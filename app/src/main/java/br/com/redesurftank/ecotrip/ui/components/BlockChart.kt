@@ -1,0 +1,142 @@
+package br.com.redesurftank.ecotrip.ui.components
+
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.text.TextMeasurer
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.drawText
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import br.com.redesurftank.ecotrip.managers.BlockSample
+import br.com.redesurftank.ecotrip.ui.theme.Blue
+import br.com.redesurftank.ecotrip.ui.theme.Green
+import br.com.redesurftank.ecotrip.ui.theme.TextSecondary
+
+@Composable
+fun BlockChart(
+    blocks: List<BlockSample>,
+    modifier: Modifier = Modifier,
+) {
+    val measurer = rememberTextMeasurer()
+    Canvas(modifier = modifier.fillMaxSize()) {
+        if (blocks.isEmpty()) {
+            drawEmptyState(measurer)
+            return@Canvas
+        }
+
+        val paddingLeft   = 38.dp.toPx()
+        val paddingRight  =  6.dp.toPx()
+        val paddingTop    =  8.dp.toPx()
+        val paddingBottom = 20.dp.toPx()
+        val chartW = size.width  - paddingLeft - paddingRight
+        val chartH = size.height - paddingTop  - paddingBottom
+
+        val slotCount = blocks.size  // always 10
+        val slotW     = chartW / slotCount
+        val barGap    = (slotW * 0.12f).coerceAtLeast(1.5.dp.toPx())
+        val barBodyW  = slotW - barGap
+
+        val maxEff  = blocks.maxOf { it.netKwhPer100km }.takeIf { it > 0f } ?: 1f
+        val maxFuel = blocks.maxOf { it.fuelL          }.takeIf { it > 0f } ?: 1f
+
+        // Baseline X axis
+        drawLine(
+            color = Color.White.copy(alpha = 0.15f),
+            start = Offset(paddingLeft, paddingTop + chartH),
+            end   = Offset(paddingLeft + chartW, paddingTop + chartH),
+            strokeWidth = 1.dp.toPx(),
+        )
+
+        // Y grid + left labels (kWh/100km scale)
+        drawYGrid(paddingLeft, paddingTop, chartW, chartH, maxEff, measurer)
+
+        // Green bars — skip empty slots
+        blocks.forEachIndexed { i, block ->
+            if (block.netKwhPer100km > 0f) {
+                val x    = paddingLeft + i * slotW + barGap / 2f
+                val barH = (block.netKwhPer100km / maxEff) * chartH
+                val y    = paddingTop + chartH - barH
+                drawRoundRect(
+                    color        = Green.copy(alpha = 0.85f),
+                    topLeft      = Offset(x, y),
+                    size         = Size(barBodyW, barH),
+                    cornerRadius = CornerRadius(3.dp.toPx()),
+                )
+            }
+        }
+
+        // Blue fuel line — only between non-empty slots
+        val fuelPoints = blocks.mapIndexedNotNull { i, block ->
+            if (block.fuelL > 0f) {
+                val cx = paddingLeft + i * slotW + slotW / 2f
+                val cy = paddingTop + chartH - (block.fuelL / maxFuel) * chartH
+                Offset(cx, cy)
+            } else null
+        }
+
+        if (fuelPoints.size >= 2) {
+            val path = Path()
+            fuelPoints.forEachIndexed { i, pt ->
+                if (i == 0) path.moveTo(pt.x, pt.y) else path.lineTo(pt.x, pt.y)
+            }
+            drawPath(path, Blue, style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round))
+        }
+
+        fuelPoints.forEach { pt ->
+            drawCircle(Blue, radius = 3.dp.toPx(), center = pt)
+        }
+
+        // X axis labels every 2 slots
+        blocks.forEachIndexed { i, block ->
+            if (i % 2 == 0) {
+                val cx     = paddingLeft + i * slotW + slotW / 2f
+                val label  = "${block.kmStart.toInt()}km"
+                val layout = measurer.measure(label, TextStyle(fontSize = 12.sp, color = TextSecondary))
+                drawText(layout, topLeft = Offset(cx - layout.size.width / 2f, paddingTop + chartH + 3.dp.toPx()))
+            }
+        }
+    }
+}
+
+private fun DrawScope.drawYGrid(
+    paddingLeft: Float,
+    paddingTop: Float,
+    chartW: Float,
+    chartH: Float,
+    maxVal: Float,
+    measurer: TextMeasurer,
+) {
+    val steps = 3
+    for (i in 0..steps) {
+        val y = paddingTop + chartH * (1f - i.toFloat() / steps)
+        drawLine(
+            color       = Color.White.copy(alpha = 0.08f),
+            start       = Offset(paddingLeft, y),
+            end         = Offset(paddingLeft + chartW, y),
+            strokeWidth = 1.dp.toPx(),
+        )
+        val label  = String.format("%.1f", maxVal * i / steps)
+        val layout = measurer.measure(label, TextStyle(fontSize = 11.sp, color = TextSecondary, fontWeight = FontWeight.Normal))
+        drawText(layout, topLeft = Offset(paddingLeft - layout.size.width - 3.dp.toPx(), y - layout.size.height / 2f))
+    }
+}
+
+private fun DrawScope.drawEmptyState(measurer: TextMeasurer) {
+    val layout = measurer.measure("Sem dados", TextStyle(fontSize = 12.sp, color = TextSecondary))
+    drawText(layout, topLeft = Offset(
+        (size.width  - layout.size.width)  / 2f,
+        (size.height - layout.size.height) / 2f,
+    ))
+}

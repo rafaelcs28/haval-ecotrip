@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!--
+        Lightning bolt — green (energia) no topo, azul (combustível) na base
+        Safe zone: círculo raio 36 centrado em (54,54)
+        Bolt ocupa aprox. x:40-68, y:22-86
+    -->
+    <path
+        android:pathData="M 61,22 L 42,56 L 54,56 L 44,86 L 66,50 L 54,50 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                xmlns:gradient="http://schemas.android.com/apk/res/android"
+                android:startX="54" android:startY="22"
+                android:endX="54"   android:endY="86"
+                android:type="linear">
+                <item android:offset="0"   android:color="#FF30D158"/>
+                <item android:offset="1"   android:color="#FF0A84FF"/>
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Gota de combustível (azul) à direita, pequena -->
+    <path
+        android:pathData="M74,62 Q74,53 68,50 Q62,53 62,62 Q62,70 68,72 Q74,70 74,62 Z"
+        android:fillColor="#CC0A84FF"/>
+
+    <!-- Faísca (verde) acima da gota -->
+    <path
+        android:pathData="M68,44 L65.5,49 L70.5,49 Z"
+        android:fillColor="#FF30D158"/>
+</vector>

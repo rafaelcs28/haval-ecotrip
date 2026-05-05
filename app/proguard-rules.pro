@@ -1,0 +1,4 @@
+-keep class com.beantechs.** { *; }
+-keep class rikka.shizuku.** { *; }
+-keep class org.lsposed.hiddenapibypass.** { *; }
+-keep class br.com.redesurftank.ecotrip.managers.** { *; }
