@@ -6,6 +6,9 @@ on:
       - 'v*'          # trigger on any tag like v1.1, v1.2, v2.0
   workflow_dispatch:  # allow manual trigger from GitHub UI
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
