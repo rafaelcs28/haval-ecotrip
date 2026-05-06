@@ -240,10 +240,12 @@ class TripManager private constructor() {
 
             if (lastShutdownMs > 0L && (now - lastShutdownMs) > THREE_HOURS_MS) {
                 Log.i(TAG, "3h elapsed since shutdown — resetting rolling window")
-                rollingAccFuel    = 0f
-                rollingAccEnergy  = 0f
-                rollingAccRegen   = 0f
-                rollingDistKm     = 0f
+                rollingAccFuel       = 0f
+                rollingAccEnergy     = 0f
+                rollingAccRegen      = 0f
+                rollingDistKm        = 0f
+                rollingStartSocPct   = 0f
+                rollingStartTankL    = 0f
                 rollingStartCaptured = false
             } else if (lastShutdownMs > 0L) {
                 Log.i(TAG, "< 3h since shutdown — continuing rolling window")
@@ -653,11 +655,14 @@ class TripManager private constructor() {
         latestFuelPct = prefs.getFloat(SharedPreferencesKeys.LATEST_FUEL_PCT, 0f)
         latestSocPct  = prefs.getFloat(SharedPreferencesKeys.LATEST_SOC_PCT,  0f)
 
-        rollingAccFuel   = prefs.getFloat(SharedPreferencesKeys.ROLLING_FUEL_L, 0f)
-        rollingAccEnergy = prefs.getFloat(SharedPreferencesKeys.ROLLING_ENERGY_KWH, 0f)
-        rollingAccRegen  = prefs.getFloat(SharedPreferencesKeys.ROLLING_REGEN_KWH, 0f)
-        rollingDistKm    = prefs.getFloat(SharedPreferencesKeys.ROLLING_DISTANCE_KM, 0f)
-        lastShutdownMs   = prefs.getLong (SharedPreferencesKeys.ROLLING_SHUTDOWN_MS, 0L)
+        rollingAccFuel      = prefs.getFloat(SharedPreferencesKeys.ROLLING_FUEL_L,        0f)
+        rollingAccEnergy    = prefs.getFloat(SharedPreferencesKeys.ROLLING_ENERGY_KWH,    0f)
+        rollingAccRegen     = prefs.getFloat(SharedPreferencesKeys.ROLLING_REGEN_KWH,     0f)
+        rollingDistKm       = prefs.getFloat(SharedPreferencesKeys.ROLLING_DISTANCE_KM,   0f)
+        lastShutdownMs      = prefs.getLong (SharedPreferencesKeys.ROLLING_SHUTDOWN_MS,   0L)
+        rollingStartSocPct  = prefs.getFloat(SharedPreferencesKeys.ROLLING_START_SOC_PCT, 0f)
+        rollingStartTankL   = prefs.getFloat(SharedPreferencesKeys.ROLLING_START_TANK_L,  0f)
+        rollingStartCaptured = rollingStartSocPct > 0f || rollingStartTankL > 0f
         tankCapacityL     = prefs.getFloat(SharedPreferencesKeys.TANK_CAPACITY_L,       DEFAULT_TANK_L)
         maxHistoryEntries = prefs.getInt  (SharedPreferencesKeys.MAX_HISTORY_ENTRIES,   50)
         priceGasolinePerL = prefs.getFloat(SharedPreferencesKeys.PRICE_GASOLINE_PER_L,  6.0f)
@@ -698,11 +703,13 @@ class TripManager private constructor() {
             .putFloat(SharedPreferencesKeys.TRIP_B_REGEN_KWH,   tripB.regenKwh)
             .putFloat(SharedPreferencesKeys.TRIP_B_DISTANCE_KM, tripB.distKm)
             .putLong (SharedPreferencesKeys.TRIP_B_TIME_SEC,    tripB.timeSec)
-            .putFloat(SharedPreferencesKeys.ROLLING_FUEL_L,      rollingAccFuel)
-            .putFloat(SharedPreferencesKeys.ROLLING_ENERGY_KWH,  rollingAccEnergy)
-            .putFloat(SharedPreferencesKeys.ROLLING_REGEN_KWH,   rollingAccRegen)
-            .putFloat(SharedPreferencesKeys.ROLLING_DISTANCE_KM, rollingDistKm)
-            .putLong (SharedPreferencesKeys.ROLLING_SHUTDOWN_MS, lastShutdownMs)
+            .putFloat(SharedPreferencesKeys.ROLLING_FUEL_L,        rollingAccFuel)
+            .putFloat(SharedPreferencesKeys.ROLLING_ENERGY_KWH,    rollingAccEnergy)
+            .putFloat(SharedPreferencesKeys.ROLLING_REGEN_KWH,     rollingAccRegen)
+            .putFloat(SharedPreferencesKeys.ROLLING_DISTANCE_KM,   rollingDistKm)
+            .putLong (SharedPreferencesKeys.ROLLING_SHUTDOWN_MS,   lastShutdownMs)
+            .putFloat(SharedPreferencesKeys.ROLLING_START_SOC_PCT, rollingStartSocPct)
+            .putFloat(SharedPreferencesKeys.ROLLING_START_TANK_L,  rollingStartTankL)
             .putString(SharedPreferencesKeys.TRIP_A_RAW_SAMPLES_JSON, serializeRawSamples(tripA.rawSamples))
             .putString(SharedPreferencesKeys.TRIP_B_RAW_SAMPLES_JSON, serializeRawSamples(tripB.rawSamples))
             .putFloat(SharedPreferencesKeys.TRIP_A_START_SOC_PCT,  tripA.startSocPct)

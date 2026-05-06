@@ -23,6 +23,9 @@ object SharedPreferencesKeys {
     const val ROLLING_REGEN_KWH = "rolling_regen_kwh"
     const val ROLLING_DISTANCE_KM = "rolling_distance_km"
     const val ROLLING_SHUTDOWN_MS = "rolling_shutdown_ms"
+    // Rolling start bookmarks (capturados no Zerar — persistidos para sobreviver reinício do app)
+    const val ROLLING_START_SOC_PCT = "rolling_start_soc_pct"
+    const val ROLLING_START_TANK_L  = "rolling_start_tank_l"
 
     // Settings
     const val TANK_CAPACITY_L      = "tank_capacity_l"
