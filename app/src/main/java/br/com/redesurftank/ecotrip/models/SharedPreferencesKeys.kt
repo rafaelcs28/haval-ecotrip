@@ -59,6 +59,8 @@ object SharedPreferencesKeys {
     const val MQTT_USERNAME = "mqtt_username"
     const val MQTT_PASSWORD = "mqtt_password"
     const val MQTT_PREFIX            = "mqtt_prefix"
-    const val MQTT_PUBLISH_INTERVAL_S  = "mqtt_publish_interval_s"   // legado (segundos)
-    const val MQTT_PUBLISH_INTERVAL_MS = "mqtt_publish_interval_ms"  // novo (milissegundos)
+    const val MQTT_PUBLISH_INTERVAL_S           = "mqtt_publish_interval_s"           // legado (segundos)
+    const val MQTT_PUBLISH_INTERVAL_MS          = "mqtt_publish_interval_ms"          // legado (ms único)
+    const val MQTT_PUBLISH_INTERVAL_WIFI_MS     = "mqtt_publish_interval_wifi_ms"     // WiFi
+    const val MQTT_PUBLISH_INTERVAL_CELLULAR_MS = "mqtt_publish_interval_cellular_ms" // 4G/Celular
 }

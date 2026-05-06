@@ -46,23 +46,24 @@ fun SettingsScreen(
     var password         by remember { mutableStateOf(mqttManager.password) }
     var prefix           by remember { mutableStateOf(mqttManager.prefix) }
     val intervalOptions = remember {
-        listOf(500, 1_000, 2_000, 3_000, 4_000, 5_000,
-               10_000, 15_000, 20_000, 25_000, 30_000, 35_000, 40_000,
-               45_000, 50_000, 55_000, 60_000, 65_000, 70_000, 75_000,
-               80_000, 85_000, 90_000)
-    }
-    fun intervalLabel(ms: Int) = when {
-        ms < 1_000 -> "${ms} ms"
-        ms % 60_000 == 0 -> "${ms / 60_000} min"
-        else -> "${ms / 1_000} s"
-    }
-    var publishIntervalMs by remember {
-        mutableStateOf(
-            intervalOptions.minByOrNull { kotlin.math.abs(it - mqttManager.publishIntervalMs) }
-                ?: mqttManager.publishIntervalMs
+        listOf(
+            250, 500,
+            1_000, 3_000, 5_000, 10_000, 20_000, 30_000, 40_000, 50_000, 60_000,
+            120_000, 180_000, 300_000, 600_000, 900_000,
+            1_800_000, 2_700_000, 3_600_000,
         )
     }
-    var intervalExpanded by remember { mutableStateOf(false) }
+    fun intervalLabel(ms: Int) = when {
+        ms < 1_000             -> "${ms} ms"
+        ms < 60_000            -> "${ms / 1_000} s"
+        ms % 60_000 == 0       -> "${ms / 60_000} min"
+        else                   -> "${ms / 1_000} s"
+    }
+    fun snapToOption(ms: Int) = intervalOptions.minByOrNull { kotlin.math.abs(it - ms) } ?: ms
+    var publishIntervalWifiMs     by remember { mutableStateOf(snapToOption(mqttManager.publishIntervalWifiMs)) }
+    var publishIntervalCellularMs by remember { mutableStateOf(snapToOption(mqttManager.publishIntervalCellularMs)) }
+    var wifiIntervalExpanded     by remember { mutableStateOf(false) }
+    var cellularIntervalExpanded by remember { mutableStateOf(false) }
     var mqttStatus       by remember { mutableStateOf(mqttManager.status) }
     var showPass         by remember { mutableStateOf(false) }
 
@@ -221,17 +222,21 @@ fun SettingsScreen(
                 MqttField("Prefixo de tópico", prefix, KeyboardType.Uri) { prefix = it }
 
                 Spacer(Modifier.height(2.dp))
-                Text("Intervalo de envio", fontSize = 13.sp, color = TextSecondary)
+                Text("Intervalo de envio", fontSize = 13.sp, color = TextSecondary,
+                    fontWeight = FontWeight.SemiBold)
+
+                // ── WiFi ──────────────────────────────────────────────────────
+                Text("📶  Com WiFi", fontSize = 12.sp, color = TextSecondary)
                 ExposedDropdownMenuBox(
-                    expanded = intervalExpanded,
-                    onExpandedChange = { intervalExpanded = it },
+                    expanded = wifiIntervalExpanded,
+                    onExpandedChange = { wifiIntervalExpanded = it },
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     OutlinedTextField(
-                        value = intervalLabel(publishIntervalMs),
+                        value = intervalLabel(publishIntervalWifiMs),
                         onValueChange = {},
                         readOnly = true,
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = intervalExpanded) },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = wifiIntervalExpanded) },
                         modifier = Modifier.menuAnchor(androidx.compose.material3.MenuAnchorType.PrimaryNotEditable).fillMaxWidth(),
                         textStyle = androidx.compose.ui.text.TextStyle(
                             fontSize = 18.sp,
@@ -246,8 +251,8 @@ fun SettingsScreen(
                         ),
                     )
                     ExposedDropdownMenu(
-                        expanded = intervalExpanded,
-                        onDismissRequest = { intervalExpanded = false },
+                        expanded = wifiIntervalExpanded,
+                        onDismissRequest = { wifiIntervalExpanded = false },
                         modifier = Modifier.background(SurfaceCard),
                     ) {
                         intervalOptions.forEach { ms ->
@@ -256,14 +261,57 @@ fun SettingsScreen(
                                     Text(
                                         intervalLabel(ms),
                                         fontSize = 15.sp,
-                                        color = if (ms == publishIntervalMs) Cyan else TextPrimary,
-                                        fontWeight = if (ms == publishIntervalMs) FontWeight.Bold else FontWeight.Normal,
+                                        color = if (ms == publishIntervalWifiMs) Cyan else TextPrimary,
+                                        fontWeight = if (ms == publishIntervalWifiMs) FontWeight.Bold else FontWeight.Normal,
                                     )
                                 },
-                                onClick = {
-                                    publishIntervalMs = ms
-                                    intervalExpanded = false
+                                onClick = { publishIntervalWifiMs = ms; wifiIntervalExpanded = false },
+                            )
+                        }
+                    }
+                }
+
+                // ── 4G / Celular ──────────────────────────────────────────────
+                Text("📡  Sem WiFi (4G/celular)", fontSize = 12.sp, color = TextSecondary)
+                ExposedDropdownMenuBox(
+                    expanded = cellularIntervalExpanded,
+                    onExpandedChange = { cellularIntervalExpanded = it },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    OutlinedTextField(
+                        value = intervalLabel(publishIntervalCellularMs),
+                        onValueChange = {},
+                        readOnly = true,
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = cellularIntervalExpanded) },
+                        modifier = Modifier.menuAnchor(androidx.compose.material3.MenuAnchorType.PrimaryNotEditable).fillMaxWidth(),
+                        textStyle = androidx.compose.ui.text.TextStyle(
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MoltenOrange,
+                        ),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            unfocusedBorderColor = BorderColor,
+                            focusedBorderColor = MoltenOrange,
+                            unfocusedContainerColor = SurfaceDeep,
+                            focusedContainerColor = SurfaceDeep,
+                        ),
+                    )
+                    ExposedDropdownMenu(
+                        expanded = cellularIntervalExpanded,
+                        onDismissRequest = { cellularIntervalExpanded = false },
+                        modifier = Modifier.background(SurfaceCard),
+                    ) {
+                        intervalOptions.forEach { ms ->
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        intervalLabel(ms),
+                                        fontSize = 15.sp,
+                                        color = if (ms == publishIntervalCellularMs) MoltenOrange else TextPrimary,
+                                        fontWeight = if (ms == publishIntervalCellularMs) FontWeight.Bold else FontWeight.Normal,
+                                    )
                                 },
+                                onClick = { publishIntervalCellularMs = ms; cellularIntervalExpanded = false },
                             )
                         }
                     }
@@ -281,13 +329,14 @@ fun SettingsScreen(
 
                     Button(
                         onClick = {
-                            mqttManager.enabled          = mqttEnabled
-                            mqttManager.host             = host
-                            mqttManager.port             = port.toIntOrNull() ?: 1883
-                            mqttManager.username         = username
-                            mqttManager.password         = password
-                            mqttManager.prefix           = prefix.ifEmpty { "haval/ecotrip" }
-                            mqttManager.publishIntervalMs = publishIntervalMs
+                            mqttManager.enabled                   = mqttEnabled
+                            mqttManager.host                      = host
+                            mqttManager.port                      = port.toIntOrNull() ?: 1883
+                            mqttManager.username                  = username
+                            mqttManager.password                  = password
+                            mqttManager.prefix                    = prefix.ifEmpty { "haval/ecotrip" }
+                            mqttManager.publishIntervalWifiMs     = publishIntervalWifiMs
+                            mqttManager.publishIntervalCellularMs = publishIntervalCellularMs
                             mqttManager.saveAndApply()
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = Green),

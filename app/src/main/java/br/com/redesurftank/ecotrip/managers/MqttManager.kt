@@ -2,6 +2,8 @@ package br.com.redesurftank.ecotrip.managers
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.util.Log
 import br.com.redesurftank.ecotrip.models.SharedPreferencesKeys
 import org.eclipse.paho.client.mqttv3.*
@@ -14,7 +16,9 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 private const val TAG = "MqttManager"
 private const val CLIENT_ID = "haval_ecotrip"
-private const val DEFAULT_PUBLISH_INTERVAL_MS = 20_000
+private const val DEFAULT_PUBLISH_INTERVAL_MS           = 20_000
+private const val DEFAULT_PUBLISH_INTERVAL_WIFI_MS      =  5_000
+private const val DEFAULT_PUBLISH_INTERVAL_CELLULAR_MS  = 30_000
 private const val RECONNECT_DELAY_MS = 15_000L
 private const val MAX_QUEUED_SNAPSHOTS = 50   // ~17 min at 20s interval
 
@@ -46,6 +50,7 @@ class MqttManager private constructor() {
     }
 
     private lateinit var prefs: SharedPreferences
+    private var appContext: Context? = null
     private val executor       = Executors.newSingleThreadExecutor()
     private val isReconnecting = AtomicBoolean(false)
     private var client: MqttClient? = null
@@ -71,13 +76,15 @@ class MqttManager private constructor() {
     val hasRepeatedFailures: Boolean get() = consecutiveFailures >= 3
 
     // Config
-    var enabled:          Boolean = false
-    var host:             String  = ""
-    var port:             Int     = 1883
-    var username:         String  = ""
-    var password:         String  = ""
-    var prefix:           String  = "haval/ecotrip"
-    var publishIntervalMs: Int    = DEFAULT_PUBLISH_INTERVAL_MS
+    var enabled:                    Boolean = false
+    var host:                       String  = ""
+    var port:                       Int     = 1883
+    var username:                   String  = ""
+    var password:                   String  = ""
+    var prefix:                     String  = "haval/ecotrip"
+    var publishIntervalMs:          Int     = DEFAULT_PUBLISH_INTERVAL_MS      // legado — mantido para não quebrar código existente
+    var publishIntervalWifiMs:      Int     = DEFAULT_PUBLISH_INTERVAL_WIFI_MS
+    var publishIntervalCellularMs:  Int     = DEFAULT_PUBLISH_INTERVAL_CELLULAR_MS
 
     // Vehicle model (populated from car data keys before connect)
     var vehicleModel1: String = ""
@@ -112,21 +119,31 @@ class MqttManager private constructor() {
             org.eclipse.paho.client.mqttv3.logging.LoggerFactory.setLogger(PahoNoOpLogger::class.java.name)
         } catch (_: Exception) {}
 
+        appContext = context.applicationContext
         val ctx = try { context.createDeviceProtectedStorageContext() } catch (_: Exception) { context }
         prefs = ctx.getSharedPreferences(SharedPreferencesKeys.PREFS_NAME, Context.MODE_PRIVATE)
         loadConfig()
         if (enabled && host.isNotEmpty()) connect()
     }
 
+    /** Retorna true se a conexão ativa for WiFi. */
+    private fun isWifiConnected(): Boolean {
+        val ctx = appContext ?: return false
+        val cm  = ctx.getSystemService(ConnectivityManager::class.java) ?: return false
+        val caps = cm.getNetworkCapabilities(cm.activeNetwork) ?: return false
+        return caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
+    }
+
     fun saveAndApply() {
         prefs.edit()
-            .putBoolean(SharedPreferencesKeys.MQTT_ENABLED,           enabled)
-            .putString (SharedPreferencesKeys.MQTT_HOST,              host)
-            .putInt    (SharedPreferencesKeys.MQTT_PORT,              port)
-            .putString (SharedPreferencesKeys.MQTT_USERNAME,          username)
-            .putString (SharedPreferencesKeys.MQTT_PASSWORD,          password)
-            .putString (SharedPreferencesKeys.MQTT_PREFIX,            prefix)
-            .putInt    (SharedPreferencesKeys.MQTT_PUBLISH_INTERVAL_MS, publishIntervalMs)
+            .putBoolean(SharedPreferencesKeys.MQTT_ENABLED,                     enabled)
+            .putString (SharedPreferencesKeys.MQTT_HOST,                        host)
+            .putInt    (SharedPreferencesKeys.MQTT_PORT,                        port)
+            .putString (SharedPreferencesKeys.MQTT_USERNAME,                    username)
+            .putString (SharedPreferencesKeys.MQTT_PASSWORD,                    password)
+            .putString (SharedPreferencesKeys.MQTT_PREFIX,                      prefix)
+            .putInt    (SharedPreferencesKeys.MQTT_PUBLISH_INTERVAL_WIFI_MS,     publishIntervalWifiMs)
+            .putInt    (SharedPreferencesKeys.MQTT_PUBLISH_INTERVAL_CELLULAR_MS, publishIntervalCellularMs)
             .apply()
 
         executor.submit {
@@ -153,8 +170,9 @@ class MqttManager private constructor() {
     // ── Public publish API ────────────────────────────────────────────────────
 
     fun publish(snapA: TripSnapshot, snapB: TripSnapshot, rolling: RollingSnapshot) {
-        val now = System.currentTimeMillis()
-        if (now - lastPublishMs < publishIntervalMs.toLong()) return
+        val now      = System.currentTimeMillis()
+        val interval = if (isWifiConnected()) publishIntervalWifiMs else publishIntervalCellularMs
+        if (now - lastPublishMs < interval.toLong()) return
         lastPublishMs = now
 
         val queued = QueuedSnapshot(now, snapA, snapB, rolling)
@@ -500,11 +518,24 @@ class MqttManager private constructor() {
         username         = prefs.getString (SharedPreferencesKeys.MQTT_USERNAME,          "") ?: ""
         password         = prefs.getString (SharedPreferencesKeys.MQTT_PASSWORD,          "") ?: ""
         prefix           = prefs.getString (SharedPreferencesKeys.MQTT_PREFIX,            "haval/ecotrip") ?: "haval/ecotrip"
-        // Migração: lê novo formato ms; se não existir, converte legado (segundos → ms)
-        publishIntervalMs = if (prefs.contains(SharedPreferencesKeys.MQTT_PUBLISH_INTERVAL_MS))
+        // Migração: lê legado (ms único ou segundos) para usar como base dos defaults WiFi
+        val legacyMs = if (prefs.contains(SharedPreferencesKeys.MQTT_PUBLISH_INTERVAL_MS))
             prefs.getInt(SharedPreferencesKeys.MQTT_PUBLISH_INTERVAL_MS, DEFAULT_PUBLISH_INTERVAL_MS)
         else
             prefs.getInt(SharedPreferencesKeys.MQTT_PUBLISH_INTERVAL_S, 20) * 1000
+        publishIntervalMs = legacyMs  // mantém campo legado atualizado
+
+        // WiFi: usa novo valor salvo; se nunca configurado, herda legado (máx 5s) como padrão razoável
+        publishIntervalWifiMs = if (prefs.contains(SharedPreferencesKeys.MQTT_PUBLISH_INTERVAL_WIFI_MS))
+            prefs.getInt(SharedPreferencesKeys.MQTT_PUBLISH_INTERVAL_WIFI_MS, DEFAULT_PUBLISH_INTERVAL_WIFI_MS)
+        else
+            legacyMs.coerceAtMost(DEFAULT_PUBLISH_INTERVAL_WIFI_MS)
+
+        // Celular: usa novo valor salvo; se nunca configurado, usa padrão 30s
+        publishIntervalCellularMs = prefs.getInt(
+            SharedPreferencesKeys.MQTT_PUBLISH_INTERVAL_CELLULAR_MS,
+            DEFAULT_PUBLISH_INTERVAL_CELLULAR_MS,
+        )
         // Restore last-known sensor values so HA never shows stale zeros after app restart
         latestOutsideTemp = prefs.getFloat(SharedPreferencesKeys.LATEST_OUTSIDE_TEMP, 0f)
         latestInsideTemp  = prefs.getFloat(SharedPreferencesKeys.LATEST_INSIDE_TEMP,  0f)
