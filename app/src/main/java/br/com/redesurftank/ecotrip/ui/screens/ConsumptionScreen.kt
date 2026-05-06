@@ -3,7 +3,9 @@ package br.com.redesurftank.ecotrip.ui.screens
 import android.os.Handler
 import android.os.Looper
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import kotlinx.coroutines.delay
@@ -18,7 +20,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -266,54 +271,70 @@ fun ConsumptionScreen() {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(SurfaceDeep)
+            .background(VoidBlack)
             .systemBarsPadding()
-            .padding(horizontal = 14.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(7.dp),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            // ── Left: title + version badge + connection dot + car name
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
                 Text(
-                    "Ecotrip Impulse",
-                    fontSize = 21.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Green,
+                    "ECOTRIP",
+                    fontSize      = 19.sp,
+                    fontWeight    = FontWeight.ExtraBold,
+                    color         = NeonLime,
+                    letterSpacing = 2.sp,
+                    style         = TextStyle(
+                        shadow = Shadow(
+                            color      = NeonLime.copy(alpha = 0.45f),
+                            offset     = Offset.Zero,
+                            blurRadius = 18f,
+                        )
+                    ),
                 )
-                if (mqttManager.enabled) {
-                    val dotColor = when {
-                        mqttStatus == MqttManager.Status.CONNECTED -> androidx.compose.ui.graphics.Color(0xFF30D158)
-                        mqttFailures                               -> androidx.compose.ui.graphics.Color(0xFFFF4444)
-                        else                                       -> androidx.compose.ui.graphics.Color(0xFF8E8E93)
-                    }
-                    Box(Modifier.size(8.dp).background(dotColor, RoundedCornerShape(50)))
-
-                    val lastSent = mqttManager.lastSuccessfulPublishMs
-                    if (lastSent > 0L) {
-                        val elapsedS = ((nowMs - lastSent) / 1000L).coerceAtLeast(0L)
-                        val label = when {
-                            elapsedS < 60   -> "há ${elapsedS}s"
-                            elapsedS < 3600 -> "há ${elapsedS / 60}min"
-                            else            -> "há ${elapsedS / 3600}h"
-                        }
-                        Text(label, fontSize = 11.sp, color = dotColor)
-                    }
+                Text(
+                    "v${BuildConfig.VERSION_NAME}",
+                    fontSize   = 10.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color      = NeonLime.copy(alpha = 0.7f),
+                    modifier   = Modifier
+                        .background(NeonLime.copy(alpha = 0.08f), RoundedCornerShape(5.dp))
+                        .border(1.dp, NeonLime.copy(alpha = 0.2f), RoundedCornerShape(5.dp))
+                        .padding(horizontal = 7.dp, vertical = 2.dp),
+                )
+                val dotColor = when (mqttStatus) {
+                    MqttManager.Status.CONNECTED    -> NeonLime
+                    MqttManager.Status.CONNECTING   -> WarnYellow
+                    MqttManager.Status.ERROR        -> androidx.compose.ui.graphics.Color(0xFFFF4444)
+                    MqttManager.Status.DISCONNECTED -> TextSecondary
                 }
+                Box(Modifier.size(6.dp).background(dotColor, CircleShape))
+                Text("Haval H6 HEV", fontSize = 11.sp, color = TextSecondary.copy(alpha = 0.6f))
             }
+
+            // ── Right: update chip + action buttons
             Row(verticalAlignment = Alignment.CenterVertically) {
                 // Update area — sempre visível; clique verifica manualmente
                 when {
                     downloadProgress in 0..99 -> {
                         // Baixando: mostra progresso
-                        val dlColor = androidx.compose.ui.graphics.Color(0xFF30D158)
                         Text(
                             "$downloadProgress%",
-                            fontSize = 11.sp,
-                            color = dlColor,
-                            modifier = Modifier.padding(end = 4.dp),
+                            fontSize   = 11.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color      = NeonLime,
+                            modifier   = Modifier
+                                .background(NeonLime.copy(alpha = 0.10f), RoundedCornerShape(8.dp))
+                                .border(1.dp, NeonLime.copy(alpha = 0.28f), RoundedCornerShape(8.dp))
+                                .padding(horizontal = 12.dp, vertical = 4.dp),
                         )
                     }
                     isCheckingUpdate -> {
@@ -321,32 +342,49 @@ fun ConsumptionScreen() {
                         Text(
                             "...",
                             fontSize = 11.sp,
-                            color = TextSecondary,
+                            color    = TextSecondary,
                             modifier = Modifier.padding(end = 4.dp),
                         )
                     }
                     updateAvailable -> {
-                        // Nova versão disponível: botão verde de download
-                        val updateColor = androidx.compose.ui.graphics.Color(0xFF30D158)
-                        IconButton(onClick = { updateMgr.downloadAndInstall(context) }) {
-                            Icon(Icons.Default.SystemUpdate, contentDescription = "Atualizar", tint = updateColor)
+                        // Nova versão disponível: chip verde de download
+                        androidx.compose.material3.TextButton(
+                            onClick        = { updateMgr.downloadAndInstall(context) },
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                modifier = Modifier
+                                    .background(NeonLime.copy(alpha = 0.10f), RoundedCornerShape(8.dp))
+                                    .border(1.dp, NeonLime.copy(alpha = 0.28f), RoundedCornerShape(8.dp))
+                                    .padding(horizontal = 12.dp, vertical = 4.dp),
+                            ) {
+                                Icon(
+                                    Icons.Default.SystemUpdate,
+                                    contentDescription = "Atualizar",
+                                    tint               = NeonLime,
+                                    modifier           = Modifier.size(14.dp),
+                                )
+                                Text(
+                                    updateMgr.latestRelease?.version?.let { "v$it disponível" } ?: "Atualizar",
+                                    fontSize   = 11.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color      = NeonLime,
+                                )
+                            }
                         }
-                        Text(
-                            updateMgr.latestRelease?.version?.let { "v$it" } ?: "",
-                            fontSize = 11.sp,
-                            color = updateColor,
-                        )
                     }
                     else -> {
                         // Em dia: mostra versão atual cinza — clicável para verificar
                         androidx.compose.material3.TextButton(
-                            onClick = { updateMgr.checkForUpdate() },
-                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 4.dp, vertical = 0.dp),
+                            onClick        = { updateMgr.checkForUpdate() },
+                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
                         ) {
                             Text(
                                 "v${BuildConfig.VERSION_NAME}",
                                 fontSize = 11.sp,
-                                color = TextSecondary,
+                                color    = TextSecondary,
                             )
                         }
                     }
@@ -373,7 +411,7 @@ fun ConsumptionScreen() {
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(7.dp),
         ) {
             TripCard(
                 label    = "Trip A",

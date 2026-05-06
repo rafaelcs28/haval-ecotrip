@@ -346,8 +346,9 @@ class MqttManager private constructor() {
             pub("charge_current_a",  fmt2(latestChargeCurrentA))
             pub("battery_voltage_v", fmt2(latestBatteryVoltageV))
             pub("battery_current_a", fmt2(latestBatteryCurrentA))
+            // Corrente de recarga chega negativa do carro; inverte sinal para kW positivo
             val chargePowerKw = if (latestBatteryVoltageV > 0f)
-                latestChargeCurrentA * latestBatteryVoltageV / 1000f else 0f
+                latestChargeCurrentA * latestBatteryVoltageV / 1000f * -1f else 0f
             pub("charge_power_kw",   fmt2(chargePowerKw))
             pub("rolling/kwh_per_100km", fmt2(q.rolling.netKwhPer100km))
             pub("rolling/km_per_l",      fmt2(q.rolling.kmPerL))

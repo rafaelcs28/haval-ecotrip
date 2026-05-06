@@ -7,8 +7,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -22,6 +24,7 @@ import androidx.compose.ui.unit.sp
 import br.com.redesurftank.ecotrip.managers.BlockSample
 import br.com.redesurftank.ecotrip.ui.theme.Blue
 import br.com.redesurftank.ecotrip.ui.theme.Green
+import br.com.redesurftank.ecotrip.ui.theme.PlasmaBlue
 import br.com.redesurftank.ecotrip.ui.theme.TextSecondary
 
 @Composable
@@ -53,7 +56,7 @@ fun BlockChart(
 
         // Baseline X axis
         drawLine(
-            color = Color.White.copy(alpha = 0.15f),
+            color = Color.White.copy(alpha = 0.07f),
             start = Offset(paddingLeft, paddingTop + chartH),
             end   = Offset(paddingLeft + chartW, paddingTop + chartH),
             strokeWidth = 1.dp.toPx(),
@@ -62,14 +65,18 @@ fun BlockChart(
         // Y grid + left labels (kWh/100km scale)
         drawYGrid(paddingLeft, paddingTop, chartW, chartH, maxEff, measurer)
 
-        // Green bars — skip empty slots
+        // Green bars with vertical gradient
         blocks.forEachIndexed { i, block ->
             if (block.netKwhPer100km > 0f) {
                 val x    = paddingLeft + i * slotW + barGap / 2f
                 val barH = (block.netKwhPer100km / maxEff) * chartH
                 val y    = paddingTop + chartH - barH
                 drawRoundRect(
-                    color        = Green.copy(alpha = 0.85f),
+                    brush        = Brush.verticalGradient(
+                        colors = listOf(Green.copy(alpha = 0.9f), Green.copy(alpha = 0.2f)),
+                        startY = y,
+                        endY   = y + barH,
+                    ),
                     topLeft      = Offset(x, y),
                     size         = Size(barBodyW, barH),
                     cornerRadius = CornerRadius(3.dp.toPx()),
@@ -91,11 +98,11 @@ fun BlockChart(
             fuelPoints.forEachIndexed { i, pt ->
                 if (i == 0) path.moveTo(pt.x, pt.y) else path.lineTo(pt.x, pt.y)
             }
-            drawPath(path, Blue, style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round))
+            drawPath(path, PlasmaBlue, style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round))
         }
 
         fuelPoints.forEach { pt ->
-            drawCircle(Blue, radius = 3.dp.toPx(), center = pt)
+            drawCircle(PlasmaBlue, radius = 3.5.dp.toPx(), center = pt)
         }
 
         // X axis labels every 2 slots
@@ -103,7 +110,10 @@ fun BlockChart(
             if (i % 2 == 0) {
                 val cx     = paddingLeft + i * slotW + slotW / 2f
                 val label  = "${block.kmStart.toInt()}km"
-                val layout = measurer.measure(label, TextStyle(fontSize = 12.sp, color = TextSecondary))
+                val layout = measurer.measure(
+                    label,
+                    TextStyle(fontSize = 12.sp, color = TextSecondary.copy(alpha = 0.6f))
+                )
                 drawText(layout, topLeft = Offset(cx - layout.size.width / 2f, paddingTop + chartH + 3.dp.toPx()))
             }
         }
@@ -119,22 +129,40 @@ private fun DrawScope.drawYGrid(
     measurer: TextMeasurer,
 ) {
     val steps = 3
+    val dashEffect = PathEffect.dashPathEffect(floatArrayOf(4f, 5f))
     for (i in 0..steps) {
         val y = paddingTop + chartH * (1f - i.toFloat() / steps)
-        drawLine(
-            color       = Color.White.copy(alpha = 0.08f),
-            start       = Offset(paddingLeft, y),
-            end         = Offset(paddingLeft + chartW, y),
-            strokeWidth = 1.dp.toPx(),
-        )
+        if (i == 0) {
+            // baseline — solid, slightly brighter
+            drawLine(
+                color       = Color.White.copy(alpha = 0.07f),
+                start       = Offset(paddingLeft, y),
+                end         = Offset(paddingLeft + chartW, y),
+                strokeWidth = 1.dp.toPx(),
+            )
+        } else {
+            drawLine(
+                color       = Color.White.copy(alpha = 0.05f),
+                start       = Offset(paddingLeft, y),
+                end         = Offset(paddingLeft + chartW, y),
+                strokeWidth = 1.dp.toPx(),
+                pathEffect  = dashEffect,
+            )
+        }
         val label  = String.format("%.1f", maxVal * i / steps)
-        val layout = measurer.measure(label, TextStyle(fontSize = 11.sp, color = TextSecondary, fontWeight = FontWeight.Normal))
+        val layout = measurer.measure(
+            label,
+            TextStyle(fontSize = 11.sp, color = TextSecondary.copy(alpha = 0.6f), fontWeight = FontWeight.Normal)
+        )
         drawText(layout, topLeft = Offset(paddingLeft - layout.size.width - 3.dp.toPx(), y - layout.size.height / 2f))
     }
 }
 
 private fun DrawScope.drawEmptyState(measurer: TextMeasurer) {
-    val layout = measurer.measure("Sem dados", TextStyle(fontSize = 12.sp, color = TextSecondary))
+    val layout = measurer.measure(
+        "Sem dados",
+        TextStyle(fontSize = 12.sp, color = TextSecondary.copy(alpha = 0.6f))
+    )
     drawText(layout, topLeft = Offset(
         (size.width  - layout.size.width)  / 2f,
         (size.height - layout.size.height) / 2f,
