@@ -167,6 +167,9 @@ class TripManager private constructor() {
     private var curDist      = 0f
     private var sessionActive = false
 
+    // Checkpoint counter — checkpointSession() is called every 5 ticks (~5s)
+    private var checkpointTickCount = 0
+
     // Current gear — used to pause trip timer while in P
     var currentGear: String = ""
         private set
@@ -244,6 +247,8 @@ class TripManager private constructor() {
         synchronized(lock) {
             sessionActive = true
             val now = System.currentTimeMillis()
+            // Read the flag BEFORE clearing it — tells us if last session ended cleanly.
+            val sessionEndedCleanly = prefs.getBoolean(SharedPreferencesKeys.SESSION_ENDED_CLEANLY, false)
 
             if (lastShutdownMs > 0L && (now - lastShutdownMs) > THREE_HOURS_MS) {
                 Log.i(TAG, "3h elapsed since shutdown — resetting rolling window")
@@ -258,30 +263,43 @@ class TripManager private constructor() {
                 Log.i(TAG, "< 3h since shutdown — continuing rolling window")
             }
 
-            prevFuelPct  = -1f
-            pendingFuelL = 0f
+            prevFuelPct         = -1f
+            pendingFuelL        = 0f
+            checkpointTickCount = 0
 
             for (trip in listOf(tripA, tripB)) {
-                trip.sessionFuelL    = 0f
-                trip.sessStartEnergy = curEnergy
-                trip.sessStartRegen  = curRegen
-                trip.sessStartMs     = now
-                trip.hwEnergy        = curEnergy
-                trip.hwRegen         = curRegen
-                // sessStartDist / hwDist are established on the first onDist() of this session
-                // (sessDistReady = false). This avoids phantom km when the app was restarted
-                // and curDist is 0 while the journey odometer is already accumulated.
-                trip.sessDistReady   = false
+                trip.sessionFuelL     = 0f
+                trip.sessStartMs      = now
+                // sessDistReady = false: first onDist() establishes the real dist baseline
+                trip.sessDistReady    = false
                 // If car is already in P (e.g. started while charging), begin paused immediately
                 trip.gearPauseStartMs = if (currentGear == "P") now else 0L
                 trip.totalPausedMs    = 0L
+
+                if (!sessionEndedCleanly && (trip.sessStartEnergy > 0f || trip.sessStartRegen > 0f)) {
+                    // Crash/update recovery: restore energy baselines from last checkpoint.
+                    // sessStartEnergy & sessStartRegen were loaded from prefs in loadFromPrefs().
+                    trip.hwEnergy = trip.sessStartEnergy
+                    trip.hwRegen  = trip.sessStartRegen
+                    Log.i(TAG, "Session recovery — restoring energy baseline: startE=${trip.sessStartEnergy} startR=${trip.sessStartRegen}")
+                } else {
+                    // Fresh (clean) session start: current car readings become new baseline.
+                    trip.sessStartEnergy = curEnergy
+                    trip.sessStartRegen  = curRegen
+                    trip.hwEnergy        = curEnergy
+                    trip.hwRegen         = curRegen
+                }
             }
+
+            // Mark session as NOT cleanly ended.  If we crash during this session, the next
+            // onSessionStart() will read false → crash recovery mode.
+            prefs.edit().putBoolean(SharedPreferencesKeys.SESSION_ENDED_CLEANLY, false).apply()
 
             // Sentinels: first odometer reading of the session establishes baseline.
             prevRollingDist   = -1f
             prevRollingEnergy = -1f
             prevRollingRegen  = -1f
-            Log.i(TAG, "Session started — dist=$curDist energy=$curEnergy regen=$curRegen")
+            Log.i(TAG, "Session started (cleanEnd=$sessionEndedCleanly) — dist=$curDist energy=$curEnergy regen=$curRegen")
         }
     }
 
@@ -308,8 +326,10 @@ class TripManager private constructor() {
                 trip.totalPausedMs    = 0L
             }
             lastShutdownMs = now
+            // Mark as cleanly ended BEFORE saving so loadFromPrefs() will see true next time.
+            prefs.edit().putBoolean(SharedPreferencesKeys.SESSION_ENDED_CLEANLY, true).apply()
             saveToPrefs()
-            Log.i(TAG, "Session ended — trips + rolling persisted, shutdownMs=$lastShutdownMs")
+            Log.i(TAG, "Session ended cleanly — trips + rolling persisted, shutdownMs=$lastShutdownMs")
         }
     }
 
@@ -460,8 +480,63 @@ class TripManager private constructor() {
 
     fun tickTime() {
         synchronized(lock) {
-            if (sessionActive) notifyListeners()
+            if (sessionActive) {
+                checkpointTickCount++
+                if (checkpointTickCount >= 5) {
+                    checkpointSession()
+                    checkpointTickCount = 0
+                }
+                notifyListeners()
+            }
         }
+    }
+
+    /**
+     * Persists the current session's progress into base accumulators every ~5s.
+     * This guarantees that a crash or app update does not lose session data:
+     * the next session start will recover from the last checkpoint via
+     * SESSION_ENDED_CLEANLY=false + stored sessStartEnergy/Regen.
+     */
+    private fun checkpointSession() {
+        if (!sessionActive) return
+        val now = System.currentTimeMillis()
+        for (trip in listOf(tripA, tripB)) {
+            // Fuel: merge session accumulator into base
+            trip.fuelL        += trip.sessionFuelL
+            trip.sessionFuelL  = 0f
+
+            // Energy: commit delta since last checkpoint, advance baseline
+            val dEnergy = max(0f, curEnergy - trip.sessStartEnergy)
+            trip.energyKwh      += dEnergy
+            trip.sessStartEnergy = curEnergy
+            trip.hwEnergy        = curEnergy   // reset high-water to current
+
+            // Regen: same pattern
+            val dRegen = max(0f, curRegen - trip.sessStartRegen)
+            trip.regenKwh      += dRegen
+            trip.sessStartRegen = curRegen
+            trip.hwRegen        = curRegen
+
+            // Distance: only if baseline was established this session
+            if (trip.sessDistReady) {
+                val dDist = max(0f, curDist - trip.sessStartDist)
+                trip.distKm       += dDist
+                trip.sessStartDist = curDist
+                trip.hwDist        = curDist
+            }
+
+            // Time: account for ongoing P-gear pause, then restart timer from now
+            val extraPauseMs = if (trip.gearPauseStartMs > 0L) (now - trip.gearPauseStartMs) else 0L
+            val pausedMs     = trip.totalPausedMs + extraPauseMs
+            val deltaSec     = ((now - trip.sessStartMs - pausedMs) / 1000L).coerceAtLeast(0L)
+            trip.timeSec      += deltaSec
+            trip.sessStartMs   = now
+            trip.totalPausedMs = 0L
+            // If still in P, reset pause start so next window doesn't double-count
+            if (trip.gearPauseStartMs > 0L) trip.gearPauseStartMs = now
+        }
+        saveToPrefs()
+        Log.d(TAG, "Checkpoint — fuelA=${tripA.fuelL} distA=${tripA.distKm} energyA=${tripA.energyKwh}")
     }
 
     fun resetRolling() {
@@ -749,6 +824,12 @@ class TripManager private constructor() {
         tripB.startFuelPct      = prefs.getFloat(SharedPreferencesKeys.TRIP_B_START_FUEL_PCT, 0f)
         tripB.startSocCaptured  = tripB.startSocPct  > 0f
         tripB.startFuelCaptured = tripB.startFuelPct > 0f
+
+        // Session baselines: used for crash-recovery in onSessionStart()
+        tripA.sessStartEnergy = prefs.getFloat(SharedPreferencesKeys.TRIP_A_SESS_START_ENERGY, 0f)
+        tripA.sessStartRegen  = prefs.getFloat(SharedPreferencesKeys.TRIP_A_SESS_START_REGEN,  0f)
+        tripB.sessStartEnergy = prefs.getFloat(SharedPreferencesKeys.TRIP_B_SESS_START_ENERGY, 0f)
+        tripB.sessStartRegen  = prefs.getFloat(SharedPreferencesKeys.TRIP_B_SESS_START_REGEN,  0f)
     }
 
     private fun saveToPrefs() {
@@ -776,6 +857,11 @@ class TripManager private constructor() {
             .putFloat(SharedPreferencesKeys.TRIP_A_START_FUEL_PCT, tripA.startFuelPct)
             .putFloat(SharedPreferencesKeys.TRIP_B_START_SOC_PCT,  tripB.startSocPct)
             .putFloat(SharedPreferencesKeys.TRIP_B_START_FUEL_PCT, tripB.startFuelPct)
+            // Session baselines — restored after crash/update to avoid double-counting energy
+            .putFloat(SharedPreferencesKeys.TRIP_A_SESS_START_ENERGY, tripA.sessStartEnergy)
+            .putFloat(SharedPreferencesKeys.TRIP_A_SESS_START_REGEN,  tripA.sessStartRegen)
+            .putFloat(SharedPreferencesKeys.TRIP_B_SESS_START_ENERGY, tripB.sessStartEnergy)
+            .putFloat(SharedPreferencesKeys.TRIP_B_SESS_START_REGEN,  tripB.sessStartRegen)
             .apply()
     }
 

@@ -71,7 +71,7 @@ fun TripCard(
         ) {
             Text(
                 text       = label,
-                fontSize   = 15.sp,
+                fontSize   = 17.sp,
                 fontWeight = FontWeight.ExtraBold,
                 color      = accentColor,
                 style      = TextStyle(
@@ -84,7 +84,7 @@ fun TripCard(
             )
             Text(
                 text     = "%.1f km · %s".format(snapshot.distKm, formatTime(snapshot.timeSec)),
-                fontSize = 12.sp,
+                fontSize = 13.sp,
                 color    = TextSecondary,
             )
         }
@@ -170,8 +170,8 @@ fun TripCard(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                LegendDot(accentColor, "kWh/100km")
-                LegendDot(PlasmaBlue, "Comb. (L)")
+                LegendDot(accentColor, "kWh/100km", 12.sp)
+                LegendDot(PlasmaBlue, "Comb. (L)", 12.sp)
             }
             androidx.compose.material3.OutlinedButton(
                 onClick        = { tripName = ""; confirmReset = true },
@@ -184,7 +184,7 @@ fun TripCard(
                     contentColor = TextSecondary,
                 ),
             ) {
-                Text("Zerar", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = TextSecondary)
+                Text("Zerar", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = TextSecondary)
             }
         }
     }
@@ -230,7 +230,7 @@ private fun TColTitle(title: String) {
     Column {
         Text(
             text          = title.uppercase(),
-            fontSize      = 10.sp,
+            fontSize      = 11.sp,
             fontWeight    = FontWeight.Bold,
             letterSpacing = 1.4.sp,
             color         = TextSecondary.copy(alpha = 0.6f),
@@ -254,7 +254,7 @@ private fun TMetric(
     ) {
         Text(
             text     = label,
-            fontSize = 12.sp,
+            fontSize = 13.sp,
             color    = TextSecondary,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -262,7 +262,7 @@ private fun TMetric(
         )
         Text(
             text       = value,
-            fontSize   = 13.sp,
+            fontSize   = 15.sp,
             fontWeight = FontWeight.Bold,
             color      = valueColor,
             maxLines   = 1,
@@ -272,10 +272,10 @@ private fun TMetric(
 }
 
 @Composable
-private fun LegendDot(color: Color, label: String) {
+private fun LegendDot(color: Color, label: String, fontSize: TextUnit = 12.sp) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         Box(Modifier.size(8.dp).background(color, RoundedCornerShape(2.dp)))
-        Text(label, fontSize = 11.sp, color = TextSecondary)
+        Text(label, fontSize = fontSize, color = TextSecondary)
     }
 }
 

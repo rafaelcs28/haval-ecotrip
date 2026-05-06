@@ -46,6 +46,16 @@ object SharedPreferencesKeys {
     const val TRIP_A_START_FUEL_PCT = "trip_a_start_fuel_pct"
     const val TRIP_B_START_FUEL_PCT = "trip_b_start_fuel_pct"
 
+    // Session baselines — persistidos para recuperar sessão após crash/atualização do app
+    const val TRIP_A_SESS_START_ENERGY = "trip_a_sess_start_energy"
+    const val TRIP_A_SESS_START_REGEN  = "trip_a_sess_start_regen"
+    const val TRIP_B_SESS_START_ENERGY = "trip_b_sess_start_energy"
+    const val TRIP_B_SESS_START_REGEN  = "trip_b_sess_start_regen"
+
+    // Flag: true se a sessão terminou normalmente (onSessionEnd rodou).
+    // false = app fechou/travou no meio → na próxima sessão manter baselines de energia.
+    const val SESSION_ENDED_CLEANLY = "session_ended_cleanly"
+
     // Último valor recebido do carro — persistido para não zerar após reinício do app
     const val LATEST_FUEL_PCT     = "latest_fuel_pct"
     const val LATEST_SOC_PCT      = "latest_soc_pct"
