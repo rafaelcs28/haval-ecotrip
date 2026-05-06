@@ -356,6 +356,10 @@ class MqttManager private constructor() {
                 pub("$label/tank_now_l",  fmt1(snap.currentTankL))
             }
             lastSuccessfulPublishMs = System.currentTimeMillis()
+            // Publica timestamp ISO para a entidade "Última Atualização" no HA
+            val isoNow = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssZ", Locale.getDefault())
+                .format(Date(lastSuccessfulPublishMs))
+            c.publish("$prefix/last_update", isoNow.toByteArray(), 1, true)
             onStatusChange?.invoke(status) // trigger UI refresh for last-sent time
         } catch (e: Exception) {
             Log.w(TAG, "publishSnapshot failed: ${e.message}")
@@ -458,6 +462,10 @@ class MqttManager private constructor() {
             val payload = """{"name":"$name","state_topic":"$prefix/$id/last_completed","value_template":"{{ value_json.distance_km }}","json_attributes_topic":"$prefix/$id/last_completed","unit_of_measurement":"km","state_class":"measurement","device_class":"distance","unique_id":"haval_ecotrip_${id}_completed","icon":"mdi:flag-checkered","device":$device}"""
             try { c.publish("homeassistant/sensor/haval_ecotrip_${id}_completed/config", payload.toByteArray(), 1, true) } catch (_: Exception) {}
         }
+
+        // Sensor: última atualização de dados (timestamp ISO)
+        val lastUpdatePayload = """{"name":"Última Atualização","state_topic":"$prefix/last_update","device_class":"timestamp","unique_id":"haval_ecotrip_last_update","icon":"mdi:clock-check-outline","device":$device}"""
+        try { c.publish("homeassistant/sensor/haval_ecotrip_last_update/config", lastUpdatePayload.toByteArray(), 1, true) } catch (_: Exception) {}
 
         // NOTA: o select "Limite de Carga SOC" (haval_ecotrip_charge_limit) é publicado
         // exclusivamente pelo haval-ecotrip-commander, que também gerencia o wake-up do carro

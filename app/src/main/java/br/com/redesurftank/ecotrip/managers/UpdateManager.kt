@@ -41,14 +41,20 @@ class UpdateManager private constructor() {
     var isUpdateAvailable: Boolean = false
         private set
 
+    var isChecking: Boolean = false
+        private set
+
     var downloadProgress: Int = -1   // -1 = idle, 0-100 = downloading
         private set
 
     var onUpdateStateChanged: (() -> Unit)? = null
 
-    /** Call once at app start to check for a new release in the background. */
+    /** Check for a new release in the background. Safe to call multiple times. */
     fun checkForUpdate() {
+        if (isChecking || downloadProgress >= 0) return   // already in progress
         executor.submit {
+            isChecking = true
+            onUpdateStateChanged?.invoke()
             try {
                 val info = fetchLatestRelease() ?: return@submit
                 latestRelease = info
@@ -58,9 +64,11 @@ class UpdateManager private constructor() {
                 } else {
                     Log.d(TAG, "Already on latest version (${BuildConfig.VERSION_NAME})")
                 }
-                onUpdateStateChanged?.invoke()
             } catch (e: Exception) {
                 Log.w(TAG, "Update check failed: ${e.message}")
+            } finally {
+                isChecking = false
+                onUpdateStateChanged?.invoke()
             }
         }
     }

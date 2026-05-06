@@ -57,7 +57,8 @@ fun ConsumptionScreen() {
     var mqttStatus      by remember { mutableStateOf(mqttManager.status) }
     var mqttFailures    by remember { mutableStateOf(mqttManager.hasRepeatedFailures) }
     var nowMs           by remember { mutableStateOf(System.currentTimeMillis()) }
-    var updateAvailable by remember { mutableStateOf(updateMgr.isUpdateAvailable) }
+    var updateAvailable  by remember { mutableStateOf(updateMgr.isUpdateAvailable) }
+    var isCheckingUpdate by remember { mutableStateOf(updateMgr.isChecking) }
     var downloadProgress by remember { mutableStateOf(updateMgr.downloadProgress) }
 
     // Kick off update check once on startup
@@ -67,6 +68,7 @@ fun ConsumptionScreen() {
         updateMgr.onUpdateStateChanged = {
             mainHandler.post {
                 updateAvailable  = updateMgr.isUpdateAvailable
+                isCheckingUpdate = updateMgr.isChecking
                 downloadProgress = updateMgr.downloadProgress
             }
         }
@@ -158,6 +160,9 @@ fun ConsumptionScreen() {
 
                 carManager.fetchCurrent(CarConstants.CAR_EV_INFO_BATTERY_CHARGE_PERCENTAGE.value)
                     ?.trim()?.let { tripManager.onDataChanged(CarConstants.CAR_EV_INFO_BATTERY_CHARGE_PERCENTAGE.value, it) }
+
+                carManager.fetchCurrent(CarConstants.CAR_EV_INFO_CUR_BATTERY_POWER_PERCENTAGE.value)
+                    ?.trim()?.let { tripManager.onDataChanged(CarConstants.CAR_EV_INFO_CUR_BATTERY_POWER_PERCENTAGE.value, it) }
 
                 // Busca imediata de temperaturas — chegam raramente via listener passivo
                 carManager.fetchCurrent(CarConstants.CAR_BASIC_OUTSIDE_TEMP.value)
@@ -280,17 +285,30 @@ fun ConsumptionScreen() {
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
-                // Update button — visible when a new version is available
-                if (updateAvailable) {
-                    val updateColor = androidx.compose.ui.graphics.Color(0xFF30D158)
-                    if (downloadProgress in 0..99) {
+                // Update area — sempre visível; clique verifica manualmente
+                when {
+                    downloadProgress in 0..99 -> {
+                        // Baixando: mostra progresso
+                        val dlColor = androidx.compose.ui.graphics.Color(0xFF30D158)
                         Text(
                             "$downloadProgress%",
                             fontSize = 11.sp,
-                            color = updateColor,
+                            color = dlColor,
                             modifier = Modifier.padding(end = 4.dp),
                         )
-                    } else {
+                    }
+                    isCheckingUpdate -> {
+                        // Verificando: mostra indicador
+                        Text(
+                            "...",
+                            fontSize = 11.sp,
+                            color = TextSecondary,
+                            modifier = Modifier.padding(end = 4.dp),
+                        )
+                    }
+                    updateAvailable -> {
+                        // Nova versão disponível: botão verde de download
+                        val updateColor = androidx.compose.ui.graphics.Color(0xFF30D158)
                         IconButton(onClick = { updateMgr.downloadAndInstall(context) }) {
                             Icon(Icons.Default.SystemUpdate, contentDescription = "Atualizar", tint = updateColor)
                         }
@@ -299,6 +317,19 @@ fun ConsumptionScreen() {
                             fontSize = 11.sp,
                             color = updateColor,
                         )
+                    }
+                    else -> {
+                        // Em dia: mostra versão atual cinza — clicável para verificar
+                        androidx.compose.material3.TextButton(
+                            onClick = { updateMgr.checkForUpdate() },
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 4.dp, vertical = 0.dp),
+                        ) {
+                            Text(
+                                "v${BuildConfig.VERSION_NAME}",
+                                fontSize = 11.sp,
+                                color = TextSecondary,
+                            )
+                        }
                     }
                 }
                 IconButton(onClick = { showLog = true }) {

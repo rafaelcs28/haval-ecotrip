@@ -313,7 +313,8 @@ class TripManager private constructor() {
                     captureStartIfNeeded()
                 }
                 CarConstants.CAR_EV_INFO_SOC_OF_BATTERY.value,
-                CarConstants.CAR_EV_INFO_BATTERY_CHARGE_PERCENTAGE.value -> {
+                CarConstants.CAR_EV_INFO_BATTERY_CHARGE_PERCENTAGE.value,
+                CarConstants.CAR_EV_INFO_CUR_BATTERY_POWER_PERCENTAGE.value -> {
                     // Idem: SOC só faz sentido em (0, 100]
                     if (value <= 0f || value > 100f) {
                         Log.w(TAG, "SOC ignorado (fora de range): $value")

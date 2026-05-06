@@ -26,6 +26,7 @@ enum class CarConstants(val value: String) {
     // Battery
     CAR_EV_INFO_BATTERY_CHARGE_PERCENTAGE("car.ev_info.battery_charge_percentage"),
     CAR_EV_INFO_SOC_OF_BATTERY("car.ev_info.soc_of_battery"),
+    CAR_EV_INFO_CUR_BATTERY_POWER_PERCENTAGE("car.ev_info.cur_battery_power_percentage"),
 
     // Vehicle model identification
     CAR_BASIC_VEHICLE_MODEL1("car.basic.vehicle_model1"),
