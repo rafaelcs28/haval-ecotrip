@@ -65,7 +65,7 @@ fun RollingWindowCard(
         ) {
             Text(
                 "DESDE ÚLTIMA PARTIDA",
-                fontSize      = 12.sp,
+                fontSize      = 13.sp,
                 fontWeight    = FontWeight.Bold,
                 letterSpacing = 1.8.sp,
                 color         = TextSecondary,
@@ -76,7 +76,7 @@ fun RollingWindowCard(
             ) {
                 Text(
                     "%.1f km".format(snapshot.windowKm),
-                    fontSize   = 17.sp,
+                    fontSize   = 19.sp,
                     fontWeight = FontWeight.ExtraBold,
                     color      = AuroraTeal,
                     style      = TextStyle(
@@ -99,7 +99,7 @@ fun RollingWindowCard(
                         contentColor = TextSecondary,
                     ),
                 ) {
-                    Text("Zerar", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = TextSecondary)
+                    Text("Zerar", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = TextSecondary)
                 }
             }
         }
@@ -131,7 +131,7 @@ fun RollingWindowCard(
                     maxValue = 40f,
                     label    = "kWh/100km",
                     color    = NeonLime,
-                    modifier = Modifier.size(126.dp),
+                    modifier = Modifier.size(140.dp),
                 )
             }
 
@@ -142,7 +142,7 @@ fun RollingWindowCard(
                     maxValue = 60f,
                     label    = "km/L comb.",
                     color    = AuroraTeal,
-                    modifier = Modifier.size(142.dp),
+                    modifier = Modifier.size(158.dp),
                 )
             }
 
@@ -153,7 +153,7 @@ fun RollingWindowCard(
                     maxValue = 50f,
                     label    = "km/L",
                     color    = PlasmaBlue,
-                    modifier = Modifier.size(126.dp),
+                    modifier = Modifier.size(140.dp),
                 )
             }
 
@@ -185,7 +185,7 @@ private fun RollingGauge(
         contentAlignment = Alignment.Center,
     ) {
         Canvas(modifier = Modifier.fillMaxSize()) {
-            val strokePx   = 7.dp.toPx()
+            val strokePx   = 8.dp.toPx()
             val inset      = strokePx * 3.2f / 2f   // largest halo determines the inset
             val arcSize    = Size(size.width - inset * 2f, size.height - inset * 2f)
             val arcOffset  = Offset(inset, inset)
@@ -245,7 +245,7 @@ private fun RollingGauge(
         ) {
             Text(
                 text       = String.format(java.util.Locale.US, "%.1f", value),
-                fontSize   = 28.sp,
+                fontSize   = 30.sp,
                 fontWeight = FontWeight.ExtraBold,
                 color      = color,
                 maxLines   = 1,
@@ -259,7 +259,7 @@ private fun RollingGauge(
             )
             Text(
                 text      = label,
-                fontSize  = 12.sp,
+                fontSize  = 13.sp,
                 color     = TextSecondary,
                 maxLines  = 1,
                 textAlign = TextAlign.Center,
@@ -272,7 +272,7 @@ private fun RollingGauge(
 private fun RMetricSection(title: String) {
     Text(
         text          = title.uppercase(),
-        fontSize      = 11.sp,
+        fontSize      = 12.sp,
         fontWeight    = FontWeight.Bold,
         letterSpacing = 1.4.sp,
         color         = TextSecondary.copy(alpha = 0.6f),
@@ -293,7 +293,7 @@ private fun RMetric(
     ) {
         Text(
             text     = label,
-            fontSize = 13.sp,
+            fontSize = 14.sp,
             color    = TextSecondary,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -301,7 +301,7 @@ private fun RMetric(
         )
         Text(
             text       = value,
-            fontSize   = 15.sp,
+            fontSize   = 17.sp,
             fontWeight = FontWeight.Bold,
             color      = valueColor,
             maxLines   = 1,
