@@ -137,6 +137,15 @@ fun ConsumptionScreen() {
                             else -> raw?.toString() ?: value.trim()
                         }
                     }
+                    CarConstants.CAR_EV_INFO_CUR_CHARGE_CURRENT.value -> {
+                        mqttManager.latestChargeCurrentA = value.trim().toFloatOrNull() ?: 0f
+                    }
+                    CarConstants.CAR_EV_INFO_POWER_BATTERY_VOLTAGE.value -> {
+                        mqttManager.latestBatteryVoltageV = value.trim().toFloatOrNull() ?: 0f
+                    }
+                    CarConstants.CAR_EV_INFO_POWER_BATTERY_CURRENT.value -> {
+                        mqttManager.latestBatteryCurrentA = value.trim().toFloatOrNull() ?: 0f
+                    }
                     else -> tripManager.onDataChanged(key, value)
                 }
             }
@@ -175,6 +184,14 @@ fun ConsumptionScreen() {
                 // Busca imediata do limite de carga SOC para sincronizar com HA
                 carManager.fetchCurrent(CarConstants.CAR_EV_SETTING_CHARGE_SOC_LIMIT.value)
                     ?.trim()?.toIntOrNull()?.let { mqttManager.syncChargeLimitFromCar(it) }
+
+                // Busca imediata de medidas elétricas do pack de bateria
+                carManager.fetchCurrent(CarConstants.CAR_EV_INFO_CUR_CHARGE_CURRENT.value)
+                    ?.trim()?.toFloatOrNull()?.let { mqttManager.latestChargeCurrentA = it }
+                carManager.fetchCurrent(CarConstants.CAR_EV_INFO_POWER_BATTERY_VOLTAGE.value)
+                    ?.trim()?.toFloatOrNull()?.let { mqttManager.latestBatteryVoltageV = it }
+                carManager.fetchCurrent(CarConstants.CAR_EV_INFO_POWER_BATTERY_CURRENT.value)
+                    ?.trim()?.toFloatOrNull()?.let { mqttManager.latestBatteryCurrentA = it }
 
             } catch (_: Exception) {}
         }

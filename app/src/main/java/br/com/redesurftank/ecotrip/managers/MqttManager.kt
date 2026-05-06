@@ -91,6 +91,11 @@ class MqttManager private constructor() {
     var latestOutsideTemp: Float = 0f
         set(value) { field = value; if (::prefs.isInitialized) prefs.edit().putFloat(SharedPreferencesKeys.LATEST_OUTSIDE_TEMP, value).apply() }
 
+    // Electrical measurements — carregamento e bateria de tração
+    var latestChargeCurrentA: Float = 0f   // A — corrente AC de carregamento
+    var latestBatteryVoltageV: Float = 0f  // V — tensão do pack de bateria
+    var latestBatteryCurrentA: Float = 0f  // A — corrente do pack (+ descarga, - carga/regen)
+
     // Último timestamp em que qualquer dado do carro foi recebido pelo app
     // Usado para saber se o barramento de dados do carro está ativo
     @Volatile var lastCarDataMs: Long = 0L
@@ -336,6 +341,14 @@ class MqttManager private constructor() {
             pub("inside_temp",           fmt1(latestInsideTemp))
             pub("outside_temp",          fmt1(latestOutsideTemp))
             if (latestGear.isNotEmpty()) pub("gear",  latestGear)
+
+            // Electrical: corrente de carga, tensão e corrente do pack + potência derivada
+            pub("charge_current_a",  fmt2(latestChargeCurrentA))
+            pub("battery_voltage_v", fmt2(latestBatteryVoltageV))
+            pub("battery_current_a", fmt2(latestBatteryCurrentA))
+            val chargePowerKw = if (latestBatteryVoltageV > 0f)
+                latestChargeCurrentA * latestBatteryVoltageV / 1000f else 0f
+            pub("charge_power_kw",   fmt2(chargePowerKw))
             pub("rolling/kwh_per_100km", fmt2(q.rolling.netKwhPer100km))
             pub("rolling/km_per_l",      fmt2(q.rolling.kmPerL))
             pub("rolling/distance_km",   fmt2(q.rolling.windowKm))
@@ -415,7 +428,11 @@ class MqttManager private constructor() {
         data class S(val id: String, val name: String, val topic: String, val unit: String, val dc: String? = null, val icon: String? = null, val sc: String? = "measurement")
 
         val sensors = listOf(
-            S("speed",              "Velocidade Atual",      "$prefix/speed_kmh",             "km/h",      "speed"),
+            S("charge_current",     "Corrente de Carregamento", "$prefix/charge_current_a",   "A",         icon = "mdi:current-ac"),
+            S("battery_voltage",    "Tensão da Bateria",        "$prefix/battery_voltage_v",  "V",         icon = "mdi:lightning-bolt"),
+            S("battery_current",    "Corrente da Bateria",      "$prefix/battery_current_a",  "A",         icon = "mdi:current-dc"),
+            S("charge_power",       "Potência de Recarga",      "$prefix/charge_power_kw",    "kW",        icon = "mdi:ev-station"),
+            S("speed",              "Velocidade Atual",         "$prefix/speed_kmh",           "km/h",      "speed"),
             S("gear",               "Marcha",                "$prefix/gear",                  "",          icon = "mdi:car-shift-pattern", sc = null),
             S("inside_temp",        "Temperatura Interna",   "$prefix/inside_temp",           "°C",        "temperature"),
             S("outside_temp",       "Temperatura Externa",   "$prefix/outside_temp",          "°C",        "temperature"),

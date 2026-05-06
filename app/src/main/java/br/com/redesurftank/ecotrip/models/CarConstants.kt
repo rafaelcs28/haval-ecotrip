@@ -23,10 +23,15 @@ enum class CarConstants(val value: String) {
     CAR_BASIC_INSIDE_TEMP("car.basic.inside_temp"),
     CAR_BASIC_OUTSIDE_TEMP("car.basic.outside_temp"),
 
-    // Battery
+    // Battery SoC
     CAR_EV_INFO_BATTERY_CHARGE_PERCENTAGE("car.ev_info.battery_charge_percentage"),
     CAR_EV_INFO_SOC_OF_BATTERY("car.ev_info.soc_of_battery"),
     CAR_EV_INFO_CUR_BATTERY_POWER_PERCENTAGE("car.ev_info.cur_battery_power_percentage"),
+
+    // Battery electrical measurements
+    CAR_EV_INFO_CUR_CHARGE_CURRENT("car.ev_info.cur_charge_current"),
+    CAR_EV_INFO_POWER_BATTERY_VOLTAGE("car.ev_info.power_battery_voltage"),
+    CAR_EV_INFO_POWER_BATTERY_CURRENT("car.ev_info.power_battery_current"),
 
     // Vehicle model identification
     CAR_BASIC_VEHICLE_MODEL1("car.basic.vehicle_model1"),
