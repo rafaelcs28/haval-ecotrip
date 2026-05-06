@@ -36,7 +36,6 @@ enum class CarConstants(val value: String) {
     // Values: 0-5 (mapeamento a confirmar com testes no carro)
     CAR_EV_SETTING_CHARGE_SOC_LIMIT("car.ev_setting.charge_soc_limit_config"),
 
-    // Gear status
-    // Known: 3=P, 2=D — 0 and 1 still unconfirmed (likely N/R)
+    // Gear status — mapeamento confirmado: 0=N, 2=D, 3=P, 4=R
     CAR_BASIC_GEAR_STATUS("car.basic.gear_status"),
 }
