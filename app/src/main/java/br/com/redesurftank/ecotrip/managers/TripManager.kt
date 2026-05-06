@@ -113,6 +113,9 @@ private class TripAccum {
     var startFuelPct:      Float   = 0f
     var startSocCaptured:  Boolean = false
     var startFuelCaptured: Boolean = false
+    // Gear-P pause tracking — timer pauses while gear is P (charging / parked)
+    var gearPauseStartMs: Long = 0L   // >0 = timestamp when P gear started this session
+    var totalPausedMs:    Long = 0L   // cumulative ms paused in P this session
 }
 
 class TripManager private constructor() {
@@ -163,6 +166,10 @@ class TripManager private constructor() {
     private var curRegen     = 0f
     private var curDist      = 0f
     private var sessionActive = false
+
+    // Current gear — used to pause trip timer while in P
+    var currentGear: String = ""
+        private set
 
     // Latest SOC and fuel % readings (for start/current bookmarks)
     private var latestSocPct  = 0f
@@ -265,6 +272,9 @@ class TripManager private constructor() {
                 // (sessDistReady = false). This avoids phantom km when the app was restarted
                 // and curDist is 0 while the journey odometer is already accumulated.
                 trip.sessDistReady   = false
+                // If car is already in P (e.g. started while charging), begin paused immediately
+                trip.gearPauseStartMs = if (currentGear == "P") now else 0L
+                trip.totalPausedMs    = 0L
             }
 
             // Sentinels: first odometer reading of the session establishes baseline.
@@ -281,16 +291,47 @@ class TripManager private constructor() {
             sessionActive = false
             val now = System.currentTimeMillis()
             for (trip in listOf(tripA, tripB)) {
+                // Finalize any ongoing P pause
+                val extraPauseMs = if (trip.gearPauseStartMs > 0L) (now - trip.gearPauseStartMs) else 0L
+                val pausedMs = trip.totalPausedMs + extraPauseMs
                 trip.fuelL    += trip.sessionFuelL
                 trip.energyKwh += max(0f, curEnergy - trip.sessStartEnergy)
                 trip.regenKwh  += max(0f, curRegen  - trip.sessStartRegen)
                 trip.distKm    += max(0f, curDist   - trip.sessStartDist)
-                trip.timeSec   += (now - trip.sessStartMs) / 1000L
-                trip.sessionFuelL = 0f
+                trip.timeSec   += ((now - trip.sessStartMs - pausedMs) / 1000L).coerceAtLeast(0L)
+                trip.sessionFuelL   = 0f
+                trip.gearPauseStartMs = 0L
+                trip.totalPausedMs    = 0L
             }
             lastShutdownMs = now
             saveToPrefs()
             Log.i(TAG, "Session ended — trips + rolling persisted, shutdownMs=$lastShutdownMs")
+        }
+    }
+
+    /**
+     * Called whenever the car reports a gear change.
+     * Pauses trip timers while in P (parked / charging) and resumes on any other gear.
+     */
+    fun onGear(gear: String) {
+        synchronized(lock) {
+            val wasP = currentGear == "P"
+            val isP  = gear == "P"
+            currentGear = gear
+            if (!sessionActive) return
+            val now = System.currentTimeMillis()
+            for (trip in listOf(tripA, tripB)) {
+                if (!wasP && isP) {
+                    // Entering P — start pause
+                    if (trip.gearPauseStartMs == 0L) trip.gearPauseStartMs = now
+                } else if (wasP && !isP) {
+                    // Leaving P — finalize pause
+                    if (trip.gearPauseStartMs > 0L) {
+                        trip.totalPausedMs   += (now - trip.gearPauseStartMs)
+                        trip.gearPauseStartMs = 0L
+                    }
+                }
+            }
         }
     }
 
@@ -388,14 +429,17 @@ class TripManager private constructor() {
             trip.timeSec      = 0L
 
             // Move session baselines to current position so all deltas restart from zero
-            trip.sessStartEnergy = curEnergy
-            trip.sessStartRegen  = curRegen
-            trip.sessStartDist   = curDist
-            trip.sessStartMs     = now
-            trip.hwEnergy        = curEnergy
-            trip.hwRegen         = curRegen
-            trip.hwDist          = curDist
-            trip.sessDistReady   = true   // curDist is known-good at manual reset time
+            trip.sessStartEnergy  = curEnergy
+            trip.sessStartRegen   = curRegen
+            trip.sessStartDist    = curDist
+            trip.sessStartMs      = now
+            trip.hwEnergy         = curEnergy
+            trip.hwRegen          = curRegen
+            trip.hwDist           = curDist
+            trip.sessDistReady    = true   // curDist is known-good at manual reset time
+            // Reset pause tracking — restart paused immediately if still in P
+            trip.gearPauseStartMs = if (currentGear == "P") now else 0L
+            trip.totalPausedMs    = 0L
 
             // Reset start bookmarks for next trip — independently per type
             trip.startSocPct       = latestSocPct
@@ -559,7 +603,10 @@ class TripManager private constructor() {
         val deltaEnergy   = if (sessionActive) max(0f, curEnergy - trip.sessStartEnergy) else 0f
         val deltaRegen    = if (sessionActive) max(0f, curRegen  - trip.sessStartRegen)  else 0f
         val deltaDist     = if (sessionActive && trip.sessDistReady) max(0f, curDist - trip.sessStartDist) else 0f
-        val deltaTime     = if (sessionActive) (System.currentTimeMillis() - trip.sessStartMs) / 1000L else 0L
+        val snapshotNow   = System.currentTimeMillis()
+        val extraPauseMs  = if (sessionActive && trip.gearPauseStartMs > 0L) (snapshotNow - trip.gearPauseStartMs) else 0L
+        val pausedMs      = trip.totalPausedMs + extraPauseMs
+        val deltaTime     = if (sessionActive) ((snapshotNow - trip.sessStartMs - pausedMs) / 1000L).coerceAtLeast(0L) else 0L
         return TripSnapshot(
             fuelL             = (trip.fuelL     + sessionFuel).coerceAtLeast(0f),
             energyKwh         = (trip.energyKwh + deltaEnergy).coerceAtLeast(0f),

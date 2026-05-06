@@ -134,13 +134,15 @@ fun ConsumptionScreen() {
                     }
                     CarConstants.CAR_BASIC_GEAR_STATUS.value -> {
                         val raw = value.trim().toIntOrNull()
-                        mqttManager.latestGear = when (raw) {
+                        val gearStr = when (raw) {
                             0    -> "N"
                             2    -> "D"
                             3    -> "P"
                             4    -> "R"
                             else -> raw?.toString() ?: value.trim()
                         }
+                        mqttManager.latestGear = gearStr
+                        tripManager.onGear(gearStr)
                     }
                     CarConstants.CAR_EV_INFO_CUR_CHARGE_CURRENT.value -> {
                         mqttManager.latestChargeCurrentA = value.trim().toFloatOrNull() ?: 0f
