@@ -23,7 +23,6 @@ import androidx.compose.ui.unit.sp
 import br.com.redesurftank.ecotrip.managers.MqttManager
 import br.com.redesurftank.ecotrip.ui.theme.*
 
-@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     tankCapacity: Float,
@@ -59,11 +58,11 @@ fun SettingsScreen(
         ms % 60_000 == 0       -> "${ms / 60_000} min"
         else                   -> "${ms / 1_000} s"
     }
-    fun snapToOption(ms: Int) = intervalOptions.minByOrNull { kotlin.math.abs(it - ms) } ?: ms
-    var publishIntervalWifiMs     by remember { mutableStateOf(snapToOption(mqttManager.publishIntervalWifiMs)) }
-    var publishIntervalCellularMs by remember { mutableStateOf(snapToOption(mqttManager.publishIntervalCellularMs)) }
-    var wifiIntervalExpanded     by remember { mutableStateOf(false) }
-    var cellularIntervalExpanded by remember { mutableStateOf(false) }
+    fun snapToIndex(ms: Int) = intervalOptions.indices.minByOrNull { kotlin.math.abs(intervalOptions[it] - ms) } ?: 0
+    var wifiIntervalIdx     by remember { mutableStateOf(snapToIndex(mqttManager.publishIntervalWifiMs)) }
+    var cellularIntervalIdx by remember { mutableStateOf(snapToIndex(mqttManager.publishIntervalCellularMs)) }
+    val publishIntervalWifiMs     by remember { derivedStateOf { intervalOptions[wifiIntervalIdx] } }
+    val publishIntervalCellularMs by remember { derivedStateOf { intervalOptions[cellularIntervalIdx] } }
     var mqttStatus       by remember { mutableStateOf(mqttManager.status) }
     var showPass         by remember { mutableStateOf(false) }
 
@@ -226,96 +225,26 @@ fun SettingsScreen(
                     fontWeight = FontWeight.SemiBold)
 
                 // ── WiFi ──────────────────────────────────────────────────────
-                Text("📶  Com WiFi", fontSize = 12.sp, color = TextSecondary)
-                ExposedDropdownMenuBox(
-                    expanded = wifiIntervalExpanded,
-                    onExpandedChange = { wifiIntervalExpanded = it },
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    OutlinedTextField(
-                        value = intervalLabel(publishIntervalWifiMs),
-                        onValueChange = {},
-                        readOnly = true,
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = wifiIntervalExpanded) },
-                        modifier = Modifier.menuAnchor(androidx.compose.material3.MenuAnchorType.PrimaryNotEditable).fillMaxWidth(),
-                        textStyle = androidx.compose.ui.text.TextStyle(
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Cyan,
-                        ),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            unfocusedBorderColor = BorderColor,
-                            focusedBorderColor = Cyan,
-                            unfocusedContainerColor = SurfaceDeep,
-                            focusedContainerColor = SurfaceDeep,
-                        ),
-                    )
-                    ExposedDropdownMenu(
-                        expanded = wifiIntervalExpanded,
-                        onDismissRequest = { wifiIntervalExpanded = false },
-                        modifier = Modifier.background(SurfaceCard),
-                    ) {
-                        intervalOptions.forEach { ms ->
-                            DropdownMenuItem(
-                                text = {
-                                    Text(
-                                        intervalLabel(ms),
-                                        fontSize = 15.sp,
-                                        color = if (ms == publishIntervalWifiMs) Cyan else TextPrimary,
-                                        fontWeight = if (ms == publishIntervalWifiMs) FontWeight.Bold else FontWeight.Normal,
-                                    )
-                                },
-                                onClick = { publishIntervalWifiMs = ms; wifiIntervalExpanded = false },
-                            )
-                        }
-                    }
-                }
+                IntervalSlider(
+                    icon        = "📶",
+                    label       = "Com WiFi",
+                    index       = wifiIntervalIdx,
+                    options     = intervalOptions,
+                    accentColor = Cyan,
+                    labelFn     = ::intervalLabel,
+                    onIndexChange = { wifiIntervalIdx = it },
+                )
 
                 // ── 4G / Celular ──────────────────────────────────────────────
-                Text("📡  Sem WiFi (4G/celular)", fontSize = 12.sp, color = TextSecondary)
-                ExposedDropdownMenuBox(
-                    expanded = cellularIntervalExpanded,
-                    onExpandedChange = { cellularIntervalExpanded = it },
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    OutlinedTextField(
-                        value = intervalLabel(publishIntervalCellularMs),
-                        onValueChange = {},
-                        readOnly = true,
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = cellularIntervalExpanded) },
-                        modifier = Modifier.menuAnchor(androidx.compose.material3.MenuAnchorType.PrimaryNotEditable).fillMaxWidth(),
-                        textStyle = androidx.compose.ui.text.TextStyle(
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = MoltenOrange,
-                        ),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            unfocusedBorderColor = BorderColor,
-                            focusedBorderColor = MoltenOrange,
-                            unfocusedContainerColor = SurfaceDeep,
-                            focusedContainerColor = SurfaceDeep,
-                        ),
-                    )
-                    ExposedDropdownMenu(
-                        expanded = cellularIntervalExpanded,
-                        onDismissRequest = { cellularIntervalExpanded = false },
-                        modifier = Modifier.background(SurfaceCard),
-                    ) {
-                        intervalOptions.forEach { ms ->
-                            DropdownMenuItem(
-                                text = {
-                                    Text(
-                                        intervalLabel(ms),
-                                        fontSize = 15.sp,
-                                        color = if (ms == publishIntervalCellularMs) MoltenOrange else TextPrimary,
-                                        fontWeight = if (ms == publishIntervalCellularMs) FontWeight.Bold else FontWeight.Normal,
-                                    )
-                                },
-                                onClick = { publishIntervalCellularMs = ms; cellularIntervalExpanded = false },
-                            )
-                        }
-                    }
-                }
+                IntervalSlider(
+                    icon        = "📡",
+                    label       = "Sem WiFi (4G/celular)",
+                    index       = cellularIntervalIdx,
+                    options     = intervalOptions,
+                    accentColor = MoltenOrange,
+                    labelFn     = ::intervalLabel,
+                    onIndexChange = { cellularIntervalIdx = it },
+                )
 
                 Spacer(Modifier.height(4.dp))
 
@@ -431,6 +360,66 @@ private fun StatusBadge(status: MqttManager.Status, errorMessage: String = "") {
         }
         if (errorMessage.isNotEmpty()) {
             Text(errorMessage, fontSize = 10.sp, color = Color(0xFFFF4444))
+        }
+    }
+}
+
+@Composable
+private fun IntervalSlider(
+    icon: String,
+    label: String,
+    index: Int,
+    options: List<Int>,
+    accentColor: Color,
+    labelFn: (Int) -> String,
+    onIndexChange: (Int) -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(SurfaceDeep, RoundedCornerShape(10.dp))
+            .border(1.dp, accentColor.copy(alpha = 0.18f), RoundedCornerShape(10.dp))
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text      = "$icon  $label",
+                fontSize  = 12.sp,
+                color     = TextSecondary,
+                fontWeight = FontWeight.Medium,
+            )
+            Text(
+                text       = labelFn(options[index]),
+                fontSize   = 22.sp,
+                fontWeight = FontWeight.ExtraBold,
+                color      = accentColor,
+            )
+        }
+        Slider(
+            value         = index.toFloat(),
+            onValueChange = { onIndexChange(it.toInt()) },
+            valueRange    = 0f..(options.size - 1).toFloat(),
+            steps         = options.size - 2,
+            modifier      = Modifier.fillMaxWidth(),
+            colors        = SliderDefaults.colors(
+                thumbColor            = accentColor,
+                activeTrackColor      = accentColor,
+                inactiveTrackColor    = accentColor.copy(alpha = 0.2f),
+                activeTickColor       = Color.Transparent,
+                inactiveTickColor     = Color.Transparent,
+            ),
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(labelFn(options.first()), fontSize = 10.sp, color = TextSecondary.copy(alpha = 0.5f))
+            Text(labelFn(options.last()),  fontSize = 10.sp, color = TextSecondary.copy(alpha = 0.5f))
         }
     }
 }
