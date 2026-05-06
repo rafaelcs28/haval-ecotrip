@@ -3,9 +3,7 @@ package br.com.redesurftank.ecotrip.ui.components
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.OutlinedTextField
@@ -39,7 +37,6 @@ fun TripCard(
 ) {
     var confirmReset by remember { mutableStateOf(false) }
     var tripName     by remember { mutableStateOf("") }
-    val scrollState  = rememberScrollState()
 
     val accentColor = if (label.contains("A", ignoreCase = true)) NeonLime else AuroraTeal
     val shape = RoundedCornerShape(16.dp)
@@ -57,16 +54,14 @@ fun TripCard(
             .background(brush, shape)
             .border(1.dp, accentColor.copy(alpha = 0.14f), shape)
             .drawBehind {
-                // linha de brilho no topo
                 drawRect(
                     brush   = glowBrush,
                     topLeft = Offset(0f, 0f),
                     size    = Size(size.width, 1.dp.toPx()),
                 )
             }
-            .padding(horizontal = 14.dp, vertical = 11.dp)
-            .fillMaxHeight()
-            .verticalScroll(scrollState),
+            .padding(horizontal = 13.dp, vertical = 9.dp)
+            .fillMaxHeight(),   // sem verticalScroll — tudo visível de uma vez
     ) {
         // ── Header ────────────────────────────────────────────────────────────
         Row(
@@ -76,7 +71,7 @@ fun TripCard(
         ) {
             Text(
                 text       = label,
-                fontSize   = 14.sp,
+                fontSize   = 15.sp,
                 fontWeight = FontWeight.ExtraBold,
                 color      = accentColor,
                 style      = TextStyle(
@@ -89,12 +84,12 @@ fun TripCard(
             )
             Text(
                 text     = "%.1f km · %s".format(snapshot.distKm, formatTime(snapshot.timeSec)),
-                fontSize = 11.sp,
+                fontSize = 12.sp,
                 color    = TextSecondary,
             )
         }
 
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(4.dp))
 
         // Gradient divider
         Box(
@@ -108,17 +103,19 @@ fun TripCard(
                 )
         )
 
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(4.dp))
 
-        // ── Two columns ───────────────────────────────────────────────────────
+        // ── Métricas (cresce para ocupar espaço disponível) ───────────────────
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             // ── Energia ───────────────────────────────────────────────────────
             Column(
                 modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
+                verticalArrangement = Arrangement.spacedBy(3.dp),
             ) {
                 TColTitle("⚡ Energia")
                 TMetric("Bruto",       "%.2f kWh".format(snapshot.energyKwh),  TextPrimary)
@@ -126,31 +123,31 @@ fun TripCard(
                 TMetric("Líquido",     "%.2f kWh".format(snapshot.netKwh),      WarnYellow)
                 if (snapshot.startSocPct > 0f || snapshot.currentSocPct > 0f)
                     TMetric("SOC", "%.0f%% → %.0f%%".format(snapshot.startSocPct, snapshot.currentSocPct), TextPrimary)
-                TMetric("Ef. elétrica", "%.2f kWh/100km".format(snapshot.kwhPer100km), AuroraTeal)
+                TMetric("Ef. elét.", "%.2f kWh/100km".format(snapshot.kwhPer100km), AuroraTeal)
             }
 
             // ── Combustível ───────────────────────────────────────────────────
             Column(
                 modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
+                verticalArrangement = Arrangement.spacedBy(3.dp),
             ) {
                 TColTitle("⛽ Combustível")
                 TMetric("km/L",   "%.2f".format(snapshot.kmPerL),             MoltenOrange)
                 TMetric("Gastos", "%.2f L".format(snapshot.fuelL),             TextPrimary)
                 if (snapshot.startTankL > 0f || snapshot.currentTankL > 0f)
-                    TMetric("Tanque", "%.1fL → %.1fL".format(snapshot.startTankL, snapshot.currentTankL), TextPrimary)
+                    TMetric("Tanque", "%.1fL→%.1fL".format(snapshot.startTankL, snapshot.currentTankL), TextPrimary)
                 if (snapshot.combinedKmL > 0f)
                     TMetric("km/L comb.", "%.2f".format(snapshot.combinedKmL), AuroraTeal)
             }
         }
 
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(5.dp))
 
-        // ── Chart ─────────────────────────────────────────────────────────────
+        // ── Gráfico (altura fixa — sempre visível) ────────────────────────────
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(132.dp)
+                .height(88.dp)
                 .background(
                     Brush.verticalGradient(
                         listOf(GlassCard.copy(alpha = 0.6f), VoidBlack)
@@ -164,27 +161,30 @@ fun TripCard(
             }
         }
 
-        Spacer(Modifier.height(4.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            LegendDot(accentColor, "kWh/100km líq.")
-            LegendDot(PlasmaBlue, "Combustível (L)")
-        }
+        Spacer(Modifier.height(3.dp))
 
-        Spacer(Modifier.height(4.dp))
-        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
+        // ── Legenda + botão Zerar ─────────────────────────────────────────────
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                LegendDot(accentColor, "kWh/100km")
+                LegendDot(PlasmaBlue, "Comb. (L)")
+            }
             androidx.compose.material3.OutlinedButton(
                 onClick        = { tripName = ""; confirmReset = true },
                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
                 border         = androidx.compose.foundation.BorderStroke(
-                    1.dp,
-                    Color.White.copy(alpha = 0.07f),
+                    1.dp, Color.White.copy(alpha = 0.07f),
                 ),
                 shape  = RoundedCornerShape(6.dp),
                 colors = androidx.compose.material3.ButtonDefaults.outlinedButtonColors(
                     contentColor = TextSecondary,
                 ),
             ) {
-                Text("Zerar", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = TextSecondary)
+                Text("Zerar", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = TextSecondary)
             }
         }
     }
@@ -230,7 +230,7 @@ private fun TColTitle(title: String) {
     Column {
         Text(
             text          = title.uppercase(),
-            fontSize      = 9.sp,
+            fontSize      = 10.sp,
             fontWeight    = FontWeight.Bold,
             letterSpacing = 1.4.sp,
             color         = TextSecondary.copy(alpha = 0.6f),
@@ -254,7 +254,7 @@ private fun TMetric(
     ) {
         Text(
             text     = label,
-            fontSize = 11.sp,
+            fontSize = 12.sp,
             color    = TextSecondary,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -262,7 +262,7 @@ private fun TMetric(
         )
         Text(
             text       = value,
-            fontSize   = 12.sp,
+            fontSize   = 13.sp,
             fontWeight = FontWeight.Bold,
             color      = valueColor,
             maxLines   = 1,
@@ -275,7 +275,7 @@ private fun TMetric(
 private fun LegendDot(color: Color, label: String) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         Box(Modifier.size(8.dp).background(color, RoundedCornerShape(2.dp)))
-        Text(label, fontSize = 10.sp, color = TextSecondary)
+        Text(label, fontSize = 11.sp, color = TextSecondary)
     }
 }
 

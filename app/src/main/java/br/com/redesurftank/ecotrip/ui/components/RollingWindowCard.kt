@@ -65,7 +65,7 @@ fun RollingWindowCard(
         ) {
             Text(
                 "DESDE ÚLTIMA PARTIDA",
-                fontSize      = 10.sp,
+                fontSize      = 11.sp,
                 fontWeight    = FontWeight.Bold,
                 letterSpacing = 1.8.sp,
                 color         = TextSecondary,
@@ -76,7 +76,7 @@ fun RollingWindowCard(
             ) {
                 Text(
                     "%.1f km".format(snapshot.windowKm),
-                    fontSize   = 14.sp,
+                    fontSize   = 15.sp,
                     fontWeight = FontWeight.ExtraBold,
                     color      = AuroraTeal,
                     style      = TextStyle(
@@ -99,7 +99,7 @@ fun RollingWindowCard(
                         contentColor = TextSecondary,
                     ),
                 ) {
-                    Text("Zerar", fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = TextSecondary)
+                    Text("Zerar", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = TextSecondary)
                 }
             }
         }
@@ -245,7 +245,7 @@ private fun RollingGauge(
         ) {
             Text(
                 text       = String.format(java.util.Locale.US, "%.1f", value),
-                fontSize   = 24.sp,
+                fontSize   = 26.sp,
                 fontWeight = FontWeight.ExtraBold,
                 color      = color,
                 maxLines   = 1,
@@ -259,7 +259,7 @@ private fun RollingGauge(
             )
             Text(
                 text      = label,
-                fontSize  = 10.sp,
+                fontSize  = 11.sp,
                 color     = TextSecondary,
                 maxLines  = 1,
                 textAlign = TextAlign.Center,
@@ -272,7 +272,7 @@ private fun RollingGauge(
 private fun RMetricSection(title: String) {
     Text(
         text          = title.uppercase(),
-        fontSize      = 9.sp,
+        fontSize      = 10.sp,
         fontWeight    = FontWeight.Bold,
         letterSpacing = 1.4.sp,
         color         = TextSecondary.copy(alpha = 0.6f),
@@ -293,7 +293,7 @@ private fun RMetric(
     ) {
         Text(
             text     = label,
-            fontSize = 11.sp,
+            fontSize = 12.sp,
             color    = TextSecondary,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -301,7 +301,7 @@ private fun RMetric(
         )
         Text(
             text       = value,
-            fontSize   = 12.sp,
+            fontSize   = 13.sp,
             fontWeight = FontWeight.Bold,
             color      = valueColor,
             maxLines   = 1,
