@@ -294,10 +294,14 @@ class TripManager private constructor() {
                 // Finalize any ongoing P pause
                 val extraPauseMs = if (trip.gearPauseStartMs > 0L) (now - trip.gearPauseStartMs) else 0L
                 val pausedMs = trip.totalPausedMs + extraPauseMs
-                trip.fuelL    += trip.sessionFuelL
+                trip.fuelL     += trip.sessionFuelL
                 trip.energyKwh += max(0f, curEnergy - trip.sessStartEnergy)
                 trip.regenKwh  += max(0f, curRegen  - trip.sessStartRegen)
-                trip.distKm    += max(0f, curDist   - trip.sessStartDist)
+                // Só acumula distância se o baseline foi estabelecido nesta sessão.
+                // Evita phantom km quando o app reinicia e sessStartDist=0 (padrão não persistido).
+                if (trip.sessDistReady) {
+                    trip.distKm += max(0f, curDist - trip.sessStartDist)
+                }
                 trip.timeSec   += ((now - trip.sessStartMs - pausedMs) / 1000L).coerceAtLeast(0L)
                 trip.sessionFuelL   = 0f
                 trip.gearPauseStartMs = 0L
@@ -540,11 +544,20 @@ class TripManager private constructor() {
         curDist = value
         if (!sessionActive) return
 
-        // First reading of session: establish baselines, accumulate nothing.
+        // First reading of session: establish rolling baseline + trip dist baseline.
+        // The trip baseline MUST be established here so that onSessionEnd() never
+        // uses sessStartDist=0 (default) and adds phantom km.
         if (prevRollingDist < 0f) {
             prevRollingDist   = value
             prevRollingEnergy = curEnergy
             prevRollingRegen  = curRegen
+            for (trip in listOf(tripA, tripB)) {
+                if (!trip.sessDistReady) {
+                    trip.sessStartDist = value
+                    trip.hwDist        = value
+                    trip.sessDistReady = true
+                }
+            }
             return
         }
 
