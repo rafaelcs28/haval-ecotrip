@@ -23,6 +23,7 @@ import androidx.compose.ui.unit.sp
 import br.com.redesurftank.ecotrip.managers.MqttManager
 import br.com.redesurftank.ecotrip.ui.theme.*
 
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     tankCapacity: Float,
@@ -44,7 +45,24 @@ fun SettingsScreen(
     var username         by remember { mutableStateOf(mqttManager.username) }
     var password         by remember { mutableStateOf(mqttManager.password) }
     var prefix           by remember { mutableStateOf(mqttManager.prefix) }
-    var publishIntervalS by remember { mutableStateOf(mqttManager.publishIntervalS) }
+    val intervalOptions = remember {
+        listOf(500, 1_000, 2_000, 3_000, 4_000, 5_000,
+               10_000, 15_000, 20_000, 25_000, 30_000, 35_000, 40_000,
+               45_000, 50_000, 55_000, 60_000, 65_000, 70_000, 75_000,
+               80_000, 85_000, 90_000)
+    }
+    fun intervalLabel(ms: Int) = when {
+        ms < 1_000 -> "${ms} ms"
+        ms % 60_000 == 0 -> "${ms / 60_000} min"
+        else -> "${ms / 1_000} s"
+    }
+    var publishIntervalMs by remember {
+        mutableStateOf(
+            intervalOptions.minByOrNull { kotlin.math.abs(it - mqttManager.publishIntervalMs) }
+                ?: mqttManager.publishIntervalMs
+        )
+    }
+    var intervalExpanded by remember { mutableStateOf(false) }
     var mqttStatus       by remember { mutableStateOf(mqttManager.status) }
     var showPass         by remember { mutableStateOf(false) }
 
@@ -204,20 +222,51 @@ fun SettingsScreen(
 
                 Spacer(Modifier.height(2.dp))
                 Text("Intervalo de envio", fontSize = 13.sp, color = TextSecondary)
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                ExposedDropdownMenuBox(
+                    expanded = intervalExpanded,
+                    onExpandedChange = { intervalExpanded = it },
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    StepButton("−") { if (publishIntervalS > 5) publishIntervalS -= 5 }
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.weight(1f),
+                    OutlinedTextField(
+                        value = intervalLabel(publishIntervalMs),
+                        onValueChange = {},
+                        readOnly = true,
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = intervalExpanded) },
+                        modifier = Modifier.menuAnchor(androidx.compose.material3.MenuAnchorType.PrimaryNotEditable).fillMaxWidth(),
+                        textStyle = androidx.compose.ui.text.TextStyle(
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Cyan,
+                        ),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            unfocusedBorderColor = BorderColor,
+                            focusedBorderColor = Cyan,
+                            unfocusedContainerColor = SurfaceDeep,
+                            focusedContainerColor = SurfaceDeep,
+                        ),
+                    )
+                    ExposedDropdownMenu(
+                        expanded = intervalExpanded,
+                        onDismissRequest = { intervalExpanded = false },
+                        modifier = Modifier.background(SurfaceCard),
                     ) {
-                        Text("${publishIntervalS}s", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Cyan)
-                        Text("segundos", fontSize = 12.sp, color = TextSecondary)
+                        intervalOptions.forEach { ms ->
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        intervalLabel(ms),
+                                        fontSize = 15.sp,
+                                        color = if (ms == publishIntervalMs) Cyan else TextPrimary,
+                                        fontWeight = if (ms == publishIntervalMs) FontWeight.Bold else FontWeight.Normal,
+                                    )
+                                },
+                                onClick = {
+                                    publishIntervalMs = ms
+                                    intervalExpanded = false
+                                },
+                            )
+                        }
                     }
-                    StepButton("+") { if (publishIntervalS < 300) publishIntervalS += 5 }
                 }
 
                 Spacer(Modifier.height(4.dp))
@@ -238,7 +287,7 @@ fun SettingsScreen(
                             mqttManager.username         = username
                             mqttManager.password         = password
                             mqttManager.prefix           = prefix.ifEmpty { "haval/ecotrip" }
-                            mqttManager.publishIntervalS = publishIntervalS
+                            mqttManager.publishIntervalMs = publishIntervalMs
                             mqttManager.saveAndApply()
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = Green),

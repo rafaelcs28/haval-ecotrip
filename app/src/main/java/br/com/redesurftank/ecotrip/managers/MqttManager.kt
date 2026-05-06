@@ -14,7 +14,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 private const val TAG = "MqttManager"
 private const val CLIENT_ID = "haval_ecotrip"
-private const val DEFAULT_PUBLISH_INTERVAL_S = 20
+private const val DEFAULT_PUBLISH_INTERVAL_MS = 20_000
 private const val RECONNECT_DELAY_MS = 15_000L
 private const val MAX_QUEUED_SNAPSHOTS = 50   // ~17 min at 20s interval
 
@@ -77,7 +77,7 @@ class MqttManager private constructor() {
     var username:         String  = ""
     var password:         String  = ""
     var prefix:           String  = "haval/ecotrip"
-    var publishIntervalS: Int     = DEFAULT_PUBLISH_INTERVAL_S
+    var publishIntervalMs: Int    = DEFAULT_PUBLISH_INTERVAL_MS
 
     // Vehicle model (populated from car data keys before connect)
     var vehicleModel1: String = ""
@@ -126,7 +126,7 @@ class MqttManager private constructor() {
             .putString (SharedPreferencesKeys.MQTT_USERNAME,          username)
             .putString (SharedPreferencesKeys.MQTT_PASSWORD,          password)
             .putString (SharedPreferencesKeys.MQTT_PREFIX,            prefix)
-            .putInt    (SharedPreferencesKeys.MQTT_PUBLISH_INTERVAL_S, publishIntervalS)
+            .putInt    (SharedPreferencesKeys.MQTT_PUBLISH_INTERVAL_MS, publishIntervalMs)
             .apply()
 
         executor.submit {
@@ -154,7 +154,7 @@ class MqttManager private constructor() {
 
     fun publish(snapA: TripSnapshot, snapB: TripSnapshot, rolling: RollingSnapshot) {
         val now = System.currentTimeMillis()
-        if (now - lastPublishMs < publishIntervalS * 1000L) return
+        if (now - lastPublishMs < publishIntervalMs.toLong()) return
         lastPublishMs = now
 
         val queued = QueuedSnapshot(now, snapA, snapB, rolling)
@@ -499,7 +499,11 @@ class MqttManager private constructor() {
         username         = prefs.getString (SharedPreferencesKeys.MQTT_USERNAME,          "") ?: ""
         password         = prefs.getString (SharedPreferencesKeys.MQTT_PASSWORD,          "") ?: ""
         prefix           = prefs.getString (SharedPreferencesKeys.MQTT_PREFIX,            "haval/ecotrip") ?: "haval/ecotrip"
-        publishIntervalS = prefs.getInt    (SharedPreferencesKeys.MQTT_PUBLISH_INTERVAL_S, DEFAULT_PUBLISH_INTERVAL_S)
+        // Migração: lê novo formato ms; se não existir, converte legado (segundos → ms)
+        publishIntervalMs = if (prefs.contains(SharedPreferencesKeys.MQTT_PUBLISH_INTERVAL_MS))
+            prefs.getInt(SharedPreferencesKeys.MQTT_PUBLISH_INTERVAL_MS, DEFAULT_PUBLISH_INTERVAL_MS)
+        else
+            prefs.getInt(SharedPreferencesKeys.MQTT_PUBLISH_INTERVAL_S, 20) * 1000
         // Restore last-known sensor values so HA never shows stale zeros after app restart
         latestOutsideTemp = prefs.getFloat(SharedPreferencesKeys.LATEST_OUTSIDE_TEMP, 0f)
         latestInsideTemp  = prefs.getFloat(SharedPreferencesKeys.LATEST_INSIDE_TEMP,  0f)
