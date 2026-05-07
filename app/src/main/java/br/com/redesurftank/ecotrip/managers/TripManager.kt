@@ -891,7 +891,7 @@ class TripManager private constructor() {
             .putFloat(SharedPreferencesKeys.TRIP_A_SESS_START_REGEN,  tripA.sessStartRegen)
             .putFloat(SharedPreferencesKeys.TRIP_B_SESS_START_ENERGY, tripB.sessStartEnergy)
             .putFloat(SharedPreferencesKeys.TRIP_B_SESS_START_REGEN,  tripB.sessStartRegen)
-            .apply()
+            .commit()   // síncrono — garante que os valores estão no disco antes de o processo morrer
     }
 
     private fun serializeRawSamples(samples: List<Triple<Float, Float, Float>>): String =
@@ -912,6 +912,6 @@ class TripManager private constructor() {
     private fun saveHistory() {
         prefs.edit()
             .putString(SharedPreferencesKeys.TRIP_HISTORY_JSON, gson.toJson(tripHistory))
-            .apply()
+            .commit()
     }
 }

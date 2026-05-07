@@ -6,6 +6,8 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.util.Log
 import br.com.redesurftank.ecotrip.models.SharedPreferencesKeys
+import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
 import org.eclipse.paho.client.mqttv3.*
 import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence
 import java.text.SimpleDateFormat
@@ -34,12 +36,12 @@ class MqttManager private constructor() {
         val rolling: RollingSnapshot,
     )
 
-    // Trip completed events must never be dropped
+    // Trip completed — payloads pré-computados para fácil serialização em disco.
+    // Sobrevive ao reinício do app: persistido em SharedPreferences enquanto não enviado.
     private data class QueuedTripCompleted(
-        val tripId: String,
-        val snap: TripSnapshot,
-        val name: String,
-        val timestampMs: Long,
+        val lastCompletedTopic:   String,   // e.g. haval/ecotrip/trip_a/last_completed
+        val lastCompletedPayload: String,   // JSON retido (last trip sensor no HA)
+        val newTripPayload:       String,   // JSON não-retido (acumulado pelo HA)
     )
 
     companion object {
@@ -55,6 +57,7 @@ class MqttManager private constructor() {
     private val isReconnecting = AtomicBoolean(false)
     private var client: MqttClient? = null
     private var lastPublishMs  = 0L
+    private val gson = Gson()
 
     // Queues — accessed from multiple threads, protected by their own locks
     private val snapshotQueue      = ArrayDeque<QueuedSnapshot>()
@@ -102,6 +105,8 @@ class MqttManager private constructor() {
     var latestChargeCurrentA: Float = 0f   // A — corrente AC de carregamento
     var latestBatteryVoltageV: Float = 0f  // V — tensão do pack de bateria
     var latestBatteryCurrentA: Float = 0f  // A — corrente do pack (+ descarga, - carga/regen)
+    // 0=Desconectado, 1=Carregando, 2=Programado, 3=Finalizado, 5=Aguardando liberação, -1=desconhecido
+    var latestChargingState: Int = -1
 
     // Último timestamp em que qualquer dado do carro foi recebido pelo app
     // Usado para saber se o barramento de dados do carro está ativo
@@ -123,6 +128,7 @@ class MqttManager private constructor() {
         val ctx = try { context.createDeviceProtectedStorageContext() } catch (_: Exception) { context }
         prefs = ctx.getSharedPreferences(SharedPreferencesKeys.PREFS_NAME, Context.MODE_PRIVATE)
         loadConfig()
+        loadPendingTrips()   // restaura trips salvos antes do app ter sido reiniciado
         if (enabled && host.isNotEmpty()) connect()
     }
 
@@ -254,15 +260,69 @@ class MqttManager private constructor() {
     }
 
     fun publishTripCompleted(tripId: String, snap: TripSnapshot, name: String = "") {
-        val queued = QueuedTripCompleted(tripId, snap, name, System.currentTimeMillis())
+        val queued = buildTripPayload(tripId, snap, name)
+        // Persiste no disco ANTES de tentar enviar — garante que o trip sobrevive a crash/kill.
+        // Só é removido do disco após confirmação de entrega (PUBACK) pelo broker.
+        synchronized(tripCompletedLock) { tripCompletedQueue.addLast(queued) }
+        savePendingTrips()
         val c = client
         if (c == null || !c.isConnected) {
-            // Trip completed events are never dropped
-            synchronized(tripCompletedLock) { tripCompletedQueue.addLast(queued) }
-            Log.i(TAG, "Offline — trip completed queued: $tripId (queue size=${tripCompletedQueue.size})")
+            Log.i(TAG, "Offline — trip persistido: $tripId (fila=${tripCompletedQueue.size})")
             return
         }
         executor.submit { publishTripCompletedInternal(c, queued) }
+    }
+
+    /** Pré-computa os dois payloads MQTT a partir do snapshot e dados do trip. */
+    private fun buildTripPayload(tripId: String, snap: TripSnapshot, name: String): QueuedTripCompleted {
+        val fmt = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.getDefault())
+        val ts = fmt.format(Date(System.currentTimeMillis()))
+        val safeName  = name.trim().replace("\"", "'")
+        val tripLabel = if (tripId == "trip_a") "Trip A" else "Trip B"
+        fun f1(v: Float) = String.format(java.util.Locale.US, "%.1f", v)
+        fun f2(v: Float) = String.format(java.util.Locale.US, "%.2f", v)
+        fun f3(v: Float) = String.format(java.util.Locale.US, "%.3f", v)
+
+        val completedPayload = """{"name":"$safeName","timestamp":"$ts","distance_km":${f2(snap.distKm)},"time_sec":${snap.timeSec},"fuel_l":${f3(snap.fuelL)},"energy_kwh":${f3(snap.energyKwh)},"regen_kwh":${f3(snap.regenKwh)},"net_kwh":${f3(snap.netKwh)},"kwh_per_100km":${f2(snap.kwhPer100km)},"km_per_l":${f2(snap.kmPerL)},"avg_speed_kmh":${f1(snap.avgSpeedKmh)},"soc_start":${f1(snap.startSocPct)},"soc_end":${f1(snap.currentSocPct)},"tank_start_l":${f1(snap.startTankL)},"tank_end_l":${f1(snap.currentTankL)}}"""
+        val newTripPayload   = """{"name":"$safeName","label":"$tripLabel","timestamp":"$ts","distance_km":${f2(snap.distKm)},"time_sec":${snap.timeSec},"fuel_l":${f2(snap.fuelL)},"energy_kwh":${f2(snap.energyKwh)},"regen_kwh":${f2(snap.regenKwh)},"net_kwh":${f2(snap.netKwh)},"kwh_per_100km":${f2(snap.kwhPer100km)},"km_per_l":${f2(snap.kmPerL)},"combined_km_l":${f2(snap.combinedKmL)},"soc_start":${f1(snap.startSocPct)},"soc_end":${f1(snap.currentSocPct)},"tank_start_l":${f1(snap.startTankL)},"tank_end_l":${f1(snap.currentTankL)}}"""
+
+        return QueuedTripCompleted(
+            lastCompletedTopic   = "$prefix/$tripId/last_completed",
+            lastCompletedPayload = completedPayload,
+            newTripPayload       = newTripPayload,
+        )
+    }
+
+    // ── Persistência da fila de trips pendentes ───────────────────────────────
+
+    private fun savePendingTrips() {
+        if (!::prefs.isInitialized) return
+        synchronized(tripCompletedLock) {
+            val json = gson.toJson(tripCompletedQueue.toList())
+            prefs.edit().putString(SharedPreferencesKeys.PENDING_TRIP_PAYLOADS_JSON, json).commit()
+        }
+    }
+
+    private fun loadPendingTrips() {
+        if (!::prefs.isInitialized) return
+        val json = prefs.getString(SharedPreferencesKeys.PENDING_TRIP_PAYLOADS_JSON, null)
+            ?: return
+        try {
+            val type = object : TypeToken<List<QueuedTripCompleted>>() {}.type
+            val loaded: List<QueuedTripCompleted> = gson.fromJson(json, type)
+            synchronized(tripCompletedLock) {
+                tripCompletedQueue.clear()
+                tripCompletedQueue.addAll(loaded)
+            }
+            Log.i(TAG, "Carregados ${loaded.size} trip(s) pendentes do disco")
+        } catch (e: Exception) {
+            Log.w(TAG, "Falha ao carregar trips pendentes: ${e.message}")
+        }
+    }
+
+    private fun clearPendingTrips() {
+        if (!::prefs.isInitialized) return
+        prefs.edit().remove(SharedPreferencesKeys.PENDING_TRIP_PAYLOADS_JSON).commit()
     }
 
     // ── Internal ─────────────────────────────────────────────────────────────
@@ -328,12 +388,12 @@ class MqttManager private constructor() {
     }
 
     private fun drainQueues(c: MqttClient) {
-        // Trip completed first — most critical
-        val completed = synchronized(tripCompletedLock) {
-            tripCompletedQueue.toList().also { tripCompletedQueue.clear() }
-        }
+        // Trip completed first — most critical.
+        // Tira cópia da fila mas NÃO limpa — cada item é removido individualmente
+        // por publishTripCompletedInternal somente após confirmação PUBACK.
+        val completed = synchronized(tripCompletedLock) { tripCompletedQueue.toList() }
         if (completed.isNotEmpty()) {
-            Log.i(TAG, "Draining ${completed.size} queued trip completed events")
+            Log.i(TAG, "Enviando ${completed.size} trip(s) pendente(s) ao HA")
             for (q in completed) publishTripCompletedInternal(c, q)
         }
 
@@ -364,10 +424,21 @@ class MqttManager private constructor() {
             pub("charge_current_a",  fmt2(latestChargeCurrentA))
             pub("battery_voltage_v", fmt2(latestBatteryVoltageV))
             pub("battery_current_a", fmt2(latestBatteryCurrentA))
+            // Potência de recarga: apenas quando charging_state == 1 (Carregando)
             // Corrente de recarga chega negativa do carro; inverte sinal para kW positivo
-            val chargePowerKw = if (latestBatteryVoltageV > 0f)
+            val chargePowerKw = if (latestChargingState == 1 && latestBatteryVoltageV > 0f)
                 latestChargeCurrentA * latestBatteryVoltageV / 1000f * -1f else 0f
             pub("charge_power_kw",   fmt2(chargePowerKw))
+            // Estado de recarga em texto legível
+            val chargingStateText = when (latestChargingState) {
+                0 -> "Desconectado"
+                1 -> "Carregando"
+                2 -> "Programado"
+                3 -> "Finalizado"
+                5 -> "Aguardando liberação"
+                else -> "Desconhecido"
+            }
+            pub("charging_state", chargingStateText)
             pub("rolling/kwh_per_100km", fmt2(q.rolling.netKwhPer100km))
             pub("rolling/km_per_l",      fmt2(q.rolling.kmPerL))
             pub("rolling/distance_km",   fmt2(q.rolling.windowKm))
@@ -400,30 +471,21 @@ class MqttManager private constructor() {
 
     private fun publishTripCompletedInternal(c: MqttClient, q: QueuedTripCompleted) {
         try {
-            val fmt = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.getDefault())
-            val safeName = q.name.trim().replace("\"", "'")
-            val tripLabel = if (q.tripId == "trip_a") "Trip A" else "Trip B"
-            fun f2(v: Float) = String.format(java.util.Locale.US, "%.2f", v)
-            fun f3(v: Float) = String.format(java.util.Locale.US, "%.3f", v)
-            fun f1(v: Float) = String.format(java.util.Locale.US, "%.1f", v)
-            val ts = fmt.format(Date(q.timestampMs))
+            // QoS 1 — Paho bloqueia até receber PUBACK do broker (confirmação de entrega)
+            c.publish(q.lastCompletedTopic, q.lastCompletedPayload.toByteArray(), 1, true)
+            c.publish("$prefix/trips/new_trip", q.newTripPayload.toByteArray(), 1, false)
 
-            // 1. last_completed retido — HA sensor "Última Viagem" (como antes)
-            val completedPayload = """{"name":"$safeName","timestamp":"$ts","distance_km":${f2(q.snap.distKm)},"time_sec":${q.snap.timeSec},"fuel_l":${f3(q.snap.fuelL)},"energy_kwh":${f3(q.snap.energyKwh)},"regen_kwh":${f3(q.snap.regenKwh)},"net_kwh":${f3(q.snap.netKwh)},"kwh_per_100km":${f2(q.snap.kwhPer100km)},"km_per_l":${f2(q.snap.kmPerL)},"avg_speed_kmh":${f1(q.snap.avgSpeedKmh)},"soc_start":${f1(q.snap.startSocPct)},"soc_end":${f1(q.snap.currentSocPct)},"tank_start_l":${f1(q.snap.startTankL)},"tank_end_l":${f1(q.snap.currentTankL)}}"""
-            c.publish("$prefix/${q.tripId}/last_completed", completedPayload.toByteArray(), 1, true)
-
-            // 2. new_trip NÃO retido — HA automation adiciona à lista permanente.
-            //    O HA é a fonte de verdade do histórico; apagar no app não apaga no HA.
-            val newTripPayload = """{"name":"$safeName","label":"$tripLabel","timestamp":"$ts","distance_km":${f2(q.snap.distKm)},"time_sec":${q.snap.timeSec},"fuel_l":${f2(q.snap.fuelL)},"energy_kwh":${f2(q.snap.energyKwh)},"regen_kwh":${f2(q.snap.regenKwh)},"net_kwh":${f2(q.snap.netKwh)},"kwh_per_100km":${f2(q.snap.kwhPer100km)},"km_per_l":${f2(q.snap.kmPerL)},"combined_km_l":${f2(q.snap.combinedKmL)},"soc_start":${f1(q.snap.startSocPct)},"soc_end":${f1(q.snap.currentSocPct)},"tank_start_l":${f1(q.snap.startTankL)},"tank_end_l":${f1(q.snap.currentTankL)}}"""
-            c.publish("$prefix/trips/new_trip", newTripPayload.toByteArray(), 1, false)
+            // PUBACK recebido — entrega confirmada. Remove da fila e atualiza disco.
+            synchronized(tripCompletedLock) { tripCompletedQueue.remove(q) }
+            val remaining = synchronized(tripCompletedLock) { tripCompletedQueue.size }
+            if (remaining == 0) clearPendingTrips() else savePendingTrips()
 
             lastSuccessfulPublishMs = System.currentTimeMillis()
             onStatusChange?.invoke(status)
-            Log.i(TAG, "Trip completed published: ${q.tripId} name='${q.name}' dist=${q.snap.distKm}km")
+            Log.i(TAG, "Trip enviado e confirmado (PUBACK): ${q.lastCompletedTopic}")
         } catch (e: Exception) {
-            // Re-queue on failure — trip events must not be lost
-            synchronized(tripCompletedLock) { tripCompletedQueue.addFirst(q) }
-            Log.w(TAG, "publishTripCompleted failed — re-queued: ${e.message}")
+            // Entrega falhou — item permanece na fila (já persistido no disco)
+            Log.w(TAG, "publishTripCompleted falhou — permanece na fila para retry: ${e.message}")
         }
     }
 
@@ -461,6 +523,7 @@ class MqttManager private constructor() {
             S("battery_voltage",    "Tensão da Bateria",        "$prefix/battery_voltage_v",  "V",         icon = "mdi:lightning-bolt"),
             S("battery_current",    "Corrente da Bateria",      "$prefix/battery_current_a",  "A",         icon = "mdi:current-dc"),
             S("charge_power",       "Potência de Recarga",      "$prefix/charge_power_kw",    "kW",        icon = "mdi:ev-station"),
+            S("charging_state",     "Estado de Recarga",        "$prefix/charging_state",     "",          icon = "mdi:ev-plug-type2", sc = null),
             S("speed",              "Velocidade Atual",         "$prefix/speed_kmh",           "km/h",      "speed"),
             S("gear",               "Marcha",                "$prefix/gear",                  "",          icon = "mdi:car-shift-pattern", sc = null),
             S("inside_temp",        "Temperatura Interna",   "$prefix/inside_temp",           "°C",        "temperature"),
@@ -517,12 +580,16 @@ class MqttManager private constructor() {
         val historyPayload = """{"name":"Histórico de Trips","state_topic":"$prefix/trips/history","value_template":"{{ value_json.count }}","json_attributes_topic":"$prefix/trips/history","unit_of_measurement":"viagens","state_class":"measurement","unique_id":"haval_ecotrip_trips_history","icon":"mdi:history","device":$device}"""
         try { c.publish("homeassistant/sensor/haval_ecotrip_trips_history/config", historyPayload.toByteArray(), 1, true) } catch (_: Exception) {}
 
+        // Sensor: histórico de sessões de recarga (acumulado pelo HA via automation)
+        val chargingHistoryPayload = """{"name":"Histórico de Recargas","state_topic":"$prefix/charging/history","value_template":"{{ value_json.count }}","json_attributes_topic":"$prefix/charging/history","unit_of_measurement":"recargas","state_class":"measurement","unique_id":"haval_ecotrip_historico_de_recargas","icon":"mdi:ev-station","device":$device}"""
+        try { c.publish("homeassistant/sensor/haval_ecotrip_historico_de_recargas/config", chargingHistoryPayload.toByteArray(), 1, true) } catch (_: Exception) {}
+
         // NOTA: o select "Limite de Carga SOC" (haval_ecotrip_charge_limit) é publicado
         // exclusivamente pelo haval-ecotrip-commander, que também gerencia o wake-up do carro
         // via GWM API. O EcotripImpulse apenas escuta cmd/charge_limit e publica o estado.
         // Publicar o discovery aqui sobrescreveria o command_topic do Commander e quebraria o fluxo.
 
-        Log.i(TAG, "HA Discovery published (${sensors.size + 2} entities)")
+        Log.i(TAG, "HA Discovery published (${sensors.size + 4} entities)")
     }
 
     private fun loadConfig() {

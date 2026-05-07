@@ -62,6 +62,10 @@ object SharedPreferencesKeys {
     const val LATEST_OUTSIDE_TEMP = "latest_outside_temp"
     const val LATEST_INSIDE_TEMP  = "latest_inside_temp"
 
+    // Trips pendentes de envio ao MQTT (salvos enquanto broker estava inacessível)
+    // JSON array de PendingTripPayload — sobrevive ao reinício do app
+    const val PENDING_TRIP_PAYLOADS_JSON = "pending_trip_payloads_json"
+
     // MQTT
     const val MQTT_ENABLED  = "mqtt_enabled"
     const val MQTT_HOST     = "mqtt_host"

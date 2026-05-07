@@ -153,6 +153,9 @@ fun ConsumptionScreen() {
                     CarConstants.CAR_EV_INFO_POWER_BATTERY_CURRENT.value -> {
                         mqttManager.latestBatteryCurrentA = value.trim().toFloatOrNull() ?: 0f
                     }
+                    CarConstants.CAR_EV_INFO_CHARGING_STATE.value -> {
+                        mqttManager.latestChargingState = value.trim().toIntOrNull() ?: -1
+                    }
                     else -> tripManager.onDataChanged(key, value)
                 }
             }
@@ -199,6 +202,8 @@ fun ConsumptionScreen() {
                     ?.trim()?.toFloatOrNull()?.let { mqttManager.latestBatteryVoltageV = it }
                 carManager.fetchCurrent(CarConstants.CAR_EV_INFO_POWER_BATTERY_CURRENT.value)
                     ?.trim()?.toFloatOrNull()?.let { mqttManager.latestBatteryCurrentA = it }
+                carManager.fetchCurrent(CarConstants.CAR_EV_INFO_CHARGING_STATE.value)
+                    ?.trim()?.toIntOrNull()?.let { mqttManager.latestChargingState = it }
 
             } catch (_: Exception) {}
         }
