@@ -260,6 +260,8 @@ class MqttManager private constructor() {
     }
 
     fun publishTripCompleted(tripId: String, snap: TripSnapshot, name: String = "") {
+        val connected = client?.isConnected == true
+        AppLogger.i(TAG, "publishTripCompleted: $tripId dist=${String.format(java.util.Locale.US, "%.2f", snap.distKm)}km fuel=${String.format(java.util.Locale.US, "%.3f", snap.fuelL)}L connected=$connected")
         val queued = buildTripPayload(tripId, snap, name)
         // Persiste no disco ANTES de tentar enviar — garante que o trip sobrevive a crash/kill.
         // Só é removido do disco após confirmação de entrega (PUBACK) pelo broker.
@@ -267,9 +269,10 @@ class MqttManager private constructor() {
         savePendingTrips()
         val c = client
         if (c == null || !c.isConnected) {
-            Log.i(TAG, "Offline — trip persistido: $tripId (fila=${tripCompletedQueue.size})")
+            AppLogger.i(TAG, "Offline — trip persistido: $tripId (fila=${tripCompletedQueue.size})")
             return
         }
+        AppLogger.i(TAG, "Submetendo trip ao executor: $tripId")
         executor.submit { publishTripCompletedInternal(c, queued) }
     }
 
@@ -393,8 +396,16 @@ class MqttManager private constructor() {
         // por publishTripCompletedInternal somente após confirmação PUBACK.
         val completed = synchronized(tripCompletedLock) { tripCompletedQueue.toList() }
         if (completed.isNotEmpty()) {
-            Log.i(TAG, "Enviando ${completed.size} trip(s) pendente(s) ao HA")
+            AppLogger.i(TAG, "Enviando ${completed.size} trip(s) pendente(s) ao HA")
             for (q in completed) publishTripCompletedInternal(c, q)
+        }
+
+        // Publica histórico completo como retained após reconexão
+        try {
+            val history = TripManager.getInstance().getHistory()
+            if (history.isNotEmpty()) publishTripHistoryInternal(c, history)
+        } catch (e: Exception) {
+            Log.w(TAG, "drainQueues: falha ao publicar histórico: ${e.message}")
         }
 
         // Then regular snapshots
@@ -482,10 +493,42 @@ class MqttManager private constructor() {
 
             lastSuccessfulPublishMs = System.currentTimeMillis()
             onStatusChange?.invoke(status)
-            Log.i(TAG, "Trip enviado e confirmado (PUBACK): ${q.lastCompletedTopic}")
+            AppLogger.i(TAG, "Trip enviado e confirmado (PUBACK): ${q.lastCompletedTopic}")
         } catch (e: Exception) {
             // Entrega falhou — item permanece na fila (já persistido no disco)
-            Log.w(TAG, "publishTripCompleted falhou — permanece na fila para retry: ${e.message}")
+            AppLogger.e(TAG, "publishTripCompleted FALHOU — permanece na fila: ${e.message}")
+        }
+    }
+
+    /**
+     * Publica o histórico completo de trips diretamente no tópico retido.
+     * O app é a fonte de verdade — não depende de automação HA para acumulação.
+     */
+    fun publishTripHistory(entries: List<TripHistoryEntry>) {
+        val c = client
+        if (c == null || !c.isConnected) {
+            Log.d(TAG, "publishTripHistory: offline, ignorado")
+            return
+        }
+        executor.submit { publishTripHistoryInternal(c, entries) }
+    }
+
+    private fun publishTripHistoryInternal(c: MqttClient, entries: List<TripHistoryEntry>) {
+        try {
+            val fmt = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.getDefault())
+            fun f1(v: Float) = String.format(java.util.Locale.US, "%.1f", v)
+            fun f2(v: Float) = String.format(java.util.Locale.US, "%.2f", v)
+
+            val tripsJson = entries.joinToString(",") { e ->
+                val ts = fmt.format(Date(e.timestampMs))
+                val safeName = e.name.replace("\"", "'")
+                """{"name":"$safeName","label":"${e.label}","timestamp":"$ts","distance_km":${f2(e.distKm)},"time_sec":${e.timeSec},"fuel_l":${f2(e.fuelL)},"energy_kwh":${f2(e.energyKwh)},"regen_kwh":${f2(e.regenKwh)},"net_kwh":${f2(e.netKwh)},"kwh_per_100km":${f2(e.kwhPer100km)},"km_per_l":${f2(e.kmPerL)},"combined_km_l":${f2(e.combinedKmL)},"avg_speed_kmh":${f1(e.avgSpeedKmh)},"soc_start":${f1(e.startSocPct)},"soc_end":${f1(e.endSocPct)},"tank_start_l":${f1(e.startTankL)},"tank_end_l":${f1(e.endTankL)}}"""
+            }
+            val payload = """{"count":${entries.size},"trips":[$tripsJson]}"""
+            c.publish("$prefix/trips/history", payload.toByteArray(), 1, true)
+            AppLogger.i(TAG, "Trip history publicado direto: ${entries.size} entradas")
+        } catch (e: Exception) {
+            AppLogger.e(TAG, "publishTripHistory falhou: ${e.message}")
         }
     }
 

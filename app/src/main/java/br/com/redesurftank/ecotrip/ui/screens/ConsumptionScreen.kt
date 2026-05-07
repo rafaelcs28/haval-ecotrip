@@ -426,6 +426,7 @@ fun ConsumptionScreen() {
                 onReset  = { name ->
                     mqttManager.publishTripCompleted("trip_a", snapA, name)
                     tripManager.resetTrip(TripId.A, name)
+                    mqttManager.publishTripHistory(tripManager.getHistory())
                 },
                 modifier = Modifier.weight(1f).fillMaxHeight(),
             )
@@ -435,6 +436,7 @@ fun ConsumptionScreen() {
                 onReset  = { name ->
                     mqttManager.publishTripCompleted("trip_b", snapB, name)
                     tripManager.resetTrip(TripId.B, name)
+                    mqttManager.publishTripHistory(tripManager.getHistory())
                 },
                 modifier = Modifier.weight(1f).fillMaxHeight(),
             )
