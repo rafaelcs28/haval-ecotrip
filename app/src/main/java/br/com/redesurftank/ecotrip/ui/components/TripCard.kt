@@ -1,5 +1,6 @@
 package br.com.redesurftank.ecotrip.ui.components
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
@@ -19,8 +20,11 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
@@ -110,7 +114,8 @@ fun TripCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
             // ── Energia ───────────────────────────────────────────────────────
             Column(
@@ -118,12 +123,22 @@ fun TripCard(
                 verticalArrangement = Arrangement.spacedBy(3.dp),
             ) {
                 TColTitle("⚡ Energia")
-                TMetric("Bruto",       "%.2f kWh".format(snapshot.energyKwh),  TextPrimary)
-                TMetric("Regen",       "%.2f kWh".format(snapshot.regenKwh),    NeonLime)
-                TMetric("Líquido",     "%.2f kWh".format(snapshot.netKwh),      WarnYellow)
+                TMetric("Bruto",   "%.2f kWh".format(snapshot.energyKwh), TextPrimary)
+                TMetric("Regen",   "%.2f kWh".format(snapshot.regenKwh),   NeonLime)
+                TMetric("Líquido", "%.2f kWh".format(snapshot.netKwh),     WarnYellow)
                 if (snapshot.startSocPct > 0f || snapshot.currentSocPct > 0f)
                     TMetric("SOC", "%.0f%% → %.0f%%".format(snapshot.startSocPct, snapshot.currentSocPct), TextPrimary)
-                TMetric("Ef. elét.", "%.2f kWh/100km".format(snapshot.kwhPer100km), AuroraTeal)
+            }
+
+            // ── Gauge kWh/100km ───────────────────────────────────────────────
+            Box(modifier = Modifier.weight(1.2f), contentAlignment = Alignment.Center) {
+                TripGauge(
+                    value    = snapshot.kwhPer100km,
+                    maxValue = 40f,
+                    label    = "kWh/100km",
+                    color    = accentColor,
+                    modifier = Modifier.size(118.dp),
+                )
             }
 
             // ── Combustível ───────────────────────────────────────────────────
@@ -132,8 +147,8 @@ fun TripCard(
                 verticalArrangement = Arrangement.spacedBy(3.dp),
             ) {
                 TColTitle("⛽ Combustível")
-                TMetric("km/L",   "%.2f".format(snapshot.kmPerL),             MoltenOrange)
-                TMetric("Gastos", "%.2f L".format(snapshot.fuelL),             TextPrimary)
+                TMetric("km/L",   "%.2f".format(snapshot.kmPerL),   MoltenOrange)
+                TMetric("Gastos", "%.2f L".format(snapshot.fuelL),   TextPrimary)
                 if (snapshot.startTankL > 0f || snapshot.currentTankL > 0f)
                     TMetric("Tanque", "%.1fL→%.1fL".format(snapshot.startTankL, snapshot.currentTankL), TextPrimary)
                 if (snapshot.combinedKmL > 0f)
@@ -276,6 +291,102 @@ private fun LegendDot(color: Color, label: String, fontSize: TextUnit = 12.sp) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         Box(Modifier.size(8.dp).background(color, RoundedCornerShape(2.dp)))
         Text(label, fontSize = fontSize, color = TextSecondary)
+    }
+}
+
+@Composable
+private fun TripGauge(
+    value: Float,
+    maxValue: Float,
+    label: String,
+    color: Color,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier,
+        contentAlignment = Alignment.Center,
+    ) {
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val strokePx   = 8.dp.toPx()
+            val inset      = strokePx * 3.2f / 2f
+            val arcSize    = Size(size.width - inset * 2f, size.height - inset * 2f)
+            val arcOffset  = Offset(inset, inset)
+            val startAngle = 135f
+            val totalSweep = 270f
+            val fraction   = (value / maxValue).coerceIn(0f, 1f)
+
+            // Track
+            drawArc(
+                color      = Color.White.copy(alpha = 0.08f),
+                startAngle = startAngle,
+                sweepAngle = totalSweep,
+                useCenter  = false,
+                topLeft    = arcOffset,
+                size       = arcSize,
+                style      = Stroke(width = strokePx, cap = StrokeCap.Round),
+            )
+
+            if (fraction > 0f) {
+                val sweep = totalSweep * fraction
+                // Halo difuso
+                drawArc(
+                    color      = color.copy(alpha = 0.07f),
+                    startAngle = startAngle,
+                    sweepAngle = sweep,
+                    useCenter  = false,
+                    topLeft    = arcOffset,
+                    size       = arcSize,
+                    style      = Stroke(width = strokePx * 3.2f, cap = StrokeCap.Round),
+                )
+                // Glow médio
+                drawArc(
+                    color      = color.copy(alpha = 0.20f),
+                    startAngle = startAngle,
+                    sweepAngle = sweep,
+                    useCenter  = false,
+                    topLeft    = arcOffset,
+                    size       = arcSize,
+                    style      = Stroke(width = strokePx * 1.8f, cap = StrokeCap.Round),
+                )
+                // Arco nítido
+                drawArc(
+                    color      = color,
+                    startAngle = startAngle,
+                    sweepAngle = sweep,
+                    useCenter  = false,
+                    topLeft    = arcOffset,
+                    size       = arcSize,
+                    style      = Stroke(width = strokePx, cap = StrokeCap.Round),
+                )
+            }
+        }
+
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Text(
+                text       = String.format(java.util.Locale.US, "%.1f", value),
+                fontSize   = 26.sp,
+                fontWeight = FontWeight.ExtraBold,
+                color      = color,
+                maxLines   = 1,
+                style      = TextStyle(
+                    shadow = Shadow(
+                        color      = color.copy(alpha = 0.5f),
+                        offset     = Offset.Zero,
+                        blurRadius = 16f,
+                    )
+                ),
+            )
+            Text(
+                text      = label,
+                fontSize  = 11.sp,
+                color     = TextSecondary,
+                maxLines  = 1,
+                textAlign = TextAlign.Center,
+            )
+        }
     }
 }
 

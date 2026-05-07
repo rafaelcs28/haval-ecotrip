@@ -402,11 +402,21 @@ class MqttManager private constructor() {
         try {
             val fmt = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.getDefault())
             val safeName = q.name.trim().replace("\"", "'")
+            val tripLabel = if (q.tripId == "trip_a") "Trip A" else "Trip B"
             fun f2(v: Float) = String.format(java.util.Locale.US, "%.2f", v)
             fun f3(v: Float) = String.format(java.util.Locale.US, "%.3f", v)
             fun f1(v: Float) = String.format(java.util.Locale.US, "%.1f", v)
-            val payload = """{"name":"$safeName","timestamp":"${fmt.format(Date(q.timestampMs))}","distance_km":${f2(q.snap.distKm)},"time_sec":${q.snap.timeSec},"fuel_l":${f3(q.snap.fuelL)},"energy_kwh":${f3(q.snap.energyKwh)},"regen_kwh":${f3(q.snap.regenKwh)},"net_kwh":${f3(q.snap.netKwh)},"kwh_per_100km":${f2(q.snap.kwhPer100km)},"km_per_l":${f2(q.snap.kmPerL)},"avg_speed_kmh":${f1(q.snap.avgSpeedKmh)},"soc_start":${f1(q.snap.startSocPct)},"soc_end":${f1(q.snap.currentSocPct)},"tank_start_l":${f1(q.snap.startTankL)},"tank_end_l":${f1(q.snap.currentTankL)}}"""
-            c.publish("$prefix/${q.tripId}/last_completed", payload.toByteArray(), 1, true)
+            val ts = fmt.format(Date(q.timestampMs))
+
+            // 1. last_completed retido — HA sensor "Última Viagem" (como antes)
+            val completedPayload = """{"name":"$safeName","timestamp":"$ts","distance_km":${f2(q.snap.distKm)},"time_sec":${q.snap.timeSec},"fuel_l":${f3(q.snap.fuelL)},"energy_kwh":${f3(q.snap.energyKwh)},"regen_kwh":${f3(q.snap.regenKwh)},"net_kwh":${f3(q.snap.netKwh)},"kwh_per_100km":${f2(q.snap.kwhPer100km)},"km_per_l":${f2(q.snap.kmPerL)},"avg_speed_kmh":${f1(q.snap.avgSpeedKmh)},"soc_start":${f1(q.snap.startSocPct)},"soc_end":${f1(q.snap.currentSocPct)},"tank_start_l":${f1(q.snap.startTankL)},"tank_end_l":${f1(q.snap.currentTankL)}}"""
+            c.publish("$prefix/${q.tripId}/last_completed", completedPayload.toByteArray(), 1, true)
+
+            // 2. new_trip NÃO retido — HA automation adiciona à lista permanente.
+            //    O HA é a fonte de verdade do histórico; apagar no app não apaga no HA.
+            val newTripPayload = """{"name":"$safeName","label":"$tripLabel","timestamp":"$ts","distance_km":${f2(q.snap.distKm)},"time_sec":${q.snap.timeSec},"fuel_l":${f2(q.snap.fuelL)},"energy_kwh":${f2(q.snap.energyKwh)},"regen_kwh":${f2(q.snap.regenKwh)},"net_kwh":${f2(q.snap.netKwh)},"kwh_per_100km":${f2(q.snap.kwhPer100km)},"km_per_l":${f2(q.snap.kmPerL)},"combined_km_l":${f2(q.snap.combinedKmL)},"soc_start":${f1(q.snap.startSocPct)},"soc_end":${f1(q.snap.currentSocPct)},"tank_start_l":${f1(q.snap.startTankL)},"tank_end_l":${f1(q.snap.currentTankL)}}"""
+            c.publish("$prefix/trips/new_trip", newTripPayload.toByteArray(), 1, false)
+
             lastSuccessfulPublishMs = System.currentTimeMillis()
             onStatusChange?.invoke(status)
             Log.i(TAG, "Trip completed published: ${q.tripId} name='${q.name}' dist=${q.snap.distKm}km")
@@ -502,6 +512,10 @@ class MqttManager private constructor() {
         // Sensor: última atualização de dados (timestamp ISO)
         val lastUpdatePayload = """{"name":"Última Atualização","state_topic":"$prefix/last_update","device_class":"timestamp","unique_id":"haval_ecotrip_last_update","icon":"mdi:clock-check-outline","device":$device}"""
         try { c.publish("homeassistant/sensor/haval_ecotrip_last_update/config", lastUpdatePayload.toByteArray(), 1, true) } catch (_: Exception) {}
+
+        // Sensor: histórico completo de trips (JSON array como atributo)
+        val historyPayload = """{"name":"Histórico de Trips","state_topic":"$prefix/trips/history","value_template":"{{ value_json.count }}","json_attributes_topic":"$prefix/trips/history","unit_of_measurement":"viagens","state_class":"measurement","unique_id":"haval_ecotrip_trips_history","icon":"mdi:history","device":$device}"""
+        try { c.publish("homeassistant/sensor/haval_ecotrip_trips_history/config", historyPayload.toByteArray(), 1, true) } catch (_: Exception) {}
 
         // NOTA: o select "Limite de Carga SOC" (haval_ecotrip_charge_limit) é publicado
         // exclusivamente pelo haval-ecotrip-commander, que também gerencia o wake-up do carro

@@ -53,6 +53,11 @@ data class TripHistoryEntry(
     val regenKwh: Float,
     val distKm: Float,
     val timeSec: Long,
+    val startSocPct: Float = 0f,
+    val endSocPct: Float = 0f,
+    val startTankL: Float = 0f,
+    val endTankL: Float = 0f,
+    val combinedKmL: Float = 0f,
 ) {
     val netKwh: Float get() = energyKwh - regenKwh
     val kmPerL: Float get() = if (fuelL > 0.001f) distKm / fuelL else 0f
@@ -107,6 +112,11 @@ private class TripAccum {
     var sessDistReady: Boolean = false
     // raw chart samples: (kmStep, netKwh, fuelL)
     val rawSamples: MutableList<Triple<Float, Float, Float>> = mutableListOf()
+    // Per-tick energy baselines used ONLY by the block chart.
+    // Unlike sessStartEnergy/Regen these are NOT reset by checkpointSession(),
+    // so each sample stores the incremental kWh since the previous odometer tick.
+    var blockPrevEnergy: Float = 0f
+    var blockPrevRegen:  Float = 0f
     // SOC and fuel % bookmarks — captured independently so whichever arrives first
     // doesn't block the other from being correctly recorded.
     var startSocPct:       Float   = 0f
@@ -126,8 +136,8 @@ class TripManager private constructor() {
             instance ?: TripManager().also { instance = it }
         }
 
-        private const val CHART_BLOCKS      = 10
-        private const val CHART_BLOCK_KM    = 5f
+        private const val CHART_BLOCKS      = 50
+        private const val CHART_BLOCK_KM    = 1f
         private const val CHART_WINDOW_KM   = CHART_BLOCK_KM * CHART_BLOCKS  // 50km
         private const val DEFAULT_TANK_L    = 51f
         private const val FUEL_PCT_THRESHOLD = 1f
@@ -289,6 +299,9 @@ class TripManager private constructor() {
                     trip.hwEnergy        = curEnergy
                     trip.hwRegen         = curRegen
                 }
+                // Block chart baselines always start from current reading (crash or clean).
+                trip.blockPrevEnergy = curEnergy
+                trip.blockPrevRegen  = curRegen
             }
 
             // Mark session as NOT cleanly ended.  If we crash during this session, the next
@@ -438,6 +451,11 @@ class TripManager private constructor() {
                     regenKwh    = snap.regenKwh,
                     distKm      = snap.distKm,
                     timeSec     = snap.timeSec,
+                    startSocPct = snap.startSocPct,
+                    endSocPct   = snap.currentSocPct,
+                    startTankL  = snap.startTankL,
+                    endTankL    = snap.currentTankL,
+                    combinedKmL = snap.combinedKmL,
                 )
                 tripHistory.add(0, entry)
                 while (tripHistory.size > maxHistoryEntries) tripHistory.removeAt(tripHistory.lastIndex)
@@ -471,6 +489,8 @@ class TripManager private constructor() {
             trip.startSocCaptured  = latestSocPct  > 0f
             trip.startFuelCaptured = latestFuelPct > 0f
 
+            trip.blockPrevEnergy = curEnergy
+            trip.blockPrevRegen  = curRegen
             trip.rawSamples.clear()
             saveToPrefs()
             notifyListeners()
@@ -628,9 +648,14 @@ class TripManager private constructor() {
             prevRollingRegen  = curRegen
             for (trip in listOf(tripA, tripB)) {
                 if (!trip.sessDistReady) {
-                    trip.sessStartDist = value
-                    trip.hwDist        = value
-                    trip.sessDistReady = true
+                    trip.sessStartDist   = value
+                    trip.hwDist          = value
+                    trip.sessDistReady   = true
+                    // Re-anchor block baselines at the first real odometer reading
+                    // so chart deltas start cleanly from here (not from session-start
+                    // when the car may not have sent energy data yet).
+                    trip.blockPrevEnergy = curEnergy
+                    trip.blockPrevRegen  = curRegen
                 }
             }
             return
@@ -677,10 +702,14 @@ class TripManager private constructor() {
     private fun updateBlocks(trip: TripAccum, newDist: Float, prevDist: Float, fuelL: Float) {
         val kmStep = max(0f, newDist - prevDist)
         if (kmStep <= 0f) return
-        val accNet  = trip.rawSamples.sumOf { it.second.toDouble() }.toFloat()
-        val dEnergy = max(0f, curEnergy - trip.sessStartEnergy)
-        val dRegen  = max(0f, curRegen  - trip.sessStartRegen)
-        val dNet    = max(0f, (dEnergy - dRegen) - accNet)
+        // Incremental energy for this single odometer tick.
+        // blockPrevEnergy/Regen advance every tick and are NOT reset by checkpointSession(),
+        // so each sample holds the real delta for that ~1km segment.
+        val dEnergy = max(0f, curEnergy - trip.blockPrevEnergy)
+        val dRegen  = max(0f, curRegen  - trip.blockPrevRegen)
+        val dNet    = max(0f, dEnergy - dRegen)
+        trip.blockPrevEnergy = curEnergy
+        trip.blockPrevRegen  = curRegen
         trip.rawSamples.add(Triple(kmStep, dNet, fuelL))
     }
 

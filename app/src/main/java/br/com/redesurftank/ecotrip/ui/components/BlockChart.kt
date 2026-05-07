@@ -46,9 +46,9 @@ fun BlockChart(
         val chartW = size.width  - paddingLeft - paddingRight
         val chartH = size.height - paddingTop  - paddingBottom
 
-        val slotCount = blocks.size  // always 10
+        val slotCount = blocks.size  // up to 50 (1 km each)
         val slotW     = chartW / slotCount
-        val barGap    = (slotW * 0.12f).coerceAtLeast(1.5.dp.toPx())
+        val barGap    = (slotW * 0.10f).coerceAtLeast(0.5.dp.toPx())
         val barBodyW  = slotW - barGap
 
         val maxEff  = blocks.maxOf { it.netKwhPer100km }.takeIf { it > 0f } ?: 1f
@@ -79,7 +79,7 @@ fun BlockChart(
                     ),
                     topLeft      = Offset(x, y),
                     size         = Size(barBodyW, barH),
-                    cornerRadius = CornerRadius(3.dp.toPx()),
+                    cornerRadius = CornerRadius(1.dp.toPx()),
                 )
             }
         }
@@ -98,16 +98,16 @@ fun BlockChart(
             fuelPoints.forEachIndexed { i, pt ->
                 if (i == 0) path.moveTo(pt.x, pt.y) else path.lineTo(pt.x, pt.y)
             }
-            drawPath(path, PlasmaBlue, style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round))
+            drawPath(path, PlasmaBlue, style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round))
+            // Small dots only at every 10th point to avoid clutter with 50 slots
+            fuelPoints.forEachIndexed { i, pt ->
+                if (i % 10 == 0) drawCircle(PlasmaBlue, radius = 2.5.dp.toPx(), center = pt)
+            }
         }
 
-        fuelPoints.forEach { pt ->
-            drawCircle(PlasmaBlue, radius = 3.5.dp.toPx(), center = pt)
-        }
-
-        // X axis labels every 2 slots
+        // X axis labels every 10 slots (= 10 km)
         blocks.forEachIndexed { i, block ->
-            if (i % 2 == 0) {
+            if (i % 10 == 0) {
                 val cx     = paddingLeft + i * slotW + slotW / 2f
                 val label  = "${block.kmStart.toInt()}km"
                 val layout = measurer.measure(
