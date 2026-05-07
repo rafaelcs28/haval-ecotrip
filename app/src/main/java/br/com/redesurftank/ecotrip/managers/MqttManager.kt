@@ -271,12 +271,14 @@ class MqttManager private constructor() {
         // Só é removido do disco após confirmação de entrega (PUBACK) pelo broker.
         synchronized(tripCompletedLock) { tripCompletedQueue.addLast(queued) }
         savePendingTrips()
+        val queueSize = synchronized(tripCompletedLock) { tripCompletedQueue.size }
+        AppLogger.i(TAG, "Trip gravado no disco (fila=$queueSize): $tripId")
         val c = client
         if (c == null || !c.isConnected) {
-            AppLogger.i(TAG, "Offline — trip persistido: $tripId (fila=${tripCompletedQueue.size})")
+            AppLogger.w(TAG, "Offline — trip aguardando reconexão: $tripId (fila=$queueSize)")
             return
         }
-        AppLogger.i(TAG, "Submetendo trip ao executor: $tripId")
+        AppLogger.i(TAG, "Enviando ao broker MQTT: $tripId")
         executor.submit { publishTripCompletedInternal(c, queued) }
     }
 
@@ -321,9 +323,9 @@ class MqttManager private constructor() {
                 tripCompletedQueue.clear()
                 tripCompletedQueue.addAll(loaded)
             }
-            Log.i(TAG, "Carregados ${loaded.size} trip(s) pendentes do disco")
+            AppLogger.i(TAG, "Trips pendentes restaurados do disco: ${loaded.size}")
         } catch (e: Exception) {
-            Log.w(TAG, "Falha ao carregar trips pendentes: ${e.message}")
+            AppLogger.w(TAG, "Falha ao carregar trips pendentes do disco: ${e.message}")
         }
     }
 
@@ -407,9 +409,12 @@ class MqttManager private constructor() {
         // Publica histórico completo como retained após reconexão
         try {
             val history = TripManager.getInstance().getHistory()
-            if (history.isNotEmpty()) publishTripHistoryInternal(c, history)
+            if (history.isNotEmpty()) {
+                AppLogger.i(TAG, "Republicando histórico após reconexão: ${history.size} entrada(s)")
+                publishTripHistoryInternal(c, history)
+            }
         } catch (e: Exception) {
-            Log.w(TAG, "drainQueues: falha ao publicar histórico: ${e.message}")
+            AppLogger.w(TAG, "drainQueues: falha ao publicar histórico: ${e.message}")
         }
 
         // Then regular snapshots
@@ -487,20 +492,25 @@ class MqttManager private constructor() {
     private fun publishTripCompletedInternal(c: MqttClient, q: QueuedTripCompleted) {
         try {
             // QoS 1 — Paho bloqueia até receber PUBACK do broker (confirmação de entrega)
+            AppLogger.i(TAG, "→ [1/2] Publicando last_completed (QoS 1, retained): ${q.lastCompletedTopic}")
             c.publish(q.lastCompletedTopic, q.lastCompletedPayload.toByteArray(), 1, true)
-            c.publish("$prefix/trips/new_trip", q.newTripPayload.toByteArray(), 1, false)
+            AppLogger.i(TAG, "→ [1/2] PUBACK recebido ✓")
 
-            // PUBACK recebido — entrega confirmada. Remove da fila e atualiza disco.
+            AppLogger.i(TAG, "→ [2/2] Publicando new_trip (QoS 1): $prefix/trips/new_trip")
+            c.publish("$prefix/trips/new_trip", q.newTripPayload.toByteArray(), 1, false)
+            AppLogger.i(TAG, "→ [2/2] PUBACK recebido ✓")
+
+            // Ambos confirmados — remove da fila e atualiza disco
             synchronized(tripCompletedLock) { tripCompletedQueue.remove(q) }
             val remaining = synchronized(tripCompletedLock) { tripCompletedQueue.size }
             if (remaining == 0) clearPendingTrips() else savePendingTrips()
 
             lastSuccessfulPublishMs = System.currentTimeMillis()
             onStatusChange?.invoke(status)
-            AppLogger.i(TAG, "Trip enviado e confirmado (PUBACK): ${q.lastCompletedTopic}")
+            AppLogger.i(TAG, "✓ Trip entregue e confirmado: ${q.lastCompletedTopic} (fila restante=$remaining)")
         } catch (e: Exception) {
             // Entrega falhou — item permanece na fila (já persistido no disco)
-            AppLogger.e(TAG, "publishTripCompleted FALHOU — permanece na fila: ${e.message}")
+            AppLogger.e(TAG, "✗ Trip FALHOU — permanece na fila: ${e::class.simpleName}: ${e.message}")
         }
     }
 
@@ -511,9 +521,10 @@ class MqttManager private constructor() {
     fun publishTripHistory(entries: List<TripHistoryEntry>) {
         val c = client
         if (c == null || !c.isConnected) {
-            Log.d(TAG, "publishTripHistory: offline, ignorado")
+            AppLogger.w(TAG, "publishTripHistory: offline, histórico não publicado agora")
             return
         }
+        AppLogger.i(TAG, "Enviando histórico ao broker: ${entries.size} entrada(s)")
         executor.submit { publishTripHistoryInternal(c, entries) }
     }
 
@@ -529,10 +540,11 @@ class MqttManager private constructor() {
                 """{"name":$safeName,"label":"${e.label}","timestamp":"$ts","distance_km":${f2(e.distKm)},"time_sec":${e.timeSec},"fuel_l":${f2(e.fuelL)},"energy_kwh":${f2(e.energyKwh)},"regen_kwh":${f2(e.regenKwh)},"net_kwh":${f2(e.netKwh)},"kwh_per_100km":${f2(e.kwhPer100km)},"km_per_l":${f2(e.kmPerL)},"combined_km_l":${f2(e.combinedKmL)},"avg_speed_kmh":${f1(e.avgSpeedKmh)},"soc_start":${f1(e.startSocPct)},"soc_end":${f1(e.endSocPct)},"tank_start_l":${f1(e.startTankL)},"tank_end_l":${f1(e.endTankL)}}"""
             }
             val payload = """{"count":${entries.size},"trips":[$tripsJson]}"""
+            AppLogger.i(TAG, "→ Publicando histórico (QoS 1, retained): $prefix/trips/history")
             c.publish("$prefix/trips/history", payload.toByteArray(), 1, true)
-            AppLogger.i(TAG, "Trip history publicado direto: ${entries.size} entradas")
+            AppLogger.i(TAG, "✓ Histórico publicado: ${entries.size} entrada(s)")
         } catch (e: Exception) {
-            AppLogger.e(TAG, "publishTripHistory falhou: ${e.message}")
+            AppLogger.e(TAG, "✗ Histórico FALHOU: ${e::class.simpleName}: ${e.message}")
         }
     }
 
