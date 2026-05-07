@@ -55,7 +55,7 @@ class MqttManager private constructor() {
     private var appContext: Context? = null
     private val executor       = Executors.newSingleThreadExecutor()
     private val isReconnecting = AtomicBoolean(false)
-    private var client: MqttClient? = null
+    @Volatile private var client: MqttClient? = null
     private var lastPublishMs  = 0L
     private val gson = Gson()
 
@@ -260,6 +260,10 @@ class MqttManager private constructor() {
     }
 
     fun publishTripCompleted(tripId: String, snap: TripSnapshot, name: String = "") {
+        if (snap.distKm < 0.5f) {
+            AppLogger.i(TAG, "publishTripCompleted: $tripId ignorado (dist=${snap.distKm}km < 0.5km mínimo)")
+            return
+        }
         val connected = client?.isConnected == true
         AppLogger.i(TAG, "publishTripCompleted: $tripId dist=${String.format(java.util.Locale.US, "%.2f", snap.distKm)}km fuel=${String.format(java.util.Locale.US, "%.3f", snap.fuelL)}L connected=$connected")
         val queued = buildTripPayload(tripId, snap, name)
@@ -280,14 +284,14 @@ class MqttManager private constructor() {
     private fun buildTripPayload(tripId: String, snap: TripSnapshot, name: String): QueuedTripCompleted {
         val fmt = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.getDefault())
         val ts = fmt.format(Date(System.currentTimeMillis()))
-        val safeName  = name.trim().replace("\"", "'")
+        val safeName  = gson.toJson(name.trim())   // JSON-quoted & escaped string (inclui as aspas)
         val tripLabel = if (tripId == "trip_a") "Trip A" else "Trip B"
         fun f1(v: Float) = String.format(java.util.Locale.US, "%.1f", v)
         fun f2(v: Float) = String.format(java.util.Locale.US, "%.2f", v)
         fun f3(v: Float) = String.format(java.util.Locale.US, "%.3f", v)
 
-        val completedPayload = """{"name":"$safeName","timestamp":"$ts","distance_km":${f2(snap.distKm)},"time_sec":${snap.timeSec},"fuel_l":${f3(snap.fuelL)},"energy_kwh":${f3(snap.energyKwh)},"regen_kwh":${f3(snap.regenKwh)},"net_kwh":${f3(snap.netKwh)},"kwh_per_100km":${f2(snap.kwhPer100km)},"km_per_l":${f2(snap.kmPerL)},"avg_speed_kmh":${f1(snap.avgSpeedKmh)},"soc_start":${f1(snap.startSocPct)},"soc_end":${f1(snap.currentSocPct)},"tank_start_l":${f1(snap.startTankL)},"tank_end_l":${f1(snap.currentTankL)}}"""
-        val newTripPayload   = """{"name":"$safeName","label":"$tripLabel","timestamp":"$ts","distance_km":${f2(snap.distKm)},"time_sec":${snap.timeSec},"fuel_l":${f2(snap.fuelL)},"energy_kwh":${f2(snap.energyKwh)},"regen_kwh":${f2(snap.regenKwh)},"net_kwh":${f2(snap.netKwh)},"kwh_per_100km":${f2(snap.kwhPer100km)},"km_per_l":${f2(snap.kmPerL)},"combined_km_l":${f2(snap.combinedKmL)},"soc_start":${f1(snap.startSocPct)},"soc_end":${f1(snap.currentSocPct)},"tank_start_l":${f1(snap.startTankL)},"tank_end_l":${f1(snap.currentTankL)}}"""
+        val completedPayload = """{"name":$safeName,"timestamp":"$ts","distance_km":${f2(snap.distKm)},"time_sec":${snap.timeSec},"fuel_l":${f3(snap.fuelL)},"energy_kwh":${f3(snap.energyKwh)},"regen_kwh":${f3(snap.regenKwh)},"net_kwh":${f3(snap.netKwh)},"kwh_per_100km":${f2(snap.kwhPer100km)},"km_per_l":${f2(snap.kmPerL)},"avg_speed_kmh":${f1(snap.avgSpeedKmh)},"soc_start":${f1(snap.startSocPct)},"soc_end":${f1(snap.currentSocPct)},"tank_start_l":${f1(snap.startTankL)},"tank_end_l":${f1(snap.currentTankL)}}"""
+        val newTripPayload   = """{"name":$safeName,"label":"$tripLabel","timestamp":"$ts","distance_km":${f2(snap.distKm)},"time_sec":${snap.timeSec},"fuel_l":${f2(snap.fuelL)},"energy_kwh":${f2(snap.energyKwh)},"regen_kwh":${f2(snap.regenKwh)},"net_kwh":${f2(snap.netKwh)},"kwh_per_100km":${f2(snap.kwhPer100km)},"km_per_l":${f2(snap.kmPerL)},"combined_km_l":${f2(snap.combinedKmL)},"soc_start":${f1(snap.startSocPct)},"soc_end":${f1(snap.currentSocPct)},"tank_start_l":${f1(snap.startTankL)},"tank_end_l":${f1(snap.currentTankL)}}"""
 
         return QueuedTripCompleted(
             lastCompletedTopic   = "$prefix/$tripId/last_completed",
@@ -521,8 +525,8 @@ class MqttManager private constructor() {
 
             val tripsJson = entries.joinToString(",") { e ->
                 val ts = fmt.format(Date(e.timestampMs))
-                val safeName = e.name.replace("\"", "'")
-                """{"name":"$safeName","label":"${e.label}","timestamp":"$ts","distance_km":${f2(e.distKm)},"time_sec":${e.timeSec},"fuel_l":${f2(e.fuelL)},"energy_kwh":${f2(e.energyKwh)},"regen_kwh":${f2(e.regenKwh)},"net_kwh":${f2(e.netKwh)},"kwh_per_100km":${f2(e.kwhPer100km)},"km_per_l":${f2(e.kmPerL)},"combined_km_l":${f2(e.combinedKmL)},"avg_speed_kmh":${f1(e.avgSpeedKmh)},"soc_start":${f1(e.startSocPct)},"soc_end":${f1(e.endSocPct)},"tank_start_l":${f1(e.startTankL)},"tank_end_l":${f1(e.endTankL)}}"""
+                val safeName = gson.toJson(e.name)   // JSON-quoted & escaped
+                """{"name":$safeName,"label":"${e.label}","timestamp":"$ts","distance_km":${f2(e.distKm)},"time_sec":${e.timeSec},"fuel_l":${f2(e.fuelL)},"energy_kwh":${f2(e.energyKwh)},"regen_kwh":${f2(e.regenKwh)},"net_kwh":${f2(e.netKwh)},"kwh_per_100km":${f2(e.kwhPer100km)},"km_per_l":${f2(e.kmPerL)},"combined_km_l":${f2(e.combinedKmL)},"avg_speed_kmh":${f1(e.avgSpeedKmh)},"soc_start":${f1(e.startSocPct)},"soc_end":${f1(e.endSocPct)},"tank_start_l":${f1(e.startTankL)},"tank_end_l":${f1(e.endTankL)}}"""
             }
             val payload = """{"count":${entries.size},"trips":[$tripsJson]}"""
             c.publish("$prefix/trips/history", payload.toByteArray(), 1, true)
