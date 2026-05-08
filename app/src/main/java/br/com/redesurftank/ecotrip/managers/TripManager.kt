@@ -88,6 +88,16 @@ data class RollingSnapshot(
     }
 }
 
+data class ChargeHistoryEntry(
+    val timestampMs:  Long,
+    val durationSec:  Long,
+    val energyKwh:    Float,
+    val startSocPct:  Float,
+    val endSocPct:    Float,
+) {
+    val avgPowerKw: Float get() = if (durationSec > 0) energyKwh / (durationSec / 3600f) else 0f
+}
+
 data class LifetimeSnapshot(
     val energyKwh: Float,
     val regenKwh:  Float,
@@ -181,6 +191,12 @@ class TripManager private constructor() {
     private var isChargingNow:        Boolean = false
     private var chargeTickCount:      Int     = 0
     private var lastChargeTickMs:     Long    = 0L   // wall clock do último tick de carga
+    // Sessão de recarga em andamento
+    private var chargeSessionStartMs:   Long  = 0L
+    private var chargeSessionStartSoc:  Float = 0f
+    private var chargeSessionEnergyKwh: Float = 0f
+    private var chargeSessionSec:       Long  = 0L
+    private val chargeHistory = mutableListOf<ChargeHistoryEntry>()
 
     // Rolling window "desde última partida"
     private var rollingAccFuel   = 0f
@@ -241,11 +257,42 @@ class TripManager private constructor() {
             val wasCharging = isChargingNow
             isChargingNow        = isCharging
             currentChargePowerKw = if (isCharging) maxOf(0f, powerKw) else 0f
-            if (!isCharging && wasCharging) {
-                // Fim de recarga — persiste imediatamente (não espera próximo tick)
+
+            if (isCharging && !wasCharging) {
+                // Início de recarga — captura timestamp e SOC inicial
+                chargeSessionStartMs   = System.currentTimeMillis()
+                chargeSessionStartSoc  = latestSocPct
+                chargeSessionEnergyKwh = 0f
+                chargeSessionSec       = 0L
+                AppLogger.i(TAG, "Recarga iniciada — SOC=${latestSocPct}%")
+            } else if (!isCharging && wasCharging) {
+                // Fim de recarga — salva sessão se suficientemente significativa
+                if (chargeSessionSec >= 60L && chargeSessionEnergyKwh >= 0.05f) {
+                    val entry = ChargeHistoryEntry(
+                        timestampMs = System.currentTimeMillis(),
+                        durationSec = chargeSessionSec,
+                        energyKwh   = chargeSessionEnergyKwh,
+                        startSocPct = chargeSessionStartSoc,
+                        endSocPct   = latestSocPct,
+                    )
+                    chargeHistory.add(0, entry)
+                    while (chargeHistory.size > 50) chargeHistory.removeAt(chargeHistory.lastIndex)
+                    saveChargeHistory()
+                    AppLogger.i(TAG, "Recarga concluída — ${chargeSessionEnergyKwh}kWh em ${chargeSessionSec}s SOC ${chargeSessionStartSoc}→${latestSocPct}%")
+                }
+                // Persiste lifetime imediatamente (não espera próximo tick)
                 saveToPrefs()
-                AppLogger.i(TAG, "Recarga concluída — chargeKwh=$lifeChargeKwh chargeSec=$lifeChargeSec")
+                AppLogger.i(TAG, "Estado de recarga off — chargeKwh=$lifeChargeKwh chargeSec=$lifeChargeSec")
             }
+        }
+    }
+
+    fun getChargeHistory(): List<ChargeHistoryEntry> = synchronized(lock) { chargeHistory.toList() }
+
+    fun clearChargeHistory() {
+        synchronized(lock) {
+            chargeHistory.clear()
+            if (::prefs.isInitialized) prefs.edit().remove(SharedPreferencesKeys.CHARGE_HISTORY_JSON).apply()
         }
     }
 
@@ -596,8 +643,11 @@ class TripManager private constructor() {
                 if (lastChargeTickMs > 0L) {
                     // Cap a 60s para não contar intervalos longos (ex: app suspenso)
                     val dtSec = ((now - lastChargeTickMs) / 1000L).coerceIn(1L, 60L)
-                    lifeChargeKwh += currentChargePowerKw * dtSec / 3600f
-                    lifeChargeSec += dtSec
+                    val dKwh  = currentChargePowerKw * dtSec / 3600f
+                    lifeChargeKwh          += dKwh
+                    lifeChargeSec          += dtSec
+                    chargeSessionEnergyKwh += dKwh    // acumula também na sessão corrente
+                    chargeSessionSec       += dtSec
                 }
                 lastChargeTickMs = now
                 chargeTickCount++
@@ -953,6 +1003,16 @@ class TripManager private constructor() {
         lifeChargeKwh = prefs.getFloat(SharedPreferencesKeys.LIFETIME_CHARGE_KWH,  0f)
         lifeChargeSec = prefs.getLong (SharedPreferencesKeys.LIFETIME_CHARGE_SEC,   0L)
 
+        val chargeHistJson = prefs.getString(SharedPreferencesKeys.CHARGE_HISTORY_JSON, null)
+        if (!chargeHistJson.isNullOrEmpty()) {
+            try {
+                val type = object : TypeToken<List<ChargeHistoryEntry>>() {}.type
+                val loaded: List<ChargeHistoryEntry> = gson.fromJson(chargeHistJson, type)
+                chargeHistory.clear()
+                chargeHistory.addAll(loaded)
+            } catch (_: Exception) {}
+        }
+
         rollingAccFuel      = prefs.getFloat(SharedPreferencesKeys.ROLLING_FUEL_L,        0f)
         rollingAccEnergy    = prefs.getFloat(SharedPreferencesKeys.ROLLING_ENERGY_KWH,    0f)
         rollingAccRegen     = prefs.getFloat(SharedPreferencesKeys.ROLLING_REGEN_KWH,     0f)
@@ -1054,5 +1114,12 @@ class TripManager private constructor() {
         prefs.edit()
             .putString(SharedPreferencesKeys.TRIP_HISTORY_JSON, gson.toJson(tripHistory))
             .commit()
+    }
+
+    private fun saveChargeHistory() {
+        if (!::prefs.isInitialized) return
+        prefs.edit()
+            .putString(SharedPreferencesKeys.CHARGE_HISTORY_JSON, gson.toJson(chargeHistory))
+            .apply()
     }
 }

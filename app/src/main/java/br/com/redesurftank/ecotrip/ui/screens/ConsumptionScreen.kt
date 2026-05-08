@@ -10,6 +10,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import kotlinx.coroutines.delay
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.material.icons.filled.BatteryChargingFull
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.BugReport
@@ -30,6 +31,7 @@ import androidx.compose.ui.unit.sp
 import br.com.redesurftank.ecotrip.BuildConfig
 import br.com.redesurftank.ecotrip.managers.CarDataManager
 import br.com.redesurftank.ecotrip.managers.MqttManager
+import br.com.redesurftank.ecotrip.managers.ChargeHistoryEntry
 import br.com.redesurftank.ecotrip.managers.RollingSnapshot
 import br.com.redesurftank.ecotrip.managers.TripHistoryEntry
 import br.com.redesurftank.ecotrip.managers.TripId
@@ -54,7 +56,8 @@ fun ConsumptionScreen() {
     var snapA   by remember { mutableStateOf(TripSnapshot(0f, 0f, 0f, 0f, 0L, emptyList())) }
     var snapB   by remember { mutableStateOf(TripSnapshot(0f, 0f, 0f, 0f, 0L, emptyList())) }
     var rolling by remember { mutableStateOf(RollingSnapshot(0f, 0f, 0f, 0f)) }
-    var history by remember { mutableStateOf<List<TripHistoryEntry>>(emptyList()) }
+    var history       by remember { mutableStateOf<List<TripHistoryEntry>>(emptyList()) }
+    var chargeHistory by remember { mutableStateOf<List<ChargeHistoryEntry>>(emptyList()) }
     var tankCapacity  by remember { mutableStateOf(tripManager.getTankCapacity()) }
     var maxHistory    by remember { mutableStateOf(tripManager.getMaxHistoryEntries()) }
     var priceGasoline by remember { mutableStateOf(tripManager.getPriceGasoline()) }
@@ -94,9 +97,10 @@ fun ConsumptionScreen() {
         }
     }
 
-    var showHistory  by remember { mutableStateOf(false) }
-    var showSettings by remember { mutableStateOf(false) }
-    var showLog      by remember { mutableStateOf(false) }
+    var showHistory       by remember { mutableStateOf(false) }
+    var showChargeHistory by remember { mutableStateOf(false) }
+    var showSettings      by remember { mutableStateOf(false) }
+    var showLog           by remember { mutableStateOf(false) }
 
     DisposableEffect(Unit) {
         val tripListener: (TripSnapshot, TripSnapshot, RollingSnapshot) -> Unit = { a, b, r ->
@@ -231,7 +235,8 @@ fun ConsumptionScreen() {
         carManager.addConnectedListener(connectedListener)
 
         if (carManager.isConnected) connectedListener()
-        history = tripManager.getHistory()
+        history       = tripManager.getHistory()
+        chargeHistory = tripManager.getChargeHistory()
 
         mqttManager.onStatusChange = { s ->
             mainHandler.post {
@@ -289,6 +294,18 @@ fun ConsumptionScreen() {
                 history = emptyList()
             },
             onBack = { showHistory = false },
+        )
+        return
+    }
+
+    if (showChargeHistory) {
+        ChargeHistoryScreen(
+            entries        = chargeHistory,
+            onClearHistory = {
+                tripManager.clearChargeHistory()
+                chargeHistory = emptyList()
+            },
+            onBack = { showChargeHistory = false },
         )
         return
     }
@@ -416,6 +433,9 @@ fun ConsumptionScreen() {
                 }
                 IconButton(onClick = { showLog = true }) {
                     Icon(Icons.Default.BugReport, contentDescription = "Log", tint = TextSecondary)
+                }
+                IconButton(onClick = { showChargeHistory = true }) {
+                    Icon(Icons.Default.BatteryChargingFull, contentDescription = "Recargas", tint = AuroraTeal)
                 }
                 IconButton(onClick = { showHistory = true }) {
                     Icon(Icons.Default.History, contentDescription = "Histórico", tint = TextSecondary)

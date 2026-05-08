@@ -44,6 +44,8 @@ object SharedPreferencesKeys {
     // Trip history (JSON array)
     const val TRIP_HISTORY_JSON      = "trip_history_json"
     const val MAX_HISTORY_ENTRIES    = "max_history_entries"
+    // Charge history (JSON array)
+    const val CHARGE_HISTORY_JSON    = "charge_history_json"
 
     // Chart raw samples (JSON)
     const val TRIP_A_RAW_SAMPLES_JSON = "trip_a_raw_samples_json"
