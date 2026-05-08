@@ -29,6 +29,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import br.com.redesurftank.ecotrip.BuildConfig
+import br.com.redesurftank.ecotrip.managers.BackupManager
 import br.com.redesurftank.ecotrip.managers.CarDataManager
 import br.com.redesurftank.ecotrip.managers.MqttManager
 import br.com.redesurftank.ecotrip.managers.ChargeHistoryEntry
@@ -52,6 +53,7 @@ fun ConsumptionScreen() {
     val carManager  = remember { CarDataManager.getInstance() }
     val mqttManager = remember { MqttManager.getInstance() }
     val updateMgr   = remember { UpdateManager.getInstance() }
+    val backupMgr = remember { BackupManager.getInstance() }
 
     var snapA   by remember { mutableStateOf(TripSnapshot(0f, 0f, 0f, 0f, 0L, emptyList())) }
     var snapB   by remember { mutableStateOf(TripSnapshot(0f, 0f, 0f, 0f, 0L, emptyList())) }
@@ -255,6 +257,7 @@ fun ConsumptionScreen() {
 
     if (showSettings) {
         SettingsScreen(
+            backupManager = backupMgr,
             tankCapacity = tankCapacity,
             onTankChange = { newVal ->
                 tankCapacity = newVal

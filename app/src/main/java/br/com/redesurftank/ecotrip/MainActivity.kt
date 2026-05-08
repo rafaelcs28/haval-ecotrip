@@ -3,6 +3,7 @@ package br.com.redesurftank.ecotrip
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import br.com.redesurftank.ecotrip.managers.BackupManager
 import br.com.redesurftank.ecotrip.managers.CarDataManager
 import br.com.redesurftank.ecotrip.managers.MqttManager
 import br.com.redesurftank.ecotrip.managers.TripManager
@@ -17,6 +18,7 @@ class MainActivity : ComponentActivity() {
         CarDataManager.getInstance().init(this)
         TripManager.getInstance().init(this)
         MqttManager.getInstance().init(this)
+        BackupManager.getInstance().init(this)
 
         setContent {
             EcotripTheme {

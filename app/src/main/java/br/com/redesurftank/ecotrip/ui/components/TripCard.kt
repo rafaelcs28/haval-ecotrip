@@ -124,7 +124,7 @@ fun TripCard(
             ) {
                 TColTitle("⚡ Energia")
                 TMetric("Bruto",   "%.2f kWh".format(snapshot.energyKwh), TextPrimary)
-                TMetric("Regen",   "%.2f kWh".format(snapshot.regenKwh),   NeonLime)
+                TRegenMetric(snapshot.regenKwh, snapshot.energyKwh)
                 TMetric("Líquido", "%.2f kWh".format(snapshot.netKwh),     WarnYellow)
                 if (snapshot.startSocPct > 0f || snapshot.currentSocPct > 0f)
                     TMetric("SOC", "%.0f%% → %.0f%%".format(snapshot.startSocPct, snapshot.currentSocPct), TextPrimary)
@@ -283,6 +283,46 @@ private fun TMetric(
             maxLines   = 1,
             overflow   = TextOverflow.Ellipsis,
         )
+    }
+}
+
+@Composable
+private fun TRegenMetric(regenKwh: Float, energyKwh: Float) {
+    val pct = if (energyKwh <= 0.01f) 0f else (regenKwh / energyKwh * 100f).coerceIn(0f, 100f)
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text     = "Regen",
+            fontSize = 14.sp,
+            color    = TextSecondary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text       = "%.2f kWh".format(regenKwh),
+                fontSize   = 17.sp,
+                fontWeight = FontWeight.Bold,
+                color      = NeonLime,
+                maxLines   = 1,
+                overflow   = TextOverflow.Ellipsis,
+            )
+            if (pct > 0f) {
+                Text(
+                    text     = "(%.0f%%)".format(pct),
+                    fontSize = 12.sp,
+                    color    = NeonLime.copy(alpha = 0.7f),
+                    maxLines = 1,
+                )
+            }
+        }
     }
 }
 

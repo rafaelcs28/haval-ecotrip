@@ -1,5 +1,7 @@
 package br.com.redesurftank.ecotrip.ui.screens
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
@@ -14,14 +16,19 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import br.com.redesurftank.ecotrip.managers.BackupManager
 import br.com.redesurftank.ecotrip.managers.MqttManager
 import br.com.redesurftank.ecotrip.ui.theme.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 fun SettingsScreen(
@@ -34,6 +41,7 @@ fun SettingsScreen(
     onPriceGasolineChange: (Float) -> Unit,
     priceEnergy: Float,
     onPriceEnergyChange: (Float) -> Unit,
+    backupManager: BackupManager,
     onBack: () -> Unit,
 ) {
     var priceGasolineStr by remember { mutableStateOf(String.format(java.util.Locale.US, "%.2f", priceGasoline)) }
@@ -65,6 +73,33 @@ fun SettingsScreen(
     val publishIntervalCellularMs by remember { derivedStateOf { intervalOptions[cellularIntervalIdx] } }
     var mqttStatus       by remember { mutableStateOf(mqttManager.status) }
     var showPass         by remember { mutableStateOf(false) }
+    val context      = LocalContext.current
+    val scope        = rememberCoroutineScope()
+    var backupStatus by remember { mutableStateOf("") }
+    var backupLoading by remember { mutableStateOf(false) }
+    var importUrl    by remember { mutableStateOf("") }
+
+    val importFileLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            backupLoading = true
+            backupStatus  = ""
+            val result = withContext(Dispatchers.IO) {
+                runCatching { backupManager.importBackupFromUri(uri) }
+            }
+            backupLoading = false
+            result.fold(
+                onSuccess = { ts ->
+                    backupStatus = "✓ Backup restaurado (salvo em: $ts). Reiniciando..."
+                    kotlinx.coroutines.delay(1800)
+                    android.os.Process.killProcess(android.os.Process.myPid())
+                },
+                onFailure = { backupStatus = "✗ ${it.message}" },
+            )
+        }
+    }
 
     DisposableEffect(Unit) {
         mqttManager.onStatusChange = { mqttStatus = it }
@@ -282,6 +317,99 @@ fun SettingsScreen(
                 )
             }
         }
+
+        // ── Backup & Restauração ──────────────────────────────────────────────
+        SectionCard(title = "Backup e Restauração") {
+            Text(
+                "Salva configurações, histórico de viagens e recargas, todos os acumulados (Trip A/B, Lifetime, Rolling) e dados de gráficos. Use para migrar entre carros ou reinstalações.",
+                fontSize = 11.sp, color = TextSecondary,
+            )
+            // Botões exportar / importar arquivo
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Button(
+                    onClick = {
+                        scope.launch {
+                            backupLoading = true
+                            backupStatus  = ""
+                            val result = withContext(Dispatchers.IO) {
+                                runCatching { backupManager.exportBackup() }
+                            }
+                            backupLoading = false
+                            result.fold(
+                                onSuccess = { (_, path) -> backupStatus = "✓ Exportado: $path" },
+                                onFailure = { backupStatus = "✗ ${it.message}" },
+                            )
+                        }
+                    },
+                    enabled  = !backupLoading,
+                    modifier = Modifier.weight(1f),
+                    colors   = ButtonDefaults.buttonColors(containerColor = AuroraTeal),
+                    shape    = RoundedCornerShape(8.dp),
+                ) {
+                    Text("⬆ Exportar", fontSize = 13.sp, color = SurfaceDeep, fontWeight = FontWeight.SemiBold)
+                }
+                Button(
+                    onClick  = { importFileLauncher.launch(arrayOf("application/json", "*/*")) },
+                    enabled  = !backupLoading,
+                    modifier = Modifier.weight(1f),
+                    colors   = ButtonDefaults.buttonColors(containerColor = MoltenOrange),
+                    shape    = RoundedCornerShape(8.dp),
+                ) {
+                    Text("⬇ Importar Arquivo", fontSize = 13.sp, color = SurfaceDeep, fontWeight = FontWeight.SemiBold)
+                }
+            }
+            // Importar via URL
+            OutlinedTextField(
+                value           = importUrl,
+                onValueChange   = { importUrl = it },
+                label           = { Text("URL do backup (ex: http://homeassistant.local:8123/local/ecotrip-backup.json)", fontSize = 10.sp) },
+                modifier        = Modifier.fillMaxWidth(),
+                singleLine      = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                colors          = mqttFieldColors(),
+            )
+            Button(
+                onClick = {
+                    scope.launch {
+                        backupLoading = true
+                        backupStatus  = ""
+                        val result = withContext(Dispatchers.IO) {
+                            runCatching { backupManager.importBackupFromUrl(importUrl) }
+                        }
+                        backupLoading = false
+                        result.fold(
+                            onSuccess = { ts ->
+                                backupStatus = "✓ Backup restaurado (salvo em: $ts). Reiniciando..."
+                                kotlinx.coroutines.delay(1800)
+                                android.os.Process.killProcess(android.os.Process.myPid())
+                            },
+                            onFailure = { backupStatus = "✗ ${it.message}" },
+                        )
+                    }
+                },
+                enabled  = importUrl.trim().isNotEmpty() && !backupLoading,
+                modifier = Modifier.fillMaxWidth(),
+                colors   = ButtonDefaults.buttonColors(containerColor = PlasmaBlue),
+                shape    = RoundedCornerShape(8.dp),
+            ) {
+                Text("⬇ Importar da URL", fontSize = 13.sp, color = SurfaceDeep, fontWeight = FontWeight.SemiBold)
+            }
+            if (backupLoading) {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = Green)
+            }
+            if (backupStatus.isNotEmpty()) {
+                Text(
+                    backupStatus,
+                    fontSize = 12.sp,
+                    color    = if (backupStatus.startsWith("✓")) NeonLime else androidx.compose.ui.graphics.Color(0xFFFF4444),
+                )
+            }
+        }
+
+        Spacer(Modifier.height(8.dp))  // breathing room at bottom of scroll
     }
 }
 
