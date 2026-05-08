@@ -51,8 +51,8 @@ fun BlockChart(
         val barGap    = (slotW * 0.10f).coerceAtLeast(0.5.dp.toPx())
         val barBodyW  = slotW - barGap
 
-        val maxEff  = blocks.maxOf { it.netKwhPer100km }.takeIf { it > 0f } ?: 1f
-        val maxFuel = blocks.maxOf { it.fuelL          }.takeIf { it > 0f } ?: 1f
+        val maxEff  = 40f   // eixo Y fixo: máximo 40 kWh/100km; barras acima ficam travadas no topo
+        val maxFuel = blocks.maxOf { it.fuelL }.takeIf { it > 0f } ?: 1f
 
         // Baseline X axis
         drawLine(
@@ -69,7 +69,7 @@ fun BlockChart(
         blocks.forEachIndexed { i, block ->
             if (block.netKwhPer100km > 0f) {
                 val x    = paddingLeft + i * slotW + barGap / 2f
-                val barH = (block.netKwhPer100km / maxEff) * chartH
+                val barH = (block.netKwhPer100km.coerceAtMost(maxEff) / maxEff) * chartH
                 val y    = paddingTop + chartH - barH
                 drawRoundRect(
                     brush        = Brush.verticalGradient(
@@ -128,7 +128,7 @@ private fun DrawScope.drawYGrid(
     maxVal: Float,
     measurer: TextMeasurer,
 ) {
-    val steps = 3
+    val steps = 4  // 0 / 10 / 20 / 30 / 40 com maxVal=40
     val dashEffect = PathEffect.dashPathEffect(floatArrayOf(4f, 5f))
     for (i in 0..steps) {
         val y = paddingTop + chartH * (1f - i.toFloat() / steps)
@@ -149,7 +149,7 @@ private fun DrawScope.drawYGrid(
                 pathEffect  = dashEffect,
             )
         }
-        val label  = String.format("%.1f", maxVal * i / steps)
+        val label  = String.format("%.0f", maxVal * i / steps)
         val layout = measurer.measure(
             label,
             TextStyle(fontSize = 11.sp, color = TextSecondary.copy(alpha = 0.6f), fontWeight = FontWeight.Normal)
