@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.util.Log
+import br.com.redesurftank.ecotrip.BuildConfig
 import br.com.redesurftank.ecotrip.models.SharedPreferencesKeys
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
@@ -385,6 +386,13 @@ class MqttManager private constructor() {
             lastPublishedChargeLimitPct = -1  // força re-sync com o carro após reconexão
             setStatus(Status.CONNECTED)
             publishDiscovery(c)
+            // Publica versão do app com retain=true — sempre visível no HA mesmo offline
+            try {
+                c.publish("$prefix/app_version", BuildConfig.VERSION_NAME.toByteArray(), 1, true)
+                AppLogger.i(TAG, "Versão publicada: ${BuildConfig.VERSION_NAME}")
+            } catch (e: Exception) {
+                AppLogger.w(TAG, "Falha ao publicar versão: ${e.message}")
+            }
             drainQueues(c)
             AppLogger.i(TAG, "MQTT conectado: $serverUri")
         } catch (e: Exception) {
@@ -649,6 +657,10 @@ class MqttManager private constructor() {
             val payload = """{"name":"$name","state_topic":"$prefix/$id/last_completed","value_template":"{{ value_json.distance_km }}","json_attributes_topic":"$prefix/$id/last_completed","unit_of_measurement":"km","state_class":"measurement","device_class":"distance","unique_id":"haval_ecotrip_${id}_completed","icon":"mdi:flag-checkered","device":$device}"""
             try { c.publish("homeassistant/sensor/haval_ecotrip_${id}_completed/config", payload.toByteArray(), 1, true) } catch (_: Exception) {}
         }
+
+        // Sensor: versão do app instalada no carro
+        val appVersionPayload = """{"name":"Versão do App","state_topic":"$prefix/app_version","unique_id":"haval_ecotrip_app_version","icon":"mdi:cellphone-arrow-down","device":$device}"""
+        try { c.publish("homeassistant/sensor/haval_ecotrip_app_version/config", appVersionPayload.toByteArray(), 1, true) } catch (_: Exception) {}
 
         // Sensor: última atualização de dados (timestamp ISO)
         val lastUpdatePayload = """{"name":"Última Atualização","state_topic":"$prefix/last_update","device_class":"timestamp","unique_id":"haval_ecotrip_last_update","icon":"mdi:clock-check-outline","device":$device}"""
