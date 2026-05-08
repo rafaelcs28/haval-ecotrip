@@ -2,10 +2,12 @@ package br.com.redesurftank.ecotrip.managers
 
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.util.Log
 import androidx.core.content.FileProvider
 import br.com.redesurftank.ecotrip.BuildConfig
 import org.json.JSONObject
+import rikka.shizuku.Shizuku
 import java.io.File
 import java.io.FileOutputStream
 import java.net.HttpURLConnection
@@ -133,8 +135,18 @@ class UpdateManager private constructor() {
 
                 downloadProgress = 100
                 onUpdateStateChanged?.invoke()
-                AppLogger.i(TAG, "APK downloaded: ${apkFile.length()} bytes — launching installer")
+                AppLogger.i(TAG, "APK downloaded: ${apkFile.length()} bytes — trying silent install")
 
+                val silentOk = tryShizukuInstall(apkFile.absolutePath)
+                if (silentOk) {
+                    AppLogger.i(TAG, "Instalação silenciosa concluída — encerrando processo para iniciar nova versão")
+                    Thread.sleep(300)
+                    android.os.Process.killProcess(android.os.Process.myPid())
+                    return@submit
+                }
+
+                // Shizuku indisponível ou falhou — fallback para instalador do sistema
+                AppLogger.i(TAG, "Silent install não disponível — abrindo instalador do sistema")
                 val uri = FileProvider.getUriForFile(
                     context,
                     "${context.packageName}.fileprovider",
@@ -156,6 +168,49 @@ class UpdateManager private constructor() {
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────
+
+    /**
+     * Tenta instalar [apkPath] silenciosamente usando o shell do Shizuku (adb-level).
+     * Retorna true se o install teve sucesso (exit 0 + "Success" na saída).
+     * Retorna false se Shizuku não está disponível, sem permissão, ou se o install falhou.
+     *
+     * Nota: Shizuku.newProcess() é private no v13 — invocamos via reflexão.
+     */
+    private fun tryShizukuInstall(apkPath: String): Boolean {
+        return try {
+            if (!Shizuku.pingBinder()) {
+                Log.w(TAG, "Shizuku binder not alive — skipping silent install")
+                return false
+            }
+            if (Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) {
+                Log.w(TAG, "Shizuku permission not granted — skipping silent install")
+                return false
+            }
+            // newProcess é private no Shizuku v13 API — acessamos via reflexão
+            val newProcessMethod = Shizuku::class.java.getDeclaredMethod(
+                "newProcess",
+                Array<String>::class.java,
+                Array<String>::class.java,
+                String::class.java,
+            ).also { it.isAccessible = true }
+
+            val process = newProcessMethod.invoke(
+                null,
+                arrayOf("pm", "install", "-r", "-t", apkPath),
+                null as Array<String>?,
+                null as String?,
+            ) as Process
+
+            val output = process.inputStream.bufferedReader().readText()
+            val errOut = process.errorStream.bufferedReader().readText()
+            val exit   = process.waitFor()
+            AppLogger.i(TAG, "pm install exit=$exit stdout=${output.trim()} stderr=${errOut.trim()}")
+            exit == 0 && output.trim().startsWith("Success")
+        } catch (e: Exception) {
+            Log.w(TAG, "tryShizukuInstall exception: ${e.message}")
+            false
+        }
+    }
 
     private fun fetchLatestRelease(): ReleaseInfo? {
         val conn = URL(API_URL).openConnection() as HttpURLConnection
