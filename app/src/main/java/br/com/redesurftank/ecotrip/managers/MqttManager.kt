@@ -443,14 +443,15 @@ class MqttManager private constructor() {
             if (latestGear.isNotEmpty()) pub("gear",  latestGear)
 
             // Electrical: corrente de carga, tensão e corrente do pack + potência derivada
-            pub("charge_current_a",  fmt2(latestChargeCurrentA))
-            pub("battery_voltage_v", fmt2(latestBatteryVoltageV))
-            pub("battery_current_a", fmt2(latestBatteryCurrentA))
+            // retain=true — persiste no broker; HA não fica em branco se a conexão cair brevemente
+            pubR("charge_current_a",  fmt2(latestChargeCurrentA))
+            pubR("battery_voltage_v", fmt2(latestBatteryVoltageV))
+            pubR("battery_current_a", fmt2(latestBatteryCurrentA))
             // Potência de recarga: apenas quando charging_state == 1 (Carregando)
             // Corrente de recarga chega negativa do carro; inverte sinal para kW positivo
             val chargePowerKw = if (latestChargingState == 1 && latestBatteryVoltageV > 0f)
                 latestChargeCurrentA * latestBatteryVoltageV / 1000f * -1f else 0f
-            pub("charge_power_kw",   fmt2(chargePowerKw))
+            pubR("charge_power_kw",   fmt2(chargePowerKw))
             // Estado de recarga em texto legível
             val chargingStateText = when (latestChargingState) {
                 0 -> "Desconectado"
@@ -460,7 +461,7 @@ class MqttManager private constructor() {
                 5 -> "Aguardando liberação"
                 else -> "Desconhecido"
             }
-            pub("charging_state", chargingStateText)
+            pubR("charging_state", chargingStateText)
             pub("rolling/kwh_per_100km", fmt2(q.rolling.netKwhPer100km))
             pub("rolling/km_per_l",      fmt2(q.rolling.kmPerL))
             pub("rolling/distance_km",   fmt2(q.rolling.windowKm))
@@ -476,7 +477,7 @@ class MqttManager private constructor() {
                 pub("$label/energy_kwh",     fmt3(snap.energyKwh))
                 pub("$label/regen_kwh",      fmt3(snap.regenKwh))
                 pub("$label/soc_start",   fmt1(snap.startSocPct))
-                pub("$label/soc_current", fmt1(snap.currentSocPct))
+                pubR("$label/soc_current", fmt1(snap.currentSocPct))   // retain — SOC não blanks no reconect
                 pub("$label/tank_start_l",fmt1(snap.startTankL))
                 pub("$label/tank_now_l",  fmt1(snap.currentTankL))
             }
