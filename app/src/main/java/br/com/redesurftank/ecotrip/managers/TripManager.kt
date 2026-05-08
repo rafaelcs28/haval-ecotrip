@@ -95,6 +95,8 @@ data class LifetimeSnapshot(
     val distKm:    Float,
     val timeSec:   Long,
     val fuelL:     Float,
+    val chargeKwh: Float,   // kWh injetados (lifetime de recargas)
+    val chargeSec: Long,    // segundos conectado ao carregador
 )
 
 typealias TripListener = (snapA: TripSnapshot, snapB: TripSnapshot, rolling: RollingSnapshot) -> Unit
@@ -172,6 +174,13 @@ class TripManager private constructor() {
     private var lifeRegenKwh:  Float = 0f
     private var lifeDistKm:    Float = 0f
     private var lifeTimeSec:   Long  = 0L
+    // Recarga — integração P×Δt (independente de sessão de condução)
+    private var lifeChargeKwh:        Float   = 0f
+    private var lifeChargeSec:        Long    = 0L
+    private var currentChargePowerKw: Float   = 0f
+    private var isChargingNow:        Boolean = false
+    private var chargeTickCount:      Int     = 0
+    private var lastChargeTickMs:     Long    = 0L   // wall clock do último tick de carga
 
     // Rolling window "desde última partida"
     private var rollingAccFuel   = 0f
@@ -217,7 +226,27 @@ class TripManager private constructor() {
             distKm    = lifeDistKm,
             timeSec   = lifeTimeSec,
             fuelL     = lifeFuelL,
+            chargeKwh = lifeChargeKwh,
+            chargeSec = lifeChargeSec,
         )
+    }
+
+    /**
+     * Chamado pelo ConsumptionScreen sempre que charging_state, battery_voltage ou
+     * charge_current mudam. Atualiza a potência instantânea usada pela integração
+     * de energia no tickTime(). Liga/desliga o acumulador via isChargingNow.
+     */
+    fun onChargingUpdate(isCharging: Boolean, powerKw: Float) {
+        synchronized(lock) {
+            val wasCharging = isChargingNow
+            isChargingNow        = isCharging
+            currentChargePowerKw = if (isCharging) maxOf(0f, powerKw) else 0f
+            if (!isCharging && wasCharging) {
+                // Fim de recarga — persiste imediatamente (não espera próximo tick)
+                saveToPrefs()
+                AppLogger.i(TAG, "Recarga concluída — chargeKwh=$lifeChargeKwh chargeSec=$lifeChargeSec")
+            }
+        }
     }
 
     fun init(context: Context) {
@@ -558,6 +587,31 @@ class TripManager private constructor() {
 
     fun tickTime() {
         synchronized(lock) {
+            // Charging lifetime — integração P×Δt usando wall-clock
+            // Roda independentemente de sessão de condução
+            // tickTime() é chamado a cada 5s pelo ConsumptionScreen, mas usamos delta
+            // real de tempo para não depender da frequência exata do chamador.
+            if (isChargingNow && currentChargePowerKw > 0f) {
+                val now = System.currentTimeMillis()
+                if (lastChargeTickMs > 0L) {
+                    // Cap a 60s para não contar intervalos longos (ex: app suspenso)
+                    val dtSec = ((now - lastChargeTickMs) / 1000L).coerceIn(1L, 60L)
+                    lifeChargeKwh += currentChargePowerKw * dtSec / 3600f
+                    lifeChargeSec += dtSec
+                }
+                lastChargeTickMs = now
+                chargeTickCount++
+                if (chargeTickCount >= 6) {   // ~30s = 6 ticks × 5s
+                    chargeTickCount = 0
+                    prefs.edit()
+                        .putFloat(SharedPreferencesKeys.LIFETIME_CHARGE_KWH, lifeChargeKwh)
+                        .putLong (SharedPreferencesKeys.LIFETIME_CHARGE_SEC,  lifeChargeSec)
+                        .apply()   // async — ok para tick periódico (saveToPrefs().commit() cuida do fim)
+                }
+            } else {
+                lastChargeTickMs = 0L   // reset para não contar tempo parado
+            }
+
             if (sessionActive) {
                 checkpointTickCount++
                 if (checkpointTickCount >= 5) {
@@ -896,6 +950,8 @@ class TripManager private constructor() {
         lifeRegenKwh  = prefs.getFloat(SharedPreferencesKeys.LIFETIME_REGEN_KWH,   0f)
         lifeDistKm    = prefs.getFloat(SharedPreferencesKeys.LIFETIME_DISTANCE_KM, 0f)
         lifeTimeSec   = prefs.getLong (SharedPreferencesKeys.LIFETIME_TIME_SEC,    0L)
+        lifeChargeKwh = prefs.getFloat(SharedPreferencesKeys.LIFETIME_CHARGE_KWH,  0f)
+        lifeChargeSec = prefs.getLong (SharedPreferencesKeys.LIFETIME_CHARGE_SEC,   0L)
 
         rollingAccFuel      = prefs.getFloat(SharedPreferencesKeys.ROLLING_FUEL_L,        0f)
         rollingAccEnergy    = prefs.getFloat(SharedPreferencesKeys.ROLLING_ENERGY_KWH,    0f)
@@ -956,6 +1012,8 @@ class TripManager private constructor() {
             .putFloat(SharedPreferencesKeys.LIFETIME_REGEN_KWH,   lifeRegenKwh)
             .putFloat(SharedPreferencesKeys.LIFETIME_DISTANCE_KM, lifeDistKm)
             .putLong (SharedPreferencesKeys.LIFETIME_TIME_SEC,    lifeTimeSec)
+            .putFloat(SharedPreferencesKeys.LIFETIME_CHARGE_KWH,  lifeChargeKwh)
+            .putLong (SharedPreferencesKeys.LIFETIME_CHARGE_SEC,   lifeChargeSec)
             .putFloat(SharedPreferencesKeys.ROLLING_FUEL_L,        rollingAccFuel)
             .putFloat(SharedPreferencesKeys.ROLLING_ENERGY_KWH,    rollingAccEnergy)
             .putFloat(SharedPreferencesKeys.ROLLING_REGEN_KWH,     rollingAccRegen)

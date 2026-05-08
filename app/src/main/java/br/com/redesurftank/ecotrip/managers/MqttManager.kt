@@ -497,6 +497,8 @@ class MqttManager private constructor() {
             pubR("lifetime/distance_km", fmt2(lt.distKm))
             pubR("lifetime/time_sec",    lt.timeSec.toString())
             pubR("lifetime/fuel_l",      fmt3(lt.fuelL))
+            pubR("lifetime/charge_kwh",  fmt3(lt.chargeKwh))
+            pubR("lifetime/charge_sec",  lt.chargeSec.toString())
 
             lastSuccessfulPublishMs = System.currentTimeMillis()
             // Publica timestamp ISO para a entidade "Última Atualização" no HA
@@ -636,12 +638,14 @@ class MqttManager private constructor() {
             S("trip_b_tank_start",  "Trip B Tanque Início",  "$prefix/trip_b/tank_start_l",   "L",         icon = "mdi:fuel"),
             S("trip_b_tank_now",    "Trip B Tanque Atual",   "$prefix/trip_b/tank_now_l",     "L",         icon = "mdi:fuel"),
             // Lifetime — state_class: total_increasing → HA registra estatísticas de longo prazo
-            S("lifetime_energy",   "Lifetime Energia",      "$prefix/lifetime/energy_kwh",  "kWh", dc = "energy",    sc = "total_increasing"),
-            S("lifetime_regen",    "Lifetime Regenerada",   "$prefix/lifetime/regen_kwh",   "kWh", dc = "energy",    sc = "total_increasing"),
-            S("lifetime_net",      "Lifetime Líquido",      "$prefix/lifetime/net_kwh",     "kWh", dc = "energy",    sc = "total_increasing"),
-            S("lifetime_distance", "Lifetime Distância",    "$prefix/lifetime/distance_km", "km",  dc = "distance",  sc = "total_increasing"),
-            S("lifetime_time",     "Lifetime Tempo",        "$prefix/lifetime/time_sec",    "s",   icon = "mdi:timer", sc = "total_increasing"),
-            S("lifetime_fuel",     "Lifetime Combustível",  "$prefix/lifetime/fuel_l",      "L",   icon = "mdi:fuel",  sc = "total_increasing"),
+            S("lifetime_energy",      "Lifetime Energia",           "$prefix/lifetime/energy_kwh",  "kWh", dc = "energy",    sc = "total_increasing"),
+            S("lifetime_regen",       "Lifetime Regenerada",        "$prefix/lifetime/regen_kwh",   "kWh", dc = "energy",    sc = "total_increasing"),
+            S("lifetime_net",         "Lifetime Líquido",           "$prefix/lifetime/net_kwh",     "kWh", dc = "energy",    sc = "total_increasing"),
+            S("lifetime_distance",    "Lifetime Distância",         "$prefix/lifetime/distance_km", "km",  dc = "distance",  sc = "total_increasing"),
+            S("lifetime_time",        "Lifetime Tempo",             "$prefix/lifetime/time_sec",    "s",   icon = "mdi:timer",      sc = "total_increasing"),
+            S("lifetime_fuel",        "Lifetime Combustível",       "$prefix/lifetime/fuel_l",      "L",   icon = "mdi:fuel",       sc = "total_increasing"),
+            S("lifetime_charge",      "Lifetime Carregado",         "$prefix/lifetime/charge_kwh",  "kWh", dc = "energy",           sc = "total_increasing"),
+            S("lifetime_charge_time", "Lifetime Tempo Recarga",     "$prefix/lifetime/charge_sec",  "s",   icon = "mdi:timer-sand", sc = "total_increasing"),
         )
 
         for (s in sensors) {
@@ -679,7 +683,7 @@ class MqttManager private constructor() {
         // via GWM API. O EcotripImpulse apenas escuta cmd/charge_limit e publica o estado.
         // Publicar o discovery aqui sobrescreveria o command_topic do Commander e quebraria o fluxo.
 
-        Log.i(TAG, "HA Discovery published (${sensors.size + 4} entities)")
+        Log.i(TAG, "HA Discovery published (${sensors.size + 4} entities)")   // +4 = 2×last_completed + app_version + last_update
     }
 
     private fun loadConfig() {

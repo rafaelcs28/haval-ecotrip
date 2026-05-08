@@ -23,6 +23,8 @@ object SharedPreferencesKeys {
     const val LIFETIME_REGEN_KWH   = "lifetime_regen_kwh"
     const val LIFETIME_DISTANCE_KM = "lifetime_distance_km"
     const val LIFETIME_TIME_SEC    = "lifetime_time_sec"
+    const val LIFETIME_CHARGE_KWH  = "lifetime_charge_kwh"   // kWh injetados em recargas
+    const val LIFETIME_CHARGE_SEC  = "lifetime_charge_sec"   // segundos conectado ao carregador
 
     // Rolling window (Desde Última Partida) accumulated
     const val ROLLING_FUEL_L = "rolling_fuel_l"

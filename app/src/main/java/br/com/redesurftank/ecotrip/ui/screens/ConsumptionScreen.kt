@@ -107,6 +107,16 @@ fun ConsumptionScreen() {
             }
         }
 
+        // Recalcula potência de recarga e notifica TripManager quando qualquer
+        // dado elétrico relevante muda (estado, corrente ou tensão).
+        fun syncCharging() {
+            val state   = mqttManager.latestChargingState
+            val powerKw = if (state == 1 && mqttManager.latestBatteryVoltageV > 0f)
+                mqttManager.latestChargeCurrentA * mqttManager.latestBatteryVoltageV / 1000f * -1f
+            else 0f
+            tripManager.onChargingUpdate(state == 1, powerKw)
+        }
+
         val carListener: (String, String) -> Unit = { key, value ->
             mainHandler.post {
                 mqttManager.lastCarDataMs = System.currentTimeMillis()
@@ -149,15 +159,18 @@ fun ConsumptionScreen() {
                     }
                     CarConstants.CAR_EV_INFO_CUR_CHARGE_CURRENT.value -> {
                         mqttManager.latestChargeCurrentA = value.trim().toFloatOrNull() ?: 0f
+                        syncCharging()
                     }
                     CarConstants.CAR_EV_INFO_POWER_BATTERY_VOLTAGE.value -> {
                         mqttManager.latestBatteryVoltageV = value.trim().toFloatOrNull() ?: 0f
+                        syncCharging()
                     }
                     CarConstants.CAR_EV_INFO_POWER_BATTERY_CURRENT.value -> {
                         mqttManager.latestBatteryCurrentA = value.trim().toFloatOrNull() ?: 0f
                     }
                     CarConstants.CAR_EV_INFO_CHARGING_STATE.value -> {
                         mqttManager.latestChargingState = value.trim().toIntOrNull() ?: -1
+                        syncCharging()
                     }
                     else -> tripManager.onDataChanged(key, value)
                 }
@@ -207,6 +220,8 @@ fun ConsumptionScreen() {
                     ?.trim()?.toFloatOrNull()?.let { mqttManager.latestBatteryCurrentA = it }
                 carManager.fetchCurrent(CarConstants.CAR_EV_INFO_CHARGING_STATE.value)
                     ?.trim()?.toIntOrNull()?.let { mqttManager.latestChargingState = it }
+                // Notifica TripManager com o estado inicial de carga após busca dos valores elétricos
+                syncCharging()
 
             } catch (_: Exception) {}
         }
