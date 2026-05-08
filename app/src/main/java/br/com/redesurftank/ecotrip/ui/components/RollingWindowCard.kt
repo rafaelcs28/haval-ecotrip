@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -117,7 +118,7 @@ fun RollingWindowCard(
             ) {
                 RMetricSection("⚡ Energia")
                 RMetric("Bruto",       "%.2f kWh".format(snapshot.energyKwh),       TextPrimary)
-                RMetric("Regen",       "%.2f kWh".format(snapshot.regenKwh),         NeonLime)
+                RRegenMetric(snapshot.regenKwh, snapshot.energyKwh)
                 RMetric("Líquido",     "%.2f kWh".format(snapshot.netKwh),           WarnYellow)
                 if (snapshot.startSocPct > 0f || snapshot.currentSocPct > 0f)
                     RMetric("SOC", "%.0f%% → %.0f%%".format(snapshot.startSocPct, snapshot.currentSocPct), TextPrimary)
@@ -167,6 +168,42 @@ fun RollingWindowCard(
                 RMetric("Gastos", "%.2f L".format(snapshot.fuelL),   TextPrimary)
                 if (snapshot.startTankL > 0f || snapshot.currentTankL > 0f)
                     RMetric("Tanque", "%.1fL → %.1fL".format(snapshot.startTankL, snapshot.currentTankL), TextPrimary)
+            }
+        }
+
+        // ── Custo total ───────────────────────────────────────────────────────
+        if (snapshot.costBrl > 0.01f) {
+            HorizontalDivider(color = WarnYellow.copy(alpha = 0.18f), thickness = 0.5.dp)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 3.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment     = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "💰 Custo total",
+                    fontSize  = 12.sp,
+                    color     = TextSecondary,
+                )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment     = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "R$ %.2f".format(snapshot.costBrl),
+                        fontSize   = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                        color      = WarnYellow,
+                    )
+                    if (snapshot.costPerKm > 0f) {
+                        Text(
+                            "R$ %.2f/km".format(snapshot.costPerKm),
+                            fontSize = 11.sp,
+                            color    = WarnYellow.copy(alpha = 0.65f),
+                        )
+                    }
+                }
             }
         }
     }
@@ -278,6 +315,46 @@ private fun RMetricSection(title: String) {
         color         = TextSecondary.copy(alpha = 0.6f),
         modifier      = Modifier.padding(bottom = 2.dp),
     )
+}
+
+@Composable
+private fun RRegenMetric(regenKwh: Float, energyKwh: Float) {
+    val pct = if (energyKwh <= 0.01f) 0f else (regenKwh / energyKwh * 100f).coerceIn(0f, 100f)
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text     = "Regen",
+            fontSize = 14.sp,
+            color    = TextSecondary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text       = "%.2f kWh".format(regenKwh),
+                fontSize   = 17.sp,
+                fontWeight = FontWeight.Bold,
+                color      = NeonLime,
+                maxLines   = 1,
+                overflow   = TextOverflow.Ellipsis,
+            )
+            if (pct > 0f) {
+                Text(
+                    text     = "(%.0f%%)".format(pct),
+                    fontSize = 12.sp,
+                    color    = NeonLime.copy(alpha = 0.7f),
+                    maxLines = 1,
+                )
+            }
+        }
+    }
 }
 
 @Composable

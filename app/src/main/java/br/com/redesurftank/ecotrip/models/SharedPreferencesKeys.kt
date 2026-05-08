@@ -77,6 +77,9 @@ object SharedPreferencesKeys {
     // JSON array de PendingTripPayload — sobrevive ao reinício do app
     const val PENDING_TRIP_PAYLOADS_JSON = "pending_trip_payloads_json"
 
+    // Home Assistant export
+    const val HA_EXPORT_URL = "ha_export_url"
+
     // MQTT
     const val MQTT_ENABLED  = "mqtt_enabled"
     const val MQTT_HOST     = "mqtt_host"

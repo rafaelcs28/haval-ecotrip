@@ -33,6 +33,11 @@ class BackupManager private constructor() {
         prefs = ctx.getSharedPreferences(SharedPreferencesKeys.PREFS_NAME, Context.MODE_PRIVATE)
     }
 
+    /** URL base do Home Assistant para export direto (ex: "http://192.168.1.10:8123"). */
+    var haExportUrl: String
+        get() = prefs.getString(SharedPreferencesKeys.HA_EXPORT_URL, "") ?: ""
+        set(v) { prefs.edit().putString(SharedPreferencesKeys.HA_EXPORT_URL, v.trim()).apply() }
+
     /** Exports all app data to JSON. Returns (file, absolutePath). */
     fun exportBackup(): Pair<File, String> {
         val json = buildBackupJson()
@@ -48,6 +53,28 @@ class BackupManager private constructor() {
         val json = appContext.contentResolver.openInputStream(uri)?.bufferedReader()?.readText()
             ?: throw Exception("Não foi possível ler o arquivo selecionado")
         return applyBackupJson(json)
+    }
+
+    /**
+     * POSTs o backup JSON direto para o webhook do HA.
+     * O HA deve ter uma automação no webhook_id="ecotrip_backup" que salva o arquivo.
+     * Retorna o timestamp do backup enviado.
+     */
+    fun exportToHomeAssistant(haBaseUrl: String): String {
+        val json = buildBackupJson()
+        val ts   = org.json.JSONObject(json).optString("timestamp", "desconhecido")
+        val url  = URL("${haBaseUrl.trimEnd('/')}/api/webhook/ecotrip_backup")
+        val conn = url.openConnection() as HttpURLConnection
+        conn.requestMethod = "POST"
+        conn.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+        conn.setRequestProperty("User-Agent", "EcotripImpulse/${BuildConfig.VERSION_NAME}")
+        conn.connectTimeout = 15_000
+        conn.readTimeout    = 15_000
+        conn.doOutput       = true
+        conn.outputStream.use { it.write(json.toByteArray(Charsets.UTF_8)) }
+        val code = conn.responseCode
+        if (code !in 200..299) throw Exception("HA retornou HTTP $code")
+        return ts
     }
 
     /** Downloads and imports backup from a URL. Returns backup timestamp string. */

@@ -78,6 +78,13 @@ fun SettingsScreen(
     var backupStatus by remember { mutableStateOf("") }
     var backupLoading by remember { mutableStateOf(false) }
     var importUrl    by remember { mutableStateOf("") }
+    var haUrl        by remember {
+        mutableStateOf(
+            backupManager.haExportUrl.ifEmpty {
+                if (mqttManager.host.isNotEmpty()) "http://${mqttManager.host}:8123" else ""
+            }
+        )
+    }
 
     val importFileLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
@@ -361,6 +368,59 @@ fun SettingsScreen(
                     Text("⬇ Importar Arquivo", fontSize = 13.sp, color = SurfaceDeep, fontWeight = FontWeight.SemiBold)
                 }
             }
+            // ── Exportar direto para o HA ─────────────────────────────────────
+            HorizontalDivider(color = Separator, thickness = 0.5.dp)
+            Text(
+                "Exportar direto para o Home Assistant",
+                fontSize   = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+                color      = TextSecondary,
+            )
+            OutlinedTextField(
+                value           = haUrl,
+                onValueChange   = { haUrl = it },
+                label           = { Text("URL do HA (ex: http://192.168.1.100:8123)", fontSize = 10.sp) },
+                modifier        = Modifier.fillMaxWidth(),
+                singleLine      = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                colors          = mqttFieldColors(),
+            )
+            Button(
+                onClick = {
+                    backupManager.haExportUrl = haUrl   // persiste para próxima vez
+                    scope.launch {
+                        backupLoading = true
+                        backupStatus  = ""
+                        val result = withContext(Dispatchers.IO) {
+                            runCatching { backupManager.exportToHomeAssistant(haUrl) }
+                        }
+                        backupLoading = false
+                        result.fold(
+                            onSuccess = { ts -> backupStatus = "✓ Enviado para HA (salvo em: $ts)\nRestore: $haUrl/local/ecotrip-backup.json" },
+                            onFailure = { backupStatus = "✗ ${it.message}" },
+                        )
+                    }
+                },
+                enabled  = haUrl.trim().isNotEmpty() && !backupLoading,
+                modifier = Modifier.fillMaxWidth(),
+                colors   = ButtonDefaults.buttonColors(containerColor = Green),
+                shape    = RoundedCornerShape(8.dp),
+            ) {
+                Text("☁  Enviar para HA", fontSize = 13.sp, color = SurfaceDeep, fontWeight = FontWeight.SemiBold)
+            }
+            Text(
+                "Salva em /config/www/ecotrip-backup.json no HA. Requer a automação webhook configurada (veja documentação).",
+                fontSize = 10.sp, color = TextSecondary,
+            )
+
+            // ── Importar via URL ──────────────────────────────────────────────
+            HorizontalDivider(color = Separator, thickness = 0.5.dp)
+            Text(
+                "Restaurar de arquivo ou URL",
+                fontSize   = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+                color      = TextSecondary,
+            )
             // Importar via URL
             OutlinedTextField(
                 value           = importUrl,
