@@ -17,6 +17,13 @@ object SharedPreferencesKeys {
     const val TRIP_B_DISTANCE_KM = "trip_b_distance_km"
     const val TRIP_B_TIME_SEC = "trip_b_time_sec"
 
+    // Lifetime — nunca zera (acumulado desde a primeira instalação)
+    const val LIFETIME_FUEL_L      = "lifetime_fuel_l"
+    const val LIFETIME_ENERGY_KWH  = "lifetime_energy_kwh"
+    const val LIFETIME_REGEN_KWH   = "lifetime_regen_kwh"
+    const val LIFETIME_DISTANCE_KM = "lifetime_distance_km"
+    const val LIFETIME_TIME_SEC    = "lifetime_time_sec"
+
     // Rolling window (Desde Última Partida) accumulated
     const val ROLLING_FUEL_L = "rolling_fuel_l"
     const val ROLLING_ENERGY_KWH = "rolling_energy_kwh"

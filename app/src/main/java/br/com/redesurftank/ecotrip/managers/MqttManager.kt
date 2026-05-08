@@ -431,6 +431,8 @@ class MqttManager private constructor() {
         try {
             fun pub(topic: String, value: String) =
                 c.publish("$prefix/$topic", value.toByteArray(), 0, false)
+            fun pubR(topic: String, value: String) =   // retained — para sensores que devem sobreviver a reinício do HA
+                c.publish("$prefix/$topic", value.toByteArray(), 0, true)
             fun fmt2(v: Float) = String.format(java.util.Locale.US, "%.2f", v)
             fun fmt3(v: Float) = String.format(java.util.Locale.US, "%.3f", v)
             fun fmt1(v: Float) = String.format(java.util.Locale.US, "%.1f", v)
@@ -478,6 +480,15 @@ class MqttManager private constructor() {
                 pub("$label/tank_start_l",fmt1(snap.startTankL))
                 pub("$label/tank_now_l",  fmt1(snap.currentTankL))
             }
+            // Lifetime — totais absolutos com retain=true (total_increasing no HA)
+            val lt = TripManager.getInstance().getLifetimeSnapshot()
+            pubR("lifetime/energy_kwh",  fmt3(lt.energyKwh))
+            pubR("lifetime/regen_kwh",   fmt3(lt.regenKwh))
+            pubR("lifetime/net_kwh",     fmt3(lt.netKwh))
+            pubR("lifetime/distance_km", fmt2(lt.distKm))
+            pubR("lifetime/time_sec",    lt.timeSec.toString())
+            pubR("lifetime/fuel_l",      fmt3(lt.fuelL))
+
             lastSuccessfulPublishMs = System.currentTimeMillis()
             // Publica timestamp ISO para a entidade "Última Atualização" no HA
             val isoNow = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssZ", Locale.getDefault())
@@ -615,6 +626,13 @@ class MqttManager private constructor() {
             S("trip_b_soc_now",     "Trip B SOC Atual",      "$prefix/trip_b/soc_current",    "%",         icon = "mdi:battery"),
             S("trip_b_tank_start",  "Trip B Tanque Início",  "$prefix/trip_b/tank_start_l",   "L",         icon = "mdi:fuel"),
             S("trip_b_tank_now",    "Trip B Tanque Atual",   "$prefix/trip_b/tank_now_l",     "L",         icon = "mdi:fuel"),
+            // Lifetime — state_class: total_increasing → HA registra estatísticas de longo prazo
+            S("lifetime_energy",   "Lifetime Energia",      "$prefix/lifetime/energy_kwh",  "kWh", dc = "energy",    sc = "total_increasing"),
+            S("lifetime_regen",    "Lifetime Regenerada",   "$prefix/lifetime/regen_kwh",   "kWh", dc = "energy",    sc = "total_increasing"),
+            S("lifetime_net",      "Lifetime Líquido",      "$prefix/lifetime/net_kwh",     "kWh", dc = "energy",    sc = "total_increasing"),
+            S("lifetime_distance", "Lifetime Distância",    "$prefix/lifetime/distance_km", "km",  dc = "distance",  sc = "total_increasing"),
+            S("lifetime_time",     "Lifetime Tempo",        "$prefix/lifetime/time_sec",    "s",   icon = "mdi:timer", sc = "total_increasing"),
+            S("lifetime_fuel",     "Lifetime Combustível",  "$prefix/lifetime/fuel_l",      "L",   icon = "mdi:fuel",  sc = "total_increasing"),
         )
 
         for (s in sensors) {

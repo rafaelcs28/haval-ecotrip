@@ -88,6 +88,15 @@ data class RollingSnapshot(
     }
 }
 
+data class LifetimeSnapshot(
+    val energyKwh: Float,
+    val regenKwh:  Float,
+    val netKwh:    Float,
+    val distKm:    Float,
+    val timeSec:   Long,
+    val fuelL:     Float,
+)
+
 typealias TripListener = (snapA: TripSnapshot, snapB: TripSnapshot, rolling: RollingSnapshot) -> Unit
 
 private class TripAccum {
@@ -157,6 +166,13 @@ class TripManager private constructor() {
     private val tripA = TripAccum()
     private val tripB = TripAccum()
 
+    // ── Lifetime — nunca zera ────────────────────────────────────────────────────
+    private var lifeFuelL:     Float = 0f
+    private var lifeEnergyKwh: Float = 0f
+    private var lifeRegenKwh:  Float = 0f
+    private var lifeDistKm:    Float = 0f
+    private var lifeTimeSec:   Long  = 0L
+
     // Rolling window "desde última partida"
     private var rollingAccFuel   = 0f
     private var rollingAccEnergy = 0f
@@ -192,6 +208,17 @@ class TripManager private constructor() {
     private var rollingStartSocPct:  Float   = 0f
     private var rollingStartTankL:   Float   = 0f
     private var rollingStartCaptured: Boolean = false
+
+    fun getLifetimeSnapshot(): LifetimeSnapshot = synchronized(lock) {
+        LifetimeSnapshot(
+            energyKwh = lifeEnergyKwh,
+            regenKwh  = lifeRegenKwh,
+            netKwh    = (lifeEnergyKwh - lifeRegenKwh).coerceAtLeast(0f),
+            distKm    = lifeDistKm,
+            timeSec   = lifeTimeSec,
+            fuelL     = lifeFuelL,
+        )
+    }
 
     fun init(context: Context) {
         val ctx = try {
@@ -324,19 +351,32 @@ class TripManager private constructor() {
             for (trip in listOf(tripA, tripB)) {
                 // Finalize any ongoing P pause
                 val extraPauseMs = if (trip.gearPauseStartMs > 0L) (now - trip.gearPauseStartMs) else 0L
-                val pausedMs = trip.totalPausedMs + extraPauseMs
+                val pausedMs     = trip.totalPausedMs + extraPauseMs
+                // Capturar deltas antes de aplicar (usados também pelo lifetime)
+                val dEnergyEnd = max(0f, curEnergy - trip.sessStartEnergy)
+                val dRegenEnd  = max(0f, curRegen  - trip.sessStartRegen)
+                val dDistEnd   = if (trip.sessDistReady) max(0f, curDist - trip.sessStartDist) else 0f
+                val dTimeEnd   = ((now - trip.sessStartMs - pausedMs) / 1000L).coerceAtLeast(0L)
+
                 trip.fuelL     += trip.sessionFuelL
-                trip.energyKwh += max(0f, curEnergy - trip.sessStartEnergy)
-                trip.regenKwh  += max(0f, curRegen  - trip.sessStartRegen)
+                trip.energyKwh += dEnergyEnd
+                trip.regenKwh  += dRegenEnd
                 // Só acumula distância se o baseline foi estabelecido nesta sessão.
                 // Evita phantom km quando o app reinicia e sessStartDist=0 (padrão não persistido).
-                if (trip.sessDistReady) {
-                    trip.distKm += max(0f, curDist - trip.sessStartDist)
-                }
-                trip.timeSec   += ((now - trip.sessStartMs - pausedMs) / 1000L).coerceAtLeast(0L)
+                if (trip.sessDistReady) trip.distKm += dDistEnd
+                trip.timeSec      += dTimeEnd
                 trip.sessionFuelL   = 0f
                 trip.gearPauseStartMs = 0L
                 trip.totalPausedMs    = 0L
+
+                // Lifetime — ponto 6: flush final do fim de sessão (apenas trip A)
+                // lifeFuelL: NÃO adicionar — sessionFuelL já foi acumulado em onFuelPct()
+                if (trip === tripA) {
+                    lifeEnergyKwh += dEnergyEnd
+                    lifeRegenKwh  += dRegenEnd
+                    lifeDistKm    += dDistEnd
+                    lifeTimeSec   += dTimeEnd
+                }
             }
             lastShutdownMs = now
             // Mark as cleanly ended BEFORE saving so loadFromPrefs() will see true next time.
@@ -462,6 +502,18 @@ class TripManager private constructor() {
                 saveHistory()
             }
 
+            // Lifetime — ponto 7: flush deltas inter-checkpoint para lifetime antes de zerar trip A
+            // (dados entre o último checkpoint e o momento do reset que ainda não foram commitados)
+            if (id == TripId.A && sessionActive) {
+                lifeEnergyKwh += max(0f, curEnergy - trip.sessStartEnergy)
+                lifeRegenKwh  += max(0f, curRegen  - trip.sessStartRegen)
+                if (trip.sessDistReady) lifeDistKm += max(0f, curDist - trip.sessStartDist)
+                val extraPauseMs = if (trip.gearPauseStartMs > 0L) (now - trip.gearPauseStartMs) else 0L
+                val pausedMs = trip.totalPausedMs + extraPauseMs
+                lifeTimeSec += ((now - trip.sessStartMs - pausedMs) / 1000L).coerceAtLeast(0L)
+                // lifeFuelL: NÃO adicionar sessionFuelL — já está em lifeFuelL via onFuelPct()
+            }
+
             // Zero all accumulators
             trip.fuelL        = 0f
             trip.sessionFuelL = 0f
@@ -522,6 +574,7 @@ class TripManager private constructor() {
         val now = System.currentTimeMillis()
         for (trip in listOf(tripA, tripB)) {
             // Fuel: merge session accumulator into base
+            // (lifeFuelL já acumulado em onFuelPct — não adicionar aqui)
             trip.fuelL        += trip.sessionFuelL
             trip.sessionFuelL  = 0f
 
@@ -538,8 +591,9 @@ class TripManager private constructor() {
             trip.hwRegen        = curRegen
 
             // Distance: only if baseline was established this session
+            var dDist = 0f
             if (trip.sessDistReady) {
-                val dDist = max(0f, curDist - trip.sessStartDist)
+                dDist = max(0f, curDist - trip.sessStartDist)
                 trip.distKm       += dDist
                 trip.sessStartDist = curDist
                 trip.hwDist        = curDist
@@ -554,6 +608,14 @@ class TripManager private constructor() {
             trip.totalPausedMs = 0L
             // If still in P, reset pause start so next window doesn't double-count
             if (trip.gearPauseStartMs > 0L) trip.gearPauseStartMs = now
+
+            // Lifetime — ponto 5: acumula deltas do checkpoint (apenas trip A)
+            if (trip === tripA) {
+                lifeEnergyKwh += dEnergy
+                lifeRegenKwh  += dRegen
+                lifeDistKm    += dDist
+                lifeTimeSec   += deltaSec
+            }
         }
         saveToPrefs()
         Log.d(TAG, "Checkpoint — fuelA=${tripA.fuelL} distA=${tripA.distKm} energyA=${tripA.energyKwh}")
@@ -592,6 +654,7 @@ class TripManager private constructor() {
                 prevFuelPct   = value
                 pendingFuelL += dFuelL
                 for (trip in listOf(tripA, tripB)) trip.sessionFuelL += dFuelL
+                lifeFuelL      += dFuelL   // lifetime: acumula direto (não passa por checkpoint)
                 rollingAccFuel += dFuelL
                 Log.d(TAG, "Fuel drop ${drop}% → ${dFuelL}L (pct=$value)")
             }
@@ -610,6 +673,7 @@ class TripManager private constructor() {
         if (!sessionActive) return
         for (trip in listOf(tripA, tripB)) {
             if (value < prev && value < trip.hwEnergy * 0.9f) {
+                if (trip === tripA) lifeEnergyKwh += trip.hwEnergy - trip.sessStartEnergy   // ponto 2
                 trip.energyKwh += trip.hwEnergy - trip.sessStartEnergy
                 trip.sessStartEnergy = value
                 trip.hwEnergy = value
@@ -625,6 +689,7 @@ class TripManager private constructor() {
         if (!sessionActive) return
         for (trip in listOf(tripA, tripB)) {
             if (value < prev && value < trip.hwRegen * 0.9f) {
+                if (trip === tripA) lifeRegenKwh += trip.hwRegen - trip.sessStartRegen   // ponto 3
                 trip.regenKwh += trip.hwRegen - trip.sessStartRegen
                 trip.sessStartRegen = value
                 trip.hwRegen = value
@@ -689,6 +754,7 @@ class TripManager private constructor() {
                 continue   // nothing to accumulate yet; next tick will start counting
             }
             if (value < prev && value < trip.hwDist * 0.9f) {
+                if (trip === tripA) lifeDistKm += trip.hwDist - trip.sessStartDist   // ponto 4
                 trip.distKm += trip.hwDist - trip.sessStartDist
                 trip.sessStartDist = value
                 trip.hwDist = value
@@ -819,6 +885,12 @@ class TripManager private constructor() {
         latestFuelPct = prefs.getFloat(SharedPreferencesKeys.LATEST_FUEL_PCT, 0f)
         latestSocPct  = prefs.getFloat(SharedPreferencesKeys.LATEST_SOC_PCT,  0f)
 
+        lifeFuelL     = prefs.getFloat(SharedPreferencesKeys.LIFETIME_FUEL_L,      0f)
+        lifeEnergyKwh = prefs.getFloat(SharedPreferencesKeys.LIFETIME_ENERGY_KWH,  0f)
+        lifeRegenKwh  = prefs.getFloat(SharedPreferencesKeys.LIFETIME_REGEN_KWH,   0f)
+        lifeDistKm    = prefs.getFloat(SharedPreferencesKeys.LIFETIME_DISTANCE_KM, 0f)
+        lifeTimeSec   = prefs.getLong (SharedPreferencesKeys.LIFETIME_TIME_SEC,    0L)
+
         rollingAccFuel      = prefs.getFloat(SharedPreferencesKeys.ROLLING_FUEL_L,        0f)
         rollingAccEnergy    = prefs.getFloat(SharedPreferencesKeys.ROLLING_ENERGY_KWH,    0f)
         rollingAccRegen     = prefs.getFloat(SharedPreferencesKeys.ROLLING_REGEN_KWH,     0f)
@@ -873,6 +945,11 @@ class TripManager private constructor() {
             .putFloat(SharedPreferencesKeys.TRIP_B_REGEN_KWH,   tripB.regenKwh)
             .putFloat(SharedPreferencesKeys.TRIP_B_DISTANCE_KM, tripB.distKm)
             .putLong (SharedPreferencesKeys.TRIP_B_TIME_SEC,    tripB.timeSec)
+            .putFloat(SharedPreferencesKeys.LIFETIME_FUEL_L,      lifeFuelL)
+            .putFloat(SharedPreferencesKeys.LIFETIME_ENERGY_KWH,  lifeEnergyKwh)
+            .putFloat(SharedPreferencesKeys.LIFETIME_REGEN_KWH,   lifeRegenKwh)
+            .putFloat(SharedPreferencesKeys.LIFETIME_DISTANCE_KM, lifeDistKm)
+            .putLong (SharedPreferencesKeys.LIFETIME_TIME_SEC,    lifeTimeSec)
             .putFloat(SharedPreferencesKeys.ROLLING_FUEL_L,        rollingAccFuel)
             .putFloat(SharedPreferencesKeys.ROLLING_ENERGY_KWH,    rollingAccEnergy)
             .putFloat(SharedPreferencesKeys.ROLLING_REGEN_KWH,     rollingAccRegen)
