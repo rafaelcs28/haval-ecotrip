@@ -350,6 +350,19 @@ class TripManager private constructor() {
         }
     }
 
+    /**
+     * Deleta uma entrada do histórico pelo timestamp ISO (mesmo formato publicado no MQTT).
+     * Persiste imediatamente. Retorna true se alguma entrada foi removida.
+     */
+    fun deleteHistoryEntry(isoTimestamp: String): Boolean = synchronized(lock) {
+        val fmt = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.getDefault())
+        val removed = tripHistory.removeIf { entry ->
+            try { fmt.format(java.util.Date(entry.timestampMs)) == isoTimestamp } catch (_: Exception) { false }
+        }
+        if (removed) saveHistory()
+        removed
+    }
+
     fun getMaxHistoryEntries(): Int = synchronized(lock) { maxHistoryEntries }
 
     fun setMaxHistoryEntries(count: Int) {

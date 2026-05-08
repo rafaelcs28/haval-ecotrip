@@ -817,6 +817,23 @@ class MqttManager private constructor() {
                         publishResult("charge_limit", "ok:$pct (fallback — leitura de confirmação falhou)")
                     }
                 }
+                "delete_trip" -> {
+                    val isoTs = payload.trim()
+                    if (isoTs.isEmpty()) {
+                        publishResult("delete_trip", "error: timestamp vazio")
+                        return@submit
+                    }
+                    val deleted = TripManager.getInstance().deleteHistoryEntry(isoTs)
+                    if (deleted) {
+                        val updated = TripManager.getInstance().getHistory()
+                        publishTripHistory(updated)
+                        publishResult("delete_trip", "ok:deleted $isoTs")
+                        AppLogger.i(TAG, "✓ Trip deletado do histórico: $isoTs")
+                    } else {
+                        publishResult("delete_trip", "error:not_found $isoTs")
+                        AppLogger.w(TAG, "Trip não encontrado para deletar: $isoTs")
+                    }
+                }
                 else -> AppLogger.w(TAG, "Comando desconhecido: $cmd")
             }
         }
