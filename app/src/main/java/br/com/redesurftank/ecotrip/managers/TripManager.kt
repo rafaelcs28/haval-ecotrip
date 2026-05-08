@@ -132,9 +132,9 @@ private class TripAccum {
     var startFuelPct:      Float   = 0f
     var startSocCaptured:  Boolean = false
     var startFuelCaptured: Boolean = false
-    // Gear-P pause tracking — timer pauses while gear is P (charging / parked)
-    var gearPauseStartMs: Long = 0L   // >0 = timestamp when P gear started this session
-    var totalPausedMs:    Long = 0L   // cumulative ms paused in P this session
+    // Gear pause tracking — timer runs ONLY while gear is D, N or R; paused for P/empty/unknown
+    var gearPauseStartMs: Long = 0L   // >0 = timestamp when non-driving gear started this session
+    var totalPausedMs:    Long = 0L   // cumulative ms paused this session
 }
 
 class TripManager private constructor() {
@@ -309,8 +309,8 @@ class TripManager private constructor() {
                 trip.sessStartMs      = now
                 // sessDistReady = false: first onDist() establishes the real dist baseline
                 trip.sessDistReady    = false
-                // If car is already in P (e.g. started while charging), begin paused immediately
-                trip.gearPauseStartMs = if (currentGear == "P") now else 0L
+                // Start paused unless already in a driving gear (D/N/R) — covers P, empty, unknown
+                trip.gearPauseStartMs = if (isDrivingGear(currentGear)) 0L else now
                 trip.totalPausedMs    = 0L
 
                 if (!sessionEndedCleanly && (trip.sessStartEnergy > 0f || trip.sessStartRegen > 0f)) {
@@ -386,23 +386,29 @@ class TripManager private constructor() {
         }
     }
 
+    /** Returns true only when the car is in a driving gear — the only gears that count time. */
+    private fun isDrivingGear(gear: String): Boolean = gear in setOf("D", "N", "R")
+
     /**
      * Called whenever the car reports a gear change.
-     * Pauses trip timers while in P (parked / charging) and resumes on any other gear.
+     * Timer runs ONLY while gear is D, N or R.
+     * Pauses for P, empty string (no signal yet) or any unknown value.
+     * Since lifetime time piggybacks on Trip A's delta (which uses the same pausedMs),
+     * this fix automatically applies to the lifetime timer as well.
      */
     fun onGear(gear: String) {
         synchronized(lock) {
-            val wasP = currentGear == "P"
-            val isP  = gear == "P"
+            val wasDriving = isDrivingGear(currentGear)
+            val isDriving  = isDrivingGear(gear)
             currentGear = gear
             if (!sessionActive) return
             val now = System.currentTimeMillis()
             for (trip in listOf(tripA, tripB)) {
-                if (!wasP && isP) {
-                    // Entering P — start pause
+                if (wasDriving && !isDriving) {
+                    // Left a driving gear (D/N/R) → pause timer
                     if (trip.gearPauseStartMs == 0L) trip.gearPauseStartMs = now
-                } else if (wasP && !isP) {
-                    // Leaving P — finalize pause
+                } else if (!wasDriving && isDriving) {
+                    // Entered a driving gear → resume timer
                     if (trip.gearPauseStartMs > 0L) {
                         trip.totalPausedMs   += (now - trip.gearPauseStartMs)
                         trip.gearPauseStartMs = 0L
@@ -531,8 +537,8 @@ class TripManager private constructor() {
             trip.hwRegen          = curRegen
             trip.hwDist           = curDist
             trip.sessDistReady    = true   // curDist is known-good at manual reset time
-            // Reset pause tracking — restart paused immediately if still in P
-            trip.gearPauseStartMs = if (currentGear == "P") now else 0L
+            // Reset pause tracking — pause unless currently in a driving gear
+            trip.gearPauseStartMs = if (isDrivingGear(currentGear)) 0L else now
             trip.totalPausedMs    = 0L
 
             // Reset start bookmarks for next trip — independently per type
