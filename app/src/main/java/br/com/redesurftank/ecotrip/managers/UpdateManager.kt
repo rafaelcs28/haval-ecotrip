@@ -11,6 +11,8 @@ import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.TimeUnit
 
 private const val TAG = "UpdateManager"
 
@@ -33,7 +35,9 @@ class UpdateManager private constructor() {
             "https://api.github.com/repos/${BuildConfig.GITHUB_REPO}/releases/latest"
     }
 
-    private val executor = Executors.newSingleThreadExecutor()
+    private val executor  = Executors.newSingleThreadExecutor()
+    private val scheduler = Executors.newSingleThreadScheduledExecutor()
+    private var periodicFuture: ScheduledFuture<*>? = null
 
     var latestRelease: ReleaseInfo? = null
         private set
@@ -48,6 +52,22 @@ class UpdateManager private constructor() {
         private set
 
     var onUpdateStateChanged: (() -> Unit)? = null
+
+    /**
+     * Inicia verificação periódica a cada [intervalMinutes] minutos.
+     * O primeiro check imediato é feito pelo chamador (checkForUpdate()); aqui só agenda
+     * os seguintes. Seguro chamar múltiplas vezes — cancela o agendamento anterior.
+     */
+    fun startPeriodicCheck(intervalMinutes: Long = 10) {
+        periodicFuture?.cancel(false)
+        periodicFuture = scheduler.scheduleAtFixedRate(
+            { checkForUpdate() },
+            intervalMinutes,   // delay inicial = 1 intervalo (não duplica o check do startup)
+            intervalMinutes,
+            TimeUnit.MINUTES,
+        )
+        Log.d(TAG, "Periodic update check scheduled every ${intervalMinutes}min")
+    }
 
     /** Check for a new release in the background. Safe to call multiple times. */
     fun checkForUpdate() {
