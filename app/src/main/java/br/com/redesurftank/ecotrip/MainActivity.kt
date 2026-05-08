@@ -7,6 +7,7 @@ import br.com.redesurftank.ecotrip.managers.BackupManager
 import br.com.redesurftank.ecotrip.managers.CarDataManager
 import br.com.redesurftank.ecotrip.managers.MqttManager
 import br.com.redesurftank.ecotrip.managers.TripManager
+import br.com.redesurftank.ecotrip.managers.UpdateManager
 import br.com.redesurftank.ecotrip.ui.screens.ConsumptionScreen
 import br.com.redesurftank.ecotrip.ui.theme.EcotripTheme
 
@@ -19,6 +20,7 @@ class MainActivity : ComponentActivity() {
         TripManager.getInstance().init(this)
         MqttManager.getInstance().init(this)
         BackupManager.getInstance().init(this)
+        UpdateManager.getInstance().init(this)
 
         setContent {
             EcotripTheme {

@@ -37,6 +37,12 @@ class UpdateManager private constructor() {
             "https://api.github.com/repos/${BuildConfig.GITHUB_REPO}/releases/latest"
     }
 
+    private var appContext: Context? = null
+
+    fun init(context: Context) {
+        appContext = context.applicationContext
+    }
+
     private val executor  = Executors.newSingleThreadExecutor()
     private val scheduler = Executors.newSingleThreadScheduledExecutor()
     private var periodicFuture: ScheduledFuture<*>? = null
@@ -82,7 +88,11 @@ class UpdateManager private constructor() {
                 latestRelease = info
                 isUpdateAvailable = isNewer(info.version, BuildConfig.VERSION_NAME)
                 if (isUpdateAvailable) {
-                    AppLogger.i(TAG, "Update available: ${info.version} (current: ${BuildConfig.VERSION_NAME})")
+                    AppLogger.i(TAG, "Update available: ${info.version} (current: ${BuildConfig.VERSION_NAME}}) — iniciando download automático")
+                    val ctx = appContext
+                    if (ctx != null) {
+                        downloadAndInstall(ctx)   // auto-download sem interação do usuário
+                    }
                 } else {
                     Log.d(TAG, "Already on latest version (${BuildConfig.VERSION_NAME})")
                 }
