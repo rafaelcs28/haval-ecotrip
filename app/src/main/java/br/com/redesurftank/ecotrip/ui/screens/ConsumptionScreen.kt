@@ -319,7 +319,7 @@ fun ConsumptionScreen() {
             .background(VoidBlack)
             .systemBarsPadding()
             .padding(horizontal = 16.dp, vertical = 10.dp),
-        verticalArrangement = Arrangement.spacedBy(7.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),

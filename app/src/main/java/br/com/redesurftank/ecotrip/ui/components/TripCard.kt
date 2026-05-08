@@ -154,9 +154,12 @@ fun TripCard(
                 if (snapshot.combinedKmL > 0f)
                     TMetric("km/L comb.", "%.2f".format(snapshot.combinedKmL), AuroraTeal)
                 if (snapshot.costBrl > 0.01f) {
-                    TMetric("💰 Custo", "R$ %.2f".format(snapshot.costBrl), WarnYellow)
-                    if (snapshot.costPerKm > 0f)
-                        TMetric("R$/km", "%.3f".format(snapshot.costPerKm), WarnYellow.copy(alpha = 0.7f))
+                    // Custo e R$/km numa única linha para não cortar conteúdo
+                    val costValue = if (snapshot.costPerKm > 0f)
+                        "R$ %.2f · %.3f/km".format(snapshot.costBrl, snapshot.costPerKm)
+                    else
+                        "R$ %.2f".format(snapshot.costBrl)
+                    TMetric("💰 Custo", costValue, WarnYellow)
                 }
             }
         }
@@ -167,7 +170,7 @@ fun TripCard(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(88.dp)
+                .height(76.dp)
                 .background(
                     Brush.verticalGradient(
                         listOf(GlassCard.copy(alpha = 0.6f), VoidBlack)

@@ -55,8 +55,8 @@ fun RollingWindowCard(
                     size    = Size(size.width, 1.dp.toPx()),
                 )
             }
-            .padding(horizontal = 16.dp, vertical = 11.dp),
-        verticalArrangement = Arrangement.spacedBy(9.dp),
+            .padding(horizontal = 16.dp, vertical = 7.dp),
+        verticalArrangement = Arrangement.spacedBy(5.dp),
     ) {
         // ── Header ────────────────────────────────────────────────────────────
         Row(
