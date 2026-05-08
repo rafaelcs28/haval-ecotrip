@@ -473,6 +473,24 @@ class TripManager private constructor() {
                     lifeTimeSec   += dTimeEnd
                 }
             }
+            // Flush rolling final: capta energia/km do trecho parcial entre o último
+            // tick do odômetro e o fim da sessão (o trip A já faz esse flush acima via
+            // dEnergyEnd/dDistEnd; o rolling precisa do mesmo para não sub-contar).
+            if (prevRollingDist >= 0f) {
+                val dEnergyRoll = max(0f, curEnergy - prevRollingEnergy)
+                val dRegenRoll  = max(0f, curRegen  - prevRollingRegen)
+                val dDistRoll   = max(0f, curDist   - prevRollingDist)
+                if (dDistRoll > 0f) {
+                    rollingDistKm    += dDistRoll
+                    rollingAccEnergy += dEnergyRoll
+                    rollingAccRegen  += dRegenRoll
+                    AppLogger.i("TripManager",
+                        "rolling flush @ session end: +${String.format("%.3f", dDistRoll)}km " +
+                        "+${String.format("%.4f", dEnergyRoll)}kWh +${String.format("%.4f", dRegenRoll)}kWhR"
+                    )
+                }
+            }
+
             lastShutdownMs = now
             // Mark as cleanly ended BEFORE saving so loadFromPrefs() will see true next time.
             prefs.edit().putBoolean(SharedPreferencesKeys.SESSION_ENDED_CLEANLY, true).apply()
@@ -864,13 +882,25 @@ class TripManager private constructor() {
             val dEnergy = max(0f, curEnergy - prevRollingEnergy)
             val dRegen  = max(0f, curRegen  - prevRollingRegen)
 
-            prevRollingDist   = value
-            prevRollingEnergy = curEnergy
-            prevRollingRegen  = curRegen
+            prevRollingDist = value
+            // High-watermark: nunca deixa o baseline cair.
+            // Se curEnergy sofreu um dip entre dois ticks (ruído ou medição) e depois
+            // sobe de novo, sem o HW o delta posterior seria maior do que o real
+            // (overcounting). Com HW, o baseline só avança, nunca recua.
+            prevRollingEnergy = maxOf(prevRollingEnergy, curEnergy)
+            prevRollingRegen  = maxOf(prevRollingRegen,  curRegen)
 
             rollingDistKm    += kmStep
             rollingAccEnergy += dEnergy
             rollingAccRegen  += dRegen
+
+            AppLogger.d("TripManager",
+                "rolling tick: km+=${String.format("%.3f", kmStep)} " +
+                "dE=${String.format("%.4f", dEnergy)} dR=${String.format("%.4f", dRegen)} " +
+                "accE=${String.format("%.3f", rollingAccEnergy)} accR=${String.format("%.3f", rollingAccRegen)} " +
+                "dist=${String.format("%.2f", rollingDistKm)} " +
+                "→ ${String.format("%.2f", if (rollingDistKm > 0.1f) (rollingAccEnergy - rollingAccRegen) / rollingDistKm * 100f else 0f)} kWh/100km"
+            )
         }
 
         // Trip distance tracking + chart
