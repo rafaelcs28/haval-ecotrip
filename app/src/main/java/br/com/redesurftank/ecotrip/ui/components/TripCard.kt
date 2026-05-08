@@ -153,41 +153,10 @@ fun TripCard(
                     TMetric("Tanque", "%.1fL→%.1fL".format(snapshot.startTankL, snapshot.currentTankL), TextPrimary)
                 if (snapshot.combinedKmL > 0f)
                     TMetric("km/L comb.", "%.2f".format(snapshot.combinedKmL), AuroraTeal)
-            }
-        }
-
-        // ── Custo total ───────────────────────────────────────────────────────
-        if (snapshot.costBrl > 0.01f) {
-            HorizontalDivider(color = WarnYellow.copy(alpha = 0.18f), thickness = 0.5.dp)
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 3.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment     = Alignment.CenterVertically,
-            ) {
-                Text(
-                    "💰 Custo total",
-                    fontSize  = 12.sp,
-                    color     = TextSecondary,
-                )
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment     = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        "R$ %.2f".format(snapshot.costBrl),
-                        fontSize   = 15.sp,
-                        fontWeight = FontWeight.Bold,
-                        color      = WarnYellow,
-                    )
-                    if (snapshot.costPerKm > 0f) {
-                        Text(
-                            "R$ %.2f/km".format(snapshot.costPerKm),
-                            fontSize = 11.sp,
-                            color    = WarnYellow.copy(alpha = 0.65f),
-                        )
-                    }
+                if (snapshot.costBrl > 0.01f) {
+                    TMetric("💰 Custo", "R$ %.2f".format(snapshot.costBrl), WarnYellow)
+                    if (snapshot.costPerKm > 0f)
+                        TMetric("R$/km", "%.3f".format(snapshot.costPerKm), WarnYellow.copy(alpha = 0.7f))
                 }
             }
         }
