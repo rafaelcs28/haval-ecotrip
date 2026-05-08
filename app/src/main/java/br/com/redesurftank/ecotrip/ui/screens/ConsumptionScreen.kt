@@ -71,10 +71,10 @@ fun ConsumptionScreen() {
     var isCheckingUpdate by remember { mutableStateOf(updateMgr.isChecking) }
     var downloadProgress by remember { mutableStateOf(updateMgr.downloadProgress) }
 
-    // Check on startup + repeat every 10 min while app is running
+    // Check on startup + repeat every 3 min while app is running
     LaunchedEffect(Unit) {
         updateMgr.checkForUpdate()
-        updateMgr.startPeriodicCheck(10)
+        updateMgr.startPeriodicCheck(3)
     }
 
     DisposableEffect(updateMgr) {

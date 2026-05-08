@@ -158,6 +158,16 @@ private fun HistoryEntryRow(entry: TripHistoryEntry, index: Int) {
                     DetailMetric("Regenerada", "%.2f kWh".format(entry.regenKwh),  Modifier.weight(1f))
                     DetailMetric("Líquido",    "%.2f kWh".format(entry.netKwh),    Modifier.weight(1f), color = Green)
                 }
+                if (entry.costBrl > 0.01f) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        DetailMetric("💰 Custo Total", "R$ %.2f".format(entry.costBrl), Modifier.weight(1f), color = WarnYellow)
+                        if (entry.costPerKm > 0f)
+                            DetailMetric("R$/km", "%.3f".format(entry.costPerKm), Modifier.weight(1f), color = WarnYellow)
+                        else
+                            Spacer(Modifier.weight(1f))
+                        Spacer(Modifier.weight(1f))
+                    }
+                }
             }
         }
     }
