@@ -293,8 +293,14 @@ class MqttManager private constructor() {
         fun f2(v: Float) = String.format(java.util.Locale.US, "%.2f", v)
         fun f3(v: Float) = String.format(java.util.Locale.US, "%.3f", v)
 
-        val completedPayload = """{"name":$safeName,"timestamp":"$ts","distance_km":${f2(snap.distKm)},"time_sec":${snap.timeSec},"fuel_l":${f3(snap.fuelL)},"energy_kwh":${f3(snap.energyKwh)},"regen_kwh":${f3(snap.regenKwh)},"net_kwh":${f3(snap.netKwh)},"kwh_per_100km":${f2(snap.kwhPer100km)},"km_per_l":${f2(snap.kmPerL)},"avg_speed_kmh":${f1(snap.avgSpeedKmh)},"soc_start":${f1(snap.startSocPct)},"soc_end":${f1(snap.currentSocPct)},"tank_start_l":${f1(snap.startTankL)},"tank_end_l":${f1(snap.currentTankL)}}"""
-        val newTripPayload   = """{"name":$safeName,"label":"$tripLabel","timestamp":"$ts","distance_km":${f2(snap.distKm)},"time_sec":${snap.timeSec},"fuel_l":${f2(snap.fuelL)},"energy_kwh":${f2(snap.energyKwh)},"regen_kwh":${f2(snap.regenKwh)},"net_kwh":${f2(snap.netKwh)},"kwh_per_100km":${f2(snap.kwhPer100km)},"km_per_l":${f2(snap.kmPerL)},"combined_km_l":${f2(snap.combinedKmL)},"soc_start":${f1(snap.startSocPct)},"soc_end":${f1(snap.currentSocPct)},"tank_start_l":${f1(snap.startTankL)},"tank_end_l":${f1(snap.currentTankL)}}"""
+        val snapNetKwh      = (snap.energyKwh - snap.regenKwh).coerceAtLeast(0f)
+        val fuelCostBrl     = snap.fuelL * snap.priceGasolinePerL
+        val energyCostBrl   = snapNetKwh * snap.priceEnergyPerKwh
+        val totalCostBrl    = fuelCostBrl + energyCostBrl
+        val costPerKm       = if (snap.distKm > 0.1f) totalCostBrl / snap.distKm else 0f
+
+        val completedPayload = """{"name":$safeName,"timestamp":"$ts","distance_km":${f2(snap.distKm)},"time_sec":${snap.timeSec},"fuel_l":${f3(snap.fuelL)},"energy_kwh":${f3(snap.energyKwh)},"regen_kwh":${f3(snap.regenKwh)},"net_kwh":${f3(snap.netKwh)},"kwh_per_100km":${f2(snap.kwhPer100km)},"km_per_l":${f2(snap.kmPerL)},"avg_speed_kmh":${f1(snap.avgSpeedKmh)},"soc_start":${f1(snap.startSocPct)},"soc_end":${f1(snap.currentSocPct)},"tank_start_l":${f1(snap.startTankL)},"tank_end_l":${f1(snap.currentTankL)},"fuel_cost_brl":${f2(fuelCostBrl)},"energy_cost_brl":${f2(energyCostBrl)},"total_cost_brl":${f2(totalCostBrl)},"cost_per_km":${f3(costPerKm)}}"""
+        val newTripPayload   = """{"name":$safeName,"label":"$tripLabel","timestamp":"$ts","distance_km":${f2(snap.distKm)},"time_sec":${snap.timeSec},"fuel_l":${f2(snap.fuelL)},"energy_kwh":${f2(snap.energyKwh)},"regen_kwh":${f2(snap.regenKwh)},"net_kwh":${f2(snap.netKwh)},"kwh_per_100km":${f2(snap.kwhPer100km)},"km_per_l":${f2(snap.kmPerL)},"combined_km_l":${f2(snap.combinedKmL)},"soc_start":${f1(snap.startSocPct)},"soc_end":${f1(snap.currentSocPct)},"tank_start_l":${f1(snap.startTankL)},"tank_end_l":${f1(snap.currentTankL)},"fuel_cost_brl":${f2(fuelCostBrl)},"energy_cost_brl":${f2(energyCostBrl)},"total_cost_brl":${f2(totalCostBrl)},"cost_per_km":${f3(costPerKm)}}"""
 
         return QueuedTripCompleted(
             lastCompletedTopic   = "$prefix/$tripId/last_completed",
@@ -488,6 +494,14 @@ class MqttManager private constructor() {
                 pubR("$label/soc_current", fmt1(snap.currentSocPct))   // retain — SOC não blanks no reconect
                 pub("$label/tank_start_l",fmt1(snap.startTankL))
                 pub("$label/tank_now_l",  fmt1(snap.currentTankL))
+                // Custo — calculado a partir dos preços embutidos no snapshot
+                val liveFuelCost   = snap.fuelL * snap.priceGasolinePerL
+                val liveNetKwh     = (snap.energyKwh - snap.regenKwh).coerceAtLeast(0f)
+                val liveEnergyCost = liveNetKwh * snap.priceEnergyPerKwh
+                val liveTotalCost  = liveFuelCost + liveEnergyCost
+                val liveCostPerKm  = if (snap.distKm > 0.1f) liveTotalCost / snap.distKm else 0f
+                pub("$label/cost_brl",    fmt2(liveTotalCost))
+                pub("$label/cost_per_km", fmt3(liveCostPerKm))
             }
             // Lifetime — totais absolutos com retain=true (total_increasing no HA)
             val lt = TripManager.getInstance().getLifetimeSnapshot()
@@ -499,6 +513,11 @@ class MqttManager private constructor() {
             pubR("lifetime/fuel_l",      fmt3(lt.fuelL))
             pubR("lifetime/charge_kwh",  fmt3(lt.chargeKwh))
             pubR("lifetime/charge_sec",  lt.chargeSec.toString())
+            // Custo lifetime — usa preços atuais (configuráveis pelo usuário)
+            val ltPriceGas    = prefs.getFloat(SharedPreferencesKeys.PRICE_GASOLINE_PER_L, 6.0f)
+            val ltPriceEnergy = prefs.getFloat(SharedPreferencesKeys.PRICE_ENERGY_PER_KWH, 0.9f)
+            val ltCostBrl     = lt.fuelL * ltPriceGas + lt.netKwh.coerceAtLeast(0f) * ltPriceEnergy
+            pubR("lifetime/cost_brl", fmt2(ltCostBrl))
 
             lastSuccessfulPublishMs = System.currentTimeMillis()
             // Publica timestamp ISO para a entidade "Última Atualização" no HA
@@ -558,8 +577,9 @@ class MqttManager private constructor() {
 
             val tripsJson = entries.joinToString(",") { e ->
                 val ts = fmt.format(Date(e.timestampMs))
-                val safeName = gson.toJson(e.name)   // JSON-quoted & escaped
-                """{"name":$safeName,"label":"${e.label}","timestamp":"$ts","distance_km":${f2(e.distKm)},"time_sec":${e.timeSec},"fuel_l":${f2(e.fuelL)},"energy_kwh":${f2(e.energyKwh)},"regen_kwh":${f2(e.regenKwh)},"net_kwh":${f2(e.netKwh)},"kwh_per_100km":${f2(e.kwhPer100km)},"km_per_l":${f2(e.kmPerL)},"combined_km_l":${f2(e.combinedKmL)},"avg_speed_kmh":${f1(e.avgSpeedKmh)},"soc_start":${f1(e.startSocPct)},"soc_end":${f1(e.endSocPct)},"tank_start_l":${f1(e.startTankL)},"tank_end_l":${f1(e.endTankL)}}"""
+                val safeName  = gson.toJson(e.name)   // JSON-quoted & escaped
+                val costPerKm = if (e.distKm > 0.1f && e.costBrl > 0f) e.costBrl / e.distKm else 0f
+                """{"name":$safeName,"label":"${e.label}","timestamp":"$ts","distance_km":${f2(e.distKm)},"time_sec":${e.timeSec},"fuel_l":${f2(e.fuelL)},"energy_kwh":${f2(e.energyKwh)},"regen_kwh":${f2(e.regenKwh)},"net_kwh":${f2(e.netKwh)},"kwh_per_100km":${f2(e.kwhPer100km)},"km_per_l":${f2(e.kmPerL)},"combined_km_l":${f2(e.combinedKmL)},"avg_speed_kmh":${f1(e.avgSpeedKmh)},"soc_start":${f1(e.startSocPct)},"soc_end":${f1(e.endSocPct)},"tank_start_l":${f1(e.startTankL)},"tank_end_l":${f1(e.endTankL)},"total_cost_brl":${f2(e.costBrl)},"cost_per_km":${f2(costPerKm)}}"""
             }
             val payload = """{"count":${entries.size},"trips":[$tripsJson]}"""
             AppLogger.i(TAG, "→ Publicando histórico (QoS 1, retained): $prefix/trips/history")
@@ -637,6 +657,11 @@ class MqttManager private constructor() {
             S("trip_b_soc_now",     "Trip B SOC Atual",      "$prefix/trip_b/soc_current",    "%",         icon = "mdi:battery"),
             S("trip_b_tank_start",  "Trip B Tanque Início",  "$prefix/trip_b/tank_start_l",   "L",         icon = "mdi:fuel"),
             S("trip_b_tank_now",    "Trip B Tanque Atual",   "$prefix/trip_b/tank_now_l",     "L",         icon = "mdi:fuel"),
+            // Custo por trip
+            S("trip_a_cost",        "Trip A Custo",          "$prefix/trip_a/cost_brl",       "R\$",       icon = "mdi:cash"),
+            S("trip_a_cost_per_km", "Trip A R\$/km",         "$prefix/trip_a/cost_per_km",    "R\$/km",    icon = "mdi:cash-multiple"),
+            S("trip_b_cost",        "Trip B Custo",          "$prefix/trip_b/cost_brl",       "R\$",       icon = "mdi:cash"),
+            S("trip_b_cost_per_km", "Trip B R\$/km",         "$prefix/trip_b/cost_per_km",    "R\$/km",    icon = "mdi:cash-multiple"),
             // Lifetime — state_class: total_increasing → HA registra estatísticas de longo prazo
             S("lifetime_energy",      "Lifetime Energia",           "$prefix/lifetime/energy_kwh",  "kWh", dc = "energy",    sc = "total_increasing"),
             S("lifetime_regen",       "Lifetime Regenerada",        "$prefix/lifetime/regen_kwh",   "kWh", dc = "energy",    sc = "total_increasing"),
@@ -646,6 +671,7 @@ class MqttManager private constructor() {
             S("lifetime_fuel",        "Lifetime Combustível",       "$prefix/lifetime/fuel_l",      "L",   icon = "mdi:fuel",       sc = "total_increasing"),
             S("lifetime_charge",      "Lifetime Carregado",         "$prefix/lifetime/charge_kwh",  "kWh", dc = "energy",           sc = "total_increasing"),
             S("lifetime_charge_time", "Lifetime Tempo Recarga",     "$prefix/lifetime/charge_sec",  "s",   icon = "mdi:timer-sand", sc = "total_increasing"),
+            S("lifetime_cost",        "Lifetime Custo Total",       "$prefix/lifetime/cost_brl",    "R\$", icon = "mdi:cash-register"),
         )
 
         for (s in sensors) {

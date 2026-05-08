@@ -58,11 +58,13 @@ data class TripHistoryEntry(
     val startTankL: Float = 0f,
     val endTankL: Float = 0f,
     val combinedKmL: Float = 0f,
+    val costBrl: Float = 0f,        // custo total em R$ (calculado no momento do reset com preços vigentes)
 ) {
     val netKwh: Float get() = energyKwh - regenKwh
     val kmPerL: Float get() = if (fuelL > 0.001f) distKm / fuelL else 0f
     val kwhPer100km: Float get() = if (distKm > 0.1f) (netKwh / distKm) * 100f else 0f
     val avgSpeedKmh: Float get() = if (timeSec > 0L) distKm / (timeSec / 3600f) else 0f
+    val costPerKm: Float get() = if (distKm > 0.1f && costBrl > 0f) costBrl / distKm else 0f
 }
 
 data class RollingSnapshot(
@@ -564,6 +566,8 @@ class TripManager private constructor() {
             // Save to history before clearing (only if trip has meaningful data)
             val snap = snapshot(trip)
             if (snap.distKm > 0.5f) {
+                val tripNetKwh  = (snap.energyKwh - snap.regenKwh).coerceAtLeast(0f)
+                val tripCostBrl = snap.fuelL * priceGasolinePerL + tripNetKwh * priceEnergyPerKwh
                 val entry = TripHistoryEntry(
                     name        = name.trim(),
                     label       = label,
@@ -578,6 +582,7 @@ class TripManager private constructor() {
                     startTankL  = snap.startTankL,
                     endTankL    = snap.currentTankL,
                     combinedKmL = snap.combinedKmL,
+                    costBrl     = tripCostBrl,
                 )
                 tripHistory.add(0, entry)
                 while (tripHistory.size > maxHistoryEntries) tripHistory.removeAt(tripHistory.lastIndex)

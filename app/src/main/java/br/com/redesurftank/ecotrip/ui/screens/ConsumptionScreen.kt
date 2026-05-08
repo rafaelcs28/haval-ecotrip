@@ -352,13 +352,24 @@ fun ConsumptionScreen() {
                         .border(1.dp, NeonLime.copy(alpha = 0.2f), RoundedCornerShape(5.dp))
                         .padding(horizontal = 7.dp, vertical = 2.dp),
                 )
-                val dotColor = when (mqttStatus) {
-                    MqttManager.Status.CONNECTED    -> NeonLime
-                    MqttManager.Status.CONNECTING   -> WarnYellow
-                    MqttManager.Status.ERROR        -> androidx.compose.ui.graphics.Color(0xFFFF4444)
-                    MqttManager.Status.DISCONNECTED -> TextSecondary
+                if (mqttStatus == MqttManager.Status.CONNECTED) {
+                    Box(Modifier.size(6.dp).background(NeonLime, CircleShape))
+                } else {
+                    val (mqttLabel, mqttColor) = when (mqttStatus) {
+                        MqttManager.Status.CONNECTING   -> "MQTT..." to WarnYellow
+                        MqttManager.Status.ERROR        -> "MQTT erro" to androidx.compose.ui.graphics.Color(0xFFFF4444)
+                        else                            -> "MQTT off"  to TextSecondary
+                    }
+                    Text(
+                        mqttLabel,
+                        fontSize = 9.sp,
+                        color    = mqttColor,
+                        modifier = Modifier
+                            .background(mqttColor.copy(alpha = 0.12f), RoundedCornerShape(4.dp))
+                            .border(1.dp, mqttColor.copy(alpha = 0.35f), RoundedCornerShape(4.dp))
+                            .padding(horizontal = 5.dp, vertical = 2.dp),
+                    )
                 }
-                Box(Modifier.size(6.dp).background(dotColor, CircleShape))
                 Text("Haval H6 HEV", fontSize = 11.sp, color = TextSecondary.copy(alpha = 0.6f))
             }
 
