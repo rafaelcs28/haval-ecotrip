@@ -11,6 +11,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.*
@@ -32,6 +33,7 @@ fun HistoryScreen(
     entries: List<TripHistoryEntry>,
     onClearHistory: () -> Unit,
     onDeleteEntry: (TripHistoryEntry) -> Unit = {},
+    onRenameEntry: (TripHistoryEntry, String) -> Unit = { _, _ -> },
     onBack: () -> Unit,
 ) {
     Column(
@@ -70,7 +72,12 @@ fun HistoryScreen(
         } else {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 itemsIndexed(entries) { index, entry ->
-                    HistoryEntryRow(entry = entry, index = index, onDelete = { onDeleteEntry(entry) })
+                    HistoryEntryRow(
+                        entry    = entry,
+                        index    = index,
+                        onDelete = { onDeleteEntry(entry) },
+                        onRename = { name -> onRenameEntry(entry, name) },
+                    )
                 }
             }
         }
@@ -78,9 +85,11 @@ fun HistoryScreen(
 }
 
 @Composable
-private fun HistoryEntryRow(entry: TripHistoryEntry, index: Int, onDelete: () -> Unit) {
-    var expanded      by remember { mutableStateOf(false) }
-    var confirmDelete by remember { mutableStateOf(false) }
+private fun HistoryEntryRow(entry: TripHistoryEntry, index: Int, onDelete: () -> Unit, onRename: (String) -> Unit) {
+    var expanded         by remember { mutableStateOf(false) }
+    var confirmDelete    by remember { mutableStateOf(false) }
+    var showRenameDialog by remember { mutableStateOf(false) }
+    var renameText       by remember(entry.timestampMs) { mutableStateOf(entry.name) }
     val dateFmt  = SimpleDateFormat("dd/MM/yy HH:mm", Locale.getDefault())
     val displayName = entry.name.ifEmpty { entry.label }
 
@@ -172,8 +181,20 @@ private fun HistoryEntryRow(entry: TripHistoryEntry, index: Int, onDelete: () ->
                     }
                 }
 
-                // ── Botão apagar ─────────────────────────────────────────────
+                // ── Botões renomear / apagar ──────────────────────────────────
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    TextButton(
+                        onClick        = { renameText = entry.name; showRenameDialog = true },
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                    ) {
+                        Icon(Icons.Default.Edit, contentDescription = "Renomear", tint = AccentBlue, modifier = Modifier.size(15.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            if (entry.name.isEmpty()) "Nomear" else "Renomear",
+                            fontSize = 13.sp,
+                            color    = AccentBlue,
+                        )
+                    }
                     TextButton(
                         onClick = { confirmDelete = true },
                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
@@ -190,6 +211,43 @@ private fun HistoryEntryRow(entry: TripHistoryEntry, index: Int, onDelete: () ->
                 }
             }
         }
+    }
+
+    // ── Diálogo de renomear ───────────────────────────────────────────────────
+    if (showRenameDialog) {
+        AlertDialog(
+            onDismissRequest = { showRenameDialog = false },
+            containerColor   = SurfaceCard,
+            title = { Text("Renomear viagem", fontWeight = FontWeight.Bold, color = TextPrimary) },
+            text  = {
+                OutlinedTextField(
+                    value         = renameText,
+                    onValueChange = { renameText = it },
+                    label         = { Text("Nome da viagem", fontSize = 12.sp) },
+                    singleLine    = true,
+                    modifier      = Modifier.fillMaxWidth(),
+                    colors        = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor   = AccentBlue,
+                        unfocusedBorderColor = BorderColor,
+                        focusedLabelColor    = AccentBlue,
+                        unfocusedLabelColor  = TextSecondary,
+                        focusedTextColor     = TextPrimary,
+                        unfocusedTextColor   = TextPrimary,
+                        cursorColor          = AccentBlue,
+                    ),
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { onRename(renameText.trim()); showRenameDialog = false }) {
+                    Text("Salvar", color = AccentBlue, fontWeight = FontWeight.SemiBold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRenameDialog = false; renameText = entry.name }) {
+                    Text("Cancelar", color = TextSecondary)
+                }
+            },
+        )
     }
 
     // ── Diálogo de confirmação ────────────────────────────────────────────────

@@ -402,6 +402,11 @@ fun ConsumptionScreen() {
                 tripManager.deleteHistoryEntry(entry)
                 history = tripManager.getHistory()
             },
+            onRenameEntry  = { entry, name ->
+                tripManager.renameTripHistoryEntry(entry.timestampMs, name)
+                history = tripManager.getHistory()
+                mqttManager.publishTripHistory(history)
+            },
             onBack = { showHistory = false },
         )
         return
@@ -492,7 +497,7 @@ fun ConsumptionScreen() {
                             .padding(horizontal = 5.dp, vertical = 2.dp),
                     )
                 }
-                Text("Haval H6 HEV", fontSize = 11.sp, color = TextSecondary.copy(alpha = 0.6f))
+                Text("Haval H6 PHEV34", fontSize = 11.sp, color = TextSecondary.copy(alpha = 0.6f))
             }
 
             // ── Right: update chip + action buttons

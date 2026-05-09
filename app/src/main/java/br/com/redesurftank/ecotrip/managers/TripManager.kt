@@ -467,6 +467,15 @@ class TripManager private constructor() {
         removed
     }
 
+    fun renameTripHistoryEntry(timestampMs: Long, name: String) {
+        synchronized(lock) {
+            val idx = tripHistory.indexOfFirst { it.timestampMs == timestampMs }
+            if (idx < 0) return
+            tripHistory[idx] = tripHistory[idx].copy(name = name.trim())
+            saveHistory()
+        }
+    }
+
     fun getMaxHistoryEntries(): Int = synchronized(lock) { maxHistoryEntries }
 
     fun setMaxHistoryEntries(count: Int) {
