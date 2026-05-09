@@ -10,6 +10,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import kotlinx.coroutines.delay
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.BatteryChargingFull
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Settings
@@ -101,6 +102,7 @@ fun ConsumptionScreen() {
 
     var showHistory       by remember { mutableStateOf(false) }
     var showChargeHistory by remember { mutableStateOf(false) }
+    var showStats         by remember { mutableStateOf(false) }
     var showSettings      by remember { mutableStateOf(false) }
     var showLog           by remember { mutableStateOf(false) }
 
@@ -313,6 +315,15 @@ fun ConsumptionScreen() {
         return
     }
 
+    if (showStats) {
+        StatsScreen(
+            trips   = history,
+            charges = chargeHistory,
+            onBack  = { showStats = false },
+        )
+        return
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -450,6 +461,9 @@ fun ConsumptionScreen() {
                 }
                 IconButton(onClick = { showChargeHistory = true }) {
                     Icon(Icons.Default.BatteryChargingFull, contentDescription = "Recargas", tint = AuroraTeal)
+                }
+                IconButton(onClick = { showStats = true }) {
+                    Icon(Icons.Default.BarChart, contentDescription = "Estatísticas", tint = Green)
                 }
                 IconButton(onClick = { showHistory = true }) {
                     Icon(Icons.Default.History, contentDescription = "Histórico", tint = TextSecondary)
