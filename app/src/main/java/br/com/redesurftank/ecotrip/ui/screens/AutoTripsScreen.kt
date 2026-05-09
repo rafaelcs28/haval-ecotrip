@@ -3,6 +3,7 @@ package br.com.redesurftank.ecotrip.ui.screens
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -10,12 +11,15 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import br.com.redesurftank.ecotrip.managers.AutoTripEntry
@@ -381,6 +385,8 @@ private fun AutoPeriodStat(
 
 @Composable
 private fun AutoTripEntryRow(entry: AutoTripEntry) {
+    var expanded by remember { mutableStateOf(false) }
+
     val dateFmtFull = remember { SimpleDateFormat("dd/MM HH:mm", Locale.getDefault()) }
     val timeFmt     = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
 
@@ -399,90 +405,135 @@ private fun AutoTripEntryRow(entry: AutoTripEntry) {
             .fillMaxWidth()
             .background(SurfaceCard, RoundedCornerShape(12.dp))
             .border(1.dp, BorderColor, RoundedCornerShape(12.dp))
-            .padding(horizontal = 14.dp, vertical = 10.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+            .clickable { expanded = !expanded },
     ) {
-        // ── Cabeçalho: data + horário + duração ───────────────────────────────
+        // ── Linha compacta ─────────────────────────────────────────────────────
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Box(
-                    modifier = Modifier
-                        .background(AccentBlue.copy(alpha = 0.12f), RoundedCornerShape(6.dp))
-                        .border(1.dp, AccentBlue.copy(alpha = 0.3f), RoundedCornerShape(6.dp))
-                        .padding(horizontal = 6.dp, vertical = 2.dp),
-                ) { Text("🚗", fontSize = 11.sp) }
+            // Badge 🚗
+            Box(
+                modifier = Modifier
+                    .background(AccentBlue.copy(alpha = 0.12f), RoundedCornerShape(6.dp))
+                    .border(1.dp, AccentBlue.copy(alpha = 0.3f), RoundedCornerShape(6.dp))
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+            ) { Text("🚗", fontSize = 10.sp) }
+
+            // Data + horário
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
                     "${dateFmtFull.format(Date(entry.startMs))} → ${timeFmt.format(Date(entry.endMs))}",
-                    fontSize = 13.sp,
+                    fontSize   = 13.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = TextPrimary,
+                    color      = TextPrimary,
+                    maxLines   = 1,
+                    overflow   = TextOverflow.Ellipsis,
                 )
+                Text(fmtAutoTripDur(durationSec), fontSize = 11.sp, color = TextSecondary)
             }
-            Text(fmtAutoTripDur(durationSec), fontSize = 13.sp, color = TextSecondary)
+
+            // Métricas inline
+            AutoCompactMetric("%.1f km".format(entry.distKm),   "dist")
+            AutoCompactMetric("%.1f kWh".format(entry.netKwh),  "liq.")
+            if (entry.fuelL > 0.001f)
+                AutoCompactMetric("%.2f L".format(entry.fuelL), "comb")
+
+            // Botão expandir
+            Icon(
+                if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                contentDescription = if (expanded) "Recolher" else "Expandir",
+                tint     = TextSecondary,
+                modifier = Modifier.size(18.dp),
+            )
         }
 
-        HorizontalDivider(color = Separator, thickness = 0.5.dp)
+        // ── Detalhes expandidos ────────────────────────────────────────────────
+        AnimatedVisibility(visible = expanded) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 14.dp, end = 14.dp, bottom = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                HorizontalDivider(color = Separator, thickness = 0.5.dp)
+                Spacer(Modifier.height(2.dp))
 
-        // ── Linha 1: km, vel, kWh liq, combustível ────────────────────────────
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(0.dp)) {
-            AutoTripMetric("%.1f km".format(entry.distKm),       "Distância",  AccentBlue,  Modifier.weight(1f))
-            AutoTripMetric("%.1f km/h".format(avgSpeed),          "Vel. Média", TextPrimary, Modifier.weight(1f))
-            AutoTripMetric("%.2f kWh".format(entry.netKwh),       "Elétrico",   Green,       Modifier.weight(1f))
-            if (entry.fuelL > 0.001f) {
-                AutoTripMetric("%.3f L".format(entry.fuelL),      "Combust.",   AccentOrange,Modifier.weight(1f))
-            }
-        }
-
-        // ── Linha 2: SOC e combustível % ──────────────────────────────────────
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(0.dp)) {
-            // SOC
-            Column(modifier = Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("%.0f%%".format(entry.startSocPct), fontSize = 13.sp, color = TextSecondary)
-                    Text("→", fontSize = 11.sp, color = TextSecondary)
-                    Text("%.0f%%".format(entry.endSocPct), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = socColor)
-                    Text("(%.0f%%)".format(socDelta), fontSize = 11.sp, color = socColor)
+                // Linha 1: km, vel, kWh liq, combustível
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    AutoDetailMetric("Distância",  "%.1f km".format(entry.distKm),        AccentBlue,   Modifier.weight(1f))
+                    AutoDetailMetric("Vel. Média", "%.1f km/h".format(avgSpeed),           TextPrimary,  Modifier.weight(1f))
+                    AutoDetailMetric("kWh líquido","%.2f kWh".format(entry.netKwh),        Green,        Modifier.weight(1f))
+                    if (entry.fuelL > 0.001f)
+                        AutoDetailMetric("Combustível","%.3f L".format(entry.fuelL),       AccentOrange, Modifier.weight(1f))
                 }
-                Text("Bateria (SOC)", fontSize = 10.sp, color = TextSecondary)
-            }
-            // Combustível % (se disponível)
-            if (entry.startFuelPct > 0f || entry.endFuelPct > 0f) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+
+                // Linha 2: energia bruta, regen, condução
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    AutoDetailMetric("Bruto",      "%.2f kWh".format(entry.energyKwh),    TextSecondary, Modifier.weight(1f))
+                    AutoDetailMetric("Regenerado", "%.2f kWh".format(entry.regenKwh),     AuroraTeal,    Modifier.weight(1f))
+                    AutoDetailMetric("Cond. efetiva", fmtAutoTripDur(entry.timeSec),       TextSecondary, Modifier.weight(1f))
+                }
+
+                // Linha 3: SOC início → fim
+                if (entry.startSocPct > 0f || entry.endSocPct > 0f) {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Text("Bateria:", fontSize = 11.sp, color = TextSecondary)
+                        Text("%.0f%%".format(entry.startSocPct), fontSize = 13.sp, color = TextSecondary)
+                        Text("→", fontSize = 11.sp, color = TextSecondary)
+                        Text("%.0f%%".format(entry.endSocPct), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = socColor)
+                        Text("(%.0f%%)".format(socDelta), fontSize = 11.sp, color = socColor)
+                    }
+                }
+
+                // Linha 4: Combustível % início → fim
+                if (entry.startFuelPct > 0f || entry.endFuelPct > 0f) {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Text("Combustível:", fontSize = 11.sp, color = TextSecondary)
                         Text("%.0f%%".format(entry.startFuelPct), fontSize = 13.sp, color = TextSecondary)
                         Text("→", fontSize = 11.sp, color = TextSecondary)
                         Text("%.0f%%".format(entry.endFuelPct), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = AccentOrange)
-                        if (fuelDelta < -0.5f) {
+                        if (fuelDelta < -0.5f)
                             Text("(%.0f%%)".format(fuelDelta), fontSize = 11.sp, color = AccentOrange)
-                        }
                     }
-                    Text("Combustível", fontSize = 10.sp, color = TextSecondary)
                 }
             }
-        }
-
-        // ── Linha 3: energia bruta e regenerada ───────────────────────────────
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(0.dp)) {
-            AutoTripMetric("%.2f kWh".format(entry.energyKwh), "Bruto",      TextSecondary, Modifier.weight(1f))
-            AutoTripMetric("%.2f kWh".format(entry.regenKwh),  "Regenerado", AuroraTeal,    Modifier.weight(1f))
-            AutoTripMetric(fmtAutoTripDur(entry.timeSec),       "Cond. efetiva", TextSecondary, Modifier.weight(1f))
         }
     }
 }
 
+// ── Métricas inline da linha compacta ─────────────────────────────────────────
+
 @Composable
-private fun AutoTripMetric(
-    value:    String,
+private fun AutoCompactMetric(value: String, label: String) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(value, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+        Text(label, fontSize = 10.sp, color = TextSecondary)
+    }
+}
+
+// ── Métricas da seção expandida ───────────────────────────────────────────────
+
+@Composable
+private fun AutoDetailMetric(
     label:    String,
-    color:    Color,
+    value:    String,
+    color:    Color    = TextPrimary,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier) {
-        Text(value, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = color)
-        Text(label, fontSize = 10.sp, color = TextSecondary)
+        Text(value, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = color)
+        Text(label, fontSize = 11.sp, color = TextSecondary)
     }
 }
