@@ -46,4 +46,7 @@ enum class CarConstants(val value: String) {
 
     // Gear status — mapeamento confirmado: 0=N, 2=D, 3=P, 4=R
     CAR_BASIC_GEAR_STATUS("car.basic.gear_status"),
+
+    // Driving ready state — 1=pronto para condução (carro ligado), 0=desligado/não pronto
+    CAR_BASIC_DRIVING_READY_STATE("car.basic.driving_ready_state"),
 }

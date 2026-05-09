@@ -165,6 +165,10 @@ fun ConsumptionScreen() {
                         mqttManager.latestGear = gearStr
                         tripManager.onGear(gearStr)
                     }
+                    CarConstants.CAR_BASIC_DRIVING_READY_STATE.value -> {
+                        val state = value.trim().toIntOrNull() ?: return@post
+                        tripManager.onDrivingReady(state)
+                    }
                     CarConstants.CAR_EV_INFO_CUR_CHARGE_CURRENT.value -> {
                         mqttManager.latestChargeCurrentA = value.trim().toFloatOrNull() ?: 0f
                         syncCharging()
@@ -208,6 +212,11 @@ fun ConsumptionScreen() {
 
                 carManager.fetchCurrent(CarConstants.CAR_EV_INFO_CUR_BATTERY_POWER_PERCENTAGE.value)
                     ?.trim()?.let { tripManager.onDataChanged(CarConstants.CAR_EV_INFO_CUR_BATTERY_POWER_PERCENTAGE.value, it) }
+
+                // Busca imediata de driving_ready_state — inicia trip automático se carro já estiver ligado
+                // (feito após busca de SOC/fuel para que latestSocPct/latestFuelPct estejam disponíveis)
+                carManager.fetchCurrent(CarConstants.CAR_BASIC_DRIVING_READY_STATE.value)
+                    ?.trim()?.toIntOrNull()?.let { tripManager.onDrivingReady(it) }
 
                 // Busca imediata de temperaturas — chegam raramente via listener passivo
                 carManager.fetchCurrent(CarConstants.CAR_BASIC_OUTSIDE_TEMP.value)

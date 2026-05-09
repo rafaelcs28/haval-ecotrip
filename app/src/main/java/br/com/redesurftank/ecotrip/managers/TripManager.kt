@@ -227,18 +227,19 @@ class TripManager private constructor() {
     // Recarga — integração P×Δt (independente de sessão de condução)
     private var lifeChargeKwh:        Float   = 0f
     private var lifeChargeSec:        Long    = 0L
-    // Checkpoints (para StatsScreen — um por transição P↔D/R)
+    // Checkpoints (para StatsScreen — um por transição P↔D/R e por driving_ready)
     private val checkpoints = mutableListOf<LifetimeCheckpoint>()
-    // Auto-Trip tracking (P→D inicia, D→P finaliza)
-    private val autoTripHistory    = mutableListOf<AutoTripEntry>()
-    private var autoTripStartMs    = 0L
-    private var autoTripStartSoc   = 0f
-    private var autoTripStartFuel  = 0f
-    private var autoTripStartEnergy= 0f
-    private var autoTripStartRegen = 0f
-    private var autoTripStartDist  = 0f
-    private var autoTripStartFuelL = 0f
-    private var autoTripStartTime  = 0L
+    // Auto-Trip tracking (driving_ready=1 inicia, driving_ready≠1 finaliza)
+    private val autoTripHistory      = mutableListOf<AutoTripEntry>()
+    private var lastDrivingReadyState: Int = 0   // persiste para detectar reinício mid-trip
+    private var autoTripStartMs      = 0L
+    private var autoTripStartSoc     = 0f
+    private var autoTripStartFuel    = 0f
+    private var autoTripStartEnergy  = 0f
+    private var autoTripStartRegen   = 0f
+    private var autoTripStartDist    = 0f
+    private var autoTripStartFuelL   = 0f
+    private var autoTripStartTime    = 0L
     private var currentChargePowerKw: Float   = 0f
     private var isChargingNow:        Boolean = false
     private var chargeTickCount:      Int     = 0
@@ -586,16 +587,11 @@ class TripManager private constructor() {
             val isDriving  = isDrivingGear(gear)
             currentGear = gear
 
-            // Auto-trip + checkpoint a cada P↔D/R (independente de sessionActive)
+            // Checkpoint de marcha a cada P↔D/R (para StatsScreen — intra-viagem)
+            // Auto-trips agora são controlados por onDrivingReady(), não pela marcha.
             when {
-                wasDriving && !isDriving -> {   // D/N/R → P: finaliza viagem automática
-                    onAutoTripEnd()
-                    saveGearTransitionCheckpoint()
-                }
-                !wasDriving && isDriving -> {   // P → D/N/R: inicia viagem automática
-                    saveGearTransitionCheckpoint()
-                    onAutoTripStart()
-                }
+                wasDriving && !isDriving -> saveGearTransitionCheckpoint()  // D/N/R → P
+                !wasDriving && isDriving -> saveGearTransitionCheckpoint()  // P → D/N/R
             }
 
             if (!sessionActive) return
@@ -611,6 +607,35 @@ class TripManager private constructor() {
                         trip.gearPauseStartMs = 0L
                     }
                 }
+            }
+        }
+    }
+
+    /**
+     * Chamado pelo ConsumptionScreen ao receber CAR_BASIC_DRIVING_READY_STATE.
+     * state=1 → carro ligado e pronto → inicia trip automático.
+     * state≠1 → carro desligado → finaliza e salva trip automático.
+     * O estado é persistido para que, após reinício do app, o contexto seja restaurado:
+     * - se state=1 já estava carregado das prefs, não inicia novo trip (já está em andamento).
+     * - se state muda 1→0 após reinício, onAutoTripEnd() usa os valores persistidos.
+     */
+    fun onDrivingReady(state: Int) {
+        synchronized(lock) {
+            val wasReady = lastDrivingReadyState == 1
+            val isReady  = state == 1
+            lastDrivingReadyState = state
+            prefs.edit().putInt(SharedPreferencesKeys.LAST_DRIVING_READY_STATE, state).apply()
+
+            when {
+                !wasReady && isReady -> {   // 0→1: carro ligado — inicia trip automático
+                    saveGearTransitionCheckpoint()
+                    onAutoTripStart()
+                }
+                wasReady && !isReady -> {   // 1→0: carro desligado — finaliza trip automático
+                    onAutoTripEnd()
+                    saveGearTransitionCheckpoint()
+                }
+                // wasReady==isReady: estado repetido (ex: reconexão/restart) — sem ação
             }
         }
     }
@@ -633,7 +658,7 @@ class TripManager private constructor() {
             .apply()
     }
 
-    /** Captura baseline da viagem automática ao sair de P. Chamado de dentro de synchronized(lock). */
+    /** Captura baseline do trip automático. Persiste para sobreviver reinício do app. */
     private fun onAutoTripStart() {
         autoTripStartMs     = System.currentTimeMillis()
         autoTripStartSoc    = latestSocPct
@@ -643,11 +668,33 @@ class TripManager private constructor() {
         autoTripStartDist   = lifeDistKm
         autoTripStartFuelL  = lifeFuelL
         autoTripStartTime   = lifeTimeSec
+        // Persiste para que, se o app reiniciar durante a viagem, os dados não sejam perdidos
+        prefs.edit()
+            .putLong (SharedPreferencesKeys.AUTO_TRIP_START_MS,       autoTripStartMs)
+            .putFloat(SharedPreferencesKeys.AUTO_TRIP_START_SOC,      autoTripStartSoc)
+            .putFloat(SharedPreferencesKeys.AUTO_TRIP_START_FUEL,     autoTripStartFuel)
+            .putFloat(SharedPreferencesKeys.AUTO_TRIP_START_ENERGY,   autoTripStartEnergy)
+            .putFloat(SharedPreferencesKeys.AUTO_TRIP_START_REGEN,    autoTripStartRegen)
+            .putFloat(SharedPreferencesKeys.AUTO_TRIP_START_DIST,     autoTripStartDist)
+            .putFloat(SharedPreferencesKeys.AUTO_TRIP_START_FUEL_L,   autoTripStartFuelL)
+            .putLong (SharedPreferencesKeys.AUTO_TRIP_START_TIME_SEC, autoTripStartTime)
+            .apply()
+        AppLogger.i(TAG, "AutoTrip iniciado — SOC=${latestSocPct}% fuel=${latestFuelPct}%")
     }
 
-    /** Finaliza e persiste viagem automática ao entrar em P. Chamado de dentro de synchronized(lock). */
+    /** Finaliza e persiste viagem automática. Descarta trips < 60 s. Limpa baseline persistida. */
     private fun onAutoTripEnd() {
-        if (autoTripStartMs == 0L) return  // app iniciou com carro em D — sem baseline
+        if (autoTripStartMs == 0L) return  // sem baseline (app iniciou sem trip em andamento)
+
+        val wallSec = (System.currentTimeMillis() - autoTripStartMs) / 1000L
+        if (wallSec < 60L) {
+            // Viagem muito curta (ex: carro ligado e desligado em segundos) — descarta
+            autoTripStartMs = 0L
+            prefs.edit().putLong(SharedPreferencesKeys.AUTO_TRIP_START_MS, 0L).apply()
+            AppLogger.i(TAG, "AutoTrip descartado (${wallSec}s < 60s mínimo)")
+            return
+        }
+
         val entry = AutoTripEntry(
             startMs      = autoTripStartMs,
             endMs        = System.currentTimeMillis(),
@@ -667,8 +714,9 @@ class TripManager private constructor() {
         autoTripStartMs = 0L
         prefs.edit()
             .putString(SharedPreferencesKeys.AUTO_TRIP_HISTORY_JSON, gson.toJson(autoTripHistory))
+            .putLong  (SharedPreferencesKeys.AUTO_TRIP_START_MS, 0L)   // limpa baseline persistida
             .apply()
-        Log.i(TAG, "AutoTrip: ${entry.distKm}km ${entry.timeSec}s ${entry.netKwh}kWh")
+        AppLogger.i(TAG, "AutoTrip salvo: ${entry.distKm}km ${entry.timeSec}s ${entry.netKwh}kWh (${wallSec}s total)")
     }
 
     fun onDataChanged(key: String, rawValue: String) {
@@ -1209,6 +1257,20 @@ class TripManager private constructor() {
                 val type = object : TypeToken<List<AutoTripEntry>>() {}.type
                 autoTripHistory.addAll(gson.fromJson<List<AutoTripEntry>>(atJson, type))
             } catch (_: Exception) {}
+        }
+
+        // Recupera estado de condução e baseline de trip em andamento (resistência a reinício)
+        lastDrivingReadyState = prefs.getInt (SharedPreferencesKeys.LAST_DRIVING_READY_STATE, 0)
+        autoTripStartMs       = prefs.getLong(SharedPreferencesKeys.AUTO_TRIP_START_MS, 0L)
+        if (autoTripStartMs > 0L) {
+            autoTripStartSoc    = prefs.getFloat(SharedPreferencesKeys.AUTO_TRIP_START_SOC,      0f)
+            autoTripStartFuel   = prefs.getFloat(SharedPreferencesKeys.AUTO_TRIP_START_FUEL,     0f)
+            autoTripStartEnergy = prefs.getFloat(SharedPreferencesKeys.AUTO_TRIP_START_ENERGY,   0f)
+            autoTripStartRegen  = prefs.getFloat(SharedPreferencesKeys.AUTO_TRIP_START_REGEN,    0f)
+            autoTripStartDist   = prefs.getFloat(SharedPreferencesKeys.AUTO_TRIP_START_DIST,     0f)
+            autoTripStartFuelL  = prefs.getFloat(SharedPreferencesKeys.AUTO_TRIP_START_FUEL_L,   0f)
+            autoTripStartTime   = prefs.getLong (SharedPreferencesKeys.AUTO_TRIP_START_TIME_SEC, 0L)
+            AppLogger.i(TAG, "AutoTrip em andamento recuperado do disco — startMs=$autoTripStartMs")
         }
 
         val chargeHistJson = prefs.getString(SharedPreferencesKeys.CHARGE_HISTORY_JSON, null)
