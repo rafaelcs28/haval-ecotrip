@@ -60,6 +60,9 @@ object SharedPreferencesKeys {
     // Charge history (JSON array)
     const val CHARGE_HISTORY_JSON    = "charge_history_json"
 
+    // Auto-trip display filter
+    const val MIN_AUTO_TRIP_DIST_KM  = "min_auto_trip_dist_km"
+
     // Chart raw samples (JSON)
     const val TRIP_A_RAW_SAMPLES_JSON = "trip_a_raw_samples_json"
     const val TRIP_B_RAW_SAMPLES_JSON = "trip_b_raw_samples_json"

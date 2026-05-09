@@ -15,10 +15,14 @@ import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.SystemUpdate
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -33,6 +37,7 @@ import br.com.redesurftank.ecotrip.BuildConfig
 import br.com.redesurftank.ecotrip.managers.BackupManager
 import br.com.redesurftank.ecotrip.managers.CarDataManager
 import br.com.redesurftank.ecotrip.managers.MqttManager
+import br.com.redesurftank.ecotrip.managers.AutoTripEntry
 import br.com.redesurftank.ecotrip.managers.ChargeHistoryEntry
 import br.com.redesurftank.ecotrip.managers.RollingSnapshot
 import br.com.redesurftank.ecotrip.managers.TripHistoryEntry
@@ -103,8 +108,11 @@ fun ConsumptionScreen() {
     var showHistory       by remember { mutableStateOf(false) }
     var showChargeHistory by remember { mutableStateOf(false) }
     var showAutoTrips     by remember { mutableStateOf(false) }
+    var showStats         by remember { mutableStateOf(false) }
     var showSettings      by remember { mutableStateOf(false) }
     var showLog           by remember { mutableStateOf(false) }
+    var minAutoTripDist   by remember { mutableStateOf(tripManager.getMinAutoTripDist()) }
+    var lastCompletedTrip by remember { mutableStateOf<AutoTripEntry?>(null) }
 
     DisposableEffect(Unit) {
         val tripListener: (TripSnapshot, TripSnapshot, RollingSnapshot) -> Unit = { a, b, r ->
@@ -243,6 +251,10 @@ fun ConsumptionScreen() {
             } catch (_: Exception) {}
         }
 
+        tripManager.onAutoTripCompleted = { entry ->
+            mainHandler.post { lastCompletedTrip = entry }
+        }
+
         tripManager.addListener(tripListener)
         carManager.addListener(carListener)
         carManager.addConnectedListener(connectedListener)
@@ -259,11 +271,85 @@ fun ConsumptionScreen() {
         }
 
         onDispose {
+            tripManager.onAutoTripCompleted = null
             tripManager.removeListener(tripListener)
             carManager.removeListener(carListener)
             carManager.removeConnectedListener(connectedListener)
             mqttManager.onStatusChange = null
         }
+    }
+
+    // ── Popup resumo da última viagem automática ──────────────────────────────
+    lastCompletedTrip?.let { trip ->
+        val dateFmt = remember { java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()) }
+        val durSec  = (trip.endMs - trip.startMs) / 1000L
+        val durStr  = when {
+            durSec >= 3600 -> "${durSec/3600}h ${(durSec%3600)/60}min"
+            durSec >= 60   -> "${durSec/60}min"
+            else           -> "${durSec}s"
+        }
+        val kwh100  = if (trip.distKm > 0.1f) trip.netKwh / trip.distKm * 100f else 0f
+        val costBrl = trip.fuelL * priceGasoline + trip.netKwh.coerceAtLeast(0f) * priceEnergy
+
+        AlertDialog(
+            onDismissRequest = { lastCompletedTrip = null },
+            containerColor   = SurfaceCard,
+            title = {
+                Text(
+                    "Viagem finalizada",
+                    fontWeight = FontWeight.Bold,
+                    color      = AccentBlue,
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        "${dateFmt.format(java.util.Date(trip.startMs))} → ${dateFmt.format(java.util.Date(trip.endMs))}  ·  $durStr",
+                        fontSize = 12.sp,
+                        color    = TextSecondary,
+                    )
+                    HorizontalDivider(color = Separator, thickness = 0.5.dp)
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Column {
+                            Text("%.1f km".format(trip.distKm), fontSize = 18.sp, fontWeight = FontWeight.Bold, color = AccentBlue)
+                            Text("distância", fontSize = 11.sp, color = TextSecondary)
+                        }
+                        Column {
+                            Text("%.2f kWh".format(trip.netKwh), fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Green)
+                            Text("kWh líq.", fontSize = 11.sp, color = TextSecondary)
+                        }
+                        if (kwh100 > 0f) Column {
+                            Text("%.1f".format(kwh100), fontSize = 18.sp, fontWeight = FontWeight.Bold, color = when {
+                                kwh100 < 20f -> Green; kwh100 < 30f -> WarnYellow; else -> AccentOrange
+                            })
+                            Text("kWh/100km", fontSize = 11.sp, color = TextSecondary)
+                        }
+                    }
+                    if (trip.fuelL > 0.001f || costBrl > 0.01f) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            if (trip.fuelL > 0.001f) Column {
+                                Text("%.2f L".format(trip.fuelL), fontSize = 15.sp, fontWeight = FontWeight.Bold, color = AccentOrange)
+                                Text("combustível", fontSize = 11.sp, color = TextSecondary)
+                            }
+                            if (costBrl > 0.01f) Column {
+                                Text("R$ %.2f".format(costBrl), fontSize = 15.sp, fontWeight = FontWeight.Bold, color = WarnYellow)
+                                Text("custo est.", fontSize = 11.sp, color = TextSecondary)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { lastCompletedTrip = null }) {
+                    Text("Fechar", color = AccentBlue, fontWeight = FontWeight.SemiBold)
+                }
+            },
+        )
+    }
+
+    if (showStats) {
+        StatsScreen(tripManager = tripManager, onBack = { showStats = false })
+        return
     }
 
     if (showSettings) {
@@ -289,6 +375,11 @@ fun ConsumptionScreen() {
             onPriceEnergyChange = { newVal ->
                 priceEnergy = newVal
                 tripManager.setPriceEnergy(newVal)
+            },
+            minAutoTripDist = minAutoTripDist,
+            onMinAutoTripDistChange = { newVal ->
+                minAutoTripDist = newVal
+                tripManager.setMinAutoTripDist(newVal)
             },
             onBack = { showSettings = false },
         )
@@ -333,6 +424,8 @@ fun ConsumptionScreen() {
             entries        = tripManager.getAutoTripHistory(),
             priceGasL      = priceGasoline,
             priceEnergyKwh = priceEnergy,
+            minDistKm      = minAutoTripDist,
+            onRename       = { entry, name -> tripManager.renameAutoTripEntry(entry.startMs, name) },
             onClear        = { tripManager.clearAutoTripHistory() },
             onBack         = { showAutoTrips = false },
         )
@@ -473,6 +566,9 @@ fun ConsumptionScreen() {
                 }
                 IconButton(onClick = { showLog = true }) {
                     Icon(Icons.Default.BugReport, contentDescription = "Log", tint = TextSecondary)
+                }
+                IconButton(onClick = { showStats = true }) {
+                    Icon(Icons.Default.BarChart, contentDescription = "Estatísticas", tint = Green)
                 }
                 IconButton(onClick = { showChargeHistory = true }) {
                     Icon(Icons.Default.BatteryChargingFull, contentDescription = "Recargas", tint = AuroraTeal)

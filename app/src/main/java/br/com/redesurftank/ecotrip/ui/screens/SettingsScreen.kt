@@ -41,6 +41,8 @@ fun SettingsScreen(
     onPriceGasolineChange: (Float) -> Unit,
     priceEnergy: Float,
     onPriceEnergyChange: (Float) -> Unit,
+    minAutoTripDist: Float,
+    onMinAutoTripDistChange: (Float) -> Unit,
     backupManager: BackupManager,
     onBack: () -> Unit,
 ) {
@@ -218,6 +220,32 @@ fun SettingsScreen(
             }
             Text(
                 "Viagens mais antigas são removidas automaticamente ao atingir o limite. O histórico completo fica salvo no Home Assistant.",
+                fontSize = 11.sp, color = TextSecondary,
+            )
+        }
+
+        // ── Viagens automáticas ───────────────────────────────────────────────
+        SectionCard(title = "Viagens automáticas") {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                StepButton("−") { if (minAutoTripDist >= 0.5f) onMinAutoTripDistChange(minAutoTripDist - 0.5f) }
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(
+                        if (minAutoTripDist <= 0f) "0 km" else "%.1f km".format(minAutoTripDist),
+                        fontSize = 28.sp, fontWeight = FontWeight.Bold, color = AccentBlue,
+                    )
+                    Text("distância mínima", fontSize = 12.sp, color = TextSecondary)
+                }
+                StepButton("+") { if (minAutoTripDist < 50f) onMinAutoTripDistChange(minAutoTripDist + 0.5f) }
+            }
+            Text(
+                "Viagens abaixo desta distância não aparecem na lista. Padrão: 0 km (mostrar todas).",
                 fontSize = 11.sp, color = TextSecondary,
             )
         }

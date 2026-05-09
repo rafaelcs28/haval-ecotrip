@@ -11,6 +11,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.*
@@ -83,6 +84,14 @@ private fun fmtAutoTripDur(sec: Long): String {
     }
 }
 
+/** Verde/amarelo/laranja baseado em kWh/100km. */
+private fun efficiencyColor(kwh100km: Float): Color = when {
+    kwh100km <= 0f    -> TextSecondary
+    kwh100km < 20f    -> Green
+    kwh100km < 30f    -> WarnYellow
+    else              -> AccentOrange
+}
+
 // ── Screen ────────────────────────────────────────────────────────────────────
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -91,6 +100,8 @@ fun AutoTripsScreen(
     entries:        List<AutoTripEntry>,
     priceGasL:      Float = 6.0f,
     priceEnergyKwh: Float = 0.9f,
+    minDistKm:      Float = 0f,
+    onRename:       (AutoTripEntry, String) -> Unit = { _, _ -> },
     onClear:        () -> Unit,
     onBack:         () -> Unit,
 ) {
@@ -107,7 +118,8 @@ fun AutoTripsScreen(
     val hasCustomRange = customStartDayMs != null || customEndDayMs != null
 
     // ── Lista filtrada ────────────────────────────────────────────────────────
-    val filtered = remember(entries, selectedFilter, customStartDayMs, customEndDayMs) {
+    val filtered = remember(entries, selectedFilter, customStartDayMs, customEndDayMs, minDistKm) {
+        val distFiltered = if (minDistKm > 0f) entries.filter { it.distKm >= minDistKm } else entries
         if (hasCustomRange) {
             val start = customStartDayMs ?: 0L
             val end   = if (customEndDayMs != null) {
@@ -117,18 +129,21 @@ fun AutoTripsScreen(
                     set(Calendar.SECOND, 59);       set(Calendar.MILLISECOND, 999)
                 }.timeInMillis
             } else Long.MAX_VALUE
-            entries.filter { it.startMs in start..end }
+            distFiltered.filter { it.startMs in start..end }
         } else {
-            entries.applyPreset(selectedFilter)
+            distFiltered.applyPreset(selectedFilter)
         }
     }
 
     // ── Totais do período ─────────────────────────────────────────────────────
-    val totalKm     = remember(filtered) { filtered.sumOf { it.distKm.toDouble() }.toFloat() }
-    val totalSec    = remember(filtered) { filtered.sumOf { it.timeSec } }
-    val totalNet    = remember(filtered) { filtered.sumOf { it.netKwh.toDouble() }.toFloat() }
-    val totalFuel   = remember(filtered) { filtered.sumOf { it.fuelL.toDouble() }.toFloat() }
-    val showSummary = selectedFilter != AutoTripFilter.ALL || hasCustomRange
+    val totalKm      = remember(filtered) { filtered.sumOf { it.distKm.toDouble() }.toFloat() }
+    val totalSec     = remember(filtered) { filtered.sumOf { it.timeSec } }
+    val totalNet     = remember(filtered) { filtered.sumOf { it.netKwh.toDouble() }.toFloat() }
+    val totalFuel    = remember(filtered) { filtered.sumOf { it.fuelL.toDouble() }.toFloat() }
+    val totalCostBrl = remember(filtered, priceGasL, priceEnergyKwh) {
+        filtered.sumOf { (it.fuelL * priceGasL + it.netKwh.coerceAtLeast(0f) * priceEnergyKwh).toDouble() }.toFloat()
+    }
+    val showSummary  = selectedFilter != AutoTripFilter.ALL || hasCustomRange
 
     // ── DatePicker — Início ───────────────────────────────────────────────────
     if (showStartPicker) {
@@ -310,20 +325,39 @@ fun AutoTripsScreen(
 
         // ── Card de resumo do período ─────────────────────────────────────────
         AnimatedVisibility(visible = showSummary && filtered.isNotEmpty()) {
-            Row(
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(AccentBlue.copy(alpha = 0.07f), RoundedCornerShape(12.dp))
                     .border(1.dp, AccentBlue.copy(alpha = 0.25f), RoundedCornerShape(12.dp))
                     .padding(horizontal = 16.dp, vertical = 10.dp),
-                horizontalArrangement = Arrangement.spacedBy(0.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                AutoPeriodStat("${filtered.size}", "Viagens", modifier = Modifier.weight(1f))
-                AutoPeriodStat("%.1f km".format(totalKm), "Distância", color = AccentBlue, modifier = Modifier.weight(1.4f))
-                AutoPeriodStat(fmtAutoTripDur(totalSec), "Tempo", modifier = Modifier.weight(1.4f))
-                AutoPeriodStat("%.2f kWh".format(totalNet), "kWh líq.", color = Green, modifier = Modifier.weight(1.5f))
-                if (totalFuel > 0.001f) {
-                    AutoPeriodStat("%.2f L".format(totalFuel), "Combustível", color = AccentOrange, modifier = Modifier.weight(1.3f))
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(0.dp),
+                ) {
+                    AutoPeriodStat("${filtered.size}", "Viagens",   modifier = Modifier.weight(1f))
+                    AutoPeriodStat("%.1f km".format(totalKm),       "Distância", color = AccentBlue, modifier = Modifier.weight(1.4f))
+                    AutoPeriodStat(fmtAutoTripDur(totalSec),        "Tempo",     modifier = Modifier.weight(1.4f))
+                    AutoPeriodStat("%.2f kWh".format(totalNet),     "kWh líq.",  color = Green,       modifier = Modifier.weight(1.5f))
+                    if (totalFuel > 0.001f)
+                        AutoPeriodStat("%.2f L".format(totalFuel),  "Combust.",  color = AccentOrange, modifier = Modifier.weight(1.3f))
+                }
+                if (totalCostBrl > 0.01f) {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(0.dp),
+                    ) {
+                        AutoPeriodStat("R$ %.2f".format(totalCostBrl), "Custo total", color = WarnYellow, modifier = Modifier.weight(1.5f))
+                        if (filtered.size > 1)
+                            AutoPeriodStat("R$ %.2f".format(totalCostBrl / filtered.size), "Méd/viagem", color = WarnYellow, modifier = Modifier.weight(1.5f))
+                        val avgCostPerKm = if (totalKm > 0.1f) totalCostBrl / totalKm else 0f
+                        if (avgCostPerKm > 0f)
+                            AutoPeriodStat("%.3f".format(avgCostPerKm), "R$/km", color = WarnYellow, modifier = Modifier.weight(1f))
+                        else
+                            Spacer(Modifier.weight(1f))
+                    }
                 }
             }
         }
@@ -352,7 +386,7 @@ fun AutoTripsScreen(
         if (entries.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text(
-                    "Nenhuma viagem automática registrada ainda.\nAs viagens são criadas ao mudar de P para D ou R.",
+                    "Nenhuma viagem automática registrada ainda.\nAs viagens são criadas ao ligar o carro.",
                     fontSize = 14.sp,
                     color = TextSecondary,
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center,
@@ -361,7 +395,12 @@ fun AutoTripsScreen(
         } else {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 itemsIndexed(filtered) { _, entry ->
-                    AutoTripEntryRow(entry = entry, priceGasL = priceGasL, priceEnergyKwh = priceEnergyKwh)
+                    AutoTripEntryRow(
+                        entry          = entry,
+                        priceGasL      = priceGasL,
+                        priceEnergyKwh = priceEnergyKwh,
+                        onRename       = { newName -> onRename(entry, newName) },
+                    )
                 }
             }
         }
@@ -390,14 +429,19 @@ private fun AutoTripEntryRow(
     entry:          AutoTripEntry,
     priceGasL:      Float,
     priceEnergyKwh: Float,
+    onRename:       (String) -> Unit,
 ) {
-    var expanded by remember { mutableStateOf(false) }
+    var expanded        by remember { mutableStateOf(false) }
+    var showRenameDialog by remember { mutableStateOf(false) }
+    var renameText      by remember(entry.startMs) { mutableStateOf(entry.name) }
 
     val dateFmtFull = remember { SimpleDateFormat("dd/MM HH:mm", Locale.getDefault()) }
     val timeFmt     = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
 
     val durationSec = (entry.endMs - entry.startMs) / 1000L
     val avgSpeed    = if (entry.timeSec > 0) entry.distKm / (entry.timeSec / 3600f) else 0f
+    val kwh100km    = if (entry.distKm > 0.1f) entry.netKwh / entry.distKm * 100f else 0f
+    val effColor    = efficiencyColor(kwh100km)
     val socDelta    = entry.endSocPct - entry.startSocPct
     val fuelDelta   = entry.endFuelPct - entry.startFuelPct
     val socColor    = when {
@@ -407,6 +451,46 @@ private fun AutoTripEntryRow(
     }
     val costBrl   = entry.fuelL * priceGasL + entry.netKwh.coerceAtLeast(0f) * priceEnergyKwh
     val costPerKm = if (entry.distKm > 0.1f && costBrl > 0f) costBrl / entry.distKm else 0f
+
+    // ── Diálogo de renomear ───────────────────────────────────────────────────
+    if (showRenameDialog) {
+        AlertDialog(
+            onDismissRequest = { showRenameDialog = false },
+            containerColor   = SurfaceCard,
+            title = { Text("Renomear viagem", fontWeight = FontWeight.Bold, color = TextPrimary) },
+            text  = {
+                OutlinedTextField(
+                    value         = renameText,
+                    onValueChange = { renameText = it },
+                    label         = { Text("Nome da viagem", fontSize = 12.sp) },
+                    singleLine    = true,
+                    modifier      = Modifier.fillMaxWidth(),
+                    colors        = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor   = AccentBlue,
+                        unfocusedBorderColor = BorderColor,
+                        focusedLabelColor    = AccentBlue,
+                        unfocusedLabelColor  = TextSecondary,
+                        focusedTextColor     = TextPrimary,
+                        unfocusedTextColor   = TextPrimary,
+                        cursorColor          = AccentBlue,
+                    ),
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    onRename(renameText.trim())
+                    showRenameDialog = false
+                }) {
+                    Text("Salvar", color = AccentBlue, fontWeight = FontWeight.SemiBold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRenameDialog = false; renameText = entry.name }) {
+                    Text("Cancelar", color = TextSecondary)
+                }
+            },
+        )
+    }
 
     Column(
         modifier = Modifier
@@ -431,13 +515,23 @@ private fun AutoTripEntryRow(
                     .padding(horizontal = 6.dp, vertical = 2.dp),
             ) { Text("🚗", fontSize = 10.sp) }
 
-            // Data + horário
+            // Nome (se tiver) + Data + horário
             Column(modifier = Modifier.weight(1f)) {
+                if (entry.name.isNotEmpty()) {
+                    Text(
+                        entry.name,
+                        fontSize   = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color      = TextPrimary,
+                        maxLines   = 1,
+                        overflow   = TextOverflow.Ellipsis,
+                    )
+                }
                 Text(
                     "${dateFmtFull.format(Date(entry.startMs))} → ${timeFmt.format(Date(entry.endMs))}",
-                    fontSize   = 13.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color      = TextPrimary,
+                    fontSize   = if (entry.name.isNotEmpty()) 11.sp else 13.sp,
+                    fontWeight = if (entry.name.isNotEmpty()) FontWeight.Normal else FontWeight.SemiBold,
+                    color      = if (entry.name.isNotEmpty()) TextSecondary else TextPrimary,
                     maxLines   = 1,
                     overflow   = TextOverflow.Ellipsis,
                 )
@@ -445,12 +539,14 @@ private fun AutoTripEntryRow(
             }
 
             // Métricas inline
-            AutoCompactMetric("%.1f km".format(entry.distKm),   "dist")
-            AutoCompactMetric("%.1f kWh".format(entry.netKwh),  "liq.")
+            AutoCompactMetric("%.1f km".format(entry.distKm), "dist")
+            // kWh/100km com cor de eficiência
+            if (kwh100km > 0f)
+                AutoCompactMetric("%.1f".format(kwh100km), "kWh/100", valueColor = effColor)
             if (entry.fuelL > 0.001f)
                 AutoCompactMetric("%.2f L".format(entry.fuelL), "comb")
             if (costBrl > 0.01f)
-                AutoCompactMetric("R$ %.2f".format(costBrl),    "custo")
+                AutoCompactMetric("R$ %.2f".format(costBrl), "custo")
 
             // Botão expandir
             Icon(
@@ -472,17 +568,19 @@ private fun AutoTripEntryRow(
                 HorizontalDivider(color = Separator, thickness = 0.5.dp)
                 Spacer(Modifier.height(2.dp))
 
-                // Linha 1: km, vel, kWh liq, combustível
+                // Linha 1: km, vel, kWh/100km, combustível
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    AutoDetailMetric("Distância",  "%.1f km".format(entry.distKm),        AccentBlue,   Modifier.weight(1f))
-                    AutoDetailMetric("Vel. Média", "%.1f km/h".format(avgSpeed),           TextPrimary,  Modifier.weight(1f))
-                    AutoDetailMetric("kWh líquido","%.2f kWh".format(entry.netKwh),        Green,        Modifier.weight(1f))
+                    AutoDetailMetric("Distância",  "%.1f km".format(entry.distKm),        AccentBlue,  Modifier.weight(1f))
+                    AutoDetailMetric("Vel. Média", "%.1f km/h".format(avgSpeed),           TextPrimary, Modifier.weight(1f))
+                    if (kwh100km > 0f)
+                        AutoDetailMetric("kWh/100km",  "%.1f".format(kwh100km),           effColor,    Modifier.weight(1f))
                     if (entry.fuelL > 0.001f)
-                        AutoDetailMetric("Combustível","%.3f L".format(entry.fuelL),       AccentOrange, Modifier.weight(1f))
+                        AutoDetailMetric("Combustível","%.3f L".format(entry.fuelL),       AccentOrange,Modifier.weight(1f))
                 }
 
-                // Linha 2: energia bruta, regen, condução
+                // Linha 2: kWh líquido, energia bruta, regen, condução efetiva
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    AutoDetailMetric("kWh líquido","%.2f kWh".format(entry.netKwh),        Green,         Modifier.weight(1f))
                     AutoDetailMetric("Bruto",      "%.2f kWh".format(entry.energyKwh),    TextSecondary, Modifier.weight(1f))
                     AutoDetailMetric("Regenerado", "%.2f kWh".format(entry.regenKwh),     AuroraTeal,    Modifier.weight(1f))
                     AutoDetailMetric("Cond. efetiva", fmtAutoTripDur(entry.timeSec),       TextSecondary, Modifier.weight(1f))
@@ -493,14 +591,14 @@ private fun AutoTripEntryRow(
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         AutoDetailMetric("💰 Custo Total", "R$ %.2f".format(costBrl),      WarnYellow, Modifier.weight(1f))
                         if (costPerKm > 0f)
-                            AutoDetailMetric("R$/km", "%.3f".format(costPerKm),             WarnYellow, Modifier.weight(1f))
+                            AutoDetailMetric("R$/km", "%.3f".format(costPerKm),            WarnYellow, Modifier.weight(1f))
                         else
                             Spacer(Modifier.weight(1f))
                         Spacer(Modifier.weight(1f))
                     }
                 }
 
-                // Linha 5: SOC início → fim
+                // Linha 4: SOC início → fim
                 if (entry.startSocPct > 0f || entry.endSocPct > 0f) {
                     Row(
                         Modifier.fillMaxWidth(),
@@ -515,7 +613,7 @@ private fun AutoTripEntryRow(
                     }
                 }
 
-                // Linha 6: Combustível % início → fim
+                // Linha 5: Combustível % início → fim
                 if (entry.startFuelPct > 0f || entry.endFuelPct > 0f) {
                     Row(
                         Modifier.fillMaxWidth(),
@@ -530,6 +628,22 @@ private fun AutoTripEntryRow(
                             Text("(%.0f%%)".format(fuelDelta), fontSize = 11.sp, color = AccentOrange)
                     }
                 }
+
+                // Botão renomear
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    TextButton(
+                        onClick        = { renameText = entry.name; showRenameDialog = true },
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                    ) {
+                        Icon(Icons.Default.Edit, contentDescription = "Renomear", tint = AccentBlue, modifier = Modifier.size(15.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            if (entry.name.isEmpty()) "Nomear" else "Renomear",
+                            fontSize = 13.sp,
+                            color    = AccentBlue,
+                        )
+                    }
+                }
             }
         }
     }
@@ -538,9 +652,9 @@ private fun AutoTripEntryRow(
 // ── Métricas inline da linha compacta ─────────────────────────────────────────
 
 @Composable
-private fun AutoCompactMetric(value: String, label: String) {
+private fun AutoCompactMetric(value: String, label: String, valueColor: Color = TextPrimary) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(value, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+        Text(value, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = valueColor)
         Text(label, fontSize = 10.sp, color = TextSecondary)
     }
 }

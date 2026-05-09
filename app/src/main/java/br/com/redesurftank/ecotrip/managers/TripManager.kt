@@ -147,6 +147,7 @@ data class AutoTripEntry(
     val regenKwh:     Float,
     val netKwh:       Float,
     val fuelL:        Float,
+    val name:         String = "",
 )
 
 typealias TripListener = (snapA: TripSnapshot, snapB: TripSnapshot, rolling: RollingSnapshot) -> Unit
@@ -232,6 +233,9 @@ class TripManager private constructor() {
     // Auto-Trip tracking (driving_ready=1 inicia, driving_ready≠1 finaliza)
     private val autoTripHistory      = mutableListOf<AutoTripEntry>()
     private var lastDrivingReadyState: Int = 0   // persiste para detectar reinício mid-trip
+    private var minAutoTripDistKm:   Float = 0f  // filtro de distância mínima (display + save)
+    /** Chamado na UI thread após cada trip automático salvo com sucesso. */
+    var onAutoTripCompleted: ((AutoTripEntry) -> Unit)? = null
     private var autoTripStartMs      = 0L
     private var autoTripStartSoc     = 0f
     private var autoTripStartFuel    = 0f
@@ -363,6 +367,24 @@ class TripManager private constructor() {
     fun clearAutoTripHistory() {
         synchronized(lock) { autoTripHistory.clear() }
         if (::prefs.isInitialized) prefs.edit().putString(SharedPreferencesKeys.AUTO_TRIP_HISTORY_JSON, "[]").apply()
+    }
+
+    /** Renomeia uma viagem automática identificada pelo startMs. */
+    fun renameAutoTripEntry(startMs: Long, name: String) {
+        synchronized(lock) {
+            val idx = autoTripHistory.indexOfFirst { it.startMs == startMs }
+            if (idx < 0) return
+            autoTripHistory[idx] = autoTripHistory[idx].copy(name = name.trim())
+            if (::prefs.isInitialized)
+                prefs.edit().putString(SharedPreferencesKeys.AUTO_TRIP_HISTORY_JSON, gson.toJson(autoTripHistory)).apply()
+        }
+    }
+
+    fun getMinAutoTripDist(): Float = synchronized(lock) { minAutoTripDistKm }
+    fun setMinAutoTripDist(km: Float) {
+        synchronized(lock) { minAutoTripDistKm = km.coerceAtLeast(0f) }
+        if (::prefs.isInitialized)
+            prefs.edit().putFloat(SharedPreferencesKeys.MIN_AUTO_TRIP_DIST_KM, km.coerceAtLeast(0f)).apply()
     }
 
     /** Para StatsScreen: preços de combustível e energia. */
@@ -727,6 +749,7 @@ class TripManager private constructor() {
             .putLong  (SharedPreferencesKeys.AUTO_TRIP_START_MS, 0L)   // limpa baseline persistida
             .apply()
         AppLogger.i(TAG, "AutoTrip salvo: ${entry.distKm}km ${entry.timeSec}s ${entry.netKwh}kWh (${wallSec}s total)")
+        onAutoTripCompleted?.invoke(entry)
     }
 
     fun onDataChanged(key: String, rawValue: String) {
@@ -1305,6 +1328,7 @@ class TripManager private constructor() {
         maxHistoryEntries = prefs.getInt  (SharedPreferencesKeys.MAX_HISTORY_ENTRIES,   50)
         priceGasolinePerL = prefs.getFloat(SharedPreferencesKeys.PRICE_GASOLINE_PER_L,  6.0f)
         priceEnergyPerKwh = prefs.getFloat(SharedPreferencesKeys.PRICE_ENERGY_PER_KWH,  0.9f)
+        minAutoTripDistKm = prefs.getFloat(SharedPreferencesKeys.MIN_AUTO_TRIP_DIST_KM,  0f)
 
         val histJson = prefs.getString(SharedPreferencesKeys.TRIP_HISTORY_JSON, null)
         if (!histJson.isNullOrEmpty()) {
