@@ -560,6 +560,7 @@ class MqttManager private constructor() {
      * O app é a fonte de verdade — não depende de automação HA para acumulação.
      */
     fun publishTripHistory(entries: List<TripHistoryEntry>) {
+        if (entries.isEmpty()) return  // nunca sobrescreve HA com lista vazia (clearing in-app não zera HA)
         val c = client
         if (c == null || !c.isConnected) {
             AppLogger.w(TAG, "publishTripHistory: offline, histórico não publicado agora")

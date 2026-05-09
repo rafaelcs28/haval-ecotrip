@@ -10,7 +10,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import kotlinx.coroutines.delay
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.BatteryChargingFull
 import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.History
@@ -103,7 +102,6 @@ fun ConsumptionScreen() {
 
     var showHistory       by remember { mutableStateOf(false) }
     var showChargeHistory by remember { mutableStateOf(false) }
-    var showStats         by remember { mutableStateOf(false) }
     var showAutoTrips     by remember { mutableStateOf(false) }
     var showSettings      by remember { mutableStateOf(false) }
     var showLog           by remember { mutableStateOf(false) }
@@ -317,14 +315,6 @@ fun ConsumptionScreen() {
         return
     }
 
-    if (showStats) {
-        StatsScreen(
-            tripManager = tripManager,
-            onBack      = { showStats = false },
-        )
-        return
-    }
-
     if (showAutoTrips) {
         AutoTripsScreen(
             entries = tripManager.getAutoTripHistory(),
@@ -472,9 +462,6 @@ fun ConsumptionScreen() {
                 IconButton(onClick = { showChargeHistory = true }) {
                     Icon(Icons.Default.BatteryChargingFull, contentDescription = "Recargas", tint = AuroraTeal)
                 }
-                IconButton(onClick = { showStats = true }) {
-                    Icon(Icons.Default.BarChart, contentDescription = "Estatísticas", tint = Green)
-                }
                 IconButton(onClick = { showAutoTrips = true }) {
                     Icon(Icons.Default.DirectionsCar, contentDescription = "Viagens Auto", tint = AccentBlue)
                 }
@@ -505,7 +492,6 @@ fun ConsumptionScreen() {
                 onReset  = { name ->
                     mqttManager.publishTripCompleted("trip_a", snapA, name)
                     tripManager.resetTrip(TripId.A, name)
-                    mqttManager.publishTripHistory(tripManager.getHistory())
                 },
                 modifier = Modifier.weight(1f).fillMaxHeight(),
             )
@@ -515,7 +501,6 @@ fun ConsumptionScreen() {
                 onReset  = { name ->
                     mqttManager.publishTripCompleted("trip_b", snapB, name)
                     tripManager.resetTrip(TripId.B, name)
-                    mqttManager.publishTripHistory(tripManager.getHistory())
                 },
                 modifier = Modifier.weight(1f).fillMaxHeight(),
             )
