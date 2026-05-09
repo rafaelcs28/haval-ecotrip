@@ -88,9 +88,11 @@ private fun fmtAutoTripDur(sec: Long): String {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AutoTripsScreen(
-    entries: List<AutoTripEntry>,
-    onClear: () -> Unit,
-    onBack:  () -> Unit,
+    entries:        List<AutoTripEntry>,
+    priceGasL:      Float = 6.0f,
+    priceEnergyKwh: Float = 0.9f,
+    onClear:        () -> Unit,
+    onBack:         () -> Unit,
 ) {
     var selectedFilter   by remember { mutableStateOf(AutoTripFilter.ALL) }
     var customStartDayMs by remember { mutableStateOf<Long?>(null) }
@@ -359,7 +361,7 @@ fun AutoTripsScreen(
         } else {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 itemsIndexed(filtered) { _, entry ->
-                    AutoTripEntryRow(entry = entry)
+                    AutoTripEntryRow(entry = entry, priceGasL = priceGasL, priceEnergyKwh = priceEnergyKwh)
                 }
             }
         }
@@ -384,7 +386,11 @@ private fun AutoPeriodStat(
 // ── Card de viagem ────────────────────────────────────────────────────────────
 
 @Composable
-private fun AutoTripEntryRow(entry: AutoTripEntry) {
+private fun AutoTripEntryRow(
+    entry:          AutoTripEntry,
+    priceGasL:      Float,
+    priceEnergyKwh: Float,
+) {
     var expanded by remember { mutableStateOf(false) }
 
     val dateFmtFull = remember { SimpleDateFormat("dd/MM HH:mm", Locale.getDefault()) }
@@ -399,6 +405,8 @@ private fun AutoTripEntryRow(entry: AutoTripEntry) {
         socDelta > -25f -> WarnYellow
         else            -> AccentOrange
     }
+    val costBrl   = entry.fuelL * priceGasL + entry.netKwh.coerceAtLeast(0f) * priceEnergyKwh
+    val costPerKm = if (entry.distKm > 0.1f && costBrl > 0f) costBrl / entry.distKm else 0f
 
     Column(
         modifier = Modifier
@@ -441,6 +449,8 @@ private fun AutoTripEntryRow(entry: AutoTripEntry) {
             AutoCompactMetric("%.1f kWh".format(entry.netKwh),  "liq.")
             if (entry.fuelL > 0.001f)
                 AutoCompactMetric("%.2f L".format(entry.fuelL), "comb")
+            if (costBrl > 0.01f)
+                AutoCompactMetric("R$ %.2f".format(costBrl),    "custo")
 
             // Botão expandir
             Icon(
@@ -478,7 +488,19 @@ private fun AutoTripEntryRow(entry: AutoTripEntry) {
                     AutoDetailMetric("Cond. efetiva", fmtAutoTripDur(entry.timeSec),       TextSecondary, Modifier.weight(1f))
                 }
 
-                // Linha 3: SOC início → fim
+                // Linha 3: custo (se preços configurados)
+                if (costBrl > 0.01f) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        AutoDetailMetric("💰 Custo Total", "R$ %.2f".format(costBrl),      WarnYellow, Modifier.weight(1f))
+                        if (costPerKm > 0f)
+                            AutoDetailMetric("R$/km", "%.3f".format(costPerKm),             WarnYellow, Modifier.weight(1f))
+                        else
+                            Spacer(Modifier.weight(1f))
+                        Spacer(Modifier.weight(1f))
+                    }
+                }
+
+                // Linha 5: SOC início → fim
                 if (entry.startSocPct > 0f || entry.endSocPct > 0f) {
                     Row(
                         Modifier.fillMaxWidth(),
@@ -493,7 +515,7 @@ private fun AutoTripEntryRow(entry: AutoTripEntry) {
                     }
                 }
 
-                // Linha 4: Combustível % início → fim
+                // Linha 6: Combustível % início → fim
                 if (entry.startFuelPct > 0f || entry.endFuelPct > 0f) {
                     Row(
                         Modifier.fillMaxWidth(),

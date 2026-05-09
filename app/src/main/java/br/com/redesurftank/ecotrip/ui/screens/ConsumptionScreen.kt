@@ -317,9 +317,11 @@ fun ConsumptionScreen() {
 
     if (showAutoTrips) {
         AutoTripsScreen(
-            entries = tripManager.getAutoTripHistory(),
-            onClear = { tripManager.clearAutoTripHistory() },
-            onBack  = { showAutoTrips = false },
+            entries        = tripManager.getAutoTripHistory(),
+            priceGasL      = priceGasoline,
+            priceEnergyKwh = priceEnergy,
+            onClear        = { tripManager.clearAutoTripHistory() },
+            onBack         = { showAutoTrips = false },
         )
         return
     }
