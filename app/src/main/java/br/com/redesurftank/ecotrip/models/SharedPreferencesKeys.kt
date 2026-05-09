@@ -25,6 +25,8 @@ object SharedPreferencesKeys {
     const val LIFETIME_TIME_SEC    = "lifetime_time_sec"
     const val LIFETIME_CHARGE_KWH  = "lifetime_charge_kwh"   // kWh injetados em recargas
     const val LIFETIME_CHARGE_SEC  = "lifetime_charge_sec"   // segundos conectado ao carregador
+    const val LIFETIME_CHECKPOINTS_JSON = "lifetime_checkpoints_json"  // checkpoints P↔D/R (para StatsScreen)
+    const val AUTO_TRIP_HISTORY_JSON    = "auto_trip_history_json"     // viagens automáticas P→D…D→P
 
     // Rolling window (Desde Última Partida) accumulated
     const val ROLLING_FUEL_L = "rolling_fuel_l"

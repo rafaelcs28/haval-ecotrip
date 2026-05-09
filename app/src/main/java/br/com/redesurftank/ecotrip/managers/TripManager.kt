@@ -115,6 +115,40 @@ data class LifetimeSnapshot(
     val chargeSec: Long,    // segundos conectado ao carregador
 )
 
+/**
+ * Snapshot dos contadores lifetime salvo a cada transição P↔D/R.
+ * Usado pela StatsScreen para calcular deltas por período.
+ */
+data class LifetimeCheckpoint(
+    val timestampMs: Long,
+    val energyKwh:   Float,
+    val regenKwh:    Float,
+    val distKm:      Float,
+    val timeSec:     Long,
+    val fuelL:       Float,
+    val chargeKwh:   Float,
+    val chargeSec:   Long,
+)
+
+/**
+ * Viagem automática registrada entre duas transições P↔D/R.
+ * Criada sem interação do usuário; lista separada dos trips manuais A/B.
+ */
+data class AutoTripEntry(
+    val startMs:      Long,
+    val endMs:        Long,
+    val startSocPct:  Float,
+    val endSocPct:    Float,
+    val startFuelPct: Float,
+    val endFuelPct:   Float,
+    val distKm:       Float,
+    val timeSec:      Long,
+    val energyKwh:    Float,
+    val regenKwh:     Float,
+    val netKwh:       Float,
+    val fuelL:        Float,
+)
+
 typealias TripListener = (snapA: TripSnapshot, snapB: TripSnapshot, rolling: RollingSnapshot) -> Unit
 
 private class TripAccum {
@@ -193,6 +227,18 @@ class TripManager private constructor() {
     // Recarga — integração P×Δt (independente de sessão de condução)
     private var lifeChargeKwh:        Float   = 0f
     private var lifeChargeSec:        Long    = 0L
+    // Checkpoints (para StatsScreen — um por transição P↔D/R)
+    private val checkpoints = mutableListOf<LifetimeCheckpoint>()
+    // Auto-Trip tracking (P→D inicia, D→P finaliza)
+    private val autoTripHistory    = mutableListOf<AutoTripEntry>()
+    private var autoTripStartMs    = 0L
+    private var autoTripStartSoc   = 0f
+    private var autoTripStartFuel  = 0f
+    private var autoTripStartEnergy= 0f
+    private var autoTripStartRegen = 0f
+    private var autoTripStartDist  = 0f
+    private var autoTripStartFuelL = 0f
+    private var autoTripStartTime  = 0L
     private var currentChargePowerKw: Float   = 0f
     private var isChargingNow:        Boolean = false
     private var chargeTickCount:      Int     = 0
@@ -302,6 +348,27 @@ class TripManager private constructor() {
         }
     }
 
+    /** Para StatsScreen: baseline de período (último checkpoint ≤ startMs). */
+    fun getLifetimeBaselineAt(startMs: Long): LifetimeCheckpoint? = synchronized(lock) {
+        checkpoints.filter { it.timestampMs <= startMs }.maxByOrNull { it.timestampMs }
+    }
+
+    /** Para AutoTripsScreen: lista de viagens automáticas (mais recentes primeiro). */
+    fun getAutoTripHistory(): List<AutoTripEntry> = synchronized(lock) {
+        autoTripHistory.reversed()
+    }
+
+    /** Para AutoTripsScreen: limpar histórico de viagens automáticas. */
+    fun clearAutoTripHistory() {
+        synchronized(lock) { autoTripHistory.clear() }
+        if (::prefs.isInitialized) prefs.edit().putString(SharedPreferencesKeys.AUTO_TRIP_HISTORY_JSON, "[]").apply()
+    }
+
+    /** Para StatsScreen: preços de combustível e energia. */
+    fun getPrices(): Pair<Float, Float> = synchronized(lock) {
+        Pair(priceGasolinePerL, priceEnergyPerKwh)
+    }
+
     fun init(context: Context) {
         val ctx = try {
             context.createDeviceProtectedStorageContext()
@@ -310,6 +377,10 @@ class TripManager private constructor() {
         }
         prefs = ctx.getSharedPreferences(SharedPreferencesKeys.PREFS_NAME, Context.MODE_PRIVATE)
         loadFromPrefs()
+        // Bootstrap: garante pelo menos 1 checkpoint para StatsScreen funcionar imediatamente
+        synchronized(lock) {
+            if (checkpoints.isEmpty()) saveGearTransitionCheckpoint()
+        }
     }
 
     fun addListener(l: TripListener)    = synchronized(lock) { listeners.add(l) }
@@ -514,6 +585,19 @@ class TripManager private constructor() {
             val wasDriving = isDrivingGear(currentGear)
             val isDriving  = isDrivingGear(gear)
             currentGear = gear
+
+            // Auto-trip + checkpoint a cada P↔D/R (independente de sessionActive)
+            when {
+                wasDriving && !isDriving -> {   // D/N/R → P: finaliza viagem automática
+                    onAutoTripEnd()
+                    saveGearTransitionCheckpoint()
+                }
+                !wasDriving && isDriving -> {   // P → D/N/R: inicia viagem automática
+                    saveGearTransitionCheckpoint()
+                    onAutoTripStart()
+                }
+            }
+
             if (!sessionActive) return
             val now = System.currentTimeMillis()
             for (trip in listOf(tripA, tripB)) {
@@ -529,6 +613,62 @@ class TripManager private constructor() {
                 }
             }
         }
+    }
+
+    /** Salva checkpoint dos valores lifetime atuais. Chamado de dentro de synchronized(lock). */
+    private fun saveGearTransitionCheckpoint() {
+        checkpoints.add(LifetimeCheckpoint(
+            timestampMs = System.currentTimeMillis(),
+            energyKwh   = lifeEnergyKwh,
+            regenKwh    = lifeRegenKwh,
+            distKm      = lifeDistKm,
+            timeSec     = lifeTimeSec,
+            fuelL       = lifeFuelL,
+            chargeKwh   = lifeChargeKwh,
+            chargeSec   = lifeChargeSec,
+        ))
+        while (checkpoints.size > 1000) checkpoints.removeAt(0)
+        prefs.edit()
+            .putString(SharedPreferencesKeys.LIFETIME_CHECKPOINTS_JSON, gson.toJson(checkpoints))
+            .apply()
+    }
+
+    /** Captura baseline da viagem automática ao sair de P. Chamado de dentro de synchronized(lock). */
+    private fun onAutoTripStart() {
+        autoTripStartMs     = System.currentTimeMillis()
+        autoTripStartSoc    = latestSocPct
+        autoTripStartFuel   = latestFuelPct
+        autoTripStartEnergy = lifeEnergyKwh
+        autoTripStartRegen  = lifeRegenKwh
+        autoTripStartDist   = lifeDistKm
+        autoTripStartFuelL  = lifeFuelL
+        autoTripStartTime   = lifeTimeSec
+    }
+
+    /** Finaliza e persiste viagem automática ao entrar em P. Chamado de dentro de synchronized(lock). */
+    private fun onAutoTripEnd() {
+        if (autoTripStartMs == 0L) return  // app iniciou com carro em D — sem baseline
+        val entry = AutoTripEntry(
+            startMs      = autoTripStartMs,
+            endMs        = System.currentTimeMillis(),
+            startSocPct  = autoTripStartSoc,
+            endSocPct    = latestSocPct,
+            startFuelPct = autoTripStartFuel,
+            endFuelPct   = latestFuelPct,
+            distKm       = (lifeDistKm    - autoTripStartDist  ).coerceAtLeast(0f),
+            timeSec      = (lifeTimeSec   - autoTripStartTime  ).coerceAtLeast(0L),
+            energyKwh    = (lifeEnergyKwh - autoTripStartEnergy).coerceAtLeast(0f),
+            regenKwh     = (lifeRegenKwh  - autoTripStartRegen ).coerceAtLeast(0f),
+            netKwh       = ((lifeEnergyKwh - autoTripStartEnergy) - (lifeRegenKwh - autoTripStartRegen)).coerceAtLeast(0f),
+            fuelL        = (lifeFuelL     - autoTripStartFuelL ).coerceAtLeast(0f),
+        )
+        autoTripHistory.add(entry)
+        while (autoTripHistory.size > 500) autoTripHistory.removeAt(0)
+        autoTripStartMs = 0L
+        prefs.edit()
+            .putString(SharedPreferencesKeys.AUTO_TRIP_HISTORY_JSON, gson.toJson(autoTripHistory))
+            .apply()
+        Log.i(TAG, "AutoTrip: ${entry.distKm}km ${entry.timeSec}s ${entry.netKwh}kWh")
     }
 
     fun onDataChanged(key: String, rawValue: String) {
@@ -1054,6 +1194,22 @@ class TripManager private constructor() {
         lifeTimeSec   = prefs.getLong (SharedPreferencesKeys.LIFETIME_TIME_SEC,    0L)
         lifeChargeKwh = prefs.getFloat(SharedPreferencesKeys.LIFETIME_CHARGE_KWH,  0f)
         lifeChargeSec = prefs.getLong (SharedPreferencesKeys.LIFETIME_CHARGE_SEC,   0L)
+
+        val cpJson = prefs.getString(SharedPreferencesKeys.LIFETIME_CHECKPOINTS_JSON, null)
+        if (!cpJson.isNullOrEmpty()) {
+            try {
+                val type = object : TypeToken<List<LifetimeCheckpoint>>() {}.type
+                checkpoints.addAll(gson.fromJson<List<LifetimeCheckpoint>>(cpJson, type))
+            } catch (_: Exception) {}
+        }
+
+        val atJson = prefs.getString(SharedPreferencesKeys.AUTO_TRIP_HISTORY_JSON, null)
+        if (!atJson.isNullOrEmpty()) {
+            try {
+                val type = object : TypeToken<List<AutoTripEntry>>() {}.type
+                autoTripHistory.addAll(gson.fromJson<List<AutoTripEntry>>(atJson, type))
+            } catch (_: Exception) {}
+        }
 
         val chargeHistJson = prefs.getString(SharedPreferencesKeys.CHARGE_HISTORY_JSON, null)
         if (!chargeHistJson.isNullOrEmpty()) {

@@ -12,6 +12,7 @@ import kotlinx.coroutines.delay
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.BatteryChargingFull
+import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.BugReport
@@ -103,6 +104,7 @@ fun ConsumptionScreen() {
     var showHistory       by remember { mutableStateOf(false) }
     var showChargeHistory by remember { mutableStateOf(false) }
     var showStats         by remember { mutableStateOf(false) }
+    var showAutoTrips     by remember { mutableStateOf(false) }
     var showSettings      by remember { mutableStateOf(false) }
     var showLog           by remember { mutableStateOf(false) }
 
@@ -317,9 +319,17 @@ fun ConsumptionScreen() {
 
     if (showStats) {
         StatsScreen(
-            trips   = history,
-            charges = chargeHistory,
-            onBack  = { showStats = false },
+            tripManager = tripManager,
+            onBack      = { showStats = false },
+        )
+        return
+    }
+
+    if (showAutoTrips) {
+        AutoTripsScreen(
+            entries = tripManager.getAutoTripHistory(),
+            onClear = { tripManager.clearAutoTripHistory() },
+            onBack  = { showAutoTrips = false },
         )
         return
     }
@@ -464,6 +474,9 @@ fun ConsumptionScreen() {
                 }
                 IconButton(onClick = { showStats = true }) {
                     Icon(Icons.Default.BarChart, contentDescription = "Estatísticas", tint = Green)
+                }
+                IconButton(onClick = { showAutoTrips = true }) {
+                    Icon(Icons.Default.DirectionsCar, contentDescription = "Viagens Auto", tint = AccentBlue)
                 }
                 IconButton(onClick = { showHistory = true }) {
                     Icon(Icons.Default.History, contentDescription = "Histórico", tint = TextSecondary)
