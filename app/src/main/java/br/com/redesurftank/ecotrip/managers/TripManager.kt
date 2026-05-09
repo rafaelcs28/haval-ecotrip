@@ -435,6 +435,16 @@ class TripManager private constructor() {
         removed
     }
 
+    /**
+     * Deleta uma entrada do histórico diretamente pelo objeto (por timestampMs único).
+     * Persiste imediatamente. Retorna true se removida.
+     */
+    fun deleteHistoryEntry(entry: TripHistoryEntry): Boolean = synchronized(lock) {
+        val removed = tripHistory.removeIf { it.timestampMs == entry.timestampMs }
+        if (removed) saveHistory()
+        removed
+    }
+
     fun getMaxHistoryEntries(): Int = synchronized(lock) { maxHistoryEntries }
 
     fun setMaxHistoryEntries(count: Int) {

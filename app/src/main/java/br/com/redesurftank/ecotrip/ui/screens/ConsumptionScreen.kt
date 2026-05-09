@@ -307,6 +307,10 @@ fun ConsumptionScreen() {
                 tripManager.clearHistory()
                 history = emptyList()
             },
+            onDeleteEntry  = { entry ->
+                tripManager.deleteHistoryEntry(entry)
+                history = tripManager.getHistory()
+            },
             onBack = { showHistory = false },
         )
         return

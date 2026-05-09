@@ -10,6 +10,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.*
@@ -30,6 +31,7 @@ import java.util.Locale
 fun HistoryScreen(
     entries: List<TripHistoryEntry>,
     onClearHistory: () -> Unit,
+    onDeleteEntry: (TripHistoryEntry) -> Unit = {},
     onBack: () -> Unit,
 ) {
     Column(
@@ -68,7 +70,7 @@ fun HistoryScreen(
         } else {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 itemsIndexed(entries) { index, entry ->
-                    HistoryEntryRow(entry = entry, index = index)
+                    HistoryEntryRow(entry = entry, index = index, onDelete = { onDeleteEntry(entry) })
                 }
             }
         }
@@ -76,8 +78,9 @@ fun HistoryScreen(
 }
 
 @Composable
-private fun HistoryEntryRow(entry: TripHistoryEntry, index: Int) {
-    var expanded by remember { mutableStateOf(false) }
+private fun HistoryEntryRow(entry: TripHistoryEntry, index: Int, onDelete: () -> Unit) {
+    var expanded      by remember { mutableStateOf(false) }
+    var confirmDelete by remember { mutableStateOf(false) }
     val dateFmt  = SimpleDateFormat("dd/MM/yy HH:mm", Locale.getDefault())
     val displayName = entry.name.ifEmpty { entry.label }
 
@@ -168,8 +171,53 @@ private fun HistoryEntryRow(entry: TripHistoryEntry, index: Int) {
                         Spacer(Modifier.weight(1f))
                     }
                 }
+
+                // ── Botão apagar ─────────────────────────────────────────────
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    TextButton(
+                        onClick = { confirmDelete = true },
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                    ) {
+                        Icon(
+                            Icons.Default.Delete,
+                            contentDescription = "Apagar viagem",
+                            tint     = androidx.compose.ui.graphics.Color(0xFFFF5555),
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text("Apagar", fontSize = 13.sp, color = androidx.compose.ui.graphics.Color(0xFFFF5555))
+                    }
+                }
             }
         }
+    }
+
+    // ── Diálogo de confirmação ────────────────────────────────────────────────
+    if (confirmDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            containerColor   = SurfaceCard,
+            title = { Text("Apagar viagem?", fontWeight = FontWeight.Bold, color = TextPrimary) },
+            text  = {
+                val displayName = entry.name.ifEmpty { entry.label }
+                val dateFmt = SimpleDateFormat("dd/MM/yy HH:mm", Locale.getDefault())
+                Text(
+                    "$displayName · ${dateFmt.format(Date(entry.timestampMs))}",
+                    fontSize = 13.sp,
+                    color    = TextSecondary,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { confirmDelete = false; onDelete() }) {
+                    Text("Apagar", color = androidx.compose.ui.graphics.Color(0xFFFF5555), fontWeight = FontWeight.SemiBold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmDelete = false }) {
+                    Text("Cancelar", color = TextSecondary)
+                }
+            },
+        )
     }
 }
 
