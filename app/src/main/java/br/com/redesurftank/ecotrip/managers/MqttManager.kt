@@ -299,8 +299,8 @@ class MqttManager private constructor() {
         val totalCostBrl    = fuelCostBrl + energyCostBrl
         val costPerKm       = if (snap.distKm > 0.1f) totalCostBrl / snap.distKm else 0f
 
-        val completedPayload = """{"name":$safeName,"timestamp":"$ts","distance_km":${f2(snap.distKm)},"time_sec":${snap.timeSec},"fuel_l":${f3(snap.fuelL)},"energy_kwh":${f3(snap.energyKwh)},"regen_kwh":${f3(snap.regenKwh)},"net_kwh":${f3(snap.netKwh)},"kwh_per_100km":${f2(snap.kwhPer100km)},"km_per_l":${f2(snap.kmPerL)},"avg_speed_kmh":${f1(snap.avgSpeedKmh)},"soc_start":${f1(snap.startSocPct)},"soc_end":${f1(snap.currentSocPct)},"tank_start_l":${f1(snap.startTankL)},"tank_end_l":${f1(snap.currentTankL)},"fuel_cost_brl":${f2(fuelCostBrl)},"energy_cost_brl":${f2(energyCostBrl)},"total_cost_brl":${f2(totalCostBrl)},"cost_per_km":${f3(costPerKm)}}"""
-        val newTripPayload   = """{"name":$safeName,"label":"$tripLabel","timestamp":"$ts","distance_km":${f2(snap.distKm)},"time_sec":${snap.timeSec},"fuel_l":${f2(snap.fuelL)},"energy_kwh":${f2(snap.energyKwh)},"regen_kwh":${f2(snap.regenKwh)},"net_kwh":${f2(snap.netKwh)},"kwh_per_100km":${f2(snap.kwhPer100km)},"km_per_l":${f2(snap.kmPerL)},"combined_km_l":${f2(snap.combinedKmL)},"soc_start":${f1(snap.startSocPct)},"soc_end":${f1(snap.currentSocPct)},"tank_start_l":${f1(snap.startTankL)},"tank_end_l":${f1(snap.currentTankL)},"fuel_cost_brl":${f2(fuelCostBrl)},"energy_cost_brl":${f2(energyCostBrl)},"total_cost_brl":${f2(totalCostBrl)},"cost_per_km":${f3(costPerKm)}}"""
+        val completedPayload = """{"name":$safeName,"timestamp":"$ts","distance_km":${f2(snap.distKm)},"time_sec":"${fmtDur(snap.timeSec)}","fuel_l":${f3(snap.fuelL)},"energy_kwh":${f3(snap.energyKwh)},"regen_kwh":${f3(snap.regenKwh)},"net_kwh":${f3(snap.netKwh)},"kwh_per_100km":${f2(snap.kwhPer100km)},"km_per_l":${f2(snap.kmPerL)},"avg_speed_kmh":${f1(snap.avgSpeedKmh)},"soc_start":${f1(snap.startSocPct)},"soc_end":${f1(snap.currentSocPct)},"tank_start_l":${f1(snap.startTankL)},"tank_end_l":${f1(snap.currentTankL)},"fuel_cost_brl":${f2(fuelCostBrl)},"energy_cost_brl":${f2(energyCostBrl)},"total_cost_brl":${f2(totalCostBrl)},"cost_per_km":${f3(costPerKm)}}"""
+        val newTripPayload   = """{"name":$safeName,"label":"$tripLabel","timestamp":"$ts","distance_km":${f2(snap.distKm)},"time_sec":"${fmtDur(snap.timeSec)}","fuel_l":${f2(snap.fuelL)},"energy_kwh":${f2(snap.energyKwh)},"regen_kwh":${f2(snap.regenKwh)},"net_kwh":${f2(snap.netKwh)},"kwh_per_100km":${f2(snap.kwhPer100km)},"km_per_l":${f2(snap.kmPerL)},"combined_km_l":${f2(snap.combinedKmL)},"soc_start":${f1(snap.startSocPct)},"soc_end":${f1(snap.currentSocPct)},"tank_start_l":${f1(snap.startTankL)},"tank_end_l":${f1(snap.currentTankL)},"fuel_cost_brl":${f2(fuelCostBrl)},"energy_cost_brl":${f2(energyCostBrl)},"total_cost_brl":${f2(totalCostBrl)},"cost_per_km":${f3(costPerKm)}}"""
 
         return QueuedTripCompleted(
             lastCompletedTopic   = "$prefix/$tripId/last_completed",
@@ -483,7 +483,7 @@ class MqttManager private constructor() {
 
             for ((label, snap) in listOf("trip_a" to q.snapA, "trip_b" to q.snapB)) {
                 pub("$label/distance_km",    fmt2(snap.distKm))
-                pub("$label/time_sec",        snap.timeSec.toString())
+                pub("$label/time_sec",        fmtDur(snap.timeSec))
                 pub("$label/kwh_per_100km",  fmt2(snap.kwhPer100km))
                 pub("$label/km_per_l",       fmt2(snap.kmPerL))
                 pub("$label/avg_speed_kmh",  fmt1(snap.avgSpeedKmh))
@@ -509,10 +509,10 @@ class MqttManager private constructor() {
             pubR("lifetime/regen_kwh",   fmt3(lt.regenKwh))
             pubR("lifetime/net_kwh",     fmt3(lt.netKwh))
             pubR("lifetime/distance_km", fmt2(lt.distKm))
-            pubR("lifetime/time_sec",    lt.timeSec.toString())
+            pubR("lifetime/time_sec",    fmtDur(lt.timeSec))
             pubR("lifetime/fuel_l",      fmt3(lt.fuelL))
             pubR("lifetime/charge_kwh",  fmt3(lt.chargeKwh))
-            pubR("lifetime/charge_sec",  lt.chargeSec.toString())
+            pubR("lifetime/charge_sec",  fmtDur(lt.chargeSec))
             // Custo lifetime — usa preços atuais (configuráveis pelo usuário)
             val ltPriceGas    = prefs.getFloat(SharedPreferencesKeys.PRICE_GASOLINE_PER_L, 6.0f)
             val ltPriceEnergy = prefs.getFloat(SharedPreferencesKeys.PRICE_ENERGY_PER_KWH, 0.9f)
@@ -579,7 +579,7 @@ class MqttManager private constructor() {
                 val ts = fmt.format(Date(e.timestampMs))
                 val safeName  = gson.toJson(e.name)   // JSON-quoted & escaped
                 val costPerKm = if (e.distKm > 0.1f && e.costBrl > 0f) e.costBrl / e.distKm else 0f
-                """{"name":$safeName,"label":"${e.label}","timestamp":"$ts","distance_km":${f2(e.distKm)},"time_sec":${e.timeSec},"fuel_l":${f2(e.fuelL)},"energy_kwh":${f2(e.energyKwh)},"regen_kwh":${f2(e.regenKwh)},"net_kwh":${f2(e.netKwh)},"kwh_per_100km":${f2(e.kwhPer100km)},"km_per_l":${f2(e.kmPerL)},"combined_km_l":${f2(e.combinedKmL)},"avg_speed_kmh":${f1(e.avgSpeedKmh)},"soc_start":${f1(e.startSocPct)},"soc_end":${f1(e.endSocPct)},"tank_start_l":${f1(e.startTankL)},"tank_end_l":${f1(e.endTankL)},"total_cost_brl":${f2(e.costBrl)},"cost_per_km":${f2(costPerKm)}}"""
+                """{"name":$safeName,"label":"${e.label}","timestamp":"$ts","distance_km":${f2(e.distKm)},"time_sec":"${fmtDur(e.timeSec)}","fuel_l":${f2(e.fuelL)},"energy_kwh":${f2(e.energyKwh)},"regen_kwh":${f2(e.regenKwh)},"net_kwh":${f2(e.netKwh)},"kwh_per_100km":${f2(e.kwhPer100km)},"km_per_l":${f2(e.kmPerL)},"combined_km_l":${f2(e.combinedKmL)},"avg_speed_kmh":${f1(e.avgSpeedKmh)},"soc_start":${f1(e.startSocPct)},"soc_end":${f1(e.endSocPct)},"tank_start_l":${f1(e.startTankL)},"tank_end_l":${f1(e.endTankL)},"total_cost_brl":${f2(e.costBrl)},"cost_per_km":${f2(costPerKm)}}"""
             }
             val payload = """{"count":${entries.size},"trips":[$tripsJson]}"""
             AppLogger.i(TAG, "→ Publicando histórico (QoS 1, retained): $prefix/trips/history")
@@ -596,6 +596,32 @@ class MqttManager private constructor() {
             Thread.sleep(RECONNECT_DELAY_MS)
             isReconnecting.set(false)
             if (enabled && host.isNotEmpty()) connectInternal()
+        }
+    }
+
+    /**
+     * Formata uma duração em segundos para string legível:
+     *   < 60s            → "30s"
+     *   < 60 min         → "58 min e 30s"
+     *   < 24h            → "2h, 38 min e 20s"
+     *   < 30 dias        → "3d, 2h, 38 min e 20s"
+     *   < 12 meses       → "2 meses, 3d, 2h, 38 min e 20s"
+     *   ≥ 12 meses       → "1 ano, 2 meses, 3d, 2h, 38 min e 20s"
+     */
+    private fun fmtDur(totalSec: Long): String {
+        val s  = (totalSec % 60).toInt()
+        val m  = (totalSec / 60 % 60).toInt()
+        val h  = (totalSec / 3600 % 24).toInt()
+        val d  = (totalSec / 86400 % 30).toInt()
+        val mo = (totalSec / (86400L * 30) % 12).toInt()
+        val yr = (totalSec / (86400L * 365)).toInt()
+        return when {
+            totalSec < 60L          -> "${s}s"
+            totalSec < 3600L        -> "${m} min e ${s}s"
+            totalSec < 86400L       -> "${h}h, ${m} min e ${s}s"
+            totalSec < 86400L * 30  -> "${d}d, ${h}h, ${m} min e ${s}s"
+            totalSec < 86400L * 365 -> "${mo} ${if (mo == 1) "mês" else "meses"}, ${d}d, ${h}h, ${m} min e ${s}s"
+            else                    -> "${yr} ${if (yr == 1) "ano" else "anos"}, ${mo} ${if (mo == 1) "mês" else "meses"}, ${d}d, ${h}h, ${m} min e ${s}s"
         }
     }
 
@@ -637,7 +663,7 @@ class MqttManager private constructor() {
             S("trip_a_kwh",         "Trip A kWh/100km",      "$prefix/trip_a/kwh_per_100km",  "kWh/100km", icon = "mdi:lightning-bolt"),
             S("trip_a_kml",         "Trip A km/L",           "$prefix/trip_a/km_per_l",       "km/L",      icon = "mdi:gas-station"),
             S("trip_a_speed",       "Trip A Vel. Média",     "$prefix/trip_a/avg_speed_kmh",  "km/h",      "speed"),
-            S("trip_a_time",        "Trip A Tempo",          "$prefix/trip_a/time_sec",        "s",         icon = "mdi:timer"),
+            S("trip_a_time",        "Trip A Tempo",          "$prefix/trip_a/time_sec",        "",          icon = "mdi:timer", sc = null),
             S("trip_a_fuel",        "Trip A Combustível",    "$prefix/trip_a/fuel_l",         "L",         icon = "mdi:fuel"),
             S("trip_a_energy",      "Trip A Energia",        "$prefix/trip_a/energy_kwh",     "kWh",       "energy"),
             S("trip_a_regen",       "Trip A Regenerada",     "$prefix/trip_a/regen_kwh",      "kWh",       "energy"),
@@ -649,7 +675,7 @@ class MqttManager private constructor() {
             S("trip_b_kwh",         "Trip B kWh/100km",      "$prefix/trip_b/kwh_per_100km",  "kWh/100km", icon = "mdi:lightning-bolt"),
             S("trip_b_kml",         "Trip B km/L",           "$prefix/trip_b/km_per_l",       "km/L",      icon = "mdi:gas-station"),
             S("trip_b_speed",       "Trip B Vel. Média",     "$prefix/trip_b/avg_speed_kmh",  "km/h",      "speed"),
-            S("trip_b_time",        "Trip B Tempo",          "$prefix/trip_b/time_sec",        "s",         icon = "mdi:timer"),
+            S("trip_b_time",        "Trip B Tempo",          "$prefix/trip_b/time_sec",        "",          icon = "mdi:timer", sc = null),
             S("trip_b_fuel",        "Trip B Combustível",    "$prefix/trip_b/fuel_l",         "L",         icon = "mdi:fuel"),
             S("trip_b_energy",      "Trip B Energia",        "$prefix/trip_b/energy_kwh",     "kWh",       "energy"),
             S("trip_b_regen",       "Trip B Regenerada",     "$prefix/trip_b/regen_kwh",      "kWh",       "energy"),
@@ -667,10 +693,10 @@ class MqttManager private constructor() {
             S("lifetime_regen",       "Lifetime Regenerada",        "$prefix/lifetime/regen_kwh",   "kWh", dc = "energy",    sc = "total_increasing"),
             S("lifetime_net",         "Lifetime Líquido",           "$prefix/lifetime/net_kwh",     "kWh", dc = "energy",    sc = "total_increasing"),
             S("lifetime_distance",    "Lifetime Distância",         "$prefix/lifetime/distance_km", "km",  dc = "distance",  sc = "total_increasing"),
-            S("lifetime_time",        "Lifetime Tempo",             "$prefix/lifetime/time_sec",    "s",   icon = "mdi:timer",      sc = "total_increasing"),
+            S("lifetime_time",        "Lifetime Tempo",             "$prefix/lifetime/time_sec",    "",    icon = "mdi:timer",      sc = null),
             S("lifetime_fuel",        "Lifetime Combustível",       "$prefix/lifetime/fuel_l",      "L",   icon = "mdi:fuel",       sc = "total_increasing"),
             S("lifetime_charge",      "Lifetime Carregado",         "$prefix/lifetime/charge_kwh",  "kWh", dc = "energy",           sc = "total_increasing"),
-            S("lifetime_charge_time", "Lifetime Tempo Recarga",     "$prefix/lifetime/charge_sec",  "s",   icon = "mdi:timer-sand", sc = "total_increasing"),
+            S("lifetime_charge_time", "Lifetime Tempo Recarga",     "$prefix/lifetime/charge_sec",  "",    icon = "mdi:timer-sand", sc = null),
             S("lifetime_cost",        "Lifetime Custo Total",       "$prefix/lifetime/cost_brl",    "R\$", icon = "mdi:cash-register"),
         )
 
