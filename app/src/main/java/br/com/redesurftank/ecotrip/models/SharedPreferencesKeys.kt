@@ -63,6 +63,10 @@ object SharedPreferencesKeys {
     // Auto-trip display filter
     const val MIN_AUTO_TRIP_DIST_KM  = "min_auto_trip_dist_km"
 
+    // IDs (startMs) de auto-trips já enviados com sucesso ao bridge
+    // JSON array de Long — evita re-envio de trips já sincronizados
+    const val BRIDGE_SYNCED_TRIP_IDS = "bridge_synced_trip_ids_json"
+
     // Chart raw samples (JSON)
     const val TRIP_A_RAW_SAMPLES_JSON = "trip_a_raw_samples_json"
     const val TRIP_B_RAW_SAMPLES_JSON = "trip_b_raw_samples_json"

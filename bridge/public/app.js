@@ -485,14 +485,20 @@ function renderHistory() {
 
 // ── Lifetime ──────────────────────────────────────────────────────────────────
 function loadLifetime() {
+  // Invalida o cache de auto-trips sempre que a aba é aberta, garantindo dados frescos.
+  // (A aba 'all' usa MQTT ao vivo, mas os filtros precisam de dados pós-sincronização.)
+  cachedAutoTrips = null;
   renderLifetimeTab();
-  // Pré-carrega trips + recargas para filtros funcionarem imediatamente
+  // Pré-carrega recargas para filtros funcionarem imediatamente
   if (cachedCharges === null) {
     fetch('/api/charges').then(r=>r.json()).then(d=>{cachedCharges=Array.isArray(d)?d:[];}).catch(()=>{});
   }
-  if (cachedTrips === null) {
-    fetch('/api/trips').then(r=>r.json()).then(d=>{cachedTrips=Array.isArray(d)?d:[];}).catch(()=>{});
-  }
+  // Pré-carrega auto-trips (fonte principal do filtro de período)
+  fetch('/api/autotrips').then(r=>r.json()).then(d=>{
+    cachedAutoTrips = Array.isArray(d) ? d : [];
+    // Re-renderiza se já estiver em modo filtrado
+    if (filterState.life.active !== 'all') renderLifetimeTab();
+  }).catch(()=>{ cachedAutoTrips = []; });
 }
 
 function renderLifetimeTab() {

@@ -232,6 +232,8 @@ class TripManager private constructor() {
     private val checkpoints = mutableListOf<LifetimeCheckpoint>()
     // Auto-Trip tracking (driving_ready=1 inicia, driving_ready≠1 finaliza)
     private val autoTripHistory      = mutableListOf<AutoTripEntry>()
+    /** startMs de trips já confirmados no bridge — impede re-envios desnecessários. */
+    private val bridgeSyncedIds      = mutableSetOf<Long>()
     private var lastDrivingReadyState: Int = 0   // persiste para detectar reinício mid-trip
     private var minAutoTripDistKm:   Float = 0f  // filtro de distância mínima (display + save)
     /** Chamado na UI thread após cada trip automático salvo com sucesso. */
@@ -372,10 +374,53 @@ class TripManager private constructor() {
         autoTripHistory.reversed()
     }
 
-    /** Para AutoTripsScreen: limpar histórico de viagens automáticas. */
+    /** Persiste o set de IDs sincronizados nas SharedPreferences (thread-safe). */
+    private fun persistSyncedIds() {
+        if (!::prefs.isInitialized) return
+        val snapshot = synchronized(lock) { bridgeSyncedIds.toList() }
+        prefs.edit()
+            .putString(SharedPreferencesKeys.BRIDGE_SYNCED_TRIP_IDS, gson.toJson(snapshot))
+            .apply()
+    }
+
+    /**
+     * Sincroniza apenas as viagens ainda não confirmadas com o bridge (iPhone PWA).
+     * Chamado ao abrir a aba de viagens automáticas.
+     * Cada viagem bem-sucedida é marcada no set [bridgeSyncedIds] para não ser reenviada.
+     */
+    fun syncAutoTripsTobridge() {
+        val bridgeUrl = getBridgeHttpUrl()
+        if (bridgeUrl.isBlank()) {
+            AppLogger.w(TAG, "syncAutoTripsTobridge: Bridge URL não configurado (verifique o host MQTT)")
+            return
+        }
+        val unsynced = synchronized(lock) {
+            autoTripHistory
+                .filter { it.startMs !in bridgeSyncedIds }
+                .map    { entry -> entry.startMs.toString() to gson.toJson(entry) }
+        }
+        if (unsynced.isEmpty()) {
+            AppLogger.i(TAG, "syncAutoTripsTobridge: todas as viagens já estão no bridge")
+            return
+        }
+        AppLogger.i(TAG, "syncAutoTripsTobridge: enviando ${unsynced.size} viagens pendentes para $bridgeUrl")
+        telemetryRecorder?.bulkPostTrips(bridgeUrl, unsynced) { tripIdStr ->
+            val ms = tripIdStr.toLongOrNull() ?: return@bulkPostTrips
+            synchronized(lock) { bridgeSyncedIds.add(ms) }
+            persistSyncedIds()
+        }
+    }
+
+    /** Para AutoTripsScreen: limpar histórico de viagens automáticas e reset do controle de sync. */
     fun clearAutoTripHistory() {
-        synchronized(lock) { autoTripHistory.clear() }
-        if (::prefs.isInitialized) prefs.edit().putString(SharedPreferencesKeys.AUTO_TRIP_HISTORY_JSON, "[]").apply()
+        synchronized(lock) {
+            autoTripHistory.clear()
+            bridgeSyncedIds.clear()
+        }
+        if (::prefs.isInitialized) prefs.edit()
+            .putString(SharedPreferencesKeys.AUTO_TRIP_HISTORY_JSON, "[]")
+            .putString(SharedPreferencesKeys.BRIDGE_SYNCED_TRIP_IDS, "[]")
+            .apply()
     }
 
     /** Renomeia uma viagem automática identificada pelo startMs. */
@@ -777,11 +822,17 @@ class TripManager private constructor() {
         AppLogger.i(TAG, "AutoTrip salvo: ${entry.distKm}km ${entry.timeSec}s ${entry.netKwh}kWh (${wallSec}s total)")
         onAutoTripCompleted?.invoke(entry)
 
-        // Envia telemetria para o bridge (fire-and-forget)
-        val telSamples = telemetryRecorder?.stopRecording() ?: emptyList()
-        val bridgeUrl  = getBridgeHttpUrl()
-        val tripId     = entry.startMs.toString()
-        telemetryRecorder?.postTelemetry(bridgeUrl, tripId, gson.toJson(entry), telSamples)
+        // Envia telemetria para o bridge (fire-and-forget) e marca como sincronizado em caso de sucesso
+        val telSamples    = telemetryRecorder?.stopRecording() ?: emptyList()
+        val bridgeUrl     = getBridgeHttpUrl()
+        val tripId        = entry.startMs.toString()
+        val entryStartMs  = entry.startMs
+        telemetryRecorder?.postTelemetry(bridgeUrl, tripId, gson.toJson(entry), telSamples) {
+            // Confirmação HTTP 2xx → marca como já enviado para evitar re-sync futuro
+            synchronized(lock) { bridgeSyncedIds.add(entryStartMs) }
+            persistSyncedIds()
+            AppLogger.i(TAG, "Trip $tripId marcada como sincronizada com o bridge")
+        }
     }
 
     fun onDataChanged(key: String, rawValue: String) {
@@ -1350,6 +1401,15 @@ class TripManager private constructor() {
             try {
                 val type = object : TypeToken<List<AutoTripEntry>>() {}.type
                 autoTripHistory.addAll(gson.fromJson<List<AutoTripEntry>>(atJson, type))
+            } catch (_: Exception) {}
+        }
+
+        // IDs de viagens já sincronizadas com o bridge
+        val syncJson = prefs.getString(SharedPreferencesKeys.BRIDGE_SYNCED_TRIP_IDS, null)
+        if (!syncJson.isNullOrEmpty()) {
+            try {
+                val type = object : TypeToken<List<Long>>() {}.type
+                bridgeSyncedIds.addAll(gson.fromJson<List<Long>>(syncJson, type))
             } catch (_: Exception) {}
         }
 

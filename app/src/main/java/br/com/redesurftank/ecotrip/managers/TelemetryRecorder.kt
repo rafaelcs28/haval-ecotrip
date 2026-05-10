@@ -136,6 +136,57 @@ class TelemetryRecorder(private val context: Context) {
     }
 
     /**
+     * Envia todas as viagens armazenadas para o bridge sem amostras de telemetria.
+     * Usado para sincronizar viagens existentes que não foram enviadas anteriormente
+     * (ex.: bridge estava offline quando a viagem foi salva).
+     * Fire-and-forget; o bridge aceita re-envios e sobrescreve de forma idempotente.
+     *
+     * @param bridgeUrl URL base do bridge, ex. "http://192.168.1.100:3000"
+     * @param trips lista de pares (tripId, autoTripJson) — já serializados pelo caller
+     */
+    fun bulkPostTrips(
+        bridgeUrl:    String,
+        trips:        List<Pair<String, String>>,
+        onTripSynced: (String) -> Unit = {},
+    ) {
+        if (bridgeUrl.isBlank() || trips.isEmpty()) return
+        scope.launch {
+            var ok = 0
+            var fail = 0
+            for ((tripId, autoTripJson) in trips) {
+                try {
+                    val payload = """{"tripId":"$tripId","autoTrip":$autoTripJson,"samples":[]}"""
+                    val url  = URL("$bridgeUrl/api/autotrips")
+                    val conn = url.openConnection() as HttpURLConnection
+                    conn.apply {
+                        requestMethod = "POST"
+                        setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                        doOutput       = true
+                        connectTimeout = 8_000
+                        readTimeout    = 8_000
+                    }
+                    conn.outputStream.use { it.write(payload.toByteArray(Charsets.UTF_8)) }
+                    val code = conn.responseCode
+                    conn.disconnect()
+                    if (code in 200..299) {
+                        ok++
+                        onTripSynced(tripId)
+                    } else {
+                        Log.w(TAG, "bulkPost trip $tripId → HTTP $code")
+                        fail++
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "bulkPost trip $tripId falhou: ${e.message}")
+                    fail++
+                }
+                // Pequena pausa entre requisições para não sobrecarregar o bridge
+                delay(80L)
+            }
+            Log.i(TAG, "bulkPostTrips: $ok OK, $fail falhas (total ${trips.size})")
+        }
+    }
+
+    /**
      * Envia telemetria + resumo do auto-trip para o bridge via HTTP POST.
      * Fire-and-forget: falhas são logadas mas não travam o caller.
      */
@@ -144,6 +195,7 @@ class TelemetryRecorder(private val context: Context) {
         tripId:       String,
         autoTripJson: String,
         samples:      List<TelemetrySample>,
+        onSuccess:    () -> Unit = {},
     ) {
         if (bridgeUrl.isBlank()) {
             Log.w(TAG, "Bridge URL não configurado — telemetria não enviada")
@@ -178,6 +230,7 @@ class TelemetryRecorder(private val context: Context) {
                 val code = conn.responseCode
                 if (code in 200..299) {
                     Log.i(TAG, "Telemetria enviada: tripId=$tripId (${samples.size} amostras)")
+                    onSuccess()
                 } else {
                     Log.w(TAG, "Erro HTTP $code ao enviar telemetria")
                 }

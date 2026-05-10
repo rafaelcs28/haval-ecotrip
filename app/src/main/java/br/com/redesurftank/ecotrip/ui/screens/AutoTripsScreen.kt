@@ -19,6 +19,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -105,14 +106,12 @@ fun AutoTripsScreen(
     onClear:        () -> Unit,
     onBack:         () -> Unit,
 ) {
+    val context          = LocalContext.current
     var selectedFilter   by remember { mutableStateOf(AutoTripFilter.ALL) }
     var customStartDayMs by remember { mutableStateOf<Long?>(null) }
     var customEndDayMs   by remember { mutableStateOf<Long?>(null) }
     var showStartPicker  by remember { mutableStateOf(false) }
     var showEndPicker    by remember { mutableStateOf(false) }
-
-    val startPickerState = rememberDatePickerState()
-    val endPickerState   = rememberDatePickerState()
     val dateLabelFmt     = remember { SimpleDateFormat("dd/MM/yy", Locale.getDefault()) }
 
     val hasCustomRange = customStartDayMs != null || customEndDayMs != null
@@ -145,49 +144,54 @@ fun AutoTripsScreen(
     }
     val showSummary  = selectedFilter != AutoTripFilter.ALL || hasCustomRange
 
-    // ── DatePicker — Início ───────────────────────────────────────────────────
+    // ── DatePicker nativo (compatível com Android personalizado do carro) ────────
+    // Usamos android.app.DatePickerDialog em vez de Material3 DatePickerDialog
+    // para evitar crashes no ROM customizado da central multimídia.
     if (showStartPicker) {
-        DatePickerDialog(
-            onDismissRequest = { showStartPicker = false },
-            confirmButton = {
-                TextButton(onClick = {
-                    startPickerState.selectedDateMillis?.let { utcMs ->
-                        customStartDayMs = autoTripUtcMsToLocalMidnight(utcMs)
-                        selectedFilter   = AutoTripFilter.ALL
-                    }
+        DisposableEffect(Unit) {
+            val cal = Calendar.getInstance()
+            customStartDayMs?.let { cal.timeInMillis = it }
+            val dialog = android.app.DatePickerDialog(
+                context,
+                { _, year, month, day ->
+                    customStartDayMs = Calendar.getInstance().apply {
+                        set(year, month, day, 0, 0, 0)
+                        set(Calendar.MILLISECOND, 0)
+                    }.timeInMillis
+                    selectedFilter = AutoTripFilter.ALL
                     showStartPicker = false
-                }) { Text("OK") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showStartPicker = false }) { Text("Cancelar") }
-            },
-        ) {
-            DatePicker(state = startPickerState, title = {
-                Text("Data inicial", modifier = Modifier.padding(start = 24.dp, top = 16.dp), fontSize = 14.sp)
-            })
+                },
+                cal.get(Calendar.YEAR),
+                cal.get(Calendar.MONTH),
+                cal.get(Calendar.DAY_OF_MONTH),
+            )
+            dialog.setOnDismissListener { showStartPicker = false }
+            dialog.show()
+            onDispose { try { dialog.dismiss() } catch (_: Exception) {} }
         }
     }
 
-    // ── DatePicker — Fim ──────────────────────────────────────────────────────
     if (showEndPicker) {
-        DatePickerDialog(
-            onDismissRequest = { showEndPicker = false },
-            confirmButton = {
-                TextButton(onClick = {
-                    endPickerState.selectedDateMillis?.let { utcMs ->
-                        customEndDayMs = autoTripUtcMsToLocalMidnight(utcMs)
-                        selectedFilter = AutoTripFilter.ALL
-                    }
+        DisposableEffect(Unit) {
+            val cal = Calendar.getInstance()
+            customEndDayMs?.let { cal.timeInMillis = it }
+            val dialog = android.app.DatePickerDialog(
+                context,
+                { _, year, month, day ->
+                    customEndDayMs = Calendar.getInstance().apply {
+                        set(year, month, day, 0, 0, 0)
+                        set(Calendar.MILLISECOND, 0)
+                    }.timeInMillis
+                    selectedFilter = AutoTripFilter.ALL
                     showEndPicker = false
-                }) { Text("OK") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showEndPicker = false }) { Text("Cancelar") }
-            },
-        ) {
-            DatePicker(state = endPickerState, title = {
-                Text("Data final", modifier = Modifier.padding(start = 24.dp, top = 16.dp), fontSize = 14.sp)
-            })
+                },
+                cal.get(Calendar.YEAR),
+                cal.get(Calendar.MONTH),
+                cal.get(Calendar.DAY_OF_MONTH),
+            )
+            dialog.setOnDismissListener { showEndPicker = false }
+            dialog.show()
+            onDispose { try { dialog.dismiss() } catch (_: Exception) {} }
         }
     }
 

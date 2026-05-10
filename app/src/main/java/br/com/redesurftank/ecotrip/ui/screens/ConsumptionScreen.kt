@@ -292,6 +292,17 @@ fun ConsumptionScreen() {
         }
     }
 
+    // Carrega (ou recarrega) a lista de viagens automáticas sempre que a aba é aberta.
+    // Fica FORA do bloco if(showAutoTrips) para não violar as regras de composição —
+    // ter um LaunchedEffect dentro de um bloco condicional com early-return causa crashes.
+    // Ao abrir a aba também dispara o sync de viagens existentes para o bridge iPhone.
+    LaunchedEffect(showAutoTrips) {
+        if (showAutoTrips) {
+            autoTripEntries = tripManager.getAutoTripHistory()
+            tripManager.syncAutoTripsTobridge()
+        }
+    }
+
     // ── Popup resumo da última viagem automática ──────────────────────────────
     lastCompletedTrip?.let { trip ->
         val dateFmt = remember { java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()) }
@@ -438,10 +449,6 @@ fun ConsumptionScreen() {
     }
 
     if (showAutoTrips) {
-        // Carrega a lista na primeira abertura
-        LaunchedEffect(Unit) {
-            autoTripEntries = tripManager.getAutoTripHistory()
-        }
         AutoTripsScreen(
             entries        = autoTripEntries,
             priceGasL      = priceGasoline,

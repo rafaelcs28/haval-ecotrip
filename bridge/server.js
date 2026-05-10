@@ -210,7 +210,17 @@ app.post('/api/autotrips', (req, res) => {
     if (!safeId) return res.status(400).json({ error: 'invalid tripId' });
 
     const filePath = path.join(AUTOTRIPS_DIR, `${safeId}.json`);
-    fs.writeFileSync(filePath, JSON.stringify({ tripId: safeId, autoTrip, samples: samples || [] }));
+
+    // Se a viagem já existe com samples e o novo POST tem samples vazio (sync sem telemetria),
+    // preserva os samples existentes para não apagar dados GPS de viagens anteriores.
+    let finalSamples = samples || [];
+    if (finalSamples.length === 0 && fs.existsSync(filePath)) {
+      try {
+        const existing = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+        if (existing.samples && existing.samples.length > 0) finalSamples = existing.samples;
+      } catch (_) {}
+    }
+    fs.writeFileSync(filePath, JSON.stringify({ tripId: safeId, autoTrip, samples: finalSamples }));
 
     const record = { tripId: safeId, ...autoTrip };
     const idx = autoTripsArr.findIndex(t => t.tripId === safeId);
