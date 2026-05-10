@@ -335,6 +335,7 @@ function renderDash() {
   setText('d-roll-fuel', r.fuel_l        > 0 ? f2(r.fuel_l) + ' L'       : '--');
   setText('d-roll-kwh',  r.kwh_per_100km > 0 ? f1(r.kwh_per_100km)       : '--');
   setText('d-roll-kml',  r.km_per_l      > 0 ? f1(r.km_per_l)            : '--');
+  setText('d-roll-cost', r.cost_brl      > 0 ? 'R$ ' + f2(r.cost_brl)   : '--');
   setClass('d-roll-kwh', eff(r.kwh_per_100km));
 }
 
@@ -634,6 +635,49 @@ function renderAutoTrips() {
   }).join('');
 }
 
+// ── Dashboard map — última localização do carro ───────────────────────────────
+let dashMap         = null;
+let dashMarker      = null;
+
+function initDashMap() {
+  fetch('/api/location')
+    .then(r => r.json())
+    .then(data => {
+      if (!data.lat || !data.lng) return;   // sem GPS disponível
+      const card = document.getElementById('d-map-card');
+      if (card) card.style.display = '';
+      const el = document.getElementById('d-car-map');
+      if (!el) return;
+
+      // Cria o mapa só uma vez
+      if (!dashMap) {
+        dashMap = L.map(el, {
+          zoomControl:       false,
+          attributionControl: false,
+          dragging:          true,
+          scrollWheelZoom:   false,
+        });
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18 }).addTo(dashMap);
+      }
+
+      const pos = [data.lat, data.lng];
+      dashMap.setView(pos, 15);
+
+      if (dashMarker) dashMarker.setLatLng(pos);
+      else {
+        dashMarker = L.circleMarker(pos, {
+          radius: 9, fillColor: '#39FF88', fillOpacity: 1, color: '#fff', weight: 2,
+        }).addTo(dashMap);
+        dashMarker.bindPopup('🚗 Haval H6 PHEV34');
+      }
+
+      if (data.ts) {
+        setText('d-map-ts', relTime(data.ts) + ' atrás');
+      }
+    })
+    .catch(() => {});   // sem localização — mapa permanece oculto
+}
+
 // ── Trip detail: mapa Leaflet + gráficos Chart.js ─────────────────────────────
 let leafletMap      = null;
 let routePolyline   = null;
@@ -822,3 +866,6 @@ try {
 connect();
 tickInterval = setInterval(tickLastUpdate, 1000);
 tickLastUpdate();
+
+// Carrega localização do carro no mapa do dashboard (requer Leaflet carregado)
+window.addEventListener('load', () => { setTimeout(initDashMap, 500); });

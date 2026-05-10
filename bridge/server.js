@@ -75,7 +75,7 @@ const state = {
     cost_brl:      0, cost_per_km: 0,
   },
   rolling: {
-    kwh_per_100km: 0, km_per_l: 0, distance_km: 0, fuel_l: 0,
+    kwh_per_100km: 0, km_per_l: 0, distance_km: 0, fuel_l: 0, cost_brl: 0,
   },
   lifetime: {
     energy_kwh: 0, regen_kwh: 0, net_kwh: 0, distance_km: 0,
@@ -237,6 +237,32 @@ app.get('/api/telemetry/:tripId', (req, res) => {
   res.sendFile(filePath);
 });
 
+// Última localização GPS conhecida do carro (pega do arquivo de telemetria mais recente)
+app.get('/api/location', (_req, res) => {
+  try {
+    const files = fs.readdirSync(AUTOTRIPS_DIR)
+      .filter(f => f.endsWith('.json'))
+      .sort()
+      .reverse();
+    for (const f of files) {
+      const d = JSON.parse(fs.readFileSync(path.join(AUTOTRIPS_DIR, f), 'utf8'));
+      const samples = d.samples || [];
+      const lastGps = [...samples].reverse().find(s => s.lat !== 0 || s.lng !== 0);
+      if (lastGps) {
+        return res.json({
+          lat: lastGps.lat,
+          lng: lastGps.lng,
+          tripId: d.tripId,
+          ts: d.autoTrip?.endMs || null,
+        });
+      }
+    }
+    res.json({ lat: null, lng: null });
+  } catch (_e) {
+    res.json({ lat: null, lng: null });
+  }
+});
+
 app.get('/api/config', (_req, res) => res.json({
   mqtt_host:   MQTT_HOST,
   mqtt_prefix: MQTT_PREFIX,
@@ -290,7 +316,7 @@ mqttClient.on('message', (topic, payload) => {
     : topic;
 
   applyMqttMessage(key, value);
-  broadcast('update', { state });
+  broadcast('update', state);
 });
 
 // ── Roteamento dos tópicos MQTT → state ──────────────────────────────────────
@@ -372,6 +398,7 @@ function applyMqttMessage(key, value) {
     case 'rolling/km_per_l':      state.rolling.km_per_l      = num(value); break;
     case 'rolling/distance_km':   state.rolling.distance_km   = num(value); break;
     case 'rolling/fuel_l':        state.rolling.fuel_l        = num(value); break;
+    case 'rolling/cost_brl':      state.rolling.cost_brl      = num(value); break;
 
     // Lifetime
     case 'lifetime/energy_kwh':  state.lifetime.energy_kwh  = num(value); break;

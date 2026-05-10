@@ -113,6 +113,10 @@ fun ConsumptionScreen() {
     var showLog           by remember { mutableStateOf(false) }
     var minAutoTripDist   by remember { mutableStateOf(tripManager.getMinAutoTripDist()) }
     var lastCompletedTrip by remember { mutableStateOf<AutoTripEntry?>(null) }
+    // Lista de viagens automáticas — carregada uma vez quando a tela é aberta e
+    // actualizada após renomear ou limpar. Evita chamar getAutoTripHistory() a cada
+    // recomposição (que criaria uma nova lista instável e poderia causar loops).
+    var autoTripEntries   by remember { mutableStateOf<List<AutoTripEntry>>(emptyList()) }
 
     DisposableEffect(Unit) {
         val tripListener: (TripSnapshot, TripSnapshot, RollingSnapshot) -> Unit = { a, b, r ->
@@ -434,13 +438,23 @@ fun ConsumptionScreen() {
     }
 
     if (showAutoTrips) {
+        // Carrega a lista na primeira abertura
+        LaunchedEffect(Unit) {
+            autoTripEntries = tripManager.getAutoTripHistory()
+        }
         AutoTripsScreen(
-            entries        = tripManager.getAutoTripHistory(),
+            entries        = autoTripEntries,
             priceGasL      = priceGasoline,
             priceEnergyKwh = priceEnergy,
             minDistKm      = minAutoTripDist,
-            onRename       = { entry, name -> tripManager.renameAutoTripEntry(entry.startMs, name) },
-            onClear        = { tripManager.clearAutoTripHistory() },
+            onRename       = { entry, name ->
+                tripManager.renameAutoTripEntry(entry.startMs, name)
+                autoTripEntries = tripManager.getAutoTripHistory()
+            },
+            onClear        = {
+                tripManager.clearAutoTripHistory()
+                autoTripEntries = emptyList()
+            },
             onBack         = { showAutoTrips = false },
         )
         return

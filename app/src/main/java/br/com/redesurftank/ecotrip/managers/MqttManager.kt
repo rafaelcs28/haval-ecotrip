@@ -491,6 +491,7 @@ class MqttManager private constructor() {
             pub("rolling/km_per_l",      fmt2(q.rolling.kmPerL))
             pub("rolling/distance_km",   fmt2(q.rolling.windowKm))
             pub("rolling/fuel_l",        fmt3(q.rolling.fuelL))
+            if (q.rolling.costBrl > 0.01f) pub("rolling/cost_brl", fmt2(q.rolling.costBrl))
 
             for ((label, snap) in listOf("trip_a" to q.snapA, "trip_b" to q.snapB)) {
                 pub("$label/distance_km",    fmt2(snap.distKm))
