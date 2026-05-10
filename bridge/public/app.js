@@ -170,6 +170,102 @@ function renderLifetime(l) {
   setText('l-cost',        l.cost_brl   > 0 ? 'R$ ' + f2(l.cost_brl)   : '--');
 }
 
+// ── Recargas ──────────────────────────────────────────────────────────────────
+function loadCharges() {
+  const list = document.getElementById('charges-list');
+  list.innerHTML = '<div class="empty">Carregando...</div>';
+
+  fetch('/api/charges')
+    .then(r => r.json())
+    .then(charges => {
+      if (!charges || charges.length === 0) {
+        list.innerHTML = '<div class="empty">Nenhuma recarga registrada ainda.</div>';
+        return;
+      }
+
+      // Totais
+      const totalKwh  = charges.reduce((s, c) => s + (c.energy_kwh || 0), 0);
+      const totalSec  = charges.reduce((s, c) => s + (c.duration_sec || 0), 0);
+      const avgPwr    = totalSec > 0 ? (totalKwh / (totalSec / 3600)) : 0;
+
+      function fmtDur(sec) {
+        if (!sec || sec <= 0) return '--';
+        const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60);
+        return h > 0 ? `${h}h ${m}min` : `${m}min`;
+      }
+      function fmtDate(ts) {
+        try {
+          const d = new Date(ts);
+          return d.toLocaleDateString('pt-BR', { day:'2-digit', month:'2-digit', year:'2-digit' })
+               + ' ' + d.toLocaleTimeString('pt-BR', { hour:'2-digit', minute:'2-digit' });
+        } catch(_) { return ts || '--'; }
+      }
+
+      const socDeltaColor = (delta) =>
+        delta >= 50 ? 'green' : delta >= 25 ? 'teal' : 'muted';
+
+      const summary = `
+<div class="charge-summary-card">
+  <div class="card-title">Resumo — ${charges.length} sessão${charges.length !== 1 ? 'ões' : ''}</div>
+  <div class="metrics-row">
+    <div class="metric">
+      <div class="metric-value teal">${f2(totalKwh)} kWh</div>
+      <div class="metric-label">total carregado</div>
+    </div>
+    <div class="metric">
+      <div class="metric-value muted">${fmtDur(totalSec)}</div>
+      <div class="metric-label">tempo total</div>
+    </div>
+    <div class="metric">
+      <div class="metric-value blue">${f1(avgPwr)} kW</div>
+      <div class="metric-label">potência média</div>
+    </div>
+  </div>
+</div>`;
+
+      const items = charges.map(c => {
+        const delta = (c.soc_end || 0) - (c.soc_start || 0);
+        const color = socDeltaColor(delta);
+        return `
+<div class="trip-item">
+  <div class="trip-header">
+    <div>
+      <div class="trip-name">${fmtDate(c.timestamp)}</div>
+    </div>
+    <span class="charge-kwh-badge">${f2(c.energy_kwh)} kWh</span>
+  </div>
+  <div class="trip-metrics">
+    <div class="trip-metric">
+      <div class="trip-metric-val" style="color:var(--teal)">${fmtDur(c.duration_sec)}</div>
+      <div class="trip-metric-lbl">duração</div>
+    </div>
+    <div class="trip-metric">
+      <div class="trip-metric-val" style="color:var(--blue)">${f1(c.avg_power_kw)} kW</div>
+      <div class="trip-metric-lbl">pot. média</div>
+    </div>
+    <div class="trip-metric">
+      <div class="trip-metric-val" style="color:var(--muted)">${pct(c.soc_start)}</div>
+      <div class="trip-metric-lbl">SOC início</div>
+    </div>
+    <div class="trip-metric">
+      <div class="trip-metric-val ${color}">${pct(c.soc_end)}</div>
+      <div class="trip-metric-lbl">SOC fim</div>
+    </div>
+    <div class="trip-metric">
+      <div class="trip-metric-val ${color}">+${delta.toFixed(0)}%</div>
+      <div class="trip-metric-lbl">Δ SOC</div>
+    </div>
+  </div>
+</div>`;
+      }).join('');
+
+      list.innerHTML = summary + items;
+    })
+    .catch(() => {
+      list.innerHTML = '<div class="empty">Erro ao carregar recargas. Verifique a conexão.</div>';
+    });
+}
+
 // ── Histórico ─────────────────────────────────────────────────────────────────
 function loadHistory() {
   const list = document.getElementById('hist-list');

@@ -253,6 +253,11 @@
       </div>
     </div>
 
+    <!-- Recargas -->
+    <div id="panel-charges" class="panel">
+      <div id="charges-list"><div class="empty">Carregando recargas...</div></div>
+    </div>
+
     <!-- Histórico -->
     <div id="panel-hist" class="panel">
       <div id="hist-list"><div class="empty">Carregando histórico...</div></div>
@@ -324,6 +329,10 @@
     <button class="tab" data-panel="rolling" onclick="switchTab(this)">
       <span class="icon">↺</span>
       <span>Rolling</span>
+    </button>
+    <button class="tab" data-panel="charges" onclick="switchTab(this, loadCharges)">
+      <span class="icon">⚡</span>
+      <span>Recargas</span>
     </button>
     <button class="tab" data-panel="hist" onclick="switchTab(this, loadHistory)">
       <span class="icon">≡</span>

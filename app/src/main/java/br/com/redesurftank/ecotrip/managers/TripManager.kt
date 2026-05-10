@@ -236,6 +236,7 @@ class TripManager private constructor() {
     private var minAutoTripDistKm:   Float = 0f  // filtro de distância mínima (display + save)
     /** Chamado na UI thread após cada trip automático salvo com sucesso. */
     var onAutoTripCompleted: ((AutoTripEntry) -> Unit)? = null
+    var onChargeSessionCompleted: ((ChargeHistoryEntry) -> Unit)? = null
     private var autoTripStartMs      = 0L
     private var autoTripStartSoc     = 0f
     private var autoTripStartFuel    = 0f
@@ -336,6 +337,7 @@ class TripManager private constructor() {
                     while (chargeHistory.size > 50) chargeHistory.removeAt(chargeHistory.lastIndex)
                     saveChargeHistory()
                     AppLogger.i(TAG, "Recarga concluída — ${chargeSessionEnergyKwh}kWh em ${chargeSessionSec}s SOC ${chargeSessionStartSoc}→${latestSocPct}%")
+                    onChargeSessionCompleted?.invoke(entry)
                 }
                 // Persiste lifetime imediatamente (não espera próximo tick)
                 saveToPrefs()

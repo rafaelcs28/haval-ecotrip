@@ -431,6 +431,17 @@ class MqttManager private constructor() {
             AppLogger.w(TAG, "drainQueues: falha ao publicar histórico: ${e.message}")
         }
 
+        // Publica histórico de recargas como retained após reconexão
+        try {
+            val charges = TripManager.getInstance().getChargeHistory()
+            if (charges.isNotEmpty()) {
+                AppLogger.i(TAG, "Republicando histórico de recargas após reconexão: ${charges.size} sessão(ões)")
+                publishChargeHistoryInternal(c, charges)
+            }
+        } catch (e: Exception) {
+            AppLogger.w(TAG, "drainQueues: falha ao publicar recargas: ${e.message}")
+        }
+
         // Then regular snapshots
         val snapshots = synchronized(snapshotLock) {
             snapshotQueue.toList().also { snapshotQueue.clear() }
@@ -588,6 +599,36 @@ class MqttManager private constructor() {
             AppLogger.i(TAG, "✓ Histórico publicado: ${entries.size} entrada(s)")
         } catch (e: Exception) {
             AppLogger.e(TAG, "✗ Histórico FALHOU: ${e::class.simpleName}: ${e.message}")
+        }
+    }
+
+    // ── Charge history ────────────────────────────────────────────────────────
+
+    fun publishChargeHistory(entries: List<ChargeHistoryEntry>) {
+        if (entries.isEmpty()) return
+        val c = client
+        if (c == null || !c.isConnected) {
+            AppLogger.w(TAG, "publishChargeHistory: offline, não publicado agora")
+            return
+        }
+        executor.submit { publishChargeHistoryInternal(c, entries) }
+    }
+
+    private fun publishChargeHistoryInternal(c: MqttClient, entries: List<ChargeHistoryEntry>) {
+        try {
+            val fmt = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.getDefault())
+            fun f1(v: Float) = String.format(java.util.Locale.US, "%.1f", v)
+            fun f2(v: Float) = String.format(java.util.Locale.US, "%.2f", v)
+            val chargesJson = entries.joinToString(",") { e ->
+                val ts = fmt.format(Date(e.timestampMs))
+                """{"timestamp":"$ts","timestamp_ms":${e.timestampMs},"duration_sec":${e.durationSec},"energy_kwh":${f2(e.energyKwh)},"soc_start":${f1(e.startSocPct)},"soc_end":${f1(e.endSocPct)},"avg_power_kw":${f2(e.avgPowerKw)}}"""
+            }
+            val payload = """{"count":${entries.size},"charges":[$chargesJson]}"""
+            AppLogger.i(TAG, "→ Publicando histórico de recargas (QoS 1, retained): $prefix/charging/history")
+            c.publish("$prefix/charging/history", payload.toByteArray(), 1, true)
+            AppLogger.i(TAG, "✓ Histórico de recargas publicado: ${entries.size} sessão(ões)")
+        } catch (e: Exception) {
+            AppLogger.e(TAG, "✗ Recargas FALHOU: ${e::class.simpleName}: ${e.message}")
         }
     }
 

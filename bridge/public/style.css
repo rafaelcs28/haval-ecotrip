@@ -285,6 +285,21 @@ html, body {
 .trip-metric-val.blue   { color: var(--blue); }
 .trip-metric-val.orange { color: var(--orange); }
 
+/* ── Recargas ────────────────────────────────────────────────────────────────── */
+.charge-summary-card {
+  background: var(--card);
+  border: 1px solid rgba(0,229,204,.2);
+  border-radius: 12px;
+  padding: 12px 14px;
+  margin-bottom: 8px;
+}
+.charge-kwh-badge {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--teal);
+  white-space: nowrap;
+}
+
 /* ── Empty state ─────────────────────────────────────────────────────────────── */
 .empty {
   text-align: center;

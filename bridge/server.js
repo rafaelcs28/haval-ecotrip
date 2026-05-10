@@ -17,7 +17,8 @@ const MQTT_PASS   = process.env.MQTT_PASS   || '';
 const MQTT_PREFIX = process.env.MQTT_PREFIX || 'haval/ecotrip';
 const PORT        = parseInt(process.env.PORT || '3000', 10);
 
-const TRIPS_FILE  = path.join(__dirname, 'trips.json');
+const TRIPS_FILE   = path.join(__dirname, 'trips.json');
+const CHARGES_FILE = path.join(__dirname, 'charges.json');
 
 // ── Estado em memória (espelha todos os tópicos MQTT) ─────────────────────────
 
@@ -109,6 +110,29 @@ function getTrips(limit = 200) {
   return all.slice(0, limit);
 }
 
+// ── Histórico de recargas — persistência JSON ─────────────────────────────────
+
+/** @type {object[]} — sessões mais recentes primeiro */
+let chargesArr = [];
+
+if (fs.existsSync(CHARGES_FILE)) {
+  try {
+    const saved = JSON.parse(fs.readFileSync(CHARGES_FILE, 'utf8'));
+    chargesArr = saved.charges || [];
+    console.log(`✓ Recargas locais: ${chargesArr.length} sessão(ões)`);
+  } catch (e) {
+    console.error('Aviso: não foi possível ler charges.json:', e.message);
+  }
+}
+
+let chargesSaveTimer = null;
+function scheduleChargesFlush() {
+  if (chargesSaveTimer) clearTimeout(chargesSaveTimer);
+  chargesSaveTimer = setTimeout(() => {
+    fs.writeFileSync(CHARGES_FILE, JSON.stringify({ charges: chargesArr }, null, 2));
+  }, 500);
+}
+
 // ── Express + HTTP ────────────────────────────────────────────────────────────
 
 const app    = express();
@@ -117,7 +141,8 @@ const server = http.createServer(app);
 app.use(express.static(path.join(__dirname, 'public')));
 
 app.get('/api/state',  (_req, res) => res.json(state));
-app.get('/api/trips',  (_req, res) => res.json(getTrips()));
+app.get('/api/trips',   (_req, res) => res.json(getTrips()));
+app.get('/api/charges', (_req, res) => res.json(chargesArr));
 app.get('/api/config', (_req, res) => res.json({
   mqtt_host:   MQTT_HOST,
   mqtt_prefix: MQTT_PREFIX,
@@ -255,6 +280,22 @@ function applyMqttMessage(key, value) {
     case 'lifetime/charge_kwh':  state.lifetime.charge_kwh  = num(value); break;
     case 'lifetime/charge_sec':  state.lifetime.charge_sec  = value; break;
     case 'lifetime/cost_brl':    state.lifetime.cost_brl    = num(value); break;
+
+    // Histórico de recargas (tópico retained)
+    case 'charging/history': {
+      try {
+        const parsed = JSON.parse(value);
+        const charges = parsed.charges || [];
+        if (charges.length > 0) {
+          chargesArr = charges;          // substitui inteiro (fonte de verdade = Android)
+          scheduleChargesFlush();
+          console.log(`✓ Recargas MQTT: ${charges.length} sessão(ões)`);
+        }
+      } catch (e) {
+        console.error('Erro ao parsear charging/history:', e.message);
+      }
+      break;
+    }
 
     // Histórico de trips (tópico retained com JSON completo)
     case 'trips/history': {

@@ -255,6 +255,14 @@ fun ConsumptionScreen() {
             mainHandler.post { lastCompletedTrip = entry }
         }
 
+        tripManager.onChargeSessionCompleted = { _ ->
+            mainHandler.post {
+                val updated = tripManager.getChargeHistory()
+                chargeHistory = updated
+                mqttManager.publishChargeHistory(updated)
+            }
+        }
+
         tripManager.addListener(tripListener)
         carManager.addListener(carListener)
         carManager.addConnectedListener(connectedListener)
@@ -272,6 +280,7 @@ fun ConsumptionScreen() {
 
         onDispose {
             tripManager.onAutoTripCompleted = null
+            tripManager.onChargeSessionCompleted = null
             tripManager.removeListener(tripListener)
             carManager.removeListener(carListener)
             carManager.removeConnectedListener(connectedListener)
