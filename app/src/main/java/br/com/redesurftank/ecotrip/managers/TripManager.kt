@@ -287,6 +287,13 @@ class TripManager private constructor() {
     private var latestSocPct  = 0f
     private var latestFuelPct = 0f
 
+    // ── Telemetria em tempo real ──────────────────────────────────────────────
+    private var telemetryRecorder: TelemetryRecorder? = null
+    private var latestSpeedKmh:        Float = 0f
+    private var latestEngineRpm:       Int   = 0
+    private var latestBatteryCurrentA: Float = 0f
+    private var latestBatteryVoltageV: Float = 0f
+
     // Rolling start bookmarks
     private var rollingStartSocPct:  Float   = 0f
     private var rollingStartTankL:   Float   = 0f
@@ -406,6 +413,13 @@ class TripManager private constructor() {
         synchronized(lock) {
             if (checkpoints.isEmpty()) saveGearTransitionCheckpoint()
         }
+        // Inicializa recorder de telemetria (GPS ativado depois via startGps())
+        telemetryRecorder = TelemetryRecorder(ctx)
+    }
+
+    /** Inicia GPS para telemetria. Chame após permissão concedida. */
+    fun startGps() {
+        telemetryRecorder?.startGps()
     }
 
     fun addListener(l: TripListener)    = synchronized(lock) { listeners.add(l) }
@@ -722,6 +736,7 @@ class TripManager private constructor() {
             .putFloat(SharedPreferencesKeys.AUTO_TRIP_START_FUEL_L,   autoTripStartFuelL)
             .putLong (SharedPreferencesKeys.AUTO_TRIP_START_TIME_SEC, autoTripStartTime)
             .apply()
+        telemetryRecorder?.startRecording(autoTripStartMs)
         AppLogger.i(TAG, "AutoTrip iniciado — SOC=${latestSocPct}% fuel=${latestFuelPct}%")
     }
 
@@ -761,6 +776,12 @@ class TripManager private constructor() {
             .apply()
         AppLogger.i(TAG, "AutoTrip salvo: ${entry.distKm}km ${entry.timeSec}s ${entry.netKwh}kWh (${wallSec}s total)")
         onAutoTripCompleted?.invoke(entry)
+
+        // Envia telemetria para o bridge (fire-and-forget)
+        val telSamples = telemetryRecorder?.stopRecording() ?: emptyList()
+        val bridgeUrl  = getBridgeHttpUrl()
+        val tripId     = entry.startMs.toString()
+        telemetryRecorder?.postTelemetry(bridgeUrl, tripId, gson.toJson(entry), telSamples)
     }
 
     fun onDataChanged(key: String, rawValue: String) {
@@ -798,6 +819,25 @@ class TripManager private constructor() {
                 CarConstants.CAR_EV_INFO_CYCLE_ENERGY_CONSUME_INFO.value -> onEnergy(value)
                 CarConstants.CAR_EV_INFO_ENERGY_RECOVERY_INFO.value      -> onRegen(value)
                 CarConstants.CAR_BASIC_CUR_JOURNEY_ODOMETER.value        -> onDist(value)
+
+                // Telemetria em tempo real — alimenta o TelemetryRecorder
+                CarConstants.CAR_BASIC_VEHICLE_SPEED.value -> {
+                    latestSpeedKmh = value
+                    telemetryRecorder?.latestSpeedKmh = value
+                }
+                CarConstants.CAR_BASIC_ENGINE_SPEED.value -> {
+                    latestEngineRpm = value.toInt()
+                    telemetryRecorder?.latestEngineRpm = value.toInt()
+                }
+                CarConstants.CAR_EV_INFO_POWER_BATTERY_CURRENT.value -> {
+                    latestBatteryCurrentA = value
+                    telemetryRecorder?.latestBatteryCurrentA = value
+                }
+                CarConstants.CAR_EV_INFO_POWER_BATTERY_VOLTAGE.value -> {
+                    latestBatteryVoltageV = value
+                    telemetryRecorder?.latestBatteryVoltageV = value
+                }
+
                 else -> return
             }
             notifyListeners()
@@ -1258,6 +1298,16 @@ class TripManager private constructor() {
             val obj = JsonParser.parseString(trimmed).asJsonObject
             obj.get("value")?.asFloat ?: obj.get("metric")?.asFloat
         } catch (_: Exception) { null }
+    }
+
+    /** Deriva a URL HTTP do bridge a partir do host MQTT configurado. */
+    private fun getBridgeHttpUrl(): String {
+        val raw = prefs.getString(SharedPreferencesKeys.MQTT_HOST, "") ?: ""
+        if (raw.isBlank()) return ""
+        val host = raw
+            .removePrefix("mqtts://").removePrefix("mqtt://").removePrefix("tcp://")
+            .substringBefore(":").trim()
+        return if (host.isNotBlank()) "http://$host:3000" else ""
     }
 
     // ── Persistence ───────────────────────────────────────────────────────────

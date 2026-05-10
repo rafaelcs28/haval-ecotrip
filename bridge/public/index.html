@@ -14,6 +14,9 @@
   <link rel="manifest" href="/manifest.json">
   <link rel="apple-touch-icon" href="/icon-192.png">
   <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin="" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js" defer></script>
 </head>
 <body>
 
@@ -331,7 +334,40 @@
       <div id="life-list"><div class="empty">Carregando...</div></div>
     </div>
 
+    <!-- Auto-Trips -->
+    <div id="panel-auto" class="panel">
+      <div id="auto-list"><div class="empty">Carregando...</div></div>
+    </div>
+
   </div><!-- /content -->
+
+  <!-- Trip detail overlay (mapa + gráficos) -->
+  <div id="trip-detail" style="display:none">
+    <div id="trip-detail-header">
+      <button id="trip-detail-back" onclick="closeTripDetail()">←</button>
+      <span id="trip-detail-title">Viagem</span>
+    </div>
+    <div id="trip-detail-body">
+      <div id="trip-map"></div>
+      <div class="playback-bar">
+        <input type="range" id="playback-slider" min="0" max="0" value="0" oninput="onPlaybackMove(this.value)">
+        <div class="playback-snapshot" id="playback-snapshot">
+          <div class="snap-item"><div class="snap-val blue"  id="snap-spd">--</div><div class="snap-lbl">km/h</div></div>
+          <div class="snap-item"><div class="snap-val green" id="snap-ev">--</div><div class="snap-lbl">kW elétrico</div></div>
+          <div class="snap-item"><div class="snap-val orange" id="snap-rpm">--</div><div class="snap-lbl">RPM ICE</div></div>
+          <div class="snap-item"><div class="snap-val teal"  id="snap-time">--</div><div class="snap-lbl">tempo</div></div>
+        </div>
+      </div>
+      <div class="chart-section">
+        <div class="chart-label">Velocidade (km/h)</div>
+        <div class="chart-wrap"><canvas id="chart-spd"></canvas></div>
+        <div class="chart-label">Potência elétrica (kW)</div>
+        <div class="chart-wrap"><canvas id="chart-ev"></canvas></div>
+        <div class="chart-label">Motor ICE (RPM)</div>
+        <div class="chart-wrap"><canvas id="chart-rpm"></canvas></div>
+      </div>
+    </div>
+  </div>
 
   <!-- Tab bar -->
   <nav id="tab-bar">
@@ -358,6 +394,10 @@
     <button class="tab" data-panel="life" onclick="switchTab(this, loadLifetime)">
       <span class="tab-icon">∞</span>
       <span class="tab-label">Total</span>
+    </button>
+    <button class="tab" data-panel="auto" onclick="switchTab(this, loadAutoTrips)">
+      <span class="tab-icon">🗺</span>
+      <span class="tab-label">Auto</span>
     </button>
   </nav>
 

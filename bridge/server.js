@@ -17,9 +17,26 @@ const MQTT_PASS   = process.env.MQTT_PASS   || '';
 const MQTT_PREFIX = process.env.MQTT_PREFIX || 'haval/ecotrip';
 const PORT        = parseInt(process.env.PORT || '3000', 10);
 
-const TRIPS_FILE   = path.join(__dirname, 'trips.json');
-const CHARGES_FILE = path.join(__dirname, 'charges.json');
-const STATE_FILE   = path.join(__dirname, 'state.json');
+const TRIPS_FILE     = path.join(__dirname, 'trips.json');
+const CHARGES_FILE   = path.join(__dirname, 'charges.json');
+const STATE_FILE     = path.join(__dirname, 'state.json');
+const AUTOTRIPS_DIR  = path.join(__dirname, 'autotrips');
+
+if (!fs.existsSync(AUTOTRIPS_DIR)) fs.mkdirSync(AUTOTRIPS_DIR, { recursive: true });
+
+// ── Auto-trips — índice em memória (carregado do disco) ───────────────────────
+let autoTripsArr = [];
+try {
+  const files = fs.readdirSync(AUTOTRIPS_DIR).filter(f => f.endsWith('.json'));
+  for (const f of files) {
+    try {
+      const d = JSON.parse(fs.readFileSync(path.join(AUTOTRIPS_DIR, f), 'utf8'));
+      if (d.autoTrip) autoTripsArr.push({ tripId: d.tripId, ...d.autoTrip });
+    } catch (_) {}
+  }
+  autoTripsArr.sort((a, b) => (b.startMs || 0) - (a.startMs || 0));
+  console.log(`✓ Auto-trips carregados: ${autoTripsArr.length}`);
+} catch (e) { console.error('Aviso: erro ao carregar auto-trips:', e.message); }
 
 // ── Estado em memória (espelha todos os tópicos MQTT) ─────────────────────────
 // Valores iniciais = defaults. Serão sobrescritos pelo state.json persistido
@@ -175,11 +192,51 @@ function scheduleChargesFlush() {
 const app    = express();
 const server = http.createServer(app);
 
+app.use(express.json({ limit: '10mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 app.get('/api/state',  (_req, res) => res.json(state));
 app.get('/api/trips',   (_req, res) => res.json(getTrips()));
 app.get('/api/charges', (_req, res) => res.json(chargesArr));
+// ── Auto-trips + Telemetria ───────────────────────────────────────────────────
+
+app.post('/api/autotrips', (req, res) => {
+  try {
+    const { tripId, autoTrip, samples } = req.body;
+    if (!tripId || !autoTrip) return res.status(400).json({ error: 'missing fields' });
+
+    // Sanitiza tripId (só dígitos — é o startMs em ms)
+    const safeId = String(tripId).replace(/\D/g, '');
+    if (!safeId) return res.status(400).json({ error: 'invalid tripId' });
+
+    const filePath = path.join(AUTOTRIPS_DIR, `${safeId}.json`);
+    fs.writeFileSync(filePath, JSON.stringify({ tripId: safeId, autoTrip, samples: samples || [] }));
+
+    const record = { tripId: safeId, ...autoTrip };
+    const idx = autoTripsArr.findIndex(t => t.tripId === safeId);
+    if (idx >= 0) autoTripsArr[idx] = record;
+    else {
+      autoTripsArr.unshift(record);
+      autoTripsArr.sort((a, b) => (b.startMs || 0) - (a.startMs || 0));
+    }
+
+    console.log(`✓ AutoTrip: ${safeId} (${(samples || []).length} amostras)`);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('Erro ao salvar auto-trip:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/api/autotrips', (_req, res) => res.json(autoTripsArr.slice(0, 300)));
+
+app.get('/api/telemetry/:tripId', (req, res) => {
+  const safeId   = String(req.params.tripId).replace(/\D/g, '');
+  const filePath = path.join(AUTOTRIPS_DIR, `${safeId}.json`);
+  if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'not found' });
+  res.sendFile(filePath);
+});
+
 app.get('/api/config', (_req, res) => res.json({
   mqtt_host:   MQTT_HOST,
   mqtt_prefix: MQTT_PREFIX,

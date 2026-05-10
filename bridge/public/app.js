@@ -586,6 +586,226 @@ function renderLifetimeTab() {
   list.innerHTML = html;
 }
 
+// ── Auto-Trips ────────────────────────────────────────────────────────────────
+let cachedAutoTrips = null;
+
+function loadAutoTrips() {
+  if (cachedAutoTrips !== null) { renderAutoTrips(); return; }
+  const list = document.getElementById('auto-list');
+  list.innerHTML = '<div class="empty">Carregando...</div>';
+  fetch('/api/autotrips')
+    .then(r => r.json())
+    .then(data => { cachedAutoTrips = Array.isArray(data) ? data : []; renderAutoTrips(); })
+    .catch(() => { list.innerHTML = '<div class="empty">Erro ao carregar.</div>'; });
+}
+
+function renderAutoTrips() {
+  const list = document.getElementById('auto-list');
+  if (!list) return;
+  const trips = cachedAutoTrips || [];
+
+  if (!trips.length) {
+    list.innerHTML = '<div class="empty">Nenhuma viagem automática registrada.</div>';
+    return;
+  }
+
+  list.innerHTML = trips.map(t => {
+    const startDate = fmtDate(t.startMs);
+    const dur       = fmtDur(Math.round((t.endMs - t.startMs) / 1000));
+    const distKm    = t.distKm  > 0 ? f1(t.distKm) + ' km' : '--';
+    const netKwh    = t.netKwh  > 0 ? f2(t.netKwh) + ' kWh' : '--';
+    const fuelL     = t.fuelL   > 0 ? f2(t.fuelL) + ' L' : '--';
+    const socDelta  = t.startSocPct > 0 ? `${t.startSocPct.toFixed(0)}%→${t.endSocPct.toFixed(0)}%` : '--';
+    return `<div class="trip-item">
+  <div class="trip-header">
+    <div>
+      <div class="trip-name">${startDate}</div>
+      <div class="trip-date">${dur}</div>
+    </div>
+    <button class="charge-badge" style="cursor:pointer;border:none" onclick="openTripDetail('${t.tripId}')">🗺 Ver rota</button>
+  </div>
+  <div class="trip-metrics">
+    <div class="trip-metric"><div class="trip-metric-val blue">${distKm}</div><div class="trip-metric-lbl">dist.</div></div>
+    <div class="trip-metric"><div class="trip-metric-val green">${netKwh}</div><div class="trip-metric-lbl">kWh liq.</div></div>
+    <div class="trip-metric"><div class="trip-metric-val orange">${fuelL}</div><div class="trip-metric-lbl">combust.</div></div>
+    <div class="trip-metric"><div class="trip-metric-val teal">${socDelta}</div><div class="trip-metric-lbl">SOC</div></div>
+  </div>
+</div>`;
+  }).join('');
+}
+
+// ── Trip detail: mapa Leaflet + gráficos Chart.js ─────────────────────────────
+let leafletMap      = null;
+let routePolyline   = null;
+let playbackMarker  = null;
+let chartSpd        = null;
+let chartEv         = null;
+let chartRpm        = null;
+let currentSamples  = [];
+
+function openTripDetail(tripId) {
+  const overlay = document.getElementById('trip-detail');
+  overlay.style.display = 'flex';
+
+  // Título
+  const trip = (cachedAutoTrips || []).find(t => t.tripId === tripId);
+  const title = trip ? fmtDate(trip.startMs) + ' · ' + fmtDur(Math.round((trip.endMs - trip.startMs)/1000)) : tripId;
+  document.getElementById('trip-detail-title').textContent = title;
+
+  // Resetar slider
+  const slider = document.getElementById('playback-slider');
+  slider.value = 0;
+
+  fetch(`/api/telemetry/${tripId}`)
+    .then(r => r.json())
+    .then(data => {
+      currentSamples = data.samples || [];
+      if (!currentSamples.length) {
+        document.getElementById('trip-detail-body').innerHTML =
+          '<div class="empty" style="padding:40px">Nenhuma amostra de telemetria disponível.</div>';
+        return;
+      }
+      slider.max   = currentSamples.length - 1;
+      slider.value = 0;
+      initTripMap(currentSamples);
+      initTripCharts(currentSamples);
+      onPlaybackMove(0);
+    })
+    .catch(() => {
+      document.getElementById('trip-detail-body').innerHTML =
+        '<div class="empty" style="padding:40px">Erro ao carregar telemetria.</div>';
+    });
+}
+
+function closeTripDetail() {
+  document.getElementById('trip-detail').style.display = 'none';
+  // Destruir mapa para forçar reinit na próxima abertura
+  if (leafletMap) { leafletMap.remove(); leafletMap = null; }
+  if (chartSpd)   { chartSpd.destroy();  chartSpd  = null; }
+  if (chartEv)    { chartEv.destroy();   chartEv   = null; }
+  if (chartRpm)   { chartRpm.destroy();  chartRpm  = null; }
+  routePolyline  = null;
+  playbackMarker = null;
+  currentSamples = [];
+}
+
+function initTripMap(samples) {
+  const mapEl = document.getElementById('trip-map');
+  if (leafletMap) { leafletMap.remove(); leafletMap = null; }
+
+  // Filtra amostras com GPS válido
+  const gpsPoints = samples.filter(s => s.lat !== 0 || s.lng !== 0);
+
+  leafletMap = L.map(mapEl, { zoomControl: true, attributionControl: false });
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+  }).addTo(leafletMap);
+
+  if (gpsPoints.length < 2) {
+    leafletMap.setView([-15.78, -47.93], 4); // Brasil
+    L.popup().setLatLng([-15.78, -47.93])
+      .setContent('<b style="color:#333">GPS indisponível nesta viagem</b>')
+      .openOn(leafletMap);
+    return;
+  }
+
+  // Polyline colorida por velocidade (verde < 40 · amarelo < 80 · laranja < 120 · vermelho ≥ 120)
+  const spdColor = spd => spd < 40 ? '#39FF88' : spd < 80 ? '#FFD60A' : spd < 120 ? '#FF5F1F' : '#FF5555';
+  for (let i = 1; i < gpsPoints.length; i++) {
+    const a = gpsPoints[i-1], b = gpsPoints[i];
+    L.polyline([[a.lat, a.lng],[b.lat, b.lng]], { color: spdColor(a.spd), weight: 4, opacity: 0.85 }).addTo(leafletMap);
+  }
+
+  // Marcador de início (verde) e fim (vermelho)
+  const first = gpsPoints[0], last = gpsPoints[gpsPoints.length-1];
+  const iconSvg = (color, label) => L.divIcon({
+    html: `<div style="width:22px;height:22px;border-radius:50%;background:${color};border:2px solid #fff;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:#000">${label}</div>`,
+    iconSize: [22,22], iconAnchor: [11,11],
+  });
+  L.marker([first.lat, first.lng], { icon: iconSvg('#39FF88','S') }).addTo(leafletMap);
+  L.marker([last.lat,  last.lng],  { icon: iconSvg('#FF5555','F') }).addTo(leafletMap);
+
+  // Marcador de playback (azul, começa no início)
+  playbackMarker = L.circleMarker([first.lat, first.lng], {
+    radius: 8, fillColor: '#4DBBFF', fillOpacity: 1, color: '#fff', weight: 2,
+  }).addTo(leafletMap);
+
+  // Ajusta zoom para o trajeto
+  const bounds = L.latLngBounds(gpsPoints.map(s => [s.lat, s.lng]));
+  leafletMap.fitBounds(bounds, { padding: [20, 20] });
+  routePolyline = gpsPoints;
+}
+
+function initTripCharts(samples) {
+  const labels = samples.map(s => s.t);
+  const mkChart = (id, dataset, borderColor, yLabel) => {
+    const ctx = document.getElementById(id).getContext('2d');
+    return new Chart(ctx, {
+      type: 'line',
+      data: { labels, datasets: [{ data: dataset, borderColor, borderWidth: 1.5, pointRadius: 0, fill: false, tension: 0.2 }] },
+      options: {
+        animation: false,
+        responsive: true, maintainAspectRatio: false,
+        scales: {
+          x: { display: false },
+          y: {
+            display: true,
+            ticks: { color: '#5B7394', font: { size: 9 }, maxTicksLimit: 4 },
+            grid:  { color: '#0F1520' },
+          },
+        },
+        plugins: { legend: { display: false }, tooltip: { enabled: false } },
+      },
+    });
+  };
+
+  if (chartSpd)  chartSpd.destroy();
+  if (chartEv)   chartEv.destroy();
+  if (chartRpm)  chartRpm.destroy();
+
+  chartSpd = mkChart('chart-spd', samples.map(s => s.spd),  '#4DBBFF', 'km/h');
+  chartEv  = mkChart('chart-ev',  samples.map(s => s.evKw), '#39FF88', 'kW');
+  chartRpm = mkChart('chart-rpm', samples.map(s => s.rpm),  '#FF5F1F', 'RPM');
+}
+
+function onPlaybackMove(idx) {
+  const i = parseInt(idx, 10);
+  if (!currentSamples.length || i >= currentSamples.length) return;
+  const s = currentSamples[i];
+
+  // Snapshot de valores
+  document.getElementById('snap-spd').textContent  = f1(s.spd) + ' km/h';
+  document.getElementById('snap-ev').textContent   = f1(s.evKw) + ' kW';
+  document.getElementById('snap-rpm').textContent  = s.rpm + ' rpm';
+  const mm = Math.floor(s.t / 60), ss = s.t % 60;
+  document.getElementById('snap-time').textContent = `${String(mm).padStart(2,'0')}'${String(ss).padStart(2,'0')}"`;
+
+  // Marcador no mapa
+  if (playbackMarker && (s.lat !== 0 || s.lng !== 0)) {
+    playbackMarker.setLatLng([s.lat, s.lng]);
+  }
+
+  // Linha vertical nos gráficos via updateChart
+  [chartSpd, chartEv, chartRpm].forEach(ch => {
+    if (!ch) return;
+    // Remove annotation anterior e redesenha cursor via dataset secundário
+    if (!ch.data.datasets[1]) {
+      ch.data.datasets.push({
+        data: ch.data.labels.map((_, li) => li === i ? ch.data.datasets[0].data[i] : null),
+        borderColor: 'rgba(255,255,255,0.4)',
+        borderWidth: 1,
+        pointRadius: ch.data.labels.map((_, li) => li === i ? 4 : 0),
+        pointBackgroundColor: '#fff',
+        fill: false, tension: 0,
+      });
+    } else {
+      ch.data.datasets[1].data = ch.data.labels.map((_, li) => li === i ? ch.data.datasets[0].data[li] : null);
+      ch.data.datasets[1].pointRadius = ch.data.labels.map((_, li) => li === i ? 4 : 0);
+    }
+    ch.update('none');
+  });
+}
+
 // ── Inicialização ─────────────────────────────────────────────────────────────
 
 // Tenta restaurar último estado do cache (offline)

@@ -17,6 +17,7 @@ enum class CarConstants(val value: String) {
     // Distance, speed & state
     CAR_BASIC_CUR_JOURNEY_ODOMETER("car.basic.cur_journey_odometer"),
     CAR_BASIC_VEHICLE_SPEED("car.basic.vehicle_speed"),
+    CAR_BASIC_ENGINE_SPEED("car.basic.engine_speed"),
     CAR_BASIC_POWER_MODE("car.basic.power_mode"),
 
     // Temperature

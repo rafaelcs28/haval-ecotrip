@@ -1,8 +1,12 @@
 package br.com.redesurftank.ecotrip
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import br.com.redesurftank.ecotrip.managers.BackupManager
 import br.com.redesurftank.ecotrip.managers.CarDataManager
 import br.com.redesurftank.ecotrip.managers.MqttManager
@@ -13,6 +17,14 @@ import br.com.redesurftank.ecotrip.ui.theme.EcotripTheme
 
 class MainActivity : ComponentActivity() {
 
+    private val locationPermLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { grants ->
+        val granted = grants[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
+                      grants[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+        if (granted) TripManager.getInstance().startGps()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -21,6 +33,19 @@ class MainActivity : ComponentActivity() {
         MqttManager.getInstance().init(this)
         BackupManager.getInstance().init(this)
         UpdateManager.getInstance().init(this)
+
+        // Localização para telemetria de auto-trips
+        val hasFine = ContextCompat.checkSelfPermission(
+            this, Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+        if (hasFine) {
+            TripManager.getInstance().startGps()
+        } else {
+            locationPermLauncher.launch(arrayOf(
+                Manifest.permission.ACCESS_FINE_LOCATION,
+                Manifest.permission.ACCESS_COARSE_LOCATION,
+            ))
+        }
 
         setContent {
             EcotripTheme {
