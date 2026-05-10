@@ -224,7 +224,6 @@ function renderCarVersion() {
 
 function renderDash() {
   const s = state;
-  setText('d-gear',    s.gear || 'P');
   setText('d-inside',  s.inside_temp  ? f1(s.inside_temp)  + '°C' : '--');
   setText('d-outside', s.outside_temp ? f1(s.outside_temp) + '°C' : '--');
 
@@ -373,9 +372,9 @@ function renderCharges() {
   html += `<div class="charge-summary-card">
   <div class="card-title">Resumo — ${charges.length} sessão${charges.length !== 1 ? 'ões' : ''}</div>
   <div class="metrics-row">
-    <div class="metric"><div class="metric-value teal">${f2(totalKwh)} kWh</div><div class="metric-label">total carregado</div></div>
-    <div class="metric"><div class="metric-value muted">${fmtDur(totalSec)}</div><div class="metric-label">tempo total</div></div>
-    <div class="metric"><div class="metric-value blue">${f1(avgPwr)} kW</div><div class="metric-label">pot. média</div></div>
+    <div class="metric"><div class="metric-value teal sm">${f2(totalKwh)} kWh</div><div class="metric-label">total carregado</div></div>
+    <div class="metric"><div class="metric-value muted sm">${fmtDur(totalSec)}</div><div class="metric-label">tempo total</div></div>
+    <div class="metric"><div class="metric-value blue sm">${f1(avgPwr)} kW</div><div class="metric-label">pot. média</div></div>
   </div>
 </div>`;
 
@@ -436,11 +435,11 @@ function renderHistory() {
   html += `<div class="charge-summary-card" style="border-color:rgba(77,187,255,.2)">
   <div class="card-title">Resumo — ${trips.length} viagem${trips.length !== 1 ? 'ns' : ''}</div>
   <div class="metrics-row">
-    <div class="metric"><div class="metric-value blue">${f1(totDist)} km</div><div class="metric-label">distância</div></div>
-    <div class="metric"><div class="metric-value orange">${f2(totFuel)} L</div><div class="metric-label">combustível</div></div>
-    <div class="metric"><div class="metric-value green">${avgKwh100 > 0 ? f1(avgKwh100) : '--'}</div><div class="metric-label">kWh/100km</div></div>
-    <div class="metric"><div class="metric-value green">${avgKml > 0 ? f1(avgKml) : '--'}</div><div class="metric-label">km/L</div></div>
-    ${totCost > 0 ? `<div class="metric"><div class="metric-value yellow">R$ ${f2(totCost)}</div><div class="metric-label">custo total</div></div>` : ''}
+    <div class="metric"><div class="metric-value blue sm">${f1(totDist)} km</div><div class="metric-label">distância</div></div>
+    <div class="metric"><div class="metric-value orange sm">${f2(totFuel)} L</div><div class="metric-label">combustível</div></div>
+    <div class="metric"><div class="metric-value green sm">${avgKwh100 > 0 ? f1(avgKwh100) : '--'}</div><div class="metric-label">kWh/100km</div></div>
+    <div class="metric"><div class="metric-value green sm">${avgKml > 0 ? f1(avgKml) : '--'}</div><div class="metric-label">km/L</div></div>
+    ${totCost > 0 ? `<div class="metric"><div class="metric-value yellow sm">R$ ${f2(totCost)}</div><div class="metric-label">custo total</div></div>` : ''}
   </div>
 </div>`;
 
