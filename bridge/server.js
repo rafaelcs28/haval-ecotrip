@@ -42,6 +42,8 @@ const state = {
   battery_voltage_v:0,
   battery_current_a:0,
   soc_pct:          0,
+  engine_state:     null,   // null=desconhecido | '0'=desligado | '1'=ligado
+  lock_state:       null,   // null=desconhecido | 'off'=trancado | 'on'=destrancado
 
   trip_a: {
     distance_km:   0, time_sec: '--', kwh_per_100km: 0, km_per_l: 0,
@@ -252,6 +254,10 @@ function applyMqttMessage(key, value) {
     case 'app_version':
       state.car_app_version = value;   // versão do APK no carro (retain=true)
       break;
+
+    // Sensores de estado (publicados pelo HA via automação)
+    case 'engine_state': state.engine_state = value; break;   // '0' | '1'
+    case 'lock_state':   state.lock_state   = value; break;   // 'off' | 'on'
 
     // Telemetria ao vivo
     case 'speed_kmh':         state.speed_kmh          = num(value); break;

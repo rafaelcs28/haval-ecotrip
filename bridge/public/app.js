@@ -198,6 +198,18 @@ function renderDash() {
   setText('d-tripb-cost', tb.cost_brl      > 0 ? 'R$ ' + f2(tb.cost_brl)   : '--');
   setClass('d-tripb-kwh', eff(tb.kwh_per_100km));
 
+  // Motor (0=desligado, 1=ligado)
+  const eng = s.engine_state;
+  if (eng === '1' || eng === 1)       { setText('d-engine-state', 'Ligado');    setClass('d-engine-state', 'green'); }
+  else if (eng === '0' || eng === 0)  { setText('d-engine-state', 'Desligado'); setClass('d-engine-state', 'muted'); }
+  else                                { setText('d-engine-state', '--');         setClass('d-engine-state', 'muted'); }
+
+  // Trava (off=trancado, on=destrancado)
+  const lck = s.lock_state;
+  if (lck === 'off')      { setText('d-lock-state', '🔒 Trancado');  setClass('d-lock-state', 'teal'); }
+  else if (lck === 'on')  { setText('d-lock-state', '🔓 Destranc.'); setClass('d-lock-state', 'orange'); }
+  else                    { setText('d-lock-state', '--');            setClass('d-lock-state', 'muted'); }
+
   // Desde última partida (rolling)
   const r = s.rolling || {};
   setText('d-roll-dist', r.distance_km   > 0 ? f1(r.distance_km) + ' km' : '--');
