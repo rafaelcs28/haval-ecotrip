@@ -531,61 +531,76 @@ function renderLifetimeTab() {
   </div>
 </div>`;
   } else {
-    // ── Vista filtrada: computado de trips + recargas ─────────────────────────
-    const [startMs, endMs] = getFilterRange('life');
-    const trips   = filterItems(cachedTrips   || [], 'timestamp', startMs, endMs);
-    const charges = filterItems(cachedCharges || [], 'timestamp', startMs, endMs);
+    // ── Vista filtrada: usa auto-trips (criados automaticamente a cada P↔D/R)
+    // NÃO usa trips manuais (Trip A/B) porque esses só existem quando o usuário
+    // pressiona "Zerar" — raramente têm granularidade de data suficiente.
+    const [filterStart, filterEnd] = getFilterRange('life');
 
-    // Se dados ainda não foram carregados, busca e re-renderiza
-    if (cachedCharges === null || cachedTrips === null) {
+    // Se dados ainda não foram carregados, aguarda e re-renderiza
+    if (cachedAutoTrips === null || cachedCharges === null) {
       html += '<div class="empty">Carregando dados...</div>';
       list.innerHTML = html;
       Promise.all([
-        cachedCharges === null ? fetch('/api/charges').then(r=>r.json()).then(d=>{cachedCharges=Array.isArray(d)?d:[];}) : Promise.resolve(),
-        cachedTrips   === null ? fetch('/api/trips').then(r=>r.json()).then(d=>{cachedTrips=Array.isArray(d)?d:[];})     : Promise.resolve(),
+        cachedAutoTrips === null ? fetch('/api/autotrips').then(r=>r.json()).then(d=>{cachedAutoTrips=Array.isArray(d)?d:[];}) : Promise.resolve(),
+        cachedCharges   === null ? fetch('/api/charges').then(r=>r.json()).then(d=>{cachedCharges=Array.isArray(d)?d:[];})     : Promise.resolve(),
       ]).then(() => renderLifetimeTab()).catch(() => {});
       return;
     }
 
+    // Filtra auto-trips pelo campo startMs (já em ms — sem parsear string de data)
+    const trips   = (cachedAutoTrips || []).filter(t => {
+      const ms = t.startMs || 0;
+      return ms >= filterStart && ms <= filterEnd;
+    });
+    const charges = filterItems(cachedCharges || [], 'timestamp', filterStart, filterEnd);
+
     if (trips.length === 0 && charges.length === 0) {
-      list.innerHTML = html + '<div class="empty">Nenhum dado no período.</div>';
+      list.innerHTML = html + '<div class="empty">Nenhuma viagem automática ou recarga no período.</div>';
       return;
     }
 
-    const distKm    = trips.reduce((s,t) => s + (t.distance_km    || 0), 0);
-    const fuelL     = trips.reduce((s,t) => s + (t.fuel_l         || 0), 0);
-    const costBrl   = trips.reduce((s,t) => s + (t.total_cost_brl || 0), 0);
-    const netKwh    = trips.reduce((s,t) => {
-      const d = t.distance_km||0, k = t.kwh_per_100km||0;
-      return s + (k > 0 && d > 0 ? k * d / 100 : 0);
-    }, 0);
+    // Agrega métricas dos auto-trips (campos em camelCase vindos do Android)
+    const distKm   = trips.reduce((s,t) => s + (t.distKm   || 0), 0);
+    const fuelL    = trips.reduce((s,t) => s + (t.fuelL    || 0), 0);
+    const netKwh   = trips.reduce((s,t) => s + (t.netKwh   || 0), 0);
+    const regenKwh = trips.reduce((s,t) => s + (t.regenKwh || 0), 0);
+    const timeSec  = trips.reduce((s,t) => s + (t.timeSec  || 0), 0);
+
     const chargeKwh = charges.reduce((s,c) => s + (c.energy_kwh   || 0), 0);
     const chargeSec = charges.reduce((s,c) => s + (c.duration_sec || 0), 0);
+
     const avgKwh100 = distKm    > 0.1   ? netKwh    / distKm * 100       : 0;
     const avgKml    = fuelL     > 0.001 ? distKm    / fuelL              : 0;
+    const avgSpd    = timeSec   > 0     ? distKm    / (timeSec / 3600)   : 0;
     const avgChgKw  = chargeSec > 0     ? chargeKwh / (chargeSec / 3600) : 0;
 
+    const chargesStr = charges.length > 0
+      ? ` · ${charges.length} recarga${charges.length !== 1 ? 's' : ''}`
+      : '';
+
     html += `<div class="card">
-  <div class="card-title">Período — ${trips.length} viagem${trips.length !== 1 ? 'ns' : ''} · ${charges.length} recarga${charges.length !== 1 ? 's' : ''}</div>
+  <div class="card-title">Período — ${trips.length} viagem${trips.length !== 1 ? 'ns' : ''}${chargesStr}</div>
   <div class="metrics-row">
     <div class="metric"><div class="metric-value blue lg">${f1(distKm)} km</div><div class="metric-label">distância</div></div>
-    <div class="metric"><div class="metric-value orange">${f2(fuelL)} L</div><div class="metric-label">combustível</div></div>
+    <div class="metric"><div class="metric-value muted sm">${fmtDur(timeSec)}</div><div class="metric-label">condução</div></div>
+    ${avgSpd > 0 ? `<div class="metric"><div class="metric-value muted sm">${f1(avgSpd)} km/h</div><div class="metric-label">vel. média</div></div>` : ''}
   </div>
   <div class="divider"></div>
   <div class="metrics-row">
-    <div class="metric"><div class="metric-value green">${netKwh > 0 ? f2(netKwh) + ' kWh' : '--'}</div><div class="metric-label">kWh consumido</div></div>
+    <div class="metric"><div class="metric-value green">${netKwh > 0 ? f2(netKwh) + ' kWh' : '--'}</div><div class="metric-label">kWh líquido</div></div>
+    <div class="metric"><div class="metric-value teal">${regenKwh > 0 ? f2(regenKwh) + ' kWh' : '--'}</div><div class="metric-label">kWh regen.</div></div>
     <div class="metric"><div class="metric-value green">${avgKwh100 > 0 ? f1(avgKwh100) : '--'}</div><div class="metric-label">kWh/100km</div></div>
-    <div class="metric"><div class="metric-value green">${avgKml > 0 ? f1(avgKml) : '--'}</div><div class="metric-label">km/L</div></div>
   </div>
-  <div class="divider"></div>
+  ${fuelL > 0.001 ? `<div class="divider"></div>
   <div class="metrics-row">
-    <div class="metric"><div class="metric-value teal">${chargeKwh > 0 ? f2(chargeKwh) + ' kWh' : '--'}</div><div class="metric-label">kWh carregados</div></div>
-    <div class="metric"><div class="metric-value muted">${fmtDur(chargeSec)}</div><div class="metric-label">tempo recarga</div></div>
+    <div class="metric"><div class="metric-value orange">${f2(fuelL)} L</div><div class="metric-label">combustível</div></div>
+    <div class="metric"><div class="metric-value orange">${avgKml > 0 ? f1(avgKml) + ' km/L' : '--'}</div><div class="metric-label">efic. combust.</div></div>
+  </div>` : ''}
+  ${chargeKwh > 0 ? `<div class="divider"></div>
+  <div class="metrics-row">
+    <div class="metric"><div class="metric-value teal">${f2(chargeKwh)} kWh</div><div class="metric-label">kWh carregados</div></div>
+    <div class="metric"><div class="metric-value muted sm">${fmtDur(chargeSec)}</div><div class="metric-label">tempo recarga</div></div>
     <div class="metric"><div class="metric-value blue">${avgChgKw > 0 ? f1(avgChgKw) + ' kW' : '--'}</div><div class="metric-label">pot. média</div></div>
-  </div>
-  ${costBrl > 0 ? `<div class="divider"></div>
-  <div class="metrics-row">
-    <div class="metric"><div class="metric-value yellow">R$ ${f2(costBrl)}</div><div class="metric-label">custo viagens</div></div>
   </div>` : ''}
 </div>`;
   }
