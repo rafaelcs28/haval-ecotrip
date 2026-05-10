@@ -11,7 +11,7 @@
   --border:     #0F1520;
   --yellow:     #FFD60A;
   --red:        #FF5555;
-  --tab-h:      46px;
+  --tab-h:      40px;
   --safe-top:   env(safe-area-inset-top, 0px);
   --safe-bot:   env(safe-area-inset-bottom, 0px);
 }
@@ -121,24 +121,26 @@ html, body {
 /* ── Tab bar ─────────────────────────────────────────────────────────────────── */
 #tab-bar {
   display: flex;
-  /* safe-bot como padding do container: empurra conteúdo para cima, espaço vazio fica abaixo */
-  padding-bottom: var(--safe-bot);
+  align-items: center;           /* centraliza tabs verticalmente */
   background: var(--card);
   border-top: 1px solid var(--border);
   flex-shrink: 0;
+  /* altura total = conteúdo + safe area do iPhone (home indicator) */
+  height: calc(var(--tab-h) + var(--safe-bot));
+  padding-bottom: var(--safe-bot);
 }
 
 .tab {
   flex: 1;
-  height: var(--tab-h);          /* altura fixa — conteúdo centralizado dentro */
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 2px;
+  height: var(--tab-h);          /* área de toque — não inclui safe area */
   cursor: pointer;
   color: var(--muted);
-  font-size: 0;               /* reset — texto via .tab-label */
+  font-size: 0;
   border: none;
   background: none;
   padding: 0 1px;
