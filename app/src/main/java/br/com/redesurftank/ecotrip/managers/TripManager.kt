@@ -1364,7 +1364,16 @@ class TripManager private constructor() {
         val explicit = prefs.getString(SharedPreferencesKeys.BRIDGE_URL, "") ?: ""
         if (explicit.isNotBlank()) return explicit.trimEnd('/')
 
-        // 2. Fallback: deriva do host MQTT (só funciona se broker e bridge estiverem no mesmo host)
+        // 2. Deriva do IP do Home Assistant (mesmo host, porta 3000) — padrão de fábrica
+        val haUrl = prefs.getString(SharedPreferencesKeys.HA_EXPORT_URL, "") ?: ""
+        if (haUrl.isNotBlank()) {
+            try {
+                val host = java.net.URL(haUrl).host
+                if (host.isNotBlank()) return "http://$host:3000"
+            } catch (_: Exception) {}
+        }
+
+        // 3. Último recurso: deriva do host MQTT (só funciona se broker e bridge forem o mesmo servidor)
         val raw = prefs.getString(SharedPreferencesKeys.MQTT_HOST, "") ?: ""
         if (raw.isBlank()) return ""
         val host = raw

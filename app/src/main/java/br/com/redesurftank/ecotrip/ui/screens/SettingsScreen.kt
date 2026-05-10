@@ -30,6 +30,15 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+/** Extrai o host da URL do Home Assistant e monta a URL do Bridge na porta 3000. */
+private fun deriveBridgeFromHaUrl(haUrl: String): String {
+    if (haUrl.isBlank()) return ""
+    return try {
+        val host = java.net.URL(haUrl).host
+        if (host.isNotBlank()) "http://$host:3000" else ""
+    } catch (_: Exception) { "" }
+}
+
 @Composable
 fun SettingsScreen(
     tankCapacity: Float,
@@ -54,6 +63,13 @@ fun SettingsScreen(
     var username         by remember { mutableStateOf(mqttManager.username) }
     var password         by remember { mutableStateOf(mqttManager.password) }
     var prefix           by remember { mutableStateOf(mqttManager.prefix) }
+    var bridgeUrlStr     by remember {
+        mutableStateOf(
+            mqttManager.bridgeUrl.ifEmpty {
+                deriveBridgeFromHaUrl(backupManager.haExportUrl)
+            }
+        )
+    }
     val intervalOptions = remember {
         listOf(
             250, 500,
@@ -291,6 +307,31 @@ fun SettingsScreen(
                 MqttField("Prefixo de tópico", prefix, KeyboardType.Uri) { prefix = it }
 
                 Spacer(Modifier.height(2.dp))
+                MqttField("URL do Bridge (iPhone PWA)", bridgeUrlStr, KeyboardType.Uri) { bridgeUrlStr = it }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "URL do servidor Node.js do PWA (porta 3000).\nPadrão: mesmo IP do Home Assistant.",
+                        fontSize   = 10.sp,
+                        color      = TextSecondary,
+                        lineHeight = 14.sp,
+                        modifier   = Modifier.weight(1f),
+                    )
+                    val haFill = deriveBridgeFromHaUrl(backupManager.haExportUrl)
+                    if (haFill.isNotBlank() && bridgeUrlStr != haFill) {
+                        TextButton(
+                            onClick = { bridgeUrlStr = haFill },
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                        ) {
+                            Text("Usar IP do HA", fontSize = 11.sp, color = AccentBlue)
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(2.dp))
                 Text("Intervalo de envio", fontSize = 13.sp, color = TextSecondary,
                     fontWeight = FontWeight.SemiBold)
 
@@ -334,6 +375,7 @@ fun SettingsScreen(
                             mqttManager.username                  = username
                             mqttManager.password                  = password
                             mqttManager.prefix                    = prefix.ifEmpty { "haval/ecotrip" }
+                            mqttManager.bridgeUrl = bridgeUrlStr.trim()
                             mqttManager.publishIntervalWifiMs     = publishIntervalWifiMs
                             mqttManager.publishIntervalCellularMs = publishIntervalCellularMs
                             mqttManager.saveAndApply()
