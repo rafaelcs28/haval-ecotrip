@@ -47,6 +47,20 @@ html, body {
 
 .header-left { display: flex; align-items: center; gap: 8px; }
 
+.model-block {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+#car-version-badge {
+  font-size: 9px;
+  font-weight: 600;
+  color: rgba(77,187,255,.75);
+  display: none; /* visível só quando receber a versão */
+}
+#car-version-badge.visible { display: block; }
+
 #logo {
   font-size: 18px;
   font-weight: 800;
@@ -65,7 +79,7 @@ html, body {
   padding: 2px 7px;
 }
 
-#model-label { font-size: 11px; color: rgba(94,115,148,.6); }
+#model-label { font-size: 11px; color: rgba(94,115,148,.6); line-height: 1.2; }
 
 #status-area { display: flex; align-items: center; gap: 6px; }
 
@@ -107,8 +121,10 @@ html, body {
 /* ── Tab bar ─────────────────────────────────────────────────────────────────── */
 #tab-bar {
   display: flex;
-  height: var(--tab-h);
+  align-items: flex-start;       /* conteúdo alinhado ao topo da área de toque */
+  padding-top: 6px;
   padding-bottom: var(--safe-bot);
+  min-height: var(--tab-h);
   background: var(--card);
   border-top: 1px solid var(--border);
   flex-shrink: 0;
@@ -119,19 +135,31 @@ html, body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
   gap: 2px;
   cursor: pointer;
   color: var(--muted);
-  font-size: 9px;
-  font-weight: 500;
+  font-size: 0;               /* reset — texto via .tab-label */
   border: none;
   background: none;
-  padding: 4px 0;
+  padding: 0 1px;
   -webkit-tap-highlight-color: transparent;
   transition: color .2s;
 }
-.tab .icon { font-size: 20px; line-height: 1; }
+.tab-icon {
+  font-size: 18px;
+  line-height: 1;
+  display: block;
+}
+.tab-letter {
+  font-size: 16px;
+  font-weight: 800;
+}
+.tab-label {
+  font-size: 8px;
+  font-weight: 500;
+  line-height: 1.2;
+  white-space: nowrap;
+}
 .tab.active { color: var(--neon); }
 
 /* ── Tab panels ──────────────────────────────────────────────────────────────── */

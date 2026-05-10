@@ -24,7 +24,10 @@
     <div class="header-left">
       <span id="logo">ECOTRIP</span>
       <span id="version-badge">bridge</span>
-      <span id="model-label">Haval H6 PHEV34</span>
+      <div class="model-block">
+        <span id="model-label">Haval H6 PHEV34</span>
+        <span id="car-version-badge"></span>
+      </div>
     </div>
     <div id="status-area">
       <div class="timestamps">
@@ -342,32 +345,32 @@
   <!-- Tab bar -->
   <nav id="tab-bar">
     <button class="tab active" data-panel="dash" onclick="switchTab(this)">
-      <span class="icon">🏠</span>
-      <span>Dashboard</span>
+      <span class="tab-icon">🏠</span>
+      <span class="tab-label">Dash</span>
     </button>
     <button class="tab" data-panel="a" onclick="switchTab(this)">
-      <span class="icon" style="font-weight:800;font-size:18px;color:inherit">A</span>
-      <span>Trip A</span>
+      <span class="tab-icon tab-letter">A</span>
+      <span class="tab-label">Trip A</span>
     </button>
     <button class="tab" data-panel="b" onclick="switchTab(this)">
-      <span class="icon" style="font-weight:800;font-size:18px;color:inherit">B</span>
-      <span>Trip B</span>
+      <span class="tab-icon tab-letter">B</span>
+      <span class="tab-label">Trip B</span>
     </button>
     <button class="tab" data-panel="rolling" onclick="switchTab(this)">
-      <span class="icon">↺</span>
-      <span>Rolling</span>
+      <span class="tab-icon">↺</span>
+      <span class="tab-label">Roll</span>
     </button>
     <button class="tab" data-panel="charges" onclick="switchTab(this, loadCharges)">
-      <span class="icon">⚡</span>
-      <span>Recargas</span>
+      <span class="tab-icon">⚡</span>
+      <span class="tab-label">Carga</span>
     </button>
     <button class="tab" data-panel="hist" onclick="switchTab(this, loadHistory)">
-      <span class="icon">≡</span>
-      <span>Histórico</span>
+      <span class="tab-icon">≡</span>
+      <span class="tab-label">Hist.</span>
     </button>
     <button class="tab" data-panel="life" onclick="switchTab(this)">
-      <span class="icon">∞</span>
-      <span>Lifetime</span>
+      <span class="tab-icon">∞</span>
+      <span class="tab-label">Total</span>
     </button>
   </nav>
 

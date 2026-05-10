@@ -27,6 +27,7 @@ const state = {
   bridge_online:     true,
   last_update_ms:    null,   // timestamp local de quando o bridge recebeu a última msg MQTT
   car_last_update:   null,   // ISO string publicada pelo Android com retain (timestamp do carro)
+  car_app_version:   null,   // versão do APK instalado no carro (retain=true)
 
   // Telemetria ao vivo
   speed_kmh:        0,
@@ -214,6 +215,9 @@ function applyMqttMessage(key, value) {
       break;
     case 'last_update':
       state.car_last_update = value;   // ISO timestamp publicado pelo Android (retain=true)
+      break;
+    case 'app_version':
+      state.car_app_version = value;   // versão do APK no carro (retain=true)
       break;
 
     // Telemetria ao vivo

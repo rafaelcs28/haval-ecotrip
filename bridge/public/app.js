@@ -124,6 +124,19 @@ function renderAll() {
   renderTrip('b', state.trip_b || {});
   renderRolling(state.rolling || {});
   renderLifetime(state.lifetime || {});
+  renderCarVersion();
+}
+
+function renderCarVersion() {
+  const el = document.getElementById('car-version-badge');
+  if (!el) return;
+  const v = state.car_app_version;
+  if (v) {
+    el.textContent = 'carro v' + v;
+    el.classList.add('visible');
+  } else {
+    el.classList.remove('visible');
+  }
 }
 
 function renderDash() {
