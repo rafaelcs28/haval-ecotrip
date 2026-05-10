@@ -416,24 +416,57 @@ function renderCharges() {
 
 // ── Histórico ─────────────────────────────────────────────────────────────────
 function loadHistory() {
-  if (cachedTrips !== null) { renderHistory(); return; }
+  // Sempre busca dados frescos ao abrir a aba (trips manuais e auto-trips podem ter chegado)
+  cachedTrips     = null;
+  cachedAutoTrips = null;
   const list = document.getElementById('hist-list');
   list.innerHTML = '<div class="empty">Carregando...</div>';
-  fetch('/api/trips')
-    .then(r => r.json())
-    .then(data => { cachedTrips = Array.isArray(data) ? data : []; renderHistory(); })
-    .catch(() => { list.innerHTML = filterChipsHTML('hist') + '<div class="empty">Erro ao carregar.</div>'; });
+  Promise.all([
+    fetch('/api/trips').then(r => r.json()).then(d => { cachedTrips = Array.isArray(d) ? d : []; }).catch(() => { cachedTrips = []; }),
+    fetch('/api/autotrips').then(r => r.json()).then(d => { cachedAutoTrips = Array.isArray(d) ? d : []; }).catch(() => { cachedAutoTrips = []; }),
+  ]).then(() => renderHistory()).catch(() => {
+    list.innerHTML = filterChipsHTML('hist') + '<div class="empty">Erro ao carregar.</div>';
+  });
 }
 
 function renderHistory() {
   const list = document.getElementById('hist-list');
   if (!list) return;
-  const [startMs, endMs] = getFilterRange('hist');
-  const trips = filterItems(cachedTrips || [], 'timestamp', startMs, endMs);
+  const [filterStart, filterEnd] = getFilterRange('hist');
+  const isFiltered = filterState.hist.active !== 'all';
+
+  let trips;
+  if (!isFiltered) {
+    // Sem filtro: mostra trips manuais (Trip A/B salvos ao Zerar) em ordem cronológica
+    trips = filterItems(cachedTrips || [], 'timestamp', filterStart, filterEnd);
+  } else {
+    // Com filtro: usa auto-trips (criados a cada P→D/R, muito mais granulares)
+    // Os campos são camelCase vindos do Android: distKm, fuelL, netKwh, timeSec
+    trips = (cachedAutoTrips || []).filter(t => {
+      const ms = t.startMs || 0;
+      return ms >= filterStart && ms <= filterEnd;
+    }).map(t => ({
+      // Normaliza para o formato esperado pelo card de renderização
+      name:            t.name || '',
+      label:           'Auto',
+      timestamp:       t.startMs,
+      distance_km:     t.distKm   || 0,
+      fuel_l:          t.fuelL    || 0,
+      kwh_per_100km:   t.distKm > 0.1 ? (t.netKwh / t.distKm * 100) : 0,
+      km_per_l:        t.fuelL   > 0.001 ? (t.distKm / t.fuelL) : 0,
+      net_kwh:         t.netKwh  || 0,
+      regen_kwh:       t.regenKwh || 0,
+      time_sec:        t.timeSec  || 0,
+      total_cost_brl:  0,
+    }));
+  }
 
   let html = filterChipsHTML('hist');
   if (!trips.length) {
-    list.innerHTML = html + '<div class="empty">Nenhuma viagem no período.</div>';
+    const hint = isFiltered
+      ? '<div class="empty">Nenhuma viagem automática no período.<br><small style="color:#5B7394">Auto-trips são criados a cada vez que o carro é colocado em marcha.</small></div>'
+      : '<div class="empty">Nenhuma viagem no período.</div>';
+    list.innerHTML = html + hint;
     return;
   }
 
@@ -461,12 +494,13 @@ function renderHistory() {
   html += trips.map(t => {
     const name = t.name || t.label || 'Viagem';
     const cost = t.total_cost_brl > 0 ? `<span class="trip-cost">R$ ${f2(t.total_cost_brl)}</span>` : '';
+    const tsDisplay = typeof t.timestamp === 'number' ? fmtDate(new Date(t.timestamp).toISOString()) : fmtDate(t.timestamp);
     return `<div class="trip-item">
   <div class="trip-header">
     <div>
       <span class="trip-badge">${t.label || 'Trip'}</span>
       <div class="trip-name" style="margin-top:3px">${name}</div>
-      <div class="trip-date">${fmtDate(t.timestamp)}</div>
+      <div class="trip-date">${tsDisplay}</div>
     </div>
     ${cost}
   </div>

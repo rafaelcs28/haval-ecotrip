@@ -1,6 +1,5 @@
 package br.com.redesurftank.ecotrip.ui.screens
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -317,7 +316,7 @@ fun AutoTripsScreen(
                 Text("📅 $endLabel", fontSize = 12.sp, fontWeight = if (endActive) FontWeight.Bold else FontWeight.Normal)
             }
 
-            AnimatedVisibility(visible = hasCustomRange) {
+            if (hasCustomRange) {
                 IconButton(
                     onClick  = { customStartDayMs = null; customEndDayMs = null },
                     modifier = Modifier.size(36.dp),
@@ -328,7 +327,7 @@ fun AutoTripsScreen(
         }
 
         // ── Card de resumo do período ─────────────────────────────────────────
-        AnimatedVisibility(visible = showSummary && filtered.isNotEmpty()) {
+        if (showSummary && filtered.isNotEmpty()) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -366,7 +365,7 @@ fun AutoTripsScreen(
             }
         }
 
-        AnimatedVisibility(visible = showSummary && filtered.isEmpty()) {
+        if (showSummary && filtered.isEmpty()) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -562,7 +561,7 @@ private fun AutoTripEntryRow(
         }
 
         // ── Detalhes expandidos ────────────────────────────────────────────────
-        AnimatedVisibility(visible = expanded) {
+        if (expanded) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()

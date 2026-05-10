@@ -100,6 +100,9 @@ object SharedPreferencesKeys {
     // Home Assistant export
     const val HA_EXPORT_URL = "ha_export_url"
 
+    // URL do Bridge Node.js (iPhone PWA) — configurado manualmente pois pode diferir do broker MQTT
+    const val BRIDGE_URL = "bridge_url"
+
     // MQTT
     const val MQTT_ENABLED  = "mqtt_enabled"
     const val MQTT_HOST     = "mqtt_host"

@@ -86,6 +86,7 @@ class MqttManager private constructor() {
     var username:                   String  = ""
     var password:                   String  = ""
     var prefix:                     String  = "haval/ecotrip"
+    var bridgeUrl:                  String  = ""
     var publishIntervalMs:          Int     = DEFAULT_PUBLISH_INTERVAL_MS      // legado — mantido para não quebrar código existente
     var publishIntervalWifiMs:      Int     = DEFAULT_PUBLISH_INTERVAL_WIFI_MS
     var publishIntervalCellularMs:  Int     = DEFAULT_PUBLISH_INTERVAL_CELLULAR_MS
@@ -149,6 +150,7 @@ class MqttManager private constructor() {
             .putString (SharedPreferencesKeys.MQTT_USERNAME,                    username)
             .putString (SharedPreferencesKeys.MQTT_PASSWORD,                    password)
             .putString (SharedPreferencesKeys.MQTT_PREFIX,                      prefix)
+            .putString (SharedPreferencesKeys.BRIDGE_URL,                       bridgeUrl)
             .putInt    (SharedPreferencesKeys.MQTT_PUBLISH_INTERVAL_WIFI_MS,     publishIntervalWifiMs)
             .putInt    (SharedPreferencesKeys.MQTT_PUBLISH_INTERVAL_CELLULAR_MS, publishIntervalCellularMs)
             .apply()
@@ -788,6 +790,7 @@ class MqttManager private constructor() {
         username         = prefs.getString (SharedPreferencesKeys.MQTT_USERNAME,          "") ?: ""
         password         = prefs.getString (SharedPreferencesKeys.MQTT_PASSWORD,          "") ?: ""
         prefix           = prefs.getString (SharedPreferencesKeys.MQTT_PREFIX,            "haval/ecotrip") ?: "haval/ecotrip"
+        bridgeUrl        = prefs.getString (SharedPreferencesKeys.BRIDGE_URL,              "") ?: ""
         // Migração: lê legado (ms único ou segundos) para usar como base dos defaults WiFi
         val legacyMs = if (prefs.contains(SharedPreferencesKeys.MQTT_PUBLISH_INTERVAL_MS))
             prefs.getInt(SharedPreferencesKeys.MQTT_PUBLISH_INTERVAL_MS, DEFAULT_PUBLISH_INTERVAL_MS)
