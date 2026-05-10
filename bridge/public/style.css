@@ -121,10 +121,8 @@ html, body {
 /* ── Tab bar ─────────────────────────────────────────────────────────────────── */
 #tab-bar {
   display: flex;
-  align-items: flex-start;       /* conteúdo alinhado ao topo da área de toque */
-  padding-top: 6px;
+  /* safe-bot como padding do container: empurra conteúdo para cima, espaço vazio fica abaixo */
   padding-bottom: var(--safe-bot);
-  min-height: var(--tab-h);
   background: var(--card);
   border-top: 1px solid var(--border);
   flex-shrink: 0;
@@ -132,9 +130,11 @@ html, body {
 
 .tab {
   flex: 1;
+  height: var(--tab-h);          /* altura fixa — conteúdo centralizado dentro */
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   gap: 2px;
   cursor: pointer;
   color: var(--muted);
@@ -213,6 +213,7 @@ html, body {
 }
 .metric-value.lg { font-size: 28px; }
 .metric-value.sm { font-size: 16px; }
+.metric-value.xs { font-size: 13px; }
 .metric-label {
   font-size: 10px;
   color: var(--muted);

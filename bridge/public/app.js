@@ -168,14 +168,23 @@ function renderDash() {
   setText('d-charge-power', s.charge_power_kw > 0 ? f1(s.charge_power_kw) + ' kW' : '--');
   setText('d-charge-state', s.charging_state || '--');
 
-  // Viagem atual (Trip A mini)
+  // Viagem atual — Trip A mini
   const ta = s.trip_a || {};
-  setText('d-trip-dist', ta.distance_km > 0 ? f1(ta.distance_km) + ' km' : '--');
-  setText('d-trip-time', ta.time_sec   || '--');
-  setText('d-trip-kwh',  ta.kwh_per_100km > 0 ? f1(ta.kwh_per_100km) : '--');
-  setText('d-trip-kml',  ta.km_per_l    > 0 ? f1(ta.km_per_l)    : '--');
-  setText('d-trip-cost', ta.cost_brl    > 0 ? 'R$ ' + f2(ta.cost_brl) : '--');
+  setText('d-trip-dist', ta.distance_km   > 0 ? f1(ta.distance_km) + ' km' : '--');
+  setText('d-trip-time', ta.time_sec      || '--');
+  setText('d-trip-kwh',  ta.kwh_per_100km > 0 ? f1(ta.kwh_per_100km)       : '--');
+  setText('d-trip-kml',  ta.km_per_l      > 0 ? f1(ta.km_per_l)            : '--');
+  setText('d-trip-cost', ta.cost_brl      > 0 ? 'R$ ' + f2(ta.cost_brl)   : '--');
   setClass('d-trip-kwh', eff(ta.kwh_per_100km));
+
+  // Viagem atual — Trip B mini
+  const tb = s.trip_b || {};
+  setText('d-tripb-dist', tb.distance_km   > 0 ? f1(tb.distance_km) + ' km' : '--');
+  setText('d-tripb-time', tb.time_sec      || '--');
+  setText('d-tripb-kwh',  tb.kwh_per_100km > 0 ? f1(tb.kwh_per_100km)       : '--');
+  setText('d-tripb-kml',  tb.km_per_l      > 0 ? f1(tb.km_per_l)            : '--');
+  setText('d-tripb-cost', tb.cost_brl      > 0 ? 'R$ ' + f2(tb.cost_brl)   : '--');
+  setClass('d-tripb-kwh', eff(tb.kwh_per_100km));
 }
 
 function renderTrip(id, t) {
