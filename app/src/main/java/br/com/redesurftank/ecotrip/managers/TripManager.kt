@@ -460,6 +460,8 @@ class TripManager private constructor() {
         }
         // Inicializa recorder de telemetria (GPS ativado depois via startGps())
         telemetryRecorder = TelemetryRecorder(ctx)
+        // Sincroniza trips pendentes ao iniciar (sem precisar abrir a aba de viagens)
+        syncAutoTripsTobridge()
     }
 
     /** Inicia GPS para telemetria. Chame após permissão concedida. */
@@ -1351,8 +1353,18 @@ class TripManager private constructor() {
         } catch (_: Exception) { null }
     }
 
-    /** Deriva a URL HTTP do bridge a partir do host MQTT configurado. */
+    /**
+     * Retorna a URL HTTP do bridge para envio de telemetria.
+     * Prioridade: campo BRIDGE_URL configurado explicitamente → derivação do host MQTT (fallback).
+     * O campo explícito é necessário quando o broker MQTT é externo (cloud) e o bridge
+     * roda localmente (ex.: Mac Mini / Raspberry Pi na rede local).
+     */
     private fun getBridgeHttpUrl(): String {
+        // 1. URL explícita configurada pelo usuário (campo nas configurações)
+        val explicit = prefs.getString(SharedPreferencesKeys.BRIDGE_URL, "") ?: ""
+        if (explicit.isNotBlank()) return explicit.trimEnd('/')
+
+        // 2. Fallback: deriva do host MQTT (só funciona se broker e bridge estiverem no mesmo host)
         val raw = prefs.getString(SharedPreferencesKeys.MQTT_HOST, "") ?: ""
         if (raw.isBlank()) return ""
         val host = raw

@@ -12,6 +12,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -64,12 +65,22 @@ fun StatsScreen(
 ) {
     var filter by remember { mutableStateOf(StatsFilter.ALL) }
 
-    val current = remember { tripManager.getLifetimeSnapshot() }
+    // Snapshot reativo — atualiza a cada 5 s para refletir dados chegando via MQTT
+    var current by remember { mutableStateOf(tripManager.getLifetimeSnapshot()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(5_000)
+            current = tripManager.getLifetimeSnapshot()
+        }
+    }
+
     val (priceGas, priceKwh) = remember { tripManager.getPrices() }
 
     val periodStartMs = remember(filter) { statsStartMs(filter) }
 
-    val baseline = remember(periodStartMs) {
+    // Baseline: recomputa ao mudar o filtro; também recomputa se current mudou
+    // (novos checkpoints podem ter sido adicionados durante a sessão)
+    val baseline = remember(periodStartMs, current) {
         if (periodStartMs == 0L) null else tripManager.getLifetimeBaselineAt(periodStartMs)
     }
     val noData = filter != StatsFilter.ALL && baseline == null
