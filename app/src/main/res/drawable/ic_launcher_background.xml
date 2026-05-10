@@ -1,15 +1,58 @@
 <?xml version="1.0" encoding="utf-8"?>
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Deep dark background -->
+
+    <!-- Deep dark background: azul escuro no centro → quase-preto nas bordas -->
     <path
-        android:pathData="M0,0 L108,0 L108,108 L0,108 Z"
-        android:fillColor="#0D0F11"/>
-    <!-- Subtle green glow circle -->
+        android:pathData="M0,0 L108,0 L108,108 L0,108 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                xmlns:gradient="http://schemas.android.com/apk/res/android"
+                android:centerX="54"
+                android:centerY="54"
+                android:gradientRadius="76"
+                android:type="radial">
+                <item android:offset="0"   android:color="#FF0D1A2A"/>
+                <item android:offset="1"   android:color="#FF060810"/>
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Halo verde suave atrás do raio -->
     <path
-        android:pathData="M54,54 m-36,0 a36,36 0 1,0 72,0 a36,36 0 1,0 -72,0"
-        android:fillColor="#0830D158"/>
+        android:pathData="M54,16 A38,38 0 1 0 54,92 A38,38 0 1 0 54,16 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                xmlns:gradient="http://schemas.android.com/apk/res/android"
+                android:centerX="54"
+                android:centerY="54"
+                android:gradientRadius="38"
+                android:type="radial">
+                <item android:offset="0"   android:color="#2039FF88"/>
+                <item android:offset="0.6" android:color="#0800E5CC"/>
+                <item android:offset="1"   android:color="#00000000"/>
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Brilho laranja na base (calor / combustível) -->
+    <path
+        android:pathData="M54,70 A38,38 0 1 0 54,108 A54,54 0 1 0 54,70 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                xmlns:gradient="http://schemas.android.com/apk/res/android"
+                android:centerX="54"
+                android:centerY="108"
+                android:gradientRadius="54"
+                android:type="radial">
+                <item android:offset="0"   android:color="#18FF5F1F"/>
+                <item android:offset="1"   android:color="#00000000"/>
+            </gradient>
+        </aapt:attr>
+    </path>
+
 </vector>
