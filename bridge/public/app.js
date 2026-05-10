@@ -198,17 +198,53 @@ function renderDash() {
   setText('d-tripb-cost', tb.cost_brl      > 0 ? 'R$ ' + f2(tb.cost_brl)   : '--');
   setClass('d-tripb-kwh', eff(tb.kwh_per_100km));
 
-  // Motor (0=desligado, 1=ligado)
-  const eng = s.engine_state;
-  if (eng === '1' || eng === 1)       { setText('d-engine-state', 'Ligado');    setClass('d-engine-state', 'green'); }
-  else if (eng === '0' || eng === 0)  { setText('d-engine-state', 'Desligado'); setClass('d-engine-state', 'muted'); }
-  else                                { setText('d-engine-state', '--');         setClass('d-engine-state', 'muted'); }
+  // Motor — ícone power: cinza=desligado, vermelho=ligado
+  const eng      = s.engine_state;
+  const engIcon  = document.getElementById('d-engine-icon');
+  const engLabel = document.getElementById('d-engine-label');
+  if (engIcon && engLabel) {
+    if (eng === '1' || eng === 1) {
+      engIcon.style.color  = 'var(--red)';
+      engLabel.textContent = 'Ligado';
+      engLabel.style.color = 'var(--red)';
+    } else if (eng === '0' || eng === 0) {
+      engIcon.style.color  = 'var(--muted)';
+      engLabel.textContent = 'Desligado';
+      engLabel.style.color = 'var(--muted)';
+    } else {
+      engIcon.style.color  = 'var(--muted)';
+      engLabel.textContent = '--';
+      engLabel.style.color = 'var(--muted)';
+    }
+  }
 
-  // Trava (off=trancado, on=destrancado)
-  const lck = s.lock_state;
-  if (lck === 'off')      { setText('d-lock-state', '🔒 Trancado');  setClass('d-lock-state', 'teal'); }
-  else if (lck === 'on')  { setText('d-lock-state', '🔓 Destranc.'); setClass('d-lock-state', 'orange'); }
-  else                    { setText('d-lock-state', '--');            setClass('d-lock-state', 'muted'); }
+  // Trava — ícone porta: fechada=teal, aberta=laranja
+  const lck       = s.lock_state;
+  const lockIcon  = document.getElementById('d-lock-icon');
+  const lockLabel = document.getElementById('d-lock-label');
+  const dClosed   = document.getElementById('d-door-closed');
+  const dOpen     = document.getElementById('d-door-open');
+  if (lockIcon && lockLabel) {
+    if (lck === 'off') {
+      lockIcon.style.color  = 'var(--teal)';
+      lockLabel.textContent = 'Trancado';
+      lockLabel.style.color = 'var(--teal)';
+      if (dClosed) dClosed.style.display = '';
+      if (dOpen)   dOpen.style.display   = 'none';
+    } else if (lck === 'on') {
+      lockIcon.style.color  = 'var(--orange)';
+      lockLabel.textContent = 'Aberto';
+      lockLabel.style.color = 'var(--orange)';
+      if (dClosed) dClosed.style.display = 'none';
+      if (dOpen)   dOpen.style.display   = '';
+    } else {
+      lockIcon.style.color  = 'var(--muted)';
+      lockLabel.textContent = '--';
+      lockLabel.style.color = 'var(--muted)';
+      if (dClosed) dClosed.style.display = '';
+      if (dOpen)   dOpen.style.display   = 'none';
+    }
+  }
 
   // Desde última partida (rolling)
   const r = s.rolling || {};

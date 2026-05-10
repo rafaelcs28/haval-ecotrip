@@ -86,14 +86,19 @@
           </div>
         </div>
         <div class="divider"></div>
-        <div class="metrics-row">
-          <div class="metric">
-            <div class="metric-value sm muted" id="d-engine-state">--</div>
-            <div class="metric-label">🔑 Motor</div>
+        <div style="display:flex;justify-content:space-around;padding:4px 0">
+          <div style="text-align:center">
+            <div id="d-engine-icon" style="color:var(--muted);line-height:1">
+              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>
+            </div>
+            <div id="d-engine-label" style="font-size:9px;color:var(--muted);margin-top:4px;font-weight:500">--</div>
           </div>
-          <div class="metric">
-            <div class="metric-value sm muted" id="d-lock-state">--</div>
-            <div class="metric-label">🔒 Trava</div>
+          <div style="text-align:center">
+            <div id="d-lock-icon" style="color:var(--muted);line-height:1">
+              <svg id="d-door-closed" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 20V6a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v14"/><path d="M2 20h20"/><circle cx="14" cy="12" r="1" fill="currentColor" stroke="none"/></svg>
+              <svg id="d-door-open" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none"><path d="M13 4h3a2 2 0 0 1 2 2v14"/><path d="M2 20h3"/><path d="M13 20h9"/><path d="M10 12v.01"/><path d="M13 4L7 20"/></svg>
+            </div>
+            <div id="d-lock-label" style="font-size:9px;color:var(--muted);margin-top:4px;font-weight:500">--</div>
           </div>
         </div>
         <div id="d-charge-row" style="display:none">
