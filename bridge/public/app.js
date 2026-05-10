@@ -63,15 +63,35 @@ function setStatus(s) {
   else if (s === 'offline'){ dot.classList.add('offline'); }
 }
 
+function relTime(ms) {
+  if (!ms) return '--';
+  const sec = Math.floor((Date.now() - ms) / 1000);
+  if (sec < 10)        return 'agora';
+  if (sec < 60)        return `${sec}s atrás`;
+  if (sec < 3600)      return `${Math.floor(sec/60)}min atrás`;
+  if (sec < 86400)     return `${Math.floor(sec/3600)}h atrás`;
+  return `${Math.floor(sec/86400)}d atrás`;
+}
+
 function tickLastUpdate() {
-  const el = document.getElementById('last-update');
-  if (!lastUpdateMs) { el.textContent = '--'; return; }
-  const sec = Math.floor((Date.now() - lastUpdateMs) / 1000);
-  if (sec < 10)       el.textContent = 'agora';
-  else if (sec < 60)  el.textContent = `${sec}s atrás`;
-  else if (sec < 3600)el.textContent = `${Math.floor(sec/60)}min atrás`;
-  else                el.textContent = `${Math.floor(sec/3600)}h atrás`;
-  // Status online/offline baseado no tempo
+  // Timestamp do bridge (última msg WS recebida)
+  const elBridge = document.getElementById('last-update');
+  elBridge.textContent = lastUpdateMs ? relTime(lastUpdateMs) : '--';
+
+  // Timestamp do carro (last_update publicado pelo Android com retain)
+  const elCar = document.getElementById('car-update');
+  if (elCar) {
+    const iso = state.car_last_update;
+    if (iso) {
+      const carMs = new Date(iso).getTime();
+      elCar.textContent = 'carro: ' + relTime(carMs);
+    } else {
+      elCar.textContent = 'carro: --';
+    }
+  }
+
+  // Status online/offline baseado no tempo da bridge
+  const sec = lastUpdateMs ? Math.floor((Date.now() - lastUpdateMs) / 1000) : 9999;
   if (state.car_online && sec < 30)  setStatus('online');
   else if (sec < 60)                 setStatus('connecting');
   else                               setStatus('offline');
@@ -108,22 +128,23 @@ function renderAll() {
 
 function renderDash() {
   const s = state;
-  setText('d-speed',   Math.round(s.speed_kmh  || 0));
   setText('d-gear',    s.gear || 'P');
   setText('d-inside',  s.inside_temp  ? f1(s.inside_temp)  + '°C' : '--');
   setText('d-outside', s.outside_temp ? f1(s.outside_temp) + '°C' : '--');
 
-  // SOC — usamos soc_pct (publicado em trip_a/soc_current com retain)
-  const soc  = s.soc_pct || s.trip_a?.soc_current || 0;
+  // SOC — usa soc_pct (publicado em trip_a/soc_current com retain)
+  const soc = s.soc_pct || s.trip_a?.soc_current || 0;
   setText('d-soc', pct(soc));
   const socBar = document.getElementById('d-soc-bar');
   if (socBar) socBar.style.width = Math.max(0, Math.min(100, soc)) + '%';
 
-  // Combustível % — inferimos de tank_now_l / (tank_start_l + distância × consumo)
-  // Usamos o % mais recente do Trip A (tank_now_l / 51L capacidade, approx)
-  const tankNow = s.trip_a?.tank_now_l ?? s.trip_b?.tank_now_l ?? 0;
-  const fuelPct = tankNow > 0 ? Math.min(100, (tankNow / 51) * 100) : 0;
-  setText('d-fuel', fuelPct > 0 ? pct(fuelPct) : '--');
+  // Combustível — usa tank_now_l (agora publicado com retain; sobrevive ao carro desligado)
+  // Capacidade do tanque: 51L (Haval H6 PHEV34)
+  const TANK_CAP = 51;
+  const tankNow = s.trip_a?.tank_now_l > 0 ? s.trip_a.tank_now_l
+                : s.trip_b?.tank_now_l > 0 ? s.trip_b.tank_now_l : 0;
+  const fuelPct = tankNow > 0 ? Math.min(100, (tankNow / TANK_CAP) * 100) : 0;
+  setText('d-fuel', tankNow > 0 ? f1(tankNow) + ' L  (' + fuelPct.toFixed(0) + '%)' : '--');
   const fuelBar = document.getElementById('d-fuel-bar');
   if (fuelBar) fuelBar.style.width = Math.max(0, Math.min(100, fuelPct)) + '%';
 
@@ -133,6 +154,15 @@ function renderDash() {
   if (chargeRow) chargeRow.style.display = isCharging ? 'block' : 'none';
   setText('d-charge-power', s.charge_power_kw > 0 ? f1(s.charge_power_kw) + ' kW' : '--');
   setText('d-charge-state', s.charging_state || '--');
+
+  // Viagem atual (Trip A mini)
+  const ta = s.trip_a || {};
+  setText('d-trip-dist', ta.distance_km > 0 ? f1(ta.distance_km) + ' km' : '--');
+  setText('d-trip-time', ta.time_sec   || '--');
+  setText('d-trip-kwh',  ta.kwh_per_100km > 0 ? f1(ta.kwh_per_100km) : '--');
+  setText('d-trip-kml',  ta.km_per_l    > 0 ? f1(ta.km_per_l)    : '--');
+  setText('d-trip-cost', ta.cost_brl    > 0 ? 'R$ ' + f2(ta.cost_brl) : '--');
+  setClass('d-trip-kwh', eff(ta.kwh_per_100km));
 }
 
 function renderTrip(id, t) {

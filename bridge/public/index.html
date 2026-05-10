@@ -27,7 +27,10 @@
       <span id="model-label">Haval H6 PHEV34</span>
     </div>
     <div id="status-area">
-      <span id="last-update">--</span>
+      <div class="timestamps">
+        <span id="last-update">--</span>
+        <span id="car-update" class="car-ts">carro --</span>
+      </div>
       <div id="status-dot"></div>
     </div>
   </div>
@@ -37,16 +40,8 @@
 
     <!-- Dashboard -->
     <div id="panel-dash" class="panel active">
-      <div class="card">
-        <div class="speed-hero">
-          <div class="speed-value" id="d-speed">0</div>
-          <div class="speed-unit">km/h</div>
-          <div style="margin-top:6px">
-            <span class="gear-badge" id="d-gear">P</span>
-          </div>
-        </div>
-      </div>
 
+      <!-- Bateria & Combustível -->
       <div class="card">
         <div class="card-title">Bateria &amp; Combustível</div>
         <div class="bar-row">
@@ -60,16 +55,20 @@
           <div class="bar-item">
             <div class="bar-header">
               <span class="bar-label">⛽ Combustível</span>
-              <span class="bar-val" id="d-fuel">--%</span>
+              <span class="bar-val" id="d-fuel">--</span>
             </div>
             <div class="bar-track"><div class="bar-fill fuel" id="d-fuel-bar" style="width:0%"></div></div>
           </div>
         </div>
       </div>
 
+      <!-- Temperatura, Marcha & Recarga -->
       <div class="card">
-        <div class="card-title">Temperatura</div>
-        <div class="metrics-row">
+        <div class="metrics-row" style="align-items:center">
+          <div class="metric" style="flex:0 0 auto;text-align:center;padding-right:14px;border-right:1px solid var(--border)">
+            <div class="gear-badge-lg" id="d-gear">P</div>
+            <div class="metric-label" style="margin-top:4px">marcha</div>
+          </div>
           <div class="metric">
             <div class="metric-value blue" id="d-inside">--</div>
             <div class="metric-label">🌡️ Interna</div>
@@ -80,7 +79,7 @@
           </div>
           <div class="metric">
             <div class="metric-value teal" id="d-charge-power">--</div>
-            <div class="metric-label">⚡ Recarga kW</div>
+            <div class="metric-label">⚡ kW recarga</div>
           </div>
         </div>
         <div id="d-charge-row" style="display:none">
@@ -91,6 +90,34 @@
           </div>
         </div>
       </div>
+
+      <!-- Viagem atual (Trip A) -->
+      <div class="card">
+        <div class="card-title">Viagem atual (Trip A)</div>
+        <div class="metrics-row">
+          <div class="metric">
+            <div class="metric-value blue lg" id="d-trip-dist">--</div>
+            <div class="metric-label">km</div>
+          </div>
+          <div class="metric">
+            <div class="metric-value muted" id="d-trip-time">--</div>
+            <div class="metric-label">tempo</div>
+          </div>
+          <div class="metric">
+            <div class="metric-value green" id="d-trip-kwh">--</div>
+            <div class="metric-label">kWh/100km</div>
+          </div>
+          <div class="metric">
+            <div class="metric-value green" id="d-trip-kml">--</div>
+            <div class="metric-label">km/L</div>
+          </div>
+          <div class="metric">
+            <div class="metric-value yellow" id="d-trip-cost">--</div>
+            <div class="metric-label">R$ custo</div>
+          </div>
+        </div>
+      </div>
+
     </div>
 
     <!-- Trip A -->

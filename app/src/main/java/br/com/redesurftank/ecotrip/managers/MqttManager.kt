@@ -503,8 +503,8 @@ class MqttManager private constructor() {
                 pub("$label/regen_kwh",      fmt3(snap.regenKwh))
                 pub("$label/soc_start",   fmt1(snap.startSocPct))
                 pubR("$label/soc_current", fmt1(snap.currentSocPct))   // retain — SOC não blanks no reconect
-                pub("$label/tank_start_l",fmt1(snap.startTankL))
-                pub("$label/tank_now_l",  fmt1(snap.currentTankL))
+                pubR("$label/tank_start_l",fmt1(snap.startTankL))   // retain — nível do tanque sobrevive a reconect
+                pubR("$label/tank_now_l",  fmt1(snap.currentTankL)) // retain — bridge/PWA usa sem carro ligado
                 // Custo — calculado a partir dos preços embutidos no snapshot
                 val liveFuelCost   = snap.fuelL * snap.priceGasolinePerL
                 val liveNetKwh     = (snap.energyKwh - snap.regenKwh).coerceAtLeast(0f)

@@ -69,6 +69,19 @@ html, body {
 
 #status-area { display: flex; align-items: center; gap: 6px; }
 
+.timestamps {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+}
+
+.car-ts {
+  font-size: 9px;
+  color: var(--muted);
+  opacity: 0.7;
+}
+
 #status-dot {
   width: 8px; height: 8px;
   border-radius: 50%;
@@ -184,33 +197,19 @@ html, body {
 .metric-value.yellow  { color: var(--yellow); }
 .metric-value.muted   { color: var(--muted); }
 
-/* ── Dashboard hero ──────────────────────────────────────────────────────────── */
-.speed-hero {
-  text-align: center;
-  padding: 10px 0 6px;
-}
-.speed-value {
-  font-size: 72px;
-  font-weight: 800;
-  color: var(--text);
-  line-height: 1;
-  text-shadow: 0 0 30px rgba(57,255,136,.15);
-}
-.speed-unit {
-  font-size: 18px;
-  color: var(--muted);
-  font-weight: 500;
-}
-.gear-badge {
+/* ── Marcha grande (dashboard) ───────────────────────────────────────────────── */
+.gear-badge-lg {
   display: inline-block;
-  font-size: 20px;
-  font-weight: 700;
+  font-size: 32px;
+  font-weight: 800;
   color: var(--neon);
   background: rgba(57,255,136,.08);
   border: 1px solid rgba(57,255,136,.25);
-  border-radius: 8px;
-  padding: 2px 12px;
-  margin-top: 4px;
+  border-radius: 10px;
+  padding: 4px 14px;
+  line-height: 1;
+  min-width: 52px;
+  text-align: center;
 }
 
 /* ── Barra de SOC/combustível ────────────────────────────────────────────────── */

@@ -23,9 +23,10 @@ const CHARGES_FILE = path.join(__dirname, 'charges.json');
 // ── Estado em memória (espelha todos os tópicos MQTT) ─────────────────────────
 
 const state = {
-  car_online:     false,
-  bridge_online:  true,
-  last_update_ms: null,
+  car_online:        false,
+  bridge_online:     true,
+  last_update_ms:    null,   // timestamp local de quando o bridge recebeu a última msg MQTT
+  car_last_update:   null,   // ISO string publicada pelo Android com retain (timestamp do carro)
 
   // Telemetria ao vivo
   speed_kmh:        0,
@@ -211,7 +212,9 @@ function applyMqttMessage(key, value) {
     case 'status':
       state.car_online = (value === 'online');
       break;
-    case 'last_update': break;
+    case 'last_update':
+      state.car_last_update = value;   // ISO timestamp publicado pelo Android (retain=true)
+      break;
 
     // Telemetria ao vivo
     case 'speed_kmh':         state.speed_kmh          = num(value); break;
