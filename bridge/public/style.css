@@ -11,7 +11,7 @@
   --border:     #0F1520;
   --yellow:     #FFD60A;
   --red:        #FF5555;
-  --tab-h:      56px;
+  --tab-h:      46px;
   --safe-top:   env(safe-area-inset-top, 0px);
   --safe-bot:   env(safe-area-inset-bottom, 0px);
 }
@@ -146,18 +146,20 @@ html, body {
   transition: color .2s;
 }
 .tab-icon {
-  font-size: 18px;
+  font-size: 17px;
   line-height: 1;
   display: block;
+  margin-bottom: 1px;
 }
 .tab-letter {
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 800;
+  line-height: 1;
 }
 .tab-label {
   font-size: 8px;
   font-weight: 500;
-  line-height: 1.2;
+  line-height: 1;
   white-space: nowrap;
 }
 .tab.active { color: var(--neon); }
