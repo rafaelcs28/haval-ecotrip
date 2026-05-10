@@ -124,10 +124,24 @@ function setClass(id, cls) {
   }
 }
 
+// Formata segundos brutos (recargas, lifetime) → "01h:20'50""
 function fmtDur(sec) {
   if (!sec || sec <= 0) return '--';
-  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60);
-  return h > 0 ? `${h}h ${m}min` : `${m}min`;
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = Math.floor(sec % 60);
+  if (h > 0) return `${String(h).padStart(2,'0')}h:${String(m).padStart(2,'0')}'${String(s).padStart(2,'0')}"`;
+  return `${String(m).padStart(2,'0')}'${String(s).padStart(2,'0')}"`;
+}
+
+// Formata string pré-formatada do Android "3h, 20 min e 50s" → "03h:20'50""
+function fmtTripTime(v) {
+  if (!v || v === '--') return '--';
+  if (typeof v === 'number') return fmtDur(v);            // fallback: segundos brutos
+  const h = +(v.match(/(\d+)\s*h/)   || [0,0])[1];
+  const m = +(v.match(/(\d+)\s*min/) || [0,0])[1];
+  const s = +(v.match(/(\d+)\s*s\b/) || [0,0])[1];
+  if (h === 0 && m === 0 && s === 0) return '--';
+  if (h > 0) return `${String(h).padStart(2,'0')}h:${String(m).padStart(2,'0')}'${String(s).padStart(2,'0')}"`;
+  return `${String(m).padStart(2,'0')}'${String(s).padStart(2,'0')}"`;
 }
 function fmtDate(ts) {
   try {
@@ -252,7 +266,7 @@ function renderDash() {
   // Trip A mini
   const ta = s.trip_a || {};
   setText('d-trip-dist', ta.distance_km   > 0 ? f1(ta.distance_km) + ' km' : '--');
-  setText('d-trip-time', ta.time_sec      || '--');
+  setText('d-trip-time', fmtTripTime(ta.time_sec));
   setText('d-trip-kwh',  ta.kwh_per_100km > 0 ? f1(ta.kwh_per_100km)       : '--');
   setText('d-trip-kml',  ta.km_per_l      > 0 ? f1(ta.km_per_l)            : '--');
   setText('d-trip-cost', ta.cost_brl      > 0 ? 'R$ ' + f2(ta.cost_brl)   : '--');
@@ -261,7 +275,7 @@ function renderDash() {
   // Trip B mini
   const tb = s.trip_b || {};
   setText('d-tripb-dist', tb.distance_km   > 0 ? f1(tb.distance_km) + ' km' : '--');
-  setText('d-tripb-time', tb.time_sec      || '--');
+  setText('d-tripb-time', fmtTripTime(tb.time_sec));
   setText('d-tripb-kwh',  tb.kwh_per_100km > 0 ? f1(tb.kwh_per_100km)       : '--');
   setText('d-tripb-kml',  tb.km_per_l      > 0 ? f1(tb.km_per_l)            : '--');
   setText('d-tripb-cost', tb.cost_brl      > 0 ? 'R$ ' + f2(tb.cost_brl)   : '--');
@@ -327,7 +341,7 @@ function renderDash() {
 function renderTrip(id, t) {
   const p = id;
   setText(`${p}-dist`,      f1(t.distance_km) + ' km');
-  setText(`${p}-time`,      t.time_sec  || '--');
+  setText(`${p}-time`,      fmtTripTime(t.time_sec));
   setText(`${p}-speed`,     f1(t.avg_speed_kmh));
   setText(`${p}-kwh100`,    t.kwh_per_100km > 0 ? f1(t.kwh_per_100km) : '--');
   setText(`${p}-kml`,       t.km_per_l    > 0 ? f1(t.km_per_l)     : '--');
@@ -460,7 +474,7 @@ function renderHistory() {
     <div class="trip-metric"><div class="trip-metric-val green">${t.kwh_per_100km > 0 ? f1(t.kwh_per_100km) : '--'}</div><div class="trip-metric-lbl">kWh/100km</div></div>
     <div class="trip-metric"><div class="trip-metric-val green">${t.km_per_l > 0 ? f1(t.km_per_l) : '--'}</div><div class="trip-metric-lbl">km/L</div></div>
     <div class="trip-metric"><div class="trip-metric-val orange">${t.fuel_l > 0 ? f2(t.fuel_l) + ' L' : '--'}</div><div class="trip-metric-lbl">combust.</div></div>
-    <div class="trip-metric"><div class="trip-metric-val" style="color:#5B7394">${t.time_sec || '--'}</div><div class="trip-metric-lbl">duração</div></div>
+    <div class="trip-metric"><div class="trip-metric-val" style="color:#5B7394">${fmtTripTime(t.time_sec)}</div><div class="trip-metric-lbl">duração</div></div>
   </div>
 </div>`;
   }).join('');
@@ -494,7 +508,7 @@ function renderLifetimeTab() {
   <div class="card-title">Lifetime — Total acumulado</div>
   <div class="metrics-row">
     <div class="metric"><div class="metric-value blue lg">${f1(l.distance_km)} km</div><div class="metric-label">km totais</div></div>
-    <div class="metric"><div class="metric-value muted">${l.time_sec || '--'}</div><div class="metric-label">Tempo condução</div></div>
+    <div class="metric"><div class="metric-value muted sm">${fmtTripTime(l.time_sec)}</div><div class="metric-label">Tempo condução</div></div>
   </div>
   <div class="divider"></div>
   <div class="metrics-row">
