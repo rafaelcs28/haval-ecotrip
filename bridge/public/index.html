@@ -70,7 +70,10 @@
         <div class="metrics-row" style="align-items:center">
           <div class="metric" style="flex:0 0 auto;text-align:center;padding-right:14px;border-right:1px solid var(--border)">
             <div class="gear-badge-lg" id="d-gear">P</div>
-            <div class="metric-label" style="margin-top:4px">marcha</div>
+            <div class="metric-label" style="margin-top:4px">
+              <!-- ícone câmbio -->
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="3"/><line x1="12" y1="8" x2="12" y2="21"/><line x1="8" y1="21" x2="16" y2="21"/></svg>
+            </div>
           </div>
           <div class="metric">
             <div class="metric-value blue" id="d-inside">--</div>
@@ -95,8 +98,10 @@
           </div>
           <div style="text-align:center">
             <div id="d-lock-icon" style="color:var(--muted);line-height:1">
-              <svg id="d-door-closed" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 20V6a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v14"/><path d="M2 20h20"/><circle cx="14" cy="12" r="1" fill="currentColor" stroke="none"/></svg>
-              <svg id="d-door-open" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none"><path d="M13 4h3a2 2 0 0 1 2 2v14"/><path d="M2 20h3"/><path d="M13 20h9"/><path d="M10 12v.01"/><path d="M13 4L7 20"/></svg>
+              <!-- porta de carro fechada -->
+              <svg id="d-door-closed" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="8" y1="5" x2="8" y2="12"/><circle cx="17" cy="16" r="1.2" fill="currentColor" stroke="none"/></svg>
+              <!-- porta de carro aberta -->
+              <svg id="d-door-open" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none"><line x1="4" y1="5" x2="4" y2="21"/><line x1="3" y1="21" x2="21" y2="21"/><path d="M4 5l15 3v13"/><line x1="4" y1="12" x2="19" y2="13.8"/><circle cx="16" cy="17" r="1.2" fill="currentColor" stroke="none"/></svg>
             </div>
             <div id="d-lock-label" style="font-size:9px;color:var(--muted);margin-top:4px;font-weight:500">--</div>
           </div>
@@ -330,49 +335,7 @@
 
     <!-- Lifetime -->
     <div id="panel-life" class="panel">
-      <div class="card">
-        <div class="card-title">Lifetime — Total acumulado</div>
-        <div class="metrics-row">
-          <div class="metric">
-            <div class="metric-value blue lg" id="l-dist">--</div>
-            <div class="metric-label">km totais</div>
-          </div>
-          <div class="metric">
-            <div class="metric-value muted" id="l-time">--</div>
-            <div class="metric-label">Tempo condução</div>
-          </div>
-        </div>
-        <div class="divider"></div>
-        <div class="metrics-row">
-          <div class="metric">
-            <div class="metric-value green" id="l-net">--</div>
-            <div class="metric-label">kWh líquido</div>
-          </div>
-          <div class="metric">
-            <div class="metric-value teal" id="l-regen">--</div>
-            <div class="metric-label">kWh regen.</div>
-          </div>
-          <div class="metric">
-            <div class="metric-value orange" id="l-fuel">--</div>
-            <div class="metric-label">L combustível</div>
-          </div>
-        </div>
-        <div class="divider"></div>
-        <div class="metrics-row">
-          <div class="metric">
-            <div class="metric-value teal" id="l-charge">--</div>
-            <div class="metric-label">kWh carregados</div>
-          </div>
-          <div class="metric">
-            <div class="metric-value muted" id="l-charge-time">--</div>
-            <div class="metric-label">Tempo recarga</div>
-          </div>
-          <div class="metric">
-            <div class="metric-value yellow" id="l-cost">--</div>
-            <div class="metric-label">R$ total est.</div>
-          </div>
-        </div>
-      </div>
+      <div id="life-list"><div class="empty">Carregando...</div></div>
     </div>
 
   </div><!-- /content -->
@@ -399,7 +362,7 @@
       <span class="tab-icon">≡</span>
       <span class="tab-label">Hist.</span>
     </button>
-    <button class="tab" data-panel="life" onclick="switchTab(this)">
+    <button class="tab" data-panel="life" onclick="switchTab(this, loadLifetime)">
       <span class="tab-icon">∞</span>
       <span class="tab-label">Total</span>
     </button>

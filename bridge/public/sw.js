@@ -1,4 +1,4 @@
-const CACHE = 'ecotrip-v11';
+const CACHE = 'ecotrip-v12';
 const SHELL = ['/', '/app.js', '/style.css', '/manifest.json'];
 
 self.addEventListener('install', e => {
