@@ -1,0 +1,297 @@
+/* ── Variáveis (cores do app Android) ──────────────────────────────────────── */
+:root {
+  --neon:       #39FF88;
+  --teal:       #00E5CC;
+  --orange:     #FF5F1F;
+  --blue:       #4DBBFF;
+  --void:       #06080C;
+  --card:       #0C1019;
+  --text:       #EEF4FF;
+  --muted:      #5B7394;
+  --border:     #0F1520;
+  --yellow:     #FFD60A;
+  --red:        #FF5555;
+  --tab-h:      56px;
+  --safe-top:   env(safe-area-inset-top, 0px);
+  --safe-bot:   env(safe-area-inset-bottom, 0px);
+}
+
+/* ── Reset ───────────────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  background: var(--void);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+/* ── Layout principal ────────────────────────────────────────────────────────── */
+#app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding-top: var(--safe-top);
+}
+
+/* ── Header ──────────────────────────────────────────────────────────────────── */
+#header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px 6px;
+  flex-shrink: 0;
+}
+
+.header-left { display: flex; align-items: center; gap: 8px; }
+
+#logo {
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--neon);
+  letter-spacing: 2px;
+  text-shadow: 0 0 18px rgba(57,255,136,.45);
+}
+
+#version-badge {
+  font-size: 10px;
+  font-weight: 600;
+  color: rgba(57,255,136,.7);
+  background: rgba(57,255,136,.08);
+  border: 1px solid rgba(57,255,136,.2);
+  border-radius: 5px;
+  padding: 2px 7px;
+}
+
+#model-label { font-size: 11px; color: rgba(94,115,148,.6); }
+
+#status-area { display: flex; align-items: center; gap: 6px; }
+
+#status-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--muted);
+  transition: background .4s;
+}
+#status-dot.online  { background: var(--neon); box-shadow: 0 0 8px var(--neon); }
+#status-dot.offline { background: var(--red); }
+
+#last-update {
+  font-size: 10px;
+  color: var(--muted);
+}
+
+/* ── Conteúdo com scroll ─────────────────────────────────────────────────────── */
+#content {
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 6px 10px 8px;
+}
+
+/* ── Tab bar ─────────────────────────────────────────────────────────────────── */
+#tab-bar {
+  display: flex;
+  height: var(--tab-h);
+  padding-bottom: var(--safe-bot);
+  background: var(--card);
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.tab {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 500;
+  border: none;
+  background: none;
+  padding: 4px 0;
+  -webkit-tap-highlight-color: transparent;
+  transition: color .2s;
+}
+.tab .icon { font-size: 20px; line-height: 1; }
+.tab.active { color: var(--neon); }
+
+/* ── Tab panels ──────────────────────────────────────────────────────────────── */
+.panel { display: none; }
+.panel.active { display: block; }
+
+/* ── Cards ───────────────────────────────────────────────────────────────────── */
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-bottom: 8px;
+}
+
+.card-title {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--muted);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  margin-bottom: 10px;
+}
+
+.divider {
+  height: 0.5px;
+  background: var(--border);
+  margin: 10px 0;
+}
+
+/* ── Métricas ────────────────────────────────────────────────────────────────── */
+.metrics-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.metrics-row:last-child { margin-bottom: 0; }
+
+.metric {
+  flex: 1;
+  min-width: 0;
+}
+.metric-value {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1.1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.metric-value.lg { font-size: 28px; }
+.metric-value.sm { font-size: 16px; }
+.metric-label {
+  font-size: 10px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+.metric-value.green   { color: var(--neon); }
+.metric-value.blue    { color: var(--blue); }
+.metric-value.teal    { color: var(--teal); }
+.metric-value.orange  { color: var(--orange); }
+.metric-value.yellow  { color: var(--yellow); }
+.metric-value.muted   { color: var(--muted); }
+
+/* ── Dashboard hero ──────────────────────────────────────────────────────────── */
+.speed-hero {
+  text-align: center;
+  padding: 10px 0 6px;
+}
+.speed-value {
+  font-size: 72px;
+  font-weight: 800;
+  color: var(--text);
+  line-height: 1;
+  text-shadow: 0 0 30px rgba(57,255,136,.15);
+}
+.speed-unit {
+  font-size: 18px;
+  color: var(--muted);
+  font-weight: 500;
+}
+.gear-badge {
+  display: inline-block;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--neon);
+  background: rgba(57,255,136,.08);
+  border: 1px solid rgba(57,255,136,.25);
+  border-radius: 8px;
+  padding: 2px 12px;
+  margin-top: 4px;
+}
+
+/* ── Barra de SOC/combustível ────────────────────────────────────────────────── */
+.bar-row { display: flex; flex-direction: column; gap: 8px; }
+.bar-item { display: flex; flex-direction: column; gap: 4px; }
+.bar-header { display: flex; justify-content: space-between; }
+.bar-label  { font-size: 11px; color: var(--muted); }
+.bar-val    { font-size: 12px; font-weight: 600; color: var(--text); }
+.bar-track  {
+  height: 6px;
+  background: var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width .6s ease;
+}
+.bar-fill.soc  { background: var(--neon); }
+.bar-fill.fuel { background: var(--orange); }
+
+/* ── Recarga ─────────────────────────────────────────────────────────────────── */
+.charge-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 8px;
+  background: rgba(0,229,204,.08);
+  border: 1px solid rgba(0,229,204,.25);
+  color: var(--teal);
+}
+
+/* ── Histórico ───────────────────────────────────────────────────────────────── */
+.trip-item {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 14px;
+  margin-bottom: 8px;
+}
+.trip-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 8px;
+}
+.trip-badge {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--neon);
+  background: rgba(57,255,136,.08);
+  border: 1px solid rgba(57,255,136,.2);
+  border-radius: 6px;
+  padding: 2px 6px;
+}
+.trip-name  { font-size: 13px; font-weight: 600; color: var(--text); }
+.trip-date  { font-size: 11px; color: var(--muted); }
+.trip-cost  { font-size: 13px; font-weight: 700; color: var(--yellow); }
+.trip-metrics {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.trip-metric { text-align: center; }
+.trip-metric-val { font-size: 13px; font-weight: 700; color: var(--text); }
+.trip-metric-lbl { font-size: 10px; color: var(--muted); }
+.trip-metric-val.green  { color: var(--neon); }
+.trip-metric-val.blue   { color: var(--blue); }
+.trip-metric-val.orange { color: var(--orange); }
+
+/* ── Empty state ─────────────────────────────────────────────────────────────── */
+.empty {
+  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
+  padding: 40px 20px;
+}
+
+/* ── Scrollbar ───────────────────────────────────────────────────────────────── */
+#content::-webkit-scrollbar { width: 0; }

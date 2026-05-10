@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>EcoTrip</title>
+
+  <!-- PWA / iPhone -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="EcoTrip">
+  <meta name="theme-color" content="#39FF88">
+
+  <link rel="manifest" href="/manifest.json">
+  <link rel="apple-touch-icon" href="/icon-192.png">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<div id="app">
+
+  <!-- Header -->
+  <div id="header">
+    <div class="header-left">
+      <span id="logo">ECOTRIP</span>
+      <span id="version-badge">bridge</span>
+      <span id="model-label">Haval H6 PHEV34</span>
+    </div>
+    <div id="status-area">
+      <span id="last-update">--</span>
+      <div id="status-dot"></div>
+    </div>
+  </div>
+
+  <!-- Conteúdo por aba -->
+  <div id="content">
+
+    <!-- Dashboard -->
+    <div id="panel-dash" class="panel active">
+      <div class="card">
+        <div class="speed-hero">
+          <div class="speed-value" id="d-speed">0</div>
+          <div class="speed-unit">km/h</div>
+          <div style="margin-top:6px">
+            <span class="gear-badge" id="d-gear">P</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Bateria &amp; Combustível</div>
+        <div class="bar-row">
+          <div class="bar-item">
+            <div class="bar-header">
+              <span class="bar-label">🔋 Bateria (SOC)</span>
+              <span class="bar-val" id="d-soc">--%</span>
+            </div>
+            <div class="bar-track"><div class="bar-fill soc" id="d-soc-bar" style="width:0%"></div></div>
+          </div>
+          <div class="bar-item">
+            <div class="bar-header">
+              <span class="bar-label">⛽ Combustível</span>
+              <span class="bar-val" id="d-fuel">--%</span>
+            </div>
+            <div class="bar-track"><div class="bar-fill fuel" id="d-fuel-bar" style="width:0%"></div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Temperatura</div>
+        <div class="metrics-row">
+          <div class="metric">
+            <div class="metric-value blue" id="d-inside">--</div>
+            <div class="metric-label">🌡️ Interna</div>
+          </div>
+          <div class="metric">
+            <div class="metric-value muted" id="d-outside">--</div>
+            <div class="metric-label">🌤️ Externa</div>
+          </div>
+          <div class="metric">
+            <div class="metric-value teal" id="d-charge-power">--</div>
+            <div class="metric-label">⚡ Recarga kW</div>
+          </div>
+        </div>
+        <div id="d-charge-row" style="display:none">
+          <div class="divider"></div>
+          <div class="charge-badge">
+            <span>⚡</span>
+            <span id="d-charge-state">Carregando</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Trip A -->
+    <div id="panel-a" class="panel">
+      <div class="card">
+        <div class="card-title">Trip A — Em andamento</div>
+        <div class="metrics-row">
+          <div class="metric">
+            <div class="metric-value blue lg" id="a-dist">0,0</div>
+            <div class="metric-label">km</div>
+          </div>
+          <div class="metric">
+            <div class="metric-value muted" id="a-time">--</div>
+            <div class="metric-label">Tempo</div>
+          </div>
+          <div class="metric">
+            <div class="metric-value muted" id="a-speed">0</div>
+            <div class="metric-label">km/h méd.</div>
+          </div>
+        </div>
+        <div class="divider"></div>
+        <div class="metrics-row">
+          <div class="metric">
+            <div class="metric-value green" id="a-kwh100">--</div>
+            <div class="metric-label">kWh/100km</div>
+          </div>
+          <div class="metric">
+            <div class="metric-value green" id="a-kml">--</div>
+            <div class="metric-label">km/L</div>
+          </div>
+          <div class="metric">
+            <div class="metric-value muted" id="a-fuel">--</div>
+            <div class="metric-label">L combust.</div>
+          </div>
+        </div>
+        <div class="divider"></div>
+        <div class="metrics-row">
+          <div class="metric">
+            <div class="metric-value teal" id="a-energy">--</div>
+            <div class="metric-label">kWh bruto</div>
+          </div>
+          <div class="metric">
+            <div class="metric-value teal" id="a-regen">--</div>
+            <div class="metric-label">kWh regen.</div>
+          </div>
+          <div class="metric">
+            <div class="metric-value yellow" id="a-cost">--</div>
+            <div class="metric-label">R$ custo</div>
+          </div>
+        </div>
+        <div class="divider"></div>
+        <div class="metrics-row">
+          <div class="metric">
+            <div class="metric-value muted sm" id="a-soc-start">--%</div>
+            <div class="metric-label">SOC início</div>
+          </div>
+          <div class="metric">
+            <div class="metric-value green sm" id="a-soc-now">--%</div>
+            <div class="metric-label">SOC agora</div>
+          </div>
+          <div class="metric">
+            <div class="metric-value orange sm" id="a-tank-now">-- L</div>
+            <div class="metric-label">Tanque agora</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Trip B -->
+    <div id="panel-b" class="panel">
+      <div class="card">
+        <div class="card-title">Trip B — Em andamento</div>
+        <div class="metrics-row">
+          <div class="metric">
+            <div class="metric-value blue lg" id="b-dist">0,0</div>
+            <div class="metric-label">km</div>
+          </div>
+          <div class="metric">
+            <div class="metric-value muted" id="b-time">--</div>
+            <div class="metric-label">Tempo</div>
+          </div>
+          <div class="metric">
+            <div class="metric-value muted" id="b-speed">0</div>
+            <div class="metric-label">km/h méd.</div>
+          </div>
+        </div>
+        <div class="divider"></div>
+        <div class="metrics-row">
+          <div class="metric">
+            <div class="metric-value green" id="b-kwh100">--</div>
+            <div class="metric-label">kWh/100km</div>
+          </div>
+          <div class="metric">
+            <div class="metric-value green" id="b-kml">--</div>
+            <div class="metric-label">km/L</div>
+          </div>
+          <div class="metric">
+            <div class="metric-value muted" id="b-fuel">--</div>
+            <div class="metric-label">L combust.</div>
+          </div>
+        </div>
+        <div class="divider"></div>
+        <div class="metrics-row">
+          <div class="metric">
+            <div class="metric-value teal" id="b-energy">--</div>
+            <div class="metric-label">kWh bruto</div>
+          </div>
+          <div class="metric">
+            <div class="metric-value teal" id="b-regen">--</div>
+            <div class="metric-label">kWh regen.</div>
+          </div>
+          <div class="metric">
+            <div class="metric-value yellow" id="b-cost">--</div>
+            <div class="metric-label">R$ custo</div>
+          </div>
+        </div>
+        <div class="divider"></div>
+        <div class="metrics-row">
+          <div class="metric">
+            <div class="metric-value muted sm" id="b-soc-start">--%</div>
+            <div class="metric-label">SOC início</div>
+          </div>
+          <div class="metric">
+            <div class="metric-value green sm" id="b-soc-now">--%</div>
+            <div class="metric-label">SOC agora</div>
+          </div>
+          <div class="metric">
+            <div class="metric-value orange sm" id="b-tank-now">-- L</div>
+            <div class="metric-label">Tanque agora</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Rolling -->
+    <div id="panel-rolling" class="panel">
+      <div class="card">
+        <div class="card-title">Desde última partida</div>
+        <div class="metrics-row">
+          <div class="metric">
+            <div class="metric-value blue lg" id="r-dist">0,0</div>
+            <div class="metric-label">km</div>
+          </div>
+          <div class="metric">
+            <div class="metric-value muted" id="r-fuel">--</div>
+            <div class="metric-label">L combust.</div>
+          </div>
+        </div>
+        <div class="divider"></div>
+        <div class="metrics-row">
+          <div class="metric">
+            <div class="metric-value green" id="r-kwh100">--</div>
+            <div class="metric-label">kWh/100km</div>
+          </div>
+          <div class="metric">
+            <div class="metric-value green" id="r-kml">--</div>
+            <div class="metric-label">km/L</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Histórico -->
+    <div id="panel-hist" class="panel">
+      <div id="hist-list"><div class="empty">Carregando histórico...</div></div>
+    </div>
+
+    <!-- Lifetime -->
+    <div id="panel-life" class="panel">
+      <div class="card">
+        <div class="card-title">Lifetime — Total acumulado</div>
+        <div class="metrics-row">
+          <div class="metric">
+            <div class="metric-value blue lg" id="l-dist">--</div>
+            <div class="metric-label">km totais</div>
+          </div>
+          <div class="metric">
+            <div class="metric-value muted" id="l-time">--</div>
+            <div class="metric-label">Tempo condução</div>
+          </div>
+        </div>
+        <div class="divider"></div>
+        <div class="metrics-row">
+          <div class="metric">
+            <div class="metric-value green" id="l-net">--</div>
+            <div class="metric-label">kWh líquido</div>
+          </div>
+          <div class="metric">
+            <div class="metric-value teal" id="l-regen">--</div>
+            <div class="metric-label">kWh regen.</div>
+          </div>
+          <div class="metric">
+            <div class="metric-value orange" id="l-fuel">--</div>
+            <div class="metric-label">L combustível</div>
+          </div>
+        </div>
+        <div class="divider"></div>
+        <div class="metrics-row">
+          <div class="metric">
+            <div class="metric-value teal" id="l-charge">--</div>
+            <div class="metric-label">kWh carregados</div>
+          </div>
+          <div class="metric">
+            <div class="metric-value muted" id="l-charge-time">--</div>
+            <div class="metric-label">Tempo recarga</div>
+          </div>
+          <div class="metric">
+            <div class="metric-value yellow" id="l-cost">--</div>
+            <div class="metric-label">R$ total est.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /content -->
+
+  <!-- Tab bar -->
+  <nav id="tab-bar">
+    <button class="tab active" data-panel="dash" onclick="switchTab(this)">
+      <span class="icon">🏠</span>
+      <span>Dashboard</span>
+    </button>
+    <button class="tab" data-panel="a" onclick="switchTab(this)">
+      <span class="icon" style="font-weight:800;font-size:18px;color:inherit">A</span>
+      <span>Trip A</span>
+    </button>
+    <button class="tab" data-panel="b" onclick="switchTab(this)">
+      <span class="icon" style="font-weight:800;font-size:18px;color:inherit">B</span>
+      <span>Trip B</span>
+    </button>
+    <button class="tab" data-panel="rolling" onclick="switchTab(this)">
+      <span class="icon">↺</span>
+      <span>Rolling</span>
+    </button>
+    <button class="tab" data-panel="hist" onclick="switchTab(this, loadHistory)">
+      <span class="icon">≡</span>
+      <span>Histórico</span>
+    </button>
+    <button class="tab" data-panel="life" onclick="switchTab(this)">
+      <span class="icon">∞</span>
+      <span>Lifetime</span>
+    </button>
+  </nav>
+
+</div><!-- /app -->
+
+<script src="/app.js"></script>
+</body>
+</html>
