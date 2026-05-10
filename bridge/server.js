@@ -19,17 +19,19 @@ const PORT        = parseInt(process.env.PORT || '3000', 10);
 
 const TRIPS_FILE   = path.join(__dirname, 'trips.json');
 const CHARGES_FILE = path.join(__dirname, 'charges.json');
+const STATE_FILE   = path.join(__dirname, 'state.json');
 
 // ── Estado em memória (espelha todos os tópicos MQTT) ─────────────────────────
+// Valores iniciais = defaults. Serão sobrescritos pelo state.json persistido
+// e depois pelos tópicos MQTT retained (ao conectar) e live (quando carro liga).
 
 const state = {
   car_online:        false,
   bridge_online:     true,
-  last_update_ms:    null,   // timestamp local de quando o bridge recebeu a última msg MQTT
-  car_last_update:   null,   // ISO string publicada pelo Android com retain (timestamp do carro)
-  car_app_version:   null,   // versão do APK instalado no carro (retain=true)
+  last_update_ms:    null,
+  car_last_update:   null,
+  car_app_version:   null,
 
-  // Telemetria ao vivo
   speed_kmh:        0,
   gear:             '--',
   inside_temp:      0,
@@ -41,33 +43,64 @@ const state = {
   battery_current_a:0,
   soc_pct:          0,
 
-  // Trip A
   trip_a: {
     distance_km:   0, time_sec: '--', kwh_per_100km: 0, km_per_l: 0,
     avg_speed_kmh: 0, fuel_l: 0, energy_kwh: 0, regen_kwh: 0,
     soc_start:     0, soc_current: 0, tank_start_l: 0, tank_now_l: 0,
     cost_brl:      0, cost_per_km: 0,
   },
-
-  // Trip B
   trip_b: {
     distance_km:   0, time_sec: '--', kwh_per_100km: 0, km_per_l: 0,
     avg_speed_kmh: 0, fuel_l: 0, energy_kwh: 0, regen_kwh: 0,
     soc_start:     0, soc_current: 0, tank_start_l: 0, tank_now_l: 0,
     cost_brl:      0, cost_per_km: 0,
   },
-
-  // Rolling (desde última partida)
   rolling: {
     kwh_per_100km: 0, km_per_l: 0, distance_km: 0, fuel_l: 0,
   },
-
-  // Lifetime
   lifetime: {
     energy_kwh: 0, regen_kwh: 0, net_kwh: 0, distance_km: 0,
     time_sec: '--', fuel_l: 0, charge_kwh: 0, charge_sec: '--', cost_brl: 0,
   },
 };
+
+// ── Persistência do estado ─────────────────────────────────────────────────────
+// Restaura o último estado conhecido do disco — evita zeros após restart do bridge.
+// Os tópicos MQTT retained sobrescreverão os valores ao reconectar.
+
+function deepMergeState(target, source) {
+  for (const [k, v] of Object.entries(source)) {
+    if (v !== null && v !== undefined) {
+      if (typeof v === 'object' && !Array.isArray(v) && typeof target[k] === 'object') {
+        deepMergeState(target[k], v);
+      } else {
+        target[k] = v;
+      }
+    }
+  }
+}
+
+if (fs.existsSync(STATE_FILE)) {
+  try {
+    const saved = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
+    // Não restaura flags de runtime — esses são redefinidos ao conectar
+    delete saved.car_online;
+    delete saved.bridge_online;
+    delete saved.last_update_ms;
+    deepMergeState(state, saved);
+    console.log(`✓ Estado anterior restaurado de state.json`);
+  } catch (e) {
+    console.error('Aviso: erro ao restaurar state.json:', e.message);
+  }
+}
+
+let stateSaveTimer = null;
+function scheduleStateSave() {
+  if (stateSaveTimer) clearTimeout(stateSaveTimer);
+  stateSaveTimer = setTimeout(() => {
+    try { fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2)); } catch (_) {}
+  }, 2000); // debounce de 2s — não grava a cada mensagem MQTT individual
+}
 
 // ── Histórico de trips — persistência JSON ────────────────────────────────────
 // O histórico vem do tópico MQTT retained `trips/history` (JSON completo).
@@ -321,6 +354,7 @@ function applyMqttMessage(key, value) {
 
     default: break;
   }
+  scheduleStateSave();
 }
 
 // ── Start ─────────────────────────────────────────────────────────────────────

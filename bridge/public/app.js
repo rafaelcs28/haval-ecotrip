@@ -7,6 +7,19 @@ let wsRetryDelay = 1000;
 let ws = null;
 let tickInterval = null;
 
+// Merge profundo: sobrescreve apenas as chaves presentes em source (sem apagar as demais)
+function deepMerge(target, source) {
+  for (const [k, v] of Object.entries(source)) {
+    if (v !== null && v !== undefined) {
+      if (typeof v === 'object' && !Array.isArray(v) && target[k] && typeof target[k] === 'object') {
+        deepMerge(target[k], v);
+      } else {
+        target[k] = v;
+      }
+    }
+  }
+}
+
 // ── Service Worker ────────────────────────────────────────────────────────────
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/sw.js').catch(() => {});
@@ -36,7 +49,7 @@ function connect() {
     try {
       const msg = JSON.parse(evt.data);
       if (msg.type === 'full_state' || msg.type === 'update') {
-        state = msg.data;
+        deepMerge(state, msg.data);  // merge — mantém dados anteriores, atualiza só o que chegou
         lastUpdateMs = Date.now();
         renderAll();
         // Persiste no localStorage para leitura offline
@@ -388,7 +401,7 @@ try {
   const cached = localStorage.getItem('ecotrip_state');
   if (cached) {
     const { state: cachedState, ts } = JSON.parse(cached);
-    state = cachedState;
+    deepMerge(state, cachedState);   // restaura sem apagar estrutura default
     lastUpdateMs = ts;
     renderAll();
   }
