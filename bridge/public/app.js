@@ -135,7 +135,6 @@ function renderAll() {
   renderDash();
   renderTrip('a', state.trip_a || {});
   renderTrip('b', state.trip_b || {});
-  renderRolling(state.rolling || {});
   renderLifetime(state.lifetime || {});
   renderCarVersion();
 }
@@ -198,6 +197,14 @@ function renderDash() {
   setText('d-tripb-kml',  tb.km_per_l      > 0 ? f1(tb.km_per_l)            : '--');
   setText('d-tripb-cost', tb.cost_brl      > 0 ? 'R$ ' + f2(tb.cost_brl)   : '--');
   setClass('d-tripb-kwh', eff(tb.kwh_per_100km));
+
+  // Desde última partida (rolling)
+  const r = s.rolling || {};
+  setText('d-roll-dist', r.distance_km   > 0 ? f1(r.distance_km) + ' km' : '--');
+  setText('d-roll-fuel', r.fuel_l        > 0 ? f2(r.fuel_l) + ' L'       : '--');
+  setText('d-roll-kwh',  r.kwh_per_100km > 0 ? f1(r.kwh_per_100km)       : '--');
+  setText('d-roll-kml',  r.km_per_l      > 0 ? f1(r.km_per_l)            : '--');
+  setClass('d-roll-kwh', eff(r.kwh_per_100km));
 }
 
 function renderTrip(id, t) {
@@ -215,13 +222,6 @@ function renderTrip(id, t) {
   setText(`${p}-soc-now`,   pct(t.soc_current));
   setText(`${p}-tank-now`,  t.tank_now_l > 0 ? f1(t.tank_now_l) + ' L' : '--');
   setClass(`${p}-kwh100`, eff(t.kwh_per_100km));
-}
-
-function renderRolling(r) {
-  setText('r-dist',   f1(r.distance_km) + ' km');
-  setText('r-fuel',   r.fuel_l > 0 ? f2(r.fuel_l) + ' L' : '--');
-  setText('r-kwh100', r.kwh_per_100km > 0 ? f1(r.kwh_per_100km) : '--');
-  setText('r-kml',    r.km_per_l      > 0 ? f1(r.km_per_l)     : '--');
 }
 
 function renderLifetime(l) {

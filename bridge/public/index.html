@@ -94,6 +94,29 @@
         </div>
       </div>
 
+      <!-- Rolling — Desde última partida -->
+      <div class="card">
+        <div class="card-title">Desde última partida</div>
+        <div class="metrics-row">
+          <div class="metric">
+            <div class="metric-value blue sm" id="d-roll-dist">--</div>
+            <div class="metric-label">km</div>
+          </div>
+          <div class="metric">
+            <div class="metric-value muted sm" id="d-roll-fuel">--</div>
+            <div class="metric-label">L combust.</div>
+          </div>
+          <div class="metric">
+            <div class="metric-value green sm" id="d-roll-kwh">--</div>
+            <div class="metric-label">kWh/100km</div>
+          </div>
+          <div class="metric">
+            <div class="metric-value green sm" id="d-roll-kml">--</div>
+            <div class="metric-label">km/L</div>
+          </div>
+        </div>
+      </div>
+
       <!-- Viagens Trip A + Trip B -->
       <div class="card">
         <div class="card-title">Trip A — em andamento</div>
@@ -279,34 +302,6 @@
       </div>
     </div>
 
-    <!-- Rolling -->
-    <div id="panel-rolling" class="panel">
-      <div class="card">
-        <div class="card-title">Desde última partida</div>
-        <div class="metrics-row">
-          <div class="metric">
-            <div class="metric-value blue lg" id="r-dist">0,0</div>
-            <div class="metric-label">km</div>
-          </div>
-          <div class="metric">
-            <div class="metric-value muted" id="r-fuel">--</div>
-            <div class="metric-label">L combust.</div>
-          </div>
-        </div>
-        <div class="divider"></div>
-        <div class="metrics-row">
-          <div class="metric">
-            <div class="metric-value green" id="r-kwh100">--</div>
-            <div class="metric-label">kWh/100km</div>
-          </div>
-          <div class="metric">
-            <div class="metric-value green" id="r-kml">--</div>
-            <div class="metric-label">km/L</div>
-          </div>
-        </div>
-      </div>
-    </div>
-
     <!-- Recargas -->
     <div id="panel-charges" class="panel">
       <div id="charges-list"><div class="empty">Carregando recargas...</div></div>
@@ -379,10 +374,6 @@
     <button class="tab" data-panel="b" onclick="switchTab(this)">
       <span class="tab-icon tab-letter">B</span>
       <span class="tab-label">Trip B</span>
-    </button>
-    <button class="tab" data-panel="rolling" onclick="switchTab(this)">
-      <span class="tab-icon">↺</span>
-      <span class="tab-label">Roll</span>
     </button>
     <button class="tab" data-panel="charges" onclick="switchTab(this, loadCharges)">
       <span class="tab-icon">⚡</span>
