@@ -114,7 +114,23 @@ Acesse `http://localhost:3000` no navegador.
 | `MQTT_PASS` | *(vazio)* | Senha do broker |
 | `MQTT_PREFIX` | `haval/ecotrip` | Prefixo dos tópicos — deve ser igual ao configurado no app |
 | `PORT` | `3000` | Porta HTTP do servidor |
-| `ADMIN_TOKEN` | `ecotrip-restart` | Token para endpoints admin (`/api/admin/*`) |
+| `BRIDGE_TOKEN` | *(vazio)* | Senha de acesso à PWA — se vazio, servidor fica aberto (dev local) |
+| `BRIDGE_TOKEN_HASH` | *(vazio)* | SHA-256 da senha — gerado automaticamente pela PWA ao trocar senha |
+| `ADMIN_TOKEN` | *(vazio)* | Token admin separado (opcional — se vazio, usa `BRIDGE_TOKEN`) |
+
+> **Nota**: defina apenas `BRIDGE_TOKEN` com uma senha curta (ex: `minhasenha`). O campo `BRIDGE_TOKEN_HASH` é gerenciado automaticamente pela PWA quando o usuário troca a senha pelo celular.
+
+### Segurança
+
+A autenticação funciona assim:
+
+- O servidor protege todas as rotas `/api/*` (exceto notificações push) e o WebSocket
+- A PWA exibe uma tela de login na primeira abertura
+- A senha é convertida para SHA-256 antes de ser enviada e armazenada (em HTTPS — em HTTP é enviada como texto puro)
+- Para trocar a senha: aba **⚙ Config** → **Alterar senha de acesso** → sem necessidade de acessar o servidor
+- Para "deslogar" de um dispositivo: aba **⚙ Config** → **🔒 Sair**
+
+> **Recomendado**: configure HTTPS com Caddy (seção abaixo) para garantir que a senha trafegue criptografada.
 
 ### Arquivos de dados (gerados automaticamente)
 
@@ -197,7 +213,7 @@ npm install --production
 
 # Cria o arquivo de configuração
 cp .env.example .env
-nano .env   # preencha com as credenciais do broker e token admin
+nano .env   # preencha MQTT_HOST, MQTT_USER, MQTT_PASS e BRIDGE_TOKEN
 
 # Inicia com PM2
 pm2 start server.js --name ecotrip-bridge
@@ -294,9 +310,12 @@ pm2 restart ecotrip-bridge
 | `GET` | `/api/vapidPublicKey` | Chave pública para Push Notifications |
 | `POST` | `/api/push/subscribe` | Registrar dispositivo para push |
 | `POST` | `/api/auto-trips` | Receber viagens do app Android |
-| `POST` | `/api/admin/clear-history` | Apagar todo o histórico (requer `Authorization: Bearer <ADMIN_TOKEN>`) |
-| `POST` | `/api/admin/restart` | Reiniciar o servidor (requer token) |
-| `WS` | `/ws` | WebSocket — stream de dados ao vivo |
+| `POST` | `/api/admin/change-password` | Trocar senha de acesso (requer auth) |
+| `POST` | `/api/admin/clear-history` | Apagar todo o histórico (requer auth) |
+| `POST` | `/api/admin/restart` | Reiniciar o servidor (requer auth) |
+| `WS` | `/ws?token=<hash>` | WebSocket — stream de dados ao vivo |
+
+Todas as rotas `/api/*` (exceto `/api/push/*`) exigem header `Authorization: Bearer <token>` quando `BRIDGE_TOKEN` está configurado no `.env`.
 
 ---
 
