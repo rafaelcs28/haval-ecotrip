@@ -518,20 +518,24 @@ function renderHistory() {
 }
 
 // ── Lifetime ──────────────────────────────────────────────────────────────────
+let cachedLifeSnapshots = null;
+
 function loadLifetime() {
-  // Invalida o cache de auto-trips sempre que a aba é aberta, garantindo dados frescos.
-  // (A aba 'all' usa MQTT ao vivo, mas os filtros precisam de dados pós-sincronização.)
-  cachedAutoTrips = null;
+  cachedAutoTrips    = null;
+  cachedLifeSnapshots = null;
   renderLifetimeTab();
-  // Pré-carrega recargas para filtros funcionarem imediatamente
+  // Pré-carrega recargas
   if (cachedCharges === null) {
     fetch('/api/charges').then(r=>r.json()).then(d=>{cachedCharges=Array.isArray(d)?d:[];}).catch(()=>{});
   }
-  // Pré-carrega auto-trips (fonte principal do filtro de período)
+  // Pré-carrega snapshots (fonte primária dos filtros — funciona sem sync de auto-trips)
+  fetch('/api/lifetime/snapshots').then(r=>r.json()).then(d=>{
+    cachedLifeSnapshots = Array.isArray(d) ? d : [];
+    if (filterState.life.active !== 'all') renderLifetimeTab();
+  }).catch(()=>{ cachedLifeSnapshots = []; });
+  // Pré-carrega auto-trips também (dados extras se sincronizados)
   fetch('/api/autotrips').then(r=>r.json()).then(d=>{
     cachedAutoTrips = Array.isArray(d) ? d : [];
-    // Re-renderiza se já estiver em modo filtrado
-    if (filterState.life.active !== 'all') renderLifetimeTab();
   }).catch(()=>{ cachedAutoTrips = []; });
 }
 
@@ -565,55 +569,79 @@ function renderLifetimeTab() {
   </div>
 </div>`;
   } else {
-    // ── Vista filtrada: usa auto-trips (criados automaticamente a cada P↔D/R)
-    // NÃO usa trips manuais (Trip A/B) porque esses só existem quando o usuário
-    // pressiona "Zerar" — raramente têm granularidade de data suficiente.
+    // ── Vista filtrada: usa snapshots do lifetime como baseline (funciona sem sync)
+    // Snapshots são salvos no bridge a cada 5 min quando dados MQTT chegam.
+    // Lógica: delta = current_live - snapshot_mais_recente_antes_do_período
     const [filterStart, filterEnd] = getFilterRange('life');
 
-    // Se dados ainda não foram carregados, aguarda e re-renderiza
-    if (cachedAutoTrips === null || cachedCharges === null) {
+    // Aguarda snapshots e recargas carregarem
+    if (cachedLifeSnapshots === null || cachedCharges === null) {
       html += '<div class="empty">Carregando dados...</div>';
       list.innerHTML = html;
       Promise.all([
-        cachedAutoTrips === null ? fetch('/api/autotrips').then(r=>r.json()).then(d=>{cachedAutoTrips=Array.isArray(d)?d:[];}) : Promise.resolve(),
-        cachedCharges   === null ? fetch('/api/charges').then(r=>r.json()).then(d=>{cachedCharges=Array.isArray(d)?d:[];})     : Promise.resolve(),
+        cachedLifeSnapshots === null
+          ? fetch('/api/lifetime/snapshots').then(r=>r.json()).then(d=>{cachedLifeSnapshots=Array.isArray(d)?d:[];})
+          : Promise.resolve(),
+        cachedCharges === null
+          ? fetch('/api/charges').then(r=>r.json()).then(d=>{cachedCharges=Array.isArray(d)?d:[];})
+          : Promise.resolve(),
       ]).then(() => renderLifetimeTab()).catch(() => {});
       return;
     }
 
-    // Filtra auto-trips pelo campo startMs (já em ms — sem parsear string de data)
-    const trips   = (cachedAutoTrips || []).filter(t => {
-      const ms = t.startMs || 0;
-      return ms >= filterStart && ms <= filterEnd;
-    });
+    // Baseline = snapshot mais recente ANTES do início do período
+    const snaps = cachedLifeSnapshots || [];
+    const baseline = snaps.filter(s => s.ts <= filterStart).sort((a,b) => b.ts - a.ts)[0];
+
+    const cur = state.lifetime || {};
     const charges = filterItems(cachedCharges || [], 'timestamp', filterStart, filterEnd);
 
-    if (trips.length === 0 && charges.length === 0) {
-      list.innerHTML = html + '<div class="empty">Nenhuma viagem automática ou recarga no período.</div>';
+    if (!baseline) {
+      // Sem snapshot antes do período: bridge acabou de ser instalado/iniciado
+      const chargeKwh = charges.reduce((s,c) => s + (c.energy_kwh   || 0), 0);
+      const chargeSec = charges.reduce((s,c) => s + (c.duration_sec || 0), 0);
+      const avgChgKw  = chargeSec > 0 ? chargeKwh / (chargeSec / 3600) : 0;
+      html += `<div class="card">
+  <div class="card-title" style="color:var(--yellow)">⏳ Coletando dados…</div>
+  <div style="font-size:12px;color:var(--text-secondary);margin-bottom:8px">
+    Os snapshots são gerados a cada 5 min com o carro conectado.<br>
+    Em breve os filtros mostrarão os dados de condução.
+  </div>`;
+      if (chargeKwh > 0) {
+        html += `<div class="divider"></div>
+  <div class="metrics-row">
+    <div class="metric"><div class="metric-value teal">${f2(chargeKwh)} kWh</div><div class="metric-label">kWh carregados</div></div>
+    <div class="metric"><div class="metric-value muted sm">${fmtDur(chargeSec)}</div><div class="metric-label">tempo recarga</div></div>
+    <div class="metric"><div class="metric-value blue">${avgChgKw > 0 ? f1(avgChgKw) + ' kW' : '--'}</div><div class="metric-label">pot. média</div></div>
+  </div>`;
+      }
+      html += '</div>';
+      list.innerHTML = html;
       return;
     }
 
-    // Agrega métricas dos auto-trips (campos em camelCase vindos do Android)
-    const distKm   = trips.reduce((s,t) => s + (t.distKm   || 0), 0);
-    const fuelL    = trips.reduce((s,t) => s + (t.fuelL    || 0), 0);
-    const netKwh   = trips.reduce((s,t) => s + (t.netKwh   || 0), 0);
-    const regenKwh = trips.reduce((s,t) => s + (t.regenKwh || 0), 0);
-    const timeSec  = trips.reduce((s,t) => s + (t.timeSec  || 0), 0);
+    // Delta condução = current_live - baseline
+    const distKm   = Math.max(0, (cur.distance_km || 0) - baseline.distance_km);
+    const netKwh   = Math.max(0, (cur.net_kwh     || 0) - baseline.net_kwh);
+    const regenKwh = Math.max(0, (cur.regen_kwh   || 0) - baseline.regen_kwh);
+    const fuelL    = Math.max(0, (cur.fuel_l      || 0) - baseline.fuel_l);
+    const timeSec  = Math.max(0, (Number(cur.time_sec) || 0) - baseline.time_sec);
 
     const chargeKwh = charges.reduce((s,c) => s + (c.energy_kwh   || 0), 0);
     const chargeSec = charges.reduce((s,c) => s + (c.duration_sec || 0), 0);
 
-    const avgKwh100 = distKm    > 0.1   ? netKwh    / distKm * 100       : 0;
-    const avgKml    = fuelL     > 0.001 ? distKm    / fuelL              : 0;
-    const avgSpd    = timeSec   > 0     ? distKm    / (timeSec / 3600)   : 0;
-    const avgChgKw  = chargeSec > 0     ? chargeKwh / (chargeSec / 3600) : 0;
+    const avgKwh100 = distKm    > 0.1   ? netKwh    / distKm * 100      : 0;
+    const avgKml    = fuelL     > 0.001 ? distKm    / fuelL             : 0;
+    const avgSpd    = timeSec   > 0     ? distKm    / (timeSec / 3600)  : 0;
+    const avgChgKw  = chargeSec > 0     ? chargeKwh / (chargeSec / 3600): 0;
 
+    const baseDate = new Date(baseline.ts).toLocaleString('pt-BR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
     const chargesStr = charges.length > 0
       ? ` · ${charges.length} recarga${charges.length !== 1 ? 's' : ''}`
       : '';
 
     html += `<div class="card">
-  <div class="card-title">Período — ${trips.length} viagem${trips.length !== 1 ? 'ns' : ''}${chargesStr}</div>
+  <div class="card-title">Período${chargesStr} <span style="font-size:10px;color:var(--text-secondary)">desde ${baseDate}</span></div>
   <div class="metrics-row">
     <div class="metric"><div class="metric-value blue lg">${f1(distKm)} km</div><div class="metric-label">distância</div></div>
     <div class="metric"><div class="metric-value muted sm">${fmtDur(timeSec)}</div><div class="metric-label">condução</div></div>

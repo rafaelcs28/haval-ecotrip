@@ -17,12 +17,48 @@ const MQTT_PASS   = process.env.MQTT_PASS   || '';
 const MQTT_PREFIX = process.env.MQTT_PREFIX || 'haval/ecotrip';
 const PORT        = parseInt(process.env.PORT || '3000', 10);
 
-const TRIPS_FILE     = path.join(__dirname, 'trips.json');
-const CHARGES_FILE   = path.join(__dirname, 'charges.json');
-const STATE_FILE     = path.join(__dirname, 'state.json');
-const AUTOTRIPS_DIR  = path.join(__dirname, 'autotrips');
+const TRIPS_FILE      = path.join(__dirname, 'trips.json');
+const CHARGES_FILE    = path.join(__dirname, 'charges.json');
+const STATE_FILE      = path.join(__dirname, 'state.json');
+const AUTOTRIPS_DIR   = path.join(__dirname, 'autotrips');
+const SNAPSHOTS_FILE  = path.join(__dirname, 'lifetime_snapshots.json');
 
 if (!fs.existsSync(AUTOTRIPS_DIR)) fs.mkdirSync(AUTOTRIPS_DIR, { recursive: true });
+
+// ── Lifetime snapshots — checkpoints periódicos para filtros do PWA ──────────
+// Salvo a cada 5 min quando dados MQTT chegam; serve de baseline para
+// os filtros "Hoje / 7 dias / 30 dias" sem depender de auto-trips sincronizados.
+let lifeSnapshots = [];
+try {
+  if (fs.existsSync(SNAPSHOTS_FILE)) {
+    lifeSnapshots = JSON.parse(fs.readFileSync(SNAPSHOTS_FILE, 'utf8'));
+    if (!Array.isArray(lifeSnapshots)) lifeSnapshots = [];
+    console.log(`✓ Lifetime snapshots: ${lifeSnapshots.length}`);
+  }
+} catch (_) { lifeSnapshots = []; }
+
+let lastSnapMs = 0;
+function maybeSaveLifetimeSnapshot() {
+  const now = Date.now();
+  if (now - lastSnapMs < 5 * 60 * 1000) return;          // máx 1 a cada 5 min
+  const l = state.lifetime;
+  if (!l || !(l.distance_km > 0)) return;                 // ignora se sem dados
+  lastSnapMs = now;
+  lifeSnapshots.push({
+    ts:          now,
+    distance_km: l.distance_km || 0,
+    energy_kwh:  l.energy_kwh  || 0,
+    regen_kwh:   l.regen_kwh   || 0,
+    net_kwh:     l.net_kwh     || 0,
+    fuel_l:      l.fuel_l      || 0,
+    time_sec:    Number(l.time_sec)    || 0,
+    charge_kwh:  l.charge_kwh  || 0,
+    charge_sec:  Number(l.charge_sec)  || 0,
+  });
+  // Mantém últimos 2016 snapshots ≈ 7 dias a 5 min
+  if (lifeSnapshots.length > 2016) lifeSnapshots = lifeSnapshots.slice(-2016);
+  try { fs.writeFileSync(SNAPSHOTS_FILE, JSON.stringify(lifeSnapshots)); } catch (_) {}
+}
 
 // ── Auto-trips — índice em memória (carregado do disco) ───────────────────────
 let autoTripsArr = [];
@@ -240,6 +276,9 @@ app.post('/api/autotrips', (req, res) => {
 
 app.get('/api/autotrips', (_req, res) => res.json(autoTripsArr.slice(0, 300)));
 
+// Snapshots do lifetime para filtros de período no PWA (não depende de sync de auto-trips)
+app.get('/api/lifetime/snapshots', (_req, res) => res.json(lifeSnapshots));
+
 app.get('/api/telemetry/:tripId', (req, res) => {
   const safeId   = String(req.params.tripId).replace(/\D/g, '');
   const filePath = path.join(AUTOTRIPS_DIR, `${safeId}.json`);
@@ -411,7 +450,7 @@ function applyMqttMessage(key, value) {
     case 'rolling/cost_brl':      state.rolling.cost_brl      = num(value); break;
 
     // Lifetime
-    case 'lifetime/energy_kwh':  state.lifetime.energy_kwh  = num(value); break;
+    case 'lifetime/energy_kwh':  state.lifetime.energy_kwh  = num(value); maybeSaveLifetimeSnapshot(); break;
     case 'lifetime/regen_kwh':   state.lifetime.regen_kwh   = num(value); break;
     case 'lifetime/net_kwh':     state.lifetime.net_kwh     = num(value); break;
     case 'lifetime/distance_km': state.lifetime.distance_km = num(value); break;
