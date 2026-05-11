@@ -412,6 +412,7 @@ fun ConsumptionScreen() {
                 minAutoTripDist = newVal
                 tripManager.setMinAutoTripDist(newVal)
             },
+            tripManager = tripManager,
             onBack = { showSettings = false },
         )
         return

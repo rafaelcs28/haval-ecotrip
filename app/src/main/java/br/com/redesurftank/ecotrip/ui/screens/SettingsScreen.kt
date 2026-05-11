@@ -25,6 +25,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import br.com.redesurftank.ecotrip.managers.BackupManager
 import br.com.redesurftank.ecotrip.managers.MqttManager
+import br.com.redesurftank.ecotrip.managers.TripManager
 import br.com.redesurftank.ecotrip.ui.theme.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -53,8 +54,11 @@ fun SettingsScreen(
     minAutoTripDist: Float,
     onMinAutoTripDistChange: (Float) -> Unit,
     backupManager: BackupManager,
+    tripManager: TripManager,
     onBack: () -> Unit,
 ) {
+    var showClearConfirm  by remember { mutableStateOf(false) }
+    var clearDoneMsg      by remember { mutableStateOf("") }
     var priceGasolineStr by remember { mutableStateOf(String.format(java.util.Locale.US, "%.2f", priceGasoline)) }
     var priceEnergyStr   by remember { mutableStateOf(String.format(java.util.Locale.US, "%.2f", priceEnergy)) }
     var mqttEnabled      by remember { mutableStateOf(mqttManager.enabled) }
@@ -556,7 +560,60 @@ fun SettingsScreen(
             }
         }
 
+        // ── Limpar dados ──────────────────────────────────────────────────────
+        SectionCard("⚠️  Limpar dados") {
+            Text(
+                "Remove permanentemente o histórico de viagens manuais, viagens automáticas e sessões de recarga. " +
+                "Os contadores de Trip A/B e os totais lifetime NÃO são afetados.",
+                fontSize = 11.sp,
+                color    = TextSecondary,
+            )
+            Button(
+                onClick  = { showClearConfirm = true; clearDoneMsg = "" },
+                modifier = Modifier.fillMaxWidth(),
+                colors   = ButtonDefaults.buttonColors(containerColor = Color(0xFFB91C1C)),
+                shape    = RoundedCornerShape(8.dp),
+            ) {
+                Text("🗑  Limpar histórico completo", fontSize = 13.sp, color = Color.White, fontWeight = FontWeight.SemiBold)
+            }
+            if (clearDoneMsg.isNotEmpty()) {
+                Text(clearDoneMsg, fontSize = 11.sp, color = NeonLime)
+            }
+        }
+
         Spacer(Modifier.height(8.dp))  // breathing room at bottom of scroll
+    }
+
+    // Diálogo de confirmação
+    if (showClearConfirm) {
+        AlertDialog(
+            onDismissRequest = { showClearConfirm = false },
+            title = { Text("Limpar histórico?", fontWeight = FontWeight.Bold) },
+            text  = {
+                Text(
+                    "Serão apagados:\n• Viagens manuais (Trip A/B salvas)\n• Viagens automáticas\n• Sessões de recarga\n\nEssa ação não pode ser desfeita.",
+                    fontSize = 13.sp,
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        tripManager.clearHistory()
+                        tripManager.clearAutoTripHistory()
+                        tripManager.clearChargeHistory()
+                        showClearConfirm = false
+                        clearDoneMsg = "✓ Histórico apagado com sucesso."
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFB91C1C)),
+                ) { Text("Apagar tudo", color = Color.White) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearConfirm = false }) { Text("Cancelar") }
+            },
+            containerColor = Color(0xFF1E293B),
+            titleContentColor  = Color(0xFFEEF4FF),
+            textContentColor   = Color(0xFF94A3B8),
+        )
     }
 }
 
