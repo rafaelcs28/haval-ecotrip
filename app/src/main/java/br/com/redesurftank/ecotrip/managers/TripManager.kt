@@ -425,8 +425,15 @@ class TripManager private constructor() {
         telemetryRecorder?.bulkPostTrips(
             bridgeUrl = bridgeUrl,
             trips     = unsynced,
-            onAllDone = { ok, _ ->
-                onResult?.invoke(ok)   // já é chamado na Main thread pelo TelemetryRecorder
+            onAllDone = { ok, fail ->
+                // -3 = todas as tentativas falharam (rede indisponível ou URL errada)
+                val result = when {
+                    ok > 0   -> ok   // pelo menos 1 enviada com sucesso
+                    fail > 0 -> -3   // tentou mas todas falharam
+                    else     -> 0    // nada para enviar
+                }
+                AppLogger.i(TAG, "syncAutoTripsTobridge: ok=$ok fail=$fail → result=$result")
+                onResult?.invoke(result)
             },
         ) { tripIdStr ->
             val ms = tripIdStr.toLongOrNull() ?: return@bulkPostTrips

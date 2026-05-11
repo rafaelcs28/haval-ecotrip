@@ -236,11 +236,12 @@ fun AutoTripsScreen(
                     if (syncLabel == "enviando…") return@IconButton  // evita double-tap
                     syncLabel = "enviando…"
                     onForceSync { sent ->
-                        syncLabel = when {
-                            sent == -2 -> "⚠ Sem viagens gravadas"
-                            sent < 0   -> "✗ URL não configurada"
-                            sent == 0  -> "✓ já sincronizado"
-                            else       -> "✓ $sent trips → iPhone"
+                        syncLabel = when (sent) {
+                            -3 -> "✗ Falha de rede — verifique a URL"
+                            -2 -> "⚠ Sem viagens gravadas"
+                            -1 -> "✗ URL não configurada"
+                            0  -> "✓ já sincronizado"
+                            else -> "✓ $sent trips → iPhone"
                         }
                         syncScope.launch {
                             delay(6_000)
