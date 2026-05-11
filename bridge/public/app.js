@@ -406,12 +406,12 @@ function renderDash() {
     if (el) el.style.display = show ? 'block' : 'none';
   }
 
-  // Faróis (sem sensor por enquanto — camadas reservadas para futura integração)
-  carLayer('cl-farol',      s.light_state === 'on');
-  carLayer('cl-farol-alto', s.high_beam   === 'on');
-
   const eng   = s.engine_state;
   const engOn = eng === '1' || eng === 1;
+
+  // Faróis — ligados com o motor (farol alto via sensor futuro high_beam)
+  carLayer('cl-farol',      engOn && s.high_beam !== 'on');
+  carLayer('cl-farol-alto', s.high_beam === 'on');
   const engLabel = document.getElementById('d-car-engine-label');
   if (engLabel) {
     engLabel.textContent = engOn ? '🔴 Motor ligado' : (eng === '0' || eng === 0) ? '⚫ Motor desligado' : '';
