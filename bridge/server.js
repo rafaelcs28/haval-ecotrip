@@ -17,7 +17,16 @@ const MQTT_USER   = process.env.MQTT_USER   || '';
 const MQTT_PASS   = process.env.MQTT_PASS   || '';
 const MQTT_PREFIX    = process.env.MQTT_PREFIX || 'haval/ecotrip';
 const PORT           = parseInt(process.env.PORT || '3000', 10);
-const BRIDGE_TOKEN   = process.env.BRIDGE_TOKEN || '';   // senha de acesso à PWA
+
+// ── Token de acesso (hash SHA-256 da senha) ────────────────────────────────────
+// Suporta migração: BRIDGE_TOKEN (plain) → calcula hash automaticamente
+// Em produção usa BRIDGE_TOKEN_HASH diretamente (gerado pelo endpoint change-password)
+function sha256hex(str) {
+  return require('crypto').createHash('sha256').update(str).digest('hex');
+}
+const _plainToken   = process.env.BRIDGE_TOKEN      || '';
+let BRIDGE_TOKEN_HASH = process.env.BRIDGE_TOKEN_HASH
+  || (_plainToken ? sha256hex(_plainToken) : '');
 
 const TRIPS_FILE      = path.join(__dirname, 'trips.json');
 const CHARGES_FILE    = path.join(__dirname, 'charges.json');
@@ -317,13 +326,13 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ── Autenticação ──────────────────────────────────────────────────────────────
-// Se BRIDGE_TOKEN estiver configurado no .env, todas as rotas /api/* (exceto push)
-// exigem o header: Authorization: Bearer <token>
+// O cliente envia SHA-256(senha) no header Authorization: Bearer <hash>
+// O servidor compara com BRIDGE_TOKEN_HASH armazenado no .env
 function requireAuth(req, res, next) {
-  if (!BRIDGE_TOKEN) return next();   // sem token configurado → sem auth (dev local)
+  if (!BRIDGE_TOKEN_HASH) return next();   // sem hash configurado → sem auth (dev local)
   const auth  = req.headers['authorization'] || '';
   const token = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
-  if (token !== BRIDGE_TOKEN) return res.status(401).json({ error: 'unauthorized' });
+  if (token !== BRIDGE_TOKEN_HASH) return res.status(401).json({ error: 'unauthorized' });
   next();
 }
 // Push não precisa de auth — SW não consegue enviar headers facilmente
@@ -339,7 +348,7 @@ app.get('/api/charges', (_req, res) => res.json(chargesArr));
 // Admin usa ADMIN_TOKEN se definido, senão cai para BRIDGE_TOKEN
 // Aceita token via Authorization header (PWA novo) ou body.token (retrocompat)
 function adminCheckToken(req, res) {
-  const adminToken = process.env.ADMIN_TOKEN || BRIDGE_TOKEN;
+  const adminToken = process.env.ADMIN_TOKEN ? sha256hex(process.env.ADMIN_TOKEN) : BRIDGE_TOKEN_HASH;
   if (!adminToken) { res.status(503).json({ error: 'ADMIN_TOKEN not configured' }); return false; }
   const auth  = req.headers['authorization'] || '';
   const token = (auth.startsWith('Bearer ') ? auth.slice(7).trim() : '')
@@ -379,6 +388,26 @@ app.post('/api/admin/update', (req, res) => {
       }, 500);
     });
   });
+});
+
+app.post('/api/admin/change-password', (req, res) => {
+  if (!adminCheckToken(req, res)) return;
+  const { newHash } = req.body || {};
+  if (!newHash || typeof newHash !== 'string' || newHash.length !== 64) {
+    return res.status(400).json({ error: 'invalid newHash — esperado SHA-256 hex (64 chars)' });
+  }
+  // Atualiza o .env: substitui BRIDGE_TOKEN e BRIDGE_TOKEN_HASH pelo novo hash
+  const envPath = path.join(__dirname, '.env');
+  let envContent = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf8') : '';
+  envContent = envContent.split('\n')
+    .filter(l => !l.startsWith('BRIDGE_TOKEN=') && !l.startsWith('BRIDGE_TOKEN_HASH='))
+    .join('\n').trimEnd();
+  envContent += '\nBRIDGE_TOKEN_HASH=' + newHash + '\n';
+  fs.writeFileSync(envPath, envContent, 'utf8');
+  // Atualiza em memória imediatamente (sem precisar reiniciar para o hash novo valer)
+  BRIDGE_TOKEN_HASH = newHash;
+  res.json({ ok: true, msg: 'Senha alterada com sucesso.' });
+  console.log('[admin] Senha de acesso alterada pelo usuário.');
 });
 
 app.post('/api/admin/clear-history', (req, res) => {
@@ -521,10 +550,10 @@ const SERVER_START_AT = Date.now();   // timestamp único por processo
 
 wss.on('connection', (ws, req) => {
   // Verificação de token via query string: /ws?token=...
-  if (BRIDGE_TOKEN) {
+  if (BRIDGE_TOKEN_HASH) {
     const url   = new URL(req.url, 'http://localhost');
     const token = url.searchParams.get('token') || '';
-    if (token !== BRIDGE_TOKEN) {
+    if (token !== BRIDGE_TOKEN_HASH) {
       ws.send(JSON.stringify({ type: 'AUTH_ERROR' }));
       ws.close(4001, 'unauthorized');
       return;

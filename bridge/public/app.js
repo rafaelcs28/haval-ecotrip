@@ -10,6 +10,12 @@ let tickInterval = null;
 // ── Auth ──────────────────────────────────────────────────────────────────────
 let bridgeToken = localStorage.getItem('bridge_token') || '';
 
+// SHA-256 via Web Crypto API (nativo no browser)
+async function sha256hex(str) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
 function showLogin(errorMsg) {
   const overlay = document.getElementById('login-overlay');
   if (overlay) overlay.style.display = 'flex';
@@ -24,14 +30,16 @@ function hideLogin() {
 }
 
 async function doLogin() {
-  const input = document.getElementById('login-input');
-  const token = (input?.value || '').trim();
+  const input    = document.getElementById('login-input');
+  const password = (input?.value || '').trim();
   try {
-    const headers = token ? { 'Authorization': 'Bearer ' + token } : {};
+    // Converte a senha para SHA-256 antes de enviar — servidor nunca vê o texto puro
+    const tokenHash = password ? await sha256hex(password) : '';
+    const headers   = tokenHash ? { 'Authorization': 'Bearer ' + tokenHash } : {};
     const r = await fetch('/api/state', { headers });
     if (r.ok) {
-      bridgeToken = token;
-      if (token) localStorage.setItem('bridge_token', token);
+      bridgeToken = tokenHash;
+      if (tokenHash) localStorage.setItem('bridge_token', tokenHash);
       else localStorage.removeItem('bridge_token');
       hideLogin();
       connect();
@@ -1166,4 +1174,38 @@ function adminLogout() {
   bridgeToken = '';
   ws?.close();
   showLogin();
+}
+
+function setCpStatus(msg, ok) {
+  const el = document.getElementById('cp-status');
+  if (el) { el.textContent = msg; el.style.color = ok ? '#4ade80' : ok === false ? '#f87171' : '#94a3b8'; }
+}
+
+async function changePassword() {
+  const newPw  = (document.getElementById('cp-new')?.value     || '').trim();
+  const confPw = (document.getElementById('cp-confirm')?.value || '').trim();
+  if (!newPw)           { setCpStatus('Digite a nova senha.', false); return; }
+  if (newPw !== confPw) { setCpStatus('Senhas não conferem.', false); return; }
+  setCpStatus('Alterando…', null);
+  try {
+    const newHash = await sha256hex(newPw);
+    const r    = await apiFetch('/api/admin/change-password', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ newHash }),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (r.ok && data.ok) {
+      // Atualiza token salvo localmente com o novo hash
+      bridgeToken = newHash;
+      localStorage.setItem('bridge_token', newHash);
+      document.getElementById('cp-new').value     = '';
+      document.getElementById('cp-confirm').value = '';
+      setCpStatus('✓ Senha alterada com sucesso.', true);
+    } else {
+      setCpStatus('✗ ' + (data.error || `HTTP ${r.status}`), false);
+    }
+  } catch (e) {
+    if (e.message !== 'unauthorized') setCpStatus('✗ Erro ao comunicar com o servidor.', false);
+  }
 }

@@ -450,6 +450,20 @@
     <div style="max-width:480px;margin:0 auto">
       <h2 style="margin:0 0 16px;font-size:16px;color:#e2e8f0">🛠 Servidor</h2>
 
+      <!-- Alterar senha -->
+      <div style="background:#1e293b;border-radius:10px;padding:14px;margin-bottom:12px">
+        <div style="font-size:11px;color:#94a3b8;margin-bottom:8px">🔑 Alterar senha de acesso</div>
+        <input id="cp-new" type="password" placeholder="Nova senha"
+          style="width:100%;box-sizing:border-box;background:#0f172a;border:1px solid #334155;border-radius:6px;padding:8px 10px;color:#e2e8f0;font-size:14px;margin-bottom:6px" />
+        <input id="cp-confirm" type="password" placeholder="Confirmar nova senha"
+          style="width:100%;box-sizing:border-box;background:#0f172a;border:1px solid #334155;border-radius:6px;padding:8px 10px;color:#e2e8f0;font-size:14px;margin-bottom:8px" />
+        <button onclick="changePassword()"
+          style="width:100%;background:#1e40af;border:none;border-radius:6px;padding:10px;color:#e2e8f0;font-size:13px;cursor:pointer">
+          Salvar nova senha
+        </button>
+        <div id="cp-status" style="font-size:11px;color:#94a3b8;margin-top:6px;min-height:16px"></div>
+      </div>
+
       <div style="display:flex;gap:10px;margin-bottom:12px">
         <button onclick="adminRestart()"
           style="flex:1;background:#1e40af;border:none;border-radius:8px;padding:12px;color:#e2e8f0;font-size:13px;cursor:pointer">
