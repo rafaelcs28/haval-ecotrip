@@ -18,10 +18,6 @@ const MQTT_PASS   = process.env.MQTT_PASS   || '';
 const MQTT_PREFIX    = process.env.MQTT_PREFIX || 'haval/ecotrip';
 const PORT           = parseInt(process.env.PORT || '3000', 10);
 
-// ── Home Assistant REST API (opcional — usado para sensores da integração GWM) ─
-const HA_URL   = process.env.HA_URL   || '';   // ex: http://homeassistant.local:8123
-const HA_TOKEN = process.env.HA_TOKEN || '';   // Long-lived access token do HA
-
 // ── Token de acesso (hash SHA-256 da senha) ────────────────────────────────────
 // Suporta migração: BRIDGE_TOKEN (plain) → calcula hash automaticamente
 // Em produção usa BRIDGE_TOKEN_HASH diretamente (gerado pelo endpoint change-password)
@@ -593,40 +589,6 @@ function broadcast(type, data) {
     if (ws.readyState === WebSocket.OPEN) ws.send(msg);
   }
 }
-
-// ── Home Assistant REST API polling ───────────────────────────────────────────
-// Busca sensores da integração GWM Brasil que não chegam via MQTT do app Android.
-// Requer HA_URL + HA_TOKEN no .env; silencioso se não configurado.
-
-async function fetchHaState(entityId) {
-  if (!HA_URL || !HA_TOKEN) return null;
-  try {
-    const res = await fetch(`${HA_URL}/api/states/${entityId}`, {
-      headers: { Authorization: `Bearer ${HA_TOKEN}` },
-      signal: AbortSignal.timeout(8_000),
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
-    return data.state ?? null;
-  } catch (_) { return null; }
-}
-
-async function pollHaSensors() {
-  // Bateria 12V — vem da integração GWM Brasil (cloud), mais confiável que o CAN bus
-  const raw = await fetchHaState('sensor.gwmbrasil_lgwffva55sh931315_estado_de_carga_12v');
-  if (raw !== null && raw !== 'unavailable' && raw !== 'unknown') {
-    const n = parseFloat(raw);
-    if (!isNaN(n) && n >= 0) {
-      state.batt_12v_pct = n;
-      broadcast('update', state);
-      scheduleStateSave();
-    }
-  }
-}
-
-// Poll na inicialização + a cada 5 min (valor muda lentamente)
-setTimeout(pollHaSensors, 5_000);           // aguarda 5s para o state estar pronto
-setInterval(pollHaSensors, 5 * 60_000);
 
 // ── MQTT ──────────────────────────────────────────────────────────────────────
 
