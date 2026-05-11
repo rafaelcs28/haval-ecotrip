@@ -396,8 +396,8 @@ app.post('/api/admin/update', (req, res) => {
 app.post('/api/admin/change-password', (req, res) => {
   if (!adminCheckToken(req, res)) return;
   const { newHash } = req.body || {};
-  if (!newHash || typeof newHash !== 'string' || newHash.length !== 64) {
-    return res.status(400).json({ error: 'invalid newHash — esperado SHA-256 hex (64 chars)' });
+  if (!newHash || typeof newHash !== 'string' || newHash.length < 4) {
+    return res.status(400).json({ error: 'Nova senha muito curta (mínimo 4 caracteres)' });
   }
   // Atualiza o .env: substitui BRIDGE_TOKEN e BRIDGE_TOKEN_HASH pelo novo hash
   const envPath = path.join(__dirname, '.env');

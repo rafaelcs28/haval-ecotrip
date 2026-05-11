@@ -1182,6 +1182,14 @@ function adminLogout() {
   showLogin();
 }
 
+function togglePwVisibility(inputId, btn) {
+  const input = document.getElementById(inputId);
+  if (!input) return;
+  const hidden = input.type === 'password';
+  input.type = hidden ? 'text' : 'password';
+  btn.textContent = hidden ? '🙈' : '👁';
+}
+
 function setCpStatus(msg, ok) {
   const el = document.getElementById('cp-status');
   if (el) { el.textContent = msg; el.style.color = ok ? '#4ade80' : ok === false ? '#f87171' : '#94a3b8'; }
