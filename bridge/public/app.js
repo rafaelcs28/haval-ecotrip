@@ -655,12 +655,14 @@ function renderHistory() {
   html += `<div class="charge-summary-card" style="border-color:rgba(77,187,255,.2)">
   <div class="card-title">Resumo — ${trips.length} viagem${trips.length !== 1 ? 'ns' : ''}</div>
   <div class="metrics-row">
-    <div class="metric"><div class="metric-value blue xs">${f1(totDist)} km</div><div class="metric-label">distância</div></div>
-    <div class="metric"><div class="metric-value orange xs">${f2(totFuel)} L</div><div class="metric-label">combustível</div></div>
-    <div class="metric"><div class="metric-value teal xs">${totNetKwh > 0 ? f2(totNetKwh) + ' kWh' : '--'}</div><div class="metric-label">bat. consumida</div></div>
-    <div class="metric"><div class="metric-value green xs">${avgKwh100 > 0 ? f1(avgKwh100) : '--'}</div><div class="metric-label">kWh/100km</div></div>
-    <div class="metric"><div class="metric-value green xs">${avgKml > 0 ? f1(avgKml) : '--'}</div><div class="metric-label">km/L</div></div>
-    ${totCost > 0 ? `<div class="metric"><div class="metric-value yellow xs">R$ ${f2(totCost)}</div><div class="metric-label">custo</div></div>` : ''}
+    <div class="metric"><div class="metric-value blue sm">${f1(totDist)} km</div><div class="metric-label">distância</div></div>
+    <div class="metric"><div class="metric-value green sm">${avgKwh100 > 0 ? f1(avgKwh100) : '--'}</div><div class="metric-label">kWh/100km</div></div>
+    <div class="metric"><div class="metric-value green sm">${avgKml > 0 ? f1(avgKml) : '--'}</div><div class="metric-label">km/L</div></div>
+  </div>
+  <div class="metrics-row" style="margin-top:4px">
+    <div class="metric"><div class="metric-value orange sm">${f2(totFuel)} L</div><div class="metric-label">combustível</div></div>
+    <div class="metric"><div class="metric-value teal sm">${totNetKwh > 0 ? f2(totNetKwh) + ' kWh' : '--'}</div><div class="metric-label">bat. consumida</div></div>
+    <div class="metric"><div class="metric-value yellow sm">${totCost > 0 ? 'R$ ' + f2(totCost) : '--'}</div><div class="metric-label">custo</div></div>
   </div>
 </div>`;
 
