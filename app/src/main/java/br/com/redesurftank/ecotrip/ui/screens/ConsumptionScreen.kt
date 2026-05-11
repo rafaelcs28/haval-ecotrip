@@ -194,18 +194,15 @@ fun ConsumptionScreen() {
                         mqttManager.latestBatteryCurrentA = value.trim().toFloatOrNull() ?: 0f
                         tripManager.onDataChanged(key, value)
                     }
-                    CarConstants.CAR_EV_INFO_INSTANT_ENERGY_CONSUMPTION.value,
-                    CarConstants.CAR_EV_INFO_ENERGY_OUTPUT_PERCENTAGE.value -> {
-                        // Confirmado no app netseek/haval-app-tool-multimidia:
-                        // ambas as chaves representam kW instantâneo do motor elétrico.
-                        // energy_output_percentage apesar do nome NÃO é %:
-                        // positivo = consumo/drive, negativo = regen.
+                    CarConstants.CAR_EV_INFO_INSTANT_ENERGY_CONSUMPTION.value -> {
+                        // Chave confirmada: retorna kW instantâneo do motor elétrico.
+                        // Positivo = consumo/drive, negativo = regeneração.
                         val kw = value.trim().toFloatOrNull() ?: 0f
                         mqttManager.latestMotorPowerKw = kw
                         tripManager.onDataChanged(key, value)
                     }
                     CarConstants.CAR_EV_INFO_MOTOR_POWER.value -> {
-                        // Chave alternativa do HCU — fallback caso as anteriores não retornem
+                        // Fallback HCU — só usa se Instant_energy_consumption ainda não enviou valor
                         val kw = value.trim().toFloatOrNull() ?: 0f
                         if (mqttManager.latestMotorPowerKw == 0f) mqttManager.latestMotorPowerKw = kw
                         tripManager.onDataChanged(key, value)

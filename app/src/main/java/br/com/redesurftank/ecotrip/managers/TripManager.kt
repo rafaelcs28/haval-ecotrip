@@ -1065,14 +1065,15 @@ class TripManager private constructor() {
                     latestBatteryVoltageV = value
                     telemetryRecorder?.latestBatteryVoltageV = value
                 }
-                CarConstants.CAR_EV_INFO_INSTANT_ENERGY_CONSUMPTION.value,
-                CarConstants.CAR_EV_INFO_ENERGY_OUTPUT_PERCENTAGE.value -> {
-                    // kW instantâneo confirmado — alimenta o TelemetryRecorder para a rota
+                CarConstants.CAR_EV_INFO_INSTANT_ENERGY_CONSUMPTION.value -> {
+                    // kW instantâneo do motor elétrico (chave confirmada)
                     telemetryRecorder?.latestMotorPowerKw = value
                 }
                 CarConstants.CAR_EV_INFO_MOTOR_POWER.value -> {
-                    // Chave alternativa do HCU — usa só se as primárias não retornaram
-                    telemetryRecorder?.latestMotorPowerKw = value
+                    // Fallback HCU — só usa se Instant_energy_consumption ainda não alimentou valor
+                    if ((telemetryRecorder?.latestMotorPowerKw ?: 0f) == 0f) {
+                        telemetryRecorder?.latestMotorPowerKw = value
+                    }
                 }
 
                 else -> return
