@@ -22,10 +22,20 @@ function deepMerge(target, source) {
 
 // ── Service Worker & Push ─────────────────────────────────────────────────────
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/sw.js').then(async () => {
+  navigator.serviceWorker.register('/sw.js').then(async reg => {
     // Tenta subscrever push sem bloquear a inicialização
     try { await subscribePush(); } catch (_) {}
   }).catch(() => {});
+
+  // Recarrega a página automaticamente quando um SW novo toma controle
+  navigator.serviceWorker.addEventListener('message', e => {
+    if (e.data?.type === 'SW_UPDATED') location.reload();
+  });
+  // Garante reload se o controlador mudar (ex: primeiro SW ou skipWaiting)
+  let refreshing = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!refreshing) { refreshing = true; location.reload(); }
+  });
 }
 
 function urlBase64ToUint8Array(b64) {
