@@ -695,12 +695,22 @@ function renderAutoTrips() {
   }
 
   list.innerHTML = trips.map(t => {
-    const startDate = fmtDate(t.startMs);
-    const dur       = fmtDur(Math.round((t.endMs - t.startMs) / 1000));
-    const distKm    = t.distKm  > 0 ? f1(t.distKm) + ' km' : '--';
-    const netKwh    = t.netKwh  > 0 ? f2(t.netKwh) + ' kWh' : '--';
-    const fuelL     = t.fuelL   > 0 ? f2(t.fuelL) + ' L' : '--';
-    const socDelta  = t.startSocPct > 0 ? `${t.startSocPct.toFixed(0)}%→${t.endSocPct.toFixed(0)}%` : '--';
+    const startDate  = fmtDate(t.startMs);
+    const dur        = fmtDur(Math.round((t.endMs - t.startMs) / 1000));
+    const distKm     = t.distKm      > 0    ? f1(t.distKm) + ' km'  : '--';
+    const netKwh     = t.netKwh      > 0    ? f2(t.netKwh) + ' kWh' : '--';
+    const fuelL      = t.fuelL       > 0    ? f2(t.fuelL)  + ' L'   : '--';
+    const socDelta   = t.startSocPct > 0    ? `${t.startSocPct.toFixed(0)}%→${t.endSocPct.toFixed(0)}%` : '--';
+    const maxSpd     = t.maxSpeedKmh > 0    ? `${Math.round(t.maxSpeedKmh)} km/h` : null;
+    const tempStr    = t.outsideTempC != null ? `${Math.round(t.outsideTempC)}°C`  : null;
+    const hasGps     = t.startLat && (t.startLat !== 0 || t.startLng !== 0);
+    const mapsUrl    = hasGps ? `https://www.google.com/maps/dir/${t.startLat},${t.startLng}/${t.endLat},${t.endLng}` : null;
+    const extraRow   = (maxSpd || tempStr) ? `
+  <div class="trip-metrics" style="margin-top:4px">
+    ${maxSpd  ? `<div class="trip-metric"><div class="trip-metric-val">${maxSpd}</div><div class="trip-metric-lbl">vel. máx.</div></div>` : ''}
+    ${tempStr ? `<div class="trip-metric"><div class="trip-metric-val blue">${tempStr}</div><div class="trip-metric-lbl">temp. ext.</div></div>` : ''}
+    ${mapsUrl ? `<div class="trip-metric"><a href="${mapsUrl}" target="_blank" style="color:#60a5fa;text-decoration:none;font-size:18px">📍</a><div class="trip-metric-lbl">mapa</div></div>` : ''}
+  </div>` : (mapsUrl ? `<div style="text-align:right;margin-top:2px"><a href="${mapsUrl}" target="_blank" style="color:#60a5fa;font-size:11px">📍 mapa</a></div>` : '');
     return `<div class="trip-item">
   <div class="trip-header">
     <div>
@@ -714,7 +724,7 @@ function renderAutoTrips() {
     <div class="trip-metric"><div class="trip-metric-val green">${netKwh}</div><div class="trip-metric-lbl">kWh liq.</div></div>
     <div class="trip-metric"><div class="trip-metric-val orange">${fuelL}</div><div class="trip-metric-lbl">combust.</div></div>
     <div class="trip-metric"><div class="trip-metric-val teal">${socDelta}</div><div class="trip-metric-lbl">SOC</div></div>
-  </div>
+  </div>${extraRow}
 </div>`;
   }).join('');
 }

@@ -677,6 +677,32 @@ private fun AutoTripEntryRow(
                     }
                 }
 
+                // Vel. máxima + temperatura externa
+                if (entry.maxSpeedKmh > 0f || entry.outsideTempC != null) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (entry.maxSpeedKmh > 0f)
+                            AutoDetailMetric("Vel. Máxima", "%.0f km/h".format(entry.maxSpeedKmh), TextPrimary, Modifier.weight(1f))
+                        else
+                            Spacer(Modifier.weight(1f))
+                        if (entry.outsideTempC != null)
+                            AutoDetailMetric("Temperatura", "%.0f°C".format(entry.outsideTempC), AccentBlue, Modifier.weight(1f))
+                        else
+                            Spacer(Modifier.weight(1f))
+                        Spacer(Modifier.weight(2f))
+                    }
+                }
+
+                // Localização (se GPS disponível)
+                if (entry.startLat != 0.0 || entry.startLng != 0.0) {
+                    Text(
+                        "📍 (%.4f, %.4f) → (%.4f, %.4f)".format(
+                            entry.startLat, entry.startLng, entry.endLat, entry.endLng
+                        ),
+                        fontSize = 10.sp,
+                        color    = TextSecondary,
+                    )
+                }
+
                 // Botão renomear
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     TextButton(

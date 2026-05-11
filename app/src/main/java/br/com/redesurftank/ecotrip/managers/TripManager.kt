@@ -147,7 +147,14 @@ data class AutoTripEntry(
     val regenKwh:     Float,
     val netKwh:       Float,
     val fuelL:        Float,
-    val name:         String = "",
+    val name:         String  = "",
+    // campos adicionados em v2.54 — default Gson-safe para retrocompatibilidade
+    val maxSpeedKmh:  Float   = 0f,
+    val outsideTempC: Float?  = null,   // null = sem leitura disponível
+    val startLat:     Double  = 0.0,
+    val startLng:     Double  = 0.0,
+    val endLat:       Double  = 0.0,
+    val endLng:       Double  = 0.0,
 )
 
 typealias TripListener = (snapA: TripSnapshot, snapB: TripSnapshot, rolling: RollingSnapshot) -> Unit
@@ -294,10 +301,12 @@ class TripManager private constructor() {
 
     // ── Telemetria em tempo real ──────────────────────────────────────────────
     private var telemetryRecorder: TelemetryRecorder? = null
-    private var latestSpeedKmh:        Float = 0f
-    private var latestEngineRpm:       Int   = 0
-    private var latestBatteryCurrentA: Float = 0f
-    private var latestBatteryVoltageV: Float = 0f
+    private var latestSpeedKmh:        Float  = 0f
+    private var latestEngineRpm:       Int    = 0
+    private var latestBatteryCurrentA: Float  = 0f
+    private var latestBatteryVoltageV: Float  = 0f
+    private var latestOutsideTempC:    Float? = null  // null = sem leitura ainda
+    private var autoTripMaxSpeed:      Float  = 0f    // máxima durante viagem em andamento
 
     // Rolling start bookmarks
     private var rollingStartSocPct:  Float   = 0f
@@ -500,6 +509,25 @@ class TripManager private constructor() {
         appContext = ctx
         prefs = ctx.getSharedPreferences(SharedPreferencesKeys.PREFS_NAME, Context.MODE_PRIVATE)
         loadFromPrefs()
+
+        // Retenção ao iniciar: remove viagens >90 dias e arquivos de amostras >7 dias
+        val cutoff90d = System.currentTimeMillis() - 90L * 24 * 3_600_000L
+        val cutoff7d  = System.currentTimeMillis() -  7L * 24 * 3_600_000L
+        synchronized(lock) {
+            val before = autoTripHistory.size
+            autoTripHistory.removeAll { it.endMs < cutoff90d }
+            if (autoTripHistory.size < before) {
+                prefs.edit().putString(SharedPreferencesKeys.AUTO_TRIP_HISTORY_JSON, gson.toJson(autoTripHistory)).apply()
+                AppLogger.i(TAG, "Retenção: ${before - autoTripHistory.size} viagem(ns) >90 dias removida(s)")
+            }
+        }
+        try {
+            samplesDir.listFiles()?.forEach { f ->
+                val ts = f.nameWithoutExtension.toLongOrNull() ?: return@forEach
+                if (ts < cutoff7d) { f.delete(); AppLogger.i(TAG, "Amostras expiradas apagadas: ${f.name}") }
+            }
+        } catch (_: Exception) {}
+
         // Bootstrap: garante pelo menos 1 checkpoint para StatsScreen funcionar imediatamente
         synchronized(lock) {
             if (checkpoints.isEmpty()) saveGearTransitionCheckpoint()
@@ -829,8 +857,9 @@ class TripManager private constructor() {
             .putFloat(SharedPreferencesKeys.AUTO_TRIP_START_FUEL_L,   autoTripStartFuelL)
             .putLong (SharedPreferencesKeys.AUTO_TRIP_START_TIME_SEC, autoTripStartTime)
             .apply()
+        autoTripMaxSpeed = 0f
         telemetryRecorder?.startRecording(autoTripStartMs)
-        AppLogger.i(TAG, "AutoTrip iniciado — SOC=${latestSocPct}% fuel=${latestFuelPct}%")
+        AppLogger.i(TAG, "AutoTrip iniciado — SOC=${latestSocPct}% fuel=${latestFuelPct}% temp=${latestOutsideTempC}°C")
     }
 
     /** Finaliza e persiste viagem automática. Descarta trips < 60 s. Limpa baseline persistida. */
@@ -846,6 +875,11 @@ class TripManager private constructor() {
             return
         }
 
+        // Coleta amostras antes de criar a entry — GPS vem do primeiro/último sample com coords válidas
+        val telSamples = telemetryRecorder?.stopRecording() ?: emptyList()
+        val startGps   = telSamples.firstOrNull { it.lat != 0.0 || it.lng != 0.0 }
+        val endGps     = telSamples.lastOrNull  { it.lat != 0.0 || it.lng != 0.0 }
+
         val entry = AutoTripEntry(
             startMs      = autoTripStartMs,
             endMs        = System.currentTimeMillis(),
@@ -859,20 +893,25 @@ class TripManager private constructor() {
             regenKwh     = (lifeRegenKwh  - autoTripStartRegen ).coerceAtLeast(0f),
             netKwh       = ((lifeEnergyKwh - autoTripStartEnergy) - (lifeRegenKwh - autoTripStartRegen)).coerceAtLeast(0f),
             fuelL        = (lifeFuelL     - autoTripStartFuelL ).coerceAtLeast(0f),
+            maxSpeedKmh  = autoTripMaxSpeed,
+            outsideTempC = latestOutsideTempC,
+            startLat     = startGps?.lat ?: 0.0,
+            startLng     = startGps?.lng ?: 0.0,
+            endLat       = endGps?.lat   ?: 0.0,
+            endLng       = endGps?.lng   ?: 0.0,
         )
         autoTripHistory.add(entry)
-        while (autoTripHistory.size > 500) autoTripHistory.removeAt(0)
+        // Retenção: descarta viagens com mais de 90 dias
+        val cutoff90d = System.currentTimeMillis() - 90L * 24 * 3_600_000L
+        autoTripHistory.removeAll { it.endMs < cutoff90d }
         autoTripStartMs = 0L
         prefs.edit()
             .putString(SharedPreferencesKeys.AUTO_TRIP_HISTORY_JSON, gson.toJson(autoTripHistory))
-            .putLong  (SharedPreferencesKeys.AUTO_TRIP_START_MS, 0L)   // limpa baseline persistida
+            .putLong  (SharedPreferencesKeys.AUTO_TRIP_START_MS, 0L)
             .apply()
-        AppLogger.i(TAG, "AutoTrip salvo: ${entry.distKm}km ${entry.timeSec}s ${entry.netKwh}kWh (${wallSec}s total)")
+        AppLogger.i(TAG, "AutoTrip salvo: ${entry.distKm}km ${entry.timeSec}s ${entry.netKwh}kWh max=${entry.maxSpeedKmh}km/h temp=${entry.outsideTempC}°C")
         onAutoTripCompleted?.invoke(entry)
 
-        // Coleta amostras de telemetria e persiste em disco antes de enviar
-        // (garante que o reenvio via sync manual funcione mesmo sem internet no momento do parking)
-        val telSamples   = telemetryRecorder?.stopRecording() ?: emptyList()
         val bridgeUrl    = getBridgeHttpUrl()
         val tripId       = entry.startMs.toString()
         val entryStartMs = entry.startMs
@@ -933,6 +972,10 @@ class TripManager private constructor() {
                 CarConstants.CAR_BASIC_VEHICLE_SPEED.value -> {
                     latestSpeedKmh = value
                     telemetryRecorder?.latestSpeedKmh = value
+                    if (autoTripStartMs > 0L && value > autoTripMaxSpeed) autoTripMaxSpeed = value
+                }
+                CarConstants.CAR_BASIC_OUTSIDE_TEMP.value -> {
+                    latestOutsideTempC = value
                 }
                 CarConstants.CAR_BASIC_ENGINE_SPEED.value -> {
                     latestEngineRpm = value.toInt()
