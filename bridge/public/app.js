@@ -38,6 +38,19 @@ if ('serviceWorker' in navigator) {
   });
 }
 
+// ── Hard refresh — limpa todos os caches SW e recarrega ───────────────────────
+async function hardRefresh() {
+  if ('caches' in window) {
+    const keys = await caches.keys();
+    await Promise.all(keys.map(k => caches.delete(k)));
+  }
+  if ('serviceWorker' in navigator) {
+    const reg = await navigator.serviceWorker.getRegistration();
+    if (reg) await reg.update();
+  }
+  location.reload(true);
+}
+
 function urlBase64ToUint8Array(b64) {
   const pad = '='.repeat((4 - b64.length % 4) % 4);
   const raw = atob((b64 + pad).replace(/-/g, '+').replace(/_/g, '/'));
