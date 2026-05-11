@@ -376,9 +376,15 @@
 
       <div style="background:#1e293b;border-radius:10px;padding:14px;margin-bottom:12px">
         <div style="font-size:11px;color:#94a3b8;margin-bottom:6px">Token de administração</div>
-        <input id="admin-token" type="password"
-          style="width:100%;box-sizing:border-box;background:#0f172a;border:1px solid #334155;border-radius:6px;padding:8px 10px;color:#e2e8f0;font-size:14px"
-          placeholder="ecotrip-restart" />
+        <div style="position:relative">
+          <input id="admin-token" type="password"
+            style="width:100%;box-sizing:border-box;background:#0f172a;border:1px solid #334155;border-radius:6px;padding:8px 38px 8px 10px;color:#e2e8f0;font-size:14px"
+            placeholder="ecotrip-restart" />
+          <button onclick="toggleTokenVisibility()" id="token-eye"
+            style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;padding:4px;color:#64748b;font-size:16px;line-height:1">
+            👁
+          </button>
+        </div>
         <div style="font-size:10px;color:#475569;margin-top:4px">Salvo localmente no iPhone</div>
       </div>
 

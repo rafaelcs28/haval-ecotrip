@@ -1161,3 +1161,12 @@ async function adminAction(path, label) {
 
 function adminRestart() { adminAction('/api/admin/restart', 'Reiniciando'); }
 function adminUpdate()  { adminAction('/api/admin/update',  'Atualizando'); }
+
+function toggleTokenVisibility() {
+  const input = document.getElementById('admin-token');
+  const btn   = document.getElementById('token-eye');
+  if (!input) return;
+  const isHidden = input.type === 'password';
+  input.type     = isHidden ? 'text' : 'password';
+  if (btn) btn.style.color = isHidden ? 'var(--teal)' : '#64748b';
+}
