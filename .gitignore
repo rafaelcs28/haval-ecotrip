@@ -17,3 +17,5 @@ app/release/
 .claude/
 preview/
 preview.html
+bridge/vapid_keys.json
+bridge/push_subscriptions.json

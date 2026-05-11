@@ -7,6 +7,7 @@ const mqtt     = require('mqtt');
 const fs       = require('fs');
 const path     = require('path');
 const http     = require('http');
+const webpush  = require('web-push');
 
 // ── Configuração ──────────────────────────────────────────────────────────────
 
@@ -22,8 +23,42 @@ const CHARGES_FILE    = path.join(__dirname, 'charges.json');
 const STATE_FILE      = path.join(__dirname, 'state.json');
 const AUTOTRIPS_DIR   = path.join(__dirname, 'autotrips');
 const SNAPSHOTS_FILE  = path.join(__dirname, 'lifetime_snapshots.json');
+const VAPID_FILE      = path.join(__dirname, 'vapid_keys.json');
+const PUSH_SUBS_FILE  = path.join(__dirname, 'push_subscriptions.json');
 
 if (!fs.existsSync(AUTOTRIPS_DIR)) fs.mkdirSync(AUTOTRIPS_DIR, { recursive: true });
+
+// ── Web Push / VAPID ─────────────────────────────────────────────────────────
+let vapidKeys;
+try { if (fs.existsSync(VAPID_FILE)) vapidKeys = JSON.parse(fs.readFileSync(VAPID_FILE, 'utf8')); } catch (_) {}
+if (!vapidKeys?.publicKey) {
+  vapidKeys = webpush.generateVAPIDKeys();
+  fs.writeFileSync(VAPID_FILE, JSON.stringify(vapidKeys));
+  console.log('✓ VAPID keys geradas e salvas em vapid_keys.json');
+}
+webpush.setVapidDetails('mailto:ecotrip@local', vapidKeys.publicKey, vapidKeys.privateKey);
+
+let pushSubs = [];
+try { if (fs.existsSync(PUSH_SUBS_FILE)) pushSubs = JSON.parse(fs.readFileSync(PUSH_SUBS_FILE, 'utf8')); } catch (_) {}
+
+function savePushSubs() {
+  try { fs.writeFileSync(PUSH_SUBS_FILE, JSON.stringify(pushSubs)); } catch (_) {}
+}
+
+async function sendPush(title, body) {
+  if (!pushSubs.length) return;
+  const payload = JSON.stringify({ title, body });
+  const dead = [];
+  await Promise.all(pushSubs.map(async (sub, i) => {
+    try { await webpush.sendNotification(sub, payload); }
+    catch (e) { if (e.statusCode === 410 || e.statusCode === 404) dead.push(i); }
+  }));
+  if (dead.length) { dead.reverse().forEach(i => pushSubs.splice(i, 1)); savePushSubs(); }
+}
+
+// ── Detecção de transição de estado de carga ──────────────────────────────────
+let prevChargingState  = null;
+let chargeStartTimer   = null;
 
 // ── Lifetime snapshots — checkpoints periódicos para filtros do PWA ──────────
 // Salvo a cada 5 min quando dados MQTT chegam; serve de baseline para
@@ -359,6 +394,23 @@ app.get('/api/config', (_req, res) => res.json({
   version:     require('./package.json').version,
 }));
 
+// ── Push Notifications ────────────────────────────────────────────────────────
+app.get('/api/push/vapid-key', (_req, res) => res.json({ key: vapidKeys.publicKey }));
+
+app.post('/api/push/subscribe', (req, res) => {
+  const sub = req.body;
+  if (!sub?.endpoint) return res.status(400).json({ error: 'invalid subscription' });
+  const exists = pushSubs.some(s => s.endpoint === sub.endpoint);
+  if (!exists) { pushSubs.push(sub); savePushSubs(); }
+  res.json({ ok: true });
+});
+
+app.post('/api/push/unsubscribe', (req, res) => {
+  const { endpoint } = req.body || {};
+  if (endpoint) { pushSubs = pushSubs.filter(s => s.endpoint !== endpoint); savePushSubs(); }
+  res.json({ ok: true });
+});
+
 // ── WebSocket ─────────────────────────────────────────────────────────────────
 
 const wss     = new WebSocketServer({ server, path: '/ws' });
@@ -437,7 +489,35 @@ function applyMqttMessage(key, value) {
     case 'gear':              state.gear               = value || '--'; break;
     case 'inside_temp':       state.inside_temp        = num(value); break;
     case 'outside_temp':      state.outside_temp       = num(value); break;
-    case 'charging_state':    state.charging_state     = value; break;
+    case 'charging_state': {
+      const prev = prevChargingState;
+      state.charging_state = value;
+      prevChargingState    = value;
+
+      if (value === 'Carregando' && prev !== 'Carregando') {
+        // Aguarda 30s para a potência estabilizar antes de notificar
+        if (chargeStartTimer) clearTimeout(chargeStartTimer);
+        chargeStartTimer = setTimeout(() => {
+          chargeStartTimer = null;
+          const pwr = state.charge_power_kw || 0;
+          const rem = state.charge_remaining_min || 0;
+          const remStr = rem > 0
+            ? (rem > 59 ? `${Math.floor(rem / 60)}h ${rem % 60}min` : `${rem} min`)
+            : '~?';
+          sendPush('⚡ Recarga iniciada', `${pwr.toFixed(1)} kW · tempo restante: ${remStr}`);
+        }, 30000);
+
+      } else if (value !== 'Carregando' && prev === 'Carregando') {
+        if (chargeStartTimer) { clearTimeout(chargeStartTimer); chargeStartTimer = null; }
+        if (value === 'Finalizado') {
+          const kwh = state.charge_session_kwh || 0;
+          sendPush('✅ Recarga concluída', kwh > 0.05
+            ? `${kwh.toFixed(2)} kWh injetados`
+            : 'Sessão encerrada');
+        }
+      }
+      break;
+    }
     case 'charge_power_kw':      state.charge_power_kw      = num(value); break;
     case 'charge_session_kwh':   state.charge_session_kwh   = num(value); break;
     case 'charge_remaining_min': state.charge_remaining_min = num(value); break;

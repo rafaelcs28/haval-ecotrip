@@ -20,9 +20,43 @@ function deepMerge(target, source) {
   }
 }
 
-// ── Service Worker ────────────────────────────────────────────────────────────
+// ── Service Worker & Push ─────────────────────────────────────────────────────
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/sw.js').catch(() => {});
+  navigator.serviceWorker.register('/sw.js').then(async () => {
+    // Tenta subscrever push sem bloquear a inicialização
+    try { await subscribePush(); } catch (_) {}
+  }).catch(() => {});
+}
+
+function urlBase64ToUint8Array(b64) {
+  const pad = '='.repeat((4 - b64.length % 4) % 4);
+  const raw = atob((b64 + pad).replace(/-/g, '+').replace(/_/g, '/'));
+  return Uint8Array.from(raw, c => c.charCodeAt(0));
+}
+
+async function subscribePush() {
+  if (!('Notification' in window) || !('PushManager' in window)) return;
+  // Só pede permissão se ainda não foi decidido
+  let perm = Notification.permission;
+  if (perm === 'denied') return;
+  if (perm === 'default') perm = await Notification.requestPermission();
+  if (perm !== 'granted') return;
+
+  const reg = await navigator.serviceWorker.ready;
+  // Reutiliza subscrição existente, se houver
+  let sub = await reg.pushManager.getSubscription();
+  if (!sub) {
+    const { key } = await fetch('/api/push/vapid-key').then(r => r.json());
+    sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(key),
+    });
+  }
+  await fetch('/api/push/subscribe', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(sub),
+  });
 }
 
 // ── Tabs ──────────────────────────────────────────────────────────────────────
@@ -246,6 +280,18 @@ function renderDash() {
   setText('d-soc', pct(soc));
   const socBar = document.getElementById('d-soc-bar');
   if (socBar) socBar.style.width = Math.max(0, Math.min(100, soc)) + '%';
+
+  // Autonomia elétrica estimada (bateria útil: SOC atual → 12% mínimo, ~25,8 kWh brutos)
+  const BATT_KWH = 25.8, EV_MIN_SOC = 12;
+  const avgKwh100 = s.rolling?.kwh_per_100km > 2 ? s.rolling.kwh_per_100km
+                  : s.trip_a?.kwh_per_100km  > 2 ? s.trip_a.kwh_per_100km : 18;
+  const usableKwh = Math.max(0, (soc - EV_MIN_SOC) / 100 * BATT_KWH);
+  const evKm      = Math.round(usableKwh / (avgKwh100 / 100));
+  const evRangeEl = document.getElementById('d-ev-range');
+  if (evRangeEl) {
+    evRangeEl.style.display = soc > EV_MIN_SOC ? '' : 'none';
+    if (soc > EV_MIN_SOC) setText('d-ev-km', evKm + ' km');
+  }
 
   // Combustível (tank 51L)
   const TANK_CAP = 51;
@@ -969,6 +1015,109 @@ tickLastUpdate();
 
 // Carrega localização do carro no mapa do dashboard (requer Leaflet carregado)
 window.addEventListener('load', () => { setTimeout(initDashMap, 500); });
+
+// ── Stats por período ─────────────────────────────────────────────────────────
+let statsFilter  = 'today';
+let statsSnaps   = null;
+
+async function loadStats() {
+  if (!statsSnaps) {
+    try { statsSnaps = await fetch('/api/lifetime/snapshots').then(r => r.json()); }
+    catch (_) { statsSnaps = []; }
+  }
+  renderStats();
+}
+
+function setStatsFilter(f) { statsFilter = f; renderStats(); }
+
+function statsBaselineMs() {
+  const now = Date.now();
+  const tod = new Date(); tod.setHours(0, 0, 0, 0);
+  switch (statsFilter) {
+    case 'today': return tod.getTime();
+    case '7d':    return now - 7  * 86400000;
+    case '30d':   return now - 30 * 86400000;
+    case 'month': { const m = new Date(); m.setDate(1); m.setHours(0, 0, 0, 0); return m.getTime(); }
+    default:      return 0;
+  }
+}
+
+function renderStats() {
+  const chips = document.getElementById('stats-chips');
+  const el    = document.getElementById('stats-content');
+  if (!chips || !el) return;
+
+  const fs = [['today','Hoje'],['7d','7 dias'],['30d','30 dias'],['month','Mês']];
+  chips.innerHTML = `<div class="filter-chips">${
+    fs.map(([id, lbl]) =>
+      `<button class="filter-chip${statsFilter===id?' active':''}" onclick="setStatsFilter('${id}')">${lbl}</button>`
+    ).join('')
+  }</div>`;
+
+  const cur = state.lifetime || {};
+  if (!(cur.distance_km > 0)) {
+    el.innerHTML = '<div class="empty">Sem dados de lifetime. Aguardando dados do carro.</div>';
+    return;
+  }
+
+  const startMs = statsBaselineMs();
+  const snaps   = statsSnaps || [];
+  const base    = snaps.filter(s => s.ts <= startMs).sort((a, b) => b.ts - a.ts)[0] || null;
+
+  if (!base && snaps.length > 0) {
+    el.innerHTML = '<div class="empty">Sem dados suficientes para este período.<br><small>Snapshots são salvos a cada 5 min com o carro ligado.</small></div>';
+    return;
+  }
+
+  const d = k => Math.max(0, (parseFloat(cur[k]) || 0) - (base ? (parseFloat(base[k]) || 0) : 0));
+
+  const dDist    = d('distance_km');
+  const dNet     = d('net_kwh');
+  const dEnergy  = d('energy_kwh');
+  const dRegen   = d('regen_kwh');
+  const dFuel    = d('fuel_l');
+  const dTime    = d('time_sec');
+  const dCharge  = d('charge_kwh');
+  const dChargeT = d('charge_sec');
+
+  const avgSpd   = dTime > 0    ? dDist / (dTime / 3600)  : 0;
+  const kwh100   = dDist > 0.1  ? dNet  / dDist * 100     : 0;
+  const kmL      = dFuel > 0.001 ? dDist / dFuel           : 0;
+  const avgChKw  = dChargeT > 0  ? dCharge / (dChargeT / 3600) : 0;
+
+  const metricHTML = (val, unit, lbl, cls) =>
+    `<div class="metric"><div class="metric-value ${cls} sm">${val}${unit ? '<span style="font-size:9px;margin-left:2px">'+unit+'</span>' : ''}</div><div class="metric-label">${lbl}</div></div>`;
+
+  el.innerHTML = `
+<div class="card">
+  <div class="card-title">🚗 Condução</div>
+  <div class="metrics-row">
+    ${metricHTML(f1(dDist),  'km',     'Distância',   'blue')}
+    ${metricHTML(fmtDur(dTime), '',    'Tempo',       'muted')}
+    ${metricHTML(f1(avgSpd), 'km/h',   'Vel. média',  'muted')}
+  </div>
+  <div class="divider"></div>
+  <div class="metrics-row">
+    ${metricHTML(f1(kwh100), 'kWh',    'kWh/100km',   kwh100 > 0 && kwh100 < 20 ? 'green' : kwh100 < 26 ? 'yellow' : 'red')}
+    ${metricHTML(f1(kmL),    'km/L',   'km/L',        kmL > 15 ? 'green' : kmL > 9 ? 'yellow' : 'red')}
+    ${metricHTML(f2(dFuel),  'L',      'Combustível', 'orange')}
+  </div>
+  <div class="divider"></div>
+  <div class="metrics-row">
+    ${metricHTML(f2(dNet),    'kWh',   'kWh líq.',    'green')}
+    ${metricHTML(f2(dEnergy), 'kWh',   'Energia bruta','muted')}
+    ${metricHTML(f2(dRegen),  'kWh',   'Regeneração', 'teal')}
+  </div>
+</div>
+${dCharge > 0.01 ? `<div class="card">
+  <div class="card-title">⚡ Recargas</div>
+  <div class="metrics-row">
+    ${metricHTML(f2(dCharge), 'kWh',   'Injetado',    'teal')}
+    ${metricHTML(fmtDur(dChargeT), '', 'Tempo total', 'muted')}
+    ${metricHTML(f1(avgChKw), 'kW',    'Potência méd.','teal')}
+  </div>
+</div>` : ''}`;
+}
 
 // ── Admin / Configurações ─────────────────────────────────────────────────────
 

@@ -57,6 +57,7 @@
               <span class="bar-val" id="d-soc">--%</span>
             </div>
             <div class="bar-track"><div class="bar-fill soc" id="d-soc-bar" style="width:0%"></div></div>
+            <div id="d-ev-range" style="font-size:10px;color:var(--teal);text-align:right;margin-top:3px;display:none">~<span id="d-ev-km">--</span> km elétricos</div>
           </div>
           <div class="bar-item">
             <div class="bar-header">
@@ -358,6 +359,14 @@
       <div id="auto-list"><div class="empty">Carregando...</div></div>
     </div>
 
+    <!-- Stats por período -->
+    <div id="panel-stats" class="panel">
+      <div style="padding:12px">
+        <div id="stats-chips"></div>
+        <div id="stats-content"><div class="empty">Selecione um período.</div></div>
+      </div>
+    </div>
+
   </div><!-- /content -->
 
   <!-- Painel Admin / Configurações -->
@@ -448,6 +457,10 @@
     <button class="tab" data-panel="auto" onclick="switchTab(this, loadAutoTrips)">
       <span class="tab-icon">🗺</span>
       <span class="tab-label">Auto</span>
+    </button>
+    <button class="tab" data-panel="stats" onclick="switchTab(this, loadStats)">
+      <span class="tab-icon">📊</span>
+      <span class="tab-label">Stats</span>
     </button>
     <button class="tab" data-panel="admin" onclick="switchTab(this, initAdmin)">
       <span class="tab-icon">⚙️</span>
