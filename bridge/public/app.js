@@ -298,7 +298,7 @@ function renderDash() {
   // Floor de 14 kWh/100km: abaixo disso o motor térmico estava carregando
   // a bateria (gerador), o que contamina o consumo elétrico com valores
   // artificialmente baixos — esse dado não reflete autonomia real em EV puro.
-  const EV_KWH_FLOOR    = 14;
+  const EV_KWH_FLOOR    = 12;
   const EV_KWH_FALLBACK = 20;   // conservador: 1 kWh = 5 km
   const KML_FALLBACK    = 12;   // 12 km/L
 
