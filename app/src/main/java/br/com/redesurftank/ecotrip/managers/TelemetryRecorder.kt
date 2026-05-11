@@ -85,10 +85,13 @@ class TelemetryRecorder(private val context: Context) {
     }
 
     // ── Valores dos sensores (atualizados por TripManager.onDataChanged) ──────
-    @Volatile var latestSpeedKmh:       Float = 0f
-    @Volatile var latestEngineRpm:      Int   = 0
-    @Volatile var latestBatteryCurrentA: Float = 0f  // A (positivo = descarregando, negativo = carregando)
-    @Volatile var latestBatteryVoltageV: Float = 0f  // V
+    @Volatile var latestSpeedKmh:        Float = 0f
+    @Volatile var latestEngineRpm:       Int   = 0
+    @Volatile var latestBatteryCurrentA: Float = 0f  // A — corrente DC do pack (power_battery_current)
+    @Volatile var latestBatteryVoltageV: Float = 0f  // V — tensão do pack
+    /** kW do motor elétrico lido diretamente do HCU (car.ev_info.motor_power).
+     *  Quando != 0, tem prioridade sobre a fórmula current×voltage na gravação de telemetria. */
+    @Volatile var latestMotorPowerKw:    Float = 0f
 
     // ── Gravação ──────────────────────────────────────────────────────────────
     private val samples   = mutableListOf<TelemetrySample>()
@@ -136,8 +139,12 @@ class TelemetryRecorder(private val context: Context) {
 
             while (isActive && recording) {
                 val spd  = latestSpeedKmh
-                val evKw = if (latestBatteryVoltageV > 0f)
-                    latestBatteryCurrentA * latestBatteryVoltageV / 1_000f else 0f
+                // motor_power (HCU) tem prioridade; fallback para current×voltage
+                val evKw = when {
+                    latestMotorPowerKw != 0f -> latestMotorPowerKw
+                    latestBatteryVoltageV > 0f -> latestBatteryCurrentA * latestBatteryVoltageV / 1_000f
+                    else -> 0f
+                }
 
                 val speedChanged = lastSpd.isNaN()  || kotlin.math.abs(spd  - lastSpd)  >= 1f
                 val powerChanged = lastEvKw.isNaN() || kotlin.math.abs(evKw - lastEvKw) >= 0.2f

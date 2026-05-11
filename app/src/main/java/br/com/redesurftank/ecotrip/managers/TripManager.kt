@@ -1065,6 +1065,10 @@ class TripManager private constructor() {
                     latestBatteryVoltageV = value
                     telemetryRecorder?.latestBatteryVoltageV = value
                 }
+                CarConstants.CAR_EV_INFO_MOTOR_POWER.value -> {
+                    // kW direto do HCU — prioridade sobre current×voltage no TelemetryRecorder
+                    telemetryRecorder?.latestMotorPowerKw = value
+                }
 
                 else -> return
             }

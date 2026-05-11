@@ -194,6 +194,18 @@ fun ConsumptionScreen() {
                         mqttManager.latestBatteryCurrentA = value.trim().toFloatOrNull() ?: 0f
                         tripManager.onDataChanged(key, value)
                     }
+                    CarConstants.CAR_EV_INFO_MOTOR_POWER.value -> {
+                        // Potência do motor elétrico direto do HCU (kW)
+                        // Positivo = consumo; negativo = regen. 0 = sem sinal.
+                        val kw = value.trim().toFloatOrNull() ?: 0f
+                        mqttManager.latestMotorPowerKw = kw
+                        // Alimenta o TelemetryRecorder para a rota: se motor_power existe,
+                        // é mais preciso que current×voltage. Converte para corrente equivalente
+                        // para compatibilidade com o campo latestBatteryCurrentA do recorder.
+                        if (mqttManager.latestBatteryVoltageV > 0f && kw != 0f) {
+                            tripManager.onDataChanged(key, value)
+                        }
+                    }
                     CarConstants.CAR_EV_INFO_CHARGING_STATE.value -> {
                         mqttManager.latestChargingState = value.trim().toIntOrNull() ?: -1
                         syncCharging()

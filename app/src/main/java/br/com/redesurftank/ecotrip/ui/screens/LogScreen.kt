@@ -17,13 +17,60 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import br.com.redesurftank.ecotrip.managers.AppLogger
+import br.com.redesurftank.ecotrip.managers.CarDataManager
 import br.com.redesurftank.ecotrip.managers.LogLevel
 import br.com.redesurftank.ecotrip.ui.theme.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+
+/** Chaves candidatas para potência elétrica — testadas pelo botão "Probe". */
+/** Chaves a sondar com o botão ⚡ Probe.
+ *  IMPORTANTE: rode este probe ANDANDO (não parado/carregando) para ver os valores de motor. */
+private val BATTERY_PROBE_KEYS = listOf(
+    // ── REFERÊNCIA (sabemos que funcionam) ────────────────────────────────────
+    "car.ev_info.cur_charge_current",       // A — corrente AC de carga (funciona carregando)
+    "car.ev_info.power_battery_voltage",    // V — tensão do pack      (funciona sempre)
+
+    // ── ALVO PRINCIPAL: potência do motor elétrico (testar ANDANDO) ──────────
+    "car.ev_info.motor_power",              // kW direto do HCU — ouro se funcionar
+    "car.ev_info.power_battery_current",    // A — corrente DC do pack (sem prefixo cur.)
+    "car.ev_info.cur_battery_power_percentage", // % potência da bateria
+
+    // ── MOTOR / TREM DE FORÇA (testar ANDANDO) ────────────────────────────────
+    "car.ev_info.drive_motor_power",
+    "car.ev_info.motor_torque",
+    "car.ev_info.motor_speed",
+    "car.ev_info.motor_rpm",
+    "car.ev_info.drive_motor_speed",
+    "car.ev_info.rear_motor_speed",
+    "car.ev_info.hcu_power_train_state",
+    "car.ev_info.energy_drive_state",
+
+    // ── VARIANTES DC do pack (testar ANDANDO) ────────────────────────────────
+    "car.ev_info.cur_battery_current",
+    "car.ev_info.cur_battery_voltage",
+    "car.ev_info.discharge_current",
+    "car.ev_info.battery_current",
+    "car.ev_info.battery_voltage",
+    "car.ev_info.battery_power",
+    "car.ev_info.bms_current",
+    "car.ev_info.bms_voltage",
+    "car.ev_info.total_battery_current",
+    "car.ev_info.total_battery_voltage",
+    "car.ev_info.phev_ahd_voltage",
+
+    // ── CONSUMO INSTANTÂNEO ────────────────────────────────────────────────
+    "car.ev_info.Instant_energy_consumption",
+    "car.ev_info.instant_energy_consumption",
+    "car.ev_info.energy_output_percentage",
+)
 
 @Composable
 fun LogScreen(onBack: () -> Unit) {
     val entries by AppLogger.entries.collectAsState()
     val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    var probing by remember { mutableStateOf(false) }
 
     LaunchedEffect(entries.size) {
         if (entries.isNotEmpty()) listState.animateScrollToItem(entries.size - 1)
@@ -47,8 +94,30 @@ fun LogScreen(onBack: () -> Unit) {
                 }
                 Text("Log do App", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Green)
             }
-            TextButton(onClick = { AppLogger.clear() }) {
-                Text("Limpar", fontSize = 13.sp, color = TextSecondary)
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                TextButton(
+                    onClick = {
+                        if (probing) return@TextButton
+                        probing = true
+                        scope.launch(Dispatchers.IO) {
+                            val car = CarDataManager.getInstance()
+                            AppLogger.i("PROBE", "=== Iniciando probe de ${BATTERY_PROBE_KEYS.size} chaves ===")
+                            for (key in BATTERY_PROBE_KEYS) {
+                                val v = try { car.fetchCurrent(key) } catch (_: Exception) { null }
+                                val label = if (v != null) "→ \"$v\"" else "→ null (chave inexistente ou sem valor)"
+                                AppLogger.i("PROBE", "$key $label")
+                            }
+                            AppLogger.i("PROBE", "=== Probe concluído ===")
+                            probing = false
+                        }
+                    },
+                    enabled = !probing,
+                ) {
+                    Text(if (probing) "⏳" else "⚡ Probe", fontSize = 13.sp, color = Cyan)
+                }
+                TextButton(onClick = { AppLogger.clear() }) {
+                    Text("Limpar", fontSize = 13.sp, color = TextSecondary)
+                }
             }
         }
 

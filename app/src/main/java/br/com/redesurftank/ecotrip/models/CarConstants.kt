@@ -34,6 +34,9 @@ enum class CarConstants(val value: String) {
     CAR_EV_INFO_POWER_BATTERY_VOLTAGE("car.ev_info.power_battery_voltage"),
     CAR_EV_INFO_POWER_BATTERY_CURRENT("car.ev_info.power_battery_current"),
 
+    // Motor elétrico — potência direta do HCU (kW, sinal positivo = consumo, negativo = regen)
+    CAR_EV_INFO_MOTOR_POWER("car.ev_info.motor_power"),
+
     // Charging state — 0=Desconectado, 1=Carregando, 2=Programado, 3=Finalizado, 5=Aguardando liberação
     CAR_EV_INFO_CHARGING_STATE("car.ev_info.charging_state"),
 
