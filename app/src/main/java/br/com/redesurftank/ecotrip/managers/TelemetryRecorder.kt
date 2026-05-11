@@ -145,10 +145,11 @@ class TelemetryRecorder(private val context: Context) {
      * @param trips lista de pares (tripId, autoTripJson) — já serializados pelo caller
      */
     fun bulkPostTrips(
-        bridgeUrl:    String,
-        trips:        List<Pair<String, String>>,
-        onAllDone:    (ok: Int, fail: Int) -> Unit = { _, _ -> },
-        onTripSynced: (String) -> Unit = {},
+        bridgeUrl:      String,
+        trips:          List<Pair<String, String>>,
+        onAllDone:      (ok: Int, fail: Int) -> Unit = { _, _ -> },
+        samplesProvider:(tripId: String) -> String = { "[]" },
+        onTripSynced:   (String) -> Unit = {},
     ) {
         if (bridgeUrl.isBlank() || trips.isEmpty()) { onAllDone(0, 0); return }
         scope.launch {
@@ -156,7 +157,8 @@ class TelemetryRecorder(private val context: Context) {
             var fail = 0
             for ((tripId, autoTripJson) in trips) {
                 try {
-                    val payload = """{"tripId":"$tripId","autoTrip":$autoTripJson,"samples":[]}"""
+                    val samplesJson = samplesProvider(tripId)
+                    val payload = """{"tripId":"$tripId","autoTrip":$autoTripJson,"samples":$samplesJson}"""
                     val url  = URL("$bridgeUrl/api/autotrips")
                     val conn = url.openConnection() as HttpURLConnection
                     conn.apply {

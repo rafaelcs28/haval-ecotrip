@@ -206,6 +206,9 @@ class TripManager private constructor() {
     }
 
     private lateinit var prefs: SharedPreferences
+    private lateinit var appContext: android.content.Context
+    private val samplesDir: java.io.File
+        get() = java.io.File(appContext.filesDir, "autotrip_samples").also { it.mkdirs() }
     private val listeners = mutableListOf<TripListener>()
     private val lock = Any()
     private val gson = Gson()
@@ -435,10 +438,19 @@ class TripManager private constructor() {
                 AppLogger.i(TAG, "syncAutoTripsTobridge: ok=$ok fail=$fail → result=$result")
                 onResult?.invoke(result)
             },
+            samplesProvider = { tripIdStr ->
+                // Inclui amostras salvas em disco, se disponíveis
+                try {
+                    val f = java.io.File(samplesDir, "$tripIdStr.json")
+                    if (f.exists()) f.readText() else "[]"
+                } catch (_: Exception) { "[]" }
+            },
         ) { tripIdStr ->
             val ms = tripIdStr.toLongOrNull() ?: return@bulkPostTrips
             synchronized(lock) { bridgeSyncedIds.add(ms) }
             persistSyncedIds()
+            // Apaga amostras locais após confirmação de envio bem-sucedido
+            try { java.io.File(samplesDir, "$tripIdStr.json").delete() } catch (_: Exception) {}
         }
     }
 
@@ -452,6 +464,8 @@ class TripManager private constructor() {
             .putString(SharedPreferencesKeys.AUTO_TRIP_HISTORY_JSON, "[]")
             .putString(SharedPreferencesKeys.BRIDGE_SYNCED_TRIP_IDS, "[]")
             .apply()
+        // Apaga todos os arquivos de amostras salvas em disco
+        try { samplesDir.listFiles()?.forEach { it.delete() } } catch (_: Exception) {}
     }
 
     /** Renomeia uma viagem automática identificada pelo startMs. */
@@ -483,6 +497,7 @@ class TripManager private constructor() {
         } catch (e: Exception) {
             context
         }
+        appContext = ctx
         prefs = ctx.getSharedPreferences(SharedPreferencesKeys.PREFS_NAME, Context.MODE_PRIVATE)
         loadFromPrefs()
         // Bootstrap: garante pelo menos 1 checkpoint para StatsScreen funcionar imediatamente
@@ -855,16 +870,26 @@ class TripManager private constructor() {
         AppLogger.i(TAG, "AutoTrip salvo: ${entry.distKm}km ${entry.timeSec}s ${entry.netKwh}kWh (${wallSec}s total)")
         onAutoTripCompleted?.invoke(entry)
 
-        // Envia telemetria para o bridge (fire-and-forget) e marca como sincronizado em caso de sucesso
-        val telSamples    = telemetryRecorder?.stopRecording() ?: emptyList()
-        val bridgeUrl     = getBridgeHttpUrl()
-        val tripId        = entry.startMs.toString()
-        val entryStartMs  = entry.startMs
+        // Coleta amostras de telemetria e persiste em disco antes de enviar
+        // (garante que o reenvio via sync manual funcione mesmo sem internet no momento do parking)
+        val telSamples   = telemetryRecorder?.stopRecording() ?: emptyList()
+        val bridgeUrl    = getBridgeHttpUrl()
+        val tripId       = entry.startMs.toString()
+        val entryStartMs = entry.startMs
+        if (telSamples.isNotEmpty()) {
+            try {
+                java.io.File(samplesDir, "$tripId.json").writeText(gson.toJson(telSamples))
+                AppLogger.i(TAG, "Amostras salvas em disco: ${telSamples.size} para trip $tripId")
+            } catch (e: Exception) {
+                AppLogger.e(TAG, "Erro ao salvar amostras em disco: ${e.message}")
+            }
+        }
         telemetryRecorder?.postTelemetry(bridgeUrl, tripId, gson.toJson(entry), telSamples) {
-            // Confirmação HTTP 2xx → marca como já enviado para evitar re-sync futuro
+            // Confirmação HTTP 2xx → apaga arquivo local e marca como sincronizado
+            try { java.io.File(samplesDir, "$tripId.json").delete() } catch (_: Exception) {}
             synchronized(lock) { bridgeSyncedIds.add(entryStartMs) }
             persistSyncedIds()
-            AppLogger.i(TAG, "Trip $tripId marcada como sincronizada com o bridge")
+            AppLogger.i(TAG, "Trip $tripId sincronizada com bridge — amostras enviadas")
         }
     }
 
