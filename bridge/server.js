@@ -321,10 +321,11 @@ app.get('/api/charges', (_req, res) => res.json(chargesArr));
 
 // ── Admin: restart remoto ─────────────────────────────────────────────────────
 // POST /api/admin/restart  body: { "token": "..." }
-// Token configurável via variável de ambiente ADMIN_TOKEN (padrão: ecotrip-restart)
+// Token obrigatório via variável de ambiente ADMIN_TOKEN — sem padrão por segurança
 function adminCheckToken(req, res) {
-  const token      = req.body?.token || req.query.token;
-  const adminToken = process.env.ADMIN_TOKEN || 'ecotrip-restart';
+  const adminToken = process.env.ADMIN_TOKEN || '';
+  if (!adminToken) { res.status(503).json({ error: 'ADMIN_TOKEN not configured' }); return false; }
+  const token = req.body?.token || req.query.token;
   if (token !== adminToken) { res.status(401).json({ error: 'unauthorized' }); return false; }
   return true;
 }
