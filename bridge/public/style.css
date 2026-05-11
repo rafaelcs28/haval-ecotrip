@@ -16,14 +16,6 @@
   --safe-bot:   0px; /* Safari browser: sem safe area */
 }
 
-/* ── Safe area: só no modo webapp instalado (standalone PWA) ─────────────────── */
-@media (display-mode: standalone) {
-  :root {
-    --safe-top: env(safe-area-inset-top,    0px);
-    --safe-bot: env(safe-area-inset-bottom, 0px);
-  }
-}
-
 /* ── Reset ───────────────────────────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 

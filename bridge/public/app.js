@@ -1,5 +1,12 @@
 'use strict';
 
+// ── Safe area: só no modo standalone iOS (webapp instalada) ──────────────────
+if (window.navigator.standalone === true) {
+  const r = document.documentElement.style;
+  r.setProperty('--safe-top', 'env(safe-area-inset-top,    0px)');
+  r.setProperty('--safe-bot', 'env(safe-area-inset-bottom, 0px)');
+}
+
 // ── Estado local ──────────────────────────────────────────────────────────────
 let state = {};
 let lastUpdateMs = null;
