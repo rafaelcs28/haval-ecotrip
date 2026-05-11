@@ -134,6 +134,18 @@ const state = {
   soc_pct:          0,
   engine_state:     null,   // null=desconhecido | '0'=desligado | '1'=ligado
   lock_state:       null,   // null=desconhecido | 'off'=trancado | 'on'=destrancado
+  high_beam:        null,   // null | 'on' | 'off'
+  ac_state:         null,   // null | 'on' | 'off'
+  door_fl:          null,   // front-left  | 'on'=aberta | 'off'=fechada
+  door_fr:          null,   // front-right
+  door_rl:          null,   // rear-left
+  door_rr:          null,   // rear-right
+  door_trunk:       null,   // porta-malas
+  sunroof:          null,   // '3'=fechado | outro=aberto
+  window_fl:        null,   // 1=fechado | 2=aberto | 3=entreaberto
+  window_fr:        null,
+  window_rl:        null,
+  window_rr:        null,
 
   trip_a: {
     distance_km:   0, time_sec: '--', kwh_per_100km: 0, km_per_l: 0,
@@ -494,6 +506,18 @@ function applyMqttMessage(key, value) {
     // Sensores de estado (publicados pelo HA via automação)
     case 'engine_state': state.engine_state = value; break;   // '0' | '1'
     case 'lock_state':   state.lock_state   = value; break;   // 'off' | 'on'
+    case 'high_beam':    state.high_beam    = value; break;   // 'on' | 'off'
+    case 'ac_state':     state.ac_state     = value; break;   // 'on' | 'off'
+    case 'door_fl':      state.door_fl      = value; break;   // 'on'=aberta | 'off'=fechada
+    case 'door_fr':      state.door_fr      = value; break;
+    case 'door_rl':      state.door_rl      = value; break;
+    case 'door_rr':      state.door_rr      = value; break;
+    case 'door_trunk':   state.door_trunk   = value; break;
+    case 'sunroof':      state.sunroof      = value; break;   // '3'=fechado
+    case 'window_fl':    state.window_fl    = value; break;   // '1'|'2'|'3'
+    case 'window_fr':    state.window_fr    = value; break;
+    case 'window_rl':    state.window_rl    = value; break;
+    case 'window_rr':    state.window_rr    = value; break;
 
     // Telemetria ao vivo
     case 'speed_kmh':         state.speed_kmh          = num(value); break;

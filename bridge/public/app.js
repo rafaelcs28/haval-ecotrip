@@ -400,36 +400,64 @@ function renderDash() {
   setText('d-tripb-cost', tb.cost_brl      > 0 ? 'R$ ' + f2(tb.cost_brl)   : '--');
   setClass('d-tripb-kwh', eff(tb.kwh_per_100km));
 
-  // Motor — SVG faróis: off=opaco, on=brilhante com glow
-  const eng    = s.engine_state;
-  const engOn  = eng === '1' || eng === 1;
-  const hlEl   = document.getElementById('d-car-hl');
-  const beamEl = document.getElementById('d-car-hl-beam');
-  if (hlEl) {
-    hlEl.setAttribute('opacity', engOn ? '0.95' : '0.4');
-    if (engOn) hlEl.setAttribute('filter', 'url(#hl-glow)');
-    else       hlEl.removeAttribute('filter');
+  // ── Camadas PNG do carro ─────────────────────────────────────────────────────
+  function carLayer(id, show) {
+    const el = document.getElementById(id);
+    if (el) el.style.display = show ? 'block' : 'none';
   }
-  if (beamEl) beamEl.setAttribute('opacity', engOn ? '1' : '0');
+
+  // Faróis
+  const eng   = s.engine_state;
+  const engOn = eng === '1' || eng === 1;
+  carLayer('cl-farol',      engOn && s.high_beam !== 'on');
+  carLayer('cl-farol-alto', engOn && s.high_beam === 'on');
   const engLabel = document.getElementById('d-car-engine-label');
   if (engLabel) {
     engLabel.textContent = engOn ? '🔴 Motor ligado' : (eng === '0' || eng === 0) ? '⚫ Motor desligado' : '';
     engLabel.style.color = engOn ? '#f87171' : '#475569';
   }
 
-  // Trava — SVG arcos de portas: fechado=invisível, aberto=laranja
-  const lck  = s.lock_state;
-  const dF   = document.getElementById('d-car-door-f');
-  const dR   = document.getElementById('d-car-door-r');
-  const open = lck === 'on';
-  if (dF) dF.setAttribute('opacity', open ? '1' : '0');
-  if (dR) dR.setAttribute('opacity', open ? '1' : '0');
+  // Trava
+  const lck = s.lock_state;
+  carLayer('cl-trava', lck === 'off');
   const lockLabel = document.getElementById('d-car-lock-label');
   if (lockLabel) {
     if      (lck === 'off') { lockLabel.textContent = '🔒 Trancado';    lockLabel.style.color = 'var(--teal)'; }
     else if (lck === 'on')  { lockLabel.textContent = '🔓 Destrancado'; lockLabel.style.color = '#f97316'; }
     else                     { lockLabel.textContent = ''; }
   }
+
+  // Portas
+  carLayer('cl-door-fl', s.door_fl    === 'on');
+  carLayer('cl-door-fr', s.door_fr    === 'on');
+  carLayer('cl-door-rl', s.door_rl    === 'on');
+  carLayer('cl-door-rr', s.door_rr    === 'on');
+  carLayer('cl-trunk',   s.door_trunk === 'on');
+
+  // Teto solar (fechado = '3')
+  carLayer('cl-sunroof', s.sunroof != null && s.sunroof !== '3' && s.sunroof !== 3);
+
+  // AC
+  const acOn = s.ac_state === 'on';
+  carLayer('cl-ac-left',    acOn);
+  carLayer('cl-ac-right',   acOn);
+  carLayer('cl-ventilacao', acOn);
+
+  // Vidros (1=fechado, 2=aberto, 3=entreaberto)
+  carLayer('cl-win-fl-open', s.window_fl === '2' || s.window_fl === 2);
+  carLayer('cl-win-fl-ajar', s.window_fl === '3' || s.window_fl === 3);
+  carLayer('cl-win-fr-open', s.window_fr === '2' || s.window_fr === 2);
+  carLayer('cl-win-fr-ajar', s.window_fr === '3' || s.window_fr === 3);
+  carLayer('cl-win-rl-open', s.window_rl === '2' || s.window_rl === 2);
+  carLayer('cl-win-rl-ajar', s.window_rl === '3' || s.window_rl === 3);
+  carLayer('cl-win-rr-open', s.window_rr === '2' || s.window_rr === 2);
+  carLayer('cl-win-rr-ajar', s.window_rr === '3' || s.window_rr === 3);
+
+  // Recarga
+  const chg = s.charging_state || '';
+  carLayer('cl-charge-on',   chg === 'Carregando');
+  carLayer('cl-charge-wait', chg === 'Aguardando');
+  carLayer('cl-charge-no',   chg === 'Não Carregando' || chg === 'NaoCarregando');
 
   // Desde última partida (rolling)
   const r = s.rolling || {};
