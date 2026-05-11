@@ -404,13 +404,20 @@ class TripManager private constructor() {
             synchronized(lock) { bridgeSyncedIds.clear() }
             AppLogger.i(TAG, "syncAutoTripsTobridge: forceAll — IDs limpos, reenviando tudo")
         }
+        val historySize: Int
         val unsynced = synchronized(lock) {
+            historySize = autoTripHistory.size
             autoTripHistory
                 .filter { it.startMs !in bridgeSyncedIds }
                 .map    { entry -> entry.startMs.toString() to gson.toJson(entry) }
         }
+        if (historySize == 0) {
+            AppLogger.i(TAG, "syncAutoTripsTobridge: autoTripHistory vazio — nenhuma viagem gravada ainda")
+            android.os.Handler(android.os.Looper.getMainLooper()).post { onResult?.invoke(-2) }
+            return
+        }
         if (unsynced.isEmpty()) {
-            AppLogger.i(TAG, "syncAutoTripsTobridge: nenhuma trip pendente para $bridgeUrl")
+            AppLogger.i(TAG, "syncAutoTripsTobridge: todas as ${historySize} trips já sincronizadas com $bridgeUrl")
             android.os.Handler(android.os.Looper.getMainLooper()).post { onResult?.invoke(0) }
             return
         }
@@ -1431,7 +1438,10 @@ class TripManager private constructor() {
             try {
                 val type = object : TypeToken<List<LifetimeCheckpoint>>() {}.type
                 checkpoints.addAll(gson.fromJson<List<LifetimeCheckpoint>>(cpJson, type))
-            } catch (_: Exception) {}
+                AppLogger.i(TAG, "loadFromPrefs: ${checkpoints.size} checkpoints de lifetime carregados")
+            } catch (e: Exception) {
+                AppLogger.e(TAG, "loadFromPrefs: ERRO ao parsear lifetime_checkpoints_json — ${e.message}")
+            }
         }
 
         val atJson = prefs.getString(SharedPreferencesKeys.AUTO_TRIP_HISTORY_JSON, null)
@@ -1439,7 +1449,12 @@ class TripManager private constructor() {
             try {
                 val type = object : TypeToken<List<AutoTripEntry>>() {}.type
                 autoTripHistory.addAll(gson.fromJson<List<AutoTripEntry>>(atJson, type))
-            } catch (_: Exception) {}
+                AppLogger.i(TAG, "loadFromPrefs: ${autoTripHistory.size} auto-trips carregados")
+            } catch (e: Exception) {
+                AppLogger.e(TAG, "loadFromPrefs: ERRO ao parsear auto_trip_history_json — ${e.message}")
+            }
+        } else {
+            AppLogger.i(TAG, "loadFromPrefs: auto_trip_history_json ausente/vazio — sem histórico gravado")
         }
 
         // IDs de viagens já sincronizadas com o bridge

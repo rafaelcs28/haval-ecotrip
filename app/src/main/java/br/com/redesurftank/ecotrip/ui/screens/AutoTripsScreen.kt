@@ -224,7 +224,12 @@ fun AutoTripsScreen(
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 if (syncLabel.isNotEmpty()) {
-                    Text(syncLabel, fontSize = 10.sp, color = if (syncLabel.startsWith("✓")) Green else TextSecondary)
+                    Text(syncLabel, fontSize = 10.sp, color = when {
+                    syncLabel.startsWith("✓") -> Green
+                    syncLabel.startsWith("⚠") -> Color(0xFFFFA726) // laranja
+                    syncLabel.startsWith("✗") -> Color(0xFFEF5350) // vermelho
+                    else -> TextSecondary
+                })
                 }
                 // Botão de sync manual para o bridge (iPhone PWA) — forceAll = true
                 IconButton(onClick = {
@@ -232,9 +237,10 @@ fun AutoTripsScreen(
                     syncLabel = "enviando…"
                     onForceSync { sent ->
                         syncLabel = when {
-                            sent < 0 -> "✗ URL não configurada"
-                            sent == 0 -> "✓ já sincronizado"
-                            else -> "✓ $sent trips → iPhone"
+                            sent == -2 -> "⚠ Sem viagens gravadas"
+                            sent < 0   -> "✗ URL não configurada"
+                            sent == 0  -> "✓ já sincronizado"
+                            else       -> "✓ $sent trips → iPhone"
                         }
                         syncScope.launch {
                             delay(6_000)
