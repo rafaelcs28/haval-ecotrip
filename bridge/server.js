@@ -472,9 +472,11 @@ app.post('/api/push/unsubscribe', (req, res) => {
 const wss     = new WebSocketServer({ server, path: '/ws' });
 const clients = new Set();
 
+const SERVER_START_AT = Date.now();   // timestamp único por processo
+
 wss.on('connection', (ws) => {
   clients.add(ws);
-  ws.send(JSON.stringify({ type: 'full_state', data: state }));
+  ws.send(JSON.stringify({ type: 'full_state', data: state, startedAt: SERVER_START_AT }));
   ws.on('close', () => clients.delete(ws));
   ws.on('error', () => clients.delete(ws));
 });

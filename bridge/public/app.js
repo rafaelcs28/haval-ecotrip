@@ -106,6 +106,17 @@ function connect() {
     try {
       const msg = JSON.parse(evt.data);
       if (msg.type === 'full_state' || msg.type === 'update') {
+        // Detecta reinício do servidor → hard refresh automático
+        if (msg.type === 'full_state' && msg.startedAt) {
+          const prev = sessionStorage.getItem('srv_start');
+          if (prev && prev !== String(msg.startedAt)) {
+            // Servidor reiniciou — busca arquivos novos
+            sessionStorage.setItem('srv_start', msg.startedAt);
+            hardRefresh();
+            return;
+          }
+          sessionStorage.setItem('srv_start', msg.startedAt);
+        }
         deepMerge(state, msg.data);
         lastUpdateMs = Date.now();
         renderAll();
