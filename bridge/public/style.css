@@ -12,8 +12,8 @@
   --yellow:     #FFD60A;
   --red:        #FF5555;
   --tab-h:      50px;
-  --safe-top:   env(safe-area-inset-top, 0px);
-  --safe-bot:   0px; /* Safari browser: sem safe area */
+  --safe-top:   0px;
+  --safe-bot:   0px;
 }
 
 /* ── Reset ───────────────────────────────────────────────────────────────────── */
