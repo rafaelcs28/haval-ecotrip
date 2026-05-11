@@ -87,6 +87,25 @@ function connect() {
         lastUpdateMs = Date.now();
         renderAll();
         try { localStorage.setItem('ecotrip_state', JSON.stringify({ state, ts: lastUpdateMs })); } catch(_) {}
+      } else if (msg.type === 'new_autotrip') {
+        // Nova viagem automática chegou do carro — invalida cache
+        cachedAutoTrips = null;
+        const autoPanel = document.getElementById('panel-auto');
+        if (autoPanel && autoPanel.classList.contains('active')) {
+          // Aba Auto aberta: recarrega direto, silenciosamente
+          loadAutoTrips();
+        } else {
+          // Outra aba: mostra badge (ponto verde) no botão Auto
+          const btn = document.querySelector('[data-panel="auto"]');
+          if (btn && !btn.querySelector('.tab-notif')) {
+            btn.style.position = 'relative';
+            const dot = document.createElement('span');
+            dot.className = 'tab-notif';
+            dot.style.cssText = 'position:absolute;top:3px;right:6px;width:8px;height:8px;' +
+              'background:#39FF88;border-radius:50%;border:2px solid #0f172a;pointer-events:none;';
+            btn.appendChild(dot);
+          }
+        }
       }
     } catch (e) { console.error('WS parse error', e); }
   };
@@ -584,6 +603,8 @@ let cachedAutoTrips = null;
 function loadAutoTrips() {
   // Sempre recarrega ao abrir a aba — garante que dados novos apareçam após sync do carro
   cachedAutoTrips = null;
+  // Limpa badge de notificação (se houver)
+  document.querySelector('[data-panel="auto"] .tab-notif')?.remove();
   const list = document.getElementById('auto-list');
   list.innerHTML = '<div class="empty">Carregando...</div>';
   fetch('/api/autotrips')

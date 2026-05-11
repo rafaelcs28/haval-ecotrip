@@ -348,6 +348,12 @@ app.post('/api/autotrips', (req, res) => {
     }
 
     console.log(`✓ AutoTrip: ${safeId} (${(samples || []).length} amostras)`);
+    // Notifica a PWA em tempo real — qualquer aba aberta recebe o evento imediatamente
+    broadcast('new_autotrip', {
+      tripId:  safeId,
+      startMs: autoTrip.startMs || 0,
+      distKm:  autoTrip.distKm  || 0,
+    });
     res.json({ ok: true });
   } catch (e) {
     console.error('Erro ao salvar auto-trip:', e.message);
