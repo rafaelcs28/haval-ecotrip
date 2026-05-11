@@ -969,7 +969,12 @@ function onPlaybackMove(idx) {
   const s = currentSamples[i];
 
   // Snapshot de valores
-  document.getElementById('snap-spd').textContent  = f1(s.spd) + ' km/h';
+  const spdEl = document.getElementById('snap-spd');
+  if (spdEl) {
+    spdEl.textContent = f1(s.spd) + ' km/h';
+    const spd = s.spd || 0;
+    spdEl.className = 'snap-val ' + (spd > 120 ? 'red' : spd > 80 ? 'orange' : spd > 60 ? 'yellow' : 'green');
+  }
   document.getElementById('snap-ev').textContent   = f1(s.evKw) + ' kW';
   document.getElementById('snap-rpm').textContent  = s.rpm + ' rpm';
   const mm = Math.floor(s.t / 60), ss = s.t % 60;

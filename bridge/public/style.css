@@ -432,7 +432,9 @@ html, body {
 .snap-lbl  { font-size: 9px; color: var(--muted); }
 .snap-val.green  { color: var(--neon); }
 .snap-val.blue   { color: var(--blue); }
+.snap-val.yellow { color: var(--yellow); }
 .snap-val.orange { color: var(--orange); }
+.snap-val.red    { color: var(--red); }
 .snap-val.teal   { color: var(--teal); }
 .chart-section { padding: 10px 12px 4px; }
 .chart-label   { font-size: 10px; font-weight: 600; color: var(--muted); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 4px; }
