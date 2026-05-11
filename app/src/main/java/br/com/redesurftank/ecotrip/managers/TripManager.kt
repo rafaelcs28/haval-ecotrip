@@ -480,6 +480,31 @@ class TripManager private constructor() {
         try { samplesDir.listFiles()?.forEach { it.delete() } } catch (_: Exception) {}
     }
 
+    /** Zera todos os contadores lifetime e limpa os checkpoints de stats. */
+    fun resetLifetime() {
+        synchronized(lock) {
+            lifeFuelL     = 0f
+            lifeEnergyKwh = 0f
+            lifeRegenKwh  = 0f
+            lifeDistKm    = 0f
+            lifeTimeSec   = 0L
+            lifeChargeKwh = 0f
+            lifeChargeSec = 0L
+            checkpoints.clear()
+        }
+        if (::prefs.isInitialized) prefs.edit()
+            .putFloat (SharedPreferencesKeys.LIFETIME_FUEL_L,             0f)
+            .putFloat (SharedPreferencesKeys.LIFETIME_ENERGY_KWH,         0f)
+            .putFloat (SharedPreferencesKeys.LIFETIME_REGEN_KWH,          0f)
+            .putFloat (SharedPreferencesKeys.LIFETIME_DISTANCE_KM,        0f)
+            .putLong  (SharedPreferencesKeys.LIFETIME_TIME_SEC,           0L)
+            .putFloat (SharedPreferencesKeys.LIFETIME_CHARGE_KWH,         0f)
+            .putLong  (SharedPreferencesKeys.LIFETIME_CHARGE_SEC,         0L)
+            .putString(SharedPreferencesKeys.LIFETIME_CHECKPOINTS_JSON, "[]")
+            .apply()
+        AppLogger.i(TAG, "Lifetime resetado pelo usuário.")
+    }
+
     /** Renomeia uma viagem automática identificada pelo startMs. */
     fun renameAutoTripEntry(startMs: Long, name: String) {
         synchronized(lock) {

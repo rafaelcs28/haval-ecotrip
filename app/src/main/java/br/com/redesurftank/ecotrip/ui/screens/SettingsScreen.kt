@@ -563,8 +563,9 @@ fun SettingsScreen(
         // ── Limpar dados ──────────────────────────────────────────────────────
         SectionCard("⚠️  Limpar dados") {
             Text(
-                "Remove permanentemente o histórico de viagens manuais, viagens automáticas e sessões de recarga. " +
-                "Os contadores de Trip A/B e os totais lifetime NÃO são afetados.",
+                "Remove permanentemente o histórico de viagens manuais, viagens automáticas, sessões de recarga " +
+                "e todos os totais lifetime (energia, combustível, distância). " +
+                "Os contadores de Trip A/B em andamento NÃO são afetados.",
                 fontSize = 11.sp,
                 color    = TextSecondary,
             )
@@ -591,7 +592,7 @@ fun SettingsScreen(
             title = { Text("Limpar histórico?", fontWeight = FontWeight.Bold) },
             text  = {
                 Text(
-                    "Serão apagados:\n• Viagens manuais (Trip A/B salvas)\n• Viagens automáticas\n• Sessões de recarga\n\nEssa ação não pode ser desfeita.",
+                    "Serão apagados:\n• Viagens manuais (Trip A/B salvas)\n• Viagens automáticas\n• Sessões de recarga\n• Totais lifetime (energia, combustível, distância, recargas)\n• Checkpoints de estatísticas\n\nEssa ação não pode ser desfeita.",
                     fontSize = 13.sp,
                 )
             },
@@ -601,8 +602,9 @@ fun SettingsScreen(
                         tripManager.clearHistory()
                         tripManager.clearAutoTripHistory()
                         tripManager.clearChargeHistory()
+                        tripManager.resetLifetime()
                         showClearConfirm = false
-                        clearDoneMsg = "✓ Histórico apagado com sucesso."
+                        clearDoneMsg = "✓ Tudo apagado. Começando do zero."
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFB91C1C)),
                 ) { Text("Apagar tudo", color = Color.White) }
