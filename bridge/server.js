@@ -89,9 +89,11 @@ const state = {
   gear:             '--',
   inside_temp:      0,
   outside_temp:     0,
-  charging_state:   'Desconhecido',
-  charge_power_kw:  0,
-  charge_current_a: 0,
+  charging_state:      'Desconhecido',
+  charge_power_kw:     0,
+  charge_session_kwh:  0,
+  charge_remaining_min:0,
+  charge_current_a:    0,
   battery_voltage_v:0,
   battery_current_a:0,
   soc_pct:          0,
@@ -436,8 +438,10 @@ function applyMqttMessage(key, value) {
     case 'inside_temp':       state.inside_temp        = num(value); break;
     case 'outside_temp':      state.outside_temp       = num(value); break;
     case 'charging_state':    state.charging_state     = value; break;
-    case 'charge_power_kw':   state.charge_power_kw    = num(value); break;
-    case 'charge_current_a':  state.charge_current_a   = num(value); break;
+    case 'charge_power_kw':      state.charge_power_kw      = num(value); break;
+    case 'charge_session_kwh':   state.charge_session_kwh   = num(value); break;
+    case 'charge_remaining_min': state.charge_remaining_min = num(value); break;
+    case 'charge_current_a':     state.charge_current_a     = num(value); break;
     case 'battery_voltage_v': state.battery_voltage_v  = num(value); break;
     case 'battery_current_a': state.battery_current_a  = num(value); break;
 

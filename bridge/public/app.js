@@ -256,12 +256,18 @@ function renderDash() {
   const fuelBar = document.getElementById('d-fuel-bar');
   if (fuelBar) fuelBar.style.width = Math.max(0, Math.min(100, fuelPct)) + '%';
 
-  // Recarga
-  const isCharging = s.charge_power_kw > 0.1 || s.charging_state === 'Carregando';
-  const chargeRow = document.getElementById('d-charge-row');
-  if (chargeRow) chargeRow.style.display = isCharging ? 'block' : 'none';
-  setText('d-charge-power', s.charge_power_kw > 0 ? f1(s.charge_power_kw) + ' kW' : '--');
-  setText('d-charge-state', s.charging_state || '--');
+  // Recarga — card dedicado (só aparece quando charging_state === 'Carregando')
+  const isCharging = s.charging_state === 'Carregando';
+  const chargingCard = document.getElementById('d-charging-card');
+  if (chargingCard) chargingCard.style.display = isCharging ? '' : 'none';
+  if (isCharging) {
+    setText('d-chrg-power',   s.charge_power_kw   > 0 ? f1(s.charge_power_kw)    + ' kW'  : '--');
+    setText('d-chrg-session', s.charge_session_kwh > 0 ? f2(s.charge_session_kwh) + ' kWh' : '--');
+    const rem = s.charge_remaining_min || 0;
+    setText('d-chrg-remain', rem > 0
+      ? (rem > 59 ? Math.floor(rem / 60) + 'h ' + (rem % 60) + 'min' : rem + ' min')
+      : '--');
+  }
 
   // Trip A mini
   const ta = s.trip_a || {};

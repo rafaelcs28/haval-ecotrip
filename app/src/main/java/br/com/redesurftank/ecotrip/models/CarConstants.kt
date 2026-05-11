@@ -37,6 +37,9 @@ enum class CarConstants(val value: String) {
     // Charging state — 0=Desconectado, 1=Carregando, 2=Programado, 3=Finalizado, 5=Aguardando liberação
     CAR_EV_INFO_CHARGING_STATE("car.ev_info.charging_state"),
 
+    // Tempo restante de recarga (em minutos)
+    CAR_EV_INFO_CHARGE_REMAINING_TIME("car.ev_info.charge_remaining_time"),
+
     // Vehicle model identification
     CAR_BASIC_VEHICLE_MODEL1("car.basic.vehicle_model1"),
     CAR_BASIC_VEHICLE_MODEL2("car.basic.vehicle_model2"),

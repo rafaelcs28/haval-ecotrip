@@ -68,7 +68,7 @@
         </div>
       </div>
 
-      <!-- Temperatura, Marcha & Recarga -->
+      <!-- Temperatura & Marcha -->
       <div class="card">
         <div class="metrics-row" style="align-items:center">
           <div class="metric">
@@ -78,10 +78,6 @@
           <div class="metric">
             <div class="metric-value muted" id="d-outside">--</div>
             <div class="metric-label">🌤️ Externa</div>
-          </div>
-          <div class="metric">
-            <div class="metric-value teal" id="d-charge-power">--</div>
-            <div class="metric-label">⚡ kW recarga</div>
           </div>
         </div>
         <div class="divider"></div>
@@ -102,11 +98,23 @@
             <div id="d-lock-label" style="font-size:9px;color:var(--muted);margin-top:4px;font-weight:500">--</div>
           </div>
         </div>
-        <div id="d-charge-row" style="display:none">
-          <div class="divider"></div>
-          <div class="charge-badge">
-            <span>⚡</span>
-            <span id="d-charge-state">Carregando</span>
+      </div>
+
+      <!-- Card de Recarga — visível só quando carregando -->
+      <div id="d-charging-card" class="card" style="display:none">
+        <div class="card-title" style="color:var(--teal)">⚡ Carregando</div>
+        <div class="metrics-row">
+          <div class="metric">
+            <div class="metric-value teal" id="d-chrg-power">--</div>
+            <div class="metric-label">Potência</div>
+          </div>
+          <div class="metric">
+            <div class="metric-value green" id="d-chrg-session">--</div>
+            <div class="metric-label">Injetado</div>
+          </div>
+          <div class="metric">
+            <div class="metric-value muted" id="d-chrg-remain">--</div>
+            <div class="metric-label">Restante</div>
           </div>
         </div>
       </div>

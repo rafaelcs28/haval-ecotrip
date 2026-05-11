@@ -369,6 +369,9 @@ class TripManager private constructor() {
 
     fun getChargeHistory(): List<ChargeHistoryEntry> = synchronized(lock) { chargeHistory.toList() }
 
+    /** Para MqttManager: energia injetada na sessão de recarga corrente. */
+    fun getChargeSessionEnergyKwh(): Float = synchronized(lock) { chargeSessionEnergyKwh }
+
     fun clearChargeHistory() {
         synchronized(lock) {
             chargeHistory.clear()

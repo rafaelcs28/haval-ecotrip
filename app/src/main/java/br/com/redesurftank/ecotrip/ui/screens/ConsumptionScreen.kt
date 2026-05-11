@@ -196,6 +196,9 @@ fun ConsumptionScreen() {
                         mqttManager.latestChargingState = value.trim().toIntOrNull() ?: -1
                         syncCharging()
                     }
+                    CarConstants.CAR_EV_INFO_CHARGE_REMAINING_TIME.value -> {
+                        mqttManager.latestChargeRemainingMin = value.trim().toIntOrNull() ?: 0
+                    }
                     else -> tripManager.onDataChanged(key, value)
                 }
             }
@@ -249,6 +252,8 @@ fun ConsumptionScreen() {
                     ?.trim()?.toFloatOrNull()?.let { mqttManager.latestBatteryCurrentA = it }
                 carManager.fetchCurrent(CarConstants.CAR_EV_INFO_CHARGING_STATE.value)
                     ?.trim()?.toIntOrNull()?.let { mqttManager.latestChargingState = it }
+                carManager.fetchCurrent(CarConstants.CAR_EV_INFO_CHARGE_REMAINING_TIME.value)
+                    ?.trim()?.toIntOrNull()?.let { mqttManager.latestChargeRemainingMin = it }
                 // Notifica TripManager com o estado inicial de carga após busca dos valores elétricos
                 syncCharging()
 

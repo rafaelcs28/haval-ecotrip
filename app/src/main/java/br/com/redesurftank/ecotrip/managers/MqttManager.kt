@@ -109,6 +109,7 @@ class MqttManager private constructor() {
     var latestBatteryCurrentA: Float = 0f  // A — corrente do pack (+ descarga, - carga/regen)
     // 0=Desconectado, 1=Carregando, 2=Programado, 3=Finalizado, 5=Aguardando liberação, -1=desconhecido
     var latestChargingState: Int = -1
+    var latestChargeRemainingMin: Int = 0   // minutos restantes de recarga (0 = indisponível)
 
     // Último timestamp em que qualquer dado do carro foi recebido pelo app
     // Usado para saber se o barramento de dados do carro está ativo
@@ -488,7 +489,9 @@ class MqttManager private constructor() {
                 5 -> "Aguardando liberação"
                 else -> "Desconhecido"
             }
-            pubR("charging_state", chargingStateText)
+            pubR("charging_state",       chargingStateText)
+            pubR("charge_session_kwh",   fmt2(TripManager.getInstance().getChargeSessionEnergyKwh()))
+            pubR("charge_remaining_min", latestChargeRemainingMin.toString())
             pub("rolling/kwh_per_100km", fmt2(q.rolling.netKwhPer100km))
             pub("rolling/km_per_l",      fmt2(q.rolling.kmPerL))
             pub("rolling/distance_km",   fmt2(q.rolling.windowKm))
