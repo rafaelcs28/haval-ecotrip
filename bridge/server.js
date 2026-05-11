@@ -238,15 +238,39 @@ app.get('/api/charges', (_req, res) => res.json(chargesArr));
 // ── Admin: restart remoto ─────────────────────────────────────────────────────
 // POST /api/admin/restart  body: { "token": "..." }
 // Token configurável via variável de ambiente ADMIN_TOKEN (padrão: ecotrip-restart)
-app.post('/api/admin/restart', (req, res) => {
+function adminCheckToken(req, res) {
   const token      = req.body?.token || req.query.token;
   const adminToken = process.env.ADMIN_TOKEN || 'ecotrip-restart';
-  if (token !== adminToken) return res.status(401).json({ error: 'unauthorized' });
+  if (token !== adminToken) { res.status(401).json({ error: 'unauthorized' }); return false; }
+  return true;
+}
+
+app.post('/api/admin/restart', (req, res) => {
+  if (!adminCheckToken(req, res)) return;
   res.json({ ok: true, msg: 'reiniciando em 500ms...' });
   setTimeout(() => {
-    console.log('[admin] Restart solicitado remotamente — saindo para pm2 reiniciar');
+    console.log('[admin] Restart solicitado remotamente');
     process.exit(0);
   }, 500);
+});
+
+app.post('/api/admin/update', (req, res) => {
+  if (!adminCheckToken(req, res)) return;
+  const { exec } = require('child_process');
+  const repoDir   = path.join(__dirname, '..');
+  exec('git pull', { cwd: repoDir }, (err, stdout, stderr) => {
+    const out = (stdout || '').trim() || (stderr || '').trim() || '(sem saída)';
+    if (err) {
+      console.error('[admin] git pull falhou:', err.message);
+      return res.json({ ok: false, msg: 'git pull falhou:\n' + out });
+    }
+    console.log('[admin] git pull OK:', out);
+    res.json({ ok: true, msg: out + '\n\nReiniciando em 500ms...' });
+    setTimeout(() => {
+      console.log('[admin] Reiniciando após update');
+      process.exit(0);
+    }, 500);
+  });
 });
 
 // ── Auto-trips + Telemetria ───────────────────────────────────────────────────

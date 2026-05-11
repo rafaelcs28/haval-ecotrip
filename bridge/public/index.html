@@ -352,6 +352,37 @@
 
   </div><!-- /content -->
 
+  <!-- Painel Admin / Configurações -->
+  <div id="panel-admin" class="panel" style="padding:16px;overflow-y:auto">
+    <div style="max-width:480px;margin:0 auto">
+      <h2 style="margin:0 0 16px;font-size:16px;color:#e2e8f0">🛠 Servidor</h2>
+
+      <div style="background:#1e293b;border-radius:10px;padding:14px;margin-bottom:12px">
+        <div style="font-size:11px;color:#94a3b8;margin-bottom:6px">Token de administração</div>
+        <input id="admin-token" type="password"
+          style="width:100%;box-sizing:border-box;background:#0f172a;border:1px solid #334155;border-radius:6px;padding:8px 10px;color:#e2e8f0;font-size:14px"
+          placeholder="ecotrip-restart" />
+        <div style="font-size:10px;color:#475569;margin-top:4px">Salvo localmente no iPhone</div>
+      </div>
+
+      <div style="display:flex;gap:10px;margin-bottom:12px">
+        <button onclick="adminRestart()"
+          style="flex:1;background:#1e40af;border:none;border-radius:8px;padding:12px;color:#e2e8f0;font-size:13px;cursor:pointer">
+          🔄 Reiniciar
+        </button>
+        <button onclick="adminUpdate()"
+          style="flex:1;background:#065f46;border:none;border-radius:8px;padding:12px;color:#e2e8f0;font-size:13px;cursor:pointer">
+          ⬆️ Atualizar + Reiniciar
+        </button>
+      </div>
+
+      <div id="admin-status"
+        style="min-height:40px;background:#0f172a;border-radius:8px;padding:10px 12px;font-size:12px;color:#94a3b8;white-space:pre-wrap;word-break:break-word">
+        Pronto.
+      </div>
+    </div>
+  </div>
+
   <!-- Trip detail overlay (mapa + gráficos) -->
   <div id="trip-detail" style="display:none">
     <div id="trip-detail-header">
@@ -409,6 +440,10 @@
     <button class="tab" data-panel="auto" onclick="switchTab(this, loadAutoTrips)">
       <span class="tab-icon">🗺</span>
       <span class="tab-label">Auto</span>
+    </button>
+    <button class="tab" data-panel="admin" onclick="switchTab(this, initAdmin)">
+      <span class="tab-icon">⚙️</span>
+      <span class="tab-label">Config</span>
     </button>
   </nav>
 

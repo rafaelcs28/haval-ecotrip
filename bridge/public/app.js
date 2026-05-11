@@ -963,3 +963,46 @@ tickLastUpdate();
 
 // Carrega localização do carro no mapa do dashboard (requer Leaflet carregado)
 window.addEventListener('load', () => { setTimeout(initDashMap, 500); });
+
+// ── Admin / Configurações ─────────────────────────────────────────────────────
+
+const ADMIN_TOKEN_KEY = 'ecotrip_admin_token';
+
+function initAdmin() {
+  const saved = localStorage.getItem(ADMIN_TOKEN_KEY);
+  if (saved) document.getElementById('admin-token').value = saved;
+}
+
+function adminGetToken() {
+  const t = document.getElementById('admin-token').value.trim();
+  if (t) localStorage.setItem(ADMIN_TOKEN_KEY, t);
+  return t || 'ecotrip-restart';
+}
+
+function adminSetStatus(msg, ok) {
+  const el = document.getElementById('admin-status');
+  el.textContent = msg;
+  el.style.color = ok === true ? '#4ade80' : ok === false ? '#f87171' : '#94a3b8';
+}
+
+async function adminAction(path, label) {
+  adminSetStatus('⏳ ' + label + '…', null);
+  try {
+    const r    = await fetch(path, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ token: adminGetToken() }),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (r.ok && data.ok) {
+      adminSetStatus('✓ ' + (data.msg || 'OK'), true);
+    } else {
+      adminSetStatus('✗ ' + (data.error || `HTTP ${r.status}`), false);
+    }
+  } catch (e) {
+    adminSetStatus('✗ Sem resposta — servidor pode estar reiniciando…', false);
+  }
+}
+
+function adminRestart() { adminAction('/api/admin/restart', 'Reiniciando'); }
+function adminUpdate()  { adminAction('/api/admin/update',  'Atualizando'); }
