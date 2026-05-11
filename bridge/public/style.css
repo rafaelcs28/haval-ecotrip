@@ -136,6 +136,7 @@ html, body {
   flex-direction: column;
   align-items: center;
   justify-content: center;
+  padding-top: 5px;
   gap: 2px;
   height: var(--tab-h);          /* área de toque — não inclui safe area */
   cursor: pointer;
