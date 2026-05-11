@@ -75,7 +75,7 @@
 
       <!-- Haval H6 — visualização em camadas PNG -->
       <div class="card" style="padding:8px 8px 4px">
-        <div style="width:72%;margin:0 auto">
+        <div style="width:65%;margin:0 auto">
         <div style="position:relative;width:100%;aspect-ratio:794/720;overflow:hidden;border-radius:6px">
           <!-- Base (sempre visível) -->
           <img src="/images/haval_h6/h6.png"
@@ -116,16 +116,21 @@
           <img id="cl-win-rr-ajar" src="/images/haval_h6/vidro_traseiro_direito_entreaberto.png"   style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:contain;display:none">
         </div>
         <!-- Barra de status -->
-        <div style="display:flex;justify-content:space-between;align-items:center;padding:5px 2px 0">
-          <div style="display:flex;align-items:baseline;gap:3px">
-            <span id="d-car-temp-in"  style="font-size:14px;font-weight:700;color:#60a5fa">--°</span>
-            <span style="font-size:9px;color:#4a7aaa">int.</span>
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:4px 2px 0">
+          <!-- Temperatura externa — esquerda -->
+          <div style="display:flex;align-items:baseline;gap:3px;min-width:36px">
+            <span id="d-car-temp-out" style="font-size:13px;font-weight:600;color:#94a3b8">--°</span>
+            <span style="font-size:8px;color:#64748b">ext.</span>
           </div>
-          <div id="d-car-engine-label" style="font-size:10px;color:#475569"></div>
-          <div id="d-car-lock-label"   style="font-size:10px;color:#475569"></div>
-          <div style="display:flex;align-items:baseline;gap:3px">
-            <span id="d-car-temp-out" style="font-size:14px;font-weight:600;color:#94a3b8">--°</span>
-            <span style="font-size:9px;color:#64748b">ext.</span>
+          <!-- Motor + Trava — centro -->
+          <div style="display:flex;gap:10px;align-items:center">
+            <span id="d-car-engine-label" style="font-size:18px;line-height:1"></span>
+            <span id="d-car-lock-label"   style="font-size:18px;line-height:1"></span>
+          </div>
+          <!-- Temperatura interna — direita -->
+          <div style="display:flex;align-items:baseline;gap:3px;min-width:36px;justify-content:flex-end">
+            <span id="d-car-temp-in"  style="font-size:13px;font-weight:700;color:#60a5fa">--°</span>
+            <span style="font-size:8px;color:#4a7aaa">int.</span>
           </div>
         </div>
         </div><!-- /wrapper 72% -->

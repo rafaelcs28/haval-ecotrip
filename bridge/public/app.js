@@ -425,8 +425,9 @@ function renderDash() {
   carLayer('cl-farol-alto', s.high_beam === 'on');
   const engLabel = document.getElementById('d-car-engine-label');
   if (engLabel) {
-    engLabel.textContent = engOn ? '🔴 Motor ligado' : (eng === '0' || eng === 0) ? '⚫ Motor desligado' : '';
-    engLabel.style.color = engOn ? '#f87171' : '#475569';
+    // ⚙️ vermelho = ligado | ⚙️ cinza = desligado | vazio = sem dado
+    engLabel.textContent = engOn ? '⚙️' : (eng === '0' || eng === 0) ? '⚙️' : '';
+    engLabel.style.filter = engOn ? 'sepia(1) saturate(8) hue-rotate(310deg)' : 'grayscale(1) opacity(.4)';
   }
 
   // Trava
@@ -434,9 +435,9 @@ function renderDash() {
   carLayer('cl-trava', lck === 'off');
   const lockLabel = document.getElementById('d-car-lock-label');
   if (lockLabel) {
-    if      (lck === 'off') { lockLabel.textContent = '🔒 Trancado';    lockLabel.style.color = 'var(--teal)'; }
-    else if (lck === 'on')  { lockLabel.textContent = '🔓 Destrancado'; lockLabel.style.color = '#f97316'; }
-    else                     { lockLabel.textContent = ''; }
+    if      (lck === 'off') { lockLabel.textContent = '🔒'; lockLabel.style.filter = 'sepia(1) saturate(6) hue-rotate(130deg)'; }  // teal
+    else if (lck === 'on')  { lockLabel.textContent = '🔓'; lockLabel.style.filter = 'sepia(1) saturate(8) hue-rotate(340deg)'; }  // laranja
+    else                     { lockLabel.textContent = ''; lockLabel.style.filter = ''; }
   }
 
   // Portas — alterna fechada/aberta (sempre uma delas visível)
