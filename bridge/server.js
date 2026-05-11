@@ -394,8 +394,9 @@ app.post('/api/admin/update', (req, res) => {
 });
 
 app.post('/api/admin/change-password', (req, res) => {
-  if (!adminCheckToken(req, res)) return;
+  // Autenticação já foi verificada pelo middleware requireAuth
   const { newHash } = req.body || {};
+  console.log('[change-password] recebido newHash length:', newHash?.length, 'body keys:', Object.keys(req.body || {}));
   if (!newHash || typeof newHash !== 'string' || newHash.length < 4) {
     return res.status(400).json({ error: 'Nova senha muito curta (mínimo 4 caracteres)' });
   }
@@ -407,10 +408,9 @@ app.post('/api/admin/change-password', (req, res) => {
     .join('\n').trimEnd();
   envContent += '\nBRIDGE_TOKEN_HASH=' + newHash + '\n';
   fs.writeFileSync(envPath, envContent, 'utf8');
-  // Atualiza em memória imediatamente (sem precisar reiniciar para o hash novo valer)
   BRIDGE_TOKEN_HASH = newHash;
+  console.log('[admin] Senha alterada. Novo BRIDGE_TOKEN_HASH:', newHash.substring(0, 8) + '…');
   res.json({ ok: true, msg: 'Senha alterada com sucesso.' });
-  console.log('[admin] Senha de acesso alterada pelo usuário.');
 });
 
 app.post('/api/admin/clear-history', (req, res) => {

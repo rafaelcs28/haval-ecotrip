@@ -65,12 +65,16 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // Wrapper de fetch que injeta o token e redireciona 401 para o login
-function apiFetch(url, opts = {}) {
+// skipLoginRedirect: true → não redireciona, só lança o erro (usado em change-password)
+function apiFetch(url, opts = {}, skipLoginRedirect = false) {
   if (bridgeToken) {
     opts.headers = { ...(opts.headers || {}), 'Authorization': 'Bearer ' + bridgeToken };
   }
   return fetch(url, opts).then(r => {
-    if (r.status === 401) { showLogin('Sessão expirada. Digite a senha novamente.'); throw new Error('unauthorized'); }
+    if (r.status === 401) {
+      if (!skipLoginRedirect) showLogin('Sessão expirada. Digite a senha novamente.');
+      throw new Error('unauthorized');
+    }
     return r;
   });
 }
@@ -1207,7 +1211,7 @@ async function changePassword() {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify({ newHash }),
-    });
+    }, true /* não redireciona para login em 401 */);
     const data = await r.json().catch(() => ({}));
     if (r.ok && data.ok) {
       // Atualiza token salvo localmente com o novo hash
@@ -1220,6 +1224,6 @@ async function changePassword() {
       setCpStatus('✗ ' + (data.error || `HTTP ${r.status}`), false);
     }
   } catch (e) {
-    if (e.message !== 'unauthorized') setCpStatus('✗ Erro ao comunicar com o servidor.', false);
+    setCpStatus('✗ ' + (e.message === 'unauthorized' ? 'Sessão expirada — entre novamente.' : 'Erro ao comunicar com o servidor.'), false);
   }
 }
