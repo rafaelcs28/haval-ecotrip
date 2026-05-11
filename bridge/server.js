@@ -234,6 +234,21 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.get('/api/state',  (_req, res) => res.json(state));
 app.get('/api/trips',   (_req, res) => res.json(getTrips()));
 app.get('/api/charges', (_req, res) => res.json(chargesArr));
+
+// ── Admin: restart remoto ─────────────────────────────────────────────────────
+// POST /api/admin/restart  body: { "token": "..." }
+// Token configurável via variável de ambiente ADMIN_TOKEN (padrão: ecotrip-restart)
+app.post('/api/admin/restart', (req, res) => {
+  const token      = req.body?.token || req.query.token;
+  const adminToken = process.env.ADMIN_TOKEN || 'ecotrip-restart';
+  if (token !== adminToken) return res.status(401).json({ error: 'unauthorized' });
+  res.json({ ok: true, msg: 'reiniciando em 500ms...' });
+  setTimeout(() => {
+    console.log('[admin] Restart solicitado remotamente — saindo para pm2 reiniciar');
+    process.exit(0);
+  }, 500);
+});
+
 // ── Auto-trips + Telemetria ───────────────────────────────────────────────────
 
 app.post('/api/autotrips', (req, res) => {
