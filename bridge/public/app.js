@@ -405,11 +405,21 @@ function renderDash() {
   const odo = s.odometer_km || 0;
   setText('d-odometer', odo > 0 ? Math.round(odo).toLocaleString('pt-BR') : '--');
 
-  // Bateria 12V
+  // Bateria 12V — cor por faixa de carga
   const b12 = s.batt_12v_pct || 0;
   setText('d-batt12v', b12 > 0 ? Math.round(b12) + '%' : '--%');
+  const b12Color = b12 >= 90 ? '#39FF88'   // verde
+                 : b12 >= 80 ? '#FFD60A'   // amarelo
+                 : b12 >= 70 ? '#FF5F1F'   // laranja
+                 : b12 >  0  ? '#f87171'   // vermelho
+                 :             '#475569';  // sem dado
   const b12Bar = document.getElementById('d-batt12v-bar');
-  if (b12Bar) b12Bar.style.width = Math.max(0, Math.min(100, b12)) + '%';
+  if (b12Bar) {
+    b12Bar.style.width      = Math.max(0, Math.min(100, b12)) + '%';
+    b12Bar.style.background = b12 > 0 ? b12Color : '';
+  }
+  const b12ValEl = document.getElementById('d-batt12v');
+  if (b12ValEl) b12ValEl.style.color = b12Color;
 
   // SOC
   const soc = s.soc_pct || s.trip_a?.soc_current || 0;
