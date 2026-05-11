@@ -478,9 +478,9 @@ class MqttManager private constructor() {
             pubR("battery_voltage_v", fmt2(latestBatteryVoltageV))
             pubR("battery_current_a", fmt2(latestBatteryCurrentA))
             // Potência de recarga: apenas quando charging_state == 1 (Carregando)
-            // Corrente de recarga chega negativa do carro; inverte sinal para kW positivo
+            // Corrente e tensão chegam positivas do carro durante recarga
             val chargePowerKw = if (latestChargingState == 1 && latestBatteryVoltageV > 0f)
-                latestChargeCurrentA * latestBatteryVoltageV / 1000f * -1f else 0f
+                latestChargeCurrentA * latestBatteryVoltageV / 1000f else 0f
             pubR("charge_power_kw",   fmt2(chargePowerKw))
             // Estado de recarga em texto legível
             val chargingStateText = when (latestChargingState) {
