@@ -73,6 +73,25 @@
         </div>
       </div>
 
+      <!-- Card de Recarga — visível só quando carregando -->
+      <div id="d-charging-card" class="card" style="display:none">
+        <div class="card-title" style="color:var(--teal)">⚡ Carregando</div>
+        <div class="metrics-row">
+          <div class="metric">
+            <div class="metric-value teal" id="d-chrg-power">--</div>
+            <div class="metric-label">Potência</div>
+          </div>
+          <div class="metric">
+            <div class="metric-value green" id="d-chrg-session">--</div>
+            <div class="metric-label">Injetado</div>
+          </div>
+          <div class="metric">
+            <div class="metric-value muted" id="d-chrg-remain">--</div>
+            <div class="metric-label">Restante</div>
+          </div>
+        </div>
+      </div>
+
       <!-- Haval H6 — visualização em camadas PNG -->
       <div class="card" style="padding:8px 8px 4px">
         <div style="width:65%;margin:0 auto">
@@ -134,25 +153,6 @@
           </div>
         </div>
         </div><!-- /wrapper 72% -->
-      </div>
-
-      <!-- Card de Recarga — visível só quando carregando -->
-      <div id="d-charging-card" class="card" style="display:none">
-        <div class="card-title" style="color:var(--teal)">⚡ Carregando</div>
-        <div class="metrics-row">
-          <div class="metric">
-            <div class="metric-value teal" id="d-chrg-power">--</div>
-            <div class="metric-label">Potência</div>
-          </div>
-          <div class="metric">
-            <div class="metric-value green" id="d-chrg-session">--</div>
-            <div class="metric-label">Injetado</div>
-          </div>
-          <div class="metric">
-            <div class="metric-value muted" id="d-chrg-remain">--</div>
-            <div class="metric-label">Restante</div>
-          </div>
-        </div>
       </div>
 
       <!-- Mapa — última localização conhecida do carro -->
