@@ -567,9 +567,11 @@ function renderDash() {
     if (psi > 0) {
       psiEl.textContent = psi.toFixed(1);
       const alert = psi < 34 || psi > 40;
-      const color = alert ? '#f87171' : '#60a5fa';
-      psiEl.style.color = color;
-      if (card) card.style.borderLeft = alert ? `3px solid #f87171` : '3px solid transparent';
+      psiEl.style.color = alert ? '#f87171' : '#60a5fa';
+      if (card) {
+        card.style.border      = alert ? '1.5px solid #f87171'         : '1.5px solid #334155';
+        card.style.background  = alert ? 'rgba(127,29,29,0.80)'        : 'rgba(9,18,36,0.85)';
+      }
     } else {
       psiEl.textContent = '--';
       psiEl.style.color = '#475569';
