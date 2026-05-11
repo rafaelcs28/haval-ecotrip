@@ -73,35 +73,114 @@
         </div>
       </div>
 
-      <!-- Temperatura & Marcha -->
-      <div class="card">
-        <div class="metrics-row" style="align-items:center">
-          <div class="metric">
-            <div class="metric-value blue" id="d-inside">--</div>
-            <div class="metric-label">🌡️ Interna</div>
-          </div>
-          <div class="metric">
-            <div class="metric-value muted" id="d-outside">--</div>
-            <div class="metric-label">🌤️ Externa</div>
-          </div>
-        </div>
-        <div class="divider"></div>
-        <div style="display:flex;justify-content:space-around;padding:4px 0">
-          <div style="text-align:center">
-            <div id="d-engine-icon" style="color:var(--muted);line-height:1">
-              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>
-            </div>
-            <div id="d-engine-label" style="font-size:9px;color:var(--muted);margin-top:4px;font-weight:500">--</div>
-          </div>
-          <div style="text-align:center">
-            <div id="d-lock-icon" style="color:var(--muted);line-height:1">
-              <!-- porta de carro fechada -->
-              <svg id="d-door-closed" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="8" y1="5" x2="8" y2="12"/><circle cx="17" cy="16" r="1.2" fill="currentColor" stroke="none"/></svg>
-              <!-- porta de carro aberta -->
-              <svg id="d-door-open" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none"><line x1="4" y1="5" x2="4" y2="21"/><line x1="3" y1="21" x2="21" y2="21"/><path d="M4 5l15 3v13"/><line x1="4" y1="12" x2="19" y2="13.8"/><circle cx="16" cy="17" r="1.2" fill="currentColor" stroke="none"/></svg>
-            </div>
-            <div id="d-lock-label" style="font-size:9px;color:var(--muted);margin-top:4px;font-weight:500">--</div>
-          </div>
+      <!-- Haval H6 — visualização do veículo -->
+      <div class="card" style="padding:10px 8px 6px">
+        <svg id="d-car-svg" viewBox="0 0 300 100" xmlns="http://www.w3.org/2000/svg"
+             style="width:100%;display:block;overflow:visible">
+          <defs>
+            <filter id="hl-glow" x="-80%" y="-80%" width="260%" height="260%">
+              <feGaussianBlur in="SourceGraphic" stdDeviation="4" result="blur"/>
+              <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+            </filter>
+          </defs>
+
+          <!-- Sombra no chão -->
+          <ellipse cx="147" cy="97" rx="112" ry="4" fill="rgba(0,0,0,0.28)"/>
+
+          <!-- RODAS (desenhadas atrás da carroceria) -->
+          <circle cx="215" cy="83" r="15" fill="#111827" stroke="#1e2d3e" stroke-width="2.5"/>
+          <circle cx="215" cy="83" r="8"  fill="#0c1525" stroke="#2d3c4e" stroke-width="1.5"/>
+          <line x1="215" y1="75" x2="215" y2="91" stroke="#2a3a4c" stroke-width="1.5"/>
+          <line x1="207" y1="83" x2="223" y2="83" stroke="#2a3a4c" stroke-width="1.5"/>
+
+          <circle cx="73"  cy="83" r="15" fill="#111827" stroke="#1e2d3e" stroke-width="2.5"/>
+          <circle cx="73"  cy="83" r="8"  fill="#0c1525" stroke="#2d3c4e" stroke-width="1.5"/>
+          <line x1="73"  y1="75" x2="73"  y2="91" stroke="#2a3a4c" stroke-width="1.5"/>
+          <line x1="65"  y1="83" x2="81"  y2="83" stroke="#2a3a4c" stroke-width="1.5"/>
+
+          <!-- CARROCERIA principal — perfil SUV H6 (frente à esquerda) -->
+          <path d="M 18 74 L 11 61 L 11 49 L 20 39 L 44 25 L 68 15 L 94 10 L 194 10 L 218 15 L 238 26 L 248 43 L 252 62 L 252 74 Q 250 81 244 81 L 236 81 L 106 81 L 58 81 Q 44 81 30 76 Z"
+                fill="#162840" stroke="#1e3a5a" stroke-width="1.5"/>
+
+          <!-- Vinco do capô -->
+          <path d="M 20 53 Q 36 44 52 39" stroke="#1a3450" stroke-width="1" fill="none"/>
+
+          <!-- PARA-BRISA -->
+          <path d="M 46 27 L 70 17 L 94 12 L 120 12 L 120 44 L 46 44 Z"
+                fill="#091e38" stroke="#163252" stroke-width="1"/>
+          <!-- Reflexo sutil -->
+          <path d="M 51 29 L 74 19 L 80 25 L 57 35 Z" fill="rgba(255,255,255,0.04)"/>
+
+          <!-- JANELA porta dianteira -->
+          <rect x="124" y="12" width="56" height="32" rx="2"
+                fill="#091e38" stroke="#163252" stroke-width="1"/>
+
+          <!-- JANELA porta traseira -->
+          <rect x="184" y="12" width="42" height="32" rx="2"
+                fill="#091e38" stroke="#163252" stroke-width="1"/>
+
+          <!-- JANELA traseira (quarto) -->
+          <path d="M 230 14 L 243 26 L 241 44 L 230 44 Z"
+                fill="#091e38" stroke="#163252" stroke-width="1"/>
+
+          <!-- COLUNAS B e C -->
+          <rect x="119" y="10" width="6" height="71" fill="#0d1b2e"/>
+          <rect x="183" y="10" width="6" height="71" fill="#0d1b2e"/>
+
+          <!-- RACK de teto -->
+          <rect x="96" y="7" width="96" height="4" rx="2" fill="#1a3050"/>
+
+          <!-- RETROVISOR -->
+          <path d="M 42 35 L 52 33 L 50 42 L 38 42 Z" fill="#1a3050" stroke="#1e3a5a" stroke-width="1"/>
+
+          <!-- MAÇANETAS -->
+          <rect x="100" y="59" width="14" height="3" rx="1.5" fill="#1e3358"/>
+          <rect x="157" y="59" width="14" height="3" rx="1.5" fill="#1e3358"/>
+
+          <!-- FARÓIS dianteiros (frente esquerda) -->
+          <rect x="10" y="47" width="9" height="4"  rx="1.5" fill="#4DBBFF" opacity="0.25"/>
+          <rect id="d-car-hl" x="10" y="50" width="9" height="14" rx="2" fill="#4DBBFF" opacity="0.4"/>
+          <!-- Feixes de luz — visíveis com motor ligado -->
+          <g id="d-car-hl-beam" opacity="0">
+            <line x1="10" y1="53" x2="0" y2="46" stroke="#4DBBFF" stroke-width="1.5" stroke-linecap="round"/>
+            <line x1="10" y1="57" x2="0" y2="57" stroke="#4DBBFF" stroke-width="2"   stroke-linecap="round"/>
+            <line x1="10" y1="61" x2="0" y2="68" stroke="#4DBBFF" stroke-width="1.5" stroke-linecap="round"/>
+          </g>
+
+          <!-- LANTERNAS traseiras -->
+          <rect x="244" y="47" width="7" height="4"  rx="1.5" fill="#dd3333" opacity="0.25"/>
+          <rect x="244" y="50" width="7" height="17" rx="2"   fill="#dd3333" opacity="0.45"/>
+
+          <!-- Para-choque dianteiro (detalhe) -->
+          <rect x="10" y="39" width="9" height="8" rx="1" fill="#0d1c30"/>
+
+          <!-- ARCOS de porta aberta — laranja, visíveis quando destrancado -->
+          <path id="d-car-door-f" d="M 119 70 Q 100 63 104 52"
+                fill="none" stroke="#FF8C00" stroke-width="2.5" stroke-linecap="round" opacity="0"/>
+          <path id="d-car-door-r" d="M 183 70 Q 200 63 197 52"
+                fill="none" stroke="#FF8C00" stroke-width="2.5" stroke-linecap="round" opacity="0"/>
+
+          <!-- TEMPERATURA INTERNA (dentro da janela dianteira) -->
+          <text id="d-car-temp-in" x="152" y="32"
+                text-anchor="middle" font-family="system-ui,-apple-system,sans-serif"
+                font-size="13" font-weight="700" fill="#60a5fa">--°</text>
+          <text x="152" y="42"
+                text-anchor="middle" font-family="system-ui,-apple-system,sans-serif"
+                font-size="7" fill="#2a4a7a">int.</text>
+
+          <!-- TEMPERATURA EXTERNA (fora do carro, à direita) -->
+          <text id="d-car-temp-out" x="273" y="59"
+                text-anchor="middle" font-family="system-ui,-apple-system,sans-serif"
+                font-size="13" font-weight="600" fill="#94a3b8">--°</text>
+          <text x="273" y="69"
+                text-anchor="middle" font-family="system-ui,-apple-system,sans-serif"
+                font-size="7" fill="#475569">ext.</text>
+        </svg>
+
+        <!-- Barra de status: motor e trava -->
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:2px 4px 0;margin-top:2px">
+          <div id="d-car-engine-label" style="font-size:10px;color:#475569"></div>
+          <div id="d-car-lock-label"   style="font-size:10px;color:#475569"></div>
         </div>
       </div>
 

@@ -284,8 +284,8 @@ function renderCarVersion() {
 
 function renderDash() {
   const s = state;
-  setText('d-inside',  s.inside_temp  ? f1(s.inside_temp)  + '°C' : '--');
-  setText('d-outside', s.outside_temp ? f1(s.outside_temp) + '°C' : '--');
+  setText('d-car-temp-in',  s.inside_temp  ? f1(s.inside_temp)  + '°' : '--°');
+  setText('d-car-temp-out', s.outside_temp ? f1(s.outside_temp) + '°' : '--°');
 
   // SOC
   const soc = s.soc_pct || s.trip_a?.soc_current || 0;
@@ -377,52 +377,35 @@ function renderDash() {
   setText('d-tripb-cost', tb.cost_brl      > 0 ? 'R$ ' + f2(tb.cost_brl)   : '--');
   setClass('d-tripb-kwh', eff(tb.kwh_per_100km));
 
-  // Motor — ícone power: cinza=desligado, vermelho=ligado
-  const eng      = s.engine_state;
-  const engIcon  = document.getElementById('d-engine-icon');
-  const engLabel = document.getElementById('d-engine-label');
-  if (engIcon && engLabel) {
-    if (eng === '1' || eng === 1) {
-      engIcon.style.color  = 'var(--red)';
-      engLabel.textContent = 'Ligado';
-      engLabel.style.color = 'var(--red)';
-    } else if (eng === '0' || eng === 0) {
-      engIcon.style.color  = 'var(--muted)';
-      engLabel.textContent = 'Desligado';
-      engLabel.style.color = 'var(--muted)';
-    } else {
-      engIcon.style.color  = 'var(--muted)';
-      engLabel.textContent = '--';
-      engLabel.style.color = 'var(--muted)';
-    }
+  // Motor — SVG faróis: off=opaco, on=brilhante com glow
+  const eng    = s.engine_state;
+  const engOn  = eng === '1' || eng === 1;
+  const hlEl   = document.getElementById('d-car-hl');
+  const beamEl = document.getElementById('d-car-hl-beam');
+  if (hlEl) {
+    hlEl.setAttribute('opacity', engOn ? '0.95' : '0.4');
+    if (engOn) hlEl.setAttribute('filter', 'url(#hl-glow)');
+    else       hlEl.removeAttribute('filter');
+  }
+  if (beamEl) beamEl.setAttribute('opacity', engOn ? '1' : '0');
+  const engLabel = document.getElementById('d-car-engine-label');
+  if (engLabel) {
+    engLabel.textContent = engOn ? '🔴 Motor ligado' : (eng === '0' || eng === 0) ? '⚫ Motor desligado' : '';
+    engLabel.style.color = engOn ? '#f87171' : '#475569';
   }
 
-  // Trava — ícone porta de carro: fechada=teal, aberta=laranja
-  const lck       = s.lock_state;
-  const lockIcon  = document.getElementById('d-lock-icon');
-  const lockLabel = document.getElementById('d-lock-label');
-  const dClosed   = document.getElementById('d-door-closed');
-  const dOpen     = document.getElementById('d-door-open');
-  if (lockIcon && lockLabel) {
-    if (lck === 'off') {
-      lockIcon.style.color  = 'var(--teal)';
-      lockLabel.textContent = 'Trancado';
-      lockLabel.style.color = 'var(--teal)';
-      if (dClosed) dClosed.style.display = '';
-      if (dOpen)   dOpen.style.display   = 'none';
-    } else if (lck === 'on') {
-      lockIcon.style.color  = 'var(--orange)';
-      lockLabel.textContent = 'Aberto';
-      lockLabel.style.color = 'var(--orange)';
-      if (dClosed) dClosed.style.display = 'none';
-      if (dOpen)   dOpen.style.display   = '';
-    } else {
-      lockIcon.style.color  = 'var(--muted)';
-      lockLabel.textContent = '--';
-      lockLabel.style.color = 'var(--muted)';
-      if (dClosed) dClosed.style.display = '';
-      if (dOpen)   dOpen.style.display   = 'none';
-    }
+  // Trava — SVG arcos de portas: fechado=invisível, aberto=laranja
+  const lck  = s.lock_state;
+  const dF   = document.getElementById('d-car-door-f');
+  const dR   = document.getElementById('d-car-door-r');
+  const open = lck === 'on';
+  if (dF) dF.setAttribute('opacity', open ? '1' : '0');
+  if (dR) dR.setAttribute('opacity', open ? '1' : '0');
+  const lockLabel = document.getElementById('d-car-lock-label');
+  if (lockLabel) {
+    if      (lck === 'off') { lockLabel.textContent = '🔒 Trancado';    lockLabel.style.color = 'var(--teal)'; }
+    else if (lck === 'on')  { lockLabel.textContent = '🔓 Destrancado'; lockLabel.style.color = '#f97316'; }
+    else                     { lockLabel.textContent = ''; }
   }
 
   // Desde última partida (rolling)
