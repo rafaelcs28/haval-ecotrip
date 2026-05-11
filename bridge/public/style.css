@@ -11,7 +11,7 @@
   --border:     #0F1520;
   --yellow:     #FFD60A;
   --red:        #FF5555;
-  --tab-h:      40px;
+  --tab-h:      36px;
   --safe-top:   env(safe-area-inset-top, 0px);
   --safe-bot:   env(safe-area-inset-bottom, 0px);
 }
@@ -136,7 +136,6 @@ html, body {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding-top: 10px;
   gap: 2px;
   height: var(--tab-h);          /* área de toque — não inclui safe area */
   cursor: pointer;
