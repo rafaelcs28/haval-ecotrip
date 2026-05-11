@@ -152,6 +152,8 @@ const state = {
   charge_power_kw:     0,
   charge_session_kwh:  0,
   charge_remaining_min:0,
+  price_gas_per_l:     0,
+  price_kwh:           0,
   charge_current_a:    0,
   battery_voltage_v:0,
   battery_current_a:0,
@@ -600,6 +602,8 @@ function applyMqttMessage(key, value) {
     case 'charge_power_kw':      state.charge_power_kw      = num(value); break;
     case 'charge_session_kwh':   state.charge_session_kwh   = num(value); break;
     case 'charge_remaining_min': state.charge_remaining_min = num(value); break;
+    case 'price_gas_per_l':      state.price_gas_per_l      = num(value); break;
+    case 'price_kwh':            state.price_kwh            = num(value); break;
     case 'charge_current_a':     state.charge_current_a     = num(value); break;
     case 'battery_voltage_v': state.battery_voltage_v  = num(value); break;
     case 'battery_current_a': state.battery_current_a  = num(value); break;

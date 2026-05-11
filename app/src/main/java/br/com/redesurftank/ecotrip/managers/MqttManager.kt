@@ -536,6 +536,10 @@ class MqttManager private constructor() {
             val ltCostBrl     = lt.fuelL * ltPriceGas + lt.netKwh.coerceAtLeast(0f) * ltPriceEnergy
             pubR("lifetime/cost_brl", fmt2(ltCostBrl))
 
+            // Preços configurados pelo usuário — retain para bridge/PWA sempre ter o valor
+            pubR("price_gas_per_l", fmt2(ltPriceGas))
+            pubR("price_kwh",       fmt2(ltPriceEnergy))
+
             lastSuccessfulPublishMs = System.currentTimeMillis()
             // Publica timestamp ISO para a entidade "Última Atualização" no HA
             val isoNow = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssZ", Locale.getDefault())

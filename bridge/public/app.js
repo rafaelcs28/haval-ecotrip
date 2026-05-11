@@ -1059,33 +1059,13 @@ tickLastUpdate();
 // Carrega localização do carro no mapa do dashboard (requer Leaflet carregado)
 window.addEventListener('load', () => { setTimeout(initDashMap, 500); });
 
-// ── Preços (gasolina + energia) ───────────────────────────────────────────────
-
-const PRICE_GAS_KEY = 'ecotrip_price_gas';
-const PRICE_KWH_KEY = 'ecotrip_price_kwh';
+// ── Preços (gasolina + energia) — vêm do app Android via MQTT ────────────────
 
 function getPrices() {
   return {
-    gas: parseFloat(localStorage.getItem(PRICE_GAS_KEY)) || 0,
-    kwh: parseFloat(localStorage.getItem(PRICE_KWH_KEY)) || 0,
+    gas: state.price_gas_per_l || 0,
+    kwh: state.price_kwh       || 0,
   };
-}
-
-function savePrices() {
-  const gas = parseFloat(document.getElementById('price-gas')?.value) || 0;
-  const kwh = parseFloat(document.getElementById('price-kwh')?.value) || 0;
-  if (gas > 0) localStorage.setItem(PRICE_GAS_KEY, gas);
-  if (kwh > 0) localStorage.setItem(PRICE_KWH_KEY, kwh);
-  // Rerenderiza auto-trips com novos preços
-  if (cachedAutoTrips) renderAutoTrips();
-}
-
-function initPrices() {
-  const { gas, kwh } = getPrices();
-  const gEl = document.getElementById('price-gas');
-  const kEl = document.getElementById('price-kwh');
-  if (gEl && gas > 0) gEl.value = gas;
-  if (kEl && kwh > 0) kEl.value = kwh;
 }
 
 // ── Admin / Configurações ─────────────────────────────────────────────────────
@@ -1095,7 +1075,6 @@ const ADMIN_TOKEN_KEY = 'ecotrip_admin_token';
 function initAdmin() {
   const saved = localStorage.getItem(ADMIN_TOKEN_KEY);
   if (saved) document.getElementById('admin-token').value = saved;
-  initPrices();
 }
 
 function adminGetToken() {
