@@ -362,6 +362,30 @@ app.post('/api/admin/update', (req, res) => {
   });
 });
 
+app.post('/api/admin/clear-history', (req, res) => {
+  if (!adminCheckToken(req, res)) return;
+  try {
+    // 1. Trips manuais
+    tripsMap.clear();
+    fs.writeFileSync(TRIPS_FILE, JSON.stringify({ trips: [] }, null, 2));
+
+    // 2. Recargas
+    chargesArr.length = 0;
+    fs.writeFileSync(CHARGES_FILE, JSON.stringify({ charges: [] }, null, 2));
+
+    // 3. Auto-trips — apaga todos os arquivos da pasta
+    const files = fs.readdirSync(AUTOTRIPS_DIR).filter(f => f.endsWith('.json'));
+    for (const f of files) fs.unlinkSync(path.join(AUTOTRIPS_DIR, f));
+    autoTripsArr.length = 0;
+
+    console.log('[admin] Histórico apagado (trips, charges, auto-trips)');
+    res.json({ ok: true, msg: 'Histórico apagado com sucesso.' });
+  } catch (e) {
+    console.error('[admin] Erro ao apagar histórico:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ── Auto-trips + Telemetria ───────────────────────────────────────────────────
 
 app.post('/api/autotrips', (req, res) => {

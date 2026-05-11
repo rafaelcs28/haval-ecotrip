@@ -1111,6 +1111,11 @@ async function adminAction(path, label) {
 function adminRestart() { adminAction('/api/admin/restart', 'Reiniciando'); }
 function adminUpdate()  { adminAction('/api/admin/update',  'Atualizando'); }
 
+function adminClearHistory() {
+  if (!confirm('Apagar todo o histórico do servidor?\n(trips manuais, auto-trips e recargas)\n\nEssa ação não pode ser desfeita.')) return;
+  adminAction('/api/admin/clear-history', 'Apagando histórico');
+}
+
 function toggleTokenVisibility() {
   const input = document.getElementById('admin-token');
   const btn   = document.getElementById('token-eye');
