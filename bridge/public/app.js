@@ -725,11 +725,14 @@ function renderAutoTrips() {
   }
 
   // Resumo — mesma estrutura 2 linhas do hist
+  const { gas: priceGas, kwh: priceKwh } = getPrices();
   const totDist   = trips.reduce((s, t) => s + (t.distKm  || 0), 0);
   const totFuel   = trips.reduce((s, t) => s + (t.fuelL   || 0), 0);
   const totNetKwh = trips.reduce((s, t) => s + (t.netKwh  || 0), 0);
   const avgKwh100 = totDist > 0.1   ? totNetKwh / totDist * 100 : 0;
   const avgKmL    = totFuel > 0.001 ? totDist   / totFuel       : 0;
+  const totCost   = (priceGas > 0 || priceKwh > 0)
+    ? totFuel * priceGas + totNetKwh * priceKwh : 0;
 
   html += `<div class="charge-summary-card" style="border-color:rgba(77,187,255,.2)">
   <div class="card-title">Resumo — ${trips.length} viagem${trips.length !== 1 ? 'ns' : ''}</div>
@@ -741,7 +744,7 @@ function renderAutoTrips() {
   <div class="metrics-row" style="margin-top:4px">
     <div class="metric"><div class="metric-value orange sm">${totFuel > 0.001 ? f2(totFuel) + ' L' : '--'}</div><div class="metric-label">combustível</div></div>
     <div class="metric"><div class="metric-value teal sm">${totNetKwh > 0.01 ? f2(totNetKwh) + ' kWh' : '--'}</div><div class="metric-label">bat. consumida</div></div>
-    <div class="metric"><div class="metric-value yellow sm">--</div><div class="metric-label">custo</div></div>
+    <div class="metric"><div class="metric-value yellow sm">${totCost > 0 ? 'R$ ' + f2(totCost) : '--'}</div><div class="metric-label">custo</div></div>
   </div>
 </div>`;
 
@@ -762,13 +765,19 @@ function renderAutoTrips() {
     ${tempStr ? `<div class="trip-metric"><div class="trip-metric-val blue">${tempStr}</div><div class="trip-metric-lbl">temp. ext.</div></div>` : ''}
     ${mapsUrl ? `<div class="trip-metric"><a href="${mapsUrl}" target="_blank" style="color:#60a5fa;text-decoration:none;font-size:18px">📍</a><div class="trip-metric-lbl">mapa</div></div>` : ''}
   </div>` : (mapsUrl ? `<div style="text-align:right;margin-top:2px"><a href="${mapsUrl}" target="_blank" style="color:#60a5fa;font-size:11px">📍 mapa</a></div>` : '');
+    const tripCost = (priceGas > 0 || priceKwh > 0)
+      ? (t.fuelL || 0) * priceGas + (t.netKwh || 0) * priceKwh : 0;
+    const costStr = tripCost > 0 ? `<span class="trip-cost">R$ ${f2(tripCost)}</span>` : '';
     return `<div class="trip-item">
   <div class="trip-header">
     <div>
       <div class="trip-name">${startDate}</div>
       <div class="trip-date">${dur}</div>
     </div>
-    <button class="charge-badge" style="cursor:pointer;border:none" onclick="openTripDetail('${t.tripId}')">🗺 Ver rota</button>
+    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">
+      ${costStr}
+      <button class="charge-badge" style="cursor:pointer;border:none" onclick="openTripDetail('${t.tripId}')">🗺 Ver rota</button>
+    </div>
   </div>
   <div class="trip-metrics">
     <div class="trip-metric"><div class="trip-metric-val blue">${distKm}</div><div class="trip-metric-lbl">dist.</div></div>
@@ -1050,6 +1059,35 @@ tickLastUpdate();
 // Carrega localização do carro no mapa do dashboard (requer Leaflet carregado)
 window.addEventListener('load', () => { setTimeout(initDashMap, 500); });
 
+// ── Preços (gasolina + energia) ───────────────────────────────────────────────
+
+const PRICE_GAS_KEY = 'ecotrip_price_gas';
+const PRICE_KWH_KEY = 'ecotrip_price_kwh';
+
+function getPrices() {
+  return {
+    gas: parseFloat(localStorage.getItem(PRICE_GAS_KEY)) || 0,
+    kwh: parseFloat(localStorage.getItem(PRICE_KWH_KEY)) || 0,
+  };
+}
+
+function savePrices() {
+  const gas = parseFloat(document.getElementById('price-gas')?.value) || 0;
+  const kwh = parseFloat(document.getElementById('price-kwh')?.value) || 0;
+  if (gas > 0) localStorage.setItem(PRICE_GAS_KEY, gas);
+  if (kwh > 0) localStorage.setItem(PRICE_KWH_KEY, kwh);
+  // Rerenderiza auto-trips com novos preços
+  if (cachedAutoTrips) renderAutoTrips();
+}
+
+function initPrices() {
+  const { gas, kwh } = getPrices();
+  const gEl = document.getElementById('price-gas');
+  const kEl = document.getElementById('price-kwh');
+  if (gEl && gas > 0) gEl.value = gas;
+  if (kEl && kwh > 0) kEl.value = kwh;
+}
+
 // ── Admin / Configurações ─────────────────────────────────────────────────────
 
 const ADMIN_TOKEN_KEY = 'ecotrip_admin_token';
@@ -1057,6 +1095,7 @@ const ADMIN_TOKEN_KEY = 'ecotrip_admin_token';
 function initAdmin() {
   const saved = localStorage.getItem(ADMIN_TOKEN_KEY);
   if (saved) document.getElementById('admin-token').value = saved;
+  initPrices();
 }
 
 function adminGetToken() {
