@@ -147,9 +147,10 @@ class TelemetryRecorder(private val context: Context) {
     fun bulkPostTrips(
         bridgeUrl:    String,
         trips:        List<Pair<String, String>>,
+        onAllDone:    (ok: Int, fail: Int) -> Unit = { _, _ -> },
         onTripSynced: (String) -> Unit = {},
     ) {
-        if (bridgeUrl.isBlank() || trips.isEmpty()) return
+        if (bridgeUrl.isBlank() || trips.isEmpty()) { onAllDone(0, 0); return }
         scope.launch {
             var ok = 0
             var fail = 0
@@ -179,10 +180,10 @@ class TelemetryRecorder(private val context: Context) {
                     Log.w(TAG, "bulkPost trip $tripId falhou: ${e.message}")
                     fail++
                 }
-                // Pequena pausa entre requisições para não sobrecarregar o bridge
                 delay(80L)
             }
             Log.i(TAG, "bulkPostTrips: $ok OK, $fail falhas (total ${trips.size})")
+            android.os.Handler(android.os.Looper.getMainLooper()).post { onAllDone(ok, fail) }
         }
     }
 

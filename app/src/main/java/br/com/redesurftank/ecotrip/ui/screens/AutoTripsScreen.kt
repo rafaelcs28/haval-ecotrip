@@ -106,7 +106,7 @@ fun AutoTripsScreen(
     minDistKm:      Float = 0f,
     onRename:       (AutoTripEntry, String) -> Unit = { _, _ -> },
     onClear:        () -> Unit,
-    onForceSync:    () -> Unit = {},
+    onForceSync:    (onResult: (Int) -> Unit) -> Unit = {},
     onBack:         () -> Unit,
 ) {
     val context          = LocalContext.current
@@ -226,15 +226,20 @@ fun AutoTripsScreen(
                 if (syncLabel.isNotEmpty()) {
                     Text(syncLabel, fontSize = 10.sp, color = if (syncLabel.startsWith("✓")) Green else TextSecondary)
                 }
-                // Botão de sync manual para o bridge (iPhone PWA)
+                // Botão de sync manual para o bridge (iPhone PWA) — forceAll = true
                 IconButton(onClick = {
+                    if (syncLabel == "enviando…") return@IconButton  // evita double-tap
                     syncLabel = "enviando…"
-                    onForceSync()
-                    syncScope.launch {
-                        delay(4_000)
-                        syncLabel = "✓ sync"
-                        delay(4_000)
-                        syncLabel = ""
+                    onForceSync { sent ->
+                        syncLabel = when {
+                            sent < 0 -> "✗ URL não configurada"
+                            sent == 0 -> "✓ já sincronizado"
+                            else -> "✓ $sent trips → iPhone"
+                        }
+                        syncScope.launch {
+                            delay(6_000)
+                            syncLabel = ""
+                        }
                     }
                 }) {
                     Icon(Icons.Default.Sync, contentDescription = "Sincronizar com iPhone", tint = AccentBlue, modifier = Modifier.size(20.dp))

@@ -674,7 +674,8 @@ function renderLifetimeTab() {
 let cachedAutoTrips = null;
 
 function loadAutoTrips() {
-  if (cachedAutoTrips !== null) { renderAutoTrips(); return; }
+  // Sempre recarrega ao abrir a aba — garante que dados novos apareçam após sync do carro
+  cachedAutoTrips = null;
   const list = document.getElementById('auto-list');
   list.innerHTML = '<div class="empty">Carregando...</div>';
   fetch('/api/autotrips')

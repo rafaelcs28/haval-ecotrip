@@ -385,14 +385,24 @@ class TripManager private constructor() {
 
     /**
      * Sincroniza apenas as viagens ainda não confirmadas com o bridge (iPhone PWA).
-     * Chamado ao abrir a aba de viagens automáticas.
-     * Cada viagem bem-sucedida é marcada no set [bridgeSyncedIds] para não ser reenviada.
+     * Chamado ao abrir a aba de viagens automáticas ou ao tocar no botão de sync.
+     * [forceAll] = true limpa o set de já-sincronizados e reenvia tudo (botão manual).
+     * [onResult] chamado na Main thread com o número de trips enviadas com sucesso,
+     *   ou -1 se a URL não estiver configurada.
      */
-    fun syncAutoTripsTobridge() {
+    fun syncAutoTripsTobridge(
+        forceAll: Boolean = false,
+        onResult: ((Int) -> Unit)? = null,
+    ) {
         val bridgeUrl = getBridgeHttpUrl()
         if (bridgeUrl.isBlank()) {
-            AppLogger.w(TAG, "syncAutoTripsTobridge: Bridge URL não configurado (verifique o host MQTT)")
+            AppLogger.w(TAG, "syncAutoTripsTobridge: Bridge URL não configurado")
+            android.os.Handler(android.os.Looper.getMainLooper()).post { onResult?.invoke(-1) }
             return
+        }
+        if (forceAll) {
+            synchronized(lock) { bridgeSyncedIds.clear() }
+            AppLogger.i(TAG, "syncAutoTripsTobridge: forceAll — IDs limpos, reenviando tudo")
         }
         val unsynced = synchronized(lock) {
             autoTripHistory
@@ -400,11 +410,18 @@ class TripManager private constructor() {
                 .map    { entry -> entry.startMs.toString() to gson.toJson(entry) }
         }
         if (unsynced.isEmpty()) {
-            AppLogger.i(TAG, "syncAutoTripsTobridge: todas as viagens já estão no bridge")
+            AppLogger.i(TAG, "syncAutoTripsTobridge: nenhuma trip pendente para $bridgeUrl")
+            android.os.Handler(android.os.Looper.getMainLooper()).post { onResult?.invoke(0) }
             return
         }
-        AppLogger.i(TAG, "syncAutoTripsTobridge: enviando ${unsynced.size} viagens pendentes para $bridgeUrl")
-        telemetryRecorder?.bulkPostTrips(bridgeUrl, unsynced) { tripIdStr ->
+        AppLogger.i(TAG, "syncAutoTripsTobridge: enviando ${unsynced.size} trips para $bridgeUrl")
+        telemetryRecorder?.bulkPostTrips(
+            bridgeUrl = bridgeUrl,
+            trips     = unsynced,
+            onAllDone = { ok, _ ->
+                onResult?.invoke(ok)   // já é chamado na Main thread pelo TelemetryRecorder
+            },
+        ) { tripIdStr ->
             val ms = tripIdStr.toLongOrNull() ?: return@bulkPostTrips
             synchronized(lock) { bridgeSyncedIds.add(ms) }
             persistSyncedIds()
@@ -460,8 +477,8 @@ class TripManager private constructor() {
         }
         // Inicializa recorder de telemetria (GPS ativado depois via startGps())
         telemetryRecorder = TelemetryRecorder(ctx)
-        // Sincroniza trips pendentes ao iniciar (sem precisar abrir a aba de viagens)
-        syncAutoTripsTobridge()
+        // Sincroniza trips pendentes ao iniciar — silencioso, sem forceAll
+        syncAutoTripsTobridge(forceAll = false)
     }
 
     /** Inicia GPS para telemetria. Chame após permissão concedida. */

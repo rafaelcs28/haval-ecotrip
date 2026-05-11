@@ -462,7 +462,7 @@ fun ConsumptionScreen() {
                 tripManager.clearAutoTripHistory()
                 autoTripEntries = emptyList()
             },
-            onForceSync    = { tripManager.syncAutoTripsTobridge() },
+            onForceSync    = { onResult -> tripManager.syncAutoTripsTobridge(forceAll = true, onResult = onResult) },
             onBack         = { showAutoTrips = false },
         )
         return
