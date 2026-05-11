@@ -570,7 +570,9 @@ class TripManager private constructor() {
         }
         try {
             samplesDir.listFiles()?.forEach { f ->
-                val ts = f.nameWithoutExtension.toLongOrNull() ?: return@forEach
+                val ts = (if (f.name.endsWith("_inprogress.json"))
+                    f.name.removeSuffix("_inprogress.json")
+                else f.nameWithoutExtension).toLongOrNull() ?: return@forEach
                 if (ts < cutoff7d) { f.delete(); AppLogger.i(TAG, "Amostras expiradas apagadas: ${f.name}") }
             }
         } catch (_: Exception) {}
@@ -581,6 +583,29 @@ class TripManager private constructor() {
         }
         // Inicializa recorder de telemetria (GPS ativado depois via startGps())
         telemetryRecorder = TelemetryRecorder(ctx)
+
+        // Se havia um auto-trip em andamento antes do reinício, retoma a gravação.
+        // Carrega as amostras já gravadas em disco (flush a cada 60 s) para preservar a rota.
+        // Arquivos _inprogress de outras sessões (orphans) são apagados.
+        if (autoTripStartMs > 0L) {
+            val inProgressFile = java.io.File(samplesDir, "${autoTripStartMs}_inprogress.json")
+            val preloaded: List<TelemetrySample> = if (inProgressFile.exists()) {
+                try {
+                    val type = object : TypeToken<List<TelemetrySample>>() {}.type
+                    gson.fromJson<List<TelemetrySample>>(inProgressFile.readText(), type)
+                } catch (_: Exception) { emptyList() }
+            } else emptyList()
+            telemetryRecorder?.startRecording(autoTripStartMs, preloaded, inProgressFile)
+            AppLogger.i(TAG, "AutoTrip retomado após reinício: ${preloaded.size} amostras carregadas do disco")
+        }
+        // Limpa arquivos _inprogress órfãos (sessões anteriores abandonadas)
+        try {
+            samplesDir.listFiles { f -> f.name.endsWith("_inprogress.json") }?.forEach { f ->
+                val ts = f.name.removeSuffix("_inprogress.json").toLongOrNull() ?: run { f.delete(); return@forEach }
+                if (ts != autoTripStartMs) f.delete()
+            }
+        } catch (_: Exception) {}
+
         // Sincroniza trips pendentes ao iniciar — silencioso, sem forceAll
         syncAutoTripsTobridge(forceAll = false)
     }
@@ -905,7 +930,8 @@ class TripManager private constructor() {
             .putLong (SharedPreferencesKeys.AUTO_TRIP_START_TIME_SEC, autoTripStartTime)
             .apply()
         autoTripMaxSpeed = 0f
-        telemetryRecorder?.startRecording(autoTripStartMs)
+        val inProgressFile = java.io.File(samplesDir, "${autoTripStartMs}_inprogress.json")
+        telemetryRecorder?.startRecording(autoTripStartMs, flushFile = inProgressFile)
         AppLogger.i(TAG, "AutoTrip iniciado — SOC=${latestSocPct}% fuel=${latestFuelPct}% temp=${latestOutsideTempC}°C")
     }
 
@@ -923,7 +949,10 @@ class TripManager private constructor() {
         }
 
         // Coleta amostras antes de criar a entry — GPS vem do primeiro/último sample com coords válidas
+        val inProgressFile = java.io.File(samplesDir, "${autoTripStartMs}_inprogress.json")
         val telSamples = telemetryRecorder?.stopRecording() ?: emptyList()
+        // Remove arquivo de flush em andamento — viagem finalizada com sucesso
+        try { inProgressFile.delete() } catch (_: Exception) {}
         val startGps   = telSamples.firstOrNull { it.lat != 0.0 || it.lng != 0.0 }
         val endGps     = telSamples.lastOrNull  { it.lat != 0.0 || it.lng != 0.0 }
 

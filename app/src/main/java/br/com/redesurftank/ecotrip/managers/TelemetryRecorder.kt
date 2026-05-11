@@ -8,6 +8,8 @@ import android.location.LocationListener
 import android.location.LocationManager
 import android.util.Log
 import androidx.core.content.ContextCompat
+import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.*
 import org.json.JSONArray
 import org.json.JSONObject
@@ -89,20 +91,42 @@ class TelemetryRecorder(private val context: Context) {
     @Volatile var latestBatteryVoltageV: Float = 0f  // V
 
     // ── Gravação ──────────────────────────────────────────────────────────────
-    private val samples  = mutableListOf<TelemetrySample>()
-    private var startMs  = 0L
+    private val samples   = mutableListOf<TelemetrySample>()
+    private var startMs   = 0L
     @Volatile private var recording = false
     private var sampleJob: Job? = null
-    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val scope    = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val gson     = Gson()
+    /** Arquivo de flush em andamento — nulo quando não está gravando. */
+    private var flushFile: java.io.File? = null
 
-    fun startRecording(startMs: Long) {
+    /**
+     * Inicia (ou retoma após reinício) a gravação de telemetria.
+     *
+     * @param startMs          Timestamp de início do auto-trip (original, não do reinício).
+     * @param preloadedSamples Amostras já salvas em disco antes do reinício do app; serão
+     *                         pré-populadas na lista antes de continuar a gravar.
+     * @param flushFile        Arquivo onde as amostras serão gravadas a cada 60 s para
+     *                         sobreviver a reinícios do app. Null = sem persistência.
+     */
+    fun startRecording(
+        startMs: Long,
+        preloadedSamples: List<TelemetrySample> = emptyList(),
+        flushFile: java.io.File? = null,
+    ) {
         if (recording) return
-        recording    = true
-        this.startMs = startMs
-        synchronized(samples) { samples.clear() }
-        Log.i(TAG, "Gravação de telemetria iniciada")
+        recording       = true
+        this.startMs    = startMs
+        this.flushFile  = flushFile
+        synchronized(samples) {
+            samples.clear()
+            if (preloadedSamples.isNotEmpty()) samples.addAll(preloadedSamples)
+        }
+        val extra = if (preloadedSamples.isNotEmpty()) " (${preloadedSamples.size} amostras recuperadas do disco)" else ""
+        Log.i(TAG, "Gravação de telemetria iniciada$extra")
 
         sampleJob = scope.launch {
+            var ticksSinceFlush = 0
             while (isActive && recording) {
                 val offsetSec = ((System.currentTimeMillis() - this@TelemetryRecorder.startMs) / 1_000L).toInt()
                 val evKw = if (latestBatteryVoltageV > 0f)
@@ -118,16 +142,26 @@ class TelemetryRecorder(private val context: Context) {
                         evKw = evKw,
                     ))
                 }
+
+                // Flush para disco a cada 60 s — garante recuperação após reinício do app
+                if (++ticksSinceFlush >= 60) {
+                    ticksSinceFlush = 0
+                    flushFile?.let { f ->
+                        val snapshot = synchronized(samples) { samples.toList() }
+                        try { f.writeText(gson.toJson(snapshot)) } catch (_: Exception) {}
+                    }
+                }
                 delay(1_000L)
             }
         }
     }
 
-    /** Para a gravação e retorna as amostras coletadas. */
+    /** Para a gravação e retorna as amostras coletadas (inclui amostras pré-carregadas). */
     fun stopRecording(): List<TelemetrySample> {
         recording = false
         sampleJob?.cancel()
-        sampleJob = null
+        sampleJob  = null
+        flushFile  = null
         return synchronized(samples) {
             val result = samples.toList()
             Log.i(TAG, "Gravação encerrada: ${result.size} amostras")
