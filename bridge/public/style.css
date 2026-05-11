@@ -261,8 +261,9 @@ html, body {
   border-radius: 3px;
   transition: width .6s ease;
 }
-.bar-fill.soc  { background: var(--neon); }
-.bar-fill.fuel { background: var(--orange); }
+.bar-fill.soc     { background: var(--neon); }
+.bar-fill.fuel    { background: var(--orange); }
+.bar-fill.batt12v { background: var(--yellow); }
 
 /* ── Recarga ─────────────────────────────────────────────────────────────────── */
 .charge-badge {

@@ -70,6 +70,13 @@
             <div class="bar-track"><div class="bar-fill fuel" id="d-fuel-bar" style="width:0%"></div></div>
             <div id="d-fuel-range" style="font-size:10px;color:var(--orange);text-align:right;margin-top:3px;display:none">~<span id="d-fuel-km">--</span> km térmico</div>
           </div>
+          <div class="bar-item">
+            <div class="bar-header">
+              <span class="bar-label">🔋 Bateria 12V</span>
+              <span class="bar-val" id="d-batt12v">--%</span>
+            </div>
+            <div class="bar-track"><div class="bar-fill batt12v" id="d-batt12v-bar" style="width:0%"></div></div>
+          </div>
         </div>
       </div>
 
@@ -95,6 +102,11 @@
       <!-- Haval H6 — visualização em camadas PNG -->
       <div class="card" style="padding:8px 8px 4px">
         <div style="width:65%;margin:0 auto">
+        <!-- Odômetro total — acima do carro, centro -->
+        <div style="display:flex;justify-content:center;align-items:baseline;gap:3px;padding:0 2px 4px">
+          <span style="font-size:13px;font-weight:600;color:#94a3b8" id="d-odometer">--</span>
+          <span style="font-size:8px;color:#64748b">km</span>
+        </div>
         <div style="position:relative;width:100%;aspect-ratio:794/720;overflow:hidden;border-radius:6px">
           <!-- Base (sempre visível) -->
           <img src="/images/haval_h6/h6.png"

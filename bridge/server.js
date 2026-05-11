@@ -158,6 +158,8 @@ const state = {
   gear:             '--',
   inside_temp:      0,
   outside_temp:     0,
+  odometer_km:         0,    // km total do veículo
+  batt_12v_pct:        0,    // % bateria auxiliar 12V
   charging_state:      'Desconhecido',
   charge_power_kw:     0,
   charge_session_kwh:  0,
@@ -705,6 +707,8 @@ function applyMqttMessage(key, value) {
     case 'charge_current_a':     state.charge_current_a     = num(value); break;
     case 'battery_voltage_v': state.battery_voltage_v  = num(value); break;
     case 'battery_current_a': state.battery_current_a  = num(value); break;
+    case 'odometer_km':       state.odometer_km         = num(value); break;
+    case 'batt_12v_pct':      state.batt_12v_pct        = num(value); break;
 
     // SOC (publicado com retain em trip_a/soc_current)
     case 'trip_a/soc_current':

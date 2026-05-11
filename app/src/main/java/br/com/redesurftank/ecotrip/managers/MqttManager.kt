@@ -109,6 +109,8 @@ class MqttManager private constructor() {
     var latestBatteryVoltageV: Float = 0f  // V — tensão do pack de bateria
     var latestBatteryCurrentA: Float = 0f  // A — corrente DC do pack (power_battery_current)
     var latestMotorPowerKw: Float = 0f     // kW — potência do motor elétrico (motor_power, HCU direto)
+    var latestOdometerKm:   Float = 0f     // km — odômetro total do veículo
+    var latestBatt12vPct:   Float = 0f     // % — carga da bateria auxiliar 12V
     // 0=Desconectado, 1=Carregando, 2=Programado, 3=Finalizado, 5=Aguardando liberação, -1=desconhecido
     var latestChargingState: Int = -1
     var latestChargeRemainingMin: Int = 0   // minutos restantes de recarga (0 = indisponível)
@@ -481,6 +483,8 @@ class MqttManager private constructor() {
             // Potência do motor elétrico — lida diretamente do HCU (car.ev_info.motor_power)
             // Valor positivo = consumo; negativo = regeneração; 0 = sem sinal do HCU
             pubR("motor_power_kw",    fmt2(latestMotorPowerKw))
+            if (latestOdometerKm > 0f) pubR("odometer_km", fmt1(latestOdometerKm))
+            if (latestBatt12vPct > 0f) pubR("batt_12v_pct", fmt1(latestBatt12vPct))
             // Potência de recarga: apenas quando charging_state == 1 (Carregando)
             // Corrente AC (cur_charge_current) × tensão do pack / 1000
             val chargePowerKw = if (latestChargingState == 1 && latestBatteryVoltageV > 0f)

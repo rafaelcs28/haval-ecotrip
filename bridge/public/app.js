@@ -401,6 +401,16 @@ function renderDash() {
   setText('d-car-temp-in',  s.inside_temp  ? f1(s.inside_temp)  + '°' : '--°');
   setText('d-car-temp-out', s.outside_temp ? f1(s.outside_temp) + '°' : '--°');
 
+  // Odômetro total
+  const odo = s.odometer_km || 0;
+  setText('d-odometer', odo > 0 ? Math.round(odo).toLocaleString('pt-BR') : '--');
+
+  // Bateria 12V
+  const b12 = s.batt_12v_pct || 0;
+  setText('d-batt12v', b12 > 0 ? Math.round(b12) + '%' : '--%');
+  const b12Bar = document.getElementById('d-batt12v-bar');
+  if (b12Bar) b12Bar.style.width = Math.max(0, Math.min(100, b12)) + '%';
+
   // SOC
   const soc = s.soc_pct || s.trip_a?.soc_current || 0;
   setText('d-soc', pct(soc));
