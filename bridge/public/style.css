@@ -410,7 +410,7 @@ html, body {
 }
 #trip-detail-title { font-size: 13px; font-weight: 700; color: var(--text); flex: 1; }
 #trip-detail-body  { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; }
-#trip-map          { height: 240px; width: 100%; background: #111; }
+#trip-map          { height: 312px; width: 100%; background: #111; }
 .playback-bar {
   padding: 10px 14px 6px;
   background: var(--card);
