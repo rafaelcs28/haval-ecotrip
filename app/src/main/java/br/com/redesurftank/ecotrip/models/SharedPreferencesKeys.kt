@@ -63,6 +63,10 @@ object SharedPreferencesKeys {
     // Auto-trip display filter
     const val MIN_AUTO_TRIP_DIST_KM  = "min_auto_trip_dist_km"
 
+    // Sessão de recarga em andamento — persiste para sobreviver reinício do app enquanto carregando
+    const val CHARGE_SESSION_ENERGY_KWH = "charge_session_energy_kwh"
+    const val CHARGE_SESSION_SEC        = "charge_session_sec"
+
     // IDs (startMs) de auto-trips já enviados com sucesso ao bridge
     // JSON array de Long — evita re-envio de trips já sincronizados
     const val BRIDGE_SYNCED_TRIP_IDS = "bridge_synced_trip_ids_json"

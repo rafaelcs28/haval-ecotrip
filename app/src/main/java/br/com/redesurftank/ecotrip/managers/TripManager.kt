@@ -338,12 +338,18 @@ class TripManager private constructor() {
             currentChargePowerKw = if (isCharging) maxOf(0f, powerKw) else 0f
 
             if (isCharging && !wasCharging) {
-                // Início de recarga — captura timestamp e SOC inicial
-                chargeSessionStartMs   = System.currentTimeMillis()
-                chargeSessionStartSoc  = latestSocPct
-                chargeSessionEnergyKwh = 0f
-                chargeSessionSec       = 0L
-                AppLogger.i(TAG, "Recarga iniciada — SOC=${latestSocPct}%")
+                // Início (ou retomada) de recarga
+                chargeSessionStartMs  = System.currentTimeMillis()
+                chargeSessionStartSoc = latestSocPct
+                if (chargeSessionEnergyKwh > 0f) {
+                    // App reiniciou com o carro ainda plugado — retoma a sessão persistida
+                    AppLogger.i(TAG, "Recarga retomada após reinício — ${chargeSessionEnergyKwh}kWh já acumulados")
+                } else {
+                    // Sessão genuinamente nova
+                    chargeSessionEnergyKwh = 0f
+                    chargeSessionSec       = 0L
+                    AppLogger.i(TAG, "Recarga iniciada — SOC=${latestSocPct}%")
+                }
             } else if (!isCharging && wasCharging) {
                 // Fim de recarga — salva sessão se suficientemente significativa
                 if (chargeSessionSec >= 60L && chargeSessionEnergyKwh >= 0.05f) {
@@ -360,6 +366,13 @@ class TripManager private constructor() {
                     AppLogger.i(TAG, "Recarga concluída — ${chargeSessionEnergyKwh}kWh em ${chargeSessionSec}s SOC ${chargeSessionStartSoc}→${latestSocPct}%")
                     onChargeSessionCompleted?.invoke(entry)
                 }
+                // Limpa sessão persistida — próxima carga começa do zero
+                chargeSessionEnergyKwh = 0f
+                chargeSessionSec       = 0L
+                if (::prefs.isInitialized) prefs.edit()
+                    .putFloat(SharedPreferencesKeys.CHARGE_SESSION_ENERGY_KWH, 0f)
+                    .putLong (SharedPreferencesKeys.CHARGE_SESSION_SEC,        0L)
+                    .apply()
                 // Persiste lifetime imediatamente (não espera próximo tick)
                 saveToPrefs()
                 AppLogger.i(TAG, "Estado de recarga off — chargeKwh=$lifeChargeKwh chargeSec=$lifeChargeSec")
@@ -491,6 +504,9 @@ class TripManager private constructor() {
             lifeChargeKwh = 0f
             lifeChargeSec = 0L
             checkpoints.clear()
+            // Também zera a sessão de recarga em andamento
+            chargeSessionEnergyKwh = 0f
+            chargeSessionSec       = 0L
         }
         if (::prefs.isInitialized) prefs.edit()
             .putFloat (SharedPreferencesKeys.LIFETIME_FUEL_L,             0f)
@@ -501,6 +517,8 @@ class TripManager private constructor() {
             .putFloat (SharedPreferencesKeys.LIFETIME_CHARGE_KWH,         0f)
             .putLong  (SharedPreferencesKeys.LIFETIME_CHARGE_SEC,         0L)
             .putString(SharedPreferencesKeys.LIFETIME_CHECKPOINTS_JSON, "[]")
+            .putFloat (SharedPreferencesKeys.CHARGE_SESSION_ENERGY_KWH,  0f)
+            .putLong  (SharedPreferencesKeys.CHARGE_SESSION_SEC,         0L)
             .apply()
         AppLogger.i(TAG, "Lifetime resetado pelo usuário.")
     }
@@ -1146,8 +1164,10 @@ class TripManager private constructor() {
                 if (chargeTickCount >= 6) {   // ~30s = 6 ticks × 5s
                     chargeTickCount = 0
                     prefs.edit()
-                        .putFloat(SharedPreferencesKeys.LIFETIME_CHARGE_KWH, lifeChargeKwh)
-                        .putLong (SharedPreferencesKeys.LIFETIME_CHARGE_SEC,  lifeChargeSec)
+                        .putFloat(SharedPreferencesKeys.LIFETIME_CHARGE_KWH,     lifeChargeKwh)
+                        .putLong (SharedPreferencesKeys.LIFETIME_CHARGE_SEC,      lifeChargeSec)
+                        .putFloat(SharedPreferencesKeys.CHARGE_SESSION_ENERGY_KWH, chargeSessionEnergyKwh)
+                        .putLong (SharedPreferencesKeys.CHARGE_SESSION_SEC,        chargeSessionSec)
                         .apply()   // async — ok para tick periódico (saveToPrefs().commit() cuida do fim)
                 }
             } else {
@@ -1535,6 +1555,10 @@ class TripManager private constructor() {
         lifeTimeSec   = prefs.getLong (SharedPreferencesKeys.LIFETIME_TIME_SEC,    0L)
         lifeChargeKwh = prefs.getFloat(SharedPreferencesKeys.LIFETIME_CHARGE_KWH,  0f)
         lifeChargeSec = prefs.getLong (SharedPreferencesKeys.LIFETIME_CHARGE_SEC,   0L)
+
+        // Restaura sessão de recarga ativa se o app reiniciou enquanto o carro estava carregando
+        chargeSessionEnergyKwh = prefs.getFloat(SharedPreferencesKeys.CHARGE_SESSION_ENERGY_KWH, 0f)
+        chargeSessionSec       = prefs.getLong (SharedPreferencesKeys.CHARGE_SESSION_SEC,         0L)
 
         val cpJson = prefs.getString(SharedPreferencesKeys.LIFETIME_CHECKPOINTS_JSON, null)
         if (!cpJson.isNullOrEmpty()) {
