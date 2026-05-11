@@ -427,12 +427,17 @@ function renderDash() {
     else                     { lockLabel.textContent = ''; }
   }
 
-  // Portas
-  carLayer('cl-door-fl', s.door_fl    === 'on');
-  carLayer('cl-door-fr', s.door_fr    === 'on');
-  carLayer('cl-door-rl', s.door_rl    === 'on');
-  carLayer('cl-door-rr', s.door_rr    === 'on');
-  carLayer('cl-trunk',   s.door_trunk === 'on');
+  // Portas — alterna fechada/aberta (sempre uma delas visível)
+  function doorLayer(pos, state) {
+    const open = state === 'on';
+    carLayer(`cl-door-${pos}-c`, !open);
+    carLayer(`cl-door-${pos}-o`,  open);
+  }
+  doorLayer('fl', s.door_fl);
+  doorLayer('fr', s.door_fr);
+  doorLayer('rl', s.door_rl);
+  doorLayer('rr', s.door_rr);
+  carLayer('cl-trunk', s.door_trunk === 'on');
 
   // Teto solar (fechado = '3')
   carLayer('cl-sunroof', s.sunroof != null && s.sunroof !== '3' && s.sunroof !== 3);
