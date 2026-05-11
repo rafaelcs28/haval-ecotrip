@@ -146,6 +146,7 @@ class TelemetryRecorder(private val context: Context) {
      */
     fun bulkPostTrips(
         bridgeUrl:      String,
+        bridgeToken:    String = "",
         trips:          List<Pair<String, String>>,
         onAllDone:      (ok: Int, fail: Int) -> Unit = { _, _ -> },
         samplesProvider:(tripId: String) -> String = { "[]" },
@@ -164,6 +165,7 @@ class TelemetryRecorder(private val context: Context) {
                     conn.apply {
                         requestMethod = "POST"
                         setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                        if (bridgeToken.isNotBlank()) setRequestProperty("Authorization", "Bearer $bridgeToken")
                         doOutput       = true
                         connectTimeout = 8_000
                         readTimeout    = 8_000
@@ -195,6 +197,7 @@ class TelemetryRecorder(private val context: Context) {
      */
     fun postTelemetry(
         bridgeUrl:    String,
+        bridgeToken:  String = "",
         tripId:       String,
         autoTripJson: String,
         samples:      List<TelemetrySample>,
@@ -225,6 +228,7 @@ class TelemetryRecorder(private val context: Context) {
                 conn.apply {
                     requestMethod = "POST"
                     setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                    if (bridgeToken.isNotBlank()) setRequestProperty("Authorization", "Bearer $bridgeToken")
                     doOutput      = true
                     connectTimeout = 15_000
                     readTimeout    = 15_000

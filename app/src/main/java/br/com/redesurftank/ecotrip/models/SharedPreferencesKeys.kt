@@ -105,7 +105,9 @@ object SharedPreferencesKeys {
     const val HA_EXPORT_URL = "ha_export_url"
 
     // URL do Bridge Node.js (iPhone PWA) — configurado manualmente pois pode diferir do broker MQTT
-    const val BRIDGE_URL = "bridge_url"
+    const val BRIDGE_URL   = "bridge_url"
+    // Senha do Bridge — enviada como Authorization: Bearer no sync de auto-trips
+    const val BRIDGE_TOKEN = "bridge_token"
 
     // MQTT
     const val MQTT_ENABLED  = "mqtt_enabled"

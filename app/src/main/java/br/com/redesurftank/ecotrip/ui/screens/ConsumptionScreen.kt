@@ -413,6 +413,11 @@ fun ConsumptionScreen() {
                 tripManager.setMinAutoTripDist(newVal)
             },
             tripManager = tripManager,
+            onClearAll = {
+                history         = emptyList()
+                chargeHistory   = emptyList()
+                autoTripEntries = emptyList()
+            },
             onBack = { showSettings = false },
         )
         return

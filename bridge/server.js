@@ -211,6 +211,11 @@ const state = {
     energy_kwh: 0, regen_kwh: 0, net_kwh: 0, distance_km: 0,
     time_sec: '--', fuel_l: 0, charge_kwh: 0, charge_sec: '--', cost_brl: 0,
   },
+
+  // Timestamps do último "Limpar histórico" — rejeita dados MQTT retained anteriores
+  // a este corte, impedindo que o Android restaure histórico apagado ao reconectar.
+  charges_cleared_at: 0,
+  trips_cleared_at:   0,
 };
 
 // ── Persistência do estado ─────────────────────────────────────────────────────
@@ -428,6 +433,13 @@ app.post('/api/admin/clear-history', (req, res) => {
     const files = fs.readdirSync(AUTOTRIPS_DIR).filter(f => f.endsWith('.json'));
     for (const f of files) fs.unlinkSync(path.join(AUTOTRIPS_DIR, f));
     autoTripsArr.length = 0;
+
+    // 4. Grava timestamp do clear — impede que dados MQTT retained anteriores
+    //    (re-publicados pelo Android ao reconectar) restaurem o histórico apagado.
+    const clearedAt = Date.now();
+    state.charges_cleared_at = clearedAt;
+    state.trips_cleared_at   = clearedAt;
+    fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
 
     console.log('[admin] Histórico apagado (trips, charges, auto-trips)');
     res.json({ ok: true, msg: 'Histórico apagado com sucesso.' });
@@ -756,11 +768,16 @@ function applyMqttMessage(key, value) {
     case 'charging/history': {
       try {
         const parsed = JSON.parse(value);
-        const charges = parsed.charges || [];
+        const all    = parsed.charges || [];
+        // Filtra entradas anteriores ao último "Limpar histórico" para impedir
+        // que o Android restaure dados apagados ao reconectar via MQTT retained.
+        const cutMs  = state.charges_cleared_at || 0;
+        const charges = cutMs > 0 ? all.filter(c => (c.timestamp_ms || 0) > cutMs) : all;
         if (charges.length > 0) {
-          chargesArr = charges;          // substitui inteiro (fonte de verdade = Android)
+          chargesArr = charges;
           scheduleChargesFlush();
-          console.log(`✓ Recargas MQTT: ${charges.length} sessão(ões)`);
+          const skipped = all.length - charges.length;
+          console.log(`✓ Recargas MQTT: ${charges.length} sessão(ões)${skipped > 0 ? ` (${skipped} anteriores ao clear ignoradas)` : ''}`);
         }
       } catch (e) {
         console.error('Erro ao parsear charging/history:', e.message);
@@ -772,10 +789,16 @@ function applyMqttMessage(key, value) {
     case 'trips/history': {
       try {
         const parsed = JSON.parse(value);
-        const trips  = parsed.trips || [];
+        const all    = parsed.trips || [];
+        // Filtra trips anteriores ao último "Limpar histórico"
+        const cutMs  = state.trips_cleared_at || 0;
+        const trips  = cutMs > 0
+          ? all.filter(t => { try { return new Date(t.timestamp).getTime() > cutMs; } catch { return false; } })
+          : all;
         if (trips.length > 0) {
           upsertTrips(trips);
-          console.log(`✓ Histórico MQTT: ${trips.length} trips (total local: ${tripsMap.size})`);
+          const skipped = all.length - trips.length;
+          console.log(`✓ Histórico MQTT: ${trips.length} trips (total local: ${tripsMap.size})${skipped > 0 ? ` (${skipped} anteriores ao clear ignoradas)` : ''}`);
         }
       } catch (e) {
         console.error('Erro ao parsear trips/history:', e.message);

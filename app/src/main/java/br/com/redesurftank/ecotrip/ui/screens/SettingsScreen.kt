@@ -55,6 +55,7 @@ fun SettingsScreen(
     onMinAutoTripDistChange: (Float) -> Unit,
     backupManager: BackupManager,
     tripManager: TripManager,
+    onClearAll: () -> Unit = {},
     onBack: () -> Unit,
 ) {
     var showClearConfirm  by remember { mutableStateOf(false) }
@@ -74,6 +75,7 @@ fun SettingsScreen(
             }
         )
     }
+    var bridgeTokenStr   by remember { mutableStateOf(mqttManager.bridgeToken) }
     val intervalOptions = remember {
         listOf(
             250, 500,
@@ -353,6 +355,15 @@ fun SettingsScreen(
                 }
 
                 Spacer(Modifier.height(2.dp))
+                MqttField("Senha do Bridge (iPhone PWA)", bridgeTokenStr, KeyboardType.Password) { bridgeTokenStr = it }
+                Text(
+                    "Mesma senha configurada no servidor (BRIDGE_TOKEN). Deixe em branco se sem autenticação.",
+                    fontSize   = 10.sp,
+                    color      = TextSecondary,
+                    lineHeight = 14.sp,
+                )
+
+                Spacer(Modifier.height(2.dp))
                 Text("Intervalo de envio", fontSize = 13.sp, color = TextSecondary,
                     fontWeight = FontWeight.SemiBold)
 
@@ -396,7 +407,8 @@ fun SettingsScreen(
                             mqttManager.username                  = username
                             mqttManager.password                  = password
                             mqttManager.prefix                    = prefix.ifEmpty { "haval/ecotrip" }
-                            mqttManager.bridgeUrl = bridgeUrlStr.trim()
+                            mqttManager.bridgeUrl   = bridgeUrlStr.trim()
+                            mqttManager.bridgeToken = bridgeTokenStr.trim()
                             mqttManager.publishIntervalWifiMs     = publishIntervalWifiMs
                             mqttManager.publishIntervalCellularMs = publishIntervalCellularMs
                             mqttManager.saveAndApply()
@@ -603,6 +615,7 @@ fun SettingsScreen(
                         tripManager.clearAutoTripHistory()
                         tripManager.clearChargeHistory()
                         tripManager.resetLifetime()
+                        onClearAll()
                         showClearConfirm = false
                         clearDoneMsg = "✓ Tudo apagado. Começando do zero."
                     },

@@ -451,8 +451,9 @@ class TripManager private constructor() {
         }
         AppLogger.i(TAG, "syncAutoTripsTobridge: enviando ${unsynced.size} trips para $bridgeUrl")
         telemetryRecorder?.bulkPostTrips(
-            bridgeUrl = bridgeUrl,
-            trips     = unsynced,
+            bridgeUrl   = bridgeUrl,
+            bridgeToken = getBridgeToken(),
+            trips       = unsynced,
             onAllDone = { ok, fail ->
                 // -3 = todas as tentativas falharam (rede indisponível ou URL errada)
                 val result = when {
@@ -969,7 +970,7 @@ class TripManager private constructor() {
                 AppLogger.e(TAG, "Erro ao salvar amostras em disco: ${e.message}")
             }
         }
-        telemetryRecorder?.postTelemetry(bridgeUrl, tripId, gson.toJson(entry), telSamples) {
+        telemetryRecorder?.postTelemetry(bridgeUrl, getBridgeToken(), tripId, gson.toJson(entry), telSamples) {
             // Confirmação HTTP 2xx → apaga arquivo local e marca como sincronizado
             try { java.io.File(samplesDir, "$tripId.json").delete() } catch (_: Exception) {}
             synchronized(lock) { bridgeSyncedIds.add(entryStartMs) }
@@ -1506,6 +1507,9 @@ class TripManager private constructor() {
      * O campo explícito é necessário quando o broker MQTT é externo (cloud) e o bridge
      * roda localmente (ex.: Mac Mini / Raspberry Pi na rede local).
      */
+    private fun getBridgeToken(): String =
+        prefs.getString(SharedPreferencesKeys.BRIDGE_TOKEN, "") ?: ""
+
     private fun getBridgeHttpUrl(): String {
         // 1. URL explícita configurada pelo usuário (campo nas configurações)
         val explicit = prefs.getString(SharedPreferencesKeys.BRIDGE_URL, "") ?: ""
