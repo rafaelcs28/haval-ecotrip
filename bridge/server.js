@@ -60,6 +60,30 @@ async function sendPush(title, body) {
 let prevChargingState  = null;
 let chargeStartTimer   = null;
 
+// ── Alerta de pressão de pneus ────────────────────────────────────────────────
+// Os valores chegam em kPa (apesar do nome "_psi" na entidade do HA)
+const TYRE_PSI_MIN = 35;   // abaixo disso → alerta
+const TYRE_PSI_MAX = 40;   // acima disso  → alerta
+const tyreAlertSent = {};   // evita spam: chave = 'FL_low' | 'FL_high' etc.
+function checkTyrePressure(pos, kpa) {
+  if (!kpa || kpa < 10) return;   // valor inválido ou zero
+  const psi = kpa / 6.895;
+  const lowKey  = `${pos}_low`;
+  const highKey = `${pos}_high`;
+  if (psi < TYRE_PSI_MIN && !tyreAlertSent[lowKey]) {
+    tyreAlertSent[lowKey] = true;
+    delete tyreAlertSent[highKey];
+    sendPush('⚠️ Pneu com pressão baixa', `${pos}: ${psi.toFixed(1)} PSI (mín ${TYRE_PSI_MIN} PSI)`);
+  } else if (psi > TYRE_PSI_MAX && !tyreAlertSent[highKey]) {
+    tyreAlertSent[highKey] = true;
+    delete tyreAlertSent[lowKey];
+    sendPush('⚠️ Pneu com pressão alta', `${pos}: ${psi.toFixed(1)} PSI (máx ${TYRE_PSI_MAX} PSI)`);
+  } else if (psi >= TYRE_PSI_MIN && psi <= TYRE_PSI_MAX) {
+    delete tyreAlertSent[lowKey];
+    delete tyreAlertSent[highKey];
+  }
+}
+
 // ── Lifetime snapshots — checkpoints periódicos para filtros do PWA ──────────
 // Salvo a cada 5 min quando dados MQTT chegam; serve de baseline para
 // os filtros "Hoje / 7 dias / 30 dias" sem depender de auto-trips sincronizados.
@@ -146,6 +170,14 @@ const state = {
   window_fr:        null,
   window_rl:        null,
   window_rr:        null,
+  tyre_pressure_fl: 0,     // kPa (dividir por 6.895 para PSI)
+  tyre_pressure_fr: 0,
+  tyre_pressure_rl: 0,
+  tyre_pressure_rr: 0,
+  tyre_temp_fl:     0,     // °C
+  tyre_temp_fr:     0,
+  tyre_temp_rl:     0,
+  tyre_temp_rr:     0,
 
   trip_a: {
     distance_km:   0, time_sec: '--', kwh_per_100km: 0, km_per_l: 0,
@@ -518,6 +550,14 @@ function applyMqttMessage(key, value) {
     case 'window_fr':    state.window_fr    = value; break;
     case 'window_rl':    state.window_rl    = value; break;
     case 'window_rr':    state.window_rr    = value; break;
+    case 'tyre_pressure_fl': { state.tyre_pressure_fl = num(value); checkTyrePressure('FL', num(value)); break; }
+    case 'tyre_pressure_fr': { state.tyre_pressure_fr = num(value); checkTyrePressure('FR', num(value)); break; }
+    case 'tyre_pressure_rl': { state.tyre_pressure_rl = num(value); checkTyrePressure('RL', num(value)); break; }
+    case 'tyre_pressure_rr': { state.tyre_pressure_rr = num(value); checkTyrePressure('RR', num(value)); break; }
+    case 'tyre_temp_fl': state.tyre_temp_fl = num(value); break;
+    case 'tyre_temp_fr': state.tyre_temp_fr = num(value); break;
+    case 'tyre_temp_rl': state.tyre_temp_rl = num(value); break;
+    case 'tyre_temp_rr': state.tyre_temp_rr = num(value); break;
 
     // Telemetria ao vivo
     case 'speed_kmh':         state.speed_kmh          = num(value); break;

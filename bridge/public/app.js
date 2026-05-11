@@ -459,6 +459,29 @@ function renderDash() {
   carLayer('cl-charge-wait', chg === 'Aguardando');
   carLayer('cl-charge-no',   chg === 'Não Carregando' || chg === 'NaoCarregando');
 
+  // Pneus
+  function renderTyre(pos, kpa, tempC) {
+    const psi = kpa > 0 ? kpa / 6.895 : 0;
+    const psiEl  = document.getElementById(`d-tyre-${pos}-psi`);
+    const tempEl = document.getElementById(`d-tyre-${pos}-temp`);
+    const card   = document.getElementById(`d-tyre-${pos}`);
+    if (!psiEl) return;
+    if (psi > 0) {
+      psiEl.textContent = psi.toFixed(1);
+      const color = psi < 35 ? '#f97316' : psi > 40 ? '#f87171' : '#39FF88';
+      psiEl.style.color = color;
+      if (card) card.style.borderLeft = psi < 35 || psi > 40 ? `3px solid ${color}` : '3px solid transparent';
+    } else {
+      psiEl.textContent = '--';
+      psiEl.style.color = '#475569';
+    }
+    if (tempEl) tempEl.textContent = tempC > 0 ? tempC + '°C' : '--°C';
+  }
+  renderTyre('fl', s.tyre_pressure_fl, s.tyre_temp_fl);
+  renderTyre('fr', s.tyre_pressure_fr, s.tyre_temp_fr);
+  renderTyre('rl', s.tyre_pressure_rl, s.tyre_temp_rl);
+  renderTyre('rr', s.tyre_pressure_rr, s.tyre_temp_rr);
+
   // Desde última partida (rolling)
   const r = s.rolling || {};
   setText('d-roll-dist', r.distance_km   > 0 ? f1(r.distance_km) + ' km' : '--');
