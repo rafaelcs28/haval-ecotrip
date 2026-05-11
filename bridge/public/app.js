@@ -293,17 +293,33 @@ function renderDash() {
   const socBar = document.getElementById('d-soc-bar');
   if (socBar) socBar.style.width = Math.max(0, Math.min(100, soc)) + '%';
 
-  // Autonomia elétrica + térmica estimadas
-  // Média: prefere rolling (> 5 km rodados) → trip_a (> 10 km) → fallback
-  const BATT_KWH = 25.8, EV_MIN_SOC = 12;
+  // ── Autonomia elétrica + térmica estimadas ────────────────────────────────
+  const BATT_KWH      = 25.8, EV_MIN_SOC = 12;
+  // Floor de 14 kWh/100km: abaixo disso o motor térmico estava carregando
+  // a bateria (gerador), o que contamina o consumo elétrico com valores
+  // artificialmente baixos — esse dado não reflete autonomia real em EV puro.
+  const EV_KWH_FLOOR    = 14;
+  const EV_KWH_FALLBACK = 20;   // conservador: 1 kWh = 5 km
+  const KML_FALLBACK    = 12;   // 12 km/L
+
   const rollingDist = s.rolling?.distance_km || 0;
   const tripaDist   = s.trip_a?.distance_km  || 0;
-  const avgKwh100 = rollingDist > 5  ? (s.rolling?.kwh_per_100km || 20)
-                  : tripaDist   > 10 ? (s.trip_a?.kwh_per_100km  || 20)
-                  : 20;   // fallback: 1 kWh = 5 km
-  const avgKmL    = rollingDist > 5  ? (s.rolling?.km_per_l || 12)
-                  : tripaDist   > 10 ? (s.trip_a?.km_per_l  || 12)
-                  : 12;   // fallback: 12 km/L
+
+  // Média elétrica — Trip A como base; rolling como refinamento só se
+  // > 10 km E valor realista para modo EV puro (>= floor)
+  const tripAKwh100   = tripaDist  > 10 && (s.trip_a?.kwh_per_100km  || 0) >= EV_KWH_FLOOR
+                        ? s.trip_a.kwh_per_100km  : null;
+  const rollingKwh100 = rollingDist > 10 && (s.rolling?.kwh_per_100km || 0) >= EV_KWH_FLOOR
+                        ? s.rolling.kwh_per_100km : null;
+  const avgKwh100 = rollingKwh100 ?? tripAKwh100 ?? EV_KWH_FALLBACK;
+
+  // Média térmica — só usa se queimou ≥ 1L de combustível; evita km/L
+  // inflado de viagens quase totalmente elétricas (ex: 15 km e 0,05L → 300 km/L)
+  const tripAKml   = (s.trip_a?.fuel_l  || 0) > 1 && (s.trip_a?.km_per_l  || 0) > 2
+                     ? s.trip_a.km_per_l  : null;
+  const rollingKml = (s.rolling?.fuel_l || 0) > 1 && (s.rolling?.km_per_l || 0) > 2
+                     ? s.rolling.km_per_l : null;
+  const avgKmL = rollingKml ?? tripAKml ?? KML_FALLBACK;
 
   const usableKwh = Math.max(0, (soc - EV_MIN_SOC) / 100 * BATT_KWH);
   const evKm      = Math.round(usableKwh / (avgKwh100 / 100));
