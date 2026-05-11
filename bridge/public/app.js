@@ -10,10 +10,16 @@ let tickInterval = null;
 // ── Auth ──────────────────────────────────────────────────────────────────────
 let bridgeToken = localStorage.getItem('bridge_token') || '';
 
-// SHA-256 via Web Crypto API (nativo no browser)
+// SHA-256 via Web Crypto API (requer HTTPS ou localhost)
+// Em HTTP retorna o texto puro como fallback — o servidor aceita os dois
 async function sha256hex(str) {
-  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
-  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+  try {
+    if (typeof crypto !== 'undefined' && crypto.subtle) {
+      const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+      return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+  } catch (_) {}
+  return str;  // fallback HTTP: envia texto puro
 }
 
 function showLogin(errorMsg) {

@@ -332,7 +332,9 @@ function requireAuth(req, res, next) {
   if (!BRIDGE_TOKEN_HASH) return next();   // sem hash configurado → sem auth (dev local)
   const auth  = req.headers['authorization'] || '';
   const token = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
-  if (token !== BRIDGE_TOKEN_HASH) return res.status(401).json({ error: 'unauthorized' });
+  // Aceita SHA-256(senha) [HTTPS] ou texto puro [HTTP — fallback quando crypto.subtle indisponível]
+  const valid = token === BRIDGE_TOKEN_HASH || sha256hex(token) === BRIDGE_TOKEN_HASH;
+  if (!valid) return res.status(401).json({ error: 'unauthorized' });
   next();
 }
 // Push não precisa de auth — SW não consegue enviar headers facilmente
@@ -353,7 +355,8 @@ function adminCheckToken(req, res) {
   const auth  = req.headers['authorization'] || '';
   const token = (auth.startsWith('Bearer ') ? auth.slice(7).trim() : '')
              || req.body?.token || req.query.token || '';
-  if (token !== adminToken) { res.status(401).json({ error: 'unauthorized' }); return false; }
+  const adminValid = token === adminToken || sha256hex(token) === adminToken;
+  if (!adminValid) { res.status(401).json({ error: 'unauthorized' }); return false; }
   return true;
 }
 
@@ -553,7 +556,8 @@ wss.on('connection', (ws, req) => {
   if (BRIDGE_TOKEN_HASH) {
     const url   = new URL(req.url, 'http://localhost');
     const token = url.searchParams.get('token') || '';
-    if (token !== BRIDGE_TOKEN_HASH) {
+    const wsValid = token === BRIDGE_TOKEN_HASH || sha256hex(token) === BRIDGE_TOKEN_HASH;
+    if (!wsValid) {
       ws.send(JSON.stringify({ type: 'AUTH_ERROR' }));
       ws.close(4001, 'unauthorized');
       return;
