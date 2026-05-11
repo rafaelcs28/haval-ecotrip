@@ -199,12 +199,6 @@ fun ConsumptionScreen() {
                         mqttManager.latestOdometerKm = km
                         // não passa para TripManager (não é usado em cálculos de trip)
                     }
-                    CarConstants.CAR_EV_INFO_BATTERY_CHARGE_PERCENTAGE.value -> {
-                        // % bateria auxiliar 12V — publica via MQTT além do papel de SOC no TripManager
-                        val pct = value.trim().toFloatOrNull() ?: 0f
-                        mqttManager.latestBatt12vPct = pct
-                        tripManager.onDataChanged(key, value)
-                    }
                     CarConstants.CAR_EV_INFO_INSTANT_ENERGY_CONSUMPTION.value -> {
                         // Chave confirmada: retorna kW instantâneo do motor elétrico.
                         // Positivo = consumo/drive, negativo = regeneração.
@@ -249,10 +243,7 @@ fun ConsumptionScreen() {
                     ?.trim()?.let { tripManager.onDataChanged(CarConstants.CAR_EV_INFO_SOC_OF_BATTERY.value, it) }
 
                 carManager.fetchCurrent(CarConstants.CAR_EV_INFO_BATTERY_CHARGE_PERCENTAGE.value)
-                    ?.trim()?.let { v ->
-                        v.toFloatOrNull()?.let { mqttManager.latestBatt12vPct = it }
-                        tripManager.onDataChanged(CarConstants.CAR_EV_INFO_BATTERY_CHARGE_PERCENTAGE.value, v)
-                    }
+                    ?.trim()?.let { tripManager.onDataChanged(CarConstants.CAR_EV_INFO_BATTERY_CHARGE_PERCENTAGE.value, it) }
 
                 carManager.fetchCurrent(CarConstants.CAR_EV_INFO_CUR_BATTERY_POWER_PERCENTAGE.value)
                     ?.trim()?.let { tripManager.onDataChanged(CarConstants.CAR_EV_INFO_CUR_BATTERY_POWER_PERCENTAGE.value, it) }
