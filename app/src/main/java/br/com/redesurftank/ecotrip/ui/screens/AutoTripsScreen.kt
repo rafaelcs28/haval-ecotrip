@@ -13,6 +13,9 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Sync
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -103,9 +106,12 @@ fun AutoTripsScreen(
     minDistKm:      Float = 0f,
     onRename:       (AutoTripEntry, String) -> Unit = { _, _ -> },
     onClear:        () -> Unit,
+    onForceSync:    () -> Unit = {},
     onBack:         () -> Unit,
 ) {
     val context          = LocalContext.current
+    var syncLabel        by remember { mutableStateOf("") }
+    val syncScope        = androidx.compose.runtime.rememberCoroutineScope()
     var selectedFilter   by remember { mutableStateOf(AutoTripFilter.ALL) }
     var customStartDayMs by remember { mutableStateOf<Long?>(null) }
     var customEndDayMs   by remember { mutableStateOf<Long?>(null) }
@@ -217,6 +223,22 @@ fun AutoTripsScreen(
                 Text("Viagens Auto", fontSize = 21.sp, fontWeight = FontWeight.Bold, color = AccentBlue)
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                if (syncLabel.isNotEmpty()) {
+                    Text(syncLabel, fontSize = 10.sp, color = if (syncLabel.startsWith("✓")) Green else TextSecondary)
+                }
+                // Botão de sync manual para o bridge (iPhone PWA)
+                IconButton(onClick = {
+                    syncLabel = "enviando…"
+                    onForceSync()
+                    syncScope.launch {
+                        delay(4_000)
+                        syncLabel = "✓ sync"
+                        delay(4_000)
+                        syncLabel = ""
+                    }
+                }) {
+                    Icon(Icons.Default.Sync, contentDescription = "Sincronizar com iPhone", tint = AccentBlue, modifier = Modifier.size(20.dp))
+                }
                 Text(
                     if (showSummary) "${filtered.size}/${entries.size} viagens"
                     else "${entries.size} viagens",
@@ -387,7 +409,13 @@ fun AutoTripsScreen(
 
         // ── Lista ─────────────────────────────────────────────────────────────
         if (entries.isEmpty()) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            // weight(1f) garante altura bounded para o Box dentro do Column
+            Box(
+                Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                contentAlignment = Alignment.Center,
+            ) {
                 Text(
                     "Nenhuma viagem automática registrada ainda.\nAs viagens são criadas ao ligar o carro.",
                     fontSize = 14.sp,
@@ -396,8 +424,13 @@ fun AutoTripsScreen(
                 )
             }
         } else {
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                itemsIndexed(filtered) { _, entry ->
+            // weight(1f) é obrigatório: sem ele o Column passa altura unbounded ao LazyColumn
+            // (devido ao verticalArrangement = spacedBy), causando crash no ROM do carro.
+            LazyColumn(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                itemsIndexed(filtered, key = { _, e -> e.startMs }) { _, entry ->
                     AutoTripEntryRow(
                         entry          = entry,
                         priceGasL      = priceGasL,

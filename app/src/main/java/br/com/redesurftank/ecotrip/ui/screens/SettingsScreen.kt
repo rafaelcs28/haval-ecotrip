@@ -308,19 +308,36 @@ fun SettingsScreen(
 
                 Spacer(Modifier.height(2.dp))
                 MqttField("URL do Bridge (iPhone PWA)", bridgeUrlStr, KeyboardType.Uri) { bridgeUrlStr = it }
+                val haFill = deriveBridgeFromHaUrl(backupManager.haExportUrl)
+                val effectiveUrl = bridgeUrlStr.ifBlank { haFill }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(
-                        "URL do servidor Node.js do PWA (porta 3000).\nPadrão: mesmo IP do Home Assistant.",
-                        fontSize   = 10.sp,
-                        color      = TextSecondary,
-                        lineHeight = 14.sp,
-                        modifier   = Modifier.weight(1f),
-                    )
-                    val haFill = deriveBridgeFromHaUrl(backupManager.haExportUrl)
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "URL do servidor Node.js do PWA (porta 3000).\nPadrão: mesmo IP do Home Assistant.",
+                            fontSize   = 10.sp,
+                            color      = TextSecondary,
+                            lineHeight = 14.sp,
+                        )
+                        if (effectiveUrl.isNotBlank()) {
+                            Text(
+                                "Usando: $effectiveUrl",
+                                fontSize   = 10.sp,
+                                color      = AccentBlue,
+                                lineHeight = 14.sp,
+                            )
+                        } else {
+                            Text(
+                                "⚠ Nenhuma URL configurada — sync com iPhone desativado.",
+                                fontSize   = 10.sp,
+                                color      = WarnYellow,
+                                lineHeight = 14.sp,
+                            )
+                        }
+                    }
                     if (haFill.isNotBlank() && bridgeUrlStr != haFill) {
                         TextButton(
                             onClick = { bridgeUrlStr = haFill },
