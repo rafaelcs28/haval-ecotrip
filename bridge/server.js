@@ -62,7 +62,7 @@ let chargeStartTimer   = null;
 
 // ── Alerta de pressão de pneus ────────────────────────────────────────────────
 // Os valores chegam em kPa (apesar do nome "_psi" na entidade do HA)
-const TYRE_PSI_MIN = 35;   // abaixo disso → alerta
+const TYRE_PSI_MIN = 34;   // abaixo disso → alerta
 const TYRE_PSI_MAX = 40;   // acima disso  → alerta
 const tyreAlertSent = {};   // evita spam: chave = 'FL_low' | 'FL_high' etc.
 function checkTyrePressure(pos, kpa) {
