@@ -65,6 +65,7 @@
               <span class="bar-val" id="d-fuel">--</span>
             </div>
             <div class="bar-track"><div class="bar-fill fuel" id="d-fuel-bar" style="width:0%"></div></div>
+            <div id="d-fuel-range" style="font-size:10px;color:var(--orange);text-align:right;margin-top:3px;display:none">~<span id="d-fuel-km">--</span> km térmico</div>
           </div>
         </div>
       </div>
@@ -151,7 +152,10 @@
       <div class="card" id="d-map-card" style="display:none">
         <div class="card-title">Última localização do carro</div>
         <div id="d-car-map" style="height:180px;border-radius:8px;overflow:hidden;margin-top:6px"></div>
-        <div class="metric-label" id="d-map-ts" style="margin-top:6px;text-align:right">--</div>
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-top:6px;gap:8px">
+          <div class="metric-label" id="d-map-address" style="flex:1;font-size:10px;line-height:1.4;color:#64748b"></div>
+          <div class="metric-label" id="d-map-ts" style="text-align:right;white-space:nowrap;flex-shrink:0">--</div>
+        </div>
       </div>
 
       <!-- Viagens Trip A + Trip B -->

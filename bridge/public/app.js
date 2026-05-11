@@ -274,10 +274,18 @@ function renderDash() {
   const socBar = document.getElementById('d-soc-bar');
   if (socBar) socBar.style.width = Math.max(0, Math.min(100, soc)) + '%';
 
-  // Autonomia elétrica estimada (bateria útil: SOC atual → 12% mínimo, ~25,8 kWh brutos)
+  // Autonomia elétrica + térmica estimadas
+  // Média: prefere rolling (> 5 km rodados) → trip_a (> 10 km) → fallback
   const BATT_KWH = 25.8, EV_MIN_SOC = 12;
-  const avgKwh100 = s.rolling?.kwh_per_100km > 2 ? s.rolling.kwh_per_100km
-                  : s.trip_a?.kwh_per_100km  > 2 ? s.trip_a.kwh_per_100km : 18;
+  const rollingDist = s.rolling?.distance_km || 0;
+  const tripaDist   = s.trip_a?.distance_km  || 0;
+  const avgKwh100 = rollingDist > 5  ? (s.rolling?.kwh_per_100km || 20)
+                  : tripaDist   > 10 ? (s.trip_a?.kwh_per_100km  || 20)
+                  : 20;   // fallback: 1 kWh = 5 km
+  const avgKmL    = rollingDist > 5  ? (s.rolling?.km_per_l || 12)
+                  : tripaDist   > 10 ? (s.trip_a?.km_per_l  || 12)
+                  : 12;   // fallback: 12 km/L
+
   const usableKwh = Math.max(0, (soc - EV_MIN_SOC) / 100 * BATT_KWH);
   const evKm      = Math.round(usableKwh / (avgKwh100 / 100));
   const evRangeEl = document.getElementById('d-ev-range');
@@ -294,6 +302,14 @@ function renderDash() {
   setText('d-fuel', tankNow > 0 ? f1(tankNow) + ' L  (' + fuelPct.toFixed(0) + '%)' : '--');
   const fuelBar = document.getElementById('d-fuel-bar');
   if (fuelBar) fuelBar.style.width = Math.max(0, Math.min(100, fuelPct)) + '%';
+
+  // Autonomia térmica estimada
+  const fuelKm      = tankNow > 0 ? Math.round(tankNow * avgKmL) : 0;
+  const fuelRangeEl = document.getElementById('d-fuel-range');
+  if (fuelRangeEl) {
+    fuelRangeEl.style.display = fuelKm > 0 ? '' : 'none';
+    if (fuelKm > 0) setText('d-fuel-km', fuelKm + ' km');
+  }
 
   // Recarga — card dedicado (só aparece quando charging_state === 'Carregando')
   const isCharging = s.charging_state === 'Carregando';
@@ -586,7 +602,25 @@ function renderAutoTrips() {
     return;
   }
 
-  list.innerHTML = trips.map(t => {
+  // Card de resumo
+  const totDist   = trips.reduce((s, t) => s + (t.distKm  || 0), 0);
+  const totFuel   = trips.reduce((s, t) => s + (t.fuelL   || 0), 0);
+  const totNetKwh = trips.reduce((s, t) => s + (t.netKwh  || 0), 0);
+  const avgKwh100 = totDist > 0.1   ? totNetKwh / totDist * 100 : 0;
+  const avgKmL    = totFuel > 0.001 ? totDist   / totFuel       : 0;
+
+  let html = `<div class="charge-summary-card" style="border-color:rgba(77,187,255,.2)">
+  <div class="card-title">Resumo — ${trips.length} viagem${trips.length !== 1 ? 'ns' : ''}</div>
+  <div class="metrics-row">
+    <div class="metric"><div class="metric-value blue sm">${f1(totDist)} km</div><div class="metric-label">distância</div></div>
+    <div class="metric"><div class="metric-value green sm">${avgKwh100 > 0 ? f1(avgKwh100) : '--'}</div><div class="metric-label">kWh/100km</div></div>
+    <div class="metric"><div class="metric-value green sm">${avgKmL > 0 ? f1(avgKmL) : '--'}</div><div class="metric-label">km/L</div></div>
+    <div class="metric"><div class="metric-value orange sm">${totFuel > 0.001 ? f2(totFuel) + ' L' : '--'}</div><div class="metric-label">combustível</div></div>
+    <div class="metric"><div class="metric-value teal sm">${totNetKwh > 0.01 ? f2(totNetKwh) + ' kWh' : '--'}</div><div class="metric-label">kWh liq.</div></div>
+  </div>
+</div>`;
+
+  html += trips.map(t => {
     const startDate  = fmtDate(t.startMs);
     const dur        = fmtDur(Math.round((t.endMs - t.startMs) / 1000));
     const distKm     = t.distKm      > 0    ? f1(t.distKm) + ' km'  : '--';
@@ -619,6 +653,8 @@ function renderAutoTrips() {
   </div>${extraRow}
 </div>`;
   }).join('');
+
+  list.innerHTML = html;
 }
 
 // ── Dashboard map — última localização do carro ───────────────────────────────
@@ -660,6 +696,22 @@ function initDashMap() {
       if (data.ts) {
         setText('d-map-ts', relTime(data.ts) + ' atrás');
       }
+
+      // Reverse geocoding — endereço da última posição (Nominatim / OSM)
+      fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${data.lat}&lon=${data.lng}&zoom=16`)
+        .then(r => r.json())
+        .then(geo => {
+          const a = geo.address || {};
+          const parts = [
+            a.road,
+            a.suburb || a.neighbourhood || a.quarter,
+            a.city   || a.town || a.village || a.municipality,
+          ].filter(Boolean);
+          const label = parts.length ? parts.join(', ')
+                      : (geo.display_name || '').split(',').slice(0, 2).join(',').trim();
+          setText('d-map-address', label);
+        })
+        .catch(() => {});
     })
     .catch(() => {});   // sem localização — mapa permanece oculto
 }
