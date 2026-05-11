@@ -7,6 +7,60 @@ let wsRetryDelay = 1000;
 let ws = null;
 let tickInterval = null;
 
+// ── Auth ──────────────────────────────────────────────────────────────────────
+let bridgeToken = localStorage.getItem('bridge_token') || '';
+
+function showLogin(errorMsg) {
+  const overlay = document.getElementById('login-overlay');
+  if (overlay) overlay.style.display = 'flex';
+  const err = document.getElementById('login-error');
+  if (err) { err.style.display = errorMsg ? '' : 'none'; err.textContent = errorMsg || ''; }
+  setTimeout(() => document.getElementById('login-input')?.focus(), 100);
+}
+
+function hideLogin() {
+  const overlay = document.getElementById('login-overlay');
+  if (overlay) overlay.style.display = 'none';
+}
+
+async function doLogin() {
+  const input = document.getElementById('login-input');
+  const token = (input?.value || '').trim();
+  try {
+    const headers = token ? { 'Authorization': 'Bearer ' + token } : {};
+    const r = await fetch('/api/state', { headers });
+    if (r.ok) {
+      bridgeToken = token;
+      if (token) localStorage.setItem('bridge_token', token);
+      else localStorage.removeItem('bridge_token');
+      hideLogin();
+      connect();
+    } else {
+      showLogin('Senha incorreta.');
+    }
+  } catch (_) {
+    showLogin('Sem conexão com o servidor.');
+  }
+}
+
+// Permite enviar com Enter no campo de senha
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('login-input')?.addEventListener('keydown', e => {
+    if (e.key === 'Enter') doLogin();
+  });
+});
+
+// Wrapper de fetch que injeta o token e redireciona 401 para o login
+function apiFetch(url, opts = {}) {
+  if (bridgeToken) {
+    opts.headers = { ...(opts.headers || {}), 'Authorization': 'Bearer ' + bridgeToken };
+  }
+  return fetch(url, opts).then(r => {
+    if (r.status === 401) { showLogin('Sessão expirada. Digite a senha novamente.'); throw new Error('unauthorized'); }
+    return r;
+  });
+}
+
 // Merge profundo: sobrescreve apenas as chaves presentes em source (sem apagar as demais)
 function deepMerge(target, source) {
   for (const [k, v] of Object.entries(source)) {
@@ -93,8 +147,9 @@ function switchTab(btn, callback) {
 
 // ── WebSocket ─────────────────────────────────────────────────────────────────
 function connect() {
-  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  ws = new WebSocket(`${proto}//${location.host}/ws`);
+  const proto  = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const tkParam = bridgeToken ? '?token=' + encodeURIComponent(bridgeToken) : '';
+  ws = new WebSocket(`${proto}//${location.host}/ws${tkParam}`);
 
   ws.onopen = () => {
     console.log('WS conectado');
@@ -121,6 +176,10 @@ function connect() {
         lastUpdateMs = Date.now();
         renderAll();
         try { localStorage.setItem('ecotrip_state', JSON.stringify({ state, ts: lastUpdateMs })); } catch(_) {}
+      } else if (msg.type === 'AUTH_ERROR') {
+        ws.close();
+        showLogin('Senha incorreta ou expirada.');
+        return;
       } else if (msg.type === 'new_autotrip') {
         // Nova viagem automática chegou do carro — invalida cache
         cachedAutoTrips = null;
@@ -145,7 +204,8 @@ function connect() {
   };
 
   ws.onerror  = () => {};
-  ws.onclose  = () => {
+  ws.onclose  = (e) => {
+    if (e.code === 4001) { showLogin('Acesso negado. Digite a senha.'); return; }
     setStatus('offline');
     const delay = Math.min(wsRetryDelay, 30000);
     wsRetryDelay = Math.min(wsRetryDelay * 1.5, 30000);
@@ -535,7 +595,7 @@ function loadCharges() {
   if (cachedCharges !== null) { renderCharges(); return; }
   const list = document.getElementById('charges-list');
   list.innerHTML = '<div class="empty">Carregando...</div>';
-  fetch('/api/charges')
+  apiFetch('/api/charges')
     .then(r => r.json())
     .then(data => { cachedCharges = Array.isArray(data) ? data : []; renderCharges(); })
     .catch(() => { list.innerHTML = filterChipsHTML('charges') + '<div class="empty">Erro ao carregar.</div>'; });
@@ -596,8 +656,8 @@ function loadHistory() {
   const list = document.getElementById('hist-list');
   list.innerHTML = '<div class="empty">Carregando...</div>';
   Promise.all([
-    fetch('/api/trips').then(r => r.json()).then(d => { cachedTrips = Array.isArray(d) ? d : []; }).catch(() => { cachedTrips = []; }),
-    fetch('/api/autotrips').then(r => r.json()).then(d => { cachedAutoTrips = Array.isArray(d) ? d : []; }).catch(() => { cachedAutoTrips = []; }),
+    apiFetch('/api/trips').then(r => r.json()).then(d => { cachedTrips = Array.isArray(d) ? d : []; }).catch(() => { cachedTrips = []; }),
+    apiFetch('/api/autotrips').then(r => r.json()).then(d => { cachedAutoTrips = Array.isArray(d) ? d : []; }).catch(() => { cachedAutoTrips = []; }),
   ]).then(() => renderHistory()).catch(() => {
     list.innerHTML = filterChipsHTML('hist') + '<div class="empty">Erro ao carregar.</div>';
   });
@@ -704,7 +764,7 @@ function loadAutoTrips() {
   document.querySelector('[data-panel="auto"] .tab-notif')?.remove();
   const list = document.getElementById('auto-list');
   list.innerHTML = '<div class="empty">Carregando...</div>';
-  fetch('/api/autotrips')
+  apiFetch('/api/autotrips')
     .then(r => r.json())
     .then(data => { cachedAutoTrips = Array.isArray(data) ? data : []; renderAutoTrips(); })
     .catch(() => { list.innerHTML = '<div class="empty">Erro ao carregar.</div>'; });
@@ -796,7 +856,7 @@ let dashMap         = null;
 let dashMarker      = null;
 
 function initDashMap() {
-  fetch('/api/location')
+  apiFetch('/api/location')
     .then(r => r.json())
     .then(data => {
       if (!data.lat || !data.lng) return;   // sem GPS disponível
@@ -880,7 +940,7 @@ function openTripDetail(tripId) {
   const slider = document.getElementById('playback-slider');
   slider.value = 0;
 
-  fetch(`/api/telemetry/${tripId}`)
+  apiFetch(`/api/telemetry/${tripId}`)
     .then(r => r.json())
     .then(data => {
       currentSamples = data.samples || [];
@@ -1052,6 +1112,7 @@ try {
   }
 } catch(_) {}
 
+// Inicia conexão; se o servidor recusar por auth, o WS fecha com 4001 e mostramos o login
 connect();
 tickInterval = setInterval(tickLastUpdate, 1000);
 tickLastUpdate();
@@ -1070,19 +1131,6 @@ function getPrices() {
 
 // ── Admin / Configurações ─────────────────────────────────────────────────────
 
-const ADMIN_TOKEN_KEY = 'ecotrip_admin_token';
-
-function initAdmin() {
-  const saved = localStorage.getItem(ADMIN_TOKEN_KEY);
-  if (saved) document.getElementById('admin-token').value = saved;
-}
-
-function adminGetToken() {
-  const t = document.getElementById('admin-token').value.trim();
-  if (t) localStorage.setItem(ADMIN_TOKEN_KEY, t);
-  return t || 'ecotrip-restart';
-}
-
 function adminSetStatus(msg, ok) {
   const el = document.getElementById('admin-status');
   el.textContent = msg;
@@ -1092,11 +1140,7 @@ function adminSetStatus(msg, ok) {
 async function adminAction(path, label) {
   adminSetStatus('⏳ ' + label + '…', null);
   try {
-    const r    = await fetch(path, {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ token: adminGetToken() }),
-    });
+    const r    = await apiFetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
     const data = await r.json().catch(() => ({}));
     if (r.ok && data.ok) {
       adminSetStatus('✓ ' + (data.msg || 'OK'), true);
@@ -1104,7 +1148,8 @@ async function adminAction(path, label) {
       adminSetStatus('✗ ' + (data.error || `HTTP ${r.status}`), false);
     }
   } catch (e) {
-    adminSetStatus('✗ Sem resposta — servidor pode estar reiniciando…', false);
+    if (e.message !== 'unauthorized')
+      adminSetStatus('✗ Sem resposta — servidor pode estar reiniciando…', false);
   }
 }
 
@@ -1116,11 +1161,9 @@ function adminClearHistory() {
   adminAction('/api/admin/clear-history', 'Apagando histórico');
 }
 
-function toggleTokenVisibility() {
-  const input = document.getElementById('admin-token');
-  const btn   = document.getElementById('token-eye');
-  if (!input) return;
-  const isHidden = input.type === 'password';
-  input.type     = isHidden ? 'text' : 'password';
-  if (btn) btn.style.color = isHidden ? 'var(--teal)' : '#64748b';
+function adminLogout() {
+  localStorage.removeItem('bridge_token');
+  bridgeToken = '';
+  ws?.close();
+  showLogin();
 }

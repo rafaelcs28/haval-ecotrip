@@ -15,8 +15,9 @@ const MQTT_HOST   = process.env.MQTT_HOST   || 'mqtt://localhost';
 const MQTT_PORT   = parseInt(process.env.MQTT_PORT || '1883', 10);
 const MQTT_USER   = process.env.MQTT_USER   || '';
 const MQTT_PASS   = process.env.MQTT_PASS   || '';
-const MQTT_PREFIX = process.env.MQTT_PREFIX || 'haval/ecotrip';
-const PORT        = parseInt(process.env.PORT || '3000', 10);
+const MQTT_PREFIX    = process.env.MQTT_PREFIX || 'haval/ecotrip';
+const PORT           = parseInt(process.env.PORT || '3000', 10);
+const BRIDGE_TOKEN   = process.env.BRIDGE_TOKEN || '';   // senha de acesso à PWA
 
 const TRIPS_FILE      = path.join(__dirname, 'trips.json');
 const CHARGES_FILE    = path.join(__dirname, 'charges.json');
@@ -315,17 +316,34 @@ const server = http.createServer(app);
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
+// ── Autenticação ──────────────────────────────────────────────────────────────
+// Se BRIDGE_TOKEN estiver configurado no .env, todas as rotas /api/* (exceto push)
+// exigem o header: Authorization: Bearer <token>
+function requireAuth(req, res, next) {
+  if (!BRIDGE_TOKEN) return next();   // sem token configurado → sem auth (dev local)
+  const auth  = req.headers['authorization'] || '';
+  const token = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
+  if (token !== BRIDGE_TOKEN) return res.status(401).json({ error: 'unauthorized' });
+  next();
+}
+// Push não precisa de auth — SW não consegue enviar headers facilmente
+app.use('/api/push', (req, res, next) => next());
+app.use('/api', requireAuth);
+
 app.get('/api/state',  (_req, res) => res.json(state));
 app.get('/api/trips',   (_req, res) => res.json(getTrips()));
 app.get('/api/charges', (_req, res) => res.json(chargesArr));
 
 // ── Admin: restart remoto ─────────────────────────────────────────────────────
 // POST /api/admin/restart  body: { "token": "..." }
-// Token obrigatório via variável de ambiente ADMIN_TOKEN — sem padrão por segurança
+// Admin usa ADMIN_TOKEN se definido, senão cai para BRIDGE_TOKEN
+// Aceita token via Authorization header (PWA novo) ou body.token (retrocompat)
 function adminCheckToken(req, res) {
-  const adminToken = process.env.ADMIN_TOKEN || '';
+  const adminToken = process.env.ADMIN_TOKEN || BRIDGE_TOKEN;
   if (!adminToken) { res.status(503).json({ error: 'ADMIN_TOKEN not configured' }); return false; }
-  const token = req.body?.token || req.query.token;
+  const auth  = req.headers['authorization'] || '';
+  const token = (auth.startsWith('Bearer ') ? auth.slice(7).trim() : '')
+             || req.body?.token || req.query.token || '';
   if (token !== adminToken) { res.status(401).json({ error: 'unauthorized' }); return false; }
   return true;
 }
@@ -501,7 +519,17 @@ const clients = new Set();
 
 const SERVER_START_AT = Date.now();   // timestamp único por processo
 
-wss.on('connection', (ws) => {
+wss.on('connection', (ws, req) => {
+  // Verificação de token via query string: /ws?token=...
+  if (BRIDGE_TOKEN) {
+    const url   = new URL(req.url, 'http://localhost');
+    const token = url.searchParams.get('token') || '';
+    if (token !== BRIDGE_TOKEN) {
+      ws.send(JSON.stringify({ type: 'AUTH_ERROR' }));
+      ws.close(4001, 'unauthorized');
+      return;
+    }
+  }
   clients.add(ws);
   ws.send(JSON.stringify({ type: 'full_state', data: state, startedAt: SERVER_START_AT }));
   ws.on('close', () => clients.delete(ws));
