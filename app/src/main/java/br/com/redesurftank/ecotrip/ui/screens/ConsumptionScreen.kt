@@ -187,10 +187,12 @@ fun ConsumptionScreen() {
                     }
                     CarConstants.CAR_EV_INFO_POWER_BATTERY_VOLTAGE.value -> {
                         mqttManager.latestBatteryVoltageV = value.trim().toFloatOrNull() ?: 0f
+                        tripManager.onDataChanged(key, value)
                         syncCharging()
                     }
                     CarConstants.CAR_EV_INFO_POWER_BATTERY_CURRENT.value -> {
                         mqttManager.latestBatteryCurrentA = value.trim().toFloatOrNull() ?: 0f
+                        tripManager.onDataChanged(key, value)
                     }
                     CarConstants.CAR_EV_INFO_CHARGING_STATE.value -> {
                         mqttManager.latestChargingState = value.trim().toIntOrNull() ?: -1

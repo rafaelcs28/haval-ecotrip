@@ -189,7 +189,6 @@ function fmtDate(ts) {
 const filterState = {
   charges: { active: 'all', customFrom: '', customTo: '' },
   hist:    { active: 'all', customFrom: '', customTo: '' },
-  life:    { active: 'all', customFrom: '', customTo: '' },
 };
 let cachedCharges = null;
 let cachedTrips   = null;
@@ -224,7 +223,6 @@ function setFilter(tabId, filter) {
   filterState[tabId].active = filter;
   if (tabId === 'charges') renderCharges();
   if (tabId === 'hist')    renderHistory();
-  if (tabId === 'life')    renderLifetimeTab();
 }
 
 function setFilterDates(tabId) {
@@ -254,11 +252,6 @@ function renderAll() {
   renderDash();
   renderTrip('a', state.trip_a || {});
   renderTrip('b', state.trip_b || {});
-  // Lifetime: atualiza live só se a aba estiver ativa e sem filtro aplicado
-  const lifePanel = document.getElementById('panel-life');
-  if (lifePanel && lifePanel.classList.contains('active') && filterState.life.active === 'all') {
-    renderLifetimeTab();
-  }
   renderCarVersion();
 }
 
@@ -569,159 +562,6 @@ function renderHistory() {
   list.innerHTML = html;
 }
 
-// ── Lifetime ──────────────────────────────────────────────────────────────────
-let cachedLifeSnapshots = null;
-
-function loadLifetime() {
-  cachedAutoTrips    = null;
-  cachedLifeSnapshots = null;
-  renderLifetimeTab();
-  // Pré-carrega recargas
-  if (cachedCharges === null) {
-    fetch('/api/charges').then(r=>r.json()).then(d=>{cachedCharges=Array.isArray(d)?d:[];}).catch(()=>{});
-  }
-  // Pré-carrega snapshots (fonte primária dos filtros — funciona sem sync de auto-trips)
-  fetch('/api/lifetime/snapshots').then(r=>r.json()).then(d=>{
-    cachedLifeSnapshots = Array.isArray(d) ? d : [];
-    if (filterState.life.active !== 'all') renderLifetimeTab();
-  }).catch(()=>{ cachedLifeSnapshots = []; });
-  // Pré-carrega auto-trips também (dados extras se sincronizados)
-  fetch('/api/autotrips').then(r=>r.json()).then(d=>{
-    cachedAutoTrips = Array.isArray(d) ? d : [];
-  }).catch(()=>{ cachedAutoTrips = []; });
-}
-
-function renderLifetimeTab() {
-  const list = document.getElementById('life-list');
-  if (!list) return;
-
-  const isFiltered = filterState.life.active !== 'all';
-  let html = filterChipsHTML('life');
-
-  if (!isFiltered) {
-    // ── Vista live: dados MQTT em tempo real ──────────────────────────────────
-    const l = state.lifetime || {};
-    html += `<div class="card">
-  <div class="card-title">Lifetime — Total acumulado</div>
-  <div class="metrics-row">
-    <div class="metric"><div class="metric-value blue lg">${f1(l.distance_km)} km</div><div class="metric-label">km totais</div></div>
-    <div class="metric"><div class="metric-value muted sm">${fmtTripTime(l.time_sec)}</div><div class="metric-label">Tempo condução</div></div>
-  </div>
-  <div class="divider"></div>
-  <div class="metrics-row">
-    <div class="metric"><div class="metric-value green">${l.net_kwh   > 0 ? f2(l.net_kwh)   + ' kWh' : '--'}</div><div class="metric-label">kWh líquido</div></div>
-    <div class="metric"><div class="metric-value teal">${l.regen_kwh  > 0 ? f2(l.regen_kwh)  + ' kWh' : '--'}</div><div class="metric-label">kWh regen.</div></div>
-    <div class="metric"><div class="metric-value orange">${l.fuel_l   > 0 ? f2(l.fuel_l)    + ' L'   : '--'}</div><div class="metric-label">L combustível</div></div>
-  </div>
-  <div class="divider"></div>
-  <div class="metrics-row">
-    <div class="metric"><div class="metric-value teal">${l.charge_kwh > 0 ? f2(l.charge_kwh) + ' kWh' : '--'}</div><div class="metric-label">kWh carregados</div></div>
-    <div class="metric"><div class="metric-value muted">${l.charge_sec || '--'}</div><div class="metric-label">Tempo recarga</div></div>
-    <div class="metric"><div class="metric-value yellow">${l.cost_brl   > 0 ? 'R$ ' + f2(l.cost_brl) : '--'}</div><div class="metric-label">R$ total est.</div></div>
-  </div>
-</div>`;
-  } else {
-    // ── Vista filtrada: usa snapshots do lifetime como baseline (funciona sem sync)
-    // Snapshots são salvos no bridge a cada 5 min quando dados MQTT chegam.
-    // Lógica: delta = current_live - snapshot_mais_recente_antes_do_período
-    const [filterStart, filterEnd] = getFilterRange('life');
-
-    // Aguarda snapshots e recargas carregarem
-    if (cachedLifeSnapshots === null || cachedCharges === null) {
-      html += '<div class="empty">Carregando dados...</div>';
-      list.innerHTML = html;
-      Promise.all([
-        cachedLifeSnapshots === null
-          ? fetch('/api/lifetime/snapshots').then(r=>r.json()).then(d=>{cachedLifeSnapshots=Array.isArray(d)?d:[];})
-          : Promise.resolve(),
-        cachedCharges === null
-          ? fetch('/api/charges').then(r=>r.json()).then(d=>{cachedCharges=Array.isArray(d)?d:[];})
-          : Promise.resolve(),
-      ]).then(() => renderLifetimeTab()).catch(() => {});
-      return;
-    }
-
-    // Baseline = snapshot mais recente ANTES do início do período
-    const snaps = cachedLifeSnapshots || [];
-    const baseline = snaps.filter(s => s.ts <= filterStart).sort((a,b) => b.ts - a.ts)[0];
-
-    const cur = state.lifetime || {};
-    const charges = filterItems(cachedCharges || [], 'timestamp', filterStart, filterEnd);
-
-    if (!baseline) {
-      // Sem snapshot antes do período: bridge acabou de ser instalado/iniciado
-      const chargeKwh = charges.reduce((s,c) => s + (c.energy_kwh   || 0), 0);
-      const chargeSec = charges.reduce((s,c) => s + (c.duration_sec || 0), 0);
-      const avgChgKw  = chargeSec > 0 ? chargeKwh / (chargeSec / 3600) : 0;
-      html += `<div class="card">
-  <div class="card-title" style="color:var(--yellow)">⏳ Coletando dados…</div>
-  <div style="font-size:12px;color:var(--text-secondary);margin-bottom:8px">
-    Os snapshots são gerados a cada 5 min com o carro conectado.<br>
-    Em breve os filtros mostrarão os dados de condução.
-  </div>`;
-      if (chargeKwh > 0) {
-        html += `<div class="divider"></div>
-  <div class="metrics-row">
-    <div class="metric"><div class="metric-value teal">${f2(chargeKwh)} kWh</div><div class="metric-label">kWh carregados</div></div>
-    <div class="metric"><div class="metric-value muted sm">${fmtDur(chargeSec)}</div><div class="metric-label">tempo recarga</div></div>
-    <div class="metric"><div class="metric-value blue">${avgChgKw > 0 ? f1(avgChgKw) + ' kW' : '--'}</div><div class="metric-label">pot. média</div></div>
-  </div>`;
-      }
-      html += '</div>';
-      list.innerHTML = html;
-      return;
-    }
-
-    // Delta condução = current_live - baseline
-    const distKm   = Math.max(0, (cur.distance_km || 0) - baseline.distance_km);
-    const netKwh   = Math.max(0, (cur.net_kwh     || 0) - baseline.net_kwh);
-    const regenKwh = Math.max(0, (cur.regen_kwh   || 0) - baseline.regen_kwh);
-    const fuelL    = Math.max(0, (cur.fuel_l      || 0) - baseline.fuel_l);
-    const timeSec  = Math.max(0, (Number(cur.time_sec) || 0) - baseline.time_sec);
-
-    const chargeKwh = charges.reduce((s,c) => s + (c.energy_kwh   || 0), 0);
-    const chargeSec = charges.reduce((s,c) => s + (c.duration_sec || 0), 0);
-
-    const avgKwh100 = distKm    > 0.1   ? netKwh    / distKm * 100      : 0;
-    const avgKml    = fuelL     > 0.001 ? distKm    / fuelL             : 0;
-    const avgSpd    = timeSec   > 0     ? distKm    / (timeSec / 3600)  : 0;
-    const avgChgKw  = chargeSec > 0     ? chargeKwh / (chargeSec / 3600): 0;
-
-    const baseDate = new Date(baseline.ts).toLocaleString('pt-BR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
-    const chargesStr = charges.length > 0
-      ? ` · ${charges.length} recarga${charges.length !== 1 ? 's' : ''}`
-      : '';
-
-    html += `<div class="card">
-  <div class="card-title">Período${chargesStr} <span style="font-size:10px;color:var(--text-secondary)">desde ${baseDate}</span></div>
-  <div class="metrics-row">
-    <div class="metric"><div class="metric-value blue lg">${f1(distKm)} km</div><div class="metric-label">distância</div></div>
-    <div class="metric"><div class="metric-value muted sm">${fmtDur(timeSec)}</div><div class="metric-label">condução</div></div>
-    ${avgSpd > 0 ? `<div class="metric"><div class="metric-value muted sm">${f1(avgSpd)} km/h</div><div class="metric-label">vel. média</div></div>` : ''}
-  </div>
-  <div class="divider"></div>
-  <div class="metrics-row">
-    <div class="metric"><div class="metric-value green">${netKwh > 0 ? f2(netKwh) + ' kWh' : '--'}</div><div class="metric-label">kWh líquido</div></div>
-    <div class="metric"><div class="metric-value teal">${regenKwh > 0 ? f2(regenKwh) + ' kWh' : '--'}</div><div class="metric-label">kWh regen.</div></div>
-    <div class="metric"><div class="metric-value green">${avgKwh100 > 0 ? f1(avgKwh100) : '--'}</div><div class="metric-label">kWh/100km</div></div>
-  </div>
-  ${fuelL > 0.001 ? `<div class="divider"></div>
-  <div class="metrics-row">
-    <div class="metric"><div class="metric-value orange">${f2(fuelL)} L</div><div class="metric-label">combustível</div></div>
-    <div class="metric"><div class="metric-value orange">${avgKml > 0 ? f1(avgKml) + ' km/L' : '--'}</div><div class="metric-label">efic. combust.</div></div>
-  </div>` : ''}
-  ${chargeKwh > 0 ? `<div class="divider"></div>
-  <div class="metrics-row">
-    <div class="metric"><div class="metric-value teal">${f2(chargeKwh)} kWh</div><div class="metric-label">kWh carregados</div></div>
-    <div class="metric"><div class="metric-value muted sm">${fmtDur(chargeSec)}</div><div class="metric-label">tempo recarga</div></div>
-    <div class="metric"><div class="metric-value blue">${avgChgKw > 0 ? f1(avgChgKw) + ' kW' : '--'}</div><div class="metric-label">pot. média</div></div>
-  </div>` : ''}
-</div>`;
-  }
-
-  list.innerHTML = html;
-}
-
 // ── Auto-Trips ────────────────────────────────────────────────────────────────
 let cachedAutoTrips = null;
 
@@ -833,6 +673,14 @@ let chartEv         = null;
 let chartRpm        = null;
 let currentSamples  = [];
 
+// HTML original do body do detalhe — restaurado a cada fechamento para garantir
+// que o #trip-map e os canvases existam frescos na próxima abertura
+let tripBodyOriginalHTML = null;
+window.addEventListener('load', () => {
+  const body = document.getElementById('trip-detail-body');
+  if (body) tripBodyOriginalHTML = body.innerHTML;
+});
+
 function openTripDetail(tripId) {
   const overlay = document.getElementById('trip-detail');
   overlay.style.display = 'flex';
@@ -869,7 +717,7 @@ function openTripDetail(tripId) {
 
 function closeTripDetail() {
   document.getElementById('trip-detail').style.display = 'none';
-  // Destruir mapa para forçar reinit na próxima abertura
+  // Destruir instâncias para liberar memória
   if (leafletMap) { leafletMap.remove(); leafletMap = null; }
   if (chartSpd)   { chartSpd.destroy();  chartSpd  = null; }
   if (chartEv)    { chartEv.destroy();   chartEv   = null; }
@@ -877,6 +725,10 @@ function closeTripDetail() {
   routePolyline  = null;
   playbackMarker = null;
   currentSamples = [];
+  // Restaura o HTML original do body — garante que #trip-map e canvases
+  // existam frescos na próxima abertura (evita erro de Leaflet + canvases sujos)
+  const body = document.getElementById('trip-detail-body');
+  if (body && tripBodyOriginalHTML) body.innerHTML = tripBodyOriginalHTML;
 }
 
 function initTripMap(samples) {
@@ -1015,109 +867,6 @@ tickLastUpdate();
 
 // Carrega localização do carro no mapa do dashboard (requer Leaflet carregado)
 window.addEventListener('load', () => { setTimeout(initDashMap, 500); });
-
-// ── Stats por período ─────────────────────────────────────────────────────────
-let statsFilter  = 'today';
-let statsSnaps   = null;
-
-async function loadStats() {
-  if (!statsSnaps) {
-    try { statsSnaps = await fetch('/api/lifetime/snapshots').then(r => r.json()); }
-    catch (_) { statsSnaps = []; }
-  }
-  renderStats();
-}
-
-function setStatsFilter(f) { statsFilter = f; renderStats(); }
-
-function statsBaselineMs() {
-  const now = Date.now();
-  const tod = new Date(); tod.setHours(0, 0, 0, 0);
-  switch (statsFilter) {
-    case 'today': return tod.getTime();
-    case '7d':    return now - 7  * 86400000;
-    case '30d':   return now - 30 * 86400000;
-    case 'month': { const m = new Date(); m.setDate(1); m.setHours(0, 0, 0, 0); return m.getTime(); }
-    default:      return 0;
-  }
-}
-
-function renderStats() {
-  const chips = document.getElementById('stats-chips');
-  const el    = document.getElementById('stats-content');
-  if (!chips || !el) return;
-
-  const fs = [['today','Hoje'],['7d','7 dias'],['30d','30 dias'],['month','Mês']];
-  chips.innerHTML = `<div class="filter-chips">${
-    fs.map(([id, lbl]) =>
-      `<button class="filter-chip${statsFilter===id?' active':''}" onclick="setStatsFilter('${id}')">${lbl}</button>`
-    ).join('')
-  }</div>`;
-
-  const cur = state.lifetime || {};
-  if (!(cur.distance_km > 0)) {
-    el.innerHTML = '<div class="empty">Sem dados de lifetime. Aguardando dados do carro.</div>';
-    return;
-  }
-
-  const startMs = statsBaselineMs();
-  const snaps   = statsSnaps || [];
-  const base    = snaps.filter(s => s.ts <= startMs).sort((a, b) => b.ts - a.ts)[0] || null;
-
-  if (!base && snaps.length > 0) {
-    el.innerHTML = '<div class="empty">Sem dados suficientes para este período.<br><small>Snapshots são salvos a cada 5 min com o carro ligado.</small></div>';
-    return;
-  }
-
-  const d = k => Math.max(0, (parseFloat(cur[k]) || 0) - (base ? (parseFloat(base[k]) || 0) : 0));
-
-  const dDist    = d('distance_km');
-  const dNet     = d('net_kwh');
-  const dEnergy  = d('energy_kwh');
-  const dRegen   = d('regen_kwh');
-  const dFuel    = d('fuel_l');
-  const dTime    = d('time_sec');
-  const dCharge  = d('charge_kwh');
-  const dChargeT = d('charge_sec');
-
-  const avgSpd   = dTime > 0    ? dDist / (dTime / 3600)  : 0;
-  const kwh100   = dDist > 0.1  ? dNet  / dDist * 100     : 0;
-  const kmL      = dFuel > 0.001 ? dDist / dFuel           : 0;
-  const avgChKw  = dChargeT > 0  ? dCharge / (dChargeT / 3600) : 0;
-
-  const metricHTML = (val, unit, lbl, cls) =>
-    `<div class="metric"><div class="metric-value ${cls} sm">${val}${unit ? '<span style="font-size:9px;margin-left:2px">'+unit+'</span>' : ''}</div><div class="metric-label">${lbl}</div></div>`;
-
-  el.innerHTML = `
-<div class="card">
-  <div class="card-title">🚗 Condução</div>
-  <div class="metrics-row">
-    ${metricHTML(f1(dDist),  'km',     'Distância',   'blue')}
-    ${metricHTML(fmtDur(dTime), '',    'Tempo',       'muted')}
-    ${metricHTML(f1(avgSpd), 'km/h',   'Vel. média',  'muted')}
-  </div>
-  <div class="divider"></div>
-  <div class="metrics-row">
-    ${metricHTML(f1(kwh100), 'kWh',    'kWh/100km',   kwh100 > 0 && kwh100 < 20 ? 'green' : kwh100 < 26 ? 'yellow' : 'red')}
-    ${metricHTML(f1(kmL),    'km/L',   'km/L',        kmL > 15 ? 'green' : kmL > 9 ? 'yellow' : 'red')}
-    ${metricHTML(f2(dFuel),  'L',      'Combustível', 'orange')}
-  </div>
-  <div class="divider"></div>
-  <div class="metrics-row">
-    ${metricHTML(f2(dNet),    'kWh',   'kWh líq.',    'green')}
-    ${metricHTML(f2(dEnergy), 'kWh',   'Energia bruta','muted')}
-    ${metricHTML(f2(dRegen),  'kWh',   'Regeneração', 'teal')}
-  </div>
-</div>
-${dCharge > 0.01 ? `<div class="card">
-  <div class="card-title">⚡ Recargas</div>
-  <div class="metrics-row">
-    ${metricHTML(f2(dCharge), 'kWh',   'Injetado',    'teal')}
-    ${metricHTML(fmtDur(dChargeT), '', 'Tempo total', 'muted')}
-    ${metricHTML(f1(avgChKw), 'kW',    'Potência méd.','teal')}
-  </div>
-</div>` : ''}`;
-}
 
 // ── Admin / Configurações ─────────────────────────────────────────────────────
 
