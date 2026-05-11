@@ -242,6 +242,7 @@ function fmtDate(ts) {
 const filterState = {
   charges: { active: 'all', customFrom: '', customTo: '' },
   hist:    { active: 'all', customFrom: '', customTo: '' },
+  auto:    { active: 'all', customFrom: '', customTo: '' },
 };
 let cachedCharges = null;
 let cachedTrips   = null;
@@ -276,6 +277,7 @@ function setFilter(tabId, filter) {
   filterState[tabId].active = filter;
   if (tabId === 'charges') renderCharges();
   if (tabId === 'hist')    renderHistory();
+  if (tabId === 'auto')    renderAutoTrips();
 }
 
 function setFilterDates(tabId) {
@@ -711,28 +713,35 @@ function loadAutoTrips() {
 function renderAutoTrips() {
   const list = document.getElementById('auto-list');
   if (!list) return;
-  const trips = cachedAutoTrips || [];
+
+  const [filterStart, filterEnd] = getFilterRange('auto');
+  const trips = filterItems(cachedAutoTrips || [], 'startMs', filterStart, filterEnd);
+
+  let html = filterChipsHTML('auto');
 
   if (!trips.length) {
-    list.innerHTML = '<div class="empty">Nenhuma viagem automática registrada.</div>';
+    list.innerHTML = html + '<div class="empty">Nenhuma viagem automática no período.</div>';
     return;
   }
 
-  // Card de resumo
+  // Resumo — mesma estrutura 2 linhas do hist
   const totDist   = trips.reduce((s, t) => s + (t.distKm  || 0), 0);
   const totFuel   = trips.reduce((s, t) => s + (t.fuelL   || 0), 0);
   const totNetKwh = trips.reduce((s, t) => s + (t.netKwh  || 0), 0);
   const avgKwh100 = totDist > 0.1   ? totNetKwh / totDist * 100 : 0;
   const avgKmL    = totFuel > 0.001 ? totDist   / totFuel       : 0;
 
-  let html = `<div class="charge-summary-card" style="border-color:rgba(77,187,255,.2)">
+  html += `<div class="charge-summary-card" style="border-color:rgba(77,187,255,.2)">
   <div class="card-title">Resumo — ${trips.length} viagem${trips.length !== 1 ? 'ns' : ''}</div>
   <div class="metrics-row">
     <div class="metric"><div class="metric-value blue sm">${f1(totDist)} km</div><div class="metric-label">distância</div></div>
     <div class="metric"><div class="metric-value green sm">${avgKwh100 > 0 ? f1(avgKwh100) : '--'}</div><div class="metric-label">kWh/100km</div></div>
     <div class="metric"><div class="metric-value green sm">${avgKmL > 0 ? f1(avgKmL) : '--'}</div><div class="metric-label">km/L</div></div>
+  </div>
+  <div class="metrics-row" style="margin-top:4px">
     <div class="metric"><div class="metric-value orange sm">${totFuel > 0.001 ? f2(totFuel) + ' L' : '--'}</div><div class="metric-label">combustível</div></div>
-    <div class="metric"><div class="metric-value teal sm">${totNetKwh > 0.01 ? f2(totNetKwh) + ' kWh' : '--'}</div><div class="metric-label">kWh liq.</div></div>
+    <div class="metric"><div class="metric-value teal sm">${totNetKwh > 0.01 ? f2(totNetKwh) + ' kWh' : '--'}</div><div class="metric-label">bat. consumida</div></div>
+    <div class="metric"><div class="metric-value yellow sm">--</div><div class="metric-label">custo</div></div>
   </div>
 </div>`;
 
