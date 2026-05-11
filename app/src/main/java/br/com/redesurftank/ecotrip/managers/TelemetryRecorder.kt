@@ -126,24 +126,41 @@ class TelemetryRecorder(private val context: Context) {
         Log.i(TAG, "Gravação de telemetria iniciada$extra")
 
         sampleJob = scope.launch {
-            var ticksSinceFlush = 0
+            // Tick de 500 ms — permite capturar variações sem esperar 1 s inteiro.
+            // Amostra é gravada quando velocidade varia ≥ 1 km/h, potência ≥ 0,2 kW,
+            // ou passaram ≥ 5 s sem nenhuma amostra (garante continuidade do GPS).
+            var ticksSinceFlush  = 0  // flush a cada 60 ticks × 500 ms = 30 s
+            var ticksSinceRecord = 0  // força registro a cada 10 ticks × 500 ms = 5 s
+            var lastSpd  = Float.NaN
+            var lastEvKw = Float.NaN
+
             while (isActive && recording) {
-                val offsetSec = ((System.currentTimeMillis() - this@TelemetryRecorder.startMs) / 1_000L).toInt()
+                val spd  = latestSpeedKmh
                 val evKw = if (latestBatteryVoltageV > 0f)
                     latestBatteryCurrentA * latestBatteryVoltageV / 1_000f else 0f
 
-                synchronized(samples) {
-                    samples.add(TelemetrySample(
-                        t    = offsetSec,
-                        lat  = latestLat,
-                        lng  = latestLng,
-                        spd  = latestSpeedKmh,
-                        rpm  = latestEngineRpm,
-                        evKw = evKw,
-                    ))
+                val speedChanged = lastSpd.isNaN()  || kotlin.math.abs(spd  - lastSpd)  >= 1f
+                val powerChanged = lastEvKw.isNaN() || kotlin.math.abs(evKw - lastEvKw) >= 0.2f
+                val timeForced   = ++ticksSinceRecord >= 10  // máx 5 s sem amostra
+
+                if (speedChanged || powerChanged || timeForced) {
+                    val offsetSec = ((System.currentTimeMillis() - this@TelemetryRecorder.startMs) / 1_000L).toInt()
+                    synchronized(samples) {
+                        samples.add(TelemetrySample(
+                            t    = offsetSec,
+                            lat  = latestLat,
+                            lng  = latestLng,
+                            spd  = spd,
+                            rpm  = latestEngineRpm,
+                            evKw = evKw,
+                        ))
+                    }
+                    lastSpd  = spd
+                    lastEvKw = evKw
+                    ticksSinceRecord = 0
                 }
 
-                // Flush para disco a cada 60 s — garante recuperação após reinício do app
+                // Flush para disco a cada 30 s — garante recuperação após reinício do app
                 if (++ticksSinceFlush >= 60) {
                     ticksSinceFlush = 0
                     flushFile?.let { f ->
@@ -151,7 +168,7 @@ class TelemetryRecorder(private val context: Context) {
                         try { f.writeText(gson.toJson(snapshot)) } catch (_: Exception) {}
                     }
                 }
-                delay(1_000L)
+                delay(500L)
             }
         }
     }
