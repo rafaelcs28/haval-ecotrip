@@ -14,7 +14,8 @@
         android:directBootAware="true"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
-        android:theme="@style/Theme.EcotripImpulse">
+        android:theme="@style/Theme.EcotripImpulse"
+        android:usesCleartextTraffic="true">
 
         <activity
             android:name=".MainActivity"
