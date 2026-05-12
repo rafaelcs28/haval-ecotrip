@@ -1419,6 +1419,8 @@ function renderAutoTrips() {
     const distKm     = t.distKm      > 0    ? f1(t.distKm) + ' km'  : '--';
     const netKwh     = t.netKwh      > 0    ? f2(t.netKwh) + ' kWh' : '--';
     const fuelL      = t.fuelL       > 0    ? f2(t.fuelL)  + ' L'   : '--';
+    const kwh100     = t.distKm > 0.1 && t.netKwh > 0 ? f1(t.netKwh / t.distKm * 100) : null;
+    const kmPerL     = t.fuelL > 0.001 ? f1(t.distKm / t.fuelL) : null;
     const socDelta   = t.startSocPct > 0    ? `${t.startSocPct.toFixed(0)}%→${t.endSocPct.toFixed(0)}%` : '--';
     const maxSpd     = t.maxSpeedKmh > 0    ? `${Math.round(t.maxSpeedKmh)} km/h` : null;
     const avgSpd     = t.timeSec > 0        ? `${Math.round(t.distKm / (t.timeSec / 3600))} km/h` : null;
@@ -1432,8 +1434,11 @@ function renderAutoTrips() {
     const statusBadge = rnStatus === 'pending'   ? '<span class="rename-status-pending" title="Aguardando confirmação do carro">⏳</span>'
                       : rnStatus === 'confirmed'  ? '<span class="rename-status-ok" title="Confirmado pelo carro">✓</span>'
                       : '';
-    const extraRow   = (maxSpd || avgSpd || tempStr) ? `
+    const hasExtra   = maxSpd || avgSpd || tempStr || netKwh !== '--' || fuelL !== '--';
+    const extraRow   = hasExtra ? `
   <div class="trip-metrics" style="margin-top:4px">
+    <div class="trip-metric"><div class="trip-metric-val green">${netKwh}</div><div class="trip-metric-lbl">kWh liq.</div></div>
+    ${fuelL !== '--' ? `<div class="trip-metric"><div class="trip-metric-val orange">${fuelL}</div><div class="trip-metric-lbl">combust.</div></div>` : ''}
     ${avgSpd  ? `<div class="trip-metric"><div class="trip-metric-val muted">${avgSpd}</div><div class="trip-metric-lbl">vel. méd.</div></div>` : ''}
     ${maxSpd  ? `<div class="trip-metric"><div class="trip-metric-val muted">${maxSpd}</div><div class="trip-metric-lbl">vel. máx.</div></div>` : ''}
     ${tempStr ? `<div class="trip-metric"><div class="trip-metric-val blue">${tempStr}</div><div class="trip-metric-lbl">temp. ext.</div></div>` : ''}
@@ -1459,8 +1464,8 @@ function renderAutoTrips() {
   </div>
   <div class="trip-metrics">
     <div class="trip-metric"><div class="trip-metric-val blue">${distKm}</div><div class="trip-metric-lbl">dist.</div></div>
-    <div class="trip-metric"><div class="trip-metric-val green">${netKwh}</div><div class="trip-metric-lbl">kWh liq.</div></div>
-    <div class="trip-metric"><div class="trip-metric-val orange">${fuelL}</div><div class="trip-metric-lbl">combust.</div></div>
+    ${kwh100 ? `<div class="trip-metric"><div class="trip-metric-val green">${kwh100}</div><div class="trip-metric-lbl">kWh/100</div></div>` : `<div class="trip-metric"><div class="trip-metric-val green">${netKwh}</div><div class="trip-metric-lbl">kWh liq.</div></div>`}
+    ${kmPerL ? `<div class="trip-metric"><div class="trip-metric-val orange">${kmPerL}</div><div class="trip-metric-lbl">km/L</div></div>` : ''}
     <div class="trip-metric"><div class="trip-metric-val teal">${socDelta}</div><div class="trip-metric-lbl">SOC</div></div>
   </div>${extraRow}
 </div>`;
