@@ -107,18 +107,14 @@ fun ConsumptionScreen() {
             // SOC e combustível chegam raramente via listener passivo no GWM —
             // busca ativa a cada 60 s garante que o auto-trip capture o valor correto ao finalizar
             if (ticks % 60 == 30) {
-                // Busca ativa dos 3 sinais de SOC + combustível — chegam raramente via listener passivo
+                // Busca ativa dos sinais que chegam raramente via listener passivo
                 val socVal  = withContext(Dispatchers.IO) {
                     carManager.fetchCurrent(CarConstants.CAR_EV_INFO_SOC_OF_BATTERY.value)?.trim()
-                }
-                val socVal2 = withContext(Dispatchers.IO) {
-                    carManager.fetchCurrent(CarConstants.CAR_EV_INFO_CUR_BATTERY_POWER_PERCENTAGE.value)?.trim()
                 }
                 val fuelVal = withContext(Dispatchers.IO) {
                     carManager.fetchCurrent(CarConstants.CAR_BASIC_REMAIN_FUEL_PERCENTAGE.value)?.trim()
                 }
                 socVal?.let  { tripManager.onDataChanged(CarConstants.CAR_EV_INFO_SOC_OF_BATTERY.value, it) }
-                socVal2?.let { tripManager.onDataChanged(CarConstants.CAR_EV_INFO_CUR_BATTERY_POWER_PERCENTAGE.value, it) }
                 fuelVal?.let { tripManager.onDataChanged(CarConstants.CAR_BASIC_REMAIN_FUEL_PERCENTAGE.value, it) }
             }
         }
@@ -202,7 +198,18 @@ fun ConsumptionScreen() {
                     }
                     CarConstants.CAR_EV_INFO_CUR_CHARGE_CURRENT.value -> {
                         mqttManager.latestChargeCurrentA = value.trim().toFloatOrNull() ?: 0f
+                        // Potência do motor elétrico: V (car.basic.battery_voltage) × A / 1000 = kW
+                        val motorKw = mqttManager.latestBasicBattVoltageV * mqttManager.latestChargeCurrentA / 1000f
+                        mqttManager.latestMotorPowerKw = motorKw
+                        tripManager.updateMotorPowerKw(motorKw)
                         syncCharging()
+                    }
+                    CarConstants.CAR_BASIC_BATTERY_VOLTAGE.value -> {
+                        mqttManager.latestBasicBattVoltageV = value.trim().toFloatOrNull() ?: 0f
+                        // Recalcula potência do motor com nova tensão
+                        val motorKw = mqttManager.latestBasicBattVoltageV * mqttManager.latestChargeCurrentA / 1000f
+                        mqttManager.latestMotorPowerKw = motorKw
+                        tripManager.updateMotorPowerKw(motorKw)
                     }
                     CarConstants.CAR_EV_INFO_POWER_BATTERY_VOLTAGE.value -> {
                         mqttManager.latestBatteryVoltageV = value.trim().toFloatOrNull() ?: 0f
@@ -218,26 +225,6 @@ fun ConsumptionScreen() {
                         mqttManager.latestOdometerKm = km
                         // não passa para TripManager (não é usado em cálculos de trip)
                     }
-                    // Aceita capital-I e lowercase-i — o Shizuku pode entregar qualquer um
-                    CarConstants.CAR_EV_INFO_INSTANT_ENERGY_CONSUMPTION.value,
-                    "car.ev_info.instant_energy_consumption" -> {
-                        // Fonte primária: positivo = consumo, negativo = regen
-                        // Valores fora de −200..+200 kW = sinal indisponível → ignora
-                        val kw = value.trim().toFloatOrNull() ?: 0f
-                        if (kw in -200f..200f) {
-                            mqttManager.latestMotorPowerKw = kw
-                            tripManager.onDataChanged(CarConstants.CAR_EV_INFO_INSTANT_ENERGY_CONSUMPTION.value, value)
-                        }
-                    }
-                    CarConstants.CAR_EV_INFO_MOTOR_POWER.value -> {
-                        // Fonte alternativa HCU — usada sempre que Instant_energy_consumption
-                        // não estiver ativo neste carro (não há dado com esse sinal)
-                        val kw = value.trim().toFloatOrNull() ?: 0f
-                        if (!mqttManager.instantEnergyActive) {
-                            mqttManager.latestMotorPowerKw = kw
-                        }
-                        tripManager.onDataChanged(key, value)
-                    }
                     CarConstants.CAR_EV_INFO_CHARGING_STATE.value -> {
                         mqttManager.latestChargingState = value.trim().toIntOrNull() ?: -1
                         syncCharging()
@@ -245,12 +232,14 @@ fun ConsumptionScreen() {
                     CarConstants.CAR_EV_INFO_CHARGE_REMAINING_TIME.value -> {
                         mqttManager.latestChargeRemainingMin = value.trim().toIntOrNull() ?: 0
                     }
-                    CarConstants.CAR_EV_INFO_ENERGY_OUTPUT_PERCENTAGE.value -> {
+                    CarConstants.CAR_EV_INFO_CUR_BATTERY_POWER_PERCENTAGE.value -> {
+                        // % de potência do motor elétrico (car.ev_info.cur_battery_power_percentage)
                         mqttManager.latestBattPowerPct = value.trim().toIntOrNull() ?: 0
-                        tripManager.onDataChanged(key, value)  // rastreia pico no auto-trip
+                        tripManager.onDataChanged(key, value)  // rastreia pico no auto-trip + telemetria
                     }
                     CarConstants.CAR_BASIC_ENGINE_SPEED.value -> {
                         mqttManager.latestEngineRpm = value.trim().toIntOrNull() ?: 0
+                        tripManager.onDataChanged(key, value)  // alimenta telemetryRecorder.latestEngineRpm
                     }
                     else -> tripManager.onDataChanged(key, value)
                 }
@@ -280,11 +269,12 @@ fun ConsumptionScreen() {
                 carManager.fetchCurrent(CarConstants.CAR_EV_INFO_BATTERY_CHARGE_PERCENTAGE.value)
                     ?.trim()?.let { tripManager.onDataChanged(CarConstants.CAR_EV_INFO_BATTERY_CHARGE_PERCENTAGE.value, it) }
 
+                // Motor power % (cur_battery_power_percentage) — busca imediata ao conectar
                 carManager.fetchCurrent(CarConstants.CAR_EV_INFO_CUR_BATTERY_POWER_PERCENTAGE.value)
-                    ?.trim()?.let { tripManager.onDataChanged(CarConstants.CAR_EV_INFO_CUR_BATTERY_POWER_PERCENTAGE.value, it) }
-
-                carManager.fetchCurrent(CarConstants.CAR_EV_INFO_ENERGY_OUTPUT_PERCENTAGE.value)
-                    ?.trim()?.toIntOrNull()?.let { mqttManager.latestBattPowerPct = it }
+                    ?.trim()?.let { raw ->
+                        raw.toIntOrNull()?.let { mqttManager.latestBattPowerPct = it }
+                        tripManager.onDataChanged(CarConstants.CAR_EV_INFO_CUR_BATTERY_POWER_PERCENTAGE.value, raw)
+                    }
 
                 // Busca imediata de driving_ready_state — inicia trip automático se carro já estiver ligado
                 // (feito após busca de SOC/fuel para que latestSocPct/latestFuelPct estejam disponíveis)
@@ -302,8 +292,16 @@ fun ConsumptionScreen() {
                     ?.trim()?.toIntOrNull()?.let { mqttManager.syncChargeLimitFromCar(it) }
 
                 // Busca imediata de medidas elétricas do pack de bateria
+                // Tensão e corrente — busca em ordem para calcular potência do motor ao conectar
+                carManager.fetchCurrent(CarConstants.CAR_BASIC_BATTERY_VOLTAGE.value)
+                    ?.trim()?.toFloatOrNull()?.let { mqttManager.latestBasicBattVoltageV = it }
                 carManager.fetchCurrent(CarConstants.CAR_EV_INFO_CUR_CHARGE_CURRENT.value)
-                    ?.trim()?.toFloatOrNull()?.let { mqttManager.latestChargeCurrentA = it }
+                    ?.trim()?.toFloatOrNull()?.let { amps ->
+                        mqttManager.latestChargeCurrentA = amps
+                        val motorKw = mqttManager.latestBasicBattVoltageV * amps / 1000f
+                        mqttManager.latestMotorPowerKw = motorKw
+                        tripManager.updateMotorPowerKw(motorKw)
+                    }
                 carManager.fetchCurrent(CarConstants.CAR_EV_INFO_POWER_BATTERY_VOLTAGE.value)
                     ?.trim()?.toFloatOrNull()?.let { mqttManager.latestBatteryVoltageV = it }
                 carManager.fetchCurrent(CarConstants.CAR_EV_INFO_POWER_BATTERY_CURRENT.value)

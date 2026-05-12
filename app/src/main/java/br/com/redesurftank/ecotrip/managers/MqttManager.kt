@@ -108,8 +108,8 @@ class MqttManager private constructor() {
     var latestChargeCurrentA: Float = 0f   // A — corrente AC de carregamento
     var latestBatteryVoltageV: Float = 0f  // V — tensão do pack de bateria
     var latestBatteryCurrentA: Float = 0f  // A — corrente DC do pack (power_battery_current)
-    var latestMotorPowerKw: Float = 0f     // kW — potência do motor elétrico
-    var instantEnergyActive: Boolean = false // true se car.ev_info.Instant_energy_consumption funcionar
+    var latestMotorPowerKw:       Float = 0f  // kW — potência do motor elétrico (V×A/1000)
+    var latestBasicBattVoltageV:  Float = 0f  // V — car.basic.battery_voltage (para cálculo de potência)
     var latestOdometerKm:   Float = 0f     // km — odômetro total do veículo
     var latestBatt12vPct:   Float = 0f     // % — carga da bateria auxiliar 12V
     // 0=Desconectado, 1=Carregando, 2=Programado, 3=Finalizado, 5=Aguardando liberação, -1=desconhecido

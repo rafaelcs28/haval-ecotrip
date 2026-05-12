@@ -1078,10 +1078,7 @@ class TripManager private constructor() {
                     captureStartIfNeeded()
                 }
                 CarConstants.CAR_EV_INFO_SOC_OF_BATTERY.value,
-                CarConstants.CAR_EV_INFO_BATTERY_CHARGE_PERCENTAGE.value,
-                CarConstants.CAR_EV_INFO_CUR_BATTERY_POWER_PERCENTAGE.value -> {
-                    // Três sinais que retornam SOC (0–100%) — usar qualquer um que chegue
-                    // CAR_EV_INFO_CUR_BATTERY_POWER_PERCENTAGE retorna SOC, não potência
+                CarConstants.CAR_EV_INFO_BATTERY_CHARGE_PERCENTAGE.value -> {
                     if (value <= 0f || value > 100f) {
                         Log.w(TAG, "SOC ignorado (fora de range): $value")
                         return
@@ -1107,28 +1104,30 @@ class TripManager private constructor() {
                     latestEngineRpm = value.toInt()
                     telemetryRecorder?.latestEngineRpm = value.toInt()
                 }
-                CarConstants.CAR_EV_INFO_ENERGY_OUTPUT_PERCENTAGE.value -> {
+                CarConstants.CAR_EV_INFO_CUR_BATTERY_POWER_PERCENTAGE.value -> {
+                    // % de potência do motor elétrico (car.ev_info.cur_battery_power_percentage)
+                    // −100=regen máx, +100=consumo máx
                     val pct = value.toInt()
                     latestBattPowerPct = pct
-                    // Rastreia o pico de potência (positivo = consumo) durante a viagem
+                    telemetryRecorder?.latestBattPowerPct = pct   // alimenta amostras da viagem
                     if (autoTripStartMs > 0L && pct > autoTripMaxPowerPct) autoTripMaxPowerPct = pct
-                }
-                CarConstants.CAR_EV_INFO_INSTANT_ENERGY_CONSUMPTION.value,
-                CarConstants.CAR_EV_INFO_INSTANT_ENERGY_CONSUMPTION_LC.value -> {
-                    // Fonte primária de kW. Range físico: −200..+200 kW. Fora = indisponível.
-                    if (value < -200f || value > 200f) return
-                    telemetryRecorder?.latestMotorPowerKw = value
-                }
-                CarConstants.CAR_EV_INFO_MOTOR_POWER.value -> {
-                    // Fonte alternativa HCU — alimenta telemetria quando Instant_energy_consumption
-                    // não retorna dados neste veículo
-                    if (value < -200f || value > 200f) return
-                    telemetryRecorder?.latestMotorPowerKw = value
                 }
 
                 else -> return
             }
             notifyListeners()
+        }
+    }
+
+    /**
+     * Atualiza potência do motor elétrico (kW) no TelemetryRecorder.
+     * Chamado pelo ConsumptionScreen após calcular V×A/1000 com car.basic.battery_voltage
+     * × car.ev_info.cur_charge_current. Separado de onDataChanged porque o valor é
+     * calculado, não vem diretamente de uma chave do carro.
+     */
+    fun updateMotorPowerKw(kw: Float) {
+        synchronized(lock) {
+            telemetryRecorder?.latestMotorPowerKw = kw
         }
     }
 

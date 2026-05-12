@@ -35,6 +35,7 @@ enum class CarConstants(val value: String) {
     CAR_EV_INFO_CUR_CHARGE_CURRENT("car.ev_info.cur_charge_current"),
     CAR_EV_INFO_POWER_BATTERY_VOLTAGE("car.ev_info.power_battery_voltage"),
     CAR_EV_INFO_POWER_BATTERY_CURRENT("car.ev_info.power_battery_current"),
+    CAR_BASIC_BATTERY_VOLTAGE("car.basic.battery_voltage"),   // tensão do pack (namespace basic)
 
     // Motor elétrico — potência direta do HCU (kW, sinal positivo = consumo, negativo = regen)
     CAR_EV_INFO_MOTOR_POWER("car.ev_info.motor_power"),
