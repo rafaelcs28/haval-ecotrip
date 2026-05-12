@@ -166,14 +166,6 @@
           <img id="cl-win-rl-ajar" src="/images/haval_h6/vidro_traseiro_esquerdo_entreaberto.png"  style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:contain;display:none">
           <img id="cl-win-rr-open" src="/images/haval_h6/vidro_traseiro_direito_aberto.png"        style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:contain;display:none">
           <img id="cl-win-rr-ajar" src="/images/haval_h6/vidro_traseiro_direito_entreaberto.png"   style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:contain;display:none">
-          <!-- Velocímetro — placa de trânsito, visível quando motor ligado -->
-          <div id="d-speedometer" style="display:none;position:absolute;left:1%;bottom:3%;width:50px;height:50px;pointer-events:none;z-index:5;opacity:0.2">
-            <div style="width:100%;height:100%;border-radius:50%;background:#fff;border:5px solid #dc2626;box-shadow:0 2px 8px rgba(0,0,0,.5);display:flex;flex-direction:column;align-items:center;justify-content:center">
-              <span id="d-speed-val" style="font-size:18px;font-weight:900;color:#111;line-height:1;font-family:'Arial Black',Arial,sans-serif;letter-spacing:-0.5px">0</span>
-              <span style="font-size:6px;font-weight:700;color:#555;line-height:1;margin-top:1px;letter-spacing:0.5px">km/h</span>
-            </div>
-          </div>
-
           <!-- Pneus — badges sobrepostos nas 4 rodas -->
           <div id="d-tyre-fl" style="position:absolute;left:5%;top:19%;display:flex;flex-direction:column;align-items:center;gap:1px;background:rgba(9,18,36,0.85);border:1.5px solid #334155;border-radius:7px;padding:4px 6px;min-width:46px;text-align:center;pointer-events:none">
             <span style="font-size:7px;color:#475569;line-height:1;letter-spacing:0.3px">D.ESQ</span>
@@ -202,10 +194,18 @@
         </div>
         <!-- Barra de status -->
         <div style="display:flex;justify-content:space-between;align-items:center;padding:1px 2px 0">
-          <!-- Temperatura externa — esquerda -->
-          <div style="display:flex;align-items:baseline;gap:3px;min-width:36px">
-            <span id="d-car-temp-out" style="font-size:13px;font-weight:600;color:#94a3b8">--°</span>
-            <span style="font-size:8px;color:#64748b">ext.</span>
+          <!-- Velocímetro + Temperatura externa — esquerda -->
+          <div style="display:flex;align-items:center;gap:5px">
+            <div id="d-speedometer" style="display:none;width:50px;height:50px;flex-shrink:0;opacity:0.1">
+              <div style="width:100%;height:100%;border-radius:50%;background:#fff;border:5px solid #dc2626;box-shadow:0 1px 6px rgba(0,0,0,.4);display:flex;flex-direction:column;align-items:center;justify-content:center">
+                <span id="d-speed-val" style="font-size:18px;font-weight:900;color:#111;line-height:1;font-family:'Arial Black',Arial,sans-serif;letter-spacing:-0.5px">0</span>
+                <span style="font-size:6px;font-weight:700;color:#555;line-height:1;margin-top:1px;letter-spacing:0.5px">km/h</span>
+              </div>
+            </div>
+            <div style="display:flex;align-items:baseline;gap:3px;min-width:36px">
+              <span id="d-car-temp-out" style="font-size:13px;font-weight:600;color:#94a3b8">--°</span>
+              <span style="font-size:8px;color:#64748b">ext.</span>
+            </div>
           </div>
           <!-- Motor + Trava — centro -->
           <div style="display:flex;gap:20px;align-items:center">
