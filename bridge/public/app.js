@@ -2,6 +2,8 @@
 
 // ── Estado local ──────────────────────────────────────────────────────────────
 let state = {};
+let _actStatusFns  = [];   // statusFn por índice de card (preenchido por initActionsPanel)
+let _actionLogMap  = {};   // action → id do div de log
 let lastUpdateMs = null;
 let wsRetryDelay = 1000;
 let ws = null;
@@ -68,33 +70,92 @@ document.addEventListener('DOMContentLoaded', () => {
 // ── Actions panel — criado 100% em JS para sobreviver a cache antigo de index.html
 function initActionsPanel() {
   const CARDS = [
-    { title: '⚙️ Motor', items: [
-      { label: '▶ Ligar',    cls: 'green',  action: 'engine_on',      confirm: '⚙️ Ligar motor?',           msg: 'O motor térmico será ligado remotamente.',       color: '#22c55e' },
-      { label: '■ Desligar', cls: 'red',    action: 'engine_off',     confirm: '⚙️ Desligar motor?',        msg: 'O motor térmico será desligado remotamente.',    color: '#ef4444' },
-    ]},
-    { title: '🚗 Portas', items: [
-      { label: '🔓 Abrir',  cls: 'orange', action: 'lock_open',      confirm: '🔓 Abrir portas?',          msg: 'As portas serão destrancadas remotamente.',      color: '#f97316' },
-      { label: '🔒 Fechar', cls: 'teal',   action: 'lock_close',     confirm: '🔒 Fechar portas?',         msg: 'As portas serão trancadas remotamente.',         color: '#2dd4bf' },
-    ]},
-    { title: '🪟 Vidros', items: [
-      { label: '↕ Abrir todos',  cls: 'orange', action: 'windows_open',  confirm: '🪟 Abrir vidros?',   msg: 'Todos os vidros serão abertos remotamente.',  color: '#f97316' },
-      { label: '↕ Fechar todos', cls: 'teal',   action: 'windows_close', confirm: '🪟 Fechar vidros?',  msg: 'Todos os vidros serão fechados remotamente.', color: '#2dd4bf' },
-    ]},
-    { title: '🧳 Porta-malas', items: [
-      { label: '↑ Abrir',  cls: 'orange', action: 'trunk_open',     confirm: '🧳 Abrir porta-malas?',     msg: 'A porta-malas será aberta remotamente.',         color: '#f97316' },
-      { label: '↓ Fechar', cls: 'teal',   action: 'trunk_close',    confirm: '🧳 Fechar porta-malas?',    msg: 'A porta-malas será fechada remotamente.',        color: '#2dd4bf' },
-    ]},
-    { title: '☀️ Teto solar', items: [
-      { label: '↑ Abrir',  cls: 'orange', action: 'sunroof_open',   confirm: '☀️ Abrir teto solar?',      msg: 'O teto solar será aberto remotamente.',          color: '#f97316' },
-      { label: '↓ Fechar', cls: 'teal',   action: 'sunroof_close',  confirm: '☀️ Fechar teto solar?',     msg: 'O teto solar será fechado remotamente.',         color: '#2dd4bf' },
-    ]},
-    { title: '❄️ Ar condicionado', items: [
-      { label: '❄️ Ativar ar condicionado', cls: 'blue full', action: 'ac_on', confirm: '❄️ Ligar AC?', msg: 'O ar condicionado será ativado remotamente.', color: '#60a5fa' },
-    ]},
-    { title: '⚡ Recarga', items: [
-      { label: '✕ Interromper recarga',  cls: 'red full',   action: 'charge_stop',    confirm: '⚡ Interromper recarga?',            msg: 'A recarga será interrompida remotamente.',       color: '#ef4444' },
-    ]},
+    { title: '⚙️ Motor',
+      statusFn: s => {
+        const v = s.engine_state;
+        if (v == null) return null;
+        return (v === '1' || v === 1)
+          ? { text: 'Ligado',    color: '#f87171' }
+          : { text: 'Desligado', color: '#4ade80' };
+      },
+      items: [
+        { label: '▶ Ligar',    cls: 'green', action: 'engine_on',  confirm: '⚙️ Ligar motor?',    msg: 'O motor térmico será ligado remotamente.',    color: '#22c55e' },
+        { label: '■ Desligar', cls: 'red',   action: 'engine_off', confirm: '⚙️ Desligar motor?', msg: 'O motor térmico será desligado remotamente.', color: '#ef4444' },
+      ]},
+    { title: '🚗 Portas',
+      statusFn: s => {
+        const v = s.lock_state;
+        if (v == null) return null;
+        return v === 'on'
+          ? { text: 'Abertas',  color: '#f87171' }
+          : { text: 'Fechadas', color: '#4ade80' };
+      },
+      items: [
+        { label: '🔓 Abrir',  cls: 'orange', action: 'lock_open',  confirm: '🔓 Abrir portas?',  msg: 'As portas serão destrancadas remotamente.', color: '#f97316' },
+        { label: '🔒 Fechar', cls: 'teal',   action: 'lock_close', confirm: '🔒 Fechar portas?', msg: 'As portas serão trancadas remotamente.',     color: '#2dd4bf' },
+      ]},
+    { title: '🪟 Vidros',
+      statusFn: s => {
+        const vals = [s.window_fl, s.window_fr, s.window_rl, s.window_rr].filter(v => v != null);
+        if (!vals.length) return null;
+        const anyOpen = vals.some(v => String(v) !== '1');
+        return anyOpen
+          ? { text: 'Abertos',  color: '#f87171' }
+          : { text: 'Fechados', color: '#4ade80' };
+      },
+      items: [
+        { label: '↕ Abrir todos',  cls: 'orange', action: 'windows_open',  confirm: '🪟 Abrir vidros?',  msg: 'Todos os vidros serão abertos remotamente.',  color: '#f97316' },
+        { label: '↕ Fechar todos', cls: 'teal',   action: 'windows_close', confirm: '🪟 Fechar vidros?', msg: 'Todos os vidros serão fechados remotamente.', color: '#2dd4bf' },
+      ]},
+    { title: '🧳 Porta-malas',
+      statusFn: s => {
+        const v = s.door_trunk;
+        if (v == null) return null;
+        return v === 'on'
+          ? { text: 'Aberto',  color: '#f87171' }
+          : { text: 'Fechado', color: '#4ade80' };
+      },
+      items: [
+        { label: '↑ Abrir',  cls: 'orange', action: 'trunk_open',  confirm: '🧳 Abrir porta-malas?',  msg: 'A porta-malas será aberta remotamente.',  color: '#f97316' },
+        { label: '↓ Fechar', cls: 'teal',   action: 'trunk_close', confirm: '🧳 Fechar porta-malas?', msg: 'A porta-malas será fechada remotamente.', color: '#2dd4bf' },
+      ]},
+    { title: '☀️ Teto solar',
+      statusFn: s => {
+        const v = s.sunroof;
+        if (v == null) return null;
+        return String(v) === '3'
+          ? { text: 'Fechado', color: '#4ade80' }
+          : { text: 'Aberto',  color: '#f87171' };
+      },
+      items: [
+        { label: '↑ Abrir',  cls: 'orange', action: 'sunroof_open',  confirm: '☀️ Abrir teto solar?',  msg: 'O teto solar será aberto remotamente.',  color: '#f97316' },
+        { label: '↓ Fechar', cls: 'teal',   action: 'sunroof_close', confirm: '☀️ Fechar teto solar?', msg: 'O teto solar será fechado remotamente.', color: '#2dd4bf' },
+      ]},
+    { title: '❄️ Ar condicionado',
+      statusFn: s => {
+        const v = s.ac_state;
+        if (v == null) return null;
+        return v === 'on'
+          ? { text: 'Ligado',     color: '#60a5fa' }
+          : { text: 'Desligado',  color: '#4ade80' };
+      },
+      items: [
+        { label: '❄️ Ativar ar condicionado', cls: 'blue full', action: 'ac_on', confirm: '❄️ Ligar AC?', msg: 'O ar condicionado será ativado remotamente.', color: '#60a5fa' },
+      ]},
+    { title: '⚡ Recarga',
+      statusFn: null,
+      items: [
+        { label: '✕ Interromper recarga', cls: 'red full', action: 'charge_stop', confirm: '⚡ Interromper recarga?', msg: 'A recarga será interrompida remotamente.', color: '#ef4444' },
+      ]},
   ];
+
+  // Preenche mapa action→logId e lista de statusFns
+  _actStatusFns = [];
+  _actionLogMap = {};
+  CARDS.forEach((card, i) => {
+    _actStatusFns.push(card.statusFn || null);
+    card.items.forEach(item => { _actionLogMap[item.action] = `act-log-${i}`; });
+  });
 
   // Garante que o panel existe mesmo com index.html antigo em cache
   let panel = document.getElementById('panel-actions');
@@ -120,9 +181,12 @@ function initActionsPanel() {
   }
 
   // Renderiza os cards de ação
-  panel.innerHTML = CARDS.map(card => `
+  panel.innerHTML = CARDS.map((card, i) => `
     <div class="card">
-      <div class="card-title">${card.title}</div>
+      <div class="act-card-header">
+        <div class="card-title" style="margin-bottom:0">${card.title}</div>
+        ${card.statusFn ? `<span id="act-st-${i}" class="act-status"><span class="act-dot" style="background:#475569"></span><span>--</span></span>` : ''}
+      </div>
       <div class="action-grid">
         ${card.items.map(item => `
           <button class="action-btn ${item.cls}"
@@ -130,7 +194,25 @@ function initActionsPanel() {
             ${item.label}
           </button>`).join('')}
       </div>
+      <div class="act-log" id="act-log-${i}"></div>
     </div>`).join('');
+}
+
+// Atualiza os badges de status na aba Ações com o estado atual
+function updateActionStatuses(s) {
+  _actStatusFns.forEach((fn, i) => {
+    if (!fn) return;
+    const el = document.getElementById(`act-st-${i}`);
+    if (!el) return;
+    const r = fn(s);
+    if (!r) {
+      el.innerHTML = '<span class="act-dot" style="background:#475569"></span><span>--</span>';
+      el.style.color = '#475569';
+    } else {
+      el.innerHTML = `<span class="act-dot" style="background:${r.color}"></span><span>${r.text}</span>`;
+      el.style.color = r.color;
+    }
+  });
 }
 
 // Wrapper de fetch que injeta o token e redireciona 401 para o login
@@ -455,6 +537,7 @@ function renderAll() {
   renderTrip('a', state.trip_a || {});
   renderTrip('b', state.trip_b || {});
   renderCarVersion();
+  updateActionStatuses(state);
 }
 
 function renderCarVersion() {
@@ -1363,18 +1446,27 @@ function showToast(msg) {
 window.showToast = showToast;
 
 async function sendRemoteAction(action, successMsg) {
+  const logEl = document.getElementById(_actionLogMap[action] || '');
+  const hhmm  = () => new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+
+  if (logEl) logEl.innerHTML = '<span style="color:#94a3b8">Enviando…</span>';
   showToast('Enviando comando…');
   try {
     const r    = await apiFetch(`/api/action/${action}`, { method: 'POST' });
     const data = await r.json().catch(() => ({}));
     if (r.ok && data.ok) {
       showToast('✓ ' + successMsg);
+      if (logEl) logEl.innerHTML = `<span style="color:#4ade80">✓ Enviado · ${hhmm()}</span>`;
       if (navigator.vibrate) navigator.vibrate(80);
     } else {
-      showToast('✗ ' + (data.error || `Erro ${r.status}`));
+      const err = data.error || `Erro ${r.status}`;
+      showToast('✗ ' + err);
+      if (logEl) logEl.innerHTML = `<span style="color:#f87171">✗ ${err} · ${hhmm()}</span>`;
     }
   } catch (err) {
-    showToast('✗ ' + (err.message === 'unauthorized' ? 'Sem permissão' : 'Falha ao enviar'));
+    const msg = err.message === 'unauthorized' ? 'Sem permissão' : 'Falha ao enviar';
+    showToast('✗ ' + msg);
+    if (logEl) logEl.innerHTML = `<span style="color:#f87171">✗ ${msg} · ${hhmm()}</span>`;
   }
 }
 

@@ -449,6 +449,36 @@ html, body {
 #content::-webkit-scrollbar { width: 0; }
 
 /* ── Action buttons (panel-actions) ─────────────────────────────────────────── */
+/* ── Ações — header do card (título + status) ─────────────────────────────── */
+.act-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.act-status {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.act-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: inline-block;
+}
+.act-log {
+  min-height: 14px;
+  margin-top: 8px;
+  text-align: right;
+  font-size: 10px;
+  font-family: monospace;
+  letter-spacing: 0.3px;
+  color: var(--muted);
+}
 .action-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
