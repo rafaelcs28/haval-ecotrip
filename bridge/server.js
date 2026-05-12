@@ -80,14 +80,27 @@ async function sendPush(title, body) {
   state.notif_latest_ts = ts;
   broadcast('update', { notif_latest_ts: ts });
 
-  if (!pushSubs.length) return;
+  if (!pushSubs.length) {
+    console.log(`Push "${title}" — sem subscribers registrados`);
+    return;
+  }
   const payload = JSON.stringify({ title, body });
   const dead = [];
   await Promise.all(pushSubs.map(async (sub, i) => {
-    try { await webpush.sendNotification(sub, payload); }
-    catch (e) { if (e.statusCode === 410 || e.statusCode === 404) dead.push(i); }
+    try {
+      await webpush.sendNotification(sub, payload);
+    } catch (e) {
+      const code = e.statusCode;
+      console.error(`Push error [${code}] ...${sub.endpoint?.slice(-30)}: ${e.body || e.message}`);
+      // Remove subscrições expiradas (410/404), inválidas (400) ou com VAPID errado (401)
+      if (code === 410 || code === 404 || code === 400 || code === 401) dead.push(i);
+    }
   }));
-  if (dead.length) { dead.reverse().forEach(i => pushSubs.splice(i, 1)); savePushSubs(); }
+  if (dead.length) {
+    console.log(`Push: removendo ${dead.length} subscrição(ões) inválida(s)`);
+    dead.reverse().forEach(i => pushSubs.splice(i, 1));
+    savePushSubs();
+  }
 }
 
 // ── Preferências de notificações push ────────────────────────────────────────
@@ -100,6 +113,7 @@ const NOTIF_DEFAULTS = {
   trunk_close:  true,   // 🧳 Porta-malas fechada
   engine_on:    true,   // 🔑 Motor ligado
   engine_off:   false,  // 🔑 Motor desligado
+  app_update:   true,   // 📱 Nova versão do app instalada no carro
 };
 let notifPrefs = { ...NOTIF_DEFAULTS };
 try {
@@ -711,6 +725,15 @@ app.post('/api/push/unsubscribe', (req, res) => {
   res.json({ ok: true });
 });
 
+// POST /api/push/reset-subs — limpa TODAS as subscrições (força re-subscribe no cliente)
+app.post('/api/push/reset-subs', (_req, res) => {
+  const count = pushSubs.length;
+  pushSubs = [];
+  savePushSubs();
+  console.log(`Push: ${count} subscrição(ões) removida(s) via reset-subs`);
+  res.json({ ok: true, removed: count });
+});
+
 // GET /api/push/prefs  — preferências de notificação por tipo de evento
 app.get('/api/push/prefs', (_req, res) => res.json(notifPrefs));
 
@@ -841,9 +864,15 @@ function applyMqttMessage(key, value, isRetained = false) {
     case 'last_update':
       state.car_last_update = value;   // ISO timestamp publicado pelo Android (retain=true)
       break;
-    case 'app_version':
-      state.car_app_version = value;   // versão do APK no carro (retain=true)
+    case 'app_version': {
+      const prevVer = state.car_app_version;
+      state.car_app_version = value;
+      // Notifica quando a versão muda (não na primeira leitura/retained)
+      if (!isRetained && prevVer !== null && prevVer !== value && notifPrefs.app_update) {
+        sendPush('📱 App atualizado', `Nova versão: ${value}${prevVer ? ` (era ${prevVer})` : ''}`);
+      }
       break;
+    }
 
     // Sensores de estado (publicados pelo HA via automação)
     case 'status_message': state.status_message = value; break; // pipe-sep alerts

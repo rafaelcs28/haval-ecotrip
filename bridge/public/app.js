@@ -145,6 +145,7 @@ const NOTIF_ITEMS = [
   { key: 'trunk_close',  icon: '🧳', label: 'Porta-malas fechada' },
   { key: 'engine_on',    icon: '🔑', label: 'Motor ligado' },
   { key: 'engine_off',   icon: '🔑', label: 'Motor desligado' },
+  { key: 'app_update',   icon: '📱', label: 'Atualização do app', sub: 'nova versão instalada no carro' },
 ];
 
 let _notifPrefs = {};
@@ -552,25 +553,39 @@ function urlBase64ToUint8Array(b64) {
 
 async function subscribePush() {
   if (!('Notification' in window) || !('PushManager' in window)) {
-    _updatePushPermStatus(); // mostra mensagem correta (standalone vs. browser)
+    _updatePushPermStatus();
     return;
   }
-  // Só pede permissão se ainda não foi decidido
   let perm = Notification.permission;
   if (perm === 'denied') return;
   if (perm === 'default') perm = await Notification.requestPermission();
   if (perm !== 'granted') return;
 
   const reg = await navigator.serviceWorker.ready;
-  // Reutiliza subscrição existente, se houver
+
+  // Busca a VAPID key atual do servidor e compara com a que foi usada na subscrição
+  const { key: currentVapidKey } = await fetch('/api/push/vapid-key').then(r => r.json());
+  const storedVapidKey = localStorage.getItem('push_vapid_key');
+
   let sub = await reg.pushManager.getSubscription();
+
+  // Se a VAPID key mudou (e.g. regenerada no servidor), descarta a subscrição antiga
+  if (sub && storedVapidKey && storedVapidKey !== currentVapidKey) {
+    console.log('VAPID key mudou — re-subscribing push');
+    await sub.unsubscribe();
+    // Limpa subscrições antigas no servidor também
+    await fetch('/api/push/reset-subs', { method: 'POST' }).catch(() => {});
+    sub = null;
+  }
+
   if (!sub) {
-    const { key } = await fetch('/api/push/vapid-key').then(r => r.json());
     sub = await reg.pushManager.subscribe({
       userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array(key),
+      applicationServerKey: urlBase64ToUint8Array(currentVapidKey),
     });
+    localStorage.setItem('push_vapid_key', currentVapidKey);
   }
+
   await fetch('/api/push/subscribe', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
