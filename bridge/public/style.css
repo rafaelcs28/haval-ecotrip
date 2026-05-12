@@ -386,6 +386,39 @@ html, body {
 }
 .filter-sep { font-size: 11px; color: var(--muted); }
 
+/* ── Busca por nome (hist + auto) ────────────────────────────────────────────── */
+.filter-search {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 10px;
+  margin-bottom: 8px;
+}
+.filter-search-icon {
+  font-size: 13px;
+  flex-shrink: 0;
+  opacity: .7;
+}
+.filter-search-input {
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: none;
+  outline: none;
+  color: var(--text);
+  font-size: 13px;
+  -webkit-appearance: none;
+}
+.filter-search-input::placeholder { color: var(--muted); }
+/* botão × nativo do type=search */
+.filter-search-input::-webkit-search-cancel-button {
+  -webkit-appearance: searchfield-cancel-button;
+  opacity: .5;
+}
+
 /* ── Trip detail overlay (mapa + gráficos) ───────────────────────────────────── */
 #trip-detail {
   position: fixed;

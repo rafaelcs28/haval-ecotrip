@@ -470,8 +470,8 @@ function fmtDate(ts) {
 // ── Filtros ───────────────────────────────────────────────────────────────────
 const filterState = {
   charges: { active: 'all', customFrom: '', customTo: '' },
-  hist:    { active: 'all', customFrom: '', customTo: '' },
-  auto:    { active: 'all', customFrom: '', customTo: '' },
+  hist:    { active: 'all', customFrom: '', customTo: '', search: '' },
+  auto:    { active: 'all', customFrom: '', customTo: '', search: '' },
 };
 let cachedCharges = null;
 let cachedTrips   = null;
@@ -517,6 +517,18 @@ function setFilterDates(tabId) {
   setFilter(tabId, 'custom');
 }
 
+window.setSearchQuery = function(tabId, value) {
+  filterState[tabId].search = value;
+  if (tabId === 'hist') renderHistory();
+  if (tabId === 'auto') renderAutoTrips();
+  // Restaura foco e cursor ao fim (necessário pois innerHTML é recriado)
+  const inp = document.getElementById(`filter-search-${tabId}`);
+  if (inp && document.activeElement !== inp) {
+    inp.focus();
+    try { inp.setSelectionRange(value.length, value.length); } catch (_) {}
+  }
+};
+
 function filterChipsHTML(tabId) {
   const a = filterState[tabId].active;
   const f = filterState[tabId];
@@ -528,7 +540,14 @@ function filterChipsHTML(tabId) {
   <span class="filter-sep">até</span>
   <input type="date" id="filter-${tabId}-to" value="${f.customTo}" onchange="setFilterDates('${tabId}')">
 </div>` : '';
-  return `<div class="filter-chips">${c('all','Tudo')}${c('today','Hoje')}${c('7d','7 dias')}${c('30d','30 dias')}${c('month','Mês')}${c('custom','Custom')}</div>${dates}`;
+  const search = (tabId === 'hist' || tabId === 'auto') ? `
+<div class="filter-search">
+  <span class="filter-search-icon">🔍</span>
+  <input type="search" id="filter-search-${tabId}" class="filter-search-input"
+    placeholder="Buscar por nome…" value="${(f.search || '').replace(/"/g,'&quot;')}"
+    oninput="setSearchQuery('${tabId}', this.value)">
+</div>` : '';
+  return `<div class="filter-chips">${c('all','Tudo')}${c('today','Hoje')}${c('7d','7 dias')}${c('30d','30 dias')}${c('month','Mês')}${c('custom','Custom')}</div>${dates}${search}`;
 }
 
 // ── Render ────────────────────────────────────────────────────────────────────
@@ -892,11 +911,22 @@ function renderHistory() {
     }));
   }
 
+  // Filtro de busca por nome
+  const histQ = (filterState.hist.search || '').trim().toLowerCase();
+  if (histQ) {
+    trips = trips.filter(t => {
+      const name = (t.name || t.label || '').toLowerCase();
+      return name.includes(histQ);
+    });
+  }
+
   let html = filterChipsHTML('hist');
   if (!trips.length) {
-    const hint = isFiltered
-      ? '<div class="empty">Nenhuma viagem automática no período.<br><small style="color:#5B7394">Auto-trips são criados a cada vez que o carro é colocado em marcha.</small></div>'
-      : '<div class="empty">Nenhuma viagem no período.</div>';
+    const hint = histQ
+      ? `<div class="empty">Nenhuma viagem com "${filterState.hist.search}".</div>`
+      : isFiltered
+        ? '<div class="empty">Nenhuma viagem automática no período.<br><small style="color:#5B7394">Auto-trips são criados a cada vez que o carro é colocado em marcha.</small></div>'
+        : '<div class="empty">Nenhuma viagem no período.</div>';
     list.innerHTML = html + hint;
     return;
   }
@@ -972,12 +1002,25 @@ function renderAutoTrips() {
   if (!list) return;
 
   const [filterStart, filterEnd] = getFilterRange('auto');
-  const trips = filterItems(cachedAutoTrips || [], 'startMs', filterStart, filterEnd);
+  let trips = filterItems(cachedAutoTrips || [], 'startMs', filterStart, filterEnd);
+
+  // Filtro de busca por nome / data
+  const autoQ = (filterState.auto.search || '').trim().toLowerCase();
+  if (autoQ) {
+    trips = trips.filter(t => {
+      const name    = (t.name || '').toLowerCase();
+      const dateStr = fmtDate(t.startMs).toLowerCase();
+      return name.includes(autoQ) || dateStr.includes(autoQ);
+    });
+  }
 
   let html = filterChipsHTML('auto');
 
   if (!trips.length) {
-    list.innerHTML = html + '<div class="empty">Nenhuma viagem automática no período.</div>';
+    const hint = autoQ
+      ? `<div class="empty">Nenhuma viagem com "${filterState.auto.search}".</div>`
+      : '<div class="empty">Nenhuma viagem automática no período.</div>';
+    list.innerHTML = html + hint;
     return;
   }
 
