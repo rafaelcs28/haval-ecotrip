@@ -894,6 +894,9 @@ async function syncAllCache({ silent = false } = {}) {
     cachedCharges = (await _idbGetAll('charges'))
       .sort((a, b) => (b.timestamp_ms || 0) - (a.timestamp_ms || 0));
 
+    // Grava timestamp da última sync bem-sucedida
+    await _idbSetMeta('lastSyncTs', Date.now());
+
     // Feedback
     const total = totals.trips + totals.auto + totals.charges;
     if (!silent) {
@@ -913,6 +916,39 @@ async function syncAllCache({ silent = false } = {}) {
     if (!silent) _syncProgressHide();
   }
   return totals;
+}
+
+async function adminCacheStatus() {
+  adminSetStatus('⏳ Verificando...', true);
+  try {
+    // Contagens locais (IndexedDB)
+    const [lTrips, lAuto, lChg, lastTs] = await Promise.all([
+      _idbGetAll('trips').then(a => a.length),
+      _idbGetAll('autotrips').then(a => a.length),
+      _idbGetAll('charges').then(a => a.length),
+      _idbGetMeta('lastSyncTs'),
+    ]);
+
+    // Contagens do servidor
+    let sTrips = '?', sAuto = '?', sChg = '?';
+    try {
+      const c = await apiFetch('/api/counts').then(r => r.json());
+      sTrips = c.trips; sAuto = c.autotrips; sChg = c.charges;
+    } catch (_) { sTrips = sAuto = sChg = 'offline'; }
+
+    const syncTime = lastTs
+      ? new Date(lastTs).toLocaleString('pt-BR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' })
+      : 'nunca';
+
+    adminSetStatus(
+      '📱 Local:    ' + lTrips + ' trips · ' + lAuto + ' auto-trips · ' + lChg + ' recargas\n' +
+      '🌐 Servidor: ' + sTrips + ' trips · ' + sAuto + ' auto-trips · ' + sChg + ' recargas\n' +
+      '🕐 Última sync: ' + syncTime,
+      true
+    );
+  } catch (e) {
+    adminSetStatus('Erro ao verificar cache: ' + e.message, false);
+  }
 }
 
 function getFilterRange(tabId) {

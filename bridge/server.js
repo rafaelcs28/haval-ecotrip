@@ -459,6 +459,11 @@ app.use('/api', (req, res, next) => {
 });
 
 app.get('/api/state',  (_req, res) => res.json(state));
+app.get('/api/counts', (_req, res) => res.json({
+  trips:    tripsMap.size,
+  autotrips: autoTripsArr.length,
+  charges:  chargesArr.length,
+}));
 app.get('/api/trips', (req, res) => {
   const since = req.query.since || '';
   const all   = getTrips(500);
