@@ -744,6 +744,7 @@ class MqttManager private constructor() {
             S("battery_current",    "Corrente da Bateria",      "$prefix/battery_current_a",  "A",         icon = "mdi:current-dc"),
             S("charge_power",       "Potência de Recarga",      "$prefix/charge_power_kw",    "kW",        icon = "mdi:ev-station"),
             S("motor_power_kw",    "Potência Motor Elétrico",  "$prefix/motor_power_kw",     "kW",        icon = "mdi:lightning-bolt-circle"),
+            S("battery_power_pct", "Potência Motor %",         "$prefix/battery_power_pct",  "%",         icon = "mdi:gauge"),
             S("engine_rpm",        "Rotação Motor Térmico",    "$prefix/engine_rpm",         "rpm",       icon = "mdi:engine"),
             S("charging_state",     "Estado de Recarga",        "$prefix/charging_state",     "",          icon = "mdi:ev-plug-type2", sc = null),
             S("speed",              "Velocidade Atual",         "$prefix/speed_kmh",           "km/h",      "speed"),
