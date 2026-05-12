@@ -390,6 +390,27 @@ function scheduleChargesFlush() {
 const app    = express();
 const server = http.createServer(app);
 
+// ── HTTPS opcional — ativo quando cert.pem + key.pem existem no diretório ────
+// Setup: brew install mkcert && mkcert -install
+//        cd ~/haval-ecotrip/bridge
+//        mkcert mac-mini.local localhost 127.0.0.1 <IP-LAN>
+//        mv mac-mini.local+*.pem cert.pem; mv mac-mini.local+*-key.pem key.pem
+const HTTPS_PORT = parseInt(process.env.HTTPS_PORT || '3443', 10);
+const _certFile  = path.join(__dirname, 'cert.pem');
+const _keyFile   = path.join(__dirname, 'key.pem');
+let httpsServer  = null;
+if (fs.existsSync(_certFile) && fs.existsSync(_keyFile)) {
+  try {
+    httpsServer = require('https').createServer(
+      { cert: fs.readFileSync(_certFile), key: fs.readFileSync(_keyFile) },
+      app
+    );
+    console.log('✅  Certificado HTTPS encontrado — porta', HTTPS_PORT);
+  } catch (e) {
+    console.warn('⚠️  HTTPS: falha ao ler certificado —', e.message);
+  }
+}
+
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -728,12 +749,10 @@ app.post('/api/action/:name', (req, res) => {
 
 // ── WebSocket ─────────────────────────────────────────────────────────────────
 
-const wss     = new WebSocketServer({ server, path: '/ws' });
-const clients = new Set();
-
+const clients       = new Set();
 const SERVER_START_AT = Date.now();   // timestamp único por processo
 
-wss.on('connection', (ws, req) => {
+function _handleWsConnection(ws, req) {
   // Verificação de token via query string: /ws?token=...
   if (BRIDGE_TOKEN_HASH) {
     const url   = new URL(req.url, 'http://localhost');
@@ -749,7 +768,16 @@ wss.on('connection', (ws, req) => {
   ws.send(JSON.stringify({ type: 'full_state', data: state, startedAt: SERVER_START_AT }));
   ws.on('close', () => clients.delete(ws));
   ws.on('error', () => clients.delete(ws));
-});
+}
+
+const wss = new WebSocketServer({ server, path: '/ws' });
+wss.on('connection', _handleWsConnection);
+
+// WSS no servidor HTTPS (mesmos clientes e handlers)
+if (httpsServer) {
+  const wssHttps = new WebSocketServer({ server: httpsServer, path: '/ws' });
+  wssHttps.on('connection', _handleWsConnection);
+}
 
 function broadcast(type, data) {
   const msg = JSON.stringify({ type, data });
@@ -1032,11 +1060,22 @@ function applyMqttMessage(key, value, isRetained = false) {
 // ── Start ─────────────────────────────────────────────────────────────────────
 
 server.listen(PORT, () => {
-  console.log(`\n🚗  EcoTrip Bridge v${require('./package.json').version}`);
-  console.log(`    PWA:       http://localhost:${PORT}`);
+  const pkg = require('./package.json');
+  console.log(`\n🚗  EcoTrip Bridge v${pkg.version}`);
+  console.log(`    HTTP PWA:  http://localhost:${PORT}`);
   console.log(`    WebSocket: ws://localhost:${PORT}/ws`);
+  if (httpsServer) {
+    console.log(`    HTTPS PWA: https://localhost:${HTTPS_PORT}  ← use este para Push`);
+    console.log(`    WSS:       wss://localhost:${HTTPS_PORT}/ws`);
+  } else {
+    console.log(`    HTTPS:     inativo (sem cert.pem / key.pem)`);
+  }
   console.log(`    MQTT:      ${MQTT_HOST} (prefix: ${MQTT_PREFIX})\n`);
 });
+
+if (httpsServer) {
+  httpsServer.listen(HTTPS_PORT);
+}
 
 process.on('SIGINT',  () => { mqttClient.end(); process.exit(0); });
 process.on('SIGTERM', () => { mqttClient.end(); process.exit(0); });
