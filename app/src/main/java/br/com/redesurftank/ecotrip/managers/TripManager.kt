@@ -1132,9 +1132,8 @@ class TripManager private constructor() {
                     latestEngineRpm = value.toInt()
                     telemetryRecorder?.latestEngineRpm = value.toInt()
                 }
-                CarConstants.CAR_EV_INFO_ENERGY_OUTPUT_PERCENTAGE.value -> {
-                    // % de potência do motor elétrico (car.ev_info.energy_output_percentage)
-                    // −100=regen máx, +100=consumo máx
+                CarConstants.CAR_EV_INFO_CUR_BATTERY_POWER_PERCENTAGE.value -> {
+                    // % SOC / potência bateria (car.ev_info.cur_battery_power_percentage) — SOC inicial e final
                     val pct = value.toInt()
                     latestBattPowerPct = pct
                     telemetryRecorder?.latestBattPowerPct = pct   // alimenta amostras da viagem
