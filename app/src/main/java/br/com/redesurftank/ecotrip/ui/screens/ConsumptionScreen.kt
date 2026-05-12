@@ -132,7 +132,7 @@ fun ConsumptionScreen() {
         fun syncCharging() {
             val state   = mqttManager.latestChargingState
             val powerKw = if (state == 1 && mqttManager.latestBatteryVoltageV > 0f)
-                mqttManager.latestChargeCurrentA * mqttManager.latestBatteryVoltageV / 1000f
+                kotlin.math.abs(mqttManager.latestChargeCurrentA) * mqttManager.latestBatteryVoltageV / 1000f
             else 0f
             tripManager.onChargingUpdate(state == 1, powerKw)
         }

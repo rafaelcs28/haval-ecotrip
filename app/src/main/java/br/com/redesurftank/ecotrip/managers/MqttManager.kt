@@ -519,7 +519,7 @@ class MqttManager private constructor() {
             // Potência de recarga: apenas quando charging_state == 1 (Carregando)
             // Corrente AC (cur_charge_current) × tensão do pack / 1000
             val chargePowerKw = if (latestChargingState == 1 && latestBatteryVoltageV > 0f)
-                latestChargeCurrentA * latestBatteryVoltageV / 1000f else 0f
+                kotlin.math.abs(latestChargeCurrentA) * latestBatteryVoltageV / 1000f else 0f
             pubR("charge_power_kw",   fmt2(chargePowerKw))
             // Estado de recarga em texto legível
             val chargingStateText = when (latestChargingState) {
