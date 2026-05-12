@@ -107,13 +107,18 @@ fun ConsumptionScreen() {
             // SOC e combustível chegam raramente via listener passivo no GWM —
             // busca ativa a cada 60 s garante que o auto-trip capture o valor correto ao finalizar
             if (ticks % 60 == 30) {
+                // Busca ativa dos 3 sinais de SOC + combustível — chegam raramente via listener passivo
                 val socVal  = withContext(Dispatchers.IO) {
                     carManager.fetchCurrent(CarConstants.CAR_EV_INFO_SOC_OF_BATTERY.value)?.trim()
+                }
+                val socVal2 = withContext(Dispatchers.IO) {
+                    carManager.fetchCurrent(CarConstants.CAR_EV_INFO_CUR_BATTERY_POWER_PERCENTAGE.value)?.trim()
                 }
                 val fuelVal = withContext(Dispatchers.IO) {
                     carManager.fetchCurrent(CarConstants.CAR_BASIC_REMAIN_FUEL_PERCENTAGE.value)?.trim()
                 }
                 socVal?.let  { tripManager.onDataChanged(CarConstants.CAR_EV_INFO_SOC_OF_BATTERY.value, it) }
+                socVal2?.let { tripManager.onDataChanged(CarConstants.CAR_EV_INFO_CUR_BATTERY_POWER_PERCENTAGE.value, it) }
                 fuelVal?.let { tripManager.onDataChanged(CarConstants.CAR_BASIC_REMAIN_FUEL_PERCENTAGE.value, it) }
             }
         }
@@ -268,6 +273,9 @@ fun ConsumptionScreen() {
 
                 carManager.fetchCurrent(CarConstants.CAR_EV_INFO_BATTERY_CHARGE_PERCENTAGE.value)
                     ?.trim()?.let { tripManager.onDataChanged(CarConstants.CAR_EV_INFO_BATTERY_CHARGE_PERCENTAGE.value, it) }
+
+                carManager.fetchCurrent(CarConstants.CAR_EV_INFO_CUR_BATTERY_POWER_PERCENTAGE.value)
+                    ?.trim()?.let { tripManager.onDataChanged(CarConstants.CAR_EV_INFO_CUR_BATTERY_POWER_PERCENTAGE.value, it) }
 
                 carManager.fetchCurrent(CarConstants.CAR_EV_INFO_ENERGY_OUTPUT_PERCENTAGE.value)
                     ?.trim()?.toIntOrNull()?.let { mqttManager.latestBattPowerPct = it }

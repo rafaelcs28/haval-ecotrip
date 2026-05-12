@@ -1070,8 +1070,10 @@ class TripManager private constructor() {
                     captureStartIfNeeded()
                 }
                 CarConstants.CAR_EV_INFO_SOC_OF_BATTERY.value,
-                CarConstants.CAR_EV_INFO_BATTERY_CHARGE_PERCENTAGE.value -> {
-                    // Idem: SOC só faz sentido em (0, 100]
+                CarConstants.CAR_EV_INFO_BATTERY_CHARGE_PERCENTAGE.value,
+                CarConstants.CAR_EV_INFO_CUR_BATTERY_POWER_PERCENTAGE.value -> {
+                    // Três sinais que retornam SOC (0–100%) — usar qualquer um que chegue
+                    // CAR_EV_INFO_CUR_BATTERY_POWER_PERCENTAGE retorna SOC, não potência
                     if (value <= 0f || value > 100f) {
                         Log.w(TAG, "SOC ignorado (fora de range): $value")
                         return
@@ -1079,12 +1081,6 @@ class TripManager private constructor() {
                     latestSocPct = value
                     prefs.edit().putFloat(SharedPreferencesKeys.LATEST_SOC_PCT, value).apply()
                     captureStartIfNeeded()
-                }
-                CarConstants.CAR_EV_INFO_CUR_BATTERY_POWER_PERCENTAGE.value -> {
-                    // −100=regen máximo, +100=consumo máximo — alimenta telemetria em tempo real
-                    val pct = value.toInt().coerceIn(-100, 100)
-                    latestBattPowerPct = pct
-                    telemetryRecorder?.latestBattPowerPct = pct
                 }
                 CarConstants.CAR_EV_INFO_CYCLE_ENERGY_CONSUME_INFO.value -> onEnergy(value)
                 CarConstants.CAR_EV_INFO_ENERGY_RECOVERY_INFO.value      -> onRegen(value)
@@ -1105,6 +1101,9 @@ class TripManager private constructor() {
                 }
                 CarConstants.CAR_EV_INFO_INSTANT_ENERGY_CONSUMPTION.value -> {
                     // Única fonte de kW para telemetria (car.ev_info.Instant_energy_consumption)
+                    // Range físico do motor EV: ≈ −200 kW (regen) a +200 kW (drive)
+                    // Valores fora desse range (ex: −1 = sinal indisponível) são descartados
+                    if (value < -200f || value > 200f) return
                     telemetryRecorder?.latestMotorPowerKw = value
                 }
 
