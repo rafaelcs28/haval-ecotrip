@@ -1036,22 +1036,18 @@ function renderDash() {
   renderTyre('rl', s.tyre_pressure_rl, s.tyre_temp_rl);
   renderTyre('rr', s.tyre_pressure_rr, s.tyre_temp_rr);
 
-  // Velocímetro — placa de trânsito, só visível com motor ligado
-  const spdEl  = document.getElementById('d-speedometer');
+  // Velocímetro + trem de força — ambos dentro de d-powertrain, visível só com motor ligado
   const spdVal = document.getElementById('d-speed-val');
-  if (spdEl) {
-    spdEl.style.display = engOn ? '' : 'none';
-    if (engOn && spdVal) {
-      const spd = Math.round(s.speed_kmh || 0);
-      spdVal.textContent  = spd;
-      spdVal.style.fontSize = spd >= 100 ? '13px' : spd >= 10 ? '18px' : '20px';
-    }
+  if (engOn && spdVal) {
+    const spd = Math.round(s.speed_kmh || 0);
+    spdVal.textContent    = spd;
+    spdVal.style.fontSize = spd >= 100 ? '13px' : spd >= 10 ? '18px' : '20px';
   }
 
   // Trem de força — barra de potência + kW elétrico + RPM ICE
   const pwrEl = document.getElementById('d-powertrain');
   if (pwrEl) {
-    pwrEl.style.display = engOn ? '' : 'none';
+    pwrEl.style.display = engOn ? 'block' : 'none';
     if (engOn) {
       const pct      = Math.max(-100, Math.min(100, Math.round(s.battery_power_pct || 0)));
       const isRegen  = pct < 0;
