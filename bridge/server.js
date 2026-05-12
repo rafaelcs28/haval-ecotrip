@@ -558,6 +558,28 @@ app.post('/api/push/unsubscribe', (req, res) => {
   res.json({ ok: true });
 });
 
+// ── Remote Actions ────────────────────────────────────────────────────────────
+const ALLOWED_ACTIONS = new Set([
+  'engine_on',  'engine_off',
+  'lock_open',  'lock_close',
+  'windows_open', 'windows_close',
+  'trunk_open', 'trunk_close',
+  'sunroof_open', 'sunroof_close',
+  'ac_on',
+  'charge_stop',
+  'charge_history',
+]);
+
+app.post('/api/action/:name', (req, res) => {
+  const { name } = req.params;
+  if (!ALLOWED_ACTIONS.has(name)) return res.status(400).json({ error: 'ação desconhecida' });
+  if (!mqttClient?.connected)     return res.status(503).json({ error: 'MQTT offline' });
+  mqttClient.publish(`${MQTT_PREFIX}/remote/${name}`, '1', { retain: false, qos: 1 }, err => {
+    if (err) return res.status(500).json({ error: 'falha ao publicar' });
+    res.json({ ok: true });
+  });
+});
+
 // ── WebSocket ─────────────────────────────────────────────────────────────────
 
 const wss     = new WebSocketServer({ server, path: '/ws' });

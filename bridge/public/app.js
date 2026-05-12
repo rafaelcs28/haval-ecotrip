@@ -62,7 +62,77 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('login-input')?.addEventListener('keydown', e => {
     if (e.key === 'Enter') doLogin();
   });
+  initActionsPanel();
 });
+
+// ── Actions panel — criado 100% em JS para sobreviver a cache antigo de index.html
+function initActionsPanel() {
+  const CARDS = [
+    { title: '⚙️ Motor', items: [
+      { label: '▶ Ligar',    cls: 'green',  action: 'engine_on',      confirm: '⚙️ Ligar motor?',           msg: 'O motor térmico será ligado remotamente.',       color: '#22c55e' },
+      { label: '■ Desligar', cls: 'red',    action: 'engine_off',     confirm: '⚙️ Desligar motor?',        msg: 'O motor térmico será desligado remotamente.',    color: '#ef4444' },
+    ]},
+    { title: '🚗 Portas', items: [
+      { label: '🔓 Abrir',  cls: 'orange', action: 'lock_open',      confirm: '🔓 Abrir portas?',          msg: 'As portas serão destrancadas remotamente.',      color: '#f97316' },
+      { label: '🔒 Fechar', cls: 'teal',   action: 'lock_close',     confirm: '🔒 Fechar portas?',         msg: 'As portas serão trancadas remotamente.',         color: '#2dd4bf' },
+    ]},
+    { title: '🪟 Vidros', items: [
+      { label: '↕ Abrir todos',  cls: 'orange', action: 'windows_open',  confirm: '🪟 Abrir vidros?',   msg: 'Todos os vidros serão abertos remotamente.',  color: '#f97316' },
+      { label: '↕ Fechar todos', cls: 'teal',   action: 'windows_close', confirm: '🪟 Fechar vidros?',  msg: 'Todos os vidros serão fechados remotamente.', color: '#2dd4bf' },
+    ]},
+    { title: '🧳 Porta-malas', items: [
+      { label: '↑ Abrir',  cls: 'orange', action: 'trunk_open',     confirm: '🧳 Abrir porta-malas?',     msg: 'A porta-malas será aberta remotamente.',         color: '#f97316' },
+      { label: '↓ Fechar', cls: 'teal',   action: 'trunk_close',    confirm: '🧳 Fechar porta-malas?',    msg: 'A porta-malas será fechada remotamente.',        color: '#2dd4bf' },
+    ]},
+    { title: '☀️ Teto solar', items: [
+      { label: '↑ Abrir',  cls: 'orange', action: 'sunroof_open',   confirm: '☀️ Abrir teto solar?',      msg: 'O teto solar será aberto remotamente.',          color: '#f97316' },
+      { label: '↓ Fechar', cls: 'teal',   action: 'sunroof_close',  confirm: '☀️ Fechar teto solar?',     msg: 'O teto solar será fechado remotamente.',         color: '#2dd4bf' },
+    ]},
+    { title: '❄️ Ar condicionado', items: [
+      { label: '❄️ Ativar ar condicionado', cls: 'blue full', action: 'ac_on', confirm: '❄️ Ligar AC?', msg: 'O ar condicionado será ativado remotamente.', color: '#60a5fa' },
+    ]},
+    { title: '⚡ Recarga', items: [
+      { label: '✕ Interromper recarga',  cls: 'red full',   action: 'charge_stop',    confirm: '⚡ Interromper recarga?',            msg: 'A recarga será interrompida remotamente.',       color: '#ef4444' },
+      { label: '📋 Atualizar histórico', cls: 'muted full', action: 'charge_history', confirm: '📋 Atualizar histórico de recarga?', msg: 'O histórico de recarga será sincronizado.',      color: '#94a3b8' },
+    ]},
+  ];
+
+  // Garante que o panel existe mesmo com index.html antigo em cache
+  let panel = document.getElementById('panel-actions');
+  if (!panel) {
+    panel = document.createElement('div');
+    panel.id = 'panel-actions';
+    panel.className = 'panel';
+    const content = document.getElementById('content');
+    if (content) content.appendChild(panel);
+  }
+
+  // Garante que o tab existe mesmo com index.html antigo em cache
+  if (!document.querySelector('[data-panel="actions"]')) {
+    const adminTab = document.querySelector('[data-panel="admin"]');
+    if (adminTab) {
+      const btn = document.createElement('button');
+      btn.className = 'tab';
+      btn.dataset.panel = 'actions';
+      btn.innerHTML = '<span class="tab-icon">🔧</span><span class="tab-label">Ações</span>';
+      btn.addEventListener('click', () => switchTab(btn));
+      adminTab.parentNode.insertBefore(btn, adminTab);
+    }
+  }
+
+  // Renderiza os cards de ação
+  panel.innerHTML = CARDS.map(card => `
+    <div class="card">
+      <div class="card-title">${card.title}</div>
+      <div class="action-grid">
+        ${card.items.map(item => `
+          <button class="action-btn ${item.cls}"
+            onclick="remoteAction('${item.action}',${JSON.stringify(item.confirm)},${JSON.stringify(item.msg)},'${item.color}')">
+            ${item.label}
+          </button>`).join('')}
+      </div>
+    </div>`).join('');
+}
 
 // Wrapper de fetch que injeta o token e redireciona 401 para o login
 // skipLoginRedirect: true → não redireciona, só lança o erro (usado em change-password)
@@ -525,9 +595,11 @@ function renderDash() {
   carLayer('cl-farol-alto', s.high_beam === 'on');
   const engLabel = document.getElementById('d-car-engine-label');
   if (engLabel) {
-    // ⚙️ vermelho = ligado | ⚙️ cinza = desligado | vazio = sem dado
-    engLabel.textContent = engOn ? '⚙️' : (eng === '0' || eng === 0) ? '⚙️' : '';
-    engLabel.style.filter = engOn ? 'sepia(1) saturate(8) hue-rotate(310deg)' : 'grayscale(1) opacity(.4)';
+    // ⚙️ sempre visível — vermelho=ligado | cinza=desligado | muito-cinza=desconhecido
+    engLabel.textContent = '⚙️';
+    engLabel.style.filter = engOn              ? 'sepia(1) saturate(8) hue-rotate(310deg)'
+                          : (eng === '0' || eng === 0) ? 'grayscale(1) opacity(.45)'
+                          :                               'grayscale(1) opacity(.18)';
   }
 
   // Trava
@@ -535,9 +607,10 @@ function renderDash() {
   carLayer('cl-trava', lck === 'off');
   const lockLabel = document.getElementById('d-car-lock-label');
   if (lockLabel) {
-    if      (lck === 'off') { lockLabel.textContent = '🔒'; lockLabel.style.filter = 'sepia(1) saturate(6) hue-rotate(130deg)'; }  // teal
-    else if (lck === 'on')  { lockLabel.textContent = '🔓'; lockLabel.style.filter = 'sepia(1) saturate(8) hue-rotate(340deg)'; }  // laranja
-    else                     { lockLabel.textContent = ''; lockLabel.style.filter = ''; }
+    // 🔒/🔓 sempre visível — teal=trancado | laranja=destrancado | muito-cinza=desconhecido
+    if      (lck === 'off') { lockLabel.textContent = '🔒'; lockLabel.style.filter = 'sepia(1) saturate(6) hue-rotate(130deg)'; }
+    else if (lck === 'on')  { lockLabel.textContent = '🔓'; lockLabel.style.filter = 'sepia(1) saturate(8) hue-rotate(340deg)'; }
+    else                     { lockLabel.textContent = '🔒'; lockLabel.style.filter = 'grayscale(1) opacity(.18)'; }
   }
 
   // Portas — alterna fechada/aberta (sempre uma delas visível)
@@ -1249,3 +1322,114 @@ async function changePassword() {
     setCpStatus('✗ ' + (e.message === 'unauthorized' ? 'Sessão expirada — entre novamente.' : 'Erro ao comunicar com o servidor.'), false);
   }
 }
+
+// ── Remote Action Helpers (modal + toast + fetch) ────────────────────────────
+let _remoteCb         = null;
+let _remoteToastTimer = null;
+
+function openRemoteModal({ title, msg, btnColor, onConfirm }) {
+  const t = document.getElementById('d-remote-modal-title');
+  const m = document.getElementById('d-remote-modal-msg');
+  const b = document.getElementById('d-remote-confirm-btn');
+  if (t) t.textContent = title;
+  if (m) m.textContent = msg;
+  if (b) b.style.background = btnColor || '#22c55e';
+  _remoteCb = onConfirm || null;
+  const modal = document.getElementById('d-remote-modal');
+  if (modal) modal.style.display = 'flex';
+}
+
+window.remoteModalCancel = function() {
+  const modal = document.getElementById('d-remote-modal');
+  if (modal) modal.style.display = 'none';
+  _remoteCb = null;
+};
+
+window.remoteModalConfirm = function() {
+  const modal = document.getElementById('d-remote-modal');
+  if (modal) modal.style.display = 'none';
+  const cb = _remoteCb;
+  _remoteCb = null;
+  cb?.();
+};
+
+function showToast(msg) {
+  const el = document.getElementById('d-toast');
+  if (!el) return;
+  el.textContent   = msg;
+  el.style.opacity = '1';
+  if (_remoteToastTimer) clearTimeout(_remoteToastTimer);
+  _remoteToastTimer = setTimeout(() => { el.style.opacity = '0'; }, 3000);
+}
+window.showToast = showToast;
+
+async function sendRemoteAction(action, successMsg) {
+  showToast('Enviando comando…');
+  try {
+    const r    = await apiFetch(`/api/action/${action}`, { method: 'POST' });
+    const data = await r.json().catch(() => ({}));
+    if (r.ok && data.ok) {
+      showToast('✓ ' + successMsg);
+      if (navigator.vibrate) navigator.vibrate(80);
+    } else {
+      showToast('✗ ' + (data.error || `Erro ${r.status}`));
+    }
+  } catch (err) {
+    showToast('✗ ' + (err.message === 'unauthorized' ? 'Sem permissão' : 'Falha ao enviar'));
+  }
+}
+
+// ── Generic remote action (actions tab) ──────────────────────────────────────
+window.remoteAction = function(action, title, msg, btnColor) {
+  openRemoteModal({
+    title,
+    msg,
+    btnColor: btnColor || '#22c55e',
+    onConfirm: () => sendRemoteAction(action, title.replace('?', '')),
+  });
+};
+
+// ── Engine — toque para ligar/desligar remotamente ───────────────────────────
+window.engineClick = function() {
+  const eng = state.engine_state;
+  const dbg = document.getElementById('d-remote-debug');
+  if (dbg) dbg.textContent = `engine_state=${eng} @ ${new Date().toLocaleTimeString('pt-BR')}`;
+  if (eng == null || (eng !== '0' && eng !== 0 && eng !== '1' && eng !== 1)) {
+    showToast('Estado do motor ainda não recebido');
+    return;
+  }
+  const engOn = eng === '1' || eng === 1;
+  openRemoteModal({
+    title:     engOn ? '⚙️ Desligar motor?' : '⚙️ Ligar motor?',
+    msg:       engOn ? 'O motor térmico será desligado remotamente.'
+                     : 'O motor térmico será ligado remotamente.',
+    btnColor:  engOn ? '#ef4444' : '#22c55e',
+    onConfirm: () => sendRemoteAction(
+      engOn ? 'engine_off' : 'engine_on',
+      engOn ? 'Comando enviado: desligar' : 'Comando enviado: ligar',
+    ),
+  });
+};
+
+// ── Lock — toque para trancar/destrancar remotamente ─────────────────────────
+window.lockClick = function() {
+  const lck = state.lock_state;
+  const dbg = document.getElementById('d-remote-debug');
+  if (dbg) dbg.textContent = `lock_state=${lck} @ ${new Date().toLocaleTimeString('pt-BR')}`;
+  if (lck == null || (lck !== 'off' && lck !== 'on')) {
+    showToast('Estado da trava ainda não recebido');
+    return;
+  }
+  // 'off' = trancado (trava fechada = ícone 🔒)
+  const locked = lck === 'off';
+  openRemoteModal({
+    title:     locked ? '🔓 Destrancar portas?' : '🔒 Trancar portas?',
+    msg:       locked ? 'As portas serão destrancadas remotamente.'
+                      : 'As portas serão trancadas remotamente.',
+    btnColor:  locked ? '#f97316' : '#39FF88',
+    onConfirm: () => sendRemoteAction(
+      locked ? 'lock_open' : 'lock_close',
+      locked ? 'Portas destrancadas' : 'Portas trancadas',
+    ),
+  });
+};

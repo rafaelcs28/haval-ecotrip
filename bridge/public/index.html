@@ -179,9 +179,17 @@
             <span style="font-size:8px;color:#64748b">ext.</span>
           </div>
           <!-- Motor + Trava — centro -->
-          <div style="display:flex;gap:10px;align-items:center">
-            <span id="d-car-engine-label" style="font-size:18px;line-height:1"></span>
-            <span id="d-car-lock-label"   style="font-size:18px;line-height:1"></span>
+          <div style="display:flex;gap:20px;align-items:center">
+            <!-- Botão de motor: toque para ligar/desligar remotamente -->
+            <button id="d-engine-btn" onclick="engineClick()"
+              style="background:none;border:none;padding:0;min-width:44px;min-height:44px;cursor:pointer;-webkit-tap-highlight-color:transparent;touch-action:manipulation;display:flex;align-items:center;justify-content:center;user-select:none">
+              <span id="d-car-engine-label" style="font-size:20px;line-height:1">⚙️</span>
+            </button>
+            <!-- Botão de trava: toque para trancar/destrancar remotamente -->
+            <button id="d-lock-btn" onclick="lockClick()"
+              style="background:none;border:none;padding:0;min-width:44px;min-height:44px;cursor:pointer;-webkit-tap-highlight-color:transparent;touch-action:manipulation;display:flex;align-items:center;justify-content:center;user-select:none">
+              <span id="d-car-lock-label" style="font-size:20px;line-height:1">🔒</span>
+            </button>
           </div>
           <!-- Temperatura interna — direita -->
           <div style="display:flex;align-items:baseline;gap:3px;min-width:36px;justify-content:flex-end">
@@ -189,6 +197,8 @@
             <span style="font-size:8px;color:#4a7aaa">int.</span>
           </div>
         </div>
+        <!-- Debug: último toque nos botões remotos -->
+        <div id="d-remote-debug" style="font-size:9px;color:#475569;text-align:center;min-height:11px;margin-top:3px;font-family:monospace;letter-spacing:0.3px"></div>
         </div><!-- /wrapper 65% -->
       </div>
 
@@ -280,8 +290,9 @@
 
     </div>
 
-    <!-- Trip A -->
-    <div id="panel-a" class="panel">
+    <!-- Trips A + B (painel unificado) -->
+    <div id="panel-trips" class="panel">
+      <!-- Trip A -->
       <div class="card">
         <div class="card-title">Trip A — Em andamento</div>
         <div class="metrics-row">
@@ -344,10 +355,7 @@
           </div>
         </div>
       </div>
-    </div>
-
-    <!-- Trip B -->
-    <div id="panel-b" class="panel">
+      <!-- Trip B -->
       <div class="card">
         <div class="card-title">Trip B — Em andamento</div>
         <div class="metrics-row">
@@ -426,6 +434,9 @@
     <div id="panel-auto" class="panel">
       <div id="auto-list"><div class="empty">Carregando...</div></div>
     </div>
+
+    <!-- Ações remotas — conteúdo gerado por JS (initActionsPanel em app.js) -->
+    <div id="panel-actions" class="panel"></div>
 
   </div><!-- /content -->
 
@@ -536,13 +547,9 @@
       <span class="tab-icon">🏠</span>
       <span class="tab-label">Dash</span>
     </button>
-    <button class="tab" data-panel="a" onclick="switchTab(this)">
-      <span class="tab-icon tab-letter">A</span>
-      <span class="tab-label">Trip A</span>
-    </button>
-    <button class="tab" data-panel="b" onclick="switchTab(this)">
-      <span class="tab-icon tab-letter">B</span>
-      <span class="tab-label">Trip B</span>
+    <button class="tab" data-panel="trips" onclick="switchTab(this)">
+      <span class="tab-icon">🅐🅑</span>
+      <span class="tab-label">Trips</span>
     </button>
     <button class="tab" data-panel="charges" onclick="switchTab(this, loadCharges)">
       <span class="tab-icon">⚡</span>
@@ -556,11 +563,38 @@
       <span class="tab-icon">🗺</span>
       <span class="tab-label">Auto</span>
     </button>
+    <button class="tab" data-panel="actions" onclick="switchTab(this)">
+      <span class="tab-icon">🔧</span>
+      <span class="tab-label">Ações</span>
+    </button>
     <button class="tab" data-panel="admin" onclick="switchTab(this)">
       <span class="tab-icon">⚙️</span>
       <span class="tab-label">Config</span>
     </button>
   </nav>
+
+  <!-- Modal de confirmação — ação remota motor -->
+  <div id="d-remote-modal" style="display:none;position:fixed;inset:0;z-index:9000;background:rgba(0,0,0,0.72);align-items:flex-end;justify-content:center;padding-bottom:env(safe-area-inset-bottom)">
+    <div style="background:#1e293b;border-radius:16px 16px 0 0;padding:24px 20px 28px;width:100%;max-width:480px;text-align:center">
+      <div id="d-remote-modal-title" style="font-size:18px;font-weight:700;color:#f1f5f9;margin-bottom:8px">Confirmar</div>
+      <div id="d-remote-modal-msg"   style="font-size:13px;color:#94a3b8;margin-bottom:22px"></div>
+      <div style="display:flex;gap:12px">
+        <button onclick="remoteModalCancel()"
+          style="flex:1;padding:13px;background:#334155;border:none;border-radius:10px;color:#e2e8f0;font-size:14px;cursor:pointer">
+          Cancelar
+        </button>
+        <button id="d-remote-confirm-btn" onclick="remoteModalConfirm()"
+          style="flex:1;padding:13px;background:#22c55e;border:none;border-radius:10px;color:#0f172a;font-size:14px;font-weight:700;cursor:pointer">
+          Confirmar
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast de feedback -->
+  <div id="d-toast"
+    style="position:fixed;bottom:84px;left:50%;transform:translateX(-50%);background:#1e293b;color:#f1f5f9;border-radius:8px;padding:10px 18px;font-size:13px;z-index:9001;opacity:0;transition:opacity .3s;pointer-events:none;white-space:nowrap;max-width:90vw;text-align:center;border:1px solid #334155">
+  </div>
 
 </div><!-- /app -->
 
