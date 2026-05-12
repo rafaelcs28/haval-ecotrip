@@ -536,6 +536,25 @@
       </div>
 
 
+      <!-- ── Cache local ─────────────────────────────────────────────────── -->
+      <div style="background:#0C1019;border:1px solid #0F1520;border-radius:12px;padding:14px 16px;margin-bottom:16px">
+        <div style="font-size:14px;font-weight:700;color:#EEF4FF;margin-bottom:12px">📱 Cache local</div>
+        <div style="display:flex;gap:8px;margin-bottom:10px">
+          <button onclick="adminCacheStatus()"
+            style="flex:1;background:#1e3a5f;border:none;border-radius:8px;padding:11px;color:#7FBADC;font-size:13px;cursor:pointer">
+            📊 Status
+          </button>
+          <button onclick="adminRedownloadCache()"
+            style="flex:1;background:#1e3a5f;border:none;border-radius:8px;padding:11px;color:#7FBADC;font-size:13px;cursor:pointer">
+            ♻️ Baixar tudo localmente
+          </button>
+        </div>
+        <div id="cache-status"
+          style="min-height:36px;background:#0f172a;border-radius:8px;padding:8px 12px;font-size:12px;color:#94a3b8;white-space:pre-wrap;word-break:break-word">
+          Toque em Status para verificar.
+        </div>
+      </div>
+
       <h2 style="margin:0 0 16px;font-size:16px;color:#e2e8f0">🛠 Servidor</h2>
 
       <!-- Alterar senha -->
@@ -568,17 +587,6 @@
         <button onclick="adminUpdate()"
           style="flex:1;background:#065f46;border:none;border-radius:8px;padding:12px;color:#e2e8f0;font-size:13px;cursor:pointer">
           ⬆️ Atualizar + Reiniciar
-        </button>
-      </div>
-
-      <div style="display:flex;gap:8px;margin-bottom:8px">
-        <button onclick="adminCacheStatus()"
-          style="flex:1;background:#1e3a5f;border:none;border-radius:8px;padding:12px;color:#7FBADC;font-size:13px;cursor:pointer">
-          📊 Status do cache
-        </button>
-        <button onclick="adminRedownloadCache()"
-          style="flex:1;background:#1e3a5f;border:none;border-radius:8px;padding:12px;color:#7FBADC;font-size:13px;cursor:pointer">
-          ♻️ Baixar tudo localmente
         </button>
       </div>
 

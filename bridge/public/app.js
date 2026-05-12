@@ -919,9 +919,8 @@ async function syncAllCache({ silent = false } = {}) {
 }
 
 async function adminCacheStatus() {
-  adminSetStatus('⏳ Verificando...', true);
+  _cacheSetStatus('⏳ Verificando...', null);
   try {
-    // Contagens locais (IndexedDB)
     const [lTrips, lAuto, lChg, lastTs] = await Promise.all([
       _idbGetAll('trips').then(a => a.length),
       _idbGetAll('autotrips').then(a => a.length),
@@ -929,7 +928,6 @@ async function adminCacheStatus() {
       _idbGetMeta('lastSyncTs'),
     ]);
 
-    // Contagens do servidor
     let sTrips = '?', sAuto = '?', sChg = '?';
     try {
       const c = await apiFetch('/api/counts').then(r => r.json());
@@ -940,14 +938,15 @@ async function adminCacheStatus() {
       ? new Date(lastTs).toLocaleString('pt-BR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' })
       : 'nunca';
 
-    adminSetStatus(
-      '📱 Local:    ' + lTrips + ' trips · ' + lAuto + ' auto-trips · ' + lChg + ' recargas\n' +
-      '🌐 Servidor: ' + sTrips + ' trips · ' + sAuto + ' auto-trips · ' + sChg + ' recargas\n' +
+    const allMatch = lTrips === sTrips && lAuto === sAuto && lChg === sChg;
+    _cacheSetStatus(
+      '📱 Local:    ' + lTrips + ' trips · ' + lAuto + ' auto · ' + lChg + ' rec\n' +
+      '🌐 Servidor: ' + sTrips + ' trips · ' + sAuto + ' auto · ' + sChg + ' rec\n' +
       '🕐 Última sync: ' + syncTime,
-      true
+      allMatch ? true : null
     );
   } catch (e) {
-    adminSetStatus('Erro ao verificar cache: ' + e.message, false);
+    _cacheSetStatus('Erro: ' + e.message, false);
   }
 }
 
@@ -2028,6 +2027,12 @@ function adminSetStatus(msg, ok) {
   el.textContent = msg;
   el.style.color = ok === true ? '#4ade80' : ok === false ? '#f87171' : '#94a3b8';
 }
+function _cacheSetStatus(msg, ok) {
+  const el = document.getElementById('cache-status');
+  if (!el) return;
+  el.textContent = msg;
+  el.style.color = ok === true ? '#4ade80' : ok === false ? '#f87171' : '#94a3b8';
+}
 
 async function adminAction(path, label) {
   adminSetStatus('⏳ ' + label + '…', null);
@@ -2055,12 +2060,12 @@ function adminClearHistory() {
 
 async function adminRedownloadCache() {
   if (!confirm('Apagar cache local e baixar todos os dados do servidor?\nIsso pode demorar alguns segundos.')) return;
-  adminSetStatus('⏳ Baixando...', true);
+  _cacheSetStatus('⏳ Baixando...', null);
   cachedTrips = null; cachedAutoTrips = null; cachedCharges = null;
   await _idbClearAll();
   const t = await syncAllCache({ silent: false });
   renderHistory(); renderAutoTrips(); renderCharges();
-  adminSetStatus('✓ ' + t.trips + ' trips · ' + t.auto + ' auto-trips · ' + t.charges + ' recargas', true);
+  _cacheSetStatus('✓ ' + t.trips + ' trips · ' + t.auto + ' auto · ' + t.charges + ' rec baixados', true);
 }
 
 function adminLogout() {
