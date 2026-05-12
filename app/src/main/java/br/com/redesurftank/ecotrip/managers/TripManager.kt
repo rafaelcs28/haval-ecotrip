@@ -150,6 +150,7 @@ data class AutoTripEntry(
     val name:         String  = "",
     // campos adicionados em v2.54 — default Gson-safe para retrocompatibilidade
     val maxSpeedKmh:  Float   = 0f,
+    val maxPowerPct:  Int     = 0,      // pico de potência do motor (%) durante a viagem
     val outsideTempC: Float?  = null,   // null = sem leitura disponível
     val startLat:     Double  = 0.0,
     val startLng:     Double  = 0.0,
@@ -306,6 +307,7 @@ class TripManager private constructor() {
     private var latestBattPowerPct: Int    = 0  // % potência bateria (−100=regen, +100=consumo)
     private var latestOutsideTempC:    Float? = null  // null = sem leitura ainda
     private var autoTripMaxSpeed:      Float  = 0f    // máxima durante viagem em andamento
+    private var autoTripMaxPowerPct:   Int    = 0     // pico de potência do motor (%) durante viagem
 
     // Rolling start bookmarks
     private var rollingStartSocPct:  Float   = 0f
@@ -970,7 +972,8 @@ class TripManager private constructor() {
             .putFloat(SharedPreferencesKeys.AUTO_TRIP_START_FUEL_L,   autoTripStartFuelL)
             .putLong (SharedPreferencesKeys.AUTO_TRIP_START_TIME_SEC, autoTripStartTime)
             .apply()
-        autoTripMaxSpeed = 0f
+        autoTripMaxSpeed    = 0f
+        autoTripMaxPowerPct = 0
         val inProgressFile = java.io.File(samplesDir, "${autoTripStartMs}_inprogress.json")
         telemetryRecorder?.startRecording(autoTripStartMs, flushFile = inProgressFile)
         AppLogger.i(TAG, "AutoTrip iniciado — SOC=${latestSocPct}% fuel=${latestFuelPct}% temp=${latestOutsideTempC}°C")
@@ -1011,6 +1014,7 @@ class TripManager private constructor() {
             netKwh       = ((lifeEnergyKwh - autoTripStartEnergy) - (lifeRegenKwh - autoTripStartRegen)).coerceAtLeast(0f),
             fuelL        = (lifeFuelL     - autoTripStartFuelL ).coerceAtLeast(0f),
             maxSpeedKmh  = autoTripMaxSpeed,
+            maxPowerPct  = autoTripMaxPowerPct,
             outsideTempC = latestOutsideTempC,
             startLat     = startGps?.lat ?: 0.0,
             startLng     = startGps?.lng ?: 0.0,
@@ -1098,6 +1102,12 @@ class TripManager private constructor() {
                 CarConstants.CAR_BASIC_ENGINE_SPEED.value -> {
                     latestEngineRpm = value.toInt()
                     telemetryRecorder?.latestEngineRpm = value.toInt()
+                }
+                CarConstants.CAR_EV_INFO_ENERGY_OUTPUT_PERCENTAGE.value -> {
+                    val pct = value.toInt()
+                    latestBattPowerPct = pct
+                    // Rastreia o pico de potência (positivo = consumo) durante a viagem
+                    if (autoTripStartMs > 0L && pct > autoTripMaxPowerPct) autoTripMaxPowerPct = pct
                 }
                 CarConstants.CAR_EV_INFO_INSTANT_ENERGY_CONSUMPTION.value -> {
                     // Única fonte de kW para telemetria (car.ev_info.Instant_energy_consumption)

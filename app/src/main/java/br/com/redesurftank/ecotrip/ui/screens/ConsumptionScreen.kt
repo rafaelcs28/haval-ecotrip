@@ -242,6 +242,7 @@ fun ConsumptionScreen() {
                     }
                     CarConstants.CAR_EV_INFO_ENERGY_OUTPUT_PERCENTAGE.value -> {
                         mqttManager.latestBattPowerPct = value.trim().toIntOrNull() ?: 0
+                        tripManager.onDataChanged(key, value)  // rastreia pico no auto-trip
                     }
                     CarConstants.CAR_BASIC_ENGINE_SPEED.value -> {
                         mqttManager.latestEngineRpm = value.trim().toIntOrNull() ?: 0
