@@ -76,20 +76,28 @@ let chargeStartTimer   = null;
 const TYRE_PSI_MIN = 34;   // abaixo disso → alerta
 const TYRE_PSI_MAX = 40;   // acima disso  → alerta
 const tyreAlertSent = {};   // evita spam: chave = 'FL_low' | 'FL_high' etc.
-function checkTyrePressure(pos, kpa) {
+function checkTyrePressure(pos, kpa, isRetained = false) {
   if (!kpa || kpa < 10) return;   // valor inválido ou zero
   const psi = kpa / 6.895;
   const lowKey  = `${pos}_low`;
   const highKey = `${pos}_high`;
-  if (psi < TYRE_PSI_MIN && !tyreAlertSent[lowKey]) {
-    tyreAlertSent[lowKey] = true;
-    delete tyreAlertSent[highKey];
-    sendPush('⚠️ Pneu com pressão baixa', `${pos}: ${psi.toFixed(1)} PSI (mín ${TYRE_PSI_MIN} PSI)`);
-  } else if (psi > TYRE_PSI_MAX && !tyreAlertSent[highKey]) {
-    tyreAlertSent[highKey] = true;
-    delete tyreAlertSent[lowKey];
-    sendPush('⚠️ Pneu com pressão alta', `${pos}: ${psi.toFixed(1)} PSI (máx ${TYRE_PSI_MAX} PSI)`);
-  } else if (psi >= TYRE_PSI_MIN && psi <= TYRE_PSI_MAX) {
+  if (psi < TYRE_PSI_MIN) {
+    if (!tyreAlertSent[lowKey] && !isRetained) {
+      tyreAlertSent[lowKey] = true;
+      delete tyreAlertSent[highKey];
+      sendPush('⚠️ Pneu com pressão baixa', `${pos}: ${psi.toFixed(1)} PSI (mín ${TYRE_PSI_MIN} PSI)`);
+    } else {
+      tyreAlertSent[lowKey] = true;   // marca como "já visto" mesmo em retained
+    }
+  } else if (psi > TYRE_PSI_MAX) {
+    if (!tyreAlertSent[highKey] && !isRetained) {
+      tyreAlertSent[highKey] = true;
+      delete tyreAlertSent[lowKey];
+      sendPush('⚠️ Pneu com pressão alta', `${pos}: ${psi.toFixed(1)} PSI (máx ${TYRE_PSI_MAX} PSI)`);
+    } else {
+      tyreAlertSent[highKey] = true;
+    }
+  } else {
     delete tyreAlertSent[lowKey];
     delete tyreAlertSent[highKey];
   }
@@ -698,13 +706,14 @@ mqttClient.on('error',      (err) => console.error('MQTT erro:', err.message));
 mqttClient.on('reconnect',  ()    => console.log('MQTT reconectando...'));
 mqttClient.on('disconnect', ()    => console.log('MQTT desconectado'));
 
-mqttClient.on('message', (topic, payload) => {
-  const value = payload.toString().trim();
-  const key   = topic.startsWith(MQTT_PREFIX + '/')
+mqttClient.on('message', (topic, payload, packet) => {
+  const value      = payload.toString().trim();
+  const isRetained = !!(packet && packet.retain);
+  const key        = topic.startsWith(MQTT_PREFIX + '/')
     ? topic.slice(MQTT_PREFIX.length + 1)
     : topic;
 
-  applyMqttMessage(key, value);
+  applyMqttMessage(key, value, isRetained);
   broadcast('update', state);
 });
 
@@ -712,7 +721,7 @@ mqttClient.on('message', (topic, payload) => {
 
 function num(v) { const n = parseFloat(v); return isNaN(n) ? 0 : n; }
 
-function applyMqttMessage(key, value) {
+function applyMqttMessage(key, value, isRetained = false) {
   state.last_update_ms = Date.now();
 
   switch (key) {
@@ -744,10 +753,10 @@ function applyMqttMessage(key, value) {
     case 'window_fr':    state.window_fr    = value; break;
     case 'window_rl':    state.window_rl    = value; break;
     case 'window_rr':    state.window_rr    = value; break;
-    case 'tyre_pressure_fl': { state.tyre_pressure_fl = num(value); checkTyrePressure('FL', num(value)); break; }
-    case 'tyre_pressure_fr': { state.tyre_pressure_fr = num(value); checkTyrePressure('FR', num(value)); break; }
-    case 'tyre_pressure_rl': { state.tyre_pressure_rl = num(value); checkTyrePressure('RL', num(value)); break; }
-    case 'tyre_pressure_rr': { state.tyre_pressure_rr = num(value); checkTyrePressure('RR', num(value)); break; }
+    case 'tyre_pressure_fl': { state.tyre_pressure_fl = num(value); checkTyrePressure('FL', num(value), isRetained); break; }
+    case 'tyre_pressure_fr': { state.tyre_pressure_fr = num(value); checkTyrePressure('FR', num(value), isRetained); break; }
+    case 'tyre_pressure_rl': { state.tyre_pressure_rl = num(value); checkTyrePressure('RL', num(value), isRetained); break; }
+    case 'tyre_pressure_rr': { state.tyre_pressure_rr = num(value); checkTyrePressure('RR', num(value), isRetained); break; }
     case 'tyre_temp_fl': state.tyre_temp_fl = num(value); break;
     case 'tyre_temp_fr': state.tyre_temp_fr = num(value); break;
     case 'tyre_temp_rl': state.tyre_temp_rl = num(value); break;
@@ -763,26 +772,32 @@ function applyMqttMessage(key, value) {
       state.charging_state = value;
       prevChargingState    = value;
 
-      if (value === 'Carregando' && prev !== 'Carregando') {
-        // Aguarda 30s para a potência estabilizar antes de notificar
-        if (chargeStartTimer) clearTimeout(chargeStartTimer);
-        chargeStartTimer = setTimeout(() => {
-          chargeStartTimer = null;
-          const pwr = state.charge_power_kw || 0;
-          const rem = state.charge_remaining_min || 0;
-          const remStr = rem > 0
-            ? (rem > 59 ? `${Math.floor(rem / 60)}h ${rem % 60}min` : `${rem} min`)
-            : '~?';
-          sendPush('⚡ Recarga iniciada', `${pwr.toFixed(1)} kW · tempo restante: ${remStr}`);
-        }, 30000);
+      // Mensagens retained chegam ao reconectar ao broker e refletem o estado
+      // anterior — não representam uma transição real, então NÃO disparam push.
+      // Sem esse filtro, a mensagem retained 'Carregando' de uma sessão anterior
+      // envenena prevChargingState e impede a notificação na próxima recarga real.
+      if (!isRetained) {
+        if (value === 'Carregando' && prev !== 'Carregando') {
+          // Aguarda 30s para a potência estabilizar antes de notificar
+          if (chargeStartTimer) clearTimeout(chargeStartTimer);
+          chargeStartTimer = setTimeout(() => {
+            chargeStartTimer = null;
+            const pwr = state.charge_power_kw || 0;
+            const rem = state.charge_remaining_min || 0;
+            const remStr = rem > 0
+              ? (rem > 59 ? `${Math.floor(rem / 60)}h ${rem % 60}min` : `${rem} min`)
+              : '~?';
+            sendPush('⚡ Recarga iniciada', `${pwr.toFixed(1)} kW · tempo restante: ${remStr}`);
+          }, 30000);
 
-      } else if (value !== 'Carregando' && prev === 'Carregando') {
-        if (chargeStartTimer) { clearTimeout(chargeStartTimer); chargeStartTimer = null; }
-        if (value === 'Finalizado') {
-          const kwh = state.charge_session_kwh || 0;
-          sendPush('✅ Recarga concluída', kwh > 0.05
-            ? `${kwh.toFixed(2)} kWh injetados`
-            : 'Sessão encerrada');
+        } else if (value !== 'Carregando' && prev === 'Carregando') {
+          if (chargeStartTimer) { clearTimeout(chargeStartTimer); chargeStartTimer = null; }
+          if (value === 'Finalizado') {
+            const kwh = state.charge_session_kwh || 0;
+            sendPush('✅ Recarga concluída', kwh > 0.05
+              ? `${kwh.toFixed(2)} kWh injetados`
+              : 'Sessão encerrada');
+          }
         }
       }
       break;
