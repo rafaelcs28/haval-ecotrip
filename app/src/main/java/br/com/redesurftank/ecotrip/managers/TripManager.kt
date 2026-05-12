@@ -1110,9 +1110,13 @@ class TripManager private constructor() {
                     if (autoTripStartMs > 0L && pct > autoTripMaxPowerPct) autoTripMaxPowerPct = pct
                 }
                 CarConstants.CAR_EV_INFO_INSTANT_ENERGY_CONSUMPTION.value -> {
-                    // Única fonte de kW para telemetria (car.ev_info.Instant_energy_consumption)
-                    // Range físico do motor EV: ≈ −200 kW (regen) a +200 kW (drive)
-                    // Valores fora desse range (ex: −1 = sinal indisponível) são descartados
+                    // Fonte primária de kW. Range físico: −200..+200 kW. Fora = indisponível.
+                    if (value < -200f || value > 200f) return
+                    telemetryRecorder?.latestMotorPowerKw = value
+                }
+                CarConstants.CAR_EV_INFO_MOTOR_POWER.value -> {
+                    // Fonte alternativa HCU — alimenta telemetria quando Instant_energy_consumption
+                    // não retorna dados neste veículo
                     if (value < -200f || value > 200f) return
                     telemetryRecorder?.latestMotorPowerKw = value
                 }

@@ -219,18 +219,22 @@ fun ConsumptionScreen() {
                         // não passa para TripManager (não é usado em cálculos de trip)
                     }
                     CarConstants.CAR_EV_INFO_INSTANT_ENERGY_CONSUMPTION.value -> {
-                        // Positivo = consumo/drive, negativo = regeneração.
-                        // −1 e valores fora do range físico (−200..+200 kW) = sinal indisponível
+                        // Fonte primária: positivo = consumo, negativo = regen
+                        // Valores fora de −200..+200 kW = sinal indisponível → ignora
                         val kw = value.trim().toFloatOrNull() ?: 0f
                         if (kw in -200f..200f) {
                             mqttManager.latestMotorPowerKw = kw
+                            mqttManager.instantEnergyActive = true
                             tripManager.onDataChanged(key, value)
                         }
                     }
                     CarConstants.CAR_EV_INFO_MOTOR_POWER.value -> {
-                        // Fallback HCU — só usa se Instant_energy_consumption ainda não enviou valor
+                        // Fonte alternativa HCU — usada sempre que Instant_energy_consumption
+                        // não estiver ativo neste carro (não há dado com esse sinal)
                         val kw = value.trim().toFloatOrNull() ?: 0f
-                        if (mqttManager.latestMotorPowerKw == 0f) mqttManager.latestMotorPowerKw = kw
+                        if (!mqttManager.instantEnergyActive) {
+                            mqttManager.latestMotorPowerKw = kw
+                        }
                         tripManager.onDataChanged(key, value)
                     }
                     CarConstants.CAR_EV_INFO_CHARGING_STATE.value -> {
