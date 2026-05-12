@@ -428,6 +428,8 @@ function requireAuth(req, res, next) {
 }
 // Push não precisa de auth — SW não consegue enviar headers facilmente
 app.use('/api/push', (req, res, next) => next());
+// Ping público — sem auth, útil para verificar se o servidor está online
+app.get('/ping', (_req, res) => res.json({ ok: true, ts: Date.now() }));
 app.use('/api', requireAuth);
 
 app.get('/api/state',  (_req, res) => res.json(state));
