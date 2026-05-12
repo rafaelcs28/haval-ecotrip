@@ -407,6 +407,34 @@ class TripManager private constructor() {
         autoTripHistory.reversed()
     }
 
+    /**
+     * Para AutoTripsScreen: snapshot ao vivo da viagem em andamento.
+     * Retorna null quando o carro está parado (autoTripStartMs == 0).
+     */
+    fun getInProgressAutoTrip(): AutoTripEntry? = synchronized(lock) {
+        if (autoTripStartMs == 0L) return@synchronized null
+        val now    = System.currentTimeMillis()
+        val energy = (lifeEnergyKwh - autoTripStartEnergy).coerceAtLeast(0f)
+        val regen  = (lifeRegenKwh  - autoTripStartRegen ).coerceAtLeast(0f)
+        AutoTripEntry(
+            startMs      = autoTripStartMs,
+            endMs        = now,
+            startSocPct  = autoTripStartSoc,
+            endSocPct    = latestSocPct,
+            startFuelPct = autoTripStartFuel,
+            endFuelPct   = latestFuelPct,
+            distKm       = (lifeDistKm  - autoTripStartDist  ).coerceAtLeast(0f),
+            timeSec      = (lifeTimeSec - autoTripStartTime  ).coerceAtLeast(0L),
+            energyKwh    = energy,
+            regenKwh     = regen,
+            netKwh       = (energy - regen).coerceAtLeast(0f),
+            fuelL        = (lifeFuelL   - autoTripStartFuelL ).coerceAtLeast(0f),
+            maxSpeedKmh  = autoTripMaxSpeed,
+            maxPowerPct  = autoTripMaxPowerPct,
+            outsideTempC = latestOutsideTempC,
+        )
+    }
+
     /** Persiste o set de IDs sincronizados nas SharedPreferences (thread-safe). */
     private fun persistSyncedIds() {
         if (!::prefs.isInitialized) return

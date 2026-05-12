@@ -75,6 +75,7 @@ fun ConsumptionScreen() {
     var mqttStatus      by remember { mutableStateOf(mqttManager.status) }
     var mqttFailures    by remember { mutableStateOf(mqttManager.hasRepeatedFailures) }
     var nowMs           by remember { mutableStateOf(System.currentTimeMillis()) }
+    var inProgressTrip  by remember { mutableStateOf<AutoTripEntry?>(null) }
     var updateAvailable  by remember { mutableStateOf(updateMgr.isUpdateAvailable) }
     var isCheckingUpdate by remember { mutableStateOf(updateMgr.isChecking) }
     var downloadProgress by remember { mutableStateOf(updateMgr.downloadProgress) }
@@ -103,6 +104,7 @@ fun ConsumptionScreen() {
             delay(1000)
             nowMs = System.currentTimeMillis()
             ticks++
+            inProgressTrip = tripManager.getInProgressAutoTrip()
             if (ticks % 5 == 0) tripManager.tickTime()
             // SOC e combustível chegam raramente via listener passivo no GWM —
             // busca ativa a cada 60 s garante que o auto-trip capture o valor correto ao finalizar
@@ -321,7 +323,11 @@ fun ConsumptionScreen() {
         }
 
         tripManager.onAutoTripCompleted = { entry ->
-            mainHandler.post { lastCompletedTrip = entry }
+            mainHandler.post {
+                lastCompletedTrip = entry
+                // Atualiza lista de viagens para o card em andamento sumir e a nova aparecer
+                autoTripEntries = tripManager.getAutoTripHistory()
+            }
         }
 
         tripManager.onChargeSessionCompleted = { _ ->
@@ -522,6 +528,7 @@ fun ConsumptionScreen() {
     if (showAutoTrips) {
         AutoTripsScreen(
             entries        = autoTripEntries,
+            inProgress     = inProgressTrip,
             priceGasL      = priceGasoline,
             priceEnergyKwh = priceEnergy,
             minDistKm      = minAutoTripDist,

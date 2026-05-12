@@ -6,6 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -101,6 +102,7 @@ private fun efficiencyColor(kwh100km: Float): Color = when {
 @Composable
 fun AutoTripsScreen(
     entries:        List<AutoTripEntry>,
+    inProgress:     AutoTripEntry? = null,
     priceGasL:      Float = 6.0f,
     priceEnergyKwh: Float = 0.9f,
     minDistKm:      Float = 0f,
@@ -420,28 +422,37 @@ fun AutoTripsScreen(
         }
 
         // ── Lista ─────────────────────────────────────────────────────────────
-        if (entries.isEmpty()) {
-            // weight(1f) garante altura bounded para o Box dentro do Column
-            Box(
-                Modifier
-                    .weight(1f)
-                    .fillMaxWidth(),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    "Nenhuma viagem automática registrada ainda.\nAs viagens são criadas ao ligar o carro.",
-                    fontSize = 14.sp,
-                    color = TextSecondary,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                )
+        // weight(1f) é obrigatório: sem ele o Column passa altura unbounded ao LazyColumn
+        // (devido ao verticalArrangement = spacedBy), causando crash no ROM do carro.
+        // Sempre usamos LazyColumn para que o card em andamento apareça mesmo sem histórico.
+        LazyColumn(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            // Card de viagem em andamento — aparece enquanto o carro está rodando
+            if (inProgress != null) {
+                item(key = "in_progress") {
+                    InProgressAutoTripCard(inProgress)
+                }
             }
-        } else {
-            // weight(1f) é obrigatório: sem ele o Column passa altura unbounded ao LazyColumn
-            // (devido ao verticalArrangement = spacedBy), causando crash no ROM do carro.
-            LazyColumn(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
+
+            if (entries.isEmpty()) {
+                item(key = "empty_msg") {
+                    Box(
+                        Modifier
+                            .fillParentMaxWidth()
+                            .height(120.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            "Nenhuma viagem automática registrada ainda.\nAs viagens são criadas ao ligar o carro.",
+                            fontSize  = 14.sp,
+                            color     = TextSecondary,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        )
+                    }
+                }
+            } else {
                 itemsIndexed(filtered, key = { _, e -> e.startMs }) { _, entry ->
                     AutoTripEntryRow(
                         entry          = entry,
@@ -450,6 +461,128 @@ fun AutoTripsScreen(
                         onRename       = { newName -> onRename(entry, newName) },
                     )
                 }
+            }
+        }
+    }
+}
+
+// ── Card de viagem em andamento ───────────────────────────────────────────────
+
+@Composable
+private fun InProgressAutoTripCard(inProgress: AutoTripEntry) {
+    val elapsedSec = (inProgress.endMs - inProgress.startMs) / 1000L
+    val kwh100km   = if (inProgress.distKm > 0.1f) inProgress.netKwh / inProgress.distKm * 100f else 0f
+    val effColor   = efficiencyColor(kwh100km)
+    val socDelta   = inProgress.endSocPct - inProgress.startSocPct
+    val socColor   = when {
+        socDelta > -10f -> Green
+        socDelta > -25f -> WarnYellow
+        else            -> AccentOrange
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Green.copy(alpha = 0.07f), RoundedCornerShape(12.dp))
+            .border(1.dp, Green.copy(alpha = 0.35f), RoundedCornerShape(12.dp))
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        // Cabeçalho: indicador verde + rótulo + tempo decorrido
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .background(Green, CircleShape),
+                )
+                Text(
+                    "Em andamento",
+                    fontSize   = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    color      = Green,
+                )
+            }
+            Text(
+                fmtAutoTripDur(elapsedSec),
+                fontSize   = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                color      = TextSecondary,
+            )
+        }
+
+        // Métricas da viagem atual
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(0.dp),
+        ) {
+            AutoPeriodStat(
+                "%.1f km".format(inProgress.distKm),
+                "Distância",
+                color    = AccentBlue,
+                modifier = Modifier.weight(1.3f),
+            )
+            AutoPeriodStat(
+                fmtAutoTripDur(inProgress.timeSec),
+                "Cond. efetiva",
+                modifier = Modifier.weight(1.4f),
+            )
+            if (kwh100km > 0f)
+                AutoPeriodStat(
+                    "%.1f".format(kwh100km),
+                    "kWh/100km",
+                    color    = effColor,
+                    modifier = Modifier.weight(1.3f),
+                )
+            else
+                Spacer(Modifier.weight(1.3f))
+
+            if (inProgress.startSocPct > 0f && socDelta < 0f)
+                AutoPeriodStat(
+                    "%.0f%%".format(socDelta),
+                    "SOC Δ",
+                    color    = socColor,
+                    modifier = Modifier.weight(1f),
+                )
+            else
+                Spacer(Modifier.weight(1f))
+        }
+
+        // Linha energia / regen / combustível (somente se não-zero)
+        if (inProgress.netKwh > 0f || inProgress.fuelL > 0.001f) {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(0.dp),
+            ) {
+                if (inProgress.netKwh > 0f)
+                    AutoPeriodStat(
+                        "%.2f kWh".format(inProgress.netKwh),
+                        "kWh líq.",
+                        color    = Green,
+                        modifier = Modifier.weight(1.5f),
+                    )
+                if (inProgress.regenKwh > 0f)
+                    AutoPeriodStat(
+                        "%.2f kWh".format(inProgress.regenKwh),
+                        "Regen",
+                        color    = AuroraTeal,
+                        modifier = Modifier.weight(1.5f),
+                    )
+                if (inProgress.fuelL > 0.001f)
+                    AutoPeriodStat(
+                        "%.3f L".format(inProgress.fuelL),
+                        "Combustível",
+                        color    = AccentOrange,
+                        modifier = Modifier.weight(1.5f),
+                    )
+                Spacer(Modifier.weight(1f))
             }
         }
     }
