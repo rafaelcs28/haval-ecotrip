@@ -505,6 +505,13 @@ class MqttManager private constructor() {
             pub("outside_temp",          fmt1(latestOutsideTemp))
             if (latestGear.isNotEmpty()) pub("gear",  latestGear)
 
+            // GPS — publica apenas quando há sinal válido (≠ 0.0)
+            val (gpsLat, gpsLng) = TripManager.getInstance().getLastGps()
+            if (gpsLat != 0.0 && gpsLng != 0.0) {
+                pubR("gps_lat", String.format(java.util.Locale.US, "%.6f", gpsLat))
+                pubR("gps_lng", String.format(java.util.Locale.US, "%.6f", gpsLng))
+            }
+
             // Electrical: corrente de carga, tensão e corrente do pack + potência derivada
             // retain=true — persiste no broker; HA não fica em branco se a conexão cair brevemente
             pubR("charge_current_a",  fmt2(latestChargeCurrentA))

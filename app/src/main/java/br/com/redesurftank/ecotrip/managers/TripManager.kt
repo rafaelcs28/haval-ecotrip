@@ -393,6 +393,10 @@ class TripManager private constructor() {
         }
     }
 
+    /** Para MqttManager: última posição GPS conhecida do veículo. */
+    fun getLastGps(): Pair<Double, Double> =
+        Pair(telemetryRecorder?.latestLat ?: 0.0, telemetryRecorder?.latestLng ?: 0.0)
+
     /** Para StatsScreen: baseline de período (último checkpoint ≤ startMs). */
     fun getLifetimeBaselineAt(startMs: Long): LifetimeCheckpoint? = synchronized(lock) {
         checkpoints.filter { it.timestampMs <= startMs }.maxByOrNull { it.timestampMs }

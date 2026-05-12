@@ -1121,6 +1121,9 @@ function renderDash() {
   setText('d-roll-cost', r.cost_brl      > 0 ? 'R$ ' + f2(r.cost_brl)   : '--');
   setClass('d-roll-kwh', eff(r.kwh_per_100km));
 
+  // Mapa GPS — atualiza live a cada nova posição recebida via WebSocket
+  if (s.gps_lat && s.gps_lng) updateDashMap(s.gps_lat, s.gps_lng, s.gps_ts);
+
   renderAlerts(s);
 }
 
@@ -1533,62 +1536,75 @@ function renderAlerts(s) {
 }
 
 // ── Dashboard map — última localização do carro ───────────────────────────────
-let dashMap         = null;
-let dashMarker      = null;
+let dashMap             = null;
+let dashMarker          = null;
+let _dashMapLastLat     = 0;
+let _dashMapLastLng     = 0;
+let _dashMapGeocodeTimer = null;
 
-function initDashMap() {
-  apiFetch('/api/location')
-    .then(r => r.json())
-    .then(data => {
-      if (!data.lat || !data.lng) return;   // sem GPS disponível
-      const card = document.getElementById('d-map-card');
-      if (card) card.style.display = '';
-      const el = document.getElementById('d-car-map');
-      if (!el) return;
+function updateDashMap(lat, lng, ts) {
+  if (!lat || !lng || lat === 0 || lng === 0) return;
 
-      // Cria o mapa só uma vez
-      if (!dashMap) {
-        dashMap = L.map(el, {
-          zoomControl:       false,
-          attributionControl: false,
-          dragging:          true,
-          scrollWheelZoom:   false,
-        });
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18 }).addTo(dashMap);
-      }
+  const card = document.getElementById('d-map-card');
+  if (card) card.style.display = '';
+  const el = document.getElementById('d-car-map');
+  if (!el) return;
 
-      const pos = [data.lat, data.lng];
-      dashMap.setView(pos, 15);
+  // Cria o mapa Leaflet uma única vez
+  if (!dashMap) {
+    dashMap = L.map(el, {
+      zoomControl:        false,
+      attributionControl: false,
+      dragging:           true,
+      scrollWheelZoom:    false,
+    });
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18 }).addTo(dashMap);
+  }
 
-      if (dashMarker) dashMarker.setLatLng(pos);
-      else {
-        dashMarker = L.circleMarker(pos, {
-          radius: 9, fillColor: '#39FF88', fillOpacity: 1, color: '#fff', weight: 2,
-        }).addTo(dashMap);
-        dashMarker.bindPopup('🚗 Haval H6 PHEV34');
-      }
+  const pos = [lat, lng];
+  dashMap.setView(pos, 15);
 
-      if (data.ts) {
-        setText('d-map-ts', relTime(data.ts) + ' atrás');
-      }
+  if (dashMarker) dashMarker.setLatLng(pos);
+  else {
+    dashMarker = L.circleMarker(pos, {
+      radius: 9, fillColor: '#39FF88', fillOpacity: 1, color: '#fff', weight: 2,
+    }).addTo(dashMap);
+    dashMarker.bindPopup('🚗 Haval H6 PHEV34');
+  }
 
-      // Reverse geocoding — endereço da última posição (Nominatim / OSM)
-      fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${data.lat}&lon=${data.lng}&zoom=16`)
+  if (ts) setText('d-map-ts', relTime(ts) + ' atrás');
+
+  // Reverse geocoding — só quando a posição muda de forma significativa (>50 m ~= 0.0005°)
+  const moved = Math.abs(lat - _dashMapLastLat) > 0.0005 || Math.abs(lng - _dashMapLastLng) > 0.0005;
+  if (moved) {
+    _dashMapLastLat = lat;
+    _dashMapLastLng = lng;
+    clearTimeout(_dashMapGeocodeTimer);
+    _dashMapGeocodeTimer = setTimeout(() => {
+      fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=16`)
         .then(r => r.json())
         .then(geo => {
           const a = geo.address || {};
           const parts = [
             a.road,
             a.suburb || a.neighbourhood || a.quarter,
-            a.city   || a.town || a.village || a.municipality,
+            a.city || a.town || a.village || a.municipality,
           ].filter(Boolean);
           const label = parts.length ? parts.join(', ')
                       : (geo.display_name || '').split(',').slice(0, 2).join(',').trim();
           setText('d-map-address', label);
         })
         .catch(() => {});
-    })
-    .catch(() => {});   // sem localização — mapa permanece oculto
+    }, 2000);  // debounce 2s para não spammar Nominatim
+  }
+}
+
+// Inicialização: tenta posição da última viagem via API (fallback se GPS ao vivo não chegou ainda)
+function initDashMap() {
+  apiFetch('/api/location')
+    .then(r => r.json())
+    .then(data => { if (data.lat && data.lng) updateDashMap(data.lat, data.lng, data.ts); })
+    .catch(() => {});
 }
 
 // ── Trip detail: mapa Leaflet + gráficos Chart.js ─────────────────────────────

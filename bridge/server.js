@@ -230,6 +230,10 @@ const state = {
   car_last_update:   null,
   car_app_version:   null,
 
+  gps_lat:          0,
+  gps_lng:          0,
+  gps_ts:           0,   // timestamp ms da última posição recebida
+
   speed_kmh:        0,
   gear:             '--',
   inside_temp:      0,
@@ -943,6 +947,18 @@ function applyMqttMessage(key, value, isRetained = false) {
     case 'tyre_temp_fr': state.tyre_temp_fr = num(value); break;
     case 'tyre_temp_rl': state.tyre_temp_rl = num(value); break;
     case 'tyre_temp_rr': state.tyre_temp_rr = num(value); break;
+
+    // GPS — posição ao vivo do veículo
+    case 'gps_lat': {
+      const lat = parseFloat(value);
+      if (lat && lat !== 0) { state.gps_lat = lat; state.gps_ts = Date.now(); }
+      break;
+    }
+    case 'gps_lng': {
+      const lng = parseFloat(value);
+      if (lng && lng !== 0) { state.gps_lng = lng; state.gps_ts = Date.now(); }
+      break;
+    }
 
     // Telemetria ao vivo
     case 'speed_kmh':         state.speed_kmh          = num(value); break;
