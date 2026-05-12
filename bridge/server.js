@@ -727,6 +727,13 @@ app.post('/api/push/unsubscribe', (req, res) => {
   res.json({ ok: true });
 });
 
+// POST /api/push/test — envia notificação de teste (diagnóstico)
+app.post('/api/push/test', async (_req, res) => {
+  if (!pushSubs.length) return res.json({ ok: false, error: 'sem subscribers' });
+  await sendPush('🔔 Teste EcoTrip', 'Notificações push estão funcionando!');
+  res.json({ ok: true, subscribers: pushSubs.length });
+});
+
 // POST /api/push/reset-subs — limpa TODAS as subscrições (força re-subscribe no cliente)
 app.post('/api/push/reset-subs', (_req, res) => {
   const count = pushSubs.length;
