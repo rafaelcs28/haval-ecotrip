@@ -190,7 +190,7 @@ function initActionsPanel() {
       <div class="action-grid">
         ${card.items.map(item => `
           <button class="action-btn ${item.cls}"
-            onclick="remoteAction('${item.action}',${JSON.stringify(item.confirm)},${JSON.stringify(item.msg)},'${item.color}')">
+            onclick="remoteAction('${item.action}','${item.confirm}','${item.msg}','${item.color}')">
             ${item.label}
           </button>`).join('')}
       </div>
