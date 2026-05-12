@@ -465,6 +465,17 @@
   <!-- Painel Admin / Configurações -->
   <div id="panel-admin" class="panel" style="padding:16px;overflow-y:auto">
     <div style="max-width:480px;margin:0 auto">
+
+      <!-- ── Notificações ──────────────────────────────────────────────────── -->
+      <div id="notif-section" style="background:#0C1019;border:1px solid #0F1520;border-radius:12px;padding:14px 16px;margin-bottom:16px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+          <span style="font-size:14px;font-weight:700;color:#EEF4FF">🔔 Notificações</span>
+          <button id="notif-perm-btn" onclick="requestPushPermission()" style="display:none;font-size:11px;font-weight:600;background:rgba(77,187,255,.15);border:1px solid rgba(77,187,255,.35);color:#4DBBFF;border-radius:8px;padding:4px 10px;cursor:pointer">Ativar</button>
+        </div>
+        <div id="notif-perm-status" style="font-size:11px;color:#5B7394;margin-bottom:10px"></div>
+        <div id="notif-toggles"></div>
+      </div>
+
       <h2 style="margin:0 0 16px;font-size:16px;color:#e2e8f0">🛠 Servidor</h2>
 
       <!-- Alterar senha -->

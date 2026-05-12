@@ -472,6 +472,47 @@ html, body {
   line-height: 1;
 }
 
+/* ── Toggle switch (notificações) ────────────────────────────────────────────── */
+.notif-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+.notif-row:last-child { border-bottom: none; }
+.notif-label {
+  font-size: 13px;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.notif-label-sub { font-size: 11px; color: var(--muted); display: block; }
+
+/* iOS toggle */
+.toggle-wrap { position: relative; width: 42px; height: 24px; flex-shrink: 0; }
+.toggle-wrap input { opacity: 0; width: 0; height: 0; position: absolute; }
+.toggle-slider {
+  position: absolute;
+  inset: 0;
+  background: #334155;
+  border-radius: 24px;
+  cursor: pointer;
+  transition: background .2s;
+}
+.toggle-slider::before {
+  content: '';
+  position: absolute;
+  width: 18px; height: 18px;
+  left: 3px; top: 3px;
+  background: #fff;
+  border-radius: 50%;
+  transition: transform .2s;
+}
+.toggle-wrap input:checked + .toggle-slider { background: var(--neon); }
+.toggle-wrap input:checked + .toggle-slider::before { transform: translateX(18px); }
+
 /* ── Trip detail overlay (mapa + gráficos) ───────────────────────────────────── */
 #trip-detail {
   position: fixed;

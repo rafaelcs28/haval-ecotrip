@@ -33,9 +33,10 @@ const CHARGES_FILE    = path.join(__dirname, 'charges.json');
 const STATE_FILE      = path.join(__dirname, 'state.json');
 const AUTOTRIPS_DIR   = path.join(__dirname, 'autotrips');
 const SNAPSHOTS_FILE  = path.join(__dirname, 'lifetime_snapshots.json');
-const VAPID_FILE      = path.join(__dirname, 'vapid_keys.json');
-const PUSH_SUBS_FILE  = path.join(__dirname, 'push_subscriptions.json');
-const RENAMES_FILE    = path.join(__dirname, 'pending_renames.json');
+const VAPID_FILE        = path.join(__dirname, 'vapid_keys.json');
+const PUSH_SUBS_FILE    = path.join(__dirname, 'push_subscriptions.json');
+const RENAMES_FILE      = path.join(__dirname, 'pending_renames.json');
+const NOTIF_PREFS_FILE  = path.join(__dirname, 'notif_prefs.json');
 
 if (!fs.existsSync(AUTOTRIPS_DIR)) fs.mkdirSync(AUTOTRIPS_DIR, { recursive: true });
 
@@ -67,9 +68,34 @@ async function sendPush(title, body) {
   if (dead.length) { dead.reverse().forEach(i => pushSubs.splice(i, 1)); savePushSubs(); }
 }
 
+// ── Preferências de notificações push ────────────────────────────────────────
+const NOTIF_DEFAULTS = {
+  charge_start: true,   // ⚡ Recarga iniciada
+  charge_end:   true,   // ✅ Recarga concluída
+  door_open:    true,   // 🚪 Qualquer porta aberta
+  door_close:   false,  // 🚪 Qualquer porta fechada
+  trunk_open:   true,   // 🧳 Porta-malas aberta
+  trunk_close:  true,   // 🧳 Porta-malas fechada
+  engine_on:    true,   // 🔑 Motor ligado
+  engine_off:   false,  // 🔑 Motor desligado
+};
+let notifPrefs = { ...NOTIF_DEFAULTS };
+try {
+  if (fs.existsSync(NOTIF_PREFS_FILE))
+    notifPrefs = { ...NOTIF_DEFAULTS, ...JSON.parse(fs.readFileSync(NOTIF_PREFS_FILE, 'utf8')) };
+} catch (_) {}
+function saveNotifPrefs() {
+  try { fs.writeFileSync(NOTIF_PREFS_FILE, JSON.stringify(notifPrefs, null, 2)); } catch (_) {}
+}
+
 // ── Detecção de transição de estado de carga ──────────────────────────────────
 let prevChargingState  = null;
 let chargeStartTimer   = null;
+
+// ── Detecção de transição porta/motor ─────────────────────────────────────────
+let prevEngineState = null;
+const prevDoorStates = { fl: null, fr: null, rl: null, rr: null, trunk: null };
+const DOOR_NAMES = { fl: 'Dianteira esq.', fr: 'Dianteira dir.', rl: 'Traseira esq.', rr: 'Traseira dir.' };
 
 // ── Alerta de pressão de pneus ────────────────────────────────────────────────
 // Os valores chegam em kPa (apesar do nome "_psi" na entidade do HA)
@@ -631,6 +657,18 @@ app.post('/api/push/unsubscribe', (req, res) => {
   res.json({ ok: true });
 });
 
+// GET /api/push/prefs  — preferências de notificação por tipo de evento
+app.get('/api/push/prefs', (_req, res) => res.json(notifPrefs));
+
+// POST /api/push/prefs  { key, value }  — atualiza uma preferência
+app.post('/api/push/prefs', (req, res) => {
+  const { key, value } = req.body || {};
+  if (!key || !(key in NOTIF_DEFAULTS)) return res.status(400).json({ error: 'chave inválida' });
+  notifPrefs[key] = !!value;
+  saveNotifPrefs();
+  res.json({ ok: true, prefs: notifPrefs });
+});
+
 // ── Remote Actions ────────────────────────────────────────────────────────────
 const ALLOWED_ACTIONS = new Set([
   'engine_on',  'engine_off',
@@ -738,16 +776,51 @@ function applyMqttMessage(key, value, isRetained = false) {
 
     // Sensores de estado (publicados pelo HA via automação)
     case 'status_message': state.status_message = value; break; // pipe-sep alerts
-    case 'engine_state': state.engine_state = value; break;   // '0' | '1'
+    case 'engine_state': {
+      const prevEng = prevEngineState;
+      state.engine_state = value;
+      prevEngineState    = value;
+      if (!isRetained && prevEng !== null) {
+        if (value === '1' && prevEng !== '1' && notifPrefs.engine_on)
+          sendPush('🔑 Motor ligado', 'O veículo foi ligado.');
+        else if (value === '0' && prevEng !== '0' && notifPrefs.engine_off)
+          sendPush('🔑 Motor desligado', 'O veículo foi desligado.');
+      }
+      break;
+    }
     case 'lock_state':   state.lock_state   = value; break;   // 'off' | 'on'
     case 'high_beam':    state.high_beam    = value; break;   // 'on' | 'off'
     case 'light_state':  state.light_state  = value; break;   // 'on' | 'off' (farol)
     case 'ac_state':     state.ac_state     = value; break;   // 'on' | 'off'
-    case 'door_fl':      state.door_fl      = value; break;   // 'on'=aberta | 'off'=fechada
-    case 'door_fr':      state.door_fr      = value; break;
-    case 'door_rl':      state.door_rl      = value; break;
-    case 'door_rr':      state.door_rr      = value; break;
-    case 'door_trunk':   state.door_trunk   = value; break;
+    case 'door_fl':
+    case 'door_fr':
+    case 'door_rl':
+    case 'door_rr': {
+      const side  = key.slice(5);           // 'fl' | 'fr' | 'rl' | 'rr'
+      const prevD = prevDoorStates[side];
+      state[key]          = value;
+      prevDoorStates[side] = value;
+      if (!isRetained && prevD !== null && prevD !== value) {
+        const label = DOOR_NAMES[side] || side.toUpperCase();
+        if (value === 'on'  && notifPrefs.door_open)
+          sendPush('🚪 Porta aberta',  label);
+        else if (value === 'off' && notifPrefs.door_close)
+          sendPush('🚪 Porta fechada', label);
+      }
+      break;
+    }
+    case 'door_trunk': {
+      const prevT = prevDoorStates.trunk;
+      state.door_trunk        = value;
+      prevDoorStates.trunk    = value;
+      if (!isRetained && prevT !== null && prevT !== value) {
+        if (value === 'on'  && notifPrefs.trunk_open)
+          sendPush('🧳 Porta-malas aberta',  'Verifique se está segura.');
+        else if (value === 'off' && notifPrefs.trunk_close)
+          sendPush('🧳 Porta-malas fechada', 'Porta-malas foi fechada.');
+      }
+      break;
+    }
     case 'sunroof':      state.sunroof      = value; break;   // '3'=fechado
     case 'window_fl':    state.window_fl    = value; break;   // '1'|'2'|'3'
     case 'window_fr':    state.window_fr    = value; break;
@@ -787,12 +860,13 @@ function applyMqttMessage(key, value, isRetained = false) {
             const remStr = rem > 0
               ? (rem > 59 ? `${Math.floor(rem / 60)}h ${rem % 60}min` : `${rem} min`)
               : '~?';
+            if (notifPrefs.charge_start)
             sendPush('⚡ Recarga iniciada', `${pwr.toFixed(1)} kW · tempo restante: ${remStr}`);
           }, 30000);
 
         } else if (value !== 'Carregando' && prev === 'Carregando') {
           if (chargeStartTimer) { clearTimeout(chargeStartTimer); chargeStartTimer = null; }
-          if (value === 'Finalizado') {
+          if (value === 'Finalizado' && notifPrefs.charge_end) {
             const kwh = state.charge_session_kwh || 0;
             sendPush('✅ Recarga concluída', kwh > 0.05
               ? `${kwh.toFixed(2)} kWh injetados`

@@ -131,7 +131,92 @@ document.addEventListener('DOMContentLoaded', () => {
     if (e.key === 'Enter') doLogin();
   });
   initActionsPanel();
+  initNotifPanel();
 });
+
+// ── Notification preferences panel ───────────────────────────────────────────
+const NOTIF_ITEMS = [
+  { key: 'charge_start', icon: '⚡', label: 'Recarga iniciada' },
+  { key: 'charge_end',   icon: '✅', label: 'Recarga concluída' },
+  { key: 'door_open',    icon: '🚪', label: 'Porta aberta',    sub: 'qualquer porta' },
+  { key: 'door_close',   icon: '🚪', label: 'Porta fechada',   sub: 'qualquer porta' },
+  { key: 'trunk_open',   icon: '🧳', label: 'Porta-malas aberta' },
+  { key: 'trunk_close',  icon: '🧳', label: 'Porta-malas fechada' },
+  { key: 'engine_on',    icon: '🔑', label: 'Motor ligado' },
+  { key: 'engine_off',   icon: '🔑', label: 'Motor desligado' },
+];
+
+let _notifPrefs = {};
+
+async function initNotifPanel() {
+  try {
+    _notifPrefs = await apiFetch('/api/push/prefs').then(r => r.json());
+  } catch (_) { _notifPrefs = {}; }
+  _renderNotifToggles();
+  _updatePushPermStatus();
+}
+
+function _renderNotifToggles() {
+  const el = document.getElementById('notif-toggles');
+  if (!el) return;
+  el.innerHTML = NOTIF_ITEMS.map(({ key, icon, label, sub }) => `
+    <div class="notif-row">
+      <label class="notif-label" for="ntog-${key}">
+        <span>${icon}</span>
+        <span>${label}${sub ? `<span class="notif-label-sub">${sub}</span>` : ''}</span>
+      </label>
+      <label class="toggle-wrap">
+        <input type="checkbox" id="ntog-${key}" ${_notifPrefs[key] ? 'checked' : ''}
+          onchange="saveNotifPref('${key}', this.checked)">
+        <span class="toggle-slider"></span>
+      </label>
+    </div>`).join('');
+}
+
+window.saveNotifPref = async function(key, value) {
+  _notifPrefs[key] = value;
+  try {
+    await apiFetch('/api/push/prefs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key, value }),
+    });
+  } catch (_) {
+    showToast('✗ Erro ao salvar preferência');
+  }
+};
+
+function _updatePushPermStatus() {
+  const statusEl = document.getElementById('notif-perm-status');
+  const btnEl    = document.getElementById('notif-perm-btn');
+  if (!statusEl) return;
+  if (!('Notification' in window) || !('PushManager' in window)) {
+    statusEl.textContent = '⚠️ Notificações push não suportadas neste browser.';
+    return;
+  }
+  const perm = Notification.permission;
+  if (perm === 'granted') {
+    statusEl.textContent = '✓ Notificações ativadas neste dispositivo.';
+    statusEl.style.color = 'var(--neon)';
+    if (btnEl) btnEl.style.display = 'none';
+  } else if (perm === 'denied') {
+    statusEl.textContent = '✗ Bloqueado nas configurações do browser/iOS.';
+    statusEl.style.color = 'var(--red)';
+    if (btnEl) btnEl.style.display = 'none';
+  } else {
+    statusEl.textContent = 'Notificações não ativadas ainda.';
+    if (btnEl) btnEl.style.display = '';
+  }
+}
+
+window.requestPushPermission = async function() {
+  try {
+    await subscribePush();
+    _updatePushPermStatus();
+  } catch (_) {
+    showToast('✗ Não foi possível ativar notificações');
+  }
+};
 
 // ── Actions panel — criado 100% em JS para sobreviver a cache antigo de index.html
 function initActionsPanel() {
