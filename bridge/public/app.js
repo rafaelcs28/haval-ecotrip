@@ -9,6 +9,44 @@ let wsRetryDelay = 1000;
 let ws = null;
 let tickInterval = null;
 
+// ── Geocode cache (sessionStorage, zoom=10 → cidade) ─────────────────────────
+let geoCache = {};
+try { geoCache = JSON.parse(sessionStorage.getItem('geoCache') || '{}'); } catch (_) {}
+let _geoQueue  = [];   // { tripId, lat, lng }
+let _geoTimer  = null; // setTimeout handle da fila
+
+function queueGeocode(tripId, lat, lng) {
+  if (!lat || !lng || lat === 0 || lng === 0) return;
+  if (geoCache[tripId] !== undefined) return;             // já tentado
+  if (_geoQueue.some(q => q.tripId === tripId)) return;   // já na fila
+  _geoQueue.push({ tripId, lat, lng });
+  if (!_geoTimer) _geoTimer = setTimeout(_processGeoQueue, 50);
+}
+
+async function _processGeoQueue() {
+  _geoTimer = null;
+  if (!_geoQueue.length) return;
+  const { tripId, lat, lng } = _geoQueue.shift();
+  try {
+    const r = await fetch(
+      `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=10`,
+      { headers: { 'Accept-Language': 'pt-BR' } }
+    );
+    const d = await r.json();
+    const a = d.address || {};
+    const city  = a.city || a.town || a.village || a.municipality || a.county || '';
+    const state = a.state || '';
+    geoCache[tripId] = city ? (state ? `${city}, ${state}` : city) : (state || '');
+  } catch (_) {
+    geoCache[tripId] = '';  // falhou — marca como tentado para não repetir
+  }
+  try { sessionStorage.setItem('geoCache', JSON.stringify(geoCache)); } catch (_) {}
+  // Atualiza lista se há busca ativa
+  if (filterState.auto.search.trim()) renderAutoTrips();
+  // Próximo item com 1.1s de intervalo (respeita política do Nominatim)
+  if (_geoQueue.length) _geoTimer = setTimeout(_processGeoQueue, 1100);
+}
+
 // ── Auth ──────────────────────────────────────────────────────────────────────
 let bridgeToken = localStorage.getItem('bridge_token') || '';
 
@@ -993,7 +1031,14 @@ function loadAutoTrips() {
   list.innerHTML = '<div class="empty">Carregando...</div>';
   apiFetch('/api/autotrips')
     .then(r => r.json())
-    .then(data => { cachedAutoTrips = Array.isArray(data) ? data : []; renderAutoTrips(); })
+    .then(data => {
+      cachedAutoTrips = Array.isArray(data) ? data : [];
+      // Enfileira geocode para trips com GPS ainda não cacheados
+      cachedAutoTrips.forEach(t => {
+        if (t.startLat && t.startLat !== 0) queueGeocode(t.tripId, t.startLat, t.startLng);
+      });
+      renderAutoTrips();
+    })
     .catch(() => { list.innerHTML = '<div class="empty">Erro ao carregar.</div>'; });
 }
 
@@ -1004,21 +1049,30 @@ function renderAutoTrips() {
   const [filterStart, filterEnd] = getFilterRange('auto');
   let trips = filterItems(cachedAutoTrips || [], 'startMs', filterStart, filterEnd);
 
-  // Filtro de busca por nome / data
+  // Filtro de busca por nome / data / localização (AND com filtro de datas)
   const autoQ = (filterState.auto.search || '').trim().toLowerCase();
+  let pendingGeo = 0;
   if (autoQ) {
     trips = trips.filter(t => {
       const name    = (t.name || '').toLowerCase();
       const dateStr = fmtDate(t.startMs).toLowerCase();
-      return name.includes(autoQ) || dateStr.includes(autoQ);
+      const geo     = (geoCache[t.tripId] ?? null);
+      if (geo === null && t.startLat && t.startLat !== 0) pendingGeo++; // ainda geocodando
+      const geoStr  = (geo || '').toLowerCase();
+      return name.includes(autoQ) || dateStr.includes(autoQ) || geoStr.includes(autoQ);
     });
   }
 
   let html = filterChipsHTML('auto');
 
+  // Badge de geocodificação em progresso
+  if (autoQ && pendingGeo > 0) {
+    html += `<div class="geo-loading">🔍 Buscando localização de ${pendingGeo} viagem${pendingGeo !== 1 ? 'ns' : ''}…</div>`;
+  }
+
   if (!trips.length) {
     const hint = autoQ
-      ? `<div class="empty">Nenhuma viagem com "${filterState.auto.search}".</div>`
+      ? `<div class="empty">Nenhuma viagem com "${filterState.auto.search}"${pendingGeo > 0 ? ' — resultado parcial, aguarde' : ''}.</div>`
       : '<div class="empty">Nenhuma viagem automática no período.</div>';
     list.innerHTML = html + hint;
     return;
@@ -1059,6 +1113,8 @@ function renderAutoTrips() {
     const tempStr    = t.outsideTempC != null ? `${Math.round(t.outsideTempC)}°C`  : null;
     const hasGps     = t.startLat && (t.startLat !== 0 || t.startLng !== 0);
     const mapsUrl    = hasGps ? `https://www.google.com/maps/dir/${t.startLat},${t.startLng}/${t.endLat},${t.endLng}` : null;
+    const geo        = geoCache[t.tripId];
+    const geoLine    = geo ? `<div class="trip-geo">📍 ${geo}</div>` : '';
     const extraRow   = (maxSpd || tempStr) ? `
   <div class="trip-metrics" style="margin-top:4px">
     ${maxSpd  ? `<div class="trip-metric"><div class="trip-metric-val">${maxSpd}</div><div class="trip-metric-lbl">vel. máx.</div></div>` : ''}
@@ -1073,6 +1129,7 @@ function renderAutoTrips() {
     <div>
       <div class="trip-name">${startDate}</div>
       <div class="trip-date">${dur}</div>
+      ${geoLine}
     </div>
     <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">
       ${costStr}
