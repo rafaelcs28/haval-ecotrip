@@ -114,6 +114,12 @@ function saveNotifPrefs() {
 let prevChargingState  = null;
 let chargeStartTimer   = null;
 
+// ── SOC — fonte HA tem prioridade quando disponível ───────────────────────────
+// Após o primeiro tópico haval/ecotrip/soc_pct (publicado via automação HA),
+// ignoramos o trip_a/b/soc_current para soc_pct — evita que o Android
+// sobrescreva com um valor mais antigo.
+let haSocActive = false;
+
 // ── Detecção de transição porta/motor ─────────────────────────────────────────
 let prevEngineState = null;
 const prevDoorStates = { fl: null, fr: null, rl: null, rr: null, trunk: null };
@@ -953,10 +959,17 @@ function applyMqttMessage(key, value, isRetained = false) {
     case 'battery_power_pct': state.battery_power_pct = Math.round(num(value)); break;
     case 'engine_rpm':        state.engine_rpm        = Math.round(num(value)); break;
 
-    // SOC (publicado com retain em trip_a/soc_current)
+    // SOC — fonte primária: HA publica via automação em haval/ecotrip/soc_pct (retain)
+    // Uma vez recebido, marca haSocActive = true e ignora trip_a/b soc_current para soc_pct
+    case 'soc_pct':
+      haSocActive   = true;
+      state.soc_pct = num(value);
+      break;
+
+    // SOC (publicado com retain em trip_a/soc_current pelo Android)
     case 'trip_a/soc_current':
-      state.soc_pct           = num(value);
       state.trip_a.soc_current = num(value);
+      if (!haSocActive) state.soc_pct = num(value);   // fallback enquanto HA não configurado
       break;
 
     // Trip A
@@ -976,8 +989,8 @@ function applyMqttMessage(key, value, isRetained = false) {
 
     // Trip B
     case 'trip_b/soc_current':
-      state.soc_pct            = num(value);
-      state.trip_b.soc_current  = num(value);
+      state.trip_b.soc_current = num(value);
+      if (!haSocActive) state.soc_pct = num(value);   // fallback enquanto HA não configurado
       break;
     case 'trip_b/distance_km':   state.trip_b.distance_km   = num(value); break;
     case 'trip_b/time_sec':      state.trip_b.time_sec       = value; break;
