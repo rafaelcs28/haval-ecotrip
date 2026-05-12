@@ -515,12 +515,14 @@ class MqttManager private constructor() {
             // Electrical: corrente de carga, tensão e corrente do pack + potência derivada
             // retain=true — persiste no broker; HA não fica em branco se a conexão cair brevemente
             pubR("charge_current_a",  fmt2(latestChargeCurrentA))
-            pubR("battery_voltage_v", fmt2(latestBatteryVoltageV))
+            pubR("battery_voltage_v", fmt2(latestBatteryVoltageV))   // car.ev_info.power_battery_voltage
             pubR("battery_current_a", fmt2(latestBatteryCurrentA))
-            // Potência do motor elétrico — lida diretamente do HCU (car.ev_info.motor_power)
-            // Valor positivo = consumo; negativo = regeneração; 0 = sem sinal do HCU
+            // Tensão do pack (namespace basic) — fonte usada no cálculo da potência do motor
+            if (latestBasicBattVoltageV > 0f) pubR("basic_battery_voltage_v", fmt2(latestBasicBattVoltageV))
+            // Potência do motor elétrico: (car.basic.battery_voltage × car.ev_info.cur_charge_current) / 1000
+            // Positivo = consumo; negativo = regeneração
             pubR("motor_power_kw",    fmt2(latestMotorPowerKw))
-            // battery_power_pct: vem de CAR_EV_INFO_ENERGY_OUTPUT_PERCENTAGE (sinal correto do carro)
+            // % potência motor elétrico — car.ev_info.cur_battery_power_percentage
             pubR("battery_power_pct", latestBattPowerPct.toString())
             pubR("engine_rpm",        latestEngineRpm.toString())
             if (latestOdometerKm > 0f) pubR("odometer_km", fmt1(latestOdometerKm))
@@ -748,12 +750,13 @@ class MqttManager private constructor() {
         data class S(val id: String, val name: String, val topic: String, val unit: String, val dc: String? = null, val icon: String? = null, val sc: String? = "measurement")
 
         val sensors = listOf(
-            S("charge_current",     "Corrente de Carregamento", "$prefix/charge_current_a",   "A",         icon = "mdi:current-ac"),
-            S("battery_voltage",    "Tensão da Bateria",        "$prefix/battery_voltage_v",  "V",         icon = "mdi:lightning-bolt"),
-            S("battery_current",    "Corrente da Bateria",      "$prefix/battery_current_a",  "A",         icon = "mdi:current-dc"),
-            S("charge_power",       "Potência de Recarga",      "$prefix/charge_power_kw",    "kW",        icon = "mdi:ev-station"),
-            S("motor_power_kw",    "Potência Motor Elétrico",  "$prefix/motor_power_kw",     "kW",        icon = "mdi:lightning-bolt-circle"),
-            S("battery_power_pct", "Potência Motor %",         "$prefix/battery_power_pct",  "%",         icon = "mdi:gauge"),
+            S("charge_current",           "Corrente de Carregamento",  "$prefix/charge_current_a",           "A",   icon = "mdi:current-ac"),
+            S("battery_voltage",          "Tensão Bateria (ev_info)",  "$prefix/battery_voltage_v",          "V",   icon = "mdi:lightning-bolt"),
+            S("basic_battery_voltage",    "Tensão Bateria (basic)",    "$prefix/basic_battery_voltage_v",    "V",   icon = "mdi:lightning-bolt-outline"),
+            S("battery_current",          "Corrente da Bateria",       "$prefix/battery_current_a",          "A",   icon = "mdi:current-dc"),
+            S("charge_power",             "Potência de Recarga",       "$prefix/charge_power_kw",            "kW",  icon = "mdi:ev-station"),
+            S("motor_power_kw",           "Potência Motor Elétrico",   "$prefix/motor_power_kw",             "kW",  icon = "mdi:lightning-bolt-circle"),
+            S("battery_power_pct",        "Potência Motor %",          "$prefix/battery_power_pct",          "%",   icon = "mdi:gauge"),
             S("engine_rpm",        "Rotação Motor Térmico",    "$prefix/engine_rpm",         "rpm",       icon = "mdi:engine"),
             S("charging_state",     "Estado de Recarga",        "$prefix/charging_state",     "",          icon = "mdi:ev-plug-type2", sc = null),
             S("speed",              "Velocidade Atual",         "$prefix/speed_kmh",           "km/h",      "speed"),
