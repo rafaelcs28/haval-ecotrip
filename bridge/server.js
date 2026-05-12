@@ -120,13 +120,12 @@ const prevDoorStates = { fl: null, fr: null, rl: null, rr: null, trunk: null };
 const DOOR_NAMES = { fl: 'Dianteira esq.', fr: 'Dianteira dir.', rl: 'Traseira esq.', rr: 'Traseira dir.' };
 
 // ── Alerta de pressão de pneus ────────────────────────────────────────────────
-// Os valores chegam em kPa (apesar do nome "_psi" na entidade do HA)
+// Os valores chegam diretamente em PSI (sem conversão necessária)
 const TYRE_PSI_MIN = 34;   // abaixo disso → alerta
 const TYRE_PSI_MAX = 40;   // acima disso  → alerta
 const tyreAlertSent = {};   // evita spam: chave = 'FL_low' | 'FL_high' etc.
-function checkTyrePressure(pos, kpa, isRetained = false) {
-  if (!kpa || kpa < 10) return;   // valor inválido ou zero
-  const psi = kpa / 6.895;
+function checkTyrePressure(pos, psi, isRetained = false) {
+  if (!psi || psi < 5) return;   // valor inválido ou zero
   const lowKey  = `${pos}_low`;
   const highKey = `${pos}_high`;
   if (psi < TYRE_PSI_MIN) {
@@ -246,7 +245,7 @@ const state = {
   window_fr:        null,
   window_rl:        null,
   window_rr:        null,
-  tyre_pressure_fl: 0,     // kPa (dividir por 6.895 para PSI)
+  tyre_pressure_fl: 0,     // PSI (direto, sem conversão)
   tyre_pressure_fr: 0,
   tyre_pressure_rl: 0,
   tyre_pressure_rr: 0,

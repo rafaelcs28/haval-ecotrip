@@ -1030,8 +1030,7 @@ function renderDash() {
   carLayer('cl-charge-no',   chg === 'Não Carregando' || chg === 'NaoCarregando');
 
   // Pneus
-  function renderTyre(pos, kpa, tempC) {
-    const psi = kpa > 0 ? kpa / 6.895 : 0;
+  function renderTyre(pos, psi, tempC) {
     const psiEl  = document.getElementById(`d-tyre-${pos}-psi`);
     const tempEl = document.getElementById(`d-tyre-${pos}-temp`);
     const card   = document.getElementById(`d-tyre-${pos}`);
