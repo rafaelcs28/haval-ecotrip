@@ -622,6 +622,7 @@ private fun AutoTripEntryRow(
     val durationSec = (entry.endMs - entry.startMs) / 1000L
     val avgSpeed    = if (entry.timeSec > 0) entry.distKm / (entry.timeSec / 3600f) else 0f
     val kwh100km    = if (entry.distKm > 0.1f) entry.netKwh / entry.distKm * 100f else 0f
+    val kmPerL      = if (entry.fuelL > 0.001f) entry.distKm / entry.fuelL else 0f
     val effColor    = efficiencyColor(kwh100km)
     val socDelta    = entry.endSocPct - entry.startSocPct
     val fuelDelta   = entry.endFuelPct - entry.startFuelPct
@@ -719,13 +720,12 @@ private fun AutoTripEntryRow(
                 Text(fmtAutoTripDur(durationSec), fontSize = 11.sp, color = TextSecondary)
             }
 
-            // Métricas inline
+            // Métricas inline — eficiência elétrica + eficiência térmica + custo
             AutoCompactMetric("%.1f km".format(entry.distKm), "dist")
-            // kWh/100km com cor de eficiência
             if (kwh100km > 0f)
                 AutoCompactMetric("%.1f".format(kwh100km), "kWh/100", valueColor = effColor)
-            if (entry.fuelL > 0.001f)
-                AutoCompactMetric("%.2f L".format(entry.fuelL), "comb")
+            if (kmPerL > 0f)
+                AutoCompactMetric("%.1f".format(kmPerL), "km/L", valueColor = AccentOrange)
             if (costBrl > 0.01f)
                 AutoCompactMetric("R$ %.2f".format(costBrl), "custo")
 
@@ -749,32 +749,46 @@ private fun AutoTripEntryRow(
                 HorizontalDivider(color = Separator, thickness = 0.5.dp)
                 Spacer(Modifier.height(2.dp))
 
-                // Linha 1: km, vel, kWh/100km, combustível
+                // Linha 1: eficiência — km, vel. média, kWh/100km, km/L
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    AutoDetailMetric("Distância",  "%.1f km".format(entry.distKm),        AccentBlue,  Modifier.weight(1f))
-                    AutoDetailMetric("Vel. Média", "%.1f km/h".format(avgSpeed),           TextPrimary, Modifier.weight(1f))
+                    AutoDetailMetric("Distância",  "%.1f km".format(entry.distKm),  AccentBlue,  Modifier.weight(1f))
+                    AutoDetailMetric("Vel. Média", "%.1f km/h".format(avgSpeed),    TextPrimary, Modifier.weight(1f))
                     if (kwh100km > 0f)
-                        AutoDetailMetric("kWh/100km",  "%.1f".format(kwh100km),           effColor,    Modifier.weight(1f))
-                    if (entry.fuelL > 0.001f)
-                        AutoDetailMetric("Combustível","%.3f L".format(entry.fuelL),       AccentOrange,Modifier.weight(1f))
+                        AutoDetailMetric("kWh/100km", "%.1f".format(kwh100km),      effColor,    Modifier.weight(1f))
+                    else
+                        Spacer(Modifier.weight(1f))
+                    if (kmPerL > 0f)
+                        AutoDetailMetric("km/L",      "%.1f".format(kmPerL),        AccentOrange,Modifier.weight(1f))
+                    else
+                        Spacer(Modifier.weight(1f))
                 }
 
-                // Linha 2: kWh líquido, energia bruta, regen, condução efetiva
+                // Linha 2: energia bruta + condução efetiva
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    AutoDetailMetric("kWh líquido","%.2f kWh".format(entry.netKwh),        Green,         Modifier.weight(1f))
-                    AutoDetailMetric("Bruto",      "%.2f kWh".format(entry.energyKwh),    TextSecondary, Modifier.weight(1f))
-                    AutoDetailMetric("Regenerado", "%.2f kWh".format(entry.regenKwh),     AuroraTeal,    Modifier.weight(1f))
+                    AutoDetailMetric("kWh líquido",   "%.2f kWh".format(entry.netKwh),    Green,         Modifier.weight(1f))
+                    AutoDetailMetric("Bruto",         "%.2f kWh".format(entry.energyKwh), TextSecondary, Modifier.weight(1f))
+                    AutoDetailMetric("Regenerado",    "%.2f kWh".format(entry.regenKwh),  AuroraTeal,    Modifier.weight(1f))
                     AutoDetailMetric("Cond. efetiva", fmtAutoTripDur(entry.timeSec),       TextSecondary, Modifier.weight(1f))
                 }
 
-                // Linha 3: custo (se preços configurados)
-                if (costBrl > 0.01f) {
+                // Linha 3: combustível (se houver) + custo
+                val showFuel = entry.fuelL > 0.001f
+                val showCost = costBrl > 0.01f
+                if (showFuel || showCost) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        AutoDetailMetric("💰 Custo Total", "R$ %.2f".format(costBrl),      WarnYellow, Modifier.weight(1f))
-                        if (costPerKm > 0f)
-                            AutoDetailMetric("R$/km", "%.3f".format(costPerKm),            WarnYellow, Modifier.weight(1f))
+                        if (showFuel)
+                            AutoDetailMetric("Combustível", "%.3f L".format(entry.fuelL),  AccentOrange, Modifier.weight(1f))
                         else
                             Spacer(Modifier.weight(1f))
+                        if (showCost) {
+                            AutoDetailMetric("💰 Custo",   "R$ %.2f".format(costBrl),      WarnYellow, Modifier.weight(1f))
+                            if (costPerKm > 0f)
+                                AutoDetailMetric("R$/km",  "%.3f".format(costPerKm),       WarnYellow, Modifier.weight(1f))
+                            else
+                                Spacer(Modifier.weight(1f))
+                        } else {
+                            Spacer(Modifier.weight(2f))
+                        }
                         Spacer(Modifier.weight(1f))
                     }
                 }
