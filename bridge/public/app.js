@@ -1040,7 +1040,7 @@ function renderDash() {
     if (engOn && spdVal) {
       const spd = Math.round(s.speed_kmh || 0);
       spdVal.textContent  = spd;
-      spdVal.style.fontSize = spd >= 100 ? '22px' : spd >= 10 ? '28px' : '32px';
+      spdVal.style.fontSize = spd >= 100 ? '13px' : spd >= 10 ? '18px' : '20px';
     }
   }
 
