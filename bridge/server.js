@@ -49,7 +49,7 @@ if (!vapidKeys?.publicKey) {
   fs.writeFileSync(VAPID_FILE, JSON.stringify(vapidKeys));
   console.log('✓ VAPID keys geradas e salvas em vapid_keys.json');
 }
-webpush.setVapidDetails('mailto:ecotrip@local', vapidKeys.publicKey, vapidKeys.privateKey);
+webpush.setVapidDetails('https://github.com/rafaelcs28/haval-ecotrip', vapidKeys.publicKey, vapidKeys.privateKey);
 
 let pushSubs = [];
 try { if (fs.existsSync(PUSH_SUBS_FILE)) pushSubs = JSON.parse(fs.readFileSync(PUSH_SUBS_FILE, 'utf8')); } catch (_) {}
