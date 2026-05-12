@@ -459,8 +459,15 @@ app.use('/api', (req, res, next) => {
 });
 
 app.get('/api/state',  (_req, res) => res.json(state));
-app.get('/api/trips',   (_req, res) => res.json(getTrips()));
-app.get('/api/charges', (_req, res) => res.json(chargesArr));
+app.get('/api/trips', (req, res) => {
+  const since = req.query.since || '';
+  const all   = getTrips(500);
+  res.json(since ? all.filter(t => (t.timestamp || '') > since) : all);
+});
+app.get('/api/charges', (req, res) => {
+  const since = parseInt(req.query.since || '0', 10);
+  res.json(since > 0 ? chargesArr.filter(c => (c.timestamp_ms || 0) > since) : chargesArr);
+});
 
 // ── Admin: restart remoto ─────────────────────────────────────────────────────
 // POST /api/admin/restart  body: { "token": "..." }
@@ -607,7 +614,11 @@ app.post('/api/autotrips', (req, res) => {
   }
 });
 
-app.get('/api/autotrips', (_req, res) => res.json(autoTripsArr.slice(0, 300)));
+app.get('/api/autotrips', (req, res) => {
+  const since = parseInt(req.query.since || '0', 10);
+  const arr   = since > 0 ? autoTripsArr.filter(t => t.startMs > since) : autoTripsArr;
+  res.json(arr.slice(0, 300));
+});
 
 // ── Renomear trips (PWA → fila → Android) ─────────────────────────────────────
 // Carrega fila persistida

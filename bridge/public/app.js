@@ -641,24 +641,24 @@ function connect() {
         showLogin('Senha incorreta ou expirada.');
         return;
       } else if (msg.type === 'new_autotrip') {
-        // Nova viagem automática chegou do carro — invalida cache
-        cachedAutoTrips = null;
+        // Nova viagem automática — sincroniza só o novo, sem derrubar o cache inteiro
         const autoPanel = document.getElementById('panel-auto');
-        if (autoPanel && autoPanel.classList.contains('active')) {
-          // Aba Auto aberta: recarrega direto, silenciosamente
-          loadAutoTrips();
-        } else {
-          // Outra aba: mostra badge (ponto verde) no botão Auto
-          const btn = document.querySelector('[data-panel="auto"]');
-          if (btn && !btn.querySelector('.tab-notif')) {
-            btn.style.position = 'relative';
-            const dot = document.createElement('span');
-            dot.className = 'tab-notif';
-            dot.style.cssText = 'position:absolute;top:3px;right:6px;width:8px;height:8px;' +
-              'background:#39FF88;border-radius:50%;border:2px solid #0f172a;pointer-events:none;';
-            btn.appendChild(dot);
+        syncAllCache({ silent: true }).then(() => {
+          if (autoPanel && autoPanel.classList.contains('active')) {
+            renderAutoTrips();
+          } else {
+            // Outra aba: mostra badge (ponto verde) no botão Auto
+            const btn = document.querySelector('[data-panel="auto"]');
+            if (btn && !btn.querySelector('.tab-notif')) {
+              btn.style.position = 'relative';
+              const dot = document.createElement('span');
+              dot.className = 'tab-notif';
+              dot.style.cssText = 'position:absolute;top:3px;right:6px;width:8px;height:8px;' +
+                'background:#39FF88;border-radius:50%;border:2px solid #0f172a;pointer-events:none;';
+              btn.appendChild(dot);
+            }
           }
-        }
+        });
       }
     } catch (e) { console.error('WS parse error', e); }
   };
@@ -766,6 +766,154 @@ const filterState = {
 };
 let cachedCharges = null;
 let cachedTrips   = null;
+
+// ── Cache local — IndexedDB ────────────────────────────────────────────────
+const _IDB_NAME = 'ecotrip-trips';
+const _IDB_VER  = 1;
+let _idb = null;
+
+function _openIDB() {
+  if (_idb) return Promise.resolve(_idb);
+  return new Promise((res, rej) => {
+    const r = indexedDB.open(_IDB_NAME, _IDB_VER);
+    r.onupgradeneeded = e => {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains('trips'))    db.createObjectStore('trips',    { keyPath: 'timestamp' });
+      if (!db.objectStoreNames.contains('autotrips'))db.createObjectStore('autotrips',{ keyPath: 'tripId' });
+      if (!db.objectStoreNames.contains('charges'))  db.createObjectStore('charges',  { keyPath: 'timestamp_ms' });
+      if (!db.objectStoreNames.contains('meta'))     db.createObjectStore('meta');
+    };
+    r.onsuccess = e => { _idb = e.target.result; res(_idb); };
+    r.onerror   = e => rej(e.target.error);
+  });
+}
+function _idbGetAll(store) {
+  return _openIDB().then(db => new Promise((res, rej) => {
+    const req = db.transaction(store, 'readonly').objectStore(store).getAll();
+    req.onsuccess = () => res(req.result || []);
+    req.onerror   = e => rej(e.target.error);
+  }));
+}
+function _idbPutMany(store, items) {
+  if (!items.length) return Promise.resolve();
+  return _openIDB().then(db => new Promise((res, rej) => {
+    const tx = db.transaction(store, 'readwrite');
+    const os = tx.objectStore(store);
+    items.forEach(item => os.put(item));
+    tx.oncomplete = res;
+    tx.onerror    = e => rej(e.target.error);
+  }));
+}
+function _idbGetMeta(key) {
+  return _openIDB().then(db => new Promise((res, rej) => {
+    const req = db.transaction('meta', 'readonly').objectStore('meta').get(key);
+    req.onsuccess = () => res(req.result ?? null);
+    req.onerror   = e => rej(e.target.error);
+  }));
+}
+function _idbSetMeta(key, val) {
+  return _openIDB().then(db => new Promise((res, rej) => {
+    const tx = db.transaction('meta', 'readwrite');
+    tx.objectStore('meta').put(val, key);
+    tx.oncomplete = res;
+    tx.onerror    = e => rej(e.target.error);
+  }));
+}
+function _idbClearAll() {
+  return _openIDB().then(db => new Promise((res, rej) => {
+    const tx = db.transaction(['trips','autotrips','charges','meta'], 'readwrite');
+    ['trips','autotrips','charges','meta'].forEach(s => tx.objectStore(s).clear());
+    tx.oncomplete = res;
+    tx.onerror    = e => rej(e.target.error);
+  }));
+}
+
+// ── Barra de progresso de sync ─────────────────────────────────────────────
+function _syncProgressShow(msg) {
+  let el = document.getElementById('sync-progress');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'sync-progress';
+    el.style.cssText = 'padding:6px 12px;font-size:12px;color:#7FBADC;text-align:center;opacity:.85';
+  }
+  el.textContent = msg;
+  const active = document.querySelector('.panel.active [id$="-list"]');
+  if (active && !active.contains(el)) active.prepend(el);
+}
+function _syncProgressHide() {
+  document.getElementById('sync-progress')?.remove();
+}
+
+// ── Sync incremental das 3 coleções ───────────────────────────────────────
+async function syncAllCache({ silent = false } = {}) {
+  const totals = { trips: 0, auto: 0, charges: 0 };
+  try {
+    if (!silent) _syncProgressShow('⟳ Sincronizando…');
+
+    // Trips manuais
+    const lastTs   = (await _idbGetMeta('lastTripTs')) || '';
+    const newTrips = await apiFetch('/api/trips' + (lastTs ? '?since=' + encodeURIComponent(lastTs) : ''))
+      .then(r => r.json()).catch(() => []);
+    if (Array.isArray(newTrips) && newTrips.length) {
+      await _idbPutMany('trips', newTrips);
+      totals.trips = newTrips.length;
+      const maxTs = [...newTrips].map(t => t.timestamp || '').sort().pop();
+      if (maxTs) await _idbSetMeta('lastTripTs', maxTs);
+      if (!silent) _syncProgressShow('⟳ ' + totals.trips + ' trip' + (totals.trips !== 1 ? 's' : '') + ' baixado' + (totals.trips !== 1 ? 's' : '') + '…');
+    }
+    cachedTrips = (await _idbGetAll('trips'))
+      .sort((a, b) => (b.timestamp || '') > (a.timestamp || '') ? 1 : -1);
+
+    // Auto-trips
+    const lastMs  = (await _idbGetMeta('lastAutoMs')) || 0;
+    const newAuto = await apiFetch('/api/autotrips' + (lastMs > 0 ? '?since=' + lastMs : ''))
+      .then(r => r.json()).catch(() => []);
+    if (Array.isArray(newAuto) && newAuto.length) {
+      await _idbPutMany('autotrips', newAuto);
+      totals.auto = newAuto.length;
+      const maxMs = Math.max(...newAuto.map(t => t.startMs || 0));
+      if (maxMs > 0) await _idbSetMeta('lastAutoMs', maxMs);
+      newAuto.forEach(t => {
+        if (t.startLat && t.startLat !== 0) queueGeocode(t.tripId, t.startLat, t.startLng);
+      });
+      if (!silent) _syncProgressShow('⟳ +' + totals.auto + ' auto-trip' + (totals.auto !== 1 ? 's' : '') + '…');
+    }
+    cachedAutoTrips = (await _idbGetAll('autotrips'))
+      .sort((a, b) => (b.startMs || 0) - (a.startMs || 0));
+
+    // Recargas
+    const lastChg = (await _idbGetMeta('lastChargeMs')) || 0;
+    const newChg  = await apiFetch('/api/charges' + (lastChg > 0 ? '?since=' + lastChg : ''))
+      .then(r => r.json()).catch(() => []);
+    if (Array.isArray(newChg) && newChg.length) {
+      await _idbPutMany('charges', newChg);
+      totals.charges = newChg.length;
+      const maxChg = Math.max(...newChg.map(c => c.timestamp_ms || 0));
+      if (maxChg > 0) await _idbSetMeta('lastChargeMs', maxChg);
+    }
+    cachedCharges = (await _idbGetAll('charges'))
+      .sort((a, b) => (b.timestamp_ms || 0) - (a.timestamp_ms || 0));
+
+    // Feedback
+    const total = totals.trips + totals.auto + totals.charges;
+    if (!silent) {
+      if (total > 0) {
+        const parts = [];
+        if (totals.trips)   parts.push(totals.trips   + ' trip' + (totals.trips   !== 1 ? 's' : ''));
+        if (totals.auto)    parts.push(totals.auto    + ' auto-trip' + (totals.auto    !== 1 ? 's' : ''));
+        if (totals.charges) parts.push(totals.charges + ' recarga' + (totals.charges !== 1 ? 's' : ''));
+        _syncProgressShow('✓ ' + parts.join(', ') + ' baixados');
+        setTimeout(_syncProgressHide, 3000);
+      } else {
+        _syncProgressHide();
+      }
+    }
+  } catch (e) {
+    console.warn('syncAllCache:', e);
+    if (!silent) _syncProgressHide();
+  }
+  return totals;
+}
 
 function getFilterRange(tabId) {
   const f   = filterState[tabId];
@@ -1146,13 +1294,14 @@ function renderTrip(id, t) {
 
 // ── Recargas ──────────────────────────────────────────────────────────────────
 function loadCharges() {
-  if (cachedCharges !== null) { renderCharges(); return; }
   const list = document.getElementById('charges-list');
-  list.innerHTML = '<div class="empty">Carregando...</div>';
-  apiFetch('/api/charges')
-    .then(r => r.json())
-    .then(data => { cachedCharges = Array.isArray(data) ? data : []; renderCharges(); })
-    .catch(() => { list.innerHTML = filterChipsHTML('charges') + '<div class="empty">Erro ao carregar.</div>'; });
+  if (cachedCharges !== null) {
+    renderCharges();
+  } else {
+    list.innerHTML = '<div class="empty">Carregando...</div>';
+  }
+  syncAllCache({ silent: true }).then(() => renderCharges())
+    .catch(() => { if (!cachedCharges) list.innerHTML = filterChipsHTML('charges') + '<div class="empty">Erro ao carregar.</div>'; });
 }
 
 function renderCharges() {
@@ -1204,16 +1353,17 @@ function renderCharges() {
 
 // ── Histórico ─────────────────────────────────────────────────────────────────
 function loadHistory() {
-  // Sempre busca dados frescos ao abrir a aba (trips manuais e auto-trips podem ter chegado)
-  cachedTrips     = null;
-  cachedAutoTrips = null;
   const list = document.getElementById('hist-list');
-  list.innerHTML = '<div class="empty">Carregando...</div>';
-  Promise.all([
-    apiFetch('/api/trips').then(r => r.json()).then(d => { cachedTrips = Array.isArray(d) ? d : []; }).catch(() => { cachedTrips = []; }),
-    apiFetch('/api/autotrips').then(r => r.json()).then(d => { cachedAutoTrips = Array.isArray(d) ? d : []; }).catch(() => { cachedAutoTrips = []; }),
-  ]).then(() => { renderHistory(); syncRenameStatus(); }).catch(() => {
-    list.innerHTML = filterChipsHTML('hist') + '<div class="empty">Erro ao carregar.</div>';
+  if (cachedTrips !== null || cachedAutoTrips !== null) {
+    renderHistory();                      // cache IndexedDB → renderiza imediatamente
+  } else {
+    list.innerHTML = '<div class="empty">Carregando...</div>';
+  }
+  syncAllCache({ silent: false }).then(() => {
+    renderHistory();
+    syncRenameStatus();
+  }).catch(() => {
+    if (!cachedTrips) list.innerHTML = filterChipsHTML('hist') + '<div class="empty">Erro ao carregar.</div>';
   });
 }
 
@@ -1333,24 +1483,19 @@ function renderHistory() {
 let cachedAutoTrips = null;
 
 function loadAutoTrips() {
-  // Sempre recarrega ao abrir a aba — garante que dados novos apareçam após sync do carro
-  cachedAutoTrips = null;
-  // Limpa badge de notificação (se houver)
   document.querySelector('[data-panel="auto"] .tab-notif')?.remove();
   const list = document.getElementById('auto-list');
-  list.innerHTML = '<div class="empty">Carregando...</div>';
-  apiFetch('/api/autotrips')
-    .then(r => r.json())
-    .then(data => {
-      cachedAutoTrips = Array.isArray(data) ? data : [];
-      // Enfileira geocode para trips com GPS ainda não cacheados
-      cachedAutoTrips.forEach(t => {
-        if (t.startLat && t.startLat !== 0) queueGeocode(t.tripId, t.startLat, t.startLng);
-      });
-      renderAutoTrips();
-      syncRenameStatus();  // checa confirmações do carro
-    })
-    .catch(() => { list.innerHTML = '<div class="empty">Erro ao carregar.</div>'; });
+  if (cachedAutoTrips !== null) {
+    renderAutoTrips();                    // cache IndexedDB → renderiza imediatamente
+  } else {
+    list.innerHTML = '<div class="empty">Carregando...</div>';
+  }
+  syncAllCache({ silent: false }).then(() => {
+    renderAutoTrips();
+    syncRenameStatus();
+  }).catch(() => {
+    if (!cachedAutoTrips) list.innerHTML = '<div class="empty">Erro ao carregar.</div>';
+  });
 }
 
 function renderAutoTrips() {
@@ -1870,6 +2015,16 @@ function adminUpdate()  { adminAction('/api/admin/update',  'Atualizando'); }
 function adminClearHistory() {
   if (!confirm('Apagar todo o histórico do servidor?\n(trips manuais, auto-trips e recargas)\n\nEssa ação não pode ser desfeita.')) return;
   adminAction('/api/admin/clear-history', 'Apagando histórico');
+}
+
+async function adminRedownloadCache() {
+  if (!confirm('Apagar cache local e baixar todos os dados do servidor?\nIsso pode demorar alguns segundos.')) return;
+  adminSetStatus('⏳ Baixando...', true);
+  cachedTrips = null; cachedAutoTrips = null; cachedCharges = null;
+  await _idbClearAll();
+  const t = await syncAllCache({ silent: false });
+  renderHistory(); renderAutoTrips(); renderCharges();
+  adminSetStatus('✓ ' + t.trips + ' trips · ' + t.auto + ' auto-trips · ' + t.charges + ' recargas', true);
 }
 
 function adminLogout() {

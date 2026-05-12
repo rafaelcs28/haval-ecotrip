@@ -39,14 +39,18 @@ SANS="$HOSTNAME localhost 127.0.0.1"
 
 echo "🔐 Gerando certificado para: $SANS"
 
-# Gera cert no diretório do bridge
+# Remove certs antigos para evitar ambiguidade no rename abaixo
 cd "$BRIDGE_DIR"
+rm -f cert.pem key.pem
+
+# Gera cert no diretório do bridge
+# mkcert gera algo como: hostname+3.pem e hostname+3-key.pem
 mkcert $SANS
 
 # Renomeia para os nomes esperados pelo server.js
-# mkcert gera algo como: hostname+3.pem e hostname+3-key.pem
-CERT_FILE=$(ls *.pem 2>/dev/null | grep -v key | head -1)
-KEY_FILE=$(ls *-key.pem 2>/dev/null | head -1)
+# Usa -t (mais recente primeiro) para pegar exatamente os arquivos que mkcert acabou de criar
+CERT_FILE=$(ls -t *.pem 2>/dev/null | grep -v '\-key\.pem' | head -1)
+KEY_FILE=$(ls -t *-key.pem 2>/dev/null | head -1)
 
 if [ -z "$CERT_FILE" ] || [ -z "$KEY_FILE" ]; then
   echo "❌ Arquivos .pem não encontrados após geração"
