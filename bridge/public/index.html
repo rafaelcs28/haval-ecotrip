@@ -263,7 +263,7 @@
       </div>
 
       <!-- Viagens Trip A + Trip B -->
-      <div class="card">
+      <div class="card" id="d-trips-summary">
         <!-- Desde última partida -->
         <div class="card-title">Desde última partida</div>
         <div class="metrics-row">
@@ -598,6 +598,7 @@
           <div class="snap-item"><div class="snap-val blue"  id="snap-spd">--</div><div class="snap-lbl">km/h</div></div>
           <div class="snap-item"><div class="snap-val green" id="snap-ev">--</div><div class="snap-lbl">kW elétrico</div></div>
           <div class="snap-item"><div class="snap-val orange" id="snap-rpm">--</div><div class="snap-lbl">RPM ICE</div></div>
+          <div class="snap-item"><div class="snap-val teal"  id="snap-pwr">--</div><div class="snap-lbl">% bat.</div></div>
           <div class="snap-item"><div class="snap-val teal"  id="snap-time">--</div><div class="snap-lbl">tempo</div></div>
         </div>
       </div>
@@ -608,6 +609,8 @@
         <div class="chart-wrap"><canvas id="chart-ev"></canvas></div>
         <div class="chart-label">Motor ICE (RPM)</div>
         <div class="chart-wrap"><canvas id="chart-rpm"></canvas></div>
+        <div class="chart-label">% Bateria (regen ← 0 → consumo)</div>
+        <div class="chart-wrap"><canvas id="chart-pwr"></canvas></div>
       </div>
     </div>
   </div>

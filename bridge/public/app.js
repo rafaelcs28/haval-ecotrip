@@ -946,6 +946,10 @@ function renderDash() {
   const eng   = s.engine_state;
   const engOn = eng === '1' || eng === 1;
 
+  // Layout do dashboard: motor ligado → mapa sobe, alertas descem
+  const panelDash = document.getElementById('panel-dash');
+  if (panelDash) panelDash.classList.toggle('engine-on', engOn);
+
   // Faróis — ligados com o motor (farol alto via sensor futuro high_beam)
   carLayer('cl-farol',      engOn && s.high_beam !== 'on');
   carLayer('cl-farol-alto', s.high_beam === 'on');
@@ -1562,6 +1566,7 @@ let playbackMarker  = null;
 let chartSpd        = null;
 let chartEv         = null;
 let chartRpm        = null;
+let chartPwr        = null;
 let currentSamples  = [];
 
 // HTML original do body do detalhe — restaurado a cada fechamento para garantir
@@ -1695,10 +1700,12 @@ function initTripCharts(samples) {
   if (chartSpd)  chartSpd.destroy();
   if (chartEv)   chartEv.destroy();
   if (chartRpm)  chartRpm.destroy();
+  if (chartPwr)  chartPwr.destroy();
 
-  chartSpd = mkChart('chart-spd', samples.map(s => s.spd),  '#4DBBFF', 'km/h');
-  chartEv  = mkChart('chart-ev',  samples.map(s => s.evKw), '#39FF88', 'kW');
-  chartRpm = mkChart('chart-rpm', samples.map(s => s.rpm),  '#FF5F1F', 'RPM');
+  chartSpd = mkChart('chart-spd', samples.map(s => s.spd),        '#4DBBFF', 'km/h');
+  chartEv  = mkChart('chart-ev',  samples.map(s => s.evKw),       '#39FF88', 'kW');
+  chartRpm = mkChart('chart-rpm', samples.map(s => s.rpm),        '#FF5F1F', 'RPM');
+  chartPwr = mkChart('chart-pwr', samples.map(s => s.pwr ?? 0),   '#a78bfa', '%');
 }
 
 function onPlaybackMove(idx) {
@@ -1715,6 +1722,12 @@ function onPlaybackMove(idx) {
   }
   document.getElementById('snap-ev').textContent   = f1(s.evKw) + ' kW';
   document.getElementById('snap-rpm').textContent  = s.rpm + ' rpm';
+  const pwrVal = s.pwr ?? 0;
+  const pwrEl  = document.getElementById('snap-pwr');
+  if (pwrEl) {
+    pwrEl.textContent = (pwrVal >= 0 ? '+' : '') + pwrVal + '%';
+    pwrEl.className   = 'snap-val ' + (pwrVal < -5 ? 'green' : pwrVal > 5 ? 'orange' : 'muted');
+  }
   const mm = Math.floor(s.t / 60), ss = s.t % 60;
   document.getElementById('snap-time').textContent = `${String(mm).padStart(2,'0')}'${String(ss).padStart(2,'0')}"`;
 
@@ -1724,7 +1737,7 @@ function onPlaybackMove(idx) {
   }
 
   // Linha vertical nos gráficos via updateChart
-  [chartSpd, chartEv, chartRpm].forEach(ch => {
+  [chartSpd, chartEv, chartRpm, chartPwr].forEach(ch => {
     if (!ch) return;
     // Remove annotation anterior e redesenha cursor via dataset secundário
     if (!ch.data.datasets[1]) {

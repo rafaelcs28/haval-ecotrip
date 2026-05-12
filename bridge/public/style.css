@@ -174,6 +174,19 @@ html, body {
 .panel { display: none; }
 .panel.active { display: block; }
 
+/* ── Dashboard: reordenação por estado do motor ──────────────────────────────── */
+#panel-dash.active { display: flex; flex-direction: column; }
+
+/* Ordem padrão (motor desligado): alertas → mapa → trips */
+#d-alerts-card   { order: 4; }
+#d-map-card      { order: 5; }
+#d-trips-summary { order: 6; }
+
+/* Motor ligado: mapa sobe, trips no meio, alertas vão pro fim */
+#panel-dash.engine-on #d-map-card      { order: 4; }
+#panel-dash.engine-on #d-trips-summary { order: 5; }
+#panel-dash.engine-on #d-alerts-card   { order: 6; }
+
 /* ── Cards ───────────────────────────────────────────────────────────────────── */
 .card {
   background: var(--card);
@@ -568,6 +581,7 @@ html, body {
 .snap-val.orange { color: var(--orange); }
 .snap-val.red    { color: var(--red); }
 .snap-val.teal   { color: var(--teal); }
+.snap-val.muted  { color: var(--muted); }
 .chart-section { padding: 10px 12px 4px; }
 .chart-label   { font-size: 10px; font-weight: 600; color: var(--muted); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 4px; }
 .chart-wrap    { position: relative; height: 90px; margin-bottom: 10px; }

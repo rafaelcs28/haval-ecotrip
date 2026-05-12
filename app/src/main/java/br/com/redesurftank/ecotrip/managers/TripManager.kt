@@ -305,6 +305,7 @@ class TripManager private constructor() {
     private var latestEngineRpm:       Int    = 0
     private var latestBatteryCurrentA: Float  = 0f
     private var latestBatteryVoltageV: Float  = 0f
+    private var latestBattPowerPct:    Int    = 0     // % potência bateria (−100=regen, +100=consumo)
     private var latestOutsideTempC:    Float? = null  // null = sem leitura ainda
     private var autoTripMaxSpeed:      Float  = 0f    // máxima durante viagem em andamento
 
@@ -1071,8 +1072,7 @@ class TripManager private constructor() {
                     captureStartIfNeeded()
                 }
                 CarConstants.CAR_EV_INFO_SOC_OF_BATTERY.value,
-                CarConstants.CAR_EV_INFO_BATTERY_CHARGE_PERCENTAGE.value,
-                CarConstants.CAR_EV_INFO_CUR_BATTERY_POWER_PERCENTAGE.value -> {
+                CarConstants.CAR_EV_INFO_BATTERY_CHARGE_PERCENTAGE.value -> {
                     // Idem: SOC só faz sentido em (0, 100]
                     if (value <= 0f || value > 100f) {
                         Log.w(TAG, "SOC ignorado (fora de range): $value")
@@ -1081,6 +1081,12 @@ class TripManager private constructor() {
                     latestSocPct = value
                     prefs.edit().putFloat(SharedPreferencesKeys.LATEST_SOC_PCT, value).apply()
                     captureStartIfNeeded()
+                }
+                CarConstants.CAR_EV_INFO_CUR_BATTERY_POWER_PERCENTAGE.value -> {
+                    // −100=regen máximo, +100=consumo máximo — alimenta telemetria em tempo real
+                    val pct = value.toInt().coerceIn(-100, 100)
+                    latestBattPowerPct = pct
+                    telemetryRecorder?.latestBattPowerPct = pct
                 }
                 CarConstants.CAR_EV_INFO_CYCLE_ENERGY_CONSUME_INFO.value -> onEnergy(value)
                 CarConstants.CAR_EV_INFO_ENERGY_RECOVERY_INFO.value      -> onRegen(value)
