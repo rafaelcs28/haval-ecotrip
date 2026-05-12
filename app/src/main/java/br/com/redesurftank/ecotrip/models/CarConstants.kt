@@ -4,6 +4,7 @@ enum class CarConstants(val value: String) {
     // Instant consumption
     CAR_BASIC_INSTANT_FUEL_CONSUMPTION("car.basic.instant_fuel_consumption"),
     CAR_EV_INFO_INSTANT_ENERGY_CONSUMPTION("car.ev_info.Instant_energy_consumption"),
+    CAR_EV_INFO_INSTANT_ENERGY_CONSUMPTION_LC("car.ev_info.instant_energy_consumption"), // lowercase — Shizuku pode entregar assim
     CAR_EV_INFO_ENERGY_OUTPUT_PERCENTAGE("car.ev_info.energy_output_percentage"),
 
     // Cumulative per ignition cycle (reset when car turns off/on)

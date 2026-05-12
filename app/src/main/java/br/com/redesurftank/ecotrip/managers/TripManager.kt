@@ -1109,7 +1109,8 @@ class TripManager private constructor() {
                     // Rastreia o pico de potência (positivo = consumo) durante a viagem
                     if (autoTripStartMs > 0L && pct > autoTripMaxPowerPct) autoTripMaxPowerPct = pct
                 }
-                CarConstants.CAR_EV_INFO_INSTANT_ENERGY_CONSUMPTION.value -> {
+                CarConstants.CAR_EV_INFO_INSTANT_ENERGY_CONSUMPTION.value,
+                CarConstants.CAR_EV_INFO_INSTANT_ENERGY_CONSUMPTION_LC.value -> {
                     // Fonte primária de kW. Range físico: −200..+200 kW. Fora = indisponível.
                     if (value < -200f || value > 200f) return
                     telemetryRecorder?.latestMotorPowerKw = value
