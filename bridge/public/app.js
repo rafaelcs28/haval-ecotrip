@@ -1032,6 +1032,18 @@ function renderDash() {
   renderTyre('rl', s.tyre_pressure_rl, s.tyre_temp_rl);
   renderTyre('rr', s.tyre_pressure_rr, s.tyre_temp_rr);
 
+  // Velocímetro — placa de trânsito, só visível com motor ligado
+  const spdEl  = document.getElementById('d-speedometer');
+  const spdVal = document.getElementById('d-speed-val');
+  if (spdEl) {
+    spdEl.style.display = engOn ? '' : 'none';
+    if (engOn && spdVal) {
+      const spd = Math.round(s.speed_kmh || 0);
+      spdVal.textContent  = spd;
+      spdVal.style.fontSize = spd >= 100 ? '22px' : spd >= 10 ? '28px' : '32px';
+    }
+  }
+
   // Desde última partida (rolling)
   const r = s.rolling || {};
   setText('d-roll-dist', r.distance_km   > 0 ? f1(r.distance_km) + ' km' : '--');
