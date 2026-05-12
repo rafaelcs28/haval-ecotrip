@@ -179,8 +179,8 @@ html, body {
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 12px;
-  padding: 14px 16px;
-  margin-bottom: 8px;
+  padding: 10px 16px;
+  margin-bottom: 6px;
 }
 
 .card-title {
@@ -189,7 +189,7 @@ html, body {
   color: var(--muted);
   letter-spacing: 1px;
   text-transform: uppercase;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 
 .divider {
@@ -250,8 +250,8 @@ html, body {
 }
 
 /* ── Barra de SOC/combustível ────────────────────────────────────────────────── */
-.bar-row { display: flex; flex-direction: column; gap: 8px; }
-.bar-item { display: flex; flex-direction: column; gap: 4px; }
+.bar-row { display: flex; flex-direction: column; gap: 6px; }
+.bar-item { display: flex; flex-direction: column; gap: 3px; }
 .bar-header { display: flex; justify-content: space-between; }
 .bar-label  { font-size: 11px; color: var(--muted); }
 .bar-val    { font-size: 12px; font-weight: 600; color: var(--text); }

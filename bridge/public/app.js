@@ -1483,8 +1483,6 @@ window.remoteAction = function(action, title, msg, btnColor) {
 // ── Engine — toque para ligar/desligar remotamente ───────────────────────────
 window.engineClick = function() {
   const eng = state.engine_state;
-  const dbg = document.getElementById('d-remote-debug');
-  if (dbg) dbg.textContent = `engine_state=${eng} @ ${new Date().toLocaleTimeString('pt-BR')}`;
   if (eng == null || (eng !== '0' && eng !== 0 && eng !== '1' && eng !== 1)) {
     showToast('Estado do motor ainda não recebido');
     return;
@@ -1505,8 +1503,6 @@ window.engineClick = function() {
 // ── Lock — toque para trancar/destrancar remotamente ─────────────────────────
 window.lockClick = function() {
   const lck = state.lock_state;
-  const dbg = document.getElementById('d-remote-debug');
-  if (dbg) dbg.textContent = `lock_state=${lck} @ ${new Date().toLocaleTimeString('pt-BR')}`;
   if (lck == null || (lck !== 'off' && lck !== 'on')) {
     showToast('Estado da trava ainda não recebido');
     return;
