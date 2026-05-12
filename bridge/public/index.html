@@ -595,6 +595,28 @@
     </div>
   </div>
 
+  <!-- Modal de renomear viagem (iOS-style, centrado) -->
+  <div id="d-rename-modal" style="display:none;position:fixed;inset:0;z-index:9100;background:rgba(0,0,0,0.72);align-items:center;justify-content:center;padding:20px" onclick="if(event.target===this)doRenameCancel()">
+    <div style="background:#1e293b;border-radius:16px;padding:22px 20px 18px;width:100%;max-width:360px">
+      <div id="d-rename-modal-title" style="font-size:15px;font-weight:700;color:#f1f5f9;margin-bottom:2px;text-align:center">Nomear viagem</div>
+      <div id="d-rename-modal-date"  style="font-size:11px;color:#5B7394;text-align:center;margin-bottom:14px"></div>
+      <input id="d-rename-modal-input" type="text" maxlength="60" autocomplete="off" autocorrect="off" spellcheck="false" enterkeyhint="done"
+        placeholder="Nome da viagem…"
+        style="width:100%;background:#0C1019;border:1.5px solid #4DBBFF;border-radius:8px;color:#EEF4FF;font-size:14px;font-weight:600;padding:9px 12px;outline:none;-webkit-appearance:none;box-sizing:border-box;margin-bottom:16px"
+        onkeydown="if(event.key==='Enter'){event.preventDefault();doRenameConfirm();}if(event.key==='Escape')doRenameCancel()">
+      <div style="display:flex;gap:10px">
+        <button onclick="doRenameCancel()"
+          style="flex:1;padding:11px;background:#334155;border:none;border-radius:10px;color:#e2e8f0;font-size:14px;cursor:pointer">
+          Cancelar
+        </button>
+        <button onclick="doRenameConfirm()"
+          style="flex:1;padding:11px;background:#4DBBFF;border:none;border-radius:10px;color:#06080C;font-size:14px;font-weight:700;cursor:pointer">
+          Salvar
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- Toast de feedback -->
   <div id="d-toast"
     style="position:fixed;bottom:84px;left:50%;transform:translateX(-50%);background:#1e293b;color:#f1f5f9;border-radius:8px;padding:10px 18px;font-size:13px;z-index:9001;opacity:0;transition:opacity .3s;pointer-events:none;white-space:nowrap;max-width:90vw;text-align:center;border:1px solid #334155">

@@ -437,36 +437,39 @@ html, body {
   opacity: .5;
 }
 
-/* ── Renomear trip (inline edit) ─────────────────────────────────────────────── */
+/* ── Renomear trip ─────────────────────────────────────────────────────────── */
 .trip-name-row {
   display: flex;
   align-items: center;
   gap: 4px;
+  min-height: 18px;   /* altura mesmo quando não há nome */
 }
 .rename-btn {
   background: none;
   border: none;
   padding: 0 2px;
-  font-size: 13px;
+  font-size: 12px;
   line-height: 1;
   cursor: pointer;
-  opacity: .45;
+  opacity: .4;
   -webkit-tap-highlight-color: transparent;
   flex-shrink: 0;
 }
 .rename-btn:active { opacity: 1; }
-.rename-input {
-  flex: 1;
-  min-width: 0;
-  background: var(--void);
-  border: 1px solid var(--neon);
-  border-radius: 6px;
-  color: var(--text);
-  font-size: 13px;
-  font-weight: 600;
-  padding: 2px 7px;
-  outline: none;
-  -webkit-appearance: none;
+
+/* ── Status de sync do rename ────────────────────────────────────────────────── */
+.rename-status-pending {
+  font-size: 11px;
+  flex-shrink: 0;
+  line-height: 1;
+  opacity: .8;
+}
+.rename-status-ok {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--neon);
+  flex-shrink: 0;
+  line-height: 1;
 }
 
 /* ── Trip detail overlay (mapa + gráficos) ───────────────────────────────────── */

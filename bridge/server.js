@@ -549,7 +549,7 @@ app.post('/api/rename', (req, res) => {
   pendingRenames.push({ id, tripId: String(tripId), type: type || 'auto', name: trimmed, createdAt: Date.now() });
   savePendingRenames();
   console.log(`✓ Rename enfileirado: [${type}] ${tripId} → "${trimmed}"`);
-  res.json({ ok: true });
+  res.json({ ok: true, id });  // id necessário para PWA rastrear status de confirmação
 });
 
 // GET /api/pending-renames  — Android consulta ao conectar

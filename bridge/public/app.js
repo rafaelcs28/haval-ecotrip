@@ -15,6 +15,34 @@ try { geoCache = JSON.parse(sessionStorage.getItem('geoCache') || '{}'); } catch
 let _geoQueue  = [];   // { tripId, lat, lng }
 let _geoTimer  = null; // setTimeout handle da fila
 
+// ── Status de rename (localStorage) ──────────────────────────────────────────
+// renameTracking[tripId] = { pendingId: string, name: string, confirmed: bool }
+let renameTracking = {};
+try { renameTracking = JSON.parse(localStorage.getItem('renameTracking') || '{}'); } catch (_) {}
+function _saveRenameTracking() {
+  try { localStorage.setItem('renameTracking', JSON.stringify(renameTracking)); } catch (_) {}
+}
+function getRenameStatus(tripId) {
+  const t = renameTracking[String(tripId)];
+  if (!t) return 'none';
+  return t.confirmed ? 'confirmed' : 'pending';
+}
+// Consulta /api/pending-renames e marca como confirmed os que o carro já aplicou
+async function syncRenameStatus() {
+  try {
+    const data = await apiFetch('/api/pending-renames').then(r => r.json());
+    const serverPendingIds = new Set(data.map(r => r.id));
+    let changed = false;
+    for (const [tripId, track] of Object.entries(renameTracking)) {
+      if (!track.confirmed && track.pendingId && !serverPendingIds.has(track.pendingId)) {
+        renameTracking[tripId] = { ...track, confirmed: true };
+        changed = true;
+      }
+    }
+    if (changed) { _saveRenameTracking(); renderAutoTrips(); renderHistory(); }
+  } catch (_) {}
+}
+
 function queueGeocode(tripId, lat, lng) {
   if (!lat || !lng || lat === 0 || lng === 0) return;
   if (geoCache[tripId] !== undefined) return;             // já tentado
@@ -912,7 +940,7 @@ function loadHistory() {
   Promise.all([
     apiFetch('/api/trips').then(r => r.json()).then(d => { cachedTrips = Array.isArray(d) ? d : []; }).catch(() => { cachedTrips = []; }),
     apiFetch('/api/autotrips').then(r => r.json()).then(d => { cachedAutoTrips = Array.isArray(d) ? d : []; }).catch(() => { cachedAutoTrips = []; }),
-  ]).then(() => renderHistory()).catch(() => {
+  ]).then(() => { renderHistory(); syncRenameStatus(); }).catch(() => {
     list.innerHTML = filterChipsHTML('hist') + '<div class="empty">Erro ao carregar.</div>';
   });
 }
@@ -995,21 +1023,24 @@ function renderHistory() {
 
   html += trips.map(t => {
     const tripId   = t.timestamp || t.tripId || '';
-    const nameId   = `hn-${String(tripId).replace(/\W/g,'_')}`;
     const tripType = t.label === 'Auto' ? 'auto' : 'manual';
     const displayName = t.name || '';
     const fallbackName = t.label || 'Trip';
     const cost = t.total_cost_brl > 0 ? `<span class="trip-cost">R$ ${f2(t.total_cost_brl)}</span>` : '';
     const tsDisplay = typeof t.timestamp === 'number' ? fmtDate(new Date(t.timestamp).toISOString()) : fmtDate(t.timestamp);
+    const rnStatus    = getRenameStatus(String(tripId));
+    const statusBadge = rnStatus === 'pending'   ? '<span class="rename-status-pending" title="Aguardando confirmação do carro">⏳</span>'
+                      : rnStatus === 'confirmed'  ? '<span class="rename-status-ok" title="Confirmado pelo carro">✓</span>'
+                      : '';
     return `<div class="trip-item">
   <div class="trip-header">
     <div style="flex:1;min-width:0">
       <span class="trip-badge">${fallbackName}</span>
       <div class="trip-name-row" style="margin-top:3px">
-        <span class="trip-name" id="${nameId}">${displayName || fallbackName}</span>
-        <button class="rename-btn" onclick="startRenameTrip('${tripId}','${tripType}','${nameId}')" title="Renomear">✏️</button>
+        ${displayName ? `<span class="trip-name">${displayName}</span>${statusBadge}` : ''}
+        <button class="rename-btn" onclick="startRenameTrip('${tripId}','${tripType}')" title="${displayName ? 'Renomear' : 'Nomear'}">✏️</button>
       </div>
-      <div class="trip-date">${displayName ? tsDisplay + ' · ' + fallbackName : tsDisplay}</div>
+      <div class="trip-date">${tsDisplay}</div>
     </div>
     ${cost}
   </div>
@@ -1045,6 +1076,7 @@ function loadAutoTrips() {
         if (t.startLat && t.startLat !== 0) queueGeocode(t.tripId, t.startLat, t.startLng);
       });
       renderAutoTrips();
+      syncRenameStatus();  // checa confirmações do carro
     })
     .catch(() => { list.innerHTML = '<div class="empty">Erro ao carregar.</div>'; });
 }
@@ -1123,8 +1155,11 @@ function renderAutoTrips() {
     const mapsUrl    = hasGps ? `https://www.google.com/maps/dir/${t.startLat},${t.startLng}/${t.endLat},${t.endLng}` : null;
     const geo        = geoCache[t.tripId];
     const geoLine    = geo ? `<div class="trip-geo">📍 ${geo}</div>` : '';
-    const nameId     = `tn-${t.tripId}`;
     const displayName = t.name || '';
+    const rnStatus    = getRenameStatus(t.tripId);
+    const statusBadge = rnStatus === 'pending'   ? '<span class="rename-status-pending" title="Aguardando confirmação do carro">⏳</span>'
+                      : rnStatus === 'confirmed'  ? '<span class="rename-status-ok" title="Confirmado pelo carro">✓</span>'
+                      : '';
     const extraRow   = (maxSpd || avgSpd || tempStr) ? `
   <div class="trip-metrics" style="margin-top:4px">
     ${avgSpd  ? `<div class="trip-metric"><div class="trip-metric-val muted">${avgSpd}</div><div class="trip-metric-lbl">vel. méd.</div></div>` : ''}
@@ -1139,10 +1174,10 @@ function renderAutoTrips() {
   <div class="trip-header">
     <div style="flex:1;min-width:0">
       <div class="trip-name-row">
-        <span class="trip-name" id="${nameId}">${displayName || startDate}</span>
-        <button class="rename-btn" onclick="startRenameTrip('${t.tripId}','auto','${nameId}')" title="Renomear">✏️</button>
+        ${displayName ? `<span class="trip-name">${displayName}</span>${statusBadge}` : ''}
+        <button class="rename-btn" onclick="startRenameTrip('${t.tripId}','auto')" title="${displayName ? 'Renomear' : 'Nomear'}">✏️</button>
       </div>
-      <div class="trip-date">${displayName ? startDate + ' · ' + dur : dur}</div>
+      <div class="trip-date">${startDate} · ${dur}</div>
       ${geoLine}
     </div>
     <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">
@@ -1652,68 +1687,73 @@ async function sendRemoteAction(action, successMsg) {
   }
 }
 
-// ── Renomear trip (inline edit) ───────────────────────────────────────────────
-window.startRenameTrip = function(tripId, type, nameElemId) {
-  const nameEl = document.getElementById(nameElemId);
-  if (!nameEl) return;
-  const current = nameEl.textContent.trim();
+// ── Renomear trip — modal estilo Android ─────────────────────────────────────
+let _renameState = null;  // { tripId, type, currentName }
 
-  const input = document.createElement('input');
-  input.type        = 'text';
-  input.value       = current;
-  input.placeholder = 'Nome da viagem…';
-  input.className   = 'rename-input';
-  input.setAttribute('enterkeyhint', 'done');
-  input.setAttribute('autocomplete', 'off');
-  nameEl.replaceWith(input);
-  input.focus();
-  try { input.setSelectionRange(0, input.value.length); } catch (_) {}
-
-  let saved = false;
-  const save = async () => {
-    if (saved) return; saved = true;
-    const newName = input.value.trim();
-    // Restaura o span com o nome final
-    const span = document.createElement('span');
-    span.id        = nameElemId;
-    span.className = 'trip-name';
-    span.textContent = newName || current;
-    input.replaceWith(span);
-
-    if (!newName || newName === current) return;
-    try {
-      await apiFetch('/api/rename', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tripId, type, name: newName }),
-      });
-      // Atualiza cache local para que a busca e o resumo reflitam o novo nome
-      if (type === 'auto') {
-        const t = (cachedAutoTrips || []).find(t => t.tripId === String(tripId));
-        if (t) t.name = newName;
-      } else if (type === 'manual') {
-        const t = (cachedTrips || []).find(t => t.timestamp === String(tripId));
-        if (t) t.name = newName;
-      }
-      showToast('✓ Nome salvo — sincronizará com o carro na próxima conexão');
-    } catch (_) {
-      showToast('✗ Erro ao salvar nome');
+window.startRenameTrip = function(tripId, type) {
+  // Lê nome atual do cache (evita problemas de escape em onclick)
+  let currentName = '';
+  let dateStr = '';
+  if (type === 'auto') {
+    const t = (cachedAutoTrips || []).find(t => t.tripId === String(tripId));
+    if (t) { currentName = t.name || ''; dateStr = fmtDate(t.startMs); }
+  } else {
+    const t = (cachedTrips || []).find(t => String(t.timestamp) === String(tripId));
+    if (t) {
+      currentName = t.name || '';
+      dateStr = typeof t.timestamp === 'number'
+        ? fmtDate(new Date(t.timestamp).toISOString()) : fmtDate(t.timestamp);
     }
-  };
+  }
+  _renameState = { tripId: String(tripId), type, currentName };
+  const modal = document.getElementById('d-rename-modal');
+  const titleEl = document.getElementById('d-rename-modal-title');
+  const dateEl  = document.getElementById('d-rename-modal-date');
+  const inputEl = document.getElementById('d-rename-modal-input');
+  if (!modal) return;
+  titleEl.textContent = currentName ? 'Renomear viagem' : 'Nomear viagem';
+  dateEl.textContent  = dateStr;
+  inputEl.value       = currentName;
+  modal.style.display = 'flex';
+  setTimeout(() => { inputEl.focus(); try { inputEl.select(); } catch (_) {} }, 80);
+};
 
-  const cancel = () => {
-    if (saved) return; saved = true;
-    const span = document.createElement('span');
-    span.id = nameElemId; span.className = 'trip-name';
-    span.textContent = current;
-    input.replaceWith(span);
-  };
+window.doRenameCancel = function() {
+  const modal = document.getElementById('d-rename-modal');
+  if (modal) modal.style.display = 'none';
+  _renameState = null;
+};
 
-  input.addEventListener('blur', save);
-  input.addEventListener('keydown', e => {
-    if (e.key === 'Enter')  { e.preventDefault(); input.blur(); }
-    if (e.key === 'Escape') { input.value = current; input.removeEventListener('blur', save); cancel(); }
-  });
+window.doRenameConfirm = async function() {
+  if (!_renameState) return;
+  const { tripId, type, currentName } = _renameState;
+  const newName = (document.getElementById('d-rename-modal-input')?.value || '').trim();
+  doRenameCancel();   // fecha o modal
+  if (!newName || newName === currentName) return;
+  try {
+    const r    = await apiFetch('/api/rename', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tripId, type, name: newName }),
+    });
+    const data = await r.json();
+    // Atualiza cache local
+    if (type === 'auto') {
+      const t = (cachedAutoTrips || []).find(t => t.tripId === tripId);
+      if (t) t.name = newName;
+    } else {
+      const t = (cachedTrips || []).find(t => String(t.timestamp) === tripId);
+      if (t) t.name = newName;
+    }
+    // Marca como pendente de confirmação do carro
+    renameTracking[tripId] = { pendingId: data.id || '', name: newName, confirmed: false };
+    _saveRenameTracking();
+    // Re-renderiza para mostrar ⏳
+    if (type === 'auto') renderAutoTrips(); else renderHistory();
+    showToast('⏳ Nome salvo — aguardando o carro confirmar');
+  } catch (_) {
+    showToast('✗ Erro ao salvar nome');
+  }
 };
 
 // ── Generic remote action (actions tab) ──────────────────────────────────────
