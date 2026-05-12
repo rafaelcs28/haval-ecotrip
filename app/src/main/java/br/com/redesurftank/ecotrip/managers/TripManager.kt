@@ -1384,7 +1384,15 @@ class TripManager private constructor() {
         if (!sessionActive) return
         for (trip in listOf(tripA, tripB)) {
             if (value < prev && value < trip.hwEnergy * 0.9f) {
-                if (trip === tripA) lifeEnergyKwh += trip.hwEnergy - trip.sessStartEnergy   // ponto 2
+                if (trip === tripA) {
+                    lifeEnergyKwh += trip.hwEnergy - trip.sessStartEnergy   // ponto 2
+                    // Rolling: comita delta pendente desde o último tick do odômetro até o HW,
+                    // depois reinicia o baseline — mesmo comportamento do trip A.
+                    if (prevRollingEnergy >= 0f) {
+                        rollingAccEnergy += max(0f, trip.hwEnergy - prevRollingEnergy)
+                        prevRollingEnergy = value
+                    }
+                }
                 trip.energyKwh += trip.hwEnergy - trip.sessStartEnergy
                 trip.sessStartEnergy = value
                 trip.hwEnergy = value
@@ -1400,7 +1408,15 @@ class TripManager private constructor() {
         if (!sessionActive) return
         for (trip in listOf(tripA, tripB)) {
             if (value < prev && value < trip.hwRegen * 0.9f) {
-                if (trip === tripA) lifeRegenKwh += trip.hwRegen - trip.sessStartRegen   // ponto 3
+                if (trip === tripA) {
+                    lifeRegenKwh += trip.hwRegen - trip.sessStartRegen   // ponto 3
+                    // Rolling: mesmo tratamento do reset de energia — comita delta pendente
+                    // e reinicia baseline para evitar que prevRollingRegen fique travado.
+                    if (prevRollingRegen >= 0f) {
+                        rollingAccRegen += max(0f, trip.hwRegen - prevRollingRegen)
+                        prevRollingRegen = value
+                    }
+                }
                 trip.regenKwh += trip.hwRegen - trip.sessStartRegen
                 trip.sessStartRegen = value
                 trip.hwRegen = value
