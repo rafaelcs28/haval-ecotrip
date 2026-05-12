@@ -187,25 +187,32 @@ window.saveNotifPref = async function(key, value) {
 };
 
 function _updatePushPermStatus() {
-  const statusEl = document.getElementById('notif-perm-status');
-  const btnEl    = document.getElementById('notif-perm-btn');
-  if (!statusEl) return;
+  const activateWrap = document.getElementById('notif-activate-wrap');
+  const togglesWrap  = document.getElementById('notif-toggles-wrap');
+  const statusEl     = document.getElementById('notif-perm-status');
+  const btnEl        = document.getElementById('notif-perm-btn');
+  if (!activateWrap) return;
+
   if (!('Notification' in window) || !('PushManager' in window)) {
-    statusEl.textContent = '⚠️ Notificações push não suportadas neste browser.';
+    if (statusEl) statusEl.textContent = '⚠️ Não suportado neste browser.';
     return;
   }
+
   const perm = Notification.permission;
   if (perm === 'granted') {
-    statusEl.textContent = '✓ Notificações ativadas neste dispositivo.';
-    statusEl.style.color = 'var(--neon)';
-    if (btnEl) btnEl.style.display = 'none';
-  } else if (perm === 'denied') {
-    statusEl.textContent = '✗ Bloqueado nas configurações do browser/iOS.';
-    statusEl.style.color = 'var(--red)';
-    if (btnEl) btnEl.style.display = 'none';
+    activateWrap.style.display = 'none';
+    if (togglesWrap) togglesWrap.style.display = '';
+    _renderNotifToggles();
   } else {
-    statusEl.textContent = 'Notificações não ativadas ainda.';
-    if (btnEl) btnEl.style.display = '';
+    activateWrap.style.display = '';
+    if (togglesWrap) togglesWrap.style.display = 'none';
+    if (perm === 'denied') {
+      if (btnEl) btnEl.style.display = 'none';
+      if (statusEl) { statusEl.textContent = '✗ Bloqueado nas configurações do sistema.'; statusEl.style.color = 'var(--red)'; }
+    } else {
+      if (btnEl) btnEl.style.display = '';
+      if (statusEl) statusEl.textContent = '';
+    }
   }
 }
 
