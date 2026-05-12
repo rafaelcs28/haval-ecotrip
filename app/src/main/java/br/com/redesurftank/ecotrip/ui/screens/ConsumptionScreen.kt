@@ -104,6 +104,18 @@ fun ConsumptionScreen() {
             nowMs = System.currentTimeMillis()
             ticks++
             if (ticks % 5 == 0) tripManager.tickTime()
+            // Instant_energy_consumption não dispara via subscription neste veículo —
+            // busca ativa a cada 5 s (alinhada ao ciclo MQTT) garante atualização contínua
+            if (ticks % 5 == 0) {
+                val kwRaw = withContext(Dispatchers.IO) {
+                    carManager.fetchCurrent(CarConstants.CAR_EV_INFO_INSTANT_ENERGY_CONSUMPTION.value)?.trim()
+                }
+                val kw = kwRaw?.toFloatOrNull()
+                if (kw != null && kw in -200f..200f) {
+                    mqttManager.latestMotorPowerKw = kw
+                    tripManager.onDataChanged(CarConstants.CAR_EV_INFO_INSTANT_ENERGY_CONSUMPTION.value, kwRaw!!)
+                }
+            }
             // SOC e combustível chegam raramente via listener passivo no GWM —
             // busca ativa a cada 60 s garante que o auto-trip capture o valor correto ao finalizar
             if (ticks % 60 == 30) {
@@ -284,6 +296,15 @@ fun ConsumptionScreen() {
 
                 carManager.fetchCurrent(CarConstants.CAR_EV_INFO_ENERGY_OUTPUT_PERCENTAGE.value)
                     ?.trim()?.toIntOrNull()?.let { mqttManager.latestBattPowerPct = it }
+
+                // Instant_energy_consumption não dispara via subscription — busca ativa na conexão
+                carManager.fetchCurrent(CarConstants.CAR_EV_INFO_INSTANT_ENERGY_CONSUMPTION.value)
+                    ?.trim()?.toFloatOrNull()?.let { kw ->
+                        if (kw in -200f..200f) {
+                            mqttManager.latestMotorPowerKw = kw
+                            tripManager.onDataChanged(CarConstants.CAR_EV_INFO_INSTANT_ENERGY_CONSUMPTION.value, kw.toString())
+                        }
+                    }
 
                 // Busca imediata de driving_ready_state — inicia trip automático se carro já estiver ligado
                 // (feito após busca de SOC/fuel para que latestSocPct/latestFuelPct estejam disponíveis)
