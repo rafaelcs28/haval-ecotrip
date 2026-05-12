@@ -655,6 +655,11 @@ class TripManager private constructor() {
     fun addListener(l: TripListener)    = synchronized(lock) { listeners.add(l) }
     fun removeListener(l: TripListener) = synchronized(lock) { listeners.remove(l) }
 
+    /** Para MqttManager.markChanged(): snapshot instantâneo sem acionar listeners. */
+    fun currentSnapshotA():  TripSnapshot    = synchronized(lock) { snapshot(tripA) }
+    fun currentSnapshotB():  TripSnapshot    = synchronized(lock) { snapshot(tripB) }
+    fun currentRolling():    RollingSnapshot = synchronized(lock) { rollingSnapshot() }
+
     fun getTankCapacity(): Float = synchronized(lock) { tankCapacityL }
 
     fun setTankCapacity(liters: Float) {

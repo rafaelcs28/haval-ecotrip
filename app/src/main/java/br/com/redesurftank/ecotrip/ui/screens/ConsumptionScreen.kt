@@ -221,6 +221,8 @@ fun ConsumptionScreen() {
                     }
                     else -> tripManager.onDataChanged(key, value)
                 }
+                // Publica imediatamente quando qualquer sinal muda (debounce 1s interno)
+                mqttManager.markChanged()
             }
         }
 

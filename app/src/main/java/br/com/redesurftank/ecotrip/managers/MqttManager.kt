@@ -119,6 +119,33 @@ class MqttManager private constructor() {
     // Usado para saber se o barramento de dados do carro está ativo
     @Volatile var lastCarDataMs: Long = 0L
 
+    // ── Publish por mudança de sinal (debounced) ──────────────────────────────
+    private val changeHandler   = android.os.Handler(android.os.Looper.getMainLooper())
+    @Volatile private var changePending = false
+    private val CHANGE_DEBOUNCE_MS = 1_000L   // máx. 1 publish/s via mudança de sinal
+
+    /**
+     * Chamado pelo carListener a cada sinal novo do carro.
+     * Se nenhum publish foi agendado, agenda um em 1s — assim rajadas de sinais
+     * distintos resultam em apenas um publish consolidado.
+     * Respeita o lastPublishMs para não duplicar com o publish timer-based.
+     */
+    fun markChanged() {
+        if (changePending) return             // já há um agendado
+        val c = client ?: return
+        if (!c.isConnected) return
+        changePending = true
+        changeHandler.postDelayed({
+            changePending = false
+            val now = System.currentTimeMillis()
+            if (now - lastPublishMs < 400L) return@postDelayed   // publicou há pouco pelo timer
+            val tm = TripManager.getInstance()
+            val queued = QueuedSnapshot(now, tm.currentSnapshotA(), tm.currentSnapshotB(), tm.currentRolling())
+            lastPublishMs = now
+            executor.submit { publishSnapshotInternal(c, queued) }
+        }, CHANGE_DEBOUNCE_MS)
+    }
+
     // Último valor de limite de carga (em %) publicado no HA.
     // -1 = ainda não publicado nesta sessão.
     // Usado para evitar publicações redundantes e detectar divergência carro ↔ HA.
