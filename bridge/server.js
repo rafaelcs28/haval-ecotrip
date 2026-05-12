@@ -221,6 +221,8 @@ const state = {
   charge_power_kw:     0,
   charge_session_kwh:  0,
   charge_remaining_min:0,
+  battery_power_pct:   0,
+  engine_rpm:          0,
   notif_latest_ts:     0,
   price_gas_per_l:     0,
   price_kwh:           0,
@@ -919,6 +921,8 @@ function applyMqttMessage(key, value, isRetained = false) {
     case 'battery_current_a': state.battery_current_a  = num(value); break;
     case 'odometer_km':       state.odometer_km         = num(value); break;
     case 'batt_12v_pct':      state.batt_12v_pct        = num(value); break;
+    case 'battery_power_pct': state.battery_power_pct = Math.round(num(value)); break;
+    case 'engine_rpm':        state.engine_rpm        = Math.round(num(value)); break;
 
     // SOC (publicado com retain em trip_a/soc_current)
     case 'trip_a/soc_current':

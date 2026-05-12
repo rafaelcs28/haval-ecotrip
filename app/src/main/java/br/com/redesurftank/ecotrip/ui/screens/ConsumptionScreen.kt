@@ -219,6 +219,12 @@ fun ConsumptionScreen() {
                     CarConstants.CAR_EV_INFO_CHARGE_REMAINING_TIME.value -> {
                         mqttManager.latestChargeRemainingMin = value.trim().toIntOrNull() ?: 0
                     }
+                    CarConstants.CAR_EV_INFO_CUR_BATTERY_POWER_PERCENTAGE.value -> {
+                        mqttManager.latestBattPowerPct = value.trim().toIntOrNull() ?: 0
+                    }
+                    CarConstants.CAR_BASIC_ENGINE_SPEED.value -> {
+                        mqttManager.latestEngineRpm = value.trim().toIntOrNull() ?: 0
+                    }
                     else -> tripManager.onDataChanged(key, value)
                 }
                 // Publica imediatamente quando qualquer sinal muda (debounce 1s interno)

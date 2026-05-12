@@ -226,6 +226,23 @@
             <span style="font-size:8px;color:#4a7aaa">int.</span>
           </div>
         </div>
+        <!-- Barra de potência do trem de força — visível quando motor ligado -->
+        <div id="d-powertrain" style="display:none;margin-top:5px">
+          <div style="position:relative;height:7px;background:#0F1C2E;border-radius:4px;overflow:hidden;margin-bottom:4px">
+            <div style="position:absolute;left:50%;top:0;width:1.5px;height:100%;background:#334155;transform:translateX(-50%);z-index:1"></div>
+            <div id="d-pwr-regen-bar"   style="position:absolute;right:50%;top:0;height:100%;background:#39FF88;border-radius:4px 0 0 4px;width:0;transition:width .35s ease"></div>
+            <div id="d-pwr-consume-bar" style="position:absolute;left:50%;top:0;height:100%;background:#fb923c;border-radius:0 4px 4px 0;width:0;transition:width .35s ease"></div>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:0 2px">
+            <span style="font-size:9px;color:#3D5166">REGEN</span>
+            <div style="display:flex;gap:14px;align-items:center">
+              <span id="d-pwr-pct" style="font-size:12px;font-weight:700;color:#94a3b8">0%</span>
+              <span><span id="d-pwr-kw"  style="font-size:12px;font-weight:700;color:#4ade80">--</span><span style="font-size:8px;color:#3D5166"> kW ⚡</span></span>
+              <span><span id="d-pwr-rpm" style="font-size:12px;font-weight:700;color:#475569">--</span><span style="font-size:8px;color:#3D5166"> rpm 🔥</span></span>
+            </div>
+            <span style="font-size:9px;color:#3D5166">CONS</span>
+          </div>
+        </div>
         </div><!-- /wrapper 65% -->
       </div>
 

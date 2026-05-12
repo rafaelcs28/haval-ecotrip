@@ -1044,6 +1044,38 @@ function renderDash() {
     }
   }
 
+  // Trem de força — barra de potência + kW elétrico + RPM ICE
+  const pwrEl = document.getElementById('d-powertrain');
+  if (pwrEl) {
+    pwrEl.style.display = engOn ? '' : 'none';
+    if (engOn) {
+      const pct      = Math.max(-100, Math.min(100, Math.round(s.battery_power_pct || 0)));
+      const isRegen  = pct < 0;
+      const absPct   = Math.abs(pct);
+      const regenBar   = document.getElementById('d-pwr-regen-bar');
+      const consumeBar = document.getElementById('d-pwr-consume-bar');
+      if (regenBar)   regenBar.style.width   = isRegen  ? (absPct / 2) + '%' : '0';
+      if (consumeBar) consumeBar.style.width  = !isRegen ? (absPct / 2) + '%' : '0';
+      const pctEl = document.getElementById('d-pwr-pct');
+      if (pctEl) {
+        pctEl.textContent = (pct > 0 ? '+' : '') + pct + '%';
+        pctEl.style.color = isRegen ? 'var(--neon)' : '#fb923c';
+      }
+      const kw = s.motor_power_kw || 0;
+      const kwEl = document.getElementById('d-pwr-kw');
+      if (kwEl) {
+        kwEl.textContent  = kw !== 0 ? Math.abs(kw).toFixed(1) : '--';
+        kwEl.style.color  = kw < 0 ? 'var(--neon)' : kw > 0 ? '#4ade80' : '#475569';
+      }
+      const rpmEl = document.getElementById('d-pwr-rpm');
+      if (rpmEl) {
+        const rpm = s.engine_rpm || 0;
+        rpmEl.textContent = rpm > 0 ? rpm.toLocaleString('pt-BR') : '--';
+        rpmEl.style.color = rpm > 0 ? '#fb923c' : '#475569';
+      }
+    }
+  }
+
   // Desde última partida (rolling)
   const r = s.rolling || {};
   setText('d-roll-dist', r.distance_km   > 0 ? f1(r.distance_km) + ' km' : '--');

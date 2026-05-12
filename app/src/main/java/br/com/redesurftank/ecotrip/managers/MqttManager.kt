@@ -114,6 +114,8 @@ class MqttManager private constructor() {
     // 0=Desconectado, 1=Carregando, 2=Programado, 3=Finalizado, 5=Aguardando liberação, -1=desconhecido
     var latestChargingState: Int = -1
     var latestChargeRemainingMin: Int = 0   // minutos restantes de recarga (0 = indisponível)
+    var latestBattPowerPct: Int = 0    // % da potência da bateria (-100=regen total, +100=consumo total)
+    var latestEngineRpm:    Int = 0    // rpm — rotação do motor térmico (ICE)
 
     // Último timestamp em que qualquer dado do carro foi recebido pelo app
     // Usado para saber se o barramento de dados do carro está ativo
@@ -510,6 +512,8 @@ class MqttManager private constructor() {
             // Potência do motor elétrico — lida diretamente do HCU (car.ev_info.motor_power)
             // Valor positivo = consumo; negativo = regeneração; 0 = sem sinal do HCU
             pubR("motor_power_kw",    fmt2(latestMotorPowerKw))
+            pubR("battery_power_pct", latestBattPowerPct.toString())
+            pubR("engine_rpm",        latestEngineRpm.toString())
             if (latestOdometerKm > 0f) pubR("odometer_km", fmt1(latestOdometerKm))
             if (latestBatt12vPct > 0f) pubR("batt_12v_pct", fmt1(latestBatt12vPct))
             // Potência de recarga: apenas quando charging_state == 1 (Carregando)
