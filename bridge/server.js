@@ -224,6 +224,7 @@ const state = {
   batt_12v_pct:        0,    // % bateria auxiliar 12V
   charging_state:      'Desconhecido',
   charge_power_kw:     0,
+  motor_power_kw:      0,
   charge_session_kwh:  0,
   charge_remaining_min:0,
   battery_power_pct:   0,
@@ -954,6 +955,7 @@ function applyMqttMessage(key, value, isRetained = false) {
     case 'charge_current_a':     state.charge_current_a     = num(value); break;
     case 'battery_voltage_v': state.battery_voltage_v  = num(value); break;
     case 'battery_current_a': state.battery_current_a  = num(value); break;
+    case 'motor_power_kw':    state.motor_power_kw      = num(value); break;
     case 'odometer_km':       state.odometer_km         = num(value); break;
     case 'batt_12v_pct':      state.batt_12v_pct        = num(value); break;
     case 'battery_power_pct': state.battery_power_pct = Math.round(num(value)); break;
