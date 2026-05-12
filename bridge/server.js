@@ -170,6 +170,7 @@ const state = {
   battery_voltage_v:0,
   battery_current_a:0,
   soc_pct:          0,
+  status_message:   '',     // string pipe-separada de alertas do carro
   engine_state:     null,   // null=desconhecido | '0'=desligado | '1'=ligado
   lock_state:       null,   // null=desconhecido | 'off'=trancado | 'on'=destrancado
   high_beam:        null,   // null | 'on' | 'off'
@@ -663,6 +664,7 @@ function applyMqttMessage(key, value) {
       break;
 
     // Sensores de estado (publicados pelo HA via automação)
+    case 'status_message': state.status_message = value; break; // pipe-sep alerts
     case 'engine_state': state.engine_state = value; break;   // '0' | '1'
     case 'lock_state':   state.lock_state   = value; break;   // 'off' | 'on'
     case 'high_beam':    state.high_beam    = value; break;   // 'on' | 'off'

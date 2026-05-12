@@ -766,6 +766,8 @@ function renderDash() {
   setText('d-roll-kml',  r.km_per_l      > 0 ? f1(r.km_per_l)            : '--');
   setText('d-roll-cost', r.cost_brl      > 0 ? 'R$ ' + f2(r.cost_brl)   : '--');
   setClass('d-roll-kwh', eff(r.kwh_per_100km));
+
+  renderAlerts(s);
 }
 
 function renderTrip(id, t) {
@@ -1044,6 +1046,72 @@ function renderAutoTrips() {
   }).join('');
 
   list.innerHTML = html;
+}
+
+// ── Alertas do carro ─────────────────────────────────────────────────────────
+const ALERT_TEXTS = {
+  'NO_ALERTS':                   null,   // null = suprimir
+  'ERR_FORMATTING_ADDRESS':      'Erro ao formatar endereço.',
+  'ERR_GENERATE_RESPONSE':       'Houve um erro ao gerar a resposta.',
+  'ALERT_HIGH_VOLTAGE_DISCONNECT': 'A bateria de alta tensão está totalmente carregada. Desconecte o carregador.',
+  'SUNROOF_OPEN':                'O teto solar está aberto.',
+  'UNLOCKED':                    'As portas não estão trancadas — o veículo pode ser aberto.',
+  'ENGINE_ON_AND_UNLOCKED':      'O motor está ligado e o veículo está destravado.',
+  'FUEL_LOW':                    'Combustível abaixo de 15 litros. Reabasteça.',
+  'AC_ON_WITH_ENGINE_OFF':       'AC ligado com motor desligado — pode drenar a bateria 12V.',
+  'REVIEW_PREFIX':               'Veículo dentro do limite para agendar revisão.',
+};
+
+function renderAlerts(s) {
+  const card = document.getElementById('d-alerts-card');
+  const body = document.getElementById('d-alerts-body');
+  if (!card || !body) return;
+
+  const raw = s.status_message || '';
+  const skip = ['', 'NO_ALERTS', 'unknown', 'unavailable'];
+  if (skip.includes(raw.trim())) { card.style.display = 'none'; return; }
+
+  const lines = [];
+  raw.split('|').forEach(item => {
+    const parts = item.split('@');
+    const code  = parts[0].trim();
+    if (!code) return;
+
+    if (code in ALERT_TEXTS) {
+      const txt = ALERT_TEXTS[code];
+      if (txt) lines.push(txt);  // null = NO_ALERTS → não exibe
+    } else if (code === 'VEHICLE_CHARGING_TIME' && parts.length >= 2) {
+      lines.push(`Carregando — conclusão estimada em ${parts[1]}.`);
+    } else if (code === 'WINDOW_OPEN' && parts.length >= 2) {
+      lines.push(`O ${parts[1]} está aberto.`);
+    } else if (code === 'DOOR_OPEN' && parts.length >= 2) {
+      lines.push(`A ${parts[1]} está aberta.`);
+    } else if (code === 'TRUNK_OPEN' && parts.length >= 2) {
+      lines.push(`O ${parts[1]} está aberto.`);
+    } else if (code === 'BATTERY_12V_CRITICAL' && parts.length >= 2) {
+      lines.push(`🔴 Bateria 12V em ${parts[1]}% — ligue o motor imediatamente.`);
+    } else if (code === 'BATTERY_12V_ALERT' && parts.length >= 2) {
+      lines.push(`🟠 Bateria 12V em ${parts[1]}%.`);
+    } else if (code === 'TIRE_PRESSURE' && parts.length >= 4) {
+      lines.push(`${parts[1]}: ${parts[2]} psi · ${parts[3]}°C.`);
+    } else if (code === 'TIRE_PRESSURE_DEFAULTS' && parts.length >= 3) {
+      lines.push(`Pressão recomendada: ${parts[1]}–${parts[2]} psi.`);
+    } else if (code === 'SERVICE_WITH_TOLERANCE' && parts.length >= 2) {
+      lines.push(`Revisão: restam ${parts[1]} km antes da perda da garantia.`);
+    } else {
+      lines.push(item.trim());
+    }
+  });
+
+  if (!lines.length) { card.style.display = 'none'; return; }
+
+  card.style.display = '';
+  body.innerHTML = lines.map(l =>
+    `<div style="display:flex;align-items:flex-start;gap:8px;font-size:13px;color:#cbd5e1;line-height:1.45">
+      <span style="color:var(--orange);flex-shrink:0;margin-top:1px">•</span>
+      <span>${l}</span>
+    </div>`
+  ).join('');
 }
 
 // ── Dashboard map — última localização do carro ───────────────────────────────
