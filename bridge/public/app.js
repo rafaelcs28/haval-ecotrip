@@ -994,15 +994,22 @@ function renderHistory() {
 </div>`;
 
   html += trips.map(t => {
-    const name = t.name || t.label || 'Viagem';
+    const tripId   = t.timestamp || t.tripId || '';
+    const nameId   = `hn-${String(tripId).replace(/\W/g,'_')}`;
+    const tripType = t.label === 'Auto' ? 'auto' : 'manual';
+    const displayName = t.name || '';
+    const fallbackName = t.label || 'Trip';
     const cost = t.total_cost_brl > 0 ? `<span class="trip-cost">R$ ${f2(t.total_cost_brl)}</span>` : '';
     const tsDisplay = typeof t.timestamp === 'number' ? fmtDate(new Date(t.timestamp).toISOString()) : fmtDate(t.timestamp);
     return `<div class="trip-item">
   <div class="trip-header">
-    <div>
-      <span class="trip-badge">${t.label || 'Trip'}</span>
-      <div class="trip-name" style="margin-top:3px">${name}</div>
-      <div class="trip-date">${tsDisplay}</div>
+    <div style="flex:1;min-width:0">
+      <span class="trip-badge">${fallbackName}</span>
+      <div class="trip-name-row" style="margin-top:3px">
+        <span class="trip-name" id="${nameId}">${displayName || fallbackName}</span>
+        <button class="rename-btn" onclick="startRenameTrip('${tripId}','${tripType}','${nameId}')" title="Renomear">✏️</button>
+      </div>
+      <div class="trip-date">${displayName ? tsDisplay + ' · ' + fallbackName : tsDisplay}</div>
     </div>
     ${cost}
   </div>
@@ -1115,6 +1122,8 @@ function renderAutoTrips() {
     const mapsUrl    = hasGps ? `https://www.google.com/maps/dir/${t.startLat},${t.startLng}/${t.endLat},${t.endLng}` : null;
     const geo        = geoCache[t.tripId];
     const geoLine    = geo ? `<div class="trip-geo">📍 ${geo}</div>` : '';
+    const nameId     = `tn-${t.tripId}`;
+    const displayName = t.name || '';
     const extraRow   = (maxSpd || tempStr) ? `
   <div class="trip-metrics" style="margin-top:4px">
     ${maxSpd  ? `<div class="trip-metric"><div class="trip-metric-val">${maxSpd}</div><div class="trip-metric-lbl">vel. máx.</div></div>` : ''}
@@ -1126,9 +1135,12 @@ function renderAutoTrips() {
     const costStr = tripCost > 0 ? `<span class="trip-cost">R$ ${f2(tripCost)}</span>` : '';
     return `<div class="trip-item">
   <div class="trip-header">
-    <div>
-      <div class="trip-name">${startDate}</div>
-      <div class="trip-date">${dur}</div>
+    <div style="flex:1;min-width:0">
+      <div class="trip-name-row">
+        <span class="trip-name" id="${nameId}">${displayName || startDate}</span>
+        <button class="rename-btn" onclick="startRenameTrip('${t.tripId}','auto','${nameId}')" title="Renomear">✏️</button>
+      </div>
+      <div class="trip-date">${displayName ? startDate + ' · ' + dur : dur}</div>
       ${geoLine}
     </div>
     <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">
@@ -1637,6 +1649,70 @@ async function sendRemoteAction(action, successMsg) {
     if (logEl) logEl.innerHTML = `<span style="color:#f87171">✗ ${msg} · ${hhmm()}</span>`;
   }
 }
+
+// ── Renomear trip (inline edit) ───────────────────────────────────────────────
+window.startRenameTrip = function(tripId, type, nameElemId) {
+  const nameEl = document.getElementById(nameElemId);
+  if (!nameEl) return;
+  const current = nameEl.textContent.trim();
+
+  const input = document.createElement('input');
+  input.type        = 'text';
+  input.value       = current;
+  input.placeholder = 'Nome da viagem…';
+  input.className   = 'rename-input';
+  input.setAttribute('enterkeyhint', 'done');
+  input.setAttribute('autocomplete', 'off');
+  nameEl.replaceWith(input);
+  input.focus();
+  try { input.setSelectionRange(0, input.value.length); } catch (_) {}
+
+  let saved = false;
+  const save = async () => {
+    if (saved) return; saved = true;
+    const newName = input.value.trim();
+    // Restaura o span com o nome final
+    const span = document.createElement('span');
+    span.id        = nameElemId;
+    span.className = 'trip-name';
+    span.textContent = newName || current;
+    input.replaceWith(span);
+
+    if (!newName || newName === current) return;
+    try {
+      await apiFetch('/api/rename', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tripId, type, name: newName }),
+      });
+      // Atualiza cache local para que a busca e o resumo reflitam o novo nome
+      if (type === 'auto') {
+        const t = (cachedAutoTrips || []).find(t => t.tripId === String(tripId));
+        if (t) t.name = newName;
+      } else if (type === 'manual') {
+        const t = (cachedTrips || []).find(t => t.timestamp === String(tripId));
+        if (t) t.name = newName;
+      }
+      showToast('✓ Nome salvo — sincronizará com o carro na próxima conexão');
+    } catch (_) {
+      showToast('✗ Erro ao salvar nome');
+    }
+  };
+
+  const cancel = () => {
+    if (saved) return; saved = true;
+    const span = document.createElement('span');
+    span.id = nameElemId; span.className = 'trip-name';
+    span.textContent = current;
+    input.replaceWith(span);
+  };
+
+  input.addEventListener('blur', save);
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter')  { e.preventDefault(); input.blur(); }
+    if (e.key === 'Escape') { input.value = current; input.removeEventListener('blur', save); cancel(); }
+  });
+};
 
 // ── Generic remote action (actions tab) ──────────────────────────────────────
 window.remoteAction = function(action, title, msg, btnColor) {

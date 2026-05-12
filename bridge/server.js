@@ -35,6 +35,7 @@ const AUTOTRIPS_DIR   = path.join(__dirname, 'autotrips');
 const SNAPSHOTS_FILE  = path.join(__dirname, 'lifetime_snapshots.json');
 const VAPID_FILE      = path.join(__dirname, 'vapid_keys.json');
 const PUSH_SUBS_FILE  = path.join(__dirname, 'push_subscriptions.json');
+const RENAMES_FILE    = path.join(__dirname, 'pending_renames.json');
 
 if (!fs.existsSync(AUTOTRIPS_DIR)) fs.mkdirSync(AUTOTRIPS_DIR, { recursive: true });
 
@@ -499,6 +500,69 @@ app.post('/api/autotrips', (req, res) => {
 });
 
 app.get('/api/autotrips', (_req, res) => res.json(autoTripsArr.slice(0, 300)));
+
+// ── Renomear trips (PWA → fila → Android) ─────────────────────────────────────
+// Carrega fila persistida
+let pendingRenames = [];
+try {
+  if (fs.existsSync(RENAMES_FILE))
+    pendingRenames = JSON.parse(fs.readFileSync(RENAMES_FILE, 'utf8')) || [];
+} catch (_) {}
+
+function savePendingRenames() {
+  // Mantém só últimos 30 dias para não acumular para sempre
+  const cutoff = Date.now() - 30 * 86_400_000;
+  pendingRenames = pendingRenames.filter(r => r.createdAt > cutoff);
+  fs.writeFileSync(RENAMES_FILE, JSON.stringify(pendingRenames, null, 2));
+}
+
+// POST /api/rename  { tripId, type:'auto'|'manual', name }
+// Aplica imediatamente nos dados locais e enfileira para o Android
+app.post('/api/rename', (req, res) => {
+  const { tripId, type, name } = req.body || {};
+  if (!tripId || !name) return res.status(400).json({ error: 'tripId e name obrigatórios' });
+  const trimmed = String(name).trim().slice(0, 80);
+
+  if (type === 'auto') {
+    // Atualiza array em memória
+    const t = autoTripsArr.find(r => r.tripId === String(tripId));
+    if (t) t.name = trimmed;
+    // Atualiza arquivo do auto-trip
+    const safeId   = String(tripId).replace(/\D/g, '');
+    const filePath = path.join(AUTOTRIPS_DIR, `${safeId}.json`);
+    if (fs.existsSync(filePath)) {
+      try {
+        const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+        data.autoTrip = data.autoTrip || {};
+        data.autoTrip.name = trimmed;
+        fs.writeFileSync(filePath, JSON.stringify(data));
+      } catch (_) {}
+    }
+  } else if (type === 'manual') {
+    // Manual trip: key = timestamp string
+    const t = tripsMap.get(String(tripId));
+    if (t) { t.name = trimmed; scheduleTripsFlush(); }
+  }
+
+  // Enfileira rename para o Android consumir
+  const id = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  pendingRenames.push({ id, tripId: String(tripId), type: type || 'auto', name: trimmed, createdAt: Date.now() });
+  savePendingRenames();
+  console.log(`✓ Rename enfileirado: [${type}] ${tripId} → "${trimmed}"`);
+  res.json({ ok: true });
+});
+
+// GET /api/pending-renames  — Android consulta ao conectar
+app.get('/api/pending-renames', (_req, res) => res.json(pendingRenames));
+
+// POST /api/rename-ack  { ids: ['id1','id2',...] }  — Android confirma após aplicar
+app.post('/api/rename-ack', (req, res) => {
+  const { ids } = req.body || {};
+  if (!Array.isArray(ids)) return res.status(400).json({ error: 'ids deve ser array' });
+  pendingRenames = pendingRenames.filter(r => !ids.includes(r.id));
+  savePendingRenames();
+  res.json({ ok: true, remaining: pendingRenames.length });
+});
 
 // Snapshots do lifetime para filtros de período no PWA (não depende de sync de auto-trips)
 app.get('/api/lifetime/snapshots', (_req, res) => res.json(lifeSnapshots));
