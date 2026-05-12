@@ -301,11 +301,9 @@ class TripManager private constructor() {
 
     // ── Telemetria em tempo real ──────────────────────────────────────────────
     private var telemetryRecorder: TelemetryRecorder? = null
-    private var latestSpeedKmh:        Float  = 0f
-    private var latestEngineRpm:       Int    = 0
-    private var latestBatteryCurrentA: Float  = 0f
-    private var latestBatteryVoltageV: Float  = 0f
-    private var latestBattPowerPct:    Int    = 0     // % potência bateria (−100=regen, +100=consumo)
+    private var latestSpeedKmh:     Float  = 0f
+    private var latestEngineRpm:    Int    = 0
+    private var latestBattPowerPct: Int    = 0  // % potência bateria (−100=regen, +100=consumo)
     private var latestOutsideTempC:    Float? = null  // null = sem leitura ainda
     private var autoTripMaxSpeed:      Float  = 0f    // máxima durante viagem em andamento
 
@@ -1105,23 +1103,9 @@ class TripManager private constructor() {
                     latestEngineRpm = value.toInt()
                     telemetryRecorder?.latestEngineRpm = value.toInt()
                 }
-                CarConstants.CAR_EV_INFO_POWER_BATTERY_CURRENT.value -> {
-                    latestBatteryCurrentA = value
-                    telemetryRecorder?.latestBatteryCurrentA = value
-                }
-                CarConstants.CAR_EV_INFO_POWER_BATTERY_VOLTAGE.value -> {
-                    latestBatteryVoltageV = value
-                    telemetryRecorder?.latestBatteryVoltageV = value
-                }
                 CarConstants.CAR_EV_INFO_INSTANT_ENERGY_CONSUMPTION.value -> {
-                    // kW instantâneo do motor elétrico (chave confirmada)
+                    // Única fonte de kW para telemetria (car.ev_info.Instant_energy_consumption)
                     telemetryRecorder?.latestMotorPowerKw = value
-                }
-                CarConstants.CAR_EV_INFO_MOTOR_POWER.value -> {
-                    // Fallback HCU — só usa se Instant_energy_consumption ainda não alimentou valor
-                    if ((telemetryRecorder?.latestMotorPowerKw ?: 0f) == 0f) {
-                        telemetryRecorder?.latestMotorPowerKw = value
-                    }
                 }
 
                 else -> return
