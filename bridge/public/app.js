@@ -194,8 +194,14 @@ function _updatePushPermStatus() {
   const btnEl        = document.getElementById('notif-perm-btn');
   if (!activateWrap) return;
 
+  // No iPhone, Web Push só funciona quando instalado na tela inicial (standalone)
+  const isStandalone = window.navigator.standalone === true ||
+                       window.matchMedia('(display-mode: standalone)').matches;
   if (!('Notification' in window) || !('PushManager' in window)) {
-    if (statusEl) statusEl.textContent = '⚠️ Não suportado neste browser.';
+    if (statusEl) statusEl.textContent = isStandalone
+      ? '⚠️ Requer iOS 16.4 ou superior.'
+      : '📲 Adicione à tela inicial primeiro:\nSafari → Compartilhar → "Adicionar à Tela de Início"';
+    if (btnEl) btnEl.style.display = 'none';
     return;
   }
 
@@ -535,7 +541,10 @@ function urlBase64ToUint8Array(b64) {
 }
 
 async function subscribePush() {
-  if (!('Notification' in window) || !('PushManager' in window)) return;
+  if (!('Notification' in window) || !('PushManager' in window)) {
+    _updatePushPermStatus(); // mostra mensagem correta (standalone vs. browser)
+    return;
+  }
   // Só pede permissão se ainda não foi decidido
   let perm = Notification.permission;
   if (perm === 'denied') return;
