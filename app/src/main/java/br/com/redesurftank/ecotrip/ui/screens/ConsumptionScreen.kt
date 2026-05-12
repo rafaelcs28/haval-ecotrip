@@ -235,7 +235,7 @@ fun ConsumptionScreen() {
                     CarConstants.CAR_EV_INFO_CHARGE_REMAINING_TIME.value -> {
                         mqttManager.latestChargeRemainingMin = value.trim().toIntOrNull() ?: 0
                     }
-                    CarConstants.CAR_EV_INFO_CUR_BATTERY_POWER_PERCENTAGE.value -> {
+                    CarConstants.CAR_EV_INFO_ENERGY_OUTPUT_PERCENTAGE.value -> {
                         mqttManager.latestBattPowerPct = value.trim().toIntOrNull() ?: 0
                     }
                     CarConstants.CAR_BASIC_ENGINE_SPEED.value -> {
@@ -269,8 +269,8 @@ fun ConsumptionScreen() {
                 carManager.fetchCurrent(CarConstants.CAR_EV_INFO_BATTERY_CHARGE_PERCENTAGE.value)
                     ?.trim()?.let { tripManager.onDataChanged(CarConstants.CAR_EV_INFO_BATTERY_CHARGE_PERCENTAGE.value, it) }
 
-                // CAR_EV_INFO_CUR_BATTERY_POWER_PERCENTAGE retorna SOC, não potência —
-                // battery_power_pct é derivado de motor_power_kw no MqttManager
+                carManager.fetchCurrent(CarConstants.CAR_EV_INFO_ENERGY_OUTPUT_PERCENTAGE.value)
+                    ?.trim()?.toIntOrNull()?.let { mqttManager.latestBattPowerPct = it }
 
                 // Busca imediata de driving_ready_state — inicia trip automático se carro já estiver ligado
                 // (feito após busca de SOC/fuel para que latestSocPct/latestFuelPct estejam disponíveis)

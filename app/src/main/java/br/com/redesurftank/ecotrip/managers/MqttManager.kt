@@ -512,11 +512,8 @@ class MqttManager private constructor() {
             // Potência do motor elétrico — lida diretamente do HCU (car.ev_info.motor_power)
             // Valor positivo = consumo; negativo = regeneração; 0 = sem sinal do HCU
             pubR("motor_power_kw",    fmt2(latestMotorPowerKw))
-            // battery_power_pct: derivado de motor_power_kw (÷ 150 kW max do H6 PHEV34)
-            // CAR_EV_INFO_CUR_BATTERY_POWER_PERCENTAGE retorna SOC, não potência — não usar
-            val motorPct = if (latestMotorPowerKw != 0f)
-                (latestMotorPowerKw / 150f * 100f).toInt().coerceIn(-100, 100) else 0
-            pubR("battery_power_pct", motorPct.toString())
+            // battery_power_pct: vem de CAR_EV_INFO_ENERGY_OUTPUT_PERCENTAGE (sinal correto do carro)
+            pubR("battery_power_pct", latestBattPowerPct.toString())
             pubR("engine_rpm",        latestEngineRpm.toString())
             if (latestOdometerKm > 0f) pubR("odometer_km", fmt1(latestOdometerKm))
             if (latestBatt12vPct > 0f) pubR("batt_12v_pct", fmt1(latestBatt12vPct))
