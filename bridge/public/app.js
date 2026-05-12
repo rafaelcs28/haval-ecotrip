@@ -238,8 +238,10 @@ window.requestPushPermission = async function() {
   try {
     await subscribePush();
     _updatePushPermStatus();
-  } catch (_) {
-    showToast('✗ Não foi possível ativar notificações');
+    showToast('✓ Notificações ativadas');
+  } catch (err) {
+    console.error('Push subscribe error:', err);
+    showToast('✗ ' + (err?.message || 'Não foi possível ativar notificações'));
   }
 };
 
@@ -564,7 +566,8 @@ async function subscribePush() {
   const reg = await navigator.serviceWorker.ready;
 
   // Busca a VAPID key atual do servidor e compara com a que foi usada na subscrição
-  const { key: currentVapidKey } = await fetch('/api/push/vapid-key').then(r => r.json());
+  const { key: currentVapidKey } = await apiFetch('/api/push/vapid-key').then(r => r.json());
+  if (!currentVapidKey) throw new Error('VAPID key não disponível');
   const storedVapidKey = localStorage.getItem('push_vapid_key');
 
   let sub = await reg.pushManager.getSubscription();
@@ -574,7 +577,7 @@ async function subscribePush() {
     console.log('VAPID key mudou — re-subscribing push');
     await sub.unsubscribe();
     // Limpa subscrições antigas no servidor também
-    await fetch('/api/push/reset-subs', { method: 'POST' }).catch(() => {});
+    await apiFetch('/api/push/reset-subs', { method: 'POST' }).catch(() => {});
     sub = null;
   }
 
@@ -586,7 +589,7 @@ async function subscribePush() {
     localStorage.setItem('push_vapid_key', currentVapidKey);
   }
 
-  await fetch('/api/push/subscribe', {
+  await apiFetch('/api/push/subscribe', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(sub),

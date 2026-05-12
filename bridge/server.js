@@ -446,11 +446,13 @@ function requireAuth(req, res, next) {
   if (!valid) return res.status(401).json({ error: 'unauthorized' });
   next();
 }
-// Push não precisa de auth — SW não consegue enviar headers facilmente
-app.use('/api/push', (req, res, next) => next());
 // Ping público — sem auth, útil para verificar se o servidor está online
 app.get('/ping', (_req, res) => res.json({ ok: true, ts: Date.now() }));
-app.use('/api', requireAuth);
+// requireAuth: aplica a toda a API exceto /api/push/* (SW não consegue enviar headers)
+app.use('/api', (req, res, next) => {
+  if (req.path.startsWith('/push')) return next();  // push routes: sem auth
+  requireAuth(req, res, next);
+});
 
 app.get('/api/state',  (_req, res) => res.json(state));
 app.get('/api/trips',   (_req, res) => res.json(getTrips()));
