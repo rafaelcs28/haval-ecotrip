@@ -1106,7 +1106,8 @@ class TripManager private constructor() {
                     captureStartIfNeeded()
                 }
                 CarConstants.CAR_EV_INFO_SOC_OF_BATTERY.value,
-                CarConstants.CAR_EV_INFO_BATTERY_CHARGE_PERCENTAGE.value -> {
+                CarConstants.CAR_EV_INFO_BATTERY_CHARGE_PERCENTAGE.value,
+                CarConstants.CAR_EV_INFO_CUR_BATTERY_POWER_PERCENTAGE.value -> {
                     if (value <= 0f || value > 100f) {
                         Log.w(TAG, "SOC ignorado (fora de range): $value")
                         return
@@ -1132,8 +1133,9 @@ class TripManager private constructor() {
                     latestEngineRpm = value.toInt()
                     telemetryRecorder?.latestEngineRpm = value.toInt()
                 }
-                CarConstants.CAR_EV_INFO_CUR_BATTERY_POWER_PERCENTAGE.value -> {
-                    // % SOC / potência bateria (car.ev_info.cur_battery_power_percentage) — SOC inicial e final
+                CarConstants.CAR_EV_INFO_ENERGY_OUTPUT_PERCENTAGE.value -> {
+                    // % potência motor elétrico em tempo real (car.ev_info.energy_output_percentage)
+                    // capturado a cada mudança + amostrado 1×/s pelo TelemetryRecorder
                     val pct = value.toInt()
                     latestBattPowerPct = pct
                     telemetryRecorder?.latestBattPowerPct = pct   // alimenta amostras da viagem
