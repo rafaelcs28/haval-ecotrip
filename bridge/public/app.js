@@ -132,6 +132,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   initActionsPanel();
   initNotifPanel();
+  _fetchNotifCache();
 });
 
 // ── Notification preferences panel ───────────────────────────────────────────
@@ -226,45 +227,99 @@ window.requestPushPermission = async function() {
 };
 
 // ── Central de notificações ───────────────────────────────────────────────────
-async function loadNotifHistory() {
+let _notifCache      = null;   // último array buscado
+let _notifLatestSeen = 0;      // último notif_latest_ts processado
+let _notifReadTs     = parseInt(localStorage.getItem('notif_read_ts') || '0', 10);
+
+async function _fetchNotifCache() {
   try {
-    const data = await apiFetch('/api/push/history').then(r => r.json());
-    renderNotifHistory(data);
-  } catch (_) {
-    renderNotifHistory([]);
+    _notifCache = await apiFetch('/api/push/history').then(r => r.json());
+  } catch (_) { _notifCache = _notifCache || []; }
+  _updateBellBadge();
+}
+
+function _updateBellBadge() {
+  const badge = document.getElementById('notif-bell-badge');
+  if (!badge) return;
+  const unread = (_notifCache || []).filter(n => n.ts > _notifReadTs).length;
+  if (unread > 0) {
+    badge.textContent  = unread > 9 ? '9+' : String(unread);
+    badge.style.display = '';
+  } else {
+    badge.style.display = 'none';
   }
 }
 
-function renderNotifHistory(items) {
-  const el = document.getElementById('notif-history-list');
-  if (!el) return;
-  if (!items || items.length === 0) {
-    el.innerHTML = '<div style="font-size:12px;color:#3D5166;text-align:center;padding:12px 0">Nenhuma notificação registrada.</div>';
-    return;
+// Chamado pelo renderAll() — detecta novo notif_latest_ts via WS
+function _checkNotifBadge() {
+  const latest = state.notif_latest_ts || 0;
+  if (latest !== _notifLatestSeen) {
+    _notifLatestSeen = latest;
+    _fetchNotifCache();
   }
-  el.innerHTML = items.map(n => {
-    const d  = new Date(n.ts);
-    const dd = d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
-    const tt = d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-    return `<div style="display:flex;gap:10px;align-items:flex-start;padding:7px 0;border-bottom:1px solid #0F1520">
-      <div style="font-size:10px;color:#3D5166;white-space:nowrap;padding-top:1px;min-width:68px">${dd} ${tt}</div>
-      <div style="flex:1;min-width:0">
-        <div style="font-size:13px;font-weight:600;color:#C9D8EE;line-height:1.3">${n.title}</div>
-        ${n.body ? `<div style="font-size:11px;color:#5B7394;margin-top:1px">${n.body}</div>` : ''}
-      </div>
-    </div>`;
-  }).join('');
 }
+
+window.openNotifHistory = function() {
+  const overlay = document.getElementById('notif-overlay');
+  if (!overlay) return;
+  overlay.style.display = 'flex';
+  // Renderiza cache imediatamente (com itens não lidos destacados)
+  if (_notifCache) _renderNotifItems(_notifCache);
+  else document.getElementById('notif-overlay-body').innerHTML =
+    '<div style="font-size:12px;color:#3D5166;text-align:center;padding:20px 0">Carregando…</div>';
+  // Busca versão mais recente e marca como lido
+  apiFetch('/api/push/history').then(r => r.json()).then(data => {
+    _notifCache = data;
+    _renderNotifItems(data);          // renderiza antes de atualizar _notifReadTs
+    _notifReadTs = Date.now();
+    localStorage.setItem('notif_read_ts', String(_notifReadTs));
+    _updateBellBadge();
+  }).catch(() => {});
+};
+
+window.closeNotifHistory = function() {
+  const overlay = document.getElementById('notif-overlay');
+  if (overlay) overlay.style.display = 'none';
+};
 
 window.clearNotifHistory = async function() {
   try {
     await apiFetch('/api/push/history/clear', { method: 'POST' });
-    renderNotifHistory([]);
+    _notifCache  = [];
+    _notifReadTs = Date.now();
+    localStorage.setItem('notif_read_ts', String(_notifReadTs));
+    _renderNotifItems([]);
+    _updateBellBadge();
     showToast('Histórico limpo');
   } catch (_) {
     showToast('✗ Erro ao limpar histórico');
   }
 };
+
+function _renderNotifItems(items) {
+  const el = document.getElementById('notif-overlay-body');
+  if (!el) return;
+  if (!items || items.length === 0) {
+    el.innerHTML = '<div style="font-size:12px;color:#3D5166;text-align:center;padding:32px 0">Nenhuma notificação registrada.</div>';
+    return;
+  }
+  el.innerHTML = items.map(n => {
+    const unread = n.ts > _notifReadTs;
+    const d  = new Date(n.ts);
+    const dd = d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+    const tt = d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    return `<div style="display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-bottom:1px solid #0F1520${unread ? ';background:rgba(77,187,255,.04);border-radius:6px;padding-left:6px' : ''}">
+      ${unread ? '<span style="width:6px;height:6px;border-radius:50%;background:#4DBBFF;flex-shrink:0;margin-top:5px"></span>' : '<span style="width:6px;flex-shrink:0"></span>'}
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;align-items:baseline;gap:8px;justify-content:space-between">
+          <div style="font-size:13px;font-weight:${unread ? '700' : '600'};color:${unread ? '#EEF4FF' : '#C9D8EE'};line-height:1.3">${n.title}</div>
+          <div style="font-size:10px;color:#3D5166;white-space:nowrap;flex-shrink:0">${dd} ${tt}</div>
+        </div>
+        ${n.body ? `<div style="font-size:11px;color:#5B7394;margin-top:2px">${n.body}</div>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+}
 
 // ── Actions panel — criado 100% em JS para sobreviver a cache antigo de index.html
 function initActionsPanel() {
@@ -756,6 +811,7 @@ function renderAll() {
   renderTrip('b', state.trip_b || {});
   renderCarVersion();
   updateActionStatuses(state);
+  _checkNotifBadge();
 }
 
 function renderCarVersion() {

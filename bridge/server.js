@@ -71,9 +71,14 @@ function saveNotifHistory() {
 
 async function sendPush(title, body) {
   // Registra no histórico sempre — mesmo sem subscribers (útil para debug)
-  notifHistory.unshift({ ts: Date.now(), title, body });
+  const ts = Date.now();
+  notifHistory.unshift({ ts, title, body });
   if (notifHistory.length > NOTIF_HISTORY_MAX) notifHistory.length = NOTIF_HISTORY_MAX;
   saveNotifHistory();
+
+  // Notifica clientes WebSocket sobre nova notificação (para badge)
+  state.notif_latest_ts = ts;
+  broadcast('update', { notif_latest_ts: ts });
 
   if (!pushSubs.length) return;
   const payload = JSON.stringify({ title, body });
@@ -216,6 +221,7 @@ const state = {
   charge_power_kw:     0,
   charge_session_kwh:  0,
   charge_remaining_min:0,
+  notif_latest_ts:     0,
   price_gas_per_l:     0,
   price_kwh:           0,
   charge_current_a:    0,

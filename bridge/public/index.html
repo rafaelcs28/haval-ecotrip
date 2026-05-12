@@ -38,10 +38,31 @@
         <span id="car-update" class="car-ts">carro --</span>
       </div>
       <div id="status-dot"></div>
+      <button id="notif-bell-btn" onclick="openNotifHistory()"
+        style="position:relative;background:none;border:none;color:#475569;font-size:18px;cursor:pointer;padding:2px 4px;line-height:1;-webkit-tap-highlight-color:transparent;user-select:none"
+        title="Notificações">
+        🔔
+        <span id="notif-bell-badge"
+          style="display:none;position:absolute;top:-3px;right:-3px;background:#ef4444;color:#fff;font-size:9px;font-weight:700;min-width:15px;height:15px;border-radius:8px;line-height:15px;text-align:center;padding:0 3px;box-sizing:border-box"></span>
+      </button>
       <button onclick="hardRefresh()"
         style="background:none;border:none;color:#475569;font-size:18px;cursor:pointer;padding:2px 6px;line-height:1;-webkit-tap-highlight-color:transparent;user-select:none"
         title="Recarregar">↺</button>
     </div>
+  </div>
+
+  <!-- ── Overlay: Central de Notificações ──────────────────────────────────── -->
+  <div id="notif-overlay" style="display:none;position:fixed;inset:0;background:var(--void);z-index:300;flex-direction:column;padding-top:var(--safe-top)">
+    <div style="display:flex;align-items:center;gap:10px;padding:8px 12px 8px;flex-shrink:0;border-bottom:1px solid var(--border)">
+      <button onclick="closeNotifHistory()"
+        style="background:none;border:none;color:var(--neon);font-size:18px;cursor:pointer;padding:4px 6px;-webkit-tap-highlight-color:transparent">←</button>
+      <span style="font-size:13px;font-weight:700;color:var(--text);flex:1">🔔 Notificações</span>
+      <button onclick="clearNotifHistory()"
+        style="font-size:11px;font-weight:600;background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.3);color:#f87171;border-radius:8px;padding:4px 10px;cursor:pointer">
+        Limpar
+      </button>
+    </div>
+    <div id="notif-overlay-body" style="flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:8px 16px"></div>
   </div>
 
   <!-- Conteúdo por aba -->
@@ -485,14 +506,6 @@
         </div>
       </div>
 
-      <!-- ── Central de Notificações ─────────────────────────────────────────── -->
-      <div style="background:#0C1019;border:1px solid #0F1520;border-radius:12px;padding:14px 16px;margin-bottom:16px">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-          <span style="font-size:14px;font-weight:700;color:#EEF4FF">🔔 Histórico de Notificações</span>
-          <button onclick="clearNotifHistory()" style="font-size:11px;font-weight:600;background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.3);color:#f87171;border-radius:8px;padding:4px 10px;cursor:pointer">Limpar</button>
-        </div>
-        <div id="notif-history-list" style="max-height:320px;overflow-y:auto"></div>
-      </div>
 
       <h2 style="margin:0 0 16px;font-size:16px;color:#e2e8f0">🛠 Servidor</h2>
 
@@ -600,7 +613,7 @@
       <span class="tab-icon">🔧</span>
       <span class="tab-label">Ações</span>
     </button>
-    <button class="tab" data-panel="admin" onclick="switchTab(this, loadNotifHistory)">
+    <button class="tab" data-panel="admin" onclick="switchTab(this)">
       <span class="tab-icon">⚙️</span>
       <span class="tab-label">Config</span>
     </button>
