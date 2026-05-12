@@ -16,6 +16,14 @@ import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
 
+// ── Renomear trip — tarefa pendente recebida do bridge ────────────────────────
+data class RenameTask(
+    val id:     String,   // UUID gerado pelo bridge (usado no ACK)
+    val tripId: String,   // startMs (auto) ou timestampMs (manual) como String
+    val type:   String,   // "auto" | "manual"
+    val name:   String,   // novo nome desejado
+)
+
 // ── Amostra de telemetria por segundo ─────────────────────────────────────────
 data class TelemetrySample(
     val t:    Int,     // segundos desde o início do auto-trip
@@ -302,6 +310,85 @@ class TelemetryRecorder(private val context: Context) {
                 conn.disconnect()
             } catch (e: Exception) {
                 Log.e(TAG, "Falha ao enviar telemetria: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * Busca tarefas de renomeação pendentes no bridge e entrega via callback na Main thread.
+     * Fire-and-forget — falhas são apenas logadas.
+     */
+    fun fetchPendingRenames(
+        bridgeUrl:   String,
+        bridgeToken: String = "",
+        onResult:    (List<RenameTask>) -> Unit,
+    ) {
+        if (bridgeUrl.isBlank()) return
+        scope.launch {
+            try {
+                val url  = URL("$bridgeUrl/api/pending-renames")
+                val conn = url.openConnection() as HttpURLConnection
+                conn.apply {
+                    requestMethod = "GET"
+                    if (bridgeToken.isNotBlank()) setRequestProperty("Authorization", "Bearer $bridgeToken")
+                    connectTimeout = 8_000
+                    readTimeout    = 8_000
+                }
+                val code = conn.responseCode
+                val body = conn.inputStream.use { it.readBytes().toString(Charsets.UTF_8) }
+                conn.disconnect()
+                if (code !in 200..299) {
+                    Log.w(TAG, "fetchPendingRenames: HTTP $code")
+                    return@launch
+                }
+                val arr   = JSONArray(body)
+                val tasks = mutableListOf<RenameTask>()
+                for (i in 0 until arr.length()) {
+                    val obj = arr.getJSONObject(i)
+                    tasks.add(RenameTask(
+                        id     = obj.optString("id"),
+                        tripId = obj.optString("tripId"),
+                        type   = obj.optString("type"),
+                        name   = obj.optString("name"),
+                    ))
+                }
+                Log.i(TAG, "fetchPendingRenames: ${tasks.size} tarefa(s) recebida(s)")
+                android.os.Handler(android.os.Looper.getMainLooper()).post { onResult(tasks) }
+            } catch (e: Exception) {
+                Log.w(TAG, "fetchPendingRenames falhou: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * Confirma para o bridge que os renames foram aplicados localmente.
+     * O bridge remove as entradas da fila para não reenviar.
+     */
+    fun ackRenames(
+        bridgeUrl:   String,
+        bridgeToken: String = "",
+        ids:         List<String>,
+    ) {
+        if (bridgeUrl.isBlank() || ids.isEmpty()) return
+        scope.launch {
+            try {
+                val payload = JSONObject().put("ids", JSONArray(ids)).toString()
+                val url  = URL("$bridgeUrl/api/rename-ack")
+                val conn = url.openConnection() as HttpURLConnection
+                conn.apply {
+                    requestMethod = "POST"
+                    setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                    if (bridgeToken.isNotBlank()) setRequestProperty("Authorization", "Bearer $bridgeToken")
+                    doOutput       = true
+                    connectTimeout = 8_000
+                    readTimeout    = 8_000
+                }
+                conn.outputStream.use { it.write(payload.toByteArray(Charsets.UTF_8)) }
+                val code = conn.responseCode
+                conn.disconnect()
+                Log.i(TAG, "ackRenames: HTTP $code (${ids.size} ID(s))")
+            } catch (e: Exception) {
+                Log.w(TAG, "ackRenames falhou: ${e.message}")
             }
         }
     }

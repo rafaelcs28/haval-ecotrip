@@ -524,6 +524,41 @@ class TripManager private constructor() {
         AppLogger.i(TAG, "Lifetime resetado pelo usuário.")
     }
 
+    /**
+     * Busca nomes pendentes no bridge e aplica localmente.
+     * Chamada automaticamente ao iniciar a sessão (WiFi com bridge acessível).
+     * Fire-and-forget: falhas são apenas logadas, sem retry imediato.
+     */
+    fun fetchAndApplyPendingRenames() {
+        val bridgeUrl = getBridgeHttpUrl()
+        if (bridgeUrl.isBlank()) return
+        telemetryRecorder?.fetchPendingRenames(bridgeUrl, getBridgeToken()) { tasks ->
+            if (tasks.isEmpty()) return@fetchPendingRenames
+            val appliedIds = mutableListOf<String>()
+            for (task in tasks) {
+                try {
+                    when (task.type) {
+                        "auto" -> {
+                            val startMs = task.tripId.toLongOrNull() ?: continue
+                            renameAutoTripEntry(startMs, task.name)
+                            appliedIds.add(task.id)
+                            AppLogger.i(TAG, "Rename auto-trip ${task.tripId} → '${task.name}'")
+                        }
+                        "manual" -> {
+                            val tsMs = task.tripId.toLongOrNull() ?: continue
+                            renameTripHistoryEntry(tsMs, task.name)
+                            appliedIds.add(task.id)
+                            AppLogger.i(TAG, "Rename manual trip ${task.tripId} → '${task.name}'")
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+            if (appliedIds.isNotEmpty()) {
+                telemetryRecorder?.ackRenames(getBridgeHttpUrl(), getBridgeToken(), appliedIds)
+            }
+        }
+    }
+
     /** Renomeia uma viagem automática identificada pelo startMs. */
     fun renameAutoTripEntry(startMs: Long, name: String) {
         synchronized(lock) {
@@ -608,6 +643,8 @@ class TripManager private constructor() {
 
         // Sincroniza trips pendentes ao iniciar — silencioso, sem forceAll
         syncAutoTripsTobridge(forceAll = false)
+        // Aplica renames feitos no iPhone (fila do bridge) — fire-and-forget
+        fetchAndApplyPendingRenames()
     }
 
     /** Inicia GPS para telemetria. Chame após permissão concedida. */

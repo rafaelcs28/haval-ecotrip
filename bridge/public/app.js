@@ -1117,6 +1117,7 @@ function renderAutoTrips() {
     const fuelL      = t.fuelL       > 0    ? f2(t.fuelL)  + ' L'   : '--';
     const socDelta   = t.startSocPct > 0    ? `${t.startSocPct.toFixed(0)}%→${t.endSocPct.toFixed(0)}%` : '--';
     const maxSpd     = t.maxSpeedKmh > 0    ? `${Math.round(t.maxSpeedKmh)} km/h` : null;
+    const avgSpd     = t.timeSec > 0        ? `${Math.round(t.distKm / (t.timeSec / 3600))} km/h` : null;
     const tempStr    = t.outsideTempC != null ? `${Math.round(t.outsideTempC)}°C`  : null;
     const hasGps     = t.startLat && (t.startLat !== 0 || t.startLng !== 0);
     const mapsUrl    = hasGps ? `https://www.google.com/maps/dir/${t.startLat},${t.startLng}/${t.endLat},${t.endLng}` : null;
@@ -1124,9 +1125,10 @@ function renderAutoTrips() {
     const geoLine    = geo ? `<div class="trip-geo">📍 ${geo}</div>` : '';
     const nameId     = `tn-${t.tripId}`;
     const displayName = t.name || '';
-    const extraRow   = (maxSpd || tempStr) ? `
+    const extraRow   = (maxSpd || avgSpd || tempStr) ? `
   <div class="trip-metrics" style="margin-top:4px">
-    ${maxSpd  ? `<div class="trip-metric"><div class="trip-metric-val">${maxSpd}</div><div class="trip-metric-lbl">vel. máx.</div></div>` : ''}
+    ${avgSpd  ? `<div class="trip-metric"><div class="trip-metric-val muted">${avgSpd}</div><div class="trip-metric-lbl">vel. méd.</div></div>` : ''}
+    ${maxSpd  ? `<div class="trip-metric"><div class="trip-metric-val muted">${maxSpd}</div><div class="trip-metric-lbl">vel. máx.</div></div>` : ''}
     ${tempStr ? `<div class="trip-metric"><div class="trip-metric-val blue">${tempStr}</div><div class="trip-metric-lbl">temp. ext.</div></div>` : ''}
     ${mapsUrl ? `<div class="trip-metric"><a href="${mapsUrl}" target="_blank" style="color:#60a5fa;text-decoration:none;font-size:18px">📍</a><div class="trip-metric-lbl">mapa</div></div>` : ''}
   </div>` : (mapsUrl ? `<div style="text-align:right;margin-top:2px"><a href="${mapsUrl}" target="_blank" style="color:#60a5fa;font-size:11px">📍 mapa</a></div>` : '');
