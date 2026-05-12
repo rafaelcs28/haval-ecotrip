@@ -218,6 +218,47 @@ window.requestPushPermission = async function() {
   }
 };
 
+// ── Central de notificações ───────────────────────────────────────────────────
+async function loadNotifHistory() {
+  try {
+    const data = await apiFetch('/api/push/history').then(r => r.json());
+    renderNotifHistory(data);
+  } catch (_) {
+    renderNotifHistory([]);
+  }
+}
+
+function renderNotifHistory(items) {
+  const el = document.getElementById('notif-history-list');
+  if (!el) return;
+  if (!items || items.length === 0) {
+    el.innerHTML = '<div style="font-size:12px;color:#3D5166;text-align:center;padding:12px 0">Nenhuma notificação registrada.</div>';
+    return;
+  }
+  el.innerHTML = items.map(n => {
+    const d  = new Date(n.ts);
+    const dd = d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+    const tt = d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    return `<div style="display:flex;gap:10px;align-items:flex-start;padding:7px 0;border-bottom:1px solid #0F1520">
+      <div style="font-size:10px;color:#3D5166;white-space:nowrap;padding-top:1px;min-width:68px">${dd} ${tt}</div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;font-weight:600;color:#C9D8EE;line-height:1.3">${n.title}</div>
+        ${n.body ? `<div style="font-size:11px;color:#5B7394;margin-top:1px">${n.body}</div>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+window.clearNotifHistory = async function() {
+  try {
+    await apiFetch('/api/push/history/clear', { method: 'POST' });
+    renderNotifHistory([]);
+    showToast('Histórico limpo');
+  } catch (_) {
+    showToast('✗ Erro ao limpar histórico');
+  }
+};
+
 // ── Actions panel — criado 100% em JS para sobreviver a cache antigo de index.html
 function initActionsPanel() {
   const CARDS = [

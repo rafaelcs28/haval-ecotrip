@@ -476,6 +476,15 @@
         <div id="notif-toggles"></div>
       </div>
 
+      <!-- ── Central de Notificações ─────────────────────────────────────────── -->
+      <div style="background:#0C1019;border:1px solid #0F1520;border-radius:12px;padding:14px 16px;margin-bottom:16px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+          <span style="font-size:14px;font-weight:700;color:#EEF4FF">🔔 Histórico de Notificações</span>
+          <button onclick="clearNotifHistory()" style="font-size:11px;font-weight:600;background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.3);color:#f87171;border-radius:8px;padding:4px 10px;cursor:pointer">Limpar</button>
+        </div>
+        <div id="notif-history-list" style="max-height:320px;overflow-y:auto"></div>
+      </div>
+
       <h2 style="margin:0 0 16px;font-size:16px;color:#e2e8f0">🛠 Servidor</h2>
 
       <!-- Alterar senha -->
@@ -582,7 +591,7 @@
       <span class="tab-icon">🔧</span>
       <span class="tab-label">Ações</span>
     </button>
-    <button class="tab" data-panel="admin" onclick="switchTab(this)">
+    <button class="tab" data-panel="admin" onclick="switchTab(this, loadNotifHistory)">
       <span class="tab-icon">⚙️</span>
       <span class="tab-label">Config</span>
     </button>

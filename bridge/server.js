@@ -36,7 +36,8 @@ const SNAPSHOTS_FILE  = path.join(__dirname, 'lifetime_snapshots.json');
 const VAPID_FILE        = path.join(__dirname, 'vapid_keys.json');
 const PUSH_SUBS_FILE    = path.join(__dirname, 'push_subscriptions.json');
 const RENAMES_FILE      = path.join(__dirname, 'pending_renames.json');
-const NOTIF_PREFS_FILE  = path.join(__dirname, 'notif_prefs.json');
+const NOTIF_PREFS_FILE    = path.join(__dirname, 'notif_prefs.json');
+const NOTIF_HISTORY_FILE  = path.join(__dirname, 'notif_history.json');
 
 if (!fs.existsSync(AUTOTRIPS_DIR)) fs.mkdirSync(AUTOTRIPS_DIR, { recursive: true });
 
@@ -57,7 +58,23 @@ function savePushSubs() {
   try { fs.writeFileSync(PUSH_SUBS_FILE, JSON.stringify(pushSubs)); } catch (_) {}
 }
 
+// ── Histórico de notificações ─────────────────────────────────────────────────
+const NOTIF_HISTORY_MAX = 100;
+let notifHistory = [];
+try {
+  if (fs.existsSync(NOTIF_HISTORY_FILE))
+    notifHistory = JSON.parse(fs.readFileSync(NOTIF_HISTORY_FILE, 'utf8')) || [];
+} catch (_) {}
+function saveNotifHistory() {
+  try { fs.writeFileSync(NOTIF_HISTORY_FILE, JSON.stringify(notifHistory)); } catch (_) {}
+}
+
 async function sendPush(title, body) {
+  // Registra no histórico sempre — mesmo sem subscribers (útil para debug)
+  notifHistory.unshift({ ts: Date.now(), title, body });
+  if (notifHistory.length > NOTIF_HISTORY_MAX) notifHistory.length = NOTIF_HISTORY_MAX;
+  saveNotifHistory();
+
   if (!pushSubs.length) return;
   const payload = JSON.stringify({ title, body });
   const dead = [];
@@ -667,6 +684,16 @@ app.post('/api/push/prefs', (req, res) => {
   notifPrefs[key] = !!value;
   saveNotifPrefs();
   res.json({ ok: true, prefs: notifPrefs });
+});
+
+// GET /api/push/history  — central de notificações
+app.get('/api/push/history', (_req, res) => res.json(notifHistory));
+
+// POST /api/push/history/clear  — limpa histórico de notificações
+app.post('/api/push/history/clear', (_req, res) => {
+  notifHistory = [];
+  saveNotifHistory();
+  res.json({ ok: true });
 });
 
 // ── Remote Actions ────────────────────────────────────────────────────────────
