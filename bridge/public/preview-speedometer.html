@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Preview — Velocímetro</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #060D18;
+    color: #EEF4FF;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    padding: 24px 16px;
+    max-width: 420px;
+    margin: 0 auto;
+  }
+  h2 {
+    font-size: 13px;
+    color: #5B7394;
+    letter-spacing: .5px;
+    text-transform: uppercase;
+    margin-bottom: 12px;
+  }
+
+  /* ── Card idêntico ao app ──────────────────────────────── */
+  .card {
+    background: #0C1828;
+    border: 1px solid #1A2A40;
+    border-radius: 14px;
+    padding: 12px;
+    margin-bottom: 20px;
+  }
+
+  /* Container da imagem — mesma proporção do app */
+  .car-wrap {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 794/720;
+    overflow: hidden;
+    border-radius: 6px;
+    background: #091224;
+  }
+  .car-wrap img {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    object-fit: contain;
+  }
+
+  /* Badge de pneu — idêntico ao app */
+  .tyre {
+    position: absolute;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1px;
+    background: rgba(9,18,36,0.85);
+    border: 1.5px solid #334155;
+    border-radius: 7px;
+    padding: 4px 6px;
+    min-width: 46px;
+    text-align: center;
+    pointer-events: none;
+  }
+  .tyre-label { font-size: 7px; color: #475569; line-height: 1; letter-spacing: .3px; }
+  .tyre-psi   { font-size: 14px; font-weight: 700; line-height: 1.1; color: #60a5fa; }
+  .tyre-unit  { font-size: 7px; color: #475569; line-height: 1; }
+  .tyre-temp  { font-size: 9px; color: #64748b; line-height: 1.2; }
+
+  /* ── Velocímetro — exatamente como está no código ──────── */
+  .speedometer {
+    position: absolute;
+    left: 4%;
+    bottom: 3%;
+    width: 90px;
+    height: 90px;
+    pointer-events: none;
+    z-index: 5;
+  }
+  .speedometer-inner {
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    background: #fff;
+    border: 8px solid #dc2626;
+    box-shadow: 0 2px 14px rgba(0,0,0,.6), 0 0 0 1.5px rgba(0,0,0,.18);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+  }
+  .speedometer-val {
+    font-weight: 900;
+    color: #111;
+    line-height: 1;
+    font-family: 'Arial Black', Arial, sans-serif;
+    letter-spacing: -1px;
+  }
+  .speedometer-unit {
+    font-size: 8px;
+    font-weight: 700;
+    color: #555;
+    line-height: 1;
+    margin-top: 2px;
+    letter-spacing: .5px;
+  }
+
+  /* Status bar abaixo do carro */
+  .status-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 2px 0;
+  }
+  .temp-out { font-size: 13px; font-weight: 600; color: #94a3b8; }
+  .engine-btn { font-size: 20px; background: none; border: none; cursor: default; }
+  .temp-in  { font-size: 13px; font-weight: 700; color: #60a5fa; }
+  .temp-lbl { font-size: 8px; color: #4a7aaa; }
+
+  /* Controles do preview */
+  .controls {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+  }
+  .btn {
+    flex: 1;
+    min-width: 60px;
+    background: #0C1828;
+    border: 1px solid #1A2A40;
+    border-radius: 8px;
+    color: #EEF4FF;
+    font-size: 13px;
+    padding: 8px 6px;
+    cursor: pointer;
+    text-align: center;
+    transition: background .15s;
+  }
+  .btn:hover, .btn.active { background: #162840; border-color: #39FF88; color: #39FF88; }
+  .btn.off { color: #5B7394; }
+
+  .tag {
+    font-size: 10px;
+    color: #3D5166;
+    margin-bottom: 6px;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+
+<h2>Preview — Velocímetro Dashboard</h2>
+
+<!-- Controles de velocidade -->
+<div class="controls">
+  <button class="btn off" onclick="setSpeed(0, this)">Motor off</button>
+  <button class="btn" onclick="setSpeed(0,  this)">0 km/h</button>
+  <button class="btn" onclick="setSpeed(47, this)">47 km/h</button>
+  <button class="btn active" onclick="setSpeed(72, this)">72 km/h</button>
+  <button class="btn" onclick="setSpeed(120,this)">120 km/h</button>
+</div>
+
+<div class="tag">Tamanho iPhone 15 Pro (390px)</div>
+
+<!-- Card do Dashboard -->
+<div class="card">
+  <div class="car-wrap">
+    <!-- Imagem base do Haval H6 -->
+    <img src="/images/haval_h6/h6.png" onerror="this.style.background='#0F1C2E';this.style.border='1px dashed #1A2A40'">
+
+    <!-- Pneus -->
+    <div class="tyre" style="left:5%;top:19%">
+      <span class="tyre-label">D.ESQ</span>
+      <span class="tyre-psi">35.8</span>
+      <span class="tyre-unit">PSI</span>
+      <span class="tyre-temp">42°C</span>
+    </div>
+    <div class="tyre" style="right:5%;top:19%">
+      <span class="tyre-label">D.DIR</span>
+      <span class="tyre-psi">36.1</span>
+      <span class="tyre-unit">PSI</span>
+      <span class="tyre-temp">41°C</span>
+    </div>
+    <div class="tyre" style="left:5%;top:66%">
+      <span class="tyre-label">T.ESQ</span>
+      <span class="tyre-psi">35.4</span>
+      <span class="tyre-unit">PSI</span>
+      <span class="tyre-temp">40°C</span>
+    </div>
+    <div class="tyre" style="right:5%;top:66%">
+      <span class="tyre-label">T.DIR</span>
+      <span class="tyre-psi">35.6</span>
+      <span class="tyre-unit">PSI</span>
+      <span class="tyre-temp">39°C</span>
+    </div>
+
+    <!-- Velocímetro -->
+    <div id="speedo" class="speedometer" style="display:none">
+      <div class="speedometer-inner">
+        <span id="speedo-val" class="speedometer-val" style="font-size:28px">72</span>
+        <span class="speedometer-unit">km/h</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Status bar -->
+  <div class="status-bar">
+    <div><span class="temp-out">18°</span> <span class="temp-lbl">ext.</span></div>
+    <div style="display:flex;gap:20px;align-items:center">
+      <button class="engine-btn" id="eng-icon">⚙️</button>
+      <button class="engine-btn">🔒</button>
+    </div>
+    <div><span class="temp-in">22°</span> <span class="temp-lbl">int.</span></div>
+  </div>
+</div>
+
+<!-- Comparativo de tamanhos -->
+<h2>Comparativo de tamanhos</h2>
+<div class="card" style="display:flex;align-items:center;gap:20px;padding:16px 20px">
+  <!-- Badge pneu (tamanho real) -->
+  <div style="display:flex;flex-direction:column;align-items:center;gap:6px">
+    <div class="tyre" style="position:static;min-width:46px">
+      <span class="tyre-label">T.ESQ</span>
+      <span class="tyre-psi">35.4</span>
+      <span class="tyre-unit">PSI</span>
+      <span class="tyre-temp">40°C</span>
+    </div>
+    <span style="font-size:10px;color:#3D5166">1× pneu</span>
+  </div>
+  <div style="font-size:22px;color:#3D5166">→</div>
+  <!-- Velocímetro (tamanho real, sem position:absolute) -->
+  <div style="display:flex;flex-direction:column;align-items:center;gap:6px">
+    <div style="width:90px;height:90px;border-radius:50%;background:#fff;border:8px solid #dc2626;box-shadow:0 2px 14px rgba(0,0,0,.6);display:flex;flex-direction:column;align-items:center;justify-content:center">
+      <span style="font-size:28px;font-weight:900;color:#111;line-height:1;font-family:'Arial Black',Arial,sans-serif;letter-spacing:-1px">72</span>
+      <span style="font-size:8px;font-weight:700;color:#555;line-height:1;margin-top:2px;letter-spacing:.5px">km/h</span>
+    </div>
+    <span style="font-size:10px;color:#3D5166">2× velocímetro</span>
+  </div>
+  <div style="font-size:22px;color:#3D5166">→</div>
+  <!-- 3 dígitos -->
+  <div style="display:flex;flex-direction:column;align-items:center;gap:6px">
+    <div style="width:90px;height:90px;border-radius:50%;background:#fff;border:8px solid #dc2626;box-shadow:0 2px 14px rgba(0,0,0,.6);display:flex;flex-direction:column;align-items:center;justify-content:center">
+      <span style="font-size:22px;font-weight:900;color:#111;line-height:1;font-family:'Arial Black',Arial,sans-serif;letter-spacing:-1px">120</span>
+      <span style="font-size:8px;font-weight:700;color:#555;line-height:1;margin-top:2px;letter-spacing:.5px">km/h</span>
+    </div>
+    <span style="font-size:10px;color:#3D5166">3 dígitos</span>
+  </div>
+</div>
+
+<script>
+let engineOn = true;
+setSpeed(72, document.querySelector('.btn.active'));
+
+function setSpeed(speed, btn) {
+  const speedo   = document.getElementById('speedo');
+  const speedVal = document.getElementById('speedo-val');
+  const engIcon  = document.getElementById('eng-icon');
+
+  // Determina se motor está ligado (btn "Motor off" = engine off)
+  const isOff = btn && btn.textContent.trim() === 'Motor off';
+  engineOn = !isOff;
+
+  // Atualiza botões ativos
+  document.querySelectorAll('.btn').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+
+  // Ícone motor
+  engIcon.style.filter = engineOn
+    ? 'sepia(1) saturate(8) hue-rotate(310deg)'
+    : 'grayscale(1) opacity(.45)';
+
+  // Velocímetro
+  if (!engineOn) {
+    speedo.style.display = 'none';
+    return;
+  }
+  speedo.style.display = '';
+  speedVal.textContent = speed;
+  speedVal.style.fontSize = speed >= 100 ? '22px' : speed >= 10 ? '28px' : '32px';
+}
+</script>
+</body>
+</html>
