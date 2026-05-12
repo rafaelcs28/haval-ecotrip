@@ -234,8 +234,8 @@ fun ConsumptionScreen() {
                     CarConstants.CAR_EV_INFO_CHARGE_REMAINING_TIME.value -> {
                         mqttManager.latestChargeRemainingMin = value.trim().toIntOrNull() ?: 0
                     }
-                    CarConstants.CAR_EV_INFO_CUR_BATTERY_POWER_PERCENTAGE.value -> {
-                        // % de potência do motor elétrico (car.ev_info.cur_battery_power_percentage)
+                    CarConstants.CAR_EV_INFO_ENERGY_OUTPUT_PERCENTAGE.value -> {
+                        // % de potência do motor elétrico (car.ev_info.energy_output_percentage)
                         mqttManager.latestBattPowerPct = value.trim().toIntOrNull() ?: 0
                         tripManager.onDataChanged(key, value)  // rastreia pico no auto-trip + telemetria
                     }
@@ -271,11 +271,11 @@ fun ConsumptionScreen() {
                 carManager.fetchCurrent(CarConstants.CAR_EV_INFO_BATTERY_CHARGE_PERCENTAGE.value)
                     ?.trim()?.let { tripManager.onDataChanged(CarConstants.CAR_EV_INFO_BATTERY_CHARGE_PERCENTAGE.value, it) }
 
-                // Motor power % (cur_battery_power_percentage) — busca imediata ao conectar
-                carManager.fetchCurrent(CarConstants.CAR_EV_INFO_CUR_BATTERY_POWER_PERCENTAGE.value)
+                // Motor power % (energy_output_percentage) — busca imediata ao conectar
+                carManager.fetchCurrent(CarConstants.CAR_EV_INFO_ENERGY_OUTPUT_PERCENTAGE.value)
                     ?.trim()?.let { raw ->
                         raw.toIntOrNull()?.let { mqttManager.latestBattPowerPct = it }
-                        tripManager.onDataChanged(CarConstants.CAR_EV_INFO_CUR_BATTERY_POWER_PERCENTAGE.value, raw)
+                        tripManager.onDataChanged(CarConstants.CAR_EV_INFO_ENERGY_OUTPUT_PERCENTAGE.value, raw)
                     }
 
                 // Busca imediata de driving_ready_state — inicia trip automático se carro já estiver ligado
