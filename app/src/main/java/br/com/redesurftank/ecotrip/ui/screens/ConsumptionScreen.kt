@@ -8,7 +8,9 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.material.icons.filled.BatteryChargingFull
 import androidx.compose.material.icons.filled.DirectionsCar
@@ -102,6 +104,18 @@ fun ConsumptionScreen() {
             nowMs = System.currentTimeMillis()
             ticks++
             if (ticks % 5 == 0) tripManager.tickTime()
+            // SOC e combustível chegam raramente via listener passivo no GWM —
+            // busca ativa a cada 60 s garante que o auto-trip capture o valor correto ao finalizar
+            if (ticks % 60 == 30) {
+                val socVal  = withContext(Dispatchers.IO) {
+                    carManager.fetchCurrent(CarConstants.CAR_EV_INFO_SOC_OF_BATTERY.value)?.trim()
+                }
+                val fuelVal = withContext(Dispatchers.IO) {
+                    carManager.fetchCurrent(CarConstants.CAR_BASIC_REMAIN_FUEL_PERCENTAGE.value)?.trim()
+                }
+                socVal?.let  { tripManager.onDataChanged(CarConstants.CAR_EV_INFO_SOC_OF_BATTERY.value, it) }
+                fuelVal?.let { tripManager.onDataChanged(CarConstants.CAR_BASIC_REMAIN_FUEL_PERCENTAGE.value, it) }
+            }
         }
     }
 
@@ -200,11 +214,13 @@ fun ConsumptionScreen() {
                         // não passa para TripManager (não é usado em cálculos de trip)
                     }
                     CarConstants.CAR_EV_INFO_INSTANT_ENERGY_CONSUMPTION.value -> {
-                        // Chave confirmada: retorna kW instantâneo do motor elétrico.
                         // Positivo = consumo/drive, negativo = regeneração.
+                        // −1 e valores fora do range físico (−200..+200 kW) = sinal indisponível
                         val kw = value.trim().toFloatOrNull() ?: 0f
-                        mqttManager.latestMotorPowerKw = kw
-                        tripManager.onDataChanged(key, value)
+                        if (kw in -200f..200f) {
+                            mqttManager.latestMotorPowerKw = kw
+                            tripManager.onDataChanged(key, value)
+                        }
                     }
                     CarConstants.CAR_EV_INFO_MOTOR_POWER.value -> {
                         // Fallback HCU — só usa se Instant_energy_consumption ainda não enviou valor
@@ -253,8 +269,8 @@ fun ConsumptionScreen() {
                 carManager.fetchCurrent(CarConstants.CAR_EV_INFO_BATTERY_CHARGE_PERCENTAGE.value)
                     ?.trim()?.let { tripManager.onDataChanged(CarConstants.CAR_EV_INFO_BATTERY_CHARGE_PERCENTAGE.value, it) }
 
-                carManager.fetchCurrent(CarConstants.CAR_EV_INFO_CUR_BATTERY_POWER_PERCENTAGE.value)
-                    ?.trim()?.let { tripManager.onDataChanged(CarConstants.CAR_EV_INFO_CUR_BATTERY_POWER_PERCENTAGE.value, it) }
+                // CAR_EV_INFO_CUR_BATTERY_POWER_PERCENTAGE retorna SOC, não potência —
+                // battery_power_pct é derivado de motor_power_kw no MqttManager
 
                 // Busca imediata de driving_ready_state — inicia trip automático se carro já estiver ligado
                 // (feito após busca de SOC/fuel para que latestSocPct/latestFuelPct estejam disponíveis)
