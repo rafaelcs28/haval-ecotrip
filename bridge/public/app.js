@@ -194,13 +194,23 @@ function _updatePushPermStatus() {
   const btnEl        = document.getElementById('notif-perm-btn');
   if (!activateWrap) return;
 
-  // No iPhone, Web Push só funciona quando instalado na tela inicial (standalone)
-  const isStandalone = window.navigator.standalone === true ||
-                       window.matchMedia('(display-mode: standalone)').matches;
+  // No iPhone, Web Push exige: HTTPS + standalone (instalado) + iOS 16.4+
+  const isStandalone   = window.navigator.standalone === true ||
+                         window.matchMedia('(display-mode: standalone)').matches;
+  const isSecure       = window.isSecureContext;
+
+  if (!isSecure) {
+    if (statusEl) statusEl.textContent = '🔒 Requer HTTPS. Acesse via https:// para ativar notificações.';
+    if (btnEl) btnEl.style.display = 'none';
+    return;
+  }
+  if (!isStandalone) {
+    if (statusEl) statusEl.textContent = '📲 Adicione à tela inicial primeiro:\nSafari → Compartilhar → "Adicionar à Tela de Início"';
+    if (btnEl) btnEl.style.display = 'none';
+    return;
+  }
   if (!('Notification' in window) || !('PushManager' in window)) {
-    if (statusEl) statusEl.textContent = isStandalone
-      ? '⚠️ Requer iOS 16.4 ou superior.'
-      : '📲 Adicione à tela inicial primeiro:\nSafari → Compartilhar → "Adicionar à Tela de Início"';
+    if (statusEl) statusEl.textContent = '⚠️ Requer iOS 16.4 ou superior.';
     if (btnEl) btnEl.style.display = 'none';
     return;
   }
