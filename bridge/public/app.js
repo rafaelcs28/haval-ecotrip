@@ -93,7 +93,6 @@ function initActionsPanel() {
     ]},
     { title: '⚡ Recarga', items: [
       { label: '✕ Interromper recarga',  cls: 'red full',   action: 'charge_stop',    confirm: '⚡ Interromper recarga?',            msg: 'A recarga será interrompida remotamente.',       color: '#ef4444' },
-      { label: '📋 Atualizar histórico', cls: 'muted full', action: 'charge_history', confirm: '📋 Atualizar histórico de recarga?', msg: 'O histórico de recarga será sincronizado.',      color: '#94a3b8' },
     ]},
   ];
 
