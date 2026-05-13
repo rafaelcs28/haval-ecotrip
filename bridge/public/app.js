@@ -2231,8 +2231,8 @@ async function _drawOSMMap(ctx, gps, mx, my, mw, mh) {
       });
     })
   );
-  // Route (speed-colored)
-  const spdClr = s => s < 40 ? '#39FF88' : s < 80 ? '#FFD60A' : s < 120 ? '#FF5F1F' : '#FF5555';
+  // Route (speed-colored) — green / orange / red (no yellow — poor contrast on OSM tiles)
+  const spdClr = s => s < 40 ? '#22c55e' : s < 80 ? '#f97316' : s < 120 ? '#ef4444' : '#991b1b';
   ctx.lineWidth = 3.5; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
   for (let i = 1; i < gps.length; i++) {
     const a = gps[i - 1], b = gps[i];
@@ -2250,7 +2250,7 @@ async function _drawOSMMap(ctx, gps, mx, my, mw, mh) {
   });
   // Speed legend (bottom-left)
   const legY = my + mh - 20;
-  [['#39FF88', '<40'], ['#FFD60A', '40–80'], ['#FF5F1F', '80–120'], ['#FF5555', '120+']].reduce((lx, [c, lbl]) => {
+  [['#22c55e', '<40'], ['#f97316', '40–80'], ['#ef4444', '80–120'], ['#991b1b', '120+']].reduce((lx, [c, lbl]) => {
     ctx.fillStyle = 'rgba(11,15,26,.80)'; ctx.fillRect(lx - 2, legY - 2, 52, 16);
     ctx.fillStyle = c; ctx.fillRect(lx, legY + 5, 10, 4);
     ctx.font = '8px system-ui, sans-serif'; ctx.fillStyle = '#f1f5f9'; ctx.textAlign = 'left';
@@ -2464,8 +2464,8 @@ function initTripMap(samples) {
     return;
   }
 
-  // Polyline colorida por velocidade (verde < 40 · amarelo < 80 · laranja < 120 · vermelho ≥ 120)
-  const spdColor = spd => spd < 40 ? '#39FF88' : spd < 80 ? '#FFD60A' : spd < 120 ? '#FF5F1F' : '#FF5555';
+  // Polyline colorida por velocidade (verde < 40 · laranja < 80 · vermelho < 120 · verm. escuro ≥ 120)
+  const spdColor = spd => spd < 40 ? '#22c55e' : spd < 80 ? '#f97316' : spd < 120 ? '#ef4444' : '#991b1b';
   for (let i = 1; i < gpsPoints.length; i++) {
     const a = gpsPoints[i-1], b = gpsPoints[i];
     L.polyline([[a.lat, a.lng],[b.lat, b.lng]], { color: spdColor(a.spd), weight: 4, opacity: 0.85 }).addTo(leafletMap);
