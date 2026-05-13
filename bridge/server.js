@@ -721,33 +721,6 @@ app.post('/api/admin/clear-history', (req, res) => {
   }
 });
 
-// POST /api/admin/purge-autotrips — remove auto-trips irrelevantes (dist=0, kwh<0.10, <60s)
-app.post('/api/admin/purge-autotrips', (req, res) => {
-  if (!adminCheckToken(req, res)) return;
-  try {
-    let purged = 0;
-    const before = autoTripsArr.length;
-    autoTripsArr = autoTripsArr.filter(t => {
-      const keep = (t.distKm || 0) > 0 || (t.netKwh || 0) >= 0.10 || (t.timeSec || 0) >= 60;
-      if (!keep) {
-        const filePath = path.join(AUTOTRIPS_DIR, `${t.tripId}.json`);
-        try { fs.unlinkSync(filePath); } catch (_) {}
-        purged++;
-      }
-      return keep;
-    });
-    console.log(`[admin] Purge auto-trips: ${purged} removidos (${before} → ${autoTripsArr.length})`);
-    const preview = autoTripsArr.slice(0, 20).map(t => ({
-      tripId: t.tripId, distKm: t.distKm || 0, netKwh: t.netKwh || 0, timeSec: t.timeSec || 0,
-    }));
-    res.json({ ok: true, purged, remaining: autoTripsArr.length, preview,
-      msg: `${purged} trip${purged !== 1 ? 's' : ''} irrelevante${purged !== 1 ? 's' : ''} removida${purged !== 1 ? 's' : ''}.` });
-  } catch (e) {
-    console.error('[admin] Erro no purge:', e.message);
-    res.status(500).json({ error: e.message });
-  }
-});
-
 // ── Auto-trips + Telemetria ───────────────────────────────────────────────────
 
 app.post('/api/autotrips', (req, res) => {
@@ -847,6 +820,27 @@ app.get('/api/autotrips', (req, res) => {
   const since = parseInt(req.query.since || '0', 10);
   const arr   = since > 0 ? autoTripsArr.filter(t => t.startMs > since) : autoTripsArr;
   res.json(arr.slice(0, 300));
+});
+
+app.delete('/api/autotrips/:tripId', (req, res) => {
+  const id = String(req.params.tripId).replace(/\D/g, '');
+  if (!id) return res.status(400).json({ error: 'invalid tripId' });
+  const idx = autoTripsArr.findIndex(t => t.tripId === id);
+  if (idx < 0) return res.status(404).json({ error: 'not found' });
+  autoTripsArr.splice(idx, 1);
+  const filePath = path.join(AUTOTRIPS_DIR, `${id}.json`);
+  try { fs.unlinkSync(filePath); } catch (_) {}
+  console.log(`[delete] AutoTrip ${id} removido`);
+  res.json({ ok: true });
+});
+
+app.delete('/api/trips/:tripId', (req, res) => {
+  const id = decodeURIComponent(req.params.tripId);
+  if (!tripsMap.has(id)) return res.status(404).json({ error: 'not found' });
+  tripsMap.delete(id);
+  fs.writeFileSync(TRIPS_FILE, JSON.stringify({ trips: [...tripsMap.values()] }, null, 2));
+  console.log(`[delete] Trip manual ${id} removido`);
+  res.json({ ok: true });
 });
 
 // ── Renomear trips (PWA → fila → Android) ─────────────────────────────────────

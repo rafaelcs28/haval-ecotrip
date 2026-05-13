@@ -1660,13 +1660,14 @@ function renderHistory() {
     const statusBadge = rnStatus === 'pending'   ? '<span class="rename-status-pending" title="Aguardando confirmação do carro">⏳</span>'
                       : rnStatus === 'confirmed'  ? '<span class="rename-status-ok" title="Confirmado pelo carro">✓</span>'
                       : '';
-    return `<div class="trip-item">
+    return `<div class="trip-item" id="trip-card-${tripId}">
   <div class="trip-header">
     <div style="flex:1;min-width:0">
       <span class="trip-badge">${fallbackName}</span>
       <div class="trip-name-row" style="margin-top:3px">
         ${displayName ? `<span class="trip-name">${displayName}</span>${statusBadge}` : ''}
         <button class="rename-btn" onclick="startRenameTrip('${tripId}','${tripType}')" title="${displayName ? 'Renomear' : 'Nomear'}">✏️</button>
+        <button class="rename-btn" onclick="deleteTrip('${tripId}','${tripType}')" title="Apagar viagem" style="opacity:.35">🗑</button>
       </div>
       <div class="trip-date">${tsDisplay}</div>
     </div>
@@ -1821,12 +1822,13 @@ function renderAutoTrips() {
     ${kmPerL ? `<div class="trip-metric"><div class="trip-metric-val green">${kmPerL}</div><div class="trip-metric-lbl">km/L</div></div>` : ''}
     ${tempStr ? `<div class="trip-metric"><div class="trip-metric-val blue">${tempStr}</div><div class="trip-metric-lbl">temp. ext.</div></div>` : ''}
   </div>` : '';
-    return `<div class="trip-item">
+    return `<div class="trip-item" id="trip-card-${t.tripId}">
   <div class="trip-header">
     <div style="flex:1;min-width:0">
       <div class="trip-name-row">
         ${displayName ? `<span class="trip-name"${nameStyle ? ` style="${nameStyle}"` : ''}>${displayName}</span>${statusBadge}` : ''}
         <button class="rename-btn" onclick="startRenameTrip('${t.tripId}','auto')" title="${displayName ? 'Renomear' : 'Nomear'}">✏️</button>
+        <button class="rename-btn" onclick="deleteTrip('${t.tripId}','auto')" title="Apagar viagem" style="opacity:.35">🗑</button>
       </div>
       <div class="trip-date">${startDate} · ${dur}${geoLine ? ' · ' + geo : ''}</div>
     </div>
@@ -2617,35 +2619,6 @@ async function adminAction(path, label) {
 function adminRestart() { adminAction('/api/admin/restart', 'Reiniciando'); }
 function adminUpdate()  { adminAction('/api/admin/update',  'Atualizando'); }
 
-async function adminPurgeAutoTrips() {
-  if (!confirm('Remover auto-trips com dist=0, energia<0.10kWh e duração<1min?\n\nEssa ação não pode ser desfeita.')) return;
-  adminSetStatus('⏳ Removendo…', null);
-  try {
-    const r    = await apiFetch('/api/admin/purge-autotrips', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
-    const data = await r.json().catch(() => ({}));
-    if (r.ok && data.ok) {
-      let statusMsg = `✓ ${data.msg || 'OK'} (${data.remaining} restantes)`;
-      if (data.purged === 0 && data.preview?.length) {
-        statusMsg += '\n\nTrips restantes (dist / kWh / seg):\n' +
-          data.preview.map(t => `• ${t.distKm.toFixed(2)}km · ${t.netKwh.toFixed(3)}kWh · ${t.timeSec}s`).join('\n');
-      }
-      adminSetStatus(statusMsg, true);
-      // Limpa cache local e re-sincroniza
-      if (data.purged > 0) {
-        cachedAutoTrips = null;
-        await _idbClearStore('autotrips');
-        await _idbSetMeta('lastAutoMs', 0);
-        await syncAllCache({ silent: true });
-        if (activePanel === 'auto') renderAutoTrips();
-      }
-    } else {
-      adminSetStatus('✗ ' + (data.error || `HTTP ${r.status}`), false);
-    }
-  } catch (e) {
-    if (e.message !== 'unauthorized') adminSetStatus('✗ Erro ao conectar.', false);
-  }
-}
-
 async function adminClearHistory() {
   const pw = prompt('Digite a senha para confirmar a exclusão do histórico:');
   if (pw === null) return;                          // cancelou
@@ -3158,6 +3131,36 @@ async function sendRemoteAction(action, successMsg) {
 
 // ── Renomear trip — modal estilo Android ─────────────────────────────────────
 let _renameState = null;  // { tripId, type, currentName }
+
+window.deleteTrip = async function(tripId, type) {
+  if (!confirm('Apagar esta viagem?\nEssa ação não pode ser desfeita.')) return;
+  const endpoint = type === 'auto'
+    ? `/api/autotrips/${encodeURIComponent(tripId)}`
+    : `/api/trips/${encodeURIComponent(tripId)}`;
+  try {
+    const r = await apiFetch(endpoint, { method: 'DELETE' });
+    if (!r.ok) { showToast('✗ Erro ao apagar viagem'); return; }
+    // Remove do cache local e IndexedDB
+    if (type === 'auto') {
+      if (cachedAutoTrips) cachedAutoTrips = cachedAutoTrips.filter(t => t.tripId !== String(tripId));
+      _openIDB().then(db => {
+        const tx = db.transaction('autotrips', 'readwrite');
+        tx.objectStore('autotrips').delete(Number(tripId) || tripId);
+      }).catch(() => {});
+    } else {
+      if (cachedTrips) cachedTrips = cachedTrips.filter(t => String(t.timestamp) !== String(tripId));
+      _openIDB().then(db => {
+        const tx = db.transaction('trips', 'readwrite');
+        tx.objectStore('trips').delete(tripId);
+      }).catch(() => {});
+    }
+    // Remove card do DOM sem re-renderizar tudo
+    document.getElementById('trip-card-' + tripId)?.remove();
+    showToast('✓ Viagem apagada');
+  } catch (e) {
+    if (e.message !== 'unauthorized') showToast('✗ Erro ao apagar viagem');
+  }
+};
 
 window.startRenameTrip = function(tripId, type) {
   // Lê nome atual do cache (evita problemas de escape em onclick)
