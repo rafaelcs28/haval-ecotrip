@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_BUILD = 'b156';   // bump a cada deploy para confirmar versão no admin
+const APP_BUILD = 'b157';   // bump a cada deploy para confirmar versão no admin
 
 // ── Estado local ──────────────────────────────────────────────────────────────
 let state = {};
@@ -3152,6 +3152,7 @@ function _statsRecordsHTML(trips) {
   if (!trips.length) return _statsCard('🏆 Recordes pessoais', '<div style="color:#475569;font-size:12px">Nenhuma viagem com mais de 2 km ainda.</div>');
 
   const KWH_PER_L = 8.9; // equivalência energética da gasolina (kWh/L)
+  const { gas: _pg, kwh: _pk } = getPrices();
 
   // Mais eficiente elétrica: só viagens 100% elétricas (fuelL ≈ 0)
   const byEff = trips
@@ -3215,7 +3216,35 @@ function _statsRecordsHTML(trips) {
     shortDate(byFuel.startMs) + ' · ' + f1(byFuel.distKm) + ' km · ' + f2(byFuel.fuelL) + ' L');
   if (!rows) rows = '<div style="color:#475569;font-size:12px">Dados insuficientes.</div>';
 
-  return _statsCard('🏆 Recordes pessoais (' + trips.length + ' viagens)', rows);
+  // ── Top 3 menor R$/km ─────────────────────────────────────────────────────
+  let top3Rows = '';
+  if (_pg > 0 || _pk > 0) {
+    const medals = ['🥇', '🥈', '🥉'];
+    const top3 = trips
+      .filter(t => (t.distKm || 0) > 5)
+      .map(t => {
+        const cost = (t.fuelL || 0) * _pg + Math.max(0, t.netKwh || 0) * _pk;
+        return cost > 0 ? { t, cPkm: cost / t.distKm, cost } : null;
+      })
+      .filter(Boolean)
+      .sort((a, b) => a.cPkm - b.cPkm)
+      .slice(0, 3);
+    if (top3.length) {
+      top3.forEach(({ t, cPkm, cost }, i) => {
+        top3Rows += _statsRow(
+          medals[i],
+          `${i + 1}º menor custo/km`,
+          'R$ ' + f3(cPkm) + '/km',
+          shortDate(t.startMs) + ' · ' + f1(t.distKm) + ' km · R$ ' + f2(cost)
+        );
+      });
+    }
+  }
+  const top3Card = top3Rows
+    ? _statsCard('💰 Top 3 — menor R$/km <span style="font-size:10px;color:#475569;font-weight:400">(> 5 km)</span>', top3Rows)
+    : '';
+
+  return _statsCard('🏆 Recordes pessoais (' + trips.length + ' viagens)', rows) + top3Card;
 }
 
 async function _statsWeeklyHTML() {
