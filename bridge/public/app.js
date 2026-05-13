@@ -215,8 +215,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // ── Notification preferences panel ───────────────────────────────────────────
 const NOTIF_ITEMS = [
-  { key: 'charge_start', icon: '⚡', label: 'Recarga iniciada' },
-  { key: 'charge_end',   icon: '✅', label: 'Recarga concluída' },
+  { key: 'charge_start',  icon: '⚡', label: 'Recarga iniciada' },
+  { key: 'charge_end',    icon: '✅', label: 'Recarga concluída' },
+  { key: 'charge_ending', icon: '🔔', label: 'Fim de recarga próximo', minuteKey: 'charge_ending_min' },
   { key: 'door_open',    icon: '🚪', label: 'Porta aberta',    sub: 'qualquer porta' },
   { key: 'door_close',   icon: '🚪', label: 'Porta fechada',   sub: 'qualquer porta' },
   { key: 'trunk_open',   icon: '🧳', label: 'Porta-malas aberta' },
@@ -240,7 +241,7 @@ async function initNotifPanel() {
 function _renderNotifToggles() {
   const el = document.getElementById('notif-toggles');
   if (!el) return;
-  el.innerHTML = NOTIF_ITEMS.map(({ key, icon, label, sub }) => `
+  el.innerHTML = NOTIF_ITEMS.map(({ key, icon, label, sub, minuteKey }) => `
     <div class="notif-row">
       <label class="notif-label" for="ntog-${key}">
         <span>${icon}</span>
@@ -251,7 +252,15 @@ function _renderNotifToggles() {
           onchange="saveNotifPref('${key}', this.checked)">
         <span class="toggle-slider"></span>
       </label>
-    </div>`).join('');
+    </div>
+    ${minuteKey ? `
+    <div class="notif-minutes-row">
+      <span class="notif-label-sub">Avisar com</span>
+      <input type="number" id="ntog-${minuteKey}" class="notif-minutes-input"
+        min="1" max="20" value="${_notifPrefs[minuteKey] ?? 5}"
+        onchange="saveNotifPref('${minuteKey}', Math.max(1,Math.min(20,+this.value)))">
+      <span class="notif-label-sub">min de antecedência</span>
+    </div>` : ''}`).join('');
 }
 
 window.saveNotifPref = async function(key, value) {

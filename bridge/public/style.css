@@ -612,6 +612,24 @@ html, body {
   border-bottom: 1px solid var(--border);
 }
 .notif-row:last-child { border-bottom: none; }
+.notif-minutes-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0 8px 24px;
+  border-bottom: 1px solid var(--border);
+}
+.notif-minutes-row:last-child { border-bottom: none; }
+.notif-minutes-input {
+  width: 48px;
+  padding: 3px 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 13px;
+  text-align: center;
+}
 .notif-label {
   font-size: 13px;
   color: var(--text);

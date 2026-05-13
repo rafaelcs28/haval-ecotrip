@@ -106,16 +106,18 @@ async function sendPush(title, body) {
 
 // ── Preferências de notificações push ────────────────────────────────────────
 const NOTIF_DEFAULTS = {
-  charge_start: true,   // ⚡ Recarga iniciada
-  charge_end:   true,   // ✅ Recarga concluída
-  door_open:    true,   // 🚪 Qualquer porta aberta
-  door_close:   false,  // 🚪 Qualquer porta fechada
-  trunk_open:   true,   // 🧳 Porta-malas aberta
-  trunk_close:  true,   // 🧳 Porta-malas fechada
-  engine_on:    true,   // 🔑 Motor ligado
-  engine_off:   false,  // 🔑 Motor desligado
-  app_update:   true,   // 📱 Nova versão do app instalada no carro
-  trip_end:     true,   // 🏁 Viagem concluída (auto-trip)
+  charge_start:      true,   // ⚡ Recarga iniciada
+  charge_end:        true,   // ✅ Recarga concluída
+  charge_ending:     false,  // 🔔 Aviso de proximidade do fim da recarga
+  charge_ending_min: 5,      // minutos antes do fim para enviar o aviso (1–20)
+  door_open:         true,   // 🚪 Qualquer porta aberta
+  door_close:        false,  // 🚪 Qualquer porta fechada
+  trunk_open:        true,   // 🧳 Porta-malas aberta
+  trunk_close:       true,   // 🧳 Porta-malas fechada
+  engine_on:         true,   // 🔑 Motor ligado
+  engine_off:        false,  // 🔑 Motor desligado
+  app_update:        true,   // 📱 Nova versão do app instalada no carro
+  trip_end:          true,   // 🏁 Viagem concluída (auto-trip)
 };
 let notifPrefs = { ...NOTIF_DEFAULTS };
 try {
@@ -125,6 +127,9 @@ try {
 function saveNotifPrefs() {
   try { fs.writeFileSync(NOTIF_PREFS_FILE, JSON.stringify(notifPrefs, null, 2)); } catch (_) {}
 }
+
+// Guard para não reenviar a notificação de fim de recarga na mesma sessão
+let chargeEndingNotifSent = false;
 
 // ── Detecção de transição de estado de carga ──────────────────────────────────
 let prevChargingState  = null;
@@ -1013,11 +1018,17 @@ app.post('/api/push/reset-subs', (_req, res) => {
 // GET /api/push/prefs  — preferências de notificação por tipo de evento
 app.get('/api/push/prefs', (_req, res) => res.json(notifPrefs));
 
-// POST /api/push/prefs  { key, value }  — atualiza uma preferência
+// POST /api/push/prefs  { key, value }  — atualiza uma preferência (boolean ou numérica)
 app.post('/api/push/prefs', (req, res) => {
   const { key, value } = req.body || {};
   if (!key || !(key in NOTIF_DEFAULTS)) return res.status(400).json({ error: 'chave inválida' });
-  notifPrefs[key] = !!value;
+  if (typeof NOTIF_DEFAULTS[key] === 'number') {
+    const n = parseInt(value);
+    if (isNaN(n)) return res.status(400).json({ error: 'valor numérico inválido' });
+    notifPrefs[key] = Math.max(1, Math.min(20, n));
+  } else {
+    notifPrefs[key] = !!value;
+  }
   saveNotifPrefs();
   res.json({ ok: true, prefs: notifPrefs });
 });
@@ -1269,6 +1280,7 @@ function applyMqttMessage(key, value, isRetained = false) {
 
         } else if (value !== 'Carregando' && prev === 'Carregando') {
           if (chargeStartTimer) { clearTimeout(chargeStartTimer); chargeStartTimer = null; }
+          chargeEndingNotifSent = false;  // reset para próxima sessão
           if (value === 'Finalizado' && notifPrefs.charge_end) {
             const kwh = state.charge_session_kwh || 0;
             sendPush('✅ Recarga concluída', kwh > 0.05
@@ -1281,7 +1293,24 @@ function applyMqttMessage(key, value, isRetained = false) {
     }
     case 'charge_power_kw':      state.charge_power_kw      = num(value); break;
     case 'charge_session_kwh':   state.charge_session_kwh   = num(value); break;
-    case 'charge_remaining_min': state.charge_remaining_min = num(value); break;
+    case 'charge_remaining_min': {
+      const rem = num(value);
+      state.charge_remaining_min = rem;
+      // Reset guard quando o tempo restante sobe (nova sessão ou leitura instável)
+      if (rem > (notifPrefs.charge_ending_min || 5) + 2) chargeEndingNotifSent = false;
+      // Dispara notificação quando threshold atingido
+      if (
+        notifPrefs.charge_ending &&
+        rem > 0 &&
+        rem <= (notifPrefs.charge_ending_min || 5) &&
+        !chargeEndingNotifSent &&
+        state.charging_state === 'Carregando'
+      ) {
+        chargeEndingNotifSent = true;
+        sendPush('🔔 Recarga finalizando', `Recarga finalizando em ${rem} minuto${rem !== 1 ? 's' : ''}.`);
+      }
+      break;
+    }
     case 'ha/charge_limit/state': {
       const pct = parseInt(value);
       if ([50,60,70,80,90,100].includes(pct)) state.charge_limit_pct = pct;
