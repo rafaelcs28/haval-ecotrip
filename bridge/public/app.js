@@ -1894,11 +1894,13 @@ function renderAutoTrips() {
 
   // Resumo — mesma estrutura 2 linhas do hist
   const { gas: priceGas, kwh: priceKwh } = getPrices();
+  const KWH_PER_L = 8.9;
   const totDist   = trips.reduce((s, t) => s + (t.distKm  || 0), 0);
   const totFuel   = trips.reduce((s, t) => s + (t.fuelL   || 0), 0);
   const totNetKwh = trips.reduce((s, t) => s + (t.netKwh  || 0), 0);
   const avgKwh100 = totDist > 0.1   ? totNetKwh / totDist * 100 : 0;
-  const avgKmL    = totFuel > 0.001 ? totDist   / totFuel       : 0;
+  const avgEqKmL  = totDist > 0.1 && (totNetKwh > 0 || totFuel > 0.001)
+    ? totDist / (totNetKwh / KWH_PER_L + totFuel) : 0;
   const totCost   = (priceGas > 0 || priceKwh > 0)
     ? totFuel * priceGas + totNetKwh * priceKwh : 0;
 
@@ -1907,7 +1909,7 @@ function renderAutoTrips() {
   <div class="metrics-row">
     <div class="metric"><div class="metric-value blue sm">${f1(totDist)} km</div><div class="metric-label">distância</div></div>
     <div class="metric"><div class="metric-value green sm">${avgKwh100 > 0 ? f1(avgKwh100) : '--'}</div><div class="metric-label">kWh/100km</div></div>
-    <div class="metric"><div class="metric-value green sm">${avgKmL > 0 ? f1(avgKmL) : '--'}</div><div class="metric-label">km/L</div></div>
+    <div class="metric"><div class="metric-value green sm">${avgEqKmL > 0 ? f1(avgEqKmL) : '--'}</div><div class="metric-label">km/L eq</div></div>
   </div>
   <div class="metrics-row" style="margin-top:4px">
     <div class="metric"><div class="metric-value orange sm">${totFuel > 0.001 ? f2(totFuel) + ' L' : '--'}</div><div class="metric-label">combustível</div></div>
@@ -1924,6 +1926,8 @@ function renderAutoTrips() {
     const fuelL      = t.fuelL       > 0    ? f2(t.fuelL)  + ' L'   : '--';
     const kwh100     = t.distKm > 0.1 && t.netKwh > 0 ? f1(t.netKwh / t.distKm * 100) : null;
     const kmPerL     = t.fuelL > 0.001 ? f1(t.distKm / t.fuelL) : null;
+    const eqKmL      = t.distKm > 0.1 && ((t.netKwh || 0) > 0 || t.fuelL > 0.001)
+      ? f1(t.distKm / ((t.netKwh || 0) / KWH_PER_L + (t.fuelL || 0))) : null;
     const socDelta   = t.startSocPct > 0    ? `${t.startSocPct.toFixed(0)}%→${t.endSocPct.toFixed(0)}%` : '--';
     const maxSpd     = t.maxSpeedKmh > 0    ? `${Math.round(t.maxSpeedKmh)} km/h` : null;
     const avgSpd     = t.timeSec > 0        ? `${Math.round(t.distKm / (t.timeSec / 3600))} km/h` : null;
@@ -1947,13 +1951,13 @@ function renderAutoTrips() {
       : ((priceGas > 0 || priceKwh > 0) ? atFuelL * priceGas + atNetKwh * priceKwh : 0);
     const costStr = `<span id="cost-badge-${t.tripId}" class="trip-cost"${tripCost <= 0 ? ' style="display:none"' : atOv ? ' style="border-bottom:1px dashed rgba(251,191,36,.5)"' : ''}>${tripCost > 0 ? 'R$ ' + f2(tripCost) : ''}</span>`;
     // Row 2: consumo — só exibe se tiver pelo menos um campo com dado
-    const hasRow2  = netKwh !== '--' || fuelL !== '--' || kwh100 || kmPerL || tempStr;
+    const hasRow2  = netKwh !== '--' || fuelL !== '--' || kwh100 || eqKmL || tempStr;
     const row2     = hasRow2 ? `
   <div class="trip-metrics trip-metrics-row2">
     ${kwh100 ? `<div class="trip-metric"><div class="trip-metric-val green">${kwh100}</div><div class="trip-metric-lbl">kWh/100km</div></div>` : ''}
     ${netKwh !== '--' ? `<div class="trip-metric"><div class="trip-metric-val teal">${netKwh}</div><div class="trip-metric-lbl">kWh liq.</div></div>` : ''}
     ${fuelL !== '--' ? `<div class="trip-metric"><div class="trip-metric-val orange">${fuelL}</div><div class="trip-metric-lbl">combust.</div></div>` : ''}
-    ${kmPerL ? `<div class="trip-metric"><div class="trip-metric-val green">${kmPerL}</div><div class="trip-metric-lbl">km/L</div></div>` : ''}
+    ${eqKmL ? `<div class="trip-metric"><div class="trip-metric-val green">${eqKmL}</div><div class="trip-metric-lbl">km/L eq</div></div>` : ''}
     ${tempStr ? `<div class="trip-metric"><div class="trip-metric-val blue">${tempStr}</div><div class="trip-metric-lbl">temp. ext.</div></div>` : ''}
   </div>` : '';
     return `<div class="trip-item" id="trip-card-${t.tripId}">
@@ -3153,7 +3157,7 @@ function _statsRecordsHTML(trips) {
       return (!b || pct > (b.regenKwh || 0) / b.energyKwh) ? t : b;
     }, null);
 
-  const byFuel = trips.filter(t => (t.fuelL || 0) > 0.05 && (t.distKm || 0) > 0)
+  const byFuel = trips.filter(t => (t.fuelL || 0) > 0.05 && (t.distKm || 0) > 30)
     .reduce((b, t) => (!b || t.distKm / t.fuelL > b.distKm / b.fuelL) ? t : b, null);
 
   const shortDate = ms => {
@@ -3182,9 +3186,9 @@ function _statsRecordsHTML(trips) {
       regenPct + '% do bruto',
       shortDate(byRegen.startMs) + ' · ' + f1(byRegen.distKm) + ' km · ' + f2(byRegen.regenKwh) + ' kWh');
   }
-  if (byFuel) rows += _statsRow('⛽', 'Mais econômica',
+  if (byFuel) rows += _statsRow('⛽', 'Melhor viagem com gasolina',
     f1(byFuel.distKm / byFuel.fuelL) + ' km/L',
-    shortDate(byFuel.startMs) + ' · ' + f1(byFuel.distKm) + ' km');
+    shortDate(byFuel.startMs) + ' · ' + f1(byFuel.distKm) + ' km · ' + f2(byFuel.fuelL) + ' L');
   if (!rows) rows = '<div style="color:#475569;font-size:12px">Dados insuficientes.</div>';
 
   return _statsCard('🏆 Recordes pessoais (' + trips.length + ' viagens)', rows);
