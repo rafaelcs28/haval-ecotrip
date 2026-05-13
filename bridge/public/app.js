@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_BUILD = 'b161';   // bump a cada deploy para confirmar versão no admin
+const APP_BUILD = 'b162';   // bump a cada deploy para confirmar versão no admin
 
 // ── Estado local ──────────────────────────────────────────────────────────────
 let state = {};
@@ -2912,7 +2912,7 @@ async function adminClearHistory() {
 }
 
 async function adminClearSnapshots() {
-  if (!confirm('Apagar todos os snapshots de lifetime?\nOs comparativos semanal e mensal ficarão sem dados até novos snapshots acumularem (chegam a cada 5 min enquanto o carro envia dados).')) return;
+  if (!confirm('Zerar o histórico de comparativos?\n\nIsso apaga apenas os snapshots usados para os gráficos semanal e mensal.\nOs dados lifetime reais (km, kWh, etc.) NÃO são afetados.\n\nNovos snapshots chegarão a cada 5 min enquanto o carro enviar dados.')) return;
   adminAction('/api/lifetime/snapshots/clear', 'Limpando snapshots');
 }
 
