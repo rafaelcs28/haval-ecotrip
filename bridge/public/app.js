@@ -1608,9 +1608,16 @@ function renderCharges() {
     return;
   }
 
-  const totalKwh = charges.reduce((s,c) => s + (c.energy_kwh   || 0), 0);
-  const totalSec = charges.reduce((s,c) => s + (c.duration_sec || 0), 0);
-  const avgPwr   = totalSec > 0 ? totalKwh / (totalSec / 3600) : 0;
+  const priceKwh  = state.price_kwh || 0;
+  const totalKwh  = charges.reduce((s,c) => s + (c.energy_kwh   || 0), 0);
+  const totalSec  = charges.reduce((s,c) => s + (c.duration_sec || 0), 0);
+  const avgPwr    = totalSec > 0 ? totalKwh / (totalSec / 3600) : 0;
+  const totalCost = charges.reduce((s, c) => {
+    const ov  = _chargeCostOverride(c.timestamp_ms || 0);
+    const kwh = c.energy_kwh || 0;
+    return s + (ov ? ov.total : priceKwh * kwh);
+  }, 0);
+  const hasCost = totalCost > 0;
 
   html += `<div class="charge-summary-card">
   <div class="card-title">Resumo — ${charges.length} sessão${charges.length !== 1 ? 'ões' : ''}</div>
@@ -1618,6 +1625,7 @@ function renderCharges() {
     <div class="metric"><div class="metric-value teal sm">${f2(totalKwh)} kWh</div><div class="metric-label">total carregado</div></div>
     <div class="metric"><div class="metric-value muted sm">${fmtDur(totalSec)}</div><div class="metric-label">tempo total</div></div>
     <div class="metric"><div class="metric-value blue sm">${f1(avgPwr)} kW</div><div class="metric-label">pot. média</div></div>
+    ${hasCost ? `<div class="metric"><div class="metric-value green sm">R$ ${f2(totalCost)}</div><div class="metric-label">custo total</div></div>` : ''}
   </div>
 </div>`;
 
@@ -1625,10 +1633,18 @@ function renderCharges() {
     const delta  = (c.soc_end || 0) - (c.soc_start || 0);
     const col    = socColor(delta);
     const ts     = c.timestamp_ms || 0;
-    const ov     = _chargeCostOverride(ts);
-    const kwh    = c.energy_kwh || 0;
-    const totalCostHtml = `<span id="chg-cost-${ts}" class="trip-cost"${!ov ? ' style="display:none"' : ' style="border-bottom:1px dashed rgba(251,191,36,.5)"'}>${ov ? 'R$ ' + f2(ov.total) : ''}</span>`;
-    const unitHtml      = `<span id="chg-unit-${ts}" style="font-size:10px;color:#64748b;${!ov ? 'display:none' : ''}">${ov ? f3(ov.perKwh) + ' R$/kWh' : ''}</span>`;
+    const ov   = _chargeCostOverride(ts);
+    const kwh  = c.energy_kwh || 0;
+    // Custo: override manual tem prioridade; padrão = price_kwh das configurações
+    const cost = ov
+      ? { total: ov.total, perKwh: ov.perKwh, isOv: true }
+      : (priceKwh > 0 && kwh > 0 ? { total: kwh * priceKwh, perKwh: priceKwh, isOv: false } : null);
+    const totalCostHtml = cost
+      ? `<span id="chg-cost-${ts}" class="trip-cost"${cost.isOv ? ' style="border-bottom:1px dashed rgba(251,191,36,.5)"' : ''}>R$ ${f2(cost.total)}</span>`
+      : `<span id="chg-cost-${ts}" class="trip-cost" style="display:none"></span>`;
+    const unitHtml = cost
+      ? `<span id="chg-unit-${ts}" style="font-size:10px;color:#64748b">${f3(cost.perKwh)} R$/kWh</span>`
+      : `<span id="chg-unit-${ts}" style="font-size:10px;color:#64748b;display:none"></span>`;
     return `<div class="trip-item" id="charge-card-${ts}">
   <div class="trip-header">
     <div style="flex:1;min-width:0">
@@ -1644,7 +1660,7 @@ function renderCharges() {
     </div>
   </div>
   <div id="charge-edit-${ts}" class="cost-edit-form" style="display:none">
-    <div style="font-size:11px;color:#64748b;width:100%;margin-bottom:2px">Total pago pela sessão (R$) — calcula R$/kWh automaticamente</div>
+    <div style="font-size:11px;color:#64748b;width:100%;margin-bottom:2px">Total pago (R$) — deixe 0 para usar o preço das configurações</div>
     <input class="charge-total-input" type="number" step="0.01" min="0" placeholder="ex: 12.50"${ov ? ` value="${ov.total}"` : ''}>
     <button class="cost-apply-btn" onclick="applyChargeCost(${ts},${kwh.toFixed(3)})">Salvar</button>
   </div>
@@ -2772,14 +2788,27 @@ window.applyChargeCost = function(ts, energyKwh) {
   const el = document.getElementById('charge-edit-' + ts);
   if (!el) return;
   const total = parseFloat(el.querySelector('.charge-total-input')?.value || '0');
-  if (total <= 0) return;
-  const perKwh = energyKwh > 0 ? total / energyKwh : 0;
-  localStorage.setItem('eco_chg_cost_' + ts, JSON.stringify({ total, perKwh }));
-  // Atualiza badges in-place
   const totalBadge = document.getElementById('chg-cost-' + ts);
   const unitBadge  = document.getElementById('chg-unit-' + ts);
-  if (totalBadge) { totalBadge.textContent = 'R$ ' + f2(total); totalBadge.style.display = ''; totalBadge.style.borderBottom = '1px dashed rgba(251,191,36,.5)'; }
-  if (unitBadge)  { unitBadge.textContent  = f3(perKwh) + ' R$/kWh'; unitBadge.style.display = ''; }
+
+  if (total <= 0) {
+    // Limpa override → volta ao preço padrão das configurações
+    localStorage.removeItem('eco_chg_cost_' + ts);
+    const defKwh   = state.price_kwh || 0;
+    const defTotal = defKwh > 0 ? defKwh * energyKwh : 0;
+    if (defTotal > 0) {
+      if (totalBadge) { totalBadge.textContent = 'R$ ' + f2(defTotal); totalBadge.style.display = ''; totalBadge.style.borderBottom = 'none'; }
+      if (unitBadge)  { unitBadge.textContent  = f3(defKwh) + ' R$/kWh'; unitBadge.style.display = ''; }
+    } else {
+      if (totalBadge) totalBadge.style.display = 'none';
+      if (unitBadge)  unitBadge.style.display  = 'none';
+    }
+  } else {
+    const perKwh = energyKwh > 0 ? total / energyKwh : 0;
+    localStorage.setItem('eco_chg_cost_' + ts, JSON.stringify({ total, perKwh }));
+    if (totalBadge) { totalBadge.textContent = 'R$ ' + f2(total); totalBadge.style.display = ''; totalBadge.style.borderBottom = '1px dashed rgba(251,191,36,.5)'; }
+    if (unitBadge)  { unitBadge.textContent  = f3(perKwh) + ' R$/kWh'; unitBadge.style.display = ''; }
+  }
   el.style.display = 'none';
 };
 
