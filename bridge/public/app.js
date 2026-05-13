@@ -1587,6 +1587,7 @@ function renderHistory() {
       net_kwh:         t.netKwh  || 0,
       regen_kwh:       t.regenKwh || 0,
       time_sec:        t.timeSec  || 0,
+      avg_speed_kmh:   t.timeSec > 0 ? (t.distKm / (t.timeSec / 3600)) : 0,
       total_cost_brl:  0,
     }));
   }
@@ -1664,6 +1665,7 @@ function renderHistory() {
     <div class="trip-metric"><div class="trip-metric-val green">${t.km_per_l > 0 ? f1(t.km_per_l) : '--'}</div><div class="trip-metric-lbl">km/L</div></div>
     <div class="trip-metric"><div class="trip-metric-val orange">${t.fuel_l > 0 ? f2(t.fuel_l) + ' L' : '--'}</div><div class="trip-metric-lbl">combust.</div></div>
     <div class="trip-metric"><div class="trip-metric-val teal">${(t.net_kwh || 0) > 0 ? f2(t.net_kwh) + ' kWh' : '--'}</div><div class="trip-metric-lbl">kWh liq.</div></div>
+    <div class="trip-metric"><div class="trip-metric-val" style="color:var(--muted)">${(t.avg_speed_kmh || 0) > 0 ? f1(t.avg_speed_kmh) + ' km/h' : '--'}</div><div class="trip-metric-lbl">vel. méd.</div></div>
     <div class="trip-metric"><div class="trip-metric-val" style="color:#5B7394">${fmtTripTime(t.time_sec)}</div><div class="trip-metric-lbl">duração</div></div>
   </div>
 </div>`;
