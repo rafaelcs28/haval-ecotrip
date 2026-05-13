@@ -117,6 +117,10 @@
             <div class="metric-value muted" id="d-chrg-remain">--</div>
             <div class="metric-label">Restante</div>
           </div>
+          <div class="metric">
+            <div class="metric-value" id="d-chrg-finish" style="color:#60a5fa">--</div>
+            <div class="metric-label">Pronto às</div>
+          </div>
         </div>
       </div>
 
@@ -246,6 +250,13 @@
                 <span style="font-size:9px;color:#3D5166;white-space:nowrap">CONS</span>
               </div>
             </div>
+          </div>
+          <!-- Modo de condução + sparkline de velocidade -->
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-top:5px;gap:8px">
+            <span id="d-drive-mode" style="display:none;font-size:10px;font-weight:700;padding:2px 9px;border-radius:10px;white-space:nowrap;flex-shrink:0"></span>
+            <svg id="d-spd-spark" width="100%" height="20" viewBox="0 0 150 20" preserveAspectRatio="none" style="flex:1;overflow:visible">
+              <polyline id="d-spd-spark-line" points="" fill="none" stroke="#3b82f6" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>
+            </svg>
           </div>
         </div>
       </div>

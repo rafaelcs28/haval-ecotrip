@@ -146,6 +146,7 @@ const NOTIF_ITEMS = [
   { key: 'engine_on',    icon: '🔑', label: 'Motor ligado' },
   { key: 'engine_off',   icon: '🔑', label: 'Motor desligado' },
   { key: 'app_update',   icon: '📱', label: 'Atualização do app', sub: 'nova versão instalada no carro' },
+  { key: 'trip_end',    icon: '🏁', label: 'Viagem concluída',   sub: 'ao finalizar auto-trip' },
 ];
 
 let _notifPrefs = {};
@@ -766,6 +767,7 @@ const filterState = {
 };
 let cachedCharges = null;
 let cachedTrips   = null;
+const _spdBuf = new Array(30).fill(0);  // buffer circular para sparkline de velocidade
 
 // ── Cache local — IndexedDB ────────────────────────────────────────────────
 const _IDB_NAME = 'ecotrip-trips';
@@ -1137,6 +1139,15 @@ function renderDash() {
     setText('d-chrg-remain', rem > 0
       ? (rem > 59 ? Math.floor(rem / 60) + 'h ' + (rem % 60) + 'min' : rem + ' min')
       : '--');
+    // Projeção de término de carga
+    if (rem > 0) {
+      const finish = new Date(Date.now() + rem * 60000);
+      setText('d-chrg-finish',
+        finish.getHours().toString().padStart(2,'0') + ':' +
+        finish.getMinutes().toString().padStart(2,'0'));
+    } else {
+      setText('d-chrg-finish', '--');
+    }
   }
 
   // Trip A mini
@@ -1291,6 +1302,43 @@ function renderDash() {
         const rpm = s.engine_rpm || 0;
         rpmEl.textContent = rpm > 0 ? rpm.toLocaleString('pt-BR') : '--';
         rpmEl.style.color = rpm > 0 ? '#fb923c' : '#475569';
+      }
+
+      // Modo de condução — baseado em batt_power_pct (0–100)
+      const driveModeEl = document.getElementById('d-drive-mode');
+      if (driveModeEl) {
+        const battPct = s.batt_power_pct || 0;
+        const spd     = s.speed_kmh || 0;
+        const moving  = spd > 3;
+        driveModeEl.style.display = moving ? '' : 'none';
+        if (moving) {
+          const modes = [
+            { max: 20,  label: '🌱 Eco',     bg: '#14532d', color: '#4ade80' },
+            { max: 50,  label: '⚡ Normal',   bg: '#1e3a5f', color: '#93c5fd' },
+            { max: 80,  label: '🔥 Esporte',  bg: '#7c2d12', color: '#fb923c' },
+            { max: 101, label: '🚀 Máximo',   bg: '#7f1d1d', color: '#f87171' },
+          ];
+          const m = modes.find(m => battPct <= m.max) || modes[3];
+          driveModeEl.textContent       = m.label;
+          driveModeEl.style.background  = m.bg;
+          driveModeEl.style.color       = m.color;
+        }
+      }
+
+      // Sparkline de velocidade — últimas 30 amostras
+      const curSpd = Math.round(s.speed_kmh || 0);
+      _spdBuf.push(curSpd);
+      if (_spdBuf.length > 30) _spdBuf.shift();
+      const sparkLine = document.getElementById('d-spd-spark-line');
+      if (sparkLine) {
+        const maxV = Math.max(10, ..._spdBuf);
+        const W = 150, H = 18;
+        const pts = _spdBuf.map((v, i) => {
+          const x = (i / (_spdBuf.length - 1)) * W;
+          const y = H - (v / maxV) * (H - 2) - 1;
+          return x.toFixed(1) + ',' + y.toFixed(1);
+        }).join(' ');
+        sparkLine.setAttribute('points', pts);
       }
     }
   }

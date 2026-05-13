@@ -114,6 +114,7 @@ const NOTIF_DEFAULTS = {
   engine_on:    true,   // 🔑 Motor ligado
   engine_off:   false,  // 🔑 Motor desligado
   app_update:   true,   // 📱 Nova versão do app instalada no carro
+  trip_end:     true,   // 🏁 Viagem concluída (auto-trip)
 };
 let notifPrefs = { ...NOTIF_DEFAULTS };
 try {
@@ -612,6 +613,15 @@ app.post('/api/autotrips', (req, res) => {
       startMs: autoTrip.startMs || 0,
       distKm:  autoTrip.distKm  || 0,
     });
+    // Push: viagem concluída
+    if (notifPrefs.trip_end) {
+      const dist = (autoTrip.distKm || 0).toFixed(1);
+      const sec  = autoTrip.timeSec || 0;
+      const dur  = sec >= 3600
+        ? `${Math.floor(sec / 3600)}h ${Math.floor((sec % 3600) / 60)}min`
+        : `${Math.floor(sec / 60)}min`;
+      sendPush('🏁 Viagem concluída', `${dist} km · ${dur}`);
+    }
     res.json({ ok: true });
   } catch (e) {
     console.error('Erro ao salvar auto-trip:', e.message);
