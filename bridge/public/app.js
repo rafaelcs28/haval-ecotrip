@@ -1683,8 +1683,7 @@ function renderHistory() {
     return `<div class="trip-item" id="trip-card-${tripId}">
   <div class="trip-header">
     <div style="flex:1;min-width:0">
-      <span class="trip-badge">${fallbackName}</span>
-      <div class="trip-name-row" style="margin-top:3px">
+      <div class="trip-name-row">
         ${displayName ? `<span class="trip-name">${displayName}</span>${statusBadge}` : ''}
         <button class="rename-btn" onclick="startRenameTrip('${tripId}','${tripType}')" title="${displayName ? 'Renomear' : 'Nomear'}">✏️</button>
         <button class="rename-btn" onclick="deleteTrip('${tripId}','${tripType}')" title="Apagar viagem" style="opacity:.35">🗑</button>
