@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>EcoTrip — Car App Preview</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #06080C;
+    font-family: -apple-system, 'Inter', 'Segoe UI', sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 32px 16px 48px;
+    gap: 40px;
+    min-height: 100vh;
+  }
+
+  h2 {
+    color: #5B7394;
+    font-size: 11px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    text-align: center;
+    margin-bottom: -28px;
+  }
+
+  /* ── Simulated phone/tablet frame ─────────────────────────── */
+  .frame {
+    width: 100%;
+    max-width: 540px;
+    background: #06080C;
+    border-radius: 24px;
+    border: 2px solid #1a2335;
+    padding: 18px 16px 22px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    box-shadow: 0 0 60px rgba(0,0,0,.7);
+  }
+
+  /* ── Header ───────────────────────────────────────────────── */
+  .header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 2px;
+  }
+  .header-left { display: flex; align-items: center; gap: 10px; }
+  .logo {
+    font-size: 19px;
+    font-weight: 900;
+    color: #39FF88;
+    letter-spacing: 2px;
+    text-shadow: 0 0 18px rgba(57,255,136,.45);
+  }
+  .version-badge {
+    font-size: 10px;
+    font-weight: 700;
+    color: rgba(57,255,136,.7);
+    background: rgba(57,255,136,.08);
+    border: 1px solid rgba(57,255,136,.2);
+    border-radius: 5px;
+    padding: 2px 7px;
+  }
+  .conn-dot { width: 6px; height: 6px; border-radius: 50%; background: #39FF88; }
+  .model { font-size: 11px; color: rgba(91,115,148,.6); }
+  .header-right { display: flex; align-items: center; gap: 2px; }
+  .icon-btn {
+    width: 36px; height: 36px; border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    background: none; border: none; cursor: pointer;
+    font-size: 18px; color: #5B7394;
+  }
+  .icon-btn.green { color: #39FF88; }
+  .icon-btn.teal  { color: #00E5CC; }
+  .icon-btn.blue  { color: #4DBBFF; }
+
+  /* ── Card base ────────────────────────────────────────────── */
+  .card {
+    background: #0C1019;
+    border-radius: 16px;
+    border: 1px solid #0F1520;
+    padding: 10px 16px 12px;
+    position: relative;
+    overflow: hidden;
+  }
+  .card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 10%; right: 10%; height: 1px;
+    background: linear-gradient(90deg,transparent,rgba(57,255,136,.3),rgba(0,229,204,.3),transparent);
+  }
+
+  /* ── Rolling card ─────────────────────────────────────────── */
+  .rolling-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 6px;
+  }
+  .section-label {
+    font-size: 12px; font-weight: 700;
+    letter-spacing: 1.8px; color: #5B7394;
+    text-transform: uppercase;
+  }
+  .rolling-right { display: flex; align-items: center; gap: 10px; }
+  .rolling-km {
+    font-size: 19px; font-weight: 900; color: #00E5CC;
+    text-shadow: 0 0 12px rgba(0,229,204,.4);
+  }
+  .btn-zero {
+    font-size: 13px; font-weight: 600; color: #5B7394;
+    background: none; border: 1px solid rgba(255,255,255,.07);
+    border-radius: 6px; padding: 3px 9px; cursor: pointer;
+  }
+
+  .rolling-body {
+    display: flex; align-items: flex-start; gap: 6px;
+  }
+  .rcol { flex: 1; display: flex; flex-direction: column; gap: 4px; }
+
+  .rmetric {
+    display: flex; justify-content: space-between; align-items: baseline;
+  }
+  .rlabel { font-size: 13px; color: #5B7394; }
+  .rvalue { font-size: 16px; font-weight: 700; }
+  .rvalue.yellow { color: #FFD60A; }
+  .rvalue.teal   { color: #00E5CC; }
+  .rvalue.lime   { color: #39FF88; }
+  .rvalue.white  { color: #EEF4FF; }
+  .rsec { font-size: 11px; font-weight: 700; letter-spacing: 1.4px;
+          color: rgba(91,115,148,.6); text-transform: uppercase; margin-bottom: 2px; }
+
+  /* Gauges */
+  .gauges { display: flex; flex: 3; align-items: center; justify-content: space-around; gap: 4px; }
+  .gauge { display: flex; flex-direction: column; align-items: center; position: relative; }
+  .gauge svg { display: block; }
+  .gauge-inner {
+    position: absolute;
+    top: 50%; left: 50%; transform: translate(-50%, -50%);
+    text-align: center; display: flex; flex-direction: column; align-items: center;
+  }
+  .gauge-val { font-size: 28px; font-weight: 900; line-height: 1; }
+  .gauge-lbl { font-size: 11px; color: #5B7394; margin-top: 1px; }
+  .gauge-lbl-main { font-size: 13px; color: #5B7394; margin-top: 3px; text-align: center; }
+
+  /* ── Trip card ────────────────────────────────────────────── */
+  .trip-card-live { border-color: rgba(77,187,255,.28) !important; }
+  .trip-card-live::before {
+    background: linear-gradient(90deg,transparent,rgba(77,187,255,.35),transparent) !important;
+  }
+  .trip-card-last { border-color: rgba(91,115,148,.2) !important; }
+  .trip-card-last::before {
+    background: linear-gradient(90deg,transparent,rgba(91,115,148,.15),transparent) !important;
+  }
+
+  .trip-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 8px;
+  }
+  .trip-left { display: flex; align-items: center; gap: 7px; }
+  .live-dot { width: 8px; height: 8px; border-radius: 50%; background: #4DBBFF; animation: pulse 1.6s ease-in-out infinite; }
+  @keyframes pulse {
+    0%,100% { opacity: 1; box-shadow: 0 0 6px #4DBBFF; }
+    50%      { opacity: .5; box-shadow: none; }
+  }
+  .trip-label { font-size: 12px; font-weight: 700; letter-spacing: 1.6px; text-transform: uppercase; }
+  .trip-label.live { color: #4DBBFF; }
+  .trip-label.last { color: #5B7394; }
+  .trip-right { display: flex; align-items: center; gap: 10px; }
+  .trip-date { font-size: 12px; color: #5B7394; }
+  .trip-dur  { font-size: 15px; font-weight: 600; }
+  .trip-dur.live { color: #4DBBFF; }
+  .trip-dur.last { color: #5B7394; }
+
+  .metrics-row {
+    display: flex; justify-content: space-evenly;
+    align-items: flex-end;
+  }
+  .metrics-row + .metrics-row { margin-top: 8px; }
+  .metric-cell { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+  .mv-big  { font-size: 26px; font-weight: 900; line-height: 1; }
+  .mv-med  { font-size: 18px; font-weight: 800; line-height: 1; }
+  .mu      { font-size: 11px; color: #5B7394; }
+
+  .c-blue   { color: #4DBBFF; }
+  .c-lime   { color: #39FF88; }
+  .c-yellow { color: #FFD60A; }
+  .c-teal   { color: #00E5CC; }
+  .c-orange { color: #FF5F1F; }
+  .c-muted  { color: #5B7394; }
+  .c-white  { color: #EEF4FF; }
+
+  .divider { height: 1px; background: #0F1520; margin: 2px 0 6px; }
+
+  /* tabs below */
+  .tab-row {
+    display: flex; gap: 2px; margin-top: 2px;
+    background: #06080C; border-radius: 10px; padding: 2px;
+    border: 1px solid #0F1520;
+  }
+  .tab {
+    flex: 1; text-align: center; font-size: 10px; color: #5B7394;
+    padding: 6px 2px 4px; border-radius: 8px; cursor: pointer;
+    display: flex; flex-direction: column; align-items: center; gap: 2px;
+  }
+  .tab.active { background: #0C1019; color: #39FF88; }
+  .tab-icon { font-size: 14px; }
+  .tab-lbl { font-size: 9px; letter-spacing: .3px; }
+</style>
+</head>
+<body>
+
+<h2>Estado ao vivo — viagem em andamento</h2>
+
+<!-- ── Frame 1: LIVE ─────────────────────────────────────────────────── -->
+<div class="frame">
+
+  <!-- Header -->
+  <div class="header">
+    <div class="header-left">
+      <span class="logo">ECOTRIP</span>
+      <span class="version-badge">v3.2</span>
+      <div class="conn-dot"></div>
+      <span class="model">Haval H6 PHEV34</span>
+    </div>
+    <div class="header-right">
+      <button class="icon-btn">🐛</button>
+      <button class="icon-btn green">📊</button>
+      <button class="icon-btn teal">⚡</button>
+      <button class="icon-btn blue">🚗</button>
+      <button class="icon-btn">📋</button>
+      <button class="icon-btn">⚙️</button>
+    </div>
+  </div>
+
+  <!-- Rolling card -->
+  <div class="card">
+    <div class="rolling-header">
+      <span class="section-label">Desde última partida</span>
+      <div class="rolling-right">
+        <span class="rolling-km">47.3 km</span>
+        <button class="btn-zero">Zerar</button>
+      </div>
+    </div>
+    <div class="rolling-body">
+      <!-- Coluna esquerda: energia -->
+      <div class="rcol">
+        <span class="rsec">⚡ Energia</span>
+        <div class="rmetric"><span class="rlabel">Bruto</span><span class="rvalue white">8.34 kWh</span></div>
+        <div class="rmetric"><span class="rlabel">Regen</span><span class="rvalue lime">2.11 kWh <small style="color:rgba(57,255,136,.6);font-size:11px">(25%)</small></span></div>
+        <div class="rmetric"><span class="rlabel">Líquido</span><span class="rvalue yellow">6.23 kWh</span></div>
+        <div class="rmetric"><span class="rlabel">SOC</span><span class="rvalue white">82% → 65%</span></div>
+        <div class="rmetric"><span class="rlabel">Ef. elétrica</span><span class="rvalue teal">13.1 kWh/100km</span></div>
+      </div>
+
+      <!-- Gauges centrais -->
+      <div class="gauges">
+        <!-- kWh/100km -->
+        <div class="gauge" style="width:110px;height:110px">
+          <svg width="110" height="110" viewBox="0 0 110 110">
+            <path d="M 18 88 A 44 44 0 1 1 92 88" fill="none" stroke="rgba(255,255,255,.07)" stroke-width="7" stroke-linecap="round"/>
+            <path d="M 18 88 A 44 44 0 1 1 92 88" fill="none" stroke="#39FF88" stroke-width="7" stroke-linecap="round"
+              stroke-dasharray="200" stroke-dashoffset="82"
+              style="filter:drop-shadow(0 0 5px #39FF88)"/>
+          </svg>
+          <div class="gauge-inner">
+            <span class="gauge-val" style="color:#39FF88;font-size:22px">13.1</span>
+          </div>
+          <span class="gauge-lbl-main">kWh/100km</span>
+        </div>
+        <!-- km/L eq -->
+        <div class="gauge" style="width:130px;height:130px">
+          <svg width="130" height="130" viewBox="0 0 130 130">
+            <path d="M 20 105 A 54 54 0 1 1 110 105" fill="none" stroke="rgba(255,255,255,.07)" stroke-width="8" stroke-linecap="round"/>
+            <path d="M 20 105 A 54 54 0 1 1 110 105" fill="none" stroke="#00E5CC" stroke-width="8" stroke-linecap="round"
+              stroke-dasharray="238" stroke-dashoffset="60"
+              style="filter:drop-shadow(0 0 6px #00E5CC)"/>
+          </svg>
+          <div class="gauge-inner">
+            <span class="gauge-val" style="color:#00E5CC;">26.4</span>
+          </div>
+          <span class="gauge-lbl-main">km/L eq</span>
+        </div>
+        <!-- km/L combustível -->
+        <div class="gauge" style="width:110px;height:110px">
+          <svg width="110" height="110" viewBox="0 0 110 110">
+            <path d="M 18 88 A 44 44 0 1 1 92 88" fill="none" stroke="rgba(255,255,255,.07)" stroke-width="7" stroke-linecap="round"/>
+            <path d="M 18 88 A 44 44 0 1 1 92 88" fill="none" stroke="#4DBBFF" stroke-width="7" stroke-linecap="round"
+              stroke-dasharray="200" stroke-dashoffset="120"
+              style="filter:drop-shadow(0 0 5px #4DBBFF)"/>
+          </svg>
+          <div class="gauge-inner">
+            <span class="gauge-val" style="color:#4DBBFF;font-size:22px">18.6</span>
+          </div>
+          <span class="gauge-lbl-main">km/L</span>
+        </div>
+      </div>
+
+      <!-- Coluna direita: combustível -->
+      <div class="rcol">
+        <span class="rsec">⛽ Combustível</span>
+        <div class="rmetric"><span class="rlabel">km/L eq</span><span class="rvalue teal">26.4</span></div>
+        <div class="rmetric"><span class="rlabel">Gastos</span><span class="rvalue white">1.83 L</span></div>
+        <div class="rmetric"><span class="rlabel">Tanque</span><span class="rvalue white">42L → 40L</span></div>
+        <div class="rmetric"><span class="rlabel">💰 Custo</span><span class="rvalue yellow">R$ 24.71</span></div>
+        <div class="rmetric"><span class="rlabel">R$/km</span><span class="rvalue yellow" style="opacity:.8">0.522</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- InProgressTripCard — LIVE -->
+  <div class="card trip-card-live">
+    <div class="trip-header">
+      <div class="trip-left">
+        <div class="live-dot"></div>
+        <span class="trip-label live">Viagem em andamento</span>
+      </div>
+      <div class="trip-right">
+        <span class="trip-date">desde 14:22</span>
+        <span class="trip-dur live">18min</span>
+      </div>
+    </div>
+
+    <!-- Linha 1: métricas principais (26sp) -->
+    <div class="metrics-row">
+      <div class="metric-cell">
+        <span class="mv-big c-blue">12.3</span>
+        <span class="mu">km</span>
+      </div>
+      <div class="metric-cell">
+        <span class="mv-big c-lime">13.8</span>
+        <span class="mu">kWh/100km</span>
+      </div>
+      <div class="metric-cell">
+        <span class="mv-big c-lime">24.1</span>
+        <span class="mu">km/L eq</span>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <!-- Linha 2: métricas secundárias (18sp) -->
+    <div class="metrics-row">
+      <div class="metric-cell">
+        <span class="mv-med c-teal">-8%</span>
+        <span class="mu">SOC Δ</span>
+      </div>
+      <div class="metric-cell">
+        <span class="mv-med c-teal">1.70 kWh</span>
+        <span class="mu">elétrico líq.</span>
+      </div>
+      <div class="metric-cell">
+        <span class="mv-med c-muted">--</span>
+        <span class="mu">combustível</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tab bar -->
+  <div class="tab-row">
+    <div class="tab active"><span class="tab-icon">🏠</span><span class="tab-lbl">Dash</span></div>
+    <div class="tab"><span class="tab-icon">⚡</span><span class="tab-lbl">Carga</span></div>
+    <div class="tab"><span class="tab-icon">🗺</span><span class="tab-lbl">Viagens</span></div>
+    <div class="tab"><span class="tab-icon">📊</span><span class="tab-lbl">Stats</span></div>
+    <div class="tab"><span class="tab-icon">⚙️</span><span class="tab-lbl">Config</span></div>
+  </div>
+</div>
+
+<!-- ─────────────────────────────────────────────────────────── -->
+
+<h2>Estado parado — última viagem salva</h2>
+
+<!-- ── Frame 2: LAST TRIP ─────────────────────────────────────────────── -->
+<div class="frame">
+
+  <!-- Header (same) -->
+  <div class="header">
+    <div class="header-left">
+      <span class="logo">ECOTRIP</span>
+      <span class="version-badge">v3.2</span>
+      <div class="conn-dot"></div>
+      <span class="model">Haval H6 PHEV34</span>
+    </div>
+    <div class="header-right">
+      <button class="icon-btn">🐛</button>
+      <button class="icon-btn green">📊</button>
+      <button class="icon-btn teal">⚡</button>
+      <button class="icon-btn blue">🚗</button>
+      <button class="icon-btn">📋</button>
+      <button class="icon-btn">⚙️</button>
+    </div>
+  </div>
+
+  <!-- Rolling card (same data) -->
+  <div class="card">
+    <div class="rolling-header">
+      <span class="section-label">Desde última partida</span>
+      <div class="rolling-right">
+        <span class="rolling-km">47.3 km</span>
+        <button class="btn-zero">Zerar</button>
+      </div>
+    </div>
+    <div class="rolling-body">
+      <div class="rcol">
+        <span class="rsec">⚡ Energia</span>
+        <div class="rmetric"><span class="rlabel">Bruto</span><span class="rvalue white">8.34 kWh</span></div>
+        <div class="rmetric"><span class="rlabel">Regen</span><span class="rvalue lime">2.11 kWh <small style="color:rgba(57,255,136,.6);font-size:11px">(25%)</small></span></div>
+        <div class="rmetric"><span class="rlabel">Líquido</span><span class="rvalue yellow">6.23 kWh</span></div>
+        <div class="rmetric"><span class="rlabel">SOC</span><span class="rvalue white">82% → 65%</span></div>
+        <div class="rmetric"><span class="rlabel">Ef. elétrica</span><span class="rvalue teal">13.1 kWh/100km</span></div>
+      </div>
+      <div class="gauges">
+        <div class="gauge" style="width:110px;height:110px">
+          <svg width="110" height="110" viewBox="0 0 110 110">
+            <path d="M 18 88 A 44 44 0 1 1 92 88" fill="none" stroke="rgba(255,255,255,.07)" stroke-width="7" stroke-linecap="round"/>
+            <path d="M 18 88 A 44 44 0 1 1 92 88" fill="none" stroke="#39FF88" stroke-width="7" stroke-linecap="round"
+              stroke-dasharray="200" stroke-dashoffset="82" style="filter:drop-shadow(0 0 5px #39FF88)"/>
+          </svg>
+          <div class="gauge-inner"><span class="gauge-val" style="color:#39FF88;font-size:22px">13.1</span></div>
+          <span class="gauge-lbl-main">kWh/100km</span>
+        </div>
+        <div class="gauge" style="width:130px;height:130px">
+          <svg width="130" height="130" viewBox="0 0 130 130">
+            <path d="M 20 105 A 54 54 0 1 1 110 105" fill="none" stroke="rgba(255,255,255,.07)" stroke-width="8" stroke-linecap="round"/>
+            <path d="M 20 105 A 54 54 0 1 1 110 105" fill="none" stroke="#00E5CC" stroke-width="8" stroke-linecap="round"
+              stroke-dasharray="238" stroke-dashoffset="60" style="filter:drop-shadow(0 0 6px #00E5CC)"/>
+          </svg>
+          <div class="gauge-inner"><span class="gauge-val" style="color:#00E5CC;">26.4</span></div>
+          <span class="gauge-lbl-main">km/L eq</span>
+        </div>
+        <div class="gauge" style="width:110px;height:110px">
+          <svg width="110" height="110" viewBox="0 0 110 110">
+            <path d="M 18 88 A 44 44 0 1 1 92 88" fill="none" stroke="rgba(255,255,255,.07)" stroke-width="7" stroke-linecap="round"/>
+            <path d="M 18 88 A 44 44 0 1 1 92 88" fill="none" stroke="#4DBBFF" stroke-width="7" stroke-linecap="round"
+              stroke-dasharray="200" stroke-dashoffset="120" style="filter:drop-shadow(0 0 5px #4DBBFF)"/>
+          </svg>
+          <div class="gauge-inner"><span class="gauge-val" style="color:#4DBBFF;font-size:22px">18.6</span></div>
+          <span class="gauge-lbl-main">km/L</span>
+        </div>
+      </div>
+      <div class="rcol">
+        <span class="rsec">⛽ Combustível</span>
+        <div class="rmetric"><span class="rlabel">km/L eq</span><span class="rvalue teal">26.4</span></div>
+        <div class="rmetric"><span class="rlabel">Gastos</span><span class="rvalue white">1.83 L</span></div>
+        <div class="rmetric"><span class="rlabel">Tanque</span><span class="rvalue white">42L → 40L</span></div>
+        <div class="rmetric"><span class="rlabel">💰 Custo</span><span class="rvalue yellow">R$ 24.71</span></div>
+        <div class="rmetric"><span class="rlabel">R$/km</span><span class="rvalue yellow" style="opacity:.8">0.522</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- InProgressTripCard — LAST SAVED -->
+  <div class="card trip-card-last">
+    <div class="trip-header">
+      <div class="trip-left">
+        <span class="trip-label last">Última viagem</span>
+      </div>
+      <div class="trip-right">
+        <span class="trip-date">13/05  08:14</span>
+        <span class="trip-dur last">34min</span>
+      </div>
+    </div>
+
+    <div class="metrics-row">
+      <div class="metric-cell">
+        <span class="mv-big c-blue">28.7</span>
+        <span class="mu">km</span>
+      </div>
+      <div class="metric-cell">
+        <span class="mv-big c-lime">15.2</span>
+        <span class="mu">kWh/100km</span>
+      </div>
+      <div class="metric-cell">
+        <span class="mv-big c-lime">21.8</span>
+        <span class="mu">km/L eq</span>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="metrics-row">
+      <div class="metric-cell">
+        <span class="mv-med c-teal">-17%</span>
+        <span class="mu">SOC Δ</span>
+      </div>
+      <div class="metric-cell">
+        <span class="mv-med c-teal">4.36 kWh</span>
+        <span class="mu">elétrico líq.</span>
+      </div>
+      <div class="metric-cell">
+        <span class="mv-med c-orange">0.42 L</span>
+        <span class="mu">combustível</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tab bar -->
+  <div class="tab-row">
+    <div class="tab active"><span class="tab-icon">🏠</span><span class="tab-lbl">Dash</span></div>
+    <div class="tab"><span class="tab-icon">⚡</span><span class="tab-lbl">Carga</span></div>
+    <div class="tab"><span class="tab-icon">🗺</span><span class="tab-lbl">Viagens</span></div>
+    <div class="tab"><span class="tab-icon">📊</span><span class="tab-lbl">Stats</span></div>
+    <div class="tab"><span class="tab-icon">⚙️</span><span class="tab-lbl">Config</span></div>
+  </div>
+</div>
+
+</body>
+</html>
