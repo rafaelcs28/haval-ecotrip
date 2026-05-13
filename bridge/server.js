@@ -627,14 +627,17 @@ app.post('/api/autotrips', (req, res) => {
       startMs: autoTrip.startMs || 0,
       distKm:  autoTrip.distKm  || 0,
     });
-    // Push: viagem concluída
+    // Push: viagem concluída (só se >1 km OU >3 min)
     if (notifPrefs.trip_end) {
-      const dist = (autoTrip.distKm || 0).toFixed(1);
-      const sec  = autoTrip.timeSec || 0;
-      const dur  = sec >= 3600
-        ? `${Math.floor(sec / 3600)}h ${Math.floor((sec % 3600) / 60)}min`
-        : `${Math.floor(sec / 60)}min`;
-      sendPush('🏁 Viagem concluída', `${dist} km · ${dur}`);
+      const distKm = autoTrip.distKm || 0;
+      const sec    = autoTrip.timeSec || 0;
+      if (distKm > 1 || sec > 180) {
+        const dist = distKm.toFixed(1);
+        const dur  = sec >= 3600
+          ? `${Math.floor(sec / 3600)}h ${Math.floor((sec % 3600) / 60)}min`
+          : `${Math.floor(sec / 60)}min`;
+        sendPush('🏁 Viagem concluída', `${dist} km · ${dur}`);
+      }
     }
     res.json({ ok: true });
   } catch (e) {
