@@ -106,18 +106,18 @@ async function confirmTripCmd(trip) {
   }
 }
 
-function queueGeocode(tripId, lat, lng) {
+function queueGeocode(tripId, lat, lng, key = tripId) {
   if (!lat || !lng || lat === 0 || lng === 0) return;
-  if (geoCache[tripId] !== undefined) return;             // já tentado
-  if (_geoQueue.some(q => q.tripId === tripId)) return;   // já na fila
-  _geoQueue.push({ tripId, lat, lng });
+  if (geoCache[key] !== undefined) return;              // já tentado
+  if (_geoQueue.some(q => q.key === key)) return;       // já na fila
+  _geoQueue.push({ key, lat, lng });
   if (!_geoTimer) _geoTimer = setTimeout(_processGeoQueue, 50);
 }
 
 async function _processGeoQueue() {
   _geoTimer = null;
   if (!_geoQueue.length) return;
-  const { tripId, lat, lng } = _geoQueue.shift();
+  const { key, lat, lng } = _geoQueue.shift();
   try {
     const r = await fetch(
       `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=10`,
@@ -127,15 +127,28 @@ async function _processGeoQueue() {
     const a = d.address || {};
     const city  = a.city || a.town || a.village || a.municipality || a.county || '';
     const state = a.state || '';
-    geoCache[tripId] = city ? (state ? `${city}, ${state}` : city) : (state || '');
+    geoCache[key] = city ? (state ? `${city}, ${state}` : city) : (state || '');
   } catch (_) {
-    geoCache[tripId] = '';  // falhou — marca como tentado para não repetir
+    geoCache[key] = '';  // falhou — marca como tentado para não repetir
   }
   try { sessionStorage.setItem('geoCache', JSON.stringify(geoCache)); } catch (_) {}
-  // Atualiza lista se há busca ativa
-  if (filterState.auto.search.trim()) renderAutoTrips();
+  // Atualiza lista: sempre que o painel auto estiver visível (nomes automáticos) ou busca ativa
+  if (document.querySelector('#panel-auto.active') || filterState.auto.search.trim()) renderAutoTrips();
   // Próximo item com 1.1s de intervalo (respeita política do Nominatim)
   if (_geoQueue.length) _geoTimer = setTimeout(_processGeoQueue, 1100);
+}
+
+// Retorna "CidadeOrigem → CidadeDestino" se forem diferentes e o trip não tiver nome.
+// Usa apenas o primeiro segmento do geocode (antes da vírgula) para ficar compacto.
+function getAutoName(t) {
+  if (t.name) return null;
+  const startFull = geoCache[t.tripId];
+  const endFull   = geoCache[t.tripId + ':end'];
+  if (!startFull || !endFull) return null;
+  const startCity = startFull.split(',')[0].trim();
+  const endCity   = endFull.split(',')[0].trim();
+  if (!startCity || !endCity || startCity === endCity) return null;
+  return `${startCity} → ${endCity}`;
 }
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
@@ -939,6 +952,7 @@ async function syncAllCache({ silent = false } = {}) {
       if (maxMs > 0) await _idbSetMeta('lastAutoMs', maxMs);
       newAuto.forEach(t => {
         if (t.startLat && t.startLat !== 0) queueGeocode(t.tripId, t.startLat, t.startLng);
+        if (t.endLat   && t.endLat   !== 0) queueGeocode(t.tripId, t.endLat,   t.endLng, t.tripId + ':end');
       });
       if (!silent) _syncProgressShow('⟳ +' + totals.auto + ' auto-trip' + (totals.auto !== 1 ? 's' : '') + '…');
     }
@@ -1665,6 +1679,12 @@ function renderAutoTrips() {
     return;
   }
 
+  // Enfileira geocodes de destino para trips que ainda não têm (sem rate limit extra —
+  // queueGeocode já ignora entradas já presentes ou na fila)
+  trips.forEach(t => {
+    if (t.endLat && t.endLat !== 0) queueGeocode(t.tripId, t.endLat, t.endLng, t.tripId + ':end');
+  });
+
   // Resumo — mesma estrutura 2 linhas do hist
   const { gas: priceGas, kwh: priceKwh } = getPrices();
   const totDist   = trips.reduce((s, t) => s + (t.distKm  || 0), 0);
@@ -1705,7 +1725,9 @@ function renderAutoTrips() {
     const mapsUrl    = hasGps ? `https://www.google.com/maps/dir/${t.startLat},${t.startLng}/${t.endLat},${t.endLng}` : null;
     const geo        = geoCache[t.tripId];
     const geoLine    = geo ? `<div class="trip-geo">📍 ${geo}</div>` : '';
-    const displayName = t.name || '';
+    const autoName   = getAutoName(t);
+    const displayName = t.name || autoName || '';
+    const nameStyle   = !t.name && autoName ? 'color:#64748b;font-style:italic' : '';
     const rnStatus    = getRenameStatus(t.tripId);
     const statusBadge = rnStatus === 'pending'   ? '<span class="rename-status-pending" title="Aguardando confirmação do carro">⏳</span>'
                       : rnStatus === 'confirmed'  ? '<span class="rename-status-ok" title="Confirmado pelo carro">✓</span>'
@@ -1727,7 +1749,7 @@ function renderAutoTrips() {
   <div class="trip-header">
     <div style="flex:1;min-width:0">
       <div class="trip-name-row">
-        ${displayName ? `<span class="trip-name">${displayName}</span>${statusBadge}` : ''}
+        ${displayName ? `<span class="trip-name"${nameStyle ? ` style="${nameStyle}"` : ''}>${displayName}</span>${statusBadge}` : ''}
         <button class="rename-btn" onclick="startRenameTrip('${t.tripId}','auto')" title="${displayName ? 'Renomear' : 'Nomear'}">✏️</button>
       </div>
       <div class="trip-date">${startDate} · ${dur}</div>
