@@ -3085,7 +3085,7 @@ async function loadStats() {
 
   // Garante que o cache local está populado
   if (!cachedAutoTrips) await syncAllCache({ silent: true });
-  const trips = (cachedAutoTrips || []).filter(t => (t.distKm || 0) > 5);
+  const trips = (cachedAutoTrips || []).filter(t => (t.distKm || 0) > 2);
 
   let html = '<div style="padding-bottom:12px">';
 
@@ -3121,7 +3121,7 @@ function _statsRow(icon, label, value, sub) {
 }
 
 function _statsRecordsHTML(trips) {
-  if (!trips.length) return _statsCard('🏆 Recordes pessoais', '<div style="color:#475569;font-size:12px">Nenhuma viagem com mais de 5 km ainda.</div>');
+  if (!trips.length) return _statsCard('🏆 Recordes pessoais', '<div style="color:#475569;font-size:12px">Nenhuma viagem com mais de 2 km ainda.</div>');
 
   const byEff = trips
     .filter(t => t.distKm > 0 && (t.netKwh || 0) > 0)
