@@ -673,18 +673,23 @@ app.post('/api/admin/update', (req, res) => {
   if (!adminCheckToken(req, res)) return;
   const { exec } = require('child_process');
   const repoDir = path.join(__dirname, '..');
-  exec('git pull', { cwd: repoDir }, (err, stdout, stderr) => {
-    const pullOut = (stdout || '').trim() || (stderr || '').trim() || '(sem saída)';
-    if (err) {
-      console.error('[admin] git pull falhou:', err.message);
-      return res.json({ ok: false, msg: 'git pull falhou:\n' + pullOut });
-    }
-    console.log('[admin] git pull OK:', pullOut);
-    res.json({ ok: true, msg: pullOut + '\n\nReiniciando servidor...' });
-    setTimeout(() => {
-      console.log('[admin] Reiniciando após update');
-      process.exit(0);
-    }, 500);
+  // 1) Diagnóstico rápido: remote + branch atual
+  exec('git remote -v && git branch --show-current', { cwd: repoDir }, (e0, s0) => {
+    const diagInfo = (s0 || '').trim();
+    // 2) fetch + reset --hard evita falhar por mudanças locais ou merge conflicts
+    exec('git fetch origin 2>&1 && git reset --hard origin/main 2>&1', { cwd: repoDir, shell: true }, (err, stdout, stderr) => {
+      const pullOut = (stdout || '').trim() || (stderr || '').trim() || '(sem saída)';
+      if (err) {
+        console.error('[admin] update falhou:', err.message);
+        return res.json({ ok: false, msg: `Diagnóstico:\n${diagInfo}\n\nErro:\n${pullOut}` });
+      }
+      console.log('[admin] update OK:', pullOut);
+      res.json({ ok: true, msg: pullOut + '\n\nReiniciando servidor...' });
+      setTimeout(() => {
+        console.log('[admin] Reiniciando após update');
+        process.exit(0);
+      }, 500);
+    });
   });
 });
 
