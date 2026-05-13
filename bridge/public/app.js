@@ -1779,7 +1779,10 @@ function renderHistory() {
   html += trips.map(t => {
     const tripId   = t.timestamp || t.tripId || '';
     const tripType = t.label === 'Auto' ? 'auto' : 'manual';
-    const displayName = t.name || '';
+    // Usa nome pendente do renameTracking como prioridade — evita que syncAllCache
+    // com dados do servidor (nome ainda antigo) apague o badge ⏳
+    const rnTrack     = renameTracking[String(tripId)];
+    const displayName = (rnTrack?.name) || t.name || '';
     const fallbackName = t.label || 'Trip';
     const ov       = _tripCostOverride(String(tripId));
     const dispCost = ov ? ov.cost : (t.total_cost_brl || 0);
@@ -1929,9 +1932,10 @@ function renderAutoTrips() {
     const mapsUrl    = hasGps ? `https://www.google.com/maps/dir/${t.startLat},${t.startLng}/${t.endLat},${t.endLng}` : null;
     const geo        = geoCache[t.tripId];
     const geoLine    = geo ? `<div class="trip-geo">📍 ${geo}</div>` : '';
-    const autoName   = getAutoName(t);
-    const displayName = t.name || autoName || '';
-    const nameStyle   = !t.name && autoName ? 'color:#64748b;font-style:italic' : '';
+    const autoName    = getAutoName(t);
+    const rnTrackH    = renameTracking[String(t.tripId)];
+    const displayName = (rnTrackH?.name) || t.name || autoName || '';
+    const nameStyle   = !rnTrackH?.name && !t.name && autoName ? 'color:#64748b;font-style:italic' : '';
     const rnStatus    = getRenameStatus(t.tripId);
     const statusBadge = rnStatus === 'pending'   ? '<span class="rename-status-pending" title="Aguardando confirmação do carro">⏳</span>'
                       : rnStatus === 'confirmed'  ? '<span class="rename-status-ok" title="Confirmado pelo carro">✓</span>'
