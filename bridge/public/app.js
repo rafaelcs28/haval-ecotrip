@@ -1,5 +1,7 @@
 'use strict';
 
+const APP_BUILD = 'b153';   // bump a cada deploy para confirmar versão no admin
+
 // ── Estado local ──────────────────────────────────────────────────────────────
 let state = {};
 let _actStatusFns  = [];   // statusFn por índice de card (preenchido por initActionsPanel)
@@ -212,6 +214,9 @@ document.addEventListener('DOMContentLoaded', () => {
   loadKnownLocations();
   _fetchNotifCache();
   checkAutoBackup();
+  // Mostra build atual no admin para confirmar versão carregada
+  const as = document.getElementById('admin-status');
+  if (as && as.textContent.trim() === 'Pronto.') as.textContent = 'Pronto. (' + APP_BUILD + ')';
 });
 
 // ── Notification preferences panel ───────────────────────────────────────────
@@ -670,15 +675,19 @@ if ('serviceWorker' in navigator) {
 
 // ── Hard refresh — limpa todos os caches SW e recarrega ───────────────────────
 async function hardRefresh() {
+  // 1. Apaga todos os caches do SW
   if ('caches' in window) {
     const keys = await caches.keys();
     await Promise.all(keys.map(k => caches.delete(k)));
   }
+  // 2. Desregistra todos os SWs para que o próximo load seja sem interceptação
   if ('serviceWorker' in navigator) {
-    const reg = await navigator.serviceWorker.getRegistration();
-    if (reg) await reg.update();
+    const regs = await navigator.serviceWorker.getRegistrations();
+    await Promise.all(regs.map(r => r.unregister()));
   }
-  location.reload(true);
+  // 3. Navega para URL com timestamp — iOS Safari não pode usar cache pois a URL mudou;
+  //    o SW (já desregistrado) não intercepta; o servidor entrega index.html fresco.
+  window.location.replace('/?_r=' + Date.now());
 }
 
 function urlBase64ToUint8Array(b64) {
