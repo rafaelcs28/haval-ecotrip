@@ -835,8 +835,10 @@ app.get('/api/autotrips', (req, res) => {
 app.delete('/api/autotrips/:tripId', (req, res) => {
   const id = String(req.params.tripId).replace(/\D/g, '');
   if (!id) return res.status(400).json({ error: 'invalid tripId' });
-  const idx = autoTripsArr.findIndex(t => t.tripId === id);
-  if (idx < 0) return res.status(404).json({ error: 'not found' });
+  // Aceita tanto tripId (string safeId) quanto startMs (número equivalente)
+  const idx = autoTripsArr.findIndex(t => t.tripId === id || String(t.startMs) === id);
+  console.log(`[delete] AutoTrip lookup id=${id} idx=${idx} total=${autoTripsArr.length}`);
+  if (idx < 0) return res.status(404).json({ error: 'not found', id });
   autoTripsArr.splice(idx, 1);
   const filePath = path.join(AUTOTRIPS_DIR, `${id}.json`);
   try { fs.unlinkSync(filePath); } catch (_) {}
@@ -846,7 +848,8 @@ app.delete('/api/autotrips/:tripId', (req, res) => {
 
 app.delete('/api/trips/:tripId', (req, res) => {
   const id = decodeURIComponent(req.params.tripId);
-  if (!tripsMap.has(id)) return res.status(404).json({ error: 'not found' });
+  console.log(`[delete] Trip lookup id="${id}" found=${tripsMap.has(id)}`);
+  if (!tripsMap.has(id)) return res.status(404).json({ error: 'not found', id });
   tripsMap.delete(id);
   fs.writeFileSync(TRIPS_FILE, JSON.stringify({ trips: [...tripsMap.values()] }, null, 2));
   console.log(`[delete] Trip manual ${id} removido`);

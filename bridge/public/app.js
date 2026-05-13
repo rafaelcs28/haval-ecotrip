@@ -3198,29 +3198,34 @@ let _renameState = null;  // { tripId, type, currentName }
 window.deleteTrip = async function(tripId, type) {
   if (!confirm('Apagar esta viagem?\nEssa ação não pode ser desfeita.')) return;
   const endpoint = type === 'auto'
-    ? `/api/autotrips/${encodeURIComponent(tripId)}`
-    : `/api/trips/${encodeURIComponent(tripId)}`;
+    ? `/api/autotrips/${encodeURIComponent(String(tripId))}`
+    : `/api/trips/${encodeURIComponent(String(tripId))}`;
   try {
     const r = await apiFetch(endpoint, { method: 'DELETE' });
-    if (!r.ok) { showToast('✗ Erro ao apagar viagem'); return; }
-    // Remove do cache local e IndexedDB
+    // 404 = já não existe no servidor; trata como sucesso e limpa local
+    if (!r.ok && r.status !== 404) {
+      const body = await r.json().catch(() => ({}));
+      console.error('deleteTrip error', r.status, body);
+      showToast('✗ Erro ' + r.status + ' ao apagar viagem');
+      return;
+    }
+    // Remove do cache em memória
     if (type === 'auto') {
-      if (cachedAutoTrips) cachedAutoTrips = cachedAutoTrips.filter(t => t.tripId !== String(tripId));
-      _openIDB().then(db => {
-        const tx = db.transaction('autotrips', 'readwrite');
-        tx.objectStore('autotrips').delete(Number(tripId) || tripId);
-      }).catch(() => {});
+      if (cachedAutoTrips) cachedAutoTrips = cachedAutoTrips.filter(t => String(t.tripId) !== String(tripId) && String(t.startMs) !== String(tripId));
     } else {
       if (cachedTrips) cachedTrips = cachedTrips.filter(t => String(t.timestamp) !== String(tripId));
-      _openIDB().then(db => {
-        const tx = db.transaction('trips', 'readwrite');
-        tx.objectStore('trips').delete(tripId);
-      }).catch(() => {});
     }
-    // Remove card do DOM sem re-renderizar tudo
+    // Remove do IndexedDB
+    _openIDB().then(db => {
+      const store = type === 'auto' ? 'autotrips' : 'trips';
+      const key   = type === 'auto' ? String(tripId) : tripId;
+      db.transaction(store, 'readwrite').objectStore(store).delete(key);
+    }).catch(() => {});
+    // Remove card do DOM
     document.getElementById('trip-card-' + tripId)?.remove();
     showToast('✓ Viagem apagada');
   } catch (e) {
+    console.error('deleteTrip exception', e);
     if (e.message !== 'unauthorized') showToast('✗ Erro ao apagar viagem');
   }
 };
