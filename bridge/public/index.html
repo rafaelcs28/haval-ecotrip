@@ -26,16 +26,22 @@
   <div id="header">
     <div class="header-left">
       <span id="logo">ECOTRIP</span>
-      <span id="version-badge">bridge</span>
-      <div class="model-block">
+      <div class="header-sub">
+        <span id="version-badge">bridge</span>
         <span id="model-label">Haval H6 PHEV34</span>
         <span id="car-version-badge"></span>
       </div>
     </div>
     <div id="status-area">
-      <div class="timestamps">
-        <span id="last-update">--</span>
-        <span id="car-update" class="car-ts">carro --</span>
+      <div class="sync-stack">
+        <div class="sync-row">
+          <span class="sync-lbl">↻</span>
+          <span id="last-update">--</span>
+        </div>
+        <div class="sync-row">
+          <span class="sync-lbl">🚗</span>
+          <span id="car-update">--</span>
+        </div>
       </div>
       <div id="status-dot"></div>
       <button id="notif-bell-btn" onclick="openNotifHistory()"
@@ -553,20 +559,29 @@
 
       <!-- ── Notificações ──────────────────────────────────────────────────── -->
       <div id="notif-section" style="background:#0C1019;border:1px solid #0F1520;border-radius:12px;padding:14px 16px;margin-bottom:16px">
-        <div style="font-size:14px;font-weight:700;color:#EEF4FF;margin-bottom:12px">🔔 Notificações</div>
-
-        <!-- Não ativado / bloqueado -->
-        <div id="notif-activate-wrap">
-          <button id="notif-perm-btn" onclick="requestPushPermission()"
-            style="width:100%;background:rgba(77,187,255,.10);border:1px solid rgba(77,187,255,.28);color:#4DBBFF;border-radius:10px;padding:12px;font-size:14px;font-weight:600;cursor:pointer">
-            Ativar Notificações
+        <div style="display:flex;align-items:center;margin-bottom:12px">
+          <span style="font-size:14px;font-weight:700;color:#EEF4FF;flex:1">🔔 Notificações</span>
+          <button id="notif-collapse-btn" onclick="toggleNotifSection()"
+            style="background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.07);border-radius:6px;color:#64748b;font-size:11px;font-weight:600;cursor:pointer;padding:3px 10px;-webkit-tap-highlight-color:transparent;user-select:none">
+            ▲
           </button>
-          <div id="notif-perm-status" style="font-size:11px;color:#5B7394;margin-top:8px;text-align:center;min-height:16px"></div>
         </div>
 
-        <!-- Ativado — exibe os toggles -->
-        <div id="notif-toggles-wrap" style="display:none">
-          <div id="notif-toggles"></div>
+        <!-- Conteúdo colapsável -->
+        <div id="notif-body">
+          <!-- Não ativado / bloqueado -->
+          <div id="notif-activate-wrap">
+            <button id="notif-perm-btn" onclick="requestPushPermission()"
+              style="width:100%;background:rgba(77,187,255,.10);border:1px solid rgba(77,187,255,.28);color:#4DBBFF;border-radius:10px;padding:12px;font-size:14px;font-weight:600;cursor:pointer">
+              Ativar Notificações
+            </button>
+            <div id="notif-perm-status" style="font-size:11px;color:#5B7394;margin-top:8px;text-align:center;min-height:16px"></div>
+          </div>
+
+          <!-- Ativado — exibe os toggles -->
+          <div id="notif-toggles-wrap" style="display:none">
+            <div id="notif-toggles"></div>
+          </div>
         </div>
       </div>
 

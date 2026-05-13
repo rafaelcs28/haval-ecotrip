@@ -266,6 +266,25 @@ window.saveNotifPref = async function(key, value) {
   }
 };
 
+// ── Colapsar / expandir opções de notificação ─────────────────────────────────
+let _notifBodyCollapsed = localStorage.getItem('notifBodyCollapsed') === '1';
+window.toggleNotifSection = function() {
+  _notifBodyCollapsed = !_notifBodyCollapsed;
+  localStorage.setItem('notifBodyCollapsed', _notifBodyCollapsed ? '1' : '0');
+  const body = document.getElementById('notif-body');
+  const btn  = document.getElementById('notif-collapse-btn');
+  if (body) body.style.display = _notifBodyCollapsed ? 'none' : '';
+  if (btn)  btn.textContent    = _notifBodyCollapsed ? '▼' : '▲';
+};
+// Aplica estado salvo ao carregar
+(function _applyNotifCollapseState() {
+  if (!_notifBodyCollapsed) return;
+  const body = document.getElementById('notif-body');
+  const btn  = document.getElementById('notif-collapse-btn');
+  if (body) body.style.display = 'none';
+  if (btn)  btn.textContent    = '▼';
+})();
+
 function _updatePushPermStatus() {
   const activateWrap = document.getElementById('notif-activate-wrap');
   const togglesWrap  = document.getElementById('notif-toggles-wrap');
@@ -777,7 +796,7 @@ function tickLastUpdate() {
   const elCar = document.getElementById('car-update');
   if (elCar) {
     const iso = state.car_last_update;
-    elCar.textContent = iso ? 'carro: ' + relTime(new Date(iso).getTime()) : 'carro: --';
+    elCar.textContent = iso ? relTime(new Date(iso).getTime()) : '--';
   }
 
   const sec = lastUpdateMs ? Math.floor((Date.now() - lastUpdateMs) / 1000) : 9999;
@@ -2029,34 +2048,172 @@ function renderSpeedBands(samples) {
   if (body) body.appendChild(section);
 }
 
-// ── Snapshot 9:16 da viagem (mapa + gráficos + métricas) ─────────────────────
+// ── Snapshot 9:16 — helpers de tiles OSM ────────────────────────────────────
+function _tileX(lng, z) { return ((lng + 180) / 360) * Math.pow(2, z); }
+function _tileY(lat, z) {
+  const r = lat * Math.PI / 180;
+  return (1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * Math.pow(2, z);
+}
+async function _fetchTile(z, x, y) {
+  try {
+    const resp = await apiFetch(`/api/tiles/${z}/${x}/${y}`);
+    if (!resp.ok) return null;
+    const blob = await resp.blob();
+    const url  = URL.createObjectURL(blob);
+    return await new Promise(res => {
+      const img = new Image();
+      img.onload  = () => { URL.revokeObjectURL(url); res(img); };
+      img.onerror = () => { URL.revokeObjectURL(url); res(null); };
+      img.src = url;
+    });
+  } catch (_) { return null; }
+}
+async function _drawOSMMap(ctx, gps, mx, my, mw, mh) {
+  if (gps.length < 2) {
+    ctx.font = '13px system-ui, sans-serif';
+    ctx.fillStyle = '#64748b'; ctx.textAlign = 'center';
+    ctx.fillText('GPS indisponível', mx + mw / 2, my + mh / 2 - 7);
+    return;
+  }
+  // Bounding box + 25% padding
+  let mnLat = Infinity, mxLat = -Infinity, mnLng = Infinity, mxLng = -Infinity;
+  gps.forEach(p => {
+    mnLat = Math.min(mnLat, p.lat); mxLat = Math.max(mxLat, p.lat);
+    mnLng = Math.min(mnLng, p.lng); mxLng = Math.max(mxLng, p.lng);
+  });
+  const dLat = (mxLat - mnLat) || 0.002, dLng = (mxLng - mnLng) || 0.002;
+  mnLat -= dLat * 0.25; mxLat += dLat * 0.25;
+  mnLng -= dLng * 0.25; mxLng += dLng * 0.25;
+  // Best zoom (cap 16, max 16 tiles)
+  let z = Math.floor(Math.log2(mw * 360 / ((mxLng - mnLng) * 256)));
+  z = Math.max(1, Math.min(z, 16));
+  for (let tries = 0; tries < 10 && z > 1; tries++) {
+    const ntx = Math.floor(_tileX(mxLng, z)) - Math.floor(_tileX(mnLng, z)) + 1;
+    const nty = Math.floor(_tileY(mnLat, z)) - Math.floor(_tileY(mxLat, z)) + 1;
+    if (ntx * nty <= 16) break;
+    z--;
+  }
+  const fxMin = _tileX(mnLng, z), fyMin = _tileY(mxLat, z);
+  const fxMax = _tileX(mxLng, z), fyMax = _tileY(mnLat, z);
+  const txMin = Math.floor(fxMin), tyMin = Math.floor(fyMin);
+  const txMax = Math.floor(fxMax), tyMax = Math.floor(fyMax);
+  const scale   = mw / ((fxMax - fxMin) * 256);
+  const toCanX  = fx => mx + (fx - fxMin) * 256 * scale;
+  const toCanY  = fy => my + (fy - fyMin) * 256 * scale;
+  const lngToC  = lng => toCanX(_tileX(lng, z));
+  const latToC  = lat => toCanY(_tileY(lat, z));
+  // Clip to map rect
+  ctx.save();
+  ctx.beginPath(); ctx.rect(mx, my, mw, mh); ctx.clip();
+  // Draw OSM tiles
+  const tileSize = 256 * scale;
+  const nty = tyMax - tyMin + 1;
+  const ntiles = (txMax - txMin + 1) * nty;
+  await Promise.all(
+    Array.from({ length: ntiles }, (_, i) => {
+      const tx = txMin + Math.floor(i / nty);
+      const ty = tyMin + (i % nty);
+      return _fetchTile(z, tx, ty).then(img => {
+        if (img) ctx.drawImage(img, toCanX(tx), toCanY(ty), tileSize, tileSize);
+      });
+    })
+  );
+  // Route (speed-colored)
+  const spdClr = s => s < 40 ? '#39FF88' : s < 80 ? '#FFD60A' : s < 120 ? '#FF5F1F' : '#FF5555';
+  ctx.lineWidth = 3.5; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+  for (let i = 1; i < gps.length; i++) {
+    const a = gps[i - 1], b = gps[i];
+    ctx.strokeStyle = spdClr(a.spd || 0);
+    ctx.beginPath();
+    ctx.moveTo(lngToC(a.lng), latToC(a.lat));
+    ctx.lineTo(lngToC(b.lng), latToC(b.lat));
+    ctx.stroke();
+  }
+  // Start / end markers
+  [[gps[0], '#4ade80'], [gps[gps.length - 1], '#60a5fa']].forEach(([p, c]) => {
+    const px = lngToC(p.lng), py = latToC(p.lat);
+    ctx.fillStyle = c; ctx.beginPath(); ctx.arc(px, py, 7, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
+  });
+  // Speed legend (bottom-left)
+  const legY = my + mh - 20;
+  [['#39FF88', '<40'], ['#FFD60A', '40–80'], ['#FF5F1F', '80–120'], ['#FF5555', '120+']].reduce((lx, [c, lbl]) => {
+    ctx.fillStyle = 'rgba(11,15,26,.80)'; ctx.fillRect(lx - 2, legY - 2, 52, 16);
+    ctx.fillStyle = c; ctx.fillRect(lx, legY + 5, 10, 4);
+    ctx.font = '8px system-ui, sans-serif'; ctx.fillStyle = '#f1f5f9'; ctx.textAlign = 'left';
+    ctx.fillText(lbl, lx + 13, legY + 2);
+    return lx + 54;
+  }, mx + 4);
+  ctx.restore();
+}
+function _drawBands(ctx, samples, x, y, w) {
+  const bands    = calcSpeedBands(samples);
+  const totalDist = bands.reduce((s, b) => s + b.distKm, 0);
+  // Section label
+  ctx.font = '8px system-ui, sans-serif'; ctx.fillStyle = '#64748b'; ctx.textAlign = 'left';
+  ctx.fillText('EFICIÊNCIA POR FAIXA DE VELOCIDADE', x, y);
+  y += 18;
+  if (totalDist < 0.1) {
+    ctx.font = '11px system-ui, sans-serif'; ctx.fillStyle = '#334155'; ctx.textAlign = 'center';
+    ctx.fillText('Dados insuficientes', x + w / 2, y + 8);
+    return;
+  }
+  const BAR_X   = x + 106;
+  const BAR_MAX = Math.floor(w * 0.41);
+  const ROW_H   = 36;
+  for (const band of bands) {
+    const pct     = Math.round(band.distKm / totalDist * 100);
+    const kwh100  = band.distKm > 0.01 ? band.kwhPos / band.distKm * 100 : 0;
+    const barFill = Math.round(BAR_MAX * pct / 100);
+    // Icon + label
+    ctx.font = '14px system-ui, sans-serif'; ctx.fillStyle = '#e2e8f0'; ctx.textAlign = 'left';
+    ctx.fillText(band.icon, x, y + 2);
+    ctx.font = '9px system-ui, sans-serif'; ctx.fillStyle = '#94a3b8';
+    ctx.fillText(band.label, x + 22, y + 3);
+    // Progress bar track + fill
+    ctx.fillStyle = '#1e293b'; ctx.fillRect(BAR_X, y + 7, BAR_MAX, 5);
+    if (barFill > 0) { ctx.fillStyle = '#22d3ee'; ctx.fillRect(BAR_X, y + 7, barFill, 5); }
+    ctx.font = '8px system-ui, sans-serif'; ctx.fillStyle = '#475569'; ctx.textAlign = 'left';
+    ctx.fillText(`${band.distKm.toFixed(1)} km · ${pct}%`, BAR_X, y + 20);
+    // kWh/100km value (right)
+    ctx.font = 'bold 16px system-ui, sans-serif'; ctx.fillStyle = '#4ade80'; ctx.textAlign = 'right';
+    ctx.fillText(kwh100 > 0 ? kwh100.toFixed(1) : '—', x + w, y + 2);
+    ctx.font = '8px system-ui, sans-serif'; ctx.fillStyle = '#64748b';
+    ctx.fillText('kWh/100km', x + w, y + 21);
+    y += ROW_H;
+  }
+}
+
+// ── Snapshot 9:16 da viagem (mapa OSM + faixas de eficiência + métricas) ──────
 async function shareTripCard(tripId) {
   const trip = (cachedAutoTrips || []).find(t => t.tripId === tripId);
   if (!trip) return;
 
-  // Feedback visual durante a geração
   const btn = [...document.querySelectorAll('.charge-badge')]
     .find(b => b.onclick?.toString().includes(tripId) && b.textContent.includes('Snapshot'));
   if (btn) { btn.textContent = '⏳'; btn.disabled = true; }
 
   try {
-    // Carrega telemetria para mapa e gráficos
     const samples = await apiFetch(`/api/telemetry/${tripId}`)
       .then(r => r.json()).then(d => d.samples || []).catch(() => []);
-
+    const gps   = samples.filter(s => s.lat !== 0 && s.lng !== 0);
     const title = trip.name || getAutoName(trip) || '';
 
-    // ── Layout ──────────────────────────────────────────────────────────────
-    const W  = 450;
-    const sc = 2;        // @2× para retina
-    const PAD = 20;
-
-    const H_HEADER  = title ? 88 : 62;
-    const H_MAP     = 290;
-    const H_METRICS = 72;
-    const H_CHARTS  = samples.length > 1 ? 3 * 66 + 16 : 0;
-    const H_FOOTER  = 36;
-    const H = H_HEADER + H_MAP + H_METRICS + H_CHARTS + H_FOOTER;
+    // ── Dimensões ─────────────────────────────────────────────────────────
+    const W    = 450, H = 800, sc = 2, PAD = 20, CW = W - PAD * 2;
+    const H_GRAD    = 4;
+    const H_HEADER  = 36;
+    const H_TITLE   = title ? 26 : 0;
+    const H_DIV     = 1;
+    const VPAD      = 10;          // padding each side of a divider
+    const H_METRICS = 64;
+    const H_BANDS   = 18 + 3 * 36; // section label + 3 band rows
+    const H_FOOTER  = 26;
+    // overhead (everything except map)
+    const H_OVH = H_GRAD + H_HEADER + H_TITLE
+      + 3 * (VPAD + H_DIV + VPAD)
+      + H_METRICS + H_BANDS + H_FOOTER;
+    const H_MAP = H - H_OVH;
 
     const canvas = document.createElement('canvas');
     canvas.width  = W * sc;
@@ -2069,121 +2226,41 @@ async function shareTripCard(tripId) {
     ctx.fillStyle = '#0B0F1A';
     ctx.fillRect(0, 0, W, H);
 
-    // Barra de gradiente no topo
+    // Barra gradiente
     const grd = ctx.createLinearGradient(0, 0, W, 0);
-    grd.addColorStop(0, '#3b82f6');
-    grd.addColorStop(1, '#10b981');
-    ctx.fillStyle = grd;
-    ctx.fillRect(0, 0, W, 4);
+    grd.addColorStop(0, '#3b82f6'); grd.addColorStop(1, '#10b981');
+    ctx.fillStyle = grd; ctx.fillRect(0, 0, W, H_GRAD);
 
     // ── Cabeçalho ────────────────────────────────────────────────────────────
-    let y = 14;
-    ctx.font = 'bold 13px -apple-system, system-ui, sans-serif';
-    ctx.fillStyle = '#3b82f6';
-    ctx.textAlign = 'left';
-    ctx.fillText('EcoTrip', PAD, y);
+    let y = H_GRAD;
+    ctx.font = 'bold 14px system-ui, sans-serif';
+    ctx.fillStyle = '#3b82f6'; ctx.textAlign = 'left';
+    ctx.fillText('⚡ EcoTrip', PAD, y + 10);
 
     const dur = fmtDur(Math.round((trip.endMs - trip.startMs) / 1000));
-    ctx.font = '10px -apple-system, system-ui, sans-serif';
-    ctx.fillStyle = '#475569';
-    ctx.textAlign = 'right';
-    ctx.fillText(fmtDate(trip.startMs) + ' · ' + dur, W - PAD, y + 2);
+    ctx.font = '10px system-ui, sans-serif'; ctx.fillStyle = '#475569'; ctx.textAlign = 'right';
+    ctx.fillText(fmtDate(trip.startMs) + '  ·  ' + dur, W - PAD, y + 12);
+    y += H_HEADER;
 
-    y += 24;
     if (title) {
-      ctx.font = 'bold 16px -apple-system, system-ui, sans-serif';
-      ctx.fillStyle = '#e2e8f0';
-      ctx.textAlign = 'left';
-      ctx.fillText(title, PAD, y);
-      y += 22;
+      ctx.font = 'bold 16px system-ui, sans-serif';
+      ctx.fillStyle = '#e2e8f0'; ctx.textAlign = 'left';
+      ctx.fillText(title, PAD, y + 4);
+      y += H_TITLE;
     }
 
-    // Divisor
-    ctx.fillStyle = '#1e293b';
-    ctx.fillRect(PAD, y, W - PAD * 2, 1);
-    y += 8;
+    // ── Divisor → mapa ───────────────────────────────────────────────────────
+    ctx.fillStyle = '#1e293b'; ctx.fillRect(PAD, y + VPAD, CW, H_DIV);
+    y += VPAD + H_DIV + VPAD;
 
-    // ── Mapa ─────────────────────────────────────────────────────────────────
-    const mapY = y, mapW = W - PAD * 2;
-    ctx.fillStyle = '#0d1523';
-    ctx.fillRect(PAD, mapY, mapW, H_MAP);
+    // Fundo claro enquanto tiles carregam (tom padrão do OSM)
+    ctx.fillStyle = '#e8e4dc'; ctx.fillRect(PAD, y, CW, H_MAP);
+    await _drawOSMMap(ctx, gps, PAD, y, CW, H_MAP);
+    y += H_MAP;
 
-    const gps = samples.filter(s => s.lat !== 0 && s.lng !== 0);
-    if (gps.length >= 2) {
-      // Bounding box com padding
-      let minLat = Infinity, maxLat = -Infinity, minLng = Infinity, maxLng = -Infinity;
-      gps.forEach(p => {
-        minLat = Math.min(minLat, p.lat); maxLat = Math.max(maxLat, p.lat);
-        minLng = Math.min(minLng, p.lng); maxLng = Math.max(maxLng, p.lng);
-      });
-      const pad = 0.15;
-      const dLat = (maxLat - minLat) || 0.001, dLng = (maxLng - minLng) || 0.001;
-      minLat -= dLat * pad; maxLat += dLat * pad;
-      minLng -= dLng * pad; maxLng += dLng * pad;
-
-      // Projeção lat/lng → canvas
-      const toX = lng => PAD + ((lng - minLng) / (maxLng - minLng)) * mapW;
-      const toY = lat => mapY + H_MAP - ((lat - minLat) / (maxLat - minLat)) * H_MAP;
-
-      // Grade de fundo suave
-      ctx.strokeStyle = '#111d2e';
-      ctx.lineWidth = 0.5;
-      for (let i = 1; i < 5; i++) {
-        const gx = PAD + i * mapW / 5;
-        ctx.beginPath(); ctx.moveTo(gx, mapY); ctx.lineTo(gx, mapY + H_MAP); ctx.stroke();
-        const gy = mapY + i * H_MAP / 5;
-        ctx.beginPath(); ctx.moveTo(PAD, gy); ctx.lineTo(PAD + mapW, gy); ctx.stroke();
-      }
-
-      // Traçado colorido por velocidade
-      const spdColor = s => s < 40 ? '#39FF88' : s < 80 ? '#FFD60A' : s < 120 ? '#FF5F1F' : '#FF5555';
-      ctx.lineWidth = 3;
-      ctx.lineJoin  = 'round';
-      ctx.lineCap   = 'round';
-      for (let i = 1; i < gps.length; i++) {
-        const a = gps[i - 1], b = gps[i];
-        ctx.strokeStyle = spdColor(a.spd || 0);
-        ctx.beginPath();
-        ctx.moveTo(toX(a.lng), toY(a.lat));
-        ctx.lineTo(toX(b.lng), toY(b.lat));
-        ctx.stroke();
-      }
-
-      // Marcadores início (verde) e fim (azul)
-      [[gps[0], '#4ade80'], [gps[gps.length - 1], '#60a5fa']].forEach(([p, c]) => {
-        ctx.fillStyle = c;
-        ctx.beginPath();
-        ctx.arc(toX(p.lng), toY(p.lat), 7, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.strokeStyle = '#fff';
-        ctx.lineWidth = 2;
-        ctx.stroke();
-      });
-
-      // Legenda de velocidade
-      const legY = mapY + H_MAP - 18;
-      [['#39FF88','<40'], ['#FFD60A','40-80'], ['#FF5F1F','80-120'], ['#FF5555','120+']].reduce((lx, [c, lbl]) => {
-        ctx.fillStyle = c;
-        ctx.fillRect(lx, legY + 2, 14, 4);
-        ctx.font = '8px -apple-system, system-ui, sans-serif';
-        ctx.fillStyle = '#94a3b8';
-        ctx.textAlign = 'left';
-        ctx.fillText(lbl, lx + 16, legY);
-        return lx + 52;
-      }, PAD + 4);
-    } else {
-      ctx.font = '13px -apple-system, system-ui, sans-serif';
-      ctx.fillStyle = '#1e293b';
-      ctx.textAlign = 'center';
-      ctx.fillText('GPS indisponível', W / 2, mapY + H_MAP / 2 - 7);
-    }
-
-    y += H_MAP + 10;
-
-    // ── Métricas ─────────────────────────────────────────────────────────────
-    ctx.fillStyle = '#1e293b';
-    ctx.fillRect(PAD, y, W - PAD * 2, 1);
-    y += 12;
+    // ── Divisor → métricas ───────────────────────────────────────────────────
+    ctx.fillStyle = '#1e293b'; ctx.fillRect(PAD, y + VPAD, CW, H_DIV);
+    y += VPAD + H_DIV + VPAD;
 
     const { gas: priceGas, kwh: priceKwh } = getPrices();
     const kwh100 = trip.distKm > 0.1 && (trip.netKwh || 0) > 0
@@ -2191,86 +2268,33 @@ async function shareTripCard(tripId) {
     const kmL  = (trip.fuelL || 0) > 0.01 ? (trip.distKm / trip.fuelL).toFixed(1) : '—';
     const cost = (trip.fuelL || 0) * priceGas + (trip.netKwh || 0) * priceKwh;
     const metrics = [
-      { v: f1(trip.distKm || 0), lbl: 'km',      color: '#60a5fa' },
-      { v: kwh100,                lbl: 'kWh/100', color: '#4ade80' },
-      { v: kmL,                   lbl: 'km/L',    color: '#fb923c' },
-      { v: trip.startSocPct > 0
-          ? `${Math.round(trip.startSocPct)}→${Math.round(trip.endSocPct)}%` : '—',
-                                  lbl: 'SOC',     color: '#2dd4bf' },
-      { v: cost > 0.01 ? 'R$' + f2(cost) : '—', lbl: 'custo',   color: '#fbbf24' },
+      { v: f1(trip.distKm || 0), lbl: 'km',      col: '#60a5fa' },
+      { v: kwh100,                lbl: 'kWh/100', col: '#4ade80' },
+      { v: kmL,                   lbl: 'km/L',    col: '#fb923c' },
+      { v: trip.startSocPct > 0 ? `${Math.round(trip.startSocPct)}→${Math.round(trip.endSocPct)}%` : '—',
+                                  lbl: 'SOC',     col: '#2dd4bf' },
+      { v: cost > 0.01 ? 'R$' + f2(cost) : '—',  lbl: 'custo',  col: '#fbbf24' },
     ];
-    const colW = (W - PAD * 2) / metrics.length;
+    const colW = CW / metrics.length;
     metrics.forEach((m, i) => {
-      const x = PAD + i * colW;
-      ctx.font = 'bold 17px -apple-system, system-ui, sans-serif';
-      ctx.fillStyle = m.color;
-      ctx.textAlign = 'left';
-      ctx.fillText(m.v, x, y);
-      ctx.font = '9px -apple-system, system-ui, sans-serif';
-      ctx.fillStyle = '#475569';
-      ctx.fillText(m.lbl, x, y + 19);
+      const mx = PAD + i * colW;
+      ctx.font = 'bold 17px system-ui, sans-serif'; ctx.fillStyle = m.col; ctx.textAlign = 'left';
+      ctx.fillText(m.v, mx, y);
+      ctx.font = '9px system-ui, sans-serif'; ctx.fillStyle = '#475569';
+      ctx.fillText(m.lbl, mx, y + 20);
     });
-
     y += H_METRICS;
 
-    // ── Gráficos ─────────────────────────────────────────────────────────────
-    if (samples.length > 1) {
-      const chartW = W - PAD * 2;
-      const chartH = 52;
+    // ── Divisor → faixas ─────────────────────────────────────────────────────
+    ctx.fillStyle = '#1e293b'; ctx.fillRect(PAD, y + VPAD, CW, H_DIV);
+    y += VPAD + H_DIV + VPAD;
 
-      function drawLine(data, label, color) {
-        const mn = Math.min(...data), mx = Math.max(...data);
-        const range = mx - mn || 1;
-
-        ctx.font = '9px -apple-system, system-ui, sans-serif';
-        ctx.fillStyle = color;
-        ctx.textAlign = 'left';
-        ctx.fillText(label, PAD, y - 1);
-
-        ctx.fillStyle = '#0d1523';
-        ctx.fillRect(PAD, y + 10, chartW, chartH);
-
-        // Linha zero (p/ valores bipolares como evKw)
-        if (mn < 0 && mx > 0) {
-          const zy = y + 10 + chartH - ((-mn) / range) * chartH;
-          ctx.strokeStyle = '#1e293b';
-          ctx.lineWidth = 0.5;
-          ctx.beginPath();
-          ctx.moveTo(PAD, zy); ctx.lineTo(PAD + chartW, zy);
-          ctx.stroke();
-        }
-
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 1.5;
-        ctx.lineJoin = 'round';
-        ctx.beginPath();
-        data.forEach((v, i) => {
-          const cx = PAD + (i / (data.length - 1)) * chartW;
-          const cy = y + 10 + chartH - ((v - mn) / range) * chartH;
-          i === 0 ? ctx.moveTo(cx, cy) : ctx.lineTo(cx, cy);
-        });
-        ctx.stroke();
-
-        y += chartH + 14;
-      }
-
-      ctx.fillStyle = '#1e293b';
-      ctx.fillRect(PAD, y, W - PAD * 2, 1);
-      y += 10;
-
-      drawLine(samples.map(s => s.spd  || 0), 'Velocidade (km/h)',       '#4DBBFF');
-      drawLine(samples.map(s => s.evKw || 0), 'Potência elétrica (kW)', '#39FF88');
-      drawLine(samples.map(s => s.rpm  || 0), 'Motor ICE (RPM)',         '#FF5F1F');
-    }
+    _drawBands(ctx, samples, PAD, y, CW);
+    y += H_BANDS;
 
     // ── Rodapé ───────────────────────────────────────────────────────────────
-    ctx.fillStyle = '#1e293b';
-    ctx.fillRect(PAD, y, W - PAD * 2, 1);
-    y += 10;
-    ctx.font = '9px -apple-system, system-ui, sans-serif';
-    ctx.fillStyle = '#334155';
-    ctx.textAlign = 'center';
-    ctx.fillText('Haval EcoTrip Impulse', W / 2, y);
+    ctx.font = '9px system-ui, sans-serif'; ctx.fillStyle = '#334155'; ctx.textAlign = 'center';
+    ctx.fillText('Haval EcoTrip Impulse', W / 2, y + 8);
 
     // ── Compartilhar / download ───────────────────────────────────────────────
     await new Promise(resolve => {

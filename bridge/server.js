@@ -7,6 +7,7 @@ const mqtt     = require('mqtt');
 const fs       = require('fs');
 const path     = require('path');
 const http     = require('http');
+const https    = require('https');
 const webpush  = require('web-push');
 
 // ── Configuração ──────────────────────────────────────────────────────────────
@@ -473,6 +474,33 @@ app.get('/api/trips', (req, res) => {
 app.get('/api/charges', (req, res) => {
   const since = parseInt(req.query.since || '0', 10);
   res.json(since > 0 ? chargesArr.filter(c => (c.timestamp_ms || 0) > since) : chargesArr);
+});
+
+// ── Proxy de tiles OSM para o canvas do Snapshot ──────────────────────────────
+// Evita CORS: o canvas carrega via apiFetch (com auth) e recebe PNG do OSM
+app.get('/api/tiles/:z/:x/:y', (req, res) => {
+  const z = parseInt(req.params.z, 10);
+  const x = parseInt(req.params.x, 10);
+  const y = parseInt(req.params.y, 10);
+  if (isNaN(z) || isNaN(x) || isNaN(y) || z < 0 || z > 19) return res.status(400).end();
+  const opts = {
+    hostname: 'tile.openstreetmap.org',
+    path:     `/${z}/${x}/${y}.png`,
+    method:   'GET',
+    timeout:  8000,
+    headers: {
+      'User-Agent': 'EcotripBridge/1.0 (https://github.com/rafaelcs28/haval-ecotrip)',
+      'Accept':     'image/png',
+    },
+  };
+  const proxyReq = https.get(opts, proxyRes => {
+    res.setHeader('Content-Type',  'image/png');
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.status(proxyRes.statusCode || 200);
+    proxyRes.pipe(res);
+  });
+  proxyReq.on('timeout', () => { proxyReq.destroy(); res.status(504).end(); });
+  proxyReq.on('error',   () => res.status(502).end());
 });
 
 // ── Admin: restart remoto ─────────────────────────────────────────────────────
