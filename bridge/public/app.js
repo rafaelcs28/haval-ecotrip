@@ -2608,8 +2608,15 @@ async function adminAction(path, label) {
 function adminRestart() { adminAction('/api/admin/restart', 'Reiniciando'); }
 function adminUpdate()  { adminAction('/api/admin/update',  'Atualizando'); }
 
-function adminClearHistory() {
-  if (!confirm('Apagar todo o histórico do servidor?\n(trips manuais, auto-trips e recargas)\n\nEssa ação não pode ser desfeita.')) return;
+async function adminClearHistory() {
+  const pw = prompt('Digite a senha para confirmar a exclusão do histórico:');
+  if (pw === null) return;                          // cancelou
+  const hash = await sha256hex(pw);
+  if (hash !== bridgeToken) {
+    adminSetStatus('✗ Senha incorreta — histórico não apagado.', false);
+    return;
+  }
+  if (!confirm('Senha confirmada.\n\nApagar TODO o histórico do servidor?\n(trips manuais, auto-trips e recargas)\n\nEssa ação não pode ser desfeita.')) return;
   adminAction('/api/admin/clear-history', 'Apagando histórico');
 }
 
