@@ -66,6 +66,8 @@ object SharedPreferencesKeys {
     // Sessão de recarga em andamento — persiste para sobreviver reinício do app enquanto carregando
     const val CHARGE_SESSION_ENERGY_KWH = "charge_session_energy_kwh"
     const val CHARGE_SESSION_SEC        = "charge_session_sec"
+    const val CHARGE_SESSION_START_SOC  = "charge_session_start_soc"   // SOC% no início da sessão
+    const val CHARGE_SESSION_START_MS   = "charge_session_start_ms"    // timestamp de início (ms)
 
     // IDs (startMs) de auto-trips já enviados com sucesso ao bridge
     // JSON array de Long — evita re-envio de trips já sincronizados
