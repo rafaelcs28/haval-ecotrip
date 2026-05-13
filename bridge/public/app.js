@@ -848,6 +848,10 @@ function setText(id, text) {
   const el = document.getElementById(id);
   if (el) el.textContent = text;
 }
+function setHTML(id, html) {
+  const el = document.getElementById(id);
+  if (el) el.innerHTML = html;
+}
 function setClass(id, cls) {
   const el = document.getElementById(id);
   if (el) {
@@ -874,6 +878,26 @@ function fmtTripTime(v) {
   if (h === 0 && m === 0 && s === 0) return '--';
   if (h > 0) return `${String(h).padStart(2,'0')}h:${String(m).padStart(2,'0')}'${String(s).padStart(2,'0')}"`;
   return `${String(m).padStart(2,'0')}'${String(s).padStart(2,'0')}"`;
+}
+// Tempo compacto em 2 componentes com unidades minúsculas (para cards do dash)
+// < 60min → "45<min>"  |  < 24h → "1<h >40<min>"  |  ≥ 24h → "2<d >3<h>"
+function fmtDashTime(v) {
+  const du = s => `<span class="dash-unit">${s}</span>`;
+  let sec = 0;
+  if (typeof v === 'number') { sec = v; }
+  else if (typeof v === 'string' && v !== '--') {
+    const h = +(v.match(/(\d+)\s*h/)   || [0,0])[1];
+    const m = +(v.match(/(\d+)\s*min/) || [0,0])[1];
+    const s = +(v.match(/(\d+)\s*s\b/) || [0,0])[1];
+    sec = h * 3600 + m * 60 + s;
+  }
+  if (!sec) return '--';
+  const days = Math.floor(sec / 86400);
+  const hrs  = Math.floor((sec % 86400) / 3600);
+  const mins = Math.floor((sec % 3600) / 60);
+  if (days > 0) return days + du('d ') + hrs  + du('h');
+  if (hrs  > 0) return hrs  + du('h ') + mins + du('min');
+  return mins + du('min');
 }
 function fmtDate(ts) {
   try {
@@ -1266,42 +1290,42 @@ function renderDash() {
   const chargingCard = document.getElementById('d-charging-card');
   if (chargingCard) chargingCard.style.display = isCharging ? '' : 'none';
   if (isCharging) {
-    const u = s => `<span class="chrg-unit">${s}</span>`;
-    const setH = (id, html) => { const el = document.getElementById(id); if (el) el.innerHTML = html; };
-    setH('d-chrg-power',   s.charge_power_kw   > 0 ? f1(s.charge_power_kw)    + u(' kW')  : '--');
-    setH('d-chrg-session', s.charge_session_kwh > 0 ? f2(s.charge_session_kwh) + u(' kWh') : '--');
+    const cu = s => `<span class="chrg-unit">${s}</span>`;
+    setHTML('d-chrg-power',   s.charge_power_kw   > 0 ? f1(s.charge_power_kw)    + cu(' kW')  : '--');
+    setHTML('d-chrg-session', s.charge_session_kwh > 0 ? f2(s.charge_session_kwh) + cu(' kWh') : '--');
     const rem = s.charge_remaining_min || 0;
     if (rem > 0) {
       const remStr = rem > 59
-        ? Math.floor(rem / 60) + u('h ') + (rem % 60) + u('min')
-        : rem + u(' min');
-      setH('d-chrg-remain', remStr);
+        ? Math.floor(rem / 60) + cu('h ') + (rem % 60) + cu('min')
+        : rem + cu(' min');
+      setHTML('d-chrg-remain', remStr);
       const finish = new Date(Date.now() + rem * 60000);
       setText('d-chrg-finish',
         finish.getHours().toString().padStart(2,'0') + ':' +
         finish.getMinutes().toString().padStart(2,'0'));
     } else {
-      setH('d-chrg-remain', '--');
+      setHTML('d-chrg-remain', '--');
       setText('d-chrg-finish', '--');
     }
   }
 
   // Trip A mini
   const ta = s.trip_a || {};
-  setText('d-trip-dist', ta.distance_km   > 0 ? f1(ta.distance_km) + ' km' : '--');
-  setText('d-trip-time', fmtTripTime(ta.time_sec));
-  setText('d-trip-kwh',  ta.kwh_per_100km > 0 ? f1(ta.kwh_per_100km)       : '--');
-  setText('d-trip-kml',  ta.km_per_l      > 0 ? f1(ta.km_per_l)            : '--');
-  setText('d-trip-cost', ta.cost_brl      > 0 ? 'R$ ' + f2(ta.cost_brl)   : '--');
+  const du = s => `<span class="dash-unit">${s}</span>`;
+  setHTML('d-trip-dist', ta.distance_km   > 0 ? f1(ta.distance_km) + du(' km') : '--');
+  setHTML('d-trip-time', fmtDashTime(ta.time_sec));
+  setText('d-trip-kwh',  ta.kwh_per_100km > 0 ? f1(ta.kwh_per_100km)           : '--');
+  setText('d-trip-kml',  ta.km_per_l      > 0 ? f1(ta.km_per_l)                : '--');
+  setHTML('d-trip-cost', ta.cost_brl      > 0 ? du('R$ ') + f2(ta.cost_brl) : '--');
   setClass('d-trip-kwh', eff(ta.kwh_per_100km));
 
   // Trip B mini
   const tb = s.trip_b || {};
-  setText('d-tripb-dist', tb.distance_km   > 0 ? f1(tb.distance_km) + ' km' : '--');
-  setText('d-tripb-time', fmtTripTime(tb.time_sec));
-  setText('d-tripb-kwh',  tb.kwh_per_100km > 0 ? f1(tb.kwh_per_100km)       : '--');
-  setText('d-tripb-kml',  tb.km_per_l      > 0 ? f1(tb.km_per_l)            : '--');
-  setText('d-tripb-cost', tb.cost_brl      > 0 ? 'R$ ' + f2(tb.cost_brl)   : '--');
+  setHTML('d-tripb-dist', tb.distance_km   > 0 ? f1(tb.distance_km) + du(' km') : '--');
+  setHTML('d-tripb-time', fmtDashTime(tb.time_sec));
+  setText('d-tripb-kwh',  tb.kwh_per_100km > 0 ? f1(tb.kwh_per_100km)           : '--');
+  setText('d-tripb-kml',  tb.km_per_l      > 0 ? f1(tb.km_per_l)                : '--');
+  setHTML('d-tripb-cost', tb.cost_brl      > 0 ? du('R$ ') + f2(tb.cost_brl) : '--');
   setClass('d-tripb-kwh', eff(tb.kwh_per_100km));
 
   // ── Camadas PNG do carro ─────────────────────────────────────────────────────
@@ -1467,11 +1491,11 @@ function renderDash() {
 
   // Desde última partida (rolling)
   const r = s.rolling || {};
-  setText('d-roll-dist', r.distance_km   > 0 ? f1(r.distance_km) + ' km' : '--');
-  setText('d-roll-fuel', r.fuel_l        > 0 ? f2(r.fuel_l) + ' L'       : '--');
-  setText('d-roll-kwh',  r.kwh_per_100km > 0 ? f1(r.kwh_per_100km)       : '--');
-  setText('d-roll-kml',  r.km_per_l      > 0 ? f1(r.km_per_l)            : '--');
-  setText('d-roll-cost', r.cost_brl      > 0 ? 'R$ ' + f2(r.cost_brl)   : '--');
+  setHTML('d-roll-dist', r.distance_km   > 0 ? f1(r.distance_km) + du(' km') : '--');
+  setHTML('d-roll-fuel', r.fuel_l        > 0 ? f2(r.fuel_l)       + du(' L')  : '--');
+  setText('d-roll-kwh',  r.kwh_per_100km > 0 ? f1(r.kwh_per_100km)            : '--');
+  setText('d-roll-kml',  r.km_per_l      > 0 ? f1(r.km_per_l)                 : '--');
+  setHTML('d-roll-cost', r.cost_brl      > 0 ? du('R$ ') + f2(r.cost_brl)  : '--');
   setClass('d-roll-kwh', eff(r.kwh_per_100km));
 
   // Mapa GPS — atualiza live a cada nova posição recebida via WebSocket

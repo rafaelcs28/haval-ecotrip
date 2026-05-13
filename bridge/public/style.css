@@ -269,6 +269,9 @@ html, body {
 #d-charging-card .metric-value { font-size: 18px; }
 #d-charging-card .chrg-unit    { font-size: 9px; font-weight: 500; opacity: .75; vertical-align: baseline; margin-left: 1px; }
 
+/* ── Cards Desde última partida / Trip A / Trip B — unidades micro ────────── */
+#d-trips-summary .dash-unit    { font-size: 8px; font-weight: 500; opacity: .70; vertical-align: baseline; margin-left: 1px; }
+
 /* ── Marcha grande (dashboard) ───────────────────────────────────────────────── */
 .gear-badge-lg {
   display: inline-block;
