@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_BUILD = 'b158';   // bump a cada deploy para confirmar versão no admin
+const APP_BUILD = 'b159';   // bump a cada deploy para confirmar versão no admin
 
 // ── Estado local ──────────────────────────────────────────────────────────────
 let state = {};
@@ -3123,7 +3123,10 @@ async function loadStats() {
   // ── 2. Comparativo semanal ───────────────────────────────────────────────
   html += await _statsWeeklyHTML();
 
-  // ── 3. Split elétrico / híbrido ──────────────────────────────────────────
+  // ── 3. Comparativo mensal ────────────────────────────────────────────────
+  html += await _statsMonthlyHTML();
+
+  // ── 4. Split elétrico / híbrido ──────────────────────────────────────────
   html += _statsElectricHTML(trips);
 
   html += '</div>';
@@ -3257,10 +3260,36 @@ function _statsRecordsHTML(trips) {
   return _statsCard('🏆 Recordes pessoais (' + trips.length + ' viagens)', rows) + top3Card;
 }
 
+// ── Coluna de período (compartilhada entre semanal e mensal) ─────────────────
+function _statsPeriodCol(title, subtitle, from, to) {
+  if (!from || !to) return `<div style="flex:1">
+    <div style="font-size:10px;font-weight:700;color:#94a3b8;margin-bottom:2px">${title}</div>
+    <div style="font-size:9px;color:#475569;margin-bottom:6px">${subtitle}</div>
+    <div style="font-size:11px;color:#475569">sem dados</div>
+  </div>`;
+  const km  = Math.max(0, (to.distance_km || 0) - (from.distance_km || 0));
+  const net = Math.max(0, (to.net_kwh     || 0) - (from.net_kwh     || 0));
+  const ren = Math.max(0, (to.regen_kwh   || 0) - (from.regen_kwh   || 0));
+  const fue = Math.max(0, (to.fuel_l      || 0) - (from.fuel_l      || 0));
+  const eff = km > 0.5 ? (net / km * 100) : 0;
+  return `<div style="flex:1">
+    <div style="font-size:10px;font-weight:700;color:#94a3b8;margin-bottom:2px">${title}</div>
+    <div style="font-size:9px;color:#475569;margin-bottom:6px">${subtitle}</div>
+    <div style="font-size:18px;font-weight:800;color:#60a5fa;line-height:1">${km.toFixed(1)}</div>
+    <div style="font-size:9px;color:#475569;margin-bottom:6px">km</div>
+    <div style="font-size:11px;color:#4ade80">${net.toFixed(1)} kWh</div>
+    ${ren > 0.1 ? `<div style="font-size:10px;color:#39FF88">↩ ${ren.toFixed(1)} kWh regen</div>` : ''}
+    ${fue > 0.05 ? `<div style="font-size:11px;color:#fb923c">${fue.toFixed(2)} L</div>` : ''}
+    ${eff > 0 ? `<div style="font-size:10px;color:#94a3b8">${eff.toFixed(1)} kWh/100km</div>` : ''}
+  </div>`;
+}
+
 async function _statsWeeklyHTML() {
   let snaps = [];
   try { snaps = await apiFetch('/api/lifetime/snapshots').then(r => r.json()); } catch (_) {}
   if (!snaps.length) return _statsCard('📅 Comparativo semanal', '<div style="color:#475569;font-size:12px">Snapshots insuficientes.</div>');
+
+  const fmtD = ms => new Date(ms).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
 
   // Segunda-feira às 00:00 local
   function mondayMs(refMs) {
@@ -3270,52 +3299,67 @@ async function _statsWeeklyHTML() {
     d.setDate(d.getDate() - (day === 0 ? 6 : day - 1));
     return d.getTime();
   }
-  const thisMon  = mondayMs(Date.now());
+
+  const now      = Date.now();
+  const thisMon  = mondayMs(now);
   const lastMon  = thisMon - 7 * 86400000;
+  const elapsed  = now - thisMon;                  // ms decorridos desde seg atual
 
   const snapBefore = ts => {
     const arr = snaps.filter(s => s.ts < ts);
     return arr.length ? arr[arr.length - 1] : null;
   };
-  const latest      = snaps[snaps.length - 1];
-  const atThisMon   = snapBefore(thisMon);
-  const atLastMon   = snapBefore(lastMon);
-
-  function deltaRow(icon, label, a, b, field, unit, deci) {
-    if (!a || !b) return '';
-    const val = ((b[field] || 0) - (a[field] || 0));
-    if (val < 0) return '';
-    return `<div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid #0F1520">
-      <span style="font-size:11px;color:#64748b">${icon} ${label}</span>
-      <span style="font-size:12px;font-weight:700;color:#f1f5f9">${val.toFixed(deci)} ${unit}</span>
-    </div>`;
-  }
-
-  function weekCol(title, from, to) {
-    if (!from || !to) return `<div style="flex:1"><div style="font-size:10px;font-weight:700;color:#64748b;margin-bottom:6px">${title}</div><div style="font-size:11px;color:#475569">sem dados</div></div>`;
-    const km  = Math.max(0, (to.distance_km || 0) - (from.distance_km || 0));
-    const net = Math.max(0, (to.net_kwh     || 0) - (from.net_kwh     || 0));
-    const ren = Math.max(0, (to.regen_kwh   || 0) - (from.regen_kwh   || 0));
-    const fue = Math.max(0, (to.fuel_l      || 0) - (from.fuel_l      || 0));
-    const eff = km > 0.5 ? (net / km * 100) : 0;
-    return `<div style="flex:1">
-      <div style="font-size:10px;font-weight:700;color:#94a3b8;margin-bottom:6px">${title}</div>
-      <div style="font-size:18px;font-weight:800;color:#60a5fa;line-height:1">${km.toFixed(1)}</div>
-      <div style="font-size:9px;color:#475569;margin-bottom:6px">km</div>
-      <div style="font-size:11px;color:#4ade80">${net.toFixed(1)} kWh</div>
-      ${ren > 0.1 ? `<div style="font-size:10px;color:#39FF88">↩ ${ren.toFixed(1)} kWh regen</div>` : ''}
-      ${fue > 0.05 ? `<div style="font-size:11px;color:#fb923c">${fue.toFixed(2)} L</div>` : ''}
-      ${eff > 0 ? `<div style="font-size:10px;color:#94a3b8">${eff.toFixed(1)} kWh/100km</div>` : ''}
-    </div>`;
-  }
+  const latest           = snaps[snaps.length - 1];
+  const atThisMon        = snapBefore(thisMon);
+  const atLastMon        = snapBefore(lastMon);
+  const atSamePtLastWeek = snapBefore(lastMon + elapsed); // mesmo ponto na semana passada
 
   const body = `<div style="display:flex;gap:16px">
-    ${weekCol('Esta semana', atThisMon, latest)}
+    ${_statsPeriodCol('Esta semana',    fmtD(thisMon) + ' → hoje',           atThisMon,  latest)}
     <div style="width:1px;background:#0F1520;flex-shrink:0"></div>
-    ${weekCol('Semana passada', atLastMon, atThisMon)}
+    ${_statsPeriodCol('Semana passada', fmtD(lastMon) + ' → ' + fmtD(lastMon + elapsed), atLastMon, atSamePtLastWeek)}
   </div>`;
 
   return _statsCard('📅 Comparativo semanal', body);
+}
+
+async function _statsMonthlyHTML() {
+  let snaps = [];
+  try { snaps = await apiFetch('/api/lifetime/snapshots').then(r => r.json()); } catch (_) {}
+  if (!snaps.length) return _statsCard('📆 Comparativo mensal', '<div style="color:#475569;font-size:12px">Snapshots insuficientes.</div>');
+
+  const fmtD = ms => new Date(ms).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+
+  const snapBefore = ts => {
+    const arr = snaps.filter(s => s.ts < ts);
+    return arr.length ? arr[arr.length - 1] : null;
+  };
+  const latest = snaps[snaps.length - 1];
+  const now    = Date.now();
+
+  // Dia 01 do mês atual às 00:00
+  const d1 = new Date(now);
+  d1.setDate(1); d1.setHours(0, 0, 0, 0);
+  const thisMonth1st = d1.getTime();
+  const elapsed      = now - thisMonth1st;   // ms decorridos desde dia 01
+
+  // Dia 01 do mês anterior
+  const d2 = new Date(d1);
+  d2.setMonth(d2.getMonth() - 1);
+  const prevMonth1st    = d2.getTime();
+  const samePtPrevMonth = prevMonth1st + elapsed; // mesmo ponto no mês anterior
+
+  const atThisMonth1st   = snapBefore(thisMonth1st);
+  const atPrevMonth1st   = snapBefore(prevMonth1st);
+  const atSamePtPrevMonth= snapBefore(samePtPrevMonth);
+
+  const body = `<div style="display:flex;gap:16px">
+    ${_statsPeriodCol('Este mês',    fmtD(thisMonth1st) + ' → hoje',                   atThisMonth1st,  latest)}
+    <div style="width:1px;background:#0F1520;flex-shrink:0"></div>
+    ${_statsPeriodCol('Mês passado', fmtD(prevMonth1st) + ' → ' + fmtD(samePtPrevMonth), atPrevMonth1st, atSamePtPrevMonth)}
+  </div>`;
+
+  return _statsCard('📆 Comparativo mensal', body);
 }
 
 function _statsElectricHTML(trips) {
