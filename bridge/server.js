@@ -664,12 +664,29 @@ function savePendingRenames() {
   fs.writeFileSync(RENAMES_FILE, JSON.stringify(pendingRenames, null, 2));
 }
 
-// POST /api/rename  { tripId, type:'auto'|'manual', name }
-// Aplica imediatamente nos dados locais e enfileira para o Android
+// POST /api/rename  { tripId, type, name, ts? }
+// type: 'auto' | 'manual' | 'trip_finish' | 'trip_name'
+// trip_finish / trip_name: tripId deve ser 'A' ou 'B'; name opcional para trip_finish
 app.post('/api/rename', (req, res) => {
-  const { tripId, type, name } = req.body || {};
-  if (!tripId || !name) return res.status(400).json({ error: 'tripId e name obrigatórios' });
-  const trimmed = String(name).trim().slice(0, 80);
+  const { tripId, type, name, ts } = req.body || {};
+  if (!tripId) return res.status(400).json({ error: 'tripId obrigatório' });
+
+  const isTripCmd = type === 'trip_finish' || type === 'trip_name';
+
+  // Comandos de trip A/B: validação específica
+  if (isTripCmd) {
+    if (!['A', 'B'].includes(String(tripId).toUpperCase())) {
+      return res.status(400).json({ error: 'tripId deve ser A ou B para trip commands' });
+    }
+    if (type === 'trip_name' && !name) {
+      return res.status(400).json({ error: 'name obrigatório para trip_name' });
+    }
+  } else {
+    // Renames normais: name obrigatório
+    if (!name) return res.status(400).json({ error: 'name obrigatório' });
+  }
+
+  const trimmed = name ? String(name).trim().slice(0, 80) : '';
 
   if (type === 'auto') {
     // Atualiza array em memória
@@ -691,10 +708,13 @@ app.post('/api/rename', (req, res) => {
     const t = tripsMap.get(String(tripId));
     if (t) { t.name = trimmed; scheduleTripsFlush(); }
   }
+  // trip_finish / trip_name: sem dados locais para atualizar — o carro aplica ao ligar
 
-  // Enfileira rename para o Android consumir
+  // Enfileira para o Android consumir
   const id = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-  pendingRenames.push({ id, tripId: String(tripId), type: type || 'auto', name: trimmed, createdAt: Date.now() });
+  const entry = { id, tripId: String(tripId), type: type || 'auto', name: trimmed, createdAt: Date.now() };
+  if (isTripCmd && ts) entry.ts = Number(ts);
+  pendingRenames.push(entry);
   savePendingRenames();
   console.log(`✓ Rename enfileirado: [${type}] ${tripId} → "${trimmed}"`);
   res.json({ ok: true, id });  // id necessário para PWA rastrear status de confirmação

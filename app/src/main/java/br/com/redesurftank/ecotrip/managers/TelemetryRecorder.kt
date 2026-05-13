@@ -19,9 +19,10 @@ import java.net.URL
 // ── Renomear trip — tarefa pendente recebida do bridge ────────────────────────
 data class RenameTask(
     val id:     String,   // UUID gerado pelo bridge (usado no ACK)
-    val tripId: String,   // startMs (auto) ou timestampMs (manual) como String
-    val type:   String,   // "auto" | "manual"
-    val name:   String,   // novo nome desejado
+    val tripId: String,   // startMs (auto) | timestampMs (manual) | "A"/"B" (trip commands)
+    val type:   String,   // "auto" | "manual" | "trip_finish" | "trip_name"
+    val name:   String,   // novo nome desejado (vazio para trip_finish sem nome)
+    val ts:     Long = 0L, // timestamp em ms do iPhone (usado em trip_finish)
 )
 
 // ── Amostra de telemetria por segundo ─────────────────────────────────────────
@@ -351,6 +352,7 @@ class TelemetryRecorder(private val context: Context) {
                         tripId = obj.optString("tripId"),
                         type   = obj.optString("type"),
                         name   = obj.optString("name"),
+                        ts     = obj.optLong("ts", 0L),
                     ))
                 }
                 Log.i(TAG, "fetchPendingRenames: ${tasks.size} tarefa(s) recebida(s)")

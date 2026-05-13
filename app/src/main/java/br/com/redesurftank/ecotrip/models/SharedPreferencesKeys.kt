@@ -104,6 +104,10 @@ object SharedPreferencesKeys {
     // Home Assistant export
     const val HA_EXPORT_URL = "ha_export_url"
 
+    // Nomes pendentes para Trip A/B (definidos pelo iPhone antes do carro ligar)
+    const val PENDING_TRIP_A_NAME = "pending_trip_a_name"
+    const val PENDING_TRIP_B_NAME = "pending_trip_b_name"
+
     // URL do Bridge Node.js (iPhone PWA) — configurado manualmente pois pode diferir do broker MQTT
     const val BRIDGE_URL   = "bridge_url"
     // Senha do Bridge — enviada como Authorization: Bearer no sync de auto-trips

@@ -300,6 +300,10 @@ class TripManager private constructor() {
     private var latestSocPct  = 0f
     private var latestFuelPct = 0f
 
+    // Nomes pendentes para Trip A/B — definidos pelo iPhone antes do carro ligar
+    private var pendingTripAName: String = ""
+    private var pendingTripBName: String = ""
+
     // ── Telemetria em tempo real ──────────────────────────────────────────────
     private var telemetryRecorder: TelemetryRecorder? = null
     private var latestSpeedKmh:     Float  = 0f
@@ -582,6 +586,34 @@ class TripManager private constructor() {
                             renameTripHistoryEntry(tsMs, task.name)
                             appliedIds.add(task.id)
                             AppLogger.i(TAG, "Rename manual trip ${task.tripId} → '${task.name}'")
+                        }
+                        "trip_finish" -> {
+                            val tripId = when (task.tripId.uppercase()) {
+                                "A" -> TripId.A
+                                "B" -> TripId.B
+                                else -> null
+                            }
+                            if (tripId != null) {
+                                resetTrip(tripId, task.name, if (task.ts > 0L) task.ts else 0L)
+                                appliedIds.add(task.id)
+                                AppLogger.i(TAG, "Trip finish ${task.tripId} via bridge — ts=${task.ts} name='${task.name}'")
+                            }
+                        }
+                        "trip_name" -> {
+                            when (task.tripId.uppercase()) {
+                                "A" -> {
+                                    pendingTripAName = task.name.trim()
+                                    prefs.edit().putString(SharedPreferencesKeys.PENDING_TRIP_A_NAME, pendingTripAName).apply()
+                                    appliedIds.add(task.id)
+                                    AppLogger.i(TAG, "Nome pendente Trip A definido: '${task.name}'")
+                                }
+                                "B" -> {
+                                    pendingTripBName = task.name.trim()
+                                    prefs.edit().putString(SharedPreferencesKeys.PENDING_TRIP_B_NAME, pendingTripBName).apply()
+                                    appliedIds.add(task.id)
+                                    AppLogger.i(TAG, "Nome pendente Trip B definido: '${task.name}'")
+                                }
+                            }
                         }
                     }
                 } catch (_: Exception) {}
@@ -1180,11 +1212,25 @@ class TripManager private constructor() {
         }
     }
 
-    fun resetTrip(id: TripId, name: String = "") {
+    fun resetTrip(id: TripId, name: String = "", historyTimestampMs: Long = 0L) {
         synchronized(lock) {
             val trip = if (id == TripId.A) tripA else tripB
             val label = if (id == TripId.A) "Trip A" else "Trip B"
             val now = System.currentTimeMillis()
+
+            // Use pending name from bridge if no explicit name provided
+            val pendingName = if (id == TripId.A) pendingTripAName else pendingTripBName
+            val effectiveName = name.takeIf { it.isNotBlank() } ?: pendingName
+            // Clear pending name after consumption
+            if (id == TripId.A && pendingTripAName.isNotBlank()) {
+                pendingTripAName = ""
+                prefs.edit().putString(SharedPreferencesKeys.PENDING_TRIP_A_NAME, "").apply()
+            } else if (id == TripId.B && pendingTripBName.isNotBlank()) {
+                pendingTripBName = ""
+                prefs.edit().putString(SharedPreferencesKeys.PENDING_TRIP_B_NAME, "").apply()
+            }
+            // Use remote timestamp from bridge if provided (iPhone time of finalization)
+            val historyTs = if (historyTimestampMs > 0L) historyTimestampMs else now
 
             // Save to history before clearing (only if trip has meaningful data)
             val snap = snapshot(trip)
@@ -1192,9 +1238,9 @@ class TripManager private constructor() {
                 val tripNetKwh  = (snap.energyKwh - snap.regenKwh).coerceAtLeast(0f)
                 val tripCostBrl = snap.fuelL * priceGasolinePerL + tripNetKwh * priceEnergyPerKwh
                 val entry = TripHistoryEntry(
-                    name        = name.trim(),
+                    name        = effectiveName.trim(),
                     label       = label,
-                    timestampMs = now,
+                    timestampMs = historyTs,
                     fuelL       = snap.fuelL,
                     energyKwh   = snap.energyKwh,
                     regenKwh    = snap.regenKwh,
@@ -1795,6 +1841,12 @@ class TripManager private constructor() {
         tripA.sessStartRegen  = prefs.getFloat(SharedPreferencesKeys.TRIP_A_SESS_START_REGEN,  0f)
         tripB.sessStartEnergy = prefs.getFloat(SharedPreferencesKeys.TRIP_B_SESS_START_ENERGY, 0f)
         tripB.sessStartRegen  = prefs.getFloat(SharedPreferencesKeys.TRIP_B_SESS_START_REGEN,  0f)
+
+        // Nomes pendentes para próximo reset via bridge
+        pendingTripAName = prefs.getString(SharedPreferencesKeys.PENDING_TRIP_A_NAME, "") ?: ""
+        pendingTripBName = prefs.getString(SharedPreferencesKeys.PENDING_TRIP_B_NAME, "") ?: ""
+        if (pendingTripAName.isNotBlank()) AppLogger.i(TAG, "Nome pendente Trip A: '$pendingTripAName'")
+        if (pendingTripBName.isNotBlank()) AppLogger.i(TAG, "Nome pendente Trip B: '$pendingTripBName'")
     }
 
     private fun saveToPrefs() {

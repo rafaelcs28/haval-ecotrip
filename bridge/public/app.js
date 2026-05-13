@@ -43,6 +43,69 @@ async function syncRenameStatus() {
   } catch (_) {}
 }
 
+// ── Comandos remotos Trip A/B ─────────────────────────────────────────────────
+// Permite finalizar ou nomear Trip A/B pelo iPhone antes de ligar o carro.
+// O carro lê e aplica o comando na próxima sessão via pending-renames pipeline.
+const _tripCmdState = { A: null, B: null };  // 'name' | 'finish' | null
+
+function showTripCmd(trip, action) {
+  _tripCmdState[trip] = action;
+  const box = document.getElementById(`trip-cmd-${trip}`);
+  if (!box) return;
+  const inp = document.getElementById(`trip-cmd-${trip}-name`);
+  if (inp) {
+    inp.placeholder = action === 'finish' ? 'Nome da viagem (opcional)' : 'Novo nome para Trip ' + trip;
+    inp.value = '';
+  }
+  document.getElementById(`trip-cmd-${trip}-status`).textContent = '';
+  box.style.display = '';
+  inp?.focus();
+}
+
+function cancelTripCmd(trip) {
+  _tripCmdState[trip] = null;
+  const box = document.getElementById(`trip-cmd-${trip}`);
+  if (box) box.style.display = 'none';
+}
+
+async function confirmTripCmd(trip) {
+  const action = _tripCmdState[trip];
+  if (!action) return;
+  const nameEl   = document.getElementById(`trip-cmd-${trip}-name`);
+  const statusEl = document.getElementById(`trip-cmd-${trip}-status`);
+  const name = nameEl ? nameEl.value.trim() : '';
+
+  if (action === 'name' && !name) {
+    if (statusEl) statusEl.textContent = '⚠️ Informe um nome';
+    return;
+  }
+
+  if (statusEl) statusEl.textContent = '⏳ Enviando…';
+
+  try {
+    const body = { tripId: trip, type: 'trip_' + action, name };
+    if (action === 'finish') body.ts = Date.now();
+
+    const r = await apiFetch('/api/rename', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(body),
+    });
+
+    if (r.ok) {
+      const label = action === 'finish' ? 'Finalização agendada' : 'Nome agendado';
+      if (statusEl) statusEl.textContent = `✓ ${label} — carro aplica ao ligar`;
+      _tripCmdState[trip] = null;
+      setTimeout(() => cancelTripCmd(trip), 4000);
+    } else {
+      const err = await r.json().catch(() => ({}));
+      if (statusEl) statusEl.textContent = '✗ ' + (err.error || `Erro ${r.status}`);
+    }
+  } catch (_e) {
+    if (statusEl) statusEl.textContent = '✗ Sem resposta do servidor';
+  }
+}
+
 function queueGeocode(tripId, lat, lng) {
   if (!lat || !lng || lat === 0 || lng === 0) return;
   if (geoCache[tripId] !== undefined) return;             // já tentado

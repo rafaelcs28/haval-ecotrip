@@ -419,6 +419,19 @@
             <div class="metric-label">Tanque agora</div>
           </div>
         </div>
+        <div class="divider"></div>
+        <div style="display:flex;gap:8px;padding:2px 0">
+          <button onclick="showTripCmd('A','name')" style="flex:1;padding:9px 6px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:#94a3b8;font-size:13px;cursor:pointer">✏️ Nomear</button>
+          <button onclick="showTripCmd('A','finish')" style="flex:1;padding:9px 6px;background:#1e293b;border:1px solid #7c2d12;border-radius:8px;color:#f97316;font-size:13px;cursor:pointer">🏁 Finalizar</button>
+        </div>
+        <div id="trip-cmd-A" style="display:none;margin-top:8px">
+          <input id="trip-cmd-A-name" type="text" maxlength="80" placeholder="Nome da viagem (opcional)" style="width:100%;box-sizing:border-box;padding:9px 10px;background:#0f172a;border:1px solid #334155;border-radius:8px;color:#e2e8f0;font-size:13px;margin-bottom:8px">
+          <div style="display:flex;gap:8px">
+            <button onclick="cancelTripCmd('A')" style="flex:1;padding:9px 6px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:#64748b;font-size:13px;cursor:pointer">✕ Cancelar</button>
+            <button onclick="confirmTripCmd('A')" style="flex:1;padding:9px 6px;background:#14301a;border:1px solid #166534;border-radius:8px;color:#4ade80;font-size:13px;cursor:pointer">✓ Confirmar</button>
+          </div>
+          <div id="trip-cmd-A-status" style="font-size:12px;color:#94a3b8;text-align:center;margin-top:7px;min-height:16px"></div>
+        </div>
       </div>
       <!-- Trip B -->
       <div class="card">
@@ -481,6 +494,19 @@
             <div class="metric-value orange sm" id="b-tank-now">-- L</div>
             <div class="metric-label">Tanque agora</div>
           </div>
+        </div>
+        <div class="divider"></div>
+        <div style="display:flex;gap:8px;padding:2px 0">
+          <button onclick="showTripCmd('B','name')" style="flex:1;padding:9px 6px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:#94a3b8;font-size:13px;cursor:pointer">✏️ Nomear</button>
+          <button onclick="showTripCmd('B','finish')" style="flex:1;padding:9px 6px;background:#1e293b;border:1px solid #7c2d12;border-radius:8px;color:#f97316;font-size:13px;cursor:pointer">🏁 Finalizar</button>
+        </div>
+        <div id="trip-cmd-B" style="display:none;margin-top:8px">
+          <input id="trip-cmd-B-name" type="text" maxlength="80" placeholder="Nome da viagem (opcional)" style="width:100%;box-sizing:border-box;padding:9px 10px;background:#0f172a;border:1px solid #334155;border-radius:8px;color:#e2e8f0;font-size:13px;margin-bottom:8px">
+          <div style="display:flex;gap:8px">
+            <button onclick="cancelTripCmd('B')" style="flex:1;padding:9px 6px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:#64748b;font-size:13px;cursor:pointer">✕ Cancelar</button>
+            <button onclick="confirmTripCmd('B')" style="flex:1;padding:9px 6px;background:#14301a;border:1px solid #166534;border-radius:8px;color:#4ade80;font-size:13px;cursor:pointer">✓ Confirmar</button>
+          </div>
+          <div id="trip-cmd-B-status" style="font-size:12px;color:#94a3b8;text-align:center;margin-top:7px;min-height:16px"></div>
         </div>
       </div>
     </div>
