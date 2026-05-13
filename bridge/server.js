@@ -553,7 +553,7 @@ app.post('/api/admin/restart', (req, res) => {
 app.post('/api/admin/update', (req, res) => {
   if (!adminCheckToken(req, res)) return;
   const { exec } = require('child_process');
-  const repoDir   = path.join(__dirname, '..');
+  const repoDir = path.join(__dirname, '..');
   exec('git pull', { cwd: repoDir }, (err, stdout, stderr) => {
     const pullOut = (stdout || '').trim() || (stderr || '').trim() || '(sem saída)';
     if (err) {
@@ -561,16 +561,11 @@ app.post('/api/admin/update', (req, res) => {
       return res.json({ ok: false, msg: 'git pull falhou:\n' + pullOut });
     }
     console.log('[admin] git pull OK:', pullOut);
-    // Instala novas dependências antes de reiniciar
-    exec('npm install --omit=dev', { cwd: __dirname }, (err2, stdout2, stderr2) => {
-      const npmOut = (stdout2 || '').trim() || (stderr2 || '').trim() || '';
-      if (err2) console.warn('[admin] npm install aviso:', err2.message);
-      res.json({ ok: true, msg: pullOut + (npmOut ? '\n' + npmOut : '') + '\n\nReiniciando...' });
-      setTimeout(() => {
-        console.log('[admin] Reiniciando após update');
-        process.exit(0);
-      }, 500);
-    });
+    res.json({ ok: true, msg: pullOut + '\n\nReiniciando servidor...' });
+    setTimeout(() => {
+      console.log('[admin] Reiniciando após update');
+      process.exit(0);
+    }, 500);
   });
 });
 
