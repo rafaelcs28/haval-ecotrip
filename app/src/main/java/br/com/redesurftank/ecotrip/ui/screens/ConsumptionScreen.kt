@@ -367,10 +367,11 @@ fun ConsumptionScreen() {
         }
     }
 
-    // Carrega (ou recarrega) a lista de viagens automáticas sempre que a aba é aberta.
-    // Fica FORA do bloco if(showAutoTrips) para não violar as regras de composição —
-    // ter um LaunchedEffect dentro de um bloco condicional com early-return causa crashes.
-    // Ao abrir a aba também dispara o sync de viagens existentes para o bridge iPhone.
+    // Carrega viagens na inicialização (para o card da tela principal mostrar a última viagem)
+    // e também ao abrir a aba de auto-trips (com sync para o bridge).
+    LaunchedEffect(Unit) {
+        autoTripEntries = tripManager.getAutoTripHistory()
+    }
     LaunchedEffect(showAutoTrips) {
         if (showAutoTrips) {
             autoTripEntries = tripManager.getAutoTripHistory()
@@ -709,9 +710,13 @@ fun ConsumptionScreen() {
             modifier = Modifier.fillMaxWidth(),
         )
 
-        inProgressTrip?.let { trip ->
+        // Mostra viagem ao vivo quando em andamento; caso contrário, última salva
+        val displayTrip   = inProgressTrip ?: autoTripEntries.firstOrNull()
+        val displayIsLive = inProgressTrip != null
+        if (displayTrip != null) {
             InProgressTripCard(
-                trip     = trip,
+                trip     = displayTrip,
+                isLive   = displayIsLive,
                 nowMs    = nowMs,
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -721,36 +726,46 @@ fun ConsumptionScreen() {
 
 }
 
-// ── Card: Viagem em andamento ─────────────────────────────────────────────────
+// ── Card: Viagem em andamento / Última viagem ─────────────────────────────────
 
 @Composable
 private fun InProgressTripCard(
     trip:     AutoTripEntry,
+    isLive:   Boolean,
     nowMs:    Long,
     modifier: Modifier = Modifier,
 ) {
-    val elapsedSec = ((nowMs - trip.startMs) / 1000L).coerceAtLeast(0L)
-    val durStr = when {
-        elapsedSec >= 3600 -> "${elapsedSec / 3600}h ${(elapsedSec % 3600) / 60}min"
-        elapsedSec >= 60   -> "${elapsedSec / 60}min"
-        else               -> "${elapsedSec}s"
+    // Tempo: ao vivo = elapsed desde startMs; salva = duração real endMs-startMs
+    val timeSec = if (isLive)
+        ((nowMs - trip.startMs) / 1000L).coerceAtLeast(0L)
+    else
+        ((trip.endMs - trip.startMs) / 1000L).coerceAtLeast(trip.timeSec)
+    val timeStr = when {
+        timeSec >= 3600 -> "${timeSec / 3600}h ${(timeSec % 3600) / 60}min"
+        timeSec >= 60   -> "${timeSec / 60}min"
+        else            -> "${timeSec}s"
     }
-    val kwh100  = if (trip.distKm > 1f)
-        trip.netKwh / trip.distKm * 100f else 0f
-    val kmlEq   = if (trip.distKm > 0.1f && (trip.netKwh > 0f || trip.fuelL > 0.001f))
+
+    val kwh100   = if (trip.distKm > 0.5f) trip.netKwh / trip.distKm * 100f else 0f
+    val kmlEq    = if (trip.distKm > 0.1f && (trip.netKwh > 0f || trip.fuelL > 0.001f))
         trip.distKm / (trip.netKwh / 8.9f + trip.fuelL) else 0f
     val socDelta = trip.endSocPct - trip.startSocPct
-    val startFmt = remember(trip.startMs) {
-        java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
-            .format(java.util.Date(trip.startMs))
+
+    val dateFmt = remember(trip.startMs) {
+        java.text.SimpleDateFormat(
+            if (isLive) "HH:mm" else "dd/MM  HH:mm",
+            java.util.Locale.getDefault()
+        ).format(java.util.Date(trip.startMs))
     }
+
+    val accentColor = if (isLive) AccentBlue else TextSecondary
 
     Column(
         modifier = modifier
             .background(GlassCard, RoundedCornerShape(16.dp))
-            .border(1.dp, AccentBlue.copy(alpha = 0.28f), RoundedCornerShape(16.dp))
+            .border(1.dp, accentColor.copy(alpha = 0.28f), RoundedCornerShape(16.dp))
             .padding(horizontal = 16.dp, vertical = 10.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         // ── Cabeçalho ─────────────────────────────────────────────────────────
         Row(
@@ -760,61 +775,88 @@ private fun InProgressTripCard(
         ) {
             Row(
                 verticalAlignment     = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                horizontalArrangement = Arrangement.spacedBy(7.dp),
             ) {
-                Box(Modifier.size(7.dp).background(AccentBlue, CircleShape))
+                if (isLive) Box(Modifier.size(8.dp).background(AccentBlue, CircleShape))
                 Text(
-                    "VIAGEM EM ANDAMENTO",
-                    fontSize      = 11.sp,
+                    if (isLive) "VIAGEM EM ANDAMENTO" else "ÚLTIMA VIAGEM",
+                    fontSize      = 12.sp,
                     fontWeight    = FontWeight.Bold,
-                    letterSpacing = 1.5.sp,
-                    color         = AccentBlue,
+                    letterSpacing = 1.6.sp,
+                    color         = accentColor,
                 )
             }
             Row(
                 verticalAlignment     = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                Text("desde $startFmt", fontSize = 11.sp, color = TextSecondary)
-                Text(durStr,           fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = AccentBlue)
+                Text(
+                    if (isLive) "desde $dateFmt" else dateFmt,
+                    fontSize = 12.sp,
+                    color    = TextSecondary,
+                )
+                Text(
+                    timeStr,
+                    fontSize   = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color      = accentColor,
+                )
             }
         }
 
-        // ── Métricas ──────────────────────────────────────────────────────────
+        // ── Linha 1: métricas principais ──────────────────────────────────────
         Row(
             modifier              = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceEvenly,
         ) {
             TripMetricCell(
-                value = if (trip.distKm > 0f) "%.1f".format(trip.distKm) else "--",
-                unit  = "km",
-                color = AccentBlue,
+                value    = if (trip.distKm > 0f) "%.1f".format(trip.distKm) else "--",
+                unit     = "km",
+                color    = AccentBlue,
+                bigValue = true,
             )
             TripMetricCell(
-                value = if (kwh100 > 0f) "%.1f".format(kwh100) else "--",
-                unit  = "kWh/100",
+                value    = if (kwh100 > 0f) "%.1f".format(kwh100) else "--",
+                unit     = "kWh/100km",
+                color    = when {
+                    kwh100 <= 0f -> TextSecondary
+                    kwh100 < 20f -> NeonLime
+                    kwh100 < 30f -> WarnYellow
+                    else         -> AccentOrange
+                },
+                bigValue = true,
+            )
+            TripMetricCell(
+                value    = if (kmlEq > 0f) "%.1f".format(kmlEq) else "--",
+                unit     = "km/L eq",
+                color    = NeonLime,
+                bigValue = true,
+            )
+        }
+
+        // ── Linha 2: métricas secundárias ─────────────────────────────────────
+        Row(
+            modifier              = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+        ) {
+            TripMetricCell(
+                value = if (trip.startSocPct > 0f) "%+.0f%%".format(socDelta) else "--",
+                unit  = "SOC Δ",
                 color = when {
-                    kwh100 <= 0f  -> TextSecondary
-                    kwh100 < 20f  -> NeonLime
-                    kwh100 < 30f  -> WarnYellow
-                    else          -> AccentOrange
+                    socDelta < -20f -> AccentOrange
+                    socDelta < 0f   -> AuroraTeal
+                    else            -> TextSecondary
                 },
             )
             TripMetricCell(
-                value = if (kmlEq > 0f) "%.1f".format(kmlEq) else "--",
-                unit  = "km/L eq",
-                color = NeonLime,
-            )
-            TripMetricCell(
-                value = if (trip.startSocPct > 0f)
-                    "%+.0f%%".format(socDelta) else "--",
-                unit  = "SOC Δ",
-                color = if (socDelta < -15f) AccentOrange else AuroraTeal,
-            )
-            TripMetricCell(
-                value = if (trip.netKwh > 0.01f) "%.2f".format(trip.netKwh) else "--",
-                unit  = "kWh",
+                value = if (trip.netKwh > 0.01f) "%.2f kWh".format(trip.netKwh) else "--",
+                unit  = "elétrico líq.",
                 color = AuroraTeal,
+            )
+            TripMetricCell(
+                value = if (trip.fuelL > 0.001f) "%.2f L".format(trip.fuelL) else "--",
+                unit  = "combustível",
+                color = AccentOrange,
             )
         }
     }
@@ -825,15 +867,25 @@ private fun TripMetricCell(
     value:    String,
     unit:     String,
     color:    androidx.compose.ui.graphics.Color,
+    bigValue: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     Column(
-        modifier             = modifier,
-        horizontalAlignment  = Alignment.CenterHorizontally,
-        verticalArrangement  = Arrangement.spacedBy(2.dp),
+        modifier            = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(3.dp),
     ) {
-        Text(value, fontSize = 16.sp, fontWeight = FontWeight.Bold,    color = color)
-        Text(unit,  fontSize = 10.sp, fontWeight = FontWeight.Normal,  color = TextSecondary)
+        Text(
+            value,
+            fontSize   = if (bigValue) 26.sp else 18.sp,
+            fontWeight = FontWeight.ExtraBold,
+            color      = color,
+        )
+        Text(
+            unit,
+            fontSize = 11.sp,
+            color    = TextSecondary,
+        )
     }
 }
 
