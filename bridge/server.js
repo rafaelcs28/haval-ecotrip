@@ -436,7 +436,7 @@ if (fs.existsSync(_certFile) && fs.existsSync(_keyFile)) {
   }
 }
 
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '200mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ── Autenticação ──────────────────────────────────────────────────────────────
@@ -541,6 +541,112 @@ app.post('/api/admin/change-password', (req, res) => {
   BRIDGE_TOKEN_HASH = newHash;
   console.log('[admin] Senha alterada. Novo BRIDGE_TOKEN_HASH:', newHash.substring(0, 8) + '…');
   res.json({ ok: true, msg: 'Senha alterada com sucesso.' });
+});
+
+// ── Backup & Restore completo ─────────────────────────────────────────────────
+// GET /api/backup — exporta tudo em um único JSON (trips + autotrips com
+// telemetria + charges + lifetime snapshots + prefs de notificação).
+// Protegido por requireAuth (middleware global).
+app.get('/api/backup', (req, res) => {
+  try {
+    // Lê todos os arquivos de auto-trips com amostras de telemetria completas
+    const autotripsWithSamples = [];
+    const atFiles = fs.readdirSync(AUTOTRIPS_DIR).filter(f => f.endsWith('.json'));
+    for (const f of atFiles) {
+      try {
+        const d = JSON.parse(fs.readFileSync(path.join(AUTOTRIPS_DIR, f), 'utf8'));
+        autotripsWithSamples.push(d);  // { tripId, autoTrip, samples }
+      } catch (_) {}
+    }
+    autotripsWithSamples.sort((a, b) =>
+      (b.autoTrip?.startMs || 0) - (a.autoTrip?.startMs || 0));
+
+    const backup = {
+      version:       2,
+      exportedAt:    new Date().toISOString(),
+      trips:         [...tripsMap.values()],
+      autotrips:     autotripsWithSamples,
+      charges:       chargesArr,
+      lifeSnapshots,
+      notifPrefs,
+    };
+
+    const filename = `ecotrip-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.json(backup);
+    console.log(`✓ Backup exportado: ${backup.trips.length} trips · ${backup.autotrips.length} auto-trips · ${backup.charges.length} recargas`);
+  } catch (e) {
+    console.error('[backup] Erro:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/restore — importa backup gerado por /api/backup e reconstrói
+// todos os dados em disco e em memória (sem precisar reiniciar o servidor).
+app.post('/api/restore', (req, res) => {
+  try {
+    const bk = req.body;
+
+    // Validação básica
+    if (!bk || bk.version !== 2) {
+      return res.status(400).json({ error: 'Formato inválido. Use um backup gerado por GET /api/backup (version 2).' });
+    }
+    if (!Array.isArray(bk.trips) || !Array.isArray(bk.autotrips) || !Array.isArray(bk.charges)) {
+      return res.status(400).json({ error: 'Backup incompleto: trips, autotrips e charges são obrigatórios.' });
+    }
+
+    // 1. Trips manuais
+    tripsMap.clear();
+    bk.trips.forEach(t => { if (t.timestamp) tripsMap.set(t.timestamp, t); });
+    fs.writeFileSync(TRIPS_FILE, JSON.stringify({ trips: [...tripsMap.values()] }, null, 2));
+
+    // 2. Auto-trips (com telemetria completa)
+    const existingFiles = fs.readdirSync(AUTOTRIPS_DIR).filter(f => f.endsWith('.json'));
+    existingFiles.forEach(f => { try { fs.unlinkSync(path.join(AUTOTRIPS_DIR, f)); } catch (_) {} });
+    autoTripsArr.length = 0;
+
+    for (const at of bk.autotrips) {
+      const safeId = String(at.tripId || at.autoTrip?.startMs || '').replace(/\D/g, '');
+      if (!safeId) continue;
+      fs.writeFileSync(
+        path.join(AUTOTRIPS_DIR, `${safeId}.json`),
+        JSON.stringify({ tripId: safeId, autoTrip: at.autoTrip || {}, samples: at.samples || [] })
+      );
+      if (at.autoTrip) autoTripsArr.push({ tripId: safeId, ...at.autoTrip });
+    }
+    autoTripsArr.sort((a, b) => (b.startMs || 0) - (a.startMs || 0));
+
+    // 3. Recargas
+    chargesArr.length = 0;
+    chargesArr.push(...bk.charges);
+    fs.writeFileSync(CHARGES_FILE, JSON.stringify({ charges: chargesArr }, null, 2));
+
+    // 4. Lifetime snapshots (para Stats da PWA)
+    if (Array.isArray(bk.lifeSnapshots)) {
+      lifeSnapshots.length = 0;
+      lifeSnapshots.push(...bk.lifeSnapshots);
+      try { fs.writeFileSync(SNAPSHOTS_FILE, JSON.stringify(lifeSnapshots)); } catch (_) {}
+    }
+
+    // 5. Preferências de notificação
+    if (bk.notifPrefs && typeof bk.notifPrefs === 'object') {
+      Object.assign(notifPrefs, bk.notifPrefs);
+      try { fs.writeFileSync(NOTIF_PREFS_FILE, JSON.stringify(notifPrefs, null, 2)); } catch (_) {}
+    }
+
+    const summary = {
+      trips:         tripsMap.size,
+      autotrips:     autoTripsArr.length,
+      charges:       chargesArr.length,
+      lifeSnapshots: lifeSnapshots.length,
+    };
+    console.log('✓ Restore completo:', summary);
+    res.json({ ok: true, msg: 'Restore concluído com sucesso.', ...summary });
+  } catch (e) {
+    console.error('[restore] Erro:', e.message);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 app.post('/api/admin/clear-history', (req, res) => {

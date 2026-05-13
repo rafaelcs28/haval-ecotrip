@@ -2585,6 +2585,96 @@ async function adminExportCsv() {
   }
 }
 
+// ── Backup & Restore completo (servidor) ─────────────────────────────────────
+function _backupSetStatus(msg, ok) {
+  const el = document.getElementById('backup-status');
+  if (!el) return;
+  el.style.display = 'block';
+  el.style.color = ok === true ? '#4ade80' : ok === false ? '#f87171' : '#94a3b8';
+  el.textContent = msg;
+}
+
+async function adminBackupServer() {
+  _backupSetStatus('⏳ Gerando backup…', null);
+  try {
+    const r = await apiFetch('/api/backup');
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      _backupSetStatus('✗ ' + (err.error || `Erro ${r.status}`), false);
+      return;
+    }
+    const blob = await r.blob();
+    const date = new Date().toISOString().slice(0, 10);
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = `ecotrip-backup-${date}.json`;
+    document.body.appendChild(a); a.click();
+    setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1500);
+    // Registra timestamp (evita aviso de backup automático pendente)
+    localStorage.setItem('ecotrip_last_backup_ms', String(Date.now()));
+    document.getElementById('auto-backup-banner')?.style && (document.getElementById('auto-backup-banner').style.display = 'none');
+    _backupSetStatus('✓ Backup baixado com sucesso', true);
+  } catch (e) {
+    _backupSetStatus('✗ Sem resposta do servidor', false);
+  }
+}
+
+async function adminRestoreServer(input) {
+  const file = input.files?.[0];
+  input.value = '';       // permite re-selecionar o mesmo arquivo
+  if (!file) return;
+
+  _backupSetStatus(`⏳ Lendo ${file.name}…`, null);
+  let backup;
+  try {
+    backup = JSON.parse(await file.text());
+  } catch (_) {
+    _backupSetStatus('✗ Arquivo inválido — não é um JSON válido', false);
+    return;
+  }
+
+  if (backup.version !== 2) {
+    _backupSetStatus('✗ Versão incompatível. Use um backup gerado pelo botão "Backup completo (servidor)".', false);
+    return;
+  }
+
+  const at = backup.autotrips?.length ?? 0;
+  const tr = backup.trips?.length ?? 0;
+  const ch = backup.charges?.length ?? 0;
+
+  if (!confirm(
+    `Restaurar backup de ${backup.exportedAt?.slice(0, 10) || '?'}?\n\n` +
+    `Isso irá substituir TODOS os dados atuais do servidor:\n` +
+    `• ${tr} trips manuais\n• ${at} auto-trips\n• ${ch} recargas\n\n` +
+    `Esta ação não pode ser desfeita.`
+  )) return;
+
+  _backupSetStatus('⏳ Restaurando… não feche o app.', null);
+  try {
+    const r = await apiFetch('/api/restore', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(backup),
+    });
+    const data = await r.json();
+    if (r.ok) {
+      // Força re-sync do cache local para refletir os dados restaurados
+      await _idbClearAll();
+      cachedTrips = null; cachedAutoTrips = null; cachedCharges = null;
+      await syncAllCache({ silent: true });
+      _backupSetStatus(
+        `✓ Restore concluído — ${data.trips} trips · ${data.autotrips} auto-trips · ${data.charges} recargas`,
+        true
+      );
+    } else {
+      _backupSetStatus('✗ ' + (data.error || `Erro ${r.status}`), false);
+    }
+  } catch (e) {
+    _backupSetStatus('✗ Sem resposta do servidor — verifique a conexão', false);
+  }
+}
+
 // ── Backup automático semanal ─────────────────────────────────────────────────
 const BACKUP_INTERVAL_MS = 7 * 86_400_000;
 

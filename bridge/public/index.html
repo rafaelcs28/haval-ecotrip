@@ -608,6 +608,28 @@
         </div>
       </div>
 
+      <!-- Backup & Restore completo (servidor) -->
+      <h2 style="margin:0 0 12px;font-size:16px;color:#e2e8f0">💾 Backup & Restore</h2>
+      <div style="background:#1e293b;border-radius:10px;padding:14px;margin-bottom:20px">
+        <div style="font-size:11px;color:#94a3b8;margin-bottom:10px;line-height:1.5">
+          Backup completo do servidor — inclui trips manuais, auto-trips com telemetria,
+          recargas, snapshots e preferências. Use para migrar ou recuperar o servidor.
+        </div>
+        <button onclick="adminBackupServer()"
+          style="width:100%;background:#1e3a5f;border:none;border-radius:8px;padding:11px;color:#7FBADC;font-size:13px;cursor:pointer;margin-bottom:8px">
+          📦 Baixar backup completo (servidor)
+        </button>
+        <button onclick="document.getElementById('restore-file-input').click()"
+          style="width:100%;background:#2d1a1a;border:1px solid #7f1d1d;border-radius:8px;padding:11px;color:#fca5a5;font-size:13px;cursor:pointer;margin-bottom:8px">
+          ⬆️ Restaurar backup…
+        </button>
+        <input id="restore-file-input" type="file" accept=".json" style="display:none"
+          onchange="adminRestoreServer(this)">
+        <div id="backup-status"
+          style="min-height:32px;background:#0f172a;border-radius:8px;padding:7px 12px;font-size:12px;color:#94a3b8;display:none">
+        </div>
+      </div>
+
       <h2 style="margin:0 0 16px;font-size:16px;color:#e2e8f0">🛠 Servidor</h2>
 
       <!-- Alterar senha -->
