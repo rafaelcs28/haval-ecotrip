@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_BUILD = 'b153';   // bump a cada deploy para confirmar versão no admin
+const APP_BUILD = 'b155';   // bump a cada deploy para confirmar versão no admin
 
 // ── Estado local ──────────────────────────────────────────────────────────────
 let state = {};
@@ -1554,6 +1554,14 @@ function renderTrip(id, t) {
   setText(`${p}-speed`,     f1(t.avg_speed_kmh));
   setText(`${p}-kwh100`,    t.kwh_per_100km > 0 ? f1(t.kwh_per_100km) : '--');
   setText(`${p}-kml`,       t.km_per_l    > 0 ? f1(t.km_per_l)     : '--');
+  // km/L equivalente: converte energia elétrica líquida em litros (1 L = 8,9 kWh)
+  const _KWH_PER_L = 8.9;
+  const _netKwh    = (t.energy_kwh || 0) - (t.regen_kwh || 0);
+  const _fuelL     = t.fuel_l || 0;
+  const _dist      = t.distance_km || 0;
+  const _eqKmL     = _dist > 0.1 && (_netKwh > 0 || _fuelL > 0.001)
+    ? f1(_dist / (_netKwh / _KWH_PER_L + _fuelL)) : '--';
+  setText(`${p}-kml-eq`, _eqKmL);
   setText(`${p}-fuel`,      t.fuel_l      > 0 ? f2(t.fuel_l) + ' L' : '--');
   setText(`${p}-energy`,    t.energy_kwh  > 0 ? f2(t.energy_kwh)    : '--');
   setText(`${p}-regen`,     t.regen_kwh   > 0 ? f2(t.regen_kwh)     : '--');
