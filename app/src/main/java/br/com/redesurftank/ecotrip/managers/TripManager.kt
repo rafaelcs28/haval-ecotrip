@@ -38,11 +38,10 @@ data class TripSnapshot(
     val avgSpeedKmh: Float get() = if (timeSec > 0L) distKm / (timeSec / 3600f) else 0f
     val costBrl: Float get() = fuelL * priceGasolinePerL + netKwh.coerceAtLeast(0f) * priceEnergyPerKwh
     val costPerKm: Float get() = if (distKm > 0.1f && costBrl > 0f) costBrl / distKm else 0f
-    // km/L equivalente combinando combustível + energia elétrica (requer preços configurados)
+    // km/L equivalente energético: 1 L gasolina = 8,9 kWh (poder calorífico inferior)
     val combinedKmL: Float get() {
-        if (priceGasolinePerL <= 0f || priceEnergyPerKwh <= 0f || distKm < 0.1f) return 0f
-        val eqFuelL = netKwh * priceEnergyPerKwh / priceGasolinePerL
-        val totalFuelL = fuelL + eqFuelL
+        if (distKm < 0.1f) return 0f
+        val totalFuelL = fuelL + netKwh.coerceAtLeast(0f) / 8.9f
         return if (totalFuelL > 0.001f) distKm / totalFuelL else 0f
     }
 }
@@ -87,10 +86,10 @@ data class RollingSnapshot(
     val kmPerL: Float get() = if (fuelL > 0.001f) windowKm / fuelL else 0f
     val costBrl: Float get() = fuelL * priceGasolinePerL + netKwh.coerceAtLeast(0f) * priceEnergyPerKwh
     val costPerKm: Float get() = if (windowKm > 0.1f && costBrl > 0f) costBrl / windowKm else 0f
+    // km/L equivalente energético: 1 L gasolina = 8,9 kWh (poder calorífico inferior)
     val combinedKmL: Float get() {
-        if (priceGasolinePerL <= 0f || priceEnergyPerKwh <= 0f || windowKm < 0.1f) return 0f
-        val eqFuelL = netKwh * priceEnergyPerKwh / priceGasolinePerL
-        val totalFuelL = fuelL + eqFuelL
+        if (windowKm < 0.1f) return 0f
+        val totalFuelL = fuelL + netKwh.coerceAtLeast(0f) / 8.9f
         return if (totalFuelL > 0.001f) windowKm / totalFuelL else 0f
     }
 }

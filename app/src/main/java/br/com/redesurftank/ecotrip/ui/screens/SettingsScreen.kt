@@ -183,7 +183,7 @@ fun SettingsScreen(
         // ── Preços ────────────────────────────────────────────────────────────
         SectionCard(title = "Preços — consumo combinado") {
             Text(
-                "Usado para calcular km/L equivalente combinando combustível + energia elétrica.\nFórmula: km total ÷ (L gastos + kWh líquido × R\$/kWh ÷ R\$/L)",
+                "Usado para calcular custo total da viagem (R\$). O km/L equivalente usa base energética fixa: 1 L gasolina = 8,9 kWh.\nFórmula km/L eq: km total ÷ (L gastos + kWh líquido ÷ 8,9)",
                 fontSize = 11.sp, color = TextSecondary,
             )
             val gasolineValid = parsePrice(priceGasolineStr) != null
