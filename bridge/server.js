@@ -219,6 +219,19 @@ try {
   }
   autoTripsArr.sort((a, b) => (b.startMs || 0) - (a.startMs || 0));
   console.log(`✓ Auto-trips carregados: ${autoTripsArr.length}`);
+
+  // Limpa viagens irrelevantes: dist=0 E energia=0 E duração<60s
+  let purged = 0;
+  autoTripsArr = autoTripsArr.filter(t => {
+    const keep = (t.distKm || 0) > 0 || (t.netKwh || 0) > 0 || (t.timeSec || 0) >= 60;
+    if (!keep) {
+      const filePath = path.join(AUTOTRIPS_DIR, `${t.tripId}.json`);
+      try { fs.unlinkSync(filePath); } catch (_) {}
+      purged++;
+    }
+    return keep;
+  });
+  if (purged > 0) console.log(`🗑  Auto-trips irrelevantes removidos: ${purged}`);
 } catch (e) { console.error('Aviso: erro ao carregar auto-trips:', e.message); }
 
 // ── Estado em memória (espelha todos os tópicos MQTT) ─────────────────────────
