@@ -1296,9 +1296,8 @@ function applyMqttMessage(key, value, isRetained = false) {
     case 'charge_remaining_min': {
       const rem = num(value);
       state.charge_remaining_min = rem;
-      // Reset guard quando o tempo restante sobe (nova sessão ou leitura instável)
-      if (rem > (notifPrefs.charge_ending_min || 5) + 2) chargeEndingNotifSent = false;
-      // Dispara notificação quando threshold atingido
+      // Dispara notificação quando threshold atingido — apenas uma vez por sessão
+      // (chargeEndingNotifSent só é resetado quando charging_state sai de 'Carregando')
       if (
         notifPrefs.charge_ending &&
         rem > 0 &&
