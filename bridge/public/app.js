@@ -1266,19 +1266,22 @@ function renderDash() {
   const chargingCard = document.getElementById('d-charging-card');
   if (chargingCard) chargingCard.style.display = isCharging ? '' : 'none';
   if (isCharging) {
-    setText('d-chrg-power',   s.charge_power_kw   > 0 ? f1(s.charge_power_kw)    + ' kW'  : '--');
-    setText('d-chrg-session', s.charge_session_kwh > 0 ? f2(s.charge_session_kwh) + ' kWh' : '--');
+    const u = s => `<span class="chrg-unit">${s}</span>`;
+    const setH = (id, html) => { const el = document.getElementById(id); if (el) el.innerHTML = html; };
+    setH('d-chrg-power',   s.charge_power_kw   > 0 ? f1(s.charge_power_kw)    + u(' kW')  : '--');
+    setH('d-chrg-session', s.charge_session_kwh > 0 ? f2(s.charge_session_kwh) + u(' kWh') : '--');
     const rem = s.charge_remaining_min || 0;
-    setText('d-chrg-remain', rem > 0
-      ? (rem > 59 ? Math.floor(rem / 60) + 'h ' + (rem % 60) + 'min' : rem + ' min')
-      : '--');
-    // Projeção de término de carga
     if (rem > 0) {
+      const remStr = rem > 59
+        ? Math.floor(rem / 60) + u('h ') + (rem % 60) + u('min')
+        : rem + u(' min');
+      setH('d-chrg-remain', remStr);
       const finish = new Date(Date.now() + rem * 60000);
       setText('d-chrg-finish',
         finish.getHours().toString().padStart(2,'0') + ':' +
         finish.getMinutes().toString().padStart(2,'0'));
     } else {
+      setH('d-chrg-remain', '--');
       setText('d-chrg-finish', '--');
     }
   }

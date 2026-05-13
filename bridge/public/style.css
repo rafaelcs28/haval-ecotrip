@@ -265,6 +265,10 @@ html, body {
 .metric-value.yellow  { color: var(--yellow); }
 .metric-value.muted   { color: var(--muted); }
 
+/* ── Card de recarga — números levemente menores + unidades bem pequenas ─── */
+#d-charging-card .metric-value { font-size: 18px; }
+#d-charging-card .chrg-unit    { font-size: 9px; font-weight: 500; opacity: .75; vertical-align: baseline; margin-left: 1px; }
+
 /* ── Marcha grande (dashboard) ───────────────────────────────────────────────── */
 .gear-badge-lg {
   display: inline-block;
