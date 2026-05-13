@@ -709,7 +709,131 @@ fun ConsumptionScreen() {
             modifier = Modifier.fillMaxWidth(),
         )
 
+        inProgressTrip?.let { trip ->
+            InProgressTripCard(
+                trip     = trip,
+                nowMs    = nowMs,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+
     }
 
+}
+
+// ── Card: Viagem em andamento ─────────────────────────────────────────────────
+
+@Composable
+private fun InProgressTripCard(
+    trip:     AutoTripEntry,
+    nowMs:    Long,
+    modifier: Modifier = Modifier,
+) {
+    val elapsedSec = ((nowMs - trip.startMs) / 1000L).coerceAtLeast(0L)
+    val durStr = when {
+        elapsedSec >= 3600 -> "${elapsedSec / 3600}h ${(elapsedSec % 3600) / 60}min"
+        elapsedSec >= 60   -> "${elapsedSec / 60}min"
+        else               -> "${elapsedSec}s"
+    }
+    val kwh100  = if (trip.distKm > 1f)
+        trip.netKwh / trip.distKm * 100f else 0f
+    val kmlEq   = if (trip.distKm > 0.1f && (trip.netKwh > 0f || trip.fuelL > 0.001f))
+        trip.distKm / (trip.netKwh / 8.9f + trip.fuelL) else 0f
+    val socDelta = trip.endSocPct - trip.startSocPct
+    val startFmt = remember(trip.startMs) {
+        java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
+            .format(java.util.Date(trip.startMs))
+    }
+
+    Column(
+        modifier = modifier
+            .background(GlassCard, RoundedCornerShape(16.dp))
+            .border(1.dp, AccentBlue.copy(alpha = 0.28f), RoundedCornerShape(16.dp))
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        // ── Cabeçalho ─────────────────────────────────────────────────────────
+        Row(
+            modifier              = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment     = Alignment.CenterVertically,
+        ) {
+            Row(
+                verticalAlignment     = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Box(Modifier.size(7.dp).background(AccentBlue, CircleShape))
+                Text(
+                    "VIAGEM EM ANDAMENTO",
+                    fontSize      = 11.sp,
+                    fontWeight    = FontWeight.Bold,
+                    letterSpacing = 1.5.sp,
+                    color         = AccentBlue,
+                )
+            }
+            Row(
+                verticalAlignment     = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text("desde $startFmt", fontSize = 11.sp, color = TextSecondary)
+                Text(durStr,           fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = AccentBlue)
+            }
+        }
+
+        // ── Métricas ──────────────────────────────────────────────────────────
+        Row(
+            modifier              = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+        ) {
+            TripMetricCell(
+                value = if (trip.distKm > 0f) "%.1f".format(trip.distKm) else "--",
+                unit  = "km",
+                color = AccentBlue,
+            )
+            TripMetricCell(
+                value = if (kwh100 > 0f) "%.1f".format(kwh100) else "--",
+                unit  = "kWh/100",
+                color = when {
+                    kwh100 <= 0f  -> TextSecondary
+                    kwh100 < 20f  -> NeonLime
+                    kwh100 < 30f  -> WarnYellow
+                    else          -> AccentOrange
+                },
+            )
+            TripMetricCell(
+                value = if (kmlEq > 0f) "%.1f".format(kmlEq) else "--",
+                unit  = "km/L eq",
+                color = NeonLime,
+            )
+            TripMetricCell(
+                value = if (trip.startSocPct > 0f)
+                    "%+.0f%%".format(socDelta) else "--",
+                unit  = "SOC Δ",
+                color = if (socDelta < -15f) AccentOrange else AuroraTeal,
+            )
+            TripMetricCell(
+                value = if (trip.netKwh > 0.01f) "%.2f".format(trip.netKwh) else "--",
+                unit  = "kWh",
+                color = AuroraTeal,
+            )
+        }
+    }
+}
+
+@Composable
+private fun TripMetricCell(
+    value:    String,
+    unit:     String,
+    color:    androidx.compose.ui.graphics.Color,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier             = modifier,
+        horizontalAlignment  = Alignment.CenterHorizontally,
+        verticalArrangement  = Arrangement.spacedBy(2.dp),
+    ) {
+        Text(value, fontSize = 16.sp, fontWeight = FontWeight.Bold,    color = color)
+        Text(unit,  fontSize = 10.sp, fontWeight = FontWeight.Normal,  color = TextSecondary)
+    }
 }
 
