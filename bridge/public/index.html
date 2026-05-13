@@ -584,10 +584,24 @@
             ♻️ Baixar tudo localmente
           </button>
         </div>
-        <button onclick="adminExportData()"
-          style="width:100%;background:#14532d;border:none;border-radius:8px;padding:11px;color:#4ade80;font-size:13px;cursor:pointer;margin-bottom:10px">
-          📥 Exportar dados locais (JSON)
-        </button>
+        <!-- Banner de backup semanal — visível só quando há mais de 7 dias sem backup -->
+        <div id="auto-backup-banner" style="display:none;background:#1c1408;border:1px solid #92400e;border-radius:10px;padding:12px 14px;margin-bottom:10px">
+          <div style="font-size:12px;color:#fbbf24;margin-bottom:6px">📦 Backup automático recomendado</div>
+          <div style="font-size:11px;color:#78716c;margin-bottom:10px">Último backup há mais de 7 dias.</div>
+          <button onclick="doAutoBackup()" style="width:100%;background:#92400e;border:none;border-radius:8px;padding:10px;color:#fde68a;font-size:13px;cursor:pointer">
+            📥 Fazer backup agora
+          </button>
+        </div>
+        <div style="display:flex;gap:8px;margin-bottom:10px">
+          <button onclick="adminExportData()"
+            style="flex:1;background:#14532d;border:none;border-radius:8px;padding:11px;color:#4ade80;font-size:13px;cursor:pointer">
+            📥 JSON
+          </button>
+          <button onclick="adminExportCsv()"
+            style="flex:1;background:#1a2e1a;border:1px solid #166534;border-radius:8px;padding:11px;color:#86efac;font-size:13px;cursor:pointer">
+            📊 CSV
+          </button>
+        </div>
         <div id="cache-status"
           style="min-height:36px;background:#0f172a;border-radius:8px;padding:8px 12px;font-size:12px;color:#94a3b8;white-space:pre-wrap;word-break:break-word">
           Toque em Status para verificar.

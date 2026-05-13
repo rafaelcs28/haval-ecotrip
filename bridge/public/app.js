@@ -209,6 +209,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initActionsPanel();
   initNotifPanel();
   _fetchNotifCache();
+  checkAutoBackup();
 });
 
 // ── Notification preferences panel ───────────────────────────────────────────
@@ -1758,6 +1759,7 @@ function renderAutoTrips() {
     <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">
       ${costStr}
       <button class="charge-badge" style="cursor:pointer;border:none" onclick="openTripDetail('${t.tripId}')">🗺 Ver rota</button>
+      <button class="charge-badge" style="cursor:pointer;border:none;color:#94a3b8" onclick="shareTripCard('${t.tripId}')">📤 Partilhar</button>
     </div>
   </div>
   <div class="trip-metrics">
@@ -1954,6 +1956,7 @@ function openTripDetail(tripId) {
       slider.value = 0;
       initTripMap(currentSamples);
       initTripCharts(currentSamples);
+      renderSpeedBands(currentSamples);
       onPlaybackMove(0);
     })
     .catch(() => {
@@ -1976,6 +1979,159 @@ function closeTripDetail() {
   // existam frescos na próxima abertura (evita erro de Leaflet + canvases sujos)
   const body = document.getElementById('trip-detail-body');
   if (body && tripBodyOriginalHTML) body.innerHTML = tripBodyOriginalHTML;
+}
+
+// ── Eficiência por faixa de velocidade ───────────────────────────────────────
+function calcSpeedBands(samples) {
+  const bands = [
+    { label: '0 – 50 km/h',   icon: '🐢', min: 0,   max: 50,       distKm: 0, kwhPos: 0 },
+    { label: '50 – 100 km/h', icon: '🚗', min: 50,  max: 100,      distKm: 0, kwhPos: 0 },
+    { label: '100+ km/h',     icon: '🏎', min: 100, max: Infinity,  distKm: 0, kwhPos: 0 },
+  ];
+  for (let i = 1; i < samples.length; i++) {
+    const a = samples[i - 1], b = samples[i];
+    const dt = (b.t || 0) - (a.t || 0);
+    if (dt <= 0 || dt > 30) continue;
+    const avgSpd = ((a.spd || 0) + (b.spd || 0)) / 2;
+    const distKm = avgSpd / 3600 * dt;
+    const kwhPos = Math.max(0, a.evKw || 0) / 3600 * dt;  // só consumo, sem regen
+    const band = bands.find(bnd => avgSpd >= bnd.min && avgSpd < bnd.max);
+    if (band) { band.distKm += distKm; band.kwhPos += kwhPos; }
+  }
+  return bands;
+}
+
+function renderSpeedBands(samples) {
+  const bands = calcSpeedBands(samples);
+  const totalDist = bands.reduce((s, b) => s + b.distKm, 0);
+  if (totalDist < 0.1) return;
+
+  let inner = '';
+  for (const band of bands) {
+    if (band.distKm < 0.05) continue;
+    const kwh100 = band.distKm > 0 ? (band.kwhPos / band.distKm * 100).toFixed(1) : '—';
+    const pct = Math.round(band.distKm / totalDist * 100);
+    inner += `<div style="flex:1;background:#0f172a;border:1px solid #1e293b;border-radius:10px;padding:10px 8px;text-align:center">
+  <div style="font-size:22px;margin-bottom:4px">${band.icon}</div>
+  <div style="font-size:10px;color:#475569;margin-bottom:8px;line-height:1.2">${band.label}</div>
+  <div style="font-size:20px;font-weight:700;color:#4ade80">${kwh100}</div>
+  <div style="font-size:9px;color:#64748b;margin-bottom:4px">kWh/100km</div>
+  <div style="font-size:9px;color:#334155">${band.distKm.toFixed(1)} km · ${pct}%</div>
+</div>`;
+  }
+
+  const section = document.createElement('div');
+  section.className = 'chart-section';
+  section.style.marginTop = '0';
+  section.innerHTML = `<div class="chart-label">Eficiência por faixa de velocidade</div>
+<div style="display:flex;gap:8px;padding:8px 0">${inner}</div>`;
+  const body = document.getElementById('trip-detail-body');
+  if (body) body.appendChild(section);
+}
+
+// ── Partilhar card da viagem (PNG) ────────────────────────────────────────────
+async function shareTripCard(tripId) {
+  const trip = (cachedAutoTrips || []).find(t => t.tripId === tripId);
+  if (!trip) return;
+
+  const W = 400, H = 200, sc = 2;
+  const canvas = document.createElement('canvas');
+  canvas.width  = W * sc;
+  canvas.height = H * sc;
+  const ctx = canvas.getContext('2d');
+
+  // Fundo
+  ctx.fillStyle = '#0B0F1A';
+  ctx.fillRect(0, 0, W * sc, H * sc);
+
+  // Barra de gradiente no topo
+  const grad = ctx.createLinearGradient(0, 0, W * sc, 0);
+  grad.addColorStop(0, '#3b82f6');
+  grad.addColorStop(1, '#10b981');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W * sc, 4 * sc);
+
+  // Logo
+  ctx.textBaseline = 'top';
+  ctx.font = `700 ${11 * sc}px -apple-system, system-ui, sans-serif`;
+  ctx.fillStyle = '#3b82f6';
+  ctx.textAlign = 'left';
+  ctx.fillText('EcoTrip', 20 * sc, 16 * sc);
+
+  // Data + duração
+  ctx.font = `${9 * sc}px -apple-system, system-ui, sans-serif`;
+  ctx.fillStyle = '#475569';
+  ctx.textAlign = 'right';
+  const dur = fmtDur(Math.round((trip.endMs - trip.startMs) / 1000));
+  ctx.fillText(fmtDate(trip.startMs) + ' · ' + dur, (W - 20) * sc, 18 * sc);
+
+  // Título (nome manual ou auto-gerado)
+  const title = trip.name || getAutoName(trip) || '';
+  let yContent = 44;
+  if (title) {
+    ctx.font = `700 ${13 * sc}px -apple-system, system-ui, sans-serif`;
+    ctx.fillStyle = '#e2e8f0';
+    ctx.textAlign = 'left';
+    ctx.fillText(title, 20 * sc, 42 * sc);
+    yContent = 64;
+  }
+
+  // Divisor
+  ctx.fillStyle = '#1e293b';
+  ctx.fillRect(20 * sc, yContent * sc, (W - 40) * sc, sc);
+  yContent += 12;
+
+  // Métricas
+  const { gas: priceGas, kwh: priceKwh } = getPrices();
+  const kwh100 = (trip.distKm > 0.1 && (trip.netKwh || 0) > 0)
+    ? (trip.netKwh / trip.distKm * 100).toFixed(1) : '—';
+  const kmL  = (trip.fuelL || 0) > 0.01 ? (trip.distKm / trip.fuelL).toFixed(1) : '—';
+  const cost = (trip.fuelL || 0) * priceGas + (trip.netKwh || 0) * priceKwh;
+  const metrics = [
+    { v: f1(trip.distKm || 0),  lbl: 'km',      color: '#60a5fa' },
+    { v: kwh100,                 lbl: 'kWh/100', color: '#4ade80' },
+    { v: kmL,                    lbl: 'km/L',    color: '#fb923c' },
+    { v: trip.startSocPct > 0 ? `${Math.round(trip.startSocPct)}→${Math.round(trip.endSocPct)}%` : '—',
+                                 lbl: 'SOC',     color: '#2dd4bf' },
+    { v: cost > 0.01 ? 'R$' + f2(cost) : '—',  lbl: 'custo',   color: '#fbbf24' },
+  ];
+
+  const colW = (W - 40) / metrics.length;
+  metrics.forEach((m, i) => {
+    const x = (20 + i * colW) * sc;
+    ctx.font = `700 ${14 * sc}px -apple-system, system-ui, sans-serif`;
+    ctx.fillStyle = m.color;
+    ctx.textAlign = 'left';
+    ctx.fillText(m.v, x, yContent * sc);
+    ctx.font = `${8 * sc}px -apple-system, system-ui, sans-serif`;
+    ctx.fillStyle = '#475569';
+    ctx.fillText(m.lbl, x, (yContent + 16) * sc);
+  });
+
+  // Marca d'água
+  ctx.font = `${7 * sc}px -apple-system, system-ui, sans-serif`;
+  ctx.fillStyle = '#1e293b';
+  ctx.textAlign = 'right';
+  ctx.fillText('Haval EcoTrip Impulse', (W - 20) * sc, (H - 10) * sc);
+
+  return new Promise(resolve => {
+    canvas.toBlob(async blob => {
+      const name = `ecotrip-${trip.tripId}.png`;
+      const file = new File([blob], name, { type: 'image/png' });
+      try {
+        if (navigator.share && navigator.canShare?.({ files: [file] })) {
+          await navigator.share({ files: [file], title: title || 'Viagem EcoTrip' });
+        } else {
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url; a.download = name;
+          document.body.appendChild(a); a.click();
+          setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1500);
+        }
+      } catch (_) {}
+      resolve();
+    }, 'image/png');
+  });
 }
 
 function initTripMap(samples) {
@@ -2214,6 +2370,74 @@ async function adminExportData() {
   } catch (e) {
     _cacheSetStatus('❌ Erro ao exportar: ' + e.message, false);
   }
+}
+
+// ── Exportar CSV de auto-trips ────────────────────────────────────────────────
+async function adminExportCsv() {
+  _cacheSetStatus('⏳ Exportando CSV…', null);
+  try {
+    const trips = await _idbGetAll('autotrips');
+    if (!trips.length) { _cacheSetStatus('ℹ️ Nenhum auto-trip para exportar', null); return; }
+
+    const { gas: priceGas, kwh: priceKwh } = getPrices();
+    const esc = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const header = ['Data', 'Hora início', 'Hora fim', 'Duração (min)', 'km',
+      'km/h méd.', 'kWh liq.', 'kWh/100km', 'Combust. (L)', 'km/L',
+      'SOC início (%)', 'SOC fim (%)', 'Custo (R$)', 'Origem', 'Destino', 'Nome'].join(',');
+    const rows = trips
+      .sort((a, b) => (b.startMs || 0) - (a.startMs || 0))
+      .map(t => {
+        const dtSec = ((t.endMs || t.startMs) - t.startMs) / 1000;
+        const avgSpd = t.timeSec > 0 ? (t.distKm / (t.timeSec / 3600)).toFixed(1) : '';
+        const kwh100 = t.distKm > 0 && (t.netKwh || 0) > 0
+          ? (t.netKwh / t.distKm * 100).toFixed(2) : '';
+        const kmL   = (t.fuelL || 0) > 0.01 ? (t.distKm / t.fuelL).toFixed(2) : '';
+        const cost  = ((t.fuelL || 0) * priceGas + (t.netKwh || 0) * priceKwh).toFixed(2);
+        const origin = (geoCache[t.tripId] || '').split(',')[0].trim();
+        const dest   = (geoCache[t.tripId + ':end'] || '').split(',')[0].trim();
+        const d = new Date(t.startMs);
+        return [
+          esc(d.toLocaleDateString('pt-BR')),
+          esc(d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })),
+          esc(new Date(t.endMs || t.startMs).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })),
+          Math.round(dtSec / 60),
+          (t.distKm || 0).toFixed(2), avgSpd,
+          (t.netKwh || 0).toFixed(3), kwh100,
+          (t.fuelL || 0).toFixed(3), kmL,
+          (t.startSocPct || 0).toFixed(1), (t.endSocPct || 0).toFixed(1),
+          cost, esc(origin), esc(dest), esc(t.name || ''),
+        ].join(',');
+      });
+
+    const bom  = '﻿';  // BOM para Excel/Numbers reconhecer UTF-8
+    const blob = new Blob([bom + [header, ...rows].join('\r\n')], { type: 'text/csv;charset=utf-8' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = 'ecotrip-viagens-' + new Date().toISOString().slice(0, 10) + '.csv';
+    document.body.appendChild(a); a.click();
+    setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1500);
+    _cacheSetStatus('✓ CSV exportado: ' + trips.length + ' viagens', true);
+  } catch (e) {
+    _cacheSetStatus('❌ Erro: ' + e.message, false);
+  }
+}
+
+// ── Backup automático semanal ─────────────────────────────────────────────────
+const BACKUP_INTERVAL_MS = 7 * 86_400_000;
+
+function checkAutoBackup() {
+  const lastMs = parseInt(localStorage.getItem('ecotrip_last_backup_ms') || '0', 10);
+  if (Date.now() - lastMs < BACKUP_INTERVAL_MS) return;
+  const banner = document.getElementById('auto-backup-banner');
+  if (banner) banner.style.display = '';
+}
+
+async function doAutoBackup() {
+  await adminExportData();
+  localStorage.setItem('ecotrip_last_backup_ms', String(Date.now()));
+  const banner = document.getElementById('auto-backup-banner');
+  if (banner) banner.style.display = 'none';
 }
 
 // ── Stats Tab ─────────────────────────────────────────────────────────────────
