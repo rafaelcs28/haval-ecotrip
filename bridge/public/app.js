@@ -1948,13 +1948,13 @@ async function setChargeLimit(pct) {
     if (!r.ok || !data.ok) {
       if (statusEl) statusEl.textContent = '✗ ' + (data.error || 'Erro');
     } else {
-      if (statusEl) statusEl.textContent = '⏳ Aguardando carro (~12s)…';
+      if (statusEl) statusEl.textContent = '⏳ Aguardando carro…';
       // resultado chegará via WebSocket (charge_limit_result)
       clearTimeout(_clLimitTimer);
       _clLimitTimer = setTimeout(() => {
         if (statusEl && statusEl.textContent.includes('Aguardando'))
           statusEl.textContent = '⚠️ Sem resposta — carro pode estar dormindo';
-      }, 20000);
+      }, 60000);
     }
   } catch (e) {
     if (statusEl) statusEl.textContent = '✗ Sem conexão com o servidor';
