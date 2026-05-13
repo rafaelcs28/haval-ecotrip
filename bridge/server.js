@@ -737,7 +737,10 @@ app.post('/api/admin/purge-autotrips', (req, res) => {
       return keep;
     });
     console.log(`[admin] Purge auto-trips: ${purged} removidos (${before} → ${autoTripsArr.length})`);
-    res.json({ ok: true, purged, remaining: autoTripsArr.length,
+    const preview = autoTripsArr.slice(0, 20).map(t => ({
+      tripId: t.tripId, distKm: t.distKm || 0, netKwh: t.netKwh || 0, timeSec: t.timeSec || 0,
+    }));
+    res.json({ ok: true, purged, remaining: autoTripsArr.length, preview,
       msg: `${purged} trip${purged !== 1 ? 's' : ''} irrelevante${purged !== 1 ? 's' : ''} removida${purged !== 1 ? 's' : ''}.` });
   } catch (e) {
     console.error('[admin] Erro no purge:', e.message);

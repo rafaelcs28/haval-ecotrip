@@ -2624,7 +2624,12 @@ async function adminPurgeAutoTrips() {
     const r    = await apiFetch('/api/admin/purge-autotrips', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
     const data = await r.json().catch(() => ({}));
     if (r.ok && data.ok) {
-      adminSetStatus(`✓ ${data.msg || 'OK'} (${data.remaining} restantes)`, true);
+      let statusMsg = `✓ ${data.msg || 'OK'} (${data.remaining} restantes)`;
+      if (data.purged === 0 && data.preview?.length) {
+        statusMsg += '\n\nTrips restantes (dist / kWh / seg):\n' +
+          data.preview.map(t => `• ${t.distKm.toFixed(2)}km · ${t.netKwh.toFixed(3)}kWh · ${t.timeSec}s`).join('\n');
+      }
+      adminSetStatus(statusMsg, true);
       // Limpa cache local e re-sincroniza
       if (data.purged > 0) {
         cachedAutoTrips = null;
