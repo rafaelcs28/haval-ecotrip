@@ -1467,6 +1467,34 @@ function renderDash() {
   setHTML('d-roll-cost', r.cost_brl      > 0 ? du('R$ ') + f2(r.cost_brl)  : '--');
   setClass('d-roll-kwh', eff(r.kwh_per_100km));
 
+  // Última viagem automática
+  const lt = (cachedAutoTrips || [])[0] || null;
+  const ltSec = document.getElementById('d-lasttrip-section');
+  if (ltSec) ltSec.style.display = lt ? '' : 'none';
+  if (lt) {
+    const ltDist  = lt.distKm  || 0;
+    const ltNet   = lt.netKwh  || 0;
+    const ltFuel  = lt.fuelL   || 0;
+    const ltTime  = lt.timeSec || 0;
+    const ltKwh100 = ltDist > 0.1 ? ltNet / ltDist * 100 : 0;
+    const _KWH_PER_L = 8.9;
+    const ltKmlEq  = ltDist > 0.1 && (ltNet > 0 || ltFuel > 0.001)
+      ? f1(ltDist / (ltNet / _KWH_PER_L + ltFuel)) : '--';
+    const ltSocDelta = (lt.endSocPct != null && lt.startSocPct != null)
+      ? Math.round(lt.endSocPct - lt.startSocPct) : null;
+    const ltWhen = lt.startMs
+      ? new Date(lt.startMs).toLocaleString('pt-BR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' })
+      : '';
+    setText('d-lasttrip-when', ltWhen);
+    setHTML('d-lasttrip-dist', ltDist > 0 ? f1(ltDist) + du(' km') : '--');
+    setText('d-lasttrip-time', ltTime > 0 ? fmtDashTime(ltTime) : '--');
+    setText('d-lasttrip-kwh',  ltKwh100 > 0 ? f1(ltKwh100) : '--');
+    setText('d-lasttrip-kml',  ltKmlEq);
+    setHTML('d-lasttrip-soc',  ltSocDelta != null
+      ? (ltSocDelta <= 0 ? ltSocDelta : '+' + ltSocDelta) + du('%') : '--');
+    setClass('d-lasttrip-kwh', eff(ltKwh100));
+  }
+
   // Mapa GPS — atualiza live a cada nova posição recebida via WebSocket
   if (s.gps_lat && s.gps_lng) updateDashMap(s.gps_lat, s.gps_lng, s.gps_ts);
 
