@@ -1641,7 +1641,11 @@ function renderHistory() {
     const tripType = t.label === 'Auto' ? 'auto' : 'manual';
     const displayName = t.name || '';
     const fallbackName = t.label || 'Trip';
-    const cost = t.total_cost_brl > 0 ? `<span class="trip-cost">R$ ${f2(t.total_cost_brl)}</span>` : '';
+    const ov       = _tripCostOverride(String(tripId));
+    const dispCost = ov ? ov.cost : (t.total_cost_brl || 0);
+    const fuelLVal = t.fuel_l || 0;
+    const netKwhVal= t.net_kwh || (t.kwh_per_100km > 0 && t.distance_km > 0 ? t.kwh_per_100km * t.distance_km / 100 : 0);
+    const costBadge = `<span id="cost-badge-${tripId}" class="trip-cost"${dispCost <= 0 ? ' style="display:none"' : ov ? ' style="border-bottom:1px dashed rgba(251,191,36,.5)"' : ''}>${dispCost > 0 ? 'R$ ' + f2(dispCost) : ''}</span>`;
     const tsDisplay = typeof t.timestamp === 'number' ? fmtDate(new Date(t.timestamp).toISOString()) : fmtDate(t.timestamp);
     const rnStatus    = getRenameStatus(String(tripId));
     const statusBadge = rnStatus === 'pending'   ? '<span class="rename-status-pending" title="Aguardando confirmação do carro">⏳</span>'
@@ -1657,7 +1661,15 @@ function renderHistory() {
       </div>
       <div class="trip-date">${tsDisplay}</div>
     </div>
-    ${cost}
+    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:3px">
+      ${costBadge}
+      <button class="cost-edit-btn" onclick="toggleCostEdit('${tripId}')" title="Recalcular custo">💰</button>
+    </div>
+  </div>
+  <div id="cost-edit-${tripId}" class="cost-edit-form" style="display:none">
+    <input class="cost-gas-input" type="number" step="0.01" min="0" placeholder="R$/L gasolina"${ov?.gas > 0 ? ` value="${ov.gas}"` : ''}>
+    <input class="cost-kwh-input" type="number" step="0.01" min="0" placeholder="R$/kWh energia"${ov?.kwh > 0 ? ` value="${ov.kwh}"` : ''}>
+    <button class="cost-apply-btn" onclick="applyTripCost('${tripId}',${fuelLVal},${netKwhVal.toFixed(3)})">Recalcular</button>
   </div>
   <div class="trip-metrics">
     <div class="trip-metric"><div class="trip-metric-val blue">${f1(t.distance_km)} km</div><div class="trip-metric-lbl">dist.</div></div>
@@ -1792,9 +1804,12 @@ function renderAutoTrips() {
     ${tempStr ? `<div class="trip-metric"><div class="trip-metric-val blue">${tempStr}</div><div class="trip-metric-lbl">temp. ext.</div></div>` : ''}
     ${mapsUrl ? `<div class="trip-metric"><a href="${mapsUrl}" target="_blank" style="color:#60a5fa;text-decoration:none;font-size:18px">📍</a><div class="trip-metric-lbl">mapa</div></div>` : ''}
   </div>` : (mapsUrl ? `<div style="text-align:right;margin-top:2px"><a href="${mapsUrl}" target="_blank" style="color:#60a5fa;font-size:11px">📍 mapa</a></div>` : '');
-    const tripCost = (priceGas > 0 || priceKwh > 0)
-      ? (t.fuelL || 0) * priceGas + (t.netKwh || 0) * priceKwh : 0;
-    const costStr = tripCost > 0 ? `<span class="trip-cost">R$ ${f2(tripCost)}</span>` : '';
+    const atOv     = _tripCostOverride(t.tripId);
+    const atFuelL  = t.fuelL  || 0;
+    const atNetKwh = t.netKwh || 0;
+    const tripCost = atOv ? atOv.cost
+      : ((priceGas > 0 || priceKwh > 0) ? atFuelL * priceGas + atNetKwh * priceKwh : 0);
+    const costStr = `<span id="cost-badge-${t.tripId}" class="trip-cost"${tripCost <= 0 ? ' style="display:none"' : atOv ? ' style="border-bottom:1px dashed rgba(251,191,36,.5)"' : ''}>${tripCost > 0 ? 'R$ ' + f2(tripCost) : ''}</span>`;
     return `<div class="trip-item">
   <div class="trip-header">
     <div style="flex:1;min-width:0">
@@ -1807,9 +1822,15 @@ function renderAutoTrips() {
     </div>
     <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">
       ${costStr}
+      <button class="cost-edit-btn" onclick="toggleCostEdit('${t.tripId}')" title="Recalcular custo">💰</button>
       <button class="charge-badge" style="cursor:pointer;border:none" onclick="openTripDetail('${t.tripId}')">🗺 Ver rota</button>
       <button class="charge-badge" style="cursor:pointer;border:none;color:#94a3b8" onclick="shareTripCard('${t.tripId}')">📸 Snapshot</button>
     </div>
+  </div>
+  <div id="cost-edit-${t.tripId}" class="cost-edit-form" style="display:none">
+    <input class="cost-gas-input" type="number" step="0.01" min="0" placeholder="R$/L gasolina"${atOv?.gas > 0 ? ` value="${atOv.gas}"` : ''}>
+    <input class="cost-kwh-input" type="number" step="0.01" min="0" placeholder="R$/kWh energia"${atOv?.kwh > 0 ? ` value="${atOv.kwh}"` : ''}>
+    <button class="cost-apply-btn" onclick="applyTripCost('${t.tripId}',${atFuelL.toFixed(3)},${atNetKwh.toFixed(3)})">Recalcular</button>
   </div>
   <div class="trip-metrics">
     <div class="trip-metric"><div class="trip-metric-val blue">${distKm}</div><div class="trip-metric-lbl">dist.</div></div>
@@ -2520,6 +2541,34 @@ function getPrices() {
     kwh: state.price_kwh       || 0,
   };
 }
+
+// ── Custo por trip — override local (localStorage) ───────────────────────────
+
+function _tripCostOverride(tripId) {
+  try { return JSON.parse(localStorage.getItem('eco_cost_' + tripId) || 'null'); } catch { return null; }
+}
+
+window.toggleCostEdit = function(tripId) {
+  const el = document.getElementById('cost-edit-' + tripId);
+  if (el) el.style.display = el.style.display === 'none' ? '' : 'none';
+};
+
+window.applyTripCost = function(tripId, fuelL, netKwh) {
+  const el = document.getElementById('cost-edit-' + tripId);
+  if (!el) return;
+  const gas  = parseFloat(el.querySelector('.cost-gas-input')?.value  || '0');
+  const kwh  = parseFloat(el.querySelector('.cost-kwh-input')?.value  || '0');
+  if (gas < 0 || kwh < 0 || (gas === 0 && kwh === 0)) return;
+  const cost = (fuelL || 0) * gas + (netKwh || 0) * kwh;
+  localStorage.setItem('eco_cost_' + tripId, JSON.stringify({ cost, gas, kwh }));
+  const badge = document.getElementById('cost-badge-' + tripId);
+  if (badge) {
+    badge.textContent = 'R$ ' + f2(cost);
+    badge.style.display = '';
+    badge.style.borderBottom = '1px dashed rgba(251,191,36,.5)';
+  }
+  el.style.display = 'none';
+};
 
 // ── Admin / Configurações ─────────────────────────────────────────────────────
 
