@@ -1475,6 +1475,7 @@ function renderDash() {
 
 // ── Recargas ──────────────────────────────────────────────────────────────────
 function loadCharges() {
+  filterState.charges.active = 'today';
   const list = document.getElementById('charges-list');
   if (cachedCharges !== null) {
     renderCharges();
@@ -1756,6 +1757,7 @@ function renderHistory() {
 let cachedAutoTrips = null;
 
 function loadAutoTrips() {
+  filterState.auto.active = 'today';
   document.querySelector('[data-panel="auto"] .tab-notif')?.remove();
   const list = document.getElementById('auto-list');
   if (cachedAutoTrips !== null) {
