@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_BUILD = 'b163';   // bump a cada deploy para confirmar versão no admin
+const APP_BUILD = 'b164';   // bump a cada deploy para confirmar versão no admin
 
 // ── Estado local ──────────────────────────────────────────────────────────────
 let state = {};
@@ -1019,6 +1019,15 @@ function _idbClearStore(store) {
   }));
 }
 
+function _idbDelete(store, key) {
+  return _openIDB().then(db => new Promise((res, rej) => {
+    const tx = db.transaction(store, 'readwrite');
+    tx.objectStore(store).delete(key);
+    tx.oncomplete = res;
+    tx.onerror    = e => rej(e.target.error);
+  }));
+}
+
 async function loadKnownLocations() {
   try {
     _knownLocations = await apiFetch('/api/charge-locations').then(r => r.json());
@@ -2014,12 +2023,97 @@ function renderAutoTrips() {
   <div class="trip-actions">
     <button class="trip-action-btn" onclick="openTripDetail('${t.tripId}')">🗺 Ver rota</button>
     <button class="trip-action-btn" style="color:#94a3b8" onclick="shareTripCard('${t.tripId}')">📸 Snapshot</button>
+    <button class="trip-action-btn" style="color:#94a3b8" onclick="openMergeModal('${t.tripId}')">🔗 Unir</button>
     ${mapsUrl ? `<a class="trip-action-btn" href="${mapsUrl}" target="_blank">📍 Maps</a>` : ''}
   </div>
 </div>`;
   }).join('');
 
   list.innerHTML = html;
+}
+
+// ── Unir auto-trips ───────────────────────────────────────────────────────────
+function openMergeModal(tripBId) {
+  const trips = cachedAutoTrips || [];
+  const tripB = trips.find(t => t.tripId === tripBId);
+  if (!tripB) return;
+
+  document.getElementById('merge-modal')?.remove();
+  const modal = document.createElement('div');
+  modal.id = 'merge-modal';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:9999;overflow-y:auto;padding:16px;-webkit-overflow-scrolling:touch';
+
+  const fmtT = t => {
+    const nm = (renameTracking[String(t.tripId)]?.name) || t.name || getAutoName(t) || '';
+    return (nm ? `<strong>${nm}</strong> · ` : '') + fmtDate(t.startMs) + ' · ' + f1(t.distKm||0) + ' km · ' + fmtDur(Math.round(((t.endMs||t.startMs)-(t.startMs||0))/1000));
+  };
+
+  // Candidatos ordenados por proximidade temporal ao início de B
+  const candidates = trips
+    .filter(t => t.tripId !== tripBId)
+    .sort((a,b) => Math.abs((a.endMs||a.startMs)-tripB.startMs) - Math.abs((b.endMs||b.startMs)-tripB.startMs));
+
+  let rows = '';
+  for (const t of candidates.slice(0, 40)) {
+    const total = f1((tripB.distKm||0)+(t.distKm||0));
+    rows += `<button onclick="confirmMerge('${tripBId}','${t.tripId}')"
+      style="width:100%;background:#0f172a;border:1px solid #1e293b;border-radius:8px;padding:10px 12px;text-align:left;cursor:pointer;color:#e2e8f0;font-size:12px;line-height:1.4;margin-bottom:6px">
+      <div>${fmtT(t)}</div>
+      <div style="color:#4ade80;font-size:11px;margin-top:3px">→ total após união: ${total} km</div>
+    </button>`;
+  }
+
+  modal.innerHTML = `<div style="max-width:500px;margin:0 auto">
+    <div style="color:#7FBADC;font-weight:700;font-size:14px;margin-bottom:12px">🔗 Unir com outra viagem</div>
+    <div style="background:#0f172a;border:1px solid #22d3ee44;border-radius:10px;padding:10px 12px;margin-bottom:14px">
+      <div style="font-size:10px;color:#64748b;margin-bottom:4px;letter-spacing:.06em">VIAGEM SELECIONADA</div>
+      <div style="font-size:13px;color:#e2e8f0">${fmtT(tripB)}</div>
+    </div>
+    <div style="font-size:10px;color:#64748b;letter-spacing:.06em;margin-bottom:8px">ESCOLHA A OUTRA VIAGEM</div>
+    ${rows}
+    <button onclick="document.getElementById('merge-modal').remove()"
+      style="width:100%;margin-top:8px;padding:11px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:#94a3b8;font-size:13px;cursor:pointer">
+      Cancelar
+    </button>
+  </div>`;
+  document.body.appendChild(modal);
+}
+
+function confirmMerge(tripBId, tripAId) {
+  const trips = cachedAutoTrips || [];
+  const A = trips.find(t => t.tripId === tripAId);
+  const B = trips.find(t => t.tripId === tripBId);
+  if (!A || !B) return;
+  const nmA = (renameTracking[String(tripAId)]?.name) || A.name || getAutoName(A) || fmtDate(A.startMs);
+  const nmB = (renameTracking[String(tripBId)]?.name) || B.name || getAutoName(B) || fmtDate(B.startMs);
+  const total = f1((A.distKm||0)+(B.distKm||0));
+  if (!confirm(`Unir as duas viagens?\n\n• ${nmA}  (${f1(A.distKm||0)} km)\n• ${nmB}  (${f1(B.distKm||0)} km)\n\nResultado: ${total} km\n\nEsta ação não pode ser desfeita.`)) return;
+  document.getElementById('merge-modal')?.remove();
+  executeMerge(tripAId, tripBId);
+}
+
+async function executeMerge(tripAId, tripBId) {
+  try {
+    const r = await apiFetch('/api/autotrips/merge', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ tripAId, tripBId }),
+    });
+    const d = await r.json();
+    if (!d.ok) { alert('Erro ao unir viagens: ' + (d.error || '?')); return; }
+
+    // Atualiza IDB: remove a viagem que foi absorvida, upsert a viagem unificada
+    const lateId = (d.trip.startMs === (cachedAutoTrips||[]).find(t=>t.tripId===tripAId)?.startMs)
+      ? tripBId : tripAId;
+    await _idbDelete('autotrips', lateId);
+    if (d.trip) await _idbPutMany('autotrips', [d.trip]);
+
+    cachedAutoTrips = (await _idbGetAll('autotrips'))
+      .sort((a,b) => (b.startMs||0)-(a.startMs||0));
+    renderAutoTrips();
+  } catch (e) {
+    alert('Erro de rede: ' + e.message);
+  }
 }
 
 // ── Alertas do carro ─────────────────────────────────────────────────────────

@@ -965,6 +965,88 @@ app.delete('/api/autotrips/:tripId', (req, res) => {
   res.json({ ok: true });
 });
 
+// ── Unir dois auto-trips em um só ────────────────────────────────────────────
+app.post('/api/autotrips/merge', (req, res) => {
+  try {
+    const { tripAId, tripBId } = req.body;
+    if (!tripAId || !tripBId) return res.status(400).json({ error: 'missing tripAId or tripBId' });
+
+    const safeA = String(tripAId).replace(/\D/g, '');
+    const safeB = String(tripBId).replace(/\D/g, '');
+    if (!safeA || !safeB || safeA === safeB) return res.status(400).json({ error: 'invalid ids' });
+
+    const fileA = path.join(AUTOTRIPS_DIR, `${safeA}.json`);
+    const fileB = path.join(AUTOTRIPS_DIR, `${safeB}.json`);
+    if (!fs.existsSync(fileA)) return res.status(404).json({ error: `trip not found: ${safeA}` });
+    if (!fs.existsSync(fileB)) return res.status(404).json({ error: `trip not found: ${safeB}` });
+
+    const dataA = JSON.parse(fs.readFileSync(fileA, 'utf8'));
+    const dataB = JSON.parse(fs.readFileSync(fileB, 'utf8'));
+    const atA = dataA.autoTrip || {}, samplesA = dataA.samples || [];
+    const atB = dataB.autoTrip || {}, samplesB = dataB.samples || [];
+
+    // Garante ordem cronológica: early = mais antigo
+    const [earlyId, earlyAT, earlySamples, lateId, lateAT, lateSamples] =
+      (atA.startMs || parseInt(safeA,10)) <= (atB.startMs || parseInt(safeB,10))
+        ? [safeA, atA, samplesA, safeB, atB, samplesB]
+        : [safeB, atB, samplesB, safeA, atA, samplesA];
+
+    const merged = {
+      startMs:      earlyAT.startMs,
+      endMs:        lateAT.endMs,
+      startSocPct:  earlyAT.startSocPct  || 0,
+      endSocPct:    lateAT.endSocPct     || 0,
+      startFuelPct: earlyAT.startFuelPct || 0,
+      endFuelPct:   lateAT.endFuelPct    || 0,
+      distKm:   parseFloat(((earlyAT.distKm   ||0)+(lateAT.distKm   ||0)).toFixed(3)),
+      timeSec:  Math.round ((earlyAT.timeSec  ||0)+(lateAT.timeSec  ||0)),
+      energyKwh:parseFloat(((earlyAT.energyKwh||0)+(lateAT.energyKwh||0)).toFixed(4)),
+      regenKwh: parseFloat(((earlyAT.regenKwh ||0)+(lateAT.regenKwh ||0)).toFixed(4)),
+      netKwh:   parseFloat(((earlyAT.netKwh   ||0)+(lateAT.netKwh   ||0)).toFixed(4)),
+      fuelL:    parseFloat(((earlyAT.fuelL    ||0)+(lateAT.fuelL    ||0)).toFixed(4)),
+      startLat: earlyAT.startLat || 0,  startLng: earlyAT.startLng || 0,
+      endLat:   lateAT.endLat   || 0,  endLng:   lateAT.endLng   || 0,
+    };
+    if (earlyAT.name || lateAT.name) merged.name = earlyAT.name || lateAT.name;
+
+    // Samples unificados — já estão em ordem cronológica
+    const mergedSamples = [...earlySamples, ...lateSamples];
+
+    // Recalcula métricas híbridas
+    let hybridTimeSec = 0, hybridDistKm = 0;
+    for (let i = 1; i < mergedSamples.length; i++) {
+      const a = mergedSamples[i-1], b = mergedSamples[i];
+      const dt = (b.t||0)-(a.t||0);
+      if (dt > 0 && dt < 30 && (a.rpm||0) > 50) {
+        hybridTimeSec += dt;
+        hybridDistKm  += ((a.spd||0)+(b.spd||0))/2/3600*dt;
+      }
+    }
+    hybridTimeSec = Math.round(hybridTimeSec);
+    hybridDistKm  = parseFloat(hybridDistKm.toFixed(3));
+
+    // Salva arquivo unificado (ID da viagem mais antiga)
+    fs.writeFileSync(
+      path.join(AUTOTRIPS_DIR, `${earlyId}.json`),
+      JSON.stringify({ tripId: earlyId, autoTrip: merged, samples: mergedSamples })
+    );
+    // Remove arquivo da viagem mais recente
+    try { fs.unlinkSync(path.join(AUTOTRIPS_DIR, `${lateId}.json`)); } catch (_) {}
+
+    // Atualiza array em memória
+    autoTripsArr = autoTripsArr.filter(t => t.tripId !== earlyId && t.tripId !== lateId);
+    const record = { tripId: earlyId, ...merged, hybridTimeSec, hybridDistKm };
+    autoTripsArr.push(record);
+    autoTripsArr.sort((a, b) => (b.startMs||0)-(a.startMs||0));
+
+    console.log(`[merge] ${earlyId} + ${lateId} → ${earlyId} (${merged.distKm} km, ${mergedSamples.length} amostras)`);
+    res.json({ ok: true, mergedId: earlyId, trip: record });
+  } catch (e) {
+    console.error('[merge]', e);
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
 app.delete('/api/trips/:tripId', (req, res) => {
   const id = decodeURIComponent(req.params.tripId);
   console.log(`[delete] Trip lookup id="${id}" found=${tripsMap.has(id)}`);
