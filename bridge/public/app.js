@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_BUILD = 'b159';   // bump a cada deploy para confirmar versão no admin
+const APP_BUILD = 'b160';   // bump a cada deploy para confirmar versão no admin
 
 // ── Estado local ──────────────────────────────────────────────────────────────
 let state = {};
@@ -2905,6 +2905,11 @@ async function adminClearHistory() {
   }
   if (!confirm('Senha confirmada.\n\nApagar TODO o histórico do servidor?\n(trips manuais, auto-trips e recargas)\n\nEssa ação não pode ser desfeita.')) return;
   adminAction('/api/admin/clear-history', 'Apagando histórico');
+}
+
+async function adminClearSnapshots() {
+  if (!confirm('Apagar todos os snapshots de lifetime?\nOs comparativos semanal e mensal ficarão sem dados até novos snapshots acumularem (chegam a cada 5 min enquanto o carro envia dados).')) return;
+  adminAction('/api/lifetime/snapshots/clear', 'Limpando snapshots');
 }
 
 async function adminRedownloadCache() {

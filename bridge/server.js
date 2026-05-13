@@ -1061,6 +1061,26 @@ app.post('/api/rename-ack', (req, res) => {
 // Snapshots do lifetime para filtros de período no PWA (não depende de sync de auto-trips)
 app.get('/api/lifetime/snapshots', (_req, res) => res.json(lifeSnapshots));
 
+// Limpar snapshots (admin)
+app.post('/api/lifetime/snapshots/clear', (req, res) => {
+  if (!adminCheckToken(req, res)) return;
+  lifeSnapshots = [];
+  lastSnapMs = 0;
+  try { fs.writeFileSync(SNAPSHOTS_FILE, '[]'); } catch (_) {}
+  console.log('[admin] snapshots limpos');
+  res.json({ ok: true, msg: 'Snapshots apagados. O próximo chegará em até 5 min.' });
+});
+
+// Forçar snapshot imediato (admin)
+app.post('/api/lifetime/snapshots/force', (req, res) => {
+  if (!adminCheckToken(req, res)) return;
+  lastSnapMs = 0;   // zera debounce
+  maybeSaveLifetimeSnapshot();
+  const n = lifeSnapshots.length;
+  console.log('[admin] snapshot forçado — total:', n);
+  res.json({ ok: true, msg: n > 0 ? `Snapshot forçado. Total: ${n}.` : 'Sem dados lifetime ainda (aguarde dados do carro).' });
+});
+
 app.get('/api/telemetry/:tripId', (req, res) => {
   const safeId   = String(req.params.tripId).replace(/\D/g, '');
   const filePath = path.join(AUTOTRIPS_DIR, `${safeId}.json`);
