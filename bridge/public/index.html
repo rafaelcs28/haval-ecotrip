@@ -634,7 +634,34 @@
         </div>
       </div>
 
-      <!-- ── 3. Backup & Restore ───────────────────────────────────────────── -->
+      <!-- ── 3. Limite de Carga SOC ──────────────────────────────────────────── -->
+      <div class="settings-card">
+        <div class="sc-header" onclick="toggleSection('sc-charge-limit-body','sc-charge-limit-btn')">
+          <span class="sc-title">🔋 Limite de Carga SOC</span>
+          <button id="sc-charge-limit-btn" type="button" class="sc-toggle">▲</button>
+        </div>
+        <div id="sc-charge-limit-body">
+          <div style="font-size:11px;color:#64748b;margin-bottom:12px;line-height:1.6">
+            Define o limite máximo de carga da bateria. Útil antes de conectar o carregador
+            para garantir que ele inicie. O carro precisa estar ligado ou carregando.
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+            <span style="font-size:12px;color:#94a3b8">Limite atual:</span>
+            <span id="s-chrg-limit" style="font-size:18px;font-weight:700;color:var(--teal)">--%</span>
+          </div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
+            <button class="clb slb" onclick="setChargeLimit(50)">50%</button>
+            <button class="clb slb" onclick="setChargeLimit(60)">60%</button>
+            <button class="clb slb" onclick="setChargeLimit(70)">70%</button>
+            <button class="clb slb" onclick="setChargeLimit(80)">80%</button>
+            <button class="clb slb" onclick="setChargeLimit(90)">90%</button>
+            <button class="clb slb" onclick="setChargeLimit(100)">100%</button>
+          </div>
+          <div id="s-chrg-limit-status" class="charge-limit-status"></div>
+        </div>
+      </div>
+
+      <!-- ── 4. Backup & Restore ───────────────────────────────────────────── -->
       <div class="settings-card">
         <div class="sc-header" onclick="toggleSection('sc-backup-body','sc-backup-btn')">
           <span class="sc-title">💾 Backup & Restore</span>

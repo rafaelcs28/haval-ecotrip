@@ -1309,9 +1309,11 @@ function renderDash() {
       setHTML('d-chrg-remain', '--');
       setText('d-chrg-finish', '--');
     }
-    // Limite de carga SOC — atualiza valor atual e destaca botão ativo
+    // Limite de carga SOC no card de recarga
     _renderChargeLimit(s.charge_limit_pct);
   }
+  // Limite de carga SOC no painel de configurações — atualiza sempre (independe de carregando)
+  _renderChargeLimit(s.charge_limit_pct);
 
   // Trip A mini
   const ta = s.trip_a || {};
@@ -1928,15 +1930,24 @@ const ALERT_TEXTS = {
 let _clLimitTimer = null;
 
 function _renderChargeLimit(pct) {
-  setText('d-chrg-limit', pct != null ? pct + '%' : '--%');
+  // Atualiza ambos os painéis (charging card + settings)
+  const label = pct != null ? pct + '%' : '--%';
+  setText('d-chrg-limit', label);
+  setText('s-chrg-limit', label);
   document.querySelectorAll('.clb').forEach(b => {
     b.classList.toggle('clb-active', parseInt(b.textContent) === pct);
   });
 }
 
+function _clSetStatus(msg) {
+  ['d-chrg-limit-status', 's-chrg-limit-status'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = msg;
+  });
+}
+
 async function setChargeLimit(pct) {
-  const statusEl = document.getElementById('d-chrg-limit-status');
-  if (statusEl) statusEl.textContent = '⏳ Enviando…';
+  _clSetStatus('⏳ Enviando…');
   document.querySelectorAll('.clb').forEach(b => b.disabled = true);
   try {
     const r = await apiFetch('/api/charge-limit', {
@@ -1946,35 +1957,31 @@ async function setChargeLimit(pct) {
     });
     const data = await r.json().catch(() => ({}));
     if (!r.ok || !data.ok) {
-      if (statusEl) statusEl.textContent = '✗ ' + (data.error || 'Erro');
+      _clSetStatus('✗ ' + (data.error || 'Erro'));
     } else {
-      if (statusEl) statusEl.textContent = '⏳ Aguardando carro…';
-      // resultado chegará via WebSocket (charge_limit_result)
+      _clSetStatus('⏳ Aguardando carro…');
       clearTimeout(_clLimitTimer);
       _clLimitTimer = setTimeout(() => {
-        if (statusEl && statusEl.textContent.includes('Aguardando'))
-          statusEl.textContent = '⚠️ Sem resposta — carro pode estar dormindo';
+        _clSetStatus('⚠️ Sem resposta — carro pode estar dormindo');
       }, 60000);
     }
   } catch (e) {
-    if (statusEl) statusEl.textContent = '✗ Sem conexão com o servidor';
+    _clSetStatus('✗ Sem conexão com o servidor');
   } finally {
     document.querySelectorAll('.clb').forEach(b => b.disabled = false);
   }
 }
 
 function _onChargeLimitResult(result) {
-  const statusEl = document.getElementById('d-chrg-limit-status');
   clearTimeout(_clLimitTimer);
-  if (!statusEl) return;
   if (result.startsWith('ok:')) {
     const pct = parseInt(result.replace('ok:', ''));
-    statusEl.textContent = '✓ Limite aplicado: ' + pct + '%';
+    _clSetStatus('✓ Limite aplicado: ' + pct + '%');
     _renderChargeLimit(pct);
   } else {
-    statusEl.textContent = '✗ ' + result.replace('error:', '');
+    _clSetStatus('✗ ' + result.replace('error:', ''));
   }
-  setTimeout(() => { if (statusEl) statusEl.textContent = ''; }, 6000);
+  setTimeout(() => _clSetStatus(''), 6000);
 }
 
 function renderAlerts(s) {
