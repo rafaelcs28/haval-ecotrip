@@ -3123,14 +3123,26 @@ function _statsRow(icon, label, value, sub) {
 function _statsRecordsHTML(trips) {
   if (!trips.length) return _statsCard('🏆 Recordes pessoais', '<div style="color:#475569;font-size:12px">Nenhuma viagem com mais de 2 km ainda.</div>');
 
+  const KWH_PER_L = 8.9; // equivalência energética da gasolina (kWh/L)
+
+  // Mais eficiente elétrica: só viagens 100% elétricas (fuelL ≈ 0)
   const byEff = trips
-    .filter(t => t.distKm > 0 && (t.netKwh || 0) > 0)
+    .filter(t => (t.fuelL || 0) < 0.05 && t.distKm > 0 && (t.netKwh || 0) > 0)
     .reduce((b, t) => {
-      const v = (t.netKwh || 0) / t.distKm * 100;
-      return (!b || v < ((b.netKwh || 0) / b.distKm * 100)) ? t : b;
+      const v = t.netKwh / t.distKm * 100;
+      return (!b || v < (b.netKwh / b.distKm * 100)) ? t : b;
     }, null);
 
-  const byDist  = trips.reduce((b, t) => (!b || (t.distKm || 0) > (b.distKm || 0)) ? t : b, null);
+  // Mais eficiente híbrida: viagens com combustível, consumo equivalente em kWh_eq/100km
+  // equiv = (netKwh + fuelL × 8,9) / distKm × 100 — menor é melhor
+  const byHybridEff = trips
+    .filter(t => (t.fuelL || 0) >= 0.05 && t.distKm > 0 && (t.netKwh || 0) >= 0)
+    .reduce((b, t) => {
+      const v = ((t.netKwh || 0) + t.fuelL * KWH_PER_L) / t.distKm * 100;
+      return (!b || v < (((b.netKwh || 0) + b.fuelL * KWH_PER_L) / b.distKm * 100)) ? t : b;
+    }, null);
+
+  const byDist = trips.reduce((b, t) => (!b || (t.distKm || 0) > (b.distKm || 0)) ? t : b, null);
 
   // Maior regeneração: só viagens 100% elétricas (fuelL ≈ 0) com > 5 km
   // Métrica: regenKwh / energyKwh (bruto) — melhor quem regenerou mais proporcionalmente
@@ -3141,7 +3153,7 @@ function _statsRecordsHTML(trips) {
       return (!b || pct > (b.regenKwh || 0) / b.energyKwh) ? t : b;
     }, null);
 
-  const byFuel  = trips.filter(t => (t.fuelL || 0) > 0.05 && (t.distKm || 0) > 0)
+  const byFuel = trips.filter(t => (t.fuelL || 0) > 0.05 && (t.distKm || 0) > 0)
     .reduce((b, t) => (!b || t.distKm / t.fuelL > b.distKm / b.fuelL) ? t : b, null);
 
   const shortDate = ms => {
@@ -3151,15 +3163,22 @@ function _statsRecordsHTML(trips) {
   };
 
   let rows = '';
-  if (byEff)  rows += _statsRow('🏆', 'Mais eficiente',
-    f1((byEff.netKwh || 0) / byEff.distKm * 100) + ' kWh/100km',
+  if (byEff) rows += _statsRow('⚡', 'Mais eficiente elétrica',
+    f1(byEff.netKwh / byEff.distKm * 100) + ' kWh/100km',
     shortDate(byEff.startMs) + ' · ' + f1(byEff.distKm) + ' km');
+  if (byHybridEff) {
+    const equiv = ((byHybridEff.netKwh || 0) + byHybridEff.fuelL * KWH_PER_L) / byHybridEff.distKm * 100;
+    rows += _statsRow('🔥', 'Mais eficiente híbrida',
+      f1(equiv) + ' kWh_eq/100km',
+      shortDate(byHybridEff.startMs) + ' · ' + f1(byHybridEff.distKm) + ' km · '
+        + f2(byHybridEff.netKwh || 0) + ' kWh + ' + f2(byHybridEff.fuelL) + ' L');
+  }
   if (byDist) rows += _statsRow('📏', 'Mais longa',
     f1(byDist.distKm) + ' km',
     shortDate(byDist.startMs));
   if (byRegen) {
     const regenPct = Math.round((byRegen.regenKwh || 0) / byRegen.energyKwh * 100);
-    rows += _statsRow('⚡', 'Maior regeneração',
+    rows += _statsRow('♻️', 'Maior regeneração',
       regenPct + '% do bruto',
       shortDate(byRegen.startMs) + ' · ' + f1(byRegen.distKm) + ' km · ' + f2(byRegen.regenKwh) + ' kWh');
   }
