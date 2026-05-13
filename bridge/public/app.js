@@ -1759,7 +1759,7 @@ function renderAutoTrips() {
     <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">
       ${costStr}
       <button class="charge-badge" style="cursor:pointer;border:none" onclick="openTripDetail('${t.tripId}')">🗺 Ver rota</button>
-      <button class="charge-badge" style="cursor:pointer;border:none;color:#94a3b8" onclick="shareTripCard('${t.tripId}')">📤 Partilhar</button>
+      <button class="charge-badge" style="cursor:pointer;border:none;color:#94a3b8" onclick="shareTripCard('${t.tripId}')">📸 Snapshot</button>
     </div>
   </div>
   <div class="trip-metrics">
@@ -2029,109 +2029,271 @@ function renderSpeedBands(samples) {
   if (body) body.appendChild(section);
 }
 
-// ── Partilhar card da viagem (PNG) ────────────────────────────────────────────
+// ── Snapshot 9:16 da viagem (mapa + gráficos + métricas) ─────────────────────
 async function shareTripCard(tripId) {
   const trip = (cachedAutoTrips || []).find(t => t.tripId === tripId);
   if (!trip) return;
 
-  const W = 400, H = 200, sc = 2;
-  const canvas = document.createElement('canvas');
-  canvas.width  = W * sc;
-  canvas.height = H * sc;
-  const ctx = canvas.getContext('2d');
+  // Feedback visual durante a geração
+  const btn = [...document.querySelectorAll('.charge-badge')]
+    .find(b => b.onclick?.toString().includes(tripId) && b.textContent.includes('Snapshot'));
+  if (btn) { btn.textContent = '⏳'; btn.disabled = true; }
 
-  // Fundo
-  ctx.fillStyle = '#0B0F1A';
-  ctx.fillRect(0, 0, W * sc, H * sc);
+  try {
+    // Carrega telemetria para mapa e gráficos
+    const samples = await apiFetch(`/api/telemetry/${tripId}`)
+      .then(r => r.json()).then(d => d.samples || []).catch(() => []);
 
-  // Barra de gradiente no topo
-  const grad = ctx.createLinearGradient(0, 0, W * sc, 0);
-  grad.addColorStop(0, '#3b82f6');
-  grad.addColorStop(1, '#10b981');
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, W * sc, 4 * sc);
+    const title = trip.name || getAutoName(trip) || '';
 
-  // Logo
-  ctx.textBaseline = 'top';
-  ctx.font = `700 ${11 * sc}px -apple-system, system-ui, sans-serif`;
-  ctx.fillStyle = '#3b82f6';
-  ctx.textAlign = 'left';
-  ctx.fillText('EcoTrip', 20 * sc, 16 * sc);
+    // ── Layout ──────────────────────────────────────────────────────────────
+    const W  = 450;
+    const sc = 2;        // @2× para retina
+    const PAD = 20;
 
-  // Data + duração
-  ctx.font = `${9 * sc}px -apple-system, system-ui, sans-serif`;
-  ctx.fillStyle = '#475569';
-  ctx.textAlign = 'right';
-  const dur = fmtDur(Math.round((trip.endMs - trip.startMs) / 1000));
-  ctx.fillText(fmtDate(trip.startMs) + ' · ' + dur, (W - 20) * sc, 18 * sc);
+    const H_HEADER  = title ? 88 : 62;
+    const H_MAP     = 290;
+    const H_METRICS = 72;
+    const H_CHARTS  = samples.length > 1 ? 3 * 66 + 16 : 0;
+    const H_FOOTER  = 36;
+    const H = H_HEADER + H_MAP + H_METRICS + H_CHARTS + H_FOOTER;
 
-  // Título (nome manual ou auto-gerado)
-  const title = trip.name || getAutoName(trip) || '';
-  let yContent = 44;
-  if (title) {
-    ctx.font = `700 ${13 * sc}px -apple-system, system-ui, sans-serif`;
-    ctx.fillStyle = '#e2e8f0';
+    const canvas = document.createElement('canvas');
+    canvas.width  = W * sc;
+    canvas.height = H * sc;
+    const ctx = canvas.getContext('2d');
+    ctx.scale(sc, sc);
+    ctx.textBaseline = 'top';
+
+    // ── Fundo ────────────────────────────────────────────────────────────────
+    ctx.fillStyle = '#0B0F1A';
+    ctx.fillRect(0, 0, W, H);
+
+    // Barra de gradiente no topo
+    const grd = ctx.createLinearGradient(0, 0, W, 0);
+    grd.addColorStop(0, '#3b82f6');
+    grd.addColorStop(1, '#10b981');
+    ctx.fillStyle = grd;
+    ctx.fillRect(0, 0, W, 4);
+
+    // ── Cabeçalho ────────────────────────────────────────────────────────────
+    let y = 14;
+    ctx.font = 'bold 13px -apple-system, system-ui, sans-serif';
+    ctx.fillStyle = '#3b82f6';
     ctx.textAlign = 'left';
-    ctx.fillText(title, 20 * sc, 42 * sc);
-    yContent = 64;
-  }
+    ctx.fillText('EcoTrip', PAD, y);
 
-  // Divisor
-  ctx.fillStyle = '#1e293b';
-  ctx.fillRect(20 * sc, yContent * sc, (W - 40) * sc, sc);
-  yContent += 12;
-
-  // Métricas
-  const { gas: priceGas, kwh: priceKwh } = getPrices();
-  const kwh100 = (trip.distKm > 0.1 && (trip.netKwh || 0) > 0)
-    ? (trip.netKwh / trip.distKm * 100).toFixed(1) : '—';
-  const kmL  = (trip.fuelL || 0) > 0.01 ? (trip.distKm / trip.fuelL).toFixed(1) : '—';
-  const cost = (trip.fuelL || 0) * priceGas + (trip.netKwh || 0) * priceKwh;
-  const metrics = [
-    { v: f1(trip.distKm || 0),  lbl: 'km',      color: '#60a5fa' },
-    { v: kwh100,                 lbl: 'kWh/100', color: '#4ade80' },
-    { v: kmL,                    lbl: 'km/L',    color: '#fb923c' },
-    { v: trip.startSocPct > 0 ? `${Math.round(trip.startSocPct)}→${Math.round(trip.endSocPct)}%` : '—',
-                                 lbl: 'SOC',     color: '#2dd4bf' },
-    { v: cost > 0.01 ? 'R$' + f2(cost) : '—',  lbl: 'custo',   color: '#fbbf24' },
-  ];
-
-  const colW = (W - 40) / metrics.length;
-  metrics.forEach((m, i) => {
-    const x = (20 + i * colW) * sc;
-    ctx.font = `700 ${14 * sc}px -apple-system, system-ui, sans-serif`;
-    ctx.fillStyle = m.color;
-    ctx.textAlign = 'left';
-    ctx.fillText(m.v, x, yContent * sc);
-    ctx.font = `${8 * sc}px -apple-system, system-ui, sans-serif`;
+    const dur = fmtDur(Math.round((trip.endMs - trip.startMs) / 1000));
+    ctx.font = '10px -apple-system, system-ui, sans-serif';
     ctx.fillStyle = '#475569';
-    ctx.fillText(m.lbl, x, (yContent + 16) * sc);
-  });
+    ctx.textAlign = 'right';
+    ctx.fillText(fmtDate(trip.startMs) + ' · ' + dur, W - PAD, y + 2);
 
-  // Marca d'água
-  ctx.font = `${7 * sc}px -apple-system, system-ui, sans-serif`;
-  ctx.fillStyle = '#1e293b';
-  ctx.textAlign = 'right';
-  ctx.fillText('Haval EcoTrip Impulse', (W - 20) * sc, (H - 10) * sc);
+    y += 24;
+    if (title) {
+      ctx.font = 'bold 16px -apple-system, system-ui, sans-serif';
+      ctx.fillStyle = '#e2e8f0';
+      ctx.textAlign = 'left';
+      ctx.fillText(title, PAD, y);
+      y += 22;
+    }
 
-  return new Promise(resolve => {
-    canvas.toBlob(async blob => {
-      const name = `ecotrip-${trip.tripId}.png`;
-      const file = new File([blob], name, { type: 'image/png' });
-      try {
-        if (navigator.share && navigator.canShare?.({ files: [file] })) {
-          await navigator.share({ files: [file], title: title || 'Viagem EcoTrip' });
-        } else {
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url; a.download = name;
-          document.body.appendChild(a); a.click();
-          setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1500);
+    // Divisor
+    ctx.fillStyle = '#1e293b';
+    ctx.fillRect(PAD, y, W - PAD * 2, 1);
+    y += 8;
+
+    // ── Mapa ─────────────────────────────────────────────────────────────────
+    const mapY = y, mapW = W - PAD * 2;
+    ctx.fillStyle = '#0d1523';
+    ctx.fillRect(PAD, mapY, mapW, H_MAP);
+
+    const gps = samples.filter(s => s.lat !== 0 && s.lng !== 0);
+    if (gps.length >= 2) {
+      // Bounding box com padding
+      let minLat = Infinity, maxLat = -Infinity, minLng = Infinity, maxLng = -Infinity;
+      gps.forEach(p => {
+        minLat = Math.min(minLat, p.lat); maxLat = Math.max(maxLat, p.lat);
+        minLng = Math.min(minLng, p.lng); maxLng = Math.max(maxLng, p.lng);
+      });
+      const pad = 0.15;
+      const dLat = (maxLat - minLat) || 0.001, dLng = (maxLng - minLng) || 0.001;
+      minLat -= dLat * pad; maxLat += dLat * pad;
+      minLng -= dLng * pad; maxLng += dLng * pad;
+
+      // Projeção lat/lng → canvas
+      const toX = lng => PAD + ((lng - minLng) / (maxLng - minLng)) * mapW;
+      const toY = lat => mapY + H_MAP - ((lat - minLat) / (maxLat - minLat)) * H_MAP;
+
+      // Grade de fundo suave
+      ctx.strokeStyle = '#111d2e';
+      ctx.lineWidth = 0.5;
+      for (let i = 1; i < 5; i++) {
+        const gx = PAD + i * mapW / 5;
+        ctx.beginPath(); ctx.moveTo(gx, mapY); ctx.lineTo(gx, mapY + H_MAP); ctx.stroke();
+        const gy = mapY + i * H_MAP / 5;
+        ctx.beginPath(); ctx.moveTo(PAD, gy); ctx.lineTo(PAD + mapW, gy); ctx.stroke();
+      }
+
+      // Traçado colorido por velocidade
+      const spdColor = s => s < 40 ? '#39FF88' : s < 80 ? '#FFD60A' : s < 120 ? '#FF5F1F' : '#FF5555';
+      ctx.lineWidth = 3;
+      ctx.lineJoin  = 'round';
+      ctx.lineCap   = 'round';
+      for (let i = 1; i < gps.length; i++) {
+        const a = gps[i - 1], b = gps[i];
+        ctx.strokeStyle = spdColor(a.spd || 0);
+        ctx.beginPath();
+        ctx.moveTo(toX(a.lng), toY(a.lat));
+        ctx.lineTo(toX(b.lng), toY(b.lat));
+        ctx.stroke();
+      }
+
+      // Marcadores início (verde) e fim (azul)
+      [[gps[0], '#4ade80'], [gps[gps.length - 1], '#60a5fa']].forEach(([p, c]) => {
+        ctx.fillStyle = c;
+        ctx.beginPath();
+        ctx.arc(toX(p.lng), toY(p.lat), 7, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      });
+
+      // Legenda de velocidade
+      const legY = mapY + H_MAP - 18;
+      [['#39FF88','<40'], ['#FFD60A','40-80'], ['#FF5F1F','80-120'], ['#FF5555','120+']].reduce((lx, [c, lbl]) => {
+        ctx.fillStyle = c;
+        ctx.fillRect(lx, legY + 2, 14, 4);
+        ctx.font = '8px -apple-system, system-ui, sans-serif';
+        ctx.fillStyle = '#94a3b8';
+        ctx.textAlign = 'left';
+        ctx.fillText(lbl, lx + 16, legY);
+        return lx + 52;
+      }, PAD + 4);
+    } else {
+      ctx.font = '13px -apple-system, system-ui, sans-serif';
+      ctx.fillStyle = '#1e293b';
+      ctx.textAlign = 'center';
+      ctx.fillText('GPS indisponível', W / 2, mapY + H_MAP / 2 - 7);
+    }
+
+    y += H_MAP + 10;
+
+    // ── Métricas ─────────────────────────────────────────────────────────────
+    ctx.fillStyle = '#1e293b';
+    ctx.fillRect(PAD, y, W - PAD * 2, 1);
+    y += 12;
+
+    const { gas: priceGas, kwh: priceKwh } = getPrices();
+    const kwh100 = trip.distKm > 0.1 && (trip.netKwh || 0) > 0
+      ? (trip.netKwh / trip.distKm * 100).toFixed(1) : '—';
+    const kmL  = (trip.fuelL || 0) > 0.01 ? (trip.distKm / trip.fuelL).toFixed(1) : '—';
+    const cost = (trip.fuelL || 0) * priceGas + (trip.netKwh || 0) * priceKwh;
+    const metrics = [
+      { v: f1(trip.distKm || 0), lbl: 'km',      color: '#60a5fa' },
+      { v: kwh100,                lbl: 'kWh/100', color: '#4ade80' },
+      { v: kmL,                   lbl: 'km/L',    color: '#fb923c' },
+      { v: trip.startSocPct > 0
+          ? `${Math.round(trip.startSocPct)}→${Math.round(trip.endSocPct)}%` : '—',
+                                  lbl: 'SOC',     color: '#2dd4bf' },
+      { v: cost > 0.01 ? 'R$' + f2(cost) : '—', lbl: 'custo',   color: '#fbbf24' },
+    ];
+    const colW = (W - PAD * 2) / metrics.length;
+    metrics.forEach((m, i) => {
+      const x = PAD + i * colW;
+      ctx.font = 'bold 17px -apple-system, system-ui, sans-serif';
+      ctx.fillStyle = m.color;
+      ctx.textAlign = 'left';
+      ctx.fillText(m.v, x, y);
+      ctx.font = '9px -apple-system, system-ui, sans-serif';
+      ctx.fillStyle = '#475569';
+      ctx.fillText(m.lbl, x, y + 19);
+    });
+
+    y += H_METRICS;
+
+    // ── Gráficos ─────────────────────────────────────────────────────────────
+    if (samples.length > 1) {
+      const chartW = W - PAD * 2;
+      const chartH = 52;
+
+      function drawLine(data, label, color) {
+        const mn = Math.min(...data), mx = Math.max(...data);
+        const range = mx - mn || 1;
+
+        ctx.font = '9px -apple-system, system-ui, sans-serif';
+        ctx.fillStyle = color;
+        ctx.textAlign = 'left';
+        ctx.fillText(label, PAD, y - 1);
+
+        ctx.fillStyle = '#0d1523';
+        ctx.fillRect(PAD, y + 10, chartW, chartH);
+
+        // Linha zero (p/ valores bipolares como evKw)
+        if (mn < 0 && mx > 0) {
+          const zy = y + 10 + chartH - ((-mn) / range) * chartH;
+          ctx.strokeStyle = '#1e293b';
+          ctx.lineWidth = 0.5;
+          ctx.beginPath();
+          ctx.moveTo(PAD, zy); ctx.lineTo(PAD + chartW, zy);
+          ctx.stroke();
         }
-      } catch (_) {}
-      resolve();
-    }, 'image/png');
-  });
+
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.5;
+        ctx.lineJoin = 'round';
+        ctx.beginPath();
+        data.forEach((v, i) => {
+          const cx = PAD + (i / (data.length - 1)) * chartW;
+          const cy = y + 10 + chartH - ((v - mn) / range) * chartH;
+          i === 0 ? ctx.moveTo(cx, cy) : ctx.lineTo(cx, cy);
+        });
+        ctx.stroke();
+
+        y += chartH + 14;
+      }
+
+      ctx.fillStyle = '#1e293b';
+      ctx.fillRect(PAD, y, W - PAD * 2, 1);
+      y += 10;
+
+      drawLine(samples.map(s => s.spd  || 0), 'Velocidade (km/h)',       '#4DBBFF');
+      drawLine(samples.map(s => s.evKw || 0), 'Potência elétrica (kW)', '#39FF88');
+      drawLine(samples.map(s => s.rpm  || 0), 'Motor ICE (RPM)',         '#FF5F1F');
+    }
+
+    // ── Rodapé ───────────────────────────────────────────────────────────────
+    ctx.fillStyle = '#1e293b';
+    ctx.fillRect(PAD, y, W - PAD * 2, 1);
+    y += 10;
+    ctx.font = '9px -apple-system, system-ui, sans-serif';
+    ctx.fillStyle = '#334155';
+    ctx.textAlign = 'center';
+    ctx.fillText('Haval EcoTrip Impulse', W / 2, y);
+
+    // ── Compartilhar / download ───────────────────────────────────────────────
+    await new Promise(resolve => {
+      canvas.toBlob(async blob => {
+        const name = `ecotrip-snapshot-${trip.tripId}.png`;
+        const file = new File([blob], name, { type: 'image/png' });
+        try {
+          if (navigator.share && navigator.canShare?.({ files: [file] })) {
+            await navigator.share({ files: [file], title: title || 'EcoTrip Snapshot' });
+          } else {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url; a.download = name;
+            document.body.appendChild(a); a.click();
+            setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1500);
+          }
+        } catch (_) {}
+        resolve();
+      }, 'image/png');
+    });
+  } finally {
+    if (btn) { btn.textContent = '📸 Snapshot'; btn.disabled = false; }
+  }
 }
 
 function initTripMap(samples) {
