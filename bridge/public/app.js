@@ -2206,7 +2206,7 @@ async function shareTripCard(tripId) {
     const H_TITLE   = title ? 26 : 0;
     const H_DIV     = 1;
     const VPAD      = 10;          // padding each side of a divider
-    const H_METRICS = 64;
+    const H_METRICS = 68;           // 2 linhas × 30px + 8px margem
     const H_BANDS   = 18 + 3 * 36; // section label + 3 band rows
     const H_FOOTER  = 26;
     // overhead (everything except map)
@@ -2267,22 +2267,33 @@ async function shareTripCard(tripId) {
       ? (trip.netKwh / trip.distKm * 100).toFixed(1) : '—';
     const kmL  = (trip.fuelL || 0) > 0.01 ? (trip.distKm / trip.fuelL).toFixed(1) : '—';
     const cost = (trip.fuelL || 0) * priceGas + (trip.netKwh || 0) * priceKwh;
-    const metrics = [
+
+    // Linha 1 — eficiência + SOC
+    const row1 = [
       { v: f1(trip.distKm || 0), lbl: 'km',      col: '#60a5fa' },
       { v: kwh100,                lbl: 'kWh/100', col: '#4ade80' },
       { v: kmL,                   lbl: 'km/L',    col: '#fb923c' },
       { v: trip.startSocPct > 0 ? `${Math.round(trip.startSocPct)}→${Math.round(trip.endSocPct)}%` : '—',
                                   lbl: 'SOC',     col: '#2dd4bf' },
-      { v: cost > 0.01 ? 'R$' + f2(cost) : '—',  lbl: 'custo',  col: '#fbbf24' },
     ];
-    const colW = CW / metrics.length;
-    metrics.forEach((m, i) => {
-      const mx = PAD + i * colW;
-      ctx.font = 'bold 17px system-ui, sans-serif'; ctx.fillStyle = m.col; ctx.textAlign = 'left';
-      ctx.fillText(m.v, mx, y);
-      ctx.font = '9px system-ui, sans-serif'; ctx.fillStyle = '#475569';
-      ctx.fillText(m.lbl, mx, y + 20);
-    });
+    // Linha 2 — consumo absoluto + custo
+    const row2 = [
+      { v: (trip.fuelL  || 0) > 0.01 ? f2(trip.fuelL)  + ' L'   : '—', lbl: 'combustível', col: '#fb923c' },
+      { v: (trip.netKwh || 0) > 0    ? f2(trip.netKwh) + ' kWh' : '—', lbl: 'energia',     col: '#4ade80' },
+      { v: cost > 0.01 ? 'R$' + f2(cost) : '—',                         lbl: 'custo',       col: '#fbbf24' },
+    ];
+    const drawMetricRow = (row, ry) => {
+      const cw = CW / row.length;
+      row.forEach((m, i) => {
+        const mx = PAD + i * cw;
+        ctx.font = 'bold 15px system-ui, sans-serif'; ctx.fillStyle = m.col; ctx.textAlign = 'left';
+        ctx.fillText(m.v, mx, ry);
+        ctx.font = '9px system-ui, sans-serif'; ctx.fillStyle = '#475569';
+        ctx.fillText(m.lbl, mx, ry + 17);
+      });
+    };
+    drawMetricRow(row1, y);
+    drawMetricRow(row2, y + 30);
     y += H_METRICS;
 
     // ── Divisor → faixas ─────────────────────────────────────────────────────
