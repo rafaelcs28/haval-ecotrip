@@ -763,14 +763,28 @@ app.post('/api/autotrips', (req, res) => {
     });
     // Push: viagem concluída (só se >1 km OU >3 min)
     if (notifPrefs.trip_end) {
-      const distKm = autoTrip.distKm || 0;
+      const distKm = autoTrip.distKm  || 0;
       const sec    = autoTrip.timeSec || 0;
       if (distKm > 1 || sec > 180) {
-        const dist = distKm.toFixed(1);
-        const dur  = sec >= 3600
+        const netKwh = autoTrip.netKwh || 0;
+        const fuelL  = autoTrip.fuelL  || 0;
+        const dist   = distKm.toFixed(1);
+        const dur    = sec >= 3600
           ? `${Math.floor(sec / 3600)}h ${Math.floor((sec % 3600) / 60)}min`
           : `${Math.floor(sec / 60)}min`;
-        sendPush('🏁 Viagem concluída', `${dist} km · ${dur}`);
+        const kwh100 = distKm > 0.1 && netKwh > 0 ? (netKwh / distKm * 100).toFixed(1) : null;
+        const kmL    = fuelL  > 0.01              ? (distKm / fuelL).toFixed(1)         : null;
+        const cost   = (state.price_gas_per_l > 0 || state.price_kwh > 0)
+          ? fuelL * state.price_gas_per_l + netKwh * state.price_kwh : 0;
+
+        const parts = [`${dist} km`, dur];
+        if (netKwh > 0.01) parts.push(`${netKwh.toFixed(2)} kWh`);
+        if (kwh100)        parts.push(`${kwh100} kWh/100`);
+        if (fuelL > 0.01)  parts.push(`${fuelL.toFixed(2)} L`);
+        if (kmL)           parts.push(`${kmL} km/L`);
+        if (cost  > 0.01)  parts.push(`R$ ${cost.toFixed(2)}`);
+
+        sendPush('🏁 Viagem concluída', parts.join(' · '));
       }
     }
     res.json({ ok: true });
