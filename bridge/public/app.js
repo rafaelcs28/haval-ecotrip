@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_BUILD = 'b157';   // bump a cada deploy para confirmar versão no admin
+const APP_BUILD = 'b158';   // bump a cada deploy para confirmar versão no admin
 
 // ── Estado local ──────────────────────────────────────────────────────────────
 let state = {};
@@ -3190,30 +3190,40 @@ function _statsRecordsHTML(trips) {
     const d = new Date(ms);
     return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
   };
+  // Nome do trip: renameTracking tem prioridade (igual ao renderAutoTrips)
+  const tName = t => {
+    const rn = renameTracking[String(t.tripId)];
+    return (rn?.name) || t.name || '';
+  };
+  // Sub-linha: [nome · ] data · dist km [ · extra]
+  const tSub = (t, distExtra, extra) => {
+    const name = tName(t);
+    const base = shortDate(t.startMs) + ' · ' + f1(t.distKm) + ' km' + (distExtra ? ' · ' + distExtra : '');
+    return (name ? name + ' · ' : '') + base + (extra ? ' · ' + extra : '');
+  };
 
   let rows = '';
   if (byEff) rows += _statsRow('⚡', 'Mais eficiente elétrica',
     f1(byEff.netKwh / byEff.distKm * 100) + ' kWh/100km',
-    shortDate(byEff.startMs) + ' · ' + f1(byEff.distKm) + ' km');
+    tSub(byEff));
   if (byHybridEff) {
     const equiv = ((byHybridEff.netKwh || 0) + byHybridEff.fuelL * KWH_PER_L) / byHybridEff.distKm * 100;
     rows += _statsRow('🔥', 'Mais eficiente híbrida',
       f1(equiv) + ' kWh_eq/100km',
-      shortDate(byHybridEff.startMs) + ' · ' + f1(byHybridEff.distKm) + ' km · '
-        + f2(byHybridEff.netKwh || 0) + ' kWh + ' + f2(byHybridEff.fuelL) + ' L');
+      tSub(byHybridEff, f2(byHybridEff.netKwh || 0) + ' kWh + ' + f2(byHybridEff.fuelL) + ' L'));
   }
   if (byDist) rows += _statsRow('📏', 'Mais longa',
     f1(byDist.distKm) + ' km',
-    shortDate(byDist.startMs));
+    tSub(byDist));
   if (byRegen) {
     const regenPct = Math.round((byRegen.regenKwh || 0) / byRegen.energyKwh * 100);
     rows += _statsRow('♻️', 'Maior regeneração',
       regenPct + '% do bruto',
-      shortDate(byRegen.startMs) + ' · ' + f1(byRegen.distKm) + ' km · ' + f2(byRegen.regenKwh) + ' kWh');
+      tSub(byRegen, null, f2(byRegen.regenKwh) + ' kWh'));
   }
   if (byFuel) rows += _statsRow('⛽', 'Melhor viagem com gasolina',
     f1(byFuel.distKm / byFuel.fuelL) + ' km/L',
-    shortDate(byFuel.startMs) + ' · ' + f1(byFuel.distKm) + ' km · ' + f2(byFuel.fuelL) + ' L');
+    tSub(byFuel, null, f2(byFuel.fuelL) + ' L'));
   if (!rows) rows = '<div style="color:#475569;font-size:12px">Dados insuficientes.</div>';
 
   // ── Top 3 menor R$/km ─────────────────────────────────────────────────────
@@ -3235,7 +3245,7 @@ function _statsRecordsHTML(trips) {
           medals[i],
           `${i + 1}º menor custo/km`,
           'R$ ' + f3(cPkm) + '/km',
-          shortDate(t.startMs) + ' · ' + f1(t.distKm) + ' km · R$ ' + f2(cost)
+          tSub(t, null, 'R$ ' + f2(cost))
         );
       });
     }
