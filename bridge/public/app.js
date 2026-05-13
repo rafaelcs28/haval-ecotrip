@@ -830,7 +830,6 @@ const filterState = {
 };
 let cachedCharges = null;
 let cachedTrips   = null;
-const _spdBuf = new Array(30).fill(0);  // buffer circular para sparkline de velocidade
 
 // ── Cache local — IndexedDB ────────────────────────────────────────────────
 const _IDB_NAME = 'ecotrip-trips';
@@ -1388,21 +1387,7 @@ function renderDash() {
         }
       }
 
-      // Sparkline de velocidade — últimas 30 amostras
-      const curSpd = Math.round(s.speed_kmh || 0);
-      _spdBuf.push(curSpd);
-      if (_spdBuf.length > 30) _spdBuf.shift();
-      const sparkLine = document.getElementById('d-spd-spark-line');
-      if (sparkLine) {
-        const maxV = Math.max(10, ..._spdBuf);
-        const W = 150, H = 18;
-        const pts = _spdBuf.map((v, i) => {
-          const x = (i / (_spdBuf.length - 1)) * W;
-          const y = H - (v / maxV) * (H - 2) - 1;
-          return x.toFixed(1) + ',' + y.toFixed(1);
-        }).join(' ');
-        sparkLine.setAttribute('points', pts);
-      }
+
     }
   }
 
