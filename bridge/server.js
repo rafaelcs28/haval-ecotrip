@@ -721,6 +721,30 @@ app.post('/api/admin/clear-history', (req, res) => {
   }
 });
 
+// POST /api/admin/purge-autotrips — remove auto-trips irrelevantes (dist=0, kwh<0.10, <60s)
+app.post('/api/admin/purge-autotrips', (req, res) => {
+  if (!adminCheckToken(req, res)) return;
+  try {
+    let purged = 0;
+    const before = autoTripsArr.length;
+    autoTripsArr = autoTripsArr.filter(t => {
+      const keep = (t.distKm || 0) > 0 || (t.netKwh || 0) >= 0.10 || (t.timeSec || 0) >= 60;
+      if (!keep) {
+        const filePath = path.join(AUTOTRIPS_DIR, `${t.tripId}.json`);
+        try { fs.unlinkSync(filePath); } catch (_) {}
+        purged++;
+      }
+      return keep;
+    });
+    console.log(`[admin] Purge auto-trips: ${purged} removidos (${before} → ${autoTripsArr.length})`);
+    res.json({ ok: true, purged, remaining: autoTripsArr.length,
+      msg: `${purged} trip${purged !== 1 ? 's' : ''} irrelevante${purged !== 1 ? 's' : ''} removida${purged !== 1 ? 's' : ''}.` });
+  } catch (e) {
+    console.error('[admin] Erro no purge:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ── Auto-trips + Telemetria ───────────────────────────────────────────────────
 
 app.post('/api/autotrips', (req, res) => {

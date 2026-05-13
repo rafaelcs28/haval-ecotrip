@@ -952,6 +952,15 @@ function _idbClearAll() {
   }));
 }
 
+function _idbClearStore(store) {
+  return _openIDB().then(db => new Promise((res, rej) => {
+    const tx = db.transaction(store, 'readwrite');
+    tx.objectStore(store).clear();
+    tx.oncomplete = res;
+    tx.onerror    = e => rej(e.target.error);
+  }));
+}
+
 // ── Barra de progresso de sync ─────────────────────────────────────────────
 function _syncProgressShow(msg) {
   let el = document.getElementById('sync-progress');
@@ -2607,6 +2616,30 @@ async function adminAction(path, label) {
 
 function adminRestart() { adminAction('/api/admin/restart', 'Reiniciando'); }
 function adminUpdate()  { adminAction('/api/admin/update',  'Atualizando'); }
+
+async function adminPurgeAutoTrips() {
+  if (!confirm('Remover auto-trips com dist=0, energia<0.10kWh e duração<1min?\n\nEssa ação não pode ser desfeita.')) return;
+  adminSetStatus('⏳ Removendo…', null);
+  try {
+    const r    = await apiFetch('/api/admin/purge-autotrips', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+    const data = await r.json().catch(() => ({}));
+    if (r.ok && data.ok) {
+      adminSetStatus(`✓ ${data.msg || 'OK'} (${data.remaining} restantes)`, true);
+      // Limpa cache local e re-sincroniza
+      if (data.purged > 0) {
+        cachedAutoTrips = null;
+        await _idbClearStore('autotrips');
+        await _idbSetMeta('lastAutoMs', 0);
+        await syncAllCache({ silent: true });
+        if (activePanel === 'auto') renderAutoTrips();
+      }
+    } else {
+      adminSetStatus('✗ ' + (data.error || `HTTP ${r.status}`), false);
+    }
+  } catch (e) {
+    if (e.message !== 'unauthorized') adminSetStatus('✗ Erro ao conectar.', false);
+  }
+}
 
 async function adminClearHistory() {
   const pw = prompt('Digite a senha para confirmar a exclusão do histórico:');
