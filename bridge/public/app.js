@@ -1619,13 +1619,14 @@ function renderCharges() {
   }, 0);
   const hasCost = totalCost > 0;
 
+  const cu = s => `<span class="chrg-unit">${s}</span>`;
   html += `<div class="charge-summary-card">
   <div class="card-title">Resumo — ${charges.length} sessão${charges.length !== 1 ? 'ões' : ''}</div>
   <div class="metrics-row">
-    <div class="metric"><div class="metric-value teal sm">${f2(totalKwh)} kWh</div><div class="metric-label">total carregado</div></div>
-    <div class="metric"><div class="metric-value muted sm">${fmtDur(totalSec)}</div><div class="metric-label">tempo total</div></div>
-    <div class="metric"><div class="metric-value blue sm">${f1(avgPwr)} kW</div><div class="metric-label">pot. média</div></div>
-    ${hasCost ? `<div class="metric"><div class="metric-value green sm">R$ ${f2(totalCost)}</div><div class="metric-label">custo total</div></div>` : ''}
+    <div class="metric"><div class="metric-value teal sm">${f2(totalKwh)}${cu(' kWh')}</div><div class="metric-label">total carregado</div></div>
+    <div class="metric"><div class="metric-value muted sm">${fmtDashTime(totalSec)}</div><div class="metric-label">tempo total</div></div>
+    <div class="metric"><div class="metric-value blue sm">${f1(avgPwr)}${cu(' kW')}</div><div class="metric-label">pot. média</div></div>
+    ${hasCost ? `<div class="metric"><div class="metric-value green sm">${cu('R$ ')}${f2(totalCost)}</div><div class="metric-label">custo total</div></div>` : ''}
   </div>
 </div>`;
 
