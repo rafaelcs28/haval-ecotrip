@@ -223,7 +223,7 @@ try {
   // Limpa viagens irrelevantes: dist=0 E energia=0 E duração<60s
   let purged = 0;
   autoTripsArr = autoTripsArr.filter(t => {
-    const keep = (t.distKm || 0) > 0 || (t.netKwh || 0) > 0 || (t.timeSec || 0) >= 60;
+    const keep = (t.distKm || 0) > 0 || (t.netKwh || 0) >= 0.10 || (t.timeSec || 0) >= 60;
     if (!keep) {
       const filePath = path.join(AUTOTRIPS_DIR, `${t.tripId}.json`);
       try { fs.unlinkSync(filePath); } catch (_) {}
@@ -736,7 +736,7 @@ app.post('/api/autotrips', (req, res) => {
     const _distKm  = autoTrip.distKm  || 0;
     const _netKwh  = autoTrip.netKwh  || 0;
     const _timeSec = autoTrip.timeSec || 0;
-    if (_distKm <= 0 && _netKwh <= 0 && _timeSec < 60) {
+    if (_distKm <= 0 && _netKwh < 0.10 && _timeSec < 60) {
       console.log(`↷ AutoTrip ${safeId} ignorado (dist=0 energy=0 time=${_timeSec}s)`);
       return res.json({ ok: true, skipped: true });
     }
