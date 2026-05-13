@@ -719,6 +719,15 @@ app.post('/api/autotrips', (req, res) => {
     const safeId = String(tripId).replace(/\D/g, '');
     if (!safeId) return res.status(400).json({ error: 'invalid tripId' });
 
+    // Descarta viagens irrelevantes: energia E distância zeradas com menos de 1 min
+    const _distKm  = autoTrip.distKm  || 0;
+    const _netKwh  = autoTrip.netKwh  || 0;
+    const _timeSec = autoTrip.timeSec || 0;
+    if (_distKm <= 0 && _netKwh <= 0 && _timeSec < 60) {
+      console.log(`↷ AutoTrip ${safeId} ignorado (dist=0 energy=0 time=${_timeSec}s)`);
+      return res.json({ ok: true, skipped: true });
+    }
+
     const filePath = path.join(AUTOTRIPS_DIR, `${safeId}.json`);
 
     // Se a viagem já existe com samples e o novo POST tem samples vazio (sync sem telemetria),
