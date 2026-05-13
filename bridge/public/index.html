@@ -128,6 +128,20 @@
             <div class="metric-label">Pronto às</div>
           </div>
         </div>
+        <!-- Limite de carga SOC -->
+        <div class="charge-limit-row">
+          <span class="charge-limit-label">Limite SOC</span>
+          <span class="charge-limit-cur" id="d-chrg-limit">--%</span>
+          <div class="charge-limit-btns">
+            <button class="clb" onclick="setChargeLimit(50)">50</button>
+            <button class="clb" onclick="setChargeLimit(60)">60</button>
+            <button class="clb" onclick="setChargeLimit(70)">70</button>
+            <button class="clb" onclick="setChargeLimit(80)">80</button>
+            <button class="clb" onclick="setChargeLimit(90)">90</button>
+            <button class="clb" onclick="setChargeLimit(100)">100</button>
+          </div>
+        </div>
+        <div id="d-chrg-limit-status" class="charge-limit-status"></div>
       </div>
 
       <!-- Haval H6 — visualização em camadas PNG -->

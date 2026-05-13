@@ -260,6 +260,7 @@ const state = {
   motor_power_kw:      0,
   charge_session_kwh:  0,
   charge_remaining_min:0,
+  charge_limit_pct:    null,   // % limite de carga SOC (null = desconhecido)
   battery_power_pct:   0,
   engine_rpm:          0,
   notif_latest_ts:     0,
@@ -1043,6 +1044,21 @@ const ALLOWED_ACTIONS = new Set([
   'charge_history',
 ]);
 
+// POST /api/charge-limit  { pct: 80 }  — publica cmd/charge_limit no MQTT
+app.post('/api/charge-limit', (req, res) => {
+  if (!adminCheckToken(req, res)) return;
+  const pct = parseInt(req.body?.pct);
+  if (![50, 60, 70, 80, 90, 100].includes(pct))
+    return res.status(400).json({ error: 'Valor inválido. Use 50, 60, 70, 80, 90 ou 100.' });
+  if (!mqttClient?.connected)
+    return res.status(503).json({ error: 'MQTT offline' });
+  mqttClient.publish(`${MQTT_PREFIX}/cmd/charge_limit`, pct.toString(), { retain: false, qos: 1 }, err => {
+    if (err) return res.status(500).json({ error: 'Falha ao publicar no MQTT' });
+    console.log(`[charge-limit] Enviando ${pct}% para o carro via MQTT`);
+    res.json({ ok: true });
+  });
+});
+
 app.post('/api/action/:name', (req, res) => {
   const { name } = req.params;
   if (!ALLOWED_ACTIONS.has(name)) return res.status(400).json({ error: 'ação desconhecida' });
@@ -1266,6 +1282,14 @@ function applyMqttMessage(key, value, isRetained = false) {
     case 'charge_power_kw':      state.charge_power_kw      = num(value); break;
     case 'charge_session_kwh':   state.charge_session_kwh   = num(value); break;
     case 'charge_remaining_min': state.charge_remaining_min = num(value); break;
+    case 'ha/charge_limit/state': {
+      const pct = parseInt(value);
+      if ([50,60,70,80,90,100].includes(pct)) state.charge_limit_pct = pct;
+      break;
+    }
+    case 'cmd/charge_limit/result':
+      broadcast('charge_limit_result', { result: value });
+      break;
     case 'price_gas_per_l':      state.price_gas_per_l      = num(value); break;
     case 'price_kwh':            state.price_kwh            = num(value); break;
     case 'charge_current_a':     state.charge_current_a     = num(value); break;

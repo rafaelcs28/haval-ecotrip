@@ -764,6 +764,8 @@ function connect() {
         ws.close();
         showLogin('Senha incorreta ou expirada.');
         return;
+      } else if (msg.type === 'charge_limit_result') {
+        _onChargeLimitResult(msg.data?.result || '');
       } else if (msg.type === 'new_autotrip') {
         // Nova viagem automática — sincroniza só o novo, sem derrubar o cache inteiro
         const autoPanel = document.getElementById('panel-auto');
@@ -1307,6 +1309,8 @@ function renderDash() {
       setHTML('d-chrg-remain', '--');
       setText('d-chrg-finish', '--');
     }
+    // Limite de carga SOC — atualiza valor atual e destaca botão ativo
+    _renderChargeLimit(s.charge_limit_pct);
   }
 
   // Trip A mini
@@ -1919,6 +1923,59 @@ const ALERT_TEXTS = {
   'AC_ON_WITH_ENGINE_OFF':       'AC ligado com motor desligado — pode drenar a bateria 12V.',
   'REVIEW_PREFIX':               'Veículo dentro do limite para agendar revisão.',
 };
+
+// ── Limite de carga SOC ───────────────────────────────────────────────────────
+let _clLimitTimer = null;
+
+function _renderChargeLimit(pct) {
+  setText('d-chrg-limit', pct != null ? pct + '%' : '--%');
+  document.querySelectorAll('.clb').forEach(b => {
+    b.classList.toggle('clb-active', parseInt(b.textContent) === pct);
+  });
+}
+
+async function setChargeLimit(pct) {
+  const statusEl = document.getElementById('d-chrg-limit-status');
+  if (statusEl) statusEl.textContent = '⏳ Enviando…';
+  document.querySelectorAll('.clb').forEach(b => b.disabled = true);
+  try {
+    const r = await apiFetch('/api/charge-limit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pct }),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok || !data.ok) {
+      if (statusEl) statusEl.textContent = '✗ ' + (data.error || 'Erro');
+    } else {
+      if (statusEl) statusEl.textContent = '⏳ Aguardando carro (~12s)…';
+      // resultado chegará via WebSocket (charge_limit_result)
+      clearTimeout(_clLimitTimer);
+      _clLimitTimer = setTimeout(() => {
+        if (statusEl && statusEl.textContent.includes('Aguardando'))
+          statusEl.textContent = '⚠️ Sem resposta — carro pode estar dormindo';
+      }, 20000);
+    }
+  } catch (e) {
+    if (statusEl) statusEl.textContent = '✗ Sem conexão com o servidor';
+  } finally {
+    document.querySelectorAll('.clb').forEach(b => b.disabled = false);
+  }
+}
+
+function _onChargeLimitResult(result) {
+  const statusEl = document.getElementById('d-chrg-limit-status');
+  clearTimeout(_clLimitTimer);
+  if (!statusEl) return;
+  if (result.startsWith('ok:')) {
+    const pct = parseInt(result.replace('ok:', ''));
+    statusEl.textContent = '✓ Limite aplicado: ' + pct + '%';
+    _renderChargeLimit(pct);
+  } else {
+    statusEl.textContent = '✗ ' + result.replace('error:', '');
+  }
+  setTimeout(() => { if (statusEl) statusEl.textContent = ''; }, 6000);
+}
 
 function renderAlerts(s) {
   const card = document.getElementById('d-alerts-card');

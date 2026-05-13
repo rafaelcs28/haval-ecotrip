@@ -272,6 +272,26 @@ html, body {
 /* ── Cards Desde última partida / Trip A / Trip B — unidades micro ────────── */
 #d-trips-summary .dash-unit    { font-size: 8px; font-weight: 500; opacity: .70; vertical-align: baseline; margin-left: 1px; }
 
+/* ── Limite de carga SOC ─────────────────────────────────────────────────── */
+.charge-limit-row   { display:flex; align-items:center; gap:8px; margin-top:10px; flex-wrap:wrap; }
+.charge-limit-label { font-size:11px; color:var(--muted); white-space:nowrap; }
+.charge-limit-cur   { font-size:14px; font-weight:700; color:var(--teal); min-width:32px; }
+.charge-limit-btns  { display:flex; gap:4px; flex-wrap:wrap; }
+.clb {
+  background: rgba(255,255,255,.07);
+  border: 1px solid rgba(255,255,255,.15);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 3px 7px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .15s, border-color .15s;
+}
+.clb:active          { background: rgba(255,255,255,.18); }
+.clb.clb-active      { background: var(--teal); border-color: var(--teal); color: #000; }
+.charge-limit-status { font-size: 11px; color: var(--muted); margin-top: 4px; min-height: 14px; }
+
 /* ── Marcha grande (dashboard) ───────────────────────────────────────────────── */
 .gear-badge-lg {
   display: inline-block;
