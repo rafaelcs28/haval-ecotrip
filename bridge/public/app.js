@@ -45,68 +45,6 @@ async function syncRenameStatus() {
   } catch (_) {}
 }
 
-// ── Comandos remotos Trip A/B ─────────────────────────────────────────────────
-// Permite finalizar ou nomear Trip A/B pelo iPhone antes de ligar o carro.
-// O carro lê e aplica o comando na próxima sessão via pending-renames pipeline.
-const _tripCmdState = { A: null, B: null };  // 'name' | 'finish' | null
-
-function showTripCmd(trip, action) {
-  _tripCmdState[trip] = action;
-  const box = document.getElementById(`trip-cmd-${trip}`);
-  if (!box) return;
-  const inp = document.getElementById(`trip-cmd-${trip}-name`);
-  if (inp) {
-    inp.placeholder = action === 'finish' ? 'Nome da viagem (opcional)' : 'Novo nome para Trip ' + trip;
-    inp.value = '';
-  }
-  document.getElementById(`trip-cmd-${trip}-status`).textContent = '';
-  box.style.display = '';
-  inp?.focus();
-}
-
-function cancelTripCmd(trip) {
-  _tripCmdState[trip] = null;
-  const box = document.getElementById(`trip-cmd-${trip}`);
-  if (box) box.style.display = 'none';
-}
-
-async function confirmTripCmd(trip) {
-  const action = _tripCmdState[trip];
-  if (!action) return;
-  const nameEl   = document.getElementById(`trip-cmd-${trip}-name`);
-  const statusEl = document.getElementById(`trip-cmd-${trip}-status`);
-  const name = nameEl ? nameEl.value.trim() : '';
-
-  if (action === 'name' && !name) {
-    if (statusEl) statusEl.textContent = '⚠️ Informe um nome';
-    return;
-  }
-
-  if (statusEl) statusEl.textContent = '⏳ Enviando…';
-
-  try {
-    const body = { tripId: trip, type: 'trip_' + action, name };
-    if (action === 'finish') body.ts = Date.now();
-
-    const r = await apiFetch('/api/rename', {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify(body),
-    });
-
-    if (r.ok) {
-      const label = action === 'finish' ? 'Finalização agendada' : 'Nome agendado';
-      if (statusEl) statusEl.textContent = `✓ ${label} — carro aplica ao ligar`;
-      _tripCmdState[trip] = null;
-      setTimeout(() => cancelTripCmd(trip), 4000);
-    } else {
-      const err = await r.json().catch(() => ({}));
-      if (statusEl) statusEl.textContent = '✗ ' + (err.error || `Erro ${r.status}`);
-    }
-  } catch (_e) {
-    if (statusEl) statusEl.textContent = '✗ Sem resposta do servidor';
-  }
-}
 
 function queueGeocode(tripId, lat, lng, key = tripId) {
   if (!lat || !lng || lat === 0 || lng === 0) return;
@@ -1234,8 +1172,6 @@ function filterChipsHTML(tabId) {
 // ── Render ────────────────────────────────────────────────────────────────────
 function renderAll() {
   renderDash();
-  renderTrip('a', state.trip_a || {});
-  renderTrip('b', state.trip_b || {});
   renderCarVersion();
   updateActionStatuses(state);
   _checkNotifBadge();
@@ -1360,25 +1296,6 @@ function renderDash() {
   }
   // Limite de carga SOC no painel de configurações — atualiza sempre (independe de carregando)
   _renderChargeLimit(s.charge_limit_pct);
-
-  // Trip A mini
-  const ta = s.trip_a || {};
-  const du = s => `<span class="dash-unit">${s}</span>`;
-  setHTML('d-trip-dist', ta.distance_km   > 0 ? f1(ta.distance_km) + du(' km') : '--');
-  setHTML('d-trip-time', fmtDashTime(ta.time_sec));
-  setText('d-trip-kwh',  ta.kwh_per_100km > 0 ? f1(ta.kwh_per_100km)           : '--');
-  setText('d-trip-kml',  ta.km_per_l      > 0 ? f1(ta.km_per_l)                : '--');
-  setHTML('d-trip-cost', ta.cost_brl      > 0 ? du('R$ ') + f2(ta.cost_brl) : '--');
-  setClass('d-trip-kwh', eff(ta.kwh_per_100km));
-
-  // Trip B mini
-  const tb = s.trip_b || {};
-  setHTML('d-tripb-dist', tb.distance_km   > 0 ? f1(tb.distance_km) + du(' km') : '--');
-  setHTML('d-tripb-time', fmtDashTime(tb.time_sec));
-  setText('d-tripb-kwh',  tb.kwh_per_100km > 0 ? f1(tb.kwh_per_100km)           : '--');
-  setText('d-tripb-kml',  tb.km_per_l      > 0 ? f1(tb.km_per_l)                : '--');
-  setHTML('d-tripb-cost', tb.cost_brl      > 0 ? du('R$ ') + f2(tb.cost_brl) : '--');
-  setClass('d-tripb-kwh', eff(tb.kwh_per_100km));
 
   // ── Camadas PNG do carro ─────────────────────────────────────────────────────
   function carLayer(id, show) {
@@ -1554,32 +1471,6 @@ function renderDash() {
   if (s.gps_lat && s.gps_lng) updateDashMap(s.gps_lat, s.gps_lng, s.gps_ts);
 
   renderAlerts(s);
-}
-
-function renderTrip(id, t) {
-  const p = id;
-  setText(`${p}-dist`,      f1(t.distance_km) + ' km');
-  setText(`${p}-time`,      fmtTripTime(t.time_sec));
-  setText(`${p}-speed`,     f1(t.avg_speed_kmh));
-  setText(`${p}-kwh100`,    t.kwh_per_100km > 0 ? f1(t.kwh_per_100km) : '--');
-  setText(`${p}-kml`,       t.km_per_l    > 0 ? f1(t.km_per_l)     : '--');
-  // km/L equivalente: converte energia elétrica líquida em litros (1 L = 8,9 kWh)
-  const _KWH_PER_L = 8.9;
-  const _netKwh    = (t.energy_kwh || 0) - (t.regen_kwh || 0);
-  const _fuelL     = t.fuel_l || 0;
-  const _dist      = t.distance_km || 0;
-  const _eqKmL     = _dist > 0.1 && (_netKwh > 0 || _fuelL > 0.001)
-    ? f1(_dist / (_netKwh / _KWH_PER_L + _fuelL)) : '--';
-  setText(`${p}-kml-eq`, _eqKmL);
-  setText(`${p}-fuel`,      t.fuel_l      > 0 ? f2(t.fuel_l) + ' L' : '--');
-  setText(`${p}-energy`,    t.energy_kwh  > 0 ? f2(t.energy_kwh)    : '--');
-  setText(`${p}-regen`,     t.regen_kwh   > 0 ? f2(t.regen_kwh)     : '--');
-  setText(`${p}-cost`,        t.cost_brl     > 0 ? 'R$ ' + f2(t.cost_brl) : '--');
-  setText(`${p}-cost-per-km`, t.cost_per_km  > 0 ? f3(t.cost_per_km)     : '--');
-  setText(`${p}-soc-start`, pct(t.soc_start));
-  setText(`${p}-soc-now`,   pct(t.soc_current));
-  setText(`${p}-tank-now`,  t.tank_now_l > 0 ? f1(t.tank_now_l) + ' L' : '--');
-  setClass(`${p}-kwh100`, eff(t.kwh_per_100km));
 }
 
 // ── Recargas ──────────────────────────────────────────────────────────────────
