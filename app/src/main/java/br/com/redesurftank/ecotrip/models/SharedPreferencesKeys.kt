@@ -3,20 +3,6 @@ package br.com.redesurftank.ecotrip.models
 object SharedPreferencesKeys {
     const val PREFS_NAME = "ecotrip_prefs"
 
-    // Trip A accumulated
-    const val TRIP_A_FUEL_L = "trip_a_fuel_l"
-    const val TRIP_A_ENERGY_KWH = "trip_a_energy_kwh"
-    const val TRIP_A_REGEN_KWH = "trip_a_regen_kwh"
-    const val TRIP_A_DISTANCE_KM = "trip_a_distance_km"
-    const val TRIP_A_TIME_SEC = "trip_a_time_sec"
-
-    // Trip B accumulated
-    const val TRIP_B_FUEL_L = "trip_b_fuel_l"
-    const val TRIP_B_ENERGY_KWH = "trip_b_energy_kwh"
-    const val TRIP_B_REGEN_KWH = "trip_b_regen_kwh"
-    const val TRIP_B_DISTANCE_KM = "trip_b_distance_km"
-    const val TRIP_B_TIME_SEC = "trip_b_time_sec"
-
     // Lifetime — nunca zera (acumulado desde a primeira instalação)
     const val LIFETIME_FUEL_L      = "lifetime_fuel_l"
     const val LIFETIME_ENERGY_KWH  = "lifetime_energy_kwh"
@@ -73,22 +59,6 @@ object SharedPreferencesKeys {
     // JSON array de Long — evita re-envio de trips já sincronizados
     const val BRIDGE_SYNCED_TRIP_IDS = "bridge_synced_trip_ids_json"
 
-    // Chart raw samples (JSON)
-    const val TRIP_A_RAW_SAMPLES_JSON = "trip_a_raw_samples_json"
-    const val TRIP_B_RAW_SAMPLES_JSON = "trip_b_raw_samples_json"
-
-    // SOC and fuel % at trip start
-    const val TRIP_A_START_SOC_PCT  = "trip_a_start_soc_pct"
-    const val TRIP_B_START_SOC_PCT  = "trip_b_start_soc_pct"
-    const val TRIP_A_START_FUEL_PCT = "trip_a_start_fuel_pct"
-    const val TRIP_B_START_FUEL_PCT = "trip_b_start_fuel_pct"
-
-    // Session baselines — persistidos para recuperar sessão após crash/atualização do app
-    const val TRIP_A_SESS_START_ENERGY = "trip_a_sess_start_energy"
-    const val TRIP_A_SESS_START_REGEN  = "trip_a_sess_start_regen"
-    const val TRIP_B_SESS_START_ENERGY = "trip_b_sess_start_energy"
-    const val TRIP_B_SESS_START_REGEN  = "trip_b_sess_start_regen"
-
     // Flag: true se a sessão terminou normalmente (onSessionEnd rodou).
     // false = app fechou/travou no meio → na próxima sessão manter baselines de energia.
     const val SESSION_ENDED_CLEANLY = "session_ended_cleanly"
@@ -105,10 +75,6 @@ object SharedPreferencesKeys {
 
     // Home Assistant export
     const val HA_EXPORT_URL = "ha_export_url"
-
-    // Nomes pendentes para Trip A/B (definidos pelo iPhone antes do carro ligar)
-    const val PENDING_TRIP_A_NAME = "pending_trip_a_name"
-    const val PENDING_TRIP_B_NAME = "pending_trip_b_name"
 
     // URL do Bridge Node.js (iPhone PWA) — configurado manualmente pois pode diferir do broker MQTT
     const val BRIDGE_URL   = "bridge_url"

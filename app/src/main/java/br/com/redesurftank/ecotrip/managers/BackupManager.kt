@@ -112,28 +112,6 @@ class BackupManager private constructor() {
         j.put(SharedPreferencesKeys.MQTT_PUBLISH_INTERVAL_WIFI_MS,     prefs.getInt(SharedPreferencesKeys.MQTT_PUBLISH_INTERVAL_WIFI_MS,     5_000))
         j.put(SharedPreferencesKeys.MQTT_PUBLISH_INTERVAL_CELLULAR_MS, prefs.getInt(SharedPreferencesKeys.MQTT_PUBLISH_INTERVAL_CELLULAR_MS, 30_000))
 
-        // Trip A
-        j.put(SharedPreferencesKeys.TRIP_A_FUEL_L,            prefs.getFloat(SharedPreferencesKeys.TRIP_A_FUEL_L,            0f).toDouble())
-        j.put(SharedPreferencesKeys.TRIP_A_ENERGY_KWH,        prefs.getFloat(SharedPreferencesKeys.TRIP_A_ENERGY_KWH,        0f).toDouble())
-        j.put(SharedPreferencesKeys.TRIP_A_REGEN_KWH,         prefs.getFloat(SharedPreferencesKeys.TRIP_A_REGEN_KWH,         0f).toDouble())
-        j.put(SharedPreferencesKeys.TRIP_A_DISTANCE_KM,       prefs.getFloat(SharedPreferencesKeys.TRIP_A_DISTANCE_KM,       0f).toDouble())
-        j.put(SharedPreferencesKeys.TRIP_A_TIME_SEC,           prefs.getLong(SharedPreferencesKeys.TRIP_A_TIME_SEC,           0L))
-        j.put(SharedPreferencesKeys.TRIP_A_START_SOC_PCT,     prefs.getFloat(SharedPreferencesKeys.TRIP_A_START_SOC_PCT,     0f).toDouble())
-        j.put(SharedPreferencesKeys.TRIP_A_START_FUEL_PCT,    prefs.getFloat(SharedPreferencesKeys.TRIP_A_START_FUEL_PCT,    0f).toDouble())
-        j.put(SharedPreferencesKeys.TRIP_A_SESS_START_ENERGY, prefs.getFloat(SharedPreferencesKeys.TRIP_A_SESS_START_ENERGY, 0f).toDouble())
-        j.put(SharedPreferencesKeys.TRIP_A_SESS_START_REGEN,  prefs.getFloat(SharedPreferencesKeys.TRIP_A_SESS_START_REGEN,  0f).toDouble())
-
-        // Trip B
-        j.put(SharedPreferencesKeys.TRIP_B_FUEL_L,            prefs.getFloat(SharedPreferencesKeys.TRIP_B_FUEL_L,            0f).toDouble())
-        j.put(SharedPreferencesKeys.TRIP_B_ENERGY_KWH,        prefs.getFloat(SharedPreferencesKeys.TRIP_B_ENERGY_KWH,        0f).toDouble())
-        j.put(SharedPreferencesKeys.TRIP_B_REGEN_KWH,         prefs.getFloat(SharedPreferencesKeys.TRIP_B_REGEN_KWH,         0f).toDouble())
-        j.put(SharedPreferencesKeys.TRIP_B_DISTANCE_KM,       prefs.getFloat(SharedPreferencesKeys.TRIP_B_DISTANCE_KM,       0f).toDouble())
-        j.put(SharedPreferencesKeys.TRIP_B_TIME_SEC,           prefs.getLong(SharedPreferencesKeys.TRIP_B_TIME_SEC,           0L))
-        j.put(SharedPreferencesKeys.TRIP_B_START_SOC_PCT,     prefs.getFloat(SharedPreferencesKeys.TRIP_B_START_SOC_PCT,     0f).toDouble())
-        j.put(SharedPreferencesKeys.TRIP_B_START_FUEL_PCT,    prefs.getFloat(SharedPreferencesKeys.TRIP_B_START_FUEL_PCT,    0f).toDouble())
-        j.put(SharedPreferencesKeys.TRIP_B_SESS_START_ENERGY, prefs.getFloat(SharedPreferencesKeys.TRIP_B_SESS_START_ENERGY, 0f).toDouble())
-        j.put(SharedPreferencesKeys.TRIP_B_SESS_START_REGEN,  prefs.getFloat(SharedPreferencesKeys.TRIP_B_SESS_START_REGEN,  0f).toDouble())
-
         // Lifetime
         j.put(SharedPreferencesKeys.LIFETIME_FUEL_L,      prefs.getFloat(SharedPreferencesKeys.LIFETIME_FUEL_L,      0f).toDouble())
         j.put(SharedPreferencesKeys.LIFETIME_ENERGY_KWH,  prefs.getFloat(SharedPreferencesKeys.LIFETIME_ENERGY_KWH,  0f).toDouble())
@@ -161,8 +139,6 @@ class BackupManager private constructor() {
         // History JSON blobs
         prefs.getString(SharedPreferencesKeys.TRIP_HISTORY_JSON,      null)?.let { j.put(SharedPreferencesKeys.TRIP_HISTORY_JSON,      it) }
         prefs.getString(SharedPreferencesKeys.CHARGE_HISTORY_JSON,    null)?.let { j.put(SharedPreferencesKeys.CHARGE_HISTORY_JSON,    it) }
-        prefs.getString(SharedPreferencesKeys.TRIP_A_RAW_SAMPLES_JSON, null)?.let { j.put(SharedPreferencesKeys.TRIP_A_RAW_SAMPLES_JSON, it) }
-        prefs.getString(SharedPreferencesKeys.TRIP_B_RAW_SAMPLES_JSON, null)?.let { j.put(SharedPreferencesKeys.TRIP_B_RAW_SAMPLES_JSON, it) }
 
         return j.toString(2)
     }
@@ -188,16 +164,6 @@ class BackupManager private constructor() {
         ps(SharedPreferencesKeys.MQTT_PASSWORD);         ps(SharedPreferencesKeys.MQTT_PREFIX)
         pi(SharedPreferencesKeys.MQTT_PUBLISH_INTERVAL_WIFI_MS)
         pi(SharedPreferencesKeys.MQTT_PUBLISH_INTERVAL_CELLULAR_MS)
-        pf(SharedPreferencesKeys.TRIP_A_FUEL_L);        pf(SharedPreferencesKeys.TRIP_A_ENERGY_KWH)
-        pf(SharedPreferencesKeys.TRIP_A_REGEN_KWH);     pf(SharedPreferencesKeys.TRIP_A_DISTANCE_KM)
-        pl(SharedPreferencesKeys.TRIP_A_TIME_SEC);       pf(SharedPreferencesKeys.TRIP_A_START_SOC_PCT)
-        pf(SharedPreferencesKeys.TRIP_A_START_FUEL_PCT); pf(SharedPreferencesKeys.TRIP_A_SESS_START_ENERGY)
-        pf(SharedPreferencesKeys.TRIP_A_SESS_START_REGEN)
-        pf(SharedPreferencesKeys.TRIP_B_FUEL_L);        pf(SharedPreferencesKeys.TRIP_B_ENERGY_KWH)
-        pf(SharedPreferencesKeys.TRIP_B_REGEN_KWH);     pf(SharedPreferencesKeys.TRIP_B_DISTANCE_KM)
-        pl(SharedPreferencesKeys.TRIP_B_TIME_SEC);       pf(SharedPreferencesKeys.TRIP_B_START_SOC_PCT)
-        pf(SharedPreferencesKeys.TRIP_B_START_FUEL_PCT); pf(SharedPreferencesKeys.TRIP_B_SESS_START_ENERGY)
-        pf(SharedPreferencesKeys.TRIP_B_SESS_START_REGEN)
         pf(SharedPreferencesKeys.LIFETIME_FUEL_L);      pf(SharedPreferencesKeys.LIFETIME_ENERGY_KWH)
         pf(SharedPreferencesKeys.LIFETIME_REGEN_KWH);   pf(SharedPreferencesKeys.LIFETIME_DISTANCE_KM)
         pl(SharedPreferencesKeys.LIFETIME_TIME_SEC);     pf(SharedPreferencesKeys.LIFETIME_CHARGE_KWH)
@@ -209,8 +175,6 @@ class BackupManager private constructor() {
         pf(SharedPreferencesKeys.LATEST_FUEL_PCT);      pf(SharedPreferencesKeys.LATEST_SOC_PCT)
         pf(SharedPreferencesKeys.LATEST_OUTSIDE_TEMP);  pf(SharedPreferencesKeys.LATEST_INSIDE_TEMP)
         ps(SharedPreferencesKeys.TRIP_HISTORY_JSON);    ps(SharedPreferencesKeys.CHARGE_HISTORY_JSON)
-        ps(SharedPreferencesKeys.TRIP_A_RAW_SAMPLES_JSON)
-        ps(SharedPreferencesKeys.TRIP_B_RAW_SAMPLES_JSON)
         ed.putBoolean(SharedPreferencesKeys.SESSION_ENDED_CLEANLY, true)
         ed.commit()
 

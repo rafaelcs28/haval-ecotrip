@@ -431,7 +431,7 @@ fun SettingsScreen(
         // ── Backup & Restauração ──────────────────────────────────────────────
         SectionCard(title = "Backup e Restauração") {
             Text(
-                "Salva configurações, histórico de viagens e recargas, todos os acumulados (Trip A/B, Lifetime, Rolling) e dados de gráficos. Use para migrar entre carros ou reinstalações.",
+                "Salva configurações, histórico de viagens e recargas, todos os acumulados (Lifetime, Rolling) e dados de gráficos. Use para migrar entre carros ou reinstalações.",
                 fontSize = 11.sp, color = TextSecondary,
             )
             // Botões exportar / importar arquivo
@@ -575,9 +575,8 @@ fun SettingsScreen(
         // ── Limpar dados ──────────────────────────────────────────────────────
         SectionCard("⚠️  Limpar dados") {
             Text(
-                "Remove permanentemente o histórico de viagens manuais, viagens automáticas, sessões de recarga " +
-                "e todos os totais lifetime (energia, combustível, distância). " +
-                "Os contadores de Trip A/B em andamento NÃO são afetados.",
+                "Remove permanentemente o histórico de viagens automáticas, sessões de recarga " +
+                "e todos os totais lifetime (energia, combustível, distância).",
                 fontSize = 11.sp,
                 color    = TextSecondary,
             )
@@ -604,7 +603,7 @@ fun SettingsScreen(
             title = { Text("Limpar histórico?", fontWeight = FontWeight.Bold) },
             text  = {
                 Text(
-                    "Serão apagados:\n• Viagens manuais (Trip A/B salvas)\n• Viagens automáticas\n• Sessões de recarga\n• Totais lifetime (energia, combustível, distância, recargas)\n• Checkpoints de estatísticas\n\nEssa ação não pode ser desfeita.",
+                    "Serão apagados:\n• Viagens automáticas\n• Sessões de recarga\n• Totais lifetime (energia, combustível, distância, recargas)\n• Checkpoints de estatísticas\n\nEssa ação não pode ser desfeita.",
                     fontSize = 13.sp,
                 )
             },

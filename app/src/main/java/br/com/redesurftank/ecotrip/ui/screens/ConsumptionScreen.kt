@@ -43,13 +43,10 @@ import br.com.redesurftank.ecotrip.managers.AutoTripEntry
 import br.com.redesurftank.ecotrip.managers.ChargeHistoryEntry
 import br.com.redesurftank.ecotrip.managers.RollingSnapshot
 import br.com.redesurftank.ecotrip.managers.TripHistoryEntry
-import br.com.redesurftank.ecotrip.managers.TripId
 import br.com.redesurftank.ecotrip.managers.TripManager
-import br.com.redesurftank.ecotrip.managers.TripSnapshot
 import br.com.redesurftank.ecotrip.managers.UpdateManager
 import br.com.redesurftank.ecotrip.models.CarConstants
 import br.com.redesurftank.ecotrip.ui.components.RollingWindowCard
-import br.com.redesurftank.ecotrip.ui.components.TripCard
 import br.com.redesurftank.ecotrip.ui.theme.*
 
 private val mainHandler = Handler(Looper.getMainLooper())
@@ -63,8 +60,6 @@ fun ConsumptionScreen() {
     val updateMgr   = remember { UpdateManager.getInstance() }
     val backupMgr = remember { BackupManager.getInstance() }
 
-    var snapA   by remember { mutableStateOf(TripSnapshot(0f, 0f, 0f, 0f, 0L, emptyList())) }
-    var snapB   by remember { mutableStateOf(TripSnapshot(0f, 0f, 0f, 0f, 0L, emptyList())) }
     var rolling by remember { mutableStateOf(RollingSnapshot(0f, 0f, 0f, 0f)) }
     var history       by remember { mutableStateOf<List<TripHistoryEntry>>(emptyList()) }
     var chargeHistory by remember { mutableStateOf<List<ChargeHistoryEntry>>(emptyList()) }
@@ -136,11 +131,11 @@ fun ConsumptionScreen() {
     var autoTripEntries   by remember { mutableStateOf<List<AutoTripEntry>>(emptyList()) }
 
     DisposableEffect(Unit) {
-        val tripListener: (TripSnapshot, TripSnapshot, RollingSnapshot) -> Unit = { a, b, r ->
+        val tripListener: (RollingSnapshot) -> Unit = { r ->
             mainHandler.post {
-                snapA = a; snapB = b; rolling = r
+                rolling = r
                 history = tripManager.getHistory()
-                mqttManager.publish(a, b, r)
+                mqttManager.publish(r)
             }
         }
 
@@ -714,31 +709,6 @@ fun ConsumptionScreen() {
             modifier = Modifier.fillMaxWidth(),
         )
 
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f),
-            horizontalArrangement = Arrangement.spacedBy(7.dp),
-        ) {
-            TripCard(
-                label    = "Trip A",
-                snapshot = snapA,
-                onReset  = { name ->
-                    mqttManager.publishTripCompleted("trip_a", snapA, name)
-                    tripManager.resetTrip(TripId.A, name)
-                },
-                modifier = Modifier.weight(1f).fillMaxHeight(),
-            )
-            TripCard(
-                label    = "Trip B",
-                snapshot = snapB,
-                onReset  = { name ->
-                    mqttManager.publishTripCompleted("trip_b", snapB, name)
-                    tripManager.resetTrip(TripId.B, name)
-                },
-                modifier = Modifier.weight(1f).fillMaxHeight(),
-            )
-        }
     }
 
 }
