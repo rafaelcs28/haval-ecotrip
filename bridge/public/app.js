@@ -835,6 +835,7 @@ function tickLastUpdate() {
 // ── Helpers de formatação ─────────────────────────────────────────────────────
 const f1  = v => (typeof v === 'number' ? v.toFixed(1)  : '--');
 const f2  = v => (typeof v === 'number' ? v.toFixed(2)  : '--');
+const f3  = v => (typeof v === 'number' ? v.toFixed(3)  : '--');
 const pct = v => (typeof v === 'number' ? v.toFixed(0) + '%' : '--%');
 const eff = v => {
   if (!v || v <= 0) return 'muted';
@@ -1532,12 +1533,31 @@ function renderCharges() {
 </div>`;
 
   html += charges.map(c => {
-    const delta = (c.soc_end || 0) - (c.soc_start || 0);
-    const col   = socColor(delta);
-    return `<div class="trip-item">
+    const delta  = (c.soc_end || 0) - (c.soc_start || 0);
+    const col    = socColor(delta);
+    const ts     = c.timestamp_ms || 0;
+    const ov     = _chargeCostOverride(ts);
+    const kwh    = c.energy_kwh || 0;
+    const totalCostHtml = `<span id="chg-cost-${ts}" class="trip-cost"${!ov ? ' style="display:none"' : ' style="border-bottom:1px dashed rgba(251,191,36,.5)"'}>${ov ? 'R$ ' + f2(ov.total) : ''}</span>`;
+    const unitHtml      = `<span id="chg-unit-${ts}" style="font-size:10px;color:#64748b;${!ov ? 'display:none' : ''}">${ov ? f3(ov.perKwh) + ' R$/kWh' : ''}</span>`;
+    return `<div class="trip-item" id="charge-card-${ts}">
   <div class="trip-header">
-    <div><div class="trip-name">${fmtDate(c.timestamp)}</div></div>
-    <span class="charge-kwh-badge">${f2(c.energy_kwh)} kWh</span>
+    <div style="flex:1;min-width:0">
+      <div class="trip-name-row">
+        <div class="trip-name">${fmtDate(c.timestamp)}</div>
+        <button class="rename-btn" onclick="deleteCharge(${ts})" title="Apagar recarga" style="opacity:.35">🗑</button>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center;margin-top:2px">${totalCostHtml}${unitHtml}</div>
+    </div>
+    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:3px">
+      <span class="charge-kwh-badge">${f2(kwh)} kWh</span>
+      <button class="cost-edit-btn" onclick="toggleChargeEdit(${ts})" title="Editar custo">💰</button>
+    </div>
+  </div>
+  <div id="charge-edit-${ts}" class="cost-edit-form" style="display:none">
+    <div style="font-size:11px;color:#64748b;width:100%;margin-bottom:2px">Total pago pela sessão (R$) — calcula R$/kWh automaticamente</div>
+    <input class="charge-total-input" type="number" step="0.01" min="0" placeholder="ex: 12.50"${ov ? ` value="${ov.total}"` : ''}>
+    <button class="cost-apply-btn" onclick="applyChargeCost(${ts},${kwh.toFixed(3)})">Salvar</button>
   </div>
   <div class="trip-metrics">
     <div class="trip-metric"><div class="trip-metric-val" style="color:var(--teal)">${fmtDur(c.duration_sec)}</div><div class="trip-metric-lbl">duração</div></div>
@@ -2584,6 +2604,49 @@ window.applyTripCost = function(tripId, fuelL, netKwh) {
     badge.style.borderBottom = '1px dashed rgba(251,191,36,.5)';
   }
   el.style.display = 'none';
+};
+
+// ── Custo de recargas — override local ───────────────────────────────────────
+
+function _chargeCostOverride(ts) {
+  try { return JSON.parse(localStorage.getItem('eco_chg_cost_' + ts) || 'null'); } catch { return null; }
+}
+
+window.toggleChargeEdit = function(ts) {
+  const el = document.getElementById('charge-edit-' + ts);
+  if (el) el.style.display = el.style.display === 'none' ? '' : 'none';
+};
+
+window.applyChargeCost = function(ts, energyKwh) {
+  const el = document.getElementById('charge-edit-' + ts);
+  if (!el) return;
+  const total = parseFloat(el.querySelector('.charge-total-input')?.value || '0');
+  if (total <= 0) return;
+  const perKwh = energyKwh > 0 ? total / energyKwh : 0;
+  localStorage.setItem('eco_chg_cost_' + ts, JSON.stringify({ total, perKwh }));
+  // Atualiza badges in-place
+  const totalBadge = document.getElementById('chg-cost-' + ts);
+  const unitBadge  = document.getElementById('chg-unit-' + ts);
+  if (totalBadge) { totalBadge.textContent = 'R$ ' + f2(total); totalBadge.style.display = ''; totalBadge.style.borderBottom = '1px dashed rgba(251,191,36,.5)'; }
+  if (unitBadge)  { unitBadge.textContent  = f3(perKwh) + ' R$/kWh'; unitBadge.style.display = ''; }
+  el.style.display = 'none';
+};
+
+window.deleteCharge = async function(ts) {
+  if (!confirm('Apagar esta recarga?\nEssa ação não pode ser desfeita.')) return;
+  try {
+    const r = await apiFetch(`/api/charges/${ts}`, { method: 'DELETE' });
+    if (!r.ok) { showToast('✗ Erro ao apagar recarga'); return; }
+    if (cachedCharges) cachedCharges = cachedCharges.filter(c => (c.timestamp_ms || 0) !== ts);
+    _openIDB().then(db => {
+      db.transaction('charges', 'readwrite').objectStore('charges').delete(ts);
+    }).catch(() => {});
+    localStorage.removeItem('eco_chg_cost_' + ts);
+    document.getElementById('charge-card-' + ts)?.remove();
+    showToast('✓ Recarga apagada');
+  } catch (e) {
+    if (e.message !== 'unauthorized') showToast('✗ Erro ao apagar recarga');
+  }
 };
 
 // ── Admin / Configurações ─────────────────────────────────────────────────────

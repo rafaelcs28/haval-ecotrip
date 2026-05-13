@@ -489,6 +489,16 @@ app.get('/api/charges', (req, res) => {
   res.json(since > 0 ? chargesArr.filter(c => (c.timestamp_ms || 0) > since) : chargesArr);
 });
 
+app.delete('/api/charges/:ts', (req, res) => {
+  const ts  = parseInt(req.params.ts, 10);
+  const idx = chargesArr.findIndex(c => (c.timestamp_ms || 0) === ts);
+  if (idx < 0) return res.status(404).json({ error: 'not found' });
+  chargesArr.splice(idx, 1);
+  scheduleChargesFlush();
+  console.log(`[delete] Charge ${ts} removida`);
+  res.json({ ok: true });
+});
+
 // ── Proxy de tiles OSM para o canvas do Snapshot ──────────────────────────────
 // Evita CORS: o canvas carrega via apiFetch (com auth) e recebe PNG do OSM
 app.get('/api/tiles/:z/:x/:y', (req, res) => {
