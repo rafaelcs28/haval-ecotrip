@@ -501,6 +501,7 @@
     </div>
 
     <!-- Ações remotas — conteúdo gerado por JS (initActionsPanel em app.js) -->
+    <div id="panel-stats" class="panel" style="overflow-y:auto;padding:10px 12px"></div>
     <div id="panel-actions" class="panel"></div>
 
   </div><!-- /content -->
@@ -550,7 +551,7 @@
       <!-- ── Cache local ─────────────────────────────────────────────────── -->
       <div style="background:#0C1019;border:1px solid #0F1520;border-radius:12px;padding:14px 16px;margin-bottom:16px">
         <div style="font-size:14px;font-weight:700;color:#EEF4FF;margin-bottom:12px">📱 Cache local</div>
-        <div style="display:flex;gap:8px;margin-bottom:10px">
+        <div style="display:flex;gap:8px;margin-bottom:8px">
           <button onclick="adminCacheStatus()"
             style="flex:1;background:#1e3a5f;border:none;border-radius:8px;padding:11px;color:#7FBADC;font-size:13px;cursor:pointer">
             📊 Status
@@ -560,6 +561,10 @@
             ♻️ Baixar tudo localmente
           </button>
         </div>
+        <button onclick="adminExportData()"
+          style="width:100%;background:#14532d;border:none;border-radius:8px;padding:11px;color:#4ade80;font-size:13px;cursor:pointer;margin-bottom:10px">
+          📥 Exportar dados locais (JSON)
+        </button>
         <div id="cache-status"
           style="min-height:36px;background:#0f172a;border-radius:8px;padding:8px 12px;font-size:12px;color:#94a3b8;white-space:pre-wrap;word-break:break-word">
           Toque em Status para verificar.
@@ -670,6 +675,10 @@
     <button class="tab" data-panel="auto" onclick="switchTab(this, loadAutoTrips)">
       <span class="tab-icon">🗺</span>
       <span class="tab-label">Auto</span>
+    </button>
+    <button class="tab" data-panel="stats" onclick="switchTab(this, loadStats)">
+      <span class="tab-icon">📊</span>
+      <span class="tab-label">Stats</span>
     </button>
     <button class="tab" data-panel="actions" onclick="switchTab(this)">
       <span class="tab-icon">🔧</span>

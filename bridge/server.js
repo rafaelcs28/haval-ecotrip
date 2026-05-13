@@ -596,9 +596,23 @@ app.post('/api/autotrips', (req, res) => {
         if (existing.samples && existing.samples.length > 0) finalSamples = existing.samples;
       } catch (_) {}
     }
+
+    // Calcula tempo e distância em modo híbrido (ICE ligado, rpm > 0)
+    let hybridTimeSec = 0, hybridDistKm = 0;
+    for (let i = 1; i < finalSamples.length; i++) {
+      const a = finalSamples[i - 1], b = finalSamples[i];
+      const dt = (b.t || 0) - (a.t || 0);
+      if (dt > 0 && dt < 30 && (a.rpm || 0) > 50) {
+        hybridTimeSec += dt;
+        hybridDistKm  += ((a.spd || 0) + (b.spd || 0)) / 2 / 3600 * dt;
+      }
+    }
+    hybridTimeSec = Math.round(hybridTimeSec);
+    hybridDistKm  = parseFloat(hybridDistKm.toFixed(3));
+
     fs.writeFileSync(filePath, JSON.stringify({ tripId: safeId, autoTrip, samples: finalSamples }));
 
-    const record = { tripId: safeId, ...autoTrip };
+    const record = { tripId: safeId, ...autoTrip, hybridTimeSec, hybridDistKm };
     const idx = autoTripsArr.findIndex(t => t.tripId === safeId);
     if (idx >= 0) autoTripsArr[idx] = record;
     else {

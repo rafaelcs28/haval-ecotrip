@@ -2116,6 +2116,222 @@ async function adminRedownloadCache() {
   _cacheSetStatus('✓ ' + t.trips + ' trips · ' + t.auto + ' auto · ' + t.charges + ' rec baixados', true);
 }
 
+// ── Exportar dados locais (IndexedDB → JSON download) ─────────────────────────
+async function adminExportData() {
+  _cacheSetStatus('⏳ Exportando…', null);
+  try {
+    const [trips, autotrips, charges] = await Promise.all([
+      _idbGetAll('trips'),
+      _idbGetAll('autotrips'),
+      _idbGetAll('charges'),
+    ]);
+    const data = {
+      exportedAt: new Date().toISOString(),
+      version:    1,
+      trips,
+      autotrips,
+      charges,
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = 'ecotrip-backup-' + new Date().toISOString().slice(0, 10) + '.json';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1500);
+    _cacheSetStatus('✓ Exportados: ' + trips.length + ' trips · ' + autotrips.length + ' auto · ' + charges.length + ' recargas', true);
+  } catch (e) {
+    _cacheSetStatus('❌ Erro ao exportar: ' + e.message, false);
+  }
+}
+
+// ── Stats Tab ─────────────────────────────────────────────────────────────────
+async function loadStats() {
+  const container = document.getElementById('panel-stats');
+  if (!container) return;
+  container.innerHTML = '<div class="empty" style="padding:24px">Carregando…</div>';
+
+  // Garante que o cache local está populado
+  if (!cachedAutoTrips) await syncAllCache({ silent: true });
+  const trips = (cachedAutoTrips || []).filter(t => (t.distKm || 0) > 5);
+
+  let html = '<div style="padding-bottom:12px">';
+
+  // ── 1. Recordes pessoais ─────────────────────────────────────────────────
+  html += _statsRecordsHTML(trips);
+
+  // ── 2. Comparativo semanal ───────────────────────────────────────────────
+  html += await _statsWeeklyHTML();
+
+  // ── 3. Split elétrico / híbrido ──────────────────────────────────────────
+  html += _statsElectricHTML(trips);
+
+  html += '</div>';
+  container.innerHTML = html;
+}
+
+function _statsCard(title, body) {
+  return `<div style="background:#0C1019;border:1px solid #0F1520;border-radius:12px;padding:14px 16px;margin-bottom:12px">
+    <div style="font-size:13px;font-weight:700;color:#EEF4FF;margin-bottom:12px">${title}</div>
+    ${body}
+  </div>`;
+}
+
+function _statsRow(icon, label, value, sub) {
+  return `<div style="display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid #0F1520">
+    <span style="font-size:16px;width:22px;text-align:center;flex-shrink:0">${icon}</span>
+    <div style="flex:1;min-width:0">
+      <div style="font-size:11px;color:#64748b">${label}</div>
+      ${sub ? `<div style="font-size:9px;color:#475569;margin-top:1px">${sub}</div>` : ''}
+    </div>
+    <div style="font-size:13px;font-weight:700;color:#f1f5f9;text-align:right;white-space:nowrap">${value}</div>
+  </div>`;
+}
+
+function _statsRecordsHTML(trips) {
+  if (!trips.length) return _statsCard('🏆 Recordes pessoais', '<div style="color:#475569;font-size:12px">Nenhuma viagem com mais de 5 km ainda.</div>');
+
+  const byEff = trips
+    .filter(t => t.distKm > 0 && (t.netKwh || 0) > 0)
+    .reduce((b, t) => {
+      const v = (t.netKwh || 0) / t.distKm * 100;
+      return (!b || v < ((b.netKwh || 0) / b.distKm * 100)) ? t : b;
+    }, null);
+
+  const byDist  = trips.reduce((b, t) => (!b || (t.distKm || 0) > (b.distKm || 0)) ? t : b, null);
+  const byRegen = trips.reduce((b, t) => (!b || (t.regenKwh || 0) > (b.regenKwh || 0)) ? t : b, null);
+  const byFuel  = trips.filter(t => (t.fuelL || 0) > 0.05 && (t.distKm || 0) > 0)
+    .reduce((b, t) => (!b || t.distKm / t.fuelL > b.distKm / b.fuelL) ? t : b, null);
+
+  const shortDate = ms => {
+    if (!ms) return '';
+    const d = new Date(ms);
+    return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+  };
+
+  let rows = '';
+  if (byEff)  rows += _statsRow('🏆', 'Mais eficiente',
+    f1((byEff.netKwh || 0) / byEff.distKm * 100) + ' kWh/100km',
+    shortDate(byEff.startMs) + ' · ' + f1(byEff.distKm) + ' km');
+  if (byDist) rows += _statsRow('📏', 'Mais longa',
+    f1(byDist.distKm) + ' km',
+    shortDate(byDist.startMs));
+  if (byRegen) rows += _statsRow('⚡', 'Maior regeneração',
+    f2(byRegen.regenKwh || 0) + ' kWh',
+    shortDate(byRegen.startMs) + ' · ' + f1(byRegen.distKm) + ' km');
+  if (byFuel) rows += _statsRow('⛽', 'Mais econômica',
+    f1(byFuel.distKm / byFuel.fuelL) + ' km/L',
+    shortDate(byFuel.startMs) + ' · ' + f1(byFuel.distKm) + ' km');
+  if (!rows) rows = '<div style="color:#475569;font-size:12px">Dados insuficientes.</div>';
+
+  return _statsCard('🏆 Recordes pessoais (' + trips.length + ' viagens)', rows);
+}
+
+async function _statsWeeklyHTML() {
+  let snaps = [];
+  try { snaps = await apiFetch('/api/lifetime/snapshots').then(r => r.json()); } catch (_) {}
+  if (!snaps.length) return _statsCard('📅 Comparativo semanal', '<div style="color:#475569;font-size:12px">Snapshots insuficientes.</div>');
+
+  // Segunda-feira às 00:00 local
+  function mondayMs(refMs) {
+    const d = new Date(refMs);
+    d.setHours(0, 0, 0, 0);
+    const day = d.getDay();
+    d.setDate(d.getDate() - (day === 0 ? 6 : day - 1));
+    return d.getTime();
+  }
+  const thisMon  = mondayMs(Date.now());
+  const lastMon  = thisMon - 7 * 86400000;
+
+  const snapBefore = ts => {
+    const arr = snaps.filter(s => s.ts < ts);
+    return arr.length ? arr[arr.length - 1] : null;
+  };
+  const latest      = snaps[snaps.length - 1];
+  const atThisMon   = snapBefore(thisMon);
+  const atLastMon   = snapBefore(lastMon);
+
+  function deltaRow(icon, label, a, b, field, unit, deci) {
+    if (!a || !b) return '';
+    const val = ((b[field] || 0) - (a[field] || 0));
+    if (val < 0) return '';
+    return `<div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid #0F1520">
+      <span style="font-size:11px;color:#64748b">${icon} ${label}</span>
+      <span style="font-size:12px;font-weight:700;color:#f1f5f9">${val.toFixed(deci)} ${unit}</span>
+    </div>`;
+  }
+
+  function weekCol(title, from, to) {
+    if (!from || !to) return `<div style="flex:1"><div style="font-size:10px;font-weight:700;color:#64748b;margin-bottom:6px">${title}</div><div style="font-size:11px;color:#475569">sem dados</div></div>`;
+    const km  = Math.max(0, (to.distance_km || 0) - (from.distance_km || 0));
+    const net = Math.max(0, (to.net_kwh     || 0) - (from.net_kwh     || 0));
+    const ren = Math.max(0, (to.regen_kwh   || 0) - (from.regen_kwh   || 0));
+    const fue = Math.max(0, (to.fuel_l      || 0) - (from.fuel_l      || 0));
+    const eff = km > 0.5 ? (net / km * 100) : 0;
+    return `<div style="flex:1">
+      <div style="font-size:10px;font-weight:700;color:#94a3b8;margin-bottom:6px">${title}</div>
+      <div style="font-size:18px;font-weight:800;color:#60a5fa;line-height:1">${km.toFixed(1)}</div>
+      <div style="font-size:9px;color:#475569;margin-bottom:6px">km</div>
+      <div style="font-size:11px;color:#4ade80">${net.toFixed(1)} kWh</div>
+      ${ren > 0.1 ? `<div style="font-size:10px;color:#39FF88">↩ ${ren.toFixed(1)} kWh regen</div>` : ''}
+      ${fue > 0.05 ? `<div style="font-size:11px;color:#fb923c">${fue.toFixed(2)} L</div>` : ''}
+      ${eff > 0 ? `<div style="font-size:10px;color:#94a3b8">${eff.toFixed(1)} kWh/100km</div>` : ''}
+    </div>`;
+  }
+
+  const body = `<div style="display:flex;gap:16px">
+    ${weekCol('Esta semana', atThisMon, latest)}
+    <div style="width:1px;background:#0F1520;flex-shrink:0"></div>
+    ${weekCol('Semana passada', atLastMon, atThisMon)}
+  </div>`;
+
+  return _statsCard('📅 Comparativo semanal', body);
+}
+
+function _statsElectricHTML(trips) {
+  const tripsWithData = trips.filter(t => t.hybridTimeSec !== undefined && (t.distKm || 0) > 0);
+  if (!tripsWithData.length) {
+    return _statsCard('⚡ Split elétrico / híbrido',
+      '<div style="color:#475569;font-size:12px">Dados disponíveis em viagens registradas a partir de agora. Cada nova viagem calculará automaticamente o tempo em modo elétrico vs híbrido.</div>');
+  }
+
+  const totalDist    = tripsWithData.reduce((s, t) => s + (t.distKm || 0), 0);
+  const totalHybrid  = tripsWithData.reduce((s, t) => s + (t.hybridDistKm || 0), 0);
+  const totalElec    = Math.max(0, totalDist - totalHybrid);
+  const elecPct      = totalDist > 0 ? Math.round(totalElec / totalDist * 100) : 0;
+  const hybPct       = 100 - elecPct;
+
+  const bar = `<div style="height:10px;background:#0F1C2E;border-radius:5px;overflow:hidden;margin:8px 0">
+    <div style="height:100%;width:${elecPct}%;background:linear-gradient(90deg,#39FF88,#4ade80);border-radius:5px 0 0 5px;display:inline-block"></div>
+  </div>
+  <div style="display:flex;justify-content:space-between;font-size:10px;color:#64748b;margin-bottom:10px">
+    <span style="color:#4ade80">⚡ ${elecPct}% elétrico</span>
+    <span style="color:#fb923c">🔥 ${hybPct}% híbrido</span>
+  </div>`;
+
+  const summary = `<div style="font-size:12px;color:#94a3b8;margin-bottom:10px">
+    ${tripsWithData.length} viagens · ${totalDist.toFixed(1)} km totais ·
+    ${totalElec.toFixed(1)} km elétrico · ${totalHybrid.toFixed(1)} km híbrido
+  </div>`;
+
+  // Últimas 5 viagens com split
+  let rows = '<div style="font-size:11px;color:#475569;margin-bottom:4px">Últimas viagens:</div>';
+  tripsWithData.slice(0, 5).forEach(t => {
+    const hyb = t.hybridDistKm || 0;
+    const elc = Math.max(0, t.distKm - hyb);
+    const ep  = t.distKm > 0 ? Math.round(elc / t.distKm * 100) : 0;
+    const d   = new Date(t.startMs || 0);
+    const dt  = d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+    rows += `<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid #0F1520">
+      <span style="font-size:11px;color:#64748b">${dt} · ${f1(t.distKm)} km</span>
+      <span style="font-size:12px;font-weight:700;color:${ep > 70 ? '#4ade80' : ep > 40 ? '#60a5fa' : '#fb923c'}">⚡ ${ep}%</span>
+    </div>`;
+  });
+
+  return _statsCard('⚡ Split elétrico / híbrido', bar + summary + rows);
+}
+
 function adminLogout() {
   localStorage.removeItem('bridge_token');
   bridgeToken = '';
