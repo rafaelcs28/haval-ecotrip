@@ -367,6 +367,9 @@
     <!-- Ações remotas — conteúdo gerado por JS (initActionsPanel em app.js) -->
     <div id="panel-stats" class="panel" style="overflow-y:auto;padding:10px 12px"></div>
     <div id="panel-actions" class="panel"></div>
+    <div id="panel-logs" class="panel">
+      <div id="logs-list" class="trip-list" style="padding:8px 12px"></div>
+    </div>
 
   </div><!-- /content -->
 
@@ -630,6 +633,10 @@
     <button class="tab" data-panel="actions" onclick="switchTab(this)">
       <span class="tab-icon">🔧</span>
       <span class="tab-label">Ações</span>
+    </button>
+    <button class="tab" data-panel="logs" onclick="switchTab(this, loadLogs)">
+      <span class="tab-icon">📋</span>
+      <span class="tab-label">Logs</span>
     </button>
     <button class="tab" data-panel="admin" onclick="switchTab(this)">
       <span class="tab-icon">⚙️</span>

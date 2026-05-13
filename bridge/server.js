@@ -40,6 +40,7 @@ const RENAMES_FILE      = path.join(__dirname, 'pending_renames.json');
 const CHARGE_LOCS_FILE    = path.join(__dirname, 'charge_locations.json');
 const NOTIF_PREFS_FILE    = path.join(__dirname, 'notif_prefs.json');
 const NOTIF_HISTORY_FILE  = path.join(__dirname, 'notif_history.json');
+const EVENTS_FILE         = path.join(__dirname, 'events.json');
 
 if (!fs.existsSync(AUTOTRIPS_DIR)) fs.mkdirSync(AUTOTRIPS_DIR, { recursive: true });
 
@@ -147,6 +148,11 @@ let haSocActive = false;
 let prevEngineState = null;
 const prevDoorStates = { fl: null, fr: null, rl: null, rr: null, trunk: null };
 const DOOR_NAMES = { fl: 'Dianteira esq.', fr: 'Dianteira dir.', rl: 'Traseira esq.', rr: 'Traseira dir.' };
+const WIN_NAMES  = { fl: 'Vidro diant. esq.', fr: 'Vidro diant. dir.', rl: 'Vidro tras. esq.', rr: 'Vidro tras. dir.' };
+const prevWindowStates = { fl: null, fr: null, rl: null, rr: null };
+let prevLockState   = null;
+let prevSunroof     = null;
+let prevGearForTrip = null;
 
 // ── Alerta de pressão de pneus ────────────────────────────────────────────────
 // Os valores chegam diretamente em PSI (sem conversão necessária)
@@ -240,6 +246,33 @@ try {
   });
   if (purged > 0) console.log(`🗑  Auto-trips irrelevantes removidos: ${purged}`);
 } catch (e) { console.error('Aviso: erro ao carregar auto-trips:', e.message); }
+
+// ── Log de eventos ────────────────────────────────────────────────────────────
+const MAX_EVENTS = 2000;
+let eventsLog = [];
+try {
+  if (fs.existsSync(EVENTS_FILE)) {
+    const _ev = JSON.parse(fs.readFileSync(EVENTS_FILE, 'utf8'));
+    eventsLog = Array.isArray(_ev) ? _ev : [];
+    console.log(`✓ Eventos carregados: ${eventsLog.length}`);
+  }
+} catch(e) { console.error('Aviso: não foi possível ler events.json:', e.message); }
+
+let _saveEventsTimer = null;
+function _saveEventsSoon() {
+  clearTimeout(_saveEventsTimer);
+  _saveEventsTimer = setTimeout(() => {
+    fs.writeFile(EVENTS_FILE, JSON.stringify(eventsLog), () => {});
+  }, 2000);
+}
+
+function addEvent(type, label) {
+  const ev = { id: Date.now(), ts: Date.now(), type, label };
+  eventsLog.unshift(ev);
+  if (eventsLog.length > MAX_EVENTS) eventsLog.pop();
+  _saveEventsSoon();
+  broadcast('new_event', ev);
+}
 
 // ── Estado em memória (espelha todos os tópicos MQTT) ─────────────────────────
 // Valores iniciais = defaults. Serão sobrescritos pelo state.json persistido
@@ -912,6 +945,7 @@ app.post('/api/autotrips', (req, res) => {
       startMs: autoTrip.startMs || 0,
       distKm:  autoTrip.distKm  || 0,
     });
+    addEvent('trip_end', `Viagem concluída: ${(autoTrip.distKm||0).toFixed(1)} km`);
     // Push: viagem concluída (só se >1 km OU >3 min)
     if (notifPrefs.trip_end) {
       const distKm = autoTrip.distKm  || 0;
@@ -1300,6 +1334,12 @@ app.post('/api/action/:name', (req, res) => {
   });
 });
 
+app.get('/api/events', requireAuth, (req, res) => {
+  const since = parseInt(req.query.since || '0', 10);
+  let result  = since > 0 ? eventsLog.filter(e => e.ts > since) : eventsLog;
+  res.json(result.slice(0, 1000));
+});
+
 // ── WebSocket ─────────────────────────────────────────────────────────────────
 
 const clients       = new Set();
@@ -1403,14 +1443,26 @@ function applyMqttMessage(key, value, isRetained = false) {
       state.engine_state = value;
       prevEngineState    = value;
       if (!isRetained && prevEng !== null) {
-        if (value === '1' && prevEng !== '1' && notifPrefs.engine_on)
-          sendPush('🔑 Motor ligado', 'O veículo foi ligado.');
-        else if (value === '0' && prevEng !== '0' && notifPrefs.engine_off)
-          sendPush('🔑 Motor desligado', 'O veículo foi desligado.');
+        if (value === '1' && prevEng !== '1') {
+          if (notifPrefs.engine_on) sendPush('🔑 Motor ligado', 'O veículo foi ligado.');
+          addEvent('engine_on', 'Motor ligado');
+        } else if (value === '0' && prevEng !== '0') {
+          if (notifPrefs.engine_off) sendPush('🔑 Motor desligado', 'O veículo foi desligado.');
+          addEvent('engine_off', 'Motor desligado');
+        }
       }
       break;
     }
-    case 'lock_state':   state.lock_state   = value; break;   // 'off' | 'on'
+    case 'lock_state': {
+      const prevL = prevLockState;
+      state.lock_state = value;
+      prevLockState = value;
+      if (!isRetained && prevL !== null && prevL !== value) {
+        if (value === 'on')  addEvent('lock_open',  'Carro destrancado');
+        if (value === 'off') addEvent('lock_close', 'Carro trancado');
+      }
+      break;
+    }
     case 'high_beam':    state.high_beam    = value; break;   // 'on' | 'off'
     case 'light_state':  state.light_state  = value; break;   // 'on' | 'off' (farol)
     case 'ac_state':     state.ac_state     = value; break;   // 'on' | 'off'
@@ -1424,10 +1476,13 @@ function applyMqttMessage(key, value, isRetained = false) {
       prevDoorStates[side] = value;
       if (!isRetained && prevD !== null && prevD !== value) {
         const label = DOOR_NAMES[side] || side.toUpperCase();
-        if (value === 'on'  && notifPrefs.door_open)
-          sendPush('🚪 Porta aberta',  label);
-        else if (value === 'off' && notifPrefs.door_close)
-          sendPush('🚪 Porta fechada', label);
+        if (value === 'on') {
+          if (notifPrefs.door_open) sendPush('🚪 Porta aberta', label);
+          addEvent('door_open', label + ' aberta');
+        } else if (value === 'off') {
+          if (notifPrefs.door_close) sendPush('🚪 Porta fechada', label);
+          addEvent('door_close', label + ' fechada');
+        }
       }
       break;
     }
@@ -1436,18 +1491,43 @@ function applyMqttMessage(key, value, isRetained = false) {
       state.door_trunk        = value;
       prevDoorStates.trunk    = value;
       if (!isRetained && prevT !== null && prevT !== value) {
-        if (value === 'on'  && notifPrefs.trunk_open)
-          sendPush('🧳 Porta-malas aberta',  'Verifique se está segura.');
-        else if (value === 'off' && notifPrefs.trunk_close)
-          sendPush('🧳 Porta-malas fechada', 'Porta-malas foi fechada.');
+        if (value === 'on') {
+          if (notifPrefs.trunk_open) sendPush('🧳 Porta-malas aberta', 'Verifique se está segura.');
+          addEvent('trunk_open', 'Porta-malas aberta');
+        } else if (value === 'off') {
+          if (notifPrefs.trunk_close) sendPush('🧳 Porta-malas fechada', 'Porta-malas foi fechada.');
+          addEvent('trunk_close', 'Porta-malas fechada');
+        }
       }
       break;
     }
-    case 'sunroof':      state.sunroof      = value; break;   // '3'=fechado
-    case 'window_fl':    state.window_fl    = value; break;   // '1'|'2'|'3'
-    case 'window_fr':    state.window_fr    = value; break;
-    case 'window_rl':    state.window_rl    = value; break;
-    case 'window_rr':    state.window_rr    = value; break;
+    case 'sunroof': {
+      const prevS = prevSunroof;
+      state.sunroof = value;
+      prevSunroof = value;
+      if (!isRetained && prevS !== null && prevS !== value) {
+        const closed = value === '3';
+        addEvent(closed ? 'sunroof_close' : 'sunroof_open',
+                 closed ? 'Teto solar fechado' : 'Teto solar aberto');
+      }
+      break;
+    }
+    case 'window_fl':
+    case 'window_fr':
+    case 'window_rl':
+    case 'window_rr': {
+      const wside = key.slice(7);
+      const prevW = prevWindowStates[wside];
+      state[key] = value;
+      prevWindowStates[wside] = value;
+      if (!isRetained && prevW !== null && prevW !== value) {
+        const wlabel = WIN_NAMES[wside] || wside.toUpperCase();
+        const closed = value === '1';
+        addEvent(closed ? 'window_close' : 'window_open',
+                 closed ? wlabel + ' fechado' : wlabel + ' aberto');
+      }
+      break;
+    }
     case 'tyre_pressure_fl': { state.tyre_pressure_fl = num(value); checkTyrePressure('FL', num(value), isRetained); break; }
     case 'tyre_pressure_fr': { state.tyre_pressure_fr = num(value); checkTyrePressure('FR', num(value), isRetained); break; }
     case 'tyre_pressure_rl': { state.tyre_pressure_rl = num(value); checkTyrePressure('RL', num(value), isRetained); break; }
@@ -1471,7 +1551,17 @@ function applyMqttMessage(key, value, isRetained = false) {
 
     // Telemetria ao vivo
     case 'speed_kmh':         state.speed_kmh          = num(value); break;
-    case 'gear':              state.gear               = value || '--'; break;
+    case 'gear': {
+      const prevG = prevGearForTrip;
+      state.gear = value || '--';
+      prevGearForTrip = value;
+      if (!isRetained && prevG !== null && prevG !== value) {
+        const wasParked  = prevG === 'P';
+        const nowDriving = value === 'D' || value === 'R' || value === 'N';
+        if (wasParked && nowDriving) addEvent('trip_start', 'Viagem iniciada');
+      }
+      break;
+    }
     case 'inside_temp':       state.inside_temp        = num(value); break;
     case 'outside_temp':      state.outside_temp       = num(value); break;
     case 'charging_state': {

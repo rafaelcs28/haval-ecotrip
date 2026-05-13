@@ -145,7 +145,11 @@ html, body {
   flex-shrink: 0;
   /* altura auto pelo conteúdo; safe area só em baixo */
   padding-bottom: var(--safe-bot);
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
 }
+#tab-bar::-webkit-scrollbar { display: none; }
 
 .tab {
   flex: 1;
@@ -161,7 +165,7 @@ html, body {
   border: none;
   background: none;
   padding: 0 2px;
-  min-width: 0;                  /* permite flex encolher sem overflow */
+  min-width: 52px;               /* não encolhe abaixo de 52px quando barra rola */
   overflow: hidden;
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
@@ -862,4 +866,24 @@ html, body {
   font-size: 12px;
   color: var(--muted);
   opacity: .6;
+}
+
+/* ── Log de eventos ─────────────────────────────────────────────────────────── */
+.log-entry {
+  display: flex;
+  align-items: center;
+  padding: 7px 4px;
+  border-bottom: 1px solid #1a2336;
+  gap: 8px;
+}
+.log-icon { font-size: 16px; width: 22px; text-align: center; flex-shrink: 0; }
+.log-label { flex: 1; font-size: 13px; color: #c8d8e8; }
+.log-time { font-size: 11px; color: #5B7394; flex-shrink: 0; font-variant-numeric: tabular-nums; }
+.log-day-header {
+  font-size: 11px;
+  font-weight: 600;
+  color: #5B7394;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 10px 4px 4px;
 }

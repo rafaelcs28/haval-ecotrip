@@ -749,6 +749,12 @@ function connect() {
             }
           }
         });
+      } else if (msg.type === 'new_event') {
+        if (cachedEvents) {
+          cachedEvents.unshift(msg.data);
+          if (cachedEvents.length > 2000) cachedEvents.pop();
+          if (activePanel === 'logs') renderLogs();
+        }
       }
     } catch (e) { console.error('WS parse error', e); }
   };
@@ -878,8 +884,10 @@ const filterState = {
   charges: { active: 'all', customFrom: '', customTo: '' },
   hist:    { active: 'all', customFrom: '', customTo: '', search: '' },
   auto:    { active: 'all', customFrom: '', customTo: '', search: '' },
+  logs:    { active: 'all', type: 'all', customFrom: '', customTo: '' },
 };
 let cachedCharges = null;
+let cachedEvents  = null;
 let cachedTrips   = null;
 let _knownLocations    = [];
 let _locPickerTs       = 0;
@@ -1628,6 +1636,130 @@ function renderCharges() {
   }).join('');
 
   list.innerHTML = html;
+}
+
+// ── Logs de eventos ───────────────────────────────────────────────────────────
+const LOG_TYPE_GROUPS = {
+  all:     [],
+  engine:  ['engine_on','engine_off'],
+  lock:    ['lock_open','lock_close'],
+  doors:   ['door_open','door_close'],
+  trunk:   ['trunk_open','trunk_close'],
+  windows: ['window_open','window_close','sunroof_open','sunroof_close'],
+  trips:   ['trip_start','trip_end'],
+};
+const LOG_TYPE_LABELS = {
+  all: 'Todos', engine: 'Motor', lock: 'Travas',
+  doors: 'Portas', trunk: 'Mala', windows: 'Vidros', trips: 'Viagens',
+};
+const LOG_ICONS = {
+  engine_on: '🔑', engine_off: '🔑',
+  lock_open: '🔓', lock_close: '🔒',
+  door_open: '🚪', door_close: '🚪',
+  trunk_open: '🧳', trunk_close: '🧳',
+  window_open: '🪟', window_close: '🪟',
+  sunroof_open: '☀️', sunroof_close: '🌙',
+  trip_start: '🚗', trip_end: '🏁',
+};
+
+function loadLogs() {
+  filterState.logs.active = 'all';
+  filterState.logs.type   = 'all';
+  const list = document.getElementById('logs-list');
+  if (!list) return;
+  if (cachedEvents) renderLogs();
+  else list.innerHTML = '<div class="empty">Carregando…</div>';
+  apiFetch('/api/events')
+    .then(r => r.json())
+    .then(data => {
+      if (!Array.isArray(data)) return;
+      cachedEvents = data;
+      renderLogs();
+    })
+    .catch(() => {
+      if (!cachedEvents) list.innerHTML = '<div class="empty">Erro ao carregar.</div>';
+    });
+}
+
+function renderLogs() {
+  const list = document.getElementById('logs-list');
+  if (!list || !cachedEvents) return;
+
+  const f       = filterState.logs;
+  const typeGrp = LOG_TYPE_GROUPS[f.type] || [];
+  const today   = new Date(); today.setHours(0,0,0,0);
+  const nowMs   = Date.now();
+
+  // Date range
+  let fromMs = 0, toMs = Infinity;
+  if (f.active === 'today')    { fromMs = today.getTime(); }
+  else if (f.active === '7d')  { fromMs = nowMs - 7*86400000; }
+  else if (f.active === '30d') { fromMs = nowMs - 30*86400000; }
+  else if (f.active === 'month') {
+    const m = new Date(); m.setDate(1); m.setHours(0,0,0,0);
+    fromMs = m.getTime();
+  } else if (f.active === 'custom') {
+    if (f.customFrom) fromMs = new Date(f.customFrom).getTime();
+    if (f.customTo)   toMs   = new Date(f.customTo).getTime() + 86400000 - 1;
+  }
+
+  const filtered = cachedEvents.filter(ev => {
+    if (ev.ts < fromMs || ev.ts > toMs) return false;
+    if (typeGrp.length && !typeGrp.includes(ev.type)) return false;
+    return true;
+  });
+
+  // Type filter chips
+  const typeKeys = Object.keys(LOG_TYPE_LABELS);
+  let chipsHtml = '<div class="filter-chips" style="margin-bottom:4px">';
+  typeKeys.forEach(k => {
+    chipsHtml += `<button class="chip ${f.type===k?'active':''}" onclick="setLogsTypeFilter('${k}')">${LOG_TYPE_LABELS[k]}</button>`;
+  });
+  chipsHtml += '</div>';
+
+  // Date chips
+  const dateOpts = [['all','Todos'],['today','Hoje'],['7d','7 dias'],['30d','30 dias'],['month','Mês']];
+  let dateChips = '<div class="filter-chips" style="margin-bottom:6px">';
+  dateOpts.forEach(([k,l]) => {
+    dateChips += `<button class="chip ${f.active===k?'active':''}" onclick="setLogsDateFilter('${k}')">${l}</button>`;
+  });
+  dateChips += '</div>';
+
+  if (!filtered.length) {
+    list.innerHTML = chipsHtml + dateChips + '<div class="empty">Nenhum evento.</div>';
+    return;
+  }
+
+  let html = chipsHtml + dateChips;
+
+  // Group by day
+  let lastDay = '';
+  filtered.forEach(ev => {
+    const d = new Date(ev.ts);
+    const dayStr = d.toLocaleDateString('pt-BR', { day:'2-digit', month:'2-digit', year:'numeric' });
+    if (dayStr !== lastDay) {
+      html += `<div class="log-day-header">${dayStr}</div>`;
+      lastDay = dayStr;
+    }
+    const timeStr = d.toLocaleTimeString('pt-BR', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+    const icon = LOG_ICONS[ev.type] || '•';
+    html += `<div class="log-entry">
+      <span class="log-icon">${icon}</span>
+      <span class="log-label">${ev.label}</span>
+      <span class="log-time">${timeStr}</span>
+    </div>`;
+  });
+
+  list.innerHTML = html;
+}
+
+function setLogsTypeFilter(type) {
+  filterState.logs.type = type;
+  renderLogs();
+}
+function setLogsDateFilter(filter) {
+  filterState.logs.active = filter;
+  renderLogs();
 }
 
 // ── Histórico ─────────────────────────────────────────────────────────────────
