@@ -1136,7 +1136,7 @@ function renderCarVersion() {
   const el = document.getElementById('car-version-badge');
   if (!el) return;
   const v = state.car_app_version;
-  if (v) { el.textContent = 'carro v' + v; el.classList.add('visible'); }
+  if (v) { el.textContent = 'v' + v; el.classList.add('visible'); }
   else   { el.classList.remove('visible'); }
 }
 
