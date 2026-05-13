@@ -3131,7 +3131,16 @@ function _statsRecordsHTML(trips) {
     }, null);
 
   const byDist  = trips.reduce((b, t) => (!b || (t.distKm || 0) > (b.distKm || 0)) ? t : b, null);
-  const byRegen = trips.reduce((b, t) => (!b || (t.regenKwh || 0) > (b.regenKwh || 0)) ? t : b, null);
+
+  // Maior regeneração: só viagens 100% elétricas (fuelL ≈ 0) com > 5 km
+  // Métrica: regenKwh / energyKwh (bruto) — melhor quem regenerou mais proporcionalmente
+  const byRegen = trips
+    .filter(t => (t.fuelL || 0) < 0.05 && (t.distKm || 0) > 5 && (t.energyKwh || 0) > 0)
+    .reduce((b, t) => {
+      const pct = (t.regenKwh || 0) / t.energyKwh;
+      return (!b || pct > (b.regenKwh || 0) / b.energyKwh) ? t : b;
+    }, null);
+
   const byFuel  = trips.filter(t => (t.fuelL || 0) > 0.05 && (t.distKm || 0) > 0)
     .reduce((b, t) => (!b || t.distKm / t.fuelL > b.distKm / b.fuelL) ? t : b, null);
 
@@ -3148,9 +3157,12 @@ function _statsRecordsHTML(trips) {
   if (byDist) rows += _statsRow('📏', 'Mais longa',
     f1(byDist.distKm) + ' km',
     shortDate(byDist.startMs));
-  if (byRegen) rows += _statsRow('⚡', 'Maior regeneração',
-    f2(byRegen.regenKwh || 0) + ' kWh',
-    shortDate(byRegen.startMs) + ' · ' + f1(byRegen.distKm) + ' km');
+  if (byRegen) {
+    const regenPct = Math.round((byRegen.regenKwh || 0) / byRegen.energyKwh * 100);
+    rows += _statsRow('⚡', 'Maior regeneração',
+      regenPct + '% do bruto',
+      shortDate(byRegen.startMs) + ' · ' + f1(byRegen.distKm) + ' km · ' + f2(byRegen.regenKwh) + ' kWh');
+  }
   if (byFuel) rows += _statsRow('⛽', 'Mais econômica',
     f1(byFuel.distKm / byFuel.fuelL) + ' km/L',
     shortDate(byFuel.startMs) + ' · ' + f1(byFuel.distKm) + ' km');
