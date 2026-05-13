@@ -109,60 +109,45 @@ fun TripCard(
 
         Spacer(Modifier.height(4.dp))
 
-        // ── Métricas (cresce para ocupar espaço disponível) ───────────────────
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
+        // ── Métricas — sequência: SOC · Energia · Combustível · km/L eq · kWh/100km · Custo · R$/km ──
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            // ── Energia ───────────────────────────────────────────────────────
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(3.dp),
-            ) {
-                TColTitle("⚡ Energia")
-                TMetric("Bruto",   "%.2f kWh".format(snapshot.energyKwh), TextPrimary)
-                TRegenMetric(snapshot.regenKwh, snapshot.energyKwh)
-                TMetric("Líquido", "%.2f kWh".format(snapshot.netKwh),     WarnYellow)
-                if (snapshot.startSocPct > 0f || snapshot.currentSocPct > 0f)
-                    TMetric("SOC", "%.0f%% → %.0f%%".format(snapshot.startSocPct, snapshot.currentSocPct), TextPrimary)
-            }
+            // SOC
+            if (snapshot.startSocPct > 0f || snapshot.currentSocPct > 0f)
+                TMetric("SOC", "%.0f%% → %.0f%%".format(snapshot.startSocPct, snapshot.currentSocPct), TextPrimary)
 
-            // ── Gauge kWh/100km ───────────────────────────────────────────────
-            Box(modifier = Modifier.weight(1.2f), contentAlignment = Alignment.Center) {
-                TripGauge(
-                    value    = snapshot.kwhPer100km,
-                    maxValue = 40f,
-                    label    = "kWh/100km",
-                    color    = accentColor,
-                    modifier = Modifier.size(118.dp),
-                )
-            }
+            // Energia
+            TColTitle("⚡ Energia")
+            TMetric("Bruto",   "%.2f kWh".format(snapshot.energyKwh), TextPrimary)
+            TRegenMetric(snapshot.regenKwh, snapshot.energyKwh)
+            TMetric("Líquido", "%.2f kWh".format(snapshot.netKwh), WarnYellow)
 
-            // ── Combustível ───────────────────────────────────────────────────
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(3.dp),
-            ) {
-                TColTitle("⛽ Combustível")
-                if (snapshot.combinedKmL > 0f)
-                    TMetric("km/L eq",  "%.2f".format(snapshot.combinedKmL), AuroraTeal)
-                else if (snapshot.kmPerL > 0f)
-                    TMetric("km/L",     "%.2f".format(snapshot.kmPerL),      MoltenOrange)
-                TMetric("Gastos", "%.2f L".format(snapshot.fuelL), TextPrimary)
-                if (snapshot.startTankL > 0f || snapshot.currentTankL > 0f)
-                    TMetric("Tanque", "%.1fL→%.1fL".format(snapshot.startTankL, snapshot.currentTankL), TextPrimary)
-                if (snapshot.costBrl > 0.01f) {
-                    TMetric("💰 Custo", "R$ %.2f".format(snapshot.costBrl), WarnYellow)
-                    if (snapshot.costPerKm > 0f)
-                        TMetric("R$/km", "%.3f".format(snapshot.costPerKm), WarnYellow.copy(alpha = 0.8f))
-                }
+            // Combustível
+            TColTitle("⛽ Combustível")
+            TMetric("Gastos", "%.2f L".format(snapshot.fuelL), TextPrimary)
+            if (snapshot.startTankL > 0f || snapshot.currentTankL > 0f)
+                TMetric("Tanque", "%.1fL→%.1fL".format(snapshot.startTankL, snapshot.currentTankL), TextPrimary)
+
+            // km/L eq
+            if (snapshot.combinedKmL > 0f)
+                TMetric("km/L eq", "%.2f".format(snapshot.combinedKmL), AuroraTeal)
+            else if (snapshot.kmPerL > 0f)
+                TMetric("km/L", "%.2f".format(snapshot.kmPerL), MoltenOrange)
+
+            // kWh/100km
+            TMetric("kWh/100km", "%.1f".format(snapshot.kwhPer100km), accentColor)
+
+            // Custo total + R$/km
+            if (snapshot.costBrl > 0.01f) {
+                TMetric("💰 Custo total", "R$ %.2f".format(snapshot.costBrl), WarnYellow)
+                if (snapshot.costPerKm > 0f)
+                    TMetric("R$/km", "%.3f".format(snapshot.costPerKm), WarnYellow.copy(alpha = 0.8f))
             }
         }
 
-        Spacer(Modifier.height(3.dp))
+        Spacer(Modifier.weight(1f))
 
         // ── Gráfico (altura fixa — sempre visível) ────────────────────────────
         Box(

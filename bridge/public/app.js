@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_BUILD = 'b160';   // bump a cada deploy para confirmar versão no admin
+const APP_BUILD = 'b161';   // bump a cada deploy para confirmar versão no admin
 
 // ── Estado local ──────────────────────────────────────────────────────────────
 let state = {};
@@ -2316,12 +2316,16 @@ function renderSpeedBands(samples) {
   for (const band of bands) {
     if (band.distKm < 0.05) continue;
     const kwh100 = band.distKm > 0 ? (band.kwhPos / band.distKm * 100).toFixed(1) : '—';
+    const eqKmL  = band.distKm > 0 && band.kwhPos > 0
+      ? (band.distKm / (band.kwhPos / 8.9)).toFixed(1) : '—';
     const pct = Math.round(band.distKm / totalDist * 100);
     inner += `<div style="flex:1;background:#0f172a;border:1px solid #1e293b;border-radius:10px;padding:10px 8px;text-align:center">
   <div style="font-size:22px;margin-bottom:4px">${band.icon}</div>
   <div style="font-size:10px;color:#475569;margin-bottom:8px;line-height:1.2">${band.label}</div>
   <div style="font-size:20px;font-weight:700;color:#4ade80">${kwh100}</div>
-  <div style="font-size:9px;color:#64748b;margin-bottom:4px">kWh/100km</div>
+  <div style="font-size:9px;color:#64748b;margin-bottom:6px">kWh/100km</div>
+  <div style="font-size:17px;font-weight:700;color:#22d3ee">${eqKmL}</div>
+  <div style="font-size:9px;color:#64748b;margin-bottom:4px">km/L eq</div>
   <div style="font-size:9px;color:#334155">${band.distKm.toFixed(1)} km · ${pct}%</div>
 </div>`;
   }
