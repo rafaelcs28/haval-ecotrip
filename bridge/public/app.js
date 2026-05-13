@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_BUILD = 'b162';   // bump a cada deploy para confirmar versão no admin
+const APP_BUILD = 'b163';   // bump a cada deploy para confirmar versão no admin
 
 // ── Estado local ──────────────────────────────────────────────────────────────
 let state = {};
@@ -2450,11 +2450,14 @@ function _drawBands(ctx, samples, x, y, w) {
     return;
   }
   const BAR_X   = x + 106;
-  const BAR_MAX = Math.floor(w * 0.41);
+  const BAR_MAX = Math.floor(w * 0.38);
   const ROW_H   = 36;
+  const xKwh    = x + w - 68;  // kWh/100km — coluna esquerda da direita
+  const xKmL    = x + w;       // km/L eq   — borda direita
   for (const band of bands) {
-    const pct     = Math.round(band.distKm / totalDist * 100);
-    const kwh100  = band.distKm > 0.01 ? band.kwhPos / band.distKm * 100 : 0;
+    const pct    = Math.round(band.distKm / totalDist * 100);
+    const kwh100 = band.distKm > 0.01 ? band.kwhPos / band.distKm * 100 : 0;
+    const eqKmL  = band.distKm > 0.01 && band.kwhPos > 0.001 ? band.distKm / (band.kwhPos / 8.9) : 0;
     const barFill = Math.round(BAR_MAX * pct / 100);
     // Icon + label
     ctx.font = '14px system-ui, sans-serif'; ctx.fillStyle = '#e2e8f0'; ctx.textAlign = 'left';
@@ -2466,11 +2469,16 @@ function _drawBands(ctx, samples, x, y, w) {
     if (barFill > 0) { ctx.fillStyle = '#22d3ee'; ctx.fillRect(BAR_X, y + 7, barFill, 5); }
     ctx.font = '8px system-ui, sans-serif'; ctx.fillStyle = '#475569'; ctx.textAlign = 'left';
     ctx.fillText(`${band.distKm.toFixed(1)} km · ${pct}%`, BAR_X, y + 20);
-    // kWh/100km value (right)
-    ctx.font = 'bold 16px system-ui, sans-serif'; ctx.fillStyle = '#4ade80'; ctx.textAlign = 'right';
-    ctx.fillText(kwh100 > 0 ? kwh100.toFixed(1) : '—', x + w, y + 2);
+    // kWh/100km (coluna esquerda da direita)
+    ctx.font = 'bold 14px system-ui, sans-serif'; ctx.fillStyle = '#4ade80'; ctx.textAlign = 'right';
+    ctx.fillText(kwh100 > 0 ? kwh100.toFixed(1) : '—', xKwh, y + 2);
     ctx.font = '8px system-ui, sans-serif'; ctx.fillStyle = '#64748b';
-    ctx.fillText('kWh/100km', x + w, y + 21);
+    ctx.fillText('kWh/100km', xKwh, y + 19);
+    // km/L eq (borda direita)
+    ctx.font = 'bold 14px system-ui, sans-serif'; ctx.fillStyle = '#22d3ee'; ctx.textAlign = 'right';
+    ctx.fillText(eqKmL > 0 ? eqKmL.toFixed(1) : '—', xKmL, y + 2);
+    ctx.font = '8px system-ui, sans-serif'; ctx.fillStyle = '#64748b';
+    ctx.fillText('km/L eq', xKmL, y + 19);
     y += ROW_H;
   }
 }
@@ -2554,24 +2562,29 @@ async function shareTripCard(tripId) {
     y += VPAD + H_DIV + VPAD;
 
     const { gas: priceGas, kwh: priceKwh } = getPrices();
-    const kwh100 = trip.distKm > 0.1 && (trip.netKwh || 0) > 0
-      ? (trip.netKwh / trip.distKm * 100).toFixed(1) : '—';
-    const kmL  = (trip.fuelL || 0) > 0.01 ? (trip.distKm / trip.fuelL).toFixed(1) : '—';
-    const cost = (trip.fuelL || 0) * priceGas + (trip.netKwh || 0) * priceKwh;
+    const _dist  = trip.distKm  || 0;
+    const _net   = trip.netKwh  || 0;
+    const _fuel  = trip.fuelL   || 0;
+    const kwh100 = _dist > 0.1 && _net > 0 ? (_net / _dist * 100).toFixed(1) : '—';
+    const eqDen  = _net / 8.9 + _fuel;
+    const eqKmL  = _dist > 0.1 && eqDen > 0.001 ? f1(_dist / eqDen) : '—';
+    const cost   = _fuel * priceGas + _net * priceKwh;
+    const cPkm   = cost > 0.01 && _dist > 0.1 ? f3(cost / _dist) : '—';
 
-    // Linha 1 — eficiência + SOC
+    // Linha 1: Km · SOC · Energia · Combustível
     const row1 = [
-      { v: f1(trip.distKm || 0), lbl: 'km',      col: '#60a5fa' },
-      { v: kwh100,                lbl: 'kWh/100', col: '#4ade80' },
-      { v: kmL,                   lbl: 'km/L',    col: '#fb923c' },
+      { v: f1(_dist),                                                                   lbl: 'km',          col: '#60a5fa' },
       { v: trip.startSocPct > 0 ? `${Math.round(trip.startSocPct)}→${Math.round(trip.endSocPct)}%` : '—',
-                                  lbl: 'SOC',     col: '#2dd4bf' },
+                                                                                        lbl: 'SOC',         col: '#2dd4bf' },
+      { v: _net > 0    ? f2(_net)  + ' kWh' : '—',                                    lbl: 'energia líq.', col: '#4ade80' },
+      { v: _fuel > 0.01 ? f2(_fuel) + ' L'  : '—',                                    lbl: 'combustível', col: '#fb923c' },
     ];
-    // Linha 2 — consumo absoluto + custo
+    // Linha 2: km/L eq · kWh/100km · Custo total · R$/km
     const row2 = [
-      { v: (trip.fuelL  || 0) > 0.01 ? f2(trip.fuelL)  + ' L'   : '—', lbl: 'combustível', col: '#fb923c' },
-      { v: (trip.netKwh || 0) > 0    ? f2(trip.netKwh) + ' kWh' : '—', lbl: 'energia',     col: '#4ade80' },
-      { v: cost > 0.01 ? 'R$' + f2(cost) : '—',                         lbl: 'custo',       col: '#fbbf24' },
+      { v: eqKmL,                             lbl: 'km/L eq',    col: '#22d3ee' },
+      { v: kwh100,                             lbl: 'kWh/100km', col: '#4ade80' },
+      { v: cost > 0.01 ? 'R$' + f2(cost) : '—', lbl: 'custo total', col: '#fbbf24' },
+      { v: cPkm,                               lbl: 'R$/km',     col: '#fbbf24' },
     ];
     const drawMetricRow = (row, ry) => {
       const cw = CW / row.length;
