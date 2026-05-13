@@ -136,12 +136,12 @@ fun RollingWindowCard(
                 )
             }
 
-            // ── Gauge km/L combinado (centro) ─────────────────────────────────
+            // ── Gauge km/L equivalente (centro) ──────────────────────────────
             Box(modifier = Modifier.weight(1.2f), contentAlignment = Alignment.Center) {
                 RollingGauge(
                     value    = snapshot.combinedKmL,
                     maxValue = 60f,
-                    label    = "km/L comb.",
+                    label    = "km/L eq",
                     color    = AuroraTeal,
                     modifier = Modifier.size(158.dp),
                 )
@@ -164,14 +164,17 @@ fun RollingWindowCard(
                 verticalArrangement = Arrangement.spacedBy(3.dp),
             ) {
                 RMetricSection("⛽ Combustível")
-                RMetric("km/L",   "%.2f".format(snapshot.kmPerL),   MoltenOrange)
-                RMetric("Gastos", "%.2f L".format(snapshot.fuelL),   TextPrimary)
+                if (snapshot.combinedKmL > 0f)
+                    RMetric("km/L eq", "%.2f".format(snapshot.combinedKmL), AuroraTeal)
+                else if (snapshot.kmPerL > 0f)
+                    RMetric("km/L",    "%.2f".format(snapshot.kmPerL),      MoltenOrange)
+                RMetric("Gastos", "%.2f L".format(snapshot.fuelL), TextPrimary)
                 if (snapshot.startTankL > 0f || snapshot.currentTankL > 0f)
                     RMetric("Tanque", "%.1fL → %.1fL".format(snapshot.startTankL, snapshot.currentTankL), TextPrimary)
                 if (snapshot.costBrl > 0.01f) {
                     RMetric("💰 Custo", "R$ %.2f".format(snapshot.costBrl), WarnYellow)
                     if (snapshot.costPerKm > 0f)
-                        RMetric("R$/km", "%.3f".format(snapshot.costPerKm), WarnYellow.copy(alpha = 0.7f))
+                        RMetric("R$/km", "%.3f".format(snapshot.costPerKm), WarnYellow.copy(alpha = 0.8f))
                 }
             }
         }

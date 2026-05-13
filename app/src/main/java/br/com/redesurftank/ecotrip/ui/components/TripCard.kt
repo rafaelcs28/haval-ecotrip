@@ -147,19 +147,17 @@ fun TripCard(
                 verticalArrangement = Arrangement.spacedBy(3.dp),
             ) {
                 TColTitle("⛽ Combustível")
-                TMetric("km/L",   "%.2f".format(snapshot.kmPerL),   MoltenOrange)
-                TMetric("Gastos", "%.2f L".format(snapshot.fuelL),   TextPrimary)
+                if (snapshot.combinedKmL > 0f)
+                    TMetric("km/L eq",  "%.2f".format(snapshot.combinedKmL), AuroraTeal)
+                else if (snapshot.kmPerL > 0f)
+                    TMetric("km/L",     "%.2f".format(snapshot.kmPerL),      MoltenOrange)
+                TMetric("Gastos", "%.2f L".format(snapshot.fuelL), TextPrimary)
                 if (snapshot.startTankL > 0f || snapshot.currentTankL > 0f)
                     TMetric("Tanque", "%.1fL→%.1fL".format(snapshot.startTankL, snapshot.currentTankL), TextPrimary)
-                if (snapshot.combinedKmL > 0f)
-                    TMetric("km/L comb.", "%.2f".format(snapshot.combinedKmL), AuroraTeal)
                 if (snapshot.costBrl > 0.01f) {
-                    // Custo e R$/km numa única linha para não cortar conteúdo
-                    val costValue = if (snapshot.costPerKm > 0f)
-                        "R$ %.2f · %.3f/km".format(snapshot.costBrl, snapshot.costPerKm)
-                    else
-                        "R$ %.2f".format(snapshot.costBrl)
-                    TMetric("💰 Custo", costValue, WarnYellow)
+                    TMetric("💰 Custo", "R$ %.2f".format(snapshot.costBrl), WarnYellow)
+                    if (snapshot.costPerKm > 0f)
+                        TMetric("R$/km", "%.3f".format(snapshot.costPerKm), WarnYellow.copy(alpha = 0.8f))
                 }
             }
         }
