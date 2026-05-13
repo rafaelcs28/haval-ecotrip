@@ -554,146 +554,155 @@
   </div>
 
   <!-- Painel Admin / Configurações -->
-  <div id="panel-admin" class="panel" style="padding:16px;overflow-y:auto">
+  <div id="panel-admin" class="panel" style="padding:12px 16px 24px;overflow-y:auto">
     <div style="max-width:480px;margin:0 auto">
 
-      <!-- ── Notificações ──────────────────────────────────────────────────── -->
-      <div id="notif-section" style="background:#0C1019;border:1px solid #0F1520;border-radius:12px;padding:14px 16px;margin-bottom:16px">
-        <div style="display:flex;align-items:center;margin-bottom:12px">
-          <span style="font-size:14px;font-weight:700;color:#EEF4FF;flex:1">🔔 Notificações</span>
-          <button id="notif-collapse-btn" onclick="toggleNotifSection()"
-            style="background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.07);border-radius:6px;color:#64748b;font-size:11px;font-weight:600;cursor:pointer;padding:3px 10px;-webkit-tap-highlight-color:transparent;user-select:none">
-            ▲
-          </button>
+      <!-- ── 1. Notificações ───────────────────────────────────────────────── -->
+      <div id="notif-section" class="settings-card">
+        <div class="sc-header" onclick="toggleNotifSection()">
+          <span class="sc-title">🔔 Notificações</span>
+          <button id="notif-collapse-btn" type="button" class="sc-toggle">▲</button>
         </div>
-
-        <!-- Conteúdo colapsável -->
         <div id="notif-body">
-          <!-- Não ativado / bloqueado -->
           <div id="notif-activate-wrap">
-            <button id="notif-perm-btn" onclick="requestPushPermission()"
+            <button id="notif-perm-btn" type="button" onclick="requestPushPermission()"
               style="width:100%;background:rgba(77,187,255,.10);border:1px solid rgba(77,187,255,.28);color:#4DBBFF;border-radius:10px;padding:12px;font-size:14px;font-weight:600;cursor:pointer">
               Ativar Notificações
             </button>
             <div id="notif-perm-status" style="font-size:11px;color:#5B7394;margin-top:8px;text-align:center;min-height:16px"></div>
           </div>
-
-          <!-- Ativado — exibe os toggles -->
           <div id="notif-toggles-wrap" style="display:none">
             <div id="notif-toggles"></div>
           </div>
         </div>
       </div>
 
-
-      <!-- ── Cache local ─────────────────────────────────────────────────── -->
-      <div style="background:#0C1019;border:1px solid #0F1520;border-radius:12px;padding:14px 16px;margin-bottom:16px">
-        <div style="font-size:14px;font-weight:700;color:#EEF4FF;margin-bottom:12px">📱 Cache local</div>
-        <div style="display:flex;gap:8px;margin-bottom:8px">
-          <button onclick="adminCacheStatus()"
-            style="flex:1;background:#1e3a5f;border:none;border-radius:8px;padding:11px;color:#7FBADC;font-size:13px;cursor:pointer">
-            📊 Status
-          </button>
-          <button onclick="adminRedownloadCache()"
-            style="flex:1;background:#1e3a5f;border:none;border-radius:8px;padding:11px;color:#7FBADC;font-size:13px;cursor:pointer">
-            ♻️ Baixar tudo localmente
-          </button>
+      <!-- ── 2. Dados & Cache ──────────────────────────────────────────────── -->
+      <div class="settings-card">
+        <div class="sc-header" onclick="toggleSection('sc-dados-body','sc-dados-btn')">
+          <span class="sc-title">📱 Dados & Cache</span>
+          <button id="sc-dados-btn" type="button" class="sc-toggle">▲</button>
         </div>
-        <!-- Banner de backup semanal — visível só quando há mais de 7 dias sem backup -->
-        <div id="auto-backup-banner" style="display:none;background:#1c1408;border:1px solid #92400e;border-radius:10px;padding:12px 14px;margin-bottom:10px">
-          <div style="font-size:12px;color:#fbbf24;margin-bottom:6px">📦 Backup automático recomendado</div>
-          <div style="font-size:11px;color:#78716c;margin-bottom:10px">Último backup há mais de 7 dias.</div>
-          <button onclick="doAutoBackup()" style="width:100%;background:#92400e;border:none;border-radius:8px;padding:10px;color:#fde68a;font-size:13px;cursor:pointer">
-            📥 Fazer backup agora
-          </button>
-        </div>
-        <div style="display:flex;gap:8px;margin-bottom:10px">
-          <button onclick="adminExportData()"
-            style="flex:1;background:#14532d;border:none;border-radius:8px;padding:11px;color:#4ade80;font-size:13px;cursor:pointer">
-            📥 JSON
-          </button>
-          <button onclick="adminExportCsv()"
-            style="flex:1;background:#1a2e1a;border:1px solid #166534;border-radius:8px;padding:11px;color:#86efac;font-size:13px;cursor:pointer">
-            📊 CSV
-          </button>
-        </div>
-        <div id="cache-status"
-          style="min-height:36px;background:#0f172a;border-radius:8px;padding:8px 12px;font-size:12px;color:#94a3b8;white-space:pre-wrap;word-break:break-word">
-          Toque em Status para verificar.
-        </div>
-      </div>
-
-      <!-- Backup & Restore completo (servidor) -->
-      <h2 style="margin:0 0 12px;font-size:16px;color:#e2e8f0">💾 Backup & Restore</h2>
-      <div style="background:#1e293b;border-radius:10px;padding:14px;margin-bottom:20px">
-        <div style="font-size:11px;color:#94a3b8;margin-bottom:10px;line-height:1.5">
-          Backup completo do servidor — inclui trips manuais, auto-trips com telemetria,
-          recargas, snapshots e preferências. Use para migrar ou recuperar o servidor.
-        </div>
-        <button onclick="adminBackupServer()"
-          style="width:100%;background:#1e3a5f;border:none;border-radius:8px;padding:11px;color:#7FBADC;font-size:13px;cursor:pointer;margin-bottom:8px">
-          📦 Baixar backup completo (servidor)
-        </button>
-        <button onclick="document.getElementById('restore-file-input').click()"
-          style="width:100%;background:#2d1a1a;border:1px solid #7f1d1d;border-radius:8px;padding:11px;color:#fca5a5;font-size:13px;cursor:pointer;margin-bottom:8px">
-          ⬆️ Restaurar backup…
-        </button>
-        <input id="restore-file-input" type="file" accept=".json" style="display:none"
-          onchange="adminRestoreServer(this)">
-        <div id="backup-status"
-          style="min-height:32px;background:#0f172a;border-radius:8px;padding:7px 12px;font-size:12px;color:#94a3b8;display:none">
+        <div id="sc-dados-body">
+          <div style="display:flex;gap:8px;margin-bottom:10px">
+            <button type="button" onclick="adminCacheStatus()"
+              style="flex:1;background:#1e3a5f;border:none;border-radius:8px;padding:11px;color:#7FBADC;font-size:13px;cursor:pointer">
+              📊 Status
+            </button>
+            <button type="button" onclick="adminRedownloadCache()"
+              style="flex:1;background:#1e3a5f;border:none;border-radius:8px;padding:11px;color:#7FBADC;font-size:13px;cursor:pointer">
+              ♻️ Baixar tudo
+            </button>
+          </div>
+          <div style="display:flex;gap:8px;margin-bottom:10px">
+            <button type="button" onclick="adminExportData()"
+              style="flex:1;background:#14532d;border:none;border-radius:8px;padding:11px;color:#4ade80;font-size:13px;cursor:pointer">
+              📥 Exportar JSON
+            </button>
+            <button type="button" onclick="adminExportCsv()"
+              style="flex:1;background:#1a2e1a;border:1px solid #166534;border-radius:8px;padding:11px;color:#86efac;font-size:13px;cursor:pointer">
+              📊 Exportar CSV
+            </button>
+          </div>
+          <!-- Banner de backup semanal -->
+          <div id="auto-backup-banner" style="display:none;background:#1c1408;border:1px solid #92400e;border-radius:10px;padding:12px 14px;margin-bottom:10px">
+            <div style="font-size:12px;color:#fbbf24;margin-bottom:6px">📦 Backup automático recomendado</div>
+            <div style="font-size:11px;color:#78716c;margin-bottom:10px">Último backup há mais de 7 dias.</div>
+            <button type="button" onclick="doAutoBackup()"
+              style="width:100%;background:#92400e;border:none;border-radius:8px;padding:10px;color:#fde68a;font-size:13px;cursor:pointer">
+              📥 Fazer backup agora
+            </button>
+          </div>
+          <div id="cache-status"
+            style="min-height:36px;background:#0f172a;border-radius:8px;padding:8px 12px;font-size:12px;color:#94a3b8;white-space:pre-wrap;word-break:break-word">
+            Toque em Status para verificar.
+          </div>
         </div>
       </div>
 
-      <h2 style="margin:0 0 16px;font-size:16px;color:#e2e8f0">🛠 Servidor</h2>
-
-      <!-- Alterar senha -->
-      <div style="background:#1e293b;border-radius:10px;padding:14px;margin-bottom:12px">
-        <div style="font-size:11px;color:#94a3b8;margin-bottom:8px">🔑 Alterar senha de acesso</div>
-        <div style="position:relative;margin-bottom:6px">
-          <input id="cp-new" type="password" placeholder="Nova senha"
-            style="width:100%;box-sizing:border-box;background:#0f172a;border:1px solid #334155;border-radius:6px;padding:8px 36px 8px 10px;color:#e2e8f0;font-size:14px" />
-          <button onclick="togglePwVisibility('cp-new', this)"
-            style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;font-size:15px;line-height:1;padding:2px;color:#64748b">👁</button>
+      <!-- ── 3. Backup & Restore ───────────────────────────────────────────── -->
+      <div class="settings-card">
+        <div class="sc-header" onclick="toggleSection('sc-backup-body','sc-backup-btn')">
+          <span class="sc-title">💾 Backup & Restore</span>
+          <button id="sc-backup-btn" type="button" class="sc-toggle">▲</button>
         </div>
-        <div style="position:relative;margin-bottom:8px">
-          <input id="cp-confirm" type="password" placeholder="Confirmar nova senha"
-            style="width:100%;box-sizing:border-box;background:#0f172a;border:1px solid #334155;border-radius:6px;padding:8px 36px 8px 10px;color:#e2e8f0;font-size:14px" />
-          <button onclick="togglePwVisibility('cp-confirm', this)"
-            style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;font-size:15px;line-height:1;padding:2px;color:#64748b">👁</button>
+        <div id="sc-backup-body">
+          <div style="font-size:11px;color:#64748b;margin-bottom:10px;line-height:1.6">
+            Backup completo do servidor — trips manuais, auto-trips com telemetria,
+            recargas, snapshots e preferências. Use para migrar ou recuperar o servidor.
+          </div>
+          <button type="button" onclick="adminBackupServer()"
+            style="width:100%;background:#1e3a5f;border:none;border-radius:8px;padding:11px;color:#7FBADC;font-size:13px;cursor:pointer;margin-bottom:8px">
+            📦 Baixar backup completo
+          </button>
+          <button type="button" onclick="document.getElementById('restore-file-input').click()"
+            style="width:100%;background:#2d1a1a;border:1px solid #7f1d1d;border-radius:8px;padding:11px;color:#fca5a5;font-size:13px;cursor:pointer">
+            ⬆️ Restaurar backup…
+          </button>
+          <input id="restore-file-input" type="file" accept=".json" style="display:none"
+            onchange="adminRestoreServer(this)">
+          <div id="backup-status"
+            style="margin-top:8px;min-height:32px;background:#0f172a;border-radius:8px;padding:7px 12px;font-size:12px;color:#94a3b8;display:none">
+          </div>
         </div>
-        <button onclick="changePassword()"
-          style="width:100%;background:#1e40af;border:none;border-radius:6px;padding:10px;color:#e2e8f0;font-size:13px;cursor:pointer">
-          Salvar nova senha
-        </button>
-        <div id="cp-status" style="font-size:11px;color:#94a3b8;margin-top:6px;min-height:16px"></div>
       </div>
 
-      <div style="display:flex;gap:10px;margin-bottom:12px">
-        <button onclick="adminRestart()"
-          style="flex:1;background:#1e40af;border:none;border-radius:8px;padding:12px;color:#e2e8f0;font-size:13px;cursor:pointer">
-          🔄 Reiniciar
-        </button>
-        <button onclick="adminUpdate()"
-          style="flex:1;background:#065f46;border:none;border-radius:8px;padding:12px;color:#e2e8f0;font-size:13px;cursor:pointer">
-          ⬆️ Atualizar + Reiniciar
-        </button>
+      <!-- ── 4. Servidor ───────────────────────────────────────────────────── -->
+      <div class="settings-card">
+        <div class="sc-header" onclick="toggleSection('sc-servidor-body','sc-servidor-btn')">
+          <span class="sc-title">🛠 Servidor</span>
+          <button id="sc-servidor-btn" type="button" class="sc-toggle">▲</button>
+        </div>
+        <div id="sc-servidor-body">
+          <!-- Alterar senha -->
+          <div class="sc-box">
+            <div class="sc-box-label">🔑 Alterar senha de acesso</div>
+            <div style="position:relative;margin-bottom:6px">
+              <input id="cp-new" type="password" placeholder="Nova senha"
+                style="width:100%;box-sizing:border-box;background:#1e293b;border:1px solid #334155;border-radius:6px;padding:8px 36px 8px 10px;color:#e2e8f0;font-size:14px" />
+              <button type="button" onclick="togglePwVisibility('cp-new', this)"
+                style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;font-size:15px;line-height:1;padding:2px;color:#64748b">👁</button>
+            </div>
+            <div style="position:relative;margin-bottom:8px">
+              <input id="cp-confirm" type="password" placeholder="Confirmar nova senha"
+                style="width:100%;box-sizing:border-box;background:#1e293b;border:1px solid #334155;border-radius:6px;padding:8px 36px 8px 10px;color:#e2e8f0;font-size:14px" />
+              <button type="button" onclick="togglePwVisibility('cp-confirm', this)"
+                style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;font-size:15px;line-height:1;padding:2px;color:#64748b">👁</button>
+            </div>
+            <button type="button" onclick="changePassword()"
+              style="width:100%;background:#1e40af;border:none;border-radius:6px;padding:10px;color:#e2e8f0;font-size:13px;cursor:pointer">
+              Salvar nova senha
+            </button>
+            <div id="cp-status" style="font-size:11px;color:#94a3b8;margin-top:6px;min-height:16px"></div>
+          </div>
+          <!-- Ações do servidor -->
+          <div style="display:flex;gap:8px;margin-bottom:10px">
+            <button type="button" onclick="adminRestart()"
+              style="flex:1;background:#1e40af;border:none;border-radius:8px;padding:12px;color:#e2e8f0;font-size:13px;cursor:pointer">
+              🔄 Reiniciar
+            </button>
+            <button type="button" onclick="adminUpdate()"
+              style="flex:1;background:#065f46;border:none;border-radius:8px;padding:12px;color:#e2e8f0;font-size:13px;cursor:pointer">
+              ⬆️ Atualizar
+            </button>
+          </div>
+          <button type="button" onclick="adminClearHistory()"
+            style="width:100%;background:#7f1d1d;border:none;border-radius:8px;padding:12px;color:#fca5a5;font-size:13px;cursor:pointer;margin-bottom:10px">
+            🗑 Limpar histórico do servidor
+          </button>
+          <div id="admin-status"
+            style="min-height:40px;background:#0f172a;border-radius:8px;padding:10px 12px;font-size:12px;color:#94a3b8;white-space:pre-wrap;word-break:break-word">
+            Pronto.
+          </div>
+        </div>
       </div>
 
-      <button onclick="adminClearHistory()"
-        style="width:100%;background:#7f1d1d;border:none;border-radius:8px;padding:12px;color:#fca5a5;font-size:13px;cursor:pointer;margin-bottom:12px">
-        🗑 Limpar histórico do servidor
-      </button>
-
-      <div id="admin-status"
-        style="min-height:40px;background:#0f172a;border-radius:8px;padding:10px 12px;font-size:12px;color:#94a3b8;white-space:pre-wrap;word-break:break-word">
-        Pronto.
-      </div>
-
-      <button onclick="adminLogout()"
-        style="width:100%;background:transparent;border:1px solid #334155;border-radius:8px;padding:10px;color:#64748b;font-size:12px;cursor:pointer;margin-top:8px">
+      <!-- ── Sessão ──────────────────────────────────────────────────────────── -->
+      <button type="button" onclick="adminLogout()"
+        style="width:100%;background:transparent;border:1px solid #1e293b;border-radius:10px;padding:11px;color:#475569;font-size:12px;cursor:pointer;margin-top:4px">
         🔒 Sair (apagar senha salva)
       </button>
+
     </div>
   </div>
 

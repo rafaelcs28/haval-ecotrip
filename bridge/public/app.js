@@ -206,6 +206,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('login-input')?.addEventListener('keydown', e => {
     if (e.key === 'Enter') doLogin();
   });
+  _restoreSettingsSections();
   initActionsPanel();
   initNotifPanel();
   _fetchNotifCache();
@@ -265,6 +266,32 @@ window.saveNotifPref = async function(key, value) {
     showToast('✗ Erro ao salvar preferência');
   }
 };
+
+// ── Colapsar / expandir seções de configurações (genérico) ────────────────────
+window.toggleSection = function(bodyId, btnId) {
+  const body = document.getElementById(bodyId);
+  const btn  = document.getElementById(btnId);
+  if (!body || !btn) return;
+  const willCollapse = body.style.display !== 'none';
+  body.style.display = willCollapse ? 'none' : '';
+  btn.textContent    = willCollapse ? '▼' : '▲';
+  localStorage.setItem('sc_' + bodyId, willCollapse ? '1' : '0');
+  // ajusta margem do header quando não há body visível
+  const header = btn.closest('.sc-header');
+  if (header) header.style.marginBottom = willCollapse ? '0' : '';
+};
+function _restoreSettingsSections() {
+  ['sc-dados-body', 'sc-backup-body', 'sc-servidor-body'].forEach(bodyId => {
+    if (localStorage.getItem('sc_' + bodyId) !== '1') return;
+    const body   = document.getElementById(bodyId);
+    const btnId  = bodyId.replace('-body', '-btn');
+    const btn    = document.getElementById(btnId);
+    if (body) body.style.display = 'none';
+    if (btn)  btn.textContent    = '▼';
+    const header = btn?.closest('.sc-header');
+    if (header) header.style.marginBottom = '0';
+  });
+}
 
 // ── Colapsar / expandir opções de notificação ─────────────────────────────────
 let _notifBodyCollapsed = localStorage.getItem('notifBodyCollapsed') === '1';
