@@ -132,8 +132,9 @@ function saveNotifPrefs() {
 let chargeEndingNotifSent = false;
 
 // ── Detecção de transição de estado de carga ──────────────────────────────────
-let prevChargingState  = null;
-let chargeStartTimer   = null;
+let prevChargingState    = null;
+let chargeStartTimer     = null;
+let chargeSessionStartMs = 0;   // timestamp de início da sessão (para duração e potência média)
 
 // ── SOC — fonte HA tem prioridade quando disponível ───────────────────────────
 // Após o primeiro tópico haval/ecotrip/soc_pct (publicado via automação HA),
@@ -1265,6 +1266,7 @@ function applyMqttMessage(key, value, isRetained = false) {
       // envenena prevChargingState e impede a notificação na próxima recarga real.
       if (!isRetained) {
         if (value === 'Carregando' && prev !== 'Carregando') {
+          chargeSessionStartMs = Date.now();
           // Aguarda 30s para a potência estabilizar antes de notificar
           if (chargeStartTimer) clearTimeout(chargeStartTimer);
           chargeStartTimer = setTimeout(() => {
@@ -1283,9 +1285,23 @@ function applyMqttMessage(key, value, isRetained = false) {
           chargeEndingNotifSent = false;  // reset para próxima sessão
           if (value === 'Finalizado' && notifPrefs.charge_end) {
             const kwh = state.charge_session_kwh || 0;
-            sendPush('✅ Recarga concluída', kwh > 0.05
-              ? `${kwh.toFixed(2)} kWh injetados`
-              : 'Sessão encerrada');
+            const durSec = chargeSessionStartMs > 0
+              ? Math.round((Date.now() - chargeSessionStartMs) / 1000)
+              : 0;
+            const durStr = durSec > 0
+              ? (durSec >= 3600
+                ? `${Math.floor(durSec / 3600)}h ${Math.floor((durSec % 3600) / 60)}min`
+                : `${Math.floor(durSec / 60)}min`)
+              : null;
+            const avgKw = (durSec > 0 && kwh > 0.05)
+              ? (kwh / (durSec / 3600))
+              : null;
+            const parts = [];
+            if (kwh > 0.05) parts.push(`${kwh.toFixed(2)} kWh`);
+            if (durStr)     parts.push(durStr);
+            if (avgKw)      parts.push(`${avgKw.toFixed(1)} kW médios`);
+            sendPush('✅ Recarga concluída', parts.length ? parts.join(' · ') : 'Sessão encerrada');
+            chargeSessionStartMs = 0;
           }
         }
       }
