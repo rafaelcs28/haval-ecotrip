@@ -343,15 +343,42 @@ html, body {
 .trip-cost  { font-size: 13px; font-weight: 700; color: var(--yellow); }
 .trip-metrics {
   display: flex;
-  gap: 12px;
+  gap: 8px 16px;
   flex-wrap: wrap;
 }
-.trip-metric { text-align: center; }
+.trip-metrics-row2 {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+.trip-metric { text-align: center; min-width: 40px; }
 .trip-metric-val { font-size: 13px; font-weight: 700; color: var(--text); }
 .trip-metric-lbl { font-size: 10px; color: var(--muted); }
 .trip-metric-val.green  { color: var(--neon); }
 .trip-metric-val.blue   { color: var(--blue); }
 .trip-metric-val.orange { color: var(--orange); }
+.trip-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.trip-action-btn {
+  background: rgba(255,255,255,.04);
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 8px;
+  color: var(--teal);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 5px 12px;
+  cursor: pointer;
+  text-decoration: none;
+  -webkit-tap-highlight-color: transparent;
+  white-space: nowrap;
+}
+.trip-action-btn:active { background: rgba(255,255,255,.09); }
 
 /* ── Recargas ────────────────────────────────────────────────────────────────── */
 .charge-summary-card {

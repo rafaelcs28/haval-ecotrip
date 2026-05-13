@@ -1674,11 +1674,13 @@ function renderHistory() {
   <div class="trip-metrics">
     <div class="trip-metric"><div class="trip-metric-val blue">${f1(t.distance_km)} km</div><div class="trip-metric-lbl">dist.</div></div>
     <div class="trip-metric"><div class="trip-metric-val green">${t.kwh_per_100km > 0 ? f1(t.kwh_per_100km) : '--'}</div><div class="trip-metric-lbl">kWh/100km</div></div>
-    <div class="trip-metric"><div class="trip-metric-val green">${t.km_per_l > 0 ? f1(t.km_per_l) : '--'}</div><div class="trip-metric-lbl">km/L</div></div>
-    <div class="trip-metric"><div class="trip-metric-val orange">${t.fuel_l > 0 ? f2(t.fuel_l) + ' L' : '--'}</div><div class="trip-metric-lbl">combust.</div></div>
-    <div class="trip-metric"><div class="trip-metric-val teal">${(t.net_kwh || 0) > 0 ? f2(t.net_kwh) + ' kWh' : '--'}</div><div class="trip-metric-lbl">kWh liq.</div></div>
     <div class="trip-metric"><div class="trip-metric-val" style="color:var(--muted)">${(t.avg_speed_kmh || 0) > 0 ? f1(t.avg_speed_kmh) + ' km/h' : '--'}</div><div class="trip-metric-lbl">vel. méd.</div></div>
     <div class="trip-metric"><div class="trip-metric-val" style="color:#5B7394">${fmtTripTime(t.time_sec)}</div><div class="trip-metric-lbl">duração</div></div>
+  </div>
+  <div class="trip-metrics trip-metrics-row2">
+    <div class="trip-metric"><div class="trip-metric-val teal">${(t.net_kwh || 0) > 0 ? f2(t.net_kwh) + ' kWh' : '--'}</div><div class="trip-metric-lbl">kWh liq.</div></div>
+    <div class="trip-metric"><div class="trip-metric-val orange">${t.fuel_l > 0 ? f2(t.fuel_l) + ' L' : '--'}</div><div class="trip-metric-lbl">combust.</div></div>
+    <div class="trip-metric"><div class="trip-metric-val green">${t.km_per_l > 0 ? f1(t.km_per_l) : '--'}</div><div class="trip-metric-lbl">km/L</div></div>
   </div>
 </div>`;
   }).join('');
@@ -1794,22 +1796,22 @@ function renderAutoTrips() {
     const statusBadge = rnStatus === 'pending'   ? '<span class="rename-status-pending" title="Aguardando confirmação do carro">⏳</span>'
                       : rnStatus === 'confirmed'  ? '<span class="rename-status-ok" title="Confirmado pelo carro">✓</span>'
                       : '';
-    const hasExtra   = maxSpd || avgSpd || tempStr || netKwh !== '--' || fuelL !== '--';
-    const extraRow   = hasExtra ? `
-  <div class="trip-metrics" style="margin-top:4px">
-    <div class="trip-metric"><div class="trip-metric-val green">${netKwh}</div><div class="trip-metric-lbl">kWh liq.</div></div>
-    ${fuelL !== '--' ? `<div class="trip-metric"><div class="trip-metric-val orange">${fuelL}</div><div class="trip-metric-lbl">combust.</div></div>` : ''}
-    ${avgSpd  ? `<div class="trip-metric"><div class="trip-metric-val muted">${avgSpd}</div><div class="trip-metric-lbl">vel. méd.</div></div>` : ''}
-    ${maxSpd  ? `<div class="trip-metric"><div class="trip-metric-val muted">${maxSpd}</div><div class="trip-metric-lbl">vel. máx.</div></div>` : ''}
-    ${tempStr ? `<div class="trip-metric"><div class="trip-metric-val blue">${tempStr}</div><div class="trip-metric-lbl">temp. ext.</div></div>` : ''}
-    ${mapsUrl ? `<div class="trip-metric"><a href="${mapsUrl}" target="_blank" style="color:#60a5fa;text-decoration:none;font-size:18px">📍</a><div class="trip-metric-lbl">mapa</div></div>` : ''}
-  </div>` : (mapsUrl ? `<div style="text-align:right;margin-top:2px"><a href="${mapsUrl}" target="_blank" style="color:#60a5fa;font-size:11px">📍 mapa</a></div>` : '');
     const atOv     = _tripCostOverride(t.tripId);
     const atFuelL  = t.fuelL  || 0;
     const atNetKwh = t.netKwh || 0;
     const tripCost = atOv ? atOv.cost
       : ((priceGas > 0 || priceKwh > 0) ? atFuelL * priceGas + atNetKwh * priceKwh : 0);
     const costStr = `<span id="cost-badge-${t.tripId}" class="trip-cost"${tripCost <= 0 ? ' style="display:none"' : atOv ? ' style="border-bottom:1px dashed rgba(251,191,36,.5)"' : ''}>${tripCost > 0 ? 'R$ ' + f2(tripCost) : ''}</span>`;
+    // Row 2: consumo — só exibe se tiver pelo menos um campo com dado
+    const hasRow2  = netKwh !== '--' || fuelL !== '--' || kwh100 || kmPerL || tempStr;
+    const row2     = hasRow2 ? `
+  <div class="trip-metrics trip-metrics-row2">
+    ${kwh100 ? `<div class="trip-metric"><div class="trip-metric-val green">${kwh100}</div><div class="trip-metric-lbl">kWh/100km</div></div>` : ''}
+    ${netKwh !== '--' ? `<div class="trip-metric"><div class="trip-metric-val teal">${netKwh}</div><div class="trip-metric-lbl">kWh liq.</div></div>` : ''}
+    ${fuelL !== '--' ? `<div class="trip-metric"><div class="trip-metric-val orange">${fuelL}</div><div class="trip-metric-lbl">combust.</div></div>` : ''}
+    ${kmPerL ? `<div class="trip-metric"><div class="trip-metric-val green">${kmPerL}</div><div class="trip-metric-lbl">km/L</div></div>` : ''}
+    ${tempStr ? `<div class="trip-metric"><div class="trip-metric-val blue">${tempStr}</div><div class="trip-metric-lbl">temp. ext.</div></div>` : ''}
+  </div>` : '';
     return `<div class="trip-item">
   <div class="trip-header">
     <div style="flex:1;min-width:0">
@@ -1817,14 +1819,11 @@ function renderAutoTrips() {
         ${displayName ? `<span class="trip-name"${nameStyle ? ` style="${nameStyle}"` : ''}>${displayName}</span>${statusBadge}` : ''}
         <button class="rename-btn" onclick="startRenameTrip('${t.tripId}','auto')" title="${displayName ? 'Renomear' : 'Nomear'}">✏️</button>
       </div>
-      <div class="trip-date">${startDate} · ${dur}</div>
-      ${geoLine}
+      <div class="trip-date">${startDate} · ${dur}${geoLine ? ' · ' + geo : ''}</div>
     </div>
-    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">
+    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:3px">
       ${costStr}
       <button class="cost-edit-btn" onclick="toggleCostEdit('${t.tripId}')" title="Recalcular custo">💰</button>
-      <button class="charge-badge" style="cursor:pointer;border:none" onclick="openTripDetail('${t.tripId}')">🗺 Ver rota</button>
-      <button class="charge-badge" style="cursor:pointer;border:none;color:#94a3b8" onclick="shareTripCard('${t.tripId}')">📸 Snapshot</button>
     </div>
   </div>
   <div id="cost-edit-${t.tripId}" class="cost-edit-form" style="display:none">
@@ -1834,10 +1833,16 @@ function renderAutoTrips() {
   </div>
   <div class="trip-metrics">
     <div class="trip-metric"><div class="trip-metric-val blue">${distKm}</div><div class="trip-metric-lbl">dist.</div></div>
-    ${kwh100 ? `<div class="trip-metric"><div class="trip-metric-val green">${kwh100}</div><div class="trip-metric-lbl">kWh/100</div></div>` : `<div class="trip-metric"><div class="trip-metric-val green">${netKwh}</div><div class="trip-metric-lbl">kWh liq.</div></div>`}
-    ${kmPerL ? `<div class="trip-metric"><div class="trip-metric-val orange">${kmPerL}</div><div class="trip-metric-lbl">km/L</div></div>` : ''}
+    ${avgSpd  ? `<div class="trip-metric"><div class="trip-metric-val" style="color:var(--muted)">${avgSpd}</div><div class="trip-metric-lbl">vel. méd.</div></div>` : ''}
+    ${maxSpd  ? `<div class="trip-metric"><div class="trip-metric-val" style="color:var(--muted)">${maxSpd}</div><div class="trip-metric-lbl">vel. máx.</div></div>` : ''}
     <div class="trip-metric"><div class="trip-metric-val teal">${socDelta}</div><div class="trip-metric-lbl">SOC</div></div>
-  </div>${extraRow}
+    <div class="trip-metric"><div class="trip-metric-val" style="color:#5B7394">${dur}</div><div class="trip-metric-lbl">duração</div></div>
+  </div>${row2}
+  <div class="trip-actions">
+    <button class="trip-action-btn" onclick="openTripDetail('${t.tripId}')">🗺 Ver rota</button>
+    <button class="trip-action-btn" style="color:#94a3b8" onclick="shareTripCard('${t.tripId}')">📸 Snapshot</button>
+    ${mapsUrl ? `<a class="trip-action-btn" href="${mapsUrl}" target="_blank">📍 Maps</a>` : ''}
+  </div>
 </div>`;
   }).join('');
 
