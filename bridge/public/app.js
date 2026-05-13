@@ -291,7 +291,7 @@ window.toggleSection = function(bodyId, btnId) {
   if (header) header.style.marginBottom = willCollapse ? '0' : '';
 };
 function _restoreSettingsSections() {
-  ['sc-dados-body', 'sc-backup-body', 'sc-servidor-body'].forEach(bodyId => {
+  ['sc-dados-body', 'sc-charge-limit-body', 'sc-backup-body', 'sc-servidor-body'].forEach(bodyId => {
     if (localStorage.getItem('sc_' + bodyId) !== '1') return;
     const body   = document.getElementById(bodyId);
     const btnId  = bodyId.replace('-body', '-btn');
