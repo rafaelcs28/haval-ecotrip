@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_BUILD = 'b155';   // bump a cada deploy para confirmar versão no admin
+const APP_BUILD = 'b156';   // bump a cada deploy para confirmar versão no admin
 
 // ── Estado local ──────────────────────────────────────────────────────────────
 let state = {};
@@ -1565,7 +1565,8 @@ function renderTrip(id, t) {
   setText(`${p}-fuel`,      t.fuel_l      > 0 ? f2(t.fuel_l) + ' L' : '--');
   setText(`${p}-energy`,    t.energy_kwh  > 0 ? f2(t.energy_kwh)    : '--');
   setText(`${p}-regen`,     t.regen_kwh   > 0 ? f2(t.regen_kwh)     : '--');
-  setText(`${p}-cost`,      t.cost_brl    > 0 ? 'R$ ' + f2(t.cost_brl) : '--');
+  setText(`${p}-cost`,        t.cost_brl     > 0 ? 'R$ ' + f2(t.cost_brl) : '--');
+  setText(`${p}-cost-per-km`, t.cost_per_km  > 0 ? f3(t.cost_per_km)     : '--');
   setText(`${p}-soc-start`, pct(t.soc_start));
   setText(`${p}-soc-now`,   pct(t.soc_current));
   setText(`${p}-tank-now`,  t.tank_now_l > 0 ? f1(t.tank_now_l) + ' L' : '--');
@@ -1776,8 +1777,9 @@ function renderHistory() {
     const d = t.distance_km||0, k = t.kwh_per_100km||0;
     return s + (k > 0 && d > 0 ? k * d / 100 : 0);
   }, 0);
-  const avgKwh100 = totDist > 0.1   ? totNetKwh / totDist * 100 : 0;
-  const avgKml    = totFuel > 0.001 ? totDist   / totFuel       : 0;
+  const avgKwh100     = totDist > 0.1   ? totNetKwh / totDist * 100 : 0;
+  const avgKml        = totFuel > 0.001 ? totDist   / totFuel       : 0;
+  const avgCostPerKm  = totCost > 0 && totDist > 0.1 ? totCost / totDist : 0;
 
   html += `<div class="charge-summary-card" style="border-color:rgba(77,187,255,.2)">
   <div class="card-title">Resumo — ${trips.length} viagem${trips.length !== 1 ? 'ns' : ''}</div>
@@ -1790,6 +1792,7 @@ function renderHistory() {
     <div class="metric"><div class="metric-value orange sm">${f2(totFuel)} L</div><div class="metric-label">combustível</div></div>
     <div class="metric"><div class="metric-value teal sm">${totNetKwh > 0 ? f2(totNetKwh) + ' kWh' : '--'}</div><div class="metric-label">bat. consumida</div></div>
     <div class="metric"><div class="metric-value yellow sm">${totCost > 0 ? 'R$ ' + f2(totCost) : '--'}</div><div class="metric-label">custo</div></div>
+    ${avgCostPerKm > 0 ? `<div class="metric"><div class="metric-value yellow sm">${f3(avgCostPerKm)}</div><div class="metric-label">R$/km</div></div>` : ''}
   </div>
 </div>`;
 
@@ -1841,6 +1844,7 @@ function renderHistory() {
     <div class="trip-metric"><div class="trip-metric-val teal">${(t.net_kwh || 0) > 0 ? f2(t.net_kwh) + ' kWh' : '--'}</div><div class="trip-metric-lbl">kWh liq.</div></div>
     <div class="trip-metric"><div class="trip-metric-val orange">${t.fuel_l > 0 ? f2(t.fuel_l) + ' L' : '--'}</div><div class="trip-metric-lbl">combust.</div></div>
     <div class="trip-metric"><div class="trip-metric-val green">${t.km_per_l > 0 ? f1(t.km_per_l) : '--'}</div><div class="trip-metric-lbl">km/L</div></div>
+    ${dispCost > 0 && (t.distance_km || 0) > 0.1 ? `<div class="trip-metric"><div class="trip-metric-val yellow">${f3(dispCost / t.distance_km)}</div><div class="trip-metric-lbl">R$/km</div></div>` : ''}
   </div>
 </div>`;
   }).join('');
@@ -1920,6 +1924,7 @@ function renderAutoTrips() {
     ? totDist / (totNetKwh / KWH_PER_L + totFuel) : 0;
   const totCost   = (priceGas > 0 || priceKwh > 0)
     ? totFuel * priceGas + totNetKwh * priceKwh : 0;
+  const avgCostPerKm = totCost > 0 && totDist > 0.1 ? totCost / totDist : 0;
 
   html += `<div class="charge-summary-card" style="border-color:rgba(77,187,255,.2)">
   <div class="card-title">Resumo — ${trips.length} viagem${trips.length !== 1 ? 'ns' : ''}</div>
@@ -1932,6 +1937,7 @@ function renderAutoTrips() {
     <div class="metric"><div class="metric-value orange sm">${totFuel > 0.001 ? f2(totFuel) + ' L' : '--'}</div><div class="metric-label">combustível</div></div>
     <div class="metric"><div class="metric-value teal sm">${totNetKwh > 0.01 ? f2(totNetKwh) + ' kWh' : '--'}</div><div class="metric-label">bat. consumida</div></div>
     <div class="metric"><div class="metric-value yellow sm">${totCost > 0 ? 'R$ ' + f2(totCost) : '--'}</div><div class="metric-label">custo</div></div>
+    ${avgCostPerKm > 0 ? `<div class="metric"><div class="metric-value yellow sm">${f3(avgCostPerKm)}</div><div class="metric-label">R$/km</div></div>` : ''}
   </div>
 </div>`;
 
@@ -1975,6 +1981,7 @@ function renderAutoTrips() {
     ${netKwh !== '--' ? `<div class="trip-metric"><div class="trip-metric-val teal">${netKwh}</div><div class="trip-metric-lbl">kWh liq.</div></div>` : ''}
     ${fuelL !== '--' ? `<div class="trip-metric"><div class="trip-metric-val orange">${fuelL}</div><div class="trip-metric-lbl">combust.</div></div>` : ''}
     ${eqKmL ? `<div class="trip-metric"><div class="trip-metric-val green">${eqKmL}</div><div class="trip-metric-lbl">km/L eq</div></div>` : ''}
+    ${tripCost > 0 && t.distKm > 0.1 ? `<div class="trip-metric"><div class="trip-metric-val yellow">${f3(tripCost / t.distKm)}</div><div class="trip-metric-lbl">R$/km</div></div>` : ''}
     ${tempStr ? `<div class="trip-metric"><div class="trip-metric-val blue">${tempStr}</div><div class="trip-metric-lbl">temp. ext.</div></div>` : ''}
   </div>` : '';
     return `<div class="trip-item" id="trip-card-${t.tripId}">
