@@ -200,21 +200,22 @@ fun ConsumptionScreen() {
                     }
                     CarConstants.CAR_EV_INFO_CUR_CHARGE_CURRENT.value -> {
                         mqttManager.latestChargeCurrentA = value.trim().toFloatOrNull() ?: 0f
-                        // Potência do motor elétrico: V (car.basic.battery_voltage) × A / 1000 = kW
-                        val motorKw = mqttManager.latestBasicBattVoltageV * mqttManager.latestChargeCurrentA / 1000f
+                        // Potência do motor: V (car.ev_info.power_battery_voltage) × A / 1000 = kW
+                        val motorKw = mqttManager.latestBatteryVoltageV * mqttManager.latestChargeCurrentA / 1000f
                         mqttManager.latestMotorPowerKw = motorKw
                         tripManager.updateMotorPowerKw(motorKw)
                         syncCharging()
                     }
                     CarConstants.CAR_BASIC_BATTERY_VOLTAGE.value -> {
+                        // Apenas armazena — não entra no cálculo de potência
                         mqttManager.latestBasicBattVoltageV = value.trim().toFloatOrNull() ?: 0f
-                        // Recalcula potência do motor com nova tensão
-                        val motorKw = mqttManager.latestBasicBattVoltageV * mqttManager.latestChargeCurrentA / 1000f
-                        mqttManager.latestMotorPowerKw = motorKw
-                        tripManager.updateMotorPowerKw(motorKw)
                     }
                     CarConstants.CAR_EV_INFO_POWER_BATTERY_VOLTAGE.value -> {
                         mqttManager.latestBatteryVoltageV = value.trim().toFloatOrNull() ?: 0f
+                        // Recalcula potência do motor com nova tensão
+                        val motorKw = mqttManager.latestBatteryVoltageV * mqttManager.latestChargeCurrentA / 1000f
+                        mqttManager.latestMotorPowerKw = motorKw
+                        tripManager.updateMotorPowerKw(motorKw)
                         tripManager.onDataChanged(key, value)
                         syncCharging()
                     }

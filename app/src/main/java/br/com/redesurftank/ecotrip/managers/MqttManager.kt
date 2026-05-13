@@ -515,7 +515,7 @@ class MqttManager private constructor() {
             // Electrical: corrente de carga, tensão e corrente do pack + potência derivada
             // retain=true — persiste no broker; HA não fica em branco se a conexão cair brevemente
             pubR("charge_current_a",  fmt2(latestChargeCurrentA))
-            pubR("battery_voltage_v", fmt2(latestBatteryVoltageV))   // car.ev_info.power_battery_voltage
+            pubR("battery_voltage_v", fmt2(latestBatteryVoltageV))   // car.ev_info.power_battery_voltage (apenas telemetria)
             pubR("battery_current_a", fmt2(latestBatteryCurrentA))
             // Tensão do pack (namespace basic) — fonte usada no cálculo da potência do motor
             if (latestBasicBattVoltageV > 0f) pubR("basic_battery_voltage_v", fmt2(latestBasicBattVoltageV))
@@ -528,7 +528,7 @@ class MqttManager private constructor() {
             if (latestOdometerKm > 0f) pubR("odometer_km", fmt1(latestOdometerKm))
             if (latestBatt12vPct > 0f) pubR("batt_12v_pct", fmt1(latestBatt12vPct))
             // Potência de recarga: apenas quando charging_state == 1 (Carregando)
-            // Corrente AC (cur_charge_current) × tensão do pack / 1000
+            // Corrente AC (cur_charge_current) × tensão do pack (car.ev_info.power_battery_voltage) / 1000
             val chargePowerKw = if (latestChargingState == 1 && latestBatteryVoltageV > 0f)
                 kotlin.math.abs(latestChargeCurrentA) * latestBatteryVoltageV / 1000f else 0f
             pubR("charge_power_kw",   fmt2(chargePowerKw))
