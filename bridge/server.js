@@ -37,6 +37,7 @@ const SNAPSHOTS_FILE  = path.join(__dirname, 'lifetime_snapshots.json');
 const VAPID_FILE        = path.join(__dirname, 'vapid_keys.json');
 const PUSH_SUBS_FILE    = path.join(__dirname, 'push_subscriptions.json');
 const RENAMES_FILE      = path.join(__dirname, 'pending_renames.json');
+const CHARGE_LOCS_FILE    = path.join(__dirname, 'charge_locations.json');
 const NOTIF_PREFS_FILE    = path.join(__dirname, 'notif_prefs.json');
 const NOTIF_HISTORY_FILE  = path.join(__dirname, 'notif_history.json');
 
@@ -431,6 +432,40 @@ function scheduleChargesFlush() {
   }, 500);
 }
 
+// ── Locais de recarga ─────────────────────────────────────────────────────────
+let chargeLocations = [];
+try {
+  if (fs.existsSync(CHARGE_LOCS_FILE))
+    chargeLocations = JSON.parse(fs.readFileSync(CHARGE_LOCS_FILE, 'utf8')) || [];
+  if (chargeLocations.length) console.log(`✓ Locais de recarga: ${chargeLocations.length}`);
+} catch (_) {}
+function saveChargeLocations() {
+  try { fs.writeFileSync(CHARGE_LOCS_FILE, JSON.stringify(chargeLocations, null, 2)); } catch (_) {}
+}
+
+// Haversine — distância em metros entre dois pontos GPS
+function haversineM(lat1, lng1, lat2, lng2) {
+  const R = 6371000;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) ** 2
+    + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180)
+    * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+// Retorna o local conhecido mais próximo dentro de radiusM metros, ou null
+function autoMatchLocation(lat, lng, radiusM = 200) {
+  if (!lat || !lng) return null;
+  let best = null, bestDist = Infinity;
+  for (const loc of chargeLocations) {
+    if (!loc.lat || !loc.lng) continue;
+    const d = haversineM(lat, lng, loc.lat, loc.lng);
+    if (d < radiusM && d < bestDist) { best = loc; bestDist = d; }
+  }
+  return best;
+}
+
 // ── Express + HTTP ────────────────────────────────────────────────────────────
 
 const app    = express();
@@ -504,6 +539,83 @@ app.delete('/api/charges/:ts', (req, res) => {
   scheduleChargesFlush();
   console.log(`[delete] Charge ${ts} removida`);
   res.json({ ok: true });
+});
+
+// ── Locais de recarga ─────────────────────────────────────────────────────────
+app.get('/api/charge-locations', (_req, res) => res.json(chargeLocations));
+
+app.post('/api/charge-locations', (req, res) => {
+  const { name, lat, lng } = req.body || {};
+  if (!name?.trim()) return res.status(400).json({ error: 'nome obrigatório' });
+  // Evita duplicatas: mesmo nome ou GPS a < 100 m
+  const dup = chargeLocations.find(l =>
+    l.name === name.trim() ||
+    (l.lat && l.lng && lat && lng && haversineM(l.lat, l.lng, lat, lng) < 100)
+  );
+  if (dup) return res.json(dup);
+  const loc = { id: Date.now(), name: name.trim(), lat: lat ?? null, lng: lng ?? null };
+  chargeLocations.push(loc);
+  saveChargeLocations();
+  res.json(loc);
+});
+
+app.delete('/api/charge-locations/:id', (req, res) => {
+  const id = parseInt(req.params.id);
+  const idx = chargeLocations.findIndex(l => l.id === id);
+  if (idx === -1) return res.status(404).json({ error: 'não encontrado' });
+  chargeLocations.splice(idx, 1);
+  saveChargeLocations();
+  res.json({ ok: true });
+});
+
+// PATCH /api/charges/:ts/location
+// Body: { name?, lat?, lng?, save_known? }
+// - Se name === '' → limpa localização
+// - Se só lat+lng → tenta auto-match em locais conhecidos
+// - Se name + (lat+lng) + save_known → salva como local favorito também
+app.patch('/api/charges/:ts/location', (req, res) => {
+  const ts = parseInt(req.params.ts);
+  const charge = chargesArr.find(c => (c.timestamp_ms || 0) === ts);
+  if (!charge) return res.status(404).json({ error: 'recarga não encontrada' });
+
+  const { name, lat, lng, save_known } = req.body || {};
+
+  if (name === '') {
+    // Limpar localização
+    delete charge.location_name;
+    delete charge.location_lat;
+    delete charge.location_lng;
+    scheduleChargesFlush();
+    return res.json(charge);
+  }
+
+  if (!name && (lat != null || lng != null)) {
+    // Auto-tag por GPS (chamado pela PWA quando recarga termina)
+    if (lat != null) charge.location_lat = lat;
+    if (lng != null) charge.location_lng = lng;
+    const match = autoMatchLocation(lat, lng);
+    if (match) charge.location_name = match.name;
+    scheduleChargesFlush();
+    return res.json(charge);
+  }
+
+  if (name?.trim()) charge.location_name = name.trim();
+  if (lat != null)  charge.location_lat  = lat;
+  if (lng != null)  charge.location_lng  = lng;
+
+  if (save_known && name?.trim() && lat != null && lng != null) {
+    const dup = chargeLocations.find(l =>
+      l.name === name.trim() ||
+      (l.lat && l.lng && haversineM(l.lat, l.lng, lat, lng) < 100)
+    );
+    if (!dup) {
+      chargeLocations.push({ id: Date.now(), name: name.trim(), lat, lng });
+      saveChargeLocations();
+    }
+  }
+
+  scheduleChargesFlush();
+  res.json(charge);
 });
 
 // ── Proxy de tiles OSM para o canvas do Snapshot ──────────────────────────────

@@ -861,6 +861,46 @@
 
 </div><!-- /app -->
 
+  <!-- Modal de local da recarga -->
+  <div id="loc-picker" style="display:none;position:fixed;inset:0;z-index:9200;background:rgba(0,0,0,0.72);align-items:center;justify-content:center;padding:20px" onclick="if(event.target===this)closeLoc()">
+    <div style="background:#1e293b;border-radius:16px;padding:22px 20px 18px;width:100%;max-width:360px">
+      <div style="font-size:15px;font-weight:700;color:#f1f5f9;margin-bottom:4px;text-align:center">📍 Local da Recarga</div>
+      <div id="loc-picker-date" style="font-size:11px;color:#5B7394;text-align:center;margin-bottom:14px"></div>
+
+      <!-- Input com datalist de locais favoritos -->
+      <input id="loc-name-input" type="text" list="loc-datalist" maxlength="60"
+        autocomplete="off" autocorrect="off" spellcheck="false" enterkeyhint="done"
+        placeholder="Nome do local (ex: Casa, Shopping…)"
+        style="width:100%;background:#0C1019;border:1.5px solid #4DBBFF;border-radius:8px;color:#EEF4FF;font-size:14px;padding:9px 12px;outline:none;-webkit-appearance:none;box-sizing:border-box;margin-bottom:10px"
+        onkeydown="if(event.key==='Enter'){event.preventDefault();saveLoc();}if(event.key==='Escape')closeLoc()">
+      <datalist id="loc-datalist"></datalist>
+
+      <!-- GPS -->
+      <button id="loc-gps-btn" onclick="locCapGps()"
+        style="width:100%;padding:9px;background:#1a2a3a;border:1px solid #334155;border-radius:8px;color:#7FBADC;font-size:13px;cursor:pointer;margin-bottom:6px;text-align:left">
+        📍 Capturar minha localização atual
+      </button>
+      <div id="loc-gps-status" style="font-size:11px;color:#5B7394;min-height:16px;margin-bottom:10px;text-align:center"></div>
+
+      <!-- Salvar como favorito -->
+      <label style="display:flex;align-items:center;gap:8px;margin-bottom:16px;cursor:pointer">
+        <input type="checkbox" id="loc-save-known" style="width:16px;height:16px;accent-color:#4DBBFF">
+        <span style="font-size:12px;color:#94a3b8">Salvar como local favorito (auto-detectar na próxima vez)</span>
+      </label>
+
+      <div style="display:flex;gap:10px">
+        <button onclick="closeLoc()"
+          style="flex:1;padding:11px;background:#334155;border:none;border-radius:10px;color:#e2e8f0;font-size:14px;cursor:pointer">
+          Cancelar
+        </button>
+        <button onclick="saveLoc()"
+          style="flex:1;padding:11px;background:#4DBBFF;border:none;border-radius:10px;color:#06080C;font-size:14px;font-weight:700;cursor:pointer">
+          Salvar
+        </button>
+      </div>
+    </div>
+  </div>
+
 <script src="/app.js"></script>
 </body>
 </html>

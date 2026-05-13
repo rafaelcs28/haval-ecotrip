@@ -835,3 +835,31 @@ html, body {
   color: #64748b;
   margin-bottom: 8px;
 }
+
+/* ── Charge location row ─────────────────────────────────────────────────────── */
+.charge-location-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 2px 3px;
+  border-top: 1px solid var(--border);
+  cursor: pointer;
+  margin-top: 6px;
+}
+.charge-loc-name {
+  font-size: 12px;
+  color: var(--teal);
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.charge-loc-edit {
+  font-size: 12px;
+  opacity: .5;
+}
+.charge-loc-add {
+  font-size: 12px;
+  color: var(--muted);
+  opacity: .6;
+}

@@ -209,6 +209,7 @@ document.addEventListener('DOMContentLoaded', () => {
   _restoreSettingsSections();
   initActionsPanel();
   initNotifPanel();
+  loadKnownLocations();
   _fetchNotifCache();
   checkAutoBackup();
 });
@@ -765,6 +766,13 @@ function connect() {
           }
           sessionStorage.setItem('srv_start', msg.startedAt);
         }
+        // Detecta fim de recarga → tenta auto-tag de localização via GPS
+        const newChgState = msg.data?.charging_state;
+        if (newChgState && _prevChargingState === 'Carregando' && newChgState !== 'Carregando') {
+          _tryAutoTagChargeLocation();
+        }
+        if (newChgState) _prevChargingState = newChgState;
+
         deepMerge(state, msg.data);
         lastUpdateMs = Date.now();
         renderAll();
@@ -926,6 +934,11 @@ const filterState = {
 };
 let cachedCharges = null;
 let cachedTrips   = null;
+let _knownLocations    = [];
+let _locPickerTs       = 0;
+let _locPickerLat      = null;
+let _locPickerLng      = null;
+let _prevChargingState = null;   // para detectar fim de recarga no WS
 
 // ── Cache local — IndexedDB ────────────────────────────────────────────────
 const _IDB_NAME = 'ecotrip-trips';
@@ -995,6 +1008,12 @@ function _idbClearStore(store) {
     tx.oncomplete = res;
     tx.onerror    = e => rej(e.target.error);
   }));
+}
+
+async function loadKnownLocations() {
+  try {
+    _knownLocations = await apiFetch('/api/charge-locations').then(r => r.json());
+  } catch (_) { _knownLocations = []; }
 }
 
 // ── Barra de progresso de sync ─────────────────────────────────────────────
@@ -1548,6 +1567,34 @@ function loadCharges() {
     .catch(() => { if (!cachedCharges) list.innerHTML = filterChipsHTML('charges') + '<div class="empty">Erro ao carregar.</div>'; });
 }
 
+// Tenta capturar GPS e auto-tagging o local da recarga mais recente
+function _tryAutoTagChargeLocation() {
+  if (!navigator.geolocation) return;
+  if (!cachedCharges?.length) return;
+  const latest = cachedCharges[0];
+  if (!latest?.timestamp_ms) return;
+  // Só tenta se ainda sem nome
+  if (latest.location_name) return;
+
+  navigator.geolocation.getCurrentPosition(pos => {
+    const { latitude: lat, longitude: lng } = pos.coords;
+    apiFetch(`/api/charges/${latest.timestamp_ms}/location`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ lat, lng }),
+    }).then(r => r.json()).then(updated => {
+      if (updated.location_name) {
+        // Atualiza cache local
+        latest.location_name = updated.location_name;
+        latest.location_lat  = updated.location_lat;
+        latest.location_lng  = updated.location_lng;
+        _idbPutMany('charges', [latest]).catch(() => {});
+        if (activePanel === 'charges') renderCharges();
+      }
+    }).catch(() => {});
+  }, null, { timeout: 15000, maximumAge: 60000 });
+}
+
 function renderCharges() {
   const list = document.getElementById('charges-list');
   if (!list) return;
@@ -1607,6 +1654,11 @@ function renderCharges() {
     <div class="trip-metric"><div class="trip-metric-val" style="color:var(--muted)">${pct(c.soc_start)}</div><div class="trip-metric-lbl">SOC início</div></div>
     <div class="trip-metric"><div class="trip-metric-val ${col}">${pct(c.soc_end)}</div><div class="trip-metric-lbl">SOC fim</div></div>
     <div class="trip-metric"><div class="trip-metric-val ${col}">+${delta.toFixed(0)}%</div><div class="trip-metric-lbl">Δ SOC</div></div>
+  </div>
+  <div class="charge-location-row" onclick="openLoc(${ts})">
+    ${c.location_name
+      ? `<span class="charge-loc-name">📍 ${c.location_name}</span><span class="charge-loc-edit">✏️</span>`
+      : `<span class="charge-loc-add">📍 Adicionar local</span>`}
   </div>
 </div>`;
   }).join('');
@@ -3392,6 +3444,117 @@ window.doRenameConfirm = async function() {
     showToast('⏳ Nome salvo — aguardando o carro confirmar');
   } catch (_) {
     showToast('✗ Erro ao salvar nome');
+  }
+};
+
+// ── Location picker ───────────────────────────────────────────────────────────
+window.openLoc = function(ts) {
+  _locPickerTs  = ts;
+  _locPickerLat = null;
+  _locPickerLng = null;
+  const charge = cachedCharges?.find(c => c.timestamp_ms === ts);
+  const modal  = document.getElementById('loc-picker');
+  if (!modal) return;
+
+  document.getElementById('loc-picker-date').textContent = charge ? fmtDate(charge.timestamp || '') : '';
+  const nameInput = document.getElementById('loc-name-input');
+  nameInput.value = charge?.location_name || '';
+
+  // Popula datalist com locais favoritos
+  const dl = document.getElementById('loc-datalist');
+  dl.innerHTML = _knownLocations.map(l => `<option value="${l.name}">`).join('');
+
+  // Se já tem GPS salvo, preenche
+  if (charge?.location_lat && charge?.location_lng) {
+    _locPickerLat = charge.location_lat;
+    _locPickerLng = charge.location_lng;
+    document.getElementById('loc-gps-status').textContent = `GPS: ${charge.location_lat.toFixed(5)}, ${charge.location_lng.toFixed(5)}`;
+    document.getElementById('loc-save-known').checked = false;
+  } else {
+    document.getElementById('loc-gps-status').textContent = '';
+    document.getElementById('loc-save-known').checked = false;
+  }
+
+  modal.style.display = 'flex';
+  setTimeout(() => nameInput.focus(), 80);
+};
+
+window.closeLoc = function() {
+  const modal = document.getElementById('loc-picker');
+  if (modal) modal.style.display = 'none';
+  _locPickerTs = 0; _locPickerLat = null; _locPickerLng = null;
+};
+
+window.locCapGps = function() {
+  const btn = document.getElementById('loc-gps-btn');
+  const status = document.getElementById('loc-gps-status');
+  if (!navigator.geolocation) { status.textContent = 'GPS não disponível neste dispositivo.'; return; }
+  if (btn) btn.textContent = '⏳ Capturando…';
+  status.textContent = '';
+  navigator.geolocation.getCurrentPosition(pos => {
+    _locPickerLat = pos.coords.latitude;
+    _locPickerLng = pos.coords.longitude;
+    status.textContent = `GPS capturado ✓`;
+    if (btn) btn.textContent = `📍 ${_locPickerLat.toFixed(5)}, ${_locPickerLng.toFixed(5)}`;
+
+    // Sugerir local próximo se já existe
+    const nameInput = document.getElementById('loc-name-input');
+    if (!nameInput.value) {
+      // Haversine client-side (approximation para sugestão)
+      let best = null, bestD = Infinity;
+      for (const l of _knownLocations) {
+        if (!l.lat || !l.lng) continue;
+        const dLat = (l.lat - _locPickerLat) * Math.PI / 180;
+        const dLng = (l.lng - _locPickerLng) * Math.PI / 180;
+        const a = Math.sin(dLat/2)**2 + Math.cos(_locPickerLat*Math.PI/180)*Math.cos(l.lat*Math.PI/180)*Math.sin(dLng/2)**2;
+        const d = 6371000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        if (d < 200 && d < bestD) { best = l; bestD = d; }
+      }
+      if (best) {
+        nameInput.value = best.name;
+        status.textContent += ` · Sugestão: ${best.name}`;
+      }
+    }
+  }, err => {
+    if (btn) btn.textContent = '📍 Capturar minha localização atual';
+    status.textContent = err.code === 1 ? 'Permissão negada.' : 'Não foi possível obter GPS.';
+  }, { timeout: 15000, maximumAge: 30000 });
+};
+
+window.saveLoc = async function() {
+  const name      = document.getElementById('loc-name-input').value.trim();
+  const saveKnown = document.getElementById('loc-save-known').checked;
+  const ts        = _locPickerTs;
+  if (!ts) return;
+
+  try {
+    const body = { name, save_known: saveKnown };
+    if (_locPickerLat != null) body.lat = _locPickerLat;
+    if (_locPickerLng != null) body.lng = _locPickerLng;
+
+    const updated = await apiFetch(`/api/charges/${ts}/location`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then(r => r.json());
+
+    // Atualiza cache local
+    if (cachedCharges) {
+      const idx = cachedCharges.findIndex(c => c.timestamp_ms === ts);
+      if (idx !== -1) {
+        cachedCharges[idx].location_name = updated.location_name ?? null;
+        cachedCharges[idx].location_lat  = updated.location_lat  ?? null;
+        cachedCharges[idx].location_lng  = updated.location_lng  ?? null;
+        _idbPutMany('charges', [cachedCharges[idx]]).catch(() => {});
+      }
+    }
+
+    if (saveKnown) await loadKnownLocations();  // reload list
+    closeLoc();
+    renderCharges();
+    showToast('📍 Local salvo');
+  } catch (e) {
+    showToast('✗ Erro ao salvar local');
   }
 };
 
