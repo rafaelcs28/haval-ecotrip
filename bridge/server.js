@@ -774,6 +774,9 @@ app.post('/api/known-places', (req, res) => {
   const { name, lat, lng, radius_m } = req.body || {};
   if (!name?.trim() || lat == null || lng == null)
     return res.status(400).json({ error: 'name, lat, lng obrigatórios' });
+  // Rejeita nome duplicado (case-insensitive) para evitar entradas repetidas
+  const dup = knownPlaces.find(p => p.name.trim().toLowerCase() === name.trim().toLowerCase());
+  if (dup) return res.status(409).json({ error: 'duplicate', existing: dup });
   const r = Math.max(50, Math.min(2000, parseInt(radius_m) || 200));
   const place = { id: Date.now(), name: name.trim(), lat, lng, radius_m: r };
   knownPlaces.push(place);

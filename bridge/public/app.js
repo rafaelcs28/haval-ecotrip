@@ -4090,8 +4090,8 @@ let _kpData = [];           // cache local da lista
 async function loadKnownPlaces() {
   try {
     const r = await apiFetch('/api/known-places');
-    _kpData = await r.json();
-  } catch (_) { _kpData = []; }
+    if (r.ok) _kpData = await r.json();
+  } catch (_) {}   // mantém _kpData anterior se rede falhar
   _renderKnownPlacesList();
 }
 
@@ -4119,9 +4119,10 @@ window.openKpModal = function(id) {
   _kpEditId = id || null;
   const place = id ? _kpData.find(p => p.id === id) : null;
   document.getElementById('kp-modal-title').textContent = place ? 'Editar local' : 'Novo local';
-  document.getElementById('kp-name-input').value  = place?.name      || '';
-  document.getElementById('kp-radius-input').value = place?.radius_m || 200;
+  document.getElementById('kp-name-input').value    = place?.name      || '';
+  document.getElementById('kp-radius-input').value  = place?.radius_m  || 200;
   document.getElementById('kp-radius-val').textContent = (place?.radius_m || 200) + ' m';
+  document.getElementById('kp-search-input').value  = '';   // limpa busca sempre
   document.getElementById('kp-modal').style.display = 'flex';
 
   // Inicializa mapa Leaflet
@@ -4188,6 +4189,8 @@ window.kpSearchAddress = async function() {
 
 window.closeKpModal = function() {
   document.getElementById('kp-modal').style.display = 'none';
+  document.getElementById('kp-search-input').value = '';
+  _kpEditId = null;
 };
 
 window.saveKnownPlace = async function() {
@@ -4197,16 +4200,21 @@ window.saveKnownPlace = async function() {
   const ll  = _kpMarker.getLatLng();
   const r   = parseInt(document.getElementById('kp-radius-input').value) || 200;
   const body = { name, lat: ll.lat, lng: ll.lng, radius_m: r };
+  // Desabilita botão para evitar duplo-submit
+  const btn = document.querySelector('#kp-modal button[onclick="saveKnownPlace()"]');
+  if (btn) btn.disabled = true;
   try {
     const resp = await apiFetch(
       _kpEditId ? `/api/known-places/${_kpEditId}` : '/api/known-places',
       { method: _kpEditId ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
     );
+    if (resp.status === 409) { showToast('Já existe um local com esse nome'); return; }
     if (!resp.ok) { showToast('✗ Erro ao salvar'); return; }
     showToast(_kpEditId ? '✓ Local atualizado' : '✓ Local salvo');
     closeKpModal();
     loadKnownPlaces();
   } catch (_) { showToast('✗ Erro de conexão'); }
+  finally { if (btn) btn.disabled = false; }
 };
 
 window.deleteKnownPlace = async function(id) {
