@@ -10,6 +10,7 @@ let lastUpdateMs = null;
 let wsRetryDelay = 1000;
 let ws = null;
 let tickInterval = null;
+let activePanel  = 'dash';
 
 // ── Geocode cache (sessionStorage, zoom=10 → cidade) ─────────────────────────
 let geoCache = {};
@@ -682,8 +683,13 @@ function switchTab(btn, callback) {
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
   btn.classList.add('active');
-  document.getElementById('panel-' + btn.dataset.panel).classList.add('active');
+  activePanel = btn.dataset.panel;
+  document.getElementById('panel-' + activePanel).classList.add('active');
   if (callback) callback();
+  // Leaflet precisa recalcular o tamanho ao tornar-se visível
+  if (activePanel === 'dash' && dashMap) {
+    setTimeout(() => dashMap.invalidateSize(), 50);
+  }
 }
 
 // ── WebSocket ─────────────────────────────────────────────────────────────────
@@ -2261,7 +2267,16 @@ let dashMap             = null;
 let dashMarker          = null;
 let _dashMapLastLat     = 0;
 let _dashMapLastLng     = 0;
+let _dashMapLastTs      = 0;
 let _dashMapGeocodeTimer = null;
+let _dashMapTsTimer     = null;
+
+function _startDashMapTsTimer() {
+  clearInterval(_dashMapTsTimer);
+  _dashMapTsTimer = setInterval(() => {
+    if (_dashMapLastTs) setText('d-map-ts', relTime(_dashMapLastTs) + ' atrás');
+  }, 30_000);
+}
 
 function updateDashMap(lat, lng, ts) {
   if (!lat || !lng || lat === 0 || lng === 0) return;
@@ -2270,6 +2285,8 @@ function updateDashMap(lat, lng, ts) {
   if (card) card.style.display = '';
   const el = document.getElementById('d-car-map');
   if (!el) return;
+
+  const pos = [lat, lng];
 
   // Cria o mapa Leaflet uma única vez
   if (!dashMap) {
@@ -2283,10 +2300,13 @@ function updateDashMap(lat, lng, ts) {
       maxZoom: 19,
       attribution: '© OpenStreetMap © CARTO',
     }).addTo(dashMap);
+    // Primeira posição: define vista + zoom
+    dashMap.setView(pos, 15);
+    _startDashMapTsTimer();
+  } else {
+    // Atualizações seguintes: pan suave sem alterar o zoom do usuário
+    dashMap.panTo(pos, { animate: true, duration: 0.5 });
   }
-
-  const pos = [lat, lng];
-  dashMap.setView(pos, 15);
 
   if (dashMarker) dashMarker.setLatLng(pos);
   else {
@@ -2296,7 +2316,10 @@ function updateDashMap(lat, lng, ts) {
     dashMarker.bindPopup('🚗 Haval H6 PHEV34');
   }
 
-  if (ts) setText('d-map-ts', relTime(ts) + ' atrás');
+  if (ts) {
+    _dashMapLastTs = ts;
+    setText('d-map-ts', relTime(ts) + ' atrás');
+  }
 
   // Reverse geocoding — só quando a posição muda de forma significativa (>50 m ~= 0.0005°)
   const moved = Math.abs(lat - _dashMapLastLat) > 0.0005 || Math.abs(lng - _dashMapLastLng) > 0.0005;
