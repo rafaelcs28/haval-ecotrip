@@ -1722,6 +1722,7 @@ function renderCharges() {
       <span class="charge-kwh-badge">${f2(kwh)} kWh</span>
       <div style="display:flex;gap:4px">
         <button class="cost-edit-btn" onclick="openChargeTimeline(${ts})" title="Ver linha do tempo">📈</button>
+        <button class="cost-edit-btn" onclick="openMergeChargeModal(${ts})" title="Unir recargas">🔗</button>
         <button class="cost-edit-btn" onclick="toggleChargerEdit(${ts})" title="kWh do carregador">🔌</button>
         <button class="cost-edit-btn" onclick="toggleChargeEdit(${ts})" title="Editar custo">💰</button>
       </div>
@@ -2667,6 +2668,110 @@ function closeChargeTimeline() {
   document.getElementById('charge-timeline').style.display = 'none';
   [_chrgChartPower, _chrgChartKwh, _chrgChartSoc, _chrgChartTemp].forEach(c => c?.destroy());
   _chrgChartPower = null; _chrgChartKwh = null; _chrgChartSoc = null; _chrgChartTemp = null;
+}
+
+// ── Unir recargas ─────────────────────────────────────────────────────────────
+function openMergeChargeModal(ts) {
+  const charges = cachedCharges || [];
+  const chargeB = charges.find(c => (c.timestamp_ms || 0) === ts);
+  if (!chargeB) return;
+
+  document.getElementById('merge-charge-modal')?.remove();
+  const modal = document.createElement('div');
+  modal.id = 'merge-charge-modal';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:9999;overflow-y:auto;padding:16px;-webkit-overflow-scrolling:touch';
+
+  const fmtC = c => {
+    const kwh  = f2(c.energy_kwh || 0);
+    const soc  = `${(c.soc_start||0).toFixed(0)}% → ${(c.soc_end||0).toFixed(0)}%`;
+    const loc  = c.location_name ? ` · 📍 ${c.location_name}` : '';
+    return `<strong>${fmtDate(c.timestamp)}</strong> · ${kwh} kWh · ${soc}${loc}`;
+  };
+
+  // Candidatos ordenados por proximidade temporal — mais próximos primeiro
+  const candidates = charges
+    .filter(c => (c.timestamp_ms || 0) !== ts)
+    .sort((a, b) =>
+      Math.abs((a.timestamp_ms || 0) - ts) - Math.abs((b.timestamp_ms || 0) - ts)
+    );
+
+  let rows = '';
+  for (const c of candidates.slice(0, 30)) {
+    const tsMerge = c.timestamp_ms || 0;
+    const totalKwh = f2((chargeB.energy_kwh || 0) + (c.energy_kwh || 0));
+    const [socStart, socEnd] = (c.timestamp_ms || 0) < ts
+      ? [`${(c.soc_start||0).toFixed(0)}%`, `${(chargeB.soc_end||0).toFixed(0)}%`]
+      : [`${(chargeB.soc_start||0).toFixed(0)}%`, `${(c.soc_end||0).toFixed(0)}%`];
+    rows += `<button onclick="confirmMergeCharge(${ts},${tsMerge})"
+      style="width:100%;background:#0f172a;border:1px solid #1e293b;border-radius:8px;padding:10px 12px;text-align:left;cursor:pointer;color:#e2e8f0;font-size:12px;line-height:1.4;margin-bottom:6px">
+      <div>${fmtC(c)}</div>
+      <div style="color:#7FBADC;font-size:11px;margin-top:3px">→ resultado: ${totalKwh} kWh · SOC ${socStart} → ${socEnd}</div>
+    </button>`;
+  }
+  if (!rows) rows = '<div style="color:#5B7394;font-size:12px;padding:8px 0">Nenhuma outra recarga disponível para unir.</div>';
+
+  modal.innerHTML = `<div style="max-width:500px;margin:0 auto">
+    <div style="color:#7FBADC;font-weight:700;font-size:14px;margin-bottom:12px">🔗 Unir com outra recarga</div>
+    <div style="background:#0f172a;border:1px solid #22d3ee44;border-radius:10px;padding:10px 12px;margin-bottom:14px">
+      <div style="font-size:10px;color:#64748b;margin-bottom:4px;letter-spacing:.06em">RECARGA SELECIONADA</div>
+      <div style="font-size:13px;color:#e2e8f0">${fmtC(chargeB)}</div>
+    </div>
+    <div style="font-size:10px;color:#64748b;letter-spacing:.06em;margin-bottom:8px">ESCOLHA A OUTRA RECARGA</div>
+    ${rows}
+    <div style="font-size:10px;color:#475569;margin-top:12px;padding:10px;background:#0f172a;border-radius:8px;line-height:1.5">
+      ⚠️ A fusão soma duração e energia injetada, preserva local, kWh do carregador, custo e temperatura.
+      O SOC inicial virá da recarga mais antiga e o SOC final da mais nova. Esta ação não pode ser desfeita.
+    </div>
+    <button onclick="document.getElementById('merge-charge-modal').remove()"
+      style="width:100%;margin-top:10px;padding:11px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:#94a3b8;font-size:13px;cursor:pointer">
+      Cancelar
+    </button>
+  </div>`;
+  document.body.appendChild(modal);
+}
+
+function confirmMergeCharge(tsB, tsA) {
+  const charges = cachedCharges || [];
+  const A = charges.find(c => (c.timestamp_ms || 0) === tsA);
+  const B = charges.find(c => (c.timestamp_ms || 0) === tsB);
+  if (!A || !B) return;
+  const dateA   = fmtDate(A.timestamp);
+  const dateB   = fmtDate(B.timestamp);
+  const totalKwh = f2((A.energy_kwh || 0) + (B.energy_kwh || 0));
+  const [early, late] = (A.timestamp_ms || 0) < (B.timestamp_ms || 0) ? [A, B] : [B, A];
+  if (!confirm(
+    `Unir as duas recargas?\n\n` +
+    `• ${fmtDate(early.timestamp)}  (${f2(early.energy_kwh||0)} kWh)\n` +
+    `• ${fmtDate(late.timestamp)}  (${f2(late.energy_kwh||0)} kWh)\n\n` +
+    `Resultado: ${totalKwh} kWh · SOC ${(early.soc_start||0).toFixed(0)}% → ${(late.soc_end||0).toFixed(0)}%\n\n` +
+    `Esta ação não pode ser desfeita.`
+  )) return;
+  document.getElementById('merge-charge-modal')?.remove();
+  executeMergeCharge(tsA, tsB);
+}
+
+async function executeMergeCharge(tsA, tsB) {
+  try {
+    const r = await apiFetch('/api/charges/merge', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ tsA, tsB }),
+    });
+    const d = await r.json();
+    if (!d.ok) { alert('Erro ao unir recargas: ' + (d.error || '?')); return; }
+
+    // Atualiza IDB: remove a recarga absorvida, upsert a unificada
+    const mergedTs  = d.merged.timestamp_ms;
+    const removedTs = mergedTs === tsA ? tsB : tsA;
+    await _idbDelete('charges', removedTs);
+    await _idbPutMany('charges', [d.merged]);
+
+    cachedCharges = (await _idbGetAll('charges'))
+      .sort((a, b) => (b.timestamp_ms || 0) - (a.timestamp_ms || 0));
+    renderCharges();
+  } catch (e) {
+    alert('Erro ao unir recargas: ' + e.message);
+  }
 }
 
 // ── Eficiência por faixa de velocidade ───────────────────────────────────────

@@ -779,6 +779,120 @@ app.get('/api/charges/:ts/samples', (req, res) => {
   } catch (_) { res.json([]); }
 });
 
+// ── Unir recargas ─────────────────────────────────────────────────────────────
+// POST /api/charges/merge  { tsA, tsB }
+// Funde duas sessões de recarga em uma só.
+// - timestamp_ms da sessão mais antiga é preservado (ID da sessão unificada)
+// - duration_sec e energy_kwh são somados
+// - soc_start = sessão mais antiga; soc_end = sessão mais nova
+// - location, charger_kwh, cost_override, avg_temp_c: preservados do que existir
+// - amostras de linha do tempo: concatenadas (late offset por duration da early)
+app.post('/api/charges/merge', (req, res) => {
+  try {
+    const { tsA, tsB } = req.body;
+    const numA = parseInt(tsA, 10), numB = parseInt(tsB, 10);
+    if (!numA || !numB || numA === numB) return res.status(400).json({ error: 'tsA e tsB devem ser diferentes e válidos' });
+
+    const idxA = chargesArr.findIndex(c => (c.timestamp_ms || 0) === numA);
+    const idxB = chargesArr.findIndex(c => (c.timestamp_ms || 0) === numB);
+    if (idxA < 0) return res.status(404).json({ error: `recarga não encontrada: ${numA}` });
+    if (idxB < 0) return res.status(404).json({ error: `recarga não encontrada: ${numB}` });
+
+    const cA = chargesArr[idxA], cB = chargesArr[idxB];
+    // Ordem cronológica
+    const [early, late] = cA.timestamp_ms <= cB.timestamp_ms ? [cA, cB] : [cB, cA];
+
+    // Campos numéricos — soma
+    const mergedDurationSec = (early.duration_sec || 0) + (late.duration_sec  || 0);
+    const mergedEnergyKwh   = parseFloat(((early.energy_kwh  || 0) + (late.energy_kwh  || 0)).toFixed(4));
+    const mergedAvgPowerKw  = mergedDurationSec > 0
+      ? parseFloat((mergedEnergyKwh / (mergedDurationSec / 3600)).toFixed(4)) : 0;
+
+    // charger_kwh: soma se ambas têm; caso contrário usa o que existir
+    let mergedChargerKwh = null;
+    if (early.charger_kwh > 0 && late.charger_kwh > 0) {
+      mergedChargerKwh = parseFloat(((early.charger_kwh || 0) + (late.charger_kwh || 0)).toFixed(4));
+    } else if (early.charger_kwh > 0) {
+      mergedChargerKwh = early.charger_kwh;
+    } else if (late.charger_kwh > 0) {
+      mergedChargerKwh = late.charger_kwh;
+    }
+
+    // cost_override: soma totais se ambas têm; caso contrário usa o que existir
+    let mergedCostOverride = null;
+    if (early.cost_override?.total > 0 && late.cost_override?.total > 0) {
+      const total     = parseFloat((early.cost_override.total + late.cost_override.total).toFixed(2));
+      const perKwh    = mergedEnergyKwh > 0 ? parseFloat((total / mergedEnergyKwh).toFixed(4)) : 0;
+      mergedCostOverride = { total, perKwh };
+    } else {
+      mergedCostOverride = early.cost_override || late.cost_override || null;
+    }
+
+    // avg_temp_c: média ponderada pela duração se ambas têm; caso contrário usa o que existir
+    let mergedAvgTemp = null;
+    if (early.avg_temp_c != null && late.avg_temp_c != null) {
+      const totalSec = mergedDurationSec || 1;
+      mergedAvgTemp  = parseFloat(
+        ((early.avg_temp_c * (early.duration_sec || 0) + late.avg_temp_c * (late.duration_sec || 0)) / totalSec)
+        .toFixed(1)
+      );
+    } else if (early.avg_temp_c != null) { mergedAvgTemp = early.avg_temp_c; }
+    else if (late.avg_temp_c != null)    { mergedAvgTemp = late.avg_temp_c;  }
+
+    // Location: prefere a mais antiga; fallback para a mais nova
+    const locName  = early.location_name || late.location_name  || null;
+    const locLat   = early.location_lat  != null ? early.location_lat  : (late.location_lat  || null);
+    const locLng   = early.location_lng  != null ? early.location_lng  : (late.location_lng  || null);
+
+    // Objeto final da recarga unificada
+    const merged = {
+      ...early,
+      duration_sec: mergedDurationSec,
+      energy_kwh:   mergedEnergyKwh,
+      avg_power_kw: mergedAvgPowerKw,
+      soc_start:    early.soc_start,
+      soc_end:      late.soc_end,
+      _updated_ms:  Date.now(),
+    };
+    if (locName != null)           merged.location_name  = locName;
+    if (locLat  != null)           merged.location_lat   = locLat;
+    if (locLng  != null)           merged.location_lng   = locLng;
+    if (mergedChargerKwh != null)  merged.charger_kwh    = mergedChargerKwh;
+    else                           delete merged.charger_kwh;
+    if (mergedCostOverride != null) merged.cost_override = mergedCostOverride;
+    else                            delete merged.cost_override;
+    if (mergedAvgTemp != null)     merged.avg_temp_c     = mergedAvgTemp;
+    else                           delete merged.avg_temp_c;
+
+    // Amostras da linha do tempo: early + late com offset de t para continuar após a early
+    const earlyFile = path.join(CHARGE_TELEMETRY_DIR, `${early.timestamp_ms}.json`);
+    const lateFile  = path.join(CHARGE_TELEMETRY_DIR, `${late.timestamp_ms}.json`);
+    let earlySamples = [], lateSamples = [];
+    try { if (fs.existsSync(earlyFile)) earlySamples = JSON.parse(fs.readFileSync(earlyFile, 'utf8')); } catch (_) {}
+    try { if (fs.existsSync(lateFile))  lateSamples  = JSON.parse(fs.readFileSync(lateFile,  'utf8')); } catch (_) {}
+    if (earlySamples.length || lateSamples.length) {
+      const offset   = early.duration_sec || 0;
+      const lateOff  = lateSamples.map(s => ({ ...s, t: (s.t || 0) + offset }));
+      const combined = [...earlySamples, ...lateOff];
+      try { fs.writeFileSync(earlyFile, JSON.stringify(combined)); } catch (_) {}
+      try { if (fs.existsSync(lateFile)) fs.unlinkSync(lateFile); } catch (_) {}
+    }
+
+    // Actualiza chargesArr: remove late, substitui early pelo merged
+    chargesArr = chargesArr.filter(c => (c.timestamp_ms || 0) !== late.timestamp_ms);
+    const earlyIdx = chargesArr.findIndex(c => (c.timestamp_ms || 0) === early.timestamp_ms);
+    if (earlyIdx >= 0) chargesArr[earlyIdx] = merged;
+    else chargesArr.unshift(merged);
+
+    scheduleChargesFlush();
+    console.log(`[merge-charges] ${early.timestamp_ms} + ${late.timestamp_ms} → ${early.timestamp_ms} (${mergedEnergyKwh} kWh, ${mergedDurationSec}s)`);
+    res.json({ ok: true, merged });
+  } catch (e) {
+    console.error('[merge-charges]', e);
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
 // ── Locais de recarga ─────────────────────────────────────────────────────────
 app.get('/api/charge-locations', (_req, res) => res.json(chargeLocations));
 
