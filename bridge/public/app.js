@@ -597,6 +597,7 @@ function deepMerge(target, source) {
 }
 
 // ── Service Worker & Push ─────────────────────────────────────────────────────
+let refreshing = false;   // escopo de módulo — usado também em hardRefresh()
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/sw.js').then(async reg => {
     // Tenta subscrever push sem bloquear a inicialização
@@ -608,7 +609,6 @@ if ('serviceWorker' in navigator) {
     if (e.data?.type === 'SW_UPDATED') location.reload();
   });
   // Garante reload se o controlador mudar (ex: primeiro SW ou skipWaiting)
-  let refreshing = false;
   navigator.serviceWorker.addEventListener('controllerchange', () => {
     if (!refreshing) { refreshing = true; location.reload(); }
   });
@@ -616,6 +616,10 @@ if ('serviceWorker' in navigator) {
 
 // ── Hard refresh — limpa todos os caches SW e recarrega ───────────────────────
 async function hardRefresh() {
+  // Evita que o controllerchange (disparado pelo unregister) chame location.reload()
+  // enquanto hardRefresh ainda está em andamento — isso causava dupla-navegação no iOS PWA
+  refreshing = true;
+
   // 1. Apaga todos os caches do SW
   if ('caches' in window) {
     const keys = await caches.keys();
@@ -626,9 +630,8 @@ async function hardRefresh() {
     const regs = await navigator.serviceWorker.getRegistrations();
     await Promise.all(regs.map(r => r.unregister()));
   }
-  // 3. Navega para URL com timestamp — iOS Safari não pode usar cache pois a URL mudou;
-  //    o SW (já desregistrado) não intercepta; o servidor entrega index.html fresco.
-  window.location.replace('/?_r=' + Date.now());
+  // 3. Volta para '/' limpa — sem ?_r= para não sujar a URL salva pelo PWA no iPhone
+  window.location.replace('/');
 }
 
 function urlBase64ToUint8Array(b64) {
