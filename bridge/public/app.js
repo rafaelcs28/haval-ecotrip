@@ -889,7 +889,7 @@ function fmtDate(ts) {
 
 // ── Filtros ───────────────────────────────────────────────────────────────────
 const filterState = {
-  charges: { active: 'today', customFrom: '', customTo: '' },
+  charges: { active: 'today', customFrom: '', customTo: '', location: null },
   hist:    { active: 'all',   customFrom: '', customTo: '', search: '' },
   auto:    { active: 'today', customFrom: '', customTo: '', search: '' },
   logs:    { active: 'all',   type: 'all',   customFrom: '', customTo: '' },
@@ -1152,6 +1152,36 @@ function setFilterDates(tabId) {
   if (fe) filterState[tabId].customFrom = fe.value;
   if (te) filterState[tabId].customTo   = te.value;
   setFilter(tabId, 'custom');
+}
+
+// ── Filtro por local (aba recargas) ───────────────────────────────────────────
+let _chargesLocList = [];  // índice estável para onclick (evita escape de strings)
+
+window.setChargesLocation = function(idx) {
+  filterState.charges.location = idx < 0 ? null : (_chargesLocList[idx] ?? null);
+  renderCharges();
+};
+
+function _locationChipsHTML() {
+  // Extrai locais únicos de TODAS as recargas (independente do filtro de data)
+  const all = cachedCharges || [];
+  const seen = new Set();
+  _chargesLocList = [];
+  for (const c of all) {
+    const n = c.location_name || null;
+    if (n && !seen.has(n)) { seen.add(n); _chargesLocList.push(n); }
+  }
+  _chargesLocList.sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  if (!_chargesLocList.length) return '';
+
+  const cur = filterState.charges.location;
+  const chip = (label, idx) => {
+    const active = (idx < 0 && cur === null) || (idx >= 0 && _chargesLocList[idx] === cur);
+    return `<button class="filter-chip${active ? ' active' : ''}" onclick="setChargesLocation(${idx})">${label}</button>`;
+  };
+  let chips = chip('Todos locais', -1);
+  _chargesLocList.forEach((n, i) => { chips += chip('📍 ' + n, i); });
+  return `<div class="filter-chips" style="margin-top:4px">${chips}</div>`;
 }
 
 window.setSearchQuery = function(tabId, value) {
@@ -1600,10 +1630,17 @@ function renderCharges() {
   const list = document.getElementById('charges-list');
   if (!list) return;
   const [startMs, endMs] = getFilterRange('charges');
-  const charges = filterItems(cachedCharges || [], 'timestamp', startMs, endMs);
+  const byDate = filterItems(cachedCharges || [], 'timestamp', startMs, endMs);
+
+  // Filtro por local (aplicado sobre o resultado do filtro de data)
+  const locFilter = filterState.charges.location;
+  const charges   = locFilter
+    ? byDate.filter(c => (c.location_name || null) === locFilter)
+    : byDate;
+
   const socColor = d => d >= 50 ? 'green' : d >= 25 ? 'teal' : 'muted';
 
-  let html = filterChipsHTML('charges');
+  let html = filterChipsHTML('charges') + _locationChipsHTML();
   if (!charges.length) {
     list.innerHTML = html + '<div class="empty">Nenhuma recarga no período.</div>';
     return;
@@ -3463,6 +3500,9 @@ async function loadStats() {
   // ── 4. Split elétrico / híbrido ──────────────────────────────────────────
   html += _statsElectricHTML(trips);
 
+  // ── 5. Locais de recarga — ranking por eficiência ────────────────────────
+  html += _statsChargingLocationsHTML(cachedCharges || []);
+
   html += '</div>';
   container.innerHTML = html;
 }
@@ -3737,6 +3777,82 @@ function _statsElectricHTML(trips) {
   });
 
   return _statsCard('⚡ Split elétrico / híbrido', bar + summary + rows);
+}
+
+// ── Ranking de locais de recarga por eficiência ───────────────────────────────
+function _statsChargingLocationsHTML(charges) {
+  if (!charges.length) return '';
+
+  const chargerMap = _chargerKwhMap();
+  const priceKwh   = state.price_kwh || 0;
+
+  // Agrupa por local (null → '(sem local registrado)')
+  const groups = {};
+  for (const c of charges) {
+    const loc = c.location_name || '(sem local registrado)';
+    if (!groups[loc]) groups[loc] = { sessions: 0, chargeKwh: 0, chargerKwh: 0, durationSec: 0, costBrl: 0, withCharger: 0 };
+    const g = groups[loc];
+    g.sessions++;
+    g.chargeKwh   += c.energy_kwh   || 0;
+    g.durationSec += c.duration_sec || 0;
+    const ck = chargerMap[c.timestamp_ms] || 0;
+    if (ck > 0) { g.chargerKwh += ck; g.withCharger++; }
+    // custo: override manual ou price_kwh
+    const ov = _chargeCostOverride(c.timestamp_ms || 0);
+    g.costBrl += ov ? ov.total : (priceKwh * (c.energy_kwh || 0));
+  }
+
+  // Calcula métricas e ordena: com dado de perda primeiro (menor % perda), depois por kWh
+  const locs = Object.entries(groups).map(([name, g]) => {
+    const lossKwh  = g.chargerKwh > 0 ? Math.max(0, g.chargerKwh - g.chargeKwh) : 0;
+    const lossPct  = g.chargerKwh > 0 ? lossKwh / g.chargerKwh * 100 : null;
+    const effPct   = g.chargerKwh > 0 ? (1 - lossKwh / g.chargerKwh) * 100 : null;
+    const avgPwr   = g.durationSec > 0 ? g.chargeKwh / (g.durationSec / 3600) : 0;
+    const costPkwh = g.chargerKwh > 0 ? g.costBrl / g.chargerKwh
+                   : g.chargeKwh > 0  ? g.costBrl / g.chargeKwh : 0;
+    return { name, ...g, lossKwh, lossPct, effPct, avgPwr, costPkwh };
+  }).sort((a, b) => {
+    if (a.lossPct !== null && b.lossPct !== null) return a.lossPct - b.lossPct;
+    if (a.lossPct !== null) return -1;
+    if (b.lossPct !== null) return 1;
+    return b.chargeKwh - a.chargeKwh;
+  });
+
+  if (!locs.length) return '';
+
+  const medals = ['🥇', '🥈', '🥉'];
+  let rows = '';
+  locs.forEach((loc, i) => {
+    // Linha de perda / eficiência
+    let lossStr;
+    if (loc.lossPct !== null) {
+      const color = loc.lossPct < 5 ? '#4ade80' : loc.lossPct < 10 ? '#fbbf24' : '#f87171';
+      lossStr = `<span style="color:${color};font-weight:700">${f1(loc.lossPct)}% perda</span>`
+              + ` · <span style="color:${color}">${f1(loc.effPct)}% efic.</span>`
+              + ` · ${loc.withCharger}/${loc.sessions} c/ dado`;
+    } else {
+      lossStr = `<span style="color:#475569">sem dado de carregador</span> · ${loc.sessions} sessões`;
+    }
+
+    // Sub-linha: kWh, potência, custo
+    const kwhStr  = `${f2(loc.chargeKwh)} kWh injetados`;
+    const pwrStr  = loc.avgPwr > 0 ? ` · ${f1(loc.avgPwr)} kW médio` : '';
+    const costStr = loc.costPkwh > 0 ? ` · R$ ${f3(loc.costPkwh)}/kWh` : '';
+
+    const icon = loc.lossPct !== null && i < 3 ? medals[i] : '📍';
+    rows += _statsRow(icon, loc.name, `${f2(loc.chargeKwh)} kWh`,
+      kwhStr + pwrStr + costStr + '<br>' + lossStr);
+  });
+
+  // Nota informativa se algum local não tem dado de perda
+  const missingData = locs.some(l => l.lossPct === null);
+  const note = missingData
+    ? `<div style="font-size:10px;color:#475569;margin-top:10px;padding-top:8px;border-top:1px solid #0F1520">
+        🔌 Use o botão 🔌 em cada recarga para inserir o kWh do carregador e calcular a perda.
+       </div>`
+    : '';
+
+  return _statsCard('🔌 Locais de recarga — eficiência de carga', rows + note);
 }
 
 function adminLogout() {
