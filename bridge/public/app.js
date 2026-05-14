@@ -1662,9 +1662,9 @@ function renderCharges() {
 
   // ── Perda de carga (kWh carregador vs kWh injetado no carro) ────────────────
   const chargerMap    = _chargerKwhMap();
-  const withLoss      = charges.filter(c => (chargerMap[c.timestamp_ms] || 0) > 0);
-  const totalChrgrKwh = withLoss.reduce((s, c) => s + (chargerMap[c.timestamp_ms] || 0), 0);
-  const totalLossKwh  = withLoss.reduce((s, c) => s + Math.max(0, (chargerMap[c.timestamp_ms] || 0) - (c.energy_kwh || 0)), 0);
+  const withLoss      = charges.filter(c => _resolveChargerKwh(c, chargerMap) > 0);
+  const totalChrgrKwh = withLoss.reduce((s, c) => s + _resolveChargerKwh(c, chargerMap), 0);
+  const totalLossKwh  = withLoss.reduce((s, c) => s + Math.max(0, _resolveChargerKwh(c, chargerMap) - (c.energy_kwh || 0)), 0);
   const avgLossPct    = totalChrgrKwh > 0 ? (totalLossKwh / totalChrgrKwh * 100) : 0;
   const hasLossData   = withLoss.length > 0;
 
@@ -3226,6 +3226,16 @@ function _getChargerKwh(ts) {
   if (fromCache?.charger_kwh > 0) return fromCache.charger_kwh;
   return _chargerKwhMap()[ts] || 0;
 }
+/**
+ * Resolve charger_kwh para um objeto de recarga:
+ *   1. c.charger_kwh    — fonte do servidor (sincronizado via IndexedDB)
+ *   2. chargerMap[ts]   — localStorage (digitado neste dispositivo, pré-sync)
+ * Usar em loops que já têm o chargerMap em memória para evitar N leituras de localStorage.
+ */
+function _resolveChargerKwh(c, chargerMap) {
+  if ((c.charger_kwh || 0) > 0) return c.charger_kwh;
+  return (chargerMap[c.timestamp_ms] || 0);
+}
 function _setChargerKwh(ts, val) {
   // 1. localStorage — disponível imediatamente (mesmo offline)
   const m = _chargerKwhMap();
@@ -3885,13 +3895,18 @@ function _statsChargingLocationsHTML(charges) {
   const groups = {};
   for (const c of charges) {
     const loc = c.location_name || '(sem local registrado)';
-    if (!groups[loc]) groups[loc] = { sessions: 0, chargeKwh: 0, chargerKwh: 0, durationSec: 0, costBrl: 0, withCharger: 0, tempSum: 0, tempCount: 0 };
+    if (!groups[loc]) groups[loc] = { sessions: 0, chargeKwh: 0, chargerKwh: 0, chargeKwhWithData: 0, durationSec: 0, costBrl: 0, withCharger: 0, tempSum: 0, tempCount: 0 };
     const g = groups[loc];
     g.sessions++;
     g.chargeKwh   += c.energy_kwh   || 0;
     g.durationSec += c.duration_sec || 0;
-    const ck = chargerMap[c.timestamp_ms] || 0;
-    if (ck > 0) { g.chargerKwh += ck; g.withCharger++; }
+    // Fonte correta: c.charger_kwh (servidor/IDB) → localStorage
+    const ck = _resolveChargerKwh(c, chargerMap);
+    if (ck > 0) {
+      g.chargerKwh      += ck;
+      g.chargeKwhWithData += c.energy_kwh || 0;  // só sessões COM dado de carregador
+      g.withCharger++;
+    }
     // custo: override manual ou price_kwh
     const ov = _chargeCostOverride(c.timestamp_ms || 0);
     g.costBrl += ov ? ov.total : (priceKwh * (c.energy_kwh || 0));
@@ -3901,7 +3916,8 @@ function _statsChargingLocationsHTML(charges) {
 
   // Calcula métricas e ordena: com dado de perda primeiro (menor % perda), depois por kWh
   const locs = Object.entries(groups).map(([name, g]) => {
-    const lossKwh  = g.chargerKwh > 0 ? Math.max(0, g.chargerKwh - g.chargeKwh) : 0;
+    // Perda calculada apenas sobre sessões que têm AMBOS os valores (carregador + carro)
+    const lossKwh  = g.chargerKwh > 0 ? Math.max(0, g.chargerKwh - g.chargeKwhWithData) : 0;
     const lossPct  = g.chargerKwh > 0 ? lossKwh / g.chargerKwh * 100 : null;
     const effPct   = g.chargerKwh > 0 ? (1 - lossKwh / g.chargerKwh) * 100 : null;
     const avgPwr   = g.durationSec > 0 ? g.chargeKwh / (g.durationSec / 3600) : 0;
