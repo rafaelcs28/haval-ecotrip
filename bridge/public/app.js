@@ -887,10 +887,10 @@ function fmtDate(ts) {
 
 // ── Filtros ───────────────────────────────────────────────────────────────────
 const filterState = {
-  charges: { active: 'all', customFrom: '', customTo: '' },
-  hist:    { active: 'all', customFrom: '', customTo: '', search: '' },
-  auto:    { active: 'all', customFrom: '', customTo: '', search: '' },
-  logs:    { active: 'all', type: 'all', customFrom: '', customTo: '' },
+  charges: { active: 'today', customFrom: '', customTo: '' },
+  hist:    { active: 'all',   customFrom: '', customTo: '', search: '' },
+  auto:    { active: 'today', customFrom: '', customTo: '', search: '' },
+  logs:    { active: 'all',   type: 'all',   customFrom: '', customTo: '' },
 };
 let cachedCharges = null;
 let cachedEvents  = null;
@@ -1538,7 +1538,6 @@ function renderDash() {
 
 // ── Recargas ──────────────────────────────────────────────────────────────────
 function loadCharges() {
-  filterState.charges.active = 'today';
   const list = document.getElementById('charges-list');
   if (cachedCharges !== null) {
     renderCharges();
@@ -1601,6 +1600,14 @@ function renderCharges() {
   }, 0);
   const hasCost = totalCost > 0;
 
+  // ── Perda de carga (kWh carregador vs kWh injetado no carro) ────────────────
+  const chargerMap    = _chargerKwhMap();
+  const withLoss      = charges.filter(c => (chargerMap[c.timestamp_ms] || 0) > 0);
+  const totalChrgrKwh = withLoss.reduce((s, c) => s + (chargerMap[c.timestamp_ms] || 0), 0);
+  const totalLossKwh  = withLoss.reduce((s, c) => s + Math.max(0, (chargerMap[c.timestamp_ms] || 0) - (c.energy_kwh || 0)), 0);
+  const avgLossPct    = totalChrgrKwh > 0 ? (totalLossKwh / totalChrgrKwh * 100) : 0;
+  const hasLossData   = withLoss.length > 0;
+
   const cu = s => `<span class="chrg-unit">${s}</span>`;
   html += `<div class="charge-summary-card">
   <div class="card-title">Resumo — ${charges.length} sessão${charges.length !== 1 ? 'ões' : ''}</div>
@@ -1610,6 +1617,11 @@ function renderCharges() {
     <div class="metric"><div class="metric-value blue sm">${f1(avgPwr)}${cu(' kW')}</div><div class="metric-label">pot. média</div></div>
     ${hasCost ? `<div class="metric"><div class="metric-value green sm">${cu('R$ ')}${f2(totalCost)}</div><div class="metric-label">custo total</div></div>` : ''}
   </div>
+  ${hasLossData ? `<div class="metrics-row" style="margin-top:6px;border-top:1px solid rgba(248,113,113,0.18);padding-top:6px">
+    <div class="metric"><div class="metric-value sm" style="color:#f87171">${f2(totalLossKwh)}${cu(' kWh')}</div><div class="metric-label">perda total</div></div>
+    <div class="metric"><div class="metric-value sm" style="color:#f87171">${f1(avgLossPct)}%</div><div class="metric-label">% perda média</div></div>
+    <div class="metric"><div class="metric-value muted sm">${withLoss.length}/${charges.length}</div><div class="metric-label">c/ dado carregador</div></div>
+  </div>` : ''}
 </div>`;
 
   html += charges.map(c => {
@@ -1628,6 +1640,15 @@ function renderCharges() {
     const unitHtml = cost
       ? `<span id="chg-unit-${ts}" style="font-size:10px;color:#64748b">${f3(cost.perKwh)} R$/kWh</span>`
       : `<span id="chg-unit-${ts}" style="font-size:10px;color:#64748b;display:none"></span>`;
+    const chargerKwh = _getChargerKwh(ts);
+    const lossKwh    = chargerKwh > 0 ? Math.max(0, chargerKwh - kwh) : 0;
+    const lossPct    = chargerKwh > 0 ? (lossKwh / chargerKwh * 100)  : 0;
+    const lossRow    = chargerKwh > 0 ? `
+  <div class="trip-metrics" style="border-top:1px solid rgba(248,113,113,0.18);margin-top:4px;padding-top:4px">
+    <div class="trip-metric"><div class="trip-metric-val muted">${f2(chargerKwh)} kWh</div><div class="trip-metric-lbl">🔌 carregador</div></div>
+    <div class="trip-metric"><div class="trip-metric-val" style="color:#f87171">${f2(lossKwh)} kWh</div><div class="trip-metric-lbl">perda</div></div>
+    <div class="trip-metric"><div class="trip-metric-val" style="color:#f87171">${lossPct.toFixed(1)}%</div><div class="trip-metric-lbl">% perda</div></div>
+  </div>` : '';
     return `<div class="trip-item" id="charge-card-${ts}">
   <div class="trip-header">
     <div style="flex:1;min-width:0">
@@ -1639,13 +1660,21 @@ function renderCharges() {
     </div>
     <div style="display:flex;flex-direction:column;align-items:flex-end;gap:3px">
       <span class="charge-kwh-badge">${f2(kwh)} kWh</span>
-      <button class="cost-edit-btn" onclick="toggleChargeEdit(${ts})" title="Editar custo">💰</button>
+      <div style="display:flex;gap:4px">
+        <button class="cost-edit-btn" onclick="toggleChargerEdit(${ts})" title="kWh do carregador">🔌</button>
+        <button class="cost-edit-btn" onclick="toggleChargeEdit(${ts})" title="Editar custo">💰</button>
+      </div>
     </div>
   </div>
   <div id="charge-edit-${ts}" class="cost-edit-form" style="display:none">
     <div style="font-size:11px;color:#64748b;width:100%;margin-bottom:2px">Total pago (R$) — deixe 0 para usar o preço das configurações</div>
     <input class="charge-total-input" type="number" step="0.01" min="0" placeholder="ex: 12.50"${ov ? ` value="${ov.total}"` : ''}>
     <button class="cost-apply-btn" onclick="applyChargeCost(${ts},${kwh.toFixed(3)})">Salvar</button>
+  </div>
+  <div id="charger-edit-${ts}" class="cost-edit-form" style="display:none">
+    <div style="font-size:11px;color:#64748b;width:100%;margin-bottom:2px">kWh marcado no carregador — para calcular a perda de carga</div>
+    <input class="charge-total-input" type="number" step="0.01" min="0" placeholder="ex: 18.50"${chargerKwh > 0 ? ` value="${chargerKwh}"` : ''}>
+    <button class="cost-apply-btn" onclick="applyChargerKwh(${ts})">Salvar</button>
   </div>
   <div class="trip-metrics">
     <div class="trip-metric"><div class="trip-metric-val" style="color:var(--teal)">${fmtDur(c.duration_sec)}</div><div class="trip-metric-lbl">duração</div></div>
@@ -1654,6 +1683,7 @@ function renderCharges() {
     <div class="trip-metric"><div class="trip-metric-val ${col}">${pct(c.soc_end)}</div><div class="trip-metric-lbl">SOC fim</div></div>
     <div class="trip-metric"><div class="trip-metric-val ${col}">+${delta.toFixed(0)}%</div><div class="trip-metric-lbl">Δ SOC</div></div>
   </div>
+  ${lossRow}
   <div class="charge-location-row" onclick="openLoc(${ts})">
     ${c.location_name
       ? `<span class="charge-loc-name">📍 ${c.location_name}</span><span class="charge-loc-edit">✏️</span>`
@@ -1946,7 +1976,6 @@ function renderHistory() {
 let cachedAutoTrips = null;
 
 function loadAutoTrips() {
-  filterState.auto.active = 'today';
   document.querySelector('[data-panel="auto"] .tab-notif')?.remove();
   const list = document.getElementById('auto-list');
   if (cachedAutoTrips !== null) {
@@ -3030,9 +3059,34 @@ function _chargeCostOverride(ts) {
   try { return JSON.parse(localStorage.getItem('eco_chg_cost_' + ts) || 'null'); } catch { return null; }
 }
 
+// ── Perda de carga — kWh do carregador externo ────────────────────────────────
+function _chargerKwhMap() {
+  try { return JSON.parse(localStorage.getItem('ecotrip-charger-kwh') || '{}'); } catch { return {}; }
+}
+function _getChargerKwh(ts) { return _chargerKwhMap()[ts] || 0; }
+function _setChargerKwh(ts, val) {
+  const m = _chargerKwhMap();
+  if (val > 0) m[ts] = val; else delete m[ts];
+  localStorage.setItem('ecotrip-charger-kwh', JSON.stringify(m));
+}
+
 window.toggleChargeEdit = function(ts) {
   const el = document.getElementById('charge-edit-' + ts);
   if (el) el.style.display = el.style.display === 'none' ? '' : 'none';
+};
+
+window.toggleChargerEdit = function(ts) {
+  const el = document.getElementById('charger-edit-' + ts);
+  if (el) el.style.display = el.style.display === 'none' ? '' : 'none';
+};
+
+window.applyChargerKwh = function(ts) {
+  const el = document.getElementById('charger-edit-' + ts);
+  if (!el) return;
+  const val = parseFloat(el.querySelector('.charge-total-input')?.value || '0') || 0;
+  _setChargerKwh(ts, val);
+  el.style.display = 'none';
+  renderCharges();
 };
 
 window.applyChargeCost = function(ts, energyKwh) {
