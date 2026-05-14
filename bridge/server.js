@@ -246,13 +246,35 @@ function maybeSaveLifetimeSnapshot() {
 }
 
 // ── Auto-trips — índice em memória (carregado do disco) ───────────────────────
+// Recalcula hybridTimeSec / hybridDistKm a partir das amostras de telemetria.
+// Chamado sempre que um auto-trip é carregado do disco — garante que os campos
+// existam mesmo em trips antigos gravados antes desta funcionalidade.
+function _calcHybrid(samples = []) {
+  let hybridTimeSec = 0, hybridDistKm = 0;
+  for (let i = 1; i < samples.length; i++) {
+    const a = samples[i - 1], b = samples[i];
+    const dt = (b.t || 0) - (a.t || 0);
+    if (dt > 0 && dt < 30 && (a.rpm || 0) > 50) {
+      hybridTimeSec += dt;
+      hybridDistKm  += ((a.spd || 0) + (b.spd || 0)) / 2 / 3600 * dt;
+    }
+  }
+  return {
+    hybridTimeSec: Math.round(hybridTimeSec),
+    hybridDistKm:  parseFloat(hybridDistKm.toFixed(3)),
+  };
+}
+
 let autoTripsArr = [];
 try {
   const files = fs.readdirSync(AUTOTRIPS_DIR).filter(f => f.endsWith('.json'));
   for (const f of files) {
     try {
       const d = JSON.parse(fs.readFileSync(path.join(AUTOTRIPS_DIR, f), 'utf8'));
-      if (d.autoTrip) autoTripsArr.push({ tripId: d.tripId, ...d.autoTrip });
+      if (d.autoTrip) {
+        const hybrid = _calcHybrid(d.samples || []);
+        autoTripsArr.push({ tripId: d.tripId, ...d.autoTrip, ...hybrid });
+      }
     } catch (_) {}
   }
   autoTripsArr.sort((a, b) => (b.startMs || 0) - (a.startMs || 0));
@@ -1206,7 +1228,10 @@ app.post('/api/restore', (req, res) => {
         path.join(AUTOTRIPS_DIR, `${safeId}.json`),
         JSON.stringify({ tripId: safeId, autoTrip: at.autoTrip || {}, samples: at.samples || [] })
       );
-      if (at.autoTrip) autoTripsArr.push({ tripId: safeId, ...at.autoTrip });
+      if (at.autoTrip) {
+        const hybrid = _calcHybrid(at.samples || []);
+        autoTripsArr.push({ tripId: safeId, ...at.autoTrip, ...hybrid });
+      }
     }
     autoTripsArr.sort((a, b) => (b.startMs || 0) - (a.startMs || 0));
 
