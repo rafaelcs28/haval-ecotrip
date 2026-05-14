@@ -1284,10 +1284,10 @@ function renderDash() {
   if (evRangeEl) {
     if (realEvKm > 0) {
       evRangeEl.style.display = '';
-      setText('d-ev-km', realEvKm + ' km');
+      setText('d-ev-km', realEvKm);
     } else if (soc > EV_MIN_SOC) {
       evRangeEl.style.display = '';
-      setText('d-ev-km', '~' + evKmCalc + ' km');
+      setText('d-ev-km', '~' + evKmCalc);
     } else {
       evRangeEl.style.display = 'none';
     }
@@ -1309,10 +1309,10 @@ function renderDash() {
   if (fuelRangeEl) {
     if (realIceKm > 0) {
       fuelRangeEl.style.display = '';
-      setText('d-fuel-km', realIceKm + ' km');
+      setText('d-fuel-km', realIceKm);
     } else if (fuelKmCalc > 0) {
       fuelRangeEl.style.display = '';
-      setText('d-fuel-km', '~' + fuelKmCalc + ' km');
+      setText('d-fuel-km', '~' + fuelKmCalc);
     } else {
       fuelRangeEl.style.display = 'none';
     }
