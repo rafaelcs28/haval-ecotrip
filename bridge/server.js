@@ -1505,10 +1505,13 @@ function applyMqttMessage(key, value, isRetained = false) {
       const prevS = prevSunroof;
       state.sunroof = value;
       prevSunroof = value;
-      if (!isRetained && prevS !== null && prevS !== value) {
-        const closed = value === '3';
-        addEvent(closed ? 'sunroof_close' : 'sunroof_open',
-                 closed ? 'Teto solar fechado' : 'Teto solar aberto');
+      // Só loga ao cruzar a fronteira fechado('3') ↔ aberto(qualquer outro)
+      if (!isRetained && prevS !== null) {
+        const wasClosed = prevS === '3';
+        const nowClosed = value === '3';
+        if (wasClosed !== nowClosed)
+          addEvent(nowClosed ? 'sunroof_close' : 'sunroof_open',
+                   nowClosed ? 'Teto solar fechado' : 'Teto solar aberto');
       }
       break;
     }
@@ -1520,11 +1523,14 @@ function applyMqttMessage(key, value, isRetained = false) {
       const prevW = prevWindowStates[wside];
       state[key] = value;
       prevWindowStates[wside] = value;
-      if (!isRetained && prevW !== null && prevW !== value) {
-        const wlabel = WIN_NAMES[wside] || wside.toUpperCase();
-        const closed = value === '1';
-        addEvent(closed ? 'window_close' : 'window_open',
-                 closed ? wlabel + ' fechado' : wlabel + ' aberto');
+      // Só loga ao cruzar a fronteira fechado('1') ↔ aberto (ignora '2'↔'3')
+      if (!isRetained && prevW !== null) {
+        const wlabel    = WIN_NAMES[wside] || wside.toUpperCase();
+        const wasClosed = prevW === '1';
+        const nowClosed = value === '1';
+        if (wasClosed !== nowClosed)
+          addEvent(nowClosed ? 'window_close' : 'window_open',
+                   nowClosed ? wlabel + ' fechado' : wlabel + ' aberto');
       }
       break;
     }
@@ -1557,7 +1563,7 @@ function applyMqttMessage(key, value, isRetained = false) {
       prevGearForTrip = value;
       if (!isRetained && prevG !== null && prevG !== value) {
         const wasParked  = prevG === 'P';
-        const nowDriving = value === 'D' || value === 'R' || value === 'N';
+        const nowDriving = value === 'D' || value === 'R';   // N não inicia viagem
         if (wasParked && nowDriving) addEvent('trip_start', 'Viagem iniciada');
       }
       break;

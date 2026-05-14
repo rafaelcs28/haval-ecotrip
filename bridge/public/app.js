@@ -1632,7 +1632,7 @@ const LOG_ICONS = {
 };
 
 function loadLogs() {
-  filterState.logs.active = 'all';
+  filterState.logs.active = 'today';
   filterState.logs.type   = 'all';
   const list = document.getElementById('logs-list');
   if (!list) return;
