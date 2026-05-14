@@ -180,45 +180,35 @@
         <div style="width:51%;margin:0 auto">
         <!-- Odômetro total — acima do carro, centro -->
         <!-- Header: Odômetro · Marcha · AC -->
-        <div style="display:flex;justify-content:space-between;align-items:center;padding:0 2px 4px;min-height:26px">
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:0 2px 4px;min-height:26px;flex-wrap:nowrap">
+          <!-- km -->
           <div id="d-odo-left" style="display:flex;align-items:baseline;gap:2px">
             <span style="font-size:12px;font-weight:600;color:#94a3b8" id="d-odometer">--</span>
             <span style="font-size:8px;color:#64748b">km</span>
           </div>
-          <div id="d-gear-badge" style="font-size:16px;font-weight:800;letter-spacing:-0.5px;padding:1px 12px;border-radius:8px;background:#1e293b;color:#475569;min-width:40px;text-align:center">--</div>
-          <div id="d-ac-chip" style="font-size:10px;font-weight:600;padding:2px 8px;border-radius:10px;background:#083344;color:#22d3ee;letter-spacing:0.3px;visibility:hidden">❄️ AC</div>
-          <!-- Ventilação dos bancos — visível só com carro ligado -->
-          <div id="d-seat-vent" style="display:flex;align-items:center;gap:5px">
-            <!-- Motorista: encosto à esquerda, assento à direita (virado p/ direita) -->
-            <div id="d-seat-drv" title="Banco motorista" style="cursor:pointer;opacity:0.45;transition:opacity .2s">
-              <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-                <!-- encosto -->
-                <rect x="1" y="3" width="5" height="10" rx="1.5" fill="#475569"/>
-                <!-- apoio de cabeça -->
-                <rect x="0" y="1" width="7" height="4" rx="2" fill="#334155"/>
-                <!-- assento -->
-                <rect x="3" y="11" width="14" height="5" rx="2" fill="#475569"/>
-                <!-- vento 1 -->
-                <path d="M7 13 Q9.5 12 12 13" stroke="#22d3ee" stroke-width="1.4" fill="none" stroke-linecap="round"/>
-                <!-- vento 2 -->
-                <path d="M7 15 Q9.5 14 12 15" stroke="#22d3ee" stroke-width="1.4" fill="none" stroke-linecap="round"/>
-              </svg>
-            </div>
-            <!-- Passageiro: encosto à direita, assento à esquerda (virado p/ esquerda) -->
-            <div id="d-seat-pass" title="Banco passageiro" style="cursor:pointer;opacity:0.45;transition:opacity .2s">
-              <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-                <!-- encosto -->
-                <rect x="14" y="3" width="5" height="10" rx="1.5" fill="#475569"/>
-                <!-- apoio de cabeça -->
-                <rect x="13" y="1" width="7" height="4" rx="2" fill="#334155"/>
-                <!-- assento -->
-                <rect x="3" y="11" width="14" height="5" rx="2" fill="#475569"/>
-                <!-- vento 1 -->
-                <path d="M7 13 Q9.5 12 12 13" stroke="#22d3ee" stroke-width="1.4" fill="none" stroke-linecap="round"/>
-                <!-- vento 2 -->
-                <path d="M7 15 Q9.5 14 12 15" stroke="#22d3ee" stroke-width="1.4" fill="none" stroke-linecap="round"/>
-              </svg>
-            </div>
+          <!-- Marcha — oculta quando inválida (-1) -->
+          <div id="d-gear-badge" style="font-size:16px;font-weight:800;letter-spacing:-0.5px;padding:1px 10px;border-radius:8px;background:#1e293b;color:#475569;min-width:36px;text-align:center">--</div>
+          <!-- AC — sem background, só ícone+texto colorido -->
+          <div id="d-ac-chip" style="font-size:10px;font-weight:600;color:#475569;letter-spacing:0.3px">❄️ AC</div>
+          <!-- Banco motorista: encosto à esquerda (virado p/ direita) -->
+          <div id="d-seat-drv" title="Banco motorista" style="cursor:pointer;opacity:0.45;transition:opacity .2s;line-height:0">
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+              <rect x="1" y="3" width="5" height="10" rx="1.5" fill="#475569"/>
+              <rect x="0" y="1" width="7" height="4" rx="2" fill="#334155"/>
+              <rect x="3" y="11" width="14" height="5" rx="2" fill="#475569"/>
+              <path d="M7 13 Q9.5 12 12 13" stroke="#22d3ee" stroke-width="1.4" fill="none" stroke-linecap="round"/>
+              <path d="M7 15 Q9.5 14 12 15" stroke="#22d3ee" stroke-width="1.4" fill="none" stroke-linecap="round"/>
+            </svg>
+          </div>
+          <!-- Banco passageiro: encosto à direita (virado p/ esquerda) -->
+          <div id="d-seat-pass" title="Banco passageiro" style="cursor:pointer;opacity:0.45;transition:opacity .2s;line-height:0">
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+              <rect x="14" y="3" width="5" height="10" rx="1.5" fill="#475569"/>
+              <rect x="13" y="1" width="7" height="4" rx="2" fill="#334155"/>
+              <rect x="3" y="11" width="14" height="5" rx="2" fill="#475569"/>
+              <path d="M7 13 Q9.5 12 12 13" stroke="#22d3ee" stroke-width="1.4" fill="none" stroke-linecap="round"/>
+              <path d="M7 15 Q9.5 14 12 15" stroke="#22d3ee" stroke-width="1.4" fill="none" stroke-linecap="round"/>
+            </svg>
           </div>
         </div>
         <div style="position:relative;width:100%;aspect-ratio:794/720;overflow:hidden;border-radius:6px;z-index:0">

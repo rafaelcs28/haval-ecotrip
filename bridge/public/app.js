@@ -1274,28 +1274,20 @@ function renderDash() {
 
   // Marcha — badge no header do card do carro
   const gearEl  = document.getElementById('d-gear-badge');
-  const odoLeft = document.getElementById('d-odo-left');
   if (gearEl) {
     const gRaw   = (s.gear || '').toString().trim();
     const g      = gRaw.toUpperCase();
     const invalid = gRaw === '-1' || gRaw === '' || gRaw === '--';
     if (invalid) {
-      // Km migra para o centro; esquerda fica oculta
-      if (odoLeft) odoLeft.style.visibility = 'hidden';
-      gearEl.style.visibility = 'visible';
-      gearEl.style.background = 'transparent';
-      const odoVal = odo > 0 ? Math.round(odo).toLocaleString('pt-BR') : '--';
-      gearEl.innerHTML = `<span style="font-size:12px;font-weight:600;color:#94a3b8">${odoVal}</span><span style="font-size:8px;color:#64748b"> km</span>`;
+      gearEl.style.display = 'none';
     } else {
-      // Marcha válida — km fica na esquerda, marcha no centro
-      if (odoLeft) odoLeft.style.visibility = 'visible';
+      gearEl.style.display = '';
       const gCfg = ({
         P: { bg: '#1e293b', color: '#64748b' },
         D: { bg: '#052e16', color: '#4ade80' },
         R: { bg: '#2a1200', color: '#fb923c' },
         N: { bg: '#1e293b', color: '#94a3b8' },
       })[g] || { bg: '#1e293b', color: '#475569' };
-      gearEl.style.visibility = 'visible';
       gearEl.style.background = gCfg.bg;
       gearEl.style.color      = gCfg.color;
       gearEl.textContent      = g;
@@ -1514,15 +1506,7 @@ function renderDash() {
   carLayer('cl-ac-right',   acOn);
   carLayer('cl-ventilacao', acOn);
   const acChip = document.getElementById('d-ac-chip');
-  if (acChip) {
-    acChip.style.visibility = 'visible';
-    acChip.style.background  = acOn ? '#083344' : '#1e293b';
-    acChip.style.color        = acOn ? '#22d3ee' : '#475569';
-  }
-
-  // Bancos com ventilação — sempre visíveis
-  const seatVent = document.getElementById('d-seat-vent');
-  if (seatVent) seatVent.style.display = 'flex';
+  if (acChip) acChip.style.color = acOn ? '#22d3ee' : '#475569';
 
   // Vidros (1=fechado, 2=aberto, 3=entreaberto)
   carLayer('cl-win-fl-open', s.window_fl === '2' || s.window_fl === 2);
