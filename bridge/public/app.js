@@ -902,6 +902,7 @@ let _locPickerTs       = 0;
 let _locPickerLat      = null;
 let _locPickerLng      = null;
 let _locSelectedKnownId = null;  // id do local conhecido selecionado no picker
+let _locKnownPlaces    = [];    // cache dos locais conhecidos carregados no picker
 let _prevChargingState = null;   // para detectar fim de recarga no WS
 
 // ── Cache local — IndexedDB ────────────────────────────────────────────────
@@ -3982,6 +3983,7 @@ function _renderLocKnownChips(activeNameHint) {
   if (!container) return;
 
   apiFetch('/api/known-places').then(r => r.ok ? r.json() : []).then(places => {
+    _locKnownPlaces = places;
     if (!places.length) {
       container.innerHTML = '';
       if (separator) separator.style.display = 'none';
@@ -3991,11 +3993,13 @@ function _renderLocKnownChips(activeNameHint) {
     container.innerHTML = places.map(p => {
       const active = activeNameHint && p.name.trim().toLowerCase() === activeNameHint.trim().toLowerCase();
       if (active) { _locPickerLat = p.lat; _locPickerLng = p.lng; _locSelectedKnownId = p.id; }
+      // Passa só o id numérico — sem strings no onclick, evita quebra de aspas HTML
       return `<button class="loc-kp-chip${active ? ' loc-kp-chip--active' : ''}"
-        onclick="locPickKnown(${p.id},${p.lat},${p.lng},${JSON.stringify(p.name)})"
+        onclick="locPickKnown(${p.id})"
         id="loc-kp-chip-${p.id}">${p.name}</button>`;
     }).join('');
   }).catch(() => {
+    _locKnownPlaces = [];
     container.innerHTML = '';
     if (separator) separator.style.display = 'none';
   });
@@ -4008,15 +4012,17 @@ window.closeLoc = function() {
 };
 
 // Seleciona chip de local conhecido — preenche nome e coordenadas
-window.locPickKnown = function(id, lat, lng, name) {
+window.locPickKnown = function(id) {
+  const place = _locKnownPlaces.find(p => p.id === id);
+  if (!place) return;
   // Marca chip ativo, desmarca os outros
   document.querySelectorAll('#loc-known-chips .loc-kp-chip').forEach(el => {
     el.classList.toggle('loc-kp-chip--active', el.id === `loc-kp-chip-${id}`);
   });
   _locSelectedKnownId = id;
-  _locPickerLat = lat;
-  _locPickerLng = lng;
-  document.getElementById('loc-name-input').value = name;
+  _locPickerLat = place.lat;
+  _locPickerLng = place.lng;
+  document.getElementById('loc-name-input').value = place.name;
   document.getElementById('loc-gps-status').textContent = '';
   document.getElementById('loc-save-known').checked = false;
 };
