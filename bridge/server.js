@@ -247,9 +247,10 @@ function maybeSaveLifetimeSnapshot() {
 
 // ── Auto-trips — índice em memória (carregado do disco) ───────────────────────
 // Recalcula hybridTimeSec / hybridDistKm a partir das amostras de telemetria.
-// Chamado sempre que um auto-trip é carregado do disco — garante que os campos
-// existam mesmo em trips antigos gravados antes desta funcionalidade.
+// Retorna {} se não há amostras (sem telemetria = sem dados de split).
+// Retorna {hybridTimeSec: 0, hybridDistKm: 0} para viagens 100% elétricas.
 function _calcHybrid(samples = []) {
+  if (!samples.length) return {};   // sem amostras → campos ficam undefined (= "sem dados")
   let hybridTimeSec = 0, hybridDistKm = 0;
   for (let i = 1; i < samples.length; i++) {
     const a = samples[i - 1], b = samples[i];
