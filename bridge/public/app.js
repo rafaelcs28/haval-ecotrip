@@ -1250,16 +1250,22 @@ function renderDash() {
   // Marcha — badge no header do card do carro
   const gearEl = document.getElementById('d-gear-badge');
   if (gearEl) {
-    const g = (s.gear || '').toString().trim().toUpperCase();
-    const gCfg = ({
-      P: { bg: '#1e293b', color: '#64748b' },
-      D: { bg: '#052e16', color: '#4ade80' },
-      R: { bg: '#2a1200', color: '#fb923c' },
-      N: { bg: '#1e293b', color: '#94a3b8' },
-    })[g] || { bg: '#1e293b', color: '#334155' };
-    gearEl.textContent      = g || '--';
-    gearEl.style.background = gCfg.bg;
-    gearEl.style.color      = gCfg.color;
+    const gRaw = (s.gear || '').toString().trim();
+    const g    = gRaw.toUpperCase();
+    // -1 = valor inválido (carro desligado) → ocultar badge sem colapsar layout
+    const invalid = gRaw === '-1' || gRaw === '' || gRaw === '--';
+    gearEl.style.visibility = invalid ? 'hidden' : 'visible';
+    if (!invalid) {
+      const gCfg = ({
+        P: { bg: '#1e293b', color: '#64748b' },
+        D: { bg: '#052e16', color: '#4ade80' },
+        R: { bg: '#2a1200', color: '#fb923c' },
+        N: { bg: '#1e293b', color: '#94a3b8' },
+      })[g] || { bg: '#1e293b', color: '#475569' };
+      gearEl.textContent      = g;
+      gearEl.style.background = gCfg.bg;
+      gearEl.style.color      = gCfg.color;
+    }
   }
 
   // Bateria 12V — cor por faixa de carga
