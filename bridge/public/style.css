@@ -176,6 +176,7 @@ html, body {
   line-height: 1;
   display: block;
 }
+.tab-icon svg { display: block; }
 .tab-letter {
   font-size: 15px;
   font-weight: 800;
@@ -269,7 +270,85 @@ html, body {
 .metric-value.yellow  { color: var(--yellow); }
 .metric-value.muted   { color: var(--muted); }
 
-/* ── Card de recarga — números levemente menores + unidades bem pequenas ─── */
+/* ── Card de recarga — animação ─────────────────────────────────────────── */
+@keyframes chrg-glow {
+  0%,100% { box-shadow: 0 0 0 1px rgba(0,229,204,.18), 0 0 14px rgba(0,229,204,.10); }
+  50%      { box-shadow: 0 0 0 1px rgba(0,229,204,.55), 0 0 28px rgba(0,229,204,.28); }
+}
+@keyframes chrg-bolt {
+  0%,100% { opacity:1;   transform:scale(1);    }
+  50%      { opacity:.50; transform:scale(1.25); }
+}
+@keyframes chrg-shimmer {
+  0%   { transform:translateX(-200%); }
+  100% { transform:translateX(450%); }
+}
+
+#d-charging-card.chrg-active {
+  border-color: rgba(0,229,204,.35);
+  animation: chrg-glow 2.4s ease-in-out infinite;
+}
+
+.chrg-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+.chrg-bolt-icon {
+  font-size: 15px;
+  display: inline-block;
+  line-height: 1;
+  animation: chrg-bolt 1.8s ease-in-out infinite;
+}
+.chrg-power-hero {
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--teal);
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.chrg-bar-wrap { margin-bottom: 4px; }
+.chrg-bar-track {
+  height: 9px;
+  background: rgba(255,255,255,.07);
+  border-radius: 5px;
+  margin-bottom: 5px;
+  overflow: hidden;
+}
+.chrg-bar-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, rgba(0,229,204,.55) 0%, #00E5CC 100%);
+  border-radius: 5px;
+  overflow: hidden;
+  transition: width 1.2s ease;
+  position: relative;
+}
+.chrg-shimmer {
+  position: absolute;
+  top: 0; bottom: 0; left: 0;
+  width: 40%;
+  background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,.50) 50%, transparent 100%);
+  animation: chrg-shimmer 2.4s ease-in-out infinite;
+}
+.chrg-bar-marker {
+  position: absolute;
+  top: -3px; bottom: -3px;
+  width: 2px;
+  background: rgba(255,255,255,.55);
+  border-radius: 2px;
+  pointer-events: none;
+  box-shadow: 0 0 4px rgba(255,255,255,.3);
+}
+.chrg-bar-labels {
+  display: flex;
+  justify-content: space-between;
+  padding: 0 1px;
+}
+
+/* Métricas menores no card de recarga */
 #d-charging-card .metric-value { font-size: 18px; }
 .chrg-unit { font-size: 9px; font-weight: 500; opacity: .75; vertical-align: baseline; margin-left: 1px; }
 

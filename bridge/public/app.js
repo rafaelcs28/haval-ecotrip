@@ -1286,9 +1286,12 @@ function renderDash() {
   // Recarga — card dedicado (só aparece quando charging_state === 'Carregando')
   const isCharging = s.charging_state === 'Carregando';
   const chargingCard = document.getElementById('d-charging-card');
-  if (chargingCard) chargingCard.style.display = isCharging ? '' : 'none';
+  if (chargingCard) {
+    chargingCard.style.display = isCharging ? '' : 'none';
+    chargingCard.classList.toggle('chrg-active', isCharging);
+  }
   if (isCharging) {
-    const cu = s => `<span class="chrg-unit">${s}</span>`;
+    const cu = u => `<span class="chrg-unit">${u}</span>`;
     setHTML('d-chrg-power',   s.charge_power_kw   > 0 ? f1(s.charge_power_kw)    + cu(' kW')  : '--');
     setHTML('d-chrg-session', s.charge_session_kwh > 0 ? f2(s.charge_session_kwh) + cu(' kWh') : '--');
     const rem = s.charge_remaining_min || 0;
@@ -1305,6 +1308,15 @@ function renderDash() {
       setHTML('d-chrg-remain', '--');
       setText('d-chrg-finish', '--');
     }
+    // Barra de progresso SOC
+    const soc = s.soc_pct || 0;
+    const lim = s.charge_limit_pct != null ? s.charge_limit_pct : 100;
+    const barFill = document.getElementById('d-chrg-bar-fill');
+    if (barFill) barFill.style.width = Math.min(Math.max(soc, 0), 100) + '%';
+    const marker = document.getElementById('d-chrg-bar-marker');
+    if (marker) marker.style.left = Math.min(lim, 100) + '%';
+    setText('d-chrg-soc-cur', Math.round(soc) + '%');
+    setText('d-chrg-soc-lim', '▶ ' + Math.round(lim) + '%');
     // Limite de carga SOC no card de recarga
     _renderChargeLimit(s.charge_limit_pct);
   }
