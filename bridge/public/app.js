@@ -193,12 +193,12 @@ function _renderNotifToggles() {
       </label>
       <label class="toggle-wrap">
         <input type="checkbox" id="ntog-${key}" ${_notifPrefs[key] ? 'checked' : ''}
-          onchange="saveNotifPref('${key}', this.checked)">
+          onchange="saveNotifPref('${key}', this.checked)${minuteKey ? `; document.getElementById('ntog-${minuteKey}-row').style.display = this.checked ? '' : 'none'` : ''}">
         <span class="toggle-slider"></span>
       </label>
     </div>
     ${minuteKey ? `
-    <div class="notif-minutes-row">
+    <div class="notif-minutes-row" id="ntog-${minuteKey}-row" style="display:${_notifPrefs[key] ? '' : 'none'}">
       <span class="notif-label-sub">Avisar com</span>
       <input type="number" id="ntog-${minuteKey}" class="notif-minutes-input"
         min="1" max="20" value="${_notifPrefs[minuteKey] ?? 5}"
@@ -1464,43 +1464,6 @@ function renderDash() {
 
 
     }
-  }
-
-  // Desde última partida (rolling)
-  const r = s.rolling || {};
-  setHTML('d-roll-dist', r.distance_km   > 0 ? f1(r.distance_km) + du(' km') : '--');
-  setHTML('d-roll-fuel', r.fuel_l        > 0 ? f2(r.fuel_l)       + du(' L')  : '--');
-  setText('d-roll-kwh',  r.kwh_per_100km > 0 ? f1(r.kwh_per_100km)            : '--');
-  setText('d-roll-kml',  r.km_per_l      > 0 ? f1(r.km_per_l)                 : '--');
-  setHTML('d-roll-cost', r.cost_brl      > 0 ? du('R$ ') + f2(r.cost_brl)  : '--');
-  setClass('d-roll-kwh', eff(r.kwh_per_100km));
-
-  // Última viagem automática
-  const lt = (cachedAutoTrips || [])[0] || null;
-  const ltSec = document.getElementById('d-lasttrip-section');
-  if (ltSec) ltSec.style.display = lt ? '' : 'none';
-  if (lt) {
-    const ltDist  = lt.distKm  || 0;
-    const ltNet   = lt.netKwh  || 0;
-    const ltFuel  = lt.fuelL   || 0;
-    const ltTime  = lt.timeSec || 0;
-    const ltKwh100 = ltDist > 0.1 ? ltNet / ltDist * 100 : 0;
-    const _KWH_PER_L = 8.9;
-    const ltKmlEq  = ltDist > 0.1 && (ltNet > 0 || ltFuel > 0.001)
-      ? f1(ltDist / (ltNet / _KWH_PER_L + ltFuel)) : '--';
-    const ltSocDelta = (lt.endSocPct != null && lt.startSocPct != null)
-      ? Math.round(lt.endSocPct - lt.startSocPct) : null;
-    const ltWhen = lt.startMs
-      ? new Date(lt.startMs).toLocaleString('pt-BR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' })
-      : '';
-    setText('d-lasttrip-when', ltWhen);
-    setHTML('d-lasttrip-dist', ltDist > 0 ? f1(ltDist) + du(' km') : '--');
-    setText('d-lasttrip-time', ltTime > 0 ? fmtDashTime(ltTime) : '--');
-    setText('d-lasttrip-kwh',  ltKwh100 > 0 ? f1(ltKwh100) : '--');
-    setText('d-lasttrip-kml',  ltKmlEq);
-    setHTML('d-lasttrip-soc',  ltSocDelta != null
-      ? (ltSocDelta <= 0 ? ltSocDelta : '+' + ltSocDelta) + du('%') : '--');
-    setClass('d-lasttrip-kwh', eff(ltKwh100));
   }
 
   // Mapa GPS — atualiza live a cada nova posição recebida via WebSocket
