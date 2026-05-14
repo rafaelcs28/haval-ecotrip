@@ -34,6 +34,7 @@ data class TelemetrySample(
     val rpm:  Int,     // rotação do motor ICE (0 = modo 100% elétrico)
     val evKw: Float,   // potência elétrica em kW (+ consumindo, − regenerando)
     val pwr:  Int = 0, // % potência bateria: −100=regen máx, +100=consumo máx
+    val soc:  Int = 0, // SOC% da bateria de tração (0–100)
 )
 
 class TelemetryRecorder(private val context: Context) {
@@ -101,6 +102,8 @@ class TelemetryRecorder(private val context: Context) {
     @Volatile var latestMotorPowerKw:    Float = 0f
     /** % da potência da bateria (−100=regen máx, +100=consumo máx). */
     @Volatile var latestBattPowerPct:    Int   = 0
+    /** SOC% da bateria de tração (0–100). */
+    @Volatile var latestSocPct:          Int   = 0
 
     // ── Gravação ──────────────────────────────────────────────────────────────
     private val samples   = mutableListOf<TelemetrySample>()
@@ -146,18 +149,21 @@ class TelemetryRecorder(private val context: Context) {
             var lastSpd  = Float.NaN
             var lastEvKw = Float.NaN
             var lastPwr  = Int.MIN_VALUE
+            var lastSoc  = Int.MIN_VALUE
 
             while (isActive && recording) {
                 val spd  = latestSpeedKmh
                 val pwr  = latestBattPowerPct
                 val evKw = latestMotorPowerKw  // car.ev_info.Instant_energy_consumption
+                val soc  = latestSocPct
 
-                val speedChanged = lastSpd.isNaN()        || kotlin.math.abs(spd  - lastSpd)  >= 1f
-                val powerChanged = lastEvKw.isNaN()       || kotlin.math.abs(evKw - lastEvKw) >= 0.2f
+                val speedChanged = lastSpd.isNaN()         || kotlin.math.abs(spd  - lastSpd)  >= 1f
+                val powerChanged = lastEvKw.isNaN()        || kotlin.math.abs(evKw - lastEvKw) >= 0.2f
                 val pwrChanged   = lastPwr == Int.MIN_VALUE || kotlin.math.abs(pwr  - lastPwr)  >= 2
+                val socChanged   = lastSoc == Int.MIN_VALUE || kotlin.math.abs(soc  - lastSoc)  >= 1
                 val timeForced   = ++ticksSinceRecord >= 10  // máx 5 s sem amostra
 
-                if (speedChanged || powerChanged || pwrChanged || timeForced) {
+                if (speedChanged || powerChanged || pwrChanged || socChanged || timeForced) {
                     val offsetSec = ((System.currentTimeMillis() - this@TelemetryRecorder.startMs) / 1_000L).toInt()
                     synchronized(samples) {
                         samples.add(TelemetrySample(
@@ -168,11 +174,13 @@ class TelemetryRecorder(private val context: Context) {
                             rpm  = latestEngineRpm,
                             evKw = evKw,
                             pwr  = pwr,
+                            soc  = soc,
                         ))
                     }
                     lastSpd  = spd
                     lastEvKw = evKw
                     lastPwr  = pwr
+                    lastSoc  = soc
                     ticksSinceRecord = 0
                 }
 
@@ -286,6 +294,7 @@ class TelemetryRecorder(private val context: Context) {
                         put("rpm",  s.rpm)
                         put("evKw", s.evKw.toDouble())
                         put("pwr",  s.pwr)
+                        if (s.soc > 0) put("soc", s.soc)
                     })
                 }
                 // Monta payload manualmente para evitar double-encoding do autoTripJson

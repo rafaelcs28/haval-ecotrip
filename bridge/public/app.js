@@ -2539,6 +2539,7 @@ let chartSpd        = null;
 let chartEv         = null;
 let chartRpm        = null;
 let chartPwr        = null;
+let chartSoc        = null;
 let currentSamples  = [];
 
 // HTML original do body do detalhe — restaurado a cada fechamento para garantir
@@ -2591,6 +2592,8 @@ function closeTripDetail() {
   if (chartSpd)   { chartSpd.destroy();  chartSpd  = null; }
   if (chartEv)    { chartEv.destroy();   chartEv   = null; }
   if (chartRpm)   { chartRpm.destroy();  chartRpm  = null; }
+  if (chartPwr)   { chartPwr.destroy();  chartPwr  = null; }
+  if (chartSoc)   { chartSoc.destroy();  chartSoc  = null; }
   routePolyline  = null;
   playbackMarker = null;
   currentSamples = [];
@@ -3216,11 +3219,21 @@ function initTripCharts(samples) {
   if (chartEv)   chartEv.destroy();
   if (chartRpm)  chartRpm.destroy();
   if (chartPwr)  chartPwr.destroy();
+  if (chartSoc)  chartSoc.destroy();
 
   chartSpd = mkChart('chart-spd', samples.map(s => s.spd),        '#4DBBFF', 'km/h');
   chartEv  = mkChart('chart-ev',  samples.map(s => s.evKw),       '#39FF88', 'kW');
   chartRpm = mkChart('chart-rpm', samples.map(s => s.rpm),        '#FF5F1F', 'RPM');
   chartPwr = mkChart('chart-pwr', samples.map(s => s.pwr ?? 0),   '#a78bfa', '%');
+
+  // SOC% — só mostra o gráfico se a viagem tiver dados de SOC
+  const socData = samples.map(s => s.soc ?? 0);
+  const hasSoc  = socData.some(v => v > 0);
+  const socLbl  = document.getElementById('chart-soc-label');
+  if (socLbl)  socLbl.style.display  = hasSoc ? '' : 'none';
+  const socWrap = document.querySelector('#chart-soc')?.parentElement;
+  if (socWrap) socWrap.style.display = hasSoc ? '' : 'none';
+  chartSoc = hasSoc ? mkChart('chart-soc', socData, '#c084fc', '%') : null;
 }
 
 function onPlaybackMove(idx) {
@@ -3242,6 +3255,12 @@ function onPlaybackMove(idx) {
   if (pwrEl) {
     pwrEl.textContent = (pwrVal >= 0 ? '+' : '') + pwrVal + '%';
     pwrEl.className   = 'snap-val ' + (pwrVal < -5 ? 'green' : pwrVal > 5 ? 'orange' : 'muted');
+  }
+  const socEl = document.getElementById('snap-soc');
+  if (socEl) {
+    const socVal = s.soc ?? 0;
+    socEl.textContent = socVal > 0 ? socVal + '%' : '--';
+    socEl.className   = 'snap-val ' + (socVal > 60 ? 'green' : socVal > 30 ? 'yellow' : socVal > 0 ? 'red' : 'muted');
   }
   const mm = Math.floor(s.t / 60), ss = s.t % 60;
   document.getElementById('snap-time').textContent = `${String(mm).padStart(2,'0')}'${String(ss).padStart(2,'0')}"`;

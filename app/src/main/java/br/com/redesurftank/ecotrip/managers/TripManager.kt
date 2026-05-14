@@ -1099,6 +1099,7 @@ class TripManager private constructor() {
                         return
                     }
                     latestSocPct = value
+                    telemetryRecorder?.latestSocPct = value.toInt()
                     prefs.edit().putFloat(SharedPreferencesKeys.LATEST_SOC_PCT, value).apply()
                     captureStartIfNeeded()
                 }
