@@ -2327,8 +2327,13 @@ function updateDashMap(lat, lng, ts) {
 
   if (dashMarker) dashMarker.setLatLng(pos);
   else {
-    dashMarker = L.circleMarker(pos, {
-      radius: 9, fillColor: '#39FF88', fillOpacity: 1, color: '#fff', weight: 2,
+    dashMarker = L.marker(pos, {
+      icon: L.divIcon({
+        className: '',
+        html: '<div class="map-pulse-dot"></div>',
+        iconSize: [14, 14],
+        iconAnchor: [7, 7],
+      }),
     }).addTo(dashMap);
     dashMarker.bindPopup('🚗 Haval H6 PHEV34');
   }

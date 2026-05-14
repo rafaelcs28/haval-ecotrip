@@ -317,11 +317,11 @@
 
       <!-- Mapa — última localização conhecida do carro -->
       <div class="card" id="d-map-card" style="display:none">
-        <div class="card-title">Última localização do carro</div>
-        <div id="d-car-map" style="height:180px;border-radius:8px;overflow:hidden;margin-top:6px"></div>
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-top:6px;gap:8px">
-          <div class="metric-label" id="d-map-address" style="flex:1;font-size:10px;line-height:1.4;color:#64748b"></div>
-          <div class="metric-label" id="d-map-ts" style="text-align:right;white-space:nowrap;flex-shrink:0">--</div>
+        <div id="d-car-map"></div>
+        <div class="map-info-bar">
+          <span class="map-pin-icon">📍</span>
+          <span id="d-map-address" class="map-address">--</span>
+          <span id="d-map-ts" class="map-ts">--</span>
         </div>
       </div>
 

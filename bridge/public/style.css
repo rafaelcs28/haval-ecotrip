@@ -979,6 +979,62 @@ html, body {
   margin-bottom: 8px;
 }
 
+/* ── Mapa de localização ─────────────────────────────────────────────────────── */
+#d-map-card {
+  padding: 0;
+  overflow: hidden;
+}
+#d-car-map {
+  height: 220px;
+  width: 100%;
+}
+.map-info-bar {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 12px;
+  background: var(--card);
+  border-top: 1px solid var(--border);
+  min-height: 36px;
+}
+.map-pin-icon {
+  font-size: 13px;
+  flex-shrink: 0;
+  line-height: 1;
+  opacity: .85;
+}
+.map-address {
+  flex: 1;
+  font-size: 11px;
+  color: #94a3b8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1;
+}
+.map-ts {
+  font-size: 10px;
+  color: #475569;
+  flex-shrink: 0;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Marcador pulsante — box-shadow expansível (sem elementos extra) */
+@keyframes map-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(57,255,136,.7), 0 0 6px rgba(57,255,136,.4); }
+  65%  { box-shadow: 0 0 0 12px rgba(57,255,136,0), 0 0 6px rgba(57,255,136,.15); }
+  100% { box-shadow: 0 0 0 0 rgba(57,255,136,0), 0 0 6px rgba(57,255,136,.4); }
+}
+.map-pulse-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #39FF88;
+  border: 2.5px solid rgba(255,255,255,.95);
+  animation: map-pulse 2.4s ease-out infinite;
+}
+
 /* ── Charge location row ─────────────────────────────────────────────────────── */
 .charge-location-row {
   display: flex;
