@@ -1616,10 +1616,11 @@ const LOG_TYPE_GROUPS = {
   trunk:   ['trunk_open','trunk_close'],
   windows: ['window_open','window_close','sunroof_open','sunroof_close'],
   trips:   ['trip_start','trip_end'],
+  ac:      ['ac_on','ac_off'],
 };
 const LOG_TYPE_LABELS = {
   all: 'Todos', engine: 'Motor', lock: 'Travas',
-  doors: 'Portas', trunk: 'Mala', windows: 'Vidros', trips: 'Viagens',
+  doors: 'Portas', trunk: 'Mala', windows: 'Vidros', trips: 'Viagens', ac: 'Clima',
 };
 const LOG_ICONS = {
   engine_on: '🔑', engine_off: '🔑',
@@ -1629,6 +1630,7 @@ const LOG_ICONS = {
   window_open: '🪟', window_close: '🪟',
   sunroof_open: '☀️', sunroof_close: '🌙',
   trip_start: '🚗', trip_end: '🏁',
+  ac_on: '❄️', ac_off: '❄️',
 };
 
 function loadLogs() {

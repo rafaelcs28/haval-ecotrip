@@ -1,4 +1,4 @@
-const CACHE = 'ecotrip-v173';
+const CACHE = 'ecotrip-v174';
 // app.js e style.css: NETWORK first (código sempre atualizado)
 // index.html e manifest: cache first (estrutura estável)
 const NETWORK_FIRST = ['/app.js', '/style.css'];
