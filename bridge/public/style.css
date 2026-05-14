@@ -355,6 +355,65 @@ html, body {
 /* ── Cards Desde última partida / Trip A / Trip B — unidades micro ────────── */
 #d-trips-summary .dash-unit    { font-size: 8px; font-weight: 500; opacity: .70; vertical-align: baseline; margin-left: 1px; }
 
+/* ── Bateria & Combustível — card aprimorado ─────────────────────────────── */
+@keyframes bfc-shimmer {
+  0%   { transform: translateX(-300%); }
+  100% { transform: translateX(600%); }
+}
+
+/* Fundo levemente gradiente, borda com toque verde */
+#d-bfc-card {
+  background: linear-gradient(148deg, var(--card) 60%, rgba(57,255,136,.03) 100%);
+  border-color: rgba(57,255,136,.12);
+}
+
+/* Barras mais altas */
+#d-bfc-card .bar-track {
+  height: 10px;
+  border-radius: 5px;
+}
+
+/* Fills precisam de position:relative + overflow:hidden para o shimmer via ::after */
+#d-bfc-card .bar-fill {
+  position: relative;
+  overflow: hidden;
+  border-radius: 4px;
+}
+
+/* Gradiente nas barras — ponta mais clara simula brilho natural */
+#d-bfc-card .bar-fill.soc {
+  background: linear-gradient(90deg, rgba(57,255,136,.50) 0%, #39FF88 78%, rgba(205,255,228,.92) 100%);
+}
+#d-bfc-card .bar-fill.fuel {
+  background: linear-gradient(90deg, rgba(255,95,31,.50) 0%, #FF5F1F 78%, rgba(255,198,148,.92) 100%);
+}
+#d-bfc-card .bar-fill.batt12v {
+  background: linear-gradient(90deg, rgba(255,214,10,.45) 0%, #FFD60A 78%, rgba(255,246,180,.92) 100%);
+}
+
+/* Shimmer escalonado — uma barra de cada vez, com ~2.3 s de intervalo */
+#d-bfc-card .bar-fill::after {
+  content: '';
+  position: absolute;
+  top: 0; bottom: 0;
+  left: 0;
+  width: 38%;
+  background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,.30) 50%, transparent 100%);
+  animation: bfc-shimmer 7s linear infinite;
+}
+#d-bfc-card .bar-fill.soc::after     { animation-delay:  0s; }
+#d-bfc-card .bar-fill.fuel::after    { animation-delay: -2.3s; }
+#d-bfc-card .bar-fill.batt12v::after { animation-delay: -4.7s; }
+
+/* Valores coloridos no tom de cada barra + tamanho levemente maior */
+#d-bfc-card .bar-val  { font-size: 13px; font-weight: 700; }
+#d-bfc-card #d-soc    { color: var(--neon); }
+#d-bfc-card #d-fuel   { color: var(--orange); }
+#d-bfc-card #d-batt12v { color: var(--yellow); }
+
+/* Texto de autonomia: mais legível */
+#d-ev-range, #d-fuel-range { font-weight: 600; letter-spacing: 0.2px; }
+
 /* ── Limite de carga SOC ─────────────────────────────────────────────────── */
 .charge-limit-row   { display:flex; align-items:center; gap:8px; margin-top:10px; flex-wrap:wrap; }
 .charge-limit-label { font-size:11px; color:var(--muted); white-space:nowrap; }
