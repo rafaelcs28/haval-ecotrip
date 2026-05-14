@@ -1277,12 +1277,20 @@ function renderDash() {
                      ? s.rolling.km_per_l : null;
   const avgKmL = rollingKml ?? tripAKml ?? KML_FALLBACK;
 
-  const usableKwh = Math.max(0, (soc - EV_MIN_SOC) / 100 * BATT_KWH);
-  const evKm      = Math.round(usableKwh / (avgKwh100 / 100));
-  const evRangeEl = document.getElementById('d-ev-range');
+  const usableKwh  = Math.max(0, (soc - EV_MIN_SOC) / 100 * BATT_KWH);
+  const evKmCalc   = Math.round(usableKwh / (avgKwh100 / 100));
+  const realEvKm   = s.range_ev_km || 0;   // valor real do sensor HA (0 = não disponível)
+  const evRangeEl  = document.getElementById('d-ev-range');
   if (evRangeEl) {
-    evRangeEl.style.display = soc > EV_MIN_SOC ? '' : 'none';
-    if (soc > EV_MIN_SOC) setText('d-ev-km', evKm + ' km');
+    if (realEvKm > 0) {
+      evRangeEl.style.display = '';
+      setText('d-ev-km', realEvKm + ' km');
+    } else if (soc > EV_MIN_SOC) {
+      evRangeEl.style.display = '';
+      setText('d-ev-km', '~' + evKmCalc + ' km');
+    } else {
+      evRangeEl.style.display = 'none';
+    }
   }
 
   // Combustível (tank 51L)
@@ -1294,12 +1302,20 @@ function renderDash() {
   const fuelBar = document.getElementById('d-fuel-bar');
   if (fuelBar) fuelBar.style.width = Math.max(0, Math.min(100, fuelPct)) + '%';
 
-  // Autonomia térmica estimada
-  const fuelKm      = tankNow > 0 ? Math.round(tankNow * avgKmL) : 0;
-  const fuelRangeEl = document.getElementById('d-fuel-range');
+  // Autonomia térmica: real (sensor HA) → fallback estimada
+  const fuelKmCalc   = tankNow > 0 ? Math.round(tankNow * avgKmL) : 0;
+  const realIceKm    = s.range_ice_km || 0;
+  const fuelRangeEl  = document.getElementById('d-fuel-range');
   if (fuelRangeEl) {
-    fuelRangeEl.style.display = fuelKm > 0 ? '' : 'none';
-    if (fuelKm > 0) setText('d-fuel-km', fuelKm + ' km');
+    if (realIceKm > 0) {
+      fuelRangeEl.style.display = '';
+      setText('d-fuel-km', realIceKm + ' km');
+    } else if (fuelKmCalc > 0) {
+      fuelRangeEl.style.display = '';
+      setText('d-fuel-km', '~' + fuelKmCalc + ' km');
+    } else {
+      fuelRangeEl.style.display = 'none';
+    }
   }
 
   // Recarga — integrada no card d-bfc-card (card único)

@@ -442,6 +442,8 @@ const state = {
   battery_voltage_v:0,
   battery_current_a:0,
   soc_pct:          0,
+  range_ev_km:      0,      // autonomia elétrica real (sensor HA)
+  range_ice_km:     0,      // autonomia térmica real  (sensor HA)
   status_message:   '',     // string pipe-separada de alertas do carro
   engine_state:     null,   // null=desconhecido | '0'=desligado | '1'=ligado
   lock_state:       null,   // null=desconhecido | 'off'=trancado | 'on'=destrancado
@@ -1873,6 +1875,8 @@ function applyMqttMessage(key, value, isRetained = false) {
     case 'motor_power_kw':    state.motor_power_kw      = num(value); break;
     case 'odometer_km':       state.odometer_km         = num(value); break;
     case 'batt_12v_pct':      state.batt_12v_pct        = num(value); break;
+    case 'range_ev_km':       state.range_ev_km         = Math.round(num(value)); break;
+    case 'range_ice_km':      state.range_ice_km        = Math.round(num(value)); break;
     case 'battery_power_pct': state.battery_power_pct = Math.round(num(value)); break;
     case 'engine_rpm':        state.engine_rpm        = Math.round(num(value)); break;
 
