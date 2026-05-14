@@ -1208,6 +1208,21 @@ function renderDash() {
   const odo = s.odometer_km || 0;
   setText('d-odometer', odo > 0 ? Math.round(odo).toLocaleString('pt-BR') : '--');
 
+  // Marcha — badge no header do card do carro
+  const gearEl = document.getElementById('d-gear-badge');
+  if (gearEl) {
+    const g = (s.gear || '').toString().trim().toUpperCase();
+    const gCfg = ({
+      P: { bg: '#1e293b', color: '#64748b' },
+      D: { bg: '#052e16', color: '#4ade80' },
+      R: { bg: '#2a1200', color: '#fb923c' },
+      N: { bg: '#1e293b', color: '#94a3b8' },
+    })[g] || { bg: '#1e293b', color: '#334155' };
+    gearEl.textContent      = g || '--';
+    gearEl.style.background = gCfg.bg;
+    gearEl.style.color      = gCfg.color;
+  }
+
   // Bateria 12V — cor por faixa de carga
   const b12 = s.batt_12v_pct || 0;
   setText('d-batt12v', b12 > 0 ? Math.round(b12) + '%' : '--%');
@@ -1342,24 +1357,45 @@ function renderDash() {
   // Faróis — ligados com o motor (farol alto via sensor futuro high_beam)
   carLayer('cl-farol',      engOn && s.high_beam !== 'on');
   carLayer('cl-farol-alto', s.high_beam === 'on');
+  const engBtn   = document.getElementById('d-engine-btn');
   const engLabel = document.getElementById('d-car-engine-label');
   if (engLabel) {
-    // ⚙️ sempre visível — vermelho=ligado | cinza=desligado | muito-cinza=desconhecido
-    engLabel.textContent = '⚙️';
-    engLabel.style.filter = engOn              ? 'sepia(1) saturate(8) hue-rotate(310deg)'
-                          : (eng === '0' || eng === 0) ? 'grayscale(1) opacity(.45)'
-                          :                               'grayscale(1) opacity(.18)';
+    if (engOn) {
+      engLabel.textContent = '⚙ ON';
+      engLabel.style.color = '#4ade80';
+      if (engBtn) { engBtn.style.background = '#0d2b1a'; engBtn.style.borderColor = '#166534'; }
+    } else if (eng === '0' || eng === 0) {
+      engLabel.textContent = '⚙ OFF';
+      engLabel.style.color = '#475569';
+      if (engBtn) { engBtn.style.background = ''; engBtn.style.borderColor = ''; }
+    } else {
+      engLabel.textContent = '⚙ --';
+      engLabel.style.color = '#334155';
+      if (engBtn) { engBtn.style.background = ''; engBtn.style.borderColor = ''; }
+    }
   }
 
   // Trava
   const lck = s.lock_state;
   carLayer('cl-trava', lck === 'off');
+  const lockBtn   = document.getElementById('d-lock-btn');
   const lockLabel = document.getElementById('d-car-lock-label');
   if (lockLabel) {
-    // 🔒/🔓 sempre visível — teal=trancado | laranja=destrancado | muito-cinza=desconhecido
-    if      (lck === 'off') { lockLabel.textContent = '🔒'; lockLabel.style.filter = 'sepia(1) saturate(6) hue-rotate(130deg)'; }
-    else if (lck === 'on')  { lockLabel.textContent = '🔓'; lockLabel.style.filter = 'sepia(1) saturate(8) hue-rotate(340deg)'; }
-    else                     { lockLabel.textContent = '🔒'; lockLabel.style.filter = 'grayscale(1) opacity(.18)'; }
+    if (lck === 'off') {
+      // 'off' = TRANCADO (layer cl-trava ativa)
+      lockLabel.textContent = '🔒 OK';
+      lockLabel.style.color = '#4ade80';
+      if (lockBtn) { lockBtn.style.background = '#0d2b1a'; lockBtn.style.borderColor = '#166534'; }
+    } else if (lck === 'on') {
+      // 'on' = DESTRANCADO
+      lockLabel.textContent = '🔓 ABERTO';
+      lockLabel.style.color = '#fb923c';
+      if (lockBtn) { lockBtn.style.background = '#2a1200'; lockBtn.style.borderColor = '#92400e'; }
+    } else {
+      lockLabel.textContent = '🔒 --';
+      lockLabel.style.color = '#334155';
+      if (lockBtn) { lockBtn.style.background = ''; lockBtn.style.borderColor = ''; }
+    }
   }
 
   // Portas — alterna fechada/aberta (sempre uma delas visível)
@@ -1382,6 +1418,8 @@ function renderDash() {
   carLayer('cl-ac-left',    acOn);
   carLayer('cl-ac-right',   acOn);
   carLayer('cl-ventilacao', acOn);
+  const acChip = document.getElementById('d-ac-chip');
+  if (acChip) acChip.style.visibility = acOn ? 'visible' : 'hidden';
 
   // Vidros (1=fechado, 2=aberto, 3=entreaberto)
   carLayer('cl-win-fl-open', s.window_fl === '2' || s.window_fl === 2);
@@ -1407,15 +1445,20 @@ function renderDash() {
     if (!psiEl) return;
     if (psi > 0) {
       psiEl.textContent = psi.toFixed(1);
-      const alert = psi < 34 || psi > 40;
-      psiEl.style.color = alert ? '#f87171' : '#60a5fa';
-      if (card) {
-        card.style.border      = alert ? '1.5px solid #f87171'         : '1.5px solid #334155';
-        card.style.background  = alert ? 'rgba(127,29,29,0.80)'        : 'rgba(9,18,36,0.85)';
-      }
+      const tier = psi < 25 || psi > 40 ? 'critical'
+                 : psi < 30             ? 'low'
+                 :                        'ok';
+      const cfg = {
+        ok:       { color: '#22d3ee', border: '1.5px solid #0e7490', bg: 'rgba(7,28,38,0.85)'  },
+        low:      { color: '#fbbf24', border: '1.5px solid #b45309', bg: 'rgba(40,24,0,0.85)'  },
+        critical: { color: '#f87171', border: '1.5px solid #dc2626', bg: 'rgba(80,10,10,0.85)' },
+      }[tier];
+      psiEl.style.color = cfg.color;
+      if (card) { card.style.border = cfg.border; card.style.background = cfg.bg; }
     } else {
       psiEl.textContent = '--';
       psiEl.style.color = '#475569';
+      if (card) { card.style.border = '1.5px solid #334155'; card.style.background = 'rgba(9,18,36,0.85)'; }
     }
     if (tempEl) tempEl.textContent = tempC > 0 ? tempC + '°C' : '--°C';
   }

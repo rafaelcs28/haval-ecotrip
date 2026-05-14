@@ -176,12 +176,17 @@
       </div>
 
       <!-- Haval H6 — visualização em camadas PNG -->
-      <div class="card" style="padding:4px 8px 2px">
+      <div class="card" id="d-car-card" style="padding:4px 8px 2px">
         <div style="width:65%;margin:0 auto">
         <!-- Odômetro total — acima do carro, centro -->
-        <div style="display:flex;justify-content:center;align-items:baseline;gap:3px;padding:0 2px 2px">
-          <span style="font-size:13px;font-weight:600;color:#94a3b8" id="d-odometer">--</span>
-          <span style="font-size:8px;color:#64748b">km</span>
+        <!-- Header: Odômetro · Marcha · AC -->
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:0 2px 4px;min-height:26px">
+          <div style="display:flex;align-items:baseline;gap:2px">
+            <span style="font-size:12px;font-weight:600;color:#94a3b8" id="d-odometer">--</span>
+            <span style="font-size:8px;color:#64748b">km</span>
+          </div>
+          <div id="d-gear-badge" style="font-size:16px;font-weight:800;letter-spacing:-0.5px;padding:1px 12px;border-radius:8px;background:#1e293b;color:#475569;min-width:40px;text-align:center">--</div>
+          <div id="d-ac-chip" style="font-size:10px;font-weight:600;padding:2px 8px;border-radius:10px;background:#083344;color:#22d3ee;letter-spacing:0.3px;visibility:hidden">❄️ AC</div>
         </div>
         <div style="position:relative;width:100%;aspect-ratio:794/720;overflow:hidden;border-radius:6px;z-index:0">
           <!-- Base (sempre visível) -->
@@ -247,30 +252,25 @@
             <span id="d-tyre-rr-temp" style="font-size:9px;color:#64748b;line-height:1.2">--°C</span>
           </div>
         </div>
-        <!-- Barra de status -->
-        <div style="display:flex;justify-content:space-between;align-items:center;padding:1px 2px 0">
-          <!-- Temperatura externa — esquerda -->
-          <div style="display:flex;align-items:baseline;gap:3px;min-width:36px">
-            <span id="d-car-temp-out" style="font-size:13px;font-weight:600;color:#94a3b8">--°</span>
-            <span style="font-size:8px;color:#64748b">ext.</span>
+        <!-- Chips de status -->
+        <div style="display:flex;justify-content:center;align-items:stretch;gap:5px;padding:5px 2px 2px;flex-wrap:nowrap">
+          <!-- Temperatura externa -->
+          <div class="car-chip">
+            <span id="d-car-temp-out" style="font-size:12px;font-weight:600;color:#94a3b8">--°</span>
+            <span style="font-size:8px;color:#64748b">ext</span>
           </div>
-          <!-- Motor + Trava — centro -->
-          <div style="display:flex;gap:20px;align-items:center">
-            <!-- Botão de motor: toque para ligar/desligar remotamente -->
-            <button id="d-engine-btn" onclick="engineClick()"
-              style="background:none;border:none;padding:0;min-width:44px;min-height:44px;cursor:pointer;-webkit-tap-highlight-color:transparent;touch-action:manipulation;display:flex;align-items:center;justify-content:center;user-select:none">
-              <span id="d-car-engine-label" style="font-size:20px;line-height:1">⚙️</span>
-            </button>
-            <!-- Botão de trava: toque para trancar/destrancar remotamente -->
-            <button id="d-lock-btn" onclick="lockClick()"
-              style="background:none;border:none;padding:0;min-width:44px;min-height:44px;cursor:pointer;-webkit-tap-highlight-color:transparent;touch-action:manipulation;display:flex;align-items:center;justify-content:center;user-select:none">
-              <span id="d-car-lock-label" style="font-size:20px;line-height:1">🔒</span>
-            </button>
-          </div>
-          <!-- Temperatura interna — direita -->
-          <div style="display:flex;align-items:baseline;gap:3px;min-width:36px;justify-content:flex-end">
-            <span id="d-car-temp-in"  style="font-size:13px;font-weight:700;color:#60a5fa">--°</span>
-            <span style="font-size:8px;color:#4a7aaa">int.</span>
+          <!-- Motor — botão tappable -->
+          <button id="d-engine-btn" onclick="engineClick()" class="car-chip car-chip-btn">
+            <span id="d-car-engine-label" style="font-size:11px;font-weight:700;color:#475569">⚙ --</span>
+          </button>
+          <!-- Trava — botão tappable -->
+          <button id="d-lock-btn" onclick="lockClick()" class="car-chip car-chip-btn">
+            <span id="d-car-lock-label" style="font-size:11px;font-weight:700;color:#475569">🔒</span>
+          </button>
+          <!-- Temperatura interna -->
+          <div class="car-chip">
+            <span id="d-car-temp-in" style="font-size:12px;font-weight:700;color:#60a5fa">--°</span>
+            <span style="font-size:8px;color:#4a7aaa">int</span>
           </div>
         </div>
         </div><!-- /wrapper 65% -->

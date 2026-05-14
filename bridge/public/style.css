@@ -450,6 +450,26 @@ html, body {
   text-align: center;
 }
 
+/* ── Status chips — barra inferior do card do carro ─────────────────────────── */
+.car-chip {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 5px 8px;
+  border-radius: 20px;
+  background: #0f1c2e;
+  border: 1px solid #1e3a5f;
+  white-space: nowrap;
+}
+.car-chip-btn {
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  user-select: none;
+  min-height: 36px;
+  transition: background .2s, border-color .2s;
+}
+
 /* ── Barra de SOC/combustível ────────────────────────────────────────────────── */
 .bar-row { display: flex; flex-direction: column; gap: 6px; }
 .bar-item { display: flex; flex-direction: column; gap: 3px; }
