@@ -1742,6 +1742,7 @@ function renderCharges() {
     <div class="trip-metric"><div class="trip-metric-val" style="color:var(--muted)">${pct(c.soc_start)}</div><div class="trip-metric-lbl">SOC início</div></div>
     <div class="trip-metric"><div class="trip-metric-val ${col}">${pct(c.soc_end)}</div><div class="trip-metric-lbl">SOC fim</div></div>
     <div class="trip-metric"><div class="trip-metric-val ${col}">+${delta.toFixed(0)}%</div><div class="trip-metric-lbl">Δ SOC</div></div>
+    ${c.avg_temp_c != null ? `<div class="trip-metric"><div class="trip-metric-val muted">${c.avg_temp_c.toFixed(1)}°C</div><div class="trip-metric-lbl">🌡 temp ext</div></div>` : ''}
   </div>
   ${lossRow}
   <div class="charge-location-row" onclick="openLoc(${ts})">
@@ -3793,7 +3794,7 @@ function _statsChargingLocationsHTML(charges) {
   const groups = {};
   for (const c of charges) {
     const loc = c.location_name || '(sem local registrado)';
-    if (!groups[loc]) groups[loc] = { sessions: 0, chargeKwh: 0, chargerKwh: 0, durationSec: 0, costBrl: 0, withCharger: 0 };
+    if (!groups[loc]) groups[loc] = { sessions: 0, chargeKwh: 0, chargerKwh: 0, durationSec: 0, costBrl: 0, withCharger: 0, tempSum: 0, tempCount: 0 };
     const g = groups[loc];
     g.sessions++;
     g.chargeKwh   += c.energy_kwh   || 0;
@@ -3803,6 +3804,8 @@ function _statsChargingLocationsHTML(charges) {
     // custo: override manual ou price_kwh
     const ov = _chargeCostOverride(c.timestamp_ms || 0);
     g.costBrl += ov ? ov.total : (priceKwh * (c.energy_kwh || 0));
+    // temperatura média
+    if (c.avg_temp_c != null) { g.tempSum += c.avg_temp_c; g.tempCount++; }
   }
 
   // Calcula métricas e ordena: com dado de perda primeiro (menor % perda), depois por kWh
@@ -3813,7 +3816,8 @@ function _statsChargingLocationsHTML(charges) {
     const avgPwr   = g.durationSec > 0 ? g.chargeKwh / (g.durationSec / 3600) : 0;
     const costPkwh = g.chargerKwh > 0 ? g.costBrl / g.chargerKwh
                    : g.chargeKwh > 0  ? g.costBrl / g.chargeKwh : 0;
-    return { name, ...g, lossKwh, lossPct, effPct, avgPwr, costPkwh };
+    const avgTemp  = g.tempCount > 0 ? Math.round((g.tempSum / g.tempCount) * 10) / 10 : null;
+    return { name, ...g, lossKwh, lossPct, effPct, avgPwr, costPkwh, avgTemp };
   }).sort((a, b) => {
     if (a.lossPct !== null && b.lossPct !== null) return a.lossPct - b.lossPct;
     if (a.lossPct !== null) return -1;
@@ -3837,14 +3841,15 @@ function _statsChargingLocationsHTML(charges) {
       lossStr = `<span style="color:#475569">sem dado de carregador</span> · ${loc.sessions} sessões`;
     }
 
-    // Sub-linha: kWh, potência, custo
+    // Sub-linha: kWh, potência, custo, temperatura
     const kwhStr  = `${f2(loc.chargeKwh)} kWh injetados`;
     const pwrStr  = loc.avgPwr > 0 ? ` · ${f1(loc.avgPwr)} kW médio` : '';
     const costStr = loc.costPkwh > 0 ? ` · R$ ${f3(loc.costPkwh)}/kWh` : '';
+    const tempStr = loc.avgTemp != null ? ` · 🌡 ${loc.avgTemp}°C médio` : '';
 
     const icon = loc.lossPct !== null && i < 3 ? medals[i] : '📍';
     rows += _statsRow(icon, loc.name, `${f2(loc.chargeKwh)} kWh`,
-      kwhStr + pwrStr + costStr + '<br>' + lossStr);
+      kwhStr + pwrStr + costStr + tempStr + '<br>' + lossStr);
   });
 
   // Nota informativa se algum local não tem dado de perda

@@ -159,6 +159,8 @@ let chargeEndingNotifSent = false;
 let prevChargingState    = null;
 let chargeStartTimer     = null;
 let chargeSessionStartMs = 0;   // timestamp de início da sessão (para duração e potência média)
+let _chargeTempSamples   = [];  // amostras de temp externa durante a sessão atual
+let _lastChargeAvgTemp   = null;// média calculada ao fim da sessão, anexada ao próximo charging/history
 
 // ── SOC — fonte HA tem prioridade quando disponível ───────────────────────────
 // Após o primeiro tópico haval/ecotrip/soc_pct (publicado via automação HA),
@@ -1796,7 +1798,13 @@ function applyMqttMessage(key, value, isRetained = false) {
       break;
     }
     case 'inside_temp':       state.inside_temp        = num(value); break;
-    case 'outside_temp':      state.outside_temp       = num(value); break;
+    case 'outside_temp': {
+      const t = num(value);
+      state.outside_temp = t;
+      // Acumula amostras durante recarga para calcular temperatura média da sessão
+      if (state.charging_state === 'Carregando' && t !== 0) _chargeTempSamples.push(t);
+      break;
+    }
     case 'charging_state': {
       const prev = prevChargingState;
       state.charging_state = value;
@@ -1808,6 +1816,7 @@ function applyMqttMessage(key, value, isRetained = false) {
       // envenena prevChargingState e impede a notificação na próxima recarga real.
       if (!isRetained) {
         if (value === 'Carregando' && prev !== 'Carregando') {
+          _chargeTempSamples = [];   // inicia nova coleta de temperatura
           chargeSessionStartMs = Date.now();
           // Aguarda 30s para a potência estabilizar antes de notificar
           if (chargeStartTimer) clearTimeout(chargeStartTimer);
@@ -1825,6 +1834,13 @@ function applyMqttMessage(key, value, isRetained = false) {
         } else if (value !== 'Carregando' && prev === 'Carregando') {
           if (chargeStartTimer) { clearTimeout(chargeStartTimer); chargeStartTimer = null; }
           chargeEndingNotifSent = false;  // reset para próxima sessão
+          // Calcula temperatura média da sessão encerrada
+          if (_chargeTempSamples.length > 0) {
+            const avg = _chargeTempSamples.reduce((a, b) => a + b, 0) / _chargeTempSamples.length;
+            _lastChargeAvgTemp = Math.round(avg * 10) / 10;
+            console.log(`🌡 Temp média recarga: ${_lastChargeAvgTemp}°C (${_chargeTempSamples.length} amostras)`);
+          }
+          _chargeTempSamples = [];
           if (value === 'Finalizado' && notifPrefs.charge_end) {
             const kwh = state.charge_session_kwh || 0;
             const durSec = chargeSessionStartMs > 0
@@ -1968,13 +1984,22 @@ function applyMqttMessage(key, value, isRetained = false) {
           // que o Android não conhece — sem isso o MQTT retained apaga tudo
           chargesArr = charges.map(newCharge => {
             const existing = chargesArr.find(c => c.timestamp_ms === newCharge.timestamp_ms);
-            if (!existing) return newCharge;
+            if (!existing) {
+              // Nova sessão — anexa temperatura média se disponível
+              const entry = { ...newCharge };
+              if (_lastChargeAvgTemp !== null) {
+                entry.avg_temp_c   = _lastChargeAvgTemp;
+                _lastChargeAvgTemp = null;   // consumida
+              }
+              return entry;
+            }
             const keep = {};
             if (existing.location_name != null) keep.location_name = existing.location_name;
             if (existing.location_lat  != null) keep.location_lat  = existing.location_lat;
             if (existing.location_lng  != null) keep.location_lng  = existing.location_lng;
             if (existing.charger_kwh   != null) keep.charger_kwh   = existing.charger_kwh;
             if (existing.cost_override != null) keep.cost_override = existing.cost_override;
+            if (existing.avg_temp_c    != null) keep.avg_temp_c    = existing.avg_temp_c;
             return { ...newCharge, ...keep };
           });
           scheduleChargesFlush();
