@@ -1530,24 +1530,33 @@ function renderDash() {
     const tempEl = document.getElementById(`d-tyre-${pos}-temp`);
     const card   = document.getElementById(`d-tyre-${pos}`);
     if (!psiEl) return;
+    const isLeft = pos === 'fl' || pos === 'rl';
     if (psi > 0) {
       psiEl.textContent = psi.toFixed(1);
       const tier = psi < 25 || psi > 40 ? 'critical'
                  : psi < 30             ? 'low'
                  :                        'ok';
       const cfg = {
-        ok:       { color: '#22d3ee', border: '1.5px solid #0e7490', bg: 'rgba(7,28,38,0.85)'  },
-        low:      { color: '#fbbf24', border: '1.5px solid #b45309', bg: 'rgba(40,24,0,0.85)'  },
-        critical: { color: '#f87171', border: '1.5px solid #dc2626', bg: 'rgba(80,10,10,0.85)' },
+        ok:       { color: '#22d3ee', borderColor: '#0e7490', bg: 'rgba(7,14,26,0.82)'  },
+        low:      { color: '#fbbf24', borderColor: '#b45309', bg: 'rgba(30,18,0,0.82)'  },
+        critical: { color: '#f87171', borderColor: '#dc2626', bg: 'rgba(50,8,8,0.82)'   },
       }[tier];
       psiEl.style.color = cfg.color;
-      if (card) { card.style.border = cfg.border; card.style.background = cfg.bg; }
+      if (card) {
+        if (isLeft) card.style.borderLeft  = `3px solid ${cfg.borderColor}`;
+        else        card.style.borderRight = `3px solid ${cfg.borderColor}`;
+        card.style.background = cfg.bg;
+      }
     } else {
       psiEl.textContent = '--';
       psiEl.style.color = '#475569';
-      if (card) { card.style.border = '1.5px solid #334155'; card.style.background = 'rgba(9,18,36,0.85)'; }
+      if (card) {
+        if (isLeft) card.style.borderLeft  = '3px solid #1e293b';
+        else        card.style.borderRight = '3px solid #1e293b';
+        card.style.background = 'rgba(7,14,26,0.82)';
+      }
     }
-    if (tempEl) tempEl.textContent = tempC > 0 ? tempC + '°C' : '--°C';
+    if (tempEl) tempEl.textContent = tempC > 0 ? `${tempC}°` : '--°';
   }
   renderTyre('fl', s.tyre_pressure_fl, s.tyre_temp_fl);
   renderTyre('fr', s.tyre_pressure_fr, s.tyre_temp_fr);
