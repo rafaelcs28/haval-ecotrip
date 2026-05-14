@@ -159,6 +159,7 @@ let chargeEndingNotifSent = false;
 let prevChargingState    = null;
 let chargeStartTimer     = null;
 let chargeSessionStartMs = 0;   // timestamp de início da sessão (para duração e potência média)
+let chargeStartSoc       = 0;   // SOC% no início da sessão (para log de eventos)
 let _chargeTempSamples   = [];  // amostras de temp externa durante a sessão atual
 let _lastChargeAvgTemp   = null;// média calculada ao fim da sessão, anexada ao próximo charging/history
 
@@ -1964,6 +1965,8 @@ function applyMqttMessage(key, value, isRetained = false) {
         if (value === 'Carregando' && prev !== 'Carregando') {
           _chargeTempSamples = [];   // inicia nova coleta de temperatura
           chargeSessionStartMs = Date.now();
+          chargeStartSoc = state.soc_pct || 0;
+          addEvent('charge_start', `Recarga iniciada · SOC: ${chargeStartSoc.toFixed(0)}%`);
           // Aguarda 30s para a potência estabilizar antes de notificar
           if (chargeStartTimer) clearTimeout(chargeStartTimer);
           chargeStartTimer = setTimeout(() => {
@@ -1980,6 +1983,8 @@ function applyMqttMessage(key, value, isRetained = false) {
         } else if (value !== 'Carregando' && prev === 'Carregando') {
           if (chargeStartTimer) { clearTimeout(chargeStartTimer); chargeStartTimer = null; }
           chargeEndingNotifSent = false;  // reset para próxima sessão
+          const endSoc = state.soc_pct || 0;
+          addEvent('charge_end', `Recarga concluída · SOC: ${chargeStartSoc.toFixed(0)}% → ${endSoc.toFixed(0)}%`);
           // Calcula temperatura média da sessão encerrada
           if (_chargeTempSamples.length > 0) {
             const avg = _chargeTempSamples.reduce((a, b) => a + b, 0) / _chargeTempSamples.length;
