@@ -1383,14 +1383,14 @@ function renderDash() {
   if (lockLabel) {
     if (lck === 'off') {
       // 'off' = TRANCADO (layer cl-trava ativa)
-      lockLabel.textContent = '🔒 OK';
+      lockLabel.textContent = '🔒 Travado';
       lockLabel.style.color = '#4ade80';
       if (lockBtn) { lockBtn.style.background = '#0d2b1a'; lockBtn.style.borderColor = '#166534'; }
     } else if (lck === 'on') {
       // 'on' = DESTRANCADO
-      lockLabel.textContent = '🔓 ABERTO';
-      lockLabel.style.color = '#fb923c';
-      if (lockBtn) { lockBtn.style.background = '#2a1200'; lockBtn.style.borderColor = '#92400e'; }
+      lockLabel.textContent = '🔓 Destravado';
+      lockLabel.style.color = '#f87171';
+      if (lockBtn) { lockBtn.style.background = '#450a0a'; lockBtn.style.borderColor = '#dc2626'; }
     } else {
       lockLabel.textContent = '🔒 --';
       lockLabel.style.color = '#334155';
