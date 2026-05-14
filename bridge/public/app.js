@@ -2199,7 +2199,10 @@ function renderAutoTrips() {
     </div>
     <div style="display:flex;flex-direction:column;align-items:flex-end;gap:3px">
       ${costStr}
-      <button class="cost-edit-btn" onclick="toggleCostEdit('${t.tripId}')" title="Recalcular custo">💰</button>
+      <div style="display:flex;gap:4px">
+        <button class="cost-edit-btn" onclick="openMergeModal('${t.tripId}')" title="Unir viagens">🔗</button>
+        <button class="cost-edit-btn" onclick="toggleCostEdit('${t.tripId}')" title="Recalcular custo">💰</button>
+      </div>
     </div>
   </div>
   <div id="cost-edit-${t.tripId}" class="cost-edit-form" style="display:none">
@@ -2217,7 +2220,6 @@ function renderAutoTrips() {
   <div class="trip-actions">
     <button class="trip-action-btn" onclick="openTripDetail('${t.tripId}')">🗺 Ver rota</button>
     <button class="trip-action-btn" style="color:#94a3b8" onclick="shareTripCard('${t.tripId}')">📸 Snapshot</button>
-    <button class="trip-action-btn" style="color:#94a3b8" onclick="openMergeModal('${t.tripId}')">🔗 Unir</button>
     ${mapsUrl ? `<a class="trip-action-btn" href="${mapsUrl}" target="_blank">📍 Maps</a>` : ''}
   </div>
 </div>`;
