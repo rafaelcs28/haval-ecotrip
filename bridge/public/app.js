@@ -1044,14 +1044,16 @@ async function syncAllCache({ silent = false } = {}) {
     cachedAutoTrips = (await _idbGetAll('autotrips'))
       .sort((a, b) => (b.startMs || 0) - (a.startMs || 0));
 
-    // Recargas
+    // Recargas — cursor usa max(timestamp_ms, _updated_ms) para capturar
+    // tanto novas recargas quanto atualizações em recargas antigas (local, custo, kWh)
     const lastChg = (await _idbGetMeta('lastChargeMs')) || 0;
     const newChg  = await apiFetch('/api/charges' + (lastChg > 0 ? '?since=' + lastChg : ''))
       .then(r => r.json()).catch(() => []);
     if (Array.isArray(newChg) && newChg.length) {
       await _idbPutMany('charges', newChg);
       totals.charges = newChg.length;
-      const maxChg = Math.max(...newChg.map(c => c.timestamp_ms || 0));
+      // Avança cursor para o maior entre timestamp_ms e _updated_ms
+      const maxChg = Math.max(...newChg.map(c => Math.max(c.timestamp_ms || 0, c._updated_ms || 0)));
       if (maxChg > 0) await _idbSetMeta('lastChargeMs', maxChg);
     }
     cachedCharges = (await _idbGetAll('charges'))

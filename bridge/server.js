@@ -729,7 +729,10 @@ app.get('/api/trips', (req, res) => {
 });
 app.get('/api/charges', (req, res) => {
   const since = parseInt(req.query.since || '0', 10);
-  res.json(since > 0 ? chargesArr.filter(c => (c.timestamp_ms || 0) > since) : chargesArr);
+  // Retorna entradas novas (timestamp_ms > since) OU atualizadas (_updated_ms > since)
+  res.json(since > 0
+    ? chargesArr.filter(c => (c.timestamp_ms || 0) > since || (c._updated_ms || 0) > since)
+    : chargesArr);
 });
 
 app.delete('/api/charges/:ts', (req, res) => {
@@ -825,6 +828,7 @@ app.patch('/api/charges/:ts/location', (req, res) => {
     delete charge.location_name;
     delete charge.location_lat;
     delete charge.location_lng;
+    charge._updated_ms = Date.now();
     scheduleChargesFlush();
     return res.json(charge);
   }
@@ -835,6 +839,7 @@ app.patch('/api/charges/:ts/location', (req, res) => {
     if (lng != null) charge.location_lng = lng;
     const match = autoMatchLocation(lat, lng);
     if (match) charge.location_name = match.name;
+    charge._updated_ms = Date.now();
     scheduleChargesFlush();
     return res.json(charge);
   }
@@ -854,6 +859,7 @@ app.patch('/api/charges/:ts/location', (req, res) => {
     }
   }
 
+  charge._updated_ms = Date.now();
   scheduleChargesFlush();
   res.json(charge);
 });
@@ -866,6 +872,7 @@ app.patch('/api/charges/:ts/charger_kwh', (req, res) => {
   if (!charge) return res.status(404).json({ error: 'not found' });
   const val = parseFloat(charger_kwh) || 0;
   if (val > 0) charge.charger_kwh = val; else delete charge.charger_kwh;
+  charge._updated_ms = Date.now();
   scheduleChargesFlush();
   res.json(charge);
 });
@@ -879,6 +886,7 @@ app.patch('/api/charges/:ts/cost', (req, res) => {
   const t = parseFloat(total) || 0;
   if (t > 0) charge.cost_override = { total: t, perKwh: parseFloat(per_kwh) || 0 };
   else        delete charge.cost_override;
+  charge._updated_ms = Date.now();
   scheduleChargesFlush();
   res.json(charge);
 });
