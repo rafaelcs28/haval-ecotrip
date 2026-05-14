@@ -82,13 +82,15 @@ async function _processGeoQueue() {
 // Retorna "CidadeOrigem → CidadeDestino" se forem diferentes e o trip não tiver nome.
 // Usa apenas o primeiro segmento do geocode (antes da vírgula) para ficar compacto.
 function getAutoName(t) {
-  if (t.name) return null;
-  const startFull = geoCache[t.tripId];
-  const endFull   = geoCache[t.tripId + ':end'];
-  if (!startFull || !endFull) return null;
-  const startCity = startFull.split(',')[0].trim();
-  const endCity   = endFull.split(',')[0].trim();
-  if (!startCity || !endCity || startCity === endCity) return null;
+  if (t.name) return null; // servidor já definiu nome completo
+  const knownStart = t.knownStart || null;
+  const knownEnd   = t.knownEnd   || null;
+  const startFull  = geoCache[t.tripId];
+  const endFull    = geoCache[t.tripId + ':end'];
+  const startCity  = knownStart || (startFull ? startFull.split(',')[0].trim() : null);
+  const endCity    = knownEnd   || (endFull   ? endFull.split(',')[0].trim()   : null);
+  if (!startCity || !endCity) return null;
+  if (!knownStart && !knownEnd && startCity === endCity) return null;
   return `${startCity} → ${endCity}`;
 }
 
@@ -4076,6 +4078,143 @@ window.engineClick = function() {
       engOn ? 'Comando enviado: desligar' : 'Comando enviado: ligar',
     ),
   });
+};
+
+// ── Locais Conhecidos ─────────────────────────────────────────────────────────
+let _kpMap = null;          // mini mapa Leaflet no modal
+let _kpMarker = null;       // marcador no mapa
+let _kpCircle = null;       // círculo de raio
+let _kpEditId = null;       // id do local em edição (null = novo)
+let _kpData = [];           // cache local da lista
+
+async function loadKnownPlaces() {
+  try {
+    const r = await apiFetch('/api/known-places');
+    _kpData = await r.json();
+  } catch (_) { _kpData = []; }
+  _renderKnownPlacesList();
+}
+
+function _renderKnownPlacesList() {
+  const el = document.getElementById('kp-list');
+  if (!el) return;
+  if (!_kpData.length) {
+    el.innerHTML = '<div class="empty" style="padding:12px 0">Nenhum local cadastrado.</div>';
+    return;
+  }
+  el.innerHTML = _kpData.map(p => `
+    <div class="kp-item">
+      <div class="kp-item-info">
+        <div class="kp-item-name">📍 ${p.name}</div>
+        <div class="kp-item-sub">${p.radius_m} m raio</div>
+      </div>
+      <div class="kp-item-actions">
+        <button class="kp-btn-edit" onclick="openKpModal(${p.id})">✏️</button>
+        <button class="kp-btn-del"  onclick="deleteKnownPlace(${p.id})">🗑</button>
+      </div>
+    </div>`).join('');
+}
+
+window.openKpModal = function(id) {
+  _kpEditId = id || null;
+  const place = id ? _kpData.find(p => p.id === id) : null;
+  document.getElementById('kp-modal-title').textContent = place ? 'Editar local' : 'Novo local';
+  document.getElementById('kp-name-input').value  = place?.name      || '';
+  document.getElementById('kp-radius-input').value = place?.radius_m || 200;
+  document.getElementById('kp-radius-val').textContent = (place?.radius_m || 200) + ' m';
+  document.getElementById('kp-modal').style.display = 'flex';
+
+  // Inicializa mapa Leaflet
+  setTimeout(() => {
+    const lat = place?.lat || -23.55;
+    const lng = place?.lng || -46.63;
+    if (!_kpMap) {
+      _kpMap = L.map('kp-map', { zoomControl: true }).setView([lat, lng], 15);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OSM', maxZoom: 19,
+      }).addTo(_kpMap);
+      _kpMap.on('click', e => _kpSetPin(e.latlng.lat, e.latlng.lng));
+    } else {
+      _kpMap.setView([lat, lng], 15);
+    }
+    if (place) _kpSetPin(lat, lng, parseInt(document.getElementById('kp-radius-input').value));
+    else { if (_kpMarker) { _kpMarker.remove(); _kpMarker = null; } if (_kpCircle) { _kpCircle.remove(); _kpCircle = null; } }
+    setTimeout(() => _kpMap.invalidateSize(), 100);
+  }, 80);
+};
+
+function _kpSetPin(lat, lng, radius) {
+  const r = radius || parseInt(document.getElementById('kp-radius-input').value) || 200;
+  if (_kpMarker) _kpMarker.setLatLng([lat, lng]);
+  else _kpMarker = L.marker([lat, lng]).addTo(_kpMap);
+  if (_kpCircle) _kpCircle.setLatLng([lat, lng]).setRadius(r);
+  else _kpCircle = L.circle([lat, lng], { radius: r, color: '#22d3ee', fillOpacity: 0.12 }).addTo(_kpMap);
+  _kpMap.setView([lat, lng], 15);
+}
+
+window.kpRadiusChange = function(val) {
+  document.getElementById('kp-radius-val').textContent = val + ' m';
+  if (_kpMarker) {
+    const ll = _kpMarker.getLatLng();
+    _kpSetPin(ll.lat, ll.lng, parseInt(val));
+  }
+};
+
+window.kpUseGps = function() {
+  if (!navigator.geolocation) { showToast('GPS não disponível'); return; }
+  showToast('📍 Obtendo localização…');
+  navigator.geolocation.getCurrentPosition(
+    pos => _kpSetPin(pos.coords.latitude, pos.coords.longitude),
+    ()  => showToast('✗ Não foi possível obter GPS'),
+    { timeout: 10000, maximumAge: 30000 }
+  );
+};
+
+window.kpSearchAddress = async function() {
+  const q = document.getElementById('kp-search-input').value.trim();
+  if (!q) return;
+  try {
+    showToast('🔍 Buscando…');
+    const r = await fetch(
+      `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=1&accept-language=pt-BR`,
+      { headers: { 'User-Agent': 'EcotripBridge/1.0' } }
+    );
+    const results = await r.json();
+    if (!results.length) { showToast('Endereço não encontrado'); return; }
+    const { lat, lon } = results[0];
+    _kpSetPin(parseFloat(lat), parseFloat(lon));
+  } catch (_) { showToast('✗ Erro na busca'); }
+};
+
+window.closeKpModal = function() {
+  document.getElementById('kp-modal').style.display = 'none';
+};
+
+window.saveKnownPlace = async function() {
+  const name = document.getElementById('kp-name-input').value.trim();
+  if (!name) { showToast('Digite um nome para o local'); return; }
+  if (!_kpMarker) { showToast('Marque a localização no mapa'); return; }
+  const ll  = _kpMarker.getLatLng();
+  const r   = parseInt(document.getElementById('kp-radius-input').value) || 200;
+  const body = { name, lat: ll.lat, lng: ll.lng, radius_m: r };
+  try {
+    const resp = await apiFetch(
+      _kpEditId ? `/api/known-places/${_kpEditId}` : '/api/known-places',
+      { method: _kpEditId ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+    );
+    if (!resp.ok) { showToast('✗ Erro ao salvar'); return; }
+    showToast(_kpEditId ? '✓ Local atualizado' : '✓ Local salvo');
+    closeKpModal();
+    loadKnownPlaces();
+  } catch (_) { showToast('✗ Erro de conexão'); }
+};
+
+window.deleteKnownPlace = async function(id) {
+  if (!confirm('Apagar este local?\nViagens futuras não serão mais nomeadas automaticamente.')) return;
+  try {
+    await apiFetch(`/api/known-places/${id}`, { method: 'DELETE' });
+    loadKnownPlaces();
+  } catch (_) { showToast('✗ Erro ao apagar'); }
 };
 
 // ── Lock — toque para trancar/destrancar remotamente ─────────────────────────

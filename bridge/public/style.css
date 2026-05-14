@@ -470,6 +470,31 @@ html, body {
   transition: background .2s, border-color .2s;
 }
 
+/* ── Locais Conhecidos ───────────────────────────────────────────────────────── */
+.kp-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  background: #0f172a;
+  border: 1px solid #1e293b;
+  border-radius: 10px;
+  margin-bottom: 6px;
+}
+.kp-item-name { font-size: 13px; font-weight: 600; color: #e2e8f0; }
+.kp-item-sub  { font-size: 11px; color: #475569; margin-top: 2px; }
+.kp-item-actions { display: flex; gap: 6px; }
+.kp-btn-edit, .kp-btn-del {
+  background: none;
+  border: none;
+  font-size: 16px;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 6px;
+  -webkit-tap-highlight-color: transparent;
+}
+.kp-btn-del { opacity: 0.5; }
+
 /* ── Barra de SOC/combustível ────────────────────────────────────────────────── */
 .bar-row { display: flex; flex-direction: column; gap: 6px; }
 .bar-item { display: flex; flex-direction: column; gap: 3px; }

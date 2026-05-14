@@ -59,6 +59,7 @@ const VAPID_FILE        = path.join(__dirname, 'vapid_keys.json');
 const PUSH_SUBS_FILE    = path.join(__dirname, 'push_subscriptions.json');
 const RENAMES_FILE      = path.join(__dirname, 'pending_renames.json');
 const CHARGE_LOCS_FILE    = path.join(__dirname, 'charge_locations.json');
+const KNOWN_PLACES_FILE   = path.join(__dirname, 'known_places.json');
 const NOTIF_PREFS_FILE    = path.join(__dirname, 'notif_prefs.json');
 const NOTIF_HISTORY_FILE  = path.join(__dirname, 'notif_history.json');
 const EVENTS_FILE         = path.join(__dirname, 'events.json');
@@ -618,8 +619,42 @@ function haversineM(lat1, lng1, lat2, lng2) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+// ── Locais Conhecidos — unificado para recargas e viagens ─────────────────────
+let knownPlaces = [];
+try {
+  if (fs.existsSync(KNOWN_PLACES_FILE)) {
+    knownPlaces = JSON.parse(fs.readFileSync(KNOWN_PLACES_FILE, 'utf8')) || [];
+  } else if (chargeLocations.length) {
+    // Migração one-time: charge_locations → known_places
+    knownPlaces = chargeLocations.map(l => ({ ...l, radius_m: 200 }));
+    fs.writeFileSync(KNOWN_PLACES_FILE, JSON.stringify(knownPlaces, null, 2));
+    console.log(`✓ Migrados ${knownPlaces.length} locais → known_places.json`);
+  }
+  if (knownPlaces.length) console.log(`✓ Locais conhecidos: ${knownPlaces.length}`);
+} catch (_) {}
+
+function saveKnownPlaces() {
+  try { fs.writeFileSync(KNOWN_PLACES_FILE, JSON.stringify(knownPlaces, null, 2)); } catch (_) {}
+}
+
+// Retorna o local conhecido mais próximo dentro do raio do local, ou null
+function matchKnownPlace(lat, lng) {
+  if (!lat || !lng) return null;
+  let best = null, bestDist = Infinity;
+  for (const loc of knownPlaces) {
+    if (!loc.lat || !loc.lng) continue;
+    const d = haversineM(lat, lng, loc.lat, loc.lng);
+    const r = loc.radius_m || 200;
+    if (d < r && d < bestDist) { best = loc; bestDist = d; }
+  }
+  return best;
+}
+
 // Retorna o local conhecido mais próximo dentro de radiusM metros, ou null
 function autoMatchLocation(lat, lng, radiusM = 200) {
+  // Tenta known_places primeiro (raio por local); fallback para chargeLocations com raio fixo
+  const kp = matchKnownPlace(lat, lng);
+  if (kp) return kp;
   if (!lat || !lng) return null;
   let best = null, bestDist = Infinity;
   for (const loc of chargeLocations) {
@@ -729,6 +764,42 @@ app.delete('/api/charge-locations/:id', (req, res) => {
   if (idx === -1) return res.status(404).json({ error: 'não encontrado' });
   chargeLocations.splice(idx, 1);
   saveChargeLocations();
+  res.json({ ok: true });
+});
+
+// ── API Locais Conhecidos ─────────────────────────────────────────────────────
+app.get('/api/known-places', (_req, res) => res.json(knownPlaces));
+
+app.post('/api/known-places', (req, res) => {
+  const { name, lat, lng, radius_m } = req.body || {};
+  if (!name?.trim() || lat == null || lng == null)
+    return res.status(400).json({ error: 'name, lat, lng obrigatórios' });
+  const r = Math.max(50, Math.min(2000, parseInt(radius_m) || 200));
+  const place = { id: Date.now(), name: name.trim(), lat, lng, radius_m: r };
+  knownPlaces.push(place);
+  saveKnownPlaces();
+  res.json(place);
+});
+
+app.put('/api/known-places/:id', (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const place = knownPlaces.find(p => p.id === id);
+  if (!place) return res.status(404).json({ error: 'not found' });
+  const { name, lat, lng, radius_m } = req.body || {};
+  if (name?.trim()) place.name = name.trim();
+  if (lat != null) place.lat = lat;
+  if (lng != null) place.lng = lng;
+  if (radius_m != null) place.radius_m = Math.max(50, Math.min(2000, parseInt(radius_m)));
+  saveKnownPlaces();
+  res.json(place);
+});
+
+app.delete('/api/known-places/:id', (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const idx = knownPlaces.findIndex(p => p.id === id);
+  if (idx < 0) return res.status(404).json({ error: 'not found' });
+  knownPlaces.splice(idx, 1);
+  saveKnownPlaces();
   res.json({ ok: true });
 });
 
@@ -1087,6 +1158,18 @@ app.post('/api/autotrips', (req, res) => {
     fs.writeFileSync(filePath, JSON.stringify({ tripId: safeId, autoTrip, samples: finalSamples }));
 
     const record = { tripId: safeId, ...autoTrip, hybridTimeSec, hybridDistKm };
+
+    // Auto-naming por Locais Conhecidos
+    const _sp = matchKnownPlace(autoTrip.startLat, autoTrip.startLng);
+    const _ep = matchKnownPlace(autoTrip.endLat,   autoTrip.endLng);
+    if (_sp) record.knownStart = _sp.name;
+    if (_ep) record.knownEnd   = _ep.name;
+    if (_sp && _ep) {
+      record.name = `${_sp.name} → ${_ep.name}`;
+      pendingRenames.push({ id: `kp-${safeId}`, type: 'auto', tripId: safeId, name: record.name, createdAt: Date.now() });
+      try { fs.writeFileSync(RENAMES_FILE, JSON.stringify(pendingRenames, null, 2)); } catch (_) {}
+    }
+
     const idx = autoTripsArr.findIndex(t => t.tripId === safeId);
     if (idx >= 0) autoTripsArr[idx] = record;
     else {

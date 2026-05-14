@@ -547,6 +547,24 @@
         </div>
       </div>
 
+      <!-- ── N. Locais Conhecidos ──────────────────────────────────────────────── -->
+      <div class="settings-card">
+        <div class="sc-header" onclick="toggleSection('sc-kp-body','sc-kp-btn')">
+          <span class="sc-title">📍 Locais Conhecidos</span>
+          <button id="sc-kp-btn" type="button" class="sc-toggle">▲</button>
+        </div>
+        <div id="sc-kp-body">
+          <div style="font-size:11px;color:#64748b;margin-bottom:10px;line-height:1.6">
+            Locais com raio configurado. Viagens e recargas dentro do raio são nomeadas automaticamente.
+          </div>
+          <button type="button" onclick="openKpModal(null)"
+            style="width:100%;background:rgba(34,211,238,.10);border:1px solid rgba(34,211,238,.28);color:#22d3ee;border-radius:10px;padding:10px;font-size:13px;font-weight:600;cursor:pointer;margin-bottom:10px">
+            + Adicionar local
+          </button>
+          <div id="kp-list"></div>
+        </div>
+      </div>
+
       <!-- ── Sessão ──────────────────────────────────────────────────────────── -->
       <button type="button" onclick="adminLogout()"
         style="width:100%;background:transparent;border:1px solid #1e293b;border-radius:10px;padding:11px;color:#475569;font-size:12px;cursor:pointer;margin-top:4px">
@@ -619,7 +637,7 @@
       <span class="tab-icon">📋</span>
       <span class="tab-label">Logs</span>
     </button>
-    <button class="tab" data-panel="admin" onclick="switchTab(this)">
+    <button class="tab" data-panel="admin" onclick="switchTab(this, loadKnownPlaces)">
       <span class="tab-icon">⚙️</span>
       <span class="tab-label">Config</span>
     </button>
@@ -711,6 +729,70 @@
       </div>
     </div>
   </div>
+
+<!-- Modal — Locais Conhecidos -->
+<div id="kp-modal" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.75);align-items:flex-end;justify-content:center">
+  <div style="background:#0c1019;border-radius:16px 16px 0 0;width:100%;max-width:520px;max-height:92vh;overflow-y:auto;padding:20px 16px 32px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <span id="kp-modal-title" style="font-size:16px;font-weight:700;color:#e2e8f0">Novo local</span>
+      <button onclick="closeKpModal()" style="background:none;border:none;color:#64748b;font-size:20px;cursor:pointer;padding:4px">✕</button>
+    </div>
+
+    <!-- Nome -->
+    <div style="margin-bottom:12px">
+      <label style="font-size:11px;color:#64748b;display:block;margin-bottom:4px">Nome do local</label>
+      <input id="kp-name-input" type="text" placeholder="Ex: Casa, Academia, Trabalho"
+        style="width:100%;background:#0f172a;border:1px solid #1e3a5f;border-radius:8px;padding:10px 12px;color:#e2e8f0;font-size:14px;box-sizing:border-box">
+    </div>
+
+    <!-- Raio -->
+    <div style="margin-bottom:12px">
+      <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+        <label style="font-size:11px;color:#64748b">Raio de detecção</label>
+        <span id="kp-radius-val" style="font-size:11px;color:#22d3ee;font-weight:600">200 m</span>
+      </div>
+      <input id="kp-radius-input" type="range" min="50" max="1000" step="25" value="200"
+        oninput="kpRadiusChange(this.value)"
+        style="width:100%;accent-color:#22d3ee">
+      <div style="display:flex;justify-content:space-between;font-size:9px;color:#334155;margin-top:2px">
+        <span>50 m</span><span>1 km</span>
+      </div>
+    </div>
+
+    <!-- Busca de endereço -->
+    <div style="display:flex;gap:8px;margin-bottom:10px">
+      <input id="kp-search-input" type="text" placeholder="Buscar endereço…"
+        style="flex:1;background:#0f172a;border:1px solid #1e3a5f;border-radius:8px;padding:9px 12px;color:#e2e8f0;font-size:13px"
+        onkeydown="if(event.key==='Enter')kpSearchAddress()">
+      <button onclick="kpSearchAddress()"
+        style="background:#1e3a5f;border:none;border-radius:8px;padding:9px 14px;color:#7FBADC;font-size:13px;cursor:pointer;white-space:nowrap">
+        🔍
+      </button>
+      <button onclick="kpUseGps()"
+        style="background:#052e16;border:1px solid #166534;border-radius:8px;padding:9px 12px;color:#4ade80;font-size:13px;cursor:pointer;white-space:nowrap">
+        📡 GPS
+      </button>
+    </div>
+
+    <!-- Mapa -->
+    <div id="kp-map" style="height:220px;border-radius:10px;overflow:hidden;margin-bottom:14px;background:#0f172a"></div>
+    <div style="font-size:10px;color:#475569;text-align:center;margin-bottom:14px">
+      Toque no mapa para posicionar o pino, ou use busca/GPS acima.
+    </div>
+
+    <!-- Ações -->
+    <div style="display:flex;gap:8px">
+      <button onclick="closeKpModal()"
+        style="flex:1;background:#1e293b;border:none;border-radius:10px;padding:13px;color:#94a3b8;font-size:14px;cursor:pointer">
+        Cancelar
+      </button>
+      <button onclick="saveKnownPlace()"
+        style="flex:1;background:#22d3ee;border:none;border-radius:10px;padding:13px;color:#000;font-size:14px;font-weight:700;cursor:pointer">
+        Salvar
+      </button>
+    </div>
+  </div>
+</div>
 
 <script src="/app.js"></script>
 </body>
