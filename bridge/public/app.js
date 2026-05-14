@@ -1248,23 +1248,32 @@ function renderDash() {
   setText('d-odometer', odo > 0 ? Math.round(odo).toLocaleString('pt-BR') : '--');
 
   // Marcha — badge no header do card do carro
-  const gearEl = document.getElementById('d-gear-badge');
+  const gearEl  = document.getElementById('d-gear-badge');
+  const odoLeft = document.getElementById('d-odo-left');
   if (gearEl) {
-    const gRaw = (s.gear || '').toString().trim();
-    const g    = gRaw.toUpperCase();
-    // -1 = valor inválido (carro desligado) → ocultar badge sem colapsar layout
+    const gRaw   = (s.gear || '').toString().trim();
+    const g      = gRaw.toUpperCase();
     const invalid = gRaw === '-1' || gRaw === '' || gRaw === '--';
-    gearEl.style.visibility = invalid ? 'hidden' : 'visible';
-    if (!invalid) {
+    if (invalid) {
+      // Km migra para o centro; esquerda fica oculta
+      if (odoLeft) odoLeft.style.visibility = 'hidden';
+      gearEl.style.visibility = 'visible';
+      gearEl.style.background = 'transparent';
+      const odoVal = odo > 0 ? Math.round(odo).toLocaleString('pt-BR') : '--';
+      gearEl.innerHTML = `<span style="font-size:12px;font-weight:600;color:#94a3b8">${odoVal}</span><span style="font-size:8px;color:#64748b"> km</span>`;
+    } else {
+      // Marcha válida — km fica na esquerda, marcha no centro
+      if (odoLeft) odoLeft.style.visibility = 'visible';
       const gCfg = ({
         P: { bg: '#1e293b', color: '#64748b' },
         D: { bg: '#052e16', color: '#4ade80' },
         R: { bg: '#2a1200', color: '#fb923c' },
         N: { bg: '#1e293b', color: '#94a3b8' },
       })[g] || { bg: '#1e293b', color: '#475569' };
-      gearEl.textContent      = g;
+      gearEl.style.visibility = 'visible';
       gearEl.style.background = gCfg.bg;
       gearEl.style.color      = gCfg.color;
+      gearEl.textContent      = g;
     }
   }
 
