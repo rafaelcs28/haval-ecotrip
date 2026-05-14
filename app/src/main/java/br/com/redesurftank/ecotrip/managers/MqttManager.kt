@@ -104,6 +104,8 @@ class MqttManager private constructor() {
     var latestChargeRemainingMin: Int = 0   // minutos restantes de recarga (0 = indisponível)
     var latestBattPowerPct: Int = 0    // % da potência da bateria (-100=regen total, +100=consumo total)
     var latestEngineRpm:    Int = 0    // rpm — rotação do motor térmico (ICE)
+    var latestDriverSeatVent:    Int = 0    // 0=off, 1–3 nível de ventilação banco motorista
+    var latestPassengerSeatVent: Int = 0    // 0=off, 1–3 nível de ventilação banco passageiro
 
     // Último timestamp em que qualquer dado do carro foi recebido pelo app
     // Usado para saber se o barramento de dados do carro está ativo
@@ -421,6 +423,8 @@ class MqttManager private constructor() {
             // % potência motor elétrico — car.ev_info.cur_battery_power_percentage
             pubR("battery_power_pct", latestBattPowerPct.toString())
             pubR("engine_rpm",        latestEngineRpm.toString())
+            pubR("seat_vent_drv",     latestDriverSeatVent.toString())
+            pubR("seat_vent_pass",    latestPassengerSeatVent.toString())
             if (latestOdometerKm > 0f) pubR("odometer_km", fmt1(latestOdometerKm))
             if (latestBatt12vPct > 0f) pubR("batt_12v_pct", fmt1(latestBatt12vPct))
             // Potência de recarga: apenas quando charging_state == 1 (Carregando)
@@ -608,6 +612,8 @@ class MqttManager private constructor() {
             S("motor_power_kw",           "Potência Motor Elétrico",   "$prefix/motor_power_kw",             "kW",  icon = "mdi:lightning-bolt-circle"),
             S("battery_power_pct",        "Potência Motor %",          "$prefix/battery_power_pct",          "%",   icon = "mdi:gauge"),
             S("engine_rpm",        "Rotação Motor Térmico",    "$prefix/engine_rpm",         "rpm",       icon = "mdi:engine"),
+            S("seat_vent_drv",  "Ventilação Banco Motorista",  "$prefix/seat_vent_drv",  "", icon = "mdi:seat-recline-normal", sc = null),
+            S("seat_vent_pass", "Ventilação Banco Passageiro", "$prefix/seat_vent_pass", "", icon = "mdi:seat-recline-normal", sc = null),
             S("charging_state",     "Estado de Recarga",        "$prefix/charging_state",     "",          icon = "mdi:ev-plug-type2", sc = null),
             S("speed",              "Velocidade Atual",         "$prefix/speed_kmh",           "km/h",      "speed"),
             S("gear",               "Marcha",                "$prefix/gear",                  "",          icon = "mdi:car-shift-pattern", sc = null),

@@ -59,4 +59,8 @@ enum class CarConstants(val value: String) {
 
     // Driving ready state — 1=pronto para condução (carro ligado), 0=desligado/não pronto
     CAR_BASIC_DRIVING_READY_STATE("car.basic.driving_ready_state"),
+
+    // Comfort settings — ventilação dos bancos (0=off, 1/2/3=nível de ventilação)
+    CAR_COMFORT_DRIVER_SEAT_VENT("car.comfort_setting.driver_seat_ventilation_level"),
+    CAR_COMFORT_PASSENGER_SEAT_VENT("car.comfort_setting.passenger_seat_ventilation_level"),
 }

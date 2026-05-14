@@ -243,6 +243,12 @@ fun ConsumptionScreen() {
                         mqttManager.latestEngineRpm = value.trim().toIntOrNull() ?: 0
                         tripManager.onDataChanged(key, value)  // alimenta telemetryRecorder.latestEngineRpm
                     }
+                    CarConstants.CAR_COMFORT_DRIVER_SEAT_VENT.value -> {
+                        mqttManager.latestDriverSeatVent = value.trim().toIntOrNull() ?: 0
+                    }
+                    CarConstants.CAR_COMFORT_PASSENGER_SEAT_VENT.value -> {
+                        mqttManager.latestPassengerSeatVent = value.trim().toIntOrNull() ?: 0
+                    }
                     else -> tripManager.onDataChanged(key, value)
                 }
                 // Publica imediatamente quando qualquer sinal muda (debounce 1s interno)
