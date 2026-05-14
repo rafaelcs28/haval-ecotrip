@@ -495,6 +495,26 @@ html, body {
 }
 .kp-btn-del { opacity: 0.5; }
 
+/* ── Chips de locais conhecidos no picker de recarga ──────────────────────── */
+.loc-kp-chip {
+  padding: 7px 13px;
+  background: #0f1c2e;
+  border: 1px solid #1e3a5f;
+  border-radius: 20px;
+  color: #7FBADC;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+  -webkit-tap-highlight-color: transparent;
+  transition: background .15s, border-color .15s, color .15s;
+}
+.loc-kp-chip--active {
+  background: #0e4a6e;
+  border-color: #22d3ee;
+  color: #22d3ee;
+  font-weight: 600;
+}
+
 /* ── Barra de SOC/combustível ────────────────────────────────────────────────── */
 .bar-row { display: flex; flex-direction: column; gap: 6px; }
 .bar-item { display: flex; flex-direction: column; gap: 3px; }

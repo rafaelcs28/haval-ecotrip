@@ -901,6 +901,7 @@ let _knownLocations    = [];
 let _locPickerTs       = 0;
 let _locPickerLat      = null;
 let _locPickerLng      = null;
+let _locSelectedKnownId = null;  // id do local conhecido selecionado no picker
 let _prevChargingState = null;   // para detectar fim de recarga no WS
 
 // ── Cache local — IndexedDB ────────────────────────────────────────────────
@@ -3944,6 +3945,7 @@ window.openLoc = function(ts) {
   _locPickerTs  = ts;
   _locPickerLat = null;
   _locPickerLng = null;
+  _locSelectedKnownId = null;
   const charge = cachedCharges?.find(c => c.timestamp_ms === ts);
   const modal  = document.getElementById('loc-picker');
   if (!modal) return;
@@ -3952,7 +3954,7 @@ window.openLoc = function(ts) {
   const nameInput = document.getElementById('loc-name-input');
   nameInput.value = charge?.location_name || '';
 
-  // Popula datalist com locais favoritos
+  // Popula datalist (campo livre) com locais favoritos legados
   const dl = document.getElementById('loc-datalist');
   dl.innerHTML = _knownLocations.map(l => `<option value="${l.name}">`).join('');
 
@@ -3967,17 +3969,62 @@ window.openLoc = function(ts) {
     document.getElementById('loc-save-known').checked = false;
   }
 
+  // Carrega e renderiza chips de locais conhecidos
+  _renderLocKnownChips(charge?.location_name || null);
+
   modal.style.display = 'flex';
   setTimeout(() => nameInput.focus(), 80);
 };
 
+function _renderLocKnownChips(activeNameHint) {
+  const container = document.getElementById('loc-known-chips');
+  const separator = document.getElementById('loc-known-sep');
+  if (!container) return;
+
+  apiFetch('/api/known-places').then(r => r.ok ? r.json() : []).then(places => {
+    if (!places.length) {
+      container.innerHTML = '';
+      if (separator) separator.style.display = 'none';
+      return;
+    }
+    if (separator) separator.style.display = 'flex';
+    container.innerHTML = places.map(p => {
+      const active = activeNameHint && p.name.trim().toLowerCase() === activeNameHint.trim().toLowerCase();
+      if (active) { _locPickerLat = p.lat; _locPickerLng = p.lng; _locSelectedKnownId = p.id; }
+      return `<button class="loc-kp-chip${active ? ' loc-kp-chip--active' : ''}"
+        onclick="locPickKnown(${p.id},${p.lat},${p.lng},${JSON.stringify(p.name)})"
+        id="loc-kp-chip-${p.id}">${p.name}</button>`;
+    }).join('');
+  }).catch(() => {
+    container.innerHTML = '';
+    if (separator) separator.style.display = 'none';
+  });
+}
+
 window.closeLoc = function() {
   const modal = document.getElementById('loc-picker');
   if (modal) modal.style.display = 'none';
-  _locPickerTs = 0; _locPickerLat = null; _locPickerLng = null;
+  _locPickerTs = 0; _locPickerLat = null; _locPickerLng = null; _locSelectedKnownId = null;
+};
+
+// Seleciona chip de local conhecido — preenche nome e coordenadas
+window.locPickKnown = function(id, lat, lng, name) {
+  // Marca chip ativo, desmarca os outros
+  document.querySelectorAll('#loc-known-chips .loc-kp-chip').forEach(el => {
+    el.classList.toggle('loc-kp-chip--active', el.id === `loc-kp-chip-${id}`);
+  });
+  _locSelectedKnownId = id;
+  _locPickerLat = lat;
+  _locPickerLng = lng;
+  document.getElementById('loc-name-input').value = name;
+  document.getElementById('loc-gps-status').textContent = '';
+  document.getElementById('loc-save-known').checked = false;
 };
 
 window.locCapGps = function() {
+  // Desseleciona chip — GPS manual sobrepõe local conhecido
+  _locSelectedKnownId = null;
+  document.querySelectorAll('#loc-known-chips .loc-kp-chip').forEach(el => el.classList.remove('loc-kp-chip--active'));
   const btn = document.getElementById('loc-gps-btn');
   const status = document.getElementById('loc-gps-status');
   if (!navigator.geolocation) { status.textContent = 'GPS não disponível neste dispositivo.'; return; }

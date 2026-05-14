@@ -694,7 +694,17 @@
   <div id="loc-picker" style="display:none;position:fixed;inset:0;z-index:9200;background:rgba(0,0,0,0.72);align-items:center;justify-content:center;padding:20px" onclick="if(event.target===this)closeLoc()">
     <div style="background:#1e293b;border-radius:16px;padding:22px 20px 18px;width:100%;max-width:360px">
       <div style="font-size:15px;font-weight:700;color:#f1f5f9;margin-bottom:4px;text-align:center">📍 Local da Recarga</div>
-      <div id="loc-picker-date" style="font-size:11px;color:#5B7394;text-align:center;margin-bottom:14px"></div>
+      <div id="loc-picker-date" style="font-size:11px;color:#5B7394;text-align:center;margin-bottom:12px"></div>
+
+      <!-- Chips de locais conhecidos -->
+      <div id="loc-known-chips" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:4px"></div>
+
+      <!-- Separador "ou nome personalizado" — oculto quando não há locais -->
+      <div id="loc-known-sep" style="display:none;align-items:center;gap:8px;margin:10px 0 10px">
+        <div style="flex:1;height:1px;background:#334155"></div>
+        <span style="font-size:11px;color:#475569;white-space:nowrap">ou nome personalizado</span>
+        <div style="flex:1;height:1px;background:#334155"></div>
+      </div>
 
       <!-- Input com datalist de locais favoritos -->
       <input id="loc-name-input" type="text" list="loc-datalist" maxlength="60"
