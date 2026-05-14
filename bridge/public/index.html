@@ -77,10 +77,23 @@
     <!-- Dashboard -->
     <div id="panel-dash" class="panel active">
 
-      <!-- Bateria & Combustível -->
+      <!-- Bateria & Combustível — integra recarga quando carregando (card único) -->
       <div class="card" id="d-bfc-card">
-        <div class="card-title">Bateria &amp; Combustível</div>
-        <div class="bar-row">
+
+        <!-- ── Cabeçalho: alterna normal ↔ carregando via JS ───────────── -->
+        <div id="bfc-normal-hdr">
+          <div class="card-title">Bateria &amp; Combustível</div>
+        </div>
+        <div id="bfc-chrg-hdr" class="chrg-header" style="display:none">
+          <div style="display:flex;align-items:center;gap:7px">
+            <span class="chrg-bolt-icon">⚡</span>
+            <span style="font-size:10px;font-weight:700;letter-spacing:1.4px;color:var(--teal);text-transform:uppercase">Carregando</span>
+          </div>
+          <div id="d-chrg-power" class="chrg-power-hero">--</div>
+        </div>
+
+        <!-- ── SOC: barra normal (quando não carregando) ────────────────── -->
+        <div id="bfc-soc-normal" style="margin-bottom:6px">
           <div class="bar-item">
             <div class="bar-header">
               <span class="bar-label">🔋 Bateria (SOC)</span>
@@ -89,6 +102,43 @@
             <div class="bar-track"><div class="bar-fill soc" id="d-soc-bar" style="width:0%"></div></div>
             <div id="d-ev-range" style="font-size:10px;color:var(--teal);text-align:right;margin-top:3px;display:none">~<span id="d-ev-km">--</span> km elétricos</div>
           </div>
+        </div>
+
+        <!-- ── SOC: barra de progresso + métricas (quando carregando) ───── -->
+        <div id="bfc-soc-charging" style="display:none">
+          <div class="chrg-bar-wrap">
+            <div style="position:relative">
+              <div class="chrg-bar-track">
+                <div id="d-chrg-bar-fill" class="chrg-bar-fill">
+                  <div class="chrg-shimmer"></div>
+                </div>
+              </div>
+              <div id="d-chrg-bar-marker" class="chrg-bar-marker"></div>
+            </div>
+            <div class="chrg-bar-labels">
+              <span id="d-chrg-soc-cur" style="font-size:11px;font-weight:700;color:var(--teal)">--%</span>
+              <span id="d-chrg-soc-lim" style="font-size:11px;color:var(--muted)">▶ --%</span>
+            </div>
+          </div>
+          <div class="metrics-row" style="margin-top:8px;margin-bottom:10px">
+            <div class="metric">
+              <div class="metric-value green" id="d-chrg-session">--</div>
+              <div class="metric-label">Injetado</div>
+            </div>
+            <div class="metric">
+              <div class="metric-value muted" id="d-chrg-remain">--</div>
+              <div class="metric-label">Restante</div>
+            </div>
+            <div class="metric">
+              <div class="metric-value" id="d-chrg-finish" style="color:#60a5fa">--</div>
+              <div class="metric-label">Pronto às</div>
+            </div>
+          </div>
+          <div class="divider" style="margin-bottom:8px"></div>
+        </div>
+
+        <!-- ── Combustível e 12V — sempre visíveis ──────────────────────── -->
+        <div class="bar-row">
           <div class="bar-item">
             <div class="bar-header">
               <span class="bar-label">⛽ Combustível</span>
@@ -105,62 +155,24 @@
             <div class="bar-track"><div class="bar-fill batt12v" id="d-batt12v-bar" style="width:0%"></div></div>
           </div>
         </div>
-      </div>
 
-      <!-- Card de Recarga — visível só quando carregando -->
-      <div id="d-charging-card" class="card" style="display:none">
-        <!-- Cabeçalho: título + potência hero -->
-        <div class="chrg-header">
-          <div style="display:flex;align-items:center;gap:7px">
-            <span class="chrg-bolt-icon">⚡</span>
-            <span style="font-size:10px;font-weight:700;letter-spacing:1.4px;color:var(--teal);text-transform:uppercase">Carregando</span>
-          </div>
-          <div id="d-chrg-power" class="chrg-power-hero">--</div>
-        </div>
-        <!-- Barra de progresso SOC -->
-        <div class="chrg-bar-wrap">
-          <div style="position:relative">
-            <div class="chrg-bar-track">
-              <div id="d-chrg-bar-fill" class="chrg-bar-fill">
-                <div class="chrg-shimmer"></div>
-              </div>
+        <!-- ── Limite SOC — só quando carregando ────────────────────────── -->
+        <div id="bfc-chrg-limit" style="display:none">
+          <div class="charge-limit-row">
+            <span class="charge-limit-label">Limite SOC</span>
+            <span class="charge-limit-cur" id="d-chrg-limit">--%</span>
+            <div class="charge-limit-btns">
+              <button class="clb" onclick="setChargeLimit(50)">50</button>
+              <button class="clb" onclick="setChargeLimit(60)">60</button>
+              <button class="clb" onclick="setChargeLimit(70)">70</button>
+              <button class="clb" onclick="setChargeLimit(80)">80</button>
+              <button class="clb" onclick="setChargeLimit(90)">90</button>
+              <button class="clb" onclick="setChargeLimit(100)">100</button>
             </div>
-            <div id="d-chrg-bar-marker" class="chrg-bar-marker"></div>
           </div>
-          <div class="chrg-bar-labels">
-            <span id="d-chrg-soc-cur" style="font-size:11px;font-weight:700;color:var(--teal)">--%</span>
-            <span id="d-chrg-soc-lim" style="font-size:11px;color:var(--muted)">▶ --%</span>
-          </div>
+          <div id="d-chrg-limit-status" class="charge-limit-status"></div>
         </div>
-        <!-- Métricas: injetado, restante, pronto às -->
-        <div class="metrics-row" style="margin-top:8px">
-          <div class="metric">
-            <div class="metric-value green" id="d-chrg-session">--</div>
-            <div class="metric-label">Injetado</div>
-          </div>
-          <div class="metric">
-            <div class="metric-value muted" id="d-chrg-remain">--</div>
-            <div class="metric-label">Restante</div>
-          </div>
-          <div class="metric">
-            <div class="metric-value" id="d-chrg-finish" style="color:#60a5fa">--</div>
-            <div class="metric-label">Pronto às</div>
-          </div>
-        </div>
-        <!-- Limite de carga SOC -->
-        <div class="charge-limit-row">
-          <span class="charge-limit-label">Limite SOC</span>
-          <span class="charge-limit-cur" id="d-chrg-limit">--%</span>
-          <div class="charge-limit-btns">
-            <button class="clb" onclick="setChargeLimit(50)">50</button>
-            <button class="clb" onclick="setChargeLimit(60)">60</button>
-            <button class="clb" onclick="setChargeLimit(70)">70</button>
-            <button class="clb" onclick="setChargeLimit(80)">80</button>
-            <button class="clb" onclick="setChargeLimit(90)">90</button>
-            <button class="clb" onclick="setChargeLimit(100)">100</button>
-          </div>
-        </div>
-        <div id="d-chrg-limit-status" class="charge-limit-status"></div>
+
       </div>
 
       <!-- Haval H6 — visualização em camadas PNG -->

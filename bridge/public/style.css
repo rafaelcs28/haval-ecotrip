@@ -284,8 +284,9 @@ html, body {
   100% { transform:translateX(450%); }
 }
 
-#d-charging-card.chrg-active {
-  border-color: rgba(0,229,204,.35);
+#d-bfc-card.chrg-active {
+  background: linear-gradient(148deg, var(--card) 60%, rgba(0,229,204,.025) 100%);
+  border-color: rgba(0,229,204,.38);
   animation: chrg-glow 2.4s ease-in-out infinite;
 }
 
@@ -348,8 +349,8 @@ html, body {
   padding: 0 1px;
 }
 
-/* Métricas menores no card de recarga */
-#d-charging-card .metric-value { font-size: 18px; }
+/* Métricas menores na seção de recarga (dentro do card unificado) */
+#bfc-soc-charging .metric-value { font-size: 18px; }
 .chrg-unit { font-size: 9px; font-weight: 500; opacity: .75; vertical-align: baseline; margin-left: 1px; }
 
 /* ── Cards Desde última partida / Trip A / Trip B — unidades micro ────────── */

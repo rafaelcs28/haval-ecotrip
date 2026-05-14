@@ -1283,13 +1283,17 @@ function renderDash() {
     if (fuelKm > 0) setText('d-fuel-km', fuelKm + ' km');
   }
 
-  // Recarga — card dedicado (só aparece quando charging_state === 'Carregando')
+  // Recarga — integrada no card d-bfc-card (card único)
   const isCharging = s.charging_state === 'Carregando';
-  const chargingCard = document.getElementById('d-charging-card');
-  if (chargingCard) {
-    chargingCard.style.display = isCharging ? '' : 'none';
-    chargingCard.classList.toggle('chrg-active', isCharging);
-  }
+  const bfcCard = document.getElementById('d-bfc-card');
+  if (bfcCard) bfcCard.classList.toggle('chrg-active', isCharging);
+  // Alterna seções dentro do card unificado
+  const _vis = (id, show) => { const el = document.getElementById(id); if (el) el.style.display = show ? '' : 'none'; };
+  _vis('bfc-normal-hdr',   !isCharging);
+  _vis('bfc-chrg-hdr',      isCharging);
+  _vis('bfc-soc-normal',   !isCharging);
+  _vis('bfc-soc-charging',  isCharging);
+  _vis('bfc-chrg-limit',    isCharging);
   if (isCharging) {
     const cu = u => `<span class="chrg-unit">${u}</span>`;
     setHTML('d-chrg-power',   s.charge_power_kw   > 0 ? f1(s.charge_power_kw)    + cu(' kW')  : '--');
@@ -1317,7 +1321,6 @@ function renderDash() {
     if (marker) marker.style.left = Math.min(lim, 100) + '%';
     setText('d-chrg-soc-cur', Math.round(soc) + '%');
     setText('d-chrg-soc-lim', '▶ ' + Math.round(lim) + '%');
-    // Limite de carga SOC no card de recarga
     _renderChargeLimit(s.charge_limit_pct);
   }
   // Limite de carga SOC no painel de configurações — atualiza sempre (independe de carregando)
