@@ -6,6 +6,27 @@ const APP_BUILD = 'b164';   // bump a cada deploy para confirmar versão no admi
 let state = {};
 let _actStatusFns  = [];   // statusFn por índice de card (preenchido por initActionsPanel)
 let _actionLogMap  = {};   // action → id do div de log
+// Confirmações de ação remota pendentes: { [stateKey]: { expectedVal, timer, onSuccess } }
+const _pendingConfirm = {};
+
+/**
+ * Verifica se algum estado recebido via WS resolve uma confirmação pendente.
+ * Usa == (loose) para lidar com engine_state que pode chegar como string ou número.
+ */
+function _checkPendingConfirm(data) {
+  if (!data) return;
+  for (const key of Object.keys(_pendingConfirm)) {
+    const newVal = data[key];
+    if (newVal === undefined) continue;
+    const p = _pendingConfirm[key];
+    // eslint-disable-next-line eqeqeq
+    if (newVal == p.expectedVal) {
+      clearTimeout(p.timer);
+      delete _pendingConfirm[key];
+      p.onSuccess();
+    }
+  }
+}
 let lastUpdateMs = null;
 let wsRetryDelay = 1000;
 let ws = null;
@@ -732,6 +753,7 @@ function connect() {
         if (newChgState) _prevChargingState = newChgState;
 
         deepMerge(state, msg.data);
+        _checkPendingConfirm(msg.data);
         lastUpdateMs = Date.now();
         renderAll();
         try { localStorage.setItem('ecotrip_state', JSON.stringify({ state, ts: lastUpdateMs })); } catch(_) {}
@@ -4205,24 +4227,63 @@ function showToast(msg) {
 }
 window.showToast = showToast;
 
-async function sendRemoteAction(action, successMsg) {
-  const logEl = document.getElementById(_actionLogMap[action] || '');
-  const hhmm  = () => new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+/**
+ * @param {string}      action      - ex: 'lock_open', 'engine_on'
+ * @param {string}      successMsg  - mensagem de sucesso
+ * @param {object|null} confirmSpec - { key: 'lock_state', expectedVal: 'on', timeout?: 60000 }
+ *                                    Se fornecido, aguarda mudança de estado via WS antes de
+ *                                    confirmar sucesso. Se não mudar em time, mostra falha.
+ */
+async function sendRemoteAction(action, successMsg, confirmSpec = null) {
+  const logEl  = document.getElementById(_actionLogMap[action] || '');
+  const hhmm   = () => new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  const TIMEOUT = (confirmSpec?.timeout ?? 60) * 1000;
+
+  // Cancela confirmação anterior para o mesmo campo (evita timer duplicado)
+  if (confirmSpec && _pendingConfirm[confirmSpec.key]) {
+    clearTimeout(_pendingConfirm[confirmSpec.key].timer);
+    delete _pendingConfirm[confirmSpec.key];
+  }
 
   if (logEl) logEl.innerHTML = '<span style="color:#94a3b8">Enviando…</span>';
   showToast('Enviando comando…');
+
   try {
     const r    = await apiFetch(`/api/action/${action}`, { method: 'POST' });
     const data = await r.json().catch(() => ({}));
-    if (r.ok && data.ok) {
-      showToast('✓ ' + successMsg);
-      if (logEl) logEl.innerHTML = `<span style="color:#4ade80">✓ Enviado · ${hhmm()}</span>`;
-      if (navigator.vibrate) navigator.vibrate(80);
-    } else {
+
+    if (!r.ok || !data.ok) {
       const err = data.error || `Erro ${r.status}`;
       showToast('✗ ' + err);
       if (logEl) logEl.innerHTML = `<span style="color:#f87171">✗ ${err} · ${hhmm()}</span>`;
+      return;
     }
+
+    if (confirmSpec) {
+      // Comando aceito — aguarda confirmação do carro via WebSocket
+      showToast('⏳ Aguardando confirmação do carro…');
+      if (logEl) logEl.innerHTML = `<span style="color:#fbbf24">⏳ Aguardando carro…</span>`;
+
+      _pendingConfirm[confirmSpec.key] = {
+        expectedVal: confirmSpec.expectedVal,
+        timer: setTimeout(() => {
+          delete _pendingConfirm[confirmSpec.key];
+          showToast('✗ Carro não confirmou em 60s');
+          if (logEl) logEl.innerHTML = `<span style="color:#f87171">✗ Sem confirmação · ${hhmm()}</span>`;
+        }, TIMEOUT),
+        onSuccess: () => {
+          showToast('✓ ' + successMsg);
+          if (logEl) logEl.innerHTML = `<span style="color:#4ade80">✓ ${successMsg} · ${hhmm()}</span>`;
+          if (navigator.vibrate) navigator.vibrate([80, 40, 80]);
+        },
+      };
+    } else {
+      // Ação sem confirmação (outros comandos remotos)
+      showToast('✓ ' + successMsg);
+      if (logEl) logEl.innerHTML = `<span style="color:#4ade80">✓ Enviado · ${hhmm()}</span>`;
+      if (navigator.vibrate) navigator.vibrate(80);
+    }
+
   } catch (err) {
     const msg = err.message === 'unauthorized' ? 'Sem permissão' : 'Falha ao enviar';
     showToast('✗ ' + msg);
@@ -4527,7 +4588,8 @@ window.engineClick = function() {
     btnColor:  engOn ? '#ef4444' : '#22c55e',
     onConfirm: () => sendRemoteAction(
       engOn ? 'engine_off' : 'engine_on',
-      engOn ? 'Comando enviado: desligar' : 'Comando enviado: ligar',
+      engOn ? 'Motor desligado' : 'Motor ligado',
+      { key: 'engine_state', expectedVal: engOn ? '0' : '1' },
     ),
   });
 };
@@ -4694,6 +4756,7 @@ window.lockClick = function() {
     onConfirm: () => sendRemoteAction(
       locked ? 'lock_open' : 'lock_close',
       locked ? 'Portas destrancadas' : 'Portas trancadas',
+      { key: 'lock_state', expectedVal: locked ? 'on' : 'off' },
     ),
   });
 };
