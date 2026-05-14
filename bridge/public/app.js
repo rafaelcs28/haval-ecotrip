@@ -3056,18 +3056,42 @@ window.applyTripCost = function(tripId, fuelL, netKwh) {
 // ── Custo de recargas — override local ───────────────────────────────────────
 
 function _chargeCostOverride(ts) {
+  // Prioridade: cost_override no objeto de recarga (vem do servidor) → localStorage (fallback)
+  const fromCache = cachedCharges?.find(c => c.timestamp_ms === ts);
+  if (fromCache?.cost_override?.total > 0) return fromCache.cost_override;
   try { return JSON.parse(localStorage.getItem('eco_chg_cost_' + ts) || 'null'); } catch { return null; }
 }
 
 // ── Perda de carga — kWh do carregador externo ────────────────────────────────
+// Fonte de verdade: campo charger_kwh no objeto de recarga (servidor + IDB).
+// localStorage é apenas cache imediato; no próximo sync o servidor prevalece.
 function _chargerKwhMap() {
   try { return JSON.parse(localStorage.getItem('ecotrip-charger-kwh') || '{}'); } catch { return {}; }
 }
-function _getChargerKwh(ts) { return _chargerKwhMap()[ts] || 0; }
+function _getChargerKwh(ts) {
+  // Prioridade: objeto em cachedCharges (vem do servidor) → localStorage (fallback offline)
+  const fromCache = cachedCharges?.find(c => c.timestamp_ms === ts);
+  if (fromCache?.charger_kwh > 0) return fromCache.charger_kwh;
+  return _chargerKwhMap()[ts] || 0;
+}
 function _setChargerKwh(ts, val) {
+  // 1. localStorage — disponível imediatamente (mesmo offline)
   const m = _chargerKwhMap();
   if (val > 0) m[ts] = val; else delete m[ts];
   localStorage.setItem('ecotrip-charger-kwh', JSON.stringify(m));
+  // 2. Servidor — persiste entre reinstalls do PWA
+  apiFetch(`/api/charges/${ts}/charger_kwh`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ charger_kwh: val > 0 ? val : null }),
+  }).then(r => r.json()).then(updated => {
+    // Atualiza cache em memória e IDB para consistência imediata
+    if (cachedCharges && updated?.timestamp_ms) {
+      const idx = cachedCharges.findIndex(c => c.timestamp_ms === ts);
+      if (idx >= 0) cachedCharges[idx] = updated;
+      _idbPutMany('charges', [updated]).catch(() => {});
+    }
+  }).catch(() => {/* offline — localStorage como fallback */});
 }
 
 window.toggleChargeEdit = function(ts) {
@@ -3095,6 +3119,7 @@ window.applyChargeCost = function(ts, energyKwh) {
   const total = parseFloat(el.querySelector('.charge-total-input')?.value || '0');
   const totalBadge = document.getElementById('chg-cost-' + ts);
   const unitBadge  = document.getElementById('chg-unit-' + ts);
+  const perKwh = total > 0 && energyKwh > 0 ? total / energyKwh : 0;
 
   if (total <= 0) {
     // Limpa override → volta ao preço padrão das configurações
@@ -3109,12 +3134,24 @@ window.applyChargeCost = function(ts, energyKwh) {
       if (unitBadge)  unitBadge.style.display  = 'none';
     }
   } else {
-    const perKwh = energyKwh > 0 ? total / energyKwh : 0;
     localStorage.setItem('eco_chg_cost_' + ts, JSON.stringify({ total, perKwh }));
     if (totalBadge) { totalBadge.textContent = 'R$ ' + f2(total); totalBadge.style.display = ''; totalBadge.style.borderBottom = '1px dashed rgba(251,191,36,.5)'; }
     if (unitBadge)  { unitBadge.textContent  = f3(perKwh) + ' R$/kWh'; unitBadge.style.display = ''; }
   }
   el.style.display = 'none';
+
+  // Persiste no servidor — sobrevive a reinstall do PWA
+  apiFetch(`/api/charges/${ts}/cost`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ total: total > 0 ? total : 0, per_kwh: perKwh }),
+  }).then(r => r.json()).then(updated => {
+    if (cachedCharges && updated?.timestamp_ms) {
+      const idx = cachedCharges.findIndex(c => c.timestamp_ms === ts);
+      if (idx >= 0) cachedCharges[idx] = updated;
+      _idbPutMany('charges', [updated]).catch(() => {});
+    }
+  }).catch(() => {/* offline — localStorage como fallback */});
 };
 
 window.deleteCharge = async function(ts) {

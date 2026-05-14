@@ -782,6 +782,31 @@ app.patch('/api/charges/:ts/location', (req, res) => {
   res.json(charge);
 });
 
+// PATCH /api/charges/:ts/charger_kwh — kWh marcado no carregador externo
+app.patch('/api/charges/:ts/charger_kwh', (req, res) => {
+  const ts     = parseInt(req.params.ts, 10);
+  const { charger_kwh } = req.body || {};
+  const charge = chargesArr.find(c => (c.timestamp_ms || 0) === ts);
+  if (!charge) return res.status(404).json({ error: 'not found' });
+  const val = parseFloat(charger_kwh) || 0;
+  if (val > 0) charge.charger_kwh = val; else delete charge.charger_kwh;
+  scheduleChargesFlush();
+  res.json(charge);
+});
+
+// PATCH /api/charges/:ts/cost — override de custo de recarga
+app.patch('/api/charges/:ts/cost', (req, res) => {
+  const ts     = parseInt(req.params.ts, 10);
+  const { total, per_kwh } = req.body || {};
+  const charge = chargesArr.find(c => (c.timestamp_ms || 0) === ts);
+  if (!charge) return res.status(404).json({ error: 'not found' });
+  const t = parseFloat(total) || 0;
+  if (t > 0) charge.cost_override = { total: t, perKwh: parseFloat(per_kwh) || 0 };
+  else        delete charge.cost_override;
+  scheduleChargesFlush();
+  res.json(charge);
+});
+
 // ── Proxy de tiles OSM para o canvas do Snapshot ──────────────────────────────
 // Evita CORS: o canvas carrega via apiFetch (com auth) e recebe PNG do OSM
 app.get('/api/tiles/:z/:x/:y', (req, res) => {
@@ -1840,7 +1865,19 @@ function applyMqttMessage(key, value, isRetained = false) {
         const cutMs  = state.charges_cleared_at || 0;
         const charges = cutMs > 0 ? all.filter(c => (c.timestamp_ms || 0) > cutMs) : all;
         if (charges.length > 0) {
-          chargesArr = charges;
+          // Merge: preserva campos server-side (location, charger_kwh, cost_override)
+          // que o Android não conhece — sem isso o MQTT retained apaga tudo
+          chargesArr = charges.map(newCharge => {
+            const existing = chargesArr.find(c => c.timestamp_ms === newCharge.timestamp_ms);
+            if (!existing) return newCharge;
+            const keep = {};
+            if (existing.location_name != null) keep.location_name = existing.location_name;
+            if (existing.location_lat  != null) keep.location_lat  = existing.location_lat;
+            if (existing.location_lng  != null) keep.location_lng  = existing.location_lng;
+            if (existing.charger_kwh   != null) keep.charger_kwh   = existing.charger_kwh;
+            if (existing.cost_override != null) keep.cost_override = existing.cost_override;
+            return { ...newCharge, ...keep };
+          });
           scheduleChargesFlush();
           const skipped = all.length - charges.length;
           console.log(`✓ Recargas MQTT: ${charges.length} sessão(ões)${skipped > 0 ? ` (${skipped} anteriores ao clear ignoradas)` : ''}`);
