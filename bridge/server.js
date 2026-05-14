@@ -849,13 +849,14 @@ app.patch('/api/charges/:ts/location', (req, res) => {
   if (lng != null)  charge.location_lng  = lng;
 
   if (save_known && name?.trim() && lat != null && lng != null) {
-    const dup = chargeLocations.find(l =>
-      l.name === name.trim() ||
-      (l.lat && l.lng && haversineM(l.lat, l.lng, lat, lng) < 100)
+    // Salva no sistema unificado knownPlaces (radius_m padrão 200m)
+    const dup = knownPlaces.find(p =>
+      p.name.trim().toLowerCase() === name.trim().toLowerCase() ||
+      (p.lat && p.lng && haversineM(p.lat, p.lng, lat, lng) < 50)
     );
     if (!dup) {
-      chargeLocations.push({ id: Date.now(), name: name.trim(), lat, lng });
-      saveChargeLocations();
+      knownPlaces.push({ id: Date.now(), name: name.trim(), lat, lng, radius_m: 200 });
+      saveKnownPlaces();
     }
   }
 

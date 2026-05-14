@@ -1596,36 +1596,37 @@ function loadCharges() {
   } else {
     list.innerHTML = '<div class="empty">Carregando...</div>';
   }
-  syncAllCache({ silent: true }).then(() => renderCharges())
+  syncAllCache({ silent: true }).then(() => { renderCharges(); _tryAutoTagChargeLocation(); })
     .catch(() => { if (!cachedCharges) list.innerHTML = filterChipsHTML('charges') + '<div class="empty">Erro ao carregar.</div>'; });
 }
 
-// Tenta capturar GPS e auto-tagging o local da recarga mais recente
+// Captura GPS e salva nas recargas recentes sem localização (últimas 8h)
+// Atualiza cache mesmo sem nome — coordenadas ficam prontas para o picker
 function _tryAutoTagChargeLocation() {
   if (!navigator.geolocation) return;
   if (!cachedCharges?.length) return;
-  const latest = cachedCharges[0];
-  if (!latest?.timestamp_ms) return;
-  // Só tenta se ainda sem nome
-  if (latest.location_name) return;
+  const cutoff   = Date.now() - 8 * 3600 * 1000;
+  const needsGps = cachedCharges.filter(c => !c.location_lat && (c.timestamp_ms || 0) > cutoff);
+  if (!needsGps.length) return;
 
   navigator.geolocation.getCurrentPosition(pos => {
     const { latitude: lat, longitude: lng } = pos.coords;
-    apiFetch(`/api/charges/${latest.timestamp_ms}/location`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ lat, lng }),
-    }).then(r => r.json()).then(updated => {
-      if (updated.location_name) {
-        // Atualiza cache local
-        latest.location_name = updated.location_name;
-        latest.location_lat  = updated.location_lat;
-        latest.location_lng  = updated.location_lng;
-        _idbPutMany('charges', [latest]).catch(() => {});
-        if (activePanel === 'charges') renderCharges();
-      }
-    }).catch(() => {});
-  }, null, { timeout: 15000, maximumAge: 60000 });
+    let anyRendered = false;
+    needsGps.forEach(charge => {
+      apiFetch(`/api/charges/${charge.timestamp_ms}/location`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lat, lng }),
+      }).then(r => r.json()).then(updated => {
+        // Atualiza coords sempre, nome só se matched
+        charge.location_lat = updated.location_lat ?? lat;
+        charge.location_lng = updated.location_lng ?? lng;
+        if (updated.location_name) charge.location_name = updated.location_name;
+        _idbPutMany('charges', [charge]).catch(() => {});
+        if (!anyRendered && activePanel === 'charges') { anyRendered = true; renderCharges(); }
+      }).catch(() => {});
+    });
+  }, null, { timeout: 15000, maximumAge: 120000 });
 }
 
 function renderCharges() {
@@ -4093,14 +4094,17 @@ window.openLoc = function(ts) {
   const dl = document.getElementById('loc-datalist');
   dl.innerHTML = _knownLocations.map(l => `<option value="${l.name}">`).join('');
 
-  // Se já tem GPS salvo, preenche
+  // Se já tem GPS salvo, preenche e indica no botão
+  const gpsBtn = document.getElementById('loc-gps-btn');
   if (charge?.location_lat && charge?.location_lng) {
     _locPickerLat = charge.location_lat;
     _locPickerLng = charge.location_lng;
-    document.getElementById('loc-gps-status').textContent = `GPS: ${charge.location_lat.toFixed(5)}, ${charge.location_lng.toFixed(5)}`;
+    document.getElementById('loc-gps-status').textContent = '';
+    if (gpsBtn) gpsBtn.textContent = `✅ GPS: ${charge.location_lat.toFixed(4)}, ${charge.location_lng.toFixed(4)}`;
     document.getElementById('loc-save-known').checked = false;
   } else {
     document.getElementById('loc-gps-status').textContent = '';
+    if (gpsBtn) gpsBtn.textContent = '📍 Capturar minha localização atual';
     document.getElementById('loc-save-known').checked = false;
   }
 
@@ -4228,7 +4232,10 @@ window.saveLoc = async function() {
       }
     }
 
-    if (saveKnown) await loadKnownLocations();  // reload list
+    if (saveKnown) {
+      await loadKnownLocations();   // reload legacy list
+      await loadKnownPlaces();      // reload known places (novo sistema)
+    }
     closeLoc();
     renderCharges();
     showToast('📍 Local salvo');
