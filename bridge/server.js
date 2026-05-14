@@ -2035,6 +2035,9 @@ function applyMqttMessage(key, value, isRetained = false) {
             if (existing.charger_kwh   != null) keep.charger_kwh   = existing.charger_kwh;
             if (existing.cost_override != null) keep.cost_override = existing.cost_override;
             if (existing.avg_temp_c    != null) keep.avg_temp_c    = existing.avg_temp_c;
+            // Preserva _updated_ms para que dispositivos que ainda não sincronizaram
+            // continuem a detectar as edições feitas via PATCH após o merge MQTT.
+            if (existing._updated_ms   != null) keep._updated_ms   = existing._updated_ms;
             return { ...newCharge, ...keep };
           });
           scheduleChargesFlush();
