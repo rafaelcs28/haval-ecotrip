@@ -92,12 +92,25 @@ data class RollingSnapshot(
     }
 }
 
+/**
+ * Amostra da linha do tempo de uma sessão de recarga.
+ * Gravada a cada ~30 s durante a recarga — usada para o gráfico de potência/energia na PWA.
+ */
+data class ChargeSample(
+    val t:          Int,     // segundos desde o início da sessão
+    val powerKw:    Float,   // potência de recarga em kW
+    val sessionKwh: Float,   // energia acumulada na sessão (kWh)
+    val socPct:     Float,   // SOC % do veículo neste instante
+    val tempC:      Float?,  // temperatura externa em °C (null = sem leitura)
+)
+
 data class ChargeHistoryEntry(
     val timestampMs:  Long,
     val durationSec:  Long,
     val energyKwh:    Float,
     val startSocPct:  Float,
     val endSocPct:    Float,
+    val avgTempC:     Float? = null,   // temperatura externa média durante a recarga
 ) {
     val avgPowerKw: Float get() = if (durationSec > 0) energyKwh / (durationSec / 3600f) else 0f
 }
@@ -174,6 +187,8 @@ class TripManager private constructor() {
     private lateinit var appContext: android.content.Context
     private val samplesDir: java.io.File
         get() = java.io.File(appContext.filesDir, "autotrip_samples").also { it.mkdirs() }
+    private val chargeSamplesDir: java.io.File
+        get() = java.io.File(appContext.filesDir, "charge_samples").also { it.mkdirs() }
     private val listeners = mutableListOf<TripListener>()
     private val lock = Any()
     private val gson = Gson()
@@ -243,6 +258,11 @@ class TripManager private constructor() {
     private var chargeSessionEnergyKwh: Float = 0f
     private var chargeSessionSec:       Long  = 0L
     private val chargeHistory = mutableListOf<ChargeHistoryEntry>()
+    // Temperatura externa durante a sessão de recarga
+    private var chargeSessionTempSum:   Double = 0.0
+    private var chargeSessionTempCount: Int    = 0
+    // Linha do tempo da sessão de recarga (amostras a cada ~30 s)
+    private val chargeSessionSamples = mutableListOf<ChargeSample>()
 
     // Rolling window "desde última partida"
     private var rollingAccFuel   = 0f
@@ -324,24 +344,48 @@ class TripManager private constructor() {
                     chargeSessionStartSoc  = latestSocPct
                     chargeSessionEnergyKwh = 0f
                     chargeSessionSec       = 0L
+                    chargeSessionTempSum   = 0.0
+                    chargeSessionTempCount = 0
+                    chargeSessionSamples.clear()
                     AppLogger.i(TAG, "Recarga iniciada — SOC=${latestSocPct}%")
                 }
             } else if (!isCharging && wasCharging) {
                 // Fim de recarga — salva sessão se suficientemente significativa
                 if (chargeSessionSec >= 60L && chargeSessionEnergyKwh >= 0.05f) {
+                    val avgTempC = if (chargeSessionTempCount > 0)
+                        (chargeSessionTempSum / chargeSessionTempCount).toFloat()
+                    else null
                     val entry = ChargeHistoryEntry(
                         timestampMs = System.currentTimeMillis(),
                         durationSec = chargeSessionSec,
                         energyKwh   = chargeSessionEnergyKwh,
                         startSocPct = chargeSessionStartSoc,
                         endSocPct   = latestSocPct,
+                        avgTempC    = avgTempC,
                     )
                     chargeHistory.add(0, entry)
                     while (chargeHistory.size > 50) chargeHistory.removeAt(chargeHistory.lastIndex)
                     saveChargeHistory()
-                    AppLogger.i(TAG, "Recarga concluída — ${chargeSessionEnergyKwh}kWh em ${chargeSessionSec}s SOC ${chargeSessionStartSoc}→${latestSocPct}%")
+                    AppLogger.i(TAG, "Recarga concluída — ${chargeSessionEnergyKwh}kWh em ${chargeSessionSec}s SOC ${chargeSessionStartSoc}→${latestSocPct}% avgTemp=${avgTempC}°C samples=${chargeSessionSamples.size}")
                     onChargeSessionCompleted?.invoke(entry)
+
+                    // Envia linha do tempo para o bridge (fire-and-forget)
+                    val samplesSnapshot = chargeSessionSamples.toList()
+                    val entryTs         = entry.timestampMs
+                    if (samplesSnapshot.isNotEmpty() && ::appContext.isInitialized) {
+                        val bridgeUrl = getBridgeHttpUrl()
+                        if (bridgeUrl.isNotBlank()) {
+                            try { java.io.File(chargeSamplesDir, "$entryTs.json").writeText(gson.toJson(samplesSnapshot)) } catch (_: Exception) {}
+                            telemetryRecorder?.postChargeSamples(bridgeUrl, getBridgeToken(), entryTs, samplesSnapshot, avgTempC) {
+                                try { java.io.File(chargeSamplesDir, "$entryTs.json").delete() } catch (_: Exception) {}
+                            }
+                        }
+                    }
                 }
+                // Reset temp/sample tracking
+                chargeSessionTempSum   = 0.0
+                chargeSessionTempCount = 0
+                chargeSessionSamples.clear()
                 // Limpa sessão persistida — próxima carga começa do zero
                 chargeSessionEnergyKwh = 0f
                 chargeSessionSec       = 0L
@@ -1070,6 +1114,11 @@ class TripManager private constructor() {
                 }
                 CarConstants.CAR_BASIC_OUTSIDE_TEMP.value -> {
                     latestOutsideTempC = value
+                    // Acumula temperatura durante sessão de recarga (para média)
+                    if (isChargingNow) {
+                        chargeSessionTempSum   += value
+                        chargeSessionTempCount++
+                    }
                 }
                 CarConstants.CAR_BASIC_ENGINE_SPEED.value -> {
                     latestEngineRpm = value.toInt()
@@ -1139,6 +1188,16 @@ class TripManager private constructor() {
                         .putFloat(SharedPreferencesKeys.CHARGE_SESSION_START_SOC,   chargeSessionStartSoc)
                         .putLong (SharedPreferencesKeys.CHARGE_SESSION_START_MS,    chargeSessionStartMs)
                         .apply()   // async — ok para tick periódico (saveToPrefs().commit() cuida do fim)
+                    // Grava amostra da linha do tempo de recarga
+                    chargeSessionSamples.add(ChargeSample(
+                        t          = chargeSessionSec.toInt(),
+                        powerKw    = currentChargePowerKw,
+                        sessionKwh = chargeSessionEnergyKwh,
+                        socPct     = latestSocPct,
+                        tempC      = latestOutsideTempC,
+                    ))
+                    // Limite de ~500 amostras ≈ 250 min (mais que suficiente para qualquer recarga)
+                    while (chargeSessionSamples.size > 500) chargeSessionSamples.removeAt(0)
                 }
             } else {
                 lastChargeTickMs = 0L   // reset para não contar tempo parado

@@ -747,6 +747,38 @@ app.delete('/api/charges/:ts', (req, res) => {
   res.json({ ok: true });
 });
 
+// ── Linha do tempo de recarga (amostras de potência/energia) ─────────────────
+const CHARGE_TELEMETRY_DIR = path.join(__dirname, 'charge_telemetry');
+try { require('fs').mkdirSync(CHARGE_TELEMETRY_DIR, { recursive: true }); } catch (_) {}
+
+app.post('/api/charges/:ts/samples', (req, res) => {
+  const ts = parseInt(req.params.ts, 10);
+  if (!ts) return res.status(400).json({ error: 'ts inválido' });
+  const { samples, avgTempC } = req.body || {};
+  if (!Array.isArray(samples)) return res.status(400).json({ error: 'samples deve ser array' });
+  try {
+    fs.writeFileSync(path.join(CHARGE_TELEMETRY_DIR, `${ts}.json`), JSON.stringify(samples));
+    // Se Android enviou avgTempC junto, atualiza a recarga (preferência sobre cálculo bridge-side)
+    if (typeof avgTempC === 'number' && !isNaN(avgTempC)) {
+      const charge = chargesArr.find(c => (c.timestamp_ms || 0) === ts);
+      if (charge) { charge.avg_temp_c = avgTempC; scheduleChargesFlush(); }
+    }
+    console.log(`✓ Amostras de recarga salvas: ts=${ts} (${samples.length} pontos)`);
+    res.json({ ok: true, count: samples.length });
+  } catch (e) {
+    console.error('Erro ao salvar amostras de recarga:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/api/charges/:ts/samples', (req, res) => {
+  const ts   = parseInt(req.params.ts, 10);
+  const file = path.join(CHARGE_TELEMETRY_DIR, `${ts}.json`);
+  try {
+    res.json(fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : []);
+  } catch (_) { res.json([]); }
+});
+
 // ── Locais de recarga ─────────────────────────────────────────────────────────
 app.get('/api/charge-locations', (_req, res) => res.json(chargeLocations));
 
@@ -1985,9 +2017,12 @@ function applyMqttMessage(key, value, isRetained = false) {
           chargesArr = charges.map(newCharge => {
             const existing = chargesArr.find(c => c.timestamp_ms === newCharge.timestamp_ms);
             if (!existing) {
-              // Nova sessão — anexa temperatura média se disponível
+              // Nova sessão — preferência: avg_temp_c do Android; fallback: cálculo bridge-side
               const entry = { ...newCharge };
-              if (_lastChargeAvgTemp !== null) {
+              if (entry.avg_temp_c != null) {
+                // Android enviou temperatura média diretamente — consume a do bridge
+                _lastChargeAvgTemp = null;
+              } else if (_lastChargeAvgTemp !== null) {
                 entry.avg_temp_c   = _lastChargeAvgTemp;
                 _lastChargeAvgTemp = null;   // consumida
               }

@@ -605,6 +605,26 @@
     </div>
   </div>
 
+  <!-- Charge timeline overlay (gráfico de potência/energia por sessão) -->
+  <div id="charge-timeline" style="display:none">
+    <div class="overlay-header">
+      <button class="overlay-back-btn" onclick="closeChargeTimeline()">←</button>
+      <span id="charge-timeline-title">Linha do Tempo</span>
+    </div>
+    <div id="charge-timeline-body">
+      <div class="chart-section">
+        <div class="chart-label">Potência de recarga (kW)</div>
+        <div class="chart-wrap"><canvas id="chart-chrg-power"></canvas></div>
+        <div class="chart-label">Energia injetada (kWh)</div>
+        <div class="chart-wrap"><canvas id="chart-chrg-kwh"></canvas></div>
+        <div class="chart-label">SOC (%)</div>
+        <div class="chart-wrap"><canvas id="chart-chrg-soc"></canvas></div>
+        <div class="chart-label" id="chart-chrg-temp-lbl" style="display:none">Temperatura externa (°C)</div>
+        <div class="chart-wrap" id="chart-chrg-temp-wrap" style="display:none"><canvas id="chart-chrg-temp"></canvas></div>
+      </div>
+    </div>
+  </div>
+
   <!-- Tab bar -->
   <nav id="tab-bar">
     <button class="tab active" data-panel="dash" onclick="switchTab(this)">

@@ -1721,6 +1721,7 @@ function renderCharges() {
     <div style="display:flex;flex-direction:column;align-items:flex-end;gap:3px">
       <span class="charge-kwh-badge">${f2(kwh)} kWh</span>
       <div style="display:flex;gap:4px">
+        <button class="cost-edit-btn" onclick="openChargeTimeline(${ts})" title="Ver linha do tempo">📈</button>
         <button class="cost-edit-btn" onclick="toggleChargerEdit(${ts})" title="kWh do carregador">🔌</button>
         <button class="cost-edit-btn" onclick="toggleChargeEdit(${ts})" title="Editar custo">💰</button>
       </div>
@@ -2576,6 +2577,96 @@ function closeTripDetail() {
   // existam frescos na próxima abertura (evita erro de Leaflet + canvases sujos)
   const body = document.getElementById('trip-detail-body');
   if (body && tripBodyOriginalHTML) body.innerHTML = tripBodyOriginalHTML;
+}
+
+// ── Linha do tempo de recarga ─────────────────────────────────────────────────
+let _chrgChartPower = null;
+let _chrgChartKwh   = null;
+let _chrgChartSoc   = null;
+let _chrgChartTemp  = null;
+
+function openChargeTimeline(ts) {
+  const overlay = document.getElementById('charge-timeline');
+  overlay.style.display = 'flex';
+
+  // Título: data da recarga
+  const charge = (cachedCharges || []).find(c => (c.timestamp_ms || 0) === ts);
+  const title  = charge ? fmtDate(charge.timestamp) : String(ts);
+  document.getElementById('charge-timeline-title').textContent = title;
+
+  const body = document.getElementById('charge-timeline-body');
+
+  apiFetch(`/api/charges/${ts}/samples`)
+    .then(r => r.json())
+    .then(samples => {
+      if (!Array.isArray(samples) || !samples.length) {
+        body.innerHTML = '<div class="empty" style="padding:40px">Nenhuma amostra disponível.<br><span style="font-size:11px;color:#5B7394">A linha do tempo é registrada automaticamente na próxima recarga após atualizar o app.</span></div>';
+        return;
+      }
+
+      // Labels em minutos
+      const labels  = samples.map(s => (s.t / 60).toFixed(1));
+      const mkChart = (id, dataset, color, fill = false) => {
+        const ctx = document.getElementById(id).getContext('2d');
+        return new Chart(ctx, {
+          type: 'line',
+          data: {
+            labels,
+            datasets: [{
+              data:        dataset,
+              borderColor: color,
+              borderWidth: 2,
+              pointRadius: 0,
+              fill:        fill ? { target: 'origin', above: color + '33' } : false,
+              tension:     0.3,
+            }],
+          },
+          options: {
+            animation: false,
+            responsive: true, maintainAspectRatio: false,
+            scales: {
+              x: {
+                display: true,
+                ticks: { color: '#5B7394', font: { size: 9 }, maxTicksLimit: 8 },
+                grid:  { color: '#0F1520' },
+                title: { display: true, text: 'min', color: '#5B7394', font: { size: 9 } },
+              },
+              y: {
+                display: true,
+                ticks: { color: '#5B7394', font: { size: 9 }, maxTicksLimit: 5 },
+                grid:  { color: '#0F1520' },
+              },
+            },
+            plugins: { legend: { display: false }, tooltip: { enabled: false } },
+          },
+        });
+      };
+
+      // Destrói charts anteriores
+      [_chrgChartPower, _chrgChartKwh, _chrgChartSoc, _chrgChartTemp].forEach(c => c?.destroy());
+
+      _chrgChartPower = mkChart('chart-chrg-power', samples.map(s => parseFloat(s.powerKw   || 0)), '#7FBADC', true);
+      _chrgChartKwh   = mkChart('chart-chrg-kwh',   samples.map(s => parseFloat(s.sessionKwh || 0)), '#39FF88', true);
+      _chrgChartSoc   = mkChart('chart-chrg-soc',   samples.map(s => parseFloat(s.socPct    || 0)), '#a78bfa', false);
+
+      // Temperatura: mostra só se houver pelo menos uma leitura não-null
+      const temps = samples.map(s => s.tempC != null ? parseFloat(s.tempC) : null);
+      const hasTemp = temps.some(t => t !== null);
+      document.getElementById('chart-chrg-temp-lbl').style.display  = hasTemp ? '' : 'none';
+      document.getElementById('chart-chrg-temp-wrap').style.display = hasTemp ? '' : 'none';
+      if (hasTemp) {
+        _chrgChartTemp = mkChart('chart-chrg-temp', temps, '#F97316', false);
+      }
+    })
+    .catch(() => {
+      body.innerHTML = '<div class="empty" style="padding:40px">Erro ao carregar amostras.</div>';
+    });
+}
+
+function closeChargeTimeline() {
+  document.getElementById('charge-timeline').style.display = 'none';
+  [_chrgChartPower, _chrgChartKwh, _chrgChartSoc, _chrgChartTemp].forEach(c => c?.destroy());
+  _chrgChartPower = null; _chrgChartKwh = null; _chrgChartSoc = null; _chrgChartTemp = null;
 }
 
 // ── Eficiência por faixa de velocidade ───────────────────────────────────────

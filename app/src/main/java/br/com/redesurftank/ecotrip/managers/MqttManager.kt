@@ -531,8 +531,9 @@ class MqttManager private constructor() {
             fun f1(v: Float) = String.format(java.util.Locale.US, "%.1f", v)
             fun f2(v: Float) = String.format(java.util.Locale.US, "%.2f", v)
             val chargesJson = entries.joinToString(",") { e ->
-                val ts = fmt.format(Date(e.timestampMs))
-                """{"timestamp":"$ts","timestamp_ms":${e.timestampMs},"duration_sec":${e.durationSec},"energy_kwh":${f2(e.energyKwh)},"soc_start":${f1(e.startSocPct)},"soc_end":${f1(e.endSocPct)},"avg_power_kw":${f2(e.avgPowerKw)}}"""
+                val ts          = fmt.format(Date(e.timestampMs))
+                val avgTempPart = if (e.avgTempC != null) ""","avg_temp_c":${f1(e.avgTempC)}""" else ""
+                """{"timestamp":"$ts","timestamp_ms":${e.timestampMs},"duration_sec":${e.durationSec},"energy_kwh":${f2(e.energyKwh)},"soc_start":${f1(e.startSocPct)},"soc_end":${f1(e.endSocPct)},"avg_power_kw":${f2(e.avgPowerKw)}$avgTempPart}"""
             }
             val payload = """{"count":${entries.size},"charges":[$chargesJson]}"""
             AppLogger.i(TAG, "→ Publicando histórico de recargas (QoS 1, retained): $prefix/charging/history")

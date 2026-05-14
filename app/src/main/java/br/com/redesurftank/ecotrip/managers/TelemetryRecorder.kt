@@ -317,6 +317,63 @@ class TelemetryRecorder(private val context: Context) {
     }
 
     /**
+     * Envia amostras da linha do tempo de uma sessão de recarga para o bridge.
+     * Fire-and-forget: falhas são logadas mas não travam o caller.
+     *
+     * @param timestampMs  Timestamp da sessão (= ChargeHistoryEntry.timestampMs)
+     * @param samples      Amostras coletadas durante a recarga
+     * @param avgTempC     Temperatura média calculada localmente (opcional)
+     * @param onSuccess    Chamado na IO thread após confirmação HTTP 2xx
+     */
+    fun postChargeSamples(
+        bridgeUrl:   String,
+        bridgeToken: String = "",
+        timestampMs: Long,
+        samples:     List<ChargeSample>,
+        avgTempC:    Float? = null,
+        onSuccess:   () -> Unit = {},
+    ) {
+        if (bridgeUrl.isBlank() || samples.isEmpty()) return
+        scope.launch {
+            try {
+                val arr = JSONArray()
+                for (s in samples) {
+                    arr.put(JSONObject().apply {
+                        put("t",          s.t)
+                        put("powerKw",    s.powerKw.toDouble())
+                        put("sessionKwh", s.sessionKwh.toDouble())
+                        put("socPct",     s.socPct.toDouble())
+                        if (s.tempC != null) put("tempC", s.tempC.toDouble())
+                    })
+                }
+                val avgTempPart = if (avgTempC != null) ""","avgTempC":${String.format(java.util.Locale.US, "%.1f", avgTempC)}""" else ""
+                val payload     = """{"samples":$arr$avgTempPart}"""
+                val url  = URL("$bridgeUrl/api/charges/$timestampMs/samples")
+                val conn = url.openConnection() as HttpURLConnection
+                conn.apply {
+                    requestMethod = "POST"
+                    setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                    if (bridgeToken.isNotBlank()) setRequestProperty("Authorization", "Bearer $bridgeToken")
+                    doOutput       = true
+                    connectTimeout = 15_000
+                    readTimeout    = 15_000
+                }
+                conn.outputStream.use { it.write(payload.toByteArray(Charsets.UTF_8)) }
+                val code = conn.responseCode
+                if (code in 200..299) {
+                    Log.i(TAG, "Amostras de recarga enviadas: ts=$timestampMs (${samples.size} amostras)")
+                    onSuccess()
+                } else {
+                    Log.w(TAG, "Erro HTTP $code ao enviar amostras de recarga")
+                }
+                conn.disconnect()
+            } catch (e: Exception) {
+                Log.e(TAG, "Falha ao enviar amostras de recarga: ${e.message}")
+            }
+        }
+    }
+
+    /**
      * Busca tarefas de renomeação pendentes no bridge e entrega via callback na Main thread.
      * Fire-and-forget — falhas são apenas logadas.
      */
