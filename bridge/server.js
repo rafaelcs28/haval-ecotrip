@@ -1786,6 +1786,8 @@ function _handleWsConnection(ws, req) {
     }
   }
   clients.add(ws);
+  ws.isAlive = true;
+  ws.on('pong', () => { ws.isAlive = true; });
   ws.send(JSON.stringify({ type: 'full_state', data: state, startedAt: SERVER_START_AT }));
   ws.on('close', () => clients.delete(ws));
   ws.on('error', () => clients.delete(ws));
@@ -1799,6 +1801,15 @@ if (httpsServer) {
   const wssHttps = new WebSocketServer({ server: httpsServer, path: '/ws' });
   wssHttps.on('connection', _handleWsConnection);
 }
+
+// ── WebSocket heartbeat (iOS Safari fecha silenciosamente conexões idle) ────────
+setInterval(() => {
+  for (const ws of clients) {
+    if (ws.isAlive === false) { ws.terminate(); continue; }
+    ws.isAlive = false;
+    ws.ping();
+  }
+}, 25000);
 
 function broadcast(type, data) {
   const msg = JSON.stringify({ type, data });

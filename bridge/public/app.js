@@ -29,6 +29,7 @@ function _checkPendingConfirm(data) {
 }
 let lastUpdateMs = null;
 let wsRetryDelay = 1000;
+let wsReconnectTimeout = null;
 let ws = null;
 let tickInterval = null;
 let activePanel  = 'dash';
@@ -174,6 +175,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initActionsPanel();
   initNotifPanel();
   loadKnownLocations();
+  loadKnownPlaces();
   _fetchNotifCache();
   checkAutoBackup();
   // Mostra build atual no admin para confirmar versão carregada
@@ -720,6 +722,7 @@ function switchTab(btn, callback) {
 
 // ── WebSocket ─────────────────────────────────────────────────────────────────
 function connect() {
+  wsReconnectTimeout = null;
   const proto  = location.protocol === 'https:' ? 'wss:' : 'ws:';
   const tkParam = bridgeToken ? '?token=' + encodeURIComponent(bridgeToken) : '';
   ws = new WebSocket(`${proto}//${location.host}/ws${tkParam}`);
@@ -799,7 +802,7 @@ function connect() {
     const delay = Math.min(wsRetryDelay, 30000);
     wsRetryDelay = Math.min(wsRetryDelay * 1.5, 30000);
     console.log(`WS fechado. Reconectando em ${delay}ms…`);
-    setTimeout(connect, delay);
+    wsReconnectTimeout = setTimeout(connect, delay);
   };
 }
 
@@ -1511,7 +1514,15 @@ function renderDash() {
   carLayer('cl-ac-right',   acOn);
   carLayer('cl-ventilacao', acOn);
   const acChip = document.getElementById('d-ac-chip');
-  if (acChip) acChip.style.visibility = acOn ? 'visible' : 'hidden';
+  if (acChip) {
+    acChip.style.visibility = 'visible';
+    acChip.style.background  = acOn ? '#083344' : '#1e293b';
+    acChip.style.color        = acOn ? '#22d3ee' : '#475569';
+  }
+
+  // Bancos com ventilação — sempre visíveis
+  const seatVent = document.getElementById('d-seat-vent');
+  if (seatVent) seatVent.style.display = 'flex';
 
   // Vidros (1=fechado, 2=aberto, 3=entreaberto)
   carLayer('cl-win-fl-open', s.window_fl === '2' || s.window_fl === 2);
@@ -1623,7 +1634,7 @@ function renderDash() {
   }
 
   // Mapa GPS — atualiza live a cada nova posição recebida via WebSocket
-  if (s.gps_lat && s.gps_lng) updateDashMap(s.gps_lat, s.gps_lng, s.gps_ts);
+  if (s.gps_lat && s.gps_lng) updateDashMap(s.gps_lat, s.gps_lng, s.gps_ts, s.speed_kmh || 0);
 
   renderAlerts(s);
 }
@@ -2466,6 +2477,7 @@ let _dashMapLastLng     = 0;
 let _dashMapLastTs      = 0;
 let _dashMapGeocodeTimer = null;
 let _dashMapTsTimer     = null;
+let _dashMapMoving      = false;   // controla auto-zoom ao mudar estado de movimento
 
 function _startDashMapTsTimer() {
   clearInterval(_dashMapTsTimer);
@@ -2474,7 +2486,7 @@ function _startDashMapTsTimer() {
   }, 30_000);
 }
 
-function updateDashMap(lat, lng, ts) {
+function updateDashMap(lat, lng, ts, speed) {
   if (!lat || !lng || lat === 0 || lng === 0) return;
 
   const card = document.getElementById('d-map-card');
@@ -2482,7 +2494,8 @@ function updateDashMap(lat, lng, ts) {
   const el = document.getElementById('d-car-map');
   if (!el) return;
 
-  const pos = [lat, lng];
+  const pos      = [lat, lng];
+  const isMoving = (speed || 0) > 3;
 
   // Cria o mapa Leaflet uma única vez
   if (!dashMap) {
@@ -2496,12 +2509,17 @@ function updateDashMap(lat, lng, ts) {
       maxZoom: 19,
       attribution: '© OpenStreetMap © CARTO',
     }).addTo(dashMap);
-    // Primeira posição: define vista + zoom
-    dashMap.setView(pos, 15);
+    // Primeira posição: zoom depende do estado de movimento
+    dashMap.setView(pos, isMoving ? 17 : 15);
+    _dashMapMoving = isMoving;
     _startDashMapTsTimer();
   } else {
-    // Atualizações seguintes: pan suave sem alterar o zoom do usuário
+    // Atualizações seguintes: pan suave; muda zoom só quando estado de movimento muda
     dashMap.panTo(pos, { animate: true, duration: 0.5 });
+    if (isMoving !== _dashMapMoving) {
+      dashMap.setZoom(isMoving ? 17 : 15, { animate: true });
+      _dashMapMoving = isMoving;
+    }
   }
 
   if (dashMarker) dashMarker.setLatLng(pos);
@@ -3332,6 +3350,15 @@ try {
 connect();
 tickInterval = setInterval(tickLastUpdate, 1000);
 tickLastUpdate();
+
+// iOS PWA: reconecta imediatamente ao trazer o app pro foreground
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && (!ws || ws.readyState !== WebSocket.OPEN)) {
+    if (wsReconnectTimeout) { clearTimeout(wsReconnectTimeout); wsReconnectTimeout = null; }
+    wsRetryDelay = 1000;
+    connect();
+  }
+});
 
 // Carrega localização do carro no mapa do dashboard (requer Leaflet carregado)
 window.addEventListener('load', () => { setTimeout(initDashMap, 500); });
@@ -4439,7 +4466,10 @@ function _renderLocKnownChips(activeNameHint) {
   const separator = document.getElementById('loc-known-sep');
   if (!container) return;
 
-  apiFetch('/api/known-places').then(r => r.ok ? r.json() : []).then(places => {
+  apiFetch('/api/known-places').then(r => r.ok ? r.json() : []).then(raw => {
+    const places = [...raw].sort((a, b) =>
+      a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' })
+    );
     _locKnownPlaces = places;
     if (!places.length) {
       container.innerHTML = '';
@@ -4616,7 +4646,10 @@ function _renderKnownPlacesList() {
     el.innerHTML = '<div class="empty" style="padding:12px 0">Nenhum local cadastrado.</div>';
     return;
   }
-  el.innerHTML = _kpData.map(p => `
+  const sorted = [..._kpData].sort((a, b) =>
+    a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' })
+  );
+  el.innerHTML = sorted.map(p => `
     <div class="kp-item">
       <div class="kp-item-info">
         <div class="kp-item-name">📍 ${p.name}</div>
