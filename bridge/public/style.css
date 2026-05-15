@@ -228,14 +228,154 @@ html, body {
   50%      { opacity: 1.0; }
 }
 
-/* AC badges (AUTO, SYNC) — animação suave ao ligar/desligar */
-#cmf-ac-auto-bg, #cmf-ac-sync-bg { transition: fill 0.3s, stroke 0.3s; }
-#cmf-ac-auto-txt, #cmf-ac-sync-txt, #cmf-ac-temp, #cmf-ac-fan-val { transition: fill 0.3s; }
-.cmf-fan-bar { transition: fill 0.3s ease, filter 0.3s ease; }
-.cmf-fan-bar.on {
-  fill: #22d3ee;
-  filter: drop-shadow(0 0 3px rgba(34,211,238,0.6));
+/* ── Climate Panel (controles do AC acima da cabine) ────────────────────────── */
+.climate-panel {
+  background: linear-gradient(180deg, #0c1019 0%, #080c14 100%);
+  border: 1px solid #1e293b;
+  border-radius: 14px;
+  padding: 14px 16px;
+  margin: 0 auto 14px;
+  max-width: 380px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
 }
+.climate-temps {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 12px;
+}
+.climate-zone {
+  background: #0a0f1c;
+  border: 1px solid #1e293b;
+  border-radius: 10px;
+  padding: 10px 8px;
+  text-align: center;
+  transition: border-color 0.3s, box-shadow 0.3s;
+}
+.climate-zone.active {
+  border-color: rgba(34, 211, 238, 0.45);
+  box-shadow: 0 0 12px rgba(34, 211, 238, 0.15);
+}
+.climate-zone-label {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1.6px;
+  color: #64748b;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+.climate-zone-value {
+  font-size: 28px;
+  font-weight: 800;
+  color: #475569;
+  letter-spacing: -1px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  transition: color 0.3s, text-shadow 0.3s;
+}
+.climate-zone.active .climate-zone-value {
+  color: #22d3ee;
+  text-shadow: 0 0 10px rgba(34, 211, 238, 0.45);
+}
+.climate-sync {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  color: #334155;
+  transition: color 0.3s;
+}
+.climate-sync.on { color: #5eead4; filter: drop-shadow(0 0 6px rgba(94, 234, 212, 0.55)); }
+.climate-sync-label {
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 1px;
+}
+
+/* Linha de controles: AUTO + FAN */
+.climate-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.climate-auto {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: #1a2236;
+  border: 1px solid #1e293b;
+  border-radius: 8px;
+  transition: background 0.3s, border-color 0.3s, color 0.3s;
+}
+.climate-auto.on {
+  background: rgba(34, 211, 238, 0.10);
+  border-color: rgba(34, 211, 238, 0.45);
+  color: #22d3ee;
+  box-shadow: 0 0 10px rgba(34, 211, 238, 0.18);
+}
+.climate-auto-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: #334155;
+  transition: background 0.3s, box-shadow 0.3s;
+}
+.climate-auto.on .climate-auto-dot {
+  background: #22d3ee;
+  box-shadow: 0 0 6px rgba(34, 211, 238, 0.85);
+}
+.climate-auto-text {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  color: #475569;
+}
+.climate-auto.on .climate-auto-text { color: #22d3ee; }
+
+.climate-fan {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #475569;
+  transition: color 0.3s;
+}
+.climate-fan.on { color: #22d3ee; }
+.climate-fan-bars {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 16px;
+}
+.climate-fan-bar {
+  width: 3px;
+  background: #1e293b;
+  border-radius: 1px;
+  transition: background 0.3s, box-shadow 0.3s;
+}
+.climate-fan-bar[data-level="1"] { height: 4px; }
+.climate-fan-bar[data-level="2"] { height: 6px; }
+.climate-fan-bar[data-level="3"] { height: 8px; }
+.climate-fan-bar[data-level="4"] { height: 10px; }
+.climate-fan-bar[data-level="5"] { height: 12px; }
+.climate-fan-bar[data-level="6"] { height: 14px; }
+.climate-fan-bar[data-level="7"] { height: 16px; }
+.climate-fan-bar.on {
+  background: #22d3ee;
+  box-shadow: 0 0 4px rgba(34, 211, 238, 0.7);
+}
+.climate-fan-val {
+  font-size: 16px;
+  font-weight: 800;
+  color: #475569;
+  letter-spacing: -0.5px;
+  min-width: 18px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.climate-fan.on .climate-fan-val { color: #22d3ee; }
 
 /* ── Dashboard: reordenação por estado do motor ──────────────────────────────── */
 #panel-dash.active { display: flex; flex-direction: column; }

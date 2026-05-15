@@ -1578,61 +1578,62 @@ function renderDash() {
   applyCabinSeat('cmf-vent-drv-dots',  'cmf-drv-text',  s.seat_vent_drv);
   applyCabinSeat('cmf-vent-pass-dots', 'cmf-pass-text', s.seat_vent_pass);
 
-  // ── AC INFO STRIP (temp + AUTO + SYNC + fan) ──────────────────────────────
-  // Temperatura definida (motorista)
-  const tempEl = document.getElementById('cmf-ac-temp');
-  if (tempEl) {
-    const t = parseFloat(s.hvac_driver_temp);
-    if (Number.isFinite(t)) {
-      tempEl.textContent = `${t.toFixed(1)}°C`;
-      tempEl.style.fill = acOn ? '#22d3ee' : '#94a3b8';
+  // ── Climate Panel (acima da cabine): 2 temps + SYNC + AUTO + FAN ─────────
+  // Temperatura motorista
+  const tempDrvEl = document.getElementById('cmf-ac-temp-drv');
+  if (tempDrvEl) {
+    const tDrv = parseFloat(s.hvac_driver_temp);
+    const zoneDrv = tempDrvEl.closest('.climate-zone');
+    if (Number.isFinite(tDrv)) {
+      tempDrvEl.textContent = `${tDrv.toFixed(1)}°C`;
+      if (zoneDrv) zoneDrv.classList.toggle('active', acOn);
     } else {
-      tempEl.textContent = '--°C';
-      tempEl.style.fill = '#475569';
+      tempDrvEl.textContent = '--°C';
+      if (zoneDrv) zoneDrv.classList.remove('active');
     }
   }
+  // Temperatura passageiro (entidade ainda pendente — exibe '--°C' até chegar)
+  const tempPassEl = document.getElementById('cmf-ac-temp-pass');
+  if (tempPassEl) {
+    const tPass = parseFloat(s.hvac_passenger_temp);
+    const zonePass = tempPassEl.closest('.climate-zone');
+    if (Number.isFinite(tPass)) {
+      tempPassEl.textContent = `${tPass.toFixed(1)}°C`;
+      if (zonePass) zonePass.classList.toggle('active', acOn);
+    } else {
+      tempPassEl.textContent = '--°C';
+      if (zonePass) zonePass.classList.remove('active');
+    }
+  }
+  // SYNC chain icon
+  const syncOn = String(s.hvac_sync_enable) === '1';
+  const syncEl = document.getElementById('cmf-ac-sync');
+  if (syncEl) syncEl.classList.toggle('on', syncOn);
   // AUTO badge
   const autoOn = String(s.hvac_auto_enable) === '1';
-  const autoBg = document.getElementById('cmf-ac-auto-bg');
-  const autoTx = document.getElementById('cmf-ac-auto-txt');
-  if (autoBg && autoTx) {
-    autoBg.setAttribute('fill',   autoOn ? 'rgba(34,211,238,0.15)' : '#1a2236');
-    autoBg.setAttribute('stroke', autoOn ? '#22d3ee'               : '#1e293b');
-    autoTx.style.fill = autoOn ? '#22d3ee' : '#475569';
-  }
-  // SYNC badge
-  const syncOn = String(s.hvac_sync_enable) === '1';
-  const syncBg = document.getElementById('cmf-ac-sync-bg');
-  const syncTx = document.getElementById('cmf-ac-sync-txt');
-  if (syncBg && syncTx) {
-    syncBg.setAttribute('fill',   syncOn ? 'rgba(94,234,212,0.15)' : '#1a2236');
-    syncBg.setAttribute('stroke', syncOn ? '#5eead4'               : '#1e293b');
-    syncTx.style.fill = syncOn ? '#5eead4' : '#475569';
-  }
-  // Fan speed bars (0..7+: ilumina N bars conforme nível)
+  const autoEl = document.getElementById('cmf-ac-auto');
+  if (autoEl) autoEl.classList.toggle('on', autoOn);
+  // FAN bars + value
   const fanLvl = parseInt(s.hvac_fan_speed, 10);
   const fanValid = Number.isFinite(fanLvl) && fanLvl >= 0;
-  document.querySelectorAll('.cmf-fan-bar').forEach(bar => {
+  const fanEl = document.getElementById('cmf-ac-fan');
+  if (fanEl) fanEl.classList.toggle('on', fanValid && fanLvl > 0);
+  document.querySelectorAll('.climate-fan-bar').forEach(bar => {
     const lvl = parseInt(bar.dataset.level, 10);
     bar.classList.toggle('on', fanValid && lvl <= fanLvl);
   });
   const fanValEl = document.getElementById('cmf-ac-fan-val');
-  if (fanValEl) {
-    fanValEl.textContent = fanValid ? String(fanLvl) : '--';
-    fanValEl.style.fill  = fanValid && fanLvl > 0 ? '#22d3ee' : '#475569';
-  }
+  if (fanValEl) fanValEl.textContent = fanValid ? String(fanLvl) : '--';
 
-  // Expande pill AC com detalhes (temp/auto/sync/fan) abaixo do "Ligado/Desligado"
+  // Pill AC do rodapé com resumo enxuto
   const acTextEl = document.getElementById('cmf-ac-text');
   if (acTextEl) {
-    const t = parseFloat(s.hvac_driver_temp);
+    const tDrv = parseFloat(s.hvac_driver_temp);
     const parts = [];
-    if (Number.isFinite(t))      parts.push(`${t.toFixed(1)}°C`);
+    if (Number.isFinite(tDrv))   parts.push(`${tDrv.toFixed(1)}°C`);
     if (autoOn)                  parts.push('AUTO');
     if (syncOn)                  parts.push('SYNC');
     if (fanValid && fanLvl > 0)  parts.push(`Fan ${fanLvl}`);
-    const detail = parts.length ? parts.join(' · ') : '';
-    // Limpa "subtext" anterior
     let sub = document.getElementById('cmf-ac-subtext');
     if (!sub) {
       sub = document.createElement('div');
@@ -1640,7 +1641,7 @@ function renderDash() {
       sub.style.cssText = 'font-size:10px;font-weight:500;color:#64748b;margin-top:2px;letter-spacing:0.2px';
       acTextEl.parentNode.appendChild(sub);
     }
-    sub.textContent = detail;
+    sub.textContent = parts.join(' · ');
   }
 
   // Vidros (1=fechado, 2=aberto, 3=entreaberto)
