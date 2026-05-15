@@ -1539,6 +1539,45 @@ function renderDash() {
   applySeatVent('d-seat-drv',  s.seat_vent_drv);
   applySeatVent('d-seat-pass', s.seat_vent_pass);
 
+  // ── Aba Conforto: cabine top-down ─────────────────────────────────────────
+  // AC vents glow + ondas animadas quando ligado
+  document.querySelectorAll('.cmf-ac-vent').forEach(v => v.classList.toggle('on', acOn));
+  const cmfWaves = document.getElementById('cmf-ac-waves');
+  if (cmfWaves) cmfWaves.style.display = acOn ? '' : 'none';
+  const cmfAcText = document.getElementById('cmf-ac-text');
+  if (cmfAcText) {
+    cmfAcText.textContent = acOn ? 'Ligado' : 'Desligado';
+    cmfAcText.style.color = acOn ? '#22d3ee' : '#475569';
+  }
+
+  // Seat ventilation: ilumina N fileiras de dots (1 fileira por nível, de baixo pra cima)
+  // Nível 0 = nenhuma · Nível 1 = fila inferior · Nível 2 = inferior+meio · Nível 3 = todas
+  function applyCabinSeat(groupId, textId, rawLevel) {
+    const group = document.getElementById(groupId);
+    const text  = document.getElementById(textId);
+    if (!group) return;
+    const lvl = parseInt(rawLevel, 10);
+    const valid = Number.isFinite(lvl) && lvl >= 0 && lvl <= 3;
+    const v = valid ? lvl : 0;
+    group.querySelectorAll('.cmf-vd').forEach(dot => {
+      const row = parseInt(dot.dataset.row, 10);
+      // Limpa classes anteriores
+      dot.classList.remove('on-1', 'on-2', 'on-3');
+      if (v >= row) {
+        // Fileira ativa: usa intensidade conforme nível geral
+        dot.classList.add(`on-${v}`);
+      }
+    });
+    if (text) {
+      const labels = ['Desligado', 'Fraco', 'Médio', 'Forte'];
+      const colors = ['#475569',   '#7dd3fc', '#22d3ee', '#5eead4'];
+      text.textContent = labels[v];
+      text.style.color = colors[v];
+    }
+  }
+  applyCabinSeat('cmf-vent-drv-dots',  'cmf-drv-text',  s.seat_vent_drv);
+  applyCabinSeat('cmf-vent-pass-dots', 'cmf-pass-text', s.seat_vent_pass);
+
   // Vidros (1=fechado, 2=aberto, 3=entreaberto)
   carLayer('cl-win-fl-open', s.window_fl === '2' || s.window_fl === 2);
   carLayer('cl-win-fl-ajar', s.window_fl === '3' || s.window_fl === 3);

@@ -197,6 +197,37 @@ html, body {
 .panel { display: none; }
 .panel.active { display: block; }
 
+/* ── Aba Conforto: animações da cabine ──────────────────────────────────────── */
+.cmf-ac-vent {
+  transition: fill 0.3s ease, filter 0.3s ease;
+}
+.cmf-ac-vent.on {
+  fill: #22d3ee;
+  filter: drop-shadow(0 0 4px rgba(34, 211, 238, 0.7));
+}
+.cmf-ac-wave {
+  transform-origin: top center;
+  animation: cmfAcWave 1.6s ease-in-out infinite;
+}
+@keyframes cmfAcWave {
+  0%, 100% { opacity: 0.35; transform: translateY(0); }
+  50%      { opacity: 0.85; transform: translateY(4px); }
+}
+.cmf-vd {
+  transition: fill 0.3s ease, filter 0.3s ease, r 0.3s ease;
+}
+.cmf-vd.on-1 { fill: #7dd3fc; filter: drop-shadow(0 0 3px rgba(125,211,252,0.6)); }
+.cmf-vd.on-2 { fill: #22d3ee; filter: drop-shadow(0 0 4px rgba(34,211,238,0.7)); }
+.cmf-vd.on-3 {
+  fill: #5eead4;
+  filter: drop-shadow(0 0 6px rgba(94,234,212,0.85));
+  animation: cmfDotPulse 1.4s ease-in-out infinite;
+}
+@keyframes cmfDotPulse {
+  0%, 100% { opacity: 0.85; }
+  50%      { opacity: 1.0; }
+}
+
 /* ── Dashboard: reordenação por estado do motor ──────────────────────────────── */
 #panel-dash.active { display: flex; flex-direction: column; }
 

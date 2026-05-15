@@ -360,6 +360,149 @@
     </div>
 
 
+    <!-- ── Conforto: cabine top-down com AC + ventilação dos bancos ─────── -->
+    <div id="panel-comfort" class="panel" style="overflow-y:auto;padding:14px 14px 80px;text-align:center">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:12px;text-align:left">
+        <div>
+          <div style="font-size:18px;font-weight:700;color:#e2e8f0;letter-spacing:0.5px">Conforto</div>
+          <div style="font-size:11px;color:#64748b;margin-top:2px">Climatização e ventilação dos bancos</div>
+        </div>
+      </div>
+
+      <!-- Cabin top-down SVG (animável via JS) -->
+      <div style="display:flex;justify-content:center">
+        <svg id="cmf-svg" viewBox="0 0 400 540" width="100%" style="max-width:380px;height:auto;display:block">
+          <defs>
+            <linearGradient id="cmf-grad-dashboard" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%"  stop-color="#1a2236"/>
+              <stop offset="100%" stop-color="#131a2b"/>
+            </linearGradient>
+            <linearGradient id="cmf-grad-seat" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%"  stop-color="#1a2236"/>
+              <stop offset="100%" stop-color="#0f1626"/>
+            </linearGradient>
+            <radialGradient id="cmf-grad-ac-on" cx="50%" cy="50%" r="50%">
+              <stop offset="0%"  stop-color="#67e8f9"/>
+              <stop offset="100%" stop-color="#0e7490"/>
+            </radialGradient>
+          </defs>
+
+          <!-- Cabin outline (silhueta do teto) -->
+          <path d="M 30 35 Q 30 20, 50 20 L 350 20 Q 370 20, 370 35
+                   L 370 510 Q 370 525, 350 525 L 50 525 Q 30 525, 30 510 Z"
+                fill="#0a0f1c" stroke="#1e293b" stroke-width="1.5"/>
+
+          <!-- ── Painel/Dashboard (banda curva no topo) ─────────────────── -->
+          <path d="M 60 50 Q 60 35, 80 35 L 320 35 Q 340 35, 340 50
+                   L 340 145 Q 340 155, 330 155 L 70 155 Q 60 155, 60 145 Z"
+                fill="url(#cmf-grad-dashboard)" stroke="#2a3550" stroke-width="1.2"/>
+
+          <!-- Tela infotainment (centro) -->
+          <rect x="170" y="60" width="60" height="40" rx="3" fill="#06080C" stroke="#334155" stroke-width="1"/>
+          <rect x="174" y="64" width="52" height="32" rx="1" fill="#0e1a30"/>
+          <text x="200" y="84" text-anchor="middle" font-size="7" fill="#475569" font-weight="700" letter-spacing="0.5">HAVAL</text>
+
+          <!-- AC vents (slits) — id agrupado pra recolorir via JS -->
+          <g id="cmf-ac-vents">
+            <rect class="cmf-ac-vent" x="78"  y="120" width="48" height="7" rx="3" fill="#334155"/>
+            <rect class="cmf-ac-vent" x="138" y="120" width="40" height="7" rx="3" fill="#334155"/>
+            <rect class="cmf-ac-vent" x="222" y="120" width="40" height="7" rx="3" fill="#334155"/>
+            <rect class="cmf-ac-vent" x="274" y="120" width="48" height="7" rx="3" fill="#334155"/>
+          </g>
+
+          <!-- Ondas AC (animáveis quando on) -->
+          <g id="cmf-ac-waves" style="display:none">
+            <path class="cmf-ac-wave" d="M 102 138 Q 102 148, 112 152 M 102 138 Q 102 152, 92 156"
+                  stroke="#22d3ee" stroke-width="1.2" fill="none" stroke-linecap="round" opacity="0.6"/>
+            <path class="cmf-ac-wave" d="M 158 138 Q 158 150, 168 154 M 158 138 Q 158 152, 148 156"
+                  stroke="#22d3ee" stroke-width="1.2" fill="none" stroke-linecap="round" opacity="0.6"/>
+            <path class="cmf-ac-wave" d="M 242 138 Q 242 150, 252 154 M 242 138 Q 242 152, 232 156"
+                  stroke="#22d3ee" stroke-width="1.2" fill="none" stroke-linecap="round" opacity="0.6"/>
+            <path class="cmf-ac-wave" d="M 298 138 Q 298 148, 308 152 M 298 138 Q 298 152, 288 156"
+                  stroke="#22d3ee" stroke-width="1.2" fill="none" stroke-linecap="round" opacity="0.6"/>
+          </g>
+
+          <!-- Volante (lado motorista — esquerda) -->
+          <g id="cmf-steering" transform="translate(102 85)">
+            <circle cx="0" cy="0" r="22" fill="none" stroke="#475569" stroke-width="2.5"/>
+            <circle cx="0" cy="0" r="7"  fill="#334155"/>
+            <line x1="0" y1="-15" x2="0" y2="-7" stroke="#475569" stroke-width="2.5" stroke-linecap="round"/>
+            <line x1="-18" y1="2" x2="-7" y2="2" stroke="#475569" stroke-width="2.5" stroke-linecap="round"/>
+            <line x1="18"  y1="2" x2="7"  y2="2" stroke="#475569" stroke-width="2.5" stroke-linecap="round"/>
+            <text x="0" y="3" text-anchor="middle" font-size="8" fill="#94a3b8" font-weight="900">H</text>
+          </g>
+
+          <!-- Caixa de câmbio entre os bancos (decorativo) -->
+          <rect x="180" y="200" width="40" height="120" rx="6" fill="#131a2b" stroke="#2a3550" stroke-width="1"/>
+          <circle cx="200" cy="222" r="6" fill="#1e293b" stroke="#334155" stroke-width="0.8"/>
+          <text x="200" y="262" text-anchor="middle" font-size="6" fill="#475569" letter-spacing="0.5">CONSOLE</text>
+
+          <!-- ── Banco motorista (esquerda) ────────────────────────────── -->
+          <g id="cmf-seat-drv">
+            <!-- Encosto de cabeça -->
+            <rect x="60" y="180" width="100" height="32" rx="10" fill="url(#cmf-grad-seat)" stroke="#2a3550" stroke-width="1"/>
+            <!-- Encosto -->
+            <rect x="52" y="218" width="116" height="148" rx="14" fill="url(#cmf-grad-seat)" stroke="#2a3550" stroke-width="1"/>
+            <!-- Padrão de ventilação no encosto (3 fileiras de 3 dots = 9 total) -->
+            <g class="cmf-vent-dots" id="cmf-vent-drv-dots">
+              <circle class="cmf-vd" data-row="3" cx="80"  cy="246" r="2.5" fill="#1e293b"/>
+              <circle class="cmf-vd" data-row="3" cx="110" cy="246" r="2.5" fill="#1e293b"/>
+              <circle class="cmf-vd" data-row="3" cx="140" cy="246" r="2.5" fill="#1e293b"/>
+
+              <circle class="cmf-vd" data-row="2" cx="80"  cy="280" r="2.5" fill="#1e293b"/>
+              <circle class="cmf-vd" data-row="2" cx="110" cy="280" r="2.5" fill="#1e293b"/>
+              <circle class="cmf-vd" data-row="2" cx="140" cy="280" r="2.5" fill="#1e293b"/>
+
+              <circle class="cmf-vd" data-row="1" cx="80"  cy="314" r="2.5" fill="#1e293b"/>
+              <circle class="cmf-vd" data-row="1" cx="110" cy="314" r="2.5" fill="#1e293b"/>
+              <circle class="cmf-vd" data-row="1" cx="140" cy="314" r="2.5" fill="#1e293b"/>
+            </g>
+            <!-- Assento -->
+            <rect x="46" y="375" width="128" height="120" rx="16" fill="url(#cmf-grad-seat)" stroke="#2a3550" stroke-width="1"/>
+            <!-- Etiqueta -->
+            <text x="110" y="405" text-anchor="middle" font-size="7" fill="#475569" font-weight="700" letter-spacing="1">MOTORISTA</text>
+          </g>
+
+          <!-- ── Banco passageiro (direita) ────────────────────────────── -->
+          <g id="cmf-seat-pass">
+            <rect x="240" y="180" width="100" height="32" rx="10" fill="url(#cmf-grad-seat)" stroke="#2a3550" stroke-width="1"/>
+            <rect x="232" y="218" width="116" height="148" rx="14" fill="url(#cmf-grad-seat)" stroke="#2a3550" stroke-width="1"/>
+            <g class="cmf-vent-dots" id="cmf-vent-pass-dots">
+              <circle class="cmf-vd" data-row="3" cx="260" cy="246" r="2.5" fill="#1e293b"/>
+              <circle class="cmf-vd" data-row="3" cx="290" cy="246" r="2.5" fill="#1e293b"/>
+              <circle class="cmf-vd" data-row="3" cx="320" cy="246" r="2.5" fill="#1e293b"/>
+
+              <circle class="cmf-vd" data-row="2" cx="260" cy="280" r="2.5" fill="#1e293b"/>
+              <circle class="cmf-vd" data-row="2" cx="290" cy="280" r="2.5" fill="#1e293b"/>
+              <circle class="cmf-vd" data-row="2" cx="320" cy="280" r="2.5" fill="#1e293b"/>
+
+              <circle class="cmf-vd" data-row="1" cx="260" cy="314" r="2.5" fill="#1e293b"/>
+              <circle class="cmf-vd" data-row="1" cx="290" cy="314" r="2.5" fill="#1e293b"/>
+              <circle class="cmf-vd" data-row="1" cx="320" cy="314" r="2.5" fill="#1e293b"/>
+            </g>
+            <rect x="226" y="375" width="128" height="120" rx="16" fill="url(#cmf-grad-seat)" stroke="#2a3550" stroke-width="1"/>
+            <text x="290" y="405" text-anchor="middle" font-size="7" fill="#475569" font-weight="700" letter-spacing="1">PASSAGEIRO</text>
+          </g>
+        </svg>
+      </div>
+
+      <!-- ── Status pills abaixo da cabine ─────────────────────────────── -->
+      <div style="display:flex;gap:8px;margin-top:16px;justify-content:center;flex-wrap:wrap;text-align:left">
+        <div id="cmf-status-ac" style="flex:1;min-width:0;max-width:160px;background:#0c1019;border:1px solid #1e293b;border-radius:10px;padding:10px 12px">
+          <div style="font-size:9px;font-weight:700;letter-spacing:1.5px;color:#64748b;text-transform:uppercase">❄️ AC</div>
+          <div id="cmf-ac-text" style="font-size:14px;font-weight:700;color:#475569;margin-top:3px">Desligado</div>
+        </div>
+        <div id="cmf-status-drv" style="flex:1;min-width:0;max-width:160px;background:#0c1019;border:1px solid #1e293b;border-radius:10px;padding:10px 12px">
+          <div style="font-size:9px;font-weight:700;letter-spacing:1.5px;color:#64748b;text-transform:uppercase">🪑 Motorista</div>
+          <div id="cmf-drv-text" style="font-size:14px;font-weight:700;color:#475569;margin-top:3px">Desligado</div>
+        </div>
+        <div id="cmf-status-pass" style="flex:1;min-width:0;max-width:160px;background:#0c1019;border:1px solid #1e293b;border-radius:10px;padding:10px 12px">
+          <div style="font-size:9px;font-weight:700;letter-spacing:1.5px;color:#64748b;text-transform:uppercase">🪑 Passageiro</div>
+          <div id="cmf-pass-text" style="font-size:14px;font-weight:700;color:#475569;margin-top:3px">Desligado</div>
+        </div>
+      </div>
+    </div>
+
     <!-- Recargas -->
     <div id="panel-charges" class="panel">
       <div id="charges-list"><div class="empty">Carregando recargas...</div></div>
@@ -664,6 +807,10 @@
     <button class="tab active" data-panel="dash" onclick="switchTab(this)">
       <span class="tab-icon">🏠</span>
       <span class="tab-label">Dash</span>
+    </button>
+    <button class="tab" data-panel="comfort" onclick="switchTab(this)">
+      <span class="tab-icon">🛋</span>
+      <span class="tab-label">Conforto</span>
     </button>
     <button class="tab" data-panel="charges" onclick="switchTab(this, loadCharges)">
       <span class="tab-icon">⚡</span>
