@@ -173,6 +173,7 @@ let haSocActive = false;
 let prevEngineState = null;
 const prevDoorStates = { fl: null, fr: null, rl: null, rr: null, trunk: null };
 const DOOR_NAMES = { fl: 'Dianteira esq.', fr: 'Dianteira dir.', rl: 'Traseira esq.', rr: 'Traseira dir.' };
+const WINDOW_NAMES = { fl: 'Vidro diant. esq.', fr: 'Vidro diant. dir.', rl: 'Vidro tras. esq.', rr: 'Vidro tras. dir.' };
 const WIN_NAMES  = { fl: 'Vidro diant. esq.', fr: 'Vidro diant. dir.', rl: 'Vidro tras. esq.', rr: 'Vidro tras. dir.' };
 const prevWindowStates = { fl: null, fr: null, rl: null, rr: null };
 let prevLockState   = null;
@@ -1888,10 +1889,12 @@ function applyMqttMessage(key, value, isRetained = false) {
       const prevEng = prevEngineState;
       state.engine_state = value;
       prevEngineState    = value;
-      if (!isRetained && prevEng !== null) {
-        if (value === '1' && prevEng !== '1') {
-          if (notifPrefs.engine_on) sendPush('🔑 Motor ligado', 'O veículo foi ligado.');
-        } else if (value === '0' && prevEng !== '0') {
+      if (!isRetained && prevEng !== null && prevEng !== value) {
+        if (value === '1') {
+          addEvent('engine_on',  'Motor ligado');
+          if (notifPrefs.engine_on)  sendPush('🔑 Motor ligado',  'O veículo foi ligado.');
+        } else if (value === '0') {
+          addEvent('engine_off', 'Motor desligado');
           if (notifPrefs.engine_off) sendPush('🔑 Motor desligado', 'O veículo foi desligado.');
         }
       }
@@ -1901,14 +1904,25 @@ function applyMqttMessage(key, value, isRetained = false) {
       const prevL = prevLockState;
       state.lock_state = value;
       prevLockState = value;
+      // Fallback MQTT (sem dependência de HA WS): gera evento na mudança.
+      // Convenção: 'on' = destrancado, 'off' = trancado (mesma do HA_ENTITY_MAP).
       if (!isRetained && prevL !== null && prevL !== value) {
-        // events sourced from HA WebSocket
+        if (value === 'on')       addEvent('lock_open',  'Carro destrancado');
+        else if (value === 'off') addEvent('lock_close', 'Carro trancado');
       }
       break;
     }
     case 'high_beam':    state.high_beam    = value; break;   // 'on' | 'off'
     case 'light_state':  state.light_state  = value; break;   // 'on' | 'off' (farol)
-    case 'ac_state':     state.ac_state     = value; break;   // 'on' | 'off'
+    case 'ac_state': {
+      const prevAc = state.ac_state;
+      state.ac_state = value;
+      if (!isRetained && prevAc !== null && prevAc !== value) {
+        if (value === 'on')       addEvent('ac_on',  'Ar condicionado ligado');
+        else if (value === 'off') addEvent('ac_off', 'Ar condicionado desligado');
+      }
+      break;
+    }
     case 'seat_vent_drv':  state.seat_vent_drv  = value; break; // '0'..'3'
     case 'seat_vent_pass': state.seat_vent_pass = value; break; // '0'..'3'
     case 'hvac_driver_temp':    state.hvac_driver_temp    = value; break; // float °C
@@ -1927,8 +1941,10 @@ function applyMqttMessage(key, value, isRetained = false) {
       if (!isRetained && prevD !== null && prevD !== value) {
         const label = DOOR_NAMES[side] || side.toUpperCase();
         if (value === 'on') {
-          if (notifPrefs.door_open) sendPush('🚪 Porta aberta', label);
+          addEvent('door_open',  `${label} aberta`);
+          if (notifPrefs.door_open)  sendPush('🚪 Porta aberta', label);
         } else if (value === 'off') {
+          addEvent('door_close', `${label} fechada`);
           if (notifPrefs.door_close) sendPush('🚪 Porta fechada', label);
         }
       }
@@ -1940,16 +1956,28 @@ function applyMqttMessage(key, value, isRetained = false) {
       prevDoorStates.trunk    = value;
       if (!isRetained && prevT !== null && prevT !== value) {
         if (value === 'on') {
-          if (notifPrefs.trunk_open) sendPush('🧳 Porta-malas aberta', 'Verifique se está segura.');
+          addEvent('trunk_open',  'Porta-malas aberta');
+          if (notifPrefs.trunk_open)  sendPush('🧳 Porta-malas aberta', 'Verifique se está segura.');
         } else if (value === 'off') {
+          addEvent('trunk_close', 'Porta-malas fechada');
           if (notifPrefs.trunk_close) sendPush('🧳 Porta-malas fechada', 'Porta-malas foi fechada.');
         }
       }
       break;
     }
     case 'sunroof': {
+      // closedVal = '3' (per HA_ENTITY_MAP). Qualquer outro valor = aberto.
+      const prevS = prevSunroof;
       state.sunroof = value;
       prevSunroof = value;
+      if (!isRetained && prevS !== null && prevS !== value) {
+        const wasClosed = String(prevS) === '3';
+        const nowClosed = String(value) === '3';
+        if (wasClosed !== nowClosed) {
+          if (nowClosed) addEvent('sunroof_close', 'Teto solar fechado');
+          else           addEvent('sunroof_open',  'Teto solar aberto');
+        }
+      }
       break;
     }
     case 'window_fl':
@@ -1957,8 +1985,19 @@ function applyMqttMessage(key, value, isRetained = false) {
     case 'window_rl':
     case 'window_rr': {
       const wside = key.slice(7);
+      const prevW = prevWindowStates[wside];
       state[key] = value;
       prevWindowStates[wside] = value;
+      // closedVal = '1' (per HA_ENTITY_MAP). Qualquer outro valor = aberto/entreaberto.
+      if (!isRetained && prevW !== null && prevW !== value) {
+        const wasClosed = String(prevW) === '1';
+        const nowClosed = String(value) === '1';
+        if (wasClosed !== nowClosed) {
+          const label = WINDOW_NAMES[wside] || wside.toUpperCase();
+          if (nowClosed) addEvent('window_close', `${label} fechado`);
+          else           addEvent('window_open',  `${label} aberto`);
+        }
+      }
       break;
     }
     case 'tyre_pressure_fl': { state.tyre_pressure_fl = num(value); checkTyrePressure('FL', num(value), isRetained); break; }
