@@ -63,4 +63,10 @@ enum class CarConstants(val value: String) {
     // Comfort settings — ventilação dos bancos (0=off, 1/2/3=nível de ventilação)
     CAR_COMFORT_DRIVER_SEAT_VENT("car.comfort_setting.driver_seat_ventilation_level"),
     CAR_COMFORT_PASSENGER_SEAT_VENT("car.comfort_setting.passenger_seat_ventilation_level"),
+
+    // HVAC settings — temperatura, ventilação, sync e auto (apenas leitura)
+    CAR_HVAC_DRIVER_TEMPERATURE("car.hvac.driver_temperature"),
+    CAR_HVAC_FAN_SPEED("car.hvac.fan_speed"),
+    CAR_HVAC_SYNC_ENABLE("car.hvac.sync_enable"),     // 0=off, 1=on
+    CAR_HVAC_AUTO_ENABLE("car.hvac.auto_enable"),     // 0=off, 1=on
 }

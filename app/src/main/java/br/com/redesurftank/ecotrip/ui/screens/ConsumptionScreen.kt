@@ -249,6 +249,18 @@ fun ConsumptionScreen() {
                     CarConstants.CAR_COMFORT_PASSENGER_SEAT_VENT.value -> {
                         mqttManager.latestPassengerSeatVent = value.trim().toIntOrNull() ?: 0
                     }
+                    CarConstants.CAR_HVAC_DRIVER_TEMPERATURE.value -> {
+                        mqttManager.latestHvacDriverTemp = value.trim().toFloatOrNull() ?: 0f
+                    }
+                    CarConstants.CAR_HVAC_FAN_SPEED.value -> {
+                        mqttManager.latestHvacFanSpeed = value.trim().toIntOrNull() ?: 0
+                    }
+                    CarConstants.CAR_HVAC_SYNC_ENABLE.value -> {
+                        mqttManager.latestHvacSyncEnable = value.trim().toIntOrNull() ?: 0
+                    }
+                    CarConstants.CAR_HVAC_AUTO_ENABLE.value -> {
+                        mqttManager.latestHvacAutoEnable = value.trim().toIntOrNull() ?: 0
+                    }
                     else -> tripManager.onDataChanged(key, value)
                 }
                 // Publica imediatamente quando qualquer sinal muda (debounce 1s interno)

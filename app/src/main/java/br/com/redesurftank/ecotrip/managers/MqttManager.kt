@@ -106,6 +106,10 @@ class MqttManager private constructor() {
     var latestEngineRpm:    Int = 0    // rpm — rotação do motor térmico (ICE)
     var latestDriverSeatVent:    Int = 0    // 0=off, 1–3 nível de ventilação banco motorista
     var latestPassengerSeatVent: Int = 0    // 0=off, 1–3 nível de ventilação banco passageiro
+    var latestHvacDriverTemp:    Float = 0f // °C — temperatura definida do AC (zona motorista)
+    var latestHvacFanSpeed:      Int   = 0  // nível do ventilador do AC
+    var latestHvacSyncEnable:    Int   = 0  // 0=off, 1=on (sync das zonas do AC)
+    var latestHvacAutoEnable:    Int   = 0  // 0=off, 1=on (modo AUTO do AC)
 
     // Último timestamp em que qualquer dado do carro foi recebido pelo app
     // Usado para saber se o barramento de dados do carro está ativo
@@ -425,6 +429,10 @@ class MqttManager private constructor() {
             pubR("engine_rpm",        latestEngineRpm.toString())
             pubR("seat_vent_drv",     latestDriverSeatVent.toString())
             pubR("seat_vent_pass",    latestPassengerSeatVent.toString())
+            pubR("hvac_driver_temp",  fmt1(latestHvacDriverTemp))
+            pubR("hvac_fan_speed",    latestHvacFanSpeed.toString())
+            pubR("hvac_sync_enable",  latestHvacSyncEnable.toString())
+            pubR("hvac_auto_enable",  latestHvacAutoEnable.toString())
             if (latestOdometerKm > 0f) pubR("odometer_km", fmt1(latestOdometerKm))
             if (latestBatt12vPct > 0f) pubR("batt_12v_pct", fmt1(latestBatt12vPct))
             // Potência de recarga: apenas quando charging_state == 1 (Carregando)
@@ -614,6 +622,10 @@ class MqttManager private constructor() {
             S("engine_rpm",        "Rotação Motor Térmico",    "$prefix/engine_rpm",         "rpm",       icon = "mdi:engine"),
             S("seat_vent_drv",  "Ventilação Banco Motorista",  "$prefix/seat_vent_drv",  "", icon = "mdi:seat-recline-normal", sc = null),
             S("seat_vent_pass", "Ventilação Banco Passageiro", "$prefix/seat_vent_pass", "", icon = "mdi:seat-recline-normal", sc = null),
+            S("hvac_driver_temp", "AC Temperatura Motorista", "$prefix/hvac_driver_temp", "°C", dc = "temperature"),
+            S("hvac_fan_speed",   "AC Velocidade Ventilador", "$prefix/hvac_fan_speed",   "",   icon = "mdi:fan",          sc = null),
+            S("hvac_sync_enable", "AC Sincronizar Zonas",     "$prefix/hvac_sync_enable", "",   icon = "mdi:link-variant", sc = null),
+            S("hvac_auto_enable", "AC Modo Automático",       "$prefix/hvac_auto_enable", "",   icon = "mdi:auto-mode",    sc = null),
             S("charging_state",     "Estado de Recarga",        "$prefix/charging_state",     "",          icon = "mdi:ev-plug-type2", sc = null),
             S("speed",              "Velocidade Atual",         "$prefix/speed_kmh",           "km/h",      "speed"),
             S("gear",               "Marcha",                "$prefix/gear",                  "",          icon = "mdi:car-shift-pattern", sc = null),
