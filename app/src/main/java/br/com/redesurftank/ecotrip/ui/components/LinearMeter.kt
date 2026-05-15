@@ -54,10 +54,10 @@ fun LinearMeter(
 
     Column(
         modifier = modifier
-            .background(Color(0xFF0C1019).copy(alpha = 0.55f), RoundedCornerShape(12.dp))
-            .border(1.dp, Color.White.copy(alpha = 0.06f), RoundedCornerShape(12.dp))
-            .padding(horizontal = 14.dp, vertical = 10.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+            .background(Color(0xFF0C1019).copy(alpha = 0.55f), RoundedCornerShape(14.dp))
+            .border(1.dp, Color.White.copy(alpha = 0.06f), RoundedCornerShape(14.dp))
+            .padding(horizontal = 20.dp, vertical = 14.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         // Header: icon + label, max à direita
         Row(
@@ -92,27 +92,28 @@ fun LinearMeter(
         }
 
         // Valor grande + unidade
-        Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+        Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(
                 text = String.format(java.util.Locale.US, "%.1f", value),
-                fontSize = 34.sp,
+                fontSize = 48.sp,
                 fontWeight = FontWeight.ExtraBold,
                 color = perfColor,
+                letterSpacing = (-1.8).sp,
                 style = TextStyle(
                     shadow = Shadow(
                         color = perfColor.copy(alpha = 0.45f),
                         offset = Offset.Zero,
-                        blurRadius = 12f,
+                        blurRadius = 14f,
                     ),
                 ),
                 maxLines = 1,
             )
             Text(
                 text = unitLabel,
-                fontSize = 13.sp,
+                fontSize = 17.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = TextSecondary,
-                modifier = Modifier.padding(bottom = 4.dp),
+                modifier = Modifier.padding(bottom = 5.dp),
                 maxLines = 1,
             )
         }
@@ -121,9 +122,9 @@ fun LinearMeter(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(7.dp)
-                .background(Color.White.copy(alpha = 0.04f), RoundedCornerShape(4.dp))
-                .border(0.5.dp, Color.Black.copy(alpha = 0.4f), RoundedCornerShape(4.dp)),
+                .height(9.dp)
+                .background(Color.White.copy(alpha = 0.04f), RoundedCornerShape(5.dp))
+                .border(0.5.dp, Color.Black.copy(alpha = 0.4f), RoundedCornerShape(5.dp)),
         ) {
             // Fill com gradient
             Box(

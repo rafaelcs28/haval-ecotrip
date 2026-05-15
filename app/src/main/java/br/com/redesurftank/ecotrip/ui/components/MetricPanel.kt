@@ -67,37 +67,37 @@ fun MetricBlock(
         ) {
             Text(
                 text = label.uppercase(),
-                fontSize = 9.5.sp,
+                fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
-                letterSpacing = 1.4.sp,
+                letterSpacing = 1.8.sp,
                 color = TextSecondary.copy(alpha = 0.78f),
             )
             if (auxRight != null) {
                 Text(
                     text = auxRight,
-                    fontSize = 10.sp,
+                    fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = auxColor,
                     letterSpacing = 0.3.sp,
                 )
             }
         }
-        Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+        Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(
                 text = value,
-                fontSize = 22.sp,
+                fontSize = 28.sp,
                 fontWeight = FontWeight.ExtraBold,
                 color = valueColor,
                 maxLines = 1,
-                letterSpacing = (-0.4).sp,
+                letterSpacing = (-0.6).sp,
             )
             if (unitInline != null) {
                 Text(
                     text = unitInline,
-                    fontSize = 11.sp,
+                    fontSize = 13.sp,
                     fontWeight = FontWeight.Medium,
                     color = TextSecondary,
-                    modifier = Modifier.padding(bottom = 2.dp),
+                    modifier = Modifier.padding(bottom = 3.dp),
                     maxLines = 1,
                 )
             }

@@ -565,8 +565,8 @@ fun ConsumptionScreen() {
             .fillMaxSize()
             .background(Brush.verticalGradient(listOf(VoidBlack, Color(0xFF04060A))))
             .systemBarsPadding()
-            .padding(horizontal = 22.dp, vertical = 10.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+            .padding(horizontal = 40.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         // ── Header: logo + status pill + update chip + 4 IconButtons ─────────
         Row(
@@ -769,12 +769,13 @@ fun ConsumptionScreen() {
         }
 
         // ── Center zone: 3 columns (Energy | Hero+Meters | Fuel) ─────────────
+        // Ultrawide 1920×720: gap maior + colunas mais largas + hero bem maior.
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
                 .padding(top = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(18.dp),
+            horizontalArrangement = Arrangement.spacedBy(36.dp),
         ) {
             // ── Coluna ESQUERDA: ⚡ Energia ──────────────────────────────────
             Column(
@@ -841,8 +842,8 @@ fun ConsumptionScreen() {
                     label      = "kWh/100km",
                     color      = kwhPer100kmColor(rolling.netKwhPer100km),
                     tickValues = listOf(0, 10, 20, 30, 40),
-                    diameter   = 250.dp,
-                    valueFontSize = 56.sp,
+                    diameter   = 360.dp,
+                    valueFontSize = 80.sp,
                 )
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 0.dp),
@@ -1192,19 +1193,19 @@ private fun StripMetric(
     ) {
         Text(
             value,
-            fontSize   = if (big) 30.sp else 19.sp,
+            fontSize   = if (big) 42.sp else 26.sp,
             fontWeight = FontWeight.ExtraBold,
             color      = color,
-            letterSpacing = (-0.8).sp,
+            letterSpacing = (-1.2).sp,
             style = TextStyle(
-                shadow = if (big) Shadow(color.copy(alpha = 0.4f), Offset.Zero, 10f) else null
+                shadow = if (big) Shadow(color.copy(alpha = 0.4f), Offset.Zero, 12f) else null
             ),
         )
         Text(
             unit,
-            fontSize = 11.sp,
+            fontSize = 13.sp,
             color    = TextSecondary,
-            letterSpacing = 0.3.sp,
+            letterSpacing = 0.6.sp,
         )
     }
 }
