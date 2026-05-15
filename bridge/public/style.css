@@ -205,21 +205,59 @@ html, body {
   fill: #22d3ee;
   filter: drop-shadow(0 0 4px rgba(34, 211, 238, 0.7));
 }
-.cmf-ac-wave {
+/* Wave lines do AC (linhas saindo dos vents) — pulso constante.
+   Quantidade visível controlada via .on (toggled em JS conforme fan_speed). */
+.cmf-ww {
+  opacity: 0;
   transform-origin: top center;
-  animation: cmfAcWave var(--wave-duration, 1.6s) ease-in-out infinite;
-  filter: drop-shadow(0 0 var(--wave-glow, 2px) rgba(34, 211, 238, 0.5));
-  transition: filter 0.4s ease;
+  transition: opacity 0.4s ease;
+  filter: drop-shadow(0 0 2.5px rgba(34, 211, 238, 0.45));
+}
+.cmf-ww.on {
+  animation: cmfAcWave 1.5s ease-in-out infinite;
 }
 @keyframes cmfAcWave {
-  0%, 100% {
-    opacity: var(--wave-op-min, 0.35);
-    transform: translateY(0) scale(1);
-  }
-  50% {
-    opacity: var(--wave-op-max, 0.85);
-    transform: translateY(var(--wave-translate, 4px)) scale(var(--wave-scale, 1));
-  }
+  0%, 100% { opacity: 0.30; transform: translateY(0); }
+  50%      { opacity: 0.90; transform: translateY(4px); }
+}
+
+/* Climate Panel: estado "AC desligado" — esconde controles, mostra indicador */
+.climate-panel.off .climate-temps,
+.climate-panel.off .climate-controls {
+  display: none;
+}
+.climate-off-indicator {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 18px 14px;
+  color: #475569;
+}
+.climate-panel.off .climate-off-indicator {
+  display: flex;
+}
+.climate-off-indicator svg {
+  color: #334155;
+  flex-shrink: 0;
+}
+.climate-off-text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+.climate-off-title {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: #64748b;
+  text-transform: uppercase;
+}
+.climate-off-subtitle {
+  font-size: 10px;
+  color: #475569;
+  letter-spacing: 0.3px;
 }
 .cmf-vd {
   transition: fill 0.3s ease, filter 0.3s ease, r 0.3s ease;
