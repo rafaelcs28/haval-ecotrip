@@ -207,11 +207,19 @@ html, body {
 }
 .cmf-ac-wave {
   transform-origin: top center;
-  animation: cmfAcWave 1.6s ease-in-out infinite;
+  animation: cmfAcWave var(--wave-duration, 1.6s) ease-in-out infinite;
+  filter: drop-shadow(0 0 var(--wave-glow, 2px) rgba(34, 211, 238, 0.5));
+  transition: filter 0.4s ease;
 }
 @keyframes cmfAcWave {
-  0%, 100% { opacity: 0.35; transform: translateY(0); }
-  50%      { opacity: 0.85; transform: translateY(4px); }
+  0%, 100% {
+    opacity: var(--wave-op-min, 0.35);
+    transform: translateY(0) scale(1);
+  }
+  50% {
+    opacity: var(--wave-op-max, 0.85);
+    transform: translateY(var(--wave-translate, 4px)) scale(var(--wave-scale, 1));
+  }
 }
 .cmf-vd {
   transition: fill 0.3s ease, filter 0.3s ease, r 0.3s ease;

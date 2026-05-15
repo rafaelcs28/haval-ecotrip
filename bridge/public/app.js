@@ -1578,6 +1578,38 @@ function renderDash() {
   applyCabinSeat('cmf-vent-drv-dots',  'cmf-drv-text',  s.seat_vent_drv);
   applyCabinSeat('cmf-vent-pass-dots', 'cmf-pass-text', s.seat_vent_pass);
 
+  // ── Ondas do AC reagem à velocidade do ventilador (hvac_fan_speed) ────────
+  // Quanto maior o fan, mais rápido o pulso + maior translateY + glow mais forte.
+  // Mapeamento contínuo (fan 0..7+):
+  //   duration:   1.8s → 0.5s   (mais rápido com fan alto)
+  //   translate:  3px  → 9px
+  //   op-max:     0.45 → 1.0
+  //   glow:       2px  → 8px
+  //   scale:      1.0  → 1.15
+  {
+    const wavesEl = document.getElementById('cmf-ac-waves');
+    if (wavesEl) {
+      const fanLvlRaw = parseInt(s.hvac_fan_speed, 10);
+      const f = Number.isFinite(fanLvlRaw) ? Math.max(0, Math.min(8, fanLvlRaw)) : 0;
+      // Quando fan=0 mas AC está on: mantém pulso bem sutil (idle).
+      // Quando fan ≥ 1: escala conforme o nível, dentro dos limites acima.
+      const baseLevel = acOn ? Math.max(f, 0.5) : 0;       // 0.5 = idle quando fan=0
+      const t = Math.min(1, baseLevel / 7);                // 0..1 normalizado
+      const duration  = (1.8 - t * 1.3).toFixed(2) + 's';  // 1.8 → 0.5
+      const translate = (3   + t * 6).toFixed(1) + 'px';   // 3 → 9
+      const opMax     = (0.45 + t * 0.55).toFixed(2);      // 0.45 → 1.0
+      const opMin     = (0.20 + t * 0.20).toFixed(2);      // 0.20 → 0.40
+      const glow      = (2   + t * 6).toFixed(1) + 'px';   // 2 → 8
+      const scale     = (1.0 + t * 0.15).toFixed(3);       // 1.0 → 1.15
+      wavesEl.style.setProperty('--wave-duration',  duration);
+      wavesEl.style.setProperty('--wave-translate', translate);
+      wavesEl.style.setProperty('--wave-op-max',    opMax);
+      wavesEl.style.setProperty('--wave-op-min',    opMin);
+      wavesEl.style.setProperty('--wave-glow',      glow);
+      wavesEl.style.setProperty('--wave-scale',     scale);
+    }
+  }
+
   // ── Climate Panel (acima da cabine): 2 temps + SYNC + AUTO + FAN ─────────
   // Temperatura motorista
   const tempDrvEl = document.getElementById('cmf-ac-temp-drv');
