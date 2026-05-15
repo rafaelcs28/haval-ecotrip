@@ -1825,9 +1825,6 @@ const mqttOptions = {
   clientId:       `ecotrip-bridge-${Date.now()}`,
   clean:          true,
   reconnectPeriod: 5000,
-  // keepalive curto (20s) para manter NAT vivo e detectar quedas cedo;
-  // útil quando o bridge alcança o broker via IP público (hairpin NAT)
-  keepalive:      20,
 };
 if (MQTT_USER) { mqttOptions.username = MQTT_USER; mqttOptions.password = MQTT_PASS; }
 

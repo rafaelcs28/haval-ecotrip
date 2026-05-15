@@ -120,6 +120,8 @@ Acesse `http://localhost:3000` no navegador.
 
 > **Nota**: defina apenas `BRIDGE_TOKEN` com uma senha curta (ex: `minhasenha`). O campo `BRIDGE_TOKEN_HASH` é gerenciado automaticamente pela PWA quando o usuário troca a senha pelo celular.
 
+> **⚠️ Armadilha — broker em VM com `vmnet-bridged`**: se o Mosquitto rodar dentro de uma VM (UTM/QEMU/Parallels) em **modo bridged** na mesma rede do bridge Node, **o host não consegue alcançar a VM via o IP "público" dela na LAN** — é uma limitação do framework `vmnet` da Apple. Sintoma: `ECONNRESET` + `Keepalive timeout` em loop quando `MQTT_HOST` aponta pro IP público (hairpin NAT instável), ou `EHOSTDOWN` quando aponta pro IP LAN da VM. **Fix**: adicione um 2º adapter de rede na VM em modo `Shared Network` (NAT), descubra o IP interno (`192.168.64.x`) e use-o em `MQTT_HOST`. Dispositivos externos (app do carro etc.) continuam usando o IP público/LAN normalmente.
+
 ### Segurança
 
 A autenticação funciona assim:
