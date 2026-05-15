@@ -224,6 +224,7 @@ fun ConsumptionScreen() {
                     }
                     CarConstants.CAR_BASIC_DRIVING_READY_STATE.value -> {
                         val state = value.trim().toIntOrNull() ?: return@post
+                        mqttManager.latestDrivingReadyState = state
                         tripManager.onDrivingReady(state)
                     }
                     CarConstants.CAR_EV_INFO_CUR_CHARGE_CURRENT.value -> {
