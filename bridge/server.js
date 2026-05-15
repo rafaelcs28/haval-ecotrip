@@ -478,6 +478,10 @@ const state = {
   ac_state:         null,   // null | 'on' | 'off'
   seat_vent_drv:    null,   // null | '0'=desligado | '1'=fraco | '2'=médio | '3'=forte
   seat_vent_pass:   null,   // idem motorista
+  hvac_driver_temp: null,   // null | float (°C) — temperatura definida (motorista)
+  hvac_fan_speed:   null,   // null | int (0..N) — velocidade do ventilador
+  hvac_sync_enable: null,   // null | '0'=desligado | '1'=ligado
+  hvac_auto_enable: null,   // null | '0'=desligado | '1'=ligado
   door_fl:          null,   // front-left  | 'on'=aberta | 'off'=fechada
   door_fr:          null,   // front-right
   door_rl:          null,   // rear-left
@@ -1906,6 +1910,10 @@ function applyMqttMessage(key, value, isRetained = false) {
     case 'ac_state':     state.ac_state     = value; break;   // 'on' | 'off'
     case 'seat_vent_drv':  state.seat_vent_drv  = value; break; // '0'..'3'
     case 'seat_vent_pass': state.seat_vent_pass = value; break; // '0'..'3'
+    case 'hvac_driver_temp': state.hvac_driver_temp = value; break; // float °C
+    case 'hvac_fan_speed':   state.hvac_fan_speed   = value; break; // int 0..N
+    case 'hvac_sync_enable': state.hvac_sync_enable = value; break; // '0'|'1'
+    case 'hvac_auto_enable': state.hvac_auto_enable = value; break; // '0'|'1'
     case 'door_fl':
     case 'door_fr':
     case 'door_rl':

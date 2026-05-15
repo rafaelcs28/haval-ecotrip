@@ -228,6 +228,15 @@ html, body {
   50%      { opacity: 1.0; }
 }
 
+/* AC badges (AUTO, SYNC) — animação suave ao ligar/desligar */
+#cmf-ac-auto-bg, #cmf-ac-sync-bg { transition: fill 0.3s, stroke 0.3s; }
+#cmf-ac-auto-txt, #cmf-ac-sync-txt, #cmf-ac-temp, #cmf-ac-fan-val { transition: fill 0.3s; }
+.cmf-fan-bar { transition: fill 0.3s ease, filter 0.3s ease; }
+.cmf-fan-bar.on {
+  fill: #22d3ee;
+  filter: drop-shadow(0 0 3px rgba(34,211,238,0.6));
+}
+
 /* ── Dashboard: reordenação por estado do motor ──────────────────────────────── */
 #panel-dash.active { display: flex; flex-direction: column; }
 

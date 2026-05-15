@@ -1578,6 +1578,71 @@ function renderDash() {
   applyCabinSeat('cmf-vent-drv-dots',  'cmf-drv-text',  s.seat_vent_drv);
   applyCabinSeat('cmf-vent-pass-dots', 'cmf-pass-text', s.seat_vent_pass);
 
+  // ── AC INFO STRIP (temp + AUTO + SYNC + fan) ──────────────────────────────
+  // Temperatura definida (motorista)
+  const tempEl = document.getElementById('cmf-ac-temp');
+  if (tempEl) {
+    const t = parseFloat(s.hvac_driver_temp);
+    if (Number.isFinite(t)) {
+      tempEl.textContent = `${t.toFixed(1)}°C`;
+      tempEl.style.fill = acOn ? '#22d3ee' : '#94a3b8';
+    } else {
+      tempEl.textContent = '--°C';
+      tempEl.style.fill = '#475569';
+    }
+  }
+  // AUTO badge
+  const autoOn = String(s.hvac_auto_enable) === '1';
+  const autoBg = document.getElementById('cmf-ac-auto-bg');
+  const autoTx = document.getElementById('cmf-ac-auto-txt');
+  if (autoBg && autoTx) {
+    autoBg.setAttribute('fill',   autoOn ? 'rgba(34,211,238,0.15)' : '#1a2236');
+    autoBg.setAttribute('stroke', autoOn ? '#22d3ee'               : '#1e293b');
+    autoTx.style.fill = autoOn ? '#22d3ee' : '#475569';
+  }
+  // SYNC badge
+  const syncOn = String(s.hvac_sync_enable) === '1';
+  const syncBg = document.getElementById('cmf-ac-sync-bg');
+  const syncTx = document.getElementById('cmf-ac-sync-txt');
+  if (syncBg && syncTx) {
+    syncBg.setAttribute('fill',   syncOn ? 'rgba(94,234,212,0.15)' : '#1a2236');
+    syncBg.setAttribute('stroke', syncOn ? '#5eead4'               : '#1e293b');
+    syncTx.style.fill = syncOn ? '#5eead4' : '#475569';
+  }
+  // Fan speed bars (0..7+: ilumina N bars conforme nível)
+  const fanLvl = parseInt(s.hvac_fan_speed, 10);
+  const fanValid = Number.isFinite(fanLvl) && fanLvl >= 0;
+  document.querySelectorAll('.cmf-fan-bar').forEach(bar => {
+    const lvl = parseInt(bar.dataset.level, 10);
+    bar.classList.toggle('on', fanValid && lvl <= fanLvl);
+  });
+  const fanValEl = document.getElementById('cmf-ac-fan-val');
+  if (fanValEl) {
+    fanValEl.textContent = fanValid ? String(fanLvl) : '--';
+    fanValEl.style.fill  = fanValid && fanLvl > 0 ? '#22d3ee' : '#475569';
+  }
+
+  // Expande pill AC com detalhes (temp/auto/sync/fan) abaixo do "Ligado/Desligado"
+  const acTextEl = document.getElementById('cmf-ac-text');
+  if (acTextEl) {
+    const t = parseFloat(s.hvac_driver_temp);
+    const parts = [];
+    if (Number.isFinite(t))      parts.push(`${t.toFixed(1)}°C`);
+    if (autoOn)                  parts.push('AUTO');
+    if (syncOn)                  parts.push('SYNC');
+    if (fanValid && fanLvl > 0)  parts.push(`Fan ${fanLvl}`);
+    const detail = parts.length ? parts.join(' · ') : '';
+    // Limpa "subtext" anterior
+    let sub = document.getElementById('cmf-ac-subtext');
+    if (!sub) {
+      sub = document.createElement('div');
+      sub.id = 'cmf-ac-subtext';
+      sub.style.cssText = 'font-size:10px;font-weight:500;color:#64748b;margin-top:2px;letter-spacing:0.2px';
+      acTextEl.parentNode.appendChild(sub);
+    }
+    sub.textContent = detail;
+  }
+
   // Vidros (1=fechado, 2=aberto, 3=entreaberto)
   carLayer('cl-win-fl-open', s.window_fl === '2' || s.window_fl === 2);
   carLayer('cl-win-fl-ajar', s.window_fl === '3' || s.window_fl === 3);
