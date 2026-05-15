@@ -1939,6 +1939,7 @@ function applyMqttMessage(key, value, isRetained = false) {
         prevWindowStates[wside] = norm;
         break;
       }
+      console.log(`[window:${wside}] mqtt='${value}' isRetained=${isRetained} → norm='${norm}' prev='${prevWindowStates[wside]}' hystPending='${_hystPending[key]}'`);
       if (norm === _hystPending[key]) break;
       _hystPending[key] = norm;
       clearTimeout(_hystTimers[key]);
@@ -1947,10 +1948,28 @@ function applyMqttMessage(key, value, isRetained = false) {
         if (norm !== prevWindowStates[wside]) {
           prevWindowStates[wside] = norm;
           const label = WINDOW_NAMES[wside] || wside.toUpperCase();
+          console.log(`[window:${wside}] EVENT after hysteresis: ${norm === 'on' ? 'open' : 'close'} (prev was different)`);
           if (norm === 'on') addEvent('window_open',  `${label} aberto`);
           else               addEvent('window_close', `${label} fechado`);
         }
       }, HYSTERESIS_MS);
+      break;
+    }
+    case 'debug/window_status_raw': {
+      // Log do CSV cru que o Android publicou — ajuda a diagnosticar oscilação
+      console.log(`[window:raw] csv='${value}' isRetained=${isRetained}`);
+      break;
+    }
+    case 'debug/door_status_raw': {
+      console.log(`[door:raw] csv='${value}' isRetained=${isRetained}`);
+      break;
+    }
+    case 'debug/sunroof_raw': {
+      console.log(`[sunroof:raw] value='${value}' isRetained=${isRetained}`);
+      break;
+    }
+    case 'debug/lock_status_raw': {
+      console.log(`[lock:raw] value='${value}' isRetained=${isRetained}`);
       break;
     }
     case 'tyre_pressure_fl': { state.tyre_pressure_fl = num(value); checkTyrePressure('FL', num(value), isRetained); break; }
