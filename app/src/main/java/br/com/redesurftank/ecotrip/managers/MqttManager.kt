@@ -473,8 +473,7 @@ class MqttManager private constructor() {
             pubR("hvac_fan_speed",    latestHvacFanSpeed.toString())
             pubR("hvac_sync_enable",  latestHvacSyncEnable.toString())
             pubR("hvac_auto_enable",  latestHvacAutoEnable.toString())
-            // Semântica invertida no carro: 1=desligado, 0=ligado (confirmado em uso).
-            pubR("ac_state",          if (latestHvacAcEnable > 0) "0" else "1")
+            pubR("ac_state",          if (latestHvacAcEnable > 0) "1" else "0")
             pubR("hvac_cycle_mode",   latestHvacCycleMode.toString())
 
             // Body — normaliza tudo pra binário "1=aberto/destrancado, 0=fechado/trancado"
