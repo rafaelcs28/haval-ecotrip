@@ -135,6 +135,13 @@ function saveNotifPrefs() {
 let chargeEndingNotifSent = false;
 
 // ── Detecção de transição de estado de carga ──────────────────────────────────
+// Hysteresis: car emite valores oscilantes (ex.: sunroof posição) pro mesmo estado
+// físico. Sem debounce, o log enche de eventos abertos/fechados a cada flip do sensor.
+// Espera N ms de valor estável antes de atualizar state + disparar evento.
+const HYSTERESIS_MS = 3000;
+const _hystPending = { sunroof: null, window_fl: null, window_fr: null, window_rl: null, window_rr: null };
+const _hystTimers  = { sunroof: null, window_fl: null, window_fr: null, window_rl: null, window_rr: null };
+
 let prevChargingState    = null;
 let chargeStartTimer     = null;
 let chargeSessionStartMs = 0;   // timestamp de início da sessão (para duração e potência média)
@@ -1898,14 +1905,24 @@ function applyMqttMessage(key, value, isRetained = false) {
     }
     case 'sunroof': {
       // App publica '1' (aberto) / '0' (fechado) já normalizado a partir de car.basic.sunroof_status.
+      // Sensor de posição oscila — hysteresis de 3s evita spam no log.
       const norm = value === '1' ? 'on' : 'off';
-      const prevS = prevSunroof;
-      state.sunroof = norm;
-      prevSunroof   = norm;
-      if (!isRetained && prevS !== null && prevS !== norm) {
-        if (norm === 'on') addEvent('sunroof_open',  'Teto solar aberto');
-        else               addEvent('sunroof_close', 'Teto solar fechado');
+      if (isRetained) {
+        state.sunroof = norm;
+        prevSunroof   = norm;
+        break;
       }
+      if (norm === _hystPending.sunroof) break;  // já agendado pra esse valor
+      _hystPending.sunroof = norm;
+      clearTimeout(_hystTimers.sunroof);
+      _hystTimers.sunroof = setTimeout(() => {
+        state.sunroof = norm;
+        if (norm !== prevSunroof) {
+          prevSunroof = norm;
+          if (norm === 'on') addEvent('sunroof_open',  'Teto solar aberto');
+          else               addEvent('sunroof_close', 'Teto solar fechado');
+        }
+      }, HYSTERESIS_MS);
       break;
     }
     case 'window_fl':
@@ -1913,16 +1930,26 @@ function applyMqttMessage(key, value, isRetained = false) {
     case 'window_rl':
     case 'window_rr': {
       // App publica '1' (aberto) / '0' (fechado) já normalizado a partir de car.basic.window_status.
+      // Mesmo padrão de hysteresis 3s — sensor oscila no estado fechado.
       const wside = key.slice(7);
       const norm  = value === '1' ? 'on' : 'off';
-      const prevW = prevWindowStates[wside];
-      state[key]              = norm;
-      prevWindowStates[wside] = norm;
-      if (!isRetained && prevW !== null && prevW !== norm) {
-        const label = WINDOW_NAMES[wside] || wside.toUpperCase();
-        if (norm === 'on') addEvent('window_open',  `${label} aberto`);
-        else               addEvent('window_close', `${label} fechado`);
+      if (isRetained) {
+        state[key]              = norm;
+        prevWindowStates[wside] = norm;
+        break;
       }
+      if (norm === _hystPending[key]) break;
+      _hystPending[key] = norm;
+      clearTimeout(_hystTimers[key]);
+      _hystTimers[key] = setTimeout(() => {
+        state[key] = norm;
+        if (norm !== prevWindowStates[wside]) {
+          prevWindowStates[wside] = norm;
+          const label = WINDOW_NAMES[wside] || wside.toUpperCase();
+          if (norm === 'on') addEvent('window_open',  `${label} aberto`);
+          else               addEvent('window_close', `${label} fechado`);
+        }
+      }, HYSTERESIS_MS);
       break;
     }
     case 'tyre_pressure_fl': { state.tyre_pressure_fl = num(value); checkTyrePressure('FL', num(value), isRetained); break; }
