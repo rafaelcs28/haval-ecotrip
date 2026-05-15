@@ -66,6 +66,7 @@ enum class CarConstants(val value: String) {
 
     // HVAC settings — temperatura, ventilação, sync e auto (apenas leitura)
     CAR_HVAC_DRIVER_TEMPERATURE("car.hvac.driver_temperature"),
+    CAR_HVAC_PASSENGER_TEMPERATURE("car.hvac.pass_temperature"),
     CAR_HVAC_FAN_SPEED("car.hvac.fan_speed"),
     CAR_HVAC_SYNC_ENABLE("car.hvac.sync_enable"),     // 0=off, 1=on
     CAR_HVAC_AUTO_ENABLE("car.hvac.auto_enable"),     // 0=off, 1=on

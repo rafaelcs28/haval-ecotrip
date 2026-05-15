@@ -262,6 +262,9 @@ fun ConsumptionScreen() {
                     CarConstants.CAR_HVAC_DRIVER_TEMPERATURE.value -> {
                         mqttManager.latestHvacDriverTemp = value.trim().toFloatOrNull() ?: 0f
                     }
+                    CarConstants.CAR_HVAC_PASSENGER_TEMPERATURE.value -> {
+                        mqttManager.latestHvacPassengerTemp = value.trim().toFloatOrNull() ?: 0f
+                    }
                     CarConstants.CAR_HVAC_FAN_SPEED.value -> {
                         mqttManager.latestHvacFanSpeed = value.trim().toIntOrNull() ?: 0
                     }
