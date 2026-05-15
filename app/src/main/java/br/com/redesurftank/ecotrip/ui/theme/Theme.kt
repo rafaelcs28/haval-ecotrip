@@ -23,6 +23,7 @@ val TextSecondary = Color(0xFF5B7394)   // mais discreto
 val BorderColor   = Color(0xFF0F1520)
 val Separator     = Color(0xFF0F1520)
 val WarnYellow    = Color(0xFFFFD60A)
+val DangerRed     = Color(0xFFFF4444)   // zona vermelha em gauges de performance
 
 private val ColorScheme = darkColorScheme(
     primary      = NeonLime,

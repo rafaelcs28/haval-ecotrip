@@ -14,22 +14,27 @@ import kotlinx.coroutines.withContext
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.material.icons.filled.BatteryChargingFull
 import androidx.compose.material.icons.filled.DirectionsCar
-import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.LocalGasStation
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.BugReport
-import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -46,8 +51,15 @@ import br.com.redesurftank.ecotrip.managers.TripHistoryEntry
 import br.com.redesurftank.ecotrip.managers.TripManager
 import br.com.redesurftank.ecotrip.managers.UpdateManager
 import br.com.redesurftank.ecotrip.models.CarConstants
-import br.com.redesurftank.ecotrip.ui.components.RollingWindowCard
+import br.com.redesurftank.ecotrip.ui.components.BulletBar
+import br.com.redesurftank.ecotrip.ui.components.HeroGauge
+import br.com.redesurftank.ecotrip.ui.components.LinearMeter
+import br.com.redesurftank.ecotrip.ui.components.MetricBlock
+import br.com.redesurftank.ecotrip.ui.components.MiniBar
+import br.com.redesurftank.ecotrip.ui.components.SocStripBar
+import br.com.redesurftank.ecotrip.ui.components.StatusBadge
 import br.com.redesurftank.ecotrip.ui.theme.*
+import androidx.compose.ui.graphics.vector.rememberVectorPainter
 
 private val mainHandler = Handler(Looper.getMainLooper())
 
@@ -117,10 +129,8 @@ fun ConsumptionScreen() {
         }
     }
 
-    var showHistory       by remember { mutableStateOf(false) }
     var showChargeHistory by remember { mutableStateOf(false) }
     var showAutoTrips     by remember { mutableStateOf(false) }
-    var showStats         by remember { mutableStateOf(false) }
     var showSettings      by remember { mutableStateOf(false) }
     var showLog           by remember { mutableStateOf(false) }
     var minAutoTripDist   by remember { mutableStateOf(tripManager.getMinAutoTripDist()) }
@@ -465,11 +475,6 @@ fun ConsumptionScreen() {
         )
     }
 
-    if (showStats) {
-        StatsScreen(tripManager = tripManager, onBack = { showStats = false })
-        return
-    }
-
     if (showSettings) {
         SettingsScreen(
             backupManager = backupMgr,
@@ -515,27 +520,6 @@ fun ConsumptionScreen() {
         return
     }
 
-    if (showHistory) {
-        HistoryScreen(
-            entries        = history,
-            onClearHistory = {
-                tripManager.clearHistory()
-                history = emptyList()
-            },
-            onDeleteEntry  = { entry ->
-                tripManager.deleteHistoryEntry(entry)
-                history = tripManager.getHistory()
-            },
-            onRenameEntry  = { entry, name ->
-                tripManager.renameTripHistoryEntry(entry.timestampMs, name)
-                history = tripManager.getHistory()
-                mqttManager.publishTripHistory(history)
-            },
-            onBack = { showHistory = false },
-        )
-        return
-    }
-
     if (showChargeHistory) {
         ChargeHistoryScreen(
             entries        = chargeHistory,
@@ -569,75 +553,82 @@ fun ConsumptionScreen() {
         return
     }
 
+    // Mostra viagem ao vivo quando em andamento; caso contrário, última salva
+    val displayTrip   = inProgressTrip ?: autoTripEntries.firstOrNull()
+    val displayIsLive = inProgressTrip != null
+
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(VoidBlack)
+            .background(Brush.verticalGradient(listOf(VoidBlack, Color(0xFF04060A))))
             .systemBarsPadding()
-            .padding(horizontal = 16.dp, vertical = 10.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+            .padding(horizontal = 22.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
+        // ── Header: logo + status pill + update chip + 4 IconButtons ─────────
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            // ── Left: title + version badge + connection dot + car name
+            // Esquerda: logo + pill consolidado (versão + MQTT + carro)
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Text(
                     "ECOTRIP",
-                    fontSize      = 19.sp,
+                    fontSize      = 22.sp,
                     fontWeight    = FontWeight.ExtraBold,
                     color         = NeonLime,
-                    letterSpacing = 2.sp,
+                    letterSpacing = 3.sp,
                     style         = TextStyle(
                         shadow = Shadow(
-                            color      = NeonLime.copy(alpha = 0.45f),
+                            color      = NeonLime.copy(alpha = 0.50f),
                             offset     = Offset.Zero,
                             blurRadius = 18f,
                         )
                     ),
                 )
-                Text(
-                    "v${BuildConfig.VERSION_NAME}",
-                    fontSize   = 10.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color      = NeonLime.copy(alpha = 0.7f),
-                    modifier   = Modifier
-                        .background(NeonLime.copy(alpha = 0.08f), RoundedCornerShape(5.dp))
-                        .border(1.dp, NeonLime.copy(alpha = 0.2f), RoundedCornerShape(5.dp))
-                        .padding(horizontal = 7.dp, vertical = 2.dp),
-                )
-                if (mqttStatus == MqttManager.Status.CONNECTED) {
-                    Box(Modifier.size(6.dp).background(NeonLime, CircleShape))
-                } else {
-                    val (mqttLabel, mqttColor) = when (mqttStatus) {
-                        MqttManager.Status.CONNECTING   -> "MQTT..." to WarnYellow
-                        MqttManager.Status.ERROR        -> "MQTT erro" to androidx.compose.ui.graphics.Color(0xFFFF4444)
-                        else                            -> "MQTT off"  to TextSecondary
+                // Pill: ● vX.Y · Haval H6 PHEV34   (com MQTT dot/chip embutido)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier
+                        .background(NeonLime.copy(alpha = 0.06f), RoundedCornerShape(50))
+                        .border(1.dp, NeonLime.copy(alpha = 0.22f), RoundedCornerShape(50))
+                        .padding(horizontal = 12.dp, vertical = 4.dp),
+                ) {
+                    if (mqttStatus == MqttManager.Status.CONNECTED) {
+                        Box(Modifier.size(6.dp).background(NeonLime, CircleShape))
+                    } else {
+                        val mqttColor = when (mqttStatus) {
+                            MqttManager.Status.CONNECTING -> WarnYellow
+                            MqttManager.Status.ERROR      -> DangerRed
+                            else                          -> TextSecondary
+                        }
+                        Box(Modifier.size(6.dp).background(mqttColor, CircleShape))
                     }
                     Text(
-                        mqttLabel,
-                        fontSize = 9.sp,
-                        color    = mqttColor,
-                        modifier = Modifier
-                            .background(mqttColor.copy(alpha = 0.12f), RoundedCornerShape(4.dp))
-                            .border(1.dp, mqttColor.copy(alpha = 0.35f), RoundedCornerShape(4.dp))
-                            .padding(horizontal = 5.dp, vertical = 2.dp),
+                        "v${BuildConfig.VERSION_NAME}",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = NeonLime,
+                    )
+                    Text("·", fontSize = 11.sp, color = TextSecondary.copy(alpha = 0.4f))
+                    Text(
+                        "Haval H6 PHEV34",
+                        fontSize = 11.sp,
+                        color = TextSecondary.copy(alpha = 0.85f),
                     )
                 }
-                Text("Haval H6 PHEV34", fontSize = 11.sp, color = TextSecondary.copy(alpha = 0.6f))
             }
 
-            // ── Right: update chip + action buttons
+            // Direita: update chip + 4 IconButtons (Log, Recargas, AutoTrips, Settings)
             Row(verticalAlignment = Alignment.CenterVertically) {
-                // Update area — sempre visível; clique verifica manualmente
+                // Update area — mesmas 4 condições do design anterior
                 when {
                     downloadProgress in 0..99 -> {
-                        // Baixando: mostra progresso
                         Text(
                             "$downloadProgress%",
                             fontSize   = 11.sp,
@@ -650,7 +641,6 @@ fun ConsumptionScreen() {
                         )
                     }
                     isCheckingUpdate -> {
-                        // Verificando: mostra indicador
                         Text(
                             "...",
                             fontSize = 11.sp,
@@ -659,8 +649,7 @@ fun ConsumptionScreen() {
                         )
                     }
                     updateAvailable -> {
-                        // Nova versão disponível: chip verde de download
-                        androidx.compose.material3.TextButton(
+                        TextButton(
                             onClick        = { updateMgr.downloadAndInstall(context) },
                             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
                         ) {
@@ -688,8 +677,7 @@ fun ConsumptionScreen() {
                         }
                     }
                     else -> {
-                        // Em dia: mostra versão atual cinza — clicável para verificar
-                        androidx.compose.material3.TextButton(
+                        TextButton(
                             onClick        = { updateMgr.checkForUpdate() },
                             contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
                         ) {
@@ -704,17 +692,11 @@ fun ConsumptionScreen() {
                 IconButton(onClick = { showLog = true }) {
                     Icon(Icons.Default.BugReport, contentDescription = "Log", tint = TextSecondary)
                 }
-                IconButton(onClick = { showStats = true }) {
-                    Icon(Icons.Default.BarChart, contentDescription = "Estatísticas", tint = Green)
-                }
                 IconButton(onClick = { showChargeHistory = true }) {
                     Icon(Icons.Default.BatteryChargingFull, contentDescription = "Recargas", tint = AuroraTeal)
                 }
                 IconButton(onClick = { showAutoTrips = true }) {
                     Icon(Icons.Default.DirectionsCar, contentDescription = "Viagens Auto", tint = AccentBlue)
-                }
-                IconButton(onClick = { showHistory = true }) {
-                    Icon(Icons.Default.History, contentDescription = "Histórico", tint = TextSecondary)
                 }
                 IconButton(onClick = { showSettings = true }) {
                     Icon(Icons.Default.Settings, contentDescription = "Configurações", tint = TextSecondary)
@@ -722,35 +704,311 @@ fun ConsumptionScreen() {
             }
         }
 
-        RollingWindowCard(
-            snapshot = rolling,
-            onReset  = { tripManager.resetRolling() },
-            modifier = Modifier.fillMaxWidth(),
+        // ── Ambient gradient strip (sutil linha viva abaixo do header) ───────
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(1.dp)
+                .drawBehind {
+                    drawLine(
+                        brush = Brush.horizontalGradient(
+                            listOf(
+                                Color.Transparent,
+                                NeonLime.copy(alpha = 0.35f),
+                                AuroraTeal.copy(alpha = 0.35f),
+                                PlasmaBlue.copy(alpha = 0.20f),
+                                Color.Transparent,
+                            ),
+                        ),
+                        start = Offset(0f, 0f),
+                        end = Offset(size.width, 0f),
+                        strokeWidth = 1.dp.toPx(),
+                    )
+                },
         )
 
-        // Mostra viagem ao vivo quando em andamento; caso contrário, última salva
-        val displayTrip   = inProgressTrip ?: autoTripEntries.firstOrNull()
-        val displayIsLive = inProgressTrip != null
-        if (displayTrip != null) {
-            InProgressTripCard(
-                trip     = displayTrip,
-                isLive   = displayIsLive,
-                nowMs    = nowMs,
-                modifier = Modifier.fillMaxWidth(),
-            )
+        // ── Sub-header rolling window: "DESDE ÚLTIMA PARTIDA · X km · Zerar" ─
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                Text(
+                    "DESDE ÚLTIMA PARTIDA",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.8.sp,
+                    color = TextSecondary.copy(alpha = 0.85f),
+                )
+                Text("▸", fontSize = 11.sp, color = TextSecondary.copy(alpha = 0.35f))
+                Text(
+                    "%.1f km".format(rolling.windowKm),
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = AuroraTeal,
+                    style = TextStyle(
+                        shadow = Shadow(AuroraTeal.copy(alpha = 0.4f), Offset.Zero, 8f),
+                    ),
+                )
+            }
+            OutlinedButton(
+                onClick        = { tripManager.resetRolling() },
+                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 2.dp),
+                border         = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
+                shape          = RoundedCornerShape(6.dp),
+            ) {
+                Text("Zerar", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = TextSecondary)
+            }
         }
 
-    }
+        // ── Center zone: 3 columns (Energy | Hero+Meters | Fuel) ─────────────
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .padding(top = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(18.dp),
+        ) {
+            // ── Coluna ESQUERDA: ⚡ Energia ──────────────────────────────────
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight(),
+                verticalArrangement = Arrangement.Top,
+            ) {
+                ColumnTitle(label = "Energia", iconColor = NeonLime, icon = Icons.Default.Bolt)
+                // Bruto
+                MetricBlock(
+                    label = "Bruto",
+                    value = "%.1f".format(rolling.energyKwh),
+                    unitInline = "kWh",
+                )
+                // Regenerada + % + mini-bar
+                val regenPct = if (rolling.energyKwh > 0.01f)
+                    (rolling.regenKwh / rolling.energyKwh).coerceIn(0f, 1f)
+                else 0f
+                MetricBlock(
+                    label = "Regenerada",
+                    value = "%.1f".format(rolling.regenKwh),
+                    valueColor = NeonLime,
+                    unitInline = "kWh",
+                    auxRight = if (regenPct > 0f) "%.0f%%".format(regenPct * 100f) else null,
+                    auxColor = NeonLime,
+                ) {
+                    if (regenPct > 0f) {
+                        Spacer(Modifier.height(4.dp))
+                        MiniBar(
+                            fraction = regenPct,
+                            fillBrush = Brush.horizontalGradient(listOf(NeonLime, NeonLime)),
+                        )
+                    }
+                }
+                // Líquida
+                MetricBlock(
+                    label = "Líquida",
+                    value = "%.1f".format(rolling.netKwh),
+                    valueColor = WarnYellow,
+                    unitInline = "kWh",
+                )
+                // SOC: start → current, com delta
+                val socDeltaRolling = rolling.currentSocPct - rolling.startSocPct
+                MetricBlock(
+                    label = "SOC",
+                    value = if (rolling.startSocPct > 0f || rolling.currentSocPct > 0f)
+                        "%.0f%% → %.0f%%".format(rolling.startSocPct, rolling.currentSocPct)
+                    else "—",
+                    auxRight = if (rolling.startSocPct > 0f) "%+.0f%%".format(socDeltaRolling) else null,
+                    showBottomBorder = false,
+                )
+            }
 
+            // ── Centro: HeroGauge + 2 LinearMeters ──────────────────────────
+            Column(
+                modifier = Modifier.weight(2.2f).fillMaxHeight(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                HeroGauge(
+                    value      = rolling.netKwhPer100km,
+                    maxValue   = 40f,
+                    label      = "kWh/100km",
+                    color      = kwhPer100kmColor(rolling.netKwhPer100km),
+                    tickValues = listOf(0, 10, 20, 30, 40),
+                    diameter   = 250.dp,
+                    valueFontSize = 56.sp,
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 0.dp),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                ) {
+                    LinearMeter(
+                        value             = rolling.combinedKmL,
+                        maxValue          = 100f,
+                        label             = "km/L eq",
+                        unitLabel         = "km/L",
+                        icon              = rememberVectorPainter(Icons.Default.Bolt),
+                        categoryIconColor = AuroraTeal,
+                        perfColor         = kmPerLEqColor(rolling.combinedKmL),
+                        tickValues        = listOf(0, 25, 50, 75, 100),
+                        modifier          = Modifier.weight(1f),
+                    )
+                    LinearMeter(
+                        value             = rolling.kmPerL,
+                        maxValue          = 40f,
+                        label             = "km/L",
+                        unitLabel         = "km/L",
+                        icon              = rememberVectorPainter(Icons.Default.LocalGasStation),
+                        categoryIconColor = MoltenOrange,
+                        perfColor         = kmPerLColor(rolling.kmPerL),
+                        tickValues        = listOf(0, 10, 20, 30, 40),
+                        modifier          = Modifier.weight(1f),
+                    )
+                }
+            }
+
+            // ── Coluna DIREITA: ⛽ Combustível ───────────────────────────────
+            Column(
+                modifier = Modifier.weight(1f).fillMaxHeight(),
+                verticalArrangement = Arrangement.Top,
+            ) {
+                ColumnTitle(label = "Combustível", iconColor = MoltenOrange, icon = Icons.Default.LocalGasStation)
+                // Consumido (L)
+                MetricBlock(
+                    label = "Consumido",
+                    value = "%.1f".format(rolling.fuelL),
+                    valueColor = MoltenOrange,
+                    unitInline = "L",
+                )
+                // Tanque start→current + mini-bar (% atual do tanque)
+                val tankFrac = if (tankCapacity > 0.1f) (rolling.currentTankL / tankCapacity).coerceIn(0f, 1f) else 0f
+                val tankSpent = rolling.startTankL - rolling.currentTankL
+                MetricBlock(
+                    label = "Tanque",
+                    value = if (rolling.startTankL > 0f || rolling.currentTankL > 0f)
+                        "%.1f → %.1f".format(rolling.startTankL, rolling.currentTankL)
+                    else "—",
+                    unitInline = "L",
+                    auxRight = if (tankSpent > 0.01f) "%.1f L gastos".format(tankSpent) else null,
+                ) {
+                    if (tankFrac > 0f) {
+                        Spacer(Modifier.height(4.dp))
+                        MiniBar(
+                            fraction = tankFrac,
+                            fillBrush = Brush.horizontalGradient(listOf(MoltenOrange, Color(0xFFFFB890))),
+                        )
+                    }
+                }
+                // Custo total
+                MetricBlock(
+                    label = "Custo total",
+                    value = if (rolling.costBrl > 0.01f) "R$ %.2f".format(rolling.costBrl) else "—",
+                    valueColor = WarnYellow,
+                )
+                // Custo por km com bullet chart
+                val costPerKm = rolling.costPerKm
+                val costStatus = costPerKmStatus(costPerKm)
+                MetricBlock(
+                    label = "Custo por km",
+                    value = if (costPerKm > 0f) "R$ %.3f".format(costPerKm) else "—",
+                    valueColor = WarnYellow.copy(alpha = 0.95f),
+                    auxRight = if (costPerKm > 0f) null else null,
+                    showBottomBorder = false,
+                ) {
+                    if (costPerKm > 0f) {
+                        Spacer(Modifier.height(6.dp))
+                        BulletBar(
+                            value = costPerKm,
+                            maxScale = 0.60f,
+                            metaPosition = 0.30f,
+                            yellowEnd = 0.45f,
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(top = 3.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                        ) {
+                            Text("R$ 0", fontSize = 8.5.sp, fontWeight = FontWeight.SemiBold, color = TextSecondary.copy(alpha = 0.5f))
+                            Text("meta R$ 0,30", fontSize = 8.5.sp, fontWeight = FontWeight.Bold, color = WarnYellow.copy(alpha = 0.9f))
+                            Text("R$ 0,60+", fontSize = 8.5.sp, fontWeight = FontWeight.SemiBold, color = TextSecondary.copy(alpha = 0.5f))
+                        }
+                    }
+                }
+                // Badge de status alinhado no top do bloco (mostra no header do "Custo por km")
+                // — fica fora do bloco pra acompanhar a label visualmente; ajustar se preferir embutido.
+                if (costPerKm > 0f) {
+                    Spacer(Modifier.height(4.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        StatusBadge(label = costStatus.label, color = costStatus.color)
+                    }
+                }
+            }
+        }
+
+        // ── Strip inferior: viagem em andamento / última viagem ──────────────
+        if (displayTrip != null) {
+            StripSection(
+                trip = displayTrip,
+                isLive = displayIsLive,
+                nowMs = nowMs,
+            )
+        }
+    }
 }
 
-// ── Card: Viagem em andamento / Última viagem ─────────────────────────────────
+// ── Helpers do header das colunas Energia/Combustível ─────────────────────────
+@Composable
+private fun ColumnTitle(
+    label: String,
+    iconColor: androidx.compose.ui.graphics.Color,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 5.dp)
+            .drawBehind {
+                drawLine(
+                    color = Color.White.copy(alpha = 0.06f),
+                    start = Offset(0f, size.height),
+                    end = Offset(size.width, size.height),
+                    strokeWidth = 1f,
+                )
+            }
+            .padding(bottom = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = iconColor.copy(alpha = 0.85f),
+            modifier = Modifier.size(14.dp),
+        )
+        Text(
+            text = label.uppercase(),
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 1.8.sp,
+            color = TextSecondary.copy(alpha = 0.75f),
+        )
+    }
+}
+
+// ── Strip inferior: viagem em andamento / última viagem ──────────────────────
+// Substitui o antigo InProgressTripCard. Layout horizontal estilo "status bar"
+// + 2 linhas de métricas (primárias grandes, secundárias menores).
 
 @Composable
-private fun InProgressTripCard(
-    trip:     AutoTripEntry,
-    isLive:   Boolean,
-    nowMs:    Long,
+private fun StripSection(
+    trip:   AutoTripEntry,
+    isLive: Boolean,
+    nowMs:  Long,
     modifier: Modifier = Modifier,
 ) {
     // Tempo: ao vivo = elapsed desde startMs; salva = duração real endMs-startMs
@@ -780,84 +1038,120 @@ private fun InProgressTripCard(
 
     Column(
         modifier = modifier
-            .background(GlassCard, RoundedCornerShape(16.dp))
-            .border(1.dp, accentColor.copy(alpha = 0.28f), RoundedCornerShape(16.dp))
-            .padding(horizontal = 16.dp, vertical = 10.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+            .fillMaxWidth()
+            .padding(top = 4.dp)
+            .drawBehind {
+                // Separador horizontal no topo da seção
+                drawLine(
+                    color = Color.White.copy(alpha = 0.04f),
+                    start = Offset(0f, 0f),
+                    end = Offset(size.width, 0f),
+                    strokeWidth = 1f,
+                )
+            }
+            .padding(top = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        // ── Cabeçalho ─────────────────────────────────────────────────────────
+        // ── Linha 1: indicador live + label + km + horário + duração + SOC bar
         Row(
-            modifier              = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment     = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             Row(
-                verticalAlignment     = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(7.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 if (isLive) Box(Modifier.size(8.dp).background(AccentBlue, CircleShape))
                 Text(
                     if (isLive) "VIAGEM EM ANDAMENTO" else "ÚLTIMA VIAGEM",
-                    fontSize      = 12.sp,
-                    fontWeight    = FontWeight.Bold,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
                     letterSpacing = 1.6.sp,
-                    color         = accentColor,
+                    color = accentColor,
                 )
-            }
-            Row(
-                verticalAlignment     = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
+                Text("▸", fontSize = 10.sp, color = TextSecondary.copy(alpha = 0.35f))
+                Text(
+                    "%.1f km".format(trip.distKm),
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = AuroraTeal,
+                    style = TextStyle(shadow = Shadow(AuroraTeal.copy(alpha = 0.4f), Offset.Zero, 6f)),
+                )
+                Text("▸", fontSize = 10.sp, color = TextSecondary.copy(alpha = 0.35f))
                 Text(
                     if (isLive) "desde $dateFmt" else dateFmt,
-                    fontSize = 12.sp,
-                    color    = TextSecondary,
+                    fontSize = 11.sp,
+                    color = TextSecondary,
                 )
+                Text("▸", fontSize = 10.sp, color = TextSecondary.copy(alpha = 0.35f))
                 Text(
                     timeStr,
-                    fontSize   = 15.sp,
+                    fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color      = accentColor,
+                    color = accentColor,
+                )
+            }
+
+            // SOC bar (decisão do usuário: usa SOC da VIAGEM — trip.startSocPct e trip.endSocPct)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.weight(1f),
+            ) {
+                Text(
+                    "SOC",
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.2.sp,
+                    color = TextSecondary,
+                )
+                SocStripBar(
+                    startSocPct   = trip.startSocPct,
+                    currentSocPct = trip.endSocPct,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    "%.0f%%".format(trip.endSocPct),
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = AuroraTeal,
+                    style = TextStyle(shadow = Shadow(AuroraTeal.copy(alpha = 0.4f), Offset.Zero, 6f)),
                 )
             }
         }
 
-        // ── Linha 1: métricas principais ──────────────────────────────────────
+        // ── Linha 2: métricas primárias (grandes, 32sp) ───────────────────────
         Row(
-            modifier              = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceEvenly,
         ) {
-            TripMetricCell(
-                value    = if (trip.distKm > 0f) "%.1f".format(trip.distKm) else "--",
-                unit     = "km",
-                color    = AccentBlue,
-                bigValue = true,
+            StripMetric(
+                value = if (trip.distKm > 0f) "%.1f".format(trip.distKm) else "--",
+                unit  = "km",
+                color = AccentBlue,
+                big   = true,
             )
-            TripMetricCell(
-                value    = if (kwh100 > 0f) "%.1f".format(kwh100) else "--",
-                unit     = "kWh/100km",
-                color    = when {
-                    kwh100 <= 0f -> TextSecondary
-                    kwh100 < 20f -> NeonLime
-                    kwh100 < 30f -> WarnYellow
-                    else         -> AccentOrange
-                },
-                bigValue = true,
+            StripMetric(
+                value = if (kwh100 > 0f) "%.1f".format(kwh100) else "--",
+                unit  = "kWh/100km",
+                color = kwhPer100kmColor(kwh100),
+                big   = true,
             )
-            TripMetricCell(
-                value    = if (kmlEq > 0f) "%.1f".format(kmlEq) else "--",
-                unit     = "km/L eq",
-                color    = NeonLime,
-                bigValue = true,
+            StripMetric(
+                value = if (kmlEq > 0f) "%.1f".format(kmlEq) else "--",
+                unit  = "km/L eq",
+                color = kmPerLEqColor(kmlEq),
+                big   = true,
             )
         }
 
-        // ── Linha 2: métricas secundárias ─────────────────────────────────────
+        // ── Linha 3: métricas secundárias ─────────────────────────────────────
         Row(
-            modifier              = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceEvenly,
         ) {
-            TripMetricCell(
+            StripMetric(
                 value = if (trip.startSocPct > 0f) "%+.0f%%".format(socDelta) else "--",
                 unit  = "SOC Δ",
                 color = when {
@@ -866,12 +1160,12 @@ private fun InProgressTripCard(
                     else            -> TextSecondary
                 },
             )
-            TripMetricCell(
+            StripMetric(
                 value = if (trip.netKwh > 0.01f) "%.2f kWh".format(trip.netKwh) else "--",
                 unit  = "elétrico líq.",
                 color = AuroraTeal,
             )
-            TripMetricCell(
+            StripMetric(
                 value = if (trip.fuelL > 0.001f) "%.2f L".format(trip.fuelL) else "--",
                 unit  = "combustível",
                 color = AccentOrange,
@@ -881,28 +1175,33 @@ private fun InProgressTripCard(
 }
 
 @Composable
-private fun TripMetricCell(
-    value:    String,
-    unit:     String,
-    color:    androidx.compose.ui.graphics.Color,
-    bigValue: Boolean = false,
+private fun StripMetric(
+    value: String,
+    unit:  String,
+    color: Color,
+    big:   Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     Column(
         modifier            = modifier,
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(3.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         Text(
             value,
-            fontSize   = if (bigValue) 26.sp else 18.sp,
+            fontSize   = if (big) 30.sp else 19.sp,
             fontWeight = FontWeight.ExtraBold,
             color      = color,
+            letterSpacing = (-0.8).sp,
+            style = TextStyle(
+                shadow = if (big) Shadow(color.copy(alpha = 0.4f), Offset.Zero, 10f) else null
+            ),
         )
         Text(
             unit,
             fontSize = 11.sp,
             color    = TextSecondary,
+            letterSpacing = 0.3.sp,
         )
     }
 }
