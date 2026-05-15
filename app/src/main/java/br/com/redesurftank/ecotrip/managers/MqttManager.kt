@@ -177,14 +177,56 @@ class MqttManager private constructor() {
     fun markChangedImmediate() {
         val c = client ?: return
         if (!c.isConnected) return
-        // Cancela debounce pendente — já vamos publicar tudo agora
+        // Cancela qualquer debounce pendente — full snapshot já cobre tudo
         changeHandler.removeCallbacksAndMessages(null)
+        changeFastHandler.removeCallbacksAndMessages(null)
         changePending = false
+        changeFastPending = false
         val now = System.currentTimeMillis()
         val tm = TripManager.getInstance()
         val queued = QueuedSnapshot(now, tm.currentRolling())
         lastPublishMs = now
         executor.submit { publishSnapshotInternal(c, queued) }
+    }
+
+    // ── Via expressa pra telemetria de alta frequência ─────────────────────────
+    // Speed, RPM, % potência motor e potência do motor (kW) mudam continuamente
+    // durante a condução. Com debounce de 1s do markChanged, PWA atualiza só a
+    // 1 Hz — fica visivelmente lerdo no dash. Via expressa publica só esses 4
+    // tópicos a até 20 Hz (50ms debounce), sem mexer no full snapshot.
+    private val changeFastHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    @Volatile private var changeFastPending = false
+    private val CHANGE_FAST_DEBOUNCE_MS = 50L
+
+    fun markChangedFast() {
+        if (changeFastPending) return
+        val c = client ?: return
+        if (!c.isConnected) return
+        changeFastPending = true
+        changeFastHandler.postDelayed({
+            changeFastPending = false
+            executor.submit { publishFastTelemetryInternal(c) }
+        }, CHANGE_FAST_DEBOUNCE_MS)
+    }
+
+    private fun publishFastTelemetryInternal(c: MqttClient) {
+        try {
+            fun pub(topic: String, value: String) =
+                c.publish("$prefix/$topic", value.toByteArray(), 0, false)
+            fun fmt1(v: Float) = String.format(java.util.Locale.US, "%.1f", v)
+            fun fmt2(v: Float) = String.format(java.util.Locale.US, "%.2f", v)
+            pub("speed_kmh",         fmt1(latestSpeedKmh))
+            pub("engine_rpm",        latestEngineRpm.toString())
+            pub("battery_power_pct", latestBattPowerPct.toString())
+            pub("motor_power_kw",    fmt2(latestMotorPowerKw))
+            // Carregando? publica a potência de recarga também (mesma fonte)
+            if (latestChargingState == 1 && latestBatteryVoltageV > 0f) {
+                val chargePowerKw = kotlin.math.abs(latestChargeCurrentA) * latestBatteryVoltageV / 1000f
+                pub("charge_power_kw", fmt2(chargePowerKw))
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "publishFastTelemetry failed: ${e.message}")
+        }
     }
 
     // Último valor de limite de carga (em %) publicado no HA.

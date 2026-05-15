@@ -63,9 +63,20 @@ import androidx.compose.ui.graphics.vector.rememberVectorPainter
 
 private val mainHandler = Handler(Looper.getMainLooper())
 
+// Chaves de telemetria contínua que mudam o tempo todo durante a condução.
+// Vão pra via expressa: publish só desses tópicos a até 20 Hz (debounce 50ms),
+// pra PWA atualizar speed/RPM/power em quase tempo real.
+private val FAST_LANE_KEYS: Set<String> = setOf(
+    CarConstants.CAR_BASIC_VEHICLE_SPEED.value,
+    CarConstants.CAR_BASIC_ENGINE_SPEED.value,
+    CarConstants.CAR_EV_INFO_ENERGY_OUTPUT_PERCENTAGE.value,  // % potência motor
+    CarConstants.CAR_EV_INFO_CUR_CHARGE_CURRENT.value,        // recalcula motor_power_kw
+    CarConstants.CAR_EV_INFO_POWER_BATTERY_VOLTAGE.value,     // recalcula motor_power_kw
+)
+
 // Chaves event-driven: mudanças discretas e raras (toggle/seleção) onde latência importa.
-// Publicam IMEDIATAMENTE no MQTT, ignorando o debounce de 1s do publish por mudança.
-// Demais chaves (telemetria contínua) continuam pelo fluxo debounced.
+// Publicam IMEDIATAMENTE no MQTT (full snapshot), ignorando o debounce de 1s do markChanged.
+// Demais chaves (telemetria contínua não-rápida) seguem pelo fluxo debounced de 1s.
 private val IMMEDIATE_PUBLISH_KEYS: Set<String> = setOf(
     CarConstants.CAR_BASIC_GEAR_STATUS.value,
     CarConstants.CAR_BASIC_DRIVING_READY_STATE.value,
@@ -339,10 +350,15 @@ fun ConsumptionScreen() {
                     }
                     else -> tripManager.onDataChanged(key, value)
                 }
-                // Chaves event-driven (toggles/seleções discretas) publicam IMEDIATAMENTE.
-                // Telemetria contínua usa debounce de 1s.
-                if (key in IMMEDIATE_PUBLISH_KEYS) mqttManager.markChangedImmediate()
-                else mqttManager.markChanged()
+                // Roteamento por tipo de chave:
+                //   - IMMEDIATE_PUBLISH_KEYS  → full snapshot na hora
+                //   - FAST_LANE_KEYS          → só speed/RPM/power, ~20 Hz (50ms debounce)
+                //   - resto                   → full snapshot debounced a 1s
+                when (key) {
+                    in IMMEDIATE_PUBLISH_KEYS -> mqttManager.markChangedImmediate()
+                    in FAST_LANE_KEYS         -> mqttManager.markChangedFast()
+                    else                      -> mqttManager.markChanged()
+                }
             }
         }
 
