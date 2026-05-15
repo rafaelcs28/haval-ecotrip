@@ -486,8 +486,8 @@ class MqttManager private constructor() {
             pubR("window_fr",  if (latestWindowFr > 0) "1" else "0")
             pubR("window_rl",  if (latestWindowRl > 0) "1" else "0")
             pubR("window_rr",  if (latestWindowRr > 0) "1" else "0")
-            // Sunroof invertido no carro: 0=aberto, >0=fechado (confirmado em uso).
-            pubR("sunroof",    if (latestSunroof  > 0) "0" else "1")
+            // Sunroof: 0=fechado, >0=aberto (confirmado em uso).
+            pubR("sunroof",    if (latestSunroof  > 0) "1" else "0")
             // Trava invertida no carro: 0=destrancado, 1=trancado (confirmado em uso).
             pubR("lock_state", if (latestLockStatus == 0) "1" else "0")
             // Motor a combustão: derivado do RPM. >0 = ligado.
