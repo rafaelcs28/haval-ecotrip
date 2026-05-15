@@ -82,15 +82,21 @@ async function _processGeoQueue() {
   if (!_geoQueue.length) return;
   const { key, lat, lng } = _geoQueue.shift();
   try {
+    // zoom=14 retorna `suburb`/`neighbourhood` (bairro) além da cidade. Com
+    // zoom=10 só vinha a cidade — "Casa → Goiânia" ficava genérico demais.
     const r = await fetch(
-      `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=10`,
+      `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=14`,
       { headers: { 'Accept-Language': 'pt-BR' } }
     );
     const d = await r.json();
     const a = d.address || {};
-    const city  = a.city || a.town || a.village || a.municipality || a.county || '';
-    const state = a.state || '';
-    geoCache[key] = city ? (state ? `${city}, ${state}` : city) : (state || '');
+    const city   = a.city || a.town || a.village || a.municipality || a.county || '';
+    // Bairros no Brasil: `suburb` é o mais comum. Demais como fallback.
+    const suburb = a.suburb || a.neighbourhood || a.quarter || a.city_district || '';
+    // Formato: "Bairro, Cidade" quando temos os dois; só "Cidade" caso contrário.
+    geoCache[key] = suburb && city
+      ? `${suburb}, ${city}`
+      : (city || '');
   } catch (_) {
     geoCache[key] = '';  // falhou — marca como tentado para não repetir
   }
@@ -101,19 +107,20 @@ async function _processGeoQueue() {
   if (_geoQueue.length) _geoTimer = setTimeout(_processGeoQueue, 1100);
 }
 
-// Retorna "CidadeOrigem → CidadeDestino" se forem diferentes e o trip não tiver nome.
-// Usa apenas o primeiro segmento do geocode (antes da vírgula) para ficar compacto.
+// Retorna "Origem → Destino" se forem diferentes e o trip não tiver nome.
+// Origem/destino usam local conhecido (knownStart/knownEnd) ou o geocode no
+// formato "Bairro, Cidade" — preserva o nome completo agora que temos bairro.
 function getAutoName(t) {
   if (t.name) return null; // servidor já definiu nome completo
   const knownStart = t.knownStart || null;
   const knownEnd   = t.knownEnd   || null;
   const startFull  = geoCache[t.tripId];
   const endFull    = geoCache[t.tripId + ':end'];
-  const startCity  = knownStart || (startFull ? startFull.split(',')[0].trim() : null);
-  const endCity    = knownEnd   || (endFull   ? endFull.split(',')[0].trim()   : null);
-  if (!startCity || !endCity) return null;
-  if (!knownStart && !knownEnd && startCity === endCity) return null;
-  return `${startCity} → ${endCity}`;
+  const startName  = knownStart || (startFull || null);
+  const endName    = knownEnd   || (endFull   || null);
+  if (!startName || !endName) return null;
+  if (!knownStart && !knownEnd && startName === endName) return null;
+  return `${startName} → ${endName}`;
 }
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
