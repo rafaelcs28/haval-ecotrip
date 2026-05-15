@@ -1098,10 +1098,12 @@ private fun StripSection(
             }
 
             // SOC bar (decisão do usuário: usa SOC da VIAGEM — trip.startSocPct e trip.endSocPct)
+            // Largura limitada a 360dp pra não se estender pela tela toda; alinhado à direita.
+            Spacer(modifier = Modifier.weight(1f))
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.width(360.dp),
             ) {
                 Text(
                     "SOC",

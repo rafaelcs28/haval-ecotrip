@@ -269,9 +269,9 @@ fun SocStripBar(
         BoxWithConstraints(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(8.dp)
-                .background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(4.dp))
-                .border(0.5.dp, Color.Black.copy(alpha = 0.4f), RoundedCornerShape(4.dp)),
+                .height(11.dp)
+                .background(Color.White.copy(alpha = 0.06f), RoundedCornerShape(5.dp))
+                .border(0.5.dp, Color.Black.copy(alpha = 0.4f), RoundedCornerShape(5.dp)),
         ) {
             val totalW = maxWidth
 
@@ -282,7 +282,7 @@ fun SocStripBar(
                     .fillMaxHeight()
                     .background(
                         brush = Brush.horizontalGradient(listOf(AuroraTeal, NeonLime)),
-                        shape = RoundedCornerShape(4.dp),
+                        shape = RoundedCornerShape(5.dp),
                     ),
             )
 
@@ -294,7 +294,7 @@ fun SocStripBar(
                         .offset(x = totalW * currentFrac)
                         .fillMaxHeight()
                         .width(totalW * consumedFrac)
-                        .background(AuroraTeal.copy(alpha = 0.18f), RoundedCornerShape(2.dp)),
+                        .background(AuroraTeal.copy(alpha = 0.18f), RoundedCornerShape(3.dp)),
                 )
             }
 
@@ -302,9 +302,9 @@ fun SocStripBar(
             if (showConsumed) {
                 Box(
                     modifier = Modifier
-                        .offset(x = totalW * startFrac - 1.dp, y = (-3).dp)
-                        .width(2.dp)
-                        .height(14.dp)
+                        .offset(x = totalW * startFrac - 1.5.dp, y = (-4).dp)
+                        .width(3.dp)
+                        .height(19.dp)
                         .background(WarnYellow),
                 )
             }
