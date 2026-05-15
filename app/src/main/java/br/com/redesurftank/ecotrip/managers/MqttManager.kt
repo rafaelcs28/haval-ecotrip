@@ -181,7 +181,9 @@ class MqttManager private constructor() {
         changeHandler.removeCallbacksAndMessages(null)
         changeFastHandler.removeCallbacksAndMessages(null)
         changePending = false
-        changeFastPending = false
+        // O snapshot full cobre os tópicos da via expressa, então libera o slot
+        // pra próxima rajada de fast (senão fica preso em true e nada publica).
+        fastInFlight.set(false)
         val now = System.currentTimeMillis()
         val tm = TripManager.getInstance()
         val queued = QueuedSnapshot(now, tm.currentRolling())
@@ -194,18 +196,26 @@ class MqttManager private constructor() {
     // durante a condução. Com debounce de 1s do markChanged, PWA atualiza só a
     // 1 Hz — fica visivelmente lerdo no dash. Via expressa publica só esses 4
     // tópicos a até 20 Hz (50ms debounce), sem mexer no full snapshot.
+    //
+    // IMPORTANTE: drop-if-in-flight. Se o executor ainda não terminou o publish
+    // anterior (rede engasgada, snapshot full grande na fila à frente), o novo é
+    // descartado — perde uma amostra de 50ms mas não enfileira. Sem isso, a fila
+    // do executor crescia em rajadas: PWA via burst de updates seguido de freeze
+    // de segundos/minutos enquanto a fila esvaziava.
     private val changeFastHandler = android.os.Handler(android.os.Looper.getMainLooper())
-    @Volatile private var changeFastPending = false
+    private val fastInFlight = AtomicBoolean(false)
     private val CHANGE_FAST_DEBOUNCE_MS = 50L
 
     fun markChangedFast() {
-        if (changeFastPending) return
-        val c = client ?: return
-        if (!c.isConnected) return
-        changeFastPending = true
+        // CAS atômico: só agenda se NÃO há publish anterior pendente OU rodando.
+        if (!fastInFlight.compareAndSet(false, true)) return
+        val c = client
+        if (c == null || !c.isConnected) { fastInFlight.set(false); return }
         changeFastHandler.postDelayed({
-            changeFastPending = false
-            executor.submit { publishFastTelemetryInternal(c) }
+            executor.submit {
+                try { publishFastTelemetryInternal(c) }
+                finally { fastInFlight.set(false) }
+            }
         }, CHANGE_FAST_DEBOUNCE_MS)
     }
 
