@@ -194,8 +194,9 @@ class MqttManager private constructor() {
 
     // ── Via expressa pra telemetria de alta frequência ─────────────────────────
     // Speed, RPM, % potência motor e potência do motor (kW) mudam continuamente
-    // durante a condução. Publica esses tópicos a ~20Hz (50ms debounce) sem mexer
-    // no snapshot full.
+    // durante a condução. Publica esses tópicos a ~40Hz (25ms debounce) sem mexer
+    // no snapshot full. 40Hz fica logo abaixo da refresh rate do iOS (60Hz) — bom
+    // ponto sem desperdiçar publishes em frames coalescidos.
     //
     // Robustez:
     //  - Executor DEDICADO (não compete com snapshots/históricos no executor
@@ -209,7 +210,7 @@ class MqttManager private constructor() {
     private val fastExecutor = java.util.concurrent.Executors.newSingleThreadScheduledExecutor()
     private val fastInFlight = AtomicBoolean(false)
     @Volatile private var fastInFlightSinceMs: Long = 0L
-    private val CHANGE_FAST_DEBOUNCE_MS = 50L
+    private val CHANGE_FAST_DEBOUNCE_MS = 25L
     private val FAST_INFLIGHT_TIMEOUT_MS = 5_000L
 
     fun markChangedFast() {
