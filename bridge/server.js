@@ -1832,12 +1832,13 @@ function applyMqttMessage(key, value, isRetained = false) {
       break;
     }
     case 'lock_state': {
-      // App publica valor cru do barramento (semântica a confirmar — assumimos 1=destrancado, 0=trancado).
-      // Normaliza pra 'on'/'off' que o PWA já espera.
+      // App publica "1" (destrancado) / "0" (trancado) — normalizado a partir
+      // do cru car.basic.door_lock_status (3=destrancado, 1=trancado).
       const norm = value === '1' ? 'on' : 'off';
       const prevL = prevLockState;
       state.lock_state = norm;
       prevLockState = norm;
+      console.log(`[lock] mqtt='${value}' isRetained=${isRetained} → state.lock_state='${norm}' (prev='${prevL}')`);
       if (!isRetained && prevL !== null && prevL !== norm) {
         if (norm === 'on')  addEvent('lock_open',  'Carro destrancado');
         else                addEvent('lock_close', 'Carro trancado');

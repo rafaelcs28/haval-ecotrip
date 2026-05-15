@@ -474,7 +474,8 @@ function initActionsPanel() {
       statusFn: s => {
         const vals = [s.window_fl, s.window_fr, s.window_rl, s.window_rr].filter(v => v != null);
         if (!vals.length) return null;
-        const anyOpen = vals.some(v => String(v) !== '1');
+        // bridge agora armazena 'on'/'off' (não mais '1' do HA antigo)
+        const anyOpen = vals.some(v => v === 'on');
         return anyOpen
           ? { text: 'Abertos',  color: '#f87171' }
           : { text: 'Fechados', color: '#4ade80' };
@@ -499,7 +500,8 @@ function initActionsPanel() {
       statusFn: s => {
         const v = s.sunroof;
         if (v == null) return null;
-        return String(v) === '3'
+        // bridge agora armazena 'on'/'off' (não mais '3' do HA antigo)
+        return v === 'off'
           ? { text: 'Fechado', color: '#4ade80' }
           : { text: 'Aberto',  color: '#f87171' };
       },
