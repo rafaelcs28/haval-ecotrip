@@ -2381,8 +2381,12 @@ function renderAutoTrips() {
     const tempStr    = t.outsideTempC != null ? `${Math.round(t.outsideTempC)}°C`  : null;
     const hasGps     = t.startLat && (t.startLat !== 0 || t.startLng !== 0);
     const mapsUrl    = hasGps ? `https://www.google.com/maps/dir/${t.startLat},${t.startLng}/${t.endLat},${t.endLng}` : null;
+    // Subtítulo "📍 Bairro, Cidade" só aparece se a origem NÃO é local conhecido.
+    // Quando t.knownStart existe (ex.: "Casa"), o título já mostra o nome — o bairro
+    // do GPS seria redundante e parecia que "Casa" estava virando bairro.
     const geo        = geoCache[t.tripId];
-    const geoLine    = geo ? `<div class="trip-geo">📍 ${geo}</div>` : '';
+    const showGeo    = !!geo && !t.knownStart;
+    const geoLine    = showGeo ? `<div class="trip-geo">📍 ${geo}</div>` : '';
     const autoName    = getAutoName(t);
     const rnTrackH    = renameTracking[String(t.tripId)];
     const displayName = (rnTrackH?.name) || t.name || autoName || '';
