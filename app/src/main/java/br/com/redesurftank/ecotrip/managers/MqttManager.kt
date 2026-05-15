@@ -482,10 +482,12 @@ class MqttManager private constructor() {
             pubR("door_rl",    if (latestDoorRl > 0) "1" else "0")
             pubR("door_rr",    if (latestDoorRr > 0) "1" else "0")
             pubR("door_trunk", if (latestTrunk  > 0) "1" else "0")
-            pubR("window_fl",  if (latestWindowFl > 0) "1" else "0")
-            pubR("window_fr",  if (latestWindowFr > 0) "1" else "0")
-            pubR("window_rl",  if (latestWindowRl > 0) "1" else "0")
-            pubR("window_rr",  if (latestWindowRr > 0) "1" else "0")
+            // Vidros: cru "1" = fechado, qualquer outro valor = aberto/entreaberto
+            // (mesma convenção que o HA usava com closedVal:'1' — confirmado em uso).
+            pubR("window_fl",  if (latestWindowFl == 1) "0" else "1")
+            pubR("window_fr",  if (latestWindowFr == 1) "0" else "1")
+            pubR("window_rl",  if (latestWindowRl == 1) "0" else "1")
+            pubR("window_rr",  if (latestWindowRr == 1) "0" else "1")
             // Sunroof: 0=fechado, >0=aberto (confirmado em uso).
             pubR("sunroof",    if (latestSunroof  > 0) "1" else "0")
             // Trava invertida no carro: 0=destrancado, 1=trancado (confirmado em uso).
