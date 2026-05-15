@@ -934,9 +934,8 @@ fun ConsumptionScreen() {
                             modifier = Modifier.fillMaxWidth().padding(top = 5.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                         ) {
-                            Text("R$ 0",         fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = TextSecondary.copy(alpha = 0.6f))
-                            Text("meta R$ 0,30", fontSize = 13.sp, fontWeight = FontWeight.Bold,    color = WarnYellow.copy(alpha = 0.95f))
-                            Text("R$ 0,60+",     fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = TextSecondary.copy(alpha = 0.6f))
+                            Text("R$ 0",     fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = TextSecondary.copy(alpha = 0.6f))
+                            Text("R$ 0,60+", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = TextSecondary.copy(alpha = 0.6f))
                         }
                     }
                 }
