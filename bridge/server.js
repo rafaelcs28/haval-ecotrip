@@ -135,12 +135,13 @@ function saveNotifPrefs() {
 let chargeEndingNotifSent = false;
 
 // ── Detecção de transição de estado de carga ──────────────────────────────────
-// Hysteresis: car emite valores oscilantes (ex.: sunroof posição) pro mesmo estado
-// físico. Sem debounce, o log enche de eventos abertos/fechados a cada flip do sensor.
+// Hysteresis: car emite valores oscilantes (ex.: sunroof posição, AC compressor cycle)
+// pro mesmo estado físico. Sem debounce, o log enche de eventos a cada flip do sensor.
 // Espera N ms de valor estável antes de atualizar state + disparar evento.
-const HYSTERESIS_MS = 3000;
-const _hystPending = { sunroof: null, window_fl: null, window_fr: null, window_rl: null, window_rr: null };
-const _hystTimers  = { sunroof: null, window_fl: null, window_fr: null, window_rl: null, window_rr: null };
+const HYSTERESIS_MS    = 3000;     // sunroof/vidros — sensor de posição
+const AC_HYSTERESIS_MS = 15000;    // AC — compressor cycle do HEV/PHEV (10-15s típico)
+const _hystPending = { sunroof: null, window_fl: null, window_fr: null, window_rl: null, window_rr: null, ac_state: null };
+const _hystTimers  = { sunroof: null, window_fl: null, window_fr: null, window_rl: null, window_rr: null, ac_state: null };
 
 let prevChargingState    = null;
 let chargeStartTimer     = null;
@@ -1849,13 +1850,25 @@ function applyMqttMessage(key, value, isRetained = false) {
     case 'light_state':  state.light_state  = value; break;   // 'on' | 'off' (farol)
     case 'ac_state': {
       // App publica '1' (ligado) / '0' (desligado). Normaliza pra 'on'/'off'.
+      // Hysteresis 15s — `car.hvac.ac_enable` reflete o ciclo do compressor no
+      // HEV/PHEV (liga/desliga a cada ~10s pra eficiência), não o setting do
+      // usuário. Sem isso o log enchia de eventos `ac_on`/`ac_off`.
       const norm = value === '1' ? 'on' : 'off';
-      const prevAc = state.ac_state;
-      state.ac_state = norm;
-      if (!isRetained && prevAc !== null && prevAc !== norm) {
-        if (norm === 'on') addEvent('ac_on',  'Ar condicionado ligado');
-        else               addEvent('ac_off', 'Ar condicionado desligado');
+      if (isRetained) {
+        state.ac_state = norm;
+        break;
       }
+      if (norm === _hystPending.ac_state) break;
+      _hystPending.ac_state = norm;
+      clearTimeout(_hystTimers.ac_state);
+      _hystTimers.ac_state = setTimeout(() => {
+        const prevAc = state.ac_state;
+        state.ac_state = norm;
+        if (norm !== prevAc) {
+          if (norm === 'on') addEvent('ac_on',  'Ar condicionado ligado');
+          else               addEvent('ac_off', 'Ar condicionado desligado');
+        }
+      }, AC_HYSTERESIS_MS);
       break;
     }
     case 'hvac_cycle_mode': state.hvac_cycle_mode = value; break; // '0'=recirc interna, '1'=ar externo
