@@ -63,6 +63,29 @@ import androidx.compose.ui.graphics.vector.rememberVectorPainter
 
 private val mainHandler = Handler(Looper.getMainLooper())
 
+// Chaves event-driven: mudanças discretas e raras (toggle/seleção) onde latência importa.
+// Publicam IMEDIATAMENTE no MQTT, ignorando o debounce de 1s do publish por mudança.
+// Demais chaves (telemetria contínua) continuam pelo fluxo debounced.
+private val IMMEDIATE_PUBLISH_KEYS: Set<String> = setOf(
+    CarConstants.CAR_BASIC_GEAR_STATUS.value,
+    CarConstants.CAR_BASIC_DRIVING_READY_STATE.value,
+    CarConstants.CAR_BASIC_POWER_MODE.value,
+    CarConstants.CAR_EV_INFO_CHARGING_STATE.value,
+    CarConstants.CAR_COMFORT_DRIVER_SEAT_VENT.value,
+    CarConstants.CAR_COMFORT_PASSENGER_SEAT_VENT.value,
+    CarConstants.CAR_HVAC_FAN_SPEED.value,
+    CarConstants.CAR_HVAC_SYNC_ENABLE.value,
+    CarConstants.CAR_HVAC_AUTO_ENABLE.value,
+    CarConstants.CAR_HVAC_AC_ENABLE.value,
+    CarConstants.CAR_HVAC_CYCLE_MODE.value,
+    CarConstants.CAR_HVAC_DRIVER_TEMPERATURE.value,
+    CarConstants.CAR_HVAC_PASSENGER_TEMPERATURE.value,
+    CarConstants.CAR_BASIC_DOOR_LOCK_STATUS.value,
+    CarConstants.CAR_BASIC_DOOR_STATUS.value,
+    CarConstants.CAR_BASIC_WINDOW_STATUS.value,
+    CarConstants.CAR_BASIC_SUNROOF_STATUS.value,
+)
+
 @Composable
 fun ConsumptionScreen() {
     val context     = LocalContext.current
@@ -274,86 +297,72 @@ fun ConsumptionScreen() {
                     CarConstants.CAR_HVAC_AUTO_ENABLE.value -> {
                         mqttManager.latestHvacAutoEnable = value.trim().toIntOrNull() ?: 0
                     }
+                    CarConstants.CAR_HVAC_AC_ENABLE.value -> {
+                        mqttManager.latestHvacAcEnable = value.trim().toIntOrNull() ?: 0
+                    }
+                    CarConstants.CAR_HVAC_CYCLE_MODE.value -> {
+                        mqttManager.latestHvacCycleMode = value.trim().toIntOrNull() ?: 0
+                    }
+                    CarConstants.CAR_BASIC_DOOR_LOCK_STATUS.value -> {
+                        mqttManager.latestLockStatus = value.trim().toIntOrNull() ?: 0
+                    }
+                    CarConstants.CAR_BASIC_DOOR_STATUS.value -> {
+                        // CSV "FL,FR,RL,RR,Trunk" — cada índice 0=fechada, 1=aberta
+                        val parts = value.split(",").map { it.trim().toIntOrNull() ?: 0 }
+                        if (parts.size >= 5) {
+                            mqttManager.latestDoorFl = parts[0]
+                            mqttManager.latestDoorFr = parts[1]
+                            mqttManager.latestDoorRl = parts[2]
+                            mqttManager.latestDoorRr = parts[3]
+                            mqttManager.latestTrunk  = parts[4]
+                        }
+                    }
+                    CarConstants.CAR_BASIC_WINDOW_STATUS.value -> {
+                        // CSV "FL,FR,RL,RR" — 0=fechado, ≠0=aberto (vários estágios)
+                        // Preservamos o valor cru pra publicação posterior normalizar
+                        val parts = value.split(",").map { it.trim().toIntOrNull() ?: 0 }
+                        if (parts.size >= 4) {
+                            mqttManager.latestWindowFl = parts[0]
+                            mqttManager.latestWindowFr = parts[1]
+                            mqttManager.latestWindowRl = parts[2]
+                            mqttManager.latestWindowRr = parts[3]
+                        }
+                    }
+                    CarConstants.CAR_BASIC_SUNROOF_STATUS.value -> {
+                        // 0=fechado, >0=aberto (vários estágios)
+                        mqttManager.latestSunroof = value.trim().toIntOrNull() ?: 0
+                    }
                     else -> tripManager.onDataChanged(key, value)
                 }
-                // Publica imediatamente quando qualquer sinal muda (debounce 1s interno)
-                mqttManager.markChanged()
+                // Chaves event-driven (toggles/seleções discretas) publicam IMEDIATAMENTE.
+                // Telemetria contínua usa debounce de 1s.
+                if (key in IMMEDIATE_PUBLISH_KEYS) mqttManager.markChangedImmediate()
+                else mqttManager.markChanged()
             }
         }
 
         val connectedListener: () -> Unit = {
             try {
-                // Fetch vehicle model for MQTT discovery before connecting
+                // Vehicle model — precisa ser lido ANTES do publishDiscovery do MQTT para popular
+                // o device JSON. carListener não tem branch pra essas chaves.
                 mqttManager.vehicleModel1 = carManager.fetchCurrent(CarConstants.CAR_BASIC_VEHICLE_MODEL1.value)?.trim() ?: ""
                 mqttManager.vehicleModel2 = carManager.fetchCurrent(CarConstants.CAR_BASIC_VEHICLE_MODEL2.value)?.trim() ?: ""
 
-                val powerMode = carManager.fetchCurrent(CarConstants.CAR_BASIC_POWER_MODE.value)
-                val mode = powerMode?.trim()?.toIntOrNull() ?: 0
-                if (mode in 1..3) tripManager.onSessionStart()
-
-                // Busca imediata de combustível e SOC — estas chaves chegam raramente via listener
-                // passivo, então lemos ativamente na conexão para não ficar zerado até o próximo update.
-                carManager.fetchCurrent(CarConstants.CAR_BASIC_REMAIN_FUEL_PERCENTAGE.value)
-                    ?.trim()?.let { tripManager.onDataChanged(CarConstants.CAR_BASIC_REMAIN_FUEL_PERCENTAGE.value, it) }
-
-                carManager.fetchCurrent(CarConstants.CAR_EV_INFO_SOC_OF_BATTERY.value)
-                    ?.trim()?.let { tripManager.onDataChanged(CarConstants.CAR_EV_INFO_SOC_OF_BATTERY.value, it) }
-
-                carManager.fetchCurrent(CarConstants.CAR_EV_INFO_BATTERY_CHARGE_PERCENTAGE.value)
-                    ?.trim()?.let { tripManager.onDataChanged(CarConstants.CAR_EV_INFO_BATTERY_CHARGE_PERCENTAGE.value, it) }
-
-                // Motor power % em tempo real (energy_output_percentage) — busca imediata ao conectar
-                carManager.fetchCurrent(CarConstants.CAR_EV_INFO_ENERGY_OUTPUT_PERCENTAGE.value)
-                    ?.trim()?.let { raw ->
-                        raw.toIntOrNull()?.let { mqttManager.latestBattPowerPct = it }
-                        tripManager.onDataChanged(CarConstants.CAR_EV_INFO_ENERGY_OUTPUT_PERCENTAGE.value, raw)
-                    }
-
-                // SOC da bateria (cur_battery_power_percentage) — busca imediata para SOC inicial
-                carManager.fetchCurrent(CarConstants.CAR_EV_INFO_CUR_BATTERY_POWER_PERCENTAGE.value)
-                    ?.trim()?.let { tripManager.onDataChanged(CarConstants.CAR_EV_INFO_CUR_BATTERY_POWER_PERCENTAGE.value, it) }
-
-                // Busca imediata de driving_ready_state — inicia trip automático se carro já estiver ligado
-                // (feito após busca de SOC/fuel para que latestSocPct/latestFuelPct estejam disponíveis)
-                carManager.fetchCurrent(CarConstants.CAR_BASIC_DRIVING_READY_STATE.value)
-                    ?.trim()?.toIntOrNull()?.let { tripManager.onDrivingReady(it) }
-
-                // Busca imediata de temperaturas — chegam raramente via listener passivo
-                carManager.fetchCurrent(CarConstants.CAR_BASIC_OUTSIDE_TEMP.value)
-                    ?.trim()?.toFloatOrNull()?.let { mqttManager.latestOutsideTemp = it }
-                carManager.fetchCurrent(CarConstants.CAR_BASIC_INSIDE_TEMP.value)
-                    ?.trim()?.toFloatOrNull()?.let { mqttManager.latestInsideTemp = it }
-
-                // Busca imediata do limite de carga SOC para sincronizar com HA
-                carManager.fetchCurrent(CarConstants.CAR_EV_SETTING_CHARGE_SOC_LIMIT.value)
-                    ?.trim()?.toIntOrNull()?.let { mqttManager.syncChargeLimitFromCar(it) }
-
-                // Busca imediata de medidas elétricas do pack de bateria
-                // Tensão e corrente — busca em ordem para calcular potência do motor ao conectar
-                carManager.fetchCurrent(CarConstants.CAR_BASIC_BATTERY_VOLTAGE.value)
-                    ?.trim()?.toFloatOrNull()?.let { mqttManager.latestBasicBattVoltageV = it }
-                carManager.fetchCurrent(CarConstants.CAR_EV_INFO_CUR_CHARGE_CURRENT.value)
-                    ?.trim()?.toFloatOrNull()?.let { amps ->
-                        mqttManager.latestChargeCurrentA = amps
-                        val motorKw = mqttManager.latestBasicBattVoltageV * amps / 1000f
-                        mqttManager.latestMotorPowerKw = motorKw
-                        tripManager.updateMotorPowerKw(motorKw)
-                    }
-                carManager.fetchCurrent(CarConstants.CAR_EV_INFO_POWER_BATTERY_VOLTAGE.value)
-                    ?.trim()?.toFloatOrNull()?.let { mqttManager.latestBatteryVoltageV = it }
-                carManager.fetchCurrent(CarConstants.CAR_EV_INFO_POWER_BATTERY_CURRENT.value)
-                    ?.trim()?.toFloatOrNull()?.let { mqttManager.latestBatteryCurrentA = it }
-                carManager.fetchCurrent(CarConstants.CAR_EV_INFO_CHARGING_STATE.value)
-                    ?.trim()?.toIntOrNull()?.let { mqttManager.latestChargingState = it }
-                carManager.fetchCurrent(CarConstants.CAR_EV_INFO_CHARGE_REMAINING_TIME.value)
-                    ?.trim()?.toIntOrNull()?.let { mqttManager.latestChargeRemainingMin = it }
-                // Notifica TripManager com o estado inicial de carga após busca dos valores elétricos
-                syncCharging()
-
-                // Odômetro total — muda raramente; busca ativa ao conectar para ter logo o valor
-                carManager.fetchCurrent(CarConstants.CAR_BASIC_TOTAL_ODOMETER.value)
-                    ?.trim()?.toFloatOrNull()?.let { mqttManager.latestOdometerKm = it }
-
+                // Startup scan: lê TODAS as chaves do barramento e propaga via carListener.
+                // Garante que mqttManager.latest* e tripManager fiquem populados desde o primeiro
+                // segundo, sem depender do listener passivo do car bus (que pode demorar para
+                // certas chaves chegarem). Toda a lógica per-key (parsing, syncCharging,
+                // syncChargeLimitFromCar, onSessionStart, etc.) é reusada via carListener.
+                for (key in CarConstants.entries) {
+                    if (key == CarConstants.CAR_BASIC_VEHICLE_MODEL1 ||
+                        key == CarConstants.CAR_BASIC_VEHICLE_MODEL2) continue  // já lidos acima
+                    val v = try { carManager.fetchCurrent(key.value)?.trim() } catch (_: Exception) { null }
+                    if (!v.isNullOrEmpty()) carListener(key.value, v)
+                }
+                // Snapshot completo logo após o scan — postado no mainHandler pra rodar DEPOIS
+                // de todas as invocações de carListener (que também postam pro mainHandler;
+                // a fila FIFO garante a ordem correta).
+                mainHandler.post { mqttManager.markChangedImmediate() }
             } catch (_: Exception) {}
         }
 

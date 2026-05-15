@@ -67,7 +67,19 @@ enum class CarConstants(val value: String) {
     // HVAC settings — temperatura, ventilação, sync e auto (apenas leitura)
     CAR_HVAC_DRIVER_TEMPERATURE("car.hvac.driver_temperature"),
     CAR_HVAC_PASSENGER_TEMPERATURE("car.hvac.pass_temperature"),
-    CAR_HVAC_FAN_SPEED("car.hvac.fan_speed"),
-    CAR_HVAC_SYNC_ENABLE("car.hvac.sync_enable"),     // 0=off, 1=on
-    CAR_HVAC_AUTO_ENABLE("car.hvac.auto_enable"),     // 0=off, 1=on
+    CAR_HVAC_FAN_SPEED("car.hvac.fan_speed"),           // 1..7
+    CAR_HVAC_SYNC_ENABLE("car.hvac.sync_enable"),       // 0=off, 1=on
+    CAR_HVAC_AUTO_ENABLE("car.hvac.auto_enable"),       // 0=off, 1=on
+    CAR_HVAC_AC_ENABLE("car.hvac.ac_enable"),           // 0=off, 1=on (master AC)
+    CAR_HVAC_CYCLE_MODE("car.hvac.cycle_mode"),         // 0=recirculação interna, 1=ar externo
+
+    // Body — portas, vidros, trava, teto solar
+    // door_lock_status: status da trava (semântica do valor a confirmar — assumimos 0=trancado, 1=destrancado)
+    CAR_BASIC_DOOR_LOCK_STATUS("car.basic.door_lock_status"),
+    // door_status: CSV "FL,FR,RL,RR,Trunk" — 0=fechada, 1=aberta
+    CAR_BASIC_DOOR_STATUS("car.basic.door_status"),
+    // window_status: CSV "FL,FR,RL,RR" — 0=fechado, ≠0=aberto (vários estágios)
+    CAR_BASIC_WINDOW_STATUS("car.basic.window_status"),
+    // sunroof_status: 0=fechado, >0=aberto (vários estágios — normalizamos pra binário)
+    CAR_BASIC_SUNROOF_STATUS("car.basic.sunroof_status"),
 }

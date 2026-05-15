@@ -108,9 +108,28 @@ class MqttManager private constructor() {
     var latestPassengerSeatVent: Int = 0    // 0=off, 1–3 nível de ventilação banco passageiro
     var latestHvacDriverTemp:    Float = 0f // °C — temperatura definida do AC (zona motorista)
     var latestHvacPassengerTemp: Float = 0f // °C — temperatura definida do AC (zona passageiro)
-    var latestHvacFanSpeed:      Int   = 0  // nível do ventilador do AC
+    var latestHvacFanSpeed:      Int   = 0  // nível do ventilador do AC (1..7)
     var latestHvacSyncEnable:    Int   = 0  // 0=off, 1=on (sync das zonas do AC)
     var latestHvacAutoEnable:    Int   = 0  // 0=off, 1=on (modo AUTO do AC)
+    var latestHvacAcEnable:      Int   = 0  // 0=off, 1=on (master AC)
+    var latestHvacCycleMode:     Int   = 0  // 0=recirc interna, 1=ar externo
+
+    // Body — estados normalizados pra binário "1=aberto/destrancado, 0=fechado/trancado"
+    // Doors (de car.basic.door_status, CSV FL,FR,RL,RR,Trunk — cada índice 0=fechada, 1=aberta)
+    var latestDoorFl: Int = 0
+    var latestDoorFr: Int = 0
+    var latestDoorRl: Int = 0
+    var latestDoorRr: Int = 0
+    var latestTrunk:  Int = 0
+    // Windows (de car.basic.window_status, CSV FL,FR,RL,RR — 0=fechado, ≠0=aberto)
+    var latestWindowFl: Int = 0
+    var latestWindowFr: Int = 0
+    var latestWindowRl: Int = 0
+    var latestWindowRr: Int = 0
+    // Sunroof (de car.basic.sunroof_status — 0=fechado, >0=aberto)
+    var latestSunroof: Int = 0
+    // Trava (de car.basic.door_lock_status — semântica do valor cru, a confirmar com o carro real)
+    var latestLockStatus: Int = 0
 
     // Último timestamp em que qualquer dado do carro foi recebido pelo app
     // Usado para saber se o barramento de dados do carro está ativo
@@ -141,6 +160,25 @@ class MqttManager private constructor() {
             lastPublishMs = now
             executor.submit { publishSnapshotInternal(c, queued) }
         }, CHANGE_DEBOUNCE_MS)
+    }
+
+    /**
+     * Publica snapshot IMEDIATAMENTE — bypassa o debounce de 1s.
+     * Usar só para chaves event-driven (mudanças discretas e raras) onde latência importa:
+     * gear, charging_state, driving_ready, AC (sync/auto/fan/temp), ventilação dos bancos.
+     * Também usado pelo startup scan pra forçar o snapshot completo logo após a varredura.
+     */
+    fun markChangedImmediate() {
+        val c = client ?: return
+        if (!c.isConnected) return
+        // Cancela debounce pendente — já vamos publicar tudo agora
+        changeHandler.removeCallbacksAndMessages(null)
+        changePending = false
+        val now = System.currentTimeMillis()
+        val tm = TripManager.getInstance()
+        val queued = QueuedSnapshot(now, tm.currentRolling())
+        lastPublishMs = now
+        executor.submit { publishSnapshotInternal(c, queued) }
     }
 
     // Último valor de limite de carga (em %) publicado no HA.
@@ -435,6 +473,25 @@ class MqttManager private constructor() {
             pubR("hvac_fan_speed",    latestHvacFanSpeed.toString())
             pubR("hvac_sync_enable",  latestHvacSyncEnable.toString())
             pubR("hvac_auto_enable",  latestHvacAutoEnable.toString())
+            pubR("ac_state",          if (latestHvacAcEnable > 0) "1" else "0")
+            pubR("hvac_cycle_mode",   latestHvacCycleMode.toString())
+
+            // Body — normaliza tudo pra binário "1=aberto/destrancado, 0=fechado/trancado"
+            pubR("door_fl",    if (latestDoorFl > 0) "1" else "0")
+            pubR("door_fr",    if (latestDoorFr > 0) "1" else "0")
+            pubR("door_rl",    if (latestDoorRl > 0) "1" else "0")
+            pubR("door_rr",    if (latestDoorRr > 0) "1" else "0")
+            pubR("door_trunk", if (latestTrunk  > 0) "1" else "0")
+            pubR("window_fl",  if (latestWindowFl > 0) "1" else "0")
+            pubR("window_fr",  if (latestWindowFr > 0) "1" else "0")
+            pubR("window_rl",  if (latestWindowRl > 0) "1" else "0")
+            pubR("window_rr",  if (latestWindowRr > 0) "1" else "0")
+            pubR("sunroof",    if (latestSunroof  > 0) "1" else "0")
+            // Trava: semântica do valor cru ainda a confirmar; publicamos cru por enquanto.
+            // PWA/HA podem interpretar 1=destrancado / 0=trancado; ajustamos se vier invertido.
+            pubR("lock_state", latestLockStatus.toString())
+            // Motor a combustão: derivado do RPM. >0 = ligado.
+            pubR("engine_state", if (latestEngineRpm > 0) "1" else "0")
             if (latestOdometerKm > 0f) pubR("odometer_km", fmt1(latestOdometerKm))
             if (latestBatt12vPct > 0f) pubR("batt_12v_pct", fmt1(latestBatt12vPct))
             // Potência de recarga: apenas quando charging_state == 1 (Carregando)
@@ -629,6 +686,7 @@ class MqttManager private constructor() {
             S("hvac_fan_speed",   "AC Velocidade Ventilador", "$prefix/hvac_fan_speed",   "",   icon = "mdi:fan",          sc = null),
             S("hvac_sync_enable", "AC Sincronizar Zonas",     "$prefix/hvac_sync_enable", "",   icon = "mdi:link-variant", sc = null),
             S("hvac_auto_enable", "AC Modo Automático",       "$prefix/hvac_auto_enable", "",   icon = "mdi:auto-mode",    sc = null),
+            S("hvac_cycle_mode",  "AC Recirculação",          "$prefix/hvac_cycle_mode",  "",   icon = "mdi:air-filter",   sc = null),
             S("charging_state",     "Estado de Recarga",        "$prefix/charging_state",     "",          icon = "mdi:ev-plug-type2", sc = null),
             S("speed",              "Velocidade Atual",         "$prefix/speed_kmh",           "km/h",      "speed"),
             S("gear",               "Marcha",                "$prefix/gear",                  "",          icon = "mdi:car-shift-pattern", sc = null),
@@ -659,6 +717,30 @@ class MqttManager private constructor() {
             try { c.publish("homeassistant/sensor/haval_ecotrip_${s.id}/config", payload.toByteArray(), 1, true) } catch (_: Exception) {}
         }
 
+        // ── Binary sensors — payload "1" = on/aberto, "0" = off/fechado ────────────
+        data class B(val id: String, val name: String, val topic: String, val dc: String? = null, val icon: String? = null)
+        val binarySensors = listOf(
+            B("door_fl",     "Porta Diant. Esq.", "$prefix/door_fl",     dc = "door"),
+            B("door_fr",     "Porta Diant. Dir.", "$prefix/door_fr",     dc = "door"),
+            B("door_rl",     "Porta Tras. Esq.",  "$prefix/door_rl",     dc = "door"),
+            B("door_rr",     "Porta Tras. Dir.",  "$prefix/door_rr",     dc = "door"),
+            B("door_trunk",  "Porta-malas",       "$prefix/door_trunk",  dc = "door"),
+            B("window_fl",   "Vidro Diant. Esq.", "$prefix/window_fl",   dc = "window"),
+            B("window_fr",   "Vidro Diant. Dir.", "$prefix/window_fr",   dc = "window"),
+            B("window_rl",   "Vidro Tras. Esq.",  "$prefix/window_rl",   dc = "window"),
+            B("window_rr",   "Vidro Tras. Dir.",  "$prefix/window_rr",   dc = "window"),
+            B("sunroof",     "Teto Solar",        "$prefix/sunroof",     icon = "mdi:car-select"),
+            B("lock_state",  "Trava",             "$prefix/lock_state",  dc = "lock"),
+            B("ac_state",    "AC Ligado",         "$prefix/ac_state",    icon = "mdi:air-conditioner"),
+            B("engine_state","Motor ICE",         "$prefix/engine_state",dc = "running"),
+        )
+        for (b in binarySensors) {
+            val dcPart   = if (b.dc   != null) ""","device_class":"${b.dc}"""" else ""
+            val iconPart = if (b.icon != null) ""","icon":"${b.icon}"""" else ""
+            val payload  = """{"name":"${b.name}","state_topic":"${b.topic}","unique_id":"haval_ecotrip_${b.id}","payload_on":"1","payload_off":"0","device":$device$dcPart$iconPart}"""
+            try { c.publish("homeassistant/binary_sensor/haval_ecotrip_${b.id}/config", payload.toByteArray(), 1, true) } catch (_: Exception) {}
+        }
+
         // Sensor: versão do app instalada no carro
         val appVersionPayload = """{"name":"Versão do App","state_topic":"$prefix/app_version","unique_id":"haval_ecotrip_app_version","icon":"mdi:cellphone-arrow-down","device":$device}"""
         try { c.publish("homeassistant/sensor/haval_ecotrip_app_version/config", appVersionPayload.toByteArray(), 1, true) } catch (_: Exception) {}
@@ -680,7 +762,7 @@ class MqttManager private constructor() {
         // via GWM API. O EcotripImpulse apenas escuta cmd/charge_limit e publica o estado.
         // Publicar o discovery aqui sobrescreveria o command_topic do Commander e quebraria o fluxo.
 
-        Log.i(TAG, "HA Discovery published (${sensors.size + 2} entities)")   // +2 = app_version + last_update
+        Log.i(TAG, "HA Discovery published (${sensors.size + binarySensors.size + 4} entities)")   // +4 = app_version + last_update + trips_history + charging_history
     }
 
     private fun loadConfig() {

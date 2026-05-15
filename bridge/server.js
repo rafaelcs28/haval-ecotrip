@@ -2,7 +2,7 @@
 
 require('dotenv').config({ path: require('path').join(__dirname, '.env') });
 const express  = require('express');
-const { WebSocketServer, WebSocket } = require('ws');
+const { WebSocketServer } = require('ws');
 const mqtt     = require('mqtt');
 const fs       = require('fs');
 const path     = require('path');
@@ -18,27 +18,6 @@ const MQTT_USER   = process.env.MQTT_USER   || '';
 const MQTT_PASS   = process.env.MQTT_PASS   || '';
 const MQTT_PREFIX    = process.env.MQTT_PREFIX || 'haval/ecotrip';
 const PORT           = parseInt(process.env.PORT || '3000', 10);
-const HA_URL   = process.env.HA_URL   || '';   // ex: http://192.168.1.100:8123
-const HA_TOKEN = process.env.HA_TOKEN || '';   // HA long-lived access token
-
-// ── Mapa de entidades HA → tipos de evento ────────────────────────────────────
-const HA_ENTITY_MAP = {
-  // binary_sensor — on=open/unlocked/on, off=close/locked/off
-  'binary_sensor.gwmbrasil_lgwffva55sh931315_porta_dianteira_direita':  { onType: 'door_open',  offType: 'door_close',   onLabel: 'Porta diant. dir. aberta',       offLabel: 'Porta diant. dir. fechada'       },
-  'binary_sensor.gwmbrasil_lgwffva55sh931315_porta_dianteira_esquerda': { onType: 'door_open',  offType: 'door_close',   onLabel: 'Porta diant. esq. aberta',       offLabel: 'Porta diant. esq. fechada'       },
-  'binary_sensor.gwmbrasil_lgwffva55sh931315_porta_traseira_direita':   { onType: 'door_open',  offType: 'door_close',   onLabel: 'Porta tras. dir. aberta',        offLabel: 'Porta tras. dir. fechada'        },
-  'binary_sensor.gwmbrasil_lgwffva55sh931315_porta_traseira_esquerda':  { onType: 'door_open',  offType: 'door_close',   onLabel: 'Porta tras. esq. aberta',        offLabel: 'Porta tras. esq. fechada'        },
-  'binary_sensor.gwmbrasil_lgwffva55sh931315_porta_malas':              { onType: 'trunk_open', offType: 'trunk_close',  onLabel: 'Porta-malas aberta',             offLabel: 'Porta-malas fechada'             },
-  'binary_sensor.gwmbrasil_lgwffva55sh931315_estado_da_trava':          { onType: 'lock_open',  offType: 'lock_close',   onLabel: 'Carro destrancado',              offLabel: 'Carro trancado'                  },
-  'binary_sensor.gwmbrasil_lgwffva55sh931315_estado_do_ar_condicionado':{ onType: 'ac_on',      offType: 'ac_off',       onLabel: 'Ar condicionado ligado',         offLabel: 'Ar condicionado desligado'       },
-  // sensor (numeric string) — boundary detection
-  'sensor.gwmbrasil_lgwffva55sh931315_vidro_dianteiro_direito':  { openType: 'window_open', closeType: 'window_close', closedVal: '1', openLabel: 'Vidro diant. dir. aberto',  closeLabel: 'Vidro diant. dir. fechado'  },
-  'sensor.gwmbrasil_lgwffva55sh931315_vidro_dianteiro_esquerdo': { openType: 'window_open', closeType: 'window_close', closedVal: '1', openLabel: 'Vidro diant. esq. aberto',  closeLabel: 'Vidro diant. esq. fechado'  },
-  'sensor.gwmbrasil_lgwffva55sh931315_vidro_traseiro_direito':   { openType: 'window_open', closeType: 'window_close', closedVal: '1', openLabel: 'Vidro tras. dir. aberto',   closeLabel: 'Vidro tras. dir. fechado'   },
-  'sensor.gwmbrasil_lgwffva55sh931315_vidro_traseiro_esquerdo':  { openType: 'window_open', closeType: 'window_close', closedVal: '1', openLabel: 'Vidro tras. esq. aberto',   closeLabel: 'Vidro tras. esq. fechado'   },
-  'sensor.gwmbrasil_lgwffva55sh931315_posicao_do_teto_solar':    { openType: 'sunroof_open',closeType: 'sunroof_close',closedVal: '3', openLabel: 'Teto solar aberto',         closeLabel: 'Teto solar fechado'         },
-  'sensor.gwmbrasil_lgwffva55sh931315_estado_do_motor':          { openType: 'engine_on',   closeType: 'engine_off',   closedVal: '0', openLabel: 'Motor ligado',              closeLabel: 'Motor desligado'            },
-};
 
 // ── Token de acesso (hash SHA-256 da senha) ────────────────────────────────────
 // Suporta migração: BRIDGE_TOKEN (plain) → calcula hash automaticamente
@@ -321,116 +300,6 @@ function addEvent(type, label) {
   if (eventsLog.length > MAX_EVENTS) eventsLog.pop();
   _saveEventsSoon();
   broadcast('new_event', ev);
-}
-
-// ── Home Assistant — integração de eventos ────────────────────────────────────
-
-function _haStateToEvent(entityId, newState, oldState) {
-  const m = HA_ENTITY_MAP[entityId];
-  if (!m) return null;
-  if (m.onType !== undefined) {
-    // binary_sensor
-    if (newState === oldState) return null;
-    if (newState === 'on')  return { type: m.onType,  label: m.onLabel  };
-    if (newState === 'off') return { type: m.offType, label: m.offLabel };
-  } else {
-    // numeric sensor — boundary only
-    const wasClosed = oldState === m.closedVal;
-    const nowClosed = newState === m.closedVal;
-    if (wasClosed === nowClosed) return null;
-    return nowClosed
-      ? { type: m.closeType, label: m.closeLabel }
-      : { type: m.openType,  label: m.openLabel  };
-  }
-  return null;
-}
-
-function _addHaEvent(entityId, newState, oldState, tsMs) {
-  const ev = _haStateToEvent(entityId, newState, oldState);
-  if (!ev) return;
-  const event = { id: tsMs, ts: tsMs, type: ev.type, label: ev.label };
-  eventsLog.unshift(event);
-  if (eventsLog.length > MAX_EVENTS) eventsLog.pop();
-  _saveEventsSoon();
-  broadcast('new_event', event);
-}
-
-// HA WebSocket — real-time events
-let _haWs = null;
-let _haWsReconnectTimer = null;
-let _haWsMsgId = 1;
-
-function connectHaWebSocket() {
-  if (!HA_URL || !HA_TOKEN) return;
-  const wsUrl = HA_URL.replace(/^https?/, m => m === 'https' ? 'wss' : 'ws') + '/api/websocket';
-  try { _haWs = new WebSocket(wsUrl); } catch(e) { console.error('[HA] WS erro:', e.message); _scheduleHaReconnect(); return; }
-
-  _haWs.on('open', () => console.log('[HA] WebSocket conectado'));
-  _haWs.on('message', raw => {
-    try {
-      const msg = JSON.parse(raw);
-      if (msg.type === 'auth_required') {
-        _haWs.send(JSON.stringify({ type: 'auth', access_token: HA_TOKEN }));
-      } else if (msg.type === 'auth_ok') {
-        console.log('[HA] Autenticado — subscrevendo state_changed');
-        _haWs.send(JSON.stringify({ id: _haWsMsgId++, type: 'subscribe_events', event_type: 'state_changed' }));
-      } else if (msg.type === 'auth_invalid') {
-        console.error('[HA] HA_TOKEN inválido');
-      } else if (msg.type === 'event' && msg.event?.event_type === 'state_changed') {
-        const { entity_id, new_state, old_state } = msg.event.data || {};
-        if (!entity_id || !HA_ENTITY_MAP[entity_id]) return;
-        const tsMs = new_state?.last_changed ? new Date(new_state.last_changed).getTime() : Date.now();
-        _addHaEvent(entity_id, new_state?.state, old_state?.state, tsMs);
-      }
-    } catch(e) { console.error('[HA] WS parse erro:', e.message); }
-  });
-  _haWs.on('close', () => { console.log('[HA] WS desconectado — reconecta em 15s'); _haWs = null; _scheduleHaReconnect(); });
-  _haWs.on('error', e => console.error('[HA] WS erro:', e.message));
-}
-function _scheduleHaReconnect() {
-  clearTimeout(_haWsReconnectTimer);
-  _haWsReconnectTimer = setTimeout(connectHaWebSocket, 15_000);
-}
-
-// HA REST — histórico dos últimos 30 dias (backfill na inicialização)
-async function fetchHaHistory(days = 30) {
-  if (!HA_URL || !HA_TOKEN) return;
-  const ids  = Object.keys(HA_ENTITY_MAP).join(',');
-  const from = new Date(Date.now() - days * 86_400_000).toISOString();
-  const url  = `${HA_URL}/api/history/period/${encodeURIComponent(from)}` +
-               `?filter_entity_id=${encodeURIComponent(ids)}&significant_changes_only=true&minimal_response=true`;
-  try {
-    const resp = await fetch(url, { headers: { Authorization: `Bearer ${HA_TOKEN}` } });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const data = await resp.json();
-    const existingIds = new Set(eventsLog.map(e => e.id));
-    let added = 0;
-    for (const entityStates of data) {
-      if (!Array.isArray(entityStates) || entityStates.length < 2) continue;
-      const entityId = entityStates[0]?.entity_id;
-      if (!entityId || !HA_ENTITY_MAP[entityId]) continue;
-      for (let i = 1; i < entityStates.length; i++) {
-        const prev = entityStates[i - 1];
-        const curr = entityStates[i];
-        // minimal_response format uses 'lu' (last_updated epoch) or 'last_changed'
-        const tsMs = curr.last_changed
-          ? new Date(curr.last_changed).getTime()
-          : (curr.lu ? curr.lu * 1000 : 0);
-        if (!tsMs || existingIds.has(tsMs)) continue;
-        const ev = _haStateToEvent(entityId, curr.state, prev.state);
-        if (!ev) continue;
-        eventsLog.push({ id: tsMs, ts: tsMs, type: ev.type, label: ev.label });
-        existingIds.add(tsMs);
-        added++;
-      }
-    }
-    if (added > 0) {
-      eventsLog.sort((a, b) => b.ts - a.ts);
-      while (eventsLog.length > MAX_EVENTS) eventsLog.pop();
-      _saveEventsSoon();
-    }
-    console.log(`✓ HA histórico: ${added} eventos adicionados`);
-  } catch(e) { console.error('[HA] Histórico erro:', e.message); }
 }
 
 // ── Estado em memória (espelha todos os tópicos MQTT) ─────────────────────────
@@ -1901,28 +1770,32 @@ function applyMqttMessage(key, value, isRetained = false) {
       break;
     }
     case 'lock_state': {
+      // App publica valor cru do barramento (semântica a confirmar — assumimos 1=destrancado, 0=trancado).
+      // Normaliza pra 'on'/'off' que o PWA já espera.
+      const norm = value === '1' ? 'on' : 'off';
       const prevL = prevLockState;
-      state.lock_state = value;
-      prevLockState = value;
-      // Fallback MQTT (sem dependência de HA WS): gera evento na mudança.
-      // Convenção: 'on' = destrancado, 'off' = trancado (mesma do HA_ENTITY_MAP).
-      if (!isRetained && prevL !== null && prevL !== value) {
-        if (value === 'on')       addEvent('lock_open',  'Carro destrancado');
-        else if (value === 'off') addEvent('lock_close', 'Carro trancado');
+      state.lock_state = norm;
+      prevLockState = norm;
+      if (!isRetained && prevL !== null && prevL !== norm) {
+        if (norm === 'on')  addEvent('lock_open',  'Carro destrancado');
+        else                addEvent('lock_close', 'Carro trancado');
       }
       break;
     }
     case 'high_beam':    state.high_beam    = value; break;   // 'on' | 'off'
     case 'light_state':  state.light_state  = value; break;   // 'on' | 'off' (farol)
     case 'ac_state': {
+      // App publica '1' (ligado) / '0' (desligado). Normaliza pra 'on'/'off'.
+      const norm = value === '1' ? 'on' : 'off';
       const prevAc = state.ac_state;
-      state.ac_state = value;
-      if (!isRetained && prevAc !== null && prevAc !== value) {
-        if (value === 'on')       addEvent('ac_on',  'Ar condicionado ligado');
-        else if (value === 'off') addEvent('ac_off', 'Ar condicionado desligado');
+      state.ac_state = norm;
+      if (!isRetained && prevAc !== null && prevAc !== norm) {
+        if (norm === 'on') addEvent('ac_on',  'Ar condicionado ligado');
+        else               addEvent('ac_off', 'Ar condicionado desligado');
       }
       break;
     }
+    case 'hvac_cycle_mode': state.hvac_cycle_mode = value; break; // '0'=recirc interna, '1'=ar externo
     case 'seat_vent_drv':  state.seat_vent_drv  = value; break; // '0'..'3'
     case 'seat_vent_pass': state.seat_vent_pass = value; break; // '0'..'3'
     case 'hvac_driver_temp':    state.hvac_driver_temp    = value; break; // float °C
@@ -1934,16 +1807,18 @@ function applyMqttMessage(key, value, isRetained = false) {
     case 'door_fr':
     case 'door_rl':
     case 'door_rr': {
+      // App publica '1' (aberta) / '0' (fechada). Normaliza pra 'on'/'off' que o PWA espera.
       const side  = key.slice(5);           // 'fl' | 'fr' | 'rl' | 'rr'
+      const norm  = value === '1' ? 'on' : 'off';
       const prevD = prevDoorStates[side];
-      state[key]          = value;
-      prevDoorStates[side] = value;
-      if (!isRetained && prevD !== null && prevD !== value) {
+      state[key]           = norm;
+      prevDoorStates[side] = norm;
+      if (!isRetained && prevD !== null && prevD !== norm) {
         const label = DOOR_NAMES[side] || side.toUpperCase();
-        if (value === 'on') {
+        if (norm === 'on') {
           addEvent('door_open',  `${label} aberta`);
           if (notifPrefs.door_open)  sendPush('🚪 Porta aberta', label);
-        } else if (value === 'off') {
+        } else {
           addEvent('door_close', `${label} fechada`);
           if (notifPrefs.door_close) sendPush('🚪 Porta fechada', label);
         }
@@ -1951,14 +1826,15 @@ function applyMqttMessage(key, value, isRetained = false) {
       break;
     }
     case 'door_trunk': {
+      const norm = value === '1' ? 'on' : 'off';
       const prevT = prevDoorStates.trunk;
-      state.door_trunk        = value;
-      prevDoorStates.trunk    = value;
-      if (!isRetained && prevT !== null && prevT !== value) {
-        if (value === 'on') {
+      state.door_trunk     = norm;
+      prevDoorStates.trunk = norm;
+      if (!isRetained && prevT !== null && prevT !== norm) {
+        if (norm === 'on') {
           addEvent('trunk_open',  'Porta-malas aberta');
           if (notifPrefs.trunk_open)  sendPush('🧳 Porta-malas aberta', 'Verifique se está segura.');
-        } else if (value === 'off') {
+        } else {
           addEvent('trunk_close', 'Porta-malas fechada');
           if (notifPrefs.trunk_close) sendPush('🧳 Porta-malas fechada', 'Porta-malas foi fechada.');
         }
@@ -1966,17 +1842,14 @@ function applyMqttMessage(key, value, isRetained = false) {
       break;
     }
     case 'sunroof': {
-      // closedVal = '3' (per HA_ENTITY_MAP). Qualquer outro valor = aberto.
+      // App publica '1' (aberto) / '0' (fechado) já normalizado a partir de car.basic.sunroof_status.
+      const norm = value === '1' ? 'on' : 'off';
       const prevS = prevSunroof;
-      state.sunroof = value;
-      prevSunroof = value;
-      if (!isRetained && prevS !== null && prevS !== value) {
-        const wasClosed = String(prevS) === '3';
-        const nowClosed = String(value) === '3';
-        if (wasClosed !== nowClosed) {
-          if (nowClosed) addEvent('sunroof_close', 'Teto solar fechado');
-          else           addEvent('sunroof_open',  'Teto solar aberto');
-        }
+      state.sunroof = norm;
+      prevSunroof   = norm;
+      if (!isRetained && prevS !== null && prevS !== norm) {
+        if (norm === 'on') addEvent('sunroof_open',  'Teto solar aberto');
+        else               addEvent('sunroof_close', 'Teto solar fechado');
       }
       break;
     }
@@ -1984,19 +1857,16 @@ function applyMqttMessage(key, value, isRetained = false) {
     case 'window_fr':
     case 'window_rl':
     case 'window_rr': {
+      // App publica '1' (aberto) / '0' (fechado) já normalizado a partir de car.basic.window_status.
       const wside = key.slice(7);
+      const norm  = value === '1' ? 'on' : 'off';
       const prevW = prevWindowStates[wside];
-      state[key] = value;
-      prevWindowStates[wside] = value;
-      // closedVal = '1' (per HA_ENTITY_MAP). Qualquer outro valor = aberto/entreaberto.
-      if (!isRetained && prevW !== null && prevW !== value) {
-        const wasClosed = String(prevW) === '1';
-        const nowClosed = String(value) === '1';
-        if (wasClosed !== nowClosed) {
-          const label = WINDOW_NAMES[wside] || wside.toUpperCase();
-          if (nowClosed) addEvent('window_close', `${label} fechado`);
-          else           addEvent('window_open',  `${label} aberto`);
-        }
+      state[key]              = norm;
+      prevWindowStates[wside] = norm;
+      if (!isRetained && prevW !== null && prevW !== norm) {
+        const label = WINDOW_NAMES[wside] || wside.toUpperCase();
+        if (norm === 'on') addEvent('window_open',  `${label} aberto`);
+        else               addEvent('window_close', `${label} fechado`);
       }
       break;
     }
@@ -2303,16 +2173,6 @@ server.listen(PORT, () => {
 
 if (httpsServer) {
   httpsServer.listen(HTTPS_PORT);
-}
-
-// Inicia integração com Home Assistant (se configurado)
-if (HA_URL && HA_TOKEN) {
-  setTimeout(() => {
-    fetchHaHistory(30).catch(e => console.error('[HA] fetchHaHistory:', e.message));
-    connectHaWebSocket();
-  }, 3000);
-} else {
-  console.log('ℹ️  HA_URL/HA_TOKEN não configurados — log de eventos via MQTT apenas');
 }
 
 process.on('SIGINT',  () => { mqttClient.end(); process.exit(0); });
