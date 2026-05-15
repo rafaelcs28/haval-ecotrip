@@ -614,14 +614,14 @@ fun ConsumptionScreen() {
                     }
                     Text(
                         "v${BuildConfig.VERSION_NAME}",
-                        fontSize = 11.sp,
+                        fontSize = 13.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = NeonLime,
                     )
-                    Text("·", fontSize = 11.sp, color = TextSecondary.copy(alpha = 0.4f))
+                    Text("·", fontSize = 13.sp, color = TextSecondary.copy(alpha = 0.4f))
                     Text(
                         "Haval H6 PHEV34",
-                        fontSize = 11.sp,
+                        fontSize = 13.sp,
                         color = TextSecondary.copy(alpha = 0.85f),
                     )
                 }
@@ -634,7 +634,7 @@ fun ConsumptionScreen() {
                     downloadProgress in 0..99 -> {
                         Text(
                             "$downloadProgress%",
-                            fontSize   = 11.sp,
+                            fontSize   = 13.sp,
                             fontWeight = FontWeight.ExtraBold,
                             color      = NeonLime,
                             modifier   = Modifier
@@ -668,11 +668,11 @@ fun ConsumptionScreen() {
                                     Icons.Default.SystemUpdate,
                                     contentDescription = "Atualizar",
                                     tint               = NeonLime,
-                                    modifier           = Modifier.size(14.dp),
+                                    modifier           = Modifier.size(16.dp),
                                 )
                                 Text(
                                     updateMgr.latestRelease?.version?.let { "v$it disponível" } ?: "Atualizar",
-                                    fontSize   = 11.sp,
+                                    fontSize   = 13.sp,
                                     fontWeight = FontWeight.ExtraBold,
                                     color      = NeonLime,
                                 )
@@ -686,7 +686,7 @@ fun ConsumptionScreen() {
                         ) {
                             Text(
                                 "v${BuildConfig.VERSION_NAME}",
-                                fontSize = 11.sp,
+                                fontSize = 13.sp,
                                 color    = TextSecondary,
                             )
                         }
@@ -742,15 +742,15 @@ fun ConsumptionScreen() {
             ) {
                 Text(
                     "DESDE ÚLTIMA PARTIDA",
-                    fontSize = 11.sp,
+                    fontSize = 14.sp,
                     fontWeight = FontWeight.Bold,
-                    letterSpacing = 1.8.sp,
-                    color = TextSecondary.copy(alpha = 0.85f),
+                    letterSpacing = 2.sp,
+                    color = TextSecondary.copy(alpha = 0.9f),
                 )
-                Text("▸", fontSize = 11.sp, color = TextSecondary.copy(alpha = 0.35f))
+                Text("▸", fontSize = 14.sp, color = TextSecondary.copy(alpha = 0.4f))
                 Text(
                     "%.1f km".format(rolling.windowKm),
-                    fontSize = 13.sp,
+                    fontSize = 16.sp,
                     fontWeight = FontWeight.ExtraBold,
                     color = AuroraTeal,
                     style = TextStyle(
@@ -760,11 +760,11 @@ fun ConsumptionScreen() {
             }
             OutlinedButton(
                 onClick        = { tripManager.resetRolling() },
-                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 2.dp),
-                border         = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
+                contentPadding = PaddingValues(horizontal = 18.dp, vertical = 4.dp),
+                border         = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.12f)),
                 shape          = RoundedCornerShape(6.dp),
             ) {
-                Text("Zerar", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = TextSecondary)
+                Text("Zerar", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = TextSecondary)
             }
         }
 
@@ -931,12 +931,12 @@ fun ConsumptionScreen() {
                             yellowEnd = 0.45f,
                         )
                         Row(
-                            modifier = Modifier.fillMaxWidth().padding(top = 3.dp),
+                            modifier = Modifier.fillMaxWidth().padding(top = 5.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                         ) {
-                            Text("R$ 0", fontSize = 8.5.sp, fontWeight = FontWeight.SemiBold, color = TextSecondary.copy(alpha = 0.5f))
-                            Text("meta R$ 0,30", fontSize = 8.5.sp, fontWeight = FontWeight.Bold, color = WarnYellow.copy(alpha = 0.9f))
-                            Text("R$ 0,60+", fontSize = 8.5.sp, fontWeight = FontWeight.SemiBold, color = TextSecondary.copy(alpha = 0.5f))
+                            Text("R$ 0",         fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = TextSecondary.copy(alpha = 0.6f))
+                            Text("meta R$ 0,30", fontSize = 13.sp, fontWeight = FontWeight.Bold,    color = WarnYellow.copy(alpha = 0.95f))
+                            Text("R$ 0,60+",     fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = TextSecondary.copy(alpha = 0.6f))
                         }
                     }
                 }
@@ -992,14 +992,14 @@ private fun ColumnTitle(
             imageVector = icon,
             contentDescription = null,
             tint = iconColor.copy(alpha = 0.85f),
-            modifier = Modifier.size(14.dp),
+            modifier = Modifier.size(17.dp),
         )
         Text(
             text = label.uppercase(),
-            fontSize = 11.sp,
+            fontSize = 14.sp,
             fontWeight = FontWeight.Bold,
-            letterSpacing = 1.8.sp,
-            color = TextSecondary.copy(alpha = 0.75f),
+            letterSpacing = 2.sp,
+            color = TextSecondary.copy(alpha = 0.8f),
         )
     }
 }
@@ -1066,32 +1066,32 @@ private fun StripSection(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                if (isLive) Box(Modifier.size(8.dp).background(AccentBlue, CircleShape))
+                if (isLive) Box(Modifier.size(10.dp).background(AccentBlue, CircleShape))
                 Text(
                     if (isLive) "VIAGEM EM ANDAMENTO" else "ÚLTIMA VIAGEM",
-                    fontSize = 11.sp,
+                    fontSize = 13.sp,
                     fontWeight = FontWeight.Bold,
-                    letterSpacing = 1.6.sp,
+                    letterSpacing = 1.8.sp,
                     color = accentColor,
                 )
-                Text("▸", fontSize = 10.sp, color = TextSecondary.copy(alpha = 0.35f))
+                Text("▸", fontSize = 13.sp, color = TextSecondary.copy(alpha = 0.4f))
                 Text(
                     "%.1f km".format(trip.distKm),
-                    fontSize = 12.sp,
+                    fontSize = 15.sp,
                     fontWeight = FontWeight.ExtraBold,
                     color = AuroraTeal,
-                    style = TextStyle(shadow = Shadow(AuroraTeal.copy(alpha = 0.4f), Offset.Zero, 6f)),
+                    style = TextStyle(shadow = Shadow(AuroraTeal.copy(alpha = 0.4f), Offset.Zero, 8f)),
                 )
-                Text("▸", fontSize = 10.sp, color = TextSecondary.copy(alpha = 0.35f))
+                Text("▸", fontSize = 13.sp, color = TextSecondary.copy(alpha = 0.4f))
                 Text(
                     if (isLive) "desde $dateFmt" else dateFmt,
-                    fontSize = 11.sp,
+                    fontSize = 13.sp,
                     color = TextSecondary,
                 )
-                Text("▸", fontSize = 10.sp, color = TextSecondary.copy(alpha = 0.35f))
+                Text("▸", fontSize = 13.sp, color = TextSecondary.copy(alpha = 0.4f))
                 Text(
                     timeStr,
-                    fontSize = 12.sp,
+                    fontSize = 15.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = accentColor,
                 )
@@ -1100,14 +1100,14 @@ private fun StripSection(
             // SOC bar (decisão do usuário: usa SOC da VIAGEM — trip.startSocPct e trip.endSocPct)
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
                 modifier = Modifier.weight(1f),
             ) {
                 Text(
                     "SOC",
-                    fontSize = 10.sp,
+                    fontSize = 14.sp,
                     fontWeight = FontWeight.Bold,
-                    letterSpacing = 1.2.sp,
+                    letterSpacing = 1.4.sp,
                     color = TextSecondary,
                 )
                 SocStripBar(
@@ -1117,10 +1117,10 @@ private fun StripSection(
                 )
                 Text(
                     "%.0f%%".format(trip.endSocPct),
-                    fontSize = 12.sp,
+                    fontSize = 16.sp,
                     fontWeight = FontWeight.Bold,
                     color = AuroraTeal,
-                    style = TextStyle(shadow = Shadow(AuroraTeal.copy(alpha = 0.4f), Offset.Zero, 6f)),
+                    style = TextStyle(shadow = Shadow(AuroraTeal.copy(alpha = 0.4f), Offset.Zero, 8f)),
                 )
             }
         }

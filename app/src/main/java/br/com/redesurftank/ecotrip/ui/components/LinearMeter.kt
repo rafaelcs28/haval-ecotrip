@@ -67,26 +67,26 @@ fun LinearMeter(
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 Icon(
                     painter = icon,
                     contentDescription = null,
                     tint = categoryIconColor.copy(alpha = 0.85f),
-                    modifier = Modifier.size(13.dp),
+                    modifier = Modifier.size(16.dp),
                 )
                 Text(
                     text = label.uppercase(),
-                    fontSize = 11.sp,
+                    fontSize = 14.sp,
                     fontWeight = FontWeight.Bold,
-                    letterSpacing = 1.6.sp,
+                    letterSpacing = 1.8.sp,
                     color = TextSecondary,
                 )
             }
             Text(
                 text = "máx ${maxValue.toInt()}",
-                fontSize = 10.sp,
-                color = TextSecondary.copy(alpha = 0.55f),
+                fontSize = 13.sp,
+                color = TextSecondary.copy(alpha = 0.65f),
                 fontWeight = FontWeight.Medium,
             )
         }
@@ -110,7 +110,7 @@ fun LinearMeter(
             )
             Text(
                 text = unitLabel,
-                fontSize = 17.sp,
+                fontSize = 19.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = TextSecondary,
                 modifier = Modifier.padding(bottom = 5.dp),
@@ -163,10 +163,10 @@ fun LinearMeter(
             for (t in tickValues) {
                 Text(
                     text = t.toString(),
-                    fontSize = 9.sp,
+                    fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = TextSecondary.copy(alpha = 0.45f),
-                    letterSpacing = 0.3.sp,
+                    color = TextSecondary.copy(alpha = 0.55f),
+                    letterSpacing = 0.5.sp,
                 )
             }
         }

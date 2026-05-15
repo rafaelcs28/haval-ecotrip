@@ -67,22 +67,22 @@ fun MetricBlock(
         ) {
             Text(
                 text = label.uppercase(),
-                fontSize = 11.sp,
+                fontSize = 14.sp,
                 fontWeight = FontWeight.Bold,
-                letterSpacing = 1.8.sp,
-                color = TextSecondary.copy(alpha = 0.78f),
+                letterSpacing = 2.sp,
+                color = TextSecondary.copy(alpha = 0.85f),
             )
             if (auxRight != null) {
                 Text(
                     text = auxRight,
-                    fontSize = 12.sp,
+                    fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = auxColor,
                     letterSpacing = 0.3.sp,
                 )
             }
         }
-        Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
             Text(
                 text = value,
                 fontSize = 28.sp,
@@ -94,7 +94,7 @@ fun MetricBlock(
             if (unitInline != null) {
                 Text(
                     text = unitInline,
-                    fontSize = 13.sp,
+                    fontSize = 15.sp,
                     fontWeight = FontWeight.Medium,
                     color = TextSecondary,
                     modifier = Modifier.padding(bottom = 3.dp),
@@ -139,13 +139,13 @@ fun StatusBadge(
 ) {
     Box(
         modifier = modifier
-            .background(color.copy(alpha = 0.10f), RoundedCornerShape(4.dp))
-            .border(1.dp, color.copy(alpha = 0.35f), RoundedCornerShape(4.dp))
-            .padding(horizontal = 7.dp, vertical = 2.dp),
+            .background(color.copy(alpha = 0.10f), RoundedCornerShape(5.dp))
+            .border(1.dp, color.copy(alpha = 0.35f), RoundedCornerShape(5.dp))
+            .padding(horizontal = 10.dp, vertical = 3.dp),
     ) {
         Text(
             text = label,
-            fontSize = 9.sp,
+            fontSize = 13.sp,
             fontWeight = FontWeight.Bold,
             letterSpacing = 0.6.sp,
             color = color,
@@ -229,8 +229,7 @@ fun BulletBar(
  * Barra horizontal mostrando:
  *  - fill bright (0% → currentSocPct): bateria atual
  *  - área "consumida" hachurada (currentSocPct → startSocPct): SOC gasto na viagem
- *  - marcador vertical amarelo no startSocPct
- *  - pulse de glow no fill bright (vida)
+ *  - marcador vertical amarelo no startSocPct + label "X% início" acima
  *
  * Quando startSocPct ≤ currentSocPct (recarregou durante o trip), só mostra fill.
  */
@@ -244,57 +243,71 @@ fun SocStripBar(
     val currentFrac = (currentSocPct / 100f).coerceIn(0f, 1f)
     val showConsumed = startFrac > currentFrac + 0.001f
 
-    var pulseAlpha by remember { mutableFloatStateOf(1f) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            pulseAlpha = 1f
-            delay(1200)
-            pulseAlpha = 0.78f
-            delay(1200)
-        }
-    }
-
-    BoxWithConstraints(
-        modifier = modifier
-            .fillMaxWidth()
-            .height(8.dp)
-            .background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(4.dp))
-            .border(0.5.dp, Color.Black.copy(alpha = 0.4f), RoundedCornerShape(4.dp)),
+    // Column wrapping para acomodar a label acima da bar
+    androidx.compose.foundation.layout.Column(
+        modifier = modifier.fillMaxWidth(),
     ) {
-        val totalW = maxWidth
-
-        // 1) Fill bright 0..current — gradient teal→lime com pulse
-        Box(
-            modifier = Modifier
-                .fillMaxWidth(currentFrac)
-                .fillMaxHeight()
-                .background(
-                    brush = Brush.horizontalGradient(listOf(AuroraTeal, NeonLime)),
-                    shape = RoundedCornerShape(4.dp),
-                ),
-        )
-
-        // 2) Área "consumida" hachurada (current..start) — só se start > current
+        // 1) Label "X% início" — posicionada acima do marcador via offset proporcional
         if (showConsumed) {
-            val consumedFrac = startFrac - currentFrac
-            Box(
-                modifier = Modifier
-                    .offset(x = totalW * currentFrac)
-                    .fillMaxHeight()
-                    .width(totalW * consumedFrac)
-                    .background(AuroraTeal.copy(alpha = 0.18f), RoundedCornerShape(2.dp)),
-            )
+            BoxWithConstraints(
+                modifier = Modifier.fillMaxWidth().height(16.dp),
+            ) {
+                val totalW = maxWidth
+                // O texto ocupa ~50dp; centro do texto deve cair em totalW * startFrac
+                Text(
+                    text = "%.0f%% início".format(startSocPct),
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = WarnYellow,
+                    letterSpacing = 0.3.sp,
+                    modifier = Modifier.offset(x = totalW * startFrac - 30.dp),
+                )
+            }
         }
 
-        // 3) Marcador vertical amarelo no startSocPct
-        if (showConsumed) {
+        // 2) Barra propriamente dita
+        BoxWithConstraints(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(8.dp)
+                .background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(4.dp))
+                .border(0.5.dp, Color.Black.copy(alpha = 0.4f), RoundedCornerShape(4.dp)),
+        ) {
+            val totalW = maxWidth
+
+            // Fill bright 0..current — gradient teal→lime
             Box(
                 modifier = Modifier
-                    .offset(x = totalW * startFrac - 1.dp, y = (-3).dp)
-                    .width(2.dp)
-                    .height(14.dp)
-                    .background(WarnYellow),
+                    .fillMaxWidth(currentFrac)
+                    .fillMaxHeight()
+                    .background(
+                        brush = Brush.horizontalGradient(listOf(AuroraTeal, NeonLime)),
+                        shape = RoundedCornerShape(4.dp),
+                    ),
             )
+
+            // Área "consumida" hachurada (current..start) — só se start > current
+            if (showConsumed) {
+                val consumedFrac = startFrac - currentFrac
+                Box(
+                    modifier = Modifier
+                        .offset(x = totalW * currentFrac)
+                        .fillMaxHeight()
+                        .width(totalW * consumedFrac)
+                        .background(AuroraTeal.copy(alpha = 0.18f), RoundedCornerShape(2.dp)),
+                )
+            }
+
+            // Marcador vertical amarelo no startSocPct
+            if (showConsumed) {
+                Box(
+                    modifier = Modifier
+                        .offset(x = totalW * startFrac - 1.dp, y = (-3).dp)
+                        .width(2.dp)
+                        .height(14.dp)
+                        .background(WarnYellow),
+                )
+            }
         }
     }
 }
