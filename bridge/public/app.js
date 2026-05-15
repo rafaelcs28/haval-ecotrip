@@ -1497,8 +1497,8 @@ function renderDash() {
   doorLayer('rr', s.door_rr);
   carLayer('cl-trunk', s.door_trunk === 'on');
 
-  // Teto solar (fechado = '3')
-  carLayer('cl-sunroof', s.sunroof != null && s.sunroof !== '3' && s.sunroof !== 3);
+  // Teto solar — bridge agora armazena 'on'/'off' (não mais valor HA cru '3')
+  carLayer('cl-sunroof', s.sunroof === 'on');
 
   // AC — ícone com texto colorido + glow quando ligado
   const acOn = s.ac_state === 'on';
