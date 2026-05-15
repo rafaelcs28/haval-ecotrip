@@ -476,6 +476,8 @@ const state = {
   high_beam:        null,   // null | 'on' | 'off'
   light_state:      null,   // null | 'on' | 'off' — farol (sem sensor por ora)
   ac_state:         null,   // null | 'on' | 'off'
+  seat_vent_drv:    null,   // null | '0'=desligado | '1'=fraco | '2'=médio | '3'=forte
+  seat_vent_pass:   null,   // idem motorista
   door_fl:          null,   // front-left  | 'on'=aberta | 'off'=fechada
   door_fr:          null,   // front-right
   door_rl:          null,   // rear-left
@@ -1902,6 +1904,8 @@ function applyMqttMessage(key, value, isRetained = false) {
     case 'high_beam':    state.high_beam    = value; break;   // 'on' | 'off'
     case 'light_state':  state.light_state  = value; break;   // 'on' | 'off' (farol)
     case 'ac_state':     state.ac_state     = value; break;   // 'on' | 'off'
+    case 'seat_vent_drv':  state.seat_vent_drv  = value; break; // '0'..'3'
+    case 'seat_vent_pass': state.seat_vent_pass = value; break; // '0'..'3'
     case 'door_fl':
     case 'door_fr':
     case 'door_rl':

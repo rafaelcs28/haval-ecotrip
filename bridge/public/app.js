@@ -1500,13 +1500,44 @@ function renderDash() {
   // Teto solar (fechado = '3')
   carLayer('cl-sunroof', s.sunroof != null && s.sunroof !== '3' && s.sunroof !== 3);
 
-  // AC
+  // AC — ícone com texto colorido + glow quando ligado
   const acOn = s.ac_state === 'on';
   carLayer('cl-ac-left',    acOn);
   carLayer('cl-ac-right',   acOn);
   carLayer('cl-ventilacao', acOn);
   const acChip = document.getElementById('d-ac-chip');
-  if (acChip) acChip.style.color = acOn ? '#22d3ee' : '#475569';
+  if (acChip) {
+    if (acOn) {
+      acChip.style.color = '#22d3ee';
+      acChip.style.textShadow = '0 0 8px rgba(34,211,238,0.55)';
+    } else {
+      acChip.style.color = '#475569';
+      acChip.style.textShadow = '';
+    }
+  }
+
+  // Ventilação dos bancos — 4 níveis (0=off, 1=fraco, 2=médio, 3=forte)
+  // Cor + opacity + glow refletem a intensidade. Vermelho não usado pois é "ruim" semanticamente;
+  // gradient cyan→lime cresce em brilho conforme nivel sobe.
+  // Tabela: [opacity, strokeColor, glowShadow]
+  const SEAT_VENT_STYLE = {
+    0: { opacity: 0.30, color: '#334155', shadow: 'none' },                                  // desligado
+    1: { opacity: 0.85, color: '#7dd3fc', shadow: '0 0 4px rgba(125,211,252,0.55)' },        // fraco — light cyan
+    2: { opacity: 1.00, color: '#22d3ee', shadow: '0 0 6px rgba(34,211,238,0.65)' },         // médio — bright cyan
+    3: { opacity: 1.00, color: '#5eead4', shadow: '0 0 10px rgba(94,234,212,0.85)' },        // forte — teal-lime glow
+  };
+  function applySeatVent(elId, rawLevel) {
+    const el = document.getElementById(elId);
+    if (!el) return;
+    const lvl = parseInt(rawLevel, 10);
+    const valid = Number.isFinite(lvl) && lvl >= 0 && lvl <= 3;
+    const style = SEAT_VENT_STYLE[valid ? lvl : 0];
+    el.style.opacity = style.opacity;
+    el.style.filter  = style.shadow === 'none' ? 'none' : `drop-shadow(${style.shadow})`;
+    el.querySelectorAll('.vent-line').forEach(p => p.setAttribute('stroke', style.color));
+  }
+  applySeatVent('d-seat-drv',  s.seat_vent_drv);
+  applySeatVent('d-seat-pass', s.seat_vent_pass);
 
   // Vidros (1=fechado, 2=aberto, 3=entreaberto)
   carLayer('cl-win-fl-open', s.window_fl === '2' || s.window_fl === 2);
