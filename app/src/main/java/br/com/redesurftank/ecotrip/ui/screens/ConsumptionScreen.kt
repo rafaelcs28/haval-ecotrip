@@ -320,10 +320,13 @@ fun ConsumptionScreen() {
                     }
                     CarConstants.CAR_BASIC_DOOR_STATUS.value -> {
                         // Formato esperado: CSV "FL,FR,RL,RR,Trunk" — 0=fechada, 1=aberta.
-                        // Aceita 4 (sem trunk) ou 5 elementos pra tolerar variações do car.
-                        // O valor cru é guardado em latestDoorStatusRaw pra publicação de debug.
+                        // O carro emite o CSV envolvido em chaves: "{0,0,0,0,0}". Limpa
+                        // qualquer não-dígito (exceto vírgula e sinal) antes de parsear,
+                        // se não o primeiro/último elemento ficam grudados com `{`/`}` e
+                        // viram 0 (toIntOrNull falha).
                         mqttManager.latestDoorStatusRaw = value
-                        val parts = value.split(",").map { it.trim().toIntOrNull() ?: 0 }
+                        val cleaned = value.replace(Regex("[^0-9,\\-]"), "")
+                        val parts = cleaned.split(",").mapNotNull { it.trim().toIntOrNull() }
                         if (parts.size >= 4) {
                             mqttManager.latestDoorFl = parts.getOrElse(0) { 0 }
                             mqttManager.latestDoorFr = parts.getOrElse(1) { 0 }
@@ -334,9 +337,12 @@ fun ConsumptionScreen() {
                     }
                     CarConstants.CAR_BASIC_WINDOW_STATUS.value -> {
                         // CSV "FL,FR,RL,RR" — cru "1"=fechado, demais valores=aberto.
-                        // O cru é guardado pra publicação de debug.
+                        // O carro emite envolvido em chaves: "{1,1,1,1}". Limpa qualquer
+                        // não-dígito (exceto vírgula e sinal) antes de parsear — senão o
+                        // primeiro/último elemento ficam grudados com `{`/`}` e viram 0.
                         mqttManager.latestWindowStatusRaw = value
-                        val parts = value.split(",").map { it.trim().toIntOrNull() ?: 0 }
+                        val cleaned = value.replace(Regex("[^0-9,\\-]"), "")
+                        val parts = cleaned.split(",").mapNotNull { it.trim().toIntOrNull() }
                         if (parts.size >= 4) {
                             mqttManager.latestWindowFl = parts[0]
                             mqttManager.latestWindowFr = parts[1]
