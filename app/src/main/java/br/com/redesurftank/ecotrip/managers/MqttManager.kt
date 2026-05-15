@@ -567,9 +567,15 @@ class MqttManager private constructor() {
             // Antes vinha de engine_rpm > 0, mas no HEV o motor a combustão cicla
             // muito durante condução — gerava dezenas de eventos engine_on/off por viagem.
             pubR("engine_state", if (latestDrivingReadyState > 0) "1" else "0")
-            // Debug — valores crus do barramento pra inspeção rápida (sem afetar lógica)
-            if (latestDoorStatusRaw.isNotEmpty())   pubR("debug/door_status_raw",   latestDoorStatusRaw)
-            if (latestWindowStatusRaw.isNotEmpty()) pubR("debug/window_status_raw", latestWindowStatusRaw)
+            // Debug — valores crus do barramento + resultado do parsing (sem afetar lógica)
+            if (latestDoorStatusRaw.isNotEmpty()) {
+                pubR("debug/door_status_raw", latestDoorStatusRaw)
+                pubR("debug/door_parsed",     "$latestDoorFl,$latestDoorFr,$latestDoorRl,$latestDoorRr,$latestTrunk")
+            }
+            if (latestWindowStatusRaw.isNotEmpty()) {
+                pubR("debug/window_status_raw", latestWindowStatusRaw)
+                pubR("debug/window_parsed",     "$latestWindowFl,$latestWindowFr,$latestWindowRl,$latestWindowRr")
+            }
             pubR("debug/sunroof_raw",      latestSunroof.toString())
             pubR("debug/lock_status_raw",  latestLockStatus.toString())
             if (latestOdometerKm > 0f) pubR("odometer_km", fmt1(latestOdometerKm))
