@@ -1886,6 +1886,18 @@ function renderCharges() {
     const ts     = c.timestamp_ms || 0;
     const ov   = _chargeCostOverride(ts);
     const kwh  = c.energy_kwh || 0;
+    // Campos editados manualmente no PWA (override no bridge).
+    // `_overridden_fields` vem do bridge applyChargeOverrides; o avg_power_kw é derivado
+    // de energy_kwh ou duration_sec, então também marca como editado nesse caso.
+    const ovFields  = new Set(c._overridden_fields || []);
+    const ovd       = (field) => ovFields.has(field);
+    const ovdAvgPwr = ovd('energy_kwh') || ovd('duration_sec');
+    // Mescla cor base + indicador de edição (dashed) num único style attribute
+    const metricStyle = (color, edited) =>
+      ` style="color:var(--${color})${edited ? ';border-bottom:1px dashed rgba(251,191,36,.5)' : ''}"`;
+    const editedBadge = ovFields.size > 0
+      ? '<span title="Recarga editada manualmente" style="font-size:9px;color:#fbbf24;margin-left:4px">✏️</span>'
+      : '';
     // Custo: override manual tem prioridade; padrão = price_kwh das configurações
     const cost = ov
       ? { total: ov.total, perKwh: ov.perKwh, isOv: true }
@@ -1909,7 +1921,7 @@ function renderCharges() {
   <div class="trip-header">
     <div style="flex:1;min-width:0">
       <div class="trip-name-row">
-        <div class="trip-name">${fmtDate(c.timestamp)}</div>
+        <div class="trip-name">${fmtDate(c.timestamp)}${editedBadge}</div>
         <button class="rename-btn" onclick="deleteCharge(${ts})" title="Apagar recarga" style="opacity:.35">🗑</button>
       </div>
       <div style="display:flex;gap:6px;align-items:center;margin-top:2px">${totalCostHtml}${unitHtml}</div>
@@ -1921,6 +1933,7 @@ function renderCharges() {
         <button class="cost-edit-btn" onclick="openMergeChargeModal(${ts})" title="Unir recargas">🔗</button>
         <button class="cost-edit-btn" onclick="toggleChargerEdit(${ts})" title="kWh do carregador">🔌</button>
         <button class="cost-edit-btn" onclick="toggleChargeEdit(${ts})" title="Editar custo">💰</button>
+        <button class="cost-edit-btn" onclick="toggleChargeMetaEdit(${ts})" title="Corrigir dados (SOC, energia, duração)">✏️</button>
       </div>
     </div>
   </div>
@@ -1934,11 +1947,32 @@ function renderCharges() {
     <input class="charge-total-input" type="number" step="0.01" min="0" placeholder="ex: 18.50"${chargerKwh > 0 ? ` value="${chargerKwh}"` : ''}>
     <button class="cost-apply-btn" onclick="applyChargerKwh(${ts})">Salvar</button>
   </div>
+  <div id="charge-meta-edit-${ts}" class="cost-edit-form" style="display:none;flex-direction:column;align-items:stretch;gap:6px">
+    <div style="font-size:11px;color:#64748b">Corrige leituras erradas do carro. Edições ficam só no servidor — o app do carro continua reportando o valor original.</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+      <label style="display:flex;flex-direction:column;gap:2px;font-size:10px;color:#94a3b8">SOC início (%)
+        <input class="charge-meta-soc-start" type="number" step="1" min="0" max="100" value="${(+c.soc_start || 0).toFixed(0)}">
+      </label>
+      <label style="display:flex;flex-direction:column;gap:2px;font-size:10px;color:#94a3b8">SOC fim (%)
+        <input class="charge-meta-soc-end" type="number" step="1" min="0" max="100" value="${(+c.soc_end || 0).toFixed(0)}">
+      </label>
+      <label style="display:flex;flex-direction:column;gap:2px;font-size:10px;color:#94a3b8">Energia injetada (kWh)
+        <input class="charge-meta-kwh" type="number" step="0.01" min="0" value="${(+c.energy_kwh || 0).toFixed(2)}">
+      </label>
+      <label style="display:flex;flex-direction:column;gap:2px;font-size:10px;color:#94a3b8">Duração (HH:MM)
+        <input class="charge-meta-dur" type="text" pattern="\\d+:\\d{2}" placeholder="HH:MM" value="${_fmtDurHHMM(c.duration_sec || 0)}">
+      </label>
+    </div>
+    <div style="display:flex;gap:6px;justify-content:flex-end">
+      ${ovFields.size > 0 ? `<button class="cost-apply-btn" style="background:#475569" onclick="revertChargeMeta(${ts})">Reverter</button>` : ''}
+      <button class="cost-apply-btn" onclick="applyChargeMeta(${ts})">Salvar</button>
+    </div>
+  </div>
   <div class="trip-metrics">
-    <div class="trip-metric"><div class="trip-metric-val" style="color:var(--teal)">${fmtDur(c.duration_sec)}</div><div class="trip-metric-lbl">duração</div></div>
-    <div class="trip-metric"><div class="trip-metric-val" style="color:var(--blue)">${f1(c.avg_power_kw)} kW</div><div class="trip-metric-lbl">pot. média</div></div>
-    <div class="trip-metric"><div class="trip-metric-val" style="color:var(--muted)">${pct(c.soc_start)}</div><div class="trip-metric-lbl">SOC início</div></div>
-    <div class="trip-metric"><div class="trip-metric-val ${col}">${pct(c.soc_end)}</div><div class="trip-metric-lbl">SOC fim</div></div>
+    <div class="trip-metric"><div class="trip-metric-val"${metricStyle('teal', ovd('duration_sec'))}>${fmtDur(c.duration_sec)}</div><div class="trip-metric-lbl">duração${ovd('duration_sec') ? ' ✏️' : ''}</div></div>
+    <div class="trip-metric"><div class="trip-metric-val"${metricStyle('blue', ovdAvgPwr)}>${f1(c.avg_power_kw)} kW</div><div class="trip-metric-lbl">pot. média${ovdAvgPwr ? ' ✏️' : ''}</div></div>
+    <div class="trip-metric"><div class="trip-metric-val"${metricStyle('muted', ovd('soc_start'))}>${pct(c.soc_start)}</div><div class="trip-metric-lbl">SOC início${ovd('soc_start') ? ' ✏️' : ''}</div></div>
+    <div class="trip-metric"><div class="trip-metric-val ${col}"${ovd('soc_end') ? ' style="border-bottom:1px dashed rgba(251,191,36,.5)"' : ''}>${pct(c.soc_end)}</div><div class="trip-metric-lbl">SOC fim${ovd('soc_end') ? ' ✏️' : ''}</div></div>
     <div class="trip-metric"><div class="trip-metric-val ${col}">+${delta.toFixed(0)}%</div><div class="trip-metric-lbl">Δ SOC</div></div>
     ${c.avg_temp_c != null ? `<div class="trip-metric"><div class="trip-metric-val muted">${c.avg_temp_c.toFixed(1)}°C</div><div class="trip-metric-lbl">🌡 temp ext</div></div>` : ''}
   </div>
@@ -3654,6 +3688,99 @@ window.applyChargeCost = function(ts, energyKwh) {
       _idbPutMany('charges', [updated]).catch(() => {});
     }
   }).catch(() => {/* offline — localStorage como fallback */});
+};
+
+// ── Helpers de duração HH:MM (usados pela edição de metadados de recarga) ────
+function _fmtDurHHMM(sec) {
+  const s = Math.max(0, Math.round(+sec || 0));
+  const h = Math.floor(s / 3600);
+  const m = Math.round((s % 3600) / 60);
+  return `${h}:${String(m).padStart(2, '0')}`;
+}
+function _parseDurHHMM(str) {
+  if (!str) return null;
+  const s = String(str).trim();
+  // Aceita: "HH:MM", "H:MM", "HH:MM:SS"
+  const mm = s.match(/^(\d+):(\d{1,2})(?::(\d{1,2}))?$/);
+  if (!mm) return null;
+  const h = parseInt(mm[1], 10);
+  const m = parseInt(mm[2], 10);
+  const sec = mm[3] ? parseInt(mm[3], 10) : 0;
+  if (m >= 60 || sec >= 60) return null;
+  return h * 3600 + m * 60 + sec;
+}
+
+window.toggleChargeMetaEdit = function(ts) {
+  const el = document.getElementById('charge-meta-edit-' + ts);
+  if (el) el.style.display = el.style.display === 'none' ? 'flex' : 'none';
+};
+
+window.applyChargeMeta = async function(ts) {
+  const el = document.getElementById('charge-meta-edit-' + ts);
+  if (!el) return;
+  const socStart = parseFloat(el.querySelector('.charge-meta-soc-start')?.value);
+  const socEnd   = parseFloat(el.querySelector('.charge-meta-soc-end')?.value);
+  const kwh      = parseFloat(el.querySelector('.charge-meta-kwh')?.value);
+  const durStr   = el.querySelector('.charge-meta-dur')?.value || '';
+  const durSec   = _parseDurHHMM(durStr);
+
+  if (durStr && durSec === null) {
+    showToast('✗ Duração inválida (use HH:MM)');
+    return;
+  }
+  if (Number.isFinite(socStart) && Number.isFinite(socEnd) && socEnd < socStart) {
+    showToast('✗ SOC fim não pode ser menor que SOC início');
+    return;
+  }
+
+  // Envia só os campos preenchidos com valor finito (vazio mantém o que está)
+  const body = {};
+  if (Number.isFinite(socStart)) body.soc_start    = socStart;
+  if (Number.isFinite(socEnd))   body.soc_end      = socEnd;
+  if (Number.isFinite(kwh))      body.energy_kwh   = kwh;
+  if (durSec !== null)           body.duration_sec = durSec;
+
+  try {
+    const r = await apiFetch(`/api/charges/${ts}/edit`, {
+      method:  'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(body),
+    });
+    if (!r.ok) { showToast('✗ Erro ao salvar edição'); return; }
+    const updated = await r.json();
+    if (cachedCharges && updated?.timestamp_ms) {
+      const idx = cachedCharges.findIndex(c => c.timestamp_ms === ts);
+      if (idx >= 0) cachedCharges[idx] = updated;
+      _idbPutMany('charges', [updated]).catch(() => {});
+    }
+    el.style.display = 'none';
+    renderCharges();
+    showToast('✓ Recarga editada');
+  } catch (e) {
+    if (e.message !== 'unauthorized') showToast('✗ Erro ao salvar edição');
+  }
+};
+
+window.revertChargeMeta = async function(ts) {
+  if (!confirm('Reverter todas as edições manuais desta recarga?\nVolta aos valores reportados pelo carro.')) return;
+  try {
+    const r = await apiFetch(`/api/charges/${ts}/edit`, {
+      method:  'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ clear: true }),
+    });
+    if (!r.ok) { showToast('✗ Erro ao reverter'); return; }
+    const updated = await r.json();
+    if (cachedCharges && updated?.timestamp_ms) {
+      const idx = cachedCharges.findIndex(c => c.timestamp_ms === ts);
+      if (idx >= 0) cachedCharges[idx] = updated;
+      _idbPutMany('charges', [updated]).catch(() => {});
+    }
+    renderCharges();
+    showToast('✓ Edições revertidas');
+  } catch (e) {
+    if (e.message !== 'unauthorized') showToast('✗ Erro ao reverter');
+  }
 };
 
 window.deleteCharge = async function(ts) {

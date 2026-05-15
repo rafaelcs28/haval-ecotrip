@@ -630,12 +630,28 @@ app.get('/api/trips', (req, res) => {
   const all   = getTrips(500);
   res.json(since ? all.filter(t => (t.timestamp || '') > since) : all);
 });
+// Aplica edições manuais (manual_overrides) sobre os valores base do Android.
+// Recalcula avg_power_kw quando energy_kwh ou duration_sec foram editados.
+// Retorna um objeto novo (não muta o original em chargesArr).
+function applyChargeOverrides(c) {
+  if (!c || !c.manual_overrides || Object.keys(c.manual_overrides).length === 0) return c;
+  const eff = { ...c, ...c.manual_overrides };
+  // Recalcula potência média se energia ou duração foram editados
+  const energy = +eff.energy_kwh;
+  const dur    = +eff.duration_sec;
+  if (energy > 0 && dur > 0) eff.avg_power_kw = (energy * 3600) / dur;
+  // Sinaliza pra PWA quais campos vieram de edição
+  eff._overridden_fields = Object.keys(c.manual_overrides);
+  return eff;
+}
+
 app.get('/api/charges', (req, res) => {
   const since = parseInt(req.query.since || '0', 10);
   // Retorna entradas novas (timestamp_ms > since) OU atualizadas (_updated_ms > since)
-  res.json(since > 0
+  const filtered = since > 0
     ? chargesArr.filter(c => (c.timestamp_ms || 0) > since || (c._updated_ms || 0) > since)
-    : chargesArr);
+    : chargesArr;
+  res.json(filtered.map(applyChargeOverrides));
 });
 
 app.delete('/api/charges/:ts', (req, res) => {
@@ -939,6 +955,45 @@ app.patch('/api/charges/:ts/cost', (req, res) => {
   charge._updated_ms = Date.now();
   scheduleChargesFlush();
   res.json(charge);
+});
+
+// PATCH /api/charges/:ts/edit — edita SOC início/fim, energia injetada e duração.
+// Sobrescreve dados do Android pra corrigir leituras incorretas do carro (falhas
+// de comunicação). Armazenado em `manual_overrides`; o merge MQTT preserva o
+// objeto, então re-publicações do Android NÃO sobrescrevem a edição.
+// Body: { soc_start?, soc_end?, energy_kwh?, duration_sec? } — campos ausentes
+// ou null limpam aquele override individual. Para limpar TUDO: { clear: true }.
+app.patch('/api/charges/:ts/edit', (req, res) => {
+  const ts     = parseInt(req.params.ts, 10);
+  const charge = chargesArr.find(c => (c.timestamp_ms || 0) === ts);
+  if (!charge) return res.status(404).json({ error: 'not found' });
+  const body = req.body || {};
+
+  if (body.clear === true) {
+    delete charge.manual_overrides;
+    charge._updated_ms = Date.now();
+    scheduleChargesFlush();
+    return res.json(applyChargeOverrides(charge));
+  }
+
+  const ov = { ...(charge.manual_overrides || {}) };
+  const setOrClear = (field, raw, parser, validate) => {
+    if (!(field in body)) return;             // não enviado → mantém como está
+    if (raw === null || raw === '') { delete ov[field]; return; }  // explícito clear
+    const v = parser(raw);
+    if (!Number.isFinite(v) || !validate(v)) return;  // inválido → ignora
+    ov[field] = v;
+  };
+  setOrClear('soc_start',    body.soc_start,    parseFloat, v => v >= 0 && v <= 100);
+  setOrClear('soc_end',      body.soc_end,      parseFloat, v => v >= 0 && v <= 100);
+  setOrClear('energy_kwh',   body.energy_kwh,   parseFloat, v => v >= 0 && v < 1000);
+  setOrClear('duration_sec', body.duration_sec, x => parseInt(x, 10), v => v >= 0 && v < 86400 * 7);
+
+  if (Object.keys(ov).length > 0) charge.manual_overrides = ov;
+  else                            delete charge.manual_overrides;
+  charge._updated_ms = Date.now();
+  scheduleChargesFlush();
+  res.json(applyChargeOverrides(charge));
 });
 
 // ── Proxy de tiles OSM para o canvas do Snapshot ──────────────────────────────
@@ -2108,15 +2163,19 @@ function applyMqttMessage(key, value, isRetained = false) {
               return entry;
             }
             const keep = {};
-            if (existing.location_name != null) keep.location_name = existing.location_name;
-            if (existing.location_lat  != null) keep.location_lat  = existing.location_lat;
-            if (existing.location_lng  != null) keep.location_lng  = existing.location_lng;
-            if (existing.charger_kwh   != null) keep.charger_kwh   = existing.charger_kwh;
-            if (existing.cost_override != null) keep.cost_override = existing.cost_override;
-            if (existing.avg_temp_c    != null) keep.avg_temp_c    = existing.avg_temp_c;
+            if (existing.location_name    != null) keep.location_name    = existing.location_name;
+            if (existing.location_lat     != null) keep.location_lat     = existing.location_lat;
+            if (existing.location_lng     != null) keep.location_lng     = existing.location_lng;
+            if (existing.charger_kwh      != null) keep.charger_kwh      = existing.charger_kwh;
+            if (existing.cost_override    != null) keep.cost_override    = existing.cost_override;
+            if (existing.avg_temp_c       != null) keep.avg_temp_c       = existing.avg_temp_c;
+            // manual_overrides: edições feitas no PWA pra corrigir leituras erradas do carro
+            // (SOC início/fim, energia injetada, duração). Têm prioridade sobre o que o
+            // Android re-publicar — caso contrário, a edição sumiria no próximo reconnect.
+            if (existing.manual_overrides != null) keep.manual_overrides = existing.manual_overrides;
             // Preserva _updated_ms para que dispositivos que ainda não sincronizaram
             // continuem a detectar as edições feitas via PATCH após o merge MQTT.
-            if (existing._updated_ms   != null) keep._updated_ms   = existing._updated_ms;
+            if (existing._updated_ms      != null) keep._updated_ms      = existing._updated_ms;
             return { ...newCharge, ...keep };
           });
           scheduleChargesFlush();
