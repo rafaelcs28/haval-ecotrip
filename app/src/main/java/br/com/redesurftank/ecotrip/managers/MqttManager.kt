@@ -179,10 +179,11 @@ class MqttManager private constructor() {
         if (!c.isConnected) return
         // Cancela qualquer debounce pendente — full snapshot já cobre tudo
         changeHandler.removeCallbacksAndMessages(null)
-        changeFastHandler.removeCallbacksAndMessages(null)
         changePending = false
         // O snapshot full cobre os tópicos da via expressa, então libera o slot
         // pra próxima rajada de fast (senão fica preso em true e nada publica).
+        // Tarefas já agendadas no fastExecutor continuam — mas com isInFlight=false,
+        // novas markChangedFast podem agendar imediatamente sem esperar.
         fastInFlight.set(false)
         val now = System.currentTimeMillis()
         val tm = TripManager.getInstance()
@@ -193,30 +194,41 @@ class MqttManager private constructor() {
 
     // ── Via expressa pra telemetria de alta frequência ─────────────────────────
     // Speed, RPM, % potência motor e potência do motor (kW) mudam continuamente
-    // durante a condução. Com debounce de 1s do markChanged, PWA atualiza só a
-    // 1 Hz — fica visivelmente lerdo no dash. Via expressa publica só esses 4
-    // tópicos a até 20 Hz (50ms debounce), sem mexer no full snapshot.
+    // durante a condução. Publica esses tópicos a ~20Hz (50ms debounce) sem mexer
+    // no snapshot full.
     //
-    // IMPORTANTE: drop-if-in-flight. Se o executor ainda não terminou o publish
-    // anterior (rede engasgada, snapshot full grande na fila à frente), o novo é
-    // descartado — perde uma amostra de 50ms mas não enfileira. Sem isso, a fila
-    // do executor crescia em rajadas: PWA via burst de updates seguido de freeze
-    // de segundos/minutos enquanto a fila esvaziava.
-    private val changeFastHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    // Robustez:
+    //  - Executor DEDICADO (não compete com snapshots/históricos no executor
+    //    principal). Se um snapshot full bloquear a fila do `executor`, fast lane
+    //    continua fluindo no `fastExecutor`.
+    //  - Drop-if-in-flight: se um publish anterior ainda não terminou, descarta o
+    //    novo. Perde uma amostra de 50ms mas não enfileira.
+    //  - Self-heal de 5s: se in-flight ficou preso por mais de 5s (rede engasgou,
+    //    Paho não detectou desconexão, etc.), força reset pra não congelar a via
+    //    expressa permanentemente.
+    private val fastExecutor = java.util.concurrent.Executors.newSingleThreadScheduledExecutor()
     private val fastInFlight = AtomicBoolean(false)
+    @Volatile private var fastInFlightSinceMs: Long = 0L
     private val CHANGE_FAST_DEBOUNCE_MS = 50L
+    private val FAST_INFLIGHT_TIMEOUT_MS = 5_000L
 
     fun markChangedFast() {
-        // CAS atômico: só agenda se NÃO há publish anterior pendente OU rodando.
+        val now = System.currentTimeMillis()
+        // Self-heal: publish anterior travou? Solta o slot.
+        if (fastInFlight.get() && (now - fastInFlightSinceMs) > FAST_INFLIGHT_TIMEOUT_MS) {
+            Log.w(TAG, "Fast lane preso há ${now - fastInFlightSinceMs}ms — força reset")
+            fastInFlight.set(false)
+        }
+        // CAS atômico: só prossegue se NÃO há publish anterior em andamento.
         if (!fastInFlight.compareAndSet(false, true)) return
+        fastInFlightSinceMs = now
         val c = client
         if (c == null || !c.isConnected) { fastInFlight.set(false); return }
-        changeFastHandler.postDelayed({
-            executor.submit {
-                try { publishFastTelemetryInternal(c) }
-                finally { fastInFlight.set(false) }
-            }
-        }, CHANGE_FAST_DEBOUNCE_MS)
+        fastExecutor.schedule({
+            try { publishFastTelemetryInternal(c) }
+            catch (e: Exception) { Log.w(TAG, "Fast publish failed: ${e.message}") }
+            finally { fastInFlight.set(false) }
+        }, CHANGE_FAST_DEBOUNCE_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
     }
 
     private fun publishFastTelemetryInternal(c: MqttClient) {
