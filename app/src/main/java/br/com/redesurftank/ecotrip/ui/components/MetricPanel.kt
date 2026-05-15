@@ -246,11 +246,12 @@ fun SocStripBar(
     // Column wrapping para acomodar a label acima da bar
     androidx.compose.foundation.layout.Column(
         modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(4.dp),  // folga entre label e bar
     ) {
         // 1) Label "X% início" — posicionada acima do marcador via offset proporcional
         if (showConsumed) {
             BoxWithConstraints(
-                modifier = Modifier.fillMaxWidth().height(16.dp),
+                modifier = Modifier.fillMaxWidth().height(18.dp),  // espaço pro texto respirar
             ) {
                 val totalW = maxWidth
                 // O texto ocupa ~50dp; centro do texto deve cair em totalW * startFrac
