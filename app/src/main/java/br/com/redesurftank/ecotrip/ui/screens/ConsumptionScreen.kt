@@ -308,19 +308,23 @@ fun ConsumptionScreen() {
                         mqttManager.latestLockStatus = value.trim().toIntOrNull() ?: 0
                     }
                     CarConstants.CAR_BASIC_DOOR_STATUS.value -> {
-                        // CSV "FL,FR,RL,RR,Trunk" — cada índice 0=fechada, 1=aberta
+                        // Formato esperado: CSV "FL,FR,RL,RR,Trunk" — 0=fechada, 1=aberta.
+                        // Aceita 4 (sem trunk) ou 5 elementos pra tolerar variações do car.
+                        // O valor cru é guardado em latestDoorStatusRaw pra publicação de debug.
+                        mqttManager.latestDoorStatusRaw = value
                         val parts = value.split(",").map { it.trim().toIntOrNull() ?: 0 }
-                        if (parts.size >= 5) {
-                            mqttManager.latestDoorFl = parts[0]
-                            mqttManager.latestDoorFr = parts[1]
-                            mqttManager.latestDoorRl = parts[2]
-                            mqttManager.latestDoorRr = parts[3]
-                            mqttManager.latestTrunk  = parts[4]
+                        if (parts.size >= 4) {
+                            mqttManager.latestDoorFl = parts.getOrElse(0) { 0 }
+                            mqttManager.latestDoorFr = parts.getOrElse(1) { 0 }
+                            mqttManager.latestDoorRl = parts.getOrElse(2) { 0 }
+                            mqttManager.latestDoorRr = parts.getOrElse(3) { 0 }
+                            mqttManager.latestTrunk  = parts.getOrElse(4) { 0 }
                         }
                     }
                     CarConstants.CAR_BASIC_WINDOW_STATUS.value -> {
-                        // CSV "FL,FR,RL,RR" — 0=fechado, ≠0=aberto (vários estágios)
-                        // Preservamos o valor cru pra publicação posterior normalizar
+                        // CSV "FL,FR,RL,RR" — cru "1"=fechado, demais valores=aberto.
+                        // O cru é guardado pra publicação de debug.
+                        mqttManager.latestWindowStatusRaw = value
                         val parts = value.split(",").map { it.trim().toIntOrNull() ?: 0 }
                         if (parts.size >= 4) {
                             mqttManager.latestWindowFl = parts[0]

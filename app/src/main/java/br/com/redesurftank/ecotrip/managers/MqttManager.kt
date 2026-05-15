@@ -133,6 +133,9 @@ class MqttManager private constructor() {
     // Driving ready (ignição) — usado pra derivar engine_state (carro on/off) sem oscilação
     // do motor a combustão (HEV liga/desliga o ICE várias vezes por minuto).
     var latestDrivingReadyState: Int = 0
+    // Valores crus pra debug — facilita inspeção via MQTT pra confirmar semântica do barramento
+    var latestDoorStatusRaw:   String = ""
+    var latestWindowStatusRaw: String = ""
 
     // Último timestamp em que qualquer dado do carro foi recebido pelo app
     // Usado para saber se o barramento de dados do carro está ativo
@@ -493,12 +496,17 @@ class MqttManager private constructor() {
             pubR("window_rr",  if (latestWindowRr == 1) "0" else "1")
             // Sunroof: 0=fechado, >0=aberto (confirmado em uso).
             pubR("sunroof",    if (latestSunroof  > 0) "1" else "0")
-            // Trava invertida no carro: 0=destrancado, 1=trancado (confirmado em uso).
-            pubR("lock_state", if (latestLockStatus == 0) "1" else "0")
+            // Trava: cru "3"=destrancado, "1"=trancado (confirmado em uso real).
+            pubR("lock_state", if (latestLockStatus == 3) "1" else "0")
             // Estado da ignição (carro on/off): derivado de driving_ready_state.
             // Antes vinha de engine_rpm > 0, mas no HEV o motor a combustão cicla
             // muito durante condução — gerava dezenas de eventos engine_on/off por viagem.
             pubR("engine_state", if (latestDrivingReadyState > 0) "1" else "0")
+            // Debug — valores crus do barramento pra inspeção rápida (sem afetar lógica)
+            if (latestDoorStatusRaw.isNotEmpty())   pubR("debug/door_status_raw",   latestDoorStatusRaw)
+            if (latestWindowStatusRaw.isNotEmpty()) pubR("debug/window_status_raw", latestWindowStatusRaw)
+            pubR("debug/sunroof_raw",      latestSunroof.toString())
+            pubR("debug/lock_status_raw",  latestLockStatus.toString())
             if (latestOdometerKm > 0f) pubR("odometer_km", fmt1(latestOdometerKm))
             if (latestBatt12vPct > 0f) pubR("batt_12v_pct", fmt1(latestBatt12vPct))
             // Potência de recarga: apenas quando charging_state == 1 (Carregando)
