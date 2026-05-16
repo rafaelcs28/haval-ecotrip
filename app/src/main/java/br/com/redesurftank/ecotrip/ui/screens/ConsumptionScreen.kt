@@ -340,14 +340,13 @@ fun ConsumptionScreen() {
                         // O carro emite envolvido em chaves: "{1,1,1,1}". Limpa qualquer
                         // não-dígito (exceto vírgula e sinal) antes de parsear — senão o
                         // primeiro/último elemento ficam grudados com `{`/`}` e viram 0.
+                        // applyWindowStatus aplica voting filter (K=8 leituras consecutivas)
+                        // pra filtrar rajadas de ruído do barramento.
                         mqttManager.latestWindowStatusRaw = value
                         val cleaned = value.replace(Regex("[^0-9,\\-]"), "")
                         val parts = cleaned.split(",").mapNotNull { it.trim().toIntOrNull() }
                         if (parts.size >= 4) {
-                            mqttManager.latestWindowFl = parts[0]
-                            mqttManager.latestWindowFr = parts[1]
-                            mqttManager.latestWindowRl = parts[2]
-                            mqttManager.latestWindowRr = parts[3]
+                            mqttManager.applyWindowStatus(parts[0], parts[1], parts[2], parts[3])
                         }
                     }
                     CarConstants.CAR_BASIC_SUNROOF_STATUS.value -> {

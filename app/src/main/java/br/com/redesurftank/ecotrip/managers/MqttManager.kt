@@ -130,6 +130,43 @@ class MqttManager private constructor() {
     var latestSunroof: Int = 0
     // Trava (de car.basic.door_lock_status — semântica do valor cru, a confirmar com o carro real)
     var latestLockStatus: Int = 0
+
+    // ── Voting filter pra car.basic.window_status ─────────────────────────────
+    // O car bus emite valores ruidosos em rajadas (observado em uso real: até
+    // 6 leituras consecutivas reportando "0" quando os vidros estão fechados,
+    // depois volta pra "1"). Antes a gente publicava cada leitura → bridge via
+    // como transição → evento espúrio. Solução: voting — só atualiza
+    // latestWindow* quando WINDOW_VOTE_REQUIRED leituras consecutivas do mesmo
+    // valor são vistas. Bursts curtos de ruído nunca passam.
+    // Trade-off: mudança real demora WINDOW_VOTE_REQUIRED × snapshot_interval
+    // pra registrar (~40s a 5s/sample). Aceitável pra vidros que mudam raramente.
+    private var pendingFl: Int = 0; private var pendingFlCount: Int = 0
+    private var pendingFr: Int = 0; private var pendingFrCount: Int = 0
+    private var pendingRl: Int = 0; private var pendingRlCount: Int = 0
+    private var pendingRr: Int = 0; private var pendingRrCount: Int = 0
+    @Volatile private var windowVoteInitialized: Boolean = false
+    private val WINDOW_VOTE_REQUIRED = 8
+
+    /** Aplica voting filter em uma nova leitura de car.basic.window_status. */
+    fun applyWindowStatus(fl: Int, fr: Int, rl: Int, rr: Int) {
+        if (!windowVoteInitialized) {
+            // Confia na primeira leitura — sem dados pra votar
+            latestWindowFl = fl; pendingFl = fl; pendingFlCount = 1
+            latestWindowFr = fr; pendingFr = fr; pendingFrCount = 1
+            latestWindowRl = rl; pendingRl = rl; pendingRlCount = 1
+            latestWindowRr = rr; pendingRr = rr; pendingRrCount = 1
+            windowVoteInitialized = true
+            return
+        }
+        if (fl == pendingFl) { if (++pendingFlCount >= WINDOW_VOTE_REQUIRED) latestWindowFl = fl }
+        else { pendingFl = fl; pendingFlCount = 1 }
+        if (fr == pendingFr) { if (++pendingFrCount >= WINDOW_VOTE_REQUIRED) latestWindowFr = fr }
+        else { pendingFr = fr; pendingFrCount = 1 }
+        if (rl == pendingRl) { if (++pendingRlCount >= WINDOW_VOTE_REQUIRED) latestWindowRl = rl }
+        else { pendingRl = rl; pendingRlCount = 1 }
+        if (rr == pendingRr) { if (++pendingRrCount >= WINDOW_VOTE_REQUIRED) latestWindowRr = rr }
+        else { pendingRr = rr; pendingRrCount = 1 }
+    }
     // Driving ready (ignição) — usado pra derivar engine_state (carro on/off) sem oscilação
     // do motor a combustão (HEV liga/desliga o ICE várias vezes por minuto).
     var latestDrivingReadyState: Int = 0
