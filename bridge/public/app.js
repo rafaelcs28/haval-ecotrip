@@ -767,8 +767,12 @@ function connect() {
         deepMerge(state, msg.data);
         _checkPendingConfirm(msg.data);
         lastUpdateMs = Date.now();
-        renderAll();
-        try { localStorage.setItem('ecotrip_state', JSON.stringify({ state, ts: lastUpdateMs })); } catch(_) {}
+        // Throttle do render via rAF: agrupa múltiplos updates em um único repaint
+        // (fast lane publica speed/RPM/power a 40 Hz — sem isso o main thread engasga).
+        _scheduleRender();
+        // Debounce do localStorage save: persistir state a 40 Hz era a causa de
+        // travadas de segundos no iPhone (setItem é síncrono, ~10–30ms cada).
+        _scheduleStatePersist();
       } else if (msg.type === 'AUTH_ERROR') {
         ws.close();
         showLogin('Senha incorreta ou expirada.');
@@ -779,6 +783,8 @@ function connect() {
         // Nova viagem automática — sincroniza só o novo, sem derrubar o cache inteiro
         const autoPanel = document.getElementById('panel-auto');
         syncAllCache({ silent: true }).then(() => {
+          // Atualiza o card de "Última viagem" no dash
+          renderDash();
           if (autoPanel && autoPanel.classList.contains('active')) {
             renderAutoTrips();
           } else {
@@ -1257,8 +1263,34 @@ function filterChipsHTML(tabId) {
 }
 
 // ── Render ────────────────────────────────────────────────────────────────────
+// Coalesce de updates: a fast lane do app publica speed/RPM/power a 40 Hz; sem
+// throttle, o main thread no iPhone fica saturado e a UI trava por segundos.
+let _renderPending = false;
+function _scheduleRender() {
+  if (_renderPending) return;
+  _renderPending = true;
+  requestAnimationFrame(() => {
+    _renderPending = false;
+    renderAll();
+  });
+}
+
+// localStorage.setItem é síncrono e custoso (~10-30ms no iPhone Safari). Persistir
+// a cada msg WS travava o thread. Debounce de 500ms reduz pra 2 escritas/seg
+// (~20-60ms/seg de I/O — invisível), e em caso de reload o WS reenvia o full_state
+// em <500ms, mascarando a defasagem.
+let _persistTimer = null;
+function _scheduleStatePersist() {
+  if (_persistTimer) return;
+  _persistTimer = setTimeout(() => {
+    _persistTimer = null;
+    try { localStorage.setItem('ecotrip_state', JSON.stringify({ state, ts: lastUpdateMs })); } catch(_) {}
+  }, 500);
+}
+
 function renderAll() {
   renderDash();
+  renderDrivePanel();
   renderCarVersion();
   updateActionStatuses(state);
   _checkNotifBadge();
@@ -1600,6 +1632,13 @@ function renderDash() {
     });
   }
 
+  // ── Temperaturas ambiente — exibidas na "tela multimídia" do painel SVG ──
+  // Estilo cluster: INT em azul, EXT em âmbar, dentro do retângulo da tela.
+  const tIn  = parseFloat(s.inside_temp);
+  const tOut = parseFloat(s.outside_temp);
+  setText('cmf-svg-temp-in',  Number.isFinite(tIn)  ? tIn.toFixed(1)  + '°' : '--°');
+  setText('cmf-svg-temp-out', Number.isFinite(tOut) ? tOut.toFixed(1) + '°' : '--°');
+
   // ── Climate Panel (acima da cabine): 2 temps + SYNC + AUTO + FAN ─────────
   // Quando AC off: esconde controles e mostra apenas indicador "AC desligado".
   const climatePanel = document.querySelector('.climate-panel');
@@ -1610,10 +1649,13 @@ function renderDash() {
     const tDrv = parseFloat(s.hvac_driver_temp);
     const zoneDrv = tempDrvEl.closest('.climate-zone');
     if (Number.isFinite(tDrv)) {
-      tempDrvEl.textContent = `${tDrv.toFixed(1)}°C`;
+      if (typeof _hvacCheckPending === 'function') _hvacCheckPending('cmf-ac-temp-drv', tDrv);
+      if (typeof _hvacIsBusy !== 'function' || !_hvacIsBusy('cmf-ac-temp-drv')) {
+        tempDrvEl.textContent = `${tDrv.toFixed(1)}°C`;
+      }
       if (zoneDrv) zoneDrv.classList.toggle('active', acOn);
     } else {
-      tempDrvEl.textContent = '--°C';
+      if (typeof _hvacIsBusy !== 'function' || !_hvacIsBusy('cmf-ac-temp-drv')) tempDrvEl.textContent = '--°C';
       if (zoneDrv) zoneDrv.classList.remove('active');
     }
   }
@@ -1791,6 +1833,117 @@ function renderDash() {
   if (s.gps_lat && s.gps_lng) updateDashMap(s.gps_lat, s.gps_lng, s.gps_ts, s.speed_kmh || 0);
 
   renderAlerts(s);
+  renderTripCard(s, engOn);
+}
+
+// ── Cards de viagem — desde última partida + viagem atual/última ─────────────
+function renderTripCard(s, engOn) {
+  const rollCard = document.getElementById('d-roll-card');
+  const curCard  = document.getElementById('d-curtrip-card');
+  if (!rollCard || !curCard) return;
+
+  const r = s.rolling || {};
+  const rollDist = +r.distance_km || 0;
+  const rollCons = +r.kwh_per_100km || 0;
+  const rollKmL  = +r.km_per_l || 0;
+  const rollFuel = +r.fuel_l || 0;
+  const rollCost = +r.cost_brl || 0;
+  const last = (cachedAutoTrips && cachedAutoTrips[0]) || null;
+
+  // ── Card 1: Desde última partida ──────────────────────────────────────────
+  const hasRoll = rollDist > 0.05 || rollCost > 0 || rollFuel > 0;
+  rollCard.style.display = hasRoll ? '' : 'none';
+  if (hasRoll) {
+    setText('d-roll-dist', rollDist > 0 ? rollDist.toFixed(1) : '0,0');
+    let consTxt = '--';
+    if (rollCons > 0)      consTxt = rollCons.toFixed(1) + ' kWh/100';
+    else if (rollKmL > 0)  consTxt = rollKmL.toFixed(1) + ' km/L';
+    setText('d-roll-cons', consTxt);
+    setText('d-roll-fuel', rollFuel > 0 ? rollFuel.toFixed(2) + ' L' : '0 L');
+    setText('d-roll-cost', rollCost > 0 ? 'R$ ' + rollCost.toFixed(2) : 'R$ 0,00');
+    const costPerKm = rollDist > 0.1 && rollCost > 0 ? (rollCost / rollDist) : 0;
+    setText('d-roll-cost-km', costPerKm > 0 ? 'R$ ' + costPerKm.toFixed(2) : '--');
+  }
+
+  // ── Card 2: Viagem em andamento (motor on) ou Última viagem (motor off) ───
+  const titleEl = document.getElementById('d-curtrip-title');
+  const iconEl  = document.getElementById('d-curtrip-icon');
+  const whenEl  = document.getElementById('d-curtrip-when');
+  const gridLast = document.getElementById('d-curtrip-grid-last');
+  const gridLive = document.getElementById('d-curtrip-grid-live');
+
+  if (engOn) {
+    curCard.style.display = '';
+    curCard.classList.add('in-progress');
+    if (iconEl)  iconEl.textContent  = '🚗';
+    if (titleEl) titleEl.textContent = 'Viagem em andamento';
+    if (whenEl)  whenEl.textContent  = '';
+    if (gridLast) gridLast.style.display = 'none';
+    if (gridLive) gridLive.style.display = '';
+
+    setText('d-curtrip-dist', rollDist > 0 ? rollDist.toFixed(1) : '0,0');
+    setText('d-live-soc',   s.soc_pct != null ? Math.round(+s.soc_pct) + '%' : '--');
+    setText('d-live-speed', s.speed_kmh != null ? Math.round(+s.speed_kmh) + ' km/h' : '--');
+    const mp = +s.motor_power_kw || 0;
+    setText('d-live-power', mp !== 0 ? (mp > 0 ? mp.toFixed(1) : '−' + Math.abs(mp).toFixed(1)) + ' kW' : '0 kW');
+    setText('d-live-temp',  s.outside_temp != null ? (+s.outside_temp).toFixed(1) + '°C' : '--');
+  } else if (last) {
+    curCard.style.display = '';
+    curCard.classList.remove('in-progress');
+    if (iconEl)  iconEl.textContent  = '🛣️';
+    if (titleEl) titleEl.textContent = (last.name && last.name.trim()) ? last.name : 'Última viagem';
+    if (whenEl && last.startMs) {
+      whenEl.textContent = fmtRelativeShort(last.startMs);
+    } else if (whenEl) {
+      whenEl.textContent = '';
+    }
+    if (gridLast) gridLast.style.display = '';
+    if (gridLive) gridLive.style.display = 'none';
+
+    const dist = +last.distKm || 0;
+    setText('d-curtrip-dist', dist > 0 ? dist.toFixed(1) : '0,0');
+
+    const secs = +last.timeSec || 0;
+    setText('d-last-time', secs > 0 ? fmtDuration(secs) : '--');
+
+    const ss = Math.round(+last.startSocPct || 0);
+    const es = Math.round(+last.endSocPct   || 0);
+    setText('d-last-soc', (ss || es) ? `${ss} → ${es}%` : '--');
+
+    const avgV = secs > 0 ? (dist / (secs / 3600)) : 0;
+    setText('d-last-avgv', avgV > 0 ? avgV.toFixed(0) + ' km/h' : '--');
+    setText('d-last-maxv', last.maxSpeedKmh ? Math.round(+last.maxSpeedKmh) + ' km/h' : '--');
+
+    const energy = +last.energyKwh || 0;
+    const regen  = +last.regenKwh  || 0;
+    setText('d-last-energy', energy > 0 ? energy.toFixed(1) + ' kWh' : '--');
+    setText('d-last-regen',  regen  > 0 ? regen.toFixed(1)  + ' kWh' : '--');
+  } else {
+    curCard.style.display = 'none';
+  }
+}
+
+// Duração em formato "1h 23m" / "23 min" / "45s"
+function fmtDuration(secs) {
+  if (secs < 60) return Math.round(secs) + 's';
+  const mins = Math.round(secs / 60);
+  if (mins < 60) return mins + ' min';
+  const hrs = Math.floor(mins / 60);
+  const rem = mins % 60;
+  return `${hrs}h ${rem}m`;
+}
+
+// Tempo relativo curto: "agora", "5 min", "2h", "ontem", "DD/MM"
+function fmtRelativeShort(ms) {
+  const diff = Date.now() - ms;
+  if (diff < 60000) return 'agora';
+  const mins = Math.floor(diff / 60000);
+  if (mins < 60) return mins + ' min atrás';
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return hrs + 'h atrás';
+  if (hrs < 48) return 'ontem';
+  const d = new Date(ms);
+  return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
 }
 
 // ── Recargas ──────────────────────────────────────────────────────────────────
@@ -5080,3 +5233,416 @@ window.lockClick = function() {
     ),
   });
 };
+
+// ── Drive panel: HUD em camadas sobre mapa ──────────────────────────────────
+// Mapa Leaflet instanciado uma única vez ao abrir a aba. Atualizações de
+// posição reaproveitam o panTo. Power chart roda em buffer próprio (2 Hz, 30s).
+let driveMap = null;
+let driveMarker = null;
+let _driveMapMoving = false;
+let _drivePowerBuf = [];           // {t: ms, kw: number} — máx 60 pontos
+let _drivePowerSampleTimer = null;
+let _drivePowerScale = 50;         // limite ±kW do eixo do chart (auto-ajusta)
+let _drvPeakSpeed = 0;             // pico de velocidade desde a aba abrir
+let _drvPeakPower = 0;             // pico de potência abs(kW) desde a aba abrir
+const DRIVE_POWER_WINDOW_MS = 30000;
+const DRIVE_POWER_SAMPLE_MS = 500;
+// Anéis SVG concêntricos:
+// - interno: raio 86, arc 270° = 405.3
+// - externo (tach): raio 94, arc 270° = 443.0
+const DRIVE_RING_TOTAL = 405.3;
+const DRIVE_TACH_TOTAL = 443.0;
+const DRIVE_POWER_MAX  = 80;       // potência máx pro anel interno (kW)
+const DRIVE_RPM_MAX    = 6500;     // redline aproximada do GW4B15D
+const DRIVE_RPM_REDLINE = 5500;    // a partir daqui pinta vermelho
+
+window.initDrivePanel = function() {
+  const el = document.getElementById('drv-map');
+  if (!el) return;
+
+  // Reseta picos cada vez que entra na aba
+  _drvPeakSpeed = 0;
+  _drvPeakPower = 0;
+
+  // Cria mapa só na primeira vez
+  if (!driveMap) {
+    driveMap = L.map(el, {
+      zoomControl:        false,
+      attributionControl: false,
+      dragging:           false,
+      scrollWheelZoom:    false,
+      doubleClickZoom:    false,
+      touchZoom:          false,
+      keyboard:           false,
+      tap:                false,
+    });
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+      maxZoom: 19,
+      attribution: '',
+    }).addTo(driveMap);
+    // Posição inicial: usa a última conhecida do state
+    const lat = +state.gps_lat || 0;
+    const lng = +state.gps_lng || 0;
+    if (lat && lng) driveMap.setView([lat, lng], 16);
+    else driveMap.setView([-15.78, -47.93], 4);  // fallback Brasil
+  }
+
+  // Garante que o tile layer renderize após o panel virar visível
+  setTimeout(() => driveMap?.invalidateSize(), 80);
+
+  // Começa amostragem do power chart (só enquanto a aba está aberta)
+  _drivePowerStart();
+
+  // Render imediato
+  renderDrivePanel();
+};
+
+// Iniciar/parar a coleta do power chart conforme a aba está visível
+function _drivePowerStart() {
+  if (_drivePowerSampleTimer) return;
+  _drivePowerSampleTimer = setInterval(() => {
+    const isActive = document.getElementById('panel-drive')?.classList.contains('active');
+    if (!isActive) return;  // pausa amostragem fora da aba
+    const kw = +state.motor_power_kw || 0;
+    _drivePowerBuf.push({ t: Date.now(), kw });
+    // Mantém só os últimos 30s
+    const cutoff = Date.now() - DRIVE_POWER_WINDOW_MS;
+    while (_drivePowerBuf.length && _drivePowerBuf[0].t < cutoff) _drivePowerBuf.shift();
+    _renderDriveChart();
+  }, DRIVE_POWER_SAMPLE_MS);
+}
+
+function _renderDriveChart() {
+  const lineEl = document.getElementById('drv-chart-line');
+  const fillEl = document.getElementById('drv-chart-fill');
+  const scaleEl = document.getElementById('drv-chart-scale');
+  if (!lineEl || !fillEl) return;
+  if (_drivePowerBuf.length < 2) {
+    lineEl.setAttribute('d', '');
+    fillEl.setAttribute('d', '');
+    return;
+  }
+  // Escala auto: max abs(kw) na janela, com mínimo de 20 kW e hysteresis (não cai rápido)
+  const maxAbs = Math.max(20, ...(_drivePowerBuf.map(p => Math.abs(p.kw))));
+  // Atualiza escala apenas se variou significativamente (suaviza)
+  if (Math.abs(maxAbs - _drivePowerScale) > _drivePowerScale * 0.2) {
+    _drivePowerScale = Math.ceil(maxAbs / 10) * 10;
+  } else if (maxAbs > _drivePowerScale) {
+    _drivePowerScale = Math.ceil(maxAbs / 10) * 10;
+  }
+  if (scaleEl) scaleEl.textContent = `±${_drivePowerScale} kW`;
+
+  const w = 300, h = 78, mid = h / 2;
+  const tMin = _drivePowerBuf[0].t;
+  const tMax = Math.max(_drivePowerBuf[_drivePowerBuf.length - 1].t, tMin + 1);
+  const tRange = Math.max(tMax - tMin, 1000);
+  let d = '';
+  _drivePowerBuf.forEach((p, i) => {
+    const x = ((p.t - tMin) / tRange) * w;
+    const y = mid - (p.kw / _drivePowerScale) * (mid - 2);
+    d += (i === 0 ? `M ${x.toFixed(1)} ${y.toFixed(1)}` : ` L ${x.toFixed(1)} ${y.toFixed(1)}`);
+  });
+  lineEl.setAttribute('d', d);
+  // Fill area até o eixo central
+  const lastX = ((_drivePowerBuf[_drivePowerBuf.length-1].t - tMin) / tRange) * w;
+  const firstX = 0;
+  fillEl.setAttribute('d', d + ` L ${lastX.toFixed(1)} ${mid} L ${firstX.toFixed(1)} ${mid} Z`);
+}
+
+// Atualiza HUD inteiro — chamado por renderAll (já passa por rAF)
+function renderDrivePanel() {
+  const panel = document.getElementById('panel-drive');
+  if (!panel) return;
+  const isActive = panel.classList.contains('active');
+  // Só renderiza se a aba está visível (poupa CPU)
+  if (!isActive && !driveMap) return;
+
+  const s = state;
+  // Speed: o car bus às vezes manda -1 quando inválido — clampa pra 0
+  const speed = Math.max(0, +s.speed_kmh || 0);
+  const speedR = Math.round(speed);
+  const speedEl = document.getElementById('drv-speed');
+  if (speedEl) {
+    speedEl.textContent = speedR;
+    speedEl.classList.toggle('idle', speedR === 0);
+  }
+
+  // Tracking de picos desde abertura da aba (resetam ao mudar de aba e voltar)
+  if (speed > _drvPeakSpeed) _drvPeakSpeed = speed;
+  // Anel: preenche proporcional a |motor_power_kw|, cor muda com regen
+  const mp = +s.motor_power_kw || 0;
+  const mpAbs = Math.abs(mp);
+  if (mpAbs > _drvPeakPower) _drvPeakPower = mpAbs;
+  // Atualiza linha de picos (mostra só se houver algum valor relevante)
+  const peakRow = document.getElementById('drv-peak-row');
+  if (peakRow) {
+    if (_drvPeakSpeed > 1 || _drvPeakPower > 1) {
+      peakRow.style.display = '';
+      setText('drv-peak-speed', Math.round(_drvPeakSpeed) + ' km/h');
+      setText('drv-peak-power', _drvPeakPower.toFixed(1) + ' kW');
+    } else {
+      peakRow.style.display = 'none';
+    }
+  }
+  const ring = document.getElementById('drv-ring');
+  if (ring) {
+    const pct = Math.min(1, Math.abs(mp) / DRIVE_POWER_MAX);
+    ring.setAttribute('stroke-dashoffset', (DRIVE_RING_TOTAL * (1 - pct)).toFixed(1));
+    ring.classList.toggle('regen', mp < -0.5);
+  }
+
+  // Gear
+  const gearEl = document.getElementById('drv-gear');
+  if (gearEl) {
+    const g = (s.gear || '').toString().toUpperCase().trim();
+    const isValid = g && g !== '-1' && g !== '--';
+    gearEl.textContent = isValid ? g : '--';
+    gearEl.classList.toggle('idle', !isValid || g === 'P' || g === 'N');
+    gearEl.classList.toggle('reverse', g === 'R');
+  }
+
+  // Tacômetro externo: arco proporcional ao RPM do ICE.
+  // O APK publica engine_rpm em kRPM (ex: "2.4" = 2400 RPM) — multiplica por 1000.
+  // Se algum dia mudar pra cru ou outras versões vierem em RPM direto, o valor
+  // vai ser >= 50, então só converte abaixo desse threshold (heurística segura).
+  const rpmRaw = Math.max(0, +s.engine_rpm || 0);
+  const rpm = rpmRaw > 0 && rpmRaw < 50 ? Math.round(rpmRaw * 1000) : Math.round(rpmRaw);
+  const isRedline = rpm >= DRIVE_RPM_REDLINE;
+  const tach = document.getElementById('drv-tach');
+  if (tach) {
+    const pct = Math.min(1, rpm / DRIVE_RPM_MAX);
+    tach.setAttribute('stroke-dashoffset', (DRIVE_TACH_TOTAL * (1 - pct)).toFixed(1));
+    tach.classList.toggle('redline', isRedline);
+  }
+  // Valor numérico embaixo do "km/h", em laranja (vermelho na redline)
+  const rpmInline = document.getElementById('drv-rpm-inline');
+  if (rpmInline) {
+    if (rpm > 0) {
+      rpmInline.style.display = '';
+      rpmInline.classList.toggle('redline', isRedline);
+      setText('drv-rpm-val', rpm.toLocaleString('pt-BR'));
+    } else {
+      rpmInline.style.display = 'none';
+    }
+  }
+
+  // Power chip
+  const chip = document.getElementById('drv-power-chip');
+  const valEl = document.getElementById('drv-power-val');
+  const chPow = +s.charge_power_kw || 0;
+  const isCharging = s.charging_state === 'Carregando' || chPow > 0.5;
+  if (chip && valEl) {
+    chip.classList.remove('regen', 'charging');
+    if (isCharging) {
+      chip.classList.add('charging');
+      valEl.textContent = `↓ ${chPow.toFixed(1)} kW`;
+    } else if (mp < -0.5) {
+      chip.classList.add('regen');
+      valEl.textContent = `↺ ${Math.abs(mp).toFixed(1)} kW`;
+    } else if (Math.abs(mp) < 0.05) {
+      valEl.textContent = `0.0 kW`;
+    } else {
+      valEl.textContent = `${(mp > 0 ? '+' : '')}${mp.toFixed(1)} kW`;
+    }
+  }
+
+  // SOC + autonomia
+  setText('drv-soc',    s.soc_pct != null ? Math.round(+s.soc_pct) + '%' : '--%');
+  setText('drv-ev-km',  s.autonomy_ev_km  != null ? Math.round(+s.autonomy_ev_km)  : '--');
+  // Combustível (vem do app, fuel_pct ou similar — fallback null)
+  const fuelPct = +s.fuel_pct || +s.fuel_level || 0;
+  setText('drv-fuel',   fuelPct > 0 ? Math.round(fuelPct) + '%' : '--%');
+  setText('drv-ice-km', s.autonomy_ice_km != null ? Math.round(+s.autonomy_ice_km) : '--');
+  // Consumo da janela (kWh/100km ou km/L)
+  const r = s.rolling || {};
+  const rKwh = +r.kwh_per_100km || 0;
+  const rKmL = +r.km_per_l || 0;
+  const rDist = +r.distance_km || 0;
+  let consTxt = '--';
+  if (rKwh > 0)      consTxt = rKwh.toFixed(1) + ' kWh/100';
+  else if (rKmL > 0) consTxt = rKmL.toFixed(1) + ' km/L';
+  setText('drv-cons', consTxt);
+  setText('drv-rolldist', rDist > 0 ? rDist.toFixed(1) : '0.0');
+
+  // Endereço + temps
+  setText('drv-address', s.current_address || '--');
+  setText('drv-temp-out', s.outside_temp != null ? (+s.outside_temp).toFixed(1) : '--');
+  setText('drv-temp-in',  s.inside_temp  != null ? (+s.inside_temp).toFixed(1)  : '--');
+
+  // Mapa: pan suave pra posição atual (só atualiza se mudou >50m)
+  if (driveMap && s.gps_lat && s.gps_lng) {
+    const lat = +s.gps_lat, lng = +s.gps_lng;
+    const moving = speedR > 3;
+    const targetZoom = moving ? 17 : 15;
+    if (!driveMarker) {
+      driveMarker = L.marker([lat, lng], {
+        icon: L.divIcon({
+          className: '',
+          html: '<div class="map-pulse-dot"></div>',
+          iconSize: [14, 14],
+          iconAnchor: [7, 7],
+        }),
+      }).addTo(driveMap);
+      driveMap.setView([lat, lng], targetZoom);
+      _driveMapMoving = moving;
+    } else {
+      driveMarker.setLatLng([lat, lng]);
+      driveMap.panTo([lat, lng], { animate: true, duration: 0.5 });
+      if (moving !== _driveMapMoving) {
+        driveMap.setZoom(targetZoom, { animate: true });
+        _driveMapMoving = moving;
+      }
+    }
+  }
+}
+
+// ── HVAC: gesture vertical pra alterar valores no painel Conforto ────────────
+// Touch up = aumenta, touch down = diminui. Cada PX_PER_STEP px = 1 step.
+// Durante o drag, renderDash ignora updates desse elemento (via classe).
+// Após release: envia POST, mantém "hvac-pending" até WS confirmar ou timeout.
+
+const HVAC_DRAG_PX_PER_STEP = 18;
+const HVAC_PENDING_TIMEOUT_MS = 12000;
+let _hvacDragState = null;
+const _hvacPending = {};  // { elementId: { until, expectedVal, fmt } }
+
+function _attachHvacGesture(elementId, control, getCurrent, fmt, min, max, step) {
+  const el = document.getElementById(elementId);
+  if (!el || el.dataset.hvacGesture === '1') return;
+  el.dataset.hvacGesture = '1';
+  el.style.touchAction = 'none';
+  el.style.userSelect = 'none';
+  el.style.webkitUserSelect = 'none';
+  el.style.cursor = 'ns-resize';
+
+  function startDrag(clientY) {
+    const cur = getCurrent();
+    if (!Number.isFinite(cur)) return false;
+    _hvacDragState = {
+      elementId, el, control, fmt, min, max, step,
+      startY: clientY, startVal: cur, previewVal: cur,
+    };
+    el.classList.add('hvac-dragging');
+    return true;
+  }
+  function moveDrag(clientY) {
+    if (!_hvacDragState || _hvacDragState.el !== el) return;
+    const dy = _hvacDragState.startY - clientY;  // up = positive
+    const steps = Math.round(dy / HVAC_DRAG_PX_PER_STEP);
+    let val = _hvacDragState.startVal + steps * _hvacDragState.step;
+    val = Math.max(_hvacDragState.min, Math.min(_hvacDragState.max, val));
+    val = Math.round(val / _hvacDragState.step) * _hvacDragState.step;
+    _hvacDragState.previewVal = val;
+    el.textContent = fmt(val);
+  }
+  async function endDrag() {
+    if (!_hvacDragState || _hvacDragState.el !== el) return;
+    const s = _hvacDragState;
+    _hvacDragState = null;
+
+    if (Math.abs(s.previewVal - s.startVal) < 0.001) {
+      el.classList.remove('hvac-dragging');
+      return;
+    }
+
+    // Vira "pending": classe muda visual e segura update do WS até confirmar
+    el.classList.remove('hvac-dragging');
+    el.classList.add('hvac-pending');
+    _hvacPending[elementId] = {
+      until: Date.now() + HVAC_PENDING_TIMEOUT_MS,
+      expectedVal: s.previewVal,
+      fmt,
+      timer: setTimeout(() => {
+        el.classList.remove('hvac-pending');
+        delete _hvacPending[elementId];
+        showToast('✗ Carro não confirmou em ' + (HVAC_PENDING_TIMEOUT_MS/1000) + 's');
+      }, HVAC_PENDING_TIMEOUT_MS),
+    };
+
+    try {
+      const r = await apiFetch(`/api/hvac/${control}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value: s.previewVal }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok || !data.ok) {
+        clearTimeout(_hvacPending[elementId]?.timer);
+        el.classList.remove('hvac-pending');
+        delete _hvacPending[elementId];
+        showToast('✗ ' + (data.error || `Erro ${r.status}`));
+        // Restaura valor original
+        el.textContent = fmt(s.startVal);
+      }
+    } catch (err) {
+      clearTimeout(_hvacPending[elementId]?.timer);
+      el.classList.remove('hvac-pending');
+      delete _hvacPending[elementId];
+      showToast('✗ Falha ao enviar');
+      el.textContent = fmt(s.startVal);
+    }
+  }
+
+  el.addEventListener('touchstart', (e) => {
+    if (!startDrag(e.touches[0].clientY)) return;
+    e.preventDefault();
+  }, { passive: false });
+  el.addEventListener('touchmove', (e) => {
+    if (!_hvacDragState || _hvacDragState.el !== el) return;
+    moveDrag(e.touches[0].clientY);
+    e.preventDefault();
+  }, { passive: false });
+  el.addEventListener('touchend', endDrag);
+  el.addEventListener('touchcancel', endDrag);
+
+  // Fallback mouse (desktop)
+  el.addEventListener('mousedown', (e) => {
+    if (!startDrag(e.clientY)) return;
+    e.preventDefault();
+    const onMove = (ev) => moveDrag(ev.clientY);
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      endDrag();
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  });
+}
+
+// Helper pro renderDash: testa se elemento está em drag/pending pra evitar
+// sobrescrever o textContent (que mostra o valor preview ou pending).
+function _hvacIsBusy(elementId) {
+  if (_hvacDragState && _hvacDragState.elementId === elementId) return true;
+  if (_hvacPending[elementId]) return true;
+  return false;
+}
+
+// Confere se valor recém-chegado via WS bate com o pending (= carro confirmou).
+function _hvacCheckPending(elementId, actualVal) {
+  const p = _hvacPending[elementId];
+  if (!p) return;
+  if (Math.abs(actualVal - p.expectedVal) < 0.05) {
+    clearTimeout(p.timer);
+    delete _hvacPending[elementId];
+    const el = document.getElementById(elementId);
+    if (el) {
+      el.classList.remove('hvac-pending');
+      el.textContent = p.fmt(actualVal);
+    }
+    showToast('✓ Aplicado: ' + p.fmt(actualVal));
+  }
+}
+
+// Setup uma vez quando DOM estiver pronto
+window.addEventListener('load', () => {
+  setTimeout(() => {
+    _attachHvacGesture(
+      'cmf-ac-temp-drv',
+      'driver_temp',
+      () => parseFloat(state.hvac_driver_temp),
+      v => `${v.toFixed(1)}°C`,
+      16, 32, 0.5,
+    );
+  }, 300);
+});

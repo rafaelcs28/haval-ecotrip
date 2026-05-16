@@ -145,7 +145,7 @@
               <span class="bar-val" id="d-fuel">--</span>
             </div>
             <div class="bar-track"><div class="bar-fill fuel" id="d-fuel-bar" style="width:0%"></div></div>
-            <div id="d-fuel-range" style="font-size:10px;color:var(--orange);text-align:right;margin-top:3px;display:none"><span id="d-fuel-km">--</span> km térmico</div>
+            <div id="d-fuel-range" style="font-size:10px;color:var(--orange);text-align:right;margin-top:3px;display:none"><span id="d-fuel-km">--</span> km à combustão</div>
           </div>
           <div class="bar-item">
             <div class="bar-header">
@@ -356,9 +356,190 @@
         </div>
       </div>
 
+      <!-- Card 1: Desde última partida (rolling window) -->
+      <div class="card trip-card" id="d-roll-card" style="display:none">
+        <div class="trip-hdr">
+          <span class="trip-hdr-icon">🛣️</span>
+          <span class="trip-hdr-title">Desde última partida</span>
+        </div>
+        <div class="trip-hero">
+          <span class="trip-hero-val" id="d-roll-dist">--</span>
+          <span class="trip-hero-unit">km</span>
+        </div>
+        <div class="trip-grid">
+          <div class="trip-cell">
+            <div class="trip-cell-label">Consumo</div>
+            <div class="trip-cell-val" id="d-roll-cons">--</div>
+          </div>
+          <div class="trip-cell">
+            <div class="trip-cell-label">Combustível</div>
+            <div class="trip-cell-val" id="d-roll-fuel">--</div>
+          </div>
+          <div class="trip-cell">
+            <div class="trip-cell-label">Custo total</div>
+            <div class="trip-cell-val" id="d-roll-cost">--</div>
+          </div>
+          <div class="trip-cell">
+            <div class="trip-cell-label">Custo/km</div>
+            <div class="trip-cell-val" id="d-roll-cost-km">--</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Card 2: Viagem em andamento (motor on) OU Última viagem (motor off) -->
+      <div class="card trip-card" id="d-curtrip-card" style="display:none">
+        <div class="trip-hdr" id="d-curtrip-hdr">
+          <span class="trip-hdr-icon" id="d-curtrip-icon">🛣️</span>
+          <span class="trip-hdr-title" id="d-curtrip-title">Última viagem</span>
+          <span class="trip-hdr-sub" id="d-curtrip-when"></span>
+        </div>
+        <div class="trip-hero">
+          <span class="trip-hero-val" id="d-curtrip-dist">--</span>
+          <span class="trip-hero-unit">km</span>
+        </div>
+        <!-- Grid: 6 células — última viagem (motor off) -->
+        <div class="trip-grid trip-grid-6" id="d-curtrip-grid-last">
+          <div class="trip-cell">
+            <div class="trip-cell-label">Duração</div>
+            <div class="trip-cell-val" id="d-last-time">--</div>
+          </div>
+          <div class="trip-cell">
+            <div class="trip-cell-label">SOC</div>
+            <div class="trip-cell-val" id="d-last-soc">--</div>
+          </div>
+          <div class="trip-cell">
+            <div class="trip-cell-label">Vel. média</div>
+            <div class="trip-cell-val" id="d-last-avgv">--</div>
+          </div>
+          <div class="trip-cell">
+            <div class="trip-cell-label">Vel. máx</div>
+            <div class="trip-cell-val" id="d-last-maxv">--</div>
+          </div>
+          <div class="trip-cell">
+            <div class="trip-cell-label">Energia</div>
+            <div class="trip-cell-val" id="d-last-energy">--</div>
+          </div>
+          <div class="trip-cell">
+            <div class="trip-cell-label">Regenerada</div>
+            <div class="trip-cell-val green" id="d-last-regen">--</div>
+          </div>
+        </div>
+        <!-- Grid: 4 células — viagem em andamento (motor on) -->
+        <div class="trip-grid" id="d-curtrip-grid-live" style="display:none">
+          <div class="trip-cell">
+            <div class="trip-cell-label">SOC atual</div>
+            <div class="trip-cell-val" id="d-live-soc">--</div>
+          </div>
+          <div class="trip-cell">
+            <div class="trip-cell-label">Velocidade</div>
+            <div class="trip-cell-val" id="d-live-speed">--</div>
+          </div>
+          <div class="trip-cell">
+            <div class="trip-cell-label">Potência</div>
+            <div class="trip-cell-val" id="d-live-power">--</div>
+          </div>
+          <div class="trip-cell">
+            <div class="trip-cell-label">Temp. externa</div>
+            <div class="trip-cell-val" id="d-live-temp">--</div>
+          </div>
+        </div>
+      </div>
+
 
     </div>
 
+
+    <!-- ── Drive: HUD em camadas sobre mapa (vista cinematográfica) ────── -->
+    <div id="panel-drive" class="panel">
+      <div id="drv-map"></div>
+      <div class="drv-overlay"></div>
+      <div class="drv-hud">
+        <!-- Top: gear + power chip -->
+        <div class="drv-top">
+          <div class="drv-gear" id="drv-gear">--</div>
+          <div class="drv-power-chip" id="drv-power-chip">
+            <span class="drv-power-icon">⚡</span>
+            <span class="drv-power-val" id="drv-power-val">0.0 kW</span>
+          </div>
+        </div>
+        <!-- Centro: anel de potência + velocidade gigante -->
+        <div class="drv-speed-wrap">
+          <svg class="drv-speed-ring" viewBox="0 0 200 200" aria-hidden="true">
+            <!-- ── Tacômetro externo (RPM do motor térmico) ────────── -->
+            <!-- Arco 270°, raio 94 — circunferência 590.6, arco 443.0 -->
+            <circle class="drv-tach-bg" cx="100" cy="100" r="94"
+                    stroke-dasharray="443.0 590.6"
+                    transform="rotate(135 100 100)"/>
+            <circle class="drv-tach-fill" id="drv-tach" cx="100" cy="100" r="94"
+                    stroke-dasharray="443.0 590.6"
+                    stroke-dashoffset="443.0"
+                    transform="rotate(135 100 100)"/>
+            <!-- ── Anel interno (potência elétrica em kW) ──────────── -->
+            <circle class="drv-ring-bg" cx="100" cy="100" r="86"
+                    stroke-dasharray="405.3 540.4"
+                    transform="rotate(135 100 100)"/>
+            <circle class="drv-ring-fill" id="drv-ring" cx="100" cy="100" r="86"
+                    stroke-dasharray="405.3 540.4"
+                    stroke-dashoffset="405.3"
+                    transform="rotate(135 100 100)"/>
+          </svg>
+          <div class="drv-speed-content">
+            <div class="drv-speed-num" id="drv-speed">0</div>
+            <div class="drv-speed-unit">km/h</div>
+            <div class="drv-rpm-inline" id="drv-rpm-inline" style="display:none">
+              <span class="drv-rpm-inline-val" id="drv-rpm-val">--</span>
+              <span class="drv-rpm-inline-unit">rpm</span>
+            </div>
+            <div class="drv-peak-row" id="drv-peak-row" style="display:none">
+              <span>Máx<span class="drv-peak-val" id="drv-peak-speed">--</span></span>
+              <span class="drv-peak-sep">·</span>
+              <span>Pico<span class="drv-peak-val" id="drv-peak-power">--</span></span>
+            </div>
+          </div>
+        </div>
+        <!-- Gráfico de potência (últimos 30s) -->
+        <div class="drv-chart-wrap">
+          <div class="drv-chart-label">
+            <span>Potência · 30s</span>
+            <span class="drv-chart-scale" id="drv-chart-scale">±50 kW</span>
+          </div>
+          <svg class="drv-chart" viewBox="0 0 300 78" preserveAspectRatio="none">
+            <line class="drv-chart-axis" x1="0" y1="39" x2="300" y2="39"/>
+            <path class="drv-chart-fill" id="drv-chart-fill" d=""/>
+            <path class="drv-chart-line" id="drv-chart-line" d=""/>
+          </svg>
+        </div>
+        <!-- Stats: SOC + autonomia -->
+        <div class="drv-stats">
+          <div class="drv-stat-row">
+            <span class="drv-stat-icon">🔋</span>
+            <span class="drv-stat-pct" id="drv-soc">--%</span>
+            <span class="drv-stat-sep">·</span>
+            <span class="drv-stat-km"><span id="drv-ev-km">--</span> km elétricos</span>
+          </div>
+          <div class="drv-stat-row">
+            <span class="drv-stat-icon">⛽</span>
+            <span class="drv-stat-pct drv-stat-pct-fuel" id="drv-fuel">--%</span>
+            <span class="drv-stat-sep">·</span>
+            <span class="drv-stat-km"><span id="drv-ice-km">--</span> km à combustão</span>
+          </div>
+          <div class="drv-stat-row drv-stat-cons">
+            <span class="drv-stat-icon">📊</span>
+            <span class="drv-stat-pct" id="drv-cons">--</span>
+            <span class="drv-stat-sep">·</span>
+            <span class="drv-stat-km"><span id="drv-rolldist">--</span> km na partida</span>
+          </div>
+        </div>
+        <!-- Footer: endereço + chips -->
+        <div class="drv-footer">
+          <div class="drv-address" id="drv-address">--</div>
+          <div class="drv-chips">
+            <span class="drv-chip">☀️ <span id="drv-temp-out">--</span>°</span>
+            <span class="drv-chip">🌡 <span id="drv-temp-in">--</span>°</span>
+          </div>
+        </div>
+      </div>
+    </div>
 
     <!-- ── Conforto: cabine top-down com AC + ventilação dos bancos ─────── -->
     <div id="panel-comfort" class="panel" style="overflow-y:auto;padding:14px 14px 80px;text-align:center">
@@ -458,10 +639,21 @@
                    L 340 145 Q 340 155, 330 155 L 70 155 Q 60 155, 60 145 Z"
                 fill="url(#cmf-grad-dashboard)" stroke="#2a3550" stroke-width="1.2"/>
 
-          <!-- Tela infotainment (centro) -->
+          <!-- Tela infotainment — mostra temp interna (azul) e externa (âmbar) -->
           <rect x="170" y="60" width="60" height="40" rx="3" fill="#06080C" stroke="#334155" stroke-width="1"/>
           <rect x="174" y="64" width="52" height="32" rx="1" fill="#0e1a30"/>
-          <text x="200" y="84" text-anchor="middle" font-size="7" fill="#475569" font-weight="700" letter-spacing="0.5">HAVAL</text>
+          <!-- Linha 1: INT em azul -->
+          <text x="182" y="76" font-size="3.6" fill="#475569" font-weight="700" letter-spacing="0.5">INT</text>
+          <text x="220" y="78" text-anchor="end" font-size="9" font-weight="700" fill="#60a5fa"
+                style="font-variant-numeric:tabular-nums"
+                id="cmf-svg-temp-in">--°</text>
+          <!-- Divisor central -->
+          <line x1="178" y1="80" x2="222" y2="80" stroke="#1e293b" stroke-width="0.6"/>
+          <!-- Linha 2: EXT em âmbar -->
+          <text x="182" y="91" font-size="3.6" fill="#475569" font-weight="700" letter-spacing="0.5">EXT</text>
+          <text x="220" y="93" text-anchor="end" font-size="9" font-weight="700" fill="#fbbf24"
+                style="font-variant-numeric:tabular-nums"
+                id="cmf-svg-temp-out">--°</text>
 
           <!-- AC vents (slits) — id agrupado pra recolorir via JS -->
           <g id="cmf-ac-vents">
@@ -893,6 +1085,10 @@
     <button class="tab active" data-panel="dash" onclick="switchTab(this)">
       <span class="tab-icon">🏠</span>
       <span class="tab-label">Dash</span>
+    </button>
+    <button class="tab" data-panel="drive" onclick="switchTab(this, initDrivePanel)">
+      <span class="tab-icon">🏎️</span>
+      <span class="tab-label">Drive</span>
     </button>
     <button class="tab" data-panel="comfort" onclick="switchTab(this)">
       <span class="tab-icon">

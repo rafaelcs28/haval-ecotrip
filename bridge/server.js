@@ -1763,6 +1763,54 @@ app.post('/api/action/:name', async (req, res) => {
   }
 });
 
+// ── HVAC commands ────────────────────────────────────────────────────────────
+// Publica em `${MQTT_PREFIX}/cmd/hvac/<control>` — o APK escuta e usa
+// CarDataManager.requestSetting() pra escrever no barramento via Shizuku.
+// Cada controle tem range/tipo validados aqui antes do publish pra evitar
+// que valores fora de faixa cheguem no carro.
+const HVAC_CONTROLS = {
+  driver_temp:    { type: 'float', min: 16, max: 32, step: 0.5 },
+  passenger_temp: { type: 'float', min: 16, max: 32, step: 0.5 },
+  fan_speed:      { type: 'int',   min: 0,  max: 7 },
+  sync:           { type: 'bool' },
+  auto:           { type: 'bool' },
+  cycle_mode:     { type: 'int',   min: 0,  max: 1 },
+  seat_vent_drv:  { type: 'int',   min: 0,  max: 3 },
+  seat_vent_pass: { type: 'int',   min: 0,  max: 3 },
+};
+
+app.post('/api/hvac/:control', (req, res) => {
+  const { control } = req.params;
+  const spec = HVAC_CONTROLS[control];
+  if (!spec) return res.status(400).json({ error: 'controle desconhecido' });
+  if (!mqttClient?.connected) return res.status(503).json({ error: 'MQTT offline' });
+
+  let raw = req.body?.value;
+  if (raw === undefined || raw === null) return res.status(400).json({ error: 'value ausente' });
+
+  let normalized;
+  if (spec.type === 'bool') {
+    normalized = (raw === true || raw === 1 || raw === '1' || raw === 'on' || raw === 'true') ? '1' : '0';
+  } else if (spec.type === 'int') {
+    const n = parseInt(raw, 10);
+    if (Number.isNaN(n) || n < spec.min || n > spec.max)
+      return res.status(400).json({ error: `valor inválido (esperado int ${spec.min}..${spec.max})` });
+    normalized = String(n);
+  } else {  // float
+    let n = parseFloat(raw);
+    if (Number.isNaN(n) || n < spec.min || n > spec.max)
+      return res.status(400).json({ error: `valor inválido (esperado float ${spec.min}..${spec.max})` });
+    if (spec.step) n = Math.round(n / spec.step) * spec.step;
+    normalized = n.toFixed(1);
+  }
+
+  console.log(`[hvac] ${control} = '${normalized}'`);
+  mqttClient.publish(`${MQTT_PREFIX}/cmd/hvac/${control}`, normalized, { qos: 1, retain: false }, err => {
+    if (err) return res.status(500).json({ error: 'falha ao publicar' });
+    res.json({ ok: true, value: normalized });
+  });
+});
+
 app.get('/api/events', requireAuth, (req, res) => {
   const since = parseInt(req.query.since || '0', 10);
   let result  = since > 0 ? eventsLog.filter(e => e.ts > since) : eventsLog;

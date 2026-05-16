@@ -1110,7 +1110,43 @@ class MqttManager private constructor() {
                         AppLogger.w(TAG, "Trip não encontrado para deletar: $isoTs")
                     }
                 }
-                else -> AppLogger.w(TAG, "Comando desconhecido: $cmd")
+                else -> {
+                    // Comandos HVAC: cmd/hvac/<control> — escreve no barramento via Shizuku.
+                    // Bridge já validou range/tipo; aqui só mapeia control → chave do bus.
+                    if (cmd.startsWith("hvac/")) {
+                        val control = cmd.removePrefix("hvac/")
+                        val busKey = when (control) {
+                            "driver_temp"    -> "car.hvac.driver_temperature"
+                            "passenger_temp" -> "car.hvac.pass_temperature"
+                            "fan_speed"      -> "car.hvac.fan_speed"
+                            "sync"           -> "car.hvac.sync_enable"
+                            "auto"           -> "car.hvac.auto_enable"
+                            "cycle_mode"     -> "car.hvac.cycle_mode"
+                            "seat_vent_drv"  -> "car.comfort_setting.driver_seat_ventilation_level"
+                            "seat_vent_pass" -> "car.comfort_setting.passenger_seat_ventilation_level"
+                            else -> null
+                        }
+                        if (busKey == null) {
+                            publishResult("hvac/$control", "error: chave desconhecida")
+                            return@submit
+                        }
+                        AppLogger.i(TAG, "HVAC set: $busKey = $payload")
+                        val ok = try {
+                            car.requestSetting(key = busKey, value = payload)
+                        } catch (e: Exception) {
+                            AppLogger.w(TAG, "requestSetting falhou: ${e.message}")
+                            false
+                        }
+                        if (!ok) {
+                            publishResult("hvac/$control", "error: carro rejeitou ou está dormindo")
+                            return@submit
+                        }
+                        publishResult("hvac/$control", "ok:$payload")
+                        AppLogger.i(TAG, "✓ HVAC aplicado: $busKey = $payload")
+                    } else {
+                        AppLogger.w(TAG, "Comando desconhecido: $cmd")
+                    }
+                }
             }
         }
     }

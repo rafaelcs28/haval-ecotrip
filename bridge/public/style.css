@@ -426,12 +426,14 @@ html, body {
 /* ── Dashboard: reordenação por estado do motor ──────────────────────────────── */
 #panel-dash.active { display: flex; flex-direction: column; }
 
-/* Ordem padrão (motor desligado): alertas → mapa → trips */
+/* Ordem padrão (motor desligado): alertas → mapa → trip cards */
 #d-alerts-card   { order: 4; }
 #d-map-card      { order: 5; }
 #d-trips-summary { order: 6; }
+#d-roll-card     { order: 7; }
+#d-curtrip-card  { order: 8; }
 
-/* Motor ligado: mapa sobe, trips no meio, alertas vão pro fim */
+/* Motor ligado: mapa sobe, trips no meio, alertas vão pro fim, trip cards no rodapé */
 #panel-dash.engine-on #d-map-card      { order: 4; }
 #panel-dash.engine-on #d-trips-summary { order: 5; }
 #panel-dash.engine-on #d-alerts-card   { order: 6; }
@@ -1404,4 +1406,421 @@ html, body {
   text-transform: uppercase;
   letter-spacing: 0.06em;
   padding: 10px 4px 4px;
+}
+
+/* ── Trip cards (dash) — desde última partida + viagem atual/última ─── */
+.trip-card { padding: 12px 16px; }
+.trip-hdr {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+}
+.trip-hdr-icon { font-size: 13px; line-height: 1; }
+.trip-hdr-title {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--muted);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+.trip-hdr-sub {
+  font-size: 10px;
+  color: #475569;
+  font-weight: 500;
+  margin-left: auto;
+}
+.trip-hero {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+.trip-hero-val {
+  font-size: 30px;
+  font-weight: 700;
+  color: var(--teal);
+  line-height: 1;
+  letter-spacing: -0.5px;
+}
+.trip-hero-unit { font-size: 13px; color: var(--muted); font-weight: 500; }
+.trip-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 14px;
+}
+.trip-grid-6 { grid-template-columns: 1fr 1fr 1fr; }
+.trip-cell { display: flex; flex-direction: column; min-width: 0; }
+.trip-cell-label {
+  font-size: 9px;
+  color: var(--muted);
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  margin-bottom: 2px;
+}
+.trip-cell-val {
+  font-size: 14px;
+  font-weight: 700;
+  color: #e2e8f0;
+  line-height: 1.1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.trip-cell-val.green { color: #4ade80; }
+#d-curtrip-card.in-progress .trip-hdr-title { color: var(--teal); }
+#d-curtrip-card.in-progress .trip-hdr-icon::after {
+  content: "●";
+  margin-left: 6px;
+  font-size: 8px;
+  color: #4ade80;
+  animation: blink 1.4s ease-in-out infinite;
+  vertical-align: middle;
+}
+@keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0.25; } }
+
+/* ── Conforto: pills de temperatura ambiente (interna/externa) ─────────── */
+.cmf-env-temps {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.cmf-env-pill {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  min-width: 0;
+}
+.cmf-env-icon { font-size: 14px; line-height: 1; flex-shrink: 0; }
+.cmf-env-meta { display: flex; flex-direction: column; line-height: 1.1; }
+.cmf-env-val { font-size: 14px; font-weight: 700; letter-spacing: -0.3px; }
+.cmf-env-lbl {
+  font-size: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--muted);
+  margin-top: 1px;
+}
+.cmf-env-in  .cmf-env-val { color: #60a5fa; }
+.cmf-env-in  { border-color: rgba(96, 165, 250, 0.25); }
+.cmf-env-out .cmf-env-val { color: #94a3b8; }
+
+/* ── Drive panel: HUD em camadas sobre mapa ────────────────────────────── */
+/* min-height usa dvh (dynamic viewport) pra acomodar o toolbar do Safari iOS;
+   tira ~110px do header + tab-bar. Sem scroll dentro do panel — tudo cabe. */
+#panel-drive.active { display: block; }
+#panel-drive {
+  position: relative;
+  min-height: calc(100dvh - 110px);
+  overflow: hidden;
+  background: #000;
+  margin: -6px -10px -8px;          /* compensa padding do #content pra ocupar full bleed */
+  border-radius: 0;
+}
+#drv-map {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  filter: saturate(0.6) brightness(0.55);
+}
+.drv-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse at center 38%, rgba(0,0,0,0.10) 0%, rgba(6,8,12,0.78) 60%, rgba(0,0,0,0.92) 100%),
+    linear-gradient(180deg, rgba(6,8,12,0.6) 0%, transparent 30%, transparent 70%, rgba(6,8,12,0.85) 100%);
+}
+.drv-hud {
+  position: relative;
+  z-index: 2;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 14px 16px 18px;
+  gap: 10px;
+}
+
+/* Top row: gear + power chip */
+.drv-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.drv-gear {
+  font-size: 28px;
+  font-weight: 800;
+  color: #4ade80;
+  letter-spacing: -1px;
+  text-shadow: 0 0 16px rgba(74, 222, 128, 0.55);
+  min-width: 32px;
+  text-align: center;
+}
+.drv-gear.idle { color: #475569; text-shadow: none; }
+.drv-gear.reverse { color: #fb923c; text-shadow: 0 0 16px rgba(251, 146, 60, 0.55); }
+.drv-power-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: rgba(8, 12, 20, 0.75);
+  border: 1px solid rgba(34, 211, 238, 0.4);
+  border-radius: 18px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #22d3ee;
+  letter-spacing: 0.2px;
+  box-shadow: 0 0 18px rgba(34, 211, 238, 0.15);
+  backdrop-filter: blur(6px);
+  transition: color .3s, border-color .3s, box-shadow .3s;
+}
+.drv-power-chip.regen {
+  color: #4ade80;
+  border-color: rgba(74, 222, 128, 0.5);
+  box-shadow: 0 0 22px rgba(74, 222, 128, 0.25);
+}
+.drv-power-chip.charging {
+  color: #fbbf24;
+  border-color: rgba(251, 191, 36, 0.5);
+  box-shadow: 0 0 22px rgba(251, 191, 36, 0.25);
+}
+.drv-power-icon { font-size: 13px; }
+
+/* Speedometer central com anel */
+.drv-speed-wrap {
+  position: relative;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto;
+  width: 100%;
+  min-height: 0;
+}
+.drv-speed-ring {
+  width: 100%;
+  height: 100%;
+  max-height: min(95vw, 460px);
+  aspect-ratio: 1 / 1;
+  display: block;
+  margin: 0 auto;
+}
+.drv-ring-bg, .drv-ring-fill {
+  fill: none;
+  stroke-width: 5;
+  stroke-linecap: round;
+}
+.drv-ring-bg { stroke: rgba(91, 115, 148, 0.18); }
+.drv-ring-fill {
+  stroke: #22d3ee;
+  filter: drop-shadow(0 0 8px rgba(34, 211, 238, 0.6));
+  transition: stroke-dashoffset .25s ease-out, stroke .3s;
+}
+.drv-ring-fill.regen {
+  stroke: #4ade80;
+  filter: drop-shadow(0 0 8px rgba(74, 222, 128, 0.6));
+}
+/* Tacômetro externo (RPM do ICE) */
+.drv-tach-bg, .drv-tach-fill {
+  fill: none;
+  stroke-width: 3;
+  stroke-linecap: round;
+}
+.drv-tach-bg { stroke: rgba(91, 115, 148, 0.12); }
+.drv-tach-fill {
+  stroke: #fb923c;
+  filter: drop-shadow(0 0 6px rgba(251, 146, 60, 0.55));
+  transition: stroke-dashoffset .2s ease-out, stroke .3s, filter .3s;
+}
+.drv-tach-fill.redline {
+  stroke: #ef4444;
+  filter: drop-shadow(0 0 9px rgba(239, 68, 68, 0.75));
+}
+.drv-speed-content {
+  position: absolute;
+  text-align: center;
+  pointer-events: none;
+}
+.drv-speed-num {
+  font-size: clamp(96px, 32vw, 160px);
+  font-weight: 800;
+  color: #e2e8f0;
+  line-height: 0.95;
+  letter-spacing: -4px;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 0 32px rgba(34, 211, 238, 0.45);
+  transition: text-shadow .3s, color .3s;
+}
+.drv-speed-num.idle {
+  color: #475569;
+  text-shadow: none;
+}
+.drv-speed-unit {
+  font-size: 13px;
+  color: var(--muted);
+  letter-spacing: 5px;
+  text-transform: uppercase;
+  margin-top: 6px;
+}
+.drv-rpm-inline {
+  margin-top: 8px;
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 4px;
+  font-variant-numeric: tabular-nums;
+}
+.drv-rpm-inline.redline .drv-rpm-inline-val { color: #ef4444; text-shadow: 0 0 12px rgba(239, 68, 68, 0.55); }
+.drv-rpm-inline-val {
+  font-size: 18px;
+  font-weight: 700;
+  color: #fb923c;
+  letter-spacing: -0.5px;
+  text-shadow: 0 0 10px rgba(251, 146, 60, 0.45);
+  transition: color .25s, text-shadow .25s;
+}
+.drv-rpm-inline-unit {
+  font-size: 10px;
+  color: var(--muted);
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+}
+.drv-peak-row {
+  margin-top: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  font-size: 10px;
+  color: var(--muted);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+.drv-peak-row .drv-peak-val {
+  color: #cbd5e1;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  margin-left: 4px;
+}
+.drv-peak-sep { opacity: 0.4; }
+
+/* Gráfico de potência (30s rolling) */
+.drv-chart-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.drv-chart-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 9px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 1.2px;
+  padding: 0 2px;
+}
+.drv-chart {
+  width: 100%;
+  height: 78px;
+  display: block;
+}
+.drv-chart-axis {
+  stroke: rgba(91, 115, 148, 0.25);
+  stroke-width: 1;
+  stroke-dasharray: 2 3;
+}
+.drv-chart-line {
+  fill: none;
+  stroke: #22d3ee;
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+  filter: drop-shadow(0 0 3px rgba(34, 211, 238, 0.5));
+}
+.drv-chart-fill {
+  fill: rgba(34, 211, 238, 0.12);
+  stroke: none;
+}
+
+/* Stats: SOC + autonomia + consumo */
+.drv-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  background: rgba(8, 12, 20, 0.55);
+  border: 1px solid rgba(34, 211, 238, 0.12);
+  border-radius: 10px;
+  backdrop-filter: blur(6px);
+}
+.drv-stat-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+}
+.drv-stat-icon { font-size: 14px; line-height: 1; }
+.drv-stat-pct {
+  font-size: 16px;
+  font-weight: 700;
+  color: #22d3ee;
+  font-variant-numeric: tabular-nums;
+  min-width: 42px;
+}
+.drv-stat-pct-fuel { color: #fb923c; }
+.drv-stat-sep { color: var(--muted); opacity: 0.5; }
+.drv-stat-km {
+  color: #cbd5e1;
+  font-size: 11px;
+}
+.drv-stat-km span { color: #e2e8f0; font-weight: 600; }
+.drv-stat-cons .drv-stat-pct { color: #fbbf24; min-width: auto; }
+
+/* Footer: endereço + temps */
+.drv-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+.drv-address {
+  flex: 1;
+  font-size: 11px;
+  color: #94a3b8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.drv-chips {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.drv-chip {
+  font-size: 10px;
+  color: #94a3b8;
+  font-weight: 600;
+}
+
+/* ── HVAC gesture: preview durante drag vertical na temperatura ────────── */
+.climate-zone-value.hvac-dragging,
+.climate-zone-value.hvac-pending {
+  color: #fbbf24 !important;
+  transition: none;
+  text-shadow: 0 0 12px rgba(251, 191, 36, 0.55);
+}
+.climate-zone-value.hvac-pending {
+  animation: hvacPendingPulse 1.2s ease-in-out infinite;
+}
+@keyframes hvacPendingPulse {
+  0%, 100% { opacity: 0.6; }
+  50%      { opacity: 1; }
 }
