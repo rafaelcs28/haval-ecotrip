@@ -855,6 +855,20 @@ class MqttManager private constructor() {
         } catch (_: Exception) {}
     }
 
+    /**
+     * IDs cuja fonte de verdade migrou pra integração GWM Brasil no HA.
+     * No discovery publicamos payload vazio nesses tópicos para que o HA
+     * REMOVA as entidades antigas que duplicavam o que agora vem do GWM.
+     * Manter o publish do dado no broker é inofensivo (bridge ignora via
+     * MIGRATED_TO_HA), mas as entidades em HA precisam ser apagadas.
+     */
+    private val MIGRATED_TO_HA_IDS = setOf(
+        "door_fl", "door_fr", "door_rl", "door_rr", "door_trunk",
+        "window_fl", "window_fr", "window_rl", "window_rr",
+        "sunroof", "lock_state", "ac_state", "engine_state",
+        "charging_state",
+    )
+
     private fun publishDiscovery(c: MqttClient) {
         val modelStr = listOf(vehicleModel1, vehicleModel2)
             .filter { it.isNotBlank() }
@@ -904,12 +918,18 @@ class MqttManager private constructor() {
         )
 
         for (s in sensors) {
+            val topic = "homeassistant/sensor/haval_ecotrip_${s.id}/config"
+            if (s.id in MIGRATED_TO_HA_IDS) {
+                // Remove a entidade do HA publicando config vazio (retained).
+                try { c.publish(topic, ByteArray(0), 1, true) } catch (_: Exception) {}
+                continue
+            }
             val dcPart   = if (s.dc   != null) ""","device_class":"${s.dc}"""" else ""
             val iconPart = if (s.icon != null) ""","icon":"${s.icon}"""" else ""
             val unitPart = if (s.unit.isNotEmpty()) ""","unit_of_measurement":"${s.unit}"""" else ""
             val scPart   = if (s.sc   != null) ""","state_class":"${s.sc}"""" else ""
             val payload  = """{"name":"${s.name}","state_topic":"${s.topic}","unique_id":"haval_ecotrip_${s.id}","device":$device$unitPart$scPart$dcPart$iconPart}"""
-            try { c.publish("homeassistant/sensor/haval_ecotrip_${s.id}/config", payload.toByteArray(), 1, true) } catch (_: Exception) {}
+            try { c.publish(topic, payload.toByteArray(), 1, true) } catch (_: Exception) {}
         }
 
         // ── Binary sensors — payload "1" = on/aberto, "0" = off/fechado ────────────
@@ -930,10 +950,16 @@ class MqttManager private constructor() {
             B("engine_state","Motor ICE",         "$prefix/engine_state",dc = "running"),
         )
         for (b in binarySensors) {
+            val topic = "homeassistant/binary_sensor/haval_ecotrip_${b.id}/config"
+            if (b.id in MIGRATED_TO_HA_IDS) {
+                // Remove a entidade do HA publicando config vazio (retained).
+                try { c.publish(topic, ByteArray(0), 1, true) } catch (_: Exception) {}
+                continue
+            }
             val dcPart   = if (b.dc   != null) ""","device_class":"${b.dc}"""" else ""
             val iconPart = if (b.icon != null) ""","icon":"${b.icon}"""" else ""
             val payload  = """{"name":"${b.name}","state_topic":"${b.topic}","unique_id":"haval_ecotrip_${b.id}","payload_on":"1","payload_off":"0","device":$device$dcPart$iconPart}"""
-            try { c.publish("homeassistant/binary_sensor/haval_ecotrip_${b.id}/config", payload.toByteArray(), 1, true) } catch (_: Exception) {}
+            try { c.publish(topic, payload.toByteArray(), 1, true) } catch (_: Exception) {}
         }
 
         // Sensor: versão do app instalada no carro
