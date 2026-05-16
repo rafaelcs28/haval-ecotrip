@@ -504,6 +504,25 @@ class MqttManager private constructor() {
 
     private fun publishSnapshotInternal(c: MqttClient, q: QueuedSnapshot) {
         try {
+            // Snapshot atômico dos campos no início da função. O publishSnapshotInternal
+            // roda no executor mas pode ceder CPU entre cada c.publish() (paho enfileira
+            // pra send thread). Se o main thread atualizar latest* durante esse intervalo,
+            // publishes subsequentes leem valores novos — gera publish inconsistente
+            // (ex.: window_fl publica "1" com latestWindowFl=0, debug/window_parsed
+            // publica "1,1,1,1" com latestWindowFl=1 já atualizado). Capturar em locais
+            // garante que todos os publishes desta chamada usem o mesmo estado.
+            val snDoorFl = latestDoorFl;     val snDoorFr = latestDoorFr
+            val snDoorRl = latestDoorRl;     val snDoorRr = latestDoorRr;     val snTrunk = latestTrunk
+            val snWinFl  = latestWindowFl;   val snWinFr  = latestWindowFr
+            val snWinRl  = latestWindowRl;   val snWinRr  = latestWindowRr
+            val snSunroof   = latestSunroof
+            val snLockStat  = latestLockStatus
+            val snAcEnable  = latestHvacAcEnable
+            val snDrvReady  = latestDrivingReadyState
+            val snDoorRaw   = latestDoorStatusRaw
+            val snWinRaw    = latestWindowStatusRaw
+            val snEngineRpm = latestEngineRpm
+
             fun pub(topic: String, value: String) =
                 c.publish("$prefix/$topic", value.toByteArray(), 0, false)
             fun pubR(topic: String, value: String) =   // retained — para sensores que devem sobreviver a reinício do HA
@@ -544,40 +563,38 @@ class MqttManager private constructor() {
             pubR("hvac_fan_speed",    latestHvacFanSpeed.toString())
             pubR("hvac_sync_enable",  latestHvacSyncEnable.toString())
             pubR("hvac_auto_enable",  latestHvacAutoEnable.toString())
-            pubR("ac_state",          if (latestHvacAcEnable > 0) "1" else "0")
+            pubR("ac_state",          if (snAcEnable > 0) "1" else "0")
             pubR("hvac_cycle_mode",   latestHvacCycleMode.toString())
 
             // Body — normaliza tudo pra binário "1=aberto/destrancado, 0=fechado/trancado"
-            pubR("door_fl",    if (latestDoorFl > 0) "1" else "0")
-            pubR("door_fr",    if (latestDoorFr > 0) "1" else "0")
-            pubR("door_rl",    if (latestDoorRl > 0) "1" else "0")
-            pubR("door_rr",    if (latestDoorRr > 0) "1" else "0")
-            pubR("door_trunk", if (latestTrunk  > 0) "1" else "0")
+            pubR("door_fl",    if (snDoorFl > 0) "1" else "0")
+            pubR("door_fr",    if (snDoorFr > 0) "1" else "0")
+            pubR("door_rl",    if (snDoorRl > 0) "1" else "0")
+            pubR("door_rr",    if (snDoorRr > 0) "1" else "0")
+            pubR("door_trunk", if (snTrunk  > 0) "1" else "0")
             // Vidros: cru "1" = fechado, qualquer outro valor = aberto/entreaberto
             // (mesma convenção que o HA usava com closedVal:'1' — confirmado em uso).
-            pubR("window_fl",  if (latestWindowFl == 1) "0" else "1")
-            pubR("window_fr",  if (latestWindowFr == 1) "0" else "1")
-            pubR("window_rl",  if (latestWindowRl == 1) "0" else "1")
-            pubR("window_rr",  if (latestWindowRr == 1) "0" else "1")
+            pubR("window_fl",  if (snWinFl == 1) "0" else "1")
+            pubR("window_fr",  if (snWinFr == 1) "0" else "1")
+            pubR("window_rl",  if (snWinRl == 1) "0" else "1")
+            pubR("window_rr",  if (snWinRr == 1) "0" else "1")
             // Sunroof: 0=fechado, >0=aberto (confirmado em uso).
-            pubR("sunroof",    if (latestSunroof  > 0) "1" else "0")
+            pubR("sunroof",    if (snSunroof  > 0) "1" else "0")
             // Trava: cru "3"=destrancado, "1"=trancado (confirmado em uso real).
-            pubR("lock_state", if (latestLockStatus == 3) "1" else "0")
+            pubR("lock_state", if (snLockStat == 3) "1" else "0")
             // Estado da ignição (carro on/off): derivado de driving_ready_state.
-            // Antes vinha de engine_rpm > 0, mas no HEV o motor a combustão cicla
-            // muito durante condução — gerava dezenas de eventos engine_on/off por viagem.
-            pubR("engine_state", if (latestDrivingReadyState > 0) "1" else "0")
+            pubR("engine_state", if (snDrvReady > 0) "1" else "0")
             // Debug — valores crus do barramento + resultado do parsing (sem afetar lógica)
-            if (latestDoorStatusRaw.isNotEmpty()) {
-                pubR("debug/door_status_raw", latestDoorStatusRaw)
-                pubR("debug/door_parsed",     "$latestDoorFl,$latestDoorFr,$latestDoorRl,$latestDoorRr,$latestTrunk")
+            if (snDoorRaw.isNotEmpty()) {
+                pubR("debug/door_status_raw", snDoorRaw)
+                pubR("debug/door_parsed",     "$snDoorFl,$snDoorFr,$snDoorRl,$snDoorRr,$snTrunk")
             }
-            if (latestWindowStatusRaw.isNotEmpty()) {
-                pubR("debug/window_status_raw", latestWindowStatusRaw)
-                pubR("debug/window_parsed",     "$latestWindowFl,$latestWindowFr,$latestWindowRl,$latestWindowRr")
+            if (snWinRaw.isNotEmpty()) {
+                pubR("debug/window_status_raw", snWinRaw)
+                pubR("debug/window_parsed",     "$snWinFl,$snWinFr,$snWinRl,$snWinRr")
             }
-            pubR("debug/sunroof_raw",      latestSunroof.toString())
-            pubR("debug/lock_status_raw",  latestLockStatus.toString())
+            pubR("debug/sunroof_raw",      snSunroof.toString())
+            pubR("debug/lock_status_raw",  snLockStat.toString())
             if (latestOdometerKm > 0f) pubR("odometer_km", fmt1(latestOdometerKm))
             if (latestBatt12vPct > 0f) pubR("batt_12v_pct", fmt1(latestBatt12vPct))
             // Potência de recarga: apenas quando charging_state == 1 (Carregando)
