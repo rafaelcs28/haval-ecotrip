@@ -314,8 +314,14 @@ function _saveEventsSoon() {
   }, 2000);
 }
 
-function addEvent(type, label) {
-  const ev = { id: Date.now(), ts: Date.now(), type, label };
+function addEvent(type, label, ts) {
+  // ts opcional — quando o app publica `valor:ms_real_da_mudanca`, o handler
+  // passa esse ms aqui pra que o evento no log mostre a hora real e não a
+  // hora da confirmação (ex.: vidros com voting filter têm ~40s de latência
+  // entre mudança real e confirmação — usar Date.now() distorceria o log).
+  const now = Date.now();
+  const eventTs = ts && ts > 0 ? ts : now;
+  const ev = { id: now, ts: eventTs, type, label };
   eventsLog.unshift(ev);
   if (eventsLog.length > MAX_EVENTS) eventsLog.pop();
   _saveEventsSoon();
@@ -1984,16 +1990,21 @@ function applyMqttMessage(key, value, isRetained = false) {
     case 'window_fr':
     case 'window_rl':
     case 'window_rr': {
-      // App publica '1' (aberto) / '0' (fechado) já normalizado a partir de car.basic.window_status.
-      // Mesmo padrão de hysteresis 3s — sensor oscila no estado fechado.
+      // App publica '1' (aberto) / '0' (fechado) com voting filter.
+      // Formato: "valor" (legacy) ou "valor:ms_da_mudanca" (v5.x+ com voting).
+      // Aceita ambos pra backward compat. O ms é a hora REAL da mudança detectada
+      // pelo app (antes do voting confirmar), não a hora da confirmação.
       const wside = key.slice(7);
-      const norm  = value === '1' ? 'on' : 'off';
+      const colonIdx = value.indexOf(':');
+      const normRaw  = colonIdx >= 0 ? value.slice(0, colonIdx) : value;
+      const realTs   = colonIdx >= 0 ? (parseInt(value.slice(colonIdx + 1), 10) || 0) : 0;
+      const norm     = normRaw === '1' ? 'on' : 'off';
       if (isRetained) {
         state[key]              = norm;
         prevWindowStates[wside] = norm;
         break;
       }
-      console.log(`[window:${wside}] mqtt='${value}' isRetained=${isRetained} → norm='${norm}' prev='${prevWindowStates[wside]}' hystPending='${_hystPending[key]}'`);
+      console.log(`[window:${wside}] mqtt='${value}' isRetained=${isRetained} → norm='${norm}' prev='${prevWindowStates[wside]}' hystPending='${_hystPending[key]}' realTs=${realTs}`);
       if (norm === _hystPending[key]) break;
       _hystPending[key] = norm;
       clearTimeout(_hystTimers[key]);
@@ -2002,9 +2013,9 @@ function applyMqttMessage(key, value, isRetained = false) {
         if (norm !== prevWindowStates[wside]) {
           prevWindowStates[wside] = norm;
           const label = WINDOW_NAMES[wside] || wside.toUpperCase();
-          console.log(`[window:${wside}] EVENT after hysteresis: ${norm === 'on' ? 'open' : 'close'} (prev was different)`);
-          if (norm === 'on') addEvent('window_open',  `${label} aberto`);
-          else               addEvent('window_close', `${label} fechado`);
+          console.log(`[window:${wside}] EVENT after hysteresis: ${norm === 'on' ? 'open' : 'close'} ts=${realTs || 'now'}`);
+          if (norm === 'on') addEvent('window_open',  `${label} aberto`, realTs);
+          else               addEvent('window_close', `${label} fechado`, realTs);
         }
       }, HYSTERESIS_MS);
       break;

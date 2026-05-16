@@ -132,40 +132,61 @@ class MqttManager private constructor() {
     var latestLockStatus: Int = 0
 
     // ── Voting filter pra car.basic.window_status ─────────────────────────────
-    // O car bus emite valores ruidosos em rajadas (observado em uso real: até
-    // 6 leituras consecutivas reportando "0" quando os vidros estão fechados,
-    // depois volta pra "1"). Antes a gente publicava cada leitura → bridge via
-    // como transição → evento espúrio. Solução: voting — só atualiza
-    // latestWindow* quando WINDOW_VOTE_REQUIRED leituras consecutivas do mesmo
-    // valor são vistas. Bursts curtos de ruído nunca passam.
-    // Trade-off: mudança real demora WINDOW_VOTE_REQUIRED × snapshot_interval
-    // pra registrar (~40s a 5s/sample). Aceitável pra vidros que mudam raramente.
-    private var pendingFl: Int = 0; private var pendingFlCount: Int = 0
-    private var pendingFr: Int = 0; private var pendingFrCount: Int = 0
-    private var pendingRl: Int = 0; private var pendingRlCount: Int = 0
-    private var pendingRr: Int = 0; private var pendingRrCount: Int = 0
+    // O car bus emite valores ruidosos em rajadas (até 6 leituras consecutivas
+    // reportando o valor errado). Voting: só atualiza latestWindow* quando
+    // WINDOW_VOTE_REQUIRED leituras consecutivas do mesmo valor são vistas.
+    //
+    // Timestamp da mudança: quando o pending muda (primeira leitura do valor
+    // novo), gravamos o ms. Quando o voting confirma, esse ms vira o "real
+    // changed at" do estado. Publicamos ele junto no MQTT pra que o evento no
+    // log do PWA mostre a hora REAL da mudança, não a hora da confirmação
+    // (~40s atrasada).
+    private var pendingFl: Int = 0; private var pendingFlCount: Int = 0; private var pendingFlSinceMs: Long = 0L
+    private var pendingFr: Int = 0; private var pendingFrCount: Int = 0; private var pendingFrSinceMs: Long = 0L
+    private var pendingRl: Int = 0; private var pendingRlCount: Int = 0; private var pendingRlSinceMs: Long = 0L
+    private var pendingRr: Int = 0; private var pendingRrCount: Int = 0; private var pendingRrSinceMs: Long = 0L
+    @Volatile var latestWindowFlConfirmedMs: Long = 0L
+    @Volatile var latestWindowFrConfirmedMs: Long = 0L
+    @Volatile var latestWindowRlConfirmedMs: Long = 0L
+    @Volatile var latestWindowRrConfirmedMs: Long = 0L
     @Volatile private var windowVoteInitialized: Boolean = false
     private val WINDOW_VOTE_REQUIRED = 8
 
     /** Aplica voting filter em uma nova leitura de car.basic.window_status. */
     fun applyWindowStatus(fl: Int, fr: Int, rl: Int, rr: Int) {
+        val now = System.currentTimeMillis()
         if (!windowVoteInitialized) {
             // Confia na primeira leitura — sem dados pra votar
-            latestWindowFl = fl; pendingFl = fl; pendingFlCount = 1
-            latestWindowFr = fr; pendingFr = fr; pendingFrCount = 1
-            latestWindowRl = rl; pendingRl = rl; pendingRlCount = 1
-            latestWindowRr = rr; pendingRr = rr; pendingRrCount = 1
+            latestWindowFl = fl; pendingFl = fl; pendingFlCount = 1; pendingFlSinceMs = now; latestWindowFlConfirmedMs = now
+            latestWindowFr = fr; pendingFr = fr; pendingFrCount = 1; pendingFrSinceMs = now; latestWindowFrConfirmedMs = now
+            latestWindowRl = rl; pendingRl = rl; pendingRlCount = 1; pendingRlSinceMs = now; latestWindowRlConfirmedMs = now
+            latestWindowRr = rr; pendingRr = rr; pendingRrCount = 1; pendingRrSinceMs = now; latestWindowRrConfirmedMs = now
             windowVoteInitialized = true
             return
         }
-        if (fl == pendingFl) { if (++pendingFlCount >= WINDOW_VOTE_REQUIRED) latestWindowFl = fl }
-        else { pendingFl = fl; pendingFlCount = 1 }
-        if (fr == pendingFr) { if (++pendingFrCount >= WINDOW_VOTE_REQUIRED) latestWindowFr = fr }
-        else { pendingFr = fr; pendingFrCount = 1 }
-        if (rl == pendingRl) { if (++pendingRlCount >= WINDOW_VOTE_REQUIRED) latestWindowRl = rl }
-        else { pendingRl = rl; pendingRlCount = 1 }
-        if (rr == pendingRr) { if (++pendingRrCount >= WINDOW_VOTE_REQUIRED) latestWindowRr = rr }
-        else { pendingRr = rr; pendingRrCount = 1 }
+        // Cada vidro vota independente. Quando o pending atinge o threshold e o valor
+        // confirmado é DIFERENTE do atual, registra o instante em que o pending começou
+        // (não o instante da confirmação) — esse vira o timestamp real da mudança.
+        if (fl == pendingFl) {
+            if (++pendingFlCount >= WINDOW_VOTE_REQUIRED && latestWindowFl != fl) {
+                latestWindowFl = fl; latestWindowFlConfirmedMs = pendingFlSinceMs
+            }
+        } else { pendingFl = fl; pendingFlCount = 1; pendingFlSinceMs = now }
+        if (fr == pendingFr) {
+            if (++pendingFrCount >= WINDOW_VOTE_REQUIRED && latestWindowFr != fr) {
+                latestWindowFr = fr; latestWindowFrConfirmedMs = pendingFrSinceMs
+            }
+        } else { pendingFr = fr; pendingFrCount = 1; pendingFrSinceMs = now }
+        if (rl == pendingRl) {
+            if (++pendingRlCount >= WINDOW_VOTE_REQUIRED && latestWindowRl != rl) {
+                latestWindowRl = rl; latestWindowRlConfirmedMs = pendingRlSinceMs
+            }
+        } else { pendingRl = rl; pendingRlCount = 1; pendingRlSinceMs = now }
+        if (rr == pendingRr) {
+            if (++pendingRrCount >= WINDOW_VOTE_REQUIRED && latestWindowRr != rr) {
+                latestWindowRr = rr; latestWindowRrConfirmedMs = pendingRrSinceMs
+            }
+        } else { pendingRr = rr; pendingRrCount = 1; pendingRrSinceMs = now }
     }
     // Driving ready (ignição) — usado pra derivar engine_state (carro on/off) sem oscilação
     // do motor a combustão (HEV liga/desliga o ICE várias vezes por minuto).
@@ -552,6 +573,8 @@ class MqttManager private constructor() {
             val snDoorRl = latestDoorRl;     val snDoorRr = latestDoorRr;     val snTrunk = latestTrunk
             val snWinFl  = latestWindowFl;   val snWinFr  = latestWindowFr
             val snWinRl  = latestWindowRl;   val snWinRr  = latestWindowRr
+            val snWinFlMs = latestWindowFlConfirmedMs;   val snWinFrMs = latestWindowFrConfirmedMs
+            val snWinRlMs = latestWindowRlConfirmedMs;   val snWinRrMs = latestWindowRrConfirmedMs
             val snSunroof   = latestSunroof
             val snLockStat  = latestLockStatus
             val snAcEnable  = latestHvacAcEnable
@@ -609,12 +632,14 @@ class MqttManager private constructor() {
             pubR("door_rl",    if (snDoorRl > 0) "1" else "0")
             pubR("door_rr",    if (snDoorRr > 0) "1" else "0")
             pubR("door_trunk", if (snTrunk  > 0) "1" else "0")
-            // Vidros: cru "1" = fechado, qualquer outro valor = aberto/entreaberto
-            // (mesma convenção que o HA usava com closedVal:'1' — confirmado em uso).
-            pubR("window_fl",  if (snWinFl == 1) "0" else "1")
-            pubR("window_fr",  if (snWinFr == 1) "0" else "1")
-            pubR("window_rl",  if (snWinRl == 1) "0" else "1")
-            pubR("window_rr",  if (snWinRr == 1) "0" else "1")
+            // Vidros: cru "1" = fechado, qualquer outro valor = aberto/entreaberto.
+            // Formato: "valor:ms_da_mudanca" — bridge usa o ms pra timestamp do evento
+            // no log, compensando os ~40s de latência do voting filter. Bridge aceita
+            // ambos formatos (com ou sem ms) pra backward compat.
+            pubR("window_fl",  "${if (snWinFl == 1) "0" else "1"}:$snWinFlMs")
+            pubR("window_fr",  "${if (snWinFr == 1) "0" else "1"}:$snWinFrMs")
+            pubR("window_rl",  "${if (snWinRl == 1) "0" else "1"}:$snWinRlMs")
+            pubR("window_rr",  "${if (snWinRr == 1) "0" else "1"}:$snWinRrMs")
             // Sunroof: 0=fechado, >0=aberto (confirmado em uso).
             pubR("sunroof",    if (snSunroof  > 0) "1" else "0")
             // Trava: cru "3"=destrancado, "1"=trancado (confirmado em uso real).
