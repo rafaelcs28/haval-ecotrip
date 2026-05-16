@@ -18,6 +18,10 @@ const MQTT_USER   = process.env.MQTT_USER   || '';
 const MQTT_PASS   = process.env.MQTT_PASS   || '';
 const MQTT_PREFIX    = process.env.MQTT_PREFIX || 'haval/ecotrip';
 const PORT           = parseInt(process.env.PORT || '3000', 10);
+// Integração GWM Brasil — publica direto via MQTT (sem passar pelo app).
+// Bridge subscribe nesses tópicos pra ter estado confiável de body/lock/etc.
+const GWM_CHASSI       = process.env.GWM_CHASSI || 'lgwffva55sh931315';
+const GWM_TOPIC_PREFIX = `gwmbrasil_${GWM_CHASSI}`;
 
 // ── Token de acesso (hash SHA-256 da senha) ────────────────────────────────────
 // Suporta migração: BRIDGE_TOKEN (plain) → calcula hash automaticamente
@@ -1791,6 +1795,10 @@ const mqttClient = mqtt.connect(MQTT_HOST, mqttOptions);
 mqttClient.on('connect', () => {
   console.log(`✓ MQTT conectado: ${MQTT_HOST} (prefix: ${MQTT_PREFIX})`);
   mqttClient.subscribe(`${MQTT_PREFIX}/#`, { qos: 1 });
+  // Subscribe nos tópicos da integração GWM Brasil — body/lock/AC/etc. vêm
+  // direto da fonte oficial via cloud, sem ruído do barramento do app.
+  mqttClient.subscribe(`${GWM_TOPIC_PREFIX}/+/state`, { qos: 1 });
+  console.log(`✓ Subscribed em ${GWM_TOPIC_PREFIX}/+/state (integração HA)`);
 });
 
 mqttClient.on('error',      (err) => console.error('MQTT erro:', err.message));
@@ -1800,11 +1808,19 @@ mqttClient.on('disconnect', ()    => console.log('MQTT desconectado'));
 mqttClient.on('message', (topic, payload, packet) => {
   const value      = payload.toString().trim();
   const isRetained = !!(packet && packet.retain);
-  const key        = topic.startsWith(MQTT_PREFIX + '/')
-    ? topic.slice(MQTT_PREFIX.length + 1)
-    : topic;
 
-  applyMqttMessage(key, value, isRetained);
+  // Dispatcher: tópicos da integração GWM Brasil vão pro handler dedicado;
+  // outros caem no handler legado do app.
+  if (topic.startsWith(GWM_TOPIC_PREFIX + '/') && topic.endsWith('/state')) {
+    // gwmbrasil_<chassi>/<id>/state
+    const id = topic.slice(GWM_TOPIC_PREFIX.length + 1, topic.length - '/state'.length);
+    applyGwmEntity(id, value, isRetained);
+  } else {
+    const key = topic.startsWith(MQTT_PREFIX + '/')
+      ? topic.slice(MQTT_PREFIX.length + 1)
+      : topic;
+    applyMqttMessage(key, value, isRetained);
+  }
   broadcast('update', state);
 });
 
@@ -1812,8 +1828,166 @@ mqttClient.on('message', (topic, payload, packet) => {
 
 function num(v) { const n = parseFloat(v); return isNaN(n) ? 0 : n; }
 
+// Mapeamento: tópico MQTT da integração GWM Brasil → campo no state do bridge.
+// A integração GWM publica direto em `gwmbrasil_<chassi>/<id_numerico>/state` com
+// payloads "1"/"0" pra binários e numéricos diretos pros sensores. Mais confiável
+// que ler pelo app (sem ruído de sensor do barramento direto).
+const GWM_TOPIC_MAP = {
+  // Body (binary "1"=aberto/destrancado/on, "0"=fechado/trancado/off)
+  '2206001': 'door_trunk',
+  '2206002': 'door_fl',
+  '2206003': 'door_rl',
+  '2206004': 'door_fr',
+  '2206005': 'door_rr',
+  '2208001': 'lock_state',
+  '2202001': 'ac_state',
+  // Vidros (cru "1"=fechado, demais valores=aberto)
+  '2210001': 'window_fl',
+  '2210002': 'window_fr',
+  '2210003': 'window_rl',
+  '2210004': 'window_rr',
+  // Sunroof (cru "3"=fechado, demais=aberto)
+  '2210005': 'sunroof',
+  // Sensores numéricos
+  '2013021': 'soc_pct',
+  '2013005': 'batt_12v_pct',
+  '2103010': 'odometer_km',
+  '2101001': 'tyre_pressure_fl',
+  '2101002': 'tyre_pressure_fr',
+  '2101003': 'tyre_pressure_rl',
+  '2101004': 'tyre_pressure_rr',
+  '2101005': 'tyre_temp_fl',
+  '2101006': 'tyre_temp_fr',
+  '2101007': 'tyre_temp_rl',
+  '2101008': 'tyre_temp_rr',
+  '2011501': 'autonomy_ev_km',
+  '2011007': 'autonomy_ice_km',
+  // Texto / outros
+  'hyengsts':       'engine_state',       // "0"=off, "1"=on (mesma convenção do app)
+  'endereco_atual': 'current_address',
+};
+
+// Chaves que migraram pro HA — handlers do app são ignorados aqui pra evitar
+// que dados ruidosos do app (via Shizuku/CarDataManager) sobrescrevam o estado
+// confiável que vem do HA.
+const MIGRATED_TO_HA = new Set([
+  'door_fl', 'door_fr', 'door_rl', 'door_rr', 'door_trunk',
+  'lock_state', 'ac_state',
+  'window_fl', 'window_fr', 'window_rl', 'window_rr',
+  'sunroof', 'engine_state',
+  // Sensores numéricos passivos — HA é mais confiável
+  'odometer_km', 'batt_12v_pct',
+]);
+
+const GWM_BODY_BINARY = new Set([
+  'door_trunk', 'door_fl', 'door_fr', 'door_rl', 'door_rr', 'lock_state', 'ac_state',
+]);
+
+/**
+ * Processa mensagem da integração GWM Brasil (tópicos `gwmbrasil_<chassi>/.../state`).
+ * Aplica conversão por tipo e dispara eventos quando há transição binária real.
+ */
+function applyGwmEntity(id, value, isRetained = false) {
+  const field = GWM_TOPIC_MAP[id];
+  if (!field) {
+    console.log(`[gwm] id desconhecido='${id}' value='${value}' isRetained=${isRetained}`);
+    return;
+  }
+
+  // ── Binary body (doors, lock, AC) ─────────────────────────────────────────
+  if (GWM_BODY_BINARY.has(field)) {
+    const norm = value === '1' ? 'on' : 'off';
+    const prev = state[field];
+    state[field] = norm;
+    if (!isRetained && prev !== undefined && prev !== null && prev !== norm) {
+      if (field === 'lock_state') {
+        if (norm === 'on') addEvent('lock_open',  'Carro destrancado');
+        else               addEvent('lock_close', 'Carro trancado');
+      } else if (field === 'ac_state') {
+        if (norm === 'on') addEvent('ac_on',  'Ar condicionado ligado');
+        else               addEvent('ac_off', 'Ar condicionado desligado');
+      } else if (field === 'door_trunk') {
+        if (norm === 'on') {
+          addEvent('trunk_open',  'Porta-malas aberta');
+          if (notifPrefs.trunk_open)  sendPush('🧳 Porta-malas aberta', 'Verifique se está segura.');
+        } else {
+          addEvent('trunk_close', 'Porta-malas fechada');
+          if (notifPrefs.trunk_close) sendPush('🧳 Porta-malas fechada', 'Porta-malas foi fechada.');
+        }
+      } else {
+        // door_fl/fr/rl/rr
+        const side = field.slice(5);
+        const label = DOOR_NAMES[side] || side.toUpperCase();
+        if (norm === 'on') {
+          addEvent('door_open',  `${label} aberta`);
+          if (notifPrefs.door_open)  sendPush('🚪 Porta aberta', label);
+        } else {
+          addEvent('door_close', `${label} fechada`);
+          if (notifPrefs.door_close) sendPush('🚪 Porta fechada', label);
+        }
+      }
+    }
+    return;
+  }
+
+  // ── Vidros (cru "1"=fechado, demais=aberto) ───────────────────────────────
+  if (field.startsWith('window_')) {
+    const norm = value === '1' ? 'off' : 'on';
+    const prev = state[field];
+    state[field] = norm;
+    if (!isRetained && prev !== undefined && prev !== null && prev !== norm) {
+      const wside = field.slice(7);
+      const label = WINDOW_NAMES[wside] || wside.toUpperCase();
+      if (norm === 'on') addEvent('window_open',  `${label} aberto`);
+      else               addEvent('window_close', `${label} fechado`);
+    }
+    return;
+  }
+
+  // ── Sunroof (cru "3"=fechado, demais=aberto) ──────────────────────────────
+  if (field === 'sunroof') {
+    const norm = value === '3' ? 'off' : 'on';
+    const prev = state.sunroof;
+    state.sunroof = norm;
+    if (!isRetained && prev !== undefined && prev !== null && prev !== norm) {
+      if (norm === 'on') addEvent('sunroof_open',  'Teto solar aberto');
+      else               addEvent('sunroof_close', 'Teto solar fechado');
+    }
+    return;
+  }
+
+  // ── Engine state (cru "1"=ligado, "0"=desligado, mesma convenção do app) ─
+  if (field === 'engine_state') {
+    const prev = state.engine_state;
+    state.engine_state = value;
+    if (!isRetained && prev !== undefined && prev !== null && prev !== value) {
+      if (value === '1') {
+        addEvent('engine_on',  'Motor ligado');
+        if (notifPrefs.engine_on)  sendPush('🔑 Motor ligado',  'O veículo foi ligado.');
+      } else if (value === '0') {
+        addEvent('engine_off', 'Motor desligado');
+        if (notifPrefs.engine_off) sendPush('🔑 Motor desligado', 'O veículo foi desligado.');
+      }
+    }
+    return;
+  }
+
+  // ── Address string (sem evento, só state) ─────────────────────────────────
+  if (field === 'current_address') {
+    state.current_address = value;
+    return;
+  }
+
+  // ── Sensores numéricos (soc, 12v, odo, pneus, autonomia) ─────────────────
+  state[field] = num(value);
+}
+
 function applyMqttMessage(key, value, isRetained = false) {
   state.last_update_ms = Date.now();
+
+  // Body/lock/etc. migradas pra HA — ignora publishes do app pra essas chaves.
+  // Bridge usa exclusivamente os tópicos da integração GWM Brasil (sem ruído).
+  if (MIGRATED_TO_HA.has(key)) return;
 
   switch (key) {
     // Status
