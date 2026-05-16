@@ -138,10 +138,22 @@ let chargeEndingNotifSent = false;
 // Hysteresis: car emite valores oscilantes (ex.: sunroof posição, AC compressor cycle)
 // pro mesmo estado físico. Sem debounce, o log enche de eventos a cada flip do sensor.
 // Espera N ms de valor estável antes de atualizar state + disparar evento.
-const HYSTERESIS_MS    = 3000;     // sunroof/vidros — sensor de posição
+const HYSTERESIS_MS    = 3000;     // sunroof/vidros/portas/trava/trunk — filtra ruído de sensor
 const AC_HYSTERESIS_MS = 15000;    // AC — compressor cycle do HEV/PHEV (10-15s típico)
-const _hystPending = { sunroof: null, window_fl: null, window_fr: null, window_rl: null, window_rr: null, ac_state: null };
-const _hystTimers  = { sunroof: null, window_fl: null, window_fr: null, window_rl: null, window_rr: null, ac_state: null };
+const _hystPending = {
+  sunroof: null,
+  window_fl: null, window_fr: null, window_rl: null, window_rr: null,
+  door_fl: null, door_fr: null, door_rl: null, door_rr: null, door_trunk: null,
+  lock_state: null,
+  ac_state: null,
+};
+const _hystTimers  = {
+  sunroof: null,
+  window_fl: null, window_fr: null, window_rl: null, window_rr: null,
+  door_fl: null, door_fr: null, door_rl: null, door_rr: null, door_trunk: null,
+  lock_state: null,
+  ac_state: null,
+};
 
 let prevChargingState    = null;
 let chargeStartTimer     = null;
@@ -1833,17 +1845,26 @@ function applyMqttMessage(key, value, isRetained = false) {
       break;
     }
     case 'lock_state': {
-      // App publica "1" (destrancado) / "0" (trancado) — normalizado a partir
-      // do cru car.basic.door_lock_status (3=destrancado, 1=trancado).
+      // App publica "1" (destrancado) / "0" (trancado).
+      // Hysteresis 3s — sensor de trava pode emitir transientes durante o
+      // travamento/destravamento (curto-circuito intermediário com chave/botão).
       const norm = value === '1' ? 'on' : 'off';
-      const prevL = prevLockState;
-      state.lock_state = norm;
-      prevLockState = norm;
-      console.log(`[lock] mqtt='${value}' isRetained=${isRetained} → state.lock_state='${norm}' (prev='${prevL}')`);
-      if (!isRetained && prevL !== null && prevL !== norm) {
-        if (norm === 'on')  addEvent('lock_open',  'Carro destrancado');
-        else                addEvent('lock_close', 'Carro trancado');
+      if (isRetained) {
+        state.lock_state = norm;
+        prevLockState    = norm;
+        break;
       }
+      if (norm === _hystPending.lock_state) break;
+      _hystPending.lock_state = norm;
+      clearTimeout(_hystTimers.lock_state);
+      _hystTimers.lock_state = setTimeout(() => {
+        state.lock_state = norm;
+        if (norm !== prevLockState) {
+          prevLockState = norm;
+          if (norm === 'on') addEvent('lock_open',  'Carro destrancado');
+          else               addEvent('lock_close', 'Carro trancado');
+        }
+      }, HYSTERESIS_MS);
       break;
     }
     case 'high_beam':    state.high_beam    = value; break;   // 'on' | 'off'
@@ -1883,38 +1904,58 @@ function applyMqttMessage(key, value, isRetained = false) {
     case 'door_fr':
     case 'door_rl':
     case 'door_rr': {
-      // App publica '1' (aberta) / '0' (fechada). Normaliza pra 'on'/'off' que o PWA espera.
-      const side  = key.slice(5);           // 'fl' | 'fr' | 'rl' | 'rr'
+      // App publica '1' (aberta) / '0' (fechada). Hysteresis 3s — sensor de porta
+      // pode oscilar durante o ato de abrir/fechar (latch intermediário).
+      const side  = key.slice(5);
       const norm  = value === '1' ? 'on' : 'off';
-      const prevD = prevDoorStates[side];
-      state[key]           = norm;
-      prevDoorStates[side] = norm;
-      if (!isRetained && prevD !== null && prevD !== norm) {
-        const label = DOOR_NAMES[side] || side.toUpperCase();
-        if (norm === 'on') {
-          addEvent('door_open',  `${label} aberta`);
-          if (notifPrefs.door_open)  sendPush('🚪 Porta aberta', label);
-        } else {
-          addEvent('door_close', `${label} fechada`);
-          if (notifPrefs.door_close) sendPush('🚪 Porta fechada', label);
-        }
+      if (isRetained) {
+        state[key]           = norm;
+        prevDoorStates[side] = norm;
+        break;
       }
+      if (norm === _hystPending[key]) break;
+      _hystPending[key] = norm;
+      clearTimeout(_hystTimers[key]);
+      _hystTimers[key] = setTimeout(() => {
+        state[key] = norm;
+        if (norm !== prevDoorStates[side]) {
+          prevDoorStates[side] = norm;
+          const label = DOOR_NAMES[side] || side.toUpperCase();
+          if (norm === 'on') {
+            addEvent('door_open',  `${label} aberta`);
+            if (notifPrefs.door_open)  sendPush('🚪 Porta aberta', label);
+          } else {
+            addEvent('door_close', `${label} fechada`);
+            if (notifPrefs.door_close) sendPush('🚪 Porta fechada', label);
+          }
+        }
+      }, HYSTERESIS_MS);
       break;
     }
     case 'door_trunk': {
+      // Mesmo padrão hysteresis 3s.
       const norm = value === '1' ? 'on' : 'off';
-      const prevT = prevDoorStates.trunk;
-      state.door_trunk     = norm;
-      prevDoorStates.trunk = norm;
-      if (!isRetained && prevT !== null && prevT !== norm) {
-        if (norm === 'on') {
-          addEvent('trunk_open',  'Porta-malas aberta');
-          if (notifPrefs.trunk_open)  sendPush('🧳 Porta-malas aberta', 'Verifique se está segura.');
-        } else {
-          addEvent('trunk_close', 'Porta-malas fechada');
-          if (notifPrefs.trunk_close) sendPush('🧳 Porta-malas fechada', 'Porta-malas foi fechada.');
-        }
+      if (isRetained) {
+        state.door_trunk     = norm;
+        prevDoorStates.trunk = norm;
+        break;
       }
+      if (norm === _hystPending.door_trunk) break;
+      _hystPending.door_trunk = norm;
+      clearTimeout(_hystTimers.door_trunk);
+      _hystTimers.door_trunk = setTimeout(() => {
+        state.door_trunk = norm;
+        if (norm !== prevDoorStates.trunk) {
+          prevDoorStates.trunk = norm;
+          if (norm === 'on') {
+            addEvent('trunk_open',  'Porta-malas aberta');
+            if (notifPrefs.trunk_open)  sendPush('🧳 Porta-malas aberta', 'Verifique se está segura.');
+          } else {
+            addEvent('trunk_close', 'Porta-malas fechada');
+            if (notifPrefs.trunk_close) sendPush('🧳 Porta-malas fechada', 'Porta-malas foi fechada.');
+          }
+        }
+      }, HYSTERESIS_MS);
       break;
     }
     case 'sunroof': {
