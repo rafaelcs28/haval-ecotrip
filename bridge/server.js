@@ -1694,16 +1694,24 @@ app.post('/api/push/history/clear', (_req, res) => {
 });
 
 // ── Remote Actions ────────────────────────────────────────────────────────────
-const ALLOWED_ACTIONS = new Set([
-  'engine_on',  'engine_off',
-  'lock_open',  'lock_close',
-  'windows_open', 'windows_close',
-  'trunk_open', 'trunk_close',
-  'sunroof_open', 'sunroof_close',
-  'ac_on',
-  'charge_stop',
-  'charge_history',
-]);
+// Cada ação do PWA mapeia 1:1 num button.* da integração GWM Brasil no HA.
+// O bridge dispara via REST: POST $HA_URL/api/services/button/press { entity_id }.
+const ACTION_TO_HA_BUTTON = {
+  engine_on:      'ligar_o_motor',
+  engine_off:     'desligar_o_motor',
+  lock_open:      'abrir_as_portas',
+  lock_close:     'fechar_as_portas',
+  windows_open:   'abrir_os_vidros',
+  windows_close:  'fechar_os_vidros',
+  trunk_open:     'abrir_porta_malas',
+  trunk_close:    'fechar_porta_malas',
+  sunroof_open:   'abrir_teto_solar',
+  sunroof_close:  'fechar_teto_solar',
+  ac_on:          'ativacao_do_ar_condicionado',
+  charge_stop:    'interromper_carregamento',
+  charge_history: 'historico_de_carregamento',
+};
+const ALLOWED_ACTIONS = new Set(Object.keys(ACTION_TO_HA_BUTTON));
 
 // POST /api/charge-limit  { pct: 80 }  — publica cmd/charge_limit no MQTT
 app.post('/api/charge-limit', (req, res) => {
@@ -1720,14 +1728,39 @@ app.post('/api/charge-limit', (req, res) => {
   });
 });
 
-app.post('/api/action/:name', (req, res) => {
+app.post('/api/action/:name', async (req, res) => {
   const { name } = req.params;
-  if (!ALLOWED_ACTIONS.has(name)) return res.status(400).json({ error: 'ação desconhecida' });
-  if (!mqttClient?.connected)     return res.status(503).json({ error: 'MQTT offline' });
-  mqttClient.publish(`${MQTT_PREFIX}/remote/${name}`, '1', { retain: false, qos: 1 }, err => {
-    if (err) return res.status(500).json({ error: 'falha ao publicar' });
+  console.log(`[action] recebido name='${name}'`);
+  const suffix = ACTION_TO_HA_BUTTON[name];
+  if (!suffix) {
+    console.warn(`[action] ${name} REJEITADO: ação desconhecida`);
+    return res.status(400).json({ error: 'ação desconhecida' });
+  }
+  if (!HA_URL || !HA_TOKEN) {
+    console.warn(`[action] ${name} REJEITADO: HA não configurado`);
+    return res.status(503).json({ error: 'HA não configurado' });
+  }
+  const entityId = `button.${GWM_TOPIC_PREFIX}_${suffix}`;
+  try {
+    const r = await fetch(`${HA_URL}/api/services/button/press`, {
+      method:  'POST',
+      headers: {
+        Authorization: `Bearer ${HA_TOKEN}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ entity_id: entityId }),
+    });
+    if (!r.ok) {
+      const txt = await r.text().catch(() => '');
+      console.error(`[action] ${name} → ${entityId} HTTP ${r.status} ${txt.slice(0, 200)}`);
+      return res.status(502).json({ error: `HA HTTP ${r.status}` });
+    }
+    console.log(`[action] ${name} → ${entityId} OK`);
     res.json({ ok: true });
-  });
+  } catch (e) {
+    console.error(`[action] ${name} erro: ${e.message}`);
+    res.status(502).json({ error: 'falha ao chamar HA' });
+  }
 });
 
 app.get('/api/events', requireAuth, (req, res) => {

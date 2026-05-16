@@ -4549,7 +4549,10 @@ window.showToast = showToast;
 async function sendRemoteAction(action, successMsg, confirmSpec = null) {
   const logEl  = document.getElementById(_actionLogMap[action] || '');
   const hhmm   = () => new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-  const TIMEOUT = (confirmSpec?.timeout ?? 60) * 1000;
+  // Cloud GWM Brasil tem latência de ~1-2min entre press do botão e
+  // atualização do estado refletida pela integração HA. 180s cobre isso.
+  const TIMEOUT_SEC = confirmSpec?.timeout ?? 180;
+  const TIMEOUT     = TIMEOUT_SEC * 1000;
 
   // Cancela confirmação anterior para o mesmo campo (evita timer duplicado)
   if (confirmSpec && _pendingConfirm[confirmSpec.key]) {
@@ -4571,29 +4574,28 @@ async function sendRemoteAction(action, successMsg, confirmSpec = null) {
       return;
     }
 
-    if (confirmSpec) {
-      // Comando aceito — aguarda confirmação do carro via WebSocket
-      showToast('⏳ Aguardando confirmação do carro…');
-      if (logEl) logEl.innerHTML = `<span style="color:#fbbf24">⏳ Aguardando carro…</span>`;
+    // HTTP 200 do bridge = HA aceitou o press. Mostra "Enviado" imediato.
+    const sentAt = hhmm();
+    showToast('✓ Comando enviado');
+    if (logEl) logEl.innerHTML = `<span style="color:#4ade80">✓ Enviado · ${sentAt}</span>`;
+    if (navigator.vibrate) navigator.vibrate(80);
 
+    // Se houver confirmSpec, segue escutando o estado físico em background.
+    // Se vier mudança em TIMEOUT_SEC, upgrade visual pra "Confirmado pelo carro".
+    // Se der timeout, mantém o "Enviado" — não é falha, só não confirmou fisicamente.
+    if (confirmSpec) {
       _pendingConfirm[confirmSpec.key] = {
         expectedVal: confirmSpec.expectedVal,
         timer: setTimeout(() => {
           delete _pendingConfirm[confirmSpec.key];
-          showToast('✗ Carro não confirmou em 60s');
-          if (logEl) logEl.innerHTML = `<span style="color:#f87171">✗ Sem confirmação · ${hhmm()}</span>`;
+          // Sem mudança visual — comando já foi marcado como Enviado
         }, TIMEOUT),
         onSuccess: () => {
-          showToast('✓ ' + successMsg);
-          if (logEl) logEl.innerHTML = `<span style="color:#4ade80">✓ ${successMsg} · ${hhmm()}</span>`;
+          showToast('✓ ' + successMsg + ' (confirmado)');
+          if (logEl) logEl.innerHTML = `<span style="color:#4ade80">✓ ${successMsg} (confirmado) · ${hhmm()}</span>`;
           if (navigator.vibrate) navigator.vibrate([80, 40, 80]);
         },
       };
-    } else {
-      // Ação sem confirmação (outros comandos remotos)
-      showToast('✓ ' + successMsg);
-      if (logEl) logEl.innerHTML = `<span style="color:#4ade80">✓ Enviado · ${hhmm()}</span>`;
-      if (navigator.vibrate) navigator.vibrate(80);
     }
 
   } catch (err) {
