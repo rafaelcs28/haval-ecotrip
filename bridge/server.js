@@ -1862,10 +1862,26 @@ const GWM_TOPIC_MAP = {
   '2101008': 'tyre_temp_rr',
   '2011501': 'autonomy_ev_km',
   '2011007': 'autonomy_ice_km',
+  // Charging (HA mapping: 0=Desconectado, 1=Carregando, 2=Programado, 3=Finalizado, 5=Aguardando)
+  '2041142': 'charging_state_raw',
+  '2013022': 'charge_remaining_min',
   // Texto / outros
   'hyengsts':       'engine_state',       // "0"=off, "1"=on (mesma convenção do app)
   'endereco_atual': 'current_address',
+  'status_message': 'car_status_message', // alertas tipo "NO_ALERTS" ou códigos
 };
+
+/** Converte código numérico do charging_state do HA pro texto que a PWA espera. */
+function mapChargingStateText(raw) {
+  switch (String(raw).trim()) {
+    case '0': return 'Desconectado';
+    case '1': return 'Carregando';
+    case '2': return 'Programado';
+    case '3': return 'Finalizado';
+    case '5': return 'Aguardando liberação';
+    default:  return 'Desconhecido';
+  }
+}
 
 // Chaves que migraram pro HA — handlers do app são ignorados aqui pra evitar
 // que dados ruidosos do app (via Shizuku/CarDataManager) sobrescrevam o estado
@@ -1877,6 +1893,8 @@ const MIGRATED_TO_HA = new Set([
   'sunroof', 'engine_state',
   // Sensores numéricos passivos — HA é mais confiável
   'odometer_km', 'batt_12v_pct',
+  // Charging state agora vem do HA com mapeamento texto
+  'charging_state', 'charge_remaining_min',
 ]);
 
 const GWM_BODY_BINARY = new Set([
@@ -1978,7 +1996,19 @@ function applyGwmEntity(id, value, isRetained = false) {
     return;
   }
 
-  // ── Sensores numéricos (soc, 12v, odo, pneus, autonomia) ─────────────────
+  // ── Status message do carro (alertas/códigos) ─────────────────────────────
+  if (field === 'car_status_message') {
+    state.car_status_message = value;
+    return;
+  }
+
+  // ── Charging state — converte número do HA pro texto que a PWA usa ────────
+  if (field === 'charging_state_raw') {
+    state.charging_state = mapChargingStateText(value);
+    return;
+  }
+
+  // ── Sensores numéricos (soc, 12v, odo, pneus, autonomia, remaining_min) ──
   state[field] = num(value);
 }
 
