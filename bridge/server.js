@@ -23,6 +23,12 @@ const PORT           = parseInt(process.env.PORT || '3000', 10);
 const GWM_CHASSI       = process.env.GWM_CHASSI || 'lgwffva55sh931315';
 const GWM_TOPIC_PREFIX = `gwmbrasil_${GWM_CHASSI}`;
 
+// Home Assistant REST — usado APENAS no boot pra puxar o estado inicial das
+// entidades que a integração GWM não publica com retain (doors, lock, AC,
+// windows, sunroof, pneus, etc). Depois disso, MQTT live cobre as mudanças.
+const HA_URL   = process.env.HA_URL   || '';
+const HA_TOKEN = process.env.HA_TOKEN || '';
+
 // ── Token de acesso (hash SHA-256 da senha) ────────────────────────────────────
 // Suporta migração: BRIDGE_TOKEN (plain) → calcula hash automaticamente
 // Em produção usa BRIDGE_TOKEN_HASH diretamente (gerado pelo endpoint change-password)
@@ -1799,6 +1805,9 @@ mqttClient.on('connect', () => {
   // direto da fonte oficial via cloud, sem ruído do barramento do app.
   mqttClient.subscribe(`${GWM_TOPIC_PREFIX}/+/state`, { qos: 1 });
   console.log(`✓ Subscribed em ${GWM_TOPIC_PREFIX}/+/state (integração HA)`);
+  // A integração não publica esses tópicos com retain — broker fica sem o
+  // estado atual ao subscribe. Puxamos via REST do HA no boot pra popular.
+  fetchInitialStateFromHA();
 });
 
 mqttClient.on('error',      (err) => console.error('MQTT erro:', err.message));
@@ -1880,6 +1889,85 @@ function mapChargingStateText(raw) {
     case '3': return 'Finalizado';
     case '5': return 'Aguardando liberação';
     default:  return 'Desconhecido';
+  }
+}
+
+/**
+ * Mapeia uma entidade HA (state via REST) pro handler GWM equivalente.
+ * Converte estado HA ('on'/'off' p/ binary, valor cru p/ sensor) pro formato
+ * MQTT esperado por applyGwmEntity ('1'/'0' p/ binary, valor cru p/ sensor),
+ * e despacha. Usado SÓ no boot do bridge — runtime usa MQTT.
+ */
+function applyHaEntityState(entityId, haState) {
+  if (haState === 'unknown' || haState === 'unavailable' || haState == null) return false;
+  const c = GWM_CHASSI.toLowerCase();
+  // (entityId → { gwmId, isBinary }) — derivado dos discovery configs do HA.
+  const m = {
+    // Binary sensors (HA state 'on'/'off' → MQTT '1'/'0')
+    [`binary_sensor.gwmbrasil_${c}_estado_da_trava`]:                     { id: '2208001', isBinary: true },
+    [`binary_sensor.gwmbrasil_${c}_porta_malas`]:                         { id: '2206001', isBinary: true },
+    [`binary_sensor.gwmbrasil_${c}_porta_dianteira_esquerda`]:            { id: '2206002', isBinary: true },
+    [`binary_sensor.gwmbrasil_${c}_porta_traseira_esquerda`]:             { id: '2206003', isBinary: true },
+    [`binary_sensor.gwmbrasil_${c}_porta_dianteira_direita`]:             { id: '2206004', isBinary: true },
+    [`binary_sensor.gwmbrasil_${c}_porta_traseira_direita`]:              { id: '2206005', isBinary: true },
+    [`binary_sensor.gwmbrasil_${c}_estado_do_ar_condicionado`]:           { id: '2202001', isBinary: true },
+    // Sensores numéricos (state HA = valor cru)
+    [`sensor.gwmbrasil_${c}_vidro_dianteiro_esquerdo`]:                   { id: '2210001' },
+    [`sensor.gwmbrasil_${c}_vidro_dianteiro_direito`]:                    { id: '2210002' },
+    [`sensor.gwmbrasil_${c}_vidro_traseiro_esquerdo`]:                    { id: '2210003' },
+    [`sensor.gwmbrasil_${c}_vidro_traseiro_direito`]:                     { id: '2210004' },
+    [`sensor.gwmbrasil_${c}_posicao_do_teto_solar`]:                      { id: '2210005' },
+    [`sensor.gwmbrasil_${c}_estado_do_motor`]:                            { id: 'hyengsts' },
+    [`sensor.gwmbrasil_${c}_estado_de_carga_soc`]:                        { id: '2013021' },
+    [`sensor.gwmbrasil_${c}_estado_de_carga_12v`]:                        { id: '2013005' },
+    [`sensor.gwmbrasil_${c}_quilometragem_total`]:                        { id: '2103010' },
+    [`sensor.gwmbrasil_${c}_pressao_do_pneu_dianteiro_esquerdo`]:         { id: '2101001' },
+    [`sensor.gwmbrasil_${c}_pressao_do_pneu_dianteiro_direito`]:          { id: '2101002' },
+    [`sensor.gwmbrasil_${c}_pressao_do_pneu_traseiro_esquerdo`]:          { id: '2101003' },
+    [`sensor.gwmbrasil_${c}_pressao_do_pneu_traseiro_direito`]:           { id: '2101004' },
+    [`sensor.gwmbrasil_${c}_temperatura_do_pneu_dianteiro_esquerdo`]:     { id: '2101005' },
+    [`sensor.gwmbrasil_${c}_temperatura_do_pneu_dianteiro_direito`]:      { id: '2101006' },
+    [`sensor.gwmbrasil_${c}_temperatura_do_pneu_traseiro_esquerdo`]:      { id: '2101007' },
+    [`sensor.gwmbrasil_${c}_temperatura_do_pneu_traseiro_direito`]:       { id: '2101008' },
+    [`sensor.gwmbrasil_${c}_autonomia_ev`]:                               { id: '2011501' },
+    [`sensor.gwmbrasil_${c}_autonomia_combustao`]:                        { id: '2011007' },
+    [`sensor.gwmbrasil_${c}_estado_da_carga`]:                            { id: '2041142' },
+    [`sensor.gwmbrasil_${c}_tempo_de_carga`]:                             { id: '2013022' },
+    [`sensor.gwmbrasil_${c}_endereco_atual`]:                             { id: 'endereco_atual' },
+    [`sensor.gwmbrasil_${c}_status_message`]:                             { id: 'status_message' },
+  };
+  const entry = m[entityId];
+  if (!entry) return false;
+  const mqttValue = entry.isBinary
+    ? (haState === 'on' ? '1' : '0')
+    : String(haState);
+  applyGwmEntity(entry.id, mqttValue, false);
+  return true;
+}
+
+/**
+ * Fetch inicial via HA REST — popula estado das entidades GWM que a integração
+ * não publica com retain (doors, lock, windows, etc). Chamado uma vez no boot.
+ * Runtime usa MQTT pra mudanças (integração publica live quando estado muda).
+ */
+async function fetchInitialStateFromHA() {
+  if (!HA_URL || !HA_TOKEN) {
+    console.log('[ha-init] HA_URL/HA_TOKEN não configurados — pulando initial fetch');
+    return;
+  }
+  try {
+    const res = await fetch(`${HA_URL}/api/states`, {
+      headers: { Authorization: `Bearer ${HA_TOKEN}` },
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const states = await res.json();
+    let applied = 0;
+    for (const ent of states) {
+      if (applyHaEntityState(ent.entity_id, ent.state)) applied++;
+    }
+    console.log(`✓ [ha-init] ${applied} entidades populadas via REST HA`);
+  } catch (e) {
+    console.error(`[ha-init] erro: ${e.message}`);
   }
 }
 
