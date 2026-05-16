@@ -1852,9 +1852,12 @@ function applyMqttMessage(key, value, isRetained = false) {
     }
     case 'lock_state': {
       // App publica "1" (destrancado) / "0" (trancado).
-      // Hysteresis 3s — sensor de trava pode emitir transientes durante o
-      // travamento/destravamento (curto-circuito intermediário com chave/botão).
-      const norm = value === '1' ? 'on' : 'off';
+      // Formato: "valor" (legacy) ou "valor:ms_da_mudanca" (v5.11+).
+      // Hysteresis 3s + voting filter Android-side (v5.11+) → defesa em camadas.
+      const colonIdx = value.indexOf(':');
+      const normRaw  = colonIdx >= 0 ? value.slice(0, colonIdx) : value;
+      const realTs   = colonIdx >= 0 ? (parseInt(value.slice(colonIdx + 1), 10) || 0) : 0;
+      const norm     = normRaw === '1' ? 'on' : 'off';
       if (isRetained) {
         state.lock_state = norm;
         prevLockState    = norm;
@@ -1867,8 +1870,8 @@ function applyMqttMessage(key, value, isRetained = false) {
         state.lock_state = norm;
         if (norm !== prevLockState) {
           prevLockState = norm;
-          if (norm === 'on') addEvent('lock_open',  'Carro destrancado');
-          else               addEvent('lock_close', 'Carro trancado');
+          if (norm === 'on') addEvent('lock_open',  'Carro destrancado', realTs);
+          else               addEvent('lock_close', 'Carro trancado',    realTs);
         }
       }, HYSTERESIS_MS);
       break;

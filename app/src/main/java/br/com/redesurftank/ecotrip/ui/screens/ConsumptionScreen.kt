@@ -316,7 +316,8 @@ fun ConsumptionScreen() {
                         mqttManager.latestHvacCycleMode = value.trim().toIntOrNull() ?: 0
                     }
                     CarConstants.CAR_BASIC_DOOR_LOCK_STATUS.value -> {
-                        mqttManager.latestLockStatus = value.trim().toIntOrNull() ?: 0
+                        val raw = value.trim().toIntOrNull() ?: 0
+                        mqttManager.applyLockStatus(raw)  // voting filter K=8
                     }
                     CarConstants.CAR_BASIC_DOOR_STATUS.value -> {
                         // Formato esperado: CSV "FL,FR,RL,RR,Trunk" — 0=fechada, 1=aberta.

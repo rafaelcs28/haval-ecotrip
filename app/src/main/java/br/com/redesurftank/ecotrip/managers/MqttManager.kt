@@ -150,7 +150,35 @@ class MqttManager private constructor() {
     @Volatile var latestWindowRlConfirmedMs: Long = 0L
     @Volatile var latestWindowRrConfirmedMs: Long = 0L
     @Volatile private var windowVoteInitialized: Boolean = false
-    private val WINDOW_VOTE_REQUIRED = 8
+    private val WINDOW_VOTE_REQUIRED = 15
+
+    // ── Voting filter pra car.basic.door_lock_status ──────────────────────────
+    // Mesma motivação dos vidros: car bus emite bursts ruidosos. Usuário relatou
+    // PWA marcando "trancado" sem o carro estar trancado.
+    private var pendingLock: Int = 0; private var pendingLockCount: Int = 0; private var pendingLockSinceMs: Long = 0L
+    @Volatile var latestLockConfirmedMs: Long = 0L
+    @Volatile private var lockVoteInitialized: Boolean = false
+    private val LOCK_VOTE_REQUIRED = 8
+
+    /** Aplica voting filter em uma nova leitura de car.basic.door_lock_status. */
+    fun applyLockStatus(raw: Int) {
+        val now = System.currentTimeMillis()
+        if (!lockVoteInitialized) {
+            latestLockStatus = raw
+            pendingLock = raw; pendingLockCount = 1; pendingLockSinceMs = now
+            latestLockConfirmedMs = now
+            lockVoteInitialized = true
+            return
+        }
+        if (raw == pendingLock) {
+            if (++pendingLockCount >= LOCK_VOTE_REQUIRED && latestLockStatus != raw) {
+                latestLockStatus = raw
+                latestLockConfirmedMs = pendingLockSinceMs
+            }
+        } else {
+            pendingLock = raw; pendingLockCount = 1; pendingLockSinceMs = now
+        }
+    }
 
     /** Aplica voting filter em uma nova leitura de car.basic.window_status. */
     fun applyWindowStatus(fl: Int, fr: Int, rl: Int, rr: Int) {
@@ -577,6 +605,7 @@ class MqttManager private constructor() {
             val snWinRlMs = latestWindowRlConfirmedMs;   val snWinRrMs = latestWindowRrConfirmedMs
             val snSunroof   = latestSunroof
             val snLockStat  = latestLockStatus
+            val snLockMs    = latestLockConfirmedMs
             val snAcEnable  = latestHvacAcEnable
             val snDrvReady  = latestDrivingReadyState
             val snDoorRaw   = latestDoorStatusRaw
@@ -642,8 +671,9 @@ class MqttManager private constructor() {
             pubR("window_rr",  "${if (snWinRr == 1) "0" else "1"}:$snWinRrMs")
             // Sunroof: 0=fechado, >0=aberto (confirmado em uso).
             pubR("sunroof",    if (snSunroof  > 0) "1" else "0")
-            // Trava: cru "3"=destrancado, "1"=trancado (confirmado em uso real).
-            pubR("lock_state", if (snLockStat == 3) "1" else "0")
+            // Trava: cru "3"=destrancado, "1"=trancado. Voting filter aplicado em
+            // applyLockStatus pra filtrar ruído. Formato "valor:ms_da_mudanca".
+            pubR("lock_state", "${if (snLockStat == 3) "1" else "0"}:$snLockMs")
             // Estado da ignição (carro on/off): derivado de driving_ready_state.
             pubR("engine_state", if (snDrvReady > 0) "1" else "0")
             // Debug — valores crus do barramento + resultado do parsing (sem afetar lógica)
