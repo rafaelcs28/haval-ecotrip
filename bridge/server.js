@@ -669,6 +669,7 @@ function recomputeTankAvgPrice() {
   // Sempre escreve no global — quando não há refuels, avgPrice é o seed.
   state.price_gas_per_l = +avgPrice.toFixed(3);
   saveRefuels();
+  publishPricesToCar();
   return avgPrice;
 }
 
@@ -732,7 +733,31 @@ function recomputeBatteryAvgPrice() {
   }
   state.battery_avg_price_per_kwh = +avgPrice.toFixed(4);
   state.price_kwh = +avgPrice.toFixed(4);
+  publishPricesToCar();
   return avgPrice;
+}
+
+// Publica os preços médios atuais no MQTT (retained) pra o APK do carro guardar
+// nas SharedPreferences e usar nos cálculos internos da tela de viagem.
+let _lastPublishedGas = null, _lastPublishedKwh = null;
+function publishPricesToCar() {
+  // mqttClient é declarado depois do boot — protege contra TDZ no primeiro
+  // recompute (que roda antes do mqtt.connect).
+  let client;
+  try { client = mqttClient; } catch (_) { return; }
+  if (!client?.connected) return;
+  const gas = +state.price_gas_per_l || 0;
+  const kwh = +state.price_kwh || 0;
+  if (gas > 0 && gas !== _lastPublishedGas) {
+    client.publish(`${MQTT_PREFIX}/cmd/set_price_gas_per_l`, gas.toFixed(3),
+      { qos: 1, retain: true });
+    _lastPublishedGas = gas;
+  }
+  if (kwh > 0 && kwh !== _lastPublishedKwh) {
+    client.publish(`${MQTT_PREFIX}/cmd/set_price_kwh`, kwh.toFixed(4),
+      { qos: 1, retain: true });
+    _lastPublishedKwh = kwh;
+  }
 }
 
 // Estado de alerta já disparado por intervalo (evita re-notificar a cada km).
@@ -2277,6 +2302,9 @@ const mqttClient = mqtt.connect(MQTT_HOST, mqttOptions);
 mqttClient.on('connect', () => {
   console.log(`✓ MQTT conectado: ${MQTT_HOST} (prefix: ${MQTT_PREFIX})`);
   mqttClient.subscribe(`${MQTT_PREFIX}/#`, { qos: 1 });
+  // Reset cache de publish pra forçar republicação dos preços ao reconectar
+  _lastPublishedGas = null; _lastPublishedKwh = null;
+  publishPricesToCar();
   // Subscribe nos tópicos da integração GWM Brasil — body/lock/AC/etc. vêm
   // direto da fonte oficial via cloud, sem ruído do barramento do app.
   mqttClient.subscribe(`${GWM_TOPIC_PREFIX}/+/state`, { qos: 1 });

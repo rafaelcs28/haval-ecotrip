@@ -1109,6 +1109,24 @@ class MqttManager private constructor() {
                         AppLogger.w(TAG, "Trip não encontrado para deletar: $isoTs")
                     }
                 }
+                "set_price_gas_per_l" -> {
+                    // Bridge publica esse tópico (retained) a cada mudança do médio
+                    // ponderado calculado a partir dos abastecimentos no PWA.
+                    val v = payload.trim().toFloatOrNull()
+                    if (v != null && v > 0) {
+                        prefs.edit().putFloat(SharedPreferencesKeys.PRICE_GASOLINE_PER_L, v).apply()
+                        TripManager.getInstance().setPriceGasoline(v)
+                        AppLogger.i(TAG, "Preço gasolina atualizado pelo bridge: R$ $v/L")
+                    }
+                }
+                "set_price_kwh" -> {
+                    val v = payload.trim().toFloatOrNull()
+                    if (v != null && v > 0) {
+                        prefs.edit().putFloat(SharedPreferencesKeys.PRICE_ENERGY_PER_KWH, v).apply()
+                        TripManager.getInstance().setPriceEnergy(v)
+                        AppLogger.i(TAG, "Preço energia atualizado pelo bridge: R$ $v/kWh")
+                    }
+                }
                 else -> {
                     // Comandos HVAC: cmd/hvac/<control> — escreve no barramento via Shizuku.
                     // Bridge já validou range/tipo; aqui só mapeia control → chave do bus.
