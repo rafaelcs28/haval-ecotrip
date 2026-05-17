@@ -1406,7 +1406,9 @@ function renderDash() {
   if (socBar) socBar.style.width = Math.max(0, Math.min(100, soc)) + '%';
 
   // ── Autonomia elétrica + térmica estimadas ────────────────────────────────
-  const BATT_KWH      = 25.8, EV_MIN_SOC = 12;
+  // Pack total H6 PHEV = 34 kWh. EV_MIN_SOC = 12% (reserva mínima — abaixo
+  // disso o motor térmico já entra). Usável de 100% a 12% = ~30 kWh.
+  const BATT_KWH      = 34, EV_MIN_SOC = 12;
   // Floor de 14 kWh/100km: abaixo disso o motor térmico estava carregando
   // a bateria (gerador), o que contamina o consumo elétrico com valores
   // artificialmente baixos — esse dado não reflete autonomia real em EV puro.
