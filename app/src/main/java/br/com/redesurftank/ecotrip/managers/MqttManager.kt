@@ -742,15 +742,13 @@ class MqttManager private constructor() {
         }
     }
 
-    /**
-     * Trip A/B descontinuado — publishTripHistory virou no-op.
-     * Bridge ignora `trips/history` e os tópicos `trip_a/*` / `trip_b/*`.
-     */
+    // Trip A/B descontinuado — publishTripHistory virou no-op.
+    // Bridge ignora "trips/history" e os tópicos "trip_a" e "trip_b".
     @Suppress("UNUSED_PARAMETER")
-    fun publishTripHistory(entries: List<TripHistoryEntry>) { /* no-op */ }
+    fun publishTripHistory(entries: List<TripHistoryEntry>) {}
 
     @Suppress("UNUSED_PARAMETER")
-    private fun publishTripHistoryInternal(c: MqttClient, entries: List<TripHistoryEntry>) { /* no-op */ }
+    private fun publishTripHistoryInternal(c: MqttClient, entries: List<TripHistoryEntry>) {}
 
     // ── Charge history ────────────────────────────────────────────────────────
 

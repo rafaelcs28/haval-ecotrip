@@ -24,8 +24,8 @@ android {
         minSdk = 28
         //noinspection ExpiredTargetSdkVersion
         targetSdk = 28
-        versionCode = 148
-        versionName = "5.17"
+        versionCode = 149
+        versionName = "5.18"
 
         buildConfigField("String", "GITHUB_REPO", "\"rafaelcs28/haval-ecotrip\"")
     }
