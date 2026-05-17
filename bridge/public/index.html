@@ -232,38 +232,26 @@
           <img id="cl-win-rl-ajar" src="/images/haval_h6/vidro_traseiro_esquerdo_entreaberto.png"  style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:contain;display:none">
           <img id="cl-win-rr-open" src="/images/haval_h6/vidro_traseiro_direito_aberto.png"        style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:contain;display:none">
           <img id="cl-win-rr-ajar" src="/images/haval_h6/vidro_traseiro_direito_entreaberto.png"   style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:contain;display:none">
-          <!-- Pneus — accent-bar lateral, esquerda/direita espelhados -->
-          <div id="d-tyre-fl" style="position:absolute;left:2%;top:17%;display:flex;flex-direction:column;align-items:flex-start;background:rgba(7,14,26,0.82);border-left:3px solid #0e7490;border-radius:0 6px 6px 0;padding:3px 8px 3px 5px;pointer-events:none">
-            <span style="font-size:6px;color:#475569;font-weight:600;letter-spacing:0.5px;line-height:1.5">D.ESQ</span>
-            <div style="display:flex;align-items:baseline;gap:2px">
-              <span id="d-tyre-fl-psi" style="font-size:14px;font-weight:700;line-height:1.1;color:#22d3ee">--</span>
-              <span style="font-size:6px;color:#475569;line-height:1">psi</span>
-            </div>
-            <span id="d-tyre-fl-temp" style="font-size:8px;color:#64748b;line-height:1.3">--°</span>
+          <!-- Pneus — pílulas compactas posicionadas alinhadas às rodas, fora do corpo do carro -->
+          <div id="d-tyre-fl" class="tyre-pill" style="top:26%;left:3%">
+            <span id="d-tyre-fl-psi" class="tyre-psi">--</span>
+            <span class="tyre-sep">·</span>
+            <span id="d-tyre-fl-temp" class="tyre-temp">--°</span>
           </div>
-          <div id="d-tyre-fr" style="position:absolute;right:2%;top:17%;display:flex;flex-direction:column;align-items:flex-end;background:rgba(7,14,26,0.82);border-right:3px solid #0e7490;border-radius:6px 0 0 6px;padding:3px 5px 3px 8px;pointer-events:none">
-            <span style="font-size:6px;color:#475569;font-weight:600;letter-spacing:0.5px;line-height:1.5">D.DIR</span>
-            <div style="display:flex;align-items:baseline;gap:2px">
-              <span id="d-tyre-fr-psi" style="font-size:14px;font-weight:700;line-height:1.1;color:#22d3ee">--</span>
-              <span style="font-size:6px;color:#475569;line-height:1">psi</span>
-            </div>
-            <span id="d-tyre-fr-temp" style="font-size:8px;color:#64748b;line-height:1.3">--°</span>
+          <div id="d-tyre-fr" class="tyre-pill" style="top:26%;right:3%">
+            <span id="d-tyre-fr-psi" class="tyre-psi">--</span>
+            <span class="tyre-sep">·</span>
+            <span id="d-tyre-fr-temp" class="tyre-temp">--°</span>
           </div>
-          <div id="d-tyre-rl" style="position:absolute;left:2%;top:64%;display:flex;flex-direction:column;align-items:flex-start;background:rgba(7,14,26,0.82);border-left:3px solid #0e7490;border-radius:0 6px 6px 0;padding:3px 8px 3px 5px;pointer-events:none">
-            <span style="font-size:6px;color:#475569;font-weight:600;letter-spacing:0.5px;line-height:1.5">T.ESQ</span>
-            <div style="display:flex;align-items:baseline;gap:2px">
-              <span id="d-tyre-rl-psi" style="font-size:14px;font-weight:700;line-height:1.1;color:#22d3ee">--</span>
-              <span style="font-size:6px;color:#475569;line-height:1">psi</span>
-            </div>
-            <span id="d-tyre-rl-temp" style="font-size:8px;color:#64748b;line-height:1.3">--°</span>
+          <div id="d-tyre-rl" class="tyre-pill" style="top:66%;left:3%">
+            <span id="d-tyre-rl-psi" class="tyre-psi">--</span>
+            <span class="tyre-sep">·</span>
+            <span id="d-tyre-rl-temp" class="tyre-temp">--°</span>
           </div>
-          <div id="d-tyre-rr" style="position:absolute;right:2%;top:64%;display:flex;flex-direction:column;align-items:flex-end;background:rgba(7,14,26,0.82);border-right:3px solid #0e7490;border-radius:6px 0 0 6px;padding:3px 5px 3px 8px;pointer-events:none">
-            <span style="font-size:6px;color:#475569;font-weight:600;letter-spacing:0.5px;line-height:1.5">T.DIR</span>
-            <div style="display:flex;align-items:baseline;gap:2px">
-              <span id="d-tyre-rr-psi" style="font-size:14px;font-weight:700;line-height:1.1;color:#22d3ee">--</span>
-              <span style="font-size:6px;color:#475569;line-height:1">psi</span>
-            </div>
-            <span id="d-tyre-rr-temp" style="font-size:8px;color:#64748b;line-height:1.3">--°</span>
+          <div id="d-tyre-rr" class="tyre-pill" style="top:66%;right:3%">
+            <span id="d-tyre-rr-psi" class="tyre-psi">--</span>
+            <span class="tyre-sep">·</span>
+            <span id="d-tyre-rr-temp" class="tyre-temp">--°</span>
           </div>
         </div>
         <!-- Chips de status -->

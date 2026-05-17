@@ -1810,37 +1810,19 @@ function renderDash() {
   carLayer('cl-charge-wait', chg === 'Aguardando');
   carLayer('cl-charge-no',   chg === 'Não Carregando' || chg === 'NaoCarregando');
 
-  // Pneus
+  // Pneus — pílula compacta com psi colorido por faixa, temp em texto neutro
   function renderTyre(pos, psi, tempC) {
     const psiEl  = document.getElementById(`d-tyre-${pos}-psi`);
     const tempEl = document.getElementById(`d-tyre-${pos}-temp`);
-    const card   = document.getElementById(`d-tyre-${pos}`);
     if (!psiEl) return;
-    const isLeft = pos === 'fl' || pos === 'rl';
     if (psi > 0) {
       psiEl.textContent = psi.toFixed(1);
-      const tier = psi < 25 || psi > 40 ? 'critical'
-                 : psi < 30             ? 'low'
-                 :                        'ok';
-      const cfg = {
-        ok:       { color: '#22d3ee', borderColor: '#0e7490', bg: 'rgba(7,14,26,0.82)'  },
-        low:      { color: '#fbbf24', borderColor: '#b45309', bg: 'rgba(30,18,0,0.82)'  },
-        critical: { color: '#f87171', borderColor: '#dc2626', bg: 'rgba(50,8,8,0.82)'   },
-      }[tier];
-      psiEl.style.color = cfg.color;
-      if (card) {
-        if (isLeft) card.style.borderLeft  = `3px solid ${cfg.borderColor}`;
-        else        card.style.borderRight = `3px solid ${cfg.borderColor}`;
-        card.style.background = cfg.bg;
-      }
+      psiEl.style.color = psi < 25 || psi > 40 ? '#f87171'   // crítico
+                       : psi < 30             ? '#fbbf24'    // baixo
+                       :                        '#22d3ee';   // ok
     } else {
       psiEl.textContent = '--';
       psiEl.style.color = '#475569';
-      if (card) {
-        if (isLeft) card.style.borderLeft  = '3px solid #1e293b';
-        else        card.style.borderRight = '3px solid #1e293b';
-        card.style.background = 'rgba(7,14,26,0.82)';
-      }
     }
     if (tempEl) tempEl.textContent = tempC > 0 ? `${tempC}°` : '--°';
   }

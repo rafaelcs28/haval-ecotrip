@@ -594,6 +594,38 @@ html, body {
   pointer-events: none;
 }
 
+/* Pílulas de pressão dos pneus — leve, sem competir com a ilustração */
+.tyre-pill {
+  position: absolute;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.65);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  pointer-events: none;
+  white-space: nowrap;
+  font-feature-settings: 'tnum';
+}
+.tyre-pill .tyre-psi {
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  color: #22d3ee;
+}
+.tyre-pill .tyre-sep {
+  font-size: 9px;
+  color: #475569;
+  line-height: 1;
+}
+.tyre-pill .tyre-temp {
+  font-size: 9px;
+  color: #94a3b8;
+  line-height: 1;
+}
+
 /* ── Cards Desde última partida / Trip A / Trip B — unidades micro ────────── */
 #d-trips-summary .dash-unit    { font-size: 8px; font-weight: 500; opacity: .70; vertical-align: baseline; margin-left: 1px; }
 
