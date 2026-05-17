@@ -1140,6 +1140,38 @@ async function syncAllCache({ silent = false } = {}) {
   return totals;
 }
 
+// Popula o resumo simples no card "Histórico & Backup". Fonte única = servidor.
+// Se cache local divergir, mostra dica discreta de atualização (auto via Reconciliar).
+async function renderHistCounts() {
+  const el = document.getElementById('hist-counts');
+  if (!el) return;
+  try {
+    const c = await apiFetch('/api/counts').then(r => r.json());
+    const refuels = cachedRefuels ? cachedRefuels.length : '?';
+    let extra = '';
+    // Detecta divergência IDB ↔ servidor pra sugerir reconciliar
+    try {
+      const [lT, lA, lC] = await Promise.all([
+        _idbGetAll('trips').then(a => a.length),
+        _idbGetAll('autotrips').then(a => a.length),
+        _idbGetAll('charges').then(a => a.length),
+      ]);
+      if (lT > 0 && (lT !== c.trips || lA !== c.autotrips || lC !== c.charges)) {
+        extra = `<div style="margin-top:6px;font-size:10px;color:#fbbf24">⚠️ Cache local difere do histórico (${lA} vs ${c.autotrips} viagens). Use "Reconciliar" pra ajustar.</div>`;
+      }
+    } catch (_) {}
+    el.innerHTML =
+      `<div>🛣️ <strong>${c.autotrips}</strong> viagens</div>` +
+      `<div>⚡ <strong>${c.charges}</strong> recargas</div>` +
+      `<div>⛽ <strong>${refuels}</strong> abastecimentos</div>` +
+      `<div>📍 <strong>${c.trips}</strong> trips manuais (Trip A/B)</div>` +
+      extra;
+  } catch (e) {
+    el.textContent = 'Não foi possível carregar (offline?)';
+  }
+}
+window.renderHistCounts = renderHistCounts;
+
 async function adminCacheStatus() {
   _cacheSetStatus('⏳ Verificando...', null);
   try {
@@ -4347,16 +4379,34 @@ function adminUpdate()  { adminAction('/api/admin/update',  'Atualizando'); }
 // tombstoneado. Usado pra "limpar permanentemente" itens que voltavam por
 // MQTT antes do tombstone system.
 async function adminSyncWithLocal() {
+  adminSetStatus('Carregando cache local…', null);
+  // Carrega do IndexedDB e refuels do servidor — admin não passa pela
+  // aba Auto/Posto, então cachedAutoTrips/cachedCharges podem estar null.
+  if (cachedAutoTrips === null) {
+    try { cachedAutoTrips = (await _idbGetAll('autotrips')).sort((a,b) => (b.startMs||0)-(a.startMs||0)); } catch (_) { cachedAutoTrips = []; }
+  }
+  if (cachedCharges === null) {
+    try { cachedCharges = await _idbGetAll('charges'); } catch (_) { cachedCharges = []; }
+  }
+  // Refuels não tem IDB, só /api/refuels
+  if (cachedRefuels === null) await _loadRefuels();
+
   const localAt = (cachedAutoTrips || []).length;
   const localCh = (cachedCharges   || []).length;
   const localRf = (cachedRefuels   || []).length;
+
+  if (localAt + localCh + localRf === 0) {
+    adminSetStatus('✗ Cache local vazio. Abra as abas Auto e Posto antes de sincronizar.', false);
+    return;
+  }
+
   if (!confirm(
     `Sincronizar servidor com este celular?\n\n` +
     `Atualmente no app:\n  • ${localAt} viagens\n  • ${localCh} recargas\n  • ${localRf} abastecimentos\n\n` +
     `Tudo que estiver no servidor e NÃO neste celular será apagado permanentemente ` +
     `(marcado como deletado pra não voltar via MQTT).\n\n` +
     `Essa ação é IRREVERSÍVEL — quer continuar?`
-  )) return;
+  )) { adminSetStatus('', null); return; }
 
   const keep_autotrips = (cachedAutoTrips || []).map(t => String(t.tripId || t.startMs));
   const keep_charges   = (cachedCharges   || []).map(c => +c.timestamp_ms || 0).filter(x => x > 0);
