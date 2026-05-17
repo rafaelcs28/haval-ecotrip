@@ -52,6 +52,7 @@ const KNOWN_PLACES_FILE   = path.join(__dirname, 'known_places.json');
 const MAINTENANCE_FILE    = path.join(__dirname, 'maintenance.json');
 const REFUELS_FILE        = path.join(__dirname, 'refuels.json');
 const TELEMETRY_LOG_FILE  = path.join(__dirname, 'telemetry_history.json');
+const DELETED_IDS_FILE    = path.join(__dirname, 'deleted_ids.json');
 
 // Capacidades do Haval H6 PHEV (uso pra estimar kWh atual a partir do SOC%)
 const BATTERY_CAPACITY_KWH = 34;
@@ -623,6 +624,36 @@ function saveMaintenance() {
   try { fs.writeFileSync(MAINTENANCE_FILE, JSON.stringify(maintenance, null, 2)); } catch (_) {}
 }
 
+// ── Tombstones (IDs explicitamente deletados pelo usuário) ────────────────
+// Sem isso, o APK reenviaria via MQTT (trips/history, charging/history) e o
+// bridge re-aceitaria. Tombstone bloqueia o re-insert. Mantém últimos 2000
+// por categoria pra não crescer infinito.
+let deletedIds = { autotrips: [], charges: [], refuels: [] };
+try {
+  if (fs.existsSync(DELETED_IDS_FILE)) {
+    const loaded = JSON.parse(fs.readFileSync(DELETED_IDS_FILE, 'utf8'));
+    deletedIds = { autotrips: [], charges: [], refuels: [], ...loaded };
+  }
+  const total = deletedIds.autotrips.length + deletedIds.charges.length + deletedIds.refuels.length;
+  if (total > 0) console.log(`✓ Tombstones: ${deletedIds.autotrips.length} viagens, ${deletedIds.charges.length} recargas, ${deletedIds.refuels.length} abastecimentos`);
+} catch (e) { console.error('Aviso deleted_ids:', e.message); }
+
+function saveDeletedIds() {
+  try { fs.writeFileSync(DELETED_IDS_FILE, JSON.stringify(deletedIds, null, 2)); } catch (_) {}
+}
+function markDeleted(kind, id) {
+  const key = String(id);
+  if (!deletedIds[kind]) deletedIds[kind] = [];
+  if (!deletedIds[kind].includes(key)) {
+    deletedIds[kind].push(key);
+    if (deletedIds[kind].length > 2000) deletedIds[kind] = deletedIds[kind].slice(-2000);
+    saveDeletedIds();
+  }
+}
+function isDeleted(kind, id) {
+  return (deletedIds[kind] || []).includes(String(id));
+}
+
 // ── Abastecimentos ──────────────────────────────────────────────────────────
 // Cada registro tem `liters_added`, opcionalmente `price_per_liter` (vazio =
 // pendente, aguardando preenchimento). `fuel_l_before`/`fuel_l_after` capturam
@@ -1142,7 +1173,8 @@ app.delete('/api/charges/:ts', (req, res) => {
   if (idx < 0) return res.status(404).json({ error: 'not found' });
   chargesArr.splice(idx, 1);
   scheduleChargesFlush();
-  console.log(`[delete] Charge ${ts} removida`);
+  markDeleted('charges', ts);
+  console.log(`[delete] Charge ${ts} removida (tombstone gravado)`);
   res.json({ ok: true });
 });
 
@@ -1768,20 +1800,29 @@ app.get('/api/backup', (req, res) => {
       (b.autoTrip?.startMs || 0) - (a.autoTrip?.startMs || 0));
 
     const backup = {
-      version:       2,
-      exportedAt:    new Date().toISOString(),
-      trips:         [...tripsMap.values()],
-      autotrips:     autotripsWithSamples,
-      charges:       chargesArr,
+      version:           3,
+      exportedAt:        new Date().toISOString(),
+      // Histórico
+      trips:             [...tripsMap.values()],
+      autotrips:         autotripsWithSamples,
+      charges:           chargesArr,
+      refuels,                                       // abastecimentos
       lifeSnapshots,
+      telemetryHistory,                              // snapshots diários (anomalia)
+      // Configurações
       notifPrefs,
+      maintenance,                                   // intervalos + histórico + alerts
+      knownPlaces,                                   // locais conhecidos
+      chargeLocations,                               // locais antigos (compat)
+      // Estado deletado — sem isso, restore re-aceitaria itens já apagados
+      deletedIds,
     };
 
     const filename = `ecotrip-backup-${new Date().toISOString().slice(0, 10)}.json`;
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
     res.json(backup);
-    console.log(`✓ Backup exportado: ${backup.trips.length} trips · ${backup.autotrips.length} auto-trips · ${backup.charges.length} recargas`);
+    console.log(`✓ Backup v3 exportado: ${backup.trips.length} trips · ${backup.autotrips.length} auto-trips · ${backup.charges.length} recargas · ${backup.refuels.length} abastecimentos · ${backup.maintenance.history.length} manutenções · ${backup.knownPlaces.length} locais`);
   } catch (e) {
     console.error('[backup] Erro:', e.message);
     res.status(500).json({ error: e.message });
@@ -1794,9 +1835,9 @@ app.post('/api/restore', (req, res) => {
   try {
     const bk = req.body;
 
-    // Validação básica
-    if (!bk || bk.version !== 2) {
-      return res.status(400).json({ error: 'Formato inválido. Use um backup gerado por GET /api/backup (version 2).' });
+    // Validação básica — aceita v2 (legado) e v3 (completo)
+    if (!bk || (bk.version !== 2 && bk.version !== 3)) {
+      return res.status(400).json({ error: 'Formato inválido. Use um backup gerado por GET /api/backup (version 2 ou 3).' });
     }
     if (!Array.isArray(bk.trips) || !Array.isArray(bk.autotrips) || !Array.isArray(bk.charges)) {
       return res.status(400).json({ error: 'Backup incompleto: trips, autotrips e charges são obrigatórios.' });
@@ -1844,11 +1885,56 @@ app.post('/api/restore', (req, res) => {
       try { fs.writeFileSync(NOTIF_PREFS_FILE, JSON.stringify(notifPrefs, null, 2)); } catch (_) {}
     }
 
+    // 6. Refuels (abastecimentos) — só se backup v3+
+    if (Array.isArray(bk.refuels)) {
+      refuels.length = 0;
+      refuels.push(...bk.refuels);
+      saveRefuels();
+      recomputeTankAvgPrice();
+    }
+
+    // 7. Maintenance (intervalos + histórico)
+    if (bk.maintenance && typeof bk.maintenance === 'object') {
+      maintenance.intervals = bk.maintenance.intervals || maintenance.intervals;
+      maintenance.history   = bk.maintenance.history   || maintenance.history;
+      maintenance._alerts   = bk.maintenance._alerts   || {};
+      saveMaintenance();
+    }
+
+    // 8. Locais conhecidos
+    if (Array.isArray(bk.knownPlaces)) {
+      knownPlaces.length = 0;
+      knownPlaces.push(...bk.knownPlaces);
+      saveKnownPlaces();
+    }
+
+    // 9. Telemetry history (snapshots diários — alertas de anomalia)
+    if (Array.isArray(bk.telemetryHistory)) {
+      telemetryHistory.length = 0;
+      telemetryHistory.push(...bk.telemetryHistory);
+      try { fs.writeFileSync(TELEMETRY_LOG_FILE, JSON.stringify(telemetryHistory, null, 2)); } catch (_) {}
+    }
+
+    // 10. Tombstones — preserva memória de o que foi deletado
+    if (bk.deletedIds && typeof bk.deletedIds === 'object') {
+      deletedIds.autotrips = bk.deletedIds.autotrips || [];
+      deletedIds.charges   = bk.deletedIds.charges   || [];
+      deletedIds.refuels   = bk.deletedIds.refuels   || [];
+      saveDeletedIds();
+    }
+
+    // Recalcula preço médio da bateria após restore
+    recomputeBatteryAvgPrice();
+
     const summary = {
       trips:         tripsMap.size,
       autotrips:     autoTripsArr.length,
       charges:       chargesArr.length,
+      refuels:       refuels.length,
       lifeSnapshots: lifeSnapshots.length,
+      maintenance:   maintenance.history.length,
+      knownPlaces:   knownPlaces.length,
+      tombstones:    (deletedIds.autotrips.length + deletedIds.charges.length + deletedIds.refuels.length),
     };
     console.log('✓ Restore completo:', summary);
     res.json({ ok: true, msg: 'Restore concluído com sucesso.', ...summary });
@@ -1899,6 +1985,12 @@ app.post('/api/autotrips', (req, res) => {
     // Sanitiza tripId (só dígitos — é o startMs em ms)
     const safeId = String(tripId).replace(/\D/g, '');
     if (!safeId) return res.status(400).json({ error: 'invalid tripId' });
+
+    // Bloqueia viagens explicitamente deletadas pelo usuário (tombstone)
+    if (isDeleted('autotrips', safeId)) {
+      console.log(`↷ AutoTrip ${safeId} bloqueada (tombstoned)`);
+      return res.json({ ok: true, skipped: true, reason: 'tombstoned' });
+    }
 
     // Descarta viagens irrelevantes: energia E distância zeradas com menos de 1 min
     const _distKm  = autoTrip.distKm  || 0;
@@ -2006,14 +2098,16 @@ app.get('/api/autotrips', (req, res) => {
 app.delete('/api/autotrips/:tripId', (req, res) => {
   const id = String(req.params.tripId).replace(/\D/g, '');
   if (!id) return res.status(400).json({ error: 'invalid tripId' });
-  // Aceita tanto tripId (string safeId) quanto startMs (número equivalente)
   const idx = autoTripsArr.findIndex(t => t.tripId === id || String(t.startMs) === id);
   console.log(`[delete] AutoTrip lookup id=${id} idx=${idx} total=${autoTripsArr.length}`);
-  if (idx < 0) return res.status(404).json({ error: 'not found', id });
+  // Mesmo se já não está em memória (ex: APK reenviou e bridge ignorou), grava
+  // tombstone — bloqueia futuras tentativas do APK de inserir esse ID.
+  markDeleted('autotrips', id);
+  if (idx < 0) return res.status(404).json({ error: 'not found', id, tombstoned: true });
   autoTripsArr.splice(idx, 1);
   const filePath = path.join(AUTOTRIPS_DIR, `${id}.json`);
   try { fs.unlinkSync(filePath); } catch (_) {}
-  console.log(`[delete] AutoTrip ${id} removido`);
+  console.log(`[delete] AutoTrip ${id} removido (tombstone gravado)`);
   res.json({ ok: true });
 });
 
@@ -3275,10 +3369,12 @@ function applyMqttMessage(key, value, isRetained = false) {
       try {
         const parsed = JSON.parse(value);
         const all    = parsed.charges || [];
-        // Filtra entradas anteriores ao último "Limpar histórico" para impedir
-        // que o Android restaure dados apagados ao reconectar via MQTT retained.
+        // Filtra entradas anteriores ao último "Limpar histórico" + tombstones
+        // de recargas explicitamente apagadas pelo usuário.
         const cutMs  = state.charges_cleared_at || 0;
-        const charges = cutMs > 0 ? all.filter(c => (c.timestamp_ms || 0) > cutMs) : all;
+        const charges = all
+          .filter(c => cutMs === 0 || (c.timestamp_ms || 0) > cutMs)
+          .filter(c => !isDeleted('charges', c.timestamp_ms || 0));
         if (charges.length > 0) {
           // Merge: preserva campos server-side (location, charger_kwh, cost_override)
           // que o Android não conhece — sem isso o MQTT retained apaga tudo
