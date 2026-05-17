@@ -1442,7 +1442,10 @@ function renderDash() {
     else if (extT > 30) factor = 1 - Math.min(0.15, (extT - 30) * 0.010);
     evKmCalc = Math.round(evKmCalc * factor);
   }
-  const realEvKm   = s.range_ev_km || 0;   // valor real do sensor HA (0 = não disponível)
+  // Autonomia oficial vinda do TCU do carro (mesma fonte usada na aba Drive/cluster).
+  // O sensor range_ev_km do HA dava valores divergentes — autonomy_ev_km é a fonte
+  // de verdade.
+  const realEvKm   = Math.round(+s.autonomy_ev_km || 0);
   const evRangeEl  = document.getElementById('d-ev-range');
   if (evRangeEl) {
     if (realEvKm > 0 && evKmCalc > 0 && soc > EV_MIN_SOC) {
@@ -1475,7 +1478,7 @@ function renderDash() {
 
   // Autonomia térmica: real (sensor HA) → fallback estimada
   const fuelKmCalc   = tankNow > 0 ? Math.round(tankNow * avgKmL) : 0;
-  const realIceKm    = s.range_ice_km || 0;
+  const realIceKm    = Math.round(+s.autonomy_ice_km || 0);
   const fuelRangeEl  = document.getElementById('d-fuel-range');
   if (fuelRangeEl) {
     if (realIceKm > 0) {
