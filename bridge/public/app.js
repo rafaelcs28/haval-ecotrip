@@ -2206,10 +2206,11 @@ function renderCharges() {
     const editedBadge = ovFields.size > 0
       ? '<span title="Recarga editada manualmente" style="font-size:9px;color:#fbbf24;margin-left:4px">✏️</span>'
       : '';
-    // Custo: override manual tem prioridade; padrão = price_kwh das configurações
+    // Custo da recarga em si: override manual tem prioridade. Sem override,
+    // usa o preço seed (SEED_KWH_PRICE_PWA) — representa "não informado".
     const cost = ov
       ? { total: ov.total, perKwh: ov.perKwh, isOv: true }
-      : (priceKwh > 0 && kwh > 0 ? { total: kwh * priceKwh, perKwh: priceKwh, isOv: false } : null);
+      : (kwh > 0 ? { total: kwh * SEED_KWH_PRICE_PWA, perKwh: SEED_KWH_PRICE_PWA, isOv: false } : null);
     const totalCostHtml = cost
       ? `<span id="chg-cost-${ts}" class="trip-cost"${cost.isOv ? ' style="border-bottom:1px dashed rgba(251,191,36,.5)"' : ''}>R$ ${f2(cost.total)}</span>`
       : `<span id="chg-cost-${ts}" class="trip-cost" style="display:none"></span>`;
@@ -2848,8 +2849,12 @@ function renderAutoTrips() {
     const atOv     = _tripCostOverride(t.tripId);
     const atFuelL  = t.fuelL  || 0;
     const atNetKwh = t.netKwh || 0;
+    // Preços vigentes NO MOMENTO da viagem (lookup na timeline) —
+    // refuels/charges posteriores ao trip não afetam seu custo, mas
+    // refuels/charges registrados retroativamente SIM (data correta).
+    const { gas: _tPriceGas, kwh: _tPriceKwh } = pricesAt(t.startMs);
     const tripCost = atOv ? atOv.cost
-      : ((priceGas > 0 || priceKwh > 0) ? atFuelL * priceGas + atNetKwh * priceKwh : 0);
+      : ((_tPriceGas > 0 || _tPriceKwh > 0) ? atFuelL * _tPriceGas + atNetKwh * _tPriceKwh : 0);
     const costStr = `<span id="cost-badge-${t.tripId}" class="trip-cost"${tripCost <= 0 ? ' style="display:none"' : atOv ? ' style="border-bottom:1px dashed rgba(251,191,36,.5)"' : ''}>${tripCost > 0 ? 'R$ ' + f2(tripCost) : ''}</span>`;
     // Row 2: consumo — só exibe se tiver pelo menos um campo com dado
     const hasRow2  = netKwh !== '--' || fuelL !== '--' || kwh100 || eqKmL || tempStr;
@@ -4009,11 +4014,90 @@ window.addEventListener('load', () => { setTimeout(initDashMap, 500); });
 
 // ── Preços (gasolina + energia) — vêm do app Android via MQTT ────────────────
 
+// Preços globais "ao vivo" (médio atual do tanque/bateria). Mantido pra
+// compatibilidade e seed dos cálculos quando timestamp não é passado.
 function getPrices() {
   return {
     gas: state.price_gas_per_l || 0,
     kwh: state.price_kwh       || 0,
   };
+}
+
+// ── Timeline de preços — recalcula custo retroativo de viagens ────────────
+// Sempre que um refuel/charge é adicionado/editado/apagado, a média ponderada
+// muda. Pra que viagens passadas usem o preço que ESTAVA valendo na época,
+// construímos uma linha do tempo com {ts, gas_avg, kwh_avg}. Cada viagem
+// procura o preço vigente no seu startMs.
+const SEED_GAS_PRICE_PER_L_PWA = 6.50;
+const SEED_KWH_PRICE_PWA       = 0.55;
+const BATTERY_CAPACITY_KWH_PWA = 34;
+
+let _priceTimelinesCache = null;
+let _priceTimelinesKey   = null;  // hash dos inputs pra invalidar quando mudar
+
+function _buildPriceTimelines() {
+  // Cache key — só rebuild quando refuels/charges mudaram
+  const key = JSON.stringify({
+    rIds: (cachedRefuels || []).map(r => `${r.id}|${r.timestamp_ms}|${r.price_per_liter}|${r.fuel_l_before}|${r.fuel_l_after}|${r.liters_added}`),
+    cIds: (cachedCharges || []).map(c => `${c.timestamp_ms}|${c.energy_kwh}|${c.soc_start}|${c.cost_override?.perKwh || 0}|${c.cost_override?.total || 0}`),
+  });
+  if (_priceTimelinesCache && _priceTimelinesKey === key) return _priceTimelinesCache;
+
+  // Gas timeline
+  const gas = [{ ts: 0, price: SEED_GAS_PRICE_PER_L_PWA }];
+  let gAvg = SEED_GAS_PRICE_PER_L_PWA, gLastAfter = 0;
+  const refuelsOrd = [...(cachedRefuels || [])].sort((a, b) => (a.timestamp_ms || 0) - (b.timestamp_ms || 0));
+  for (const r of refuelsOrd) {
+    if (!(+r.price_per_liter > 0)) { gLastAfter = +r.fuel_l_after || gLastAfter; continue; }
+    const before = +r.fuel_l_before || 0;
+    const after  = +r.fuel_l_after  || (before + (+r.liters_added || 0));
+    const added  = +r.liters_added  || Math.max(0, after - before);
+    const oldL   = Math.max(0, Math.min(before, gLastAfter > 0 ? gLastAfter : before));
+    const total  = oldL + added;
+    if (total > 0.1) gAvg = (oldL * gAvg + added * +r.price_per_liter) / total;
+    gLastAfter = after;
+    gas.push({ ts: r.timestamp_ms || 0, price: gAvg });
+  }
+
+  // kWh timeline (similar; só sessões com cost override mudam o avg)
+  const kwh = [{ ts: 0, price: SEED_KWH_PRICE_PWA }];
+  let kAvg = SEED_KWH_PRICE_PWA;
+  const chargesOrd = [...(cachedCharges || [])].sort((a, b) => (a.timestamp_ms || 0) - (b.timestamp_ms || 0));
+  for (const c of chargesOrd) {
+    const energy = +c.energy_kwh || 0;
+    if (energy < 0.05) continue;
+    const ovr = c.cost_override;
+    const pricePerKwh = ovr && +ovr.perKwh > 0 ? +ovr.perKwh
+                       : ovr && +ovr.total  > 0 ? (+ovr.total / energy)
+                       : SEED_KWH_PRICE_PWA;
+    const socStart  = +c.soc_start || 0;
+    const kWhBefore = socStart * BATTERY_CAPACITY_KWH_PWA / 100;
+    const kWhAfter  = kWhBefore + energy;
+    kAvg = (kWhBefore * kAvg + energy * pricePerKwh) / kWhAfter;
+    kwh.push({ ts: c.timestamp_ms || 0, price: kAvg });
+  }
+
+  _priceTimelinesCache = { gas, kwh };
+  _priceTimelinesKey   = key;
+  return _priceTimelinesCache;
+}
+
+function _priceAt(timeline, ms) {
+  // Busca o último ponto cujo ts <= ms. Linear search é OK pra <1000 eventos.
+  let price = timeline[0].price;
+  for (const e of timeline) {
+    if (e.ts <= ms) price = e.price;
+    else break;
+  }
+  return price;
+}
+
+// Retorna {gas, kwh} no preço que estava vigente em `ms`. Fallback pra
+// getPrices() (médio atual) quando ms não fornecido ou inválido.
+function pricesAt(ms) {
+  if (!ms) return getPrices();
+  const t = _buildPriceTimelines();
+  return { gas: _priceAt(t.gas, ms), kwh: _priceAt(t.kwh, ms) };
 }
 
 // ── Custo por trip — override local (localStorage) ───────────────────────────
