@@ -3302,7 +3302,10 @@ function applyMqttMessage(key, value, isRetained = false) {
         if (p > state.charge_max_power_kw) state.charge_max_power_kw = +p.toFixed(2);
         const elapsedH = (Date.now() - chargeSessionStartMs) / 3_600_000;
         const deltaKwh = Math.max(0, (state.charge_session_kwh || 0) - (state.charge_session_kwh_at_init || 0));
-        if (elapsedH > 0.0014 && deltaKwh > 0.05) {   // >5s e >0.05 kWh pra evitar ruído
+        // Threshold: >60s e >0.1 kWh. Antes era 5s/0.05 mas o MQTT retain pós-restart
+        // entrega valores acumulados rapidamente nos primeiros segundos, gerando picos
+        // de 100+ kW na média. Janela maior amortece o ruído inicial.
+        if (elapsedH > 0.0167 && deltaKwh > 0.1) {
           state.charge_avg_power_kw = +(deltaKwh / elapsedH).toFixed(2);
         }
       }
