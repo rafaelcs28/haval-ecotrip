@@ -779,6 +779,12 @@ function connect() {
         return;
       } else if (msg.type === 'charge_limit_result') {
         _onChargeLimitResult(msg.data?.result || '');
+      } else if (msg.type === 'new_refuel') {
+        // Abastecimento detectado pelo bridge — recarrega lista
+        _loadRefuels().then(() => {
+          const panel = document.getElementById('panel-charges');
+          if (panel && panel.classList.contains('active')) renderCharges();
+        });
       } else if (msg.type === 'new_autotrip') {
         // Nova viagem automática — sincroniza só o novo, sem derrubar o cache inteiro
         const autoPanel = document.getElementById('panel-auto');
@@ -932,13 +938,16 @@ function fmtDate(ts) {
 
 // ── Filtros ───────────────────────────────────────────────────────────────────
 const filterState = {
-  charges:     { active: 'today', customFrom: '', customTo: '', location: null },
+  charges:     { active: 'today', customFrom: '', customTo: '', location: null, type: 'all' },
   hist:        { active: 'all',   customFrom: '', customTo: '', search: '' },
   auto:        { active: 'today', customFrom: '', customTo: '', search: '' },
   logs:        { active: 'all',   type: 'all',   customFrom: '', customTo: '' },
   stats_split: { active: 'all',   customFrom: '', customTo: '' },
 };
 let cachedCharges = null;
+let cachedRefuels = null;
+let _tankAvgPriceL = 0;     // R$/L médio atual no tanque (vem do bridge)
+let _batteryAvgPriceKwh = 0;// R$/kWh médio atual na bateria
 let cachedEvents  = null;
 let cachedTrips   = null;
 let _knownLocations    = [];
@@ -1960,7 +1969,7 @@ function fmtRelativeShort(ms) {
   return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
 }
 
-// ── Recargas ──────────────────────────────────────────────────────────────────
+// ── Recargas + Abastecimentos ────────────────────────────────────────────────
 function loadCharges() {
   const list = document.getElementById('charges-list');
   if (cachedCharges !== null) {
@@ -1968,8 +1977,22 @@ function loadCharges() {
   } else {
     list.innerHTML = '<div class="empty">Carregando...</div>';
   }
-  syncAllCache({ silent: true }).then(() => { renderCharges(); _tryAutoTagChargeLocation(); })
+  // Carrega charges (via cache) + refuels do bridge em paralelo
+  Promise.all([
+    syncAllCache({ silent: true }),
+    _loadRefuels(),
+  ]).then(() => { renderCharges(); _tryAutoTagChargeLocation(); })
     .catch(() => { if (!cachedCharges) list.innerHTML = filterChipsHTML('charges') + '<div class="empty">Erro ao carregar.</div>'; });
+}
+
+async function _loadRefuels() {
+  try {
+    const r = await apiFetch('/api/refuels');
+    if (!r.ok) return;
+    const d = await r.json();
+    cachedRefuels = d.refuels || [];
+    _tankAvgPriceL = +d.tank_avg_price_per_l || 0;
+  } catch (_) {}
 }
 
 // Captura GPS e salva nas recargas recentes sem localização (últimas 8h)
@@ -2001,6 +2024,91 @@ function _tryAutoTagChargeLocation() {
   }, null, { timeout: 15000, maximumAge: 120000 });
 }
 
+// Chips de filtro de tipo (Todos / ⚡ Recargas / ⛽ Abastecimentos)
+function _typeFilterChipsHTML() {
+  const t = filterState.charges.type || 'all';
+  const c = (id, lbl) =>
+    `<button class="filter-chip${t===id?' active':''}" onclick="setChargesType('${id}')">${lbl}</button>`;
+  return `<div class="filter-chips" style="margin-bottom:6px">${c('all','Todos')}${c('recarga','⚡ Recargas')}${c('refuel','⛽ Abastecimentos')}</div>`;
+}
+window.setChargesType = function(type) {
+  filterState.charges.type = type;
+  renderCharges();
+};
+
+// Renderiza card de abastecimento (formato similar ao de recarga)
+function _renderRefuelCard(r) {
+  const ts = r.timestamp_ms || 0;
+  const pending = !!r.pending;
+  const date = fmtDate(new Date(ts).toISOString());
+  const liters = +r.liters_added || 0;
+  const ppl    = +r.price_per_liter || 0;
+  const total  = +r.total_cost || (ppl * liters);
+  const tankAfter = +r.tank_avg_after || 0;
+  return `<div class="trip-item ${pending ? 'refuel-pending' : ''}" id="refuel-card-${r.id}">
+  <div class="trip-header">
+    <div style="flex:1;min-width:0">
+      <div class="trip-name-row">
+        <div class="trip-name">⛽ ${date}</div>
+        ${pending ? '<span class="refuel-pending-badge">Pendente</span>' : ''}
+        <button class="rename-btn" onclick="deleteRefuel('${r.id}')" title="Apagar" style="opacity:.35">🗑</button>
+      </div>
+      ${pending
+        ? `<div style="font-size:11px;color:#fbbf24;margin-top:2px">Informe o preço pra calcular o mix do tanque</div>`
+        : `<div style="display:flex;gap:6px;align-items:center;margin-top:2px">
+            <span class="trip-cost">R$ ${f2(total)}</span>
+            <span style="font-size:10px;color:#64748b">${f2(ppl)} R$/L · tanque: R$ ${f3(tankAfter)}/L</span>
+           </div>`}
+    </div>
+    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:3px">
+      <span class="charge-kwh-badge" style="background:rgba(251,146,60,0.15);color:#fb923c;border-color:rgba(251,146,60,0.3)">${f1(liters)} L</span>
+      <button class="cost-edit-btn" onclick="toggleRefuelEdit('${r.id}')" title="Editar preço">💰</button>
+    </div>
+  </div>
+  <div id="refuel-edit-${r.id}" class="cost-edit-form" style="display:${pending ? 'flex' : 'none'};flex-wrap:wrap;gap:6px">
+    <div style="font-size:11px;color:#64748b;width:100%">Preço por litro (R$/L) ou total (R$). Litros: ${f2(liters)} L</div>
+    <input id="refuel-ppl-${r.id}" class="charge-total-input" type="number" step="0.01" min="0" placeholder="R$/L ex: 6.00"${ppl > 0 ? ` value="${f2(ppl)}"` : ''}>
+    <input id="refuel-total-${r.id}" class="charge-total-input" type="number" step="0.01" min="0" placeholder="Total R$"${total > 0 ? ` value="${f2(total)}"` : ''}>
+    <button class="cost-apply-btn" onclick="applyRefuelPrice('${r.id}')">Salvar</button>
+  </div>
+</div>`;
+}
+
+window.toggleRefuelEdit = function(id) {
+  const el = document.getElementById('refuel-edit-' + id);
+  if (el) el.style.display = el.style.display === 'none' ? 'flex' : 'none';
+};
+
+window.applyRefuelPrice = async function(id) {
+  const ppl   = parseFloat(document.getElementById('refuel-ppl-' + id)?.value || '0');
+  const total = parseFloat(document.getElementById('refuel-total-' + id)?.value || '0');
+  const body  = ppl > 0 ? { price_per_liter: ppl } : total > 0 ? { total_cost: total } : null;
+  if (!body) { showToast('Informe R$/L ou total'); return; }
+  try {
+    const r = await apiFetch('/api/refuels/' + id, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const d = await r.json();
+    if (!r.ok || !d.ok) throw new Error(d.error || 'erro');
+    _tankAvgPriceL = +d.tank_avg_price_per_l || 0;
+    await _loadRefuels();
+    renderCharges();
+    showToast('✓ Preço salvo');
+  } catch (e) { showToast('✗ ' + e.message); }
+};
+
+window.deleteRefuel = async function(id) {
+  if (!confirm('Apagar este abastecimento?')) return;
+  try {
+    const r = await apiFetch('/api/refuels/' + id, { method: 'DELETE' });
+    if (!r.ok) throw new Error('erro');
+    await _loadRefuels();
+    renderCharges();
+  } catch (_) { showToast('✗ Falha ao apagar'); }
+};
+
 function renderCharges() {
   const list = document.getElementById('charges-list');
   if (!list) return;
@@ -2009,17 +2117,35 @@ function renderCharges() {
 
   // Filtro por local (aplicado sobre o resultado do filtro de data)
   const locFilter = filterState.charges.location;
-  const charges   = locFilter
+  let charges     = locFilter
     ? byDate.filter(c => (c.location_name || null) === locFilter)
     : byDate;
 
+  // Filtro por tipo (todos / só recarga / só abastecimento)
+  const typeFilter = filterState.charges.type || 'all';
+  const showCharges  = typeFilter === 'all' || typeFilter === 'recarga';
+  const showRefuels  = typeFilter === 'all' || typeFilter === 'refuel';
+
+  // Filtra refuels pelo MESMO range de data
+  const refuelsAll = cachedRefuels || [];
+  const refuelsDate = refuelsAll.filter(r => {
+    const ms = r.timestamp_ms || 0;
+    return ms >= startMs && ms <= endMs;
+  });
+
+  const finalCharges = showCharges ? charges : [];
+  const finalRefuels = showRefuels ? refuelsDate : [];
+
   const socColor = d => d >= 50 ? 'green' : d >= 25 ? 'teal' : 'muted';
 
-  let html = filterChipsHTML('charges') + _locationChipsHTML();
-  if (!charges.length) {
-    list.innerHTML = html + '<div class="empty">Nenhuma recarga no período.</div>';
+  let html = filterChipsHTML('charges') + _typeFilterChipsHTML() + (showCharges ? _locationChipsHTML() : '');
+  if (!finalCharges.length && !finalRefuels.length) {
+    const empty = typeFilter === 'refuel' ? 'Nenhum abastecimento no período.' : 'Nenhuma recarga no período.';
+    list.innerHTML = html + `<div class="empty">${empty}</div>`;
     return;
   }
+  // Reaponta `charges` pro filtrado por tipo
+  charges = finalCharges;
 
   const priceKwh  = state.price_kwh || 0;
   const totalKwh  = charges.reduce((s,c) => s + (c.energy_kwh   || 0), 0);
@@ -2056,7 +2182,9 @@ function renderCharges() {
   </div>` : ''}
 </div>`;
 
-  html += charges.map(c => {
+  // Acumula cards num array {ts, html} — depois mescla com refuels e ordena por data
+  const _allCards = [];
+  charges.forEach(c => {
     const delta  = (c.soc_end || 0) - (c.soc_start || 0);
     const col    = socColor(delta);
     const ts     = c.timestamp_ms || 0;
@@ -2093,7 +2221,7 @@ function renderCharges() {
     <div class="trip-metric"><div class="trip-metric-val" style="color:#f87171">${f2(lossKwh)} kWh</div><div class="trip-metric-lbl">perda</div></div>
     <div class="trip-metric"><div class="trip-metric-val" style="color:#f87171">${lossPct.toFixed(1)}%</div><div class="trip-metric-lbl">% perda</div></div>
   </div>` : '';
-    return `<div class="trip-item" id="charge-card-${ts}">
+    _allCards.push({ ts, html: `<div class="trip-item" id="charge-card-${ts}">
   <div class="trip-header">
     <div style="flex:1;min-width:0">
       <div class="trip-name-row">
@@ -2158,8 +2286,39 @@ function renderCharges() {
       ? `<span class="charge-loc-name">📍 ${c.location_name}</span><span class="charge-loc-edit">✏️</span>`
       : `<span class="charge-loc-add">📍 Adicionar local</span>`}
   </div>
-</div>`;
-  }).join('');
+</div>` });
+  });
+
+  // ── Resumo de abastecimentos (separado do de recargas) ──────────────────
+  if (showRefuels && finalRefuels.length > 0) {
+    const totalL    = finalRefuels.reduce((s, r) => s + (+r.liters_added || 0), 0);
+    const withPrice = finalRefuels.filter(r => +r.price_per_liter > 0);
+    const totalR    = withPrice.reduce((s, r) => s + (+r.total_cost || 0), 0);
+    const avgR      = withPrice.length > 0
+      ? withPrice.reduce((s, r) => s + (+r.liters_added * +r.price_per_liter), 0) /
+        withPrice.reduce((s, r) => s + (+r.liters_added || 0), 0)
+      : 0;
+    const pending = finalRefuels.filter(r => r.pending).length;
+
+    html += `<div class="charge-summary-card" style="margin-top:14px;border-color:rgba(251,146,60,0.25)">
+      <div class="card-title" style="color:#fb923c">⛽ Abastecimentos — ${finalRefuels.length}${pending ? ` (${pending} pendente${pending>1?'s':''})` : ''}</div>
+      <div class="metrics-row">
+        <div class="metric"><div class="metric-value sm" style="color:#fb923c">${f1(totalL)}<span class="chrg-unit"> L</span></div><div class="metric-label">total</div></div>
+        ${avgR > 0 ? `<div class="metric"><div class="metric-value muted sm">${f2(avgR)}<span class="chrg-unit"> R$/L</span></div><div class="metric-label">médio</div></div>` : ''}
+        ${totalR > 0 ? `<div class="metric"><div class="metric-value green sm"><span class="chrg-unit">R$ </span>${f2(totalR)}</div><div class="metric-label">custo total</div></div>` : ''}
+        ${_tankAvgPriceL > 0 ? `<div class="metric"><div class="metric-value teal sm">${f3(_tankAvgPriceL)}<span class="chrg-unit"> R$/L</span></div><div class="metric-label">tanque atual</div></div>` : ''}
+      </div>
+    </div>`;
+
+    // Adiciona refuels ao mesmo array — vão ser ordenados intercalados por ts
+    for (const r of finalRefuels) {
+      _allCards.push({ ts: r.timestamp_ms || 0, html: _renderRefuelCard(r) });
+    }
+  }
+
+  // Ordena tudo (recargas + abastecimentos) por timestamp descendente e renderiza
+  _allCards.sort((a, b) => b.ts - a.ts);
+  html += _allCards.map(x => x.html).join('');
 
   list.innerHTML = html;
 }

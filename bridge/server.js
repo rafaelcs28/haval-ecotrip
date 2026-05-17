@@ -50,6 +50,11 @@ const RENAMES_FILE      = path.join(__dirname, 'pending_renames.json');
 const CHARGE_LOCS_FILE    = path.join(__dirname, 'charge_locations.json');
 const KNOWN_PLACES_FILE   = path.join(__dirname, 'known_places.json');
 const MAINTENANCE_FILE    = path.join(__dirname, 'maintenance.json');
+const REFUELS_FILE        = path.join(__dirname, 'refuels.json');
+
+// Capacidades do Haval H6 PHEV (uso pra estimar kWh atual a partir do SOC%)
+const BATTERY_CAPACITY_KWH = 34;
+const TANK_CAPACITY_L      = 55;
 const NOTIF_PREFS_FILE    = path.join(__dirname, 'notif_prefs.json');
 const NOTIF_HISTORY_FILE  = path.join(__dirname, 'notif_history.json');
 const EVENTS_FILE         = path.join(__dirname, 'events.json');
@@ -134,6 +139,8 @@ const NOTIF_DEFAULTS = {
   trip_end:          true,   // 🏁 Viagem concluída (auto-trip)
   geofence_arrival:  true,   // 📍 Chegou em local conhecido
   geofence_departure:false,  // 🚗 Saiu de local conhecido
+  maintenance_soon:  true,   // 🔧 Manutenção se aproximando (dentro do alert_km)
+  maintenance_overdue: true, // ⚠️ Manutenção atrasada
 };
 let notifPrefs = { ...NOTIF_DEFAULTS };
 try {
@@ -361,6 +368,9 @@ const state = {
   inside_temp:      0,
   outside_temp:     0,
   odometer_km:         0,    // km total do veículo
+  fuel_l:              0,    // litros no tanque (direto da GWM Brasil)
+  tank_avg_price_per_l: 0,   // R$/L médio ponderado do que está no tanque
+  battery_avg_price_per_kwh: 0,  // R$/kWh médio ponderado do que está na bateria
   batt_12v_pct:        0,    // % bateria auxiliar 12V
   charging_state:      'Desconhecido',
   charge_power_kw:     0,
@@ -609,6 +619,153 @@ try {
 
 function saveMaintenance() {
   try { fs.writeFileSync(MAINTENANCE_FILE, JSON.stringify(maintenance, null, 2)); } catch (_) {}
+}
+
+// ── Abastecimentos ──────────────────────────────────────────────────────────
+// Cada registro tem `liters_added`, opcionalmente `price_per_liter` (vazio =
+// pendente, aguardando preenchimento). `fuel_l_before`/`fuel_l_after` capturam
+// o estado do tanque no momento do abastecimento. `tank_avg_after` é o preço
+// médio ponderado do tanque resultante (mix do que tinha + o que entrou).
+let refuels = [];
+try {
+  if (fs.existsSync(REFUELS_FILE)) refuels = JSON.parse(fs.readFileSync(REFUELS_FILE, 'utf8')) || [];
+  console.log(`✓ Abastecimentos: ${refuels.length}`);
+} catch (e) { console.error('Aviso refuels.json:', e.message); }
+
+function saveRefuels() {
+  try { fs.writeFileSync(REFUELS_FILE, JSON.stringify(refuels, null, 2)); } catch (_) {}
+}
+
+// Preços de referência (seed) usados quando não há histórico próprio.
+// Também valoram o combustível/energia já presente antes do primeiro registro:
+// no mix do primeiro abastecimento real, o que estava no tanque conta a SEED_*.
+const SEED_GAS_PRICE_PER_L = 6.50;
+const SEED_KWH_PRICE       = 0.55;
+
+// Recalcula o preço médio do tanque iterando pelos refuels em ordem cronológica.
+// Lógica de mix ponderado: ao abastecer, mistura o R$/L do que sobrou com o novo.
+function recomputeTankAvgPrice() {
+  // Ordena por ts crescente
+  const ordered = [...refuels].sort((a, b) => (a.timestamp_ms || 0) - (b.timestamp_ms || 0));
+  let avgPrice = SEED_GAS_PRICE_PER_L;  // R$/L médio inicial = seed
+  let lastAfter = 0;    // litros no tanque após último abastecimento processado
+  for (const r of ordered) {
+    if (!(r.price_per_liter > 0)) {
+      // Pendente — pula no cálculo do médio. Mantém o avg anterior.
+      lastAfter = +r.fuel_l_after || lastAfter;
+      continue;
+    }
+    const before  = +r.fuel_l_before || 0;
+    const after   = +r.fuel_l_after  || (before + (+r.liters_added || 0));
+    const added   = +r.liters_added  || Math.max(0, after - before);
+    const oldL    = Math.max(0, Math.min(before, lastAfter > 0 ? lastAfter : before));
+    const total   = oldL + added;
+    if (total > 0.1) avgPrice = (oldL * avgPrice + added * r.price_per_liter) / total;
+    lastAfter = after;
+    // Persiste no registro o snapshot
+    r.tank_avg_after = +avgPrice.toFixed(3);
+  }
+  state.tank_avg_price_per_l = +avgPrice.toFixed(3);
+  // Sempre escreve no global — quando não há refuels, avgPrice é o seed.
+  state.price_gas_per_l = +avgPrice.toFixed(3);
+  saveRefuels();
+  return avgPrice;
+}
+
+// Snapshot do tanque ao desligar o motor — usado pra detectar abastecimento ao religar
+let _fuelLAtPark = 0;
+let _fuelParkTs  = 0;
+const REFUEL_MIN_LITERS = 5;          // threshold mínimo pra detectar abastecimento
+
+function checkRefuelOnEngineOn() {
+  const fuelNow = +state.fuel_l || 0;
+  if (_fuelLAtPark <= 0 || fuelNow <= 0) return;
+  const added = fuelNow - _fuelLAtPark;
+  if (added < REFUEL_MIN_LITERS) return;
+
+  // Criar registro PENDENTE (sem preço — usuário preenche depois)
+  const rec = {
+    id: 'r-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
+    timestamp_ms: Date.now(),
+    fuel_l_before: +_fuelLAtPark.toFixed(2),
+    fuel_l_after:  +fuelNow.toFixed(2),
+    liters_added:  +added.toFixed(2),
+    price_per_liter: 0,           // pendente — usuário registra
+    total_cost: 0,
+    odometer_km: +state.odometer_km || 0,
+    location_name: '',
+    notes: '',
+    pending: true,
+  };
+  refuels.push(rec);
+  saveRefuels();
+  addEvent('refuel_detected', `⛽ Abastecimento de ~${added.toFixed(1)}L detectado`);
+  sendPush(
+    `⛽ Abastecimento detectado`,
+    `~${added.toFixed(1)}L. Toque pra registrar o preço.`
+  );
+  console.log(`[refuel] detectado +${added.toFixed(1)}L (${_fuelLAtPark.toFixed(1)} → ${fuelNow.toFixed(1)})`);
+  broadcast('new_refuel', rec);
+}
+
+// Idem pra bateria — itera por charges com preço e mixa com kWh estimado restante.
+// kWh restante na bateria = SOC% × BATTERY_CAPACITY_KWH / 100.
+function recomputeBatteryAvgPrice() {
+  // chargesArr é o storage de recargas (carregado no boot via CHARGES_FILE).
+  // Preço por sessão: cost_override.perKwh > 0 ou cost_override.total / energy.
+  // Quando não há override, usa SEED_KWH_PRICE pra valorar a sessão.
+  const ordered = [...chargesArr].sort((a, b) => (a.timestamp_ms || 0) - (b.timestamp_ms || 0));
+  let avgPrice = SEED_KWH_PRICE;  // R$/kWh médio inicial = seed
+  for (const c of ordered) {
+    const energy = +c.energy_kwh || 0;
+    if (energy < 0.05) continue;
+    const ovr = c.cost_override;
+    // Preço da sessão: override manual, ou SEED_KWH_PRICE como default
+    const pricePerKwh = ovr && +ovr.perKwh > 0 ? ovr.perKwh
+                       : ovr && +ovr.total  > 0 ? (ovr.total / energy)
+                       : SEED_KWH_PRICE;
+    // Estima kWh antes da recarga: usa soc_start se disponível
+    const socStart = +c.soc_start || 0;
+    const kWhBefore = socStart * BATTERY_CAPACITY_KWH / 100;
+    const kWhAfter  = kWhBefore + energy;
+    avgPrice = (kWhBefore * avgPrice + energy * pricePerKwh) / kWhAfter;
+  }
+  state.battery_avg_price_per_kwh = +avgPrice.toFixed(4);
+  state.price_kwh = +avgPrice.toFixed(4);
+  return avgPrice;
+}
+
+// Estado de alerta já disparado por intervalo (evita re-notificar a cada km).
+// Reseta automaticamente quando uma nova manutenção é registrada (ciclo novo).
+// Persistido em maintenance.json como `_alerts: { type_id: 'soon'|'overdue' }`.
+maintenance._alerts = maintenance._alerts || {};
+
+function checkMaintenanceAlerts() {
+  const items = computeMaintenance();
+  for (const it of items) {
+    const prev = maintenance._alerts[it.id] || 'ok';
+    if (it.status === prev) continue;  // sem mudança de severidade
+
+    // Só notifica em transição pra estado MAIS severo (ok→soon, ok→overdue, soon→overdue)
+    const order = { ok: 0, soon: 1, overdue: 2 };
+    if (order[it.status] > order[prev]) {
+      if (it.status === 'soon' && notifPrefs.maintenance_soon) {
+        sendPush(
+          `${it.icon || '🔧'} ${it.label} se aproximando`,
+          `Faltam ${Math.round(it.remaining_km).toLocaleString('pt-BR')} km (em ${Math.round(it.next_km).toLocaleString('pt-BR')} km)`
+        );
+        addEvent('maint_soon', `${it.icon || '🔧'} ${it.label}: faltam ${Math.round(it.remaining_km)} km`);
+      } else if (it.status === 'overdue' && notifPrefs.maintenance_overdue) {
+        sendPush(
+          `⚠️ ${it.label} atrasada`,
+          `${Math.round(Math.abs(it.remaining_km)).toLocaleString('pt-BR')} km além do programado (${Math.round(it.next_km).toLocaleString('pt-BR')} km)`
+        );
+        addEvent('maint_overdue', `⚠️ ${it.label} atrasada em ${Math.round(Math.abs(it.remaining_km))} km`);
+      }
+    }
+    maintenance._alerts[it.id] = it.status;
+    saveMaintenance();
+  }
 }
 
 // Computa o status de cada intervalo (próxima manutenção, km restantes, severidade)
@@ -1056,6 +1213,8 @@ app.post('/api/maintenance/history', (req, res) => {
     notes: notes ? String(notes).slice(0, 240) : '',
   };
   maintenance.history.push(rec);
+  // Reseta o alerta do tipo — novo ciclo começa
+  if (maintenance._alerts) delete maintenance._alerts[rec.type_id];
   saveMaintenance();
   res.json({ ok: true, record: rec });
 });
@@ -1066,6 +1225,80 @@ app.delete('/api/maintenance/history/:id', (req, res) => {
   maintenance.history.splice(idx, 1);
   saveMaintenance();
   res.json({ ok: true });
+});
+
+// ── Abastecimentos ──────────────────────────────────────────────────────────
+app.get('/api/refuels', (_req, res) => {
+  res.json({
+    refuels: [...refuels].sort((a, b) => (b.timestamp_ms || 0) - (a.timestamp_ms || 0)),
+    tank_avg_price_per_l: state.tank_avg_price_per_l || 0,
+    fuel_l_current: +state.fuel_l || 0,
+    tank_capacity_l: TANK_CAPACITY_L,
+  });
+});
+
+// POST /api/refuels — registro manual (ou completar pendente via PATCH)
+app.post('/api/refuels', (req, res) => {
+  const b = req.body || {};
+  const liters = parseFloat(b.liters_added);
+  if (!(liters > 0)) return res.status(400).json({ error: 'liters_added obrigatório' });
+  const pricePerL = parseFloat(b.price_per_liter) || 0;
+  const total     = parseFloat(b.total_cost) || (pricePerL * liters);
+  const finalPrice = pricePerL > 0 ? pricePerL : (total > 0 ? total / liters : 0);
+  const rec = {
+    id: 'r-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
+    timestamp_ms: parseInt(b.timestamp_ms) || Date.now(),
+    fuel_l_before: parseFloat(b.fuel_l_before) || 0,
+    fuel_l_after:  parseFloat(b.fuel_l_after)  || 0,
+    liters_added: liters,
+    price_per_liter: finalPrice,
+    total_cost: finalPrice * liters,
+    odometer_km: parseFloat(b.odometer_km) || (+state.odometer_km || 0),
+    location_name: b.location_name || '',
+    notes: b.notes ? String(b.notes).slice(0, 240) : '',
+    pending: !(finalPrice > 0),
+  };
+  refuels.push(rec);
+  recomputeTankAvgPrice();
+  broadcast('new_refuel', rec);
+  res.json({ ok: true, refuel: rec, tank_avg_price_per_l: state.tank_avg_price_per_l });
+});
+
+// PATCH /api/refuels/:id — atualiza campos (preço, posto, notas)
+app.patch('/api/refuels/:id', (req, res) => {
+  const r = refuels.find(x => x.id === req.params.id);
+  if (!r) return res.status(404).json({ error: 'não encontrado' });
+  const b = req.body || {};
+  if (b.price_per_liter !== undefined) {
+    const p = parseFloat(b.price_per_liter);
+    if (!(p > 0)) return res.status(400).json({ error: 'price_per_liter inválido' });
+    r.price_per_liter = p;
+    r.total_cost = p * (+r.liters_added || 0);
+    r.pending = false;
+  } else if (b.total_cost !== undefined) {
+    const t = parseFloat(b.total_cost);
+    if (!(t > 0)) return res.status(400).json({ error: 'total_cost inválido' });
+    r.total_cost = t;
+    r.price_per_liter = (+r.liters_added || 0) > 0 ? t / r.liters_added : 0;
+    r.pending = false;
+  }
+  if (b.liters_added !== undefined) r.liters_added = parseFloat(b.liters_added) || r.liters_added;
+  if (b.location_name !== undefined) r.location_name = String(b.location_name).slice(0, 80);
+  if (b.notes !== undefined)         r.notes = String(b.notes).slice(0, 240);
+  if (b.timestamp_ms !== undefined)  r.timestamp_ms = parseInt(b.timestamp_ms) || r.timestamp_ms;
+  if (b.odometer_km !== undefined)   r.odometer_km = parseFloat(b.odometer_km) || r.odometer_km;
+  // Recoeficiente total se price ou liters mudaram
+  if (r.price_per_liter > 0 && r.liters_added > 0) r.total_cost = r.price_per_liter * r.liters_added;
+  recomputeTankAvgPrice();
+  res.json({ ok: true, refuel: r, tank_avg_price_per_l: state.tank_avg_price_per_l });
+});
+
+app.delete('/api/refuels/:id', (req, res) => {
+  const idx = refuels.findIndex(x => x.id === req.params.id);
+  if (idx < 0) return res.status(404).json({ error: 'não encontrado' });
+  refuels.splice(idx, 1);
+  recomputeTankAvgPrice();
+  res.json({ ok: true, tank_avg_price_per_l: state.tank_avg_price_per_l });
 });
 
 // PATCH /api/charges/:ts/location
@@ -1146,6 +1379,7 @@ app.patch('/api/charges/:ts/cost', (req, res) => {
   else        delete charge.cost_override;
   charge._updated_ms = Date.now();
   scheduleChargesFlush();
+  recomputeBatteryAvgPrice();   // recalcula mix da bateria após override
   res.json(charge);
 });
 
@@ -2033,6 +2267,11 @@ const mqttOptions = {
 };
 if (MQTT_USER) { mqttOptions.username = MQTT_USER; mqttOptions.password = MQTT_PASS; }
 
+// Recalcula médios de tanque/bateria a partir dos JSONs já carregados (refuels + charges)
+recomputeTankAvgPrice();
+recomputeBatteryAvgPrice();
+console.log(`✓ Preço médio tanque: R$ ${state.tank_avg_price_per_l.toFixed(2)}/L · bateria: R$ ${state.battery_avg_price_per_kwh.toFixed(2)}/kWh`);
+
 const mqttClient = mqtt.connect(MQTT_HOST, mqttOptions);
 
 mqttClient.on('connect', () => {
@@ -2108,6 +2347,7 @@ const GWM_TOPIC_MAP = {
   '2101008': 'tyre_temp_rr',
   '2011501': 'autonomy_ev_km',
   '2011007': 'autonomy_ice_km',
+  '2017002': 'fuel_l',           // nível de combustível em litros (direto da GWM)
   // Charging (HA mapping: 0=Desconectado, 1=Carregando, 2=Programado, 3=Finalizado, 5=Aguardando)
   '2041142': 'charging_state_raw',
   '2013022': 'charge_remaining_min',
@@ -2307,9 +2547,14 @@ function applyGwmEntity(id, value, isRetained = false) {
       if (value === '1') {
         addEvent('engine_on',  'Motor ligado');
         if (notifPrefs.engine_on)  sendPush('🔑 Motor ligado',  'O veículo foi ligado.');
+        // Transição off→on: compara fuel atual com snapshot ao desligar
+        checkRefuelOnEngineOn();
       } else if (value === '0') {
         addEvent('engine_off', 'Motor desligado');
         if (notifPrefs.engine_off) sendPush('🔑 Motor desligado', 'O veículo foi desligado.');
+        // Snapshot: fuel_l quando o motor desliga, comparado quando voltar a ligar
+        _fuelLAtPark = +state.fuel_l || 0;
+        _fuelParkTs  = Date.now();
       }
     }
     return;
@@ -2335,6 +2580,7 @@ function applyGwmEntity(id, value, isRetained = false) {
 
   // ── Sensores numéricos (soc, 12v, odo, pneus, autonomia, remaining_min) ──
   state[field] = num(value);
+  if (field === 'odometer_km') checkMaintenanceAlerts();
 }
 
 function applyMqttMessage(key, value, isRetained = false) {
@@ -2702,13 +2948,16 @@ function applyMqttMessage(key, value, isRetained = false) {
     case 'cmd/charge_limit/result':
       broadcast('charge_limit_result', { result: value });
       break;
-    case 'price_gas_per_l':      state.price_gas_per_l      = num(value); break;
-    case 'price_kwh':            state.price_kwh            = num(value); break;
+    // price_gas_per_l e price_kwh do APK: IGNORADOS — valor agora vem do mix
+    // ponderado de abastecimentos/recargas (recomputeTankAvgPrice / recomputeBatteryAvgPrice).
+    // Próxima versão do APK vai parar de publicar esses tópicos.
+    case 'price_gas_per_l': break;
+    case 'price_kwh':       break;
     case 'charge_current_a':     state.charge_current_a     = num(value); break;
     case 'battery_voltage_v': state.battery_voltage_v  = num(value); break;
     case 'battery_current_a': state.battery_current_a  = num(value); break;
     case 'motor_power_kw':    state.motor_power_kw      = num(value); break;
-    case 'odometer_km':       state.odometer_km         = num(value); break;
+    case 'odometer_km':       state.odometer_km         = num(value); checkMaintenanceAlerts(); break;
     case 'batt_12v_pct':      state.batt_12v_pct        = num(value); break;
     case 'range_ev_km':       state.range_ev_km         = Math.round(num(value)); break;
     case 'range_ice_km':      state.range_ice_km        = Math.round(num(value)); break;

@@ -2035,3 +2035,27 @@ html, body {
   padding: 4px 6px;
   margin-left: 4px;
 }
+
+/* ── Abastecimentos ─────────────────────────────────────────────────────── */
+.refuel-pending {
+  border-color: rgba(251, 191, 36, 0.45) !important;
+  background: rgba(251, 191, 36, 0.04);
+}
+.refuel-pending-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 8px;
+  background: rgba(251, 191, 36, 0.15);
+  color: #fbbf24;
+  border: 1px solid rgba(251, 191, 36, 0.40);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  animation: refuelPendingPulse 2s ease-in-out infinite;
+}
+@keyframes refuelPendingPulse {
+  0%, 100% { opacity: 0.7; }
+  50%      { opacity: 1; }
+}
