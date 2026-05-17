@@ -713,8 +713,10 @@ function recomputeBatteryAvgPrice() {
     const energy = +c.energy_kwh || 0;
     if (energy < 0.05) continue;
     const ovr = c.cost_override;
-    // Preço da sessão: override manual, ou SEED_KWH_PRICE como default
-    const pricePerKwh = ovr && +ovr.perKwh > 0 ? ovr.perKwh
+    // Preço da sessão: override manual (incluindo recarga gratuita: free===true → 0),
+    // ou SEED_KWH_PRICE como default
+    const pricePerKwh = ovr?.free === true ? 0
+                       : ovr && +ovr.perKwh > 0 ? ovr.perKwh
                        : ovr && +ovr.total  > 0 ? (ovr.total / energy)
                        : SEED_KWH_PRICE;
     // Estima kWh antes da recarga: usa soc_start se disponível
@@ -1206,9 +1208,23 @@ app.post('/api/charges/merge', (req, res) => {
       mergedChargerKwh = late.charger_kwh;
     }
 
-    // cost_override: soma totais se ambas têm; caso contrário usa o que existir
+    // cost_override: soma totais se ambas têm preço; se ambas grátis, mantém grátis;
+    // se uma grátis e outra paga, conta só o pago.
     let mergedCostOverride = null;
-    if (early.cost_override?.total > 0 && late.cost_override?.total > 0) {
+    const eFree = early.cost_override?.free === true;
+    const lFree = late.cost_override?.free  === true;
+    if (eFree && lFree) {
+      mergedCostOverride = { total: 0, perKwh: 0, free: true };
+    } else if (eFree || lFree) {
+      // Só uma é grátis — pega o total da paga
+      const paid = eFree ? late.cost_override : early.cost_override;
+      if (paid?.total > 0) {
+        const perKwh = mergedEnergyKwh > 0 ? parseFloat((paid.total / mergedEnergyKwh).toFixed(4)) : 0;
+        mergedCostOverride = { total: paid.total, perKwh };
+      } else {
+        mergedCostOverride = { total: 0, perKwh: 0, free: true };
+      }
+    } else if (early.cost_override?.total > 0 && late.cost_override?.total > 0) {
       const total     = parseFloat((early.cost_override.total + late.cost_override.total).toFixed(2));
       const perKwh    = mergedEnergyKwh > 0 ? parseFloat((total / mergedEnergyKwh).toFixed(4)) : 0;
       mergedCostOverride = { total, perKwh };
@@ -1592,12 +1608,13 @@ app.patch('/api/charges/:ts/charger_kwh', (req, res) => {
 // PATCH /api/charges/:ts/cost — override de custo de recarga
 app.patch('/api/charges/:ts/cost', (req, res) => {
   const ts     = parseInt(req.params.ts, 10);
-  const { total, per_kwh } = req.body || {};
+  const { total, per_kwh, free } = req.body || {};
   const charge = chargesArr.find(c => (c.timestamp_ms || 0) === ts);
   if (!charge) return res.status(404).json({ error: 'not found' });
   const t = parseFloat(total) || 0;
-  if (t > 0) charge.cost_override = { total: t, perKwh: parseFloat(per_kwh) || 0 };
-  else        delete charge.cost_override;
+  if (free === true)  charge.cost_override = { total: 0, perKwh: 0, free: true };
+  else if (t > 0)     charge.cost_override = { total: t, perKwh: parseFloat(per_kwh) || 0 };
+  else                delete charge.cost_override;
   charge._updated_ms = Date.now();
   scheduleChargesFlush();
   recomputeBatteryAvgPrice();   // recalcula mix da bateria após override

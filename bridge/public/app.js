@@ -2193,15 +2193,20 @@ function renderCharges() {
     const editedBadge = ovFields.size > 0
       ? '<span title="Recarga editada manualmente" style="font-size:9px;color:#fbbf24;margin-left:4px">✏️</span>'
       : '';
-    // Custo da recarga em si: override manual tem prioridade. Sem override,
-    // usa o preço seed (SEED_KWH_PRICE_PWA) — representa "não informado".
+    // Custo da recarga em si: override manual tem prioridade (incl. recarga grátis).
+    // Sem override, usa o preço seed (SEED_KWH_PRICE_PWA) — representa "não informado".
+    const isFreeOv = ov?.free === true;
     const cost = ov
-      ? { total: ov.total, perKwh: ov.perKwh, isOv: true }
-      : (kwh > 0 ? { total: kwh * SEED_KWH_PRICE_PWA, perKwh: SEED_KWH_PRICE_PWA, isOv: false } : null);
+      ? { total: ov.total || 0, perKwh: ov.perKwh || 0, isOv: true, isFree: isFreeOv }
+      : (kwh > 0 ? { total: kwh * SEED_KWH_PRICE_PWA, perKwh: SEED_KWH_PRICE_PWA, isOv: false, isFree: false } : null);
+    const totalLabel = cost?.isFree ? '🎁 Grátis' : (cost ? 'R$ ' + f2(cost.total) : '');
+    const totalCostStyle = cost?.isFree
+      ? ' style="color:#4ade80;font-weight:600;border-bottom:1px dashed rgba(74,222,128,.5)"'
+      : (cost?.isOv ? ' style="border-bottom:1px dashed rgba(251,191,36,.5)"' : '');
     const totalCostHtml = cost
-      ? `<span id="chg-cost-${ts}" class="trip-cost"${cost.isOv ? ' style="border-bottom:1px dashed rgba(251,191,36,.5)"' : ''}>R$ ${f2(cost.total)}</span>`
+      ? `<span id="chg-cost-${ts}" class="trip-cost"${totalCostStyle}>${totalLabel}</span>`
       : `<span id="chg-cost-${ts}" class="trip-cost" style="display:none"></span>`;
-    const unitHtml = cost
+    const unitHtml = cost && !cost.isFree
       ? `<span id="chg-unit-${ts}" style="font-size:10px;color:#64748b">${f3(cost.perKwh)} R$/kWh</span>`
       : `<span id="chg-unit-${ts}" style="font-size:10px;color:#64748b;display:none"></span>`;
     const chargerKwh = _getChargerKwh(ts);
@@ -2235,8 +2240,9 @@ function renderCharges() {
   </div>
   <div id="charge-edit-${ts}" class="cost-edit-form" style="display:none">
     <div style="font-size:11px;color:#64748b;width:100%;margin-bottom:2px">Total pago (R$) — deixe 0 para usar o preço das configurações</div>
-    <input class="charge-total-input" type="number" step="0.01" min="0" placeholder="ex: 12.50"${ov ? ` value="${ov.total}"` : ''}>
+    <input class="charge-total-input" type="number" step="0.01" min="0" placeholder="ex: 12.50"${ov && !isFreeOv ? ` value="${ov.total}"` : ''}>
     <button class="cost-apply-btn" onclick="applyChargeCost(${ts},${kwh.toFixed(3)})">Salvar</button>
+    <button class="cost-apply-btn" onclick="markChargeFree(${ts})" style="background:#16a34a;color:#fff">Grátis 🎁</button>
   </div>
   <div id="charger-edit-${ts}" class="cost-edit-form" style="display:none">
     <div style="font-size:11px;color:#64748b;width:100%;margin-bottom:2px">kWh marcado no carregador — para calcular a perda de carga</div>
@@ -3928,7 +3934,8 @@ function _buildPriceTimelines() {
     const energy = +c.energy_kwh || 0;
     if (energy < 0.05) continue;
     const ovr = c.cost_override;
-    const pricePerKwh = ovr && +ovr.perKwh > 0 ? +ovr.perKwh
+    const pricePerKwh = ovr?.free === true ? 0
+                       : ovr && +ovr.perKwh > 0 ? +ovr.perKwh
                        : ovr && +ovr.total  > 0 ? (+ovr.total / energy)
                        : SEED_KWH_PRICE_PWA;
     const socStart  = +c.soc_start || 0;
@@ -3994,9 +4001,11 @@ window.applyTripCost = function(tripId, fuelL, netKwh) {
 // ── Custo de recargas — override local ───────────────────────────────────────
 
 function _chargeCostOverride(ts) {
-  // Prioridade: cost_override no objeto de recarga (vem do servidor) → localStorage (fallback)
+  // Prioridade: cost_override no objeto de recarga (vem do servidor) → localStorage (fallback).
+  // Aceita também recarga gratuita (free===true), que tem total=0 explicitamente.
   const fromCache = _getChargesByTs().get(ts);
-  if (fromCache?.cost_override?.total > 0) return fromCache.cost_override;
+  const ov = fromCache?.cost_override;
+  if (ov?.free === true || ov?.total > 0) return ov;
   try { return JSON.parse(localStorage.getItem('eco_chg_cost_' + ts) || 'null'); } catch { return null; }
 }
 
@@ -4059,6 +4068,25 @@ window.applyChargerKwh = function(ts) {
   _setChargerKwh(ts, val);
   el.style.display = 'none';
   renderCharges();
+};
+
+window.markChargeFree = function(ts) {
+  const el = document.getElementById('charge-edit-' + ts);
+  if (el) el.style.display = 'none';
+  // Limpa override local (vai ser sobrescrito pelo do servidor) e persiste flag no bridge.
+  localStorage.removeItem('eco_chg_cost_' + ts);
+  apiFetch(`/api/charges/${ts}/cost`, {
+    method:  'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify({ free: true }),
+  }).then(r => r.json()).then(updated => {
+    if (cachedCharges && updated?.timestamp_ms) {
+      const idx = cachedCharges.findIndex(c => c.timestamp_ms === ts);
+      if (idx >= 0) { cachedCharges[idx] = updated; _bumpCachesVersion(); }
+      _idbPutMany('charges', [updated]).catch(() => {});
+    }
+    renderCharges();
+  }).catch(() => {/* offline — fica pendente até voltar */});
 };
 
 window.applyChargeCost = function(ts, energyKwh) {
