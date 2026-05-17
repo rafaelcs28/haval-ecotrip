@@ -3072,7 +3072,13 @@ function applyMqttMessage(key, value, isRetained = false) {
     case 'charge_current_a':     state.charge_current_a     = num(value); break;
     case 'battery_voltage_v': state.battery_voltage_v  = num(value); break;
     case 'battery_current_a': state.battery_current_a  = num(value); break;
-    case 'motor_power_kw':    state.motor_power_kw      = num(value); break;
+    case 'motor_power_kw': {
+      // Safety: H6 PHEV pico ~173 kW; clamp absurdos (vinham de APK pré-v5.16
+      // sem filtro de sentinela do bus). Mantém regen negativo até -200.
+      const v = num(value);
+      state.motor_power_kw = (Math.abs(v) > 250) ? 0 : v;
+      break;
+    }
     case 'odometer_km':       state.odometer_km         = num(value); checkMaintenanceAlerts(); break;
     case 'batt_12v_pct':      state.batt_12v_pct        = num(value); break;
     case 'range_ev_km':       state.range_ev_km         = Math.round(num(value)); break;

@@ -239,9 +239,13 @@ fun ConsumptionScreen() {
                         tripManager.onDrivingReady(state)
                     }
                     CarConstants.CAR_EV_INFO_CUR_CHARGE_CURRENT.value -> {
-                        mqttManager.latestChargeCurrentA = value.trim().toFloatOrNull() ?: 0f
+                        val raw = value.trim().toFloatOrNull() ?: 0f
+                        // O bus retorna sentinelas tipo -1001 quando o carro está
+                        // parado/sem dado. Range físico real: ~ -400..+400 A.
+                        val current = if (kotlin.math.abs(raw) > 500f) 0f else raw
+                        mqttManager.latestChargeCurrentA = current
                         // Potência do motor: V (car.ev_info.power_battery_voltage) × A / 1000 = kW
-                        val motorKw = mqttManager.latestBatteryVoltageV * mqttManager.latestChargeCurrentA / 1000f
+                        val motorKw = mqttManager.latestBatteryVoltageV * current / 1000f
                         mqttManager.latestMotorPowerKw = motorKw
                         tripManager.updateMotorPowerKw(motorKw)
                         syncCharging()
@@ -251,9 +255,11 @@ fun ConsumptionScreen() {
                         mqttManager.latestBasicBattVoltageV = value.trim().toFloatOrNull() ?: 0f
                     }
                     CarConstants.CAR_EV_INFO_POWER_BATTERY_VOLTAGE.value -> {
-                        mqttManager.latestBatteryVoltageV = value.trim().toFloatOrNull() ?: 0f
-                        // Recalcula potência do motor com nova tensão
-                        val motorKw = mqttManager.latestBatteryVoltageV * mqttManager.latestChargeCurrentA / 1000f
+                        val rawV = value.trim().toFloatOrNull() ?: 0f
+                        // Filtra sentinelas (range físico real: ~250..450 V)
+                        val voltage = if (rawV < 100f || rawV > 600f) 0f else rawV
+                        mqttManager.latestBatteryVoltageV = voltage
+                        val motorKw = voltage * mqttManager.latestChargeCurrentA / 1000f
                         mqttManager.latestMotorPowerKw = motorKw
                         tripManager.updateMotorPowerKw(motorKw)
                         tripManager.onDataChanged(key, value)
