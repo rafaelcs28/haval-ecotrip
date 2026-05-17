@@ -1500,6 +1500,8 @@ function renderDash() {
     const cu = u => `<span class="chrg-unit">${u}</span>`;
     setHTML('d-chrg-power',   s.charge_power_kw   > 0 ? f1(s.charge_power_kw)    + cu(' kW')  : '--');
     setHTML('d-chrg-session', s.charge_session_kwh > 0 ? f2(s.charge_session_kwh) + cu(' kWh') : '--');
+    setHTML('d-chrg-avg',     s.charge_avg_power_kw > 0 ? f1(s.charge_avg_power_kw) + cu(' kW') : '--');
+    setHTML('d-chrg-peak',    s.charge_max_power_kw > 0 ? f1(s.charge_max_power_kw) + cu(' kW') : '--');
     const rem = s.charge_remaining_min || 0;
     if (rem > 0) {
       const remStr = rem > 59
@@ -1521,6 +1523,17 @@ function renderDash() {
     if (barFill) barFill.style.width = Math.min(Math.max(soc, 0), 100) + '%';
     const marker = document.getElementById('d-chrg-bar-marker');
     if (marker) marker.style.left = Math.min(lim, 100) + '%';
+    // Marcador sutil do SOC de início — só mostra se temos o valor e ele faz sentido
+    const startSoc = s.charge_start_soc_pct || 0;
+    const startMarker = document.getElementById('d-chrg-bar-start');
+    if (startMarker) {
+      if (startSoc > 0 && startSoc < 100 && startSoc < soc) {
+        startMarker.style.left = Math.min(startSoc, 100) + '%';
+        startMarker.style.display = '';
+      } else {
+        startMarker.style.display = 'none';
+      }
+    }
     setText('d-chrg-soc-cur', Math.round(soc) + '%');
     setText('d-chrg-soc-lim', '▶ ' + Math.round(lim) + '%');
     _renderChargeLimit(s.charge_limit_pct);

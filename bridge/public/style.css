@@ -579,7 +579,20 @@ html, body {
 
 /* Métricas menores na seção de recarga (dentro do card unificado) */
 #bfc-soc-charging .metric-value { font-size: 18px; }
+/* Linha de 5 métricas (com pot. média e pico) — fonte reduzida pra caber */
+#bfc-soc-charging .chrg-metrics-5 .metric-value { font-size: 14px; }
+#bfc-soc-charging .chrg-metrics-5 .metric-label { font-size: 9px; letter-spacing: 0.4px; }
+#bfc-soc-charging .chrg-metrics-5 .chrg-unit    { font-size: 8px; margin-left: 0; }
 .chrg-unit { font-size: 9px; font-weight: 500; opacity: .75; vertical-align: baseline; margin-left: 1px; }
+
+/* Marcador do SOC inicial na barra de recarga — bem sutil */
+.chrg-bar-start-marker {
+  position: absolute;
+  top: -1px; bottom: -1px;
+  width: 1px;
+  background: rgba(255,255,255,.25);
+  pointer-events: none;
+}
 
 /* ── Cards Desde última partida / Trip A / Trip B — unidades micro ────────── */
 #d-trips-summary .dash-unit    { font-size: 8px; font-weight: 500; opacity: .70; vertical-align: baseline; margin-left: 1px; }

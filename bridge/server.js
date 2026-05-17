@@ -381,6 +381,10 @@ const state = {
   batt_12v_pct:        0,    // % bateria auxiliar 12V
   charging_state:      'Desconhecido',
   charge_power_kw:     0,
+  charge_max_power_kw: 0,    // pico de potência da sessão atual (reset ao iniciar)
+  charge_avg_power_kw: 0,    // potência média da sessão atual (kWh / tempo decorrido)
+  charge_start_soc_pct: 0,   // % SOC quando a sessão atual começou (reset ao iniciar)
+  charge_session_start_ms: 0,// timestamp do início da sessão — persistido pra sobreviver a restart
   motor_power_kw:      0,
   charge_session_kwh:  0,
   charge_remaining_min:0,
@@ -466,6 +470,9 @@ if (fs.existsSync(STATE_FILE)) {
     delete saved.bridge_online;
     delete saved.last_update_ms;
     deepMergeState(state, saved);
+    // Recupera contexto da sessão de recarga em andamento após restart.
+    chargeSessionStartMs = state.charge_session_start_ms || 0;
+    chargeStartSoc       = state.charge_start_soc_pct   || 0;
     console.log(`✓ Estado anterior restaurado de state.json`);
   } catch (e) {
     console.error('Aviso: erro ao restaurar state.json:', e.message);
@@ -3214,6 +3221,10 @@ function applyMqttMessage(key, value, isRetained = false) {
           _chargeTempSamples = [];   // inicia nova coleta de temperatura
           chargeSessionStartMs = Date.now();
           chargeStartSoc = state.soc_pct || 0;
+          state.charge_start_soc_pct    = chargeStartSoc;
+          state.charge_session_start_ms = chargeSessionStartMs;
+          state.charge_max_power_kw     = 0;
+          state.charge_avg_power_kw     = 0;
           addEvent('charge_start', `Recarga iniciada · SOC: ${chargeStartSoc.toFixed(0)}%`);
           // Aguarda 30s para a potência estabilizar antes de notificar
           if (chargeStartTimer) clearTimeout(chargeStartTimer);
@@ -3259,12 +3270,38 @@ function applyMqttMessage(key, value, isRetained = false) {
             if (avgKw)      parts.push(`${avgKw.toFixed(1)} kW médios`);
             sendPush('✅ Recarga concluída', parts.length ? parts.join(' · ') : 'Sessão encerrada');
             chargeSessionStartMs = 0;
+            state.charge_session_start_ms = 0;
           }
         }
       }
       break;
     }
-    case 'charge_power_kw':      state.charge_power_kw      = num(value); break;
+    case 'charge_power_kw': {
+      const p = num(value);
+      state.charge_power_kw = p;
+      // Rastreia pico + média só enquanto carregando.
+      if (state.charging_state === 'Carregando') {
+        // Init lazy: se a sessão começou ANTES deste boot (state.json restaurado já
+        // tinha charging_state='Carregando' mas o tracking nunca foi inicializado),
+        // marca o início agora. As métricas serão parciais — só "do restart pra cá".
+        if (chargeSessionStartMs === 0) {
+          chargeSessionStartMs = Date.now();
+          state.charge_session_start_ms = chargeSessionStartMs;
+          if (!chargeStartSoc) {
+            chargeStartSoc = state.soc_pct || 0;
+            state.charge_start_soc_pct = chargeStartSoc;
+          }
+          console.log(`⚡ Sessão de recarga já em andamento — tracking de pico/média iniciado a partir de agora`);
+        }
+        if (p > state.charge_max_power_kw) state.charge_max_power_kw = +p.toFixed(2);
+        const elapsedH = (Date.now() - chargeSessionStartMs) / 3_600_000;
+        const kwh = state.charge_session_kwh || 0;
+        if (elapsedH > 0.0014 && kwh > 0.05) {   // >5s e >0.05 kWh pra evitar ruído
+          state.charge_avg_power_kw = +(kwh / elapsedH).toFixed(2);
+        }
+      }
+      break;
+    }
     case 'charge_session_kwh':   state.charge_session_kwh   = num(value); break;
     case 'charge_remaining_min': {
       const rem = num(value);
