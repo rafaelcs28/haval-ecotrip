@@ -2524,6 +2524,36 @@ const HVAC_CONTROLS = {
   seat_vent_pass: { type: 'int',   min: 0,  max: 3 },
 };
 
+// ── HF mode (alta frequência sob demanda) ─────────────────────────────────
+// PWA chama este endpoint quando entra na aba cluster/conforto pra forçar o
+// APK a publicar a 250ms em vez do intervalo configurado (5s default).
+// Heartbeat: PWA bate a cada 5s. Se passar 10s sem chamada, o watchdog
+// publica '0' automaticamente — evita ficar travado em HF se o PWA crashar.
+let _hfModeActive = false;
+let _hfLastBeatMs = 0;
+const HF_HEARTBEAT_TIMEOUT_MS = 10_000;
+function _publishHfMode(active) {
+  if (!mqttClient?.connected) return;
+  mqttClient.publish(`${MQTT_PREFIX}/cmd/hf_mode`, active ? '1' : '0', { qos: 1, retain: false });
+}
+setInterval(() => {
+  if (_hfModeActive && Date.now() - _hfLastBeatMs > HF_HEARTBEAT_TIMEOUT_MS) {
+    console.log('[hf_mode] heartbeat expirou — desligando');
+    _hfModeActive = false;
+    _publishHfMode(false);
+  }
+}, 2000);
+app.post('/api/hf_mode', (req, res) => {
+  const active = req.body?.active === true;
+  _hfLastBeatMs = Date.now();
+  if (active !== _hfModeActive) {
+    _hfModeActive = active;
+    _publishHfMode(active);
+    console.log(`[hf_mode] ${active ? 'ON' : 'OFF'}`);
+  }
+  res.json({ ok: true, active: _hfModeActive });
+});
+
 app.post('/api/hvac/:control', (req, res) => {
   const { control } = req.params;
   const spec = HVAC_CONTROLS[control];

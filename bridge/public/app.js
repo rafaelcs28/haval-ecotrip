@@ -733,7 +733,47 @@ function switchTab(btn, callback) {
   if (activePanel === 'dash' && dashMap) {
     setTimeout(() => dashMap.invalidateSize(), 50);
   }
+  // HF mode: ativa publish a 250ms enquanto cluster/conforto aberto.
+  _updateHfMode();
 }
+
+// ── HF mode (alta frequência sob demanda) ────────────────────────────────────
+// Quando o usuário está em cluster ou conforto, faz heartbeat pro bridge a cada
+// 5s. Bridge publica cmd/hf_mode 1 no MQTT, APK reduz publishInterval pra 250ms.
+// Watchdog do bridge desliga sozinho se não houver heartbeat por 10s.
+let _hfHeartbeatTimer = null;
+const HF_PANELS = new Set(['drive', 'comfort']);
+function _hfPing(active) {
+  apiFetch('/api/hf_mode', {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify({ active }),
+  }).catch(() => {/* offline — sem problema, bridge tem watchdog */});
+}
+function _updateHfMode() {
+  const shouldBeOn = HF_PANELS.has(activePanel);
+  if (shouldBeOn) {
+    if (_hfHeartbeatTimer) return;          // já ativo
+    _hfPing(true);
+    _hfHeartbeatTimer = setInterval(() => _hfPing(true), 5000);
+  } else {
+    if (!_hfHeartbeatTimer) return;
+    clearInterval(_hfHeartbeatTimer);
+    _hfHeartbeatTimer = null;
+    _hfPing(false);
+  }
+}
+// Garante que ao sair da página (close tab, navega fora) o HF é desligado
+window.addEventListener('beforeunload', () => {
+  if (_hfHeartbeatTimer) {
+    clearInterval(_hfHeartbeatTimer);
+    _hfHeartbeatTimer = null;
+    navigator.sendBeacon?.('/api/hf_mode', new Blob(
+      [JSON.stringify({ active: false })],
+      { type: 'application/json' },
+    ));
+  }
+});
 
 // ── WebSocket ─────────────────────────────────────────────────────────────────
 function connect() {

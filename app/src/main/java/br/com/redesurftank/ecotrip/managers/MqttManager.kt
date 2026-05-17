@@ -78,6 +78,11 @@ class MqttManager private constructor() {
     var publishIntervalMs:          Int     = DEFAULT_PUBLISH_INTERVAL_MS      // legado — mantido para não quebrar código existente
     var publishIntervalWifiMs:      Int     = DEFAULT_PUBLISH_INTERVAL_WIFI_MS
     var publishIntervalCellularMs:  Int     = DEFAULT_PUBLISH_INTERVAL_CELLULAR_MS
+    // High-frequency mode — ativado pelo bridge via cmd/hf_mode (PWA na aba
+    // cluster/conforto). Sobrescreve o intervalo em runtime SEM persistir.
+    // Auto-revert: o bridge envia '0' se não houver heartbeat do PWA.
+    @Volatile private var hfModeActive: Boolean = false
+    private val HF_MODE_INTERVAL_MS = 250
 
     // Vehicle model (populated from car data keys before connect)
     var vehicleModel1: String = ""
@@ -404,7 +409,9 @@ class MqttManager private constructor() {
 
     fun publish(rolling: RollingSnapshot) {
         val now      = System.currentTimeMillis()
-        val interval = if (isWifiConnected()) publishIntervalWifiMs else publishIntervalCellularMs
+        val interval = if (hfModeActive) HF_MODE_INTERVAL_MS
+                       else if (isWifiConnected()) publishIntervalWifiMs
+                       else publishIntervalCellularMs
         if (now - lastPublishMs < interval.toLong()) return
         lastPublishMs = now
 
@@ -1099,6 +1106,16 @@ class MqttManager private constructor() {
                         prefs.edit().putFloat(SharedPreferencesKeys.PRICE_ENERGY_PER_KWH, v).apply()
                         TripManager.getInstance().setPriceEnergy(v)
                         AppLogger.i(TAG, "Preço energia atualizado pelo bridge: R$ $v/kWh")
+                    }
+                }
+                "hf_mode" -> {
+                    // Modo de alta frequência (250ms entre publishes) acionado pelo PWA
+                    // enquanto a aba cluster/conforto está aberta. Bridge envia '0' se não
+                    // houver heartbeat, então não precisa de timeout no APK.
+                    val on = payload.trim() == "1"
+                    if (hfModeActive != on) {
+                        hfModeActive = on
+                        AppLogger.i(TAG, if (on) "HF mode ON — publish a cada ${HF_MODE_INTERVAL_MS}ms" else "HF mode OFF — intervalo normal restaurado")
                     }
                 }
                 else -> {
