@@ -1359,9 +1359,9 @@ html, body {
   width: 100%;
   transition: height .25s ease;
 }
-/* Durante a recarga, encolhe 20% pra liberar espaço pro card de bateria expandido */
+/* Durante a recarga, encolhe pra liberar espaço pro card de bateria expandido */
 #panel-dash.charging #d-car-map {
-  height: 172px;
+  height: 167px;
 }
 .map-info-bar {
   display: flex;
