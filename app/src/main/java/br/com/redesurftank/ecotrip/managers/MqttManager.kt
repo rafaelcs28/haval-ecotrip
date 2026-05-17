@@ -722,15 +722,14 @@ class MqttManager private constructor() {
             pubR("lifetime/fuel_l",      fmt3(lt.fuelL))
             pubR("lifetime/charge_kwh",  fmt3(lt.chargeKwh))
             pubR("lifetime/charge_sec",  fmtDur(lt.chargeSec))
-            // Custo lifetime — usa preços atuais (configuráveis pelo usuário)
-            val ltPriceGas    = prefs.getFloat(SharedPreferencesKeys.PRICE_GASOLINE_PER_L, 6.0f)
-            val ltPriceEnergy = prefs.getFloat(SharedPreferencesKeys.PRICE_ENERGY_PER_KWH, 0.9f)
+            // Custo lifetime — usa defaults internos. Cálculo definitivo é feito
+            // no bridge a partir do mix ponderado de abastecimentos/recargas.
+            val ltPriceGas    = prefs.getFloat(SharedPreferencesKeys.PRICE_GASOLINE_PER_L, 6.5f)
+            val ltPriceEnergy = prefs.getFloat(SharedPreferencesKeys.PRICE_ENERGY_PER_KWH, 0.55f)
             val ltCostBrl     = lt.fuelL * ltPriceGas + lt.netKwh.coerceAtLeast(0f) * ltPriceEnergy
             pubR("lifetime/cost_brl", fmt2(ltCostBrl))
-
-            // Preços configurados pelo usuário — retain para bridge/PWA sempre ter o valor
-            pubR("price_gas_per_l", fmt2(ltPriceGas))
-            pubR("price_kwh",       fmt2(ltPriceEnergy))
+            // price_gas_per_l e price_kwh NÃO são mais publicados — bridge ignora e
+            // mantém o cálculo via mix de abastecimentos/recargas registrados no PWA.
 
             lastSuccessfulPublishMs = System.currentTimeMillis()
             // Publica timestamp ISO para a entidade "Última Atualização" no HA

@@ -47,10 +47,6 @@ fun SettingsScreen(
     maxHistory: Int,
     onMaxHistoryChange: (Int) -> Unit,
     mqttManager: MqttManager,
-    priceGasoline: Float,
-    onPriceGasolineChange: (Float) -> Unit,
-    priceEnergy: Float,
-    onPriceEnergyChange: (Float) -> Unit,
     minAutoTripDist: Float,
     onMinAutoTripDistChange: (Float) -> Unit,
     backupManager: BackupManager,
@@ -60,8 +56,6 @@ fun SettingsScreen(
 ) {
     var showClearConfirm  by remember { mutableStateOf(false) }
     var clearDoneMsg      by remember { mutableStateOf("") }
-    var priceGasolineStr by remember { mutableStateOf(String.format(java.util.Locale.US, "%.2f", priceGasoline)) }
-    var priceEnergyStr   by remember { mutableStateOf(String.format(java.util.Locale.US, "%.2f", priceEnergy)) }
     var mqttEnabled      by remember { mutableStateOf(mqttManager.enabled) }
     var host             by remember { mutableStateOf(mqttManager.host) }
     var port             by remember { mutableStateOf(mqttManager.port.toString()) }
@@ -180,48 +174,8 @@ fun SettingsScreen(
             )
         }
 
-        // ── Preços ────────────────────────────────────────────────────────────
-        SectionCard(title = "Preços — consumo combinado") {
-            Text(
-                "Usado para calcular custo total da viagem (R\$). O km/L equivalente usa base energética fixa: 1 L gasolina = 8,9 kWh.\nFórmula km/L eq: km total ÷ (L gastos + kWh líquido ÷ 8,9)",
-                fontSize = 11.sp, color = TextSecondary,
-            )
-            val gasolineValid = parsePrice(priceGasolineStr) != null
-            val energyValid   = parsePrice(priceEnergyStr)   != null
-            OutlinedTextField(
-                value = priceGasolineStr,
-                onValueChange = { priceGasolineStr = it },
-                label = { Text("Preço da gasolina (R\$/L)", fontSize = 12.sp) },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-                isError = priceGasolineStr.isNotEmpty() && !gasolineValid,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                colors = mqttFieldColors(),
-            )
-            OutlinedTextField(
-                value = priceEnergyStr,
-                onValueChange = { priceEnergyStr = it },
-                label = { Text("Preço da energia (R\$/kWh)", fontSize = 12.sp) },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-                isError = priceEnergyStr.isNotEmpty() && !energyValid,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                colors = mqttFieldColors(),
-            )
-            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
-                Button(
-                    onClick = {
-                        parsePrice(priceGasolineStr)?.let { onPriceGasolineChange(it) }
-                        parsePrice(priceEnergyStr)?.let   { onPriceEnergyChange(it) }
-                    },
-                    enabled = gasolineValid && energyValid,
-                    colors = ButtonDefaults.buttonColors(containerColor = Green),
-                    shape  = RoundedCornerShape(8.dp),
-                ) {
-                    Text("Salvar preços", fontSize = 13.sp, color = SurfaceDeep, fontWeight = FontWeight.SemiBold)
-                }
-            }
-        }
+        // Preços de gasolina/energia agora são calculados no bridge a partir
+        // dos abastecimentos/recargas registrados no PWA — UI removida do APK.
 
         // ── Histórico ─────────────────────────────────────────────────────────
         SectionCard(title = "Histórico de viagens") {

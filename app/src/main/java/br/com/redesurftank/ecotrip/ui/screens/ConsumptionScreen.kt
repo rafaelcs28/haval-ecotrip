@@ -528,16 +528,6 @@ fun ConsumptionScreen() {
                 tripManager.setMaxHistoryEntries(newVal)
             },
             mqttManager = mqttManager,
-            priceGasoline = priceGasoline,
-            onPriceGasolineChange = { newVal ->
-                priceGasoline = newVal
-                tripManager.setPriceGasoline(newVal)
-            },
-            priceEnergy = priceEnergy,
-            onPriceEnergyChange = { newVal ->
-                priceEnergy = newVal
-                tripManager.setPriceEnergy(newVal)
-            },
             minAutoTripDist = minAutoTripDist,
             onMinAutoTripDistChange = { newVal ->
                 minAutoTripDist = newVal
