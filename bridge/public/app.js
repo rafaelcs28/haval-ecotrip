@@ -1792,68 +1792,10 @@ function renderDash() {
   renderTyre('rl', s.tyre_pressure_rl, s.tyre_temp_rl);
   renderTyre('rr', s.tyre_pressure_rr, s.tyre_temp_rr);
 
-  // Velocímetro + trem de força — ambos dentro de d-powertrain, visível só com motor ligado
-  const spdVal = document.getElementById('d-speed-val');
-  if (engOn && spdVal) {
-    const spd = Math.round(s.speed_kmh || 0);
-    spdVal.textContent    = spd;
-    spdVal.style.fontSize = spd >= 100 ? '13px' : spd >= 10 ? '18px' : '20px';
-  }
-
-  // Trem de força — barra de potência + kW elétrico + RPM ICE
+  // Velocímetro + trem de força + modo de condução — migrados pra aba Drive
+  // (cluster cinematográfico). Aqui no Dash apenas garante container oculto.
   const pwrEl = document.getElementById('d-powertrain');
-  if (pwrEl) {
-    pwrEl.style.display = engOn ? 'block' : 'none';
-    if (engOn) {
-      const pct      = Math.max(-100, Math.min(100, Math.round(s.battery_power_pct || 0)));
-      const isRegen  = pct < 0;
-      const absPct   = Math.abs(pct);
-      const regenBar   = document.getElementById('d-pwr-regen-bar');
-      const consumeBar = document.getElementById('d-pwr-consume-bar');
-      if (regenBar)   regenBar.style.width   = isRegen  ? (absPct / 2) + '%' : '0';
-      if (consumeBar) consumeBar.style.width  = !isRegen ? (absPct / 2) + '%' : '0';
-      const pctEl = document.getElementById('d-pwr-pct');
-      if (pctEl) {
-        pctEl.textContent = (pct > 0 ? '+' : '') + pct + '%';
-        pctEl.style.color = isRegen ? 'var(--neon)' : '#fb923c';
-      }
-      const kw = s.motor_power_kw || 0;
-      const kwEl = document.getElementById('d-pwr-kw');
-      if (kwEl) {
-        kwEl.textContent  = kw !== 0 ? Math.abs(kw).toFixed(1) : '--';
-        kwEl.style.color  = kw < 0 ? 'var(--neon)' : kw > 0 ? '#4ade80' : '#475569';
-      }
-      const rpmEl = document.getElementById('d-pwr-rpm');
-      if (rpmEl) {
-        const rpm = s.engine_rpm || 0;
-        rpmEl.textContent = rpm > 0 ? rpm.toLocaleString('pt-BR') : '--';
-        rpmEl.style.color = rpm > 0 ? '#fb923c' : '#475569';
-      }
-
-      // Modo de condução — baseado em batt_power_pct (0–100)
-      const driveModeEl = document.getElementById('d-drive-mode');
-      if (driveModeEl) {
-        const battPct = s.batt_power_pct || 0;
-        const spd     = s.speed_kmh || 0;
-        const moving  = spd > 3;
-        driveModeEl.style.display = moving ? '' : 'none';
-        if (moving) {
-          const modes = [
-            { max: 20,  label: '🌱 Eco',     bg: '#14532d', color: '#4ade80' },
-            { max: 50,  label: '⚡ Normal',   bg: '#1e3a5f', color: '#93c5fd' },
-            { max: 80,  label: '🔥 Esporte',  bg: '#7c2d12', color: '#fb923c' },
-            { max: 101, label: '🚀 Máximo',   bg: '#7f1d1d', color: '#f87171' },
-          ];
-          const m = modes.find(m => battPct <= m.max) || modes[3];
-          driveModeEl.textContent       = m.label;
-          driveModeEl.style.background  = m.bg;
-          driveModeEl.style.color       = m.color;
-        }
-      }
-
-
-    }
-  }
+  if (pwrEl) pwrEl.style.display = 'none';
 
   // Mapa GPS — atualiza live a cada nova posição recebida via WebSocket
   if (s.gps_lat && s.gps_lng) updateDashMap(s.gps_lat, s.gps_lng, s.gps_ts, s.speed_kmh || 0);
