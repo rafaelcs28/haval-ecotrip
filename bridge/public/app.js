@@ -6236,7 +6236,9 @@ function _attachHvacGesture(touchId, control, getCurrent, fmt, min, max, step, a
     e.preventDefault();
   }, { passive: false });
   el.addEventListener('touchmove', (e) => {
-    if (!_hvacDragState || _hvacDragState.el !== el) return;
+    // Compara contra touchEl (o elemento que recebe os eventos) e NÃO contra .el
+    // (que pode ser o display separado quando displayId é passado, caso dos bancos).
+    if (!_hvacDragState || _hvacDragState.touchEl !== el) return;
     moveDrag(e.touches[0].clientX, e.touches[0].clientY);
     e.preventDefault();
   }, { passive: false });
