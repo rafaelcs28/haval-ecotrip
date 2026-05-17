@@ -1401,11 +1401,30 @@ function renderDash() {
   const avgKmL = rollingKml ?? tripAKml ?? KML_FALLBACK;
 
   const usableKwh  = Math.max(0, (soc - EV_MIN_SOC) / 100 * BATT_KWH);
-  const evKmCalc   = Math.round(usableKwh / (avgKwh100 / 100));
+  let evKmCalc   = Math.round(usableKwh / (avgKwh100 / 100));
+  // Correção por temperatura externa (frio reduz range; quente neutro).
+  // Heurística: abaixo de 15°C reduz ~1.5% por °C abaixo. Acima de 30°C
+  // reduz ~1% por °C acima (uso de AC pesado). Em climas BR é raro frio.
+  const extT = parseFloat(s.outside_temp);
+  if (Number.isFinite(extT)) {
+    let factor = 1;
+    if (extT < 15) factor = 1 - Math.min(0.30, (15 - extT) * 0.015);
+    else if (extT > 30) factor = 1 - Math.min(0.15, (extT - 30) * 0.010);
+    evKmCalc = Math.round(evKmCalc * factor);
+  }
   const realEvKm   = s.range_ev_km || 0;   // valor real do sensor HA (0 = não disponível)
   const evRangeEl  = document.getElementById('d-ev-range');
   if (evRangeEl) {
-    if (realEvKm > 0) {
+    if (realEvKm > 0 && evKmCalc > 0 && soc > EV_MIN_SOC) {
+      // Mostra AMBOS: oficial do carro + estimado pelo consumo real
+      evRangeEl.style.display = '';
+      const diff = realEvKm - evKmCalc;
+      const diffPct = realEvKm > 0 ? Math.abs(diff) / realEvKm * 100 : 0;
+      const diffCls = diffPct > 15 ? (diff > 0 ? 'color:#fb923c' : 'color:#4ade80') : 'color:var(--teal)';
+      const evEl = document.getElementById('d-ev-km');
+      if (evEl) evEl.parentElement.innerHTML =
+        `<span id="d-ev-km">${realEvKm}</span> km elétricos · <span style="${diffCls}">~${evKmCalc} reais</span>`;
+    } else if (realEvKm > 0) {
       evRangeEl.style.display = '';
       setText('d-ev-km', realEvKm);
     } else if (soc > EV_MIN_SOC) {
@@ -4563,7 +4582,13 @@ async function loadStats() {
   // ── 4. Split elétrico / híbrido ──────────────────────────────────────────
   html += _statsElectricHTML(trips);
 
-  // ── 5. Locais de recarga — ranking por eficiência ────────────────────────
+  // ── 5. Comparativo EV vs ICE (economia acumulada) ────────────────────────
+  html += _statsEvVsIceHTML(trips);
+
+  // ── 6. Saúde da bateria (SOH estimado) ───────────────────────────────────
+  html += _statsBatterySohHTML(cachedCharges || []);
+
+  // ── 7. Locais de recarga — ranking por eficiência ────────────────────────
   html += _statsChargingLocationsHTML(cachedCharges || []);
 
   html += '</div>';
@@ -4889,6 +4914,131 @@ function _statsElectricHTML(trips) {
 }
 
 // ── Ranking de locais de recarga por eficiência ───────────────────────────────
+// ── Comparativo EV vs ICE — economia acumulada ────────────────────────────
+// Compara o que VOCÊ gastou (gasolina real + kWh real) com o cenário
+// hipotético "só ICE" — todos os km da viagem queimando gasolina ao
+// consumo médio oficial do H6 PHEV em modo combustão (10 km/L cidade).
+function _statsEvVsIceHTML(trips) {
+  const valid = trips.filter(t => (t.distKm || 0) > 1);
+  if (valid.length < 5) return '';
+
+  const totalKm  = valid.reduce((s, t) => s + (+t.distKm  || 0), 0);
+  const totalL   = valid.reduce((s, t) => s + (+t.fuelL   || 0), 0);
+  const totalKwh = valid.reduce((s, t) => s + Math.max(0, +t.netKwh || 0), 0);
+
+  const { gas: priceGas, kwh: priceKwh } = getPrices();
+  const realCost = totalL * priceGas + totalKwh * priceKwh;
+
+  // Consumo de referência só-ICE pro Haval H6 PHEV (cidade)
+  const ICE_REF_KM_PER_L = 10;
+  const iceL    = totalKm / ICE_REF_KM_PER_L;
+  const iceCost = iceL * priceGas;
+
+  const saved    = iceCost - realCost;
+  const savedPct = iceCost > 0 ? (saved / iceCost) * 100 : 0;
+  const cls      = saved > 0 ? 'green' : 'orange';
+
+  return _statsCard('💰 EV vs ICE — quanto você economizou', `
+    <div style="font-size:11px;color:#64748b;margin-bottom:8px">
+      Base: ${valid.length} viagens · ${totalKm.toFixed(0)} km totais.
+      Referência ICE: ${ICE_REF_KM_PER_L} km/L (Haval H6 PHEV em modo combustão).
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
+      <div style="background:#0a0f1c;border:1px solid #1e293b;border-radius:8px;padding:10px">
+        <div style="font-size:9px;color:#475569;letter-spacing:1px;text-transform:uppercase">Você gastou</div>
+        <div style="font-size:18px;font-weight:800;color:#4ade80;margin-top:3px">R$ ${f2(realCost)}</div>
+        <div style="font-size:10px;color:#64748b;margin-top:2px">${f1(totalL)} L + ${f1(totalKwh)} kWh</div>
+      </div>
+      <div style="background:#0a0f1c;border:1px solid #1e293b;border-radius:8px;padding:10px">
+        <div style="font-size:9px;color:#475569;letter-spacing:1px;text-transform:uppercase">Se fosse só ICE</div>
+        <div style="font-size:18px;font-weight:800;color:#fb923c;margin-top:3px">R$ ${f2(iceCost)}</div>
+        <div style="font-size:10px;color:#64748b;margin-top:2px">${f1(iceL)} L (estimado)</div>
+      </div>
+    </div>
+    <div style="background:rgba(${saved > 0 ? '74,222,128' : '251,146,60'},0.10);border:1px solid rgba(${saved > 0 ? '74,222,128' : '251,146,60'},0.30);border-radius:8px;padding:10px;text-align:center">
+      <div style="font-size:10px;color:#64748b;letter-spacing:1px;text-transform:uppercase">${saved > 0 ? 'Economia com o elétrico' : 'Custo extra do elétrico'}</div>
+      <div style="font-size:22px;font-weight:800;color:var(--${cls});margin-top:3px">${saved >= 0 ? '−' : '+'} R$ ${f2(Math.abs(saved))}</div>
+      <div style="font-size:11px;color:#94a3b8;margin-top:2px">${saved > 0 ? '−' : '+'}${Math.abs(savedPct).toFixed(0)}% vs combustão pura</div>
+    </div>
+  `);
+}
+
+// ── SOH estimado — capacidade aparente da bateria por recarga ────────────
+// Pra cada recarga relevante (ΔSOC >= 30%), calcula energy_kwh / ΔSOC × 100 =
+// capacidade total estimada. Compara média das mais recentes vs mais antigas
+// pra detectar degradação. Nominal: 34 kWh.
+function _statsBatterySohHTML(charges) {
+  const NOMINAL_KWH = 34;
+  const valid = (charges || []).filter(c => {
+    const ds = (+c.soc_end || 0) - (+c.soc_start || 0);
+    return ds >= 30 && (+c.energy_kwh || 0) > 5;
+  });
+  if (valid.length < 3) return '';   // amostra muito pequena pra confiar
+
+  const capacities = valid.map(c => {
+    const ds = c.soc_end - c.soc_start;
+    return {
+      ts: c.timestamp_ms || 0,
+      cap: (c.energy_kwh / ds) * 100,
+    };
+  }).filter(x => x.cap > 10 && x.cap < 60)  // clamp valores absurdos
+    .sort((a, b) => a.ts - b.ts);
+
+  if (capacities.length < 3) return '';
+
+  // Médias: recentes (até 5) vs antigas (até 5)
+  const recent = capacities.slice(-Math.min(5, Math.floor(capacities.length/2)));
+  const older  = capacities.slice(0,  Math.min(5, Math.floor(capacities.length/2)));
+  const avgRecent = recent.reduce((s, x) => s + x.cap, 0) / recent.length;
+  const avgOlder  = older.reduce((s, x) => s + x.cap, 0) / older.length;
+  const soh = (avgRecent / NOMINAL_KWH) * 100;
+  const trend = avgRecent - avgOlder;
+  const sohCls = soh >= 95 ? 'green' : soh >= 85 ? 'teal' : 'orange';
+
+  // Mini gráfico (pontos no tempo)
+  const minC = Math.min(...capacities.map(x => x.cap));
+  const maxC = Math.max(...capacities.map(x => x.cap));
+  const yRange = Math.max(0.5, maxC - minC);
+  const w = 280, h = 40;
+  const tMin = capacities[0].ts;
+  const tMax = capacities[capacities.length-1].ts;
+  const tRange = Math.max(1, tMax - tMin);
+  const pts = capacities.map(p => {
+    const x = ((p.ts - tMin) / tRange) * w;
+    const y = h - ((p.cap - minC) / yRange) * (h - 4) - 2;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  });
+  const trendBadge = Math.abs(trend) < 0.3 ? 'estável'
+                   : trend > 0 ? `+${trend.toFixed(1)} kWh ↑` : `${trend.toFixed(1)} kWh ↓`;
+  const trendCls = Math.abs(trend) < 0.3 ? 'muted' : trend > 0 ? 'green' : 'orange';
+
+  return _statsCard('🔋 Saúde da bateria (SOH estimado)', `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
+      <div style="background:#0a0f1c;border:1px solid #1e293b;border-radius:8px;padding:10px">
+        <div style="font-size:9px;color:#475569;letter-spacing:1px;text-transform:uppercase">Capacidade atual</div>
+        <div style="font-size:18px;font-weight:800;color:var(--${sohCls});margin-top:3px">${avgRecent.toFixed(1)} kWh</div>
+        <div style="font-size:10px;color:#64748b;margin-top:2px">de ${NOMINAL_KWH} kWh nominais</div>
+      </div>
+      <div style="background:#0a0f1c;border:1px solid #1e293b;border-radius:8px;padding:10px">
+        <div style="font-size:9px;color:#475569;letter-spacing:1px;text-transform:uppercase">SOH</div>
+        <div style="font-size:18px;font-weight:800;color:var(--${sohCls});margin-top:3px">${soh.toFixed(0)}%</div>
+        <div style="font-size:10px;color:var(--${trendCls});margin-top:2px">vs antigas: ${trendBadge}</div>
+      </div>
+    </div>
+    <svg viewBox="0 0 ${w} ${h}" width="100%" height="${h}" preserveAspectRatio="none" style="display:block;background:#0a0f1c;border:1px solid #1e293b;border-radius:8px">
+      <polyline points="${pts.join(' ')}" fill="none" stroke="#22d3ee" stroke-width="1.5" stroke-linejoin="round"/>
+      ${capacities.map((p, i) => {
+        const [x, y] = pts[i].split(',');
+        return `<circle cx="${x}" cy="${y}" r="2" fill="#22d3ee"/>`;
+      }).join('')}
+    </svg>
+    <div style="font-size:10px;color:#475569;margin-top:6px;line-height:1.5">
+      Estimativa baseada em ${capacities.length} recargas com Δ SOC ≥ 30%.
+      Range observado: ${minC.toFixed(1)} – ${maxC.toFixed(1)} kWh.
+    </div>
+  `);
+}
+
 function _statsChargingLocationsHTML(charges) {
   if (!charges.length) return '';
 
