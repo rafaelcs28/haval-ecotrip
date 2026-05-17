@@ -267,15 +267,19 @@ window.toggleSection = function(bodyId, btnId) {
   if (header) header.style.marginBottom = willCollapse ? '0' : '';
 };
 function _restoreSettingsSections() {
-  ['sc-dados-body', 'sc-charge-limit-body', 'sc-backup-body', 'sc-servidor-body'].forEach(bodyId => {
+  // Descobre todas as sections via DOM (em vez de lista hardcoded) — assim
+  // novas seções adicionadas no HTML herdam a persistência sem precisar
+  // mexer aqui. Lê de localStorage cada `sc_<bodyId>`.
+  document.querySelectorAll('.sc-header[onclick*="toggleSection"]').forEach(hdr => {
+    const m = (hdr.getAttribute('onclick') || '').match(/toggleSection\('([^']+)','([^']+)'\)/);
+    if (!m) return;
+    const [, bodyId, btnId] = m;
     if (localStorage.getItem('sc_' + bodyId) !== '1') return;
-    const body   = document.getElementById(bodyId);
-    const btnId  = bodyId.replace('-body', '-btn');
-    const btn    = document.getElementById(btnId);
+    const body = document.getElementById(bodyId);
+    const btn  = document.getElementById(btnId);
     if (body) body.style.display = 'none';
     if (btn)  btn.textContent    = '▼';
-    const header = btn?.closest('.sc-header');
-    if (header) header.style.marginBottom = '0';
+    hdr.style.marginBottom = '0';
   });
 }
 
@@ -6374,17 +6378,41 @@ function _renderMaintCard() {
 
   const f0 = (n) => Math.round(n).toLocaleString('pt-BR');
   list.innerHTML = items.map(it => {
-    const rem = it.remaining_km;
-    let remTxt;
-    if (rem <= 0) remTxt = `Atrasada ${f0(Math.abs(rem))} km`;
-    else          remTxt = `em ${f0(rem)} km`;
-    // Barra: percentual percorrido do intervalo (de last_km até next_km)
-    const span = it.every_km;
-    const consumed = Math.max(0, Math.min(span, span - rem));
-    const pct = span > 0 ? Math.min(100, (consumed / span) * 100) : 0;
+    // Texto principal: km e/ou dias, conforme configurado
+    const parts = [];
+    if (it.has_km) {
+      const rk = it.remaining_km;
+      parts.push(rk <= 0 ? `Atrasada ${f0(Math.abs(rk))} km` : `em ${f0(rk)} km`);
+    }
+    if (it.has_time) {
+      const rd = it.remaining_days;
+      parts.push(rd <= 0 ? `${Math.abs(rd)} dias atrasada` : `em ${rd} ${rd === 1 ? 'dia' : 'dias'}`);
+    }
+    const remTxt = parts.join(' · ') || '—';
+
+    // Barra: usa o menor dos percentuais (km ou tempo) — mais agressivo visual
+    let pctKm = 0, pctTime = 0;
+    if (it.has_km) {
+      const span = it.every_km, consumed = Math.max(0, Math.min(span, span - it.remaining_km));
+      pctKm = span > 0 ? (consumed / span) * 100 : 0;
+    }
+    if (it.has_time && it.every_months > 0) {
+      const totalDays = it.every_months * 30;
+      const consumed = Math.max(0, Math.min(totalDays, totalDays - it.remaining_days));
+      pctTime = totalDays > 0 ? (consumed / totalDays) * 100 : 0;
+    }
+    const pct = Math.min(100, Math.max(pctKm, pctTime));
+
     const lastDate = it.last_date_ms
       ? new Date(it.last_date_ms).toLocaleDateString('pt-BR', { day:'2-digit', month:'2-digit', year:'numeric' })
       : '--';
+    const nextDateStr = it.next_date_ms
+      ? new Date(it.next_date_ms).toLocaleDateString('pt-BR', { day:'2-digit', month:'2-digit', year:'numeric' })
+      : '';
+    const nextLine = it.has_km
+      ? `Próxima: ${f0(it.next_km)} km${nextDateStr ? ' ou ' + nextDateStr : ''}`
+      : `Próxima: ${nextDateStr}`;
+
     return `<div class="maint-row ${it.status}">
       <span class="maint-icon">${it.icon || '🔧'}</span>
       <div class="maint-body">
@@ -6395,7 +6423,7 @@ function _renderMaintCard() {
         <div class="maint-bar-track"><div class="maint-bar-fill" style="width:${pct.toFixed(1)}%"></div></div>
         <div class="maint-body-row2">
           <span>Última: ${f0(it.last_km)} km · ${lastDate}</span>
-          <span>Próxima: ${f0(it.next_km)} km</span>
+          <span>${nextLine}</span>
         </div>
       </div>
     </div>`;
@@ -6421,17 +6449,25 @@ window.openMaintAdmin = async function() {
   modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:9999;overflow-y:auto;padding:16px;-webkit-overflow-scrolling:touch';
 
   const odom = _maintCache.current_odometer_km || 0;
-  const intervalsHtml = (_maintCache.intervals || []).map(itv => `
+  const intervalsHtml = (_maintCache.intervals || []).map(itv => {
+    const sub = [];
+    if (+itv.every_km     > 0) sub.push(`a cada ${itv.every_km.toLocaleString('pt-BR')} km`);
+    if (+itv.every_months > 0) sub.push(`${itv.every_months} ${itv.every_months === 1 ? 'mês' : 'meses'}`);
+    const alerts = [];
+    if (+itv.every_km     > 0) alerts.push(`${itv.alert_km || 500} km antes`);
+    if (+itv.every_months > 0) alerts.push(`${itv.alert_days || 15} dias antes`);
+    return `
     <div class="maint-admin-item">
       <div style="flex:1;min-width:0">
         <div class="maint-admin-name">${itv.icon || '🔧'} ${itv.label}</div>
-        <div class="maint-admin-sub">a cada ${itv.every_km.toLocaleString('pt-BR')} km · alerta ${itv.alert_km || 500} km antes</div>
+        <div class="maint-admin-sub">${sub.join(' · ')}${alerts.length ? ' · alerta ' + alerts.join(' / ') : ''}</div>
       </div>
       <div class="maint-admin-actions">
         <button onclick="editMaintInterval('${itv.id}')">✏️</button>
         <button onclick="deleteMaintInterval('${itv.id}','${itv.label.replace(/'/g,'')}')">🗑</button>
       </div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 
   const histHtml = (_maintCache.history || []).map(h => {
     const itv = _maintCache.intervals.find(i => i.id === h.type_id);
@@ -6442,6 +6478,7 @@ window.openMaintAdmin = async function() {
         <div class="maint-admin-sub">${dt}${h.notes ? ' · ' + h.notes : ''}</div>
       </div>
       <div class="maint-admin-actions">
+        <button onclick="editMaintHistory('${h.id}')">✏️</button>
         <button onclick="deleteMaintHistory('${h.id}')">🗑</button>
       </div>
     </div>`;
@@ -6508,21 +6545,50 @@ window.deleteMaintHistory = async function(id) {
   } catch (_) { showToast('✗ Falha ao apagar'); }
 };
 
+window.editMaintHistory = async function(id) {
+  const rec = (_maintCache?.history || []).find(h => h.id === id);
+  if (!rec) return;
+  const newOdo = parseFloat(prompt('Novo odômetro (km):', Math.round(rec.odometer_km)));
+  if (!(newOdo > 0)) return;
+  const curDate = new Date(rec.date_ms || Date.now()).toISOString().slice(0, 10);
+  const newDateStr = prompt('Nova data (YYYY-MM-DD):', curDate);
+  if (!newDateStr) return;
+  const newDateMs = new Date(newDateStr).getTime();
+  if (!(newDateMs > 0)) { showToast('✗ Data inválida'); return; }
+  const newNotes = prompt('Observações:', rec.notes || '');
+  try {
+    const r = await apiFetch('/api/maintenance/history/' + id, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ odometer_km: newOdo, date_ms: newDateMs, notes: newNotes || '' }),
+    });
+    const d = await r.json();
+    if (!r.ok || !d.ok) throw new Error(d.error || 'erro');
+    showToast('✓ Registro atualizado — próximas recalculadas');
+    await _loadMaintenance();
+    openMaintAdmin();
+  } catch (e) { showToast('✗ ' + e.message); }
+};
+
 window.editMaintInterval = async function(id) {
   const existing = id ? (_maintCache?.intervals || []).find(i => i.id === id) : null;
   const newId    = existing ? id : prompt('ID curto (ex: oleo, freios)', '');
   if (!newId) return;
   const label    = prompt('Nome', existing?.label || '');
   if (!label) return;
-  const every    = parseFloat(prompt('Intervalo em km (ex: 12000)', existing?.every_km || 12000));
-  if (!(every > 0)) return;
-  const alert    = parseFloat(prompt('Alertar quantos km antes? (ex: 1000)', existing?.alert_km || 1000));
+  const everyKm    = parseFloat(prompt('Intervalo em KM (0 pra não usar)', existing?.every_km || 12000)) || 0;
+  const everyMths  = parseFloat(prompt('Intervalo em MESES (0 pra não usar)', existing?.every_months || 12)) || 0;
+  if (!(everyKm > 0) && !(everyMths > 0)) {
+    showToast('Informe ao menos um (km ou meses)'); return;
+  }
+  const alertKm   = everyKm > 0   ? parseFloat(prompt('Alertar quantos km antes?',   existing?.alert_km   || 1000)) || 500 : 0;
+  const alertDays = everyMths > 0 ? parseFloat(prompt('Alertar quantos dias antes?', existing?.alert_days || 15))   || 15  : 0;
   const icon     = prompt('Ícone (emoji)', existing?.icon || '🔧') || '🔧';
   try {
     const r = await apiFetch('/api/maintenance/intervals', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: newId.trim(), label, every_km: every, alert_km: alert, icon }),
+      body: JSON.stringify({ id: newId.trim(), label, every_km: everyKm, every_months: everyMths, alert_km: alertKm, alert_days: alertDays, icon }),
     });
     const d = await r.json();
     if (!r.ok || !d.ok) throw new Error(d.error || 'erro');

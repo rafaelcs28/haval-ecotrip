@@ -595,7 +595,7 @@ function saveKnownPlaces() {
 // Pré-config inicial baseada no carro do usuário: revisão a cada 12k, última em 24.200.
 let maintenance = {
   intervals: [
-    { id: 'revisao', label: 'Revisão geral', every_km: 12000, alert_km: 1000, icon: '🔧' },
+    { id: 'revisao', label: 'Revisão geral', every_km: 12000, every_months: 12, alert_km: 1000, alert_days: 15, icon: '🔧' },
   ],
   history: [
     {
@@ -765,6 +765,24 @@ function publishPricesToCar() {
 // Persistido em maintenance.json como `_alerts: { type_id: 'soon'|'overdue' }`.
 maintenance._alerts = maintenance._alerts || {};
 
+// Compõe descrição "X km / Y dias" da condição que disparou o alerta
+function _maintBody(it) {
+  const parts = [];
+  if (it.has_km && it.km_status !== 'ok') {
+    const rk = it.remaining_km;
+    parts.push(rk <= 0
+      ? `${Math.round(Math.abs(rk)).toLocaleString('pt-BR')} km atrasada`
+      : `${Math.round(rk).toLocaleString('pt-BR')} km restantes`);
+  }
+  if (it.has_time && it.time_status !== 'ok') {
+    const rd = it.remaining_days;
+    parts.push(rd <= 0
+      ? `${Math.abs(rd)} dias atrasada`
+      : `${rd} dias restantes`);
+  }
+  return parts.join(' · ') || `${Math.round(it.remaining_km).toLocaleString('pt-BR')} km`;
+}
+
 function checkMaintenanceAlerts() {
   const items = computeMaintenance();
   for (const it of items) {
@@ -774,18 +792,13 @@ function checkMaintenanceAlerts() {
     // Só notifica em transição pra estado MAIS severo (ok→soon, ok→overdue, soon→overdue)
     const order = { ok: 0, soon: 1, overdue: 2 };
     if (order[it.status] > order[prev]) {
+      const body = _maintBody(it);
       if (it.status === 'soon' && notifPrefs.maintenance_soon) {
-        sendPush(
-          `${it.icon || '🔧'} ${it.label} se aproximando`,
-          `Faltam ${Math.round(it.remaining_km).toLocaleString('pt-BR')} km (em ${Math.round(it.next_km).toLocaleString('pt-BR')} km)`
-        );
-        addEvent('maint_soon', `${it.icon || '🔧'} ${it.label}: faltam ${Math.round(it.remaining_km)} km`);
+        sendPush(`${it.icon || '🔧'} ${it.label} se aproximando`, body);
+        addEvent('maint_soon', `${it.icon || '🔧'} ${it.label}: ${body}`);
       } else if (it.status === 'overdue' && notifPrefs.maintenance_overdue) {
-        sendPush(
-          `⚠️ ${it.label} atrasada`,
-          `${Math.round(Math.abs(it.remaining_km)).toLocaleString('pt-BR')} km além do programado (${Math.round(it.next_km).toLocaleString('pt-BR')} km)`
-        );
-        addEvent('maint_overdue', `⚠️ ${it.label} atrasada em ${Math.round(Math.abs(it.remaining_km))} km`);
+        sendPush(`⚠️ ${it.label} atrasada`, body);
+        addEvent('maint_overdue', `⚠️ ${it.label}: ${body}`);
       }
     }
     maintenance._alerts[it.id] = it.status;
@@ -793,26 +806,67 @@ function checkMaintenanceAlerts() {
   }
 }
 
+// Verificação diária pros alertas por tempo (km já dispara em cada update do odo)
+setInterval(checkMaintenanceAlerts, 60 * 60 * 1000);  // 1h
+
 // Computa o status de cada intervalo (próxima manutenção, km restantes, severidade)
 function computeMaintenance() {
   const odom = +state.odometer_km || 0;
+  const now  = Date.now();
+  const MS_PER_DAY = 24 * 60 * 60 * 1000;
   return maintenance.intervals.map(itv => {
-    const last = maintenance.history
-      .filter(h => h.type_id === itv.id)
-      .sort((a, b) => b.odometer_km - a.odometer_km)[0];
-    const lastKm = last ? last.odometer_km : 0;
-    const nextKm = lastKm + itv.every_km;
-    const remaining = nextKm - odom;
-    const alertKm = itv.alert_km || 500;
-    let status = 'ok';
-    if (remaining <= 0)          status = 'overdue';
-    else if (remaining <= alertKm) status = 'soon';
+    // Pega registro mais recente pra essa manutenção — preferindo o de maior
+    // odômetro (fallback: data mais recente se odômetro for igual/zero).
+    const all = maintenance.history.filter(h => h.type_id === itv.id);
+    const last = all.sort((a, b) => {
+      const dk = (b.odometer_km || 0) - (a.odometer_km || 0);
+      return dk !== 0 ? dk : (b.date_ms || 0) - (a.date_ms || 0);
+    })[0];
+    const lastKm   = last ? last.odometer_km : 0;
+    const lastDate = last?.date_ms || null;
+
+    // ── Componente km ──
+    const everyKm    = +itv.every_km || 0;
+    const alertKm    = +itv.alert_km || 500;
+    const hasKm      = everyKm > 0;
+    const nextKm     = hasKm ? lastKm + everyKm : 0;
+    const remainKm   = hasKm ? (nextKm - odom) : Infinity;
+    let kmStatus = 'ok';
+    if (hasKm) {
+      if (remainKm <= 0)        kmStatus = 'overdue';
+      else if (remainKm <= alertKm) kmStatus = 'soon';
+    }
+
+    // ── Componente tempo (meses) ──
+    const everyMonths = +itv.every_months || 0;
+    const alertDays   = +itv.alert_days   || 15;
+    const hasTime     = everyMonths > 0 && lastDate;
+    let nextDate = null, remainDays = Infinity, timeStatus = 'ok';
+    if (hasTime) {
+      const d = new Date(lastDate);
+      d.setMonth(d.getMonth() + everyMonths);
+      nextDate = d.getTime();
+      remainDays = Math.round((nextDate - now) / MS_PER_DAY);
+      if (remainDays <= 0)              timeStatus = 'overdue';
+      else if (remainDays <= alertDays) timeStatus = 'soon';
+    }
+
+    // Status final: o pior entre os dois (overdue > soon > ok)
+    const order = { ok: 0, soon: 1, overdue: 2 };
+    const status = order[kmStatus] >= order[timeStatus] ? kmStatus : timeStatus;
+
     return {
       ...itv,
       last_km: lastKm,
-      last_date_ms: last?.date_ms || null,
+      last_date_ms: lastDate,
       next_km: nextKm,
-      remaining_km: remaining,
+      remaining_km: remainKm,
+      next_date_ms: nextDate,
+      remaining_days: hasTime ? remainDays : null,
+      km_status: kmStatus,
+      time_status: timeStatus,
+      has_km: hasKm,
+      has_time: hasTime,
       status,
     };
   });
@@ -1197,14 +1251,18 @@ app.get('/api/maintenance', (_req, res) => {
 
 // POST /api/maintenance/intervals  — cria ou atualiza um intervalo
 app.post('/api/maintenance/intervals', (req, res) => {
-  const { id, label, every_km, icon, alert_km } = req.body || {};
-  if (!id || !label || !(parseFloat(every_km) > 0))
-    return res.status(400).json({ error: 'id, label e every_km > 0 obrigatórios' });
+  const { id, label, every_km, every_months, icon, alert_km, alert_days } = req.body || {};
+  const km   = parseFloat(every_km)   || 0;
+  const mths = parseFloat(every_months) || 0;
+  if (!id || !label || (!(km > 0) && !(mths > 0)))
+    return res.status(400).json({ error: 'id, label e pelo menos every_km ou every_months > 0 obrigatórios' });
   const interval = {
     id: String(id).trim(),
     label: String(label).trim(),
-    every_km: parseFloat(every_km),
-    alert_km: parseFloat(alert_km) || 500,
+    every_km:     km,
+    every_months: mths,
+    alert_km:    parseFloat(alert_km)   || 500,
+    alert_days:  parseFloat(alert_days) || 15,
     icon: icon || '🔧',
   };
   const idx = maintenance.intervals.findIndex(i => i.id === interval.id);
@@ -1248,8 +1306,38 @@ app.delete('/api/maintenance/history/:id', (req, res) => {
   const idx = maintenance.history.findIndex(h => h.id === req.params.id);
   if (idx < 0) return res.status(404).json({ error: 'não encontrado' });
   maintenance.history.splice(idx, 1);
+  // Reseta alertas pros tipos afetados — recompute pode mover o "último"
+  if (maintenance._alerts) maintenance._alerts = {};
   saveMaintenance();
   res.json({ ok: true });
+});
+
+// PATCH /api/maintenance/history/:id — edita registro existente
+// (próximas manutenções recalculam automaticamente em computeMaintenance)
+app.patch('/api/maintenance/history/:id', (req, res) => {
+  const rec = maintenance.history.find(h => h.id === req.params.id);
+  if (!rec) return res.status(404).json({ error: 'não encontrado' });
+  const b = req.body || {};
+  if (b.odometer_km !== undefined) {
+    const o = parseFloat(b.odometer_km);
+    if (!(o > 0)) return res.status(400).json({ error: 'odometer_km > 0 obrigatório' });
+    rec.odometer_km = o;
+  }
+  if (b.date_ms !== undefined) {
+    const d = parseInt(b.date_ms);
+    if (!(d > 0)) return res.status(400).json({ error: 'date_ms inválido' });
+    rec.date_ms = d;
+  }
+  if (b.type_id !== undefined) {
+    if (!maintenance.intervals.find(i => i.id === b.type_id))
+      return res.status(400).json({ error: 'type_id inválido' });
+    rec.type_id = String(b.type_id);
+  }
+  if (b.notes !== undefined) rec.notes = String(b.notes).slice(0, 240);
+  // Reseta alertas pros tipos afetados — registro mudou, ciclo novo
+  if (maintenance._alerts) maintenance._alerts = {};
+  saveMaintenance();
+  res.json({ ok: true, record: rec, next: computeMaintenance() });
 });
 
 // ── Abastecimentos ──────────────────────────────────────────────────────────
