@@ -4561,8 +4561,10 @@ async function loadStats() {
 
   // Garante que o cache local está populado
   if (!cachedAutoTrips) await syncAllCache({ silent: true });
+  if (cachedRefuels === null) await _loadRefuels();
   const allTrips   = (cachedAutoTrips || []).filter(t => (t.distKm || 0) > 2);
   const allCharges = cachedCharges || [];
+  const allRefuels = cachedRefuels || [];
 
   // Filtro global da aba — aplica em todos os cards (semanal e mensal são
   // intrinsecamente atrelados ao período da semana/mês e ficam só visíveis
@@ -4572,6 +4574,7 @@ async function loadStats() {
   const inRange = (ms) => ms >= fStart && ms <= fEnd;
   const trips   = isAll ? allTrips   : allTrips.filter(t => inRange(t.startMs || 0));
   const charges = isAll ? allCharges : allCharges.filter(c => inRange(c.timestamp_ms || 0));
+  const refuels = isAll ? allRefuels : allRefuels.filter(r => inRange(r.timestamp_ms || 0));
 
   let html = '<div style="padding-bottom:12px">';
 
@@ -4588,6 +4591,9 @@ async function loadStats() {
       ${trips.length} viagem${trips.length !== 1 ? 's' : ''} · ${charges.length} recarga${charges.length !== 1 ? 's' : ''}
     </div>
   </div>`;
+
+  // ── 0. Preços médios (atual + período) ───────────────────────────────────
+  html += _statsPricesHTML(charges, refuels);
 
   // ── 1. Recordes pessoais ─────────────────────────────────────────────────
   html += _statsRecordsHTML(trips);
@@ -4635,6 +4641,58 @@ function _statsRow(icon, label, value, sub) {
     </div>
     <div style="font-size:13px;font-weight:700;color:#f1f5f9;text-align:right;white-space:nowrap">${value}</div>
   </div>`;
+}
+
+// Preços médios — atual (mix atual do tanque/bateria, vem do state) e do período
+// filtrado (ponderado pelos litros abastecidos e kWh recarregados no recorte).
+function _statsPricesHTML(charges, refuels) {
+  // ── Atual (mix ponderado de TODO histórico — refletido em state) ────────
+  const curGas = state.price_gas_per_l || 0;
+  const curKwh = state.price_kwh       || 0;
+
+  // ── Período: média ponderada do que ENTROU (abasteceu / recarregou) ─────
+  let gasSpend = 0, gasL = 0;
+  for (const r of refuels) {
+    const p = +r.price_per_liter || 0;
+    const l = +r.liters_added    || 0;
+    if (p > 0 && l > 0) { gasSpend += p * l; gasL += l; }
+  }
+  const periodGas = gasL > 0 ? gasSpend / gasL : 0;
+
+  let kwhSpend = 0, kwhTotal = 0;
+  for (const c of charges) {
+    const e = +c.energy_kwh || 0;
+    if (e < 0.05) continue;
+    const ov = c.cost_override;
+    let pricePerKwh;
+    if (ov?.free === true)                           pricePerKwh = 0;
+    else if (ov && +ov.perKwh > 0)                   pricePerKwh = +ov.perKwh;
+    else if (ov && +ov.total > 0)                    pricePerKwh = +ov.total / e;
+    else                                              pricePerKwh = SEED_KWH_PRICE_PWA;
+    kwhSpend += pricePerKwh * e;
+    kwhTotal += e;
+  }
+  const periodKwh = kwhTotal > 0 ? kwhSpend / kwhTotal : 0;
+
+  // ── Render ──────────────────────────────────────────────────────────────
+  const fmtGas = v => v > 0 ? 'R$ ' + v.toFixed(2)  + ' /L'   : '—';
+  const fmtKwh = v => v > 0 ? 'R$ ' + v.toFixed(4)  + ' /kWh' : v === 0 ? 'R$ 0,0000 /kWh' : '—';
+
+  const body =
+    _statsRow('⛽', 'Gasolina · atual no tanque',
+              fmtGas(curGas),
+              'média ponderada de todo histórico — publicado no carro') +
+    _statsRow('⛽', 'Gasolina · período',
+              fmtGas(periodGas),
+              `média ponderada de ${refuels.length} abastecimento${refuels.length !== 1 ? 's' : ''} no filtro`) +
+    _statsRow('⚡', 'Energia · atual na bateria',
+              fmtKwh(curKwh),
+              'média ponderada de todo histórico — publicado no carro') +
+    _statsRow('⚡', 'Energia · período',
+              fmtKwh(periodKwh),
+              `média ponderada de ${charges.length} recarga${charges.length !== 1 ? 's' : ''} no filtro`);
+
+  return _statsCard('💰 Custo unitário', body);
 }
 
 function _statsRecordsHTML(trips) {
