@@ -64,7 +64,7 @@ async function syncRenameStatus() {
         changed = true;
       }
     }
-    if (changed) { _saveRenameTracking(); renderAutoTrips(); renderHistory(); }
+    if (changed) { _saveRenameTracking(); renderAutoTrips(); }
   } catch (_) {}
 }
 
@@ -943,7 +943,6 @@ function fmtDate(ts) {
 // ── Filtros ───────────────────────────────────────────────────────────────────
 const filterState = {
   charges:     { active: 'today', customFrom: '', customTo: '', location: null, type: 'all' },
-  hist:        { active: 'all',   customFrom: '', customTo: '', search: '' },
   auto:        { active: 'today', customFrom: '', customTo: '', search: '' },
   logs:        { active: 'all',   type: 'all',   customFrom: '', customTo: '' },
   stats:       { active: 'all',   customFrom: '', customTo: '' },
@@ -953,7 +952,7 @@ let cachedRefuels = null;
 let _tankAvgPriceL = 0;     // R$/L médio atual no tanque (vem do bridge)
 let _batteryAvgPriceKwh = 0;// R$/kWh médio atual na bateria
 let cachedEvents  = null;
-let cachedTrips   = null;
+// cachedTrips removido — Trip A/B descontinuados.
 let _knownLocations    = [];
 let _locPickerTs       = 0;
 let _locPickerLat      = null;
@@ -1065,23 +1064,11 @@ function _syncProgressHide() {
 
 // ── Sync incremental das 3 coleções ───────────────────────────────────────
 async function syncAllCache({ silent = false } = {}) {
-  const totals = { trips: 0, auto: 0, charges: 0 };
+  const totals = { auto: 0, charges: 0 };
   try {
     if (!silent) _syncProgressShow('⟳ Sincronizando…');
 
-    // Trips manuais
-    const lastTs   = (await _idbGetMeta('lastTripTs')) || '';
-    const newTrips = await apiFetch('/api/trips' + (lastTs ? '?since=' + encodeURIComponent(lastTs) : ''))
-      .then(r => r.json()).catch(() => []);
-    if (Array.isArray(newTrips) && newTrips.length) {
-      await _idbPutMany('trips', newTrips);
-      totals.trips = newTrips.length;
-      const maxTs = [...newTrips].map(t => t.timestamp || '').sort().pop();
-      if (maxTs) await _idbSetMeta('lastTripTs', maxTs);
-      if (!silent) _syncProgressShow('⟳ ' + totals.trips + ' trip' + (totals.trips !== 1 ? 's' : '') + ' baixado' + (totals.trips !== 1 ? 's' : '') + '…');
-    }
-    cachedTrips = (await _idbGetAll('trips'))
-      .sort((a, b) => (b.timestamp || '') > (a.timestamp || '') ? 1 : -1);
+    // Trip A/B descontinuados — não sincroniza mais.
 
     // Auto-trips
     const lastMs  = (await _idbGetMeta('lastAutoMs')) || 0;
@@ -1151,12 +1138,11 @@ async function renderHistCounts() {
     let extra = '';
     // Detecta divergência IDB ↔ servidor pra sugerir reconciliar
     try {
-      const [lT, lA, lC] = await Promise.all([
-        _idbGetAll('trips').then(a => a.length),
+      const [lA, lC] = await Promise.all([
         _idbGetAll('autotrips').then(a => a.length),
         _idbGetAll('charges').then(a => a.length),
       ]);
-      if (lT > 0 && (lT !== c.trips || lA !== c.autotrips || lC !== c.charges)) {
+      if ((lA > 0 || lC > 0) && (lA !== c.autotrips || lC !== c.charges)) {
         extra = `<div style="margin-top:6px;font-size:10px;color:#fbbf24">⚠️ Cache local difere do histórico (${lA} vs ${c.autotrips} viagens). Use "Reconciliar" pra ajustar.</div>`;
       }
     } catch (_) {}
@@ -1164,7 +1150,6 @@ async function renderHistCounts() {
       `<div>🛣️ <strong>${c.autotrips}</strong> viagens</div>` +
       `<div>⚡ <strong>${c.charges}</strong> recargas</div>` +
       `<div>⛽ <strong>${refuels}</strong> abastecimentos</div>` +
-      `<div>📍 <strong>${c.trips}</strong> trips manuais (Trip A/B)</div>` +
       extra;
   } catch (e) {
     el.textContent = 'Não foi possível carregar (offline?)';
@@ -1233,7 +1218,6 @@ function filterItems(arr, tsField, startMs, endMs) {
 function setFilter(tabId, filter) {
   filterState[tabId].active = filter;
   if (tabId === 'charges')     renderCharges();
-  if (tabId === 'hist')        renderHistory();
   if (tabId === 'auto')        renderAutoTrips();
   if (tabId === 'stats')       loadStats();
 }
@@ -1278,7 +1262,6 @@ function _locationChipsHTML() {
 
 window.setSearchQuery = function(tabId, value) {
   filterState[tabId].search = value;
-  if (tabId === 'hist') renderHistory();
   if (tabId === 'auto') renderAutoTrips();
   // Restaura foco e cursor ao fim (necessário pois innerHTML é recriado)
   const inp = document.getElementById(`filter-search-${tabId}`);
@@ -1299,7 +1282,7 @@ function filterChipsHTML(tabId) {
   <span class="filter-sep">até</span>
   <input type="date" id="filter-${tabId}-to" value="${f.customTo}" onchange="setFilterDates('${tabId}')">
 </div>` : '';
-  const search = (tabId === 'hist' || tabId === 'auto') ? `
+  const search = (tabId === 'auto') ? `
 <div class="filter-search">
   <span class="filter-search-icon">🔍</span>
   <input type="search" id="filter-search-${tabId}" class="filter-search-input"
@@ -1399,7 +1382,7 @@ function renderDash() {
   if (b12ValEl) b12ValEl.style.color = b12Color;
 
   // SOC
-  const soc = s.soc_pct || s.trip_a?.soc_current || 0;
+  const soc = s.soc_pct || 0;
   setText('d-soc', pct(soc));
   const socBar = document.getElementById('d-soc-bar');
   if (socBar) socBar.style.width = Math.max(0, Math.min(100, soc)) + '%';
@@ -1414,23 +1397,18 @@ function renderDash() {
   const KML_FALLBACK    = 12;   // 12 km/L
 
   const rollingDist = s.rolling?.distance_km || 0;
-  const tripaDist   = s.trip_a?.distance_km  || 0;
 
-  // Média elétrica — Trip A como base; rolling como refinamento só se
-  // > 10 km E valor realista para modo EV puro (>= floor)
-  const tripAKwh100   = tripaDist  > 10 && (s.trip_a?.kwh_per_100km  || 0) >= EV_KWH_FLOOR
-                        ? s.trip_a.kwh_per_100km  : null;
+  // Média elétrica — rolling window. Só usa se ≥10 km e consumo realista
+  // (acima do floor — evita inflar com regen + gerador térmico).
   const rollingKwh100 = rollingDist > 10 && (s.rolling?.kwh_per_100km || 0) >= EV_KWH_FLOOR
                         ? s.rolling.kwh_per_100km : null;
-  const avgKwh100 = rollingKwh100 ?? tripAKwh100 ?? EV_KWH_FALLBACK;
+  const avgKwh100 = rollingKwh100 ?? EV_KWH_FALLBACK;
 
-  // Média térmica — só usa se queimou ≥ 1L de combustível; evita km/L
-  // inflado de viagens quase totalmente elétricas (ex: 15 km e 0,05L → 300 km/L)
-  const tripAKml   = (s.trip_a?.fuel_l  || 0) > 1 && (s.trip_a?.km_per_l  || 0) > 2
-                     ? s.trip_a.km_per_l  : null;
+  // Média térmica — só usa se queimou ≥ 1L (evita km/L inflado em viagens
+  // quase totalmente elétricas).
   const rollingKml = (s.rolling?.fuel_l || 0) > 1 && (s.rolling?.km_per_l || 0) > 2
                      ? s.rolling.km_per_l : null;
-  const avgKmL = rollingKml ?? tripAKml ?? KML_FALLBACK;
+  const avgKmL = rollingKml ?? KML_FALLBACK;
 
   const usableKwh  = Math.max(0, (soc - EV_MIN_SOC) / 100 * BATT_KWH);
   let evKmCalc   = Math.round(usableKwh / (avgKwh100 / 100));
@@ -1467,10 +1445,9 @@ function renderDash() {
     }
   }
 
-  // Combustível (tank 51L)
-  const TANK_CAP = 51;
-  const tankNow = s.trip_a?.tank_now_l > 0 ? s.trip_a.tank_now_l
-                : s.trip_b?.tank_now_l > 0 ? s.trip_b.tank_now_l : 0;
+  // Combustível (tank 55L — H6 PHEV) — fuel_l vem direto da GWM Brasil em litros
+  const TANK_CAP = 55;
+  const tankNow = s.fuel_l > 0 ? +s.fuel_l : 0;
   const fuelPct = tankNow > 0 ? Math.min(100, (tankNow / TANK_CAP) * 100) : 0;
   setText('d-fuel', tankNow > 0 ? f1(tankNow) + ' L  (' + fuelPct.toFixed(0) + '%)' : '--');
   const fuelBar = document.getElementById('d-fuel-bar');
@@ -2448,157 +2425,6 @@ function setLogsTypeFilter(type) {
 function setLogsDateFilter(filter) {
   filterState.logs.active = filter;
   renderLogs();
-}
-
-// ── Histórico ─────────────────────────────────────────────────────────────────
-function loadHistory() {
-  const list = document.getElementById('hist-list');
-  if (cachedTrips !== null || cachedAutoTrips !== null) {
-    renderHistory();                      // cache IndexedDB → renderiza imediatamente
-  } else {
-    list.innerHTML = '<div class="empty">Carregando...</div>';
-  }
-  syncAllCache({ silent: false }).then(() => {
-    renderHistory();
-    syncRenameStatus();
-  }).catch(() => {
-    if (!cachedTrips) list.innerHTML = filterChipsHTML('hist') + '<div class="empty">Erro ao carregar.</div>';
-  });
-}
-
-function renderHistory() {
-  const list = document.getElementById('hist-list');
-  if (!list) return;
-  const [filterStart, filterEnd] = getFilterRange('hist');
-  const isFiltered = filterState.hist.active !== 'all';
-
-  let trips;
-  if (!isFiltered) {
-    // Sem filtro: mostra trips manuais (Trip A/B salvos ao Zerar) em ordem cronológica
-    trips = filterItems(cachedTrips || [], 'timestamp', filterStart, filterEnd);
-  } else {
-    // Com filtro: usa auto-trips (criados a cada P→D/R, muito mais granulares)
-    // Os campos são camelCase vindos do Android: distKm, fuelL, netKwh, timeSec
-    trips = (cachedAutoTrips || []).filter(t => {
-      const ms = t.startMs || 0;
-      return ms >= filterStart && ms <= filterEnd;
-    }).map(t => ({
-      // Normaliza para o formato esperado pelo card de renderização
-      name:            t.name || '',
-      label:           'Auto',
-      timestamp:       t.startMs,
-      distance_km:     t.distKm   || 0,
-      fuel_l:          t.fuelL    || 0,
-      kwh_per_100km:   t.distKm > 0.1 ? (t.netKwh / t.distKm * 100) : 0,
-      km_per_l:        t.fuelL   > 0.001 ? (t.distKm / t.fuelL) : 0,
-      net_kwh:         t.netKwh  || 0,
-      regen_kwh:       t.regenKwh || 0,
-      time_sec:        t.timeSec  || 0,
-      avg_speed_kmh:   t.timeSec > 0 ? (t.distKm / (t.timeSec / 3600)) : 0,
-      total_cost_brl:  0,
-    }));
-  }
-
-  // Filtro de busca por nome
-  const histQ = (filterState.hist.search || '').trim().toLowerCase();
-  if (histQ) {
-    trips = trips.filter(t => {
-      const name = (t.name || t.label || '').toLowerCase();
-      return name.includes(histQ);
-    });
-  }
-
-  let html = filterChipsHTML('hist');
-  if (!trips.length) {
-    const hint = histQ
-      ? `<div class="empty">Nenhuma viagem com "${filterState.hist.search}".</div>`
-      : isFiltered
-        ? '<div class="empty">Nenhuma viagem automática no período.<br><small style="color:#5B7394">Auto-trips são criados a cada vez que o carro é colocado em marcha.</small></div>'
-        : '<div class="empty">Nenhuma viagem no período.</div>';
-    list.innerHTML = html + hint;
-    return;
-  }
-
-  const totDist   = trips.reduce((s,t) => s + (t.distance_km    || 0), 0);
-  const totFuel   = trips.reduce((s,t) => s + (t.fuel_l         || 0), 0);
-  const totCost   = trips.reduce((s,t) => s + (t.total_cost_brl || 0), 0);
-  const totNetKwh = trips.reduce((s,t) => {
-    const d = t.distance_km||0, k = t.kwh_per_100km||0;
-    return s + (k > 0 && d > 0 ? k * d / 100 : 0);
-  }, 0);
-  const avgKwh100     = totDist > 0.1   ? totNetKwh / totDist * 100 : 0;
-  const avgKml        = totFuel > 0.001 ? totDist   / totFuel       : 0;
-  const avgCostPerKm  = totCost > 0 && totDist > 0.1 ? totCost / totDist : 0;
-
-  html += `<div class="charge-summary-card" style="border-color:rgba(77,187,255,.2)">
-  <div class="card-title">Resumo — ${trips.length} viagem${trips.length !== 1 ? 'ns' : ''}</div>
-  <div class="metrics-row">
-    <div class="metric"><div class="metric-value blue sm">${f1(totDist)} km</div><div class="metric-label">distância</div></div>
-    <div class="metric"><div class="metric-value green sm">${avgKwh100 > 0 ? f1(avgKwh100) : '--'}</div><div class="metric-label">kWh/100km</div></div>
-    <div class="metric"><div class="metric-value green sm">${avgKml > 0 ? f1(avgKml) : '--'}</div><div class="metric-label">km/L</div></div>
-  </div>
-  <div class="metrics-row" style="margin-top:4px">
-    <div class="metric"><div class="metric-value orange sm">${f2(totFuel)} L</div><div class="metric-label">combustível</div></div>
-    <div class="metric"><div class="metric-value teal sm">${totNetKwh > 0 ? f2(totNetKwh) + ' kWh' : '--'}</div><div class="metric-label">bat. consumida</div></div>
-    <div class="metric"><div class="metric-value yellow sm">${totCost > 0 ? 'R$ ' + f2(totCost) : '--'}</div><div class="metric-label">custo</div></div>
-    ${avgCostPerKm > 0 ? `<div class="metric"><div class="metric-value yellow sm">${f3(avgCostPerKm)}</div><div class="metric-label">R$/km</div></div>` : ''}
-  </div>
-</div>`;
-
-  html += trips.map(t => {
-    const tripId   = t.timestamp || t.tripId || '';
-    const tripType = t.label === 'Auto' ? 'auto' : 'manual';
-    // Usa nome pendente do renameTracking como prioridade — evita que syncAllCache
-    // com dados do servidor (nome ainda antigo) apague o badge ⏳
-    const rnTrack     = renameTracking[String(tripId)];
-    const displayName = (rnTrack?.name) || t.name || '';
-    const fallbackName = t.label || 'Trip';
-    const ov       = _tripCostOverride(String(tripId));
-    const dispCost = ov ? ov.cost : (t.total_cost_brl || 0);
-    const fuelLVal = t.fuel_l || 0;
-    const netKwhVal= t.net_kwh || (t.kwh_per_100km > 0 && t.distance_km > 0 ? t.kwh_per_100km * t.distance_km / 100 : 0);
-    const costBadge = `<span id="cost-badge-${tripId}" class="trip-cost"${dispCost <= 0 ? ' style="display:none"' : ov ? ' style="border-bottom:1px dashed rgba(251,191,36,.5)"' : ''}>${dispCost > 0 ? 'R$ ' + f2(dispCost) : ''}</span>`;
-    const tsDisplay = typeof t.timestamp === 'number' ? fmtDate(new Date(t.timestamp).toISOString()) : fmtDate(t.timestamp);
-    const rnStatus    = getRenameStatus(String(tripId));
-    const statusBadge = rnStatus === 'pending'   ? '<span class="rename-status-pending" title="Aguardando confirmação do carro">⏳</span>'
-                      : rnStatus === 'confirmed'  ? '<span class="rename-status-ok" title="Confirmado pelo carro">✓</span>'
-                      : '';
-    return `<div class="trip-item" id="trip-card-${tripId}">
-  <div class="trip-header">
-    <div style="flex:1;min-width:0">
-      <div class="trip-name-row">
-        ${displayName ? `<span class="trip-name">${displayName}</span>${statusBadge}` : ''}
-        <button class="rename-btn" onclick="startRenameTrip('${tripId}','${tripType}')" title="${displayName ? 'Renomear' : 'Nomear'}">✏️</button>
-        <button class="rename-btn" onclick="deleteTrip('${tripId}','${tripType}')" title="Apagar viagem" style="opacity:.35">🗑</button>
-      </div>
-      <div class="trip-date">${tsDisplay}</div>
-    </div>
-    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:3px">
-      ${costBadge}
-      <button class="cost-edit-btn" onclick="toggleCostEdit('${tripId}')" title="Recalcular custo">💰</button>
-    </div>
-  </div>
-  <div id="cost-edit-${tripId}" class="cost-edit-form" style="display:none">
-    <input class="cost-gas-input" type="number" step="0.01" min="0" placeholder="R$/L gasolina"${ov?.gas > 0 ? ` value="${ov.gas}"` : ''}>
-    <input class="cost-kwh-input" type="number" step="0.01" min="0" placeholder="R$/kWh energia"${ov?.kwh > 0 ? ` value="${ov.kwh}"` : ''}>
-    <button class="cost-apply-btn" onclick="applyTripCost('${tripId}',${fuelLVal},${netKwhVal.toFixed(3)})">Recalcular</button>
-  </div>
-  <div class="trip-metrics">
-    <div class="trip-metric"><div class="trip-metric-val blue">${f1(t.distance_km)} km</div><div class="trip-metric-lbl">dist.</div></div>
-    <div class="trip-metric"><div class="trip-metric-val green">${t.kwh_per_100km > 0 ? f1(t.kwh_per_100km) : '--'}</div><div class="trip-metric-lbl">kWh/100km</div></div>
-    <div class="trip-metric"><div class="trip-metric-val" style="color:var(--muted)">${(t.avg_speed_kmh || 0) > 0 ? f1(t.avg_speed_kmh) + ' km/h' : '--'}</div><div class="trip-metric-lbl">vel. méd.</div></div>
-    <div class="trip-metric"><div class="trip-metric-val" style="color:#5B7394">${fmtTripTime(t.time_sec)}</div><div class="trip-metric-lbl">duração</div></div>
-  </div>
-  <div class="trip-metrics trip-metrics-row2">
-    <div class="trip-metric"><div class="trip-metric-val teal">${(t.net_kwh || 0) > 0 ? f2(t.net_kwh) + ' kWh' : '--'}</div><div class="trip-metric-lbl">kWh liq.</div></div>
-    <div class="trip-metric"><div class="trip-metric-val orange">${t.fuel_l > 0 ? f2(t.fuel_l) + ' L' : '--'}</div><div class="trip-metric-lbl">combust.</div></div>
-    <div class="trip-metric"><div class="trip-metric-val green">${t.km_per_l > 0 ? f1(t.km_per_l) : '--'}</div><div class="trip-metric-lbl">km/L</div></div>
-    ${dispCost > 0 && (t.distance_km || 0) > 0.1 ? `<div class="trip-metric"><div class="trip-metric-val yellow">${f3(dispCost / t.distance_km)}</div><div class="trip-metric-lbl">R$/km</div></div>` : ''}
-  </div>
-</div>`;
-  }).join('');
-
-  list.innerHTML = html;
 }
 
 // ── Auto-Trips ────────────────────────────────────────────────────────────────
@@ -4452,11 +4278,11 @@ async function adminClearSnapshots() {
 async function adminRedownloadCache() {
   if (!confirm('Apagar cache local e baixar todos os dados do servidor?\nIsso pode demorar alguns segundos.')) return;
   _cacheSetStatus('⏳ Baixando...', null);
-  cachedTrips = null; cachedAutoTrips = null; cachedCharges = null;
+  cachedAutoTrips = null; cachedCharges = null;
   await _idbClearAll();
   const t = await syncAllCache({ silent: false });
-  renderHistory(); renderAutoTrips(); renderCharges();
-  _cacheSetStatus('✓ ' + t.trips + ' trips · ' + t.auto + ' auto · ' + t.charges + ' rec baixados', true);
+  renderAutoTrips(); renderCharges();
+  _cacheSetStatus('✓ ' + t.auto + ' viagens · ' + t.charges + ' recargas baixados', true);
 }
 
 // ── Exportar dados locais (IndexedDB → JSON download) ─────────────────────────
@@ -4616,10 +4442,10 @@ async function adminRestoreServer(input) {
     if (r.ok) {
       // Força re-sync do cache local para refletir os dados restaurados
       await _idbClearAll();
-      cachedTrips = null; cachedAutoTrips = null; cachedCharges = null;
+      cachedAutoTrips = null; cachedCharges = null;
       await syncAllCache({ silent: true });
       _backupSetStatus(
-        `✓ Restore concluído — ${data.trips} trips · ${data.autotrips} auto-trips · ${data.charges} recargas`,
+        `✓ Restore concluído — ${data.autotrips} viagens · ${data.charges} recargas`,
         true
       );
     } else {
@@ -5446,17 +5272,11 @@ window.deleteTrip = async function(tripId, type) {
       showToast('✗ Erro ' + r.status + ' ao apagar viagem');
       return;
     }
-    // Remove do cache em memória
-    if (type === 'auto') {
-      if (cachedAutoTrips) cachedAutoTrips = cachedAutoTrips.filter(t => String(t.tripId) !== String(tripId) && String(t.startMs) !== String(tripId));
-    } else {
-      if (cachedTrips) cachedTrips = cachedTrips.filter(t => String(t.timestamp) !== String(tripId));
-    }
+    // Remove do cache em memória (só auto agora — trip A/B descontinuado)
+    if (cachedAutoTrips) cachedAutoTrips = cachedAutoTrips.filter(t => String(t.tripId) !== String(tripId) && String(t.startMs) !== String(tripId));
     // Remove do IndexedDB
     _openIDB().then(db => {
-      const store = type === 'auto' ? 'autotrips' : 'trips';
-      const key   = type === 'auto' ? String(tripId) : tripId;
-      db.transaction(store, 'readwrite').objectStore(store).delete(key);
+      db.transaction('autotrips', 'readwrite').objectStore('autotrips').delete(String(tripId));
     }).catch(() => {});
     // Remove card do DOM
     document.getElementById('trip-card-' + tripId)?.remove();
@@ -5468,20 +5288,11 @@ window.deleteTrip = async function(tripId, type) {
 };
 
 window.startRenameTrip = function(tripId, type) {
-  // Lê nome atual do cache (evita problemas de escape em onclick)
+  // Trip A/B descontinuado — só auto agora
   let currentName = '';
   let dateStr = '';
-  if (type === 'auto') {
-    const t = (cachedAutoTrips || []).find(t => t.tripId === String(tripId));
-    if (t) { currentName = t.name || ''; dateStr = fmtDate(t.startMs); }
-  } else {
-    const t = (cachedTrips || []).find(t => String(t.timestamp) === String(tripId));
-    if (t) {
-      currentName = t.name || '';
-      dateStr = typeof t.timestamp === 'number'
-        ? fmtDate(new Date(t.timestamp).toISOString()) : fmtDate(t.timestamp);
-    }
-  }
+  const t = (cachedAutoTrips || []).find(t => t.tripId === String(tripId));
+  if (t) { currentName = t.name || ''; dateStr = fmtDate(t.startMs); }
   _renameState = { tripId: String(tripId), type, currentName };
   const modal = document.getElementById('d-rename-modal');
   const titleEl = document.getElementById('d-rename-modal-title');
@@ -5514,19 +5325,13 @@ window.doRenameConfirm = async function() {
       body: JSON.stringify({ tripId, type, name: newName }),
     });
     const data = await r.json();
-    // Atualiza cache local
-    if (type === 'auto') {
-      const t = (cachedAutoTrips || []).find(t => t.tripId === tripId);
-      if (t) t.name = newName;
-    } else {
-      const t = (cachedTrips || []).find(t => String(t.timestamp) === tripId);
-      if (t) t.name = newName;
-    }
+    // Atualiza cache local (auto-trips only)
+    const t = (cachedAutoTrips || []).find(t => t.tripId === tripId);
+    if (t) t.name = newName;
     // Marca como pendente de confirmação do carro
     renameTracking[tripId] = { pendingId: data.id || '', name: newName, confirmed: false };
     _saveRenameTracking();
-    // Re-renderiza para mostrar ⏳
-    if (type === 'auto') renderAutoTrips(); else renderHistory();
+    renderAutoTrips();
     showToast('⏳ Nome salvo — aguardando o carro confirmar');
   } catch (_) {
     showToast('✗ Erro ao salvar nome');

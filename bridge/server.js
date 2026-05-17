@@ -39,7 +39,7 @@ const _plainToken   = process.env.BRIDGE_TOKEN      || '';
 let BRIDGE_TOKEN_HASH = process.env.BRIDGE_TOKEN_HASH
   || (_plainToken ? sha256hex(_plainToken) : '');
 
-const TRIPS_FILE      = path.join(__dirname, 'trips.json');
+// TRIPS_FILE removido — Trip A/B descontinuados.
 const CHARGES_FILE    = path.join(__dirname, 'charges.json');
 const STATE_FILE      = path.join(__dirname, 'state.json');
 const AUTOTRIPS_DIR   = path.join(__dirname, 'autotrips');
@@ -424,18 +424,6 @@ const state = {
   tyre_temp_rl:     0,
   tyre_temp_rr:     0,
 
-  trip_a: {
-    distance_km:   0, time_sec: '--', kwh_per_100km: 0, km_per_l: 0,
-    avg_speed_kmh: 0, fuel_l: 0, energy_kwh: 0, regen_kwh: 0,
-    soc_start:     0, soc_current: 0, tank_start_l: 0, tank_now_l: 0,
-    cost_brl:      0, cost_per_km: 0,
-  },
-  trip_b: {
-    distance_km:   0, time_sec: '--', kwh_per_100km: 0, km_per_l: 0,
-    avg_speed_kmh: 0, fuel_l: 0, energy_kwh: 0, regen_kwh: 0,
-    soc_start:     0, soc_current: 0, tank_start_l: 0, tank_now_l: 0,
-    cost_brl:      0, cost_per_km: 0,
-  },
   rolling: {
     kwh_per_100km: 0, km_per_l: 0, distance_km: 0, fuel_l: 0, cost_brl: 0,
   },
@@ -486,49 +474,6 @@ function scheduleStateSave() {
   stateSaveTimer = setTimeout(() => {
     try { fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2)); } catch (_) {}
   }, 2000); // debounce de 2s — não grava a cada mensagem MQTT individual
-}
-
-// ── Histórico de trips — persistência JSON ────────────────────────────────────
-// O histórico vem do tópico MQTT retained `trips/history` (JSON completo).
-// Guardamos em trips.json para não perder entre reinicios do bridge.
-
-/** @type {Map<string, object>}  timestamp → trip object */
-const tripsMap = new Map();
-
-// Carrega do disco na inicialização
-if (fs.existsSync(TRIPS_FILE)) {
-  try {
-    const saved = JSON.parse(fs.readFileSync(TRIPS_FILE, 'utf8'));
-    for (const t of (saved.trips || [])) {
-      if (t.timestamp) tripsMap.set(t.timestamp, t);
-    }
-    console.log(`✓ Histórico local: ${tripsMap.size} trips`);
-  } catch (e) {
-    console.error('Aviso: não foi possível ler trips.json:', e.message);
-  }
-}
-
-let saveTimer = null;
-function scheduleTripsFlush() {
-  if (saveTimer) clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => {
-    const trips = [...tripsMap.values()].sort((a, b) =>
-      (b.timestamp || '').localeCompare(a.timestamp || ''));
-    fs.writeFileSync(TRIPS_FILE, JSON.stringify({ trips }, null, 2));
-  }, 500);
-}
-
-function upsertTrips(trips) {
-  for (const t of trips) {
-    if (t.timestamp) tripsMap.set(t.timestamp, t);
-  }
-  scheduleTripsFlush();
-}
-
-function getTrips(limit = 200) {
-  const all = [...tripsMap.values()].sort((a, b) =>
-    (b.timestamp || '').localeCompare(a.timestamp || ''));
-  return all.slice(0, limit);
 }
 
 // ── Histórico de recargas — persistência JSON ─────────────────────────────────
@@ -1134,15 +1079,13 @@ app.use('/api', (req, res, next) => {
 
 app.get('/api/state',  (_req, res) => res.json(state));
 app.get('/api/counts', (_req, res) => res.json({
-  trips:    tripsMap.size,
+  trips:     0,                  // Trip A/B descontinuados
   autotrips: autoTripsArr.length,
-  charges:  chargesArr.length,
+  charges:   chargesArr.length,
 }));
-app.get('/api/trips', (req, res) => {
-  const since = req.query.since || '';
-  const all   = getTrips(500);
-  res.json(since ? all.filter(t => (t.timestamp || '') > since) : all);
-});
+// /api/trips removido — Trip A/B descontinuados. Retorna 410 (Gone).
+app.get('/api/trips', (_req, res) => res.status(410).json({ error: 'Trip A/B descontinuados' }));
+app.delete('/api/trips/:tripId', (_req, res) => res.status(410).json({ error: 'Trip A/B descontinuados' }));
 // Aplica edições manuais (manual_overrides) sobre os valores base do Android.
 // Recalcula avg_power_kw quando energy_kwh ou duration_sec foram editados.
 // Retorna um objeto novo (não muta o original em chargesArr).
@@ -1802,8 +1745,8 @@ app.get('/api/backup', (req, res) => {
     const backup = {
       version:           3,
       exportedAt:        new Date().toISOString(),
-      // Histórico
-      trips:             [...tripsMap.values()],
+      // Histórico (trips manuais A/B descontinuados — campo legado pra compat v2)
+      trips:             [],
       autotrips:         autotripsWithSamples,
       charges:           chargesArr,
       refuels,                                       // abastecimentos
@@ -1814,8 +1757,7 @@ app.get('/api/backup', (req, res) => {
       maintenance,                                   // intervalos + histórico + alerts
       knownPlaces,                                   // locais conhecidos
       chargeLocations,                               // locais antigos (compat)
-      // Estado deletado — sem isso, restore re-aceitaria itens já apagados
-      deletedIds,
+      deletedIds,                                    // tombstones de deleção
     };
 
     const filename = `ecotrip-backup-${new Date().toISOString().slice(0, 10)}.json`;
@@ -1844,9 +1786,8 @@ app.post('/api/restore', (req, res) => {
     }
 
     // 1. Trips manuais
-    tripsMap.clear();
-    bk.trips.forEach(t => { if (t.timestamp) tripsMap.set(t.timestamp, t); });
-    fs.writeFileSync(TRIPS_FILE, JSON.stringify({ trips: [...tripsMap.values()] }, null, 2));
+    // Trip A/B descontinuados — backup v2 podia conter trips manuais, mas
+    // não são mais restaurados. Ignora bk.trips silenciosamente.
 
     // 2. Auto-trips (com telemetria completa)
     const existingFiles = fs.readdirSync(AUTOTRIPS_DIR).filter(f => f.endsWith('.json'));
@@ -1927,7 +1868,6 @@ app.post('/api/restore', (req, res) => {
     recomputeBatteryAvgPrice();
 
     const summary = {
-      trips:         tripsMap.size,
       autotrips:     autoTripsArr.length,
       charges:       chargesArr.length,
       refuels:       refuels.length,
@@ -2000,11 +1940,7 @@ app.post('/api/admin/sync', (req, res) => {
 app.post('/api/admin/clear-history', (req, res) => {
   if (!adminCheckToken(req, res)) return;
   try {
-    // 1. Trips manuais
-    tripsMap.clear();
-    fs.writeFileSync(TRIPS_FILE, JSON.stringify({ trips: [] }, null, 2));
-
-    // 2. Recargas
+    // 1. Recargas
     chargesArr.length = 0;
     fs.writeFileSync(CHARGES_FILE, JSON.stringify({ charges: [] }, null, 2));
 
@@ -2246,15 +2182,7 @@ app.post('/api/autotrips/merge', (req, res) => {
   }
 });
 
-app.delete('/api/trips/:tripId', (req, res) => {
-  const id = decodeURIComponent(req.params.tripId);
-  console.log(`[delete] Trip lookup id="${id}" found=${tripsMap.has(id)}`);
-  if (!tripsMap.has(id)) return res.status(404).json({ error: 'not found', id });
-  tripsMap.delete(id);
-  fs.writeFileSync(TRIPS_FILE, JSON.stringify({ trips: [...tripsMap.values()] }, null, 2));
-  console.log(`[delete] Trip manual ${id} removido`);
-  res.json({ ok: true });
-});
+// DELETE /api/trips/:id retorna 410 (Gone) — Trip A/B descontinuados.
 
 // ── Renomear trips (PWA → fila → Android) ─────────────────────────────────────
 // Carrega fila persistida
@@ -2310,11 +2238,8 @@ app.post('/api/rename', (req, res) => {
         fs.writeFileSync(filePath, JSON.stringify(data));
       } catch (_) {}
     }
-  } else if (type === 'manual') {
-    // Manual trip: key = timestamp string
-    const t = tripsMap.get(String(tripId));
-    if (t) { t.name = trimmed; scheduleTripsFlush(); }
   }
+  // type 'manual' (Trip A/B) descontinuado — ignora rename silenciosamente
   // trip_finish / trip_name: sem dados locais para atualizar — o carro aplica ao ligar
 
   // Enfileira para o Android consumir
@@ -3359,45 +3284,12 @@ function applyMqttMessage(key, value, isRetained = false) {
       state.soc_pct = num(value);
       break;
 
-    // SOC (publicado com retain em trip_a/soc_current pelo Android)
-    case 'trip_a/soc_current':
-      state.trip_a.soc_current = num(value);
-      if (!haSocActive) state.soc_pct = num(value);   // fallback enquanto HA não configurado
+    // Trip A/B foram descontinuados — bridge ignora os tópicos legados.
+    // SOC vem agora exclusivamente do HA (gwmbrasil_.../soc_pct) ou do
+    // próprio app via gwmbrasil; sem fallback do trip_a.
+    case 'trip_a/soc_current': case 'trip_b/soc_current':
+      if (!haSocActive) state.soc_pct = num(value);   // legacy fallback até HA estar online
       break;
-
-    // Trip A
-    case 'trip_a/distance_km':   state.trip_a.distance_km   = num(value); break;
-    case 'trip_a/time_sec':      state.trip_a.time_sec       = value; break;
-    case 'trip_a/kwh_per_100km': state.trip_a.kwh_per_100km  = num(value); break;
-    case 'trip_a/km_per_l':      state.trip_a.km_per_l       = num(value); break;
-    case 'trip_a/avg_speed_kmh': state.trip_a.avg_speed_kmh  = num(value); break;
-    case 'trip_a/fuel_l':        state.trip_a.fuel_l         = num(value); break;
-    case 'trip_a/energy_kwh':    state.trip_a.energy_kwh     = num(value); break;
-    case 'trip_a/regen_kwh':     state.trip_a.regen_kwh      = num(value); break;
-    case 'trip_a/soc_start':     state.trip_a.soc_start      = num(value); break;
-    case 'trip_a/tank_start_l':  state.trip_a.tank_start_l   = num(value); break;
-    case 'trip_a/tank_now_l':    state.trip_a.tank_now_l     = num(value); break;
-    case 'trip_a/cost_brl':      state.trip_a.cost_brl       = num(value); break;
-    case 'trip_a/cost_per_km':   state.trip_a.cost_per_km    = num(value); break;
-
-    // Trip B
-    case 'trip_b/soc_current':
-      state.trip_b.soc_current = num(value);
-      if (!haSocActive) state.soc_pct = num(value);   // fallback enquanto HA não configurado
-      break;
-    case 'trip_b/distance_km':   state.trip_b.distance_km   = num(value); break;
-    case 'trip_b/time_sec':      state.trip_b.time_sec       = value; break;
-    case 'trip_b/kwh_per_100km': state.trip_b.kwh_per_100km  = num(value); break;
-    case 'trip_b/km_per_l':      state.trip_b.km_per_l       = num(value); break;
-    case 'trip_b/avg_speed_kmh': state.trip_b.avg_speed_kmh  = num(value); break;
-    case 'trip_b/fuel_l':        state.trip_b.fuel_l         = num(value); break;
-    case 'trip_b/energy_kwh':    state.trip_b.energy_kwh     = num(value); break;
-    case 'trip_b/regen_kwh':     state.trip_b.regen_kwh      = num(value); break;
-    case 'trip_b/soc_start':     state.trip_b.soc_start      = num(value); break;
-    case 'trip_b/tank_start_l':  state.trip_b.tank_start_l   = num(value); break;
-    case 'trip_b/tank_now_l':    state.trip_b.tank_now_l     = num(value); break;
-    case 'trip_b/cost_brl':      state.trip_b.cost_brl       = num(value); break;
-    case 'trip_b/cost_per_km':   state.trip_b.cost_per_km    = num(value); break;
 
     // Rolling
     case 'rolling/kwh_per_100km': state.rolling.kwh_per_100km = num(value); break;
@@ -3471,26 +3363,8 @@ function applyMqttMessage(key, value, isRetained = false) {
       break;
     }
 
-    // Histórico de trips (tópico retained com JSON completo)
-    case 'trips/history': {
-      try {
-        const parsed = JSON.parse(value);
-        const all    = parsed.trips || [];
-        // Filtra trips anteriores ao último "Limpar histórico"
-        const cutMs  = state.trips_cleared_at || 0;
-        const trips  = cutMs > 0
-          ? all.filter(t => { try { return new Date(t.timestamp).getTime() > cutMs; } catch { return false; } })
-          : all;
-        if (trips.length > 0) {
-          upsertTrips(trips);
-          const skipped = all.length - trips.length;
-          console.log(`✓ Histórico MQTT: ${trips.length} trips (total local: ${tripsMap.size})${skipped > 0 ? ` (${skipped} anteriores ao clear ignoradas)` : ''}`);
-        }
-      } catch (e) {
-        console.error('Erro ao parsear trips/history:', e.message);
-      }
-      break;
-    }
+    // Histórico de Trip A/B descontinuado — ignora msg do APK
+    case 'trips/history': break;
 
     default: break;
   }
