@@ -51,6 +51,7 @@ const CHARGE_LOCS_FILE    = path.join(__dirname, 'charge_locations.json');
 const KNOWN_PLACES_FILE   = path.join(__dirname, 'known_places.json');
 const MAINTENANCE_FILE    = path.join(__dirname, 'maintenance.json');
 const REFUELS_FILE        = path.join(__dirname, 'refuels.json');
+const TELEMETRY_LOG_FILE  = path.join(__dirname, 'telemetry_history.json');
 
 // Capacidades do Haval H6 PHEV (uso pra estimar kWh atual a partir do SOC%)
 const BATTERY_CAPACITY_KWH = 34;
@@ -141,6 +142,7 @@ const NOTIF_DEFAULTS = {
   geofence_departure:false,  // 🚗 Saiu de local conhecido
   maintenance_soon:  true,   // 🔧 Manutenção se aproximando (dentro do alert_km)
   maintenance_overdue: true, // ⚠️ Manutenção atrasada
+  anomaly_detected:  true,   // ⚠️ Anomalia detectada na telemetria
 };
 let notifPrefs = { ...NOTIF_DEFAULTS };
 try {
@@ -808,6 +810,123 @@ function checkMaintenanceAlerts() {
 
 // Verificação diária pros alertas por tempo (km já dispara em cada update do odo)
 setInterval(checkMaintenanceAlerts, 60 * 60 * 1000);  // 1h
+
+// ── Detecção de anomalia preventiva ────────────────────────────────────────
+// Mantém histórico de snapshots diários (telemetry_history.json) e dispara
+// push notif quando uma métrica se desvia significativamente da média móvel
+// dos últimos N dias. Não substitui sensores de defeito do carro — é um
+// "olha esquisito" baseado em variações graduais.
+let telemetryHistory = [];
+try {
+  if (fs.existsSync(TELEMETRY_LOG_FILE)) {
+    telemetryHistory = JSON.parse(fs.readFileSync(TELEMETRY_LOG_FILE, 'utf8')) || [];
+  }
+  console.log(`✓ Snapshots de telemetria: ${telemetryHistory.length}`);
+} catch (e) { console.error('Aviso telemetry_history:', e.message); }
+
+function _todayKey() {
+  return new Date().toISOString().slice(0, 10);  // YYYY-MM-DD
+}
+
+function captureTelemetrySnapshot() {
+  const today = _todayKey();
+  // Substitui o snapshot de hoje se já existe (atualiza valores mais recentes)
+  const idx = telemetryHistory.findIndex(s => s.date === today);
+  const snap = {
+    date: today,
+    ts: Date.now(),
+    tyre_fl: +state.tyre_pressure_fl || 0,
+    tyre_fr: +state.tyre_pressure_fr || 0,
+    tyre_rl: +state.tyre_pressure_rl || 0,
+    tyre_rr: +state.tyre_pressure_rr || 0,
+    batt_12v: +state.batt_12v_pct || 0,
+    autonomy_ice: +state.autonomy_ice_km || 0,
+    autonomy_ev:  +state.autonomy_ev_km  || 0,
+    fuel_l: +state.fuel_l || 0,
+    soc_pct: +state.soc_pct || 0,
+    odometer: +state.odometer_km || 0,
+  };
+  if (idx >= 0) telemetryHistory[idx] = snap;
+  else telemetryHistory.push(snap);
+  // Mantém só os últimos 90 dias
+  if (telemetryHistory.length > 90) telemetryHistory = telemetryHistory.slice(-90);
+  try { fs.writeFileSync(TELEMETRY_LOG_FILE, JSON.stringify(telemetryHistory, null, 2)); } catch (_) {}
+}
+
+// Detecta anomalias comparando o snapshot atual com a média dos últimos 14d.
+// Evita re-alertar todo dia: mantém memória do dia de cada alerta disparado.
+let _anomalyAlerted = {};  // { metric: 'YYYY-MM-DD' }
+function checkAnomalies() {
+  if (telemetryHistory.length < 7) return;  // amostra mínima
+  const today = _todayKey();
+  const last = telemetryHistory[telemetryHistory.length - 1];
+  const window = telemetryHistory.slice(-15, -1);  // últimos 14 dias (excluindo hoje)
+  if (window.length < 5) return;
+  const avg = (key) => {
+    const vals = window.map(s => +s[key] || 0).filter(v => v > 0);
+    return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
+  };
+
+  const issues = [];
+
+  // Pneus: cada um cai mais de 2 PSI da média
+  for (const pos of ['fl', 'fr', 'rl', 'rr']) {
+    const k = `tyre_${pos}`;
+    const a = avg(k), cur = +last[k] || 0;
+    if (a > 0 && cur > 0 && (a - cur) >= 2) {
+      issues.push({
+        metric: `tyre_${pos}_drop`,
+        title: `🚗 Pneu ${pos.toUpperCase()} perdendo pressão`,
+        body: `Atual ${cur.toFixed(1)} PSI · média 14d ${a.toFixed(1)} PSI (−${(a-cur).toFixed(1)})`,
+      });
+    }
+  }
+
+  // Bateria 12V abaixo de 75% e tendência caindo
+  const v12 = avg('batt_12v'), cur12 = +last.batt_12v || 0;
+  if (v12 > 0 && cur12 > 0 && cur12 < 75 && (v12 - cur12) >= 5) {
+    issues.push({
+      metric: 'batt_12v_low',
+      title: '🔋 Bateria 12V baixa',
+      body: `Atual ${cur12}% · média ${v12.toFixed(0)}%. Considere verificar.`,
+    });
+  }
+
+  // Autonomia ICE caindo com tanque similar (pode indicar filtro/injeção)
+  if (last.fuel_l > 5) {
+    const recent = telemetryHistory.slice(-15).filter(s => Math.abs((s.fuel_l || 0) - last.fuel_l) < 3 && (s.autonomy_ice || 0) > 0);
+    if (recent.length >= 5) {
+      const sortedByDate = [...recent].sort((a, b) => a.ts - b.ts);
+      const first3 = sortedByDate.slice(0, 3).map(s => s.autonomy_ice);
+      const last3  = sortedByDate.slice(-3).map(s => s.autonomy_ice);
+      const avgFirst = first3.reduce((a, b) => a + b, 0) / first3.length;
+      const avgLast  = last3.reduce((a, b) => a + b, 0) / last3.length;
+      if (avgFirst > 0 && (avgFirst - avgLast) / avgFirst > 0.10) {
+        issues.push({
+          metric: 'autonomy_ice_drop',
+          title: '⛽ Autonomia (combustão) caindo',
+          body: `Com tanque ~${last.fuel_l.toFixed(0)}L, estimativa caiu de ${avgFirst.toFixed(0)} km pra ${avgLast.toFixed(0)} km.`,
+        });
+      }
+    }
+  }
+
+  // Dispara alertas — evita repetir o mesmo no mesmo dia
+  for (const iss of issues) {
+    if (_anomalyAlerted[iss.metric] === today) continue;
+    _anomalyAlerted[iss.metric] = today;
+    addEvent('anomaly', `${iss.title} — ${iss.body}`);
+    if (notifPrefs.anomaly_detected) sendPush(iss.title, iss.body);
+  }
+}
+
+// Captura snapshot diário + check de anomalia 1×/dia (à meia-noite + boot)
+function _runDailyTelemetry() {
+  captureTelemetrySnapshot();
+  checkAnomalies();
+}
+setTimeout(_runDailyTelemetry, 30 * 1000);                       // 30s após boot
+setInterval(_runDailyTelemetry, 24 * 60 * 60 * 1000);            // 24h
 
 // Computa o status de cada intervalo (próxima manutenção, km restantes, severidade)
 function computeMaintenance() {

@@ -4588,11 +4588,16 @@ async function loadStats() {
   // ── 6. Saúde da bateria (SOH estimado) ───────────────────────────────────
   html += _statsBatterySohHTML(cachedCharges || []);
 
-  // ── 7. Locais de recarga — ranking por eficiência ────────────────────────
+  // ── 7. Heatmap de uso (onde mais andou) ──────────────────────────────────
+  html += _statsHeatmapHTML(trips);
+
+  // ── 8. Locais de recarga — ranking por eficiência ────────────────────────
   html += _statsChargingLocationsHTML(cachedCharges || []);
 
   html += '</div>';
   container.innerHTML = html;
+  // Inicializa heatmap após o DOM ser pintado
+  setTimeout(_initStatsHeatmap, 100);
 }
 
 function _statsCard(title, body) {
@@ -5037,6 +5042,71 @@ function _statsBatterySohHTML(charges) {
       Range observado: ${minC.toFixed(1)} – ${maxC.toFixed(1)} kWh.
     </div>
   `);
+}
+
+// ── Heatmap de uso ─────────────────────────────────────────────────────────
+// Mapa Leaflet com círculos translúcidos em cada ponto de início/fim de
+// viagem. Sobreposição cria efeito visual de "heat" sem precisar de plugin.
+let _statsHeatmapData = null;  // { points: [{lat,lng,w}], ... }
+function _statsHeatmapHTML(trips) {
+  const withGps = trips.filter(t =>
+    t.startLat && t.startLng && t.endLat && t.endLng &&
+    (t.startLat !== 0 || t.startLng !== 0));
+  if (withGps.length < 5) return '';
+
+  // Cada viagem contribui 2 pontos (start + end). Peso = log(distKm) pra
+  // não inflar viagens curtas locais demais.
+  const points = [];
+  for (const t of withGps) {
+    const w = Math.max(0.4, Math.min(2, Math.log10(1 + (t.distKm || 0))));
+    points.push({ lat: t.startLat, lng: t.startLng, w });
+    points.push({ lat: t.endLat,   lng: t.endLng,   w });
+  }
+  _statsHeatmapData = { points };
+
+  return _statsCard(`🗺 Mapa de uso — ${withGps.length} viagens`, `
+    <div style="font-size:11px;color:#64748b;margin-bottom:8px">
+      Pontos quentes mostram onde você mais começa/termina viagens.
+    </div>
+    <div id="stats-heatmap" style="height:300px;border-radius:8px;overflow:hidden;background:#0a0f1c"></div>
+  `);
+}
+
+let _statsHeatmapMap = null;
+function _initStatsHeatmap() {
+  const el = document.getElementById('stats-heatmap');
+  if (!el || !_statsHeatmapData) return;
+  if (_statsHeatmapMap) {
+    _statsHeatmapMap.remove();
+    _statsHeatmapMap = null;
+  }
+  const pts = _statsHeatmapData.points;
+  if (!pts.length) return;
+  // Bounds
+  const lats = pts.map(p => p.lat), lngs = pts.map(p => p.lng);
+  const sw = [Math.min(...lats), Math.min(...lngs)];
+  const ne = [Math.max(...lats), Math.max(...lngs)];
+
+  _statsHeatmapMap = L.map(el, {
+    zoomControl: true,
+    attributionControl: false,
+    scrollWheelZoom: false,
+  });
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    maxZoom: 18,
+  }).addTo(_statsHeatmapMap);
+  _statsHeatmapMap.fitBounds([sw, ne], { padding: [20, 20], maxZoom: 14 });
+
+  // Desenha círculos translúcidos. Sobreposição = mais "quente".
+  for (const p of pts) {
+    L.circle([p.lat, p.lng], {
+      radius: 150 * p.w,
+      color: '#fb923c',
+      fillColor: '#fb923c',
+      fillOpacity: 0.12,
+      weight: 0,
+    }).addTo(_statsHeatmapMap);
+  }
 }
 
 function _statsChargingLocationsHTML(charges) {
