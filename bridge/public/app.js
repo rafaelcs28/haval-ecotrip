@@ -2580,20 +2580,45 @@ function renderAutoTrips() {
     if (totalEqL < 0.001) return null;
     return t.distKm / totalEqL;
   }
-  // Pré-computa as "irmãs" pra cada trip que tem coords + dist + eficiência
+  // Pré-computa as "irmãs" pra cada trip que tem coords + dist + eficiência.
+  // Antes era O(N²) com haversine — em 5k trips eram 25M comparações + trig.
+  // Agora: bucket por start_lat/start_lng arredondado (~110m cada). Pra cada
+  // trip só checa o próprio bucket + 8 vizinhos = O(N·k), k ≈ trips por região.
   const _effIndex = {};
+  const BUCKET_DEG  = 0.001;   // ~110m no equador, similar em latitudes do Brasil
+  const validTrips  = [];
+  const tripKmL     = new Map();
   for (const t of trips) {
-    const myKmL = _tripKmLEq(t);
-    if (myKmL === null || !t.startLat || !t.endLat) continue;
+    const kmL = _tripKmLEq(t);
+    if (kmL === null || !t.startLat || !t.endLat) continue;
+    tripKmL.set(t.tripId, kmL);
+    validTrips.push(t);
+  }
+  const buckets = new Map();
+  const bx = t => Math.floor(t.startLat / BUCKET_DEG);
+  const by = t => Math.floor(t.startLng / BUCKET_DEG);
+  for (const t of validTrips) {
+    const key = bx(t) + ':' + by(t);
+    let arr = buckets.get(key);
+    if (!arr) { arr = []; buckets.set(key, arr); }
+    arr.push(t);
+  }
+  for (const t of validTrips) {
+    const myKmL = tripKmL.get(t.tripId);
+    const tx = bx(t), ty = by(t);
     const siblings = [];
-    for (const o of trips) {
-      if (o.tripId === t.tripId) continue;
-      const oKmL = _tripKmLEq(o);
-      if (oKmL === null || !o.startLat || !o.endLat) continue;
-      if (Math.abs(t.distKm - o.distKm) / t.distKm > 0.10) continue;
-      if (_haversineM(t.startLat, t.startLng, o.startLat, o.startLng) > 200) continue;
-      if (_haversineM(t.endLat,   t.endLng,   o.endLat,   o.endLng)   > 200) continue;
-      siblings.push(oKmL);
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -1; dy <= 1; dy++) {
+        const neighbor = buckets.get((tx + dx) + ':' + (ty + dy));
+        if (!neighbor) continue;
+        for (const o of neighbor) {
+          if (o.tripId === t.tripId) continue;
+          if (Math.abs(t.distKm - o.distKm) / t.distKm > 0.10) continue;
+          if (_haversineM(t.startLat, t.startLng, o.startLat, o.startLng) > 200) continue;
+          if (_haversineM(t.endLat,   t.endLng,   o.endLat,   o.endLng)   > 200) continue;
+          siblings.push(tripKmL.get(o.tripId));
+        }
+      }
     }
     if (siblings.length < 1) continue;
     const avg = siblings.reduce((s, x) => s + x, 0) / siblings.length;

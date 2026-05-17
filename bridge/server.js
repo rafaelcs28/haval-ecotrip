@@ -296,7 +296,11 @@ try {
     try {
       const d = JSON.parse(fs.readFileSync(path.join(AUTOTRIPS_DIR, f), 'utf8'));
       if (d.autoTrip) {
-        const hybrid = _calcHybrid(d.samples || []);
+        // Usa hybrid pré-calculado do JSON; arquivos antigos (sem o campo) ainda
+        // são recalculados na carga — após o primeiro POST/merge, ficam persistidos.
+        const hybrid = (d.hybridTimeSec != null && d.hybridDistKm != null)
+          ? { hybridTimeSec: d.hybridTimeSec, hybridDistKm: d.hybridDistKm }
+          : _calcHybrid(d.samples || []);
         autoTripsArr.push({ tripId: d.tripId, ...d.autoTrip, ...hybrid });
       }
     } catch (_) {}
@@ -2028,7 +2032,8 @@ app.post('/api/autotrips', (req, res) => {
     hybridTimeSec = Math.round(hybridTimeSec);
     hybridDistKm  = parseFloat(hybridDistKm.toFixed(3));
 
-    fs.writeFileSync(filePath, JSON.stringify({ tripId: safeId, autoTrip, samples: finalSamples }));
+    // Persiste hybrid junto — boot não precisa recalcular varrendo todas as samples.
+    fs.writeFileSync(filePath, JSON.stringify({ tripId: safeId, autoTrip, samples: finalSamples, hybridTimeSec, hybridDistKm }));
 
     const record = { tripId: safeId, ...autoTrip, hybridTimeSec, hybridDistKm };
 
@@ -2173,10 +2178,11 @@ app.post('/api/autotrips/merge', (req, res) => {
     hybridTimeSec = Math.round(hybridTimeSec);
     hybridDistKm  = parseFloat(hybridDistKm.toFixed(3));
 
-    // Salva arquivo unificado (ID da viagem mais antiga)
+    // Salva arquivo unificado (ID da viagem mais antiga) — hybrid persistido pra
+    // boot não recalcular.
     fs.writeFileSync(
       path.join(AUTOTRIPS_DIR, `${earlyId}.json`),
-      JSON.stringify({ tripId: earlyId, autoTrip: merged, samples: mergedSamples })
+      JSON.stringify({ tripId: earlyId, autoTrip: merged, samples: mergedSamples, hybridTimeSec, hybridDistKm })
     );
     // Remove arquivo da viagem mais recente
     try { fs.unlinkSync(path.join(AUTOTRIPS_DIR, `${lateId}.json`)); } catch (_) {}
