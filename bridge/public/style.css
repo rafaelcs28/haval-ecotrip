@@ -164,8 +164,8 @@ html, body {
   font-size: 0;
   border: none;
   background: none;
-  padding: 0 2px;
-  min-width: 52px;               /* não encolhe abaixo de 52px quando barra rola */
+  padding: 0 1px;
+  min-width: 40px;               /* 9 abas × 40px = 360px, cabe em qualquer iPhone */
   overflow: hidden;
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
@@ -1810,17 +1810,153 @@ html, body {
   font-weight: 600;
 }
 
-/* ── HVAC gesture: preview durante drag vertical na temperatura ────────── */
-.climate-zone-value.hvac-dragging,
-.climate-zone-value.hvac-pending {
+/* ── HVAC gesture: preview durante drag / pending após release ───────── */
+.hvac-dragging,
+.hvac-pending {
   color: #fbbf24 !important;
   transition: none;
   text-shadow: 0 0 12px rgba(251, 191, 36, 0.55);
+  filter: drop-shadow(0 0 6px rgba(251, 191, 36, 0.45));
 }
-.climate-zone-value.hvac-pending {
+.hvac-pending {
   animation: hvacPendingPulse 1.2s ease-in-out infinite;
 }
 @keyframes hvacPendingPulse {
-  0%, 100% { opacity: 0.6; }
+  0%, 100% { opacity: 0.55; }
   50%      { opacity: 1; }
 }
+
+/* ── Badge de eficiência de viagens (compara vs média do mesmo trecho) ─── */
+.trip-eff-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 7px;
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 700;
+  margin-left: 6px;
+  letter-spacing: 0.2px;
+  vertical-align: middle;
+  white-space: nowrap;
+  cursor: help;
+}
+.trip-eff-badge.better {
+  background: rgba(74, 222, 128, 0.12);
+  color: #4ade80;
+  border: 1px solid rgba(74, 222, 128, 0.28);
+}
+.trip-eff-badge.worse {
+  background: rgba(248, 113, 113, 0.10);
+  color: #f87171;
+  border: 1px solid rgba(248, 113, 113, 0.25);
+}
+.trip-eff-badge.neutral {
+  background: rgba(148, 163, 184, 0.10);
+  color: #94a3b8;
+  border: 1px solid rgba(148, 163, 184, 0.20);
+}
+
+/* ── Eco score badge (0-100 por viagem) ──────────────────────────────────── */
+.trip-eco-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 7px;
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 800;
+  margin-left: 6px;
+  letter-spacing: 0.3px;
+  vertical-align: middle;
+  white-space: nowrap;
+  cursor: help;
+  font-variant-numeric: tabular-nums;
+}
+.trip-eco-badge.eco-excellent {
+  background: rgba(74, 222, 128, 0.16);
+  color: #4ade80;
+  border: 1px solid rgba(74, 222, 128, 0.40);
+  text-shadow: 0 0 6px rgba(74, 222, 128, 0.45);
+}
+.trip-eco-badge.eco-good {
+  background: rgba(132, 204, 22, 0.12);
+  color: #a3e635;
+  border: 1px solid rgba(132, 204, 22, 0.30);
+}
+.trip-eco-badge.eco-ok {
+  background: rgba(251, 191, 36, 0.10);
+  color: #fbbf24;
+  border: 1px solid rgba(251, 191, 36, 0.28);
+}
+.trip-eco-badge.eco-bad {
+  background: rgba(248, 113, 113, 0.08);
+  color: #f87171;
+  border: 1px solid rgba(248, 113, 113, 0.22);
+}
+
+/* ── Modal de comparativo lado-a-lado ───────────────────────────────────── */
+.cmp-headers {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 10px;
+  align-items: center;
+  background: #0f172a;
+  border: 1px solid #1e293b;
+  border-radius: 10px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+.cmp-head { min-width: 0; text-align: center; }
+.cmp-head-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: #e2e8f0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cmp-head-date { font-size: 11px; color: #64748b; margin-top: 2px; }
+.cmp-vs {
+  font-size: 11px;
+  font-weight: 800;
+  color: #22d3ee;
+  letter-spacing: 1px;
+}
+.cmp-metrics {
+  background: #0c1019;
+  border: 1px solid #0F1520;
+  border-radius: 10px;
+  padding: 4px 12px;
+}
+.cmp-metric {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 9px 0;
+  border-bottom: 1px solid #0F1520;
+}
+.cmp-metric:last-child { border-bottom: none; }
+.cmp-metric-label {
+  font-size: 11px;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  flex-shrink: 0;
+  max-width: 38%;
+}
+.cmp-metric-vals {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  flex: 1;
+  text-align: center;
+}
+.cmp-val {
+  font-size: 13px;
+  font-weight: 600;
+  color: #cbd5e1;
+  font-variant-numeric: tabular-nums;
+}
+.cmp-val.cmp-win  { color: #4ade80; font-weight: 800; }
+.cmp-val.cmp-loss { color: #94a3b8; opacity: 0.6; }

@@ -180,36 +180,10 @@
         <div style="width:51%;margin:0 auto">
         <!-- Odômetro total — acima do carro, centro -->
         <!-- Header: Odômetro · Marcha · AC -->
-        <div style="display:flex;justify-content:space-between;align-items:center;padding:0 2px 4px;min-height:26px;flex-wrap:nowrap">
-          <!-- km -->
-          <div id="d-odo-left" style="display:flex;align-items:baseline;gap:2px">
-            <span style="font-size:12px;font-weight:600;color:#94a3b8" id="d-odometer">--</span>
-            <span style="font-size:8px;color:#64748b">km</span>
-          </div>
-          <!-- Marcha — oculta quando inválida (-1) -->
-          <div id="d-gear-badge" style="font-size:16px;font-weight:800;letter-spacing:-0.5px;padding:1px 10px;border-radius:8px;background:#1e293b;color:#475569;min-width:36px;text-align:center">--</div>
-          <!-- AC — sem background, só ícone+texto colorido -->
-          <div id="d-ac-chip" style="font-size:10px;font-weight:600;color:#475569;letter-spacing:0.3px">❄️ AC</div>
-          <!-- Banco motorista: encosto à esquerda (virado p/ direita) -->
-          <div id="d-seat-drv" title="Banco motorista" style="cursor:pointer;opacity:0.45;transition:opacity .2s,filter .2s;line-height:0">
-            <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-              <rect x="1" y="3" width="5" height="10" rx="1.5" fill="#475569"/>
-              <rect x="0" y="1" width="7" height="4" rx="2" fill="#334155"/>
-              <rect x="3" y="11" width="14" height="5" rx="2" fill="#475569"/>
-              <path class="vent-line" d="M7 13 Q9.5 12 12 13" stroke="#22d3ee" stroke-width="1.4" fill="none" stroke-linecap="round"/>
-              <path class="vent-line" d="M7 15 Q9.5 14 12 15" stroke="#22d3ee" stroke-width="1.4" fill="none" stroke-linecap="round"/>
-            </svg>
-          </div>
-          <!-- Banco passageiro: encosto à direita (virado p/ esquerda) -->
-          <div id="d-seat-pass" title="Banco passageiro" style="cursor:pointer;opacity:0.45;transition:opacity .2s,filter .2s;line-height:0">
-            <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-              <rect x="14" y="3" width="5" height="10" rx="1.5" fill="#475569"/>
-              <rect x="13" y="1" width="7" height="4" rx="2" fill="#334155"/>
-              <rect x="3" y="11" width="14" height="5" rx="2" fill="#475569"/>
-              <path class="vent-line" d="M7 13 Q9.5 12 12 13" stroke="#22d3ee" stroke-width="1.4" fill="none" stroke-linecap="round"/>
-              <path class="vent-line" d="M7 15 Q9.5 14 12 15" stroke="#22d3ee" stroke-width="1.4" fill="none" stroke-linecap="round"/>
-            </svg>
-          </div>
+        <!-- Odômetro centralizado (gear, AC e bancos foram removidos) -->
+        <div style="display:flex;justify-content:center;align-items:baseline;padding:0 2px 4px;min-height:26px;gap:3px">
+          <span style="font-size:13px;font-weight:600;color:#94a3b8" id="d-odometer">--</span>
+          <span style="font-size:9px;color:#64748b">km</span>
         </div>
         <div style="position:relative;width:100%;aspect-ratio:794/720;overflow:hidden;border-radius:6px;z-index:0">
           <!-- Base (sempre visível) -->
@@ -439,8 +413,8 @@
             <div class="trip-cell-val" id="d-live-power">--</div>
           </div>
           <div class="trip-cell">
-            <div class="trip-cell-label">Temp. externa</div>
-            <div class="trip-cell-val" id="d-live-temp">--</div>
+            <div class="trip-cell-label">Clima</div>
+            <div class="trip-cell-val" id="d-live-weather">--</div>
           </div>
         </div>
       </div>
@@ -739,6 +713,8 @@
             <rect x="46" y="375" width="128" height="120" rx="16" fill="url(#cmf-grad-seat)" stroke="#2a3550" stroke-width="1"/>
             <!-- Etiqueta -->
             <text x="110" y="405" text-anchor="middle" font-size="7" fill="#475569" font-weight="700" letter-spacing="1">MOTORISTA</text>
+            <!-- Zona de touch pra alterar nível de ventilação (cobre encosto + assento) -->
+            <rect id="cmf-seat-drv-touch" x="46" y="180" width="128" height="315" fill="transparent" style="cursor:ns-resize" pointer-events="all"/>
           </g>
 
           <!-- ── Banco passageiro (direita) ────────────────────────────── -->
@@ -760,6 +736,8 @@
             </g>
             <rect x="226" y="375" width="128" height="120" rx="16" fill="url(#cmf-grad-seat)" stroke="#2a3550" stroke-width="1"/>
             <text x="290" y="405" text-anchor="middle" font-size="7" fill="#475569" font-weight="700" letter-spacing="1">PASSAGEIRO</text>
+            <!-- Zona de touch pra alterar nível de ventilação (cobre encosto + assento) -->
+            <rect id="cmf-seat-pass-touch" x="226" y="180" width="128" height="315" fill="transparent" style="cursor:ns-resize" pointer-events="all"/>
           </g>
         </svg>
       </div>

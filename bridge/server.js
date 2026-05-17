@@ -131,6 +131,8 @@ const NOTIF_DEFAULTS = {
   engine_off:        false,  // 🔑 Motor desligado
   app_update:        true,   // 📱 Nova versão do app instalada no carro
   trip_end:          true,   // 🏁 Viagem concluída (auto-trip)
+  geofence_arrival:  true,   // 📍 Chegou em local conhecido
+  geofence_departure:false,  // 🚗 Saiu de local conhecido
 };
 let notifPrefs = { ...NOTIF_DEFAULTS };
 try {
@@ -589,6 +591,39 @@ function matchKnownPlace(lat, lng) {
     if (d < r && d < bestDist) { best = loc; bestDist = d; }
   }
   return best;
+}
+
+// ── Geofence: detecta entrada/saída de locais conhecidos e dispara push ───
+// Mantém estado por place {id → 'in'|'out'}. Histerese de 20% no raio pra evitar
+// flapping na borda. Saída só notifica se motor ligado (evita ruído de
+// reconexão GPS). Loga eventos `geofence_in` / `geofence_out` em events.json.
+const geofenceState = {};  // { placeId: 'in' | 'out' }
+function checkGeofence() {
+  const lat = state.gps_lat, lng = state.gps_lng;
+  if (!lat || !lng) return;
+  const engineOn = String(state.engine_state) === '1' || state.engine_state === 1;
+  for (const loc of knownPlaces) {
+    if (!loc.lat || !loc.lng) continue;
+    const r = loc.radius_m || 200;
+    const d = haversineM(lat, lng, loc.lat, loc.lng);
+    const prev = geofenceState[loc.id];
+    const isInside = d < r;
+    // Histerese: pra mudar IN → OUT precisa estar 20% além do raio
+    const isOutside = d > r * 1.2;
+    if (isInside && prev !== 'in') {
+      geofenceState[loc.id] = 'in';
+      if (prev === 'out') {  // só notifica se houve transição (não no boot)
+        addEvent('geofence_in', `📍 Chegou em ${loc.name}`);
+        if (notifPrefs.geofence_arrival) sendPush(`📍 Chegou em ${loc.name}`, `Veículo dentro da zona.`);
+      }
+    } else if (isOutside && prev !== 'out') {
+      geofenceState[loc.id] = 'out';
+      if (prev === 'in' && engineOn) {  // saída só com motor ligado
+        addEvent('geofence_out', `🚗 Saiu de ${loc.name}`);
+        if (notifPrefs.geofence_departure) sendPush(`🚗 Saiu de ${loc.name}`, `Veículo deixou a zona.`);
+      }
+    }
+  }
 }
 
 // Retorna o local conhecido mais próximo dentro de radiusM metros, ou null
@@ -2425,12 +2460,12 @@ function applyMqttMessage(key, value, isRetained = false) {
     // GPS — posição ao vivo do veículo
     case 'gps_lat': {
       const lat = parseFloat(value);
-      if (lat && lat !== 0) { state.gps_lat = lat; state.gps_ts = Date.now(); }
+      if (lat && lat !== 0) { state.gps_lat = lat; state.gps_ts = Date.now(); checkGeofence(); }
       break;
     }
     case 'gps_lng': {
       const lng = parseFloat(value);
-      if (lng && lng !== 0) { state.gps_lng = lng; state.gps_ts = Date.now(); }
+      if (lng && lng !== 0) { state.gps_lng = lng; state.gps_ts = Date.now(); checkGeofence(); }
       break;
     }
 

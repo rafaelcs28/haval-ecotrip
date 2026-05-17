@@ -932,10 +932,11 @@ function fmtDate(ts) {
 
 // ── Filtros ───────────────────────────────────────────────────────────────────
 const filterState = {
-  charges: { active: 'today', customFrom: '', customTo: '', location: null },
-  hist:    { active: 'all',   customFrom: '', customTo: '', search: '' },
-  auto:    { active: 'today', customFrom: '', customTo: '', search: '' },
-  logs:    { active: 'all',   type: 'all',   customFrom: '', customTo: '' },
+  charges:     { active: 'today', customFrom: '', customTo: '', location: null },
+  hist:        { active: 'all',   customFrom: '', customTo: '', search: '' },
+  auto:        { active: 'today', customFrom: '', customTo: '', search: '' },
+  logs:        { active: 'all',   type: 'all',   customFrom: '', customTo: '' },
+  stats_split: { active: 'all',   customFrom: '', customTo: '' },
 };
 let cachedCharges = null;
 let cachedEvents  = null;
@@ -1186,9 +1187,10 @@ function filterItems(arr, tsField, startMs, endMs) {
 
 function setFilter(tabId, filter) {
   filterState[tabId].active = filter;
-  if (tabId === 'charges') renderCharges();
-  if (tabId === 'hist')    renderHistory();
-  if (tabId === 'auto')    renderAutoTrips();
+  if (tabId === 'charges')     renderCharges();
+  if (tabId === 'hist')        renderHistory();
+  if (tabId === 'auto')        renderAutoTrips();
+  if (tabId === 'stats_split') _renderStatsSplit();
 }
 
 function setFilterDates(tabId) {
@@ -1600,20 +1602,17 @@ function renderDash() {
     const lvl = parseInt(rawLevel, 10);
     const valid = Number.isFinite(lvl) && lvl >= 0 && lvl <= 3;
     const v = valid ? lvl : 0;
-    group.querySelectorAll('.cmf-vd').forEach(dot => {
-      const row = parseInt(dot.dataset.row, 10);
-      // Limpa classes anteriores
-      dot.classList.remove('on-1', 'on-2', 'on-3');
-      if (v >= row) {
-        // Fileira ativa: usa intensidade conforme nível geral
-        dot.classList.add(`on-${v}`);
-      }
-    });
+    // Skip se o usuário está mexendo no banco (drag/pending) — preserva preview
+    const busy = (typeof _hvacIsBusy === 'function') && _hvacIsBusy(textId);
+    if (!busy) _updateSeatDots(groupId, v);
     if (text) {
       const labels = ['Desligado', 'Fraco', 'Médio', 'Forte'];
       const colors = ['#475569',   '#7dd3fc', '#22d3ee', '#5eead4'];
-      text.textContent = labels[v];
-      text.style.color = colors[v];
+      if (typeof _hvacCheckPending === 'function') _hvacCheckPending(textId, v);
+      if (!busy) {
+        text.textContent = labels[v];
+        text.style.color = colors[v];
+      }
     }
   }
   applyCabinSeat('cmf-vent-drv-dots',  'cmf-drv-text',  s.seat_vent_drv);
@@ -1665,21 +1664,30 @@ function renderDash() {
     const tPass = parseFloat(s.hvac_passenger_temp);
     const zonePass = tempPassEl.closest('.climate-zone');
     if (Number.isFinite(tPass)) {
-      tempPassEl.textContent = `${tPass.toFixed(1)}°C`;
+      if (typeof _hvacCheckPending === 'function') _hvacCheckPending('cmf-ac-temp-pass', tPass);
+      if (typeof _hvacIsBusy !== 'function' || !_hvacIsBusy('cmf-ac-temp-pass')) {
+        tempPassEl.textContent = `${tPass.toFixed(1)}°C`;
+      }
       if (zonePass) zonePass.classList.toggle('active', acOn);
     } else {
-      tempPassEl.textContent = '--°C';
+      if (typeof _hvacIsBusy !== 'function' || !_hvacIsBusy('cmf-ac-temp-pass')) tempPassEl.textContent = '--°C';
       if (zonePass) zonePass.classList.remove('active');
     }
   }
   // SYNC chain icon
   const syncOn = String(s.hvac_sync_enable) === '1';
   const syncEl = document.getElementById('cmf-ac-sync');
-  if (syncEl) syncEl.classList.toggle('on', syncOn);
+  if (syncEl) {
+    if (typeof _hvacCheckPending === 'function') _hvacCheckPending('cmf-ac-sync', syncOn ? 1 : 0);
+    syncEl.classList.toggle('on', syncOn);
+  }
   // AUTO badge
   const autoOn = String(s.hvac_auto_enable) === '1';
   const autoEl = document.getElementById('cmf-ac-auto');
-  if (autoEl) autoEl.classList.toggle('on', autoOn);
+  if (autoEl) {
+    if (typeof _hvacCheckPending === 'function') _hvacCheckPending('cmf-ac-auto', autoOn ? 1 : 0);
+    autoEl.classList.toggle('on', autoOn);
+  }
   // FAN bars + value
   const fanLvl = parseInt(s.hvac_fan_speed, 10);
   const fanValid = Number.isFinite(fanLvl) && fanLvl >= 0;
@@ -1690,7 +1698,12 @@ function renderDash() {
     bar.classList.toggle('on', fanValid && lvl <= fanLvl);
   });
   const fanValEl = document.getElementById('cmf-ac-fan-val');
-  if (fanValEl) fanValEl.textContent = fanValid ? String(fanLvl) : '--';
+  if (fanValEl) {
+    if (typeof _hvacCheckPending === 'function' && fanValid) _hvacCheckPending('cmf-ac-fan-val', fanLvl);
+    if (typeof _hvacIsBusy !== 'function' || !_hvacIsBusy('cmf-ac-fan-val')) {
+      fanValEl.textContent = fanValid ? String(fanLvl) : '--';
+    }
+  }
 
   // Pill AC do rodapé com resumo enxuto
   const acTextEl = document.getElementById('cmf-ac-text');
@@ -1886,7 +1899,8 @@ function renderTripCard(s, engOn) {
     setText('d-live-speed', s.speed_kmh != null ? Math.round(+s.speed_kmh) + ' km/h' : '--');
     const mp = +s.motor_power_kw || 0;
     setText('d-live-power', mp !== 0 ? (mp > 0 ? mp.toFixed(1) : '−' + Math.abs(mp).toFixed(1)) + ' kW' : '0 kW');
-    setText('d-live-temp',  s.outside_temp != null ? (+s.outside_temp).toFixed(1) + '°C' : '--');
+    // Clima — combina temp do carro + condição/precipitação do Open-Meteo (cache 30min)
+    _refreshLiveWeather(s);
   } else if (last) {
     curCard.style.display = '';
     curCard.classList.remove('in-progress');
@@ -2220,6 +2234,7 @@ function renderLogs() {
   }
 
   const filtered = cachedEvents.filter(ev => {
+    if (ev.type === 'trip_end') return false;   // ruído — viagem termina, autotrip já registra
     if (ev.ts < fromMs || ev.ts > toMs) return false;
     if (typeGrp.length && !typeGrp.includes(ev.type)) return false;
     return true;
@@ -2493,6 +2508,103 @@ function renderAutoTrips() {
   // Resumo — mesma estrutura 2 linhas do hist
   const { gas: priceGas, kwh: priceKwh } = getPrices();
   const KWH_PER_L = 8.9;
+
+  // Calcula eco score 0-100 de uma viagem combinando 5 componentes.
+  // Retorna null se a viagem não tem dado suficiente.
+  function _computeEcoScore(t, effInfo) {
+    const dist = +t.distKm || 0;
+    if (dist < 1) return null;
+    const timeSec = +t.timeSec || 0;
+    if (timeSec < 30) return null;
+
+    // 1) Elétrico (35 pts): % do trecho em modo EV puro
+    const elecPct = Math.max(0, Math.min(1, 1 - ((t.hybridDistKm || 0) / dist)));
+    const s1 = elecPct * 35;
+
+    // 2) Regen (25 pts): razão regen/consumo bruto. 25% = full.
+    const energy = +t.energyKwh || 0;
+    const regen  = +t.regenKwh  || 0;
+    const regenRatio = energy > 0.05 ? regen / energy : 0;
+    const s2 = Math.min(25, regenRatio * 100);
+
+    // 3) Velocidade média (15 pts): zona ideal 30-70 km/h
+    const avgKmh = dist / (timeSec / 3600);
+    let s3;
+    if (avgKmh >= 30 && avgKmh <= 70)      s3 = 15;
+    else if (avgKmh >= 20 && avgKmh <= 90) s3 = 8;
+    else if (avgKmh >= 10 && avgKmh <= 110) s3 = 4;
+    else                                    s3 = 0;
+
+    // 4) Suavidade (10 pts): inverso do pico de potência (%)
+    const maxP = +t.maxPowerPct || 0;
+    const s4 = Math.max(0, 10 - (maxP / 10));
+
+    // 5) vs trecho (15 pts): pega de effInfo se houver
+    let s5 = 7.5;  // neutro quando não há histórico
+    if (effInfo) {
+      // pct +20% → 15 pts, 0% → 7.5, -20% → 0
+      s5 = Math.max(0, Math.min(15, 7.5 + (effInfo.pct * 0.375)));
+    }
+
+    return Math.round(s1 + s2 + s3 + s4 + s5);
+  }
+
+  function _ecoScoreDetail(t, effInfo) {
+    const dist = +t.distKm || 0;
+    const elecPct = Math.max(0, Math.min(100, 100 * (1 - ((t.hybridDistKm || 0) / dist))));
+    const energy = +t.energyKwh || 0;
+    const regen  = +t.regenKwh  || 0;
+    const regenRatio = energy > 0.05 ? regen / energy * 100 : 0;
+    const avgKmh = (+t.timeSec || 0) > 0 ? dist / ((+t.timeSec || 0) / 3600) : 0;
+    const parts = [
+      `${elecPct.toFixed(0)}% elétrico`,
+      `${regenRatio.toFixed(0)}% regen`,
+      `${avgKmh.toFixed(0)} km/h méd.`,
+    ];
+    if (effInfo) parts.push(`${effInfo.pct >= 0 ? '+' : ''}${effInfo.pct.toFixed(0)}% vs trecho`);
+    return parts.join(' · ');
+  }
+
+  // Pré-cálculo: índice de eficiência por trajeto (start/end ~200m, ±10% km).
+  // Pra cada trip, acha viagens "irmãs" do mesmo trecho e calcula a média km/L eq;
+  // o badge mostra quantos % esta viagem está acima/abaixo da média do trecho.
+  function _haversineM(la1, ln1, la2, ln2) {
+    const R = 6371000, toRad = d => d * Math.PI / 180;
+    const dLat = toRad(la2 - la1), dLng = toRad(ln2 - ln1);
+    const a = Math.sin(dLat/2)**2 + Math.cos(toRad(la1))*Math.cos(toRad(la2))*Math.sin(dLng/2)**2;
+    return 2 * R * Math.asin(Math.sqrt(a));
+  }
+  function _tripKmLEq(t) {
+    if (!t || (t.distKm || 0) < 0.5) return null;
+    const totalEqL = (t.netKwh || 0) / KWH_PER_L + (t.fuelL || 0);
+    if (totalEqL < 0.001) return null;
+    return t.distKm / totalEqL;
+  }
+  // Pré-computa as "irmãs" pra cada trip que tem coords + dist + eficiência
+  const _effIndex = {};
+  for (const t of trips) {
+    const myKmL = _tripKmLEq(t);
+    if (myKmL === null || !t.startLat || !t.endLat) continue;
+    const siblings = [];
+    for (const o of trips) {
+      if (o.tripId === t.tripId) continue;
+      const oKmL = _tripKmLEq(o);
+      if (oKmL === null || !o.startLat || !o.endLat) continue;
+      if (Math.abs(t.distKm - o.distKm) / t.distKm > 0.10) continue;
+      if (_haversineM(t.startLat, t.startLng, o.startLat, o.startLng) > 200) continue;
+      if (_haversineM(t.endLat,   t.endLng,   o.endLat,   o.endLng)   > 200) continue;
+      siblings.push(oKmL);
+    }
+    if (siblings.length < 1) continue;
+    const avg = siblings.reduce((s, x) => s + x, 0) / siblings.length;
+    if (avg <= 0) continue;
+    _effIndex[t.tripId] = {
+      pct: (myKmL - avg) / avg * 100,
+      sampleCount: siblings.length,
+      avgKmL: avg,
+      myKmL,
+    };
+  }
   const totDist   = trips.reduce((s, t) => s + (t.distKm  || 0), 0);
   const totFuel   = trips.reduce((s, t) => s + (t.fuelL   || 0), 0);
   const totNetKwh = trips.reduce((s, t) => s + (t.netKwh  || 0), 0);
@@ -2548,6 +2660,28 @@ function renderAutoTrips() {
     const statusBadge = rnStatus === 'pending'   ? '<span class="rename-status-pending" title="Aguardando confirmação do carro">⏳</span>'
                       : rnStatus === 'confirmed'  ? '<span class="rename-status-ok" title="Confirmado pelo carro">✓</span>'
                       : '';
+    // Indicador de eficiência vs média do mesmo trecho (start/end ~200m, ±10% km)
+    const effInfo = _effIndex[t.tripId];
+    let effBadge = '';
+    if (effInfo) {
+      const pct = effInfo.pct;
+      // Banda neutra ±2% (≈ ruído de medida)
+      const cls = pct >= 2 ? 'better' : pct <= -2 ? 'worse' : 'neutral';
+      const arrow = pct >= 2 ? '↑' : pct <= -2 ? '↓' : '≈';
+      const sign  = pct > 0 ? '+' : '';
+      const tip   = `vs média de ${effInfo.sampleCount + 1} viagens deste trecho (${effInfo.avgKmL.toFixed(1)} km/L eq)`;
+      effBadge = `<span class="trip-eff-badge ${cls}" title="${tip}">${arrow} ${sign}${pct.toFixed(0)}%</span>`;
+    }
+
+    // Eco score 0-100 — combina elétrico, regen, vel.média, suavidade e vs trecho
+    const score = _computeEcoScore(t, effInfo);
+    let ecoBadge = '';
+    if (score !== null) {
+      const cls   = score >= 85 ? 'eco-excellent' : score >= 70 ? 'eco-good' : score >= 50 ? 'eco-ok' : 'eco-bad';
+      const icon  = score >= 85 ? '🌿' : score >= 70 ? '🌱' : score >= 50 ? '🌾' : '🥀';
+      const tip   = `Eco score: ${score} · ${_ecoScoreDetail(t, effInfo)}`;
+      ecoBadge = `<span class="trip-eco-badge ${cls}" title="${tip}">${icon} ${score}</span>`;
+    }
     const atOv     = _tripCostOverride(t.tripId);
     const atFuelL  = t.fuelL  || 0;
     const atNetKwh = t.netKwh || 0;
@@ -2570,7 +2704,9 @@ function renderAutoTrips() {
     <div style="flex:1;min-width:0">
       <div class="trip-name-row">
         ${displayName ? `<span class="trip-name"${nameStyle ? ` style="${nameStyle}"` : ''}>${displayName}</span>${statusBadge}` : ''}
+        ${ecoBadge}${effBadge}
         <button class="rename-btn" onclick="startRenameTrip('${t.tripId}','auto')" title="${displayName ? 'Renomear' : 'Nomear'}">✏️</button>
+        ${effInfo ? `<button class="rename-btn" onclick="openCompareModal('${t.tripId}')" title="Comparar com outra viagem do mesmo trecho" style="opacity:.6">🔀</button>` : ''}
         <button class="rename-btn" onclick="deleteTrip('${t.tripId}','auto')" title="Apagar viagem" style="opacity:.35">🗑</button>
       </div>
       <div class="trip-date">${startDate} · ${dur}${geoLine ? ' · ' + geo : ''}</div>
@@ -4474,47 +4610,93 @@ async function _statsMonthlyHTML() {
   return _statsCard('📆 Comparativo mensal', body);
 }
 
+// Re-render só do card "Split elétrico/híbrido" (chamado quando o filtro muda).
+function _renderStatsSplit() {
+  const el = document.getElementById('stats-split-card');
+  if (!el) return;
+  const trips = (cachedAutoTrips || []).filter(t => (t.distKm || 0) > 2);
+  el.outerHTML = _statsElectricHTML(trips);
+}
+
 function _statsElectricHTML(trips) {
-  const tripsWithData = trips.filter(t => t.hybridTimeSec !== undefined && (t.distKm || 0) > 0);
-  if (!tripsWithData.length) {
-    return _statsCard('⚡ Split elétrico / híbrido',
-      '<div style="color:#475569;font-size:12px">Dados disponíveis em viagens registradas a partir de agora. Cada nova viagem calculará automaticamente o tempo em modo elétrico vs híbrido.</div>');
+  // Universo TOTAL com dado de split — usado pros odômetros lifetime
+  // (não filtrado por período; mostra sempre o acumulado desde o início).
+  const tripsAll = trips.filter(t => t.hybridTimeSec !== undefined && (t.distKm || 0) > 0);
+  if (!tripsAll.length) {
+    return `<div id="stats-split-card">${_statsCard('⚡ Split elétrico / híbrido',
+      '<div style="color:#475569;font-size:12px">Dados disponíveis em viagens registradas a partir de agora. Cada nova viagem calculará automaticamente o tempo em modo elétrico vs híbrido.</div>')}</div>`;
   }
 
-  const totalDist    = tripsWithData.reduce((s, t) => s + (t.distKm || 0), 0);
-  const totalHybrid  = tripsWithData.reduce((s, t) => s + (t.hybridDistKm || 0), 0);
-  const totalElec    = Math.max(0, totalDist - totalHybrid);
-  const elecPct      = totalDist > 0 ? Math.round(totalElec / totalDist * 100) : 0;
-  const hybPct       = 100 - elecPct;
+  // Totais lifetime (todas as viagens com dado de split)
+  const lifetimeDist   = tripsAll.reduce((s, t) => s + (t.distKm || 0), 0);
+  const lifetimeHybrid = tripsAll.reduce((s, t) => s + (t.hybridDistKm || 0), 0);
+  const lifetimeElec   = Math.max(0, lifetimeDist - lifetimeHybrid);
+  const sinceMs        = tripsAll.reduce((m, t) => Math.min(m, t.startMs || Infinity), Infinity);
+  const sinceDate      = isFinite(sinceMs)
+    ? new Date(sinceMs).toLocaleDateString('pt-BR', { day:'2-digit', month:'2-digit', year:'numeric' })
+    : null;
 
-  const bar = `<div style="height:10px;background:#0F1C2E;border-radius:5px;overflow:hidden;margin:8px 0">
-    <div style="height:100%;width:${elecPct}%;background:linear-gradient(90deg,#39FF88,#4ade80);border-radius:5px 0 0 5px;display:inline-block"></div>
-  </div>
-  <div style="display:flex;justify-content:space-between;font-size:10px;color:#64748b;margin-bottom:10px">
-    <span style="color:#4ade80">⚡ ${elecPct}% elétrico</span>
-    <span style="color:#fb923c">🔥 ${hybPct}% híbrido</span>
-  </div>`;
-
-  const summary = `<div style="font-size:12px;color:#94a3b8;margin-bottom:10px">
-    ${tripsWithData.length} viagens · ${totalDist.toFixed(1)} km totais ·
-    ${totalElec.toFixed(1)} km elétrico · ${totalHybrid.toFixed(1)} km híbrido
-  </div>`;
-
-  // Últimas 5 viagens com split
-  let rows = '<div style="font-size:11px;color:#475569;margin-bottom:4px">Últimas viagens:</div>';
-  tripsWithData.slice(0, 5).forEach(t => {
-    const hyb = t.hybridDistKm || 0;
-    const elc = Math.max(0, t.distKm - hyb);
-    const ep  = t.distKm > 0 ? Math.round(elc / t.distKm * 100) : 0;
-    const d   = new Date(t.startMs || 0);
-    const dt  = d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
-    rows += `<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid #0F1520">
-      <span style="font-size:11px;color:#64748b">${dt} · ${f1(t.distKm)} km</span>
-      <span style="font-size:12px;font-weight:700;color:${ep > 70 ? '#4ade80' : ep > 40 ? '#60a5fa' : '#fb923c'}">⚡ ${ep}%</span>
-    </div>`;
+  // Filtro de período pros chips (independente do lifetime)
+  const [fStart, fEnd]   = getFilterRange('stats_split');
+  const isAll            = filterState.stats_split.active === 'all';
+  const tripsFiltered    = isAll ? tripsAll : tripsAll.filter(t => {
+    const ms = t.startMs || 0;
+    return ms >= fStart && ms <= fEnd;
   });
+  const periodDist   = tripsFiltered.reduce((s, t) => s + (t.distKm || 0), 0);
+  const periodHybrid = tripsFiltered.reduce((s, t) => s + (t.hybridDistKm || 0), 0);
+  const periodElec   = Math.max(0, periodDist - periodHybrid);
+  const periodElecPct = periodDist > 0 ? Math.round(periodElec / periodDist * 100) : 0;
+  const periodHybPct  = 100 - periodElecPct;
 
-  return _statsCard('⚡ Split elétrico / híbrido', bar + summary + rows);
+  // ── Odômetros lifetime (sempre acumulado total) ──
+  const odoBlock = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:6px">
+    <div style="background:rgba(74,222,128,0.06);border:1px solid rgba(74,222,128,0.18);border-radius:10px;padding:10px 12px">
+      <div style="font-size:9px;font-weight:700;letter-spacing:1.2px;color:#4ade80;text-transform:uppercase">⚡ Elétrico</div>
+      <div style="font-size:22px;font-weight:800;color:#4ade80;letter-spacing:-0.5px;font-variant-numeric:tabular-nums;margin-top:2px">${lifetimeElec.toFixed(1)}<span style="font-size:11px;color:#5B7394;font-weight:500;margin-left:3px">km</span></div>
+    </div>
+    <div style="background:rgba(251,146,60,0.06);border:1px solid rgba(251,146,60,0.18);border-radius:10px;padding:10px 12px">
+      <div style="font-size:9px;font-weight:700;letter-spacing:1.2px;color:#fb923c;text-transform:uppercase">🔥 Híbrido</div>
+      <div style="font-size:22px;font-weight:800;color:#fb923c;letter-spacing:-0.5px;font-variant-numeric:tabular-nums;margin-top:2px">${lifetimeHybrid.toFixed(1)}<span style="font-size:11px;color:#5B7394;font-weight:500;margin-left:3px">km</span></div>
+    </div>
+  </div>
+  ${sinceDate ? `<div style="font-size:10px;color:#475569;text-align:center;margin-bottom:12px;letter-spacing:0.3px">desde ${sinceDate} · ${tripsAll.length} viagens · ${lifetimeDist.toFixed(1)} km totais</div>` : ''}`;
+
+  // ── Filtro de período ──
+  const filterChips = filterChipsHTML('stats_split');
+
+  // ── Stats do período filtrado ──
+  const periodLabel = isAll ? 'Total acumulado' : 'Período selecionado';
+  const periodBlock = `<div style="margin-top:10px">
+    <div style="font-size:10px;color:#475569;letter-spacing:0.5px;text-transform:uppercase;margin-bottom:6px">${periodLabel}</div>
+    <div style="height:10px;background:#0F1C2E;border-radius:5px;overflow:hidden;margin-bottom:6px">
+      <div style="height:100%;width:${periodElecPct}%;background:linear-gradient(90deg,#39FF88,#4ade80);border-radius:5px 0 0 5px;display:inline-block"></div>
+    </div>
+    <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:8px">
+      <span style="color:#4ade80;font-weight:600">⚡ ${periodElec.toFixed(1)} km · ${periodElecPct}%</span>
+      <span style="color:#fb923c;font-weight:600">🔥 ${periodHybrid.toFixed(1)} km · ${periodHybPct}%</span>
+    </div>
+    <div style="font-size:11px;color:#64748b">${tripsFiltered.length} viagens · ${periodDist.toFixed(1)} km</div>
+  </div>`;
+
+  // ── Últimas 5 viagens (do período filtrado) ──
+  let rows = '';
+  if (tripsFiltered.length > 0) {
+    rows = '<div style="font-size:11px;color:#475569;margin-top:14px;margin-bottom:4px">Últimas viagens:</div>';
+    tripsFiltered.slice(0, 5).forEach(t => {
+      const hyb = t.hybridDistKm || 0;
+      const elc = Math.max(0, t.distKm - hyb);
+      const ep  = t.distKm > 0 ? Math.round(elc / t.distKm * 100) : 0;
+      const d   = new Date(t.startMs || 0);
+      const dt  = d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+      rows += `<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid #0F1520">
+        <span style="font-size:11px;color:#64748b">${dt} · ${f1(t.distKm)} km</span>
+        <span style="font-size:12px;font-weight:700;color:${ep > 70 ? '#4ade80' : ep > 40 ? '#60a5fa' : '#fb923c'}">⚡ ${ep}%</span>
+      </div>`;
+    });
+  }
+
+  return `<div id="stats-split-card">${_statsCard('⚡ Split elétrico / híbrido', odoBlock + filterChips + periodBlock + rows)}</div>`;
 }
 
 // ── Ranking de locais de recarga por eficiência ───────────────────────────────
@@ -5502,59 +5684,86 @@ function renderDrivePanel() {
 // Após release: envia POST, mantém "hvac-pending" até WS confirmar ou timeout.
 
 const HVAC_DRAG_PX_PER_STEP = 18;
-const HVAC_PENDING_TIMEOUT_MS = 12000;
+const HVAC_PENDING_TIMEOUT_MS = 30000;
 let _hvacDragState = null;
 const _hvacPending = {};  // { elementId: { until, expectedVal, fmt } }
 
-function _attachHvacGesture(elementId, control, getCurrent, fmt, min, max, step) {
-  const el = document.getElementById(elementId);
+// Preenche os pontinhos de ventilação do banco no SVG conforme nível 0..3.
+function _updateSeatDots(groupId, lvl) {
+  const group = document.getElementById(groupId);
+  if (!group) return;
+  const v = Math.max(0, Math.min(3, parseInt(lvl, 10) || 0));
+  group.querySelectorAll('.cmf-vd').forEach(dot => {
+    const row = parseInt(dot.dataset.row, 10);
+    dot.classList.remove('on-1', 'on-2', 'on-3');
+    if (v >= row) dot.classList.add(`on-${v}`);
+  });
+}
+
+// Touch handler genérico:
+// - touchId: elemento que recebe gestos (pode ser uma zona invisível em SVG)
+// - displayId: elemento que mostra preview/pending (default = touchId)
+// - onUpdate(val): callback opcional disparado a cada step do drag (ex: pra
+//   atualizar pontinhos de ventilação dos bancos em tempo real)
+// O pending tracking sempre usa displayId — assim renderDash sabe quem está busy.
+function _attachHvacGesture(touchId, control, getCurrent, fmt, min, max, step, axis = 'y', displayId = null, onUpdate = null) {
+  const el = document.getElementById(touchId);
+  const displayEl = displayId ? document.getElementById(displayId) : el;
+  const trackId = displayId || touchId;
   if (!el || el.dataset.hvacGesture === '1') return;
   el.dataset.hvacGesture = '1';
   el.style.touchAction = 'none';
   el.style.userSelect = 'none';
   el.style.webkitUserSelect = 'none';
-  el.style.cursor = 'ns-resize';
+  if (el.style) el.style.cursor = axis === 'x' ? 'ew-resize' : 'ns-resize';
 
-  function startDrag(clientY) {
+  function startDrag(clientX, clientY) {
     const cur = getCurrent();
     if (!Number.isFinite(cur)) return false;
     _hvacDragState = {
-      elementId, el, control, fmt, min, max, step,
-      startY: clientY, startVal: cur, previewVal: cur,
+      elementId: trackId, el: displayEl, touchEl: el, control, fmt, min, max, step, axis,
+      startX: clientX, startY: clientY,
+      startVal: cur, previewVal: cur,
     };
-    el.classList.add('hvac-dragging');
+    if (displayEl) displayEl.classList.add('hvac-dragging');
     return true;
   }
-  function moveDrag(clientY) {
-    if (!_hvacDragState || _hvacDragState.el !== el) return;
-    const dy = _hvacDragState.startY - clientY;  // up = positive
-    const steps = Math.round(dy / HVAC_DRAG_PX_PER_STEP);
+  function moveDrag(clientX, clientY) {
+    if (!_hvacDragState || _hvacDragState.touchEl !== el) return;
+    const delta = _hvacDragState.axis === 'x'
+      ? (clientX - _hvacDragState.startX)
+      : (_hvacDragState.startY - clientY);
+    const steps = Math.round(delta / HVAC_DRAG_PX_PER_STEP);
     let val = _hvacDragState.startVal + steps * _hvacDragState.step;
     val = Math.max(_hvacDragState.min, Math.min(_hvacDragState.max, val));
     val = Math.round(val / _hvacDragState.step) * _hvacDragState.step;
+    if (val === _hvacDragState.previewVal) return;  // sem mudança, evita rerender
     _hvacDragState.previewVal = val;
-    el.textContent = fmt(val);
+    if (displayEl) displayEl.textContent = fmt(val);
+    if (onUpdate) onUpdate(val);
   }
   async function endDrag() {
-    if (!_hvacDragState || _hvacDragState.el !== el) return;
+    if (!_hvacDragState || _hvacDragState.touchEl !== el) return;
     const s = _hvacDragState;
     _hvacDragState = null;
+    const d = displayEl;  // display target
 
     if (Math.abs(s.previewVal - s.startVal) < 0.001) {
-      el.classList.remove('hvac-dragging');
+      if (d) d.classList.remove('hvac-dragging');
       return;
     }
 
-    // Vira "pending": classe muda visual e segura update do WS até confirmar
-    el.classList.remove('hvac-dragging');
-    el.classList.add('hvac-pending');
-    _hvacPending[elementId] = {
+    if (d) {
+      d.classList.remove('hvac-dragging');
+      d.classList.add('hvac-pending');
+    }
+    _hvacPending[trackId] = {
       until: Date.now() + HVAC_PENDING_TIMEOUT_MS,
       expectedVal: s.previewVal,
       fmt,
       timer: setTimeout(() => {
-        el.classList.remove('hvac-pending');
-        delete _hvacPending[elementId];
+        if (d) d.classList.remove('hvac-pending');
+        delete _hvacPending[trackId];
         showToast('✗ Carro não confirmou em ' + (HVAC_PENDING_TIMEOUT_MS/1000) + 's');
       }, HVAC_PENDING_TIMEOUT_MS),
     };
@@ -5567,29 +5776,30 @@ function _attachHvacGesture(elementId, control, getCurrent, fmt, min, max, step)
       });
       const data = await r.json().catch(() => ({}));
       if (!r.ok || !data.ok) {
-        clearTimeout(_hvacPending[elementId]?.timer);
-        el.classList.remove('hvac-pending');
-        delete _hvacPending[elementId];
+        clearTimeout(_hvacPending[trackId]?.timer);
+        if (d) d.classList.remove('hvac-pending');
+        delete _hvacPending[trackId];
         showToast('✗ ' + (data.error || `Erro ${r.status}`));
-        // Restaura valor original
-        el.textContent = fmt(s.startVal);
+        if (d) d.textContent = fmt(s.startVal);
+      } else {
+        _hvacApplySyncSideEffect(control, s.previewVal, fmt);
       }
     } catch (err) {
-      clearTimeout(_hvacPending[elementId]?.timer);
-      el.classList.remove('hvac-pending');
-      delete _hvacPending[elementId];
+      clearTimeout(_hvacPending[trackId]?.timer);
+      if (d) d.classList.remove('hvac-pending');
+      delete _hvacPending[trackId];
       showToast('✗ Falha ao enviar');
-      el.textContent = fmt(s.startVal);
+      if (d) d.textContent = fmt(s.startVal);
     }
   }
 
   el.addEventListener('touchstart', (e) => {
-    if (!startDrag(e.touches[0].clientY)) return;
+    if (!startDrag(e.touches[0].clientX, e.touches[0].clientY)) return;
     e.preventDefault();
   }, { passive: false });
   el.addEventListener('touchmove', (e) => {
     if (!_hvacDragState || _hvacDragState.el !== el) return;
-    moveDrag(e.touches[0].clientY);
+    moveDrag(e.touches[0].clientX, e.touches[0].clientY);
     e.preventDefault();
   }, { passive: false });
   el.addEventListener('touchend', endDrag);
@@ -5597,9 +5807,9 @@ function _attachHvacGesture(elementId, control, getCurrent, fmt, min, max, step)
 
   // Fallback mouse (desktop)
   el.addEventListener('mousedown', (e) => {
-    if (!startDrag(e.clientY)) return;
+    if (!startDrag(e.clientX, e.clientY)) return;
     e.preventDefault();
-    const onMove = (ev) => moveDrag(ev.clientY);
+    const onMove = (ev) => moveDrag(ev.clientX, ev.clientY);
     const onUp = () => {
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
@@ -5626,23 +5836,357 @@ function _hvacCheckPending(elementId, actualVal) {
     clearTimeout(p.timer);
     delete _hvacPending[elementId];
     const el = document.getElementById(elementId);
+    const txt = p.fmt(actualVal);
     if (el) {
       el.classList.remove('hvac-pending');
-      el.textContent = p.fmt(actualVal);
+      if (txt) el.textContent = txt;  // toggles passam fmt vazio — não mexe no DOM
     }
-    showToast('✓ Aplicado: ' + p.fmt(actualVal));
+    showToast(txt ? '✓ Aplicado: ' + txt : '✓ Aplicado');
   }
+}
+
+// Toggle por tap (booleano) — usado em sync, auto, AC enable, etc.
+function _attachHvacToggle(elementId, control, getCurrent, fmtPending) {
+  const el = document.getElementById(elementId);
+  if (!el || el.dataset.hvacToggle === '1') return;
+  el.dataset.hvacToggle = '1';
+  el.style.cursor = 'pointer';
+  el.style.userSelect = 'none';
+  el.style.webkitUserSelect = 'none';
+  el.style.webkitTapHighlightColor = 'transparent';
+
+  async function onTap(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    const cur = getCurrent();   // boolean ou 0/1
+    const newVal = cur ? 0 : 1;
+    el.classList.add('hvac-pending');
+    _hvacPending[elementId] = {
+      until: Date.now() + HVAC_PENDING_TIMEOUT_MS,
+      expectedVal: newVal,
+      fmt: fmtPending || (() => ''),
+      timer: setTimeout(() => {
+        el.classList.remove('hvac-pending');
+        delete _hvacPending[elementId];
+        showToast('✗ Carro não confirmou em ' + (HVAC_PENDING_TIMEOUT_MS/1000) + 's');
+      }, HVAC_PENDING_TIMEOUT_MS),
+    };
+    try {
+      const r = await apiFetch(`/api/hvac/${control}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value: newVal }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok || !data.ok) {
+        clearTimeout(_hvacPending[elementId]?.timer);
+        el.classList.remove('hvac-pending');
+        delete _hvacPending[elementId];
+        showToast('✗ ' + (data.error || `Erro ${r.status}`));
+      }
+    } catch (err) {
+      clearTimeout(_hvacPending[elementId]?.timer);
+      el.classList.remove('hvac-pending');
+      delete _hvacPending[elementId];
+      showToast('✗ Falha ao enviar');
+    }
+  }
+  el.addEventListener('click', onTap);
+}
+
+// Side-effect: quando sync está ligado, mudar temp do motorista muda passageiro
+// também (e vice-versa). Marca o "outro" elemento como pending pra não dar a
+// falsa impressão de que não atualizou — o WS confirma quando o carro publicar.
+function _hvacApplySyncSideEffect(control, value, fmt) {
+  if (String(state.hvac_sync_enable) !== '1') return;
+  if (control !== 'driver_temp' && control !== 'passenger_temp') return;
+  const otherId = control === 'driver_temp' ? 'cmf-ac-temp-pass' : 'cmf-ac-temp-drv';
+  const otherEl = document.getElementById(otherId);
+  if (!otherEl) return;
+  // Já tinha pending? cancela o antigo.
+  if (_hvacPending[otherId]) clearTimeout(_hvacPending[otherId].timer);
+  otherEl.classList.add('hvac-pending');
+  otherEl.textContent = fmt(value);
+  _hvacPending[otherId] = {
+    until: Date.now() + HVAC_PENDING_TIMEOUT_MS,
+    expectedVal: value,
+    fmt,
+    timer: setTimeout(() => {
+      otherEl.classList.remove('hvac-pending');
+      delete _hvacPending[otherId];
+    }, HVAC_PENDING_TIMEOUT_MS),
+  };
 }
 
 // Setup uma vez quando DOM estiver pronto
 window.addEventListener('load', () => {
   setTimeout(() => {
-    _attachHvacGesture(
-      'cmf-ac-temp-drv',
-      'driver_temp',
+    // ── Temperaturas — drag vertical, step 0.5°C
+    _attachHvacGesture('cmf-ac-temp-drv',  'driver_temp',
       () => parseFloat(state.hvac_driver_temp),
-      v => `${v.toFixed(1)}°C`,
-      16, 32, 0.5,
-    );
+      v => `${v.toFixed(1)}°C`, 16, 32, 0.5);
+    _attachHvacGesture('cmf-ac-temp-pass', 'passenger_temp',
+      () => parseFloat(state.hvac_passenger_temp),
+      v => `${v.toFixed(1)}°C`, 16, 32, 0.5);
+
+    // ── Fan speed — drag HORIZONTAL (direita=aumenta, esquerda=reduz), step 1 (0..7)
+    _attachHvacGesture('cmf-ac-fan-val',   'fan_speed',
+      () => parseInt(state.hvac_fan_speed, 10),
+      v => String(v), 0, 7, 1, 'x');
+
+    // ── Ventilação dos bancos — swipe vertical NO BANCO do SVG.
+    // Display: label embaixo da cabine. Pontinhos do banco preenchem ao vivo.
+    const seatLabels = ['Desligado', 'Fraco', 'Médio', 'Forte'];
+    _attachHvacGesture('cmf-seat-drv-touch', 'seat_vent_drv',
+      () => parseInt(state.seat_vent_drv, 10),
+      v => seatLabels[v] || String(v), 0, 3, 1, 'y', 'cmf-drv-text',
+      v => _updateSeatDots('cmf-vent-drv-dots', v));
+    _attachHvacGesture('cmf-seat-pass-touch', 'seat_vent_pass',
+      () => parseInt(state.seat_vent_pass, 10),
+      v => seatLabels[v] || String(v), 0, 3, 1, 'y', 'cmf-pass-text',
+      v => _updateSeatDots('cmf-vent-pass-dots', v));
+
+    // ── Tap-to-toggle: sync e auto
+    _attachHvacToggle('cmf-ac-sync', 'sync',
+      () => String(state.hvac_sync_enable) === '1');
+    _attachHvacToggle('cmf-ac-auto', 'auto',
+      () => String(state.hvac_auto_enable) === '1');
   }, 300);
 });
+
+// ── Weather (Open-Meteo) ─────────────────────────────────────────────────────
+// API gratuita sem chave. Cache 30min + raio 5km pra evitar fetch redundante.
+let _weatherCache = null;
+let _weatherFetching = false;
+
+function _weatherEmoji(code) {
+  if (code === 0)       return '☀️';
+  if (code <= 3)        return '🌤️';
+  if (code <= 48)       return '🌫️';
+  if (code <= 67)       return '🌧️';
+  if (code <= 77)       return '🌨️';
+  if (code <= 82)       return '🌦️';
+  if (code <= 99)       return '⛈️';
+  return '🌡️';
+}
+
+async function _fetchWeather(lat, lng) {
+  if (_weatherCache &&
+      Math.abs(_weatherCache.lat - lat) < 0.05 &&
+      Math.abs(_weatherCache.lng - lng) < 0.05 &&
+      Date.now() - _weatherCache.ts < 30 * 60 * 1000) {
+    return _weatherCache.data;
+  }
+  if (_weatherFetching) return null;
+  _weatherFetching = true;
+  try {
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&current=temperature_2m,precipitation,weather_code,wind_speed_10m&timezone=auto`;
+    const r = await fetch(url);
+    const d = await r.json();
+    if (d && d.current) {
+      _weatherCache = { ts: Date.now(), lat, lng, data: d.current };
+      return d.current;
+    }
+  } catch (_) {}
+  finally { _weatherFetching = false; }
+  return null;
+}
+
+function _renderWeatherCell(elementId, fallbackTempC, current) {
+  const el = document.getElementById(elementId);
+  if (!el) return;
+  if (current) {
+    const t = current.temperature_2m != null ? Math.round(current.temperature_2m) : null;
+    const emoji = _weatherEmoji(current.weather_code);
+    const precip = +current.precipitation || 0;
+    let txt = `${emoji} ${t != null ? t + '°' : '--'}`;
+    if (precip > 0.1) txt += ` · ${precip.toFixed(1)}mm`;
+    el.textContent = txt;
+  } else if (Number.isFinite(fallbackTempC)) {
+    el.textContent = '🌡️ ' + fallbackTempC.toFixed(1) + '°';
+  } else {
+    el.textContent = '--';
+  }
+}
+
+// Chamado no renderTripCard quando viagem em andamento. Render imediato com
+// cache (se houver), e dispara fetch async pra atualizar quando vier resposta.
+function _refreshLiveWeather(s) {
+  const lat = +s.gps_lat || 0;
+  const lng = +s.gps_lng || 0;
+  const fallbackTemp = parseFloat(s.outside_temp);
+  // Sem GPS, mostra só temp do carro
+  if (!lat || !lng) {
+    _renderWeatherCell('d-live-weather', fallbackTemp, null);
+    return;
+  }
+  // Renderiza imediato com cache (se válido)
+  _renderWeatherCell('d-live-weather', fallbackTemp, _weatherCache?.data || null);
+  // Dispara fetch async — atualiza DOM quando vier (não bloqueia)
+  _fetchWeather(lat, lng).then(d => {
+    if (d) _renderWeatherCell('d-live-weather', fallbackTemp, d);
+  });
+}
+
+// ── Comparativo lado-a-lado de viagens do mesmo trecho ──────────────────────
+window.openCompareModal = function(tripAId) {
+  const trips = cachedAutoTrips || [];
+  const tripA = trips.find(t => t.tripId === tripAId);
+  if (!tripA) return;
+
+  // Recompute "irmãs" do trecho — mesmas regras do effIndex
+  function hav(la1, ln1, la2, ln2) {
+    const R = 6371000, toRad = d => d * Math.PI / 180;
+    const dLat = toRad(la2 - la1), dLng = toRad(ln2 - ln1);
+    const a = Math.sin(dLat/2)**2 + Math.cos(toRad(la1))*Math.cos(toRad(la2))*Math.sin(dLng/2)**2;
+    return 2 * R * Math.asin(Math.sqrt(a));
+  }
+  const similar = trips.filter(t => {
+    if (t.tripId === tripAId) return false;
+    if (!t.startLat || !t.endLat) return false;
+    if (Math.abs(t.distKm - tripA.distKm) / tripA.distKm > 0.10) return false;
+    if (hav(tripA.startLat, tripA.startLng, t.startLat, t.startLng) > 200) return false;
+    if (hav(tripA.endLat,   tripA.endLng,   t.endLat,   t.endLng)   > 200) return false;
+    return true;
+  }).sort((a, b) => (b.startMs || 0) - (a.startMs || 0));
+
+  document.getElementById('compare-modal')?.remove();
+  const modal = document.createElement('div');
+  modal.id = 'compare-modal';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:9999;overflow-y:auto;padding:16px;-webkit-overflow-scrolling:touch';
+
+  if (similar.length === 0) {
+    modal.innerHTML = `<div style="max-width:500px;margin:24px auto;color:#94a3b8;text-align:center">
+      <div style="font-size:14px;margin-bottom:12px">Nenhuma outra viagem deste trecho registrada.</div>
+      <button onclick="document.getElementById('compare-modal').remove()" style="padding:11px 22px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:#94a3b8;font-size:13px;cursor:pointer">Fechar</button>
+    </div>`;
+    document.body.appendChild(modal);
+    return;
+  }
+
+  const aLabel = (renameTracking[String(tripA.tripId)]?.name) || tripA.name || getAutoName(tripA) || 'Viagem';
+  const aDate  = fmtDate(tripA.startMs);
+  let rows = '';
+  for (const t of similar.slice(0, 30)) {
+    const nm = (renameTracking[String(t.tripId)]?.name) || t.name || getAutoName(t) || 'Viagem';
+    const dt = fmtDate(t.startMs);
+    rows += `<button onclick="showComparison('${tripA.tripId}','${t.tripId}')"
+      style="width:100%;background:#0f172a;border:1px solid #1e293b;border-radius:8px;padding:10px 12px;text-align:left;cursor:pointer;color:#e2e8f0;font-size:12px;line-height:1.4;margin-bottom:6px">
+      <div><strong>${nm}</strong></div>
+      <div style="color:#64748b;font-size:11px;margin-top:2px">${dt} · ${f1(t.distKm || 0)} km</div>
+    </button>`;
+  }
+
+  modal.innerHTML = `<div style="max-width:500px;margin:0 auto">
+    <div style="color:#22d3ee;font-weight:700;font-size:14px;margin-bottom:12px">🔀 Comparar viagens</div>
+    <div style="background:#0f172a;border:1px solid #22d3ee44;border-radius:10px;padding:10px 12px;margin-bottom:14px">
+      <div style="font-size:10px;color:#64748b;margin-bottom:4px;letter-spacing:.06em">VIAGEM A</div>
+      <div style="font-size:13px;color:#e2e8f0"><strong>${aLabel}</strong></div>
+      <div style="font-size:11px;color:#64748b;margin-top:2px">${aDate} · ${f1(tripA.distKm || 0)} km</div>
+    </div>
+    <div style="font-size:10px;color:#64748b;letter-spacing:.06em;margin-bottom:8px">ESCOLHA A VIAGEM B (mesmo trecho)</div>
+    ${rows}
+    <button onclick="document.getElementById('compare-modal').remove()"
+      style="width:100%;margin-top:8px;padding:11px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:#94a3b8;font-size:13px;cursor:pointer">
+      Cancelar
+    </button>
+  </div>`;
+  document.body.appendChild(modal);
+};
+
+window.showComparison = function(tripAId, tripBId) {
+  const trips = cachedAutoTrips || [];
+  const a = trips.find(t => t.tripId === tripAId);
+  const b = trips.find(t => t.tripId === tripBId);
+  if (!a || !b) return;
+
+  function metric(label, va, vb, fmt, bigger='better') {
+    const aN = +va, bN = +vb;
+    const validA = Number.isFinite(aN);
+    const validB = Number.isFinite(bN);
+    let aCls = '', bCls = '';
+    if (validA && validB && Math.abs(aN - bN) > 0.001 && bigger !== 'neutral') {
+      const aWins = bigger === 'better' ? aN > bN : aN < bN;
+      aCls = aWins ? 'cmp-win' : 'cmp-loss';
+      bCls = aWins ? 'cmp-loss' : 'cmp-win';
+    }
+    return `<div class="cmp-metric">
+      <div class="cmp-metric-label">${label}</div>
+      <div class="cmp-metric-vals">
+        <span class="cmp-val ${aCls}">${validA ? fmt(aN) : '--'}</span>
+        <span class="cmp-val ${bCls}">${validB ? fmt(bN) : '--'}</span>
+      </div>
+    </div>`;
+  }
+
+  const KWH_PER_L = 8.9;
+  const kmL = (t) => (t.distKm > 0.1 && ((t.netKwh || 0) > 0 || (t.fuelL || 0) > 0.001))
+    ? t.distKm / ((t.netKwh || 0) / KWH_PER_L + (t.fuelL || 0)) : NaN;
+  const kwh100 = (t) => t.distKm > 0.1 && (t.netKwh || 0) > 0 ? (t.netKwh / t.distKm) * 100 : NaN;
+  const avgKmh = (t) => (t.timeSec || 0) > 0 ? t.distKm / (t.timeSec / 3600) : NaN;
+  const regenRatio = (t) => (t.energyKwh || 0) > 0.05 ? (t.regenKwh || 0) / t.energyKwh * 100 : NaN;
+  const elecPct = (t) => t.distKm > 0 ? (1 - (t.hybridDistKm || 0) / t.distKm) * 100 : NaN;
+  const ecoScore = (t) => {
+    // Inline: usa as mesmas regras do _computeEcoScore
+    const dist = +t.distKm || 0; if (dist < 1 || (+t.timeSec || 0) < 30) return NaN;
+    const ep = Math.max(0, Math.min(1, 1 - ((t.hybridDistKm || 0) / dist)));
+    const rr = (t.energyKwh || 0) > 0.05 ? (t.regenKwh || 0) / t.energyKwh : 0;
+    const av = dist / ((+t.timeSec || 0) / 3600);
+    const s1 = ep * 35, s2 = Math.min(25, rr * 100);
+    let s3 = av >= 30 && av <= 70 ? 15 : av >= 20 && av <= 90 ? 8 : av >= 10 && av <= 110 ? 4 : 0;
+    const s4 = Math.max(0, 10 - ((+t.maxPowerPct || 0) / 10));
+    return Math.round(s1 + s2 + s3 + s4 + 7.5);
+  };
+
+  const aName = (renameTracking[String(a.tripId)]?.name) || a.name || getAutoName(a) || 'Viagem A';
+  const bName = (renameTracking[String(b.tripId)]?.name) || b.name || getAutoName(b) || 'Viagem B';
+
+  const sec2dur = (s) => {
+    const m = Math.round(s / 60), h = Math.floor(m / 60), rem = m % 60;
+    return h > 0 ? `${h}h ${rem}m` : `${m} min`;
+  };
+
+  const html = `<div style="max-width:600px;margin:0 auto">
+    <div style="color:#22d3ee;font-weight:700;font-size:14px;margin-bottom:14px">🔀 Comparativo</div>
+    <div class="cmp-headers">
+      <div class="cmp-head">
+        <div class="cmp-head-name">${aName}</div>
+        <div class="cmp-head-date">${fmtDate(a.startMs)}</div>
+      </div>
+      <div class="cmp-vs">VS</div>
+      <div class="cmp-head">
+        <div class="cmp-head-name">${bName}</div>
+        <div class="cmp-head-date">${fmtDate(b.startMs)}</div>
+      </div>
+    </div>
+    <div class="cmp-metrics">
+      ${metric('Distância',     a.distKm,           b.distKm,           v => f1(v) + ' km',    'neutral')}
+      ${metric('Duração',       a.timeSec,          b.timeSec,          v => sec2dur(v),       'less')}
+      ${metric('Vel. média',    avgKmh(a),          avgKmh(b),          v => v.toFixed(0) + ' km/h', 'neutral')}
+      ${metric('Vel. máxima',   a.maxSpeedKmh,      b.maxSpeedKmh,      v => v.toFixed(0) + ' km/h', 'neutral')}
+      ${metric('SOC início',    a.startSocPct,      b.startSocPct,      v => v.toFixed(0) + '%',    'neutral')}
+      ${metric('SOC fim',       a.endSocPct,        b.endSocPct,        v => v.toFixed(0) + '%',    'better')}
+      ${metric('% elétrico',    elecPct(a),         elecPct(b),         v => v.toFixed(0) + '%',    'better')}
+      ${metric('Energia consumida', a.energyKwh,    b.energyKwh,        v => v.toFixed(2) + ' kWh', 'less')}
+      ${metric('Energia regenerada', a.regenKwh,    b.regenKwh,         v => v.toFixed(2) + ' kWh', 'better')}
+      ${metric('% regen',       regenRatio(a),      regenRatio(b),      v => v.toFixed(0) + '%',    'better')}
+      ${metric('Combustível',   a.fuelL,            b.fuelL,            v => v.toFixed(2) + ' L',   'less')}
+      ${metric('kWh/100km',     kwh100(a),          kwh100(b),          v => v.toFixed(1),          'less')}
+      ${metric('km/L eq',       kmL(a),             kmL(b),             v => v.toFixed(1),          'better')}
+      ${metric('Eco score',     ecoScore(a),        ecoScore(b),        v => String(Math.round(v)), 'better')}
+    </div>
+    <button onclick="document.getElementById('compare-modal').remove()"
+      style="width:100%;margin-top:14px;padding:11px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:#94a3b8;font-size:13px;cursor:pointer">
+      Fechar
+    </button>
+  </div>`;
+
+  let modal = document.getElementById('compare-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'compare-modal';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:9999;overflow-y:auto;padding:16px;-webkit-overflow-scrolling:touch';
+    document.body.appendChild(modal);
+  }
+  modal.innerHTML = html;
+};
