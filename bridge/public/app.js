@@ -949,6 +949,21 @@ const filterState = {
 };
 let cachedCharges = null;
 let cachedRefuels = null;
+// Versão monotônica das caches — bumped a cada mutação de cachedCharges/cachedRefuels.
+// Usado pra invalidar índices derivados (Map<ts,charge>, timeline de preços) sem
+// precisar stringify do conteúdo a cada lookup.
+let _cachesVersion        = 0;
+let _chargesByTs          = null;
+let _chargesByTsVersion   = -1;
+function _bumpCachesVersion() { _cachesVersion++; }
+function _getChargesByTs() {
+  if (_chargesByTsVersion !== _cachesVersion) {
+    _chargesByTs = new Map();
+    if (cachedCharges) for (const c of cachedCharges) _chargesByTs.set(c.timestamp_ms || 0, c);
+    _chargesByTsVersion = _cachesVersion;
+  }
+  return _chargesByTs;
+}
 let _tankAvgPriceL = 0;     // R$/L médio atual no tanque (vem do bridge)
 let _batteryAvgPriceKwh = 0;// R$/kWh médio atual na bateria
 let cachedEvents  = null;
@@ -1102,6 +1117,7 @@ async function syncAllCache({ silent = false } = {}) {
     }
     cachedCharges = (await _idbGetAll('charges'))
       .sort((a, b) => (b.timestamp_ms || 0) - (a.timestamp_ms || 0));
+    _bumpCachesVersion();
 
     // Grava timestamp da última sync bem-sucedida
     await _idbSetMeta('lastSyncTs', Date.now());
@@ -1965,6 +1981,7 @@ async function _loadRefuels() {
     if (!r.ok) return;
     const d = await r.json();
     cachedRefuels = d.refuels || [];
+    _bumpCachesVersion();
     _tankAvgPriceL = +d.tank_avg_price_per_l || 0;
   } catch (_) {}
 }
@@ -3301,6 +3318,7 @@ async function executeMergeCharge(tsA, tsB) {
 
     cachedCharges = (await _idbGetAll('charges'))
       .sort((a, b) => (b.timestamp_ms || 0) - (a.timestamp_ms || 0));
+    _bumpCachesVersion();
     renderCharges();
   } catch (e) {
     alert('Erro ao unir recargas: ' + e.message);
@@ -3855,11 +3873,10 @@ let _priceTimelinesCache = null;
 let _priceTimelinesKey   = null;  // hash dos inputs pra invalidar quando mudar
 
 function _buildPriceTimelines() {
-  // Cache key — só rebuild quando refuels/charges mudaram
-  const key = JSON.stringify({
-    rIds: (cachedRefuels || []).map(r => `${r.id}|${r.timestamp_ms}|${r.price_per_liter}|${r.fuel_l_before}|${r.fuel_l_after}|${r.liters_added}`),
-    cIds: (cachedCharges || []).map(c => `${c.timestamp_ms}|${c.energy_kwh}|${c.soc_start}|${c.cost_override?.perKwh || 0}|${c.cost_override?.total || 0}`),
-  });
+  // Cache key — versão monotônica das caches (bumped por _bumpCachesVersion).
+  // Antes era JSON.stringify de todos os refuels+charges a cada chamada — em 5k trips
+  // × 6k itens isso era dezenas de MB de string alocados por render.
+  const key = _cachesVersion;
   if (_priceTimelinesCache && _priceTimelinesKey === key) return _priceTimelinesCache;
 
   // Gas timeline
@@ -3953,7 +3970,7 @@ window.applyTripCost = function(tripId, fuelL, netKwh) {
 
 function _chargeCostOverride(ts) {
   // Prioridade: cost_override no objeto de recarga (vem do servidor) → localStorage (fallback)
-  const fromCache = cachedCharges?.find(c => c.timestamp_ms === ts);
+  const fromCache = _getChargesByTs().get(ts);
   if (fromCache?.cost_override?.total > 0) return fromCache.cost_override;
   try { return JSON.parse(localStorage.getItem('eco_chg_cost_' + ts) || 'null'); } catch { return null; }
 }
@@ -3966,7 +3983,7 @@ function _chargerKwhMap() {
 }
 function _getChargerKwh(ts) {
   // Prioridade: objeto em cachedCharges (vem do servidor) → localStorage (fallback offline)
-  const fromCache = cachedCharges?.find(c => c.timestamp_ms === ts);
+  const fromCache = _getChargesByTs().get(ts);
   if (fromCache?.charger_kwh > 0) return fromCache.charger_kwh;
   return _chargerKwhMap()[ts] || 0;
 }
@@ -3994,7 +4011,7 @@ function _setChargerKwh(ts, val) {
     // Atualiza cache em memória e IDB para consistência imediata
     if (cachedCharges && updated?.timestamp_ms) {
       const idx = cachedCharges.findIndex(c => c.timestamp_ms === ts);
-      if (idx >= 0) cachedCharges[idx] = updated;
+      if (idx >= 0) { cachedCharges[idx] = updated; _bumpCachesVersion(); }
       _idbPutMany('charges', [updated]).catch(() => {});
     }
   }).catch(() => {/* offline — localStorage como fallback */});
@@ -4054,7 +4071,7 @@ window.applyChargeCost = function(ts, energyKwh) {
   }).then(r => r.json()).then(updated => {
     if (cachedCharges && updated?.timestamp_ms) {
       const idx = cachedCharges.findIndex(c => c.timestamp_ms === ts);
-      if (idx >= 0) cachedCharges[idx] = updated;
+      if (idx >= 0) { cachedCharges[idx] = updated; _bumpCachesVersion(); }
       _idbPutMany('charges', [updated]).catch(() => {});
     }
   }).catch(() => {/* offline — localStorage como fallback */});
@@ -4120,7 +4137,7 @@ window.applyChargeMeta = async function(ts) {
     const updated = await r.json();
     if (cachedCharges && updated?.timestamp_ms) {
       const idx = cachedCharges.findIndex(c => c.timestamp_ms === ts);
-      if (idx >= 0) cachedCharges[idx] = updated;
+      if (idx >= 0) { cachedCharges[idx] = updated; _bumpCachesVersion(); }
       _idbPutMany('charges', [updated]).catch(() => {});
     }
     el.style.display = 'none';
@@ -4143,7 +4160,7 @@ window.revertChargeMeta = async function(ts) {
     const updated = await r.json();
     if (cachedCharges && updated?.timestamp_ms) {
       const idx = cachedCharges.findIndex(c => c.timestamp_ms === ts);
-      if (idx >= 0) cachedCharges[idx] = updated;
+      if (idx >= 0) { cachedCharges[idx] = updated; _bumpCachesVersion(); }
       _idbPutMany('charges', [updated]).catch(() => {});
     }
     renderCharges();
@@ -4158,7 +4175,7 @@ window.deleteCharge = async function(ts) {
   try {
     const r = await apiFetch(`/api/charges/${ts}`, { method: 'DELETE' });
     if (!r.ok) { showToast('✗ Erro ao apagar recarga'); return; }
-    if (cachedCharges) cachedCharges = cachedCharges.filter(c => (c.timestamp_ms || 0) !== ts);
+    if (cachedCharges) { cachedCharges = cachedCharges.filter(c => (c.timestamp_ms || 0) !== ts); _bumpCachesVersion(); }
     _openIDB().then(db => {
       db.transaction('charges', 'readwrite').objectStore('charges').delete(ts);
     }).catch(() => {});
@@ -4215,6 +4232,7 @@ async function adminSyncWithLocal() {
   }
   if (cachedCharges === null) {
     try { cachedCharges = await _idbGetAll('charges'); } catch (_) { cachedCharges = []; }
+    _bumpCachesVersion();
   }
   // Refuels não tem IDB, só /api/refuels
   if (cachedRefuels === null) await _loadRefuels();
@@ -4280,7 +4298,7 @@ async function adminClearSnapshots() {
 async function adminRedownloadCache() {
   if (!confirm('Apagar cache local e baixar todos os dados do servidor?\nIsso pode demorar alguns segundos.')) return;
   _cacheSetStatus('⏳ Baixando...', null);
-  cachedAutoTrips = null; cachedCharges = null;
+  cachedAutoTrips = null; cachedCharges = null; _bumpCachesVersion();
   await _idbClearAll();
   const t = await syncAllCache({ silent: false });
   renderAutoTrips(); renderCharges();
@@ -4444,7 +4462,7 @@ async function adminRestoreServer(input) {
     if (r.ok) {
       // Força re-sync do cache local para refletir os dados restaurados
       await _idbClearAll();
-      cachedAutoTrips = null; cachedCharges = null;
+      cachedAutoTrips = null; cachedCharges = null; _bumpCachesVersion();
       await syncAllCache({ silent: true });
       _backupSetStatus(
         `✓ Restore concluído — ${data.autotrips} viagens · ${data.charges} recargas`,
@@ -5495,6 +5513,7 @@ window.saveLoc = async function() {
         cachedCharges[idx].location_name = updated.location_name ?? null;
         cachedCharges[idx].location_lat  = updated.location_lat  ?? null;
         cachedCharges[idx].location_lng  = updated.location_lng  ?? null;
+        _bumpCachesVersion();
         _idbPutMany('charges', [cachedCharges[idx]]).catch(() => {});
       }
     }

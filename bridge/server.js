@@ -574,10 +574,16 @@ function saveMaintenance() {
 // bridge re-aceitaria. Tombstone bloqueia o re-insert. Mantém últimos 2000
 // por categoria pra não crescer infinito.
 let deletedIds = { autotrips: [], charges: [], refuels: [] };
+// Sets paralelos pra lookup O(1) — array continua sendo a fonte de verdade
+// (mantém ordem de inserção e serializa direto pro JSON).
+let deletedIdsSets = { autotrips: new Set(), charges: new Set(), refuels: new Set() };
 try {
   if (fs.existsSync(DELETED_IDS_FILE)) {
     const loaded = JSON.parse(fs.readFileSync(DELETED_IDS_FILE, 'utf8'));
     deletedIds = { autotrips: [], charges: [], refuels: [], ...loaded };
+  }
+  for (const k of ['autotrips', 'charges', 'refuels']) {
+    deletedIdsSets[k] = new Set(deletedIds[k].map(String));
   }
   const total = deletedIds.autotrips.length + deletedIds.charges.length + deletedIds.refuels.length;
   if (total > 0) console.log(`✓ Tombstones: ${deletedIds.autotrips.length} viagens, ${deletedIds.charges.length} recargas, ${deletedIds.refuels.length} abastecimentos`);
@@ -588,15 +594,19 @@ function saveDeletedIds() {
 }
 function markDeleted(kind, id) {
   const key = String(id);
-  if (!deletedIds[kind]) deletedIds[kind] = [];
-  if (!deletedIds[kind].includes(key)) {
+  if (!deletedIds[kind]) { deletedIds[kind] = []; deletedIdsSets[kind] = new Set(); }
+  if (!deletedIdsSets[kind].has(key)) {
     deletedIds[kind].push(key);
-    if (deletedIds[kind].length > 2000) deletedIds[kind] = deletedIds[kind].slice(-2000);
+    deletedIdsSets[kind].add(key);
+    if (deletedIds[kind].length > 2000) {
+      deletedIds[kind] = deletedIds[kind].slice(-2000);
+      deletedIdsSets[kind] = new Set(deletedIds[kind]);
+    }
     saveDeletedIds();
   }
 }
 function isDeleted(kind, id) {
-  return (deletedIds[kind] || []).includes(String(id));
+  return deletedIdsSets[kind]?.has(String(id)) || false;
 }
 
 // ── Abastecimentos ──────────────────────────────────────────────────────────
@@ -1861,6 +1871,9 @@ app.post('/api/restore', (req, res) => {
       deletedIds.autotrips = bk.deletedIds.autotrips || [];
       deletedIds.charges   = bk.deletedIds.charges   || [];
       deletedIds.refuels   = bk.deletedIds.refuels   || [];
+      for (const k of ['autotrips', 'charges', 'refuels']) {
+        deletedIdsSets[k] = new Set(deletedIds[k].map(String));
+      }
       saveDeletedIds();
     }
 
