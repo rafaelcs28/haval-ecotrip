@@ -1944,6 +1944,59 @@ app.post('/api/restore', (req, res) => {
   }
 });
 
+// POST /api/admin/sync — sincroniza servidor com lista do cliente.
+// O PWA envia keep_autotrips + keep_charges (+ opcional keep_refuels) com
+// os IDs que existem no cache local. Tudo no servidor que NÃO está nessas
+// listas é deletado e marcado como tombstone (não volta nem por MQTT).
+app.post('/api/admin/sync', (req, res) => {
+  if (!adminCheckToken(req, res)) return;
+  const b = req.body || {};
+  const keepA = new Set((b.keep_autotrips || []).map(String));
+  const keepC = new Set((b.keep_charges   || []).map(v => parseInt(v, 10)));
+  const keepR = b.keep_refuels ? new Set(b.keep_refuels.map(String)) : null;
+
+  // Autotrips
+  let remA = 0;
+  for (let i = autoTripsArr.length - 1; i >= 0; i--) {
+    const t = autoTripsArr[i];
+    const id = String(t.tripId || t.startMs || '');
+    if (!keepA.has(id)) {
+      markDeleted('autotrips', id);
+      autoTripsArr.splice(i, 1);
+      try { fs.unlinkSync(path.join(AUTOTRIPS_DIR, `${id}.json`)); } catch (_) {}
+      remA++;
+    }
+  }
+
+  // Charges
+  let remC = 0;
+  for (let i = chargesArr.length - 1; i >= 0; i--) {
+    const ts = chargesArr[i].timestamp_ms || 0;
+    if (!keepC.has(ts)) {
+      markDeleted('charges', ts);
+      chargesArr.splice(i, 1);
+      remC++;
+    }
+  }
+  if (remC > 0) scheduleChargesFlush();
+
+  // Refuels (opcional — só sincroniza se o cliente enviou keep_refuels)
+  let remR = 0;
+  if (keepR) {
+    for (let i = refuels.length - 1; i >= 0; i--) {
+      if (!keepR.has(String(refuels[i].id || ''))) {
+        markDeleted('refuels', refuels[i].id);
+        refuels.splice(i, 1);
+        remR++;
+      }
+    }
+    if (remR > 0) { saveRefuels(); recomputeTankAvgPrice(); }
+  }
+
+  console.log(`✓ Sync: removidas ${remA} viagens + ${remC} recargas${keepR ? ` + ${remR} abastecimentos` : ''}`);
+  res.json({ ok: true, removed_autotrips: remA, removed_charges: remC, removed_refuels: remR });
+});
+
 app.post('/api/admin/clear-history', (req, res) => {
   if (!adminCheckToken(req, res)) return;
   try {

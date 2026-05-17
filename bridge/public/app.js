@@ -946,7 +946,7 @@ const filterState = {
   hist:        { active: 'all',   customFrom: '', customTo: '', search: '' },
   auto:        { active: 'today', customFrom: '', customTo: '', search: '' },
   logs:        { active: 'all',   type: 'all',   customFrom: '', customTo: '' },
-  stats_split: { active: 'all',   customFrom: '', customTo: '' },
+  stats:       { active: 'all',   customFrom: '', customTo: '' },
 };
 let cachedCharges = null;
 let cachedRefuels = null;
@@ -1203,7 +1203,7 @@ function setFilter(tabId, filter) {
   if (tabId === 'charges')     renderCharges();
   if (tabId === 'hist')        renderHistory();
   if (tabId === 'auto')        renderAutoTrips();
-  if (tabId === 'stats_split') _renderStatsSplit();
+  if (tabId === 'stats')       loadStats();
 }
 
 function setFilterDates(tabId) {
@@ -4343,6 +4343,45 @@ async function adminAction(path, label) {
 function adminRestart() { adminAction('/api/admin/restart', 'Reiniciando'); }
 function adminUpdate()  { adminAction('/api/admin/update',  'Atualizando'); }
 
+// Sincroniza servidor: tudo que NÃO está em cache local é apagado +
+// tombstoneado. Usado pra "limpar permanentemente" itens que voltavam por
+// MQTT antes do tombstone system.
+async function adminSyncWithLocal() {
+  const localAt = (cachedAutoTrips || []).length;
+  const localCh = (cachedCharges   || []).length;
+  const localRf = (cachedRefuels   || []).length;
+  if (!confirm(
+    `Sincronizar servidor com este celular?\n\n` +
+    `Atualmente no app:\n  • ${localAt} viagens\n  • ${localCh} recargas\n  • ${localRf} abastecimentos\n\n` +
+    `Tudo que estiver no servidor e NÃO neste celular será apagado permanentemente ` +
+    `(marcado como deletado pra não voltar via MQTT).\n\n` +
+    `Essa ação é IRREVERSÍVEL — quer continuar?`
+  )) return;
+
+  const keep_autotrips = (cachedAutoTrips || []).map(t => String(t.tripId || t.startMs));
+  const keep_charges   = (cachedCharges   || []).map(c => +c.timestamp_ms || 0).filter(x => x > 0);
+  const keep_refuels   = (cachedRefuels   || []).map(r => String(r.id || '')).filter(x => x);
+
+  adminSetStatus('Sincronizando…', null);
+  try {
+    const r = await apiFetch('/api/admin/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ keep_autotrips, keep_charges, keep_refuels }),
+    });
+    const d = await r.json();
+    if (!r.ok || !d.ok) throw new Error(d.error || 'erro');
+    adminSetStatus(
+      `✓ Sincronizado: removidas ${d.removed_autotrips} viagens, ` +
+      `${d.removed_charges} recargas, ${d.removed_refuels} abastecimentos do servidor.`,
+      true
+    );
+  } catch (e) {
+    adminSetStatus('✗ ' + e.message, false);
+  }
+}
+window.adminSyncWithLocal = adminSyncWithLocal;
+
 async function adminClearHistory() {
   const pw = prompt('Digite a senha para confirmar a exclusão do histórico:');
   if (pw === null) return;                          // cancelou
@@ -4566,33 +4605,57 @@ async function loadStats() {
 
   // Garante que o cache local está populado
   if (!cachedAutoTrips) await syncAllCache({ silent: true });
-  const trips = (cachedAutoTrips || []).filter(t => (t.distKm || 0) > 2);
+  const allTrips   = (cachedAutoTrips || []).filter(t => (t.distKm || 0) > 2);
+  const allCharges = cachedCharges || [];
+
+  // Filtro global da aba — aplica em todos os cards (semanal e mensal são
+  // intrinsecamente atrelados ao período da semana/mês e ficam só visíveis
+  // quando filtro = "Tudo" ou "Mês").
+  const [fStart, fEnd] = getFilterRange('stats');
+  const isAll = filterState.stats.active === 'all';
+  const inRange = (ms) => ms >= fStart && ms <= fEnd;
+  const trips   = isAll ? allTrips   : allTrips.filter(t => inRange(t.startMs || 0));
+  const charges = isAll ? allCharges : allCharges.filter(c => inRange(c.timestamp_ms || 0));
 
   let html = '<div style="padding-bottom:12px">';
+
+  // ── Filtro de período (topo da aba) ───────────────────────────────────────
+  const filterLabel = isAll ? 'Todo o histórico' :
+    (filterState.stats.active === 'today'  ? 'Hoje' :
+     filterState.stats.active === '7d'     ? 'Últimos 7 dias' :
+     filterState.stats.active === '30d'    ? 'Últimos 30 dias' :
+     filterState.stats.active === 'month'  ? 'Mês atual' : 'Período custom');
+  html += `<div style="background:#0c1019;border:1px solid #0f1520;border-radius:12px;padding:10px 14px;margin-bottom:12px">
+    <div style="font-size:10px;color:#475569;letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px">Período · ${filterLabel}</div>
+    ${filterChipsHTML('stats')}
+    <div style="font-size:10px;color:#64748b;margin-top:4px">
+      ${trips.length} viagem${trips.length !== 1 ? 's' : ''} · ${charges.length} recarga${charges.length !== 1 ? 's' : ''}
+    </div>
+  </div>`;
 
   // ── 1. Recordes pessoais ─────────────────────────────────────────────────
   html += _statsRecordsHTML(trips);
 
-  // ── 2. Comparativo semanal ───────────────────────────────────────────────
-  html += await _statsWeeklyHTML();
+  // ── 2. Comparativo semanal (só faz sentido sem filtro ou Mês) ─────────────
+  if (isAll || filterState.stats.active === 'month') {
+    html += await _statsWeeklyHTML();
+    html += await _statsMonthlyHTML();
+  }
 
-  // ── 3. Comparativo mensal ────────────────────────────────────────────────
-  html += await _statsMonthlyHTML();
-
-  // ── 4. Split elétrico / híbrido ──────────────────────────────────────────
+  // ── 3. Split elétrico / híbrido ──────────────────────────────────────────
   html += _statsElectricHTML(trips);
 
-  // ── 5. Comparativo EV vs ICE (economia acumulada) ────────────────────────
+  // ── 4. Comparativo EV vs ICE (economia acumulada) ────────────────────────
   html += _statsEvVsIceHTML(trips);
 
-  // ── 6. Saúde da bateria (SOH estimado) ───────────────────────────────────
-  html += _statsBatterySohHTML(cachedCharges || []);
+  // ── 5. Saúde da bateria (SOH estimado) ───────────────────────────────────
+  html += _statsBatterySohHTML(charges);
 
-  // ── 7. Heatmap de uso (onde mais andou) ──────────────────────────────────
+  // ── 6. Heatmap de uso (onde mais andou) ──────────────────────────────────
   html += _statsHeatmapHTML(trips);
 
-  // ── 8. Locais de recarga — ranking por eficiência ────────────────────────
-  html += _statsChargingLocationsHTML(cachedCharges || []);
+  // ── 7. Locais de recarga — ranking por eficiência ────────────────────────
+  html += _statsChargingLocationsHTML(charges);
 
   html += '</div>';
   container.innerHTML = html;
@@ -4829,46 +4892,34 @@ async function _statsMonthlyHTML() {
   return _statsCard('📆 Comparativo mensal', body);
 }
 
-// Re-render só do card "Split elétrico/híbrido" (chamado quando o filtro muda).
-function _renderStatsSplit() {
-  const el = document.getElementById('stats-split-card');
-  if (!el) return;
-  const trips = (cachedAutoTrips || []).filter(t => (t.distKm || 0) > 2);
-  el.outerHTML = _statsElectricHTML(trips);
-}
-
 function _statsElectricHTML(trips) {
-  // Universo TOTAL com dado de split — usado pros odômetros lifetime
-  // (não filtrado por período; mostra sempre o acumulado desde o início).
-  const tripsAll = trips.filter(t => t.hybridTimeSec !== undefined && (t.distKm || 0) > 0);
-  if (!tripsAll.length) {
-    return `<div id="stats-split-card">${_statsCard('⚡ Split elétrico / híbrido',
-      '<div style="color:#475569;font-size:12px">Dados disponíveis em viagens registradas a partir de agora. Cada nova viagem calculará automaticamente o tempo em modo elétrico vs híbrido.</div>')}</div>`;
+  // Universo lifetime — todas viagens com dado de split (independe do filtro
+  // global, mostra sempre o acumulado total no topo do card).
+  const tripsLifetimeAll = (cachedAutoTrips || [])
+    .filter(t => (t.distKm || 0) > 2 && t.hybridTimeSec !== undefined);
+  if (!tripsLifetimeAll.length) {
+    return _statsCard('⚡ Split elétrico / híbrido',
+      '<div style="color:#475569;font-size:12px">Dados disponíveis em viagens registradas a partir de agora. Cada nova viagem calculará automaticamente o tempo em modo elétrico vs híbrido.</div>');
   }
 
-  // Totais lifetime (todas as viagens com dado de split)
-  const lifetimeDist   = tripsAll.reduce((s, t) => s + (t.distKm || 0), 0);
-  const lifetimeHybrid = tripsAll.reduce((s, t) => s + (t.hybridDistKm || 0), 0);
+  // Lifetime
+  const lifetimeDist   = tripsLifetimeAll.reduce((s, t) => s + (t.distKm || 0), 0);
+  const lifetimeHybrid = tripsLifetimeAll.reduce((s, t) => s + (t.hybridDistKm || 0), 0);
   const lifetimeElec   = Math.max(0, lifetimeDist - lifetimeHybrid);
-  const sinceMs        = tripsAll.reduce((m, t) => Math.min(m, t.startMs || Infinity), Infinity);
+  const sinceMs        = tripsLifetimeAll.reduce((m, t) => Math.min(m, t.startMs || Infinity), Infinity);
   const sinceDate      = isFinite(sinceMs)
     ? new Date(sinceMs).toLocaleDateString('pt-BR', { day:'2-digit', month:'2-digit', year:'numeric' })
     : null;
 
-  // Filtro de período pros chips (independente do lifetime)
-  const [fStart, fEnd]   = getFilterRange('stats_split');
-  const isAll            = filterState.stats_split.active === 'all';
-  const tripsFiltered    = isAll ? tripsAll : tripsAll.filter(t => {
-    const ms = t.startMs || 0;
-    return ms >= fStart && ms <= fEnd;
-  });
+  // Período (trips já vem filtrado pelo filtro global)
+  const tripsFiltered = trips.filter(t => t.hybridTimeSec !== undefined && (t.distKm || 0) > 0);
   const periodDist   = tripsFiltered.reduce((s, t) => s + (t.distKm || 0), 0);
   const periodHybrid = tripsFiltered.reduce((s, t) => s + (t.hybridDistKm || 0), 0);
   const periodElec   = Math.max(0, periodDist - periodHybrid);
   const periodElecPct = periodDist > 0 ? Math.round(periodElec / periodDist * 100) : 0;
   const periodHybPct  = 100 - periodElecPct;
+  const isAllFilter  = filterState.stats.active === 'all';
 
-  // ── Odômetros lifetime (sempre acumulado total) ──
   const odoBlock = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:6px">
     <div style="background:rgba(74,222,128,0.06);border:1px solid rgba(74,222,128,0.18);border-radius:10px;padding:10px 12px">
       <div style="font-size:9px;font-weight:700;letter-spacing:1.2px;color:#4ade80;text-transform:uppercase">⚡ Elétrico</div>
@@ -4879,15 +4930,11 @@ function _statsElectricHTML(trips) {
       <div style="font-size:22px;font-weight:800;color:#fb923c;letter-spacing:-0.5px;font-variant-numeric:tabular-nums;margin-top:2px">${lifetimeHybrid.toFixed(1)}<span style="font-size:11px;color:#5B7394;font-weight:500;margin-left:3px">km</span></div>
     </div>
   </div>
-  ${sinceDate ? `<div style="font-size:10px;color:#475569;text-align:center;margin-bottom:12px;letter-spacing:0.3px">desde ${sinceDate} · ${tripsAll.length} viagens · ${lifetimeDist.toFixed(1)} km totais</div>` : ''}`;
+  ${sinceDate ? `<div style="font-size:10px;color:#475569;text-align:center;margin-bottom:12px;letter-spacing:0.3px">lifetime desde ${sinceDate} · ${tripsLifetimeAll.length} viagens · ${lifetimeDist.toFixed(1)} km totais</div>` : ''}`;
 
-  // ── Filtro de período ──
-  const filterChips = filterChipsHTML('stats_split');
-
-  // ── Stats do período filtrado ──
-  const periodLabel = isAll ? 'Total acumulado' : 'Período selecionado';
-  const periodBlock = `<div style="margin-top:10px">
-    <div style="font-size:10px;color:#475569;letter-spacing:0.5px;text-transform:uppercase;margin-bottom:6px">${periodLabel}</div>
+  // Bloco do período só aparece se filtro ≠ Tudo (senão seria duplicado com odômetros lifetime)
+  const periodBlock = isAllFilter ? '' : `<div style="margin-top:10px;border-top:1px solid #0F1520;padding-top:10px">
+    <div style="font-size:10px;color:#475569;letter-spacing:0.5px;text-transform:uppercase;margin-bottom:6px">Período selecionado</div>
     <div style="height:10px;background:#0F1C2E;border-radius:5px;overflow:hidden;margin-bottom:6px">
       <div style="height:100%;width:${periodElecPct}%;background:linear-gradient(90deg,#39FF88,#4ade80);border-radius:5px 0 0 5px;display:inline-block"></div>
     </div>
@@ -4898,24 +4945,7 @@ function _statsElectricHTML(trips) {
     <div style="font-size:11px;color:#64748b">${tripsFiltered.length} viagens · ${periodDist.toFixed(1)} km</div>
   </div>`;
 
-  // ── Últimas 5 viagens (do período filtrado) ──
-  let rows = '';
-  if (tripsFiltered.length > 0) {
-    rows = '<div style="font-size:11px;color:#475569;margin-top:14px;margin-bottom:4px">Últimas viagens:</div>';
-    tripsFiltered.slice(0, 5).forEach(t => {
-      const hyb = t.hybridDistKm || 0;
-      const elc = Math.max(0, t.distKm - hyb);
-      const ep  = t.distKm > 0 ? Math.round(elc / t.distKm * 100) : 0;
-      const d   = new Date(t.startMs || 0);
-      const dt  = d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
-      rows += `<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid #0F1520">
-        <span style="font-size:11px;color:#64748b">${dt} · ${f1(t.distKm)} km</span>
-        <span style="font-size:12px;font-weight:700;color:${ep > 70 ? '#4ade80' : ep > 40 ? '#60a5fa' : '#fb923c'}">⚡ ${ep}%</span>
-      </div>`;
-    });
-  }
-
-  return `<div id="stats-split-card">${_statsCard('⚡ Split elétrico / híbrido', odoBlock + filterChips + periodBlock + rows)}</div>`;
+  return _statsCard('⚡ Split elétrico / híbrido', odoBlock + periodBlock);
 }
 
 // ── Ranking de locais de recarga por eficiência ───────────────────────────────
