@@ -330,6 +330,12 @@
         </div>
       </div>
 
+      <!-- Card de manutenções — próximas revisões com alerta por proximidade -->
+      <div class="card" id="d-maint-card" style="display:none">
+        <div class="card-title">🔧 Manutenções</div>
+        <div id="d-maint-list"></div>
+      </div>
+
       <!-- Card 1: Desde última partida (rolling window) -->
       <div class="card trip-card" id="d-roll-card" style="display:none">
         <div class="trip-hdr">
@@ -974,6 +980,23 @@
             style="min-height:40px;background:#0f172a;border-radius:8px;padding:10px 12px;font-size:12px;color:#94a3b8;white-space:pre-wrap;word-break:break-word">
             Pronto.
           </div>
+        </div>
+      </div>
+
+      <!-- ── Manutenções ──────────────────────────────────────────────────────── -->
+      <div class="settings-card">
+        <div class="sc-header" onclick="toggleSection('sc-maint-body','sc-maint-btn')">
+          <span class="sc-title">🔧 Manutenções</span>
+          <button id="sc-maint-btn" type="button" class="sc-toggle">▲</button>
+        </div>
+        <div id="sc-maint-body">
+          <div style="font-size:11px;color:#64748b;margin-bottom:10px;line-height:1.6">
+            Intervalos por km (revisão, óleo, freios) e histórico do que já foi feito. O card no Dash avisa quando está perto do vencimento.
+          </div>
+          <button type="button" onclick="openMaintAdmin()"
+            style="width:100%;background:rgba(74,222,128,.10);border:1px solid rgba(74,222,128,.28);color:#4ade80;border-radius:10px;padding:10px;font-size:13px;font-weight:600;cursor:pointer">
+            🔧 Gerenciar manutenções
+          </button>
         </div>
       </div>
 

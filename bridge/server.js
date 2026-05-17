@@ -49,6 +49,7 @@ const PUSH_SUBS_FILE    = path.join(__dirname, 'push_subscriptions.json');
 const RENAMES_FILE      = path.join(__dirname, 'pending_renames.json');
 const CHARGE_LOCS_FILE    = path.join(__dirname, 'charge_locations.json');
 const KNOWN_PLACES_FILE   = path.join(__dirname, 'known_places.json');
+const MAINTENANCE_FILE    = path.join(__dirname, 'maintenance.json');
 const NOTIF_PREFS_FILE    = path.join(__dirname, 'notif_prefs.json');
 const NOTIF_HISTORY_FILE  = path.join(__dirname, 'notif_history.json');
 const EVENTS_FILE         = path.join(__dirname, 'events.json');
@@ -580,6 +581,61 @@ function saveKnownPlaces() {
   try { fs.writeFileSync(KNOWN_PLACES_FILE, JSON.stringify(knownPlaces, null, 2)); } catch (_) {}
 }
 
+// ── Manutenções — intervalos por km + histórico ─────────────────────────────
+// Pré-config inicial baseada no carro do usuário: revisão a cada 12k, última em 24.200.
+let maintenance = {
+  intervals: [
+    { id: 'revisao', label: 'Revisão geral', every_km: 12000, alert_km: 1000, icon: '🔧' },
+  ],
+  history: [
+    {
+      id: 'init-revisao-24200',
+      type_id: 'revisao',
+      odometer_km: 24200,
+      date_ms: Date.now() - 60 * 24 * 60 * 60 * 1000,   // estimativa: ~2 meses atrás
+      notes: 'Pré-configurado a partir do dado inicial do usuário',
+    },
+  ],
+};
+try {
+  if (fs.existsSync(MAINTENANCE_FILE)) {
+    maintenance = JSON.parse(fs.readFileSync(MAINTENANCE_FILE, 'utf8'));
+  } else {
+    fs.writeFileSync(MAINTENANCE_FILE, JSON.stringify(maintenance, null, 2));
+    console.log('✓ maintenance.json criado com config inicial');
+  }
+  console.log(`✓ Manutenções: ${maintenance.intervals.length} intervalo(s), ${maintenance.history.length} registro(s)`);
+} catch (e) { console.error('Aviso: maintenance.json:', e.message); }
+
+function saveMaintenance() {
+  try { fs.writeFileSync(MAINTENANCE_FILE, JSON.stringify(maintenance, null, 2)); } catch (_) {}
+}
+
+// Computa o status de cada intervalo (próxima manutenção, km restantes, severidade)
+function computeMaintenance() {
+  const odom = +state.odometer_km || 0;
+  return maintenance.intervals.map(itv => {
+    const last = maintenance.history
+      .filter(h => h.type_id === itv.id)
+      .sort((a, b) => b.odometer_km - a.odometer_km)[0];
+    const lastKm = last ? last.odometer_km : 0;
+    const nextKm = lastKm + itv.every_km;
+    const remaining = nextKm - odom;
+    const alertKm = itv.alert_km || 500;
+    let status = 'ok';
+    if (remaining <= 0)          status = 'overdue';
+    else if (remaining <= alertKm) status = 'soon';
+    return {
+      ...itv,
+      last_km: lastKm,
+      last_date_ms: last?.date_ms || null,
+      next_km: nextKm,
+      remaining_km: remaining,
+      status,
+    };
+  });
+}
+
 // Retorna o local conhecido mais próximo dentro do raio do local, ou null
 function matchKnownPlace(lat, lng) {
   if (!lat || !lng) return null;
@@ -944,6 +1000,71 @@ app.delete('/api/known-places/:id', (req, res) => {
   if (idx < 0) return res.status(404).json({ error: 'not found' });
   knownPlaces.splice(idx, 1);
   saveKnownPlaces();
+  res.json({ ok: true });
+});
+
+// ── Manutenções ──────────────────────────────────────────────────────────────
+app.get('/api/maintenance', (_req, res) => {
+  res.json({
+    intervals: maintenance.intervals,
+    history:   [...maintenance.history].sort((a, b) => (b.odometer_km || 0) - (a.odometer_km || 0)),
+    next:      computeMaintenance(),
+    current_odometer_km: +state.odometer_km || 0,
+  });
+});
+
+// POST /api/maintenance/intervals  — cria ou atualiza um intervalo
+app.post('/api/maintenance/intervals', (req, res) => {
+  const { id, label, every_km, icon, alert_km } = req.body || {};
+  if (!id || !label || !(parseFloat(every_km) > 0))
+    return res.status(400).json({ error: 'id, label e every_km > 0 obrigatórios' });
+  const interval = {
+    id: String(id).trim(),
+    label: String(label).trim(),
+    every_km: parseFloat(every_km),
+    alert_km: parseFloat(alert_km) || 500,
+    icon: icon || '🔧',
+  };
+  const idx = maintenance.intervals.findIndex(i => i.id === interval.id);
+  if (idx >= 0) maintenance.intervals[idx] = interval;
+  else maintenance.intervals.push(interval);
+  saveMaintenance();
+  res.json({ ok: true, interval });
+});
+
+app.delete('/api/maintenance/intervals/:id', (req, res) => {
+  const idx = maintenance.intervals.findIndex(i => i.id === req.params.id);
+  if (idx < 0) return res.status(404).json({ error: 'não encontrado' });
+  maintenance.intervals.splice(idx, 1);
+  saveMaintenance();
+  res.json({ ok: true });
+});
+
+// POST /api/maintenance/history — registra manutenção feita
+app.post('/api/maintenance/history', (req, res) => {
+  const { type_id, odometer_km, date_ms, notes } = req.body || {};
+  if (!type_id) return res.status(400).json({ error: 'type_id obrigatório' });
+  if (!maintenance.intervals.find(i => i.id === type_id))
+    return res.status(400).json({ error: 'type_id inválido' });
+  const odo = parseFloat(odometer_km);
+  if (!(odo > 0)) return res.status(400).json({ error: 'odometer_km > 0 obrigatório' });
+  const rec = {
+    id: 'h-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
+    type_id: String(type_id),
+    odometer_km: odo,
+    date_ms: parseInt(date_ms) || Date.now(),
+    notes: notes ? String(notes).slice(0, 240) : '',
+  };
+  maintenance.history.push(rec);
+  saveMaintenance();
+  res.json({ ok: true, record: rec });
+});
+
+app.delete('/api/maintenance/history/:id', (req, res) => {
+  const idx = maintenance.history.findIndex(h => h.id === req.params.id);
+  if (idx < 0) return res.status(404).json({ error: 'não encontrado' });
+  maintenance.history.splice(idx, 1);
+  saveMaintenance();
   res.json({ ok: true });
 });
 

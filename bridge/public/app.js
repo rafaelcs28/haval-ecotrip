@@ -6190,3 +6190,195 @@ window.showComparison = function(tripAId, tripBId) {
   }
   modal.innerHTML = html;
 };
+
+// ── Manutenções: card do dash + admin ──────────────────────────────────────
+let _maintCache = null;   // { intervals, history, next, current_odometer_km }
+let _maintTimer = null;
+
+async function _loadMaintenance() {
+  try {
+    const r = await apiFetch('/api/maintenance');
+    if (!r.ok) return;
+    _maintCache = await r.json();
+    _renderMaintCard();
+  } catch (_) {}
+}
+
+function _renderMaintCard() {
+  const card = document.getElementById('d-maint-card');
+  const list = document.getElementById('d-maint-list');
+  if (!card || !list || !_maintCache) return;
+
+  const items = _maintCache.next || [];
+  if (!items.length) { card.style.display = 'none'; return; }
+  card.style.display = '';
+
+  const f0 = (n) => Math.round(n).toLocaleString('pt-BR');
+  list.innerHTML = items.map(it => {
+    const rem = it.remaining_km;
+    let remTxt;
+    if (rem <= 0) remTxt = `Atrasada ${f0(Math.abs(rem))} km`;
+    else          remTxt = `em ${f0(rem)} km`;
+    // Barra: percentual percorrido do intervalo (de last_km até next_km)
+    const span = it.every_km;
+    const consumed = Math.max(0, Math.min(span, span - rem));
+    const pct = span > 0 ? Math.min(100, (consumed / span) * 100) : 0;
+    const lastDate = it.last_date_ms
+      ? new Date(it.last_date_ms).toLocaleDateString('pt-BR', { day:'2-digit', month:'2-digit', year:'numeric' })
+      : '--';
+    return `<div class="maint-row ${it.status}">
+      <span class="maint-icon">${it.icon || '🔧'}</span>
+      <div class="maint-body">
+        <div class="maint-body-row1">
+          <span class="maint-label">${it.label}</span>
+          <span class="maint-rem-km">${remTxt}</span>
+        </div>
+        <div class="maint-bar-track"><div class="maint-bar-fill" style="width:${pct.toFixed(1)}%"></div></div>
+        <div class="maint-body-row2">
+          <span>Última: ${f0(it.last_km)} km · ${lastDate}</span>
+          <span>Próxima: ${f0(it.next_km)} km</span>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// Refresh inicial + a cada 5min, e quando odometer mudar significativamente
+function _initMaintenance() {
+  _loadMaintenance();
+  if (_maintTimer) clearInterval(_maintTimer);
+  _maintTimer = setInterval(_loadMaintenance, 5 * 60 * 1000);
+}
+window.addEventListener('load', () => setTimeout(_initMaintenance, 800));
+
+// ── Admin: gerenciar manutenções ─────────────────────────────────────────
+window.openMaintAdmin = async function() {
+  await _loadMaintenance();
+  if (!_maintCache) { showToast('Erro ao carregar manutenções'); return; }
+
+  document.getElementById('maint-admin-modal')?.remove();
+  const modal = document.createElement('div');
+  modal.id = 'maint-admin-modal';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:9999;overflow-y:auto;padding:16px;-webkit-overflow-scrolling:touch';
+
+  const odom = _maintCache.current_odometer_km || 0;
+  const intervalsHtml = (_maintCache.intervals || []).map(itv => `
+    <div class="maint-admin-item">
+      <div style="flex:1;min-width:0">
+        <div class="maint-admin-name">${itv.icon || '🔧'} ${itv.label}</div>
+        <div class="maint-admin-sub">a cada ${itv.every_km.toLocaleString('pt-BR')} km · alerta ${itv.alert_km || 500} km antes</div>
+      </div>
+      <div class="maint-admin-actions">
+        <button onclick="editMaintInterval('${itv.id}')">✏️</button>
+        <button onclick="deleteMaintInterval('${itv.id}','${itv.label.replace(/'/g,'')}')">🗑</button>
+      </div>
+    </div>`).join('');
+
+  const histHtml = (_maintCache.history || []).map(h => {
+    const itv = _maintCache.intervals.find(i => i.id === h.type_id);
+    const dt = new Date(h.date_ms).toLocaleDateString('pt-BR', { day:'2-digit', month:'2-digit', year:'numeric' });
+    return `<div class="maint-admin-item">
+      <div style="flex:1;min-width:0">
+        <div class="maint-admin-name">${itv?.icon || '🔧'} ${itv?.label || h.type_id} · ${h.odometer_km.toLocaleString('pt-BR')} km</div>
+        <div class="maint-admin-sub">${dt}${h.notes ? ' · ' + h.notes : ''}</div>
+      </div>
+      <div class="maint-admin-actions">
+        <button onclick="deleteMaintHistory('${h.id}')">🗑</button>
+      </div>
+    </div>`;
+  }).join('');
+
+  modal.innerHTML = `<div style="max-width:560px;margin:0 auto">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+      <div style="color:#4ade80;font-weight:700;font-size:14px">🔧 Manutenções</div>
+      <button onclick="document.getElementById('maint-admin-modal').remove()" style="background:none;border:none;color:#64748b;font-size:22px;cursor:pointer">✕</button>
+    </div>
+    <div style="font-size:11px;color:#64748b;margin-bottom:14px">Odômetro atual: <strong style="color:#e2e8f0">${odom.toLocaleString('pt-BR')} km</strong></div>
+
+    <div style="font-size:10px;color:#475569;letter-spacing:.06em;margin-bottom:6px">REGISTRAR MANUTENÇÃO FEITA</div>
+    <div class="maint-admin-item" style="display:block">
+      <select id="maint-new-type" style="width:100%;padding:10px;background:#0c1019;border:1px solid #1e293b;border-radius:6px;color:#e2e8f0;font-size:12px;margin-bottom:8px">
+        ${(_maintCache.intervals || []).map(i => `<option value="${i.id}">${i.icon} ${i.label}</option>`).join('')}
+      </select>
+      <input id="maint-new-odo" type="number" placeholder="Odômetro km (ex: ${odom > 0 ? Math.round(odom) : 30000})" style="width:100%;padding:10px;background:#0c1019;border:1px solid #1e293b;border-radius:6px;color:#e2e8f0;font-size:12px;margin-bottom:8px" value="${odom > 0 ? Math.round(odom) : ''}">
+      <input id="maint-new-date" type="date" value="${new Date().toISOString().slice(0,10)}" style="width:100%;padding:10px;background:#0c1019;border:1px solid #1e293b;border-radius:6px;color:#e2e8f0;font-size:12px;margin-bottom:8px">
+      <input id="maint-new-notes" type="text" placeholder="Observações (opcional)" style="width:100%;padding:10px;background:#0c1019;border:1px solid #1e293b;border-radius:6px;color:#e2e8f0;font-size:12px;margin-bottom:10px">
+      <button onclick="addMaintHistory()" style="width:100%;padding:11px;background:#0d2b1a;border:1px solid #166534;color:#4ade80;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600">+ Registrar</button>
+    </div>
+
+    <div style="font-size:10px;color:#475569;letter-spacing:.06em;margin:18px 0 6px">INTERVALOS (TIPOS)</div>
+    ${intervalsHtml}
+    <button onclick="editMaintInterval(null)" style="width:100%;padding:11px;background:#1e293b;border:1px solid #334155;color:#94a3b8;border-radius:8px;cursor:pointer;font-size:12px;margin-bottom:18px">+ Novo intervalo</button>
+
+    <div style="font-size:10px;color:#475569;letter-spacing:.06em;margin-bottom:6px">HISTÓRICO</div>
+    ${histHtml || '<div style="color:#475569;font-size:12px;text-align:center;padding:12px">Nenhum registro.</div>'}
+
+    <button onclick="document.getElementById('maint-admin-modal').remove()" style="width:100%;margin-top:14px;padding:11px;background:#1e293b;border:1px solid #334155;color:#94a3b8;border-radius:8px;cursor:pointer;font-size:13px">Fechar</button>
+  </div>`;
+  document.body.appendChild(modal);
+};
+
+window.addMaintHistory = async function() {
+  const type_id = document.getElementById('maint-new-type').value;
+  const odometer_km = parseFloat(document.getElementById('maint-new-odo').value);
+  const dateStr = document.getElementById('maint-new-date').value;
+  const notes = document.getElementById('maint-new-notes').value;
+  if (!(odometer_km > 0)) { showToast('Informe o odômetro'); return; }
+  const date_ms = dateStr ? new Date(dateStr).getTime() : Date.now();
+  try {
+    const r = await apiFetch('/api/maintenance/history', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type_id, odometer_km, date_ms, notes }),
+    });
+    const d = await r.json();
+    if (!r.ok || !d.ok) throw new Error(d.error || 'erro');
+    showToast('✓ Manutenção registrada');
+    await _loadMaintenance();
+    openMaintAdmin();
+  } catch (e) { showToast('✗ ' + e.message); }
+};
+
+window.deleteMaintHistory = async function(id) {
+  if (!confirm('Apagar este registro?')) return;
+  try {
+    const r = await apiFetch('/api/maintenance/history/' + id, { method: 'DELETE' });
+    if (!r.ok) throw new Error('erro');
+    await _loadMaintenance();
+    openMaintAdmin();
+  } catch (_) { showToast('✗ Falha ao apagar'); }
+};
+
+window.editMaintInterval = async function(id) {
+  const existing = id ? (_maintCache?.intervals || []).find(i => i.id === id) : null;
+  const newId    = existing ? id : prompt('ID curto (ex: oleo, freios)', '');
+  if (!newId) return;
+  const label    = prompt('Nome', existing?.label || '');
+  if (!label) return;
+  const every    = parseFloat(prompt('Intervalo em km (ex: 12000)', existing?.every_km || 12000));
+  if (!(every > 0)) return;
+  const alert    = parseFloat(prompt('Alertar quantos km antes? (ex: 1000)', existing?.alert_km || 1000));
+  const icon     = prompt('Ícone (emoji)', existing?.icon || '🔧') || '🔧';
+  try {
+    const r = await apiFetch('/api/maintenance/intervals', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: newId.trim(), label, every_km: every, alert_km: alert, icon }),
+    });
+    const d = await r.json();
+    if (!r.ok || !d.ok) throw new Error(d.error || 'erro');
+    showToast('✓ Intervalo salvo');
+    await _loadMaintenance();
+    openMaintAdmin();
+  } catch (e) { showToast('✗ ' + e.message); }
+};
+
+window.deleteMaintInterval = async function(id, label) {
+  if (!confirm(`Apagar o intervalo "${label}"?\nO histórico relacionado não será apagado.`)) return;
+  try {
+    const r = await apiFetch('/api/maintenance/intervals/' + encodeURIComponent(id), { method: 'DELETE' });
+    if (!r.ok) throw new Error('erro');
+    await _loadMaintenance();
+    openMaintAdmin();
+  } catch (_) { showToast('✗ Falha ao apagar'); }
+};

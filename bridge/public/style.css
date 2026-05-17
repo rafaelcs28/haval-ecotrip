@@ -1960,3 +1960,78 @@ html, body {
 }
 .cmp-val.cmp-win  { color: #4ade80; font-weight: 800; }
 .cmp-val.cmp-loss { color: #94a3b8; opacity: 0.6; }
+
+/* ── Manutenções (card do Dash + admin) ─────────────────────────────────── */
+#d-maint-card { order: 6; padding: 10px 14px; }
+.maint-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+.maint-row:last-child { border-bottom: none; }
+.maint-icon { font-size: 18px; flex-shrink: 0; width: 24px; text-align: center; }
+.maint-body { flex: 1; min-width: 0; }
+.maint-body-row1 {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 12px;
+  font-weight: 600;
+}
+.maint-body-row1 .maint-label { color: #e2e8f0; }
+.maint-body-row1 .maint-rem-km {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: #4ade80;
+}
+.maint-body-row2 {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+.maint-bar-track {
+  height: 4px;
+  background: rgba(91,115,148,0.18);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-top: 6px;
+}
+.maint-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #4ade80, #4ade80);
+  border-radius: 2px;
+  transition: width .6s ease, background .3s;
+}
+/* Estados — colore valor + barra */
+.maint-row.soon .maint-rem-km     { color: #fbbf24; }
+.maint-row.soon .maint-bar-fill   { background: linear-gradient(90deg, #fbbf24, #f59e0b); }
+.maint-row.overdue .maint-rem-km  { color: #f87171; }
+.maint-row.overdue .maint-bar-fill{ background: linear-gradient(90deg, #f87171, #ef4444); }
+.maint-row.overdue .maint-label   { color: #f87171; }
+
+/* Admin: lista de intervalos + histórico */
+.maint-admin-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  background: #0f172a;
+  border: 1px solid #1e293b;
+  border-radius: 10px;
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+.maint-admin-name { color: #e2e8f0; font-weight: 600; }
+.maint-admin-sub  { color: var(--muted); font-size: 10px; margin-top: 2px; }
+.maint-admin-actions button {
+  background: none;
+  border: none;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 4px 6px;
+  margin-left: 4px;
+}
