@@ -3902,13 +3902,15 @@ function _buildPriceTimelines() {
 }
 
 function _priceAt(timeline, ms) {
-  // Busca o último ponto cujo ts <= ms. Linear search é OK pra <1000 eventos.
-  let price = timeline[0].price;
-  for (const e of timeline) {
-    if (e.ts <= ms) price = e.price;
-    else break;
+  // Busca binária — timeline é construída em ordem cronológica.
+  // Procura o último ponto cujo ts <= ms (upper bound − 1).
+  let lo = 0, hi = timeline.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (timeline[mid].ts <= ms) lo = mid + 1;
+    else hi = mid;
   }
-  return price;
+  return timeline[lo > 0 ? lo - 1 : 0].price;
 }
 
 // Retorna {gas, kwh} no preço que estava vigente em `ms`. Fallback pra
