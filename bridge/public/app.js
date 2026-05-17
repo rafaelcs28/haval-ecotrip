@@ -6783,3 +6783,62 @@ window.deleteMaintInterval = async function(id, label) {
     openMaintAdmin();
   } catch (_) { showToast('✗ Falha ao apagar'); }
 };
+
+// ── PWA Shortcuts — dispara ação ao abrir o app via atalho do iOS ─────────
+// O manifest.json define ?shortcut=lock_open, ?shortcut=ac_on, etc.
+// Esse handler intercepta o param ao carregar e dispara a ação correspondente.
+window.addEventListener('load', () => {
+  const params = new URLSearchParams(location.search);
+  const sc = params.get('shortcut');
+  if (!sc) return;
+  // Limpa a URL (não queremos repetir ao recarregar)
+  history.replaceState({}, '', location.pathname);
+  setTimeout(() => {
+    if (sc === 'drive') {
+      const btn = document.querySelector('[data-panel="drive"]');
+      btn?.click();
+      return;
+    }
+    // Ações remotas: lock_open, ac_on, engine_on, etc.
+    const ACTION_LABELS = {
+      lock_open: 'Destrancar portas',
+      ac_on:     'Ligar AC',
+      engine_on: 'Ligar motor',
+    };
+    const label = ACTION_LABELS[sc];
+    if (label && typeof sendRemoteAction === 'function') {
+      sendRemoteAction(sc, label);
+    }
+  }, 800);  // dá tempo do WS conectar
+});
+
+// ── Tema (Dark / Light / Auto) ──────────────────────────────────────────────
+// Persistido em localStorage. "auto" segue prefers-color-scheme do iOS.
+function _getThemePref() {
+  return localStorage.getItem('eco_theme') || 'dark';
+}
+function _applyTheme() {
+  const pref = _getThemePref();
+  const root = document.documentElement;
+  root.classList.remove('theme-light', 'theme-dark');
+  let effective = pref;
+  if (pref === 'auto') {
+    effective = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+  }
+  if (effective === 'light') root.classList.add('theme-light');
+  else                       root.classList.add('theme-dark');
+}
+window.setTheme = function(pref) {
+  localStorage.setItem('eco_theme', pref);
+  _applyTheme();
+  showToast('🎨 Tema: ' + pref);
+  // Atualiza visual dos botões no admin
+  document.querySelectorAll('[data-theme-btn]').forEach(b => {
+    b.classList.toggle('active', b.dataset.themeBtn === pref);
+  });
+};
+// Aplica no boot e a cada mudança de prefers-color-scheme (modo auto)
+_applyTheme();
+matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => {
+  if (_getThemePref() === 'auto') _applyTheme();
+});

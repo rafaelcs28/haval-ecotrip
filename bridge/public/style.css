@@ -2059,3 +2059,23 @@ html, body {
   0%, 100% { opacity: 0.7; }
   50%      { opacity: 1; }
 }
+
+/* ── Tema claro (experimental — vários elementos seguem com look dark) ──── */
+/* Aplica overrides quando .theme-light está em <html> (definido por JS).
+   Cores principais via CSS vars seguem; itens com cor hardcoded mantêm dark. */
+:root.theme-light {
+  --void:   #f1f5f9;
+  --card:   #ffffff;
+  --text:   #0f172a;
+  --muted:  #475569;
+  --border: #cbd5e1;
+}
+:root.theme-light html, :root.theme-light body { background: var(--void); }
+:root.theme-light #header,
+:root.theme-light #tab-bar { background: #ffffff; border-color: var(--border); }
+:root.theme-light .tab { color: #94a3b8; }
+:root.theme-light .tab.active { color: var(--neon); }
+:root.theme-light .card { background: var(--card); border-color: var(--border); box-shadow: 0 1px 3px rgba(15,23,42,0.06); }
+:root.theme-light .card-title { color: #64748b; }
+:root.theme-light .filter-chip { background: #f8fafc; border-color: var(--border); color: #475569; }
+:root.theme-light .filter-chip.active { background: rgba(57,255,136,0.10); color: #0a8a3a; border-color: rgba(57,255,136,0.45); }

@@ -18,5 +18,35 @@
       "sizes": "512x512",
       "type": "image/png"
     }
+  ],
+  "shortcuts": [
+    {
+      "name": "Destravar",
+      "short_name": "Destravar",
+      "description": "Destrancar as portas do veículo",
+      "url": "/?shortcut=lock_open",
+      "icons": [{ "src": "icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Ligar AC",
+      "short_name": "AC",
+      "description": "Ativar ar condicionado remotamente",
+      "url": "/?shortcut=ac_on",
+      "icons": [{ "src": "icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Ligar motor",
+      "short_name": "Motor",
+      "description": "Ligar o motor remotamente",
+      "url": "/?shortcut=engine_on",
+      "icons": [{ "src": "icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Drive (cluster)",
+      "short_name": "Drive",
+      "description": "Abrir painel cluster",
+      "url": "/?shortcut=drive",
+      "icons": [{ "src": "icon-192.png", "sizes": "192x192" }]
+    }
   ]
 }

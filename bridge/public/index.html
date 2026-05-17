@@ -955,6 +955,24 @@
         </div>
       </div>
 
+      <!-- ── Aparência ────────────────────────────────────────────────────────── -->
+      <div class="settings-card">
+        <div class="sc-header" onclick="toggleSection('sc-theme-body','sc-theme-btn')">
+          <span class="sc-title">🎨 Aparência</span>
+          <button id="sc-theme-btn" type="button" class="sc-toggle">▲</button>
+        </div>
+        <div id="sc-theme-body">
+          <div style="font-size:11px;color:#64748b;margin-bottom:10px;line-height:1.6">
+            Modo claro é experimental — vários elementos ainda mantêm o look escuro.
+          </div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            <button type="button" data-theme-btn="dark"  onclick="setTheme('dark')"  class="filter-chip">🌙 Escuro</button>
+            <button type="button" data-theme-btn="light" onclick="setTheme('light')" class="filter-chip">☀️ Claro</button>
+            <button type="button" data-theme-btn="auto"  onclick="setTheme('auto')"  class="filter-chip">⚙ Auto (iOS)</button>
+          </div>
+        </div>
+      </div>
+
       <!-- ── Manutenções ──────────────────────────────────────────────────────── -->
       <div class="settings-card">
         <div class="sc-header" onclick="toggleSection('sc-maint-body','sc-maint-btn')">
