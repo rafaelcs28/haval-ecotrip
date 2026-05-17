@@ -1489,6 +1489,17 @@ function renderDash() {
   const isCharging = s.charging_state === 'Carregando';
   const bfcCard = document.getElementById('d-bfc-card');
   if (bfcCard) bfcCard.classList.toggle('chrg-active', isCharging);
+  // Propaga estado de recarga pro painel inteiro — permite CSS reduzir altura
+  // do mapa enquanto carregando, liberando espaço pro card de bateria expandido.
+  const panelDash = document.getElementById('panel-dash');
+  if (panelDash) {
+    const wasCharging = panelDash.classList.contains('charging');
+    panelDash.classList.toggle('charging', isCharging);
+    // Mapa Leaflet não recalcula sozinho quando o container muda — chama após a transição
+    if (wasCharging !== isCharging && dashMap) {
+      setTimeout(() => dashMap.invalidateSize(), 280);
+    }
+  }
   // Alterna seções dentro do card unificado
   const _vis = (id, show) => { const el = document.getElementById(id); if (el) el.style.display = show ? '' : 'none'; };
   _vis('bfc-normal-hdr',   !isCharging);
@@ -1551,7 +1562,6 @@ function renderDash() {
   const engOn = eng === '1' || eng === 1;
 
   // Layout do dashboard: motor ligado → mapa sobe, alertas descem
-  const panelDash = document.getElementById('panel-dash');
   if (panelDash) panelDash.classList.toggle('engine-on', engOn);
 
   // Faróis — ligados com o motor (farol alto via sensor futuro high_beam)
