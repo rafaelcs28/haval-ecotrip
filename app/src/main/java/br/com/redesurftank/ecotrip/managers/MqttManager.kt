@@ -743,40 +743,14 @@ class MqttManager private constructor() {
     }
 
     /**
-     * Publica o histórico completo de trips diretamente no tópico retido.
-     * O app é a fonte de verdade — não depende de automação HA para acumulação.
+     * Trip A/B descontinuado — publishTripHistory virou no-op.
+     * Bridge ignora `trips/history` e os tópicos `trip_a/*` / `trip_b/*`.
      */
-    fun publishTripHistory(entries: List<TripHistoryEntry>) {
-        if (entries.isEmpty()) return  // nunca sobrescreve HA com lista vazia (clearing in-app não zera HA)
-        val c = client
-        if (c == null || !c.isConnected) {
-            AppLogger.w(TAG, "publishTripHistory: offline, histórico não publicado agora")
-            return
-        }
-        AppLogger.i(TAG, "Enviando histórico ao broker: ${entries.size} entrada(s)")
-        executor.submit { publishTripHistoryInternal(c, entries) }
-    }
+    @Suppress("UNUSED_PARAMETER")
+    fun publishTripHistory(entries: List<TripHistoryEntry>) { /* no-op */ }
 
-    private fun publishTripHistoryInternal(c: MqttClient, entries: List<TripHistoryEntry>) {
-        try {
-            val fmt = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.getDefault())
-            fun f1(v: Float) = String.format(java.util.Locale.US, "%.1f", v)
-            fun f2(v: Float) = String.format(java.util.Locale.US, "%.2f", v)
-
-            val tripsJson = entries.joinToString(",") { e ->
-                val ts = fmt.format(Date(e.timestampMs))
-                val safeName  = gson.toJson(e.name)   // JSON-quoted & escaped
-                val costPerKm = if (e.distKm > 0.1f && e.costBrl > 0f) e.costBrl / e.distKm else 0f
-                """{"name":$safeName,"label":"${e.label}","timestamp":"$ts","distance_km":${f2(e.distKm)},"time_sec":"${fmtDur(e.timeSec)}","fuel_l":${f2(e.fuelL)},"energy_kwh":${f2(e.energyKwh)},"regen_kwh":${f2(e.regenKwh)},"net_kwh":${f2(e.netKwh)},"kwh_per_100km":${f2(e.kwhPer100km)},"km_per_l":${f2(e.kmPerL)},"combined_km_l":${f2(e.combinedKmL)},"avg_speed_kmh":${f1(e.avgSpeedKmh)},"soc_start":${f1(e.startSocPct)},"soc_end":${f1(e.endSocPct)},"tank_start_l":${f1(e.startTankL)},"tank_end_l":${f1(e.endTankL)},"total_cost_brl":${f2(e.costBrl)},"cost_per_km":${f2(costPerKm)}}"""
-            }
-            val payload = """{"count":${entries.size},"trips":[$tripsJson]}"""
-            AppLogger.i(TAG, "→ Publicando histórico (QoS 1, retained): $prefix/trips/history")
-            c.publish("$prefix/trips/history", payload.toByteArray(), 1, true)
-            AppLogger.i(TAG, "✓ Histórico publicado: ${entries.size} entrada(s)")
-        } catch (e: Exception) {
-            AppLogger.e(TAG, "✗ Histórico FALHOU: ${e::class.simpleName}: ${e.message}")
-        }
-    }
+    @Suppress("UNUSED_PARAMETER")
+    private fun publishTripHistoryInternal(c: MqttClient, entries: List<TripHistoryEntry>) { /* no-op */ }
 
     // ── Charge history ────────────────────────────────────────────────────────
 
@@ -866,6 +840,8 @@ class MqttManager private constructor() {
         "window_fl", "window_fr", "window_rl", "window_rr",
         "sunroof", "lock_state", "ac_state", "engine_state",
         "charging_state",
+        // Trip A/B descontinuados — remove entidade "Histórico de Trips" do HA
+        "trips_history",
     )
 
     private fun publishDiscovery(c: MqttClient) {
@@ -969,9 +945,9 @@ class MqttManager private constructor() {
         val lastUpdatePayload = """{"name":"Última Atualização","state_topic":"$prefix/last_update","device_class":"timestamp","unique_id":"haval_ecotrip_last_update","icon":"mdi:clock-check-outline","device":$device}"""
         try { c.publish("homeassistant/sensor/haval_ecotrip_last_update/config", lastUpdatePayload.toByteArray(), 1, true) } catch (_: Exception) {}
 
-        // Sensor: histórico completo de trips (JSON array como atributo)
-        val historyPayload = """{"name":"Histórico de Trips","state_topic":"$prefix/trips/history","value_template":"{{ value_json.count }}","json_attributes_topic":"$prefix/trips/history","unit_of_measurement":"viagens","state_class":"measurement","unique_id":"haval_ecotrip_trips_history","icon":"mdi:history","device":$device}"""
-        try { c.publish("homeassistant/sensor/haval_ecotrip_trips_history/config", historyPayload.toByteArray(), 1, true) } catch (_: Exception) {}
+        // Trip A/B descontinuado — publica payload vazio retained pra REMOVER
+        // a entidade "Histórico de Trips" do HA caso ainda exista.
+        try { c.publish("homeassistant/sensor/haval_ecotrip_trips_history/config", ByteArray(0), 1, true) } catch (_: Exception) {}
 
         // Sensor: histórico de sessões de recarga (acumulado pelo HA via automation)
         val chargingHistoryPayload = """{"name":"Histórico de Recargas","state_topic":"$prefix/charging/history","value_template":"{{ value_json.count }}","json_attributes_topic":"$prefix/charging/history","unit_of_measurement":"recargas","state_class":"measurement","unique_id":"haval_ecotrip_historico_de_recargas","icon":"mdi:ev-station","device":$device}"""
