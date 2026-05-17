@@ -2340,22 +2340,29 @@ app.get('/api/telemetry/:tripId', (req, res) => {
 
 // Última localização GPS conhecida do carro (pega do arquivo de telemetria mais recente)
 app.get('/api/location', (_req, res) => {
+  // Usa GPS em memória — atualizado live por gps_lat/gps_lng do MQTT e persistido
+  // em state.json. Endpoint O(1) em vez de varrer todos os JSONs de auto-trip a
+  // cada GET (antes lia N arquivos do disco por chamada).
+  if (state.gps_lat && state.gps_lng) {
+    return res.json({
+      lat: state.gps_lat,
+      lng: state.gps_lng,
+      ts:  state.gps_ts || null,
+    });
+  }
+  // Fallback: se state.json estava vazio no boot, varre arquivos uma vez.
   try {
-    const files = fs.readdirSync(AUTOTRIPS_DIR)
-      .filter(f => f.endsWith('.json'))
-      .sort()
-      .reverse();
+    const files = fs.readdirSync(AUTOTRIPS_DIR).filter(f => f.endsWith('.json')).sort().reverse();
     for (const f of files) {
       const d = JSON.parse(fs.readFileSync(path.join(AUTOTRIPS_DIR, f), 'utf8'));
       const samples = d.samples || [];
       const lastGps = [...samples].reverse().find(s => s.lat !== 0 || s.lng !== 0);
       if (lastGps) {
-        return res.json({
-          lat: lastGps.lat,
-          lng: lastGps.lng,
-          tripId: d.tripId,
-          ts: d.autoTrip?.endMs || null,
-        });
+        // Popula state pra próximas chamadas serem O(1)
+        state.gps_lat = lastGps.lat;
+        state.gps_lng = lastGps.lng;
+        state.gps_ts  = d.autoTrip?.endMs || null;
+        return res.json({ lat: lastGps.lat, lng: lastGps.lng, tripId: d.tripId, ts: state.gps_ts });
       }
     }
     res.json({ lat: null, lng: null });
