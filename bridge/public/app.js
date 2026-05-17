@@ -203,6 +203,8 @@ const NOTIF_ITEMS = [
   { key: 'engine_off',   icon: '🔑', label: 'Motor desligado' },
   { key: 'app_update',   icon: '📱', label: 'Atualização do app', sub: 'nova versão instalada no carro' },
   { key: 'trip_end',    icon: '🏁', label: 'Viagem concluída',   sub: 'ao finalizar auto-trip' },
+  { key: 'geofence_arrival',   icon: '📍', label: 'Chegada em local conhecido', sub: 'casa, trabalho, etc.' },
+  { key: 'geofence_departure', icon: '🚗', label: 'Saída de local conhecido',   sub: 'ao deixar a zona' },
 ];
 
 let _notifPrefs = {};
