@@ -371,23 +371,31 @@
             <div class="trip-cell-val green" id="d-last-regen">--</div>
           </div>
         </div>
-        <!-- Grid: 4 células — viagem em andamento (motor on) -->
-        <div class="trip-grid" id="d-curtrip-grid-live" style="display:none">
+        <!-- Grid: 6 células — viagem em andamento (motor on), médias acumuladas -->
+        <div class="trip-grid trip-grid-6" id="d-curtrip-grid-live" style="display:none">
+          <div class="trip-cell">
+            <div class="trip-cell-label">Vel. média</div>
+            <div class="trip-cell-val" id="d-live-avgv">--</div>
+          </div>
+          <div class="trip-cell">
+            <div class="trip-cell-label">Vel. máx</div>
+            <div class="trip-cell-val" id="d-live-maxv">--</div>
+          </div>
+          <div class="trip-cell">
+            <div class="trip-cell-label">Pot. média</div>
+            <div class="trip-cell-val" id="d-live-avgpwr">--</div>
+          </div>
           <div class="trip-cell">
             <div class="trip-cell-label">SOC atual</div>
             <div class="trip-cell-val" id="d-live-soc">--</div>
           </div>
           <div class="trip-cell">
-            <div class="trip-cell-label">Velocidade</div>
-            <div class="trip-cell-val" id="d-live-speed">--</div>
+            <div class="trip-cell-label">Bateria</div>
+            <div class="trip-cell-val" id="d-live-kwh">--</div>
           </div>
           <div class="trip-cell">
-            <div class="trip-cell-label">Potência</div>
-            <div class="trip-cell-val" id="d-live-power">--</div>
-          </div>
-          <div class="trip-cell">
-            <div class="trip-cell-label">Clima</div>
-            <div class="trip-cell-val" id="d-live-weather">--</div>
+            <div class="trip-cell-label">Combustível</div>
+            <div class="trip-cell-val" id="d-live-fuel">--</div>
           </div>
         </div>
       </div>

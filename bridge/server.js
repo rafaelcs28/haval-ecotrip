@@ -401,6 +401,7 @@ const state = {
   soc_pct:          0,
   range_ev_km:      0,      // autonomia elétrica real (sensor HA)
   range_ice_km:     0,      // autonomia térmica real  (sensor HA)
+  current_trip:     null,   // snapshot da viagem em andamento (publicado retained pelo APK)
   status_message:   '',     // string pipe-separada de alertas do carro
   engine_state:     null,   // null=desconhecido | '0'=desligado | '1'=ligado
   lock_state:       null,   // null=desconhecido | 'off'=trancado | 'on'=destrancado
@@ -3498,6 +3499,23 @@ function applyMqttMessage(key, value, isRetained = false) {
 
     // Histórico de Trip A/B descontinuado — ignora msg do APK
     case 'trips/history': break;
+
+    // ── Viagem em andamento (retained pelo APK ≥5.20) ─────────────────────
+    // Snapshot da auto-trip ativa. Sobrevive a desconexão pq é retained — se o
+    // carro atingiu 140 km/h offline, ao reconectar entrega o último valor.
+    // Payload vazio = sem viagem ativa.
+    case 'current_trip': {
+      if (!value || value.trim() === '') {
+        state.current_trip = null;
+      } else {
+        try {
+          state.current_trip = JSON.parse(value);
+        } catch (e) {
+          console.error('current_trip JSON inválido:', e.message);
+        }
+      }
+      break;
+    }
 
     default: break;
   }

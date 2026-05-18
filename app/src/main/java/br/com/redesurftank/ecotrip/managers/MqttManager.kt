@@ -738,6 +738,23 @@ class MqttManager private constructor() {
             // price_gas_per_l e price_kwh NÃO são mais publicados — bridge ignora e
             // mantém o cálculo via mix de abastecimentos/recargas registrados no PWA.
 
+            // ── Viagem em andamento ──────────────────────────────────────────────
+            // Publica como retained pra sobreviver a desconexão: se o carro atingiu
+            // 140 km/h offline, ao reconectar o broker entrega o último valor ao bridge.
+            // Quando a viagem termina, publica payload vazio (limpa o retain).
+            val inProgress = TripManager.getInstance().getInProgressAutoTrip()
+            if (inProgress != null) {
+                val avgKmh = if (inProgress.timeSec > 0)
+                    inProgress.distKm / (inProgress.timeSec / 3600f) else 0f
+                val avgPwrKw = if (inProgress.timeSec > 0)
+                    inProgress.netKwh / (inProgress.timeSec / 3600f) else 0f
+                val payload = """{"startMs":${inProgress.startMs},"distKm":${fmt3(inProgress.distKm)},"timeSec":${inProgress.timeSec},"maxSpeedKmh":${fmt1(inProgress.maxSpeedKmh)},"avgSpeedKmh":${fmt1(avgKmh)},"netKwh":${fmt3(inProgress.netKwh)},"fuelL":${fmt3(inProgress.fuelL)},"avgPowerKw":${fmt2(avgPwrKw)},"startSocPct":${fmt1(inProgress.startSocPct)},"currentSocPct":${fmt1(inProgress.endSocPct)}}"""
+                c.publish("$prefix/current_trip", payload.toByteArray(), 1, true)
+            } else {
+                // Sem viagem ativa — limpa o retain (payload vazio + retain=true).
+                c.publish("$prefix/current_trip", ByteArray(0), 1, true)
+            }
+
             lastSuccessfulPublishMs = System.currentTimeMillis()
             // Publica timestamp ISO para a entidade "Última Atualização" no HA
             val isoNow = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssZ", Locale.getDefault())

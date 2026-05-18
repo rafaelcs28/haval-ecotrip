@@ -1044,9 +1044,11 @@ class TripManager private constructor() {
         val cutoff90d = System.currentTimeMillis() - 90L * 24 * 3_600_000L
         autoTripHistory.removeAll { it.endMs < cutoff90d }
         autoTripStartMs = 0L
+        autoTripMaxSpeed = 0f
         prefs.edit()
             .putString(SharedPreferencesKeys.AUTO_TRIP_HISTORY_JSON, gson.toJson(autoTripHistory))
             .putLong  (SharedPreferencesKeys.AUTO_TRIP_START_MS, 0L)
+            .putFloat (SharedPreferencesKeys.AUTO_TRIP_MAX_SPEED, 0f)
             .apply()
         AppLogger.i(TAG, "AutoTrip salvo: ${entry.distKm}km ${entry.timeSec}s ${entry.netKwh}kWh max=${entry.maxSpeedKmh}km/h temp=${entry.outsideTempC}°C")
         onAutoTripCompleted?.invoke(entry)
@@ -1111,7 +1113,14 @@ class TripManager private constructor() {
                 CarConstants.CAR_BASIC_VEHICLE_SPEED.value -> {
                     latestSpeedKmh = value
                     telemetryRecorder?.latestSpeedKmh = value
-                    if (autoTripStartMs > 0L && value > autoTripMaxSpeed) autoTripMaxSpeed = value
+                    if (autoTripStartMs > 0L && value > autoTripMaxSpeed) {
+                        autoTripMaxSpeed = value
+                        // Persiste pra sobreviver a kill do app mid-trip. Só grava em
+                        // novos picos — então o I/O é raro (~1 write por incremento real).
+                        if (::prefs.isInitialized) {
+                            prefs.edit().putFloat(SharedPreferencesKeys.AUTO_TRIP_MAX_SPEED, value).apply()
+                        }
+                    }
                 }
                 CarConstants.CAR_BASIC_OUTSIDE_TEMP.value -> {
                     latestOutsideTempC = value
@@ -1518,7 +1527,8 @@ class TripManager private constructor() {
             autoTripStartDist   = prefs.getFloat(SharedPreferencesKeys.AUTO_TRIP_START_DIST,     0f)
             autoTripStartFuelL  = prefs.getFloat(SharedPreferencesKeys.AUTO_TRIP_START_FUEL_L,   0f)
             autoTripStartTime   = prefs.getLong (SharedPreferencesKeys.AUTO_TRIP_START_TIME_SEC, 0L)
-            AppLogger.i(TAG, "AutoTrip em andamento recuperado do disco — startMs=$autoTripStartMs")
+            autoTripMaxSpeed    = prefs.getFloat(SharedPreferencesKeys.AUTO_TRIP_MAX_SPEED,      0f)
+            AppLogger.i(TAG, "AutoTrip em andamento recuperado do disco — startMs=$autoTripStartMs maxSpd=${autoTripMaxSpeed}")
         }
 
         val chargeHistJson = prefs.getString(SharedPreferencesKeys.CHARGE_HISTORY_JSON, null)

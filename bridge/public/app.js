@@ -1945,13 +1945,18 @@ function renderTripCard(s, engOn) {
     if (gridLast) gridLast.style.display = 'none';
     if (gridLive) gridLive.style.display = '';
 
-    setText('d-curtrip-dist', rollDist > 0 ? rollDist.toFixed(1) : '0,0');
-    setText('d-live-soc',   s.soc_pct != null ? Math.round(+s.soc_pct) + '%' : '--');
-    setText('d-live-speed', s.speed_kmh != null ? Math.round(+s.speed_kmh) + ' km/h' : '--');
-    const mp = +s.motor_power_kw || 0;
-    setText('d-live-power', mp !== 0 ? (mp > 0 ? mp.toFixed(1) : '−' + Math.abs(mp).toFixed(1)) + ' kW' : '0 kW');
-    // Clima — combina temp do carro + condição/precipitação do Open-Meteo (cache 30min)
-    _refreshLiveWeather(s);
+    // Médias da viagem em andamento — vem do APK via tópico retained current_trip.
+    // Fallback: usa rolling enquanto não tem dado (ou APK antigo sem publish).
+    const ct = s.current_trip;
+    const tripDist = ct?.distKm ?? rollDist;
+    setText('d-curtrip-dist', tripDist > 0 ? tripDist.toFixed(1) : '0,0');
+    setText('d-live-avgv',    ct?.avgSpeedKmh > 0 ? Math.round(ct.avgSpeedKmh) + ' km/h' : '--');
+    setText('d-live-maxv',    ct?.maxSpeedKmh > 0 ? Math.round(ct.maxSpeedKmh) + ' km/h' : '--');
+    const ap = ct?.avgPowerKw || 0;
+    setText('d-live-avgpwr',  ap > 0.05 ? ap.toFixed(1) + ' kW' : '--');
+    setText('d-live-soc',     s.soc_pct != null ? Math.round(+s.soc_pct) + '%' : '--');
+    setText('d-live-kwh',     ct?.netKwh > 0 ? ct.netKwh.toFixed(2) + ' kWh' : '--');
+    setText('d-live-fuel',    ct?.fuelL  > 0.01 ? ct.fuelL.toFixed(2)  + ' L'   : '--');
   } else if (last) {
     curCard.style.display = '';
     curCard.classList.remove('in-progress');
