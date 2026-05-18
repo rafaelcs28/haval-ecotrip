@@ -443,26 +443,18 @@ class TripManager private constructor() {
      *    aparece no início da nova viagem, oferecendo conversão em continuação.
      */
     fun getResumableLastTrip(): AutoTripEntry? = synchronized(lock) {
-        // Se já houver viagem em andamento, permite resume desde que ela ainda
-        // esteja em fase inicial (limites generosos: usuário pode demorar pra abrir
-        // o app depois de ligar o carro). Se já dirigiu muito, a "nova" viagem
-        // virou independente — não faz mais sentido absorver pra anterior.
-        if (autoTripStartMs != 0L) {
-            val ageMs = System.currentTimeMillis() - autoTripStartMs
-            val curDist = lifeDistKm - autoTripStartDist
-            if (ageMs > 20L * 60_000L || curDist > 5f) {
-                AppLogger.d(TAG, "getResumableLastTrip: nova viagem já madura (${ageMs/60_000}min, ${"%.1f".format(curDist)}km) — sem banner")
-                return@synchronized null
-            }
-        }
         val last = autoTripHistory.lastOrNull()
         if (last == null) {
             AppLogger.d(TAG, "getResumableLastTrip: histórico vazio")
             return@synchronized null
         }
-        val gapMs = System.currentTimeMillis() - last.endMs
+        // Gap = intervalo entre o FIM da viagem anterior e o INÍCIO da próxima.
+        // Se já há nova viagem em curso: gap = autoTripStartMs - last.endMs.
+        // Se ainda não começou: gap = agora - last.endMs.
+        val newTripStartOrNow = if (autoTripStartMs != 0L) autoTripStartMs else System.currentTimeMillis()
+        val gapMs = newTripStartOrNow - last.endMs
         if (gapMs < 0 || gapMs > RESUME_WINDOW_MS) {
-            AppLogger.d(TAG, "getResumableLastTrip: última viagem fora da janela (gap=${gapMs/60_000}min)")
+            AppLogger.d(TAG, "getResumableLastTrip: gap fora da janela (${gapMs/60_000}min, máx=${RESUME_WINDOW_MS/60_000}min)")
             return@synchronized null
         }
         if (last.distKm < 0.1f) {
@@ -472,7 +464,7 @@ class TripManager private constructor() {
         // Samples file é OPCIONAL — se sumiu (já enviado pro bridge e limpo), aceita
         // mesmo assim. resumeLastTrip() trata file-not-found ok (samples vazios →
         // GPS terá gap no período entre as paradas, mas a viagem em si é restaurada).
-        AppLogger.i(TAG, "getResumableLastTrip: elegível — viagem ${last.startMs} (${"%.1f".format(last.distKm)}km, terminou há ${gapMs/60_000}min)")
+        AppLogger.i(TAG, "getResumableLastTrip: elegível — viagem ${last.startMs} (${"%.1f".format(last.distKm)}km, gap=${gapMs/60_000}min)")
         last
     }
 
