@@ -3043,14 +3043,53 @@ function renderAlerts(s) {
 }
 
 // ── Dashboard map — última localização do carro ───────────────────────────────
+// Zoom inteligente dos mapas: 3 modos baseado na velocidade.
+//   parked  (≤3 km/h):  zoom 15 — área local
+//   urban   (3..50):    zoom 17 — visão detalhada de ruas
+//   highway (>50):      zoom 14 — afasta pra ver o caminho na estrada
+// Histerese: ao cair de highway, só desce o zoom após 30s ininterruptos abaixo
+// de 50 (cada pico ≥50 reseta). Subir pra highway é imediato.
+const MAP_HIGHWAY_KMH       = 50;
+const MAP_HIGHWAY_HOLD_MS   = 30000;
+const MAP_ZOOM_HIGHWAY      = 14;
+const MAP_ZOOM_URBAN        = 17;
+const MAP_ZOOM_PARKED       = 15;
+function _updateMapZoomForSpeed(map, kmh, stateRef) {
+  const now       = Date.now();
+  const isHighway = kmh > MAP_HIGHWAY_KMH;
+  if (isHighway) {
+    stateRef.lastHighwayMs = now;
+    if (stateRef.zoomMode !== 'highway') {
+      stateRef.zoomMode = 'highway';
+      map.setZoom(MAP_ZOOM_HIGHWAY, { animate: true });
+    }
+    return;
+  }
+  // Abaixo de 50 — se ainda estava em highway, espera o cooldown
+  if (stateRef.zoomMode === 'highway') {
+    if (now - (stateRef.lastHighwayMs || 0) >= MAP_HIGHWAY_HOLD_MS) {
+      const next = kmh > 3 ? 'urban' : 'parked';
+      stateRef.zoomMode = next;
+      map.setZoom(next === 'urban' ? MAP_ZOOM_URBAN : MAP_ZOOM_PARKED, { animate: true });
+    }
+    return;
+  }
+  // Transições urban ↔ parked: imediatas (comportamento original)
+  const next = kmh > 3 ? 'urban' : 'parked';
+  if (next !== stateRef.zoomMode) {
+    stateRef.zoomMode = next;
+    map.setZoom(next === 'urban' ? MAP_ZOOM_URBAN : MAP_ZOOM_PARKED, { animate: true });
+  }
+}
+
 let dashMap             = null;
+let _dashMapZoomState   = { zoomMode: null, lastHighwayMs: 0 };
 let dashMarker          = null;
 let _dashMapLastLat     = 0;
 let _dashMapLastLng     = 0;
 let _dashMapLastTs      = 0;
 let _dashMapGeocodeTimer = null;
 let _dashMapTsTimer     = null;
-let _dashMapMoving      = false;   // controla auto-zoom ao mudar estado de movimento
 
 function _startDashMapTsTimer() {
   clearInterval(_dashMapTsTimer);
@@ -3068,7 +3107,7 @@ function updateDashMap(lat, lng, ts, speed) {
   if (!el) return;
 
   const pos      = [lat, lng];
-  const isMoving = (speed || 0) > 3;
+  const kmh      = +speed || 0;
 
   // Cria o mapa Leaflet uma única vez
   if (!dashMap) {
@@ -3082,17 +3121,17 @@ function updateDashMap(lat, lng, ts, speed) {
       maxZoom: 19,
       attribution: '© OpenStreetMap © CARTO',
     }).addTo(dashMap);
-    // Primeira posição: zoom depende do estado de movimento
-    dashMap.setView(pos, isMoving ? 17 : 15);
-    _dashMapMoving = isMoving;
+    // Primeira posição: escolhe zoom inicial baseado na velocidade
+    const initialZoom = kmh > MAP_HIGHWAY_KMH ? MAP_ZOOM_HIGHWAY
+                      : kmh > 3               ? MAP_ZOOM_URBAN
+                      :                          MAP_ZOOM_PARKED;
+    dashMap.setView(pos, initialZoom);
+    _dashMapZoomState.zoomMode = kmh > MAP_HIGHWAY_KMH ? 'highway' : kmh > 3 ? 'urban' : 'parked';
+    _dashMapZoomState.lastHighwayMs = kmh > MAP_HIGHWAY_KMH ? Date.now() : 0;
     _startDashMapTsTimer();
   } else {
-    // Atualizações seguintes: pan suave; muda zoom só quando estado de movimento muda
     dashMap.panTo(pos, { animate: true, duration: 0.5 });
-    if (isMoving !== _dashMapMoving) {
-      dashMap.setZoom(isMoving ? 17 : 15, { animate: true });
-      _dashMapMoving = isMoving;
-    }
+    _updateMapZoomForSpeed(dashMap, kmh, _dashMapZoomState);
   }
 
   if (dashMarker) dashMarker.setLatLng(pos);
@@ -5903,8 +5942,8 @@ window.lockClick = function() {
 // Mapa Leaflet instanciado uma única vez ao abrir a aba. Atualizações de
 // posição reaproveitam o panTo. Power chart roda em buffer próprio (2 Hz, 30s).
 let driveMap = null;
+let _driveMapZoomState = { zoomMode: null, lastHighwayMs: 0 };
 let driveMarker = null;
-let _driveMapMoving = false;
 let _drivePowerBuf = [];           // {t: ms, kw: number} — máx 60 pontos
 let _drivePowerSampleTimer = null;
 let _drivePowerScale = 50;         // limite ±kW do eixo do chart (auto-ajusta)
@@ -6134,11 +6173,13 @@ function renderDrivePanel() {
   setText('drv-temp-out', s.outside_temp != null ? (+s.outside_temp).toFixed(1) : '--');
   setText('drv-temp-in',  s.inside_temp  != null ? (+s.inside_temp).toFixed(1)  : '--');
 
-  // Mapa: pan suave pra posição atual (só atualiza se mudou >50m)
+  // Mapa: pan suave pra posição atual + zoom inteligente com histerese
   if (driveMap && s.gps_lat && s.gps_lng) {
     const lat = +s.gps_lat, lng = +s.gps_lng;
-    const moving = speedR > 3;
-    const targetZoom = moving ? 17 : 15;
+    const kmh = speedR;
+    const initialZoom = kmh > MAP_HIGHWAY_KMH ? MAP_ZOOM_HIGHWAY
+                      : kmh > 3               ? MAP_ZOOM_URBAN
+                      :                          MAP_ZOOM_PARKED;
     if (!driveMarker) {
       driveMarker = L.marker([lat, lng], {
         icon: L.divIcon({
@@ -6148,15 +6189,13 @@ function renderDrivePanel() {
           iconAnchor: [7, 7],
         }),
       }).addTo(driveMap);
-      driveMap.setView([lat, lng], targetZoom);
-      _driveMapMoving = moving;
+      driveMap.setView([lat, lng], initialZoom);
+      _driveMapZoomState.zoomMode = kmh > MAP_HIGHWAY_KMH ? 'highway' : kmh > 3 ? 'urban' : 'parked';
+      _driveMapZoomState.lastHighwayMs = kmh > MAP_HIGHWAY_KMH ? Date.now() : 0;
     } else {
       driveMarker.setLatLng([lat, lng]);
       driveMap.panTo([lat, lng], { animate: true, duration: 0.5 });
-      if (moving !== _driveMapMoving) {
-        driveMap.setZoom(targetZoom, { animate: true });
-        _driveMapMoving = moving;
-      }
+      _updateMapZoomForSpeed(driveMap, kmh, _driveMapZoomState);
     }
   }
 }
