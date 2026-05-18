@@ -3500,6 +3500,60 @@ function applyMqttMessage(key, value, isRetained = false) {
     // Histórico de Trip A/B descontinuado — ignora msg do APK
     case 'trips/history': break;
 
+    // ── Abastecimentos auto-detectados (retained pelo APK ≥5.20) ──────────
+    // O APK detecta pulos no fuel_l com carro parado e registra como
+    // abastecimento com price_per_liter=0 (pendente). Bridge mescla com os
+    // do PWA preservando campos editados pelo usuário (preço, posto, notas).
+    case 'refuels/history': {
+      try {
+        const parsed = JSON.parse(value);
+        const incoming = parsed.refuels || [];
+        let merged = 0, added = 0;
+        for (const r of incoming) {
+          const tsMs = r.timestamp_ms || 0;
+          if (!tsMs) continue;
+          if (isDeleted('refuels', tsMs)) continue;
+          // Match por timestamp_ms (±2s pra tolerar drift entre APK e PWA)
+          const existing = refuels.find(x =>
+            Math.abs((x.timestamp_ms || 0) - tsMs) <= 2000
+          );
+          if (existing) {
+            // Preserva preço/cost/notes/location do PWA, atualiza só dados físicos.
+            existing.fuel_l_before = r.fuel_l_before || existing.fuel_l_before;
+            existing.fuel_l_after  = r.fuel_l_after  || existing.fuel_l_after;
+            existing.liters_added  = r.liters_added  || existing.liters_added;
+            if (r.odometer_km > 0) existing.odometer_km = r.odometer_km;
+            merged++;
+          } else {
+            const pricePerL = +r.price_per_liter || 0;
+            refuels.push({
+              id: 'apk-' + tsMs,
+              timestamp_ms: tsMs,
+              fuel_l_before: +r.fuel_l_before || 0,
+              fuel_l_after:  +r.fuel_l_after  || 0,
+              liters_added:  +r.liters_added  || 0,
+              price_per_liter: pricePerL,
+              total_cost: pricePerL * (+r.liters_added || 0),
+              odometer_km: +r.odometer_km || 0,
+              location_name: '',
+              notes: '',
+              pending: !(pricePerL > 0),
+            });
+            added++;
+          }
+        }
+        if (added > 0 || merged > 0) {
+          refuels.sort((a, b) => (b.timestamp_ms || 0) - (a.timestamp_ms || 0));
+          saveRefuels();
+          recomputeTankAvgPrice();
+          console.log(`✓ Abastecimentos MQTT: ${incoming.length} (${added} novos, ${merged} atualizados)`);
+        }
+      } catch (e) {
+        console.error('Erro ao parsear refuels/history:', e.message);
+      }
+      break;
+    }
+
     // ── Viagem em andamento (retained pelo APK ≥5.20) ─────────────────────
     // Snapshot da auto-trip ativa. Sobrevive a desconexão pq é retained — se o
     // carro atingiu 140 km/h offline, ao reconectar entrega o último valor.

@@ -585,6 +585,17 @@ class MqttManager private constructor() {
             AppLogger.w(TAG, "drainQueues: falha ao publicar recargas: ${e.message}")
         }
 
+        // Publica histórico de abastecimentos como retained após reconexão
+        try {
+            val refuels = TripManager.getInstance().getRefuelHistory()
+            if (refuels.isNotEmpty()) {
+                AppLogger.i(TAG, "Republicando histórico de abastecimentos após reconexão: ${refuels.size} registro(s)")
+                publishRefuelHistoryInternal(c, refuels)
+            }
+        } catch (e: Exception) {
+            AppLogger.w(TAG, "drainQueues: falha ao publicar abastecimentos: ${e.message}")
+        }
+
         // Then regular snapshots
         val snapshots = synchronized(snapshotLock) {
             snapshotQueue.toList().also { snapshotQueue.clear() }
@@ -802,6 +813,36 @@ class MqttManager private constructor() {
             AppLogger.i(TAG, "✓ Histórico de recargas publicado: ${entries.size} sessão(ões)")
         } catch (e: Exception) {
             AppLogger.e(TAG, "✗ Recargas FALHOU: ${e::class.simpleName}: ${e.message}")
+        }
+    }
+
+    // ── Refuel history ────────────────────────────────────────────────────────
+
+    fun publishRefuelHistory(entries: List<RefuelEntry>) {
+        if (entries.isEmpty()) return
+        val c = client
+        if (c == null || !c.isConnected) {
+            AppLogger.w(TAG, "publishRefuelHistory: offline, não publicado agora")
+            return
+        }
+        executor.submit { publishRefuelHistoryInternal(c, entries) }
+    }
+
+    private fun publishRefuelHistoryInternal(c: MqttClient, entries: List<RefuelEntry>) {
+        try {
+            val fmt = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.getDefault())
+            fun f1(v: Float) = String.format(java.util.Locale.US, "%.1f", v)
+            fun f2(v: Float) = String.format(java.util.Locale.US, "%.2f", v)
+            val refuelsJson = entries.joinToString(",") { e ->
+                val ts = fmt.format(Date(e.timestampMs))
+                """{"timestamp":"$ts","timestamp_ms":${e.timestampMs},"fuel_l_before":${f2(e.fuelLBefore)},"fuel_l_after":${f2(e.fuelLAfter)},"liters_added":${f2(e.litersAdded)},"odometer_km":${f1(e.odometerKm)},"price_per_liter":${f2(e.pricePerLiter)}}"""
+            }
+            val payload = """{"count":${entries.size},"refuels":[$refuelsJson]}"""
+            AppLogger.i(TAG, "→ Publicando histórico de abastecimentos (QoS 1, retained): $prefix/refuels/history")
+            c.publish("$prefix/refuels/history", payload.toByteArray(), 1, true)
+            AppLogger.i(TAG, "✓ Histórico de abastecimentos publicado: ${entries.size} registro(s)")
+        } catch (e: Exception) {
+            AppLogger.e(TAG, "✗ Abastecimentos FALHOU: ${e::class.simpleName}: ${e.message}")
         }
     }
 

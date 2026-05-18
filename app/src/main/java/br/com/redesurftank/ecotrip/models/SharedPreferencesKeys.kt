@@ -25,6 +25,7 @@ object SharedPreferencesKeys {
     const val AUTO_TRIP_START_FUEL_L    = "auto_trip_start_fuel_l"
     const val AUTO_TRIP_START_TIME_SEC  = "auto_trip_start_time_sec"
     const val AUTO_TRIP_MAX_SPEED       = "auto_trip_max_speed"        // pico de velocidade da viagem em andamento
+    const val REFUEL_HISTORY_JSON       = "refuel_history_json"        // abastecimentos auto-detectados (pre-sync MQTT)
 
     // Rolling window (Desde Última Partida) accumulated
     const val ROLLING_FUEL_L = "rolling_fuel_l"

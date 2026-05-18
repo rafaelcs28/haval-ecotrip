@@ -169,6 +169,18 @@ data class AutoTripEntry(
     val endLng:       Double  = 0.0,
 )
 
+/** Abastecimento auto-detectado pelo APK (pulo no fuel_l com carro parado).
+ *  price_per_liter = 0 → o usuário preenche depois via PWA. Sync via MQTT
+ *  retained pra sobreviver a falta de internet no momento do abastecimento. */
+data class RefuelEntry(
+    val timestampMs:    Long,
+    val fuelLBefore:    Float,
+    val fuelLAfter:     Float,
+    val litersAdded:    Float,
+    val odometerKm:     Float = 0f,
+    val pricePerLiter:  Float = 0f,   // 0 = pendente, usuário preenche depois
+)
+
 typealias TripListener = (rolling: RollingSnapshot) -> Unit
 
 class TripManager private constructor() {
@@ -240,6 +252,7 @@ class TripManager private constructor() {
     /** Chamado na UI thread após cada trip automático salvo com sucesso. */
     var onAutoTripCompleted: ((AutoTripEntry) -> Unit)? = null
     var onChargeSessionCompleted: ((ChargeHistoryEntry) -> Unit)? = null
+    var onRefuelDetected:         ((RefuelEntry) -> Unit)?        = null
     private var autoTripStartMs      = 0L
     private var autoTripStartSoc     = 0f
     private var autoTripStartFuel    = 0f
@@ -258,6 +271,7 @@ class TripManager private constructor() {
     private var chargeSessionEnergyKwh: Float = 0f
     private var chargeSessionSec:       Long  = 0L
     private val chargeHistory = mutableListOf<ChargeHistoryEntry>()
+    private val refuelHistory = mutableListOf<RefuelEntry>()
     // Temperatura externa durante a sessão de recarga
     private var chargeSessionTempSum:   Double = 0.0
     private var chargeSessionTempCount: Int    = 0
@@ -405,6 +419,7 @@ class TripManager private constructor() {
     }
 
     fun getChargeHistory(): List<ChargeHistoryEntry> = synchronized(lock) { chargeHistory.toList() }
+    fun getRefuelHistory(): List<RefuelEntry>        = synchronized(lock) { refuelHistory.toList() }
 
     /** Para MqttManager: energia injetada na sessão de recarga corrente. */
     fun getChargeSessionEnergyKwh(): Float = synchronized(lock) { chargeSessionEnergyKwh }
@@ -1296,7 +1311,32 @@ class TripManager private constructor() {
             drop < -5f -> {
                 // Large increase = refuelling — just update baseline, don't subtract
                 Log.i(TAG, "Refuel detected: ${-drop}% increase")
+                val fuelLBefore = prevFuelPct / 100f * tankCapacityL
+                val fuelLAfter  = value / 100f * tankCapacityL
+                val litersAdded = (fuelLAfter - fuelLBefore).coerceAtLeast(0f)
                 prevFuelPct = value
+                // Registra como abastecimento auto-detectado se ≥5L (filtra ruído).
+                // price_per_liter fica 0 — usuário preenche depois via PWA.
+                if (litersAdded >= 5f) {
+                    val entry = RefuelEntry(
+                        timestampMs   = System.currentTimeMillis(),
+                        fuelLBefore   = fuelLBefore,
+                        fuelLAfter    = fuelLAfter,
+                        litersAdded   = litersAdded,
+                        odometerKm    = MqttManager.getInstance().latestOdometerKm,
+                    )
+                    refuelHistory.add(0, entry)
+                    // Retenção: descarta abastecimentos com mais de 1 ano
+                    val cutoff1y = System.currentTimeMillis() - 365L * 24 * 3_600_000L
+                    refuelHistory.removeAll { it.timestampMs < cutoff1y }
+                    if (::prefs.isInitialized) {
+                        prefs.edit()
+                            .putString(SharedPreferencesKeys.REFUEL_HISTORY_JSON, gson.toJson(refuelHistory))
+                            .apply()
+                    }
+                    AppLogger.i(TAG, "Abastecimento registrado: ${"%.1f".format(litersAdded)}L (${"%.1f".format(fuelLBefore)}→${"%.1f".format(fuelLAfter)})")
+                    onRefuelDetected?.invoke(entry)
+                }
             }
             // Small fluctuation (±5%) — ignore
         }
@@ -1538,6 +1578,16 @@ class TripManager private constructor() {
                 val loaded: List<ChargeHistoryEntry> = gson.fromJson(chargeHistJson, type)
                 chargeHistory.clear()
                 chargeHistory.addAll(loaded)
+            } catch (_: Exception) {}
+        }
+
+        val refuelHistJson = prefs.getString(SharedPreferencesKeys.REFUEL_HISTORY_JSON, null)
+        if (!refuelHistJson.isNullOrEmpty()) {
+            try {
+                val type = object : TypeToken<List<RefuelEntry>>() {}.type
+                val loaded: List<RefuelEntry> = gson.fromJson(refuelHistJson, type)
+                refuelHistory.clear()
+                refuelHistory.addAll(loaded)
             } catch (_: Exception) {}
         }
 

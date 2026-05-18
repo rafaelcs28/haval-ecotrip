@@ -415,6 +415,14 @@ fun ConsumptionScreen() {
             }
         }
 
+        tripManager.onRefuelDetected = { _ ->
+            mainHandler.post {
+                // Publica imediato se MQTT online; offline, fica no histórico local
+                // e drainQueues republicará no próximo reconnect.
+                mqttManager.publishRefuelHistory(tripManager.getRefuelHistory())
+            }
+        }
+
         tripManager.addListener(tripListener)
         carManager.addListener(carListener)
         carManager.addConnectedListener(connectedListener)
@@ -433,6 +441,7 @@ fun ConsumptionScreen() {
         onDispose {
             tripManager.onAutoTripCompleted = null
             tripManager.onChargeSessionCompleted = null
+            tripManager.onRefuelDetected         = null
             tripManager.removeListener(tripListener)
             carManager.removeListener(carListener)
             carManager.removeConnectedListener(connectedListener)
