@@ -1964,11 +1964,17 @@ function renderTripCard(s, engOn) {
     const ct = s.current_trip;
     const tripDist = ct?.distKm ?? rollDist;
     setText('d-curtrip-dist', tripDist > 0 ? tripDist.toFixed(1) : '0,0');
+    // Tempo total = conduzindo + parado em P + motor desligado entre resumes
+    const liveTimeSec    = (+ct?.timeSec || 0);
+    const liveParkedSec  = (+ct?.parkedInPSec || 0) + (+ct?.engineOffSec || 0);
+    const liveTotal      = liveTimeSec + liveParkedSec;
+    setText('d-live-time', liveTotal > 0
+      ? (liveParkedSec > 60 ? `${fmtDuration(liveTotal)} · ${fmtDuration(liveParkedSec)} pdo` : fmtDuration(liveTotal))
+      : '--');
     setText('d-live-avgv',    ct?.avgSpeedKmh > 0 ? Math.round(ct.avgSpeedKmh) + ' km/h' : '--');
     setText('d-live-maxv',    ct?.maxSpeedKmh > 0 ? Math.round(ct.maxSpeedKmh) + ' km/h' : '--');
     const ap = ct?.avgPowerKw || 0;
     setText('d-live-avgpwr',  ap > 0.05 ? ap.toFixed(1) + ' kW' : '--');
-    setText('d-live-soc',     s.soc_pct != null ? Math.round(+s.soc_pct) + '%' : '--');
     setText('d-live-kwh',     ct?.netKwh > 0 ? ct.netKwh.toFixed(2) + ' kWh' : '--');
     setText('d-live-fuel',    ct?.fuelL  > 0.01 ? ct.fuelL.toFixed(2)  + ' L'   : '--');
   } else if (last) {
@@ -1987,8 +1993,15 @@ function renderTripCard(s, engOn) {
     const dist = +last.distKm || 0;
     setText('d-curtrip-dist', dist > 0 ? dist.toFixed(1) : '0,0');
 
-    const secs = +last.timeSec || 0;
-    setText('d-last-time', secs > 0 ? fmtDuration(secs) : '--');
+    const secs       = +last.timeSec || 0;
+    const parkedSec  = (+last.parkedInPSec || 0) + (+last.engineOffSec || 0);
+    const totalSec   = secs + parkedSec;
+    // Mostra total + breakdown sutil quando há tempo parado
+    setText('d-last-time', totalSec > 0
+      ? (parkedSec > 60
+          ? `${fmtDuration(totalSec)} · ${fmtDuration(parkedSec)} parado`
+          : fmtDuration(totalSec))
+      : '--');
 
     const ss = Math.round(+last.startSocPct || 0);
     const es = Math.round(+last.endSocPct   || 0);

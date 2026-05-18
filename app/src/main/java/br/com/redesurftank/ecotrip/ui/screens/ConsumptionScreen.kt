@@ -173,6 +173,19 @@ fun ConsumptionScreen() {
     // actualizada após renomear ou limpar. Evita chamar getAutoTripHistory() a cada
     // recomposição (que criaria uma nova lista instável e poderia causar loops).
     var autoTripEntries   by remember { mutableStateOf<List<AutoTripEntry>>(emptyList()) }
+    var resumableTrip     by remember { mutableStateOf<AutoTripEntry?>(null) }
+
+    // Verifica continuamente se há viagem retomável. Aparece e some sozinho conforme
+    // as condições mudam (janela 60min, distância da viagem em curso, etc).
+    // Espera 3s antes do primeiro check — evita popup competindo com a partida do
+    // carro (vários apps Android Auto inicializando ao mesmo tempo).
+    LaunchedEffect(Unit) {
+        delay(3_000L)
+        while (true) {
+            resumableTrip = tripManager.getResumableLastTrip()
+            delay(5_000L)
+        }
+    }
 
     DisposableEffect(Unit) {
         val tripListener: (RollingSnapshot) -> Unit = { r ->
@@ -806,6 +819,51 @@ fun ConsumptionScreen() {
                 shape          = RoundedCornerShape(6.dp),
             ) {
                 Text("Zerar", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = TextSecondary)
+            }
+        }
+
+        // ── Banner de continuação: aparece quando há viagem retomável ────────
+        resumableTrip?.let { last ->
+            val gapMin = ((System.currentTimeMillis() - last.endMs) / 60_000L).toInt().coerceAtLeast(0)
+            Surface(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                color    = SurfaceCard,
+                shape    = RoundedCornerShape(10.dp),
+                border   = androidx.compose.foundation.BorderStroke(1.dp, AccentBlue.copy(alpha = 0.4f)),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Text("🔄", fontSize = 18.sp)
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "Continuar viagem anterior?",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = TextPrimary,
+                        )
+                        Text(
+                            "Terminou há ${gapMin} min · ${"%.1f".format(last.distKm)} km",
+                            fontSize = 11.sp,
+                            color = TextSecondary,
+                        )
+                    }
+                    OutlinedButton(
+                        onClick = { resumableTrip = null },
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = TextSecondary),
+                    ) { Text("Não", fontSize = 12.sp) }
+                    Button(
+                        onClick = {
+                            if (tripManager.resumeLastTrip()) {
+                                resumableTrip = null
+                                autoTripEntries = tripManager.getAutoTripHistory()
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = AccentBlue),
+                    ) { Text("Continuar", fontSize = 12.sp, fontWeight = FontWeight.Bold) }
+                }
             }
         }
 

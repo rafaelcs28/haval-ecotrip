@@ -759,7 +759,7 @@ class MqttManager private constructor() {
                     inProgress.distKm / (inProgress.timeSec / 3600f) else 0f
                 val avgPwrKw = if (inProgress.timeSec > 0)
                     inProgress.netKwh / (inProgress.timeSec / 3600f) else 0f
-                val payload = """{"startMs":${inProgress.startMs},"distKm":${fmt3(inProgress.distKm)},"timeSec":${inProgress.timeSec},"maxSpeedKmh":${fmt1(inProgress.maxSpeedKmh)},"avgSpeedKmh":${fmt1(avgKmh)},"netKwh":${fmt3(inProgress.netKwh)},"fuelL":${fmt3(inProgress.fuelL)},"avgPowerKw":${fmt2(avgPwrKw)},"startSocPct":${fmt1(inProgress.startSocPct)},"currentSocPct":${fmt1(inProgress.endSocPct)}}"""
+                val payload = """{"startMs":${inProgress.startMs},"distKm":${fmt3(inProgress.distKm)},"timeSec":${inProgress.timeSec},"parkedInPSec":${inProgress.parkedInPSec},"engineOffSec":${inProgress.engineOffSec},"maxSpeedKmh":${fmt1(inProgress.maxSpeedKmh)},"avgSpeedKmh":${fmt1(avgKmh)},"netKwh":${fmt3(inProgress.netKwh)},"fuelL":${fmt3(inProgress.fuelL)},"avgPowerKw":${fmt2(avgPwrKw)},"startSocPct":${fmt1(inProgress.startSocPct)},"currentSocPct":${fmt1(inProgress.endSocPct)}}"""
                 c.publish("$prefix/current_trip", payload.toByteArray(), 1, true)
             } else {
                 // Sem viagem ativa — limpa o retain (payload vazio + retain=true).

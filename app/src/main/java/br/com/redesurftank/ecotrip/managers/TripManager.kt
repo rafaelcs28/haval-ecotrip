@@ -167,6 +167,12 @@ data class AutoTripEntry(
     val startLng:     Double  = 0.0,
     val endLat:       Double  = 0.0,
     val endLng:       Double  = 0.0,
+    // v5.20 — tempo parado:
+    //   parkedInPSec  = motor ligado em P (acumula durante toda a viagem)
+    //   engineOffSec  = motor desligado entre resumes (só >0 em viagens continuadas)
+    //   tempo total exibido = timeSec + parkedInPSec + engineOffSec
+    val parkedInPSec: Long    = 0L,
+    val engineOffSec: Long    = 0L,
 )
 
 /** Abastecimento auto-detectado pelo APK (pulo no fuel_l com carro parado).
@@ -261,6 +267,9 @@ class TripManager private constructor() {
     private var autoTripStartDist    = 0f
     private var autoTripStartFuelL   = 0f
     private var autoTripStartTime    = 0L
+    // v5.20 — tempo parado
+    private var autoTripStartPausedMs: Long = 0L  // snapshot de lifeTotalPausedMs no início
+    private var autoTripEngineOffMs:   Long = 0L  // acumulador de gaps entre resumes (ms)
     private var currentChargePowerKw: Float   = 0f
     private var isChargingNow:        Boolean = false
     private var chargeTickCount:      Int     = 0
@@ -421,6 +430,105 @@ class TripManager private constructor() {
     fun getChargeHistory(): List<ChargeHistoryEntry> = synchronized(lock) { chargeHistory.toList() }
     fun getRefuelHistory(): List<RefuelEntry>        = synchronized(lock) { refuelHistory.toList() }
 
+    /** Janela máxima (ms) entre fim de uma viagem e o engate da próxima pra permitir
+     *  continuação. 60min cobre almoços e recargas curtas. */
+    private val RESUME_WINDOW_MS = 60L * 60_000L
+
+    /**
+     * Retorna a última viagem se ela for elegível pra continuação:
+     *  - Última viagem terminou há menos de RESUME_WINDOW_MS (60min)
+     *  - Distância ≥ 0.5 km (filtra triviais)
+     *  - Arquivo local de samples ainda existe (não foi sincronizada e limpa)
+     *  - Se já houver viagem ativa, ela deve estar "fresca" (<5min, <1km) — banner
+     *    aparece no início da nova viagem, oferecendo conversão em continuação.
+     */
+    fun getResumableLastTrip(): AutoTripEntry? = synchronized(lock) {
+        // Se já houver viagem em andamento, só permite resume se ela é muito fresca
+        if (autoTripStartMs != 0L) {
+            val ageMs = System.currentTimeMillis() - autoTripStartMs
+            val curDist = lifeDistKm - autoTripStartDist
+            if (ageMs > 5L * 60_000L || curDist > 1f) return@synchronized null
+        }
+        val last = autoTripHistory.lastOrNull() ?: return@synchronized null
+        val gapMs = System.currentTimeMillis() - last.endMs
+        if (gapMs < 0 || gapMs > RESUME_WINDOW_MS) return@synchronized null
+        if (last.distKm < 0.5f) return@synchronized null
+        val samplesFile = java.io.File(samplesDir, "${last.startMs}.json")
+        if (!samplesFile.exists()) return@synchronized null
+        last
+    }
+
+    /**
+     * Restaura a última viagem como ativa. Os baselines voltam pros valores
+     * originais (subtraindo o acumulado da viagem dos contadores lifetime),
+     * o gap de motor desligado é somado em autoTripEngineOffMs, e os samples
+     * antigos são pré-carregados no recorder pra serem concatenados aos novos.
+     * Quando a viagem (agora estendida) terminar, ela é salva com o mesmo
+     * startMs original — o bridge faz UPSERT, sem duplicação.
+     */
+    fun resumeLastTrip(): Boolean {
+        val last = getResumableLastTrip() ?: return false
+        synchronized(lock) {
+            // Pop do histórico — a viagem volta a ser "em andamento"
+            autoTripHistory.removeAll { it.startMs == last.startMs }
+
+            // Restaura baselines: o ponto inicial da viagem (em lifeXxx) era
+            // (lifeAtualNoFimDaViagem - acumuladoNaViagem). Mas lifeAtual pode
+            // ter mudado pouco entre o fim da viagem e agora (motor off → poucos
+            // updates). Reverte usando os valores atuais menos os totais da viagem.
+            autoTripStartMs     = last.startMs
+            autoTripStartSoc    = last.startSocPct
+            autoTripStartFuel   = last.startFuelPct
+            autoTripStartDist   = lifeDistKm   - last.distKm
+            autoTripStartTime   = lifeTimeSec  - last.timeSec
+            autoTripStartEnergy = lifeEnergyKwh - last.energyKwh
+            autoTripStartRegen  = lifeRegenKwh  - last.regenKwh
+            autoTripStartFuelL  = lifeFuelL    - last.fuelL
+            autoTripMaxSpeed    = last.maxSpeedKmh
+            autoTripMaxPowerPct = last.maxPowerPct
+
+            // Soma o gap atual (motor off) ao acumulador. Preserva engineOffSec
+            // anterior caso esta viagem já tenha sido continuada antes.
+            val gapMs = (System.currentTimeMillis() - last.endMs).coerceAtLeast(0L)
+            autoTripEngineOffMs = (last.engineOffSec * 1000L) + gapMs
+
+            // Reseta autoTripStartPausedMs pro snapshot atual menos o parkedInPSec
+            // da viagem original — mantém continuidade do contador de P-time.
+            val now = System.currentTimeMillis()
+            val curPausedMs = lifeTotalPausedMs + (if (lifeGearPauseStartMs > 0L) now - lifeGearPauseStartMs else 0L)
+            autoTripStartPausedMs = curPausedMs - (last.parkedInPSec * 1000L)
+
+            // Recarrega samples antigos no recorder pra concatenar com novos
+            val samplesFile = java.io.File(samplesDir, "${last.startMs}.json")
+            val preloaded = try {
+                if (samplesFile.exists()) {
+                    val type = object : TypeToken<List<TelemetrySample>>() {}.type
+                    gson.fromJson<List<TelemetrySample>>(samplesFile.readText(), type) ?: emptyList()
+                } else emptyList()
+            } catch (_: Exception) { emptyList() }
+            val inProgressFile = java.io.File(samplesDir, "${autoTripStartMs}_inprogress.json")
+            telemetryRecorder?.startRecording(autoTripStartMs, preloaded, inProgressFile)
+
+            // Re-publica histórico atualizado (a viagem some) e baselines
+            prefs.edit()
+                .putString(SharedPreferencesKeys.AUTO_TRIP_HISTORY_JSON, gson.toJson(autoTripHistory))
+                .putLong  (SharedPreferencesKeys.AUTO_TRIP_START_MS,       autoTripStartMs)
+                .putFloat (SharedPreferencesKeys.AUTO_TRIP_START_SOC,      autoTripStartSoc)
+                .putFloat (SharedPreferencesKeys.AUTO_TRIP_START_FUEL,     autoTripStartFuel)
+                .putFloat (SharedPreferencesKeys.AUTO_TRIP_START_ENERGY,   autoTripStartEnergy)
+                .putFloat (SharedPreferencesKeys.AUTO_TRIP_START_REGEN,    autoTripStartRegen)
+                .putFloat (SharedPreferencesKeys.AUTO_TRIP_START_DIST,     autoTripStartDist)
+                .putFloat (SharedPreferencesKeys.AUTO_TRIP_START_FUEL_L,   autoTripStartFuelL)
+                .putLong  (SharedPreferencesKeys.AUTO_TRIP_START_TIME_SEC, autoTripStartTime)
+                .putFloat (SharedPreferencesKeys.AUTO_TRIP_MAX_SPEED,      autoTripMaxSpeed)
+                .putLong  (SharedPreferencesKeys.AUTO_TRIP_START_PAUSED_MS,autoTripStartPausedMs)
+                .putLong  (SharedPreferencesKeys.AUTO_TRIP_ENGINE_OFF_MS,  autoTripEngineOffMs)
+                .apply()
+        }
+        AppLogger.i(TAG, "Viagem ${last.startMs} retomada — gap=${(System.currentTimeMillis() - last.endMs) / 60000}min")
+        return true
+    }
+
     /** Para MqttManager: energia injetada na sessão de recarga corrente. */
     fun getChargeSessionEnergyKwh(): Float = synchronized(lock) { chargeSessionEnergyKwh }
 
@@ -454,6 +562,10 @@ class TripManager private constructor() {
         val now    = System.currentTimeMillis()
         val energy = (lifeEnergyKwh - autoTripStartEnergy).coerceAtLeast(0f)
         val regen  = (lifeRegenKwh  - autoTripStartRegen ).coerceAtLeast(0f)
+        // Tempo em P durante a viagem = pause acumulado atual − snapshot do início.
+        // Inclui o intervalo em andamento se ainda em P (lifeGearPauseStartMs > 0).
+        val curPausedMs = lifeTotalPausedMs + (if (lifeGearPauseStartMs > 0L) now - lifeGearPauseStartMs else 0L)
+        val parkedInPMs = (curPausedMs - autoTripStartPausedMs).coerceAtLeast(0L)
         AutoTripEntry(
             startMs      = autoTripStartMs,
             endMs        = now,
@@ -470,6 +582,8 @@ class TripManager private constructor() {
             maxSpeedKmh  = autoTripMaxSpeed,
             maxPowerPct  = autoTripMaxPowerPct,
             outsideTempC = latestOutsideTempC,
+            parkedInPSec = parkedInPMs / 1000L,
+            engineOffSec = autoTripEngineOffMs / 1000L,
         )
     }
 
@@ -994,6 +1108,9 @@ class TripManager private constructor() {
         autoTripStartDist   = lifeDistKm
         autoTripStartFuelL  = lifeFuelL
         autoTripStartTime   = lifeTimeSec
+        // Snapshot de lifeTotalPausedMs pra calcular o tempo em P durante a viagem
+        autoTripStartPausedMs = lifeTotalPausedMs + (if (lifeGearPauseStartMs > 0L) System.currentTimeMillis() - lifeGearPauseStartMs else 0L)
+        autoTripEngineOffMs   = 0L
         // Persiste para que, se o app reiniciar durante a viagem, os dados não sejam perdidos
         prefs.edit()
             .putLong (SharedPreferencesKeys.AUTO_TRIP_START_MS,       autoTripStartMs)
@@ -1004,6 +1121,8 @@ class TripManager private constructor() {
             .putFloat(SharedPreferencesKeys.AUTO_TRIP_START_DIST,     autoTripStartDist)
             .putFloat(SharedPreferencesKeys.AUTO_TRIP_START_FUEL_L,   autoTripStartFuelL)
             .putLong (SharedPreferencesKeys.AUTO_TRIP_START_TIME_SEC, autoTripStartTime)
+            .putLong (SharedPreferencesKeys.AUTO_TRIP_START_PAUSED_MS,autoTripStartPausedMs)
+            .putLong (SharedPreferencesKeys.AUTO_TRIP_ENGINE_OFF_MS,  0L)
             .apply()
         autoTripMaxSpeed    = 0f
         autoTripMaxPowerPct = 0
@@ -1053,6 +1172,12 @@ class TripManager private constructor() {
             startLng     = startGps?.lng ?: 0.0,
             endLat       = endGps?.lat   ?: 0.0,
             endLng       = endGps?.lng   ?: 0.0,
+            parkedInPSec = run {
+                val now = System.currentTimeMillis()
+                val curPausedMs = lifeTotalPausedMs + (if (lifeGearPauseStartMs > 0L) now - lifeGearPauseStartMs else 0L)
+                ((curPausedMs - autoTripStartPausedMs).coerceAtLeast(0L)) / 1000L
+            },
+            engineOffSec = autoTripEngineOffMs / 1000L,
         )
         autoTripHistory.add(entry)
         // Retenção: descarta viagens com mais de 90 dias
@@ -1060,10 +1185,14 @@ class TripManager private constructor() {
         autoTripHistory.removeAll { it.endMs < cutoff90d }
         autoTripStartMs = 0L
         autoTripMaxSpeed = 0f
+        autoTripStartPausedMs = 0L
+        autoTripEngineOffMs   = 0L
         prefs.edit()
             .putString(SharedPreferencesKeys.AUTO_TRIP_HISTORY_JSON, gson.toJson(autoTripHistory))
             .putLong  (SharedPreferencesKeys.AUTO_TRIP_START_MS, 0L)
             .putFloat (SharedPreferencesKeys.AUTO_TRIP_MAX_SPEED, 0f)
+            .putLong  (SharedPreferencesKeys.AUTO_TRIP_START_PAUSED_MS, 0L)
+            .putLong  (SharedPreferencesKeys.AUTO_TRIP_ENGINE_OFF_MS, 0L)
             .apply()
         AppLogger.i(TAG, "AutoTrip salvo: ${entry.distKm}km ${entry.timeSec}s ${entry.netKwh}kWh max=${entry.maxSpeedKmh}km/h temp=${entry.outsideTempC}°C")
         onAutoTripCompleted?.invoke(entry)
@@ -1566,8 +1695,10 @@ class TripManager private constructor() {
             autoTripStartRegen  = prefs.getFloat(SharedPreferencesKeys.AUTO_TRIP_START_REGEN,    0f)
             autoTripStartDist   = prefs.getFloat(SharedPreferencesKeys.AUTO_TRIP_START_DIST,     0f)
             autoTripStartFuelL  = prefs.getFloat(SharedPreferencesKeys.AUTO_TRIP_START_FUEL_L,   0f)
-            autoTripStartTime   = prefs.getLong (SharedPreferencesKeys.AUTO_TRIP_START_TIME_SEC, 0L)
-            autoTripMaxSpeed    = prefs.getFloat(SharedPreferencesKeys.AUTO_TRIP_MAX_SPEED,      0f)
+            autoTripStartTime     = prefs.getLong (SharedPreferencesKeys.AUTO_TRIP_START_TIME_SEC, 0L)
+            autoTripMaxSpeed      = prefs.getFloat(SharedPreferencesKeys.AUTO_TRIP_MAX_SPEED,      0f)
+            autoTripStartPausedMs = prefs.getLong (SharedPreferencesKeys.AUTO_TRIP_START_PAUSED_MS,0L)
+            autoTripEngineOffMs   = prefs.getLong (SharedPreferencesKeys.AUTO_TRIP_ENGINE_OFF_MS,  0L)
             AppLogger.i(TAG, "AutoTrip em andamento recuperado do disco — startMs=$autoTripStartMs maxSpd=${autoTripMaxSpeed}")
         }
 
