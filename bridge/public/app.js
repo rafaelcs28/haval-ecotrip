@@ -188,11 +188,10 @@ document.addEventListener('DOMContentLoaded', () => {
   // Mostra build atual no admin para confirmar versão carregada
   const as = document.getElementById('admin-status');
   if (as && as.textContent.trim() === 'Pronto.') as.textContent = 'Pronto. (' + APP_BUILD + ')';
-  // Restaura a aba ativa após hardRefresh — chave consome após uso (one-shot).
+  // Restaura a aba ativa de qualquer reload dentro da mesma sessão.
   try {
     const saved = sessionStorage.getItem('ecotrip_active_panel');
     if (saved && saved !== 'dash') {
-      sessionStorage.removeItem('ecotrip_active_panel');
       const btn = document.querySelector(`.tab[data-panel="${saved}"]`);
       if (btn) btn.click();
     }
@@ -666,9 +665,8 @@ async function hardRefresh() {
   // Evita que o controllerchange (disparado pelo unregister) chame location.reload()
   // enquanto hardRefresh ainda está em andamento — isso causava dupla-navegação no iOS PWA
   refreshing = true;
-  // Persiste a aba ativa pra restaurar após o reload (sessionStorage: morre ao fechar
-  // a aba do navegador, mas sobrevive ao reload — exatamente o que queremos).
-  try { sessionStorage.setItem('ecotrip_active_panel', activePanel); } catch (_) {}
+  // A aba ativa é persistida em switchTab() — sobrevive a este reload e a qualquer
+  // outro que aconteça depois (ex: controllerchange do SW).
 
   // 1. Apaga todos os caches do SW
   if ('caches' in window) {
@@ -740,6 +738,10 @@ function switchTab(btn, callback) {
   btn.classList.add('active');
   activePanel = btn.dataset.panel;
   document.getElementById('panel-' + activePanel).classList.add('active');
+  // Persiste a aba ativa pra sobreviver a reloads (sw controllerchange,
+  // hardRefresh, etc). sessionStorage morre ao fechar o PWA — comportamento
+  // ideal: dentro da sessão restaura, em nova sessão volta pro default.
+  try { sessionStorage.setItem('ecotrip_active_panel', activePanel); } catch (_) {}
   if (callback) callback();
   // Leaflet precisa recalcular o tamanho ao tornar-se visível
   if (activePanel === 'dash' && dashMap) {
