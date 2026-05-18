@@ -248,20 +248,26 @@ fun SocStripBar(
         modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(4.dp),  // folga entre label e bar
     ) {
-        // 1) Label "X% início" — posicionada acima do marcador via offset proporcional
+        // 1) Label "X% início" — posicionada acima do marcador via offset proporcional.
+        // O texto é clampado pra não sair do limite da barra (evita sobreposição com
+        // o "%" da SOC atual que vem fora do componente).
         if (showConsumed) {
             BoxWithConstraints(
                 modifier = Modifier.fillMaxWidth().height(18.dp),  // espaço pro texto respirar
             ) {
-                val totalW = maxWidth
-                // O texto ocupa ~50dp; centro do texto deve cair em totalW * startFrac
+                val totalW       = maxWidth
+                val labelWidth   = 60.dp        // "100% início" no font 13sp ≈ 56dp + folga
+                val rawCenter    = totalW * startFrac
+                // Centraliza no marcador quando possível, encosta na borda quando estouraria.
+                val clampedLeft  = (rawCenter - labelWidth / 2)
+                    .coerceIn(0.dp, (totalW - labelWidth).coerceAtLeast(0.dp))
                 Text(
                     text = "%.0f%% início".format(startSocPct),
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Bold,
                     color = WarnYellow,
                     letterSpacing = 0.3.sp,
-                    modifier = Modifier.offset(x = totalW * startFrac - 30.dp),
+                    modifier = Modifier.offset(x = clampedLeft),
                 )
             }
         }
