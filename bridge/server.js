@@ -2642,6 +2642,20 @@ function broadcast(type, data) {
   }
 }
 
+// Coalesce de updates de state: o APK manda ~10 tópicos por snapshot (speed,
+// RPM, soc, doors, etc). Sem coalesce, o PWA recebia 10 'update' messages
+// quase simultâneos por snapshot — flood ineficiente. Agrupa numa janela de
+// 16ms (1 frame a 60fps): múltiplas mensagens MQTT viram 1 broadcast WS.
+// Mantém latência ~imperceptível e reduz tráfego/CPU do PWA significativamente.
+let _stateBroadcastTimer = null;
+function scheduleStateBroadcast() {
+  if (_stateBroadcastTimer) return;
+  _stateBroadcastTimer = setTimeout(() => {
+    _stateBroadcastTimer = null;
+    broadcast('update', state);
+  }, 16);
+}
+
 // ── MQTT ──────────────────────────────────────────────────────────────────────
 
 const mqttOptions = {
@@ -2694,7 +2708,7 @@ mqttClient.on('message', (topic, payload, packet) => {
       : topic;
     applyMqttMessage(key, value, isRetained);
   }
-  broadcast('update', state);
+  scheduleStateBroadcast();
 });
 
 // ── Roteamento dos tópicos MQTT → state ──────────────────────────────────────

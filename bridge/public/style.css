@@ -1673,7 +1673,10 @@ html, body {
 .drv-ring-fill {
   stroke: #22d3ee;
   filter: drop-shadow(0 0 8px rgba(34, 211, 238, 0.6));
-  transition: stroke-dashoffset .25s ease-out, stroke .3s;
+  /* 120ms linear casa com a taxa de chegada (~10 Hz). Antes era 250ms ease-out —
+     com dado chegando a cada ~100ms, cada update reiniciava a transição no meio,
+     gerando engasgo visual mesmo com fonte fluida. Cor mantém ease-out. */
+  transition: stroke-dashoffset .12s linear, stroke .3s ease-out;
 }
 .drv-ring-fill.regen {
   stroke: #4ade80;
@@ -1689,7 +1692,7 @@ html, body {
 .drv-tach-fill {
   stroke: #fb923c;
   filter: drop-shadow(0 0 6px rgba(251, 146, 60, 0.55));
-  transition: stroke-dashoffset .2s ease-out, stroke .3s, filter .3s;
+  transition: stroke-dashoffset .12s linear, stroke .3s ease-out, filter .3s ease-out;
 }
 .drv-tach-fill.redline {
   stroke: #ef4444;
