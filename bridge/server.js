@@ -676,11 +676,11 @@ function _haversineM(la1, ln1, la2, ln2) {
   return 2 * R * Math.asin(Math.sqrt(a));
 }
 
-// Threshold de confiança: +8 km/h sobre o limite. A leitura do veículo é a
-// velocidade REAL (não a velocímetro inflado), então excedendo o limite legal
-// (+7 km/h até 100, +7% acima) em pelo menos 1 km/h dá certeza de multa.
-// Valor fixo de 8 simplifica e cobre os dois regimes com margem.
-function _radarTolerance() { return 8; }
+// Tolerância legal brasileira: +7 km/h. Alerta dispara apenas quando excede
+// isso (speed > limit + 7), ou seja, a partir de 8 km/h acima do limite —
+// confirmação de multa real, já considerando que a leitura do veículo é a
+// velocidade verdadeira (não o velocímetro otimista).
+function _radarTolerance() { return 7; }
 
 // Pega o radar mais próximo de (lat, lng) dentro de maxMeters.
 function _findNearestRadar(lat, lng, maxMeters = 50) {

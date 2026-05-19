@@ -1020,7 +1020,7 @@ function fmtDate(ts) {
 // ── Filtros ───────────────────────────────────────────────────────────────────
 const filterState = {
   charges:     { active: 'today', customFrom: '', customTo: '', location: null, type: 'all' },
-  auto:        { active: 'today', customFrom: '', customTo: '', search: '' },
+  auto:        { active: 'today', customFrom: '', customTo: '', search: '', onlyRadarAlerts: false },
   logs:        { active: 'all',   type: 'all',   customFrom: '', customTo: '' },
   stats:       { active: 'all',   customFrom: '', customTo: '' },
 };
@@ -2595,7 +2595,13 @@ function renderAutoTrips() {
     });
   }
 
-  let html = filterChipsHTML('auto');
+  // Filtro "só com possível multa"
+  if (filterState.auto.onlyRadarAlerts) {
+    trips = trips.filter(t => (t.radarAlertCount || 0) > 0);
+  }
+
+  const radarChip = `<button class="filter-chip${filterState.auto.onlyRadarAlerts ? ' active' : ''}" onclick="toggleAutoRadarFilter()" title="Só viagens com possível multa por excesso de velocidade">⚠️ Multa</button>`;
+  let html = filterChipsHTML('auto') + `<div style="margin-top:6px">${radarChip}</div>`;
 
   // Badge de geocodificação em progresso
   if (autoQ && pendingGeo > 0) {
@@ -3953,6 +3959,11 @@ function initTripCharts(samples) {
   chartSoc = hasSoc ? mkChart('chart-soc', socData, '#c084fc', '%') : null;
 }
 
+window.toggleAutoRadarFilter = function() {
+  filterState.auto.onlyRadarAlerts = !filterState.auto.onlyRadarAlerts;
+  loadAutoTrips();
+};
+
 // ── Radares: pinos no mapa + lista clicável de alertas ───────────────────────
 function renderRadarAlerts(tripId) {
   const section = document.getElementById('radar-alerts-section');
@@ -4991,6 +5002,7 @@ async function loadStats() {
 
   // ── 0. Preços médios (atual + período) ───────────────────────────────────
   html += _statsPricesHTML(charges, refuels);
+  html += _statsRadarHTML(trips);
 
   // ── 1. Recordes pessoais ─────────────────────────────────────────────────
   html += _statsRecordsHTML(trips);
@@ -5090,6 +5102,22 @@ function _statsPricesHTML(charges, refuels) {
               `média ponderada de ${charges.length} recarga${charges.length !== 1 ? 's' : ''} no filtro`);
 
   return _statsCard('💰 Custo unitário', body);
+}
+
+// Possíveis multas no período: conta viagens com radarAlertCount > 0 e soma o
+// total de alertas individuais.
+function _statsRadarHTML(trips) {
+  const tripsWithAlert = trips.filter(t => (t.radarAlertCount || 0) > 0);
+  const totalAlerts    = tripsWithAlert.reduce((s, t) => s + (t.radarAlertCount || 0), 0);
+  const body = tripsWithAlert.length === 0
+    ? '<div style="color:#4ade80;font-size:13px;text-align:center;padding:8px">✓ Nenhuma possível multa no período</div>'
+    : _statsRow('⚠️', 'Viagens com possível multa',
+                 `<span style="color:#fbbf24">${tripsWithAlert.length}</span>`,
+                 `${totalAlerts} alerta${totalAlerts !== 1 ? 's' : ''} no total · cada radar pesa 1 vez por viagem`)
+      + `<div style="margin-top:8px;font-size:11px;color:#64748b;text-align:center">
+           Toca em ⚠️ Multa na aba Auto-trips pra ver só essas viagens
+         </div>`;
+  return _statsCard('🚨 Possíveis multas', body);
 }
 
 function _statsRecordsHTML(trips) {
