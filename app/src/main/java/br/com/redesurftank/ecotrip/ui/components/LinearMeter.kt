@@ -34,7 +34,7 @@ import br.com.redesurftank.ecotrip.ui.theme.VoidBlack
  *   │  0  25  50  75  100           │
  *   └───────────────────────────────┘
  *
- * - [categoryIconColor]: cor fixa identifica a categoria (teal pra km/L eq, orange pra km/L)
+ * - [categoryIconColor]: cor fixa identifica a categoria (teal pra km/L econ., orange pra km/L)
  * - [perfColor]: cor de performance vinda do threshold helper — pinta valor, fill e dot
  */
 @Composable

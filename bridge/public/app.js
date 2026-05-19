@@ -2682,7 +2682,7 @@ function renderAutoTrips() {
   }
 
   // Pré-cálculo: índice de eficiência por trajeto (start/end ~200m, ±10% km).
-  // Pra cada trip, acha viagens "irmãs" do mesmo trecho e calcula a média km/L eq;
+  // Pra cada trip, acha viagens "irmãs" do mesmo trecho e calcula a média km/L econ.;
   // o badge mostra quantos % esta viagem está acima/abaixo da média do trecho.
   function _haversineM(la1, ln1, la2, ln2) {
     const R = 6371000, toRad = d => d * Math.PI / 180;
@@ -2763,7 +2763,7 @@ function renderAutoTrips() {
   <div class="metrics-row">
     <div class="metric"><div class="metric-value blue sm">${f1(totDist)} km</div><div class="metric-label">distância</div></div>
     <div class="metric"><div class="metric-value green sm">${avgKwh100 > 0 ? f1(avgKwh100) : '--'}</div><div class="metric-label">kWh/100km</div></div>
-    <div class="metric"><div class="metric-value green sm">${avgEqKmL > 0 ? f1(avgEqKmL) : '--'}</div><div class="metric-label">km/L eq</div></div>
+    <div class="metric"><div class="metric-value green sm">${avgEqKmL > 0 ? f1(avgEqKmL) : '--'}</div><div class="metric-label">km/L econ.</div></div>
   </div>
   <div class="metrics-row" style="margin-top:4px">
     <div class="metric"><div class="metric-value orange sm">${totFuel > 0.001 ? f2(totFuel) + ' L' : '--'}</div><div class="metric-label">combustível</div></div>
@@ -2816,7 +2816,7 @@ function renderAutoTrips() {
       const cls = pct >= 2 ? 'better' : pct <= -2 ? 'worse' : 'neutral';
       const arrow = pct >= 2 ? '↑' : pct <= -2 ? '↓' : '≈';
       const sign  = pct > 0 ? '+' : '';
-      const tip   = `vs média de ${effInfo.sampleCount + 1} viagens deste trecho (${effInfo.avgKmL.toFixed(1)} km/L eq)`;
+      const tip   = `vs média de ${effInfo.sampleCount + 1} viagens deste trecho (${effInfo.avgKmL.toFixed(1)} km/L econ.)`;
       effBadge = `<span class="trip-eff-badge ${cls}" title="${tip}">${arrow} ${sign}${pct.toFixed(0)}%</span>`;
     }
 
@@ -2846,7 +2846,7 @@ function renderAutoTrips() {
     ${kwh100 ? `<div class="trip-metric"><div class="trip-metric-val green">${kwh100}</div><div class="trip-metric-lbl">kWh/100km</div></div>` : ''}
     ${netKwh !== '--' ? `<div class="trip-metric"><div class="trip-metric-val teal">${netKwh}</div><div class="trip-metric-lbl">kWh liq.</div></div>` : ''}
     ${fuelL !== '--' ? `<div class="trip-metric"><div class="trip-metric-val orange">${fuelL}</div><div class="trip-metric-lbl">combust.</div></div>` : ''}
-    ${eqKmL ? `<div class="trip-metric"><div class="trip-metric-val green">${eqKmL}</div><div class="trip-metric-lbl">km/L eq</div></div>` : ''}
+    ${eqKmL ? `<div class="trip-metric"><div class="trip-metric-val green">${eqKmL}</div><div class="trip-metric-lbl">km/L econ.</div></div>` : ''}
     ${tripCost > 0 && t.distKm > 0.1 ? `<div class="trip-metric"><div class="trip-metric-val yellow">${f3(tripCost / t.distKm)}</div><div class="trip-metric-lbl">R$/km</div></div>` : ''}
     ${tempStr ? `<div class="trip-metric"><div class="trip-metric-val blue">${tempStr}</div><div class="trip-metric-lbl">temp. ext.</div></div>` : ''}
   </div>` : '';
@@ -3561,7 +3561,7 @@ function renderSpeedBands(samples) {
   <div style="font-size:20px;font-weight:700;color:#4ade80">${kwh100}</div>
   <div style="font-size:9px;color:#64748b;margin-bottom:6px">kWh/100km</div>
   <div style="font-size:17px;font-weight:700;color:#22d3ee">${eqKmL}</div>
-  <div style="font-size:9px;color:#64748b;margin-bottom:4px">km/L eq</div>
+  <div style="font-size:9px;color:#64748b;margin-bottom:4px">km/L econ.</div>
   <div style="font-size:9px;color:#334155">${band.distKm.toFixed(1)} km · ${pct}%</div>
 </div>`;
   }
@@ -3689,7 +3689,7 @@ function _drawBands(ctx, samples, x, y, w) {
   const BAR_MAX = Math.floor(w * 0.38);
   const ROW_H   = 36;
   const xKwh    = x + w - 68;  // kWh/100km — coluna esquerda da direita
-  const xKmL    = x + w;       // km/L eq   — borda direita
+  const xKmL    = x + w;       // km/L econ.   — borda direita
   for (const band of bands) {
     const pct    = Math.round(band.distKm / totalDist * 100);
     const kwh100 = band.distKm > 0.01 ? band.kwhPos / band.distKm * 100 : 0;
@@ -3710,11 +3710,11 @@ function _drawBands(ctx, samples, x, y, w) {
     ctx.fillText(kwh100 > 0 ? kwh100.toFixed(1) : '—', xKwh, y + 2);
     ctx.font = '8px system-ui, sans-serif'; ctx.fillStyle = '#64748b';
     ctx.fillText('kWh/100km', xKwh, y + 19);
-    // km/L eq (borda direita)
+    // km/L econ. (borda direita)
     ctx.font = 'bold 14px system-ui, sans-serif'; ctx.fillStyle = '#22d3ee'; ctx.textAlign = 'right';
     ctx.fillText(eqKmL > 0 ? eqKmL.toFixed(1) : '—', xKmL, y + 2);
     ctx.font = '8px system-ui, sans-serif'; ctx.fillStyle = '#64748b';
-    ctx.fillText('km/L eq', xKmL, y + 19);
+    ctx.fillText('km/L econ.', xKmL, y + 19);
     y += ROW_H;
   }
 }
@@ -3815,9 +3815,9 @@ async function shareTripCard(tripId) {
       { v: _net > 0    ? f2(_net)  + ' kWh' : '—',                                    lbl: 'energia líq.', col: '#4ade80' },
       { v: _fuel > 0.01 ? f2(_fuel) + ' L'  : '—',                                    lbl: 'combustível', col: '#fb923c' },
     ];
-    // Linha 2: km/L eq · kWh/100km · Custo total · R$/km
+    // Linha 2: km/L econ. · kWh/100km · Custo total · R$/km
     const row2 = [
-      { v: eqKmL,                             lbl: 'km/L eq',    col: '#22d3ee' },
+      { v: eqKmL,                             lbl: 'km/L econ.',    col: '#22d3ee' },
       { v: kwh100,                             lbl: 'kWh/100km', col: '#4ade80' },
       { v: cost > 0.01 ? 'R$' + f2(cost) : '—', lbl: 'custo total', col: '#fbbf24' },
       { v: cPkm,                               lbl: 'R$/km',     col: '#fbbf24' },
@@ -4192,7 +4192,7 @@ function _renderIntervalMetrics(si, ei) {
     cell('Energia líq.',  fmt(m.netKwh, 2), 'kWh',   '#4ade80') +
     cell('Regenerada',    fmt(m.kwhRegen, 2), 'kWh', '#34d399') +
     cell('kWh / 100km',   fmt(m.kwh100, 1), '',     '#a78bfa') +
-    cell('km/L eq.',      fmt(m.eqKmL, 1), '',      '#facc15') +
+    cell('km/L econ.',      fmt(m.eqKmL, 1), '',      '#facc15') +
     cell('Pot. média',    fmt(m.avgPwr, 1), 'kW',   '#fb923c') +
     cell('Tempo ICE',     fmt(m.icePct, 0), '%',    '#f97316') +
     cell('RPM médio',     fmt(m.avgRpm, 0), '',     '#ef4444') +
@@ -7308,7 +7308,7 @@ window.showComparison = function(tripAId, tripBId) {
       ${metric('% regen',       regenRatio(a),      regenRatio(b),      v => v.toFixed(0) + '%',    'better')}
       ${metric('Combustível',   a.fuelL,            b.fuelL,            v => v.toFixed(2) + ' L',   'less')}
       ${metric('kWh/100km',     kwh100(a),          kwh100(b),          v => v.toFixed(1),          'less')}
-      ${metric('km/L eq',       kmL(a),             kmL(b),             v => v.toFixed(1),          'better')}
+      ${metric('km/L econ.',       kmL(a),             kmL(b),             v => v.toFixed(1),          'better')}
       ${metric('Eco score',     ecoScore(a),        ecoScore(b),        v => String(Math.round(v)), 'better')}
     </div>
     <button onclick="document.getElementById('compare-modal').remove()"

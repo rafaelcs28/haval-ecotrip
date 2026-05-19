@@ -141,7 +141,7 @@ fun RollingWindowCard(
                 RollingGauge(
                     value    = snapshot.combinedKmL,
                     maxValue = 60f,
-                    label    = "km/L eq",
+                    label    = "km/L econ.",
                     color    = AuroraTeal,
                     modifier = Modifier.size(158.dp),
                 )
@@ -165,7 +165,7 @@ fun RollingWindowCard(
             ) {
                 RMetricSection("⛽ Combustível")
                 if (snapshot.combinedKmL > 0f)
-                    RMetric("km/L eq", "%.2f".format(snapshot.combinedKmL), AuroraTeal)
+                    RMetric("km/L econ.", "%.2f".format(snapshot.combinedKmL), AuroraTeal)
                 else if (snapshot.kmPerL > 0f)
                     RMetric("km/L",    "%.2f".format(snapshot.kmPerL),      MoltenOrange)
                 RMetric("Gastos", "%.2f L".format(snapshot.fuelL), TextPrimary)

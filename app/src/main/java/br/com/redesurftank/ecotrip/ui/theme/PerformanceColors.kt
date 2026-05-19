@@ -5,7 +5,7 @@ import androidx.compose.ui.graphics.Color
 // ── Cores de performance por threshold ────────────────────────────────────────
 // Regras definidas pelo usuário em 2026-05-15:
 //   kWh/100km : ≤20 lime · ≤25 yellow · ≤30 orange · >30 red
-//   km/L eq   : ≤15 red  · ≤25 orange · ≤40 yellow · >40 lime
+//   km/L econ.   : ≤15 red  · ≤25 orange · ≤40 yellow · >40 lime
 //   km/L      : ≤10 red  · ≤14 orange · ≤18 yellow · >18 lime
 //   R$/km     : ≤0.30 eco lime · ≤0.45 warn yellow · >0.45 bad orange
 

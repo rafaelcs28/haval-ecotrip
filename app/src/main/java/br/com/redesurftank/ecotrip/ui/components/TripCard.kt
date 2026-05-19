@@ -148,7 +148,7 @@ fun TripCard(
             ) {
                 TColTitle("⛽ Combustível")
                 if (snapshot.combinedKmL > 0f)
-                    TMetric("km/L eq",  "%.2f".format(snapshot.combinedKmL), AuroraTeal)
+                    TMetric("km/L econ.",  "%.2f".format(snapshot.combinedKmL), AuroraTeal)
                 else if (snapshot.kmPerL > 0f)
                     TMetric("km/L",     "%.2f".format(snapshot.kmPerL),      MoltenOrange)
                 TMetric("Gastos", "%.2f L".format(snapshot.fuelL), TextPrimary)

@@ -954,7 +954,7 @@ fun ConsumptionScreen() {
                     LinearMeter(
                         value             = rolling.combinedKmL,
                         maxValue          = 100f,
-                        label             = "km/L eq",
+                        label             = "km/L econ.",
                         unitLabel         = "km/L",
                         icon              = rememberVectorPainter(Icons.Default.Bolt),
                         categoryIconColor = AuroraTeal,
@@ -1061,6 +1061,8 @@ fun ConsumptionScreen() {
                 trip = displayTrip,
                 isLive = displayIsLive,
                 nowMs = nowMs,
+                priceGasL = priceGasoline,
+                priceKwh  = priceEnergy,
             )
         }
     }
@@ -1114,6 +1116,8 @@ private fun StripSection(
     trip:   AutoTripEntry,
     isLive: Boolean,
     nowMs:  Long,
+    priceGasL: Float,
+    priceKwh:  Float,
     modifier: Modifier = Modifier,
 ) {
     // Tempo: ao vivo = elapsed desde startMs; salva = duração real endMs-startMs
@@ -1128,8 +1132,11 @@ private fun StripSection(
     }
 
     val kwh100   = if (trip.distKm > 0.5f) trip.netKwh / trip.distKm * 100f else 0f
-    val kmlEq    = if (trip.distKm > 0.1f && (trip.netKwh > 0f || trip.fuelL > 0.001f))
-        trip.distKm / (trip.netKwh / 8.9f + trip.fuelL) else 0f
+    // km/L econômico (ver TripManager.combinedKmL pro mesmo princípio)
+    val netPos   = trip.netKwh.coerceAtLeast(0f)
+    val kwhAsL   = if (priceGasL > 0f && priceKwh > 0f) netPos * priceKwh / priceGasL else netPos / 8.9f
+    val kmlEq    = if (trip.distKm > 0.1f && (kwhAsL + trip.fuelL) > 0.001f)
+        trip.distKm / (kwhAsL + trip.fuelL) else 0f
     val socDelta = trip.endSocPct - trip.startSocPct
 
     val dateFmt = remember(trip.startMs) {
@@ -1247,7 +1254,7 @@ private fun StripSection(
             )
             StripMetric(
                 value = if (kmlEq > 0f) "%.1f".format(kmlEq) else "--",
-                unit  = "km/L eq",
+                unit  = "km/L econ.",
                 color = kmPerLEqColor(kmlEq),
                 big   = true,
             )

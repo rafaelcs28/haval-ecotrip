@@ -36,10 +36,18 @@ data class TripSnapshot(
     val avgSpeedKmh: Float get() = if (timeSec > 0L) distKm / (timeSec / 3600f) else 0f
     val costBrl: Float get() = fuelL * priceGasolinePerL + netKwh.coerceAtLeast(0f) * priceEnergyPerKwh
     val costPerKm: Float get() = if (distKm > 0.1f && costBrl > 0f) costBrl / distKm else 0f
-    // km/L equivalente energético: 1 L gasolina = 8,9 kWh (poder calorífico inferior)
+    // km/L equivalente ECONÔMICO: converte kWh em "litros de gasolina equivalentes"
+    // pela razão de custo (R$/kWh ÷ R$/L). Reflete a economia real do PHEV vs
+    // ICE puro. Fallback pra equivalência energética (1 L = 8,9 kWh) só quando
+    // os preços ainda não foram sincronizados do bridge.
     val combinedKmL: Float get() {
         if (distKm < 0.1f) return 0f
-        val totalFuelL = fuelL + netKwh.coerceAtLeast(0f) / 8.9f
+        val netPos = netKwh.coerceAtLeast(0f)
+        val kwhAsL = if (priceGasolinePerL > 0f && priceEnergyPerKwh > 0f)
+            netPos * priceEnergyPerKwh / priceGasolinePerL
+        else
+            netPos / 8.9f
+        val totalFuelL = fuelL + kwhAsL
         return if (totalFuelL > 0.001f) distKm / totalFuelL else 0f
     }
 }
@@ -84,10 +92,15 @@ data class RollingSnapshot(
     val kmPerL: Float get() = if (fuelL > 0.001f) windowKm / fuelL else 0f
     val costBrl: Float get() = fuelL * priceGasolinePerL + netKwh.coerceAtLeast(0f) * priceEnergyPerKwh
     val costPerKm: Float get() = if (windowKm > 0.1f && costBrl > 0f) costBrl / windowKm else 0f
-    // km/L equivalente energético: 1 L gasolina = 8,9 kWh (poder calorífico inferior)
+    // km/L equivalente ECONÔMICO: ver TripManager.combinedKmL pro mesmo princípio.
     val combinedKmL: Float get() {
         if (windowKm < 0.1f) return 0f
-        val totalFuelL = fuelL + netKwh.coerceAtLeast(0f) / 8.9f
+        val netPos = netKwh.coerceAtLeast(0f)
+        val kwhAsL = if (priceGasolinePerL > 0f && priceEnergyPerKwh > 0f)
+            netPos * priceEnergyPerKwh / priceGasolinePerL
+        else
+            netPos / 8.9f
+        val totalFuelL = fuelL + kwhAsL
         return if (totalFuelL > 0.001f) windowKm / totalFuelL else 0f
     }
 }
