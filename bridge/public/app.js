@@ -4016,19 +4016,32 @@ function renderRadarAlerts(tripId) {
   `).join('');
 }
 
+// Após reanalyze, o radarAlertCount muda em viagens antigas — mas o delta sync
+// (?since=lastMs) só pega viagens NOVAS. Precisa forçar re-fetch completo:
+// zera o cursor e clear da store, depois syncAllCache puxa tudo de novo.
+async function _forceReloadAutotrips() {
+  await _idbSetMeta('lastAutoMs', 0);
+  // Limpa só autotrips, mantém charges/refuels intactos
+  await new Promise(resolve => {
+    const tx = _idb.transaction(['autotrips'], 'readwrite');
+    tx.objectStore('autotrips').clear();
+    tx.oncomplete = resolve;
+    tx.onerror    = resolve;
+  });
+  cachedAutoTrips = null;
+  await syncAllCache({ silent: true });
+}
+
 window.ignoreRadar = async function(radarId, tripId) {
   if (!confirm(`Marcar radar #${radarId} como inexistente? Ele não vai gerar alertas em nenhuma viagem.`)) return;
   try {
     const r = await apiFetch(`/api/radars/${radarId}/ignore`, { method: 'POST' });
     if (!r.ok) { showToast('✗ Falha ao marcar'); return; }
-    showToast('✓ Radar marcado como inexistente. Recalculando viagens...');
-    // Roda reanalyze pra atualizar todas as viagens (pode demorar 1-2s)
+    showToast('✓ Radar marcado. Recalculando viagens...');
     await apiFetch('/api/radars/reanalyze', { method: 'POST' });
-    // Reabre o detalhe pra refletir
+    await _forceReloadAutotrips();
     closeTripDetail();
     setTimeout(() => openTripDetail(tripId), 300);
-    // Atualiza cache de auto-trips
-    await syncAllCache({ silent: true });
     if (activePanel === 'auto') loadAutoTrips();
   } catch (e) {
     showToast('✗ Erro: ' + e.message);
@@ -5923,7 +5936,7 @@ window.reanalyzeRadars = async function() {
   try {
     const r = await apiFetch('/api/radars/reanalyze', { method: 'POST' }).then(x => x.json());
     showToast(`✓ ${r.processed} viagens reprocessadas, ${r.with_alerts} com alertas`);
-    await syncAllCache({ silent: true });
+    await _forceReloadAutotrips();
     if (activePanel === 'auto') loadAutoTrips();
   } catch (e) { showToast('✗ ' + e.message); }
 };
@@ -5932,7 +5945,7 @@ window.unignoreRadar = async function(radarId) {
   if (!confirm(`Reativar radar #${radarId}? Vai voltar a gerar alertas.`)) return;
   await apiFetch(`/api/radars/${radarId}/ignore`, { method: 'DELETE' });
   await apiFetch('/api/radars/reanalyze', { method: 'POST' });
-  await syncAllCache({ silent: true });
+  await _forceReloadAutotrips();
   if (activePanel === 'auto') loadAutoTrips();
   showToast('✓ Radar reativado');
   refreshRadarsSection();
