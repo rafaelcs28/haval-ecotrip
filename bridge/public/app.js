@@ -5035,19 +5035,25 @@ async function adminRestoreServer(input) {
     return;
   }
 
-  if (backup.version !== 2) {
+  if (![2, 3, 4].includes(backup.version)) {
     _backupSetStatus('✗ Versão incompatível. Use um backup gerado pelo botão "Backup completo (servidor)".', false);
     return;
   }
 
   const at = backup.autotrips?.length ?? 0;
-  const tr = backup.trips?.length ?? 0;
   const ch = backup.charges?.length ?? 0;
+  const rf = backup.refuels?.length ?? 0;
+  const kp = backup.knownPlaces?.length ?? 0;
+  const mn = backup.maintenance?.history?.length ?? 0;
+  const ct = backup.chargeTelemetry ? Object.keys(backup.chargeTelemetry).length : 0;
+  const ri = backup.radarsIgnored?.length ?? 0;
 
   if (!confirm(
-    `Restaurar backup de ${backup.exportedAt?.slice(0, 10) || '?'}?\n\n` +
-    `Isso irá substituir TODOS os dados atuais do servidor:\n` +
-    `• ${tr} trips manuais\n• ${at} auto-trips\n• ${ch} recargas\n\n` +
+    `Restaurar backup de ${backup.exportedAt?.slice(0, 10) || '?'} (v${backup.version})?\n\n` +
+    `Vai substituir TODOS os dados do servidor:\n` +
+    `• ${at} viagens · ${ch} recargas${ct ? ` (${ct} com telemetria)` : ''}\n` +
+    `• ${rf} abastecimentos · ${mn} manutenções\n` +
+    `• ${kp} locais conhecidos${ri ? ` · ${ri} radares ignorados` : ''}\n\n` +
     `Esta ação não pode ser desfeita.`
   )) return;
 
@@ -5064,8 +5070,13 @@ async function adminRestoreServer(input) {
       await _idbClearAll();
       cachedAutoTrips = null; cachedCharges = null; _bumpCachesVersion();
       await syncAllCache({ silent: true });
+      const extras = [];
+      if (data.refuels)         extras.push(`${data.refuels} abast.`);
+      if (data.chargeTelemetry) extras.push(`${data.chargeTelemetry} telem.`);
+      if (data.radarsIgnored)   extras.push(`${data.radarsIgnored} radares ign.`);
+      const extrasStr = extras.length ? ' · ' + extras.join(' · ') : '';
       _backupSetStatus(
-        `✓ Restore concluído — ${data.autotrips} viagens · ${data.charges} recargas`,
+        `✓ Restore concluído — ${data.autotrips} viagens · ${data.charges} recargas${extrasStr}`,
         true
       );
     } else {

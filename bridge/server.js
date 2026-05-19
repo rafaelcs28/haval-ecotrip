@@ -2171,29 +2171,48 @@ app.get('/api/backup', (req, res) => {
     autotripsWithSamples.sort((a, b) =>
       (b.autoTrip?.startMs || 0) - (a.autoTrip?.startMs || 0));
 
+    // Telemetria de recargas — um arquivo por sessão em charge_telemetry/
+    const chargeTelemetry = {};
+    try {
+      const ctFiles = fs.readdirSync(CHARGE_TELEMETRY_DIR).filter(f => f.endsWith('.json'));
+      for (const f of ctFiles) {
+        const ts = f.replace('.json', '');
+        try {
+          chargeTelemetry[ts] = JSON.parse(fs.readFileSync(path.join(CHARGE_TELEMETRY_DIR, f), 'utf8'));
+        } catch (_) {}
+      }
+    } catch (_) {}
+
+    // Radares marcados como ignorados pelo usuário
+    const radarsIgnoredList = Array.from(ignoredRadars);
+
     const backup = {
-      version:           3,
+      version:           4,
       exportedAt:        new Date().toISOString(),
       // Histórico (trips manuais A/B descontinuados — campo legado pra compat v2)
       trips:             [],
-      autotrips:         autotripsWithSamples,
+      autotrips:         autotripsWithSamples,        // inclui radar_alerts em cada
       charges:           chargesArr,
-      refuels,                                       // abastecimentos
+      chargeTelemetry,                                // novo v4: samples por sessão de recarga
+      refuels,                                        // abastecimentos
       lifeSnapshots,
-      telemetryHistory,                              // snapshots diários (anomalia)
+      telemetryHistory,                               // snapshots diários (anomalia)
       // Configurações
       notifPrefs,
-      maintenance,                                   // intervalos + histórico + alerts
-      knownPlaces,                                   // locais conhecidos
-      chargeLocations,                               // locais antigos (compat)
-      deletedIds,                                    // tombstones de deleção
+      maintenance,                                    // intervalos + histórico + alerts
+      knownPlaces,                                    // locais conhecidos
+      chargeLocations,                                // locais antigos (compat)
+      deletedIds,                                     // tombstones de deleção
+      radarsIgnored:     radarsIgnoredList,           // novo v4: radares marcados como inexistentes
+      // NÃO inclui: auth.json (TOTP secret), radars.json (re-baixa do OSM),
+      // state.json (runtime, recomputado), cert.pem/key.pem (per-server).
     };
 
     const filename = `ecotrip-backup-${new Date().toISOString().slice(0, 10)}.json`;
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
     res.json(backup);
-    console.log(`✓ Backup v3 exportado: ${backup.trips.length} trips · ${backup.autotrips.length} auto-trips · ${backup.charges.length} recargas · ${backup.refuels.length} abastecimentos · ${backup.maintenance.history.length} manutenções · ${backup.knownPlaces.length} locais`);
+    console.log(`✓ Backup v4 exportado: ${backup.autotrips.length} auto-trips · ${backup.charges.length} recargas (${Object.keys(chargeTelemetry).length} com telemetria) · ${backup.refuels.length} abastecimentos · ${backup.maintenance.history.length} manutenções · ${backup.knownPlaces.length} locais · ${radarsIgnoredList.length} radares ignorados`);
   } catch (e) {
     console.error('[backup] Erro:', e.message);
     res.status(500).json({ error: e.message });
@@ -2206,9 +2225,9 @@ app.post('/api/restore', (req, res) => {
   try {
     const bk = req.body;
 
-    // Validação básica — aceita v2 (legado) e v3 (completo)
-    if (!bk || (bk.version !== 2 && bk.version !== 3)) {
-      return res.status(400).json({ error: 'Formato inválido. Use um backup gerado por GET /api/backup (version 2 ou 3).' });
+    // Validação básica — aceita v2 (legado), v3 e v4 (completo)
+    if (!bk || (bk.version !== 2 && bk.version !== 3 && bk.version !== 4)) {
+      return res.status(400).json({ error: 'Formato inválido. Use um backup gerado por GET /api/backup (version 2, 3 ou 4).' });
     }
     if (!Array.isArray(bk.trips) || !Array.isArray(bk.autotrips) || !Array.isArray(bk.charges)) {
       return res.status(400).json({ error: 'Backup incompleto: trips, autotrips e charges são obrigatórios.' });
@@ -2226,13 +2245,29 @@ app.post('/api/restore', (req, res) => {
     for (const at of bk.autotrips) {
       const safeId = String(at.tripId || at.autoTrip?.startMs || '').replace(/\D/g, '');
       if (!safeId) continue;
+      // Preserva hybridTimeSec/hybridDistKm e radar_alerts se vieram no backup,
+      // senão recalcula hybrid (radar_alerts vira [] se ausente — reanalyze
+      // pode regenerar depois).
+      const hybrid = (at.hybridTimeSec != null && at.hybridDistKm != null)
+        ? { hybridTimeSec: at.hybridTimeSec, hybridDistKm: at.hybridDistKm }
+        : _calcHybrid(at.samples || []);
+      const radarAlerts = Array.isArray(at.radar_alerts) ? at.radar_alerts : [];
       fs.writeFileSync(
         path.join(AUTOTRIPS_DIR, `${safeId}.json`),
-        JSON.stringify({ tripId: safeId, autoTrip: at.autoTrip || {}, samples: at.samples || [] })
+        JSON.stringify({
+          tripId: safeId,
+          autoTrip: at.autoTrip || {},
+          samples: at.samples || [],
+          hybridTimeSec: hybrid.hybridTimeSec,
+          hybridDistKm:  hybrid.hybridDistKm,
+          radar_alerts:  radarAlerts,
+        })
       );
       if (at.autoTrip) {
-        const hybrid = _calcHybrid(at.samples || []);
-        autoTripsArr.push({ tripId: safeId, ...at.autoTrip, ...hybrid });
+        autoTripsArr.push({
+          tripId: safeId, ...at.autoTrip, ...hybrid,
+          radarAlertCount: radarAlerts.length,
+        });
       }
     }
     autoTripsArr.sort((a, b) => (b.startMs || 0) - (a.startMs || 0));
@@ -2296,17 +2331,42 @@ app.post('/api/restore', (req, res) => {
       saveDeletedIds();
     }
 
+    // 11. Telemetria de recargas (v4+) — restaura arquivos charge_telemetry/{ts}.json
+    let chargeTelemetryRestored = 0;
+    if (bk.chargeTelemetry && typeof bk.chargeTelemetry === 'object') {
+      // Limpa diretório antes de restaurar
+      try {
+        fs.readdirSync(CHARGE_TELEMETRY_DIR)
+          .filter(f => f.endsWith('.json'))
+          .forEach(f => { try { fs.unlinkSync(path.join(CHARGE_TELEMETRY_DIR, f)); } catch (_) {} });
+      } catch (_) {}
+      for (const [ts, samples] of Object.entries(bk.chargeTelemetry)) {
+        try {
+          fs.writeFileSync(path.join(CHARGE_TELEMETRY_DIR, `${ts}.json`), JSON.stringify(samples));
+          chargeTelemetryRestored++;
+        } catch (_) {}
+      }
+    }
+
+    // 12. Radares ignorados (v4+) — substitui lista local
+    if (Array.isArray(bk.radarsIgnored)) {
+      ignoredRadars = new Set(bk.radarsIgnored.map(String));
+      _saveIgnoredRadars();
+    }
+
     // Recalcula preço médio da bateria após restore
     recomputeBatteryAvgPrice();
 
     const summary = {
-      autotrips:     autoTripsArr.length,
-      charges:       chargesArr.length,
-      refuels:       refuels.length,
-      lifeSnapshots: lifeSnapshots.length,
-      maintenance:   maintenance.history.length,
-      knownPlaces:   knownPlaces.length,
-      tombstones:    (deletedIds.autotrips.length + deletedIds.charges.length + deletedIds.refuels.length),
+      autotrips:         autoTripsArr.length,
+      charges:           chargesArr.length,
+      chargeTelemetry:   chargeTelemetryRestored,
+      refuels:           refuels.length,
+      lifeSnapshots:     lifeSnapshots.length,
+      maintenance:       maintenance.history.length,
+      knownPlaces:       knownPlaces.length,
+      tombstones:        (deletedIds.autotrips.length + deletedIds.charges.length + deletedIds.refuels.length),
+      radarsIgnored:     ignoredRadars.size,
     };
     console.log('✓ Restore completo:', summary);
     res.json({ ok: true, msg: 'Restore concluído com sucesso.', ...summary });
