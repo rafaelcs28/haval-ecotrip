@@ -2132,3 +2132,67 @@ html, body {
 :root.theme-light .card-title { color: #64748b; }
 :root.theme-light .filter-chip { background: #f8fafc; border-color: var(--border); color: #475569; }
 :root.theme-light .filter-chip.active { background: rgba(57,255,136,0.10); color: #0a8a3a; border-color: rgba(57,255,136,0.45); }
+
+/* ── Tela larga (Z Fold 7 desdobrado, tablets) ─────────────────────────────── */
+/* Em ≥780px, painéis com cards listados verticalmente viram grid 2 colunas.
+   Itens "largos" (mapa, ilustração do carro, alertas, banners) ocupam a linha
+   inteira pra continuar bem legíveis. Painéis de visualização contínua (Drive,
+   Conforto) ficam centralizados com max-width. */
+@media (min-width: 780px) {
+  /* Habilita labels nos botões da tab bar (mais espaço disponível) */
+  .tab-label { display: block; }
+
+  /* Painéis com lista vertical de cards → grid 2 col */
+  #panel-dash.active,
+  #panel-charges.active,
+  #panel-auto.active,
+  #panel-stats.active,
+  #panel-actions.active,
+  #panel-events.active,
+  #panel-maint.active,
+  #panel-logs.active {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    align-content: start;
+    max-width: 1400px;
+    margin: 0 auto;
+    width: 100%;
+  }
+
+  /* Cards "grandes" / "informativos" que ficam melhor full-width */
+  #panel-dash #d-car-card,
+  #panel-dash #d-map-card,
+  #panel-dash #d-alerts-card,
+  #panel-dash #auto-backup-banner,
+  #panel-charges .card-title,
+  #panel-auto .card-title,
+  #panel-stats > div:first-child {
+    grid-column: 1 / -1;
+  }
+
+  /* Drive (cluster) e Conforto: centraliza com max-width — gauges não escalam bem */
+  #panel-drive.active,
+  #panel-comfort.active {
+    max-width: 900px;
+    margin: 0 auto;
+  }
+
+  /* Tab bar: aumenta área tocável quando há espaço */
+  .tab { font-size: 0; padding: 0 8px; }
+  .tab-icon { font-size: 20px; }
+  .tab-label { font-size: 10px; }
+}
+
+/* ── Tela muito larga (Fold em landscape, tablet horizontal) ───────────────── */
+@media (min-width: 1100px) {
+  #panel-dash.active,
+  #panel-stats.active {
+    grid-template-columns: 1fr 1fr 1fr;
+  }
+  /* Mapa ainda full-width pra acomodar a visualização */
+  #panel-dash #d-map-card,
+  #panel-dash #d-alerts-card {
+    grid-column: 1 / -1;
+  }
+}
