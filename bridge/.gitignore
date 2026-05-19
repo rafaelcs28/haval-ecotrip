@@ -6,3 +6,25 @@ state.json
 *.db
 auth.json
 radars.json
+
+# Runtime / per-server data (não versiona)
+autotrips/
+charge_telemetry/
+events.json
+events.json.bak
+events.json.bak-*
+.env.bak
+cert.pem
+key.pem
+public/rootCA.pem
+charge_locations.json
+known_places.json
+maintenance.json
+lifetime_snapshots.json
+notif_history.json
+notif_prefs.json
+pending_renames.json
+refuels.json
+telemetry_history.json
+deleted_ids.json
+radars_ignored.json
