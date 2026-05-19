@@ -1040,6 +1040,16 @@
           <div class="snap-item"><div class="snap-val teal"  id="snap-time">--</div><div class="snap-lbl">tempo</div></div>
         </div>
       </div>
+      <!-- Possíveis multas (radares passados acima do limite) -->
+      <div id="radar-alerts-section" style="display:none;padding:8px 14px 0">
+        <div style="background:#7f1d1d22;border:1px solid #ef4444;border-radius:8px;padding:10px 14px">
+          <div style="font-size:13px;font-weight:700;color:#fecaca;margin-bottom:8px">
+            ⚠️ <span id="radar-alerts-count">0</span> possível(eis) multa(s) detectada(s)
+          </div>
+          <div id="radar-alerts-list" style="display:flex;flex-direction:column;gap:6px"></div>
+        </div>
+      </div>
+
       <!-- Médias de um intervalo dentro da viagem -->
       <div id="interval-bar" style="padding:8px 14px 0">
         <button onclick="toggleIntervalPanel()" id="interval-toggle"

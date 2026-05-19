@@ -2796,6 +2796,10 @@ function renderAutoTrips() {
     const statusBadge = rnStatus === 'pending'   ? '<span class="rename-status-pending" title="Aguardando confirmação do carro">⏳</span>'
                       : rnStatus === 'confirmed'  ? '<span class="rename-status-ok" title="Confirmado pelo carro">✓</span>'
                       : '';
+    // Badge de possível multa — viagem passou por radar acima do limite + tolerância
+    const radarBadge = (t.radarAlertCount || 0) > 0
+      ? `<span class="trip-badge" style="background:#7f1d1d;color:#fecaca;border:1px solid #ef4444" title="${t.radarAlertCount} possível${t.radarAlertCount > 1 ? 'eis' : ''} multa(s) por excesso de velocidade">⚠️ ${t.radarAlertCount}</span>`
+      : '';
     // Indicador de eficiência vs média do mesmo trecho (start/end ~200m, ±10% km)
     const effInfo = _effIndex[t.tripId];
     let effBadge = '';
@@ -2844,7 +2848,7 @@ function renderAutoTrips() {
     <div style="flex:1;min-width:0">
       <div class="trip-name-row">
         ${displayName ? `<span class="trip-name"${nameStyle ? ` style="${nameStyle}"` : ''}>${displayName}</span>${statusBadge}` : ''}
-        ${ecoBadge}${effBadge}
+        ${ecoBadge}${effBadge}${radarBadge}
         <button class="rename-btn" onclick="startRenameTrip('${t.tripId}','auto')" title="${displayName ? 'Renomear' : 'Nomear'}">✏️</button>
         ${effInfo ? `<button class="rename-btn" onclick="openCompareModal('${t.tripId}')" title="Comparar com outra viagem do mesmo trecho" style="opacity:.6">🔀</button>` : ''}
         <button class="rename-btn" onclick="deleteTrip('${t.tripId}','auto')" title="Apagar viagem" style="opacity:.35">🗑</button>
@@ -3239,6 +3243,8 @@ let routePolyline       = null;
 let playbackMarker      = null;
 let intervalStartMarker = null;
 let intervalEndMarker   = null;
+let currentRadarAlerts  = [];
+let radarAlertMarkers   = [];
 let chartSpd        = null;
 let chartEv         = null;
 let chartRpm        = null;
@@ -3278,9 +3284,11 @@ function openTripDetail(tripId) {
       }
       slider.max   = currentSamples.length - 1;
       slider.value = 0;
+      currentRadarAlerts = data.radar_alerts || [];
       initTripMap(currentSamples);
       initTripCharts(currentSamples);
       renderSpeedBands(currentSamples);
+      renderRadarAlerts(tripId);
       onPlaybackMove(0);
     })
     .catch(() => {
@@ -3302,6 +3310,8 @@ function closeTripDetail() {
   playbackMarker      = null;
   intervalStartMarker = null;
   intervalEndMarker   = null;
+  radarAlertMarkers   = [];
+  currentRadarAlerts  = [];
   currentSamples = [];
   // Restaura o HTML original do body — garante que #trip-map e canvases
   // existam frescos na próxima abertura (evita erro de Leaflet + canvases sujos)
@@ -3942,6 +3952,77 @@ function initTripCharts(samples) {
   if (socWrap) socWrap.style.display = hasSoc ? '' : 'none';
   chartSoc = hasSoc ? mkChart('chart-soc', socData, '#c084fc', '%') : null;
 }
+
+// ── Radares: pinos no mapa + lista clicável de alertas ───────────────────────
+function renderRadarAlerts(tripId) {
+  const section = document.getElementById('radar-alerts-section');
+  if (!section) return;
+  // Limpa pinos antigos do mapa
+  for (const m of radarAlertMarkers) { if (leafletMap) leafletMap.removeLayer(m); }
+  radarAlertMarkers = [];
+
+  if (!currentRadarAlerts.length) {
+    section.style.display = 'none';
+    return;
+  }
+  section.style.display = '';
+  document.getElementById('radar-alerts-count').textContent = currentRadarAlerts.length;
+
+  // Adiciona pinos vermelhos no mapa
+  if (leafletMap) {
+    for (const a of currentRadarAlerts) {
+      const icon = L.divIcon({
+        className: '',
+        html: `<div style="background:#ef4444;color:#fff;font-size:13px;font-weight:700;
+          width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+          border:2px solid #0f172a;box-shadow:0 0 8px rgba(239,68,68,.7)">⚠</div>`,
+        iconSize: [30, 30], iconAnchor: [15, 15],
+      });
+      const m = L.marker([a.lat, a.lng], { icon, zIndexOffset: 1000 })
+        .bindPopup(`<b style="color:#7f1d1d">${a.speed_kmh} km/h em zona de ${a.limit_kmh} km/h</b><br>Excesso: +${a.excess_kmh.toFixed(1)} km/h<br>Radar OSM #${a.radar_id}<br><button onclick="ignoreRadar('${a.radar_id}','${tripId}')" style="margin-top:6px;background:#1e40af;border:none;color:#fff;padding:6px 10px;border-radius:4px;cursor:pointer;font-size:11px">Marcar como inexistente</button>`)
+        .addTo(leafletMap);
+      radarAlertMarkers.push(m);
+    }
+  }
+
+  // Lista textual no painel
+  const listEl = document.getElementById('radar-alerts-list');
+  listEl.innerHTML = currentRadarAlerts.map(a => `
+    <div style="display:flex;align-items:center;gap:8px;background:#0c1019;border-radius:6px;padding:8px 10px">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;color:#fff">
+          <span style="color:#ef4444;font-weight:700">${a.speed_kmh} km/h</span>
+          em zona de ${a.limit_kmh} km/h
+          <span style="color:#fbbf24">(+${a.excess_kmh.toFixed(1)})</span>
+        </div>
+        <div style="font-size:10px;color:#64748b">Radar OSM #${a.radar_id} · ${a.dist_m}m</div>
+      </div>
+      <button onclick="ignoreRadar('${a.radar_id}','${tripId}')"
+              style="background:#1e40af;border:none;color:#fff;padding:6px 10px;border-radius:4px;cursor:pointer;font-size:11px">
+        Não existe
+      </button>
+    </div>
+  `).join('');
+}
+
+window.ignoreRadar = async function(radarId, tripId) {
+  if (!confirm(`Marcar radar #${radarId} como inexistente? Ele não vai gerar alertas em nenhuma viagem.`)) return;
+  try {
+    const r = await apiFetch(`/api/radars/${radarId}/ignore`, { method: 'POST' });
+    if (!r.ok) { showToast('✗ Falha ao marcar'); return; }
+    showToast('✓ Radar marcado como inexistente. Recalculando viagens...');
+    // Roda reanalyze pra atualizar todas as viagens (pode demorar 1-2s)
+    await apiFetch('/api/radars/reanalyze', { method: 'POST' });
+    // Reabre o detalhe pra refletir
+    closeTripDetail();
+    setTimeout(() => openTripDetail(tripId), 300);
+    // Atualiza cache de auto-trips
+    await syncAllCache({ silent: true });
+    if (activePanel === 'auto') loadAutoTrips();
+  } catch (e) {
+    showToast('✗ Erro: ' + e.message);
+  }
+};
 
 // ── Intervalo: médias dentro de uma faixa selecionada da viagem ──────────────
 window.toggleIntervalPanel = function() {
