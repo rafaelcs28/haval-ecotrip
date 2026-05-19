@@ -5,3 +5,4 @@ charges.json
 state.json
 *.db
 auth.json
+radars.json

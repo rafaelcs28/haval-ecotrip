@@ -82,6 +82,8 @@ function genBackupCodes(n = 10) {
 const CHARGES_FILE    = path.join(__dirname, 'charges.json');
 const STATE_FILE      = path.join(__dirname, 'state.json');
 const AUTOTRIPS_DIR   = path.join(__dirname, 'autotrips');
+const RADARS_FILE         = path.join(__dirname, 'radars.json');
+const RADARS_IGNORED_FILE = path.join(__dirname, 'radars_ignored.json');
 const SNAPSHOTS_FILE  = path.join(__dirname, 'lifetime_snapshots.json');
 const VAPID_FILE        = path.join(__dirname, 'vapid_keys.json');
 const PUSH_SUBS_FILE    = path.join(__dirname, 'push_subscriptions.json');
@@ -340,7 +342,8 @@ try {
         const hybrid = (d.hybridTimeSec != null && d.hybridDistKm != null)
           ? { hybridTimeSec: d.hybridTimeSec, hybridDistKm: d.hybridDistKm }
           : _calcHybrid(d.samples || []);
-        autoTripsArr.push({ tripId: d.tripId, ...d.autoTrip, ...hybrid });
+        const radarAlertCount = Array.isArray(d.radar_alerts) ? d.radar_alerts.length : 0;
+        autoTripsArr.push({ tripId: d.tripId, ...d.autoTrip, ...hybrid, radarAlertCount });
       }
     } catch (_) {}
   }
@@ -620,6 +623,170 @@ try {
 function saveMaintenance() {
   try { fs.writeFileSync(MAINTENANCE_FILE, JSON.stringify(maintenance, null, 2)); } catch (_) {}
 }
+
+// ── Radares (OSM Overpass — speed cameras do Brasil inteiro) ─────────────
+// Cache de radares em radars.json. Refresh manual via POST /api/radars/refresh
+// ou automático se o arquivo tem >7 dias. Análise por viagem: pra cada sample
+// com GPS, busca radar mais próximo. Se ≤30m E velocidade excede limite +
+// tolerância brasileira (7 km/h até 100, 7% acima), marca como alerta.
+let radarsArr = [];
+let radarBuckets = new Map();   // chave geohash 0.01° (~1km) → [radar...]
+let ignoredRadars = new Set();  // IDs de radares marcados pra ignorar pelo usuário
+try {
+  if (fs.existsSync(RADARS_IGNORED_FILE)) {
+    const data = JSON.parse(fs.readFileSync(RADARS_IGNORED_FILE, 'utf8'));
+    ignoredRadars = new Set((data.ids || []).map(String));
+  }
+} catch (_) {}
+function _saveIgnoredRadars() {
+  try {
+    fs.writeFileSync(RADARS_IGNORED_FILE, JSON.stringify({
+      updatedAt: new Date().toISOString(),
+      ids: Array.from(ignoredRadars),
+    }, null, 2));
+  } catch (_) {}
+}
+function _rbKey(lat, lng) { return Math.floor(lat * 100) + ':' + Math.floor(lng * 100); }
+function _rebuildRadarIndex() {
+  radarBuckets = new Map();
+  for (const r of radarsArr) {
+    const k = _rbKey(r.lat, r.lng);
+    let arr = radarBuckets.get(k);
+    if (!arr) { arr = []; radarBuckets.set(k, arr); }
+    arr.push(r);
+  }
+}
+function _loadRadars() {
+  try {
+    if (fs.existsSync(RADARS_FILE)) {
+      const data = JSON.parse(fs.readFileSync(RADARS_FILE, 'utf8'));
+      radarsArr = data.radars || [];
+      _rebuildRadarIndex();
+      console.log(`✓ Radares: ${radarsArr.length} carregados (atualizado em ${data.updatedAt || '?'})`);
+    }
+  } catch (e) { console.error('Aviso radars.json:', e.message); }
+}
+_loadRadars();
+
+// Distância em metros entre dois pontos lat/lng (Haversine)
+function _haversineM(la1, ln1, la2, ln2) {
+  const R = 6371000, toRad = d => d * Math.PI / 180;
+  const dLat = toRad(la2 - la1), dLng = toRad(ln2 - ln1);
+  const a = Math.sin(dLat/2)**2 + Math.cos(toRad(la1))*Math.cos(toRad(la2))*Math.sin(dLng/2)**2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+// Tolerância de radar fixo no Brasil: até 100 km/h é +7 km/h, acima é +7%.
+function _radarTolerance(limit) {
+  return limit <= 100 ? 7 : Math.round(limit * 0.07);
+}
+
+// Pega o radar mais próximo de (lat, lng) dentro de maxMeters.
+function _findNearestRadar(lat, lng, maxMeters = 50) {
+  const bx = Math.floor(lat * 100), by = Math.floor(lng * 100);
+  let best = null, bestDist = Infinity;
+  for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) {
+    const arr = radarBuckets.get((bx+dx) + ':' + (by+dy));
+    if (!arr) continue;
+    for (const r of arr) {
+      const d = _haversineM(lat, lng, r.lat, r.lng);
+      if (d < bestDist && d <= maxMeters) { bestDist = d; best = r; }
+    }
+  }
+  return best ? { radar: best, distM: bestDist } : null;
+}
+
+/** Analisa samples e retorna lista de alertas. Cada alerta = sample no
+ *  raio de 30m de um radar com speed > limit + tolerance. Dedupe: cada
+ *  radar gera no máximo 1 alerta por viagem (pega o maior excesso). */
+function analyzeTripRadars(samples) {
+  if (!radarsArr.length || !samples?.length) return [];
+  const byRadar = new Map();   // radar.id → melhor alerta
+  for (const s of samples) {
+    if (!s || (s.lat === 0 && s.lng === 0)) continue;
+    const speed = +s.spd || 0;
+    if (speed < 1) continue;
+    const near = _findNearestRadar(s.lat, s.lng, 30);
+    if (!near) continue;
+    const r = near.radar;
+    if (ignoredRadars.has(String(r.id))) continue;   // usuário marcou como inexistente
+    const limit = +r.maxspeed || 0;
+    if (limit <= 0) continue;          // radar sem velocidade tag — pula
+    const tol  = _radarTolerance(limit);
+    const excess = speed - (limit + tol);
+    if (excess <= 0) continue;
+    const prev = byRadar.get(r.id);
+    if (!prev || excess > prev.excess_kmh) {
+      byRadar.set(r.id, {
+        t:         s.t,
+        lat:       s.lat,
+        lng:       s.lng,
+        speed_kmh: Math.round(speed),
+        limit_kmh: limit,
+        excess_kmh: Math.round(excess * 10) / 10,
+        radar_id:  r.id,
+        dist_m:    Math.round(near.distM),
+      });
+    }
+  }
+  return Array.from(byRadar.values()).sort((a, b) => (a.t||0) - (b.t||0));
+}
+
+async function fetchRadarsFromOSM() {
+  // Overpass: timeout generoso (300s = 5min) pra coletar Brasil inteiro.
+  // out:csv pra reduzir tamanho da resposta (~30% menor que JSON).
+  const query = `
+    [out:json][timeout:300];
+    area["ISO3166-1"="BR"][admin_level=2]->.br;
+    (
+      node["highway"="speed_camera"](area.br);
+      node["enforcement"="maxspeed"](area.br);
+    );
+    out body;
+  `;
+  console.log('→ Baixando radares do OSM (Brasil)...');
+  const startMs = Date.now();
+  const res = await fetch('https://overpass-api.de/api/interpreter', {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body:    'data=' + encodeURIComponent(query),
+  });
+  if (!res.ok) throw new Error(`Overpass HTTP ${res.status}`);
+  const data = await res.json();
+  const nodes = (data.elements || []).filter(e => e.type === 'node' && e.lat && e.lon);
+  // Normaliza pro formato interno
+  const radars = nodes.map(n => ({
+    id:       String(n.id),
+    lat:      n.lat,
+    lng:      n.lon,
+    maxspeed: parseInt(n.tags?.maxspeed) || parseInt(n.tags?.['maxspeed:type']) || 0,
+    direction: n.tags?.direction || n.tags?.['camera:direction'] || null,
+  }));
+  radarsArr = radars;
+  _rebuildRadarIndex();
+  fs.writeFileSync(RADARS_FILE, JSON.stringify({
+    updatedAt: new Date().toISOString(),
+    count: radars.length,
+    radars,
+  }, null, 2));
+  console.log(`✓ ${radars.length} radares baixados em ${((Date.now() - startMs)/1000).toFixed(1)}s`);
+  return radars.length;
+}
+
+// Refresh automático: se o arquivo tem >7 dias, agenda update em background.
+(function _maybeAutoRefreshRadars() {
+  try {
+    const stat = fs.statSync(RADARS_FILE);
+    const ageMs = Date.now() - stat.mtimeMs;
+    if (ageMs > 7 * 86400000) {
+      console.log(`Radares com ${Math.round(ageMs/86400000)} dias — atualizando em background`);
+      setTimeout(() => fetchRadarsFromOSM().catch(e => console.error('refresh radars:', e.message)), 30_000);
+    }
+  } catch (_) {
+    // Arquivo não existe — agenda primeiro download
+    setTimeout(() => fetchRadarsFromOSM().catch(e => console.error('first radars fetch:', e.message)), 5_000);
+  }
+})();
 
 // ── Tombstones (IDs explicitamente deletados pelo usuário) ────────────────
 // Sem isso, o APK reenviaria via MQTT (trips/history, charging/history) e o
@@ -2153,6 +2320,78 @@ app.post('/api/admin/clear-history', (req, res) => {
   }
 });
 
+// ── Radares ───────────────────────────────────────────────────────────────────
+// GET /api/radars/status — info de saúde da base
+app.get('/api/radars/status', (_req, res) => {
+  let updatedAt = null;
+  try { updatedAt = JSON.parse(fs.readFileSync(RADARS_FILE,'utf8')).updatedAt; } catch (_) {}
+  res.json({
+    total: radarsArr.length,
+    ignored: ignoredRadars.size,
+    with_maxspeed: radarsArr.filter(r => r.maxspeed > 0).length,
+    updated_at: updatedAt,
+  });
+});
+
+// POST /api/radars/refresh — força redownload do OSM
+app.post('/api/radars/refresh', async (_req, res) => {
+  try {
+    const n = await fetchRadarsFromOSM();
+    res.json({ ok: true, total: n });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// GET /api/radars/ignored — lista IDs marcados como ignorados (com lat/lng)
+app.get('/api/radars/ignored', (_req, res) => {
+  const list = radarsArr.filter(r => ignoredRadars.has(String(r.id)));
+  res.json({ count: list.length, radars: list });
+});
+
+// POST /api/radars/:id/ignore — marca um radar como ignorado
+app.post('/api/radars/:id/ignore', (req, res) => {
+  const id = String(req.params.id);
+  ignoredRadars.add(id);
+  _saveIgnoredRadars();
+  res.json({ ok: true, ignored_count: ignoredRadars.size });
+});
+
+// DELETE /api/radars/:id/ignore — remove radar da lista de ignorados (volta a alertar)
+app.delete('/api/radars/:id/ignore', (req, res) => {
+  const id = String(req.params.id);
+  const had = ignoredRadars.delete(id);
+  _saveIgnoredRadars();
+  res.json({ ok: true, removed: had, ignored_count: ignoredRadars.size });
+});
+
+// POST /api/radars/reanalyze — reprocessa todas as auto-trips com a base atual de
+// radares (após download inicial OU mudança na lista de ignorados). Atualiza
+// radar_alerts em cada arquivo + autoTripsArr em memória.
+app.post('/api/radars/reanalyze', (_req, res) => {
+  let processed = 0, withAlerts = 0;
+  try {
+    const files = fs.readdirSync(AUTOTRIPS_DIR).filter(f => f.endsWith('.json'));
+    for (const f of files) {
+      try {
+        const fp = path.join(AUTOTRIPS_DIR, f);
+        const data = JSON.parse(fs.readFileSync(fp, 'utf8'));
+        const samples = data.samples || [];
+        const alerts = analyzeTripRadars(samples);
+        data.radar_alerts = alerts;
+        fs.writeFileSync(fp, JSON.stringify(data));
+        const rec = autoTripsArr.find(t => t.tripId === data.tripId);
+        if (rec) rec.radarAlertCount = alerts.length;
+        if (alerts.length > 0) withAlerts++;
+        processed++;
+      } catch (_) {}
+    }
+    res.json({ ok: true, processed, with_alerts: withAlerts });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ── Auto-trips + Telemetria ───────────────────────────────────────────────────
 
 app.post('/api/autotrips', (req, res) => {
@@ -2204,10 +2443,18 @@ app.post('/api/autotrips', (req, res) => {
     hybridTimeSec = Math.round(hybridTimeSec);
     hybridDistKm  = parseFloat(hybridDistKm.toFixed(3));
 
-    // Persiste hybrid junto — boot não precisa recalcular varrendo todas as samples.
-    fs.writeFileSync(filePath, JSON.stringify({ tripId: safeId, autoTrip, samples: finalSamples, hybridTimeSec, hybridDistKm }));
+    // Análise de radares — detecta possíveis multas comparando samples GPS+speed
+    // com a base OSM. Cada radar pode gerar no máximo 1 alerta por viagem (o de
+    // maior excesso). Ignora radares marcados pelo usuário como inexistentes.
+    const radarAlerts = analyzeTripRadars(finalSamples);
 
-    const record = { tripId: safeId, ...autoTrip, hybridTimeSec, hybridDistKm };
+    // Persiste hybrid + alertas junto — boot não precisa recalcular.
+    fs.writeFileSync(filePath, JSON.stringify({
+      tripId: safeId, autoTrip, samples: finalSamples, hybridTimeSec, hybridDistKm,
+      radar_alerts: radarAlerts,
+    }));
+
+    const record = { tripId: safeId, ...autoTrip, hybridTimeSec, hybridDistKm, radarAlertCount: radarAlerts.length };
 
     // Auto-naming por Locais Conhecidos
     const _sp = matchKnownPlace(autoTrip.startLat, autoTrip.startLng);
