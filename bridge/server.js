@@ -676,10 +676,11 @@ function _haversineM(la1, ln1, la2, ln2) {
   return 2 * R * Math.asin(Math.sqrt(a));
 }
 
-// Tolerância de radar fixo no Brasil: até 100 km/h é +7 km/h, acima é +7%.
-function _radarTolerance(limit) {
-  return limit <= 100 ? 7 : Math.round(limit * 0.07);
-}
+// Threshold de confiança: +8 km/h sobre o limite. A leitura do veículo é a
+// velocidade REAL (não a velocímetro inflado), então excedendo o limite legal
+// (+7 km/h até 100, +7% acima) em pelo menos 1 km/h dá certeza de multa.
+// Valor fixo de 8 simplifica e cobre os dois regimes com margem.
+function _radarTolerance() { return 8; }
 
 // Pega o radar mais próximo de (lat, lng) dentro de maxMeters.
 function _findNearestRadar(lat, lng, maxMeters = 50) {
@@ -712,7 +713,7 @@ function analyzeTripRadars(samples) {
     if (ignoredRadars.has(String(r.id))) continue;   // usuário marcou como inexistente
     const limit = +r.maxspeed || 0;
     if (limit <= 0) continue;          // radar sem velocidade tag — pula
-    const tol  = _radarTolerance(limit);
+    const tol  = _radarTolerance();
     const excess = speed - (limit + tol);
     if (excess <= 0) continue;
     const prev = byRadar.get(r.id);

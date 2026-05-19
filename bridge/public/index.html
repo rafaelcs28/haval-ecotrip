@@ -927,6 +927,16 @@
             <div id="twofa-status" style="font-size:12px;color:#94a3b8;margin-bottom:8px">Carregando…</div>
             <div id="twofa-actions"></div>
           </div>
+          <!-- Radares -->
+          <div class="sc-box" id="radars-box">
+            <div class="sc-box-label">📡 Radares</div>
+            <div id="radars-status" style="font-size:12px;color:#94a3b8;margin-bottom:8px">Carregando…</div>
+            <div style="display:flex;gap:6px;margin-bottom:8px">
+              <button onclick="refreshRadars()" style="flex:1;background:#1e40af;border:none;border-radius:6px;padding:8px;color:#e2e8f0;font-size:12px;cursor:pointer">🔄 Atualizar do OSM</button>
+              <button onclick="reanalyzeRadars()" style="flex:1;background:#065f46;border:none;border-radius:6px;padding:8px;color:#e2e8f0;font-size:12px;cursor:pointer">⚙ Reanalisar viagens</button>
+            </div>
+            <div id="ignored-radars-list" style="margin-top:4px"></div>
+          </div>
           <!-- Ações do servidor -->
           <div style="display:flex;gap:8px;margin-bottom:10px">
             <button type="button" onclick="adminRestart()"

@@ -5846,13 +5846,78 @@ function _showBackupCodes(codes, header) {
   document.getElementById('bk-close-btn').onclick = () => modal.remove();
 }
 
-// Atualiza seção 2FA quando entra no painel Admin
+// ── Radares: gerenciar lista de ignorados + refresh OSM ──────────────────────
+async function refreshRadarsSection() {
+  const statusEl = document.getElementById('radars-status');
+  const listEl   = document.getElementById('ignored-radars-list');
+  if (!statusEl) return;
+  try {
+    const s = await apiFetch('/api/radars/status').then(r => r.json());
+    const updated = s.updated_at ? new Date(s.updated_at).toLocaleDateString('pt-BR') : 'nunca';
+    statusEl.innerHTML = `${s.total} radares na base · ${s.with_maxspeed} com limite · <span style="color:#fbbf24">${s.ignored}</span> ignorados · atualizado em ${updated}`;
+    if (s.ignored > 0) {
+      const ig = await apiFetch('/api/radars/ignored').then(r => r.json());
+      listEl.innerHTML = `<div style="font-size:11px;color:#94a3b8;margin-bottom:6px">Radares marcados como inexistentes:</div>` +
+        ig.radars.map(r => `
+          <div style="display:flex;align-items:center;gap:8px;background:#0c1019;border:1px solid #1e293b;border-radius:6px;padding:6px 10px;margin-bottom:4px">
+            <div style="flex:1;min-width:0;font-size:11px;color:#94a3b8">
+              <div>#${r.id} · ${r.maxspeed > 0 ? r.maxspeed + ' km/h' : 'sem limite'}</div>
+              <div style="color:#64748b">${r.lat.toFixed(5)}, ${r.lng.toFixed(5)}</div>
+            </div>
+            <button onclick="unignoreRadar('${r.id}')" style="background:#7f1d1d;border:none;border-radius:4px;padding:4px 10px;color:#fecaca;font-size:11px;cursor:pointer">Reativar</button>
+          </div>
+        `).join('');
+    } else {
+      listEl.innerHTML = '';
+    }
+  } catch (_) {
+    statusEl.textContent = '✗ Não foi possível consultar status.';
+  }
+}
+
+window.refreshRadars = async function() {
+  if (!confirm('Baixar radares atualizados do OpenStreetMap? Demora ~1-3 minutos.')) return;
+  showToast('⏳ Baixando radares do OSM...');
+  try {
+    const r = await apiFetch('/api/radars/refresh', { method: 'POST' }).then(x => x.json());
+    if (r.ok) {
+      showToast(`✓ ${r.total} radares atualizados`);
+      refreshRadarsSection();
+    } else {
+      showToast('✗ Falha: ' + (r.error || 'erro'));
+    }
+  } catch (e) { showToast('✗ ' + e.message); }
+};
+
+window.reanalyzeRadars = async function() {
+  if (!confirm('Reanalisar todas as viagens com a base atual de radares?')) return;
+  showToast('⏳ Reprocessando viagens...');
+  try {
+    const r = await apiFetch('/api/radars/reanalyze', { method: 'POST' }).then(x => x.json());
+    showToast(`✓ ${r.processed} viagens reprocessadas, ${r.with_alerts} com alertas`);
+    await syncAllCache({ silent: true });
+    if (activePanel === 'auto') loadAutoTrips();
+  } catch (e) { showToast('✗ ' + e.message); }
+};
+
+window.unignoreRadar = async function(radarId) {
+  if (!confirm(`Reativar radar #${radarId}? Vai voltar a gerar alertas.`)) return;
+  await apiFetch(`/api/radars/${radarId}/ignore`, { method: 'DELETE' });
+  await apiFetch('/api/radars/reanalyze', { method: 'POST' });
+  await syncAllCache({ silent: true });
+  if (activePanel === 'auto') loadAutoTrips();
+  showToast('✓ Radar reativado');
+  refreshRadarsSection();
+};
+
+// Atualiza seções 2FA + Radares quando entra no painel Admin
 document.addEventListener('DOMContentLoaded', () => {
-  // Refresh inicial quando o usuário abre Settings — dispara via switchTab
   const adminTab = document.querySelector('.tab[data-panel="admin"]');
   if (adminTab) {
-    const origOnClick = adminTab.onclick;
-    adminTab.addEventListener('click', () => setTimeout(refresh2faSection, 100));
+    adminTab.addEventListener('click', () => setTimeout(() => {
+      refresh2faSection();
+      refreshRadarsSection();
+    }, 100));
   }
 });
 
