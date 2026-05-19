@@ -1359,6 +1359,18 @@ html, body {
   width: 100%;
   transition: height .25s ease;
 }
+/* Fix: linhas brancas finas nas bordas dos tiles do Leaflet em alguns DPRs.
+   Sobrepõe os tiles com escala mínima pra cobrir o seam sub-pixel. */
+.leaflet-tile {
+  border: none !important;
+  outline: none !important;
+  image-rendering: -webkit-optimize-contrast;
+  transform: translateZ(0);          /* força GPU compositing */
+}
+.leaflet-tile-container img {
+  width: 256.5px !important;
+  height: 256.5px !important;
+}
 /* Durante a recarga, encolhe pra liberar espaço pro card de bateria expandido */
 #panel-dash.charging #d-car-map {
   height: 158px;
