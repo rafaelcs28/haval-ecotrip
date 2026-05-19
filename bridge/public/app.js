@@ -5643,10 +5643,32 @@ window.setup2fa = async function() {
     const modal = document.createElement('div');
     modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:10000;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;gap:14px';
     modal.innerHTML = `
-      <div style="font-size:16px;font-weight:700;color:#f1f5f9">Escaneie no app autenticador</div>
-      <img src="${r.qr}" style="width:240px;height:240px;background:#fff;padding:8px;border-radius:8px">
-      <div style="font-size:11px;color:#94a3b8">Ou cole o secret manualmente:</div>
-      <code style="font-size:12px;color:#22d3ee;background:#0c1019;padding:6px 12px;border-radius:6px;word-break:break-all;max-width:300px;text-align:center">${r.secret}</code>
+      <div style="font-size:16px;font-weight:700;color:#f1f5f9">Configure no app autenticador</div>
+
+      <!-- Botão principal pra mobile: abre o app autenticador instalado direto -->
+      <a href="${r.otpauth_uri}" id="twofa-open-app-btn"
+         style="background:#16a34a;color:#0f172a;font-size:14px;font-weight:700;padding:12px 20px;border-radius:8px;text-decoration:none;text-align:center;min-width:240px">
+        📱 Abrir no app autenticador
+      </a>
+
+      <div style="font-size:11px;color:#64748b;margin:4px 0">— ou —</div>
+
+      <!-- QR code pra quem está em outro dispositivo (PC/iPad escaneando com celular) -->
+      <details style="width:280px">
+        <summary style="cursor:pointer;font-size:12px;color:#94a3b8;text-align:center;padding:4px">📷 Escanear QR (de outro dispositivo)</summary>
+        <img src="${r.qr}" style="width:240px;height:240px;background:#fff;padding:8px;border-radius:8px;margin:8px auto;display:block">
+      </details>
+
+      <!-- Secret manual com botão de copiar -->
+      <details style="width:280px">
+        <summary style="cursor:pointer;font-size:12px;color:#94a3b8;text-align:center;padding:4px">⌨️ Digitar secret manualmente</summary>
+        <div style="display:flex;gap:6px;align-items:center;margin-top:6px">
+          <code id="twofa-secret-code" style="flex:1;font-size:12px;color:#22d3ee;background:#0c1019;padding:8px 10px;border-radius:6px;word-break:break-all;text-align:center;border:1px solid #1e293b">${r.secret}</code>
+          <button id="twofa-copy-btn" style="background:#1e40af;border:none;border-radius:6px;padding:8px 12px;color:#e2e8f0;font-size:13px;cursor:pointer">📋</button>
+        </div>
+      </details>
+
+      <div style="margin-top:12px;font-size:13px;color:#cbd5e1;text-align:center">Depois digite o código de 6 dígitos:</div>
       <input id="twofa-confirm-code" type="text" inputmode="numeric" maxlength="6" placeholder="6 dígitos"
         style="width:200px;padding:12px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:#f1f5f9;font-size:18px;text-align:center;letter-spacing:8px;outline:none">
       <div style="display:flex;gap:8px">
@@ -5655,6 +5677,21 @@ window.setup2fa = async function() {
       </div>`;
     document.body.appendChild(modal);
     const close = () => modal.remove();
+    document.getElementById('twofa-copy-btn').onclick = () => {
+      const text = r.secret;
+      navigator.clipboard?.writeText(text).then(
+        () => showToast('✓ Secret copiado'),
+        () => {
+          // Fallback: select + execCommand
+          const el = document.getElementById('twofa-secret-code');
+          const range = document.createRange();
+          range.selectNode(el);
+          window.getSelection().removeAllRanges();
+          window.getSelection().addRange(range);
+          showToast('Selecionado — toque pra copiar');
+        }
+      );
+    };
     document.getElementById('twofa-cancel-btn').onclick = close;
     document.getElementById('twofa-confirm-btn').onclick = async () => {
       const code = document.getElementById('twofa-confirm-code').value.trim();
