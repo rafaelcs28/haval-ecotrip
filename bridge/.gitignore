@@ -4,3 +4,4 @@ trips.json
 charges.json
 state.json
 *.db
+auth.json

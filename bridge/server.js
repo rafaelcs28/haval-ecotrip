@@ -39,6 +39,45 @@ const _plainToken   = process.env.BRIDGE_TOKEN      || '';
 let BRIDGE_TOKEN_HASH = process.env.BRIDGE_TOKEN_HASH
   || (_plainToken ? sha256hex(_plainToken) : '');
 
+// ── 2FA (TOTP) ────────────────────────────────────────────────────────────────
+// Estado em arquivo gitignored. Quando ativado: requer código TOTP no login.
+// APK e dispositivos que já logaram não são afetados (bearer token continua válido).
+const otplib = require('otplib');
+otplib.authenticator.options = { window: 1 };  // tolera ±30s de drift
+const QRCode = require('qrcode');
+const AUTH_FILE = path.join(__dirname, 'auth.json');
+let authConfig = { totp_secret: '', backup_codes: [] };
+try {
+  if (fs.existsSync(AUTH_FILE)) authConfig = JSON.parse(fs.readFileSync(AUTH_FILE, 'utf8'));
+} catch (_) {}
+function saveAuthConfig() {
+  try { fs.writeFileSync(AUTH_FILE, JSON.stringify(authConfig, null, 2)); } catch (_) {}
+}
+function is2faEnabled() { return !!authConfig.totp_secret; }
+function verifyTotpOrBackup(code) {
+  if (!code) return false;
+  const trimmed = String(code).trim().replace(/[\s-]/g, '');
+  // 1. TOTP normal (6 dígitos)
+  if (/^\d{6}$/.test(trimmed) && authConfig.totp_secret) {
+    if (otplib.authenticator.check(trimmed, authConfig.totp_secret)) return true;
+  }
+  // 2. Backup code (8 chars hex) — single-use
+  const idx = (authConfig.backup_codes || []).indexOf(trimmed.toUpperCase());
+  if (idx >= 0) {
+    authConfig.backup_codes.splice(idx, 1);
+    saveAuthConfig();
+    return true;
+  }
+  return false;
+}
+function genBackupCodes(n = 10) {
+  const codes = [];
+  for (let i = 0; i < n; i++) {
+    codes.push(require('crypto').randomBytes(4).toString('hex').toUpperCase());
+  }
+  return codes;
+}
+
 // TRIPS_FILE removido — Trip A/B descontinuados.
 const CHARGES_FILE    = path.join(__dirname, 'charges.json');
 const STATE_FILE      = path.join(__dirname, 'state.json');
@@ -1096,10 +1135,117 @@ function requireAuth(req, res, next) {
 }
 // Ping público — sem auth, útil para verificar se o servidor está online
 app.get('/ping', (_req, res) => res.json({ ok: true, ts: Date.now() }));
+
+// ── /api/auth/* — rotas de autenticação (públicas e privadas) ────────────────
+// Rate limit simples por IP pra /api/auth/login: 5 tentativas/min, 15min de
+// bloqueio após 10 falhas consecutivas. Hash da senha NUNCA volta no response.
+const _loginAttempts = new Map();   // ip → { count, firstMs, blockedUntilMs }
+function _checkRateLimit(ip) {
+  const now = Date.now();
+  let s = _loginAttempts.get(ip);
+  if (!s) { s = { count: 0, firstMs: now, blockedUntilMs: 0 }; _loginAttempts.set(ip, s); }
+  if (s.blockedUntilMs > now) return { ok: false, retryAfterSec: Math.ceil((s.blockedUntilMs - now) / 1000) };
+  if (now - s.firstMs > 60_000) { s.count = 0; s.firstMs = now; }  // janela de 1min
+  return { ok: true, state: s };
+}
+function _registerFailure(s) {
+  s.count++;
+  if (s.count >= 10) s.blockedUntilMs = Date.now() + 15 * 60_000;   // bloqueio 15min
+}
+function _registerSuccess(ip) { _loginAttempts.delete(ip); }
+
+// POST /api/auth/login — { password_hash, totp_code? } → { ok, token? }
+app.post('/api/auth/login', (req, res) => {
+  const ip = req.ip || req.connection?.remoteAddress || 'unknown';
+  const rl = _checkRateLimit(ip);
+  if (!rl.ok) return res.status(429).json({ error: 'rate_limited', retry_after_sec: rl.retryAfterSec });
+  if (rl.state.count >= 5) return res.status(429).json({ error: 'too_many_attempts' });
+  const { password_hash, totp_code } = req.body || {};
+  // Sem hash configurado no servidor (dev mode) → aceita qualquer login
+  if (!BRIDGE_TOKEN_HASH) return res.json({ ok: true, token: '' });
+  const passwordValid = password_hash === BRIDGE_TOKEN_HASH ||
+                        (password_hash && sha256hex(password_hash) === BRIDGE_TOKEN_HASH);
+  if (!passwordValid) {
+    _registerFailure(rl.state);
+    return res.status(401).json({ error: 'invalid_password' });
+  }
+  // Senha ok. Se 2FA está ativo, exige o código.
+  if (is2faEnabled()) {
+    if (!totp_code) return res.status(401).json({ error: 'totp_required', requires_2fa: true });
+    if (!verifyTotpOrBackup(totp_code)) {
+      _registerFailure(rl.state);
+      return res.status(401).json({ error: 'invalid_totp' });
+    }
+  }
+  _registerSuccess(ip);
+  res.json({ ok: true, token: BRIDGE_TOKEN_HASH });
+});
+
+// GET /api/auth/2fa/status — pública: PWA chama no início pra saber se precisa pedir código
+app.get('/api/auth/2fa/status', (_req, res) => res.json({ enabled: is2faEnabled() }));
+
 // requireAuth: aplica a toda a API exceto /api/push/* (SW não consegue enviar headers)
+// e /api/auth/login (que faz sua própria validação) e /api/auth/2fa/status (público).
 app.use('/api', (req, res, next) => {
-  if (req.path.startsWith('/push')) return next();  // push routes: sem auth
+  if (req.path.startsWith('/push')) return next();        // push routes: sem auth
+  if (req.path === '/auth/login' || req.path === '/auth/2fa/status') return next();
   requireAuth(req, res, next);
+});
+
+// POST /api/auth/2fa/setup — autenticado. Gera secret + QR + backup codes
+// mas NÃO ativa ainda. Cliente precisa confirmar via /api/auth/2fa/activate.
+let _pending2faSecret = null;   // { secret, generatedAt }
+app.post('/api/auth/2fa/setup', async (req, res) => {
+  const secret = otplib.authenticator.generateSecret();
+  _pending2faSecret = { secret, generatedAt: Date.now() };
+  const issuer = 'EcoTrip Impulse';
+  const label  = 'bridge';
+  const uri    = otplib.authenticator.keyuri(label, issuer, secret);
+  const qrDataUrl = await QRCode.toDataURL(uri);
+  res.json({ secret, qr: qrDataUrl, otpauth_uri: uri });
+});
+
+// POST /api/auth/2fa/activate — { code } confirma e persiste. Retorna backup codes.
+app.post('/api/auth/2fa/activate', (req, res) => {
+  const { code } = req.body || {};
+  if (!_pending2faSecret) return res.status(400).json({ error: 'no_pending_setup' });
+  if (Date.now() - _pending2faSecret.generatedAt > 10 * 60_000) {
+    _pending2faSecret = null;
+    return res.status(400).json({ error: 'setup_expired' });
+  }
+  if (!code || !otplib.authenticator.check(String(code).trim(), _pending2faSecret.secret)) {
+    return res.status(401).json({ error: 'invalid_code' });
+  }
+  authConfig.totp_secret  = _pending2faSecret.secret;
+  authConfig.backup_codes = genBackupCodes(10);
+  saveAuthConfig();
+  _pending2faSecret = null;
+  res.json({ ok: true, backup_codes: authConfig.backup_codes });
+});
+
+// POST /api/auth/2fa/disable — autenticado + exige código TOTP atual
+app.post('/api/auth/2fa/disable', (req, res) => {
+  if (!is2faEnabled()) return res.json({ ok: true, already_disabled: true });
+  const { code } = req.body || {};
+  if (!verifyTotpOrBackup(code)) return res.status(401).json({ error: 'invalid_code' });
+  authConfig = { totp_secret: '', backup_codes: [] };
+  saveAuthConfig();
+  res.json({ ok: true });
+});
+
+// GET /api/auth/2fa/backup-codes — lista códigos restantes (não regenera)
+app.get('/api/auth/2fa/backup-codes', (_req, res) => {
+  res.json({ enabled: is2faEnabled(), backup_codes: authConfig.backup_codes || [] });
+});
+
+// POST /api/auth/2fa/regenerate-backup — gera nova lista, descarta a antiga
+app.post('/api/auth/2fa/regenerate-backup', (req, res) => {
+  if (!is2faEnabled()) return res.status(400).json({ error: 'not_enabled' });
+  const { code } = req.body || {};
+  if (!verifyTotpOrBackup(code)) return res.status(401).json({ error: 'invalid_code' });
+  authConfig.backup_codes = genBackupCodes(10);
+  saveAuthConfig();
+  res.json({ ok: true, backup_codes: authConfig.backup_codes });
 });
 
 app.get('/api/state',  (_req, res) => res.json(state));

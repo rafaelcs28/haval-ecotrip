@@ -152,19 +152,37 @@ function hideLogin() {
 }
 
 async function doLogin() {
-  const input    = document.getElementById('login-input');
-  const password = (input?.value || '').trim();
+  const input     = document.getElementById('login-input');
+  const totpInput = document.getElementById('login-totp');
+  const password  = (input?.value || '').trim();
+  const totpCode  = (totpInput?.value || '').trim();
   try {
-    // Converte a senha para SHA-256 antes de enviar — servidor nunca vê o texto puro
-    const tokenHash = password ? await sha256hex(password) : '';
-    const headers   = tokenHash ? { 'Authorization': 'Bearer ' + tokenHash } : {};
-    const r = await fetch('/api/state', { headers });
-    if (r.ok) {
-      bridgeToken = tokenHash;
-      if (tokenHash) localStorage.setItem('bridge_token', tokenHash);
+    const passwordHash = password ? await sha256hex(password) : '';
+    const r = await fetch('/api/auth/login', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ password_hash: passwordHash, totp_code: totpCode || undefined }),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (r.ok && data.ok) {
+      bridgeToken = data.token || passwordHash;
+      if (bridgeToken) localStorage.setItem('bridge_token', bridgeToken);
       else localStorage.removeItem('bridge_token');
+      // Esconde campo TOTP se estava visível
+      const totpRow = document.getElementById('login-totp-row');
+      if (totpRow) totpRow.style.display = 'none';
       hideLogin();
       connect();
+    } else if (data.requires_2fa || data.error === 'totp_required') {
+      // Mostra campo do código + foca nele
+      const totpRow = document.getElementById('login-totp-row');
+      if (totpRow) totpRow.style.display = '';
+      setTimeout(() => totpInput?.focus(), 50);
+      showLogin('Digite o código do app autenticador (6 dígitos)');
+    } else if (data.error === 'invalid_totp') {
+      showLogin('Código incorreto. Tente novamente.');
+    } else if (data.error === 'rate_limited' || data.error === 'too_many_attempts') {
+      showLogin('Muitas tentativas. Aguarde alguns minutos.');
     } else {
       showLogin('Senha incorreta.');
     }
@@ -176,6 +194,9 @@ async function doLogin() {
 // Permite enviar com Enter no campo de senha
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('login-input')?.addEventListener('keydown', e => {
+    if (e.key === 'Enter') doLogin();
+  });
+  document.getElementById('login-totp')?.addEventListener('keydown', e => {
     if (e.key === 'Enter') doLogin();
   });
   _restoreSettingsSections();
@@ -5581,6 +5602,141 @@ async function changePassword() {
     setCpStatus('✗ ' + (e.message === 'unauthorized' ? 'Sessão expirada — entre novamente.' : 'Erro ao comunicar com o servidor.'), false);
   }
 }
+
+// ── 2FA (TOTP) ────────────────────────────────────────────────────────────────
+async function refresh2faSection() {
+  const statusEl  = document.getElementById('twofa-status');
+  const actionsEl = document.getElementById('twofa-actions');
+  if (!statusEl || !actionsEl) return;
+  try {
+    const r = await apiFetch('/api/auth/2fa/status').then(x => x.json());
+    if (r.enabled) {
+      statusEl.innerHTML = '✅ <span style="color:#4ade80">Ativada</span> — login exige código do app autenticador';
+      actionsEl.innerHTML = `
+        <div style="display:flex;gap:8px;margin-top:6px;flex-wrap:wrap">
+          <button onclick="show2faBackupCodes()" style="flex:1;background:#1e40af;border:none;border-radius:6px;padding:8px;color:#e2e8f0;font-size:12px;cursor:pointer;min-width:120px">Ver códigos backup</button>
+          <button onclick="disable2fa()" style="flex:1;background:#7f1d1d;border:none;border-radius:6px;padding:8px;color:#e2e8f0;font-size:12px;cursor:pointer;min-width:120px">Desativar 2FA</button>
+        </div>`;
+    } else {
+      statusEl.innerHTML = '⚠️ <span style="color:#fbbf24">Desativada</span> — só senha protege o acesso';
+      actionsEl.innerHTML = `
+        <button onclick="setup2fa()" style="width:100%;background:#16a34a;border:none;border-radius:6px;padding:10px;color:#0f172a;font-size:13px;font-weight:700;cursor:pointer">
+          Ativar 2FA com app autenticador
+        </button>`;
+    }
+  } catch (_) {
+    statusEl.textContent = '✗ Não foi possível consultar status.';
+  }
+}
+
+window.setup2fa = async function() {
+  try {
+    const r = await apiFetch('/api/auth/2fa/setup', { method: 'POST' }).then(x => x.json());
+    if (!r.qr) { showToast('✗ Falha ao iniciar setup'); return; }
+    const code = prompt(
+      'Escaneie o QR code abaixo com Google Authenticator, Authy ou similar.\n\n' +
+      'Depois digite o código de 6 dígitos que aparecer no app pra confirmar.\n\n' +
+      'Secret (se preferir digitar manualmente):\n' + r.secret + '\n\n' +
+      'URL otpauth:\n' + r.otpauth_uri
+    );
+    // Para mostrar o QR visualmente, abre janela modal
+    const modal = document.createElement('div');
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:10000;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;gap:14px';
+    modal.innerHTML = `
+      <div style="font-size:16px;font-weight:700;color:#f1f5f9">Escaneie no app autenticador</div>
+      <img src="${r.qr}" style="width:240px;height:240px;background:#fff;padding:8px;border-radius:8px">
+      <div style="font-size:11px;color:#94a3b8">Ou cole o secret manualmente:</div>
+      <code style="font-size:12px;color:#22d3ee;background:#0c1019;padding:6px 12px;border-radius:6px;word-break:break-all;max-width:300px;text-align:center">${r.secret}</code>
+      <input id="twofa-confirm-code" type="text" inputmode="numeric" maxlength="6" placeholder="6 dígitos"
+        style="width:200px;padding:12px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:#f1f5f9;font-size:18px;text-align:center;letter-spacing:8px;outline:none">
+      <div style="display:flex;gap:8px">
+        <button id="twofa-cancel-btn" style="background:#334155;border:none;border-radius:6px;padding:10px 16px;color:#e2e8f0;font-size:13px;cursor:pointer">Cancelar</button>
+        <button id="twofa-confirm-btn" style="background:#16a34a;border:none;border-radius:6px;padding:10px 16px;color:#0f172a;font-size:13px;font-weight:700;cursor:pointer">Confirmar</button>
+      </div>`;
+    document.body.appendChild(modal);
+    const close = () => modal.remove();
+    document.getElementById('twofa-cancel-btn').onclick = close;
+    document.getElementById('twofa-confirm-btn').onclick = async () => {
+      const code = document.getElementById('twofa-confirm-code').value.trim();
+      if (!/^\d{6}$/.test(code)) { showToast('✗ Digite os 6 dígitos'); return; }
+      const r2 = await apiFetch('/api/auth/2fa/activate', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ code }),
+      }).then(x => x.json());
+      close();
+      if (r2.ok) {
+        _showBackupCodes(r2.backup_codes, 'IMPORTANTE: salve estes códigos de backup');
+        refresh2faSection();
+      } else {
+        showToast('✗ ' + (r2.error || 'Código inválido'));
+      }
+    };
+    setTimeout(() => document.getElementById('twofa-confirm-code')?.focus(), 100);
+  } catch (e) {
+    showToast('✗ Erro: ' + (e.message || 'desconhecido'));
+  }
+};
+
+window.disable2fa = async function() {
+  const code = prompt('Digite o código do app autenticador (ou um código de backup) pra desativar 2FA:');
+  if (!code) return;
+  const r = await apiFetch('/api/auth/2fa/disable', {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify({ code: code.trim() }),
+  }).then(x => x.json());
+  if (r.ok) {
+    showToast('✓ 2FA desativada');
+    refresh2faSection();
+  } else {
+    showToast('✗ ' + (r.error || 'Falha'));
+  }
+};
+
+window.show2faBackupCodes = async function() {
+  const r = await apiFetch('/api/auth/2fa/backup-codes').then(x => x.json());
+  if (!r.backup_codes || r.backup_codes.length === 0) {
+    if (confirm('Você não tem códigos de backup restantes. Gerar nova lista?')) regenBackupCodes();
+    return;
+  }
+  _showBackupCodes(r.backup_codes, `${r.backup_codes.length} código(s) restante(s) — use cada um apenas uma vez`);
+};
+
+async function regenBackupCodes() {
+  const code = prompt('Digite o código do app autenticador pra gerar novos códigos:');
+  if (!code) return;
+  const r = await apiFetch('/api/auth/2fa/regenerate-backup', {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify({ code: code.trim() }),
+  }).then(x => x.json());
+  if (r.ok) _showBackupCodes(r.backup_codes, 'Códigos antigos invalidados — guarde os novos');
+  else showToast('✗ ' + (r.error || 'Falha'));
+}
+
+function _showBackupCodes(codes, header) {
+  const modal = document.createElement('div');
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:10000;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;gap:14px';
+  const codeRows = codes.map(c => `<div style="font-size:15px;color:#fbbf24;font-family:monospace;letter-spacing:2px;padding:4px 0">${c}</div>`).join('');
+  modal.innerHTML = `
+    <div style="font-size:16px;font-weight:700;color:#f87171;text-align:center">⚠️ ${header}</div>
+    <div style="background:#0c1019;border:1px solid #1e293b;border-radius:8px;padding:14px 24px;text-align:center">${codeRows}</div>
+    <div style="font-size:12px;color:#94a3b8;text-align:center;max-width:360px">Cada código funciona uma única vez no login se você perder acesso ao app autenticador.</div>
+    <button id="bk-close-btn" style="background:#1e40af;border:none;border-radius:6px;padding:10px 20px;color:#e2e8f0;font-size:13px;cursor:pointer">Já anotei, fechar</button>`;
+  document.body.appendChild(modal);
+  document.getElementById('bk-close-btn').onclick = () => modal.remove();
+}
+
+// Atualiza seção 2FA quando entra no painel Admin
+document.addEventListener('DOMContentLoaded', () => {
+  // Refresh inicial quando o usuário abre Settings — dispara via switchTab
+  const adminTab = document.querySelector('.tab[data-panel="admin"]');
+  if (adminTab) {
+    const origOnClick = adminTab.onclick;
+    adminTab.addEventListener('click', () => setTimeout(refresh2faSection, 100));
+  }
+});
 
 // ── Remote Action Helpers (modal + toast + fetch) ────────────────────────────
 let _remoteCb         = null;
