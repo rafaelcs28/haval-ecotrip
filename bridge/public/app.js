@@ -3213,9 +3213,11 @@ function initDashMap() {
 }
 
 // ── Trip detail: mapa Leaflet + gráficos Chart.js ─────────────────────────────
-let leafletMap      = null;
-let routePolyline   = null;
-let playbackMarker  = null;
+let leafletMap          = null;
+let routePolyline       = null;
+let playbackMarker      = null;
+let intervalStartMarker = null;
+let intervalEndMarker   = null;
 let chartSpd        = null;
 let chartEv         = null;
 let chartRpm        = null;
@@ -3275,8 +3277,10 @@ function closeTripDetail() {
   if (chartRpm)   { chartRpm.destroy();  chartRpm  = null; }
   if (chartPwr)   { chartPwr.destroy();  chartPwr  = null; }
   if (chartSoc)   { chartSoc.destroy();  chartSoc  = null; }
-  routePolyline  = null;
-  playbackMarker = null;
+  routePolyline       = null;
+  playbackMarker      = null;
+  intervalStartMarker = null;
+  intervalEndMarker   = null;
   currentSamples = [];
   // Restaura o HTML original do body — garante que #trip-map e canvases
   // existam frescos na próxima abertura (evita erro de Leaflet + canvases sujos)
@@ -3924,7 +3928,15 @@ window.toggleIntervalPanel = function() {
   if (!panel) return;
   const opening = panel.style.display === 'none';
   panel.style.display = opening ? '' : 'none';
-  if (opening) _initIntervalSliders();
+  if (opening) {
+    _initIntervalSliders();
+  } else {
+    // Remove os pinos do mapa ao fechar
+    if (intervalStartMarker && leafletMap) leafletMap.removeLayer(intervalStartMarker);
+    if (intervalEndMarker   && leafletMap) leafletMap.removeLayer(intervalEndMarker);
+    intervalStartMarker = null;
+    intervalEndMarker   = null;
+  }
 };
 
 function _initIntervalSliders() {
@@ -3947,6 +3959,46 @@ function _fmtTripTime(sample) {
   return h > 0 ? `${h}h${String(m).padStart(2,'0')}` : `${m}:${String(s).padStart(2,'0')}`;
 }
 
+function _nearestGpsSample(idx) {
+  // Procura a amostra mais próxima de idx que tenha GPS válido (lat/lng != 0)
+  if (!currentSamples.length) return null;
+  const s = currentSamples[idx];
+  if (s && (s.lat !== 0 || s.lng !== 0)) return s;
+  // walk pra ambos os lados
+  for (let off = 1; off < currentSamples.length; off++) {
+    const a = currentSamples[idx - off];
+    if (a && (a.lat !== 0 || a.lng !== 0)) return a;
+    const b = currentSamples[idx + off];
+    if (b && (b.lat !== 0 || b.lng !== 0)) return b;
+  }
+  return null;
+}
+
+function _intervalPinIcon(color, label) {
+  return L.divIcon({
+    className: '',
+    html: `<div style="background:${color};color:#fff;font-size:10px;font-weight:700;
+      width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+      border:2px solid #0f172a;box-shadow:0 0 6px ${color}">${label}</div>`,
+    iconSize:   [24, 24],
+    iconAnchor: [12, 12],
+  });
+}
+
+function _updateIntervalPin(which, idx) {
+  if (!leafletMap) return;
+  const gps = _nearestGpsSample(idx);
+  if (!gps) return;
+  const pos = [gps.lat, gps.lng];
+  if (which === 'start') {
+    if (intervalStartMarker) intervalStartMarker.setLatLng(pos);
+    else intervalStartMarker = L.marker(pos, { icon: _intervalPinIcon('#22d3ee', 'I'), zIndexOffset: 500 }).addTo(leafletMap);
+  } else {
+    if (intervalEndMarker) intervalEndMarker.setLatLng(pos);
+    else intervalEndMarker = L.marker(pos, { icon: _intervalPinIcon('#fbbf24', 'F'), zIndexOffset: 500 }).addTo(leafletMap);
+  }
+}
+
 window.onIntervalChange = function() {
   const startEl = document.getElementById('interval-start');
   const endEl   = document.getElementById('interval-end');
@@ -3956,6 +4008,8 @@ window.onIntervalChange = function() {
   document.getElementById('interval-start-time').textContent = _fmtTripTime(currentSamples[si]);
   document.getElementById('interval-end-time').textContent   = _fmtTripTime(currentSamples[ei]);
   _renderIntervalMetrics(si, ei);
+  _updateIntervalPin('start', si);
+  _updateIntervalPin('end',   ei);
 };
 
 function _computeIntervalMetrics(samples, si, ei) {
