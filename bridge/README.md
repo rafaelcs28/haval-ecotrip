@@ -18,24 +18,45 @@ Servidor Node.js que recebe telemetria do APK do carro via MQTT, persiste em arq
 
 ## Setup em ~15 min
 
+### Opção A — Docker (recomendado, sem instalar Node)
+
+Pré-requisitos: Docker Desktop ou Docker Engine + Compose.
+
 ```bash
-# 1. Clone o repo
 git clone https://github.com/rafaelcs28/haval-ecotrip.git
 cd haval-ecotrip/bridge
-
-# 2. Instala dependências
-npm install
-
-# 3. Configure o .env
 cp .env.example .env
-# edite o .env com seus valores — leia os comentários inline
+# edita o .env com seus valores — leia os comentários inline
+docker compose up -d --build
+```
 
-# 4. Inicia
+Acesse: `http://localhost:3000`.
+
+```bash
+# Logs em tempo real
+docker compose logs -f bridge
+
+# Reiniciar (depois de mudar .env)
+docker compose restart bridge
+
+# Atualizar pra última versão do repo
+git pull && docker compose up -d --build
+
+# Parar / remover
+docker compose down
+```
+
+### Opção B — Node nativo
+
+```bash
+git clone https://github.com/rafaelcs28/haval-ecotrip.git
+cd haval-ecotrip/bridge
+npm install
+cp .env.example .env
+# edita o .env com seus valores
 node server.js
 # ou via pm2: pm2 start server.js --name ecotrip-bridge
 ```
-
-Acesse: `http://localhost:3000` (ou `:PORT` que você configurou).
 
 ## Configuração mínima do .env
 

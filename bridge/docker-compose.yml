@@ -1,0 +1,44 @@
+# EcoTrip Bridge — docker-compose
+#
+# Setup (uma vez):
+#   cp .env.example .env  →  edita .env com seus valores
+#   docker compose up -d --build
+#
+# Logs:    docker compose logs -f bridge
+# Stop:    docker compose down
+# Update:  git pull && docker compose up -d --build
+#
+# Dados persistem em ./bridge/ no host (autotrips/, charges.json, etc).
+# Backup = backup desse diretório (ou via PWA Settings → "Backup completo").
+
+services:
+  bridge:
+    build: .
+    image: ecotrip-bridge:latest
+    container_name: ecotrip-bridge
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "${PORT:-3000}:3000"
+      - "${HTTPS_PORT:-3443}:3443"
+    volumes:
+      # Bind-mount do diretório inteiro: código + dados persistem juntos.
+      # Vantagem: zero pre-setup, git pull aplica direto, backup é simples.
+      - .:/app
+      # Volume anônimo pra preservar o node_modules instalado na imagem
+      # (evita que o bind-mount acima esconda o /app/node_modules do container).
+      - /app/node_modules
+
+  # Mosquitto local — habilite SE não usa o broker do Home Assistant.
+  # Comente este bloco se já tem broker MQTT funcionando.
+  # mosquitto:
+  #   image: eclipse-mosquitto:2
+  #   container_name: ecotrip-mosquitto
+  #   restart: unless-stopped
+  #   ports:
+  #     - "1883:1883"
+  #   volumes:
+  #     - ./mosquitto/config:/mosquitto/config
+  #     - ./mosquitto/data:/mosquitto/data
+  #     - ./mosquitto/log:/mosquitto/log
