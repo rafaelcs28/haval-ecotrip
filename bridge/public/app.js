@@ -167,7 +167,9 @@ async function _initGoogleLogin() {
       client_id: cfg.client_id,
       callback:  _onGoogleCredential,
       auto_select: false,
-      use_fedcm_for_prompt: true,
+      // use_fedcm_for_prompt: false — desabilitado pra compat com iOS Safari
+      // e cenários com cookies cross-site restritivos
+      ux_mode: 'popup',
     });
     const container = document.getElementById('g_id_signin');
     if (container) {
