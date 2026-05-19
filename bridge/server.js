@@ -748,7 +748,11 @@ async function fetchRadarsFromOSM() {
   const startMs = Date.now();
   const res = await fetch('https://overpass-api.de/api/interpreter', {
     method:  'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'Accept':       'application/json',
+      'User-Agent':   'ecotrip-bridge/1.0 (https://github.com/rafaelcs28/haval-ecotrip)',
+    },
     body:    'data=' + encodeURIComponent(query),
   });
   if (!res.ok) throw new Error(`Overpass HTTP ${res.status}`);
