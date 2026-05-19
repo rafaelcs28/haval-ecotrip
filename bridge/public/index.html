@@ -1029,6 +1029,40 @@
           <div class="snap-item"><div class="snap-val teal"  id="snap-time">--</div><div class="snap-lbl">tempo</div></div>
         </div>
       </div>
+      <!-- Médias de um intervalo dentro da viagem -->
+      <div id="interval-bar" style="padding:8px 14px 0">
+        <button onclick="toggleIntervalPanel()" id="interval-toggle"
+                style="width:100%;padding:9px;background:#0f172a;border:1px solid #1e293b;
+                       border-radius:8px;color:#cbd5e1;font-size:13px;font-weight:600;
+                       cursor:pointer">
+          📊 Médias de um intervalo da viagem
+        </button>
+      </div>
+      <div id="interval-panel" style="display:none;padding:12px 14px">
+        <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:10px">
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="font-size:11px;color:#94a3b8;width:50px">Início</span>
+            <input type="range" id="interval-start" min="0" max="0" value="0"
+                   oninput="onIntervalChange()" style="flex:1">
+            <span id="interval-start-time" style="font-size:11px;color:#22d3ee;
+                  font-weight:600;width:55px;text-align:right">--:--</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="font-size:11px;color:#94a3b8;width:50px">Fim</span>
+            <input type="range" id="interval-end" min="0" max="0" value="0"
+                   oninput="onIntervalChange()" style="flex:1">
+            <span id="interval-end-time" style="font-size:11px;color:#fbbf24;
+                  font-weight:600;width:55px;text-align:right">--:--</span>
+          </div>
+        </div>
+        <div id="interval-metrics" style="display:grid;grid-template-columns:repeat(3,1fr);
+             gap:8px;background:#0c1019;border:1px solid #1e293b;border-radius:10px;padding:12px">
+          <div class="empty" style="grid-column:1/-1;text-align:center;padding:8px;font-size:12px;color:#64748b">
+            Selecione início e fim acima
+          </div>
+        </div>
+      </div>
+
       <div class="chart-section">
         <div class="chart-label">Velocidade (km/h)</div>
         <div class="chart-wrap"><canvas id="chart-spd"></canvas></div>

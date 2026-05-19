@@ -3918,6 +3918,102 @@ function initTripCharts(samples) {
   chartSoc = hasSoc ? mkChart('chart-soc', socData, '#c084fc', '%') : null;
 }
 
+// ── Intervalo: médias dentro de uma faixa selecionada da viagem ──────────────
+window.toggleIntervalPanel = function() {
+  const panel = document.getElementById('interval-panel');
+  if (!panel) return;
+  const opening = panel.style.display === 'none';
+  panel.style.display = opening ? '' : 'none';
+  if (opening) _initIntervalSliders();
+};
+
+function _initIntervalSliders() {
+  if (!currentSamples.length) return;
+  const startEl = document.getElementById('interval-start');
+  const endEl   = document.getElementById('interval-end');
+  const maxIdx  = currentSamples.length - 1;
+  startEl.max = maxIdx; endEl.max = maxIdx;
+  startEl.value = 0;
+  endEl.value   = maxIdx;
+  onIntervalChange();
+}
+
+function _fmtTripTime(sample) {
+  if (!sample || !currentSamples.length) return '--:--';
+  const t = sample.t || 0;
+  const h = Math.floor(t / 3600);
+  const m = Math.floor((t % 3600) / 60);
+  const s = Math.round(t % 60);
+  return h > 0 ? `${h}h${String(m).padStart(2,'0')}` : `${m}:${String(s).padStart(2,'0')}`;
+}
+
+window.onIntervalChange = function() {
+  const startEl = document.getElementById('interval-start');
+  const endEl   = document.getElementById('interval-end');
+  let si = parseInt(startEl.value, 10) || 0;
+  let ei = parseInt(endEl.value, 10)   || 0;
+  if (si > ei) { [si, ei] = [ei, si]; startEl.value = si; endEl.value = ei; }
+  document.getElementById('interval-start-time').textContent = _fmtTripTime(currentSamples[si]);
+  document.getElementById('interval-end-time').textContent   = _fmtTripTime(currentSamples[ei]);
+  _renderIntervalMetrics(si, ei);
+};
+
+function _computeIntervalMetrics(samples, si, ei) {
+  let distKm = 0, kwhConsumed = 0, kwhRegen = 0, timeSec = 0;
+  let maxSpd = 0, rpmSum = 0, rpmCount = 0, iceSec = 0;
+  for (let i = si + 1; i <= ei; i++) {
+    const a = samples[i - 1], b = samples[i];
+    const dt = (b.t || 0) - (a.t || 0);
+    if (dt <= 0 || dt > 30) continue;
+    const avgSpd = ((a.spd || 0) + (b.spd || 0)) / 2;
+    distKm += avgSpd / 3600 * dt;
+    timeSec += dt;
+    const ev = a.evKw || 0;
+    if (ev > 0) kwhConsumed += ev / 3600 * dt;
+    else        kwhRegen    += (-ev) / 3600 * dt;
+    if ((a.spd || 0) > maxSpd) maxSpd = a.spd;
+    if ((a.rpm || 0) > 50) { rpmSum += a.rpm; rpmCount++; iceSec += dt; }
+  }
+  const netKwh    = kwhConsumed - kwhRegen;
+  const avgSpd    = timeSec > 0 ? distKm / (timeSec / 3600) : 0;
+  const kwh100    = distKm > 0.1 ? Math.max(0, netKwh) / distKm * 100 : 0;
+  const eqL       = Math.max(0, netKwh) / 8.9;   // gasolina equiv. (sem combustível direto)
+  const eqKmL     = distKm > 0.1 && eqL > 0.001 ? distKm / eqL : 0;
+  const avgPwr    = timeSec > 0 ? netKwh / (timeSec / 3600) : 0;
+  const avgRpm    = rpmCount > 0 ? rpmSum / rpmCount : 0;
+  const icePct    = timeSec > 0 ? (iceSec / timeSec * 100) : 0;
+  return { distKm, timeSec, avgSpd, maxSpd, kwhConsumed, kwhRegen, netKwh, kwh100, eqKmL, avgPwr, avgRpm, icePct };
+}
+
+function _renderIntervalMetrics(si, ei) {
+  const el = document.getElementById('interval-metrics');
+  if (!el) return;
+  if (ei - si < 2) {
+    el.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:8px;font-size:12px;color:#64748b">Intervalo muito curto</div>';
+    return;
+  }
+  const m = _computeIntervalMetrics(currentSamples, si, ei);
+  const fmt = (v, dec=1) => Number.isFinite(v) ? v.toFixed(dec) : '--';
+  const cell = (label, value, unit, color = '#cbd5e1') =>
+    `<div style="text-align:center;padding:4px 2px">
+       <div style="font-size:18px;font-weight:700;color:${color}">${value}</div>
+       <div style="font-size:9px;color:#64748b;text-transform:uppercase;letter-spacing:0.5px">${label}${unit ? ' ('+unit+')' : ''}</div>
+     </div>`;
+  el.innerHTML =
+    cell('Distância',     fmt(m.distKm, 2), 'km',    '#22d3ee') +
+    cell('Duração',       Math.floor(m.timeSec/60) + ':' + String(Math.round(m.timeSec%60)).padStart(2,'0'), 'min', '#94a3b8') +
+    cell('Vel. média',    fmt(m.avgSpd, 0), 'km/h',  '#60a5fa') +
+    cell('Vel. máxima',   fmt(m.maxSpd, 0), 'km/h',  '#fbbf24') +
+    cell('Energia líq.',  fmt(m.netKwh, 2), 'kWh',   '#4ade80') +
+    cell('Regenerada',    fmt(m.kwhRegen, 2), 'kWh', '#34d399') +
+    cell('kWh / 100km',   fmt(m.kwh100, 1), '',     '#a78bfa') +
+    cell('km/L eq.',      fmt(m.eqKmL, 1), '',      '#facc15') +
+    cell('Pot. média',    fmt(m.avgPwr, 1), 'kW',   '#fb923c') +
+    cell('Tempo ICE',     fmt(m.icePct, 0), '%',    '#f97316') +
+    cell('RPM médio',     fmt(m.avgRpm, 0), '',     '#ef4444') +
+    cell('Consumida',     fmt(m.kwhConsumed, 2), 'kWh', '#ef4444');
+}
+
 function onPlaybackMove(idx) {
   const i = parseInt(idx, 10);
   if (!currentSamples.length || i >= currentSamples.length) return;
