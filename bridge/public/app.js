@@ -2624,7 +2624,6 @@ function renderAutoTrips() {
 
   // Resumo — mesma estrutura 2 linhas do hist
   const { gas: priceGas, kwh: priceKwh } = getPrices();
-  const KWH_PER_L = 8.9;
 
   // Calcula eco score 0-100 de uma viagem combinando 5 componentes.
   // Retorna null se a viagem não tem dado suficiente.
@@ -2693,7 +2692,7 @@ function renderAutoTrips() {
   }
   function _tripKmLEq(t) {
     if (!t || (t.distKm || 0) < 0.5) return null;
-    const totalEqL = (t.netKwh || 0) / KWH_PER_L + (t.fuelL || 0);
+    const totalEqL = kwhToEquivL(t.netKwh || 0, t.startMs) + (t.fuelL || 0);
     if (totalEqL < 0.001) return null;
     return t.distKm / totalEqL;
   }
@@ -2751,8 +2750,10 @@ function renderAutoTrips() {
   const totFuel   = trips.reduce((s, t) => s + (t.fuelL   || 0), 0);
   const totNetKwh = trips.reduce((s, t) => s + (t.netKwh  || 0), 0);
   const avgKwh100 = totDist > 0.1   ? totNetKwh / totDist * 100 : 0;
-  const avgEqKmL  = totDist > 0.1 && (totNetKwh > 0 || totFuel > 0.001)
-    ? totDist / (totNetKwh / KWH_PER_L + totFuel) : 0;
+  // Soma "litros equivalentes" por viagem usando os preços vigentes em cada
+  // startMs (mais preciso que usar preço médio global aplicado ao total).
+  const totEqL    = trips.reduce((s, t) => s + kwhToEquivL(t.netKwh || 0, t.startMs) + (t.fuelL || 0), 0);
+  const avgEqKmL  = totDist > 0.1 && totEqL > 0.001 ? totDist / totEqL : 0;
   const totCost   = (priceGas > 0 || priceKwh > 0)
     ? totFuel * priceGas + totNetKwh * priceKwh : 0;
   const avgCostPerKm = totCost > 0 && totDist > 0.1 ? totCost / totDist : 0;
@@ -2780,8 +2781,8 @@ function renderAutoTrips() {
     const fuelL      = t.fuelL       > 0    ? f2(t.fuelL)  + ' L'   : '--';
     const kwh100     = t.distKm > 0.1 && t.netKwh > 0 ? f1(t.netKwh / t.distKm * 100) : null;
     const kmPerL     = t.fuelL > 0.001 ? f1(t.distKm / t.fuelL) : null;
-    const eqKmL      = t.distKm > 0.1 && ((t.netKwh || 0) > 0 || t.fuelL > 0.001)
-      ? f1(t.distKm / ((t.netKwh || 0) / KWH_PER_L + (t.fuelL || 0))) : null;
+    const _eqL       = kwhToEquivL(t.netKwh || 0, t.startMs) + (t.fuelL || 0);
+    const eqKmL      = t.distKm > 0.1 && _eqL > 0.001 ? f1(t.distKm / _eqL) : null;
     const socDelta   = t.startSocPct > 0    ? `${t.startSocPct.toFixed(0)}%→${t.endSocPct.toFixed(0)}%` : '--';
     const maxSpd     = t.maxSpeedKmh > 0    ? `${Math.round(t.maxSpeedKmh)} km/h` : null;
     const avgSpd     = t.timeSec > 0        ? `${Math.round(t.distKm / (t.timeSec / 3600))} km/h` : null;
@@ -3257,6 +3258,7 @@ let chartRpm        = null;
 let chartPwr        = null;
 let chartSoc        = null;
 let currentSamples  = [];
+let currentTripStartMs = 0;
 
 // HTML original do body do detalhe — restaurado a cada fechamento para garantir
 // que o #trip-map e os canvases existam frescos na próxima abertura
@@ -3272,6 +3274,7 @@ function openTripDetail(tripId) {
 
   // Título
   const trip = (cachedAutoTrips || []).find(t => t.tripId === tripId);
+  currentTripStartMs = trip?.startMs || parseInt(tripId, 10) || 0;
   const title = trip ? fmtDate(trip.startMs) + ' · ' + fmtDur(Math.round((trip.endMs - trip.startMs)/1000)) : tripId;
   document.getElementById('trip-detail-title').textContent = title;
 
@@ -3550,7 +3553,7 @@ function renderSpeedBands(samples) {
     if (band.distKm < 0.05) continue;
     const kwh100 = band.distKm > 0 ? (band.kwhPos / band.distKm * 100).toFixed(1) : '—';
     const eqKmL  = band.distKm > 0 && band.kwhPos > 0
-      ? (band.distKm / (band.kwhPos / 8.9)).toFixed(1) : '—';
+      ? (band.distKm / kwhToEquivL(band.kwhPos, currentTripStartMs)).toFixed(1) : '—';
     const pct = Math.round(band.distKm / totalDist * 100);
     inner += `<div style="flex:1;background:#0f172a;border:1px solid #1e293b;border-radius:10px;padding:10px 8px;text-align:center">
   <div style="font-size:22px;margin-bottom:4px">${band.icon}</div>
@@ -3690,7 +3693,7 @@ function _drawBands(ctx, samples, x, y, w) {
   for (const band of bands) {
     const pct    = Math.round(band.distKm / totalDist * 100);
     const kwh100 = band.distKm > 0.01 ? band.kwhPos / band.distKm * 100 : 0;
-    const eqKmL  = band.distKm > 0.01 && band.kwhPos > 0.001 ? band.distKm / (band.kwhPos / 8.9) : 0;
+    const eqKmL  = band.distKm > 0.01 && band.kwhPos > 0.001 ? band.distKm / kwhToEquivL(band.kwhPos, currentTripStartMs) : 0;
     const barFill = Math.round(BAR_MAX * pct / 100);
     // Icon + label
     ctx.font = '14px system-ui, sans-serif'; ctx.fillStyle = '#e2e8f0'; ctx.textAlign = 'left';
@@ -3799,7 +3802,7 @@ async function shareTripCard(tripId) {
     const _net   = trip.netKwh  || 0;
     const _fuel  = trip.fuelL   || 0;
     const kwh100 = _dist > 0.1 && _net > 0 ? (_net / _dist * 100).toFixed(1) : '—';
-    const eqDen  = _net / 8.9 + _fuel;
+    const eqDen  = kwhToEquivL(_net, trip.startMs) + _fuel;
     const eqKmL  = _dist > 0.1 && eqDen > 0.001 ? f1(_dist / eqDen) : '—';
     const cost   = _fuel * priceGas + _net * priceKwh;
     const cPkm   = cost > 0.01 && _dist > 0.1 ? f3(cost / _dist) : '—';
@@ -4157,7 +4160,9 @@ function _computeIntervalMetrics(samples, si, ei) {
   const netKwh    = kwhConsumed - kwhRegen;
   const avgSpd    = timeSec > 0 ? distKm / (timeSec / 3600) : 0;
   const kwh100    = distKm > 0.1 ? Math.max(0, netKwh) / distKm * 100 : 0;
-  const eqL       = Math.max(0, netKwh) / 8.9;   // gasolina equiv. (sem combustível direto)
+  // Equivalência econômica nos preços da viagem (não tem combustível por sample,
+  // só netKwh — fuelL fica fora do intervalo).
+  const eqL       = kwhToEquivL(Math.max(0, netKwh), currentTripStartMs);
   const eqKmL     = distKm > 0.1 && eqL > 0.001 ? distKm / eqL : 0;
   const avgPwr    = timeSec > 0 ? netKwh / (timeSec / 3600) : 0;
   const avgRpm    = rpmCount > 0 ? rpmSum / rpmCount : 0;
@@ -4398,6 +4403,19 @@ function pricesAt(ms) {
   if (!ms) return getPrices();
   const t = _buildPriceTimelines();
   return { gas: _priceAt(t.gas, ms), kwh: _priceAt(t.kwh, ms) };
+}
+
+// Converte kWh em "litros equivalentes" pelo custo: quantos litros de gasolina
+// custariam o mesmo que essa energia, nos preços vigentes em `ms`. Substitui
+// a equivalência energética antiga (1 L = 8.9 kWh) por uma econômica — reflete
+// o quanto você gastou em R$ pra rodar com kWh vs gasolina.
+// Fallback pra 8.9 só quando não há preços conhecidos (estado limpo).
+const KWH_PER_L_FALLBACK = 8.9;
+function kwhToEquivL(netKwh, ms) {
+  if (!(netKwh > 0)) return 0;
+  const p = ms ? pricesAt(ms) : getPrices();
+  if (p.gas > 0 && p.kwh > 0) return netKwh * p.kwh / p.gas;
+  return netKwh / KWH_PER_L_FALLBACK;
 }
 
 // ── Custo por trip — override local (localStorage) ───────────────────────────
@@ -5138,7 +5156,7 @@ function _statsRadarHTML(trips) {
 function _statsRecordsHTML(trips) {
   if (!trips.length) return _statsCard('🏆 Recordes pessoais', '<div style="color:#475569;font-size:12px">Nenhuma viagem com mais de 2 km ainda.</div>');
 
-  const KWH_PER_L = 8.9; // equivalência energética da gasolina (kWh/L)
+  // Equivalência econômica via kwhToEquivL (substitui o antigo 8.9 fixo)
   const { gas: _pg, kwh: _pk } = getPrices();
 
   // Mais eficiente elétrica: só viagens 100% elétricas (fuelL ≈ 0)
@@ -5150,13 +5168,17 @@ function _statsRecordsHTML(trips) {
     }, null);
 
   // Mais eficiente híbrida: viagens com combustível, consumo equivalente em kWh_eq/100km
-  // equiv = (netKwh + fuelL × 8,9) / distKm × 100 — menor é melhor
+  // "kWh-eq por 100km": converte gasolina em kWh equivalente pela razão de
+  // custo (gas R$/L ÷ kwh R$/kWh) — menor = mais eficiente economicamente.
+  const _eqKwh100 = t => {
+    if (t.distKm < 0.1) return Infinity;
+    const p = pricesAt(t.startMs);
+    const ratio = (p.gas > 0 && p.kwh > 0) ? p.gas / p.kwh : KWH_PER_L_FALLBACK;
+    return ((t.netKwh || 0) + (t.fuelL || 0) * ratio) / t.distKm * 100;
+  };
   const byHybridEff = trips
     .filter(t => (t.fuelL || 0) >= 0.05 && t.distKm > 0 && (t.netKwh || 0) >= 0)
-    .reduce((b, t) => {
-      const v = ((t.netKwh || 0) + t.fuelL * KWH_PER_L) / t.distKm * 100;
-      return (!b || v < (((b.netKwh || 0) + b.fuelL * KWH_PER_L) / b.distKm * 100)) ? t : b;
-    }, null);
+    .reduce((b, t) => (!b || _eqKwh100(t) < _eqKwh100(b)) ? t : b, null);
 
   const byDist = trips.reduce((b, t) => (!b || (t.distKm || 0) > (b.distKm || 0)) ? t : b, null);
 
@@ -5194,7 +5216,7 @@ function _statsRecordsHTML(trips) {
     f1(byEff.netKwh / byEff.distKm * 100) + ' kWh/100km',
     tSub(byEff));
   if (byHybridEff) {
-    const equiv = ((byHybridEff.netKwh || 0) + byHybridEff.fuelL * KWH_PER_L) / byHybridEff.distKm * 100;
+    const equiv = _eqKwh100(byHybridEff);
     rows += _statsRow('🔥', 'Mais eficiente híbrida',
       f1(equiv) + ' kWh_eq/100km',
       tSub(byHybridEff, f2(byHybridEff.netKwh || 0) + ' kWh + ' + f2(byHybridEff.fuelL) + ' L'));
@@ -7231,9 +7253,11 @@ window.showComparison = function(tripAId, tripBId) {
     </div>`;
   }
 
-  const KWH_PER_L = 8.9;
-  const kmL = (t) => (t.distKm > 0.1 && ((t.netKwh || 0) > 0 || (t.fuelL || 0) > 0.001))
-    ? t.distKm / ((t.netKwh || 0) / KWH_PER_L + (t.fuelL || 0)) : NaN;
+  const kmL = (t) => {
+    if (t.distKm < 0.1) return NaN;
+    const eqL = kwhToEquivL(t.netKwh || 0, t.startMs) + (t.fuelL || 0);
+    return eqL > 0.001 ? t.distKm / eqL : NaN;
+  };
   const kwh100 = (t) => t.distKm > 0.1 && (t.netKwh || 0) > 0 ? (t.netKwh / t.distKm) * 100 : NaN;
   const avgKmh = (t) => (t.timeSec || 0) > 0 ? t.distKm / (t.timeSec / 3600) : NaN;
   const regenRatio = (t) => (t.energyKwh || 0) > 0.05 ? (t.regenKwh || 0) / t.energyKwh * 100 : NaN;
