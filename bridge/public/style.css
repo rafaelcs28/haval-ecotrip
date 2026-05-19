@@ -2138,7 +2138,7 @@ html, body {
    Itens "largos" (mapa, ilustração do carro, alertas, banners) ocupam a linha
    inteira pra continuar bem legíveis. Painéis de visualização contínua (Drive,
    Conforto) ficam centralizados com max-width. */
-@media (min-width: 780px) {
+@media (min-width: 700px) {
   /* Habilita labels nos botões da tab bar (mais espaço disponível) */
   .tab-label { display: block; }
 
