@@ -20,7 +20,11 @@ const MQTT_PREFIX    = process.env.MQTT_PREFIX || 'haval/ecotrip';
 const PORT           = parseInt(process.env.PORT || '3000', 10);
 // Integração GWM Brasil — publica direto via MQTT (sem passar pelo app).
 // Bridge subscribe nesses tópicos pra ter estado confiável de body/lock/etc.
-const GWM_CHASSI       = process.env.GWM_CHASSI || 'lgwffva55sh931315';
+const GWM_CHASSI       = (process.env.GWM_CHASSI || '').toLowerCase();
+if (!GWM_CHASSI) {
+  console.error('⚠️  GWM_CHASSI não configurado no .env — integração GWM Brasil/HA desabilitada.');
+  console.error('   Defina o chassi do carro em minúsculas (ex: GWM_CHASSI=lgwffva55sh931315)');
+}
 const GWM_TOPIC_PREFIX = `gwmbrasil_${GWM_CHASSI}`;
 
 // Home Assistant REST — usado APENAS no boot pra puxar o estado inicial das
