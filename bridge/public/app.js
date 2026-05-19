@@ -3708,8 +3708,19 @@ async function _drawOSMMap(ctx, gps, mx, my, mw, mh) {
     if (ntx * nty <= 16) break;
     z--;
   }
-  const fxMin = _tileX(mnLng, z), fyMin = _tileY(mxLat, z);
-  const fxMax = _tileX(mxLng, z), fyMax = _tileY(mnLat, z);
+  const fxMin = _tileX(mnLng, z);
+  const fxMax = _tileX(mxLng, z);
+  let fyMin   = _tileY(mxLat, z);
+  let fyMax   = _tileY(mnLat, z);
+  // Pad vertical: rota predominante leste-oeste ocupa só uma fatia da altura.
+  // Expande lat range simétrico pra que o tile grid preencha mh sem vazio.
+  const desiredLatTileRange = (mh / mw) * (fxMax - fxMin);
+  const currentLatTileRange = fyMax - fyMin;
+  if (currentLatTileRange < desiredLatTileRange) {
+    const extra = desiredLatTileRange - currentLatTileRange;
+    fyMin -= extra / 2;
+    fyMax += extra / 2;
+  }
   const txMin = Math.floor(fxMin), tyMin = Math.floor(fyMin);
   const txMax = Math.floor(fxMax), tyMax = Math.floor(fyMax);
   const scale   = mw / ((fxMax - fxMin) * 256);
