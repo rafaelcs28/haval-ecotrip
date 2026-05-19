@@ -4256,13 +4256,15 @@ function onPlaybackMove(idx) {
 // de UI ao abrir o app em dispositivo novo ou após senha mudada.
 (async function bootstrapAuth() {
   if (!bridgeToken) {
-    // Sem token salvo → fica no login (overlay já está visível por default)
+    // Sem token salvo → mostra login (overlay começa display:none por default
+    // pra evitar flash quando há sessão válida — caminho mais comum).
+    showLogin();
     return;
   }
   try {
     const r = await fetch('/api/state', { headers: { 'Authorization': 'Bearer ' + bridgeToken } });
     if (!r.ok) {
-      // Token salvo é inválido (senha mudou no servidor, etc) — mantém login
+      // Token inválido — mostra login com aviso
       showLogin('Sessão expirada. Digite a senha novamente.');
       return;
     }
