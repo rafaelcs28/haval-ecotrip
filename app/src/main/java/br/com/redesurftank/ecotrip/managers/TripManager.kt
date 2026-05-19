@@ -494,6 +494,14 @@ class TripManager private constructor() {
         synchronized(lock) {
             // Pop do histórico — a viagem volta a ser "em andamento"
             autoTripHistory.removeAll { it.startMs == last.startMs }
+            // Remove de bridgeSyncedIds: se a viagem foi sincronizada antes (caso
+            // típico — sync rodou após o primeiro trecho), o filtro
+            // syncAutoTripsTobridge ignoraria a versão estendida (mesmo startMs).
+            // Forçar re-sync garante que o bridge receba a viagem combinada.
+            if (bridgeSyncedIds.remove(last.startMs)) {
+                persistSyncedIds()
+                AppLogger.i(TAG, "Viagem ${last.startMs} removida de bridgeSyncedIds — será re-sincronizada ao fim")
+            }
 
             // Restaura baselines: o ponto inicial da viagem (em lifeXxx) era
             // (lifeAtualNoFimDaViagem - acumuladoNaViagem). Mas lifeAtual pode
@@ -683,8 +691,8 @@ class TripManager private constructor() {
             val ms = tripIdStr.toLongOrNull() ?: return@bulkPostTrips
             synchronized(lock) { bridgeSyncedIds.add(ms) }
             persistSyncedIds()
-            // Apaga amostras locais após confirmação de envio bem-sucedido
-            try { java.io.File(samplesDir, "$tripIdStr.json").delete() } catch (_: Exception) {}
+            // NÃO apaga samples aqui — preserva pra preload em caso de resume
+            // (janela de 60min). Cleanup acontece no boot via cleanOldSamples().
         }
     }
 
@@ -850,6 +858,20 @@ class TripManager private constructor() {
             samplesDir.listFiles { f -> f.name.endsWith("_inprogress.json") }?.forEach { f ->
                 val ts = f.name.removeSuffix("_inprogress.json").toLongOrNull() ?: run { f.delete(); return@forEach }
                 if (ts != autoTripStartMs) f.delete()
+            }
+        } catch (_: Exception) {}
+
+        // Limpa samples de viagens já sincronizadas E mais antigas que a janela de
+        // resume (60min) + folga de 30min. Mantém samples recentes pra permitir
+        // preload em caso de resume. Não toca _inprogress (gerenciado acima).
+        try {
+            val ageCutoffMs = 90L * 60_000L  // 90min
+            val now = System.currentTimeMillis()
+            samplesDir.listFiles { f -> f.name.matches(Regex("^\\d+\\.json$")) }?.forEach { f ->
+                val ts = f.name.removeSuffix(".json").toLongOrNull() ?: return@forEach
+                if (ts == autoTripStartMs) return@forEach   // viagem em andamento — preserva
+                val ageMs = now - f.lastModified()
+                if (ageMs > ageCutoffMs && bridgeSyncedIds.contains(ts)) f.delete()
             }
         } catch (_: Exception) {}
 
