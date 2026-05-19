@@ -4125,19 +4125,48 @@ function onPlaybackMove(idx) {
 
 // ── Inicialização ─────────────────────────────────────────────────────────────
 
-// Tenta restaurar último estado do cache (offline)
-try {
-  const cached = localStorage.getItem('ecotrip_state');
-  if (cached) {
-    const { state: cachedState, ts } = JSON.parse(cached);
-    deepMerge(state, cachedState);
-    lastUpdateMs = ts;
-    renderAll();
+// Login overlay começa visível por padrão (index.html). Antes de mostrar dashboard,
+// valida o token via /api/state. Só hideLogin se o servidor aceitar — evita flash
+// de UI ao abrir o app em dispositivo novo ou após senha mudada.
+(async function bootstrapAuth() {
+  if (!bridgeToken) {
+    // Sem token salvo → fica no login (overlay já está visível por default)
+    return;
   }
-} catch(_) {}
-
-// Inicia conexão; se o servidor recusar por auth, o WS fecha com 4001 e mostramos o login
-connect();
+  try {
+    const r = await fetch('/api/state', { headers: { 'Authorization': 'Bearer ' + bridgeToken } });
+    if (!r.ok) {
+      // Token salvo é inválido (senha mudou no servidor, etc) — mantém login
+      showLogin('Sessão expirada. Digite a senha novamente.');
+      return;
+    }
+    // Token válido — popula state inicial + esconde login + restaura cache pra UI rica
+    try {
+      const cached = localStorage.getItem('ecotrip_state');
+      if (cached) {
+        const { state: cachedState, ts } = JSON.parse(cached);
+        deepMerge(state, cachedState);
+        lastUpdateMs = ts;
+      }
+    } catch (_) {}
+    hideLogin();
+    renderAll();
+    connect();
+  } catch (_) {
+    // Sem conexão — usa cache mas mantém overlay como camada de proteção
+    try {
+      const cached = localStorage.getItem('ecotrip_state');
+      if (cached) {
+        const { state: cachedState, ts } = JSON.parse(cached);
+        deepMerge(state, cachedState);
+        lastUpdateMs = ts;
+        renderAll();
+      }
+    } catch (_) {}
+    hideLogin();   // permite ver dados offline (cached) mesmo sem validar
+    connect();     // WS tentará reconectar
+  }
+})();
 tickInterval = setInterval(tickLastUpdate, 1000);
 tickLastUpdate();
 
