@@ -144,6 +144,7 @@ function showLogin(errorMsg) {
   const err = document.getElementById('login-error');
   if (err) { err.style.display = errorMsg ? '' : 'none'; err.textContent = errorMsg || ''; }
   setTimeout(() => document.getElementById('login-input')?.focus(), 100);
+  _initGoogleLogin();
 }
 
 function hideLogin() {
@@ -151,11 +152,96 @@ function hideLogin() {
   if (overlay) overlay.style.display = 'none';
 }
 
+// ── Login via Google ─────────────────────────────────────────────────────────
+let _pendingGoogleCredential = null;
+
+async function _initGoogleLogin() {
+  if (window._googleInitDone) return;
+  try {
+    const cfg = await fetch('/api/auth/google/config').then(r => r.json());
+    if (!cfg.enabled || !cfg.client_id) return;
+    let tries = 0;
+    while (!window.google?.accounts?.id && tries++ < 50) await new Promise(r => setTimeout(r, 100));
+    if (!window.google?.accounts?.id) return;
+    google.accounts.id.initialize({
+      client_id: cfg.client_id,
+      callback:  _onGoogleCredential,
+      auto_select: false,
+      use_fedcm_for_prompt: true,
+    });
+    const container = document.getElementById('g_id_signin');
+    if (container) {
+      container.innerHTML = '';
+      google.accounts.id.renderButton(container, {
+        type: 'standard',
+        theme: 'filled_black',
+        size: 'large',
+        text: 'continue_with',
+        shape: 'rectangular',
+        logo_alignment: 'left',
+        width: 280,
+      });
+    }
+    document.getElementById('google-login-section').style.display = 'flex';
+    window._googleInitDone = true;
+  } catch (e) { console.warn('Google login init:', e); }
+}
+
+async function _onGoogleCredential(response) {
+  const credential = response?.credential;
+  if (!credential) return;
+  _pendingGoogleCredential = credential;
+  await _submitGoogleLogin();
+}
+
+async function _submitGoogleLogin() {
+  if (!_pendingGoogleCredential) return;
+  const totpInput = document.getElementById('login-totp');
+  const totpCode  = (totpInput?.value || '').trim() || undefined;
+  try {
+    const r = await fetch('/api/auth/google/login', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ credential: _pendingGoogleCredential, totp_code: totpCode }),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (r.ok && data.ok) {
+      _pendingGoogleCredential = null;
+      bridgeToken = data.token || '';
+      if (bridgeToken) localStorage.setItem('bridge_token', bridgeToken);
+      const row = document.getElementById('login-totp-row');
+      if (row) row.style.display = 'none';
+      hideLogin();
+      connect();
+    } else if (data.requires_2fa || data.error === 'totp_required') {
+      const row = document.getElementById('login-totp-row');
+      if (row) row.style.display = '';
+      setTimeout(() => totpInput?.focus(), 50);
+      showLogin('Conta validada. Digite o código do app autenticador.');
+    } else if (data.error === 'invalid_totp') {
+      showLogin('Código incorreto. Tente novamente.');
+    } else if (data.error === 'email_not_allowed') {
+      _pendingGoogleCredential = null;
+      showLogin(`Email ${data.email || ''} não autorizado.`);
+    } else {
+      _pendingGoogleCredential = null;
+      showLogin('Falha no login Google: ' + (data.error || `HTTP ${r.status}`));
+    }
+  } catch (_) {
+    showLogin('Sem conexão com o servidor.');
+  }
+}
+
 async function doLogin() {
   const input     = document.getElementById('login-input');
   const totpInput = document.getElementById('login-totp');
   const password  = (input?.value || '').trim();
   const totpCode  = (totpInput?.value || '').trim();
+  // Se há credential Google pendente esperando 2FA, completa esse fluxo em vez
+  // do password flow (botão "Entrar" e Enter no campo TOTP reusam a credential).
+  if (_pendingGoogleCredential && !password) {
+    return _submitGoogleLogin();
+  }
   try {
     const passwordHash = password ? await sha256hex(password) : '';
     const r = await fetch('/api/auth/login', {

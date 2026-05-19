@@ -1356,11 +1356,82 @@ app.post('/api/auth/login', (req, res) => {
 // GET /api/auth/2fa/status — pública: PWA chama no início pra saber se precisa pedir código
 app.get('/api/auth/2fa/status', (_req, res) => res.json({ enabled: is2faEnabled() }));
 
+// ── Google Sign-In ────────────────────────────────────────────────────────────
+const GOOGLE_OAUTH_CLIENT_ID = process.env.GOOGLE_OAUTH_CLIENT_ID || '';
+const GOOGLE_ALLOWED_EMAILS  = (process.env.GOOGLE_ALLOWED_EMAILS || '')
+  .split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+let googleAuthClient = null;
+if (GOOGLE_OAUTH_CLIENT_ID) {
+  try {
+    const { OAuth2Client } = require('google-auth-library');
+    googleAuthClient = new OAuth2Client(GOOGLE_OAUTH_CLIENT_ID);
+    console.log(`✓ Google Sign-In: client configurado · ${GOOGLE_ALLOWED_EMAILS.length} email(s) na whitelist`);
+  } catch (e) { console.error('Falha google-auth-library:', e.message); }
+}
+
+// GET /api/auth/google/config — público. PWA usa pra saber se renderiza botão e qual client ID.
+app.get('/api/auth/google/config', (_req, res) => res.json({
+  enabled:    !!googleAuthClient,
+  client_id:  GOOGLE_OAUTH_CLIENT_ID || null,
+}));
+
+// POST /api/auth/google/login — { credential (ID token), totp_code? } → { ok, token }
+// Verifica o ID token (assinado pelo Google), checa email contra whitelist,
+// aplica 2FA TOTP se ativo. Retorna o bearer (mesmo BRIDGE_TOKEN_HASH).
+app.post('/api/auth/google/login', async (req, res) => {
+  if (!googleAuthClient) return res.status(503).json({ error: 'google_login_disabled' });
+  const ip = req.ip || req.connection?.remoteAddress || 'unknown';
+  const rl = _checkRateLimit(ip);
+  if (!rl.ok) return res.status(429).json({ error: 'rate_limited', retry_after_sec: rl.retryAfterSec });
+  if (rl.state.count >= 5) return res.status(429).json({ error: 'too_many_attempts' });
+
+  const { credential, totp_code } = req.body || {};
+  if (!credential) return res.status(400).json({ error: 'missing_credential' });
+
+  let payload;
+  try {
+    const ticket = await googleAuthClient.verifyIdToken({
+      idToken:  credential,
+      audience: GOOGLE_OAUTH_CLIENT_ID,
+    });
+    payload = ticket.getPayload();
+  } catch (e) {
+    _registerFailure(rl.state);
+    return res.status(401).json({ error: 'invalid_credential', detail: e.message });
+  }
+
+  const email = (payload?.email || '').toLowerCase();
+  if (!email || !payload.email_verified) {
+    _registerFailure(rl.state);
+    return res.status(401).json({ error: 'email_not_verified' });
+  }
+  if (GOOGLE_ALLOWED_EMAILS.length > 0 && !GOOGLE_ALLOWED_EMAILS.includes(email)) {
+    _registerFailure(rl.state);
+    return res.status(403).json({ error: 'email_not_allowed', email });
+  }
+
+  // 2FA: se ativo, exige o código (igual ao login por senha)
+  if (is2faEnabled()) {
+    if (!totp_code) return res.status(401).json({ error: 'totp_required', requires_2fa: true, email });
+    if (!verifyTotpOrBackup(totp_code)) {
+      _registerFailure(rl.state);
+      return res.status(401).json({ error: 'invalid_totp' });
+    }
+  }
+
+  _registerSuccess(ip);
+  console.log(`[auth] login Google OK · ${email}`);
+  res.json({ ok: true, token: BRIDGE_TOKEN_HASH, email });
+});
+
 // requireAuth: aplica a toda a API exceto /api/push/* (SW não consegue enviar headers)
-// e /api/auth/login (que faz sua própria validação) e /api/auth/2fa/status (público).
+// e rotas de auth públicas (login, google, status).
 app.use('/api', (req, res, next) => {
   if (req.path.startsWith('/push')) return next();        // push routes: sem auth
-  if (req.path === '/auth/login' || req.path === '/auth/2fa/status') return next();
+  if (req.path === '/auth/login' ||
+      req.path === '/auth/2fa/status' ||
+      req.path === '/auth/google/config' ||
+      req.path === '/auth/google/login') return next();
   requireAuth(req, res, next);
 });
 
