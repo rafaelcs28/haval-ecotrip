@@ -2645,6 +2645,14 @@ function renderPlace() {
   }
 }
 
+let _lastCenteredPos = null;
+function _haversine(a, b) {
+  const R = 6371000, toRad = x => x * Math.PI / 180;
+  const dLat = toRad(b[0] - a[0]), dLng = toRad(b[1] - a[1]);
+  const s = Math.sin(dLat/2)**2 + Math.cos(toRad(a[0]))*Math.cos(toRad(b[0]))*Math.sin(dLng/2)**2;
+  return 2 * R * Math.asin(Math.sqrt(s));
+}
+
 function render(s, kpData) {
   // ── Mapa fullscreen + trajeto da viagem (polyline verde) + pin atual
   if (s.gps_lat && s.gps_lng) {
@@ -2668,11 +2676,17 @@ function render(s, kpData) {
       html: '<div style="width:20px;height:20px;background:#22c55e;border:3px solid #fff;border-radius:50%;box-shadow:0 0 0 6px rgba(34,197,94,.35),0 0 0 14px rgba(34,197,94,.12),0 2px 8px rgba(0,0,0,.4);"></div>',
       iconSize: [20,20], iconAnchor: [10,10]
     }) }).addTo(map);
-    // Centraliza na metade superior (acima do sheet)
-    const sheet = document.querySelector('.bottom-sheet');
-    const sheetH = sheet && !sheet.classList.contains('collapsed') ? sheet.offsetHeight : 0;
-    map.setView(pos, map.getZoom(), { animate: true });
-    if (sheetH > 0) map.panBy([0, sheetH / 2], { animate: false });
+    // Re-centra só na primeira call OU se o carro andou >50m desde o último centro.
+    // Antes recentrava a cada 1s e o setView animado conflitava com o panBy imediato,
+    // causando piscada do pin entre centro absoluto e centro da área visível.
+    const moved = !_lastCenteredPos || _haversine(_lastCenteredPos, pos) > 50;
+    if (moved) {
+      const sheet = document.querySelector('.bottom-sheet');
+      const sheetH = sheet && !sheet.classList.contains('collapsed') ? sheet.offsetHeight : 0;
+      map.setView(pos, map.getZoom() || 16, { animate: false });
+      if (sheetH > 0) map.panBy([0, sheetH / 2], { animate: false });
+      _lastCenteredPos = pos;
+    }
     currentKp = _findKp(kpData, s.gps_lat, s.gps_lng);
     updateAddress(s.gps_lat, s.gps_lng);
     renderPlace();
