@@ -34100,6 +34100,22 @@ function updateTabbarHeights() {
 updateTabbarHeights();
 window.addEventListener('resize', updateTabbarHeights);
 
+// Resolve nome do local olhando lat/lng contra a lista de known places.
+// Usa haversine pra distance e o radius_m de cada place.
+let _kpListCache = null;
+function _resolveKp(lat, lng) {
+  if (!_kpListCache || !lat || !lng) return '';
+  const R = 6371000, toRad = x => x * Math.PI / 180;
+  for (const k of _kpListCache) {
+    if (!k.lat || !k.lng) continue;
+    const dLat = toRad(k.lat - lat), dLng = toRad(k.lng - lng);
+    const s = Math.sin(dLat/2)**2 + Math.cos(toRad(lat)) * Math.cos(toRad(k.lat)) * Math.sin(dLng/2)**2;
+    const dist = 2 * R * Math.asin(Math.sqrt(s));
+    if (dist <= (k.radius_m || 200)) return k.name;
+  }
+  return '';
+}
+
 async function _loadDeslocData() {
   // 1. Render imediato do cache local (offline-first)
   const cached = window.cacheGet && window.cacheGet('desloc');
@@ -34110,10 +34126,39 @@ async function _loadDeslocData() {
     lastStartMs = Math.max(...cached.v.map(t => +t.startMs || 0));
     renderTrips(); renderCalendar(); renderDateNav();
   }
-  // 2. Fetch incremental (só viagens novas desde o cache)
+  // 2. Fetch incremental
   const tk = localStorage.getItem('bridge_token');
   if (!tk) { if (!cached) { renderTrips(); renderCalendar(); renderDateNav(); } return; }
   try {
+    // Carrega lista de known-places (cacheada em window) pra resolver nomes
+    if (!_kpListCache) {
+      try {
+        const kpCached = window.cacheGet && window.cacheGet('known_places');
+        if (kpCached && Array.isArray(kpCached.v)) _kpListCache = kpCached.v;
+      } catch (_) {}
+      try {
+        const kpResp = await fetch('/api/known-places', { headers: { 'Authorization': 'Bearer ' + tk } });
+        _kpListCache = await kpResp.json();
+        window.cacheSet && window.cacheSet('known_places', _kpListCache);
+      } catch (_) {}
+    }
+    // Re-resolve nomes nas viagens já carregadas do cache (cache antigo pode ter
+    // sido salvo sem startKp/endKp). Faz in-place; cache atualiza no fim.
+    let cacheDirty = false;
+    for (const tr of trips) {
+      if (!tr.startKp) {
+        const k = _resolveKp(tr.startLat, tr.startLng);
+        if (k) { tr.startKp = k; cacheDirty = true; }
+      }
+      if (!tr.endKp) {
+        const k = _resolveKp(tr.endLat, tr.endLng);
+        if (k) { tr.endKp = k; cacheDirty = true; }
+      }
+    }
+    if (cacheDirty) {
+      renderTrips();
+      window.cacheSet && window.cacheSet('desloc', trips.slice());
+    }
     const url = lastStartMs > 0 ? `/api/autotrips?since=${lastStartMs}` : '/api/autotrips';
     const r = await fetch(url, { headers: { 'Authorization': 'Bearer ' + tk } });
     const data = await r.json();
@@ -34144,8 +34189,8 @@ async function _loadDeslocData() {
       startLng:      t.startLng,
       endLat:        t.endLat,
       endLng:        t.endLng,
-      startKp:       t.startKp || '',
-      endKp:         t.endKp || '',
+      startKp:       t.startKp || _resolveKp(t.startLat, t.startLng) || '',
+      endKp:         t.endKp || _resolveKp(t.endLat, t.endLng) || '',
       name:          t.name || null,
       samples:       [],   // carrega sob demanda via /api/telemetry/:tripId
       route:         [],
