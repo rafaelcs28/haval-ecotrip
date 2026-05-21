@@ -33666,9 +33666,30 @@ function closeAction() {
 
 // ── 🗺 Mapa em tela cheia ────────────────────────────────────────────────
 let _fullMap = null;
-function openMapFull(id) {
+async function openMapFull(id) {
   const t = getTrip(id);
-  if (!t || !t.route.length) { showToast('Sem trajeto GPS pra essa viagem'); return; }
+  if (!t) { showToast('Viagem não encontrada'); return; }
+  // Samples não vêm com /api/autotrips — busca sob demanda em /api/telemetry/:tripId
+  if (!t.route || !t.route.length) {
+    const tk = localStorage.getItem('bridge_token');
+    if (tk) {
+      try {
+        showToast('Carregando trajeto…');
+        const r = await fetch('/api/telemetry/' + encodeURIComponent(t.tripId || t.id), {
+          headers: { 'Authorization': 'Bearer ' + tk }
+        });
+        const data = await r.json();
+        const samples = data.samples || data || [];
+        if (Array.isArray(samples) && samples.length) {
+          t.samples = samples;
+          t.route = samples
+            .filter(s => s && s.lat && s.lng)
+            .map(s => [s.lat, s.lng]);
+        }
+      } catch (e) { console.warn('Telemetria falhou:', e); }
+    }
+  }
+  if (!t.route || !t.route.length) { showToast('Sem trajeto GPS pra essa viagem'); return; }
   _tlTrip = t;  // guarda referência pra a timeline usar
   const modal = document.getElementById('map-fullmodal');
   modal.classList.add('show');
