@@ -1,7 +1,8 @@
 <style>
 /* Mapa fullscreen */
-.map-fullscreen { position: fixed; inset: 0; z-index: 0; background: #0a0a0a; }
-#map { width: 100%; height: 100%; }
+.map-fullscreen { position: fixed; inset: 0; z-index: 0; background: #0c1422; }
+#map-drive { width: 100%; height: 100%; background: #0c1422; }
+.leaflet-container, .leaflet-tile-pane, .leaflet-pane { background: #0c1422 !important; }
 
 /* Header glassmorphism */
 
@@ -169,7 +170,7 @@
 
 <span id="hd-place" style="display:none"></span>
 <span id="hd-gear" style="display:none"></span>
-<div class="map-fullscreen"><div id="map"></div></div>
+<div class="map-fullscreen"><div id="map-drive"></div></div>
 
 </div>
   <div class="right">
@@ -2653,7 +2654,7 @@ function render(s, kpData) {
   if (s.gps_lat && s.gps_lng) {
     const pos = [s.gps_lat, s.gps_lng];
     if (!map) {
-      map = L.map('map', {
+      map = L.map("map-drive", {
         zoomControl: false, attributionControl: false, dragging: true, zoomSnap: 0.5,
       }).setView(pos, 16);
       L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom: 19 }).addTo(map);
@@ -2687,8 +2688,9 @@ function render(s, kpData) {
   gp.textContent = gear;
   gp.className = 'gear-pill ' + (gear === 'P' ? 'park' : gear === 'R' ? 'reverse' : gear === 'N' ? 'neutral' : '');
 
-  // ── HERO: velocidade
-  const spd = +s.speed_kmh || 0;
+  // ── HERO: velocidade — APK publica -1 quando não há leitura válida (carro parado/desligado)
+  const spdRaw = +s.speed_kmh;
+  const spd = (Number.isFinite(spdRaw) && spdRaw >= 0) ? spdRaw : 0;
   document.getElementById('speed-v').textContent = Math.round(spd);
 
   // ── Potência atual (motor_power_kw):

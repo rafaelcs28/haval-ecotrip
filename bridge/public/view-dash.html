@@ -4,7 +4,7 @@
   position: fixed; inset: 0; z-index: 0;
   background: #0c1422;
 }
-#map { width: 100%; height: 100%; background: #0c1422; }
+#map-dash { width: 100%; height: 100%; background: #0c1422; }
 /* Override do bg default cinza claro do Leaflet enquanto tiles carregam */
 .leaflet-container, .leaflet-tile-pane, .leaflet-pane { background: #0c1422 !important; }
 
@@ -352,7 +352,7 @@
 
 <span id="hd-place" style="display:none"></span>
 <span id="dev-bar" style="display:none"></span>
-<div class="map-fullscreen"><div id="map"></div></div>
+<div class="map-fullscreen"><div id="map-dash"></div></div>
 
 </div>
   <div class="right">
@@ -790,7 +790,7 @@ function render(s, kpData) {
   if (s.gps_lat && s.gps_lng) {
     const pos = [s.gps_lat, s.gps_lng];
     if (!map) {
-      map = L.map('map', {
+      map = L.map("map-dash", {
         zoomControl: false, attributionControl: false, dragging: true,
         zoomSnap: 0.5,
       }).setView(pos, 16);
