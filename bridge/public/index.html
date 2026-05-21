@@ -346,7 +346,7 @@ input { font-family: inherit; }
 <!-- ──────────────────────── VIEWS ──────────────────────── -->
 <main id="views">
   <!-- views injetadas via JS no boot pra evitar arquivo gigante -->
-  <div id="view-dash" class="view active">
+  <div id="view-dash" class="view">
     <div class="container">
       <div class="section-title">Dash</div>
       <div class="spin-loader"></div>
@@ -392,7 +392,7 @@ input { font-family: inherit; }
 
 <!-- ──────────────────────── TABBAR ──────────────────────── -->
 <nav class="tabbar">
-  <button class="tb active" data-view="dash"     onclick="switchView('dash')"><span class="ic">🏠</span>Dash</button>
+  <button class="tb"        data-view="dash"     onclick="switchView('dash')"><span class="ic">🏠</span>Dash</button>
   <button class="tb"        data-view="drive"    onclick="switchView('drive')"><span class="ic">🏎</span>Drive</button>
   <button class="tb"        data-view="conforto" onclick="switchView('conforto')"><span class="ic">❄️</span>Conforto</button>
   <button class="tb"        data-view="posto"    onclick="switchView('posto')"><span class="ic">⚡</span>Posto</button>
@@ -413,6 +413,17 @@ let wsReconnectTimeout = null;
 let wsRetryDelay = 1000;
 let lastUpdateMs = null;
 let activeView = sessionStorage.getItem('ecotrip_v2_active') || 'dash';
+// Aplica .active na view salva ANTES do primeiro paint pra evitar flash da Dash
+// quando o user dá refresh estando em outra aba. Também marca o botão correto no tabbar.
+(function () {
+  const v = document.getElementById('view-' + activeView);
+  if (v) v.classList.add('active');
+  const tb = document.querySelector(`.tabbar .tb[data-view="${activeView}"]`);
+  if (tb) {
+    document.querySelectorAll('.tabbar .tb').forEach(b => b.classList.remove('active'));
+    tb.classList.add('active');
+  }
+})();
 let refreshing = false;
 
 // Pending HVAC state (preservado do app.js legacy)
