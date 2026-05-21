@@ -670,6 +670,7 @@ class MqttManager private constructor() {
             pubR("hvac_fan_speed",    latestHvacFanSpeed.toString())
             pubR("hvac_sync_enable",  latestHvacSyncEnable.toString())
             pubR("hvac_auto_enable",  latestHvacAutoEnable.toString())
+            pubR("hvac_ac_enable",    latestHvacAcEnable.toString())  // master ON/OFF do AC
             pubR("ac_state",          if (snAcEnable > 0) "1" else "0")
             pubR("hvac_cycle_mode",   latestHvacCycleMode.toString())
 
@@ -1187,6 +1188,7 @@ class MqttManager private constructor() {
                             "fan_speed"      -> "car.hvac.fan_speed"
                             "sync"           -> "car.hvac.sync_enable"
                             "auto"           -> "car.hvac.auto_enable"
+                            "ac_enable"      -> "car.hvac.ac_enable"  // master ON/OFF do AC (compressor)
                             "cycle_mode"     -> "car.hvac.cycle_mode"
                             "seat_vent_drv"  -> "car.comfort_setting.driver_seat_ventilation_level"
                             "seat_vent_pass" -> "car.comfort_setting.passenger_seat_ventilation_level"

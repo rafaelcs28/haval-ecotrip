@@ -481,6 +481,7 @@ const state = {
   hvac_fan_speed:      null, // null | int (0..N) — velocidade do ventilador
   hvac_sync_enable:    null, // null | '0'=desligado | '1'=ligado
   hvac_auto_enable:    null, // null | '0'=desligado | '1'=ligado
+  hvac_ac_enable:      null, // null | '0'=desligado | '1'=ligado — car.hvac.ac_enable
   door_fl:          null,   // front-left  | 'on'=aberta | 'off'=fechada
   door_fr:          null,   // front-right
   door_rl:          null,   // rear-left
@@ -3180,6 +3181,10 @@ const HVAC_CONTROLS = {
   cycle_mode:     { type: 'int',   min: 0,  max: 1 },
   seat_vent_drv:  { type: 'int',   min: 0,  max: 3 },
   seat_vent_pass: { type: 'int',   min: 0,  max: 3 },
+  // Liga/desliga o compressor do AC (não só o fan). Mapeia para
+  // `car.hvac.ac_enable` no barramento via Shizuku. Usar junto com fan_speed
+  // pra garantir que liga o AC e não só sopra ar.
+  ac_enable:      { type: 'bool' },
 };
 
 // ── HF mode (alta frequência sob demanda) ─────────────────────────────────
@@ -3744,6 +3749,7 @@ function applyMqttMessage(key, value, isRetained = false) {
     case 'hvac_fan_speed':      state.hvac_fan_speed      = value; break; // int 0..N
     case 'hvac_sync_enable':    state.hvac_sync_enable    = value; break; // '0'|'1'
     case 'hvac_auto_enable':    state.hvac_auto_enable    = value; break; // '0'|'1'
+    case 'hvac_ac_enable':      state.hvac_ac_enable      = value; break; // '0'|'1' — car.hvac.ac_enable
     case 'door_fl':
     case 'door_fr':
     case 'door_rl':
