@@ -33670,39 +33670,43 @@ let _fullMap = null;
 async function openMapFull(id) {
   const t = getTrip(id);
   if (!t) { showToast('Viagem não encontrada'); return; }
-  // Samples não vêm com /api/autotrips — busca sob demanda em /api/telemetry/:tripId
+  // Samples não vêm com /api/autotrips — busca sob demanda. Cache em IndexedDB
+  // (samples de uma viagem pode ter 1000+ pontos, ~50KB cada; estoura localStorage).
   if (!t.route || !t.route.length) {
-    const tk = localStorage.getItem('bridge_token');
-    if (tk) {
-      const toastEl = document.getElementById('toast');
-      if (toastEl) { toastEl.textContent = 'Carregando trajeto…'; toastEl.classList.add('show'); }
-      try {
-        const r = await fetch('/api/telemetry/' + encodeURIComponent(t.tripId || t.id), {
-          headers: { 'Authorization': 'Bearer ' + tk }
-        });
-        const data = await r.json();
-        const samples = data.samples || data || [];
-        if (Array.isArray(samples) && samples.length) {
-          // API retorna {spd, evKw, pwr, soc, rpm, t, lat, lng}.
-          // Timeline espera s.kw — usa pwr (potência total). Mantém spd e soc.
-          t.samples = samples.map(s => ({
-            t:   s.t,
-            lat: s.lat,
-            lng: s.lng,
-            spd: s.spd,
-            kw:  (s.pwr != null ? s.pwr : (s.evKw != null ? s.evKw : 0)),
-            soc: s.soc,
-            rpm: s.rpm,
-          }));
-          t.route = t.samples
-            .filter(s => s && s.lat && s.lng)
-            .map(s => [s.lat, s.lng]);
-        }
-      } catch (e) { console.warn('Telemetria falhou:', e); }
-      // Remove o toast assim que o fetch retorna — sem esperar 2.2s do timeout
-      if (toastEl) {
-        clearTimeout(showToast._t);
-        toastEl.classList.remove('show');
+    const tripKey = 'telemetry_' + (t.tripId || t.id);
+    // 1. Cache instantâneo
+    if (window.idbGet) {
+      const cached = await window.idbGet(tripKey);
+      if (cached && Array.isArray(cached.samples) && cached.samples.length) {
+        t.samples = cached.samples;
+        t.route = cached.route || cached.samples
+          .filter(s => s && s.lat && s.lng).map(s => [s.lat, s.lng]);
+      }
+    }
+    // 2. Se ainda não tem rota (cache vazio ou erro), busca da API
+    if (!t.route || !t.route.length) {
+      const tk = localStorage.getItem('bridge_token');
+      if (tk) {
+        const toastEl = document.getElementById('toast');
+        if (toastEl) { toastEl.textContent = 'Carregando trajeto…'; toastEl.classList.add('show'); }
+        try {
+          const r = await fetch('/api/telemetry/' + encodeURIComponent(t.tripId || t.id), {
+            headers: { 'Authorization': 'Bearer ' + tk }
+          });
+          const data = await r.json();
+          const samples = data.samples || data || [];
+          if (Array.isArray(samples) && samples.length) {
+            // API: {spd, evKw, pwr, soc, rpm, t, lat, lng} → snapshot espera "kw"
+            t.samples = samples.map(s => ({
+              t: s.t, lat: s.lat, lng: s.lng, spd: s.spd, soc: s.soc, rpm: s.rpm,
+              kw: (s.pwr != null ? s.pwr : (s.evKw != null ? s.evKw : 0)),
+            }));
+            t.route = t.samples.filter(s => s && s.lat && s.lng).map(s => [s.lat, s.lng]);
+            // Salva no IndexedDB pra próxima abertura ser instantânea
+            if (window.idbSet) window.idbSet(tripKey, { samples: t.samples, route: t.route });
+          }
+        } catch (e) { console.warn('Telemetria falhou:', e); }
+        if (toastEl) { clearTimeout(showToast._t); toastEl.classList.remove('show'); }
       }
     }
   }

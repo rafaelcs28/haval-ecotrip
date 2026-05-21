@@ -499,6 +499,47 @@ function relTime(ms) {
   return `${Math.floor(sec/86400)}d atrás`;
 }
 
+// ── IndexedDB key/value pra dados grandes (telemetria de viagens) ─
+// localStorage tem ~5MB no iOS PWA, telemetria com 1000+ samples por viagem
+// estoura rápido. IndexedDB tem 50MB+ e é assíncrono (não trava UI).
+const _IDB_NAME = 'ecotrip_v2', _IDB_STORE = 'kv';
+let _idbPromise = null;
+function _idb() {
+  if (_idbPromise) return _idbPromise;
+  _idbPromise = new Promise((resolve, reject) => {
+    const req = indexedDB.open(_IDB_NAME, 1);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(_IDB_STORE)) db.createObjectStore(_IDB_STORE);
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+  return _idbPromise;
+}
+window.idbGet = async function(key) {
+  try {
+    const db = await _idb();
+    return await new Promise((resolve) => {
+      const tx = db.transaction(_IDB_STORE, 'readonly');
+      const req = tx.objectStore(_IDB_STORE).get(key);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => resolve(null);
+    });
+  } catch (_) { return null; }
+};
+window.idbSet = async function(key, val) {
+  try {
+    const db = await _idb();
+    await new Promise((resolve) => {
+      const tx = db.transaction(_IDB_STORE, 'readwrite');
+      tx.objectStore(_IDB_STORE).put(val, key);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => resolve();
+    });
+  } catch (_) {}
+};
+
 // ── Cache local (offline-first inspirado no Electro) ─────────────
 // Cada view chama window.cacheGet('chave') no início pra renderizar do
 // disco antes do fetch. Quando o fetch volta, chama cacheSet('chave', dados).
