@@ -1198,6 +1198,8 @@ async function _syncWithServer() {
     connect();  // WS — começa sync em tempo real
     if (window._renderActiveView) window._renderActiveView();
     _hideOfflineBanner();
+    // Quando temos GPS real, pré-cacheia área do mapa em background
+    setTimeout(_maybePrefetchTiles, 2000);
   } catch (_) {
     // Network error — modo offline (cache continua válido)
     _showOfflineBanner();
@@ -1224,6 +1226,102 @@ function _hideOfflineBanner() {
 // Re-tenta sincronizar quando o navegador detecta volta da rede
 window.addEventListener('online', () => _syncWithServer());
 window.addEventListener('offline', () => _showOfflineBanner());
+
+// ═════════════════════════════════════════════════════════
+//  PRÉ-CACHE DE TILES DE MAPA (offline)
+// ═════════════════════════════════════════════════════════
+// Baixa tiles num raio (km) ao redor do GPS atual em zooms intermediários.
+// Cada tile vai pro cache do SW automaticamente via fetch handler.
+//
+// Volumes esperados (lat ~-16°, Goiânia):
+//   zoom 11 (tile ~19km): raio 50km → ~30 tiles · ~1MB
+//   zoom 13 (tile ~4.7km): raio 50km → ~380 tiles · ~15MB
+//   zoom 15 (tile ~1.2km): raio 50km → ~6000 tiles · ~250MB ← muito
+// Default: zoom 11 + 13, raio 50km, total ~16MB.
+
+function _tilesAroundPoint(lat, lng, kmRadius, zoom) {
+  const n = Math.pow(2, zoom);
+  const latRad = lat * Math.PI / 180;
+  const xC = Math.floor((lng + 180) / 360 * n);
+  const yC = Math.floor((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2 * n);
+  const kmPerTile = 40075 * Math.cos(latRad) / n;
+  const r = Math.ceil(kmRadius / kmPerTile);
+  const tiles = [];
+  for (let dx = -r; dx <= r; dx++) {
+    for (let dy = -r; dy <= r; dy++) {
+      if (Math.sqrt(dx * dx + dy * dy) > r) continue;
+      tiles.push({ z: zoom, x: xC + dx, y: yC + dy });
+    }
+  }
+  return tiles;
+}
+
+let _tilePrefetchRunning = false;
+async function prefetchMapArea(lat, lng, kmRadius = 50, zooms = [11, 13]) {
+  if (_tilePrefetchRunning) return;
+  if (!lat || !lng) { showToast('Sem GPS ainda — abra com o carro online primeiro'); return; }
+  _tilePrefetchRunning = true;
+
+  let urls = [];
+  for (const z of zooms) {
+    for (const t of _tilesAroundPoint(lat, lng, kmRadius, z)) {
+      // Carto suporta subdomínios a/b/c/d pra paralelismo de fetch
+      const s = 'abcd'[(t.x + t.y) % 4];
+      urls.push(`https://${s}.basemaps.cartocdn.com/dark_all/${t.z}/${t.x}/${t.y}@2x.png`);
+    }
+  }
+
+  const total = urls.length;
+  const progress = window.showProgress && window.showProgress(`Baixando mapa (${total} tiles)`);
+  let done = 0, ok = 0;
+
+  // Limita a 8 em paralelo pra não saturar o link
+  const CONCURRENCY = 8;
+  async function worker() {
+    while (urls.length) {
+      const u = urls.shift();
+      if (!u) break;
+      try {
+        const r = await fetch(u, { mode: 'cors', cache: 'force-cache' });
+        if (r.ok) ok++;
+      } catch (_) {}
+      done++;
+      if (progress && done % 10 === 0) {
+        progress.set((done / total) * 100);
+        progress.label(`Mapa: ${done}/${total} tiles`);
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: CONCURRENCY }, worker));
+
+  if (progress) progress.done();
+  showToast(`✓ ${ok}/${total} tiles do mapa salvos offline`, 'ok');
+  // Marca último centro/raio pra evitar re-download em moves pequenos
+  localStorage.setItem('eco_tiles_last', JSON.stringify({
+    lat, lng, kmRadius, ts: Date.now()
+  }));
+  _tilePrefetchRunning = false;
+}
+
+// Auto-prefetch: roda 1x quando state.gps_lat estiver disponível,
+// se ainda não rodou OU se o carro andou >25km desde último prefetch.
+function _maybePrefetchTiles() {
+  if (_tilePrefetchRunning) return;
+  const lat = state.gps_lat, lng = state.gps_lng;
+  if (!lat || !lng) return;
+  const last = (() => { try { return JSON.parse(localStorage.getItem('eco_tiles_last') || 'null'); } catch (_) { return null; } })();
+  if (last) {
+    // Distância haversine
+    const R = 6371, toRad = x => x * Math.PI / 180;
+    const dLat = toRad(lat - last.lat), dLng = toRad(lng - last.lng);
+    const s = Math.sin(dLat/2)**2 + Math.cos(toRad(last.lat)) * Math.cos(toRad(lat)) * Math.sin(dLng/2)**2;
+    const km = 2 * R * Math.asin(Math.sqrt(s));
+    if (km < 25) return;  // ainda dentro da área pré-baixada
+  }
+  prefetchMapArea(lat, lng, 50, [11, 13]);
+}
+
+window.prefetchMapArea = prefetchMapArea;
 
 window.addEventListener('load', () => {
   // Atualiza tabbar-h pra usar no padding-bottom do body
