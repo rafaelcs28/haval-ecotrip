@@ -33673,8 +33673,9 @@ async function openMapFull(id) {
   if (!t.route || !t.route.length) {
     const tk = localStorage.getItem('bridge_token');
     if (tk) {
+      const toastEl = document.getElementById('toast');
+      if (toastEl) { toastEl.textContent = 'Carregando trajeto…'; toastEl.classList.add('show'); }
       try {
-        showToast('Carregando trajeto…');
         const r = await fetch('/api/telemetry/' + encodeURIComponent(t.tripId || t.id), {
           headers: { 'Authorization': 'Bearer ' + tk }
         });
@@ -33687,6 +33688,11 @@ async function openMapFull(id) {
             .map(s => [s.lat, s.lng]);
         }
       } catch (e) { console.warn('Telemetria falhou:', e); }
+      // Remove o toast assim que o fetch retorna — sem esperar 2.2s do timeout
+      if (toastEl) {
+        clearTimeout(showToast._t);
+        toastEl.classList.remove('show');
+      }
     }
   }
   if (!t.route || !t.route.length) { showToast('Sem trajeto GPS pra essa viagem'); return; }
