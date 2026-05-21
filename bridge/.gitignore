@@ -28,3 +28,4 @@ refuels.json
 telemetry_history.json
 deleted_ids.json
 radars_ignored.json
+vehicle.json

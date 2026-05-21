@@ -294,6 +294,10 @@
           <span class="map-pin-icon">📍</span>
           <span id="d-map-address" class="map-address">--</span>
           <span id="d-map-ts" class="map-ts">--</span>
+          <!-- Warning quando o carro está online publicando dados mas o GPS especificamente
+               não fixa há vários minutos (típico de resume sem preload, ou permissão Android
+               de localização negada). -->
+          <span id="d-gps-warn" style="display:none;font-size:10px;font-weight:600;margin-left:6px"></span>
         </div>
       </div>
 
@@ -445,10 +449,53 @@
               <span class="drv-rpm-inline-val" id="drv-rpm-val">--</span>
               <span class="drv-rpm-inline-unit">rpm</span>
             </div>
+            <!-- Power chip dentro do cluster — só aparece no layout Fold/tablet (≥700px).
+                 No mobile, o chip fica em .drv-top. Ambos são populados pelo mesmo render. -->
+            <div class="drv-power-cluster" id="drv-power-cluster" style="display:none">
+              <span class="drv-power-icon">⚡</span>
+              <span class="drv-power-val" id="drv-power-cluster-val">0.0 kW</span>
+            </div>
             <div class="drv-peak-row" id="drv-peak-row" style="display:none">
               <span>Máx<span class="drv-peak-val" id="drv-peak-speed">--</span></span>
               <span class="drv-peak-sep">·</span>
               <span>Pico<span class="drv-peak-val" id="drv-peak-power">--</span></span>
+            </div>
+          </div>
+        </div>
+        <!-- Card "Viagem em andamento" — só visível no Fold/tablet (≥700px) -->
+        <div class="drv-trip-card" id="drv-trip-card" style="display:none">
+          <div class="drv-trip-hdr">
+            <span class="drv-trip-ic">🚗</span>
+            <span class="drv-trip-tit">VIAGEM EM ANDAMENTO</span>
+          </div>
+          <div class="drv-trip-hero">
+            <span class="drv-trip-hero-val" id="drv-trip-dist">--</span>
+            <span class="drv-trip-hero-unit">km</span>
+          </div>
+          <div class="drv-trip-grid">
+            <div class="drv-trip-cell">
+              <div class="drv-trip-cell-val muted" id="drv-trip-time">--</div>
+              <div class="drv-trip-cell-lbl">TEMPO TOTAL</div>
+            </div>
+            <div class="drv-trip-cell">
+              <div class="drv-trip-cell-val teal" id="drv-trip-avgpwr">--</div>
+              <div class="drv-trip-cell-lbl">POT. MÉDIA</div>
+            </div>
+            <div class="drv-trip-cell">
+              <div class="drv-trip-cell-val lime" id="drv-trip-soc">--</div>
+              <div class="drv-trip-cell-lbl">SOC ATUAL</div>
+            </div>
+            <div class="drv-trip-cell">
+              <div class="drv-trip-cell-val lime" id="drv-trip-kwh">--</div>
+              <div class="drv-trip-cell-lbl">BATERIA kWh</div>
+            </div>
+            <div class="drv-trip-cell">
+              <div class="drv-trip-cell-val orange" id="drv-trip-fuel">--</div>
+              <div class="drv-trip-cell-lbl">COMBUSTÍVEL L</div>
+            </div>
+            <div class="drv-trip-cell">
+              <div class="drv-trip-cell-val yellow" id="drv-trip-cost">--</div>
+              <div class="drv-trip-cell-lbl">CUSTO R$</div>
             </div>
           </div>
         </div>
@@ -906,6 +953,37 @@
         </div>
       </div>
 
+
+      <!-- ── 3b. Veículo (chassi GWM) ─────────────────────────────────────── -->
+      <div class="settings-card">
+        <div class="sc-header" onclick="toggleSection('sc-vehicle-body','sc-vehicle-btn')">
+          <span class="sc-title">🚗 Veículo</span>
+          <button id="sc-vehicle-btn" type="button" class="sc-toggle">▲</button>
+        </div>
+        <div id="sc-vehicle-body">
+          <div class="sc-box">
+            <div class="sc-box-label">Chassi do veículo (VIN)</div>
+            <div style="font-size:11px;color:#94a3b8;margin-bottom:8px;line-height:1.45">
+              Usado pelo bridge pra subscribe nos tópicos MQTT da integração GWM Brasil
+              (<code style="font-size:10px;color:#cbd5e1">gwmbrasil_&lt;chassi&gt;/+/state</code>) e mapear
+              entidades do Home Assistant. Formato esperado: <code style="font-size:10px;color:#cbd5e1">lgw + 14 alfanuméricos</code>.
+            </div>
+            <input id="vh-chassi" type="text" placeholder="lgwffva55sh931315" maxlength="17"
+              autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
+              style="width:100%;box-sizing:border-box;background:#1e293b;border:1px solid #334155;border-radius:6px;padding:8px 10px;color:#e2e8f0;font-size:14px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:0.5px;margin-bottom:8px" />
+            <div id="vh-info" style="font-size:11px;color:#64748b;margin-bottom:8px;min-height:14px"></div>
+            <button type="button" onclick="saveVehicleChassi()"
+              style="width:100%;background:#1e40af;border:none;border-radius:6px;padding:10px;color:#e2e8f0;font-size:13px;cursor:pointer">
+              Salvar
+            </button>
+            <div id="vh-status" style="font-size:12px;color:#94a3b8;margin-top:8px;min-height:18px"></div>
+            <button type="button" id="vh-restart-btn" onclick="adminRestart()"
+              style="display:none;width:100%;margin-top:8px;background:#7c2d12;border:none;border-radius:6px;padding:10px;color:#fed7aa;font-size:13px;cursor:pointer">
+              🔄 Reiniciar bridge agora para aplicar
+            </button>
+          </div>
+        </div>
+      </div>
 
       <!-- ── 4. Servidor ───────────────────────────────────────────────────── -->
       <div class="settings-card">

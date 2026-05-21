@@ -1778,6 +1778,81 @@ html, body {
 }
 .drv-peak-sep { opacity: 0.4; }
 
+/* Chip de potência dentro do cluster (Fold/tablet ≥700px) — escondido por padrão.
+   No layout estreito o chip fica em .drv-top; aqui aparece embaixo do RPM. */
+.drv-power-cluster {
+  margin-top: 4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #22d3ee;
+}
+.drv-power-cluster .drv-power-icon { font-size: 12px; }
+.drv-power-cluster .drv-power-val { font-variant-numeric: tabular-nums; }
+.drv-power-cluster.regen { color: #39FF88; }
+.drv-power-cluster.charging { color: #fbbf24; }
+
+/* Card "Viagem em andamento" — só visível em ≥700px (Fold aberto/tablet) */
+.drv-trip-card {
+  background: rgba(12, 16, 25, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.drv-trip-hdr {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  letter-spacing: 1.5px;
+  color: var(--muted);
+}
+.drv-trip-tit { font-weight: 700; }
+.drv-trip-hero {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.drv-trip-hero-val {
+  font-size: 36px;
+  font-weight: 200;
+  letter-spacing: -1px;
+  color: #EEF4FF;
+  font-variant-numeric: tabular-nums;
+}
+.drv-trip-hero-unit { font-size: 13px; color: var(--muted); }
+.drv-trip-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 10px;
+}
+.drv-trip-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.drv-trip-cell-val {
+  font-size: 15px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.drv-trip-cell-val.teal { color: #22d3ee; }
+.drv-trip-cell-val.lime { color: #39FF88; }
+.drv-trip-cell-val.orange { color: #fb923c; }
+.drv-trip-cell-val.yellow { color: #fbbf24; }
+.drv-trip-cell-val.muted { color: #cbd5e1; }
+.drv-trip-cell-lbl {
+  font-size: 9px;
+  letter-spacing: 1px;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+
 /* Gráfico de potência (30s rolling) */
 .drv-chart-wrap {
   display: flex;
@@ -2154,15 +2229,13 @@ html, body {
   /* Habilita labels nos botões da tab bar (mais espaço disponível) */
   .tab-label { display: block; }
 
-  /* Painéis com lista vertical de cards → grid 2 col */
-  #panel-dash.active,
-  #panel-charges.active,
-  #panel-auto.active,
+  /* Painéis com lista vertical de cards → grid 2 col.
+     panel-charges/auto/logs NÃO entram aqui — eles têm um único filho contêiner
+     (`*-list`); o grid vai dentro desse contêiner (regras logo abaixo). */
   #panel-stats.active,
   #panel-actions.active,
   #panel-events.active,
-  #panel-maint.active,
-  #panel-logs.active {
+  #panel-maint.active {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 12px;
@@ -2172,22 +2245,139 @@ html, body {
     width: 100%;
   }
 
-  /* Cards "grandes" / "informativos" que ficam melhor full-width */
-  #panel-dash #d-car-card,
-  #panel-dash #d-map-card,
-  #panel-dash #d-alerts-card,
-  #panel-dash #auto-backup-banner,
-  #panel-charges .card-title,
-  #panel-auto .card-title,
   #panel-stats > div:first-child {
     grid-column: 1 / -1;
   }
 
-  /* Drive (cluster) e Conforto: centraliza com max-width — gauges não escalam bem */
-  #panel-drive.active,
+  /* ── Posto (Recargas + Abastecimentos) e Viagens ──
+     Os panels têm 1 único filho contêiner (#charges-list / #auto-list) com
+     filtros + cards. Grid vai no contêiner; filtros/empty ocupam linha cheia. */
+  #panel-charges.active,
+  #panel-auto.active {
+    max-width: 1400px;
+    margin: 0 auto;
+    width: 100%;
+  }
+  #charges-list,
+  #auto-list {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    align-content: start;
+  }
+  #charges-list > .filter-chips,
+  #charges-list > .empty,
+  #charges-list > .geo-loading,
+  #charges-list > .card-title,
+  #auto-list > .filter-chips,
+  #auto-list > .empty,
+  #auto-list > .geo-loading,
+  #auto-list > .card-title {
+    grid-column: 1 / -1;
+  }
+  /* Wrapper inline do chip "⚠️ Multa" no panel-auto (div com style margin-top) */
+  #auto-list > div:not(.trip-item):not(.filter-chips):not(.empty):not(.geo-loading) {
+    grid-column: 1 / -1;
+  }
+
+  /* ── Logs: lista cronológica agrupada por dia → não vai pra grid.
+     Centraliza com max-width pra não ficar uma linha gigante atravessando a
+     tela toda do Fold aberto. */
+  #panel-logs.active {
+    max-width: 820px;
+    margin: 0 auto;
+  }
+
+  /* ── Dash responsivo (Fold aberto / tablet) — grid 12-col ──
+     Ordem do DOM ≠ ordem visual (cada card tem visibilidade controlada por JS).
+     Linhas:
+       L1: alerts (full)            ← + auto-backup-banner se visível
+       L2: carro (7) + bfc (5)
+       L3: viagem (8) + consumo (4)
+       L4: manutenção (4) + mapa (8) */
+  #panel-dash.active {
+    display: grid;
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    gap: 12px;
+    align-content: start;
+    align-items: start;
+    max-width: 1400px;
+    margin: 0 auto;
+    width: 100%;
+  }
+  /* Auto-backup banner: full-width, antes de tudo */
+  #panel-dash #auto-backup-banner {
+    grid-column: 1 / -1;
+    order: 0;
+  }
+  #panel-dash #d-alerts-card  { grid-column: 1 / -1; order: 1; }
+  #panel-dash #d-car-card     { grid-column: span 7; order: 2; }
+  #panel-dash #d-bfc-card     { grid-column: span 5; order: 3; }
+  #panel-dash #d-curtrip-card { grid-column: span 8; order: 4; }
+  #panel-dash #d-roll-card    { grid-column: span 4; order: 5; }
+  #panel-dash #d-maint-card   { grid-column: span 4; order: 6; }
+  #panel-dash #d-map-card     { grid-column: span 8; order: 7; }
+
+  /* No card de viagem (agora span-8 ≈465px), as 6 células cabem em 1 linha */
+  #panel-dash #d-curtrip-card .trip-grid-6 {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+
+  /* Conforto: centraliza com max-width — controles não escalam bem */
   #panel-comfort.active {
     max-width: 900px;
     margin: 0 auto;
+  }
+
+  /* ── Drive responsivo (Fold aberto / tablet) ──
+     Layout: 2 colunas. Esquerda = cluster + card "Viagem em andamento".
+     Direita = chart, stats e footer. Mapa permanece de fundo (absolute). */
+  #panel-drive.active {
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+  #panel-drive .drv-hud {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-rows: auto auto 1fr auto;
+    gap: 14px 18px;
+    align-items: start;
+  }
+  /* Header (gear): full-width, mas escondemos o power-chip do topo —
+     ele vai aparecer abaixo do RPM dentro do cluster. */
+  #panel-drive .drv-top {
+    grid-column: 1 / -1;
+  }
+  #panel-drive .drv-top .drv-power-chip { display: none !important; }
+  /* Mostra o chip dentro do cluster */
+  #panel-drive .drv-power-cluster { display: flex !important; }
+  /* Cluster (speed gauge) à esquerda */
+  #panel-drive .drv-speed-wrap {
+    grid-column: 1 / 2;
+    grid-row: 2 / 3;
+  }
+  /* Card "Viagem em andamento" embaixo do cluster, à esquerda */
+  #panel-drive .drv-trip-card {
+    display: flex !important;
+    grid-column: 1 / 2;
+    grid-row: 3 / 4;
+  }
+  /* Chart na direita, alinhado ao topo do cluster */
+  #panel-drive .drv-chart-wrap {
+    grid-column: 2 / 3;
+    grid-row: 2 / 3;
+    align-self: start;
+  }
+  /* Stats na direita, abaixo do chart */
+  #panel-drive .drv-stats {
+    grid-column: 2 / 3;
+    grid-row: 3 / 4;
+    align-self: start;
+  }
+  /* Footer full-width na base */
+  #panel-drive .drv-footer {
+    grid-column: 1 / -1;
+    grid-row: 4 / 5;
   }
 
   /* Tab bar: aumenta área tocável quando há espaço */
@@ -2198,13 +2388,9 @@ html, body {
 
 /* ── Tela muito larga (Fold em landscape, tablet horizontal) ───────────────── */
 @media (min-width: 1100px) {
-  #panel-dash.active,
+  /* Dash já está em grid 12-col em ≥700px — mantém os mesmos spans, só
+     ganha mais respiro pelo max-width: 1400px do container. */
   #panel-stats.active {
     grid-template-columns: 1fr 1fr 1fr;
-  }
-  /* Mapa ainda full-width pra acomodar a visualização */
-  #panel-dash #d-map-card,
-  #panel-dash #d-alerts-card {
-    grid-column: 1 / -1;
   }
 }

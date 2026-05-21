@@ -66,9 +66,13 @@ Pra rodar funcional, no mínimo:
 MQTT_HOST=mqtt://192.168.X.X       # IP do seu broker
 MQTT_USER=usuario_mqtt              # (se broker requer auth)
 MQTT_PASS=senha_mqtt
-GWM_CHASSI=lgwxxxxxxxxxxx           # SEU chassi em minúsculas
 BRIDGE_TOKEN=senha_forte_aqui       # protege a PWA
 ```
+
+O **chassi do veículo** (GWM_CHASSI) pode ser definido aqui no `.env` (legado)
+ou — preferido — configurado pela PWA depois de logar:
+**Configurações → 🚗 Veículo → digita o chassi → Salvar → Reiniciar bridge**.
+O bridge grava em `vehicle.json` (que tem precedência sobre o `.env`).
 
 Tudo o resto é opcional ou tem default sensato.
 
@@ -123,6 +127,7 @@ Tudo em arquivos JSON dentro de `bridge/`:
 | `radars_ignored.json` | Radares marcados como inexistentes |
 | `deleted_ids.json` | Tombstones de deleção |
 | `auth.json` | Secret TOTP + códigos backup (se 2FA ativo) |
+| `vehicle.json` | Chassi do veículo (editável via UI · sobrescreve `.env`) |
 
 Backup completo: PWA → Settings → "Backup completo (servidor)" gera um JSON único com tudo. Restore via mesmo painel.
 
@@ -149,7 +154,8 @@ curl -X POST http://localhost:3000/api/radars/refresh \
 
 ## Troubleshooting
 
-**"GWM_CHASSI não configurado"** no boot → adicione no .env e reinicie.
+**"Chassi do veículo não configurado"** no boot → configure pela PWA em
+Configurações → Veículo (preferido), ou adicione `GWM_CHASSI` no .env e reinicie.
 
 **MQTT não conecta** → verifica `MQTT_HOST`, firewall, e se o broker aceita conexões da rede do bridge.
 

@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_BUILD = 'b164';   // bump a cada deploy para confirmar versão no admin
+const APP_BUILD = 'b172';   // bump a cada deploy para confirmar versão no admin
 
 // ── Estado local ──────────────────────────────────────────────────────────────
 let state = {};
@@ -2019,8 +2019,31 @@ function renderDash() {
   // Mapa GPS — atualiza live a cada nova posição recebida via WebSocket
   if (s.gps_lat && s.gps_lng) updateDashMap(s.gps_lat, s.gps_lng, s.gps_ts, s.speed_kmh || 0);
 
+  _updateGpsHealthWarn(s);
   renderAlerts(s);
   renderTripCard(s, engOn);
+}
+
+// Avisa quando o carro está publicando dados (lock/door/engine/etc) mas o GPS
+// especificamente não traz fix há >3min. Sintoma típico:
+//   - resume sem preload de samples (bug do APK que deleta arquivo pós-sync)
+//   - permissão de localização revogada após reinstalar Shizuku
+//   - garagem subsolo prolongada (acima de 3min)
+function _updateGpsHealthWarn(s) {
+  const el = document.getElementById('d-gps-warn');
+  if (!el) return;
+  const now = Date.now();
+  const gpsAge    = s.gps_ts          ? (now - s.gps_ts)          / 60000 : Infinity;
+  const updateAge = s.last_update_ms  ? (now - s.last_update_ms)  / 60000 : Infinity;
+  const carOnline = updateAge < 5;        // dados gerais chegando há <5min
+  const gpsStale  = gpsAge > 3;           // sem GPS válido há >3min
+  if (carOnline && gpsStale) {
+    el.style.display = '';
+    el.textContent   = `⚠️ GPS sem fix há ${Math.round(gpsAge)} min`;
+    el.style.color   = gpsAge > 10 ? '#f87171' : '#fbbf24';
+  } else {
+    el.style.display = 'none';
+  }
 }
 
 // ── Cards de viagem — desde última partida + viagem atual/última ─────────────
@@ -3317,7 +3340,7 @@ function updateDashMap(lat, lng, ts, speed) {
           ].filter(Boolean);
           const label = parts.length ? parts.join(', ')
                       : (geo.display_name || '').split(',').slice(0, 2).join(',').trim();
-          setText('d-map-address', label);
+          setHTML('d-map-address', _addressWithKnownPlace(lat, lng, label));
         })
         .catch(() => {});
     }, 2000);  // debounce 2s para não spammar Nominatim
@@ -6085,13 +6108,75 @@ window.unignoreRadar = async function(radarId) {
   refreshRadarsSection();
 };
 
-// Atualiza seções 2FA + Radares quando entra no painel Admin
+// ── Veículo (chassi GWM) ─────────────────────────────────────────────────────
+async function loadVehicleConfig() {
+  const input    = document.getElementById('vh-chassi');
+  const infoEl   = document.getElementById('vh-info');
+  const restart  = document.getElementById('vh-restart-btn');
+  if (!input) return;
+  try {
+    const v = await apiFetch('/api/vehicle').then(r => r.json());
+    if (v.active && !input.value) input.value = v.active;
+    const src = v.active_source === 'file' ? 'vehicle.json' :
+                v.active_source === 'env'  ? '.env (legado)' : '—';
+    infoEl.textContent = v.active
+      ? `Em uso: ${v.active.toUpperCase()} · fonte: ${src}`
+      : 'Nenhum chassi configurado. Bridge sem integração GWM.';
+    restart.style.display = v.needs_restart ? '' : 'none';
+  } catch (_) {
+    infoEl.textContent = '';
+  }
+}
+
+window.saveVehicleChassi = async function() {
+  const input    = document.getElementById('vh-chassi');
+  const statusEl = document.getElementById('vh-status');
+  const restart  = document.getElementById('vh-restart-btn');
+  const raw = (input.value || '').toLowerCase().trim();
+  if (!/^lgw[a-z0-9]{14}$/.test(raw)) {
+    statusEl.style.color = '#f87171';
+    statusEl.textContent = '✗ Formato inválido. Esperado: lgw + 14 alfanuméricos.';
+    return;
+  }
+  statusEl.style.color = '#94a3b8';
+  statusEl.textContent = '⏳ Salvando…';
+  try {
+    const r = await apiFetch('/api/vehicle', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chassi: raw }),
+    });
+    const d = await r.json();
+    if (!r.ok || !d.ok) {
+      statusEl.style.color = '#f87171';
+      statusEl.textContent = '✗ ' + (d.error || `HTTP ${r.status}`);
+      return;
+    }
+    if (d.needs_restart) {
+      statusEl.style.color = '#fbbf24';
+      statusEl.textContent = '✓ Salvo. Reinicie o bridge para aplicar.';
+      restart.style.display = '';
+    } else {
+      statusEl.style.color = '#4ade80';
+      statusEl.textContent = '✓ Salvo. Sem mudanças no chassi ativo.';
+      restart.style.display = 'none';
+    }
+  } catch (e) {
+    if (e.message !== 'unauthorized') {
+      statusEl.style.color = '#f87171';
+      statusEl.textContent = '✗ ' + e.message;
+    }
+  }
+};
+
+// Atualiza seções 2FA + Radares + Veículo quando entra no painel Admin
 document.addEventListener('DOMContentLoaded', () => {
   const adminTab = document.querySelector('.tab[data-panel="admin"]');
   if (adminTab) {
     adminTab.addEventListener('click', () => setTimeout(() => {
       refresh2faSection();
       refreshRadarsSection();
+      loadVehicleConfig();
     }, 100));
   }
 });
@@ -6501,6 +6586,63 @@ async function loadKnownPlaces() {
     if (r.ok) _kpData = await r.json();
   } catch (_) {}   // mantém _kpData anterior se rede falhar
   _renderKnownPlacesList();
+  // Re-renderiza o address do dash + drive (caso o reverse geocoding já tenha
+  // rolado antes dos known_places carregarem — sem isso o nome do local não
+  // aparece até a próxima atualização de GPS).
+  _refreshAddressLabels();
+}
+
+// Re-renderiza as labels de endereço usando o cache atual de _kpData.
+// Chamada após loadKnownPlaces e quando o user edita/remove um local.
+function _refreshAddressLabels() {
+  const lat = state?.gps_lat, lng = state?.gps_lng;
+  if (!lat || !lng) return;
+  // Dash map: pega o texto atual (sem nome), reaplica com o nome
+  const mapAddrEl = document.getElementById('d-map-address');
+  if (mapAddrEl) {
+    // Remove qualquer <strong>...</strong> · prefixo prévio pra recompor
+    const plainAddr = mapAddrEl.textContent.replace(/^.+? · /, '').trim();
+    if (plainAddr && plainAddr !== '--') {
+      setHTML('d-map-address', _addressWithKnownPlace(lat, lng, plainAddr));
+    }
+  }
+  // Drive: idem
+  const drvAddrEl = document.getElementById('drv-address');
+  if (drvAddrEl && state?.current_address) {
+    setHTML('drv-address', _addressWithKnownPlace(lat, lng, state.current_address));
+  }
+}
+
+// Acha o local conhecido mais próximo dentro do raio. Retorna o objeto ou null.
+// Em caso de overlap (raros), escolhe o de menor raio (mais específico).
+function _findKnownPlace(lat, lng) {
+  if (!_kpData || !_kpData.length || !lat || !lng) return null;
+  const R = 6371000, toRad = d => d * Math.PI / 180;
+  let best = null;
+  for (const p of _kpData) {
+    if (!p.lat || !p.lng) continue;
+    const dLat = toRad(p.lat - lat), dLng = toRad(p.lng - lng);
+    const la1 = toRad(lat), la2 = toRad(p.lat);
+    const a = Math.sin(dLat/2)**2 + Math.cos(la1)*Math.cos(la2)*Math.sin(dLng/2)**2;
+    const dist = 2 * R * Math.asin(Math.sqrt(a));
+    const radius = p.radius_m || 200;
+    if (dist <= radius) {
+      if (!best || (best.radius_m || 200) > radius) best = p;
+    }
+  }
+  return best;
+}
+
+// Formata endereço com prefixo "📍 Nome · " quando dentro de local conhecido.
+// Retorna HTML (não texto) — usa <strong> pra destacar o nome.
+function _addressWithKnownPlace(lat, lng, address) {
+  const kp = _findKnownPlace(lat, lng);
+  const safeAddr = address ? String(address).replace(/[<>]/g, '') : '--';
+  if (kp) {
+    const safeName = String(kp.name).replace(/[<>]/g, '');
+    return `<strong style="color:#39FF88">${safeName}</strong> · ${safeAddr}`;
+  }
+  return safeAddr;
 }
 
 function _renderKnownPlacesList() {
@@ -6850,24 +6992,67 @@ function renderDrivePanel() {
     }
   }
 
-  // Power chip
+  // Power chip — populado em 2 lugares: .drv-top (mobile) e .drv-power-cluster (Fold).
+  // CSS decide qual aparece via media query; o JS preenche os dois sem custo.
   const chip = document.getElementById('drv-power-chip');
   const valEl = document.getElementById('drv-power-val');
+  const chipCluster = document.getElementById('drv-power-cluster');
+  const valClusterEl = document.getElementById('drv-power-cluster-val');
   const chPow = +s.charge_power_kw || 0;
   const isCharging = s.charging_state === 'Carregando' || chPow > 0.5;
+  let powerTxt;
+  let powerCls = ''; // '' | 'regen' | 'charging'
+  if (isCharging) {
+    powerCls = 'charging';
+    powerTxt = `↓ ${chPow.toFixed(1)} kW`;
+  } else if (mp < -0.5) {
+    powerCls = 'regen';
+    powerTxt = `↺ ${Math.abs(mp).toFixed(1)} kW`;
+  } else if (Math.abs(mp) < 0.05) {
+    powerTxt = `0.0 kW`;
+  } else {
+    powerTxt = `${(mp > 0 ? '+' : '')}${mp.toFixed(1)} kW`;
+  }
   if (chip && valEl) {
     chip.classList.remove('regen', 'charging');
-    if (isCharging) {
-      chip.classList.add('charging');
-      valEl.textContent = `↓ ${chPow.toFixed(1)} kW`;
-    } else if (mp < -0.5) {
-      chip.classList.add('regen');
-      valEl.textContent = `↺ ${Math.abs(mp).toFixed(1)} kW`;
-    } else if (Math.abs(mp) < 0.05) {
-      valEl.textContent = `0.0 kW`;
-    } else {
-      valEl.textContent = `${(mp > 0 ? '+' : '')}${mp.toFixed(1)} kW`;
-    }
+    if (powerCls) chip.classList.add(powerCls);
+    valEl.textContent = powerTxt;
+  }
+  if (chipCluster && valClusterEl) {
+    chipCluster.classList.remove('regen', 'charging');
+    if (powerCls) chipCluster.classList.add(powerCls);
+    valClusterEl.textContent = powerTxt;
+  }
+
+  // Card "Viagem em andamento" — só renderiza no layout largo (CSS controla a visibilidade).
+  // Reaproveita os mesmos campos que o Dash exibe: current_trip do APK via MQTT.
+  const ct = s.current_trip;
+  if (ct && (+ct.distKm > 0 || +ct.timeSec > 0)) {
+    const tripDist = +ct.distKm || 0;
+    setText('drv-trip-dist', tripDist > 0 ? tripDist.toFixed(1) : '0,0');
+    const liveTimeSec   = (+ct.timeSec || 0);
+    const liveParkedSec = (+ct.parkedInPSec || 0) + (+ct.engineOffSec || 0);
+    const liveTotal     = liveTimeSec + liveParkedSec;
+    setText('drv-trip-time', liveTotal > 0
+      ? (liveParkedSec > 60 ? `${fmtDuration(liveTotal)} · ${fmtDuration(liveParkedSec)} pdo` : fmtDuration(liveTotal))
+      : '--');
+    const ap = +ct.avgPowerKw || 0;
+    setText('drv-trip-avgpwr', ap > 0.05 ? ap.toFixed(1) + ' kW' : '--');
+    setText('drv-trip-soc', s.soc_pct != null ? Math.round(+s.soc_pct) + '%' : '--');
+    setText('drv-trip-kwh', +ct.netKwh > 0 ? (+ct.netKwh).toFixed(2) : '--');
+    setText('drv-trip-fuel', +ct.fuelL > 0.01 ? (+ct.fuelL).toFixed(2) : '--');
+    const priceKwh = +state.price_kwh || 0;
+    const priceGas = +state.price_gas_per_l || 0;
+    const cost = (Math.max(0, +ct.netKwh || 0) * priceKwh) + ((+ct.fuelL || 0) * priceGas);
+    setText('drv-trip-cost', cost > 0.01 ? cost.toFixed(2) : '--');
+  } else {
+    setText('drv-trip-dist',   '0,0');
+    setText('drv-trip-time',   '--');
+    setText('drv-trip-avgpwr', '--');
+    setText('drv-trip-soc',    s.soc_pct != null ? Math.round(+s.soc_pct) + '%' : '--');
+    setText('drv-trip-kwh',    '--');
+    setText('drv-trip-fuel',   '--');
+    setText('drv-trip-cost',   '--');
   }
 
   // SOC + autonomia
@@ -6889,7 +7074,8 @@ function renderDrivePanel() {
   setText('drv-rolldist', rDist > 0 ? rDist.toFixed(1) : '0.0');
 
   // Endereço + temps
-  setText('drv-address', s.current_address || '--');
+  // Endereço no Drive: prefixa com nome do local conhecido se dentro do raio
+  setHTML('drv-address', _addressWithKnownPlace(s.gps_lat, s.gps_lng, s.current_address || '--'));
   setText('drv-temp-out', s.outside_temp != null ? (+s.outside_temp).toFixed(1) : '--');
   setText('drv-temp-in',  s.inside_temp  != null ? (+s.inside_temp).toFixed(1)  : '--');
 

@@ -20,10 +20,30 @@ const MQTT_PREFIX    = process.env.MQTT_PREFIX || 'haval/ecotrip';
 const PORT           = parseInt(process.env.PORT || '3000', 10);
 // Integração GWM Brasil — publica direto via MQTT (sem passar pelo app).
 // Bridge subscribe nesses tópicos pra ter estado confiável de body/lock/etc.
-const GWM_CHASSI       = (process.env.GWM_CHASSI || '').toLowerCase();
+//
+// Origem do chassi (precedência): vehicle.json (editável via UI) → .env (legacy).
+// vehicle.json vence porque é a fonte autoritativa quando o usuário configura
+// pela tela de Settings → Veículo. .env é fallback pra setups antigos.
+const VEHICLE_FILE = path.join(__dirname, 'vehicle.json');
+function _loadVehicleChassiFromFile() {
+  try {
+    if (!fs.existsSync(VEHICLE_FILE)) return '';
+    const v = JSON.parse(fs.readFileSync(VEHICLE_FILE, 'utf8'));
+    return (v && typeof v.chassi === 'string') ? v.chassi.toLowerCase().trim() : '';
+  } catch (e) {
+    console.error('Aviso: erro ao ler vehicle.json:', e.message);
+    return '';
+  }
+}
+const _chassiFromFile = _loadVehicleChassiFromFile();
+const _chassiFromEnv  = (process.env.GWM_CHASSI || '').toLowerCase().trim();
+const GWM_CHASSI       = _chassiFromFile || _chassiFromEnv;
+const GWM_CHASSI_SOURCE = _chassiFromFile ? 'file' : (_chassiFromEnv ? 'env' : 'none');
 if (!GWM_CHASSI) {
-  console.error('⚠️  GWM_CHASSI não configurado no .env — integração GWM Brasil/HA desabilitada.');
-  console.error('   Defina o chassi do carro em minúsculas (ex: GWM_CHASSI=lgwffva55sh931315)');
+  console.error('⚠️  Chassi do veículo não configurado — integração GWM Brasil/HA desabilitada.');
+  console.error('   Configure em Settings → Veículo (UI) ou via GWM_CHASSI no .env.');
+} else {
+  console.log(`✓ Chassi do veículo: ${GWM_CHASSI} (fonte: ${GWM_CHASSI_SOURCE === 'file' ? 'vehicle.json' : '.env'})`);
 }
 const GWM_TOPIC_PREFIX = `gwmbrasil_${GWM_CHASSI}`;
 
@@ -527,12 +547,22 @@ if (fs.existsSync(STATE_FILE)) {
   }
 }
 
-let stateSaveTimer = null;
+let stateSaveTimer    = null;
+let stateLastSavedAt  = 0;
 function scheduleStateSave() {
   if (stateSaveTimer) clearTimeout(stateSaveTimer);
+  // Trailing debounce de 2s, COM cap de 15s sem salvar. Durante recarga o APK
+  // publica continuamente (charge_power_kw, charge_session_kwh, etc) em janelas
+  // < 2s — sem o cap o timer era resetado pra sempre e o state.json NUNCA era
+  // persistido em disco. Em caso de crash, perdíamos pico/média da sessão.
+  const sinceLast = Date.now() - stateLastSavedAt;
+  const delay = sinceLast > 13000 ? 0 : 2000;
   stateSaveTimer = setTimeout(() => {
-    try { fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2)); } catch (_) {}
-  }, 2000); // debounce de 2s — não grava a cada mensagem MQTT individual
+    try {
+      fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
+      stateLastSavedAt = Date.now();
+    } catch (_) {}
+  }, delay);
 }
 
 // ── Histórico de recargas — persistência JSON ─────────────────────────────────
@@ -2113,6 +2143,39 @@ app.post('/api/admin/restart', (req, res) => {
   }, 500);
 });
 
+// ── Veículo (chassi GWM) ─────────────────────────────────────────────────────
+// GET retorna config ATIVA (a que o bridge subiu com) + a que está salva em
+// vehicle.json — podem divergir se o user editou mas não reiniciou.
+app.get('/api/vehicle', (req, res) => {
+  if (!adminCheckToken(req, res)) return;
+  // Re-lê o arquivo (pode ter sido alterado depois do boot)
+  const onDiskFile = _loadVehicleChassiFromFile();
+  res.json({
+    active:        GWM_CHASSI || null,
+    active_source: GWM_CHASSI_SOURCE,
+    saved_in_file: onDiskFile || null,
+    env_value:     _chassiFromEnv || null,
+    needs_restart: !!(onDiskFile && onDiskFile !== GWM_CHASSI),
+  });
+});
+
+// POST { chassi } — valida e persiste. Restart manual via /api/admin/restart.
+app.post('/api/vehicle', (req, res) => {
+  if (!adminCheckToken(req, res)) return;
+  const raw = (req.body?.chassi || '').toString().toLowerCase().trim();
+  // GWM (Haval H6) chassi padrão: lgw + 14 alfanuméricos = 17 total
+  if (!/^lgw[a-z0-9]{14}$/.test(raw)) {
+    return res.status(400).json({ error: 'Formato inválido. Esperado: lgw + 14 alfanuméricos (ex: lgwffva55sh931315)' });
+  }
+  try {
+    fs.writeFileSync(VEHICLE_FILE, JSON.stringify({ chassi: raw, updated_at: Date.now() }, null, 2));
+    const needsRestart = raw !== GWM_CHASSI;
+    res.json({ ok: true, chassi: raw, needs_restart: needsRestart });
+  } catch (e) {
+    res.status(500).json({ error: 'Falha ao gravar vehicle.json: ' + e.message });
+  }
+});
+
 app.post('/api/admin/update', (req, res) => {
   if (!adminCheckToken(req, res)) return;
   const { exec } = require('child_process');
@@ -2560,14 +2623,75 @@ app.post('/api/autotrips', (req, res) => {
 
     const filePath = path.join(AUTOTRIPS_DIR, `${safeId}.json`);
 
-    // Se a viagem já existe com samples e o novo POST tem samples vazio (sync sem telemetria),
-    // preserva os samples existentes para não apagar dados GPS de viagens anteriores.
-    let finalSamples = samples || [];
-    if (finalSamples.length === 0 && fs.existsSync(filePath)) {
+    // Merge de samples com o que já existe no arquivo. Resolve o caso clássico
+    // de RESUME no APK em que os samples antigos foram deletados localmente
+    // pós-sync (linha 1258 do TripManager.kt) — o POST do resume só traz os
+    // samples do trecho NOVO. Sem este merge, a rota visual + startLat/Lng do
+    // primeiro trecho desaparecem da viagem combinada.
+    //
+    // Estratégia: deduplica por `t` arredondado (offset em segundos relativo
+    // a startMs). Em conflito, prefere o sample NOVO (mais fresco). Os samples
+    // antigos sobrevivem nos `t` que o novo POST não cobre.
+    let existingSamples = [];
+    if (fs.existsSync(filePath)) {
       try {
         const existing = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-        if (existing.samples && existing.samples.length > 0) finalSamples = existing.samples;
+        existingSamples = existing.samples || [];
       } catch (_) {}
+    }
+
+    const newSamples = samples || [];
+    let finalSamples = newSamples;
+    let didMerge = false;
+
+    if (existingSamples.length > 0) {
+      if (newSamples.length === 0) {
+        // POST sem samples (sync metadata-only) — preserva existentes
+        finalSamples = existingSamples;
+      } else {
+        // Atenção: `t` é em segundos (offset de startMs) e múltiplos samples no
+        // mesmo segundo são comuns (tick de 500ms). Dedupe por t inteiro colapsa
+        // samples legítimos. Estratégia: comparar os RANGES de `t` dos dois sets.
+        //   - Disjuntos (typical resume): concatena e ordena
+        //   - Overlap: assume que os existentes cobrem a parte mais antiga e os
+        //     novos a mais recente; corta no maxExistingT
+        const maxExistingT = existingSamples.reduce((m, s) => Math.max(m, s.t || 0), 0);
+        const minNewT      = newSamples.reduce((m, s) => Math.min(m, s.t || 0), Infinity);
+        if (minNewT > maxExistingT) {
+          // Ranges disjuntos — apenas concatena
+          finalSamples = [...existingSamples, ...newSamples];
+        } else {
+          // Overlap — corta os existentes em maxExistingT e usa novos pra t > cutT.
+          // Em prática raro porque o APK reseta o array ao iniciar (resume traz
+          // só t a partir do retomar). Mas é defensivo.
+          finalSamples = [
+            ...existingSamples.filter(s => (s.t || 0) <= maxExistingT),
+            ...newSamples.filter(s => (s.t || 0) > maxExistingT),
+          ];
+        }
+        if (finalSamples.length > newSamples.length) {
+          didMerge = true;
+          const preserved = finalSamples.length - newSamples.length;
+          console.log(`↻ AutoTrip ${safeId}: merge — ${existingSamples.length} existentes + ${newSamples.length} novos = ${finalSamples.length} (${preserved} antigos preservados)`);
+        }
+      }
+    }
+
+    // Se o merge preservou samples antigos, recalcula start/end com o primeiro
+    // e último ponto com GPS válido — corrige o startLat/Lng que o APK enviou
+    // baseado só nos samples do trecho novo (pode estar no meio da viagem real).
+    if (didMerge) {
+      const firstGps = finalSamples.find(s => s.lat && s.lat !== 0);
+      const lastGps  = [...finalSamples].reverse().find(s => s.lat && s.lat !== 0);
+      if (firstGps && (firstGps.lat !== autoTrip.startLat || firstGps.lng !== autoTrip.startLng)) {
+        console.log(`↻ AutoTrip ${safeId}: startLat ${(+autoTrip.startLat||0).toFixed(5)},${(+autoTrip.startLng||0).toFixed(5)} → ${firstGps.lat.toFixed(5)},${firstGps.lng.toFixed(5)}`);
+        autoTrip.startLat = firstGps.lat;
+        autoTrip.startLng = firstGps.lng;
+      }
+      if (lastGps && (lastGps.lat !== autoTrip.endLat || lastGps.lng !== autoTrip.endLng)) {
+        autoTrip.endLat = lastGps.lat;
+        autoTrip.endLng = lastGps.lng;
+      }
     }
 
     // Calcula tempo e distância em modo híbrido (ICE ligado, rpm > 0)
@@ -3896,7 +4020,28 @@ function applyMqttMessage(key, value, isRetained = false) {
       }
       break;
     }
-    case 'charge_session_kwh':   state.charge_session_kwh   = num(value); break;
+    case 'charge_session_kwh': {
+      const newKwh  = num(value);
+      const oldInit = +state.charge_session_kwh_at_init || 0;
+      // Detecta nova sessão de recarga quando o transition `charging_state→Carregando`
+      // veio retained do broker (pulou o reset em 3806–3815) e o APK reiniciou seu
+      // contador. Sinal: o valor publicado cai abaixo do baseline anterior — só
+      // possível se zerou. Reseta pico/média/início pra refletir a sessão atual.
+      if (state.charging_state === 'Carregando' && newKwh + 0.3 < oldInit) {
+        console.log(`⚡ Nova sessão de recarga detectada (kwh ${newKwh.toFixed(2)} < init ${oldInit.toFixed(2)}) — resetando tracking`);
+        chargeSessionStartMs           = Date.now();
+        chargeStartSoc                 = state.soc_pct || 0;
+        state.charge_session_start_ms  = chargeSessionStartMs;
+        state.charge_start_soc_pct     = chargeStartSoc;
+        state.charge_session_kwh_at_init = 0;
+        state.charge_max_power_kw      = 0;
+        state.charge_avg_power_kw      = 0;
+        _chargeTempSamples             = [];
+        addEvent('charge_start', `Recarga iniciada · SOC: ${chargeStartSoc.toFixed(0)}%`);
+      }
+      state.charge_session_kwh = newKwh;
+      break;
+    }
     case 'charge_remaining_min': {
       const rem = num(value);
       state.charge_remaining_min = rem;
