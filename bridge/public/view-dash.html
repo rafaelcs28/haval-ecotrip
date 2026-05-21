@@ -800,12 +800,9 @@ function render(s, kpData) {
       html: '<div style="width:18px;height:18px;background:#22c55e;border:3px solid #fff;border-radius:50%;box-shadow:0 0 0 6px rgba(34,197,94,.35),0 0 0 14px rgba(34,197,94,.12),0 2px 8px rgba(0,0,0,.4);"></div>',
       iconSize: [18,18], iconAnchor: [9,9]
     }) }).addTo(map);
-    // Centra o pin na metade superior da tela (acima do bottom sheet)
-    const sheet = document.querySelector('.bottom-sheet');
-    const sheetH = sheet ? sheet.offsetHeight : 0;
-    map.setView(pos, map.getZoom() || 16, { animate: true });
-    // Empurra o pin pra cima: positivo em Y = mundo move pra cima = pin sobe na tela
-    if (sheetH > 0) map.panBy([0, sheetH / 2], { animate: false });
+    // Centra o pin na METADE SUPERIOR da tela quando o bottom-sheet está expandido.
+    // Quando colapsado: centro absoluto da viewport. Usa rAF + reflow garantido.
+    _centerMapOnVisibleArea(pos);
     currentKp = _findKp(kpData, s.gps_lat, s.gps_lng);
     updateAddress(s.gps_lat, s.gps_lng);
     renderPlace(s.gps_lat, s.gps_lng);
@@ -994,15 +991,33 @@ function renderCarLayers(s, charging) {
 function toggleSheet() {
   const sheet = document.getElementById('bottom-sheet');
   sheet.classList.toggle('collapsed');
-  // Re-centraliza o pin no mapa após o sheet mudar de tamanho
+  // Re-centraliza o pin após a transição (300ms da animação)
   setTimeout(() => {
     if (!map || !marker) return;
-    const pos = marker.getLatLng();
-    const sheetH = sheet.classList.contains('collapsed') ? 0 : sheet.offsetHeight;
+    _centerMapOnVisibleArea(marker.getLatLng());
+  }, 310);
+}
+
+// Centraliza o pin do carro na ÁREA VISÍVEL do mapa.
+// - Sheet expandido: pin no centro da metade superior (acima do sheet)
+// - Sheet colapsado: pin no centro absoluto da viewport
+// Usa rAF + invalidateSize() pra garantir que o layout já foi calculado.
+function _centerMapOnVisibleArea(pos) {
+  if (!map) return;
+  // Aguarda o próximo frame pra ter layout sólido
+  requestAnimationFrame(() => {
     map.invalidateSize();
-    map.setView(pos, map.getZoom(), { animate: true });
-    if (sheetH > 0) map.panBy([0, sheetH / 2], { animate: false });
-  }, 280);
+    const sheet = document.getElementById('bottom-sheet');
+    const collapsed = sheet?.classList.contains('collapsed');
+    const sheetH = (sheet && !collapsed) ? sheet.offsetHeight : 0;
+    map.setView(pos, map.getZoom() || 16, { animate: false });
+    // panBy positivo Y = mundo desloca pra baixo = pin sobe na tela
+    if (sheetH > 0) {
+      requestAnimationFrame(() => {
+        map.panBy([0, sheetH / 2], { animate: false });
+      });
+    }
+  });
 }
 
 // Mede altura da tabbar e seta CSS variable pro sheet ficar grudado
