@@ -34099,16 +34099,19 @@ window.addEventListener('resize', updateTabbarHeights);
 async function _loadDeslocData() {
   // 1. Render imediato do cache local (offline-first)
   const cached = window.cacheGet && window.cacheGet('desloc');
+  let lastStartMs = 0;
   if (cached && Array.isArray(cached.v) && cached.v.length) {
     trips.length = 0;
     trips.push(...cached.v);
+    lastStartMs = Math.max(...cached.v.map(t => +t.startMs || 0));
     renderTrips(); renderCalendar(); renderDateNav();
   }
-  // 2. Fetch em background
+  // 2. Fetch incremental (só viagens novas desde o cache)
   const tk = localStorage.getItem('bridge_token');
   if (!tk) { if (!cached) { renderTrips(); renderCalendar(); renderDateNav(); } return; }
   try {
-    const r = await fetch('/api/autotrips', { headers: { 'Authorization': 'Bearer ' + tk } });
+    const url = lastStartMs > 0 ? `/api/autotrips?since=${lastStartMs}` : '/api/autotrips';
+    const r = await fetch(url, { headers: { 'Authorization': 'Bearer ' + tk } });
     const data = await r.json();
     const apiTrips = (data.trips || data || []).map(t => ({
       id:            t.tripId || t.id,
@@ -34143,10 +34146,21 @@ async function _loadDeslocData() {
       samples:       [],   // carrega sob demanda via /api/telemetry/:tripId
       route:         [],
     }));
-    // muta array no lugar (trips é const)
-    trips.length = 0;
-    trips.push(...apiTrips);
-    window.cacheSet && window.cacheSet('desloc', apiTrips);
+    // Merge incremental: se foi fetch incremental (since>0) e tem novos, adiciona
+    if (lastStartMs > 0 && apiTrips.length) {
+      const existingIds = new Set(trips.map(t => t.tripId || t.id));
+      const onlyNew = apiTrips.filter(t => !existingIds.has(t.tripId || t.id));
+      if (onlyNew.length) {
+        // Insere no início (viagens mais novas primeiro)
+        trips.unshift(...onlyNew);
+        window.cacheSet && window.cacheSet('desloc', trips.slice());
+      }
+    } else if (lastStartMs === 0) {
+      // Fetch completo (primeira vez) — substitui tudo
+      trips.length = 0;
+      trips.push(...apiTrips);
+      window.cacheSet && window.cacheSet('desloc', apiTrips);
+    }
   } catch (e) { console.warn('Desloc: falha live', e); }
   renderTrips(); renderCalendar(); renderDateNav();
 }

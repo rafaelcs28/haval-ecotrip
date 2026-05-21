@@ -1451,18 +1451,32 @@ window.addEventListener('resize', updateTabbarHeight);
 async function _loadLogsData() {
   // 1. Render imediato do cache (offline-first)
   const cached = window.cacheGet && window.cacheGet('logs');
+  let lastTs = 0;
   if (cached && Array.isArray(cached.v) && cached.v.length) {
     allEvents = cached.v;
+    lastTs = Math.max(...cached.v.map(e => +e.ts || 0));
     renderFilters(); renderEvents();
   }
-  // 2. Fetch em background
+  // 2. Fetch incremental (só eventos novos desde o cache) + merge
   const tk = localStorage.getItem('bridge_token');
   if (!tk) { if (!cached) { renderFilters(); renderEvents(); } return; }
   try {
-    const r = await fetch('/api/events?limit=500', { headers: { 'Authorization': 'Bearer ' + tk } });
+    const url = lastTs > 0 ? `/api/events?since=${lastTs}` : '/api/events?limit=500';
+    const r = await fetch(url, { headers: { 'Authorization': 'Bearer ' + tk } });
     const list = await r.json();
     if (Array.isArray(list)) {
-      allEvents = list.map(e => ({ ...e, ts: e.ts || e.timestamp || e.timestamp_ms }));
+      const incoming = list.map(e => ({ ...e, ts: e.ts || e.timestamp || e.timestamp_ms }));
+      if (lastTs > 0 && incoming.length) {
+        // Merge incremental: prepend novos no array existente
+        const existingIds = new Set(allEvents.map(e => e.id || e.ts));
+        const onlyNew = incoming.filter(e => !existingIds.has(e.id || e.ts));
+        if (onlyNew.length) {
+          allEvents = [...onlyNew, ...allEvents];
+          if (allEvents.length > 1000) allEvents.length = 1000;
+        }
+      } else {
+        allEvents = incoming;
+      }
       window.cacheSet && window.cacheSet('logs', allEvents);
     }
   } catch (e) { console.warn('Logs: falha live', e); }

@@ -1381,18 +1381,21 @@ window.addEventListener('resize', updateTabbarHeights);
 async function _loadPostoData() {
   // 1. Render imediato do cache local (offline-first)
   const cached = window.cacheGet && window.cacheGet('posto');
+  let lastTs = 0;
   if (cached && Array.isArray(cached.v) && cached.v.length) {
     SNAPSHOT.items = cached.v;
+    lastTs = Math.max(...cached.v.map(i => +i.ts || 0));
     renderEntries(); renderCalendar(); renderDateNav();
   }
-  // 2. Fetch em background pra atualizar
+  // 2. Fetch incremental (charges + refuels novos desde o cache)
   const tk = localStorage.getItem('bridge_token');
   if (!tk) { if (!cached) { renderEntries(); renderCalendar(); renderDateNav(); } return; }
   const h = { 'Authorization': 'Bearer ' + tk };
   try {
+    const sinceQ = lastTs > 0 ? '?since=' + lastTs : '';
     const [chRaw, rfRaw] = await Promise.all([
-      fetch('/api/charges', { headers: h }).then(r => r.json()).catch(() => []),
-      fetch('/api/refuels', { headers: h }).then(r => r.json()).catch(() => []),
+      fetch('/api/charges' + sinceQ, { headers: h }).then(r => r.json()).catch(() => []),
+      fetch('/api/refuels' + sinceQ, { headers: h }).then(r => r.json()).catch(() => []),
     ]);
     const charges = (Array.isArray(chRaw) ? chRaw : (chRaw.charges || [])).map(c => ({
       id: c.timestamp_ms || c.ts,
@@ -1421,7 +1424,15 @@ async function _loadPostoData() {
       odometer_km: r.odometer_km,
       location: r.location_name ? { name: r.location_name } : null,
     }));
-    SNAPSHOT.items = [...charges, ...refuels].sort((a, b) => b.ts - a.ts);
+    const incoming = [...charges, ...refuels].sort((a, b) => b.ts - a.ts);
+    if (lastTs > 0 && incoming.length) {
+      // Merge incremental: adiciona/atualiza, deduplica por (id+type)
+      const byKey = new Map(SNAPSHOT.items.map(i => [i.type + ':' + i.id, i]));
+      for (const item of incoming) byKey.set(item.type + ':' + item.id, item);
+      SNAPSHOT.items = [...byKey.values()].sort((a, b) => b.ts - a.ts);
+    } else if (lastTs === 0) {
+      SNAPSHOT.items = incoming;
+    }
     window.cacheSet && window.cacheSet('posto', SNAPSHOT.items);
   } catch (e) { console.warn('Posto: falha ao carregar live', e); }
   renderEntries(); renderCalendar(); renderDateNav();

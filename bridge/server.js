@@ -1898,9 +1898,15 @@ app.patch('/api/maintenance/history/:id', (req, res) => {
 });
 
 // ── Abastecimentos ──────────────────────────────────────────────────────────
-app.get('/api/refuels', (_req, res) => {
+app.get('/api/refuels', (req, res) => {
+  const since = parseInt(req.query.since || '0', 10);
+  const all = [...refuels].sort((a, b) => (b.timestamp_ms || 0) - (a.timestamp_ms || 0));
+  // Suporta fetch incremental: ?since=ts retorna só registros novos/editados após o ts
+  const filtered = since > 0
+    ? all.filter(r => (r.timestamp_ms || 0) > since || (r._updated_ms || 0) > since)
+    : all;
   res.json({
-    refuels: [...refuels].sort((a, b) => (b.timestamp_ms || 0) - (a.timestamp_ms || 0)),
+    refuels: filtered,
     tank_avg_price_per_l: state.tank_avg_price_per_l || 0,
     fuel_l_current: +state.fuel_l || 0,
     tank_capacity_l: TANK_CAPACITY_L,

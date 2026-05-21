@@ -170,6 +170,36 @@ input { font-family: inherit; }
 .view.active { display: block; animation: fadeIn .2s ease; }
 @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 
+/* ── Banner "nova versão disponível" ─────────────────────── */
+#update-banner {
+  position: fixed; left: 12px; right: 12px;
+  top: calc(env(safe-area-inset-top) + 60px);
+  z-index: 30;
+  background: linear-gradient(135deg, rgba(34,197,94,.18), rgba(34,197,94,.08));
+  border: 1px solid rgba(34,197,94,.4);
+  border-radius: 14px;
+  padding: 10px 12px;
+  display: flex; align-items: center; gap: 10px;
+  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  box-shadow: 0 8px 24px rgba(0,0,0,.4);
+  animation: ubSlide .25s ease;
+}
+@keyframes ubSlide { from { transform: translateY(-16px); opacity: 0; } to { transform: none; opacity: 1; } }
+#update-banner .ub-ic { font-size: 22px; flex-shrink: 0; }
+#update-banner .ub-text { flex: 1; min-width: 0; }
+#update-banner .ub-title { font-size: 13px; font-weight: 700; color: var(--text); line-height: 1.2; }
+#update-banner .ub-sub { font-size: 10px; color: var(--hint); margin-top: 2px; }
+#update-banner .ub-btn {
+  background: var(--green); color: #000;
+  border: none; border-radius: 8px;
+  padding: 7px 12px; font-size: 12px; font-weight: 700;
+  flex-shrink: 0;
+}
+#update-banner .ub-close {
+  background: none; border: none; color: var(--muted);
+  padding: 4px 6px; font-size: 14px; flex-shrink: 0;
+}
+
 /* ── Notification center overlay ─────────────────────────── */
 #notif-overlay {
   position: fixed; inset: 0; z-index: 90;
@@ -332,6 +362,17 @@ input { font-family: inherit; }
 
 <!-- ──────────────────────── TOAST STACK ──────────────────────── -->
 <div id="toast-stack"></div>
+
+<!-- ──────────────────────── BANNER NOVA VERSÃO ──────────────────────── -->
+<div id="update-banner" style="display:none">
+  <span class="ub-ic">⬆️</span>
+  <div class="ub-text">
+    <div class="ub-title">Nova versão disponível</div>
+    <div class="ub-sub" id="ub-sub">…</div>
+  </div>
+  <button class="ub-btn" onclick="hardRefresh()">Atualizar</button>
+  <button class="ub-close" onclick="dismissUpdateBanner()" title="Dispensar">✕</button>
+</div>
 
 <!-- ──────────────────────── NOTIF OVERLAY ──────────────────────── -->
 <div id="notif-overlay" style="display:none">
@@ -746,10 +787,48 @@ function _scheduleRender() {
   });
 }
 
+// Banner "nova versão" — dispara quando state.bridge_version ou car_app_version
+// muda em relação ao último visto (gravado em localStorage)
+function _checkVersionBanner() {
+  const dismissed = localStorage.getItem('eco_update_dismissed') || '';
+  const seenBridge = localStorage.getItem('eco_seen_bridge_ver') || '';
+  const seenApk = localStorage.getItem('eco_seen_apk_ver') || '';
+  const curBridge = state.bridge_version || '';
+  const curApk = state.car_app_version || '';
+  if (!curBridge && !curApk) return;
+  // Primeira vez: só grava, não mostra banner
+  if (!seenBridge && !seenApk) {
+    if (curBridge) localStorage.setItem('eco_seen_bridge_ver', curBridge);
+    if (curApk) localStorage.setItem('eco_seen_apk_ver', curApk);
+    return;
+  }
+  const bridgeChanged = curBridge && seenBridge && curBridge !== seenBridge;
+  const apkChanged = curApk && seenApk && curApk !== seenApk;
+  if (!bridgeChanged && !apkChanged) return;
+  // Não mostra se o user já dispensou essa versão específica
+  const key = curBridge + '+' + curApk;
+  if (dismissed === key) return;
+  const banner = document.getElementById('update-banner');
+  if (!banner) return;
+  const parts = [];
+  if (bridgeChanged) parts.push('Bridge ' + seenBridge + ' → ' + curBridge);
+  if (apkChanged) parts.push('APK ' + seenApk + ' → ' + curApk);
+  document.getElementById('ub-sub').textContent = parts.join(' · ');
+  banner.style.display = 'flex';
+}
+
+function dismissUpdateBanner() {
+  const banner = document.getElementById('update-banner');
+  if (banner) banner.style.display = 'none';
+  const key = (state.bridge_version || '') + '+' + (state.car_app_version || '');
+  localStorage.setItem('eco_update_dismissed', key);
+}
+
 function _renderHeader() {
   // Versão do app do carro (publicada via MQTT pelo APK como car_app_version)
   const av = document.getElementById('hdr-apk-ver');
   if (state.car_app_version) av.textContent = 'v' + state.car_app_version;
+  _checkVersionBanner();
   // Status dot
   const sec = lastUpdateMs ? Math.floor((Date.now() - lastUpdateMs) / 1000) : 9999;
   if (state.car_online && sec < 30) setStatus('online');
