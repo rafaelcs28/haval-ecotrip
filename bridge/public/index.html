@@ -952,11 +952,24 @@ function dismissUpdateBanner() {
   localStorage.setItem('eco_update_dismissed', key);
 }
 
+// Throttled save do state em localStorage — escrita custosa (10-30ms no iOS).
+let _lastStateSaveMs = 0;
+function _persistState() {
+  const now = Date.now();
+  if (now - _lastStateSaveMs < 5000) return;  // máx 1x a cada 5s
+  _lastStateSaveMs = now;
+  try {
+    // Salva versão enxuta (sem arrays grandes) — só metadados/snapshot
+    localStorage.setItem('eco_state_cache', JSON.stringify(state));
+  } catch (_) {/* localStorage cheio — ignora */}
+}
+
 function _renderHeader() {
   // Versão do app do carro (publicada via MQTT pelo APK como car_app_version)
   const av = document.getElementById('hdr-apk-ver');
   if (state.car_app_version) av.textContent = 'v' + state.car_app_version;
   _checkVersionBanner();
+  _persistState();
   // Status dot
   const sec = lastUpdateMs ? Math.floor((Date.now() - lastUpdateMs) / 1000) : 9999;
   if (state.car_online && sec < 30) setStatus('online');
@@ -1145,25 +1158,72 @@ window._renderActiveView = function() {
 // ═════════════════════════════════════════════════════════
 async function bootstrap() {
   if (!bridgeToken) { showLogin(); return; }
+
+  // ─── OFFLINE-FIRST ───
+  // Mostra UI IMEDIATA com cache local. Tenta sincronizar em background.
+  // Só cai no login se o servidor explicitamente devolver 401 (token inválido).
+  // Sem rede ou servidor down: continua mostrando cache normalmente.
+
+  // 1. Restaura state do cache local pra render header rolar
+  try {
+    const cachedState = localStorage.getItem('eco_state_cache');
+    if (cachedState) state = JSON.parse(cachedState);
+  } catch (_) {}
+
+  // 2. Mostra a UI já com cache (banner offline aparece se aplicável)
+  _scheduleRender();
+  _fetchNotifCache();
+  _checkPwaVersionOnBoot();
+  switchView(activeView);
+
+  // 3. Tenta sincronizar com servidor em background — sem bloquear UI
+  _syncWithServer();
+}
+
+// Sincroniza com o bridge. Não bloqueia o boot.
+// - 200 OK: atualiza state, persiste cache, conecta WS
+// - 401: token inválido → mostra login
+// - Network error / servidor down: silencioso (continua offline)
+async function _syncWithServer() {
+  if (!bridgeToken) return;
   try {
     const r = await fetch('/api/state', {
       headers: { 'Authorization': 'Bearer ' + bridgeToken },
     });
     if (r.status === 401) { showLogin('Sessão expirada.'); return; }
-    if (!r.ok) { showLogin('Erro de conexão.'); return; }
+    if (!r.ok) return;  // 5xx ou outro: mantém modo offline silencioso
     state = await r.json();
+    try { localStorage.setItem('eco_state_cache', JSON.stringify(state)); } catch (_) {}
     _scheduleRender();
-    connect();
-    // Carrega cache de notificações pra badge aparecer imediatamente
-    _fetchNotifCache();
-    // Verifica versão do SW (banner se mudou desde o último boot)
-    _checkPwaVersionOnBoot();
-    // Restaura aba ativa
-    switchView(activeView);
+    connect();  // WS — começa sync em tempo real
+    if (window._renderActiveView) window._renderActiveView();
+    _hideOfflineBanner();
   } catch (_) {
-    showLogin('Sem conexão com o servidor.');
+    // Network error — modo offline (cache continua válido)
+    _showOfflineBanner();
   }
 }
+
+// Banner discreto "Offline · dados em cache"
+function _showOfflineBanner() {
+  let el = document.getElementById('offline-banner');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'offline-banner';
+    el.style.cssText = 'position:fixed;left:12px;right:12px;top:calc(env(safe-area-inset-top) + 60px);z-index:25;background:rgba(251,146,60,.15);border:1px solid rgba(251,146,60,.4);border-radius:10px;padding:8px 12px;font-size:12px;color:var(--orange);font-weight:600;display:flex;align-items:center;gap:8px;backdrop-filter:blur(10px);';
+    el.innerHTML = '<span>📡</span><span style="flex:1">Offline · mostrando dados em cache</span>';
+    document.body.appendChild(el);
+  }
+  el.style.display = 'flex';
+}
+function _hideOfflineBanner() {
+  const el = document.getElementById('offline-banner');
+  if (el) el.style.display = 'none';
+}
+
+// Re-tenta sincronizar quando o navegador detecta volta da rede
+window.addEventListener('online', () => _syncWithServer());
+window.addEventListener('offline', () => _showOfflineBanner());
 
 window.addEventListener('load', () => {
   // Atualiza tabbar-h pra usar no padding-bottom do body

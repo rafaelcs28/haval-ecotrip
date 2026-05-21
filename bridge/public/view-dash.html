@@ -1109,6 +1109,13 @@ window.addEventListener('resize', updateTabbarHeight);
 // Live se houver token; senão snapshot
 if (localStorage.getItem('bridge_token')) {
   useLive = true;
+  // 1. Render instantâneo do state cacheado no shell (zero rede)
+  if (window.state && Object.keys(window.state).length) {
+    try { render(window.state, SNAPSHOT.known_places); } catch (_) {}
+  } else {
+    renderSnapshot();
+  }
+  // 2. Fetch live em background (offline = continua com cache)
   renderLive();
   liveTimer = setInterval(renderLive, 5000);
 } else {
