@@ -177,6 +177,10 @@ fun ConsumptionScreen() {
     // recomposição (que criaria uma nova lista instável e poderia causar loops).
     var autoTripEntries   by remember { mutableStateOf<List<AutoTripEntry>>(emptyList()) }
     var resumableTrip     by remember { mutableStateOf<AutoTripEntry?>(null) }
+    // startMs da última viagem que o usuário dismissou ("Não") — usada pelo polling
+    // pra não fazer o banner reaparecer enquanto for a MESMA viagem retomável.
+    // Quando uma viagem nova vira retomável (startMs diferente), o banner volta.
+    var dismissedResumeStartMs by remember { mutableStateOf<Long?>(null) }
 
     // Verifica continuamente se há viagem retomável. Aparece e some sozinho conforme
     // as condições mudam (janela 60min, distância da viagem em curso, etc).
@@ -185,7 +189,10 @@ fun ConsumptionScreen() {
     LaunchedEffect(Unit) {
         delay(3_000L)
         while (true) {
-            resumableTrip = tripManager.getResumableLastTrip()
+            val candidate = tripManager.getResumableLastTrip()
+            // Ignora se o usuário já dismissou ESTA viagem específica
+            resumableTrip = if (candidate != null && candidate.startMs == dismissedResumeStartMs) null
+                            else candidate
             delay(5_000L)
         }
     }
@@ -854,12 +861,19 @@ fun ConsumptionScreen() {
                         )
                     }
                     OutlinedButton(
-                        onClick = { resumableTrip = null },
+                        onClick = {
+                            // Registra essa viagem como dismissada — o polling não vai
+                            // ressuscitar o banner enquanto for a mesma viagem retomável.
+                            dismissedResumeStartMs = last.startMs
+                            resumableTrip = null
+                        },
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = TextSecondary),
                     ) { Text("Não", fontSize = 12.sp) }
                     Button(
                         onClick = {
                             if (tripManager.resumeLastTrip()) {
+                                // Reset do dismissal — viagem foi consumida pelo resume
+                                dismissedResumeStartMs = null
                                 resumableTrip = null
                                 autoTripEntries = tripManager.getAutoTripHistory()
                             }
