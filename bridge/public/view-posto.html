@@ -1379,8 +1379,15 @@ updateTabbarHeights();
 window.addEventListener('resize', updateTabbarHeights);
 
 async function _loadPostoData() {
+  // 1. Render imediato do cache local (offline-first)
+  const cached = window.cacheGet && window.cacheGet('posto');
+  if (cached && Array.isArray(cached.v) && cached.v.length) {
+    SNAPSHOT.items = cached.v;
+    renderEntries(); renderCalendar(); renderDateNav();
+  }
+  // 2. Fetch em background pra atualizar
   const tk = localStorage.getItem('bridge_token');
-  if (!tk) { renderEntries(); renderCalendar(); renderDateNav(); return; }
+  if (!tk) { if (!cached) { renderEntries(); renderCalendar(); renderDateNav(); } return; }
   const h = { 'Authorization': 'Bearer ' + tk };
   try {
     const [chRaw, rfRaw] = await Promise.all([
@@ -1415,6 +1422,7 @@ async function _loadPostoData() {
       location: r.location_name ? { name: r.location_name } : null,
     }));
     SNAPSHOT.items = [...charges, ...refuels].sort((a, b) => b.ts - a.ts);
+    window.cacheSet && window.cacheSet('posto', SNAPSHOT.items);
   } catch (e) { console.warn('Posto: falha ao carregar live', e); }
   renderEntries(); renderCalendar(); renderDateNav();
 }

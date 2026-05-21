@@ -34097,8 +34097,16 @@ updateTabbarHeights();
 window.addEventListener('resize', updateTabbarHeights);
 
 async function _loadDeslocData() {
+  // 1. Render imediato do cache local (offline-first)
+  const cached = window.cacheGet && window.cacheGet('desloc');
+  if (cached && Array.isArray(cached.v) && cached.v.length) {
+    trips.length = 0;
+    trips.push(...cached.v);
+    renderTrips(); renderCalendar(); renderDateNav();
+  }
+  // 2. Fetch em background
   const tk = localStorage.getItem('bridge_token');
-  if (!tk) { renderTrips(); renderCalendar(); renderDateNav(); return; }
+  if (!tk) { if (!cached) { renderTrips(); renderCalendar(); renderDateNav(); } return; }
   try {
     const r = await fetch('/api/autotrips', { headers: { 'Authorization': 'Bearer ' + tk } });
     const data = await r.json();
@@ -34138,6 +34146,7 @@ async function _loadDeslocData() {
     // muta array no lugar (trips é const)
     trips.length = 0;
     trips.push(...apiTrips);
+    window.cacheSet && window.cacheSet('desloc', apiTrips);
   } catch (e) { console.warn('Desloc: falha live', e); }
   renderTrips(); renderCalendar(); renderDateNav();
 }

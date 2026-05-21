@@ -458,6 +458,32 @@ function relTime(ms) {
   return `${Math.floor(sec/86400)}d atrás`;
 }
 
+// ── Cache local (offline-first inspirado no Electro) ─────────────
+// Cada view chama window.cacheGet('chave') no início pra renderizar do
+// disco antes do fetch. Quando o fetch volta, chama cacheSet('chave', dados).
+// Render incremental cabe à view; aqui só I/O em localStorage.
+window.cacheGet = function(key) {
+  try {
+    const raw = localStorage.getItem('eco_cache_' + key);
+    if (!raw) return null;
+    const o = JSON.parse(raw);
+    return o && typeof o === 'object' ? o : null;
+  } catch (_) { return null; }
+};
+window.cacheSet = function(key, data) {
+  try {
+    localStorage.setItem('eco_cache_' + key, JSON.stringify({ v: data, ts: Date.now() }));
+  } catch (e) {
+    // localStorage cheio (>5MB no iOS) — limpa caches antigos e tenta de novo
+    try {
+      Object.keys(localStorage)
+        .filter(k => k.startsWith('eco_cache_') && k !== 'eco_cache_' + key)
+        .forEach(k => localStorage.removeItem(k));
+      localStorage.setItem('eco_cache_' + key, JSON.stringify({ v: data, ts: Date.now() }));
+    } catch (_) {}
+  }
+};
+
 function deepMerge(target, source) {
   if (!source || typeof source !== 'object') return target;
   for (const k of Object.keys(source)) {
