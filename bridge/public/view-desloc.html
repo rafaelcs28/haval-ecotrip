@@ -477,6 +477,7 @@
 
 
 
+<span id="hd-dot" style="display:none"></span>
 <div class="container">
   <div class="section-title">Deslocamentos</div>
 
@@ -33682,8 +33683,18 @@ async function openMapFull(id) {
         const data = await r.json();
         const samples = data.samples || data || [];
         if (Array.isArray(samples) && samples.length) {
-          t.samples = samples;
-          t.route = samples
+          // API retorna {spd, evKw, pwr, soc, rpm, t, lat, lng}.
+          // Timeline espera s.kw — usa pwr (potência total). Mantém spd e soc.
+          t.samples = samples.map(s => ({
+            t:   s.t,
+            lat: s.lat,
+            lng: s.lng,
+            spd: s.spd,
+            kw:  (s.pwr != null ? s.pwr : (s.evKw != null ? s.evKw : 0)),
+            soc: s.soc,
+            rpm: s.rpm,
+          }));
+          t.route = t.samples
             .filter(s => s && s.lat && s.lng)
             .map(s => [s.lat, s.lng]);
         }
