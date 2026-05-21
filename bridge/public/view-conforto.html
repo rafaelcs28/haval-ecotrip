@@ -264,12 +264,7 @@
 .seat-vent-ctrl.pending text { fill: #fbbf24 !important; }
 </style>
 
-</div>
-  <div class="right">
-    <span class="dot"></span>
-    <span class="bell">🔔</span>
-  </div>
-</div>
+
 
 <div class="container">
   <div class="section-title">Conforto</div>
@@ -590,11 +585,13 @@ function render() {
     ? `Climatização ativa · fan ${STATE.hvac_fan_speed}`
     : 'AC desligado';
 
-  // Temperaturas
-  document.getElementById('t-drv').textContent = (+STATE.hvac_driver_temp).toFixed(1).replace('.', ',');
-  document.getElementById('t-pass').textContent = (+STATE.hvac_passenger_temp).toFixed(1).replace('.', ',');
-  document.getElementById('t-in').textContent = STATE.inside_temp != null ? Math.round(STATE.inside_temp) : '--';
-  document.getElementById('t-out').textContent = STATE.outside_temp != null ? Math.round(STATE.outside_temp) : '--';
+  // Temperaturas — APK publica -1 quando carro desligado (sem leitura CAN)
+  const drv = +STATE.hvac_driver_temp;
+  const pss = +STATE.hvac_passenger_temp;
+  document.getElementById('t-drv').textContent  = (Number.isFinite(drv) && drv >= 0) ? drv.toFixed(1).replace('.', ',') : '--';
+  document.getElementById('t-pass').textContent = (Number.isFinite(pss) && pss >= 0) ? pss.toFixed(1).replace('.', ',') : '--';
+  document.getElementById('t-in').textContent  = (STATE.inside_temp  != null && +STATE.inside_temp  >= 0) ? Math.round(STATE.inside_temp)  : '--';
+  document.getElementById('t-out').textContent = (STATE.outside_temp != null && +STATE.outside_temp >= 0) ? Math.round(STATE.outside_temp) : '--';
 
   // SYNC
   document.getElementById('sync-btn').classList.toggle('on', STATE.hvac_sync_enable === '1');
@@ -606,9 +603,11 @@ function render() {
   document.getElementById('cycle-ic').textContent = recirc ? '↺' : '↪';
   document.getElementById('cycle-lbl').textContent = recirc ? 'RECIRC' : 'EXTERNO';
 
-  // FAN
-  const fan = parseInt(STATE.hvac_fan_speed, 10) || 0;
-  document.getElementById('fan-val').textContent = fan;
+  // FAN — também trata -1 do APK
+  const fanRaw = parseInt(STATE.hvac_fan_speed, 10);
+  const fan = (Number.isFinite(fanRaw) && fanRaw >= 0) ? fanRaw : 0;
+  const fanInvalid = !(Number.isFinite(fanRaw) && fanRaw >= 0);
+  document.getElementById('fan-val').textContent = fanInvalid ? '--' : fan;
   document.getElementById('fan-card').classList.toggle('off', fan === 0);
   document.querySelectorAll('#fan-bars .fan-bar').forEach((b, i) => {
     b.classList.toggle('on', i < fan);
