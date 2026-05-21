@@ -170,6 +170,16 @@
   width: 100%; height: auto; max-width: 360px; margin: 0 auto; display: block;
 }
 
+/* ── Compacto: cabe em 1 tela sem scroll ────────────────────────── */
+.conforto-tight { padding-top: 4px; }
+.conforto-tight .ac-card { padding: 10px 12px; margin-bottom: 6px; border-radius: 12px; }
+.conforto-tight .ac-power { padding: 2px 2px 4px; margin-bottom: 4px; }
+.conforto-tight .ac-temp-row { padding: 4px 0; }
+.conforto-tight .ac-aux-row { gap: 5px; padding-top: 6px; margin-top: 4px; }
+.conforto-tight .seats-card { padding: 8px 10px; margin-bottom: 6px; border-radius: 12px; }
+.conforto-tight .seats-card .ti { margin-bottom: 2px; }
+.conforto-tight .cabin-svg { max-width: 220px; max-height: 240px; }
+
 /* Estilo dos botões de ventilação nos bancos (clicáveis sobre o SVG) */
 .seat-vent-ctrl {
   cursor: pointer;
@@ -266,8 +276,7 @@
 
 
 
-<div class="container">
-  <div class="section-title">Conforto</div>
+<div class="container conforto-tight">
 
   <!-- ── Card AC principal ─────────────────────────────────────────── -->
   <div class="ac-card" id="ac-card">
@@ -338,7 +347,6 @@
   <!-- ── Card de bancos (vista superior) ───────────────────────────── -->
   <div class="seats-card">
     <div class="ti">🪑 Ventilação dos bancos</div>
-    <div class="sub">Toque no <strong>círculo verde</strong> de cada banco pra alternar a intensidade (Desligado → Fraco → Médio → Forte)</div>
     <svg class="cabin-svg" viewBox="0 0 400 540" xmlns="http://www.w3.org/2000/svg">
       <defs>
         <linearGradient id="cab-seat" x1="0" y1="0" x2="0" y2="1">
