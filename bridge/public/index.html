@@ -252,7 +252,7 @@ input { font-family: inherit; }
     <span class="logo">🚗</span>
     <div class="info">
       <div class="model">Haval H6 PHEV <span style="color:var(--muted);font-weight:500">▾</span></div>
-      <div class="ver"><span id="hdr-bridge-ver">…</span> · <span id="hdr-apk-ver">…</span></div>
+      <div class="ver"><span id="hdr-apk-ver">…</span></div>
     </div>
   </div>
   <div class="right">
@@ -633,11 +633,9 @@ function _scheduleRender() {
 }
 
 function _renderHeader() {
-  // Atualiza versão (state.bridge_version, state.car_version)
-  const bv = document.getElementById('hdr-bridge-ver');
+  // Versão do app do carro (publicada via MQTT pelo APK como car_app_version)
   const av = document.getElementById('hdr-apk-ver');
-  if (state.bridge_version) bv.textContent = 'EcoTrip v' + state.bridge_version;
-  if (state.car_version) av.textContent = 'APK v' + state.car_version;
+  if (state.car_app_version) av.textContent = 'v' + state.car_app_version;
   // Status dot
   const sec = lastUpdateMs ? Math.floor((Date.now() - lastUpdateMs) / 1000) : 9999;
   if (state.car_online && sec < 30) setStatus('online');

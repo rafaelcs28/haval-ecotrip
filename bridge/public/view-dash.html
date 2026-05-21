@@ -2,9 +2,11 @@
 /* Mapa fullscreen como background */
 .map-fullscreen {
   position: fixed; inset: 0; z-index: 0;
-  background: linear-gradient(135deg,#0c1422,#1a2942 50%,#0c1422);
+  background: #0c1422;
 }
-#map { width: 100%; height: 100%; }
+#map { width: 100%; height: 100%; background: #0c1422; }
+/* Override do bg default cinza claro do Leaflet enquanto tiles carregam */
+.leaflet-container, .leaflet-tile-pane, .leaflet-pane { background: #0c1422 !important; }
 
 /* Header flutuante no topo, glassmorphism */
 
@@ -991,27 +993,31 @@ function renderCarLayers(s, charging) {
 function toggleSheet() {
   const sheet = document.getElementById('bottom-sheet');
   sheet.classList.toggle('collapsed');
-  // Re-centraliza o pin após a transição (300ms da animação)
+  // Re-centraliza o pin após a transição (300ms da animação) — força
+  // invalidateSize porque a área visível do mapa mudou
   setTimeout(() => {
     if (!map || !marker) return;
-    _centerMapOnVisibleArea(marker.getLatLng());
+    _centerMapOnVisibleArea(marker.getLatLng(), true);
   }, 310);
 }
 
 // Centraliza o pin do carro na ÁREA VISÍVEL do mapa.
 // - Sheet expandido: pin no centro da metade superior (acima do sheet)
 // - Sheet colapsado: pin no centro absoluto da viewport
-// Usa rAF + invalidateSize() pra garantir que o layout já foi calculado.
-function _centerMapOnVisibleArea(pos) {
+// invalidateSize só na primeira chamada / quando sheet alterna — evita
+// re-fetch desnecessário dos tiles (causa daquela área cinza piscando).
+let _mapSizeInvalidated = false;
+function _centerMapOnVisibleArea(pos, forceInvalidate = false) {
   if (!map) return;
-  // Aguarda o próximo frame pra ter layout sólido
   requestAnimationFrame(() => {
-    map.invalidateSize();
+    if (!_mapSizeInvalidated || forceInvalidate) {
+      map.invalidateSize({ animate: false, pan: false });
+      _mapSizeInvalidated = true;
+    }
     const sheet = document.getElementById('bottom-sheet');
     const collapsed = sheet?.classList.contains('collapsed');
     const sheetH = (sheet && !collapsed) ? sheet.offsetHeight : 0;
     map.setView(pos, map.getZoom() || 16, { animate: false });
-    // panBy positivo Y = mundo desloca pra baixo = pin sobe na tela
     if (sheetH > 0) {
       requestAnimationFrame(() => {
         map.panBy([0, sheetH / 2], { animate: false });
