@@ -170,6 +170,72 @@ input { font-family: inherit; }
 .view.active { display: block; animation: fadeIn .2s ease; }
 @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 
+/* ── Notification center overlay ─────────────────────────── */
+#notif-overlay {
+  position: fixed; inset: 0; z-index: 90;
+  background: var(--bg);
+  display: flex; flex-direction: column;
+  padding-top: env(safe-area-inset-top);
+}
+.notif-head {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.notif-back {
+  background: none; border: none; color: var(--green);
+  font-size: 22px; padding: 4px 6px; line-height: 1;
+}
+.notif-title {
+  flex: 1; font-size: 16px; font-weight: 700; color: var(--text);
+}
+.notif-clear {
+  font-size: 11px; font-weight: 600;
+  background: rgba(248,113,113,.12);
+  border: 1px solid rgba(248,113,113,.3);
+  color: var(--red);
+  border-radius: 8px; padding: 5px 12px;
+}
+#notif-body {
+  flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch;
+  padding: 8px 16px calc(env(safe-area-inset-bottom) + 16px);
+}
+.notif-item {
+  display: flex; gap: 10px; align-items: flex-start;
+  padding: 12px 8px; border-bottom: 1px solid var(--border-soft);
+}
+.notif-item.unread {
+  background: rgba(34,197,94,.04);
+  border-radius: 8px; border-bottom-color: transparent;
+}
+.notif-item .udot {
+  width: 8px; height: 8px; border-radius: 50%; background: var(--green);
+  flex-shrink: 0; margin-top: 6px;
+}
+.notif-item .spacer { width: 8px; flex-shrink: 0; }
+.notif-item .info { flex: 1; min-width: 0; }
+.notif-item .row {
+  display: flex; align-items: baseline; gap: 8px; justify-content: space-between;
+}
+.notif-item .title {
+  font-size: 13px; font-weight: 600; color: var(--text);
+  line-height: 1.3;
+}
+.notif-item.unread .title { font-weight: 700; }
+.notif-item .when {
+  font-size: 10px; color: var(--muted);
+  white-space: nowrap; flex-shrink: 0;
+}
+.notif-item .body {
+  font-size: 11px; color: var(--hint); margin-top: 2px;
+  line-height: 1.4;
+}
+.notif-empty {
+  text-align: center; padding: 48px 16px;
+  font-size: 13px; color: var(--muted);
+}
+.notif-empty .ic { font-size: 56px; opacity: .3; display: block; margin-bottom: 8px; }
+
 /* ── Toast notifications ─────────────────────────────────── */
 #toast-stack {
   position: fixed; top: 60px; left: 50%; transform: translateX(-50%);
@@ -266,6 +332,16 @@ input { font-family: inherit; }
 
 <!-- ──────────────────────── TOAST STACK ──────────────────────── -->
 <div id="toast-stack"></div>
+
+<!-- ──────────────────────── NOTIF OVERLAY ──────────────────────── -->
+<div id="notif-overlay" style="display:none">
+  <div class="notif-head">
+    <button class="notif-back" onclick="closeNotifPanel()">←</button>
+    <span class="notif-title">🔔 Notificações</span>
+    <button class="notif-clear" onclick="clearNotifHistory()">Limpar</button>
+  </div>
+  <div id="notif-body"></div>
+</div>
 
 <!-- ──────────────────────── VIEWS ──────────────────────── -->
 <main id="views">
@@ -583,6 +659,7 @@ function connect() {
         }
         deepMerge(state, msg.data);
         _checkPendingHvacConfirm(msg.data);
+        _checkNotifBadge();
         lastUpdateMs = Date.now();
         _scheduleRender();
       } else if (msg.type === 'AUTH_ERROR') {
@@ -833,6 +910,8 @@ async function bootstrap() {
     state = await r.json();
     _scheduleRender();
     connect();
+    // Carrega cache de notificações pra badge aparecer imediatamente
+    _fetchNotifCache();
     // Restaura aba ativa
     switchView(activeView);
   } catch (_) {
@@ -854,9 +933,105 @@ function openVersionInfo() {
     `Última atualização: ${relTime(lastUpdateMs)}`;
   alert(msg);
 }
+// ═════════════════════════════════════════════════════════
+//  NOTIFICAÇÕES (central + badge)
+// ═════════════════════════════════════════════════════════
+let _notifCache = null;
+let _notifReadTs = parseInt(localStorage.getItem('notif_read_ts') || '0', 10);
+let _notifLatestSeen = 0;
+
+async function _fetchNotifCache() {
+  try {
+    _notifCache = await apiFetch('/api/push/history').then(r => r.json());
+  } catch (_) { _notifCache = _notifCache || []; }
+  _updateBellBadge();
+}
+
+function _updateBellBadge() {
+  const badge = document.getElementById('bell-badge');
+  if (!badge) return;
+  const unread = (_notifCache || []).filter(n => n.ts > _notifReadTs).length;
+  if (unread > 0) {
+    badge.textContent = unread > 9 ? '9+' : String(unread);
+    badge.style.display = '';
+  } else {
+    badge.style.display = 'none';
+  }
+}
+
+// Chamado quando WS atualiza state — detecta nova notificação via notif_latest_ts
+function _checkNotifBadge() {
+  const latest = state.notif_latest_ts || 0;
+  if (latest && latest !== _notifLatestSeen) {
+    _notifLatestSeen = latest;
+    _fetchNotifCache();
+  }
+}
+
+function _renderNotifItems(items) {
+  const body = document.getElementById('notif-body');
+  if (!body) return;
+  if (!items || !items.length) {
+    body.innerHTML = '<div class="notif-empty"><span class="ic">🔔</span>Nenhuma notificação registrada.</div>';
+    return;
+  }
+  // Mais recentes primeiro
+  const sorted = [...items].sort((a, b) => b.ts - a.ts);
+  body.innerHTML = sorted.map(n => {
+    const unread = n.ts > _notifReadTs;
+    const d  = new Date(n.ts);
+    const dd = d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+    const tt = d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    const esc = (s) => String(s || '').replace(/[<>&]/g, c => ({ '<':'&lt;','>':'&gt;','&':'&amp;' }[c]));
+    return `<div class="notif-item${unread ? ' unread' : ''}">
+      <span class="${unread ? 'udot' : 'spacer'}"></span>
+      <div class="info">
+        <div class="row">
+          <div class="title">${esc(n.title)}</div>
+          <div class="when">${dd} · ${tt}</div>
+        </div>
+        ${n.body ? `<div class="body">${esc(n.body)}</div>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
 function openNotifPanel() {
-  // TODO: integrar com /api/push/history
-  alert('Notificações (em construção)');
+  const overlay = document.getElementById('notif-overlay');
+  if (!overlay) return;
+  overlay.style.display = 'flex';
+  // Render cache imediatamente
+  if (_notifCache) _renderNotifItems(_notifCache);
+  else document.getElementById('notif-body').innerHTML =
+    '<div class="notif-empty"><div class="spin-loader"></div></div>';
+  // Re-fetch + marca como lido depois de renderizar
+  apiFetch('/api/push/history').then(r => r.json()).then(data => {
+    _notifCache = data;
+    _renderNotifItems(data);
+    _notifReadTs = Date.now();
+    localStorage.setItem('notif_read_ts', String(_notifReadTs));
+    _updateBellBadge();
+  }).catch(() => {});
+}
+
+function closeNotifPanel() {
+  const overlay = document.getElementById('notif-overlay');
+  if (overlay) overlay.style.display = 'none';
+}
+
+async function clearNotifHistory() {
+  if (!confirm('Limpar todo o histórico de notificações?')) return;
+  try {
+    await apiFetch('/api/push/history/clear', { method: 'POST' });
+    _notifCache = [];
+    _notifReadTs = Date.now();
+    localStorage.setItem('notif_read_ts', String(_notifReadTs));
+    _renderNotifItems([]);
+    _updateBellBadge();
+    showToast('Histórico limpo', 'ok');
+  } catch (_) {
+    showToast('✗ Erro ao limpar', 'err');
+  }
 }
 </script>
 
