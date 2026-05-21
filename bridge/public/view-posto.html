@@ -1391,12 +1391,16 @@ async function _loadPostoData() {
   const tk = localStorage.getItem('bridge_token');
   if (!tk) { if (!cached) { renderEntries(); renderCalendar(); renderDateNav(); } return; }
   const h = { 'Authorization': 'Bearer ' + tk };
+  // Mostra barra só quando NÃO tem cache (primeira carga real)
+  const progress = !cached && window.showProgress ? window.showProgress('Baixando recargas e abastecimentos') : null;
   try {
+    if (progress) progress.set(20);
     const sinceQ = lastTs > 0 ? '?since=' + lastTs : '';
     const [chRaw, rfRaw] = await Promise.all([
       fetch('/api/charges' + sinceQ, { headers: h }).then(r => r.json()).catch(() => []),
       fetch('/api/refuels' + sinceQ, { headers: h }).then(r => r.json()).catch(() => []),
     ]);
+    if (progress) progress.set(75);
     const charges = (Array.isArray(chRaw) ? chRaw : (chRaw.charges || [])).map(c => ({
       id: c.timestamp_ms || c.ts,
       ts: c.timestamp_ms || c.ts,
@@ -1435,6 +1439,7 @@ async function _loadPostoData() {
     }
     window.cacheSet && window.cacheSet('posto', SNAPSHOT.items);
   } catch (e) { console.warn('Posto: falha ao carregar live', e); }
+  if (progress) progress.done();
   renderEntries(); renderCalendar(); renderDateNav();
 }
 _loadPostoData();

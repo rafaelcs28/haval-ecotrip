@@ -34129,7 +34129,9 @@ async function _loadDeslocData() {
   // 2. Fetch incremental
   const tk = localStorage.getItem('bridge_token');
   if (!tk) { if (!cached) { renderTrips(); renderCalendar(); renderDateNav(); } return; }
+  const progress = !cached && window.showProgress ? window.showProgress('Baixando viagens') : null;
   try {
+    if (progress) progress.set(20);
     // Carrega lista de known-places (cacheada em window) pra resolver nomes
     if (!_kpListCache) {
       try {
@@ -34159,9 +34161,11 @@ async function _loadDeslocData() {
       renderTrips();
       window.cacheSet && window.cacheSet('desloc', trips.slice());
     }
+    if (progress) progress.set(50);
     const url = lastStartMs > 0 ? `/api/autotrips?since=${lastStartMs}` : '/api/autotrips';
     const r = await fetch(url, { headers: { 'Authorization': 'Bearer ' + tk } });
     const data = await r.json();
+    if (progress) progress.set(85);
     const apiTrips = (data.trips || data || []).map(t => ({
       id:            t.tripId || t.id,
       tripId:        t.tripId || t.id,
@@ -34211,6 +34215,7 @@ async function _loadDeslocData() {
       window.cacheSet && window.cacheSet('desloc', apiTrips);
     }
   } catch (e) { console.warn('Desloc: falha live', e); }
+  if (progress) progress.done();
   renderTrips(); renderCalendar(); renderDateNav();
 }
 _loadDeslocData();

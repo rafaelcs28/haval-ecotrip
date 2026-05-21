@@ -1460,10 +1460,13 @@ async function _loadLogsData() {
   // 2. Fetch incremental (só eventos novos desde o cache) + merge
   const tk = localStorage.getItem('bridge_token');
   if (!tk) { if (!cached) { renderFilters(); renderEvents(); } return; }
+  const progress = !cached && window.showProgress ? window.showProgress('Baixando eventos') : null;
   try {
+    if (progress) progress.set(25);
     const url = lastTs > 0 ? `/api/events?since=${lastTs}` : '/api/events?limit=500';
     const r = await fetch(url, { headers: { 'Authorization': 'Bearer ' + tk } });
     const list = await r.json();
+    if (progress) progress.set(80);
     if (Array.isArray(list)) {
       const incoming = list.map(e => ({ ...e, ts: e.ts || e.timestamp || e.timestamp_ms }));
       if (lastTs > 0 && incoming.length) {
@@ -1480,6 +1483,7 @@ async function _loadLogsData() {
       window.cacheSet && window.cacheSet('logs', allEvents);
     }
   } catch (e) { console.warn('Logs: falha live', e); }
+  if (progress) progress.done();
   renderFilters(); renderEvents();
 }
 _loadLogsData();

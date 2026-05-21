@@ -170,6 +170,31 @@ input { font-family: inherit; }
 .view.active { display: block; animation: fadeIn .2s ease; }
 @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 
+/* ── Progress bar (carregamento de dados) ────────────────── */
+#progress-bar {
+  position: fixed; left: 0; right: 0;
+  top: calc(env(safe-area-inset-top) + 56px);
+  height: 22px; z-index: 25;
+  background: rgba(20,20,20,.92);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--border);
+  overflow: hidden;
+  display: flex; align-items: center;
+}
+#progress-bar .pb-fill {
+  position: absolute; left: 0; top: 0; bottom: 0;
+  background: linear-gradient(90deg, var(--green), #34d399);
+  width: 0%;
+  transition: width .25s ease;
+  box-shadow: 0 0 8px rgba(34,197,94,.4);
+}
+#progress-bar .pb-label {
+  position: relative; z-index: 1;
+  font-size: 11px; font-weight: 600;
+  color: var(--text); margin-left: 12px;
+  text-shadow: 0 1px 2px rgba(0,0,0,.5);
+}
+
 /* ── Banner "nova versão disponível" ─────────────────────── */
 #update-banner {
   position: fixed; left: 12px; right: 12px;
@@ -359,6 +384,9 @@ input { font-family: inherit; }
     <button class="bell" onclick="hardRefresh()" title="Recarregar (limpa cache)" style="font-size:16px">↺</button>
   </div>
 </div>
+
+<!-- ──────────────────────── PROGRESS BAR ──────────────────────── -->
+<div id="progress-bar" style="display:none"><div class="pb-fill" id="pb-fill"></div><span class="pb-label" id="pb-label"></span></div>
 
 <!-- ──────────────────────── TOAST STACK ──────────────────────── -->
 <div id="toast-stack"></div>
@@ -858,6 +886,65 @@ function _checkVersionBanner() {
   banner.style.display = 'flex';
 }
 
+// ─── Progress bar de carregamento ─────────────────────────────────
+// Uso: const p = showProgress('Baixando viagens'); p.set(30); p.set(70); p.done()
+window.showProgress = function(label) {
+  const bar = document.getElementById('progress-bar');
+  const fill = document.getElementById('pb-fill');
+  const lbl = document.getElementById('pb-label');
+  if (!bar || !fill || !lbl) return { set: () => {}, done: () => {} };
+  bar.style.display = 'flex';
+  lbl.textContent = label || 'Carregando…';
+  fill.style.width = '5%';
+  return {
+    set(pct) { fill.style.width = Math.max(5, Math.min(100, pct)) + '%'; },
+    label(t) { lbl.textContent = t; },
+    done() {
+      fill.style.width = '100%';
+      setTimeout(() => {
+        bar.style.display = 'none';
+        fill.style.width = '0%';
+      }, 250);
+    }
+  };
+};
+
+// ─── Verificação de versão no boot (SW cache version) ─────────────
+// Pergunta ao SW ativo qual versão tem em cache. Compara com a última
+// vista pelo navegador (em localStorage). Se diferente: oferece atualizar.
+async function _checkPwaVersionOnBoot() {
+  if (!('serviceWorker' in navigator) || !navigator.serviceWorker.controller) return;
+  try {
+    const ch = new MessageChannel();
+    const ver = await new Promise((resolve) => {
+      ch.port1.onmessage = (e) => resolve(e.data && e.data.version);
+      navigator.serviceWorker.controller.postMessage({ type: 'GET_VERSION' }, [ch.port2]);
+      setTimeout(() => resolve(null), 1000);
+    });
+    if (!ver) return;
+    const lastSeen = localStorage.getItem('eco_pwa_version') || '';
+    if (lastSeen && lastSeen !== ver) {
+      // Versão do SW mudou desde o último boot — força atualização
+      const dismissed = localStorage.getItem('eco_pwa_dismissed') || '';
+      if (dismissed === ver) return;  // user já dispensou essa
+      _showPwaUpdateBanner(lastSeen, ver);
+    }
+    localStorage.setItem('eco_pwa_version', ver);
+  } catch (_) {}
+}
+
+function _showPwaUpdateBanner(oldV, newV) {
+  const banner = document.getElementById('update-banner');
+  if (!banner) return;
+  document.getElementById('ub-sub').textContent = 'PWA ' + oldV.replace('ecotrip-','') + ' → ' + newV.replace('ecotrip-','');
+  banner.style.display = 'flex';
+  // Override do dismiss pra usar a versão do PWA
+  window.dismissUpdateBanner = function() {
+    banner.style.display = 'none';
+    localStorage.setItem('eco_pwa_dismissed', newV);
+  };
+}
+
 function dismissUpdateBanner() {
   const banner = document.getElementById('update-banner');
   if (banner) banner.style.display = 'none';
@@ -1069,6 +1156,8 @@ async function bootstrap() {
     connect();
     // Carrega cache de notificações pra badge aparecer imediatamente
     _fetchNotifCache();
+    // Verifica versão do SW (banner se mudou desde o último boot)
+    _checkPwaVersionOnBoot();
     // Restaura aba ativa
     switchView(activeView);
   } catch (_) {
