@@ -27,6 +27,11 @@ object SharedPreferencesKeys {
     const val AUTO_TRIP_MAX_SPEED       = "auto_trip_max_speed"        // pico de velocidade da viagem em andamento
     const val AUTO_TRIP_START_PAUSED_MS = "auto_trip_start_paused_ms"  // snapshot de lifeTotalPausedMs no início (pra calcular P-time intra-viagem)
     const val AUTO_TRIP_ENGINE_OFF_MS   = "auto_trip_engine_off_ms"    // acumulador de gaps entre resumes
+    // Posição original da viagem antes do resume — salva quando há resume pra
+    // permitir o endTrip usar o startLat correto (caso o samples do trecho
+    // original tenha sido deletado pós-sync). 0.0 = sem resume ativo.
+    const val AUTO_TRIP_RESUMED_START_LAT = "auto_trip_resumed_start_lat"
+    const val AUTO_TRIP_RESUMED_START_LNG = "auto_trip_resumed_start_lng"
     const val REFUEL_HISTORY_JSON       = "refuel_history_json"        // abastecimentos auto-detectados (pre-sync MQTT)
 
     // Rolling window (Desde Última Partida) accumulated

@@ -283,6 +283,12 @@ class TripManager private constructor() {
     // v5.20 — tempo parado
     private var autoTripStartPausedMs: Long = 0L  // snapshot de lifeTotalPausedMs no início
     private var autoTripEngineOffMs:   Long = 0L  // acumulador de gaps entre resumes (ms)
+    // v5.26 — preserva a posição original quando há resume. O samples do trecho 1
+    // pode ter sido deletado em disco pós-sync com o bridge — sem isso, endTrip
+    // calcularia startLat com `firstOrNull` no telSamples só do trecho novo, e
+    // perderia a referência da origem real (Casa, por exemplo).
+    private var autoTripResumedStartLat: Double = 0.0
+    private var autoTripResumedStartLng: Double = 0.0
     private var currentChargePowerKw: Float   = 0f
     private var isChargingNow:        Boolean = false
     private var chargeTickCount:      Int     = 0
@@ -517,6 +523,11 @@ class TripManager private constructor() {
             autoTripStartFuelL  = lifeFuelL    - last.fuelL
             autoTripMaxSpeed    = last.maxSpeedKmh
             autoTripMaxPowerPct = last.maxPowerPct
+            // Preserva a posição original da viagem — endTrip vai usar isso em
+            // vez de recalcular a partir do telSamples (que perdeu o trecho 1
+            // se o arquivo de samples foi deletado pós-sync).
+            autoTripResumedStartLat = last.startLat
+            autoTripResumedStartLng = last.startLng
 
             // Soma o gap atual (motor off) ao acumulador. Preserva engineOffSec
             // anterior caso esta viagem já tenha sido continuada antes.
@@ -554,9 +565,11 @@ class TripManager private constructor() {
                 .putFloat (SharedPreferencesKeys.AUTO_TRIP_MAX_SPEED,      autoTripMaxSpeed)
                 .putLong  (SharedPreferencesKeys.AUTO_TRIP_START_PAUSED_MS,autoTripStartPausedMs)
                 .putLong  (SharedPreferencesKeys.AUTO_TRIP_ENGINE_OFF_MS,  autoTripEngineOffMs)
+                .putFloat (SharedPreferencesKeys.AUTO_TRIP_RESUMED_START_LAT, autoTripResumedStartLat.toFloat())
+                .putFloat (SharedPreferencesKeys.AUTO_TRIP_RESUMED_START_LNG, autoTripResumedStartLng.toFloat())
                 .apply()
         }
-        AppLogger.i(TAG, "Viagem ${last.startMs} retomada — gap=${(System.currentTimeMillis() - last.endMs) / 60000}min")
+        AppLogger.i(TAG, "Viagem ${last.startMs} retomada — gap=${(System.currentTimeMillis() - last.endMs) / 60000}min · start preservado=(${autoTripResumedStartLat},${autoTripResumedStartLng})")
         return true
     }
 
@@ -1156,6 +1169,9 @@ class TripManager private constructor() {
         // Snapshot de lifeTotalPausedMs pra calcular o tempo em P durante a viagem
         autoTripStartPausedMs = lifeTotalPausedMs + (if (lifeGearPauseStartMs > 0L) System.currentTimeMillis() - lifeGearPauseStartMs else 0L)
         autoTripEngineOffMs   = 0L
+        // Nova viagem (não-resume): zera o override de posição original
+        autoTripResumedStartLat = 0.0
+        autoTripResumedStartLng = 0.0
         // Persiste para que, se o app reiniciar durante a viagem, os dados não sejam perdidos
         prefs.edit()
             .putLong (SharedPreferencesKeys.AUTO_TRIP_START_MS,       autoTripStartMs)
@@ -1168,6 +1184,8 @@ class TripManager private constructor() {
             .putLong (SharedPreferencesKeys.AUTO_TRIP_START_TIME_SEC, autoTripStartTime)
             .putLong (SharedPreferencesKeys.AUTO_TRIP_START_PAUSED_MS,autoTripStartPausedMs)
             .putLong (SharedPreferencesKeys.AUTO_TRIP_ENGINE_OFF_MS,  0L)
+            .putFloat(SharedPreferencesKeys.AUTO_TRIP_RESUMED_START_LAT, 0f)
+            .putFloat(SharedPreferencesKeys.AUTO_TRIP_RESUMED_START_LNG, 0f)
             .apply()
         autoTripMaxSpeed    = 0f
         autoTripMaxPowerPct = 0
@@ -1213,8 +1231,12 @@ class TripManager private constructor() {
             maxSpeedKmh  = autoTripMaxSpeed,
             maxPowerPct  = autoTripMaxPowerPct,
             outsideTempC = latestOutsideTempC,
-            startLat     = startGps?.lat ?: 0.0,
-            startLng     = startGps?.lng ?: 0.0,
+            // Se a viagem foi retomada via resume, usa a posição ORIGINAL preservada
+            // pelo resumeLastTrip — caso contrário cai no firstOrNull do telSamples.
+            // Sem isso, viagens continuadas perdem o startLat real quando o arquivo
+            // de samples do trecho 1 foi deletado em disco pós-sync com o bridge.
+            startLat     = if (autoTripResumedStartLat != 0.0) autoTripResumedStartLat else (startGps?.lat ?: 0.0),
+            startLng     = if (autoTripResumedStartLng != 0.0) autoTripResumedStartLng else (startGps?.lng ?: 0.0),
             endLat       = endGps?.lat   ?: 0.0,
             endLng       = endGps?.lng   ?: 0.0,
             parkedInPSec = run {
@@ -1232,12 +1254,16 @@ class TripManager private constructor() {
         autoTripMaxSpeed = 0f
         autoTripStartPausedMs = 0L
         autoTripEngineOffMs   = 0L
+        autoTripResumedStartLat = 0.0
+        autoTripResumedStartLng = 0.0
         prefs.edit()
             .putString(SharedPreferencesKeys.AUTO_TRIP_HISTORY_JSON, gson.toJson(autoTripHistory))
             .putLong  (SharedPreferencesKeys.AUTO_TRIP_START_MS, 0L)
             .putFloat (SharedPreferencesKeys.AUTO_TRIP_MAX_SPEED, 0f)
             .putLong  (SharedPreferencesKeys.AUTO_TRIP_START_PAUSED_MS, 0L)
             .putLong  (SharedPreferencesKeys.AUTO_TRIP_ENGINE_OFF_MS, 0L)
+            .putFloat (SharedPreferencesKeys.AUTO_TRIP_RESUMED_START_LAT, 0f)
+            .putFloat (SharedPreferencesKeys.AUTO_TRIP_RESUMED_START_LNG, 0f)
             .apply()
         AppLogger.i(TAG, "AutoTrip salvo: ${entry.distKm}km ${entry.timeSec}s ${entry.netKwh}kWh max=${entry.maxSpeedKmh}km/h temp=${entry.outsideTempC}°C")
         onAutoTripCompleted?.invoke(entry)
@@ -1744,7 +1770,9 @@ class TripManager private constructor() {
             autoTripMaxSpeed      = prefs.getFloat(SharedPreferencesKeys.AUTO_TRIP_MAX_SPEED,      0f)
             autoTripStartPausedMs = prefs.getLong (SharedPreferencesKeys.AUTO_TRIP_START_PAUSED_MS,0L)
             autoTripEngineOffMs   = prefs.getLong (SharedPreferencesKeys.AUTO_TRIP_ENGINE_OFF_MS,  0L)
-            AppLogger.i(TAG, "AutoTrip em andamento recuperado do disco — startMs=$autoTripStartMs maxSpd=${autoTripMaxSpeed}")
+            autoTripResumedStartLat = prefs.getFloat(SharedPreferencesKeys.AUTO_TRIP_RESUMED_START_LAT, 0f).toDouble()
+            autoTripResumedStartLng = prefs.getFloat(SharedPreferencesKeys.AUTO_TRIP_RESUMED_START_LNG, 0f).toDouble()
+            AppLogger.i(TAG, "AutoTrip em andamento recuperado do disco — startMs=$autoTripStartMs maxSpd=${autoTripMaxSpeed} resumedStart=(${autoTripResumedStartLat},${autoTripResumedStartLng})")
         }
 
         val chargeHistJson = prefs.getString(SharedPreferencesKeys.CHARGE_HISTORY_JSON, null)
