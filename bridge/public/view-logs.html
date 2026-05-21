@@ -1,0 +1,1480 @@
+<style>
+.container { padding: 0 16px; max-width: 480px; margin: 0 auto; }
+
+.search-box {
+  display: flex; align-items: center; gap: 8px;
+  background: rgba(31,31,31,.85);
+  border: 1px solid rgba(255,255,255,.06);
+  border-radius: 10px;
+  padding: 8px 12px; margin-bottom: 10px;
+}
+.search-box input {
+  flex: 1; background: transparent; border: none; outline: none;
+  color: var(--text); font-size: 13px;
+}
+.search-box .ic { color: var(--muted); font-size: 14px; }
+.filter-chips {
+  display: flex; gap: 6px; margin-bottom: 12px;
+  overflow-x: auto; padding-bottom: 4px;
+}
+.filter-chips::-webkit-scrollbar { display: none; }
+.chip {
+  flex-shrink: 0;
+  background: rgba(31,31,31,.85);
+  border: 1px solid rgba(255,255,255,.06);
+  color: #cbd5e1;
+  padding: 7px 12px; border-radius: 999px;
+  font-size: 12px; font-weight: 600;
+  cursor: pointer; transition: all .15s;
+  display: flex; align-items: center; gap: 4px;
+}
+.chip:active { transform: scale(.96); }
+.chip.active { background: var(--green); color: #000; border-color: var(--green); }
+.chip .count {
+  background: rgba(0,0,0,.25); border-radius: 999px;
+  padding: 1px 6px; font-size: 10px; font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.chip.active .count { background: rgba(0,0,0,.2); }
+.day-hdr {
+  font-size: 10px; color: var(--muted); font-weight: 700;
+  letter-spacing: 1.5px; text-transform: uppercase;
+  padding: 14px 4px 6px;
+  display: flex; align-items: center; gap: 8px;
+}
+.day-hdr::before, .day-hdr::after {
+  content: ''; flex: 1; height: 1px; background: rgba(255,255,255,.06);
+}
+.event {
+  display: flex; align-items: center; gap: 12px;
+  padding: 9px 12px;
+  background: rgba(31,31,31,.6);
+  border: 1px solid rgba(255,255,255,.04);
+  border-radius: 10px;
+  margin-bottom: 5px;
+  font-size: 13px;
+}
+.event .ic-box {
+  width: 30px; height: 30px; border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px; flex-shrink: 0;
+}
+.event .meta { flex: 1; min-width: 0; }
+.event .title {
+  font-weight: 600; color: var(--text); line-height: 1.3;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.event .sub { font-size: 10px; color: var(--muted); margin-top: 1px; }
+.event .time {
+  font-size: 10px; color: var(--muted); font-weight: 600;
+  font-variant-numeric: tabular-nums; flex-shrink: 0;
+}
+.event.engine .ic-box  { background: rgba(34,197,94,.15); color: var(--green); }
+.event.lock .ic-box    { background: rgba(248,113,113,.15); color: var(--red); }
+.event.door .ic-box    { background: rgba(96,165,250,.15); color: var(--blue); }
+.event.window .ic-box  { background: rgba(34,211,238,.15); color: var(--teal); }
+.event.ac .ic-box      { background: rgba(167,139,250,.15); color: var(--purple); }
+.event.trip .ic-box    { background: rgba(34,197,94,.15); color: var(--green); }
+.event.charge .ic-box  { background: rgba(251,191,36,.15); color: var(--yellow); }
+.event.fuel .ic-box    { background: rgba(251,146,60,.15); color: var(--orange); }
+.event.geo .ic-box     { background: rgba(96,165,250,.15); color: var(--blue); }
+.event.maint .ic-box   { background: rgba(251,146,60,.15); color: var(--orange); }
+.event.alert .ic-box   { background: rgba(248,113,113,.15); color: var(--red); }
+.event.other .ic-box   { background: rgba(107,114,128,.15); color: var(--muted); }
+.empty-state {
+  display: flex; flex-direction: column; align-items: center;
+  padding: 40px 16px; gap: 12px; text-align: center;
+}
+.empty-state .ic { font-size: 64px; opacity: .25; }
+.empty-state .msg { font-size: 13px; color: var(--muted); max-width: 240px; line-height: 1.4; }
+</style>
+
+</div>
+  <div class="right">
+    <span class="dot"></span>
+    <span class="bell">🔔</span>
+  </div>
+</div>
+
+<div class="container">
+  <div class="section-title">Logs</div>
+
+  <div class="search-box">
+    <span class="ic">🔍</span>
+    <input type="text" id="search" placeholder="Buscar nos eventos..." />
+  </div>
+
+  <div class="filter-chips" id="filter-chips"></div>
+
+  <div id="events-list"></div>
+
+  <div id="empty-state" class="empty-state" style="display:none">
+    <div class="ic">📋</div>
+    <div class="msg">Nenhum evento corresponde ao filtro.</div>
+  </div>
+</div>
+
+<script>
+(function() {
+  const SNAPSHOT = {
+  "events": [
+    {
+      "id": 1778960364382,
+      "ts": 1778960364382,
+      "type": "lock_open",
+      "label": "Carro destrancado"
+    },
+    {
+      "id": 1778960394249,
+      "ts": 1778960394249,
+      "type": "lock_close",
+      "label": "Carro trancado"
+    },
+    {
+      "id": 1778962756285,
+      "ts": 1778962756285,
+      "type": "ac_on",
+      "label": "Ar condicionado ligado"
+    },
+    {
+      "id": 1778962766510,
+      "ts": 1778962766510,
+      "type": "engine_on",
+      "label": "Motor ligado"
+    },
+    {
+      "id": 1778962896515,
+      "ts": 1778962896515,
+      "type": "ac_off",
+      "label": "Ar condicionado desligado"
+    },
+    {
+      "id": 1778962896577,
+      "ts": 1778962896577,
+      "type": "engine_off",
+      "label": "Motor desligado"
+    },
+    {
+      "id": 1778963647448,
+      "ts": 1778963647448,
+      "type": "ac_on",
+      "label": "Ar condicionado ligado"
+    },
+    {
+      "id": 1778963667703,
+      "ts": 1778963667703,
+      "type": "engine_on",
+      "label": "Motor ligado"
+    },
+    {
+      "id": 1778963697326,
+      "ts": 1778963697326,
+      "type": "ac_off",
+      "label": "Ar condicionado desligado"
+    },
+    {
+      "id": 1778963711725,
+      "ts": 1778963711725,
+      "type": "engine_off",
+      "label": "Motor desligado"
+    },
+    {
+      "id": 1778965839354,
+      "ts": 1778965839354,
+      "type": "door_open",
+      "label": "Dianteira dir. aberta"
+    },
+    {
+      "id": 1778965839358,
+      "ts": 1778965839358,
+      "type": "lock_open",
+      "label": "Carro destrancado"
+    },
+    {
+      "id": 1778965849381,
+      "ts": 1778965849381,
+      "type": "door_open",
+      "label": "Traseira dir. aberta"
+    },
+    {
+      "id": 1778965869347,
+      "ts": 1778965869347,
+      "type": "door_close",
+      "label": "Traseira dir. fechada"
+    },
+    {
+      "id": 1778965879337,
+      "ts": 1778965879337,
+      "type": "door_open",
+      "label": "Traseira esq. aberta"
+    },
+    {
+      "id": 1778966017197,
+      "ts": 1778966017197,
+      "type": "ac_on",
+      "label": "Ar condicionado ligado"
+    },
+    {
+      "id": 1778966017198,
+      "ts": 1778966017198,
+      "type": "door_close",
+      "label": "Dianteira dir. fechada"
+    },
+    {
+      "id": 1778966017199,
+      "ts": 1778966017199,
+      "type": "door_close",
+      "label": "Traseira esq. fechada"
+    },
+    {
+      "id": 1778966017201,
+      "ts": 1778966017201,
+      "type": "lock_close",
+      "label": "Carro trancado"
+    },
+    {
+      "id": 1778966017948,
+      "ts": 1778966017948,
+      "type": "engine_on",
+      "label": "Motor ligado"
+    },
+    {
+      "id": 1778966029200,
+      "ts": 1778966029200,
+      "type": "trip_start",
+      "label": "Viagem iniciada"
+    },
+    {
+      "id": 1778967059904,
+      "ts": 1778967059904,
+      "type": "lock_open",
+      "label": "Carro destrancado"
+    },
+    {
+      "id": 1778967150576,
+      "ts": 1778967150576,
+      "type": "door_open",
+      "label": "Dianteira esq. aberta"
+    },
+    {
+      "id": 1778967160569,
+      "ts": 1778967160569,
+      "type": "door_close",
+      "label": "Dianteira esq. fechada"
+    },
+    {
+      "id": 1778967190589,
+      "ts": 1778967190589,
+      "type": "lock_close",
+      "label": "Carro trancado"
+    },
+    {
+      "id": 1778967191277,
+      "ts": 1778967191277,
+      "type": "trip_start",
+      "label": "Viagem iniciada"
+    },
+    {
+      "id": 1778967331685,
+      "ts": 1778967331685,
+      "type": "window_open",
+      "label": "Vidro diant. esq. aberto"
+    },
+    {
+      "id": 1778967340652,
+      "ts": 1778967340652,
+      "type": "window_close",
+      "label": "Vidro diant. esq. fechado"
+    },
+    {
+      "id": 1778967430779,
+      "ts": 1778967430779,
+      "type": "ac_off",
+      "label": "Ar condicionado desligado"
+    },
+    {
+      "id": 1778967430781,
+      "ts": 1778967430781,
+      "type": "door_open",
+      "label": "Traseira esq. aberta"
+    },
+    {
+      "id": 1778967430781,
+      "ts": 1778967430781,
+      "type": "door_open",
+      "label": "Dianteira esq. aberta"
+    },
+    {
+      "id": 1778967430782,
+      "ts": 1778967430782,
+      "type": "lock_open",
+      "label": "Carro destrancado"
+    },
+    {
+      "id": 1778967440791,
+      "ts": 1778967440791,
+      "type": "door_close",
+      "label": "Traseira esq. fechada"
+    },
+    {
+      "id": 1778967440833,
+      "ts": 1778967440833,
+      "type": "engine_off",
+      "label": "Motor desligado"
+    },
+    {
+      "id": 1778967450810,
+      "ts": 1778967450810,
+      "type": "door_open",
+      "label": "Traseira dir. aberta"
+    },
+    {
+      "id": 1778967450811,
+      "ts": 1778967450811,
+      "type": "door_close",
+      "label": "Dianteira esq. fechada"
+    },
+    {
+      "id": 1778967460804,
+      "ts": 1778967460804,
+      "type": "door_close",
+      "label": "Traseira dir. fechada"
+    },
+    {
+      "id": 1778967470916,
+      "ts": 1778967470916,
+      "type": "door_open",
+      "label": "Traseira dir. aberta"
+    },
+    {
+      "id": 1778967511300,
+      "ts": 1778967511300,
+      "type": "door_close",
+      "label": "Traseira dir. fechada"
+    },
+    {
+      "id": 1778967511301,
+      "ts": 1778967511301,
+      "type": "door_open",
+      "label": "Dianteira dir. aberta"
+    },
+    {
+      "id": 1778967540922,
+      "ts": 1778967540922,
+      "type": "door_close",
+      "label": "Dianteira dir. fechada"
+    },
+    {
+      "id": 1778967550979,
+      "ts": 1778967550979,
+      "type": "lock_close",
+      "label": "Carro trancado"
+    },
+    {
+      "id": 1778970914376,
+      "ts": 1778970914376,
+      "type": "ac_on",
+      "label": "Ar condicionado ligado"
+    },
+    {
+      "id": 1778970914378,
+      "ts": 1778970914378,
+      "type": "door_open",
+      "label": "Dianteira esq. aberta"
+    },
+    {
+      "id": 1778970914381,
+      "ts": 1778970914381,
+      "type": "lock_open",
+      "label": "Carro destrancado"
+    },
+    {
+      "id": 1778970945775,
+      "ts": 1778970945775,
+      "type": "trip_end",
+      "label": "Viagem concluída: 11.0 km"
+    },
+    {
+      "id": 1778970953987,
+      "ts": 1778970953987,
+      "type": "trip_end",
+      "label": "Viagem concluída: 6.3 km"
+    },
+    {
+      "id": 1778970954297,
+      "ts": 1778970954297,
+      "type": "trip_end",
+      "label": "Viagem concluída: 4.8 km"
+    },
+    {
+      "id": 1778970954571,
+      "ts": 1778970954571,
+      "type": "trip_end",
+      "label": "Viagem concluída: 21.9 km"
+    },
+    {
+      "id": 1778970954801,
+      "ts": 1778970954801,
+      "type": "trip_end",
+      "label": "Viagem concluída: 6.5 km"
+    },
+    {
+      "id": 1778970955170,
+      "ts": 1778970955170,
+      "type": "trip_end",
+      "label": "Viagem concluída: 6.6 km"
+    },
+    {
+      "id": 1778970957461,
+      "ts": 1778970957461,
+      "type": "trip_end",
+      "label": "Viagem concluída: 15.9 km"
+    },
+    {
+      "id": 1778970957743,
+      "ts": 1778970957743,
+      "type": "trip_end",
+      "label": "Viagem concluída: 0.1 km"
+    },
+    {
+      "id": 1778970957991,
+      "ts": 1778970957991,
+      "type": "trip_end",
+      "label": "Viagem concluída: 17.2 km"
+    },
+    {
+      "id": 1778970958291,
+      "ts": 1778970958291,
+      "type": "trip_end",
+      "label": "Viagem concluída: 3.4 km"
+    },
+    {
+      "id": 1778970958542,
+      "ts": 1778970958542,
+      "type": "trip_end",
+      "label": "Viagem concluída: 1.5 km"
+    },
+    {
+      "id": 1778970958852,
+      "ts": 1778970958852,
+      "type": "trip_end",
+      "label": "Viagem concluída: 7.5 km"
+    },
+    {
+      "id": 1778970959109,
+      "ts": 1778970959109,
+      "type": "trip_end",
+      "label": "Viagem concluída: 14.6 km"
+    },
+    {
+      "id": 1778970959330,
+      "ts": 1778970959330,
+      "type": "trip_end",
+      "label": "Viagem concluída: 3.6 km"
+    },
+    {
+      "id": 1778970959650,
+      "ts": 1778970959650,
+      "type": "trip_end",
+      "label": "Viagem concluída: 8.5 km"
+    },
+    {
+      "id": 1778970959889,
+      "ts": 1778970959889,
+      "type": "trip_end",
+      "label": "Viagem concluída: 2.1 km"
+    },
+    {
+      "id": 1778970960153,
+      "ts": 1778970960153,
+      "type": "trip_end",
+      "label": "Viagem concluída: 16.9 km"
+    },
+    {
+      "id": 1778970960805,
+      "ts": 1778970960805,
+      "type": "trip_end",
+      "label": "Viagem concluída: 5.6 km"
+    },
+    {
+      "id": 1778970961094,
+      "ts": 1778970961094,
+      "type": "trip_end",
+      "label": "Viagem concluída: 11.8 km"
+    },
+    {
+      "id": 1778970961971,
+      "ts": 1778970961971,
+      "type": "trip_end",
+      "label": "Viagem concluída: 14.4 km"
+    },
+    {
+      "id": 1778970962227,
+      "ts": 1778970962227,
+      "type": "trip_end",
+      "label": "Viagem concluída: 13.6 km"
+    },
+    {
+      "id": 1778970962503,
+      "ts": 1778970962503,
+      "type": "trip_end",
+      "label": "Viagem concluída: 15.5 km"
+    },
+    {
+      "id": 1778970962733,
+      "ts": 1778970962733,
+      "type": "trip_end",
+      "label": "Viagem concluída: 1.8 km"
+    },
+    {
+      "id": 1778970963491,
+      "ts": 1778970963491,
+      "type": "trip_end",
+      "label": "Viagem concluída: 4.5 km"
+    },
+    {
+      "id": 1778970963741,
+      "ts": 1778970963741,
+      "type": "trip_end",
+      "label": "Viagem concluída: 0.0 km"
+    },
+    {
+      "id": 1778970964047,
+      "ts": 1778970964047,
+      "type": "trip_end",
+      "label": "Viagem concluída: 0.0 km"
+    },
+    {
+      "id": 1778970964609,
+      "ts": 1778970964609,
+      "type": "trip_end",
+      "label": "Viagem concluída: 3.4 km"
+    },
+    {
+      "id": 1778970965105,
+      "ts": 1778970965105,
+      "type": "trip_end",
+      "label": "Viagem concluída: 11.0 km"
+    },
+    {
+      "id": 1778970984501,
+      "ts": 1778970984501,
+      "type": "ac_off",
+      "label": "Ar condicionado desligado"
+    },
+    {
+      "id": 1778970994437,
+      "ts": 1778970994437,
+      "type": "door_close",
+      "label": "Dianteira esq. fechada"
+    },
+    {
+      "id": 1778970994439,
+      "ts": 1778970994439,
+      "type": "lock_close",
+      "label": "Carro trancado"
+    },
+    {
+      "id": 1778971074605,
+      "ts": 1778971074605,
+      "type": "door_open",
+      "label": "Dianteira esq. aberta"
+    },
+    {
+      "id": 1778971074607,
+      "ts": 1778971074607,
+      "type": "lock_open",
+      "label": "Carro destrancado"
+    },
+    {
+      "id": 1778971084616,
+      "ts": 1778971084616,
+      "type": "ac_on",
+      "label": "Ar condicionado ligado"
+    },
+    {
+      "id": 1778971084618,
+      "ts": 1778971084618,
+      "type": "door_close",
+      "label": "Dianteira esq. fechada"
+    },
+    {
+      "id": 1778971094632,
+      "ts": 1778971094632,
+      "type": "engine_on",
+      "label": "Motor ligado"
+    },
+    {
+      "id": 1778971154708,
+      "ts": 1778971154708,
+      "type": "ac_off",
+      "label": "Ar condicionado desligado"
+    },
+    {
+      "id": 1778971154710,
+      "ts": 1778971154710,
+      "type": "door_open",
+      "label": "Dianteira esq. aberta"
+    },
+    {
+      "id": 1778971155453,
+      "ts": 1778971155453,
+      "type": "engine_off",
+      "label": "Motor desligado"
+    },
+    {
+      "id": 1778971164661,
+      "ts": 1778971164661,
+      "type": "door_close",
+      "label": "Dianteira esq. fechada"
+    },
+    {
+      "id": 1778971174760,
+      "ts": 1778971174760,
+      "type": "lock_close",
+      "label": "Carro trancado"
+    },
+    {
+      "id": 1778975268856,
+      "ts": 1778975268856,
+      "type": "lock_open",
+      "label": "Carro destrancado"
+    },
+    {
+      "id": 1778975298737,
+      "ts": 1778975298737,
+      "type": "lock_close",
+      "label": "Carro trancado"
+    },
+    {
+      "id": 1779014817033,
+      "ts": 1779014817033,
+      "type": "lock_open",
+      "label": "Carro destrancado"
+    },
+    {
+      "id": 1779014847041,
+      "ts": 1779014847041,
+      "type": "lock_close",
+      "label": "Carro trancado"
+    },
+    {
+      "id": 1779017449610,
+      "ts": 1779017449610,
+      "type": "lock_open",
+      "label": "Carro destrancado"
+    },
+    {
+      "id": 1779017479725,
+      "ts": 1779017479725,
+      "type": "lock_close",
+      "label": "Carro trancado"
+    },
+    {
+      "id": 1779022084452,
+      "ts": 1779022084452,
+      "type": "lock_open",
+      "label": "Carro destrancado"
+    },
+    {
+      "id": 1779022094578,
+      "ts": 1779022094578,
+      "type": "door_open",
+      "label": "Dianteira esq. aberta"
+    },
+    {
+      "id": 1779022104559,
+      "ts": 1779022104559,
+      "type": "door_close",
+      "label": "Dianteira esq. fechada"
+    },
+    {
+      "id": 1779022114549,
+      "ts": 1779022114549,
+      "type": "ac_on",
+      "label": "Ar condicionado ligado"
+    },
+    {
+      "id": 1779022125315,
+      "ts": 1779022125315,
+      "type": "engine_on",
+      "label": "Motor ligado"
+    },
+    {
+      "id": 1779022144639,
+      "ts": 1779022144639,
+      "type": "lock_close",
+      "label": "Carro trancado"
+    },
+    {
+      "id": 1779022189123,
+      "ts": 1779022189123,
+      "type": "geofence_out",
+      "label": "🚗 Saiu de Jardins Lisboa"
+    },
+    {
+      "id": 1779022224760,
+      "ts": 1779022224760,
+      "type": "window_open",
+      "label": "Vidro diant. esq. aberto"
+    },
+    {
+      "id": 1779022268581,
+      "ts": 1779022268581,
+      "type": "window_close",
+      "label": "Vidro diant. esq. fechado"
+    },
+    {
+      "id": 1779022404676,
+      "ts": 1779022404676,
+      "type": "window_open",
+      "label": "Vidro diant. esq. aberto"
+    },
+    {
+      "id": 1779022498805,
+      "ts": 1779022498805,
+      "type": "window_close",
+      "label": "Vidro diant. esq. fechado"
+    },
+    {
+      "id": 1779022556045,
+      "ts": 1779022556045,
+      "type": "trip_end",
+      "label": "Viagem concluída: 2.1 km"
+    },
+    {
+      "id": 1779022564892,
+      "ts": 1779022564892,
+      "type": "ac_off",
+      "label": "Ar condicionado desligado"
+    },
+    {
+      "id": 1779022564895,
+      "ts": 1779022564895,
+      "type": "lock_open",
+      "label": "Carro destrancado"
+    },
+    {
+      "id": 1779022565674,
+      "ts": 1779022565674,
+      "type": "engine_off",
+      "label": "Motor desligado"
+    },
+    {
+      "id": 1779022604869,
+      "ts": 1779022604869,
+      "type": "door_open",
+      "label": "Dianteira esq. aberta"
+    },
+    {
+      "id": 1779022614898,
+      "ts": 1779022614898,
+      "type": "door_close",
+      "label": "Dianteira esq. fechada"
+    },
+    {
+      "id": 1779022614900,
+      "ts": 1779022614900,
+      "type": "lock_close",
+      "label": "Carro trancado"
+    },
+    {
+      "id": 1779028560647,
+      "ts": 1779028560647,
+      "type": "ac_on",
+      "label": "Ar condicionado ligado"
+    },
+    {
+      "id": 1779028570705,
+      "ts": 1779028570705,
+      "type": "engine_on",
+      "label": "Motor ligado"
+    },
+    {
+      "id": 1779028710837,
+      "ts": 1779028710837,
+      "type": "door_open",
+      "label": "Dianteira esq. aberta"
+    },
+    {
+      "id": 1779028710839,
+      "ts": 1779028710839,
+      "type": "lock_open",
+      "label": "Carro destrancado"
+    },
+    {
+      "id": 1779028720725,
+      "ts": 1779028720725,
+      "type": "door_close",
+      "label": "Dianteira esq. fechada"
+    },
+    {
+      "id": 1779028739545,
+      "ts": 1779028739545,
+      "type": "trip_start",
+      "label": "Viagem iniciada"
+    },
+    {
+      "id": 1779028770730,
+      "ts": 1779028770730,
+      "type": "lock_close",
+      "label": "Carro trancado"
+    },
+    {
+      "id": 1779028790868,
+      "ts": 1779028790868,
+      "type": "window_open",
+      "label": "Vidro diant. esq. aberto"
+    },
+    {
+      "id": 1779028820927,
+      "ts": 1779028820927,
+      "type": "window_close",
+      "label": "Vidro diant. esq. fechado"
+    },
+    {
+      "id": 1779028959702,
+      "ts": 1779028959702,
+      "type": "geofence_in",
+      "label": "📍 Chegou em Jardins Lisboa"
+    },
+    {
+      "id": 1779028969143,
+      "ts": 1779028969143,
+      "type": "trip_end",
+      "label": "Viagem concluída: 0.4 km"
+    },
+    {
+      "id": 1779028970838,
+      "ts": 1779028970838,
+      "type": "ac_off",
+      "label": "Ar condicionado desligado"
+    },
+    {
+      "id": 1779028970846,
+      "ts": 1779028970846,
+      "type": "lock_open",
+      "label": "Carro destrancado"
+    },
+    {
+      "id": 1779028973385,
+      "ts": 1779028973385,
+      "type": "engine_off",
+      "label": "Motor desligado"
+    },
+    {
+      "id": 1779028990965,
+      "ts": 1779028990965,
+      "type": "door_open",
+      "label": "Dianteira dir. aberta"
+    },
+    {
+      "id": 1779029000889,
+      "ts": 1779029000889,
+      "type": "door_close",
+      "label": "Dianteira dir. fechada"
+    },
+    {
+      "id": 1779029020931,
+      "ts": 1779029020931,
+      "type": "lock_close",
+      "label": "Carro trancado"
+    },
+    {
+      "id": 1779039544290,
+      "ts": 1779039544290,
+      "type": "lock_open",
+      "label": "Carro destrancado"
+    },
+    {
+      "id": 1779039591371,
+      "ts": 1779039591371,
+      "type": "door_open",
+      "label": "Traseira esq. aberta"
+    },
+    {
+      "id": 1779039601393,
+      "ts": 1779039601393,
+      "type": "door_close",
+      "label": "Traseira esq. fechada"
+    },
+    {
+      "id": 1779039817038,
+      "ts": 1779039817038,
+      "type": "door_open",
+      "label": "Dianteira dir. aberta"
+    },
+    {
+      "id": 1779039831692,
+      "ts": 1779039831692,
+      "type": "door_close",
+      "label": "Dianteira dir. fechada"
+    },
+    {
+      "id": 1779040090133,
+      "ts": 1779040090133,
+      "type": "ac_on",
+      "label": "Ar condicionado ligado"
+    },
+    {
+      "id": 1779040090986,
+      "ts": 1779040090986,
+      "type": "engine_on",
+      "label": "Motor ligado"
+    },
+    {
+      "id": 1779040212063,
+      "ts": 1779040212063,
+      "type": "door_open",
+      "label": "Traseira dir. aberta"
+    },
+    {
+      "id": 1779040221978,
+      "ts": 1779040221978,
+      "type": "door_open",
+      "label": "Dianteira dir. aberta"
+    },
+    {
+      "id": 1779040363596,
+      "ts": 1779040363596,
+      "type": "window_open",
+      "label": "Vidro diant. esq. aberto"
+    },
+    {
+      "id": 1779040363791,
+      "ts": 1779040363791,
+      "type": "door_close",
+      "label": "Traseira dir. fechada"
+    },
+    {
+      "id": 1779040363791,
+      "ts": 1779040363791,
+      "type": "door_close",
+      "label": "Dianteira dir. fechada"
+    },
+    {
+      "id": 1779040369826,
+      "ts": 1779040369826,
+      "type": "window_close",
+      "label": "Vidro diant. esq. fechado"
+    },
+    {
+      "id": 1779040369845,
+      "ts": 1779040369845,
+      "type": "lock_close",
+      "label": "Carro trancado"
+    },
+    {
+      "id": 1779040380900,
+      "ts": 1779040380900,
+      "type": "trip_start",
+      "label": "Viagem iniciada"
+    },
+    {
+      "id": 1779040394463,
+      "ts": 1779040394463,
+      "type": "lock_open",
+      "label": "Carro destrancado"
+    },
+    {
+      "id": 1779040402058,
+      "ts": 1779040402058,
+      "type": "lock_close",
+      "label": "Carro trancado"
+    },
+    {
+      "id": 1779040425355,
+      "ts": 1779040425355,
+      "type": "geofence_out",
+      "label": "🚗 Saiu de Jardins Lisboa"
+    },
+    {
+      "id": 1779040462081,
+      "ts": 1779040462081,
+      "type": "window_open",
+      "label": "Vidro diant. esq. aberto"
+    },
+    {
+      "id": 1779040472114,
+      "ts": 1779040472114,
+      "type": "window_close",
+      "label": "Vidro diant. esq. fechado"
+    },
+    {
+      "id": 1779041522984,
+      "ts": 1779041522984,
+      "type": "lock_open",
+      "label": "Carro destrancado"
+    },
+    {
+      "id": 1779041693824,
+      "ts": 1779041693824,
+      "type": "trip_start",
+      "label": "Viagem iniciada"
+    },
+    {
+      "id": 1779041703349,
+      "ts": 1779041703349,
+      "type": "lock_close",
+      "label": "Carro trancado"
+    },
+    {
+      "id": 1779041729651,
+      "ts": 1779041729651,
+      "type": "geofence_in",
+      "label": "📍 Chegou em Casa"
+    },
+    {
+      "id": 1779041849897,
+      "ts": 1779041849897,
+      "type": "trip_end",
+      "label": "Viagem concluída: 11.5 km"
+    },
+    {
+      "id": 1779041940295,
+      "ts": 1779041940295,
+      "type": "ac_off",
+      "label": "Ar condicionado desligado"
+    },
+    {
+      "id": 1779041940295,
+      "ts": 1779041940295,
+      "type": "door_open",
+      "label": "Traseira dir. aberta"
+    },
+    {
+      "id": 1779041940298,
+      "ts": 1779041940298,
+      "type": "lock_open",
+      "label": "Carro destrancado"
+    },
+    {
+      "id": 1779041941009,
+      "ts": 1779041941009,
+      "type": "engine_off",
+      "label": "Motor desligado"
+    },
+    {
+      "id": 1779041973350,
+      "ts": 1779041973350,
+      "type": "door_close",
+      "label": "Traseira dir. fechada"
+    },
+    {
+      "id": 1779041973351,
+      "ts": 1779041973351,
+      "type": "door_open",
+      "label": "Dianteira dir. aberta"
+    },
+    {
+      "id": 1779042003326,
+      "ts": 1779042003326,
+      "type": "door_open",
+      "label": "Traseira dir. aberta"
+    },
+    {
+      "id": 1779042013357,
+      "ts": 1779042013357,
+      "type": "door_close",
+      "label": "Traseira dir. fechada"
+    },
+    {
+      "id": 1779042013358,
+      "ts": 1779042013358,
+      "type": "door_close",
+      "label": "Dianteira dir. fechada"
+    },
+    {
+      "id": 1779042023473,
+      "ts": 1779042023473,
+      "type": "lock_close",
+      "label": "Carro trancado"
+    },
+    {
+      "id": 1779043209289,
+      "ts": 1779043209289,
+      "type": "door_open",
+      "label": "Traseira dir. aberta"
+    },
+    {
+      "id": 1779043209292,
+      "ts": 1779043209292,
+      "type": "lock_open",
+      "label": "Carro destrancado"
+    },
+    {
+      "id": 1779043234786,
+      "ts": 1779043234786,
+      "type": "door_close",
+      "label": "Traseira dir. fechada"
+    },
+    {
+      "id": 1779043244649,
+      "ts": 1779043244649,
+      "type": "door_open",
+      "label": "Dianteira esq. aberta"
+    },
+    {
+      "id": 1779043254528,
+      "ts": 1779043254528,
+      "type": "ac_on",
+      "label": "Ar condicionado ligado"
+    },
+    {
+      "id": 1779043254530,
+      "ts": 1779043254530,
+      "type": "door_close",
+      "label": "Dianteira esq. fechada"
+    },
+    {
+      "id": 1779043264820,
+      "ts": 1779043264820,
+      "type": "engine_on",
+      "label": "Motor ligado"
+    },
+    {
+      "id": 1779043285693,
+      "ts": 1779043285693,
+      "type": "trip_start",
+      "label": "Viagem iniciada"
+    },
+    {
+      "id": 1779043334586,
+      "ts": 1779043334586,
+      "type": "lock_close",
+      "label": "Carro trancado"
+    },
+    {
+      "id": 1779043415626,
+      "ts": 1779043415626,
+      "type": "geofence_out",
+      "label": "🚗 Saiu de Casa"
+    },
+    {
+      "id": 1779044509690,
+      "ts": 1779044509690,
+      "type": "window_open",
+      "label": "Vidro diant. esq. aberto"
+    },
+    {
+      "id": 1779044517716,
+      "ts": 1779044517716,
+      "type": "window_close",
+      "label": "Vidro diant. esq. fechado"
+    },
+    {
+      "id": 1779044664285,
+      "ts": 1779044664285,
+      "type": "trip_end",
+      "label": "Viagem concluída: 9.2 km"
+    },
+    {
+      "id": 1779044776720,
+      "ts": 1779044776720,
+      "type": "ac_off",
+      "label": "Ar condicionado desligado"
+    },
+    {
+      "id": 1779044777526,
+      "ts": 1779044777526,
+      "type": "engine_off",
+      "label": "Motor desligado"
+    },
+    {
+      "id": 1779046987832,
+      "ts": 1779046987832,
+      "type": "lock_open",
+      "label": "Carro destrancado"
+    },
+    {
+      "id": 1779046997948,
+      "ts": 1779046997948,
+      "type": "lock_close",
+      "label": "Carro trancado"
+    },
+    {
+      "id": 1779052332897,
+      "ts": 1779052332897,
+      "type": "door_open",
+      "label": "Traseira dir. aberta"
+    },
+    {
+      "id": 1779052332900,
+      "ts": 1779052332900,
+      "type": "lock_open",
+      "label": "Carro destrancado"
+    },
+    {
+      "id": 1779052342795,
+      "ts": 1779052342795,
+      "type": "door_close",
+      "label": "Traseira dir. fechada"
+    },
+    {
+      "id": 1779052352826,
+      "ts": 1779052352826,
+      "type": "door_open",
+      "label": "Dianteira esq. aberta"
+    },
+    {
+      "id": 1779052362903,
+      "ts": 1779052362903,
+      "type": "ac_on",
+      "label": "Ar condicionado ligado"
+    },
+    {
+      "id": 1779052363593,
+      "ts": 1779052363593,
+      "type": "engine_on",
+      "label": "Motor ligado"
+    },
+    {
+      "id": 1779052368791,
+      "ts": 1779052368791,
+      "type": "trip_start",
+      "label": "Viagem iniciada"
+    },
+    {
+      "id": 1779052372819,
+      "ts": 1779052372819,
+      "type": "door_close",
+      "label": "Dianteira esq. fechada"
+    },
+    {
+      "id": 1779052382986,
+      "ts": 1779052382986,
+      "type": "lock_close",
+      "label": "Carro trancado"
+    },
+    {
+      "id": 1779052573058,
+      "ts": 1779052573058,
+      "type": "window_open",
+      "label": "Vidro diant. esq. aberto"
+    },
+    {
+      "id": 1779052583091,
+      "ts": 1779052583091,
+      "type": "window_close",
+      "label": "Vidro diant. esq. fechado"
+    },
+    {
+      "id": 1779054314877,
+      "ts": 1779054314877,
+      "type": "window_open",
+      "label": "Vidro diant. esq. aberto"
+    },
+    {
+      "id": 1779054384960,
+      "ts": 1779054384960,
+      "type": "window_close",
+      "label": "Vidro diant. esq. fechado"
+    },
+    {
+      "id": 1779054391424,
+      "ts": 1779054391424,
+      "type": "window_close",
+      "label": "Vidro diant. esq. fechado"
+    },
+    {
+      "id": 1779054474926,
+      "ts": 1779054474926,
+      "type": "window_open",
+      "label": "Vidro diant. esq. aberto"
+    },
+    {
+      "id": 1779054678612,
+      "ts": 1779054678612,
+      "type": "geofence_in",
+      "label": "📍 Chegou em Casa"
+    },
+    {
+      "id": 1779054802894,
+      "ts": 1779054802894,
+      "type": "trip_end",
+      "label": "Viagem concluída: 10.8 km"
+    },
+    {
+      "id": 1779054842787,
+      "ts": 1779054842787,
+      "type": "ac_off",
+      "label": "Ar condicionado desligado"
+    },
+    {
+      "id": 1779054842793,
+      "ts": 1779054842793,
+      "type": "door_open",
+      "label": "Dianteira esq. aberta"
+    },
+    {
+      "id": 1779054842796,
+      "ts": 1779054842796,
+      "type": "lock_open",
+      "label": "Carro destrancado"
+    },
+    {
+      "id": 1779054842797,
+      "ts": 1779054842797,
+      "type": "engine_off",
+      "label": "Motor desligado"
+    }
+  ]
+};
+const TYPE_META = {
+  engine_on:        { cat: 'engine', ic: '🔑' },
+  engine_off:       { cat: 'engine', ic: '🛑' },
+  lock_open:        { cat: 'lock',   ic: '🔓' },
+  lock_close:       { cat: 'lock',   ic: '🔒' },
+  door_open:        { cat: 'door',   ic: '🚪' },
+  door_close:       { cat: 'door',   ic: '🚪' },
+  trunk_open:       { cat: 'door',   ic: '🧳' },
+  trunk_close:      { cat: 'door',   ic: '🧳' },
+  window_open:      { cat: 'window', ic: '🪟' },
+  window_close:     { cat: 'window', ic: '🪟' },
+  sunroof_open:     { cat: 'window', ic: '☀' },
+  sunroof_close:    { cat: 'window', ic: '☀' },
+  ac_on:            { cat: 'ac',     ic: '❄' },
+  ac_off:           { cat: 'ac',     ic: '❄' },
+  trip_start:       { cat: 'trip',   ic: '🏁' },
+  trip_end:         { cat: 'trip',   ic: '🏁' },
+  charge_start:     { cat: 'charge', ic: '⚡' },
+  charge_end:       { cat: 'charge', ic: '✓' },
+  refuel_detected:  { cat: 'fuel',   ic: '⛽' },
+  geofence_in:      { cat: 'geo',    ic: '📍' },
+  geofence_out:     { cat: 'geo',    ic: '📍' },
+  maint_soon:       { cat: 'maint',  ic: '🔧' },
+  maint_overdue:    { cat: 'maint',  ic: '⚠' },
+  anomaly:          { cat: 'alert',  ic: '⚠' },
+};
+const FILTERS = [
+  { id: 'all',    label: 'Tudo',    icon: '' },
+  { id: 'engine', label: 'Motor',   icon: '🔑', cats: ['engine'] },
+  { id: 'trip',   label: 'Viagens', icon: '🏁', cats: ['trip', 'geo'] },
+  { id: 'charge', label: 'Recarga', icon: '⚡', cats: ['charge', 'fuel'] },
+  { id: 'lock',   label: 'Trava',   icon: '🔒', cats: ['lock'] },
+  { id: 'door',   label: 'Portas',  icon: '🚪', cats: ['door'] },
+  { id: 'window', label: 'Vidros',  icon: '🪟', cats: ['window'] },
+  { id: 'ac',     label: 'AC',      icon: '❄', cats: ['ac'] },
+  { id: 'maint',  label: 'Manut.',  icon: '🔧', cats: ['maint', 'alert'] },
+];
+let allEvents = (SNAPSHOT.events || []).map(e => ({ ...e, ts: e.ts || e.timestamp }));
+let currentFilter = 'all';
+let currentSearch = '';
+function metaOf(type) {
+  return TYPE_META[type] || { cat: 'other', ic: '•' };
+}
+function labelOf(ev) {
+  if (ev.label) return ev.label;
+  return ev.type.replace(/_/g, ' ');
+}
+function countByCat(catList) {
+  if (!catList) return allEvents.length;
+  let n = 0;
+  for (const e of allEvents) {
+    if (catList.includes(metaOf(e.type).cat)) n++;
+  }
+  return n;
+}
+function applyFilter() {
+  const f = FILTERS.find(x => x.id === currentFilter);
+  let out = allEvents;
+  if (f && f.cats) out = out.filter(e => f.cats.includes(metaOf(e.type).cat));
+  if (currentSearch) {
+    const q = currentSearch.toLowerCase();
+    out = out.filter(e => labelOf(e).toLowerCase().includes(q) || e.type.toLowerCase().includes(q));
+  }
+  return out;
+}
+function renderFilters() {
+  const el = document.getElementById('filter-chips');
+  el.innerHTML = FILTERS.map(f => {
+    const n = f.id === 'all' ? allEvents.length : countByCat(f.cats);
+    return `<div class="chip ${currentFilter === f.id ? 'active' : ''}" onclick="setFilter('${f.id}')">${f.icon ? f.icon + ' ' : ''}${f.label}<span class="count">${n}</span></div>`;
+  }).join('');
+}
+function setFilter(id) {
+  currentFilter = id;
+  renderFilters();
+  renderEvents();
+}
+function fmtDayLabel(ts) {
+  const d = new Date(ts); d.setHours(0,0,0,0);
+  const today = new Date(); today.setHours(0,0,0,0);
+  const yesterday = new Date(today.getTime() - 86400000);
+  if (d.getTime() === today.getTime()) return 'Hoje';
+  if (d.getTime() === yesterday.getTime()) return 'Ontem';
+  return d.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'short' });
+}
+function fmtTime(ts) {
+  return new Date(ts).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+}
+function renderEvents() {
+  const list = document.getElementById('events-list');
+  const empty = document.getElementById('empty-state');
+  const filtered = applyFilter();
+  if (!filtered.length) {
+    list.innerHTML = '';
+    empty.style.display = '';
+    return;
+  }
+  empty.style.display = 'none';
+  const byDay = new Map();
+  for (const e of filtered) {
+    const d = new Date(e.ts); d.setHours(0,0,0,0);
+    const key = d.getTime();
+    if (!byDay.has(key)) byDay.set(key, []);
+    byDay.get(key).push(e);
+  }
+  const html = [];
+  for (const [dayKey, dayEvents] of byDay) {
+    html.push(`<div class="day-hdr">${fmtDayLabel(dayKey)} · <span style="color:#cbd5e1">${dayEvents.length}</span></div>`);
+    for (const e of dayEvents) {
+      const m = metaOf(e.type);
+      html.push(`
+        <div class="event ${m.cat}">
+          <div class="ic-box">${m.ic}</div>
+          <div class="meta">
+            <div class="title">${labelOf(e)}</div>
+          </div>
+          <div class="time">${fmtTime(e.ts)}</div>
+        </div>`);
+    }
+  }
+  list.innerHTML = html.join('');
+}
+document.getElementById('search').addEventListener('input', (ev) => {
+  currentSearch = ev.target.value.trim();
+  renderEvents();
+});
+function updateTabbarHeight() {
+  const t = document.querySelector('.tabbar')?.offsetHeight || 56;
+  document.documentElement.style.setProperty('--tabbar-h', t + 'px');
+}
+updateTabbarHeight();
+window.addEventListener('resize', updateTabbarHeight);
+
+async function _loadLogsData() {
+  const tk = localStorage.getItem('bridge_token');
+  if (!tk) { renderFilters(); renderEvents(); return; }
+  try {
+    const r = await fetch('/api/events?limit=500', { headers: { 'Authorization': 'Bearer ' + tk } });
+    const list = await r.json();
+    if (Array.isArray(list)) {
+      allEvents = list.map(e => ({ ...e, ts: e.ts || e.timestamp || e.timestamp_ms }));
+    }
+  } catch (e) { console.warn('Logs: falha live', e); }
+  renderFilters(); renderEvents();
+}
+_loadLogsData();
+window.renderView_logs = function() { _loadLogsData(); };
+window._addEventToLog = function(ev) {
+  if (!ev) return;
+  allEvents.unshift({ ...ev, ts: ev.ts || ev.timestamp || ev.timestamp_ms || Date.now() });
+  if (allEvents.length > 1000) allEvents.length = 1000;
+  renderFilters(); renderEvents();
+};
+  // Expõe handlers de onclick no window
+  Object.assign(window, { setFilter: typeof setFilter !== 'undefined' ? setFilter : undefined });
+  if (!window['initView_logs']) window['initView_logs'] = function() {};
+})();
+</script>

@@ -1,0 +1,1471 @@
+<!DOCTYPE html>
+<html lang="pt-BR"><head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<meta name="theme-color" content="#1a1a1a">
+<title>EcoTrip · Posto Preview</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+:root {
+  --bg: #1a1a1a; --card: #1f1f1f; --card2: #2a2a2a;
+  --text: #f1f5f9; --muted: #6b7280;
+  --green: #22c55e; --green-dim: #16a34a;
+  --orange: #fb923c; --teal: #22d3ee;
+  --yellow: #fbbf24; --red: #f87171;
+}
+body {
+  background: var(--bg); color: var(--text);
+  font-family: -apple-system, "SF Pro Display", "Helvetica Neue", system-ui, sans-serif;
+  min-height: 100vh; padding: env(safe-area-inset-top) 0 calc(var(--tabbar-h, 52px) + var(--subtab-h, 0px) + 8px);
+  overscroll-behavior: none;
+  overflow-x: hidden;
+}
+.container { padding: 0 16px; max-width: 480px; margin: 0 auto; }
+
+/* Header glassmorphism */
+.head {
+  position: sticky; top: 0; z-index: 10;
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 10px 16px;
+  background: linear-gradient(180deg, rgba(20,20,20,.95) 80%, rgba(20,20,20,.6) 100%);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+}
+.head .menu, .head .bell { font-size: 22px; color: #cbd5e1; cursor: pointer; padding: 4px; }
+.head .brand { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+.head .brand .logo { font-size: 20px; }
+.head .brand .info { line-height: 1.15; }
+.head .brand .model { font-size: 13px; font-weight: 700; color: var(--text); display: flex; align-items: center; gap: 4px; }
+.head .brand .ver { font-size: 9px; color: var(--muted); font-weight: 500; }
+
+.head .model {
+  font-size: 15px; font-weight: 600; color: var(--text);
+  display: flex; align-items: center; gap: 6px;
+}
+.head .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); margin-left: 4px; }
+
+/* Title verde gigante (estilo Electro) */
+.section-title {
+  font-size: 32px; font-weight: 800; color: var(--green);
+  padding: 8px 4px 16px; letter-spacing: -0.5px;
+}
+
+/* Filtros de tipo no topo (chip-row) */
+.filter-chips {
+  display: flex; gap: 6px; margin-bottom: 12px;
+  overflow-x: auto; padding-bottom: 4px;
+}
+.filter-chips::-webkit-scrollbar { display: none; }
+.chip {
+  flex-shrink: 0;
+  background: rgba(31,31,31,.85);
+  border: 1px solid rgba(255,255,255,.06);
+  color: #cbd5e1;
+  padding: 7px 14px; border-radius: 999px;
+  font-size: 12px; font-weight: 600;
+  cursor: pointer; transition: all .15s;
+}
+.chip.active { background: var(--green); color: #000; border-color: var(--green); }
+.chip:active { transform: scale(.97); }
+
+/* Cards de registros (recarga / abastecimento) */
+.entry-card {
+  background: rgba(31,31,31,.85);
+  border: 1px solid rgba(255,255,255,.05);
+  border-radius: 14px;
+  padding: 12px 14px;
+  margin-bottom: 8px;
+  display: flex; flex-direction: column; gap: 6px;
+  overflow: hidden;
+}
+.entry-card .row { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.entry-card .icon {
+  width: 34px; height: 34px; border-radius: 9px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 17px; flex-shrink: 0;
+}
+.entry-card.recarga .icon { background: rgba(34,197,94,.15); color: var(--green); }
+.entry-card.abastecimento .icon { background: rgba(251,146,60,.15); color: var(--orange); }
+.entry-card .meta { flex: 1; min-width: 0; }
+.entry-card .date { font-size: 11px; color: var(--muted); font-weight: 500; }
+.entry-card .place { font-size: 13px; font-weight: 700; color: var(--text); line-height: 1.2; }
+.entry-card .badge {
+  font-size: 13px; font-weight: 700; padding: 4px 9px;
+  border-radius: 8px; font-variant-numeric: tabular-nums;
+  flex-shrink: 0; white-space: nowrap;
+}
+.entry-card.recarga .badge { background: rgba(34,197,94,.12); color: var(--green); }
+.entry-card.abastecimento .badge { background: rgba(251,146,60,.12); color: var(--orange); }
+/* Linha de detalhes (SOC start/end, etc) */
+.entry-card .details {
+  display: flex; gap: 14px; flex-wrap: wrap;
+  font-size: 11px; color: var(--muted);
+  padding-left: 46px;
+}
+.entry-card .details .v { color: #cbd5e1; font-weight: 700; font-variant-numeric: tabular-nums; }
+.entry-card .details .v.loss { color: var(--red); }
+
+/* Ações do card (linha de ícones na base) */
+.entry-actions {
+  display: flex; gap: 4px; justify-content: space-around; flex-wrap: nowrap;
+  padding-top: 6px; margin-top: 2px;
+  border-top: 1px solid rgba(255,255,255,.04);
+}
+.entry-actions button {
+  flex: 1; max-width: 44px;
+  height: 30px; border-radius: 8px;
+  background: rgba(255,255,255,.03);
+  border: 1px solid rgba(255,255,255,.06);
+  color: #cbd5e1; font-size: 13px;
+  cursor: pointer; transition: all .15s;
+  display: flex; align-items: center; justify-content: center;
+  font-family: inherit;
+}
+.entry-actions button:active { transform: scale(.92); background: rgba(255,255,255,.08); }
+.entry-actions button.has-value { background: rgba(34,197,94,.12); border-color: rgba(34,197,94,.3); color: var(--green); }
+
+/* ── Bottom sheet de edição/ação (escorrega de baixo) */
+.action-sheet {
+  position: fixed; inset: 0; z-index: 60;
+  background: rgba(0,0,0,.6);
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  display: none; align-items: flex-end;
+}
+.action-sheet.show { display: flex; }
+.action-content {
+  width: 100%; max-width: 480px; margin: 0 auto;
+  background: #1f1f1f;
+  border-top-left-radius: 20px; border-top-right-radius: 20px;
+  padding: 18px 18px calc(env(safe-area-inset-bottom) + 18px);
+  border-top: 1px solid rgba(255,255,255,.08);
+  max-height: 80vh; overflow-y: auto;
+}
+.action-content .handle {
+  width: 42px; height: 5px; background: rgba(255,255,255,.18);
+  border-radius: 3px; margin: -8px auto 14px;
+}
+.action-content .ti { font-size: 18px; font-weight: 700; color: var(--text); margin-bottom: 4px; }
+.action-content .sub { font-size: 12px; color: var(--muted); margin-bottom: 16px; }
+.action-content .input-row {
+  display: flex; flex-direction: column; gap: 6px;
+  margin-bottom: 14px;
+}
+.action-content .input-row label {
+  font-size: 11px; color: var(--muted); font-weight: 600;
+  text-transform: uppercase; letter-spacing: 1px;
+}
+.action-content .input-row input, .action-content .input-row select {
+  padding: 12px 14px; background: rgba(255,255,255,.05);
+  color: var(--text); border: 1px solid rgba(255,255,255,.08);
+  border-radius: 10px; font-size: 14px;
+  font-family: inherit; font-variant-numeric: tabular-nums;
+}
+.action-content .input-row .hint {
+  font-size: 10px; color: var(--muted); margin-top: 2px;
+}
+.action-content .btns { display: flex; gap: 10px; margin-top: 8px; }
+.action-content .btn {
+  flex: 1; padding: 13px; border: none; border-radius: 10px;
+  font-size: 14px; font-weight: 700; cursor: pointer; font-family: inherit;
+}
+.action-content .btn.cancel { background: rgba(255,255,255,.06); color: #cbd5e1; }
+.action-content .btn.confirm { background: var(--green); color: #000; }
+.action-content .btn.danger { background: var(--red); color: #fff; }
+
+/* Timeline (linha do tempo da recarga) — mini gráfico */
+.timeline-chart {
+  background: rgba(0,0,0,.25); border-radius: 10px;
+  padding: 12px; margin-bottom: 14px;
+  height: 140px; position: relative;
+}
+.timeline-chart svg { width: 100%; height: 100%; }
+.tl-label {
+  font-size: 10px; color: var(--muted); text-align: center;
+  margin-top: 4px;
+}
+
+/* Estado vazio (calendar + ícone) */
+.empty-state {
+  display: flex; flex-direction: column; align-items: center;
+  padding: 40px 16px 24px; gap: 16px;
+}
+.empty-state .ic {
+  font-size: 96px; opacity: .25; color: #94a3b8; line-height: 1;
+}
+.empty-state .msg {
+  font-size: 14px; color: var(--muted); text-align: center;
+  max-width: 260px; line-height: 1.4;
+}
+
+/* Calendar modal — abre ao tocar na data do footer */
+.cal-modal {
+  position: fixed; inset: 0; z-index: 50;
+  background: rgba(0,0,0,.7);
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  display: none; align-items: center; justify-content: center;
+  padding: 24px;
+}
+.cal-modal.show { display: flex; }
+.calendar {
+  background: #1f1f1f;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 16px;
+  padding: 16px 18px;
+  width: 100%; max-width: 340px;
+  box-shadow: 0 20px 50px rgba(0,0,0,.5);
+}
+.cal-head {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 12px;
+}
+.cal-head .nav { color: #cbd5e1; font-size: 16px; cursor: pointer; padding: 4px 8px; }
+.cal-head .title { font-size: 14px; font-weight: 700; color: var(--text); }
+.cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.cal-dow { text-align: center; font-size: 10px; color: var(--muted); font-weight: 600; padding: 4px 0; }
+.cal-day {
+  position: relative;
+  text-align: center; padding: 8px 0;
+  font-size: 13px; color: #cbd5e1;
+  border-radius: 8px; cursor: pointer;
+  font-variant-numeric: tabular-nums;
+}
+/* Dia atual (hoje) — só borda verde, sem preenchimento */
+.cal-day.today {
+  border: 1.5px solid var(--green);
+  font-weight: 700;
+}
+/* Dia selecionado (clicado pelo usuário) — fundo verde sólido */
+.cal-day.selected {
+  background: var(--green); color: #000; font-weight: 700;
+}
+.cal-day.muted { color: rgba(255,255,255,.15); }
+.cal-day.has-event::after {
+  content: ''; position: absolute; top: 4px; right: 8px;
+  width: 4px; height: 4px; background: var(--red); border-radius: 50%;
+}
+.cal-day.selected.has-event::after { background: #000; }
+
+/* Footer com data nav (setas) */
+.date-nav {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 0;
+  position: sticky; bottom: 0;
+}
+.date-nav .arrow {
+  width: 48px; height: 36px; border-radius: 18px;
+  background: var(--green); color: #000;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 18px; cursor: pointer;
+}
+.date-nav .arrow.disabled { background: rgba(255,255,255,.08); color: var(--muted); cursor: default; }
+.date-nav .label {
+  text-align: center; flex: 1; cursor: pointer;
+  padding: 6px 12px; border-radius: 10px;
+  transition: background .15s;
+}
+.date-nav .label:active { background: rgba(255,255,255,.06); }
+.date-nav .label .date { font-size: 13px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
+.date-nav .label .lbl { font-size: 10px; color: var(--muted); font-weight: 500; }
+.date-nav .label .hint { font-size: 9px; color: var(--green); margin-top: 1px; }
+
+/* Stats view (cards individuais empilhados) */
+.period-card {
+  background: rgba(31,31,31,.85);
+  border: 1px solid rgba(255,255,255,.06);
+  border-radius: 14px;
+  padding: 14px 16px;
+  margin-bottom: 10px;
+}
+.period-card .ti {
+  font-size: 15px; font-weight: 700; color: var(--text);
+  margin-bottom: 4px;
+}
+.period-card .sub { font-size: 11px; color: var(--muted); margin-bottom: 12px; }
+.period-card .options {
+  background: rgba(0,0,0,.25); border-radius: 10px; overflow: hidden;
+}
+.period-card .opt {
+  padding: 10px 14px; text-align: center;
+  font-size: 13px; color: #cbd5e1; cursor: pointer;
+  border-bottom: 1px solid rgba(255,255,255,.04);
+  font-weight: 500;
+}
+.period-card .opt:last-child { border-bottom: none; }
+.period-card .opt.active { background: rgba(255,255,255,.06); color: var(--text); font-weight: 700; }
+
+/* Range picker (período personalizado) */
+.custom-range {
+  margin-top: 10px; padding: 12px;
+  background: rgba(0,0,0,.25); border-radius: 10px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.custom-range .range-row {
+  display: flex; align-items: center; gap: 10px;
+}
+.custom-range label {
+  font-size: 12px; color: var(--muted); font-weight: 600;
+  min-width: 28px;
+}
+.custom-range input[type="date"] {
+  flex: 1; padding: 8px 10px;
+  background: rgba(255,255,255,.05); color: var(--text);
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 8px; font-size: 13px;
+  font-family: inherit; font-variant-numeric: tabular-nums;
+}
+
+.stat-card {
+  background: rgba(31,31,31,.85);
+  border: 1px solid rgba(255,255,255,.06);
+  border-radius: 14px;
+  padding: 14px 16px;
+  margin-bottom: 8px;
+  display: flex; align-items: center; gap: 14px;
+}
+.stat-card .icon-box {
+  width: 40px; height: 40px; border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 18px; flex-shrink: 0;
+}
+.stat-card.green .icon-box { background: rgba(34,197,94,.15); color: var(--green); }
+.stat-card.teal .icon-box  { background: rgba(34,211,238,.15); color: var(--teal); }
+.stat-card.yellow .icon-box { background: rgba(251,191,36,.15); color: var(--yellow); }
+.stat-card.orange .icon-box { background: rgba(251,146,60,.15); color: var(--orange); }
+.stat-card .meta { flex: 1; }
+.stat-card .lbl { font-size: 11px; color: var(--muted); font-weight: 500; margin-bottom: 2px; }
+.stat-card .v {
+  font-size: 22px; font-weight: 800; color: var(--text);
+  font-variant-numeric: tabular-nums; line-height: 1;
+}
+.stat-card .v .u { font-size: 12px; color: var(--muted); font-weight: 500; margin-left: 2px; }
+
+/* Lista de locais nas estatísticas */
+.place-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px;
+  background: rgba(255,255,255,.03);
+  border: 1px solid rgba(255,255,255,.04);
+  border-radius: 10px;
+  margin-bottom: 6px;
+}
+.place-row .rank {
+  width: 22px; height: 22px; border-radius: 50%;
+  background: rgba(34,197,94,.15); color: var(--green);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 800; flex-shrink: 0;
+}
+.place-row .rank.top { background: var(--green); color: #000; }
+.place-row .info { flex: 1; min-width: 0; }
+.place-row .name {
+  font-size: 13px; font-weight: 700; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.place-row .sub { font-size: 10px; color: var(--muted); margin-top: 1px; }
+.place-row .metrics {
+  display: flex; flex-direction: column; gap: 1px;
+  text-align: right; flex-shrink: 0;
+}
+.place-row .m-count {
+  font-size: 14px; font-weight: 800; color: var(--green);
+  font-variant-numeric: tabular-nums;
+}
+.place-row .m-detail {
+  font-size: 9px; color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.place-row .m-detail .loss { color: var(--red); font-weight: 700; }
+.place-row .m-detail .eff { color: var(--teal); font-weight: 700; }
+.place-row.empty { padding: 16px; text-align: center; }
+.place-row.empty .sub { font-size: 12px; }
+
+/* Sub-tabs (Registros / Estatísticas) — barra acima da tabbar principal */
+.subtab {
+  position: fixed; left: 0; right: 0;
+  bottom: var(--tabbar-h, 52px); z-index: 19;
+  background: rgba(15,15,15,.95);
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  border-top: 1px solid rgba(255,255,255,.05);
+  display: flex; justify-content: space-around;
+  padding: 6px 0;
+}
+.subtab .stb {
+  flex: 1; text-align: center;
+  font-size: 11px; color: var(--muted); font-weight: 600;
+  padding: 8px 0; cursor: pointer; letter-spacing: 0.3px;
+  display: flex; align-items: center; justify-content: center; gap: 4px;
+}
+.subtab .stb.active { color: var(--green); }
+.subtab .stb .ic { font-size: 13px; }
+
+/* Tabbar */
+.tabbar {
+  position: fixed; bottom: 0; left: 0; right: 0; z-index: 20;
+  background: rgba(10,10,10,.92);
+  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  border-top: 1px solid rgba(255,255,255,.05);
+  display: flex; justify-content: space-around;
+  padding: 8px 0 calc(8px + env(safe-area-inset-bottom));
+}
+.tabbar .tb {
+  display: flex; flex-direction: column; align-items: center;
+  font-size: 8px; color: var(--muted); gap: 1px; padding: 0 2px;
+  font-weight: 600; cursor: pointer; flex: 1;
+  letter-spacing: 0.2px;
+}
+.tabbar .tb.active { color: var(--green); }
+.tabbar .ic { font-size: 16px; line-height: 1; }
+
+.dev-bar { position: fixed; top: 4px; right: 4px; background: rgba(0,0,0,.7); border-radius: 8px; padding: 4px 8px; font-size: 9px; color: #fbbf24; z-index: 99; font-weight: 600; }
+
+.section-hidden { display: none; }
+</style>
+</head>
+<body>
+
+<div class="dev-bar">📸 demo</div>
+
+<!-- Header -->
+<div class="head">
+  <div class="brand" onclick="openVersionInfo()">
+    <span class="logo">🚗</span>
+    <div class="info">
+      <div class="model" id="hd-model">Haval H6 PHEV ▾</div>
+      <div class="ver" id="hd-ver">EcoTrip v5.27 · APK v5.27</div>
+    </div>
+  </div>
+  <div class="right">
+    <span class="dot" id="hd-dot" title="Conectado"></span>
+    <span class="bell">🔔</span>
+  </div>
+</div>
+
+<div class="container">
+  <div class="section-title">Posto</div>
+
+  <!-- VIEW: REGISTROS -->
+  <div id="view-registros">
+    <!-- Filtro de tipo -->
+    <div class="filter-chips">
+      <div class="chip active" data-filter="all" onclick="setFilter('all')">Todos</div>
+      <div class="chip" data-filter="recarga" onclick="setFilter('recarga')">⚡ Recargas</div>
+      <div class="chip" data-filter="abastecimento" onclick="setFilter('abastecimento')">⛽ Abastecimentos</div>
+    </div>
+
+    <!-- Lista de registros (preenchida via JS) -->
+    <div id="entries-list"></div>
+
+    <!-- Estado vazio (sem calendar inline — calendar virou modal) -->
+    <div id="empty-state" class="empty-state section-hidden">
+      <div class="ic">⚡</div>
+      <div class="msg" id="empty-msg">Nenhum registro encontrado na data selecionada...</div>
+    </div>
+
+    <!-- Footer: navegação de dia (toque na data abre o calendar modal) -->
+    <div class="date-nav">
+      <div class="arrow" id="nav-prev" onclick="navDay(-1)">‹</div>
+      <div class="label" onclick="openCalendar()">
+        <div class="date" id="nav-date">--</div>
+        <div class="lbl" id="nav-lbl">--</div>
+        <div class="hint">📅 toque pra ver calendário</div>
+      </div>
+      <div class="arrow" id="nav-next" onclick="navDay(1)">›</div>
+    </div>
+  </div>
+
+  <!-- Calendar modal (overlay) -->
+  <div class="cal-modal" id="cal-modal" onclick="if(event.target===this) closeCalendar()">
+    <div class="calendar" id="calendar"></div>
+  </div>
+
+  <!-- Bottom sheet de edição (compartilhado entre todas as ações) -->
+  <div class="action-sheet" id="action-sheet" onclick="if(event.target===this) closeAction()">
+    <div class="action-content">
+      <div class="handle"></div>
+      <div id="action-body"></div>
+    </div>
+  </div>
+
+  <!-- VIEW: ESTATÍSTICAS -->
+  <div id="view-stats" class="section-hidden">
+    <!-- Seletor de período -->
+    <div class="period-card">
+      <div class="ti">Estatísticas</div>
+      <div class="sub">Resumo do período selecionado</div>
+      <div class="options" id="period-options">
+        <div class="opt active" data-period="today" onclick="setPeriod('today')">Hoje</div>
+        <div class="opt" data-period="7d" onclick="setPeriod('7d')">Últimos 7 dias</div>
+        <div class="opt" data-period="30d" onclick="setPeriod('30d')">Últimos 30 dias</div>
+        <div class="opt" data-period="all" onclick="setPeriod('all')">Tudo</div>
+        <div class="opt" data-period="custom" onclick="setPeriod('custom')">Personalizar</div>
+      </div>
+      <!-- Range picker (só aparece quando period=custom) -->
+      <div class="custom-range" id="custom-range" style="display:none">
+        <div class="range-row">
+          <label>De:</label>
+          <input type="date" id="custom-from" onchange="renderStats()">
+        </div>
+        <div class="range-row">
+          <label>Até:</label>
+          <input type="date" id="custom-to" onchange="renderStats()">
+        </div>
+      </div>
+    </div>
+
+    <!-- Stats individuais -->
+    <div class="stat-card green">
+      <div class="icon-box">⚡</div>
+      <div class="meta">
+        <div class="lbl">Recargas no período</div>
+        <div class="v" id="st-charges-n">0</div>
+      </div>
+    </div>
+    <div class="stat-card teal">
+      <div class="icon-box">🔋</div>
+      <div class="meta">
+        <div class="lbl">Energia total recarregada</div>
+        <div class="v"><span id="st-kwh">0</span><span class="u">kWh</span></div>
+      </div>
+    </div>
+    <div class="stat-card yellow">
+      <div class="icon-box">⏱</div>
+      <div class="meta">
+        <div class="lbl">Tempo total de recarga</div>
+        <div class="v" id="st-time">0,0<span class="u">hora</span></div>
+      </div>
+    </div>
+    <div class="stat-card green">
+      <div class="icon-box">📈</div>
+      <div class="meta">
+        <div class="lbl">Ganho total de SoC</div>
+        <div class="v"><span id="st-soc">0</span><span class="u">%</span></div>
+      </div>
+    </div>
+    <div class="stat-card" id="st-loss-card" style="display:none">
+      <div class="icon-box" style="background:rgba(248,113,113,.15);color:var(--red)">📉</div>
+      <div class="meta">
+        <div class="lbl"><span id="st-loss-info">Perda nos carregadores (kWh medido vs entregue)</span></div>
+        <div class="v" style="color:var(--red)"><span id="st-loss">0</span><span class="u">%</span></div>
+      </div>
+    </div>
+    <div class="stat-card orange">
+      <div class="icon-box">⛽</div>
+      <div class="meta">
+        <div class="lbl">Abastecimentos no período</div>
+        <div class="v" id="st-refuels-n">0</div>
+      </div>
+    </div>
+    <div class="stat-card orange">
+      <div class="icon-box">🛢</div>
+      <div class="meta">
+        <div class="lbl">Combustível total abastecido</div>
+        <div class="v"><span id="st-liters">0</span><span class="u">L</span></div>
+      </div>
+    </div>
+    <div class="stat-card yellow">
+      <div class="icon-box">💰</div>
+      <div class="meta">
+        <div class="lbl">Custo total (energia + combustível)</div>
+        <div class="v">R$ <span id="st-cost">0</span></div>
+      </div>
+    </div>
+
+    <!-- Estatística por local — ranking por número de recargas -->
+    <div class="period-card" id="by-place-card" style="display:none;margin-top:14px">
+      <div class="ti">📍 Por local</div>
+      <div class="sub">Ranking de locais com mais recargas no período · % perda + eficiência</div>
+      <div id="by-place-list"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Sub-tabs (Registros · Estatísticas) -->
+<div class="subtab">
+  <div class="stb active" data-view="registros" onclick="setView('registros')"><span class="ic">📋</span>Registros</div>
+  <div class="stb" data-view="stats" onclick="setView('stats')"><span class="ic">📊</span>Estatísticas</div>
+</div>
+
+<!-- Tabbar principal -->
+<div class="tabbar">
+  <div class="tb" data-tab="dash" onclick="location.href='/dash-preview.html'"><span class="ic">🏠</span>Dash</div>
+  <div class="tb" data-tab="drive" onclick="location.href='/drive-preview.html'"><span class="ic">🏎</span>Drive</div>
+  <div class="tb" data-tab="conforto" onclick="location.href='/conforto-preview.html'"><span class="ic">❄️</span>Conforto</div>
+  <div class="tb active" data-tab="posto" onclick="location.href='/posto-preview.html'"><span class="ic">⚡</span>Posto</div>
+  <div class="tb" data-tab="desloc" onclick="location.href='/viagens-preview.html'"><span class="ic">📈</span>Desloc.</div>
+  <div class="tb" data-tab="logs" onclick="location.href='/logs-preview.html'"><span class="ic">📋</span>Logs</div>
+  <div class="tb" data-tab="config" onclick="location.href='/configs-preview.html'"><span class="ic">⚙</span>Config</div>
+</div>
+
+<script>
+const SNAPSHOT = {
+  "charge_limit_pct": 90,
+  "items": [
+    {
+      "id": 1779392768625,
+      "ts": 1779392768625,
+      "type": "recarga",
+      "kwh": 10.01,
+      "duration_sec": 5896,
+      "avg_power_kw": 6.11,
+      "soc_start": 62,
+      "soc_end": 90,
+      "cost": {
+        "total": 6.53,
+        "perKwh": 0.6523476523476524
+      },
+      "override_cost": {
+        "total": 6.53,
+        "perKwh": 0.6523476523476524
+      },
+      "charger_kwh": 11.4,
+      "location": "Limpa Gyn",
+      "location_lat": -16.6225521310156,
+      "location_lng": -49.23311570359275
+    },
+    {
+      "id": 1779291834942,
+      "ts": 1779291834942,
+      "type": "recarga",
+      "kwh": 24.11,
+      "duration_sec": 14487,
+      "avg_power_kw": 5.99,
+      "soc_start": 19,
+      "soc_end": 90,
+      "cost": {
+        "total": 15.67,
+        "perKwh": 0.6499377851513894
+      },
+      "override_cost": {
+        "total": 15.67,
+        "perKwh": 0.6499377851513894
+      },
+      "charger_kwh": 27.34,
+      "location": "Limpa Gyn",
+      "location_lat": -16.622417567605744,
+      "location_lng": -49.23314538679514
+    },
+    {
+      "id": "r-1779201906556-soxxrd",
+      "ts": 1779201906556,
+      "type": "abastecimento",
+      "liters": 38,
+      "price_per_l": 6.39,
+      "cost": 242.82,
+      "fuel_l_before": 13,
+      "fuel_l_after": 51,
+      "location": null
+    },
+    {
+      "id": 1779133533159,
+      "ts": 1779133533159,
+      "type": "recarga",
+      "kwh": 31.43,
+      "duration_sec": 3089,
+      "avg_power_kw": 36.63,
+      "soc_start": 13,
+      "soc_end": 99,
+      "cost": {
+        "total": 80.51,
+        "perKwh": 2.561565383391664
+      },
+      "override_cost": {
+        "total": 80.51,
+        "perKwh": 2.561565383391664
+      },
+      "charger_kwh": 32.83,
+      "location": "Posto Petrobrás Barra do Garças",
+      "location_lat": -15.88370113711273,
+      "location_lng": -52.30554442819968
+    },
+    {
+      "id": 1779111316876,
+      "ts": 1779111316876,
+      "type": "recarga",
+      "kwh": 11.99,
+      "duration_sec": 7063,
+      "avg_power_kw": 6.11,
+      "soc_start": 70,
+      "soc_end": 100,
+      "cost": {
+        "total": 8.07,
+        "perKwh": 0.6730608840700584
+      },
+      "override_cost": {
+        "total": 8.07,
+        "perKwh": 0.6730608840700584
+      },
+      "charger_kwh": 14.08,
+      "location": "Limpa Gyn",
+      "location_lat": -16.62247819969068,
+      "location_lng": -49.23302667711914
+    },
+    {
+      "id": 1779034935815,
+      "ts": 1779034935815,
+      "type": "recarga",
+      "kwh": 9.42,
+      "duration_sec": 5904,
+      "avg_power_kw": 5.74,
+      "soc_start": 65,
+      "soc_end": 90,
+      "cost": {
+        "total": 0,
+        "perKwh": 0,
+        "free": true
+      },
+      "override_cost": {
+        "total": 0,
+        "perKwh": 0,
+        "free": true
+      },
+      "charger_kwh": 10.64,
+      "location": "Jardins Lisboa",
+      "location_lat": -16.769725498744798,
+      "location_lng": -49.35381620742757
+    },
+    {
+      "id": 1778866735105,
+      "ts": 1778866735105,
+      "type": "recarga",
+      "kwh": 4.61,
+      "duration_sec": 2719,
+      "avg_power_kw": 6.1,
+      "soc_start": 77,
+      "soc_end": 90,
+      "cost": 4.61,
+      "charger_kwh": 5.42,
+      "location": "Limpa Gyn",
+      "location_lat": -16.622590443552493,
+      "location_lng": -49.23306504412248
+    },
+    {
+      "id": 1778855486505,
+      "ts": 1778855486505,
+      "type": "recarga",
+      "kwh": 5.37,
+      "duration_sec": 3184,
+      "avg_power_kw": 6.07,
+      "soc_start": 72,
+      "soc_end": 87,
+      "cost": 5.37,
+      "charger_kwh": 7.52,
+      "location": "Limpa Gyn",
+      "location_lat": -16.622593026809533,
+      "location_lng": -49.23306284515152
+    },
+    {
+      "id": 1778785739794,
+      "ts": 1778785739794,
+      "type": "recarga",
+      "kwh": 10.8,
+      "duration_sec": 6674,
+      "avg_power_kw": 5.83,
+      "soc_start": 59,
+      "soc_end": 90,
+      "cost": 10.8,
+      "charger_kwh": 12.77,
+      "location": "Limpa Gyn",
+      "location_lat": -16.622597179855937,
+      "location_lng": -49.23307082411335
+    },
+    {
+      "id": 1778678989248,
+      "ts": 1778678989248,
+      "type": "recarga",
+      "kwh": 10.66,
+      "duration_sec": 6275,
+      "avg_power_kw": 6.12,
+      "soc_start": 61,
+      "soc_end": 90,
+      "cost": 10.66,
+      "charger_kwh": 12.06,
+      "location": "Limpa Gyn",
+      "location_lat": -16.622597179855937,
+      "location_lng": -49.23307082411335
+    }
+  ],
+  "known_places": [
+    {
+      "id": 1778680168607,
+      "name": "Limpa Gyn",
+      "lat": -16.622597179855937,
+      "lng": -49.23307082411335,
+      "radius_m": 200
+    },
+    {
+      "id": 1778784954904,
+      "name": "Casa",
+      "lat": -16.7325572,
+      "lng": -49.2743561,
+      "radius_m": 200
+    },
+    {
+      "id": 1778785785987,
+      "name": "Jardins Lisboa",
+      "lat": -16.769718907273646,
+      "lng": -49.3538302293123,
+      "radius_m": 150
+    },
+    {
+      "id": 1778792832122,
+      "name": "Nasa Business",
+      "lat": -16.6981151,
+      "lng": -49.2584848,
+      "radius_m": 75
+    },
+    {
+      "id": 1778792856472,
+      "name": "Bodytech",
+      "lat": -16.6914966,
+      "lng": -49.2613609,
+      "radius_m": 125
+    },
+    {
+      "id": 1778803344713,
+      "name": "Clean Master Catalão",
+      "lat": -18.189742,
+      "lng": -47.9373861,
+      "radius_m": 100
+    },
+    {
+      "id": 1778803609932,
+      "name": "Clean Master Barra do Garças",
+      "lat": -15.886999993891566,
+      "lng": -52.304342334120925,
+      "radius_m": 300
+    },
+    {
+      "id": 1778803704546,
+      "name": "1934 Academia",
+      "lat": -16.69999405240724,
+      "lng": -49.26506440577913,
+      "radius_m": 50
+    },
+    {
+      "id": 1779133890537,
+      "name": "Posto Petrobrás Barra do Garças",
+      "lat": -15.88370113711273,
+      "lng": -52.30554442819968,
+      "radius_m": 200
+    },
+    {
+      "id": 1779299404074,
+      "name": "Comida Caipira",
+      "lat": -16.651625839443003,
+      "lng": -49.23071907025588,
+      "radius_m": 200
+    },
+    {
+      "id": 1779299443913,
+      "name": "Passeio das Águas",
+      "lat": -16.6299704,
+      "lng": -49.2783748,
+      "radius_m": 350
+    },
+    {
+      "id": 1779325755076,
+      "name": "Clínica Ellevar",
+      "lat": -16.705464844566215,
+      "lng": -49.27145719528198,
+      "radius_m": 75
+    },
+    {
+      "id": 1779327489489,
+      "name": "Recanto da Paz",
+      "lat": -16.88319813614347,
+      "lng": -49.81892108917236,
+      "radius_m": 350
+    }
+  ]
+};
+const items = SNAPSHOT.items;
+
+let currentFilter = 'all';
+let currentDate = new Date(); currentDate.setHours(0,0,0,0);
+let calendarMonth = new Date(currentDate);
+let currentView = 'registros';
+let currentPeriod = 'today';
+
+// Helper: escapa ID pra usar em template de onclick (atributo HTML com aspas duplas).
+// Numbers ficam plain (ex: 1779392768625), strings ficam entre aspas simples (ex: 'r-...-soxxrd').
+function esc(v) {
+  if (typeof v === 'number') return v;
+  return "'" + String(v).replace(/'/g, "\\'") + "'";
+}
+
+function fmtBRL(n) {
+  const v = +n; // coerce number; null/undefined viram NaN
+  return (isNaN(v) ? 0 : v).toFixed(2).replace('.', ',');
+}
+function fmtDate(ms) {
+  return new Date(ms).toLocaleString('pt-BR', { hour:'2-digit', minute:'2-digit' });
+}
+function fmtDay(ms) {
+  return new Date(ms).toLocaleDateString('pt-BR', { weekday:'long', day:'2-digit', month:'short' });
+}
+function fmtDuration(secs) {
+  if (!secs) return '0min';
+  const h = Math.floor(secs / 3600), m = Math.round((secs % 3600) / 60);
+  if (h > 0) return `${h}h ${m}min`;
+  return `${m} min`;
+}
+function isSameDay(ts) {
+  const d = new Date(ts); d.setHours(0,0,0,0);
+  return d.getTime() === currentDate.getTime();
+}
+
+function setFilter(f) {
+  currentFilter = f;
+  document.querySelectorAll('.chip').forEach(el => {
+    el.classList.toggle('active', el.dataset.filter === f);
+  });
+  renderEntries();
+  renderCalendar();   // dots vermelhos refletem o filtro ativo
+}
+
+function setView(v) {
+  currentView = v;
+  document.querySelectorAll('.stb').forEach(el => {
+    el.classList.toggle('active', el.dataset.view === v);
+  });
+  document.getElementById('view-registros').classList.toggle('section-hidden', v !== 'registros');
+  document.getElementById('view-stats').classList.toggle('section-hidden', v !== 'stats');
+  if (v === 'stats') renderStats();
+}
+
+function setPeriod(p) {
+  currentPeriod = p;
+  document.querySelectorAll('.opt').forEach(el => {
+    el.classList.toggle('active', el.dataset.period === p);
+  });
+  document.getElementById('custom-range').style.display = (p === 'custom') ? '' : 'none';
+  // Default custom range: últimos 7 dias até hoje
+  if (p === 'custom') {
+    const from = document.getElementById('custom-from');
+    const to   = document.getElementById('custom-to');
+    if (!to.value) {
+      const today = new Date();
+      to.value = today.toISOString().slice(0, 10);
+      const past = new Date(today); past.setDate(past.getDate() - 7);
+      from.value = past.toISOString().slice(0, 10);
+    }
+  }
+  renderStats();
+}
+
+function navDay(delta) {
+  // Não permite ir pro futuro
+  if (delta > 0) {
+    const today = new Date(); today.setHours(0,0,0,0);
+    if (currentDate.getTime() >= today.getTime()) return;
+  }
+  currentDate.setDate(currentDate.getDate() + delta);
+  // Sincroniza mês do calendar com a data selecionada
+  calendarMonth = new Date(currentDate);
+  renderEntries();
+  renderCalendar();
+  renderDateNav();
+}
+
+function selectDate(d) {
+  currentDate = new Date(d); currentDate.setHours(0,0,0,0);
+  calendarMonth = new Date(currentDate);
+  renderEntries();
+  renderCalendar();
+  renderDateNav();
+  closeCalendar();
+}
+
+function openCalendar() {
+  calendarMonth = new Date(currentDate);
+  renderCalendar();
+  document.getElementById('cal-modal').classList.add('show');
+}
+function closeCalendar() {
+  document.getElementById('cal-modal').classList.remove('show');
+}
+
+// ── Ações por card ─────────────────────────────────────────────────────────
+function getItem(id) { return items.find(i => i.id == id); }
+
+function openAction(title, sub, body) {
+  document.getElementById('action-body').innerHTML = `
+    <div class="ti">${title}</div>
+    <div class="sub">${sub}</div>
+    ${body}
+  `;
+  document.getElementById('action-sheet').classList.add('show');
+}
+function closeAction() {
+  document.getElementById('action-sheet').classList.remove('show');
+}
+
+function openTimeline(id) {
+  const it = getItem(id);
+  if (!it) return;
+  // Simula uma curva de potência durante a recarga (no app real vem do telemetry)
+  const pts = 30;
+  const path = [];
+  for (let i = 0; i < pts; i++) {
+    const t = i / (pts - 1);
+    // Curva típica: sobe rápido, plateau, taper no fim
+    const p = t < 0.1 ? t * 10 * it.avg_power_kw
+            : t > 0.8 ? it.avg_power_kw * (1 - (t - 0.8) * 4)
+            : it.avg_power_kw * (1 + Math.sin(t * 6) * 0.1);
+    path.push([i * (100 / (pts - 1)), 100 - Math.max(0, Math.min(100, p / 50 * 100))]);
+  }
+  const d = 'M ' + path.map(p => p.join(',')).join(' L ');
+  openAction('📈 Linha do tempo', `${fmtDate(it.ts)} · ${fmtDuration(it.duration_sec)}`, `
+    <div class="timeline-chart">
+      <svg viewBox="0 0 100 100" preserveAspectRatio="none">
+        <path d="${d}" fill="none" stroke="#22c55e" stroke-width="1.5" vector-effect="non-scaling-stroke"/>
+        <path d="${d} L 100,100 L 0,100 Z" fill="rgba(34,197,94,.12)"/>
+      </svg>
+    </div>
+    <div class="tl-label">Potência (kW) ao longo da sessão · pico ${it.avg_power_kw.toFixed(1)} kW</div>
+    <div class="btns"><button class="btn cancel" onclick="closeAction()">Fechar</button></div>
+  `);
+}
+
+function openMerge(id) {
+  const it = getItem(id);
+  if (!it) return;
+  // Lista candidatos (mesma data ± 2h, mesma localização ou próxima)
+  const candidates = items.filter(o =>
+    o.id != id && o.type === 'recarga' &&
+    Math.abs(o.ts - it.ts) < 6 * 3600 * 1000
+  ).slice(0, 5);
+  const list = candidates.length ? candidates.map(c => `
+    <div class="input-row" style="flex-direction:row;align-items:center;gap:10px;background:rgba(255,255,255,.04);padding:10px 12px;border-radius:10px">
+      <input type="checkbox" data-merge-id="${c.id}" style="width:18px;height:18px;flex:none">
+      <div style="flex:1">
+        <div style="font-size:13px;font-weight:700">${fmtDate(c.ts)} · ${c.kwh.toFixed(2)} kWh</div>
+        <div style="font-size:11px;color:var(--muted)">SOC ${c.soc_start}→${c.soc_end}%</div>
+      </div>
+    </div>
+  `).join('') : '<div class="sub">Nenhuma recarga próxima encontrada pra unir.</div>';
+  openAction('🔗 Unir recargas', 'Marca as recargas que devem ser combinadas com esta sessão.', `
+    ${list}
+    <div class="btns" style="margin-top:14px">
+      <button class="btn cancel" onclick="closeAction()">Cancelar</button>
+      ${candidates.length ? '<button class="btn confirm" onclick="alert(\'[preview] Unir recargas selecionadas\');closeAction()">Unir</button>' : ''}
+    </div>
+  `);
+}
+
+function openChargerEdit(id) {
+  const it = getItem(id);
+  if (!it) return;
+  const cur = it.charger_kwh || '';
+  const lossInfo = it.kwh > 0 ? `<div class="hint">📊 Se você informar, calculamos a % de perda na aba Estatísticas.</div>` : '';
+  openAction('🔌 kWh medidos no carregador', `Recarga de ${it.kwh.toFixed(2)} kWh no carro · ${fmtDate(it.ts)}`, `
+    <div class="input-row">
+      <label>kWh medidos pelo carregador externo</label>
+      <input id="ai-charger" type="number" step="0.01" placeholder="ex: ${(it.kwh * 1.08).toFixed(2)}" value="${cur}">
+      ${lossInfo}
+    </div>
+    <div class="btns">
+      <button class="btn cancel" onclick="closeAction()">Cancelar</button>
+      <button class="btn confirm" onclick="saveCharger(${esc(id)})">Salvar</button>
+    </div>
+  `);
+}
+function saveCharger(id) {
+  const it = getItem(id);
+  const v = parseFloat(document.getElementById('ai-charger').value);
+  if (!isNaN(v) && v > 0) { it.charger_kwh = v; }
+  else { delete it.charger_kwh; }
+  closeAction();
+  renderEntries();
+}
+
+function openCostEdit(id) {
+  const it = getItem(id);
+  if (!it) return;
+  const computed = it.kwh * 0.9997;
+  openAction('💰 Editar valor pago', `Custo atual: R$ ${fmtBRL(it.cost)} · automático R$ ${fmtBRL(computed)}`, `
+    <div class="input-row">
+      <label>Valor total pago (R$)</label>
+      <input id="ai-cost" type="number" step="0.01" placeholder="${computed.toFixed(2)}" value="${it.override_cost ?? ''}">
+      <div class="hint">Deixe vazio pra recalcular automático a partir do tarifa kWh.</div>
+    </div>
+    <div class="btns">
+      <button class="btn cancel" onclick="closeAction()">Cancelar</button>
+      <button class="btn confirm" onclick="saveCost(${esc(id)})">Salvar</button>
+    </div>
+  `);
+}
+function saveCost(id) {
+  const it = getItem(id);
+  const v = parseFloat(document.getElementById('ai-cost').value);
+  if (!isNaN(v) && v > 0) { it.override_cost = v; it.cost = v; }
+  else { delete it.override_cost; it.cost = +(it.kwh * 0.9997).toFixed(2); }
+  closeAction();
+  renderEntries();
+}
+
+function openLocationEdit(id) {
+  const it = getItem(id);
+  if (!it) return;
+  const places = (SNAPSHOT.known_places || []).sort((a,b) => a.name.localeCompare(b.name, 'pt-BR'));
+  const opts = places.map(p => `<option value="${p.name}"${it.location === p.name ? ' selected' : ''}>${p.name}</option>`).join('');
+  openAction('📍 Local da recarga', it.location ? `Atual: ${it.location}` : 'Nenhum local definido', `
+    <div class="input-row">
+      <label>Escolher de locais conhecidos</label>
+      <select id="ai-loc-kp" onchange="document.getElementById('ai-loc-text').value=this.value">
+        <option value="">— Selecione —</option>
+        ${opts}
+      </select>
+    </div>
+    <div class="input-row">
+      <label>Ou digite manualmente</label>
+      <input id="ai-loc-text" type="text" placeholder="Ex: Casa, Posto Shell BR-040..." value="${it.location || ''}">
+      <div class="hint">Aparece nas estatísticas filtradas por local.</div>
+    </div>
+    <div class="btns">
+      <button class="btn cancel" onclick="closeAction()">Cancelar</button>
+      ${it.location ? '<button class="btn danger" onclick="saveLocation(' + id + ',null)">Remover</button>' : ''}
+      <button class="btn confirm" onclick="saveLocation(${esc(id)})">Salvar</button>
+    </div>
+  `);
+}
+function saveLocation(id, force) {
+  const it = getItem(id);
+  if (force === null) { delete it.location; }
+  else {
+    const v = (document.getElementById('ai-loc-text').value || '').trim();
+    if (v) it.location = v; else delete it.location;
+  }
+  closeAction();
+  renderEntries();
+}
+
+function openMetaEdit(id) {
+  const it = getItem(id);
+  if (!it) return;
+  openAction('✏️ Corrigir dados da recarga', `${fmtDate(it.ts)}`, `
+    <div class="input-row"><label>SOC inicial (%)</label><input id="ai-soc-start" type="number" min="0" max="100" value="${it.soc_start}"></div>
+    <div class="input-row"><label>SOC final (%)</label><input id="ai-soc-end" type="number" min="0" max="100" value="${it.soc_end}"></div>
+    <div class="input-row"><label>Energia (kWh)</label><input id="ai-kwh" type="number" step="0.01" value="${it.kwh.toFixed(2)}"></div>
+    <div class="input-row"><label>Duração (min)</label><input id="ai-dur" type="number" value="${Math.round(it.duration_sec/60)}"></div>
+    <div class="btns">
+      <button class="btn cancel" onclick="closeAction()">Cancelar</button>
+      <button class="btn confirm" onclick="saveMeta(${esc(id)})">Salvar</button>
+    </div>
+  `);
+}
+function saveMeta(id) {
+  const it = getItem(id);
+  it.soc_start = parseInt(document.getElementById('ai-soc-start').value);
+  it.soc_end   = parseInt(document.getElementById('ai-soc-end').value);
+  it.kwh       = parseFloat(document.getElementById('ai-kwh').value);
+  it.duration_sec = parseInt(document.getElementById('ai-dur').value) * 60;
+  it.avg_power_kw = it.duration_sec > 0 ? (it.kwh / (it.duration_sec / 3600)) : 0;
+  if (it.override_cost == null) it.cost = +(it.kwh * 0.9997).toFixed(2);
+  closeAction();
+  renderEntries();
+}
+
+function openRefuelEdit(id) {
+  const it = getItem(id);
+  if (!it) return;
+  openAction('✏️ Editar abastecimento', `${fmtDate(it.ts)}`, `
+    <div class="input-row"><label>Litros abastecidos</label><input id="ai-liters" type="number" step="0.1" value="${it.liters.toFixed(1)}"></div>
+    <div class="input-row"><label>Tanque antes (L)</label><input id="ai-fbefore" type="number" step="0.1" value="${it.fuel_l_before}"></div>
+    <div class="input-row"><label>Tanque depois (L)</label><input id="ai-fafter" type="number" step="0.1" value="${it.fuel_l_after}"></div>
+    <div class="btns">
+      <button class="btn cancel" onclick="closeAction()">Cancelar</button>
+      <button class="btn confirm" onclick="saveRefuel(${esc(id)})">Salvar</button>
+    </div>
+  `);
+}
+function saveRefuel(id) {
+  const it = getItem(id);
+  it.liters = parseFloat(document.getElementById('ai-liters').value);
+  it.fuel_l_before = parseFloat(document.getElementById('ai-fbefore').value);
+  it.fuel_l_after  = parseFloat(document.getElementById('ai-fafter').value);
+  it.cost = +(it.liters * it.price_per_l).toFixed(2);
+  closeAction();
+  renderEntries();
+}
+
+function openRefuelCost(id) {
+  const it = getItem(id);
+  if (!it) return;
+  openAction('💰 Editar valor / preço', `${fmtDate(it.ts)}`, `
+    <div class="input-row"><label>Preço por litro (R$)</label><input id="ai-ppl" type="number" step="0.01" value="${it.price_per_l.toFixed(2)}"></div>
+    <div class="input-row"><label>Valor total (R$)</label><input id="ai-rcost" type="number" step="0.01" value="${it.cost.toFixed(2)}"><div class="hint">Recalcula litros se você editar o total + preço/L.</div></div>
+    <div class="btns">
+      <button class="btn cancel" onclick="closeAction()">Cancelar</button>
+      <button class="btn confirm" onclick="saveRefuelCost(${esc(id)})">Salvar</button>
+    </div>
+  `);
+}
+function saveRefuelCost(id) {
+  const it = getItem(id);
+  it.price_per_l = parseFloat(document.getElementById('ai-ppl').value);
+  it.cost = parseFloat(document.getElementById('ai-rcost').value);
+  closeAction();
+  renderEntries();
+}
+
+function renderEntries() {
+  const list = document.getElementById('entries-list');
+  const empty = document.getElementById('empty-state');
+  const dayItems = items
+    .filter(it => isSameDay(it.ts))
+    .filter(it => currentFilter === 'all' || it.type === currentFilter);
+  if (!dayItems.length) {
+    list.innerHTML = '';
+    empty.classList.remove('section-hidden');
+    const msg = currentFilter === 'recarga' ? 'Nenhuma recarga encontrada na data selecionada...'
+              : currentFilter === 'abastecimento' ? 'Nenhum abastecimento encontrado na data selecionada...'
+              : 'Nenhum registro encontrado na data selecionada...';
+    document.getElementById('empty-msg').textContent = msg;
+    document.querySelector('.empty-state .ic').textContent = currentFilter === 'abastecimento' ? '⛽' : '⚡';
+    return;
+  }
+  empty.classList.add('section-hidden');
+  list.innerHTML = dayItems.map(it => {
+    if (it.type === 'recarga') {
+      const lossPct = (it.charger_kwh > 0 && it.kwh > 0)
+        ? Math.max(0, (it.charger_kwh - it.kwh) / it.charger_kwh * 100) : 0;
+      const hasCharger = it.charger_kwh > 0;
+      const hasOvCost  = it.override_cost != null;
+      const hasLoc     = !!it.location;
+      const placeLabel = it.location
+        ? `📍 ${it.location}`
+        : `<span style="color:var(--muted);font-style:italic">Sem local definido</span>`;
+      return `
+        <div class="entry-card recarga">
+          <div class="row">
+            <div class="icon">⚡</div>
+            <div class="meta">
+              <div class="date">${fmtDate(it.ts)} · ${fmtDuration(it.duration_sec)}</div>
+              <div class="place">${placeLabel}</div>
+            </div>
+            <div class="badge">${it.kwh.toFixed(2)} kWh</div>
+          </div>
+          <div class="details">
+            <span>SOC: <span class="v">${it.soc_start}% → ${it.soc_end}%</span></span>
+            <span>Pot. média: <span class="v">${it.avg_power_kw.toFixed(1)} kW</span></span>
+            <span>Custo: <span class="v">R$ ${fmtBRL(it.cost)}</span></span>
+            ${hasCharger ? `<span>Carregador: <span class="v">${it.charger_kwh.toFixed(2)} kWh</span></span>
+            <span>Perda: <span class="v loss">${lossPct.toFixed(1)}%</span></span>` : ''}
+          </div>
+          <div class="entry-actions">
+            <button title="Definir local" class="${hasLoc ? 'has-value' : ''}" onclick="openLocationEdit(${esc(it.id)})">📍</button>
+            <button title="Ver linha do tempo" onclick="openTimeline(${esc(it.id)})">📈</button>
+            <button title="Unir com outra recarga" onclick="openMerge(${esc(it.id)})">🔗</button>
+            <button title="Quantidade medida no carregador" class="${hasCharger ? 'has-value' : ''}" onclick="openChargerEdit(${esc(it.id)})">🔌</button>
+            <button title="Editar valor pago" class="${hasOvCost ? 'has-value' : ''}" onclick="openCostEdit(${esc(it.id)})">💰</button>
+            <button title="Editar SOC / energia / duração" onclick="openMetaEdit(${esc(it.id)})">✏️</button>
+          </div>
+        </div>`;
+    } else {
+      return `
+        <div class="entry-card abastecimento">
+          <div class="row">
+            <div class="icon">⛽</div>
+            <div class="meta">
+              <div class="date">${fmtDate(it.ts)}</div>
+              <div class="place">${it.location || 'Abastecimento'}</div>
+            </div>
+            <div class="badge">${it.liters.toFixed(1)} L</div>
+          </div>
+          <div class="details">
+            <span>Tanque: <span class="v">${it.fuel_l_before}L → ${it.fuel_l_after}L</span></span>
+            <span>Preço/L: <span class="v">R$ ${fmtBRL(it.price_per_l)}</span></span>
+            <span>Custo: <span class="v">R$ ${fmtBRL(it.cost)}</span></span>
+          </div>
+          <div class="entry-actions">
+            <button title="Editar litros e tanque" onclick="openRefuelEdit(${esc(it.id)})">✏️</button>
+            <button title="Editar valor / preço" onclick="openRefuelCost(${esc(it.id)})">💰</button>
+          </div>
+        </div>`;
+    }
+  }).join('');
+}
+
+function renderCalendar() {
+  const cal = document.getElementById('calendar');
+  const y = calendarMonth.getFullYear(), m = calendarMonth.getMonth();
+  const first = new Date(y, m, 1);
+  const last  = new Date(y, m + 1, 0);
+  const startWeekday = (first.getDay() + 6) % 7;  // Segunda = 0
+  const today = new Date(); today.setHours(0,0,0,0);
+  const monthName = first.toLocaleDateString('pt-BR', { month:'long', year:'numeric' });
+  // Dias com evento — respeita o filtro atual (Tudo / Recargas / Abastecimentos)
+  const eventsDays = new Set();
+  for (const it of items) {
+    if (currentFilter !== 'all' && it.type !== currentFilter) continue;
+    const d = new Date(it.ts); d.setHours(0,0,0,0);
+    if (d.getFullYear() === y && d.getMonth() === m) eventsDays.add(d.getDate());
+  }
+  let html = `
+    <div class="cal-head">
+      <span class="nav" onclick="changeMonth(-1)">←</span>
+      <span class="title">${monthName}</span>
+      <span class="nav" onclick="changeMonth(1)">→</span>
+    </div>
+    <div class="cal-grid">
+      ${['2ª','3ª','4ª','5ª','6ª','Sá','Do'].map(d => `<div class="cal-dow">${d}</div>`).join('')}
+  `;
+  for (let i = 0; i < startWeekday; i++) html += '<div></div>';
+  for (let d = 1; d <= last.getDate(); d++) {
+    const dt = new Date(y, m, d);
+    const isToday = dt.getTime() === today.getTime();
+    const isSelected = dt.getTime() === currentDate.getTime();
+    const hasEvent = eventsDays.has(d);
+    let cls = 'cal-day';
+    if (isToday) cls += ' today';
+    if (isSelected) cls += ' selected';
+    if (hasEvent) cls += ' has-event';
+    html += `<div class="${cls}" onclick="selectDate(new Date(${y},${m},${d}))">${d}</div>`;
+  }
+  html += '</div>';
+  cal.innerHTML = html;
+}
+
+function changeMonth(delta) {
+  calendarMonth.setMonth(calendarMonth.getMonth() + delta);
+  renderCalendar();
+}
+
+function renderDateNav() {
+  const today = new Date(); today.setHours(0,0,0,0);
+  const isToday = currentDate.getTime() === today.getTime();
+  document.getElementById('nav-date').textContent =
+    currentDate.toLocaleDateString('pt-BR');
+  document.getElementById('nav-lbl').textContent = isToday ? 'Hoje'
+    : currentDate.toLocaleDateString('pt-BR', { weekday: 'long' });
+  document.getElementById('nav-next').classList.toggle('disabled', isToday);
+}
+
+function renderStats() {
+  const now = Date.now(), day = 86400000;
+  let start = 0, end = Infinity;
+  if (currentPeriod === 'today') {
+    const t = new Date(); t.setHours(0,0,0,0); start = t.getTime();
+  } else if (currentPeriod === '7d')  start = now - 7  * day;
+  else if (currentPeriod === '30d') start = now - 30 * day;
+  else if (currentPeriod === 'custom') {
+    const fv = document.getElementById('custom-from')?.value;
+    const tv = document.getElementById('custom-to')?.value;
+    if (fv) { const d = new Date(fv); d.setHours(0,0,0,0); start = d.getTime(); }
+    if (tv) { const d = new Date(tv); d.setHours(23,59,59,999); end = d.getTime(); }
+  }
+  const filtered = items.filter(i => i.ts >= start && i.ts <= end);
+  const charges = filtered.filter(i => i.type === 'recarga');
+  const refuels = filtered.filter(i => i.type === 'abastecimento');
+  const totalKwh = charges.reduce((s,c) => s + c.kwh, 0);
+  const totalSec = charges.reduce((s,c) => s + c.duration_sec, 0);
+  const socGain  = charges.reduce((s,c) => s + ((c.soc_end || 0) - (c.soc_start || 0)), 0);
+  const totalLiters = refuels.reduce((s,r) => s + r.liters, 0);
+  const totalCost = filtered.reduce((s,i) => s + (i.cost || 0), 0);
+  document.getElementById('st-charges-n').textContent = charges.length;
+  document.getElementById('st-kwh').textContent       = totalKwh.toFixed(1);
+  document.getElementById('st-time').innerHTML        = `${(totalSec/3600).toFixed(1).replace('.',',')}<span class="u">hora${totalSec/3600>=2?'s':''}</span>`;
+  document.getElementById('st-soc').textContent       = Math.round(socGain);
+  document.getElementById('st-refuels-n').textContent = refuels.length;
+  document.getElementById('st-liters').textContent    = totalLiters.toFixed(1);
+  document.getElementById('st-cost').textContent      = fmtBRL(totalCost);
+  // ── Perda média nos carregadores (só recargas que têm charger_kwh informado)
+  const withCharger = charges.filter(c => c.charger_kwh > 0);
+  const lossCard = document.getElementById('st-loss-card');
+  if (withCharger.length > 0) {
+    const chargerSum = withCharger.reduce((s,c) => s + c.charger_kwh, 0);
+    const carSum     = withCharger.reduce((s,c) => s + c.kwh, 0);
+    const lossPct = chargerSum > 0 ? ((chargerSum - carSum) / chargerSum * 100) : 0;
+    document.getElementById('st-loss').textContent = lossPct.toFixed(1);
+    document.getElementById('st-loss-info').textContent =
+      `Perda nos carregadores · ${withCharger.length} de ${charges.length} medidas`;
+    lossCard.style.display = '';
+  } else {
+    lossCard.style.display = 'none';
+  }
+
+  // ── Ranking por local: agrupa recargas por location, ordena por count desc
+  renderByPlace(charges);
+}
+
+function renderByPlace(charges) {
+  const byPlaceCard = document.getElementById('by-place-card');
+  const byPlaceList = document.getElementById('by-place-list');
+  if (!charges.length) {
+    byPlaceCard.style.display = 'none';
+    return;
+  }
+  const groups = new Map();  // location → { count, kwh, charger_kwh, with_charger, soc_gain }
+  for (const c of charges) {
+    const loc = c.location || '— Sem local definido —';
+    const g = groups.get(loc) || { name: loc, count: 0, kwh: 0, charger_kwh: 0, with_charger: 0, soc_gain: 0 };
+    g.count++;
+    g.kwh += c.kwh || 0;
+    g.soc_gain += (c.soc_end || 0) - (c.soc_start || 0);
+    if (c.charger_kwh > 0) {
+      g.charger_kwh += c.charger_kwh;
+      g.with_charger++;
+    }
+    groups.set(loc, g);
+  }
+  const list = [...groups.values()].sort((a,b) => b.count - a.count);
+  if (!list.length) {
+    byPlaceCard.style.display = 'none';
+    return;
+  }
+  byPlaceCard.style.display = '';
+  byPlaceList.innerHTML = list.map((g, i) => {
+    // Perda só se há medidas de carregador
+    const hasLoss = g.with_charger > 0 && g.charger_kwh > 0;
+    const lossPct = hasLoss ? ((g.charger_kwh - (charges.filter(c => (c.location || '— Sem local definido —') === g.name && c.charger_kwh > 0).reduce((s,c) => s + c.kwh, 0))) / g.charger_kwh * 100) : null;
+    // Eficiência = kWh entregue / kWh medido (1 - perda)
+    const effPct = hasLoss ? (100 - lossPct) : null;
+    const lossLabel = hasLoss
+      ? `<span class="loss">↓ ${lossPct.toFixed(1)}% perda</span> · <span class="eff">${effPct.toFixed(1)}% efic.</span>`
+      : `<span style="opacity:.5">sem medida de carregador</span>`;
+    return `
+      <div class="place-row">
+        <div class="rank ${i === 0 ? 'top' : ''}">${i + 1}</div>
+        <div class="info">
+          <div class="name">${g.name}</div>
+          <div class="sub">${g.kwh.toFixed(1)} kWh · ganho SOC ${Math.round(g.soc_gain)}% acumulado</div>
+        </div>
+        <div class="metrics">
+          <div class="m-count">${g.count} <span style="font-size:9px;font-weight:600;color:var(--muted)">recargas</span></div>
+          <div class="m-detail">${lossLabel}</div>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function updateTabbarHeights() {
+  const tab = document.querySelector('.tabbar')?.offsetHeight || 52;
+  const sub = document.querySelector('.subtab')?.offsetHeight || 38;
+  document.documentElement.style.setProperty('--tabbar-h', tab + 'px');
+  document.documentElement.style.setProperty('--subtab-h', sub + 'px');
+}
+
+// Bootstrap
+updateTabbarHeights();
+window.addEventListener('resize', updateTabbarHeights);
+renderEntries();
+renderCalendar();
+renderDateNav();
+
+function openVersionInfo() {
+  const lines = [
+    '🚗 Carro',
+    '  APK: v5.27 (build 157)',
+    '  Última atualização: 1 min atrás',
+    '',
+    '📱 App PWA',
+    '  v5.27 (build 171)',
+    '  Última atualização: agora',
+    '',
+    '🌉 Bridge',
+    '  v5.27 · uptime 2h',
+  ];
+  alert(lines.join('\n'));
+}
+
+</script>
+</body></html>

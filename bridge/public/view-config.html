@@ -1,0 +1,539 @@
+<style>
+.container { padding: 0 16px; max-width: 480px; margin: 0 auto; }
+
+
+/* Lista iOS-style — 1 linha por item */
+.settings-group {
+  background: rgba(31,31,31,.85);
+  border: 1px solid rgba(255,255,255,.06);
+  border-radius: 14px;
+  overflow: hidden;
+  margin-bottom: 12px;
+}
+.settings-item {
+  display: flex; align-items: center; gap: 12px;
+  padding: 14px;
+  cursor: pointer;
+  border-bottom: 1px solid rgba(255,255,255,.04);
+  transition: background .12s;
+}
+.settings-item:last-child { border-bottom: none; }
+.settings-item:active { background: rgba(255,255,255,.04); }
+.settings-item .icon-box {
+  width: 32px; height: 32px; border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 16px; flex-shrink: 0;
+}
+.settings-item.green .icon-box  { background: rgba(34,197,94,.15); color: var(--green); }
+.settings-item.teal .icon-box   { background: rgba(34,211,238,.15); color: var(--teal); }
+.settings-item.yellow .icon-box { background: rgba(251,191,36,.15); color: var(--yellow); }
+.settings-item.orange .icon-box { background: rgba(251,146,60,.15); color: var(--orange); }
+.settings-item.blue .icon-box   { background: rgba(96,165,250,.15); color: var(--blue); }
+.settings-item.red .icon-box    { background: rgba(248,113,113,.15); color: var(--red); }
+.settings-item.muted .icon-box  { background: rgba(148,163,184,.15); color: #cbd5e1; }
+.settings-item .info { flex: 1; min-width: 0; }
+.settings-item .label { font-size: 14px; font-weight: 600; color: var(--text); }
+.settings-item .sub {
+  font-size: 11px; color: var(--muted); margin-top: 2px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.settings-item .chevron { color: var(--muted); font-size: 18px; opacity: .5; flex-shrink: 0; }
+
+/* Subview overlay (slide-in da direita, estilo iOS) */
+.subview {
+  position: fixed; top: 0; right: 0; bottom: 0; left: 0;
+  background: var(--bg); z-index: 100;
+  transform: translateX(100%);
+  transition: transform .25s cubic-bezier(.4,.0,.2,1);
+  overflow-y: auto;
+  padding-bottom: calc(env(safe-area-inset-bottom) + 16px);
+}
+.subview.show { transform: translateX(0); }
+.subview .sub-head {
+  position: sticky; top: 0; z-index: 5;
+  display: flex; align-items: center; gap: 10px;
+  padding: calc(env(safe-area-inset-top) + 10px) 14px 12px;
+  background: linear-gradient(180deg, rgba(20,20,20,.97) 80%, transparent);
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(255,255,255,.04);
+}
+.subview .sub-back {
+  width: 36px; height: 36px; border-radius: 50%;
+  background: rgba(255,255,255,.06);
+  border: none; color: var(--text);
+  font-size: 18px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+}
+.subview .sub-back:active { transform: scale(.92); }
+.subview .sub-title { flex: 1; font-size: 17px; font-weight: 700; }
+.subview .sub-body { padding: 16px; max-width: 480px; margin: 0 auto; }
+
+.field {
+  background: rgba(31,31,31,.85);
+  border: 1px solid rgba(255,255,255,.06);
+  border-radius: 12px;
+  padding: 12px 14px;
+  margin-bottom: 10px;
+}
+.field .lbl {
+  font-size: 10px; color: var(--muted); font-weight: 700;
+  letter-spacing: 1.2px; text-transform: uppercase;
+  margin-bottom: 6px;
+}
+.field input[type="text"], .field input[type="number"], .field input[type="password"] {
+  width: 100%; background: transparent; border: none; outline: none;
+  color: var(--text); font-size: 15px; font-family: inherit;
+  font-variant-numeric: tabular-nums;
+}
+.field .hint { font-size: 10px; color: var(--muted); margin-top: 6px; line-height: 1.4; }
+.field-group { margin-bottom: 16px; }
+.field-group .group-ti {
+  font-size: 10px; color: var(--muted); font-weight: 700;
+  letter-spacing: 1.2px; text-transform: uppercase;
+  padding: 0 14px 6px;
+}
+
+.toggle-row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 14px;
+  background: rgba(31,31,31,.85);
+  border: 1px solid rgba(255,255,255,.06);
+  border-radius: 12px;
+  margin-bottom: 8px;
+}
+.toggle-row .label { flex: 1; font-size: 13px; font-weight: 600; }
+.toggle-row .sub { font-size: 10px; color: var(--muted); font-weight: 400; margin-top: 2px; }
+.toggle {
+  width: 44px; height: 26px; border-radius: 13px;
+  background: rgba(255,255,255,.1); position: relative; cursor: pointer;
+  transition: background .2s; flex-shrink: 0;
+}
+.toggle::after {
+  content: ''; position: absolute; top: 2px; left: 2px;
+  width: 22px; height: 22px; border-radius: 50%; background: #94a3b8;
+  transition: left .2s, background .2s;
+}
+.toggle.on { background: rgba(34,197,94,.3); }
+.toggle.on::after { left: 20px; background: var(--green); }
+
+.btn {
+  width: 100%; padding: 13px; border: none; border-radius: 12px;
+  font-size: 14px; font-weight: 700; cursor: pointer; font-family: inherit;
+  margin-top: 8px;
+}
+.btn.primary { background: var(--green); color: #000; }
+.btn.secondary { background: rgba(255,255,255,.06); color: var(--text); }
+.btn.danger { background: var(--red); color: #fff; }
+.btn:active { transform: scale(.98); }
+
+.soc-chips { display: flex; gap: 6px; margin-top: 8px; }
+.soc-chip {
+  flex: 1; padding: 10px; text-align: center;
+  background: rgba(255,255,255,.04); color: #cbd5e1;
+  border: 1px solid rgba(255,255,255,.06);
+  border-radius: 10px; font-size: 13px; font-weight: 700;
+  cursor: pointer; font-variant-numeric: tabular-nums;
+}
+.soc-chip.active { background: rgba(34,197,94,.15); color: var(--green); border-color: var(--green); }
+
+.about-card {
+  background: rgba(31,31,31,.85);
+  border: 1px solid rgba(255,255,255,.06);
+  border-radius: 14px;
+  padding: 18px; text-align: center; margin-bottom: 12px;
+}
+.about-card .logo { font-size: 40px; margin-bottom: 4px; }
+.about-card .name { font-size: 18px; font-weight: 800; color: var(--green); }
+.about-card .ver { font-size: 12px; color: var(--muted); font-weight: 500; margin-top: 4px; }
+.about-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 14px;
+  background: rgba(31,31,31,.85);
+  border: 1px solid rgba(255,255,255,.06);
+  border-radius: 10px; margin-bottom: 6px;
+  font-size: 13px;
+}
+.about-row .l { color: var(--muted); }
+.about-row .v { font-weight: 700; font-variant-numeric: tabular-nums; }
+
+
+
+
+
+.toast {
+  position: fixed; bottom: 110px; left: 50%; transform: translateX(-50%);
+  background: rgba(31,31,31,.95);
+  border: 1px solid rgba(34,197,94,.3);
+  padding: 10px 18px; border-radius: 24px;
+  font-size: 13px; color: var(--green); font-weight: 700;
+  z-index: 200; box-shadow: 0 4px 16px rgba(0,0,0,.4);
+  opacity: 0; transition: opacity .2s; pointer-events: none;
+}
+.toast.show { opacity: 1; }
+</style>
+
+</div>
+  <div class="right">
+    <span class="dot"></span>
+    <span class="bell">🔔</span>
+  </div>
+</div>
+
+<div class="container">
+  <div class="section-title">Configurações</div>
+
+  <!-- Grupo 1: Carro -->
+  <div class="settings-group">
+    <div class="settings-item green" onclick="openSub('vehicle')">
+      <div class="icon-box">🚗</div>
+      <div class="info"><div class="label">Veículo</div><div class="sub">Chassi · capacidade da bateria</div></div>
+      <span class="chevron">›</span>
+    </div>
+    <div class="settings-item teal" onclick="openSub('charge')">
+      <div class="icon-box">🔋</div>
+      <div class="info"><div class="label">Recarga</div><div class="sub">Limite SOC</div></div>
+      <span class="chevron">›</span>
+    </div>
+    <div class="settings-item orange" onclick="openSub('maint')">
+      <div class="icon-box">🔧</div>
+      <div class="info"><div class="label">Manutenção</div><div class="sub">Próximas · histórico</div></div>
+      <span class="chevron">›</span>
+    </div>
+  </div>
+
+  <!-- Grupo 2: Pessoal -->
+  <div class="settings-group">
+    <div class="settings-item blue" onclick="openSub('notif')">
+      <div class="icon-box">🔔</div>
+      <div class="info"><div class="label">Notificações</div><div class="sub">Push e alertas</div></div>
+      <span class="chevron">›</span>
+    </div>
+    <div class="settings-item red" onclick="openSub('security')">
+      <div class="icon-box">🔐</div>
+      <div class="info"><div class="label">Conta & Segurança</div><div class="sub">Senha · 2FA</div></div>
+      <span class="chevron">›</span>
+    </div>
+    <div class="settings-item muted" onclick="openSub('backup')">
+      <div class="icon-box">💾</div>
+      <div class="info"><div class="label">Backup & Dados</div><div class="sub">Exportar · restaurar · limpar</div></div>
+      <span class="chevron">›</span>
+    </div>
+  </div>
+
+  <!-- Grupo 3: Avançado + Sobre -->
+  <div class="settings-group">
+    <div class="settings-item muted" onclick="openSub('advanced')">
+      <div class="icon-box">⚙</div>
+      <div class="info"><div class="label">Avançado</div><div class="sub">Radares · locais · servidor</div></div>
+      <span class="chevron">›</span>
+    </div>
+    <div class="settings-item muted" onclick="openSub('about')">
+      <div class="icon-box">ℹ️</div>
+      <div class="info"><div class="label">Sobre</div><div class="sub">v5.28 · build 159</div></div>
+      <span class="chevron">›</span>
+    </div>
+  </div>
+</div>
+
+<!-- ── Subviews ── -->
+
+<div class="subview" id="sv-vehicle">
+  <div class="sub-head">
+    <button class="sub-back" onclick="closeSub()">←</button>
+    <div class="sub-title">🚗 Veículo</div>
+  </div>
+  <div class="sub-body">
+    <div class="field"><div class="lbl">Modelo</div><input type="text" value="Haval H6 PHEV34" readonly></div>
+    <div class="field">
+      <div class="lbl">Chassi (VIN)</div>
+      <input type="text" id="cfg-chassi" value="lgwffva55sh931315">
+      <div class="hint">Formato: <code>lgw</code> + 14 alfanuméricos · grava em <code>vehicle.json</code></div>
+    </div>
+    <div class="field">
+      <div class="lbl">Capacidade da bateria (kWh)</div>
+      <input type="number" id="cfg-batt-cap" value="34" step="0.1" min="10" max="100">
+      <div class="hint">Usado pra calcular % perda nas recargas</div>
+    </div>
+    <div class="field">
+      <div class="lbl">Capacidade do tanque (L)</div>
+      <input type="number" id="cfg-fuel-cap" value="55" step="1" min="10" max="200">
+      <div class="hint">Usado pra calcular % combustível</div>
+    </div>
+    <button class="btn primary" onclick="saveSection('vehicle')">Salvar</button>
+  </div>
+</div>
+
+<div class="subview" id="sv-charge">
+  <div class="sub-head">
+    <button class="sub-back" onclick="closeSub()">←</button>
+    <div class="sub-title">🔋 Recarga</div>
+  </div>
+  <div class="sub-body">
+    <div class="field">
+      <div class="lbl">SOC máximo na recarga</div>
+      <div class="soc-chips" id="soc-chips">
+        <div class="soc-chip" data-pct="50">50%</div>
+        <div class="soc-chip" data-pct="60">60%</div>
+        <div class="soc-chip" data-pct="70">70%</div>
+        <div class="soc-chip" data-pct="80">80%</div>
+        <div class="soc-chip active" data-pct="90">90%</div>
+        <div class="soc-chip" data-pct="100">100%</div>
+      </div>
+      <div class="hint">Envia comando ao carro pra parar de carregar nesse nível · atual: <strong id="soc-cur">90%</strong></div>
+    </div>
+  </div>
+</div>
+
+<div class="subview" id="sv-maint">
+  <div class="sub-head">
+    <button class="sub-back" onclick="closeSub()">←</button>
+    <div class="sub-title">🔧 Manutenção</div>
+  </div>
+  <div class="sub-body">
+    <div class="field-group">
+      <div class="group-ti">Próximas</div>
+      <div class="field" style="display:flex;justify-content:space-between;align-items:center">
+        <div><div style="font-size:13px;font-weight:700">🛢 Troca de óleo</div><div style="font-size:10px;color:var(--muted);margin-top:2px">a cada 10.000 km · próx. em 1.240 km</div></div>
+        <span style="font-size:13px;color:var(--yellow);font-weight:700">⚠ próximo</span>
+      </div>
+      <div class="field" style="display:flex;justify-content:space-between;align-items:center">
+        <div><div style="font-size:13px;font-weight:700">🌬 Filtro de ar</div><div style="font-size:10px;color:var(--muted);margin-top:2px">a cada 15.000 km · próx. em 8.200 km</div></div>
+        <span style="font-size:13px;color:var(--green);font-weight:700">OK</span>
+      </div>
+      <div class="field" style="display:flex;justify-content:space-between;align-items:center">
+        <div><div style="font-size:13px;font-weight:700">🛞 Pastilhas de freio</div><div style="font-size:10px;color:var(--muted);margin-top:2px">a cada 30.000 km · próx. em 14.500 km</div></div>
+        <span style="font-size:13px;color:var(--green);font-weight:700">OK</span>
+      </div>
+    </div>
+    <button class="btn secondary" onclick="showToast('Em construção: adicionar nova manutenção')">+ Adicionar manutenção</button>
+  </div>
+</div>
+
+<div class="subview" id="sv-notif">
+  <div class="sub-head">
+    <button class="sub-back" onclick="closeSub()">←</button>
+    <div class="sub-title">🔔 Notificações</div>
+  </div>
+  <div class="sub-body">
+    <div class="field-group">
+      <div class="group-ti">Eventos do carro</div>
+      <div class="toggle-row"><div class="label">Motor ligado/desligado<div class="sub">Push quando alguém liga o carro</div></div><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
+      <div class="toggle-row"><div class="label">Porta-malas<div class="sub">Aberto/fechado</div></div><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
+      <div class="toggle-row"><div class="label">Travamento<div class="sub">Tranca/destranca</div></div><div class="toggle" onclick="this.classList.toggle('on')"></div></div>
+      <div class="toggle-row"><div class="label">Portas abertas<div class="sub">Quando o carro está estacionado</div></div><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
+    </div>
+    <div class="field-group">
+      <div class="group-ti">Recarga</div>
+      <div class="toggle-row"><div class="label">Início da recarga<div class="sub">Confirma quando conecta</div></div><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
+      <div class="toggle-row"><div class="label">Fim da recarga<div class="sub">Quando atinge meta SOC</div></div><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
+      <div class="toggle-row"><div class="label">Próximo do fim<div class="sub">Aviso 5min antes</div></div><div class="toggle" onclick="this.classList.toggle('on')"></div></div>
+    </div>
+    <div class="field-group">
+      <div class="group-ti">Manutenção</div>
+      <div class="toggle-row"><div class="label">Manutenção próxima<div class="sub">Aviso quando faltar &lt; 1000 km</div></div><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
+    </div>
+  </div>
+</div>
+
+<div class="subview" id="sv-security">
+  <div class="sub-head">
+    <button class="sub-back" onclick="closeSub()">←</button>
+    <div class="sub-title">🔐 Conta & Segurança</div>
+  </div>
+  <div class="sub-body">
+    <div class="field-group">
+      <div class="group-ti">Senha</div>
+      <div class="field"><div class="lbl">Nova senha</div><input type="password" id="cfg-pw-new" placeholder="••••••••"></div>
+      <div class="field"><div class="lbl">Confirmar nova senha</div><input type="password" id="cfg-pw-confirm" placeholder="••••••••"></div>
+      <button class="btn primary" onclick="saveSection('password')">Alterar senha</button>
+    </div>
+    <div class="field-group">
+      <div class="group-ti">Autenticação em 2 etapas (TOTP)</div>
+      <div class="toggle-row"><div class="label">2FA<div class="sub">Código de 6 dígitos no login (Google Authenticator)</div></div><div class="toggle" id="tg-2fa" onclick="toggle2fa(this)"></div></div>
+      <div class="hint" style="font-size:10px;color:var(--muted);padding:0 4px;margin-top:6px">Quando ativo, novos dispositivos precisam do código. Sessões logadas continuam funcionando.</div>
+    </div>
+  </div>
+</div>
+
+<div class="subview" id="sv-backup">
+  <div class="sub-head">
+    <button class="sub-back" onclick="closeSub()">←</button>
+    <div class="sub-title">💾 Backup & Dados</div>
+  </div>
+  <div class="sub-body">
+    <div class="field-group">
+      <div class="group-ti">Exportar tudo</div>
+      <div class="field">
+        <div style="font-size:13px;font-weight:600;margin-bottom:4px">Backup completo (servidor)</div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:10px">Inclui viagens, recargas, abastecimentos, manutenções, locais conhecidos e radares ignorados.</div>
+        <button class="btn primary" onclick="showToast('⬇ Baixando backup-v4.json')">⬇ Baixar JSON</button>
+      </div>
+    </div>
+    <div class="field-group">
+      <div class="group-ti">Restaurar</div>
+      <div class="field">
+        <div style="font-size:13px;font-weight:600;margin-bottom:4px">Importar backup</div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:10px">Substitui todos os dados atuais. Ação irreversível.</div>
+        <button class="btn secondary" onclick="showToast('Selecione arquivo backup-v4.json')">📂 Selecionar arquivo</button>
+      </div>
+    </div>
+    <div class="field-group">
+      <div class="group-ti">Zona de perigo</div>
+      <button class="btn danger" onclick="confirmClearHistory()">🗑 Limpar todo o histórico</button>
+      <div class="hint" style="text-align:center;margin-top:8px;color:var(--muted)">Apaga viagens, recargas, abastecimentos. Mantém configurações e locais.</div>
+    </div>
+  </div>
+</div>
+
+<div class="subview" id="sv-advanced">
+  <div class="sub-head">
+    <button class="sub-back" onclick="closeSub()">←</button>
+    <div class="sub-title">⚙ Avançado</div>
+  </div>
+  <div class="sub-body">
+    <div class="field-group">
+      <div class="group-ti">Radares e mapa</div>
+      <div class="settings-group">
+        <div class="settings-item teal" onclick="showToast('⏳ Atualizando base de radares...')">
+          <div class="icon-box">📡</div>
+          <div class="info"><div class="label">Atualizar base de radares</div><div class="sub">Refresh OSM · última: 18/05</div></div>
+          <span class="chevron">›</span>
+        </div>
+        <div class="settings-item green" onclick="showToast('⏳ Reanalisando viagens...')">
+          <div class="icon-box">⚙</div>
+          <div class="info"><div class="label">Reanalisar deslocamentos</div><div class="sub">Recalcula alertas de multa</div></div>
+          <span class="chevron">›</span>
+        </div>
+        <div class="settings-item yellow" onclick="openSub('places')">
+          <div class="icon-box">📍</div>
+          <div class="info"><div class="label">Locais conhecidos</div><div class="sub">14 locais cadastrados</div></div>
+          <span class="chevron">›</span>
+        </div>
+      </div>
+    </div>
+    <div class="field-group">
+      <div class="group-ti">Servidor (bridge)</div>
+      <div class="settings-group">
+        <div class="settings-item muted" onclick="showToast('🔄 Reiniciando bridge...')">
+          <div class="icon-box">🔄</div>
+          <div class="info"><div class="label">Reiniciar bridge</div><div class="sub">pm2 restart</div></div>
+          <span class="chevron">›</span>
+        </div>
+        <div class="settings-item muted" onclick="showToast('⬆ git pull + restart')">
+          <div class="icon-box">⬆</div>
+          <div class="info"><div class="label">Atualizar do GitHub</div><div class="sub">git pull origin main</div></div>
+          <span class="chevron">›</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="subview" id="sv-places">
+  <div class="sub-head">
+    <button class="sub-back" onclick="openSub('advanced')">←</button>
+    <div class="sub-title">📍 Locais conhecidos</div>
+  </div>
+  <div class="sub-body">
+    <button class="btn primary">+ Adicionar local</button>
+    <div class="field-group" style="margin-top:14px">
+      <div class="group-ti">14 locais cadastrados</div>
+      <div class="field" style="display:flex;justify-content:space-between"><div style="flex:1"><strong>Limpa Gyn</strong><div style="font-size:10px;color:var(--muted)">raio 200m</div></div><span style="color:var(--muted)">›</span></div>
+      <div class="field" style="display:flex;justify-content:space-between"><div style="flex:1"><strong>Casa</strong><div style="font-size:10px;color:var(--muted)">raio 200m</div></div><span style="color:var(--muted)">›</span></div>
+      <div class="field" style="display:flex;justify-content:space-between"><div style="flex:1"><strong>Bodytech</strong><div style="font-size:10px;color:var(--muted)">raio 125m</div></div><span style="color:var(--muted)">›</span></div>
+      <div class="field" style="text-align:center;color:var(--muted);font-size:11px">+ 11 outros...</div>
+    </div>
+  </div>
+</div>
+
+<div class="subview" id="sv-about">
+  <div class="sub-head">
+    <button class="sub-back" onclick="closeSub()">←</button>
+    <div class="sub-title">ℹ️ Sobre</div>
+  </div>
+  <div class="sub-body">
+    <div class="about-card">
+      <div class="logo">🚗</div>
+      <div class="name">EcoTrip Impulse</div>
+      <div class="ver">v5.28 · build 159</div>
+    </div>
+    <div class="about-row"><span class="l">📱 PWA (este app)</span><span class="v">v5.28 · b172</span></div>
+    <div class="about-row"><span class="l">🚙 APK (carro)</span><span class="v">v5.28 · b159</span></div>
+    <div class="about-row"><span class="l">🌉 Bridge (Node)</span><span class="v">v5.28</span></div>
+    <div class="about-row"><span class="l">🕐 Última atualização carro</span><span class="v">1 min</span></div>
+    <div class="about-row"><span class="l">📡 MQTT broker</span><span class="v" style="color:var(--green)">conectado</span></div>
+    <div class="about-row"><span class="l">⏱ Uptime bridge</span><span class="v">2h 14min</span></div>
+    <div style="margin-top:14px">
+      <button class="btn secondary" onclick="window.open('https://github.com/rafaelcs28/haval-ecotrip','_blank')">🐙 Repositório no GitHub</button>
+      <button class="btn secondary" onclick="showToast('Uso pessoal · sem garantia')">📄 Licença</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  function openSub(name) {
+  document.querySelectorAll('.subview.show').forEach(el => el.classList.remove('show'));
+  const el = document.getElementById('sv-' + name);
+  if (!el) return;
+  el.classList.add('show');
+  window.scrollTo(0, 0);
+}
+function closeSub() {
+  document.querySelectorAll('.subview.show').forEach(el => el.classList.remove('show'));
+}
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(showToast._t);
+  showToast._t = setTimeout(() => t.classList.remove('show'), 2000);
+}
+
+function saveSection(name) {
+  const msgs = {
+    vehicle:  '✓ Veículo salvo · reinicie o bridge pra aplicar mudanças do chassi',
+    costs:    '✓ Custos atualizados',
+    password: '✓ Senha alterada · você continuará logado',
+  };
+  showToast(msgs[name] || '✓ Salvo');
+}
+
+function toggle2fa(el) {
+  el.classList.toggle('on');
+  if (el.classList.contains('on')) {
+    showToast('📲 Abra o app autenticador e escaneie o QR (em construção)');
+  } else {
+    showToast('2FA desativada');
+  }
+}
+
+function confirmClearHistory() {
+  if (confirm('⚠ Apagar TODO o histórico de deslocamentos, recargas e abastecimentos?\n\nIrreversível.')) {
+    showToast('🗑 Histórico apagado');
+  }
+}
+
+// Chips SOC do limite de recarga
+document.querySelectorAll('.soc-chip').forEach(chip => {
+  chip.onclick = () => {
+    document.querySelectorAll('.soc-chip').forEach(c => c.classList.remove('active'));
+    chip.classList.add('active');
+    const pct = chip.dataset.pct;
+    document.getElementById('soc-cur').textContent = pct + '%';
+    showToast('⏳ enviando limite ' + pct + '% ao carro...');
+  };
+});
+
+function updateTabbarHeight() {
+  const t = document.querySelector('.tabbar')?.offsetHeight || 56;
+  document.documentElement.style.setProperty('--tabbar-h', t + 'px');
+}
+updateTabbarHeight();
+window.addEventListener('resize', updateTabbarHeight);
+  // Expõe handlers de onclick no window
+  Object.assign(window, { openSub: typeof openSub !== 'undefined' ? openSub : undefined, closeSub: typeof closeSub !== 'undefined' ? closeSub : undefined, saveSection: typeof saveSection !== 'undefined' ? saveSection : undefined, toggle2fa: typeof toggle2fa !== 'undefined' ? toggle2fa : undefined, confirmClearHistory: typeof confirmClearHistory !== 'undefined' ? confirmClearHistory : undefined });
+  if (!window['initView_config']) window['initView_config'] = function() {};
+})();
+</script>

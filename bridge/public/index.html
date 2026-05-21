@@ -1,1443 +1,873 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>EcoTrip</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#1a1a1a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="EcoTrip">
+<title>EcoTrip · v2</title>
+<link rel="manifest" href="/manifest.json">
+<link rel="apple-touch-icon" href="/icon-192.png">
+<link rel="stylesheet" href="/leaflet.css">
+<script src="/leaflet.js" defer></script>
+<script src="/chart.min.js" defer></script>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+:root {
+  --bg: #1a1a1a; --card: #1f1f1f; --card-lift: #262626;
+  --text: #f1f5f9; --muted: #6b7280; --hint: #94a3b8;
+  --green: #22c55e; --orange: #fb923c; --teal: #22d3ee;
+  --yellow: #fbbf24; --red: #f87171; --blue: #60a5fa; --purple: #a78bfa;
+  --border: rgba(255,255,255,.06);
+  --border-soft: rgba(255,255,255,.04);
+  --pending: #fbbf24;
+}
+html, body { background: var(--bg); }
+body {
+  color: var(--text);
+  font-family: -apple-system, "SF Pro Display", "Helvetica Neue", system-ui, sans-serif;
+  min-height: 100vh;
+  overflow-x: hidden;
+  /* Compensa header sticky + tabbar fixo */
+  padding-bottom: calc(var(--tabbar-h, 56px) + env(safe-area-inset-bottom) + 8px);
+}
+button { font-family: inherit; cursor: pointer; }
+input { font-family: inherit; }
 
-  <!-- PWA / iPhone -->
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="EcoTrip">
-  <meta name="theme-color" content="#39FF88">
+/* ── Login overlay ───────────────────────────────────────── */
+#login-overlay {
+  position: fixed; inset: 0; z-index: 100;
+  background: rgba(10,10,10,.95);
+  backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+  display: flex; align-items: center; justify-content: center;
+  padding: 16px;
+}
+#login-overlay .lo-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 32px 24px;
+  width: 100%; max-width: 380px;
+  text-align: center;
+}
+#login-overlay .lo-logo { font-size: 56px; margin-bottom: 12px; }
+#login-overlay .lo-title {
+  font-size: 24px; font-weight: 800;
+  color: var(--green); margin-bottom: 6px;
+}
+#login-overlay .lo-sub { font-size: 13px; color: var(--muted); margin-bottom: 24px; }
+#login-overlay input {
+  width: 100%;
+  background: rgba(0,0,0,.3);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  color: var(--text); font-size: 15px;
+  margin-bottom: 10px;
+  outline: none;
+}
+#login-overlay input:focus { border-color: var(--green); }
+#login-overlay .lo-totp-row { display: none; }
+#login-overlay .lo-totp-row[style*="display: block"] { display: block !important; }
+#login-overlay #login-error {
+  display: none; color: var(--red); font-size: 12px;
+  margin-bottom: 10px; padding: 8px 10px;
+  background: rgba(248,113,113,.08); border-radius: 8px;
+  border: 1px solid rgba(248,113,113,.2);
+}
+#login-overlay button.lo-btn {
+  width: 100%;
+  background: var(--green); color: #000;
+  border: none; border-radius: 10px;
+  padding: 12px; font-size: 15px; font-weight: 700;
+  margin-bottom: 12px;
+}
+#login-overlay button.lo-btn:active { transform: scale(.98); }
+#login-overlay .lo-divider {
+  display: flex; align-items: center; gap: 8px;
+  margin: 12px 0;
+  font-size: 11px; color: var(--muted); text-transform: uppercase;
+  letter-spacing: 1.5px;
+}
+#login-overlay .lo-divider::before, #login-overlay .lo-divider::after {
+  content: ''; flex: 1; height: 1px; background: var(--border);
+}
+#g_id_signin { display: flex; justify-content: center; min-height: 44px; }
 
-  <link rel="manifest" href="/manifest.json">
-  <link rel="apple-touch-icon" href="/icon-192.png">
-  <link rel="stylesheet" href="/style.css">
-  <link rel="stylesheet" href="/leaflet.css">
-  <script src="/leaflet.js" defer></script>
-  <script src="/chart.min.js" defer></script>
+/* ── Header ──────────────────────────────────────────────── */
+.head {
+  position: sticky; top: 0; z-index: 10;
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 10px 16px;
+  background: linear-gradient(180deg, rgba(20,20,20,.95) 80%, rgba(20,20,20,.6) 100%);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+}
+.head .brand {
+  display: flex; align-items: center; gap: 10px;
+  cursor: pointer; -webkit-tap-highlight-color: transparent;
+}
+.head .brand .logo { font-size: 20px; }
+.head .brand .info { line-height: 1.15; }
+.head .brand .model { font-size: 13px; font-weight: 700; color: var(--text); }
+.head .brand .ver { font-size: 9px; color: var(--muted); font-weight: 500; }
+.head .right { display: flex; align-items: center; gap: 10px; }
+.head .dot {
+  width: 8px; height: 8px; border-radius: 50%; background: var(--green);
+  box-shadow: 0 0 8px rgba(34,197,94,.6);
+  transition: background .3s, box-shadow .3s;
+}
+.head .dot.connecting { background: var(--yellow); box-shadow: 0 0 8px rgba(251,191,36,.6); }
+.head .dot.offline { background: var(--muted); box-shadow: none; }
+.head .bell {
+  font-size: 18px; color: #cbd5e1; cursor: pointer;
+  background: none; border: none; padding: 4px;
+  position: relative;
+}
+.head .bell .badge {
+  position: absolute; top: 0; right: 0;
+  background: var(--red); color: #000;
+  font-size: 9px; font-weight: 700;
+  border-radius: 999px; padding: 1px 4px; min-width: 14px;
+  border: 2px solid var(--bg);
+}
+
+/* ── Tabbar ──────────────────────────────────────────────── */
+.tabbar {
+  position: fixed; bottom: 0; left: 0; right: 0; z-index: 20;
+  background: rgba(10,10,10,.92);
+  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  border-top: 1px solid var(--border);
+  display: flex; justify-content: space-around;
+  padding: 8px 0 calc(8px + env(safe-area-inset-bottom));
+}
+.tabbar .tb {
+  display: flex; flex-direction: column; align-items: center;
+  font-size: 8px; color: var(--muted); gap: 1px; padding: 0 2px;
+  font-weight: 600; cursor: pointer; flex: 1;
+  letter-spacing: 0.2px; background: none; border: none;
+  position: relative;
+}
+.tabbar .tb.active { color: var(--green); }
+.tabbar .ic { font-size: 16px; line-height: 1; }
+.tabbar .tb-badge {
+  position: absolute; top: 4px; right: 30%;
+  width: 6px; height: 6px; background: var(--green);
+  border-radius: 50%;
+}
+
+/* ── Container comum de views ────────────────────────────── */
+.container { padding: 0 16px; max-width: 480px; margin: 0 auto; }
+.section-title {
+  font-size: 32px; font-weight: 800; color: var(--green);
+  padding: 8px 4px 14px; letter-spacing: -0.5px;
+}
+
+/* Views: só uma visível por vez */
+.view { display: none; }
+.view.active { display: block; animation: fadeIn .2s ease; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+/* ── Toast notifications ─────────────────────────────────── */
+#toast-stack {
+  position: fixed; top: 60px; left: 50%; transform: translateX(-50%);
+  z-index: 200; display: flex; flex-direction: column; gap: 8px; pointer-events: none;
+  align-items: center;
+}
+.toast {
+  background: rgba(31,31,31,.95);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 10px 16px; border-radius: 999px;
+  font-size: 13px; font-weight: 600;
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  animation: toastIn .25s ease forwards;
+  max-width: 90vw; text-align: center;
+  pointer-events: auto;
+}
+.toast.ok { color: var(--green); }
+.toast.err { color: var(--red); }
+@keyframes toastIn {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* ── HVAC pending visual ─────────────────────────────────── */
+.hvac-pending {
+  color: var(--pending) !important;
+  animation: pendingPulse 1s ease-in-out infinite;
+}
+@keyframes pendingPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+.hvac-dragging {
+  color: var(--teal) !important;
+}
+
+/* ── Loaders ─────────────────────────────────────────────── */
+.spin-loader {
+  width: 24px; height: 24px;
+  border: 3px solid rgba(255,255,255,.1);
+  border-top-color: var(--green);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin: 20px auto;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+</style>
+
+<!-- CSS específico das views será injetado abaixo (ainda na construção) -->
+<style id="view-styles">
+/* placeholder — preenchido nos próximos blocos */
+</style>
 </head>
 <body>
 
-<div id="app">
+<!-- ──────────────────────── LOGIN OVERLAY ──────────────────────── -->
+<div id="login-overlay" style="display:none">
+  <div class="lo-card">
+    <div class="lo-logo">🚗</div>
+    <div class="lo-title">EcoTrip</div>
+    <div class="lo-sub">Haval H6 PHEV · Impulse</div>
 
-  <!-- Header -->
-  <div id="header">
-    <div class="header-left">
-      <span id="logo">ECOTRIP</span>
-      <div class="header-sub">
-        <span id="version-badge">bridge</span>
-        <span id="model-label">Haval H6 PHEV34</span>
-        <span id="car-version-badge"></span>
-      </div>
+    <input id="login-input" type="password" placeholder="Senha" autocomplete="current-password">
+    <div class="lo-totp-row" id="login-totp-row">
+      <input id="login-totp" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="6" placeholder="Código 2FA">
     </div>
-    <div id="status-area">
-      <div class="sync-stack">
-        <div class="sync-row">
-          <span class="sync-lbl">↻</span>
-          <span id="last-update">--</span>
-        </div>
-        <div class="sync-row">
-          <span class="sync-lbl">🚗</span>
-          <span id="car-update">--</span>
-        </div>
-      </div>
-      <div id="status-dot"></div>
-      <button id="notif-bell-btn" onclick="openNotifHistory()"
-        style="position:relative;background:none;border:none;color:#475569;font-size:18px;cursor:pointer;padding:2px 4px;line-height:1;-webkit-tap-highlight-color:transparent;user-select:none"
-        title="Notificações">
-        🔔
-        <span id="notif-bell-badge"
-          style="display:none;position:absolute;top:-3px;right:-3px;background:#ef4444;color:#fff;font-size:9px;font-weight:700;min-width:15px;height:15px;border-radius:8px;line-height:15px;text-align:center;padding:0 3px;box-sizing:border-box"></span>
-      </button>
-      <button onclick="hardRefresh()"
-        style="background:none;border:none;color:#475569;font-size:18px;cursor:pointer;padding:2px 6px;line-height:1;-webkit-tap-highlight-color:transparent;user-select:none"
-        title="Recarregar">↺</button>
-    </div>
-  </div>
-
-  <!-- ── Overlay: Central de Notificações ──────────────────────────────────── -->
-  <div id="notif-overlay" style="display:none;position:fixed;inset:0;background:var(--void);z-index:300;flex-direction:column;padding-top:var(--safe-top)">
-    <div style="display:flex;align-items:center;gap:10px;padding:8px 12px 8px;flex-shrink:0;border-bottom:1px solid var(--border)">
-      <button onclick="closeNotifHistory()"
-        style="background:none;border:none;color:var(--neon);font-size:18px;cursor:pointer;padding:4px 6px;-webkit-tap-highlight-color:transparent">←</button>
-      <span style="font-size:13px;font-weight:700;color:var(--text);flex:1">🔔 Notificações</span>
-      <button onclick="clearNotifHistory()"
-        style="font-size:11px;font-weight:600;background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.3);color:#f87171;border-radius:8px;padding:4px 10px;cursor:pointer">
-        Limpar
-      </button>
-    </div>
-    <div id="notif-overlay-body" style="flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:8px 16px"></div>
-  </div>
-
-  <!-- Conteúdo por aba -->
-  <div id="content">
-
-    <!-- Dashboard -->
-    <div id="panel-dash" class="panel active">
-
-      <!-- Bateria & Combustível — integra recarga quando carregando (card único) -->
-      <div class="card" id="d-bfc-card">
-
-        <!-- ── Cabeçalho: alterna normal ↔ carregando via JS ───────────── -->
-        <div id="bfc-normal-hdr">
-          <div class="card-title">Bateria &amp; Combustível</div>
-        </div>
-        <div id="bfc-chrg-hdr" class="chrg-header" style="display:none">
-          <div style="display:flex;align-items:center;gap:7px">
-            <span class="chrg-bolt-icon">⚡</span>
-            <span style="font-size:10px;font-weight:700;letter-spacing:1.4px;color:var(--teal);text-transform:uppercase">Carregando</span>
-          </div>
-          <div id="d-chrg-power" class="chrg-power-hero">--</div>
-        </div>
-
-        <!-- ── SOC: barra normal (quando não carregando) ────────────────── -->
-        <div id="bfc-soc-normal" style="margin-bottom:6px">
-          <div class="bar-item">
-            <div class="bar-header">
-              <span class="bar-label">🔋 Bateria (SOC)</span>
-              <span class="bar-val" id="d-soc">--%</span>
-            </div>
-            <div class="bar-track"><div class="bar-fill soc" id="d-soc-bar" style="width:0%"></div></div>
-            <div id="d-ev-range" style="font-size:10px;color:var(--teal);text-align:right;margin-top:3px;display:none"><span id="d-ev-km">--</span> km elétricos</div>
-          </div>
-        </div>
-
-        <!-- ── SOC: barra de progresso + métricas (quando carregando) ───── -->
-        <div id="bfc-soc-charging" style="display:none">
-          <div class="chrg-bar-wrap">
-            <div style="position:relative">
-              <div class="chrg-bar-track">
-                <div id="d-chrg-bar-fill" class="chrg-bar-fill">
-                  <div class="chrg-shimmer"></div>
-                </div>
-              </div>
-              <div id="d-chrg-bar-start" class="chrg-bar-start-marker" style="display:none"></div>
-              <div id="d-chrg-bar-marker" class="chrg-bar-marker"></div>
-            </div>
-            <div class="chrg-bar-labels">
-              <span id="d-chrg-soc-cur" style="font-size:11px;font-weight:700;color:var(--teal)">--%</span>
-              <span id="d-chrg-soc-lim" style="font-size:11px;color:var(--muted)">▶ --%</span>
-            </div>
-          </div>
-          <div class="metrics-row chrg-metrics-5" style="margin-top:8px;margin-bottom:10px">
-            <div class="metric">
-              <div class="metric-value green" id="d-chrg-session">--</div>
-              <div class="metric-label">Injetado</div>
-            </div>
-            <div class="metric">
-              <div class="metric-value muted" id="d-chrg-remain">--</div>
-              <div class="metric-label">Restante</div>
-            </div>
-            <div class="metric">
-              <div class="metric-value" id="d-chrg-finish" style="color:#60a5fa">--</div>
-              <div class="metric-label">Pronto às</div>
-            </div>
-            <div class="metric">
-              <div class="metric-value" id="d-chrg-avg" style="color:#94a3b8">--</div>
-              <div class="metric-label">Pot. média</div>
-            </div>
-            <div class="metric">
-              <div class="metric-value" id="d-chrg-peak" style="color:#fbbf24">--</div>
-              <div class="metric-label">Pot. pico</div>
-            </div>
-          </div>
-          <div class="divider" style="margin-bottom:8px"></div>
-        </div>
-
-        <!-- ── Combustível e 12V — sempre visíveis ──────────────────────── -->
-        <div class="bar-row">
-          <div class="bar-item">
-            <div class="bar-header">
-              <span class="bar-label">⛽ Combustível</span>
-              <span class="bar-val" id="d-fuel">--</span>
-            </div>
-            <div class="bar-track"><div class="bar-fill fuel" id="d-fuel-bar" style="width:0%"></div></div>
-            <div id="d-fuel-range" style="font-size:10px;color:var(--orange);text-align:right;margin-top:3px;display:none"><span id="d-fuel-km">--</span> km à combustão</div>
-          </div>
-          <div class="bar-item">
-            <div class="bar-header">
-              <span class="bar-label">🔋 Bateria 12V</span>
-              <span class="bar-val" id="d-batt12v">--%</span>
-            </div>
-            <div class="bar-track"><div class="bar-fill batt12v" id="d-batt12v-bar" style="width:0%"></div></div>
-          </div>
-        </div>
-
-        <!-- ── Limite SOC — só quando carregando ────────────────────────── -->
-        <div id="bfc-chrg-limit" style="display:none">
-          <div class="charge-limit-row">
-            <span class="charge-limit-label">Limite SOC</span>
-            <span class="charge-limit-cur" id="d-chrg-limit">--%</span>
-            <div class="charge-limit-btns">
-              <button class="clb" onclick="setChargeLimit(50)">50</button>
-              <button class="clb" onclick="setChargeLimit(60)">60</button>
-              <button class="clb" onclick="setChargeLimit(70)">70</button>
-              <button class="clb" onclick="setChargeLimit(80)">80</button>
-              <button class="clb" onclick="setChargeLimit(90)">90</button>
-              <button class="clb" onclick="setChargeLimit(100)">100</button>
-            </div>
-          </div>
-          <div id="d-chrg-limit-status" class="charge-limit-status"></div>
-        </div>
-
-      </div>
-
-      <!-- Haval H6 — visualização em camadas PNG -->
-      <div class="card" id="d-car-card" style="padding:2px 8px 1px">
-        <div style="width:47%;margin:0 auto">
-        <!-- Odômetro centralizado, próximo do carro -->
-        <div style="display:flex;justify-content:center;align-items:baseline;padding:0 2px 1px;min-height:16px;gap:3px">
-          <span style="font-size:13px;font-weight:600;color:#94a3b8" id="d-odometer">--</span>
-          <span style="font-size:9px;color:#64748b">km</span>
-        </div>
-        <div style="position:relative;width:100%;aspect-ratio:794/720;overflow:visible;border-radius:6px;z-index:0">
-          <!-- Base (sempre visível) -->
-          <img src="/images/haval_h6/h6.png"
-               style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:contain">
-          <!-- Recarga -->
-          <img id="cl-charge-on"   src="/images/haval_h6/carga_carregando.png"    style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:contain;display:none">
-          <img id="cl-charge-wait" src="/images/haval_h6/carga_aguardando.png"    style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:contain;display:none">
-          <img id="cl-charge-no"   src="/images/haval_h6/carga_naocarregando.png" style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:contain;display:none">
-          <!-- Faróis -->
-          <img id="cl-farol"       src="/images/haval_h6/farol.png"               style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:contain;display:none">
-          <img id="cl-farol-alto"  src="/images/haval_h6/farol_alto.png"          style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:contain;display:none">
-          <!-- Trava -->
-          <img id="cl-trava"       src="/images/haval_h6/trava.png"               style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:contain;display:none">
-          <!-- Portas — sempre mostrada (fechada ou aberta) -->
-          <img id="cl-door-fl-c"   src="/images/haval_h6/porta_dianteira_esquerda_fechada.png" style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:contain">
-          <img id="cl-door-fl-o"   src="/images/haval_h6/porta_dianteira_esquerda_aberta.png"  style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:contain;display:none">
-          <img id="cl-door-fr-c"   src="/images/haval_h6/porta_dianteira_direita_fechada.png"  style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:contain">
-          <img id="cl-door-fr-o"   src="/images/haval_h6/porta_dianteira_direita_aberta.png"   style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:contain;display:none">
-          <img id="cl-door-rl-c"   src="/images/haval_h6/porta_traseira_esquerda_fechada.png"  style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:contain">
-          <img id="cl-door-rl-o"   src="/images/haval_h6/porta_traseira_esquerda_aberta.png"   style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:contain;display:none">
-          <img id="cl-door-rr-c"   src="/images/haval_h6/porta_traseira_direita_fechada.png"   style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:contain">
-          <img id="cl-door-rr-o"   src="/images/haval_h6/porta_traseira_direita_aberta.png"    style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:contain;display:none">
-          <img id="cl-trunk"       src="/images/haval_h6/porta_malas.png"                      style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:contain;display:none">
-          <!-- Teto solar -->
-          <img id="cl-sunroof"     src="/images/haval_h6/teto_solar_aberto.png"               style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:contain;display:none">
-          <!-- AC -->
-          <img id="cl-ac-left"     src="/images/haval_h6/ac_esquerda.png"                     style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:contain;display:none">
-          <img id="cl-ac-right"    src="/images/haval_h6/ac_direita.png"                      style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:contain;display:none">
-          <img id="cl-ventilacao"  src="/images/haval_h6/ventilacao.png"                      style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:contain;display:none">
-          <!-- Vidros -->
-          <img id="cl-win-fl-open" src="/images/haval_h6/vidro_dianteiro_esquerdo_aberto.png"      style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:contain;display:none">
-          <img id="cl-win-fl-ajar" src="/images/haval_h6/vidro_dianteiro_esquerdo_entreaberto.png" style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:contain;display:none">
-          <img id="cl-win-fr-open" src="/images/haval_h6/vidro_dianteiro_direito_aberto.png"       style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:contain;display:none">
-          <img id="cl-win-fr-ajar" src="/images/haval_h6/vidro_dianteiro_direito_entreaberto.png"  style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:contain;display:none">
-          <img id="cl-win-rl-open" src="/images/haval_h6/vidro_traseiro_esquerdo_aberto.png"       style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:contain;display:none">
-          <img id="cl-win-rl-ajar" src="/images/haval_h6/vidro_traseiro_esquerdo_entreaberto.png"  style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:contain;display:none">
-          <img id="cl-win-rr-open" src="/images/haval_h6/vidro_traseiro_direito_aberto.png"        style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:contain;display:none">
-          <img id="cl-win-rr-ajar" src="/images/haval_h6/vidro_traseiro_direito_entreaberto.png"   style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:contain;display:none">
-          <!-- Pneus — pílulas compactas, posicionadas FORA do container do carro -->
-          <div id="d-tyre-fl" class="tyre-pill" style="top:26%;right:100%;margin-right:-14px">
-            <span id="d-tyre-fl-psi" class="tyre-psi">--</span>
-            <span class="tyre-sep">·</span>
-            <span id="d-tyre-fl-temp" class="tyre-temp">--°</span>
-          </div>
-          <div id="d-tyre-fr" class="tyre-pill" style="top:26%;left:100%;margin-left:-14px">
-            <span id="d-tyre-fr-psi" class="tyre-psi">--</span>
-            <span class="tyre-sep">·</span>
-            <span id="d-tyre-fr-temp" class="tyre-temp">--°</span>
-          </div>
-          <div id="d-tyre-rl" class="tyre-pill" style="top:66%;right:100%;margin-right:-14px">
-            <span id="d-tyre-rl-psi" class="tyre-psi">--</span>
-            <span class="tyre-sep">·</span>
-            <span id="d-tyre-rl-temp" class="tyre-temp">--°</span>
-          </div>
-          <div id="d-tyre-rr" class="tyre-pill" style="top:66%;left:100%;margin-left:-14px">
-            <span id="d-tyre-rr-psi" class="tyre-psi">--</span>
-            <span class="tyre-sep">·</span>
-            <span id="d-tyre-rr-temp" class="tyre-temp">--°</span>
-          </div>
-        </div>
-        <!-- Chips de status -->
-        <div style="display:flex;justify-content:center;align-items:stretch;gap:5px;padding:5px 2px 2px;flex-wrap:nowrap">
-          <!-- Temperatura externa -->
-          <div class="car-chip">
-            <span id="d-car-temp-out" style="font-size:12px;font-weight:600;color:#94a3b8">--°</span>
-            <span style="font-size:8px;color:#64748b">ext</span>
-          </div>
-          <!-- Motor — botão tappable -->
-          <button id="d-engine-btn" onclick="engineClick()" class="car-chip car-chip-btn">
-            <span id="d-car-engine-label" style="font-size:11px;font-weight:700;color:#475569">⚙ --</span>
-          </button>
-          <!-- Trava — botão tappable -->
-          <button id="d-lock-btn" onclick="lockClick()" class="car-chip car-chip-btn">
-            <span id="d-car-lock-label" style="font-size:11px;font-weight:700;color:#475569">🔒</span>
-          </button>
-          <!-- Temperatura interna -->
-          <div class="car-chip">
-            <span id="d-car-temp-in" style="font-size:12px;font-weight:700;color:#60a5fa">--°</span>
-            <span style="font-size:8px;color:#4a7aaa">int</span>
-          </div>
-        </div>
-        </div><!-- /wrapper 65% -->
-        <!-- Velocímetro e barra de potência foram movidos pra aba Drive (cluster). -->
-        <!-- Modo de condução fica aqui só pra mostrar P/D/R quando relevante -->
-        <div id="d-powertrain" style="display:none;margin-top:5px">
-          <span id="d-drive-mode" style="display:none;font-size:10px;font-weight:700;padding:2px 9px;border-radius:10px;white-space:nowrap"></span>
-        </div>
-      </div>
-
-      <!-- Alertas do carro — mesmo tamanho do mapa, visível só com alertas -->
-      <div class="card" id="d-alerts-card" style="display:none">
-        <div class="card-title" style="color:var(--orange)">⚠️ Alertas</div>
-        <div id="d-alerts-body" style="height:180px;overflow-y:auto;display:flex;flex-direction:column;justify-content:center;gap:8px;padding:4px 0"></div>
-      </div>
-
-      <!-- Mapa — última localização conhecida do carro -->
-      <div class="card" id="d-map-card" style="display:none">
-        <div id="d-car-map"></div>
-        <div class="map-info-bar">
-          <span class="map-pin-icon">📍</span>
-          <span id="d-map-address" class="map-address">--</span>
-          <span id="d-map-ts" class="map-ts">--</span>
-          <!-- Warning quando o carro está online publicando dados mas o GPS especificamente
-               não fixa há vários minutos (típico de resume sem preload, ou permissão Android
-               de localização negada). -->
-          <span id="d-gps-warn" style="display:none;font-size:10px;font-weight:600;margin-left:6px"></span>
-        </div>
-      </div>
-
-      <!-- Card de manutenções — próximas revisões com alerta por proximidade -->
-      <div class="card" id="d-maint-card" style="display:none">
-        <div class="card-title">🔧 Manutenções</div>
-        <div id="d-maint-list"></div>
-      </div>
-
-      <!-- Card 1: Desde última partida (rolling window) -->
-      <div class="card trip-card" id="d-roll-card" style="display:none">
-        <div class="trip-hdr">
-          <span class="trip-hdr-icon">🛣️</span>
-          <span class="trip-hdr-title">Desde última partida</span>
-        </div>
-        <div class="trip-hero">
-          <span class="trip-hero-val" id="d-roll-dist">--</span>
-          <span class="trip-hero-unit">km</span>
-        </div>
-        <div class="trip-grid">
-          <div class="trip-cell">
-            <div class="trip-cell-label">Consumo</div>
-            <div class="trip-cell-val" id="d-roll-cons">--</div>
-          </div>
-          <div class="trip-cell">
-            <div class="trip-cell-label">Combustível</div>
-            <div class="trip-cell-val" id="d-roll-fuel">--</div>
-          </div>
-          <div class="trip-cell">
-            <div class="trip-cell-label">Custo total</div>
-            <div class="trip-cell-val" id="d-roll-cost">--</div>
-          </div>
-          <div class="trip-cell">
-            <div class="trip-cell-label">Custo/km</div>
-            <div class="trip-cell-val" id="d-roll-cost-km">--</div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Card 2: Viagem em andamento (motor on) OU Última viagem (motor off) -->
-      <div class="card trip-card" id="d-curtrip-card" style="display:none">
-        <div class="trip-hdr" id="d-curtrip-hdr">
-          <span class="trip-hdr-icon" id="d-curtrip-icon">🛣️</span>
-          <span class="trip-hdr-title" id="d-curtrip-title">Última viagem</span>
-          <span class="trip-hdr-sub" id="d-curtrip-when"></span>
-        </div>
-        <div class="trip-hero">
-          <span class="trip-hero-val" id="d-curtrip-dist">--</span>
-          <span class="trip-hero-unit">km</span>
-        </div>
-        <!-- Grid: 6 células — última viagem (motor off) -->
-        <div class="trip-grid trip-grid-6" id="d-curtrip-grid-last">
-          <div class="trip-cell">
-            <div class="trip-cell-label">Duração</div>
-            <div class="trip-cell-val" id="d-last-time">--</div>
-          </div>
-          <div class="trip-cell">
-            <div class="trip-cell-label">SOC</div>
-            <div class="trip-cell-val" id="d-last-soc">--</div>
-          </div>
-          <div class="trip-cell">
-            <div class="trip-cell-label">Vel. média</div>
-            <div class="trip-cell-val" id="d-last-avgv">--</div>
-          </div>
-          <div class="trip-cell">
-            <div class="trip-cell-label">Vel. máx</div>
-            <div class="trip-cell-val" id="d-last-maxv">--</div>
-          </div>
-          <div class="trip-cell">
-            <div class="trip-cell-label">Energia</div>
-            <div class="trip-cell-val" id="d-last-energy">--</div>
-          </div>
-          <div class="trip-cell">
-            <div class="trip-cell-label">Regenerada</div>
-            <div class="trip-cell-val green" id="d-last-regen">--</div>
-          </div>
-        </div>
-        <!-- Grid: 6 células — viagem em andamento (motor on), médias acumuladas -->
-        <div class="trip-grid trip-grid-6" id="d-curtrip-grid-live" style="display:none">
-          <div class="trip-cell">
-            <div class="trip-cell-label">Tempo total</div>
-            <div class="trip-cell-val" id="d-live-time">--</div>
-          </div>
-          <div class="trip-cell">
-            <div class="trip-cell-label">Vel. média</div>
-            <div class="trip-cell-val" id="d-live-avgv">--</div>
-          </div>
-          <div class="trip-cell">
-            <div class="trip-cell-label">Vel. máx</div>
-            <div class="trip-cell-val" id="d-live-maxv">--</div>
-          </div>
-          <div class="trip-cell">
-            <div class="trip-cell-label">Pot. média</div>
-            <div class="trip-cell-val" id="d-live-avgpwr">--</div>
-          </div>
-          <div class="trip-cell">
-            <div class="trip-cell-label">Bateria</div>
-            <div class="trip-cell-val" id="d-live-kwh">--</div>
-          </div>
-          <div class="trip-cell">
-            <div class="trip-cell-label">Combustível</div>
-            <div class="trip-cell-val" id="d-live-fuel">--</div>
-          </div>
-        </div>
-      </div>
-
-
-    </div>
-
-
-    <!-- ── Drive: HUD em camadas sobre mapa (vista cinematográfica) ────── -->
-    <div id="panel-drive" class="panel">
-      <div id="drv-map"></div>
-      <div class="drv-overlay"></div>
-      <div class="drv-hud">
-        <!-- Top: gear + power chip -->
-        <div class="drv-top">
-          <div class="drv-gear" id="drv-gear">--</div>
-          <div class="drv-power-chip" id="drv-power-chip">
-            <span class="drv-power-icon">⚡</span>
-            <span class="drv-power-val" id="drv-power-val">0.0 kW</span>
-          </div>
-        </div>
-        <!-- Centro: anel de potência + velocidade gigante -->
-        <div class="drv-speed-wrap">
-          <svg class="drv-speed-ring" viewBox="0 0 200 200" aria-hidden="true">
-            <!-- ── Tacômetro externo (RPM do motor térmico) ────────── -->
-            <!-- Arco 270°, raio 94 — circunferência 590.6, arco 443.0 -->
-            <circle class="drv-tach-bg" cx="100" cy="100" r="94"
-                    stroke-dasharray="443.0 590.6"
-                    transform="rotate(135 100 100)"/>
-            <circle class="drv-tach-fill" id="drv-tach" cx="100" cy="100" r="94"
-                    stroke-dasharray="443.0 590.6"
-                    stroke-dashoffset="443.0"
-                    transform="rotate(135 100 100)"/>
-            <!-- ── Anel interno (potência elétrica em kW) ──────────── -->
-            <circle class="drv-ring-bg" cx="100" cy="100" r="86"
-                    stroke-dasharray="405.3 540.4"
-                    transform="rotate(135 100 100)"/>
-            <circle class="drv-ring-fill" id="drv-ring" cx="100" cy="100" r="86"
-                    stroke-dasharray="405.3 540.4"
-                    stroke-dashoffset="405.3"
-                    transform="rotate(135 100 100)"/>
-          </svg>
-          <div class="drv-speed-content">
-            <div class="drv-speed-num" id="drv-speed">0</div>
-            <div class="drv-speed-unit">km/h</div>
-            <div class="drv-rpm-inline" id="drv-rpm-inline" style="display:none">
-              <span class="drv-rpm-inline-val" id="drv-rpm-val">--</span>
-              <span class="drv-rpm-inline-unit">rpm</span>
-            </div>
-            <!-- Power chip dentro do cluster — só aparece no layout Fold/tablet (≥700px).
-                 No mobile, o chip fica em .drv-top. Ambos são populados pelo mesmo render. -->
-            <div class="drv-power-cluster" id="drv-power-cluster" style="display:none">
-              <span class="drv-power-icon">⚡</span>
-              <span class="drv-power-val" id="drv-power-cluster-val">0.0 kW</span>
-            </div>
-            <div class="drv-peak-row" id="drv-peak-row" style="display:none">
-              <span>Máx<span class="drv-peak-val" id="drv-peak-speed">--</span></span>
-              <span class="drv-peak-sep">·</span>
-              <span>Pico<span class="drv-peak-val" id="drv-peak-power">--</span></span>
-            </div>
-          </div>
-        </div>
-        <!-- Card "Viagem em andamento" — só visível no Fold/tablet (≥700px) -->
-        <div class="drv-trip-card" id="drv-trip-card" style="display:none">
-          <div class="drv-trip-hdr">
-            <span class="drv-trip-ic">🚗</span>
-            <span class="drv-trip-tit">VIAGEM EM ANDAMENTO</span>
-          </div>
-          <div class="drv-trip-hero">
-            <span class="drv-trip-hero-val" id="drv-trip-dist">--</span>
-            <span class="drv-trip-hero-unit">km</span>
-          </div>
-          <div class="drv-trip-grid">
-            <div class="drv-trip-cell">
-              <div class="drv-trip-cell-val muted" id="drv-trip-time">--</div>
-              <div class="drv-trip-cell-lbl">TEMPO TOTAL</div>
-            </div>
-            <div class="drv-trip-cell">
-              <div class="drv-trip-cell-val teal" id="drv-trip-avgpwr">--</div>
-              <div class="drv-trip-cell-lbl">POT. MÉDIA</div>
-            </div>
-            <div class="drv-trip-cell">
-              <div class="drv-trip-cell-val lime" id="drv-trip-soc">--</div>
-              <div class="drv-trip-cell-lbl">SOC ATUAL</div>
-            </div>
-            <div class="drv-trip-cell">
-              <div class="drv-trip-cell-val lime" id="drv-trip-kwh">--</div>
-              <div class="drv-trip-cell-lbl">BATERIA kWh</div>
-            </div>
-            <div class="drv-trip-cell">
-              <div class="drv-trip-cell-val orange" id="drv-trip-fuel">--</div>
-              <div class="drv-trip-cell-lbl">COMBUSTÍVEL L</div>
-            </div>
-            <div class="drv-trip-cell">
-              <div class="drv-trip-cell-val yellow" id="drv-trip-cost">--</div>
-              <div class="drv-trip-cell-lbl">CUSTO R$</div>
-            </div>
-          </div>
-        </div>
-        <!-- Gráfico de potência (últimos 30s) -->
-        <div class="drv-chart-wrap">
-          <div class="drv-chart-label">
-            <span>Potência · 30s</span>
-            <span class="drv-chart-scale" id="drv-chart-scale">±50 kW</span>
-          </div>
-          <svg class="drv-chart" viewBox="0 0 300 78" preserveAspectRatio="none">
-            <line class="drv-chart-axis" x1="0" y1="39" x2="300" y2="39"/>
-            <path class="drv-chart-fill" id="drv-chart-fill" d=""/>
-            <path class="drv-chart-line" id="drv-chart-line" d=""/>
-          </svg>
-        </div>
-        <!-- Stats: SOC + autonomia -->
-        <div class="drv-stats">
-          <div class="drv-stat-row">
-            <span class="drv-stat-icon">🔋</span>
-            <span class="drv-stat-pct" id="drv-soc">--%</span>
-            <span class="drv-stat-sep">·</span>
-            <span class="drv-stat-km"><span id="drv-ev-km">--</span> km elétricos</span>
-          </div>
-          <div class="drv-stat-row">
-            <span class="drv-stat-icon">⛽</span>
-            <span class="drv-stat-pct drv-stat-pct-fuel" id="drv-fuel">--%</span>
-            <span class="drv-stat-sep">·</span>
-            <span class="drv-stat-km"><span id="drv-ice-km">--</span> km à combustão</span>
-          </div>
-          <div class="drv-stat-row drv-stat-cons">
-            <span class="drv-stat-icon">📊</span>
-            <span class="drv-stat-pct" id="drv-cons">--</span>
-            <span class="drv-stat-sep">·</span>
-            <span class="drv-stat-km"><span id="drv-rolldist">--</span> km na partida</span>
-          </div>
-        </div>
-        <!-- Footer: endereço + chips -->
-        <div class="drv-footer">
-          <div class="drv-address" id="drv-address">--</div>
-          <div class="drv-chips">
-            <span class="drv-chip">☀️ <span id="drv-temp-out">--</span>°</span>
-            <span class="drv-chip">🌡 <span id="drv-temp-in">--</span>°</span>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- ── Conforto: cabine top-down com AC + ventilação dos bancos ─────── -->
-    <div id="panel-comfort" class="panel" style="overflow-y:auto;padding:14px 14px 80px;text-align:center">
-      <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:12px;text-align:left">
-        <div>
-          <div style="font-size:18px;font-weight:700;color:#e2e8f0;letter-spacing:0.5px">Conforto</div>
-          <div style="font-size:11px;color:#64748b;margin-top:2px">Climatização e ventilação dos bancos</div>
-        </div>
-      </div>
-
-      <!-- ── CLIMATE PANEL (controles do AC, separado da cabine) ─────────── -->
-      <div class="climate-panel">
-        <!-- Indicador "AC desligado" — visível só quando .climate-panel.off -->
-        <div class="climate-off-indicator">
-          <svg viewBox="0 0 24 24" width="28" height="28" fill="none">
-            <g stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
-              <line x1="12" y1="3" x2="12" y2="21"/>
-              <line x1="4"  y1="7" x2="20" y2="17"/>
-              <line x1="4"  y1="17" x2="20" y2="7"/>
-              <path d="M9 5 L12 7 L15 5 M9 19 L12 17 L15 19" stroke-width="1.4"/>
-            </g>
-          </svg>
-          <div class="climate-off-text">
-            <div class="climate-off-title">AC desligado</div>
-            <div class="climate-off-subtitle">Climatização inativa</div>
-          </div>
-        </div>
-        <!-- Linha das temperaturas: MOT | SYNC | PASS -->
-        <div class="climate-temps">
-          <div class="climate-zone">
-            <div class="climate-zone-label">MOTORISTA</div>
-            <div class="climate-zone-value" id="cmf-ac-temp-drv">--°C</div>
-          </div>
-          <div class="climate-sync" id="cmf-ac-sync">
-            <svg viewBox="0 0 24 24" width="22" height="22" fill="none">
-              <path d="M9 12 H15" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-              <path d="M7 8a4 4 0 0 0 0 8h2" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/>
-              <path d="M17 8a4 4 0 0 1 0 8h-2" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/>
-            </svg>
-            <div class="climate-sync-label">SYNC</div>
-          </div>
-          <div class="climate-zone">
-            <div class="climate-zone-label">PASSAGEIRO</div>
-            <div class="climate-zone-value" id="cmf-ac-temp-pass">--°C</div>
-          </div>
-        </div>
-        <!-- Linha AUTO + FAN -->
-        <div class="climate-controls">
-          <div class="climate-auto" id="cmf-ac-auto">
-            <span class="climate-auto-dot"></span>
-            <span class="climate-auto-text">AUTO</span>
-          </div>
-          <div class="climate-fan" id="cmf-ac-fan">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none">
-              <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.8" fill="none"/>
-              <path d="M12 3a4 4 0 0 0 0 8M12 21a4 4 0 0 1 0-8M3 12a4 4 0 0 0 8 0M21 12a4 4 0 0 1-8 0" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
-            </svg>
-            <div class="climate-fan-bars">
-              <div class="climate-fan-bar" data-level="1"></div>
-              <div class="climate-fan-bar" data-level="2"></div>
-              <div class="climate-fan-bar" data-level="3"></div>
-              <div class="climate-fan-bar" data-level="4"></div>
-              <div class="climate-fan-bar" data-level="5"></div>
-              <div class="climate-fan-bar" data-level="6"></div>
-              <div class="climate-fan-bar" data-level="7"></div>
-            </div>
-            <div class="climate-fan-val" id="cmf-ac-fan-val">--</div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Cabin top-down SVG (animável via JS) -->
-      <div style="display:flex;justify-content:center">
-        <svg id="cmf-svg" viewBox="0 0 400 540" width="100%" style="max-width:380px;height:auto;display:block">
-          <defs>
-            <linearGradient id="cmf-grad-dashboard" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%"  stop-color="#1a2236"/>
-              <stop offset="100%" stop-color="#131a2b"/>
-            </linearGradient>
-            <linearGradient id="cmf-grad-seat" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%"  stop-color="#1a2236"/>
-              <stop offset="100%" stop-color="#0f1626"/>
-            </linearGradient>
-            <radialGradient id="cmf-grad-ac-on" cx="50%" cy="50%" r="50%">
-              <stop offset="0%"  stop-color="#67e8f9"/>
-              <stop offset="100%" stop-color="#0e7490"/>
-            </radialGradient>
-          </defs>
-
-          <!-- Cabin outline (silhueta do teto) -->
-          <path d="M 30 35 Q 30 20, 50 20 L 350 20 Q 370 20, 370 35
-                   L 370 510 Q 370 525, 350 525 L 50 525 Q 30 525, 30 510 Z"
-                fill="#0a0f1c" stroke="#1e293b" stroke-width="1.5"/>
-
-          <!-- ── Painel/Dashboard (banda curva no topo) ─────────────────── -->
-          <path d="M 60 50 Q 60 35, 80 35 L 320 35 Q 340 35, 340 50
-                   L 340 145 Q 340 155, 330 155 L 70 155 Q 60 155, 60 145 Z"
-                fill="url(#cmf-grad-dashboard)" stroke="#2a3550" stroke-width="1.2"/>
-
-          <!-- Tela infotainment — mostra temp interna (azul) e externa (âmbar) -->
-          <rect x="170" y="60" width="60" height="40" rx="3" fill="#06080C" stroke="#334155" stroke-width="1"/>
-          <rect x="174" y="64" width="52" height="32" rx="1" fill="#0e1a30"/>
-          <!-- Linha 1: INT em azul -->
-          <text x="182" y="76" font-size="3.6" fill="#475569" font-weight="700" letter-spacing="0.5">INT</text>
-          <text x="220" y="78" text-anchor="end" font-size="9" font-weight="700" fill="#60a5fa"
-                style="font-variant-numeric:tabular-nums"
-                id="cmf-svg-temp-in">--°</text>
-          <!-- Divisor central -->
-          <line x1="178" y1="80" x2="222" y2="80" stroke="#1e293b" stroke-width="0.6"/>
-          <!-- Linha 2: EXT em âmbar -->
-          <text x="182" y="91" font-size="3.6" fill="#475569" font-weight="700" letter-spacing="0.5">EXT</text>
-          <text x="220" y="93" text-anchor="end" font-size="9" font-weight="700" fill="#fbbf24"
-                style="font-variant-numeric:tabular-nums"
-                id="cmf-svg-temp-out">--°</text>
-
-          <!-- AC vents (slits) — id agrupado pra recolorir via JS -->
-          <g id="cmf-ac-vents">
-            <rect class="cmf-ac-vent" x="78"  y="120" width="48" height="7" rx="3" fill="#334155"/>
-            <rect class="cmf-ac-vent" x="138" y="120" width="40" height="7" rx="3" fill="#334155"/>
-            <rect class="cmf-ac-vent" x="222" y="120" width="40" height="7" rx="3" fill="#334155"/>
-            <rect class="cmf-ac-vent" x="274" y="120" width="48" height="7" rx="3" fill="#334155"/>
-          </g>
-
-          <!-- Ondas AC (camadas de "vento" por vent — quantidade visível conforme fan_speed)
-               data-min = fan_speed mínimo para a path ficar visível
-               Cada vent tem 6 paths: 2 core (data-min=0), 2 mid (=3), 2 wide (=6) -->
-          <g id="cmf-ac-waves" style="display:none">
-            <!-- VENT 1 (x=102) — core left/right, mid, wide -->
-            <path class="cmf-ww" data-min="0" d="M 102 137 Q 100 145, 98 154"  stroke="#22d3ee" stroke-width="1.2" fill="none" stroke-linecap="round" style="animation-delay:0.00s"/>
-            <path class="cmf-ww" data-min="0" d="M 102 137 Q 104 145, 106 154" stroke="#22d3ee" stroke-width="1.2" fill="none" stroke-linecap="round" style="animation-delay:0.10s"/>
-            <path class="cmf-ww" data-min="3" d="M 102 137 Q 96 148, 91 159"   stroke="#22d3ee" stroke-width="1.1" fill="none" stroke-linecap="round" style="animation-delay:0.20s"/>
-            <path class="cmf-ww" data-min="3" d="M 102 137 Q 108 148, 113 159" stroke="#22d3ee" stroke-width="1.1" fill="none" stroke-linecap="round" style="animation-delay:0.30s"/>
-            <path class="cmf-ww" data-min="6" d="M 102 137 Q 92 151, 84 163"   stroke="#22d3ee" stroke-width="1.0" fill="none" stroke-linecap="round" style="animation-delay:0.40s"/>
-            <path class="cmf-ww" data-min="6" d="M 102 137 Q 112 151, 120 163" stroke="#22d3ee" stroke-width="1.0" fill="none" stroke-linecap="round" style="animation-delay:0.50s"/>
-
-            <!-- VENT 2 (x=158) -->
-            <path class="cmf-ww" data-min="0" d="M 158 137 Q 156 145, 154 154" stroke="#22d3ee" stroke-width="1.2" fill="none" stroke-linecap="round" style="animation-delay:0.05s"/>
-            <path class="cmf-ww" data-min="0" d="M 158 137 Q 160 145, 162 154" stroke="#22d3ee" stroke-width="1.2" fill="none" stroke-linecap="round" style="animation-delay:0.15s"/>
-            <path class="cmf-ww" data-min="3" d="M 158 137 Q 152 148, 147 159" stroke="#22d3ee" stroke-width="1.1" fill="none" stroke-linecap="round" style="animation-delay:0.25s"/>
-            <path class="cmf-ww" data-min="3" d="M 158 137 Q 164 148, 169 159" stroke="#22d3ee" stroke-width="1.1" fill="none" stroke-linecap="round" style="animation-delay:0.35s"/>
-            <path class="cmf-ww" data-min="6" d="M 158 137 Q 148 151, 140 163" stroke="#22d3ee" stroke-width="1.0" fill="none" stroke-linecap="round" style="animation-delay:0.45s"/>
-            <path class="cmf-ww" data-min="6" d="M 158 137 Q 168 151, 176 163" stroke="#22d3ee" stroke-width="1.0" fill="none" stroke-linecap="round" style="animation-delay:0.55s"/>
-
-            <!-- VENT 3 (x=242) -->
-            <path class="cmf-ww" data-min="0" d="M 242 137 Q 240 145, 238 154" stroke="#22d3ee" stroke-width="1.2" fill="none" stroke-linecap="round" style="animation-delay:0.08s"/>
-            <path class="cmf-ww" data-min="0" d="M 242 137 Q 244 145, 246 154" stroke="#22d3ee" stroke-width="1.2" fill="none" stroke-linecap="round" style="animation-delay:0.18s"/>
-            <path class="cmf-ww" data-min="3" d="M 242 137 Q 236 148, 231 159" stroke="#22d3ee" stroke-width="1.1" fill="none" stroke-linecap="round" style="animation-delay:0.28s"/>
-            <path class="cmf-ww" data-min="3" d="M 242 137 Q 248 148, 253 159" stroke="#22d3ee" stroke-width="1.1" fill="none" stroke-linecap="round" style="animation-delay:0.38s"/>
-            <path class="cmf-ww" data-min="6" d="M 242 137 Q 232 151, 224 163" stroke="#22d3ee" stroke-width="1.0" fill="none" stroke-linecap="round" style="animation-delay:0.48s"/>
-            <path class="cmf-ww" data-min="6" d="M 242 137 Q 252 151, 260 163" stroke="#22d3ee" stroke-width="1.0" fill="none" stroke-linecap="round" style="animation-delay:0.58s"/>
-
-            <!-- VENT 4 (x=298) -->
-            <path class="cmf-ww" data-min="0" d="M 298 137 Q 296 145, 294 154" stroke="#22d3ee" stroke-width="1.2" fill="none" stroke-linecap="round" style="animation-delay:0.03s"/>
-            <path class="cmf-ww" data-min="0" d="M 298 137 Q 300 145, 302 154" stroke="#22d3ee" stroke-width="1.2" fill="none" stroke-linecap="round" style="animation-delay:0.13s"/>
-            <path class="cmf-ww" data-min="3" d="M 298 137 Q 292 148, 287 159" stroke="#22d3ee" stroke-width="1.1" fill="none" stroke-linecap="round" style="animation-delay:0.23s"/>
-            <path class="cmf-ww" data-min="3" d="M 298 137 Q 304 148, 309 159" stroke="#22d3ee" stroke-width="1.1" fill="none" stroke-linecap="round" style="animation-delay:0.33s"/>
-            <path class="cmf-ww" data-min="6" d="M 298 137 Q 288 151, 280 163" stroke="#22d3ee" stroke-width="1.0" fill="none" stroke-linecap="round" style="animation-delay:0.43s"/>
-            <path class="cmf-ww" data-min="6" d="M 298 137 Q 308 151, 316 163" stroke="#22d3ee" stroke-width="1.0" fill="none" stroke-linecap="round" style="animation-delay:0.53s"/>
-          </g>
-
-          <!-- Volante (lado motorista — esquerda) -->
-          <g id="cmf-steering" transform="translate(102 85)">
-            <circle cx="0" cy="0" r="22" fill="none" stroke="#475569" stroke-width="2.5"/>
-            <circle cx="0" cy="0" r="7"  fill="#334155"/>
-            <line x1="0" y1="-15" x2="0" y2="-7" stroke="#475569" stroke-width="2.5" stroke-linecap="round"/>
-            <line x1="-18" y1="2" x2="-7" y2="2" stroke="#475569" stroke-width="2.5" stroke-linecap="round"/>
-            <line x1="18"  y1="2" x2="7"  y2="2" stroke="#475569" stroke-width="2.5" stroke-linecap="round"/>
-            <text x="0" y="3" text-anchor="middle" font-size="8" fill="#94a3b8" font-weight="900">H</text>
-          </g>
-
-          <!-- Caixa de câmbio entre os bancos (decorativo) -->
-          <rect x="180" y="200" width="40" height="120" rx="6" fill="#131a2b" stroke="#2a3550" stroke-width="1"/>
-          <circle cx="200" cy="222" r="6" fill="#1e293b" stroke="#334155" stroke-width="0.8"/>
-          <text x="200" y="262" text-anchor="middle" font-size="6" fill="#475569" letter-spacing="0.5">CONSOLE</text>
-
-          <!-- ── Banco motorista (esquerda) ────────────────────────────── -->
-          <g id="cmf-seat-drv">
-            <!-- Encosto de cabeça -->
-            <rect x="60" y="180" width="100" height="32" rx="10" fill="url(#cmf-grad-seat)" stroke="#2a3550" stroke-width="1"/>
-            <!-- Encosto -->
-            <rect x="52" y="218" width="116" height="148" rx="14" fill="url(#cmf-grad-seat)" stroke="#2a3550" stroke-width="1"/>
-            <!-- Padrão de ventilação no encosto (3 fileiras de 3 dots = 9 total) -->
-            <g class="cmf-vent-dots" id="cmf-vent-drv-dots">
-              <circle class="cmf-vd" data-row="3" cx="80"  cy="246" r="2.5" fill="#1e293b"/>
-              <circle class="cmf-vd" data-row="3" cx="110" cy="246" r="2.5" fill="#1e293b"/>
-              <circle class="cmf-vd" data-row="3" cx="140" cy="246" r="2.5" fill="#1e293b"/>
-
-              <circle class="cmf-vd" data-row="2" cx="80"  cy="280" r="2.5" fill="#1e293b"/>
-              <circle class="cmf-vd" data-row="2" cx="110" cy="280" r="2.5" fill="#1e293b"/>
-              <circle class="cmf-vd" data-row="2" cx="140" cy="280" r="2.5" fill="#1e293b"/>
-
-              <circle class="cmf-vd" data-row="1" cx="80"  cy="314" r="2.5" fill="#1e293b"/>
-              <circle class="cmf-vd" data-row="1" cx="110" cy="314" r="2.5" fill="#1e293b"/>
-              <circle class="cmf-vd" data-row="1" cx="140" cy="314" r="2.5" fill="#1e293b"/>
-            </g>
-            <!-- Assento -->
-            <rect x="46" y="375" width="128" height="120" rx="16" fill="url(#cmf-grad-seat)" stroke="#2a3550" stroke-width="1"/>
-            <!-- Etiqueta -->
-            <text x="110" y="405" text-anchor="middle" font-size="7" fill="#475569" font-weight="700" letter-spacing="1">MOTORISTA</text>
-            <!-- Zona de touch pra alterar nível de ventilação (cobre encosto + assento) -->
-            <rect id="cmf-seat-drv-touch" x="46" y="180" width="128" height="315" fill="transparent" style="cursor:ns-resize" pointer-events="all"/>
-          </g>
-
-          <!-- ── Banco passageiro (direita) ────────────────────────────── -->
-          <g id="cmf-seat-pass">
-            <rect x="240" y="180" width="100" height="32" rx="10" fill="url(#cmf-grad-seat)" stroke="#2a3550" stroke-width="1"/>
-            <rect x="232" y="218" width="116" height="148" rx="14" fill="url(#cmf-grad-seat)" stroke="#2a3550" stroke-width="1"/>
-            <g class="cmf-vent-dots" id="cmf-vent-pass-dots">
-              <circle class="cmf-vd" data-row="3" cx="260" cy="246" r="2.5" fill="#1e293b"/>
-              <circle class="cmf-vd" data-row="3" cx="290" cy="246" r="2.5" fill="#1e293b"/>
-              <circle class="cmf-vd" data-row="3" cx="320" cy="246" r="2.5" fill="#1e293b"/>
-
-              <circle class="cmf-vd" data-row="2" cx="260" cy="280" r="2.5" fill="#1e293b"/>
-              <circle class="cmf-vd" data-row="2" cx="290" cy="280" r="2.5" fill="#1e293b"/>
-              <circle class="cmf-vd" data-row="2" cx="320" cy="280" r="2.5" fill="#1e293b"/>
-
-              <circle class="cmf-vd" data-row="1" cx="260" cy="314" r="2.5" fill="#1e293b"/>
-              <circle class="cmf-vd" data-row="1" cx="290" cy="314" r="2.5" fill="#1e293b"/>
-              <circle class="cmf-vd" data-row="1" cx="320" cy="314" r="2.5" fill="#1e293b"/>
-            </g>
-            <rect x="226" y="375" width="128" height="120" rx="16" fill="url(#cmf-grad-seat)" stroke="#2a3550" stroke-width="1"/>
-            <text x="290" y="405" text-anchor="middle" font-size="7" fill="#475569" font-weight="700" letter-spacing="1">PASSAGEIRO</text>
-            <!-- Zona de touch pra alterar nível de ventilação (cobre encosto + assento) -->
-            <rect id="cmf-seat-pass-touch" x="226" y="180" width="128" height="315" fill="transparent" style="cursor:ns-resize" pointer-events="all"/>
-          </g>
-        </svg>
-      </div>
-
-      <!-- ── Status pills abaixo da cabine ─────────────────────────────── -->
-      <div style="display:flex;gap:8px;margin-top:16px;justify-content:center;flex-wrap:wrap;text-align:left">
-        <div id="cmf-status-ac" style="flex:1;min-width:0;max-width:160px;background:#0c1019;border:1px solid #1e293b;border-radius:10px;padding:10px 12px">
-          <div style="font-size:9px;font-weight:700;letter-spacing:1.5px;color:#64748b;text-transform:uppercase">❄️ AC</div>
-          <div id="cmf-ac-text" style="font-size:14px;font-weight:700;color:#475569;margin-top:3px">Desligado</div>
-        </div>
-        <div id="cmf-status-drv" style="flex:1;min-width:0;max-width:160px;background:#0c1019;border:1px solid #1e293b;border-radius:10px;padding:10px 12px">
-          <div style="font-size:9px;font-weight:700;letter-spacing:1.5px;color:#64748b;text-transform:uppercase">🪑 Motorista</div>
-          <div id="cmf-drv-text" style="font-size:14px;font-weight:700;color:#475569;margin-top:3px">Desligado</div>
-        </div>
-        <div id="cmf-status-pass" style="flex:1;min-width:0;max-width:160px;background:#0c1019;border:1px solid #1e293b;border-radius:10px;padding:10px 12px">
-          <div style="font-size:9px;font-weight:700;letter-spacing:1.5px;color:#64748b;text-transform:uppercase">🪑 Passageiro</div>
-          <div id="cmf-pass-text" style="font-size:14px;font-weight:700;color:#475569;margin-top:3px">Desligado</div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Recargas -->
-    <div id="panel-charges" class="panel">
-      <div id="charges-list"><div class="empty">Carregando recargas...</div></div>
-    </div>
-
-    <!-- Auto-Trips -->
-    <div id="panel-auto" class="panel">
-      <div id="auto-list"><div class="empty">Carregando...</div></div>
-    </div>
-
-    <!-- Ações remotas — conteúdo gerado por JS (initActionsPanel em app.js) -->
-    <div id="panel-stats" class="panel" style="overflow-y:auto;padding:10px 12px"></div>
-    <div id="panel-actions" class="panel"></div>
-    <div id="panel-logs" class="panel">
-      <div id="logs-list" class="trip-list" style="padding:8px 12px"></div>
-    </div>
-
-  </div><!-- /content -->
-
-  <!-- Overlay de login -->
-  <div id="login-overlay" style="display:none;position:fixed;inset:0;background:#0f172a;z-index:9999;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:24px">
-    <div style="font-size:40px">🚗</div>
-    <div style="font-size:20px;font-weight:700;color:#f1f5f9">EcoTrip</div>
-    <div style="font-size:13px;color:#64748b">Digite a senha de acesso</div>
-    <div style="position:relative;width:100%;max-width:280px">
-      <input id="login-input" type="password" placeholder="Senha"
-        style="width:100%;padding:12px 44px 12px 16px;background:#1e293b;border:1px solid #334155;border-radius:10px;color:#f1f5f9;font-size:16px;outline:none;box-sizing:border-box" />
-      <button onclick="togglePwVisibility('login-input', this)"
-        style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;font-size:18px;line-height:1;padding:4px">👁</button>
-    </div>
-    <div id="login-totp-row" style="display:none;width:100%;max-width:280px">
-      <input id="login-totp" type="text" inputmode="numeric" maxlength="8"
-        placeholder="Código (6 dígitos) ou backup"
-        style="width:100%;padding:12px 16px;background:#1e293b;border:1px solid #334155;border-radius:10px;color:#f1f5f9;font-size:16px;outline:none;box-sizing:border-box;letter-spacing:2px;text-align:center" />
-    </div>
-    <button onclick="doLogin()"
-      style="width:100%;max-width:280px;padding:12px;background:#22c55e;border:none;border-radius:10px;color:#0f172a;font-size:15px;font-weight:700;cursor:pointer">
-      Entrar
-    </button>
-
-    <!-- Divisor + login Google (renderiza só se servidor tem GOOGLE_OAUTH_CLIENT_ID configurado) -->
-    <div id="google-login-section" style="display:none;width:100%;max-width:280px;flex-direction:column;align-items:center;gap:10px">
-      <div style="display:flex;align-items:center;gap:8px;width:100%;color:#475569;font-size:11px">
-        <div style="flex:1;height:1px;background:#334155"></div>
-        ou
-        <div style="flex:1;height:1px;background:#334155"></div>
-      </div>
-      <div id="g_id_signin"></div>
-    </div>
-
-    <div id="login-error" style="font-size:12px;color:#f87171;display:none"></div>
-  </div>
-
-  <!-- Google Identity Services (carrega assíncrono — só ativa se o servidor configurar) -->
-  <script src="https://accounts.google.com/gsi/client" async defer></script>
-
-  <!-- Painel Admin / Configurações -->
-  <div id="panel-admin" class="panel" style="padding:12px 16px 24px;overflow-y:auto">
-    <div style="max-width:480px;margin:0 auto">
-
-      <!-- ── 1. Notificações ───────────────────────────────────────────────── -->
-      <div id="notif-section" class="settings-card">
-        <div class="sc-header" onclick="toggleNotifSection()">
-          <span class="sc-title">🔔 Notificações</span>
-          <button id="notif-collapse-btn" type="button" class="sc-toggle">▲</button>
-        </div>
-        <div id="notif-body">
-          <div id="notif-activate-wrap">
-            <button id="notif-perm-btn" type="button" onclick="requestPushPermission()"
-              style="width:100%;background:rgba(77,187,255,.10);border:1px solid rgba(77,187,255,.28);color:#4DBBFF;border-radius:10px;padding:12px;font-size:14px;font-weight:600;cursor:pointer">
-              Ativar Notificações
-            </button>
-            <div id="notif-perm-status" style="font-size:11px;color:#5B7394;margin-top:8px;text-align:center;min-height:16px"></div>
-          </div>
-          <div id="notif-toggles-wrap" style="display:none">
-            <div id="notif-toggles"></div>
-          </div>
-        </div>
-      </div>
-
-      <!-- ── 2. Histórico & Backup (unificado) ──────────────────────────────── -->
-      <div class="settings-card">
-        <div class="sc-header" onclick="toggleSection('sc-dados-body','sc-dados-btn')">
-          <span class="sc-title">💾 Histórico & Backup</span>
-          <button id="sc-dados-btn" type="button" class="sc-toggle">▲</button>
-        </div>
-        <div id="sc-dados-body">
-          <div id="hist-counts"
-            style="font-size:12px;color:#94a3b8;margin-bottom:12px;line-height:1.7">
-            Carregando…
-          </div>
-          <!-- Backup completo (servidor) -->
-          <button type="button" onclick="adminBackupServer()"
-            style="width:100%;background:#1e3a5f;border:none;border-radius:8px;padding:11px;color:#7FBADC;font-size:13px;cursor:pointer;margin-bottom:8px">
-            📦 Baixar backup completo
-          </button>
-          <button type="button" onclick="document.getElementById('restore-file-input').click()"
-            style="width:100%;background:#2d1a1a;border:1px solid #7f1d1d;border-radius:8px;padding:11px;color:#fca5a5;font-size:13px;cursor:pointer;margin-bottom:8px">
-            ⬆️ Restaurar backup…
-          </button>
-          <input id="restore-file-input" type="file" accept=".json" style="display:none"
-            onchange="adminRestoreServer(this)">
-          <!-- Exports rápidos pra análise externa -->
-          <div style="display:flex;gap:8px;margin-bottom:10px">
-            <button type="button" onclick="adminExportData()"
-              style="flex:1;background:#14532d;border:none;border-radius:8px;padding:10px;color:#4ade80;font-size:12px;cursor:pointer">
-              📥 Exportar JSON
-            </button>
-            <button type="button" onclick="adminExportCsv()"
-              style="flex:1;background:#1a2e1a;border:1px solid #166534;border-radius:8px;padding:10px;color:#86efac;font-size:12px;cursor:pointer">
-              📊 Exportar CSV
-            </button>
-          </div>
-          <!-- Banner de backup semanal -->
-          <div id="auto-backup-banner" style="display:none;background:#1c1408;border:1px solid #92400e;border-radius:10px;padding:12px 14px;margin-bottom:10px">
-            <div style="font-size:12px;color:#fbbf24;margin-bottom:6px">📦 Backup automático recomendado</div>
-            <div style="font-size:11px;color:#78716c;margin-bottom:10px">Último backup há mais de 7 dias.</div>
-            <button type="button" onclick="doAutoBackup()"
-              style="width:100%;background:#92400e;border:none;border-radius:8px;padding:10px;color:#fde68a;font-size:13px;cursor:pointer">
-              📥 Fazer backup agora
-            </button>
-          </div>
-          <!-- Avançado: ações de manutenção em caso de problema -->
-          <details style="margin-top:8px">
-            <summary style="font-size:11px;color:#64748b;cursor:pointer;padding:6px 0">⚙ Avançado</summary>
-            <button type="button" onclick="adminRedownloadCache()"
-              style="width:100%;background:#0f172a;border:1px solid #1e293b;border-radius:8px;padding:9px;color:#7FBADC;font-size:11px;cursor:pointer;margin:6px 0">
-              ♻️ Re-baixar histórico (reset cache local)
-            </button>
-            <button type="button" onclick="adminSyncWithLocal()"
-              style="width:100%;background:#3a1d4f;border:1px solid #6b21a8;border-radius:8px;padding:9px;color:#d8b4fe;font-size:11px;cursor:pointer">
-              🔄 Reconciliar (apaga do histórico o que não está aqui)
-            </button>
-          </details>
-          <div id="cache-status"
-            style="margin-top:8px;min-height:24px;font-size:12px;color:#94a3b8;white-space:pre-wrap;word-break:break-word"></div>
-        </div>
-      </div>
-
-      <!-- ── 3. Limite de Carga SOC ──────────────────────────────────────────── -->
-      <div class="settings-card">
-        <div class="sc-header" onclick="toggleSection('sc-charge-limit-body','sc-charge-limit-btn')">
-          <span class="sc-title">🔋 Limite de Carga SOC</span>
-          <button id="sc-charge-limit-btn" type="button" class="sc-toggle">▲</button>
-        </div>
-        <div id="sc-charge-limit-body">
-          <div style="font-size:11px;color:#64748b;margin-bottom:12px;line-height:1.6">
-            Define o limite máximo de carga da bateria. Útil antes de conectar o carregador
-            para garantir que ele inicie. O carro precisa estar ligado ou carregando.
-          </div>
-          <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
-            <span style="font-size:12px;color:#94a3b8">Limite atual:</span>
-            <span id="s-chrg-limit" style="font-size:18px;font-weight:700;color:var(--teal)">--%</span>
-          </div>
-          <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
-            <button class="clb slb" onclick="setChargeLimit(50)">50%</button>
-            <button class="clb slb" onclick="setChargeLimit(60)">60%</button>
-            <button class="clb slb" onclick="setChargeLimit(70)">70%</button>
-            <button class="clb slb" onclick="setChargeLimit(80)">80%</button>
-            <button class="clb slb" onclick="setChargeLimit(90)">90%</button>
-            <button class="clb slb" onclick="setChargeLimit(100)">100%</button>
-          </div>
-          <div id="s-chrg-limit-status" class="charge-limit-status"></div>
-        </div>
-      </div>
-
-
-      <!-- ── 3b. Veículo (chassi GWM) ─────────────────────────────────────── -->
-      <div class="settings-card">
-        <div class="sc-header" onclick="toggleSection('sc-vehicle-body','sc-vehicle-btn')">
-          <span class="sc-title">🚗 Veículo</span>
-          <button id="sc-vehicle-btn" type="button" class="sc-toggle">▲</button>
-        </div>
-        <div id="sc-vehicle-body">
-          <div class="sc-box">
-            <div class="sc-box-label">Chassi do veículo (VIN)</div>
-            <div style="font-size:11px;color:#94a3b8;margin-bottom:8px;line-height:1.45">
-              Usado pelo bridge pra subscribe nos tópicos MQTT da integração GWM Brasil
-              (<code style="font-size:10px;color:#cbd5e1">gwmbrasil_&lt;chassi&gt;/+/state</code>) e mapear
-              entidades do Home Assistant. Formato esperado: <code style="font-size:10px;color:#cbd5e1">lgw + 14 alfanuméricos</code>.
-            </div>
-            <input id="vh-chassi" type="text" placeholder="lgwffva55sh931315" maxlength="17"
-              autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
-              style="width:100%;box-sizing:border-box;background:#1e293b;border:1px solid #334155;border-radius:6px;padding:8px 10px;color:#e2e8f0;font-size:14px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:0.5px;margin-bottom:8px" />
-            <div id="vh-info" style="font-size:11px;color:#64748b;margin-bottom:8px;min-height:14px"></div>
-            <button type="button" onclick="saveVehicleChassi()"
-              style="width:100%;background:#1e40af;border:none;border-radius:6px;padding:10px;color:#e2e8f0;font-size:13px;cursor:pointer">
-              Salvar
-            </button>
-            <div id="vh-status" style="font-size:12px;color:#94a3b8;margin-top:8px;min-height:18px"></div>
-            <button type="button" id="vh-restart-btn" onclick="adminRestart()"
-              style="display:none;width:100%;margin-top:8px;background:#7c2d12;border:none;border-radius:6px;padding:10px;color:#fed7aa;font-size:13px;cursor:pointer">
-              🔄 Reiniciar bridge agora para aplicar
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <!-- ── 4. Servidor ───────────────────────────────────────────────────── -->
-      <div class="settings-card">
-        <div class="sc-header" onclick="toggleSection('sc-servidor-body','sc-servidor-btn')">
-          <span class="sc-title">🛠 Servidor</span>
-          <button id="sc-servidor-btn" type="button" class="sc-toggle">▲</button>
-        </div>
-        <div id="sc-servidor-body">
-          <!-- Alterar senha -->
-          <div class="sc-box">
-            <div class="sc-box-label">🔑 Alterar senha de acesso</div>
-            <div style="position:relative;margin-bottom:6px">
-              <input id="cp-new" type="password" placeholder="Nova senha"
-                style="width:100%;box-sizing:border-box;background:#1e293b;border:1px solid #334155;border-radius:6px;padding:8px 36px 8px 10px;color:#e2e8f0;font-size:14px" />
-              <button type="button" onclick="togglePwVisibility('cp-new', this)"
-                style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;font-size:15px;line-height:1;padding:2px;color:#64748b">👁</button>
-            </div>
-            <div style="position:relative;margin-bottom:8px">
-              <input id="cp-confirm" type="password" placeholder="Confirmar nova senha"
-                style="width:100%;box-sizing:border-box;background:#1e293b;border:1px solid #334155;border-radius:6px;padding:8px 36px 8px 10px;color:#e2e8f0;font-size:14px" />
-              <button type="button" onclick="togglePwVisibility('cp-confirm', this)"
-                style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;font-size:15px;line-height:1;padding:2px;color:#64748b">👁</button>
-            </div>
-            <button type="button" onclick="changePassword()"
-              style="width:100%;background:#1e40af;border:none;border-radius:6px;padding:10px;color:#e2e8f0;font-size:13px;cursor:pointer">
-              Salvar nova senha
-            </button>
-            <div id="cp-status" style="font-size:11px;color:#94a3b8;margin-top:6px;min-height:16px"></div>
-          </div>
-          <!-- 2FA / TOTP -->
-          <div class="sc-box" id="twofa-box">
-            <div class="sc-box-label">🔐 Autenticação em 2 etapas</div>
-            <div id="twofa-status" style="font-size:12px;color:#94a3b8;margin-bottom:8px">Carregando…</div>
-            <div id="twofa-actions"></div>
-          </div>
-          <!-- Radares -->
-          <div class="sc-box" id="radars-box">
-            <div class="sc-box-label">📡 Radares</div>
-            <div id="radars-status" style="font-size:12px;color:#94a3b8;margin-bottom:8px">Carregando…</div>
-            <div style="display:flex;gap:6px;margin-bottom:8px">
-              <button onclick="refreshRadars()" style="flex:1;background:#1e40af;border:none;border-radius:6px;padding:8px;color:#e2e8f0;font-size:12px;cursor:pointer">🔄 Atualizar do OSM</button>
-              <button onclick="reanalyzeRadars()" style="flex:1;background:#065f46;border:none;border-radius:6px;padding:8px;color:#e2e8f0;font-size:12px;cursor:pointer">⚙ Reanalisar viagens</button>
-            </div>
-            <div id="ignored-radars-list" style="margin-top:4px"></div>
-          </div>
-          <!-- Ações do servidor -->
-          <div style="display:flex;gap:8px;margin-bottom:10px">
-            <button type="button" onclick="adminRestart()"
-              style="flex:1;background:#1e40af;border:none;border-radius:8px;padding:12px;color:#e2e8f0;font-size:13px;cursor:pointer">
-              🔄 Reiniciar
-            </button>
-            <button type="button" onclick="adminUpdate()"
-              style="flex:1;background:#065f46;border:none;border-radius:8px;padding:12px;color:#e2e8f0;font-size:13px;cursor:pointer">
-              ⬆️ Atualizar
-            </button>
-          </div>
-          <button type="button" onclick="adminClearHistory()"
-            style="width:100%;background:#7f1d1d;border:none;border-radius:8px;padding:12px;color:#fca5a5;font-size:13px;cursor:pointer;margin-bottom:10px">
-            🗑 Limpar histórico do servidor
-          </button>
-          <div style="display:flex;gap:8px;margin-bottom:10px">
-            <button type="button" onclick="adminAction('/api/lifetime/snapshots/force','Forçando snapshot')"
-              style="flex:1;background:#1e293b;border:1px solid #334155;border-radius:8px;padding:10px;color:#94a3b8;font-size:12px;cursor:pointer">
-              📸 Snapshot agora
-            </button>
-            <button type="button" onclick="adminClearSnapshots()"
-              style="flex:1;background:#1e293b;border:1px solid #7f1d1d;border-radius:8px;padding:10px;color:#fca5a5;font-size:12px;cursor:pointer">
-              🗑 Zerar comparativos
-            </button>
-          </div>
-          <div id="admin-status"
-            style="min-height:40px;background:#0f172a;border-radius:8px;padding:10px 12px;font-size:12px;color:#94a3b8;white-space:pre-wrap;word-break:break-word">
-            Pronto.
-          </div>
-        </div>
-      </div>
-
-      <!-- ── Aparência ────────────────────────────────────────────────────────── -->
-      <div class="settings-card">
-        <div class="sc-header" onclick="toggleSection('sc-theme-body','sc-theme-btn')">
-          <span class="sc-title">🎨 Aparência</span>
-          <button id="sc-theme-btn" type="button" class="sc-toggle">▲</button>
-        </div>
-        <div id="sc-theme-body">
-          <div style="font-size:11px;color:#64748b;margin-bottom:10px;line-height:1.6">
-            Modo claro é experimental — vários elementos ainda mantêm o look escuro.
-          </div>
-          <div style="display:flex;gap:6px;flex-wrap:wrap">
-            <button type="button" data-theme-btn="dark"  onclick="setTheme('dark')"  class="filter-chip">🌙 Escuro</button>
-            <button type="button" data-theme-btn="light" onclick="setTheme('light')" class="filter-chip">☀️ Claro</button>
-            <button type="button" data-theme-btn="auto"  onclick="setTheme('auto')"  class="filter-chip">⚙ Auto (iOS)</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- ── Manutenções ──────────────────────────────────────────────────────── -->
-      <div class="settings-card">
-        <div class="sc-header" onclick="toggleSection('sc-maint-body','sc-maint-btn')">
-          <span class="sc-title">🔧 Manutenções</span>
-          <button id="sc-maint-btn" type="button" class="sc-toggle">▲</button>
-        </div>
-        <div id="sc-maint-body">
-          <div style="font-size:11px;color:#64748b;margin-bottom:10px;line-height:1.6">
-            Intervalos por km (revisão, óleo, freios) e histórico do que já foi feito. O card no Dash avisa quando está perto do vencimento.
-          </div>
-          <button type="button" onclick="openMaintAdmin()"
-            style="width:100%;background:rgba(74,222,128,.10);border:1px solid rgba(74,222,128,.28);color:#4ade80;border-radius:10px;padding:10px;font-size:13px;font-weight:600;cursor:pointer">
-            🔧 Gerenciar manutenções
-          </button>
-        </div>
-      </div>
-
-      <!-- ── N. Locais Conhecidos ──────────────────────────────────────────────── -->
-      <div class="settings-card">
-        <div class="sc-header" onclick="toggleSection('sc-kp-body','sc-kp-btn')">
-          <span class="sc-title">📍 Locais Conhecidos</span>
-          <button id="sc-kp-btn" type="button" class="sc-toggle">▲</button>
-        </div>
-        <div id="sc-kp-body">
-          <div style="font-size:11px;color:#64748b;margin-bottom:10px;line-height:1.6">
-            Locais com raio configurado. Viagens e recargas dentro do raio são nomeadas automaticamente.
-          </div>
-          <button type="button" onclick="openKpModal(null)"
-            style="width:100%;background:rgba(34,211,238,.10);border:1px solid rgba(34,211,238,.28);color:#22d3ee;border-radius:10px;padding:10px;font-size:13px;font-weight:600;cursor:pointer;margin-bottom:10px">
-            + Adicionar local
-          </button>
-          <div id="kp-list"></div>
-        </div>
-      </div>
-
-      <!-- ── Sessão ──────────────────────────────────────────────────────────── -->
-      <button type="button" onclick="adminLogout()"
-        style="width:100%;background:transparent;border:1px solid #1e293b;border-radius:10px;padding:11px;color:#475569;font-size:12px;cursor:pointer;margin-top:4px">
-        🔒 Sair (apagar senha salva)
-      </button>
-
-    </div>
-  </div>
-
-  <!-- Trip detail overlay (mapa + gráficos) -->
-  <div id="trip-detail" style="display:none">
-    <div id="trip-detail-header">
-      <button id="trip-detail-back" onclick="closeTripDetail()">←</button>
-      <span id="trip-detail-title">Viagem</span>
-    </div>
-    <div id="trip-detail-body">
-      <div id="trip-map"></div>
-      <div class="playback-bar">
-        <input type="range" id="playback-slider" min="0" max="0" value="0" oninput="onPlaybackMove(this.value)">
-        <div class="playback-snapshot" id="playback-snapshot">
-          <div class="snap-item"><div class="snap-val blue"  id="snap-spd">--</div><div class="snap-lbl">km/h</div></div>
-          <div class="snap-item"><div class="snap-val green" id="snap-ev">--</div><div class="snap-lbl">kW elétrico</div></div>
-          <div class="snap-item"><div class="snap-val orange" id="snap-rpm">--</div><div class="snap-lbl">RPM ICE</div></div>
-          <div class="snap-item"><div class="snap-val teal"  id="snap-pwr">--</div><div class="snap-lbl">% bat.</div></div>
-          <div class="snap-item"><div class="snap-val purple" id="snap-soc">--</div><div class="snap-lbl">SOC%</div></div>
-          <div class="snap-item"><div class="snap-val teal"  id="snap-time">--</div><div class="snap-lbl">tempo</div></div>
-        </div>
-      </div>
-      <!-- Possíveis multas (radares passados acima do limite) -->
-      <div id="radar-alerts-section" style="display:none;padding:8px 14px 0">
-        <div style="background:#7f1d1d22;border:1px solid #ef4444;border-radius:8px;padding:10px 14px">
-          <div style="font-size:13px;font-weight:700;color:#fecaca;margin-bottom:8px">
-            ⚠️ <span id="radar-alerts-count">0</span> possível(eis) multa(s) detectada(s)
-          </div>
-          <div id="radar-alerts-list" style="display:flex;flex-direction:column;gap:6px"></div>
-        </div>
-      </div>
-
-      <!-- Médias de um intervalo dentro da viagem -->
-      <div id="interval-bar" style="padding:8px 14px 0">
-        <button onclick="toggleIntervalPanel()" id="interval-toggle"
-                style="width:100%;padding:9px;background:#0f172a;border:1px solid #1e293b;
-                       border-radius:8px;color:#cbd5e1;font-size:13px;font-weight:600;
-                       cursor:pointer">
-          📊 Médias de um intervalo da viagem
-        </button>
-      </div>
-      <div id="interval-panel" style="display:none;padding:12px 14px">
-        <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:10px">
-          <div style="display:flex;align-items:center;gap:10px">
-            <span style="font-size:11px;color:#94a3b8;width:50px">Início</span>
-            <input type="range" id="interval-start" min="0" max="0" value="0"
-                   oninput="onIntervalChange()" style="flex:1">
-            <span id="interval-start-time" style="font-size:11px;color:#22d3ee;
-                  font-weight:600;width:55px;text-align:right">--:--</span>
-          </div>
-          <div style="display:flex;align-items:center;gap:10px">
-            <span style="font-size:11px;color:#94a3b8;width:50px">Fim</span>
-            <input type="range" id="interval-end" min="0" max="0" value="0"
-                   oninput="onIntervalChange()" style="flex:1">
-            <span id="interval-end-time" style="font-size:11px;color:#fbbf24;
-                  font-weight:600;width:55px;text-align:right">--:--</span>
-          </div>
-        </div>
-        <div id="interval-metrics" style="display:grid;grid-template-columns:repeat(3,1fr);
-             gap:8px;background:#0c1019;border:1px solid #1e293b;border-radius:10px;padding:12px">
-          <div class="empty" style="grid-column:1/-1;text-align:center;padding:8px;font-size:12px;color:#64748b">
-            Selecione início e fim acima
-          </div>
-        </div>
-      </div>
-
-      <div class="chart-section">
-        <div class="chart-label">Velocidade (km/h)</div>
-        <div class="chart-wrap"><canvas id="chart-spd"></canvas></div>
-        <div class="chart-label">Potência elétrica (kW)</div>
-        <div class="chart-wrap"><canvas id="chart-ev"></canvas></div>
-        <div class="chart-label">Motor ICE (RPM)</div>
-        <div class="chart-wrap"><canvas id="chart-rpm"></canvas></div>
-        <div class="chart-label">% Bateria (regen ← 0 → consumo)</div>
-        <div class="chart-wrap"><canvas id="chart-pwr"></canvas></div>
-        <div class="chart-label" id="chart-soc-label">SOC%</div>
-        <div class="chart-wrap"><canvas id="chart-soc"></canvas></div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Charge timeline overlay (gráfico de potência/energia por sessão) -->
-  <div id="charge-timeline" style="display:none">
-    <div class="overlay-header">
-      <button class="overlay-back-btn" onclick="closeChargeTimeline()">←</button>
-      <span id="charge-timeline-title">Linha do Tempo</span>
-    </div>
-    <div id="charge-timeline-body">
-      <div class="chart-section">
-        <div class="chart-label">Potência de recarga (kW)</div>
-        <div class="chart-wrap"><canvas id="chart-chrg-power"></canvas></div>
-        <div class="chart-label">Energia injetada (kWh)</div>
-        <div class="chart-wrap"><canvas id="chart-chrg-kwh"></canvas></div>
-        <div class="chart-label">SOC (%)</div>
-        <div class="chart-wrap"><canvas id="chart-chrg-soc"></canvas></div>
-        <div class="chart-label" id="chart-chrg-temp-lbl" style="display:none">Temperatura externa (°C)</div>
-        <div class="chart-wrap" id="chart-chrg-temp-wrap" style="display:none"><canvas id="chart-chrg-temp"></canvas></div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Tab bar -->
-  <nav id="tab-bar">
-    <button class="tab active" data-panel="dash" onclick="switchTab(this)">
-      <span class="tab-icon">🏠</span>
-      <span class="tab-label">Dash</span>
-    </button>
-    <button class="tab" data-panel="drive" onclick="switchTab(this, initDrivePanel)">
-      <span class="tab-icon">🏎️</span>
-      <span class="tab-label">Drive</span>
-    </button>
-    <button class="tab" data-panel="comfort" onclick="switchTab(this)">
-      <span class="tab-icon">
-        <svg viewBox="0 0 20 20" width="18" height="18" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-          <g stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
-            <line x1="10" y1="2" x2="10" y2="18"/>
-            <line x1="3"  y1="6" x2="17" y2="14"/>
-            <line x1="3"  y1="14" x2="17" y2="6"/>
-            <path d="M7 4 L10 6 L13 4 M7 16 L10 14 L13 16" stroke-width="1.3"/>
-            <path d="M4.5 7 L4 10 L4.5 13 M15.5 7 L16 10 L15.5 13" stroke-width="1.3"/>
-          </g>
-        </svg>
-      </span>
-      <span class="tab-label">Conforto</span>
-    </button>
-    <button class="tab" data-panel="charges" onclick="switchTab(this, loadCharges)">
-      <span class="tab-icon" style="font-size:14px;letter-spacing:-1px">⚡⛽</span>
-      <span class="tab-label">Posto</span>
-    </button>
-    <button class="tab" data-panel="auto" onclick="switchTab(this, loadAutoTrips)">
-      <span class="tab-icon">
-        <svg viewBox="0 0 20 20" width="18" height="18" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-          <circle cx="4" cy="15.5" r="2.4" fill="currentColor"/>
-          <path d="M4 13.1C4 9 8.2 6.8 10.5 9.5C12.5 12 16 11 16 7.2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none"/>
-          <circle cx="16" cy="4.8" r="2.4" fill="currentColor"/>
-        </svg>
-      </span>
-      <span class="tab-label">Viagens</span>
-    </button>
-    <button class="tab" data-panel="stats" onclick="switchTab(this, loadStats)">
-      <span class="tab-icon">📊</span>
-      <span class="tab-label">Stats</span>
-    </button>
-    <button class="tab" data-panel="actions" onclick="switchTab(this)">
-      <span class="tab-icon">🔧</span>
-      <span class="tab-label">Ações</span>
-    </button>
-    <button class="tab" data-panel="logs" onclick="switchTab(this, loadLogs)">
-      <span class="tab-icon">📋</span>
-      <span class="tab-label">Logs</span>
-    </button>
-    <button class="tab" data-panel="admin" onclick="switchTab(this, () => { loadKnownPlaces(); renderHistCounts(); })">
-      <span class="tab-icon">⚙️</span>
-      <span class="tab-label">Config</span>
-    </button>
-  </nav>
-
-  <!-- Modal de confirmação — ação remota motor -->
-  <div id="d-remote-modal" style="display:none;position:fixed;inset:0;z-index:9000;background:rgba(0,0,0,0.72);align-items:flex-end;justify-content:center;padding-bottom:env(safe-area-inset-bottom)">
-    <div style="background:#1e293b;border-radius:16px 16px 0 0;padding:24px 20px 28px;width:100%;max-width:480px;text-align:center">
-      <div id="d-remote-modal-title" style="font-size:18px;font-weight:700;color:#f1f5f9;margin-bottom:8px">Confirmar</div>
-      <div id="d-remote-modal-msg"   style="font-size:13px;color:#94a3b8;margin-bottom:22px"></div>
-      <div style="display:flex;gap:12px">
-        <button onclick="remoteModalCancel()"
-          style="flex:1;padding:13px;background:#334155;border:none;border-radius:10px;color:#e2e8f0;font-size:14px;cursor:pointer">
-          Cancelar
-        </button>
-        <button id="d-remote-confirm-btn" onclick="remoteModalConfirm()"
-          style="flex:1;padding:13px;background:#22c55e;border:none;border-radius:10px;color:#0f172a;font-size:14px;font-weight:700;cursor:pointer">
-          Confirmar
-        </button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Modal de renomear viagem (iOS-style, centrado) -->
-  <div id="d-rename-modal" style="display:none;position:fixed;inset:0;z-index:9100;background:rgba(0,0,0,0.72);align-items:center;justify-content:center;padding:20px" onclick="if(event.target===this)doRenameCancel()">
-    <div style="background:#1e293b;border-radius:16px;padding:22px 20px 18px;width:100%;max-width:360px">
-      <div id="d-rename-modal-title" style="font-size:15px;font-weight:700;color:#f1f5f9;margin-bottom:2px;text-align:center">Nomear viagem</div>
-      <div id="d-rename-modal-date"  style="font-size:11px;color:#5B7394;text-align:center;margin-bottom:14px"></div>
-      <input id="d-rename-modal-input" type="text" maxlength="60" autocomplete="off" autocorrect="off" spellcheck="false" enterkeyhint="done"
-        placeholder="Nome da viagem…"
-        style="width:100%;background:#0C1019;border:1.5px solid #4DBBFF;border-radius:8px;color:#EEF4FF;font-size:14px;font-weight:600;padding:9px 12px;outline:none;-webkit-appearance:none;box-sizing:border-box;margin-bottom:16px"
-        onkeydown="if(event.key==='Enter'){event.preventDefault();doRenameConfirm();}if(event.key==='Escape')doRenameCancel()">
-      <div style="display:flex;gap:10px">
-        <button onclick="doRenameCancel()"
-          style="flex:1;padding:11px;background:#334155;border:none;border-radius:10px;color:#e2e8f0;font-size:14px;cursor:pointer">
-          Cancelar
-        </button>
-        <button onclick="doRenameConfirm()"
-          style="flex:1;padding:11px;background:#4DBBFF;border:none;border-radius:10px;color:#06080C;font-size:14px;font-weight:700;cursor:pointer">
-          Salvar
-        </button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Toast de feedback -->
-  <div id="d-toast"
-    style="position:fixed;bottom:84px;left:50%;transform:translateX(-50%);background:#1e293b;color:#f1f5f9;border-radius:8px;padding:10px 18px;font-size:13px;z-index:9001;opacity:0;transition:opacity .3s;pointer-events:none;white-space:nowrap;max-width:90vw;text-align:center;border:1px solid #334155">
-  </div>
-
-</div><!-- /app -->
-
-  <!-- Modal de local da recarga -->
-  <div id="loc-picker" style="display:none;position:fixed;inset:0;z-index:9200;background:rgba(0,0,0,0.72);align-items:center;justify-content:center;padding:20px" onclick="if(event.target===this)closeLoc()">
-    <div style="background:#1e293b;border-radius:16px;padding:22px 20px 18px;width:100%;max-width:360px">
-      <div style="font-size:15px;font-weight:700;color:#f1f5f9;margin-bottom:4px;text-align:center">📍 Local da Recarga</div>
-      <div id="loc-picker-date" style="font-size:11px;color:#5B7394;text-align:center;margin-bottom:12px"></div>
-
-      <!-- Chips de locais conhecidos -->
-      <div id="loc-known-chips" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:4px"></div>
-
-      <!-- Separador "ou nome personalizado" — oculto quando não há locais -->
-      <div id="loc-known-sep" style="display:none;align-items:center;gap:8px;margin:10px 0 10px">
-        <div style="flex:1;height:1px;background:#334155"></div>
-        <span style="font-size:11px;color:#475569;white-space:nowrap">ou nome personalizado</span>
-        <div style="flex:1;height:1px;background:#334155"></div>
-      </div>
-
-      <!-- Input com datalist de locais favoritos -->
-      <input id="loc-name-input" type="text" list="loc-datalist" maxlength="60"
-        autocomplete="off" autocorrect="off" spellcheck="false" enterkeyhint="done"
-        placeholder="Nome do local (ex: Casa, Shopping…)"
-        style="width:100%;background:#0C1019;border:1.5px solid #4DBBFF;border-radius:8px;color:#EEF4FF;font-size:14px;padding:9px 12px;outline:none;-webkit-appearance:none;box-sizing:border-box;margin-bottom:10px"
-        onkeydown="if(event.key==='Enter'){event.preventDefault();saveLoc();}if(event.key==='Escape')closeLoc()">
-      <datalist id="loc-datalist"></datalist>
-
-      <!-- GPS -->
-      <button id="loc-gps-btn" onclick="locCapGps()"
-        style="width:100%;padding:9px;background:#1a2a3a;border:1px solid #334155;border-radius:8px;color:#7FBADC;font-size:13px;cursor:pointer;margin-bottom:6px;text-align:left">
-        📍 Capturar minha localização atual
-      </button>
-      <div id="loc-gps-status" style="font-size:11px;color:#5B7394;min-height:16px;margin-bottom:10px;text-align:center"></div>
-
-      <!-- Salvar como favorito -->
-      <label style="display:flex;align-items:center;gap:8px;margin-bottom:16px;cursor:pointer">
-        <input type="checkbox" id="loc-save-known" style="width:16px;height:16px;accent-color:#4DBBFF">
-        <span style="font-size:12px;color:#94a3b8">Adicionar aos Locais Conhecidos (auto-detectar nas próximas recargas)</span>
-      </label>
-
-      <div style="display:flex;gap:10px">
-        <button onclick="closeLoc()"
-          style="flex:1;padding:11px;background:#334155;border:none;border-radius:10px;color:#e2e8f0;font-size:14px;cursor:pointer">
-          Cancelar
-        </button>
-        <button onclick="saveLoc()"
-          style="flex:1;padding:11px;background:#4DBBFF;border:none;border-radius:10px;color:#06080C;font-size:14px;font-weight:700;cursor:pointer">
-          Salvar
-        </button>
-      </div>
-    </div>
-  </div>
-
-<!-- Modal — Locais Conhecidos -->
-<div id="kp-modal" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.75);align-items:flex-end;justify-content:center">
-  <div style="background:#0c1019;border-radius:16px 16px 0 0;width:100%;max-width:520px;max-height:92vh;overflow-y:auto;padding:20px 16px 32px">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-      <span id="kp-modal-title" style="font-size:16px;font-weight:700;color:#e2e8f0">Novo local</span>
-      <button onclick="closeKpModal()" style="background:none;border:none;color:#64748b;font-size:20px;cursor:pointer;padding:4px">✕</button>
-    </div>
-
-    <!-- Nome -->
-    <div style="margin-bottom:12px">
-      <label style="font-size:11px;color:#64748b;display:block;margin-bottom:4px">Nome do local</label>
-      <input id="kp-name-input" type="text" placeholder="Ex: Casa, Academia, Trabalho"
-        style="width:100%;background:#0f172a;border:1px solid #1e3a5f;border-radius:8px;padding:10px 12px;color:#e2e8f0;font-size:14px;box-sizing:border-box">
-    </div>
-
-    <!-- Raio -->
-    <div style="margin-bottom:12px">
-      <div style="display:flex;justify-content:space-between;margin-bottom:4px">
-        <label style="font-size:11px;color:#64748b">Raio de detecção</label>
-        <span id="kp-radius-val" style="font-size:11px;color:#22d3ee;font-weight:600">200 m</span>
-      </div>
-      <input id="kp-radius-input" type="range" min="50" max="1000" step="25" value="200"
-        oninput="kpRadiusChange(this.value)"
-        style="width:100%;accent-color:#22d3ee">
-      <div style="display:flex;justify-content:space-between;font-size:9px;color:#334155;margin-top:2px">
-        <span>50 m</span><span>1 km</span>
-      </div>
-    </div>
-
-    <!-- Busca de endereço -->
-    <div style="display:flex;gap:8px;margin-bottom:10px">
-      <input id="kp-search-input" type="text" placeholder="Buscar endereço…"
-        style="flex:1;background:#0f172a;border:1px solid #1e3a5f;border-radius:8px;padding:9px 12px;color:#e2e8f0;font-size:13px"
-        onkeydown="if(event.key==='Enter')kpSearchAddress()">
-      <button onclick="kpSearchAddress()"
-        style="background:#1e3a5f;border:none;border-radius:8px;padding:9px 14px;color:#7FBADC;font-size:13px;cursor:pointer;white-space:nowrap">
-        🔍
-      </button>
-      <button onclick="kpUseGps()"
-        style="background:#052e16;border:1px solid #166534;border-radius:8px;padding:9px 12px;color:#4ade80;font-size:13px;cursor:pointer;white-space:nowrap">
-        📡 GPS
-      </button>
-    </div>
-
-    <!-- Mapa -->
-    <div id="kp-map" style="height:220px;border-radius:10px;overflow:hidden;margin-bottom:14px;background:#0f172a"></div>
-    <div style="font-size:10px;color:#475569;text-align:center;margin-bottom:14px">
-      Toque no mapa para posicionar o pino, ou use busca/GPS acima.
-    </div>
-
-    <!-- Ações -->
-    <div style="display:flex;gap:8px">
-      <button onclick="closeKpModal()"
-        style="flex:1;background:#1e293b;border:none;border-radius:10px;padding:13px;color:#94a3b8;font-size:14px;cursor:pointer">
-        Cancelar
-      </button>
-      <button onclick="saveKnownPlace()"
-        style="flex:1;background:#22d3ee;border:none;border-radius:10px;padding:13px;color:#000;font-size:14px;font-weight:700;cursor:pointer">
-        Salvar
-      </button>
-    </div>
+    <div id="login-error"></div>
+    <button class="lo-btn" onclick="doLogin()">Entrar</button>
+
+    <div class="lo-divider">ou</div>
+    <div id="g_id_onload" data-callback="_onGoogleCredential" data-auto_prompt="false"></div>
+    <div id="g_id_signin" class="g_id_signin" data-type="standard" data-shape="rectangular" data-theme="filled_black" data-text="signin_with" data-size="large" data-locale="pt-BR" data-logo_alignment="left"></div>
   </div>
 </div>
 
-<script src="/app.js"></script>
+<!-- ──────────────────────── HEADER ──────────────────────── -->
+<div class="head">
+  <div class="brand" onclick="openVersionInfo()">
+    <span class="logo">🚗</span>
+    <div class="info">
+      <div class="model">Haval H6 PHEV <span style="color:var(--muted);font-weight:500">▾</span></div>
+      <div class="ver"><span id="hdr-bridge-ver">…</span> · <span id="hdr-apk-ver">…</span></div>
+    </div>
+  </div>
+  <div class="right">
+    <span id="status-dot" class="dot offline" title="Conexão"></span>
+    <button class="bell" onclick="openNotifPanel()">
+      🔔<span id="bell-badge" class="badge" style="display:none">0</span>
+    </button>
+    <button class="bell" onclick="hardRefresh()" title="Recarregar (limpa cache)" style="font-size:16px">↺</button>
+  </div>
+</div>
+
+<!-- ──────────────────────── TOAST STACK ──────────────────────── -->
+<div id="toast-stack"></div>
+
+<!-- ──────────────────────── VIEWS ──────────────────────── -->
+<main id="views">
+  <!-- views injetadas via JS no boot pra evitar arquivo gigante -->
+  <div id="view-dash" class="view active">
+    <div class="container">
+      <div class="section-title">Dash</div>
+      <div class="spin-loader"></div>
+    </div>
+  </div>
+  <div id="view-drive" class="view">
+    <div class="container">
+      <div class="section-title">Drive</div>
+      <div class="spin-loader"></div>
+    </div>
+  </div>
+  <div id="view-conforto" class="view">
+    <div class="container">
+      <div class="section-title">Conforto</div>
+      <div class="spin-loader"></div>
+    </div>
+  </div>
+  <div id="view-posto" class="view">
+    <div class="container">
+      <div class="section-title">Posto</div>
+      <div class="spin-loader"></div>
+    </div>
+  </div>
+  <div id="view-desloc" class="view">
+    <div class="container">
+      <div class="section-title">Deslocamentos</div>
+      <div class="spin-loader"></div>
+    </div>
+  </div>
+  <div id="view-logs" class="view">
+    <div class="container">
+      <div class="section-title">Logs</div>
+      <div class="spin-loader"></div>
+    </div>
+  </div>
+  <div id="view-config" class="view">
+    <div class="container">
+      <div class="section-title">Configurações</div>
+      <div class="spin-loader"></div>
+    </div>
+  </div>
+</main>
+
+<!-- ──────────────────────── TABBAR ──────────────────────── -->
+<nav class="tabbar">
+  <button class="tb active" data-view="dash"     onclick="switchView('dash')"><span class="ic">🏠</span>Dash</button>
+  <button class="tb"        data-view="drive"    onclick="switchView('drive')"><span class="ic">🏎</span>Drive</button>
+  <button class="tb"        data-view="conforto" onclick="switchView('conforto')"><span class="ic">❄️</span>Conforto</button>
+  <button class="tb"        data-view="posto"    onclick="switchView('posto')"><span class="ic">⚡</span>Posto</button>
+  <button class="tb"        data-view="desloc"   onclick="switchView('desloc')"><span class="ic">📈</span>Desloc.</button>
+  <button class="tb"        data-view="logs"     onclick="switchView('logs')"><span class="ic">📋</span>Logs</button>
+  <button class="tb"        data-view="config"   onclick="switchView('config')"><span class="ic">⚙</span>Config</button>
+</nav>
+
+<!-- ──────────────────────── CORE JS ──────────────────────── -->
+<script>
+// ═════════════════════════════════════════════════════════
+//  GLOBAL STATE
+// ═════════════════════════════════════════════════════════
+let bridgeToken = localStorage.getItem('bridge_token') || '';
+let state = {};
+let ws = null;
+let wsReconnectTimeout = null;
+let wsRetryDelay = 1000;
+let lastUpdateMs = null;
+let activeView = sessionStorage.getItem('ecotrip_v2_active') || 'dash';
+let refreshing = false;
+
+// Pending HVAC state (preservado do app.js legacy)
+let _hvacDragState = null;
+const _hvacPending = {};
+const HVAC_DRAG_PX_PER_STEP = 18;
+const HVAC_PENDING_TIMEOUT_MS = 5000;
+
+// Lazy load tracker — view só inicializa uma vez
+const _viewsLoaded = new Set();
+
+// ═════════════════════════════════════════════════════════
+//  UTILS
+// ═════════════════════════════════════════════════════════
+async function sha256hex(str) {
+  try {
+    if (typeof crypto !== 'undefined' && crypto.subtle) {
+      const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+      return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+  } catch (_) {}
+  return str;
+}
+
+function relTime(ms) {
+  if (!ms) return '--';
+  const sec = Math.floor((Date.now() - ms) / 1000);
+  if (sec < 10)    return 'agora';
+  if (sec < 60)    return `${sec}s atrás`;
+  if (sec < 3600)  return `${Math.floor(sec/60)}min atrás`;
+  if (sec < 86400) return `${Math.floor(sec/3600)}h atrás`;
+  return `${Math.floor(sec/86400)}d atrás`;
+}
+
+function deepMerge(target, source) {
+  if (!source || typeof source !== 'object') return target;
+  for (const k of Object.keys(source)) {
+    if (source[k] !== null && typeof source[k] === 'object' && !Array.isArray(source[k])) {
+      target[k] = target[k] || {};
+      deepMerge(target[k], source[k]);
+    } else {
+      target[k] = source[k];
+    }
+  }
+  return target;
+}
+
+// Wrapper de fetch com injeção de token + redirect pra login no 401
+function apiFetch(url, opts = {}) {
+  if (bridgeToken) {
+    opts.headers = { ...(opts.headers || {}), 'Authorization': 'Bearer ' + bridgeToken };
+  }
+  return fetch(url, opts).then(r => {
+    if (r.status === 401) {
+      localStorage.removeItem('bridge_token');
+      bridgeToken = '';
+      showLogin('Sessão expirada. Faça login novamente.');
+      throw new Error('401');
+    }
+    return r;
+  });
+}
+
+function showToast(msg, type = '') {
+  const stack = document.getElementById('toast-stack');
+  const t = document.createElement('div');
+  t.className = 'toast ' + (type || (msg.startsWith('✓') ? 'ok' : msg.startsWith('✗') ? 'err' : ''));
+  t.textContent = msg;
+  stack.appendChild(t);
+  setTimeout(() => { t.style.opacity = '0'; t.style.transform = 'translateY(-8px)'; }, 2500);
+  setTimeout(() => t.remove(), 3000);
+}
+
+function setStatus(s) {
+  const dot = document.getElementById('status-dot');
+  dot.className = 'dot';
+  if (s === 'online') {/* default green */}
+  else if (s === 'connecting') dot.classList.add('connecting');
+  else dot.classList.add('offline');
+}
+
+// ═════════════════════════════════════════════════════════
+//  LOGIN
+// ═════════════════════════════════════════════════════════
+let _pendingGoogleCredential = null;
+
+function showLogin(errorMsg) {
+  document.getElementById('login-overlay').style.display = 'flex';
+  const err = document.getElementById('login-error');
+  if (errorMsg) { err.style.display = ''; err.textContent = errorMsg; }
+  else err.style.display = 'none';
+  setTimeout(() => document.getElementById('login-input')?.focus(), 100);
+  _initGoogleLogin();
+}
+
+function hideLogin() {
+  document.getElementById('login-overlay').style.display = 'none';
+}
+
+function _initGoogleLogin() {
+  if (window._googleInited) return;
+  apiFetch('/api/auth/google/config').then(r => r.json()).then(cfg => {
+    if (!cfg.client_id) return;
+    document.getElementById('g_id_onload').setAttribute('data-client_id', cfg.client_id);
+    const s = document.createElement('script');
+    s.src = 'https://accounts.google.com/gsi/client';
+    s.async = true; s.defer = true;
+    document.head.appendChild(s);
+    window._googleInited = true;
+  }).catch(() => {});
+}
+
+async function _onGoogleCredential(response) {
+  _pendingGoogleCredential = response?.credential;
+  if (!_pendingGoogleCredential) return;
+  await _submitGoogleLogin();
+}
+window._onGoogleCredential = _onGoogleCredential;
+
+async function _submitGoogleLogin() {
+  if (!_pendingGoogleCredential) return;
+  const totp = document.getElementById('login-totp');
+  const totpCode = (totp?.value || '').trim() || undefined;
+  try {
+    const r = await fetch('/api/auth/google/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ credential: _pendingGoogleCredential, totp_code: totpCode }),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (r.ok && data.ok) {
+      _pendingGoogleCredential = null;
+      bridgeToken = data.token || '';
+      if (bridgeToken) localStorage.setItem('bridge_token', bridgeToken);
+      document.getElementById('login-totp-row').style.display = 'none';
+      hideLogin(); connect();
+    } else if (data.requires_2fa || data.error === 'totp_required') {
+      document.getElementById('login-totp-row').style.display = 'block';
+      setTimeout(() => totp?.focus(), 50);
+      showLogin('Conta validada. Digite o código 2FA.');
+    } else if (data.error === 'invalid_totp') {
+      showLogin('Código incorreto. Tente novamente.');
+    } else if (data.error === 'email_not_allowed') {
+      _pendingGoogleCredential = null;
+      showLogin(`Email ${data.email || ''} não autorizado.`);
+    } else {
+      _pendingGoogleCredential = null;
+      showLogin('Falha no login Google.');
+    }
+  } catch (_) { showLogin('Sem conexão com o servidor.'); }
+}
+
+async function doLogin() {
+  const input = document.getElementById('login-input');
+  const totpInput = document.getElementById('login-totp');
+  const password = (input?.value || '').trim();
+  const totpCode = (totpInput?.value || '').trim();
+  if (_pendingGoogleCredential && !password) return _submitGoogleLogin();
+  showToast('Enviando...', '');
+  try {
+    const passwordHash = password ? await sha256hex(password) : '';
+    let r;
+    try {
+      r = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password_hash: passwordHash, totp_code: totpCode || undefined }),
+      });
+    } catch (netErr) {
+      showLogin('Erro de rede: ' + netErr.message);
+      return;
+    }
+    const data = await r.json().catch(() => ({}));
+    showToast(`HTTP ${r.status} · ok=${data.ok} · err=${data.error || '-'}`, '');
+    if (r.ok && data.ok) {
+      bridgeToken = data.token || passwordHash;
+      if (bridgeToken) localStorage.setItem('bridge_token', bridgeToken);
+      document.getElementById('login-totp-row').style.display = 'none';
+      hideLogin(); connect();
+    } else if (data.requires_2fa || data.error === 'totp_required') {
+      document.getElementById('login-totp-row').style.display = 'block';
+      setTimeout(() => totpInput?.focus(), 50);
+      showLogin('Digite o código do app autenticador (6 dígitos)');
+    } else if (data.error === 'invalid_totp') showLogin('Código incorreto. Tente novamente.');
+    else if (data.error === 'rate_limited') showLogin('Muitas tentativas. Aguarde.');
+    else if (data.error === 'invalid_password') showLogin('Senha incorreta.');
+    else showLogin('Erro: ' + (data.error || `HTTP ${r.status}`));
+  } catch (e) { showLogin('Erro inesperado: ' + e.message); }
+}
+document.getElementById('login-input')?.addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+document.getElementById('login-totp')?.addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+
+function adminLogout() {
+  localStorage.removeItem('bridge_token');
+  bridgeToken = '';
+  ws?.close();
+  showLogin();
+}
+
+// Hard refresh: limpa caches do SW + desregistra + recarrega. Extraído do app.js.
+// Útil quando a UI ficar inconsistente ou pra forçar update sem desinstalar PWA.
+async function hardRefresh() {
+  refreshing = true;
+  showToast('Limpando cache…', '');
+  try {
+    if ('caches' in window) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map(k => caches.delete(k)));
+    }
+    if ('serviceWorker' in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map(r => r.unregister()));
+    }
+  } catch (_) {}
+  window.location.replace('/');
+}
+
+// ═════════════════════════════════════════════════════════
+//  WEBSOCKET (extraído do app.js)
+// ═════════════════════════════════════════════════════════
+function connect() {
+  wsReconnectTimeout = null;
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const tkParam = bridgeToken ? '?token=' + encodeURIComponent(bridgeToken) : '';
+  ws = new WebSocket(`${proto}//${location.host}/ws${tkParam}`);
+
+  ws.onopen = () => {
+    wsRetryDelay = 1000;
+    setStatus('connecting');
+  };
+
+  ws.onmessage = (evt) => {
+    try {
+      const msg = JSON.parse(evt.data);
+      if (msg.type === 'full_state' || msg.type === 'update') {
+        if (msg.type === 'full_state' && msg.startedAt) {
+          const prev = sessionStorage.getItem('srv_start');
+          if (prev && prev !== String(msg.startedAt)) {
+            sessionStorage.setItem('srv_start', msg.startedAt);
+            location.reload();
+            return;
+          }
+          sessionStorage.setItem('srv_start', msg.startedAt);
+        }
+        deepMerge(state, msg.data);
+        _checkPendingHvacConfirm(msg.data);
+        lastUpdateMs = Date.now();
+        _scheduleRender();
+      } else if (msg.type === 'AUTH_ERROR') {
+        ws.close();
+        showLogin('Senha incorreta ou expirada.');
+        return;
+      } else if (msg.type === 'new_event') {
+        if (window._addEventToLog) window._addEventToLog(msg.data);
+      } else if (msg.type === 'new_autotrip') {
+        if (window._onNewAutotrip) window._onNewAutotrip();
+      } else if (msg.type === 'new_refuel') {
+        if (window._onNewRefuel) window._onNewRefuel();
+      }
+    } catch (e) { console.error('WS parse error', e); }
+  };
+
+  ws.onerror = () => {};
+  ws.onclose = (e) => {
+    if (e.code === 4001) { showLogin('Acesso negado.'); return; }
+    setStatus('offline');
+    const delay = Math.min(wsRetryDelay, 30000);
+    wsRetryDelay = Math.min(wsRetryDelay * 1.5, 30000);
+    wsReconnectTimeout = setTimeout(connect, delay);
+  };
+}
+
+// Reconecta no foreground (iOS PWA)
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && bridgeToken && (!ws || ws.readyState === WebSocket.CLOSED)) {
+    if (wsReconnectTimeout) { clearTimeout(wsReconnectTimeout); wsReconnectTimeout = null; }
+    wsRetryDelay = 1000;
+    connect();
+  }
+});
+
+// ═════════════════════════════════════════════════════════
+//  RENDER LOOP (throttle via rAF)
+// ═════════════════════════════════════════════════════════
+let _renderQueued = false;
+function _scheduleRender() {
+  if (_renderQueued) return;
+  _renderQueued = true;
+  requestAnimationFrame(() => {
+    _renderQueued = false;
+    if (window._renderActiveView) window._renderActiveView();
+    _renderHeader();
+  });
+}
+
+function _renderHeader() {
+  // Atualiza versão (state.bridge_version, state.car_version)
+  const bv = document.getElementById('hdr-bridge-ver');
+  const av = document.getElementById('hdr-apk-ver');
+  if (state.bridge_version) bv.textContent = 'EcoTrip v' + state.bridge_version;
+  if (state.car_version) av.textContent = 'APK v' + state.car_version;
+  // Status dot
+  const sec = lastUpdateMs ? Math.floor((Date.now() - lastUpdateMs) / 1000) : 9999;
+  if (state.car_online && sec < 30) setStatus('online');
+  else if (sec < 60) setStatus('connecting');
+  else setStatus('offline');
+}
+setInterval(_renderHeader, 1000);
+
+// ═════════════════════════════════════════════════════════
+//  HVAC PENDING SYSTEM (extraído do app.js)
+// ═════════════════════════════════════════════════════════
+function _hvacIsBusy(elementId) {
+  if (_hvacDragState && _hvacDragState.elementId === elementId) return true;
+  if (_hvacPending[elementId]) return true;
+  return false;
+}
+
+function _hvacMarkPending(elementId, expectedVal, fmt) {
+  const el = document.getElementById(elementId);
+  if (el) el.classList.add('hvac-pending');
+  _hvacPending[elementId] = {
+    until: Date.now() + HVAC_PENDING_TIMEOUT_MS,
+    expectedVal, fmt,
+    timer: setTimeout(() => {
+      if (el) el.classList.remove('hvac-pending');
+      delete _hvacPending[elementId];
+      showToast('✗ Carro não confirmou em ' + (HVAC_PENDING_TIMEOUT_MS/1000) + 's', 'err');
+    }, HVAC_PENDING_TIMEOUT_MS),
+  };
+}
+
+function _hvacConfirmPending(elementId, actualVal, label) {
+  const p = _hvacPending[elementId];
+  if (!p) return false;
+  if (Math.abs(actualVal - p.expectedVal) < 0.05) {
+    clearTimeout(p.timer);
+    delete _hvacPending[elementId];
+    const el = document.getElementById(elementId);
+    if (el) el.classList.remove('hvac-pending');
+    if (label) showToast('✓ ' + label, 'ok');
+    return true;
+  }
+  return false;
+}
+
+function _checkPendingHvacConfirm(stateUpdate) {
+  // Para cada chave HVAC atualizada, checa pending
+  if (stateUpdate.hvac_driver_temp !== undefined)
+    _hvacConfirmPending('cmf-temp-d-val', parseFloat(stateUpdate.hvac_driver_temp), `${parseFloat(stateUpdate.hvac_driver_temp).toFixed(1)}°C motorista`);
+  if (stateUpdate.hvac_passenger_temp !== undefined)
+    _hvacConfirmPending('cmf-temp-p-val', parseFloat(stateUpdate.hvac_passenger_temp), `${parseFloat(stateUpdate.hvac_passenger_temp).toFixed(1)}°C passageiro`);
+  if (stateUpdate.hvac_fan_speed !== undefined)
+    _hvacConfirmPending('cmf-fan-val', parseInt(stateUpdate.hvac_fan_speed,10), `Fan ${stateUpdate.hvac_fan_speed}`);
+  if (stateUpdate.hvac_sync_enable !== undefined)
+    _hvacConfirmPending('cmf-sync', parseInt(stateUpdate.hvac_sync_enable,10), 'Sync ' + (stateUpdate.hvac_sync_enable === '1' ? 'ligado' : 'desligado'));
+  if (stateUpdate.hvac_auto_enable !== undefined)
+    _hvacConfirmPending('cmf-auto', parseInt(stateUpdate.hvac_auto_enable,10), 'Auto ' + (stateUpdate.hvac_auto_enable === '1' ? 'ligado' : 'desligado'));
+  if (stateUpdate.hvac_ac_enable !== undefined)
+    _hvacConfirmPending('cmf-ac-power', parseInt(stateUpdate.hvac_ac_enable,10), 'AC ' + (stateUpdate.hvac_ac_enable === '1' ? 'ligado' : 'desligado'));
+}
+
+async function sendHvac(control, value, opts = {}) {
+  try {
+    const r = await apiFetch(`/api/hvac/${control}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ value }),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok || !data.ok) {
+      showToast('✗ ' + (data.error || `Erro ${r.status}`), 'err');
+      return false;
+    }
+    return true;
+  } catch (err) {
+    showToast('✗ Falha ao enviar', 'err');
+    return false;
+  }
+}
+
+// ═════════════════════════════════════════════════════════
+//  PUSH NOTIFICATIONS
+// ═════════════════════════════════════════════════════════
+function urlBase64ToUint8Array(b64) {
+  const pad = '='.repeat((4 - b64.length % 4) % 4);
+  const raw = atob((b64 + pad).replace(/-/g, '+').replace(/_/g, '/'));
+  return Uint8Array.from(raw, c => c.charCodeAt(0));
+}
+
+async function subscribePush() {
+  if (!('Notification' in window) || !('PushManager' in window)) return;
+  let perm = Notification.permission;
+  if (perm === 'denied') return;
+  if (perm === 'default') perm = await Notification.requestPermission();
+  if (perm !== 'granted') return;
+  const reg = await navigator.serviceWorker.ready;
+  const { key: vapidKey } = await apiFetch('/api/push/vapid-key').then(r => r.json());
+  if (!vapidKey) return;
+  const storedVapid = localStorage.getItem('push_vapid_key');
+  let sub = await reg.pushManager.getSubscription();
+  if (sub && storedVapid && storedVapid !== vapidKey) {
+    await sub.unsubscribe();
+    await apiFetch('/api/push/reset-subs', { method: 'POST' }).catch(() => {});
+    sub = null;
+  }
+  if (!sub) {
+    sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(vapidKey),
+    });
+    localStorage.setItem('push_vapid_key', vapidKey);
+  }
+  await apiFetch('/api/push/subscribe', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(sub),
+  });
+}
+
+// ═════════════════════════════════════════════════════════
+//  SERVICE WORKER
+// ═════════════════════════════════════════════════════════
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').then(async () => {
+    try { await subscribePush(); } catch (_) {}
+  }).catch(() => {});
+  navigator.serviceWorker.addEventListener('message', e => {
+    if (e.data?.type === 'SW_UPDATED') location.reload();
+  });
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!refreshing) { refreshing = true; location.reload(); }
+  });
+}
+
+// ═════════════════════════════════════════════════════════
+//  VIEW SWITCHING (lazy load: fetch view-X.html on demand)
+// ═════════════════════════════════════════════════════════
+async function loadView(name) {
+  if (_viewsLoaded.has(name)) return;
+  const container = document.getElementById('view-' + name);
+  if (!container) return;
+  try {
+    const r = await fetch('/view-' + name + '.html', { credentials: 'same-origin' });
+    if (!r.ok) {
+      container.querySelector('.container').innerHTML =
+        `<div style="text-align:center;color:var(--muted);padding:40px 20px">
+          <div style="font-size:48px;opacity:.3">⚠️</div>
+          <div style="margin-top:8px;font-size:13px">View "${name}" indisponível</div>
+        </div>`;
+      return;
+    }
+    const html = await r.text();
+    container.innerHTML = html;
+    // Re-executa scripts inline (innerHTML não dispara <script>)
+    container.querySelectorAll('script').forEach(oldScript => {
+      const s = document.createElement('script');
+      [...oldScript.attributes].forEach(a => s.setAttribute(a.name, a.value));
+      s.textContent = oldScript.textContent;
+      oldScript.parentNode.replaceChild(s, oldScript);
+    });
+    _viewsLoaded.add(name);
+    // Init hook (cada view registra `initView_X` no script inline)
+    if (window['initView_' + name]) window['initView_' + name]();
+  } catch (e) {
+    console.error('Erro ao carregar view', name, e);
+  }
+}
+
+async function switchView(name) {
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.querySelectorAll('.tabbar .tb').forEach(t => t.classList.remove('active'));
+  document.getElementById('view-' + name)?.classList.add('active');
+  document.querySelector(`.tabbar .tb[data-view="${name}"]`)?.classList.add('active');
+  activeView = name;
+  sessionStorage.setItem('ecotrip_v2_active', name);
+
+  if (!_viewsLoaded.has(name)) await loadView(name);
+  if (window['renderView_' + name]) window['renderView_' + name]();
+}
+
+window._renderActiveView = function() {
+  if (window['renderView_' + activeView]) window['renderView_' + activeView]();
+};
+
+// ═════════════════════════════════════════════════════════
+//  BOOTSTRAP
+// ═════════════════════════════════════════════════════════
+async function bootstrap() {
+  if (!bridgeToken) { showLogin(); return; }
+  try {
+    const r = await fetch('/api/state', {
+      headers: { 'Authorization': 'Bearer ' + bridgeToken },
+    });
+    if (r.status === 401) { showLogin('Sessão expirada.'); return; }
+    if (!r.ok) { showLogin('Erro de conexão.'); return; }
+    state = await r.json();
+    _scheduleRender();
+    connect();
+    // Restaura aba ativa
+    switchView(activeView);
+  } catch (_) {
+    showLogin('Sem conexão com o servidor.');
+  }
+}
+
+window.addEventListener('load', () => {
+  // Atualiza tabbar-h pra usar no padding-bottom do body
+  const t = document.querySelector('.tabbar')?.offsetHeight || 56;
+  document.documentElement.style.setProperty('--tabbar-h', t + 'px');
+  bootstrap();
+});
+
+// Stubs pra views (cada view registra suas próprias funções)
+function openVersionInfo() {
+  const msg = `EcoTrip ${state.bridge_version || '?'} · APK ${state.car_version || '?'}\n` +
+    `Carro: ${state.car_online ? 'online' : 'offline'}\n` +
+    `Última atualização: ${relTime(lastUpdateMs)}`;
+  alert(msg);
+}
+function openNotifPanel() {
+  // TODO: integrar com /api/push/history
+  alert('Notificações (em construção)');
+}
+</script>
+
+<!-- ──────────────── VIEW: DASH ──────────────── -->
+<!-- (será preenchido no próximo bloco) -->
+
+<!-- ──────────────── VIEW: CONFORTO ──────────────── -->
+<!-- (será preenchido no próximo bloco) -->
+
+<!-- ... etc ... -->
+
 </body>
 </html>

@@ -1,0 +1,814 @@
+<style>
+.container { padding: 0 16px; max-width: 480px; margin: 0 auto; }
+
+
+/* ── Card de AC principal ────────────────────────────────────────────── */
+.ac-card {
+  background: rgba(31,31,31,.85);
+  border: 1px solid rgba(255,255,255,.06);
+  border-radius: 16px;
+  padding: 14px;
+  margin-bottom: 10px;
+  transition: opacity .2s;
+}
+.ac-card.off { opacity: .55; }
+
+/* Toggle "AC ligar/desligar" no topo */
+.ac-power {
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 4px;
+  margin-bottom: 8px;
+}
+.ac-power .label { flex: 1; font-size: 13px; font-weight: 700; }
+.ac-power .label .sub { font-size: 10px; color: var(--muted); font-weight: 500; }
+.ac-power .toggle {
+  width: 50px; height: 28px; border-radius: 14px;
+  background: rgba(255,255,255,.08);
+  position: relative; cursor: pointer; transition: background .2s;
+}
+.ac-power .toggle::after {
+  content: ''; position: absolute; top: 3px; left: 3px;
+  width: 22px; height: 22px; border-radius: 50%; background: #94a3b8;
+  transition: left .2s, background .2s;
+}
+.ac-power .toggle.on { background: rgba(34,197,94,.3); }
+.ac-power .toggle.on::after { left: 25px; background: var(--green); }
+
+/* Linha das temperaturas (motorista | SYNC | passageiro) */
+.temp-row {
+  display: grid;
+  grid-template-columns: 1fr 60px 1fr;
+  gap: 10px; align-items: center;
+  margin-bottom: 12px;
+}
+.temp-zone {
+  background: rgba(255,255,255,.03);
+  border: 1px solid rgba(255,255,255,.04);
+  border-radius: 12px;
+  padding: 10px 8px; text-align: center;
+}
+.temp-zone .lbl {
+  font-size: 9px; color: var(--muted); font-weight: 700;
+  letter-spacing: 1.2px; text-transform: uppercase;
+  margin-bottom: 4px;
+}
+.temp-zone .controls {
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+}
+.temp-zone .controls button {
+  width: 28px; height: 28px; border-radius: 50%;
+  background: rgba(34,197,94,.12); color: var(--green);
+  border: 1px solid rgba(34,197,94,.3);
+  font-size: 16px; font-weight: 700; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  font-family: inherit;
+}
+.temp-zone .controls button:active { transform: scale(.9); }
+.temp-zone .v {
+  font-size: 26px; font-weight: 700; color: var(--text);
+  font-variant-numeric: tabular-nums; letter-spacing: -0.5px;
+  min-width: 56px;
+}
+.temp-zone .v small { font-size: 13px; color: var(--muted); font-weight: 500; }
+
+.sync-btn {
+  background: rgba(255,255,255,.04);
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 12px;
+  padding: 12px 4px; text-align: center; cursor: pointer;
+  transition: all .15s;
+}
+.sync-btn.on {
+  background: rgba(34,197,94,.12);
+  border-color: rgba(34,197,94,.35);
+  color: var(--green);
+}
+.sync-btn .ic { font-size: 16px; margin-bottom: 2px; }
+.sync-btn .lbl { font-size: 9px; font-weight: 700; letter-spacing: 1px; }
+
+/* Linha: AUTO + FAN bars + modo recirc */
+.ac-controls {
+  display: grid;
+  grid-template-columns: 1fr 1.4fr 1fr;
+  gap: 8px;
+}
+.ctrl-btn {
+  background: rgba(255,255,255,.04);
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 12px;
+  padding: 12px 8px; text-align: center; cursor: pointer;
+  transition: all .15s;
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  font-family: inherit;
+}
+.ctrl-btn.on {
+  background: rgba(34,197,94,.12);
+  border-color: rgba(34,197,94,.35);
+  color: var(--green);
+}
+.ctrl-btn .ic { font-size: 16px; }
+.ctrl-btn .lbl { font-size: 9px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; }
+
+.fan-card {
+  background: rgba(255,255,255,.04);
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 12px;
+  padding: 8px 10px;
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  position: relative;
+}
+.fan-card .fan-top { display: flex; align-items: center; gap: 6px; }
+.fan-card .fan-ic { font-size: 14px; color: var(--teal); animation: spin 2s linear infinite; }
+.fan-card.off .fan-ic { animation: none; opacity: .4; }
+ to { transform: rotate(360deg); } }
+.fan-card .fan-val { font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.fan-card .fan-bars {
+  display: flex; gap: 2px; height: 14px; align-items: flex-end;
+}
+.fan-bar {
+  width: 5px; background: rgba(255,255,255,.12); border-radius: 1px;
+  transition: background .15s, height .15s;
+}
+.fan-bar.on { background: var(--teal); }
+.fan-bar:nth-child(1) { height: 35%; }
+.fan-bar:nth-child(2) { height: 45%; }
+.fan-bar:nth-child(3) { height: 58%; }
+.fan-bar:nth-child(4) { height: 70%; }
+.fan-bar:nth-child(5) { height: 80%; }
+.fan-bar:nth-child(6) { height: 90%; }
+.fan-bar:nth-child(7) { height: 100%; }
+.fan-arrows {
+  display: flex; gap: 6px; margin-top: 2px;
+}
+.fan-arrows button {
+  width: 24px; height: 20px; border-radius: 6px;
+  background: rgba(255,255,255,.05); color: #cbd5e1;
+  border: 1px solid rgba(255,255,255,.06);
+  font-size: 10px; cursor: pointer; font-family: inherit;
+}
+
+/* ── Card de assentos (vista superior do carro) ──────────────────────── */
+.seats-card {
+  background: rgba(31,31,31,.85);
+  border: 1px solid rgba(255,255,255,.06);
+  border-radius: 16px;
+  padding: 14px;
+  margin-bottom: 10px;
+}
+.seats-card .ti {
+  font-size: 11px; font-weight: 700; color: var(--muted);
+  letter-spacing: 1.5px; text-transform: uppercase;
+  margin-bottom: 4px;
+}
+.seats-card .sub {
+  font-size: 12px; color: #cbd5e1; margin-bottom: 12px;
+  line-height: 1.3;
+}
+.seats-card .sub strong { color: var(--green); font-weight: 700; }
+
+.cabin-svg {
+  width: 100%; height: auto; max-width: 360px; margin: 0 auto; display: block;
+}
+
+/* Estilo dos botões de ventilação nos bancos (clicáveis sobre o SVG) */
+.seat-vent-ctrl {
+  cursor: pointer;
+  transition: transform .1s;
+}
+.seat-vent-ctrl:active { transform: scale(.92); }
+
+/* ── Card de informações ambientais ──────────────────────────────────── */
+.info-row {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+  margin-bottom: 10px;
+}
+.info-card {
+  background: rgba(31,31,31,.85);
+  border: 1px solid rgba(255,255,255,.06);
+  border-radius: 12px;
+  padding: 10px 12px;
+  display: flex; align-items: center; gap: 10px;
+}
+.info-card .ic-box {
+  width: 30px; height: 30px; border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px; flex-shrink: 0;
+}
+.info-card.cold .ic-box { background: rgba(96,165,250,.15); color: var(--blue); }
+.info-card.hot .ic-box { background: rgba(251,146,60,.15); color: var(--orange); }
+.info-card .meta { flex: 1; min-width: 0; }
+.info-card .lbl { font-size: 9px; color: var(--muted); letter-spacing: 1.2px; text-transform: uppercase; font-weight: 700; }
+.info-card .v {
+  font-size: 18px; font-weight: 700; color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.info-card .v small { font-size: 11px; color: var(--muted); }
+
+/* Tabbar */
+
+
+
+
+
+/* Toast */
+.toast {
+  position: fixed; bottom: 110px; left: 50%; transform: translateX(-50%);
+  background: rgba(31,31,31,.95);
+  border: 1px solid rgba(34,197,94,.3);
+  padding: 10px 18px; border-radius: 24px;
+  font-size: 13px; color: var(--green); font-weight: 700;
+  z-index: 200; box-shadow: 0 4px 16px rgba(0,0,0,.4);
+  opacity: 0; transition: opacity .2s;
+  pointer-events: none;
+}
+.toast.show { opacity: 1; }
+
+.dev-bar { position: fixed; top: 4px; right: 4px; background: rgba(0,0,0,.7); border-radius: 8px; padding: 4px 8px; font-size: 9px; color: #fbbf24; z-index: 99; font-weight: 600; }
+
+/* ── Estado PENDENTE: amarelo pulsante até o carro confirmar via MQTT.
+   Mesmo padrão do app atual (_hvacIsBusy / _hvacCheckPending). */
+@keyframes pulse-pending {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+.pending {
+  animation: pulse-pending 1s ease-in-out infinite;
+  position: relative;
+}
+.pending::after {
+  content: '⏳';
+  position: absolute; top: -4px; right: -4px;
+  background: var(--yellow); color: #000;
+  font-size: 9px; width: 16px; height: 16px;
+  border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  border: 2px solid var(--bg);
+  z-index: 2;
+}
+/* Cor amarela pendente sobrescreve verde/etc */
+.temp-zone .v.pending {
+  color: var(--yellow) !important;
+}
+.sync-btn.pending, .ctrl-btn.pending {
+  background: rgba(251,191,36,.15) !important;
+  border-color: rgba(251,191,36,.4) !important;
+  color: var(--yellow) !important;
+}
+.ac-power .toggle.pending {
+  background: rgba(251,191,36,.3) !important;
+}
+.ac-power .toggle.pending::after {
+  background: var(--yellow) !important;
+}
+.fan-bar.pending { background: var(--yellow) !important; }
+.seat-vent-ctrl.pending circle { stroke: #fbbf24 !important; }
+.seat-vent-ctrl.pending text { fill: #fbbf24 !important; }
+</style>
+
+</div>
+  <div class="right">
+    <span class="dot"></span>
+    <span class="bell">🔔</span>
+  </div>
+</div>
+
+<div class="container">
+  <div class="section-title">Conforto</div>
+
+  <!-- ── Card AC principal ─────────────────────────────────────────── -->
+  <div class="ac-card" id="ac-card">
+    <div class="ac-power">
+      <div class="label">
+        ❄️ Ar-condicionado
+        <div class="sub" id="ac-power-sub">Climatização ativa</div>
+      </div>
+      <div class="toggle" id="ac-power-toggle" onclick="toggleAC()"></div>
+    </div>
+
+    <!-- Temperaturas zonadas -->
+    <div class="temp-row">
+      <div class="temp-zone">
+        <div class="lbl">🪑 Motorista</div>
+        <div class="controls">
+          <button onclick="adjustTemp('drv', -0.5)">−</button>
+          <span class="v"><span id="t-drv">--</span><small>°C</small></span>
+          <button onclick="adjustTemp('drv', +0.5)">+</button>
+        </div>
+      </div>
+      <div class="sync-btn" id="sync-btn" onclick="toggleSync()">
+        <div class="ic">⇄</div>
+        <div class="lbl">SYNC</div>
+      </div>
+      <div class="temp-zone">
+        <div class="lbl">🪑 Passageiro</div>
+        <div class="controls">
+          <button onclick="adjustTemp('pass', -0.5)">−</button>
+          <span class="v"><span id="t-pass">--</span><small>°C</small></span>
+          <button onclick="adjustTemp('pass', +0.5)">+</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Controles: AUTO + FAN + Modo circulação -->
+    <div class="ac-controls">
+      <button class="ctrl-btn" id="auto-btn" onclick="toggleAuto()">
+        <span class="ic">A</span>
+        <span class="lbl">AUTO</span>
+      </button>
+      <div class="fan-card" id="fan-card">
+        <div class="fan-top">
+          <span class="fan-ic">⚙</span>
+          <span class="fan-val" id="fan-val">--</span>
+        </div>
+        <div class="fan-bars" id="fan-bars">
+          <div class="fan-bar"></div>
+          <div class="fan-bar"></div>
+          <div class="fan-bar"></div>
+          <div class="fan-bar"></div>
+          <div class="fan-bar"></div>
+          <div class="fan-bar"></div>
+          <div class="fan-bar"></div>
+        </div>
+        <div class="fan-arrows">
+          <button onclick="adjustFan(-1)">−</button>
+          <button onclick="adjustFan(+1)">+</button>
+        </div>
+      </div>
+      <button class="ctrl-btn" id="cycle-btn" onclick="toggleCycle()">
+        <span class="ic" id="cycle-ic">↩</span>
+        <span class="lbl" id="cycle-lbl">RECIRC</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- ── Card de bancos (vista superior) ───────────────────────────── -->
+  <div class="seats-card">
+    <div class="ti">🪑 Ventilação dos bancos</div>
+    <div class="sub">Toque no <strong>círculo verde</strong> de cada banco pra alternar a intensidade (Desligado → Fraco → Médio → Forte)</div>
+    <svg class="cabin-svg" viewBox="0 0 400 540" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="cab-seat" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#2a3550"/>
+          <stop offset="100%" stop-color="#1a2236"/>
+        </linearGradient>
+      </defs>
+      <!-- Outline cabine -->
+      <path d="M 30 35 Q 30 20, 50 20 L 350 20 Q 370 20, 370 35 L 370 510 Q 370 525, 350 525 L 50 525 Q 30 525, 30 510 Z"
+            fill="#0a0f1c" stroke="#1e293b" stroke-width="1.5"/>
+      <!-- Painel/dashboard -->
+      <path d="M 60 50 Q 60 35, 80 35 L 320 35 Q 340 35, 340 50 L 340 145 Q 340 155, 330 155 L 70 155 Q 60 155, 60 145 Z"
+            fill="#131a2b" stroke="#2a3550" stroke-width="1.2"/>
+      <!-- Volante -->
+      <circle cx="102" cy="95" r="22" fill="none" stroke="#475569" stroke-width="2.5"/>
+      <circle cx="102" cy="95" r="7" fill="#334155"/>
+      <text x="102" y="99" text-anchor="middle" font-size="9" fill="#94a3b8" font-weight="900">H</text>
+      <!-- Console central -->
+      <rect x="180" y="200" width="40" height="120" rx="6" fill="#131a2b" stroke="#2a3550" stroke-width="1"/>
+      <text x="200" y="265" text-anchor="middle" font-size="6" fill="#475569" letter-spacing="0.5">CONSOLE</text>
+
+      <!-- BANCO MOTORISTA (esquerda) -->
+      <g id="seat-drv-group">
+        <rect x="60" y="180" width="100" height="32" rx="10" fill="url(#cab-seat)" stroke="#2a3550"/>
+        <rect x="52" y="218" width="116" height="148" rx="14" fill="url(#cab-seat)" stroke="#2a3550"/>
+        <rect x="46" y="375" width="128" height="120" rx="16" fill="url(#cab-seat)" stroke="#2a3550"/>
+        <text x="110" y="405" text-anchor="middle" font-size="7" fill="#475569" font-weight="700" letter-spacing="1">MOTORISTA</text>
+        <!-- Botão de ventilação central -->
+        <g class="seat-vent-ctrl" id="vent-drv-btn" onclick="cycleSeatVent('drv')">
+          <circle cx="110" cy="290" r="26" fill="#0a0f1c" stroke="#22c55e" stroke-width="2"/>
+          <text x="110" y="280" text-anchor="middle" font-size="14" fill="#22c55e">≡</text>
+          <text x="110" y="303" text-anchor="middle" font-size="9" fill="#22c55e" font-weight="700" id="vent-drv-lvl">OFF</text>
+        </g>
+        <!-- Linhas de vento (visíveis conforme nível) -->
+        <g id="vent-drv-waves">
+          <path class="vw" data-min="1" d="M 80 252 Q 76 258, 80 264" stroke="#22c55e" stroke-width="1.4" fill="none" stroke-linecap="round"/>
+          <path class="vw" data-min="1" d="M 140 252 Q 144 258, 140 264" stroke="#22c55e" stroke-width="1.4" fill="none" stroke-linecap="round"/>
+          <path class="vw" data-min="2" d="M 72 248 Q 68 258, 72 268" stroke="#22c55e" stroke-width="1.3" fill="none" stroke-linecap="round"/>
+          <path class="vw" data-min="2" d="M 148 248 Q 152 258, 148 268" stroke="#22c55e" stroke-width="1.3" fill="none" stroke-linecap="round"/>
+          <path class="vw" data-min="3" d="M 64 244 Q 58 258, 64 272" stroke="#22c55e" stroke-width="1.2" fill="none" stroke-linecap="round"/>
+          <path class="vw" data-min="3" d="M 156 244 Q 162 258, 156 272" stroke="#22c55e" stroke-width="1.2" fill="none" stroke-linecap="round"/>
+        </g>
+      </g>
+
+      <!-- BANCO PASSAGEIRO (direita) -->
+      <g id="seat-pass-group">
+        <rect x="240" y="180" width="100" height="32" rx="10" fill="url(#cab-seat)" stroke="#2a3550"/>
+        <rect x="232" y="218" width="116" height="148" rx="14" fill="url(#cab-seat)" stroke="#2a3550"/>
+        <rect x="226" y="375" width="128" height="120" rx="16" fill="url(#cab-seat)" stroke="#2a3550"/>
+        <text x="290" y="405" text-anchor="middle" font-size="7" fill="#475569" font-weight="700" letter-spacing="1">PASSAGEIRO</text>
+        <g class="seat-vent-ctrl" id="vent-pass-btn" onclick="cycleSeatVent('pass')">
+          <circle cx="290" cy="290" r="26" fill="#0a0f1c" stroke="#22c55e" stroke-width="2"/>
+          <text x="290" y="280" text-anchor="middle" font-size="14" fill="#22c55e">≡</text>
+          <text x="290" y="303" text-anchor="middle" font-size="9" fill="#22c55e" font-weight="700" id="vent-pass-lvl">OFF</text>
+        </g>
+        <g id="vent-pass-waves">
+          <path class="vw" data-min="1" d="M 260 252 Q 256 258, 260 264" stroke="#22c55e" stroke-width="1.4" fill="none" stroke-linecap="round"/>
+          <path class="vw" data-min="1" d="M 320 252 Q 324 258, 320 264" stroke="#22c55e" stroke-width="1.4" fill="none" stroke-linecap="round"/>
+          <path class="vw" data-min="2" d="M 252 248 Q 248 258, 252 268" stroke="#22c55e" stroke-width="1.3" fill="none" stroke-linecap="round"/>
+          <path class="vw" data-min="2" d="M 328 248 Q 332 258, 328 268" stroke="#22c55e" stroke-width="1.3" fill="none" stroke-linecap="round"/>
+          <path class="vw" data-min="3" d="M 244 244 Q 238 258, 244 272" stroke="#22c55e" stroke-width="1.2" fill="none" stroke-linecap="round"/>
+          <path class="vw" data-min="3" d="M 348 244 Q 354 258, 348 272" stroke="#22c55e" stroke-width="1.2" fill="none" stroke-linecap="round"/>
+        </g>
+      </g>
+    </svg>
+  </div>
+
+  <!-- ── Temperaturas externas/internas ────────────────────────────── -->
+  <div class="info-row">
+    <div class="info-card cold">
+      <div class="ic-box">🌡</div>
+      <div class="meta">
+        <div class="lbl">Interna</div>
+        <div class="v"><span id="t-in">--</span><small>°C</small></div>
+      </div>
+    </div>
+    <div class="info-card hot">
+      <div class="ic-box">☀️</div>
+      <div class="meta">
+        <div class="lbl">Externa</div>
+        <div class="v"><span id="t-out">--</span><small>°C</small></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  const STATE = {
+  "ac_state": "on",
+  "hvac_driver_temp": 22.0,
+  "hvac_passenger_temp": 22.0,
+  "hvac_fan_speed": 4,
+  "hvac_sync_enable": "1",
+  "hvac_auto_enable": "1",
+  "hvac_cycle_mode": "1",
+  "seat_vent_drv": "0",
+  "seat_vent_pass": "0",
+  "inside_temp": 22,
+  "outside_temp": 30
+};
+
+const TEMP_MIN = 16, TEMP_MAX = 32, TEMP_STEP = 0.5;
+const FAN_MIN = 0, FAN_MAX = 7;
+const VENT_LABELS = ['OFF', 'I', 'II', 'III'];
+const PENDING_TIMEOUT_MS = 12000;        // 12s pra carro confirmar antes de marcar falha
+const PENDING_SIM_MIN_MS = 800;          // simulação: confirma entre 0.8s e 2.5s
+const PENDING_SIM_MAX_MS = 2500;
+
+// Token do bridge — quando preenchido, comandos viram POSTs reais pra /api/hvac
+// e /api/action. Sem token, fica em modo simulado (resposta fake após delay).
+const BRIDGE_TOKEN = localStorage.getItem('bridge_token') || '';
+const LIVE_MODE = !!BRIDGE_TOKEN;
+
+function showToast(msg, color) {
+  // Delega pro showToast global do shell quando disponível
+  if (typeof window !== 'undefined' && window.showToast && window.showToast !== showToast) {
+    const type = color === 'var(--red)' ? 'err' : color === 'var(--green)' ? 'ok' : '';
+    return window.showToast(msg, type);
+  }
+  // Fallback: cria toast local
+  let t = document.getElementById('toast-conforto-local');
+  if (!t) {
+    t = document.createElement('div');
+    t.id = 'toast-conforto-local';
+    t.style.cssText = 'position:fixed;top:60px;left:50%;transform:translateX(-50%);background:rgba(31,31,31,.95);padding:10px 16px;border-radius:999px;font-size:13px;font-weight:600;z-index:200;color:var(--green);border:1px solid rgba(255,255,255,.1);max-width:90vw;text-align:center';
+    document.body.appendChild(t);
+  }
+  t.textContent = msg;
+  t.style.color = color || 'var(--green)';
+  t.style.display = 'block';
+  clearTimeout(showToast._t);
+  showToast._t = setTimeout(() => t.style.display = 'none', 1800);
+}
+
+
+// ── Sistema de PENDING: marca elementos como "aguardando confirmação do carro"
+// Igual ao mecanismo _hvacIsBusy / _hvacCheckPending do app atual.
+// Em produção: confirmação chega via WebSocket quando state[field] muda no bridge.
+// No preview sem token: simulamos com setTimeout (0.8-2.5s).
+const _pending = {};  // { field: { expected, elements: [DOM], sentAt, timeoutId } }
+
+function markPending(field, expected, elementIds) {
+  if (_pending[field]) {
+    clearTimeout(_pending[field].timeoutId);
+    _clearPendingVisual(_pending[field].elements);
+  }
+  const elements = (elementIds || []).map(id => document.getElementById(id)).filter(Boolean);
+  elements.forEach(el => el.classList.add('pending'));
+  const timeoutId = setTimeout(() => {
+    _clearPendingVisual(elements);
+    delete _pending[field];
+    showToast(`✗ ${field}: carro não respondeu`, 'var(--red)');
+    render();
+  }, PENDING_TIMEOUT_MS);
+  _pending[field] = { expected, elements, sentAt: Date.now(), timeoutId };
+  showToast(LIVE_MODE ? '⏳ enviando ao carro…' : '⏳ enviando… (preview)', 'var(--yellow)');
+}
+
+function _clearPendingVisual(elements) {
+  (elements || []).forEach(el => el && el.classList.remove('pending'));
+}
+
+function confirmPending(field, actualValue, label) {
+  const p = _pending[field];
+  if (!p) return;
+  const match = (typeof p.expected === 'number' && typeof actualValue === 'number')
+    ? Math.abs(p.expected - actualValue) < 0.01
+    : String(p.expected) === String(actualValue);
+  if (match) {
+    clearTimeout(p.timeoutId);
+    _clearPendingVisual(p.elements);
+    delete _pending[field];
+    showToast(`✓ ${label || field}`, 'var(--green)');
+    render();
+  }
+}
+
+// Envia comando ao carro. LIVE: POST /api/hvac/:control. Preview: simula resposta.
+async function sendHvacCommand(control, value, field, label, elementIds) {
+  markPending(field, value, elementIds);
+  if (LIVE_MODE) {
+    try {
+      const r = await fetch('/api/hvac/' + control, {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + BRIDGE_TOKEN, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value })
+      });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      // Resposta vai chegar via WS quando state[field] atualizar.
+      // Polling fallback: re-checa /api/state a cada 1.5s até match ou timeout.
+      _pollUntilConfirmed(field, value, label);
+    } catch (e) {
+      clearTimeout(_pending[field]?.timeoutId);
+      _clearPendingVisual(_pending[field]?.elements);
+      delete _pending[field];
+      showToast('✗ Falha: ' + e.message, 'var(--red)');
+      render();
+    }
+  } else {
+    // Modo preview: simula confirmação após delay aleatório
+    const delay = PENDING_SIM_MIN_MS + Math.random() * (PENDING_SIM_MAX_MS - PENDING_SIM_MIN_MS);
+    setTimeout(() => {
+      STATE[field] = value;
+      confirmPending(field, value, label);
+    }, delay);
+  }
+}
+
+// Em LIVE mode, faz polling em /api/state pra detectar quando o carro confirmar
+async function _pollUntilConfirmed(field, expected, label) {
+  const startedAt = Date.now();
+  const interval = setInterval(async () => {
+    if (!_pending[field] || Date.now() - startedAt > PENDING_TIMEOUT_MS) {
+      clearInterval(interval);
+      return;
+    }
+    try {
+      const r = await fetch('/api/state', {
+        headers: { 'Authorization': 'Bearer ' + BRIDGE_TOKEN }
+      });
+      const s = await r.json();
+      const actual = s[field];
+      // Atualiza STATE inteiro pra refletir últimas mudanças
+      Object.assign(STATE, s);
+      const isMatch = (typeof expected === 'number' && typeof +actual === 'number')
+        ? Math.abs(expected - +actual) < 0.01
+        : String(expected) === String(actual);
+      if (isMatch) {
+        clearInterval(interval);
+        confirmPending(field, actual, label);
+      }
+    } catch (_) {}
+  }, 1500);
+}
+
+function render() {
+  // AC on/off derivado de fan_speed (proxy: fan=0 → desligado)
+  const acOn = isAcOn();
+  // Card geral fica fade só se realmente desligado (e não pending)
+  document.getElementById('ac-card').classList.toggle('off', !acOn && !_pending.hvac_fan_speed);
+  document.getElementById('ac-power-toggle').classList.toggle('on', acOn);
+  document.getElementById('ac-power-sub').textContent = acOn
+    ? `Climatização ativa · fan ${STATE.hvac_fan_speed}`
+    : 'AC desligado';
+
+  // Temperaturas
+  document.getElementById('t-drv').textContent = (+STATE.hvac_driver_temp).toFixed(1).replace('.', ',');
+  document.getElementById('t-pass').textContent = (+STATE.hvac_passenger_temp).toFixed(1).replace('.', ',');
+  document.getElementById('t-in').textContent = STATE.inside_temp != null ? Math.round(STATE.inside_temp) : '--';
+  document.getElementById('t-out').textContent = STATE.outside_temp != null ? Math.round(STATE.outside_temp) : '--';
+
+  // SYNC
+  document.getElementById('sync-btn').classList.toggle('on', STATE.hvac_sync_enable === '1');
+  // AUTO
+  document.getElementById('auto-btn').classList.toggle('on', STATE.hvac_auto_enable === '1');
+  // Modo de circulação
+  const recirc = STATE.hvac_cycle_mode === '0';
+  document.getElementById('cycle-btn').classList.toggle('on', recirc);
+  document.getElementById('cycle-ic').textContent = recirc ? '↺' : '↪';
+  document.getElementById('cycle-lbl').textContent = recirc ? 'RECIRC' : 'EXTERNO';
+
+  // FAN
+  const fan = parseInt(STATE.hvac_fan_speed, 10) || 0;
+  document.getElementById('fan-val').textContent = fan;
+  document.getElementById('fan-card').classList.toggle('off', fan === 0);
+  document.querySelectorAll('#fan-bars .fan-bar').forEach((b, i) => {
+    b.classList.toggle('on', i < fan);
+  });
+
+  // Ventilação dos bancos
+  ['drv', 'pass'].forEach(side => {
+    const lvl = parseInt(STATE['seat_vent_' + side], 10) || 0;
+    document.getElementById(`vent-${side}-lvl`).textContent = VENT_LABELS[lvl];
+    // Cor do círculo dependendo do nível
+    const grp = document.getElementById(`vent-${side}-btn`);
+    const colors = ['#475569', '#22c55e', '#fbbf24', '#fb923c'];
+    grp.querySelectorAll('circle').forEach(c => c.setAttribute('stroke', colors[lvl]));
+    grp.querySelectorAll('text').forEach(t => t.setAttribute('fill', colors[lvl]));
+    // Mostra/esconde paths de vento
+    document.querySelectorAll(`#vent-${side}-waves .vw`).forEach(p => {
+      const min = parseInt(p.getAttribute('data-min'), 10);
+      p.style.display = lvl >= min ? '' : 'none';
+      p.setAttribute('stroke', colors[lvl] || '#475569');
+    });
+  });
+}
+
+// ── Helper: AC está ligado se ac_enable=1 OU fan_speed>0 (fallback).
+// ac_enable é o estado canônico (car.hvac.ac_enable do barramento). Sem ele,
+// fan>0 indica que o compressor ou ventilação estão ativos.
+function isAcOn() {
+  if (STATE.hvac_ac_enable === '1' || STATE.hvac_ac_enable === 1) return true;
+  return (parseInt(STATE.hvac_fan_speed, 10) || 0) > 0;
+}
+
+// ── ON/OFF do AC: liga manda 2 comandos (ac_enable=1 + fan_speed=1) pra
+// garantir que o compressor liga, não só a ventilação. Desliga manda os 2 em 0.
+// fan_speed=1 (não 4) — mínimo razoável, usuário ajusta depois.
+function toggleAC() {
+  const turningOn = !isAcOn();
+  if (turningOn) {
+    // Manda ac_enable=1 + fan_speed=1 simultaneamente
+    sendHvacCommand('ac_enable', true, 'hvac_ac_enable', 'AC ligado',
+      ['ac-power-toggle']);
+    if (LIVE_MODE) {
+      sendHvacCommand('fan_speed', 1, 'hvac_fan_speed', null,
+        ['fan-card']);
+    } else {
+      // Preview: simula confirmação do fan junto
+      setTimeout(() => { STATE.hvac_fan_speed = 1; render(); },
+        PENDING_SIM_MIN_MS + Math.random() * 500);
+    }
+  } else {
+    sendHvacCommand('ac_enable', false, 'hvac_ac_enable', 'AC desligado',
+      ['ac-power-toggle']);
+    if (LIVE_MODE) {
+      sendHvacCommand('fan_speed', 0, 'hvac_fan_speed', null, ['fan-card']);
+    } else {
+      setTimeout(() => { STATE.hvac_fan_speed = 0; render(); },
+        PENDING_SIM_MIN_MS + Math.random() * 500);
+    }
+  }
+}
+
+function adjustTemp(side, delta) {
+  if (!isAcOn()) return showToast('AC desligado', 'var(--muted)');
+  const key = side === 'drv' ? 'hvac_driver_temp' : 'hvac_passenger_temp';
+  const ctrl = side === 'drv' ? 'driver_temp' : 'passenger_temp';
+  let v = +STATE[key] + delta;
+  v = Math.max(TEMP_MIN, Math.min(TEMP_MAX, +v.toFixed(1)));
+  // Se SYNC ativo, ambas mudam juntas
+  if (STATE.hvac_sync_enable === '1') {
+    sendHvacCommand('driver_temp', v, 'hvac_driver_temp', `Temperatura ${v}°C`,
+      ['t-drv', 't-pass']);
+    // Em LIVE, manda os 2 comandos. Em preview, só atualiza ambos.
+    if (LIVE_MODE) {
+      sendHvacCommand('passenger_temp', v, 'hvac_passenger_temp', null, []);
+    } else {
+      STATE.hvac_passenger_temp = v;
+    }
+  } else {
+    sendHvacCommand(ctrl, v, key,
+      `${side === 'drv' ? 'Motorista' : 'Passageiro'}: ${v}°C`,
+      ['t-' + side]);
+  }
+}
+
+function toggleSync() {
+  if (!isAcOn()) return showToast('AC desligado', 'var(--muted)');
+  const newVal = STATE.hvac_sync_enable === '1' ? '0' : '1';
+  sendHvacCommand('sync', newVal === '1', 'hvac_sync_enable',
+    newVal === '1' ? 'SYNC ligado' : 'SYNC desligado',
+    ['sync-btn']);
+}
+
+function toggleAuto() {
+  if (!isAcOn()) return showToast('AC desligado', 'var(--muted)');
+  const newVal = STATE.hvac_auto_enable === '1' ? '0' : '1';
+  sendHvacCommand('auto', newVal === '1', 'hvac_auto_enable',
+    'AUTO ' + (newVal === '1' ? 'ligado' : 'desligado'),
+    ['auto-btn']);
+}
+
+function toggleCycle() {
+  if (!isAcOn()) return showToast('AC desligado', 'var(--muted)');
+  const newVal = STATE.hvac_cycle_mode === '0' ? 1 : 0;
+  sendHvacCommand('cycle_mode', newVal, 'hvac_cycle_mode',
+    newVal === 0 ? 'Recirculação interna' : 'Ar externo',
+    ['cycle-btn']);
+}
+
+function adjustFan(delta) {
+  let v = (parseInt(STATE.hvac_fan_speed, 10) || 0) + delta;
+  v = Math.max(FAN_MIN, Math.min(FAN_MAX, v));
+  if (v === parseInt(STATE.hvac_fan_speed, 10)) return; // sem mudança
+  const label = v === 0 ? 'AC desligado' : `Ventilação ${v}/7`;
+  sendHvacCommand('fan_speed', v, 'hvac_fan_speed', label,
+    ['fan-card', 'ac-power-toggle']);
+}
+
+function cycleSeatVent(side) {
+  const key = 'seat_vent_' + side;
+  const ctrl = side === 'drv' ? 'seat_vent_drv' : 'seat_vent_pass';
+  // Alterna apenas entre Desligado (0) e Forte (3) — níveis 1 e 2 sem uso prático
+  const cur = parseInt(STATE[key], 10) || 0;
+  const v = cur > 0 ? 0 : 3;
+  const label = v === 0 ? 'Desligada' : 'Forte';
+  sendHvacCommand(ctrl, v, key,
+    `${side === 'drv' ? 'Motorista' : 'Passageiro'}: ${label}`,
+    [`vent-${side}-btn`]);
+}
+
+function openVersionInfo() {
+  alert('App: EcoTrip v5.27 (b171)\nCarro: APK v5.27 (157)\nÚltima atualização carro: 1 min atrás\nÚltima atualização app: agora');
+}
+
+function updateTabbarHeight() {
+  const t = document.querySelector('.tabbar')?.offsetHeight || 56;
+  document.documentElement.style.setProperty('--tabbar-h', t + 'px');
+}
+
+updateTabbarHeight();
+window.addEventListener('resize', updateTabbarHeight);
+
+// Bootstrap: se houver token, puxa estado real do bridge antes do primeiro render
+async function bootstrapState() {
+  if (!LIVE_MODE) {
+    render();
+    return;
+  }
+  try {
+    const r = await fetch('/api/state', {
+      headers: { 'Authorization': 'Bearer ' + BRIDGE_TOKEN }
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const live = await r.json();
+    // Sobrescreve só os campos HVAC + temps + ac_state — preserva defaults se ausentes
+    const fields = [
+      'ac_state', 'hvac_ac_enable',
+      'hvac_driver_temp', 'hvac_passenger_temp',
+      'hvac_fan_speed', 'hvac_sync_enable', 'hvac_auto_enable',
+      'hvac_cycle_mode', 'seat_vent_drv', 'seat_vent_pass',
+      'inside_temp', 'outside_temp',
+    ];
+    for (const f of fields) {
+      if (live[f] != null) STATE[f] = live[f];
+    }
+    { const _db = document.getElementById('dev-bar'); if (_db) _db.textContent = '🔴 live' };
+    { const _db = document.getElementById('dev-bar'); if (_db) _db.style.color = '#22c55e' };
+  } catch (e) {
+    { const _db = document.getElementById('dev-bar'); if (_db) _db.textContent = '✗ ' } + e.message;
+    { const _db = document.getElementById('dev-bar'); if (_db) _db.style.color = '#f87171' };
+  }
+  render();
+  // Polling em background: atualiza estado a cada 3s pra refletir mudanças do carro
+  setInterval(async () => {
+    if (Object.keys(_pending).length > 0) return; // sem refresh durante pending
+    try {
+      const r = await fetch('/api/state', {
+        headers: { 'Authorization': 'Bearer ' + BRIDGE_TOKEN }
+      });
+      if (!r.ok) return;
+      const live = await r.json();
+      let changed = false;
+      const fields = [
+        'ac_state', 'hvac_ac_enable',
+        'hvac_driver_temp', 'hvac_passenger_temp',
+        'hvac_fan_speed', 'hvac_sync_enable', 'hvac_auto_enable',
+        'hvac_cycle_mode', 'seat_vent_drv', 'seat_vent_pass',
+        'inside_temp', 'outside_temp',
+      ];
+      for (const f of fields) {
+        if (live[f] != null && String(live[f]) !== String(STATE[f])) {
+          STATE[f] = live[f];
+          changed = true;
+        }
+      }
+      if (changed) render();
+    } catch (_) {}
+  }, 3000);
+}
+bootstrapState();
+  // Expõe handlers de onclick no window
+  Object.assign(window, { toggleAC: typeof toggleAC !== 'undefined' ? toggleAC : undefined, adjustTemp: typeof adjustTemp !== 'undefined' ? adjustTemp : undefined, toggleSync: typeof toggleSync !== 'undefined' ? toggleSync : undefined, toggleAuto: typeof toggleAuto !== 'undefined' ? toggleAuto : undefined, adjustFan: typeof adjustFan !== 'undefined' ? adjustFan : undefined, toggleCycle: typeof toggleCycle !== 'undefined' ? toggleCycle : undefined, cycleSeatVent: typeof cycleSeatVent !== 'undefined' ? cycleSeatVent : undefined });
+  if (!window['initView_conforto']) window['initView_conforto'] = function() {};
+})();
+</script>

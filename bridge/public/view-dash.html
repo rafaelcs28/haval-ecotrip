@@ -1,0 +1,1113 @@
+<style>
+/* Mapa fullscreen como background */
+.map-fullscreen {
+  position: fixed; inset: 0; z-index: 0;
+  background: linear-gradient(135deg,#0c1422,#1a2942 50%,#0c1422);
+}
+#map { width: 100%; height: 100%; }
+
+/* Header flutuante no topo, glassmorphism */
+
+
+
+
+
+
+
+
+
+
+
+
+@keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.5; transform: scale(0.8); } }
+
+
+/* Badge sobre o mapa: nome do local + endereço (flutua, abaixo do header).
+   Largura quase total da tela pra caber nomes mais longos em uma linha só. */
+.map-place-pill {
+  position: fixed;
+  top: calc(env(safe-area-inset-top) + 56px); left: 8px; right: 8px;
+  z-index: 9;
+  background: rgba(20,20,20,.85);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  padding: 7px 14px; border-radius: 999px;
+  font-size: 11px; color: #cbd5e1; line-height: 1.2;
+  display: flex; align-items: center; gap: 8px;
+  box-shadow: 0 4px 12px rgba(0,0,0,.3);
+  max-width: 480px; margin: 0 auto;
+  white-space: nowrap;
+}
+.map-place-pill strong { color: var(--green); font-weight: 700; font-size: 12px; flex-shrink: 0; }
+.map-place-pill .sep { color: #475569; flex-shrink: 0; }
+.map-place-pill .addr { color: #94a3b8; font-size: 10px; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1; }
+
+/* ── Bottom sheet com cards flutuantes ──
+   Ocupa só a parte inferior, sobreposto ao mapa. Toggle entre minimizado
+   (só handle, mapa quase fullscreen) e expandido (mostra tudo). */
+.bottom-sheet {
+  position: fixed;
+  left: 0; right: 0;
+  bottom: var(--tabbar-h, 52px);  /* sobe acima da tabbar, sem gap */
+  z-index: 5;
+  background: linear-gradient(180deg, transparent 0%, rgba(20,20,20,.92) 18%, rgba(20,20,20,.96) 100%);
+  padding-bottom: 4px;             /* só margem interna mínima */
+  max-height: 75vh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  transition: max-height .25s cubic-bezier(.4,.0,.2,1);
+}
+.bottom-sheet.collapsed {
+  max-height: 20px;       /* só o handle visível */
+  overflow: hidden;
+}
+.sheet-handle {
+  display: flex; justify-content: center;
+  padding: 8px 0 4px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: rgba(255,255,255,.05);
+}
+.sheet-handle .bar {
+  width: 42px; height: 5px;
+  background: rgba(255,255,255,.22);
+  border-radius: 3px;
+  transition: background .15s, width .2s;
+}
+.sheet-handle:hover .bar, .sheet-handle:active .bar { background: rgba(255,255,255,.4); width: 56px; }
+.bottom-sheet.collapsed .sheet-handle { padding: 6px 0; }
+.bottom-sheet.collapsed .sheet-handle .bar { width: 56px; }
+.sheet-inner {
+  padding: 2px 12px 8px;
+  max-width: 480px; margin: 0 auto;
+}
+
+/* Hero grid 2x2 */
+.hero-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.hero-card {
+  background: rgba(31,31,31,.85);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  border-radius: 12px;
+  padding: 8px 12px;
+  display: flex; flex-direction: column; gap: 2px;
+  min-height: 64px;
+  position: relative; overflow: hidden;
+  border: 1px solid rgba(255,255,255,.04);
+}
+.hero-card.charging {
+  background: linear-gradient(135deg, rgba(34,197,94,.12), var(--card));
+  border: 1px solid rgba(34,197,94,.3);
+}
+.hero-card.charging::after {
+  content: ''; position: absolute; inset: 0;
+  background: radial-gradient(circle at top right, rgba(34,197,94,.15), transparent 60%);
+  pointer-events: none;
+}
+.hero-card .lbl {
+  font-size: 9px; letter-spacing: 1.4px; color: var(--muted);
+  text-transform: uppercase; font-weight: 700;
+  display: flex; align-items: center; gap: 4px;
+}
+.hero-card .lbl .live-tag {
+  background: var(--green); color: #000;
+  font-size: 8px; padding: 1px 5px; border-radius: 4px;
+  letter-spacing: 0.5px; font-weight: 800;
+  margin-left: 4px;
+  animation: pulse-bg 1.5s ease-in-out infinite;
+}
+@keyframes pulse-bg { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
+.hero-card .val-row {
+  display: flex; align-items: baseline; gap: 4px; line-height: 1;
+}
+.hero-card .v {
+  font-size: 28px; font-weight: 700;
+  letter-spacing: -1px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+.hero-card .u { font-size: 13px; color: var(--muted); font-weight: 500; }
+.hero-card .sub { font-size: 10px; color: var(--muted); font-weight: 500; margin-top: auto; line-height: 1.4; }
+.hero-card.green .v { color: var(--green); }
+.hero-card.orange .v { color: var(--orange); }
+.hero-card.teal .v { color: var(--teal); }
+.hero-card.muted .v { color: #cbd5e1; }
+.hero-card.yellow .v { color: var(--yellow); }
+
+/* Barra de progresso de carga (no card SOC quando charging) */
+.charge-bar {
+  height: 4px; background: rgba(255,255,255,.08);
+  border-radius: 2px; overflow: hidden;
+  margin-top: 6px; position: relative;
+}
+.charge-bar .fill {
+  position: absolute; left: 0; top: 0; bottom: 0;
+  background: linear-gradient(90deg, var(--green-dim), var(--green));
+  border-radius: 2px;
+  transition: width .4s;
+}
+.charge-bar .target {
+  position: absolute; top: -2px; bottom: -2px;
+  width: 2px; background: var(--yellow);
+  border-radius: 1px;
+}
+
+/* Tiny chips */
+.tiny-row {
+  display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 5px;
+  margin-bottom: 6px;
+}
+.tiny-card {
+  background: rgba(31,31,31,.85);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  border-radius: 9px;
+  padding: 5px 8px;
+  display: flex; flex-direction: column; gap: 1px;
+  border: 1px solid rgba(255,255,255,.04);
+}
+.tiny-card .lbl {
+  font-size: 8px; color: var(--muted);
+  text-transform: uppercase; letter-spacing: 1.2px; font-weight: 600;
+}
+.tiny-card .v { font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.1; }
+
+/* Card de status do carro */
+.car-card {
+  background: rgba(31,31,31,.85);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  border-radius: 14px;
+  padding: 10px 12px 10px;
+  text-align: center;
+  margin-bottom: 10px;
+  border: 1px solid rgba(255,255,255,.04);
+}
+.car-card .odo { font-size: 11px; color: var(--muted); font-weight: 600; margin-bottom: 2px; letter-spacing: 0.5px; }
+.car-card .car { font-size: 64px; line-height: 1; padding: 8px 0; }
+.car-card .chips { display: flex; justify-content: center; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.car-card .ch {
+  font-size: 9px; padding: 4px 9px; background: var(--card2); border-radius: 999px;
+  color: #9ca3af; font-weight: 600;
+}
+.car-card .ch.green { color: var(--green); background: rgba(34,197,94,.12); }
+.car-card .ch.red { color: var(--red); background: rgba(248,113,113,.12); }
+.car-card .ch.yellow { color: var(--yellow); background: rgba(251,191,36,.12); }
+
+/* Card de detalhe de recarga (aparece quando charging) */
+.charging-detail {
+  background: linear-gradient(135deg, rgba(34,197,94,.15), rgba(31,31,31,.85));
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(34,197,94,.3);
+  border-radius: 12px;
+  padding: 8px 12px;
+  margin-bottom: 6px;
+  display: none;
+}
+.charging-detail.show { display: block; }
+.charging-detail .hdr {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 6px;
+}
+.charging-detail .ti {
+  font-size: 9px; letter-spacing: 1.4px; color: var(--green);
+  text-transform: uppercase; font-weight: 700;
+}
+.charging-detail .eta { font-size: 10px; color: #cbd5e1; font-weight: 600; }
+.charging-detail .metrics {
+  display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px;
+}
+.charging-detail .metric { text-align: center; }
+.charging-detail .metric .v { font-size: 15px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; line-height: 1.1; }
+.charging-detail .metric .lbl { font-size: 8px; color: var(--muted); letter-spacing: 1px; margin-top: 1px; text-transform: uppercase; font-weight: 600; }
+
+/* ── Chip clicável (motor + portas/trava): pointer + feedback de toque */
+.st-card.clickable { cursor: pointer; transition: transform .1s, background .15s; }
+.st-card.clickable:active { transform: scale(.97); background: rgba(45,45,45,.85); }
+
+/* ── Modal de ação remota (Ligar motor / Destravar) */
+.action-modal {
+  position: fixed; inset: 0; z-index: 100;
+  background: rgba(0,0,0,.7);
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  display: none; align-items: center; justify-content: center;
+  padding: 24px;
+}
+.action-modal.show { display: flex; }
+.action-card {
+  background: #1f1f1f;
+  border-radius: 18px;
+  padding: 24px 22px 18px;
+  max-width: 320px; width: 100%;
+  border: 1px solid rgba(255,255,255,.08);
+  text-align: center;
+}
+.action-card .ic { font-size: 36px; line-height: 1; margin-bottom: 8px; }
+.action-card .title { font-size: 16px; font-weight: 700; color: var(--text); margin-bottom: 6px; }
+.action-card .msg { font-size: 12px; color: var(--muted); line-height: 1.4; margin-bottom: 18px; }
+.action-card .btns { display: flex; gap: 10px; }
+.action-card .btn {
+  flex: 1; padding: 12px;
+  border: none; border-radius: 10px;
+  font-size: 13px; font-weight: 700;
+  cursor: pointer;
+  font-family: inherit;
+}
+.action-card .btn.cancel { background: #2a2a2a; color: #cbd5e1; }
+.action-card .btn.confirm { background: var(--green); color: #000; }
+.action-card .btn.confirm.danger { background: var(--red); color: #fff; }
+
+/* Tabbar */
+
+
+
+
+
+/* Dev bar (canto pra debug + toggle live/snapshot) */
+.dev-bar {
+  position: fixed; top: 4px; right: 4px;
+  background: rgba(0,0,0,.7); border-radius: 8px;
+  padding: 4px 8px; font-size: 9px; color: #94a3b8;
+  z-index: 99; cursor: pointer;
+  font-weight: 600;
+}
+.dev-bar .ok { color: var(--green); }
+.dev-bar .err { color: var(--red); }
+.dev-bar .snap { color: var(--yellow); }
+
+/* ── Linha de status (chips compactos) ──
+   Substitui o PNG layered do carro. Cada chip = estado de um aspecto. */
+.status-row {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px;
+  margin-bottom: 6px;
+}
+.st-card {
+  background: rgba(31,31,31,.85);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  border-radius: 9px;
+  padding: 5px 3px;
+  text-align: center;
+  border: 1px solid rgba(255,255,255,.04);
+}
+.st-card .ic { font-size: 14px; line-height: 1; margin-bottom: 1px; display: flex; justify-content: center; height: 18px; align-items: center; color: #cbd5e1; }
+.st-card.alert .ic { color: var(--red); }
+.st-card.on .ic { color: var(--green); }
+.st-card .v { font-size: 8.5px; color: #cbd5e1; font-weight: 600; line-height: 1.1; }
+.st-card.alert { border-color: rgba(248,113,113,.4); background: rgba(248,113,113,.10); }
+.st-card.alert .v { color: var(--red); }
+.st-card.on { border-color: rgba(34,197,94,.35); background: rgba(34,197,94,.10); }
+.st-card.on .v { color: var(--green); }
+
+/* ── Card de pneus 2x2 (vista aérea do carro só com pneus) ── */
+.tyres-card {
+  background: rgba(31,31,31,.85);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  border-radius: 12px;
+  padding: 6px 10px 6px;
+  margin-bottom: 6px;
+  border: 1px solid rgba(255,255,255,.04);
+}
+.tyres-card .ti {
+  font-size: 8.5px; letter-spacing: 1.3px; color: var(--muted);
+  text-transform: uppercase; font-weight: 700; margin-bottom: 4px;
+  display: flex; justify-content: space-between; align-items: center;
+}
+.tyres-card .ti .odo { color: #cbd5e1; font-weight: 600; letter-spacing: 0.3px; text-transform: none; font-size: 10px; }
+.tyres-grid {
+  display: grid;
+  grid-template-columns: 1fr 28px 1fr;
+  grid-template-rows: auto auto;
+  gap: 3px 6px;
+  align-items: center;
+}
+.tyres-grid .car-spacer {
+  grid-row: 1 / -1; grid-column: 2;
+  background: linear-gradient(180deg, rgba(34,197,94,.06), rgba(34,197,94,.02));
+  border-left: 1px dashed rgba(34,197,94,.15);
+  border-right: 1px dashed rgba(34,197,94,.15);
+  height: 100%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px;
+  color: rgba(255,255,255,.2);
+}
+.ty {
+  display: flex; align-items: center; gap: 4px;
+  padding: 3px 5px;
+  background: rgba(255,255,255,.03);
+  border-radius: 6px;
+}
+.ty.right { flex-direction: row-reverse; text-align: right; }
+.ty .ic { font-size: 11px; opacity: 0.7; }
+.ty .data { display: flex; flex-direction: column; line-height: 1.05; }
+.ty .psi { font-size: 11px; font-weight: 700; color: var(--teal); font-variant-numeric: tabular-nums; }
+.ty .psi.warn { color: var(--yellow); }
+.ty .psi.alert { color: var(--red); }
+.ty .temp { font-size: 8.5px; color: #94a3b8; font-variant-numeric: tabular-nums; }
+.ty .temp.warn { color: var(--yellow); }
+.ty .temp.alert { color: var(--red); }
+</style>
+
+
+<span id="hd-place" style="display:none"></span>
+<span id="dev-bar" style="display:none"></span>
+<div class="map-fullscreen"><div id="map"></div></div>
+
+</div>
+  <div class="right">
+    <span class="dot" id="hd-dot" title="Conectado"></span>
+    <span class="bell">🔔</span>
+  </div>
+</div>
+
+<!-- Pill flutuante sobre o mapa com endereço completo -->
+<div class="map-place-pill">
+  <strong id="mp-place">--</strong>
+  <span class="sep">·</span>
+  <span class="addr" id="mp-addr">--</span>
+</div>
+
+<!-- Bottom sheet com todos os cards -->
+<div class="bottom-sheet" id="bottom-sheet">
+  <div class="sheet-handle" onclick="toggleSheet()"><div class="bar"></div></div>
+  <div class="sheet-inner">
+
+  <!-- Card especial de recarga (só quando charging) -->
+  <div class="charging-detail" id="chg-detail">
+    <div class="hdr">
+      <span class="ti">⚡ Recarga em andamento</span>
+      <span class="eta" id="chg-eta">--</span>
+    </div>
+    <div class="metrics">
+      <div class="metric"><div class="v" id="chg-pwr">--</div><div class="lbl">⚡ Atual</div></div>
+      <div class="metric"><div class="v" id="chg-kwh">--</div><div class="lbl">∑ Sessão</div></div>
+      <div class="metric"><div class="v" id="chg-peak">--</div><div class="lbl">▲ Pico</div></div>
+    </div>
+  </div>
+
+  <!-- Hero grid 2x2 -->
+  <div class="hero-grid">
+    <div class="hero-card green" id="hc-soc-card">
+      <div class="lbl">🔋 Bateria<span id="hc-soc-tag"></span></div>
+      <div class="val-row"><span class="v" id="hc-soc">--</span><span class="u">%</span></div>
+      <div class="sub" id="hc-soc-sub">--</div>
+      <div class="charge-bar" id="hc-soc-bar" style="display:none">
+        <div class="fill" id="hc-soc-bar-fill"></div>
+        <div class="target" id="hc-soc-bar-target"></div>
+      </div>
+    </div>
+    <div class="hero-card orange">
+      <div class="lbl">⛽ Combustível</div>
+      <div class="val-row"><span class="v" id="hc-fuel">--</span><span class="u">%</span></div>
+      <div class="sub" id="hc-fuel-sub">--</div>
+    </div>
+    <div class="hero-card teal">
+      <div class="lbl">📊 Consumo</div>
+      <div class="val-row"><span class="v" id="hc-cons">--</span><span class="u" id="hc-cons-u">--</span></div>
+      <div class="sub" id="hc-cons-sub">--</div>
+    </div>
+    <div class="hero-card muted" id="hc-trip-card">
+      <div class="lbl">🛣 <span id="hc-trip-lbl">Desde partida</span></div>
+      <div class="val-row"><span class="v" id="hc-trip">--</span><span class="u" id="hc-trip-u">km</span></div>
+      <div class="sub" id="hc-trip-sub">--</div>
+    </div>
+  </div>
+
+  <!-- Status do veículo: 4 chips compactos.
+       Ícones inline SVG (sem emoji residencial pra portas/vidros) — desenho
+       de carro visto de cima com a parte relevante destacada. -->
+  <div class="status-row">
+    <div class="st-card" id="st-lock">
+      <div class="ic" id="st-lock-ic">🔒</div>
+      <div class="v" id="st-lock-v">--</div>
+    </div>
+    <div class="st-card clickable" id="st-engine" onclick="confirmAction('engine')">
+      <div class="ic">⚙</div>
+      <div class="v" id="st-engine-v">--</div>
+    </div>
+    <div class="st-card clickable" id="st-doors" onclick="confirmAction('lock')">
+      <div class="ic">
+        <!-- Carro visto de cima com portas laterais destacadas -->
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true">
+          <path d="M7 3.5 h10 a1 1 0 0 1 1 1 v15 a1 1 0 0 1 -1 1 h-10 a1 1 0 0 1 -1 -1 v-15 a1 1 0 0 1 1 -1 z" />
+          <line x1="6" y1="9" x2="3" y2="9" stroke-width="1.6"/>
+          <line x1="6" y1="15" x2="3" y2="15" stroke-width="1.6"/>
+          <line x1="18" y1="9" x2="21" y2="9" stroke-width="1.6"/>
+          <line x1="18" y1="15" x2="21" y2="15" stroke-width="1.6"/>
+        </svg>
+      </div>
+      <div class="v" id="st-doors-v">--</div>
+    </div>
+    <div class="st-card" id="st-windows">
+      <div class="ic">
+        <!-- Carro visto de lado com janela destacada -->
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true">
+          <path d="M3 16 v-3 l2 -5 q.5 -1.5 2 -1.5 h10 q1.5 0 2 1.5 l2 5 v3 z" />
+          <path d="M6 12 h12 l-1.5 -3 q-.3 -.6 -1 -.6 h-7 q-.7 0 -1 .6 z" fill="currentColor" fill-opacity=".25" stroke="none"/>
+          <circle cx="7" cy="16" r="1.5"/>
+          <circle cx="17" cy="16" r="1.5"/>
+        </svg>
+      </div>
+      <div class="v" id="st-windows-v">--</div>
+    </div>
+  </div>
+
+  <!-- Pneus em layout 2x2 (vista aérea sem PNG) -->
+  <div class="tyres-card">
+    <div class="ti">
+      <span>🛞 Pneus</span>
+      <span class="odo" id="car-odo">--</span>
+    </div>
+    <div class="tyres-grid">
+      <div class="ty"><span class="ic">🛞</span><div class="data"><span class="psi" id="ty-fl-psi">--</span><span class="temp"><span id="ty-fl-temp">--</span>° · DE</span></div></div>
+      <div class="car-spacer">▲</div>
+      <div class="ty right"><span class="ic">🛞</span><div class="data"><span class="psi" id="ty-fr-psi">--</span><span class="temp"><span id="ty-fr-temp">--</span>° · DD</span></div></div>
+      <div class="ty"><span class="ic">🛞</span><div class="data"><span class="psi" id="ty-rl-psi">--</span><span class="temp"><span id="ty-rl-temp">--</span>° · TE</span></div></div>
+      <div class="ty right"><span class="ic">🛞</span><div class="data"><span class="psi" id="ty-rr-psi">--</span><span class="temp"><span id="ty-rr-temp">--</span>° · TD</span></div></div>
+    </div>
+  </div>
+
+  <!-- Tiny row: 12V + temps -->
+  <div class="tiny-row">
+    <div class="tiny-card"><span class="lbl">🔌 12V</span><span class="v" id="t-batt12">--</span></div>
+    <div class="tiny-card"><span class="lbl">🌡 Externa</span><span class="v" id="t-tempout">--</span></div>
+    <div class="tiny-card"><span class="lbl">🌡 Interna</span><span class="v" id="t-tempin">--</span></div>
+  </div>
+
+  </div>
+</div>
+
+<!-- Modal de ação remota (oculto por padrão) -->
+<div class="action-modal" id="action-modal" onclick="if(event.target===this) closeAction()">
+  <div class="action-card">
+    <div class="ic" id="action-ic">⚙</div>
+    <div class="title" id="action-title">--</div>
+    <div class="msg" id="action-msg">--</div>
+    <div class="btns">
+      <button class="btn cancel" onclick="closeAction()">Cancelar</button>
+      <button class="btn confirm" id="action-confirm" onclick="doAction()">Confirmar</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  // ───────────────────────────────────────────────────────────────────────────
+// Snapshot dos dados REAIS do state.json — gerado em 2026-05-21.
+// Permite ver o preview com dados verdadeiros do seu carro sem precisar login.
+// Toque no badge "📸 snapshot" no canto pra alternar pra dados live.
+// ───────────────────────────────────────────────────────────────────────────
+const SNAPSHOT = {
+  "state": {
+    "gps_lat": -16.622449,
+    "gps_lng": -49.233154,
+    "gps_ts": 1779389448077,
+    "soc_pct": 74,
+    "batt_12v_pct": 99,
+    "odometer_km": 27670,
+    "fuel_l": 31,
+    "autonomy_ev_km": 122,
+    "autonomy_ice_km": 413,
+    "rolling": {
+      "kwh_per_100km": 15.33,
+      "km_per_l": 0,
+      "distance_km": 27,
+      "fuel_l": 0,
+      "cost_brl": 4.14
+    },
+    "current_trip": null,
+    "engine_state": "0",
+    "lock_state": "off",
+    "door_fl": "off",
+    "door_fr": "off",
+    "door_rl": "off",
+    "door_rr": "off",
+    "door_trunk": "off",
+    "window_fl": "off",
+    "window_fr": "off",
+    "window_rl": "off",
+    "window_rr": "off",
+    "sunroof": "off",
+    "gear": "P",
+    "outside_temp": 30,
+    "inside_temp": 31.5,
+    "last_update_ms": 1779389449172,
+    "price_kwh": 0.9997,
+    "price_gas_per_l": 6.418,
+    "charging_state": "Carregando",
+    "charge_power_kw": 6.25,
+    "charge_session_kwh": 4.42,
+    "charge_max_power_kw": 6.47,
+    "charge_avg_power_kw": 0.14,
+    "charge_remaining_min": 60,
+    "charge_start_soc_pct": 25,
+    "charge_limit_pct": 90,
+    "tyre_pressure_fl": 38,
+    "tyre_pressure_fr": 38,
+    "tyre_pressure_rl": 37,
+    "tyre_pressure_rr": 37,
+    "tyre_temp_fl": 31,
+    "tyre_temp_fr": 33,
+    "tyre_temp_rl": 30,
+    "tyre_temp_rr": 31,
+    "light_state": null,
+    "high_beam": null,
+    "ac_state": "off",
+    "_gps_ts_offset": -4507,
+    "_last_update_offset": -3412
+  },
+  "known_places": [
+    {
+      "id": 1778680168607,
+      "name": "Limpa Gyn",
+      "lat": -16.622597179855937,
+      "lng": -49.23307082411335,
+      "radius_m": 200
+    },
+    {
+      "id": 1778784954904,
+      "name": "Casa",
+      "lat": -16.7325572,
+      "lng": -49.2743561,
+      "radius_m": 200
+    },
+    {
+      "id": 1778785785987,
+      "name": "Jardins Lisboa",
+      "lat": -16.769718907273646,
+      "lng": -49.3538302293123,
+      "radius_m": 150
+    },
+    {
+      "id": 1778792832122,
+      "name": "Nasa Business",
+      "lat": -16.6981151,
+      "lng": -49.2584848,
+      "radius_m": 75
+    },
+    {
+      "id": 1778792856472,
+      "name": "Bodytech",
+      "lat": -16.6914966,
+      "lng": -49.2613609,
+      "radius_m": 125
+    },
+    {
+      "id": 1778803344713,
+      "name": "Clean Master Catalão",
+      "lat": -18.189742,
+      "lng": -47.9373861,
+      "radius_m": 100
+    },
+    {
+      "id": 1778803609932,
+      "name": "Clean Master Barra do Garças",
+      "lat": -15.886999993891566,
+      "lng": -52.304342334120925,
+      "radius_m": 300
+    },
+    {
+      "id": 1778803704546,
+      "name": "1934 Academia",
+      "lat": -16.69999405240724,
+      "lng": -49.26506440577913,
+      "radius_m": 50
+    },
+    {
+      "id": 1779133890537,
+      "name": "Posto Petrobrás Barra do Garças",
+      "lat": -15.88370113711273,
+      "lng": -52.30554442819968,
+      "radius_m": 200
+    },
+    {
+      "id": 1779299404074,
+      "name": "Comida Caipira",
+      "lat": -16.651625839443003,
+      "lng": -49.23071907025588,
+      "radius_m": 200
+    },
+    {
+      "id": 1779299443913,
+      "name": "Passeio das Águas",
+      "lat": -16.6299704,
+      "lng": -49.2783748,
+      "radius_m": 350
+    },
+    {
+      "id": 1779325755076,
+      "name": "Clínica Ellevar",
+      "lat": -16.705464844566215,
+      "lng": -49.27145719528198,
+      "radius_m": 75
+    },
+    {
+      "id": 1779327489489,
+      "name": "Recanto da Paz",
+      "lat": -16.88319813614347,
+      "lng": -49.81892108917236,
+      "radius_m": 350
+    }
+  ]
+};
+
+let useLive = false;
+let liveTimer = null;
+
+function toggleLive() {
+  useLive = !useLive;
+  const dev = document.getElementById('dev-bar');
+  if (useLive) {
+    const token = localStorage.getItem('bridge_token');
+    if (!token) {
+      dev.innerHTML = '<span class="err">✗ login na PWA primeiro</span>';
+      useLive = false;
+      return;
+    }
+    dev.innerHTML = '<span class="ok">🔴 live</span>';
+    renderLive();
+    liveTimer = setInterval(renderLive, 5000);
+  } else {
+    dev.innerHTML = '<span class="snap">📸 snapshot</span>';
+    if (liveTimer) { clearInterval(liveTimer); liveTimer = null; }
+    renderSnapshot();
+  }
+}
+
+async function renderLive() {
+  try {
+    const token = localStorage.getItem('bridge_token');
+    const r = await fetch('/api/state', { headers: { 'Authorization': 'Bearer ' + token } });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const s = await r.json();
+    if (!_kpDataLive) {
+      _kpDataLive = await fetch('/api/known-places', { headers: { 'Authorization': 'Bearer ' + token } }).then(x => x.json()).catch(() => SNAPSHOT.known_places);
+    }
+    try { render(s, _kpDataLive); }
+    catch (re) {
+      console.error('Dash render erro:', re);
+      if (window.showToast) window.showToast('Dash render erro: ' + re.message, 'err');
+    }
+  } catch (e) {
+    console.error('Dash fetch erro:', e);
+    if (window.showToast) window.showToast('Dash fetch erro: ' + e.message, 'err');
+  }
+}
+
+function renderSnapshot() {
+  // Reaplica offsets relativos pra "agora" — assim "agora" aparece como "agora" mesmo
+  // se o snapshot for de horas atrás
+  const s = JSON.parse(JSON.stringify(SNAPSHOT.state));
+  const now = Date.now();
+  if (s._gps_ts_offset != null) s.gps_ts = now + s._gps_ts_offset;
+  if (s._last_update_offset != null) s.last_update_ms = now + s._last_update_offset;
+  render(s, SNAPSHOT.known_places);
+}
+
+let map = null;
+let marker = null;
+let lastMapLat = 0, lastMapLng = 0;
+let lastAddress = '';
+let _kpDataLive = null;
+
+function _findKp(kpData, lat, lng) {
+  if (!kpData || !kpData.length || !lat) return null;
+  const R = 6371000, toRad = d => d * Math.PI / 180;
+  let best = null;
+  for (const p of kpData) {
+    if (!p.lat) continue;
+    const dLat = toRad(p.lat - lat), dLng = toRad(p.lng - lng);
+    const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat))*Math.cos(toRad(p.lat))*Math.sin(dLng/2)**2;
+    const d = 2 * R * Math.asin(Math.sqrt(a));
+    if (d <= (p.radius_m || 200)) {
+      if (!best || (best.radius_m || 200) > (p.radius_m || 200)) best = p;
+    }
+  }
+  return best;
+}
+
+function fmtRelTime(ms) {
+  if (!ms) return '--';
+  const d = (Date.now() - ms) / 1000;
+  if (d < 60) return 'agora';
+  if (d < 3600) return Math.round(d/60) + ' min atrás';
+  if (d < 86400) return Math.round(d/3600) + 'h atrás';
+  return Math.round(d/86400) + 'd atrás';
+}
+
+async function updateAddress(lat, lng) {
+  if (Math.abs(lat - lastMapLat) < 0.0005 && Math.abs(lng - lastMapLng) < 0.0005) return;
+  lastMapLat = lat; lastMapLng = lng;
+  try {
+    const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=16`);
+    const g = await r.json();
+    const a = g.address || {};
+    lastAddress = [a.road, a.suburb || a.neighbourhood || a.quarter, a.city || a.town].filter(Boolean).join(', ');
+    if (currentKp || lastAddress) renderPlace(lat, lng);
+  } catch (_) {}
+}
+
+let currentKp = null;
+function renderPlace(lat, lng) {
+  const kp = currentKp;
+  const hdPlace = document.getElementById('hd-place');
+  const mpPlace = document.getElementById('mp-place');
+  const mpAddr  = document.getElementById('mp-addr');
+  if (kp) {
+    hdPlace.textContent = kp.name;
+    mpPlace.textContent = kp.name;
+    mpAddr.textContent  = lastAddress || '--';
+  } else {
+    const first = (lastAddress || '').split(',')[0] || '--';
+    hdPlace.textContent = first;
+    mpPlace.textContent = (lastAddress || '').split(',').slice(0,2).join(',').trim() || first;
+    mpAddr.textContent  = (lastAddress || '').split(',').slice(2).join(',').trim() || '';
+  }
+}
+
+function fmt1(n) { return (Math.round(n * 10) / 10).toString(); }
+
+function fmtChargeEta(min) {
+  if (!min || min <= 0) return '--';
+  if (min < 60) return `${min} min`;
+  const h = Math.floor(min / 60), m = min % 60;
+  return `${h}h${m > 0 ? ' ' + m + 'min' : ''}`;
+}
+
+function render(s, kpData) {
+  _latestState = s;  // pro modal de ação saber o estado atual
+  // ── Status dot
+  const onlineAge = s.last_update_ms ? (Date.now() - s.last_update_ms) / 1000 : Infinity;
+  const charging = s.charging_state === 'Carregando';
+  const dot = document.getElementById('hd-dot');
+  dot.className = 'dot' + (charging ? ' charging' : (onlineAge < 300 ? '' : ' off'));
+
+  // ── Mapa fullscreen — pin centrado na ÁREA VISÍVEL ACIMA do bottom sheet.
+  // O Leaflet centraliza no meio da viewport por padrão; como o sheet cobre
+  // ~55% inferior, precisamos puxar a vista pra baixo (panBy +Y) pro pin
+  // aparecer no centro da metade SUPERIOR (que é o que está visível).
+  if (s.gps_lat && s.gps_lng) {
+    const pos = [s.gps_lat, s.gps_lng];
+    if (!map) {
+      map = L.map('map', {
+        zoomControl: false, attributionControl: false, dragging: true,
+        zoomSnap: 0.5,
+      }).setView(pos, 16);
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom: 19 }).addTo(map);
+    }
+    if (marker) marker.setLatLng(pos);
+    else marker = L.marker(pos, { icon: L.divIcon({
+      className: '',
+      html: '<div style="width:18px;height:18px;background:#22c55e;border:3px solid #fff;border-radius:50%;box-shadow:0 0 0 6px rgba(34,197,94,.35),0 0 0 14px rgba(34,197,94,.12),0 2px 8px rgba(0,0,0,.4);"></div>',
+      iconSize: [18,18], iconAnchor: [9,9]
+    }) }).addTo(map);
+    // Centra o pin na metade superior da tela (acima do bottom sheet)
+    const sheet = document.querySelector('.bottom-sheet');
+    const sheetH = sheet ? sheet.offsetHeight : 0;
+    map.setView(pos, map.getZoom() || 16, { animate: true });
+    // Empurra o pin pra cima: positivo em Y = mundo move pra cima = pin sobe na tela
+    if (sheetH > 0) map.panBy([0, sheetH / 2], { animate: false });
+    currentKp = _findKp(kpData, s.gps_lat, s.gps_lng);
+    updateAddress(s.gps_lat, s.gps_lng);
+    renderPlace(s.gps_lat, s.gps_lng);
+  }
+  // ts movido pro header dot (status visual) — sem mais badge separado
+
+  // ── Card de detalhe de recarga
+  const chgDetail = document.getElementById('chg-detail');
+  if (charging) {
+    chgDetail.classList.add('show');
+    document.getElementById('chg-pwr').textContent  = (+s.charge_power_kw || 0).toFixed(1) + ' kW';
+    document.getElementById('chg-kwh').textContent  = (+s.charge_session_kwh || 0).toFixed(2) + ' kWh';
+    document.getElementById('chg-peak').textContent = (+s.charge_max_power_kw || 0).toFixed(1) + ' kW';
+    document.getElementById('chg-eta').textContent  = '⏱ ' + fmtChargeEta(+s.charge_remaining_min) + ' restantes';
+  } else {
+    chgDetail.classList.remove('show');
+  }
+
+  // ── SOC (card especial quando carregando)
+  const soc = s.soc_pct != null ? +s.soc_pct : null;
+  document.getElementById('hc-soc').textContent = soc != null ? Math.round(soc) : '--';
+  const socCard = document.getElementById('hc-soc-card');
+  const socTag  = document.getElementById('hc-soc-tag');
+  const socBar  = document.getElementById('hc-soc-bar');
+  if (charging) {
+    socCard.classList.add('charging');
+    socTag.innerHTML = '<span class="live-tag">⚡ LIVE</span>';
+    socBar.style.display = 'block';
+    const target = +s.charge_limit_pct || 100;
+    document.getElementById('hc-soc-bar-fill').style.width = (soc || 0) + '%';
+    document.getElementById('hc-soc-bar-target').style.left = `calc(${target}% - 1px)`;
+    document.getElementById('hc-soc-sub').textContent = `↑ +${(+s.charge_power_kw || 0).toFixed(1)} kW · meta ${target}%`;
+  } else {
+    socCard.classList.remove('charging');
+    socTag.innerHTML = '';
+    socBar.style.display = 'none';
+    const evKm = s.autonomy_ev_km != null ? Math.round(+s.autonomy_ev_km) : null;
+    const battKwh = +s.battery_capacity_kwh || 0;
+    const evCost = soc != null && +s.price_kwh && battKwh > 0
+      ? '~R$ ' + (soc/100 * battKwh * s.price_kwh).toFixed(0)
+      : '';
+    const subParts = [];
+    if (evKm != null) subParts.push(`${evKm} km elétricos`);
+    if (evCost) subParts.push(evCost);
+    document.getElementById('hc-soc-sub').textContent = subParts.join(' · ') || '--';
+  }
+
+  // ── Combustível: PHEV34 publica fuel_l (litros), não fuel_pct
+  // Fallback: calcula % a partir do tanque default 55L se fuel_pct ausente
+  const FUEL_CAPACITY_L = +s.fuel_capacity_l || 55;  // Haval H6 PHEV34 = 55L
+  let fuelPct = +s.fuel_pct || +s.fuel_level || 0;
+  if (!fuelPct && +s.fuel_l > 0) fuelPct = (s.fuel_l / FUEL_CAPACITY_L) * 100;
+  document.getElementById('hc-fuel').textContent = fuelPct > 0 ? Math.round(fuelPct) : '--';
+  const iceKm = s.autonomy_ice_km != null ? Math.round(+s.autonomy_ice_km) : null;
+  const fuelL = +s.fuel_l > 0 ? `${s.fuel_l.toFixed(1)}L` : '';
+  const subParts = [fuelL, iceKm != null ? `${iceKm} km à combustão` : ''].filter(Boolean);
+  document.getElementById('hc-fuel-sub').textContent = subParts.join(' · ') || '--';
+
+  // ── Consumo
+  const r = s.rolling || {};
+  const rKwh = +r.kwh_per_100km || 0;
+  const rKmL = +r.km_per_l || 0;
+  if (rKwh > 0) {
+    document.getElementById('hc-cons').textContent = fmt1(rKwh);
+    document.getElementById('hc-cons-u').textContent = 'kWh/100';
+  } else if (rKmL > 0) {
+    document.getElementById('hc-cons').textContent = fmt1(rKmL);
+    document.getElementById('hc-cons-u').textContent = 'km/L';
+  } else {
+    document.getElementById('hc-cons').textContent = '--';
+    document.getElementById('hc-cons-u').textContent = '';
+  }
+  const distRoll = +r.distance_km || 0;
+  document.getElementById('hc-cons-sub').textContent = distRoll > 0
+    ? `${fmt1(distRoll)} km · janela`
+    : 'janela rolling';
+
+  // ── Trip card (current ou desde partida)
+  const ct = s.current_trip;
+  const engOn = s.engine_state === '1' || s.engine_state === 'on';
+  if (ct && (+ct.distKm > 0 || engOn)) {
+    document.getElementById('hc-trip-lbl').textContent = 'Viagem atual';
+    document.getElementById('hc-trip').textContent = fmt1(+ct.distKm || 0);
+    document.getElementById('hc-trip-u').textContent = 'km';
+    const mins = Math.round(((+ct.timeSec || 0) + (+ct.parkedInPSec || 0) + (+ct.engineOffSec || 0)) / 60);
+    const cost = ((+ct.netKwh || 0) * (+s.price_kwh || 0)) + ((+ct.fuelL || 0) * (+s.price_gas_per_l || 0));
+    document.getElementById('hc-trip-sub').textContent = `${mins} min${cost > 0.01 ? ' · R$ ' + cost.toFixed(2) : ''}`;
+    document.getElementById('hc-trip-card').className = 'hero-card yellow';
+  } else {
+    document.getElementById('hc-trip-lbl').textContent = 'Rolling';
+    document.getElementById('hc-trip').textContent = distRoll > 0 ? fmt1(distRoll) : '--';
+    document.getElementById('hc-trip-u').textContent = 'km';
+    const cost = +r.cost_brl || 0;
+    document.getElementById('hc-trip-sub').textContent = cost > 0.01 ? `R$ ${cost.toFixed(2)} gastos` : 'última janela';
+    document.getElementById('hc-trip-card').className = 'hero-card muted';
+  }
+
+  // ── Tiny row
+  document.getElementById('t-batt12').textContent = s.batt_12v_pct ? Math.round(s.batt_12v_pct) + '%' : '--';
+  document.getElementById('t-tempout').textContent = s.outside_temp != null ? Math.round(+s.outside_temp) + '°' : '--';
+  document.getElementById('t-tempin').textContent  = s.inside_temp  != null ? Math.round(+s.inside_temp ) + '°' : '--';
+
+  // ── Status do veículo + pneus (substitui o PNG layered)
+  document.getElementById('car-odo').textContent = s.odometer_km
+    ? Math.round(s.odometer_km).toLocaleString('pt-BR') + ' km'
+    : '--';
+  renderCarLayers(s, charging);
+}
+
+// ── Render do bloco de status do carro (chips + pneus) — sem PNG
+// Pressão recomendada Haval H6 PHEV34: 36 PSI (front+rear).
+// Thresholds: 34-39 OK · 32-34 ou 39-42 atenção · <32 ou >42 alerta crítico.
+const TYRE_PSI_OK_MIN = 34, TYRE_PSI_OK_MAX = 39;
+const TYRE_PSI_WARN_MIN = 32, TYRE_PSI_WARN_MAX = 42;
+const TYRE_TEMP_WARN = 60, TYRE_TEMP_ALERT = 80;  // °C
+function _tyrePsiClass(p) {
+  if (p == null || p <= 0) return '';
+  if (p < TYRE_PSI_WARN_MIN || p > TYRE_PSI_WARN_MAX) return 'alert';
+  if (p < TYRE_PSI_OK_MIN  || p > TYRE_PSI_OK_MAX)  return 'warn';
+  return '';
+}
+function _tyreTempClass(t) {
+  if (t == null || t <= 0) return '';
+  if (t >= TYRE_TEMP_ALERT) return 'alert';
+  if (t >= TYRE_TEMP_WARN)  return 'warn';
+  return '';
+}
+function setTyreCell(side, psiVal, tempVal) {
+  const psiEl  = document.getElementById(`ty-${side}-psi`);
+  const tempEl = document.getElementById(`ty-${side}-temp`);
+  psiEl.textContent  = psiVal != null && psiVal > 0 ? Math.round(psiVal) : '--';
+  tempEl.textContent = tempVal != null && tempVal > 0 ? Math.round(tempVal) : '--';
+  psiEl.className  = 'psi '  + _tyrePsiClass(psiVal);
+  tempEl.className = 'temp ' + _tyreTempClass(tempVal);
+}
+function setChip(id, txt, mode) {
+  const card = document.getElementById('st-' + id);
+  document.getElementById('st-' + id + '-v').textContent = txt;
+  card.classList.remove('alert', 'on');
+  if (mode) card.classList.add(mode);
+}
+function renderCarLayers(s, charging) {
+  // ── Trava: convenção do bridge → 'off' = trancado, 'on' = destrancado
+  const locked = s.lock_state === 'off';
+  document.getElementById('st-lock-ic').textContent = locked ? '🔒' : '🔓';
+  setChip('lock', locked ? 'Travado' : 'Destravado', locked ? null : 'alert');
+
+  // ── Motor
+  const engOn = s.engine_state === '1' || s.engine_state === 'on';
+  if (engOn)       setChip('engine', 'Ligado', 'on');
+  else if (charging) setChip('engine', 'Carregando', 'on');
+  else             setChip('engine', 'Desligado', null);
+
+  // ── Portas (qualquer aberta → alert)
+  const doorOpenList = ['fl', 'fr', 'rl', 'rr'].filter(side => s[`door_${side}`] === 'on');
+  const trunkOpen = s.door_trunk === 'on';
+  if (doorOpenList.length === 0 && !trunkOpen) {
+    setChip('doors', 'Fechadas', null);
+  } else {
+    const labels = [];
+    if (doorOpenList.length) labels.push(doorOpenList.length + (doorOpenList.length === 1 ? ' aberta' : ' abertas'));
+    if (trunkOpen) labels.push('+ porta-malas');
+    setChip('doors', labels.join(' '), 'alert');
+  }
+
+  // ── Vidros (qualquer aberto → alert; teto solar entra junto)
+  const winOpen = ['fl', 'fr', 'rl', 'rr'].filter(side => s[`window_${side}`] === 'on').length;
+  const sunOpen = s.sunroof === 'on';
+  if (winOpen === 0 && !sunOpen) {
+    setChip('windows', 'Fechados', null);
+  } else {
+    const parts = [];
+    if (winOpen) parts.push(winOpen + (winOpen === 1 ? ' aberto' : ' abertos'));
+    if (sunOpen) parts.push('+ teto');
+    setChip('windows', parts.join(' '), 'alert');
+  }
+
+  // ── Pneus
+  setTyreCell('fl', s.tyre_pressure_fl, s.tyre_temp_fl);
+  setTyreCell('fr', s.tyre_pressure_fr, s.tyre_temp_fr);
+  setTyreCell('rl', s.tyre_pressure_rl, s.tyre_temp_rl);
+  setTyreCell('rr', s.tyre_pressure_rr, s.tyre_temp_rr);
+}
+
+// Toggle bottom sheet entre expandido / minimizado
+function toggleSheet() {
+  const sheet = document.getElementById('bottom-sheet');
+  sheet.classList.toggle('collapsed');
+  // Re-centraliza o pin no mapa após o sheet mudar de tamanho
+  setTimeout(() => {
+    if (!map || !marker) return;
+    const pos = marker.getLatLng();
+    const sheetH = sheet.classList.contains('collapsed') ? 0 : sheet.offsetHeight;
+    map.invalidateSize();
+    map.setView(pos, map.getZoom(), { animate: true });
+    if (sheetH > 0) map.panBy([0, sheetH / 2], { animate: false });
+  }, 280);
+}
+
+// Mede altura da tabbar e seta CSS variable pro sheet ficar grudado
+function updateTabbarHeight() {
+  const tabH = document.querySelector('.tabbar')?.offsetHeight || 52;
+  document.documentElement.style.setProperty('--tabbar-h', tabH + 'px');
+}
+
+// ── Ações remotas via modal de confirmação
+// Reusa o endpoint /api/action/:name do bridge (mesmo do app principal)
+let _pendingAction = null;
+function confirmAction(type) {
+  const s = _latestState || SNAPSHOT.state;
+  let conf = null;
+  if (type === 'engine') {
+    const engOn = s.engine_state === '1' || s.engine_state === 'on';
+    conf = {
+      ic: '⚙', danger: engOn,
+      title:   engOn ? 'Desligar motor?' : 'Ligar motor?',
+      msg:     engOn ? 'O motor será desligado remotamente.'
+                     : 'O motor térmico será ligado remotamente.',
+      btn:     engOn ? 'Desligar' : 'Ligar',
+      action:  engOn ? 'engine_off' : 'engine_on',
+    };
+  } else if (type === 'lock') {
+    const locked = s.lock_state === 'off';
+    conf = {
+      ic: locked ? '🔓' : '🔒', danger: !locked,
+      title:   locked ? 'Destravar carro?' : 'Travar carro?',
+      msg:     locked ? 'As portas serão destravadas.'
+                      : 'As portas serão travadas.',
+      btn:     locked ? 'Destravar' : 'Travar',
+      action:  locked ? 'lock_open' : 'lock_close',
+    };
+  }
+  if (!conf) return;
+  document.getElementById('action-ic').textContent    = conf.ic;
+  document.getElementById('action-title').textContent = conf.title;
+  document.getElementById('action-msg').textContent   = conf.msg;
+  const btn = document.getElementById('action-confirm');
+  btn.textContent = conf.btn;
+  btn.classList.toggle('danger', !!conf.danger);
+  _pendingAction = conf;
+  document.getElementById('action-modal').classList.add('show');
+}
+function closeAction() {
+  document.getElementById('action-modal').classList.remove('show');
+  _pendingAction = null;
+}
+async function doAction() {
+  if (!_pendingAction) { closeAction(); return; }
+  const action = _pendingAction.action;
+  const token = localStorage.getItem('bridge_token');
+  const btn = document.getElementById('action-confirm');
+  btn.textContent = '⏳ enviando…';
+  btn.disabled = true;
+  try {
+    if (!token) {
+      // No preview/demo sem login, só simula
+      await new Promise(r => setTimeout(r, 600));
+      document.getElementById('action-title').textContent = '✓ Comando simulado';
+      document.getElementById('action-msg').textContent = `Em produção, isto enviaria ${action} pro carro. Faça login na PWA principal pra acionar de verdade.`;
+      setTimeout(closeAction, 1800);
+    } else {
+      const r = await fetch('/api/action/' + action, {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+      });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      document.getElementById('action-title').textContent = '✓ Comando enviado';
+      document.getElementById('action-msg').textContent = 'O carro vai responder em alguns segundos.';
+      setTimeout(closeAction, 1500);
+    }
+  } catch (e) {
+    document.getElementById('action-title').textContent = '✗ Falha';
+    document.getElementById('action-msg').textContent = e.message;
+    btn.disabled = false;
+    btn.textContent = 'Tentar de novo';
+  }
+}
+// Cache do último state pra usar em confirmAction
+let _latestState = null;
+
+// Bootstrap
+updateTabbarHeight();
+window.addEventListener('resize', updateTabbarHeight);
+// Live se houver token; senão snapshot
+if (localStorage.getItem('bridge_token')) {
+  useLive = true;
+  renderLive();
+  liveTimer = setInterval(renderLive, 5000);
+} else {
+  renderSnapshot();
+}
+{
+  const _db = document.getElementById('dev-bar');
+  if (_db) _db.innerHTML = useLive ? '<span class="ok">🔴 live</span>' : '<span class="snap">📸 demo</span>';
+}
+window.renderView_dash = function() {
+  if (useLive && window.state && Object.keys(window.state).length) {
+    try { render(window.state, _kpDataLive || SNAPSHOT.known_places); } catch (_) {}
+  }
+};
+  // Expõe handlers de onclick no window
+  Object.assign(window, { toggleSheet: typeof toggleSheet !== 'undefined' ? toggleSheet : undefined, confirmAction: typeof confirmAction !== 'undefined' ? confirmAction : undefined, closeAction: typeof closeAction !== 'undefined' ? closeAction : undefined, doAction: typeof doAction !== 'undefined' ? doAction : undefined });
+  if (!window['initView_dash']) window['initView_dash'] = function() {};
+})();
+</script>
