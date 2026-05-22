@@ -33586,8 +33586,7 @@ function renderTrips() {
   }
   empty.classList.add('section-hidden');
   list.innerHTML = dayTrips.map(t => renderTripCard(t)).join('');
-  // Renderiza mapas (após o HTML estar no DOM)
-  setTimeout(() => dayTrips.forEach(t => renderTripMap(t)), 50);
+  // Mini-mapas nos cards removidos — abre fullscreen pelo botão 🗺
 }
 
 function tripName(t) {
@@ -33619,7 +33618,6 @@ function renderTripCard(t) {
         <div class="s"><div class="l">${t.fuelL > 0 ? 'Comb.' : 'km/L eq'}</div><div class="v orange">${t.fuelL > 0 ? fmt1(t.fuelL) + ' L' : (kmL > 0 ? fmt1(kmL) : '--')}</div></div>
         <div class="s"><div class="l">Custo</div><div class="v yellow">R$ ${fmtBRL(cost)}</div></div>
       </div>
-      ${t.route.length > 1 ? `<div class="trip-map" id="map-${t.id}">${radar}</div>` : ''}
       <div class="trip-actions">
         <button title="Ver mapa em tela cheia" onclick="openMapFull(${esc(t.id)})">🗺</button>
         <button title="Renomear" onclick="openRename(${esc(t.id)})">✏️</button>
