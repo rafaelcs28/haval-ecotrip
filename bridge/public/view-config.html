@@ -286,21 +286,36 @@
   </div>
   <div class="sub-body">
     <div class="field-group">
-      <div class="group-ti">Próximas</div>
-      <div class="field" style="display:flex;justify-content:space-between;align-items:center">
-        <div><div style="font-size:13px;font-weight:700">🛢 Troca de óleo</div><div style="font-size:10px;color:var(--muted);margin-top:2px">a cada 10.000 km · próx. em 1.240 km</div></div>
-        <span style="font-size:13px;color:var(--yellow);font-weight:700">⚠ próximo</span>
-      </div>
-      <div class="field" style="display:flex;justify-content:space-between;align-items:center">
-        <div><div style="font-size:13px;font-weight:700">🌬 Filtro de ar</div><div style="font-size:10px;color:var(--muted);margin-top:2px">a cada 15.000 km · próx. em 8.200 km</div></div>
-        <span style="font-size:13px;color:var(--green);font-weight:700">OK</span>
-      </div>
-      <div class="field" style="display:flex;justify-content:space-between;align-items:center">
-        <div><div style="font-size:13px;font-weight:700">🛞 Pastilhas de freio</div><div style="font-size:10px;color:var(--muted);margin-top:2px">a cada 30.000 km · próx. em 14.500 km</div></div>
-        <span style="font-size:13px;color:var(--green);font-weight:700">OK</span>
+      <div class="group-ti">Itens</div>
+      <div id="maint-list" style="display:flex;flex-direction:column;gap:6px">
+        <div style="font-size:11px;color:var(--muted);padding:12px;text-align:center">Carregando…</div>
       </div>
     </div>
-    <button class="btn secondary" onclick="showToast('Em construção: adicionar nova manutenção')">+ Adicionar manutenção</button>
+    <button class="btn secondary" onclick="openMaintAdd()">+ Adicionar item de manutenção</button>
+
+    <div class="field-group" style="margin-top:18px">
+      <div class="group-ti">Histórico</div>
+      <div id="maint-history" style="display:flex;flex-direction:column;gap:6px"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal de adicionar/editar manutenção -->
+<div id="maint-modal" style="display:none;position:fixed;inset:0;z-index:80;background:rgba(0,0,0,.7);align-items:flex-end;justify-content:center;backdrop-filter:blur(8px)">
+  <div style="background:#1f1f1f;width:100%;max-width:480px;border-top-left-radius:18px;border-top-right-radius:18px;padding:18px 18px calc(env(safe-area-inset-bottom) + 18px);border-top:1px solid rgba(255,255,255,.08);max-height:80vh;overflow-y:auto">
+    <div style="width:42px;height:5px;background:rgba(255,255,255,.18);border-radius:3px;margin:-8px auto 14px"></div>
+    <div style="font-size:16px;font-weight:700;color:var(--text);margin-bottom:4px" id="maint-modal-ti">Adicionar manutenção</div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:16px">Defina periodicidade em km e/ou meses</div>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <input id="maint-label" placeholder="Ex: Revisão geral" style="width:100%;padding:12px 14px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:10px;color:var(--text);font-size:14px;font-family:inherit">
+      <input id="maint-icon" placeholder="Ícone (emoji opcional)" maxlength="3" style="width:100%;padding:12px 14px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:10px;color:var(--text);font-size:14px;font-family:inherit">
+      <input id="maint-every-km" type="number" placeholder="A cada quantos km" style="width:100%;padding:12px 14px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:10px;color:var(--text);font-size:14px;font-family:inherit">
+      <input id="maint-every-months" type="number" placeholder="OU a cada quantos meses (opcional)" style="width:100%;padding:12px 14px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:10px;color:var(--text);font-size:14px;font-family:inherit">
+    </div>
+    <div style="display:flex;gap:10px;margin-top:16px">
+      <button onclick="closeMaintModal()" style="flex:1;padding:12px;background:rgba(255,255,255,.06);color:#cbd5e1;border:none;border-radius:10px;font-size:14px;font-weight:700;font-family:inherit">Cancelar</button>
+      <button onclick="saveMaintItem()" style="flex:1;padding:12px;background:var(--green);color:#000;border:none;border-radius:10px;font-size:14px;font-weight:700;font-family:inherit">Salvar</button>
+    </div>
   </div>
 </div>
 
@@ -527,8 +542,156 @@ function updateTabbarHeight() {
 }
 updateTabbarHeight();
 window.addEventListener('resize', updateTabbarHeight);
+
+// ─── Manutenção: CRUD de intervalos + histórico ────────────────
+let _maintLocal = { intervals: [], history: [] };
+let _maintEditId = null;
+
+async function _loadMaint() {
+  const tk = localStorage.getItem('bridge_token');
+  if (!tk) return;
+  try {
+    const r = await fetch('/api/maintenance', { headers: { 'Authorization': 'Bearer ' + tk } });
+    _maintLocal = await r.json();
+    _renderMaintList();
+    _renderMaintHistory();
+  } catch (_) {}
+}
+
+function _renderMaintList() {
+  const el = document.getElementById('maint-list');
+  if (!el) return;
+  const intervals = _maintLocal.intervals || [];
+  if (!intervals.length) {
+    el.innerHTML = '<div style="font-size:11px;color:var(--muted);padding:12px;text-align:center">Nenhuma manutenção configurada</div>';
+    return;
+  }
+  const odo = +(window.state?.odometer_km) || 0;
+  el.innerHTML = intervals.map(it => {
+    const last = (_maintLocal.history || []).filter(h => h.interval_id === it.id).sort((a,b) => (b.odometer_km||0) - (a.odometer_km||0))[0];
+    const baseOdo = last ? last.odometer_km : 0;
+    const nextAt = baseOdo + (it.every_km || 0);
+    const rem = it.every_km ? nextAt - odo : null;
+    let status = 'OK', statusColor = 'var(--green)';
+    if (rem != null && rem <= 0) { status = '⚠ atrasada'; statusColor = 'var(--red)'; }
+    else if (rem != null && rem < 1000) { status = '⚠ próxima'; statusColor = 'var(--yellow)'; }
+    const icon = it.icon || '🔧';
+    return `<div style="display:flex;justify-content:space-between;align-items:center;padding:10px;background:rgba(255,255,255,.03);border-radius:10px;gap:8px">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;font-weight:700">${icon} ${it.label || it.id}</div>
+        <div style="font-size:10px;color:var(--muted);margin-top:2px">
+          ${it.every_km ? `a cada ${it.every_km.toLocaleString('pt-BR')} km` : ''}
+          ${it.every_months ? ` · ${it.every_months} meses` : ''}
+          ${rem != null ? ` · próx em ${Math.abs(Math.round(rem)).toLocaleString('pt-BR')} km` : ''}
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">
+        <span style="font-size:11px;color:${statusColor};font-weight:700">${status}</span>
+        <div style="display:flex;gap:4px">
+          <button onclick="markMaintDone('${it.id}')" title="Marcar feito" style="background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.3);color:var(--green);font-size:11px;padding:3px 8px;border-radius:6px;font-family:inherit;font-weight:600;cursor:pointer">✓ feito</button>
+          <button onclick="deleteMaintItem('${it.id}')" title="Remover" style="background:rgba(248,113,113,.12);border:1px solid rgba(248,113,113,.3);color:var(--red);font-size:11px;padding:3px 8px;border-radius:6px;font-family:inherit;font-weight:600;cursor:pointer">🗑</button>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function _renderMaintHistory() {
+  const el = document.getElementById('maint-history');
+  if (!el) return;
+  const hist = (_maintLocal.history || []).slice().sort((a,b) => (b.ts||0) - (a.ts||0));
+  if (!hist.length) {
+    el.innerHTML = '<div style="font-size:11px;color:var(--muted);padding:8px;text-align:center">Nenhum registro ainda</div>';
+    return;
+  }
+  el.innerHTML = hist.slice(0, 10).map(h => {
+    const it = (_maintLocal.intervals || []).find(i => i.id === h.interval_id);
+    const d = new Date(h.ts);
+    return `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:rgba(255,255,255,.02);border-radius:8px;font-size:11px">
+      <div>
+        <div style="font-weight:700;color:#cbd5e1">${(it?.icon || '🔧')} ${(it?.label || h.interval_id)}</div>
+        <div style="color:var(--muted);font-size:10px;margin-top:1px">${d.toLocaleDateString('pt-BR')} · ${(h.odometer_km||0).toLocaleString('pt-BR')} km</div>
+      </div>
+      ${h.cost ? `<div style="color:var(--yellow);font-weight:700">R$ ${(+h.cost).toFixed(2)}</div>` : ''}
+    </div>`;
+  }).join('');
+}
+
+window.openMaintAdd = function() {
+  _maintEditId = null;
+  document.getElementById('maint-modal-ti').textContent = 'Adicionar manutenção';
+  document.getElementById('maint-label').value = '';
+  document.getElementById('maint-icon').value = '🔧';
+  document.getElementById('maint-every-km').value = '';
+  document.getElementById('maint-every-months').value = '';
+  document.getElementById('maint-modal').style.display = 'flex';
+};
+window.closeMaintModal = function() {
+  document.getElementById('maint-modal').style.display = 'none';
+};
+window.saveMaintItem = async function() {
+  const tk = localStorage.getItem('bridge_token');
+  if (!tk) return;
+  const body = {
+    label: document.getElementById('maint-label').value.trim(),
+    icon:  document.getElementById('maint-icon').value.trim() || '🔧',
+    every_km: parseInt(document.getElementById('maint-every-km').value || '0', 10) || null,
+    every_months: parseInt(document.getElementById('maint-every-months').value || '0', 10) || null,
+  };
+  if (!body.label) { alert('Informe o nome'); return; }
+  if (!body.every_km && !body.every_months) { alert('Informe km ou meses'); return; }
+  try {
+    await fetch('/api/maintenance/intervals', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + tk, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    closeMaintModal();
+    _loadMaint();
+  } catch (e) { alert('Erro ao salvar: ' + e.message); }
+};
+window.deleteMaintItem = async function(id) {
+  if (!confirm('Remover esse item de manutenção?')) return;
+  const tk = localStorage.getItem('bridge_token');
+  if (!tk) return;
+  try {
+    await fetch('/api/maintenance/intervals/' + encodeURIComponent(id), {
+      method: 'DELETE',
+      headers: { 'Authorization': 'Bearer ' + tk },
+    });
+    _loadMaint();
+  } catch (e) { alert('Erro: ' + e.message); }
+};
+window.markMaintDone = async function(id) {
+  const tk = localStorage.getItem('bridge_token');
+  if (!tk) return;
+  const odo = +(window.state?.odometer_km) || 0;
+  const cost = prompt('Custo dessa manutenção (R$)? (deixe vazio se não quer registrar)');
+  try {
+    await fetch('/api/maintenance/history', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + tk, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        interval_id: id,
+        odometer_km: odo,
+        ts: Date.now(),
+        cost: cost ? parseFloat(cost) || 0 : 0,
+      }),
+    });
+    _loadMaint();
+  } catch (e) { alert('Erro: ' + e.message); }
+};
+
+// Carrega quando abrir o sv-maint
+const _origOpenSub = window.openSub;
+window.openSub = function(name) {
+  if (typeof _origOpenSub === 'function') _origOpenSub(name);
+  else openSub(name);
+  if (name === 'maint') _loadMaint();
+};
+
   // Expõe handlers de onclick no window
-  Object.assign(window, { openSub: typeof openSub !== 'undefined' ? openSub : undefined, closeSub: typeof closeSub !== 'undefined' ? closeSub : undefined, saveSection: typeof saveSection !== 'undefined' ? saveSection : undefined, toggle2fa: typeof toggle2fa !== 'undefined' ? toggle2fa : undefined, confirmClearHistory: typeof confirmClearHistory !== 'undefined' ? confirmClearHistory : undefined });
+  Object.assign(window, { openSub: typeof openSub !== 'undefined' ? openSub : undefined, closeSub: typeof closeSub !== 'undefined' ? closeSub : undefined, saveSection: typeof saveSection !== 'undefined' ? saveSection : undefined, toggle2fa: typeof toggle2fa !== 'undefined' ? toggle2fa : undefined, confirmClearHistory: typeof confirmClearHistory !== 'undefined' ? confirmClearHistory : undefined, openMaintAdd: openMaintAdd, closeMaintModal: closeMaintModal, saveMaintItem: saveMaintItem, deleteMaintItem: deleteMaintItem, markMaintDone: markMaintDone });
   if (!window['initView_config']) window['initView_config'] = function() {};
 })();
 </script>
