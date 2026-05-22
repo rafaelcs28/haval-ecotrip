@@ -258,14 +258,14 @@
     <div class="field">
       <div class="lbl">SOC máximo na recarga</div>
       <div class="soc-chips" id="soc-chips">
-        <div class="soc-chip" data-pct="50">50%</div>
-        <div class="soc-chip" data-pct="60">60%</div>
-        <div class="soc-chip" data-pct="70">70%</div>
-        <div class="soc-chip" data-pct="80">80%</div>
-        <div class="soc-chip active" data-pct="90">90%</div>
-        <div class="soc-chip" data-pct="100">100%</div>
+        <div class="soc-chip" data-pct="50" onclick="setChargeLimit(50)">50%</div>
+        <div class="soc-chip" data-pct="60" onclick="setChargeLimit(60)">60%</div>
+        <div class="soc-chip" data-pct="70" onclick="setChargeLimit(70)">70%</div>
+        <div class="soc-chip" data-pct="80" onclick="setChargeLimit(80)">80%</div>
+        <div class="soc-chip" data-pct="90" onclick="setChargeLimit(90)">90%</div>
+        <div class="soc-chip" data-pct="100" onclick="setChargeLimit(100)">100%</div>
       </div>
-      <div class="hint">Envia comando ao carro pra parar de carregar nesse nível · atual: <strong id="soc-cur">90%</strong></div>
+      <div class="hint">Envia comando ao carro pra parar de carregar nesse nível · atual: <strong id="soc-cur">--</strong></div>
     </div>
   </div>
 </div>
@@ -482,6 +482,40 @@
   // Hooks por subview
   if (name === 'maint' && typeof _loadMaint === 'function') _loadMaint();
   if (name === 'vehicle' && typeof _loadVehicle === 'function') _loadVehicle();
+  if (name === 'charge' && typeof _loadChargeLimit === 'function') _loadChargeLimit();
+}
+
+function _loadChargeLimit() {
+  const cur = +(window.state?.charge_limit_pct) || 0;
+  document.getElementById('soc-cur').textContent = cur > 0 ? cur + '%' : '--';
+  document.querySelectorAll('#soc-chips .soc-chip').forEach(c => {
+    c.classList.toggle('active', +c.dataset.pct === cur);
+  });
+}
+
+async function setChargeLimit(pct) {
+  const tk = localStorage.getItem('bridge_token');
+  if (!tk) return;
+  // Otimista: marca chip ativo na hora
+  document.querySelectorAll('#soc-chips .soc-chip').forEach(c => {
+    c.classList.toggle('active', +c.dataset.pct === pct);
+  });
+  document.getElementById('soc-cur').textContent = pct + '% (enviando…)';
+  try {
+    const r = await fetch('/api/charge-limit', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + tk, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pct }),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'HTTP ' + r.status);
+    showToast('✓ Comando enviado: limite ' + pct + '%', 'ok');
+    // O carro vai confirmar via WS (state.charge_limit_pct atualiza)
+    setTimeout(_loadChargeLimit, 2000);
+  } catch (e) {
+    showToast('✗ ' + e.message, 'err');
+    _loadChargeLimit();  // restaura
+  }
 }
 
 async function _loadVehicle() {
@@ -724,7 +758,7 @@ window.markMaintDone = async function(id) {
 };
 
   // Expõe handlers de onclick no window
-  Object.assign(window, { openSub: typeof openSub !== 'undefined' ? openSub : undefined, closeSub: typeof closeSub !== 'undefined' ? closeSub : undefined, saveSection: typeof saveSection !== 'undefined' ? saveSection : undefined, toggle2fa: typeof toggle2fa !== 'undefined' ? toggle2fa : undefined, confirmClearHistory: typeof confirmClearHistory !== 'undefined' ? confirmClearHistory : undefined, openMaintAdd: openMaintAdd, closeMaintModal: closeMaintModal, saveMaintItem: saveMaintItem, deleteMaintItem: deleteMaintItem, markMaintDone: markMaintDone, saveVehicle: saveVehicle });
+  Object.assign(window, { openSub: typeof openSub !== 'undefined' ? openSub : undefined, closeSub: typeof closeSub !== 'undefined' ? closeSub : undefined, saveSection: typeof saveSection !== 'undefined' ? saveSection : undefined, toggle2fa: typeof toggle2fa !== 'undefined' ? toggle2fa : undefined, confirmClearHistory: typeof confirmClearHistory !== 'undefined' ? confirmClearHistory : undefined, openMaintAdd: openMaintAdd, closeMaintModal: closeMaintModal, saveMaintItem: saveMaintItem, deleteMaintItem: deleteMaintItem, markMaintDone: markMaintDone, saveVehicle: saveVehicle, setChargeLimit: setChargeLimit });
   if (!window['initView_config']) window['initView_config'] = function() {};
 })();
 </script>
