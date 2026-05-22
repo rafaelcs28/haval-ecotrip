@@ -410,6 +410,11 @@
   border-radius: 6px;
 }
 .ty.right { flex-direction: row-reverse; text-align: right; }
+
+/* Estados de cada porta (verde fechada, vermelho aberta) */
+.ty.door-open { background: rgba(248,113,113,.12); border: 1px solid rgba(248,113,113,.3); }
+.ty.door-open .psi { color: var(--red); }
+.ty.door-closed .psi { color: var(--green); }
 .ty .ic { font-size: 11px; opacity: 0.7; }
 .ty .data { display: flex; flex-direction: column; line-height: 1.05; }
 .ty .psi { font-size: 11px; font-weight: 700; color: var(--teal); font-variant-numeric: tabular-nums; }
@@ -532,10 +537,14 @@
     </div>
   </div>
 
-  <!-- Pneus em layout 2x2 (vista aérea sem PNG) -->
+  <!-- Pneus + Bateria 12V + Temps em um único card -->
   <div class="tyres-card">
     <div class="ti">
       <span>🛞 Pneus</span>
+      <span style="display:flex;gap:10px;font-size:9.5px;color:#cbd5e1;font-weight:600;letter-spacing:0">
+        <span>🔌 <span id="t-batt12">--</span></span>
+        <span>🌡 <span id="t-tempout">--</span> / <span id="t-tempin">--</span></span>
+      </span>
     </div>
     <span id="car-odo" style="display:none"></span>
     <div class="tyres-grid">
@@ -547,11 +556,19 @@
     </div>
   </div>
 
-  <!-- Tiny row: 12V + temps -->
-  <div class="tiny-row">
-    <div class="tiny-card"><span class="lbl">🔌 12V</span><span class="v" id="t-batt12">--</span></div>
-    <div class="tiny-card"><span class="lbl">🌡 Externa</span><span class="v" id="t-tempout">--</span></div>
-    <div class="tiny-card"><span class="lbl">🌡 Interna</span><span class="v" id="t-tempin">--</span></div>
+  <!-- Status das 4 portas (mesmo estilo do card de pneus) -->
+  <div class="tyres-card" id="doors-card">
+    <div class="ti">
+      <span>🚪 Portas</span>
+      <span style="font-size:9.5px;color:#cbd5e1;font-weight:600;letter-spacing:0" id="doors-summary">--</span>
+    </div>
+    <div class="tyres-grid">
+      <div class="ty" id="dr-fl"><span class="ic">🚪</span><div class="data"><span class="psi" id="dr-fl-v">--</span><span class="temp">DE</span></div></div>
+      <div class="car-spacer">▲</div>
+      <div class="ty right" id="dr-fr"><span class="ic">🚪</span><div class="data"><span class="psi" id="dr-fr-v">--</span><span class="temp">DD</span></div></div>
+      <div class="ty" id="dr-rl"><span class="ic">🚪</span><div class="data"><span class="psi" id="dr-rl-v">--</span><span class="temp">TE</span></div></div>
+      <div class="ty right" id="dr-rr"><span class="ic">🚪</span><div class="data"><span class="psi" id="dr-rr-v">--</span><span class="temp">TD</span></div></div>
+    </div>
   </div>
 
   </div>
@@ -1277,7 +1294,7 @@ function renderCarLayers(s, charging) {
   else if (charging) setChip('engine', 'Carregando', 'on');
   else             setChip('engine', 'Desligado', null);
 
-  // ── Portas (qualquer aberta → alert)
+  // ── Portas (qualquer aberta → alert no chip + popula card detalhado)
   const doorOpenList = ['fl', 'fr', 'rl', 'rr'].filter(side => s[`door_${side}`] === 'on');
   const trunkOpen = s.door_trunk === 'on';
   if (doorOpenList.length === 0 && !trunkOpen) {
@@ -1287,6 +1304,23 @@ function renderCarLayers(s, charging) {
     if (doorOpenList.length) labels.push(doorOpenList.length + (doorOpenList.length === 1 ? ' aberta' : ' abertas'));
     if (trunkOpen) labels.push('+ porta-malas');
     setChip('doors', labels.join(' '), 'alert');
+  }
+  // Card detalhado de portas (mesmo estilo dos pneus): 4 cards lat/long, status colorido
+  ['fl', 'fr', 'rl', 'rr'].forEach(side => {
+    const open = s[`door_${side}`] === 'on';
+    const el = document.getElementById('dr-' + side);
+    const v  = document.getElementById('dr-' + side + '-v');
+    if (el) {
+      el.classList.remove('door-open', 'door-closed');
+      el.classList.add(open ? 'door-open' : 'door-closed');
+    }
+    if (v) v.textContent = open ? 'Aberta' : 'OK';
+  });
+  const dSummary = document.getElementById('doors-summary');
+  if (dSummary) {
+    const n = doorOpenList.length + (trunkOpen ? 1 : 0);
+    if (n === 0) { dSummary.textContent = 'todas fechadas'; dSummary.style.color = 'var(--green)'; }
+    else { dSummary.textContent = n + (n === 1 ? ' aberta' : ' abertas'); dSummary.style.color = 'var(--red)'; }
   }
 
   // ── Vidros (qualquer aberto → alert; teto solar entra junto)
