@@ -355,14 +355,48 @@
   <div class="sub-body">
     <div class="field-group">
       <div class="group-ti">Senha</div>
-      <div class="field"><div class="lbl">Nova senha</div><input type="password" id="cfg-pw-new" placeholder="••••••••"></div>
-      <div class="field"><div class="lbl">Confirmar nova senha</div><input type="password" id="cfg-pw-confirm" placeholder="••••••••"></div>
-      <button class="btn primary" onclick="saveSection('password')">Alterar senha</button>
+      <div class="field"><div class="lbl">Nova senha</div><input type="password" id="cfg-pw-new" placeholder="••••••••" autocomplete="new-password"></div>
+      <div class="field"><div class="lbl">Confirmar nova senha</div><input type="password" id="cfg-pw-confirm" placeholder="••••••••" autocomplete="new-password"></div>
+      <button class="btn primary" onclick="changePassword()">Alterar senha</button>
+      <div class="hint" style="font-size:10px;color:var(--muted);margin-top:6px">Mínimo 4 caracteres. Você precisará logar novamente após trocar.</div>
     </div>
     <div class="field-group">
       <div class="group-ti">Autenticação em 2 etapas (TOTP)</div>
-      <div class="toggle-row"><div class="label">2FA<div class="sub">Código de 6 dígitos no login (Google Authenticator)</div></div><div class="toggle" id="tg-2fa" onclick="toggle2fa(this)"></div></div>
+      <div class="toggle-row"><div class="label">2FA<div class="sub">Código de 6 dígitos no login (Google Authenticator, Authy)</div></div><div class="toggle" id="tg-2fa" onclick="toggle2faNew()"></div></div>
+      <div id="cfg-2fa-backup-wrap" style="display:none;margin-top:8px">
+        <button class="btn secondary" onclick="show2faBackup()">Ver códigos de backup</button>
+      </div>
       <div class="hint" style="font-size:10px;color:var(--muted);padding:0 4px;margin-top:6px">Quando ativo, novos dispositivos precisam do código. Sessões logadas continuam funcionando.</div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal setup 2FA: QR code + código de verificação -->
+<div id="totp-modal" style="display:none;position:fixed;inset:0;z-index:80;background:rgba(0,0,0,.8);align-items:flex-end;justify-content:center;backdrop-filter:blur(8px)">
+  <div style="background:#1f1f1f;width:100%;max-width:480px;border-top-left-radius:18px;border-top-right-radius:18px;padding:18px 18px calc(env(safe-area-inset-bottom) + 18px);border-top:1px solid rgba(255,255,255,.08);max-height:85vh;overflow-y:auto">
+    <div style="width:42px;height:5px;background:rgba(255,255,255,.18);border-radius:3px;margin:-8px auto 14px"></div>
+    <div style="font-size:16px;font-weight:700;color:var(--text);margin-bottom:6px">📱 Ativar autenticação 2FA</div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:14px">Escaneie o QR no seu app autenticador (Google Authenticator, Authy, 1Password) e confirme o código de 6 dígitos.</div>
+    <div id="totp-qr" style="background:#fff;padding:12px;border-radius:10px;display:flex;justify-content:center;margin-bottom:14px"></div>
+    <div id="totp-secret" style="font-size:10px;color:var(--muted);text-align:center;font-family:monospace;margin-bottom:12px">…</div>
+    <input id="totp-code" inputmode="numeric" pattern="[0-9]*" maxlength="6" placeholder="Código de 6 dígitos" style="width:100%;padding:14px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:10px;color:var(--text);font-size:18px;text-align:center;letter-spacing:8px;font-family:inherit;font-weight:700">
+    <div style="display:flex;gap:10px;margin-top:14px">
+      <button onclick="closeTotpModal()" style="flex:1;padding:12px;background:rgba(255,255,255,.06);color:#cbd5e1;border:none;border-radius:10px;font-size:14px;font-weight:700;font-family:inherit">Cancelar</button>
+      <button onclick="activate2fa()" style="flex:1;padding:12px;background:var(--green);color:#000;border:none;border-radius:10px;font-size:14px;font-weight:700;font-family:inherit">Ativar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal de códigos de backup -->
+<div id="backup-modal" style="display:none;position:fixed;inset:0;z-index:80;background:rgba(0,0,0,.8);align-items:flex-end;justify-content:center;backdrop-filter:blur(8px)">
+  <div style="background:#1f1f1f;width:100%;max-width:480px;border-top-left-radius:18px;border-top-right-radius:18px;padding:18px 18px calc(env(safe-area-inset-bottom) + 18px);border-top:1px solid rgba(255,255,255,.08);max-height:85vh;overflow-y:auto">
+    <div style="width:42px;height:5px;background:rgba(255,255,255,.18);border-radius:3px;margin:-8px auto 14px"></div>
+    <div style="font-size:16px;font-weight:700;color:var(--text);margin-bottom:6px">🔑 Códigos de backup 2FA</div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:14px">Use estes códigos no lugar do TOTP se perder o aparelho. Cada código serve apenas uma vez. <strong style="color:var(--yellow)">Guarde em local seguro.</strong></div>
+    <div id="backup-codes-list" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-family:monospace;font-size:14px;margin-bottom:14px"></div>
+    <div style="display:flex;gap:10px">
+      <button onclick="regenBackupCodes()" style="flex:1;padding:12px;background:rgba(251,191,36,.12);border:1px solid rgba(251,191,36,.3);color:var(--yellow);border-radius:10px;font-size:13px;font-weight:700;font-family:inherit">Regenerar</button>
+      <button onclick="document.getElementById('backup-modal').style.display='none'" style="flex:1;padding:12px;background:var(--green);color:#000;border:none;border-radius:10px;font-size:14px;font-weight:700;font-family:inherit">Fechar</button>
     </div>
   </div>
 </div>
@@ -517,6 +551,142 @@
   if (name === 'advanced' && typeof _loadAdvanced === 'function') _loadAdvanced();
   if (name === 'places' && typeof _loadPlaces === 'function') _loadPlaces();
   if (name === 'notif' && typeof _loadNotifPrefs === 'function') _loadNotifPrefs();
+  if (name === 'security' && typeof _loadSecurity === 'function') _loadSecurity();
+}
+
+// ─── Conta & Segurança ───────────────────────────────────
+async function _loadSecurity() {
+  const tk = localStorage.getItem('bridge_token');
+  if (!tk) return;
+  try {
+    const r = await fetch('/api/auth/2fa/status', { headers: { 'Authorization': 'Bearer ' + tk } });
+    const d = await r.json();
+    const tg = document.getElementById('tg-2fa');
+    const wrap = document.getElementById('cfg-2fa-backup-wrap');
+    if (tg) tg.classList.toggle('on', !!d.enabled);
+    if (wrap) wrap.style.display = d.enabled ? 'block' : 'none';
+  } catch (_) {}
+}
+
+async function sha256hex(s) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function changePassword() {
+  const tk = localStorage.getItem('bridge_token');
+  if (!tk) return;
+  const pw = document.getElementById('cfg-pw-new').value;
+  const pw2 = document.getElementById('cfg-pw-confirm').value;
+  if (pw.length < 4) { showToast('✗ Senha muito curta (mín. 4 chars)', 'err'); return; }
+  if (pw !== pw2) { showToast('✗ Senhas não conferem', 'err'); return; }
+  if (!confirm('Trocar a senha do bridge? Você precisará logar novamente.')) return;
+  try {
+    const newHash = await sha256hex(pw);
+    const r = await fetch('/api/admin/change-password', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + tk, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ newHash }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'HTTP ' + r.status);
+    showToast('✓ Senha alterada. Faça login novamente.', 'ok');
+    document.getElementById('cfg-pw-new').value = '';
+    document.getElementById('cfg-pw-confirm').value = '';
+    // Limpa token local — o servidor já gerou novo hash, sessão antiga não vale mais
+    setTimeout(() => {
+      localStorage.removeItem('bridge_token');
+      window.location.reload();
+    }, 2000);
+  } catch (e) { showToast('✗ ' + e.message, 'err'); }
+}
+
+// 2FA: toggle abre modal de setup se OFF; pergunta confirmação se ON
+async function toggle2faNew() {
+  const tk = localStorage.getItem('bridge_token');
+  if (!tk) return;
+  const tg = document.getElementById('tg-2fa');
+  const isOn = tg.classList.contains('on');
+  if (isOn) {
+    if (!confirm('Desativar 2FA? O login voltará a ser só com senha.')) return;
+    try {
+      const r = await fetch('/api/auth/2fa/disable', {
+        method: 'POST', headers: { 'Authorization': 'Bearer ' + tk },
+      });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      tg.classList.remove('on');
+      document.getElementById('cfg-2fa-backup-wrap').style.display = 'none';
+      showToast('✓ 2FA desativado', 'ok');
+    } catch (e) { showToast('✗ ' + e.message, 'err'); }
+  } else {
+    // Setup: pega secret + QR
+    try {
+      const r = await fetch('/api/auth/2fa/setup', {
+        method: 'POST', headers: { 'Authorization': 'Bearer ' + tk },
+      });
+      const d = await r.json();
+      if (!r.ok || !d.qr_data_url) throw new Error(d.error || 'HTTP ' + r.status);
+      document.getElementById('totp-qr').innerHTML = `<img src="${d.qr_data_url}" style="width:200px;height:200px;display:block">`;
+      document.getElementById('totp-secret').textContent = 'Chave: ' + (d.secret || '');
+      document.getElementById('totp-code').value = '';
+      document.getElementById('totp-modal').style.display = 'flex';
+    } catch (e) { showToast('✗ ' + e.message, 'err'); }
+  }
+}
+
+function closeTotpModal() {
+  document.getElementById('totp-modal').style.display = 'none';
+}
+
+async function activate2fa() {
+  const tk = localStorage.getItem('bridge_token');
+  const code = document.getElementById('totp-code').value.trim();
+  if (!/^\d{6}$/.test(code)) { showToast('✗ Digite os 6 dígitos do app', 'err'); return; }
+  try {
+    const r = await fetch('/api/auth/2fa/activate', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + tk, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'HTTP ' + r.status);
+    document.getElementById('tg-2fa').classList.add('on');
+    document.getElementById('cfg-2fa-backup-wrap').style.display = 'block';
+    closeTotpModal();
+    showToast('✓ 2FA ativado', 'ok');
+    // Mostra códigos de backup logo após ativar
+    if (d.backup_codes) renderBackupCodes(d.backup_codes);
+  } catch (e) { showToast('✗ ' + e.message, 'err'); }
+}
+
+function renderBackupCodes(codes) {
+  const list = document.getElementById('backup-codes-list');
+  list.innerHTML = (codes || []).map(c => `<div style="padding:10px;background:rgba(255,255,255,.05);border-radius:8px;text-align:center;letter-spacing:1px;color:var(--green)">${c}</div>`).join('');
+  document.getElementById('backup-modal').style.display = 'flex';
+}
+
+async function show2faBackup() {
+  const tk = localStorage.getItem('bridge_token');
+  try {
+    const r = await fetch('/api/auth/2fa/backup-codes', { headers: { 'Authorization': 'Bearer ' + tk } });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'HTTP ' + r.status);
+    renderBackupCodes(d.codes || []);
+  } catch (e) { showToast('✗ ' + e.message, 'err'); }
+}
+
+async function regenBackupCodes() {
+  if (!confirm('Regenerar novos códigos? Os atuais ficarão inválidos.')) return;
+  const tk = localStorage.getItem('bridge_token');
+  try {
+    const r = await fetch('/api/auth/2fa/regenerate-backup', {
+      method: 'POST', headers: { 'Authorization': 'Bearer ' + tk },
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'HTTP ' + r.status);
+    renderBackupCodes(d.codes || []);
+    showToast('✓ Códigos regenerados', 'ok');
+  } catch (e) { showToast('✗ ' + e.message, 'err'); }
 }
 
 // ─── Notificações: prefs de push ───────────────────────
@@ -1042,7 +1212,7 @@ window.markMaintDone = async function(id) {
 };
 
   // Expõe handlers de onclick no window
-  Object.assign(window, { openSub: typeof openSub !== 'undefined' ? openSub : undefined, closeSub: typeof closeSub !== 'undefined' ? closeSub : undefined, saveSection: typeof saveSection !== 'undefined' ? saveSection : undefined, toggle2fa: typeof toggle2fa !== 'undefined' ? toggle2fa : undefined, confirmClearHistory: typeof confirmClearHistory !== 'undefined' ? confirmClearHistory : undefined, openMaintAdd: openMaintAdd, closeMaintModal: closeMaintModal, saveMaintItem: saveMaintItem, deleteMaintItem: deleteMaintItem, markMaintDone: markMaintDone, saveVehicle: saveVehicle, setChargeLimit: setChargeLimit, actionRefreshRadars: actionRefreshRadars, actionReanalyzeTrips: actionReanalyzeTrips, actionRestartBridge: actionRestartBridge, actionUpdateBridge: actionUpdateBridge, openPlaceAdd: openPlaceAdd, openPlaceEdit: openPlaceEdit, closePlaceModal: closePlaceModal, usePlaceGps: usePlaceGps, savePlace: savePlace, deletePlace: deletePlace, toggleNotif: toggleNotif });
+  Object.assign(window, { openSub: typeof openSub !== 'undefined' ? openSub : undefined, closeSub: typeof closeSub !== 'undefined' ? closeSub : undefined, saveSection: typeof saveSection !== 'undefined' ? saveSection : undefined, toggle2fa: typeof toggle2fa !== 'undefined' ? toggle2fa : undefined, confirmClearHistory: typeof confirmClearHistory !== 'undefined' ? confirmClearHistory : undefined, openMaintAdd: openMaintAdd, closeMaintModal: closeMaintModal, saveMaintItem: saveMaintItem, deleteMaintItem: deleteMaintItem, markMaintDone: markMaintDone, saveVehicle: saveVehicle, setChargeLimit: setChargeLimit, actionRefreshRadars: actionRefreshRadars, actionReanalyzeTrips: actionReanalyzeTrips, actionRestartBridge: actionRestartBridge, actionUpdateBridge: actionUpdateBridge, openPlaceAdd: openPlaceAdd, openPlaceEdit: openPlaceEdit, closePlaceModal: closePlaceModal, usePlaceGps: usePlaceGps, savePlace: savePlace, deletePlace: deletePlace, toggleNotif: toggleNotif, changePassword: changePassword, toggle2faNew: toggle2faNew, closeTotpModal: closeTotpModal, activate2fa: activate2fa, show2faBackup: show2faBackup, regenBackupCodes: regenBackupCodes });
   if (!window['initView_config']) window['initView_config'] = function() {};
 })();
 </script>
