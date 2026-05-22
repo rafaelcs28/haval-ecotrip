@@ -395,19 +395,19 @@
     <div class="field-group">
       <div class="group-ti">Radares e mapa</div>
       <div class="settings-group">
-        <div class="settings-item teal" onclick="showToast('⏳ Atualizando base de radares...')">
+        <div class="settings-item teal" onclick="actionRefreshRadars()">
           <div class="icon-box">📡</div>
-          <div class="info"><div class="label">Atualizar base de radares</div><div class="sub">Refresh OSM · última: 18/05</div></div>
+          <div class="info"><div class="label">Atualizar base de radares</div><div class="sub" id="adv-radars-sub">Refresh OSM</div></div>
           <span class="chevron">›</span>
         </div>
-        <div class="settings-item green" onclick="showToast('⏳ Reanalisando viagens...')">
+        <div class="settings-item green" onclick="actionReanalyzeTrips()">
           <div class="icon-box">⚙</div>
           <div class="info"><div class="label">Reanalisar deslocamentos</div><div class="sub">Recalcula alertas de multa</div></div>
           <span class="chevron">›</span>
         </div>
         <div class="settings-item yellow" onclick="openSub('places')">
           <div class="icon-box">📍</div>
-          <div class="info"><div class="label">Locais conhecidos</div><div class="sub">14 locais cadastrados</div></div>
+          <div class="info"><div class="label">Locais conhecidos</div><div class="sub" id="adv-places-sub">--</div></div>
           <span class="chevron">›</span>
         </div>
       </div>
@@ -415,14 +415,14 @@
     <div class="field-group">
       <div class="group-ti">Servidor (bridge)</div>
       <div class="settings-group">
-        <div class="settings-item muted" onclick="showToast('🔄 Reiniciando bridge...')">
+        <div class="settings-item muted" onclick="actionRestartBridge()">
           <div class="icon-box">🔄</div>
           <div class="info"><div class="label">Reiniciar bridge</div><div class="sub">pm2 restart</div></div>
           <span class="chevron">›</span>
         </div>
-        <div class="settings-item muted" onclick="showToast('⬆ git pull + restart')">
+        <div class="settings-item muted" onclick="actionUpdateBridge()">
           <div class="icon-box">⬆</div>
-          <div class="info"><div class="label">Atualizar do GitHub</div><div class="sub">git pull origin main</div></div>
+          <div class="info"><div class="label">Atualizar do GitHub</div><div class="sub">git pull + restart</div></div>
           <span class="chevron">›</span>
         </div>
       </div>
@@ -483,6 +483,96 @@
   if (name === 'maint' && typeof _loadMaint === 'function') _loadMaint();
   if (name === 'vehicle' && typeof _loadVehicle === 'function') _loadVehicle();
   if (name === 'charge' && typeof _loadChargeLimit === 'function') _loadChargeLimit();
+  if (name === 'advanced' && typeof _loadAdvanced === 'function') _loadAdvanced();
+}
+
+// ─── Avançado ─────────────────────────────────────────────
+async function _loadAdvanced() {
+  const tk = localStorage.getItem('bridge_token');
+  if (!tk) return;
+  // Status dos radares (última atualização)
+  try {
+    const r = await fetch('/api/radars/status', { headers: { 'Authorization': 'Bearer ' + tk } });
+    const d = await r.json();
+    const sub = document.getElementById('adv-radars-sub');
+    if (sub && d.last_update_ms) {
+      const dt = new Date(d.last_update_ms);
+      sub.textContent = `Refresh OSM · última: ${dt.toLocaleDateString('pt-BR')}`;
+    } else if (sub) {
+      sub.textContent = 'Refresh OSM · nunca atualizado';
+    }
+  } catch (_) {}
+  // Quantidade de locais conhecidos
+  try {
+    const r = await fetch('/api/known-places', { headers: { 'Authorization': 'Bearer ' + tk } });
+    const list = await r.json();
+    const sub = document.getElementById('adv-places-sub');
+    if (sub) sub.textContent = `${list.length} local${list.length !== 1 ? 'is' : ''} cadastrado${list.length !== 1 ? 's' : ''}`;
+  } catch (_) {}
+}
+
+async function actionRefreshRadars() {
+  if (!confirm('Atualizar base de radares do OpenStreetMap? Pode demorar 30-60s.')) return;
+  const tk = localStorage.getItem('bridge_token');
+  showToast('⏳ Atualizando radares…', 'ok');
+  try {
+    const r = await fetch('/api/radars/refresh', {
+      method: 'POST', headers: { 'Authorization': 'Bearer ' + tk },
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'HTTP ' + r.status);
+    showToast(`✓ ${d.count || 0} radares baixados`, 'ok');
+    _loadAdvanced();
+  } catch (e) { showToast('✗ ' + e.message, 'err'); }
+}
+
+async function actionReanalyzeTrips() {
+  if (!confirm('Reanalisar todos os deslocamentos contra a base de radares atual? Pode demorar.')) return;
+  const tk = localStorage.getItem('bridge_token');
+  showToast('⏳ Reanalisando viagens…', 'ok');
+  try {
+    const r = await fetch('/api/radars/reanalyze', {
+      method: 'POST', headers: { 'Authorization': 'Bearer ' + tk },
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'HTTP ' + r.status);
+    showToast(`✓ ${d.trips_updated || 0} viagens reanalisadas`, 'ok');
+  } catch (e) { showToast('✗ ' + e.message, 'err'); }
+}
+
+async function actionRestartBridge() {
+  if (!confirm('Reiniciar o bridge? A PWA vai perder conexão por 5-10s.')) return;
+  const tk = localStorage.getItem('bridge_token');
+  showToast('🔄 Reiniciando bridge…', 'ok');
+  try {
+    await fetch('/api/admin/restart', {
+      method: 'POST', headers: { 'Authorization': 'Bearer ' + tk },
+    });
+    // Não espera response — bridge mata o processo. Aguarda reconexão.
+    showToast('✓ Comando enviado. Aguardando reconexão…', 'ok');
+    setTimeout(() => window.location.reload(), 5000);
+  } catch (_) {
+    // Esperado: connection closed
+    showToast('✓ Bridge reiniciando…', 'ok');
+    setTimeout(() => window.location.reload(), 5000);
+  }
+}
+
+async function actionUpdateBridge() {
+  if (!confirm('Atualizar bridge do GitHub? Vai rodar git pull + npm install + restart. Demora 30-60s.')) return;
+  const tk = localStorage.getItem('bridge_token');
+  showToast('⏳ git pull + restart…', 'ok');
+  try {
+    const r = await fetch('/api/admin/update', {
+      method: 'POST', headers: { 'Authorization': 'Bearer ' + tk },
+    });
+    const d = await r.json().catch(() => ({}));
+    if (d.error) throw new Error(d.error);
+    showToast('✓ Update iniciado. Aguardando reconexão…', 'ok');
+    setTimeout(() => window.location.reload(), 8000);
+  } catch (e) {
+    showToast('✗ ' + e.message, 'err');
+  }
 }
 
 function _loadChargeLimit() {
@@ -758,7 +848,7 @@ window.markMaintDone = async function(id) {
 };
 
   // Expõe handlers de onclick no window
-  Object.assign(window, { openSub: typeof openSub !== 'undefined' ? openSub : undefined, closeSub: typeof closeSub !== 'undefined' ? closeSub : undefined, saveSection: typeof saveSection !== 'undefined' ? saveSection : undefined, toggle2fa: typeof toggle2fa !== 'undefined' ? toggle2fa : undefined, confirmClearHistory: typeof confirmClearHistory !== 'undefined' ? confirmClearHistory : undefined, openMaintAdd: openMaintAdd, closeMaintModal: closeMaintModal, saveMaintItem: saveMaintItem, deleteMaintItem: deleteMaintItem, markMaintDone: markMaintDone, saveVehicle: saveVehicle, setChargeLimit: setChargeLimit });
+  Object.assign(window, { openSub: typeof openSub !== 'undefined' ? openSub : undefined, closeSub: typeof closeSub !== 'undefined' ? closeSub : undefined, saveSection: typeof saveSection !== 'undefined' ? saveSection : undefined, toggle2fa: typeof toggle2fa !== 'undefined' ? toggle2fa : undefined, confirmClearHistory: typeof confirmClearHistory !== 'undefined' ? confirmClearHistory : undefined, openMaintAdd: openMaintAdd, closeMaintModal: closeMaintModal, saveMaintItem: saveMaintItem, deleteMaintItem: deleteMaintItem, markMaintDone: markMaintDone, saveVehicle: saveVehicle, setChargeLimit: setChargeLimit, actionRefreshRadars: actionRefreshRadars, actionReanalyzeTrips: actionReanalyzeTrips, actionRestartBridge: actionRestartBridge, actionUpdateBridge: actionUpdateBridge });
   if (!window['initView_config']) window['initView_config'] = function() {};
 })();
 </script>
