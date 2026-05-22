@@ -621,6 +621,7 @@
   <div class="timeline-panel" id="timeline-panel">
     <div class="tl-hdr">
       <span class="tl-ti">📊 Linha do tempo</span>
+      <span class="tl-current" id="tl-dist">--</span>
       <span class="tl-current" id="tl-time">--</span>
       <button class="tl-close" onclick="toggleTimeline()">×</button>
     </div>
@@ -33869,6 +33870,22 @@ function onScrub(pctStr) {
   const min = Math.floor(tsec / 60), sec = tsec % 60;
   document.getElementById('tl-time').textContent =
     `${String(min).padStart(2,'0')}:${String(sec).padStart(2,'0')} / ${fmtDuration(_tlTrip.timeSec)}`;
+  // Atualiza distância cumulativa (haversine sample-a-sample até idx atual)
+  let kmCum = 0;
+  for (let i = 1; i <= idx; i++) {
+    const a = samples[i - 1], b = samples[i];
+    if (a && b && a.lat && a.lng && b.lat && b.lng) {
+      const R = 6371, toRad = x => x * Math.PI / 180;
+      const dLat = toRad(b.lat - a.lat), dLng = toRad(b.lng - a.lng);
+      const h = Math.sin(dLat/2)**2 + Math.cos(toRad(a.lat))*Math.cos(toRad(b.lat))*Math.sin(dLng/2)**2;
+      kmCum += 2 * R * Math.asin(Math.sqrt(h));
+    }
+  }
+  const distEl = document.getElementById('tl-dist');
+  if (distEl) {
+    const total = +_tlTrip.distKm || 0;
+    distEl.textContent = `${kmCum.toFixed(1)}/${total.toFixed(1)}km`;
+  }
   // Move cursores dos charts
   ['tl-chart-spd', 'tl-chart-kw', 'tl-chart-soc'].forEach(id => {
     const cur = document.getElementById('cur-' + id);
