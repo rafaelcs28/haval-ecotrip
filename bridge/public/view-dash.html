@@ -805,7 +805,7 @@ function renderMaintCard(s) {
   let urgent = null, urgentKm = Infinity;
   for (const it of _maintData.intervals) {
     if (!it.every_km) continue;
-    const last = (_maintData.history || []).filter(h => h.interval_id === it.id).sort((a,b) => (b.odometer_km||0) - (a.odometer_km||0))[0];
+    const last = (_maintData.history || []).filter(h => h.type_id === it.id).sort((a,b) => (b.odometer_km||0) - (a.odometer_km||0))[0];
     const baseOdo = last ? last.odometer_km : 0;
     const nextAt = baseOdo + it.every_km;
     const remaining = nextAt - odo;

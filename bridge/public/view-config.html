@@ -570,7 +570,7 @@ function _renderMaintList() {
   }
   const odo = +(window.state?.odometer_km) || 0;
   el.innerHTML = intervals.map(it => {
-    const last = (_maintLocal.history || []).filter(h => h.interval_id === it.id).sort((a,b) => (b.odometer_km||0) - (a.odometer_km||0))[0];
+    const last = (_maintLocal.history || []).filter(h => h.type_id === it.id).sort((a,b) => (b.odometer_km||0) - (a.odometer_km||0))[0];
     const baseOdo = last ? last.odometer_km : 0;
     const nextAt = baseOdo + (it.every_km || 0);
     const rem = it.every_km ? nextAt - odo : null;
@@ -607,12 +607,15 @@ function _renderMaintHistory() {
     return;
   }
   el.innerHTML = hist.slice(0, 10).map(h => {
-    const it = (_maintLocal.intervals || []).find(i => i.id === h.interval_id);
-    const d = new Date(h.ts);
+    const it = (_maintLocal.intervals || []).find(i => i.id === h.type_id);
+    const ts = h.date_ms || h.ts;
+    const d = ts ? new Date(ts) : null;
+    const dateStr = d && !isNaN(d.getTime()) ? d.toLocaleDateString('pt-BR') : '—';
     return `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:rgba(255,255,255,.02);border-radius:8px;font-size:11px">
       <div>
-        <div style="font-weight:700;color:#cbd5e1">${(it?.icon || '🔧')} ${(it?.label || h.interval_id)}</div>
-        <div style="color:var(--muted);font-size:10px;margin-top:1px">${d.toLocaleDateString('pt-BR')} · ${(h.odometer_km||0).toLocaleString('pt-BR')} km</div>
+        <div style="font-weight:700;color:#cbd5e1">${(it?.icon || '🔧')} ${(it?.label || h.type_id || 'item removido')}</div>
+        <div style="color:var(--muted);font-size:10px;margin-top:1px">${dateStr} · ${(h.odometer_km||0).toLocaleString('pt-BR')} km</div>
+        ${h.notes ? `<div style="color:var(--muted);font-size:10px;margin-top:1px;font-style:italic">${h.notes}</div>` : ''}
       </div>
       ${h.cost ? `<div style="color:var(--yellow);font-weight:700">R$ ${(+h.cost).toFixed(2)}</div>` : ''}
     </div>`;
@@ -668,18 +671,22 @@ window.markMaintDone = async function(id) {
   const tk = localStorage.getItem('bridge_token');
   if (!tk) return;
   const odo = +(window.state?.odometer_km) || 0;
-  const cost = prompt('Custo dessa manutenção (R$)? (deixe vazio se não quer registrar)');
+  const notes = prompt('Notas dessa manutenção (opcional)') || '';
   try {
-    await fetch('/api/maintenance/history', {
+    const r = await fetch('/api/maintenance/history', {
       method: 'POST',
       headers: { 'Authorization': 'Bearer ' + tk, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        interval_id: id,
+        type_id: id,
         odometer_km: odo,
-        ts: Date.now(),
-        cost: cost ? parseFloat(cost) || 0 : 0,
+        date_ms: Date.now(),
+        notes,
       }),
     });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      throw new Error(err.error || ('HTTP ' + r.status));
+    }
     _loadMaint();
   } catch (e) { alert('Erro: ' + e.message); }
 };
