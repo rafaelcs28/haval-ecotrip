@@ -421,7 +421,7 @@
        Ícones inline SVG (sem emoji residencial pra portas/vidros) — desenho
        de carro visto de cima com a parte relevante destacada. -->
   <div class="status-row">
-    <div class="st-card" id="st-lock">
+    <div class="st-card clickable" id="st-lock" onclick="confirmAction('lock')">
       <div class="ic" id="st-lock-ic">🔒</div>
       <div class="v" id="st-lock-v">--</div>
     </div>
@@ -429,7 +429,7 @@
       <div class="ic">⚙</div>
       <div class="v" id="st-engine-v">--</div>
     </div>
-    <div class="st-card clickable" id="st-doors" onclick="confirmAction('lock')">
+    <div class="st-card" id="st-doors">
       <div class="ic">
         <!-- Carro visto de cima com portas laterais destacadas -->
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true">
@@ -460,8 +460,8 @@
   <div class="tyres-card">
     <div class="ti">
       <span>🛞 Pneus</span>
-      <span class="odo" id="car-odo">--</span>
     </div>
+    <span id="car-odo" style="display:none"></span>
     <div class="tyres-grid">
       <div class="ty"><span class="ic">🛞</span><div class="data"><span class="psi" id="ty-fl-psi">--</span><span class="temp"><span id="ty-fl-temp">--</span>° · DE</span></div></div>
       <div class="car-spacer">▲</div>
@@ -843,18 +843,14 @@ window.openMaintModal = function() {
   alert('Manutenção:\n\n' + (_maintData ? JSON.stringify(_maintData, null, 2).substring(0, 500) : 'Sem dados ainda'));
 };
 
-// ── Card "Outros dados": mostra um resumo (KM, 12V, autonomia)
+// ── Card "Outros dados": só odômetro no card; resto fica no modal
 function renderOtherCard(s) {
   const v = document.getElementById('hc-other-v');
   const sub = document.getElementById('hc-other-sub');
   if (!v || !sub) return;
   const odo = +s.odometer_km || 0;
   v.textContent = odo > 0 ? Math.round(odo).toLocaleString('pt-BR') + ' km' : '--';
-  const parts = [];
-  if (s.batt_12v_pct != null) parts.push('12V ' + Math.round(+s.batt_12v_pct) + '%');
-  if (+s.autonomy_ev_km > 0) parts.push(Math.round(+s.autonomy_ev_km) + ' km EV');
-  if (+s.autonomy_ice_km > 0) parts.push(Math.round(+s.autonomy_ice_km) + ' km comb.');
-  sub.textContent = parts.join(' · ') || 'Toque pra ver tudo';
+  sub.textContent = 'odômetro';
 }
 window.openOtherDataModal = function() {
   const s = window.state || {};
