@@ -134,6 +134,24 @@
 .hero-card .sub { font-size: 10px; color: var(--muted); font-weight: 500; margin-top: auto; line-height: 1.4; }
 .hero-card.green .v { color: var(--green); }
 .hero-card.red .v { color: var(--red); }
+
+/* Barra de progresso do card de manutenção */
+.maint-bar {
+  width: 100%; height: 14px;
+  background: rgba(255,255,255,.08);
+  border-radius: 7px; overflow: hidden;
+  margin: 8px 0 6px;
+  position: relative;
+}
+.maint-bar-fill {
+  position: absolute; left: 0; top: 0; bottom: 0;
+  background: var(--green);
+  border-radius: 7px;
+  transition: width .4s, background .3s;
+  width: 0%;
+}
+.maint-bar-fill.yellow { background: var(--yellow); }
+.maint-bar-fill.red    { background: var(--red); }
 .hero-card.red {
   background: linear-gradient(135deg, rgba(248,113,113,.18), var(--card));
   border: 1px solid rgba(248,113,113,.4);
@@ -406,8 +424,10 @@
       <div class="sub" id="hc-fuel-sub">--</div>
     </div>
     <div class="hero-card yellow" id="hc-maint-card" onclick="openMaintModal()">
-      <div class="lbl">🔧 Manutenção</div>
-      <div class="val-row"><span class="v" id="hc-maint-v" style="font-size:18px;line-height:1.15">--</span></div>
+      <div class="lbl">🔧 Manutenção<span id="hc-maint-label-side" style="margin-left:6px;font-size:9px;color:#cbd5e1;font-weight:600;text-transform:none;letter-spacing:0"></span></div>
+      <div class="maint-bar" id="hc-maint-bar">
+        <div class="maint-bar-fill" id="hc-maint-bar-fill"></div>
+      </div>
       <div class="sub" id="hc-maint-sub">Toque pra detalhes</div>
     </div>
     <div class="hero-card muted" id="hc-other-card" onclick="openOtherDataModal()">
@@ -799,41 +819,51 @@ async function _loadMaintData() {
   } catch (_) {}
 }
 function renderMaintCard(s) {
-  const v = document.getElementById('hc-maint-v');
+  const fill = document.getElementById('hc-maint-bar-fill');
   const sub = document.getElementById('hc-maint-sub');
-  if (!v || !sub) return;
+  const labelSide = document.getElementById('hc-maint-label-side');
+  if (!fill || !sub) return;
   if (!_maintData || !Array.isArray(_maintData.intervals) || !_maintData.intervals.length) {
-    v.textContent = 'Configurar';
+    if (labelSide) labelSide.textContent = '· configurar';
+    fill.style.width = '0%';
     sub.textContent = 'Toque pra configurar';
     return;
   }
-  // Encontra item mais urgente (menos km restantes)
+  // Encontra item mais urgente
   const odo = +s.odometer_km || 0;
-  let urgent = null, urgentKm = Infinity;
+  let urgent = null, urgentKm = Infinity, urgentBaseOdo = 0;
   for (const it of _maintData.intervals) {
     if (!it.every_km) continue;
     const last = (_maintData.history || []).filter(h => h.type_id === it.id).sort((a,b) => (b.odometer_km||0) - (a.odometer_km||0))[0];
     const baseOdo = last ? last.odometer_km : 0;
     const nextAt = baseOdo + it.every_km;
     const remaining = nextAt - odo;
-    if (remaining < urgentKm) { urgentKm = remaining; urgent = it; }
+    if (remaining < urgentKm) { urgentKm = remaining; urgent = it; urgentBaseOdo = baseOdo; }
   }
   if (urgent) {
-    v.textContent = urgent.label || 'Próxima revisão';
-    if (urgentKm > 0) sub.textContent = `em ${Math.round(urgentKm).toLocaleString('pt-BR')} km`;
+    if (labelSide) labelSide.textContent = '· ' + (urgent.label || '');
+    // Progresso: km percorridos desde o último serviço / intervalo total
+    const traveled = Math.max(0, odo - urgentBaseOdo);
+    const pct = Math.min(100, (traveled / urgent.every_km) * 100);
+    fill.style.width = pct.toFixed(1) + '%';
+    if (urgentKm > 0) sub.textContent = `em ${Math.round(urgentKm).toLocaleString('pt-BR')} km · ${Math.round(traveled).toLocaleString('pt-BR')}/${urgent.every_km.toLocaleString('pt-BR')} km`;
     else sub.textContent = `${Math.abs(Math.round(urgentKm)).toLocaleString('pt-BR')} km atrasado`;
-    // Cor do card conforme urgência:
-    // < 0: vermelho atrasado · < 1000: vermelho urgente · < 2000: amarelo próximo · >2000: verde
+    // Cor: vermelho urgente/atrasado · amarelo próximo · verde OK
     const card = document.getElementById('hc-maint-card');
-    if (card) {
-      card.classList.remove('green', 'yellow', 'red', 'muted');
-      if (urgentKm <= 0) card.classList.add('red');
-      else if (urgentKm < 1000) card.classList.add('red');
-      else if (urgentKm < 2000) card.classList.add('yellow');
-      else card.classList.add('green');
+    fill.classList.remove('yellow', 'red');
+    if (card) card.classList.remove('green', 'yellow', 'red', 'muted');
+    if (urgentKm <= 0 || urgentKm < 1000) {
+      fill.classList.add('red');
+      card?.classList.add('red');
+    } else if (urgentKm < 2000) {
+      fill.classList.add('yellow');
+      card?.classList.add('yellow');
+    } else {
+      card?.classList.add('green');
     }
   } else {
-    v.textContent = 'Tudo em dia';
+    if (labelSide) labelSide.textContent = '';
+    fill.style.width = '0%';
     sub.textContent = 'sem manutenções configuradas';
   }
 }
