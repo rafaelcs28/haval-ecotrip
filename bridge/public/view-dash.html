@@ -135,6 +135,52 @@
 .hero-card.green .v { color: var(--green); }
 .hero-card.red .v { color: var(--red); }
 
+/* Ícone de bateria (horizontal, com nipple) — preenchimento por cor */
+.lvl-batt {
+  width: 32px; height: 16px;
+  border: 2px solid rgba(255,255,255,.5);
+  border-radius: 3px;
+  position: relative; flex-shrink: 0;
+  overflow: hidden;
+}
+.lvl-batt::after {
+  content: ''; position: absolute;
+  right: -5px; top: 4px; width: 3px; height: 6px;
+  background: rgba(255,255,255,.5);
+  border-radius: 0 2px 2px 0;
+}
+.lvl-batt-fill {
+  position: absolute; left: 0; top: 0; bottom: 0;
+  background: var(--green);
+  transition: width .4s, background .3s;
+  width: 0%;
+}
+.lvl-batt-fill.yellow { background: var(--yellow); }
+.lvl-batt-fill.red    { background: var(--red); }
+
+/* Ícone de tanque de combustível (forma de bomba simples) */
+.lvl-fuel {
+  width: 22px; height: 28px;
+  border: 2px solid rgba(255,255,255,.5);
+  border-radius: 3px 3px 4px 4px;
+  position: relative; flex-shrink: 0;
+  overflow: hidden;
+}
+.lvl-fuel::before {
+  content: ''; position: absolute;
+  top: -3px; left: 3px; right: 3px; height: 2px;
+  background: rgba(255,255,255,.5);
+  border-radius: 1px;
+}
+.lvl-fuel-fill {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  background: var(--orange);
+  transition: height .4s, background .3s;
+  height: 0%;
+}
+.lvl-fuel-fill.yellow { background: var(--yellow); }
+.lvl-fuel-fill.red    { background: var(--red); }
+
 /* Barra de progresso do card de manutenção */
 .maint-bar {
   width: 100%; height: 14px;
@@ -411,7 +457,12 @@
   <div class="hero-grid">
     <div class="hero-card green" id="hc-soc-card">
       <div class="lbl">🔋 Bateria<span id="hc-soc-tag"></span></div>
-      <div class="val-row"><span class="v" id="hc-soc">--</span><span class="u">%</span></div>
+      <div class="val-row" style="gap:10px">
+        <div class="lvl-batt">
+          <div class="lvl-batt-fill" id="hc-soc-icon-fill"></div>
+        </div>
+        <span class="v" id="hc-soc">--</span><span class="u">%</span>
+      </div>
       <div class="sub" id="hc-soc-sub">--</div>
       <div class="charge-bar" id="hc-soc-bar" style="display:none">
         <div class="fill" id="hc-soc-bar-fill"></div>
@@ -420,7 +471,12 @@
     </div>
     <div class="hero-card orange">
       <div class="lbl">⛽ Combustível</div>
-      <div class="val-row"><span class="v" id="hc-fuel">--</span><span class="u">%</span></div>
+      <div class="val-row" style="gap:10px">
+        <div class="lvl-fuel">
+          <div class="lvl-fuel-fill" id="hc-fuel-icon-fill"></div>
+        </div>
+        <span class="v" id="hc-fuel">--</span><span class="u">%</span>
+      </div>
       <div class="sub" id="hc-fuel-sub">--</div>
     </div>
     <div class="hero-card yellow" id="hc-maint-card" onclick="openMaintModal()">
@@ -1107,6 +1163,14 @@ function render(s, kpData) {
   // ── SOC (card especial quando carregando)
   const soc = s.soc_pct != null ? +s.soc_pct : null;
   document.getElementById('hc-soc').textContent = soc != null ? Math.round(soc) : '--';
+  // Ícone de bateria: preenchimento + cor por nível
+  const socFill = document.getElementById('hc-soc-icon-fill');
+  if (socFill && soc != null) {
+    socFill.style.width = Math.min(100, Math.max(0, soc)) + '%';
+    socFill.classList.remove('yellow', 'red');
+    if (soc < 20) socFill.classList.add('red');
+    else if (soc < 40) socFill.classList.add('yellow');
+  }
   const socCard = document.getElementById('hc-soc-card');
   const socTag  = document.getElementById('hc-soc-tag');
   const socBar  = document.getElementById('hc-soc-bar');
@@ -1139,6 +1203,14 @@ function render(s, kpData) {
   let fuelPct = +s.fuel_pct || +s.fuel_level || 0;
   if (!fuelPct && +s.fuel_l > 0) fuelPct = (s.fuel_l / FUEL_CAPACITY_L) * 100;
   document.getElementById('hc-fuel').textContent = fuelPct > 0 ? Math.round(fuelPct) : '--';
+  // Ícone de tanque: preenchimento de baixo pra cima + cor por nível
+  const fuelFill = document.getElementById('hc-fuel-icon-fill');
+  if (fuelFill) {
+    fuelFill.style.height = Math.min(100, Math.max(0, fuelPct)) + '%';
+    fuelFill.classList.remove('yellow', 'red');
+    if (fuelPct > 0 && fuelPct < 15) fuelFill.classList.add('red');
+    else if (fuelPct > 0 && fuelPct < 30) fuelFill.classList.add('yellow');
+  }
   const iceKm = s.autonomy_ice_km != null ? Math.round(+s.autonomy_ice_km) : null;
   const fuelL = +s.fuel_l > 0 ? `${s.fuel_l.toFixed(1)}L` : '';
   const subParts = [fuelL, iceKm != null ? `${iceKm} km à combustão` : ''].filter(Boolean);
