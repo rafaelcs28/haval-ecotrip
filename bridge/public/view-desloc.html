@@ -33674,12 +33674,15 @@ async function openMapFull(id) {
   // (samples de uma viagem pode ter 1000+ pontos, ~50KB cada; estoura localStorage).
   if (!t.route || !t.route.length) {
     const tripKey = 'telemetry_' + (t.tripId || t.id);
-    // 1. Cache instantâneo
+    // 1. Cache instantâneo (normaliza samples antigos sem campo kw)
     if (window.idbGet) {
       const cached = await window.idbGet(tripKey);
       if (cached && Array.isArray(cached.samples) && cached.samples.length) {
-        t.samples = cached.samples;
-        t.route = cached.route || cached.samples
+        t.samples = cached.samples.map(s => ({
+          t: s.t, lat: s.lat, lng: s.lng, spd: s.spd, soc: s.soc, rpm: s.rpm,
+          kw: (s.kw != null ? s.kw : (s.pwr != null ? s.pwr : (s.evKw != null ? s.evKw : 0))),
+        }));
+        t.route = cached.route || t.samples
           .filter(s => s && s.lat && s.lng).map(s => [s.lat, s.lng]);
       }
     }
@@ -33687,8 +33690,22 @@ async function openMapFull(id) {
     if (!t.route || !t.route.length) {
       const tk = localStorage.getItem('bridge_token');
       if (tk) {
+        // Toast inline (esconde com style.display, não confia no classList — caso outro
+        // showToast no meio do fluxo re-adicione a classe .show por causa de race)
         const toastEl = document.getElementById('toast');
-        if (toastEl) { toastEl.textContent = 'Carregando trajeto…'; toastEl.classList.add('show'); }
+        const _hideToast = () => {
+          if (!toastEl) return;
+          clearTimeout(showToast._t);
+          toastEl.classList.remove('show');
+          toastEl.style.display = 'none';
+        };
+        if (toastEl) {
+          toastEl.textContent = 'Carregando trajeto…';
+          toastEl.style.display = '';
+          toastEl.classList.add('show');
+        }
+        // Fallback de segurança: se algo pendurar, esconde em 10s no máximo
+        const safetyTimer = setTimeout(_hideToast, 10000);
         try {
           const r = await fetch('/api/telemetry/' + encodeURIComponent(t.tripId || t.id), {
             headers: { 'Authorization': 'Bearer ' + tk }
@@ -33696,17 +33713,20 @@ async function openMapFull(id) {
           const data = await r.json();
           const samples = data.samples || data || [];
           if (Array.isArray(samples) && samples.length) {
-            // API: {spd, evKw, pwr, soc, rpm, t, lat, lng} → snapshot espera "kw"
             t.samples = samples.map(s => ({
               t: s.t, lat: s.lat, lng: s.lng, spd: s.spd, soc: s.soc, rpm: s.rpm,
               kw: (s.pwr != null ? s.pwr : (s.evKw != null ? s.evKw : 0)),
             }));
             t.route = t.samples.filter(s => s && s.lat && s.lng).map(s => [s.lat, s.lng]);
-            // Salva no IndexedDB pra próxima abertura ser instantânea
             if (window.idbSet) window.idbSet(tripKey, { samples: t.samples, route: t.route });
           }
         } catch (e) { console.warn('Telemetria falhou:', e); }
-        if (toastEl) { clearTimeout(showToast._t); toastEl.classList.remove('show'); }
+        finally {
+          clearTimeout(safetyTimer);
+          _hideToast();
+          // Restaura display: '' depois pra próximo showToast funcionar
+          setTimeout(() => { if (toastEl) toastEl.style.display = ''; }, 100);
+        }
       }
     }
   }
@@ -33831,13 +33851,18 @@ function onScrub(pctStr) {
   const samples = _tlTrip.samples || [];
   if (!samples.length) return;
   const idx = Math.min(samples.length - 1, Math.round((pct / 100) * (samples.length - 1)));
-  const s = samples[idx];
-  // Atualiza valores
-  document.getElementById('tl-spd-val').textContent = s.spd;
-  document.getElementById('tl-kw-val').textContent  = s.kw.toFixed(1);
-  document.getElementById('tl-soc-val').textContent = s.soc;
+  const s = samples[idx] || {};
+  // Aceita campos antigos (pwr, evKw) ou novo (kw). Fallback '--' se nada.
+  const spd = Number.isFinite(+s.spd) ? Math.round(+s.spd) : '--';
+  const kwRaw = s.kw != null ? +s.kw : (s.pwr != null ? +s.pwr : (s.evKw != null ? +s.evKw : NaN));
+  const kw  = Number.isFinite(kwRaw) ? kwRaw.toFixed(1) : '--';
+  const soc = Number.isFinite(+s.soc) ? Math.round(+s.soc) : '--';
+  document.getElementById('tl-spd-val').textContent = spd;
+  document.getElementById('tl-kw-val').textContent  = kw;
+  document.getElementById('tl-soc-val').textContent = soc;
   // Atualiza tempo
-  const min = Math.floor(s.t / 60), sec = s.t % 60;
+  const tsec = Number.isFinite(+s.t) ? +s.t : 0;
+  const min = Math.floor(tsec / 60), sec = tsec % 60;
   document.getElementById('tl-time').textContent =
     `${String(min).padStart(2,'0')}:${String(sec).padStart(2,'0')} / ${fmtDuration(_tlTrip.timeSec)}`;
   // Move cursores dos charts
