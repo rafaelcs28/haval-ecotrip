@@ -133,6 +133,13 @@
 .hero-card .u { font-size: 13px; color: var(--muted); font-weight: 500; }
 .hero-card .sub { font-size: 10px; color: var(--muted); font-weight: 500; margin-top: auto; line-height: 1.4; }
 .hero-card.green .v { color: var(--green); }
+.hero-card.red .v { color: var(--red); }
+.hero-card.red {
+  background: linear-gradient(135deg, rgba(248,113,113,.18), var(--card));
+  border: 1px solid rgba(248,113,113,.4);
+  animation: maintPulse 1.8s ease-in-out infinite;
+}
+@keyframes maintPulse { 0%,100% { box-shadow: 0 0 0 rgba(248,113,113,.3); } 50% { box-shadow: 0 0 16px rgba(248,113,113,.35); } }
 .hero-card.orange .v { color: var(--orange); }
 .hero-card.teal .v { color: var(--teal); }
 .hero-card.muted .v { color: #cbd5e1; }
@@ -815,6 +822,16 @@ function renderMaintCard(s) {
     v.textContent = urgent.label || 'Próxima revisão';
     if (urgentKm > 0) sub.textContent = `em ${Math.round(urgentKm).toLocaleString('pt-BR')} km`;
     else sub.textContent = `${Math.abs(Math.round(urgentKm)).toLocaleString('pt-BR')} km atrasado`;
+    // Cor do card conforme urgência:
+    // < 0: vermelho atrasado · < 1000: vermelho urgente · < 2000: amarelo próximo · >2000: verde
+    const card = document.getElementById('hc-maint-card');
+    if (card) {
+      card.classList.remove('green', 'yellow', 'red', 'muted');
+      if (urgentKm <= 0) card.classList.add('red');
+      else if (urgentKm < 1000) card.classList.add('red');
+      else if (urgentKm < 2000) card.classList.add('yellow');
+      else card.classList.add('green');
+    }
   } else {
     v.textContent = 'Tudo em dia';
     sub.textContent = 'sem manutenções configuradas';

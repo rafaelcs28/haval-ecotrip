@@ -576,7 +576,8 @@ function _renderMaintList() {
     const rem = it.every_km ? nextAt - odo : null;
     let status = 'OK', statusColor = 'var(--green)';
     if (rem != null && rem <= 0) { status = '⚠ atrasada'; statusColor = 'var(--red)'; }
-    else if (rem != null && rem < 1000) { status = '⚠ próxima'; statusColor = 'var(--yellow)'; }
+    else if (rem != null && rem < 1000) { status = '⚠ urgente'; statusColor = 'var(--red)'; }
+    else if (rem != null && rem < 2000) { status = '⚠ próxima'; statusColor = 'var(--yellow)'; }
     const icon = it.icon || '🔧';
     return `<div style="display:flex;justify-content:space-between;align-items:center;padding:10px;background:rgba(255,255,255,.03);border-radius:10px;gap:8px">
       <div style="flex:1;min-width:0">
