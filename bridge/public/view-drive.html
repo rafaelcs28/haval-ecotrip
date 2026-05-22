@@ -59,27 +59,27 @@
 .speed-hero {
   background: rgba(31,31,31,.85);
   backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
-  border-radius: 16px;
-  padding: 16px 18px;
+  border-radius: 14px;
+  padding: 10px 14px;
   margin-bottom: 6px;
   border: 1px solid rgba(255,255,255,.04);
-  display: grid; grid-template-columns: 1fr auto; gap: 14px;
+  display: grid; grid-template-columns: 1fr auto; gap: 12px;
   align-items: center;
 }
 .speed-hero .speed-block { display: flex; flex-direction: column; gap: 2px; line-height: 1; }
 .speed-hero .speed-v {
-  font-size: 64px; font-weight: 200;
-  letter-spacing: -3px;
+  font-size: 52px; font-weight: 200;
+  letter-spacing: -2px;
   color: var(--text);
   font-variant-numeric: tabular-nums;
 }
-.speed-hero .speed-u { font-size: 11px; color: var(--muted); font-weight: 600; letter-spacing: 1.5px; text-transform: uppercase; margin-top: 4px; }
+.speed-hero .speed-u { font-size: 10px; color: var(--muted); font-weight: 600; letter-spacing: 1.5px; text-transform: uppercase; margin-top: 3px; }
 .speed-hero .power-block {
-  display: flex; flex-direction: column; align-items: flex-end; gap: 4px;
-  min-width: 100px;
+  display: flex; flex-direction: column; align-items: flex-end; gap: 3px;
+  min-width: 90px;
 }
 .speed-hero .power-v {
-  font-size: 26px; font-weight: 700;
+  font-size: 22px; font-weight: 700;
   font-variant-numeric: tabular-nums;
   line-height: 1;
 }
@@ -132,6 +132,39 @@
 .trip-card.green .v { color: var(--green); }
 .trip-card.teal  .v { color: var(--teal); }
 .trip-card.yellow .v { color: var(--yellow); }
+
+/* Cards "split": 2 métricas dentro de um único card */
+.trip-card.split { gap: 6px; padding: 8px 10px; min-height: 0; }
+.trip-card.split .split-row {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 8px;
+}
+.trip-card.split .split-row .lbl { font-size: 9px; }
+.trip-card .v.sm {
+  font-size: 16px; font-weight: 700; line-height: 1;
+}
+.trip-card .v.sm .u { font-size: 10px; }
+
+/* Card energia/combustível com indicador lateral de consumo eq */
+.trip-card.with-side {
+  display: grid; grid-template-columns: 1fr auto; gap: 8px;
+  align-items: center;
+}
+.trip-card.with-side .split-left { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.trip-card.with-side .split-side {
+  display: flex; flex-direction: column; align-items: flex-end;
+  border-left: 1px solid rgba(255,255,255,.08);
+  padding-left: 8px;
+  min-width: 56px;
+}
+.trip-card.with-side .side-v {
+  font-size: 18px; font-weight: 700; line-height: 1;
+  color: var(--green); font-variant-numeric: tabular-nums;
+}
+.trip-card.with-side .side-u {
+  font-size: 8px; color: var(--muted); font-weight: 600;
+  letter-spacing: 0.5px; margin-top: 3px;
+}
 
 /* Tiny row: 3 ou 4 cards conforme houver RPM (motor térmico ligado) */
 .tiny-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; margin-bottom: 6px; }
@@ -200,25 +233,33 @@
       </div>
     </div>
 
-    <!-- Grid 2x2: stats da viagem em andamento -->
-    <div class="trip-grid">
-      <div class="trip-card teal">
-        <div class="lbl">⏱ Tempo</div>
-        <div class="v" id="trip-time">--</div>
+    <!-- Grid 1x2 compacto: Tempo+Distância · Energia+Combustível -->
+    <div class="trip-grid two-col">
+      <div class="trip-card teal split">
+        <div class="split-row">
+          <div class="lbl">⏱ Tempo</div>
+          <div class="v sm" id="trip-time">--</div>
+        </div>
+        <div class="split-row">
+          <div class="lbl">🛣 Dist.</div>
+          <div class="v sm"><span id="trip-dist">--</span> <span class="u">km</span></div>
+        </div>
       </div>
-      <div class="trip-card">
-        <div class="lbl">🛣 Distância</div>
-        <div class="v"><span id="trip-dist">--</span> <span class="u">km</span></div>
-      </div>
-      <div class="trip-card green">
-        <div class="lbl">⚡ Energia</div>
-        <div class="v"><span id="trip-kwh">--</span> <span class="u">kWh</span></div>
-        <div class="sub" id="trip-kwh-sub">--</div>
-      </div>
-      <div class="trip-card yellow">
-        <div class="lbl">💰 Custo</div>
-        <div class="v">R$ <span id="trip-cost">--</span></div>
-        <div class="sub" id="trip-cost-sub">--</div>
+      <div class="trip-card green split with-side">
+        <div class="split-left">
+          <div class="split-row">
+            <div class="lbl">⚡ Energia</div>
+            <div class="v sm"><span id="trip-kwh">--</span> <span class="u">kWh</span></div>
+          </div>
+          <div class="split-row">
+            <div class="lbl">⛽ Comb.</div>
+            <div class="v sm"><span id="trip-fuel">--</span> <span class="u">L</span></div>
+          </div>
+        </div>
+        <div class="split-side">
+          <div class="side-v" id="trip-consumo-eq">--</div>
+          <div class="side-u">km/L eq</div>
+        </div>
       </div>
     </div>
 
@@ -2736,12 +2777,14 @@ function render(s, kpData) {
     document.getElementById('trip-time').textContent = fmtDuration(+ct.timeSec || 0);
     document.getElementById('trip-dist').textContent = fmt1(+ct.distKm || 0);
     document.getElementById('trip-kwh').textContent  = fmt2(+ct.netKwh || 0);
-    const regenStr = +ct.regenKwh > 0.01 ? ('regen ' + fmt2(ct.regenKwh) + ' kWh') : 'sem regen';
-    document.getElementById('trip-kwh-sub').textContent = regenStr;
-    const cost = ((+ct.netKwh || 0) * (+s.price_kwh || 0)) + ((+ct.fuelL || 0) * (+s.price_gas_per_l || 0));
-    document.getElementById('trip-cost').textContent = fmt2(cost);
-    const avgKm = +ct.avgSpeedKmh > 0 ? Math.round(ct.avgSpeedKmh) + ' km/h méd' : '';
-    document.getElementById('trip-cost-sub').textContent = avgKm;
+    document.getElementById('trip-fuel').textContent = fmt2(+ct.fuelL || 0);
+    // Consumo equivalente km/L: converte kWh em L de gasolina (~8.9 kWh/L)
+    // e divide a distância pela soma equivalente. Mostra "--" se distância
+    // ínfima ou nenhuma energia consumida.
+    const distKm = +ct.distKm || 0;
+    const eqL = (+ct.netKwh || 0) / 8.9 + (+ct.fuelL || 0);
+    const consumoEq = (distKm > 0.1 && eqL > 0.01) ? (distKm / eqL).toFixed(1) : '--';
+    document.getElementById('trip-consumo-eq').textContent = consumoEq;
   }
 
   // ── Tiny row: SOC · Autonomia EV · Temp (int + ext) · RPM (condicional)
