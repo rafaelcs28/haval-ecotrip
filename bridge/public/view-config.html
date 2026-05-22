@@ -492,6 +492,16 @@
         </div>
       </div>
     </div>
+    <div class="field-group">
+      <div class="group-ti">Debug</div>
+      <div class="settings-group">
+        <div class="settings-item teal" onclick="openSub('diag')">
+          <div class="icon-box">🔬</div>
+          <div class="info"><div class="label">Modo diagnóstico</div><div class="sub" id="adv-diag-sub">desligado</div></div>
+          <span class="chevron">›</span>
+        </div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -528,6 +538,40 @@
     <div style="display:flex;gap:10px;margin-top:16px">
       <button onclick="closePlaceModal()" style="flex:1;padding:12px;background:rgba(255,255,255,.06);color:#cbd5e1;border:none;border-radius:10px;font-size:14px;font-weight:700;font-family:inherit">Cancelar</button>
       <button onclick="savePlace()" style="flex:1;padding:12px;background:var(--green);color:#000;border:none;border-radius:10px;font-size:14px;font-weight:700;font-family:inherit">Salvar</button>
+    </div>
+  </div>
+</div>
+
+<div class="subview" id="sv-diag">
+  <div class="sub-head">
+    <button class="sub-back" onclick="openSub('advanced')">←</button>
+    <div class="sub-title">🔬 Diagnóstico</div>
+  </div>
+  <div class="sub-body">
+    <div class="field-group">
+      <div class="group-ti">Controle remoto</div>
+      <div class="toggle-row" onclick="toggleDiag()"><div class="label">Coleta ativa<div class="sub">APK publica todas as constantes em loop</div></div><div class="toggle" id="tg-diag"></div></div>
+      <div class="field">
+        <div class="lbl">Intervalo entre publicações (segundos)</div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input type="number" id="cfg-diag-interval" min="1" max="300" step="1" value="5" style="flex:1">
+          <button class="btn primary" style="width:auto;padding:10px 16px" onclick="saveDiagInterval()">Aplicar</button>
+        </div>
+        <div class="hint">De 1 a 300s. Vai pro carro via MQTT retained — sobrevive a reconexão.</div>
+      </div>
+    </div>
+    <div class="field-group">
+      <div class="group-ti"><span id="diag-keys-count">0</span> chaves recebidas · <span id="diag-last-ts">—</span></div>
+      <div id="diag-keys-list" style="display:flex;flex-direction:column;gap:4px;max-height:60vh;overflow-y:auto">
+        <div style="text-align:center;color:var(--muted);font-size:12px;padding:24px">Aguardando dados…<br><span style="font-size:10px">Ative a coleta acima pra começar a receber</span></div>
+      </div>
+    </div>
+    <div class="field-group">
+      <div class="group-ti">Ações</div>
+      <div style="display:flex;gap:8px">
+        <button class="btn secondary" style="flex:1" onclick="exportDiag()">⬇ Exportar JSON</button>
+        <button class="btn danger" style="flex:1" onclick="clearDiag()">🗑 Limpar log</button>
+      </div>
     </div>
   </div>
 </div>
@@ -574,7 +618,136 @@
   if (name === 'notif' && typeof _loadNotifPrefs === 'function') _loadNotifPrefs();
   if (name === 'security' && typeof _loadSecurity === 'function') _loadSecurity();
   if (name === 'about' && typeof _loadAbout === 'function') _loadAbout();
+  if (name === 'diag' && typeof _loadDiag === 'function') _loadDiag();
 }
+
+// ─── Diagnóstico (debug): captura tempo real via WS ────────────────────
+let _diagValues = {};
+let _diagRenderQueued = false;
+async function _loadDiag() {
+  const tk = localStorage.getItem('bridge_token');
+  if (!tk) return;
+  try {
+    const r = await fetch('/api/diag/data', { headers: { 'Authorization': 'Bearer ' + tk } });
+    const d = await r.json();
+    document.getElementById('tg-diag').classList.toggle('on', !!d.enabled);
+    document.getElementById('cfg-diag-interval').value = d.interval_sec || 5;
+    _diagValues = d.values || {};
+    _scheduleDiagRender();
+    _updateDiagAdvSub(d.enabled, d.interval_sec);
+  } catch (_) {}
+}
+function _updateDiagAdvSub(enabled, sec) {
+  const el = document.getElementById('adv-diag-sub');
+  if (!el) return;
+  el.textContent = enabled ? `ativo · ${sec}s` : 'desligado';
+}
+function _scheduleDiagRender() {
+  if (_diagRenderQueued) return;
+  _diagRenderQueued = true;
+  requestAnimationFrame(() => {
+    _diagRenderQueued = false;
+    _renderDiagList();
+  });
+}
+function _renderDiagList() {
+  const list = document.getElementById('diag-keys-list');
+  if (!list) return;
+  const keys = Object.keys(_diagValues).sort();
+  const cnt = document.getElementById('diag-keys-count');
+  if (cnt) cnt.textContent = keys.length;
+  const lastTs = Object.values(_diagValues).reduce((m, e) => Math.max(m, +e.ts || 0), 0);
+  const lts = document.getElementById('diag-last-ts');
+  if (lts) lts.textContent = lastTs ? `última: ${new Date(lastTs).toLocaleTimeString('pt-BR')}` : '—';
+  if (!keys.length) {
+    list.innerHTML = '<div style="text-align:center;color:var(--muted);font-size:12px;padding:24px">Aguardando dados…<br><span style="font-size:10px">Ative a coleta acima pra começar a receber</span></div>';
+    return;
+  }
+  const now = Date.now();
+  list.innerHTML = keys.map(k => {
+    const e = _diagValues[k];
+    const age = Math.floor((now - (+e.ts || 0)) / 1000);
+    const stale = age > (2 * ((+document.getElementById('cfg-diag-interval').value) || 5));
+    const valStr = typeof e.value === 'object' ? JSON.stringify(e.value).slice(0, 60) : String(e.value).slice(0, 60);
+    return `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 10px;background:rgba(255,255,255,.03);border-radius:8px;gap:8px;font-family:monospace">
+      <div style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:${stale ? 'var(--muted)' : '#cbd5e1'}">${k}</div>
+      <div style="font-size:12px;font-weight:700;color:${stale ? 'var(--muted)' : 'var(--green)'};white-space:nowrap;max-width:50%;overflow:hidden;text-overflow:ellipsis">${valStr}</div>
+    </div>`;
+  }).join('');
+}
+
+async function toggleDiag() {
+  const tk = localStorage.getItem('bridge_token');
+  const el = document.getElementById('tg-diag');
+  const wasOn = el.classList.contains('on');
+  const interval = parseInt(document.getElementById('cfg-diag-interval').value, 10) || 5;
+  if (!wasOn && !confirm(`Ativar coleta? O APK vai publicar TODAS as constantes a cada ${interval}s. Pode gerar tráfego significativo.`)) return;
+  el.classList.toggle('on');
+  try {
+    const r = await fetch('/api/diag/enable', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + tk, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: !wasOn, interval_sec: interval }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'HTTP ' + r.status);
+    showToast(!wasOn ? '✓ Coleta ativada no carro' : '✓ Coleta desativada', 'ok');
+    _updateDiagAdvSub(!wasOn, interval);
+    if (wasOn) { _diagValues = {}; _renderDiagList(); }  // limpa snapshot ao desligar
+  } catch (e) {
+    el.classList.toggle('on');  // reverte
+    showToast('✗ ' + e.message, 'err');
+  }
+}
+
+async function saveDiagInterval() {
+  const tk = localStorage.getItem('bridge_token');
+  const interval = parseInt(document.getElementById('cfg-diag-interval').value, 10);
+  if (!interval || interval < 1 || interval > 300) { showToast('✗ Entre 1 e 300s', 'err'); return; }
+  const isOn = document.getElementById('tg-diag').classList.contains('on');
+  try {
+    const r = await fetch('/api/diag/enable', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + tk, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: isOn, interval_sec: interval }),
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    showToast('✓ Intervalo: ' + interval + 's', 'ok');
+    _updateDiagAdvSub(isOn, interval);
+  } catch (e) { showToast('✗ ' + e.message, 'err'); }
+}
+
+async function exportDiag() {
+  const tk = localStorage.getItem('bridge_token');
+  try {
+    const r = await fetch('/api/diag/log', { headers: { 'Authorization': 'Bearer ' + tk } });
+    const log = await r.json();
+    const blob = new Blob([JSON.stringify({ exported_at: Date.now(), entries: log.length, log }, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `ecotrip-diag-${new Date().toISOString().slice(0,16).replace(':','-')}.json`;
+    a.click(); URL.revokeObjectURL(url);
+    showToast(`✓ ${log.length} entradas exportadas`, 'ok');
+  } catch (e) { showToast('✗ ' + e.message, 'err'); }
+}
+
+async function clearDiag() {
+  if (!confirm('Limpar o histórico de diagnóstico no servidor?')) return;
+  const tk = localStorage.getItem('bridge_token');
+  try {
+    await fetch('/api/diag/clear', { method: 'POST', headers: { 'Authorization': 'Bearer ' + tk } });
+    _diagValues = {};
+    _renderDiagList();
+    showToast('✓ Histórico limpo', 'ok');
+  } catch (e) { showToast('✗ ' + e.message, 'err'); }
+}
+
+// Recebe updates em tempo real do WS (chamado pelo shell)
+window._onDiagUpdate = function(data) {
+  if (!data || !data.key) return;
+  _diagValues[data.key] = { value: data.value, ts: data.ts || Date.now() };
+  _scheduleDiagRender();
+};
 
 // ─── Sobre: versões, uptime, broker ──────────────────────
 async function _loadAbout() {
@@ -1526,7 +1699,7 @@ window.markMaintDone = async function(id) {
 };
 
   // Expõe handlers de onclick no window
-  Object.assign(window, { openSub: typeof openSub !== 'undefined' ? openSub : undefined, closeSub: typeof closeSub !== 'undefined' ? closeSub : undefined, saveSection: typeof saveSection !== 'undefined' ? saveSection : undefined, toggle2fa: typeof toggle2fa !== 'undefined' ? toggle2fa : undefined, confirmClearHistory: typeof confirmClearHistory !== 'undefined' ? confirmClearHistory : undefined, openMaintAdd: openMaintAdd, closeMaintModal: closeMaintModal, saveMaintItem: saveMaintItem, deleteMaintItem: deleteMaintItem, markMaintDone: markMaintDone, saveVehicle: saveVehicle, setChargeLimit: setChargeLimit, actionRefreshRadars: actionRefreshRadars, actionReanalyzeTrips: actionReanalyzeTrips, actionRestartBridge: actionRestartBridge, actionUpdateBridge: actionUpdateBridge, openPlaceAdd: openPlaceAdd, openPlaceEdit: openPlaceEdit, closePlaceModal: closePlaceModal, usePlaceGps: usePlaceGps, savePlace: savePlace, deletePlace: deletePlace, toggleNotif: toggleNotif, changePassword: changePassword, toggle2faNew: toggle2faNew, closeTotpModal: closeTotpModal, activate2fa: activate2fa, show2faBackup: show2faBackup, regenBackupCodes: regenBackupCodes, openGeofencePlaces: openGeofencePlaces, _toggleGeofencePick: _toggleGeofencePick, saveGeofencePlaces: saveGeofencePlaces, toggleChargeEnding: toggleChargeEnding, editChargeEndingMin: editChargeEndingMin, downloadBackup: downloadBackup, uploadBackup: uploadBackup, clearLocalCache: clearLocalCache });
+  Object.assign(window, { openSub: typeof openSub !== 'undefined' ? openSub : undefined, closeSub: typeof closeSub !== 'undefined' ? closeSub : undefined, saveSection: typeof saveSection !== 'undefined' ? saveSection : undefined, toggle2fa: typeof toggle2fa !== 'undefined' ? toggle2fa : undefined, confirmClearHistory: typeof confirmClearHistory !== 'undefined' ? confirmClearHistory : undefined, openMaintAdd: openMaintAdd, closeMaintModal: closeMaintModal, saveMaintItem: saveMaintItem, deleteMaintItem: deleteMaintItem, markMaintDone: markMaintDone, saveVehicle: saveVehicle, setChargeLimit: setChargeLimit, actionRefreshRadars: actionRefreshRadars, actionReanalyzeTrips: actionReanalyzeTrips, actionRestartBridge: actionRestartBridge, actionUpdateBridge: actionUpdateBridge, openPlaceAdd: openPlaceAdd, openPlaceEdit: openPlaceEdit, closePlaceModal: closePlaceModal, usePlaceGps: usePlaceGps, savePlace: savePlace, deletePlace: deletePlace, toggleNotif: toggleNotif, changePassword: changePassword, toggle2faNew: toggle2faNew, closeTotpModal: closeTotpModal, activate2fa: activate2fa, show2faBackup: show2faBackup, regenBackupCodes: regenBackupCodes, openGeofencePlaces: openGeofencePlaces, _toggleGeofencePick: _toggleGeofencePick, saveGeofencePlaces: saveGeofencePlaces, toggleChargeEnding: toggleChargeEnding, editChargeEndingMin: editChargeEndingMin, downloadBackup: downloadBackup, uploadBackup: uploadBackup, clearLocalCache: clearLocalCache, toggleDiag: toggleDiag, saveDiagInterval: saveDiagInterval, exportDiag: exportDiag, clearDiag: clearDiag });
   if (!window['initView_config']) window['initView_config'] = function() {};
 })();
 </script>

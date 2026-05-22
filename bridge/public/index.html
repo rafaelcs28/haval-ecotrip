@@ -827,6 +827,8 @@ function connect() {
       } else if (msg.type === 'new_charge' || msg.type === 'charge_end') {
         showToast('⚡ Nova recarga registrada', 'ok');
         if (window._reloadPostoData) window._reloadPostoData();
+      } else if (msg.type === 'diag_update') {
+        if (window._onDiagUpdate) window._onDiagUpdate(msg.data);
       }
     } catch (e) { console.error('WS parse error', e); }
   };

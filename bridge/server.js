@@ -3071,6 +3071,61 @@ app.get('/api/location', (_req, res) => {
   }
 });
 
+// ─── Diag mode ────────────────────────────────────────────────────────────
+app.get('/api/diag/status', (_req, res) => {
+  res.json({
+    enabled:        diagState.enabled,
+    interval_sec:   diagState.interval_sec,
+    keys_count:     Object.keys(diagState.values).length,
+    last_update_ms: diagState.last_update_ms,
+  });
+});
+
+app.get('/api/diag/data', (req, res) => {
+  // Snapshot atual: { values: {key: {value, ts}}, ... }
+  res.json({
+    enabled:        diagState.enabled,
+    interval_sec:   diagState.interval_sec,
+    last_update_ms: diagState.last_update_ms,
+    values:         diagState.values,
+  });
+});
+
+app.get('/api/diag/log', (req, res) => {
+  // Histórico completo (rotacionado a DIAG_LOG_MAX entradas)
+  const limit = Math.min(DIAG_LOG_MAX, parseInt(req.query.limit) || DIAG_LOG_MAX);
+  res.json(diagLog.slice(-limit));
+});
+
+app.post('/api/diag/enable', (req, res) => {
+  if (!adminCheckToken(req, res)) return;
+  const b = req.body || {};
+  if (typeof b.enabled !== 'boolean') return res.status(400).json({ error: 'enabled (bool) obrigatório' });
+  const interval = parseInt(b.interval_sec || diagState.interval_sec || 5);
+  if (interval < 1 || interval > 300) return res.status(400).json({ error: 'interval_sec entre 1 e 300' });
+  diagState.enabled = b.enabled;
+  diagState.interval_sec = interval;
+  // Limpa snapshot quando desliga (evita ver valores velhos)
+  if (!b.enabled) diagState.values = {};
+  _saveDiagState();
+  // Publica comando pro APK começar/parar a coleta
+  if (!mqttClient?.connected) return res.status(503).json({ error: 'MQTT offline' });
+  const cmd = JSON.stringify({ enabled: b.enabled, interval_sec: interval });
+  mqttClient.publish(`${MQTT_PREFIX}/cmd/diag`, cmd, { qos: 1, retain: true }, err => {
+    if (err) return res.status(500).json({ error: 'Falha ao publicar no MQTT: ' + err.message });
+    console.log(`[diag] ${b.enabled ? 'ATIVADO' : 'DESATIVADO'} (intervalo ${interval}s)`);
+    res.json({ ok: true, enabled: b.enabled, interval_sec: interval });
+  });
+});
+
+app.post('/api/diag/clear', (req, res) => {
+  if (!adminCheckToken(req, res)) return;
+  diagLog = [];
+  diagState.values = {};
+  _saveDiagState();
+  res.json({ ok: true });
+});
+
 app.get('/api/config', (_req, res) => res.json({
   mqtt_host:        MQTT_HOST,
   mqtt_prefix:      MQTT_PREFIX,
@@ -3406,6 +3461,48 @@ mqttClient.on('error',      (err) => console.error('MQTT erro:', err.message));
 mqttClient.on('reconnect',  ()    => console.log('MQTT reconectando...'));
 mqttClient.on('disconnect', ()    => console.log('MQTT desconectado'));
 
+// ─── Modo Diagnóstico (debug) ─────────────────────────────────────────────
+// APK publica TODAS as constantes do CarConstants.kt em haval/ecotrip/diag/<key>
+// quando habilitado via cmd/diag. Bridge mantém snapshot em memória + log em
+// disco (rotacionado), broadcast pelo WS (msg type=diag_update) e expõe
+// endpoints REST.
+const DIAG_FILE      = path.join(__dirname, 'diag_state.json');
+const DIAG_LOG_FILE  = path.join(__dirname, 'diag_log.json');
+const DIAG_LOG_MAX   = 5000;  // rotação por linhas
+let diagState        = { enabled: false, interval_sec: 5, values: {}, last_update_ms: 0 };
+let diagLog          = [];
+try {
+  if (fs.existsSync(DIAG_FILE)) diagState = { ...diagState, ...JSON.parse(fs.readFileSync(DIAG_FILE, 'utf8')) };
+  if (fs.existsSync(DIAG_LOG_FILE)) diagLog = JSON.parse(fs.readFileSync(DIAG_LOG_FILE, 'utf8')) || [];
+} catch (_) {}
+let _diagSaveTimer = null;
+function _saveDiagState() {
+  if (_diagSaveTimer) return;
+  _diagSaveTimer = setTimeout(() => {
+    _diagSaveTimer = null;
+    try { fs.writeFileSync(DIAG_FILE, JSON.stringify(diagState, null, 2)); } catch (_) {}
+    try { fs.writeFileSync(DIAG_LOG_FILE, JSON.stringify(diagLog.slice(-DIAG_LOG_MAX))); } catch (_) {}
+  }, 2000);
+}
+function handleDiagMessage(key, raw) {
+  let value = raw;
+  // tenta parse JSON pra valores compostos; senão mantém string
+  if (raw && (raw.startsWith('{') || raw.startsWith('['))) {
+    try { value = JSON.parse(raw); } catch (_) {}
+  }
+  const ts = Date.now();
+  diagState.values[key] = { value, ts };
+  diagState.last_update_ms = ts;
+  diagLog.push({ ts, key, value });
+  if (diagLog.length > DIAG_LOG_MAX) diagLog = diagLog.slice(-DIAG_LOG_MAX);
+  _saveDiagState();
+  // Broadcast pelo WS em tempo real
+  const msg = JSON.stringify({ type: 'diag_update', data: { key, value, ts } });
+  for (const c of clients) {
+    try { c.readyState === 1 && c.send(msg); } catch (_) {}
+  }
+}
+
 mqttClient.on('message', (topic, payload, packet) => {
   const value      = payload.toString().trim();
   const isRetained = !!(packet && packet.retain);
@@ -3413,9 +3510,12 @@ mqttClient.on('message', (topic, payload, packet) => {
   // Dispatcher: tópicos da integração GWM Brasil vão pro handler dedicado;
   // outros caem no handler legado do app.
   if (topic.startsWith(GWM_TOPIC_PREFIX + '/') && topic.endsWith('/state')) {
-    // gwmbrasil_<chassi>/<id>/state
     const id = topic.slice(GWM_TOPIC_PREFIX.length + 1, topic.length - '/state'.length);
     applyGwmEntity(id, value, isRetained);
+  } else if (topic.startsWith(MQTT_PREFIX + '/diag/')) {
+    // Modo diagnóstico: APK publica em diag/<constant_name>
+    const key = topic.slice((MQTT_PREFIX + '/diag/').length);
+    handleDiagMessage(key, value);
   } else {
     const key = topic.startsWith(MQTT_PREFIX + '/')
       ? topic.slice(MQTT_PREFIX.length + 1)
