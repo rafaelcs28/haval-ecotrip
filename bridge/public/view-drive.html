@@ -2778,12 +2778,17 @@ function render(s, kpData) {
     document.getElementById('trip-dist').textContent = fmt1(+ct.distKm || 0);
     document.getElementById('trip-kwh').textContent  = fmt2(+ct.netKwh || 0);
     document.getElementById('trip-fuel').textContent = fmt2(+ct.fuelL || 0);
-    // Consumo equivalente km/L: converte kWh em L de gasolina (~8.9 kWh/L)
-    // e divide a distância pela soma equivalente. Mostra "--" se distância
-    // ínfima ou nenhuma energia consumida.
+    // Consumo equivalente km/L (baseado em PREÇO, não energia):
+    // custo total = kWh × R$/kWh + L × R$/L
+    // litros equivalentes = custo total ÷ R$/L (quantos litros de gasolina
+    // custariam o mesmo)
+    // km/L eq = distância ÷ litros equivalentes
     const distKm = +ct.distKm || 0;
-    const eqL = (+ct.netKwh || 0) / 8.9 + (+ct.fuelL || 0);
-    const consumoEq = (distKm > 0.1 && eqL > 0.01) ? (distKm / eqL).toFixed(1) : '--';
+    const pKwh = +s.price_kwh || 0;
+    const pGas = +s.price_gas_per_l || 0;
+    const cost = (+ct.netKwh || 0) * pKwh + (+ct.fuelL || 0) * pGas;
+    const eqL = (pGas > 0.01) ? (cost / pGas) : 0;
+    const consumoEq = (distKm > 0.1 && eqL > 0.001) ? (distKm / eqL).toFixed(1) : '--';
     document.getElementById('trip-consumo-eq').textContent = consumoEq;
   }
 

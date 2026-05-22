@@ -398,15 +398,15 @@
       <div class="val-row"><span class="v" id="hc-fuel">--</span><span class="u">%</span></div>
       <div class="sub" id="hc-fuel-sub">--</div>
     </div>
-    <div class="hero-card teal">
-      <div class="lbl">📊 Consumo</div>
-      <div class="val-row"><span class="v" id="hc-cons">--</span><span class="u" id="hc-cons-u">--</span></div>
-      <div class="sub" id="hc-cons-sub">--</div>
+    <div class="hero-card yellow" id="hc-maint-card" onclick="openMaintModal()">
+      <div class="lbl">🔧 Manutenção</div>
+      <div class="val-row"><span class="v" id="hc-maint-v" style="font-size:18px;line-height:1.15">--</span></div>
+      <div class="sub" id="hc-maint-sub">Toque pra detalhes</div>
     </div>
-    <div class="hero-card muted" id="hc-trip-card">
-      <div class="lbl">🛣 <span id="hc-trip-lbl">Desde partida</span></div>
-      <div class="val-row"><span class="v" id="hc-trip">--</span><span class="u" id="hc-trip-u">km</span></div>
-      <div class="sub" id="hc-trip-sub">--</div>
+    <div class="hero-card muted" id="hc-other-card" onclick="openOtherDataModal()">
+      <div class="lbl">🚗 Outros dados</div>
+      <div class="val-row"><span class="v" id="hc-other-v" style="font-size:18px;line-height:1.15">--</span></div>
+      <div class="sub" id="hc-other-sub">Toque pra ver tudo</div>
     </div>
   </div>
 
@@ -779,6 +779,80 @@ function _haversine(a, b) {
   return 2 * R * Math.asin(Math.sqrt(s));
 }
 
+// ── Card de manutenção: mostra próxima revisão mais urgente (km ou meses)
+// Dados vêm de /api/maintenance — buscados em background no boot da view
+let _maintData = null;
+async function _loadMaintData() {
+  const tk = localStorage.getItem('bridge_token');
+  if (!tk) return;
+  try {
+    const r = await fetch('/api/maintenance', { headers: { 'Authorization': 'Bearer ' + tk } });
+    _maintData = await r.json();
+    if (window.state) renderMaintCard(window.state);
+  } catch (_) {}
+}
+function renderMaintCard(s) {
+  const v = document.getElementById('hc-maint-v');
+  const sub = document.getElementById('hc-maint-sub');
+  if (!v || !sub) return;
+  if (!_maintData || !Array.isArray(_maintData.intervals) || !_maintData.intervals.length) {
+    v.textContent = 'Configurar';
+    sub.textContent = 'Toque pra configurar';
+    return;
+  }
+  // Encontra item mais urgente (menos km restantes)
+  const odo = +s.odometer_km || 0;
+  let urgent = null, urgentKm = Infinity;
+  for (const it of _maintData.intervals) {
+    if (!it.every_km) continue;
+    const last = (_maintData.history || []).filter(h => h.interval_id === it.id).sort((a,b) => (b.odometer_km||0) - (a.odometer_km||0))[0];
+    const baseOdo = last ? last.odometer_km : 0;
+    const nextAt = baseOdo + it.every_km;
+    const remaining = nextAt - odo;
+    if (remaining < urgentKm) { urgentKm = remaining; urgent = it; }
+  }
+  if (urgent) {
+    v.textContent = urgent.label || 'Próxima revisão';
+    if (urgentKm > 0) sub.textContent = `em ${Math.round(urgentKm).toLocaleString('pt-BR')} km`;
+    else sub.textContent = `${Math.abs(Math.round(urgentKm)).toLocaleString('pt-BR')} km atrasado`;
+  } else {
+    v.textContent = 'Tudo em dia';
+    sub.textContent = 'sem manutenções configuradas';
+  }
+}
+window.openMaintModal = function() {
+  // TODO: modal com lista completa de manutenções (próxima sessão)
+  // Por agora, navega pra aba Config > Manutenção
+  alert('Manutenção:\n\n' + (_maintData ? JSON.stringify(_maintData, null, 2).substring(0, 500) : 'Sem dados ainda'));
+};
+
+// ── Card "Outros dados": mostra um resumo (KM, 12V, autonomia)
+function renderOtherCard(s) {
+  const v = document.getElementById('hc-other-v');
+  const sub = document.getElementById('hc-other-sub');
+  if (!v || !sub) return;
+  const odo = +s.odometer_km || 0;
+  v.textContent = odo > 0 ? Math.round(odo).toLocaleString('pt-BR') + ' km' : '--';
+  const parts = [];
+  if (s.batt_12v_pct != null) parts.push('12V ' + Math.round(+s.batt_12v_pct) + '%');
+  if (+s.autonomy_ev_km > 0) parts.push(Math.round(+s.autonomy_ev_km) + ' km EV');
+  if (+s.autonomy_ice_km > 0) parts.push(Math.round(+s.autonomy_ice_km) + ' km comb.');
+  sub.textContent = parts.join(' · ') || 'Toque pra ver tudo';
+}
+window.openOtherDataModal = function() {
+  const s = window.state || {};
+  const lines = [
+    '🚗 ' + (s.odometer_km != null ? Math.round(s.odometer_km).toLocaleString('pt-BR') + ' km' : 'odômetro --'),
+    '🔌 12V: ' + (s.batt_12v_pct != null ? Math.round(s.batt_12v_pct) + '%' : '--'),
+    '⚡ Autonomia EV: ' + (+s.autonomy_ev_km > 0 ? Math.round(s.autonomy_ev_km) + ' km' : '--'),
+    '⛽ Autonomia combustão: ' + (+s.autonomy_ice_km > 0 ? Math.round(s.autonomy_ice_km) + ' km' : '--'),
+    '🌡 Interna: ' + (s.inside_temp != null ? Math.round(s.inside_temp) + '°' : '--'),
+    '🌡 Externa: ' + (s.outside_temp != null ? Math.round(s.outside_temp) + '°' : '--'),
+    '⚙ Marcha: ' + (s.gear || '--'),
+  ];
+  alert(lines.join('\n'));
+};
+
 function render(s, kpData) {
   _latestState = s;  // pro modal de ação saber o estado atual
   // ── Status dot
@@ -877,44 +951,10 @@ function render(s, kpData) {
   const subParts = [fuelL, iceKm != null ? `${iceKm} km à combustão` : ''].filter(Boolean);
   document.getElementById('hc-fuel-sub').textContent = subParts.join(' · ') || '--';
 
-  // ── Consumo
-  const r = s.rolling || {};
-  const rKwh = +r.kwh_per_100km || 0;
-  const rKmL = +r.km_per_l || 0;
-  if (rKwh > 0) {
-    document.getElementById('hc-cons').textContent = fmt1(rKwh);
-    document.getElementById('hc-cons-u').textContent = 'kWh/100';
-  } else if (rKmL > 0) {
-    document.getElementById('hc-cons').textContent = fmt1(rKmL);
-    document.getElementById('hc-cons-u').textContent = 'km/L';
-  } else {
-    document.getElementById('hc-cons').textContent = '--';
-    document.getElementById('hc-cons-u').textContent = '';
-  }
-  const distRoll = +r.distance_km || 0;
-  document.getElementById('hc-cons-sub').textContent = distRoll > 0
-    ? `${fmt1(distRoll)} km · janela`
-    : 'janela rolling';
-
-  // ── Trip card (current ou desde partida)
-  const ct = s.current_trip;
-  const engOn = s.engine_state === '1' || s.engine_state === 'on';
-  if (ct && (+ct.distKm > 0 || engOn)) {
-    document.getElementById('hc-trip-lbl').textContent = 'Viagem atual';
-    document.getElementById('hc-trip').textContent = fmt1(+ct.distKm || 0);
-    document.getElementById('hc-trip-u').textContent = 'km';
-    const mins = Math.round(((+ct.timeSec || 0) + (+ct.parkedInPSec || 0) + (+ct.engineOffSec || 0)) / 60);
-    const cost = ((+ct.netKwh || 0) * (+s.price_kwh || 0)) + ((+ct.fuelL || 0) * (+s.price_gas_per_l || 0));
-    document.getElementById('hc-trip-sub').textContent = `${mins} min${cost > 0.01 ? ' · R$ ' + cost.toFixed(2) : ''}`;
-    document.getElementById('hc-trip-card').className = 'hero-card yellow';
-  } else {
-    document.getElementById('hc-trip-lbl').textContent = 'Rolling';
-    document.getElementById('hc-trip').textContent = distRoll > 0 ? fmt1(distRoll) : '--';
-    document.getElementById('hc-trip-u').textContent = 'km';
-    const cost = +r.cost_brl || 0;
-    document.getElementById('hc-trip-sub').textContent = cost > 0.01 ? `R$ ${cost.toFixed(2)} gastos` : 'última janela';
-    document.getElementById('hc-trip-card').className = 'hero-card muted';
-  }
+  // ── Manutenção e Outros dados são renderizados separadamente
+  // (renderMaintCard e renderOtherCard chamados depois pelo loader)
+  if (typeof renderMaintCard === 'function') renderMaintCard(s);
+  if (typeof renderOtherCard === 'function') renderOtherCard(s);
 
   // ── Tiny row
   document.getElementById('t-batt12').textContent = s.batt_12v_pct ? Math.round(s.batt_12v_pct) + '%' : '--';
@@ -1124,6 +1164,9 @@ let _latestState = null;
 // Bootstrap
 updateTabbarHeight();
 window.addEventListener('resize', updateTabbarHeight);
+// Carrega dados de manutenção em background (popula _maintData)
+if (typeof _loadMaintData === 'function') _loadMaintData();
+
 // Live se houver token; senão snapshot fake
 if (localStorage.getItem('bridge_token')) {
   useLive = true;
