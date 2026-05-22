@@ -838,9 +838,58 @@ function renderMaintCard(s) {
   }
 }
 window.openMaintModal = function() {
-  // TODO: modal com lista completa de manutenções (próxima sessão)
-  // Por agora, navega pra aba Config > Manutenção
-  alert('Manutenção:\n\n' + (_maintData ? JSON.stringify(_maintData, null, 2).substring(0, 500) : 'Sem dados ainda'));
+  let modal = document.getElementById('maint-dash-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'maint-dash-modal';
+    modal.style.cssText = 'position:fixed;inset:0;z-index:90;background:rgba(0,0,0,.7);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);display:flex;align-items:flex-end;justify-content:center';
+    modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+    document.body.appendChild(modal);
+  }
+  const odo = +(window.state?.odometer_km) || 0;
+  const intervals = _maintData?.intervals || [];
+  const history = _maintData?.history || [];
+  const itemsHtml = intervals.length ? intervals.map(it => {
+    const last = history.filter(h => h.type_id === it.id).sort((a,b) => (b.odometer_km||0) - (a.odometer_km||0))[0];
+    const baseOdo = last ? last.odometer_km : 0;
+    const nextAt = baseOdo + (it.every_km || 0);
+    const rem = it.every_km ? nextAt - odo : null;
+    let status = 'OK', color = '#22c55e', bg = 'rgba(34,197,94,.12)';
+    if (rem != null && rem <= 0) { status = `${Math.abs(Math.round(rem)).toLocaleString('pt-BR')} km atrasado`; color = '#f87171'; bg = 'rgba(248,113,113,.12)'; }
+    else if (rem != null && rem < 1000) { status = `em ${Math.round(rem).toLocaleString('pt-BR')} km — urgente`; color = '#f87171'; bg = 'rgba(248,113,113,.12)'; }
+    else if (rem != null && rem < 2000) { status = `em ${Math.round(rem).toLocaleString('pt-BR')} km — próximo`; color = '#fbbf24'; bg = 'rgba(251,191,36,.12)'; }
+    else if (rem != null) { status = `em ${Math.round(rem).toLocaleString('pt-BR')} km`; }
+    return `<div style="background:rgba(255,255,255,.04);border-radius:10px;padding:12px 14px;margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+        <div style="font-size:14px;font-weight:700">${it.icon || '🔧'} ${it.label}</div>
+        <span style="font-size:11px;font-weight:700;color:${color};background:${bg};padding:4px 10px;border-radius:8px;white-space:nowrap">${status}</span>
+      </div>
+      <div style="font-size:10px;color:var(--muted);margin-top:4px">
+        a cada ${(it.every_km||0).toLocaleString('pt-BR')} km${it.every_months ? ` · ${it.every_months} meses` : ''}
+        ${last ? `<br>último: ${(last.odometer_km||0).toLocaleString('pt-BR')} km` : ''}
+      </div>
+    </div>`;
+  }).join('') : '<div style="text-align:center;padding:24px;color:var(--muted);font-size:13px">Nenhuma manutenção configurada</div>';
+
+  const recentHist = history.slice().sort((a,b) => (b.date_ms||0) - (a.date_ms||0)).slice(0, 3);
+  const histHtml = recentHist.length ? recentHist.map(h => {
+    const it = intervals.find(i => i.id === h.type_id);
+    const d = h.date_ms ? new Date(h.date_ms) : null;
+    return `<div style="display:flex;justify-content:space-between;padding:8px 0;border-top:1px solid rgba(255,255,255,.06);font-size:11px">
+      <div>${(it?.icon || '🔧')} ${(it?.label || h.type_id)}</div>
+      <div style="color:var(--muted)">${d ? d.toLocaleDateString('pt-BR') : '—'} · ${(h.odometer_km||0).toLocaleString('pt-BR')} km</div>
+    </div>`;
+  }).join('') : '';
+
+  modal.innerHTML = `<div style="width:100%;max-width:480px;background:#1f1f1f;border-top-left-radius:18px;border-top-right-radius:18px;padding:18px 18px calc(env(safe-area-inset-bottom) + 18px);border-top:1px solid rgba(255,255,255,.08);max-height:80vh;overflow-y:auto">
+    <div style="width:42px;height:5px;background:rgba(255,255,255,.18);border-radius:3px;margin:-8px auto 14px"></div>
+    <div style="font-size:18px;font-weight:700;margin-bottom:2px">🔧 Manutenção</div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:14px">Odômetro atual: ${odo.toLocaleString('pt-BR')} km</div>
+    ${itemsHtml}
+    ${histHtml ? `<div style="margin-top:18px"><div style="font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:1.4px;margin-bottom:6px">Últimos serviços</div>${histHtml}</div>` : ''}
+    <button onclick="document.getElementById('maint-dash-modal').remove();switchView('config');setTimeout(()=>window.openSub&&window.openSub('maint'),200)" style="width:100%;margin-top:18px;padding:12px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.08);color:#cbd5e1;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">⚙ Gerenciar em Configurações</button>
+    <button onclick="document.getElementById('maint-dash-modal').remove()" style="width:100%;margin-top:8px;padding:12px;background:var(--green);color:#000;border:none;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit">Fechar</button>
+  </div>`;
 };
 
 // ── Card "Outros dados": só odômetro no card; resto fica no modal
