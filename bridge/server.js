@@ -3126,6 +3126,23 @@ app.post('/api/diag/clear', (req, res) => {
   res.json({ ok: true });
 });
 
+// POST /api/diag/set { key, value } — pede pro APK tentar gravar a constante
+// no carro via Shizuku. Nem todas são writable — APK responde em diag_ack/<key>
+// com { ok, error }. Bridge propaga via WS pra UI mostrar resultado.
+app.post('/api/diag/set', (req, res) => {
+  if (!adminCheckToken(req, res)) return;
+  const { key, value } = req.body || {};
+  if (!key || typeof key !== 'string') return res.status(400).json({ error: 'key obrigatório' });
+  if (value === undefined) return res.status(400).json({ error: 'value obrigatório' });
+  if (!mqttClient?.connected) return res.status(503).json({ error: 'MQTT offline' });
+  const payload = typeof value === 'object' ? JSON.stringify(value) : String(value);
+  mqttClient.publish(`${MQTT_PREFIX}/cmd/diag_set/${key}`, payload, { qos: 1, retain: false }, err => {
+    if (err) return res.status(500).json({ error: 'Falha ao publicar: ' + err.message });
+    console.log(`[diag] set ${key} = ${payload}`);
+    res.json({ ok: true, key, value: payload, sent_at: Date.now() });
+  });
+});
+
 app.get('/api/config', (_req, res) => res.json({
   mqtt_host:        MQTT_HOST,
   mqtt_prefix:      MQTT_PREFIX,
@@ -3516,6 +3533,16 @@ mqttClient.on('message', (topic, payload, packet) => {
     // Modo diagnóstico: APK publica em diag/<constant_name>
     const key = topic.slice((MQTT_PREFIX + '/diag/').length);
     handleDiagMessage(key, value);
+  } else if (topic.startsWith(MQTT_PREFIX + '/diag_ack/')) {
+    // Resposta do APK ao set: { ok, error?, applied? }
+    const key = topic.slice((MQTT_PREFIX + '/diag_ack/').length);
+    let ack = { raw: value };
+    try { ack = JSON.parse(value); } catch (_) {}
+    const msg = JSON.stringify({ type: 'diag_ack', data: { key, ...ack, ts: Date.now() } });
+    for (const c of clients) {
+      try { c.readyState === 1 && c.send(msg); } catch (_) {}
+    }
+    console.log(`[diag] ack ${key}: ${value}`);
   } else {
     const key = topic.startsWith(MQTT_PREFIX + '/')
       ? topic.slice(MQTT_PREFIX.length + 1)

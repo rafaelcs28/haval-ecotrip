@@ -561,8 +561,13 @@
       </div>
     </div>
     <div class="field-group">
-      <div class="group-ti"><span id="diag-keys-count">0</span> chaves recebidas · <span id="diag-last-ts">—</span></div>
-      <div id="diag-keys-list" style="display:flex;flex-direction:column;gap:4px;max-height:60vh;overflow-y:auto">
+      <div class="group-ti"><span id="diag-keys-count">0</span> chaves · <span id="diag-last-ts">—</span></div>
+      <div style="display:flex;align-items:center;gap:8px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:10px;padding:8px 12px;margin-bottom:8px">
+        <span style="color:var(--muted);font-size:14px">🔍</span>
+        <input id="diag-search" type="text" placeholder="Buscar constante…" oninput="_scheduleDiagRender()" style="flex:1;background:transparent;border:none;outline:none;color:var(--text);font-size:13px;font-family:inherit">
+      </div>
+      <div style="font-size:10px;color:var(--muted);margin-bottom:6px;padding:0 4px">Toque na chave pra tentar mudar o valor no carro</div>
+      <div id="diag-keys-list" style="display:flex;flex-direction:column;gap:4px;max-height:55vh;overflow-y:auto">
         <div style="text-align:center;color:var(--muted);font-size:12px;padding:24px">Aguardando dados…<br><span style="font-size:10px">Ative a coleta acima pra começar a receber</span></div>
       </div>
     </div>
@@ -572,6 +577,22 @@
         <button class="btn secondary" style="flex:1" onclick="exportDiag()">⬇ Exportar JSON</button>
         <button class="btn danger" style="flex:1" onclick="clearDiag()">🗑 Limpar log</button>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: setar valor de uma constante de diag -->
+<div id="diag-set-modal" style="display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,.8);align-items:flex-end;justify-content:center;backdrop-filter:blur(8px)">
+  <div style="background:#1f1f1f;width:100%;max-width:480px;border-top-left-radius:18px;border-top-right-radius:18px;padding:18px 18px calc(env(safe-area-inset-bottom) + 18px);border-top:1px solid rgba(255,255,255,.08);max-height:85vh;overflow-y:auto">
+    <div style="width:42px;height:5px;background:rgba(255,255,255,.18);border-radius:3px;margin:-8px auto 14px"></div>
+    <div style="font-size:14px;font-weight:700;margin-bottom:4px">⚙ Mudar valor</div>
+    <div id="diag-set-key" style="font-size:11px;color:var(--muted);font-family:monospace;margin-bottom:6px;word-break:break-all">—</div>
+    <div id="diag-set-cur" style="font-size:11px;color:#cbd5e1;margin-bottom:12px">Valor atual: <span style="font-family:monospace;color:var(--green)" id="diag-set-cur-v">—</span></div>
+    <input id="diag-set-input" placeholder="Novo valor" style="width:100%;padding:12px 14px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:10px;color:var(--text);font-size:14px;font-family:monospace">
+    <div style="font-size:10px;color:var(--muted);margin-top:6px;line-height:1.4">⚠️ Nem todas as chaves são graváveis. O carro vai responder se aceitou (verifique o toast). Use por sua conta e risco.</div>
+    <div style="display:flex;gap:10px;margin-top:14px">
+      <button onclick="document.getElementById('diag-set-modal').style.display='none'" style="flex:1;padding:12px;background:rgba(255,255,255,.06);color:#cbd5e1;border:none;border-radius:10px;font-size:14px;font-weight:700;font-family:inherit">Cancelar</button>
+      <button onclick="confirmDiagSet()" style="flex:1;padding:12px;background:var(--yellow);color:#000;border:none;border-radius:10px;font-size:14px;font-weight:700;font-family:inherit">Aplicar no carro</button>
     </div>
   </div>
 </div>
@@ -653,14 +674,25 @@ function _scheduleDiagRender() {
 function _renderDiagList() {
   const list = document.getElementById('diag-keys-list');
   if (!list) return;
-  const keys = Object.keys(_diagValues).sort();
+  const allKeys = Object.keys(_diagValues).sort();
   const cnt = document.getElementById('diag-keys-count');
-  if (cnt) cnt.textContent = keys.length;
+  if (cnt) cnt.textContent = allKeys.length;
   const lastTs = Object.values(_diagValues).reduce((m, e) => Math.max(m, +e.ts || 0), 0);
   const lts = document.getElementById('diag-last-ts');
   if (lts) lts.textContent = lastTs ? `última: ${new Date(lastTs).toLocaleTimeString('pt-BR')}` : '—';
-  if (!keys.length) {
+
+  // Filtro por busca
+  const searchEl = document.getElementById('diag-search');
+  const q = (searchEl?.value || '').trim().toLowerCase();
+  const keys = q ? allKeys.filter(k => k.toLowerCase().includes(q) ||
+    (typeof _diagValues[k].value !== 'object' && String(_diagValues[k].value).toLowerCase().includes(q))) : allKeys;
+
+  if (!allKeys.length) {
     list.innerHTML = '<div style="text-align:center;color:var(--muted);font-size:12px;padding:24px">Aguardando dados…<br><span style="font-size:10px">Ative a coleta acima pra começar a receber</span></div>';
+    return;
+  }
+  if (!keys.length) {
+    list.innerHTML = `<div style="text-align:center;color:var(--muted);font-size:12px;padding:24px">Nenhuma chave bate com "<strong>${q}</strong>"</div>`;
     return;
   }
   const now = Date.now();
@@ -669,12 +701,53 @@ function _renderDiagList() {
     const age = Math.floor((now - (+e.ts || 0)) / 1000);
     const stale = age > (2 * ((+document.getElementById('cfg-diag-interval').value) || 5));
     const valStr = typeof e.value === 'object' ? JSON.stringify(e.value).slice(0, 60) : String(e.value).slice(0, 60);
-    return `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 10px;background:rgba(255,255,255,.03);border-radius:8px;gap:8px;font-family:monospace">
+    const safeK = k.replace(/'/g, "\\'");
+    return `<div onclick="openDiagSet('${safeK}')" style="display:flex;justify-content:space-between;align-items:center;padding:7px 10px;background:rgba(255,255,255,.03);border-radius:8px;gap:8px;font-family:monospace;cursor:pointer">
       <div style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:${stale ? 'var(--muted)' : '#cbd5e1'}">${k}</div>
       <div style="font-size:12px;font-weight:700;color:${stale ? 'var(--muted)' : 'var(--green)'};white-space:nowrap;max-width:50%;overflow:hidden;text-overflow:ellipsis">${valStr}</div>
     </div>`;
   }).join('');
 }
+
+let _diagSetKey = null;
+function openDiagSet(key) {
+  _diagSetKey = key;
+  const cur = _diagValues[key];
+  const curStr = cur ? (typeof cur.value === 'object' ? JSON.stringify(cur.value) : String(cur.value)) : '—';
+  document.getElementById('diag-set-key').textContent = key;
+  document.getElementById('diag-set-cur-v').textContent = curStr;
+  document.getElementById('diag-set-input').value = curStr === '—' ? '' : curStr;
+  document.getElementById('diag-set-modal').style.display = 'flex';
+  setTimeout(() => document.getElementById('diag-set-input').focus(), 100);
+}
+
+async function confirmDiagSet() {
+  if (!_diagSetKey) return;
+  const tk = localStorage.getItem('bridge_token');
+  const value = document.getElementById('diag-set-input').value;
+  if (!confirm(`Aplicar valor "${value}" em "${_diagSetKey}" no carro?\n\nO carro pode rejeitar (constante read-only). Verifique o toast de resposta.`)) return;
+  try {
+    const r = await fetch('/api/diag/set', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + tk, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: _diagSetKey, value }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'HTTP ' + r.status);
+    document.getElementById('diag-set-modal').style.display = 'none';
+    showToast('⏳ Aguardando resposta do carro…', 'ok');
+  } catch (e) { showToast('✗ ' + e.message, 'err'); }
+}
+
+// Recebe ack do carro via WS
+window._onDiagAck = function(data) {
+  if (!data || !data.key) return;
+  if (data.ok) {
+    showToast(`✓ Aplicado: ${data.key}${data.applied !== undefined ? ' = ' + data.applied : ''}`, 'ok');
+  } else {
+    showToast(`✗ ${data.key}: ${data.error || 'rejeitado pelo carro'}`, 'err');
+  }
+};
 
 async function toggleDiag() {
   const tk = localStorage.getItem('bridge_token');
@@ -1699,7 +1772,7 @@ window.markMaintDone = async function(id) {
 };
 
   // Expõe handlers de onclick no window
-  Object.assign(window, { openSub: typeof openSub !== 'undefined' ? openSub : undefined, closeSub: typeof closeSub !== 'undefined' ? closeSub : undefined, saveSection: typeof saveSection !== 'undefined' ? saveSection : undefined, toggle2fa: typeof toggle2fa !== 'undefined' ? toggle2fa : undefined, confirmClearHistory: typeof confirmClearHistory !== 'undefined' ? confirmClearHistory : undefined, openMaintAdd: openMaintAdd, closeMaintModal: closeMaintModal, saveMaintItem: saveMaintItem, deleteMaintItem: deleteMaintItem, markMaintDone: markMaintDone, saveVehicle: saveVehicle, setChargeLimit: setChargeLimit, actionRefreshRadars: actionRefreshRadars, actionReanalyzeTrips: actionReanalyzeTrips, actionRestartBridge: actionRestartBridge, actionUpdateBridge: actionUpdateBridge, openPlaceAdd: openPlaceAdd, openPlaceEdit: openPlaceEdit, closePlaceModal: closePlaceModal, usePlaceGps: usePlaceGps, savePlace: savePlace, deletePlace: deletePlace, toggleNotif: toggleNotif, changePassword: changePassword, toggle2faNew: toggle2faNew, closeTotpModal: closeTotpModal, activate2fa: activate2fa, show2faBackup: show2faBackup, regenBackupCodes: regenBackupCodes, openGeofencePlaces: openGeofencePlaces, _toggleGeofencePick: _toggleGeofencePick, saveGeofencePlaces: saveGeofencePlaces, toggleChargeEnding: toggleChargeEnding, editChargeEndingMin: editChargeEndingMin, downloadBackup: downloadBackup, uploadBackup: uploadBackup, clearLocalCache: clearLocalCache, toggleDiag: toggleDiag, saveDiagInterval: saveDiagInterval, exportDiag: exportDiag, clearDiag: clearDiag });
+  Object.assign(window, { openSub: typeof openSub !== 'undefined' ? openSub : undefined, closeSub: typeof closeSub !== 'undefined' ? closeSub : undefined, saveSection: typeof saveSection !== 'undefined' ? saveSection : undefined, toggle2fa: typeof toggle2fa !== 'undefined' ? toggle2fa : undefined, confirmClearHistory: typeof confirmClearHistory !== 'undefined' ? confirmClearHistory : undefined, openMaintAdd: openMaintAdd, closeMaintModal: closeMaintModal, saveMaintItem: saveMaintItem, deleteMaintItem: deleteMaintItem, markMaintDone: markMaintDone, saveVehicle: saveVehicle, setChargeLimit: setChargeLimit, actionRefreshRadars: actionRefreshRadars, actionReanalyzeTrips: actionReanalyzeTrips, actionRestartBridge: actionRestartBridge, actionUpdateBridge: actionUpdateBridge, openPlaceAdd: openPlaceAdd, openPlaceEdit: openPlaceEdit, closePlaceModal: closePlaceModal, usePlaceGps: usePlaceGps, savePlace: savePlace, deletePlace: deletePlace, toggleNotif: toggleNotif, changePassword: changePassword, toggle2faNew: toggle2faNew, closeTotpModal: closeTotpModal, activate2fa: activate2fa, show2faBackup: show2faBackup, regenBackupCodes: regenBackupCodes, openGeofencePlaces: openGeofencePlaces, _toggleGeofencePick: _toggleGeofencePick, saveGeofencePlaces: saveGeofencePlaces, toggleChargeEnding: toggleChargeEnding, editChargeEndingMin: editChargeEndingMin, downloadBackup: downloadBackup, uploadBackup: uploadBackup, clearLocalCache: clearLocalCache, toggleDiag: toggleDiag, saveDiagInterval: saveDiagInterval, exportDiag: exportDiag, clearDiag: clearDiag, openDiagSet: openDiagSet, confirmDiagSet: confirmDiagSet, _scheduleDiagRender: _scheduleDiagRender });
   if (!window['initView_config']) window['initView_config'] = function() {};
 })();
 </script>

@@ -829,6 +829,8 @@ function connect() {
         if (window._reloadPostoData) window._reloadPostoData();
       } else if (msg.type === 'diag_update') {
         if (window._onDiagUpdate) window._onDiagUpdate(msg.data);
+      } else if (msg.type === 'diag_ack') {
+        if (window._onDiagAck) window._onDiagAck(msg.data);
       }
     } catch (e) { console.error('WS parse error', e); }
   };
