@@ -115,6 +115,26 @@
 }
 .toggle.on { background: rgba(34,197,94,.3); }
 .toggle.on::after { left: 20px; background: var(--green); }
+/* Toggle pendente (aguardando confirmação do APK) — pulsa em amarelo */
+.toggle.pending { background: rgba(234,179,8,.3); }
+.toggle.pending::after { background: var(--yellow); animation: toggle-pulse 1s ease-in-out infinite; }
+@keyframes toggle-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+/* Lista de eventos do modo diag */
+.diag-ev {
+  display: flex; gap: 8px; align-items: baseline;
+  padding: 5px 8px; border-radius: 6px;
+  background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.05);
+}
+.diag-ev.sent  { border-color: rgba(56,189,248,.3); }
+.diag-ev.ack   { border-color: rgba(34,197,94,.3); }
+.diag-ev.error { border-color: rgba(248,113,113,.4); background: rgba(248,113,113,.06); }
+.diag-ev .ev-ts { color: var(--muted); flex-shrink: 0; font-size: 9.5px; }
+.diag-ev .ev-tag { font-size: 9px; font-weight: 800; padding: 1px 5px; border-radius: 4px; flex-shrink: 0; }
+.diag-ev .ev-tag.send  { background: rgba(56,189,248,.18); color: #38bdf8; }
+.diag-ev .ev-tag.ack   { background: rgba(34,197,94,.18); color: var(--green); }
+.diag-ev .ev-tag.error { background: rgba(248,113,113,.18); color: var(--red); }
+.diag-ev .ev-body { flex: 1; word-break: break-all; color: #cbd5e1; }
 
 .btn {
   width: 100%; padding: 13px; border: none; border-radius: 12px;
@@ -572,6 +592,12 @@
       </div>
     </div>
     <div class="field-group">
+      <div class="group-ti">Comandos recentes <span style="color:var(--muted);font-weight:400">(envio · ack do carro)</span></div>
+      <div id="diag-events-list" style="display:flex;flex-direction:column;gap:4px;max-height:240px;overflow-y:auto;font-family:monospace;font-size:10.5px">
+        <div style="text-align:center;color:var(--muted);padding:14px">Nenhum comando registrado ainda.</div>
+      </div>
+    </div>
+    <div class="field-group">
       <div class="group-ti">Ações</div>
       <div style="display:flex;gap:8px">
         <button class="btn secondary" style="flex:1" onclick="exportDiag()">⬇ Exportar JSON</button>
@@ -643,20 +669,65 @@
 }
 
 // ─── Diagnóstico (debug): captura tempo real via WS ────────────────────
+// `_diagValues` é persistido em localStorage — sobrevive desligar o carro,
+// recarregar PWA ou bridge limpar snapshot (quando APK desativa coleta).
 let _diagValues = {};
+let _diagEvents = [];
 let _diagRenderQueued = false;
+let _diagPendingTimer = null;
+let _diagPendingTarget = null;  // estado desejado (true/false) enquanto aguarda ack
+const DIAG_CACHE_KEY = 'eco_diag_values_v1';
+const DIAG_EVENTS_CACHE_KEY = 'eco_diag_events_v1';
+function _loadDiagFromCache() {
+  try {
+    _diagValues = JSON.parse(localStorage.getItem(DIAG_CACHE_KEY) || '{}') || {};
+    _diagEvents = JSON.parse(localStorage.getItem(DIAG_EVENTS_CACHE_KEY) || '[]') || [];
+  } catch (_) { _diagValues = {}; _diagEvents = []; }
+}
+let _diagSaveTimer = null;
+function _scheduleDiagCacheSave() {
+  if (_diagSaveTimer) return;
+  _diagSaveTimer = setTimeout(() => {
+    _diagSaveTimer = null;
+    try { localStorage.setItem(DIAG_CACHE_KEY, JSON.stringify(_diagValues)); } catch (_) {}
+    try { localStorage.setItem(DIAG_EVENTS_CACHE_KEY, JSON.stringify(_diagEvents.slice(-100))); } catch (_) {}
+  }, 1500);
+}
+_loadDiagFromCache();
+
 async function _loadDiag() {
   const tk = localStorage.getItem('bridge_token');
   if (!tk) return;
   try {
     const r = await fetch('/api/diag/data', { headers: { 'Authorization': 'Bearer ' + tk } });
     const d = await r.json();
-    document.getElementById('tg-diag').classList.toggle('on', !!d.enabled);
+    if (_diagPendingTarget === null) _setDiagToggleState(!!d.enabled, false);
     document.getElementById('cfg-diag-interval').value = d.interval_sec || 5;
-    _diagValues = d.values || {};
+    // Merge — não sobrescreve nossa cópia local (pode ter chaves antigas)
+    const serverVals = d.values || {};
+    for (const k of Object.keys(serverVals)) _diagValues[k] = serverVals[k];
+    _scheduleDiagCacheSave();
     _scheduleDiagRender();
     _updateDiagAdvSub(d.enabled, d.interval_sec);
   } catch (_) {}
+  // Eventos recentes do servidor
+  try {
+    const r2 = await fetch('/api/diag/events', { headers: { 'Authorization': 'Bearer ' + tk } });
+    if (r2.ok) {
+      const j = await r2.json();
+      _diagEvents = (j.events || []).slice(-100);
+      _scheduleDiagCacheSave();
+    }
+  } catch (_) {}
+  _renderDiagEvents();
+}
+
+// Aplica estado no toggle visual. `pending=true` mostra animação amarela.
+function _setDiagToggleState(enabled, pending) {
+  const el = document.getElementById('tg-diag');
+  if (!el) return;
+  el.classList.toggle('on', !!enabled);
+  el.classList.toggle('pending', !!pending);
 }
 function _updateDiagAdvSub(enabled, sec) {
   const el = document.getElementById('adv-diag-sub');
@@ -749,28 +820,111 @@ window._onDiagAck = function(data) {
   }
 };
 
+// Toggle vai pra estado "pendente" até o APK confirmar via diag/state.
+// Se não chegar ack em ~8s, reverte e mostra erro.
 async function toggleDiag() {
   const tk = localStorage.getItem('bridge_token');
   const el = document.getElementById('tg-diag');
   const wasOn = el.classList.contains('on');
+  const want = !wasOn;
   const interval = parseInt(document.getElementById('cfg-diag-interval').value, 10) || 5;
-  if (!wasOn && !confirm(`Ativar coleta? O APK vai publicar TODAS as constantes a cada ${interval}s. Pode gerar tráfego significativo.`)) return;
-  el.classList.toggle('on');
+  if (want && !confirm(`Ativar coleta? O APK vai publicar TODAS as constantes a cada ${interval}s. Pode gerar tráfego significativo.`)) return;
+  // Marca como pendente (toggle amarelo pulsando) — só vai pra "on" definitivo quando o APK confirmar
+  _diagPendingTarget = want;
+  _setDiagToggleState(wasOn, true);
+  if (_diagPendingTimer) clearTimeout(_diagPendingTimer);
+  _diagPendingTimer = setTimeout(() => {
+    if (_diagPendingTarget === null) return;
+    _setDiagToggleState(document.getElementById('tg-diag').classList.contains('on'), false);
+    showToast('⚠ APK não respondeu — toggle revertido ao estado real', 'err');
+    _diagPendingTarget = null;
+    _loadDiag();
+  }, 8000);
   try {
     const r = await fetch('/api/diag/enable', {
       method: 'POST',
       headers: { 'Authorization': 'Bearer ' + tk, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ enabled: !wasOn, interval_sec: interval }),
+      body: JSON.stringify({ enabled: want, interval_sec: interval }),
     });
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || 'HTTP ' + r.status);
-    showToast(!wasOn ? '✓ Coleta ativada no carro' : '✓ Coleta desativada', 'ok');
-    _updateDiagAdvSub(!wasOn, interval);
-    if (wasOn) { _diagValues = {}; _renderDiagList(); }  // limpa snapshot ao desligar
+    showToast(`⏳ Comando enviado — aguardando confirmação do carro…`, 'ok');
   } catch (e) {
-    el.classList.toggle('on');  // reverte
+    if (_diagPendingTimer) { clearTimeout(_diagPendingTimer); _diagPendingTimer = null; }
+    _diagPendingTarget = null;
+    _setDiagToggleState(wasOn, false);
     showToast('✗ ' + e.message, 'err');
   }
+}
+
+// Recebe estado real do APK (single source of truth)
+window._onDiagState = function(data) {
+  if (!data) return;
+  if (_diagPendingTimer) { clearTimeout(_diagPendingTimer); _diagPendingTimer = null; }
+  const real = !!data.enabled;
+  _setDiagToggleState(real, false);
+  if (_diagPendingTarget !== null) {
+    if (real === _diagPendingTarget) {
+      showToast(real ? '✓ Coleta ativada no carro' : '✓ Coleta desativada', 'ok');
+    } else {
+      showToast('⚠ Carro reportou estado diferente do solicitado', 'err');
+    }
+    _diagPendingTarget = null;
+  }
+  if (data.interval_sec) document.getElementById('cfg-diag-interval').value = data.interval_sec;
+  _updateDiagAdvSub(real, data.interval_sec || 5);
+};
+
+// Recebe eventos (cmd enviado / ack / erro) — adiciona no painel de log
+window._onDiagEvent = function(ev) {
+  if (!ev) return;
+  _diagEvents.push(ev);
+  if (_diagEvents.length > 100) _diagEvents = _diagEvents.slice(-100);
+  _scheduleDiagCacheSave();
+  _renderDiagEvents();
+};
+
+function _renderDiagEvents() {
+  const list = document.getElementById('diag-events-list');
+  if (!list) return;
+  if (!_diagEvents.length) {
+    list.innerHTML = '<div style="text-align:center;color:var(--muted);padding:14px">Nenhum comando registrado ainda.</div>';
+    return;
+  }
+  const html = _diagEvents.slice(-50).reverse().map(ev => {
+    const t = new Date(ev.ts || Date.now()).toLocaleTimeString('pt-BR');
+    let tag, cls, body;
+    switch (ev.type) {
+      case 'cmd_sent':
+        tag = '→ ENVIADO'; cls = 'sent';
+        body = `cmd/diag · ${JSON.stringify(ev.payload)}`;
+        break;
+      case 'state_ack':
+        tag = '← APK'; cls = 'ack';
+        body = `enabled=${ev.enabled} · interval=${ev.interval_sec}s${ev.source ? ' · src=' + ev.source : ''}`;
+        break;
+      case 'set_cmd_sent':
+        tag = '→ SET'; cls = 'sent';
+        body = `${ev.key} = ${ev.payload}`;
+        break;
+      case 'set_ack':
+        tag = ev.ok ? '← OK' : '← FAIL';
+        cls = ev.ok ? 'ack' : 'error';
+        body = `${ev.key}${ev.applied !== undefined && ev.applied !== null ? ' → ' + JSON.stringify(ev.applied) : ''}${ev.error ? ' · ' + ev.error : ''}`;
+        break;
+      case 'cmd_error':
+        tag = '✗ ERRO'; cls = 'error';
+        body = `${ev.error || 'erro desconhecido'}${ev.key ? ' (' + ev.key + ')' : ''}`;
+        break;
+      default:
+        tag = ev.type; cls = '';
+        body = JSON.stringify(ev);
+    }
+    const tagCls = cls === 'sent' ? 'send' : cls;
+    const safeBody = String(body).replace(/</g, '&lt;');
+    return `<div class="diag-ev ${cls}"><span class="ev-ts">${t}</span><span class="ev-tag ${tagCls}">${tag}</span><span class="ev-body">${safeBody}</span></div>`;
+  }).join('');
+  list.innerHTML = html;
 }
 
 async function saveDiagInterval() {
@@ -815,10 +969,13 @@ async function clearDiag() {
   } catch (e) { showToast('✗ ' + e.message, 'err'); }
 }
 
-// Recebe updates em tempo real do WS (chamado pelo shell)
+// Recebe updates em tempo real do WS (chamado pelo shell).
+// Persiste no localStorage — mesmo desligando o carro, o último valor visto
+// continua disponível no PWA.
 window._onDiagUpdate = function(data) {
   if (!data || !data.key) return;
   _diagValues[data.key] = { value: data.value, ts: data.ts || Date.now() };
+  _scheduleDiagCacheSave();
   _scheduleDiagRender();
 };
 

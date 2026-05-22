@@ -1281,7 +1281,7 @@ class MqttManager private constructor() {
     @Volatile private var diagIntervalSec = 5
     @Volatile private var diagTimer: Timer? = null
 
-    private fun applyDiagState(enabled: Boolean, intervalSec: Int) {
+    private fun applyDiagState(enabled: Boolean, intervalSec: Int, source: String = "cmd") {
         diagEnabled = enabled
         diagIntervalSec = intervalSec.coerceIn(1, 300)
         // Persiste em SharedPreferences pra sobreviver restart do app
@@ -1296,6 +1296,7 @@ class MqttManager private constructor() {
         diagTimer = null
         if (!enabled) {
             AppLogger.i(TAG, "[diag] DESATIVADO")
+            publishDiagState(source)
             return
         }
         AppLogger.i(TAG, "[diag] ATIVADO (intervalo ${diagIntervalSec}s, ${CarConstants.entries.size} constantes)")
@@ -1309,6 +1310,25 @@ class MqttManager private constructor() {
             }
         }, 500L, periodMs)
         diagTimer = t
+        publishDiagState(source)
+    }
+
+    // Publica estado real do modo diag em diag/state (retained) — o bridge
+    // usa isso como única fonte de verdade pra refletir o toggle na PWA.
+    private fun publishDiagState(source: String) {
+        val c = client ?: return
+        if (!c.isConnected) return
+        try {
+            val state = JSONObject()
+                .put("enabled", diagEnabled)
+                .put("interval_sec", diagIntervalSec)
+                .put("applied_at", System.currentTimeMillis())
+                .put("source", source)
+            c.publish("$prefix/diag/state", state.toString().toByteArray(), 1, true)
+            AppLogger.i(TAG, "[diag] state publicado: enabled=$diagEnabled interval=$diagIntervalSec src=$source")
+        } catch (e: Exception) {
+            AppLogger.w(TAG, "[diag] erro publicando state: ${e.message}")
+        }
     }
 
     private fun publishDiagSnapshot() {
@@ -1332,16 +1352,18 @@ class MqttManager private constructor() {
     private fun restoreDiagState(prefs: SharedPreferences) {
         val enabled = prefs.getBoolean("diag_enabled", false)
         val interval = prefs.getInt("diag_interval_sec", 5)
-        if (enabled) {
-            AppLogger.i(TAG, "[diag] estado persistido encontrado — restaurando (interval ${interval}s)")
-            // Espera 5s pra MQTT conectar antes de iniciar publicação
-            executor.submit {
-                Thread.sleep(5_000)
-                applyDiagState(true, interval)
+        // Espera 5s pra MQTT conectar antes de publicar/aplicar
+        executor.submit {
+            Thread.sleep(5_000)
+            if (enabled) {
+                AppLogger.i(TAG, "[diag] estado persistido encontrado — restaurando (interval ${interval}s)")
+                applyDiagState(true, interval, source = "restore")
+            } else {
+                diagEnabled = false
+                diagIntervalSec = interval
+                // Publica o estado real (disabled) pra bridge saber que o APK está vivo
+                publishDiagState("restore")
             }
-        } else {
-            diagEnabled = false
-            diagIntervalSec = interval
         }
     }
 
