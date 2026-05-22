@@ -425,25 +425,29 @@
   </div>
   <div class="sub-body">
     <div class="field-group">
-      <div class="group-ti">Exportar tudo</div>
+      <div class="group-ti">Exportar do servidor</div>
       <div class="field">
-        <div style="font-size:13px;font-weight:600;margin-bottom:4px">Backup completo (servidor)</div>
-        <div style="font-size:11px;color:var(--muted);margin-bottom:10px">Inclui viagens, recargas, abastecimentos, manutenções, locais conhecidos e radares ignorados.</div>
-        <button class="btn primary" onclick="showToast('⬇ Baixando backup-v4.json')">⬇ Baixar JSON</button>
+        <div style="font-size:13px;font-weight:600;margin-bottom:4px">Backup completo</div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:10px">Baixa um JSON com viagens, recargas, abastecimentos, manutenções, locais conhecidos e radares ignorados.</div>
+        <button class="btn primary" onclick="downloadBackup()">⬇ Baixar JSON</button>
       </div>
     </div>
     <div class="field-group">
-      <div class="group-ti">Restaurar</div>
+      <div class="group-ti">Restaurar no servidor</div>
       <div class="field">
         <div style="font-size:13px;font-weight:600;margin-bottom:4px">Importar backup</div>
         <div style="font-size:11px;color:var(--muted);margin-bottom:10px">Substitui todos os dados atuais. Ação irreversível.</div>
-        <button class="btn secondary" onclick="showToast('Selecione arquivo backup-v4.json')">📂 Selecionar arquivo</button>
+        <input id="cfg-backup-file" type="file" accept=".json,application/json" style="display:none" onchange="uploadBackup(this.files[0])">
+        <button class="btn secondary" onclick="document.getElementById('cfg-backup-file').click()">📂 Selecionar arquivo</button>
       </div>
     </div>
     <div class="field-group">
-      <div class="group-ti">Zona de perigo</div>
-      <button class="btn danger" onclick="confirmClearHistory()">🗑 Limpar todo o histórico</button>
-      <div class="hint" style="text-align:center;margin-top:8px;color:var(--muted)">Apaga viagens, recargas, abastecimentos. Mantém configurações e locais.</div>
+      <div class="group-ti">Cache do telefone</div>
+      <div class="field">
+        <div style="font-size:13px;font-weight:600;margin-bottom:4px">Limpar dados locais</div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:10px">Apaga listas cacheadas (viagens, recargas, eventos), telemetria do IndexedDB, tiles de mapa e cache do Service Worker. Os dados do servidor <strong style="color:var(--green)">não são afetados</strong> — tudo será baixado de novo na próxima abertura.</div>
+        <button class="btn secondary" onclick="clearLocalCache()">🧹 Limpar cache local</button>
+      </div>
     </div>
   </div>
 </div>
@@ -689,6 +693,73 @@ async function show2faBackup() {
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || 'HTTP ' + r.status);
     renderBackupCodes(d.codes || []);
+  } catch (e) { showToast('✗ ' + e.message, 'err'); }
+}
+
+// ─── Backup & Dados ──────────────────────────────────────
+async function downloadBackup() {
+  const tk = localStorage.getItem('bridge_token');
+  if (!tk) return;
+  showToast('⬇ Gerando backup…', 'ok');
+  try {
+    const r = await fetch('/api/backup', { headers: { 'Authorization': 'Bearer ' + tk } });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const now = new Date();
+    a.download = `ecotrip-backup-${now.toISOString().slice(0,10)}.json`;
+    document.body.appendChild(a); a.click();
+    setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 100);
+    showToast('✓ Backup baixado', 'ok');
+  } catch (e) { showToast('✗ ' + e.message, 'err'); }
+}
+
+async function uploadBackup(file) {
+  if (!file) return;
+  if (!confirm(`Importar "${file.name}"? Todos os dados atuais do servidor serão substituídos.`)) return;
+  const tk = localStorage.getItem('bridge_token');
+  try {
+    const text = await file.text();
+    const json = JSON.parse(text);
+    showToast('⏳ Restaurando…', 'ok');
+    const r = await fetch('/api/restore', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + tk, 'Content-Type': 'application/json' },
+      body: JSON.stringify(json),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'HTTP ' + r.status);
+    showToast('✓ Backup restaurado. Recarregando…', 'ok');
+    setTimeout(() => window.location.reload(), 2000);
+  } catch (e) { showToast('✗ ' + e.message, 'err'); }
+}
+
+async function clearLocalCache() {
+  if (!confirm('Limpar todo o cache local do telefone?\n\nIsso apaga:\n• Listas cacheadas (viagens, recargas, eventos)\n• Telemetria das viagens (IndexedDB)\n• Tiles de mapa baixados\n• Service Worker\n\nOs dados do servidor não serão tocados. Vai recarregar.')) return;
+  showToast('🧹 Limpando cache local…', 'ok');
+  try {
+    // 1. localStorage: remove só eco_cache_* + eco_tiles_* + eco_state_cache (não toca token/notif_read)
+    Object.keys(localStorage).forEach(k => {
+      if (k.startsWith('eco_cache_') || k.startsWith('eco_tiles_') || k === 'eco_state_cache' || k === 'eco_pwa_version' || k === 'eco_pwa_dismissed' || k === 'eco_update_dismissed' || k === 'eco_seen_bridge_ver' || k === 'eco_seen_apk_ver') {
+        localStorage.removeItem(k);
+      }
+    });
+    // 2. IndexedDB: deleta o DB inteiro
+    try { indexedDB.deleteDatabase('ecotrip_v2'); } catch (_) {}
+    // 3. SW caches
+    if ('caches' in window) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map(k => caches.delete(k)));
+    }
+    // 4. Desregistra SW (próximo load instala fresh)
+    if ('serviceWorker' in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map(r => r.unregister()));
+    }
+    showToast('✓ Cache limpo. Recarregando…', 'ok');
+    setTimeout(() => window.location.replace('/'), 1500);
   } catch (e) { showToast('✗ ' + e.message, 'err'); }
 }
 
@@ -1376,7 +1447,7 @@ window.markMaintDone = async function(id) {
 };
 
   // Expõe handlers de onclick no window
-  Object.assign(window, { openSub: typeof openSub !== 'undefined' ? openSub : undefined, closeSub: typeof closeSub !== 'undefined' ? closeSub : undefined, saveSection: typeof saveSection !== 'undefined' ? saveSection : undefined, toggle2fa: typeof toggle2fa !== 'undefined' ? toggle2fa : undefined, confirmClearHistory: typeof confirmClearHistory !== 'undefined' ? confirmClearHistory : undefined, openMaintAdd: openMaintAdd, closeMaintModal: closeMaintModal, saveMaintItem: saveMaintItem, deleteMaintItem: deleteMaintItem, markMaintDone: markMaintDone, saveVehicle: saveVehicle, setChargeLimit: setChargeLimit, actionRefreshRadars: actionRefreshRadars, actionReanalyzeTrips: actionReanalyzeTrips, actionRestartBridge: actionRestartBridge, actionUpdateBridge: actionUpdateBridge, openPlaceAdd: openPlaceAdd, openPlaceEdit: openPlaceEdit, closePlaceModal: closePlaceModal, usePlaceGps: usePlaceGps, savePlace: savePlace, deletePlace: deletePlace, toggleNotif: toggleNotif, changePassword: changePassword, toggle2faNew: toggle2faNew, closeTotpModal: closeTotpModal, activate2fa: activate2fa, show2faBackup: show2faBackup, regenBackupCodes: regenBackupCodes, openGeofencePlaces: openGeofencePlaces, _toggleGeofencePick: _toggleGeofencePick, saveGeofencePlaces: saveGeofencePlaces, toggleChargeEnding: toggleChargeEnding, editChargeEndingMin: editChargeEndingMin });
+  Object.assign(window, { openSub: typeof openSub !== 'undefined' ? openSub : undefined, closeSub: typeof closeSub !== 'undefined' ? closeSub : undefined, saveSection: typeof saveSection !== 'undefined' ? saveSection : undefined, toggle2fa: typeof toggle2fa !== 'undefined' ? toggle2fa : undefined, confirmClearHistory: typeof confirmClearHistory !== 'undefined' ? confirmClearHistory : undefined, openMaintAdd: openMaintAdd, closeMaintModal: closeMaintModal, saveMaintItem: saveMaintItem, deleteMaintItem: deleteMaintItem, markMaintDone: markMaintDone, saveVehicle: saveVehicle, setChargeLimit: setChargeLimit, actionRefreshRadars: actionRefreshRadars, actionReanalyzeTrips: actionReanalyzeTrips, actionRestartBridge: actionRestartBridge, actionUpdateBridge: actionUpdateBridge, openPlaceAdd: openPlaceAdd, openPlaceEdit: openPlaceEdit, closePlaceModal: closePlaceModal, usePlaceGps: usePlaceGps, savePlace: savePlace, deletePlace: deletePlace, toggleNotif: toggleNotif, changePassword: changePassword, toggle2faNew: toggle2faNew, closeTotpModal: closeTotpModal, activate2fa: activate2fa, show2faBackup: show2faBackup, regenBackupCodes: regenBackupCodes, openGeofencePlaces: openGeofencePlaces, _toggleGeofencePick: _toggleGeofencePick, saveGeofencePlaces: saveGeofencePlaces, toggleChargeEnding: toggleChargeEnding, editChargeEndingMin: editChargeEndingMin, downloadBackup: downloadBackup, uploadBackup: uploadBackup, clearLocalCache: clearLocalCache });
   if (!window['initView_config']) window['initView_config'] = function() {};
 })();
 </script>
