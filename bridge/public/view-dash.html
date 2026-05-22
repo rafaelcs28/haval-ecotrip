@@ -1124,19 +1124,19 @@ let _latestState = null;
 // Bootstrap
 updateTabbarHeight();
 window.addEventListener('resize', updateTabbarHeight);
-// Live se houver token; senão snapshot
+// Live se houver token; senão snapshot fake
 if (localStorage.getItem('bridge_token')) {
   useLive = true;
-  // 1. Render instantâneo do state cacheado no shell (zero rede)
-  if (window.state && Object.keys(window.state).length) {
+  // Render imediato APENAS se já há state real (do cache localStorage do shell).
+  // Sem state: aguarda renderLive trazer dados reais — NÃO mostra snapshot fake.
+  if (window.state && (window.state.gps_lat || window.state.soc_pct != null)) {
     try { render(window.state, SNAPSHOT.known_places); } catch (_) {}
-  } else {
-    renderSnapshot();
   }
-  // 2. Fetch live em background (offline = continua com cache)
+  // Fetch live + polling
   renderLive();
   liveTimer = setInterval(renderLive, 5000);
 } else {
+  // Sem login: só o snapshot fake (demo)
   renderSnapshot();
 }
 {
