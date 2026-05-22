@@ -771,6 +771,14 @@ function fmtChargeEta(min) {
   return `${h}h${m > 0 ? ' ' + m + 'min' : ''}`;
 }
 
+let _lastCenteredPos = null;
+function _haversine(a, b) {
+  const R = 6371000, toRad = x => x * Math.PI / 180;
+  const dLat = toRad(b[0] - a[0]), dLng = toRad(b[1] - a[1]);
+  const s = Math.sin(dLat/2)**2 + Math.cos(toRad(a[0]))*Math.cos(toRad(b[0]))*Math.sin(dLng/2)**2;
+  return 2 * R * Math.asin(Math.sqrt(s));
+}
+
 function render(s, kpData) {
   _latestState = s;  // pro modal de ação saber o estado atual
   // ── Status dot
@@ -791,6 +799,10 @@ function render(s, kpData) {
         zoomSnap: 0.5,
       }).setView(pos, 16);
       L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom: 19 }).addTo(map);
+      // Força recálculo de dimensões logo após instanciar (alguns iOS PWA têm
+      // race quando map é criado num container ainda sem layout estável)
+      setTimeout(() => { try { map.invalidateSize(); } catch (_) {} }, 100);
+      setTimeout(() => { try { map.invalidateSize(); } catch (_) {} }, 500);
     }
     if (marker) marker.setLatLng(pos);
     else marker = L.marker(pos, { icon: L.divIcon({
@@ -798,9 +810,15 @@ function render(s, kpData) {
       html: '<div style="width:18px;height:18px;background:#22c55e;border:3px solid #fff;border-radius:50%;box-shadow:0 0 0 6px rgba(34,197,94,.35),0 0 0 14px rgba(34,197,94,.12),0 2px 8px rgba(0,0,0,.4);"></div>',
       iconSize: [18,18], iconAnchor: [9,9]
     }) }).addTo(map);
-    // Centra o pin na METADE SUPERIOR da tela quando o bottom-sheet está expandido.
-    // Quando colapsado: centro absoluto da viewport. Usa rAF + reflow garantido.
-    _centerMapOnVisibleArea(pos);
+    // Centra simples (sem rAF aninhado) — só recentra se carro andou >50m
+    const moved = !_lastCenteredPos || _haversine(_lastCenteredPos, pos) > 50;
+    if (moved) {
+      const sheet = document.querySelector('.bottom-sheet');
+      const sheetH = sheet && !sheet.classList.contains('collapsed') ? sheet.offsetHeight : 0;
+      map.setView(pos, map.getZoom() || 16, { animate: false });
+      if (sheetH > 0) map.panBy([0, sheetH / 2], { animate: false });
+      _lastCenteredPos = pos;
+    }
     currentKp = _findKp(kpData, s.gps_lat, s.gps_lng);
     updateAddress(s.gps_lat, s.gps_lng);
     renderPlace(s.gps_lat, s.gps_lng);
