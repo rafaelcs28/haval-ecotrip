@@ -1481,18 +1481,23 @@ async function _loadLogsData() {
     }
     if (Array.isArray(list)) {
       const incoming = list.map(e => ({ ...e, ts: e.ts || e.timestamp || e.timestamp_ms }));
-      if (lastTs > 0 && incoming.length) {
-        // Merge incremental: prepend novos no array existente
+      // Bug crítico antes: se lastTs > 0 (tinha cache) e incoming vazio,
+      // o else SOBRESCREVIA allEvents com [] e zerava o cache.
+      // Agora: substitui só se for fetch completo (lastTs == 0).
+      if (lastTs === 0) {
+        allEvents = incoming;
+        window.cacheSet && window.cacheSet('logs', allEvents);
+      } else if (incoming.length) {
+        // Incremental: merge novos sem perder existentes
         const existingIds = new Set(allEvents.map(e => e.id || e.ts));
         const onlyNew = incoming.filter(e => !existingIds.has(e.id || e.ts));
         if (onlyNew.length) {
           allEvents = [...onlyNew, ...allEvents];
           if (allEvents.length > 1000) allEvents.length = 1000;
+          window.cacheSet && window.cacheSet('logs', allEvents);
         }
-      } else {
-        allEvents = incoming;
       }
-      window.cacheSet && window.cacheSet('logs', allEvents);
+      // Sem mudança quando incoming vazio E tem cache: mantém allEvents intacto
     }
   } catch (e) { console.warn('Logs: falha live', e); }
   if (progress) progress.done();

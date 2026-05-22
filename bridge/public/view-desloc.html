@@ -636,8 +636,8 @@
 
 <!-- Sub-tabs -->
 <div class="subtab">
-  <div class="stb active" data-view="registros" onclick="setView('registros')"><span class="ic">📋</span>Registros</div>
-  <div class="stb" data-view="stats" onclick="setView('stats')"><span class="ic">📊</span>Estatísticas</div>
+  <div class="stb active" data-view="registros" onclick="setDeslocView('registros')"><span class="ic">📋</span>Registros</div>
+  <div class="stb" data-view="stats" onclick="setDeslocView('stats')"><span class="ic">📊</span>Estatísticas</div>
 </div>
 
 <!-- Tabbar -->
@@ -33507,7 +33507,7 @@ function setFilter(f) {
   renderCalendar();
 }
 
-function setView(v) {
+function setDeslocView(v) {
   currentView = v;
   document.querySelectorAll('.stb').forEach(el => {
     el.classList.toggle('active', el.dataset.view === v);
@@ -34291,7 +34291,7 @@ function openVersionInfo() {
   alert(lines.join('\n'));
 }
   // Expõe handlers de onclick no window
-  Object.assign(window, { setFilter: typeof setFilter !== 'undefined' ? setFilter : undefined, navDay: typeof navDay !== 'undefined' ? navDay : undefined, openCalendar: typeof openCalendar !== 'undefined' ? openCalendar : undefined, setPeriod: typeof setPeriod !== 'undefined' ? setPeriod : undefined, closeMapFull: typeof closeMapFull !== 'undefined' ? closeMapFull : undefined, toggleTimeline: typeof toggleTimeline !== 'undefined' ? toggleTimeline : undefined, setView: typeof setView !== 'undefined' ? setView : undefined, openMapFull: typeof openMapFull !== 'undefined' ? openMapFull : undefined, openRename: typeof openRename !== 'undefined' ? openRename : undefined, openShare: typeof openShare !== 'undefined' ? openShare : undefined, confirmDelete: typeof confirmDelete !== 'undefined' ? confirmDelete : undefined, closeAction: typeof closeAction !== 'undefined' ? closeAction : undefined, saveRename: typeof saveRename !== 'undefined' ? saveRename : undefined, doDelete: typeof doDelete !== 'undefined' ? doDelete : undefined, changeMonth: typeof changeMonth !== 'undefined' ? changeMonth : undefined, selectDate: typeof selectDate !== 'undefined' ? selectDate : undefined });
+  Object.assign(window, { setFilter: typeof setFilter !== 'undefined' ? setFilter : undefined, navDay: typeof navDay !== 'undefined' ? navDay : undefined, openCalendar: typeof openCalendar !== 'undefined' ? openCalendar : undefined, setPeriod: typeof setPeriod !== 'undefined' ? setPeriod : undefined, closeMapFull: typeof closeMapFull !== 'undefined' ? closeMapFull : undefined, toggleTimeline: typeof toggleTimeline !== 'undefined' ? toggleTimeline : undefined, setDeslocView: typeof setDeslocView !== 'undefined' ? setView : undefined, openMapFull: typeof openMapFull !== 'undefined' ? openMapFull : undefined, openRename: typeof openRename !== 'undefined' ? openRename : undefined, openShare: typeof openShare !== 'undefined' ? openShare : undefined, confirmDelete: typeof confirmDelete !== 'undefined' ? confirmDelete : undefined, closeAction: typeof closeAction !== 'undefined' ? closeAction : undefined, saveRename: typeof saveRename !== 'undefined' ? saveRename : undefined, doDelete: typeof doDelete !== 'undefined' ? doDelete : undefined, changeMonth: typeof changeMonth !== 'undefined' ? changeMonth : undefined, selectDate: typeof selectDate !== 'undefined' ? selectDate : undefined });
   if (!window['initView_desloc']) window['initView_desloc'] = function() {};
 })();
 </script>

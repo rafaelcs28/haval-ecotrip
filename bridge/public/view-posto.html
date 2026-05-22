@@ -517,8 +517,8 @@
 
 <!-- Sub-tabs (Registros · Estatísticas) -->
 <div class="subtab">
-  <div class="stb active" data-view="registros" onclick="setView('registros')"><span class="ic">📋</span>Registros</div>
-  <div class="stb" data-view="stats" onclick="setView('stats')"><span class="ic">📊</span>Estatísticas</div>
+  <div class="stb active" data-view="registros" onclick="setPostoView('registros')"><span class="ic">📋</span>Registros</div>
+  <div class="stb" data-view="stats" onclick="setPostoView('stats')"><span class="ic">📊</span>Estatísticas</div>
 </div>
 
 <!-- Tabbar principal -->
@@ -851,7 +851,7 @@ function setFilter(f) {
   renderCalendar();   // dots vermelhos refletem o filtro ativo
 }
 
-function setView(v) {
+function setPostoView(v) {
   currentView = v;
   document.querySelectorAll('.stb').forEach(el => {
     el.classList.toggle('active', el.dataset.view === v);
@@ -1478,7 +1478,7 @@ function openVersionInfo() {
   alert(lines.join('\n'));
 }
   // Expõe handlers de onclick no window
-  Object.assign(window, { setFilter: typeof setFilter !== 'undefined' ? setFilter : undefined, navDay: typeof navDay !== 'undefined' ? navDay : undefined, openCalendar: typeof openCalendar !== 'undefined' ? openCalendar : undefined, setPeriod: typeof setPeriod !== 'undefined' ? setPeriod : undefined, setView: typeof setView !== 'undefined' ? setView : undefined, closeAction: typeof closeAction !== 'undefined' ? closeAction : undefined, saveCharger: typeof saveCharger !== 'undefined' ? saveCharger : undefined, saveCost: typeof saveCost !== 'undefined' ? saveCost : undefined, saveLocation: typeof saveLocation !== 'undefined' ? saveLocation : undefined, saveMeta: typeof saveMeta !== 'undefined' ? saveMeta : undefined, saveRefuel: typeof saveRefuel !== 'undefined' ? saveRefuel : undefined, saveRefuelCost: typeof saveRefuelCost !== 'undefined' ? saveRefuelCost : undefined, openLocationEdit: typeof openLocationEdit !== 'undefined' ? openLocationEdit : undefined, openTimeline: typeof openTimeline !== 'undefined' ? openTimeline : undefined, openMerge: typeof openMerge !== 'undefined' ? openMerge : undefined, openChargerEdit: typeof openChargerEdit !== 'undefined' ? openChargerEdit : undefined, openCostEdit: typeof openCostEdit !== 'undefined' ? openCostEdit : undefined, openMetaEdit: typeof openMetaEdit !== 'undefined' ? openMetaEdit : undefined, openRefuelEdit: typeof openRefuelEdit !== 'undefined' ? openRefuelEdit : undefined, openRefuelCost: typeof openRefuelCost !== 'undefined' ? openRefuelCost : undefined, changeMonth: typeof changeMonth !== 'undefined' ? changeMonth : undefined, selectDate: typeof selectDate !== 'undefined' ? selectDate : undefined });
+  Object.assign(window, { setFilter: typeof setFilter !== 'undefined' ? setFilter : undefined, navDay: typeof navDay !== 'undefined' ? navDay : undefined, openCalendar: typeof openCalendar !== 'undefined' ? openCalendar : undefined, setPeriod: typeof setPeriod !== 'undefined' ? setPeriod : undefined, setPostoView: typeof setPostoView !== 'undefined' ? setView : undefined, closeAction: typeof closeAction !== 'undefined' ? closeAction : undefined, saveCharger: typeof saveCharger !== 'undefined' ? saveCharger : undefined, saveCost: typeof saveCost !== 'undefined' ? saveCost : undefined, saveLocation: typeof saveLocation !== 'undefined' ? saveLocation : undefined, saveMeta: typeof saveMeta !== 'undefined' ? saveMeta : undefined, saveRefuel: typeof saveRefuel !== 'undefined' ? saveRefuel : undefined, saveRefuelCost: typeof saveRefuelCost !== 'undefined' ? saveRefuelCost : undefined, openLocationEdit: typeof openLocationEdit !== 'undefined' ? openLocationEdit : undefined, openTimeline: typeof openTimeline !== 'undefined' ? openTimeline : undefined, openMerge: typeof openMerge !== 'undefined' ? openMerge : undefined, openChargerEdit: typeof openChargerEdit !== 'undefined' ? openChargerEdit : undefined, openCostEdit: typeof openCostEdit !== 'undefined' ? openCostEdit : undefined, openMetaEdit: typeof openMetaEdit !== 'undefined' ? openMetaEdit : undefined, openRefuelEdit: typeof openRefuelEdit !== 'undefined' ? openRefuelEdit : undefined, openRefuelCost: typeof openRefuelCost !== 'undefined' ? openRefuelCost : undefined, changeMonth: typeof changeMonth !== 'undefined' ? changeMonth : undefined, selectDate: typeof selectDate !== 'undefined' ? selectDate : undefined });
   if (!window['initView_posto']) window['initView_posto'] = function() {};
 })();
 </script>
