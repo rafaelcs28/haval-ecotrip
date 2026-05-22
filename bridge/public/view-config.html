@@ -241,20 +241,11 @@
     <div class="field"><div class="lbl">Modelo</div><input type="text" value="Haval H6 PHEV34" readonly></div>
     <div class="field">
       <div class="lbl">Chassi (VIN)</div>
-      <input type="text" id="cfg-chassi" value="lgwffva55sh931315">
-      <div class="hint">Formato: <code>lgw</code> + 14 alfanuméricos · grava em <code>vehicle.json</code></div>
+      <input type="text" id="cfg-chassi" placeholder="lgw...">
+      <div class="hint">Formato: <code>lgw</code> + 14 alfanuméricos · grava em <code>vehicle.json</code>. O carro precisa reiniciar o bridge se o chassi mudar.</div>
+      <div id="cfg-chassi-warn" style="display:none;font-size:11px;color:var(--yellow);margin-top:6px;font-weight:600">⚠ Reinicie o bridge pra ativar (Avançado &gt; Reiniciar bridge)</div>
     </div>
-    <div class="field">
-      <div class="lbl">Capacidade da bateria (kWh)</div>
-      <input type="number" id="cfg-batt-cap" value="34" step="0.1" min="10" max="100">
-      <div class="hint">Usado pra calcular % perda nas recargas</div>
-    </div>
-    <div class="field">
-      <div class="lbl">Capacidade do tanque (L)</div>
-      <input type="number" id="cfg-fuel-cap" value="55" step="1" min="10" max="200">
-      <div class="hint">Usado pra calcular % combustível</div>
-    </div>
-    <button class="btn primary" onclick="saveSection('vehicle')">Salvar</button>
+    <button class="btn primary" onclick="saveVehicle()">Salvar</button>
   </div>
 </div>
 
@@ -490,6 +481,46 @@
   window.scrollTo(0, 0);
   // Hooks por subview
   if (name === 'maint' && typeof _loadMaint === 'function') _loadMaint();
+  if (name === 'vehicle' && typeof _loadVehicle === 'function') _loadVehicle();
+}
+
+async function _loadVehicle() {
+  const tk = localStorage.getItem('bridge_token');
+  if (!tk) return;
+  try {
+    const r = await fetch('/api/vehicle', { headers: { 'Authorization': 'Bearer ' + tk } });
+    const d = await r.json();
+    const input = document.getElementById('cfg-chassi');
+    if (input) input.value = d.active || d.saved_in_file || '';
+    const warn = document.getElementById('cfg-chassi-warn');
+    if (warn) warn.style.display = d.needs_restart ? 'block' : 'none';
+  } catch (_) {}
+}
+
+async function saveVehicle() {
+  const tk = localStorage.getItem('bridge_token');
+  if (!tk) return;
+  const chassi = (document.getElementById('cfg-chassi').value || '').trim().toLowerCase();
+  if (!/^lgw[a-z0-9]{14}$/.test(chassi)) {
+    showToast('✗ Formato inválido. Esperado: lgw + 14 alfanuméricos', 'err');
+    return;
+  }
+  try {
+    const r = await fetch('/api/vehicle', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + tk, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chassi }),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'HTTP ' + r.status);
+    showToast('✓ Chassi salvo', 'ok');
+    if (data.needs_restart) {
+      const warn = document.getElementById('cfg-chassi-warn');
+      if (warn) warn.style.display = 'block';
+    }
+  } catch (e) {
+    showToast('✗ ' + e.message, 'err');
+  }
 }
 function closeSub() {
   document.querySelectorAll('.subview.show').forEach(el => el.classList.remove('show'));
@@ -693,7 +724,7 @@ window.markMaintDone = async function(id) {
 };
 
   // Expõe handlers de onclick no window
-  Object.assign(window, { openSub: typeof openSub !== 'undefined' ? openSub : undefined, closeSub: typeof closeSub !== 'undefined' ? closeSub : undefined, saveSection: typeof saveSection !== 'undefined' ? saveSection : undefined, toggle2fa: typeof toggle2fa !== 'undefined' ? toggle2fa : undefined, confirmClearHistory: typeof confirmClearHistory !== 'undefined' ? confirmClearHistory : undefined, openMaintAdd: openMaintAdd, closeMaintModal: closeMaintModal, saveMaintItem: saveMaintItem, deleteMaintItem: deleteMaintItem, markMaintDone: markMaintDone });
+  Object.assign(window, { openSub: typeof openSub !== 'undefined' ? openSub : undefined, closeSub: typeof closeSub !== 'undefined' ? closeSub : undefined, saveSection: typeof saveSection !== 'undefined' ? saveSection : undefined, toggle2fa: typeof toggle2fa !== 'undefined' ? toggle2fa : undefined, confirmClearHistory: typeof confirmClearHistory !== 'undefined' ? confirmClearHistory : undefined, openMaintAdd: openMaintAdd, closeMaintModal: closeMaintModal, saveMaintItem: saveMaintItem, deleteMaintItem: deleteMaintItem, markMaintDone: markMaintDone, saveVehicle: saveVehicle });
   if (!window['initView_config']) window['initView_config'] = function() {};
 })();
 </script>
