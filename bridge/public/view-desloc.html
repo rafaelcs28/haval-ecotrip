@@ -461,7 +461,8 @@
   background: var(--green); cursor: pointer; border: 3px solid #fff;
 }
 
-/* Toast (feedback rápido) */
+/* Toast (feedback rápido) — display:none por padrão pra evitar chip
+   vazio piscando antes do JS atualizar opacity */
 .toast {
   position: fixed; bottom: 110px; left: 50%; transform: translateX(-50%);
   background: rgba(31,31,31,.95);
@@ -471,8 +472,9 @@
   z-index: 200; box-shadow: 0 4px 16px rgba(0,0,0,.4);
   opacity: 0; transition: opacity .2s, transform .2s;
   pointer-events: none;
+  display: none;
 }
-.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+.toast.show { display: block; opacity: 1; transform: translateX(-50%) translateY(0); }
 </style>
 
 
@@ -33650,6 +33652,7 @@ function getTrip(id) { return trips.find(t => t.id == id); }
 function showToast(msg) {
   const t = document.getElementById('toast');
   t.textContent = msg;
+  t.style.display = '';   // limpa possível display:none inline
   t.classList.add('show');
   clearTimeout(showToast._t);
   showToast._t = setTimeout(() => t.classList.remove('show'), 2200);
