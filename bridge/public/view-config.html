@@ -321,7 +321,6 @@
       <div class="toggle-row" onclick="toggleNotif('charge_start', this)"><div class="label">Início da recarga<div class="sub">Push quando conecta</div></div><div class="toggle" data-key="charge_start"></div></div>
       <div class="toggle-row" onclick="toggleNotif('charge_end', this)"><div class="label">Fim da recarga<div class="sub">Quando atinge meta SOC</div></div><div class="toggle" data-key="charge_end"></div></div>
       <div class="toggle-row" onclick="toggleChargeEnding(this)"><div class="label">Próximo do fim<div class="sub" id="charge-ending-sub">Aviso minutos antes</div></div><div class="toggle" data-key="charge_ending"></div></div>
-      <div id="charge-ending-row" style="display:none;padding:0 4px 6px"><button class="btn secondary" style="width:100%" onclick="editChargeEndingMin()">⏱ Alterar antecedência (<span id="charge-ending-min-v">--</span> min)</button></div>
     </div>
     <div class="field-group">
       <div class="group-ti">Eventos do carro</div>
@@ -865,15 +864,11 @@ function _updateGeofenceLocalControls() {
     const list = _notifPrefsLocal[listKey] || [];
     if (count) count.textContent = list.length === 0 ? 'todos' : `${list.length} marcado${list.length > 1 ? 's' : ''}`;
   });
-  // Charge ending — mostra row de editar minutos quando ON
-  const cer = document.getElementById('charge-ending-row');
+  // Charge ending — sub mostra os minutos configurados quando ON
   const csub = document.getElementById('charge-ending-sub');
-  const cmin = document.getElementById('charge-ending-min-v');
   const isOn = !!_notifPrefsLocal.charge_ending;
   const min = +_notifPrefsLocal.charge_ending_min || 5;
-  if (cer) cer.style.display = isOn ? 'block' : 'none';
   if (csub) csub.textContent = isOn ? `Aviso ${min} min antes` : 'Aviso minutos antes';
-  if (cmin) cmin.textContent = min;
 }
 
 async function toggleChargeEnding() {
@@ -1004,6 +999,8 @@ async function toggleNotif(key) {
   const newVal = !el.classList.contains('on');
   el.classList.toggle('on', newVal);  // otimista
   _notifPrefsLocal[key] = newVal;
+  // Atualiza controles dependentes (botão "Selecionar locais" pra geofence)
+  if (key === 'geofence_arrival' || key === 'geofence_departure') _updateGeofenceLocalControls();
   try {
     const r = await fetch('/api/push/prefs', {
       method: 'POST',
@@ -1018,6 +1015,7 @@ async function toggleNotif(key) {
     // Reverte em caso de erro
     el.classList.toggle('on', !newVal);
     _notifPrefsLocal[key] = !newVal;
+    if (key === 'geofence_arrival' || key === 'geofence_departure') _updateGeofenceLocalControls();
     showToast('✗ Falha ao salvar: ' + e.message, 'err');
   }
 }
