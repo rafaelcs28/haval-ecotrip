@@ -3046,9 +3046,14 @@ app.get('/api/location', (_req, res) => {
 });
 
 app.get('/api/config', (_req, res) => res.json({
-  mqtt_host:   MQTT_HOST,
-  mqtt_prefix: MQTT_PREFIX,
-  version:     require('./package.json').version,
+  mqtt_host:        MQTT_HOST,
+  mqtt_prefix:      MQTT_PREFIX,
+  mqtt_connected:   !!(mqttClient && mqttClient.connected),
+  version:          require('./package.json').version,
+  bridge_uptime_sec: Math.floor(process.uptime()),
+  started_at_ms:    SERVER_START_AT,
+  node_version:     process.version,
+  platform:         process.platform,
 }));
 
 // ── Push Notifications ────────────────────────────────────────────────────────

@@ -542,17 +542,18 @@
     <div class="about-card">
       <div class="logo">🚗</div>
       <div class="name">EcoTrip Impulse</div>
-      <div class="ver">v5.28 · build 159</div>
+      <div class="ver" id="about-headline">…</div>
     </div>
-    <div class="about-row"><span class="l">📱 PWA (este app)</span><span class="v">v5.28 · b172</span></div>
-    <div class="about-row"><span class="l">🚙 APK (carro)</span><span class="v">v5.28 · b159</span></div>
-    <div class="about-row"><span class="l">🌉 Bridge (Node)</span><span class="v">v5.28</span></div>
-    <div class="about-row"><span class="l">🕐 Última atualização carro</span><span class="v">1 min</span></div>
-    <div class="about-row"><span class="l">📡 MQTT broker</span><span class="v" style="color:var(--green)">conectado</span></div>
-    <div class="about-row"><span class="l">⏱ Uptime bridge</span><span class="v">2h 14min</span></div>
-    <div style="margin-top:14px">
+    <div class="about-row"><span class="l">📱 PWA (este app)</span><span class="v" id="about-pwa">…</span></div>
+    <div class="about-row"><span class="l">🚙 APK (carro)</span><span class="v" id="about-apk">…</span></div>
+    <div class="about-row"><span class="l">🌉 Bridge (Node)</span><span class="v" id="about-bridge">…</span></div>
+    <div class="about-row"><span class="l">🕐 Última atualização carro</span><span class="v" id="about-last-update">…</span></div>
+    <div class="about-row"><span class="l">📡 MQTT broker</span><span class="v" id="about-mqtt">…</span></div>
+    <div class="about-row"><span class="l">⏱ Uptime bridge</span><span class="v" id="about-uptime">…</span></div>
+    <div class="about-row"><span class="l">⚙ Node.js</span><span class="v" id="about-node">…</span></div>
+    <div style="margin-top:14px;display:flex;flex-direction:column;gap:8px">
       <button class="btn secondary" onclick="window.open('https://github.com/rafaelcs28/haval-ecotrip','_blank')">🐙 Repositório no GitHub</button>
-      <button class="btn secondary" onclick="showToast('Uso pessoal · sem garantia')">📄 Licença</button>
+      <button class="btn secondary" onclick="window.open('https://github.com/rafaelcs28/haval-ecotrip/releases','_blank')">📦 Releases</button>
     </div>
   </div>
 </div>
@@ -573,6 +574,64 @@
   if (name === 'places' && typeof _loadPlaces === 'function') _loadPlaces();
   if (name === 'notif' && typeof _loadNotifPrefs === 'function') _loadNotifPrefs();
   if (name === 'security' && typeof _loadSecurity === 'function') _loadSecurity();
+  if (name === 'about' && typeof _loadAbout === 'function') _loadAbout();
+}
+
+// ─── Sobre: versões, uptime, broker ──────────────────────
+async function _loadAbout() {
+  const tk = localStorage.getItem('bridge_token');
+  // PWA versão = versão do SW cache (já temos cacheGet)
+  try {
+    if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+      const ch = new MessageChannel();
+      const ver = await new Promise(resolve => {
+        ch.port1.onmessage = e => resolve(e.data?.version);
+        navigator.serviceWorker.controller.postMessage({ type: 'GET_VERSION' }, [ch.port2]);
+        setTimeout(() => resolve(null), 500);
+      });
+      const pwa = document.getElementById('about-pwa');
+      if (pwa) pwa.textContent = ver ? ver.replace('ecotrip-', '') : '—';
+    }
+  } catch (_) {}
+  // State já tem car_app_version + last_update_ms
+  const s = window.state || {};
+  const apk = document.getElementById('about-apk');
+  if (apk) apk.textContent = s.car_app_version ? 'v' + s.car_app_version : '—';
+  const lu = document.getElementById('about-last-update');
+  if (lu) {
+    if (s.last_update_ms) {
+      const age = Math.floor((Date.now() - s.last_update_ms) / 1000);
+      lu.textContent = age < 60 ? `${age}s atrás` : age < 3600 ? `${Math.floor(age/60)} min atrás` : `${Math.floor(age/3600)}h atrás`;
+    } else lu.textContent = '—';
+  }
+  // Bridge config (uptime, broker, node)
+  try {
+    const r = await fetch('/api/config', { headers: tk ? { 'Authorization': 'Bearer ' + tk } : {} });
+    const d = await r.json();
+    const br = document.getElementById('about-bridge');
+    if (br) br.textContent = d.version ? 'v' + d.version : '—';
+    const head = document.getElementById('about-headline');
+    if (head && d.version) head.textContent = 'v' + d.version;
+    const mqtt = document.getElementById('about-mqtt');
+    if (mqtt) {
+      mqtt.textContent = d.mqtt_connected ? '✓ conectado' : '✗ desconectado';
+      mqtt.style.color = d.mqtt_connected ? 'var(--green)' : 'var(--red)';
+    }
+    const up = document.getElementById('about-uptime');
+    if (up) up.textContent = _fmtUptime(d.bridge_uptime_sec);
+    const nd = document.getElementById('about-node');
+    if (nd) nd.textContent = d.node_version || '—';
+  } catch (_) {}
+}
+
+function _fmtUptime(sec) {
+  if (!sec) return '—';
+  const d = Math.floor(sec / 86400);
+  const h = Math.floor((sec % 86400) / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  if (d > 0) return `${d}d ${h}h`;
+  if (h > 0) return `${h}h ${m}min`;
+  return `${m} min`;
 }
 
 // ─── Conta & Segurança ───────────────────────────────────
