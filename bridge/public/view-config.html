@@ -488,6 +488,8 @@
   if (!el) return;
   el.classList.add('show');
   window.scrollTo(0, 0);
+  // Hooks por subview
+  if (name === 'maint' && typeof _loadMaint === 'function') _loadMaint();
 }
 function closeSub() {
   document.querySelectorAll('.subview.show').forEach(el => el.classList.remove('show'));
@@ -680,14 +682,6 @@ window.markMaintDone = async function(id) {
     });
     _loadMaint();
   } catch (e) { alert('Erro: ' + e.message); }
-};
-
-// Carrega quando abrir o sv-maint
-const _origOpenSub = window.openSub;
-window.openSub = function(name) {
-  if (typeof _origOpenSub === 'function') _origOpenSub(name);
-  else openSub(name);
-  if (name === 'maint') _loadMaint();
 };
 
   // Expõe handlers de onclick no window
