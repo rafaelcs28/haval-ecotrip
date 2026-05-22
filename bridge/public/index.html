@@ -372,7 +372,7 @@ input { font-family: inherit; }
   <div class="brand" onclick="openVersionInfo()">
     <span class="logo">🚗</span>
     <div class="info">
-      <div class="model">Haval H6 PHEV <span style="color:var(--muted);font-weight:500">▾</span></div>
+      <div class="model"><span id="hdr-model-name">Haval H6 PHEV</span> <span style="color:var(--muted);font-weight:500">▾</span></div>
       <div class="ver"><span id="hdr-apk-ver">…</span></div>
     </div>
   </div>
@@ -1164,6 +1164,27 @@ window._renderActiveView = function() {
 // ═════════════════════════════════════════════════════════
 //  BOOTSTRAP
 // ═════════════════════════════════════════════════════════
+// Atualiza o nome do modelo no header (chamado pelo Configs > Veículo)
+window._updateModelName = function(name) {
+  const el = document.getElementById('hdr-model-name');
+  if (el && name) el.textContent = name;
+  if (name) localStorage.setItem('eco_model_name', name);
+};
+
+// Carrega o nome do modelo do bridge no boot
+async function _loadModelName() {
+  // 1. Cache local imediato pra evitar flash
+  const cached = localStorage.getItem('eco_model_name');
+  if (cached) _updateModelName(cached);
+  if (!bridgeToken) return;
+  // 2. Atualiza do server
+  try {
+    const r = await fetch('/api/vehicle', { headers: { 'Authorization': 'Bearer ' + bridgeToken } });
+    const d = await r.json();
+    if (d.model_name) _updateModelName(d.model_name);
+  } catch (_) {}
+}
+
 async function bootstrap() {
   if (!bridgeToken) { showLogin(); return; }
 
@@ -1182,6 +1203,7 @@ async function bootstrap() {
   _scheduleRender();
   _fetchNotifCache();
   _checkPwaVersionOnBoot();
+  _loadModelName();
   switchView(activeView);
 
   // 3. Tenta sincronizar com servidor em background — sem bloquear UI

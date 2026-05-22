@@ -238,7 +238,7 @@
     <div class="sub-title">🚗 Veículo</div>
   </div>
   <div class="sub-body">
-    <div class="field"><div class="lbl">Modelo</div><input type="text" value="Haval H6 PHEV34" readonly></div>
+    <div class="field"><div class="lbl">Modelo</div><input type="text" id="cfg-model-name" placeholder="Ex: Haval H6 PHEV"><div class="hint">Aparece no topo do app</div></div>
     <div class="field">
       <div class="lbl">Chassi (VIN)</div>
       <input type="text" id="cfg-chassi" placeholder="lgw...">
@@ -1272,6 +1272,8 @@ async function _loadVehicle() {
     const d = await r.json();
     const input = document.getElementById('cfg-chassi');
     if (input) input.value = d.active || d.saved_in_file || '';
+    const name = document.getElementById('cfg-model-name');
+    if (name) name.value = d.model_name || 'Haval H6 PHEV';
     const warn = document.getElementById('cfg-chassi-warn');
     if (warn) warn.style.display = d.needs_restart ? 'block' : 'none';
   } catch (_) {}
@@ -1281,23 +1283,27 @@ async function saveVehicle() {
   const tk = localStorage.getItem('bridge_token');
   if (!tk) return;
   const chassi = (document.getElementById('cfg-chassi').value || '').trim().toLowerCase();
+  const modelName = (document.getElementById('cfg-model-name').value || '').trim();
   if (!/^lgw[a-z0-9]{14}$/.test(chassi)) {
-    showToast('✗ Formato inválido. Esperado: lgw + 14 alfanuméricos', 'err');
+    showToast('✗ Formato de chassi inválido', 'err');
     return;
   }
+  if (!modelName) { showToast('✗ Informe o nome do modelo', 'err'); return; }
   try {
     const r = await fetch('/api/vehicle', {
       method: 'POST',
       headers: { 'Authorization': 'Bearer ' + tk, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chassi }),
+      body: JSON.stringify({ chassi, model_name: modelName }),
     });
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'HTTP ' + r.status);
-    showToast('✓ Chassi salvo', 'ok');
+    showToast('✓ Salvo', 'ok');
     if (data.needs_restart) {
       const warn = document.getElementById('cfg-chassi-warn');
       if (warn) warn.style.display = 'block';
     }
+    // Atualiza header do shell na hora
+    if (window._updateModelName) window._updateModelName(modelName);
   } catch (e) {
     showToast('✗ ' + e.message, 'err');
   }

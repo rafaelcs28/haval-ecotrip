@@ -2162,31 +2162,57 @@ app.post('/api/admin/restart', (req, res) => {
 // ── Veículo (chassi GWM) ─────────────────────────────────────────────────────
 // GET retorna config ATIVA (a que o bridge subiu com) + a que está salva em
 // vehicle.json — podem divergir se o user editou mas não reiniciou.
+// Lê o conteúdo inteiro do vehicle.json (chassi + model_name)
+function _loadVehicleFile() {
+  try {
+    if (!fs.existsSync(VEHICLE_FILE)) return {};
+    return JSON.parse(fs.readFileSync(VEHICLE_FILE, 'utf8')) || {};
+  } catch (_) { return {}; }
+}
+
 app.get('/api/vehicle', (req, res) => {
   if (!adminCheckToken(req, res)) return;
-  // Re-lê o arquivo (pode ter sido alterado depois do boot)
-  const onDiskFile = _loadVehicleChassiFromFile();
+  const onDisk = _loadVehicleFile();
   res.json({
     active:        GWM_CHASSI || null,
     active_source: GWM_CHASSI_SOURCE,
-    saved_in_file: onDiskFile || null,
+    saved_in_file: onDisk.chassi || null,
     env_value:     _chassiFromEnv || null,
-    needs_restart: !!(onDiskFile && onDiskFile !== GWM_CHASSI),
+    model_name:    onDisk.model_name || 'Haval H6 PHEV',
+    needs_restart: !!(onDisk.chassi && onDisk.chassi !== GWM_CHASSI),
   });
 });
 
-// POST { chassi } — valida e persiste. Restart manual via /api/admin/restart.
+// POST { chassi?, model_name? } — aceita atualização parcial. Salva o que vier.
 app.post('/api/vehicle', (req, res) => {
   if (!adminCheckToken(req, res)) return;
-  const raw = (req.body?.chassi || '').toString().toLowerCase().trim();
-  // GWM (Haval H6) chassi padrão: lgw + 14 alfanuméricos = 17 total
-  if (!/^lgw[a-z0-9]{14}$/.test(raw)) {
-    return res.status(400).json({ error: 'Formato inválido. Esperado: lgw + 14 alfanuméricos (ex: lgwffva55sh931315)' });
+  const body = req.body || {};
+  const current = _loadVehicleFile();
+  const out = { ...current };
+  let needsRestart = false;
+  // Chassi (opcional na chamada, mas se vier precisa ser válido)
+  if (body.chassi !== undefined) {
+    const raw = String(body.chassi).toLowerCase().trim();
+    if (!/^lgw[a-z0-9]{14}$/.test(raw)) {
+      return res.status(400).json({ error: 'Formato de chassi inválido. Esperado: lgw + 14 alfanuméricos' });
+    }
+    out.chassi = raw;
+    needsRestart = raw !== GWM_CHASSI;
   }
+  // Nome do modelo (opcional)
+  if (body.model_name !== undefined) {
+    const name = String(body.model_name).trim().slice(0, 60);
+    if (!name) return res.status(400).json({ error: 'Nome do modelo vazio' });
+    out.model_name = name;
+  }
+  if (Object.keys(out).length === Object.keys(current).length &&
+      Object.keys(out).every(k => out[k] === current[k])) {
+    return res.json({ ok: true, unchanged: true });
+  }
+  out.updated_at = Date.now();
   try {
-    fs.writeFileSync(VEHICLE_FILE, JSON.stringify({ chassi: raw, updated_at: Date.now() }, null, 2));
-    const needsRestart = raw !== GWM_CHASSI;
-    res.json({ ok: true, chassi: raw, needs_restart: needsRestart });
+    fs.writeFileSync(VEHICLE_FILE, JSON.stringify(out, null, 2));
+    res.json({ ok: true, ...out, needs_restart: needsRestart });
   } catch (e) {
     res.status(500).json({ error: 'Falha ao gravar vehicle.json: ' + e.message });
   }
