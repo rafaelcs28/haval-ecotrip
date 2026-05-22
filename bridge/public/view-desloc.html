@@ -538,6 +538,11 @@
       <div class="meta">
         <div class="lbl">Distância total</div>
         <div class="v"><span id="st-dist">0</span><span class="u">km</span></div>
+        <div class="lbl" style="margin-top:6px;font-size:10px">
+          <span style="color:var(--green)">⚡ <span id="st-dist-ev">0</span> km EV</span>
+          &nbsp;·&nbsp;
+          <span style="color:var(--orange)">⛽ <span id="st-dist-ice">0</span> km térmico</span>
+        </div>
       </div>
     </div>
     <div class="stat-card yellow">
@@ -34087,17 +34092,26 @@ function renderStats() {
     if (tv) { const d = new Date(tv); d.setHours(23,59,59,999); end = d.getTime(); }
   }
   const filtered = trips.filter(t => t.startMs >= start && t.startMs <= end);
-  const totalDist = filtered.reduce((s,t) => s + t.distKm, 0);
-  const totalSec  = filtered.reduce((s,t) => s + t.timeSec, 0);
-  const totalKwh  = filtered.reduce((s,t) => s + t.netKwh, 0);
-  const totalFuel = filtered.reduce((s,t) => s + t.fuelL, 0);
-  const totalCost = filtered.reduce((s,t) => s + (t.netKwh * SNAPSHOT.price_kwh + t.fuelL * SNAPSHOT.price_gas_per_l), 0);
-  // km/L equivalente (1 L gasolina ≈ 8.9 kWh)
-  const eqL = (totalKwh / 8.9) + totalFuel;
+  const totalDist = filtered.reduce((s,t) => s + (+t.distKm || 0), 0);
+  const totalSec  = filtered.reduce((s,t) => s + (+t.timeSec || 0), 0);
+  const totalKwh  = filtered.reduce((s,t) => s + (+t.netKwh || 0), 0);
+  const totalFuel = filtered.reduce((s,t) => s + (+t.fuelL || 0), 0);
+  // km em modo térmico: hybridDistKm soma a parte com motor a combustão.
+  // EV puro = total - térmico.
+  const totalIceKm = filtered.reduce((s,t) => s + (+t.hybridDistKm || 0), 0);
+  const totalEvKm  = Math.max(0, totalDist - totalIceKm);
+  // Custo (usa preços salvos no state — pode vir do server)
+  const pKwh = +(window.state?.price_kwh) || +SNAPSHOT.price_kwh || 0;
+  const pGas = +(window.state?.price_gas_per_l) || +SNAPSHOT.price_gas_per_l || 0;
+  const totalCost = filtered.reduce((s,t) => s + ((+t.netKwh||0) * pKwh + (+t.fuelL||0) * pGas), 0);
+  // km/L equivalente (baseado em preço, igual ao Drive)
+  const eqL = pGas > 0.01 ? (totalCost / pGas) : 0;
   const kmL = eqL > 0.001 ? (totalDist / eqL) : 0;
 
   document.getElementById('st-trips').textContent = filtered.length;
   document.getElementById('st-dist').textContent  = fmt1(totalDist);
+  document.getElementById('st-dist-ev').textContent  = fmt1(totalEvKm);
+  document.getElementById('st-dist-ice').textContent = fmt1(totalIceKm);
   document.getElementById('st-time').textContent  = fmtDuration(totalSec);
   document.getElementById('st-kwh').textContent   = fmt1(totalKwh);
   document.getElementById('st-fuel').textContent  = fmt1(totalFuel);
