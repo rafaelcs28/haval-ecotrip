@@ -527,16 +527,6 @@ function relTime(ms) {
   return `${Math.floor(sec/86400)}d atrás`;
 }
 
-// Refetch de uma view em background (sem render) — atualiza cache pra
-// quando o user abrir a aba já estar tudo lá. Usado quando WS avisa
-// new_autotrip/new_refuel/new_charge e a view alvo não está carregada.
-async function _refetchInBackground(viewName) {
-  // Pra atualizar cache, basta chamar o loader da view. Se a view ainda
-  // não foi inicializada (lazy), agendamos pra próxima abertura.
-  const fn = window['renderView_' + viewName];
-  if (typeof fn === 'function') fn();
-}
-
 // ── IndexedDB key/value pra dados grandes (telemetria de viagens) ─
 // localStorage tem ~5MB no iOS PWA, telemetria com 1000+ samples por viagem
 // estoura rápido. IndexedDB tem 50MB+ e é assíncrono (não trava UI).
@@ -824,20 +814,19 @@ function connect() {
         showLogin('Senha incorreta ou expirada.');
         return;
       } else if (msg.type === 'new_event') {
+        // Eventos já vêm no payload — só anexa no log em memória, sem refetch
         if (window._addEventToLog) window._addEventToLog(msg.data);
         showToast('📋 Novo evento: ' + (msg.data?.label || msg.data?.type || ''), 'ok');
       } else if (msg.type === 'new_autotrip') {
         showToast('🚗 Nova viagem registrada', 'ok');
-        if (window.renderView_desloc) window.renderView_desloc();
-        else _refetchInBackground('desloc');
+        // Refetch incremental (só a viagem nova)
+        if (window._reloadDeslocData) window._reloadDeslocData();
       } else if (msg.type === 'new_refuel') {
         showToast('⛽ Novo abastecimento', 'ok');
-        if (window.renderView_posto) window.renderView_posto();
-        else _refetchInBackground('posto');
+        if (window._reloadPostoData) window._reloadPostoData();
       } else if (msg.type === 'new_charge' || msg.type === 'charge_end') {
         showToast('⚡ Nova recarga registrada', 'ok');
-        if (window.renderView_posto) window.renderView_posto();
-        else _refetchInBackground('posto');
+        if (window._reloadPostoData) window._reloadPostoData();
       }
     } catch (e) { console.error('WS parse error', e); }
   };

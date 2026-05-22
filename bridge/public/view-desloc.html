@@ -34267,8 +34267,13 @@ async function _loadDeslocData() {
   if (progress) progress.done();
   renderTrips(); renderCalendar(); renderDateNav();
 }
+// Boot inicial: 1 fetch
 _loadDeslocData();
-window.renderView_desloc = function() { _loadDeslocData(); };
+// Troca de aba: re-render só do estado em memória (não refetcha).
+// Refetch é disparado SÓ pelo shell (WS new_autotrip → window._reloadDeslocData)
+window.renderView_desloc = function() { renderTrips(); renderCalendar(); renderDateNav(); };
+// Hook chamado pelo shell quando o WS notifica nova viagem
+window._reloadDeslocData = _loadDeslocData;
 
 function openVersionInfo() {
   const lines = [

@@ -1497,8 +1497,12 @@ async function _loadLogsData() {
   if (progress) progress.done();
   renderFilters(); renderEvents();
 }
+// Boot inicial: 1 fetch
 _loadLogsData();
-window.renderView_logs = function() { _loadLogsData(); };
+// Troca de aba: re-render do cache (sem fetch — eventos novos chegam via WS new_event)
+window.renderView_logs = function() { renderFilters(); renderEvents(); };
+// Hook pra refetch quando WS pedir explicitamente
+window._reloadLogsData = _loadLogsData;
 window._addEventToLog = function(ev) {
   if (!ev) return;
   allEvents.unshift({ ...ev, ts: ev.ts || ev.timestamp || ev.timestamp_ms || Date.now() });

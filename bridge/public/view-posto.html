@@ -1454,8 +1454,12 @@ async function _loadPostoData() {
   if (progress) progress.done();
   renderEntries(); renderCalendar(); renderDateNav();
 }
+// Boot inicial: 1 fetch
 _loadPostoData();
-window.renderView_posto = function() { _loadPostoData(); };
+// Troca de aba: re-render do cache em memória (sem fetch)
+window.renderView_posto = function() { renderEntries(); renderCalendar(); renderDateNav(); };
+// Hook chamado pelo shell quando o WS notifica nova recarga/abastecimento
+window._reloadPostoData = _loadPostoData;
 
 function openVersionInfo() {
   const lines = [
