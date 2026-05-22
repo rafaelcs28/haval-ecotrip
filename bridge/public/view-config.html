@@ -853,6 +853,9 @@ async function _loadNotifPrefs() {
   } catch (_) {}
 }
 
+// Set de kinds que acabaram de ser ativados e ainda não tiveram a seleção
+// salva. Botão "Selecionar locais" só aparece pra esses; some após o save.
+const _geofencePending = new Set();
 function _updateGeofenceLocalControls() {
   ['arrival', 'departure'].forEach(kind => {
     const row = document.getElementById('geofence-' + kind + '-row');
@@ -860,7 +863,8 @@ function _updateGeofenceLocalControls() {
     const onKey = 'geofence_' + kind;
     const listKey = 'geofence_' + kind + '_places';
     const isOn = !!_notifPrefsLocal[onKey];
-    if (row) row.style.display = isOn ? 'block' : 'none';
+    const showBtn = isOn && _geofencePending.has(kind);
+    if (row) row.style.display = showBtn ? 'block' : 'none';
     const list = _notifPrefsLocal[listKey] || [];
     if (count) count.textContent = list.length === 0 ? 'todos' : `${list.length} marcado${list.length > 1 ? 's' : ''}`;
   });
@@ -985,6 +989,7 @@ async function saveGeofencePlaces() {
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || 'HTTP ' + r.status);
     _notifPrefsLocal[key] = value;
+    _geofencePending.delete(_geofenceKind);  // salvo: esconde o botão até próximo toggle on
     _updateGeofenceLocalControls();
     document.getElementById('geofence-places-modal').style.display = 'none';
     showToast('✓ Locais salvos', 'ok');
@@ -1000,7 +1005,12 @@ async function toggleNotif(key) {
   el.classList.toggle('on', newVal);  // otimista
   _notifPrefsLocal[key] = newVal;
   // Atualiza controles dependentes (botão "Selecionar locais" pra geofence)
-  if (key === 'geofence_arrival' || key === 'geofence_departure') _updateGeofenceLocalControls();
+  if (key === 'geofence_arrival' || key === 'geofence_departure') {
+    const kind = key === 'geofence_arrival' ? 'arrival' : 'departure';
+    if (newVal) _geofencePending.add(kind);   // ligou: mostra "Selecionar locais"
+    else _geofencePending.delete(kind);       // desligou: limpa pending
+    _updateGeofenceLocalControls();
+  }
   try {
     const r = await fetch('/api/push/prefs', {
       method: 'POST',
