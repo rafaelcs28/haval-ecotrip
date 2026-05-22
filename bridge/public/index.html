@@ -831,6 +831,10 @@ function connect() {
         if (window._onDiagUpdate) window._onDiagUpdate(msg.data);
       } else if (msg.type === 'diag_ack') {
         if (window._onDiagAck) window._onDiagAck(msg.data);
+      } else if (msg.type === 'diag_state') {
+        if (window._onDiagState) window._onDiagState(msg.data);
+      } else if (msg.type === 'diag_event') {
+        if (window._onDiagEvent) window._onDiagEvent(msg.data);
       }
     } catch (e) { console.error('WS parse error', e); }
   };
@@ -868,33 +872,27 @@ function _scheduleRender() {
   });
 }
 
-// Banner "nova versão" — dispara quando state.bridge_version ou car_app_version
-// muda em relação ao último visto (gravado em localStorage)
+// Banner "nova versão" — só PWA/Bridge. Updates do APK do carro vêm por
+// push notification (o carro atualiza sozinho via Shizuku, não precisa de
+// ação do usuário no celular).
 function _checkVersionBanner() {
   const dismissed = localStorage.getItem('eco_update_dismissed') || '';
   const seenBridge = localStorage.getItem('eco_seen_bridge_ver') || '';
-  const seenApk = localStorage.getItem('eco_seen_apk_ver') || '';
   const curBridge = state.bridge_version || '';
+  // Mantém seen_apk_ver atualizado em silêncio (pra histórico/diagnóstico)
   const curApk = state.car_app_version || '';
-  if (!curBridge && !curApk) return;
+  if (curApk) localStorage.setItem('eco_seen_apk_ver', curApk);
+  if (!curBridge) return;
   // Primeira vez: só grava, não mostra banner
-  if (!seenBridge && !seenApk) {
-    if (curBridge) localStorage.setItem('eco_seen_bridge_ver', curBridge);
-    if (curApk) localStorage.setItem('eco_seen_apk_ver', curApk);
+  if (!seenBridge) {
+    localStorage.setItem('eco_seen_bridge_ver', curBridge);
     return;
   }
-  const bridgeChanged = curBridge && seenBridge && curBridge !== seenBridge;
-  const apkChanged = curApk && seenApk && curApk !== seenApk;
-  if (!bridgeChanged && !apkChanged) return;
-  // Não mostra se o user já dispensou essa versão específica
-  const key = curBridge + '+' + curApk;
-  if (dismissed === key) return;
+  if (curBridge === seenBridge) return;
+  if (dismissed === curBridge) return;
   const banner = document.getElementById('update-banner');
   if (!banner) return;
-  const parts = [];
-  if (bridgeChanged) parts.push('Bridge ' + seenBridge + ' → ' + curBridge);
-  if (apkChanged) parts.push('APK ' + seenApk + ' → ' + curApk);
-  document.getElementById('ub-sub').textContent = parts.join(' · ');
+  document.getElementById('ub-sub').textContent = 'Bridge ' + seenBridge + ' → ' + curBridge;
   banner.style.display = 'flex';
 }
 
@@ -960,8 +958,7 @@ function _showPwaUpdateBanner(oldV, newV) {
 function dismissUpdateBanner() {
   const banner = document.getElementById('update-banner');
   if (banner) banner.style.display = 'none';
-  const key = (state.bridge_version || '') + '+' + (state.car_app_version || '');
-  localStorage.setItem('eco_update_dismissed', key);
+  localStorage.setItem('eco_update_dismissed', state.bridge_version || '');
 }
 
 // Throttled save do state em localStorage — escrita custosa (10-30ms no iOS).
