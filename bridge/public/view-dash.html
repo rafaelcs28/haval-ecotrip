@@ -931,18 +931,119 @@ function renderOtherCard(s) {
   v.textContent = odo > 0 ? Math.round(odo).toLocaleString('pt-BR') + ' km' : '--';
   sub.textContent = 'odômetro';
 }
+// Chaves que JÁ aparecem em algum card/widget do Dash (ou que são internas/ruído).
+// Tudo que sobra do state vai aparecer no modal "Outros dados".
+const _DASH_SHOWN_KEYS = new Set([
+  // Cards principais
+  'soc_pct', 'fuel_l', 'autonomy_ev_km', 'autonomy_ice_km', 'odometer_km',
+  // Header / map / pin
+  'gps_lat', 'gps_lng', 'gps_ts', 'car_online', 'last_update_ms',
+  'bridge_version', 'car_app_version', 'car_version',
+  // Status row
+  'engine_state', 'lock_state',
+  'door_fl', 'door_fr', 'door_rl', 'door_rr', 'door_trunk',
+  'window_fl', 'window_fr', 'window_rl', 'window_rr', 'sunroof',
+  // Pneus
+  'tyre_psi_fl', 'tyre_psi_fr', 'tyre_psi_rl', 'tyre_psi_rr',
+  'tyre_temp_fl', 'tyre_temp_fr', 'tyre_temp_rl', 'tyre_temp_rr',
+  // Tiny cards
+  'batt_12v_pct', 'outside_temp', 'inside_temp',
+  // Charge banner
+  'charging_state', 'charge_power_kw', 'charge_session_kwh',
+  'charge_remaining_min', 'charge_max_power_kw', 'charge_avg_power_kw',
+  'charge_start_soc_pct', 'charge_session_start_ms', 'charge_session_kwh_at_init',
+  // Conforto
+  'hvac_driver_temp', 'hvac_passenger_temp', 'hvac_fan_speed',
+  'hvac_sync_enable', 'hvac_auto_enable', 'hvac_ac_enable', 'hvac_cycle_mode',
+  'seat_vent_drv', 'seat_vent_pass', 'ac_state',
+  // Usados no Drive
+  'speed_kmh', 'rpm', 'motor_power_kw', 'current_trip', 'gear',
+  // Usados internamente (cache, sync) — não mostrar
+  'rolling', 'price_kwh', 'price_gas_per_l', 'tank_avg_price_per_l',
+  'notif_latest_ts', 'notif_unread',
+  // Refuel sub-state (mostrado em Posto)
+  'fuel_l_before_refuel', 'last_refuel_ts',
+]);
+
+// Labels amigáveis pras chaves restantes.
+const _OTHER_KEY_LABELS = {
+  charging_mode:    ['⚡', 'Modo de carregamento'],
+  charge_voltage_v: ['🔌', 'Tensão da carga'],
+  charge_current_a: ['🔌', 'Corrente da carga'],
+  signal_strength:  ['📶', 'Sinal celular'],
+  uptime_sec:       ['⏱', 'Uptime do APK'],
+  battery_temp:     ['🌡', 'Temperatura da bateria'],
+  brake_status:     ['🛑', 'Freio de mão'],
+  seatbelt_drv:     ['🚻', 'Cinto motorista'],
+  seatbelt_pass:    ['🚻', 'Cinto passageiro'],
+  headlights:       ['💡', 'Faróis'],
+  fog_lights:       ['🌫', 'Faróis de neblina'],
+  hazard:           ['⚠️', 'Pisca-alerta'],
+  high_beam:        ['🔆', 'Farol alto'],
+  wipers:           ['🌧', 'Limpadores'],
+  hood:             ['🚗', 'Capô'],
+  // (qualquer chave fora desse mapa cai num fallback genérico)
+};
+
+function _formatStateValue(k, v) {
+  if (v === null || v === undefined || v === '') return null;
+  if (typeof v === 'object') {
+    if (Array.isArray(v)) return v.length ? `${v.length} itens` : null;
+    const keys = Object.keys(v);
+    if (!keys.length) return null;
+    return keys.length + ' campos';  // resumido
+  }
+  if (typeof v === 'boolean') return v ? 'sim' : 'não';
+  if (typeof v === 'number') {
+    // Heurísticas: timestamps grandes
+    if (k.endsWith('_ms') && v > 1e12) return new Date(v).toLocaleString('pt-BR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
+    if (k.endsWith('_pct')) return Math.round(v) + '%';
+    if (k.includes('temp')) return Math.round(v) + '°';
+    if (k.includes('km')) return Math.round(v).toLocaleString('pt-BR') + ' km';
+    if (k.includes('kw')) return v.toFixed(1) + ' kW';
+    if (k.includes('voltage')) return v.toFixed(1) + ' V';
+    if (k.includes('current')) return v.toFixed(1) + ' A';
+    return Number.isInteger(v) ? v.toString() : v.toFixed(2);
+  }
+  return String(v);
+}
+
 window.openOtherDataModal = function() {
   const s = window.state || {};
-  const lines = [
-    '🚗 ' + (s.odometer_km != null ? Math.round(s.odometer_km).toLocaleString('pt-BR') + ' km' : 'odômetro --'),
-    '🔌 12V: ' + (s.batt_12v_pct != null ? Math.round(s.batt_12v_pct) + '%' : '--'),
-    '⚡ Autonomia EV: ' + (+s.autonomy_ev_km > 0 ? Math.round(s.autonomy_ev_km) + ' km' : '--'),
-    '⛽ Autonomia combustão: ' + (+s.autonomy_ice_km > 0 ? Math.round(s.autonomy_ice_km) + ' km' : '--'),
-    '🌡 Interna: ' + (s.inside_temp != null ? Math.round(s.inside_temp) + '°' : '--'),
-    '🌡 Externa: ' + (s.outside_temp != null ? Math.round(s.outside_temp) + '°' : '--'),
-    '⚙ Marcha: ' + (s.gear || '--'),
-  ];
-  alert(lines.join('\n'));
+  let modal = document.getElementById('other-dash-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'other-dash-modal';
+    modal.style.cssText = 'position:fixed;inset:0;z-index:90;background:rgba(0,0,0,.7);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);display:flex;align-items:flex-end;justify-content:center';
+    modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+    document.body.appendChild(modal);
+  }
+  // Coleta TUDO do state que tem valor não vazio E não está nos cards do Dash
+  const entries = [];
+  for (const [k, v] of Object.entries(s)) {
+    if (_DASH_SHOWN_KEYS.has(k)) continue;
+    if (k.startsWith('_')) continue;  // internos
+    const formatted = _formatStateValue(k, v);
+    if (formatted === null) continue;
+    entries.push([k, formatted]);
+  }
+  entries.sort(([a],[b]) => a.localeCompare(b));
+  const rowsHtml = entries.length
+    ? entries.map(([k, val]) => {
+        const meta = _OTHER_KEY_LABELS[k] || ['', k.replace(/_/g, ' ')];
+        return `<div style="display:flex;justify-content:space-between;align-items:center;padding:9px 4px;border-bottom:1px solid rgba(255,255,255,.05);gap:10px">
+          <div style="font-size:12px;color:#cbd5e1;flex:1;min-width:0">${meta[0] ? meta[0] + ' ' : ''}${meta[1]}</div>
+          <div style="font-size:12px;font-weight:700;color:var(--text);font-variant-numeric:tabular-nums">${val}</div>
+        </div>`;
+      }).join('')
+    : '<div style="text-align:center;padding:24px;color:var(--muted);font-size:13px">Nenhum dado extra publicado pelo carro</div>';
+  modal.innerHTML = `<div style="width:100%;max-width:480px;background:#1f1f1f;border-top-left-radius:18px;border-top-right-radius:18px;padding:18px 18px calc(env(safe-area-inset-bottom) + 18px);border-top:1px solid rgba(255,255,255,.08);max-height:80vh;overflow-y:auto">
+    <div style="width:42px;height:5px;background:rgba(255,255,255,.18);border-radius:3px;margin:-8px auto 14px"></div>
+    <div style="font-size:17px;font-weight:700;margin-bottom:2px">🚗 Outros dados</div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:14px">${entries.length} ${entries.length === 1 ? 'campo' : 'campos'} extras publicados pelo carro</div>
+    <div>${rowsHtml}</div>
+    <button onclick="document.getElementById('other-dash-modal').remove()" style="width:100%;margin-top:16px;padding:12px;background:var(--green);color:#000;border:none;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit">Fechar</button>
+  </div>`;
 };
 
 function render(s, kpData) {
