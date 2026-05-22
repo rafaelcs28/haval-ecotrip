@@ -34154,10 +34154,10 @@ async function _loadDeslocData() {
   // 2. Fetch incremental
   const tk = localStorage.getItem('bridge_token');
   if (!tk) { if (!cached) { renderTrips(); renderCalendar(); renderDateNav(); } return; }
-  // Progresso visual: mostra mesmo quando tem cache (sincronizando incremental)
+  // Progress bar SÓ no primeiro load (sem cache). Refetch via WS é silencioso.
   const isFirst = !cached;
-  const progress = window.showProgress
-    ? window.showProgress(isFirst ? 'Baixando deslocamentos' : 'Verificando novos deslocamentos')
+  const progress = isFirst && window.showProgress
+    ? window.showProgress('Baixando deslocamentos')
     : null;
   try {
     if (progress) progress.set(15);

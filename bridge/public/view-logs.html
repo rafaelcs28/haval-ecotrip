@@ -1460,9 +1460,10 @@ async function _loadLogsData() {
   // 2. Fetch incremental (só eventos novos desde o cache) + merge
   const tk = localStorage.getItem('bridge_token');
   if (!tk) { if (!cached) { renderFilters(); renderEvents(); } return; }
+  // Progress bar SÓ no primeiro load (sem cache). WS new_event atualiza silencioso.
   const isFirst = !cached;
-  const progress = window.showProgress
-    ? window.showProgress(isFirst ? 'Baixando eventos' : 'Verificando novos eventos')
+  const progress = isFirst && window.showProgress
+    ? window.showProgress('Baixando eventos')
     : null;
   try {
     if (progress) progress.set(15);

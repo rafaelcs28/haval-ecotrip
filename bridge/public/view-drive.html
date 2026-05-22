@@ -175,12 +175,9 @@
 
 
 
-<!-- Pill com endereço -->
-<div class="map-place-pill">
-  <strong id="mp-place">--</strong>
-  <span class="sep">·</span>
-  <span class="addr" id="mp-addr">--</span>
-</div>
+<!-- Pill com endereço removida no Drive — cluster não precisa de endereço (apenas dados de direção) -->
+<span id="mp-place" style="display:none"></span>
+<span id="mp-addr" style="display:none"></span>
 
 <!-- Bottom sheet -->
 <div class="bottom-sheet" id="bottom-sheet">
@@ -2817,6 +2814,11 @@ async function _renderDriveLive() {
   }
 }
 if (localStorage.getItem('bridge_token')) {
+  // Render imediato com state cacheado no shell (zero rede) — evita
+  // flash do snapshot fake
+  if (window.state && (window.state.gps_lat || window.state.soc_pct != null)) {
+    try { render(window.state, SNAPSHOT.known_places); } catch (_) {}
+  }
   _renderDriveLive();
   // Drive precisa ser responsivo: polling 1s
   _driveLiveTimer = setInterval(_renderDriveLive, 1000);

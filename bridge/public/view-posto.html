@@ -1391,9 +1391,10 @@ async function _loadPostoData() {
   const tk = localStorage.getItem('bridge_token');
   if (!tk) { if (!cached) { renderEntries(); renderCalendar(); renderDateNav(); } return; }
   const h = { 'Authorization': 'Bearer ' + tk };
+  // Progress bar SÓ no primeiro load (sem cache). Refetch via WS é silencioso.
   const isFirst = !cached;
-  const progress = window.showProgress
-    ? window.showProgress(isFirst ? 'Baixando recargas e abastecimentos' : 'Verificando novas recargas')
+  const progress = isFirst && window.showProgress
+    ? window.showProgress('Baixando recargas e abastecimentos')
     : null;
   try {
     if (progress) progress.set(15);
