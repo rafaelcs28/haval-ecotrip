@@ -1311,25 +1311,84 @@ async function prefetchMapArea(lat, lng, kmRadius = 50, zooms = [11, 13]) {
   _tilePrefetchRunning = false;
 }
 
-// Auto-prefetch: roda 1x quando state.gps_lat estiver disponível,
-// se ainda não rodou OU se o carro andou >25km desde último prefetch.
-function _maybePrefetchTiles() {
+// Pré-cache em torno de TODOS os locais conhecidos (Casa, Limpa Gyn, etc.)
+// num raio de 10km cada. Tiles sobrepostos baixam só 1x (Set dedup).
+async function prefetchKnownPlacesTiles(kmRadius = 10, zooms = [12, 14]) {
   if (_tilePrefetchRunning) return;
-  const lat = state.gps_lat, lng = state.gps_lng;
-  if (!lat || !lng) return;
-  const last = (() => { try { return JSON.parse(localStorage.getItem('eco_tiles_last') || 'null'); } catch (_) { return null; } })();
-  if (last) {
-    // Distância haversine
-    const R = 6371, toRad = x => x * Math.PI / 180;
-    const dLat = toRad(lat - last.lat), dLng = toRad(lng - last.lng);
-    const s = Math.sin(dLat/2)**2 + Math.cos(toRad(last.lat)) * Math.cos(toRad(lat)) * Math.sin(dLng/2)**2;
-    const km = 2 * R * Math.asin(Math.sqrt(s));
-    if (km < 25) return;  // ainda dentro da área pré-baixada
+  if (!bridgeToken) return;
+  _tilePrefetchRunning = true;
+  try {
+    const places = await apiFetch('/api/known-places').then(r => r.json()).catch(() => []);
+    if (!Array.isArray(places) || !places.length) {
+      _tilePrefetchRunning = false;
+      return;
+    }
+    // Coleta tiles únicos de todos os places
+    const tilesSet = new Set();
+    for (const p of places) {
+      if (!p.lat || !p.lng) continue;
+      for (const z of zooms) {
+        for (const t of _tilesAroundPoint(p.lat, p.lng, kmRadius, z)) {
+          tilesSet.add(`${t.z}/${t.x}/${t.y}`);
+        }
+      }
+    }
+    // Gera URLs
+    let urls = [...tilesSet].map(key => {
+      const [z, x, y] = key.split('/');
+      const s = 'abcd'[(+x + +y) % 4];
+      return `https://${s}.basemaps.cartocdn.com/dark_all/${z}/${x}/${y}@2x.png`;
+    });
+    const total = urls.length;
+    const progress = window.showProgress && window.showProgress(`Baixando mapa de ${places.length} locais (${total} tiles únicos)`);
+    let done = 0;
+    const CONCURRENCY = 8;
+    async function worker() {
+      while (urls.length) {
+        const u = urls.shift();
+        if (!u) break;
+        try { await fetch(u, { mode: 'cors', cache: 'force-cache' }); } catch (_) {}
+        done++;
+        if (progress && done % 20 === 0) {
+          progress.set((done / total) * 100);
+          progress.label(`Mapa: ${done}/${total} tiles`);
+        }
+      }
+    }
+    await Promise.all(Array.from({ length: CONCURRENCY }, worker));
+    if (progress) progress.done();
+    showToast(`✓ ${total} tiles dos locais conhecidos cacheados`, 'ok');
+    localStorage.setItem('eco_tiles_places_done', JSON.stringify({
+      ts: Date.now(),
+      count: places.length,
+      placeIds: places.map(p => p.id || p.name).sort(),
+    }));
+  } catch (e) {
+    console.warn('Prefetch places tiles falhou:', e);
   }
-  prefetchMapArea(lat, lng, 50, [11, 13]);
+  _tilePrefetchRunning = false;
+}
+
+// Auto-prefetch no boot:
+// - Se nunca rodou pra esses places: dispara
+// - Se a lista de places mudou desde último prefetch: dispara
+// Senão: skip (não desperdiça rede)
+async function _maybePrefetchTiles() {
+  if (_tilePrefetchRunning || !bridgeToken) return;
+  try {
+    const places = await apiFetch('/api/known-places').then(r => r.json()).catch(() => []);
+    if (!Array.isArray(places) || !places.length) return;
+    const currIds = places.map(p => p.id || p.name).sort();
+    const last = (() => { try { return JSON.parse(localStorage.getItem('eco_tiles_places_done') || 'null'); } catch (_) { return null; } })();
+    if (last && Array.isArray(last.placeIds) && JSON.stringify(last.placeIds) === JSON.stringify(currIds)) {
+      return; // já cacheado pra esse conjunto
+    }
+    prefetchKnownPlacesTiles(10, [12, 14]);
+  } catch (_) {}
 }
 
 window.prefetchMapArea = prefetchMapArea;
+window.prefetchKnownPlacesTiles = prefetchKnownPlacesTiles;
 
 window.addEventListener('load', () => {
   // Atualiza tabbar-h pra usar no padding-bottom do body
