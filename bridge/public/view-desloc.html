@@ -34154,9 +34154,13 @@ async function _loadDeslocData() {
   // 2. Fetch incremental
   const tk = localStorage.getItem('bridge_token');
   if (!tk) { if (!cached) { renderTrips(); renderCalendar(); renderDateNav(); } return; }
-  const progress = !cached && window.showProgress ? window.showProgress('Baixando viagens') : null;
+  // Progresso visual: mostra mesmo quando tem cache (sincronizando incremental)
+  const isFirst = !cached;
+  const progress = window.showProgress
+    ? window.showProgress(isFirst ? 'Baixando deslocamentos' : 'Verificando novos deslocamentos')
+    : null;
   try {
-    if (progress) progress.set(20);
+    if (progress) progress.set(15);
     // Carrega lista de known-places (cacheada em window) pra resolver nomes
     if (!_kpListCache) {
       try {
@@ -34186,12 +34190,31 @@ async function _loadDeslocData() {
       renderTrips();
       window.cacheSet && window.cacheSet('desloc', trips.slice());
     }
-    if (progress) progress.set(50);
+    if (progress) progress.set(35);
     const url = lastStartMs > 0 ? `/api/autotrips?since=${lastStartMs}` : '/api/autotrips';
     const r = await fetch(url, { headers: { 'Authorization': 'Bearer ' + tk } });
     const data = await r.json();
-    if (progress) progress.set(85);
-    const apiTrips = (data.trips || data || []).map(t => ({
+    const apiCount = (data.trips || data || []).length;
+    if (progress) {
+      if (apiCount === 0) {
+        progress.label('Tudo atualizado');
+        progress.set(100);
+      } else {
+        progress.label(`Processando ${apiCount} deslocamento${apiCount > 1 ? 's' : ''}`);
+        progress.set(50);
+      }
+    }
+    let _processed = 0;
+    const _list = (data.trips || data || []);
+    const apiTrips = _list.map((t, i) => {
+      // Atualiza contador regressivo no progress (a cada 5 ou no fim)
+      if (progress && (i % 5 === 0 || i === _list.length - 1)) {
+        const restam = _list.length - i;
+        progress.label(`Faltam ${restam} deslocamento${restam > 1 ? 's' : ''}`);
+        progress.set(50 + (i / _list.length) * 40);  // 50% → 90%
+      }
+      _processed = i + 1;
+      return {
       id:            t.tripId || t.id,
       tripId:        t.tripId || t.id,
       startMs:       t.startMs,
@@ -34223,7 +34246,8 @@ async function _loadDeslocData() {
       name:          t.name || null,
       samples:       [],   // carrega sob demanda via /api/telemetry/:tripId
       route:         [],
-    }));
+      };
+    });
     // Merge incremental: se foi fetch incremental (since>0) e tem novos, adiciona
     if (lastStartMs > 0 && apiTrips.length) {
       const existingIds = new Set(trips.map(t => t.tripId || t.id));

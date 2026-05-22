@@ -1391,16 +1391,28 @@ async function _loadPostoData() {
   const tk = localStorage.getItem('bridge_token');
   if (!tk) { if (!cached) { renderEntries(); renderCalendar(); renderDateNav(); } return; }
   const h = { 'Authorization': 'Bearer ' + tk };
-  // Mostra barra só quando NÃO tem cache (primeira carga real)
-  const progress = !cached && window.showProgress ? window.showProgress('Baixando recargas e abastecimentos') : null;
+  const isFirst = !cached;
+  const progress = window.showProgress
+    ? window.showProgress(isFirst ? 'Baixando recargas e abastecimentos' : 'Verificando novas recargas')
+    : null;
   try {
-    if (progress) progress.set(20);
+    if (progress) progress.set(15);
     const sinceQ = lastTs > 0 ? '?since=' + lastTs : '';
     const [chRaw, rfRaw] = await Promise.all([
       fetch('/api/charges' + sinceQ, { headers: h }).then(r => r.json()).catch(() => []),
       fetch('/api/refuels' + sinceQ, { headers: h }).then(r => r.json()).catch(() => []),
     ]);
-    if (progress) progress.set(75);
+    const chCount = (Array.isArray(chRaw) ? chRaw : (chRaw.charges || [])).length;
+    const rfCount = (Array.isArray(rfRaw) ? rfRaw : (rfRaw.refuels || [])).length;
+    const totalNew = chCount + rfCount;
+    if (progress) {
+      if (totalNew === 0) {
+        progress.label('Tudo atualizado'); progress.set(100);
+      } else {
+        progress.label(`Processando ${totalNew} registro${totalNew > 1 ? 's' : ''}`);
+        progress.set(60);
+      }
+    }
     const charges = (Array.isArray(chRaw) ? chRaw : (chRaw.charges || [])).map(c => ({
       id: c.timestamp_ms || c.ts,
       ts: c.timestamp_ms || c.ts,
