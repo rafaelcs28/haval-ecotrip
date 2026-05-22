@@ -436,13 +436,33 @@
     <div class="sub-title">📍 Locais conhecidos</div>
   </div>
   <div class="sub-body">
-    <button class="btn primary">+ Adicionar local</button>
+    <button class="btn primary" onclick="openPlaceAdd()">+ Adicionar local</button>
     <div class="field-group" style="margin-top:14px">
-      <div class="group-ti">14 locais cadastrados</div>
-      <div class="field" style="display:flex;justify-content:space-between"><div style="flex:1"><strong>Limpa Gyn</strong><div style="font-size:10px;color:var(--muted)">raio 200m</div></div><span style="color:var(--muted)">›</span></div>
-      <div class="field" style="display:flex;justify-content:space-between"><div style="flex:1"><strong>Casa</strong><div style="font-size:10px;color:var(--muted)">raio 200m</div></div><span style="color:var(--muted)">›</span></div>
-      <div class="field" style="display:flex;justify-content:space-between"><div style="flex:1"><strong>Bodytech</strong><div style="font-size:10px;color:var(--muted)">raio 125m</div></div><span style="color:var(--muted)">›</span></div>
-      <div class="field" style="text-align:center;color:var(--muted);font-size:11px">+ 11 outros...</div>
+      <div class="group-ti" id="places-count">— locais</div>
+      <div id="places-list" style="display:flex;flex-direction:column;gap:6px">
+        <div style="font-size:11px;color:var(--muted);padding:12px;text-align:center">Carregando…</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal de adicionar/editar local -->
+<div id="place-modal" style="display:none;position:fixed;inset:0;z-index:80;background:rgba(0,0,0,.7);align-items:flex-end;justify-content:center;backdrop-filter:blur(8px)">
+  <div style="background:#1f1f1f;width:100%;max-width:480px;border-top-left-radius:18px;border-top-right-radius:18px;padding:18px 18px calc(env(safe-area-inset-bottom) + 18px);border-top:1px solid rgba(255,255,255,.08);max-height:85vh;overflow-y:auto">
+    <div style="width:42px;height:5px;background:rgba(255,255,255,.18);border-radius:3px;margin:-8px auto 14px"></div>
+    <div style="font-size:16px;font-weight:700;color:var(--text);margin-bottom:14px" id="place-modal-ti">Adicionar local</div>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <input id="place-name" placeholder="Nome (ex: Casa)" style="padding:12px 14px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:10px;color:var(--text);font-size:14px;font-family:inherit">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <input id="place-lat" type="number" placeholder="Latitude" step="0.000001" style="padding:12px 14px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:10px;color:var(--text);font-size:13px;font-family:inherit;font-variant-numeric:tabular-nums">
+        <input id="place-lng" type="number" placeholder="Longitude" step="0.000001" style="padding:12px 14px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:10px;color:var(--text);font-size:13px;font-family:inherit;font-variant-numeric:tabular-nums">
+      </div>
+      <button onclick="usePlaceGps()" style="padding:10px;background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.3);color:var(--green);border-radius:10px;font-size:12px;font-weight:700;font-family:inherit;cursor:pointer">📡 Usar GPS atual do carro</button>
+      <input id="place-radius" type="number" placeholder="Raio (metros)" value="200" min="50" max="2000" step="25" style="padding:12px 14px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:10px;color:var(--text);font-size:14px;font-family:inherit">
+    </div>
+    <div style="display:flex;gap:10px;margin-top:16px">
+      <button onclick="closePlaceModal()" style="flex:1;padding:12px;background:rgba(255,255,255,.06);color:#cbd5e1;border:none;border-radius:10px;font-size:14px;font-weight:700;font-family:inherit">Cancelar</button>
+      <button onclick="savePlace()" style="flex:1;padding:12px;background:var(--green);color:#000;border:none;border-radius:10px;font-size:14px;font-weight:700;font-family:inherit">Salvar</button>
     </div>
   </div>
 </div>
@@ -484,6 +504,129 @@
   if (name === 'vehicle' && typeof _loadVehicle === 'function') _loadVehicle();
   if (name === 'charge' && typeof _loadChargeLimit === 'function') _loadChargeLimit();
   if (name === 'advanced' && typeof _loadAdvanced === 'function') _loadAdvanced();
+  if (name === 'places' && typeof _loadPlaces === 'function') _loadPlaces();
+}
+
+// ─── Locais conhecidos (CRUD) ───────────────────────────
+let _placesLocal = [];
+let _placeEditId = null;
+
+async function _loadPlaces() {
+  const tk = localStorage.getItem('bridge_token');
+  if (!tk) return;
+  try {
+    const r = await fetch('/api/known-places', { headers: { 'Authorization': 'Bearer ' + tk } });
+    _placesLocal = await r.json();
+    _renderPlaces();
+  } catch (_) {}
+}
+
+function _renderPlaces() {
+  const el = document.getElementById('places-list');
+  const counter = document.getElementById('places-count');
+  if (counter) counter.textContent = `${_placesLocal.length} ${_placesLocal.length === 1 ? 'local' : 'locais'}`;
+  if (!el) return;
+  if (!_placesLocal.length) {
+    el.innerHTML = '<div style="font-size:11px;color:var(--muted);padding:12px;text-align:center">Nenhum local cadastrado</div>';
+    return;
+  }
+  el.innerHTML = _placesLocal.map(p => `<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:rgba(255,255,255,.03);border-radius:10px;gap:8px">
+    <div style="flex:1;min-width:0;cursor:pointer" onclick="openPlaceEdit('${p.id}')">
+      <div style="font-size:13px;font-weight:700;color:var(--text)">📍 ${p.name || '(sem nome)'}</div>
+      <div style="font-size:10px;color:var(--muted);margin-top:2px;font-variant-numeric:tabular-nums">
+        ${(+p.lat).toFixed(5)}, ${(+p.lng).toFixed(5)} · raio ${p.radius_m || 200}m
+      </div>
+    </div>
+    <button onclick="deletePlace('${p.id}')" style="background:rgba(248,113,113,.12);border:1px solid rgba(248,113,113,.3);color:var(--red);font-size:11px;padding:4px 10px;border-radius:6px;font-family:inherit;font-weight:600;cursor:pointer">🗑</button>
+  </div>`).join('');
+}
+
+function openPlaceAdd() {
+  _placeEditId = null;
+  document.getElementById('place-modal-ti').textContent = 'Adicionar local';
+  document.getElementById('place-name').value = '';
+  document.getElementById('place-lat').value = '';
+  document.getElementById('place-lng').value = '';
+  document.getElementById('place-radius').value = '200';
+  document.getElementById('place-modal').style.display = 'flex';
+}
+
+function openPlaceEdit(id) {
+  const p = _placesLocal.find(x => String(x.id) === String(id));
+  if (!p) return;
+  _placeEditId = p.id;
+  document.getElementById('place-modal-ti').textContent = 'Editar local';
+  document.getElementById('place-name').value = p.name || '';
+  document.getElementById('place-lat').value = p.lat;
+  document.getElementById('place-lng').value = p.lng;
+  document.getElementById('place-radius').value = p.radius_m || 200;
+  document.getElementById('place-modal').style.display = 'flex';
+}
+
+function closePlaceModal() {
+  document.getElementById('place-modal').style.display = 'none';
+}
+
+function usePlaceGps() {
+  const s = window.state || {};
+  if (!s.gps_lat || !s.gps_lng) {
+    showToast('✗ GPS do carro indisponível', 'err');
+    return;
+  }
+  document.getElementById('place-lat').value = (+s.gps_lat).toFixed(6);
+  document.getElementById('place-lng').value = (+s.gps_lng).toFixed(6);
+  showToast('✓ GPS preenchido', 'ok');
+}
+
+async function savePlace() {
+  const tk = localStorage.getItem('bridge_token');
+  if (!tk) return;
+  const body = {
+    name: document.getElementById('place-name').value.trim(),
+    lat: parseFloat(document.getElementById('place-lat').value),
+    lng: parseFloat(document.getElementById('place-lng').value),
+    radius_m: parseInt(document.getElementById('place-radius').value || '200', 10) || 200,
+  };
+  if (!body.name) { showToast('✗ Informe o nome', 'err'); return; }
+  if (!Number.isFinite(body.lat) || !Number.isFinite(body.lng)) {
+    showToast('✗ Coordenadas inválidas', 'err'); return;
+  }
+  try {
+    let r;
+    if (_placeEditId) {
+      r = await fetch('/api/known-places/' + encodeURIComponent(_placeEditId), {
+        method: 'PUT',
+        headers: { 'Authorization': 'Bearer ' + tk, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    } else {
+      r = await fetch('/api/known-places', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + tk, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    }
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.error || 'HTTP ' + r.status);
+    closePlaceModal();
+    showToast('✓ Local salvo', 'ok');
+    _loadPlaces();
+  } catch (e) { showToast('✗ ' + e.message, 'err'); }
+}
+
+async function deletePlace(id) {
+  const p = _placesLocal.find(x => String(x.id) === String(id));
+  if (!confirm(`Excluir "${p?.name || 'esse local'}"?`)) return;
+  const tk = localStorage.getItem('bridge_token');
+  try {
+    const r = await fetch('/api/known-places/' + encodeURIComponent(id), {
+      method: 'DELETE',
+      headers: { 'Authorization': 'Bearer ' + tk },
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    showToast('✓ Local removido', 'ok');
+    _loadPlaces();
+  } catch (e) { showToast('✗ ' + e.message, 'err'); }
 }
 
 // ─── Avançado ─────────────────────────────────────────────
@@ -848,7 +991,7 @@ window.markMaintDone = async function(id) {
 };
 
   // Expõe handlers de onclick no window
-  Object.assign(window, { openSub: typeof openSub !== 'undefined' ? openSub : undefined, closeSub: typeof closeSub !== 'undefined' ? closeSub : undefined, saveSection: typeof saveSection !== 'undefined' ? saveSection : undefined, toggle2fa: typeof toggle2fa !== 'undefined' ? toggle2fa : undefined, confirmClearHistory: typeof confirmClearHistory !== 'undefined' ? confirmClearHistory : undefined, openMaintAdd: openMaintAdd, closeMaintModal: closeMaintModal, saveMaintItem: saveMaintItem, deleteMaintItem: deleteMaintItem, markMaintDone: markMaintDone, saveVehicle: saveVehicle, setChargeLimit: setChargeLimit, actionRefreshRadars: actionRefreshRadars, actionReanalyzeTrips: actionReanalyzeTrips, actionRestartBridge: actionRestartBridge, actionUpdateBridge: actionUpdateBridge });
+  Object.assign(window, { openSub: typeof openSub !== 'undefined' ? openSub : undefined, closeSub: typeof closeSub !== 'undefined' ? closeSub : undefined, saveSection: typeof saveSection !== 'undefined' ? saveSection : undefined, toggle2fa: typeof toggle2fa !== 'undefined' ? toggle2fa : undefined, confirmClearHistory: typeof confirmClearHistory !== 'undefined' ? confirmClearHistory : undefined, openMaintAdd: openMaintAdd, closeMaintModal: closeMaintModal, saveMaintItem: saveMaintItem, deleteMaintItem: deleteMaintItem, markMaintDone: markMaintDone, saveVehicle: saveVehicle, setChargeLimit: setChargeLimit, actionRefreshRadars: actionRefreshRadars, actionReanalyzeTrips: actionReanalyzeTrips, actionRestartBridge: actionRestartBridge, actionUpdateBridge: actionUpdateBridge, openPlaceAdd: openPlaceAdd, openPlaceEdit: openPlaceEdit, closePlaceModal: closePlaceModal, usePlaceGps: usePlaceGps, savePlace: savePlace, deletePlace: deletePlace });
   if (!window['initView_config']) window['initView_config'] = function() {};
 })();
 </script>
