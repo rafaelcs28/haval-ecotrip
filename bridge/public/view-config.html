@@ -320,7 +320,8 @@
       <div class="group-ti">Recarga</div>
       <div class="toggle-row" onclick="toggleNotif('charge_start', this)"><div class="label">Início da recarga<div class="sub">Push quando conecta</div></div><div class="toggle" data-key="charge_start"></div></div>
       <div class="toggle-row" onclick="toggleNotif('charge_end', this)"><div class="label">Fim da recarga<div class="sub">Quando atinge meta SOC</div></div><div class="toggle" data-key="charge_end"></div></div>
-      <div class="toggle-row" onclick="toggleNotif('charge_ending', this)"><div class="label">Próximo do fim<div class="sub">Aviso minutos antes</div></div><div class="toggle" data-key="charge_ending"></div></div>
+      <div class="toggle-row" onclick="toggleChargeEnding(this)"><div class="label">Próximo do fim<div class="sub" id="charge-ending-sub">Aviso minutos antes</div></div><div class="toggle" data-key="charge_ending"></div></div>
+      <div id="charge-ending-row" style="display:none;padding:0 4px 6px"><button class="btn secondary" style="width:100%" onclick="editChargeEndingMin()">⏱ Alterar antecedência (<span id="charge-ending-min-v">--</span> min)</button></div>
     </div>
     <div class="field-group">
       <div class="group-ti">Eventos do carro</div>
@@ -334,7 +335,9 @@
     <div class="field-group">
       <div class="group-ti">Localização</div>
       <div class="toggle-row" onclick="toggleNotif('geofence_arrival', this)"><div class="label">Chegada em local conhecido<div class="sub">Quando entra na geofence</div></div><div class="toggle" data-key="geofence_arrival"></div></div>
+      <div id="geofence-arrival-row" style="display:none;padding:0 4px 6px"><button class="btn secondary" style="width:100%" onclick="openGeofencePlaces('arrival')">📍 Selecionar locais (<span id="geofence-arrival-count">todos</span>)</button></div>
       <div class="toggle-row" onclick="toggleNotif('geofence_departure', this)"><div class="label">Saída de local conhecido<div class="sub">Quando sai da geofence</div></div><div class="toggle" data-key="geofence_departure"></div></div>
+      <div id="geofence-departure-row" style="display:none;padding:0 4px 6px"><button class="btn secondary" style="width:100%" onclick="openGeofencePlaces('departure')">📍 Selecionar locais (<span id="geofence-departure-count">todos</span>)</button></div>
       <div class="toggle-row" onclick="toggleNotif('trip_end', this)"><div class="label">Fim de viagem<div class="sub">Resumo ao terminar deslocamento</div></div><div class="toggle" data-key="trip_end"></div></div>
     </div>
     <div class="field-group">
@@ -367,6 +370,20 @@
         <button class="btn secondary" onclick="show2faBackup()">Ver códigos de backup</button>
       </div>
       <div class="hint" style="font-size:10px;color:var(--muted);padding:0 4px;margin-top:6px">Quando ativo, novos dispositivos precisam do código. Sessões logadas continuam funcionando.</div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal de seleção de locais pra geofence push -->
+<div id="geofence-places-modal" style="display:none;position:fixed;inset:0;z-index:80;background:rgba(0,0,0,.8);align-items:flex-end;justify-content:center;backdrop-filter:blur(8px)">
+  <div style="background:#1f1f1f;width:100%;max-width:480px;border-top-left-radius:18px;border-top-right-radius:18px;padding:18px 18px calc(env(safe-area-inset-bottom) + 18px);border-top:1px solid rgba(255,255,255,.08);max-height:85vh;overflow-y:auto">
+    <div style="width:42px;height:5px;background:rgba(255,255,255,.18);border-radius:3px;margin:-8px auto 14px"></div>
+    <div style="font-size:16px;font-weight:700;color:var(--text);margin-bottom:4px" id="geofence-places-ti">📍 Locais</div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:14px">Marque os locais que devem disparar notificação. Vazio = todos.</div>
+    <div id="geofence-places-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:16px"></div>
+    <div style="display:flex;gap:10px">
+      <button onclick="document.getElementById('geofence-places-modal').style.display='none'" style="flex:1;padding:12px;background:rgba(255,255,255,.06);color:#cbd5e1;border:none;border-radius:10px;font-size:14px;font-weight:700;font-family:inherit">Cancelar</button>
+      <button onclick="saveGeofencePlaces()" style="flex:1;padding:12px;background:var(--green);color:#000;border:none;border-radius:10px;font-size:14px;font-weight:700;font-family:inherit">Salvar</button>
     </div>
   </div>
 </div>
@@ -702,7 +719,151 @@ async function _loadNotifPrefs() {
       const key = el.dataset.key;
       el.classList.toggle('on', !!_notifPrefsLocal[key]);
     });
+    // Mostra "Selecionar locais" quando geofence está ON + atualiza count
+    _updateGeofenceLocalControls();
   } catch (_) {}
+}
+
+function _updateGeofenceLocalControls() {
+  ['arrival', 'departure'].forEach(kind => {
+    const row = document.getElementById('geofence-' + kind + '-row');
+    const count = document.getElementById('geofence-' + kind + '-count');
+    const onKey = 'geofence_' + kind;
+    const listKey = 'geofence_' + kind + '_places';
+    const isOn = !!_notifPrefsLocal[onKey];
+    if (row) row.style.display = isOn ? 'block' : 'none';
+    const list = _notifPrefsLocal[listKey] || [];
+    if (count) count.textContent = list.length === 0 ? 'todos' : `${list.length} marcado${list.length > 1 ? 's' : ''}`;
+  });
+  // Charge ending — mostra row de editar minutos quando ON
+  const cer = document.getElementById('charge-ending-row');
+  const csub = document.getElementById('charge-ending-sub');
+  const cmin = document.getElementById('charge-ending-min-v');
+  const isOn = !!_notifPrefsLocal.charge_ending;
+  const min = +_notifPrefsLocal.charge_ending_min || 5;
+  if (cer) cer.style.display = isOn ? 'block' : 'none';
+  if (csub) csub.textContent = isOn ? `Aviso ${min} min antes` : 'Aviso minutos antes';
+  if (cmin) cmin.textContent = min;
+}
+
+async function toggleChargeEnding() {
+  const tk = localStorage.getItem('bridge_token');
+  if (!tk) return;
+  const el = document.querySelector('#sv-notif .toggle[data-key="charge_ending"]');
+  const wasOn = el.classList.contains('on');
+  if (!wasOn) {
+    // Ligando: pergunta minutos
+    const input = prompt('Avisar quantos minutos antes do fim da recarga? (1 a 20)', _notifPrefsLocal.charge_ending_min || 5);
+    if (input === null) return;  // cancelou
+    const min = parseInt(input, 10);
+    if (!min || min < 1 || min > 20) { showToast('✗ Valor entre 1 e 20', 'err'); return; }
+    el.classList.add('on');
+    try {
+      // Salva minutos primeiro
+      await fetch('/api/push/prefs', {
+        method: 'POST', headers: { 'Authorization': 'Bearer ' + tk, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: 'charge_ending_min', value: min }),
+      });
+      // Ativa o toggle
+      const r = await fetch('/api/push/prefs', {
+        method: 'POST', headers: { 'Authorization': 'Bearer ' + tk, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: 'charge_ending', value: true }),
+      });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      _notifPrefsLocal.charge_ending = true;
+      _notifPrefsLocal.charge_ending_min = min;
+      _updateGeofenceLocalControls();
+    } catch (e) {
+      el.classList.remove('on');
+      showToast('✗ ' + e.message, 'err');
+    }
+  } else {
+    // Desligando
+    el.classList.remove('on');
+    try {
+      const r = await fetch('/api/push/prefs', {
+        method: 'POST', headers: { 'Authorization': 'Bearer ' + tk, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: 'charge_ending', value: false }),
+      });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      _notifPrefsLocal.charge_ending = false;
+      _updateGeofenceLocalControls();
+    } catch (e) {
+      el.classList.add('on');
+      showToast('✗ ' + e.message, 'err');
+    }
+  }
+}
+
+async function editChargeEndingMin() {
+  const tk = localStorage.getItem('bridge_token');
+  const cur = _notifPrefsLocal.charge_ending_min || 5;
+  const input = prompt('Avisar quantos minutos antes do fim da recarga? (1 a 20)', cur);
+  if (input === null) return;
+  const min = parseInt(input, 10);
+  if (!min || min < 1 || min > 20) { showToast('✗ Valor entre 1 e 20', 'err'); return; }
+  try {
+    const r = await fetch('/api/push/prefs', {
+      method: 'POST', headers: { 'Authorization': 'Bearer ' + tk, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: 'charge_ending_min', value: min }),
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    _notifPrefsLocal.charge_ending_min = min;
+    _updateGeofenceLocalControls();
+    showToast('✓ Antecedência: ' + min + ' min', 'ok');
+  } catch (e) { showToast('✗ ' + e.message, 'err'); }
+}
+
+let _geofenceKind = null;  // 'arrival' ou 'departure'
+let _geofencePicked = new Set();
+async function openGeofencePlaces(kind) {
+  _geofenceKind = kind;
+  document.getElementById('geofence-places-ti').textContent = kind === 'arrival' ? '📍 Notificar chegada em:' : '🚗 Notificar saída de:';
+  const tk = localStorage.getItem('bridge_token');
+  if (!tk) return;
+  try {
+    const r = await fetch('/api/known-places', { headers: { 'Authorization': 'Bearer ' + tk } });
+    const places = await r.json();
+    const selected = new Set((_notifPrefsLocal['geofence_' + kind + '_places'] || []).map(String));
+    _geofencePicked = new Set(selected);
+    const list = document.getElementById('geofence-places-list');
+    list.innerHTML = (places || []).map(p => {
+      const id = String(p.id);
+      const checked = selected.has(id);
+      return `<label style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:rgba(255,255,255,.03);border-radius:10px;cursor:pointer">
+        <input type="checkbox" data-id="${id}" ${checked ? 'checked' : ''} onchange="_toggleGeofencePick(this)" style="width:18px;height:18px;accent-color:var(--green)">
+        <div style="flex:1">
+          <div style="font-size:13px;font-weight:600;color:var(--text)">📍 ${p.name || '(sem nome)'}</div>
+          <div style="font-size:10px;color:var(--muted)">raio ${p.radius_m || 200}m</div>
+        </div>
+      </label>`;
+    }).join('') + (places.length ? '' : '<div style="text-align:center;padding:18px;color:var(--muted);font-size:12px">Nenhum local cadastrado</div>');
+    document.getElementById('geofence-places-modal').style.display = 'flex';
+  } catch (e) { showToast('✗ ' + e.message, 'err'); }
+}
+
+function _toggleGeofencePick(inp) {
+  if (inp.checked) _geofencePicked.add(inp.dataset.id);
+  else _geofencePicked.delete(inp.dataset.id);
+}
+
+async function saveGeofencePlaces() {
+  const tk = localStorage.getItem('bridge_token');
+  const key = 'geofence_' + _geofenceKind + '_places';
+  const value = [..._geofencePicked];
+  try {
+    const r = await fetch('/api/push/prefs', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + tk, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key, value }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'HTTP ' + r.status);
+    _notifPrefsLocal[key] = value;
+    _updateGeofenceLocalControls();
+    document.getElementById('geofence-places-modal').style.display = 'none';
+    showToast('✓ Locais salvos', 'ok');
+  } catch (e) { showToast('✗ ' + e.message, 'err'); }
 }
 
 async function toggleNotif(key) {
@@ -1215,7 +1376,7 @@ window.markMaintDone = async function(id) {
 };
 
   // Expõe handlers de onclick no window
-  Object.assign(window, { openSub: typeof openSub !== 'undefined' ? openSub : undefined, closeSub: typeof closeSub !== 'undefined' ? closeSub : undefined, saveSection: typeof saveSection !== 'undefined' ? saveSection : undefined, toggle2fa: typeof toggle2fa !== 'undefined' ? toggle2fa : undefined, confirmClearHistory: typeof confirmClearHistory !== 'undefined' ? confirmClearHistory : undefined, openMaintAdd: openMaintAdd, closeMaintModal: closeMaintModal, saveMaintItem: saveMaintItem, deleteMaintItem: deleteMaintItem, markMaintDone: markMaintDone, saveVehicle: saveVehicle, setChargeLimit: setChargeLimit, actionRefreshRadars: actionRefreshRadars, actionReanalyzeTrips: actionReanalyzeTrips, actionRestartBridge: actionRestartBridge, actionUpdateBridge: actionUpdateBridge, openPlaceAdd: openPlaceAdd, openPlaceEdit: openPlaceEdit, closePlaceModal: closePlaceModal, usePlaceGps: usePlaceGps, savePlace: savePlace, deletePlace: deletePlace, toggleNotif: toggleNotif, changePassword: changePassword, toggle2faNew: toggle2faNew, closeTotpModal: closeTotpModal, activate2fa: activate2fa, show2faBackup: show2faBackup, regenBackupCodes: regenBackupCodes });
+  Object.assign(window, { openSub: typeof openSub !== 'undefined' ? openSub : undefined, closeSub: typeof closeSub !== 'undefined' ? closeSub : undefined, saveSection: typeof saveSection !== 'undefined' ? saveSection : undefined, toggle2fa: typeof toggle2fa !== 'undefined' ? toggle2fa : undefined, confirmClearHistory: typeof confirmClearHistory !== 'undefined' ? confirmClearHistory : undefined, openMaintAdd: openMaintAdd, closeMaintModal: closeMaintModal, saveMaintItem: saveMaintItem, deleteMaintItem: deleteMaintItem, markMaintDone: markMaintDone, saveVehicle: saveVehicle, setChargeLimit: setChargeLimit, actionRefreshRadars: actionRefreshRadars, actionReanalyzeTrips: actionReanalyzeTrips, actionRestartBridge: actionRestartBridge, actionUpdateBridge: actionUpdateBridge, openPlaceAdd: openPlaceAdd, openPlaceEdit: openPlaceEdit, closePlaceModal: closePlaceModal, usePlaceGps: usePlaceGps, savePlace: savePlace, deletePlace: deletePlace, toggleNotif: toggleNotif, changePassword: changePassword, toggle2faNew: toggle2faNew, closeTotpModal: closeTotpModal, activate2fa: activate2fa, show2faBackup: show2faBackup, regenBackupCodes: regenBackupCodes, openGeofencePlaces: openGeofencePlaces, _toggleGeofencePick: _toggleGeofencePick, saveGeofencePlaces: saveGeofencePlaces, toggleChargeEnding: toggleChargeEnding, editChargeEndingMin: editChargeEndingMin });
   if (!window['initView_config']) window['initView_config'] = function() {};
 })();
 </script>

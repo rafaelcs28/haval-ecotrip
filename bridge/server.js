@@ -204,8 +204,12 @@ const NOTIF_DEFAULTS = {
   engine_off:        false,  // 🔑 Motor desligado
   app_update:        true,   // 📱 Nova versão do app instalada no carro
   trip_end:          true,   // 🏁 Viagem concluída (auto-trip)
-  geofence_arrival:  true,   // 📍 Chegou em local conhecido
-  geofence_departure:false,  // 🚗 Saiu de local conhecido
+  geofence_arrival:  true,   // 📍 Chegou em local conhecido (master on/off)
+  geofence_departure:false,  // 🚗 Saiu de local conhecido (master on/off)
+  // Listas de place IDs autorizados. Vazio = todos os locais conhecidos.
+  // Quando o user marca/desmarca locais específicos, vai pra cá.
+  geofence_arrival_places:   [],
+  geofence_departure_places: [],
   maintenance_soon:  true,   // 🔧 Manutenção se aproximando (dentro do alert_km)
   maintenance_overdue: true, // ⚠️ Manutenção atrasada
   anomaly_detected:  true,   // ⚠️ Anomalia detectada na telemetria
@@ -1272,13 +1276,18 @@ function checkGeofence() {
       geofenceState[loc.id] = 'in';
       if (prev === 'out') {  // só notifica se houve transição (não no boot)
         addEvent('geofence_in', `📍 Chegou em ${loc.name}`);
-        if (notifPrefs.geofence_arrival) sendPush(`📍 Chegou em ${loc.name}`, `Veículo dentro da zona.`);
+        // Push gateado por: 1) master toggle 2) lista de places (vazio = todos)
+        const arrPlaces = notifPrefs.geofence_arrival_places || [];
+        if (notifPrefs.geofence_arrival && (arrPlaces.length === 0 || arrPlaces.includes(String(loc.id))))
+          sendPush(`📍 Chegou em ${loc.name}`, `Veículo dentro da zona.`);
       }
     } else if (isOutside && prev !== 'out') {
       geofenceState[loc.id] = 'out';
       if (prev === 'in' && engineOn) {  // saída só com motor ligado
         addEvent('geofence_out', `🚗 Saiu de ${loc.name}`);
-        if (notifPrefs.geofence_departure) sendPush(`🚗 Saiu de ${loc.name}`, `Veículo deixou a zona.`);
+        const depPlaces = notifPrefs.geofence_departure_places || [];
+        if (notifPrefs.geofence_departure && (depPlaces.length === 0 || depPlaces.includes(String(loc.id))))
+          sendPush(`🚗 Saiu de ${loc.name}`, `Veículo deixou a zona.`);
       }
     }
   }
@@ -3082,7 +3091,12 @@ app.get('/api/push/prefs', (_req, res) => res.json(notifPrefs));
 app.post('/api/push/prefs', (req, res) => {
   const { key, value } = req.body || {};
   if (!key || !(key in NOTIF_DEFAULTS)) return res.status(400).json({ error: 'chave inválida' });
-  if (typeof NOTIF_DEFAULTS[key] === 'number') {
+  const def = NOTIF_DEFAULTS[key];
+  if (Array.isArray(def)) {
+    // Lista de IDs (ex: geofence_arrival_places)
+    if (!Array.isArray(value)) return res.status(400).json({ error: 'esperado array' });
+    notifPrefs[key] = value.map(String);
+  } else if (typeof def === 'number') {
     const n = parseInt(value);
     if (isNaN(n)) return res.status(400).json({ error: 'valor numérico inválido' });
     notifPrefs[key] = Math.max(1, Math.min(20, n));
@@ -4071,7 +4085,11 @@ function applyMqttMessage(key, value, isRetained = false) {
         state.charging_state === 'Carregando'
       ) {
         chargeEndingNotifSent = true;
-        sendPush('🔔 Recarga finalizando', `Recarga finalizando em ${rem} minuto${rem !== 1 ? 's' : ''}.`);
+        const cfgMin = notifPrefs.charge_ending_min || 5;
+        sendPush(
+          '🔔 Recarga quase no fim',
+          `Faltam ${rem} min · aviso configurado: ${cfgMin} min antes`
+        );
       }
       break;
     }
