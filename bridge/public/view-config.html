@@ -1156,16 +1156,22 @@ async function deletePlace(id) {
 async function _loadAdvanced() {
   const tk = localStorage.getItem('bridge_token');
   if (!tk) return;
-  // Status dos radares (última atualização)
+  // Status dos radares (total + última atualização)
   try {
     const r = await fetch('/api/radars/status', { headers: { 'Authorization': 'Bearer ' + tk } });
     const d = await r.json();
     const sub = document.getElementById('adv-radars-sub');
-    if (sub && d.last_update_ms) {
-      const dt = new Date(d.last_update_ms);
-      sub.textContent = `Refresh OSM · última: ${dt.toLocaleDateString('pt-BR')}`;
-    } else if (sub) {
-      sub.textContent = 'Refresh OSM · nunca atualizado';
+    if (sub) {
+      const ts = d.updated_at || d.last_update_ms;
+      const dt = ts ? new Date(ts) : null;
+      const dateStr = dt && !isNaN(dt.getTime())
+        ? dt.toLocaleDateString('pt-BR', { day:'2-digit', month:'2-digit' })
+        : null;
+      const parts = [];
+      if (d.total) parts.push(`${d.total.toLocaleString('pt-BR')} radares`);
+      if (dateStr) parts.push(`última: ${dateStr}`);
+      else if (!d.total) parts.push('nunca atualizado');
+      sub.textContent = parts.join(' · ') || 'Refresh OSM';
     }
   } catch (_) {}
   // Quantidade de locais conhecidos
@@ -1187,7 +1193,7 @@ async function actionRefreshRadars() {
     });
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || 'HTTP ' + r.status);
-    showToast(`✓ ${d.count || 0} radares baixados`, 'ok');
+    showToast(`✓ ${(d.total || 0).toLocaleString('pt-BR')} radares baixados`, 'ok');
     _loadAdvanced();
   } catch (e) { showToast('✗ ' + e.message, 'err'); }
 }
@@ -1202,7 +1208,7 @@ async function actionReanalyzeTrips() {
     });
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || 'HTTP ' + r.status);
-    showToast(`✓ ${d.trips_updated || 0} viagens reanalisadas`, 'ok');
+    showToast(`✓ ${d.processed || 0} viagens reanalisadas (${d.with_alerts || 0} com alertas)`, 'ok');
   } catch (e) { showToast('✗ ' + e.message, 'err'); }
 }
 
