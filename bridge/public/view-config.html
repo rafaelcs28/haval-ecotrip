@@ -317,21 +317,32 @@
   </div>
   <div class="sub-body">
     <div class="field-group">
-      <div class="group-ti">Eventos do carro</div>
-      <div class="toggle-row"><div class="label">Motor ligado/desligado<div class="sub">Push quando alguém liga o carro</div></div><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
-      <div class="toggle-row"><div class="label">Porta-malas<div class="sub">Aberto/fechado</div></div><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
-      <div class="toggle-row"><div class="label">Travamento<div class="sub">Tranca/destranca</div></div><div class="toggle" onclick="this.classList.toggle('on')"></div></div>
-      <div class="toggle-row"><div class="label">Portas abertas<div class="sub">Quando o carro está estacionado</div></div><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
-    </div>
-    <div class="field-group">
       <div class="group-ti">Recarga</div>
-      <div class="toggle-row"><div class="label">Início da recarga<div class="sub">Confirma quando conecta</div></div><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
-      <div class="toggle-row"><div class="label">Fim da recarga<div class="sub">Quando atinge meta SOC</div></div><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
-      <div class="toggle-row"><div class="label">Próximo do fim<div class="sub">Aviso 5min antes</div></div><div class="toggle" onclick="this.classList.toggle('on')"></div></div>
+      <div class="toggle-row" onclick="toggleNotif('charge_start', this)"><div class="label">Início da recarga<div class="sub">Push quando conecta</div></div><div class="toggle" data-key="charge_start"></div></div>
+      <div class="toggle-row" onclick="toggleNotif('charge_end', this)"><div class="label">Fim da recarga<div class="sub">Quando atinge meta SOC</div></div><div class="toggle" data-key="charge_end"></div></div>
+      <div class="toggle-row" onclick="toggleNotif('charge_ending', this)"><div class="label">Próximo do fim<div class="sub">Aviso minutos antes</div></div><div class="toggle" data-key="charge_ending"></div></div>
     </div>
     <div class="field-group">
-      <div class="group-ti">Manutenção</div>
-      <div class="toggle-row"><div class="label">Manutenção próxima<div class="sub">Aviso quando faltar &lt; 1000 km</div></div><div class="toggle on" onclick="this.classList.toggle('on')"></div></div>
+      <div class="group-ti">Eventos do carro</div>
+      <div class="toggle-row" onclick="toggleNotif('engine_on', this)"><div class="label">Motor ligado<div class="sub">Quando o motor é acionado</div></div><div class="toggle" data-key="engine_on"></div></div>
+      <div class="toggle-row" onclick="toggleNotif('engine_off', this)"><div class="label">Motor desligado<div class="sub">Quando desligam o motor</div></div><div class="toggle" data-key="engine_off"></div></div>
+      <div class="toggle-row" onclick="toggleNotif('door_open', this)"><div class="label">Porta aberta<div class="sub">Qualquer porta lateral</div></div><div class="toggle" data-key="door_open"></div></div>
+      <div class="toggle-row" onclick="toggleNotif('door_close', this)"><div class="label">Porta fechada<div class="sub">Qualquer porta lateral</div></div><div class="toggle" data-key="door_close"></div></div>
+      <div class="toggle-row" onclick="toggleNotif('trunk_open', this)"><div class="label">Porta-malas aberto<div class="sub">Quando o porta-malas abre</div></div><div class="toggle" data-key="trunk_open"></div></div>
+      <div class="toggle-row" onclick="toggleNotif('trunk_close', this)"><div class="label">Porta-malas fechado<div class="sub">Quando o porta-malas fecha</div></div><div class="toggle" data-key="trunk_close"></div></div>
+    </div>
+    <div class="field-group">
+      <div class="group-ti">Localização</div>
+      <div class="toggle-row" onclick="toggleNotif('geofence_arrival', this)"><div class="label">Chegada em local conhecido<div class="sub">Quando entra na geofence</div></div><div class="toggle" data-key="geofence_arrival"></div></div>
+      <div class="toggle-row" onclick="toggleNotif('geofence_departure', this)"><div class="label">Saída de local conhecido<div class="sub">Quando sai da geofence</div></div><div class="toggle" data-key="geofence_departure"></div></div>
+      <div class="toggle-row" onclick="toggleNotif('trip_end', this)"><div class="label">Fim de viagem<div class="sub">Resumo ao terminar deslocamento</div></div><div class="toggle" data-key="trip_end"></div></div>
+    </div>
+    <div class="field-group">
+      <div class="group-ti">Manutenção e atualizações</div>
+      <div class="toggle-row" onclick="toggleNotif('maintenance_soon', this)"><div class="label">Manutenção próxima<div class="sub">Aviso quando faltar &lt; 1000 km</div></div><div class="toggle" data-key="maintenance_soon"></div></div>
+      <div class="toggle-row" onclick="toggleNotif('maintenance_overdue', this)"><div class="label">Manutenção atrasada<div class="sub">Aviso quando ultrapassar o prazo</div></div><div class="toggle" data-key="maintenance_overdue"></div></div>
+      <div class="toggle-row" onclick="toggleNotif('anomaly_detected', this)"><div class="label">Anomalias detectadas<div class="sub">Eventos incomuns no carro</div></div><div class="toggle" data-key="anomaly_detected"></div></div>
+      <div class="toggle-row" onclick="toggleNotif('app_update', this)"><div class="label">Atualização do app<div class="sub">Nova versão disponível</div></div><div class="toggle" data-key="app_update"></div></div>
     </div>
   </div>
 </div>
@@ -505,6 +516,46 @@
   if (name === 'charge' && typeof _loadChargeLimit === 'function') _loadChargeLimit();
   if (name === 'advanced' && typeof _loadAdvanced === 'function') _loadAdvanced();
   if (name === 'places' && typeof _loadPlaces === 'function') _loadPlaces();
+  if (name === 'notif' && typeof _loadNotifPrefs === 'function') _loadNotifPrefs();
+}
+
+// ─── Notificações: prefs de push ───────────────────────
+let _notifPrefsLocal = {};
+async function _loadNotifPrefs() {
+  const tk = localStorage.getItem('bridge_token');
+  if (!tk) return;
+  try {
+    const r = await fetch('/api/push/prefs', { headers: { 'Authorization': 'Bearer ' + tk } });
+    _notifPrefsLocal = await r.json();
+    // Atualiza estado visual dos toggles
+    document.querySelectorAll('#sv-notif .toggle[data-key]').forEach(el => {
+      const key = el.dataset.key;
+      el.classList.toggle('on', !!_notifPrefsLocal[key]);
+    });
+  } catch (_) {}
+}
+
+async function toggleNotif(key) {
+  const tk = localStorage.getItem('bridge_token');
+  if (!tk) return;
+  const el = document.querySelector(`#sv-notif .toggle[data-key="${key}"]`);
+  if (!el) return;
+  const newVal = !el.classList.contains('on');
+  el.classList.toggle('on', newVal);  // otimista
+  _notifPrefsLocal[key] = newVal;
+  try {
+    const r = await fetch('/api/push/prefs', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + tk, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ [key]: newVal }),
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+  } catch (e) {
+    // Reverte em caso de erro
+    el.classList.toggle('on', !newVal);
+    _notifPrefsLocal[key] = !newVal;
+    showToast('✗ Falha ao salvar: ' + e.message, 'err');
+  }
 }
 
 // ─── Locais conhecidos (CRUD) ───────────────────────────
@@ -991,7 +1042,7 @@ window.markMaintDone = async function(id) {
 };
 
   // Expõe handlers de onclick no window
-  Object.assign(window, { openSub: typeof openSub !== 'undefined' ? openSub : undefined, closeSub: typeof closeSub !== 'undefined' ? closeSub : undefined, saveSection: typeof saveSection !== 'undefined' ? saveSection : undefined, toggle2fa: typeof toggle2fa !== 'undefined' ? toggle2fa : undefined, confirmClearHistory: typeof confirmClearHistory !== 'undefined' ? confirmClearHistory : undefined, openMaintAdd: openMaintAdd, closeMaintModal: closeMaintModal, saveMaintItem: saveMaintItem, deleteMaintItem: deleteMaintItem, markMaintDone: markMaintDone, saveVehicle: saveVehicle, setChargeLimit: setChargeLimit, actionRefreshRadars: actionRefreshRadars, actionReanalyzeTrips: actionReanalyzeTrips, actionRestartBridge: actionRestartBridge, actionUpdateBridge: actionUpdateBridge, openPlaceAdd: openPlaceAdd, openPlaceEdit: openPlaceEdit, closePlaceModal: closePlaceModal, usePlaceGps: usePlaceGps, savePlace: savePlace, deletePlace: deletePlace });
+  Object.assign(window, { openSub: typeof openSub !== 'undefined' ? openSub : undefined, closeSub: typeof closeSub !== 'undefined' ? closeSub : undefined, saveSection: typeof saveSection !== 'undefined' ? saveSection : undefined, toggle2fa: typeof toggle2fa !== 'undefined' ? toggle2fa : undefined, confirmClearHistory: typeof confirmClearHistory !== 'undefined' ? confirmClearHistory : undefined, openMaintAdd: openMaintAdd, closeMaintModal: closeMaintModal, saveMaintItem: saveMaintItem, deleteMaintItem: deleteMaintItem, markMaintDone: markMaintDone, saveVehicle: saveVehicle, setChargeLimit: setChargeLimit, actionRefreshRadars: actionRefreshRadars, actionReanalyzeTrips: actionReanalyzeTrips, actionRestartBridge: actionRestartBridge, actionUpdateBridge: actionUpdateBridge, openPlaceAdd: openPlaceAdd, openPlaceEdit: openPlaceEdit, closePlaceModal: closePlaceModal, usePlaceGps: usePlaceGps, savePlace: savePlace, deletePlace: deletePlace, toggleNotif: toggleNotif });
   if (!window['initView_config']) window['initView_config'] = function() {};
 })();
 </script>
