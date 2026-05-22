@@ -6,13 +6,17 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.util.Log
 import br.com.redesurftank.ecotrip.BuildConfig
+import br.com.redesurftank.ecotrip.models.CarConstants
 import br.com.redesurftank.ecotrip.models.SharedPreferencesKeys
 import com.google.gson.Gson
 import org.eclipse.paho.client.mqttv3.*
 import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence
+import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.Timer
+import java.util.TimerTask
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -359,6 +363,7 @@ class MqttManager private constructor() {
         val ctx = try { context.createDeviceProtectedStorageContext() } catch (_: Exception) { context }
         prefs = ctx.getSharedPreferences(SharedPreferencesKeys.PREFS_NAME, Context.MODE_PRIVATE)
         loadConfig()
+        restoreDiagState(prefs)
         if (enabled && host.isNotEmpty()) connect()
     }
 
@@ -1177,9 +1182,50 @@ class MqttManager private constructor() {
                         AppLogger.i(TAG, if (on) "HF mode ON — publish a cada ${HF_MODE_INTERVAL_MS}ms" else "HF mode OFF — intervalo normal restaurado")
                     }
                 }
+                "diag" -> {
+                    // Payload JSON: { enabled: bool, interval_sec: int }
+                    try {
+                        val o = JSONObject(payload)
+                        val enabled = o.optBoolean("enabled", false)
+                        val interval = o.optInt("interval_sec", 5)
+                        applyDiagState(enabled, interval)
+                    } catch (e: Exception) {
+                        AppLogger.w(TAG, "[diag] payload inválido: '$payload' (${e.message})")
+                    }
+                }
                 else -> {
                     // Comandos HVAC: cmd/hvac/<control> — escreve no barramento via Shizuku.
                     // Bridge já validou range/tipo; aqui só mapeia control → chave do bus.
+                    if (cmd.startsWith("diag_set/")) {
+                        // Tenta gravar uma constante arbitrária via Shizuku.
+                        // Bridge envia o valor cru; APK chama requestSetting e publica
+                        // resultado em diag_ack/<KEY>.
+                        val keyName = cmd.removePrefix("diag_set/")
+                        val constant = CarConstants.entries.firstOrNull { it.name == keyName }
+                        if (constant == null) {
+                            try {
+                                val ack = JSONObject().put("ok", false).put("error", "chave desconhecida: $keyName")
+                                client?.publish("$prefix/diag_ack/$keyName", ack.toString().toByteArray(), 1, false)
+                            } catch (_: Exception) {}
+                            return@submit
+                        }
+                        AppLogger.i(TAG, "[diag] set ${constant.value} = '$payload'")
+                        val ok = try { car.requestSetting(key = constant.value, value = payload) }
+                                 catch (e: Exception) { AppLogger.w(TAG, "requestSetting falhou: ${e.message}"); false }
+                        // Pequena pausa pra ECU processar antes de ler de volta
+                        Thread.sleep(800)
+                        val applied = try { car.fetchCurrent(constant.value) } catch (_: Exception) { null }
+                        val ack = JSONObject()
+                            .put("ok", ok)
+                            .put("applied", applied ?: JSONObject.NULL)
+                            .put("requested", payload)
+                            .put("bus_key", constant.value)
+                        if (!ok) ack.put("error", "carro rejeitou (read-only ou dormindo)")
+                        try {
+                            client?.publish("$prefix/diag_ack/$keyName", ack.toString().toByteArray(), 1, false)
+                        } catch (e: Exception) { AppLogger.w(TAG, "publish ack falhou: ${e.message}") }
+                        return@submit
+                    }
                     if (cmd.startsWith("hvac/")) {
                         val control = cmd.removePrefix("hvac/")
                         val busKey = when (control) {
@@ -1224,6 +1270,78 @@ class MqttManager private constructor() {
             client?.publish("$prefix/cmd/$cmd/result", result.toByteArray(), 1, false)
         } catch (e: Exception) {
             AppLogger.w(TAG, "Falha ao publicar resultado: ${e.message}")
+        }
+    }
+
+    // ─── Modo diagnóstico ────────────────────────────────────────────
+    // Quando ativado pela PWA via cmd/diag, o APK lê TODAS as constantes
+    // do CarConstants em loop e publica em diag/<KEY> a cada N segundos.
+    // Bridge propaga via WS pro PWA, e salva snapshot em diag_state.json.
+    @Volatile private var diagEnabled = false
+    @Volatile private var diagIntervalSec = 5
+    @Volatile private var diagTimer: Timer? = null
+
+    private fun applyDiagState(enabled: Boolean, intervalSec: Int) {
+        diagEnabled = enabled
+        diagIntervalSec = intervalSec.coerceIn(1, 300)
+        // Persiste em SharedPreferences pra sobreviver restart do app
+        try {
+            appContext?.getSharedPreferences(SharedPreferencesKeys.PREFS_NAME, Context.MODE_PRIVATE)?.edit()
+                ?.putBoolean("diag_enabled", enabled)
+                ?.putInt("diag_interval_sec", diagIntervalSec)
+                ?.apply()
+        } catch (_: Exception) {}
+        // Cancela timer antigo
+        diagTimer?.cancel()
+        diagTimer = null
+        if (!enabled) {
+            AppLogger.i(TAG, "[diag] DESATIVADO")
+            return
+        }
+        AppLogger.i(TAG, "[diag] ATIVADO (intervalo ${diagIntervalSec}s, ${CarConstants.entries.size} constantes)")
+        val periodMs = diagIntervalSec * 1000L
+        val t = Timer("diag-publisher", true)
+        t.scheduleAtFixedRate(object : TimerTask() {
+            override fun run() {
+                try { publishDiagSnapshot() } catch (e: Exception) {
+                    AppLogger.w(TAG, "[diag] erro no loop: ${e.message}")
+                }
+            }
+        }, 500L, periodMs)
+        diagTimer = t
+    }
+
+    private fun publishDiagSnapshot() {
+        val c = client ?: return
+        if (!c.isConnected) return
+        val car = CarDataManager.getInstance()
+        var ok = 0; var fail = 0
+        for (k in CarConstants.entries) {
+            try {
+                val raw = car.fetchCurrent(k.value)
+                if (raw != null) {
+                    c.publish("$prefix/diag/${k.name}", raw.toByteArray(), 0, false)
+                    ok++
+                } else fail++
+            } catch (_: Exception) { fail++ }
+        }
+        AppLogger.d(TAG, "[diag] snapshot: $ok ok / $fail null")
+    }
+
+    // Pega estado persistido em SharedPreferences (chamado no init)
+    private fun restoreDiagState(prefs: SharedPreferences) {
+        val enabled = prefs.getBoolean("diag_enabled", false)
+        val interval = prefs.getInt("diag_interval_sec", 5)
+        if (enabled) {
+            AppLogger.i(TAG, "[diag] estado persistido encontrado — restaurando (interval ${interval}s)")
+            // Espera 5s pra MQTT conectar antes de iniciar publicação
+            executor.submit {
+                Thread.sleep(5_000)
+                applyDiagState(true, interval)
+            }
+        } else {
+            diagEnabled = false
+            diagIntervalSec = interval
         }
     }
 
