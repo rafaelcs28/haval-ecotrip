@@ -3934,12 +3934,14 @@ function applyMqttMessage(key, value, isRetained = false) {
       state.charging_state = value;
       prevChargingState    = value;
 
-      // Mensagens retained chegam ao reconectar ao broker e refletem o estado
-      // anterior — não representam uma transição real, então NÃO disparam push.
-      // Sem esse filtro, a mensagem retained 'Carregando' de uma sessão anterior
-      // envenena prevChargingState e impede a notificação na próxima recarga real.
-      if (!isRetained) {
-        if (value === 'Carregando' && prev !== 'Carregando') {
+      // Detecta transição REAL: prev definido e diferente do novo valor.
+      // No primeiro boot do bridge, prev é vazio → pula (não há transição).
+      // Em qualquer outra mudança (retained ou não), registra evento no log;
+      // só o push de notificação é gateado por !isRetained (pra não notificar
+      // o user no boot quando o broker reenvia 'Carregando' antigo).
+      const realTransition = prev && prev !== value;
+      if (realTransition) {
+        if (value === 'Carregando') {
           _chargeTempSamples = [];   // inicia nova coleta de temperatura
           chargeSessionStartMs = Date.now();
           chargeStartSoc = state.soc_pct || 0;
@@ -3949,20 +3951,22 @@ function applyMqttMessage(key, value, isRetained = false) {
           state.charge_avg_power_kw        = 0;
           state.charge_session_kwh_at_init = 0;
           addEvent('charge_start', `Recarga iniciada · SOC: ${chargeStartSoc.toFixed(0)}%`);
-          // Aguarda 30s para a potência estabilizar antes de notificar
-          if (chargeStartTimer) clearTimeout(chargeStartTimer);
-          chargeStartTimer = setTimeout(() => {
-            chargeStartTimer = null;
-            const pwr = state.charge_power_kw || 0;
-            const rem = state.charge_remaining_min || 0;
-            const remStr = rem > 0
-              ? (rem > 59 ? `${Math.floor(rem / 60)}h ${rem % 60}min` : `${rem} min`)
-              : '~?';
-            if (notifPrefs.charge_start)
-            sendPush('⚡ Recarga iniciada', `${pwr.toFixed(1)} kW · tempo restante: ${remStr}`);
-          }, 30000);
+          if (!isRetained) {
+            // Aguarda 30s para a potência estabilizar antes de notificar
+            if (chargeStartTimer) clearTimeout(chargeStartTimer);
+            chargeStartTimer = setTimeout(() => {
+              chargeStartTimer = null;
+              const pwr = state.charge_power_kw || 0;
+              const rem = state.charge_remaining_min || 0;
+              const remStr = rem > 0
+                ? (rem > 59 ? `${Math.floor(rem / 60)}h ${rem % 60}min` : `${rem} min`)
+                : '~?';
+              if (notifPrefs.charge_start)
+              sendPush('⚡ Recarga iniciada', `${pwr.toFixed(1)} kW · tempo restante: ${remStr}`);
+            }, 30000);
+          }
 
-        } else if (value !== 'Carregando' && prev === 'Carregando') {
+        } else if (prev === 'Carregando') {
           if (chargeStartTimer) { clearTimeout(chargeStartTimer); chargeStartTimer = null; }
           chargeEndingNotifSent = false;  // reset para próxima sessão
           const endSoc = state.soc_pct || 0;
@@ -3974,7 +3978,7 @@ function applyMqttMessage(key, value, isRetained = false) {
             console.log(`🌡 Temp média recarga: ${_lastChargeAvgTemp}°C (${_chargeTempSamples.length} amostras)`);
           }
           _chargeTempSamples = [];
-          if (value === 'Finalizado' && notifPrefs.charge_end) {
+          if (!isRetained && value === 'Finalizado' && notifPrefs.charge_end) {
             const kwh = state.charge_session_kwh || 0;
             const durSec = chargeSessionStartMs > 0
               ? Math.round((Date.now() - chargeSessionStartMs) / 1000)
