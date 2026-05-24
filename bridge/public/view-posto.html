@@ -1069,14 +1069,16 @@ function openCostEdit(id) {
   const it = getItem(id);
   if (!it) return;
   const computed = it.kwh * 0.9997;
-  openAction('💰 Editar valor pago', `Custo atual: R$ ${fmtBRL(it.cost)} · automático R$ ${fmtBRL(computed)}`, `
+  const isFree = it.cost === 0 && it.override_cost != null && +it.override_cost === 0;
+  openAction('💰 Editar valor pago', `Custo atual: ${isFree ? '🆓 GRÁTIS' : 'R$ ' + fmtBRL(it.cost)} · automático R$ ${fmtBRL(computed)}`, `
     <div class="input-row">
       <label>Valor total pago (R$)</label>
-      <input id="ai-cost" type="number" step="0.01" placeholder="${computed.toFixed(2)}" value="${it.override_cost ?? ''}">
-      <div class="hint">Deixe vazio pra recalcular automático a partir do tarifa kWh.</div>
+      <input id="ai-cost" type="number" step="0.01" placeholder="${computed.toFixed(2)}" value="${(!isFree && it.override_cost) ?? ''}">
+      <div class="hint">Deixe vazio pra recalcular automático a partir da tarifa kWh.</div>
     </div>
-    <div class="btns">
+    <div class="btns" style="display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn cancel" onclick="closeAction()">Cancelar</button>
+      <button class="btn" style="background:rgba(34,197,94,.15);color:var(--green);border:1px solid var(--green)" onclick="saveCostFree(${esc(id)})">🆓 Marcar como grátis</button>
       <button class="btn confirm" onclick="saveCost(${esc(id)})">Salvar</button>
     </div>
   `);
@@ -1091,12 +1093,26 @@ async function saveCost(id) {
   closeAction();
   renderEntries();
   try {
-    // Bridge espera { total, perKwh, free? } no body. Calcula perKwh quando temos kwh.
+    // Bridge: { total, per_kwh, free }. Total > 0 = override; total null = limpa.
     const body = override != null
-      ? { total: override, perKwh: it.kwh > 0 ? +(override / it.kwh).toFixed(6) : 0 }
-      : { total: null };  // null limpa override
+      ? { total: override, per_kwh: it.kwh > 0 ? +(override / it.kwh).toFixed(6) : 0 }
+      : { total: null };
     await _patchCharge(id, '/cost', body);
     if (window.cacheSet) window.cacheSet('posto', items);
+  } catch (e) { if (window.showToast) window.showToast('✗ Falha ao salvar: ' + e.message, 'err'); }
+}
+
+async function saveCostFree(id) {
+  const it = getItem(id);
+  if (!it) return;
+  it.override_cost = 0;
+  it.cost = 0;
+  closeAction();
+  renderEntries();
+  try {
+    await _patchCharge(id, '/cost', { free: true });
+    if (window.cacheSet) window.cacheSet('posto', items);
+    if (window.showToast) window.showToast('🆓 Marcada como grátis', 'ok');
   } catch (e) { if (window.showToast) window.showToast('✗ Falha ao salvar: ' + e.message, 'err'); }
 }
 
@@ -1685,7 +1701,7 @@ function openVersionInfo() {
   alert(lines.join('\n'));
 }
   // Expõe handlers de onclick no window
-  Object.assign(window, { setFilter: typeof setFilter !== 'undefined' ? setFilter : undefined, navDay: typeof navDay !== 'undefined' ? navDay : undefined, openCalendar: typeof openCalendar !== 'undefined' ? openCalendar : undefined, setPeriod: typeof setPeriod !== 'undefined' ? setPeriod : undefined, setPostoView: typeof setPostoView !== 'undefined' ? setPostoView : undefined, closeAction: typeof closeAction !== 'undefined' ? closeAction : undefined, saveCharger: typeof saveCharger !== 'undefined' ? saveCharger : undefined, saveCost: typeof saveCost !== 'undefined' ? saveCost : undefined, saveLocation: typeof saveLocation !== 'undefined' ? saveLocation : undefined, saveMeta: typeof saveMeta !== 'undefined' ? saveMeta : undefined, saveRefuel: typeof saveRefuel !== 'undefined' ? saveRefuel : undefined, saveRefuelCost: typeof saveRefuelCost !== 'undefined' ? saveRefuelCost : undefined, openLocationEdit: typeof openLocationEdit !== 'undefined' ? openLocationEdit : undefined, openTimeline: typeof openTimeline !== 'undefined' ? openTimeline : undefined, openMerge: typeof openMerge !== 'undefined' ? openMerge : undefined, doMerge: typeof doMerge !== 'undefined' ? doMerge : undefined, openChargerEdit: typeof openChargerEdit !== 'undefined' ? openChargerEdit : undefined, openCostEdit: typeof openCostEdit !== 'undefined' ? openCostEdit : undefined, openMetaEdit: typeof openMetaEdit !== 'undefined' ? openMetaEdit : undefined, openRefuelEdit: typeof openRefuelEdit !== 'undefined' ? openRefuelEdit : undefined, openRefuelCost: typeof openRefuelCost !== 'undefined' ? openRefuelCost : undefined, changeMonth: typeof changeMonth !== 'undefined' ? changeMonth : undefined, selectDate: typeof selectDate !== 'undefined' ? selectDate : undefined });
+  Object.assign(window, { setFilter: typeof setFilter !== 'undefined' ? setFilter : undefined, navDay: typeof navDay !== 'undefined' ? navDay : undefined, openCalendar: typeof openCalendar !== 'undefined' ? openCalendar : undefined, setPeriod: typeof setPeriod !== 'undefined' ? setPeriod : undefined, setPostoView: typeof setPostoView !== 'undefined' ? setPostoView : undefined, closeAction: typeof closeAction !== 'undefined' ? closeAction : undefined, saveCharger: typeof saveCharger !== 'undefined' ? saveCharger : undefined, saveCost: typeof saveCost !== 'undefined' ? saveCost : undefined, saveCostFree: typeof saveCostFree !== 'undefined' ? saveCostFree : undefined, saveLocation: typeof saveLocation !== 'undefined' ? saveLocation : undefined, saveMeta: typeof saveMeta !== 'undefined' ? saveMeta : undefined, saveRefuel: typeof saveRefuel !== 'undefined' ? saveRefuel : undefined, saveRefuelCost: typeof saveRefuelCost !== 'undefined' ? saveRefuelCost : undefined, openLocationEdit: typeof openLocationEdit !== 'undefined' ? openLocationEdit : undefined, openTimeline: typeof openTimeline !== 'undefined' ? openTimeline : undefined, openMerge: typeof openMerge !== 'undefined' ? openMerge : undefined, doMerge: typeof doMerge !== 'undefined' ? doMerge : undefined, openChargerEdit: typeof openChargerEdit !== 'undefined' ? openChargerEdit : undefined, openCostEdit: typeof openCostEdit !== 'undefined' ? openCostEdit : undefined, openMetaEdit: typeof openMetaEdit !== 'undefined' ? openMetaEdit : undefined, openRefuelEdit: typeof openRefuelEdit !== 'undefined' ? openRefuelEdit : undefined, openRefuelCost: typeof openRefuelCost !== 'undefined' ? openRefuelCost : undefined, changeMonth: typeof changeMonth !== 'undefined' ? changeMonth : undefined, selectDate: typeof selectDate !== 'undefined' ? selectDate : undefined });
   if (!window['initView_posto']) window['initView_posto'] = function() {};
 })();
 </script>
