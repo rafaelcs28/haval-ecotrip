@@ -167,21 +167,23 @@
 }
 .cal-day.selected.has-event::after { background: #000; }
 
-/* Footer date nav — FIXO acima do tabbar pra que dias com muitos
-   deslocamentos não escondam os botões (visto em Android Galaxy) */
+/* Footer date nav — FIXO acima do tabbar (sticky não funciona porque o
+   scroll é no body, não dentro do .view). Em dias com muitos deslocamentos
+   o conteúdo passa atrás. */
 .date-nav {
   display: flex; align-items: center; justify-content: space-between;
-  position: sticky;
-  bottom: 0;
+  position: fixed;
+  left: 0; right: 0;
+  bottom: calc(var(--tabbar-h, 56px) + var(--subtab-h, 38px) + env(safe-area-inset-bottom, 0px));
+  padding: 8px 12px;
   background: rgba(10,10,10,.94);
   backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
   border-top: 1px solid rgba(255,255,255,.06);
-  padding: 10px 8px calc(env(safe-area-inset-bottom, 0) + 10px);
-  margin: 0 -8px;
-  z-index: 5;
+  z-index: 6;
 }
-/* Espaço extra no fim da lista pra última viagem não ficar coberta */
-#trip-list { padding-bottom: 4px; }
+/* Espaço extra no fim da lista pra última viagem não ficar coberta
+   pela barra fixa (date-nav ~56px + tabbar + subtab) */
+#desloc-registros { padding-bottom: 70px; }
 .date-nav .arrow {
   width: 48px; height: 36px; border-radius: 18px;
   background: var(--green); color: #000;
