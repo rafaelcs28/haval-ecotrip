@@ -93,12 +93,6 @@
 .trip-map svg { width: 100%; height: 100%; }
 .trip-map .leaflet-container { width: 100% !important; height: 100% !important; }
 .trip-map .leaflet-control-zoom { display: none !important; }
-.trip-map .badge-radar {
-  position: absolute; top: 6px; right: 6px;
-  background: rgba(251,191,36,.92); color: #000;
-  font-size: 10px; font-weight: 700;
-  padding: 2px 7px; border-radius: 999px;
-}
 
 /* Ações */
 .trip-actions {
@@ -504,7 +498,6 @@
   <div id="desloc-registros">
     <div class="filter-chips">
       <div class="chip active" data-filter="all" onclick="setFilter('all')">Todas</div>
-      <div class="chip warning" data-filter="radar" onclick="setFilter('radar')">⚠️ Multa</div>
     </div>
 
     <!-- Date nav fica DENTRO do conteúdo, sticky no topo abaixo do header.
@@ -33599,10 +33592,7 @@ function closeCalendar() {
 }
 
 function filterTrips(allTrips) {
-  return allTrips.filter(t => {
-    if (currentFilter === 'radar' && !(t.radarAlerts && t.radarAlerts.length)) return false;
-    return true;
-  });
+  return allTrips;
 }
 
 function renderTrips() {
@@ -33613,9 +33603,7 @@ function renderTrips() {
     list.innerHTML = '';
     empty.classList.remove('section-hidden');
     document.getElementById('empty-msg').textContent =
-      currentFilter === 'radar'
-        ? 'Nenhuma viagem com alerta de multa nessa data...'
-        : 'Nenhuma viagem encontrada nessa data...';
+      'Nenhuma viagem encontrada nessa data...';
     return;
   }
   empty.classList.add('section-hidden');
@@ -33733,7 +33721,6 @@ function renderTripCard(t) {
     : ((+t.netKwh || 0) * _tripPriceKwh()) + ((+t.fuelL || 0) * _tripPriceGas());
   const totalEqL = (t.netKwh / 8.9) + (t.fuelL || 0);
   const kmL = totalEqL > 0.001 ? (t.distKm / totalEqL) : 0;
-  const radar = (t.radarAlerts && t.radarAlerts.length) ? `<span class="badge-radar">⚠️ ${t.radarAlerts.length}</span>` : '';
   return `
     <div class="trip-card">
       <div class="top">
@@ -33899,16 +33886,6 @@ async function openMapFull(id) {
       html: '<div style="width:14px;height:14px;background:#22c55e;border:2px solid #fff;border-radius:50%;box-shadow:0 0 0 4px rgba(34,197,94,.3)"></div>',
       iconSize: [14,14], iconAnchor: [7,7]
     })}).addTo(_fullMap);
-    // Radar alerts (se houver)
-    (t.radarAlerts || []).forEach(a => {
-      if (a.lat && a.lng) {
-        L.marker([a.lat, a.lng], { icon: L.divIcon({
-          className: '',
-          html: '<div style="width:18px;height:18px;background:#fbbf24;border:2px solid #fff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px">⚠</div>',
-          iconSize: [18,18], iconAnchor: [9,9]
-        })}).addTo(_fullMap);
-      }
-    });
     _fullMap.fitBounds(line.getBounds(), { padding: [60, 30] });
   }, 50);
 }
@@ -34544,7 +34521,6 @@ async function _loadDeslocData() {
       engineOffSec:  t.engineOffSec,
       hybridTimeSec: t.hybridTimeSec,
       hybridDistKm:  t.hybridDistKm,
-      radarAlertCount: t.radarAlertCount,
       startLat:      t.startLat,
       startLng:      t.startLng,
       endLat:        t.endLat,

@@ -459,7 +459,7 @@
       <div class="group-ti">Exportar do servidor</div>
       <div class="field">
         <div style="font-size:13px;font-weight:600;margin-bottom:4px">Backup completo</div>
-        <div style="font-size:11px;color:var(--muted);margin-bottom:10px">Baixa um JSON com viagens, recargas, abastecimentos, manutenções, locais conhecidos e radares ignorados.</div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:10px">Baixa um JSON com viagens, recargas, abastecimentos, manutenções e locais conhecidos.</div>
         <button class="btn primary" id="btn-download-backup" onclick="downloadBackup()">⬇ Gerar backup</button>
       </div>
     </div>
@@ -511,18 +511,8 @@
   </div>
   <div class="sub-body">
     <div class="field-group">
-      <div class="group-ti">Radares e mapa</div>
+      <div class="group-ti">Mapa e dados</div>
       <div class="settings-group">
-        <div class="settings-item teal" onclick="actionRefreshRadars()">
-          <div class="icon-box">📡</div>
-          <div class="info"><div class="label">Atualizar base de radares</div><div class="sub" id="adv-radars-sub">Refresh OSM</div></div>
-          <span class="chevron">›</span>
-        </div>
-        <div class="settings-item green" onclick="actionReanalyzeTrips()">
-          <div class="icon-box">⚙</div>
-          <div class="info"><div class="label">Reanalisar deslocamentos</div><div class="sub">Recalcula alertas de multa</div></div>
-          <span class="chevron">›</span>
-        </div>
         <div class="settings-item orange" onclick="actionReprocessPlaces()">
           <div class="icon-box">🌍</div>
           <div class="info"><div class="label">Reprocessar nomes de locais</div><div class="sub" id="adv-reprocess-sub">Aplica regra "Bairro, Cidade" em viagens e recargas com GPS</div></div>
@@ -1996,24 +1986,6 @@ async function deletePlace(id) {
 async function _loadAdvanced() {
   const tk = localStorage.getItem('bridge_token');
   if (!tk) return;
-  // Status dos radares (total + última atualização)
-  try {
-    const r = await fetch('/api/radars/status', { headers: { 'Authorization': 'Bearer ' + tk } });
-    const d = await r.json();
-    const sub = document.getElementById('adv-radars-sub');
-    if (sub) {
-      const ts = d.updated_at || d.last_update_ms;
-      const dt = ts ? new Date(ts) : null;
-      const dateStr = dt && !isNaN(dt.getTime())
-        ? dt.toLocaleDateString('pt-BR', { day:'2-digit', month:'2-digit' })
-        : null;
-      const parts = [];
-      if (d.total) parts.push(`${d.total.toLocaleString('pt-BR')} radares`);
-      if (dateStr) parts.push(`última: ${dateStr}`);
-      else if (!d.total) parts.push('nunca atualizado');
-      sub.textContent = parts.join(' · ') || 'Refresh OSM';
-    }
-  } catch (_) {}
   // Quantidade de locais conhecidos
   try {
     const r = await fetch('/api/known-places', { headers: { 'Authorization': 'Bearer ' + tk } });
@@ -2089,35 +2061,6 @@ window._onReprocessDone = function(data) {
   _updateReprocessSub(data);
   showToast(`✓ Reprocessamento concluído: ${data.trips_updated} viagens · ${data.charges_updated} recargas`, 'ok');
 };
-
-async function actionRefreshRadars() {
-  if (!confirm('Atualizar base de radares do OpenStreetMap? Pode demorar 30-60s.')) return;
-  const tk = localStorage.getItem('bridge_token');
-  showToast('⏳ Atualizando radares…', 'ok');
-  try {
-    const r = await fetch('/api/radars/refresh', {
-      method: 'POST', headers: { 'Authorization': 'Bearer ' + tk },
-    });
-    const d = await r.json();
-    if (!r.ok) throw new Error(d.error || 'HTTP ' + r.status);
-    showToast(`✓ ${(d.total || 0).toLocaleString('pt-BR')} radares baixados`, 'ok');
-    _loadAdvanced();
-  } catch (e) { showToast('✗ ' + e.message, 'err'); }
-}
-
-async function actionReanalyzeTrips() {
-  if (!confirm('Reanalisar todos os deslocamentos contra a base de radares atual? Pode demorar.')) return;
-  const tk = localStorage.getItem('bridge_token');
-  showToast('⏳ Reanalisando viagens…', 'ok');
-  try {
-    const r = await fetch('/api/radars/reanalyze', {
-      method: 'POST', headers: { 'Authorization': 'Bearer ' + tk },
-    });
-    const d = await r.json();
-    if (!r.ok) throw new Error(d.error || 'HTTP ' + r.status);
-    showToast(`✓ ${d.processed || 0} viagens reanalisadas (${d.with_alerts || 0} com alertas)`, 'ok');
-  } catch (e) { showToast('✗ ' + e.message, 'err'); }
-}
 
 async function actionRestartBridge() {
   if (!confirm('Reiniciar o bridge? A PWA vai perder conexão por 5-10s.')) return;
@@ -2526,7 +2469,7 @@ window.markMaintDone = async function(id) {
 };
 
   // Expõe handlers de onclick no window
-  Object.assign(window, { openSub: typeof openSub !== 'undefined' ? openSub : undefined, closeSub: typeof closeSub !== 'undefined' ? closeSub : undefined, saveSection: typeof saveSection !== 'undefined' ? saveSection : undefined, toggle2fa: typeof toggle2fa !== 'undefined' ? toggle2fa : undefined, confirmClearHistory: typeof confirmClearHistory !== 'undefined' ? confirmClearHistory : undefined, openMaintAdd: openMaintAdd, closeMaintModal: closeMaintModal, saveMaintItem: saveMaintItem, deleteMaintItem: deleteMaintItem, markMaintDone: markMaintDone, saveVehicle: saveVehicle, setChargeLimit: setChargeLimit, actionRefreshRadars: actionRefreshRadars, actionReanalyzeTrips: actionReanalyzeTrips, actionReprocessPlaces: actionReprocessPlaces, actionRecomputeTripCosts: actionRecomputeTripCosts, actionRestartBridge: actionRestartBridge, actionUpdateBridge: actionUpdateBridge, openPlaceAdd: openPlaceAdd, openPlaceEdit: openPlaceEdit, closePlaceModal: closePlaceModal, usePlaceGps: usePlaceGps, savePlace: savePlace, deletePlace: deletePlace, toggleNotif: toggleNotif, _onNotifDeviceChange: _onNotifDeviceChange, renameNotifDevice: renameNotifDevice, removeNotifDevice: removeNotifDevice, renameMyDevice: renameMyDevice, forceSubscribePush: forceSubscribePush, openNotifDevicePicker: openNotifDevicePicker, closeNotifDevicePicker: closeNotifDevicePicker, _pickNotifDevice: _pickNotifDevice, renameNotifDeviceById: renameNotifDeviceById, removeNotifDeviceById: removeNotifDeviceById, changePassword: changePassword, toggle2faNew: toggle2faNew, closeTotpModal: closeTotpModal, activate2fa: activate2fa, show2faBackup: show2faBackup, regenBackupCodes: regenBackupCodes, openGeofencePlaces: openGeofencePlaces, _toggleGeofencePick: _toggleGeofencePick, saveGeofencePlaces: saveGeofencePlaces, toggleChargeEnding: toggleChargeEnding, editChargeEndingMin: editChargeEndingMin, downloadBackup: downloadBackup, uploadBackup: uploadBackup, copyBackupToClipboard: copyBackupToClipboard, shareBackup: shareBackup, clearLocalCache: clearLocalCache, toggleDiag: toggleDiag, saveDiagInterval: saveDiagInterval, exportDiag: exportDiag, clearDiag: clearDiag, openDiagSet: openDiagSet, confirmDiagSet: confirmDiagSet, _scheduleDiagRender: _scheduleDiagRender });
+  Object.assign(window, { openSub: typeof openSub !== 'undefined' ? openSub : undefined, closeSub: typeof closeSub !== 'undefined' ? closeSub : undefined, saveSection: typeof saveSection !== 'undefined' ? saveSection : undefined, toggle2fa: typeof toggle2fa !== 'undefined' ? toggle2fa : undefined, confirmClearHistory: typeof confirmClearHistory !== 'undefined' ? confirmClearHistory : undefined, openMaintAdd: openMaintAdd, closeMaintModal: closeMaintModal, saveMaintItem: saveMaintItem, deleteMaintItem: deleteMaintItem, markMaintDone: markMaintDone, saveVehicle: saveVehicle, setChargeLimit: setChargeLimit, actionReprocessPlaces: actionReprocessPlaces, actionRecomputeTripCosts: actionRecomputeTripCosts, actionRestartBridge: actionRestartBridge, actionUpdateBridge: actionUpdateBridge, openPlaceAdd: openPlaceAdd, openPlaceEdit: openPlaceEdit, closePlaceModal: closePlaceModal, usePlaceGps: usePlaceGps, savePlace: savePlace, deletePlace: deletePlace, toggleNotif: toggleNotif, _onNotifDeviceChange: _onNotifDeviceChange, renameNotifDevice: renameNotifDevice, removeNotifDevice: removeNotifDevice, renameMyDevice: renameMyDevice, forceSubscribePush: forceSubscribePush, openNotifDevicePicker: openNotifDevicePicker, closeNotifDevicePicker: closeNotifDevicePicker, _pickNotifDevice: _pickNotifDevice, renameNotifDeviceById: renameNotifDeviceById, removeNotifDeviceById: removeNotifDeviceById, changePassword: changePassword, toggle2faNew: toggle2faNew, closeTotpModal: closeTotpModal, activate2fa: activate2fa, show2faBackup: show2faBackup, regenBackupCodes: regenBackupCodes, openGeofencePlaces: openGeofencePlaces, _toggleGeofencePick: _toggleGeofencePick, saveGeofencePlaces: saveGeofencePlaces, toggleChargeEnding: toggleChargeEnding, editChargeEndingMin: editChargeEndingMin, downloadBackup: downloadBackup, uploadBackup: uploadBackup, copyBackupToClipboard: copyBackupToClipboard, shareBackup: shareBackup, clearLocalCache: clearLocalCache, toggleDiag: toggleDiag, saveDiagInterval: saveDiagInterval, exportDiag: exportDiag, clearDiag: clearDiag, openDiagSet: openDiagSet, confirmDiagSet: confirmDiagSet, _scheduleDiagRender: _scheduleDiagRender });
   if (!window['initView_config']) window['initView_config'] = function() {};
 })();
 </script>
