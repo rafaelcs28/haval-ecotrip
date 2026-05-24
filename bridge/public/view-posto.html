@@ -1069,7 +1069,7 @@ function openCostEdit(id) {
   const it = getItem(id);
   if (!it) return;
   const computed = it.kwh * 0.9997;
-  const isFree = it.cost === 0 && it.override_cost != null && +it.override_cost === 0;
+  const isFree = it.override_free === true;
   openAction('💰 Editar valor pago', `Custo atual: ${isFree ? '🆓 GRÁTIS' : 'R$ ' + fmtBRL(it.cost)} · automático R$ ${fmtBRL(computed)}`, `
     <div class="input-row">
       <label>Valor total pago (R$)</label>
@@ -1088,8 +1088,8 @@ async function saveCost(id) {
   if (!it) return;
   const v = parseFloat(document.getElementById('ai-cost').value);
   const override = (!isNaN(v) && v > 0) ? v : null;
-  if (override != null) { it.override_cost = override; it.cost = override; }
-  else { delete it.override_cost; it.cost = +(it.kwh * 0.9997).toFixed(2); }
+  if (override != null) { it.override_cost = override; it.override_free = false; it.cost = override; }
+  else { it.override_cost = null; it.override_free = false; it.cost = +(it.kwh * 0.9997).toFixed(2); }
   closeAction();
   renderEntries();
   try {
@@ -1106,6 +1106,7 @@ async function saveCostFree(id) {
   const it = getItem(id);
   if (!it) return;
   it.override_cost = 0;
+  it.override_free = true;
   it.cost = 0;
   closeAction();
   renderEntries();
@@ -1632,25 +1633,35 @@ async function _loadPostoData() {
         progress.set(60);
       }
     }
-    const charges = (Array.isArray(chRaw) ? chRaw : (chRaw.charges || [])).map(c => ({
-      id: c.timestamp_ms || c.ts,
-      ts: c.timestamp_ms || c.ts,
-      type: 'recarga',
-      kwh: c.energy_kwh ?? c.kwh,
-      duration_sec: c.duration_sec,
-      avg_power_kw: c.avg_power_kw,
-      soc_start: c.soc_start,
-      soc_end: c.soc_end,
-      cost: c.cost_override || c.cost,
-      charger_kwh: c.charger_kwh,
-      avg_temp_c: c.avg_temp_c,
-      // location é STRING (nome). Lat/lng ficam em campos separados pra que
-      // edição local possa setar só o nome sem precisar reconstruir um objeto.
-      location:     c.location_name || null,
-      location_lat: c.location_lat ?? null,
-      location_lng: c.location_lng ?? null,
-      samples: c.samples,
-    }));
+    const charges = (Array.isArray(chRaw) ? chRaw : (chRaw.charges || [])).map(c => {
+      // cost_override do bridge é OBJETO ({ total, perKwh, free? }) — desempacota
+      // pra campos planos que o resto do view-posto consulta (it.override_cost,
+      // it.cost). Sem isso, refresh "perdia" o valor imputado: a edição local
+      // setava it.override_cost (number), mas o refetch sobrescrevia com objeto.
+      const ovr = c.cost_override;
+      const isFree = ovr?.free === true;
+      const overrideNum = ovr ? (+ovr.total || 0) : null;  // null = sem override
+      const computedCost = overrideNum != null ? overrideNum : (+c.cost || 0);
+      return {
+        id: c.timestamp_ms || c.ts,
+        ts: c.timestamp_ms || c.ts,
+        type: 'recarga',
+        kwh: c.energy_kwh ?? c.kwh,
+        duration_sec: c.duration_sec,
+        avg_power_kw: c.avg_power_kw,
+        soc_start: c.soc_start,
+        soc_end: c.soc_end,
+        cost:         computedCost,
+        override_cost: overrideNum,
+        override_free: isFree,
+        charger_kwh: c.charger_kwh,
+        avg_temp_c: c.avg_temp_c,
+        location:     c.location_name || null,
+        location_lat: c.location_lat ?? null,
+        location_lng: c.location_lng ?? null,
+        samples: c.samples,
+      };
+    });
     const refuels = (Array.isArray(rfRaw) ? rfRaw : (rfRaw.refuels || [])).map(r => ({
       id: r.id || r.timestamp_ms,
       ts: r.timestamp_ms || r.ts,
