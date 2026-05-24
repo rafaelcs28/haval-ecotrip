@@ -364,6 +364,15 @@ class MqttManager private constructor() {
         prefs = ctx.getSharedPreferences(SharedPreferencesKeys.PREFS_NAME, Context.MODE_PRIVATE)
         loadConfig()
         restoreDiagState(prefs)
+        // Listener GLOBAL pra charge_soc_limit_config — antes só funcionava com
+        // ConsumptionScreen montado. Agora qualquer mudança feita diretamente
+        // no carro é refletida no HA mesmo com a tela do app fechada.
+        CarDataManager.getInstance().addListener { key, value ->
+            if (key == CarConstants.CAR_EV_SETTING_CHARGE_SOC_LIMIT.value) {
+                val carVal = value.trim().toIntOrNull()
+                if (carVal != null) syncChargeLimitFromCar(carVal)
+            }
+        }
         if (enabled && host.isNotEmpty()) connect()
     }
 
@@ -1170,6 +1179,27 @@ class MqttManager private constructor() {
                         prefs.edit().putFloat(SharedPreferencesKeys.PRICE_ENERGY_PER_KWH, v).apply()
                         TripManager.getInstance().setPriceEnergy(v)
                         AppLogger.i(TAG, "Preço energia atualizado pelo bridge: R$ $v/kWh")
+                    }
+                }
+                "refresh_charge_limit" -> {
+                    // Força releitura do limite real do carro e re-publica em ha/charge_limit/state.
+                    // Usado pelo PWA quando abre a Config de Recarga (caso user tenha mudado
+                    // direto no carro e o sync por listener tenha perdido o evento).
+                    val readBack = try {
+                        car.fetchCurrent("car.ev_setting.charge_soc_limit_config")?.trim()
+                    } catch (e: Exception) {
+                        AppLogger.w(TAG, "refresh_charge_limit fetchCurrent falhou: ${e.message}")
+                        null
+                    }
+                    val carVal = readBack?.toIntOrNull()
+                    val pct = if (carVal != null) carValToPct(carVal) else null
+                    if (pct != null) {
+                        AppLogger.i(TAG, "refresh_charge_limit: carro = ${pct}% — re-publicando")
+                        // Bypassa o guard `lastPublishedChargeLimitPct` pra forçar nova publicação
+                        lastPublishedChargeLimitPct = -1
+                        publishChargeLimitState(pct)
+                    } else {
+                        publishResult("refresh_charge_limit", "error: leitura falhou")
                     }
                 }
                 "hf_mode" -> {

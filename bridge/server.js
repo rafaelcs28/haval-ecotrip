@@ -142,8 +142,29 @@ let pushSubs = [];
 try { if (fs.existsSync(PUSH_SUBS_FILE)) pushSubs = JSON.parse(fs.readFileSync(PUSH_SUBS_FILE, 'utf8')); } catch (_) {}
 
 function savePushSubs() {
-  try { fs.writeFileSync(PUSH_SUBS_FILE, JSON.stringify(pushSubs)); } catch (_) {}
+  try { fs.writeFileSync(PUSH_SUBS_FILE, JSON.stringify(pushSubs, null, 2)); } catch (_) {}
 }
+
+// Migration: subscriptions antigas não têm device_id. Atribui UUID + nome
+// genérico pra cada uma. Migration roda 1x; se já tiver device_id, ignora.
+function _migrateLegacySubs() {
+  let changed = 0;
+  pushSubs.forEach((s, idx) => {
+    if (!s.device_id) {
+      s.device_id = (typeof require !== 'undefined' && require('crypto').randomUUID)
+        ? require('crypto').randomUUID()
+        : 'dev_' + Date.now() + '_' + idx;
+      s.device_name = s.device_name || `Dispositivo ${idx + 1}`;
+      s.created_at  = s.created_at  || Date.now();
+      changed++;
+    }
+  });
+  if (changed) {
+    savePushSubs();
+    console.log(`✓ Push subs migrados: ${changed} subscription(s) ganharam device_id`);
+  }
+}
+_migrateLegacySubs();
 
 // ── Histórico de notificações ─────────────────────────────────────────────────
 const NOTIF_HISTORY_MAX = 100;
@@ -156,10 +177,18 @@ function saveNotifHistory() {
   try { fs.writeFileSync(NOTIF_HISTORY_FILE, JSON.stringify(notifHistory)); } catch (_) {}
 }
 
-async function sendPush(title, body) {
+/**
+ * Dispara push notification.
+ * @param {string} title
+ * @param {string} body
+ * @param {string} [type]  - chave em NOTIF_DEFAULTS (ex: 'charge_start'). Quando
+ *   passado, cada sub é avaliada contra as prefs do device dela (silencia
+ *   subs cujo prefs[type] === false). Sem type, dispara pra todos.
+ */
+async function sendPush(title, body, type) {
   // Registra no histórico sempre — mesmo sem subscribers (útil para debug)
   const ts = Date.now();
-  notifHistory.unshift({ ts, title, body });
+  notifHistory.unshift({ ts, title, body, type: type || null });
   if (notifHistory.length > NOTIF_HISTORY_MAX) notifHistory.length = NOTIF_HISTORY_MAX;
   saveNotifHistory();
 
@@ -173,9 +202,16 @@ async function sendPush(title, body) {
   }
   const payload = JSON.stringify({ title, body });
   const dead = [];
+  let sent = 0, skipped = 0;
   await Promise.all(pushSubs.map(async (sub, i) => {
+    // Gating por device: se a sub tem device_id e o tipo está OFF nas prefs, pula.
+    if (type) {
+      const prefs = getPrefsForDevice(sub.device_id);
+      if (prefs[type] === false) { skipped++; return; }
+    }
     try {
       await webpush.sendNotification(sub, payload);
+      sent++;
     } catch (e) {
       const code = e.statusCode;
       console.error(`Push error [${code}] ...${sub.endpoint?.slice(-30)}: ${e.body || e.message}`);
@@ -183,6 +219,7 @@ async function sendPush(title, body) {
       if (code === 410 || code === 404 || code === 400 || code === 401) dead.push(i);
     }
   }));
+  if (type) console.log(`Push "${title}" type=${type} sent=${sent} skipped=${skipped}/${pushSubs.length}`);
   if (dead.length) {
     console.log(`Push: removendo ${dead.length} subscrição(ões) inválida(s)`);
     dead.reverse().forEach(i => pushSubs.splice(i, 1));
@@ -192,27 +229,31 @@ async function sendPush(title, body) {
 
 // ── Preferências de notificações push ────────────────────────────────────────
 const NOTIF_DEFAULTS = {
-  charge_start:      true,   // ⚡ Recarga iniciada
-  charge_end:        true,   // ✅ Recarga concluída
-  charge_ending:     false,  // 🔔 Aviso de proximidade do fim da recarga
-  charge_ending_min: 5,      // minutos antes do fim para enviar o aviso (1–20)
-  door_open:         true,   // 🚪 Qualquer porta aberta
-  door_close:        false,  // 🚪 Qualquer porta fechada
-  trunk_open:        true,   // 🧳 Porta-malas aberta
-  trunk_close:       true,   // 🧳 Porta-malas fechada
-  engine_on:         true,   // 🔑 Motor ligado
-  engine_off:        false,  // 🔑 Motor desligado
-  app_update:        true,   // 📱 Nova versão do app instalada no carro
-  trip_end:          true,   // 🏁 Viagem concluída (auto-trip)
-  geofence_arrival:  true,   // 📍 Chegou em local conhecido (master on/off)
-  geofence_departure:false,  // 🚗 Saiu de local conhecido (master on/off)
-  // Listas de place IDs autorizados. Vazio = todos os locais conhecidos.
-  // Quando o user marca/desmarca locais específicos, vai pra cá.
+  // Tudo desativado por padrão. Cada device escolhe o que ativar — sem
+  // surpresas pra device novo. charge_ending_min fica em 5 porque é
+  // um número, não um toggle (entra em uso só se charge_ending=true).
+  charge_start:      false,
+  charge_end:        false,
+  charge_ending:     false,
+  charge_ending_min: 5,
+  door_open:         false,
+  door_close:        false,
+  trunk_open:        false,
+  trunk_close:       false,
+  engine_on:         false,
+  engine_off:        false,
+  app_update:        false,
+  trip_end:          false,
+  geofence_arrival:  false,
+  geofence_departure:false,
   geofence_arrival_places:   [],
   geofence_departure_places: [],
-  maintenance_soon:  true,   // 🔧 Manutenção se aproximando (dentro do alert_km)
-  maintenance_overdue: true, // ⚠️ Manutenção atrasada
-  anomaly_detected:  true,   // ⚠️ Anomalia detectada na telemetria
+  maintenance_soon:  false,
+  maintenance_overdue: false,
+  anomaly_detected:  false,
+  tyre_low:          false,
+  tyre_high:         false,
+  refuel_detected:   false,
 };
 let notifPrefs = { ...NOTIF_DEFAULTS };
 try {
@@ -221,6 +262,40 @@ try {
 } catch (_) {}
 function saveNotifPrefs() {
   try { fs.writeFileSync(NOTIF_PREFS_FILE, JSON.stringify(notifPrefs, null, 2)); } catch (_) {}
+}
+
+// ── Preferências por device ────────────────────────────────────────────────
+// notifPrefsByDevice = { <device_id>: { charge_start, charge_end, ... } }
+// Cada push subscription tem um device_id estável (gerado no client e
+// guardado no localStorage). Quando uma notificação dispara, cada sub é
+// avaliada contra as prefs do seu device — não há mais "global".
+// `notifPrefs` acima vira o fallback default pra devices sem prefs próprias.
+const NOTIF_PREFS_BY_DEVICE_FILE = path.join(__dirname, 'notif_prefs_by_device.json');
+let notifPrefsByDevice = {};
+try {
+  if (fs.existsSync(NOTIF_PREFS_BY_DEVICE_FILE))
+    notifPrefsByDevice = JSON.parse(fs.readFileSync(NOTIF_PREFS_BY_DEVICE_FILE, 'utf8')) || {};
+} catch (_) { notifPrefsByDevice = {}; }
+function saveNotifPrefsByDevice() {
+  try { fs.writeFileSync(NOTIF_PREFS_BY_DEVICE_FILE, JSON.stringify(notifPrefsByDevice, null, 2)); } catch (_) {}
+}
+
+function getPrefsForDevice(deviceId) {
+  // Devices SEM prefs próprias recebem apenas NOTIF_DEFAULTS (tudo OFF).
+  // Não caem mais no fallback `notifPrefs` global — antes isso fazia 7 devices
+  // antigos (sem prefs) receberem tudo automaticamente.
+  // notifPrefs global continua sendo lido só pras listas de places (geofence)
+  // e como ponto de partida quando o user ativa algo no painel global.
+  if (deviceId && notifPrefsByDevice[deviceId]) {
+    return { ...NOTIF_DEFAULTS, ...notifPrefsByDevice[deviceId] };
+  }
+  return { ...NOTIF_DEFAULTS };
+}
+
+// Gera UUID v4 (usa crypto.randomUUID em Node ≥14.17). Fallback simples.
+function genDeviceId() {
+  try { return require('crypto').randomUUID(); }
+  catch (_) { return 'dev_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8); }
 }
 
 // Guard para não reenviar a notificação de fim de recarga na mesma sessão
@@ -272,27 +347,39 @@ let prevSunroof     = null;
 let prevGearForTrip = null;
 
 // ── Alerta de pressão de pneus ────────────────────────────────────────────────
-// Os valores chegam diretamente em PSI (sem conversão necessária)
-const TYRE_PSI_MIN = 34;   // abaixo disso → alerta
-const TYRE_PSI_MAX = 40;   // acima disso  → alerta
-const tyreAlertSent = {};   // evita spam: chave = 'FL_low' | 'FL_high' etc.
-function checkTyrePressure(pos, psi, isRetained = false) {
-  if (!psi || psi < 5) return;   // valor inválido ou zero
+// PSI a frio. Pneu rodando esquenta e a pressão sobe ~1 PSI a cada 10°C acima
+// da temperatura ambiente (rule of thumb). Sem filtrar por temperatura, a média
+// inflaciona em movimento e gera "pressão alta" falsa; pior, o ALTO mascara
+// pneu que originalmente estava baixo (compensa). Solução: só avaliar quando
+// a temperatura do pneu está dentro da faixa "fria" (≤ TYRE_COLD_MAX_C).
+const TYRE_PSI_MIN     = 34;   // abaixo → alerta
+const TYRE_PSI_MAX     = 40;   // acima  → alerta
+const TYRE_COLD_MAX_C  = 35;   // pneu acima disso: rodando, ignora pra alerta
+const tyreAlertSent = {};
+function checkTyrePressure(pos, psi, isRetained = false, tempC = null) {
+  if (!psi || psi < 5) return;
+  // Pneu quente: skip — pressão real (a frio) é menor que o lido aqui.
+  // Aceita null/0 como "sem leitura de temperatura" (mantém comportamento legado)
+  if (tempC != null && tempC > 0 && tempC > TYRE_COLD_MAX_C) {
+    // Limpa state.alertSent pra que assim que esfriar e cair abaixo do mín
+    // a notificação volte a disparar (caso ainda esteja baixo).
+    return;
+  }
   const lowKey  = `${pos}_low`;
   const highKey = `${pos}_high`;
   if (psi < TYRE_PSI_MIN) {
     if (!tyreAlertSent[lowKey] && !isRetained) {
       tyreAlertSent[lowKey] = true;
       delete tyreAlertSent[highKey];
-      sendPush('⚠️ Pneu com pressão baixa', `${pos}: ${psi.toFixed(1)} PSI (mín ${TYRE_PSI_MIN} PSI)`);
+      sendPush('⚠️ Pneu com pressão baixa', `${pos}: ${psi.toFixed(1)} PSI (mín ${TYRE_PSI_MIN} PSI, pneu a frio)`, 'tyre_low');
     } else {
-      tyreAlertSent[lowKey] = true;   // marca como "já visto" mesmo em retained
+      tyreAlertSent[lowKey] = true;
     }
   } else if (psi > TYRE_PSI_MAX) {
     if (!tyreAlertSent[highKey] && !isRetained) {
       tyreAlertSent[highKey] = true;
       delete tyreAlertSent[lowKey];
-      sendPush('⚠️ Pneu com pressão alta', `${pos}: ${psi.toFixed(1)} PSI (máx ${TYRE_PSI_MAX} PSI)`);
+      sendPush('⚠️ Pneu com pressão alta', `${pos}: ${psi.toFixed(1)} PSI (máx ${TYRE_PSI_MAX} PSI, pneu a frio)`, 'tyre_high');
     } else {
       tyreAlertSent[highKey] = true;
     }
@@ -772,31 +859,57 @@ function analyzeTripRadars(samples) {
   return Array.from(byRadar.values()).sort((a, b) => (a.t||0) - (b.t||0));
 }
 
+// Bounding box do Brasil (radares fora do bbox são raros e desprezíveis).
+// area["ISO3166-1"="BR"] estourava timeout interno do Overpass (retornava 200
+// com remark="Query timed out" ou 406 sob carga). bbox direto é ~5x mais barato.
+const BR_BBOX = [-33.75, -73.99, 5.27, -28.85]; // [south, west, north, east]
+const OVERPASS_ENDPOINTS = [
+  'https://overpass-api.de/api/interpreter',
+  'https://overpass.kumi.systems/api/interpreter',
+  'https://overpass.private.coffee/api/interpreter',
+];
+
 async function fetchRadarsFromOSM() {
-  // Overpass: timeout generoso (300s = 5min) pra coletar Brasil inteiro.
-  // out:csv pra reduzir tamanho da resposta (~30% menor que JSON).
+  const [s, w, n, e] = BR_BBOX;
   const query = `
-    [out:json][timeout:300];
-    area["ISO3166-1"="BR"][admin_level=2]->.br;
+    [out:json][timeout:240];
     (
-      node["highway"="speed_camera"](area.br);
-      node["enforcement"="maxspeed"](area.br);
+      node["highway"="speed_camera"](${s},${w},${n},${e});
+      node["enforcement"="maxspeed"](${s},${w},${n},${e});
     );
     out body;
   `;
-  console.log('→ Baixando radares do OSM (Brasil)...');
+  console.log('→ Baixando radares do OSM (Brasil bbox)...');
   const startMs = Date.now();
-  const res = await fetch('https://overpass-api.de/api/interpreter', {
-    method:  'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-      'Accept':       'application/json',
-      'User-Agent':   'ecotrip-bridge/1.0 (https://github.com/rafaelcs28/haval-ecotrip)',
-    },
-    body:    'data=' + encodeURIComponent(query),
-  });
-  if (!res.ok) throw new Error(`Overpass HTTP ${res.status}`);
+  let res = null;
+  let lastErr = null;
+  // Tenta cada endpoint em sequência — fallback se um falhar (rate limit, manutenção)
+  for (const url of OVERPASS_ENDPOINTS) {
+    try {
+      res = await fetch(url, {
+        method:  'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Accept':       'application/json',
+          'User-Agent':   'ecotrip-bridge/1.0 (https://github.com/rafaelcs28/haval-ecotrip)',
+        },
+        body:    'data=' + encodeURIComponent(query),
+      });
+      if (res.ok) { console.log(`  endpoint usado: ${url}`); break; }
+      console.warn(`  ${url} → HTTP ${res.status} — tentando próximo`);
+      lastErr = new Error(`HTTP ${res.status}`);
+      res = null;
+    } catch (e) {
+      console.warn(`  ${url} → ${e.message} — tentando próximo`);
+      lastErr = e;
+    }
+  }
+  if (!res) throw lastErr || new Error('todos os endpoints Overpass falharam');
   const data = await res.json();
+  // Overpass pode retornar 200 com timeout interno — captura via remark
+  if (data.remark && /timed out/i.test(data.remark)) {
+    throw new Error(`Overpass timeout: ${data.remark}`);
+  }
   const nodes = (data.elements || []).filter(e => e.type === 'node' && e.lat && e.lon);
   // Normaliza pro formato interno
   const radars = nodes.map(n => ({
@@ -954,7 +1067,8 @@ function checkRefuelOnEngineOn() {
   addEvent('refuel_detected', `⛽ Abastecimento de ~${added.toFixed(1)}L detectado`);
   sendPush(
     `⛽ Abastecimento detectado`,
-    `~${added.toFixed(1)}L. Toque pra registrar o preço.`
+    `~${added.toFixed(1)}L. Toque pra registrar o preço.`,
+    'refuel_detected'
   );
   console.log(`[refuel] detectado +${added.toFixed(1)}L (${_fuelLAtPark.toFixed(1)} → ${fuelNow.toFixed(1)})`);
   broadcast('new_refuel', rec);
@@ -1046,11 +1160,11 @@ function checkMaintenanceAlerts() {
     const order = { ok: 0, soon: 1, overdue: 2 };
     if (order[it.status] > order[prev]) {
       const body = _maintBody(it);
-      if (it.status === 'soon' && notifPrefs.maintenance_soon) {
-        sendPush(`${it.icon || '🔧'} ${it.label} se aproximando`, body);
+      if (it.status === 'soon') {
+        sendPush(`${it.icon || '🔧'} ${it.label} se aproximando`, body, 'maintenance_soon');
         addEvent('maint_soon', `${it.icon || '🔧'} ${it.label}: ${body}`);
-      } else if (it.status === 'overdue' && notifPrefs.maintenance_overdue) {
-        sendPush(`⚠️ ${it.label} atrasada`, body);
+      } else if (it.status === 'overdue') {
+        sendPush(`⚠️ ${it.label} atrasada`, body, 'maintenance_overdue');
         addEvent('maint_overdue', `⚠️ ${it.label}: ${body}`);
       }
     }
@@ -1079,17 +1193,41 @@ function _todayKey() {
   return new Date().toISOString().slice(0, 10);  // YYYY-MM-DD
 }
 
+// Pressão é registrada só quando o pneu está "a frio" (≤ TYRE_COLD_C°C).
+// Em movimento o pneu esquenta e a pressão sobe ~1 PSI a cada 10°C — incluir
+// essas leituras na média histórica inflava o baseline e gerava falso "perdendo
+// pressão" quando o carro voltava a esfriar. A captura mantém o pneu anterior
+// (não sobrescreve com 0) quando a temperatura inviabiliza a leitura.
+const TYRE_COLD_C = 28;
+
+function _tyreColdPsi(pos) {
+  const psi = +state[`tyre_pressure_${pos}`] || 0;
+  const t   = +state[`tyre_temp_${pos}`]     || 0;
+  // Sem leitura de PSI ou temperatura elevada: retorna null pra preservar
+  // o valor anterior do snapshot do dia (não dilui a média com 0).
+  if (psi <= 5) return null;
+  if (t > TYRE_COLD_C) return null;
+  return psi;
+}
+
 function captureTelemetrySnapshot() {
   const today = _todayKey();
-  // Substitui o snapshot de hoje se já existe (atualiza valores mais recentes)
   const idx = telemetryHistory.findIndex(s => s.date === today);
+  const prev = idx >= 0 ? telemetryHistory[idx] : null;
+  // Pneus: usa leitura a frio quando disponível; senão preserva o que tinha no
+  // snapshot anterior do dia (ou 0 se primeira chamada do dia).
+  const tyre = (pos) => {
+    const cold = _tyreColdPsi(pos);
+    if (cold != null) return cold;
+    return prev ? (+prev[`tyre_${pos}`] || 0) : 0;
+  };
   const snap = {
     date: today,
     ts: Date.now(),
-    tyre_fl: +state.tyre_pressure_fl || 0,
-    tyre_fr: +state.tyre_pressure_fr || 0,
-    tyre_rl: +state.tyre_pressure_rl || 0,
-    tyre_rr: +state.tyre_pressure_rr || 0,
+    tyre_fl: tyre('fl'),
+    tyre_fr: tyre('fr'),
+    tyre_rl: tyre('rl'),
+    tyre_rr: tyre('rr'),
     batt_12v: +state.batt_12v_pct || 0,
     autonomy_ice: +state.autonomy_ice_km || 0,
     autonomy_ev:  +state.autonomy_ev_km  || 0,
@@ -1167,7 +1305,7 @@ function checkAnomalies() {
     if (_anomalyAlerted[iss.metric] === today) continue;
     _anomalyAlerted[iss.metric] = today;
     addEvent('anomaly', `${iss.title} — ${iss.body}`);
-    if (notifPrefs.anomaly_detected) sendPush(iss.title, iss.body);
+    sendPush(iss.title, iss.body, 'anomaly_detected');
   }
 }
 
@@ -1276,18 +1414,19 @@ function checkGeofence() {
       geofenceState[loc.id] = 'in';
       if (prev === 'out') {  // só notifica se houve transição (não no boot)
         addEvent('geofence_in', `📍 Chegou em ${loc.name}`);
-        // Push gateado por: 1) master toggle 2) lista de places (vazio = todos)
+        // Filtro de places permanece global (todos devices reagem aos mesmos locais).
+        // O on/off da categoria geofence_arrival fica por device dentro do sendPush.
         const arrPlaces = notifPrefs.geofence_arrival_places || [];
-        if (notifPrefs.geofence_arrival && (arrPlaces.length === 0 || arrPlaces.includes(String(loc.id))))
-          sendPush(`📍 Chegou em ${loc.name}`, `Veículo dentro da zona.`);
+        if (arrPlaces.length === 0 || arrPlaces.includes(String(loc.id)))
+          sendPush(`📍 Chegou em ${loc.name}`, `Veículo dentro da zona.`, 'geofence_arrival');
       }
     } else if (isOutside && prev !== 'out') {
       geofenceState[loc.id] = 'out';
       if (prev === 'in' && engineOn) {  // saída só com motor ligado
         addEvent('geofence_out', `🚗 Saiu de ${loc.name}`);
         const depPlaces = notifPrefs.geofence_departure_places || [];
-        if (notifPrefs.geofence_departure && (depPlaces.length === 0 || depPlaces.includes(String(loc.id))))
-          sendPush(`🚗 Saiu de ${loc.name}`, `Veículo deixou a zona.`);
+        if (depPlaces.length === 0 || depPlaces.includes(String(loc.id)))
+          sendPush(`🚗 Saiu de ${loc.name}`, `Veículo deixou a zona.`, 'geofence_departure');
       }
     }
   }
@@ -1334,6 +1473,7 @@ if (fs.existsSync(_certFile) && fs.existsSync(_keyFile)) {
   }
 }
 
+app.use(require('compression')());  // gzip — backup de 11MB cai pra ~1.5MB
 app.use(express.json({ limit: '200mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -2267,6 +2407,7 @@ app.post('/api/admin/change-password', (req, res) => {
 // telemetria + charges + lifetime snapshots + prefs de notificação).
 // Protegido por requireAuth (middleware global).
 app.get('/api/backup', (req, res) => {
+  if (!adminCheckToken(req, res)) return;  // exige token (Authorization header OR ?token=)
   try {
     // Lê todos os arquivos de auto-trips com amostras de telemetria completas
     const autotripsWithSamples = [];
@@ -2318,10 +2459,16 @@ app.get('/api/backup', (req, res) => {
     };
 
     const filename = `ecotrip-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    // Pré-serializa pra saber o tamanho exato — expõe via X-Original-Size pro
+    // PWA calcular % de progresso (com gzip ativo, Content-Length some).
+    const buf = Buffer.from(JSON.stringify(backup), 'utf8');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
-    res.json(backup);
-    console.log(`✓ Backup v4 exportado: ${backup.autotrips.length} auto-trips · ${backup.charges.length} recargas (${Object.keys(chargeTelemetry).length} com telemetria) · ${backup.refuels.length} abastecimentos · ${backup.maintenance.history.length} manutenções · ${backup.knownPlaces.length} locais · ${radarsIgnoredList.length} radares ignorados`);
+    res.setHeader('X-Original-Size', String(buf.length));
+    res.setHeader('Access-Control-Expose-Headers', 'X-Original-Size');
+    res.send(buf);
+    const mb = (buf.length / 1024 / 1024).toFixed(2);
+    console.log(`✓ Backup v4 exportado (${mb} MB): ${backup.autotrips.length} auto-trips · ${backup.charges.length} recargas (${Object.keys(chargeTelemetry).length} com telemetria) · ${backup.refuels.length} abastecimentos · ${backup.maintenance.history.length} manutenções · ${backup.knownPlaces.length} locais · ${radarsIgnoredList.length} radares ignorados`);
   } catch (e) {
     console.error('[backup] Erro:', e.message);
     res.status(500).json({ error: e.message });
@@ -2788,8 +2935,8 @@ app.post('/api/autotrips', (req, res) => {
       distKm:  autoTrip.distKm  || 0,
     });
     addEvent('trip_end', `Viagem concluída: ${(autoTrip.distKm||0).toFixed(1)} km`);
-    // Push: viagem concluída (só se >1 km OU >3 min)
-    if (notifPrefs.trip_end) {
+    // Push: viagem concluída (só se >1 km OU >3 min). On/off por device.
+    {
       const distKm = autoTrip.distKm  || 0;
       const sec    = autoTrip.timeSec || 0;
       if (distKm > 1 || sec > 180) {
@@ -2811,7 +2958,7 @@ app.post('/api/autotrips', (req, res) => {
         if (kmL)           parts.push(`${kmL} km/L`);
         if (cost  > 0.01)  parts.push(`R$ ${cost.toFixed(2)}`);
 
-        sendPush('🏁 Viagem concluída', parts.join(' · '));
+        sendPush('🏁 Viagem concluída', parts.join(' · '), 'trip_end');
       }
     }
     res.json({ ok: true });
@@ -3162,26 +3309,113 @@ app.post('/api/diag/set', (req, res) => {
   });
 });
 
-app.get('/api/config', (_req, res) => res.json({
-  mqtt_host:        MQTT_HOST,
-  mqtt_prefix:      MQTT_PREFIX,
-  mqtt_connected:   !!(mqttClient && mqttClient.connected),
-  version:          require('./package.json').version,
-  bridge_uptime_sec: Math.floor(process.uptime()),
-  started_at_ms:    SERVER_START_AT,
-  node_version:     process.version,
-  platform:         process.platform,
-}));
+// Commit + data do HEAD, lido uma vez no boot (não muda em runtime)
+let _BRIDGE_GIT_INFO = null;
+function _readGitInfo() {
+  if (_BRIDGE_GIT_INFO) return _BRIDGE_GIT_INFO;
+  try {
+    const { execSync } = require('child_process');
+    const cwd = path.join(__dirname, '..');
+    const sha = execSync('git rev-parse --short HEAD', { cwd, encoding: 'utf8', timeout: 1500 }).trim();
+    const date = execSync('git log -1 --format=%cI HEAD', { cwd, encoding: 'utf8', timeout: 1500 }).trim();
+    _BRIDGE_GIT_INFO = { sha, date };
+  } catch (_) { _BRIDGE_GIT_INFO = { sha: null, date: null }; }
+  return _BRIDGE_GIT_INFO;
+}
+// GET /api/whoami — retorna IP do cliente + headers úteis pra debug de rede.
+// Usado pelo indicador de rede no header da PWA (toque mostra IP).
+app.get('/api/whoami', (req, res) => {
+  const xff = req.headers['x-forwarded-for'] || '';
+  const remoteIp = (xff.split(',')[0] || req.socket.remoteAddress || '').trim();
+  res.json({
+    remote_ip: remoteIp,
+    x_forwarded_for: xff || null,
+    user_agent: req.headers['user-agent'] || null,
+    via: req.headers['via'] || null,  // se via Tailscale Funnel, vem aqui
+    host: req.headers['host'] || null,
+    timestamp: Date.now(),
+  });
+});
+
+app.get('/api/config', (_req, res) => {
+  const git = _readGitInfo();
+  res.json({
+    mqtt_host:        MQTT_HOST,
+    mqtt_prefix:      MQTT_PREFIX,
+    mqtt_connected:   !!(mqttClient && mqttClient.connected),
+    version:          require('./package.json').version,
+    git_commit:       git.sha,
+    git_commit_date:  git.date,
+    bridge_uptime_sec: Math.floor(process.uptime()),
+    started_at_ms:    SERVER_START_AT,
+    node_version:     process.version,
+    platform:         process.platform,
+  });
+});
 
 // ── Push Notifications ────────────────────────────────────────────────────────
 app.get('/api/push/vapid-key', (_req, res) => res.json({ key: vapidKeys.publicKey }));
 
 app.post('/api/push/subscribe', (req, res) => {
-  const sub = req.body;
-  if (!sub?.endpoint) return res.status(400).json({ error: 'invalid subscription' });
-  const exists = pushSubs.some(s => s.endpoint === sub.endpoint);
-  if (!exists) { pushSubs.push(sub); savePushSubs(); }
-  res.json({ ok: true });
+  const body = req.body || {};
+  if (!body?.endpoint) return res.status(400).json({ error: 'invalid subscription' });
+  const incomingDeviceId = body.device_id && String(body.device_id).trim();
+  const incomingName = body.device_name && String(body.device_name).trim();
+  // Dedup #1: match exato por endpoint — atualiza no lugar
+  const sameEndpoint = pushSubs.find(s => s.endpoint === body.endpoint);
+  if (sameEndpoint) {
+    if (incomingDeviceId) sameEndpoint.device_id = incomingDeviceId;
+    if (incomingName)     sameEndpoint.device_name = incomingName;
+    sameEndpoint.last_seen = Date.now();
+    savePushSubs();
+    return res.json({ ok: true, device_id: sameEndpoint.device_id, device_name: sameEndpoint.device_name });
+  }
+  // Dedup #2: mesmo device_id, endpoint diferente (browser re-subscreveu) →
+  // REMOVE as entradas antigas pra evitar duplicatas. Browsers iOS/Android giram
+  // endpoint quando o token push é renovado; sem isso o histórico enche de subs
+  // do mesmo aparelho.
+  if (incomingDeviceId) {
+    const dups = pushSubs.filter(s => s.device_id === incomingDeviceId);
+    if (dups.length > 0) {
+      pushSubs = pushSubs.filter(s => s.device_id !== incomingDeviceId);
+      console.log(`[push] device_id ${incomingDeviceId.slice(0,8)} re-subscribed — removidas ${dups.length} entry(s) antigas`);
+    }
+  }
+  const deviceId = incomingDeviceId || genDeviceId();
+  const sub = {
+    endpoint:    body.endpoint,
+    keys:        body.keys,
+    device_id:   deviceId,
+    device_name: incomingName || 'Dispositivo',
+    created_at:  Date.now(),
+    last_seen:   Date.now(),
+  };
+  if (!notifPrefsByDevice[deviceId]) {
+    notifPrefsByDevice[deviceId] = { ...NOTIF_DEFAULTS };
+    saveNotifPrefsByDevice();
+  }
+  pushSubs.push(sub);
+  savePushSubs();
+  res.json({ ok: true, device_id: deviceId, device_name: sub.device_name });
+});
+
+// POST /api/admin/dedup-devices — limpa duplicatas existentes (mantém apenas a
+// entry mais recente por device_id; nomes diferentes → opta pela mais nova).
+app.post('/api/admin/dedup-devices', (req, res) => {
+  if (!adminCheckToken(req, res)) return;
+  const byId = new Map();
+  for (const s of pushSubs) {
+    const id = s.device_id || s.endpoint;
+    const prev = byId.get(id);
+    if (!prev || (s.last_seen || s.created_at || 0) > (prev.last_seen || prev.created_at || 0)) {
+      byId.set(id, s);
+    }
+  }
+  const before = pushSubs.length;
+  pushSubs = [...byId.values()];
+  savePushSubs();
+  console.log(`[push] dedup: ${before} → ${pushSubs.length} subs`);
+  res.json({ ok: true, before, after: pushSubs.length });
 });
 
 app.post('/api/push/unsubscribe', (req, res) => {
@@ -3229,8 +3463,86 @@ app.post('/api/push/prefs', (req, res) => {
   res.json({ ok: true, prefs: notifPrefs });
 });
 
+// ── Devices: lista, prefs por device, rename, delete ─────────────────────────
+// GET /api/notif/devices — lista todos os devices registrados (push subs)
+app.get('/api/notif/devices', (_req, res) => {
+  const list = pushSubs.map(s => ({
+    device_id:   s.device_id || null,
+    device_name: s.device_name || '(sem nome)',
+    last_seen:   s.last_seen || s.created_at || null,
+    has_prefs:   !!(s.device_id && notifPrefsByDevice[s.device_id]),
+    endpoint_tail: (s.endpoint || '').slice(-24),
+  }));
+  res.json({ devices: list });
+});
+
+// GET /api/notif/prefs/:device_id — prefs efetivas (defaults + global + device)
+app.get('/api/notif/prefs/:device_id', (req, res) => {
+  const id = req.params.device_id;
+  res.json({
+    device_id: id,
+    prefs:     getPrefsForDevice(id),
+    overrides: notifPrefsByDevice[id] || {},
+  });
+});
+
+// POST /api/notif/prefs/:device_id  { key, value }
+app.post('/api/notif/prefs/:device_id', (req, res) => {
+  const id = req.params.device_id;
+  const { key, value } = req.body || {};
+  if (!key || !(key in NOTIF_DEFAULTS)) return res.status(400).json({ error: 'chave inválida' });
+  if (!notifPrefsByDevice[id]) notifPrefsByDevice[id] = {};
+  const def = NOTIF_DEFAULTS[key];
+  if (Array.isArray(def)) {
+    if (!Array.isArray(value)) return res.status(400).json({ error: 'esperado array' });
+    notifPrefsByDevice[id][key] = value.map(String);
+  } else if (typeof def === 'number') {
+    const n = parseInt(value);
+    if (isNaN(n)) return res.status(400).json({ error: 'valor numérico inválido' });
+    notifPrefsByDevice[id][key] = Math.max(1, Math.min(20, n));
+  } else {
+    notifPrefsByDevice[id][key] = !!value;
+  }
+  saveNotifPrefsByDevice();
+  res.json({ ok: true, prefs: getPrefsForDevice(id) });
+});
+
+// PATCH /api/notif/devices/:device_id  { device_name }
+app.patch('/api/notif/devices/:device_id', (req, res) => {
+  const id = req.params.device_id;
+  const name = (req.body?.device_name || '').toString().trim();
+  if (!name) return res.status(400).json({ error: 'device_name vazio' });
+  const sub = pushSubs.find(s => s.device_id === id);
+  if (!sub) return res.status(404).json({ error: 'device não encontrado' });
+  sub.device_name = name.slice(0, 50);
+  savePushSubs();
+  res.json({ ok: true, device_id: id, device_name: sub.device_name });
+});
+
+// DELETE /api/notif/devices/:device_id — remove subscription E prefs
+app.delete('/api/notif/devices/:device_id', (req, res) => {
+  const id = req.params.device_id;
+  const before = pushSubs.length;
+  pushSubs = pushSubs.filter(s => s.device_id !== id);
+  savePushSubs();
+  if (notifPrefsByDevice[id]) {
+    delete notifPrefsByDevice[id];
+    saveNotifPrefsByDevice();
+  }
+  res.json({ ok: true, removed: before - pushSubs.length });
+});
+
 // GET /api/push/history  — central de notificações
-app.get('/api/push/history', (_req, res) => res.json(notifHistory));
+// History é gravado globalmente (pra log/diagnóstico) mas o PWA filtra por
+// device: só mostra entradas cujo `type` está ON nas prefs daquele device.
+// Entradas sem `type` (testes/genéricas) sempre passam.
+app.get('/api/push/history', (req, res) => {
+  const deviceId = req.query.device_id || '';
+  if (!deviceId) return res.json(notifHistory);  // sem device: comportamento legado
+  const prefs = getPrefsForDevice(deviceId);
+  const filtered = notifHistory.filter(n => !n.type || prefs[n.type] === true);
+  res.json(filtered);
+});
 
 // POST /api/push/history/clear  — limpa histórico de notificações
 app.post('/api/push/history/clear', (_req, res) => {
@@ -3258,6 +3570,40 @@ const ACTION_TO_HA_BUTTON = {
   charge_history: 'historico_de_carregamento',
 };
 const ALLOWED_ACTIONS = new Set(Object.keys(ACTION_TO_HA_BUTTON));
+
+// POST /api/admin/reset-tyre-baseline — zera o histórico de PSI dos pneus.
+// Outras métricas (12V, autonomia, combustível) permanecem. Útil quando a
+// média 14d ficou viciada com leituras em movimento (pneu quente).
+app.post('/api/admin/reset-tyre-baseline', (req, res) => {
+  if (!adminCheckToken(req, res)) return;
+  let cleared = 0;
+  for (const snap of telemetryHistory) {
+    for (const pos of ['fl', 'fr', 'rl', 'rr']) {
+      if (snap[`tyre_${pos}`]) { snap[`tyre_${pos}`] = 0; cleared++; }
+    }
+  }
+  try { fs.writeFileSync(TELEMETRY_LOG_FILE, JSON.stringify(telemetryHistory, null, 2)); } catch (_) {}
+  // Limpa flags de "alerta já enviado hoje" pra que novos alertas legítimos
+  // (a frio) voltem a disparar sem precisar passar a data
+  for (const k of Object.keys(_anomalyAlerted)) {
+    if (k.startsWith('tyre_')) delete _anomalyAlerted[k];
+  }
+  console.log(`✓ Baseline de pneus zerado (${cleared} valores limpos)`);
+  res.json({ ok: true, cleared, entries: telemetryHistory.length });
+});
+
+// POST /api/charge-limit/refresh — pede pro APK reler o limite real do carro
+// e re-publicar em ha/charge_limit/state. Útil quando o user muda direto no
+// carro (sem usar o PWA) e o state do bridge ficou desatualizado.
+app.post('/api/charge-limit/refresh', (req, res) => {
+  if (!adminCheckToken(req, res)) return;
+  if (!mqttClient?.connected) return res.status(503).json({ error: 'MQTT offline' });
+  mqttClient.publish(`${MQTT_PREFIX}/cmd/refresh_charge_limit`, '1', { retain: false, qos: 1 }, err => {
+    if (err) return res.status(500).json({ error: 'Falha ao publicar: ' + err.message });
+    console.log('[charge-limit] refresh solicitado — aguardando APK re-publicar');
+    res.json({ ok: true });
+  });
+});
 
 // POST /api/charge-limit  { pct: 80 }  — publica cmd/charge_limit no MQTT
 app.post('/api/charge-limit', (req, res) => {
@@ -3772,6 +4118,90 @@ const GWM_BODY_BINARY = new Set([
 ]);
 
 /**
+ * Single source of truth pro handler de transição de charging_state.
+ * Chamado por DOIS lugares:
+ *   - applyGwmEntity (caminho HA) quando `charging_state_raw` chega — caminho ATUAL
+ *   - applyMqttMessage (caminho legado APK) — só dispara se key sair de MIGRATED_TO_HA
+ * Antes, a lógica estava SÓ no segundo lugar e parou de rodar após a migração:
+ *   - events.json nunca recebia charge_start/charge_end
+ *   - sendPush('⚡ Recarga iniciada' / '✅ Recarga concluída') jamais era chamado
+ *   - chargeStartTimer (30s pra potência estabilizar) nunca disparava
+ *   - _chargeTempSamples ficava sempre vazio → avg_temp_c null nos charges
+ */
+function handleChargingStateTransition(value, isRetained) {
+  const prev = prevChargingState;
+  state.charging_state = value;
+  prevChargingState    = value;
+
+  // Detecta transição REAL: prev definido e diferente do novo valor.
+  // No primeiro boot do bridge, prev é vazio → pula (não há transição).
+  // Em qualquer outra mudança (retained ou não), registra evento no log;
+  // só o push de notificação é gateado por !isRetained (pra não notificar
+  // o user no boot quando o broker reenvia 'Carregando' antigo).
+  const realTransition = prev && prev !== value;
+  if (!realTransition) return;
+
+  if (value === 'Carregando') {
+    _chargeTempSamples = [];   // inicia nova coleta de temperatura
+    chargeSessionStartMs = Date.now();
+    chargeStartSoc = state.soc_pct || 0;
+    state.charge_start_soc_pct       = chargeStartSoc;
+    state.charge_session_start_ms    = chargeSessionStartMs;
+    state.charge_max_power_kw        = 0;
+    state.charge_avg_power_kw        = 0;
+    state.charge_session_kwh_at_init = 0;
+    addEvent('charge_start', `Recarga iniciada · SOC: ${chargeStartSoc.toFixed(0)}%`);
+    if (!isRetained) {
+      // Aguarda 30s para a potência estabilizar antes de notificar
+      if (chargeStartTimer) clearTimeout(chargeStartTimer);
+      chargeStartTimer = setTimeout(() => {
+        chargeStartTimer = null;
+        const pwr = state.charge_power_kw || 0;
+        const rem = state.charge_remaining_min || 0;
+        const remStr = rem > 0
+          ? (rem > 59 ? `${Math.floor(rem / 60)}h ${rem % 60}min` : `${rem} min`)
+          : '~?';
+        sendPush('⚡ Recarga iniciada', `${pwr.toFixed(1)} kW · tempo restante: ${remStr}`, 'charge_start');
+      }, 30000);
+    }
+  } else if (prev === 'Carregando') {
+    if (chargeStartTimer) { clearTimeout(chargeStartTimer); chargeStartTimer = null; }
+    chargeEndingNotifSent = false;  // reset para próxima sessão
+    const endSoc = state.soc_pct || 0;
+    addEvent('charge_end', `Recarga concluída · SOC: ${chargeStartSoc.toFixed(0)}% → ${endSoc.toFixed(0)}%`);
+    // Calcula temperatura média da sessão encerrada
+    if (_chargeTempSamples.length > 0) {
+      const avg = _chargeTempSamples.reduce((a, b) => a + b, 0) / _chargeTempSamples.length;
+      _lastChargeAvgTemp = Math.round(avg * 10) / 10;
+      console.log(`🌡 Temp média recarga: ${_lastChargeAvgTemp}°C (${_chargeTempSamples.length} amostras)`);
+    }
+    _chargeTempSamples = [];
+    if (!isRetained && value === 'Finalizado') {
+      const kwh = state.charge_session_kwh || 0;
+      const durSec = chargeSessionStartMs > 0
+        ? Math.round((Date.now() - chargeSessionStartMs) / 1000)
+        : 0;
+      const durStr = durSec > 0
+        ? (durSec >= 3600
+          ? `${Math.floor(durSec / 3600)}h ${Math.floor((durSec % 3600) / 60)}min`
+          : `${Math.floor(durSec / 60)}min`)
+        : null;
+      const avgKw = (durSec > 0 && kwh > 0.05)
+        ? (kwh / (durSec / 3600))
+        : null;
+      const parts = [];
+      if (kwh > 0.05) parts.push(`${kwh.toFixed(2)} kWh`);
+      if (durStr)     parts.push(durStr);
+      if (avgKw)      parts.push(`${avgKw.toFixed(1)} kW médios`);
+      sendPush('✅ Recarga concluída', parts.length ? parts.join(' · ') : 'Sessão encerrada', 'charge_end');
+      chargeSessionStartMs = 0;
+      state.charge_session_start_ms    = 0;
+      state.charge_session_kwh_at_init = 0;
+    }
+  }
+}
+
+/**
  * Processa mensagem da integração GWM Brasil (tópicos `gwmbrasil_<chassi>/.../state`).
  * Aplica conversão por tipo e dispara eventos quando há transição binária real.
  */
@@ -3797,10 +4227,10 @@ function applyGwmEntity(id, value, isRetained = false) {
       } else if (field === 'door_trunk') {
         if (norm === 'on') {
           addEvent('trunk_open',  'Porta-malas aberta');
-          if (notifPrefs.trunk_open)  sendPush('🧳 Porta-malas aberta', 'Verifique se está segura.');
+          sendPush('🧳 Porta-malas aberta', 'Verifique se está segura.', 'trunk_open');
         } else {
           addEvent('trunk_close', 'Porta-malas fechada');
-          if (notifPrefs.trunk_close) sendPush('🧳 Porta-malas fechada', 'Porta-malas foi fechada.');
+          sendPush('🧳 Porta-malas fechada', 'Porta-malas foi fechada.', 'trunk_close');
         }
       } else {
         // door_fl/fr/rl/rr
@@ -3808,10 +4238,10 @@ function applyGwmEntity(id, value, isRetained = false) {
         const label = DOOR_NAMES[side] || side.toUpperCase();
         if (norm === 'on') {
           addEvent('door_open',  `${label} aberta`);
-          if (notifPrefs.door_open)  sendPush('🚪 Porta aberta', label);
+          sendPush('🚪 Porta aberta', label, 'door_open');
         } else {
           addEvent('door_close', `${label} fechada`);
-          if (notifPrefs.door_close) sendPush('🚪 Porta fechada', label);
+          sendPush('🚪 Porta fechada', label, 'door_close');
         }
       }
     }
@@ -3851,12 +4281,12 @@ function applyGwmEntity(id, value, isRetained = false) {
     if (!isRetained && prev !== undefined && prev !== null && prev !== value) {
       if (value === '1') {
         addEvent('engine_on',  'Motor ligado');
-        if (notifPrefs.engine_on)  sendPush('🔑 Motor ligado',  'O veículo foi ligado.');
+        sendPush('🔑 Motor ligado',  'O veículo foi ligado.', 'engine_on');
         // Transição off→on: compara fuel atual com snapshot ao desligar
         checkRefuelOnEngineOn();
       } else if (value === '0') {
         addEvent('engine_off', 'Motor desligado');
-        if (notifPrefs.engine_off) sendPush('🔑 Motor desligado', 'O veículo foi desligado.');
+        sendPush('🔑 Motor desligado', 'O veículo foi desligado.', 'engine_off');
         // Snapshot: fuel_l quando o motor desliga, comparado quando voltar a ligar
         _fuelLAtPark = +state.fuel_l || 0;
         _fuelParkTs  = Date.now();
@@ -3877,9 +4307,12 @@ function applyGwmEntity(id, value, isRetained = false) {
     return;
   }
 
-  // ── Charging state — converte número do HA pro texto que a PWA usa ────────
+  // ── Charging state — converte número do HA pro texto que a PWA usa.
+  // Delega a transição (events + push + temperatura média + chargeStartTimer)
+  // pro handler único — sem isso, eventos de recarga param de ser registrados.
   if (field === 'charging_state_raw') {
-    state.charging_state = mapChargingStateText(value);
+    const txt = mapChargingStateText(value);
+    handleChargingStateTransition(txt, isRetained);
     return;
   }
 
@@ -3907,8 +4340,8 @@ function applyMqttMessage(key, value, isRetained = false) {
       const prevVer = state.car_app_version;
       state.car_app_version = value;
       // Notifica quando a versão muda (não na primeira leitura/retained)
-      if (!isRetained && prevVer !== null && prevVer !== value && notifPrefs.app_update) {
-        sendPush('📱 App atualizado', `Nova versão: ${value}${prevVer ? ` (era ${prevVer})` : ''}`);
+      if (!isRetained && prevVer !== null && prevVer !== value) {
+        sendPush('📱 App atualizado', `Nova versão: ${value}${prevVer ? ` (era ${prevVer})` : ''}`, 'app_update');
       }
       break;
     }
@@ -3922,10 +4355,10 @@ function applyMqttMessage(key, value, isRetained = false) {
       if (!isRetained && prevEng !== null && prevEng !== value) {
         if (value === '1') {
           addEvent('engine_on',  'Motor ligado');
-          if (notifPrefs.engine_on)  sendPush('🔑 Motor ligado',  'O veículo foi ligado.');
+          sendPush('🔑 Motor ligado',  'O veículo foi ligado.', 'engine_on');
         } else if (value === '0') {
           addEvent('engine_off', 'Motor desligado');
-          if (notifPrefs.engine_off) sendPush('🔑 Motor desligado', 'O veículo foi desligado.');
+          sendPush('🔑 Motor desligado', 'O veículo foi desligado.', 'engine_off');
         }
       }
       break;
@@ -4013,10 +4446,10 @@ function applyMqttMessage(key, value, isRetained = false) {
           const label = DOOR_NAMES[side] || side.toUpperCase();
           if (norm === 'on') {
             addEvent('door_open',  `${label} aberta`);
-            if (notifPrefs.door_open)  sendPush('🚪 Porta aberta', label);
+            sendPush('🚪 Porta aberta', label, 'door_open');
           } else {
             addEvent('door_close', `${label} fechada`);
-            if (notifPrefs.door_close) sendPush('🚪 Porta fechada', label);
+            sendPush('🚪 Porta fechada', label, 'door_close');
           }
         }
       }, HYSTERESIS_MS);
@@ -4039,10 +4472,10 @@ function applyMqttMessage(key, value, isRetained = false) {
           prevDoorStates.trunk = norm;
           if (norm === 'on') {
             addEvent('trunk_open',  'Porta-malas aberta');
-            if (notifPrefs.trunk_open)  sendPush('🧳 Porta-malas aberta', 'Verifique se está segura.');
+            sendPush('🧳 Porta-malas aberta', 'Verifique se está segura.', 'trunk_open');
           } else {
             addEvent('trunk_close', 'Porta-malas fechada');
-            if (notifPrefs.trunk_close) sendPush('🧳 Porta-malas fechada', 'Porta-malas foi fechada.');
+            sendPush('🧳 Porta-malas fechada', 'Porta-malas foi fechada.', 'trunk_close');
           }
         }
       }, HYSTERESIS_MS);
@@ -4121,10 +4554,10 @@ function applyMqttMessage(key, value, isRetained = false) {
       console.log(`[lock:raw] value='${value}' isRetained=${isRetained}`);
       break;
     }
-    case 'tyre_pressure_fl': { state.tyre_pressure_fl = num(value); checkTyrePressure('FL', num(value), isRetained); break; }
-    case 'tyre_pressure_fr': { state.tyre_pressure_fr = num(value); checkTyrePressure('FR', num(value), isRetained); break; }
-    case 'tyre_pressure_rl': { state.tyre_pressure_rl = num(value); checkTyrePressure('RL', num(value), isRetained); break; }
-    case 'tyre_pressure_rr': { state.tyre_pressure_rr = num(value); checkTyrePressure('RR', num(value), isRetained); break; }
+    case 'tyre_pressure_fl': { state.tyre_pressure_fl = num(value); checkTyrePressure('FL', num(value), isRetained, state.tyre_temp_fl); break; }
+    case 'tyre_pressure_fr': { state.tyre_pressure_fr = num(value); checkTyrePressure('FR', num(value), isRetained, state.tyre_temp_fr); break; }
+    case 'tyre_pressure_rl': { state.tyre_pressure_rl = num(value); checkTyrePressure('RL', num(value), isRetained, state.tyre_temp_rl); break; }
+    case 'tyre_pressure_rr': { state.tyre_pressure_rr = num(value); checkTyrePressure('RR', num(value), isRetained, state.tyre_temp_rr); break; }
     case 'tyre_temp_fl': state.tyre_temp_fl = num(value); break;
     case 'tyre_temp_fr': state.tyre_temp_fr = num(value); break;
     case 'tyre_temp_rl': state.tyre_temp_rl = num(value); break;
@@ -4164,78 +4597,9 @@ function applyMqttMessage(key, value, isRetained = false) {
       break;
     }
     case 'charging_state': {
-      const prev = prevChargingState;
-      state.charging_state = value;
-      prevChargingState    = value;
-
-      // Detecta transição REAL: prev definido e diferente do novo valor.
-      // No primeiro boot do bridge, prev é vazio → pula (não há transição).
-      // Em qualquer outra mudança (retained ou não), registra evento no log;
-      // só o push de notificação é gateado por !isRetained (pra não notificar
-      // o user no boot quando o broker reenvia 'Carregando' antigo).
-      const realTransition = prev && prev !== value;
-      if (realTransition) {
-        if (value === 'Carregando') {
-          _chargeTempSamples = [];   // inicia nova coleta de temperatura
-          chargeSessionStartMs = Date.now();
-          chargeStartSoc = state.soc_pct || 0;
-          state.charge_start_soc_pct       = chargeStartSoc;
-          state.charge_session_start_ms    = chargeSessionStartMs;
-          state.charge_max_power_kw        = 0;
-          state.charge_avg_power_kw        = 0;
-          state.charge_session_kwh_at_init = 0;
-          addEvent('charge_start', `Recarga iniciada · SOC: ${chargeStartSoc.toFixed(0)}%`);
-          if (!isRetained) {
-            // Aguarda 30s para a potência estabilizar antes de notificar
-            if (chargeStartTimer) clearTimeout(chargeStartTimer);
-            chargeStartTimer = setTimeout(() => {
-              chargeStartTimer = null;
-              const pwr = state.charge_power_kw || 0;
-              const rem = state.charge_remaining_min || 0;
-              const remStr = rem > 0
-                ? (rem > 59 ? `${Math.floor(rem / 60)}h ${rem % 60}min` : `${rem} min`)
-                : '~?';
-              if (notifPrefs.charge_start)
-              sendPush('⚡ Recarga iniciada', `${pwr.toFixed(1)} kW · tempo restante: ${remStr}`);
-            }, 30000);
-          }
-
-        } else if (prev === 'Carregando') {
-          if (chargeStartTimer) { clearTimeout(chargeStartTimer); chargeStartTimer = null; }
-          chargeEndingNotifSent = false;  // reset para próxima sessão
-          const endSoc = state.soc_pct || 0;
-          addEvent('charge_end', `Recarga concluída · SOC: ${chargeStartSoc.toFixed(0)}% → ${endSoc.toFixed(0)}%`);
-          // Calcula temperatura média da sessão encerrada
-          if (_chargeTempSamples.length > 0) {
-            const avg = _chargeTempSamples.reduce((a, b) => a + b, 0) / _chargeTempSamples.length;
-            _lastChargeAvgTemp = Math.round(avg * 10) / 10;
-            console.log(`🌡 Temp média recarga: ${_lastChargeAvgTemp}°C (${_chargeTempSamples.length} amostras)`);
-          }
-          _chargeTempSamples = [];
-          if (!isRetained && value === 'Finalizado' && notifPrefs.charge_end) {
-            const kwh = state.charge_session_kwh || 0;
-            const durSec = chargeSessionStartMs > 0
-              ? Math.round((Date.now() - chargeSessionStartMs) / 1000)
-              : 0;
-            const durStr = durSec > 0
-              ? (durSec >= 3600
-                ? `${Math.floor(durSec / 3600)}h ${Math.floor((durSec % 3600) / 60)}min`
-                : `${Math.floor(durSec / 60)}min`)
-              : null;
-            const avgKw = (durSec > 0 && kwh > 0.05)
-              ? (kwh / (durSec / 3600))
-              : null;
-            const parts = [];
-            if (kwh > 0.05) parts.push(`${kwh.toFixed(2)} kWh`);
-            if (durStr)     parts.push(durStr);
-            if (avgKw)      parts.push(`${avgKw.toFixed(1)} kW médios`);
-            sendPush('✅ Recarga concluída', parts.length ? parts.join(' · ') : 'Sessão encerrada');
-            chargeSessionStartMs = 0;
-            state.charge_session_start_ms    = 0;
-            state.charge_session_kwh_at_init = 0;
-          }
-        }
-      }
+      // Mantido como fallback pro caso de charging_state sair de MIGRATED_TO_HA;
+      // hoje quem chama handleChargingStateTransition é applyGwmEntity via HA.
+      handleChargingStateTransition(value, isRetained);
       break;
     }
     case 'charge_power_kw': {
@@ -4297,18 +4661,24 @@ function applyMqttMessage(key, value, isRetained = false) {
       state.charge_remaining_min = rem;
       // Dispara notificação quando threshold atingido — apenas uma vez por sessão
       // (chargeEndingNotifSent só é resetado quando charging_state sai de 'Carregando')
+      // Charge_ending: threshold pra disparar é o MÍNIMO entre todos os devices.
+      // Cada device tem seu próprio `charge_ending_min`; o gate per-device acontece
+      // dentro do sendPush (devices com charge_ending=false não recebem).
+      const minThreshold = Math.max(
+        notifPrefs.charge_ending_min || 5,
+        ...Object.values(notifPrefsByDevice).map(p => p.charge_ending_min || 0)
+      );
       if (
-        notifPrefs.charge_ending &&
         rem > 0 &&
-        rem <= (notifPrefs.charge_ending_min || 5) &&
+        rem <= minThreshold &&
         !chargeEndingNotifSent &&
         state.charging_state === 'Carregando'
       ) {
         chargeEndingNotifSent = true;
-        const cfgMin = notifPrefs.charge_ending_min || 5;
         sendPush(
           '🔔 Recarga quase no fim',
-          `Faltam ${rem} min · aviso configurado: ${cfgMin} min antes`
+          `Faltam ${rem} min`,
+          'charge_ending'
         );
       }
       break;
@@ -4387,6 +4757,9 @@ function applyMqttMessage(key, value, isRetained = false) {
           .filter(c => cutMs === 0 || (c.timestamp_ms || 0) > cutMs)
           .filter(c => !isDeleted('charges', c.timestamp_ms || 0));
         if (charges.length > 0) {
+          // Snapshot dos timestamps que JÁ tínhamos — pra detectar novas depois do merge.
+          // Em mensagens retained (chegam no boot do bridge), não dispara broadcast/push.
+          const prevTsSet = new Set(chargesArr.map(c => c.timestamp_ms));
           // Merge: preserva campos server-side (location, charger_kwh, cost_override)
           // que o Android não conhece — sem isso o MQTT retained apaga tudo
           chargesArr = charges.map(newCharge => {
@@ -4422,6 +4795,36 @@ function applyMqttMessage(key, value, isRetained = false) {
           scheduleChargesFlush();
           const skipped = all.length - charges.length;
           console.log(`✓ Recargas MQTT: ${charges.length} sessão(ões)${skipped > 0 ? ` (${skipped} anteriores ao clear ignoradas)` : ''}`);
+          // Broadcast WS pra PWA re-fazer fetch — só pra entradas novas, em msg live (não retained)
+          if (!isRetained) {
+            const novas = charges.filter(c => !prevTsSet.has(c.timestamp_ms));
+            // Auto-tag de local: usa GPS atual do bridge. Se cair dentro de um
+            // knownPlace (raio 200m), preenche location_name automaticamente.
+            // Antes só faltava ser chamado — o autoMatchLocation já existia.
+            for (const nova of novas) {
+              const stored = chargesArr.find(c => c.timestamp_ms === nova.timestamp_ms);
+              if (stored && !stored.location_name && state.gps_lat && state.gps_lng) {
+                stored.location_lat = state.gps_lat;
+                stored.location_lng = state.gps_lng;
+                const match = autoMatchLocation(state.gps_lat, state.gps_lng);
+                if (match) {
+                  stored.location_name = match.name;
+                  console.log(`📍 Auto-tag recarga ${nova.timestamp_ms}: "${match.name}"`);
+                } else {
+                  console.log(`📍 Recarga ${nova.timestamp_ms} salva com GPS (${state.gps_lat.toFixed(5)}, ${state.gps_lng.toFixed(5)}) — fora de locais conhecidos`);
+                }
+                stored._updated_ms = Date.now();
+                scheduleChargesFlush();
+              }
+              broadcast('new_charge', {
+                timestamp_ms: nova.timestamp_ms,
+                energy_kwh:   nova.energy_kwh,
+                soc_start:    nova.soc_start,
+                soc_end:      nova.soc_end,
+              });
+              console.log(`✓ Broadcast new_charge ts=${nova.timestamp_ms} (${nova.energy_kwh} kWh)`);
+            }
+          }
         }
       } catch (e) {
         console.error('Erro ao parsear charging/history:', e.message);
