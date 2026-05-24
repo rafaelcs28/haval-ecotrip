@@ -1828,7 +1828,7 @@ app.delete('/api/maintenance/intervals/:id', (req, res) => {
 
 // POST /api/maintenance/history — registra manutenção feita
 app.post('/api/maintenance/history', (req, res) => {
-  const { type_id, odometer_km, date_ms, notes } = req.body || {};
+  const { type_id, odometer_km, date_ms, notes, cost } = req.body || {};
   if (!type_id) return res.status(400).json({ error: 'type_id obrigatório' });
   if (!maintenance.intervals.find(i => i.id === type_id))
     return res.status(400).json({ error: 'type_id inválido' });
@@ -1841,6 +1841,10 @@ app.post('/api/maintenance/history', (req, res) => {
     date_ms: parseInt(date_ms) || Date.now(),
     notes: notes ? String(notes).slice(0, 240) : '',
   };
+  // Custo opcional — entra no cálculo de R$/km nas estatísticas de Desloc.
+  // Lançamentos antigos sem custo continuam válidos (não contam pro TCO).
+  const c = parseFloat(cost);
+  if (!isNaN(c) && c > 0) rec.cost = parseFloat(c.toFixed(2));
   maintenance.history.push(rec);
   // Reseta o alerta do tipo — novo ciclo começa
   if (maintenance._alerts) delete maintenance._alerts[rec.type_id];

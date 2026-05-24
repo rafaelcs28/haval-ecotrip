@@ -2449,6 +2449,8 @@ window.markMaintDone = async function(id) {
   if (!tk) return;
   const odo = +(window.state?.odometer_km) || 0;
   const notes = prompt('Notas dessa manutenção (opcional)') || '';
+  const costStr = prompt('Custo em R$ (opcional — entra no cálculo de custo/km do Desloc)') || '';
+  const cost = parseFloat(costStr.replace(',', '.'));
   try {
     const r = await fetch('/api/maintenance/history', {
       method: 'POST',
@@ -2458,6 +2460,7 @@ window.markMaintDone = async function(id) {
         odometer_km: odo,
         date_ms: Date.now(),
         notes,
+        cost: (!isNaN(cost) && cost > 0) ? cost : undefined,
       }),
     });
     if (!r.ok) {

@@ -591,6 +591,14 @@
         <div class="v"><span id="st-eff">--</span><span class="u">km/L</span></div>
       </div>
     </div>
+    <div class="stat-card teal">
+      <div class="icon-box">💵</div>
+      <div class="meta">
+        <div class="lbl">Custo por km (energia + comb<span id="st-tco-with-maint" style="display:none"> + manut</span>)</div>
+        <div class="v">R$ <span id="st-tco">--</span><span class="u">/km</span></div>
+        <div id="st-tco-breakdown" style="font-size:10px;color:var(--muted);margin-top:3px;font-variant-numeric:tabular-nums">--</div>
+      </div>
+    </div>
 
     <!-- Gráfico: distância por período (interativo) -->
     <div class="period-card" id="dist-chart-card" style="margin-top:14px">
@@ -33500,6 +33508,22 @@ for (const t of trips) {
   t.route = (t.samples || []).map(s => [s.lat, s.lng]);
 }
 
+// Histórico de manutenção com `cost` — usado no card "Custo por km" das Estatísticas.
+// Carregado uma vez ao bootstrap; refrescado quando o user marca uma manutenção
+// feita via WS (broadcast do server). Lançamentos sem cost contam só pra UI de
+// manutenção, não pro TCO.
+let maintHistory = [];
+async function _loadMaintHistory() {
+  const tk = localStorage.getItem('bridge_token');
+  if (!tk) return;
+  try {
+    const r = await fetch('/api/maintenance', { headers: { 'Authorization': 'Bearer ' + tk } });
+    if (!r.ok) return;
+    const d = await r.json();
+    maintHistory = Array.isArray(d.history) ? d.history : [];
+  } catch (_) {}
+}
+
 let currentFilter = 'all';
 let currentDate = new Date(); currentDate.setHours(0,0,0,0);
 let calendarMonth = new Date(currentDate);
@@ -34224,6 +34248,17 @@ function renderStats() {
   const eqL = pGas > 0.01 ? (totalCost / pGas) : 0;
   const kmL = eqL > 0.001 ? (totalDist / eqL) : 0;
 
+  // Custo por km (R$/km) = (energia+comb + manutenção no período) / distância.
+  // Manutenção é prorrateada pelo `date_ms` do lançamento dentro da janela do
+  // período. Lançamentos sem `cost` são ignorados — só os explicitados pelo user.
+  const maintInPeriod = (maintHistory || []).filter(h => {
+    const t = +h.date_ms || 0;
+    return t >= start && t <= end && +h.cost > 0;
+  });
+  const totalMaintCost = maintInPeriod.reduce((s, h) => s + (+h.cost || 0), 0);
+  const totalAllCost = totalCost + totalMaintCost;
+  const costPerKm = totalDist > 0.01 ? (totalAllCost / totalDist) : 0;
+
   // IMPORTANTE: scope ao container da view. view-posto também usa
   // st-kwh/st-time/st-cost — sem isso, document.getElementById pega o da
   // view-posto (que aparece primeiro no DOM) e atualiza os cards errados.
@@ -34237,6 +34272,22 @@ function renderStats() {
   _scope.querySelector('#st-fuel').textContent  = fmt1(totalFuel);
   _scope.querySelector('#st-cost').textContent  = fmtBRL(totalCost);
   _scope.querySelector('#st-eff').textContent   = kmL > 0 ? fmt1(kmL) : '--';
+
+  // Card "Custo por km"
+  const tcoEl   = _scope.querySelector('#st-tco');
+  const tcoSub  = _scope.querySelector('#st-tco-breakdown');
+  const tcoFlag = _scope.querySelector('#st-tco-with-maint');
+  if (tcoEl) {
+    tcoEl.textContent = costPerKm > 0 ? costPerKm.toFixed(2).replace('.', ',') : '--';
+    if (tcoFlag) tcoFlag.style.display = totalMaintCost > 0 ? '' : 'none';
+    if (tcoSub) {
+      const parts = [];
+      if (totalCost > 0)      parts.push(`Operação R$ ${fmtBRL(totalCost)}`);
+      if (totalMaintCost > 0) parts.push(`Manut. R$ ${fmtBRL(totalMaintCost)}`);
+      if (totalDist > 0)      parts.push(`${fmt1(totalDist)} km`);
+      tcoSub.textContent = parts.join(' · ') || '—';
+    }
+  }
 
   // Charts: distância e consumo médio por período
   _renderDeslocCharts(filtered, start === 0 ? (filtered[0]?.startMs || now) : start, end === Infinity ? now : end);
@@ -34564,6 +34615,7 @@ async function _loadDeslocData() {
 }
 // Boot inicial: 1 fetch
 _loadDeslocData();
+_loadMaintHistory().then(() => { if (currentView === 'stats') renderStats(); });
 // Troca de aba: re-render só do estado em memória (não refetcha).
 // Refetch é disparado SÓ pelo shell (WS new_autotrip → window._reloadDeslocData)
 window.renderView_desloc = function() { renderTrips(); renderCalendar(); renderDateNav(); };
