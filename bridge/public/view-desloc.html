@@ -532,9 +532,9 @@
       <div class="ti">Estatísticas</div>
       <div class="sub">Resumo do período selecionado</div>
       <div class="options" id="period-options">
-        <div class="opt" data-period="today" onclick="setPeriod('today')">Hoje</div>
+        <div class="opt active" data-period="today" onclick="setPeriod('today')">Hoje</div>
         <div class="opt" data-period="7d" onclick="setPeriod('7d')">Últimos 7 dias</div>
-        <div class="opt active" data-period="30d" onclick="setPeriod('30d')">Últimos 30 dias</div>
+        <div class="opt" data-period="30d" onclick="setPeriod('30d')">Últimos 30 dias</div>
         <div class="opt" data-period="all" onclick="setPeriod('all')">Tudo</div>
         <div class="opt" data-period="custom" onclick="setPeriod('custom')">Personalizar</div>
       </div>
@@ -33511,7 +33511,7 @@ let currentFilter = 'all';
 let currentDate = new Date(); currentDate.setHours(0,0,0,0);
 let calendarMonth = new Date(currentDate);
 let currentView = 'registros';
-let currentPeriod = '30d';
+let currentPeriod = 'today';
 
 function fmtBRL(n) {
   const v = +n;
