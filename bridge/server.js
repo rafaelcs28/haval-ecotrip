@@ -3660,6 +3660,15 @@ app.post('/api/admin/reprocess-places', async (req, res) => {
   _reprocessRunning = true;
   _reprocessStatus = { kind, total, done: 0, trips_updated: 0, charges_updated: 0, errors: 0, current: '' };
   res.json({ ok: true, total, kind });
+  // Resolve um lado: prioridade pra knownPlace (autoMatchLocation, raio 200m);
+  // só cai no Nominatim quando o GPS está fora de qualquer KP.
+  async function _resolveSide(lat, lng) {
+    const kp = autoMatchLocation(lat, lng);
+    if (kp?.name) return { name: kp.name, from_kp: true, geo: null };
+    const geo = await _reverseGeocode(lat, lng);
+    await new Promise(r => setTimeout(r, 1100));
+    return { name: null, from_kp: false, geo };
+  }
   // Roda em background
   (async () => {
     try {
@@ -3671,12 +3680,11 @@ app.post('/api/admin/reprocess-places', async (req, res) => {
           const at = d.autoTrip || {};
           const skip = !force && at.startKp && at.endKp;
           if (!skip && at.startLat && at.endLat) {
-            const sG = await _reverseGeocode(at.startLat, at.startLng);
-            await new Promise(r => setTimeout(r, 1100));
-            const eG = await _reverseGeocode(at.endLat, at.endLng);
-            await new Promise(r => setTimeout(r, 1100));
-            const newStart = _formatPlace(sG, eG);
-            const newEnd   = _formatPlace(eG, sG);
+            const s = await _resolveSide(at.startLat, at.startLng);
+            const e = await _resolveSide(at.endLat, at.endLng);
+            // KP tem prioridade; senão "Bairro, Cidade" (se mesma cidade do oposto)
+            const newStart = s.from_kp ? s.name : _formatPlace(s.geo, e.geo);
+            const newEnd   = e.from_kp ? e.name : _formatPlace(e.geo, s.geo);
             if (force || !at.startKp) at.startKp = newStart || at.startKp || null;
             if (force || !at.endKp)   at.endKp   = newEnd   || at.endKp   || null;
             _reprocessStatus.current = (at.startKp || '?') + ' → ' + (at.endKp || '?');
@@ -3687,12 +3695,16 @@ app.post('/api/admin/reprocess-places', async (req, res) => {
         _reprocessStatus.done++;
         if (_reprocessStatus.done % 3 === 0) _broadcastReprocess();
       }
-      // Charges
+      // Charges — também prioriza KP. Sem KP: "Cidade" (sem oposto, fica só cidade).
       for (const c of chargesTodo) {
         try {
-          const g = await _reverseGeocode(c.location_lat, c.location_lng);
-          await new Promise(r => setTimeout(r, 1100));
-          const name = _formatPlace(g, null);  // sem oposto pra charge → cidade
+          const kp = autoMatchLocation(c.location_lat, c.location_lng);
+          let name = kp?.name || null;
+          if (!name) {
+            const g = await _reverseGeocode(c.location_lat, c.location_lng);
+            await new Promise(r => setTimeout(r, 1100));
+            name = _formatPlace(g, null);
+          }
           if (name) {
             c.location_name = name;
             c._updated_ms = Date.now();
