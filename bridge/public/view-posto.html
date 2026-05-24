@@ -990,9 +990,40 @@ function openMerge(id) {
     ${list}
     <div class="btns" style="margin-top:14px">
       <button class="btn cancel" onclick="closeAction()">Cancelar</button>
-      ${candidates.length ? '<button class="btn confirm" onclick="alert(\'[preview] Unir recargas selecionadas\');closeAction()">Unir</button>' : ''}
+      ${candidates.length ? `<button class="btn confirm" onclick="doMerge(${esc(id)})">Unir</button>` : ''}
     </div>
   `);
+}
+
+async function doMerge(baseId) {
+  const tk = localStorage.getItem('bridge_token');
+  if (!tk) return;
+  const checks = Array.from(document.querySelectorAll('[data-merge-id]'))
+    .filter(c => c.checked)
+    .map(c => +c.dataset.mergeId);
+  if (!checks.length) { showToast('Marque pelo menos uma recarga', 'err'); return; }
+  closeAction();
+  showToast(`⏳ Unindo ${checks.length + 1} recargas…`, 'ok');
+  try {
+    // O endpoint funde 2 por chamada — itera acumulando no baseId
+    let currentBase = +baseId;
+    for (const other of checks) {
+      const r = await fetch('/api/charges/merge', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + tk, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tsA: currentBase, tsB: other }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'HTTP ' + r.status);
+      // O merge mantém o timestamp da MAIS ANTIGA como ID. Atualiza baseId.
+      currentBase = Math.min(currentBase, other);
+    }
+    showToast('✓ Recargas unidas', 'ok');
+    // Refetch incremental — força reload removendo cache e recarregando
+    if (window.cacheSet) window.cacheSet('posto', []);
+    items.length = 0;
+    if (typeof _loadPostoData === 'function') await _loadPostoData();
+  } catch (e) { showToast('✗ ' + e.message, 'err'); }
 }
 
 function openChargerEdit(id) {
@@ -1649,7 +1680,7 @@ function openVersionInfo() {
   alert(lines.join('\n'));
 }
   // Expõe handlers de onclick no window
-  Object.assign(window, { setFilter: typeof setFilter !== 'undefined' ? setFilter : undefined, navDay: typeof navDay !== 'undefined' ? navDay : undefined, openCalendar: typeof openCalendar !== 'undefined' ? openCalendar : undefined, setPeriod: typeof setPeriod !== 'undefined' ? setPeriod : undefined, setPostoView: typeof setPostoView !== 'undefined' ? setPostoView : undefined, closeAction: typeof closeAction !== 'undefined' ? closeAction : undefined, saveCharger: typeof saveCharger !== 'undefined' ? saveCharger : undefined, saveCost: typeof saveCost !== 'undefined' ? saveCost : undefined, saveLocation: typeof saveLocation !== 'undefined' ? saveLocation : undefined, saveMeta: typeof saveMeta !== 'undefined' ? saveMeta : undefined, saveRefuel: typeof saveRefuel !== 'undefined' ? saveRefuel : undefined, saveRefuelCost: typeof saveRefuelCost !== 'undefined' ? saveRefuelCost : undefined, openLocationEdit: typeof openLocationEdit !== 'undefined' ? openLocationEdit : undefined, openTimeline: typeof openTimeline !== 'undefined' ? openTimeline : undefined, openMerge: typeof openMerge !== 'undefined' ? openMerge : undefined, openChargerEdit: typeof openChargerEdit !== 'undefined' ? openChargerEdit : undefined, openCostEdit: typeof openCostEdit !== 'undefined' ? openCostEdit : undefined, openMetaEdit: typeof openMetaEdit !== 'undefined' ? openMetaEdit : undefined, openRefuelEdit: typeof openRefuelEdit !== 'undefined' ? openRefuelEdit : undefined, openRefuelCost: typeof openRefuelCost !== 'undefined' ? openRefuelCost : undefined, changeMonth: typeof changeMonth !== 'undefined' ? changeMonth : undefined, selectDate: typeof selectDate !== 'undefined' ? selectDate : undefined });
+  Object.assign(window, { setFilter: typeof setFilter !== 'undefined' ? setFilter : undefined, navDay: typeof navDay !== 'undefined' ? navDay : undefined, openCalendar: typeof openCalendar !== 'undefined' ? openCalendar : undefined, setPeriod: typeof setPeriod !== 'undefined' ? setPeriod : undefined, setPostoView: typeof setPostoView !== 'undefined' ? setPostoView : undefined, closeAction: typeof closeAction !== 'undefined' ? closeAction : undefined, saveCharger: typeof saveCharger !== 'undefined' ? saveCharger : undefined, saveCost: typeof saveCost !== 'undefined' ? saveCost : undefined, saveLocation: typeof saveLocation !== 'undefined' ? saveLocation : undefined, saveMeta: typeof saveMeta !== 'undefined' ? saveMeta : undefined, saveRefuel: typeof saveRefuel !== 'undefined' ? saveRefuel : undefined, saveRefuelCost: typeof saveRefuelCost !== 'undefined' ? saveRefuelCost : undefined, openLocationEdit: typeof openLocationEdit !== 'undefined' ? openLocationEdit : undefined, openTimeline: typeof openTimeline !== 'undefined' ? openTimeline : undefined, openMerge: typeof openMerge !== 'undefined' ? openMerge : undefined, doMerge: typeof doMerge !== 'undefined' ? doMerge : undefined, openChargerEdit: typeof openChargerEdit !== 'undefined' ? openChargerEdit : undefined, openCostEdit: typeof openCostEdit !== 'undefined' ? openCostEdit : undefined, openMetaEdit: typeof openMetaEdit !== 'undefined' ? openMetaEdit : undefined, openRefuelEdit: typeof openRefuelEdit !== 'undefined' ? openRefuelEdit : undefined, openRefuelCost: typeof openRefuelCost !== 'undefined' ? openRefuelCost : undefined, changeMonth: typeof changeMonth !== 'undefined' ? changeMonth : undefined, selectDate: typeof selectDate !== 'undefined' ? selectDate : undefined });
   if (!window['initView_posto']) window['initView_posto'] = function() {};
 })();
 </script>

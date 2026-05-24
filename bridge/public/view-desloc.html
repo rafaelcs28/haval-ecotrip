@@ -167,23 +167,20 @@
 }
 .cal-day.selected.has-event::after { background: #000; }
 
-/* Footer date nav — FIXO acima do tabbar (sticky não funciona porque o
-   scroll é no body, não dentro do .view). Em dias com muitos deslocamentos
-   o conteúdo passa atrás. */
+/* Date nav agora STICKY no topo (logo abaixo do header). Antes ficava
+   fixed no rodapé e cobria os últimos cards em dias com muitos
+   deslocamentos. Sticky funciona aqui porque o scroll é no body. */
 .date-nav {
   display: flex; align-items: center; justify-content: space-between;
-  position: fixed;
-  left: 0; right: 0;
-  bottom: calc(var(--tabbar-h, 56px) + var(--subtab-h, 38px) + env(safe-area-inset-bottom, 0px));
+  position: sticky;
+  top: calc(env(safe-area-inset-top, 0px) + 56px);
   padding: 8px 12px;
+  margin: 0 -4px 8px;
   background: rgba(10,10,10,.94);
   backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
-  border-top: 1px solid rgba(255,255,255,.06);
+  border-bottom: 1px solid rgba(255,255,255,.06);
   z-index: 6;
 }
-/* Espaço extra no fim da lista pra última viagem não ficar coberta
-   pela barra fixa (date-nav ~56px + tabbar + subtab) */
-#desloc-registros { padding-bottom: 70px; }
 .date-nav .arrow {
   width: 48px; height: 36px; border-radius: 18px;
   background: var(--green); color: #000;
@@ -502,21 +499,22 @@
       <div class="chip warning" data-filter="radar" onclick="setFilter('radar')">⚠️ Multa</div>
     </div>
 
-    <div id="trips-list"></div>
-
-    <div id="empty-state" class="empty-state section-hidden">
-      <div class="ic">📈</div>
-      <div class="msg" id="empty-msg">Nenhuma viagem encontrada na data selecionada...</div>
-    </div>
-
+    <!-- Date nav fica DENTRO do conteúdo, sticky no topo abaixo do header.
+         Antes era fixed no rodapé e cobria os últimos cards em dias cheios. -->
     <div class="date-nav">
       <div class="arrow" id="nav-prev" onclick="navDay(-1)">‹</div>
       <div class="label" onclick="openCalendar()">
         <div class="date" id="nav-date">--</div>
         <div class="lbl" id="nav-lbl">--</div>
-        <div class="hint">📅 toque pra ver calendário</div>
       </div>
       <div class="arrow" id="nav-next" onclick="navDay(1)">›</div>
+    </div>
+
+    <div id="trips-list"></div>
+
+    <div id="empty-state" class="empty-state section-hidden">
+      <div class="ic">📈</div>
+      <div class="msg" id="empty-msg">Nenhuma viagem encontrada na data selecionada...</div>
     </div>
   </div>
 

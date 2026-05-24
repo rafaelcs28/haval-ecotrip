@@ -2204,21 +2204,39 @@ async function setChargeLimit(pct) {
 
 // Recebe ack do APK via WS (formato: { result: "ok:80" } ou { result: "error: ..." })
 window._onChargeLimitResult = function(data) {
-  if (_chargeLimitPending === null) return;  // não tem pedido em andamento
+  if (_chargeLimitPending === null) return;
   const raw = String(data?.result || '');
   if (raw.startsWith('ok:')) {
-    const applied = parseInt(raw.slice(3));
+    // "ok:80" ou "ok:90 (solicitado 80% — carro aplicou 90%)"
+    const m = raw.match(/^ok:(\d+)/);
+    const applied = m ? parseInt(m[1]) : null;
     if (applied === _chargeLimitPending) {
       showToast('✓ Limite aplicado: ' + applied + '%', 'ok');
+    } else if (applied) {
+      // Carro aplicou valor diferente — mostra com clareza, MANTÉM o chip do
+      // solicitado por 4s antes de voltar pro estado real (user vê o que pediu).
+      showToast('⚠ Carro aplicou ' + applied + '% (você pediu ' + _chargeLimitPending + '%) · ECU pode ter recusado o pedido', 'err');
+      _clearChargePending();
+      setTimeout(() => _setChargeLimitUI(applied, null), 4000);
+      return;
     } else {
-      showToast('⚠ Carro aplicou ' + applied + '% (solicitado ' + _chargeLimitPending + '%)', 'err');
+      showToast('⚠ Resposta inesperada: ' + raw, 'err');
     }
     _clearChargePending();
-    _setChargeLimitUI(applied, null);
+    _setChargeLimitUI(applied || _chargeLimitPending, null);
   } else if (raw.startsWith('error')) {
+    // Erro do APK: mantém o chip clicado por 4s pra user ver o que pediu,
+    // depois volta pro estado real do carro.
     showToast('✗ ' + raw, 'err');
+    const requested = _chargeLimitPending;
     _clearChargePending();
-    _loadChargeLimit();
+    _setChargeLimitUI(requested, null);  // não pulsa, mas mantém visual
+    setTimeout(() => {
+      // Re-render do real (carro pode ter mudado nesse meio tempo)
+      if (_chargeLimitPending === null) {
+        _setChargeLimitUI(+(window.state?.charge_limit_pct) || 0, null);
+      }
+    }, 4000);
   }
 };
 

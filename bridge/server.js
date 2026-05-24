@@ -3661,12 +3661,14 @@ app.post('/api/admin/reprocess-places', async (req, res) => {
   _reprocessStatus = { kind, total, done: 0, trips_updated: 0, charges_updated: 0, errors: 0, current: '' };
   res.json({ ok: true, total, kind });
   // Resolve um lado: prioridade pra knownPlace (autoMatchLocation, raio 200m);
-  // só cai no Nominatim quando o GPS está fora de qualquer KP.
+  // só cai no Nominatim quando o GPS está fora de qualquer KP. SEMPRE retorna
+  // o geocode (mesmo quando é KP) pra que a regra "mesma cidade" funcione no
+  // OUTRO lado da viagem.
   async function _resolveSide(lat, lng) {
     const kp = autoMatchLocation(lat, lng);
-    if (kp?.name) return { name: kp.name, from_kp: true, geo: null };
     const geo = await _reverseGeocode(lat, lng);
     await new Promise(r => setTimeout(r, 1100));
+    if (kp?.name) return { name: kp.name, from_kp: true, geo };
     return { name: null, from_kp: false, geo };
   }
   // Roda em background

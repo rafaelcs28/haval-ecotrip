@@ -20,3 +20,19 @@ preview.html
 mockups/
 bridge/vapid_keys.json
 bridge/push_subscriptions.json
+
+# Secrets e estado runtime do bridge — nunca commitar
+.env
+bridge/.env
+bridge/.env.*
+bridge/*.bak
+bridge/*.bak.*
+bridge/state.json.bak*
+bridge/diag_state.json
+bridge/diag_log.json
+bridge/notif_prefs_by_device.json
+bridge/notif_history.json
+bridge/auth.json
+bridge/cert.pem
+bridge/key.pem
+bridge/*.pem
