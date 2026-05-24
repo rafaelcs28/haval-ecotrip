@@ -1295,7 +1295,11 @@ function _updateHfMode() {
 function _startHfHeartbeat() {
   if (_hfHeartbeatTimer) return;
   _updateHfMode();
-  _hfHeartbeatTimer = setInterval(_updateHfMode, 5000);
+  // 3s (antes 5s) — iOS Safari faz throttle de timers em foreground às vezes,
+  // e o watchdog do bridge expira em 15s. Margem maior evita HF desligar
+  // sozinho durante uso ativo (sintoma: Drive "congela" alguns segundos
+  // depois volta).
+  _hfHeartbeatTimer = setInterval(_updateHfMode, 3000);
 }
 
 document.addEventListener('visibilitychange', () => {

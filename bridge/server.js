@@ -3983,7 +3983,10 @@ const HVAC_CONTROLS = {
 // publica '0' automaticamente — evita ficar travado em HF se o PWA crashar.
 let _hfModeActive = false;
 let _hfLastBeatMs = 0;
-const HF_HEARTBEAT_TIMEOUT_MS = 10_000;
+// 15s (antes 10s): PWA bate heartbeat a cada 3s. Margem grande pra cobrir
+// throttle de timer do iOS Safari e variação de rede. Sintoma do timeout
+// curto era Drive "congelar" alguns segundos enquanto HF desligava sozinho.
+const HF_HEARTBEAT_TIMEOUT_MS = 15_000;
 function _publishHfMode(active) {
   if (!mqttClient?.connected) return;
   mqttClient.publish(`${MQTT_PREFIX}/cmd/hf_mode`, active ? '1' : '0', { qos: 1, retain: false });
