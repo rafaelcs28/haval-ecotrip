@@ -404,8 +404,9 @@
     </div>
     <div class="field-group">
       <div class="group-ti">Login biométrico (Face ID / Touch ID / fingerprint)</div>
+      <div id="passkey-status" style="font-size:11px;padding:8px 12px;border-radius:8px;margin-bottom:10px;display:none"></div>
       <div id="passkeys-list" style="display:flex;flex-direction:column;gap:6px"></div>
-      <button class="btn secondary" onclick="addPasskey()" style="margin-top:10px">+ Cadastrar este dispositivo</button>
+      <button class="btn secondary" onclick="addPasskey()" id="passkey-add-btn" style="margin-top:10px">+ Cadastrar este dispositivo</button>
       <div class="hint" style="font-size:10px;color:var(--muted);padding:0 4px;margin-top:6px">Depois de cadastrado, o login nesse dispositivo pode ser feito direto pela biometria. Senha+2FA continuam como fallback.</div>
     </div>
   </div>
@@ -1111,7 +1112,66 @@ async function _loadSecurity() {
   _loadPasskeys();
 }
 
+// Detecta o tipo provável de biometria do device pelo User-Agent + checa se
+// o navegador tem WebAuthn habilitado. Não há API que diga "Face ID" vs
+// "Touch ID" — usamos heurística por modelo (iPhone X+ sem botão Home → Face ID).
+function _detectBiometricLabel() {
+  const ua = navigator.userAgent || '';
+  const isIOS = /iPhone|iPad|iPod/.test(ua);
+  const isMac = /Macintosh/.test(ua) && !isIOS;
+  const isAndroid = /Android/.test(ua);
+  if (isIOS) {
+    // iPad Pro 11"/12.9" 2018+ tem Face ID; resto tem Touch ID. Não dá pra
+    // saber exato, então generaliza pra "Face ID / Touch ID".
+    if (/iPad/.test(ua)) return 'Face ID / Touch ID';
+    // iPhone X (modelo "iPhone10,3"/"iPhone10,6") em diante = Face ID.
+    // userAgent não traz modelo; usamos screen size como proxy (notch ≥ 812).
+    if (window.screen && Math.max(window.screen.width, window.screen.height) >= 812) {
+      return 'Face ID';
+    }
+    return 'Touch ID';
+  }
+  if (isMac) return 'Touch ID';
+  if (isAndroid) return 'Biometria do dispositivo';
+  return 'Biometria';
+}
+
+async function _updatePasskeyStatus() {
+  const el = document.getElementById('passkey-status');
+  const btn = document.getElementById('passkey-add-btn');
+  if (!el) return;
+  if (!window.PublicKeyCredential || !window.SimpleWebAuthnBrowser) {
+    el.style.display = '';
+    el.style.background = 'rgba(248,113,113,.10)';
+    el.style.border = '1px solid rgba(248,113,113,.3)';
+    el.style.color = 'var(--red)';
+    el.textContent = '⚠ Este navegador não suporta WebAuthn';
+    if (btn) btn.disabled = true;
+    return;
+  }
+  let available = false;
+  try {
+    available = await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable?.();
+  } catch (_) {}
+  const label = _detectBiometricLabel();
+  el.style.display = '';
+  if (available) {
+    el.style.background = 'rgba(34,197,94,.12)';
+    el.style.border = '1px solid rgba(34,197,94,.3)';
+    el.style.color = 'var(--green)';
+    el.textContent = `✓ ${label} disponível neste dispositivo`;
+    if (btn) btn.disabled = false;
+  } else {
+    el.style.background = 'rgba(234,179,8,.12)';
+    el.style.border = '1px solid rgba(234,179,8,.3)';
+    el.style.color = 'var(--yellow)';
+    el.textContent = `⚠ ${label} não detectado — habilite a tela de bloqueio do dispositivo`;
+    if (btn) btn.disabled = true;
+  }
+}
+
 async function _loadPasskeys() {
+  _updatePasskeyStatus();
   const tk = localStorage.getItem('bridge_token');
   const el = document.getElementById('passkeys-list');
   if (!tk || !el) return;
