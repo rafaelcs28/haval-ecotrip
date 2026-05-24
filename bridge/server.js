@@ -3765,6 +3765,46 @@ app.get('/api/admin/reprocess-places/status', (_req, res) => {
   res.json({ running: _reprocessRunning, status: _reprocessStatus });
 });
 
+// POST /api/admin/bulk-set-cost-by-location  { location, per_kwh, use_charger? }
+// Aplica preço unitário fixo (R$/kWh) em todas as recargas de um local.
+// Total = per_kwh * (charger_kwh quando use_charger=true e disponível,
+// senão energy_kwh do carro). Útil pra retroceder histórico em locais com
+// tarifa fixa conhecida.
+app.post('/api/admin/bulk-set-cost-by-location', (req, res) => {
+  if (!adminCheckToken(req, res)) return;
+  const location = (req.body?.location || '').toString().trim();
+  const perKwh   = parseFloat(req.body?.per_kwh);
+  const useCharger = req.body?.use_charger !== false;  // default true
+  if (!location)          return res.status(400).json({ error: 'location obrigatório' });
+  if (!(perKwh >= 0))     return res.status(400).json({ error: 'per_kwh inválido' });
+  let updated = 0, skipped = 0;
+  const details = [];
+  for (const c of chargesArr) {
+    if (c.location_name !== location) continue;
+    const kwh = useCharger && c.charger_kwh > 0 ? c.charger_kwh
+              : c.energy_kwh > 0 ? c.energy_kwh
+              : 0;
+    if (kwh <= 0) {
+      skipped++;
+      details.push({ ts: c.timestamp_ms, action: 'skipped', reason: 'sem kWh' });
+      continue;
+    }
+    const total = +(kwh * perKwh).toFixed(2);
+    c.cost_override = perKwh === 0
+      ? { total: 0, perKwh: 0, free: true }
+      : { total, perKwh: perKwh };
+    c._updated_ms = Date.now();
+    updated++;
+    details.push({ ts: c.timestamp_ms, action: 'updated', kwh, total });
+  }
+  if (updated > 0) {
+    scheduleChargesFlush();
+    recomputeBatteryAvgPrice();
+  }
+  console.log(`[bulk-cost] "${location}" @ R$ ${perKwh}/kWh: ${updated} atualizadas, ${skipped} puladas`);
+  res.json({ ok: true, location, per_kwh: perKwh, updated, skipped, details });
+});
+
 // POST /api/admin/recompute-trip-costs — recalcula o custo de TODAS as viagens
 // usando o preço médio que valia NO MOMENTO de cada viagem (não o atual).
 // body: { dry_run?: bool } — dry_run só conta quantas seriam afetadas
