@@ -567,6 +567,22 @@ class MqttManager private constructor() {
             }
             drainQueues(c)
             AppLogger.i(TAG, "MQTT conectado: $serverUri")
+            // Leitura inicial de charge_soc_limit ~7s após conectar — garante
+            // sincronia inicial mesmo se o user mudou o valor direto no carro
+            // enquanto o app estava parado (evento perdido).
+            executor.submit {
+                Thread.sleep(7_000)
+                try {
+                    val readBack = CarDataManager.getInstance().fetchCurrent("car.ev_setting.charge_soc_limit_config")?.trim()
+                    val carVal = readBack?.toIntOrNull()
+                    if (carVal != null) {
+                        AppLogger.i(TAG, "Leitura inicial charge_limit: carVal=$carVal — sincronizando")
+                        syncChargeLimitFromCar(carVal)
+                    }
+                } catch (e: Exception) {
+                    AppLogger.w(TAG, "Leitura inicial charge_limit falhou: ${e.message}")
+                }
+            }
         } catch (e: Exception) {
             consecutiveFailures++
             lastErrorMessage = e.message?.take(120) ?: "Erro desconhecido"
