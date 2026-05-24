@@ -384,6 +384,54 @@ class MqttManager private constructor() {
         return caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
     }
 
+    /** Coleta IP local v4 do head unit + tipo de conexão pra publicar no bridge. */
+    private fun collectNetworkInfo(): JSONObject {
+        val info = JSONObject()
+        try {
+            val ctx = appContext ?: return info
+            val cm  = ctx.getSystemService(ConnectivityManager::class.java) ?: return info
+            val net = cm.activeNetwork ?: return info
+            val caps = cm.getNetworkCapabilities(net)
+            val lp   = cm.getLinkProperties(net)
+            // Tipo
+            val type = when {
+                caps?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true     -> "wifi"
+                caps?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true -> "cellular"
+                caps?.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) == true -> "ethernet"
+                else                                                                -> "other"
+            }
+            info.put("type", type)
+            // IPv4 (prefere)
+            val ipv4 = lp?.linkAddresses?.firstOrNull {
+                it.address.hostAddress?.contains('.') == true && !it.address.isLoopbackAddress
+            }?.address?.hostAddress
+            if (ipv4 != null) info.put("ip", ipv4)
+            // Velocidade
+            if (caps != null) {
+                val down = caps.linkDownstreamBandwidthKbps
+                if (down > 0) info.put("downlink_kbps", down)
+            }
+            info.put("ts", System.currentTimeMillis())
+        } catch (e: Exception) {
+            AppLogger.w(TAG, "collectNetworkInfo: ${e.message}")
+        }
+        return info
+    }
+
+    /** Publica info de rede do carro em `network/info` (retained) — o PWA lê via bridge. */
+    private fun publishNetworkInfo() {
+        val c = client ?: return
+        if (!c.isConnected) return
+        try {
+            val info = collectNetworkInfo()
+            if (info.length() > 0) {
+                c.publish("$prefix/network/info", info.toString().toByteArray(), 1, true)
+            }
+        } catch (e: Exception) {
+            AppLogger.w(TAG, "publishNetworkInfo falhou: ${e.message}")
+        }
+    }
+
     fun saveAndApply() {
         prefs.edit()
             .putBoolean(SharedPreferencesKeys.MQTT_ENABLED,                     enabled)
@@ -567,6 +615,10 @@ class MqttManager private constructor() {
             }
             drainQueues(c)
             AppLogger.i(TAG, "MQTT conectado: $serverUri")
+            // Publica info de rede do head unit (IP local v4 + tipo) pra PWA
+            // mostrar no modal de rede. Retained — fica disponível mesmo se
+            // carro estiver dormindo.
+            try { publishNetworkInfo() } catch (_: Exception) {}
             // Leitura inicial de charge_soc_limit ~7s após conectar — garante
             // sincronia inicial mesmo se o user mudou o valor direto no carro
             // enquanto o app estava parado (evento perdido).

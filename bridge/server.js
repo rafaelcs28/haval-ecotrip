@@ -518,6 +518,7 @@ function addEvent(type, label, ts) {
 
 const state = {
   car_online:        false,
+  car_network:       null,   // { type, ip, downlink_kbps, ts } publicado pelo APK
   bridge_online:     true,
   last_update_ms:    null,
   car_last_update:   null,
@@ -4841,6 +4842,19 @@ function applyMqttMessage(key, value, isRetained = false) {
           'charge_ending'
         );
       }
+      break;
+    }
+    case 'network/info': {
+      // APK publica IP/tipo de rede do head unit. Salva no state pra PWA usar.
+      try {
+        const o = JSON.parse(value);
+        state.car_network = {
+          type:          o.type || null,
+          ip:            o.ip || null,
+          downlink_kbps: o.downlink_kbps || null,
+          ts:            o.ts || Date.now(),
+        };
+      } catch (_) {}
       break;
     }
     case 'ha/charge_limit/state': {
