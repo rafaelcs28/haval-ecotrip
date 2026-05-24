@@ -1,0 +1,65 @@
+# XcodeGen spec — gera HavalEcoTrip.xcodeproj a partir desse arquivo.
+# Roda: `cd ios-app && xcodegen generate`
+name: HavalEcoTrip
+options:
+  bundleIdPrefix: br.com.consorciolimpagyn
+  deploymentTarget:
+    iOS: "16.1"           # mínimo pra ActivityKit
+  createIntermediateGroups: true
+
+settings:
+  base:
+    DEVELOPMENT_TEAM: ""                 # preenche depois do Sign In Apple ID
+    CODE_SIGN_STYLE: Automatic
+    CODE_SIGN_IDENTITY: "Apple Development"
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    SWIFT_VERSION: "5.10"
+
+targets:
+  HavalEcoTrip:
+    type: application
+    platform: iOS
+    sources:
+      - HavalEcoTrip
+      # ChargeActivityAttributes precisa estar nos DOIS targets — app referencia
+      # o tipo, widget também. Sem duplicação física: mesmo arquivo, duas memberships.
+      - path: HavalEcoTripWidget/ChargeActivityAttributes.swift
+    info:
+      path: HavalEcoTrip/Info.plist
+      properties:
+        CFBundleDisplayName: "Haval EcoTrip"
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        UILaunchScreen: {}
+        NSSupportsLiveActivities: true
+        NSSupportsLiveActivitiesFrequentUpdates: true
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        ITSAppUsesNonExemptEncryption: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: br.com.consorciolimpagyn.havalecotrip
+        TARGETED_DEVICE_FAMILY: "1,2"      # iPhone + iPad
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+    dependencies:
+      - target: HavalEcoTripWidget
+
+  HavalEcoTripWidget:
+    type: app-extension
+    platform: iOS
+    sources:
+      - HavalEcoTripWidget
+    info:
+      path: HavalEcoTripWidget/Info.plist
+      properties:
+        CFBundleDisplayName: "Haval EcoTrip Widget"
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: br.com.consorciolimpagyn.havalecotrip.HavalEcoTripWidget
+        TARGETED_DEVICE_FAMILY: "1,2"
+        INFOPLIST_KEY_NSHumanReadableCopyright: ""

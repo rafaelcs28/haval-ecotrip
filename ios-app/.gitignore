@@ -1,0 +1,11 @@
+# Xcode user-specific
+xcuserdata/
+*.xcuserstate
+DerivedData/
+build/
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# AppCode/JetBrains
+.idea/

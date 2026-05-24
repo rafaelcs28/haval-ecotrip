@@ -7,97 +7,54 @@ no lock screen e no Dynamic Island.
 O bridge (Mac mini) atualiza a Live Activity via **APNs HTTP/2 push direto**
 — o app pode estar morto, basta o iPhone estar online.
 
-Tudo grátis: free Apple Developer account, Xcode no Mac mini, AltStore pra
-reinstalar automaticamente quando o sideload expirar em 7 dias.
+Tudo grátis: Apple ID free, Xcode (gratuito), AltStore pra reinstalar
+automaticamente quando o sideload expirar em 7 dias.
 
 ---
 
-## Estrutura dos arquivos neste diretório
+## Pra você (o amador): o que precisa fazer manualmente
 
-```
-ios-app/
-├── HavalEcoTrip/                           # app principal (target iOS)
-│   ├── HavalEcoTripApp.swift
-│   ├── ContentView.swift
-│   ├── Settings.swift
-│   ├── ActivityManager.swift
-│   └── Info-additions.plist               # chaves pra somar no Info.plist
-└── HavalEcoTripWidget/                     # widget extension target
-    ├── ChargeActivityAttributes.swift     # SHARED com o app — marcar ambos
-    ├── ChargeActivityLiveActivity.swift   # layouts lock screen + Dynamic Island
-    └── HavalEcoTripWidgetBundle.swift     # @main do widget bundle
-```
+> Só essas etapas exigem suas mãos. O projeto Xcode JÁ está pronto.
 
----
+### 1. Instalar o Xcode (Mac App Store)
 
-## 1. Criar o projeto no Xcode
+1. Abre o **App Store** no Mac mini
+2. Busca por **Xcode** → **Get** / **Instalar** (~10 GB, demora 30-60 min)
+3. Depois de instalar, abre o Xcode uma vez pra aceitar os termos
+4. No terminal, roda:
+   ```
+   sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+   sudo xcodebuild -license accept
+   ```
 
-1. **Abre Xcode** no Mac mini → "Create New Project…"
-2. **iOS → App** → Next
-3. Configura:
-   - Product Name: `HavalEcoTrip`
-   - Team: a sua Apple ID free (vai aparecer depois de fazer Sign In na
-     aba Xcode → Settings → Accounts)
-   - Bundle Identifier: `br.com.consorciolimpagyn.havalecotrip` (qualquer
-     reverse-DNS único — só não pode bater com app na App Store)
-   - Interface: **SwiftUI**
-   - Language: **Swift**
-   - Storage / Tests: desmarcados
-4. Salva em `~/Developer/HavalEcoTrip` (qualquer lugar fora do repo).
-5. **Adiciona o target da Widget Extension:**
-   - File → New → Target… → iOS → **Widget Extension**
-   - Product Name: `HavalEcoTripWidget`
-   - **Marca** "Include Live Activity"
-   - Bundle ID vai virar `br.com.consorciolimpagyn.havalecotrip.HavalEcoTripWidget`
-6. Apaga os arquivos boilerplate que o Xcode criou (`ContentView.swift`,
-   `HavalEcoTripApp.swift`, e tudo dentro de `HavalEcoTripWidget/`) — vamos
-   substituir pelos nossos.
+### 2. Logar a Apple ID no Xcode
 
-## 2. Copiar os arquivos deste repo
+1. Abre o Xcode → **Settings…** → **Accounts** (Cmd+,)
+2. Toca em **+** → **Apple ID** → digita seu Apple ID e senha
+3. Espera aparecer "Personal Team" na lista — é a free dev account
 
-Arrasta os arquivos `.swift` daqui pros targets correspondentes no Xcode:
+### 3. Gerar AuthKey APNs (grátis)
 
-- `HavalEcoTrip/*.swift` → target **HavalEcoTrip** (marcar Target Membership)
-- `HavalEcoTripWidget/HavalEcoTripWidgetBundle.swift` → target
-  **HavalEcoTripWidget**
-- `HavalEcoTripWidget/ChargeActivityLiveActivity.swift` → target
-  **HavalEcoTripWidget**
-- `HavalEcoTripWidget/ChargeActivityAttributes.swift` → **AMBOS** os targets
-  (Target Membership: ✅ HavalEcoTrip ✅ HavalEcoTripWidget)
-
-## 3. Editar o `Info.plist` do app principal
-
-Abre `Info.plist` do target HavalEcoTrip e adiciona estas duas chaves
-(copia do arquivo `Info-additions.plist`):
-
-```xml
-<key>NSSupportsLiveActivities</key>
-<true/>
-<key>NSSupportsLiveActivitiesFrequentUpdates</key>
-<true/>
-```
-
-Sem isso, `Activity.request()` joga `activitiesEnabled is false`.
-
-## 4. Criar o AuthKey APNs (grátis)
-
-> A Apple permite gerar **AuthKey APNs** com qualquer Apple ID, sem precisar
-> da assinatura paga de US$ 99/ano.
+> Apple permite gerar Authentication Key APNs com qualquer Apple ID, sem
+> precisar da assinatura paga.
 
 1. Abre <https://developer.apple.com/account/resources/authkeys/list>
-2. Faz Sign In com sua Apple ID
+2. Sign In com sua Apple ID
 3. Toca em **+** (criar key)
 4. Marca **Apple Push Notifications service (APNs)**
-5. Nome: `EcoTrip APNs` → Continue
-6. Baixa o arquivo **`AuthKey_XXXXXXXXXX.p8`** (XXXXXXXXXX = Key ID, 10 chars)
-7. Anota o **Key ID** e o **Team ID** (canto superior direito da página)
-8. Copia o `.p8` pro Mac mini, em `/Users/consorciolimpagyn/haval-ecotrip/bridge/`
+5. Nome: `EcoTrip APNs` → Continue → Register
+6. Baixa o arquivo `AuthKey_XXXXXXXXXX.p8` (XXXXXXXXXX = Key ID, 10 chars)
+7. Anota o **Key ID** (na página) e o **Team ID** (canto superior direito)
+8. Move o `.p8` pra `/Users/consorciolimpagyn/haval-ecotrip/bridge/`:
+   ```
+   mv ~/Downloads/AuthKey_*.p8 /Users/consorciolimpagyn/haval-ecotrip/bridge/
+   ```
 
-> ⚠ O `.p8` só pode ser baixado uma vez. Guarda em backup.
+> ⚠ O `.p8` só pode ser baixado uma vez. Guarda backup.
 
-## 5. Configurar o bridge
+### 4. Configurar o bridge com APNs
 
-Edita `bridge/.env` (cria se não existir):
+Edita `/Users/consorciolimpagyn/haval-ecotrip/bridge/.env`:
 
 ```
 APNS_ENABLED=true
@@ -108,46 +65,103 @@ APNS_KEY_P8_PATH=/Users/consorciolimpagyn/haval-ecotrip/bridge/AuthKey_AAAA1111B
 APNS_ENV=sandbox
 ```
 
-> **Importante**: free dev account = sempre `APNS_ENV=sandbox`. Sandbox é
-> totalmente funcional; só não distribui pela App Store. Se um dia pagar a
-> assinatura, muda pra `production` (a mesma key funciona nos dois).
+(Bundle ID deve bater com o do projeto Xcode — já é esse por padrão.)
 
-Reinicia o bridge:
-
+Reinicia:
 ```
 pm2 restart ecotrip-bridge
 pm2 logs ecotrip-bridge --lines 5
-# deve aparecer: [apns] pronto · team=… bundle=… env=sandbox tokens=0
+# espera ver: [apns] pronto · team=… bundle=… env=sandbox tokens=0
 ```
 
-## 6. Build e sideload no iPhone
+### 5. Abrir o projeto no Xcode
 
-1. Conecta o iPhone no Mac via cabo (Trust This Computer)
-2. No Xcode, no menu de devices (top bar), seleciona o seu iPhone
-3. Cmd+R pra fazer build + install
-4. Primeira vez: iPhone vai pedir confirmação em **Ajustes → Geral →
-   Gerenciamento de VPN e Dispositivos → seu Apple ID → Confiar**
-5. App abre. Preenche:
+```
+open /Users/consorciolimpagyn/haval-ecotrip/ios-app/HavalEcoTrip.xcodeproj
+```
+
+No Xcode:
+
+1. Clica no nome do projeto (raiz, ícone azul) → aba **Signing & Capabilities**
+2. Pro target **HavalEcoTrip**: marca **Automatically manage signing** e
+   seleciona seu **Team** (vai aparecer "Your Name (Personal Team)")
+3. Pro target **HavalEcoTripWidget**: mesma coisa
+4. Se aparecer erro "Failed to register bundle identifier", muda o
+   bundle ID pra outro reverse-DNS único (ex:
+   `br.com.consorciolimpagyn.havalecotrip2`). E atualiza no `.env` também.
+
+### 6. Conectar o iPhone e Run
+
+1. Conecta o iPhone no Mac via cabo
+2. iPhone vai pedir "Trust This Computer" — confirma
+3. No Xcode, no menu de devices (top bar), seleciona seu iPhone
+4. **Cmd+R** pra fazer build + install
+5. **Primeiro install só:** no iPhone vai aparecer "Untrusted Developer".
+   Ajustes → Geral → Gerenciamento de VPN e Dispositivos → seu Apple ID
+   → **Confiar**
+6. Abre o app no iPhone, preenche:
    - **URL**: `https://mac-mini.tailacc6e7.ts.net`
-   - **Token**: pega do PWA — abre <https://mac-mini.tailacc6e7.ts.net>
-     no Safari, ativa "Inspecionar Web" no Mac, console: `localStorage.bridge_token`
-6. Toca em **Iniciar Live Activity**
-7. Bloqueia o iPhone — a activity deve aparecer no lock screen
-8. Quando o carro começar a carregar, os dados começam a chegar via APNs.
+   - **Token**: pega do PWA (abre o PWA no Safari iPhone, ativa Web
+     Inspector pelo Mac em Safari → Develop → seu iPhone → console:
+     `localStorage.bridge_token`)
+7. Toca **Iniciar Live Activity**
+8. Bloqueia o iPhone — a activity deve aparecer no lock screen
+9. Quando o carro carregar, os updates começam a chegar via APNs.
 
-## 7. Renovação automática via AltStore (opcional mas recomendado)
+### 7. Renovação automática via AltStore (opcional)
 
-App sideloaded com free account **expira em 7 dias**. Pra reinstalar
-automaticamente:
+Free sideload expira em 7 dias. AltStore reassina automaticamente quando
+o iPhone está na mesma WiFi do Mac:
 
-1. Baixa **AltStore**: <https://altstore.io>
-2. Instala o AltServer no Mac mini
-3. Roda o AltServer em background (login automático)
-4. Pareia o iPhone com o AltStore (Wi-Fi sync)
-5. AltStore reassina o app a cada 7 dias quando o iPhone está na mesma
-   rede do Mac. Sem fazer nada.
+1. <https://altstore.io> → baixa AltServer pro Mac
+2. Instala, segue o wizard de pareamento com o iPhone
+3. Roda AltServer em background no Mac mini
+4. Dali pra frente: a cada 7 dias o app é reassinado sozinho
 
-Alternativa manual: simplesmente abrir o Xcode e fazer Cmd+R toda semana.
+Alternativa: simplesmente abrir Xcode e Cmd+R toda semana.
+
+---
+
+## O que JÁ está pronto no projeto
+
+```
+ios-app/
+├── HavalEcoTrip.xcodeproj/         # ← projeto Xcode pronto (gerado por XcodeGen)
+├── project.yml                     # spec do XcodeGen (regen com: xcodegen generate)
+├── HavalEcoTrip/                   # target app principal
+│   ├── HavalEcoTripApp.swift
+│   ├── ContentView.swift
+│   ├── Settings.swift
+│   ├── ActivityManager.swift
+│   └── Info.plist                  # ← gerado, já tem NSSupportsLiveActivities
+└── HavalEcoTripWidget/             # target Widget Extension
+    ├── ChargeActivityAttributes.swift   # shared com app (membership dupla configurada)
+    ├── ChargeActivityLiveActivity.swift # layouts lock screen + Dynamic Island
+    ├── HavalEcoTripWidgetBundle.swift
+    └── Info.plist
+```
+
+Configuração já incluída:
+- Bundle ID: `br.com.consorciolimpagyn.havalecotrip`
+- Bundle ID widget: `br.com.consorciolimpagyn.havalecotrip.HavalEcoTripWidget`
+- Deployment target: iOS 16.1 (mínimo pra ActivityKit)
+- `NSSupportsLiveActivities` no Info.plist
+- ChargeActivityAttributes nos DOIS targets (membership configurada)
+- Bridge endpoints `/api/activity/start` e `/api/activity/stop`
+- Bridge `apns_live_activity.js` (cliente APNs HTTP/2 zero-deps)
+
+## Re-gerar o projeto Xcode (se editar Swift fora do Xcode)
+
+Se você editar arquivos `.swift` pelo VSCode ou similar e quiser que o Xcode
+reconheça mudanças estruturais (arquivos novos, target membership):
+
+```
+brew install xcodegen     # uma vez
+cd ios-app
+xcodegen generate
+```
+
+O `.xcodeproj` é regenerado preservando settings de Signing.
 
 ---
 
@@ -168,7 +182,7 @@ Alternativa manual: simplesmente abrir o Xcode e fazer Cmd+R toda semana.
    ↓
 7. sendChargeLiveUpdate() faz:
    - sendPush (Web Push pro PWA — já existia)
-   - apnsLive.pushUpdate (NOVO: APNs HTTP/2 pra todos os pushTokens)
+   - apnsLive.pushUpdate (APNs HTTP/2 pra todos os pushTokens iOS)
    ↓
 8. iPhone recebe push da Apple → atualiza Live Activity SEM acordar o app
    ↓
@@ -181,21 +195,19 @@ Alternativa manual: simplesmente abrir o Xcode e fazer Cmd+R toda semana.
 
 - **Free account sideload expira em 7 dias** — use AltStore
 - **iOS limita Live Activities a ~8h ativas** — Apple decide se prolonga
-  com base em recência de updates. Recargas de >8h podem ser cortadas;
-  o bridge envia um novo `event:end` quando termina pra encerrar limpo.
+  com base em recência de updates. Recargas longas podem ser cortadas;
+  bridge envia novo `event:end` quando termina pra encerrar limpo.
 - **Sandbox APNs pode ter latência ~5s** ocasionalmente
-- **iOS 16.1+ obrigatório** pra Live Activities; iOS 17+ pra Dynamic Island
-  no iPhone 14 Pro / 15 / 15 Pro
+- **iOS 16.1+ obrigatório**; iOS 17+ pra Dynamic Island no iPhone 14 Pro/15
 - **Múltiplos iPhones**: cada um chama `/api/activity/start` com seu
-  próprio pushToken. O bridge envia atualização pra todos.
+  pushToken. Bridge envia atualização pra todos.
 
 ## Troubleshooting
 
 | Sintoma | Causa provável | Fix |
 |---|---|---|
-| "Activity já ativa" mas nada na lock screen | Activity stale | Toque em "Parar" e depois "Iniciar" |
-| `activitiesEnabled is false` | Falta `NSSupportsLiveActivities` no Info.plist | Item 3 acima |
-| `[apns] HTTP 403 InvalidProviderToken` | Team ID, Key ID, ou .p8 errado | Confere `.env` e o caminho do `.p8` |
-| `[apns] HTTP 400 BadDeviceToken` | Sandbox/production mismatch | Free account = sandbox; muda `APNS_ENV` |
-| `[apns] HTTP 410 Unregistered` | Push token expirou (normal) | Bridge remove sozinho; user toca "Iniciar" de novo |
-| App não compila — "Live Activity requires…" | iOS deployment target < 16.1 | Project → Build Settings → iOS Deployment Target → 16.1 |
+| "Activity já ativa" mas nada na lock screen | Activity stale | Toca "Parar" e depois "Iniciar" |
+| Build erro: "Signing for HavalEcoTrip requires a development team" | Team não selecionado | Item 5 acima |
+| `[apns] HTTP 403 InvalidProviderToken` | Team ID, Key ID, ou .p8 errado | Confere `.env` |
+| `[apns] HTTP 400 BadDeviceToken` | Sandbox/production mismatch | Free = sandbox; muda `APNS_ENV` |
+| `[apns] HTTP 410 Unregistered` | Push token expirou (normal) | Bridge remove sozinho; toca "Iniciar" de novo |
