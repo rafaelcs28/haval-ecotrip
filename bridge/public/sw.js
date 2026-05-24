@@ -1,4 +1,4 @@
-const CACHE = 'ecotrip-v342';
+const CACHE = 'ecotrip-v343';
 
 // Tudo do shell do PWA (HTML/CSS/JS/icons/libs) — pre-cached no install.
 // Bumpar CACHE acima força o navegador a re-baixar tudo na próxima vez.
@@ -101,19 +101,26 @@ self.addEventListener('message', e => {
 });
 
 // ── Push Notifications ────────────────────────────────────────────────────────
+// O payload pode incluir tag/silent/renotify customizados pra "notification ao
+// vivo" durante recarga (mesmo tag = substitui a anterior, silent = atualiza
+// sem ding/vibração). Sem isso, cai no comportamento legado: tag fixa de carga
+// + renotify true.
 self.addEventListener('push', e => {
   let data = { title: 'EcoTrip', body: '' };
   try { data = e.data?.json() || data; } catch (_) {}
-  e.waitUntil(
-    self.registration.showNotification(data.title, {
-      body:      data.body,
-      icon:      '/icon-192.png',
-      badge:     '/icon-192.png',
-      tag:       'ecotrip-charge',
-      renotify:  true,
-      vibrate:   [200, 100, 200],
-    })
-  );
+  const tag      = data.tag      || 'ecotrip-charge';
+  const silent   = data.silent   === true;
+  const renotify = data.renotify !== undefined ? !!data.renotify : !silent;
+  const opts = {
+    body:     data.body,
+    icon:     '/icon-192.png',
+    badge:    '/icon-192.png',
+    tag,
+    renotify,
+    silent,
+  };
+  if (!silent) opts.vibrate = [200, 100, 200];
+  e.waitUntil(self.registration.showNotification(data.title, opts));
 });
 
 self.addEventListener('notificationclick', e => {

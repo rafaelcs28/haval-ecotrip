@@ -182,23 +182,31 @@ function saveNotifHistory() {
  * @param {string} [type]  - chave em NOTIF_DEFAULTS (ex: 'charge_start'). Quando
  *   passado, cada sub é avaliada contra as prefs do device dela (silencia
  *   subs cujo prefs[type] === false). Sem type, dispara pra todos.
+ * @param {object} [opts] - { tag, silent, renotify, skipHistory } — controla
+ *   o comportamento da notification (usado pra "live update" durante recarga,
+ *   onde queremos substituir a notif anterior em silêncio).
  */
-async function sendPush(title, body, type) {
-  // Registra no histórico sempre — mesmo sem subscribers (útil para debug)
+async function sendPush(title, body, type, opts = {}) {
+  // Registra no histórico — exceto se for live update silencioso (poluiria o feed)
   const ts = Date.now();
-  notifHistory.unshift({ ts, title, body, type: type || null });
-  if (notifHistory.length > NOTIF_HISTORY_MAX) notifHistory.length = NOTIF_HISTORY_MAX;
-  saveNotifHistory();
-
-  // Notifica clientes WebSocket sobre nova notificação (para badge)
-  state.notif_latest_ts = ts;
-  broadcast('update', { notif_latest_ts: ts });
+  if (!opts.skipHistory) {
+    notifHistory.unshift({ ts, title, body, type: type || null });
+    if (notifHistory.length > NOTIF_HISTORY_MAX) notifHistory.length = NOTIF_HISTORY_MAX;
+    saveNotifHistory();
+    // Notifica clientes WebSocket sobre nova notificação (para badge)
+    state.notif_latest_ts = ts;
+    broadcast('update', { notif_latest_ts: ts });
+  }
 
   if (!pushSubs.length) {
-    console.log(`Push "${title}" — sem subscribers registrados`);
+    if (!opts.skipHistory) console.log(`Push "${title}" — sem subscribers registrados`);
     return;
   }
-  const payload = JSON.stringify({ title, body });
+  const payloadObj = { title, body };
+  if (opts.tag)      payloadObj.tag      = opts.tag;
+  if (opts.silent)   payloadObj.silent   = true;
+  if (opts.renotify !== undefined) payloadObj.renotify = !!opts.renotify;
+  const payload = JSON.stringify(payloadObj);
   const dead = [];
   let sent = 0, skipped = 0;
   await Promise.all(pushSubs.map(async (sub, i) => {
@@ -234,6 +242,7 @@ const NOTIF_DEFAULTS = {
   charge_end:        false,
   charge_ending:     false,
   charge_ending_min: 5,
+  charge_live:       false,   // notif "ao vivo" na tela de bloqueio durante recarga
   door_open:         false,
   door_close:        false,
   trunk_open:        false,
@@ -4471,11 +4480,81 @@ function handleChargingStateTransition(value, isRetained) {
       if (durStr)     parts.push(durStr);
       if (avgKw)      parts.push(`${avgKw.toFixed(1)} kW médios`);
       sendPush('✅ Recarga concluída', parts.length ? parts.join(' · ') : 'Sessão encerrada', 'charge_end');
+      // Encerra a "live notification" (substitui pela final, agora com som)
+      stopChargeLiveTimer();
+      sendChargeLiveUpdate(true /* final */);
       chargeSessionStartMs = 0;
       state.charge_session_start_ms    = 0;
       state.charge_session_kwh_at_init = 0;
     }
   }
+  // Inicia o ciclo de "live notification" quando começa a carregar
+  if (value === 'Carregando' && !isRetained) startChargeLiveTimer();
+}
+
+// ── Live notification durante recarga ─────────────────────────────────────────
+// Notif fixa no lock screen com tag 'charge-live'. Atualiza a cada 60s ou
+// quando SOC/potência mudam significativamente. Cada update substitui a
+// notif anterior pelo `tag` igual. Silent = true → atualiza sem ding/vibrar.
+let _chargeLiveTimer = null;
+let _chargeLiveLast  = { soc: -1, pwr: -1, rem: -1, ts: 0 };
+const CHARGE_LIVE_TAG = 'charge-live';
+
+function _fmtChargeLiveBody(stateObj) {
+  const soc = +stateObj.soc_pct || 0;
+  const pwr = +stateObj.charge_power_kw || 0;
+  const rem = +stateObj.charge_remaining_min || 0;
+  const kwh = +stateObj.charge_session_kwh || 0;
+  const parts = [];
+  parts.push(`SOC ${soc.toFixed(0)}%`);
+  if (pwr > 0.1) parts.push(`${pwr.toFixed(1)} kW`);
+  if (kwh > 0.05) parts.push(`${kwh.toFixed(1)} kWh`);
+  if (rem > 0) {
+    const remStr = rem >= 60 ? `${Math.floor(rem/60)}h${(rem%60).toString().padStart(2,'0')}` : `${rem} min`;
+    parts.push(`~${remStr}`);
+  }
+  return parts.join(' · ');
+}
+
+function sendChargeLiveUpdate(isFinal = false) {
+  // Só dispara se o estado é Carregando (ou se é a notif final)
+  const charging = state.charging_state === 'Carregando';
+  if (!charging && !isFinal) return;
+  const soc = +state.soc_pct || 0;
+  const pwr = +state.charge_power_kw || 0;
+  const rem = +state.charge_remaining_min || 0;
+  const now = Date.now();
+  if (!isFinal) {
+    // Throttle: só envia se mudou SOC≥1%, potência≥0.5kW, ou 60s desde o último
+    const dSoc = Math.abs(soc - _chargeLiveLast.soc);
+    const dPwr = Math.abs(pwr - _chargeLiveLast.pwr);
+    const dT   = now - _chargeLiveLast.ts;
+    const significant = dSoc >= 1 || dPwr >= 0.5 || dT >= 60_000;
+    if (!significant) return;
+  }
+  _chargeLiveLast = { soc, pwr, rem, ts: now };
+  const title = isFinal ? '✅ Recarga concluída' : '⚡ Carregando…';
+  const body  = isFinal
+    ? _fmtChargeLiveBody(state) || 'Sessão encerrada'
+    : _fmtChargeLiveBody(state);
+  sendPush(title, body, 'charge_live', {
+    tag: CHARGE_LIVE_TAG,
+    silent: !isFinal,                // updates não fazem barulho; a final sim
+    renotify: isFinal,
+    skipHistory: !isFinal,           // updates ao vivo não entram na central de notif
+  });
+}
+
+function startChargeLiveTimer() {
+  if (_chargeLiveTimer) return;
+  _chargeLiveLast = { soc: -1, pwr: -1, rem: -1, ts: 0 };
+  // Aguarda 30s do início (potência estabilizar) antes da primeira live notif
+  setTimeout(() => sendChargeLiveUpdate(false), 30_000);
+  _chargeLiveTimer = setInterval(() => sendChargeLiveUpdate(false), 60_000);
+}
+
+function stopChargeLiveTimer() {
+  if (_chargeLiveTimer) { clearInterval(_chargeLiveTimer); _chargeLiveTimer = null; }
 }
 
 /**
