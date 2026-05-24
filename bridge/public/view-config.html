@@ -2339,30 +2339,46 @@ async function _loadMaint() {
 function _renderMaintList() {
   const el = document.getElementById('maint-list');
   if (!el) return;
-  const intervals = _maintLocal.intervals || [];
-  if (!intervals.length) {
+  // Usa `next[]` do server que já vem com TODOS os cálculos: status, remaining_km,
+  // remaining_days e — novo — eta_days_from_km (previsão baseada em km/dia médio
+  // dos últimos 30 dias). Fallback pro `intervals[]` puro se o server for antigo.
+  const items = (_maintLocal.next && _maintLocal.next.length)
+    ? _maintLocal.next
+    : (_maintLocal.intervals || []);
+  if (!items.length) {
     el.innerHTML = '<div style="font-size:11px;color:var(--muted);padding:12px;text-align:center">Nenhuma manutenção configurada</div>';
     return;
   }
-  const odo = +(window.state?.odometer_km) || 0;
-  el.innerHTML = intervals.map(it => {
-    const last = (_maintLocal.history || []).filter(h => h.type_id === it.id).sort((a,b) => (b.odometer_km||0) - (a.odometer_km||0))[0];
-    const baseOdo = last ? last.odometer_km : 0;
-    const nextAt = baseOdo + (it.every_km || 0);
-    const rem = it.every_km ? nextAt - odo : null;
+  const dailyKm = +_maintLocal.daily_km_avg || 0;
+  const _fmtBR  = (n) => Number(n).toLocaleString('pt-BR');
+  const _fmtDt  = (ms) => new Date(ms).toLocaleDateString('pt-BR', { day:'2-digit', month:'2-digit', year:'2-digit' });
+  el.innerHTML = items.map(it => {
+    const remKm = (typeof it.remaining_km === 'number') ? it.remaining_km : null;
     let status = 'OK', statusColor = 'var(--green)';
-    if (rem != null && rem <= 0) { status = '⚠ atrasada'; statusColor = 'var(--red)'; }
-    else if (rem != null && rem < 1000) { status = '⚠ urgente'; statusColor = 'var(--red)'; }
-    else if (rem != null && rem < 2000) { status = '⚠ próxima'; statusColor = 'var(--yellow)'; }
+    if (it.status === 'overdue')      { status = '⚠ atrasada';  statusColor = 'var(--red)'; }
+    else if (it.status === 'soon')    { status = '⚠ próxima';   statusColor = 'var(--yellow)'; }
     const icon = it.icon || '🔧';
+    // Linha de previsão dinâmica: agrega o que o server calculou
+    const lines = [];
+    if (it.every_km)     lines.push(`a cada ${_fmtBR(it.every_km)} km`);
+    if (it.every_months) lines.push(`${it.every_months} meses`);
+    if (remKm != null && Number.isFinite(remKm)) {
+      lines.push(remKm > 0 ? `próx em ${_fmtBR(Math.round(remKm))} km` : `${_fmtBR(Math.round(-remKm))} km atrasado`);
+    }
+    // Previsão dinâmica (km/dia médio)
+    let etaLine = '';
+    if (it.eta_date_ms_from_km && it.eta_days_from_km != null) {
+      const dias = it.eta_days_from_km;
+      etaLine = `🔮 vence em ~${_fmtBR(dias)} ${dias === 1 ? 'dia' : 'dias'} (${_fmtDt(it.eta_date_ms_from_km)})`;
+    } else if (it.next_date_ms && it.remaining_days != null && it.remaining_days > 0) {
+      // Fallback: previsão por meses quando km/dia não disponível
+      etaLine = `🔮 vence em ${it.remaining_days} ${it.remaining_days === 1 ? 'dia' : 'dias'} (${_fmtDt(it.next_date_ms)})`;
+    }
     return `<div style="display:flex;justify-content:space-between;align-items:center;padding:10px;background:rgba(255,255,255,.03);border-radius:10px;gap:8px">
       <div style="flex:1;min-width:0">
         <div style="font-size:13px;font-weight:700">${icon} ${it.label || it.id}</div>
-        <div style="font-size:10px;color:var(--muted);margin-top:2px">
-          ${it.every_km ? `a cada ${it.every_km.toLocaleString('pt-BR')} km` : ''}
-          ${it.every_months ? ` · ${it.every_months} meses` : ''}
-          ${rem != null ? ` · próx em ${Math.abs(Math.round(rem)).toLocaleString('pt-BR')} km` : ''}
-        </div>
+        <div style="font-size:10px;color:var(--muted);margin-top:2px">${lines.join(' · ')}</div>
+        ${etaLine ? `<div style="font-size:10px;color:var(--teal,#5eead4);margin-top:3px;font-weight:600">${etaLine}</div>` : ''}
       </div>
       <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">
         <span style="font-size:11px;color:${statusColor};font-weight:700">${status}</span>
@@ -2372,7 +2388,7 @@ function _renderMaintList() {
         </div>
       </div>
     </div>`;
-  }).join('');
+  }).join('') + (dailyKm > 0 ? `<div style="font-size:10px;color:var(--muted);text-align:center;padding:6px 0 0">Previsão baseada em ${dailyKm.toLocaleString('pt-BR')} km/dia (média dos últimos 30 dias)</div>` : '');
 }
 
 function _renderMaintHistory() {

@@ -1141,10 +1141,29 @@ setTimeout(_runDailyTelemetry, 30 * 1000);                       // 30s após bo
 setInterval(_runDailyTelemetry, 24 * 60 * 60 * 1000);            // 24h
 
 // Computa o status de cada intervalo (próxima manutenção, km restantes, severidade)
+// Média de km/dia dos últimos N dias (default 30) baseada em autotrips.
+// Cai pra 0 se não houver viagens — UI trata como "sem ETA".
+function avgDailyKm(daysWindow = 30) {
+  const now = Date.now();
+  const cutoff = now - daysWindow * 24 * 60 * 60 * 1000;
+  let totalKm = 0, firstMs = now;
+  for (const t of autoTripsArr) {
+    if ((t.startMs || 0) < cutoff) continue;
+    totalKm += +t.distKm || 0;
+    if ((t.startMs || 0) < firstMs) firstMs = t.startMs;
+  }
+  const spanMs = Math.max(now - firstMs, 24 * 60 * 60 * 1000); // mín 1 dia
+  return totalKm / (spanMs / (24 * 60 * 60 * 1000));
+}
+
 function computeMaintenance() {
   const odom = +state.odometer_km || 0;
   const now  = Date.now();
   const MS_PER_DAY = 24 * 60 * 60 * 1000;
+  // km/dia médio dos últimos 30 dias — usado pra prever DATA do próximo
+  // vencimento por km (até hoje só prevíamos por meses). Se < 1 km/dia,
+  // ignora a previsão (carro parado ou recém-instalado).
+  const dailyKm = avgDailyKm(30);
   return maintenance.intervals.map(itv => {
     // Pega registro mais recente pra essa manutenção — preferindo o de maior
     // odômetro (fallback: data mais recente se odômetro for igual/zero).
@@ -1186,6 +1205,15 @@ function computeMaintenance() {
     const order = { ok: 0, soon: 1, overdue: 2 };
     const status = order[kmStatus] >= order[timeStatus] ? kmStatus : timeStatus;
 
+    // ── ETA por km/dia: estima quantos dias ainda faltam pro vencimento
+    // por km, baseado no ritmo de uso recente. Se carro está parado
+    // (dailyKm < 1) ou intervalo não usa km, ignora.
+    let etaDaysFromKm = null, etaDateMsFromKm = null;
+    if (hasKm && dailyKm >= 1 && remainKm > 0 && Number.isFinite(remainKm)) {
+      etaDaysFromKm = Math.round(remainKm / dailyKm);
+      etaDateMsFromKm = now + etaDaysFromKm * MS_PER_DAY;
+    }
+
     return {
       ...itv,
       last_km: lastKm,
@@ -1198,6 +1226,8 @@ function computeMaintenance() {
       time_status: timeStatus,
       has_km: hasKm,
       has_time: hasTime,
+      eta_days_from_km: etaDaysFromKm,     // dias previstos até vencer pelo km/dia
+      eta_date_ms_from_km: etaDateMsFromKm, // timestamp previsto
       status,
     };
   });
@@ -1792,6 +1822,7 @@ app.get('/api/maintenance', (_req, res) => {
     history:   [...maintenance.history].sort((a, b) => (b.odometer_km || 0) - (a.odometer_km || 0)),
     next:      computeMaintenance(),
     current_odometer_km: +state.odometer_km || 0,
+    daily_km_avg: parseFloat(avgDailyKm(30).toFixed(1)),
   });
 });
 
