@@ -381,9 +381,10 @@ input { font-family: inherit; }
   </div>
 </div>
 
-<!-- @simplewebauthn/browser via CDN — usado pelo login biométrico e pela
-     seção Passkeys em Config. Inline UMD na window como SimpleWebAuthnBrowser. -->
-<script src="https://cdn.jsdelivr.net/npm/@simplewebauthn/browser@13.2.4/dist/bundle/index.umd.min.js"></script>
+<!-- @simplewebauthn/browser servido localmente — antes vinha do jsdelivr,
+     mas o Android Chrome bloqueava silenciosamente o CDN em PWA standalone.
+     Versão 13.3.0 (compatível com server-side 13.x). Expõe window.SimpleWebAuthnBrowser. -->
+<script src="/simplewebauthn-browser.umd.min.js"></script>
 
 <!-- ──────────────────────── HEADER ──────────────────────── -->
 <div class="head">

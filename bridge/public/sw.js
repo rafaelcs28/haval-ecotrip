@@ -1,4 +1,4 @@
-const CACHE = 'ecotrip-v341';
+const CACHE = 'ecotrip-v342';
 
 // Tudo do shell do PWA (HTML/CSS/JS/icons/libs) — pre-cached no install.
 // Bumpar CACHE acima força o navegador a re-baixar tudo na próxima vez.
@@ -16,6 +16,7 @@ const PRECACHE = [
   '/leaflet.css',
   '/leaflet.js',
   '/chart.min.js',
+  '/simplewebauthn-browser.umd.min.js',
   '/icon-192.png',
   '/icon-512.png',
 ];
