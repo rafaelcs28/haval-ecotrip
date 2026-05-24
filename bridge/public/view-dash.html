@@ -576,6 +576,7 @@
     <div class="hero-card green" id="hc-soc-card">
       <div class="lbl">
         Bateria<span id="hc-soc-tag"></span>
+        <span class="batt12-pill" id="hc-batt12-pill" style="display:none"><svg class="ic-batt12" viewBox="0 0 24 14" width="14" height="9" aria-hidden="true"><rect x="2" y="2" width="3" height="2" rx="0.5" fill="currentColor"/><rect x="9" y="2" width="3" height="2" rx="0.5" fill="currentColor"/><rect x="1" y="4" width="13" height="9" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.4"/><text x="7.5" y="11.2" text-anchor="middle" font-size="5.5" font-weight="900" fill="currentColor">12V</text></svg> <span id="hc-batt12-v">--</span>%</span>
       </div>
       <div class="val-row" style="gap:10px">
         <div class="lvl-batt">
@@ -607,10 +608,7 @@
       <div class="sub" id="hc-maint-sub">Toque pra detalhes</div>
     </div>
     <div class="hero-card muted" id="hc-other-card" onclick="openOtherDataModal()">
-      <div class="lbl">
-        🚗 Outros dados
-        <span class="batt12-pill" id="hc-batt12-pill-other" style="display:none"><svg class="ic-batt12" viewBox="0 0 24 14" width="14" height="9" aria-hidden="true"><rect x="2" y="2" width="3" height="2" rx="0.5" fill="currentColor"/><rect x="9" y="2" width="3" height="2" rx="0.5" fill="currentColor"/><rect x="1" y="4" width="13" height="9" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.4"/><text x="7.5" y="11.2" text-anchor="middle" font-size="5.5" font-weight="900" fill="currentColor">12V</text></svg> <span id="hc-batt12-v-other">--</span>%</span>
-      </div>
+      <div class="lbl">🚗 Outros dados</div>
       <div class="val-row"><span class="v" id="hc-other-v" style="font-size:18px;line-height:1.15">--</span></div>
       <div class="sub" id="hc-other-sub">Toque pra ver tudo</div>
       <div class="sub" id="hc-other-prices" style="font-size:10px;margin-top:1px;font-variant-numeric:tabular-nums;color:#94a3b8">--</div>
@@ -1166,10 +1164,7 @@ window.openMaintModal = function() {
   </div>`;
 };
 
-// ── Card "Outros dados": odômetro + preços médios (gas/kWh) + pill 12V.
-// 12V foi movido do card de Bateria SOC pra cá pra agrupar leituras
-// informativas de baixa frequência num só lugar e deixar o card de Bateria
-// mais limpo.
+// ── Card "Outros dados": odômetro + preços médios (gas/kWh).
 function renderOtherCard(s) {
   const v = document.getElementById('hc-other-v');
   const sub = document.getElementById('hc-other-sub');
@@ -1462,9 +1457,9 @@ function render(s, kpData) {
     : 'AC off';
   _setStatusLine('climate', _tempStr ? `${_tempStr} · ${_acStr}` : _acStr, 'ok');
 
-  // ── Pill 12V dentro do card "Outros dados" (cor por faixa)
-  const pill12 = document.getElementById('hc-batt12-pill-other');
-  const v12El  = document.getElementById('hc-batt12-v-other');
+  // ── Pill 12V dentro do card de Bateria SOC (cor por faixa)
+  const pill12 = document.getElementById('hc-batt12-pill');
+  const v12El  = document.getElementById('hc-batt12-v');
   if (pill12 && v12El) {
     if (s.batt_12v_pct == null) {
       pill12.style.display = 'none';
