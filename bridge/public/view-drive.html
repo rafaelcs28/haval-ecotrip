@@ -2625,7 +2625,7 @@ const SNAPSHOT = {
   ]
 };
 
-let map = null, marker = null, routeLine = null;
+let map = null, marker = null, routeLine = null, _routeLineLen = 0;
 let _lastLat = 0, _lastLng = 0, _lastAddress = '';
 
 function _findKp(kpData, lat, lng) {
@@ -2706,12 +2706,34 @@ function render(s, kpData) {
       setTimeout(() => { try { map.invalidateSize(); } catch (_) {} }, 100);
       setTimeout(() => { try { map.invalidateSize(); } catch (_) {} }, 500);
     }
-    // Polyline do trajeto (samples até agora)
+    // Polyline do trajeto — não recria a cada render! Em HF mode (4x/s) com
+    // viagens longas (500+ pontos), o `remove()`+criar nova polyline gera
+    // reflow pesado no canvas Leaflet e trava a thread alguns segundos.
+    // Estratégia: cria 1x e usa addLatLng() pra pontos novos depois.
     if (Array.isArray(s.trip_route) && s.trip_route.length > 1) {
-      if (routeLine) { routeLine.remove(); }
-      routeLine = L.polyline(s.trip_route, {
-        color: '#22c55e', weight: 4, opacity: .85, lineCap: 'round', lineJoin: 'round',
-      }).addTo(map);
+      if (!routeLine) {
+        routeLine = L.polyline(s.trip_route, {
+          color: '#22c55e', weight: 4, opacity: .85, lineCap: 'round', lineJoin: 'round',
+        }).addTo(map);
+        _routeLineLen = s.trip_route.length;
+      } else if (s.trip_route.length !== _routeLineLen) {
+        // Pontos novos chegaram OU array foi truncado (reset de viagem)
+        if (s.trip_route.length > _routeLineLen && s.trip_route.length - _routeLineLen < 20) {
+          // Append incremental — bem mais barato que recriar
+          for (let i = _routeLineLen; i < s.trip_route.length; i++) {
+            routeLine.addLatLng(s.trip_route[i]);
+          }
+        } else {
+          // Reset (nova viagem) ou jump grande — recria
+          routeLine.setLatLngs(s.trip_route);
+        }
+        _routeLineLen = s.trip_route.length;
+      }
+    } else if (routeLine && (!Array.isArray(s.trip_route) || s.trip_route.length <= 1)) {
+      // Viagem terminou/resetou — limpa polyline
+      routeLine.remove();
+      routeLine = null;
+      _routeLineLen = 0;
     }
     if (marker) marker.setLatLng(pos);
     else marker = L.marker(pos, { icon: L.divIcon({
