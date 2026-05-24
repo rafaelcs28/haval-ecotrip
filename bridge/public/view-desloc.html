@@ -33775,12 +33775,18 @@ function showToast(msg) {
   showToast._t = setTimeout(() => t.classList.remove('show'), 2200);
 }
 
+// IMPORTANTE: scope ao container — view-posto também tem #action-sheet e
+// #action-body. getElementById global pega o da view-posto (vem primeiro no
+// DOM), então o popup era injetado lá dentro (display:none) e o user nunca
+// via nada. Mesmo padrão dos IDs st-* corrigido antes.
+function _deslocScope() { return document.getElementById('view-desloc') || document; }
 function openAction(body) {
-  document.getElementById('action-body').innerHTML = body;
-  document.getElementById('action-sheet').classList.add('show');
+  const s = _deslocScope();
+  s.querySelector('#action-body').innerHTML = body;
+  s.querySelector('#action-sheet').classList.add('show');
 }
 function closeAction() {
-  document.getElementById('action-sheet').classList.remove('show');
+  _deslocScope().querySelector('#action-sheet').classList.remove('show');
 }
 
 // ── 🗺 Mapa em tela cheia ────────────────────────────────────────────────
