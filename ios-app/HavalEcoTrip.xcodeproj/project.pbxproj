@@ -16,7 +16,6 @@
 		920A0533D20932EF36FC4D49 /* ChargeActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = C110A5E3EADD0B1D4DA52BE6 /* ChargeActivityAttributes.swift */; };
 		97D85BD3A8D8D549ABD6A944 /* ActivityManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9926C58E001CD8511E829FB /* ActivityManager.swift */; };
 		AACDCF32BF0A0A36A4A2F84F /* HavalEcoTripApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5A372CA99C89C5712EE54BC /* HavalEcoTripApp.swift */; };
-		ACE4A69E44CE09AEB9D85C93 /* Info-additions.plist in Resources */ = {isa = PBXBuildFile; fileRef = 415872EBC0DAC8AE7FD699C5 /* Info-additions.plist */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -47,7 +46,6 @@
 		192BA3BE182AC3D50F636DA9 /* HavalEcoTripWidget.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = HavalEcoTripWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		1C2F4161732FE79AB2415337 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		36AA01E4F54D0727EF341F49 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
-		415872EBC0DAC8AE7FD699C5 /* Info-additions.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "Info-additions.plist"; sourceTree = "<group>"; };
 		6AB3E13D26098FB169B559E2 /* HavalEcoTrip.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = HavalEcoTrip.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		6F5328FAA367AE3DF93613BE /* HavalEcoTripWidgetBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HavalEcoTripWidgetBundle.swift; sourceTree = "<group>"; };
 		968AA8DFD87E74A832ED71A5 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
@@ -65,7 +63,6 @@
 				D9926C58E001CD8511E829FB /* ActivityManager.swift */,
 				36AA01E4F54D0727EF341F49 /* ContentView.swift */,
 				B5A372CA99C89C5712EE54BC /* HavalEcoTripApp.swift */,
-				415872EBC0DAC8AE7FD699C5 /* Info-additions.plist */,
 				968AA8DFD87E74A832ED71A5 /* Info.plist */,
 				E4593E338CE49445D2B4E37A /* Settings.swift */,
 			);
@@ -126,7 +123,6 @@
 			buildConfigurationList = 33F8B95A0DBFD663A5DE1E30 /* Build configuration list for PBXNativeTarget "HavalEcoTrip" */;
 			buildPhases = (
 				6C9516BD0FE489AF29E586F7 /* Sources */,
-				5CFAD127AF4A412D5DBF385E /* Resources */,
 				DCCDFE484E2CC324AC0D8146 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
@@ -179,17 +175,6 @@
 			);
 		};
 /* End PBXProject section */
-
-/* Begin PBXResourcesBuildPhase section */
-		5CFAD127AF4A412D5DBF385E /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				ACE4A69E44CE09AEB9D85C93 /* Info-additions.plist in Resources */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-/* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		628FAE7CE794B1464393B2D5 /* Sources */ = {

@@ -4,11 +4,21 @@ App Swift mínimo cujo único papel é hospedar uma **Live Activity** no iPhone
 que mostra a recarga em tempo real (SOC, potência, energia, tempo restante)
 no lock screen e no Dynamic Island.
 
-O bridge (Mac mini) atualiza a Live Activity via **APNs HTTP/2 push direto**
-— o app pode estar morto, basta o iPhone estar online.
+**Modo atual: app-driven (grátis)** — o app faz polling do bridge a cada 5s
+e atualiza a Live Activity localmente via `Activity.update()`. Funciona
+perfeito enquanto o iPhone está desbloqueado / app em foreground. Quando
+bloqueia, iOS pode matar o app em ~30s e a Activity congela com o último
+estado até o user desbloquear.
 
-Tudo grátis: Apple ID free, Xcode (gratuito), AltStore pra reinstalar
-automaticamente quando o sideload expirar em 7 dias.
+**Pra ter push remoto** (Activity atualiza com o app morto), precisa de
+Apple Developer Program pago (US$ 99/ano) pra gerar AuthKey APNs. O
+backend do bridge (`apns_live_activity.js`) já está pronto pra esse modo
+— basta trocar `pushType: nil` por `.token` no `ActivityManager.swift` e
+configurar `APNS_*` no `.env` da bridge. Free Apple ID NÃO consegue criar
+AuthKeys APNs.
+
+Custo no modo atual: R$ 0. Apple ID free, Xcode (gratuito), AltStore pra
+reinstalar automaticamente quando o sideload expirar em 7 dias.
 
 ---
 
@@ -33,48 +43,7 @@ automaticamente quando o sideload expirar em 7 dias.
 2. Toca em **+** → **Apple ID** → digita seu Apple ID e senha
 3. Espera aparecer "Personal Team" na lista — é a free dev account
 
-### 3. Gerar AuthKey APNs (grátis)
-
-> Apple permite gerar Authentication Key APNs com qualquer Apple ID, sem
-> precisar da assinatura paga.
-
-1. Abre <https://developer.apple.com/account/resources/authkeys/list>
-2. Sign In com sua Apple ID
-3. Toca em **+** (criar key)
-4. Marca **Apple Push Notifications service (APNs)**
-5. Nome: `EcoTrip APNs` → Continue → Register
-6. Baixa o arquivo `AuthKey_XXXXXXXXXX.p8` (XXXXXXXXXX = Key ID, 10 chars)
-7. Anota o **Key ID** (na página) e o **Team ID** (canto superior direito)
-8. Move o `.p8` pra `/Users/consorciolimpagyn/haval-ecotrip/bridge/`:
-   ```
-   mv ~/Downloads/AuthKey_*.p8 /Users/consorciolimpagyn/haval-ecotrip/bridge/
-   ```
-
-> ⚠ O `.p8` só pode ser baixado uma vez. Guarda backup.
-
-### 4. Configurar o bridge com APNs
-
-Edita `/Users/consorciolimpagyn/haval-ecotrip/bridge/.env`:
-
-```
-APNS_ENABLED=true
-APNS_TEAM_ID=ABCDE12345
-APNS_KEY_ID=AAAA1111BB
-APNS_BUNDLE_ID=br.com.consorciolimpagyn.havalecotrip
-APNS_KEY_P8_PATH=/Users/consorciolimpagyn/haval-ecotrip/bridge/AuthKey_AAAA1111BB.p8
-APNS_ENV=sandbox
-```
-
-(Bundle ID deve bater com o do projeto Xcode — já é esse por padrão.)
-
-Reinicia:
-```
-pm2 restart ecotrip-bridge
-pm2 logs ecotrip-bridge --lines 5
-# espera ver: [apns] pronto · team=… bundle=… env=sandbox tokens=0
-```
-
-### 5. Abrir o projeto no Xcode
+### 3. Abrir o projeto no Xcode
 
 ```
 open /Users/consorciolimpagyn/haval-ecotrip/ios-app/HavalEcoTrip.xcodeproj
@@ -90,7 +59,7 @@ No Xcode:
    bundle ID pra outro reverse-DNS único (ex:
    `br.com.consorciolimpagyn.havalecotrip2`). E atualiza no `.env` também.
 
-### 6. Conectar o iPhone e Run
+### 4. Conectar o iPhone e Run
 
 1. Conecta o iPhone no Mac via cabo
 2. iPhone vai pedir "Trust This Computer" — confirma
@@ -108,7 +77,7 @@ No Xcode:
 8. Bloqueia o iPhone — a activity deve aparecer no lock screen
 9. Quando o carro carregar, os updates começam a chegar via APNs.
 
-### 7. Renovação automática via AltStore (opcional)
+### 5. Renovação automática via AltStore (opcional)
 
 Free sideload expira em 7 dias. AltStore reassina automaticamente quando
 o iPhone está na mesma WiFi do Mac:
@@ -165,29 +134,30 @@ O `.xcodeproj` é regenerado preservando settings de Signing.
 
 ---
 
-## Como o fluxo end-to-end funciona
+## Como o fluxo end-to-end funciona (modo app-driven)
 
 ```
 1. User toca "Iniciar Live Activity" no app
    ↓
-2. iOS gera pushToken pra essa Activity
+2. App cria a Activity localmente (pushType: nil)
    ↓
-3. App envia (pushToken, activityId) → POST /api/activity/start no bridge
+3. App inicia loop de polling a cada 5s
    ↓
-4. Bridge salva em activity_tokens.json
+4. Loop: GET /api/state → pega charging_state, soc_pct, charge_power_kw,
+   charge_session_kwh, charge_remaining_min
    ↓
-5. Carro começa a carregar (charging_state vira "Carregando")
+5. App chama Activity.update(contentState) localmente
    ↓
-6. Bridge chama sendChargeLiveUpdate() a cada 60s ou em mudança significativa
+6. Live Activity atualiza na lock screen / Dynamic Island
    ↓
-7. sendChargeLiveUpdate() faz:
-   - sendPush (Web Push pro PWA — já existia)
-   - apnsLive.pushUpdate (APNs HTTP/2 pra todos os pushTokens iOS)
-   ↓
-8. iPhone recebe push da Apple → atualiza Live Activity SEM acordar o app
-   ↓
-9. Recarga termina → manda event=end + alerta com som
+7. Quando user toca "Parar" → Activity.end()
 ```
+
+**Limitação**: enquanto o iPhone está desbloqueado / app em foreground,
+updates de 5 em 5s. Quando o iPhone bloqueia, iOS suspende o app em ~30s
+e os updates param — a Activity continua exibida com o ÚLTIMO estado
+até o user desbloquear. Pra ter updates contínuos com app morto, precisa
+do programa Developer pago (APNs push).
 
 ---
 
