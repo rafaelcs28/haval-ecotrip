@@ -211,6 +211,10 @@
 .cal-day.selected.has-event::after { background: #000; }
 
 /* Footer com data nav (setas) */
+/* Padding-bottom extra: subtab+tabbar são fixed, sem isso cobriam último card */
+#posto-stats { padding-bottom: calc(var(--subtab-h, 38px) + 24px); }
+#posto-registros { padding-bottom: calc(var(--subtab-h, 38px) + 12px); }
+
 .date-nav {
   display: flex; align-items: center; justify-content: space-between;
   position: sticky;

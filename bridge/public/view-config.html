@@ -2041,8 +2041,13 @@ async function actionRecomputeTripCosts() {
       sub.style.color = 'var(--green)';
     }
     showToast(`✓ ${d.updated} viagens recalculadas`, 'ok');
-    // Limpa cache local pro PWA puxar de novo com costRecomputed
-    if (window.cacheSet) window.cacheSet('desloc', []);
+    // Limpa cache local pro PWA puxar de novo com costRecomputed.
+    // Remove a chave inteira pra forçar full fetch (sem since).
+    try { localStorage.removeItem('eco_cache_desloc'); } catch (_) {}
+    // Se o user já voltar pra Desloc, força reload
+    if (typeof window._reloadDeslocData === 'function') {
+      setTimeout(() => window._reloadDeslocData(), 500);
+    }
   } catch (e) {
     if (sub) { sub.textContent = '✗ ' + e.message; sub.style.color = 'var(--red)'; }
     showToast('✗ ' + e.message, 'err');

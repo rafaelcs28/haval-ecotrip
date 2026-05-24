@@ -167,6 +167,11 @@
 }
 .cal-day.selected.has-event::after { background: #000; }
 
+/* Padding-bottom extra na seção Estatísticas: subtab + tabbar são fixed
+   no rodapé, cobriam os últimos gráficos sem isso */
+#desloc-stats { padding-bottom: calc(var(--subtab-h, 38px) + 24px); }
+#desloc-registros { padding-bottom: calc(var(--subtab-h, 38px) + 12px); }
+
 /* Date nav agora STICKY no topo (logo abaixo do header). Antes ficava
    fixed no rodapé e cobria os últimos cards em dias com muitos
    deslocamentos. Sticky funciona aqui porque o scroll é no body. */
@@ -34540,19 +34545,21 @@ async function _loadDeslocData() {
       startKp:       t.startKp || _resolveKp(t.startLat, t.startLng) || '',
       endKp:         t.endKp || _resolveKp(t.endLat, t.endLng) || '',
       name:          t.name || null,
+      costRecomputed: t.costRecomputed || null,  // server salva custo histórico aqui
       samples:       [],   // carrega sob demanda via /api/telemetry/:tripId
       route:         [],
       };
     });
-    // Merge incremental: se foi fetch incremental (since>0) e tem novos, adiciona
+    // Merge incremental: ATUALIZA existentes (server pode ter modificado
+    // costRecomputed, startKp, etc) + adiciona novas. Antes só adicionava
+    // novas, então viagens reprocessadas mantinham valores antigos no cache.
     if (lastStartMs > 0 && apiTrips.length) {
-      const existingIds = new Set(trips.map(t => t.tripId || t.id));
-      const onlyNew = apiTrips.filter(t => !existingIds.has(t.tripId || t.id));
-      if (onlyNew.length) {
-        // Insere no início (viagens mais novas primeiro)
-        trips.unshift(...onlyNew);
-        window.cacheSet && window.cacheSet('desloc', trips.slice());
-      }
+      const byId = new Map(trips.map(t => [t.tripId || t.id, t]));
+      for (const apiT of apiTrips) byId.set(apiT.tripId || apiT.id, apiT);
+      const merged = [...byId.values()].sort((a, b) => (b.startMs || 0) - (a.startMs || 0));
+      trips.length = 0;
+      trips.push(...merged);
+      window.cacheSet && window.cacheSet('desloc', trips.slice());
     } else if (lastStartMs === 0) {
       // Fetch completo (primeira vez) — substitui tudo
       trips.length = 0;
@@ -34562,6 +34569,9 @@ async function _loadDeslocData() {
   } catch (e) { console.warn('Desloc: falha live', e); }
   if (progress) progress.done();
   renderTrips(); renderCalendar(); renderDateNav();
+  // Se o user está na aba Estatísticas, re-renderiza com dados novos
+  // (antes ficava com totais do cache antigo até o user tocar num período).
+  if (currentView === 'stats') renderStats();
 }
 // Boot inicial: 1 fetch
 _loadDeslocData();
