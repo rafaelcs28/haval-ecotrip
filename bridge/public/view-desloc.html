@@ -167,11 +167,21 @@
 }
 .cal-day.selected.has-event::after { background: #000; }
 
-/* Footer date nav */
+/* Footer date nav — FIXO acima do tabbar pra que dias com muitos
+   deslocamentos não escondam os botões (visto em Android Galaxy) */
 .date-nav {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 10px 0;
+  position: sticky;
+  bottom: 0;
+  background: rgba(10,10,10,.94);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  border-top: 1px solid rgba(255,255,255,.06);
+  padding: 10px 8px calc(env(safe-area-inset-bottom, 0) + 10px);
+  margin: 0 -8px;
+  z-index: 5;
 }
+/* Espaço extra no fim da lista pra última viagem não ficar coberta */
+#trip-list { padding-bottom: 4px; }
 .date-nav .arrow {
   width: 48px; height: 36px; border-radius: 18px;
   background: var(--green); color: #000;
@@ -484,7 +494,7 @@
   <div class="section-title">Deslocamentos</div>
 
   <!-- VIEW: REGISTROS -->
-  <div id="view-registros">
+  <div id="desloc-registros">
     <div class="filter-chips">
       <div class="chip active" data-filter="all" onclick="setFilter('all')">Todas</div>
       <div class="chip warning" data-filter="radar" onclick="setFilter('radar')">⚠️ Multa</div>
@@ -509,7 +519,7 @@
   </div>
 
   <!-- VIEW: ESTATÍSTICAS -->
-  <div id="view-stats" class="section-hidden">
+  <div id="desloc-stats" class="section-hidden">
     <div class="period-card">
       <div class="ti">Estatísticas</div>
       <div class="sub">Resumo do período selecionado</div>
@@ -581,18 +591,23 @@
       </div>
     </div>
 
-    <!-- Ranking por origem -->
-    <div class="period-card" id="origin-card" style="display:none;margin-top:14px">
-      <div class="ti">🏁 Origens mais frequentes</div>
-      <div class="sub">Locais de onde você mais sai</div>
-      <div id="origin-list"></div>
+    <!-- Gráfico: distância por período (interativo) -->
+    <div class="period-card" id="dist-chart-card" style="margin-top:14px">
+      <div class="ti">🛣 Distância por período</div>
+      <div class="sub">Toque numa barra pra ver os valores</div>
+      <div style="position:relative;height:200px;margin-top:10px"><canvas id="desloc-chart-dist"></canvas></div>
     </div>
-
-    <!-- Ranking por destino -->
-    <div class="period-card" id="dest-card" style="display:none;margin-top:14px">
-      <div class="ti">📍 Destinos mais frequentes</div>
-      <div class="sub">Locais aonde você mais vai</div>
-      <div id="dest-list"></div>
+    <!-- Gráfico: consumo médio por período (interativo) -->
+    <div class="period-card" id="eff-chart-card" style="margin-top:14px">
+      <div class="ti">📊 Consumo médio (kWh/100 km) por período</div>
+      <div class="sub">Toque numa barra pra ver os valores</div>
+      <div style="position:relative;height:200px;margin-top:10px"><canvas id="desloc-chart-eff"></canvas></div>
+    </div>
+    <!-- Gráfico: consumo total (energia + combustível) por período -->
+    <div class="period-card" id="energy-chart-card" style="margin-top:14px">
+      <div class="ti">⚡⛽ Energia e combustível por período</div>
+      <div class="sub">Toque numa barra pra ver kWh + litros</div>
+      <div style="position:relative;height:200px;margin-top:10px"><canvas id="desloc-chart-energy"></canvas></div>
     </div>
   </div>
 </div>
@@ -33517,11 +33532,14 @@ function setFilter(f) {
 
 function setDeslocView(v) {
   currentView = v;
-  document.querySelectorAll('.stb').forEach(el => {
+  // Escopa pelo container — sem isso, marca como active também os .stb do Posto
+  // (IDs duplicados entre views — bug que fazia o botão "Estatísticas" às vezes
+  // não trocar de tela)
+  document.querySelectorAll('#view-desloc .stb').forEach(el => {
     el.classList.toggle('active', el.dataset.view === v);
   });
-  document.getElementById('view-registros').classList.toggle('section-hidden', v !== 'registros');
-  document.getElementById('view-stats').classList.toggle('section-hidden', v !== 'stats');
+  document.getElementById('desloc-registros').classList.toggle('section-hidden', v !== 'registros');
+  document.getElementById('desloc-stats').classList.toggle('section-hidden', v !== 'stats');
   if (v === 'stats') renderStats();
 }
 
@@ -33599,9 +33617,91 @@ function renderTrips() {
 
 function tripName(t) {
   if (t.name) return `<span class="from">${t.name}</span>`;
-  const from = t.startKp || '?';
-  const to   = t.endKp || '?';
-  return `<span class="from">${from}</span><span class="arrow">→</span><span class="to">${to}</span>`;
+  // Locais desconhecidos: tenta resolver com setor/cidade via reverse-geocode
+  const start = _tripPlaceLabel(t, 'start');
+  const end   = _tripPlaceLabel(t, 'end');
+  return `<span class="from">${start}</span><span class="arrow">→</span><span class="to">${end}</span>`;
+}
+
+// Para um lado (start/end): se tem KP cadastrado usa direto; senão, busca
+// pelo geocoder. Regra: se a cidade do lado for IGUAL à do oposto, mostra setor;
+// senão mostra cidade. Cache em localStorage pra evitar spam no Nominatim.
+function _tripPlaceLabel(t, side) {
+  const kp  = t[side + 'Kp'];
+  if (kp) return kp;
+  const lat = t[side + 'Lat'], lng = t[side + 'Lng'];
+  if (!lat || !lng) return '?';
+  const g = _geocodeLookup(lat, lng);
+  if (!g) return '…';   // em cache miss, _geocodeLookup faz fetch async + re-render
+  const otherSide = side === 'start' ? 'end' : 'start';
+  const otherKp = t[otherSide + 'Kp'];
+  const otherLat = t[otherSide + 'Lat'], otherLng = t[otherSide + 'Lng'];
+  const otherG = otherKp ? _geocodeLookup(otherLat, otherLng) : _geocodeLookup(otherLat, otherLng);
+  // Mesma cidade do oposto → bairro + cidade (ex: "Setor Bueno, Goiânia").
+  // Cidade diferente → só cidade. Sem bairro disponível → só cidade.
+  const sameCity = otherG && g.city && otherG.city && g.city === otherG.city;
+  if (sameCity && g.suburb && g.city) return g.suburb + ', ' + g.city;
+  if (sameCity && g.suburb)           return g.suburb;
+  return g.city || g.suburb || '?';
+}
+
+// Cache em memória + localStorage. Chave = lat/lng arredondado a ~100m.
+const _GEOCODE_CACHE_KEY = 'eco_geocode_cache_v1';
+let _geocodeCache = null;
+let _geocodePending = new Set();
+let _geocodeQueue = [];
+let _geocodeBusy = false;
+
+function _loadGeocodeCache() {
+  if (_geocodeCache) return _geocodeCache;
+  try { _geocodeCache = JSON.parse(localStorage.getItem(_GEOCODE_CACHE_KEY) || '{}'); }
+  catch (_) { _geocodeCache = {}; }
+  return _geocodeCache;
+}
+function _saveGeocodeCache() {
+  try { localStorage.setItem(_GEOCODE_CACHE_KEY, JSON.stringify(_geocodeCache || {})); } catch (_) {}
+}
+function _geocodeKey(lat, lng) {
+  return Math.round(lat * 1000) / 1000 + ',' + Math.round(lng * 1000) / 1000;
+}
+function _geocodeLookup(lat, lng) {
+  const cache = _loadGeocodeCache();
+  const k = _geocodeKey(lat, lng);
+  if (k in cache) return cache[k];   // null = já resolvido como "sem dados"
+  // Enfileira fetch (rate-limited a 1/s pra respeitar política do Nominatim)
+  if (!_geocodePending.has(k)) {
+    _geocodePending.add(k);
+    _geocodeQueue.push({ key: k, lat, lng });
+    _pumpGeocodeQueue();
+  }
+  return null;
+}
+async function _pumpGeocodeQueue() {
+  if (_geocodeBusy) return;
+  _geocodeBusy = true;
+  while (_geocodeQueue.length) {
+    const { key, lat, lng } = _geocodeQueue.shift();
+    try {
+      const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=16`, {
+        headers: { 'Accept': 'application/json' },
+      });
+      const j = await r.json();
+      const a = j.address || {};
+      _geocodeCache[key] = {
+        city:   a.city || a.town || a.village || a.county || '',
+        suburb: a.suburb || a.neighbourhood || a.quarter || a.borough || a.city_district || '',
+        full:   j.display_name || '',
+      };
+    } catch (_) {
+      _geocodeCache[key] = { city: '', suburb: '', full: '' };
+    }
+    _geocodePending.delete(key);
+    _saveGeocodeCache();
+    // Re-renderiza pra refletir o nome resolvido
+    if (typeof renderTrips === 'function') renderTrips();
+    await new Promise(r => setTimeout(r, 1100));  // ~1 req/s (Nominatim policy)
+  }
+  _geocodeBusy = false;
 }
 
 function renderTripCard(t) {
@@ -34118,7 +34218,143 @@ function renderStats() {
   document.getElementById('st-cost').textContent  = fmtBRL(totalCost);
   document.getElementById('st-eff').textContent   = kmL > 0 ? fmt1(kmL) : '--';
 
-  renderPlaces(filtered);
+  // Charts: distância e consumo médio por período
+  _renderDeslocCharts(filtered, start === 0 ? (filtered[0]?.startMs || now) : start, end === Infinity ? now : end);
+}
+
+// Bucketing: dia/semana/mês conforme amplitude do período
+function _bucketize(items, getMs, getVal, start, end) {
+  const span = end - start;
+  const day = 86400000;
+  let bucketSize, fmtLabel;
+  if (span <= 32 * day)      { bucketSize = day;        fmtLabel = d => d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }); }
+  else if (span <= 200 * day) { bucketSize = 7 * day;   fmtLabel = d => 'sem ' + d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }); }
+  else                       { bucketSize = 30 * day;   fmtLabel = d => d.toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' }); }
+  const buckets = new Map();
+  for (const it of items) {
+    const ms = getMs(it);
+    if (ms < start || ms > end) continue;
+    const key = Math.floor((ms - start) / bucketSize);
+    const cur = buckets.get(key) || { sumVal: 0, count: 0, ms: start + key * bucketSize, sumDist: 0, sumKwh: 0 };
+    const v = getVal(it);
+    if (Array.isArray(v)) { cur.sumDist += v[0]; cur.sumKwh += v[1]; cur.count++; }
+    else { cur.sumVal += v; cur.count++; }
+    buckets.set(key, cur);
+  }
+  const keys = [...buckets.keys()].sort((a,b) => a - b);
+  return keys.map(k => ({ ...buckets.get(k), label: fmtLabel(new Date(buckets.get(k).ms)) }));
+}
+
+let _deslocChartDist = null, _deslocChartEff = null, _deslocChartEnergy = null;
+function _renderDeslocCharts(filtered, start, end) {
+  if (typeof Chart === 'undefined') return;
+  const distBuckets = _bucketize(filtered, t => t.startMs, t => +t.distKm || 0, start, end);
+  const effBuckets  = _bucketize(filtered, t => t.startMs,
+    t => [+t.distKm || 0, +t.netKwh || 0], start, end);
+  // Eff por bucket: kWh/100 km = (sumKwh / sumDist) * 100
+  const effData = effBuckets.map(b => b.sumDist > 0.1 ? +((b.sumKwh / b.sumDist) * 100).toFixed(2) : 0);
+
+  const distCanvas = document.getElementById('desloc-chart-dist');
+  if (distCanvas) {
+    if (_deslocChartDist) _deslocChartDist.destroy();
+    _deslocChartDist = new Chart(distCanvas, _chartConfig(
+      distBuckets.map(b => b.label),
+      distBuckets.map(b => +b.sumVal.toFixed(1)),
+      '#22c55e',
+      v => v.toFixed(1) + ' km'
+    ));
+  }
+  const effCanvas = document.getElementById('desloc-chart-eff');
+  if (effCanvas) {
+    if (_deslocChartEff) _deslocChartEff.destroy();
+    _deslocChartEff = new Chart(effCanvas, _chartConfig(
+      effBuckets.map(b => b.label),
+      effData,
+      '#22d3ee',
+      v => v.toFixed(2) + ' kWh/100km'
+    ));
+  }
+
+  // Gráfico de energia + combustível por período (dois datasets lado a lado)
+  const energyCanvas = document.getElementById('desloc-chart-energy');
+  if (energyCanvas) {
+    const span = end - start, day = 86400000;
+    const bucketSize = span <= 32 * day ? day : span <= 200 * day ? 7 * day : 30 * day;
+    const fmtLabel = span <= 32 * day
+      ? d => d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
+      : span <= 200 * day
+        ? d => 'sem ' + d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
+        : d => d.toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' });
+    const map = new Map();
+    for (const t of filtered) {
+      if (t.startMs < start || t.startMs > end) continue;
+      const k = Math.floor((t.startMs - start) / bucketSize);
+      const cur = map.get(k) || { kwh: 0, fuel: 0, ms: start + k * bucketSize };
+      cur.kwh  += +t.netKwh || 0;
+      cur.fuel += +t.fuelL  || 0;
+      map.set(k, cur);
+    }
+    const keys = [...map.keys()].sort((a, b) => a - b);
+    const labels  = keys.map(k => fmtLabel(new Date(map.get(k).ms)));
+    const kwhData = keys.map(k => +map.get(k).kwh.toFixed(2));
+    const fuelData = keys.map(k => +map.get(k).fuel.toFixed(2));
+    if (_deslocChartEnergy) _deslocChartEnergy.destroy();
+    _deslocChartEnergy = new Chart(energyCanvas, {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [
+          { label: 'kWh', data: kwhData,  backgroundColor: '#22c55eb0', borderColor: '#22c55e', borderWidth: 1, borderRadius: 4 },
+          { label: 'L',   data: fuelData, backgroundColor: '#fb923cb0', borderColor: '#fb923c', borderWidth: 1, borderRadius: 4 },
+        ],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        animation: { duration: 220 },
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { labels: { color: '#cbd5e1', boxWidth: 12 } },
+          tooltip: {
+            backgroundColor: 'rgba(20,20,20,.95)',
+            titleColor: '#fff', bodyColor: '#cbd5e1',
+            callbacks: {
+              label: ctx => ctx.dataset.label === 'kWh'
+                ? ctx.parsed.y.toFixed(2) + ' kWh'
+                : ctx.parsed.y.toFixed(2) + ' L',
+            },
+          },
+        },
+        scales: {
+          x: { ticks: { color: '#94a3b8', maxRotation: 0, autoSkip: true, maxTicksLimit: 8 }, grid: { display: false } },
+          y: { ticks: { color: '#94a3b8' }, grid: { color: 'rgba(255,255,255,.05)' }, beginAtZero: true },
+        },
+      },
+    });
+  }
+}
+
+function _chartConfig(labels, data, color, fmt) {
+  return {
+    type: 'bar',
+    data: { labels, datasets: [{ data, backgroundColor: color + 'b0', borderColor: color, borderWidth: 1, borderRadius: 4 }] },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      animation: { duration: 220 },
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: 'rgba(20,20,20,.95)',
+          titleColor: '#fff', bodyColor: '#cbd5e1',
+          callbacks: { label: ctx => fmt(ctx.parsed.y) },
+        },
+      },
+      scales: {
+        x: { ticks: { color: '#94a3b8', maxRotation: 0, autoSkip: true, maxTicksLimit: 8 }, grid: { display: false } },
+        y: { ticks: { color: '#94a3b8' }, grid: { color: 'rgba(255,255,255,.05)' }, beginAtZero: true },
+      },
+    },
+  };
 }
 
 function renderPlaces(list) {

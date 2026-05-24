@@ -380,7 +380,7 @@
   <div class="section-title">Posto</div>
 
   <!-- VIEW: REGISTROS -->
-  <div id="view-registros">
+  <div id="posto-registros">
     <!-- Filtro de tipo -->
     <div class="filter-chips">
       <div class="chip active" data-filter="all" onclick="setFilter('all')">Todos</div>
@@ -423,7 +423,7 @@
   </div>
 
   <!-- VIEW: ESTATÍSTICAS -->
-  <div id="view-stats" class="section-hidden">
+  <div id="posto-stats" class="section-hidden">
     <!-- Seletor de período -->
     <div class="period-card">
       <div class="ti">Estatísticas</div>
@@ -504,6 +504,19 @@
         <div class="lbl">Custo total (energia + combustível)</div>
         <div class="v">R$ <span id="st-cost">0</span></div>
       </div>
+    </div>
+
+    <!-- Gráfico: energia recarregada por período -->
+    <div class="period-card" style="margin-top:14px">
+      <div class="ti">🔋 Energia recarregada por período</div>
+      <div class="sub">Toque numa barra pra ver os valores</div>
+      <div style="position:relative;height:200px;margin-top:10px"><canvas id="posto-chart-kwh"></canvas></div>
+    </div>
+    <!-- Gráfico: potência média por período -->
+    <div class="period-card" style="margin-top:14px">
+      <div class="ti">⚡ Potência média por período (kW)</div>
+      <div class="sub">Média ponderada por kWh injetado em cada sessão</div>
+      <div style="position:relative;height:200px;margin-top:10px"><canvas id="posto-chart-pwr"></canvas></div>
     </div>
 
     <!-- Estatística por local — ranking por número de recargas -->
@@ -853,11 +866,12 @@ function setFilter(f) {
 
 function setPostoView(v) {
   currentView = v;
-  document.querySelectorAll('.stb').forEach(el => {
+  // Escopa pelo container (IDs/classes duplicadas entre views)
+  document.querySelectorAll('#view-posto .stb').forEach(el => {
     el.classList.toggle('active', el.dataset.view === v);
   });
-  document.getElementById('view-registros').classList.toggle('section-hidden', v !== 'registros');
-  document.getElementById('view-stats').classList.toggle('section-hidden', v !== 'stats');
+  document.getElementById('posto-registros').classList.toggle('section-hidden', v !== 'registros');
+  document.getElementById('posto-stats').classList.toggle('section-hidden', v !== 'stats');
   if (v === 'stats') renderStats();
 }
 
@@ -998,13 +1012,21 @@ function openChargerEdit(id) {
     </div>
   `);
 }
-function saveCharger(id) {
+async function saveCharger(id) {
   const it = getItem(id);
+  if (!it) return;
   const v = parseFloat(document.getElementById('ai-charger').value);
-  if (!isNaN(v) && v > 0) { it.charger_kwh = v; }
-  else { delete it.charger_kwh; }
+  const charger_kwh = (!isNaN(v) && v > 0) ? v : null;
+  // Otimista local
+  if (charger_kwh != null) it.charger_kwh = charger_kwh;
+  else delete it.charger_kwh;
   closeAction();
   renderEntries();
+  // Persiste no bridge — sem isso, próximo refetch sobrescreve
+  try {
+    await _patchCharge(id, '/charger_kwh', { kwh: charger_kwh });
+    if (window.cacheSet) window.cacheSet('posto', items);
+  } catch (e) { if (window.showToast) window.showToast('✗ Falha ao salvar: ' + e.message, 'err'); }
 }
 
 function openCostEdit(id) {
@@ -1023,13 +1045,23 @@ function openCostEdit(id) {
     </div>
   `);
 }
-function saveCost(id) {
+async function saveCost(id) {
   const it = getItem(id);
+  if (!it) return;
   const v = parseFloat(document.getElementById('ai-cost').value);
-  if (!isNaN(v) && v > 0) { it.override_cost = v; it.cost = v; }
+  const override = (!isNaN(v) && v > 0) ? v : null;
+  if (override != null) { it.override_cost = override; it.cost = override; }
   else { delete it.override_cost; it.cost = +(it.kwh * 0.9997).toFixed(2); }
   closeAction();
   renderEntries();
+  try {
+    // Bridge espera { total, perKwh, free? } no body. Calcula perKwh quando temos kwh.
+    const body = override != null
+      ? { total: override, perKwh: it.kwh > 0 ? +(override / it.kwh).toFixed(6) : 0 }
+      : { total: null };  // null limpa override
+    await _patchCharge(id, '/cost', body);
+    if (window.cacheSet) window.cacheSet('posto', items);
+  } catch (e) { if (window.showToast) window.showToast('✗ Falha ao salvar: ' + e.message, 'err'); }
 }
 
 function openLocationEdit(id) {
@@ -1057,15 +1089,26 @@ function openLocationEdit(id) {
     </div>
   `);
 }
-function saveLocation(id, force) {
+async function saveLocation(id, force) {
   const it = getItem(id);
+  if (!it) return;
+  let name = '';
   if (force === null) { delete it.location; }
   else {
-    const v = (document.getElementById('ai-loc-text').value || '').trim();
-    if (v) it.location = v; else delete it.location;
+    name = (document.getElementById('ai-loc-text').value || '').trim();
+    if (name) it.location = name; else delete it.location;
   }
   closeAction();
   renderEntries();
+  try {
+    // Bridge: name === '' limpa; name preenchido + lat/lng salva
+    const body = force === null ? { name: '' } : { name };
+    if (force !== null && it.location_lat && it.location_lng) {
+      body.lat = it.location_lat; body.lng = it.location_lng;
+    }
+    await _patchCharge(id, '/location', body);
+    if (window.cacheSet) window.cacheSet('posto', items);
+  } catch (e) { if (window.showToast) window.showToast('✗ Falha ao salvar: ' + e.message, 'err'); }
 }
 
 function openMetaEdit(id) {
@@ -1082,16 +1125,42 @@ function openMetaEdit(id) {
     </div>
   `);
 }
-function saveMeta(id) {
+async function saveMeta(id) {
   const it = getItem(id);
-  it.soc_start = parseInt(document.getElementById('ai-soc-start').value);
-  it.soc_end   = parseInt(document.getElementById('ai-soc-end').value);
-  it.kwh       = parseFloat(document.getElementById('ai-kwh').value);
-  it.duration_sec = parseInt(document.getElementById('ai-dur').value) * 60;
-  it.avg_power_kw = it.duration_sec > 0 ? (it.kwh / (it.duration_sec / 3600)) : 0;
-  if (it.override_cost == null) it.cost = +(it.kwh * 0.9997).toFixed(2);
+  if (!it) return;
+  const soc_start = parseInt(document.getElementById('ai-soc-start').value);
+  const soc_end   = parseInt(document.getElementById('ai-soc-end').value);
+  const kwh       = parseFloat(document.getElementById('ai-kwh').value);
+  const duration_sec = parseInt(document.getElementById('ai-dur').value) * 60;
+  it.soc_start    = soc_start;
+  it.soc_end      = soc_end;
+  it.kwh          = kwh;
+  it.duration_sec = duration_sec;
+  it.avg_power_kw = duration_sec > 0 ? (kwh / (duration_sec / 3600)) : 0;
+  if (it.override_cost == null) it.cost = +(kwh * 0.9997).toFixed(2);
   closeAction();
   renderEntries();
+  try {
+    // Bridge /edit aceita manual_overrides parcial
+    await _patchCharge(id, '/edit', { soc_start, soc_end, energy_kwh: kwh, duration_sec });
+    if (window.cacheSet) window.cacheSet('posto', items);
+  } catch (e) { if (window.showToast) window.showToast('✗ Falha ao salvar: ' + e.message, 'err'); }
+}
+
+// Helper: PATCH /api/charges/:ts<suffix> com auth + JSON
+async function _patchCharge(ts, suffix, body) {
+  const tk = localStorage.getItem('bridge_token');
+  if (!tk) throw new Error('sem token');
+  const r = await fetch('/api/charges/' + ts + suffix, {
+    method: 'PATCH',
+    headers: { 'Authorization': 'Bearer ' + tk, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body || {}),
+  });
+  if (!r.ok) {
+    const d = await r.json().catch(() => ({}));
+    throw new Error(d.error || 'HTTP ' + r.status);
+  }
+  return r.json();
 }
 
 function openRefuelEdit(id) {
@@ -1107,14 +1176,22 @@ function openRefuelEdit(id) {
     </div>
   `);
 }
-function saveRefuel(id) {
+async function saveRefuel(id) {
   const it = getItem(id);
-  it.liters = parseFloat(document.getElementById('ai-liters').value);
-  it.fuel_l_before = parseFloat(document.getElementById('ai-fbefore').value);
-  it.fuel_l_after  = parseFloat(document.getElementById('ai-fafter').value);
-  it.cost = +(it.liters * it.price_per_l).toFixed(2);
+  if (!it) return;
+  const liters = parseFloat(document.getElementById('ai-liters').value);
+  const fuel_l_before = parseFloat(document.getElementById('ai-fbefore').value);
+  const fuel_l_after  = parseFloat(document.getElementById('ai-fafter').value);
+  it.liters = liters;
+  it.fuel_l_before = fuel_l_before;
+  it.fuel_l_after  = fuel_l_after;
+  it.cost = +(liters * it.price_per_l).toFixed(2);
   closeAction();
   renderEntries();
+  try {
+    await _patchRefuel(id, { liters_added: liters, fuel_l_before, fuel_l_after });
+    if (window.cacheSet) window.cacheSet('posto', items);
+  } catch (e) { if (window.showToast) window.showToast('✗ Falha ao salvar: ' + e.message, 'err'); }
 }
 
 function openRefuelCost(id) {
@@ -1129,12 +1206,34 @@ function openRefuelCost(id) {
     </div>
   `);
 }
-function saveRefuelCost(id) {
+async function saveRefuelCost(id) {
   const it = getItem(id);
-  it.price_per_l = parseFloat(document.getElementById('ai-ppl').value);
-  it.cost = parseFloat(document.getElementById('ai-rcost').value);
+  if (!it) return;
+  const price_per_l = parseFloat(document.getElementById('ai-ppl').value);
+  const total_cost  = parseFloat(document.getElementById('ai-rcost').value);
+  it.price_per_l = price_per_l;
+  it.cost = total_cost;
   closeAction();
   renderEntries();
+  try {
+    await _patchRefuel(id, { price_per_liter: price_per_l, total_cost });
+    if (window.cacheSet) window.cacheSet('posto', items);
+  } catch (e) { if (window.showToast) window.showToast('✗ Falha ao salvar: ' + e.message, 'err'); }
+}
+
+async function _patchRefuel(id, body) {
+  const tk = localStorage.getItem('bridge_token');
+  if (!tk) throw new Error('sem token');
+  const r = await fetch('/api/refuels/' + id, {
+    method: 'PATCH',
+    headers: { 'Authorization': 'Bearer ' + tk, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body || {}),
+  });
+  if (!r.ok) {
+    const d = await r.json().catch(() => ({}));
+    throw new Error(d.error || 'HTTP ' + r.status);
+  }
+  return r.json();
 }
 
 function renderEntries() {
@@ -1315,6 +1414,72 @@ function renderStats() {
 
   // ── Ranking por local: agrupa recargas por location, ordena por count desc
   renderByPlace(charges);
+
+  // ── Gráficos: energia recarregada e potência média por período
+  _renderPostoCharts(charges, start === 0 ? (charges[0]?.ts || now) : start, end === Infinity ? now : end);
+}
+
+let _postoChartKwh = null, _postoChartPwr = null;
+function _renderPostoCharts(charges, start, end) {
+  if (typeof Chart === 'undefined') return;
+  const span = end - start, day = 86400000;
+  let bucketSize, fmtLabel;
+  if (span <= 32 * day)      { bucketSize = day;       fmtLabel = d => d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }); }
+  else if (span <= 200 * day) { bucketSize = 7 * day;  fmtLabel = d => 'sem ' + d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }); }
+  else                       { bucketSize = 30 * day;  fmtLabel = d => d.toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' }); }
+  const buckets = new Map();
+  for (const c of charges) {
+    if (c.ts < start || c.ts > end) continue;
+    const key = Math.floor((c.ts - start) / bucketSize);
+    const cur = buckets.get(key) || { kwh: 0, kwh_x_h: 0, hours: 0, ms: start + key * bucketSize };
+    cur.kwh += +c.kwh || 0;
+    const h = (+c.duration_sec || 0) / 3600;
+    if (h > 0 && c.kwh > 0) { cur.hours += h; }  // soma horas pra potência média ponderada
+    buckets.set(key, cur);
+  }
+  const keys = [...buckets.keys()].sort((a,b) => a - b);
+  const labels = keys.map(k => fmtLabel(new Date(buckets.get(k).ms)));
+  const kwhData = keys.map(k => +buckets.get(k).kwh.toFixed(2));
+  // Potência média = kWh / horas. Quando horas=0, fica 0.
+  const pwrData = keys.map(k => {
+    const b = buckets.get(k);
+    return b.hours > 0.01 ? +(b.kwh / b.hours).toFixed(2) : 0;
+  });
+
+  const kwhCanvas = document.getElementById('posto-chart-kwh');
+  if (kwhCanvas) {
+    if (_postoChartKwh) _postoChartKwh.destroy();
+    _postoChartKwh = new Chart(kwhCanvas, _postoChartCfg(labels, kwhData, '#22c55e', v => v.toFixed(2) + ' kWh'));
+  }
+  const pwrCanvas = document.getElementById('posto-chart-pwr');
+  if (pwrCanvas) {
+    if (_postoChartPwr) _postoChartPwr.destroy();
+    _postoChartPwr = new Chart(pwrCanvas, _postoChartCfg(labels, pwrData, '#fbbf24', v => v.toFixed(2) + ' kW'));
+  }
+}
+
+function _postoChartCfg(labels, data, color, fmt) {
+  return {
+    type: 'bar',
+    data: { labels, datasets: [{ data, backgroundColor: color + 'b0', borderColor: color, borderWidth: 1, borderRadius: 4 }] },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      animation: { duration: 220 },
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: 'rgba(20,20,20,.95)',
+          titleColor: '#fff', bodyColor: '#cbd5e1',
+          callbacks: { label: ctx => fmt(ctx.parsed.y) },
+        },
+      },
+      scales: {
+        x: { ticks: { color: '#94a3b8', maxRotation: 0, autoSkip: true, maxTicksLimit: 8 }, grid: { display: false } },
+        y: { ticks: { color: '#94a3b8' }, grid: { color: 'rgba(255,255,255,.05)' }, beginAtZero: true },
+      },
+    },
+  };
 }
 
 function renderByPlace(charges) {
@@ -1383,7 +1548,8 @@ async function _loadPostoData() {
   const cached = window.cacheGet && window.cacheGet('posto');
   let lastTs = 0;
   if (cached && Array.isArray(cached.v) && cached.v.length) {
-    SNAPSHOT.items = cached.v;
+    // Muta in-place — `items` é uma const com referência ao array inicial
+    items.splice(0, items.length, ...cached.v);
     lastTs = Math.max(...cached.v.map(i => +i.ts || 0));
     renderEntries(); renderCalendar(); renderDateNav();
   }
@@ -1426,7 +1592,11 @@ async function _loadPostoData() {
       cost: c.cost_override || c.cost,
       charger_kwh: c.charger_kwh,
       avg_temp_c: c.avg_temp_c,
-      location: c.location_name ? { name: c.location_name, lat: c.location_lat, lng: c.location_lng } : null,
+      // location é STRING (nome). Lat/lng ficam em campos separados pra que
+      // edição local possa setar só o nome sem precisar reconstruir um objeto.
+      location:     c.location_name || null,
+      location_lat: c.location_lat ?? null,
+      location_lng: c.location_lng ?? null,
       samples: c.samples,
     }));
     const refuels = (Array.isArray(rfRaw) ? rfRaw : (rfRaw.refuels || [])).map(r => ({
@@ -1439,18 +1609,19 @@ async function _loadPostoData() {
       fuel_l_before: r.fuel_l_before,
       fuel_l_after: r.fuel_l_after,
       odometer_km: r.odometer_km,
-      location: r.location_name ? { name: r.location_name } : null,
+      location: r.location_name || null,
     }));
     const incoming = [...charges, ...refuels].sort((a, b) => b.ts - a.ts);
     if (lastTs > 0 && incoming.length) {
       // Merge incremental: adiciona/atualiza, deduplica por (id+type)
-      const byKey = new Map(SNAPSHOT.items.map(i => [i.type + ':' + i.id, i]));
+      const byKey = new Map(items.map(i => [i.type + ':' + i.id, i]));
       for (const item of incoming) byKey.set(item.type + ':' + item.id, item);
-      SNAPSHOT.items = [...byKey.values()].sort((a, b) => b.ts - a.ts);
+      const merged = [...byKey.values()].sort((a, b) => b.ts - a.ts);
+      items.splice(0, items.length, ...merged);
     } else if (lastTs === 0) {
-      SNAPSHOT.items = incoming;
+      items.splice(0, items.length, ...incoming);
     }
-    window.cacheSet && window.cacheSet('posto', SNAPSHOT.items);
+    window.cacheSet && window.cacheSet('posto', items);
   } catch (e) { console.warn('Posto: falha ao carregar live', e); }
   if (progress) progress.done();
   renderEntries(); renderCalendar(); renderDateNav();

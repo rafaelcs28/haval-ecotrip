@@ -155,6 +155,8 @@
   cursor: pointer; font-variant-numeric: tabular-nums;
 }
 .soc-chip.active { background: rgba(34,197,94,.15); color: var(--green); border-color: var(--green); }
+.soc-chip.pending { background: rgba(234,179,8,.18); color: var(--yellow); border-color: var(--yellow); animation: soc-pulse 1s ease-in-out infinite; }
+@keyframes soc-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.45; } }
 
 .about-card {
   background: rgba(31,31,31,.85);
@@ -337,6 +339,16 @@
   </div>
   <div class="sub-body">
     <div class="field-group">
+      <div id="notif-me-card" style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px">
+        <span id="notif-me-icon" style="font-size:18px">📱</span>
+        <div style="flex:1;min-width:0">
+          <div id="notif-me-status" style="font-size:13px;font-weight:700">…</div>
+          <div id="notif-me-hint" style="font-size:11px;color:var(--muted);margin-top:1px">As preferências abaixo se aplicam só a este dispositivo.</div>
+        </div>
+        <div id="notif-me-actions"></div>
+      </div>
+    </div>
+    <div class="field-group">
       <div class="group-ti">Recarga</div>
       <div class="toggle-row" onclick="toggleNotif('charge_start', this)"><div class="label">Início da recarga<div class="sub">Push quando conecta</div></div><div class="toggle" data-key="charge_start"></div></div>
       <div class="toggle-row" onclick="toggleNotif('charge_end', this)"><div class="label">Fim da recarga<div class="sub">Quando atinge meta SOC</div></div><div class="toggle" data-key="charge_end"></div></div>
@@ -448,7 +460,7 @@
       <div class="field">
         <div style="font-size:13px;font-weight:600;margin-bottom:4px">Backup completo</div>
         <div style="font-size:11px;color:var(--muted);margin-bottom:10px">Baixa um JSON com viagens, recargas, abastecimentos, manutenções, locais conhecidos e radares ignorados.</div>
-        <button class="btn primary" onclick="downloadBackup()">⬇ Baixar JSON</button>
+        <button class="btn primary" id="btn-download-backup" onclick="downloadBackup()">⬇ Gerar backup</button>
       </div>
     </div>
     <div class="field-group">
@@ -467,6 +479,27 @@
         <div style="font-size:11px;color:var(--muted);margin-bottom:10px">Apaga listas cacheadas (viagens, recargas, eventos), telemetria do IndexedDB, tiles de mapa e cache do Service Worker. Os dados do servidor <strong style="color:var(--green)">não são afetados</strong> — tudo será baixado de novo na próxima abertura.</div>
         <button class="btn secondary" onclick="clearLocalCache()">🧹 Limpar cache local</button>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: backup JSON gerado (mostrar + copiar + compartilhar) -->
+<div id="backup-result-modal" style="display:none;position:fixed;inset:0;z-index:250;background:rgba(0,0,0,.85);align-items:center;justify-content:center;padding:14px">
+  <div style="background:#1f1f1f;width:100%;max-width:520px;max-height:90vh;border-radius:14px;display:flex;flex-direction:column;border:1px solid rgba(255,255,255,.08);overflow:hidden">
+    <div style="padding:14px 16px;border-bottom:1px solid rgba(255,255,255,.06);display:flex;align-items:center;justify-content:space-between;gap:10px">
+      <div>
+        <div style="font-size:14px;font-weight:700">💾 Backup gerado</div>
+        <div id="backup-result-info" style="font-size:11px;color:var(--muted);margin-top:2px">—</div>
+      </div>
+      <button onclick="document.getElementById('backup-result-modal').style.display='none'" style="background:transparent;border:none;color:#cbd5e1;font-size:20px;cursor:pointer">✕</button>
+    </div>
+    <div style="padding:10px 16px 12px;display:flex;gap:8px;flex-wrap:wrap">
+      <button onclick="copyBackupToClipboard()" style="flex:1;min-width:120px;padding:11px;background:var(--green);color:#000;border:none;border-radius:10px;font-size:13px;font-weight:700;font-family:inherit">📋 Copiar JSON</button>
+      <button onclick="shareBackup()" id="btn-share-backup" style="flex:1;min-width:120px;padding:11px;background:rgba(56,189,248,.15);color:#38bdf8;border:1px solid rgba(56,189,248,.3);border-radius:10px;font-size:13px;font-weight:700;font-family:inherit">📤 Compartilhar</button>
+    </div>
+    <textarea id="backup-result-text" readonly style="flex:1;width:calc(100% - 20px);margin:0 10px 12px;padding:10px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:8px;color:#cbd5e1;font-family:monospace;font-size:10px;resize:none;min-height:200px;max-height:50vh"></textarea>
+    <div style="padding:0 16px calc(env(safe-area-inset-bottom) + 14px);font-size:10.5px;color:var(--muted);line-height:1.5">
+      💡 <strong>iOS:</strong> use "Compartilhar" pra salvar em Files/Mail/AirDrop. Ou toque longo no texto → Compartilhar → Salvar.
     </div>
   </div>
 </div>
@@ -982,7 +1015,8 @@ window._onDiagUpdate = function(data) {
 // ─── Sobre: versões, uptime, broker ──────────────────────
 async function _loadAbout() {
   const tk = localStorage.getItem('bridge_token');
-  // PWA versão = versão do SW cache (já temos cacheGet)
+  const hdrs = tk ? { 'Authorization': 'Bearer ' + tk } : {};
+  // PWA versão = versão do SW cache
   try {
     if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
       const ch = new MessageChannel();
@@ -995,25 +1029,45 @@ async function _loadAbout() {
       if (pwa) pwa.textContent = ver ? ver.replace('ecotrip-', '') : '—';
     }
   } catch (_) {}
-  // State já tem car_app_version + last_update_ms
-  const s = window.state || {};
+  // Fonte de verdade: /api/state (sempre atualizado pelo bridge) + /api/config
+  let s = window.state || {};
+  try {
+    const rs = await fetch('/api/state', { headers: hdrs });
+    if (rs.ok) s = await rs.json();
+  } catch (_) {}
   const apk = document.getElementById('about-apk');
   if (apk) apk.textContent = s.car_app_version ? 'v' + s.car_app_version : '—';
   const lu = document.getElementById('about-last-update');
   if (lu) {
-    if (s.last_update_ms) {
-      const age = Math.floor((Date.now() - s.last_update_ms) / 1000);
-      lu.textContent = age < 60 ? `${age}s atrás` : age < 3600 ? `${Math.floor(age/60)} min atrás` : `${Math.floor(age/3600)}h atrás`;
+    // Prefere car_last_update (ISO publicado pelo APK retained); fallback no last_update_ms (qualquer mensagem MQTT)
+    let ms = null;
+    if (s.car_last_update) {
+      const t = Date.parse(s.car_last_update);
+      if (!isNaN(t)) ms = t;
+    }
+    if (!ms && s.last_update_ms) ms = s.last_update_ms;
+    if (ms) {
+      const age = Math.floor((Date.now() - ms) / 1000);
+      let rel;
+      if (age < 60) rel = `${age}s atrás`;
+      else if (age < 3600) rel = `${Math.floor(age/60)} min atrás`;
+      else if (age < 86400) rel = `${Math.floor(age/3600)}h atrás`;
+      else rel = `${Math.floor(age/86400)}d atrás`;
+      lu.textContent = rel + ' · ' + new Date(ms).toLocaleString('pt-BR');
     } else lu.textContent = '—';
   }
-  // Bridge config (uptime, broker, node)
+  // Bridge config (uptime, broker, node, commit)
   try {
-    const r = await fetch('/api/config', { headers: tk ? { 'Authorization': 'Bearer ' + tk } : {} });
+    const r = await fetch('/api/config', { headers: hdrs });
     const d = await r.json();
     const br = document.getElementById('about-bridge');
-    if (br) br.textContent = d.version ? 'v' + d.version : '—';
+    if (br) {
+      const ver = d.version ? 'v' + d.version : '—';
+      const sha = d.git_commit ? ' (' + d.git_commit + ')' : '';
+      br.textContent = ver + sha;
+    }
     const head = document.getElementById('about-headline');
-    if (head && d.version) head.textContent = 'v' + d.version;
+    if (head && d.version) head.textContent = 'v' + d.version + (d.git_commit ? ' · ' + d.git_commit : '');
     const mqtt = document.getElementById('about-mqtt');
     if (mqtt) {
       mqtt.textContent = d.mqtt_connected ? '✓ conectado' : '✗ desconectado';
@@ -1158,23 +1212,119 @@ async function show2faBackup() {
 }
 
 // ─── Backup & Dados ──────────────────────────────────────
+// Guarda o blob gerado pra reusar nos botões do modal. NÃO carrega texto
+// inteiro em memória — backup pode ter 10MB+ e o textarea trava no iOS.
+let _backupBlob = null;
+let _backupFilename = '';
+let _backupSizeBytes = 0;
+
 async function downloadBackup() {
   const tk = localStorage.getItem('bridge_token');
-  if (!tk) return;
-  showToast('⬇ Gerando backup…', 'ok');
+  if (!tk) { showToast('✗ Sem token', 'err'); return; }
+  const btn = document.getElementById('btn-download-backup');
+  const orig = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Baixando…'; }
+  // Timeout de 60s pra detectar fetches travados
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 60_000);
   try {
-    const r = await fetch('/api/backup', { headers: { 'Authorization': 'Bearer ' + tk } });
+    const r = await fetch('/api/backup', {
+      headers: { 'Authorization': 'Bearer ' + tk },
+      signal: ctrl.signal,
+    });
     if (!r.ok) throw new Error('HTTP ' + r.status);
-    const blob = await r.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
+    // Total esperado: X-Original-Size (sempre, mesmo com gzip) ou Content-Length (sem gzip)
+    const total = parseInt(r.headers.get('X-Original-Size') || r.headers.get('Content-Length') || '0', 10);
+    // Stream do response — atualiza botão com % ou bytes recebidos
+    const reader = r.body && r.body.getReader ? r.body.getReader() : null;
+    const chunks = [];
+    let received = 0;
+    let lastUpdate = 0;
+    if (reader) {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+        received += value.length;
+        // Throttle de UI (no máx 1 update / 100ms pra não saturar repaint)
+        const now = Date.now();
+        if (now - lastUpdate > 100) {
+          lastUpdate = now;
+          if (btn) {
+            if (total > 0) {
+              const pct = Math.min(100, Math.round((received / total) * 100));
+              const rcvMb = (received / 1024 / 1024).toFixed(1);
+              const totMb = (total / 1024 / 1024).toFixed(1);
+              btn.textContent = `⏳ ${pct}% · ${rcvMb}/${totMb} MB`;
+            } else {
+              btn.textContent = `⏳ ${(received/1024/1024).toFixed(1)} MB…`;
+            }
+          }
+        }
+      }
+    } else {
+      chunks.push(await r.arrayBuffer());
+      received = chunks[0].byteLength;
+    }
+    if (btn && total > 0) btn.textContent = `✓ ${(received/1024/1024).toFixed(1)} MB baixados`;
+    clearTimeout(timer);
+    _backupBlob = new Blob(chunks, { type: 'application/json' });
+    _backupSizeBytes = received;
     const now = new Date();
-    a.download = `ecotrip-backup-${now.toISOString().slice(0,10)}.json`;
-    document.body.appendChild(a); a.click();
-    setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 100);
-    showToast('✓ Backup baixado', 'ok');
-  } catch (e) { showToast('✗ ' + e.message, 'err'); }
+    _backupFilename = `ecotrip-backup-${now.toISOString().slice(0,10)}.json`;
+    document.getElementById('backup-result-info').textContent = (received/1024).toFixed(0) + ' KB · ' + _backupFilename;
+    // NÃO popula o textarea com tudo (trava com 10MB+). Mostra os primeiros KB como preview.
+    const ta = document.getElementById('backup-result-text');
+    if (received > 200_000) {
+      // Pega só os primeiros 200KB pro textarea — pra Copiar/Compartilhar usa o blob inteiro
+      try {
+        const preview = await _backupBlob.slice(0, 200_000).text();
+        ta.value = preview + '\n\n... (preview · arquivo completo: ' + (received/1024).toFixed(0) + ' KB)\nUse "Compartilhar" ou "Copiar" para o backup integral.';
+      } catch (_) { ta.value = '(preview indisponível — use Compartilhar/Copiar)'; }
+    } else {
+      ta.value = await _backupBlob.text();
+    }
+    document.getElementById('backup-result-modal').style.display = 'flex';
+    const shareBtn = document.getElementById('btn-share-backup');
+    if (shareBtn) shareBtn.style.display = (navigator.share ? '' : 'none');
+    showToast('✓ Backup pronto (' + (received/1024).toFixed(0) + ' KB)', 'ok');
+  } catch (e) {
+    clearTimeout(timer);
+    console.error('[backup] erro:', e);
+    const msg = e.name === 'AbortError' ? 'timeout após 60s — rede lenta?' : (e.message || 'falha');
+    showToast('✗ ' + msg, 'err');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = orig || '⬇ Gerar backup'; }
+  }
+}
+
+async function copyBackupToClipboard() {
+  if (!_backupBlob) return;
+  try {
+    const text = await _backupBlob.text();
+    await navigator.clipboard.writeText(text);
+    showToast('✓ JSON copiado (' + (text.length/1024).toFixed(0) + ' KB)', 'ok');
+  } catch (e) {
+    console.warn('[backup] clipboard err:', e);
+    showToast('✗ Clipboard falhou — tente Compartilhar', 'err');
+  }
+}
+
+async function shareBackup() {
+  if (!_backupBlob) return;
+  try {
+    const file = new File([_backupBlob], _backupFilename, { type: 'application/json' });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title: 'EcoTrip Backup', text: _backupFilename });
+      showToast('✓ Compartilhado', 'ok');
+      return;
+    }
+    showToast('Compartilhamento de arquivo indisponível — use Copiar', 'err');
+  } catch (e) {
+    if (e && e.name === 'AbortError') return;
+    console.warn('[backup] share err:', e);
+    showToast('✗ ' + (e.message || 'falha ao compartilhar'), 'err');
+  }
 }
 
 async function uploadBackup(file) {
@@ -1240,20 +1390,296 @@ async function regenBackupCodes() {
 
 // ─── Notificações: prefs de push ───────────────────────
 let _notifPrefsLocal = {};
+// Device atualmente sendo editado na subview Notificações
+let _currentNotifDeviceId = null;
+let _notifDevicesList = [];
+
 async function _loadNotifPrefs() {
   const tk = localStorage.getItem('bridge_token');
   if (!tk) return;
+  const myId = localStorage.getItem('eco_device_id') || '';
+  // UI simplificada: cada dispositivo edita só as próprias prefs, sem
+  // listar/renomear/escolher. Backend salva tudo por device_id automático.
+  _currentNotifDeviceId = myId || null;
+  let registered = false;
   try {
-    const r = await fetch('/api/push/prefs', { headers: { 'Authorization': 'Bearer ' + tk } });
-    _notifPrefsLocal = await r.json();
-    // Atualiza estado visual dos toggles
+    const r = await fetch('/api/notif/devices', { headers: { 'Authorization': 'Bearer ' + tk } });
+    const j = await r.json();
+    registered = (j.devices || []).some(d => d.device_id === myId);
+  } catch (_) {}
+  const meCard = document.getElementById('notif-me-card');
+  const meIcon = document.getElementById('notif-me-icon');
+  const meStatus = document.getElementById('notif-me-status');
+  const meHint = document.getElementById('notif-me-hint');
+  const meActions = document.getElementById('notif-me-actions');
+  const pushPerm = ('Notification' in window) ? Notification.permission : 'unsupported';
+  if (meCard) {
+    if (registered) {
+      meCard.style.background = 'rgba(34,197,94,.08)';
+      meCard.style.border = '1px solid rgba(34,197,94,.3)';
+      meIcon.textContent = '✓';
+      meStatus.style.color = 'var(--green)';
+      meStatus.textContent = 'Push ativo neste dispositivo';
+      meHint.textContent = 'As preferências abaixo se aplicam só a este dispositivo.';
+      meActions.innerHTML = '';
+    } else if (pushPerm === 'granted') {
+      meCard.style.background = 'rgba(234,179,8,.08)';
+      meCard.style.border = '1px solid rgba(234,179,8,.35)';
+      meIcon.textContent = '⚠';
+      meStatus.style.color = 'var(--yellow)';
+      meStatus.textContent = 'Aguardando registro';
+      meHint.textContent = 'Toque pra tentar registrar novamente.';
+      meActions.innerHTML = '<button class="btn secondary" style="width:auto;padding:6px 12px;font-size:11px;margin:0" onclick="forceSubscribePush()">🔁 Registrar</button>';
+    } else if (pushPerm === 'denied') {
+      meCard.style.background = 'rgba(248,113,113,.08)';
+      meCard.style.border = '1px solid rgba(248,113,113,.35)';
+      meIcon.textContent = '🔕';
+      meStatus.style.color = 'var(--red)';
+      meStatus.textContent = 'Notificações bloqueadas';
+      meHint.textContent = 'Habilite em Ajustes > Safari > Notificações.';
+      meActions.innerHTML = '';
+    } else {
+      meCard.style.background = 'rgba(56,189,248,.08)';
+      meCard.style.border = '1px solid rgba(56,189,248,.35)';
+      meIcon.textContent = '🔔';
+      meStatus.style.color = '#38bdf8';
+      meStatus.textContent = 'Push não ativado';
+      meHint.textContent = 'Ative pra receber notificações neste dispositivo.';
+      meActions.innerHTML = '<button class="btn primary" style="width:auto;padding:6px 12px;font-size:11px;margin:0" onclick="forceSubscribePush()">🔔 Ativar</button>';
+    }
+  }
+  await _loadPrefsForCurrentDevice();
+}
+
+function _renderNotifPickerButton() {
+  const btn = document.getElementById('notif-device-picker-label');
+  if (!btn) return;
+  if (!_currentNotifDeviceId) { btn.textContent = '— nenhum dispositivo —'; return; }
+  const d = _notifDevicesList.find(x => x.device_id === _currentNotifDeviceId);
+  const myId = localStorage.getItem('eco_device_id');
+  if (!d) { btn.textContent = '— device removido —'; return; }
+  const isMe = d.device_id === myId;
+  btn.innerHTML = (isMe ? '★ ' : '') + '<strong>' + _escapeHtml(d.device_name) + '</strong> · visto ' + _relTime(d.last_seen || Date.now());
+}
+
+function _escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+}
+
+function _renderNotifDeviceList() {
+  const list = document.getElementById('notif-device-list');
+  if (!list) return;
+  const count = document.getElementById('notif-picker-count');
+  if (count) count.textContent = _notifDevicesList.length + (_notifDevicesList.length === 1 ? ' dispositivo' : ' dispositivos');
+  if (!_notifDevicesList.length) {
+    list.innerHTML = '<div style="text-align:center;color:var(--muted);padding:24px;font-size:13px">Nenhum dispositivo registrado.</div>';
+    return;
+  }
+  const myId = localStorage.getItem('eco_device_id') || '';
+  const sorted = [..._notifDevicesList].sort((a, b) => {
+    if (a.device_id === myId) return -1;
+    if (b.device_id === myId) return  1;
+    return (b.last_seen || 0) - (a.last_seen || 0);
+  });
+  list.innerHTML = sorted.map(d => {
+    const isMe = d.device_id === myId;
+    const isSelected = d.device_id === _currentNotifDeviceId;
+    const seen = d.last_seen ? _relTime(d.last_seen) : 'nunca';
+    const bg = isSelected ? 'rgba(34,197,94,.12)' : 'rgba(255,255,255,.03)';
+    const bd = isSelected ? 'var(--green)' : 'rgba(255,255,255,.08)';
+    const star = isMe ? '<span style="color:var(--green);font-size:13px">★</span> ' : '';
+    return `
+      <div style="background:${bg};border:1px solid ${bd};border-radius:10px;padding:10px 12px;display:flex;align-items:center;gap:10px">
+        <div style="flex:1;min-width:0;cursor:pointer" onclick="_pickNotifDevice('${d.device_id}')">
+          <div style="font-size:13px;font-weight:700;color:${isSelected ? 'var(--green)' : 'var(--text)'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${star}${_escapeHtml(d.device_name)}</div>
+          <div style="font-size:10.5px;color:var(--muted);margin-top:2px">${isMe ? 'Este dispositivo · ' : ''}visto ${seen} · ${d.endpoint_tail || ''}</div>
+        </div>
+        <button onclick="renameNotifDeviceById('${d.device_id}')" style="background:rgba(255,255,255,.06);color:#cbd5e1;border:none;border-radius:8px;padding:6px 8px;font-size:13px;cursor:pointer" title="Renomear">✏️</button>
+        <button onclick="removeNotifDeviceById('${d.device_id}')" style="background:rgba(248,113,113,.12);color:var(--red);border:none;border-radius:8px;padding:6px 8px;font-size:13px;cursor:pointer" title="Remover">🗑</button>
+      </div>
+    `;
+  }).join('');
+}
+
+function openNotifDevicePicker() {
+  const m = document.getElementById('notif-device-picker');
+  if (!m) return;
+  _renderNotifDeviceList();
+  m.style.display = 'flex';
+}
+
+function closeNotifDevicePicker() {
+  const m = document.getElementById('notif-device-picker');
+  if (m) m.style.display = 'none';
+}
+
+async function _pickNotifDevice(deviceId) {
+  _currentNotifDeviceId = deviceId;
+  _renderNotifPickerButton();
+  _renderNotifDeviceList();
+  await _loadPrefsForCurrentDevice();
+  closeNotifDevicePicker();
+}
+
+async function renameNotifDeviceById(deviceId) {
+  const cur = _notifDevicesList.find(d => d.device_id === deviceId);
+  const newName = prompt('Novo nome para o dispositivo:', cur?.device_name || '');
+  if (!newName || !newName.trim()) return;
+  const tk = localStorage.getItem('bridge_token');
+  try {
+    const r = await fetch('/api/notif/devices/' + encodeURIComponent(deviceId), {
+      method: 'PATCH',
+      headers: { 'Authorization': 'Bearer ' + tk, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ device_name: newName.trim() }),
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    showToast('✓ Renomeado', 'ok');
+    // Update otimista local + reload completo
+    const local = _notifDevicesList.find(d => d.device_id === deviceId);
+    if (local) local.device_name = newName.trim();
+    const myId = localStorage.getItem('eco_device_id');
+    if (myId === deviceId) localStorage.setItem('eco_device_name', newName.trim());
+    _renderNotifPickerButton();
+    _renderNotifDeviceList();
+    await _loadNotifPrefs();  // pega timestamps atualizados
+  } catch (e) { showToast('✗ ' + e.message, 'err'); }
+}
+
+async function removeNotifDeviceById(deviceId) {
+  const cur = _notifDevicesList.find(d => d.device_id === deviceId);
+  if (!confirm(`Remover "${cur?.device_name || deviceId}"? O dispositivo não receberá mais notificações até registrar de novo.`)) return;
+  const tk = localStorage.getItem('bridge_token');
+  try {
+    const r = await fetch('/api/notif/devices/' + encodeURIComponent(deviceId), {
+      method: 'DELETE',
+      headers: { 'Authorization': 'Bearer ' + tk },
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    showToast('✓ Dispositivo removido', 'ok');
+    // Remove otimista da lista local
+    _notifDevicesList = _notifDevicesList.filter(d => d.device_id !== deviceId);
+    if (_currentNotifDeviceId === deviceId) {
+      _currentNotifDeviceId = _notifDevicesList[0]?.device_id || null;
+    }
+    _renderNotifPickerButton();
+    _renderNotifDeviceList();
+    await _loadNotifPrefs();
+  } catch (e) { showToast('✗ ' + e.message, 'err'); }
+}
+
+// Tempo relativo em pt-BR — usado pra mostrar "visto há X" em cada device
+function _relTime(ms) {
+  const diff = Math.max(0, Date.now() - ms);
+  const s = Math.floor(diff / 1000);
+  if (s < 60)     return 'agora';
+  const m = Math.floor(s / 60);
+  if (m < 60)    return `há ${m} min`;
+  const h = Math.floor(m / 60);
+  if (h < 24)    return `há ${h}h`;
+  const d = Math.floor(h / 24);
+  if (d < 30)    return `há ${d}d`;
+  return new Date(ms).toLocaleDateString('pt-BR');
+}
+
+// Tenta registrar o device atual para push (chamado pelo card "Este dispositivo")
+async function forceSubscribePush() {
+  if (typeof window.subscribePush !== 'function') {
+    showToast('subscribePush indisponível — recarregue o app', 'err');
+    return;
+  }
+  showToast('🔔 Solicitando permissão…', 'ok');
+  try {
+    await window.subscribePush();
+    showToast('✓ Registrando…', 'ok');
+    // Pequeno delay pro bridge processar o subscribe
+    setTimeout(() => _loadNotifPrefs(), 800);
+  } catch (e) { showToast('✗ ' + (e.message || 'falha ao registrar'), 'err'); }
+}
+
+// Renomeia este dispositivo (atalho do card no topo)
+async function renameMyDevice() {
+  const myId = localStorage.getItem('eco_device_id');
+  if (!myId) return;
+  const cur = _notifDevicesList.find(d => d.device_id === myId);
+  const newName = prompt('Nome para este dispositivo (ex: iPhone do Rafael):', cur?.device_name || '');
+  if (!newName || !newName.trim()) return;
+  const tk = localStorage.getItem('bridge_token');
+  try {
+    const r = await fetch('/api/notif/devices/' + encodeURIComponent(myId), {
+      method: 'PATCH',
+      headers: { 'Authorization': 'Bearer ' + tk, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ device_name: newName.trim() }),
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    localStorage.setItem('eco_device_name', newName.trim());
+    showToast('✓ Renomeado', 'ok');
+    await _loadNotifPrefs();
+  } catch (e) { showToast('✗ ' + e.message, 'err'); }
+}
+
+async function _loadPrefsForCurrentDevice() {
+  const tk = localStorage.getItem('bridge_token');
+  if (!tk || !_currentNotifDeviceId) {
+    // Sem device: desabilita os toggles visualmente
+    document.querySelectorAll('#sv-notif .toggle[data-key]').forEach(el => el.classList.remove('on'));
+    _notifPrefsLocal = {};
+    return;
+  }
+  try {
+    const r = await fetch('/api/notif/prefs/' + encodeURIComponent(_currentNotifDeviceId), {
+      headers: { 'Authorization': 'Bearer ' + tk },
+    });
+    const j = await r.json();
+    _notifPrefsLocal = j.prefs || {};
     document.querySelectorAll('#sv-notif .toggle[data-key]').forEach(el => {
       const key = el.dataset.key;
       el.classList.toggle('on', !!_notifPrefsLocal[key]);
     });
-    // Mostra "Selecionar locais" quando geofence está ON + atualiza count
     _updateGeofenceLocalControls();
   } catch (_) {}
+}
+
+async function _onNotifDeviceChange() {
+  const sel = document.getElementById('notif-device-select');
+  _currentNotifDeviceId = sel?.value || null;
+  await _loadPrefsForCurrentDevice();
+}
+
+async function renameNotifDevice() {
+  if (!_currentNotifDeviceId) return;
+  const cur = _notifDevicesList.find(d => d.device_id === _currentNotifDeviceId);
+  const newName = prompt('Novo nome para o dispositivo:', cur?.device_name || '');
+  if (!newName || !newName.trim()) return;
+  const tk = localStorage.getItem('bridge_token');
+  try {
+    const r = await fetch('/api/notif/devices/' + encodeURIComponent(_currentNotifDeviceId), {
+      method: 'PATCH',
+      headers: { 'Authorization': 'Bearer ' + tk, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ device_name: newName.trim() }),
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    showToast('✓ Renomeado', 'ok');
+    // Se é o próprio device, atualiza localStorage também
+    const myId = localStorage.getItem('eco_device_id');
+    if (myId === _currentNotifDeviceId) localStorage.setItem('eco_device_name', newName.trim());
+    await _loadNotifPrefs();
+  } catch (e) { showToast('✗ ' + e.message, 'err'); }
+}
+
+async function removeNotifDevice() {
+  if (!_currentNotifDeviceId) return;
+  const cur = _notifDevicesList.find(d => d.device_id === _currentNotifDeviceId);
+  if (!confirm(`Remover "${cur?.device_name || _currentNotifDeviceId}"? O dispositivo não receberá mais notificações até registrar de novo.`)) return;
+  const tk = localStorage.getItem('bridge_token');
+  try {
+    const r = await fetch('/api/notif/devices/' + encodeURIComponent(_currentNotifDeviceId), {
+      method: 'DELETE',
+      headers: { 'Authorization': 'Bearer ' + tk },
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    showToast('✓ Dispositivo removido', 'ok');
+    await _loadNotifPrefs();
+  } catch (e) { showToast('✗ ' + e.message, 'err'); }
 }
 
 // Set de kinds que acabaram de ser ativados e ainda não tiveram a seleção
@@ -1292,12 +1718,12 @@ async function toggleChargeEnding() {
     el.classList.add('on');
     try {
       // Salva minutos primeiro
-      await fetch('/api/push/prefs', {
+      await fetch('/api/notif/prefs/' + encodeURIComponent(_currentNotifDeviceId), {
         method: 'POST', headers: { 'Authorization': 'Bearer ' + tk, 'Content-Type': 'application/json' },
         body: JSON.stringify({ key: 'charge_ending_min', value: min }),
       });
       // Ativa o toggle
-      const r = await fetch('/api/push/prefs', {
+      const r = await fetch('/api/notif/prefs/' + encodeURIComponent(_currentNotifDeviceId), {
         method: 'POST', headers: { 'Authorization': 'Bearer ' + tk, 'Content-Type': 'application/json' },
         body: JSON.stringify({ key: 'charge_ending', value: true }),
       });
@@ -1313,7 +1739,7 @@ async function toggleChargeEnding() {
     // Desligando
     el.classList.remove('on');
     try {
-      const r = await fetch('/api/push/prefs', {
+      const r = await fetch('/api/notif/prefs/' + encodeURIComponent(_currentNotifDeviceId), {
         method: 'POST', headers: { 'Authorization': 'Bearer ' + tk, 'Content-Type': 'application/json' },
         body: JSON.stringify({ key: 'charge_ending', value: false }),
       });
@@ -1334,8 +1760,9 @@ async function editChargeEndingMin() {
   if (input === null) return;
   const min = parseInt(input, 10);
   if (!min || min < 1 || min > 20) { showToast('✗ Valor entre 1 e 20', 'err'); return; }
+  if (!_currentNotifDeviceId) { showToast('Selecione um dispositivo primeiro', 'err'); return; }
   try {
-    const r = await fetch('/api/push/prefs', {
+    const r = await fetch('/api/notif/prefs/' + encodeURIComponent(_currentNotifDeviceId), {
       method: 'POST', headers: { 'Authorization': 'Bearer ' + tk, 'Content-Type': 'application/json' },
       body: JSON.stringify({ key: 'charge_ending_min', value: min }),
     });
@@ -1402,6 +1829,7 @@ async function saveGeofencePlaces() {
 async function toggleNotif(key) {
   const tk = localStorage.getItem('bridge_token');
   if (!tk) return;
+  if (!_currentNotifDeviceId) { showToast('Selecione um dispositivo primeiro', 'err'); return; }
   const el = document.querySelector(`#sv-notif .toggle[data-key="${key}"]`);
   if (!el) return;
   const newVal = !el.classList.contains('on');
@@ -1410,12 +1838,12 @@ async function toggleNotif(key) {
   // Atualiza controles dependentes (botão "Selecionar locais" pra geofence)
   if (key === 'geofence_arrival' || key === 'geofence_departure') {
     const kind = key === 'geofence_arrival' ? 'arrival' : 'departure';
-    if (newVal) _geofencePending.add(kind);   // ligou: mostra "Selecionar locais"
-    else _geofencePending.delete(kind);       // desligou: limpa pending
+    if (newVal) _geofencePending.add(kind);
+    else _geofencePending.delete(kind);
     _updateGeofenceLocalControls();
   }
   try {
-    const r = await fetch('/api/push/prefs', {
+    const r = await fetch('/api/notif/prefs/' + encodeURIComponent(_currentNotifDeviceId), {
       method: 'POST',
       headers: { 'Authorization': 'Bearer ' + tk, 'Content-Type': 'application/json' },
       body: JSON.stringify({ key, value: newVal }),
@@ -1425,7 +1853,6 @@ async function toggleNotif(key) {
       throw new Error(d.error || 'HTTP ' + r.status);
     }
   } catch (e) {
-    // Reverte em caso de erro
     el.classList.toggle('on', !newVal);
     _notifPrefsLocal[key] = !newVal;
     if (key === 'geofence_arrival' || key === 'geofence_departure') _updateGeofenceLocalControls();
@@ -1650,22 +2077,74 @@ async function actionUpdateBridge() {
   }
 }
 
+let _chargeLimitPending = null;     // pct solicitado, null quando não há pedido em curso
+let _chargeLimitTimer = null;
+
+// Auto-refresh do estado enquanto a subview Recarga está aberta: window.state
+// é atualizado pelo WS, mas a UI só re-renderiza quando _loadChargeLimit roda.
+let _chargeLimitWatcher = null;
 function _loadChargeLimit() {
-  const cur = +(window.state?.charge_limit_pct) || 0;
-  document.getElementById('soc-cur').textContent = cur > 0 ? cur + '%' : '--';
+  if (_chargeLimitPending !== null) return;  // não sobrescreve durante pendência
+  _setChargeLimitUI(+(window.state?.charge_limit_pct) || 0, null);
+  // Dispara releitura do carro — se o user mudou direto no carro, o estado
+  // do bridge pode estar desatualizado. APK re-publica em ha/charge_limit/state
+  // e o WS notifica o PWA em ~1s.
+  const tk = localStorage.getItem('bridge_token');
+  if (tk) {
+    fetch('/api/charge-limit/refresh', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + tk },
+    }).catch(() => {});
+  }
+  // Inicia watcher se ainda não tem
+  if (!_chargeLimitWatcher) {
+    _chargeLimitWatcher = setInterval(() => {
+      const sub = document.getElementById('sv-charge');
+      if (!sub || !sub.classList.contains('show')) {
+        clearInterval(_chargeLimitWatcher);
+        _chargeLimitWatcher = null;
+        return;
+      }
+      if (_chargeLimitPending !== null) return;
+      const cur = +(window.state?.charge_limit_pct) || 0;
+      _setChargeLimitUI(cur, null);
+    }, 1500);
+  }
+}
+
+// mode: null = estado normal · 'pending' (amarelo pulsando) · 'ok' · 'err'
+function _setChargeLimitUI(pct, mode) {
+  const cur = document.getElementById('soc-cur');
+  if (cur) {
+    if (mode === 'pending') cur.textContent = pct + '% (aguardando carro…)';
+    else cur.textContent = pct > 0 ? pct + '%' : '--';
+  }
   document.querySelectorAll('#soc-chips .soc-chip').forEach(c => {
-    c.classList.toggle('active', +c.dataset.pct === cur);
+    const isThis = +c.dataset.pct === pct;
+    c.classList.toggle('active', isThis);
+    c.classList.toggle('pending', isThis && mode === 'pending');
   });
+}
+
+function _clearChargePending() {
+  if (_chargeLimitTimer) { clearTimeout(_chargeLimitTimer); _chargeLimitTimer = null; }
+  _chargeLimitPending = null;
 }
 
 async function setChargeLimit(pct) {
   const tk = localStorage.getItem('bridge_token');
   if (!tk) return;
-  // Otimista: marca chip ativo na hora
-  document.querySelectorAll('#soc-chips .soc-chip').forEach(c => {
-    c.classList.toggle('active', +c.dataset.pct === pct);
-  });
-  document.getElementById('soc-cur').textContent = pct + '% (enviando…)';
+  _chargeLimitPending = pct;
+  _setChargeLimitUI(pct, 'pending');
+  if (_chargeLimitTimer) clearTimeout(_chargeLimitTimer);
+  // APK aguarda 10s antes de ler de volta — damos 25s pra ter folga
+  _chargeLimitTimer = setTimeout(() => {
+    if (_chargeLimitPending !== null) {
+      showToast('⚠ Carro não respondeu — verifique se o veículo está acordado', 'err');
+      _clearChargePending();
+      _loadChargeLimit();
+    }
+  }, 25000);
   try {
     const r = await fetch('/api/charge-limit', {
       method: 'POST',
@@ -1674,14 +2153,33 @@ async function setChargeLimit(pct) {
     });
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'HTTP ' + r.status);
-    showToast('✓ Comando enviado: limite ' + pct + '%', 'ok');
-    // O carro vai confirmar via WS (state.charge_limit_pct atualiza)
-    setTimeout(_loadChargeLimit, 2000);
+    showToast('⏳ Comando enviado — aguardando confirmação do carro (até 15s)', 'ok');
   } catch (e) {
+    _clearChargePending();
     showToast('✗ ' + e.message, 'err');
-    _loadChargeLimit();  // restaura
+    _loadChargeLimit();
   }
 }
+
+// Recebe ack do APK via WS (formato: { result: "ok:80" } ou { result: "error: ..." })
+window._onChargeLimitResult = function(data) {
+  if (_chargeLimitPending === null) return;  // não tem pedido em andamento
+  const raw = String(data?.result || '');
+  if (raw.startsWith('ok:')) {
+    const applied = parseInt(raw.slice(3));
+    if (applied === _chargeLimitPending) {
+      showToast('✓ Limite aplicado: ' + applied + '%', 'ok');
+    } else {
+      showToast('⚠ Carro aplicou ' + applied + '% (solicitado ' + _chargeLimitPending + '%)', 'err');
+    }
+    _clearChargePending();
+    _setChargeLimitUI(applied, null);
+  } else if (raw.startsWith('error')) {
+    showToast('✗ ' + raw, 'err');
+    _clearChargePending();
+    _loadChargeLimit();
+  }
+};
 
 async function _loadVehicle() {
   const tk = localStorage.getItem('bridge_token');
@@ -1929,7 +2427,7 @@ window.markMaintDone = async function(id) {
 };
 
   // Expõe handlers de onclick no window
-  Object.assign(window, { openSub: typeof openSub !== 'undefined' ? openSub : undefined, closeSub: typeof closeSub !== 'undefined' ? closeSub : undefined, saveSection: typeof saveSection !== 'undefined' ? saveSection : undefined, toggle2fa: typeof toggle2fa !== 'undefined' ? toggle2fa : undefined, confirmClearHistory: typeof confirmClearHistory !== 'undefined' ? confirmClearHistory : undefined, openMaintAdd: openMaintAdd, closeMaintModal: closeMaintModal, saveMaintItem: saveMaintItem, deleteMaintItem: deleteMaintItem, markMaintDone: markMaintDone, saveVehicle: saveVehicle, setChargeLimit: setChargeLimit, actionRefreshRadars: actionRefreshRadars, actionReanalyzeTrips: actionReanalyzeTrips, actionRestartBridge: actionRestartBridge, actionUpdateBridge: actionUpdateBridge, openPlaceAdd: openPlaceAdd, openPlaceEdit: openPlaceEdit, closePlaceModal: closePlaceModal, usePlaceGps: usePlaceGps, savePlace: savePlace, deletePlace: deletePlace, toggleNotif: toggleNotif, changePassword: changePassword, toggle2faNew: toggle2faNew, closeTotpModal: closeTotpModal, activate2fa: activate2fa, show2faBackup: show2faBackup, regenBackupCodes: regenBackupCodes, openGeofencePlaces: openGeofencePlaces, _toggleGeofencePick: _toggleGeofencePick, saveGeofencePlaces: saveGeofencePlaces, toggleChargeEnding: toggleChargeEnding, editChargeEndingMin: editChargeEndingMin, downloadBackup: downloadBackup, uploadBackup: uploadBackup, clearLocalCache: clearLocalCache, toggleDiag: toggleDiag, saveDiagInterval: saveDiagInterval, exportDiag: exportDiag, clearDiag: clearDiag, openDiagSet: openDiagSet, confirmDiagSet: confirmDiagSet, _scheduleDiagRender: _scheduleDiagRender });
+  Object.assign(window, { openSub: typeof openSub !== 'undefined' ? openSub : undefined, closeSub: typeof closeSub !== 'undefined' ? closeSub : undefined, saveSection: typeof saveSection !== 'undefined' ? saveSection : undefined, toggle2fa: typeof toggle2fa !== 'undefined' ? toggle2fa : undefined, confirmClearHistory: typeof confirmClearHistory !== 'undefined' ? confirmClearHistory : undefined, openMaintAdd: openMaintAdd, closeMaintModal: closeMaintModal, saveMaintItem: saveMaintItem, deleteMaintItem: deleteMaintItem, markMaintDone: markMaintDone, saveVehicle: saveVehicle, setChargeLimit: setChargeLimit, actionRefreshRadars: actionRefreshRadars, actionReanalyzeTrips: actionReanalyzeTrips, actionRestartBridge: actionRestartBridge, actionUpdateBridge: actionUpdateBridge, openPlaceAdd: openPlaceAdd, openPlaceEdit: openPlaceEdit, closePlaceModal: closePlaceModal, usePlaceGps: usePlaceGps, savePlace: savePlace, deletePlace: deletePlace, toggleNotif: toggleNotif, _onNotifDeviceChange: _onNotifDeviceChange, renameNotifDevice: renameNotifDevice, removeNotifDevice: removeNotifDevice, renameMyDevice: renameMyDevice, forceSubscribePush: forceSubscribePush, openNotifDevicePicker: openNotifDevicePicker, closeNotifDevicePicker: closeNotifDevicePicker, _pickNotifDevice: _pickNotifDevice, renameNotifDeviceById: renameNotifDeviceById, removeNotifDeviceById: removeNotifDeviceById, changePassword: changePassword, toggle2faNew: toggle2faNew, closeTotpModal: closeTotpModal, activate2fa: activate2fa, show2faBackup: show2faBackup, regenBackupCodes: regenBackupCodes, openGeofencePlaces: openGeofencePlaces, _toggleGeofencePick: _toggleGeofencePick, saveGeofencePlaces: saveGeofencePlaces, toggleChargeEnding: toggleChargeEnding, editChargeEndingMin: editChargeEndingMin, downloadBackup: downloadBackup, uploadBackup: uploadBackup, copyBackupToClipboard: copyBackupToClipboard, shareBackup: shareBackup, clearLocalCache: clearLocalCache, toggleDiag: toggleDiag, saveDiagInterval: saveDiagInterval, exportDiag: exportDiag, clearDiag: clearDiag, openDiagSet: openDiagSet, confirmDiagSet: confirmDiagSet, _scheduleDiagRender: _scheduleDiagRender });
   if (!window['initView_config']) window['initView_config'] = function() {};
 })();
 </script>

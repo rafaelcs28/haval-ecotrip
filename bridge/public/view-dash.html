@@ -127,7 +127,9 @@
   letter-spacing: 0.2px; font-weight: 800; text-transform: none;
   margin-left: auto;
   background: rgba(34,197,94,.22); color: var(--green);
+  display: inline-flex; align-items: center; gap: 3px;
 }
+.batt12-pill .ic-batt12 { display: inline-block; vertical-align: middle; }
 .batt12-pill.yellow { background: rgba(234,179,8,.22); color: var(--yellow); }
 .batt12-pill.orange { background: rgba(249,115,22,.22); color: #f97316; }
 .batt12-pill.red    { background: rgba(239,68,68,.22); color: var(--red); }
@@ -445,24 +447,80 @@
 .ty .temp.warn { color: var(--yellow); }
 .ty .temp.alert { color: var(--red); }
 
-/* Grid 2x2 de mini-cards de status (Pneus + Portas + Vidros + Clima) */
-.status-2x2 {
-  display: grid;
+/* Mini-grid 2x2 standalone — funciona em qualquer contexto (linhas finas, modal, etc) */
+.tyres-grid.mini {
   grid-template-columns: 1fr 1fr;
-  gap: 6px;
-  margin-bottom: 6px;
-}
-.status-2x2 .tyres-card { margin-bottom: 0; padding: 6px 8px; }
-.status-2x2 .tyres-grid.mini {
-  grid-template-columns: 1fr 1fr;
-  gap: 3px;
+  gap: 4px;
   align-items: stretch;
 }
-.status-2x2 .tyres-grid.mini .car-spacer { display: none; }
-.status-2x2 .ty { padding: 3px 4px; }
-.status-2x2 .ty.right { flex-direction: row; text-align: left; }
-.status-2x2 .ty .psi { font-size: 10.5px; }
-.status-2x2 .ty .temp { font-size: 8px; }
+.tyres-grid.mini .car-spacer { display: none; }
+.tyres-grid.mini .ty { padding: 6px 8px; }
+.tyres-grid.mini .ty.right { flex-direction: row; text-align: left; }
+
+/* Linhas finas de status (Pneus/Portas/Vidros/Clima) — clicáveis pra abrir detalhes */
+.status-lines {
+  display: flex; flex-direction: column; gap: 4px;
+  margin-bottom: 6px;
+}
+.sl {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 12px;
+  background: rgba(31,31,31,.85);
+  border: 1px solid rgba(34,197,94,.18);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background .15s;
+}
+.sl:active { background: rgba(255,255,255,.04); }
+.sl.warn  { border-color: rgba(234,179,8,.4); background: rgba(234,179,8,.06); }
+.sl.alert { border-color: rgba(248,113,113,.45); background: rgba(248,113,113,.08); }
+.sl-ic { font-size: 14px; flex-shrink: 0; }
+.sl-ti { font-size: 12px; font-weight: 700; color: #cbd5e1; text-transform: uppercase; letter-spacing: 0.5px; flex-shrink: 0; }
+.sl-st { flex: 1; text-align: right; font-size: 12px; font-weight: 600; color: var(--green); font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sl.warn  .sl-st { color: var(--yellow); }
+.sl.alert .sl-st { color: var(--red); }
+.sl-arrow { font-size: 18px; color: var(--muted); flex-shrink: 0; line-height: 1; }
+
+/* Modal de detalhes de status — bottom sheet com os mini-cards completos */
+.status-modal {
+  display: none; position: fixed; inset: 0; z-index: 250;
+  background: rgba(0,0,0,.75); backdrop-filter: blur(8px);
+  align-items: flex-end; justify-content: center;
+}
+.status-modal.show { display: flex; }
+.status-modal-card {
+  background: #1f1f1f; width: 100%; max-width: 520px;
+  border-top-left-radius: 18px; border-top-right-radius: 18px;
+  padding: 6px 12px calc(env(safe-area-inset-bottom) + 14px);
+  border-top: 1px solid rgba(255,255,255,.08);
+  max-height: 88vh; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.status-modal-handle { width: 42px; height: 5px; background: rgba(255,255,255,.18); border-radius: 3px; margin: 4px auto 8px; }
+.status-modal-title {
+  font-size: 16px; font-weight: 700; color: var(--text);
+  margin-bottom: 8px; padding: 0 4px;
+  display: flex; align-items: center; gap: 8px;
+}
+.status-modal-close {
+  width: 100%; padding: 12px; margin-top: 4px;
+  background: rgba(255,255,255,.06); color: #cbd5e1;
+  border: none; border-radius: 10px;
+  font-size: 14px; font-weight: 700; font-family: inherit; cursor: pointer;
+}
+/* Seções do modal — uma por vez (display controlado pelo JS) */
+.sm-section { display: none; }
+.sm-section.show { display: block; }
+.sm-section .tyres-card { padding: 12px; margin-bottom: 0; }
+.sm-section .tyres-card .ti { font-size: 11px; margin-bottom: 10px; }
+.sm-section .ty { padding: 10px 8px; }
+.sm-section .ty .psi { font-size: 16px; }
+.sm-section .ty .temp { font-size: 11px; }
+.sm-section .ty .ic { font-size: 16px; }
+.sm-section .cl-row { padding: 10px 12px; }
+.sm-section .cl-lbl { font-size: 12px; }
+.sm-section .cl-val { font-size: 14px; }
+.sm-hint { font-size: 10.5px; color: var(--muted); margin-top: 10px; line-height: 1.5; }
 
 /* Card de Clima (temps + AC) */
 .climate-grid { display: flex; flex-direction: column; gap: 3px; }
@@ -518,7 +576,7 @@
     <div class="hero-card green" id="hc-soc-card">
       <div class="lbl">
         Bateria<span id="hc-soc-tag"></span>
-        <span class="batt12-pill" id="hc-batt12-pill" style="display:none">🔌 <span id="hc-batt12-v">--</span>%</span>
+        <span class="batt12-pill" id="hc-batt12-pill" style="display:none"><svg class="ic-batt12" viewBox="0 0 24 14" width="14" height="9" aria-hidden="true"><rect x="2" y="2" width="3" height="2" rx="0.5" fill="currentColor"/><rect x="9" y="2" width="3" height="2" rx="0.5" fill="currentColor"/><rect x="1" y="4" width="13" height="9" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.4"/><text x="7.5" y="11.2" text-anchor="middle" font-size="5.5" font-weight="900" fill="currentColor">12V</text></svg> <span id="hc-batt12-v">--</span>%</span>
       </div>
       <div class="val-row" style="gap:10px">
         <div class="lvl-batt">
@@ -574,68 +632,113 @@
     <span id="st-windows-v" style="display:none"></span>
   </div>
 
-  <!-- Status detalhado: Pneus, Portas, Vidros, Clima em grid 2x2 -->
-  <div class="status-2x2">
-    <!-- Pneus -->
-    <div class="tyres-card">
-      <div class="ti">
-        <span>🛞 Pneus</span>
-        <span id="ty-summary" style="font-size:9.5px;color:#cbd5e1;font-weight:600;letter-spacing:0">--</span>
-      </div>
-      <span id="car-odo" style="display:none"></span>
-      <div class="tyres-grid mini">
-        <div class="ty"><span class="ic">🛞</span><div class="data"><span class="psi" id="ty-fl-psi">--</span><span class="temp"><span id="ty-fl-temp">--</span>° · DE</span></div></div>
-        <div class="ty"><span class="ic">🛞</span><div class="data"><span class="psi" id="ty-fr-psi">--</span><span class="temp"><span id="ty-fr-temp">--</span>° · DD</span></div></div>
-        <div class="ty"><span class="ic">🛞</span><div class="data"><span class="psi" id="ty-rl-psi">--</span><span class="temp"><span id="ty-rl-temp">--</span>° · TE</span></div></div>
-        <div class="ty"><span class="ic">🛞</span><div class="data"><span class="psi" id="ty-rr-psi">--</span><span class="temp"><span id="ty-rr-temp">--</span>° · TD</span></div></div>
-      </div>
+  <!-- Status do veículo em 4 linhas compactas — clique abre modal com detalhes -->
+  <div class="status-lines">
+    <div class="sl" id="sl-tyres" onclick="openStatusDetails('tyres')">
+      <span class="sl-ic">🛞</span>
+      <span class="sl-ti">Pneus</span>
+      <span class="sl-st" id="sl-tyres-st">--</span>
+      <span class="sl-arrow">›</span>
     </div>
-
-    <!-- Portas -->
-    <div class="tyres-card" id="doors-card">
-      <div class="ti">
-        <span>🚪 Portas</span>
-        <span style="font-size:9.5px;color:#cbd5e1;font-weight:600;letter-spacing:0" id="doors-summary">--</span>
-      </div>
-      <div class="tyres-grid mini">
-        <div class="ty" id="dr-fl"><span class="ic">🚪</span><span class="temp" style="font-size:9px">DE</span></div>
-        <div class="ty" id="dr-fr"><span class="ic">🚪</span><span class="temp" style="font-size:9px">DD</span></div>
-        <div class="ty" id="dr-rl"><span class="ic">🚪</span><span class="temp" style="font-size:9px">TE</span></div>
-        <div class="ty" id="dr-rr"><span class="ic">🚪</span><span class="temp" style="font-size:9px">TD</span></div>
-      </div>
+    <div class="sl" id="sl-doors" onclick="openStatusDetails('doors')">
+      <span class="sl-ic">🚪</span>
+      <span class="sl-ti">Portas</span>
+      <span class="sl-st" id="sl-doors-st">--</span>
+      <span class="sl-arrow">›</span>
     </div>
-
-    <!-- Vidros + teto solar (teto vai pro summary) -->
-    <div class="tyres-card" id="windows-card">
-      <div class="ti">
-        <span>🪟 Vidros</span>
-        <span style="font-size:9.5px;color:#cbd5e1;font-weight:600;letter-spacing:0" id="windows-summary">--</span>
-      </div>
-      <div class="tyres-grid mini">
-        <div class="ty" id="wn-fl"><span class="ic">🪟</span><span class="temp" style="font-size:9px">DE</span></div>
-        <div class="ty" id="wn-fr"><span class="ic">🪟</span><span class="temp" style="font-size:9px">DD</span></div>
-        <div class="ty" id="wn-rl"><span class="ic">🪟</span><span class="temp" style="font-size:9px">TE</span></div>
-        <div class="ty" id="wn-rr"><span class="ic">🪟</span><span class="temp" style="font-size:9px">TD</span></div>
-      </div>
-      <div style="font-size:9px;color:var(--muted);margin-top:3px;text-align:center" id="wn-sun-row">
-        ☀ teto <span id="wn-sun-ind">--</span>
-      </div>
+    <div class="sl" id="sl-windows" onclick="openStatusDetails('windows')">
+      <span class="sl-ic">🪟</span>
+      <span class="sl-ti">Vidros</span>
+      <span class="sl-st" id="sl-windows-st">--</span>
+      <span class="sl-arrow">›</span>
     </div>
-
-    <!-- Clima (temps + AC) -->
-    <div class="tyres-card" id="climate-card">
-      <div class="ti">
-        <span>🌡 Clima</span>
-        <span id="climate-status" style="font-size:9.5px;color:#cbd5e1;font-weight:600;letter-spacing:0">--</span>
-      </div>
-      <div class="climate-grid">
-        <div class="cl-row"><span class="cl-lbl">Externa</span><span class="cl-val" id="cl-out">--</span></div>
-        <div class="cl-row"><span class="cl-lbl">Interna</span><span class="cl-val" id="cl-in">--</span></div>
-        <div class="cl-row"><span class="cl-lbl">AC</span><span class="cl-val" id="cl-ac">--</span></div>
-      </div>
+    <div class="sl" id="sl-climate" onclick="openStatusDetails('climate')">
+      <span class="sl-ic">🌡</span>
+      <span class="sl-ti">Clima</span>
+      <span class="sl-st" id="sl-climate-st">--</span>
+      <span class="sl-arrow">›</span>
     </div>
   </div>
 
+  </div>
+</div>
+
+<!-- Modal: detalhe de UMA seção por vez (Pneus / Portas / Vidros / Clima) -->
+<div class="status-modal" id="status-modal" onclick="if(event.target===this) closeStatusDetails()">
+  <div class="status-modal-card">
+    <div class="status-modal-handle"></div>
+    <div class="status-modal-title" id="status-modal-title">Status</div>
+
+    <!-- Seção: Pneus -->
+    <div class="sm-section" id="sm-section-tyres">
+      <div class="tyres-card" id="sm-tyres-card">
+        <div class="ti">
+          <span>Pressão e temperatura</span>
+          <span id="ty-summary" style="font-size:11px;color:#cbd5e1;font-weight:700">--</span>
+        </div>
+        <span id="car-odo" style="display:none"></span>
+        <div class="tyres-grid mini">
+          <div class="ty"><span class="ic">🛞</span><div class="data"><span class="psi" id="ty-fl-psi">--</span><span class="temp"><span id="ty-fl-temp">--</span>° · DE</span></div></div>
+          <div class="ty"><span class="ic">🛞</span><div class="data"><span class="psi" id="ty-fr-psi">--</span><span class="temp"><span id="ty-fr-temp">--</span>° · DD</span></div></div>
+          <div class="ty"><span class="ic">🛞</span><div class="data"><span class="psi" id="ty-rl-psi">--</span><span class="temp"><span id="ty-rl-temp">--</span>° · TE</span></div></div>
+          <div class="ty"><span class="ic">🛞</span><div class="data"><span class="psi" id="ty-rr-psi">--</span><span class="temp"><span id="ty-rr-temp">--</span>° · TD</span></div></div>
+        </div>
+        <div class="sm-hint">Pressão ideal Haval H6 PHEV: <strong>36 PSI</strong> · faixa OK 34–39 · alerta &lt;32 ou &gt;42</div>
+      </div>
+    </div>
+
+    <!-- Seção: Portas -->
+    <div class="sm-section" id="sm-section-doors">
+      <div class="tyres-card" id="doors-card">
+        <div class="ti">
+          <span>Estado das portas</span>
+          <span style="font-size:11px;font-weight:700" id="doors-summary">--</span>
+        </div>
+        <div class="tyres-grid mini">
+          <div class="ty" id="dr-fl"><span class="ic">🚪</span><span class="temp" style="font-size:10px">DE</span></div>
+          <div class="ty" id="dr-fr"><span class="ic">🚪</span><span class="temp" style="font-size:10px">DD</span></div>
+          <div class="ty" id="dr-rl"><span class="ic">🚪</span><span class="temp" style="font-size:10px">TE</span></div>
+          <div class="ty" id="dr-rr"><span class="ic">🚪</span><span class="temp" style="font-size:10px">TD</span></div>
+        </div>
+        <div class="sm-hint">Verde = fechada · vermelho com ponto = aberta</div>
+      </div>
+    </div>
+
+    <!-- Seção: Vidros -->
+    <div class="sm-section" id="sm-section-windows">
+      <div class="tyres-card" id="windows-card">
+        <div class="ti">
+          <span>Estado dos vidros</span>
+          <span style="font-size:11px;font-weight:700" id="windows-summary">--</span>
+        </div>
+        <div class="tyres-grid mini">
+          <div class="ty" id="wn-fl"><span class="ic">🪟</span><span class="temp" style="font-size:10px">DE</span></div>
+          <div class="ty" id="wn-fr"><span class="ic">🪟</span><span class="temp" style="font-size:10px">DD</span></div>
+          <div class="ty" id="wn-rl"><span class="ic">🪟</span><span class="temp" style="font-size:10px">TE</span></div>
+          <div class="ty" id="wn-rr"><span class="ic">🪟</span><span class="temp" style="font-size:10px">TD</span></div>
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-top:8px;text-align:center" id="wn-sun-row">
+          ☀ teto solar: <span id="wn-sun-ind" style="font-weight:700">--</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Seção: Clima -->
+    <div class="sm-section" id="sm-section-climate">
+      <div class="tyres-card" id="climate-card">
+        <div class="ti">
+          <span>Climatização</span>
+          <span id="climate-status" style="font-size:11px;font-weight:700">--</span>
+        </div>
+        <div class="climate-grid">
+          <div class="cl-row"><span class="cl-lbl">Temperatura externa</span><span class="cl-val" id="cl-out">--</span></div>
+          <div class="cl-row"><span class="cl-lbl">Temperatura interna</span><span class="cl-val" id="cl-in">--</span></div>
+          <div class="cl-row"><span class="cl-lbl">Ar-condicionado</span><span class="cl-val" id="cl-ac">--</span></div>
+        </div>
+      </div>
+    </div>
+
+    <button class="status-modal-close" onclick="closeStatusDetails()">Fechar</button>
   </div>
 </div>
 
@@ -1327,6 +1430,11 @@ function render(s, kpData) {
     climateStatus.textContent = acOn ? '❄ ativo' : (s.outside_temp != null ? fmtTemp(s.outside_temp) : '--');
     climateStatus.style.color = acOn ? 'var(--green)' : '#cbd5e1';
   }
+  // Linha compacta de Clima
+  _setStatusLine('climate', acOn
+    ? `${fmtTemp(s.outside_temp)} · AC ${acSet > 0 ? acSet.toFixed(0) + '°' : 'on'}${acFan > 0 ? ' · Fan ' + acFan : ''}`
+    : `${fmtTemp(s.outside_temp)} · AC off`,
+    'ok');
 
   // ── Pill 12V dentro do card de Bateria SOC (cor por faixa)
   const pill12 = document.getElementById('hc-batt12-pill');
@@ -1422,17 +1530,20 @@ function renderCarLayers(s, charging) {
     }
   });
   const dSummary = document.getElementById('doors-summary');
-  if (dSummary) {
-    const n = doorOpenList.length + (trunkOpen ? 1 : 0);
-    if (n === 0) { dSummary.textContent = 'todas fechadas'; dSummary.style.color = 'var(--green)'; }
-    else {
-      const parts = [];
-      if (doorOpenList.length) parts.push(doorOpenList.length + (doorOpenList.length === 1 ? ' porta aberta' : ' portas abertas'));
-      if (trunkOpen) parts.push('+ porta-malas');
-      dSummary.textContent = parts.join(' ');
-      dSummary.style.color = 'var(--red)';
-    }
+  const dN = doorOpenList.length + (trunkOpen ? 1 : 0);
+  let dTxt, dLevel;
+  if (dN === 0) { dTxt = 'todas fechadas'; dLevel = 'ok'; }
+  else {
+    const parts = [];
+    if (doorOpenList.length) parts.push(doorOpenList.length + (doorOpenList.length === 1 ? ' aberta' : ' abertas'));
+    if (trunkOpen) parts.push('+ porta-malas');
+    dTxt = parts.join(' '); dLevel = 'alert';
   }
+  if (dSummary) {
+    dSummary.textContent = dTxt;
+    dSummary.style.color = dLevel === 'ok' ? 'var(--green)' : 'var(--red)';
+  }
+  _setStatusLine('doors', dTxt, dLevel);
 
   // ── Vidros (card detalhado: só alterna classe; teto solar embaixo)
   const sunOpen = s.sunroof === 'on';
@@ -1451,19 +1562,20 @@ function renderCarLayers(s, charging) {
     sunInd.textContent = sunOpen ? 'aberto' : 'fechado';
     sunInd.style.color = sunOpen ? 'var(--red)' : 'var(--green)';
   }
+  let wTxt, wLevel;
+  if (winOpen === 0 && !sunOpen) { wTxt = 'todos fechados'; wLevel = 'ok'; }
+  else {
+    const parts = [];
+    if (winOpen) parts.push(winOpen + (winOpen === 1 ? ' aberto' : ' abertos'));
+    if (sunOpen) parts.push('+ teto');
+    wTxt = parts.join(' '); wLevel = 'alert';
+  }
   const wSummary = document.getElementById('windows-summary');
   if (wSummary) {
-    if (winOpen === 0 && !sunOpen) {
-      wSummary.textContent = 'todos fechados';
-      wSummary.style.color = 'var(--green)';
-    } else {
-      const parts = [];
-      if (winOpen) parts.push(winOpen + (winOpen === 1 ? ' vidro aberto' : ' vidros abertos'));
-      if (sunOpen) parts.push('+ teto');
-      wSummary.textContent = parts.join(' ');
-      wSummary.style.color = 'var(--red)';
-    }
+    wSummary.textContent = wTxt;
+    wSummary.style.color = wLevel === 'ok' ? 'var(--green)' : 'var(--red)';
   }
+  _setStatusLine('windows', wTxt, wLevel);
 
   // ── Pneus
   setTyreCell('fl', s.tyre_pressure_fl, s.tyre_temp_fl);
@@ -1471,19 +1583,64 @@ function renderCarLayers(s, charging) {
   setTyreCell('rl', s.tyre_pressure_rl, s.tyre_temp_rl);
   setTyreCell('rr', s.tyre_pressure_rr, s.tyre_temp_rr);
 
-  // Summary do card de pneus (média de psi · média de temp)
-  const tySum = document.getElementById('ty-summary');
-  if (tySum) {
-    const psis = ['fl','fr','rl','rr'].map(k => +s['tyre_pressure_' + k]).filter(v => v > 0);
-    const temps = ['fl','fr','rl','rr'].map(k => +s['tyre_temp_' + k]).filter(v => v > 0);
-    if (psis.length === 0) { tySum.textContent = '--'; }
+  // Summary de pneus — detecta anomalia (psi/temp fora da faixa) e gera label
+  const psis = ['fl','fr','rl','rr'].map(k => ({ k, v: +s['tyre_pressure_' + k] })).filter(x => x.v > 0);
+  const temps = ['fl','fr','rl','rr'].map(k => ({ k, v: +s['tyre_temp_' + k] })).filter(x => x.v > 0);
+  const sideLbl = { fl: 'DE', fr: 'DD', rl: 'TE', rr: 'TD' };
+  let tyTxt, tyLevel;
+  if (psis.length === 0) { tyTxt = '--'; tyLevel = 'ok'; }
+  else {
+    const bad = psis.find(x => _tyrePsiClass(x.v) === 'alert');
+    const warn = psis.find(x => _tyrePsiClass(x.v) === 'warn');
+    const hotBad = temps.find(x => _tyreTempClass(x.v) === 'alert');
+    if (bad)       { tyTxt = `${sideLbl[bad.k]} ${Math.round(bad.v)} PSI`;   tyLevel = 'alert'; }
+    else if (warn) { tyTxt = `${sideLbl[warn.k]} ${Math.round(warn.v)} PSI`; tyLevel = 'warn';  }
+    else if (hotBad){ tyTxt = `${sideLbl[hotBad.k]} ${Math.round(hotBad.v)}°`; tyLevel = 'alert'; }
     else {
-      const psiAvg = Math.round(psis.reduce((a,b)=>a+b,0) / psis.length);
-      const tAvg = temps.length ? Math.round(temps.reduce((a,b)=>a+b,0) / temps.length) : null;
-      tySum.textContent = psiAvg + ' · ' + (tAvg != null ? tAvg + '°' : '--');
+      const psiAvg = Math.round(psis.reduce((a,b)=>a+b.v,0) / psis.length);
+      const tAvg = temps.length ? Math.round(temps.reduce((a,b)=>a+b.v,0) / temps.length) : null;
+      tyTxt = psiAvg + ' PSI' + (tAvg != null ? ' · ' + tAvg + '°' : '');
+      tyLevel = 'ok';
     }
   }
+  const tySum = document.getElementById('ty-summary');
+  if (tySum) tySum.textContent = tyTxt;
+  _setStatusLine('tyres', tyTxt, tyLevel);
 }
+
+// Atualiza a linha compacta (id sl-<key>) + texto + estado de cor (ok/warn/alert)
+function _setStatusLine(key, text, level) {
+  const line = document.getElementById('sl-' + key);
+  const st = document.getElementById('sl-' + key + '-st');
+  if (st) st.textContent = text;
+  if (line) {
+    line.classList.remove('warn', 'alert');
+    if (level === 'warn')  line.classList.add('warn');
+    if (level === 'alert') line.classList.add('alert');
+  }
+}
+
+window.openStatusDetails = function(section) {
+  const m = document.getElementById('status-modal');
+  if (!m) return;
+  // Mostra só a seção escolhida
+  document.querySelectorAll('.sm-section').forEach(el => el.classList.remove('show'));
+  const target = document.getElementById('sm-section-' + section);
+  if (target) target.classList.add('show');
+  const titles = {
+    tyres:   '🛞 Pneus',
+    doors:   '🚪 Portas',
+    windows: '🪟 Vidros',
+    climate: '🌡 Clima',
+  };
+  const t = document.getElementById('status-modal-title');
+  if (t) t.textContent = titles[section] || 'Status';
+  m.classList.add('show');
+};
+window.closeStatusDetails = function() {
+  const m = document.getElementById('status-modal');
+  if (m) m.classList.remove('show');
+};
 
 // Toggle bottom sheet entre expandido / minimizado
 function toggleSheet() {

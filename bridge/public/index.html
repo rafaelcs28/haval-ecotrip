@@ -372,11 +372,12 @@ input { font-family: inherit; }
   <div class="brand" onclick="openVersionInfo()">
     <span class="logo">🚗</span>
     <div class="info">
-      <div class="model"><span id="hdr-model-name">Haval H6 PHEV</span> <span style="color:var(--muted);font-weight:500">▾</span></div>
+      <div class="model"><span id="hdr-model-name">…</span> <span style="color:var(--muted);font-weight:500">▾</span></div>
       <div class="ver"><span id="hdr-apk-ver">…</span></div>
     </div>
   </div>
   <div class="right">
+    <button class="bell" id="net-indicator" onclick="openNetInfo()" title="Conexão de rede" style="font-size:14px;line-height:1">…</button>
     <span id="status-dot" class="dot offline" title="Conexão"></span>
     <button class="bell" onclick="openNotifPanel()">
       🔔<span id="bell-badge" class="badge" style="display:none">0</span>
@@ -400,6 +401,54 @@ input { font-family: inherit; }
   </div>
   <button class="ub-btn" onclick="hardRefresh()">Atualizar</button>
   <button class="ub-close" onclick="dismissUpdateBanner()" title="Dispensar">✕</button>
+</div>
+
+<!-- ──────────────────────── MODAL: VERSÃO + CARRO ──────────────────────── -->
+<!-- ──────────────────────── MODAL: REDE ──────────────────────── -->
+<div id="net-info-modal" style="display:none;position:fixed;inset:0;z-index:250;background:rgba(0,0,0,.7);align-items:flex-end;justify-content:center;backdrop-filter:blur(8px)" onclick="if(event.target===this) closeNetInfo()">
+  <div style="background:#1f1f1f;width:100%;max-width:480px;border-top-left-radius:18px;border-top-right-radius:18px;padding:18px 18px calc(env(safe-area-inset-bottom) + 18px);border-top:1px solid rgba(255,255,255,.08)">
+    <div style="width:42px;height:5px;background:rgba(255,255,255,.18);border-radius:3px;margin:-8px auto 14px"></div>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+      <span id="net-info-icon" style="font-size:24px">📶</span>
+      <div>
+        <div id="net-info-title" style="font-size:16px;font-weight:700;color:var(--text)">—</div>
+        <div style="font-size:11px;color:var(--muted)">Conexão de rede do dispositivo</div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px;font-size:13px">
+      <div style="display:flex;justify-content:space-between;padding:8px 10px;background:rgba(255,255,255,.04);border-radius:8px"><span style="color:#94a3b8">Tipo</span><span id="net-info-type" style="font-weight:700">—</span></div>
+      <div style="display:flex;justify-content:space-between;padding:8px 10px;background:rgba(255,255,255,.04);border-radius:8px"><span style="color:#94a3b8">Velocidade estimada</span><span id="net-info-speed" style="font-weight:600;color:#cbd5e1">—</span></div>
+      <div style="display:flex;justify-content:space-between;padding:8px 10px;background:rgba(255,255,255,.04);border-radius:8px"><span style="color:#94a3b8">Online</span><span id="net-info-online" style="font-weight:700">—</span></div>
+      <div style="height:6px"></div>
+      <div style="display:flex;justify-content:space-between;padding:8px 10px;background:rgba(255,255,255,.04);border-radius:8px;gap:8px"><span style="color:#94a3b8;flex-shrink:0">IP local (LAN)</span><span id="net-info-ip-local" style="font-weight:700;color:#cbd5e1;font-family:monospace;font-size:11px;text-align:right">—</span></div>
+      <div style="display:flex;justify-content:space-between;padding:8px 10px;background:rgba(255,255,255,.04);border-radius:8px;gap:8px"><span style="color:#94a3b8;flex-shrink:0">IP visto pelo bridge</span><span id="net-info-ip" style="font-weight:700;color:#cbd5e1;font-family:monospace;font-size:11px;text-align:right">—</span></div>
+      <div style="display:flex;justify-content:space-between;padding:8px 10px;background:rgba(255,255,255,.04);border-radius:8px;gap:8px"><span style="color:#94a3b8;flex-shrink:0">Host do bridge</span><span id="net-info-host" style="font-weight:600;color:#cbd5e1;font-family:monospace;font-size:11px;text-align:right">—</span></div>
+    </div>
+    <button onclick="closeNetInfo()" style="width:100%;margin-top:14px;padding:12px;background:rgba(255,255,255,.06);color:#cbd5e1;border:none;border-radius:10px;font-size:14px;font-weight:700;font-family:inherit">Fechar</button>
+  </div>
+</div>
+
+<div id="version-info-modal" style="display:none;position:fixed;inset:0;z-index:250;background:rgba(0,0,0,.7);align-items:flex-end;justify-content:center;backdrop-filter:blur(8px)" onclick="if(event.target===this) closeVersionInfo()">
+  <div style="background:#1f1f1f;width:100%;max-width:480px;border-top-left-radius:18px;border-top-right-radius:18px;padding:18px 18px calc(env(safe-area-inset-bottom) + 18px);border-top:1px solid rgba(255,255,255,.08)">
+    <div style="width:42px;height:5px;background:rgba(255,255,255,.18);border-radius:3px;margin:-8px auto 14px"></div>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+      <span style="font-size:24px">🚗</span>
+      <div>
+        <div id="vi-model" style="font-size:16px;font-weight:700;color:var(--text)">—</div>
+        <div style="font-size:11px;color:var(--muted)">Detalhes do veículo e versões</div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px;font-size:13px">
+      <div style="display:flex;justify-content:space-between;padding:8px 10px;background:rgba(255,255,255,.04);border-radius:8px"><span style="color:#94a3b8">Status do carro</span><span id="vi-car-status" style="font-weight:700">—</span></div>
+      <div style="display:flex;justify-content:space-between;padding:8px 10px;background:rgba(255,255,255,.04);border-radius:8px"><span style="color:#94a3b8">Última atualização</span><span id="vi-last-update" style="font-weight:600;color:#cbd5e1">—</span></div>
+      <div style="display:flex;justify-content:space-between;padding:8px 10px;background:rgba(255,255,255,.04);border-radius:8px;gap:8px"><span style="color:#94a3b8;flex-shrink:0">Chassi</span><span id="vi-chassi" style="font-weight:600;color:#cbd5e1;font-family:monospace;font-size:10.5px;text-align:right;overflow:hidden;text-overflow:ellipsis">—</span></div>
+      <div style="height:6px"></div>
+      <div style="display:flex;justify-content:space-between;padding:8px 10px;background:rgba(255,255,255,.04);border-radius:8px"><span style="color:#94a3b8">📱 PWA</span><span id="vi-pwa" style="font-weight:700;color:var(--green);font-family:monospace">—</span></div>
+      <div style="display:flex;justify-content:space-between;padding:8px 10px;background:rgba(255,255,255,.04);border-radius:8px"><span style="color:#94a3b8">🚙 APK (carro)</span><span id="vi-apk" style="font-weight:700;color:var(--green);font-family:monospace">—</span></div>
+      <div style="display:flex;justify-content:space-between;padding:8px 10px;background:rgba(255,255,255,.04);border-radius:8px"><span style="color:#94a3b8">🌉 Bridge</span><span id="vi-bridge" style="font-weight:700;color:var(--green);font-family:monospace">—</span></div>
+    </div>
+    <button onclick="closeVersionInfo()" style="width:100%;margin-top:14px;padding:12px;background:rgba(255,255,255,.06);color:#cbd5e1;border:none;border-radius:10px;font-size:14px;font-weight:700;font-family:inherit">Fechar</button>
+  </div>
 </div>
 
 <!-- ──────────────────────── NOTIF OVERLAY ──────────────────────── -->
@@ -477,6 +526,10 @@ input { font-family: inherit; }
 // ═════════════════════════════════════════════════════════
 let bridgeToken = localStorage.getItem('bridge_token') || '';
 let state = {};
+// Expõe o objeto state no window pra que as views leiam direto (deepMerge muta
+// o conteúdo sem trocar a referência, então window.state acompanha mudanças
+// em tempo real sem precisar de reassign).
+window.state = state;
 let ws = null;
 let wsReconnectTimeout = null;
 let wsRetryDelay = 1000;
@@ -831,6 +884,8 @@ function connect() {
         if (window._onDiagUpdate) window._onDiagUpdate(msg.data);
       } else if (msg.type === 'diag_ack') {
         if (window._onDiagAck) window._onDiagAck(msg.data);
+      } else if (msg.type === 'charge_limit_result') {
+        if (window._onChargeLimitResult) window._onChargeLimitResult(msg.data);
       } else if (msg.type === 'diag_state') {
         if (window._onDiagState) window._onDiagState(msg.data);
       } else if (msg.type === 'diag_event') {
@@ -1068,6 +1123,15 @@ function urlBase64ToUint8Array(b64) {
   return Uint8Array.from(raw, c => c.charCodeAt(0));
 }
 
+// device_id é gerado no BOOT pra existir mesmo antes de habilitar push.
+// Quando subscribePush rodar (após permissão), esse mesmo ID vai pro bridge.
+(function _ensureDeviceId() {
+  if (!localStorage.getItem('eco_device_id')) {
+    const id = (crypto.randomUUID && crypto.randomUUID()) || ('dev_' + Date.now() + '_' + Math.random().toString(36).slice(2, 10));
+    localStorage.setItem('eco_device_id', id);
+  }
+})();
+
 async function subscribePush() {
   if (!('Notification' in window) || !('PushManager' in window)) return;
   let perm = Notification.permission;
@@ -1091,10 +1155,35 @@ async function subscribePush() {
     });
     localStorage.setItem('push_vapid_key', vapidKey);
   }
-  await apiFetch('/api/push/subscribe', {
+  // device_id estável por device — gera 1x e guarda. device_name default
+  // usa user agent (user pode renomear depois em Configurações > Notificações).
+  let deviceId = localStorage.getItem('eco_device_id');
+  if (!deviceId) {
+    deviceId = (crypto.randomUUID && crypto.randomUUID()) || ('dev_' + Date.now() + '_' + Math.random().toString(36).slice(2, 10));
+    localStorage.setItem('eco_device_id', deviceId);
+  }
+  const deviceName = localStorage.getItem('eco_device_name') || _guessDeviceName();
+  const subPayload = sub.toJSON ? sub.toJSON() : sub;
+  const r = await apiFetch('/api/push/subscribe', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(sub),
+    body: JSON.stringify({ ...subPayload, device_id: deviceId, device_name: deviceName }),
   });
+  // Bridge pode retornar device_name que ele tem registrado (ex: renomeado pelo user)
+  try {
+    const j = await r.json();
+    if (j?.device_name) localStorage.setItem('eco_device_name', j.device_name);
+  } catch (_) {}
+}
+
+// Adivinha um nome humano pro device — só pro primeiro registro.
+function _guessDeviceName() {
+  const ua = navigator.userAgent || '';
+  if (/iPad/.test(ua))    return 'iPad';
+  if (/iPhone/.test(ua))  return 'iPhone';
+  if (/Macintosh/.test(ua)) return 'Mac';
+  if (/Android/.test(ua)) return /Tablet|SM-T/.test(ua) ? 'Tablet Android' : 'Android';
+  if (/Windows/.test(ua)) return 'Windows';
+  return 'Dispositivo';
 }
 
 // ═════════════════════════════════════════════════════════
@@ -1156,11 +1245,59 @@ async function switchView(name) {
 
   if (!_viewsLoaded.has(name)) await loadView(name);
   if (window['renderView_' + name]) window['renderView_' + name]();
+  _updateHfMode();
 }
 
 window._renderActiveView = function() {
   if (window['renderView_' + activeView]) window['renderView_' + activeView]();
 };
+
+// ═════════════════════════════════════════════════════════
+//  HF MODE — pede pro APK publicar a 250ms enquanto Dash/Drive estão ativas
+// ═════════════════════════════════════════════════════════
+// Bridge tem watchdog de 10s: se o PWA não bate heartbeat, desliga HF.
+// Aqui batemos a cada 5s nas views relevantes; quando troca de aba, manda OFF.
+const _HF_VIEWS = new Set(['dash', 'drive', 'conforto']);
+let _hfHeartbeatTimer = null;
+let _hfLastSent = null;
+
+async function _hfPost(active) {
+  if (!bridgeToken) return;
+  try {
+    await fetch('/api/hf_mode', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + bridgeToken, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ active }),
+    });
+  } catch (_) { /* sem rede: bridge watchdog desliga sozinho */ }
+}
+
+function _updateHfMode() {
+  const shouldBe = _HF_VIEWS.has(activeView) && document.visibilityState !== 'hidden';
+  if (shouldBe !== _hfLastSent) {
+    _hfLastSent = shouldBe;
+    _hfPost(shouldBe);
+  } else if (shouldBe) {
+    // Heartbeat (mesmo estado) — mantém o bridge feliz pelos próximos 10s
+    _hfPost(true);
+  }
+}
+
+function _startHfHeartbeat() {
+  if (_hfHeartbeatTimer) return;
+  _updateHfMode();
+  _hfHeartbeatTimer = setInterval(_updateHfMode, 5000);
+}
+
+document.addEventListener('visibilitychange', () => {
+  // Quando o PWA vai pro background, desliga HF imediato (não desperdiça bateria do carro)
+  if (document.visibilityState === 'hidden' && _hfLastSent) {
+    _hfLastSent = false;
+    _hfPost(false);
+  } else if (document.visibilityState === 'visible') {
+    _updateHfMode();
+  }
+});
 
 // ═════════════════════════════════════════════════════════
 //  BOOTSTRAP
@@ -1194,10 +1331,12 @@ async function bootstrap() {
   // Só cai no login se o servidor explicitamente devolver 401 (token inválido).
   // Sem rede ou servidor down: continua mostrando cache normalmente.
 
-  // 1. Restaura state do cache local pra render header rolar
+  // 1. Restaura state do cache local pra render header rolar.
+  // IMPORTANTE: usa Object.assign pra mutar em vez de reassign — window.state
+  // já aponta pra essa referência, e views dependem disso pra ver updates live.
   try {
     const cachedState = localStorage.getItem('eco_state_cache');
-    if (cachedState) state = JSON.parse(cachedState);
+    if (cachedState) Object.assign(state, JSON.parse(cachedState));
   } catch (_) {}
 
   // 2. Mostra a UI já com cache (banner offline aparece se aplicável)
@@ -1209,6 +1348,8 @@ async function bootstrap() {
 
   // 3. Tenta sincronizar com servidor em background — sem bloquear UI
   _syncWithServer();
+  // 4. Liga heartbeat HF (publica a 250ms enquanto Dash/Drive estão ativas)
+  _startHfHeartbeat();
 }
 
 // Sincroniza com o bridge. Não bloqueia o boot.
@@ -1223,7 +1364,11 @@ async function _syncWithServer() {
     });
     if (r.status === 401) { showLogin('Sessão expirada.'); return; }
     if (!r.ok) return;  // 5xx ou outro: mantém modo offline silencioso
-    state = await r.json();
+    // Muta no lugar (window.state aponta pra essa referência)
+    const fresh = await r.json();
+    // Limpa keys antigas que sumiram do server e copia as novas
+    for (const k of Object.keys(state)) if (!(k in fresh)) delete state[k];
+    Object.assign(state, fresh);
     try { localStorage.setItem('eco_state_cache', JSON.stringify(state)); } catch (_) {}
     _scheduleRender();
     connect();  // WS — começa sync em tempo real
@@ -1421,11 +1566,147 @@ window.addEventListener('load', () => {
 });
 
 // Stubs pra views (cada view registra suas próprias funções)
-function openVersionInfo() {
-  const msg = `EcoTrip ${state.bridge_version || '?'} · APK ${state.car_version || '?'}\n` +
-    `Carro: ${state.car_online ? 'online' : 'offline'}\n` +
-    `Última atualização: ${relTime(lastUpdateMs)}`;
-  alert(msg);
+async function openVersionInfo() {
+  const modal = document.getElementById('version-info-modal');
+  if (!modal) { alert('Modal não encontrado'); return; }
+  // Modelo (do header, populado por _loadModelName)
+  const model = document.getElementById('hdr-model-name')?.textContent || 'Veículo';
+  document.getElementById('vi-model').textContent = model;
+  document.getElementById('vi-apk').textContent = state.car_app_version ? 'v' + state.car_app_version : '—';
+  document.getElementById('vi-pwa').textContent = (localStorage.getItem('eco_pwa_version') || '').replace('ecotrip-','') || '—';
+  // Conexão do carro
+  const sec = lastUpdateMs ? Math.floor((Date.now() - lastUpdateMs) / 1000) : null;
+  const online = state.car_online && sec != null && sec < 30;
+  const carEl = document.getElementById('vi-car-status');
+  carEl.textContent = online ? 'online' : 'offline';
+  carEl.style.color = online ? 'var(--green)' : 'var(--red)';
+  document.getElementById('vi-last-update').textContent = lastUpdateMs ? relTime(lastUpdateMs) : '—';
+  // Reseta enquanto carrega
+  document.getElementById('vi-chassi').textContent = '…';
+  document.getElementById('vi-bridge').textContent = '…';
+  modal.style.display = 'flex';
+  // Busca dados frescos em paralelo (vehicle + config)
+  const hdrs = { 'Authorization': 'Bearer ' + bridgeToken };
+  try {
+    const [rv, rc] = await Promise.all([
+      fetch('/api/vehicle', { headers: hdrs }),
+      fetch('/api/config', { headers: hdrs }),
+    ]);
+    if (rv.ok) {
+      const d = await rv.json();
+      if (d.model_name) document.getElementById('vi-model').textContent = d.model_name;
+      // Chassi ativo (usado pelo bridge) — campo correto é "active", não "chassi"
+      const chassi = d.active || d.saved_in_file || '';
+      document.getElementById('vi-chassi').textContent = chassi ? chassi.toUpperCase() : '—';
+    } else {
+      document.getElementById('vi-chassi').textContent = '—';
+    }
+    if (rc.ok) {
+      const c = await rc.json();
+      document.getElementById('vi-bridge').textContent = c.version ? 'v' + c.version : '—';
+    } else {
+      document.getElementById('vi-bridge').textContent = '—';
+    }
+  } catch (_) {
+    document.getElementById('vi-chassi').textContent = '—';
+    document.getElementById('vi-bridge').textContent = '—';
+  }
+}
+function closeVersionInfo() {
+  const m = document.getElementById('version-info-modal');
+  if (m) m.style.display = 'none';
+}
+
+// ─── Indicador de rede no header ───────────────────────────────────────────
+// Detecta tipo via Network Information API (parcial em iOS — fallback "online").
+// Toque abre modal com IP visto pelo bridge + tipo + velocidade estimada.
+function _getNetSummary() {
+  const c = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+  if (!navigator.onLine) return { icon: '🚫', label: 'Offline', type: 'offline' };
+  if (!c) return { icon: '📶', label: 'Online', type: 'unknown' };
+  // c.type não vem em iOS — usa effectiveType como fallback
+  const t = c.type || '';
+  const eff = c.effectiveType || '';
+  if (t === 'wifi') return { icon: '📶', label: 'Wi-Fi', type: 'wifi', eff };
+  if (t === 'ethernet') return { icon: '🔌', label: 'Cabo', type: 'ethernet', eff };
+  if (t === 'cellular' || /[234]g/.test(eff)) {
+    const label = eff ? eff.toUpperCase() : 'Celular';
+    return { icon: '📱', label, type: 'cellular', eff };
+  }
+  return { icon: '📶', label: 'Online', type: t || 'unknown', eff };
+}
+
+function _renderNetIndicator() {
+  const el = document.getElementById('net-indicator');
+  if (!el) return;
+  const s = _getNetSummary();
+  el.textContent = s.icon;
+  el.title = s.label;
+  el.style.opacity = s.type === 'offline' ? '0.45' : '1';
+}
+
+async function openNetInfo() {
+  const m = document.getElementById('net-info-modal');
+  if (!m) return;
+  const s = _getNetSummary();
+  document.getElementById('net-info-icon').textContent = s.icon;
+  document.getElementById('net-info-title').textContent = s.label;
+  document.getElementById('net-info-type').textContent = s.label + (s.eff ? ' (' + s.eff.toUpperCase() + ')' : '');
+  const c = navigator.connection;
+  document.getElementById('net-info-speed').textContent = c?.downlink ? c.downlink + ' Mbps' : '—';
+  const onlineEl = document.getElementById('net-info-online');
+  onlineEl.textContent = navigator.onLine ? 'sim' : 'não';
+  onlineEl.style.color = navigator.onLine ? 'var(--green)' : 'var(--red)';
+  document.getElementById('net-info-host').textContent = location.host;
+  document.getElementById('net-info-ip-local').textContent = '…';
+  document.getElementById('net-info-ip').textContent = '…';
+  m.style.display = 'flex';
+  // IP local via WebRTC ICE candidate (truque clássico; alguns navegadores
+  // mascaram com mDNS — nesses casos retorna ".local")
+  _getLocalIp().then(ip => {
+    document.getElementById('net-info-ip-local').textContent = ip || 'indisponível';
+  });
+  try {
+    const r = await fetch('/api/whoami', { headers: { 'Authorization': 'Bearer ' + bridgeToken } });
+    if (r.ok) {
+      const d = await r.json();
+      document.getElementById('net-info-ip').textContent = d.remote_ip || '—';
+    } else {
+      document.getElementById('net-info-ip').textContent = '— (HTTP ' + r.status + ')';
+    }
+  } catch (_) { document.getElementById('net-info-ip').textContent = '— (sem rede)'; }
+}
+
+// Descobre IP local via WebRTC. Timeout 1.5s.
+function _getLocalIp() {
+  return new Promise(resolve => {
+    if (!window.RTCPeerConnection) return resolve(null);
+    let resolved = false;
+    const done = (ip) => { if (resolved) return; resolved = true; try { pc.close(); } catch(_){} resolve(ip); };
+    const pc = new RTCPeerConnection({ iceServers: [] });
+    pc.createDataChannel('');
+    pc.onicecandidate = ev => {
+      if (!ev?.candidate) return;
+      // candidate string: "candidate:... <type> <ip> <port> typ host ..."
+      const m = ev.candidate.candidate.match(/([\d]+\.[\d]+\.[\d]+\.[\d]+)|([a-f0-9:]+:[a-f0-9:]+)/i);
+      if (m && m[0] && !/^0\.0\.0\.0$/.test(m[0])) done(m[0]);
+    };
+    pc.createOffer().then(o => pc.setLocalDescription(o)).catch(() => done(null));
+    setTimeout(() => done(null), 1500);
+  });
+}
+
+function closeNetInfo() {
+  const m = document.getElementById('net-info-modal');
+  if (m) m.style.display = 'none';
+}
+
+// Boot do indicador: render inicial + listeners de mudança
+_renderNetIndicator();
+window.addEventListener('online', _renderNetIndicator);
+window.addEventListener('offline', _renderNetIndicator);
+if (navigator.connection?.addEventListener) {
+  navigator.connection.addEventListener('change', _renderNetIndicator);
 }
 // ═════════════════════════════════════════════════════════
 //  NOTIFICAÇÕES (central + badge)
@@ -1436,7 +1717,11 @@ let _notifLatestSeen = 0;
 
 async function _fetchNotifCache() {
   try {
-    _notifCache = await apiFetch('/api/push/history').then(r => r.json());
+    // Filtra no server pelas prefs DESTE dispositivo — só vem o que o user
+    // ativou pra ele. Tipos OFF nem aparecem no painel/badge.
+    const did = localStorage.getItem('eco_device_id') || '';
+    const url = did ? '/api/push/history?device_id=' + encodeURIComponent(did) : '/api/push/history';
+    _notifCache = await apiFetch(url).then(r => r.json());
   } catch (_) { _notifCache = _notifCache || []; }
   _updateBellBadge();
 }
@@ -1499,7 +1784,9 @@ function openNotifPanel() {
   else document.getElementById('notif-body').innerHTML =
     '<div class="notif-empty"><div class="spin-loader"></div></div>';
   // Re-fetch + marca como lido depois de renderizar
-  apiFetch('/api/push/history').then(r => r.json()).then(data => {
+  const did = localStorage.getItem('eco_device_id') || '';
+  const historyUrl = did ? '/api/push/history?device_id=' + encodeURIComponent(did) : '/api/push/history';
+  apiFetch(historyUrl).then(r => r.json()).then(data => {
     _notifCache = data;
     _renderNotifItems(data);
     _notifReadTs = Date.now();
