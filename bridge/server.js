@@ -2027,10 +2027,14 @@ app.patch('/api/charges/:ts/location', (req, res) => {
 // PATCH /api/charges/:ts/charger_kwh — kWh marcado no carregador externo
 app.patch('/api/charges/:ts/charger_kwh', (req, res) => {
   const ts     = parseInt(req.params.ts, 10);
-  const { charger_kwh } = req.body || {};
+  // Aceita ambas as chaves: PWA antigo cacheado mandava `kwh`; PWA novo manda
+  // `charger_kwh`. Sem isso, body com `kwh` era lido como undefined e o campo
+  // era SILENCIOSAMENTE deletado — valor sumia após o próximo refetch/restart.
+  const body = req.body || {};
+  const raw = body.charger_kwh != null ? body.charger_kwh : body.kwh;
   const charge = chargesArr.find(c => (c.timestamp_ms || 0) === ts);
   if (!charge) return res.status(404).json({ error: 'not found' });
-  const val = parseFloat(charger_kwh) || 0;
+  const val = parseFloat(raw) || 0;
   if (val > 0) charge.charger_kwh = val; else delete charge.charger_kwh;
   charge._updated_ms = Date.now();
   scheduleChargesFlush();

@@ -1068,7 +1068,7 @@ async function saveCharger(id) {
   renderEntries();
   // Persiste no bridge — sem isso, próximo refetch sobrescreve
   try {
-    await _patchCharge(id, '/charger_kwh', { kwh: charger_kwh });
+    await _patchCharge(id, '/charger_kwh', { charger_kwh });
     if (window.cacheSet) window.cacheSet('posto', items);
   } catch (e) { if (window.showToast) window.showToast('✗ Falha ao salvar: ' + e.message, 'err'); }
 }
