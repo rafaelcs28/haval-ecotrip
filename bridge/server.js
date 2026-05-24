@@ -1861,6 +1861,10 @@ app.post('/api/charges/merge', (req, res) => {
       soc_start:    early.soc_start,
       soc_end:      late.soc_end,
       _updated_ms:  Date.now(),
+      // Marca de quais ts originais a recarga foi consolidada — o handler
+      // de charging/history (retained do APK) usa pra NÃO sobrescrever os
+      // campos somados quando o APK reenvia o estado original da early.
+      merged_from:  [...(early.merged_from || []), late.timestamp_ms],
     };
     if (locName != null)           merged.location_name  = locName;
     if (locLat  != null)           merged.location_lat   = locLat;
@@ -5078,13 +5082,18 @@ function applyMqttMessage(key, value, isRetained = false) {
             if (existing.charger_kwh      != null) keep.charger_kwh      = existing.charger_kwh;
             if (existing.cost_override    != null) keep.cost_override    = existing.cost_override;
             if (existing.avg_temp_c       != null) keep.avg_temp_c       = existing.avg_temp_c;
-            // manual_overrides: edições feitas no PWA pra corrigir leituras erradas do carro
-            // (SOC início/fim, energia injetada, duração). Têm prioridade sobre o que o
-            // Android re-publicar — caso contrário, a edição sumiria no próximo reconnect.
             if (existing.manual_overrides != null) keep.manual_overrides = existing.manual_overrides;
-            // Preserva _updated_ms para que dispositivos que ainda não sincronizaram
-            // continuem a detectar as edições feitas via PATCH após o merge MQTT.
             if (existing._updated_ms      != null) keep._updated_ms      = existing._updated_ms;
+            // Recarga consolidada (merge): preserva os campos somados — sem isso
+            // o APK retained sobrescreve com os valores originais da `early` e o
+            // merge "se desfaz" em cada reconnect.
+            if (Array.isArray(existing.merged_from) && existing.merged_from.length > 0) {
+              keep.merged_from  = existing.merged_from;
+              keep.duration_sec = existing.duration_sec;
+              keep.energy_kwh   = existing.energy_kwh;
+              keep.avg_power_kw = existing.avg_power_kw;
+              keep.soc_end      = existing.soc_end;
+            }
             return { ...newCharge, ...keep };
           });
           scheduleChargesFlush();
