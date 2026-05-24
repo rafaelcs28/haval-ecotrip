@@ -402,6 +402,12 @@
       </div>
       <div class="hint" style="font-size:10px;color:var(--muted);padding:0 4px;margin-top:6px">Quando ativo, novos dispositivos precisam do código. Sessões logadas continuam funcionando.</div>
     </div>
+    <div class="field-group">
+      <div class="group-ti">Login biométrico (Face ID / Touch ID / fingerprint)</div>
+      <div id="passkeys-list" style="display:flex;flex-direction:column;gap:6px"></div>
+      <button class="btn secondary" onclick="addPasskey()" style="margin-top:10px">+ Cadastrar este dispositivo</button>
+      <div class="hint" style="font-size:10px;color:var(--muted);padding:0 4px;margin-top:6px">Depois de cadastrado, o login nesse dispositivo pode ser feito direto pela biometria. Senha+2FA continuam como fallback.</div>
+    </div>
   </div>
 </div>
 
@@ -1102,7 +1108,90 @@ async function _loadSecurity() {
     if (tg) tg.classList.toggle('on', !!d.enabled);
     if (wrap) wrap.style.display = d.enabled ? 'block' : 'none';
   } catch (_) {}
+  _loadPasskeys();
 }
+
+async function _loadPasskeys() {
+  const tk = localStorage.getItem('bridge_token');
+  const el = document.getElementById('passkeys-list');
+  if (!tk || !el) return;
+  try {
+    const r = await fetch('/api/auth/passkey', { headers: { 'Authorization': 'Bearer ' + tk } });
+    const d = await r.json();
+    const list = d.passkeys || [];
+    if (!list.length) {
+      el.innerHTML = '<div style="font-size:11px;color:var(--muted);padding:8px;text-align:center">Nenhum dispositivo cadastrado</div>';
+      return;
+    }
+    el.innerHTML = list.map(p => {
+      const created = new Date(p.created_ms).toLocaleDateString('pt-BR');
+      const lastUsed = p.last_used_ms
+        ? `usado ${new Date(p.last_used_ms).toLocaleDateString('pt-BR')}`
+        : 'nunca usado';
+      return `<div style="display:flex;justify-content:space-between;align-items:center;padding:10px;background:rgba(255,255,255,.03);border-radius:10px;gap:8px">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;font-weight:700">🔐 ${p.device_name}</div>
+          <div style="font-size:10px;color:var(--muted);margin-top:2px">cadastrado ${created} · ${lastUsed}</div>
+        </div>
+        <button onclick="removePasskey('${p.id}', '${p.device_name.replace(/'/g, "\\'")}')" title="Remover" style="background:rgba(248,113,113,.12);border:1px solid rgba(248,113,113,.3);color:var(--red);font-size:11px;padding:5px 10px;border-radius:6px;font-family:inherit;font-weight:600;cursor:pointer">🗑</button>
+      </div>`;
+    }).join('');
+  } catch (_) {}
+}
+
+async function addPasskey() {
+  const swa = window.SimpleWebAuthnBrowser;
+  if (!swa) { showToast('Biometria não suportada', 'err'); return; }
+  const tk = localStorage.getItem('bridge_token');
+  if (!tk) return;
+  const supported = await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable?.();
+  if (!supported) { showToast('Este dispositivo não tem biometria habilitada', 'err'); return; }
+  const defaultName = navigator.userAgent.includes('iPhone') ? 'iPhone'
+    : navigator.userAgent.includes('iPad') ? 'iPad'
+    : navigator.userAgent.includes('Mac') ? 'Mac'
+    : navigator.userAgent.includes('Android') ? 'Android'
+    : 'Dispositivo';
+  const deviceName = prompt('Nome desse dispositivo:', defaultName) || defaultName;
+  try {
+    const r = await fetch('/api/auth/passkey/register/begin', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + tk, 'Content-Type': 'application/json' },
+      body: '{}',
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const opts = await r.json();
+    const att = await swa.startRegistration({ optionsJSON: opts });
+    const fr = await fetch('/api/auth/passkey/register/finish', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + tk, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ response: att, device_name: deviceName }),
+    });
+    const data = await fr.json().catch(() => ({}));
+    if (fr.ok && data.ok) {
+      showToast('✓ Dispositivo cadastrado', 'ok');
+      _loadPasskeys();
+    } else {
+      showToast('✗ ' + (data.error || 'falha ao registrar'), 'err');
+    }
+  } catch (e) {
+    if (e?.name !== 'NotAllowedError') showToast('✗ ' + (e?.message || e), 'err');
+  }
+}
+
+async function removePasskey(id, name) {
+  if (!confirm(`Remover "${name}"? Esse dispositivo deixará de poder entrar por biometria.`)) return;
+  const tk = localStorage.getItem('bridge_token');
+  try {
+    const r = await fetch('/api/auth/passkey/' + encodeURIComponent(id), {
+      method: 'DELETE',
+      headers: { 'Authorization': 'Bearer ' + tk },
+    });
+    if (r.ok) { showToast('✓ Removido', 'ok'); _loadPasskeys(); }
+    else showToast('✗ HTTP ' + r.status, 'err');
+  } catch (e) { showToast('✗ ' + e.message, 'err'); }
+}
+window.addPasskey = addPasskey;
+window.removePasskey = removePasskey;
 
 async function sha256hex(s) {
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));

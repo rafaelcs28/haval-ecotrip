@@ -1468,7 +1468,10 @@ app.use('/api', (req, res, next) => {
   if (req.path === '/auth/login' ||
       req.path === '/auth/2fa/status' ||
       req.path === '/auth/google/config' ||
-      req.path === '/auth/google/login') return next();
+      req.path === '/auth/google/login' ||
+      req.path === '/auth/passkey/available' ||
+      req.path === '/auth/passkey/login/begin' ||
+      req.path === '/auth/passkey/login/finish') return next();
   requireAuth(req, res, next);
 });
 
@@ -1526,6 +1529,229 @@ app.post('/api/auth/2fa/regenerate-backup', (req, res) => {
   authConfig.backup_codes = genBackupCodes(10);
   saveAuthConfig();
   res.json({ ok: true, backup_codes: authConfig.backup_codes });
+});
+
+// ── Passkeys (WebAuthn) ───────────────────────────────────────────────────────
+// Login biométrico complementar (Face ID/Touch ID/fingerprint). O user PRIMEIRO
+// faz login normal com senha+TOTP; daí registra a passkey nesse device. Próximas
+// vezes pode entrar direto com biometria. O caminho senha+TOTP continua existindo
+// como fallback se o device for perdido.
+const PASSKEYS_FILE = path.join(__dirname, 'passkeys.json');
+let passkeys = [];
+try {
+  if (fs.existsSync(PASSKEYS_FILE)) {
+    passkeys = JSON.parse(fs.readFileSync(PASSKEYS_FILE, 'utf8')).passkeys || [];
+    console.log(`✓ Passkeys: ${passkeys.length} registrada(s)`);
+  }
+} catch (e) { console.error('Aviso passkeys.json:', e.message); }
+function savePasskeys() {
+  try {
+    fs.writeFileSync(PASSKEYS_FILE, JSON.stringify({
+      updatedAt: new Date().toISOString(),
+      passkeys,
+    }, null, 2));
+  } catch (e) { console.error('Falha salvar passkeys:', e.message); }
+}
+
+// Challenges efêmeros — TTL 5min. Sem persistência: se o bridge cai no meio
+// do registro/login, é só recomeçar.
+const _passkeyChallenges = new Map();   // challenge → expiresMs
+const _PASSKEY_CHALLENGE_TTL = 5 * 60 * 1000;
+function _putChallenge(ch) { _passkeyChallenges.set(ch, Date.now() + _PASSKEY_CHALLENGE_TTL); }
+function _takeChallenge(ch) {
+  const exp = _passkeyChallenges.get(ch);
+  if (!exp) return false;
+  _passkeyChallenges.delete(ch);
+  return exp > Date.now();
+}
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, v] of _passkeyChallenges) if (v < now) _passkeyChallenges.delete(k);
+}, 10 * 60 * 1000).unref();
+
+// Lazy import — só quando o primeiro endpoint é chamado, pra não atrasar boot.
+let _swa = null;
+function _swaLib() {
+  if (!_swa) _swa = require('@simplewebauthn/server');
+  return _swa;
+}
+
+// rpID é o domínio (sem protocolo nem porta). Pega do header Host pra suportar
+// Tailscale Funnel sem hardcode. Origin é montado com https:// porque WebAuthn
+// só funciona em HTTPS (ou localhost).
+function _passkeyRpInfo(req) {
+  const host = req.headers.host || 'localhost';
+  const rpID = host.split(':')[0];
+  const proto = (rpID === 'localhost' || rpID.startsWith('127.')) ? 'http' : 'https';
+  const origin = `${proto}://${host}`;
+  return { rpID, rpName: 'EcoTrip', origin };
+}
+
+// GET /api/auth/passkey — lista passkeys do user (autenticado)
+app.get('/api/auth/passkey', (_req, res) => {
+  res.json({
+    passkeys: passkeys.map(p => ({
+      id: p.id,
+      device_name: p.device_name || 'Dispositivo',
+      created_ms: p.created_ms,
+      last_used_ms: p.last_used_ms || null,
+    })),
+  });
+});
+
+// POST /api/auth/passkey/register/begin — gera challenge de registro (autenticado)
+app.post('/api/auth/passkey/register/begin', async (req, res) => {
+  try {
+    const { rpID, rpName } = _passkeyRpInfo(req);
+    const opts = await _swaLib().generateRegistrationOptions({
+      rpName, rpID,
+      userID:    Buffer.from('ecotrip-user'),         // single-user
+      userName:  'EcoTrip',
+      attestationType: 'none',
+      excludeCredentials: passkeys.map(p => ({
+        id: p.id,
+        transports: p.transports,
+      })),
+      authenticatorSelection: {
+        residentKey: 'preferred',
+        userVerification: 'preferred',                 // Face ID/Touch ID quando disponível
+      },
+    });
+    _putChallenge(opts.challenge);
+    res.json(opts);
+  } catch (e) {
+    console.error('passkey register/begin:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/auth/passkey/register/finish — valida e armazena a credential
+app.post('/api/auth/passkey/register/finish', async (req, res) => {
+  try {
+    const { response, device_name } = req.body || {};
+    if (!response) return res.status(400).json({ error: 'missing response' });
+    const expectedChallenge = response.response?.clientDataJSON
+      ? JSON.parse(Buffer.from(response.response.clientDataJSON, 'base64url').toString()).challenge
+      : null;
+    if (!expectedChallenge || !_takeChallenge(expectedChallenge)) {
+      return res.status(400).json({ error: 'invalid_or_expired_challenge' });
+    }
+    const { rpID, origin } = _passkeyRpInfo(req);
+    const verification = await _swaLib().verifyRegistrationResponse({
+      response,
+      expectedChallenge,
+      expectedOrigin: origin,
+      expectedRPID:   rpID,
+    });
+    if (!verification.verified || !verification.registrationInfo) {
+      return res.status(400).json({ error: 'verification_failed' });
+    }
+    const reg = verification.registrationInfo;
+    const cred = reg.credential || reg;       // v13 traz dentro de .credential
+    const newPk = {
+      id:           cred.id,
+      publicKey:    Buffer.from(cred.publicKey).toString('base64url'),
+      counter:      cred.counter || 0,
+      transports:   cred.transports || response.response?.transports || [],
+      device_name:  String(device_name || 'Dispositivo').slice(0, 60),
+      created_ms:   Date.now(),
+      last_used_ms: null,
+    };
+    passkeys.push(newPk);
+    savePasskeys();
+    console.log(`[passkey] registrada: ${newPk.device_name} (id=${newPk.id.slice(0, 12)}…)`);
+    res.json({ ok: true, id: newPk.id });
+  } catch (e) {
+    console.error('passkey register/finish:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// DELETE /api/auth/passkey/:id — remove passkey
+app.delete('/api/auth/passkey/:id', (req, res) => {
+  const id = String(req.params.id);
+  const idx = passkeys.findIndex(p => p.id === id);
+  if (idx < 0) return res.status(404).json({ error: 'not_found' });
+  const [removed] = passkeys.splice(idx, 1);
+  savePasskeys();
+  console.log(`[passkey] removida: ${removed.device_name}`);
+  res.json({ ok: true });
+});
+
+// POST /api/auth/passkey/login/begin — público. Gera challenge + lista de
+// credentials permitidas. Sem rate limit aqui — o limit aplica ao /finish.
+app.post('/api/auth/passkey/login/begin', async (req, res) => {
+  try {
+    if (!passkeys.length) return res.status(404).json({ error: 'no_passkeys_registered' });
+    const { rpID } = _passkeyRpInfo(req);
+    const opts = await _swaLib().generateAuthenticationOptions({
+      rpID,
+      allowCredentials: passkeys.map(p => ({
+        id: p.id,
+        transports: p.transports,
+      })),
+      userVerification: 'preferred',
+    });
+    _putChallenge(opts.challenge);
+    res.json(opts);
+  } catch (e) {
+    console.error('passkey login/begin:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/auth/passkey/login/finish — valida assertion e emite o bearer
+app.post('/api/auth/passkey/login/finish', async (req, res) => {
+  const ip = req.ip || req.connection?.remoteAddress || 'unknown';
+  const rl = _checkRateLimit(ip);
+  if (!rl.ok) return res.status(429).json({ error: 'rate_limited', retry_after_sec: rl.retryAfterSec });
+  if (rl.state.count >= 5) return res.status(429).json({ error: 'too_many_attempts' });
+  try {
+    const { response } = req.body || {};
+    if (!response?.id) return res.status(400).json({ error: 'missing response' });
+    const cred = passkeys.find(p => p.id === response.id);
+    if (!cred) { _registerFailure(rl.state); return res.status(401).json({ error: 'unknown_credential' }); }
+    const expectedChallenge = response.response?.clientDataJSON
+      ? JSON.parse(Buffer.from(response.response.clientDataJSON, 'base64url').toString()).challenge
+      : null;
+    if (!expectedChallenge || !_takeChallenge(expectedChallenge)) {
+      _registerFailure(rl.state);
+      return res.status(400).json({ error: 'invalid_or_expired_challenge' });
+    }
+    const { rpID, origin } = _passkeyRpInfo(req);
+    const verification = await _swaLib().verifyAuthenticationResponse({
+      response,
+      expectedChallenge,
+      expectedOrigin: origin,
+      expectedRPID:   rpID,
+      credential: {
+        id:        cred.id,
+        publicKey: Buffer.from(cred.publicKey, 'base64url'),
+        counter:   cred.counter || 0,
+        transports: cred.transports,
+      },
+    });
+    if (!verification.verified) {
+      _registerFailure(rl.state);
+      return res.status(401).json({ error: 'verification_failed' });
+    }
+    // Atualiza counter (anti-replay) + last_used
+    cred.counter      = verification.authenticationInfo?.newCounter ?? cred.counter;
+    cred.last_used_ms = Date.now();
+    savePasskeys();
+    _registerSuccess(ip);
+    console.log(`[auth] login passkey OK · ${cred.device_name}`);
+    res.json({ ok: true, token: BRIDGE_TOKEN_HASH });
+  } catch (e) {
+    console.error('passkey login/finish:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/auth/passkey/available — público, conta passkeys cadastradas
+// (PWA usa pra decidir se mostra o botão "Entrar com biometria")
+app.get('/api/auth/passkey/available', (_req, res) => {
+  res.json({ count: passkeys.length, available: passkeys.length > 0 });
 });
 
 app.get('/api/state',  (_req, res) => res.json(state));

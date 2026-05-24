@@ -364,6 +364,10 @@ input { font-family: inherit; }
     <div class="lo-title">EcoTrip</div>
     <div class="lo-sub">Haval H6 PHEV · Impulse</div>
 
+    <!-- Botão biométrico: só aparece se há passkey registrada no servidor
+         E o navegador suporta WebAuthn. Detectado por _initLoginPasskeyButton. -->
+    <button class="lo-btn" id="login-passkey-btn" onclick="doLoginPasskey()" style="display:none;background:rgba(34,197,94,.18);color:var(--green);border:1px solid rgba(34,197,94,.4);margin-bottom:14px">🔐 Entrar com biometria</button>
+
     <input id="login-input" type="password" placeholder="Senha" autocomplete="current-password">
     <div class="lo-totp-row" id="login-totp-row">
       <input id="login-totp" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="6" placeholder="Código 2FA">
@@ -376,6 +380,10 @@ input { font-family: inherit; }
     <div id="g_id_signin" class="g_id_signin" data-type="standard" data-shape="rectangular" data-theme="filled_black" data-text="signin_with" data-size="large" data-locale="pt-BR" data-logo_alignment="left"></div>
   </div>
 </div>
+
+<!-- @simplewebauthn/browser via CDN — usado pelo login biométrico e pela
+     seção Passkeys em Config. Inline UMD na window como SimpleWebAuthnBrowser. -->
+<script src="https://cdn.jsdelivr.net/npm/@simplewebauthn/browser@13.2.4/dist/bundle/index.umd.min.js"></script>
 
 <!-- ──────────────────────── HEADER ──────────────────────── -->
 <div class="head">
@@ -721,6 +729,7 @@ function showLogin(errorMsg) {
   else err.style.display = 'none';
   setTimeout(() => document.getElementById('login-input')?.focus(), 100);
   _initGoogleLogin();
+  _initLoginPasskeyButton();
 }
 
 function hideLogin() {
@@ -739,6 +748,49 @@ function _initGoogleLogin() {
     window._googleInited = true;
   }).catch(() => {});
 }
+
+// Mostra o botão "Entrar com biometria" se há passkey cadastrada E o navegador
+// suporta WebAuthn. Sem isso, deixa o overlay no fluxo padrão senha+TOTP.
+async function _initLoginPasskeyButton() {
+  const btn = document.getElementById('login-passkey-btn');
+  if (!btn) return;
+  if (!window.PublicKeyCredential || !window.SimpleWebAuthnBrowser) return;
+  try {
+    const supported = await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable?.();
+    if (!supported) return;
+    const r = await fetch('/api/auth/passkey/available');
+    const d = await r.json();
+    if (d.available) btn.style.display = '';
+  } catch (_) {}
+}
+
+async function doLoginPasskey() {
+  const swa = window.SimpleWebAuthnBrowser;
+  if (!swa) { showLogin('Biometria não suportada'); return; }
+  try {
+    const r = await fetch('/api/auth/passkey/login/begin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    if (!r.ok) { showLogin('Sem passkeys ou erro: ' + r.status); return; }
+    const opts = await r.json();
+    const assertion = await swa.startAuthentication({ optionsJSON: opts });
+    const fr = await fetch('/api/auth/passkey/login/finish', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ response: assertion }),
+    });
+    const data = await fr.json().catch(() => ({}));
+    if (fr.ok && data.ok && data.token) {
+      bridgeToken = data.token;
+      localStorage.setItem('bridge_token', bridgeToken);
+      hideLogin(); connect();
+    } else {
+      showLogin('Falha biometria: ' + (data.error || `HTTP ${fr.status}`));
+    }
+  } catch (e) {
+    // NotAllowedError quando o user cancela — silencia.
+    if (e?.name !== 'NotAllowedError') showLogin('Erro biometria: ' + (e?.message || e));
+  }
+}
+window.doLoginPasskey = doLoginPasskey;
 
 async function _onGoogleCredential(response) {
   _pendingGoogleCredential = response?.credential;
