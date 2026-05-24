@@ -2700,6 +2700,11 @@ function render(s, kpData) {
         zoomControl: false, attributionControl: false, dragging: true, zoomSnap: 0.5,
       }).setView(pos, 16);
       L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom: 19 }).addTo(map);
+      // Força recálculo do tamanho — Drive entra muitas vezes com container
+      // ainda sem layout estável (rAF do tabbar/bottom-sheet); sem isso
+      // os tiles ficam sem carregar e o mapa aparece preto.
+      setTimeout(() => { try { map.invalidateSize(); } catch (_) {} }, 100);
+      setTimeout(() => { try { map.invalidateSize(); } catch (_) {} }, 500);
     }
     // Polyline do trajeto (samples até agora)
     if (Array.isArray(s.trip_route) && s.trip_route.length > 1) {
@@ -2877,6 +2882,11 @@ if (localStorage.getItem('bridge_token')) {
 window.renderView_drive = function() {
   if (window.state && Object.keys(window.state).length) {
     try { render(window.state, _driveKp || SNAPSHOT.known_places); } catch (_) {}
+  }
+  // Garante que tiles carregam quando o user troca de aba (container muda
+  // de display:none → block — Leaflet precisa recalcular dimensões).
+  if (map) {
+    setTimeout(() => { try { map.invalidateSize(); } catch (_) {} }, 50);
   }
 };
   // Expõe handlers de onclick no window
