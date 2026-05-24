@@ -1726,6 +1726,13 @@ app.get('/api/charges', (req, res) => {
   const filtered = since > 0
     ? chargesArr.filter(c => (c.timestamp_ms || 0) > since || (c._updated_ms || 0) > since)
     : chargesArr;
+  // Tombstones: PWA precisa saber quais IDs foram deletados pra remover do
+  // cache local (sem isso, merge incremental mantinha entries fantasma após
+  // delete/merge). Mandados via header pra preservar shape do body (array).
+  if (Array.isArray(deletedIds.charges) && deletedIds.charges.length) {
+    res.setHeader('X-Tombstones', deletedIds.charges.join(','));
+    res.setHeader('Access-Control-Expose-Headers', 'X-Tombstones');
+  }
   res.json(filtered.map(applyChargeOverrides));
 });
 
@@ -2085,6 +2092,10 @@ app.get('/api/refuels', (req, res) => {
   const filtered = since > 0
     ? all.filter(r => (r.timestamp_ms || 0) > since || (r._updated_ms || 0) > since)
     : all;
+  if (Array.isArray(deletedIds.refuels) && deletedIds.refuels.length) {
+    res.setHeader('X-Tombstones', deletedIds.refuels.join(','));
+    res.setHeader('Access-Control-Expose-Headers', 'X-Tombstones');
+  }
   res.json({
     refuels: filtered,
     tank_avg_price_per_l: state.tank_avg_price_per_l || 0,
@@ -3009,6 +3020,10 @@ app.post('/api/autotrips', (req, res) => {
 app.get('/api/autotrips', (req, res) => {
   const since = parseInt(req.query.since || '0', 10);
   const arr   = since > 0 ? autoTripsArr.filter(t => t.startMs > since) : autoTripsArr;
+  if (Array.isArray(deletedIds.autotrips) && deletedIds.autotrips.length) {
+    res.setHeader('X-Tombstones', deletedIds.autotrips.join(','));
+    res.setHeader('Access-Control-Expose-Headers', 'X-Tombstones');
+  }
   res.json(arr.slice(0, 300));
 });
 

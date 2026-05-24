@@ -1618,10 +1618,18 @@ async function _loadPostoData() {
   try {
     if (progress) progress.set(15);
     const sinceQ = lastTs > 0 ? '?since=' + lastTs : '';
-    const [chRaw, rfRaw] = await Promise.all([
-      fetch('/api/charges' + sinceQ, { headers: h }).then(r => r.json()).catch(() => []),
-      fetch('/api/refuels' + sinceQ, { headers: h }).then(r => r.json()).catch(() => []),
+    const [chResp, rfResp] = await Promise.all([
+      fetch('/api/charges' + sinceQ, { headers: h }).catch(() => null),
+      fetch('/api/refuels' + sinceQ, { headers: h }).catch(() => null),
     ]);
+    // Tombstones via header: PWA precisa remover do cache local entries que
+    // foram deletadas no server (delete direto, merge, etc).
+    const tombChargesHdr = chResp?.headers?.get('X-Tombstones') || '';
+    const tombRefuelsHdr = rfResp?.headers?.get('X-Tombstones') || '';
+    const tombCharges = new Set(tombChargesHdr.split(',').filter(Boolean).map(Number));
+    const tombRefuels = new Set(tombRefuelsHdr.split(',').filter(Boolean).map(Number));
+    const chRaw = chResp ? await chResp.json().catch(() => []) : [];
+    const rfRaw = rfResp ? await rfResp.json().catch(() => []) : [];
     const chCount = (Array.isArray(chRaw) ? chRaw : (chRaw.charges || [])).length;
     const rfCount = (Array.isArray(rfRaw) ? rfRaw : (rfRaw.refuels || [])).length;
     const totalNew = chCount + rfCount;
@@ -1675,14 +1683,30 @@ async function _loadPostoData() {
       location: r.location_name || null,
     }));
     const incoming = [...charges, ...refuels].sort((a, b) => b.ts - a.ts);
+    // Predicado de tombstone (combina tipo + ID — recarga e abastecimento
+    // podem ter mesmo timestamp_ms por coincidência)
+    const isTombstoned = (item) =>
+      (item.type === 'recarga' && tombCharges.has(+item.id)) ||
+      (item.type === 'abastecimento' && tombRefuels.has(+item.id));
     if (lastTs > 0 && incoming.length) {
-      // Merge incremental: adiciona/atualiza, deduplica por (id+type)
       const byKey = new Map(items.map(i => [i.type + ':' + i.id, i]));
       for (const item of incoming) byKey.set(item.type + ':' + item.id, item);
+      // Remove items que foram deletados/merged no server
+      for (const [key, item] of byKey) {
+        if (isTombstoned(item)) byKey.delete(key);
+      }
       const merged = [...byKey.values()].sort((a, b) => b.ts - a.ts);
       items.splice(0, items.length, ...merged);
     } else if (lastTs === 0) {
-      items.splice(0, items.length, ...incoming);
+      // Full fetch: aplica tombstones em incoming (defensive)
+      const cleaned = incoming.filter(it => !isTombstoned(it));
+      items.splice(0, items.length, ...cleaned);
+    } else if (lastTs > 0 && (tombCharges.size || tombRefuels.size)) {
+      // Sem entries novas mas com tombstones: limpa cache local
+      const cleaned = items.filter(it => !isTombstoned(it));
+      if (cleaned.length !== items.length) {
+        items.splice(0, items.length, ...cleaned);
+      }
     }
     window.cacheSet && window.cacheSet('posto', items);
   } catch (e) { console.warn('Posto: falha ao carregar live', e); }
