@@ -1892,6 +1892,11 @@ app.post('/api/charges/merge', (req, res) => {
     if (earlyIdx >= 0) chargesArr[earlyIdx] = merged;
     else chargesArr.unshift(merged);
 
+    // Tombstone da `late` — sem isso, próximo charging/history retained do APK
+    // re-adiciona a recarga (PWA "perde" a unificação ao dar refresh).
+    markDeleted('charges', late.timestamp_ms);
+    // Mix da bateria muda quando recargas fundem (cost_override pode mudar)
+    recomputeBatteryAvgPrice();
     scheduleChargesFlush();
     console.log(`[merge-charges] ${early.timestamp_ms} + ${late.timestamp_ms} → ${early.timestamp_ms} (${mergedEnergyKwh} kWh, ${mergedDurationSec}s)`);
     res.json({ ok: true, merged });
