@@ -407,6 +407,8 @@
       <div id="passkey-status" style="font-size:11px;padding:8px 12px;border-radius:8px;margin-bottom:10px;display:none"></div>
       <div id="passkeys-list" style="display:flex;flex-direction:column;gap:6px"></div>
       <button class="btn secondary" onclick="addPasskey()" id="passkey-add-btn" style="margin-top:10px">+ Cadastrar este dispositivo</button>
+      <button class="btn secondary" onclick="diagnosePasskey()" style="margin-top:6px;background:rgba(96,165,250,.12);border:1px solid rgba(96,165,250,.3);color:#60a5fa">🔍 Diagnosticar (se cadastrar não funcionou)</button>
+      <div id="passkey-diag" style="display:none;margin-top:10px;font-size:11px;font-family:ui-monospace,'SF Mono',monospace;background:rgba(0,0,0,.4);padding:10px;border-radius:8px;white-space:pre-wrap;line-height:1.5;color:#cbd5e1;max-height:300px;overflow-y:auto"></div>
       <div class="hint" style="font-size:10px;color:var(--muted);padding:0 4px;margin-top:6px">Depois de cadastrado, o login nesse dispositivo pode ser feito direto pela biometria. Senha+2FA continuam como fallback.</div>
     </div>
   </div>
@@ -1283,6 +1285,97 @@ async function removePasskey(id, name) {
 }
 window.addPasskey = addPasskey;
 window.removePasskey = removePasskey;
+
+// Diagnóstico passo-a-passo: imprime status de cada pré-requisito + tenta
+// uma chamada real ao /begin. Output em <pre> dentro do próprio Config —
+// não precisa de Web Inspector.
+async function diagnosePasskey() {
+  const el = document.getElementById('passkey-diag');
+  if (!el) return;
+  el.style.display = '';
+  const lines = [];
+  const ok = (msg) => lines.push('✓ ' + msg);
+  const bad = (msg) => lines.push('✗ ' + msg);
+  const info = (msg) => lines.push('· ' + msg);
+  const render = () => el.textContent = lines.join('\n');
+  render();
+  info(`User-Agent: ${navigator.userAgent}`);
+  info(`Origin: ${location.origin}`);
+  info(`Hostname: ${location.hostname}`);
+  render();
+
+  // 1. WebAuthn API
+  if (!window.PublicKeyCredential) { bad('PublicKeyCredential ausente (navegador antigo)'); render(); return; }
+  ok('PublicKeyCredential disponível');
+  // 2. Lib client
+  if (!window.SimpleWebAuthnBrowser) { bad('SimpleWebAuthnBrowser não carregou (CDN bloqueado?)'); render(); return; }
+  ok('SimpleWebAuthnBrowser carregada');
+  // 3. Biometria
+  let bioOk = false;
+  try { bioOk = await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable?.(); } catch (e) { bad('isUserVerifying… falhou: ' + e.message); }
+  if (bioOk) ok('Biometria platform-authenticator disponível');
+  else bad('Biometria não disponível (tela de bloqueio configurada?)');
+  render();
+  // 4. Token
+  const tk = localStorage.getItem('bridge_token');
+  if (!tk) { bad('bridge_token vazio (faça login novamente)'); render(); return; }
+  ok(`Token presente (len=${tk.length})`);
+  // 5. /api/auth/passkey/available público
+  try {
+    const r = await fetch('/api/auth/passkey/available');
+    info(`GET /api/auth/passkey/available → HTTP ${r.status}`);
+    const d = await r.json().catch(() => ({}));
+    info('  resposta: ' + JSON.stringify(d));
+  } catch (e) { bad('available falhou: ' + e.message); }
+  render();
+  // 6. /api/auth/passkey GET (autenticado)
+  try {
+    const r = await fetch('/api/auth/passkey', { headers: { 'Authorization': 'Bearer ' + tk } });
+    info(`GET /api/auth/passkey → HTTP ${r.status}`);
+    const d = await r.json().catch(() => ({}));
+    info('  resposta: ' + JSON.stringify(d).slice(0, 200));
+  } catch (e) { bad('list falhou: ' + e.message); }
+  render();
+  // 7. /api/auth/passkey/register/begin
+  try {
+    const r = await fetch('/api/auth/passkey/register/begin', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + tk, 'Content-Type': 'application/json' },
+      body: '{}',
+    });
+    info(`POST /register/begin → HTTP ${r.status}`);
+    if (!r.ok) {
+      const txt = await r.text().catch(() => '');
+      bad('  body: ' + txt.slice(0, 200));
+      render();
+      return;
+    }
+    const opts = await r.json();
+    ok('Server retornou options de registro');
+    info(`  rp.id (servidor) = ${opts.rp?.id}`);
+    info(`  user.id len = ${(opts.user?.id || '').length}`);
+    info(`  challenge len = ${(opts.challenge || '').length}`);
+    info(`  authenticatorSelection = ${JSON.stringify(opts.authenticatorSelection || {})}`);
+    render();
+    // 8. Disparar prompt biométrico real
+    info('Chamando startRegistration() — deve aparecer o prompt nativo agora');
+    render();
+    const att = await SimpleWebAuthnBrowser.startRegistration({ optionsJSON: opts });
+    ok('Biometria confirmada pelo browser');
+    info(`  cred id len = ${(att.id || '').length}`);
+    info(`  transports = ${JSON.stringify(att.response?.transports || [])}`);
+    render();
+  } catch (e) {
+    bad(`Erro: ${e?.name || ''} ${e?.message || e}`);
+    if (e?.name === 'SecurityError') bad('  ↳ provavelmente rpID/origin não bate ou não é HTTPS');
+    if (e?.name === 'NotAllowedError') bad('  ↳ user cancelou ou timeout');
+    if (e?.name === 'InvalidStateError') bad('  ↳ já existe passkey desse autenticator');
+    render();
+  }
+  info('--- Fim do diagnóstico ---');
+  render();
+}
+window.diagnosePasskey = diagnosePasskey;
 
 async function sha256hex(s) {
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
