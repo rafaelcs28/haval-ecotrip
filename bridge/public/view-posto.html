@@ -353,15 +353,19 @@
 .place-row.empty { padding: 16px; text-align: center; }
 .place-row.empty .sub { font-size: 12px; }
 
-/* Sub-tabs (Registros / Estatísticas) — barra acima da tabbar principal */
+/* Sub-tabs (Registros / Estatísticas) — barra acima da tabbar principal.
+   Sem backdrop-filter (iOS PWA fixed+blur "sobe pro meio" no scroll) +
+   GPU layer próprio pra ficar grudado no viewport. */
 .subtab {
   position: fixed; left: 0; right: 0;
   bottom: var(--tabbar-h, 52px); z-index: 19;
-  background: rgba(15,15,15,.95);
-  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  background: rgba(15,15,15,.98);
   border-top: 1px solid rgba(255,255,255,.05);
   display: flex; justify-content: space-around;
   padding: 6px 0;
+  transform: translateZ(0);
+  -webkit-transform: translateZ(0);
+  will-change: transform;
 }
 .subtab .stb {
   flex: 1; text-align: center;

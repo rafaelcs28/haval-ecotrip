@@ -137,11 +137,18 @@ input { font-family: inherit; }
 /* ── Tabbar ──────────────────────────────────────────────── */
 .tabbar {
   position: fixed; bottom: 0; left: 0; right: 0; z-index: 20;
-  background: rgba(10,10,10,.92);
-  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  /* Background sólido em vez de blur. iOS standalone PWA tem bug onde
+     fixed + backdrop-filter "sobe pro meio" durante scroll momentum
+     porque o compositor repinta o blur baseado em um viewport stale. */
+  background: rgba(10,10,10,.97);
   border-top: 1px solid var(--border);
   display: flex; justify-content: space-around;
   padding: 8px 0 calc(8px + env(safe-area-inset-bottom));
+  /* Promove pro GPU layer próprio: iOS para de tentar repintar junto
+     com o scroll, mantém o tabbar fixo no viewport. */
+  transform: translateZ(0);
+  -webkit-transform: translateZ(0);
+  will-change: transform;
 }
 .tabbar .tb {
   display: flex; flex-direction: column; align-items: center;
