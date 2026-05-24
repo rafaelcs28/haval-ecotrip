@@ -1716,6 +1716,7 @@ app.delete('/api/charges/:ts', (req, res) => {
   chargesArr.splice(idx, 1);
   scheduleChargesFlush();
   markDeleted('charges', ts);
+  recomputeBatteryAvgPrice();
   console.log(`[delete] Charge ${ts} removida (tombstone gravado)`);
   res.json({ ok: true });
 });
@@ -2246,6 +2247,8 @@ app.patch('/api/charges/:ts/edit', (req, res) => {
   else                            delete charge.manual_overrides;
   charge._updated_ms = Date.now();
   scheduleChargesFlush();
+  // energy_kwh editado muda o mix da bateria
+  recomputeBatteryAvgPrice();
   res.json(applyChargeOverrides(charge));
 });
 
@@ -2949,8 +2952,13 @@ app.post('/api/autotrips', (req, res) => {
           : `${Math.floor(sec / 60)}min`;
         const kwh100 = distKm > 0.1 && netKwh > 0 ? (netKwh / distKm * 100).toFixed(1) : null;
         const kmL    = fuelL  > 0.01              ? (distKm / fuelL).toFixed(1)         : null;
-        const cost   = (state.price_gas_per_l > 0 || state.price_kwh > 0)
-          ? fuelL * state.price_gas_per_l + netKwh * state.price_kwh : 0;
+        // Custo da viagem usa preços PONDERADOS pelo mix de combustível/recargas
+        // do tanque/bateria, recalculados a cada refuel/charge. Sem isso, o
+        // valor exibido ignorava se a recarga foi grátis ou se o tanque tinha
+        // mix de preços diferentes.
+        const pKwh = state.battery_avg_price_per_kwh || state.price_kwh || 0;
+        const pGas = state.tank_avg_price_per_l      || state.price_gas_per_l || 0;
+        const cost = (pGas > 0 || pKwh > 0) ? fuelL * pGas + netKwh * pKwh : 0;
 
         const parts = [`${dist} km`, dur];
         if (netKwh > 0.01) parts.push(`${netKwh.toFixed(2)} kWh`);
@@ -4967,6 +4975,10 @@ function applyMqttMessage(key, value, isRetained = false) {
             return { ...newCharge, ...keep };
           });
           scheduleChargesFlush();
+          // Mix ponderado da bateria precisa ser recalculado a cada recarga
+          // nova/atualizada — sem isso, o custo das viagens segue usando o
+          // preço fixo até alguém editar override manualmente.
+          recomputeBatteryAvgPrice();
           const skipped = all.length - charges.length;
           console.log(`✓ Recargas MQTT: ${charges.length} sessão(ões)${skipped > 0 ? ` (${skipped} anteriores ao clear ignoradas)` : ''}`);
           // Broadcast WS pra PWA re-fazer fetch — só pra entradas novas, em msg live (não retained)

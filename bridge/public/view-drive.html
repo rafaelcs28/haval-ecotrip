@@ -2784,8 +2784,9 @@ function render(s, kpData) {
     // custariam o mesmo)
     // km/L eq = distância ÷ litros equivalentes
     const distKm = +ct.distKm || 0;
-    const pKwh = +s.price_kwh || 0;
-    const pGas = +s.price_gas_per_l || 0;
+    // Mix ponderado prevalece sobre preços fixos (igual ao desloc)
+    const pKwh = +s.battery_avg_price_per_kwh || +s.price_kwh || 0;
+    const pGas = +s.tank_avg_price_per_l      || +s.price_gas_per_l || 0;
     const cost = (+ct.netKwh || 0) * pKwh + (+ct.fuelL || 0) * pGas;
     const eqL = (pGas > 0.01) ? (cost / pGas) : 0;
     const consumoEq = (distKm > 0.1 && eqL > 0.001) ? (distKm / eqL).toFixed(1) : '--';

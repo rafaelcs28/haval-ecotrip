@@ -1373,8 +1373,10 @@ function render(s, kpData) {
     socBar.style.display = 'none';
     const evKm = s.autonomy_ev_km != null ? Math.round(+s.autonomy_ev_km) : null;
     const battKwh = +s.battery_capacity_kwh || 0;
-    const evCost = soc != null && +s.price_kwh && battKwh > 0
-      ? '~R$ ' + (soc/100 * battKwh * s.price_kwh).toFixed(0)
+    // Mix ponderado da bateria (recalculado a cada recarga) > preço fixo
+    const evPriceKwh = +s.battery_avg_price_per_kwh || +s.price_kwh || 0;
+    const evCost = soc != null && evPriceKwh > 0 && battKwh > 0
+      ? '~R$ ' + (soc/100 * battKwh * evPriceKwh).toFixed(0)
       : '';
     const subParts = [];
     if (evKm != null) subParts.push(`${evKm} km elétricos`);

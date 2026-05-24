@@ -33704,9 +33704,23 @@ async function _pumpGeocodeQueue() {
   _geocodeBusy = false;
 }
 
+// Preços usados no cálculo de custo das viagens: prioriza o MIX PONDERADO
+// recalculado a cada refuel/charge (state.battery_avg_price_per_kwh /
+// state.tank_avg_price_per_l) e cai pra preços fixos globais quando o mix
+// ainda não foi calculado. Sem isso, recarga grátis ou abastecimento mais
+// barato não refletiam no custo das viagens.
+function _tripPriceKwh() {
+  const s = window.state || {};
+  return +s.battery_avg_price_per_kwh || +s.price_kwh || +SNAPSHOT.price_kwh || 0;
+}
+function _tripPriceGas() {
+  const s = window.state || {};
+  return +s.tank_avg_price_per_l || +s.price_gas_per_l || +SNAPSHOT.price_gas_per_l || 0;
+}
+
 function renderTripCard(t) {
   const socDelta = (t.startSocPct || 0) - (t.endSocPct || 0);
-  const cost = ((+t.netKwh || 0) * SNAPSHOT.price_kwh) + ((+t.fuelL || 0) * SNAPSHOT.price_gas_per_l);
+  const cost = ((+t.netKwh || 0) * _tripPriceKwh()) + ((+t.fuelL || 0) * _tripPriceGas());
   const totalEqL = (t.netKwh / 8.9) + (t.fuelL || 0);
   const kmL = totalEqL > 0.001 ? (t.distKm / totalEqL) : 0;
   const radar = (t.radarAlerts && t.radarAlerts.length) ? `<span class="badge-radar">⚠️ ${t.radarAlerts.length}</span>` : '';
@@ -33849,7 +33863,7 @@ async function openMapFull(id) {
   document.getElementById('mf-sub').textContent =
     `${new Date(t.startMs).toLocaleString('pt-BR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' })} · ${fmtDuration(t.timeSec)}`;
   // Métricas no bottom
-  const cost = ((+t.netKwh || 0) * SNAPSHOT.price_kwh) + ((+t.fuelL || 0) * SNAPSHOT.price_gas_per_l);
+  const cost = ((+t.netKwh || 0) * _tripPriceKwh()) + ((+t.fuelL || 0) * _tripPriceGas());
   document.getElementById('mf-bottom').innerHTML = `
     <div class="m"><div class="l">Distância</div><div class="v">${fmt1(t.distKm)} km</div></div>
     <div class="m"><div class="l">Energia</div><div class="v">${fmt1(t.netKwh)} kWh</div></div>
@@ -34056,7 +34070,7 @@ async function openShare(id) {
   const t = getTrip(id);
   if (!t) return;
   const dt = new Date(t.startMs).toLocaleString('pt-BR', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' });
-  const cost = ((+t.netKwh || 0) * SNAPSHOT.price_kwh) + ((+t.fuelL || 0) * SNAPSHOT.price_gas_per_l);
+  const cost = ((+t.netKwh || 0) * _tripPriceKwh()) + ((+t.fuelL || 0) * _tripPriceGas());
   const eqL = (t.netKwh / 8.9) + (t.fuelL || 0);
   const kmL = eqL > 0.001 ? (t.distKm / eqL) : 0;
   const name = t.name || `${t.startKp || '?'} → ${t.endKp || '?'}`;
@@ -34201,8 +34215,8 @@ function renderStats() {
   const totalIceKm = filtered.reduce((s,t) => s + (+t.hybridDistKm || 0), 0);
   const totalEvKm  = Math.max(0, totalDist - totalIceKm);
   // Custo (usa preços salvos no state — pode vir do server)
-  const pKwh = +(window.state?.price_kwh) || +SNAPSHOT.price_kwh || 0;
-  const pGas = +(window.state?.price_gas_per_l) || +SNAPSHOT.price_gas_per_l || 0;
+  const pKwh = _tripPriceKwh();
+  const pGas = _tripPriceGas();
   const totalCost = filtered.reduce((s,t) => s + ((+t.netKwh||0) * pKwh + (+t.fuelL||0) * pGas), 0);
   // km/L equivalente (baseado em preço, igual ao Drive)
   const eqL = pGas > 0.01 ? (totalCost / pGas) : 0;
