@@ -1081,28 +1081,48 @@ function recomputeBatteryAvgPrice() {
   // chargesArr é o storage de recargas (carregado no boot via CHARGES_FILE).
   // Preço por sessão: cost_override.perKwh > 0 ou cost_override.total / energy.
   // Quando não há override, usa SEED_KWH_PRICE pra valorar a sessão.
+  // Persiste `battery_avg_after` em cada recarga pra permitir reconstruir o
+  // preço histórico (custo de viagens antigas com preço da época).
   const ordered = [...chargesArr].sort((a, b) => (a.timestamp_ms || 0) - (b.timestamp_ms || 0));
   let avgPrice = SEED_KWH_PRICE;  // R$/kWh médio inicial = seed
   for (const c of ordered) {
     const energy = +c.energy_kwh || 0;
     if (energy < 0.05) continue;
     const ovr = c.cost_override;
-    // Preço da sessão: override manual (incluindo recarga gratuita: free===true → 0),
-    // ou SEED_KWH_PRICE como default
     const pricePerKwh = ovr?.free === true ? 0
                        : ovr && +ovr.perKwh > 0 ? ovr.perKwh
                        : ovr && +ovr.total  > 0 ? (ovr.total / energy)
                        : SEED_KWH_PRICE;
-    // Estima kWh antes da recarga: usa soc_start se disponível
     const socStart = +c.soc_start || 0;
     const kWhBefore = socStart * BATTERY_CAPACITY_KWH / 100;
     const kWhAfter  = kWhBefore + energy;
     avgPrice = (kWhBefore * avgPrice + energy * pricePerKwh) / kWhAfter;
+    c.battery_avg_after = +avgPrice.toFixed(4);   // snapshot pós-recarga
   }
   state.battery_avg_price_per_kwh = +avgPrice.toFixed(4);
   state.price_kwh = +avgPrice.toFixed(4);
   publishPricesToCar();
   return avgPrice;
+}
+
+// Retorna { kwhPrice, gasPrice } válidos no momento `targetMs`. Usa o
+// `battery_avg_after`/`tank_avg_after` persistido na recarga/abastecimento
+// IMEDIATAMENTE ANTERIOR a esse timestamp. Cai no SEED quando o histórico
+// não cobre o período (viagem antes da primeira recarga).
+function priceMixAtMs(targetMs) {
+  // Bateria: pega o avg pós-recarga mais recente <= targetMs
+  let kwhPrice = SEED_KWH_PRICE;
+  const cBefore = chargesArr
+    .filter(c => (c.timestamp_ms || 0) <= targetMs && c.battery_avg_after != null)
+    .sort((a, b) => (b.timestamp_ms || 0) - (a.timestamp_ms || 0))[0];
+  if (cBefore) kwhPrice = +cBefore.battery_avg_after || kwhPrice;
+  // Tanque: idem com refuels
+  let gasPrice = SEED_GAS_PRICE_PER_L;
+  const rBefore = refuels
+    .filter(r => (r.timestamp_ms || 0) <= targetMs && r.tank_avg_after != null)
+    .sort((a, b) => (b.timestamp_ms || 0) - (a.timestamp_ms || 0))[0];
+  if (rBefore) gasPrice = +rBefore.tank_avg_after || gasPrice;
+  return { kwhPrice, gasPrice };
 }
 
 // Publica os preços médios atuais no MQTT (retained) pra o APK do carro guardar
@@ -3738,6 +3758,54 @@ app.post('/api/admin/reprocess-places', async (req, res) => {
 
 app.get('/api/admin/reprocess-places/status', (_req, res) => {
   res.json({ running: _reprocessRunning, status: _reprocessStatus });
+});
+
+// POST /api/admin/recompute-trip-costs — recalcula o custo de TODAS as viagens
+// usando o preço médio que valia NO MOMENTO de cada viagem (não o atual).
+// body: { dry_run?: bool } — dry_run só conta quantas seriam afetadas
+// O resultado vai pra `autoTrip.costRecomputed = { total, kwhPrice, gasPrice, ts }`,
+// preservando o `cost` original. PWA usa o recomputed quando presente.
+app.post('/api/admin/recompute-trip-costs', async (req, res) => {
+  if (!adminCheckToken(req, res)) return;
+  const dryRun = req.body?.dry_run === true;
+  // Garante que battery_avg_after/tank_avg_after estão atualizados em todas
+  // recargas/abastecimentos antes de iterar viagens.
+  recomputeBatteryAvgPrice();
+  recomputeTankAvgPrice();
+  let updated = 0, skipped = 0, errors = 0;
+  try {
+    const files = fs.readdirSync(AUTOTRIPS_DIR).filter(f => f.endsWith('.json'));
+    for (const f of files) {
+      try {
+        const filePath = path.join(AUTOTRIPS_DIR, f);
+        const d = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+        const at = d.autoTrip;
+        if (!at?.endMs) { skipped++; continue; }
+        const netKwh = +at.netKwh || 0;
+        const fuelL  = +at.fuelL  || 0;
+        if (netKwh < 0.01 && fuelL < 0.01) { skipped++; continue; }
+        // Preço usado: o que valia no FIM da viagem (consumiu durante o trajeto)
+        const { kwhPrice, gasPrice } = priceMixAtMs(at.endMs);
+        const total = +(netKwh * kwhPrice + fuelL * gasPrice).toFixed(2);
+        at.costRecomputed = {
+          total,
+          kwhPrice: +kwhPrice.toFixed(4),
+          gasPrice: +gasPrice.toFixed(3),
+          ts:       Date.now(),
+        };
+        if (!dryRun) {
+          fs.writeFileSync(filePath, JSON.stringify(d, null, 2));
+          // Espelha em memória pra que /api/autotrips reflita imediato
+          const mem = autoTripsArr.find(t => t.tripId === d.tripId);
+          if (mem) mem.costRecomputed = at.costRecomputed;
+        }
+        updated++;
+      } catch (_) { errors++; }
+    }
+  } catch (e) {
+    return res.status(500).json({ error: 'Falha ao iterar autotrips: ' + e.message });
+  }
+  res.json({ ok: true, dry_run: dryRun, updated, skipped, errors });
 });
 
 // POST /api/admin/reset-tyre-baseline — zera o histórico de PSI dos pneus.
