@@ -1447,22 +1447,24 @@ function renderStats() {
   const socGain  = charges.reduce((s,c) => s + ((c.soc_end || 0) - (c.soc_start || 0)), 0);
   const totalLiters = refuels.reduce((s,r) => s + r.liters, 0);
   const totalCost = filtered.reduce((s,i) => s + (i.cost || 0), 0);
-  document.getElementById('st-charges-n').textContent = charges.length;
-  document.getElementById('st-kwh').textContent       = totalKwh.toFixed(1);
-  document.getElementById('st-time').innerHTML        = `${(totalSec/3600).toFixed(1).replace('.',',')}<span class="u">hora${totalSec/3600>=2?'s':''}</span>`;
-  document.getElementById('st-soc').textContent       = Math.round(socGain);
-  document.getElementById('st-refuels-n').textContent = refuels.length;
-  document.getElementById('st-liters').textContent    = totalLiters.toFixed(1);
-  document.getElementById('st-cost').textContent      = fmtBRL(totalCost);
+  // IMPORTANTE: scope ao container — view-desloc duplica st-kwh/st-time/st-cost
+  const _scope = document.getElementById('view-posto') || document;
+  _scope.querySelector('#st-charges-n').textContent = charges.length;
+  _scope.querySelector('#st-kwh').textContent       = totalKwh.toFixed(1);
+  _scope.querySelector('#st-time').innerHTML        = `${(totalSec/3600).toFixed(1).replace('.',',')}<span class="u">hora${totalSec/3600>=2?'s':''}</span>`;
+  _scope.querySelector('#st-soc').textContent       = Math.round(socGain);
+  _scope.querySelector('#st-refuels-n').textContent = refuels.length;
+  _scope.querySelector('#st-liters').textContent    = totalLiters.toFixed(1);
+  _scope.querySelector('#st-cost').textContent      = fmtBRL(totalCost);
   // ── Perda média nos carregadores (só recargas que têm charger_kwh informado)
   const withCharger = charges.filter(c => c.charger_kwh > 0);
-  const lossCard = document.getElementById('st-loss-card');
+  const lossCard = _scope.querySelector('#st-loss-card');
   if (withCharger.length > 0) {
     const chargerSum = withCharger.reduce((s,c) => s + c.charger_kwh, 0);
     const carSum     = withCharger.reduce((s,c) => s + c.kwh, 0);
     const lossPct = chargerSum > 0 ? ((chargerSum - carSum) / chargerSum * 100) : 0;
-    document.getElementById('st-loss').textContent = lossPct.toFixed(1);
-    document.getElementById('st-loss-info').textContent =
+    _scope.querySelector('#st-loss').textContent = lossPct.toFixed(1);
+    _scope.querySelector('#st-loss-info').textContent =
       `Perda nos carregadores · ${withCharger.length} de ${charges.length} medidas`;
     lossCard.style.display = '';
   } else {

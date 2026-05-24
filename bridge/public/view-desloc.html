@@ -34238,15 +34238,19 @@ function renderStats() {
   const eqL = pGas > 0.01 ? (totalCost / pGas) : 0;
   const kmL = eqL > 0.001 ? (totalDist / eqL) : 0;
 
-  document.getElementById('st-trips').textContent = filtered.length;
-  document.getElementById('st-dist').textContent  = fmt1(totalDist);
-  document.getElementById('st-dist-ev').textContent  = fmt1(totalEvKm);
-  document.getElementById('st-dist-ice').textContent = fmt1(totalIceKm);
-  document.getElementById('st-time').textContent  = fmtDuration(totalSec);
-  document.getElementById('st-kwh').textContent   = fmt1(totalKwh);
-  document.getElementById('st-fuel').textContent  = fmt1(totalFuel);
-  document.getElementById('st-cost').textContent  = fmtBRL(totalCost);
-  document.getElementById('st-eff').textContent   = kmL > 0 ? fmt1(kmL) : '--';
+  // IMPORTANTE: scope ao container da view. view-posto também usa
+  // st-kwh/st-time/st-cost — sem isso, document.getElementById pega o da
+  // view-posto (que aparece primeiro no DOM) e atualiza os cards errados.
+  const _scope = document.getElementById('view-desloc') || document;
+  _scope.querySelector('#st-trips').textContent = filtered.length;
+  _scope.querySelector('#st-dist').textContent  = fmt1(totalDist);
+  _scope.querySelector('#st-dist-ev').textContent  = fmt1(totalEvKm);
+  _scope.querySelector('#st-dist-ice').textContent = fmt1(totalIceKm);
+  _scope.querySelector('#st-time').textContent  = fmtDuration(totalSec);
+  _scope.querySelector('#st-kwh').textContent   = fmt1(totalKwh);
+  _scope.querySelector('#st-fuel').textContent  = fmt1(totalFuel);
+  _scope.querySelector('#st-cost').textContent  = fmtBRL(totalCost);
+  _scope.querySelector('#st-eff').textContent   = kmL > 0 ? fmt1(kmL) : '--';
 
   // Charts: distância e consumo médio por período
   _renderDeslocCharts(filtered, start === 0 ? (filtered[0]?.startMs || now) : start, end === Infinity ? now : end);

@@ -168,7 +168,10 @@ input { font-family: inherit; }
 /* Views: só uma visível por vez */
 .view { display: none; }
 .view.active { display: block; animation: fadeIn .2s ease; }
-@keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+/* Sem `transform` aqui: `transform` em ancestral cria containing block
+   pros descendentes `position: fixed` (tabbar/subtab dentro da view ficam
+   relativos ao container animado em vez do viewport durante a animação). */
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 
 /* ── Progress bar (carregamento de dados) ────────────────── */
 #progress-bar {

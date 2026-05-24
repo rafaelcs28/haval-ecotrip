@@ -1,4 +1,4 @@
-const CACHE = 'ecotrip-v327';
+const CACHE = 'ecotrip-v328';
 
 // Tudo do shell do PWA (HTML/CSS/JS/icons/libs) — pre-cached no install.
 // Bumpar CACHE acima força o navegador a re-baixar tudo na próxima vez.
