@@ -174,8 +174,46 @@ fun SettingsScreen(
             )
         }
 
-        // Preços de gasolina/energia agora são calculados no bridge a partir
-        // dos abastecimentos/recargas registrados no PWA — UI removida do APK.
+        // Preços (read-only): vêm do bridge via cmd/set_price_kwh e
+        // cmd/set_price_gas_per_l (retained). Recalculados a cada
+        // abastecimento/recarga registrado no PWA — mix ponderado.
+        SectionCard(title = "Preços atuais (calculados no servidor)") {
+            val priceGas = tripManager.getPriceGasoline()
+            val priceKwh = tripManager.getPriceEnergy()
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text("⛽ Gasolina", fontSize = 11.sp, color = TextSecondary)
+                    Text(
+                        if (priceGas > 0f) "R$ %.3f".format(priceGas) else "—",
+                        fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Cyan,
+                    )
+                    Text("por litro", fontSize = 10.sp, color = TextSecondary)
+                }
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text("⚡ Energia", fontSize = 11.sp, color = TextSecondary)
+                    Text(
+                        if (priceKwh > 0f) "R$ %.4f".format(priceKwh) else "—",
+                        fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Cyan,
+                    )
+                    Text("por kWh", fontSize = 10.sp, color = TextSecondary)
+                }
+            }
+            Text(
+                "Valores ponderados pelo mix do tanque/bateria, atualizados a cada abastecimento e recarga registrados no PWA. Edição feita no celular.",
+                fontSize = 11.sp, color = TextSecondary,
+                modifier = Modifier.padding(top = 6.dp),
+            )
+        }
 
         // ── Histórico ─────────────────────────────────────────────────────────
         SectionCard(title = "Histórico de viagens") {
