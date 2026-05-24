@@ -421,8 +421,8 @@ input { font-family: inherit; }
       <div style="display:flex;justify-content:space-between;padding:8px 10px;background:rgba(255,255,255,.04);border-radius:8px"><span style="color:#94a3b8">Online</span><span id="net-info-online" style="font-weight:700">—</span></div>
       <div style="height:6px"></div>
       <div id="net-info-ssid-row" style="display:none;justify-content:space-between;padding:8px 10px;background:rgba(255,255,255,.04);border-radius:8px;gap:8px"><span style="color:#94a3b8;flex-shrink:0">Wi-Fi (bridge)</span><span id="net-info-ssid" style="font-weight:700;color:#cbd5e1;font-size:12px;text-align:right">—</span></div>
-      <div style="display:flex;justify-content:space-between;padding:8px 10px;background:rgba(255,255,255,.04);border-radius:8px;gap:8px"><span style="color:#94a3b8;flex-shrink:0">IP local (LAN)</span><span id="net-info-ip-local" style="font-weight:700;color:#cbd5e1;font-family:monospace;font-size:11px;text-align:right">—</span></div>
-      <div style="display:flex;justify-content:space-between;padding:8px 10px;background:rgba(255,255,255,.04);border-radius:8px;gap:8px"><span style="color:#94a3b8;flex-shrink:0">IP visto pelo bridge</span><span id="net-info-ip" style="font-weight:700;color:#cbd5e1;font-family:monospace;font-size:11px;text-align:right">—</span></div>
+      <div style="display:flex;justify-content:space-between;padding:8px 10px;background:rgba(255,255,255,.04);border-radius:8px;gap:8px"><span style="color:#94a3b8;flex-shrink:0">IP deste dispositivo</span><span id="net-info-ip-local" style="font-weight:700;color:#cbd5e1;font-family:monospace;font-size:11px;text-align:right">—</span></div>
+      <div style="display:flex;justify-content:space-between;padding:8px 10px;background:rgba(255,255,255,.04);border-radius:8px;gap:8px"><span style="color:#94a3b8;flex-shrink:0">IP de saída (Tailscale/internet)</span><span id="net-info-ip" style="font-weight:700;color:#cbd5e1;font-family:monospace;font-size:11px;text-align:right">—</span></div>
       <div style="display:flex;justify-content:space-between;padding:8px 10px;background:rgba(255,255,255,.04);border-radius:8px;gap:8px"><span style="color:#94a3b8;flex-shrink:0">Host do bridge</span><span id="net-info-host" style="font-weight:600;color:#cbd5e1;font-family:monospace;font-size:11px;text-align:right">—</span></div>
     </div>
     <button onclick="closeNetInfo()" style="width:100%;margin-top:14px;padding:12px;background:rgba(255,255,255,.06);color:#cbd5e1;border:none;border-radius:10px;font-size:14px;font-weight:700;font-family:inherit">Fechar</button>
@@ -1693,22 +1693,49 @@ async function openNetInfo() {
   } catch (_) { document.getElementById('net-info-ip').textContent = '— (sem rede)'; }
 }
 
-// Descobre IP local via WebRTC. Timeout 1.5s.
+// Descobre IP local via WebRTC. Timeout 2s. Coleta TODOS candidatos
+// e prioriza IPv4 privado (192.168.x, 10.x, 172.16-31.x), depois CGNAT
+// Tailscale (100.x), depois mDNS (.local), por último IPv6.
 function _getLocalIp() {
   return new Promise(resolve => {
     if (!window.RTCPeerConnection) return resolve(null);
     let resolved = false;
+    const candidates = [];
     const done = (ip) => { if (resolved) return; resolved = true; try { pc.close(); } catch(_){} resolve(ip); };
+    const finishWithBest = () => {
+      if (resolved) return;
+      const priv = candidates.find(ip => /^(192\.168|10\.|172\.(1[6-9]|2[0-9]|3[01]))\./.test(ip));
+      if (priv) return done(priv);
+      const tailscale = candidates.find(ip => /^100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\./.test(ip));
+      if (tailscale) return done(tailscale);
+      const ipv4 = candidates.find(ip => /^\d+\.\d+\.\d+\.\d+$/.test(ip));
+      if (ipv4) return done(ipv4);
+      const mdns = candidates.find(ip => /\.local$/.test(ip));
+      if (mdns) return done(mdns);
+      const ipv6 = candidates.find(ip => /^[a-f0-9:]+$/i.test(ip));
+      if (ipv6) return done(ipv6);
+      done(null);
+    };
     const pc = new RTCPeerConnection({ iceServers: [] });
     pc.createDataChannel('');
     pc.onicecandidate = ev => {
-      if (!ev?.candidate) return;
-      // candidate string: "candidate:... <type> <ip> <port> typ host ..."
-      const m = ev.candidate.candidate.match(/([\d]+\.[\d]+\.[\d]+\.[\d]+)|([a-f0-9:]+:[a-f0-9:]+)/i);
-      if (m && m[0] && !/^0\.0\.0\.0$/.test(m[0])) done(m[0]);
+      if (!ev?.candidate) {
+        // null candidate = fim do gathering
+        finishWithBest();
+        return;
+      }
+      // candidate string típica:
+      //   "candidate:1 1 UDP 2122252543 192.168.1.42 51234 typ host"
+      //   "candidate:2 1 UDP 2122252543 abcd-uuid.local 51234 typ host"
+      //   "candidate:... typ host ufrag e:abc123" ← partes que NÃO são IP
+      const parts = ev.candidate.candidate.split(/\s+/);
+      // pega o 5º token quando o 8º é "typ" — esse é o IP/hostname
+      const idx = parts.indexOf('typ');
+      const ip = idx > 0 ? parts[idx - 2] : null;
+      if (ip && ip !== '0.0.0.0' && !candidates.includes(ip)) candidates.push(ip);
     };
     pc.createOffer().then(o => pc.setLocalDescription(o)).catch(() => done(null));
-    setTimeout(() => done(null), 1500);
+    setTimeout(finishWithBest, 2000);
   });
 }
 
