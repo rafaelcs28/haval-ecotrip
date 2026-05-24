@@ -9,6 +9,8 @@ const path     = require('path');
 const http     = require('http');
 const https    = require('https');
 const webpush  = require('web-push');
+const apnsLive = require('./apns_live_activity');
+apnsLive.init();
 
 // ── Configuração ──────────────────────────────────────────────────────────────
 
@@ -4543,7 +4545,33 @@ function sendChargeLiveUpdate(isFinal = false) {
     renotify: isFinal,
     skipHistory: !isFinal,           // updates ao vivo não entram na central de notif
   });
+  // Live Activity (iOS) via APNs — manda o mesmo content-state pra todos os
+  // pushTokens registrados pelo app companion. No-op se APNS_ENABLED=false.
+  if (apnsLive.tokenCount() > 0) {
+    apnsLive.pushUpdate({
+      soc, powerKw: pwr,
+      sessionKwh: +state.charge_session_kwh || 0,
+      remainingMin: Math.max(0, Math.round(rem)),
+      charging: !isFinal,
+      updatedAtMs: now,
+    }, { isFinal }).catch(err => console.warn('[apns] push falhou:', err.message));
+  }
 }
+
+// ── Endpoints da Live Activity (iOS companion) ────────────────────────────────
+// O app companion swift chama esses dois endpoints; o bridge usa o pushToken
+// retornado pra disparar updates da Live Activity via APNs HTTP/2.
+app.post('/api/activity/start', (req, res) => {
+  const { push_token, activity_id } = req.body || {};
+  if (!push_token || !activity_id) return res.status(400).json({ error: 'push_token e activity_id obrigatórios' });
+  apnsLive.registerToken(String(activity_id), String(push_token));
+  res.json({ ok: true, registered: apnsLive.tokenCount() });
+});
+app.post('/api/activity/stop', (req, res) => {
+  const { activity_id } = req.body || {};
+  if (activity_id) apnsLive.unregisterToken(String(activity_id));
+  res.json({ ok: true, registered: apnsLive.tokenCount() });
+});
 
 function startChargeLiveTimer() {
   if (_chargeLiveTimer) return;
