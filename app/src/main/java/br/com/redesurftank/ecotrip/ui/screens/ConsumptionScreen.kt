@@ -189,7 +189,12 @@ fun ConsumptionScreen() {
     LaunchedEffect(Unit) {
         delay(3_000L)
         while (true) {
-            val candidate = tripManager.getResumableLastTrip()
+            // Só oferece "continuar viagem" enquanto o carro está em driving_ready=1.
+            // Antes o banner aparecia 3s após desligar (mesmo sem abrir porta),
+            // forçando o user a dismissar manualmente. Agora some sozinho quando
+            // o carro sai de driving_ready e volta quando entra de novo.
+            val carReady = mqttManager.latestDrivingReadyState == 1
+            val candidate = if (carReady) tripManager.getResumableLastTrip() else null
             // Ignora se o usuário já dismissou ESTA viagem específica
             resumableTrip = if (candidate != null && candidate.startMs == dismissedResumeStartMs) null
                             else candidate
