@@ -1140,27 +1140,56 @@ async function _loadPasskeys() {
 }
 
 async function addPasskey() {
+  // Log explícito pra diagnóstico — em iOS PWA standalone os toasts e prompts
+  // podem ser bloqueados/cinematic, então deixamos rastro no console.
+  console.log('[passkey] addPasskey() invocado');
   const swa = window.SimpleWebAuthnBrowser;
-  if (!swa) { showToast('Biometria não suportada', 'err'); return; }
+  if (!swa) {
+    console.warn('[passkey] SimpleWebAuthnBrowser não carregou');
+    showToast('Biblioteca biométrica não carregou. Faça pull-down pra refresh.', 'err');
+    return;
+  }
   const tk = localStorage.getItem('bridge_token');
-  if (!tk) return;
-  const supported = await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable?.();
-  if (!supported) { showToast('Este dispositivo não tem biometria habilitada', 'err'); return; }
+  if (!tk) { showToast('Não logado', 'err'); return; }
+  if (!window.PublicKeyCredential) {
+    showToast('WebAuthn não suportado neste navegador', 'err');
+    return;
+  }
+  let supported = true;
+  try {
+    supported = await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable?.();
+  } catch (_) {}
+  if (supported === false) {
+    showToast('Este dispositivo não tem biometria habilitada', 'err');
+    return;
+  }
+  // Nome do device — `prompt()` é bloqueado em alguns PWAs standalone iOS.
+  // Pega default automático e segue direto; user troca depois pela lista.
   const defaultName = navigator.userAgent.includes('iPhone') ? 'iPhone'
     : navigator.userAgent.includes('iPad') ? 'iPad'
     : navigator.userAgent.includes('Mac') ? 'Mac'
     : navigator.userAgent.includes('Android') ? 'Android'
     : 'Dispositivo';
-  const deviceName = prompt('Nome desse dispositivo:', defaultName) || defaultName;
+  let deviceName = defaultName;
   try {
+    const v = window.prompt && window.prompt('Nome desse dispositivo:', defaultName);
+    if (v && v.trim()) deviceName = v.trim();
+  } catch (_) {}
+  try {
+    showToast('⏳ Solicitando biometria…', 'ok');
     const r = await fetch('/api/auth/passkey/register/begin', {
       method: 'POST',
       headers: { 'Authorization': 'Bearer ' + tk, 'Content-Type': 'application/json' },
       body: '{}',
     });
-    if (!r.ok) throw new Error('HTTP ' + r.status);
+    if (!r.ok) {
+      const errBody = await r.text().catch(() => '');
+      throw new Error('begin HTTP ' + r.status + ' ' + errBody.slice(0, 80));
+    }
     const opts = await r.json();
+    console.log('[passkey] options recebidas, iniciando prompt nativo');
     const att = await swa.startRegistration({ optionsJSON: opts });
+    console.log('[passkey] biometria confirmada, enviando para finish');
     const fr = await fetch('/api/auth/passkey/register/finish', {
       method: 'POST',
       headers: { 'Authorization': 'Bearer ' + tk, 'Content-Type': 'application/json' },
@@ -1174,7 +1203,9 @@ async function addPasskey() {
       showToast('✗ ' + (data.error || 'falha ao registrar'), 'err');
     }
   } catch (e) {
-    if (e?.name !== 'NotAllowedError') showToast('✗ ' + (e?.message || e), 'err');
+    console.error('[passkey] erro:', e);
+    if (e?.name === 'NotAllowedError') showToast('Biometria cancelada', '');
+    else showToast('✗ ' + (e?.message || e), 'err');
   }
 }
 
