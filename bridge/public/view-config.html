@@ -2319,12 +2319,16 @@ function closeSub() {
   document.querySelectorAll('.subview.show').forEach(el => el.classList.remove('show'));
 }
 
-function showToast(msg) {
-  const t = document.getElementById('toast');
-  t.textContent = msg;
-  t.classList.add('show');
-  clearTimeout(showToast._t);
-  showToast._t = setTimeout(() => t.classList.remove('show'), 2000);
+// showToast: usa o do shell global (com toast-stack). A versão local antiga
+// dependia de <div id="toast"> que não existe no shell — quebrava todas as
+// ações de Avançado ("null is not an object evaluating 't.textContent=msg'").
+function showToast(msg, type) {
+  if (typeof window.showToast === 'function' && window.showToast !== showToast) {
+    window.showToast(msg, type);
+  } else {
+    // Fallback (sem shell): só console
+    try { console.log('[toast]', msg); } catch (_) {}
+  }
 }
 
 function saveSection(name) {
