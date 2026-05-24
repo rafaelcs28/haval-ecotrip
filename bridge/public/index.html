@@ -420,6 +420,7 @@ input { font-family: inherit; }
       <div style="display:flex;justify-content:space-between;padding:8px 10px;background:rgba(255,255,255,.04);border-radius:8px"><span style="color:#94a3b8">Velocidade estimada</span><span id="net-info-speed" style="font-weight:600;color:#cbd5e1">—</span></div>
       <div style="display:flex;justify-content:space-between;padding:8px 10px;background:rgba(255,255,255,.04);border-radius:8px"><span style="color:#94a3b8">Online</span><span id="net-info-online" style="font-weight:700">—</span></div>
       <div style="height:6px"></div>
+      <div id="net-info-ssid-row" style="display:none;justify-content:space-between;padding:8px 10px;background:rgba(255,255,255,.04);border-radius:8px;gap:8px"><span style="color:#94a3b8;flex-shrink:0">Wi-Fi (bridge)</span><span id="net-info-ssid" style="font-weight:700;color:#cbd5e1;font-size:12px;text-align:right">—</span></div>
       <div style="display:flex;justify-content:space-between;padding:8px 10px;background:rgba(255,255,255,.04);border-radius:8px;gap:8px"><span style="color:#94a3b8;flex-shrink:0">IP local (LAN)</span><span id="net-info-ip-local" style="font-weight:700;color:#cbd5e1;font-family:monospace;font-size:11px;text-align:right">—</span></div>
       <div style="display:flex;justify-content:space-between;padding:8px 10px;background:rgba(255,255,255,.04);border-radius:8px;gap:8px"><span style="color:#94a3b8;flex-shrink:0">IP visto pelo bridge</span><span id="net-info-ip" style="font-weight:700;color:#cbd5e1;font-family:monospace;font-size:11px;text-align:right">—</span></div>
       <div style="display:flex;justify-content:space-between;padding:8px 10px;background:rgba(255,255,255,.04);border-radius:8px;gap:8px"><span style="color:#94a3b8;flex-shrink:0">Host do bridge</span><span id="net-info-host" style="font-weight:600;color:#cbd5e1;font-family:monospace;font-size:11px;text-align:right">—</span></div>
@@ -884,6 +885,10 @@ function connect() {
         if (window._onDiagUpdate) window._onDiagUpdate(msg.data);
       } else if (msg.type === 'diag_ack') {
         if (window._onDiagAck) window._onDiagAck(msg.data);
+      } else if (msg.type === 'reprocess_progress') {
+        if (window._onReprocessProgress) window._onReprocessProgress(msg.data);
+      } else if (msg.type === 'reprocess_done') {
+        if (window._onReprocessDone) window._onReprocessDone(msg.data);
       } else if (msg.type === 'charge_limit_result') {
         if (window._onChargeLimitResult) window._onChargeLimitResult(msg.data);
       } else if (msg.type === 'diag_state') {
@@ -1666,6 +1671,17 @@ async function openNetInfo() {
   _getLocalIp().then(ip => {
     document.getElementById('net-info-ip-local').textContent = ip || 'indisponível';
   });
+  // SSID — browser não expõe (privacidade). Tentamos via bridge (macOS).
+  // Só faz sentido quando o user está na MESMA rede do bridge.
+  fetch('/api/network/ssid', { headers: { 'Authorization': 'Bearer ' + bridgeToken } })
+    .then(r => r.ok ? r.json() : null)
+    .then(j => {
+      const row = document.getElementById('net-info-ssid-row');
+      const el  = document.getElementById('net-info-ssid');
+      if (j?.ssid) { row.style.display = 'flex'; el.textContent = j.ssid; }
+      else { row.style.display = 'none'; }
+    })
+    .catch(() => {});
   try {
     const r = await fetch('/api/whoami', { headers: { 'Authorization': 'Bearer ' + bridgeToken } });
     if (r.ok) {

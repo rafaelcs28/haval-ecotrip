@@ -523,6 +523,11 @@
           <div class="info"><div class="label">Reanalisar deslocamentos</div><div class="sub">Recalcula alertas de multa</div></div>
           <span class="chevron">›</span>
         </div>
+        <div class="settings-item orange" onclick="actionReprocessPlaces()">
+          <div class="icon-box">🌍</div>
+          <div class="info"><div class="label">Reprocessar nomes de locais</div><div class="sub" id="adv-reprocess-sub">Aplica regra "Bairro, Cidade" em viagens e recargas com GPS</div></div>
+          <span class="chevron">›</span>
+        </div>
         <div class="settings-item yellow" onclick="openSub('places')">
           <div class="icon-box">📍</div>
           <div class="info"><div class="label">Locais conhecidos</div><div class="sub" id="adv-places-sub">--</div></div>
@@ -2013,6 +2018,42 @@ async function _loadAdvanced() {
   } catch (_) {}
 }
 
+async function actionReprocessPlaces() {
+  if (!confirm('Aplicar reverse-geocode em todas as viagens e recargas com GPS salvo?\n\nProcessa ~1 entrada/s (limite Nominatim). Pode demorar alguns minutos. O progresso aparece no rodapé.')) return;
+  const force = confirm('Forçar reprocessamento mesmo nas entradas que JÁ TÊM nome?\n\nCancele se quiser preservar nomes editados manualmente.');
+  const tk = localStorage.getItem('bridge_token');
+  try {
+    const r = await fetch('/api/admin/reprocess-places', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + tk, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind: 'all', force }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'HTTP ' + r.status);
+    showToast(`⏳ Reprocessando ${d.total} entrada(s)…`, 'ok');
+    _updateReprocessSub({ done: 0, total: d.total });
+  } catch (e) { showToast('✗ ' + e.message, 'err'); }
+}
+
+function _updateReprocessSub(s) {
+  const sub = document.getElementById('adv-reprocess-sub');
+  if (!sub || !s) return;
+  if (s.total > 0 && s.done < s.total) {
+    sub.textContent = `Processando ${s.done}/${s.total}${s.current ? ' · ' + s.current : ''}`;
+    sub.style.color = 'var(--yellow)';
+  } else if (s.total > 0) {
+    sub.textContent = `✓ Concluído · ${s.trips_updated || 0} viagens, ${s.charges_updated || 0} recargas${s.errors ? ' · ' + s.errors + ' erro(s)' : ''}`;
+    sub.style.color = 'var(--green)';
+  }
+}
+
+// Recebe progress via WS (chamado pelo shell)
+window._onReprocessProgress = function(data) { _updateReprocessSub(data); };
+window._onReprocessDone = function(data) {
+  _updateReprocessSub(data);
+  showToast(`✓ Reprocessamento concluído: ${data.trips_updated} viagens · ${data.charges_updated} recargas`, 'ok');
+};
+
 async function actionRefreshRadars() {
   if (!confirm('Atualizar base de radares do OpenStreetMap? Pode demorar 30-60s.')) return;
   const tk = localStorage.getItem('bridge_token');
@@ -2427,7 +2468,7 @@ window.markMaintDone = async function(id) {
 };
 
   // Expõe handlers de onclick no window
-  Object.assign(window, { openSub: typeof openSub !== 'undefined' ? openSub : undefined, closeSub: typeof closeSub !== 'undefined' ? closeSub : undefined, saveSection: typeof saveSection !== 'undefined' ? saveSection : undefined, toggle2fa: typeof toggle2fa !== 'undefined' ? toggle2fa : undefined, confirmClearHistory: typeof confirmClearHistory !== 'undefined' ? confirmClearHistory : undefined, openMaintAdd: openMaintAdd, closeMaintModal: closeMaintModal, saveMaintItem: saveMaintItem, deleteMaintItem: deleteMaintItem, markMaintDone: markMaintDone, saveVehicle: saveVehicle, setChargeLimit: setChargeLimit, actionRefreshRadars: actionRefreshRadars, actionReanalyzeTrips: actionReanalyzeTrips, actionRestartBridge: actionRestartBridge, actionUpdateBridge: actionUpdateBridge, openPlaceAdd: openPlaceAdd, openPlaceEdit: openPlaceEdit, closePlaceModal: closePlaceModal, usePlaceGps: usePlaceGps, savePlace: savePlace, deletePlace: deletePlace, toggleNotif: toggleNotif, _onNotifDeviceChange: _onNotifDeviceChange, renameNotifDevice: renameNotifDevice, removeNotifDevice: removeNotifDevice, renameMyDevice: renameMyDevice, forceSubscribePush: forceSubscribePush, openNotifDevicePicker: openNotifDevicePicker, closeNotifDevicePicker: closeNotifDevicePicker, _pickNotifDevice: _pickNotifDevice, renameNotifDeviceById: renameNotifDeviceById, removeNotifDeviceById: removeNotifDeviceById, changePassword: changePassword, toggle2faNew: toggle2faNew, closeTotpModal: closeTotpModal, activate2fa: activate2fa, show2faBackup: show2faBackup, regenBackupCodes: regenBackupCodes, openGeofencePlaces: openGeofencePlaces, _toggleGeofencePick: _toggleGeofencePick, saveGeofencePlaces: saveGeofencePlaces, toggleChargeEnding: toggleChargeEnding, editChargeEndingMin: editChargeEndingMin, downloadBackup: downloadBackup, uploadBackup: uploadBackup, copyBackupToClipboard: copyBackupToClipboard, shareBackup: shareBackup, clearLocalCache: clearLocalCache, toggleDiag: toggleDiag, saveDiagInterval: saveDiagInterval, exportDiag: exportDiag, clearDiag: clearDiag, openDiagSet: openDiagSet, confirmDiagSet: confirmDiagSet, _scheduleDiagRender: _scheduleDiagRender });
+  Object.assign(window, { openSub: typeof openSub !== 'undefined' ? openSub : undefined, closeSub: typeof closeSub !== 'undefined' ? closeSub : undefined, saveSection: typeof saveSection !== 'undefined' ? saveSection : undefined, toggle2fa: typeof toggle2fa !== 'undefined' ? toggle2fa : undefined, confirmClearHistory: typeof confirmClearHistory !== 'undefined' ? confirmClearHistory : undefined, openMaintAdd: openMaintAdd, closeMaintModal: closeMaintModal, saveMaintItem: saveMaintItem, deleteMaintItem: deleteMaintItem, markMaintDone: markMaintDone, saveVehicle: saveVehicle, setChargeLimit: setChargeLimit, actionRefreshRadars: actionRefreshRadars, actionReanalyzeTrips: actionReanalyzeTrips, actionReprocessPlaces: actionReprocessPlaces, actionRestartBridge: actionRestartBridge, actionUpdateBridge: actionUpdateBridge, openPlaceAdd: openPlaceAdd, openPlaceEdit: openPlaceEdit, closePlaceModal: closePlaceModal, usePlaceGps: usePlaceGps, savePlace: savePlace, deletePlace: deletePlace, toggleNotif: toggleNotif, _onNotifDeviceChange: _onNotifDeviceChange, renameNotifDevice: renameNotifDevice, removeNotifDevice: removeNotifDevice, renameMyDevice: renameMyDevice, forceSubscribePush: forceSubscribePush, openNotifDevicePicker: openNotifDevicePicker, closeNotifDevicePicker: closeNotifDevicePicker, _pickNotifDevice: _pickNotifDevice, renameNotifDeviceById: renameNotifDeviceById, removeNotifDeviceById: removeNotifDeviceById, changePassword: changePassword, toggle2faNew: toggle2faNew, closeTotpModal: closeTotpModal, activate2fa: activate2fa, show2faBackup: show2faBackup, regenBackupCodes: regenBackupCodes, openGeofencePlaces: openGeofencePlaces, _toggleGeofencePick: _toggleGeofencePick, saveGeofencePlaces: saveGeofencePlaces, toggleChargeEnding: toggleChargeEnding, editChargeEndingMin: editChargeEndingMin, downloadBackup: downloadBackup, uploadBackup: uploadBackup, copyBackupToClipboard: copyBackupToClipboard, shareBackup: shareBackup, clearLocalCache: clearLocalCache, toggleDiag: toggleDiag, saveDiagInterval: saveDiagInterval, exportDiag: exportDiag, clearDiag: clearDiag, openDiagSet: openDiagSet, confirmDiagSet: confirmDiagSet, _scheduleDiagRender: _scheduleDiagRender });
   if (!window['initView_config']) window['initView_config'] = function() {};
 })();
 </script>

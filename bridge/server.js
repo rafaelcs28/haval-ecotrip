@@ -3322,6 +3322,33 @@ function _readGitInfo() {
   } catch (_) { _BRIDGE_GIT_INFO = { sha: null, date: null }; }
   return _BRIDGE_GIT_INFO;
 }
+// GET /api/network/ssid — retorna o SSID da rede onde o bridge está conectado.
+// Browsers não expõem SSID por privacidade; esse endpoint pega do macOS via
+// `networksetup`. Útil só quando user/bridge estão na mesma rede Wi-Fi.
+let _ssidCache = { value: null, ts: 0 };
+app.get('/api/network/ssid', (_req, res) => {
+  // Cache 30s pra não shellar a cada open do modal
+  if (Date.now() - _ssidCache.ts < 30_000) return res.json({ ssid: _ssidCache.value, cached: true });
+  if (process.platform !== 'darwin') return res.json({ ssid: null, reason: 'platform_not_supported' });
+  const { exec } = require('child_process');
+  // Descobre a interface Wi-Fi (varia por Mac: en0/en1/...). networksetup
+  // -listallhardwareports retorna pares "Hardware Port: Wi-Fi" + "Device: enN"
+  exec('/usr/sbin/networksetup -listallhardwareports', { timeout: 2000 }, (err1, ports) => {
+    if (err1) { _ssidCache = { value: null, ts: Date.now() }; return res.json({ ssid: null }); }
+    const m = ports.match(/Hardware Port:\s*Wi-Fi[\s\S]*?Device:\s*(\S+)/i);
+    const iface = m ? m[1] : 'en0';
+    exec(`/usr/sbin/networksetup -getairportnetwork ${iface}`, { timeout: 2000 }, (err2, stdout) => {
+      let ssid = null;
+      if (!err2 && stdout) {
+        const m2 = stdout.match(/:\s*(.+?)\s*$/);
+        if (m2 && m2[1] && !/not associated|off/i.test(m2[1])) ssid = m2[1];
+      }
+      _ssidCache = { value: ssid, ts: Date.now() };
+      res.json({ ssid, iface });
+    });
+  });
+});
+
 // GET /api/whoami — retorna IP do cliente + headers úteis pra debug de rede.
 // Usado pelo indicador de rede no header da PWA (toque mostra IP).
 app.get('/api/whoami', (req, res) => {
@@ -3570,6 +3597,125 @@ const ACTION_TO_HA_BUTTON = {
   charge_history: 'historico_de_carregamento',
 };
 const ALLOWED_ACTIONS = new Set(Object.keys(ACTION_TO_HA_BUTTON));
+
+// ── Reverse-geocode via Nominatim (1 req/s, cache em memória) ─────────────
+// Usado pelo reprocessamento de trips/charges. Para o uso runtime do PWA,
+// cada cliente faz o seu (Nominatim aceita); aqui o foco é batch server-side.
+const _geocodeMem = new Map();
+function _geocodeMemKey(lat, lng) {
+  return (Math.round(lat * 1000) / 1000) + ',' + (Math.round(lng * 1000) / 1000);
+}
+async function _reverseGeocode(lat, lng) {
+  const k = _geocodeMemKey(lat, lng);
+  if (_geocodeMem.has(k)) return _geocodeMem.get(k);
+  try {
+    const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=16`, {
+      headers: {
+        'Accept': 'application/json',
+        'User-Agent': 'ecotrip-bridge/1.0 (https://github.com/rafaelcs28/haval-ecotrip)',
+      },
+    });
+    const j = await r.json();
+    const a = j.address || {};
+    const result = {
+      city:   a.city || a.town || a.village || a.county || '',
+      suburb: a.suburb || a.neighbourhood || a.quarter || a.borough || a.city_district || '',
+    };
+    _geocodeMem.set(k, result);
+    return result;
+  } catch (_) {
+    _geocodeMem.set(k, { city: '', suburb: '' });
+    return { city: '', suburb: '' };
+  }
+}
+function _formatPlace(g, otherG) {
+  // Mesma cidade do oposto → "Bairro, Cidade"; cidade diferente → só cidade
+  const sameCity = otherG && g.city && otherG.city && g.city === otherG.city;
+  if (sameCity && g.suburb && g.city) return g.suburb + ', ' + g.city;
+  if (sameCity && g.suburb)           return g.suburb;
+  return g.city || g.suburb || '';
+}
+
+let _reprocessRunning = false;
+let _reprocessStatus = null;  // { kind, total, done, current, errors }
+
+function _broadcastReprocess() {
+  broadcast('reprocess_progress', _reprocessStatus);
+}
+
+// POST /api/admin/reprocess-places  body { kind: 'trips'|'charges'|'all', force?: bool }
+// Itera tudo, faz reverse-geocode 1/s. Resposta imediata; progresso via WS.
+app.post('/api/admin/reprocess-places', async (req, res) => {
+  if (!adminCheckToken(req, res)) return;
+  if (_reprocessRunning) return res.status(409).json({ error: 'já em execução', status: _reprocessStatus });
+  const kind  = req.body?.kind || 'all';   // 'trips' | 'charges' | 'all'
+  const force = !!req.body?.force;
+  const tripFiles = (kind === 'trips' || kind === 'all')
+    ? fs.readdirSync(AUTOTRIPS_DIR).filter(f => f.endsWith('.json'))
+    : [];
+  const chargesTodo = (kind === 'charges' || kind === 'all')
+    ? chargesArr.filter(c => c.location_lat && c.location_lng && (force || !c.location_name))
+    : [];
+  const total = tripFiles.length + chargesTodo.length;
+  _reprocessRunning = true;
+  _reprocessStatus = { kind, total, done: 0, trips_updated: 0, charges_updated: 0, errors: 0, current: '' };
+  res.json({ ok: true, total, kind });
+  // Roda em background
+  (async () => {
+    try {
+      // Trips
+      for (const f of tripFiles) {
+        try {
+          const filePath = path.join(AUTOTRIPS_DIR, f);
+          const d = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+          const at = d.autoTrip || {};
+          const skip = !force && at.startKp && at.endKp;
+          if (!skip && at.startLat && at.endLat) {
+            const sG = await _reverseGeocode(at.startLat, at.startLng);
+            await new Promise(r => setTimeout(r, 1100));
+            const eG = await _reverseGeocode(at.endLat, at.endLng);
+            await new Promise(r => setTimeout(r, 1100));
+            const newStart = _formatPlace(sG, eG);
+            const newEnd   = _formatPlace(eG, sG);
+            if (force || !at.startKp) at.startKp = newStart || at.startKp || null;
+            if (force || !at.endKp)   at.endKp   = newEnd   || at.endKp   || null;
+            _reprocessStatus.current = (at.startKp || '?') + ' → ' + (at.endKp || '?');
+            fs.writeFileSync(filePath, JSON.stringify(d, null, 2));
+            _reprocessStatus.trips_updated++;
+          }
+        } catch (e) { _reprocessStatus.errors++; }
+        _reprocessStatus.done++;
+        if (_reprocessStatus.done % 3 === 0) _broadcastReprocess();
+      }
+      // Charges
+      for (const c of chargesTodo) {
+        try {
+          const g = await _reverseGeocode(c.location_lat, c.location_lng);
+          await new Promise(r => setTimeout(r, 1100));
+          const name = _formatPlace(g, null);  // sem oposto pra charge → cidade
+          if (name) {
+            c.location_name = name;
+            c._updated_ms = Date.now();
+            _reprocessStatus.current = name;
+            _reprocessStatus.charges_updated++;
+          }
+        } catch (e) { _reprocessStatus.errors++; }
+        _reprocessStatus.done++;
+        if (_reprocessStatus.done % 3 === 0) _broadcastReprocess();
+      }
+      if (_reprocessStatus.charges_updated > 0) scheduleChargesFlush();
+      _broadcastReprocess();
+      broadcast('reprocess_done', _reprocessStatus);
+      console.log(`✓ Reprocess: trips=${_reprocessStatus.trips_updated} charges=${_reprocessStatus.charges_updated} errors=${_reprocessStatus.errors}`);
+    } finally {
+      _reprocessRunning = false;
+    }
+  })();
+});
+
+app.get('/api/admin/reprocess-places/status', (_req, res) => {
+  res.json({ running: _reprocessRunning, status: _reprocessStatus });
+});
 
 // POST /api/admin/reset-tyre-baseline — zera o histórico de PSI dos pneus.
 // Outras métricas (12V, autonomia, combustível) permanecem. Útil quando a
