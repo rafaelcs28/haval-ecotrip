@@ -213,8 +213,14 @@
 /* Footer com data nav (setas) */
 .date-nav {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 10px 0;
-  position: sticky; bottom: 0;
+  position: sticky;
+  top: calc(env(safe-area-inset-top, 0px) + 56px);
+  padding: 8px 12px;
+  margin: 0 -4px 8px;
+  background: rgba(10,10,10,.94);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  border-bottom: 1px solid rgba(255,255,255,.06);
+  z-index: 6;
 }
 .date-nav .arrow {
   width: 48px; height: 36px; border-radius: 18px;
@@ -388,6 +394,16 @@
       <div class="chip" data-filter="abastecimento" onclick="setFilter('abastecimento')">⛽ Abastecimentos</div>
     </div>
 
+    <!-- Date nav sticky no topo (padronizado com Desloc) -->
+    <div class="date-nav">
+      <div class="arrow" id="nav-prev" onclick="navDay(-1)">‹</div>
+      <div class="label" onclick="openCalendar()">
+        <div class="date" id="nav-date">--</div>
+        <div class="lbl" id="nav-lbl">--</div>
+      </div>
+      <div class="arrow" id="nav-next" onclick="navDay(1)">›</div>
+    </div>
+
     <!-- Lista de registros (preenchida via JS) -->
     <div id="entries-list"></div>
 
@@ -395,17 +411,6 @@
     <div id="empty-state" class="empty-state section-hidden">
       <div class="ic">⚡</div>
       <div class="msg" id="empty-msg">Nenhum registro encontrado na data selecionada...</div>
-    </div>
-
-    <!-- Footer: navegação de dia (toque na data abre o calendar modal) -->
-    <div class="date-nav">
-      <div class="arrow" id="nav-prev" onclick="navDay(-1)">‹</div>
-      <div class="label" onclick="openCalendar()">
-        <div class="date" id="nav-date">--</div>
-        <div class="lbl" id="nav-lbl">--</div>
-        <div class="hint">📅 toque pra ver calendário</div>
-      </div>
-      <div class="arrow" id="nav-next" onclick="navDay(1)">›</div>
     </div>
   </div>
 
