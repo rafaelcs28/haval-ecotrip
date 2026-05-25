@@ -1,19 +1,77 @@
 //
 //  ContentView.swift
-//  Tela única do app companion. Mostra:
-//   - Campo URL + Campo Token (salvos em UserDefaults)
-//   - Botão "Iniciar Live Activity" (cria a activity + manda pushToken pro bridge)
-//   - Botão "Parar"
-//   - Status atual
+//  Modos:
+//   - Sem URL configurada → mostra SetupView (form de URL + token)
+//   - Com URL → carrega o PWA inteiro numa WKWebView fullscreen.
 //
-//  O app NÃO precisa ficar aberto pra Live Activity funcionar — depois de
-//  iniciada, o bridge atualiza via APNs Push direto.
+//  Pra reabrir o Setup (trocar URL/token): long-press com 3 dedos por 1 segundo
+//  em qualquer lugar abre a sheet de Settings. Também pode ser disparado pelo
+//  próprio PWA via window.HavalNative.openSettings().
 //
 import SwiftUI
 
 struct ContentView: View {
     @StateObject private var manager = ActivityManager()
     @Environment(\.scenePhase) private var scenePhase
+    @State private var showSetup = false   // sheet por cima da WebView
+
+    private var bridgeURL: URL? {
+        URL(string: Settings.bridgeURL)
+    }
+
+    var body: some View {
+        Group {
+            if let url = bridgeURL, Settings.isConfigured {
+                ZStack {
+                    PwaWebView(url: url, manager: manager)
+                        .ignoresSafeArea()
+                    // Indicador discreto da Live Activity (não invasivo)
+                    if manager.currentActivity != nil {
+                        VStack {
+                            HStack {
+                                Spacer()
+                                Image(systemName: "bolt.fill")
+                                    .font(.caption)
+                                    .padding(6)
+                                    .background(Color.green.opacity(0.85))
+                                    .foregroundStyle(.black)
+                                    .clipShape(Circle())
+                                    .padding(.top, 60)
+                                    .padding(.trailing, 12)
+                            }
+                            Spacer()
+                        }
+                    }
+                }
+                // Long-press com 3 dedos por 1s abre Settings. Gesto invisível
+                // pro user normal, fácil pra dev.
+                .onLongPressGesture(minimumDuration: 1.0,
+                                    maximumDistance: 30) {
+                    showSetup = true
+                }
+                .onReceive(NotificationCenter.default.publisher(for: .openHavalSettings)) { _ in
+                    showSetup = true
+                }
+                .sheet(isPresented: $showSetup) {
+                    SetupView(manager: manager, isPresented: $showSetup)
+                }
+            } else {
+                SetupView(manager: manager, isPresented: .constant(true))
+            }
+        }
+        .task { await manager.autoStartIfCharging() }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .active {
+                Task { await manager.autoStartIfCharging() }
+            }
+        }
+    }
+}
+
+// ── Tela de Setup / Settings ─────────────────────────────────────────────────
+struct SetupView: View {
+    @ObservedObject var manager: ActivityManager
+    @Binding var isPresented: Bool
     @State private var url:   String = Settings.bridgeURL
     @State private var token: String = Settings.bridgeToken
     @State private var showTokenPlain = false
@@ -40,16 +98,15 @@ struct ContentView: View {
                         }
                     }
                     .onChange(of: token) { _, new in Settings.bridgeToken = new }
-                    Text("O token é o mesmo `bridge_token` do PWA — copie do localStorage do Safari/Chrome.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    Text("Mesmo bridge_token do PWA. Copia do localStorage do Safari/Chrome.")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
 
                 Section("Live Activity") {
                     HStack {
-                        Text("Status")
+                        Text("Status").foregroundStyle(.secondary)
                         Spacer()
-                        Text(manager.status).foregroundStyle(.secondary)
+                        Text(manager.status).font(.callout)
                     }
                     Button {
                         Task { await manager.start() }
@@ -67,24 +124,18 @@ struct ContentView: View {
                 }
 
                 Section("Como funciona") {
-                    Text("1. Configure URL e token acima\n2. Toque em 'Iniciar Live Activity' (1ª vez)\n3. A activity aparece no lock screen / Dynamic Island\n4. App faz polling a cada 5s enquanto aberto\n\nDica: ao abrir o app, se o carro JÁ está carregando, a Activity dispara sozinha. Combine com um atalho de Automação ('Quando conectar ao WiFi de casa → Abrir Haval EcoTrip') pra ficar quase 100% automático.")
+                    Text("Esse app é o PWA inteiro dentro de um wrapper nativo. Pra reabrir essas configurações: pressione e segure com 3 dedos por 1 segundo em qualquer parte da tela.")
                         .font(.caption)
                 }
             }
-            .navigationTitle("Haval EcoTrip")
-            // Auto-start ao abrir o app: se o carro está carregando, cria a
-            // Activity sem precisar de toque. Funciona em combinação com
-            // Atalhos Automation que abre o app no evento certo.
-            .task { await manager.autoStartIfCharging() }
-            .onChange(of: scenePhase) { _, newPhase in
-                if newPhase == .active {
-                    Task { await manager.autoStartIfCharging() }
+            .navigationTitle(Settings.isConfigured ? "Configurações" : "Configuração inicial")
+            .toolbar {
+                if Settings.isConfigured {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Concluído") { isPresented = false }
+                    }
                 }
             }
         }
     }
-}
-
-#Preview {
-    ContentView()
 }

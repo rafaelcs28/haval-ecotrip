@@ -569,7 +569,20 @@
       <div class="metric"><div class="v" id="chg-kwh">--</div><div class="lbl">∑ Sessão</div></div>
       <div class="metric"><div class="v" id="chg-peak">--</div><div class="lbl">▲ Pico</div></div>
     </div>
+    <!-- Botão "Live Activity" só aparece dentro do app nativo iOS (HavalNative
+         injetado pela WKWebView). PWA normal no Safari ignora. -->
+    <button id="chg-live-activity-btn" onclick="window.HavalNative?.startLiveActivity()"
+            style="display:none;width:100%;margin-top:10px;padding:10px;background:rgba(34,197,94,.18);color:var(--green);border:1px solid rgba(34,197,94,.4);border-radius:10px;font-size:13px;font-weight:700;font-family:inherit;cursor:pointer">
+      🎯 Ativar Live Activity no iPhone
+    </button>
   </div>
+  <script>
+    // Mostra o botão de Live Activity só quando estamos dentro do wrapper iOS
+    if (window.HavalNative?.isNative) {
+      const btn = document.getElementById('chg-live-activity-btn');
+      if (btn) btn.style.display = '';
+    }
+  </script>
 
   <!-- Hero grid 2x2 -->
   <div class="hero-grid">
