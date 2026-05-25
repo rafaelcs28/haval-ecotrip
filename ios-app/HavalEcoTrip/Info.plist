@@ -46,6 +46,61 @@
 		<key>UIApplicationSupportsMultipleScenes</key>
 		<false/>
 	</dict>
+	<key>UIApplicationShortcutItems</key>
+	<array>
+		<dict>
+			<key>UIApplicationShortcutItemIconSymbolName</key>
+			<string>lock.fill</string>
+			<key>UIApplicationShortcutItemTitle</key>
+			<string>Travar</string>
+			<key>UIApplicationShortcutItemType</key>
+			<string>br.com.consorciolimpagyn.havalecotrip.lock_close</string>
+			<key>UIApplicationShortcutItemUserInfo</key>
+			<dict>
+				<key>action</key>
+				<string>lock_close</string>
+			</dict>
+		</dict>
+		<dict>
+			<key>UIApplicationShortcutItemIconSymbolName</key>
+			<string>lock.open.fill</string>
+			<key>UIApplicationShortcutItemTitle</key>
+			<string>Destravar</string>
+			<key>UIApplicationShortcutItemType</key>
+			<string>br.com.consorciolimpagyn.havalecotrip.lock_open</string>
+			<key>UIApplicationShortcutItemUserInfo</key>
+			<dict>
+				<key>action</key>
+				<string>lock_open</string>
+			</dict>
+		</dict>
+		<dict>
+			<key>UIApplicationShortcutItemIconSymbolName</key>
+			<string>power.circle.fill</string>
+			<key>UIApplicationShortcutItemTitle</key>
+			<string>Ligar motor</string>
+			<key>UIApplicationShortcutItemType</key>
+			<string>br.com.consorciolimpagyn.havalecotrip.engine_on</string>
+			<key>UIApplicationShortcutItemUserInfo</key>
+			<dict>
+				<key>action</key>
+				<string>engine_on</string>
+			</dict>
+		</dict>
+		<dict>
+			<key>UIApplicationShortcutItemIconSymbolName</key>
+			<string>power.circle</string>
+			<key>UIApplicationShortcutItemTitle</key>
+			<string>Desligar motor</string>
+			<key>UIApplicationShortcutItemType</key>
+			<string>br.com.consorciolimpagyn.havalecotrip.engine_off</string>
+			<key>UIApplicationShortcutItemUserInfo</key>
+			<dict>
+				<key>action</key>
+				<string>engine_off</string>
+			</dict>
+		</dict>
+	</array>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>fetch</string>

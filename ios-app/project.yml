@@ -47,6 +47,30 @@ targets:
         UIBackgroundModes:
           - fetch
           - processing
+        # Quick Actions (3D/Haptic Touch no ícone do app). 4 atalhos: travar,
+        # destravar, ligar motor, desligar motor. AppDelegate captura o
+        # shortcut e dispara o action via URL scheme havalecotrip://action/<name>.
+        UIApplicationShortcutItems:
+          - UIApplicationShortcutItemType: br.com.consorciolimpagyn.havalecotrip.lock_close
+            UIApplicationShortcutItemTitle: Travar
+            UIApplicationShortcutItemIconSymbolName: lock.fill
+            UIApplicationShortcutItemUserInfo:
+              action: lock_close
+          - UIApplicationShortcutItemType: br.com.consorciolimpagyn.havalecotrip.lock_open
+            UIApplicationShortcutItemTitle: Destravar
+            UIApplicationShortcutItemIconSymbolName: lock.open.fill
+            UIApplicationShortcutItemUserInfo:
+              action: lock_open
+          - UIApplicationShortcutItemType: br.com.consorciolimpagyn.havalecotrip.engine_on
+            UIApplicationShortcutItemTitle: Ligar motor
+            UIApplicationShortcutItemIconSymbolName: power.circle.fill
+            UIApplicationShortcutItemUserInfo:
+              action: engine_on
+          - UIApplicationShortcutItemType: br.com.consorciolimpagyn.havalecotrip.engine_off
+            UIApplicationShortcutItemTitle: Desligar motor
+            UIApplicationShortcutItemIconSymbolName: power.circle
+            UIApplicationShortcutItemUserInfo:
+              action: engine_off
         BGTaskSchedulerPermittedIdentifiers:
           - br.com.consorciolimpagyn.havalecotrip.notif-refresh
         # URL scheme: PWA standalone pode chamar `havalecotrip://` no
