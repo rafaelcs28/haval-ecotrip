@@ -3204,22 +3204,39 @@ app.post('/api/autotrips/merge', (req, res) => {
     hybridTimeSec = Math.round(hybridTimeSec);
     hybridDistKm  = parseFloat(hybridDistKm.toFixed(3));
 
+    // Marker: lista das tripIds originais antes deste merge. Preserva o
+    // histórico se for um merge encadeado (A+B+C — segunda chamada já vê o
+    // merged_from da primeira). Bridge depois exibe isso pra usuario saber.
+    const prevMergedFrom = Array.isArray(dataA.merged_from) ? dataA.merged_from
+                          : Array.isArray(dataB.merged_from) ? dataB.merged_from
+                          : [];
+    const mergedFrom = Array.from(new Set([...prevMergedFrom, lateId]));
+
     // Salva arquivo unificado (ID da viagem mais antiga) — hybrid persistido pra
     // boot não recalcular.
     fs.writeFileSync(
       path.join(AUTOTRIPS_DIR, `${earlyId}.json`),
-      JSON.stringify({ tripId: earlyId, autoTrip: merged, samples: mergedSamples, hybridTimeSec, hybridDistKm })
+      JSON.stringify({
+        tripId: earlyId, autoTrip: merged, samples: mergedSamples,
+        hybridTimeSec, hybridDistKm, merged_from: mergedFrom,
+      })
     );
     // Remove arquivo da viagem mais recente
     try { fs.unlinkSync(path.join(AUTOTRIPS_DIR, `${lateId}.json`)); } catch (_) {}
 
+    // Marca tombstone pro lateId — sem isso, PWAs com cache local
+    // continuam mostrando a viagem absorvida como fantasma. O endpoint
+    // GET /api/autotrips devolve esses ids no header X-Tombstones e o
+    // PWA limpa o cache.
+    markDeleted('autotrips', lateId);
+
     // Atualiza array em memória
     autoTripsArr = autoTripsArr.filter(t => t.tripId !== earlyId && t.tripId !== lateId);
-    const record = { tripId: earlyId, ...merged, hybridTimeSec, hybridDistKm };
+    const record = { tripId: earlyId, ...merged, hybridTimeSec, hybridDistKm, merged_from: mergedFrom };
     autoTripsArr.push(record);
     autoTripsArr.sort((a, b) => (b.startMs||0)-(a.startMs||0));
 
-    console.log(`[merge] ${earlyId} + ${lateId} → ${earlyId} (${merged.distKm} km, ${mergedSamples.length} amostras)`);
+    console.log(`[merge] ${earlyId} + ${lateId} → ${earlyId} (${merged.distKm} km, ${mergedSamples.length} amostras, merged_from=${mergedFrom.length})`);
     res.json({ ok: true, mergedId: earlyId, trip: record });
   } catch (e) {
     console.error('[merge]', e);
