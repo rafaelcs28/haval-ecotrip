@@ -20,6 +20,11 @@ targets:
   HavalEcoTrip:
     type: application
     platform: iOS
+    entitlements:
+      path: HavalEcoTrip/HavalEcoTrip.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.br.com.consorciolimpagyn.havalecotrip
     sources:
       - HavalEcoTrip
       # ChargeActivityAttributes precisa estar nos DOIS targets — app referencia
@@ -66,8 +71,15 @@ targets:
   HavalEcoTripWidget:
     type: app-extension
     platform: iOS
+    entitlements:
+      path: HavalEcoTripWidget/HavalEcoTripWidget.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.br.com.consorciolimpagyn.havalecotrip
     sources:
       - HavalEcoTripWidget
+      # Settings.swift compartilhado pra widget acessar URL/token via App Group
+      - path: HavalEcoTrip/Settings.swift
     info:
       path: HavalEcoTripWidget/Info.plist
       properties:

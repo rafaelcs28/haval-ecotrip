@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		1A900DDEB8C0BB74EAD4A130 /* Settings.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4593E338CE49445D2B4E37A /* Settings.swift */; };
 		253A6649A6A5B25C6DEBB140 /* HavalEcoTripWidgetBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F5328FAA367AE3DF93613BE /* HavalEcoTripWidgetBundle.swift */; };
 		40E528D7246C74CE6B1F0DFD /* NotificationPoller.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2483530E4E9C3FD6D43A633 /* NotificationPoller.swift */; };
 		5258D112C16CFD21020F41B2 /* Settings.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4593E338CE49445D2B4E37A /* Settings.swift */; };
@@ -20,6 +21,7 @@
 		97D85BD3A8D8D549ABD6A944 /* ActivityManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9926C58E001CD8511E829FB /* ActivityManager.swift */; };
 		AACDCF32BF0A0A36A4A2F84F /* HavalEcoTripApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5A372CA99C89C5712EE54BC /* HavalEcoTripApp.swift */; };
 		AE6DF0BA2B76E13159F83FE3 /* BackgroundRefresh.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F97B54C85FEC5A112CB0C9E /* BackgroundRefresh.swift */; };
+		CFA18AF48CB7CF8DF7C40EC3 /* BatteryWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6B65FA59825E09151BBC7C3 /* BatteryWidget.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -53,15 +55,18 @@
 		36AA01E4F54D0727EF341F49 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		6AB3E13D26098FB169B559E2 /* HavalEcoTrip.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = HavalEcoTrip.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		6F5328FAA367AE3DF93613BE /* HavalEcoTripWidgetBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HavalEcoTripWidgetBundle.swift; sourceTree = "<group>"; };
+		7BA445855D7E9BCBC513DE19 /* HavalEcoTrip.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = HavalEcoTrip.entitlements; sourceTree = "<group>"; };
 		968AA8DFD87E74A832ED71A5 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		A2483530E4E9C3FD6D43A633 /* NotificationPoller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationPoller.swift; sourceTree = "<group>"; };
 		B41BC4A6A889A1B5BBFCF7C6 /* PwaWebView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PwaWebView.swift; sourceTree = "<group>"; };
 		B5A372CA99C89C5712EE54BC /* HavalEcoTripApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HavalEcoTripApp.swift; sourceTree = "<group>"; };
 		B6A433A5AA48336FD73F1C85 /* ChargeActivityLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChargeActivityLiveActivity.swift; sourceTree = "<group>"; };
 		C110A5E3EADD0B1D4DA52BE6 /* ChargeActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChargeActivityAttributes.swift; sourceTree = "<group>"; };
+		C4C25F23B2E85136F2735757 /* HavalEcoTripWidget.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = HavalEcoTripWidget.entitlements; sourceTree = "<group>"; };
 		D9926C58E001CD8511E829FB /* ActivityManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityManager.swift; sourceTree = "<group>"; };
 		E4593E338CE49445D2B4E37A /* Settings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Settings.swift; sourceTree = "<group>"; };
 		EEEFCC8135B0627DFDB60013 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		F6B65FA59825E09151BBC7C3 /* BatteryWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BatteryWidget.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -72,6 +77,7 @@
 				EEEFCC8135B0627DFDB60013 /* Assets.xcassets */,
 				2F97B54C85FEC5A112CB0C9E /* BackgroundRefresh.swift */,
 				36AA01E4F54D0727EF341F49 /* ContentView.swift */,
+				7BA445855D7E9BCBC513DE19 /* HavalEcoTrip.entitlements */,
 				B5A372CA99C89C5712EE54BC /* HavalEcoTripApp.swift */,
 				968AA8DFD87E74A832ED71A5 /* Info.plist */,
 				A2483530E4E9C3FD6D43A633 /* NotificationPoller.swift */,
@@ -84,8 +90,10 @@
 		45616B981A51EAA946EC9D44 /* HavalEcoTripWidget */ = {
 			isa = PBXGroup;
 			children = (
+				F6B65FA59825E09151BBC7C3 /* BatteryWidget.swift */,
 				C110A5E3EADD0B1D4DA52BE6 /* ChargeActivityAttributes.swift */,
 				B6A433A5AA48336FD73F1C85 /* ChargeActivityLiveActivity.swift */,
+				C4C25F23B2E85136F2735757 /* HavalEcoTripWidget.entitlements */,
 				6F5328FAA367AE3DF93613BE /* HavalEcoTripWidgetBundle.swift */,
 				1C2F4161732FE79AB2415337 /* Info.plist */,
 			);
@@ -205,9 +213,11 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				CFA18AF48CB7CF8DF7C40EC3 /* BatteryWidget.swift in Sources */,
 				77472ED6F598E53605506B96 /* ChargeActivityAttributes.swift in Sources */,
 				659B7DF18D1CC3CBBC1615F3 /* ChargeActivityLiveActivity.swift in Sources */,
 				253A6649A6A5B25C6DEBB140 /* HavalEcoTripWidgetBundle.swift in Sources */,
+				1A900DDEB8C0BB74EAD4A130 /* Settings.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -240,6 +250,7 @@
 		1D34F5FCE58AFC691B5725C5 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = HavalEcoTripWidget/HavalEcoTripWidget.entitlements;
 				INFOPLIST_FILE = HavalEcoTripWidget/Info.plist;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -325,6 +336,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = HavalEcoTrip/HavalEcoTrip.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				INFOPLIST_FILE = HavalEcoTrip/Info.plist;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -342,6 +354,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = HavalEcoTrip/HavalEcoTrip.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				INFOPLIST_FILE = HavalEcoTrip/Info.plist;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -419,6 +432,7 @@
 		EDA60AEDD405EBE94B248C5E /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = HavalEcoTripWidget/HavalEcoTripWidget.entitlements;
 				INFOPLIST_FILE = HavalEcoTripWidget/Info.plist;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (

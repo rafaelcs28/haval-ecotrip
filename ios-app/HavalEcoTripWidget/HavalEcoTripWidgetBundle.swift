@@ -10,5 +10,6 @@ import WidgetKit
 struct HavalEcoTripWidgetBundle: WidgetBundle {
     var body: some Widget {
         ChargeActivityLiveActivity()
+        BatteryWidget()
     }
 }
