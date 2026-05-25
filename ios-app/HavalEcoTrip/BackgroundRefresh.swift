@@ -15,6 +15,7 @@
 import Foundation
 import BackgroundTasks
 import UserNotifications
+import ActivityKit
 
 enum BackgroundRefresh {
     static let identifier = "br.com.consorciolimpagyn.havalecotrip.notif-refresh"
@@ -43,10 +44,46 @@ enum BackgroundRefresh {
         schedule()
 
         let work = Task {
+            // 1. Puxa notifs novas e dispara Local Notifications
             await runPoll()
+            // 2. Atualiza a Live Activity ativa, se houver — usa o mesmo
+            //    /api/state que o ActivityManager usa em foreground.
+            await updateActiveLiveActivity()
             task.setTaskCompleted(success: true)
         }
         task.expirationHandler = { work.cancel() }
+    }
+
+    /// Pega a primeira Activity ativa do app e chama Activity.update() com
+    /// o state atual do bridge. No-op se não há Activity ativa.
+    private static func updateActiveLiveActivity() async {
+        // Acesso a Activity<T>.activities exige @MainActor
+        let activities = await MainActor.run {
+            Activity<ChargeActivityAttributes>.activities.filter { $0.activityState == .active }
+        }
+        guard let activity = activities.first else { return }
+        guard let url = URL(string: Settings.bridgeURL + "/api/state") else { return }
+        var req = URLRequest(url: url)
+        req.timeoutInterval = 8
+        req.addValue("Bearer " + Settings.bridgeToken, forHTTPHeaderField: "Authorization")
+        do {
+            let (data, resp) = try await URLSession.shared.data(for: req)
+            guard (resp as? HTTPURLResponse)?.statusCode == 200,
+                  let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+            let charging = (json["charging_state"] as? String) == "Carregando"
+            let soc = (json["soc_pct"]              as? Double) ?? 0
+            let pwr = (json["charge_power_kw"]      as? Double) ?? 0
+            let kwh = (json["charge_session_kwh"]   as? Double) ?? 0
+            let rem = (json["charge_remaining_min"] as? Double) ?? 0
+            let state = ChargeActivityAttributes.ContentState(
+                soc: soc, powerKw: pwr, sessionKwh: kwh,
+                remainingMin: Int(rem.rounded()),
+                charging: charging,
+                updatedAtMs: Date().timeIntervalSince1970 * 1000
+            )
+            let content = ActivityContent(state: state, staleDate: Date().addingTimeInterval(60 * 60))
+            await activity.update(content)
+        } catch { /* silencioso */ }
     }
 
     /// Versão standalone do polling (sem UI/Combine), reusa lógica do NotificationPoller.
