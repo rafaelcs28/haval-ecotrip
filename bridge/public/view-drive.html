@@ -273,9 +273,10 @@
   background: rgba(31,31,31,.85);
   border: 1px solid rgba(255,255,255,.06);
   border-radius: 12px;
-  padding: 9px 12px;
+  padding: 8px 10px;
   cursor: pointer; user-select: none;
   transition: border-radius .25s;
+  position: relative;
 }
 .drive-controls-accordion.open .dc-header {
   border-radius: 12px 12px 0 0;
@@ -283,23 +284,31 @@
 }
 .dc-hd-top {
   display: flex; align-items: center; justify-content: space-between;
-  margin-bottom: 7px;
+  margin-bottom: 6px;
 }
 .dc-title { font-size: 9px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
-.dc-chevron { font-size: 15px; color: var(--muted); transition: transform .25s; line-height: 1; }
+.dc-chevron { font-size: 13px; color: var(--muted); transition: transform .25s; line-height: 1; }
 .drive-controls-accordion.open .dc-chevron { transform: rotate(180deg); }
-/* Pills de resumo no header */
-.dc-pills-row { display: flex; gap: 5px; flex-wrap: wrap; }
+/* Grid de stats no header */
+.dc-pills-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; }
 .dc-pill {
-  font-size: 10px; font-weight: 600; white-space: nowrap;
-  padding: 3px 8px; border-radius: 99px;
-  background: rgba(255,255,255,.05);
-  border: 1px solid rgba(255,255,255,.09);
-  color: #64748b;
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  padding: 5px 2px; border-radius: 8px; text-align: center;
+  background: rgba(255,255,255,.04);
+  border: 1px solid rgba(255,255,255,.07);
 }
-.dc-pill.known { color: #cbd5e1; background: rgba(255,255,255,.08); }
-.dc-pill.hi    { color: var(--green); background: rgba(34,197,94,.12); border-color: rgba(34,197,94,.28); }
-.dc-pill.warn  { color: var(--yellow); background: rgba(234,179,8,.12); border-color: rgba(234,179,8,.28); }
+.dc-pill-lbl {
+  font-size: 8px; font-weight: 600; color: #475569;
+  text-transform: uppercase; letter-spacing: .4px; white-space: nowrap;
+}
+.dc-pill-val {
+  font-size: 11px; font-weight: 700; color: #475569; white-space: nowrap;
+}
+.dc-pill.known .dc-pill-val { color: #cbd5e1; }
+.dc-pill.hi    { background: rgba(34,197,94,.08); border-color: rgba(34,197,94,.2); }
+.dc-pill.hi    .dc-pill-val { color: var(--green); }
+.dc-pill.warn  { background: rgba(234,179,8,.08); border-color: rgba(234,179,8,.2); }
+.dc-pill.warn  .dc-pill-val { color: var(--yellow); }
 .dc-body {
   background: rgba(31,31,31,.85);
   border: 1px solid rgba(255,255,255,.06);
@@ -494,11 +503,26 @@
           <span class="dc-chevron">⌄</span>
         </div>
         <div class="dc-pills-row">
-          <span class="dc-pill" id="dc-pill-ev">Cond. --</span>
-          <span class="dc-pill" id="dc-pill-terrain">Estilo --</span>
-          <span class="dc-pill" id="dc-pill-regen">Regen --</span>
-          <span class="dc-pill" id="dc-pill-onepedal">1-Pedal --</span>
-          <span class="dc-pill" id="dc-pill-esp">ESP --</span>
+          <div class="dc-pill" id="dc-pill-ev">
+            <span class="dc-pill-lbl">Cond.</span>
+            <span class="dc-pill-val">--</span>
+          </div>
+          <div class="dc-pill" id="dc-pill-terrain">
+            <span class="dc-pill-lbl">Estilo</span>
+            <span class="dc-pill-val">--</span>
+          </div>
+          <div class="dc-pill" id="dc-pill-regen">
+            <span class="dc-pill-lbl">Regen</span>
+            <span class="dc-pill-val">--</span>
+          </div>
+          <div class="dc-pill" id="dc-pill-onepedal">
+            <span class="dc-pill-lbl">1-Pedal</span>
+            <span class="dc-pill-val">--</span>
+          </div>
+          <div class="dc-pill" id="dc-pill-esp">
+            <span class="dc-pill-lbl">ESP</span>
+            <span class="dc-pill-val">--</span>
+          </div>
         </div>
       </div>
       <div class="dc-body">
@@ -3736,7 +3760,9 @@ window._onEspResult = function(data) {
   function _setPill(id, text, cls) {
     const el = document.getElementById(id);
     if (!el) return;
-    el.textContent = text;
+    const val = el.querySelector('.dc-pill-val');
+    if (val) val.textContent = text;
+    else el.textContent = text;
     el.className = 'dc-pill' + (cls ? ' ' + cls : '');
   }
 
@@ -3744,31 +3770,30 @@ window._onEspResult = function(data) {
     const s = window.state || {};
     // Pill: Condução EV
     const dm = s.drive_mode;
-    if (dm == null)      _setPill('dc-pill-ev', 'Cond. --', '');
+    if (dm == null)      _setPill('dc-pill-ev', '--', '');
     else if (dm === 3)   _setPill('dc-pill-ev', 'EV Puro', 'known hi');
     else if (dm === 1)   _setPill('dc-pill-ev', 'Prior. EV', 'known hi');
     else if (dm === 0) {
-      if (s.power_reserve === 1)      _setPill('dc-pill-ev', 'HEV Intel.', 'known');
-      else if (s.power_reserve === 2) _setPill('dc-pill-ev', s.charge_soc_target ? `HEV ${s.charge_soc_target}%` : 'HEV Prior.', 'known');
+      if (s.power_reserve === 1)      _setPill('dc-pill-ev', 'Intel.', 'known');
+      else if (s.power_reserve === 2) _setPill('dc-pill-ev', s.charge_soc_target ? `HEV ${s.charge_soc_target}%` : 'Prior.', 'known');
       else                            _setPill('dc-pill-ev', 'HEV', 'known');
     }
     // Pill: Estilo de condução
     const t = s.terrain_mode;
     const tLabel = t != null ? (_DC_TERRAIN[+t] || '?') : null;
-    if (t == null)        _setPill('dc-pill-terrain', 'Estilo --', '');
+    if (t == null)        _setPill('dc-pill-terrain', '--', '');
     else if (t === 0)     _setPill('dc-pill-terrain', 'Normal', 'known');
     else                  _setPill('dc-pill-terrain', tLabel, 'known hi');
     // Pill: Regeneração
     const r = s.regen_level;
-    const rShort = { 0: 'Regen Normal', 1: 'Regen Alto', 2: 'Regen Baixo' };
-    const rText = r != null ? rShort[+r] : 'Regen --';
+    const rText = r == null ? '--' : r === 0 ? 'Normal' : r === 1 ? 'Alto' : 'Baixo';
     _setPill('dc-pill-regen', rText, r == null ? '' : r === 1 ? 'known hi' : 'known');
     // Pill: One-Pedal
     const op = s.one_pedal;
-    _setPill('dc-pill-onepedal', op == null ? '1-Pedal --' : op === 1 ? '1-Pedal ON' : '1-Pedal OFF', op == null ? '' : op === 1 ? 'known hi' : 'known');
+    _setPill('dc-pill-onepedal', op == null ? '--' : op === 1 ? 'ON' : 'OFF', op == null ? '' : op === 1 ? 'known hi' : 'known');
     // Pill: ESP
     const espOn = s.esp_enable !== 0;
-    _setPill('dc-pill-esp', `ESP ${espOn ? 'ON' : 'OFF'}`, s.esp_enable == null ? '' : espOn ? 'known' : 'known warn');
+    _setPill('dc-pill-esp', s.esp_enable == null ? '--' : espOn ? 'ON' : 'OFF', s.esp_enable == null ? '' : espOn ? 'known' : 'known warn');
   }
 
   function toggleDriveControls() {
