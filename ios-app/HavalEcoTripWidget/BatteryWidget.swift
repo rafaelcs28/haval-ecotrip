@@ -47,13 +47,17 @@ struct BatteryProvider: TimelineProvider {
     }
 
     private func fetch() async -> BatteryEntry {
-        guard Settings.isConfigured else {
-            return BatteryEntry(date: Date(), soc: 0, evKm: 0, iceKm: 0, fuelPct: 0,
-                                charging: false, chargingKw: 0, remainingMin: 0,
-                                isConfigured: false, error: nil)
+        // Diagnóstico: deixa o widget mostrar o ESTADO do Settings em vez de
+        // só "Configure o app" — facilita pegar problema de App Group.
+        let urlStr = Settings.bridgeURL
+        let tokLen = Settings.bridgeToken.count
+        if urlStr.isEmpty && tokLen == 0 {
+            return errorEntry("App Group vazio — abra o app uma vez pra migrar config")
         }
-        guard let url = URL(string: Settings.bridgeURL + "/api/state") else {
-            return errorEntry("URL inválida")
+        if urlStr.isEmpty { return errorEntry("URL vazia (token len=\(tokLen))") }
+        if tokLen == 0    { return errorEntry("Token vazio (url=\(urlStr.prefix(20))…)") }
+        guard let url = URL(string: urlStr + "/api/state") else {
+            return errorEntry("URL inválida: \(urlStr.prefix(30))")
         }
         var req = URLRequest(url: url)
         req.timeoutInterval = 6
