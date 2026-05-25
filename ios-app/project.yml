@@ -9,7 +9,7 @@ options:
 
 settings:
   base:
-    DEVELOPMENT_TEAM: ""                 # preenche depois do Sign In Apple ID
+    DEVELOPMENT_TEAM: "7Y6MPKR5CD"       # Personal Team do Rafael
     CODE_SIGN_STYLE: Automatic
     CODE_SIGN_IDENTITY: "Apple Development"
     MARKETING_VERSION: "1.0"
@@ -44,6 +44,10 @@ targets:
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
     dependencies:
       - target: HavalEcoTripWidget
+    scheme:
+      # Scheme compartilhado (gera xcshareddata/xcschemes/HavalEcoTrip.xcscheme)
+      # pra `xcodebuild -scheme HavalEcoTrip` funcionar sem precisar de xcuserdata.
+      gatherCoverageData: false
 
   HavalEcoTripWidget:
     type: app-extension

@@ -10,14 +10,18 @@ echo "→ Regenerando projeto Xcode (xcodegen)…"
 xcodegen generate
 
 echo "→ Listando devices conectados…"
-DEVICE_ID=$(xcrun devicectl list devices 2>/dev/null \
-  | awk '/connected/ {print $NF; exit}')
+# xcodebuild precisa do ECID (formato 8hex-16hex) do iPhone, não do UUID
+# do CoreDevice. xctrace list devices retorna no formato correto.
+# Filtra fora Simulator e Mac, pega o primeiro iPhone real.
+DEVICE_LINE=$(xcrun xctrace list devices 2>&1 | grep -v -i "simulator\|^Mac " | grep -i "iPhone\|iPad" | head -1)
+DEVICE_ID=$(echo "$DEVICE_LINE" | sed -E 's/.*\(([0-9A-F]{8}-[0-9A-F]{16})\).*/\1/')
+DEVICE_NAME=$(echo "$DEVICE_LINE" | sed -E 's/^(.+) \([0-9.]+\) \([0-9A-F-]+\)$/\1/')
 
-if [ -z "$DEVICE_ID" ]; then
+if [ -z "$DEVICE_ID" ] || [ "$DEVICE_ID" = "$DEVICE_LINE" ]; then
   echo "✗ Nenhum iPhone conectado. Plugue o cabo e tenta de novo."
   exit 1
 fi
-echo "  device: $DEVICE_ID"
+echo "  device: $DEVICE_NAME ($DEVICE_ID)"
 
 DERIVED=/tmp/HavalEcoTrip-build
 rm -rf "$DERIVED"
