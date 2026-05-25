@@ -676,6 +676,12 @@
 
 <script>
 (function() {
+  // Helper de scoping: busca id DENTRO do container #view-desloc.
+  // Várias IDs (nav-date, cal-modal, calendar, custom-from, etc) são
+  // duplicadas com view-posto. getElementById global retorna o primeiro
+  // do DOM (view-posto vem antes), então sem scope, view-desloc atualiza
+  // o DOM da view escondida. Use _$ em vez de getElementById.
+  const _$ = (id) => (document.getElementById('view-desloc') || document).querySelector('#' + id);
   const SNAPSHOT = {
   "trips": [
     {
@@ -33573,10 +33579,10 @@ function setPeriod(p) {
   document.querySelectorAll('.opt').forEach(el => {
     el.classList.toggle('active', el.dataset.period === p);
   });
-  document.getElementById('custom-range').style.display = (p === 'custom') ? '' : 'none';
+  _$('custom-range').style.display = (p === 'custom') ? '' : 'none';
   if (p === 'custom') {
-    const from = document.getElementById('custom-from');
-    const to   = document.getElementById('custom-to');
+    const from = _$('custom-from');
+    const to   = _$('custom-to');
     if (!to.value) {
       const today = new Date();
       to.value = today.toISOString().slice(0, 10);
@@ -33609,10 +33615,10 @@ function selectDate(d) {
 function openCalendar() {
   calendarMonth = new Date(currentDate);
   renderCalendar();
-  document.getElementById('cal-modal').classList.add('show');
+  _$('cal-modal').classList.add('show');
 }
 function closeCalendar() {
-  document.getElementById('cal-modal').classList.remove('show');
+  _$('cal-modal').classList.remove('show');
 }
 
 function filterTrips(allTrips) {
@@ -33621,12 +33627,12 @@ function filterTrips(allTrips) {
 
 function renderTrips() {
   const list = document.getElementById('trips-list');
-  const empty = document.getElementById('empty-state');
+  const empty = _$('empty-state');
   const dayTrips = filterTrips(trips).filter(t => isSameDay(t.startMs));
   if (!dayTrips.length) {
     list.innerHTML = '';
     empty.classList.remove('section-hidden');
-    document.getElementById('empty-msg').textContent =
+    _$('empty-msg').textContent =
       'Nenhuma viagem encontrada nessa data...';
     return;
   }
@@ -33791,7 +33797,7 @@ function renderTripMap(t) {
 function getTrip(id) { return trips.find(t => t.id == id); }
 
 function showToast(msg) {
-  const t = document.getElementById('toast');
+  const t = _$('toast');
   t.textContent = msg;
   t.style.display = '';   // limpa possível display:none inline
   t.classList.add('show');
@@ -33840,7 +33846,7 @@ async function openMapFull(id) {
       if (tk) {
         // Toast inline (esconde com style.display, não confia no classList — caso outro
         // showToast no meio do fluxo re-adicione a classe .show por causa de race)
-        const toastEl = document.getElementById('toast');
+        const toastEl = _$('toast');
         const _hideToast = () => {
           if (!toastEl) return;
           clearTimeout(showToast._t);
@@ -33881,7 +33887,7 @@ async function openMapFull(id) {
   if (!t.route || !t.route.length) { showToast('Sem trajeto GPS pra essa viagem'); return; }
   _tlTrip = t;  // guarda referência pra a timeline usar
   // Garante que toast não fique visível sobre o mapa fullmodal
-  const _toastEl = document.getElementById('toast');
+  const _toastEl = _$('toast');
   if (_toastEl) { _toastEl.classList.remove('show'); _toastEl.style.display = 'none'; }
   const modal = document.getElementById('map-fullmodal');
   modal.classList.add('show');
@@ -34162,7 +34168,7 @@ function doDelete(id) {
 }
 
 function renderCalendar() {
-  const cal = document.getElementById('calendar');
+  const cal = _$('calendar');
   const y = calendarMonth.getFullYear(), m = calendarMonth.getMonth();
   const first = new Date(y, m, 1);
   const last  = new Date(y, m + 1, 0);
@@ -34207,10 +34213,17 @@ function changeMonth(delta) {
 function renderDateNav() {
   const today = new Date(); today.setHours(0,0,0,0);
   const isToday = currentDate.getTime() === today.getTime();
-  document.getElementById('nav-date').textContent = currentDate.toLocaleDateString('pt-BR');
-  document.getElementById('nav-lbl').textContent = isToday ? 'Hoje'
+  // Scope ao container — view-posto também tem #nav-date / #nav-lbl /
+  // #nav-next. Sem isso, getElementById pega o da view-posto (primeiro
+  // no DOM) e a navegação do Desloc fica congelada.
+  const s = document.getElementById('view-desloc') || document;
+  const dateEl = s.querySelector('#nav-date');
+  const lblEl  = s.querySelector('#nav-lbl');
+  const nextEl = s.querySelector('#nav-next');
+  if (dateEl) dateEl.textContent = currentDate.toLocaleDateString('pt-BR');
+  if (lblEl)  lblEl.textContent  = isToday ? 'Hoje'
     : currentDate.toLocaleDateString('pt-BR', { weekday: 'long' });
-  document.getElementById('nav-next').classList.toggle('disabled', isToday);
+  if (nextEl) nextEl.classList.toggle('disabled', isToday);
 }
 
 function renderStats() {
@@ -34221,8 +34234,8 @@ function renderStats() {
   } else if (currentPeriod === '7d')  start = now - 7  * day;
   else if (currentPeriod === '30d') start = now - 30 * day;
   else if (currentPeriod === 'custom') {
-    const fv = document.getElementById('custom-from')?.value;
-    const tv = document.getElementById('custom-to')?.value;
+    const fv = _$('custom-from')?.value;
+    const tv = _$('custom-to')?.value;
     if (fv) { const d = new Date(fv); d.setHours(0,0,0,0); start = d.getTime(); }
     if (tv) { const d = new Date(tv); d.setHours(23,59,59,999); end = d.getTime(); }
   }

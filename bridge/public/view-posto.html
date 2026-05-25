@@ -551,6 +551,9 @@
 
 <script>
 (function() {
+  // Helper de scoping (mesma motivação que view-desloc — IDs duplicados
+  // entre views causam bugs sutis quando user troca de aba).
+  const _$ = (id) => (document.getElementById('view-posto') || document).querySelector('#' + id);
   const SNAPSHOT = {
   "charge_limit_pct": 90,
   "items": [
@@ -893,11 +896,11 @@ function setPeriod(p) {
   document.querySelectorAll('.opt').forEach(el => {
     el.classList.toggle('active', el.dataset.period === p);
   });
-  document.getElementById('custom-range').style.display = (p === 'custom') ? '' : 'none';
+  _$('custom-range').style.display = (p === 'custom') ? '' : 'none';
   // Default custom range: últimos 7 dias até hoje
   if (p === 'custom') {
-    const from = document.getElementById('custom-from');
-    const to   = document.getElementById('custom-to');
+    const from = _$('custom-from');
+    const to   = _$('custom-to');
     if (!to.value) {
       const today = new Date();
       to.value = today.toISOString().slice(0, 10);
@@ -934,25 +937,25 @@ function selectDate(d) {
 function openCalendar() {
   calendarMonth = new Date(currentDate);
   renderCalendar();
-  document.getElementById('cal-modal').classList.add('show');
+  _$('cal-modal').classList.add('show');
 }
 function closeCalendar() {
-  document.getElementById('cal-modal').classList.remove('show');
+  _$('cal-modal').classList.remove('show');
 }
 
 // ── Ações por card ─────────────────────────────────────────────────────────
 function getItem(id) { return items.find(i => i.id == id); }
 
 function openAction(title, sub, body) {
-  document.getElementById('action-body').innerHTML = `
+  _$('action-body').innerHTML = `
     <div class="ti">${title}</div>
     <div class="sub">${sub}</div>
     ${body}
   `;
-  document.getElementById('action-sheet').classList.add('show');
+  _$('action-sheet').classList.add('show');
 }
 function closeAction() {
-  document.getElementById('action-sheet').classList.remove('show');
+  _$('action-sheet').classList.remove('show');
 }
 
 function openTimeline(id) {
@@ -1299,7 +1302,7 @@ async function _patchRefuel(id, body) {
 
 function renderEntries() {
   const list = document.getElementById('entries-list');
-  const empty = document.getElementById('empty-state');
+  const empty = _$('empty-state');
   const dayItems = items
     .filter(it => isSameDay(it.ts))
     .filter(it => currentFilter === 'all' || it.type === currentFilter);
@@ -1309,7 +1312,7 @@ function renderEntries() {
     const msg = currentFilter === 'recarga' ? 'Nenhuma recarga encontrada na data selecionada...'
               : currentFilter === 'abastecimento' ? 'Nenhum abastecimento encontrado na data selecionada...'
               : 'Nenhum registro encontrado na data selecionada...';
-    document.getElementById('empty-msg').textContent = msg;
+    _$('empty-msg').textContent = msg;
     document.querySelector('.empty-state .ic').textContent = currentFilter === 'abastecimento' ? '⛽' : '⚡';
     return;
   }
@@ -1376,7 +1379,7 @@ function renderEntries() {
 }
 
 function renderCalendar() {
-  const cal = document.getElementById('calendar');
+  const cal = _$('calendar');
   const y = calendarMonth.getFullYear(), m = calendarMonth.getMonth();
   const first = new Date(y, m, 1);
   const last  = new Date(y, m + 1, 0);
@@ -1423,11 +1426,15 @@ function changeMonth(delta) {
 function renderDateNav() {
   const today = new Date(); today.setHours(0,0,0,0);
   const isToday = currentDate.getTime() === today.getTime();
-  document.getElementById('nav-date').textContent =
-    currentDate.toLocaleDateString('pt-BR');
-  document.getElementById('nav-lbl').textContent = isToday ? 'Hoje'
+  // Scope ao container — view-desloc duplica os IDs nav-*
+  const s = document.getElementById('view-posto') || document;
+  const dateEl = s.querySelector('#nav-date');
+  const lblEl  = s.querySelector('#nav-lbl');
+  const nextEl = s.querySelector('#nav-next');
+  if (dateEl) dateEl.textContent = currentDate.toLocaleDateString('pt-BR');
+  if (lblEl)  lblEl.textContent  = isToday ? 'Hoje'
     : currentDate.toLocaleDateString('pt-BR', { weekday: 'long' });
-  document.getElementById('nav-next').classList.toggle('disabled', isToday);
+  if (nextEl) nextEl.classList.toggle('disabled', isToday);
 }
 
 function renderStats() {
@@ -1438,8 +1445,8 @@ function renderStats() {
   } else if (currentPeriod === '7d')  start = now - 7  * day;
   else if (currentPeriod === '30d') start = now - 30 * day;
   else if (currentPeriod === 'custom') {
-    const fv = document.getElementById('custom-from')?.value;
-    const tv = document.getElementById('custom-to')?.value;
+    const fv = _$('custom-from')?.value;
+    const tv = _$('custom-to')?.value;
     if (fv) { const d = new Date(fv); d.setHours(0,0,0,0); start = d.getTime(); }
     if (tv) { const d = new Date(tv); d.setHours(23,59,59,999); end = d.getTime(); }
   }
