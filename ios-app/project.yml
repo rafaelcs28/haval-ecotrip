@@ -4,7 +4,7 @@ name: HavalEcoTrip
 options:
   bundleIdPrefix: br.com.consorciolimpagyn
   deploymentTarget:
-    iOS: "16.1"           # mínimo pra ActivityKit
+    iOS: "17.0"           # onChange(of:initial:) com 2 params exige 17; ActivityKit + Dynamic Island ok
   createIntermediateGroups: true
 
 settings:

@@ -23,6 +23,26 @@ final class ActivityManager: ObservableObject {
     private var pollingTask: Task<Void, Never>?
     private let pollInterval: TimeInterval = 5    // 5s entre polls
 
+    // Auto-start: chamado no .onAppear / scenePhase=active. Se o carro estiver
+    // carregando E ainda não tem Activity ativa, inicia automaticamente.
+    // Pré-requisito: URL + token configurados.
+    func autoStartIfCharging() async {
+        guard Settings.isConfigured else { return }
+        if currentActivity != nil { return }
+        guard let url = URL(string: Settings.bridgeURL + "/api/state") else { return }
+        var req = URLRequest(url: url)
+        req.timeoutInterval = 4
+        req.addValue("Bearer " + Settings.bridgeToken, forHTTPHeaderField: "Authorization")
+        do {
+            let (data, resp) = try await URLSession.shared.data(for: req)
+            guard (resp as? HTTPURLResponse)?.statusCode == 200,
+                  let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  (json["charging_state"] as? String) == "Carregando" else { return }
+            // Está carregando — dispara start
+            await start()
+        } catch { /* offline, sem rede etc. — silencia */ }
+    }
+
     func start() async {
         guard Settings.isConfigured else {
             status = "Configure URL e token primeiro"

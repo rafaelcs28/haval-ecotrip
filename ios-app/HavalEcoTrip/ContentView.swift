@@ -13,6 +13,7 @@ import SwiftUI
 
 struct ContentView: View {
     @StateObject private var manager = ActivityManager()
+    @Environment(\.scenePhase) private var scenePhase
     @State private var url:   String = Settings.bridgeURL
     @State private var token: String = Settings.bridgeToken
     @State private var showTokenPlain = false
@@ -66,11 +67,20 @@ struct ContentView: View {
                 }
 
                 Section("Como funciona") {
-                    Text("1. Configure URL e token acima\n2. Toque em 'Iniciar Live Activity'\n3. A activity aparece no lock screen / Dynamic Island\n4. O bridge atualiza sozinho via APNs Push — não precisa manter o app aberto")
+                    Text("1. Configure URL e token acima\n2. Toque em 'Iniciar Live Activity' (1ª vez)\n3. A activity aparece no lock screen / Dynamic Island\n4. App faz polling a cada 5s enquanto aberto\n\nDica: ao abrir o app, se o carro JÁ está carregando, a Activity dispara sozinha. Combine com um atalho de Automação ('Quando conectar ao WiFi de casa → Abrir Haval EcoTrip') pra ficar quase 100% automático.")
                         .font(.caption)
                 }
             }
             .navigationTitle("Haval EcoTrip")
+            // Auto-start ao abrir o app: se o carro está carregando, cria a
+            // Activity sem precisar de toque. Funciona em combinação com
+            // Atalhos Automation que abre o app no evento certo.
+            .task { await manager.autoStartIfCharging() }
+            .onChange(of: scenePhase) { _, newPhase in
+                if newPhase == .active {
+                    Task { await manager.autoStartIfCharging() }
+                }
+            }
         }
     }
 }
