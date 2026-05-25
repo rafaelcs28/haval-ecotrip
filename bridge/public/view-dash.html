@@ -1879,14 +1879,26 @@ window.renderView_dash = function() {
 let _socDashPending = null;
 let _socDashTimer = null;
 
-function openSocLimitModal() {
-  // Marca o chip do valor atual como active pra user ver de onde está mudando
-  const cur = +(window.state?.charge_limit_pct) || 0;
+function _setSocChipsUI(pct, mode) {
   document.querySelectorAll('#soc-limit-chips .soc-chip').forEach(c => {
-    c.classList.toggle('active', +c.dataset.pct === cur);
-    c.classList.remove('pending');
+    const isThis = +c.dataset.pct === pct;
+    c.classList.toggle('active', isThis);
+    c.classList.toggle('pending', isThis && mode === 'pending');
   });
+}
+
+function _clearSocDashPending() {
+  if (_socDashTimer) { clearTimeout(_socDashTimer); _socDashTimer = null; }
+  _socDashPending = null;
+}
+
+function openSocLimitModal() {
+  const cur = +(window.state?.charge_limit_pct) || 0;
+  _setSocChipsUI(cur, null);
   document.getElementById('soc-limit-modal').classList.add('show');
+  // Pede releitura do valor real do carro (mesmo padrão do config)
+  const tk = localStorage.getItem('bridge_token');
+  if (tk) fetch('/api/charge-limit/refresh', { method: 'POST', headers: { 'Authorization': 'Bearer ' + tk } }).catch(() => {});
 }
 function closeSocLimitModal() {
   document.getElementById('soc-limit-modal').classList.remove('show');
@@ -1897,17 +1909,13 @@ async function setSocLimitFromDash(pct) {
   const tk = localStorage.getItem('bridge_token');
   if (!tk) return;
   _socDashPending = pct;
-  document.querySelectorAll('#soc-limit-chips .soc-chip').forEach(c => {
-    const isThis = +c.dataset.pct === pct;
-    c.classList.toggle('active', false);
-    c.classList.toggle('pending', isThis);
-  });
+  _setSocChipsUI(pct, 'pending');
   if (_socDashTimer) clearTimeout(_socDashTimer);
   _socDashTimer = setTimeout(() => {
     if (_socDashPending !== null) {
       window.showToast && window.showToast('⚠ Carro não respondeu — verifique se está acordado', 'err');
-      _socDashPending = null;
-      _refreshSocChipsActive();
+      _clearSocDashPending();
+      _setSocChipsUI(+(window.state?.charge_limit_pct) || 0, null);
     }
   }, 25000);
   try {
@@ -1916,31 +1924,20 @@ async function setSocLimitFromDash(pct) {
       headers: { 'Authorization': 'Bearer ' + tk, 'Content-Type': 'application/json' },
       body: JSON.stringify({ pct }),
     });
-    if (!r.ok) {
-      const txt = await r.text();
-      let data = {}; try { data = JSON.parse(txt); } catch(_) {}
-      throw new Error(data.error || 'HTTP ' + r.status);
-    }
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'HTTP ' + r.status);
+    window.showToast && window.showToast('⏳ Aguardando confirmação do carro…', 'ok');
   } catch (e) {
+    _clearSocDashPending();
     window.showToast && window.showToast('✗ ' + e.message, 'err');
-    _socDashPending = null;
-    _refreshSocChipsActive();
+    _setSocChipsUI(+(window.state?.charge_limit_pct) || 0, null);
   }
 }
 
-function _refreshSocChipsActive() {
-  const cur = +(window.state?.charge_limit_pct) || 0;
-  document.querySelectorAll('#soc-limit-chips .soc-chip').forEach(c => {
-    c.classList.toggle('active', +c.dataset.pct === cur);
-    c.classList.remove('pending');
-  });
-}
-
-// Ack via CustomEvent disparado pelo shell — funciona em paralelo com o
-// handler do view-config (mesma origem de evento).
-window.addEventListener('charge_limit_result', (ev) => {
+// Mesmo padrão do view-config: propriedade direta chamada pelo shell via WS
+window._onChargeLimitResult = function(data) {
   if (_socDashPending === null) return;
-  const raw = String(ev.detail?.result || '');
+  const raw = String(data?.result || '');
   if (raw.startsWith('ok:')) {
     const m = raw.match(/^ok:(\d+)/);
     const applied = m ? parseInt(m[1]) : null;
@@ -1948,19 +1945,24 @@ window.addEventListener('charge_limit_result', (ev) => {
       window.showToast && window.showToast('✓ Meta aplicada: ' + applied + '%', 'ok');
     } else if (applied) {
       window.showToast && window.showToast('⚠ Carro aplicou ' + applied + '% (você pediu ' + _socDashPending + '%)', 'err');
+      _clearSocDashPending();
+      setTimeout(() => _setSocChipsUI(applied, null), 4000);
+      setTimeout(closeSocLimitModal, 4800);
+      return;
     }
-    if (_socDashTimer) { clearTimeout(_socDashTimer); _socDashTimer = null; }
-    _socDashPending = null;
-    _refreshSocChipsActive();
-    // Fecha modal após sucesso
+    _clearSocDashPending();
+    _setSocChipsUI(applied || _socDashPending, null);
     setTimeout(closeSocLimitModal, 800);
   } else if (raw.startsWith('error')) {
     window.showToast && window.showToast('✗ ' + raw, 'err');
-    if (_socDashTimer) { clearTimeout(_socDashTimer); _socDashTimer = null; }
-    _socDashPending = null;
-    _refreshSocChipsActive();
+    const requested = _socDashPending;
+    _clearSocDashPending();
+    _setSocChipsUI(requested, null);
+    setTimeout(() => {
+      if (_socDashPending === null) _setSocChipsUI(+(window.state?.charge_limit_pct) || 0, null);
+    }, 4000);
   }
-});
+};
 
   // Expõe handlers de onclick no window
   Object.assign(window, {
