@@ -28,36 +28,26 @@ struct HavalEcoTripApp: App {
     }
 }
 
-/// Captura Quick Actions (Home Screen Shortcuts) e converte em URL scheme
-/// havalecotrip://action/<name>. O ContentView.onOpenURL processa a URL,
-/// chama o backend (/api/action/<name>) e dispara Local Notification com
-/// o resultado.
+/// AppDelegate captura cold-launch via Quick Action + registra a SceneDelegate
+/// pra entregar shortcuts em warm-launches. SwiftUI iOS 13+ usa scene lifecycle,
+/// então performActionFor do AppDelegate NÃO é chamado em warm-launch — Apple
+/// roteia tudo via UIWindowSceneDelegate.
 final class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil) -> Bool {
-        // Cold-launch via Quick Action: precisa processar aqui (performActionFor
-        // não dispara nesse caso). Posta numa fila pra processar quando a view
-        // estiver pronta.
         if let shortcut = launchOptions?[.shortcutItem] as? UIApplicationShortcutItem {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                self.handleShortcut(shortcut)
+            DispatchQueue.main.async {
+                ShortcutManager.shared.receive(shortcut)
             }
         }
         return true
     }
 
     func application(_ application: UIApplication,
-                     performActionFor shortcutItem: UIApplicationShortcutItem,
-                     completionHandler: @escaping (Bool) -> Void) {
-        handleShortcut(shortcutItem)
-        completionHandler(true)
-    }
-
-    private func handleShortcut(_ shortcut: UIApplicationShortcutItem) {
-        let action = (shortcut.userInfo?["action"] as? String) ?? ""
-        guard !action.isEmpty else { return }
-        if let url = URL(string: "havalecotrip://action/\(action)") {
-            UIApplication.shared.open(url)
-        }
+                     configurationForConnecting connectingSceneSession: UISceneSession,
+                     options: UIScene.ConnectionOptions) -> UISceneConfiguration {
+        let config = UISceneConfiguration(name: "Default", sessionRole: connectingSceneSession.role)
+        config.delegateClass = SceneDelegate.self
+        return config
     }
 }

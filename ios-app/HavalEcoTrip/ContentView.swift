@@ -13,6 +13,7 @@ import SwiftUI
 struct ContentView: View {
     @StateObject private var manager = ActivityManager()
     @StateObject private var notifPoller = NotificationPoller()
+    @StateObject private var shortcuts = ShortcutManager.shared
     @Environment(\.scenePhase) private var scenePhase
     @State private var showSetup = false   // sheet por cima da WebView
 
@@ -65,21 +66,17 @@ struct ContentView: View {
             await notifPoller.requestPermission()
             notifPoller.start()
         }
-        // URL scheme havalecotrip:// — disparado por:
-        //   1. SW do PWA standalone quando user toca em notif Web Push (host="open")
-        //   2. Quick Action (3D Touch no ícone) com host="action" e path="/<name>"
+        // URL scheme havalecotrip://open — disparado pelo SW do PWA standalone
+        // quando user toca em notif Web Push.
         .onOpenURL { url in
             print("[app] aberto via URL:", url.absoluteString)
-            // havalecotrip://action/<name>
-            if url.host == "action" {
-                let actionName = url.path.hasPrefix("/") ? String(url.path.dropFirst()) : url.path
-                if !actionName.isEmpty {
-                    Task { await CarActions.run(actionName) }
-                    return
-                }
-            }
-            // Caminho padrão: auto-start de Live Activity
             Task { await manager.autoStartIfCharging() }
+        }
+        // Quick Actions (3D Touch no ícone) — postam em ShortcutManager.shared
+        // via SceneDelegate. Aqui observamos e despachamos pra CarActions.
+        .onReceive(shortcuts.$pendingAction.compactMap { $0 }) { action in
+            shortcuts.pendingAction = nil
+            Task { await CarActions.run(action) }
         }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
