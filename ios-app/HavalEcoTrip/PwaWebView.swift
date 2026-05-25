@@ -52,6 +52,10 @@ struct PwaWebView: UIViewRepresentable {
         web.allowsBackForwardNavigationGestures = true
         web.scrollView.bounces = false
         web.navigationDelegate = context.coordinator
+        // WKWebView no iOS bloqueia alert/confirm/prompt JS por padrão. Sem
+        // uiDelegate, chamadas retornam false silenciosamente e botões como
+        // "Limpar histórico" (que confirma com confirm()) ficam inertes.
+        web.uiDelegate = context.coordinator
         // User-Agent custom — o PWA pode detectar via navigator.userAgent
         // que está rodando dentro do wrapper iOS.
         web.customUserAgent = (web.value(forKey: "userAgent") as? String ?? "") + " HavalEcoTripiOS/1.0"
@@ -67,7 +71,7 @@ struct PwaWebView: UIViewRepresentable {
     }
 
     @MainActor
-    final class Coordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
+    final class Coordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate, WKUIDelegate {
         let manager: ActivityManager
         init(manager: ActivityManager) { self.manager = manager }
 
@@ -91,6 +95,52 @@ struct PwaWebView: UIViewRepresentable {
                      didFailProvisionalNavigation navigation: WKNavigation!,
                      withError error: Error) {
             print("[webview] falha:", error.localizedDescription)
+        }
+
+        // ── JS dialogs: alert / confirm / prompt ─────────────────────────────
+        // Sem esses delegates, WKWebView ignora silenciosamente os 3 e botões
+        // do PWA que dependem deles (ex: confirm() de "Limpar histórico de
+        // notificações", "Remover dispositivo" etc.) ficam inertes.
+
+        private func topController() -> UIViewController? {
+            let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+            let window = scenes.flatMap { $0.windows }.first(where: { $0.isKeyWindow }) ?? scenes.first?.windows.first
+            var top = window?.rootViewController
+            while let presented = top?.presentedViewController { top = presented }
+            return top
+        }
+
+        func webView(_ webView: WKWebView,
+                     runJavaScriptAlertPanelWithMessage message: String,
+                     initiatedByFrame frame: WKFrameInfo,
+                     completionHandler: @escaping () -> Void) {
+            let alert = UIAlertController(title: nil, message: message, preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: "OK", style: .default) { _ in completionHandler() })
+            topController()?.present(alert, animated: true)
+        }
+
+        func webView(_ webView: WKWebView,
+                     runJavaScriptConfirmPanelWithMessage message: String,
+                     initiatedByFrame frame: WKFrameInfo,
+                     completionHandler: @escaping (Bool) -> Void) {
+            let alert = UIAlertController(title: nil, message: message, preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: "Cancelar", style: .cancel) { _ in completionHandler(false) })
+            alert.addAction(UIAlertAction(title: "OK", style: .default) { _ in completionHandler(true) })
+            topController()?.present(alert, animated: true)
+        }
+
+        func webView(_ webView: WKWebView,
+                     runJavaScriptTextInputPanelWithPrompt prompt: String,
+                     defaultText: String?,
+                     initiatedByFrame frame: WKFrameInfo,
+                     completionHandler: @escaping (String?) -> Void) {
+            let alert = UIAlertController(title: nil, message: prompt, preferredStyle: .alert)
+            alert.addTextField { tf in tf.text = defaultText }
+            alert.addAction(UIAlertAction(title: "Cancelar", style: .cancel) { _ in completionHandler(nil) })
+            alert.addAction(UIAlertAction(title: "OK", style: .default) { _ in
+                completionHandler(alert.textFields?.first?.text)
+            })
+            topController()?.present(alert, animated: true)
         }
     }
 }
