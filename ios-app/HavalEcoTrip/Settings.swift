@@ -18,6 +18,24 @@ enum Settings {
         UserDefaults(suiteName: appGroupId) ?? .standard
     }
 
+    /// Migra URL+token do UserDefaults.standard pro App Group, uma vez só.
+    /// Chamado no init do app — sem isso, ao trocar pra app group em release
+    /// nova o user perderia config e veria widget vazio + tela de Setup.
+    static func migrateFromStandardIfNeeded() {
+        let group = defaults
+        let std = UserDefaults.standard
+        if let oldUrl = std.string(forKey: urlKey),
+           !oldUrl.isEmpty,
+           (group.string(forKey: urlKey) ?? "").isEmpty {
+            group.set(oldUrl, forKey: urlKey)
+        }
+        if let oldTok = std.string(forKey: tokenKey),
+           !oldTok.isEmpty,
+           (group.string(forKey: tokenKey) ?? "").isEmpty {
+            group.set(oldTok, forKey: tokenKey)
+        }
+    }
+
     static var bridgeURL: String {
         get { defaults.string(forKey: urlKey) ?? "" }
         set { defaults.set(newValue, forKey: urlKey) }

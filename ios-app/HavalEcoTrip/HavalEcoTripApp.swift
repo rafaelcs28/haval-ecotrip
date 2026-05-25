@@ -9,6 +9,10 @@ import SwiftUI
 @main
 struct HavalEcoTripApp: App {
     init() {
+        // Migra URL/token de versões antigas (UserDefaults.standard) pro
+        // App Group novo — sem isso o widget aparece vazio e o user precisa
+        // re-colar tudo. Idempotente.
+        Settings.migrateFromStandardIfNeeded()
         // Registra handler de BG refresh ANTES de qualquer view aparecer.
         // Sem isso, iOS não acorda o app em background pra polling de notifs.
         BackgroundRefresh.register()
