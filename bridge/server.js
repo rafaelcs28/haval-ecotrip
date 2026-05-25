@@ -3996,8 +3996,8 @@ app.post('/api/admin/reset-tyre-baseline', (req, res) => {
 // POST /api/charge-limit/refresh — pede pro APK reler o limite real do carro
 // e re-publicar em ha/charge_limit/state. Útil quando o user muda direto no
 // carro (sem usar o PWA) e o state do bridge ficou desatualizado.
+// (requireAuth global já cobre; não precisa do admin gate extra.)
 app.post('/api/charge-limit/refresh', (req, res) => {
-  if (!adminCheckToken(req, res)) return;
   if (!mqttClient?.connected) return res.status(503).json({ error: 'MQTT offline' });
   mqttClient.publish(`${MQTT_PREFIX}/cmd/refresh_charge_limit`, '1', { retain: false, qos: 1 }, err => {
     if (err) return res.status(500).json({ error: 'Falha ao publicar: ' + err.message });
@@ -4007,8 +4007,9 @@ app.post('/api/charge-limit/refresh', (req, res) => {
 });
 
 // POST /api/charge-limit  { pct: 80 }  — publica cmd/charge_limit no MQTT
+// (requireAuth global já cobre; não precisa do admin gate extra — antes
+// rejeitava o bridge_token do PWA com 401, fazendo o UI reverter o pedido.)
 app.post('/api/charge-limit', (req, res) => {
-  if (!adminCheckToken(req, res)) return;
   const pct = parseInt(req.body?.pct);
   if (![50, 60, 70, 80, 90, 100].includes(pct))
     return res.status(400).json({ error: 'Valor inválido. Use 50, 60, 70, 80, 90 ou 100.' });
