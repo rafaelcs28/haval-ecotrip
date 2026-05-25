@@ -58,6 +58,12 @@ enum class CarConstants(val value: String) {
     // Valores: 0=HEV (híbrido), 1=Prioridade EV, 3=EV puro (elétrico).
     CAR_EV_SETTING_POWER_MODEL_CONFIG("car.ev_setting.power_model_config"),
 
+    // Sub-modos do HEV — writable. Só fazem sentido quando power_model_config=0.
+    // power_reserve: 1=Inteligente (carro decide), 2=Prioritário (preserva SOC alvo).
+    // charge_soc_target: % de bateria a preservar em modo Prioritário (20..80).
+    CAR_EV_SETTING_POWER_RESERVE_CONFIG("car.ev_setting.power_reserve_config"),
+    CAR_EV_SETTING_CHARGE_SOC_TARGET_CONFIG("car.ev_setting.charge_soc_target_config"),
+
     // Gear status — mapeamento confirmado: 0=N, 2=D, 3=P, 4=R
     CAR_BASIC_GEAR_STATUS("car.basic.gear_status"),
 

@@ -352,6 +352,8 @@ class MqttManager private constructor() {
     // Usado para evitar publicações redundantes e detectar divergência carro ↔ HA.
     @Volatile private var lastPublishedChargeLimitPct: Int = -1
     @Volatile private var lastPublishedDriveMode: Int = -1   // 0=HEV, 1=Prior. EV, 3=EV
+    @Volatile private var lastPublishedPowerReserve: Int = -1 // 1=inteligente, 2=prioritário
+    @Volatile private var lastPublishedSocTarget: Int = -1    // 20..80 %
 
     fun init(context: Context) {
         // Prevent "Error locating the logging class" crash on Android: set a no-op logger
@@ -375,6 +377,12 @@ class MqttManager private constructor() {
             } else if (key == CarConstants.CAR_EV_SETTING_POWER_MODEL_CONFIG.value) {
                 val carVal = value.trim().toIntOrNull()
                 if (carVal != null) syncDriveModeFromCar(carVal)
+            } else if (key == CarConstants.CAR_EV_SETTING_POWER_RESERVE_CONFIG.value) {
+                val carVal = value.trim().toIntOrNull()
+                if (carVal != null) syncPowerReserveFromCar(carVal)
+            } else if (key == CarConstants.CAR_EV_SETTING_CHARGE_SOC_TARGET_CONFIG.value) {
+                val carVal = value.trim().toIntOrNull()
+                if (carVal != null) syncSocTargetFromCar(carVal)
             }
         }
         if (enabled && host.isNotEmpty()) connect()
@@ -564,6 +572,50 @@ class MqttManager private constructor() {
         }
     }
 
+    /** Sub-modo HEV: 1=Inteligente, 2=Prioritário. */
+    fun syncPowerReserveFromCar(carVal: Int) {
+        if (carVal !in setOf(1, 2)) {
+            Log.w(TAG, "syncPowerReserveFromCar: valor inesperado carVal=$carVal, ignorado")
+            return
+        }
+        if (carVal == lastPublishedPowerReserve) return
+        AppLogger.i(TAG, "Carro reportou power_reserve=$carVal — atualizando HA")
+        publishPowerReserveState(carVal)
+    }
+
+    fun publishPowerReserveState(mode: Int) {
+        if (mode !in setOf(1, 2)) return
+        try {
+            client?.publish("$prefix/ha/power_reserve/state", mode.toString().toByteArray(), 1, true)
+            lastPublishedPowerReserve = mode
+            AppLogger.i(TAG, "Power reserve publicado no HA: $mode")
+        } catch (e: Exception) {
+            Log.w(TAG, "publishPowerReserveState falhou: ${e.message}")
+        }
+    }
+
+    /** Alvo de SOC no modo Prioritário HEV: 20..80 (%). */
+    fun syncSocTargetFromCar(carVal: Int) {
+        if (carVal !in 20..80) {
+            Log.w(TAG, "syncSocTargetFromCar: valor fora da faixa carVal=$carVal, ignorado")
+            return
+        }
+        if (carVal == lastPublishedSocTarget) return
+        AppLogger.i(TAG, "Carro reportou soc_target=${carVal}% — atualizando HA")
+        publishSocTargetState(carVal)
+    }
+
+    fun publishSocTargetState(pct: Int) {
+        if (pct !in 20..80) return
+        try {
+            client?.publish("$prefix/ha/charge_soc_target/state", pct.toString().toByteArray(), 1, true)
+            lastPublishedSocTarget = pct
+            AppLogger.i(TAG, "Soc target publicado no HA: $pct%")
+        } catch (e: Exception) {
+            Log.w(TAG, "publishSocTargetState falhou: ${e.message}")
+        }
+    }
+
     /** Converte valor do carro (0–5) para percentual. null se fora do range. */
     private fun carValToPct(carVal: Int): Int? {
         return when (carVal) {
@@ -640,6 +692,8 @@ class MqttManager private constructor() {
             consecutiveFailures = 0
             lastPublishedChargeLimitPct = -1  // força re-sync com o carro após reconexão
             lastPublishedDriveMode = -1       // idem pro modo de condução
+            lastPublishedPowerReserve = -1    // sub-modo HEV
+            lastPublishedSocTarget = -1       // alvo SOC prioritário
             setStatus(Status.CONNECTED)
             publishDiscovery(c)
             // Publica versão do app com retain=true — sempre visível no HA mesmo offline
@@ -681,6 +735,17 @@ class MqttManager private constructor() {
                 } catch (e: Exception) {
                     AppLogger.w(TAG, "Leitura inicial drive_mode falhou: ${e.message}")
                 }
+                // Sub-modos HEV
+                try {
+                    val readBack = CarDataManager.getInstance().fetchCurrent("car.ev_setting.power_reserve_config")?.trim()
+                    val carVal = readBack?.toIntOrNull()
+                    if (carVal != null) syncPowerReserveFromCar(carVal)
+                } catch (e: Exception) { AppLogger.w(TAG, "Leitura inicial power_reserve falhou: ${e.message}") }
+                try {
+                    val readBack = CarDataManager.getInstance().fetchCurrent("car.ev_setting.charge_soc_target_config")?.trim()
+                    val carVal = readBack?.toIntOrNull()
+                    if (carVal != null) syncSocTargetFromCar(carVal)
+                } catch (e: Exception) { AppLogger.w(TAG, "Leitura inicial soc_target falhou: ${e.message}") }
             }
         } catch (e: Exception) {
             consecutiveFailures++
@@ -1385,6 +1450,80 @@ class MqttManager private constructor() {
                     } else {
                         publishResult("refresh_drive_mode", "error: leitura falhou")
                     }
+                }
+                "power_reserve" -> {
+                    // 1=Inteligente, 2=Prioritário
+                    val target = payload.trim().toIntOrNull()
+                    if (target == null || target !in setOf(1, 2)) {
+                        publishResult("power_reserve", "error: valor inválido ('$payload')")
+                        return@submit
+                    }
+                    val ok = car.requestSetting(
+                        key   = "car.ev_setting.power_reserve_config",
+                        value = target.toString(),
+                    )
+                    if (!ok) {
+                        publishResult("power_reserve", "error: carro recusou ou está dormindo")
+                        return@submit
+                    }
+                    Thread.sleep(3_000)
+                    val readBack = try { car.fetchCurrent("car.ev_setting.power_reserve_config")?.trim() }
+                                   catch (_: Exception) { null }
+                    val confirmed = readBack?.toIntOrNull()
+                    if (confirmed != null && confirmed in setOf(1, 2)) {
+                        publishPowerReserveState(confirmed)
+                        publishResult("power_reserve", if (confirmed == target) "ok:$confirmed"
+                                                       else "ok:$confirmed (solicitado $target)")
+                    } else {
+                        publishPowerReserveState(target)
+                        publishResult("power_reserve", "ok:$target (fallback)")
+                    }
+                }
+                "charge_soc_target" -> {
+                    // 20..80 (%)
+                    val target = payload.trim().toIntOrNull()
+                    if (target == null || target !in 20..80) {
+                        publishResult("charge_soc_target", "error: valor fora da faixa 20..80 ('$payload')")
+                        return@submit
+                    }
+                    val ok = car.requestSetting(
+                        key   = "car.ev_setting.charge_soc_target_config",
+                        value = target.toString(),
+                    )
+                    if (!ok) {
+                        publishResult("charge_soc_target", "error: carro recusou ou está dormindo")
+                        return@submit
+                    }
+                    Thread.sleep(3_000)
+                    val readBack = try { car.fetchCurrent("car.ev_setting.charge_soc_target_config")?.trim() }
+                                   catch (_: Exception) { null }
+                    val confirmed = readBack?.toIntOrNull()
+                    if (confirmed != null && confirmed in 20..80) {
+                        publishSocTargetState(confirmed)
+                        publishResult("charge_soc_target", if (confirmed == target) "ok:$confirmed"
+                                                           else "ok:$confirmed (solicitado $target)")
+                    } else {
+                        publishSocTargetState(target)
+                        publishResult("charge_soc_target", "ok:$target (fallback)")
+                    }
+                }
+                "refresh_power_reserve" -> {
+                    val readBack = try { car.fetchCurrent("car.ev_setting.power_reserve_config")?.trim() }
+                                   catch (_: Exception) { null }
+                    val carVal = readBack?.toIntOrNull()
+                    if (carVal != null && carVal in setOf(1, 2)) {
+                        lastPublishedPowerReserve = -1
+                        publishPowerReserveState(carVal)
+                    } else publishResult("refresh_power_reserve", "error: leitura falhou")
+                }
+                "refresh_charge_soc_target" -> {
+                    val readBack = try { car.fetchCurrent("car.ev_setting.charge_soc_target_config")?.trim() }
+                                   catch (_: Exception) { null }
+                    val carVal = readBack?.toIntOrNull()
+                    if (carVal != null && carVal in 20..80) {
+                        lastPublishedSocTarget = -1
+                        publishSocTargetState(carVal)
+                    } else publishResult("refresh_charge_soc_target", "error: leitura falhou")
                 }
                 "hf_mode" -> {
                     // Modo de alta frequência (250ms entre publishes) acionado pelo PWA

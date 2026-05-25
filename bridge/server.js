@@ -609,6 +609,8 @@ const state = {
   charge_remaining_min:0,
   charge_limit_pct:    null,   // % limite de carga SOC (null = desconhecido)
   drive_mode:          null,   // 0=HEV, 1=Prior. EV, 3=EV (null = desconhecido)
+  power_reserve:       null,   // sub-modo HEV: 1=Inteligente, 2=Prioritário
+  charge_soc_target:   null,   // alvo SOC no modo Prioritário (20..80 %)
   battery_power_pct:   0,
   engine_rpm:          0,
   notif_latest_ts:     0,
@@ -4064,6 +4066,46 @@ app.post('/api/drive-mode/refresh', (_req, res) => {
   });
 });
 
+// POST /api/power-reserve  { mode: 1|2 } — sub-modo HEV
+//   1 = Inteligente (carro decide quando ligar motor)
+//   2 = Prioritário (preserva SOC alvo definido em charge_soc_target)
+app.post('/api/power-reserve', (req, res) => {
+  const mode = parseInt(req.body?.mode);
+  if (![1, 2].includes(mode))
+    return res.status(400).json({ error: 'Valor inválido. Use 1 (Inteligente) ou 2 (Prioritário).' });
+  if (!mqttClient?.connected) return res.status(503).json({ error: 'MQTT offline' });
+  mqttClient.publish(`${MQTT_PREFIX}/cmd/power_reserve`, mode.toString(), { retain: false, qos: 1 }, err => {
+    if (err) return res.status(500).json({ error: 'Falha ao publicar no MQTT' });
+    res.json({ ok: true });
+  });
+});
+app.post('/api/power-reserve/refresh', (_req, res) => {
+  if (!mqttClient?.connected) return res.status(503).json({ error: 'MQTT offline' });
+  mqttClient.publish(`${MQTT_PREFIX}/cmd/refresh_power_reserve`, '1', { retain: false, qos: 1 }, err => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ ok: true });
+  });
+});
+
+// POST /api/charge-soc-target  { pct: 20..80 } — alvo SOC no HEV Prioritário
+app.post('/api/charge-soc-target', (req, res) => {
+  const pct = parseInt(req.body?.pct);
+  if (!(pct >= 20 && pct <= 80))
+    return res.status(400).json({ error: 'Valor fora da faixa. Use 20..80.' });
+  if (!mqttClient?.connected) return res.status(503).json({ error: 'MQTT offline' });
+  mqttClient.publish(`${MQTT_PREFIX}/cmd/charge_soc_target`, pct.toString(), { retain: false, qos: 1 }, err => {
+    if (err) return res.status(500).json({ error: 'Falha ao publicar no MQTT' });
+    res.json({ ok: true });
+  });
+});
+app.post('/api/charge-soc-target/refresh', (_req, res) => {
+  if (!mqttClient?.connected) return res.status(503).json({ error: 'MQTT offline' });
+  mqttClient.publish(`${MQTT_PREFIX}/cmd/refresh_charge_soc_target`, '1', { retain: false, qos: 1 }, err => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ ok: true });
+  });
+});
+
 app.post('/api/action/:name', async (req, res) => {
   const { name } = req.params;
   console.log(`[action] recebido name='${name}'`);
@@ -5254,6 +5296,22 @@ function applyMqttMessage(key, value, isRetained = false) {
     }
     case 'cmd/drive_mode/result':
       broadcast('drive_mode_result', { result: value });
+      break;
+    case 'ha/power_reserve/state': {
+      const m = parseInt(value);
+      if ([1, 2].includes(m)) state.power_reserve = m;
+      break;
+    }
+    case 'cmd/power_reserve/result':
+      broadcast('power_reserve_result', { result: value });
+      break;
+    case 'ha/charge_soc_target/state': {
+      const m = parseInt(value);
+      if (m >= 20 && m <= 80) state.charge_soc_target = m;
+      break;
+    }
+    case 'cmd/charge_soc_target/result':
+      broadcast('charge_soc_target_result', { result: value });
       break;
     // price_gas_per_l e price_kwh do APK: IGNORADOS — valor agora vem do mix
     // ponderado de abastecimentos/recargas (recomputeTankAvgPrice / recomputeBatteryAvgPrice).

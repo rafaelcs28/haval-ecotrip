@@ -223,6 +223,48 @@
   animation: dm-pulse 1s ease-in-out infinite;
 }
 @keyframes dm-pulse { 50% { opacity: 0.5; } }
+
+/* Modal HEV: escolha de sub-modo + slider de % */
+.hev-modal {
+  display: none;
+  position: fixed; inset: 0; z-index: 200;
+  background: rgba(0,0,0,.75);
+  align-items: flex-end; justify-content: center;
+  backdrop-filter: blur(8px);
+}
+.hev-modal.show { display: flex; }
+.hev-card {
+  background: #1f1f1f; width: 100%; max-width: 480px;
+  border-top-left-radius: 18px; border-top-right-radius: 18px;
+  padding: 18px 18px calc(env(safe-area-inset-bottom) + 18px);
+  border-top: 1px solid rgba(255,255,255,.08);
+}
+.hev-ti { font-size: 16px; font-weight: 700; margin-bottom: 14px; }
+.hev-opts { display: flex; flex-direction: column; gap: 8px; }
+.hev-opt {
+  display: flex; align-items: center; gap: 10px;
+  padding: 12px; border-radius: 10px;
+  background: rgba(255,255,255,.03);
+  border: 1px solid rgba(255,255,255,.06);
+  cursor: pointer;
+}
+.hev-opt input[type=radio] { accent-color: var(--green); width: 20px; height: 20px; }
+.hev-opt-body { display: flex; flex-direction: column; }
+.hev-opt-body strong { font-size: 14px; }
+.hev-opt-body .hev-opt-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.hev-slider-wrap { margin-top: 14px; padding: 12px; background: rgba(34,197,94,.06); border: 1px solid rgba(34,197,94,.18); border-radius: 10px; }
+.hev-slider-row { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
+.hev-slider-lbl { font-size: 12px; color: var(--muted); }
+.hev-slider-val { font-size: 18px; font-weight: 700; color: var(--green); font-variant-numeric: tabular-nums; }
+.hev-slider-wrap input[type=range] { width: 100%; accent-color: var(--green); }
+.hev-slider-hint { font-size: 10px; color: var(--muted); text-align: right; margin-top: 4px; }
+.hev-btns { display: flex; gap: 10px; margin-top: 16px; }
+.hev-btn {
+  flex: 1; padding: 12px; border-radius: 10px;
+  font-size: 14px; font-weight: 700; font-family: inherit; cursor: pointer; border: none;
+}
+.hev-btn.cancel  { background: rgba(255,255,255,.06); color: #cbd5e1; }
+.hev-btn.confirm { background: var(--green); color: #000; }
 .tiny-row.has-rpm .tiny-card .lbl { font-size: 7.5px; letter-spacing: 1px; }
 
 /* Tabbar */
@@ -323,14 +365,49 @@
          Mesmo padrão UX do SOC limit: amarelo pulsando enquanto aguarda
          confirmação do APK, verde quando aplicado, vermelho em erro. -->
     <div class="drive-mode-card">
-      <div class="dm-label">⚙ Modo de condução</div>
+      <div class="dm-label">⚙ Modo de condução <span id="dm-sub-label" style="font-size:9px;color:var(--muted);font-weight:500;text-transform:none;letter-spacing:0.2px;margin-left:6px"></span></div>
       <div class="dm-chips">
-        <div class="dm-chip" data-mode="0" onclick="setDriveMode(0)">HEV</div>
+        <div class="dm-chip" data-mode="0" onclick="openHevModal()">HEV</div>
         <div class="dm-chip" data-mode="1" onclick="setDriveMode(1)">Prior. EV</div>
         <div class="dm-chip" data-mode="3" onclick="setDriveMode(3)">EV</div>
       </div>
     </div>
 
+  </div>
+</div>
+
+<!-- Modal HEV: escolhe sub-modo (Inteligente / Prioritário) + slider de % se Prioritário -->
+<div id="hev-modal" class="hev-modal" onclick="if(event.target===this) closeHevModal()">
+  <div class="hev-card">
+    <div class="hev-ti">⚙ Modo HEV</div>
+    <div class="hev-opts">
+      <label class="hev-opt">
+        <input type="radio" name="hev-mode" value="1" id="hev-r-smart">
+        <span class="hev-opt-body">
+          <strong>Inteligente</strong>
+          <span class="hev-opt-sub">Carro decide quando ligar o motor</span>
+        </span>
+      </label>
+      <label class="hev-opt">
+        <input type="radio" name="hev-mode" value="2" id="hev-r-priority">
+        <span class="hev-opt-body">
+          <strong>Prioritário</strong>
+          <span class="hev-opt-sub">Preserva uma % de bateria definida</span>
+        </span>
+      </label>
+    </div>
+    <div class="hev-slider-wrap" id="hev-slider-wrap" style="display:none">
+      <div class="hev-slider-row">
+        <span class="hev-slider-lbl">% de bateria a preservar</span>
+        <span class="hev-slider-val"><span id="hev-soc-val">50</span>%</span>
+      </div>
+      <input type="range" min="20" max="80" step="5" value="50" id="hev-soc-slider" oninput="document.getElementById('hev-soc-val').textContent = this.value">
+      <div class="hev-slider-hint">20–80 %</div>
+    </div>
+    <div class="hev-btns">
+      <button class="hev-btn cancel" onclick="closeHevModal()">Cancelar</button>
+      <button class="hev-btn confirm" onclick="applyHevModal()">Aplicar</button>
+    </div>
   </div>
 </div>
 
@@ -2979,6 +3056,22 @@ function _renderDriveModeChips() {
   if (_driveModePending !== null) return;  // não sobrescreve durante pendência
   const cur = (window.state && window.state.drive_mode != null) ? +window.state.drive_mode : null;
   if (cur != null) _setDriveModeUI(cur, null);
+  _renderHevSubLabel();
+}
+
+// Mostra "(Inteligente)" ou "(Prioritário · 60%)" ao lado do título do card
+// quando o modo atual é HEV — facilita ver o sub-modo sem abrir o popup.
+function _renderHevSubLabel() {
+  const lbl = document.querySelector('#view-drive #dm-sub-label');
+  if (!lbl) return;
+  const mode = window.state?.drive_mode;
+  if (mode !== 0) { lbl.textContent = ''; return; }
+  const pr = window.state?.power_reserve;
+  if (pr === 1) lbl.textContent = '· Inteligente';
+  else if (pr === 2) {
+    const t = window.state?.charge_soc_target;
+    lbl.textContent = t ? `· Prioritário ${t}%` : '· Prioritário';
+  } else lbl.textContent = '';
 }
 
 function _clearDriveModePending() {
@@ -3038,10 +3131,87 @@ window._onDriveModeResult = function(data) {
   }
 };
 
+// Handlers dos sub-modos HEV (não controlam UI de chip — só notificam toast)
+window._onPowerReserveResult = function(data) {
+  const raw = String(data?.result || '');
+  if (raw.startsWith('ok:')) window.showToast && window.showToast('✓ Sub-modo HEV aplicado', 'ok');
+  else if (raw.startsWith('error')) window.showToast && window.showToast('✗ Sub-modo HEV: ' + raw, 'err');
+};
+window._onChargeSocTargetResult = function(data) {
+  const raw = String(data?.result || '');
+  if (raw.startsWith('ok:')) window.showToast && window.showToast('✓ % alvo aplicada', 'ok');
+  else if (raw.startsWith('error')) window.showToast && window.showToast('✗ % alvo: ' + raw, 'err');
+};
+
+// ── Modal HEV ───────────────────────────────────────────────────────────────
+function openHevModal() {
+  // Pré-seleciona radio com o sub-modo atual; default inteligente.
+  const pr = (window.state?.power_reserve === 2) ? 2 : 1;
+  const target = (typeof window.state?.charge_soc_target === 'number')
+                 ? Math.max(20, Math.min(80, window.state.charge_soc_target)) : 50;
+  document.getElementById('hev-r-smart').checked    = (pr === 1);
+  document.getElementById('hev-r-priority').checked = (pr === 2);
+  document.getElementById('hev-soc-slider').value = String(target);
+  document.getElementById('hev-soc-val').textContent = String(target);
+  _toggleHevSliderVisibility();
+  // Listener pra mostrar/esconder slider
+  document.querySelectorAll('input[name="hev-mode"]').forEach(r => {
+    r.onchange = _toggleHevSliderVisibility;
+  });
+  document.getElementById('hev-modal').classList.add('show');
+}
+function closeHevModal() {
+  document.getElementById('hev-modal').classList.remove('show');
+}
+function _toggleHevSliderVisibility() {
+  const isPriority = document.getElementById('hev-r-priority').checked;
+  document.getElementById('hev-slider-wrap').style.display = isPriority ? '' : 'none';
+}
+
+async function applyHevModal() {
+  const pr = document.getElementById('hev-r-priority').checked ? 2 : 1;
+  const target = parseInt(document.getElementById('hev-soc-slider').value, 10);
+  closeHevModal();
+  // Dispara 3 comandos em série: drive_mode=0 (HEV) → power_reserve → soc_target (só se prioritário)
+  const tk = localStorage.getItem('bridge_token');
+  if (!tk) return;
+  // Se já não está em HEV, troca primeiro
+  if (window.state?.drive_mode !== 0) {
+    await setDriveMode(0);
+  }
+  // power_reserve
+  try {
+    await fetch('/api/power-reserve', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + tk, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode: pr }),
+    });
+    window.showToast && window.showToast('⏳ Sub-modo HEV enviado…', 'ok');
+  } catch (e) {
+    window.showToast && window.showToast('✗ ' + e.message, 'err');
+  }
+  // charge_soc_target (só faz sentido em prioritário)
+  if (pr === 2) {
+    try {
+      await fetch('/api/charge-soc-target', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + tk, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pct: target }),
+      });
+      window.showToast && window.showToast(`⏳ Alvo ${target}% enviado…`, 'ok');
+    } catch (e) {
+      window.showToast && window.showToast('✗ ' + e.message, 'err');
+    }
+  }
+}
+
   // Expõe handlers de onclick no window
   Object.assign(window, {
     toggleSheet: typeof toggleSheet !== 'undefined' ? toggleSheet : undefined,
     setDriveMode: setDriveMode,
+    openHevModal: openHevModal,
+    closeHevModal: closeHevModal,
+    applyHevModal: applyHevModal,
   });
   if (!window['initView_drive']) window['initView_drive'] = function() {};
 })();

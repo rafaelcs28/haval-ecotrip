@@ -960,6 +960,10 @@ function connect() {
         if (window._onChargeLimitResult) window._onChargeLimitResult(msg.data);
       } else if (msg.type === 'drive_mode_result') {
         if (window._onDriveModeResult) window._onDriveModeResult(msg.data);
+      } else if (msg.type === 'power_reserve_result') {
+        if (window._onPowerReserveResult) window._onPowerReserveResult(msg.data);
+      } else if (msg.type === 'charge_soc_target_result') {
+        if (window._onChargeSocTargetResult) window._onChargeSocTargetResult(msg.data);
       } else if (msg.type === 'diag_state') {
         if (window._onDiagState) window._onDiagState(msg.data);
       } else if (msg.type === 'diag_event') {
