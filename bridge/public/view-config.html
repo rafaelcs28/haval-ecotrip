@@ -2497,12 +2497,13 @@ function _clearChargePending() {
 }
 
 async function setChargeLimit(pct) {
+  console.log('[charge-limit] setChargeLimit chamado', pct);
+  showToast('🔵 click pct=' + pct, '');
   const tk = localStorage.getItem('bridge_token');
-  if (!tk) return;
+  if (!tk) { showToast('🔴 sem bridge_token', 'err'); return; }
   _chargeLimitPending = pct;
   _setChargeLimitUI(pct, 'pending');
   if (_chargeLimitTimer) clearTimeout(_chargeLimitTimer);
-  // APK aguarda 10s antes de ler de volta — damos 25s pra ter folga
   _chargeLimitTimer = setTimeout(() => {
     if (_chargeLimitPending !== null) {
       showToast('⚠ Carro não respondeu — verifique se o veículo está acordado', 'err');
@@ -2511,17 +2512,20 @@ async function setChargeLimit(pct) {
     }
   }, 25000);
   try {
+    showToast('🟡 enviando POST…', '');
     const r = await fetch('/api/charge-limit', {
       method: 'POST',
       headers: { 'Authorization': 'Bearer ' + tk, 'Content-Type': 'application/json' },
       body: JSON.stringify({ pct }),
     });
-    const data = await r.json();
+    const txt = await r.text();
+    showToast(`🟢 resp HTTP ${r.status} body=${txt.slice(0,40)}`, r.ok ? 'ok' : 'err');
+    let data = {}; try { data = JSON.parse(txt); } catch(_) {}
     if (!r.ok) throw new Error(data.error || 'HTTP ' + r.status);
-    showToast('⏳ Comando enviado — aguardando confirmação do carro (até 15s)', 'ok');
+    showToast('⏳ Comando enviado — aguardando confirmação do carro', 'ok');
   } catch (e) {
     _clearChargePending();
-    showToast('✗ ' + e.message, 'err');
+    showToast('✗ catch: ' + e.message, 'err');
     _loadChargeLimit();
   }
 }
