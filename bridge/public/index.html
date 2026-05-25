@@ -1316,6 +1316,10 @@ async function switchView(name) {
   sessionStorage.setItem('ecotrip_v2_active', name);
 
   if (!_viewsLoaded.has(name)) await loadView(name);
+  // Re-expõe funções da view ativa no window. Várias views compartilham
+  // nomes (openCalendar, setPeriod, etc) — sem re-bind, ao trocar de view
+  // os onclick chamam função da view anterior, que opera no DOM errado.
+  if (window['_havalActivate_' + name]) window['_havalActivate_' + name]();
   if (window['renderView_' + name]) window['renderView_' + name]();
   _updateHfMode();
 }
