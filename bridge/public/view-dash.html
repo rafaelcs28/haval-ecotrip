@@ -1893,10 +1893,11 @@ function closeSocLimitModal() {
 }
 
 async function setSocLimitFromDash(pct) {
+  console.log('[soc-dash] setSocLimitFromDash', pct);
   window.showToast && window.showToast('🔵 click dash pct=' + pct, '');
   if (![50,60,70,80,90,100].includes(pct)) return;
   const tk = localStorage.getItem('bridge_token');
-  if (!tk) return;
+  if (!tk) { window.showToast && window.showToast('🔴 sem token', 'err'); return; }
   _socDashPending = pct;
   // UI: chip clicado pulsa amarelo
   document.querySelectorAll('#soc-limit-chips .soc-chip').forEach(c => {
@@ -1913,22 +1914,28 @@ async function setSocLimitFromDash(pct) {
     }
   }, 25000);
   try {
+    window.showToast && window.showToast('🟡 POST…', '');
     const r = await fetch('/api/charge-limit', {
       method: 'POST',
       headers: { 'Authorization': 'Bearer ' + tk, 'Content-Type': 'application/json' },
       body: JSON.stringify({ pct }),
     });
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.error || 'HTTP ' + r.status);
-    window.showToast && window.showToast('⏳ Enviado — aguardando confirmação', 'ok');
+    const txt = await r.text();
+    window.showToast && window.showToast(`🟢 HTTP ${r.status} body=${txt.slice(0,30)}`, r.ok ? 'ok' : 'err');
+    if (!r.ok) {
+      let data = {}; try { data = JSON.parse(txt); } catch(_) {}
+      throw new Error(data.error || 'HTTP ' + r.status);
+    }
   } catch (e) {
+    window.showToast && window.showToast('✗ catch: ' + e.message, 'err');
     _socDashPending = null;
-    window.showToast && window.showToast('✗ ' + e.message, 'err');
     _refreshSocChipsActive();
   }
 }
 
 function _refreshSocChipsActive() {
+  console.log('[soc-dash] _refreshSocChipsActive called');
+  window.showToast && window.showToast('🔄 refresh chips (pending=' + _socDashPending + ')', '');
   const cur = +(window.state?.charge_limit_pct) || 0;
   document.querySelectorAll('#soc-limit-chips .soc-chip').forEach(c => {
     c.classList.toggle('active', +c.dataset.pct === cur);
