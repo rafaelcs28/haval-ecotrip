@@ -615,7 +615,7 @@
 
   <!-- Hero grid 2x2 -->
   <div class="hero-grid">
-    <div class="hero-card green" id="hc-soc-card">
+    <div class="hero-card green" id="hc-soc-card" onclick="if(window.state?.charging_state==='Carregando') openSocLimitModal()" style="cursor:pointer">
       <div class="lbl">
         Bateria<span id="hc-soc-tag"></span>
         <span class="batt12-pill" id="hc-batt12-pill" style="display:none"><svg class="ic-batt12" viewBox="0 0 24 14" width="14" height="9" aria-hidden="true"><rect x="2" y="2" width="3" height="2" rx="0.5" fill="currentColor"/><rect x="9" y="2" width="3" height="2" rx="0.5" fill="currentColor"/><rect x="1" y="4" width="13" height="9" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.4"/><text x="7.5" y="11.2" text-anchor="middle" font-size="5.5" font-weight="900" fill="currentColor">12V</text></svg> <span id="hc-batt12-v">--</span>%</span>
@@ -1436,9 +1436,9 @@ function render(s, kpData) {
   const socBar  = document.getElementById('hc-soc-bar');
   if (charging) {
     socCard.classList.add('charging');
-    // LIVE clicável: abre modal pra mudar a meta de SOC do limite de recarga.
-    // event.stopPropagation evita acionar onclick do card pai (se houver).
-    socTag.innerHTML = '<span class="live-tag" onclick="event.stopPropagation(); openSocLimitModal()" style="cursor:pointer">⚡ LIVE</span>';
+    // Card inteiro é clicável quando carregando (onclick no hc-soc-card).
+    // Mantém só o badge visual, sem onclick próprio.
+    socTag.innerHTML = '<span class="live-tag">⚡ LIVE</span>';
     socBar.style.display = 'block';
     const target = +s.charge_limit_pct || 100;
     document.getElementById('hc-soc-bar-fill').style.width = (soc || 0) + '%';
@@ -1893,6 +1893,7 @@ function closeSocLimitModal() {
 }
 
 async function setSocLimitFromDash(pct) {
+  window.showToast && window.showToast('🔵 click dash pct=' + pct, '');
   if (![50,60,70,80,90,100].includes(pct)) return;
   const tk = localStorage.getItem('bridge_token');
   if (!tk) return;
