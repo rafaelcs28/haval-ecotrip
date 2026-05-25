@@ -8,6 +8,11 @@ import SwiftUI
 
 @main
 struct HavalEcoTripApp: App {
+    init() {
+        // Registra handler de BG refresh ANTES de qualquer view aparecer.
+        // Sem isso, iOS não acorda o app em background pra polling de notifs.
+        BackgroundRefresh.register()
+    }
     var body: some Scene {
         WindowGroup {
             ContentView()

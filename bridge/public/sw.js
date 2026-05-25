@@ -1,4 +1,4 @@
-const CACHE = 'ecotrip-v345';
+const CACHE = 'ecotrip-v346';
 
 // Tudo do shell do PWA (HTML/CSS/JS/icons/libs) — pre-cached no install.
 // Bumpar CACHE acima força o navegador a re-baixar tudo na próxima vez.
@@ -125,10 +125,18 @@ self.addEventListener('push', e => {
 
 self.addEventListener('notificationclick', e => {
   e.notification.close();
-  e.waitUntil(
-    clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
-      const focused = list.find(c => c.url.includes(self.location.origin) && 'focus' in c);
-      return focused ? focused.focus() : clients.openWindow('/');
-    })
-  );
+  e.waitUntil((async () => {
+    // Tenta abrir o app nativo iOS via URL scheme havalecotrip://
+    // (registrado no Info.plist do app wrapper). Se o app não estiver
+    // instalado, o iOS abre o PWA normal como fallback silencioso.
+    try {
+      await clients.openWindow('havalecotrip://open');
+      return;
+    } catch (_) {}
+    // Fallback: foca uma janela do PWA já aberta, senão abre nova
+    const list = await clients.matchAll({ type: 'window', includeUncontrolled: true });
+    const focused = list.find(c => c.url.includes(self.location.origin) && 'focus' in c);
+    if (focused) return focused.focus();
+    return clients.openWindow('/');
+  })());
 });

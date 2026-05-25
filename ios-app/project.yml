@@ -37,6 +37,19 @@ targets:
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
         ITSAppUsesNonExemptEncryption: false
+        # BG refresh: iOS exige declarar tanto o capability quanto a lista
+        # de identifiers permitidos pra BGTaskScheduler.
+        UIBackgroundModes:
+          - fetch
+          - processing
+        BGTaskSchedulerPermittedIdentifiers:
+          - br.com.consorciolimpagyn.havalecotrip.notif-refresh
+        # URL scheme: PWA standalone pode chamar `havalecotrip://` no
+        # notificationclick do SW pra abrir o app nativo (com toque do user).
+        CFBundleURLTypes:
+          - CFBundleURLName: br.com.consorciolimpagyn.havalecotrip
+            CFBundleURLSchemes:
+              - havalecotrip
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: br.com.consorciolimpagyn.havalecotrip

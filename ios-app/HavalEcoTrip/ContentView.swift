@@ -65,12 +65,21 @@ struct ContentView: View {
             await notifPoller.requestPermission()
             notifPoller.start()
         }
+        // URL scheme havalecotrip:// — disparado pelo SW do PWA standalone
+        // quando user toca numa notif Web Push. App abre e roda auto-start.
+        .onOpenURL { url in
+            print("[app] aberto via URL:", url.absoluteString)
+            Task { await manager.autoStartIfCharging() }
+        }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
                 Task { await manager.autoStartIfCharging() }
                 notifPoller.start()
             } else if newPhase == .background {
                 notifPoller.stop()
+                // Agenda o BG refresh: iOS vai acordar o app em ~15min+ pra
+                // puxar notifs novas e disparar Local Notifications.
+                BackgroundRefresh.schedule()
             }
         }
     }
