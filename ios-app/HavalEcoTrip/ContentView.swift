@@ -102,30 +102,18 @@ struct SetupView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
 
-                Section("Live Activity") {
-                    HStack {
-                        Text("Status").foregroundStyle(.secondary)
-                        Spacer()
-                        Text(manager.status).font(.callout)
-                    }
-                    Button {
-                        Task { await manager.start() }
-                    } label: {
-                        Label("Iniciar Live Activity", systemImage: "bolt.fill")
-                    }
-                    .disabled(!Settings.isConfigured || manager.currentActivity != nil)
-
-                    Button(role: .destructive) {
-                        Task { await manager.stop() }
-                    } label: {
-                        Label("Parar Live Activity", systemImage: "stop.fill")
-                    }
-                    .disabled(manager.currentActivity == nil)
-                }
-
                 Section("Como funciona") {
-                    Text("Esse app é o PWA inteiro dentro de um wrapper nativo. Pra reabrir essas configurações: pressione e segure com 3 dedos por 1 segundo em qualquer parte da tela.")
+                    Text("Esse app é o PWA inteiro dentro de um wrapper nativo. Pra reabrir essas configurações: pressione e segure com 3 dedos por 1 segundo em qualquer parte da tela.\n\nA Live Activity é controlada direto pelo Dash → 'Recarga em andamento'. Auto-start quando o carro começa a carregar e o app está aberto.")
                         .font(.caption)
+                    if manager.currentActivity != nil {
+                        HStack {
+                            Image(systemName: "bolt.fill").foregroundStyle(.green)
+                            Text("Live Activity ativa")
+                            Spacer()
+                            Button("Parar") { Task { await manager.stop() } }
+                                .foregroundStyle(.red)
+                        }
+                    }
                 }
             }
             .navigationTitle(Settings.isConfigured ? "Configurações" : "Configuração inicial")
