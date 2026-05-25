@@ -608,6 +608,7 @@ const state = {
   charge_session_kwh:  0,
   charge_remaining_min:0,
   charge_limit_pct:    null,   // % limite de carga SOC (null = desconhecido)
+  drive_mode:          null,   // 0=HEV, 1=Prior. EV, 3=EV (null = desconhecido)
   battery_power_pct:   0,
   engine_rpm:          0,
   notif_latest_ts:     0,
@@ -4022,6 +4023,30 @@ app.post('/api/charge-limit', (req, res) => {
   });
 });
 
+// POST /api/drive-mode  { mode: 0|1|3 } — publica cmd/drive_mode no MQTT.
+// Valores: 0=HEV (híbrido), 1=Prior. EV, 3=EV puro.
+app.post('/api/drive-mode', (req, res) => {
+  const mode = parseInt(req.body?.mode);
+  if (![0, 1, 3].includes(mode))
+    return res.status(400).json({ error: 'Valor inválido. Use 0 (HEV), 1 (Prior. EV) ou 3 (EV).' });
+  if (!mqttClient?.connected)
+    return res.status(503).json({ error: 'MQTT offline' });
+  mqttClient.publish(`${MQTT_PREFIX}/cmd/drive_mode`, mode.toString(), { retain: false, qos: 1 }, err => {
+    if (err) return res.status(500).json({ error: 'Falha ao publicar no MQTT' });
+    console.log(`[drive-mode] Enviando mode=${mode} para o carro via MQTT`);
+    res.json({ ok: true });
+  });
+});
+
+// POST /api/drive-mode/refresh — força APK reler valor do carro
+app.post('/api/drive-mode/refresh', (_req, res) => {
+  if (!mqttClient?.connected) return res.status(503).json({ error: 'MQTT offline' });
+  mqttClient.publish(`${MQTT_PREFIX}/cmd/refresh_drive_mode`, '1', { retain: false, qos: 1 }, err => {
+    if (err) return res.status(500).json({ error: 'Falha ao publicar: ' + err.message });
+    res.json({ ok: true });
+  });
+});
+
 app.post('/api/action/:name', async (req, res) => {
   const { name } = req.params;
   console.log(`[action] recebido name='${name}'`);
@@ -5204,6 +5229,14 @@ function applyMqttMessage(key, value, isRetained = false) {
     }
     case 'cmd/charge_limit/result':
       broadcast('charge_limit_result', { result: value });
+      break;
+    case 'ha/drive_mode/state': {
+      const m = parseInt(value);
+      if ([0, 1, 3].includes(m)) state.drive_mode = m;
+      break;
+    }
+    case 'cmd/drive_mode/result':
+      broadcast('drive_mode_result', { result: value });
       break;
     // price_gas_per_l e price_kwh do APK: IGNORADOS — valor agora vem do mix
     // ponderado de abastecimentos/recargas (recomputeTankAvgPrice / recomputeBatteryAvgPrice).

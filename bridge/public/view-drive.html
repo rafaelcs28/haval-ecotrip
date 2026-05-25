@@ -187,6 +187,42 @@
 /* Quando 4 cards na linha (modo híbrido) reduz fonte pra caber */
 .tiny-row.has-rpm .tiny-card .v { font-size: 11px; }
 .tiny-row.has-rpm .tiny-card .v small { font-size: 7px; }
+
+/* Drive mode card — 3 chips clicáveis HEV / Prior. EV / EV */
+.drive-mode-card {
+  background: rgba(31,31,31,.85);
+  border: 1px solid rgba(255,255,255,.06);
+  border-radius: 12px;
+  padding: 8px 10px;
+  margin-top: 6px;
+}
+.drive-mode-card .dm-label {
+  font-size: 9px; color: var(--muted); text-transform: uppercase;
+  letter-spacing: 1px; font-weight: 600; margin-bottom: 6px;
+}
+.drive-mode-card .dm-chips { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
+.dm-chip {
+  text-align: center; padding: 8px 6px; border-radius: 8px;
+  font-size: 12px; font-weight: 700; font-family: inherit; cursor: pointer;
+  background: rgba(255,255,255,.04);
+  border: 1px solid rgba(255,255,255,.08);
+  color: #cbd5e1;
+  letter-spacing: 0.3px;
+  user-select: none;
+}
+.dm-chip:active { background: rgba(255,255,255,.08); }
+.dm-chip.active {
+  background: rgba(34,197,94,.15);
+  color: var(--green);
+  border-color: var(--green);
+}
+.dm-chip.pending {
+  background: rgba(234,179,8,.18);
+  color: var(--yellow);
+  border-color: var(--yellow);
+  animation: dm-pulse 1s ease-in-out infinite;
+}
+@keyframes dm-pulse { 50% { opacity: 0.5; } }
 .tiny-row.has-rpm .tiny-card .lbl { font-size: 7.5px; letter-spacing: 1px; }
 
 /* Tabbar */
@@ -280,6 +316,18 @@
       <div class="tiny-card" id="t-rpm-card" style="display:none">
         <span class="lbl">⚙ Motor</span>
         <span class="v"><span id="t-rpm">--</span><small>rpm</small></span>
+      </div>
+    </div>
+
+    <!-- Modo de condução PHEV — manda comando ao carro via MQTT.
+         Mesmo padrão UX do SOC limit: amarelo pulsando enquanto aguarda
+         confirmação do APK, verde quando aplicado, vermelho em erro. -->
+    <div class="drive-mode-card">
+      <div class="dm-label">⚙ Modo de condução</div>
+      <div class="dm-chips">
+        <div class="dm-chip" data-mode="0" onclick="setDriveMode(0)">HEV</div>
+        <div class="dm-chip" data-mode="1" onclick="setDriveMode(1)">Prior. EV</div>
+        <div class="dm-chip" data-mode="3" onclick="setDriveMode(3)">EV</div>
       </div>
     </div>
 
@@ -2910,9 +2958,91 @@ window.renderView_drive = function() {
   if (map) {
     setTimeout(() => { try { map.invalidateSize(); } catch (_) {} }, 50);
   }
+  _renderDriveModeChips();
 };
+
+// ── Modo de condução PHEV (HEV / Prior. EV / EV puro) ───────────────────────
+// Valores: 0 = HEV, 1 = Prior. EV, 3 = EV puro
+let _driveModePending = null;
+let _driveModeTimer = null;
+let _driveModeWatcher = null;
+
+function _setDriveModeUI(mode, status) {
+  document.querySelectorAll('#view-drive .dm-chip').forEach(c => {
+    const isThis = +c.dataset.mode === mode;
+    c.classList.toggle('active', isThis && status !== 'pending');
+    c.classList.toggle('pending', isThis && status === 'pending');
+  });
+}
+
+function _renderDriveModeChips() {
+  if (_driveModePending !== null) return;  // não sobrescreve durante pendência
+  const cur = (window.state && window.state.drive_mode != null) ? +window.state.drive_mode : null;
+  if (cur != null) _setDriveModeUI(cur, null);
+}
+
+function _clearDriveModePending() {
+  if (_driveModeTimer) { clearTimeout(_driveModeTimer); _driveModeTimer = null; }
+  _driveModePending = null;
+}
+
+async function setDriveMode(mode) {
+  const tk = localStorage.getItem('bridge_token');
+  if (!tk) return;
+  _driveModePending = mode;
+  _setDriveModeUI(mode, 'pending');
+  if (_driveModeTimer) clearTimeout(_driveModeTimer);
+  _driveModeTimer = setTimeout(() => {
+    if (_driveModePending !== null) {
+      window.showToast && window.showToast('⚠ Carro não respondeu — verifique se o veículo está acordado', 'err');
+      _clearDriveModePending();
+      _renderDriveModeChips();
+    }
+  }, 15000);
+  try {
+    const r = await fetch('/api/drive-mode', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + tk, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode }),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'HTTP ' + r.status);
+    window.showToast && window.showToast('⏳ Modo enviado — aguardando confirmação do carro', 'ok');
+  } catch (e) {
+    _clearDriveModePending();
+    window.showToast && window.showToast('✗ ' + e.message, 'err');
+    _renderDriveModeChips();
+  }
+}
+
+// Handler do ack vindo via WS (broadcast 'drive_mode_result' do bridge)
+window._onDriveModeResult = function(data) {
+  if (_driveModePending === null) return;
+  const raw = String(data?.result || '');
+  if (raw.startsWith('ok:')) {
+    const m = raw.match(/^ok:(\d+)/);
+    const applied = m ? parseInt(m[1]) : null;
+    if (applied === _driveModePending) {
+      window.showToast && window.showToast('✓ Modo aplicado', 'ok');
+    } else if (applied != null) {
+      window.showToast && window.showToast('⚠ Carro aplicou modo ' + applied + ' (você pediu ' + _driveModePending + ')', 'err');
+    }
+    _clearDriveModePending();
+    _setDriveModeUI(applied != null ? applied : _driveModePending, null);
+  } else if (raw.startsWith('error')) {
+    window.showToast && window.showToast('✗ ' + raw, 'err');
+    const requested = _driveModePending;
+    _clearDriveModePending();
+    _setDriveModeUI(requested, null);
+    setTimeout(() => { if (_driveModePending === null) _renderDriveModeChips(); }, 4000);
+  }
+};
+
   // Expõe handlers de onclick no window
-  Object.assign(window, { toggleSheet: typeof toggleSheet !== 'undefined' ? toggleSheet : undefined });
+  Object.assign(window, {
+    toggleSheet: typeof toggleSheet !== 'undefined' ? toggleSheet : undefined,
+    setDriveMode: setDriveMode,
+  });
   if (!window['initView_drive']) window['initView_drive'] = function() {};
 })();
 </script>

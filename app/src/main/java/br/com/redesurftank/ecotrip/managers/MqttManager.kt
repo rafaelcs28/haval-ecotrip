@@ -351,6 +351,7 @@ class MqttManager private constructor() {
     // -1 = ainda não publicado nesta sessão.
     // Usado para evitar publicações redundantes e detectar divergência carro ↔ HA.
     @Volatile private var lastPublishedChargeLimitPct: Int = -1
+    @Volatile private var lastPublishedDriveMode: Int = -1   // 0=HEV, 1=Prior. EV, 3=EV
 
     fun init(context: Context) {
         // Prevent "Error locating the logging class" crash on Android: set a no-op logger
@@ -371,6 +372,9 @@ class MqttManager private constructor() {
             if (key == CarConstants.CAR_EV_SETTING_CHARGE_SOC_LIMIT.value) {
                 val carVal = value.trim().toIntOrNull()
                 if (carVal != null) syncChargeLimitFromCar(carVal)
+            } else if (key == CarConstants.CAR_EV_SETTING_POWER_MODEL_CONFIG.value) {
+                val carVal = value.trim().toIntOrNull()
+                if (carVal != null) syncDriveModeFromCar(carVal)
             }
         }
         if (enabled && host.isNotEmpty()) connect()
@@ -529,6 +533,37 @@ class MqttManager private constructor() {
         }
     }
 
+    /**
+     * Sync drive_mode carro → HA. Valores: 0=HEV, 1=Prior. EV, 3=EV puro.
+     * Idempotente (não republica se valor não mudou).
+     */
+    fun syncDriveModeFromCar(carVal: Int) {
+        if (carVal !in setOf(0, 1, 3)) {
+            Log.w(TAG, "syncDriveModeFromCar: valor inesperado carVal=$carVal, ignorado")
+            return
+        }
+        if (carVal == lastPublishedDriveMode) {
+            Log.d(TAG, "Drive mode sem mudança ($carVal) — HA já atualizado")
+            return
+        }
+        AppLogger.i(TAG, "Carro reportou drive_mode=$carVal (HA tinha $lastPublishedDriveMode) — atualizando HA")
+        publishDriveModeState(carVal)
+    }
+
+    fun publishDriveModeState(mode: Int) {
+        if (mode !in setOf(0, 1, 3)) {
+            Log.w(TAG, "publishDriveModeState: mode=$mode inválido, ignorado")
+            return
+        }
+        try {
+            client?.publish("$prefix/ha/drive_mode/state", mode.toString().toByteArray(), 1, true)
+            lastPublishedDriveMode = mode
+            AppLogger.i(TAG, "Drive mode publicado no HA: $mode")
+        } catch (e: Exception) {
+            Log.w(TAG, "publishDriveModeState falhou: ${e.message}")
+        }
+    }
+
     /** Converte valor do carro (0–5) para percentual. null se fora do range. */
     private fun carValToPct(carVal: Int): Int? {
         return when (carVal) {
@@ -604,6 +639,7 @@ class MqttManager private constructor() {
             client = c
             consecutiveFailures = 0
             lastPublishedChargeLimitPct = -1  // força re-sync com o carro após reconexão
+            lastPublishedDriveMode = -1       // idem pro modo de condução
             setStatus(Status.CONNECTED)
             publishDiscovery(c)
             // Publica versão do app com retain=true — sempre visível no HA mesmo offline
@@ -633,6 +669,17 @@ class MqttManager private constructor() {
                     }
                 } catch (e: Exception) {
                     AppLogger.w(TAG, "Leitura inicial charge_limit falhou: ${e.message}")
+                }
+                // Leitura inicial do drive_mode também
+                try {
+                    val readBack = CarDataManager.getInstance().fetchCurrent("car.ev_setting.power_model_config")?.trim()
+                    val carVal = readBack?.toIntOrNull()
+                    if (carVal != null) {
+                        AppLogger.i(TAG, "Leitura inicial drive_mode: carVal=$carVal — sincronizando")
+                        syncDriveModeFromCar(carVal)
+                    }
+                } catch (e: Exception) {
+                    AppLogger.w(TAG, "Leitura inicial drive_mode falhou: ${e.message}")
                 }
             }
         } catch (e: Exception) {
@@ -1268,6 +1315,75 @@ class MqttManager private constructor() {
                         publishChargeLimitState(pct)
                     } else {
                         publishResult("refresh_charge_limit", "error: leitura falhou")
+                    }
+                }
+                "drive_mode" -> {
+                    // Recebe valor numérico bruto: 0=HEV, 1=Prior. EV, 3=EV puro.
+                    val target = payload.trim().toIntOrNull()
+                    if (target == null || target !in setOf(0, 1, 3)) {
+                        val msg = "error: valor inválido ('$payload'). Use 0 (HEV), 1 (Prior. EV) ou 3 (EV)."
+                        AppLogger.w(TAG, msg)
+                        publishResult("drive_mode", msg)
+                        return@submit
+                    }
+
+                    val now = System.currentTimeMillis()
+                    val carActiveMs = now - lastCarDataMs
+                    val carRecentlyActive = lastCarDataMs > 0L && carActiveMs <= 60_000L
+                    if (carRecentlyActive)
+                        AppLogger.i(TAG, "Carro ativo há ${carActiveMs / 1000}s — enviando drive_mode=$target")
+                    else
+                        AppLogger.w(TAG, "Carro sem dados há ${carActiveMs / 1000}s — tentando drive_mode=$target mesmo assim")
+
+                    val ok = car.requestSetting(
+                        key   = "car.ev_setting.power_model_config",
+                        value = target.toString(),
+                    )
+                    if (!ok) {
+                        val msg = if (carRecentlyActive)
+                            "error: carro ativo mas recusou o comando"
+                        else
+                            "error: carro não respondeu — pode estar dormindo"
+                        AppLogger.w(TAG, msg)
+                        publishResult("drive_mode", msg)
+                        return@submit
+                    }
+                    AppLogger.i(TAG, "drive_mode requestSetting aceito. Aguardando 5s pra ECU processar...")
+                    Thread.sleep(5_000)
+
+                    val readBack = try {
+                        car.fetchCurrent("car.ev_setting.power_model_config")?.trim()
+                    } catch (e: Exception) {
+                        AppLogger.w(TAG, "drive_mode fetchCurrent falhou: ${e.message}")
+                        null
+                    }
+                    val confirmed = readBack?.toIntOrNull()
+                    if (confirmed != null && confirmed in setOf(0, 1, 3)) {
+                        AppLogger.i(TAG, "Confirmado drive_mode=$confirmed")
+                        publishDriveModeState(confirmed)
+                        val resultMsg = if (confirmed == target) "ok:$confirmed"
+                                        else "ok:$confirmed (solicitado $target — carro aplicou $confirmed)"
+                        publishResult("drive_mode", resultMsg)
+                    } else {
+                        AppLogger.w(TAG, "Leitura de confirmação drive_mode falhou. Fallback ao pretendido.")
+                        publishDriveModeState(target)
+                        publishResult("drive_mode", "ok:$target (fallback — leitura de confirmação falhou)")
+                    }
+                }
+                "refresh_drive_mode" -> {
+                    val readBack = try {
+                        car.fetchCurrent("car.ev_setting.power_model_config")?.trim()
+                    } catch (e: Exception) {
+                        AppLogger.w(TAG, "refresh_drive_mode fetchCurrent falhou: ${e.message}")
+                        null
+                    }
+                    val carVal = readBack?.toIntOrNull()
+                    if (carVal != null && carVal in setOf(0, 1, 3)) {
+                        AppLogger.i(TAG, "refresh_drive_mode: carro = $carVal — re-publicando")
+                        lastPublishedDriveMode = -1
+                        publishDriveModeState(carVal)
+                    } else {
+                        publishResult("refresh_drive_mode", "error: leitura falhou")
                     }
                 }
                 "hf_mode" -> {
