@@ -121,6 +121,48 @@
   animation: pulse-bg 1.5s ease-in-out infinite;
 }
 @keyframes pulse-bg { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
+
+/* Modal de meta de carga (SOC limit) — abre tocando no badge LIVE */
+.soc-limit-modal {
+  display: none;
+  position: fixed; inset: 0; z-index: 200;
+  background: rgba(0,0,0,.75);
+  align-items: flex-end; justify-content: center;
+  backdrop-filter: blur(8px);
+}
+.soc-limit-modal.show { display: flex; }
+.soc-limit-card {
+  background: #1f1f1f; width: 100%; max-width: 480px;
+  border-top-left-radius: 18px; border-top-right-radius: 18px;
+  padding: 18px 18px calc(env(safe-area-inset-bottom) + 18px);
+  border-top: 1px solid rgba(255,255,255,.08);
+}
+.soc-limit-ti { font-size: 16px; font-weight: 700; }
+.soc-limit-sub { font-size: 11px; color: var(--muted); margin: 2px 0 14px; }
+.soc-limit-chips { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.soc-limit-chips .soc-chip {
+  padding: 14px 0; text-align: center;
+  background: rgba(255,255,255,.04);
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 10px; color: #cbd5e1;
+  font-size: 14px; font-weight: 700; cursor: pointer;
+  user-select: none;
+}
+.soc-limit-chips .soc-chip:active { background: rgba(255,255,255,.08); }
+.soc-limit-chips .soc-chip.active {
+  background: rgba(34,197,94,.15); color: var(--green); border-color: var(--green);
+}
+.soc-limit-chips .soc-chip.pending {
+  background: rgba(234,179,8,.18); color: var(--yellow); border-color: var(--yellow);
+  animation: socp-pulse 1s ease-in-out infinite;
+}
+@keyframes socp-pulse { 50% { opacity: 0.5; } }
+.soc-limit-btns { display: flex; margin-top: 14px; }
+.soc-limit-btn {
+  flex: 1; padding: 12px; border-radius: 10px;
+  font-size: 14px; font-weight: 700; font-family: inherit; cursor: pointer; border: none;
+}
+.soc-limit-btn.cancel { background: rgba(255,255,255,.06); color: #cbd5e1; }
 /* Pill 12V dentro do card de Bateria SOC — bem pequeno, cor por faixa de % */
 .batt12-pill {
   font-size: 8.5px; padding: 1px 6px; border-radius: 6px;
@@ -756,6 +798,26 @@
   </div>
 </div>
 
+<!-- Modal SOC limit: aberto pelo badge LIVE no card de Bateria durante recarga.
+     Chips 50/60/70/80/90/100, pulsing amarelo até carro confirmar via WS. -->
+<div id="soc-limit-modal" class="soc-limit-modal" onclick="if(event.target===this) closeSocLimitModal()">
+  <div class="soc-limit-card">
+    <div class="soc-limit-ti">🎯 Meta de carga</div>
+    <div class="soc-limit-sub">Carro para de carregar nesse %</div>
+    <div class="soc-limit-chips" id="soc-limit-chips">
+      <div class="soc-chip" data-pct="50" onclick="setSocLimitFromDash(50)">50%</div>
+      <div class="soc-chip" data-pct="60" onclick="setSocLimitFromDash(60)">60%</div>
+      <div class="soc-chip" data-pct="70" onclick="setSocLimitFromDash(70)">70%</div>
+      <div class="soc-chip" data-pct="80" onclick="setSocLimitFromDash(80)">80%</div>
+      <div class="soc-chip" data-pct="90" onclick="setSocLimitFromDash(90)">90%</div>
+      <div class="soc-chip" data-pct="100" onclick="setSocLimitFromDash(100)">100%</div>
+    </div>
+    <div class="soc-limit-btns">
+      <button class="soc-limit-btn cancel" onclick="closeSocLimitModal()">Fechar</button>
+    </div>
+  </div>
+</div>
+
 <script>
 (function() {
   // ───────────────────────────────────────────────────────────────────────────
@@ -1374,7 +1436,9 @@ function render(s, kpData) {
   const socBar  = document.getElementById('hc-soc-bar');
   if (charging) {
     socCard.classList.add('charging');
-    socTag.innerHTML = '<span class="live-tag">⚡ LIVE</span>';
+    // LIVE clicável: abre modal pra mudar a meta de SOC do limite de recarga.
+    // event.stopPropagation evita acionar onclick do card pai (se houver).
+    socTag.innerHTML = '<span class="live-tag" onclick="event.stopPropagation(); openSocLimitModal()" style="cursor:pointer">⚡ LIVE</span>';
     socBar.style.display = 'block';
     const target = +s.charge_limit_pct || 100;
     document.getElementById('hc-soc-bar-fill').style.width = (soc || 0) + '%';
@@ -1811,8 +1875,102 @@ window.renderView_dash = function() {
     try { render(window.state, _kpDataLive || SNAPSHOT.known_places); } catch (_) {}
   }
 };
+// ── Modal SOC limit (acionado pelo badge LIVE) ──────────────────────────────
+let _socDashPending = null;
+let _socDashTimer = null;
+
+function openSocLimitModal() {
+  // Marca o chip do valor atual como active pra user ver de onde está mudando
+  const cur = +(window.state?.charge_limit_pct) || 0;
+  document.querySelectorAll('#soc-limit-chips .soc-chip').forEach(c => {
+    c.classList.toggle('active', +c.dataset.pct === cur);
+    c.classList.remove('pending');
+  });
+  document.getElementById('soc-limit-modal').classList.add('show');
+}
+function closeSocLimitModal() {
+  document.getElementById('soc-limit-modal').classList.remove('show');
+}
+
+async function setSocLimitFromDash(pct) {
+  if (![50,60,70,80,90,100].includes(pct)) return;
+  const tk = localStorage.getItem('bridge_token');
+  if (!tk) return;
+  _socDashPending = pct;
+  // UI: chip clicado pulsa amarelo
+  document.querySelectorAll('#soc-limit-chips .soc-chip').forEach(c => {
+    const isThis = +c.dataset.pct === pct;
+    c.classList.toggle('active', false);
+    c.classList.toggle('pending', isThis);
+  });
+  if (_socDashTimer) clearTimeout(_socDashTimer);
+  _socDashTimer = setTimeout(() => {
+    if (_socDashPending !== null) {
+      window.showToast && window.showToast('⚠ Carro não respondeu — verifique se está acordado', 'err');
+      _socDashPending = null;
+      _refreshSocChipsActive();
+    }
+  }, 25000);
+  try {
+    const r = await fetch('/api/charge-limit', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + tk, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pct }),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'HTTP ' + r.status);
+    window.showToast && window.showToast('⏳ Enviado — aguardando confirmação', 'ok');
+  } catch (e) {
+    _socDashPending = null;
+    window.showToast && window.showToast('✗ ' + e.message, 'err');
+    _refreshSocChipsActive();
+  }
+}
+
+function _refreshSocChipsActive() {
+  const cur = +(window.state?.charge_limit_pct) || 0;
+  document.querySelectorAll('#soc-limit-chips .soc-chip').forEach(c => {
+    c.classList.toggle('active', +c.dataset.pct === cur);
+    c.classList.remove('pending');
+  });
+}
+
+// Ack via CustomEvent disparado pelo shell — funciona em paralelo com o
+// handler do view-config (mesma origem de evento).
+window.addEventListener('charge_limit_result', (ev) => {
+  if (_socDashPending === null) return;
+  const raw = String(ev.detail?.result || '');
+  if (raw.startsWith('ok:')) {
+    const m = raw.match(/^ok:(\d+)/);
+    const applied = m ? parseInt(m[1]) : null;
+    if (applied === _socDashPending) {
+      window.showToast && window.showToast('✓ Meta aplicada: ' + applied + '%', 'ok');
+    } else if (applied) {
+      window.showToast && window.showToast('⚠ Carro aplicou ' + applied + '% (você pediu ' + _socDashPending + '%)', 'err');
+    }
+    if (_socDashTimer) { clearTimeout(_socDashTimer); _socDashTimer = null; }
+    _socDashPending = null;
+    _refreshSocChipsActive();
+    // Fecha modal após sucesso
+    setTimeout(closeSocLimitModal, 800);
+  } else if (raw.startsWith('error')) {
+    window.showToast && window.showToast('✗ ' + raw, 'err');
+    if (_socDashTimer) { clearTimeout(_socDashTimer); _socDashTimer = null; }
+    _socDashPending = null;
+    _refreshSocChipsActive();
+  }
+});
+
   // Expõe handlers de onclick no window
-  Object.assign(window, { toggleSheet: typeof toggleSheet !== 'undefined' ? toggleSheet : undefined, confirmAction: typeof confirmAction !== 'undefined' ? confirmAction : undefined, closeAction: typeof closeAction !== 'undefined' ? closeAction : undefined, doAction: typeof doAction !== 'undefined' ? doAction : undefined });
+  Object.assign(window, {
+    toggleSheet: typeof toggleSheet !== 'undefined' ? toggleSheet : undefined,
+    confirmAction: typeof confirmAction !== 'undefined' ? confirmAction : undefined,
+    closeAction: typeof closeAction !== 'undefined' ? closeAction : undefined,
+    doAction: typeof doAction !== 'undefined' ? doAction : undefined,
+    openSocLimitModal: openSocLimitModal,
+    closeSocLimitModal: closeSocLimitModal,
+    setSocLimitFromDash: setSocLimitFromDash,
+  });
   if (!window['initView_dash']) window['initView_dash'] = function() {};
 })();
 </script>

@@ -958,6 +958,9 @@ function connect() {
         if (window._onReprocessDone) window._onReprocessDone(msg.data);
       } else if (msg.type === 'charge_limit_result') {
         if (window._onChargeLimitResult) window._onChargeLimitResult(msg.data);
+        // Também dispara CustomEvent pra múltiplos views escutarem em paralelo
+        // (view-dash + view-config ambos têm interesse no ack)
+        window.dispatchEvent(new CustomEvent('charge_limit_result', { detail: msg.data }));
       } else if (msg.type === 'drive_mode_result') {
         if (window._onDriveModeResult) window._onDriveModeResult(msg.data);
       } else if (msg.type === 'power_reserve_result') {
