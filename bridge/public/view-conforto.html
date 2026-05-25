@@ -655,7 +655,7 @@ function toggleAC() {
   const turningOn = !isAcOn();
   if (turningOn) {
     // Manda ac_enable=1 + fan_speed=1 simultaneamente
-    sendHvacCommand('ac_enable', true, 'hvac_ac_enable', 'AC ligado',
+    sendHvacCommand('ac_enable', 1, 'hvac_ac_enable', 'AC ligado',
       ['ac-power-toggle']);
     if (LIVE_MODE) {
       sendHvacCommand('fan_speed', 1, 'hvac_fan_speed', null,
@@ -666,7 +666,7 @@ function toggleAC() {
         PENDING_SIM_MIN_MS + Math.random() * 500);
     }
   } else {
-    sendHvacCommand('ac_enable', false, 'hvac_ac_enable', 'AC desligado',
+    sendHvacCommand('ac_enable', 0, 'hvac_ac_enable', 'AC desligado',
       ['ac-power-toggle']);
     if (LIVE_MODE) {
       sendHvacCommand('fan_speed', 0, 'hvac_fan_speed', null, ['fan-card']);
@@ -703,7 +703,7 @@ function adjustTemp(side, delta) {
 function toggleSync() {
   if (!isAcOn()) return showToast('AC desligado', 'var(--muted)');
   const newVal = STATE.hvac_sync_enable === '1' ? '0' : '1';
-  sendHvacCommand('sync', newVal === '1', 'hvac_sync_enable',
+  sendHvacCommand('sync', newVal === '1' ? 1 : 0, 'hvac_sync_enable',
     newVal === '1' ? 'SYNC ligado' : 'SYNC desligado',
     ['sync-btn']);
 }
@@ -711,7 +711,7 @@ function toggleSync() {
 function toggleAuto() {
   if (!isAcOn()) return showToast('AC desligado', 'var(--muted)');
   const newVal = STATE.hvac_auto_enable === '1' ? '0' : '1';
-  sendHvacCommand('auto', newVal === '1', 'hvac_auto_enable',
+  sendHvacCommand('auto', newVal === '1' ? 1 : 0, 'hvac_auto_enable',
     'AUTO ' + (newVal === '1' ? 'ligado' : 'desligado'),
     ['auto-btn']);
 }
@@ -817,6 +817,42 @@ async function bootstrapState() {
 bootstrapState();
   // Expõe handlers de onclick no window
   Object.assign(window, { toggleAC: typeof toggleAC !== 'undefined' ? toggleAC : undefined, adjustTemp: typeof adjustTemp !== 'undefined' ? adjustTemp : undefined, toggleSync: typeof toggleSync !== 'undefined' ? toggleSync : undefined, toggleAuto: typeof toggleAuto !== 'undefined' ? toggleAuto : undefined, adjustFan: typeof adjustFan !== 'undefined' ? adjustFan : undefined, toggleCycle: typeof toggleCycle !== 'undefined' ? toggleCycle : undefined, cycleSeatVent: typeof cycleSeatVent !== 'undefined' ? cycleSeatVent : undefined });
+  // Handler de resultado HVAC via WS push (mais rápido que polling — confirma logo
+  // que o APK faz fetchCurrent ~2.5s após requestSetting).
+  window._onHvacResult = function({ control, result }) {
+    // Mapeia control → field de estado correspondente
+    const fieldMap = {
+      ac_enable:      'hvac_ac_enable',
+      fan_speed:      'hvac_fan_speed',
+      driver_temp:    'hvac_driver_temp',
+      passenger_temp: 'hvac_passenger_temp',
+      sync:           'hvac_sync_enable',
+      auto:           'hvac_auto_enable',
+      cycle_mode:     'hvac_cycle_mode',
+      seat_vent_drv:  'seat_vent_drv',
+      seat_vent_pass: 'seat_vent_pass',
+    };
+    const field = fieldMap[control];
+    if (!field) return;
+    if (result.startsWith('error:')) {
+      // Cancela pending e mostra erro
+      if (_pending[field]) {
+        clearTimeout(_pending[field].timeoutId);
+        _clearPendingVisual(_pending[field].elements);
+        delete _pending[field];
+      }
+      showToast('✗ ' + result.replace('error:', '').trim(), 'var(--red)');
+      render();
+    } else if (result.startsWith('ok:')) {
+      // Extrai valor confirmado e tenta confirmar pending
+      const confirmed = result.replace(/^ok:/, '').split(' ')[0];
+      STATE[field] = confirmed;
+      confirmPending(field, +confirmed, null);   // tenta match numérico
+      if (_pending[field]) confirmPending(field, confirmed, null); // fallback string
+      render();
+    }
+  };
+
   if (!window['initView_conforto']) window['initView_conforto'] = function() {};
 })();
 </script>

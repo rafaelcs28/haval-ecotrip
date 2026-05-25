@@ -4979,6 +4979,14 @@ function applyMqttMessage(key, value, isRetained = false) {
   // Bridge usa exclusivamente os tópicos da integração GWM Brasil (sem ruído).
   if (MIGRATED_TO_HA.has(key)) return;
 
+  // Resultados de comandos HVAC: cmd/hvac/<control>/result
+  if (key.startsWith('cmd/hvac/') && key.endsWith('/result')) {
+    const control = key.slice('cmd/hvac/'.length, -'/result'.length);
+    console.log(`[hvac] resultado ${control}: ${value}`);
+    broadcast('hvac_result', { control, result: value });
+    return;
+  }
+
   switch (key) {
     // Status
     case 'status':

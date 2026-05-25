@@ -977,6 +977,8 @@ function connect() {
         if (window._onEspResult) window._onEspResult(msg.data);
       } else if (msg.type === 'steer_mode_result') {
         if (window._onSteerModeResult) window._onSteerModeResult(msg.data);
+      } else if (msg.type === 'hvac_result') {
+        if (window._onHvacResult) window._onHvacResult(msg.data);
       } else if (msg.type === 'diag_state') {
         if (window._onDiagState) window._onDiagState(msg.data);
       } else if (msg.type === 'diag_event') {

@@ -1841,8 +1841,15 @@ class MqttManager private constructor() {
                             publishResult("hvac/$control", "error: carro rejeitou ou está dormindo")
                             return@submit
                         }
-                        publishResult("hvac/$control", "ok:$payload")
-                        AppLogger.i(TAG, "✓ HVAC aplicado: $busKey = $payload")
+                        Thread.sleep(2500)
+                        val confirmed = try { car.fetchCurrent(busKey) } catch (_: Exception) { null }
+                        val resultMsg = when {
+                            confirmed == null -> "ok:$payload (fallback — leitura falhou)"
+                            confirmed == payload -> "ok:$confirmed"
+                            else -> "ok:$confirmed (solicitado $payload)"
+                        }
+                        publishResult("hvac/$control", resultMsg)
+                        AppLogger.i(TAG, "✓ HVAC aplicado: $busKey solicitado=$payload confirmado=$confirmed")
                     } else {
                         AppLogger.w(TAG, "Comando desconhecido: $cmd")
                     }
