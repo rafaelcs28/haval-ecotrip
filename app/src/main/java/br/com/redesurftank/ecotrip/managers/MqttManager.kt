@@ -354,6 +354,11 @@ class MqttManager private constructor() {
     @Volatile private var lastPublishedDriveMode: Int = -1   // 0=HEV, 1=Prior. EV, 3=EV
     @Volatile private var lastPublishedPowerReserve: Int = -1 // 1=inteligente, 2=prioritário
     @Volatile private var lastPublishedSocTarget: Int = -1    // 20..80 %
+    @Volatile private var lastPublishedTerrainMode: Int = -1  // 0=Normal,1=Sport,2=Eco,3=Neve,4=Areia,5=Lama,11=AWD
+    @Volatile private var lastPublishedRegenLevel: Int = -1   // 0=Normal, 1=Alto, 2=Baixo
+    @Volatile private var lastPublishedOnePedal: Int = -1     // 0=off, 1=on
+    @Volatile private var lastPublishedEsp: Int = -1          // 0=off, 1=on
+    @Volatile private var lastPublishedSteerMode: Int = -1    // 0=Normal, 1=Sport, 2=Conforto
 
     fun init(context: Context) {
         // Prevent "Error locating the logging class" crash on Android: set a no-op logger
@@ -383,6 +388,24 @@ class MqttManager private constructor() {
             } else if (key == CarConstants.CAR_EV_SETTING_CHARGE_SOC_TARGET_CONFIG.value) {
                 val carVal = value.trim().toIntOrNull()
                 if (carVal != null) syncSocTargetFromCar(carVal)
+            } else if (key == CarConstants.CAR_DRIVE_SETTING_DRIVE_MODE.value) {
+                val carVal = value.trim().toIntOrNull()
+                if (carVal != null) syncTerrainModeFromCar(carVal)
+            } else if (key == CarConstants.CAR_EV_SETTING_ENERGY_RECOVERY_LEVEL.value) {
+                val carVal = value.trim().toIntOrNull()
+                if (carVal != null) syncRegenLevelFromCar(carVal)
+            } else if (key == CarConstants.CAR_CONFIGURE_PEDAL_CONTROL_ENABLE.value) {
+                val carVal = value.trim().toIntOrNull()
+                if (carVal != null) syncOnePedalFromCar(carVal)
+            } else if (key == CarConstants.CAR_EV_INFO_ENERGY_OUTPUT_PERCENTAGE.value) {
+                val carVal = value.trim().toFloatOrNull()
+                if (carVal != null) publishRegenPower(carVal)
+            } else if (key == CarConstants.CAR_DRIVE_SETTING_ESP_ENABLE.value) {
+                val carVal = value.trim().toIntOrNull()
+                if (carVal != null) syncEspFromCar(carVal)
+            } else if (key == CarConstants.CAR_DRIVE_SETTING_STEER_MODE.value) {
+                val carVal = value.trim().toIntOrNull()
+                if (carVal != null) syncSteerModeFromCar(carVal)
             }
         }
         if (enabled && host.isNotEmpty()) connect()
@@ -616,6 +639,100 @@ class MqttManager private constructor() {
         }
     }
 
+    // ── Terrain mode (car.drive_setting.drive_mode) ──────────────────────────
+    fun syncTerrainModeFromCar(carVal: Int) {
+        if (carVal !in setOf(0, 1, 2, 3, 4, 5, 11)) return
+        if (carVal == lastPublishedTerrainMode) return
+        AppLogger.i(TAG, "Carro reportou terrain_mode=$carVal — atualizando HA")
+        publishTerrainModeState(carVal)
+    }
+
+    fun publishTerrainModeState(mode: Int) {
+        if (mode !in setOf(0, 1, 2, 3, 4, 5, 11)) return
+        try {
+            client?.publish("$prefix/ha/terrain_mode/state", mode.toString().toByteArray(), 1, true)
+            lastPublishedTerrainMode = mode
+            AppLogger.i(TAG, "Terrain mode publicado: $mode")
+        } catch (e: Exception) { Log.w(TAG, "publishTerrainModeState falhou: ${e.message}") }
+    }
+
+    // ── Regen level (car.ev_setting.energy_recovery_level) ───────────────────
+    fun syncRegenLevelFromCar(carVal: Int) {
+        if (carVal !in setOf(0, 1, 2)) return
+        if (carVal == lastPublishedRegenLevel) return
+        AppLogger.i(TAG, "Carro reportou regen_level=$carVal — atualizando HA")
+        publishRegenLevelState(carVal)
+    }
+
+    fun publishRegenLevelState(level: Int) {
+        if (level !in setOf(0, 1, 2)) return
+        try {
+            client?.publish("$prefix/ha/regen_level/state", level.toString().toByteArray(), 1, true)
+            lastPublishedRegenLevel = level
+            AppLogger.i(TAG, "Regen level publicado: $level")
+        } catch (e: Exception) { Log.w(TAG, "publishRegenLevelState falhou: ${e.message}") }
+    }
+
+    // ── One-pedal (car.configure.pedal_control_enable) ───────────────────────
+    fun syncOnePedalFromCar(carVal: Int) {
+        if (carVal !in setOf(0, 1)) return
+        if (carVal == lastPublishedOnePedal) return
+        AppLogger.i(TAG, "Carro reportou one_pedal=$carVal — atualizando HA")
+        publishOnePedalState(carVal)
+    }
+
+    fun publishOnePedalState(enable: Int) {
+        if (enable !in setOf(0, 1)) return
+        try {
+            client?.publish("$prefix/ha/one_pedal/state", enable.toString().toByteArray(), 1, true)
+            lastPublishedOnePedal = enable
+            AppLogger.i(TAG, "One-pedal publicado: $enable")
+        } catch (e: Exception) { Log.w(TAG, "publishOnePedalState falhou: ${e.message}") }
+    }
+
+    // ── Regen power real-time (car.ev_info.energy_output_percentage) ─────────
+    // Sem retain — dado em tempo real, não faz sentido armazenar no broker.
+    // Valor negativo = regenerando; positivo = consumindo. Publicamos o valor bruto.
+    private fun publishRegenPower(value: Float) {
+        try {
+            client?.publish("$prefix/ha/regen_power/state", value.toString().toByteArray(), 0, false)
+        } catch (_: Exception) {}
+    }
+
+    // ── ESP (car.drive_setting.esp_enable) ────────────────────────────────────
+    fun syncEspFromCar(carVal: Int) {
+        if (carVal !in setOf(0, 1)) return
+        if (carVal == lastPublishedEsp) return
+        AppLogger.i(TAG, "Carro reportou esp=$carVal — atualizando HA")
+        publishEspState(carVal)
+    }
+
+    fun publishEspState(enable: Int) {
+        if (enable !in setOf(0, 1)) return
+        try {
+            client?.publish("$prefix/ha/esp/state", enable.toString().toByteArray(), 1, true)
+            lastPublishedEsp = enable
+            AppLogger.i(TAG, "ESP publicado: $enable")
+        } catch (e: Exception) { Log.w(TAG, "publishEspState falhou: ${e.message}") }
+    }
+
+    // ── Steer mode (car.drive_setting.steering_wheel_assist_mode) ────────────
+    fun syncSteerModeFromCar(carVal: Int) {
+        if (carVal !in setOf(0, 1, 2)) return
+        if (carVal == lastPublishedSteerMode) return
+        AppLogger.i(TAG, "Carro reportou steer_mode=$carVal — atualizando HA")
+        publishSteerModeState(carVal)
+    }
+
+    fun publishSteerModeState(mode: Int) {
+        if (mode !in setOf(0, 1, 2)) return
+        try {
+            client?.publish("$prefix/ha/steer_mode/state", mode.toString().toByteArray(), 1, true)
+            lastPublishedSteerMode = mode
+            AppLogger.i(TAG, "Steer mode publicado: $mode")
+        } catch (e: Exception) { Log.w(TAG, "publishSteerModeState falhou: ${e.message}") }
+    }
+
     /** Converte valor do carro (0–5) para percentual. null se fora do range. */
     private fun carValToPct(carVal: Int): Int? {
         return when (carVal) {
@@ -694,6 +811,11 @@ class MqttManager private constructor() {
             lastPublishedDriveMode = -1       // idem pro modo de condução
             lastPublishedPowerReserve = -1    // sub-modo HEV
             lastPublishedSocTarget = -1       // alvo SOC prioritário
+            lastPublishedTerrainMode = -1
+            lastPublishedRegenLevel = -1
+            lastPublishedOnePedal = -1
+            lastPublishedEsp = -1
+            lastPublishedSteerMode = -1
             setStatus(Status.CONNECTED)
             publishDiscovery(c)
             // Publica versão do app com retain=true — sempre visível no HA mesmo offline
@@ -746,6 +868,27 @@ class MqttManager private constructor() {
                     val carVal = readBack?.toIntOrNull()
                     if (carVal != null) syncSocTargetFromCar(carVal)
                 } catch (e: Exception) { AppLogger.w(TAG, "Leitura inicial soc_target falhou: ${e.message}") }
+                // Leitura inicial de terrain_mode, regen_level, one_pedal, esp, steer_mode
+                try {
+                    val v = CarDataManager.getInstance().fetchCurrent("car.drive_setting.drive_mode")?.trim()?.toIntOrNull()
+                    if (v != null) syncTerrainModeFromCar(v)
+                } catch (e: Exception) { AppLogger.w(TAG, "Leitura inicial terrain_mode falhou: ${e.message}") }
+                try {
+                    val v = CarDataManager.getInstance().fetchCurrent("car.ev_setting.energy_recovery_level")?.trim()?.toIntOrNull()
+                    if (v != null) syncRegenLevelFromCar(v)
+                } catch (e: Exception) { AppLogger.w(TAG, "Leitura inicial regen_level falhou: ${e.message}") }
+                try {
+                    val v = CarDataManager.getInstance().fetchCurrent("car.configure.pedal_control_enable")?.trim()?.toIntOrNull()
+                    if (v != null) syncOnePedalFromCar(v)
+                } catch (e: Exception) { AppLogger.w(TAG, "Leitura inicial one_pedal falhou: ${e.message}") }
+                try {
+                    val v = CarDataManager.getInstance().fetchCurrent("car.drive_setting.esp_enable")?.trim()?.toIntOrNull()
+                    if (v != null) syncEspFromCar(v)
+                } catch (e: Exception) { AppLogger.w(TAG, "Leitura inicial esp falhou: ${e.message}") }
+                try {
+                    val v = CarDataManager.getInstance().fetchCurrent("car.drive_setting.steering_wheel_assist_mode")?.trim()?.toIntOrNull()
+                    if (v != null) syncSteerModeFromCar(v)
+                } catch (e: Exception) { AppLogger.w(TAG, "Leitura inicial steer_mode falhou: ${e.message}") }
             }
         } catch (e: Exception) {
             consecutiveFailures++
@@ -1524,6 +1667,96 @@ class MqttManager private constructor() {
                         lastPublishedSocTarget = -1
                         publishSocTargetState(carVal)
                     } else publishResult("refresh_charge_soc_target", "error: leitura falhou")
+                }
+                "terrain_mode" -> {
+                    val target = payload.trim().toIntOrNull()
+                    if (target == null || target !in setOf(0, 1, 2, 3, 4, 5, 11)) {
+                        publishResult("terrain_mode", "error: valor inválido ('$payload')")
+                        return@submit
+                    }
+                    val ok = car.requestSetting(key = "car.drive_setting.drive_mode", value = target.toString())
+                    if (!ok) { publishResult("terrain_mode", "error: carro recusou ou está dormindo"); return@submit }
+                    Thread.sleep(3_000)
+                    val confirmed = try { car.fetchCurrent("car.drive_setting.drive_mode")?.trim()?.toIntOrNull() } catch (_: Exception) { null }
+                    if (confirmed != null && confirmed in setOf(0, 1, 2, 3, 4, 5, 11)) {
+                        publishTerrainModeState(confirmed)
+                        publishResult("terrain_mode", if (confirmed == target) "ok:$confirmed" else "ok:$confirmed (solicitado $target)")
+                    } else {
+                        publishTerrainModeState(target)
+                        publishResult("terrain_mode", "ok:$target (fallback)")
+                    }
+                }
+                "regen_level" -> {
+                    val target = payload.trim().toIntOrNull()
+                    if (target == null || target !in setOf(0, 1, 2)) {
+                        publishResult("regen_level", "error: valor inválido ('$payload')")
+                        return@submit
+                    }
+                    val ok = car.requestSetting(key = "car.ev_setting.energy_recovery_level", value = target.toString())
+                    if (!ok) { publishResult("regen_level", "error: carro recusou ou está dormindo"); return@submit }
+                    Thread.sleep(3_000)
+                    val confirmed = try { car.fetchCurrent("car.ev_setting.energy_recovery_level")?.trim()?.toIntOrNull() } catch (_: Exception) { null }
+                    if (confirmed != null && confirmed in setOf(0, 1, 2)) {
+                        publishRegenLevelState(confirmed)
+                        publishResult("regen_level", if (confirmed == target) "ok:$confirmed" else "ok:$confirmed (solicitado $target)")
+                    } else {
+                        publishRegenLevelState(target)
+                        publishResult("regen_level", "ok:$target (fallback)")
+                    }
+                }
+                "one_pedal" -> {
+                    val target = payload.trim().toIntOrNull()
+                    if (target == null || target !in setOf(0, 1)) {
+                        publishResult("one_pedal", "error: valor inválido ('$payload')")
+                        return@submit
+                    }
+                    val ok = car.requestSetting(key = "car.configure.pedal_control_enable", value = target.toString())
+                    if (!ok) { publishResult("one_pedal", "error: carro recusou ou está dormindo"); return@submit }
+                    Thread.sleep(3_000)
+                    val confirmed = try { car.fetchCurrent("car.configure.pedal_control_enable")?.trim()?.toIntOrNull() } catch (_: Exception) { null }
+                    if (confirmed != null && confirmed in setOf(0, 1)) {
+                        publishOnePedalState(confirmed)
+                        publishResult("one_pedal", if (confirmed == target) "ok:$confirmed" else "ok:$confirmed (solicitado $target)")
+                    } else {
+                        publishOnePedalState(target)
+                        publishResult("one_pedal", "ok:$target (fallback)")
+                    }
+                }
+                "esp" -> {
+                    val target = payload.trim().toIntOrNull()
+                    if (target == null || target !in setOf(0, 1)) {
+                        publishResult("esp", "error: valor inválido ('$payload')")
+                        return@submit
+                    }
+                    val ok = car.requestSetting(key = "car.drive_setting.esp_enable", value = target.toString())
+                    if (!ok) { publishResult("esp", "error: carro recusou ou está dormindo"); return@submit }
+                    Thread.sleep(3_000)
+                    val confirmed = try { car.fetchCurrent("car.drive_setting.esp_enable")?.trim()?.toIntOrNull() } catch (_: Exception) { null }
+                    if (confirmed != null && confirmed in setOf(0, 1)) {
+                        publishEspState(confirmed)
+                        publishResult("esp", if (confirmed == target) "ok:$confirmed" else "ok:$confirmed (solicitado $target)")
+                    } else {
+                        publishEspState(target)
+                        publishResult("esp", "ok:$target (fallback)")
+                    }
+                }
+                "steer_mode" -> {
+                    val target = payload.trim().toIntOrNull()
+                    if (target == null || target !in setOf(0, 1, 2)) {
+                        publishResult("steer_mode", "error: valor inválido ('$payload')")
+                        return@submit
+                    }
+                    val ok = car.requestSetting(key = "car.drive_setting.steering_wheel_assist_mode", value = target.toString())
+                    if (!ok) { publishResult("steer_mode", "error: carro recusou ou está dormindo"); return@submit }
+                    Thread.sleep(3_000)
+                    val confirmed = try { car.fetchCurrent("car.drive_setting.steering_wheel_assist_mode")?.trim()?.toIntOrNull() } catch (_: Exception) { null }
+                    if (confirmed != null && confirmed in setOf(0, 1, 2)) {
+                        publishSteerModeState(confirmed)
+                        publishResult("steer_mode", if (confirmed == target) "ok:$confirmed" else "ok:$confirmed (solicitado $target)")
+                    } else {
+                        publishSteerModeState(target)
+                        publishResult("steer_mode", "ok:$target (fallback)")
+                    }
                 }
                 "hf_mode" -> {
                     // Modo de alta frequência (250ms entre publishes) acionado pelo PWA

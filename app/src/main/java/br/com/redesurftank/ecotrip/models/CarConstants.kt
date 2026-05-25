@@ -92,4 +92,19 @@ enum class CarConstants(val value: String) {
     CAR_BASIC_WINDOW_STATUS("car.basic.window_status"),
     // sunroof_status: 0=fechado, >0=aberto (vários estágios — normalizamos pra binário)
     CAR_BASIC_SUNROOF_STATUS("car.basic.sunroof_status"),
+
+    // Terrain / driving style — writable. 0=Normal, 1=Sport, 2=Eco, 3=Neve, 4=Areia, 5=Lama, 11=AWD
+    CAR_DRIVE_SETTING_DRIVE_MODE("car.drive_setting.drive_mode"),
+
+    // Energy recovery level — writable. 0=Normal, 1=Alto, 2=Baixo
+    CAR_EV_SETTING_ENERGY_RECOVERY_LEVEL("car.ev_setting.energy_recovery_level"),
+
+    // One-pedal driving — writable. 0=off, 1=on
+    CAR_CONFIGURE_PEDAL_CONTROL_ENABLE("car.configure.pedal_control_enable"),
+
+    // ESP stability control — writable. 0=off, 1=on
+    CAR_DRIVE_SETTING_ESP_ENABLE("car.drive_setting.esp_enable"),
+
+    // Steering wheel assist mode — writable. 0=Normal, 1=Sport, 2=Conforto
+    CAR_DRIVE_SETTING_STEER_MODE("car.drive_setting.steering_wheel_assist_mode"),
 }

@@ -200,9 +200,9 @@
   font-size: 9px; color: var(--muted); text-transform: uppercase;
   letter-spacing: 1px; font-weight: 600; margin-bottom: 6px;
 }
-.drive-mode-card .dm-chips { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
+.dm-chips { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
 .dm-chip {
-  text-align: center; padding: 8px 6px; border-radius: 8px;
+  text-align: center; padding: 7px 4px; border-radius: 8px;
   font-size: 12px; font-weight: 700; font-family: inherit; cursor: pointer;
   background: rgba(255,255,255,.04);
   border: 1px solid rgba(255,255,255,.08);
@@ -266,6 +266,131 @@
 .hev-btn.cancel  { background: rgba(255,255,255,.06); color: #cbd5e1; }
 .hev-btn.confirm { background: var(--green); color: #000; }
 .tiny-row.has-rpm .tiny-card .lbl { font-size: 7.5px; letter-spacing: 1px; }
+
+/* Acordeão de controles de condução */
+.drive-controls-accordion { margin-top: 6px; }
+.dc-header {
+  background: rgba(31,31,31,.85);
+  border: 1px solid rgba(255,255,255,.06);
+  border-radius: 12px;
+  padding: 9px 12px;
+  cursor: pointer; user-select: none;
+  transition: border-radius .25s;
+}
+.drive-controls-accordion.open .dc-header {
+  border-radius: 12px 12px 0 0;
+  border-bottom-color: transparent;
+}
+.dc-hd-top {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 7px;
+}
+.dc-title { font-size: 9px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
+.dc-chevron { font-size: 15px; color: var(--muted); transition: transform .25s; line-height: 1; }
+.drive-controls-accordion.open .dc-chevron { transform: rotate(180deg); }
+/* Pills de resumo no header */
+.dc-pills-row { display: flex; gap: 5px; flex-wrap: wrap; }
+.dc-pill {
+  font-size: 10px; font-weight: 600; white-space: nowrap;
+  padding: 3px 8px; border-radius: 99px;
+  background: rgba(255,255,255,.05);
+  border: 1px solid rgba(255,255,255,.09);
+  color: #64748b;
+}
+.dc-pill.known { color: #cbd5e1; background: rgba(255,255,255,.08); }
+.dc-pill.hi    { color: var(--green); background: rgba(34,197,94,.12); border-color: rgba(34,197,94,.28); }
+.dc-pill.warn  { color: var(--yellow); background: rgba(234,179,8,.12); border-color: rgba(234,179,8,.28); }
+.dc-body {
+  background: rgba(31,31,31,.85);
+  border: 1px solid rgba(255,255,255,.06);
+  border-top: none;
+  border-radius: 0 0 12px 12px;
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height .3s cubic-bezier(.4,0,.2,1), padding .3s;
+  padding: 0 10px;
+}
+.drive-controls-accordion.open .dc-body { max-height: 900px; padding: 0 10px 8px; }
+.dc-body .drive-mode-card,
+.dc-body .terrain-card,
+.dc-body .regen-card,
+.dc-body .settings-card {
+  background: transparent; border: none; border-radius: 0;
+  border-bottom: 1px solid rgba(255,255,255,.05);
+  margin-top: 0; padding: 8px 0;
+}
+.dc-body .settings-card { border-bottom: none; }
+
+/* Terrain mode card */
+.terrain-card {
+  background: rgba(31,31,31,.85);
+  border: 1px solid rgba(255,255,255,.06);
+  border-radius: 12px;
+  padding: 8px 10px;
+  margin-top: 6px;
+}
+.terrain-card .tm-label {
+  font-size: 9px; color: var(--muted); text-transform: uppercase;
+  letter-spacing: 1px; font-weight: 600; margin-bottom: 6px;
+}
+.terrain-card .tm-chips-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; margin-bottom: 5px; }
+.terrain-card .tm-chips-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
+
+/* Regen card */
+.regen-card {
+  background: rgba(31,31,31,.85);
+  border: 1px solid rgba(255,255,255,.06);
+  border-radius: 12px;
+  padding: 8px 10px;
+  margin-top: 6px;
+}
+.regen-card .regen-label {
+  font-size: 9px; color: var(--muted); text-transform: uppercase;
+  letter-spacing: 1px; font-weight: 600; margin-bottom: 6px;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.regen-power-val { font-size: 10px; color: var(--green); font-variant-numeric: tabular-nums; text-transform: none; letter-spacing: 0; }
+.regen-card .regen-chips { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
+.one-pedal-row {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-top: 8px; padding: 6px 2px;
+}
+.one-pedal-lbl { font-size: 12px; font-weight: 600; color: #cbd5e1; }
+.one-pedal-toggle {
+  width: 40px; height: 22px; border-radius: 11px;
+  background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.15);
+  position: relative; cursor: pointer; transition: background .2s;
+}
+.one-pedal-toggle.on { background: rgba(34,197,94,.35); border-color: var(--green); }
+.one-pedal-toggle .toggle-knob {
+  position: absolute; top: 2px; left: 2px;
+  width: 16px; height: 16px; border-radius: 50%;
+  background: #94a3b8; transition: left .2s, background .2s;
+}
+.one-pedal-toggle.on .toggle-knob { left: 20px; background: var(--green); }
+.regen-bar-wrap {
+  margin-top: 6px; height: 4px; border-radius: 2px;
+  background: rgba(255,255,255,.06); overflow: hidden;
+}
+.regen-bar-fill { height: 100%; border-radius: 2px; background: var(--green); transition: width .4s; }
+
+/* Vehicle settings card */
+.settings-card {
+  background: rgba(31,31,31,.85);
+  border: 1px solid rgba(255,255,255,.06);
+  border-radius: 12px;
+  padding: 8px 10px;
+  margin-top: 6px;
+}
+.settings-card .settings-label {
+  font-size: 9px; color: var(--muted); text-transform: uppercase;
+  letter-spacing: 1px; font-weight: 600; margin-bottom: 6px;
+}
+.settings-section-lbl { font-size: 10px; color: #64748b; margin-bottom: 5px; font-weight: 600; }
+.settings-row { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; }
+.settings-item-lbl { font-size: 12px; font-weight: 600; color: #cbd5e1; }
+.esp-chip { padding: 6px 18px; }
+.esp-chip.esp-off { background: rgba(239,68,68,.15); color: var(--red); border-color: var(--red); }
 
 /* Tabbar */
 
@@ -361,15 +486,86 @@
       </div>
     </div>
 
-    <!-- Modo de condução PHEV — manda comando ao carro via MQTT.
-         Mesmo padrão UX do SOC limit: amarelo pulsando enquanto aguarda
-         confirmação do APK, verde quando aplicado, vermelho em erro. -->
-    <div class="drive-mode-card">
-      <div class="dm-label">⚙ Modo de condução <span id="dm-sub-label" style="font-size:9px;color:var(--muted);font-weight:500;text-transform:none;letter-spacing:0.2px;margin-left:6px"></span></div>
-      <div class="dm-chips">
-        <div class="dm-chip" data-mode="0" onclick="openHevModal()">HEV</div>
-        <div class="dm-chip" data-mode="1" onclick="setDriveMode(1)">Prior. EV</div>
-        <div class="dm-chip" data-mode="3" onclick="setDriveMode(3)">EV</div>
+    <!-- Acordeão: Modos + Configurações (recolhível) -->
+    <div class="drive-controls-accordion" id="drive-controls-accordion">
+      <div class="dc-header" onclick="toggleDriveControls()">
+        <div class="dc-hd-top">
+          <span class="dc-title">⚙ Modos &amp; Configurações</span>
+          <span class="dc-chevron">⌄</span>
+        </div>
+        <div class="dc-pills-row">
+          <span class="dc-pill" id="dc-pill-ev">Cond. --</span>
+          <span class="dc-pill" id="dc-pill-terrain">Estilo --</span>
+          <span class="dc-pill" id="dc-pill-regen">Regen --</span>
+          <span class="dc-pill" id="dc-pill-onepedal">1-Pedal --</span>
+          <span class="dc-pill" id="dc-pill-esp">ESP --</span>
+        </div>
+      </div>
+      <div class="dc-body">
+
+        <!-- Modo de condução PHEV -->
+        <div class="drive-mode-card">
+          <div class="dm-label">⚙ Modo de condução <span id="dm-sub-label" style="font-size:9px;color:var(--muted);font-weight:500;text-transform:none;letter-spacing:0.2px;margin-left:6px"></span></div>
+          <div class="dm-chips">
+            <div class="dm-chip" data-mode="0" onclick="openHevModal()">HEV</div>
+            <div class="dm-chip" data-mode="1" onclick="setDriveMode(1)">Prior. EV</div>
+            <div class="dm-chip" data-mode="3" onclick="setDriveMode(3)">EV</div>
+          </div>
+        </div>
+
+        <!-- Estilo de condução (terrain) -->
+        <div class="terrain-card">
+          <div class="tm-label">🏁 Estilo de condução</div>
+          <div class="tm-chips-4">
+            <div class="dm-chip" data-terrain="0" onclick="setTerrainMode(0)">Normal</div>
+            <div class="dm-chip" data-terrain="1" onclick="setTerrainMode(1)">Sport</div>
+            <div class="dm-chip" data-terrain="2" onclick="setTerrainMode(2)">Eco</div>
+            <div class="dm-chip" data-terrain="3" onclick="setTerrainMode(3)">Neve</div>
+          </div>
+          <div class="tm-chips-3">
+            <div class="dm-chip" data-terrain="4" onclick="setTerrainMode(4)">Areia</div>
+            <div class="dm-chip" data-terrain="5" onclick="setTerrainMode(5)">Lama</div>
+            <div class="dm-chip" data-terrain="11" onclick="setTerrainMode(11)">AWD</div>
+          </div>
+        </div>
+
+        <!-- Regeneração -->
+        <div class="regen-card">
+          <div class="regen-label">
+            <span>⚡ Regeneração</span>
+            <span class="regen-power-val" id="regen-power-val"></span>
+          </div>
+          <div class="regen-chips">
+            <div class="dm-chip" data-regen="2" onclick="setRegenLevel(2)">Baixo</div>
+            <div class="dm-chip" data-regen="0" onclick="setRegenLevel(0)">Normal</div>
+            <div class="dm-chip" data-regen="1" onclick="setRegenLevel(1)">Alto</div>
+          </div>
+          <div class="one-pedal-row">
+            <span class="one-pedal-lbl">One-Pedal</span>
+            <div class="one-pedal-toggle" id="one-pedal-toggle" onclick="toggleOnePedal()">
+              <div class="toggle-knob"></div>
+            </div>
+          </div>
+          <div class="regen-bar-wrap">
+            <div class="regen-bar-fill" id="regen-bar-fill" style="width:0%"></div>
+          </div>
+        </div>
+
+        <!-- Configurações do veículo: direção + ESP -->
+        <div class="settings-card">
+          <div class="settings-label">🔧 Configurações</div>
+          <div class="settings-section-lbl">Direção elétrica</div>
+          <div class="dm-chips">
+            <div class="dm-chip" data-steer="2" onclick="setSteerMode(2)">Conforto</div>
+            <div class="dm-chip" data-steer="0" onclick="setSteerMode(0)">Normal</div>
+            <div class="dm-chip" data-steer="1" onclick="setSteerMode(1)">Sport</div>
+          </div>
+          <div class="settings-row">
+            <span class="settings-item-lbl">ESP</span>
+            <div class="dm-chip esp-chip" id="esp-chip" onclick="toggleEsp()">ON</div>
+          </div>
+        </div>
+
       </div>
     </div>
 
@@ -2962,6 +3158,14 @@ function render(s, kpData) {
     rpmCard.style.display = 'none';
     tinyRow.classList.remove('has-rpm');
   }
+
+  _renderTerrainChips();
+  _renderRegenChips();
+  _renderOnePedal();
+  _renderEsp();
+  _renderSteerChips();
+  _renderRegenPower(s);
+  if (typeof _updateDriveControlsSummary === 'function') _updateDriveControlsSummary();
 }
 
 function toggleSheet() {
@@ -3036,6 +3240,11 @@ window.renderView_drive = function() {
     setTimeout(() => { try { map.invalidateSize(); } catch (_) {} }, 50);
   }
   _renderDriveModeChips();
+  _renderTerrainChips();
+  _renderRegenChips();
+  _renderOnePedal();
+  _renderEsp();
+  _renderSteerChips();
 };
 
 // ── Modo de condução PHEV (HEV / Prior. EV / EV puro) ───────────────────────
@@ -3205,6 +3414,368 @@ async function applyHevModal() {
   }
 }
 
+// ── Terrain mode ────────────────────────────────────────────────────────────
+let _terrainPending = null;
+let _terrainTimer = null;
+
+function _setTerrainUI(mode, status) {
+  document.querySelectorAll('.terrain-card .dm-chip').forEach(c => {
+    const isThis = +c.dataset.terrain === mode;
+    c.classList.toggle('active', isThis && status !== 'pending');
+    c.classList.toggle('pending', isThis && status === 'pending');
+  });
+}
+
+function _renderTerrainChips() {
+  if (_terrainPending !== null) return;
+  const cur = window.state?.terrain_mode;
+  if (cur != null) _setTerrainUI(+cur, null);
+}
+
+async function setTerrainMode(mode) {
+  const tk = localStorage.getItem('bridge_token');
+  if (!tk) return;
+  _terrainPending = mode;
+  _setTerrainUI(mode, 'pending');
+  if (_terrainTimer) clearTimeout(_terrainTimer);
+  _terrainTimer = setTimeout(() => {
+    if (_terrainPending !== null) {
+      window.showToast && window.showToast('⚠ Carro não respondeu', 'err');
+      _terrainPending = null;
+      _renderTerrainChips();
+    }
+  }, 15000);
+  try {
+    const r = await fetch('/api/terrain-mode', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + tk, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode }),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'HTTP ' + r.status);
+    window.showToast && window.showToast('⏳ Enviado — aguardando confirmação', 'ok');
+  } catch (e) {
+    _terrainPending = null;
+    window.showToast && window.showToast('✗ ' + e.message, 'err');
+    _renderTerrainChips();
+  }
+}
+
+window._onTerrainModeResult = function(data) {
+  if (_terrainPending === null) return;
+  if (_terrainTimer) { clearTimeout(_terrainTimer); _terrainTimer = null; }
+  const raw = String(data?.result || '');
+  if (raw.startsWith('ok:')) {
+    const m = raw.match(/^ok:(\d+)/);
+    const applied = m ? parseInt(m[1]) : _terrainPending;
+    window.showToast && window.showToast('✓ Modo aplicado', 'ok');
+    if (window.state) window.state.terrain_mode = applied;
+    _terrainPending = null;
+    _setTerrainUI(applied, null);
+  } else {
+    window.showToast && window.showToast('✗ ' + raw, 'err');
+    _terrainPending = null;
+    _renderTerrainChips();
+  }
+};
+
+// ── Regen level ─────────────────────────────────────────────────────────────
+let _regenPending = null;
+let _regenTimer = null;
+
+function _setRegenUI(level, status) {
+  document.querySelectorAll('.regen-chips .dm-chip').forEach(c => {
+    const isThis = +c.dataset.regen === level;
+    c.classList.toggle('active', isThis && status !== 'pending');
+    c.classList.toggle('pending', isThis && status === 'pending');
+  });
+}
+
+function _renderRegenChips() {
+  if (_regenPending !== null) return;
+  const cur = window.state?.regen_level;
+  if (cur != null) _setRegenUI(+cur, null);
+}
+
+async function setRegenLevel(level) {
+  const tk = localStorage.getItem('bridge_token');
+  if (!tk) return;
+  _regenPending = level;
+  _setRegenUI(level, 'pending');
+  if (_regenTimer) clearTimeout(_regenTimer);
+  _regenTimer = setTimeout(() => {
+    if (_regenPending !== null) {
+      window.showToast && window.showToast('⚠ Carro não respondeu', 'err');
+      _regenPending = null;
+      _renderRegenChips();
+    }
+  }, 15000);
+  try {
+    const r = await fetch('/api/regen-level', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + tk, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ level }),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'HTTP ' + r.status);
+    window.showToast && window.showToast('⏳ Enviado — aguardando confirmação', 'ok');
+  } catch (e) {
+    _regenPending = null;
+    window.showToast && window.showToast('✗ ' + e.message, 'err');
+    _renderRegenChips();
+  }
+}
+
+window._onRegenLevelResult = function(data) {
+  if (_regenPending === null) return;
+  if (_regenTimer) { clearTimeout(_regenTimer); _regenTimer = null; }
+  const raw = String(data?.result || '');
+  if (raw.startsWith('ok:')) {
+    const m = raw.match(/^ok:(\d+)/);
+    const applied = m ? parseInt(m[1]) : _regenPending;
+    window.showToast && window.showToast('✓ Regeneração aplicada', 'ok');
+    if (window.state) window.state.regen_level = applied;
+    _regenPending = null;
+    _setRegenUI(applied, null);
+  } else {
+    window.showToast && window.showToast('✗ ' + raw, 'err');
+    _regenPending = null;
+    _renderRegenChips();
+  }
+};
+
+// ── One-Pedal ────────────────────────────────────────────────────────────────
+let _onePedalPending = null;
+
+function _renderOnePedal() {
+  if (_onePedalPending !== null) return;
+  const tog = document.getElementById('one-pedal-toggle');
+  if (!tog) return;
+  const on = window.state?.one_pedal === 1;
+  tog.classList.toggle('on', on);
+}
+
+async function toggleOnePedal() {
+  const tk = localStorage.getItem('bridge_token');
+  if (!tk) return;
+  const cur = window.state?.one_pedal;
+  const next = cur === 1 ? 0 : 1;
+  _onePedalPending = next;
+  const tog = document.getElementById('one-pedal-toggle');
+  if (tog) tog.classList.toggle('on', next === 1);
+  try {
+    const r = await fetch('/api/one-pedal', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + tk, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enable: next }),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'HTTP ' + r.status);
+    window.showToast && window.showToast('⏳ Enviado — aguardando confirmação', 'ok');
+  } catch (e) {
+    _onePedalPending = null;
+    window.showToast && window.showToast('✗ ' + e.message, 'err');
+    _renderOnePedal();
+  }
+}
+
+window._onOnePedalResult = function(data) {
+  _onePedalPending = null;
+  const raw = String(data?.result || '');
+  if (raw.startsWith('ok:')) {
+    const m = raw.match(/^ok:(\d+)/);
+    const applied = m ? parseInt(m[1]) : null;
+    if (applied != null && window.state) window.state.one_pedal = applied;
+    window.showToast && window.showToast(applied === 1 ? '✓ One-Pedal ativado' : '✓ One-Pedal desativado', 'ok');
+    _renderOnePedal();
+  } else {
+    window.showToast && window.showToast('✗ ' + raw, 'err');
+    _renderOnePedal();
+  }
+};
+
+// ── Regen power bar (real-time) ──────────────────────────────────────────────
+function _renderRegenPower(s) {
+  // Usa regen_power_pct se disponível, senão deriva de motor_power_kw (negativo = regen)
+  const raw = s.regen_power_pct != null && s.regen_power_pct !== 0
+    ? s.regen_power_pct
+    : (s.motor_power_kw != null ? s.motor_power_kw : 0);
+  const regenPct = Math.max(0, -1 * raw);  // só mostra quando negativo (regen)
+  const fill = document.getElementById('regen-bar-fill');
+  if (fill) fill.style.width = Math.min(100, regenPct) + '%';
+  const lbl = document.getElementById('regen-power-val');
+  if (lbl) lbl.textContent = regenPct > 1 ? regenPct.toFixed(0) + ' kW' : '';
+}
+
+// ── Steering mode ────────────────────────────────────────────────────────────
+let _steerPending = null;
+let _steerTimer = null;
+
+function _setSteerUI(mode, status) {
+  document.querySelectorAll('.settings-card .dm-chip[data-steer]').forEach(c => {
+    const isThis = +c.dataset.steer === mode;
+    c.classList.toggle('active', isThis && status !== 'pending');
+    c.classList.toggle('pending', isThis && status === 'pending');
+  });
+}
+
+function _renderSteerChips() {
+  if (_steerPending !== null) return;
+  const cur = window.state?.steer_mode;
+  if (cur != null) _setSteerUI(+cur, null);
+}
+
+async function setSteerMode(mode) {
+  const tk = localStorage.getItem('bridge_token');
+  if (!tk) return;
+  _steerPending = mode;
+  _setSteerUI(mode, 'pending');
+  if (_steerTimer) clearTimeout(_steerTimer);
+  _steerTimer = setTimeout(() => {
+    if (_steerPending !== null) {
+      window.showToast && window.showToast('⚠ Carro não respondeu', 'err');
+      _steerPending = null;
+      _renderSteerChips();
+    }
+  }, 15000);
+  try {
+    const r = await fetch('/api/steer-mode', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + tk, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode }),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'HTTP ' + r.status);
+    window.showToast && window.showToast('⏳ Enviado — aguardando confirmação', 'ok');
+  } catch (e) {
+    _steerPending = null;
+    window.showToast && window.showToast('✗ ' + e.message, 'err');
+    _renderSteerChips();
+  }
+}
+
+window._onSteerModeResult = function(data) {
+  if (_steerPending === null) return;
+  if (_steerTimer) { clearTimeout(_steerTimer); _steerTimer = null; }
+  const raw = String(data?.result || '');
+  if (raw.startsWith('ok:')) {
+    const m = raw.match(/^ok:(\d+)/);
+    const applied = m ? parseInt(m[1]) : _steerPending;
+    window.showToast && window.showToast('✓ Direção aplicada', 'ok');
+    if (window.state) window.state.steer_mode = applied;
+    _steerPending = null;
+    _setSteerUI(applied, null);
+  } else {
+    window.showToast && window.showToast('✗ ' + raw, 'err');
+    _steerPending = null;
+    _renderSteerChips();
+  }
+};
+
+// ── ESP ───────────────────────────────────────────────────────────────────────
+let _espPending = null;
+
+function _renderEsp() {
+  if (_espPending !== null) return;
+  const chip = document.getElementById('esp-chip');
+  if (!chip) return;
+  const on = window.state?.esp_enable !== 0;  // null ou 1 = ON (default)
+  chip.textContent = on ? 'ON' : 'OFF';
+  chip.classList.toggle('esp-off', !on);
+  chip.classList.remove('active', 'pending');
+  if (on) chip.classList.add('active');
+}
+
+async function toggleEsp() {
+  const tk = localStorage.getItem('bridge_token');
+  if (!tk) return;
+  const cur = window.state?.esp_enable;
+  const next = cur === 0 ? 1 : 0;
+  _espPending = next;
+  const chip = document.getElementById('esp-chip');
+  if (chip) {
+    chip.classList.add('pending');
+    chip.classList.remove('active', 'esp-off');
+    chip.textContent = next === 1 ? 'ON' : 'OFF';
+  }
+  try {
+    const r = await fetch('/api/esp', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + tk, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enable: next }),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'HTTP ' + r.status);
+    window.showToast && window.showToast('⏳ Enviado — aguardando confirmação', 'ok');
+  } catch (e) {
+    _espPending = null;
+    window.showToast && window.showToast('✗ ' + e.message, 'err');
+    _renderEsp();
+  }
+}
+
+window._onEspResult = function(data) {
+  _espPending = null;
+  const raw = String(data?.result || '');
+  if (raw.startsWith('ok:')) {
+    const m = raw.match(/^ok:(\d+)/);
+    const applied = m ? parseInt(m[1]) : null;
+    if (applied != null && window.state) window.state.esp_enable = applied;
+    window.showToast && window.showToast(applied === 1 ? '✓ ESP ativado' : '✓ ESP desativado', 'ok');
+    _renderEsp();
+  } else {
+    window.showToast && window.showToast('✗ ' + raw, 'err');
+    _renderEsp();
+  }
+};
+
+  // ── Acordeão toggle + summary ────────────────────────────────────────────
+  const _DC_TERRAIN = { 0:'Normal', 1:'Sport', 2:'Eco', 3:'Neve', 4:'Areia', 5:'Lama', 11:'AWD' };
+  const _DC_REGEN   = { 0:'Regen Normal', 1:'Regen Alto', 2:'Regen Baixo' };
+
+  function _setPill(id, text, cls) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = text;
+    el.className = 'dc-pill' + (cls ? ' ' + cls : '');
+  }
+
+  function _updateDriveControlsSummary() {
+    const s = window.state || {};
+    // Pill: Condução EV
+    const dm = s.drive_mode;
+    if (dm == null)      _setPill('dc-pill-ev', 'Cond. --', '');
+    else if (dm === 3)   _setPill('dc-pill-ev', 'EV Puro', 'known hi');
+    else if (dm === 1)   _setPill('dc-pill-ev', 'Prior. EV', 'known hi');
+    else if (dm === 0) {
+      if (s.power_reserve === 1)      _setPill('dc-pill-ev', 'HEV Intel.', 'known');
+      else if (s.power_reserve === 2) _setPill('dc-pill-ev', s.charge_soc_target ? `HEV ${s.charge_soc_target}%` : 'HEV Prior.', 'known');
+      else                            _setPill('dc-pill-ev', 'HEV', 'known');
+    }
+    // Pill: Estilo de condução
+    const t = s.terrain_mode;
+    const tLabel = t != null ? (_DC_TERRAIN[+t] || '?') : null;
+    if (t == null)        _setPill('dc-pill-terrain', 'Estilo --', '');
+    else if (t === 0)     _setPill('dc-pill-terrain', 'Normal', 'known');
+    else                  _setPill('dc-pill-terrain', tLabel, 'known hi');
+    // Pill: Regeneração
+    const r = s.regen_level;
+    const rShort = { 0: 'Regen Normal', 1: 'Regen Alto', 2: 'Regen Baixo' };
+    const rText = r != null ? rShort[+r] : 'Regen --';
+    _setPill('dc-pill-regen', rText, r == null ? '' : r === 1 ? 'known hi' : 'known');
+    // Pill: One-Pedal
+    const op = s.one_pedal;
+    _setPill('dc-pill-onepedal', op == null ? '1-Pedal --' : op === 1 ? '1-Pedal ON' : '1-Pedal OFF', op == null ? '' : op === 1 ? 'known hi' : 'known');
+    // Pill: ESP
+    const espOn = s.esp_enable !== 0;
+    _setPill('dc-pill-esp', `ESP ${espOn ? 'ON' : 'OFF'}`, s.esp_enable == null ? '' : espOn ? 'known' : 'known warn');
+  }
+
+  function toggleDriveControls() {
+    const el = document.getElementById('drive-controls-accordion');
+    if (el) el.classList.toggle('open');
+  }
+
   // Expõe handlers de onclick no window
   Object.assign(window, {
     toggleSheet: typeof toggleSheet !== 'undefined' ? toggleSheet : undefined,
@@ -3212,6 +3783,12 @@ async function applyHevModal() {
     openHevModal: openHevModal,
     closeHevModal: closeHevModal,
     applyHevModal: applyHevModal,
+    setTerrainMode: setTerrainMode,
+    setRegenLevel: setRegenLevel,
+    toggleOnePedal: toggleOnePedal,
+    setSteerMode: setSteerMode,
+    toggleEsp: toggleEsp,
+    toggleDriveControls: toggleDriveControls,
   });
   if (!window['initView_drive']) window['initView_drive'] = function() {};
 })();

@@ -967,6 +967,16 @@ function connect() {
         if (window._onPowerReserveResult) window._onPowerReserveResult(msg.data);
       } else if (msg.type === 'charge_soc_target_result') {
         if (window._onChargeSocTargetResult) window._onChargeSocTargetResult(msg.data);
+      } else if (msg.type === 'terrain_mode_result') {
+        if (window._onTerrainModeResult) window._onTerrainModeResult(msg.data);
+      } else if (msg.type === 'regen_level_result') {
+        if (window._onRegenLevelResult) window._onRegenLevelResult(msg.data);
+      } else if (msg.type === 'one_pedal_result') {
+        if (window._onOnePedalResult) window._onOnePedalResult(msg.data);
+      } else if (msg.type === 'esp_result') {
+        if (window._onEspResult) window._onEspResult(msg.data);
+      } else if (msg.type === 'steer_mode_result') {
+        if (window._onSteerModeResult) window._onSteerModeResult(msg.data);
       } else if (msg.type === 'diag_state') {
         if (window._onDiagState) window._onDiagState(msg.data);
       } else if (msg.type === 'diag_event') {

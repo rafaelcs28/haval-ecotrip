@@ -611,6 +611,12 @@ const state = {
   drive_mode:          null,   // 0=HEV, 1=Prior. EV, 3=EV (null = desconhecido)
   power_reserve:       null,   // sub-modo HEV: 1=Inteligente, 2=Prioritário
   charge_soc_target:   null,   // alvo SOC no modo Prioritário (20..80 %)
+  terrain_mode:   null,   // 0=Normal, 1=Sport, 2=Eco, 3=Neve, 4=Areia, 5=Lama, 11=AWD
+  regen_level:    null,   // 0=Normal, 1=Alto, 2=Baixo
+  one_pedal:      null,   // 0=off, 1=on
+  regen_power_pct: 0,     // energy_output_percentage (negativo = regenerando)
+  esp_enable:     null,   // 0=off, 1=on
+  steer_mode:     null,   // 0=Normal, 1=Sport, 2=Conforto
   battery_power_pct:   0,
   engine_rpm:          0,
   notif_latest_ts:     0,
@@ -4106,6 +4112,66 @@ app.post('/api/charge-soc-target/refresh', (_req, res) => {
   });
 });
 
+// POST /api/terrain-mode  { mode: 0|1|2|3|4|5|11 }
+app.post('/api/terrain-mode', (req, res) => {
+  const mode = parseInt(req.body?.mode);
+  if (![0,1,2,3,4,5,11].includes(mode))
+    return res.status(400).json({ error: 'Valor inválido.' });
+  if (!mqttClient?.connected) return res.status(503).json({ error: 'MQTT offline' });
+  mqttClient.publish(`${MQTT_PREFIX}/cmd/terrain_mode`, mode.toString(), { retain: false, qos: 1 }, err => {
+    if (err) return res.status(500).json({ error: 'Falha ao publicar no MQTT' });
+    res.json({ ok: true });
+  });
+});
+
+// POST /api/regen-level  { level: 0|1|2 }
+app.post('/api/regen-level', (req, res) => {
+  const level = parseInt(req.body?.level);
+  if (![0,1,2].includes(level))
+    return res.status(400).json({ error: 'Valor inválido. Use 0 (Normal), 1 (Alto), 2 (Baixo).' });
+  if (!mqttClient?.connected) return res.status(503).json({ error: 'MQTT offline' });
+  mqttClient.publish(`${MQTT_PREFIX}/cmd/regen_level`, level.toString(), { retain: false, qos: 1 }, err => {
+    if (err) return res.status(500).json({ error: 'Falha ao publicar no MQTT' });
+    res.json({ ok: true });
+  });
+});
+
+// POST /api/one-pedal  { enable: 0|1 }
+app.post('/api/one-pedal', (req, res) => {
+  const enable = parseInt(req.body?.enable);
+  if (![0,1].includes(enable))
+    return res.status(400).json({ error: 'Valor inválido. Use 0 ou 1.' });
+  if (!mqttClient?.connected) return res.status(503).json({ error: 'MQTT offline' });
+  mqttClient.publish(`${MQTT_PREFIX}/cmd/one_pedal`, enable.toString(), { retain: false, qos: 1 }, err => {
+    if (err) return res.status(500).json({ error: 'Falha ao publicar no MQTT' });
+    res.json({ ok: true });
+  });
+});
+
+// POST /api/esp  { enable: 0|1 }
+app.post('/api/esp', (req, res) => {
+  const enable = parseInt(req.body?.enable);
+  if (![0,1].includes(enable))
+    return res.status(400).json({ error: 'Valor inválido. Use 0 ou 1.' });
+  if (!mqttClient?.connected) return res.status(503).json({ error: 'MQTT offline' });
+  mqttClient.publish(`${MQTT_PREFIX}/cmd/esp`, enable.toString(), { retain: false, qos: 1 }, err => {
+    if (err) return res.status(500).json({ error: 'Falha ao publicar no MQTT' });
+    res.json({ ok: true });
+  });
+});
+
+// POST /api/steer-mode  { mode: 0|1|2 }
+app.post('/api/steer-mode', (req, res) => {
+  const mode = parseInt(req.body?.mode);
+  if (![0,1,2].includes(mode))
+    return res.status(400).json({ error: 'Valor inválido. Use 0 (Normal), 1 (Sport), 2 (Conforto).' });
+  if (!mqttClient?.connected) return res.status(503).json({ error: 'MQTT offline' });
+  mqttClient.publish(`${MQTT_PREFIX}/cmd/steer_mode`, mode.toString(), { retain: false, qos: 1 }, err => {
+    if (err) return res.status(500).json({ error: 'Falha ao publicar no MQTT' });
+    res.json({ ok: true });
+  });
+});
+
 app.post('/api/action/:name', async (req, res) => {
   const { name } = req.params;
   console.log(`[action] recebido name='${name}'`);
@@ -5312,6 +5378,49 @@ function applyMqttMessage(key, value, isRetained = false) {
     }
     case 'cmd/charge_soc_target/result':
       broadcast('charge_soc_target_result', { result: value });
+      break;
+    case 'ha/terrain_mode/state': {
+      const m = parseInt(value);
+      if ([0,1,2,3,4,5,11].includes(m)) state.terrain_mode = m;
+      break;
+    }
+    case 'cmd/terrain_mode/result':
+      broadcast('terrain_mode_result', { result: value });
+      break;
+    case 'ha/regen_level/state': {
+      const m = parseInt(value);
+      if ([0,1,2].includes(m)) state.regen_level = m;
+      break;
+    }
+    case 'cmd/regen_level/result':
+      broadcast('regen_level_result', { result: value });
+      break;
+    case 'ha/one_pedal/state': {
+      const m = parseInt(value);
+      if ([0,1].includes(m)) state.one_pedal = m;
+      break;
+    }
+    case 'cmd/one_pedal/result':
+      broadcast('one_pedal_result', { result: value });
+      break;
+    case 'ha/regen_power/state':
+      state.regen_power_pct = parseFloat(value) || 0;
+      break;
+    case 'ha/esp/state': {
+      const m = parseInt(value);
+      if ([0,1].includes(m)) state.esp_enable = m;
+      break;
+    }
+    case 'cmd/esp/result':
+      broadcast('esp_result', { result: value });
+      break;
+    case 'ha/steer_mode/state': {
+      const m = parseInt(value);
+      if ([0,1,2].includes(m)) state.steer_mode = m;
+      break;
+    }
+    case 'cmd/steer_mode/result':
+      broadcast('steer_mode_result', { result: value });
       break;
     // price_gas_per_l e price_kwh do APK: IGNORADOS — valor agora vem do mix
     // ponderado de abastecimentos/recargas (recomputeTankAvgPrice / recomputeBatteryAvgPrice).

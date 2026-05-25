@@ -701,6 +701,12 @@
       <span class="sl-st" id="sl-climate-st">--</span>
       <span class="sl-arrow">›</span>
     </div>
+    <div class="sl" id="sl-drive" onclick="switchView&&switchView('drive')">
+      <span class="sl-ic">⚡</span>
+      <span class="sl-ti">Modo</span>
+      <span class="sl-st" id="sl-drive-st">--</span>
+      <span class="sl-arrow">›</span>
+    </div>
   </div>
 
   </div>
@@ -1274,6 +1280,8 @@ const _DASH_SHOWN_KEYS = new Set([
   'seat_vent_drv', 'seat_vent_pass', 'ac_state',
   // Usados no Drive
   'speed_kmh', 'rpm', 'motor_power_kw', 'current_trip', 'gear',
+  'drive_mode', 'power_reserve', 'charge_soc_target',
+  'terrain_mode', 'regen_level', 'one_pedal', 'esp_enable', 'steer_mode',
   // Usados internamente (cache, sync) — não mostrar
   'rolling', 'price_kwh', 'price_gas_per_l', 'tank_avg_price_per_l',
   'notif_latest_ts', 'notif_unread',
@@ -1537,6 +1545,26 @@ function render(s, kpData) {
       else               pill12.classList.add('red');
       pill12.style.display = '';
     }
+  }
+
+  // ── Modo de condução (linha compacta)
+  {
+    const dm = s.drive_mode != null ? +s.drive_mode : null;
+    const TERRAIN_LABELS = { 0:'Normal', 1:'Sport', 2:'Eco', 3:'Neve', 4:'Areia', 5:'Lama', 11:'AWD' };
+    let evText = '--';
+    if (dm === 3) {
+      evText = 'EV Puro';
+    } else if (dm === 1) {
+      evText = 'Prior. EV';
+    } else if (dm === 0) {
+      const pr = s.power_reserve;
+      if (pr === 1)      evText = 'HEV · Intel.';
+      else if (pr === 2) evText = s.charge_soc_target ? `HEV · Prior. ${s.charge_soc_target}%` : 'HEV · Prior.';
+      else               evText = 'HEV';
+    }
+    const terrain = s.terrain_mode != null ? TERRAIN_LABELS[+s.terrain_mode] : null;
+    const dmText = terrain ? `${evText} / ${terrain}` : evText;
+    _setStatusLine('drive', dmText, 'ok');
   }
 
   // ── Status do veículo + pneus (substitui o PNG layered)
