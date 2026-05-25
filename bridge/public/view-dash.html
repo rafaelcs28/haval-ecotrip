@@ -1896,9 +1896,6 @@ function openSocLimitModal() {
   const cur = +(window.state?.charge_limit_pct) || 0;
   _setSocChipsUI(cur, null);
   document.getElementById('soc-limit-modal').classList.add('show');
-  // Pede releitura do valor real do carro (mesmo padrão do config)
-  const tk = localStorage.getItem('bridge_token');
-  if (tk) fetch('/api/charge-limit/refresh', { method: 'POST', headers: { 'Authorization': 'Bearer ' + tk } }).catch(() => {});
 }
 function closeSocLimitModal() {
   document.getElementById('soc-limit-modal').classList.remove('show');
@@ -1950,6 +1947,7 @@ window._onChargeLimitResult = function(data) {
       setTimeout(closeSocLimitModal, 4800);
       return;
     }
+    if (window.state && applied) window.state.charge_limit_pct = applied;
     _clearSocDashPending();
     _setSocChipsUI(applied || _socDashPending, null);
     setTimeout(closeSocLimitModal, 800);

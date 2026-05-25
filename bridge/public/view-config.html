@@ -2545,6 +2545,7 @@ window._onChargeLimitResult = function(data) {
     } else {
       showToast('⚠ Resposta inesperada: ' + raw, 'err');
     }
+    if (window.state && applied) window.state.charge_limit_pct = applied;
     _clearChargePending();
     _setChargeLimitUI(applied || _chargeLimitPending, null);
   } else if (raw.startsWith('error')) {
