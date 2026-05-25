@@ -12,6 +12,7 @@ import SwiftUI
 
 struct ContentView: View {
     @StateObject private var manager = ActivityManager()
+    @StateObject private var notifPoller = NotificationPoller()
     @Environment(\.scenePhase) private var scenePhase
     @State private var showSetup = false   // sheet por cima da WebView
 
@@ -59,10 +60,17 @@ struct ContentView: View {
                 SetupView(manager: manager, isPresented: .constant(true))
             }
         }
-        .task { await manager.autoStartIfCharging() }
+        .task {
+            await manager.autoStartIfCharging()
+            await notifPoller.requestPermission()
+            notifPoller.start()
+        }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
                 Task { await manager.autoStartIfCharging() }
+                notifPoller.start()
+            } else if newPhase == .background {
+                notifPoller.stop()
             }
         }
     }

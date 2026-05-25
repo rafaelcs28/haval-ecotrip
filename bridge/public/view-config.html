@@ -1712,6 +1712,17 @@ async function _loadNotifPrefs() {
       meStatus.textContent = 'Notificações bloqueadas';
       meHint.textContent = 'Habilite em Ajustes > Safari > Notificações.';
       meActions.innerHTML = '';
+    } else if (window.HavalNative?.isNative) {
+      // No app nativo iOS, Web Push não funciona (limitação WKWebView).
+      // Em vez disso, o app nativo polla /api/push/history e dispara
+      // Local Notifications. Mostra estado correto pro user.
+      meCard.style.background = 'rgba(34,197,94,.08)';
+      meCard.style.border = '1px solid rgba(34,197,94,.35)';
+      meIcon.textContent = '✅';
+      meStatus.style.color = 'var(--green)';
+      meStatus.textContent = 'Notificações nativas (app iOS)';
+      meHint.textContent = 'O app monitora o bridge e dispara notificações iOS quando algum evento de interesse acontece. Configure abaixo quais eventos.';
+      meActions.innerHTML = '';
     } else {
       meCard.style.background = 'rgba(56,189,248,.08)';
       meCard.style.border = '1px solid rgba(56,189,248,.35)';
