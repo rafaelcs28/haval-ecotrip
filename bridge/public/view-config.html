@@ -384,6 +384,24 @@
             onchange="saveAcParkedMin(this.value)">
         </div>
       </div>
+      <div class="toggle-row" onclick="toggleNotif('window_forgotten', this)"><div class="label">Vidro esquecido aberto<div class="sub">Motor desligado e vidro aberto por X minutos</div></div><div class="toggle" data-key="window_forgotten"></div></div>
+      <div id="window-forgotten-min-row" style="display:none;padding:4px 4px 8px">
+        <div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:rgba(255,255,255,.04);border-radius:8px">
+          <span style="flex:1;font-size:12px;color:var(--muted)">Minutos antes de alertar</span>
+          <input type="number" id="window-forgotten-min-input" min="1" max="60" value="10"
+            style="width:52px;padding:4px 8px;border-radius:6px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);color:var(--text);font-size:13px;font-family:inherit;text-align:center"
+            onchange="saveWindowForgottenMin(this.value)">
+        </div>
+      </div>
+      <div class="toggle-row" onclick="toggleNotif('lock_forgotten', this)"><div class="label">Carro destravado esquecido<div class="sub">Motor desligado e carro destravado por X minutos</div></div><div class="toggle" data-key="lock_forgotten"></div></div>
+      <div id="lock-forgotten-min-row" style="display:none;padding:4px 4px 8px">
+        <div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:rgba(255,255,255,.04);border-radius:8px">
+          <span style="flex:1;font-size:12px;color:var(--muted)">Minutos antes de alertar</span>
+          <input type="number" id="lock-forgotten-min-input" min="1" max="60" value="5"
+            style="width:52px;padding:4px 8px;border-radius:6px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);color:var(--text);font-size:13px;font-family:inherit;text-align:center"
+            onchange="saveLockForgottenMin(this.value)">
+        </div>
+      </div>
       <div class="toggle-row" onclick="toggleNotif('batt12_low', this)"><div class="label">Bateria auxiliar baixa<div class="sub">12V abaixo de 50% — possível dreno</div></div><div class="toggle" data-key="batt12_low"></div></div>
     </div>
     <div class="field-group">
@@ -1973,11 +1991,19 @@ async function _loadPrefsForCurrentDevice() {
       const key = el.dataset.key;
       el.classList.toggle('on', !!_notifPrefsLocal[key]);
     });
-    // Mostra input de minutos se ac_on_parked estiver ativo; carrega valor salvo
+    // Mostra inputs de minutos se a notif estiver ativa; carrega valor salvo
     const acOn = !!_notifPrefsLocal.ac_on_parked;
     document.getElementById('ac-parked-min-row').style.display = acOn ? '' : 'none';
     const savedMin = _notifPrefsLocal.ac_on_parked_min;
     if (savedMin) document.getElementById('ac-parked-min-input').value = savedMin;
+
+    const wfOn = !!_notifPrefsLocal.window_forgotten;
+    document.getElementById('window-forgotten-min-row').style.display = wfOn ? '' : 'none';
+    if (_notifPrefsLocal.window_forgotten_min) document.getElementById('window-forgotten-min-input').value = _notifPrefsLocal.window_forgotten_min;
+
+    const lfOn = !!_notifPrefsLocal.lock_forgotten;
+    document.getElementById('lock-forgotten-min-row').style.display = lfOn ? '' : 'none';
+    if (_notifPrefsLocal.lock_forgotten_min) document.getElementById('lock-forgotten-min-input').value = _notifPrefsLocal.lock_forgotten_min;
     _updateGeofenceLocalControls();
   } catch (_) {}
 }
@@ -1994,6 +2020,36 @@ async function saveAcParkedMin(val) {
       body: JSON.stringify({ key: 'ac_on_parked_min', value: mins }),
     });
     _notifPrefsLocal.ac_on_parked_min = mins;
+  } catch (e) { showToast('✗ ' + e.message, 'err'); }
+}
+
+async function saveWindowForgottenMin(val) {
+  const mins = Math.max(1, Math.min(60, parseInt(val, 10) || 10));
+  document.getElementById('window-forgotten-min-input').value = mins;
+  const tk = localStorage.getItem('bridge_token');
+  if (!tk || !_currentNotifDeviceId) return;
+  try {
+    await fetch('/api/notif/prefs/' + encodeURIComponent(_currentNotifDeviceId), {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + tk, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: 'window_forgotten_min', value: mins }),
+    });
+    _notifPrefsLocal.window_forgotten_min = mins;
+  } catch (e) { showToast('✗ ' + e.message, 'err'); }
+}
+
+async function saveLockForgottenMin(val) {
+  const mins = Math.max(1, Math.min(60, parseInt(val, 10) || 10));
+  document.getElementById('lock-forgotten-min-input').value = mins;
+  const tk = localStorage.getItem('bridge_token');
+  if (!tk || !_currentNotifDeviceId) return;
+  try {
+    await fetch('/api/notif/prefs/' + encodeURIComponent(_currentNotifDeviceId), {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + tk, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: 'lock_forgotten_min', value: mins }),
+    });
+    _notifPrefsLocal.lock_forgotten_min = mins;
   } catch (e) { showToast('✗ ' + e.message, 'err'); }
 }
 
@@ -2193,10 +2249,10 @@ async function toggleNotif(key) {
   const newVal = !el.classList.contains('on');
   el.classList.toggle('on', newVal);  // otimista
   _notifPrefsLocal[key] = newVal;
-  // Mostra/esconde input de minutos do AC parado
-  if (key === 'ac_on_parked') {
-    document.getElementById('ac-parked-min-row').style.display = newVal ? '' : 'none';
-  }
+  // Mostra/esconde inputs de minutos
+  if (key === 'ac_on_parked')      document.getElementById('ac-parked-min-row').style.display      = newVal ? '' : 'none';
+  if (key === 'window_forgotten')  document.getElementById('window-forgotten-min-row').style.display = newVal ? '' : 'none';
+  if (key === 'lock_forgotten')    document.getElementById('lock-forgotten-min-row').style.display   = newVal ? '' : 'none';
   // Atualiza controles dependentes (botão "Selecionar locais" pra geofence)
   if (key === 'geofence_arrival' || key === 'geofence_departure') {
     const kind = key === 'geofence_arrival' ? 'arrival' : 'departure';
@@ -2887,7 +2943,7 @@ window.markMaintDone = async function(id) {
 };
 
   // Expõe handlers de onclick no window
-  Object.assign(window, { openSub: typeof openSub !== 'undefined' ? openSub : undefined, closeSub: typeof closeSub !== 'undefined' ? closeSub : undefined, saveSection: typeof saveSection !== 'undefined' ? saveSection : undefined, toggle2fa: typeof toggle2fa !== 'undefined' ? toggle2fa : undefined, confirmClearHistory: typeof confirmClearHistory !== 'undefined' ? confirmClearHistory : undefined, confirmClearPwaCache: typeof confirmClearPwaCache !== 'undefined' ? confirmClearPwaCache : undefined, clearDriveHistory: typeof clearDriveHistory !== 'undefined' ? clearDriveHistory : undefined, confirmClearEventLogs: typeof confirmClearEventLogs !== 'undefined' ? confirmClearEventLogs : undefined, openMaintAdd: openMaintAdd, closeMaintModal: closeMaintModal, saveMaintItem: saveMaintItem, deleteMaintItem: deleteMaintItem, markMaintDone: markMaintDone, saveVehicle: saveVehicle, setChargeLimit: setChargeLimit, actionReprocessPlaces: actionReprocessPlaces, actionRecomputeTripCosts: actionRecomputeTripCosts, actionRestartBridge: actionRestartBridge, actionUpdateBridge: actionUpdateBridge, openPlaceAdd: openPlaceAdd, openPlaceEdit: openPlaceEdit, closePlaceModal: closePlaceModal, usePlaceGps: usePlaceGps, savePlace: savePlace, deletePlace: deletePlace, toggleNotif: toggleNotif, _onNotifDeviceChange: _onNotifDeviceChange, renameNotifDevice: renameNotifDevice, removeNotifDevice: removeNotifDevice, renameMyDevice: renameMyDevice, forceSubscribePush: forceSubscribePush, openNotifDevicePicker: openNotifDevicePicker, closeNotifDevicePicker: closeNotifDevicePicker, _pickNotifDevice: _pickNotifDevice, renameNotifDeviceById: renameNotifDeviceById, removeNotifDeviceById: removeNotifDeviceById, changePassword: changePassword, toggle2faNew: toggle2faNew, closeTotpModal: closeTotpModal, activate2fa: activate2fa, show2faBackup: show2faBackup, regenBackupCodes: regenBackupCodes, openGeofencePlaces: openGeofencePlaces, _toggleGeofencePick: _toggleGeofencePick, saveGeofencePlaces: saveGeofencePlaces, toggleChargeEnding: toggleChargeEnding, editChargeEndingMin: editChargeEndingMin, downloadBackup: downloadBackup, uploadBackup: uploadBackup, copyBackupToClipboard: copyBackupToClipboard, shareBackup: shareBackup, clearLocalCache: clearLocalCache, toggleDiag: toggleDiag, saveDiagInterval: saveDiagInterval, exportDiag: exportDiag, clearDiag: clearDiag, openDiagSet: openDiagSet, confirmDiagSet: confirmDiagSet, _scheduleDiagRender: _scheduleDiagRender });
+  Object.assign(window, { openSub: typeof openSub !== 'undefined' ? openSub : undefined, closeSub: typeof closeSub !== 'undefined' ? closeSub : undefined, saveSection: typeof saveSection !== 'undefined' ? saveSection : undefined, toggle2fa: typeof toggle2fa !== 'undefined' ? toggle2fa : undefined, confirmClearHistory: typeof confirmClearHistory !== 'undefined' ? confirmClearHistory : undefined, confirmClearPwaCache: typeof confirmClearPwaCache !== 'undefined' ? confirmClearPwaCache : undefined, clearDriveHistory: typeof clearDriveHistory !== 'undefined' ? clearDriveHistory : undefined, confirmClearEventLogs: typeof confirmClearEventLogs !== 'undefined' ? confirmClearEventLogs : undefined, openMaintAdd: openMaintAdd, closeMaintModal: closeMaintModal, saveMaintItem: saveMaintItem, deleteMaintItem: deleteMaintItem, markMaintDone: markMaintDone, saveVehicle: saveVehicle, setChargeLimit: setChargeLimit, actionReprocessPlaces: actionReprocessPlaces, actionRecomputeTripCosts: actionRecomputeTripCosts, actionRestartBridge: actionRestartBridge, actionUpdateBridge: actionUpdateBridge, openPlaceAdd: openPlaceAdd, openPlaceEdit: openPlaceEdit, closePlaceModal: closePlaceModal, usePlaceGps: usePlaceGps, savePlace: savePlace, deletePlace: deletePlace, toggleNotif: toggleNotif, _onNotifDeviceChange: _onNotifDeviceChange, renameNotifDevice: renameNotifDevice, removeNotifDevice: removeNotifDevice, renameMyDevice: renameMyDevice, forceSubscribePush: forceSubscribePush, openNotifDevicePicker: openNotifDevicePicker, closeNotifDevicePicker: closeNotifDevicePicker, _pickNotifDevice: _pickNotifDevice, renameNotifDeviceById: renameNotifDeviceById, removeNotifDeviceById: removeNotifDeviceById, changePassword: changePassword, toggle2faNew: toggle2faNew, closeTotpModal: closeTotpModal, activate2fa: activate2fa, show2faBackup: show2faBackup, regenBackupCodes: regenBackupCodes, openGeofencePlaces: openGeofencePlaces, _toggleGeofencePick: _toggleGeofencePick, saveGeofencePlaces: saveGeofencePlaces, saveWindowForgottenMin: saveWindowForgottenMin, saveLockForgottenMin: saveLockForgottenMin, toggleChargeEnding: toggleChargeEnding, editChargeEndingMin: editChargeEndingMin, downloadBackup: downloadBackup, uploadBackup: uploadBackup, copyBackupToClipboard: copyBackupToClipboard, shareBackup: shareBackup, clearLocalCache: clearLocalCache, toggleDiag: toggleDiag, saveDiagInterval: saveDiagInterval, exportDiag: exportDiag, clearDiag: clearDiag, openDiagSet: openDiagSet, confirmDiagSet: confirmDiagSet, _scheduleDiagRender: _scheduleDiagRender });
   if (!window['initView_config']) window['initView_config'] = function() {};
 })();
 </script>

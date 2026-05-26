@@ -274,6 +274,10 @@ const NOTIF_DEFAULTS = {
   batt12_low:        false,   // bateria auxiliar 12V abaixo de 50%
   daily_summary:     false,   // resumo diário às 20h (km, kWh, recargas)
   charge_slow:       false,   // alerta quando potência de recarga cai >30% do pico por 5+ min
+  window_forgotten:     false, // vidro aberto X min após motor desligar
+  window_forgotten_min: 10,    // minutos antes de alertar (padrão 10)
+  lock_forgotten:       false, // carro destravado X min após motor desligar
+  lock_forgotten_min:   5,     // minutos antes de alertar (padrão 5)
 };
 let notifPrefs = { ...NOTIF_DEFAULTS };
 try {
@@ -1109,6 +1113,64 @@ function _scheduleAcParkedAlert() {
     _acParkedSentAt = Date.now();
     sendPush('❄️ AC ligado com carro parado',
       `Ventilação ${fan}/7 há mais de ${mins} min. Lembre de desligar.`, 'ac_on_parked');
+  }, mins * 60_000);
+}
+
+// ── Vidros esquecidos abertos após motor desligar ─────────────────────────────
+let _windowForgottenTimer  = null;
+let _windowForgottenSentAt = 0;
+
+function _cancelWindowForgottenTimer() {
+  if (_windowForgottenTimer) { clearTimeout(_windowForgottenTimer); _windowForgottenTimer = null; }
+}
+
+function _scheduleWindowForgottenAlert() {
+  _cancelWindowForgottenTimer();
+  // Usa o menor delay entre os devices com a notif ativa (ou global default)
+  const minsArr = pushSubs
+    .map(s => getPrefsForDevice(s.device_id))
+    .filter(p => p.window_forgotten)
+    .map(p => Math.max(1, +(p.window_forgotten_min) || 10));
+  if (!minsArr.length) return;   // nenhum device ativou — não agenda
+  const mins = Math.min(...minsArr);
+  _windowForgottenTimer = setTimeout(() => {
+    _windowForgottenTimer = null;
+    if (state.engine_state !== '0') return;                          // motor voltou
+    const openNames = ['fl','fr','rl','rr']
+      .filter(s => state[`window_${s}`] === 'on')
+      .map(s => WINDOW_NAMES[s] || s.toUpperCase());
+    if (!openNames.length) return;                                    // tudo fechado
+    if (Date.now() - _windowForgottenSentAt < 30 * 60_000) return;  // cooldown 30 min
+    _windowForgottenSentAt = Date.now();
+    sendPush('🪟 Vidro aberto com carro desligado',
+      `${openNames.join(', ')} há mais de ${mins} min.`, 'window_forgotten');
+  }, mins * 60_000);
+}
+
+// ── Carro destravado após motor desligar ──────────────────────────────────────
+let _lockForgottenTimer  = null;
+let _lockForgottenSentAt = 0;
+
+function _cancelLockForgottenTimer() {
+  if (_lockForgottenTimer) { clearTimeout(_lockForgottenTimer); _lockForgottenTimer = null; }
+}
+
+function _scheduleLockForgottenAlert() {
+  _cancelLockForgottenTimer();
+  const minsArr = pushSubs
+    .map(s => getPrefsForDevice(s.device_id))
+    .filter(p => p.lock_forgotten)
+    .map(p => Math.max(1, +(p.lock_forgotten_min) || 5));
+  if (!minsArr.length) return;
+  const mins = Math.min(...minsArr);
+  _lockForgottenTimer = setTimeout(() => {
+    _lockForgottenTimer = null;
+    if (state.engine_state !== '0') return;        // motor voltou
+    if (state.lock_state !== 'on') return;          // foi trancado
+    if (Date.now() - _lockForgottenSentAt < 30 * 60_000) return;
+    _lockForgottenSentAt = Date.now();
+    sendPush('🔓 Carro destravado com motor desligado',
+      `Carro continua destrancado há mais de ${mins} min.`, 'lock_forgotten');
   }, mins * 60_000);
 }
 
@@ -3912,7 +3974,7 @@ app.post('/api/notif/prefs/:device_id', (req, res) => {
   } else if (typeof def === 'number') {
     const n = parseInt(value);
     if (isNaN(n)) return res.status(400).json({ error: 'valor numérico inválido' });
-    notifPrefsByDevice[id][key] = Math.max(1, Math.min(20, n));
+    notifPrefsByDevice[id][key] = Math.max(1, Math.min(60, n));
   } else {
     notifPrefsByDevice[id][key] = !!value;
   }
@@ -5226,6 +5288,11 @@ function applyGwmEntity(id, value, isRetained = false) {
         sendPush('🔑 Motor desligado', 'O veículo foi desligado.', 'engine_off');
         _fuelLAtPark = +state.fuel_l || 0;
         _fuelParkTs  = Date.now();
+        _scheduleWindowForgottenAlert();
+        _scheduleLockForgottenAlert();
+      } else {
+        _cancelWindowForgottenTimer();
+        _cancelLockForgottenTimer();
       }
     }
     return;
@@ -5303,6 +5370,11 @@ function applyMqttMessage(key, value, isRetained = false) {
         } else if (value === '0') {
           addEvent('engine_off', 'Motor desligado');
           sendPush('🔑 Motor desligado', 'O veículo foi desligado.', 'engine_off');
+          _scheduleWindowForgottenAlert();
+          _scheduleLockForgottenAlert();
+        } else {
+          _cancelWindowForgottenTimer();
+          _cancelLockForgottenTimer();
         }
       }
       break;
@@ -5328,7 +5400,10 @@ function applyMqttMessage(key, value, isRetained = false) {
         if (norm !== prevLockState) {
           prevLockState = norm;
           if (norm === 'on') addEvent('lock_open',  'Carro destrancado', realTs);
-          else               addEvent('lock_close', 'Carro trancado',    realTs);
+          else {
+            addEvent('lock_close', 'Carro trancado', realTs);
+            _cancelLockForgottenTimer();   // carro foi trancado — cancela alerta
+          }
         }
       }, HYSTERESIS_MS);
       break;
@@ -5485,7 +5560,12 @@ function applyMqttMessage(key, value, isRetained = false) {
           const label = WINDOW_NAMES[wside] || wside.toUpperCase();
           console.log(`[window:${wside}] EVENT after hysteresis: ${norm === 'on' ? 'open' : 'close'} ts=${realTs || 'now'}`);
           if (norm === 'on') addEvent('window_open',  `${label} aberto`, realTs);
-          else               addEvent('window_close', `${label} fechado`, realTs);
+          else {
+            addEvent('window_close', `${label} fechado`, realTs);
+            // Se todos os vidros estão fechados, cancela o alerta pendente
+            const anyOpen = ['fl','fr','rl','rr'].some(s => (s === wside ? norm : state[`window_${s}`]) === 'on');
+            if (!anyOpen) _cancelWindowForgottenTimer();
+          }
         }
       }, HYSTERESIS_MS);
       break;
