@@ -107,7 +107,12 @@ struct LockScreenView: View {
             HStack {
                 MiniStat(label: "Energia", value: String(format: "%.1f", state.sessionKwh), unit: "kWh")
                 Spacer()
-                MiniStat(label: "Atualizado", value: relativeTime(), unit: "")
+                VStack(alignment: .trailing, spacing: 1) {
+                    Text("Atualizado").font(.caption2).foregroundStyle(.secondary)
+                    Text(state.updatedAt, style: .relative)
+                        .font(.callout).bold()
+                        .multilineTextAlignment(.trailing)
+                }
             }
         }
         .padding(14)
@@ -122,11 +127,6 @@ struct LockScreenView: View {
         return "~\(state.remainingMin) min"
     }
 
-    private func relativeTime() -> String {
-        let fmt = RelativeDateTimeFormatter()
-        fmt.unitsStyle = .abbreviated
-        return fmt.localizedString(for: state.updatedAt, relativeTo: Date())
-    }
 }
 
 struct MiniStat: View {

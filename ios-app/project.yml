@@ -42,12 +42,8 @@ targets:
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
         ITSAppUsesNonExemptEncryption: false
-        # BG refresh: iOS exige declarar tanto o capability quanto a lista
-        # de identifiers permitidos pra BGTaskScheduler.
-        UIBackgroundModes:
-          - audio
-          - fetch
-          - processing
+        # UIBackgroundModes gerenciado direto no Info.plist (xcodegen não
+        # sobrescreve chaves já existentes, então áudio ficava faltando).
         # Quick Actions (3D/Haptic Touch no ícone do app). 4 atalhos: travar,
         # destravar, ligar motor, desligar motor. AppDelegate captura o
         # shortcut e dispara o action via URL scheme havalecotrip://action/<name>.
