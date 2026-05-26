@@ -100,7 +100,7 @@ enum class CarConstants(val value: String) {
     CAR_EV_SETTING_ENERGY_RECOVERY_LEVEL("car.ev_setting.energy_recovery_level"),
 
     // One-pedal driving — writable. 0=off, 1=on
-    CAR_CONFIGURE_PEDAL_CONTROL_ENABLE("car.configure.pedal_control_enable"),
+    CAR_EV_SETTING_PEDAL_CONTROL_ENABLE("car.ev_setting.pedal_control_enable"),
 
     // ESP stability control — writable. 0=off, 1=on
     CAR_DRIVE_SETTING_ESP_ENABLE("car.drive_setting.esp_enable"),
