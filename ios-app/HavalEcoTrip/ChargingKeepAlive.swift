@@ -171,7 +171,17 @@ final class ChargingKeepAlive: NSObject, ObservableObject {
         let activities = Activity<ChargeActivityAttributes>.activities.filter {
             $0.activityState == .active
         }
-        guard let activity = activities.first else { return }
+        guard let activity = activities.first else {
+            // Sem LA de carga. Se também não há LA de pré-climatização ativa e o
+            // modo não é "sempre", solta o keep-alive — evita gastar bateria com
+            // localização em background depois que a pré-climatização encerra.
+            let preclimatActive = !Activity<PreClimatActivityAttributes>.activities
+                .filter { $0.activityState == .active }.isEmpty
+            if !preclimatActive && Settings.keepAliveMode != .always {
+                stopBackground()
+            }
+            return
+        }
         guard let url = URL(string: Settings.bridgeURL + "/api/state") else { return }
         var req = URLRequest(url: url, timeoutInterval: 10)
         req.addValue("Bearer " + Settings.bridgeToken, forHTTPHeaderField: "Authorization")
