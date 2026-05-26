@@ -132,6 +132,7 @@ final class ActivityManager: ObservableObject {
         if let id = currentActivity?.id {
             Task { await unregisterTokenFromServer(activityId: id) }
         }
+        ChargingKeepAlive.shared.chargingDidStop()
         stopPolling()
         guard let activity = currentActivity else { return }
         let final = ChargeActivityAttributes.ContentState(

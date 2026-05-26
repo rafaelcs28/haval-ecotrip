@@ -82,11 +82,13 @@ struct ContentView: View {
             if newPhase == .active {
                 Task { await manager.autoStartIfCharging() }
                 notifPoller.start()
+                ChargingKeepAlive.shared.appDidForeground()
             } else if newPhase == .background {
                 notifPoller.stop()
-                // Agenda o BG refresh: iOS vai acordar o app em ~15min+ pra
-                // puxar notifs novas e disparar Local Notifications.
                 BackgroundRefresh.schedule()
+                ChargingKeepAlive.shared.appDidBackground(
+                    hasActiveCharging: manager.currentActivity != nil
+                )
             }
         }
     }
@@ -96,9 +98,10 @@ struct ContentView: View {
 struct SetupView: View {
     @ObservedObject var manager: ActivityManager
     @Binding var isPresented: Bool
-    @State private var url:   String = Settings.bridgeURL
-    @State private var token: String = Settings.bridgeToken
+    @State private var url:           String = Settings.bridgeURL
+    @State private var token:         String = Settings.bridgeToken
     @State private var showTokenPlain = false
+    @State private var keepAliveMode: Settings.KeepAliveMode = Settings.keepAliveMode
 
     var body: some View {
         NavigationStack {
@@ -124,6 +127,19 @@ struct SetupView: View {
                     .onChange(of: token) { _, new in Settings.bridgeToken = new }
                     Text("Mesmo bridge_token do PWA. Copia do localStorage do Safari/Chrome.")
                         .font(.caption).foregroundStyle(.secondary)
+                }
+
+                Section {
+                    Picker("Live Activity em background", selection: $keepAliveMode) {
+                        ForEach(Settings.KeepAliveMode.allCases, id: \.self) { mode in
+                            Text(mode.label).tag(mode)
+                        }
+                    }
+                    .onChange(of: keepAliveMode) { _, new in Settings.keepAliveMode = new }
+                    Text("Áudio silencioso mantém o app ativo e atualiza a Live Activity a cada 30s. Não interrompe música. "Enquanto carrega" é o recomendado.")
+                        .font(.caption).foregroundStyle(.secondary)
+                } header: {
+                    Text("Segundo plano")
                 }
 
                 Section("Como funciona") {

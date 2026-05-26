@@ -887,7 +887,7 @@ const state = {
 function deepMergeState(target, source) {
   for (const [k, v] of Object.entries(source)) {
     if (v !== null && v !== undefined) {
-      if (typeof v === 'object' && !Array.isArray(v) && typeof target[k] === 'object') {
+      if (typeof v === 'object' && !Array.isArray(v) && target[k] !== null && typeof target[k] === 'object') {
         deepMergeState(target[k], v);
       } else {
         target[k] = v;
@@ -908,6 +908,12 @@ if (fs.existsSync(STATE_FILE)) {
     chargeSessionStartMs = state.charge_session_start_ms || 0;
     chargeStartSoc       = state.charge_start_soc_pct   || 0;
     console.log(`✓ Estado anterior restaurado de state.json`);
+    // Retoma o timer de live-notification se o carro já estava carregando
+    // quando o server foi reiniciado. setImmediate garante que os `let` mais
+    // abaixo (ex: _chargeLiveTimer) já estão inicializados antes de chamar.
+    if (state.charging_state === 'Carregando') {
+      setImmediate(() => startChargeLiveTimer());
+    }
   } catch (e) {
     console.error('Aviso: erro ao restaurar state.json:', e.message);
   }
@@ -5254,7 +5260,10 @@ function handleChargingStateTransition(value, isRetained) {
         const remStr = rem > 0
           ? (rem > 59 ? `${Math.floor(rem / 60)}h ${rem % 60}min` : `${rem} min`)
           : '~?';
-        sendPush('⚡ Recarga iniciada', `${pwr.toFixed(1)} kW · tempo restante: ${remStr}`, 'charge_start');
+        // Usa o mesmo tag das live-updates pra que o 1º update silencioso substitua
+        // esta notif (sem acumular) em vez de criar uma segunda notification separada.
+        sendPush('⚡ Recarga iniciada', `${pwr.toFixed(1)} kW · tempo restante: ${remStr}`, 'charge_start',
+          { tag: CHARGE_LIVE_TAG });
       }, 30000);
     }
   } else if (prev === 'Carregando') {
@@ -5295,8 +5304,11 @@ function handleChargingStateTransition(value, isRetained) {
       state.charge_session_kwh_at_init = 0;
     }
   }
-  // Inicia o ciclo de "live notification" quando começa a carregar
-  if (value === 'Carregando' && !isRetained) startChargeLiveTimer();
+  // Inicia o ciclo de "live notification" quando começa a carregar.
+  // Aceita retained: se o server reinicia com o carro carregando, o broker entrega
+  // o estado como retained (packet.retain = true) e sem isso o timer nunca começa.
+  // startChargeLiveTimer() já tem guarda interna contra duplo-início.
+  if (value === 'Carregando') startChargeLiveTimer();
 }
 
 // ── Live notification durante recarga ─────────────────────────────────────────
