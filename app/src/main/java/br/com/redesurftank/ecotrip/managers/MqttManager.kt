@@ -673,7 +673,7 @@ class MqttManager private constructor() {
         } catch (e: Exception) { Log.w(TAG, "publishRegenLevelState falhou: ${e.message}") }
     }
 
-    // ── One-pedal (car.ev_setting.pedal_control_enable) ───────────────────────
+    // ── One-pedal (car.ev.setting.pedal_control_enable) ───────────────────────
     fun syncOnePedalFromCar(carVal: Int) {
         if (carVal !in setOf(0, 1)) return
         if (carVal == lastPublishedOnePedal) return
@@ -878,7 +878,7 @@ class MqttManager private constructor() {
                     if (v != null) syncRegenLevelFromCar(v)
                 } catch (e: Exception) { AppLogger.w(TAG, "Leitura inicial regen_level falhou: ${e.message}") }
                 try {
-                    val v = CarDataManager.getInstance().fetchCurrent("car.ev_setting.pedal_control_enable")?.trim()?.toIntOrNull()
+                    val v = CarDataManager.getInstance().fetchCurrent("car.ev.setting.pedal_control_enable")?.trim()?.toIntOrNull()
                     if (v != null) syncOnePedalFromCar(v)
                 } catch (e: Exception) { AppLogger.w(TAG, "Leitura inicial one_pedal falhou: ${e.message}") }
                 try {
@@ -1109,7 +1109,7 @@ class MqttManager private constructor() {
             val cdm = CarDataManager.getInstance()
             try { cdm.fetchCurrent("car.drive_setting.drive_mode")?.trim()?.toIntOrNull()?.let { syncTerrainModeFromCar(it) } } catch (_: Exception) {}
             try { cdm.fetchCurrent("car.ev_setting.energy_recovery_level")?.trim()?.toIntOrNull()?.let { syncRegenLevelFromCar(it) } } catch (_: Exception) {}
-            try { cdm.fetchCurrent("car.ev_setting.pedal_control_enable")?.trim()?.toIntOrNull()?.let { syncOnePedalFromCar(it) } } catch (_: Exception) {}
+            try { cdm.fetchCurrent("car.ev.setting.pedal_control_enable")?.trim()?.toIntOrNull()?.let { syncOnePedalFromCar(it) } } catch (_: Exception) {}
             try { cdm.fetchCurrent("car.drive_setting.esp_enable")?.trim()?.toIntOrNull()?.let { syncEspFromCar(it) } } catch (_: Exception) {}
             try { cdm.fetchCurrent("car.drive_setting.steering_wheel_assist_mode")?.trim()?.toIntOrNull()?.let { syncSteerModeFromCar(it) } } catch (_: Exception) {}
 
@@ -1719,10 +1719,10 @@ class MqttManager private constructor() {
                         publishResult("one_pedal", "error: valor inválido ('$payload')")
                         return@submit
                     }
-                    val ok = car.requestSetting(key = "car.ev_setting.pedal_control_enable", value = target.toString())
+                    val ok = car.requestSetting(key = "car.ev.setting.pedal_control_enable", value = target.toString())
                     if (!ok) { publishResult("one_pedal", "error: carro recusou ou está dormindo"); return@submit }
                     Thread.sleep(3_000)
-                    val confirmed = try { car.fetchCurrent("car.ev_setting.pedal_control_enable")?.trim()?.toIntOrNull() } catch (_: Exception) { null }
+                    val confirmed = try { car.fetchCurrent("car.ev.setting.pedal_control_enable")?.trim()?.toIntOrNull() } catch (_: Exception) { null }
                     if (confirmed != null && confirmed in setOf(0, 1)) {
                         publishOnePedalState(confirmed)
                         publishResult("one_pedal", if (confirmed == target) "ok:$confirmed" else "ok:$confirmed (solicitado $target)")
