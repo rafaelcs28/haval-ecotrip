@@ -49,6 +49,9 @@ if (!GWM_CHASSI) {
 }
 const GWM_TOPIC_PREFIX = `gwmbrasil_${GWM_CHASSI}`;
 
+// Versão do bridge — usada no endpoint /api/bridge-version e no full_state WS
+const BRIDGE_VERSION = '5.11';
+
 // Home Assistant REST — usado APENAS no boot pra puxar o estado inicial das
 // entidades que a integração GWM não publica com retain (doors, lock, AC,
 // windows, sunroof, pneus, etc). Depois disso, MQTT live cobre as mudanças.
@@ -118,6 +121,8 @@ const MAINTENANCE_FILE    = path.join(__dirname, 'maintenance.json');
 const REFUELS_FILE        = path.join(__dirname, 'refuels.json');
 const TELEMETRY_LOG_FILE  = path.join(__dirname, 'telemetry_history.json');
 const DELETED_IDS_FILE    = path.join(__dirname, 'deleted_ids.json');
+const PRECLIMAT_FILE      = path.join(__dirname, 'preclimat.json');
+const DRIVE_HISTORY_FILE  = path.join(__dirname, 'drive_history.json');
 
 // Capacidades do Haval H6 PHEV (uso pra estimar kWh atual a partir do SOC%)
 const BATTERY_CAPACITY_KWH = 34;
@@ -315,6 +320,11 @@ const NOTIF_DEFAULTS = {
   tyre_low:          false,
   tyre_high:         false,
   refuel_detected:   false,
+  ac_on_parked:      false,   // AC ligado com velocidade=0 por mais de ac_on_parked_min minutos
+  ac_on_parked_min:  10,      // minutos de tolerância antes de alertar (padrão 10)
+  batt12_low:        false,   // bateria auxiliar 12V abaixo de 50%
+  daily_summary:     false,   // resumo diário às 20h (km, kWh, recargas)
+  charge_slow:       false,   // alerta quando potência de recarga cai >30% do pico por 5+ min
 };
 let notifPrefs = { ...NOTIF_DEFAULTS };
 try {
@@ -323,6 +333,219 @@ try {
 } catch (_) {}
 function saveNotifPrefs() {
   try { fs.writeFileSync(NOTIF_PREFS_FILE, JSON.stringify(notifPrefs, null, 2)); } catch (_) {}
+}
+
+// ── Pré-climatização agendada ─────────────────────────────────────────────
+// Estrutura: { enabled, time:"HH:MM", recurrence:"once"|"daily"|"weekdays"|"weekends",
+//              temp:22.0, fan:3, lastFiredDate:"YYYY-MM-DD" }
+const PRECLIMAT_DEFAULTS = { enabled: false, time: '07:30', recurrence: 'daily', temp: 22.0, fan: 3, duration: 20, lastFiredDate: '' };
+let preclimat = { ...PRECLIMAT_DEFAULTS };
+try {
+  if (fs.existsSync(PRECLIMAT_FILE))
+    preclimat = { ...PRECLIMAT_DEFAULTS, ...JSON.parse(fs.readFileSync(PRECLIMAT_FILE, 'utf8')) };
+} catch (_) {}
+function savePreclimat() {
+  try { fs.writeFileSync(PRECLIMAT_FILE, JSON.stringify(preclimat, null, 2)); } catch (_) {}
+}
+
+// ── Resumo diário ─────────────────────────────────────────────────────────────
+// Estado operacional — não é preferência, não persiste em notif_prefs.json.
+let daily_summary_last_date = '';
+
+// ── Alerta carga desacelera ───────────────────────────────────────────────────
+let _chargePeakKw        = 0;
+let _chargeSlowAlertSent = false;
+let _chargeSlowCheckTs   = 0;
+
+// Checker rodando a cada 60s — dispara quando hora local bate com agendamento.
+let _preclimatFiring = false;
+setInterval(() => {
+  if (!preclimat.enabled || _preclimatFiring) return;
+  const now  = new Date();
+  const hhmm = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
+  if (hhmm !== preclimat.time) return;
+
+  // Evita re-disparo dentro do mesmo minuto ou no mesmo dia (recurrence=once)
+  const today = now.toISOString().slice(0, 10);
+  if (preclimat.lastFiredDate === today) return;
+
+  // Verifica dia da semana para recorrência
+  const dow = now.getDay(); // 0=Dom … 6=Sáb
+  if (preclimat.recurrence === 'weekdays' && (dow === 0 || dow === 6)) return;
+  if (preclimat.recurrence === 'weekends' && dow !== 0 && dow !== 6) return;
+
+  preclimat.lastFiredDate = today;
+  if (preclimat.recurrence === 'once') preclimat.enabled = false;
+  savePreclimat();
+
+  _preclimatFiring = true;
+  firePreClimat().finally(() => { _preclimatFiring = false; });
+}, 60_000);
+
+// ── Resumo diário às 20h ──────────────────────────────────────────────────────
+// Roda a cada 60s, dispara exatamente uma vez por dia às 20:00 local.
+setInterval(() => {
+  const now  = new Date();
+  const hhmm = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
+  if (hhmm !== '20:00') return;
+  const today = now.toISOString().slice(0, 10);
+  if (daily_summary_last_date === today) return;
+  daily_summary_last_date = today;
+
+  const todayMidnight = new Date(today + 'T00:00:00').getTime();
+
+  // km e kWh rodados hoje (das auto-trips)
+  let kmHoje  = 0;
+  let kwhHoje = 0;
+  for (const t of autoTripsArr) {
+    if ((t.startMs || 0) >= todayMidnight) {
+      kmHoje  += +t.distKm || 0;
+      kwhHoje += +t.netKwh || 0;
+    }
+  }
+
+  // Recargas finalizadas hoje (eventos charge_end)
+  const chargesHoje = eventsLog.filter(e => e.type === 'charge_end' && (e.ts || 0) >= todayMidnight).length;
+
+  if (kmHoje <= 0 && chargesHoje <= 0) return; // nada a reportar
+
+  const kmStr  = kmHoje.toFixed(0);
+  // netKwh é negativo quando energia é consumida; exibe o valor absoluto
+  const kwhStr = Math.abs(kwhHoje).toFixed(1).replace('.', ',');
+  const parts  = [`${kmStr} km rodados`, `${kwhStr} kWh`];
+  if (chargesHoje > 0) parts.push(`${chargesHoje} recarga${chargesHoje > 1 ? 's' : ''}`);
+
+  sendPush('📊 Resumo do dia', parts.join(' · '), 'daily_summary', { tag: 'daily_summary' });
+}, 60_000);
+
+async function firePreClimat() {
+  const { temp, fan, duration } = preclimat;
+  console.log(`[preclimat] disparando — temp=${temp}°C fan=${fan}`);
+
+  // Passo 1: ligar motor via HA (mesmo mecanismo do botão do dashboard)
+  if (HA_URL && HA_TOKEN) {
+    const entityId = `button.${GWM_TOPIC_PREFIX}_ligar_o_motor`;
+    try {
+      const r = await fetch(`${HA_URL}/api/services/button/press`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${HA_TOKEN}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ entity_id: entityId }),
+      });
+      if (!r.ok) throw new Error(`HA HTTP ${r.status}`);
+      console.log('[preclimat] comando engine_on enviado via HA');
+    } catch (e) {
+      console.error(`[preclimat] falha ao ligar motor: ${e.message}`);
+      sendPush('⏰ Pré-climatização falhou', 'Não foi possível ligar o motor.', 'preclimat');
+      return;
+    }
+  } else {
+    console.warn('[preclimat] HA não configurado — pulando engine_on');
+  }
+
+  // Passo 2: aguardar engine_state='1' por até 2 min (poll a cada 5s)
+  const engineOk = await new Promise(resolve => {
+    if (state.engine_state === '1') return resolve(true);
+    let attempts = 0;
+    const t = setInterval(() => {
+      attempts++;
+      if (state.engine_state === '1') { clearInterval(t); resolve(true); return; }
+      if (attempts >= 24) { clearInterval(t); resolve(false); }
+    }, 5_000);
+  });
+
+  if (!engineOk) {
+    console.warn('[preclimat] timeout esperando engine_state=1');
+    sendPush('⏰ Pré-climatização falhou', 'Motor não confirmou em 2 min.', 'preclimat');
+    return;
+  }
+
+  console.log('[preclimat] motor confirmado — enviando HVAC');
+
+  // Captura estado anterior do AC antes de sobrescrever
+  const prevFan      = parseInt(state.hvac_fan_speed, 10) || 0;
+  const prevDrvTemp  = parseFloat(state.hvac_driver_temp)    || null;
+  const prevPassTemp = parseFloat(state.hvac_passenger_temp) || null;
+
+  // Passo 3: enviar temperatura e fan via MQTT
+  const fanStr  = fan.toString();
+  const tempStr = temp.toFixed(1);
+  mqttClient.publish(`${MQTT_PREFIX}/cmd/hvac/driver_temp`,    tempStr, { qos: 1, retain: false });
+  mqttClient.publish(`${MQTT_PREFIX}/cmd/hvac/passenger_temp`, tempStr, { qos: 1, retain: false });
+  mqttClient.publish(`${MQTT_PREFIX}/cmd/hvac/fan_speed`,      fanStr,  { qos: 1, retain: false });
+
+  const durStr = duration > 0 ? ` · desliga em ${duration} min` : '';
+  sendPush('⏰ Pré-climatização ativada',
+    `Motor ligado · AC ${temp.toFixed(0)}° · ventilação ${fan}/7${durStr}`, 'preclimat');
+  console.log(`[preclimat] AC ativado — temp=${temp} fan=${fan} duration=${duration}min (prev: fan=${prevFan} temp=${prevDrvTemp})`);
+
+  // Passo 4: restaurar AC ao estado anterior + desligar motor após X minutos
+  if (duration > 0) {
+    setTimeout(async () => {
+      console.log('[preclimat] timer expirado — restaurando AC e desligando motor');
+
+      // Restaura temperatura anterior (se havia) antes de desligar o fan
+      if (prevDrvTemp  !== null) mqttClient.publish(`${MQTT_PREFIX}/cmd/hvac/driver_temp`,    prevDrvTemp.toFixed(1),  { qos: 1, retain: false });
+      if (prevPassTemp !== null) mqttClient.publish(`${MQTT_PREFIX}/cmd/hvac/passenger_temp`, prevPassTemp.toFixed(1), { qos: 1, retain: false });
+      await new Promise(r => setTimeout(r, 1_000));
+      mqttClient.publish(`${MQTT_PREFIX}/cmd/hvac/fan_speed`, prevFan.toString(), { qos: 1, retain: false });
+      await new Promise(r => setTimeout(r, 3_000));
+
+      if (HA_URL && HA_TOKEN) {
+        const entityId = `button.${GWM_TOPIC_PREFIX}_desligar_o_motor`;
+        try {
+          await fetch(`${HA_URL}/api/services/button/press`, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${HA_TOKEN}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ entity_id: entityId }),
+          });
+          console.log('[preclimat] engine_off enviado via HA');
+        } catch (e) {
+          console.error(`[preclimat] falha ao desligar motor: ${e.message}`);
+        }
+      }
+      sendPush('⏰ Pré-climatização encerrada',
+        `AC restaurado · motor desligado após ${duration} min.`, 'preclimat');
+    }, duration * 60_000);
+  }
+}
+
+// ── Histórico de modos de condução ────────────────────────────────────────
+// Cada segmento: { dm, tm, from_ts, to_ts }
+// dm = drive_mode (0=HEV, 1=Prior.EV, 3=EV Puro)
+// tm = terrain_mode (0=Normal, 1=Sport, 2=Eco, 3=Neve, 4=Areia, 5=Lama, 11=AWD)
+const DRIVE_HISTORY_MAX = 5000;
+let driveHistory = [];
+try {
+  if (fs.existsSync(DRIVE_HISTORY_FILE))
+    driveHistory = JSON.parse(fs.readFileSync(DRIVE_HISTORY_FILE, 'utf8')) || [];
+} catch (_) {}
+function saveDriveHistory() {
+  try { fs.writeFileSync(DRIVE_HISTORY_FILE, JSON.stringify(driveHistory)); } catch (_) {}
+}
+
+let _dmSegment = null; // segmento aberto: { dm, tm, from_ts }
+
+function _closeDmSegment(to_ts) {
+  if (!_dmSegment) return;
+  const dur = to_ts - _dmSegment.from_ts;
+  if (dur >= 5_000) { // ignora transições < 5s (ruído de inicialização)
+    driveHistory.push({ dm: _dmSegment.dm, tm: _dmSegment.tm, from_ts: _dmSegment.from_ts, to_ts });
+    if (driveHistory.length > DRIVE_HISTORY_MAX) driveHistory.shift();
+    saveDriveHistory();
+  }
+  _dmSegment = null;
+}
+
+function _openDmSegment() {
+  const dm = state.drive_mode  ?? null;
+  const tm = state.terrain_mode ?? null;
+  if (dm === null || tm === null) return; // espera ter os dois
+  _dmSegment = { dm, tm, from_ts: Date.now() };
+}
+
+function _onDriveModeChange() {
+  _closeDmSegment(Date.now());
+  _openDmSegment();
 }
 
 // ── Preferências por device ────────────────────────────────────────────────
@@ -540,7 +763,7 @@ try {
 } catch (e) { console.error('Aviso: erro ao carregar auto-trips:', e.message); }
 
 // ── Log de eventos ────────────────────────────────────────────────────────────
-const MAX_EVENTS = 2000;
+const MAX_EVENTS = 10000;
 let eventsLog = [];
 try {
   if (fs.existsSync(EVENTS_FILE)) {
@@ -915,6 +1138,46 @@ function recomputeTankAvgPrice() {
 // Snapshot do tanque ao desligar o motor — usado pra detectar abastecimento ao religar
 let _fuelLAtPark = 0;
 let _fuelParkTs  = 0;
+
+// ── AC esquecido ligado com carro parado (velocidade = 0 por X min) ──────────
+let _acParkedTimer   = null;   // setTimeout handle
+let _acParkedSentAt  = 0;      // ts do último push para evitar re-envio imediato
+
+function _cancelAcParkedTimer() {
+  if (_acParkedTimer) { clearTimeout(_acParkedTimer); _acParkedTimer = null; }
+}
+
+function _scheduleAcParkedAlert() {
+  _cancelAcParkedTimer();
+  if (!notifPrefs.ac_on_parked) return;
+  const mins = Math.max(1, +(notifPrefs.ac_on_parked_min) || 10);
+  _acParkedTimer = setTimeout(() => {
+    _acParkedTimer = null;
+    if ((+state.speed_kmh || 0) > 0) return;             // carro se moveu
+    const fan = parseInt(state.hvac_fan_speed, 10) || 0;
+    if (fan === 0) return;                                // AC foi desligado
+    if (Date.now() - _acParkedSentAt < 30 * 60_000) return; // re-envio mín 30 min
+    _acParkedSentAt = Date.now();
+    sendPush('❄️ AC ligado com carro parado',
+      `Ventilação ${fan}/7 há mais de ${mins} min. Lembre de desligar.`, 'ac_on_parked');
+  }, mins * 60_000);
+}
+
+// ── Bateria 12V baixa ────────────────────────────────────────────────────────
+let _batt12LowSentAt = 0;
+const BATT12_LOW_PCT = 50;       // threshold %
+const BATT12_LOW_COOLDOWN = 60 * 60_000; // 1 hora entre notifs
+
+function checkBatt12Low() {
+  if (!notifPrefs.batt12_low) return;
+  const pct = +state.batt_12v_pct || 0;
+  if (pct <= 0 || pct > BATT12_LOW_PCT) return;
+  if (Date.now() - _batt12LowSentAt < BATT12_LOW_COOLDOWN) return;
+  _batt12LowSentAt = Date.now();
+  sendPush('🔋 Bateria auxiliar baixa',
+    `12V em ${pct.toFixed(0)}% · verifique se há dreno excessivo.`, 'batt12_low');
+}
+
 const REFUEL_MIN_LITERS = 5;          // threshold mínimo pra detectar abastecimento
 
 function checkRefuelOnEngineOn() {
@@ -3559,6 +3822,12 @@ app.get('/api/config', (_req, res) => {
   });
 });
 
+// Retorna versão do bridge e versão mínima de app compatível.
+// Útil para o PWA alertar quando o bridge está desatualizado.
+app.get('/api/bridge-version', (_req, res) => {
+  res.json({ version: BRIDGE_VERSION, min_app_version: '5.0' });
+});
+
 // ── Push Notifications ────────────────────────────────────────────────────────
 app.get('/api/push/vapid-key', (_req, res) => res.json({ key: vapidKeys.publicKey }));
 
@@ -4207,6 +4476,82 @@ app.post('/api/action/:name', async (req, res) => {
   }
 });
 
+// ── Pré-climatização — GET / POST / DELETE ────────────────────────────────
+app.get('/api/preclimat', requireAuth, (_req, res) => res.json(preclimat));
+
+app.post('/api/preclimat', requireAuth, (req, res) => {
+  const { enabled, time, recurrence, temp, fan, duration } = req.body;
+  if (time !== undefined) {
+    if (!/^\d{2}:\d{2}$/.test(time)) return res.status(400).json({ error: 'time inválido (HH:MM)' });
+    preclimat.time = time;
+  }
+  if (recurrence !== undefined) {
+    if (!['once', 'daily', 'weekdays', 'weekends'].includes(recurrence))
+      return res.status(400).json({ error: 'recurrence inválido' });
+    preclimat.recurrence = recurrence;
+  }
+  if (temp !== undefined) {
+    const t = parseFloat(temp);
+    if (isNaN(t) || t < 16 || t > 32) return res.status(400).json({ error: 'temp fora do range 16-32' });
+    preclimat.temp = t;
+  }
+  if (fan !== undefined) {
+    const f = parseInt(fan, 10);
+    if (isNaN(f) || f < 1 || f > 7) return res.status(400).json({ error: 'fan fora do range 1-7' });
+    preclimat.fan = f;
+  }
+  if (duration !== undefined) {
+    const d = parseInt(duration, 10);
+    if (isNaN(d) || d < 0 || d > 180) return res.status(400).json({ error: 'duration fora do range 0-180 min' });
+    preclimat.duration = d;
+  }
+  if (enabled !== undefined) preclimat.enabled = !!enabled;
+  savePreclimat();
+  res.json(preclimat);
+});
+
+app.delete('/api/preclimat', requireAuth, (_req, res) => {
+  preclimat = { ...PRECLIMAT_DEFAULTS };
+  savePreclimat();
+  res.json({ ok: true });
+});
+
+// ── Histórico de modos — GET /api/drive-history ───────────────────────────
+app.get('/api/drive-history', requireAuth, (req, res) => {
+  const since = parseInt(req.query.since || '0', 10);
+  const segs   = since > 0 ? driveHistory.filter(s => s.to_ts > since) : driveHistory;
+
+  // Agrega: soma duração e conta por combinação dm+tm
+  const map = new Map();
+  for (const s of segs) {
+    const key = `${s.dm}_${s.tm}`;
+    const dur = s.to_ts - s.from_ts;
+    if (!map.has(key)) map.set(key, { dm: s.dm, tm: s.tm, total_ms: 0, count: 0 });
+    const e = map.get(key);
+    e.total_ms += dur;
+    e.count++;
+  }
+
+  // Segmento aberto (modo atual ainda em andamento)
+  if (_dmSegment) {
+    const key = `${_dmSegment.dm}_${_dmSegment.tm}`;
+    const dur = Date.now() - _dmSegment.from_ts;
+    if (!map.has(key)) map.set(key, { dm: _dmSegment.dm, tm: _dmSegment.tm, total_ms: 0, count: 0 });
+    map.get(key).total_ms += dur;
+  }
+
+  const stats = [...map.values()].sort((a, b) => b.total_ms - a.total_ms);
+  res.json({ stats, segments: segs.length + (_dmSegment ? 1 : 0) });
+});
+
+// ── Drive history clear ───────────────────────────────────────────────────────
+app.post('/api/drive-history/clear', requireAuth, (req, res) => {
+  driveHistory.length = 0;
+  _dmSegment = null;
+  try { fs.writeFileSync(DRIVE_HISTORY_FILE, '[]'); } catch (_) {}
+  res.json({ ok: true });
+});
+
 // ── HVAC commands ────────────────────────────────────────────────────────────
 // Publica em `${MQTT_PREFIX}/cmd/hvac/<control>` — o APK escuta e usa
 // CarDataManager.requestSetting() pra escrever no barramento via Shizuku.
@@ -4295,7 +4640,7 @@ app.post('/api/hvac/:control', (req, res) => {
 app.get('/api/events', requireAuth, (req, res) => {
   const since = parseInt(req.query.since || '0', 10);
   let result  = since > 0 ? eventsLog.filter(e => e.ts > since) : eventsLog;
-  res.json(result.slice(0, 1000));
+  res.json(result.slice(0, 10000));
 });
 
 // ── WebSocket ─────────────────────────────────────────────────────────────────
@@ -4318,7 +4663,7 @@ function _handleWsConnection(ws, req) {
   clients.add(ws);
   ws.isAlive = true;
   ws.on('pong', () => { ws.isAlive = true; });
-  ws.send(JSON.stringify({ type: 'full_state', data: state, startedAt: SERVER_START_AT }));
+  ws.send(JSON.stringify({ type: 'full_state', data: state, startedAt: SERVER_START_AT, bridge_version: BRIDGE_VERSION }));
   ws.on('close', () => clients.delete(ws));
   ws.on('error', () => clients.delete(ws));
 }
@@ -4705,6 +5050,10 @@ function handleChargingStateTransition(value, isRetained) {
     state.charge_max_power_kw        = 0;
     state.charge_avg_power_kw        = 0;
     state.charge_session_kwh_at_init = 0;
+    // Reinicia tracking de desaceleração da recarga
+    _chargePeakKw        = 0;
+    _chargeSlowAlertSent = false;
+    _chargeSlowCheckTs   = 0;
     addEvent('charge_start', `Recarga iniciada · SOC: ${chargeStartSoc.toFixed(0)}%`);
     if (!isRetained) {
       // Aguarda 30s para a potência estabilizar antes de notificar
@@ -4721,7 +5070,7 @@ function handleChargingStateTransition(value, isRetained) {
     }
   } else if (prev === 'Carregando') {
     if (chargeStartTimer) { clearTimeout(chargeStartTimer); chargeStartTimer = null; }
-    chargeEndingNotifSent = false;  // reset para próxima sessão
+    chargeEndingNotifSent = false;       // reset para próxima sessão
     const endSoc = state.soc_pct || 0;
     addEvent('charge_end', `Recarga concluída · SOC: ${chargeStartSoc.toFixed(0)}% → ${endSoc.toFixed(0)}%`);
     // Calcula temperatura média da sessão encerrada
@@ -4933,12 +5282,10 @@ function applyGwmEntity(id, value, isRetained = false) {
       if (value === '1') {
         addEvent('engine_on',  'Motor ligado');
         sendPush('🔑 Motor ligado',  'O veículo foi ligado.', 'engine_on');
-        // Transição off→on: compara fuel atual com snapshot ao desligar
         checkRefuelOnEngineOn();
       } else if (value === '0') {
         addEvent('engine_off', 'Motor desligado');
         sendPush('🔑 Motor desligado', 'O veículo foi desligado.', 'engine_off');
-        // Snapshot: fuel_l quando o motor desliga, comparado quando voltar a ligar
         _fuelLAtPark = +state.fuel_l || 0;
         _fuelParkTs  = Date.now();
       }
@@ -5078,7 +5425,16 @@ function applyMqttMessage(key, value, isRetained = false) {
     case 'seat_vent_pass': state.seat_vent_pass = value; break; // '0'..'3'
     case 'hvac_driver_temp':    state.hvac_driver_temp    = value; break; // float °C
     case 'hvac_passenger_temp': state.hvac_passenger_temp = value; break; // float °C (pendente)
-    case 'hvac_fan_speed':      state.hvac_fan_speed      = value; break; // int 0..N
+    case 'hvac_fan_speed': {
+      state.hvac_fan_speed = value;
+      const fan = parseInt(value, 10) || 0;
+      if (fan === 0) {
+        _cancelAcParkedTimer(); // AC desligado — cancela alerta pendente
+      } else if (state.engine_state === '0') {
+        _scheduleAcParkedAlert(); // AC ligou com motor parado — agenda alerta
+      }
+      break;
+    }
     case 'hvac_sync_enable':    state.hvac_sync_enable    = value; break; // '0'|'1'
     case 'hvac_auto_enable':    state.hvac_auto_enable    = value; break; // '0'|'1'
     case 'hvac_ac_enable':      state.hvac_ac_enable      = value; break; // '0'|'1' — car.hvac.ac_enable
@@ -5235,7 +5591,18 @@ function applyMqttMessage(key, value, isRetained = false) {
     }
 
     // Telemetria ao vivo
-    case 'speed_kmh':         state.speed_kmh          = num(value); break;
+    case 'speed_kmh': {
+      const prevSpeed = +state.speed_kmh || 0;
+      state.speed_kmh = num(value);
+      const curSpeed  = +state.speed_kmh || 0;
+      if (curSpeed > 0) {
+        _cancelAcParkedTimer(); // carro em movimento — cancela alerta pendente
+      } else if (prevSpeed > 0) {
+        // Carro acabou de parar; agenda alerta se AC estiver ligado
+        if ((parseInt(state.hvac_fan_speed, 10) || 0) > 0) _scheduleAcParkedAlert();
+      }
+      break;
+    }
     case 'gear': {
       const prevG = prevGearForTrip;
       state.gear = value || '--';
@@ -5289,6 +5656,23 @@ function applyMqttMessage(key, value, isRetained = false) {
         // de 100+ kW na média. Janela maior amortece o ruído inicial.
         if (elapsedH > 0.0167 && deltaKwh > 0.1) {
           state.charge_avg_power_kw = +(deltaKwh / elapsedH).toFixed(2);
+        }
+        // ── Alerta carga desacelera ──────────────────────────────────────────
+        // Rastreia pico da sessão e detecta queda >30% sustentada por 5+ min.
+        if (p > _chargePeakKw) _chargePeakKw = p;
+        if (_chargePeakKw > 3 && p < _chargePeakKw * 0.7 && !_chargeSlowAlertSent) {
+          if (_chargeSlowCheckTs === 0) _chargeSlowCheckTs = Date.now();
+          if (Date.now() - _chargeSlowCheckTs > 5 * 60_000) {
+            _chargeSlowAlertSent = true;
+            sendPush(
+              '⚡ Carga desacelerou',
+              `Potência caiu de ${_chargePeakKw.toFixed(1)} para ${p.toFixed(1)} kW · possível limitação térmica`,
+              'charge_slow',
+              { tag: 'charge_slow' }
+            );
+          }
+        } else if (p >= _chargePeakKw * 0.7) {
+          _chargeSlowCheckTs = 0; // recuperou — reinicia janela de 5 min
         }
       }
       break;
@@ -5365,7 +5749,7 @@ function applyMqttMessage(key, value, isRetained = false) {
       break;
     case 'ha/drive_mode/state': {
       const m = parseInt(value);
-      if ([0, 1, 3].includes(m)) state.drive_mode = m;
+      if ([0, 1, 3].includes(m)) { state.drive_mode = m; _onDriveModeChange(); }
       break;
     }
     case 'cmd/drive_mode/result':
@@ -5389,7 +5773,7 @@ function applyMqttMessage(key, value, isRetained = false) {
       break;
     case 'ha/terrain_mode/state': {
       const m = parseInt(value);
-      if ([0,1,2,3,4,5,11].includes(m)) state.terrain_mode = m;
+      if ([0,1,2,3,4,5,11].includes(m)) { state.terrain_mode = m; _onDriveModeChange(); }
       break;
     }
     case 'cmd/terrain_mode/result':
@@ -5446,7 +5830,7 @@ function applyMqttMessage(key, value, isRetained = false) {
       break;
     }
     case 'odometer_km':       state.odometer_km         = num(value); checkMaintenanceAlerts(); break;
-    case 'batt_12v_pct':      state.batt_12v_pct        = num(value); break;
+    case 'batt_12v_pct':      state.batt_12v_pct        = num(value); checkBatt12Low(); break;
     case 'range_ev_km':       state.range_ev_km         = Math.round(num(value)); break;
     case 'range_ice_km':      state.range_ice_km        = Math.round(num(value)); break;
     case 'battery_power_pct': state.battery_power_pct = Math.round(num(value)); break;

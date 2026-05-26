@@ -420,6 +420,19 @@
       <div class="ic">⚡</div>
       <div class="msg" id="empty-msg">Nenhum registro encontrado na data selecionada...</div>
     </div>
+
+    <!-- Histórico de cargas (colapsável, carrega ao expandir) -->
+    <div id="charges-history-section" style="margin-top:12px;margin-bottom:12px">
+      <div id="charges-history-toggle"
+           onclick="toggleChargesHistory()"
+           style="display:flex;align-items:center;justify-content:space-between;
+                  background:rgba(31,31,31,.85);border:1px solid rgba(255,255,255,.06);
+                  border-radius:12px;padding:12px 14px;cursor:pointer;user-select:none">
+        <span style="font-size:13px;font-weight:700;color:#cbd5e1">📋 Histórico de cargas</span>
+        <span id="charges-history-chevron" style="font-size:14px;color:#475569;transition:transform .2s">›</span>
+      </div>
+      <div id="charges-history-body" style="display:none;margin-top:6px"></div>
+    </div>
   </div>
 
   <!-- Calendar modal (overlay) -->
@@ -1609,6 +1622,103 @@ function updateTabbarHeights() {
   document.documentElement.style.setProperty('--subtab-h', sub + 'px');
 }
 
+// ── Histórico de cargas ─────────────────────────────────────────────────────
+let _chargesHistoryLoaded = false;
+let _chargesHistoryOpen = false;
+
+function toggleChargesHistory() {
+  _chargesHistoryOpen = !_chargesHistoryOpen;
+  const body = document.getElementById('charges-history-body');
+  const chev = document.getElementById('charges-history-chevron');
+  if (!body || !chev) return;
+  body.style.display = _chargesHistoryOpen ? '' : 'none';
+  chev.style.transform = _chargesHistoryOpen ? 'rotate(90deg)' : '';
+  if (_chargesHistoryOpen && !_chargesHistoryLoaded) {
+    _loadChargesHistory();
+  }
+}
+
+async function _loadChargesHistory() {
+  const body = document.getElementById('charges-history-body');
+  if (!body) return;
+  body.innerHTML = '<div style="font-size:11px;color:var(--muted);padding:10px;text-align:center">Carregando…</div>';
+
+  const tk = localStorage.getItem('bridge_token');
+  if (!tk) {
+    // Use data already in `items` array (memory cache)
+    _renderChargesHistory(items.filter(i => i.type === 'recarga'));
+    return;
+  }
+  try {
+    const r = await fetch('/api/charges', { headers: { 'Authorization': 'Bearer ' + tk } });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const raw = await r.json();
+    const charges = (Array.isArray(raw) ? raw : (raw.charges || [])).map(c => {
+      const ovr = c.cost_override;
+      const overrideNum = ovr ? (+ovr.total || 0) : null;
+      const computedCost = overrideNum != null ? overrideNum : (+c.cost || 0);
+      return {
+        ts: c.timestamp_ms || c.ts,
+        kwh: c.energy_kwh ?? c.kwh,
+        duration_sec: c.duration_sec,
+        avg_power_kw: c.avg_power_kw,
+        soc_start: c.soc_start,
+        soc_end: c.soc_end,
+        cost: computedCost,
+        override_cost: overrideNum,
+        location: c.location_name || null,
+      };
+    });
+    _chargesHistoryLoaded = true;
+    _renderChargesHistory(charges);
+  } catch (e) {
+    if (body) body.innerHTML = `<div style="font-size:11px;color:var(--red);padding:10px;text-align:center">✗ Erro ao carregar: ${e.message}</div>`;
+  }
+}
+
+function _renderChargesHistory(charges) {
+  const body = document.getElementById('charges-history-body');
+  if (!body) return;
+  const list = charges.slice().sort((a, b) => b.ts - a.ts).slice(0, 20);
+  if (!list.length) {
+    body.innerHTML = '<div style="font-size:11px;color:var(--muted);padding:10px;text-align:center">Nenhuma recarga registrada</div>';
+    return;
+  }
+  // Calcula potência máxima do conjunto para a barra proporcional
+  const maxPwr = Math.max(...list.map(c => c.avg_power_kw || 0), 1);
+
+  body.innerHTML = list.map(c => {
+    const dt = new Date(c.ts).toLocaleString('pt-BR', { day:'2-digit', month:'2-digit', year:'2-digit', hour:'2-digit', minute:'2-digit' });
+    const kwh = (c.kwh || 0).toFixed(2);
+    const dur = fmtDuration(c.duration_sec);
+    const socLine = (c.soc_start != null && c.soc_end != null)
+      ? `${c.soc_start}% → ${c.soc_end}%`
+      : '—';
+    const costStr = c.cost > 0 ? `R$ ${c.cost.toFixed(2).replace('.', ',')}` : '—';
+    const pwr = c.avg_power_kw || 0;
+    const barPct = Math.round((pwr / maxPwr) * 100);
+    const loc = c.location ? `<div style="font-size:10px;color:var(--muted);margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">📍 ${c.location}</div>` : '';
+    return `<div style="background:rgba(31,31,31,.85);border:1px solid rgba(255,255,255,.05);border-radius:10px;padding:10px 12px;margin-bottom:6px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:11px;color:var(--muted)">${dt}</div>
+          ${loc}
+        </div>
+        <div style="font-size:14px;font-weight:700;color:var(--green);white-space:nowrap">${kwh} kWh</div>
+      </div>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;font-size:11px;color:var(--muted);margin-top:5px">
+        <span>⏱ <span style="color:#cbd5e1;font-weight:600">${dur}</span></span>
+        <span>🔋 <span style="color:#cbd5e1;font-weight:600">${socLine}</span></span>
+        <span>💰 <span style="color:#cbd5e1;font-weight:600">${costStr}</span></span>
+        <span>⚡ <span style="color:#cbd5e1;font-weight:600">${pwr.toFixed(1)} kW</span></span>
+      </div>
+      <div style="margin-top:6px;background:rgba(255,255,255,.06);border-radius:3px;height:4px;overflow:hidden">
+        <div style="width:${barPct}%;height:100%;background:var(--teal,#5eead4);border-radius:3px;transition:width .3s"></div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
 // Bootstrap — carrega dados live se houver token
 updateTabbarHeights();
 window.addEventListener('resize', updateTabbarHeights);
@@ -1756,7 +1866,7 @@ function openVersionInfo() {
   // entre views (openCalendar, setPeriod, etc) precisam ser re-expostas no
   // switchView pra não ficar apontando pra view errada.
   function _exportPostoFns() {
-    Object.assign(window, { setFilter: typeof setFilter !== 'undefined' ? setFilter : undefined, navDay: typeof navDay !== 'undefined' ? navDay : undefined, openCalendar: typeof openCalendar !== 'undefined' ? openCalendar : undefined, setPeriod: typeof setPeriod !== 'undefined' ? setPeriod : undefined, setPostoView: typeof setPostoView !== 'undefined' ? setPostoView : undefined, closeAction: typeof closeAction !== 'undefined' ? closeAction : undefined, saveCharger: typeof saveCharger !== 'undefined' ? saveCharger : undefined, saveCost: typeof saveCost !== 'undefined' ? saveCost : undefined, saveCostFree: typeof saveCostFree !== 'undefined' ? saveCostFree : undefined, saveLocation: typeof saveLocation !== 'undefined' ? saveLocation : undefined, saveMeta: typeof saveMeta !== 'undefined' ? saveMeta : undefined, saveRefuel: typeof saveRefuel !== 'undefined' ? saveRefuel : undefined, saveRefuelCost: typeof saveRefuelCost !== 'undefined' ? saveRefuelCost : undefined, openLocationEdit: typeof openLocationEdit !== 'undefined' ? openLocationEdit : undefined, openTimeline: typeof openTimeline !== 'undefined' ? openTimeline : undefined, openMerge: typeof openMerge !== 'undefined' ? openMerge : undefined, doMerge: typeof doMerge !== 'undefined' ? doMerge : undefined, openChargerEdit: typeof openChargerEdit !== 'undefined' ? openChargerEdit : undefined, openCostEdit: typeof openCostEdit !== 'undefined' ? openCostEdit : undefined, openMetaEdit: typeof openMetaEdit !== 'undefined' ? openMetaEdit : undefined, openRefuelEdit: typeof openRefuelEdit !== 'undefined' ? openRefuelEdit : undefined, openRefuelCost: typeof openRefuelCost !== 'undefined' ? openRefuelCost : undefined, changeMonth: typeof changeMonth !== 'undefined' ? changeMonth : undefined, selectDate: typeof selectDate !== 'undefined' ? selectDate : undefined });
+    Object.assign(window, { setFilter: typeof setFilter !== 'undefined' ? setFilter : undefined, toggleChargesHistory: typeof toggleChargesHistory !== 'undefined' ? toggleChargesHistory : undefined, navDay: typeof navDay !== 'undefined' ? navDay : undefined, openCalendar: typeof openCalendar !== 'undefined' ? openCalendar : undefined, setPeriod: typeof setPeriod !== 'undefined' ? setPeriod : undefined, setPostoView: typeof setPostoView !== 'undefined' ? setPostoView : undefined, closeAction: typeof closeAction !== 'undefined' ? closeAction : undefined, saveCharger: typeof saveCharger !== 'undefined' ? saveCharger : undefined, saveCost: typeof saveCost !== 'undefined' ? saveCost : undefined, saveCostFree: typeof saveCostFree !== 'undefined' ? saveCostFree : undefined, saveLocation: typeof saveLocation !== 'undefined' ? saveLocation : undefined, saveMeta: typeof saveMeta !== 'undefined' ? saveMeta : undefined, saveRefuel: typeof saveRefuel !== 'undefined' ? saveRefuel : undefined, saveRefuelCost: typeof saveRefuelCost !== 'undefined' ? saveRefuelCost : undefined, openLocationEdit: typeof openLocationEdit !== 'undefined' ? openLocationEdit : undefined, openTimeline: typeof openTimeline !== 'undefined' ? openTimeline : undefined, openMerge: typeof openMerge !== 'undefined' ? openMerge : undefined, doMerge: typeof doMerge !== 'undefined' ? doMerge : undefined, openChargerEdit: typeof openChargerEdit !== 'undefined' ? openChargerEdit : undefined, openCostEdit: typeof openCostEdit !== 'undefined' ? openCostEdit : undefined, openMetaEdit: typeof openMetaEdit !== 'undefined' ? openMetaEdit : undefined, openRefuelEdit: typeof openRefuelEdit !== 'undefined' ? openRefuelEdit : undefined, openRefuelCost: typeof openRefuelCost !== 'undefined' ? openRefuelCost : undefined, changeMonth: typeof changeMonth !== 'undefined' ? changeMonth : undefined, selectDate: typeof selectDate !== 'undefined' ? selectDate : undefined });
   }
   window._havalActivate_posto = _exportPostoFns;
   _exportPostoFns();

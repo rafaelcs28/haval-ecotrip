@@ -188,6 +188,7 @@
 .hero-card .sub { font-size: 10px; color: var(--muted); font-weight: 500; margin-top: auto; line-height: 1.4; }
 .hero-card.green .v { color: var(--green); }
 .hero-card.red .v { color: var(--red); }
+.hero-card.blue .v { color: var(--blue); }
 
 /* Ícone de bateria (horizontal, com nipple) — preenchimento por cor */
 .lvl-batt {
@@ -501,17 +502,19 @@
 
 /* Linhas finas de status (Pneus/Portas/Vidros/Clima) — clicáveis pra abrir detalhes */
 .status-lines {
-  display: flex; flex-direction: column; gap: 4px;
+  display: grid; grid-template-columns: 1fr 1fr; gap: 4px;
   margin-bottom: 6px;
 }
 .sl {
-  display: flex; align-items: center; gap: 10px;
-  padding: 9px 12px;
+  display: flex; align-items: center; gap: 8px;
+  padding: 9px 10px;
   background: rgba(31,31,31,.85);
   border: 1px solid rgba(34,197,94,.18);
   border-radius: 10px;
   cursor: pointer;
   transition: background .15s;
+  min-width: 0;
+  overflow: hidden;
 }
 .sl:active { background: rgba(255,255,255,.04); }
 .sl.warn  { border-color: rgba(234,179,8,.4); background: rgba(234,179,8,.06); }
@@ -521,7 +524,7 @@
 .sl-st { flex: 1; text-align: right; font-size: 12px; font-weight: 600; color: var(--green); font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sl.warn  .sl-st { color: var(--yellow); }
 .sl.alert .sl-st { color: var(--red); }
-.sl-arrow { font-size: 18px; color: var(--muted); flex-shrink: 0; line-height: 1; }
+.sl-arrow { display: none; }
 
 /* Modal de detalhes de status — bottom sheet com os mini-cards completos */
 .status-modal {
@@ -610,6 +613,7 @@
       <div class="metric"><div class="v" id="chg-pwr">--</div><div class="lbl">⚡ Atual</div></div>
       <div class="metric"><div class="v" id="chg-kwh">--</div><div class="lbl">∑ Sessão</div></div>
       <div class="metric"><div class="v" id="chg-peak">--</div><div class="lbl">▲ Pico</div></div>
+      <div class="metric"><div class="v" id="chg-cost" style="color:#4ade80">--</div><div class="lbl">💰 Custo</div></div>
     </div>
   </div>
 
@@ -627,6 +631,7 @@
         <span class="v" id="hc-soc">--</span><span class="u">%</span>
       </div>
       <div class="sub" id="hc-soc-sub">--</div>
+      <div id="hc-trip-eff" style="font-size:10px;color:#475569;margin-top:2px"></div>
       <div class="charge-bar" id="hc-soc-bar" style="display:none">
         <div class="fill" id="hc-soc-bar-fill"></div>
         <div class="target" id="hc-soc-bar-target"></div>
@@ -654,6 +659,26 @@
       <div class="val-row"><span class="v" id="hc-other-v" style="font-size:18px;line-height:1.15">--</span></div>
       <div class="sub" id="hc-other-sub">Toque pra ver tudo</div>
       <div class="sub" id="hc-other-prices" style="font-size:10px;margin-top:1px;font-variant-numeric:tabular-nums;color:#94a3b8">--</div>
+    </div>
+    <div class="hero-card" id="hc-drive-card" style="grid-column:1/-1;cursor:pointer;padding:12px 14px" onclick="window.switchView&&window.switchView('drive')">
+      <div class="lbl" style="margin-bottom:10px">🏎 Condução <span style="float:right;font-size:11px;opacity:.4;font-weight:500">›</span></div>
+      <!-- 3 colunas: MODO · ESTILO · REGEN -->
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
+        <div id="hc-dc-mode" style="background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.07);border-radius:10px;padding:8px 10px;min-width:0">
+          <div style="font-size:8px;font-weight:700;color:#475569;letter-spacing:1.2px;text-transform:uppercase;margin-bottom:4px">MODO</div>
+          <div id="hc-dc-mode-v" style="font-size:15px;font-weight:800;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">--</div>
+        </div>
+        <div id="hc-dc-style" style="background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.07);border-radius:10px;padding:8px 10px;min-width:0">
+          <div style="font-size:8px;font-weight:700;color:#475569;letter-spacing:1.2px;text-transform:uppercase;margin-bottom:4px">ESTILO</div>
+          <div id="hc-dc-style-v" style="font-size:15px;font-weight:800;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">--</div>
+        </div>
+        <div id="hc-dc-regen" style="background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.07);border-radius:10px;padding:8px 10px;min-width:0">
+          <div style="font-size:8px;font-weight:700;color:#475569;letter-spacing:1.2px;text-transform:uppercase;margin-bottom:4px">REGEN</div>
+          <div id="hc-dc-regen-v" style="font-size:15px;font-weight:800;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">--</div>
+        </div>
+      </div>
+      <!-- Indicadores secundários: One-Pedal · ESP · Direção -->
+      <div id="hc-dc-extras" style="display:flex;gap:5px;margin-top:8px;flex-wrap:wrap"></div>
     </div>
   </div>
 
@@ -699,12 +724,6 @@
       <span class="sl-ic">🌡</span>
       <span class="sl-ti">Clima</span>
       <span class="sl-st" id="sl-climate-st">--</span>
-      <span class="sl-arrow">›</span>
-    </div>
-    <div class="sl" id="sl-drive" onclick="switchView&&switchView('drive')">
-      <span class="sl-ic">⚡</span>
-      <span class="sl-ti">Modo</span>
-      <span class="sl-st" id="sl-drive-st">--</span>
       <span class="sl-arrow">›</span>
     </div>
   </div>
@@ -1253,6 +1272,98 @@ function renderOtherCard(s) {
     prices.style.display = parts.length ? '' : 'none';
   }
 }
+// ── Card "Condução": drive_mode + terrain_mode + regen_level + indicadores.
+function renderDriveCard(s) {
+  const card = document.getElementById('hc-drive-card');
+  if (!card) return;
+
+  const dm = s.drive_mode   != null ? +s.drive_mode   : null;
+  const tm = s.terrain_mode != null ? +s.terrain_mode : null;
+  const rl = s.regen_level  != null ? +s.regen_level  : null;
+  const op = s.one_pedal    != null ? +s.one_pedal    : null;
+  const es = s.esp_enable   != null ? +s.esp_enable   : null;
+  const sm = s.steer_mode   != null ? +s.steer_mode   : null;
+
+  function _cell(id, value, color, bg, borderColor) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.querySelector('[id$="-v"]').textContent = value;
+    el.querySelector('[id$="-v"]').style.color = color;
+    el.style.background   = bg;
+    el.style.borderColor  = borderColor;
+  }
+
+  const unknown = dm === null && tm === null && rl === null;
+
+  // ── MODO ──────────────────────────────────────────────────────────────────
+  const DM = {
+    label: { 0:'HEV', 1:'Prior.EV', 3:'EV Puro' },
+    color: { 0:'var(--text)', 1:'var(--green)', 3:'var(--blue)' },
+    bg:    { 0:'rgba(255,255,255,.05)', 1:'rgba(34,197,94,.08)', 3:'rgba(96,165,250,.08)' },
+    bdr:   { 0:'rgba(255,255,255,.07)', 1:'rgba(34,197,94,.18)', 3:'rgba(96,165,250,.18)' },
+  };
+  _cell('hc-dc-mode',
+    dm !== null ? (DM.label[dm] ?? '--') : '--',
+    dm !== null ? (DM.color[dm] ?? 'var(--muted)') : 'var(--muted)',
+    dm !== null ? (DM.bg[dm]    ?? 'rgba(255,255,255,.05)') : 'rgba(255,255,255,.05)',
+    dm !== null ? (DM.bdr[dm]   ?? 'rgba(255,255,255,.07)') : 'rgba(255,255,255,.07)');
+
+  // ── ESTILO ────────────────────────────────────────────────────────────────
+  const TM = {
+    label: { 0:'Normal', 1:'Sport', 2:'Eco', 3:'Neve', 4:'Areia', 5:'Lama', 11:'AWD' },
+    color: { 0:'var(--muted)', 1:'var(--red)', 2:'var(--green)', 3:'var(--yellow)', 4:'var(--yellow)', 5:'var(--yellow)', 11:'var(--yellow)' },
+    bg:    { 0:'rgba(255,255,255,.05)', 1:'rgba(248,113,113,.08)', 2:'rgba(34,197,94,.08)', 3:'rgba(251,191,36,.08)', 4:'rgba(251,191,36,.08)', 5:'rgba(251,191,36,.08)', 11:'rgba(251,191,36,.08)' },
+    bdr:   { 0:'rgba(255,255,255,.07)', 1:'rgba(248,113,113,.18)', 2:'rgba(34,197,94,.18)', 3:'rgba(251,191,36,.18)', 4:'rgba(251,191,36,.18)', 5:'rgba(251,191,36,.18)', 11:'rgba(251,191,36,.18)' },
+  };
+  _cell('hc-dc-style',
+    tm !== null ? (TM.label[tm] ?? '--') : '--',
+    tm !== null ? (TM.color[tm] ?? 'var(--muted)') : 'var(--muted)',
+    tm !== null ? (TM.bg[tm]    ?? 'rgba(255,255,255,.05)') : 'rgba(255,255,255,.05)',
+    tm !== null ? (TM.bdr[tm]   ?? 'rgba(255,255,255,.07)') : 'rgba(255,255,255,.07)');
+
+  // ── REGEN ─────────────────────────────────────────────────────────────────
+  const RL = {
+    label: { 0:'Normal', 1:'Alto', 2:'Baixo' },
+    color: { 0:'var(--yellow)', 1:'var(--green)', 2:'var(--orange)' },
+    bg:    { 0:'rgba(251,191,36,.08)', 1:'rgba(34,197,94,.08)', 2:'rgba(251,146,60,.08)' },
+    bdr:   { 0:'rgba(251,191,36,.18)', 1:'rgba(34,197,94,.18)', 2:'rgba(251,146,60,.18)' },
+  };
+  _cell('hc-dc-regen',
+    rl !== null ? (RL.label[rl] ?? '--') : '--',
+    rl !== null ? (RL.color[rl] ?? 'var(--muted)') : 'var(--muted)',
+    rl !== null ? (RL.bg[rl]    ?? 'rgba(255,255,255,.05)') : 'rgba(255,255,255,.05)',
+    rl !== null ? (RL.bdr[rl]   ?? 'rgba(255,255,255,.07)') : 'rgba(255,255,255,.07)');
+
+  // ── INDICADORES SECUNDÁRIOS ───────────────────────────────────────────────
+  const extras = document.getElementById('hc-dc-extras');
+  if (extras) {
+    const chips = [];
+    if (op === 1)
+      chips.push(['One-Pedal', 'var(--green)', 'rgba(34,197,94,.12)', 'rgba(34,197,94,.25)']);
+    if (es === 0)
+      chips.push(['ESP off', 'var(--red)', 'rgba(248,113,113,.12)', 'rgba(248,113,113,.25)']);
+    if (sm === 1)
+      chips.push(['Direção Sport', 'var(--red)', 'rgba(248,113,113,.08)', 'rgba(248,113,113,.18)']);
+    else if (sm === 2)
+      chips.push(['Direção Conforto', 'var(--blue)', 'rgba(96,165,250,.08)', 'rgba(96,165,250,.18)']);
+
+    if (chips.length) {
+      extras.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;justify-content:center;' +
+        'margin-top:10px;padding-top:8px;border-top:1px solid rgba(255,255,255,.07)';
+      extras.innerHTML = chips.map(([label, color, bg, bdr]) =>
+        `<span style="font-size:10px;font-weight:700;padding:4px 10px;border-radius:20px;` +
+        `letter-spacing:.2px;background:${bg};color:${color};border:1px solid ${bdr}">${label}</span>`
+      ).join('');
+    } else {
+      extras.style.display = 'none';
+      extras.innerHTML = '';
+    }
+  }
+
+  // Card fade quando sem dados
+  card.style.opacity = unknown ? '0.45' : '';
+}
+
 // Chaves que JÁ aparecem em algum card/widget do Dash (ou que são internas/ruído).
 // Tudo que sobra do state vai aparecer no modal "Outros dados".
 const _DASH_SHOWN_KEYS = new Set([
@@ -1424,6 +1535,10 @@ function render(s, kpData) {
     document.getElementById('chg-kwh').textContent  = (+s.charge_session_kwh || 0).toFixed(2) + ' kWh';
     document.getElementById('chg-peak').textContent = (+s.charge_max_power_kw || 0).toFixed(1) + ' kW';
     document.getElementById('chg-eta').textContent  = '⏱ ' + fmtChargeEta(+s.charge_remaining_min) + ' restantes';
+    const sessionCost = (s.charge_session_kwh || 0) * (s.price_kwh || 0);
+    document.getElementById('chg-cost').textContent = sessionCost > 0
+      ? 'R$ ' + sessionCost.toFixed(2).replace('.', ',')
+      : '--';
   } else {
     chgDetail.classList.remove('show');
   }
@@ -1469,6 +1584,18 @@ function render(s, kpData) {
     document.getElementById('hc-soc-sub').textContent = subParts.join(' · ') || '--';
   }
 
+  // ── Eficiência da viagem atual (kWh/100km) abaixo do sub do SOC
+  const tripEff = document.getElementById('hc-trip-eff');
+  if (tripEff) {
+    const ct = s.current_trip;
+    if (ct && ct.distKm > 0.5 && ct.netKwh) {
+      const eff = Math.abs(ct.netKwh) / ct.distKm * 100;
+      tripEff.textContent = `⚡ ${eff.toFixed(1)} kWh/100km · ${ct.distKm.toFixed(1)} km`;
+    } else {
+      tripEff.textContent = '';
+    }
+  }
+
   // ── Combustível: PHEV34 publica fuel_l (litros), não fuel_pct
   // Fallback: calcula % a partir do tanque default 55L se fuel_pct ausente
   const FUEL_CAPACITY_L = +s.fuel_capacity_l || 55;  // Haval H6 PHEV34 = 55L
@@ -1488,10 +1615,10 @@ function render(s, kpData) {
   const subParts = [fuelL, iceKm != null ? `${iceKm} km à combustão` : ''].filter(Boolean);
   document.getElementById('hc-fuel-sub').textContent = subParts.join(' · ') || '--';
 
-  // ── Manutenção e Outros dados são renderizados separadamente
-  // (renderMaintCard e renderOtherCard chamados depois pelo loader)
-  if (typeof renderMaintCard === 'function') renderMaintCard(s);
-  if (typeof renderOtherCard === 'function') renderOtherCard(s);
+  // ── Manutenção, Outros dados e Condução são renderizados separadamente
+  if (typeof renderMaintCard   === 'function') renderMaintCard(s);
+  if (typeof renderOtherCard   === 'function') renderOtherCard(s);
+  if (typeof renderDriveCard   === 'function') renderDriveCard(s);
 
   // ── Card de Clima (4º mini-card do grid 2x2)
   const fmtTemp = (t) => t != null ? Math.round(+t) + '°' : '--';
@@ -1524,10 +1651,7 @@ function render(s, kpData) {
     _tOut ? `Ext ${_tOut}` : null,
     _tIn  ? `Int ${_tIn}`  : null,
   ].filter(Boolean).join(' · ');
-  const _acStr = acOn
-    ? `AC ${acSet > 0 ? acSet.toFixed(0) + '°' : 'on'}${acFan > 0 ? ' · Fan ' + acFan : ''}`
-    : 'AC off';
-  _setStatusLine('climate', _tempStr ? `${_tempStr} · ${_acStr}` : _acStr, 'ok');
+  _setStatusLine('climate', _tempStr || '--', 'ok');
 
   // ── Pill 12V dentro do card de Bateria SOC (cor por faixa)
   const pill12 = document.getElementById('hc-batt12-pill');

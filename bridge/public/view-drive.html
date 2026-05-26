@@ -388,12 +388,14 @@
   position: relative; cursor: pointer; transition: background .2s;
 }
 .one-pedal-toggle.on { background: rgba(34,197,94,.35); border-color: var(--green); }
+.one-pedal-toggle.pending { background: rgba(234,179,8,.25); border-color: var(--yellow); animation: dm-pulse 1s ease-in-out infinite; }
 .one-pedal-toggle .toggle-knob {
   position: absolute; top: 2px; left: 2px;
   width: 16px; height: 16px; border-radius: 50%;
   background: #94a3b8; transition: left .2s, background .2s;
 }
 .one-pedal-toggle.on .toggle-knob { left: 20px; background: var(--green); }
+.one-pedal-toggle.pending .toggle-knob { background: var(--yellow); }
 .regen-bar-wrap {
   margin-top: 6px; height: 4px; border-radius: 2px;
   background: rgba(255,255,255,.06); overflow: hidden;
@@ -605,6 +607,15 @@
             <span class="settings-item-lbl">ESP</span>
             <div class="dm-chip esp-chip" id="esp-chip" onclick="toggleEsp()">ON</div>
           </div>
+        </div>
+
+        <!-- Histórico de modos de condução -->
+        <div class="settings-card" id="drive-history-card" style="cursor:pointer" onclick="toggleDriveHistory()">
+          <div style="display:flex;align-items:center;justify-content:space-between">
+            <div class="settings-label" style="margin:0">📊 Histórico de modos</div>
+            <span id="drive-history-arrow" style="font-size:18px;color:var(--muted);transition:transform .2s">›</span>
+          </div>
+          <div id="drive-history-body" style="display:none;margin-top:12px"></div>
         </div>
 
       </div>
@@ -3587,11 +3598,17 @@ window._onRegenLevelResult = function(data) {
 
 // ── One-Pedal ────────────────────────────────────────────────────────────────
 let _onePedalPending = null;
+let _onePedalTimer  = null;
 
 function _renderOnePedal() {
-  if (_onePedalPending !== null) return;
   const tog = document.getElementById('one-pedal-toggle');
   if (!tog) return;
+  if (_onePedalPending !== null) {
+    tog.classList.toggle('on', _onePedalPending === 1);
+    tog.classList.add('pending');
+    return;
+  }
+  tog.classList.remove('pending');
   const on = window.state?.one_pedal === 1;
   tog.classList.toggle('on', on);
 }
@@ -3602,8 +3619,15 @@ async function toggleOnePedal() {
   const cur = window.state?.one_pedal;
   const next = cur === 1 ? 0 : 1;
   _onePedalPending = next;
-  const tog = document.getElementById('one-pedal-toggle');
-  if (tog) tog.classList.toggle('on', next === 1);
+  _renderOnePedal();
+  if (_onePedalTimer) clearTimeout(_onePedalTimer);
+  _onePedalTimer = setTimeout(() => {
+    if (_onePedalPending !== null) {
+      _onePedalPending = null;
+      window.showToast && window.showToast('⚠ Carro não respondeu', 'err');
+      _renderOnePedal();
+    }
+  }, 15_000);
   try {
     const r = await fetch('/api/one-pedal', {
       method: 'POST',
@@ -3612,8 +3636,8 @@ async function toggleOnePedal() {
     });
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'HTTP ' + r.status);
-    window.showToast && window.showToast('⏳ Enviado — aguardando confirmação', 'ok');
   } catch (e) {
+    clearTimeout(_onePedalTimer);
     _onePedalPending = null;
     window.showToast && window.showToast('✗ ' + e.message, 'err');
     _renderOnePedal();
@@ -3621,6 +3645,7 @@ async function toggleOnePedal() {
 }
 
 window._onOnePedalResult = function(data) {
+  clearTimeout(_onePedalTimer);
   _onePedalPending = null;
   const raw = String(data?.result || '');
   if (raw.startsWith('ok:')) {
@@ -3628,11 +3653,10 @@ window._onOnePedalResult = function(data) {
     const applied = m ? parseInt(m[1]) : null;
     if (applied != null && window.state) window.state.one_pedal = applied;
     window.showToast && window.showToast(applied === 1 ? '✓ One-Pedal ativado' : '✓ One-Pedal desativado', 'ok');
-    _renderOnePedal();
   } else {
     window.showToast && window.showToast('✗ ' + raw, 'err');
-    _renderOnePedal();
   }
+  _renderOnePedal();
 };
 
 // ── Regen power bar (real-time) ──────────────────────────────────────────────
@@ -3715,12 +3739,18 @@ window._onSteerModeResult = function(data) {
 
 // ── ESP ───────────────────────────────────────────────────────────────────────
 let _espPending = null;
+let _espTimer   = null;
 
 function _renderEsp() {
-  if (_espPending !== null) return;
   const chip = document.getElementById('esp-chip');
   if (!chip) return;
-  const on = window.state?.esp_enable !== 0;  // null ou 1 = ON (default)
+  if (_espPending !== null) {
+    chip.classList.add('pending');
+    chip.classList.remove('active', 'esp-off');
+    chip.textContent = _espPending === 1 ? 'ON' : 'OFF';
+    return;
+  }
+  const on = window.state?.esp_enable !== 0;
   chip.textContent = on ? 'ON' : 'OFF';
   chip.classList.toggle('esp-off', !on);
   chip.classList.remove('active', 'pending');
@@ -3733,12 +3763,15 @@ async function toggleEsp() {
   const cur = window.state?.esp_enable;
   const next = cur === 0 ? 1 : 0;
   _espPending = next;
-  const chip = document.getElementById('esp-chip');
-  if (chip) {
-    chip.classList.add('pending');
-    chip.classList.remove('active', 'esp-off');
-    chip.textContent = next === 1 ? 'ON' : 'OFF';
-  }
+  _renderEsp();
+  if (_espTimer) clearTimeout(_espTimer);
+  _espTimer = setTimeout(() => {
+    if (_espPending !== null) {
+      _espPending = null;
+      window.showToast && window.showToast('⚠ Carro não respondeu', 'err');
+      _renderEsp();
+    }
+  }, 15_000);
   try {
     const r = await fetch('/api/esp', {
       method: 'POST',
@@ -3747,8 +3780,8 @@ async function toggleEsp() {
     });
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'HTTP ' + r.status);
-    window.showToast && window.showToast('⏳ Enviado — aguardando confirmação', 'ok');
   } catch (e) {
+    clearTimeout(_espTimer);
     _espPending = null;
     window.showToast && window.showToast('✗ ' + e.message, 'err');
     _renderEsp();
@@ -3756,6 +3789,7 @@ async function toggleEsp() {
 }
 
 window._onEspResult = function(data) {
+  clearTimeout(_espTimer);
   _espPending = null;
   const raw = String(data?.result || '');
   if (raw.startsWith('ok:')) {
@@ -3763,11 +3797,10 @@ window._onEspResult = function(data) {
     const applied = m ? parseInt(m[1]) : null;
     if (applied != null && window.state) window.state.esp_enable = applied;
     window.showToast && window.showToast(applied === 1 ? '✓ ESP ativado' : '✓ ESP desativado', 'ok');
-    _renderEsp();
   } else {
     window.showToast && window.showToast('✗ ' + raw, 'err');
-    _renderEsp();
   }
+  _renderEsp();
 };
 
   // ── Acordeão toggle + summary ────────────────────────────────────────────
@@ -3821,6 +3854,73 @@ window._onEspResult = function(data) {
     if (el) el.classList.toggle('open');
   }
 
+  // ── Histórico de modos ────────────────────────────────────────────────────
+  const DM_LABEL = { 0: 'HEV', 1: 'Prior.EV', 3: 'EV Puro' };
+  const TM_LABEL = { 0: 'Normal', 1: 'Sport', 2: 'Eco', 3: 'Neve', 4: 'Areia', 5: 'Lama', 11: 'AWD' };
+  const DM_COLOR = { 0: '#94a3b8', 1: '#22c55e', 3: '#60a5fa' };
+  const TM_COLOR = { 0: '#94a3b8', 1: '#f87171', 2: '#22c55e', 3: '#fbbf24', 4: '#fbbf24', 5: '#fbbf24', 11: '#fbbf24' };
+  let _dhOpen = false;
+
+  function _fmtDur(ms) {
+    const h = Math.floor(ms / 3_600_000);
+    const m = Math.floor((ms % 3_600_000) / 60_000);
+    if (h > 0) return `${h}h ${m}min`;
+    if (m > 0) return `${m} min`;
+    return `${Math.round(ms / 1000)}s`;
+  }
+
+  async function _loadDriveHistory() {
+    const body = document.getElementById('drive-history-body');
+    if (!body) return;
+    const tk = localStorage.getItem('bridge_token');
+    if (!tk) { body.innerHTML = '<div style="font-size:12px;color:var(--muted);text-align:center;padding:8px">Faça login para ver o histórico.</div>'; return; }
+    body.innerHTML = '<div style="font-size:12px;color:var(--muted);text-align:center;padding:8px">Carregando…</div>';
+    try {
+      const r = await fetch('/api/drive-history', { headers: { Authorization: 'Bearer ' + tk } });
+      const data = await r.json();
+      const { stats, segments } = data;
+      if (!stats.length) {
+        body.innerHTML = '<div style="font-size:12px;color:var(--muted);text-align:center;padding:8px">Nenhum dado ainda — os modos serão registrados a partir de agora.</div>';
+        return;
+      }
+      const totalMs = stats.reduce((s, x) => s + x.total_ms, 0);
+      const rows = stats.map(s => {
+        const pct = totalMs > 0 ? Math.round(s.total_ms / totalMs * 100) : 0;
+        const dmC = DM_COLOR[s.dm] || '#94a3b8';
+        const tmC = TM_COLOR[s.tm] || '#94a3b8';
+        return `<div style="margin-bottom:10px">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+            <div style="display:flex;gap:6px;align-items:center">
+              <span style="font-size:11px;font-weight:800;color:${dmC}">${DM_LABEL[s.dm] ?? 'Modo ' + s.dm}</span>
+              <span style="font-size:10px;color:var(--muted)">·</span>
+              <span style="font-size:11px;font-weight:700;color:${tmC}">${TM_LABEL[s.tm] ?? 'Estilo ' + s.tm}</span>
+            </div>
+            <div style="text-align:right">
+              <span style="font-size:12px;font-weight:700;color:var(--text)">${_fmtDur(s.total_ms)}</span>
+              <span style="font-size:10px;color:var(--muted);margin-left:4px">${pct}%</span>
+            </div>
+          </div>
+          <div style="height:4px;border-radius:2px;background:rgba(255,255,255,.06);overflow:hidden">
+            <div style="height:100%;width:${pct}%;background:${dmC};border-radius:2px;transition:width .4s"></div>
+          </div>
+          <div style="font-size:9px;color:#475569;margin-top:2px">${s.count} ocorrência${s.count !== 1 ? 's' : ''}</div>
+        </div>`;
+      }).join('');
+      body.innerHTML = `<div style="font-size:9px;color:#475569;margin-bottom:10px;text-transform:uppercase;letter-spacing:.8px">${segments} segmentos · ${_fmtDur(totalMs)} total</div>` + rows;
+    } catch (e) {
+      body.innerHTML = `<div style="font-size:12px;color:var(--muted);text-align:center;padding:8px">Erro ao carregar: ${e.message}</div>`;
+    }
+  }
+
+  function toggleDriveHistory() {
+    _dhOpen = !_dhOpen;
+    const body  = document.getElementById('drive-history-body');
+    const arrow = document.getElementById('drive-history-arrow');
+    if (body)  body.style.display  = _dhOpen ? '' : 'none';
+    if (arrow) arrow.style.transform = _dhOpen ? 'rotate(90deg)' : '';
+    if (_dhOpen) _loadDriveHistory();
+  }
+
   // Expõe handlers de onclick no window
   Object.assign(window, {
     toggleSheet: typeof toggleSheet !== 'undefined' ? toggleSheet : undefined,
@@ -3834,6 +3934,7 @@ window._onEspResult = function(data) {
     setSteerMode: setSteerMode,
     toggleEsp: toggleEsp,
     toggleDriveControls: toggleDriveControls,
+    toggleDriveHistory: toggleDriveHistory,
   });
   if (!window['initView_drive']) window['initView_drive'] = function() {};
 })();

@@ -250,6 +250,25 @@
       <span class="chevron">›</span>
     </div>
   </div>
+
+  <!-- Grupo 4: Dados locais -->
+  <div class="settings-group">
+    <div class="settings-item red" onclick="confirmClearPwaCache()">
+      <div class="icon-box">🧹</div>
+      <div class="info"><div class="label">Limpar cache PWA</div><div class="sub">Service Worker + caches do browser · recarrega</div></div>
+      <span class="chevron">›</span>
+    </div>
+    <div class="settings-item yellow" onclick="clearDriveHistory()">
+      <div class="icon-box">🗂</div>
+      <div class="info"><div class="label">Limpar histórico de modos</div><div class="sub">Apaga histórico de modos de condução</div></div>
+      <span class="chevron">›</span>
+    </div>
+    <div class="settings-item red" onclick="confirmClearEventLogs()">
+      <div class="icon-box">🗑</div>
+      <div class="info"><div class="label">Limpar logs de eventos</div><div class="sub">Apaga todo o histórico de eventos do servidor</div></div>
+      <span class="chevron">›</span>
+    </div>
+  </div>
 </div>
 
 <!-- ── Subviews ── -->
@@ -389,6 +408,19 @@
       <div class="toggle-row" onclick="toggleNotif('geofence_departure', this)"><div class="label">Saída de local conhecido<div class="sub">Quando sai da geofence</div></div><div class="toggle" data-key="geofence_departure"></div></div>
       <div id="geofence-departure-row" style="display:none;padding:0 4px 6px"><button class="btn secondary" style="width:100%" onclick="openGeofencePlaces('departure')">📍 Selecionar locais (<span id="geofence-departure-count">todos</span>)</button></div>
       <div class="toggle-row" onclick="toggleNotif('trip_end', this)"><div class="label">Fim de viagem<div class="sub">Resumo ao terminar deslocamento</div></div><div class="toggle" data-key="trip_end"></div></div>
+    </div>
+    <div class="field-group">
+      <div class="group-ti">Alertas inteligentes</div>
+      <div class="toggle-row" onclick="toggleNotif('ac_on_parked', this)"><div class="label">AC ligado com carro parado<div class="sub">Avisa quando velocidade=0 por X minutos com ventilação ativa</div></div><div class="toggle" data-key="ac_on_parked"></div></div>
+      <div id="ac-parked-min-row" style="display:none;padding:4px 4px 8px">
+        <div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:rgba(255,255,255,.04);border-radius:8px">
+          <span style="flex:1;font-size:12px;color:var(--muted)">Minutos parado antes de alertar</span>
+          <input type="number" id="ac-parked-min-input" min="1" max="60" value="10"
+            style="width:52px;padding:4px 8px;border-radius:6px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);color:var(--text);font-size:13px;font-family:inherit;text-align:center"
+            onchange="saveAcParkedMin(this.value)">
+        </div>
+      </div>
+      <div class="toggle-row" onclick="toggleNotif('batt12_low', this)"><div class="label">Bateria auxiliar baixa<div class="sub">12V abaixo de 50% — possível dreno</div></div><div class="toggle" data-key="batt12_low"></div></div>
     </div>
     <div class="field-group">
       <div class="group-ti">Manutenção e atualizações</div>
@@ -1980,8 +2012,28 @@ async function _loadPrefsForCurrentDevice() {
       const key = el.dataset.key;
       el.classList.toggle('on', !!_notifPrefsLocal[key]);
     });
+    // Mostra input de minutos se ac_on_parked estiver ativo; carrega valor salvo
+    const acOn = !!_notifPrefsLocal.ac_on_parked;
+    document.getElementById('ac-parked-min-row').style.display = acOn ? '' : 'none';
+    const savedMin = _notifPrefsLocal.ac_on_parked_min;
+    if (savedMin) document.getElementById('ac-parked-min-input').value = savedMin;
     _updateGeofenceLocalControls();
   } catch (_) {}
+}
+
+async function saveAcParkedMin(val) {
+  const mins = Math.max(1, Math.min(60, parseInt(val, 10) || 10));
+  document.getElementById('ac-parked-min-input').value = mins;
+  const tk = localStorage.getItem('bridge_token');
+  if (!tk || !_currentNotifDeviceId) return;
+  try {
+    await fetch('/api/notif/prefs/' + encodeURIComponent(_currentNotifDeviceId), {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + tk, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: 'ac_on_parked_min', value: mins }),
+    });
+    _notifPrefsLocal.ac_on_parked_min = mins;
+  } catch (e) { showToast('✗ ' + e.message, 'err'); }
 }
 
 async function _onNotifDeviceChange() {
@@ -2180,6 +2232,10 @@ async function toggleNotif(key) {
   const newVal = !el.classList.contains('on');
   el.classList.toggle('on', newVal);  // otimista
   _notifPrefsLocal[key] = newVal;
+  // Mostra/esconde input de minutos do AC parado
+  if (key === 'ac_on_parked') {
+    document.getElementById('ac-parked-min-row').style.display = newVal ? '' : 'none';
+  }
   // Atualiza controles dependentes (botão "Selecionar locais" pra geofence)
   if (key === 'geofence_arrival' || key === 'geofence_departure') {
     const kind = key === 'geofence_arrival' ? 'arrival' : 'departure';
@@ -2648,6 +2704,48 @@ function confirmClearHistory() {
   }
 }
 
+async function confirmClearPwaCache() {
+  if (!confirm('Limpar o cache do Service Worker?\n\nTodos os caches do browser serão apagados e a página vai recarregar.\nOs dados do servidor não são afetados.')) return;
+  showToast('🧹 Limpando cache PWA…', 'ok');
+  try {
+    if ('caches' in window) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map(k => caches.delete(k)));
+    }
+    showToast('✓ Cache limpo. Recarregando…', 'ok');
+    setTimeout(() => location.reload(), 1200);
+  } catch (e) { showToast('✗ ' + e.message, 'err'); }
+}
+
+async function clearDriveHistory() {
+  if (!confirm('Apagar o histórico de modos de condução?\n\nIrreversível.')) return;
+  const tk = localStorage.getItem('bridge_token');
+  if (!tk) { showToast('✗ Sem token de autenticação', 'err'); return; }
+  try {
+    const r = await fetch('/api/drive-history/clear', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + tk },
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    showToast('✓ Histórico de modos apagado', 'ok');
+  } catch (e) { showToast('✗ ' + e.message, 'err'); }
+}
+
+async function confirmClearEventLogs() {
+  if (!confirm('⚠ Apagar TODOS os logs de eventos do servidor?\n\nIrreversível.')) return;
+  const tk = localStorage.getItem('bridge_token');
+  if (!tk) { showToast('✗ Sem token de autenticação', 'err'); return; }
+  showToast('🗑 Apagando logs…', 'ok');
+  try {
+    const r = await fetch('/api/admin/clear-history', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + tk },
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    showToast('✓ Logs de eventos apagados', 'ok');
+  } catch (e) { showToast('✗ ' + e.message, 'err'); }
+}
+
 // Handler legado dos chips SOC removido — ele SOBRESCREVIA o onclick inline
 // do HTML (que chama setChargeLimit), substituindo por uma versão fake que
 // só fazia UI (active class + toast) sem chamar o backend. O usuário via o
@@ -2828,7 +2926,7 @@ window.markMaintDone = async function(id) {
 };
 
   // Expõe handlers de onclick no window
-  Object.assign(window, { openSub: typeof openSub !== 'undefined' ? openSub : undefined, closeSub: typeof closeSub !== 'undefined' ? closeSub : undefined, saveSection: typeof saveSection !== 'undefined' ? saveSection : undefined, toggle2fa: typeof toggle2fa !== 'undefined' ? toggle2fa : undefined, confirmClearHistory: typeof confirmClearHistory !== 'undefined' ? confirmClearHistory : undefined, openMaintAdd: openMaintAdd, closeMaintModal: closeMaintModal, saveMaintItem: saveMaintItem, deleteMaintItem: deleteMaintItem, markMaintDone: markMaintDone, saveVehicle: saveVehicle, setChargeLimit: setChargeLimit, actionReprocessPlaces: actionReprocessPlaces, actionRecomputeTripCosts: actionRecomputeTripCosts, actionRestartBridge: actionRestartBridge, actionUpdateBridge: actionUpdateBridge, openPlaceAdd: openPlaceAdd, openPlaceEdit: openPlaceEdit, closePlaceModal: closePlaceModal, usePlaceGps: usePlaceGps, savePlace: savePlace, deletePlace: deletePlace, toggleNotif: toggleNotif, _onNotifDeviceChange: _onNotifDeviceChange, renameNotifDevice: renameNotifDevice, removeNotifDevice: removeNotifDevice, renameMyDevice: renameMyDevice, forceSubscribePush: forceSubscribePush, openNotifDevicePicker: openNotifDevicePicker, closeNotifDevicePicker: closeNotifDevicePicker, _pickNotifDevice: _pickNotifDevice, renameNotifDeviceById: renameNotifDeviceById, removeNotifDeviceById: removeNotifDeviceById, changePassword: changePassword, toggle2faNew: toggle2faNew, closeTotpModal: closeTotpModal, activate2fa: activate2fa, show2faBackup: show2faBackup, regenBackupCodes: regenBackupCodes, openGeofencePlaces: openGeofencePlaces, _toggleGeofencePick: _toggleGeofencePick, saveGeofencePlaces: saveGeofencePlaces, toggleChargeEnding: toggleChargeEnding, editChargeEndingMin: editChargeEndingMin, downloadBackup: downloadBackup, uploadBackup: uploadBackup, copyBackupToClipboard: copyBackupToClipboard, shareBackup: shareBackup, clearLocalCache: clearLocalCache, toggleDiag: toggleDiag, saveDiagInterval: saveDiagInterval, exportDiag: exportDiag, clearDiag: clearDiag, openDiagSet: openDiagSet, confirmDiagSet: confirmDiagSet, _scheduleDiagRender: _scheduleDiagRender });
+  Object.assign(window, { openSub: typeof openSub !== 'undefined' ? openSub : undefined, closeSub: typeof closeSub !== 'undefined' ? closeSub : undefined, saveSection: typeof saveSection !== 'undefined' ? saveSection : undefined, toggle2fa: typeof toggle2fa !== 'undefined' ? toggle2fa : undefined, confirmClearHistory: typeof confirmClearHistory !== 'undefined' ? confirmClearHistory : undefined, confirmClearPwaCache: typeof confirmClearPwaCache !== 'undefined' ? confirmClearPwaCache : undefined, clearDriveHistory: typeof clearDriveHistory !== 'undefined' ? clearDriveHistory : undefined, confirmClearEventLogs: typeof confirmClearEventLogs !== 'undefined' ? confirmClearEventLogs : undefined, openMaintAdd: openMaintAdd, closeMaintModal: closeMaintModal, saveMaintItem: saveMaintItem, deleteMaintItem: deleteMaintItem, markMaintDone: markMaintDone, saveVehicle: saveVehicle, setChargeLimit: setChargeLimit, actionReprocessPlaces: actionReprocessPlaces, actionRecomputeTripCosts: actionRecomputeTripCosts, actionRestartBridge: actionRestartBridge, actionUpdateBridge: actionUpdateBridge, openPlaceAdd: openPlaceAdd, openPlaceEdit: openPlaceEdit, closePlaceModal: closePlaceModal, usePlaceGps: usePlaceGps, savePlace: savePlace, deletePlace: deletePlace, toggleNotif: toggleNotif, _onNotifDeviceChange: _onNotifDeviceChange, renameNotifDevice: renameNotifDevice, removeNotifDevice: removeNotifDevice, renameMyDevice: renameMyDevice, forceSubscribePush: forceSubscribePush, openNotifDevicePicker: openNotifDevicePicker, closeNotifDevicePicker: closeNotifDevicePicker, _pickNotifDevice: _pickNotifDevice, renameNotifDeviceById: renameNotifDeviceById, removeNotifDeviceById: removeNotifDeviceById, changePassword: changePassword, toggle2faNew: toggle2faNew, closeTotpModal: closeTotpModal, activate2fa: activate2fa, show2faBackup: show2faBackup, regenBackupCodes: regenBackupCodes, openGeofencePlaces: openGeofencePlaces, _toggleGeofencePick: _toggleGeofencePick, saveGeofencePlaces: saveGeofencePlaces, toggleChargeEnding: toggleChargeEnding, editChargeEndingMin: editChargeEndingMin, downloadBackup: downloadBackup, uploadBackup: uploadBackup, copyBackupToClipboard: copyBackupToClipboard, shareBackup: shareBackup, clearLocalCache: clearLocalCache, toggleDiag: toggleDiag, saveDiagInterval: saveDiagInterval, exportDiag: exportDiag, clearDiag: clearDiag, openDiagSet: openDiagSet, confirmDiagSet: confirmDiagSet, _scheduleDiagRender: _scheduleDiagRender });
   if (!window['initView_config']) window['initView_config'] = function() {};
 })();
 </script>

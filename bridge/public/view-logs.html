@@ -100,6 +100,7 @@
   </div>
 
   <div class="filter-chips" id="filter-chips"></div>
+  <div class="filter-chips" id="period-chips" style="margin-bottom:14px"></div>
 
   <div id="events-list"></div>
 
@@ -1355,6 +1356,16 @@ const FILTERS = [
 let allEvents = (SNAPSHOT.events || []).map(e => ({ ...e, ts: e.ts || e.timestamp }));
 let currentFilter = 'all';
 let currentSearch = '';
+let currentPeriod = 'all';
+
+const PERIODS = [
+  { id: 'all',  label: 'Tudo' },
+  { id: '1d',   label: 'Hoje' },
+  { id: '7d',   label: '7 dias' },
+  { id: '30d',  label: '30 dias' },
+];
+
+function periodCutoff() { return cutoffFor(currentPeriod); }
 function metaOf(type) {
   return TYPE_META[type] || { cat: 'other', ic: '•' };
 }
@@ -1372,8 +1383,10 @@ function countByCat(catList) {
 }
 function applyFilter() {
   const f = FILTERS.find(x => x.id === currentFilter);
+  const cutoff = periodCutoff();
   let out = allEvents;
   if (f && f.cats) out = out.filter(e => f.cats.includes(metaOf(e.type).cat));
+  if (cutoff) out = out.filter(e => e.ts >= cutoff);
   if (currentSearch) {
     const q = currentSearch.toLowerCase();
     out = out.filter(e => labelOf(e).toLowerCase().includes(q) || e.type.toLowerCase().includes(q));
@@ -1390,6 +1403,27 @@ function renderFilters() {
 function setFilter(id) {
   currentFilter = id;
   renderFilters();
+  renderEvents();
+}
+function cutoffFor(periodId) {
+  const now = Date.now();
+  if (periodId === '1d')  { const d = new Date(); d.setHours(0,0,0,0); return d.getTime(); }
+  if (periodId === '7d')  return now - 7  * 86400_000;
+  if (periodId === '30d') return now - 30 * 86400_000;
+  return 0;
+}
+function renderPeriodChips() {
+  const el = document.getElementById('period-chips');
+  if (!el) return;
+  el.innerHTML = PERIODS.map(p => {
+    const c = cutoffFor(p.id);
+    const n = c ? allEvents.filter(e => e.ts >= c).length : allEvents.length;
+    return `<div class="chip ${currentPeriod === p.id ? 'active' : ''}" onclick="setPeriod('${p.id}')">${p.label}<span class="count">${n}</span></div>`;
+  }).join('');
+}
+function setPeriod(id) {
+  currentPeriod = id;
+  renderPeriodChips();
   renderEvents();
 }
 function fmtDayLabel(ts) {
@@ -1455,7 +1489,7 @@ async function _loadLogsData() {
   if (cached && Array.isArray(cached.v) && cached.v.length) {
     allEvents = cached.v;
     lastTs = Math.max(...cached.v.map(e => +e.ts || 0));
-    renderFilters(); renderEvents();
+    renderFilters(); renderPeriodChips(); renderEvents();
   }
   // 2. Fetch incremental (só eventos novos desde o cache) + merge
   const tk = localStorage.getItem('bridge_token');
@@ -1467,7 +1501,7 @@ async function _loadLogsData() {
     : null;
   try {
     if (progress) progress.set(15);
-    const url = lastTs > 0 ? `/api/events?since=${lastTs}` : '/api/events?limit=500';
+    const url = lastTs > 0 ? `/api/events?since=${lastTs}` : '/api/events?limit=10000';
     const r = await fetch(url, { headers: { 'Authorization': 'Bearer ' + tk } });
     const list = await r.json();
     const newCount = Array.isArray(list) ? list.length : 0;
@@ -1493,7 +1527,7 @@ async function _loadLogsData() {
         const onlyNew = incoming.filter(e => !existingIds.has(e.id || e.ts));
         if (onlyNew.length) {
           allEvents = [...onlyNew, ...allEvents];
-          if (allEvents.length > 1000) allEvents.length = 1000;
+          if (allEvents.length > 10000) allEvents.length = 10000;
           window.cacheSet && window.cacheSet('logs', allEvents);
         }
       }
@@ -1506,18 +1540,18 @@ async function _loadLogsData() {
 // Boot inicial: 1 fetch
 _loadLogsData();
 // Troca de aba: re-render do cache (sem fetch — eventos novos chegam via WS new_event)
-window.renderView_logs = function() { renderFilters(); renderEvents(); };
+window.renderView_logs = function() { renderFilters(); renderPeriodChips(); renderEvents(); };
 // Hook pra refetch quando WS pedir explicitamente
 window._reloadLogsData = _loadLogsData;
 window._addEventToLog = function(ev) {
   if (!ev) return;
   allEvents.unshift({ ...ev, ts: ev.ts || ev.timestamp || ev.timestamp_ms || Date.now() });
-  if (allEvents.length > 1000) allEvents.length = 1000;
+  if (allEvents.length > 10000) allEvents.length = 10000;
   window.cacheSet && window.cacheSet('logs', allEvents);
   renderFilters(); renderEvents();
 };
   // Expõe handlers de onclick no window
-  Object.assign(window, { setFilter: typeof setFilter !== 'undefined' ? setFilter : undefined });
+  Object.assign(window, { setFilter, setPeriod });
   if (!window['initView_logs']) window['initView_logs'] = function() {};
 })();
 </script>
