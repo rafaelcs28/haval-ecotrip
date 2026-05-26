@@ -9,8 +9,8 @@ NOW=$(date +%s)
 LAST=$(cat "$STAMP" 2>/dev/null || echo 0)
 DAYS=$(( (NOW - LAST) / 86400 ))
 
-if [ "$DAYS" -lt 6 ]; then
-  echo "[auto-reinstall] $(date): ok, faltam $((6 - DAYS)) dias para renovar."
+if [ "$DAYS" -lt 2 ]; then
+  echo "[auto-reinstall] $(date): ok, faltam $((2 - DAYS)) dias para renovar."
   exit 0
 fi
 
@@ -31,5 +31,5 @@ cd "$(dirname "$0")"
 echo "[auto-reinstall] $(date): instalação concluída."
 
 # Para ativar: adicione ao cron com `crontab -e`
-# Roda todo dia às 9h:
-#   0 9 * * * /Users/consorciolimpagyn/haval-ecotrip/ios-app/auto-reinstall.sh >> /tmp/haval-auto-reinstall.log 2>&1
+# Roda todo dia à meia-noite:
+#   0 0 * * * /Users/consorciolimpagyn/haval-ecotrip/ios-app/auto-reinstall.sh >> /tmp/haval-auto-reinstall.log 2>&1
