@@ -157,10 +157,9 @@ final class ChargingKeepAlive {
         Task { @MainActor in
             switch type {
             case .began:
-                // Interrupção iniciou — engine parou, mas mantemos wantsBackground.
-                self.engine?.stop()
-                self.engine = nil
-                self.sourceNode = nil
+                // Interrupção iniciou — player parou, mas mantemos wantsBackground.
+                self.player?.stop()
+                self.player = nil
                 print("[keepalive] áudio interrompido")
 
             case .ended:
