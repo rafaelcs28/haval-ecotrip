@@ -1223,6 +1223,15 @@ function urlBase64ToUint8Array(b64) {
     const id = (crypto.randomUUID && crypto.randomUUID()) || ('dev_' + Date.now() + '_' + Math.random().toString(36).slice(2, 10));
     localStorage.setItem('eco_device_id', id);
   }
+  // Quando rodando dentro do app nativo iOS (WKWebView), informa o device_id
+  // pro wrapper. É o que permite a Live Activity da pré-climatização saber que
+  // ESTE app foi quem agendou (gate device_id == notifDeviceId no PreClimatManager).
+  try {
+    const did = localStorage.getItem('eco_device_id');
+    if (did && window.HavalNative && typeof window.HavalNative.setDeviceId === 'function') {
+      window.HavalNative.setDeviceId(did);
+    }
+  } catch (_) {}
 })();
 
 async function subscribePush() {

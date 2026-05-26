@@ -4707,6 +4707,7 @@ app.post('/api/preclimat', requireAuth, (req, res) => {
   if (device_id) preclimat.device_id = String(device_id);
   if (time !== undefined) {
     if (!/^\d{2}:\d{2}$/.test(time)) return res.status(400).json({ error: 'time inválido (HH:MM)' });
+    if (time !== preclimat.time) preclimat.lastFiredDate = '';  // novo horário → pode disparar de novo hoje
     preclimat.time = time;
   }
   if (recurrence !== undefined) {
@@ -4729,7 +4730,10 @@ app.post('/api/preclimat', requireAuth, (req, res) => {
     if (isNaN(d) || d < 0 || d > 180) return res.status(400).json({ error: 'duration fora do range 0-180 min' });
     preclimat.duration = d;
   }
-  if (enabled !== undefined) preclimat.enabled = !!enabled;
+  if (enabled !== undefined) {
+    if (!!enabled && !preclimat.enabled) preclimat.lastFiredDate = '';  // reabilitou → pode disparar hoje
+    preclimat.enabled = !!enabled;
+  }
   savePreclimat();
   res.json(preclimat);
 });
