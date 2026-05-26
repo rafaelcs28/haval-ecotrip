@@ -1566,8 +1566,13 @@ function render(s, kpData) {
     chgDetail.classList.remove('show');
   }
 
-  // Enquanto carregando: oculta Condução e as linhas de status (menos relevantes)
-  document.getElementById('hc-drive-card').style.display  = charging ? 'none' : '';
+  // Condução: visível só com o carro LIGADO (e nunca durante recarga — o layout
+  // de carga foca a sessão). Linhas de status: ocultas na recarga; fora dela,
+  // cada linha decide a própria visibilidade (porta/vidro só com anomalia, clima
+  // só com AC, pneu só fora da faixa) via _setStatusLine, e o bloco inteiro é
+  // recolhido no fim de renderCarLayers se nada sobrar.
+  const _engOn = s.engine_state === '1' || s.engine_state === 'on';
+  document.getElementById('hc-drive-card').style.display  = (charging || !_engOn) ? 'none' : '';
   document.querySelector('.status-lines').style.display    = charging ? 'none' : '';
 
   // ── SOC (card especial quando carregando)
@@ -1678,7 +1683,7 @@ function render(s, kpData) {
     _tOut ? `Ext ${_tOut}` : null,
     _tIn  ? `Int ${_tIn}`  : null,
   ].filter(Boolean).join(' · ');
-  _setStatusLine('climate', _tempStr || '--', 'ok');
+  _setStatusLine('climate', _tempStr || '--', 'ok', acOn);   // só visível com AC ligado
 
   // ── Pill 12V dentro do card de Bateria SOC (cor por faixa)
   const pill12 = document.getElementById('hc-batt12-pill');
@@ -1807,7 +1812,7 @@ function renderCarLayers(s, charging) {
     dSummary.textContent = dTxt;
     dSummary.style.color = dLevel === 'ok' ? 'var(--green)' : 'var(--red)';
   }
-  _setStatusLine('doors', dTxt, dLevel);
+  _setStatusLine('doors', dTxt, dLevel, dN > 0);   // só visível se alguma porta/porta-malas aberta
 
   // ── Vidros (card detalhado: só alterna classe; teto solar embaixo)
   const sunOpen = s.sunroof === 'on';
@@ -1839,7 +1844,7 @@ function renderCarLayers(s, charging) {
     wSummary.textContent = wTxt;
     wSummary.style.color = wLevel === 'ok' ? 'var(--green)' : 'var(--red)';
   }
-  _setStatusLine('windows', wTxt, wLevel);
+  _setStatusLine('windows', wTxt, wLevel, (winOpen > 0 || sunOpen));   // só visível se vidro/teto aberto
 
   // ── Pneus
   setTyreCell('fl', s.tyre_pressure_fl, s.tyre_temp_fl);
@@ -1869,11 +1874,21 @@ function renderCarLayers(s, charging) {
   }
   const tySum = document.getElementById('ty-summary');
   if (tySum) tySum.textContent = tyTxt;
-  _setStatusLine('tyres', tyTxt, tyLevel);
+  _setStatusLine('tyres', tyTxt, tyLevel, tyLevel !== 'ok');   // só visível fora da faixa OK (amarelo/vermelho)
+
+  // Recolhe o bloco inteiro de status se nenhuma linha sobrou visível (fora da recarga).
+  const slBox = document.querySelector('.status-lines');
+  if (slBox && !charging) {
+    const anyVisible = ['tyres', 'doors', 'windows', 'climate'].some(k => {
+      const el = document.getElementById('sl-' + k);
+      return el && el.style.display !== 'none';
+    });
+    slBox.style.display = anyVisible ? '' : 'none';
+  }
 }
 
 // Atualiza a linha compacta (id sl-<key>) + texto + estado de cor (ok/warn/alert)
-function _setStatusLine(key, text, level) {
+function _setStatusLine(key, text, level, visible = true) {
   const line = document.getElementById('sl-' + key);
   const st = document.getElementById('sl-' + key + '-st');
   if (st) st.textContent = text;
@@ -1881,6 +1896,7 @@ function _setStatusLine(key, text, level) {
     line.classList.remove('warn', 'alert');
     if (level === 'warn')  line.classList.add('warn');
     if (level === 'alert') line.classList.add('alert');
+    line.style.display = visible ? '' : 'none';
   }
 }
 
