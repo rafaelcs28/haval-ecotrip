@@ -136,7 +136,7 @@ struct SetupView: View {
                         }
                     }
                     .onChange(of: keepAliveMode) { _, new in Settings.keepAliveMode = new }
-                    Text("Áudio silencioso mantém o app ativo e atualiza a Live Activity a cada 30s. Não interrompe música. "Enquanto carrega" é o recomendado.")
+                    Text("Áudio silencioso mantém o app ativo e atualiza a Live Activity a cada 30s. Não interrompe música. 'Enquanto carrega' é o recomendado.")
                         .font(.caption).foregroundStyle(.secondary)
                 } header: {
                     Text("Segundo plano")
