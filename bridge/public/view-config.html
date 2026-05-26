@@ -2118,11 +2118,27 @@ async function _loadPrefsForCurrentDevice() {
 
     _updateGeofenceLocalControls();
     _updateNgBadges();
+    _ngRestoreState();
+  } catch (_) {}
+}
+
+const _NG_STATE_KEY = 'notif_groups_open';
+
+function _ngSaveState() {
+  const open = [...document.querySelectorAll('.ng[id].open')].map(g => g.id);
+  localStorage.setItem(_NG_STATE_KEY, JSON.stringify(open));
+}
+
+function _ngRestoreState() {
+  try {
+    const open = JSON.parse(localStorage.getItem(_NG_STATE_KEY) || '[]');
+    open.forEach(id => document.getElementById(id)?.classList.add('open'));
   } catch (_) {}
 }
 
 function toggleNg(id) {
   document.getElementById(id)?.classList.toggle('open');
+  _ngSaveState();
 }
 
 function _updateNgBadges() {
@@ -2131,8 +2147,6 @@ function _updateNgBadges() {
     if (!ct) return;
     const n = g.querySelectorAll('.ng-bd .toggle.on').length;
     ct.textContent = n ? n + ' ativo' + (n > 1 ? 's' : '') : '';
-    // auto-abre o grupo se tiver algum toggle ativo
-    if (n > 0) g.classList.add('open');
   });
 }
 
