@@ -5849,7 +5849,8 @@ function applyMqttMessage(key, value, isRetained = false) {
         // ── Alerta carga desacelera ──────────────────────────────────────────
         // Rastreia pico da sessão e detecta queda >30% sustentada por 5+ min.
         if (p > _chargePeakKw) _chargePeakKw = p;
-        if (_chargePeakKw > 3 && p < _chargePeakKw * 0.7 && !_chargeSlowAlertSent) {
+        if (_chargePeakKw > 3 && p < _chargePeakKw * 0.7 && !_chargeSlowAlertSent
+            && (+state.soc_pct || 0) < 90) {  // acima de 90% é normal desacelerar
           if (_chargeSlowCheckTs === 0) _chargeSlowCheckTs = Date.now();
           if (Date.now() - _chargeSlowCheckTs > 5 * 60_000) {
             _chargeSlowAlertSent = true;
@@ -5860,8 +5861,8 @@ function applyMqttMessage(key, value, isRetained = false) {
               { tag: 'charge_slow' }
             );
           }
-        } else if (p >= _chargePeakKw * 0.7) {
-          _chargeSlowCheckTs = 0; // recuperou — reinicia janela de 5 min
+        } else if (p >= _chargePeakKw * 0.7 || (+state.soc_pct || 0) >= 90) {
+          _chargeSlowCheckTs = 0; // recuperou ou entrou no final da carga — reinicia janela
         }
       }
       break;
