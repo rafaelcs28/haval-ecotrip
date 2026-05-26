@@ -215,16 +215,14 @@ async function sendPush(title, body, type, opts = {}) {
   if (opts.silent)   payloadObj.silent   = true;
   if (opts.renotify !== undefined) payloadObj.renotify = !!opts.renotify;
   if (type)          payloadObj.type     = type;
+  if (opts.state)    payloadObj.state    = opts.state;
   const payload = JSON.stringify(payloadObj);
 
-  // Opções de envio para push silencioso: diz ao APNS pra entregar como passive
-  // (sem banner, sem acender tela, só aparece na central/tela de bloqueio).
-  // Mantém urgency padrão (normal) — urgency muito baixo faz o APNS segurar/
-  // descartar a notificação indefinidamente. Para endpoints não-Apple (FCM, etc.)
-  // o header apns-interruption-level é ignorado silenciosamente.
-  const _silentWpOpts = {
-    headers: { 'apns-interruption-level': 'passive' },
-  };
+  // Opções de envio para push silencioso. Sem headers extras — o endpoint
+  // web.push.apple.com segue RFC 8030 e rejeita headers APNS proprietários.
+  // A supressão de banner/som é feita pelo `silent: true` no payload, que o
+  // Service Worker repassa pro showNotification({ silent: true }).
+  const _silentWpOpts = {};
 
   const dead = [];
   let sent = 0, skipped = 0;
@@ -5342,6 +5340,7 @@ function sendChargeLiveUpdate(isFinal = false) {
     if (!significant) return;
   }
   _chargeLiveLast = { soc, pwr, rem, ts: now };
+  const kwh   = +state.charge_session_kwh || 0;
   const title = isFinal ? '✅ Recarga concluída' : '⚡ Carregando…';
   const body  = isFinal
     ? _fmtChargeLiveBody(state) || 'Sessão encerrada'
@@ -5351,6 +5350,9 @@ function sendChargeLiveUpdate(isFinal = false) {
     silent: !isFinal,                // updates não fazem barulho; a final sim
     renotify: isFinal,
     skipHistory: !isFinal,           // updates ao vivo não entram na central de notif
+    // Dados de estado embarcados no payload: o app nativo iOS usa para atualizar
+    // a Live Activity diretamente a partir da notificação (sem fetch extra).
+    state: { soc, pwr, rem: Math.max(0, Math.round(rem)), kwh, charging: !isFinal },
   });
   // Live Activity (iOS) via APNs — manda o mesmo content-state pra todos os
   // pushTokens registrados pelo app companion. No-op se APNS_ENABLED=false.

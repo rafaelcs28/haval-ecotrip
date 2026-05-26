@@ -1,15 +1,10 @@
 //
 //  ActivityManager.swift
-//  Versão app-driven (free Apple ID, sem AuthKey APNs paga):
-//   - request() inicia uma Activity local.
-//   - Enquanto app está em foreground, um Task em loop faz polling do bridge
-//     a cada 5s e chama Activity.update() com o novo content-state.
-//   - Quando o iPhone bloqueia, o iOS pode matar o app em ~30s; a Activity
-//     continua exibida com o ÚLTIMO estado até o user desbloquear/reabrir
-//     o app — limitação conhecida sem APNs push.
-//   - Se mais tarde você pagar a Developer Account (US$ 99/ano), basta
-//     trocar `pushType: nil` por `pushType: .token` e configurar o bridge
-//     com a AuthKey — o backend APNs já está pronto.
+//  Atualiza a Live Activity de carga em foreground (polling 5s) e via push
+//  APNS quando o celular está bloqueado (requer AuthKey .p8 configurada no
+//  bridge — ver APNS_ENABLED no .env). Sem a .p8 o pushType é nil e só o
+//  polling de foreground funciona; com a .p8 o servidor empurra atualizações
+//  diretamente a cada ~60s sem depender do app estar ativo.
 //
 import Foundation
 import ActivityKit
@@ -70,22 +65,73 @@ final class ActivityManager: ObservableObject {
         )
         do {
             let content = ActivityContent(state: initial, staleDate: Date().addingTimeInterval(60 * 60))
-            // pushType nil = app-driven. Pra trocar pra push remoto: .token
-            // (requer Apple Developer Program pago + AuthKey APNs configurada).
+            // pushType: .token — iOS gera um push token único para esta Activity;
+            // o app manda pro servidor via /api/activity/start e o bridge usa o
+            // apns_live_activity.js pra mandar updates direto no celular bloqueado.
+            // Requer APNS_ENABLED=true + AuthKey .p8 no .env do bridge.
+            // Se o APNS não estiver configurado, pushType: nil funciona mas só
+            // atualiza em foreground.
+            let usePushType: Activity<ChargeActivityAttributes>.PushType? = Settings.apnsEnabled ? .token : nil
             let activity = try Activity<ChargeActivityAttributes>.request(
                 attributes: attributes,
                 content: content,
-                pushType: nil
+                pushType: usePushType
             )
             currentActivity = activity
             status = "Activity iniciada — polling…"
             startPolling()
+            if usePushType == .token {
+                monitorPushToken(activity: activity)
+            }
         } catch {
             status = "Erro: \(error.localizedDescription)"
         }
     }
 
+    // ── Push token monitoring (só com pushType: .token) ──────────────────────
+    // Monitora atualizações do token e registra no servidor. iOS pode trocar o
+    // token durante a vida da Activity, por isso o loop continua até encerrar.
+    private func monitorPushToken(activity: Activity<ChargeActivityAttributes>) {
+        Task { [weak self] in
+            for await tokenData in activity.pushTokenUpdates {
+                let hex = tokenData.map { String(format: "%02x", $0) }.joined()
+                await self?.registerTokenWithServer(activityId: activity.id, token: hex)
+            }
+        }
+    }
+
+    private func registerTokenWithServer(activityId: String, token: String) async {
+        guard let url = URL(string: Settings.bridgeURL + "/api/activity/start") else { return }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("Bearer " + Settings.bridgeToken, forHTTPHeaderField: "Authorization")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try? JSONSerialization.data(withJSONObject: [
+            "activity_id": activityId, "push_token": token
+        ])
+        req.timeoutInterval = 8
+        try? await URLSession.shared.data(for: req)
+    }
+
+    // Atualiza a Live Activity ativa diretamente de um payload (sem fetch).
+    // Chamado pelo UNUserNotificationCenterDelegate quando chega charge_live.
+    static func updateFromPayload(soc: Double, pwr: Double, rem: Double, kwh: Double) async {
+        let activities = await MainActor.run {
+            Activity<ChargeActivityAttributes>.activities.filter { $0.activityState == .active }
+        }
+        guard let activity = activities.first else { return }
+        let state = ChargeActivityAttributes.ContentState(
+            soc: soc, powerKw: pwr, sessionKwh: kwh,
+            remainingMin: Int(rem.rounded()), charging: true,
+            updatedAtMs: Date().timeIntervalSince1970 * 1000
+        )
+        await activity.update(ActivityContent(state: state, staleDate: Date().addingTimeInterval(60 * 60)))
+    }
+
     func stop() async {
+        if let id = currentActivity?.id {
+            Task { await unregisterTokenFromServer(activityId: id) }
+        }
         stopPolling()
         guard let activity = currentActivity else { return }
         let final = ChargeActivityAttributes.ContentState(
@@ -96,6 +142,17 @@ final class ActivityManager: ObservableObject {
         await activity.end(content, dismissalPolicy: .immediate)
         currentActivity = nil
         status = "Encerrada"
+    }
+
+    private func unregisterTokenFromServer(activityId: String) async {
+        guard let url = URL(string: Settings.bridgeURL + "/api/activity/stop") else { return }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("Bearer " + Settings.bridgeToken, forHTTPHeaderField: "Authorization")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try? JSONSerialization.data(withJSONObject: ["activity_id": activityId])
+        req.timeoutInterval = 8
+        try? await URLSession.shared.data(for: req)
     }
 
     // ── Polling loop ──────────────────────────────────────────────────────────

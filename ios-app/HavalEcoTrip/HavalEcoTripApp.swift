@@ -56,10 +56,21 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
                                  willPresent notification: UNNotification,
                                  withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
         let info = notification.request.content.userInfo
-        // O SW passa data: { type } → iOS armazena em userInfo (direto ou aninhado em "data")
-        let type = (info["type"] as? String)
-            ?? ((info["data"] as? [String: Any])?["type"] as? String)
+        // O SW passa data: { type, soc, pwr, rem, kwh } → iOS armazena em userInfo
+        let data = (info["data"] as? [String: Any]) ?? [:]
+        let type = (info["type"] as? String) ?? (data["type"] as? String)
+
         if type == "charge_live" {
+            // Atualiza a Live Activity diretamente do payload — sem fetch.
+            // Cobre o caso em que o app está aberto mas o pushType:nil não tem
+            // canal de push pro servidor atualizar em background.
+            let soc = (data["soc"] as? Double) ?? 0
+            let pwr = (data["pwr"] as? Double) ?? 0
+            let rem = (data["rem"] as? Double) ?? 0
+            let kwh = (data["kwh"] as? Double) ?? 0
+            if soc > 0 || pwr > 0 {
+                Task { await ActivityManager.updateFromPayload(soc: soc, pwr: pwr, rem: rem, kwh: kwh) }
+            }
             completionHandler([.list])   // silencioso, sem banner, só central
         } else {
             completionHandler([.banner, .sound, .list, .badge])
