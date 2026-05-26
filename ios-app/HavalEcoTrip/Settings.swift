@@ -58,6 +58,16 @@ enum Settings {
         set { defaults.set(newValue, forKey: deviceIdKey) }
     }
 
+    private static let nativeNotifsKey = "native_notifs_enabled"
+
+    /// Notificações nativas via NotificationPoller (polling de /api/push/history
+    /// + local notifications). Padrão OFF — o PWA standalone já notifica em tempo
+    /// real via Web Push, e o poller nativo só re-dispararia o backlog ao abrir.
+    static var nativeNotificationsEnabled: Bool {
+        get { defaults.bool(forKey: nativeNotifsKey) }   // ausente = false = OFF
+        set { defaults.set(newValue, forKey: nativeNotifsKey) }
+    }
+
     // ── Keep-alive em background ──────────────────────────────────────────────
 
     /// Comportamento do áudio silencioso que mantém o app vivo em background

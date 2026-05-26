@@ -49,16 +49,20 @@ struct ContentView: View {
                     showSetup = true
                 }
                 .sheet(isPresented: $showSetup) {
-                    SetupView(manager: manager, isPresented: $showSetup)
+                    SetupView(manager: manager, notifPoller: notifPoller, isPresented: $showSetup)
                 }
             } else {
-                SetupView(manager: manager, isPresented: .constant(true))
+                SetupView(manager: manager, notifPoller: notifPoller, isPresented: .constant(true))
             }
         }
         .task {
             await manager.autoStartIfCharging()
-            await notifPoller.requestPermission()
-            notifPoller.start()
+            // Notificações nativas são opt-in (padrão OFF) — o PWA standalone
+            // já notifica em tempo real. Sem isso, o poller re-dispara o backlog.
+            if Settings.nativeNotificationsEnabled {
+                await notifPoller.requestPermission()
+                notifPoller.start()
+            }
             ChargingKeepAlive.shared.requestPermissionIfNeeded()
         }
         // URL scheme havalecotrip://open — disparado pelo SW do PWA standalone
@@ -76,7 +80,7 @@ struct ContentView: View {
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
                 Task { await manager.autoStartIfCharging() }
-                notifPoller.start()
+                if Settings.nativeNotificationsEnabled { notifPoller.start() }
                 ChargingKeepAlive.shared.appDidForeground()
                 ChargingKeepAlive.shared.requestPermissionIfNeeded()
             } else if newPhase == .background {
@@ -93,11 +97,13 @@ struct ContentView: View {
 // ── Tela de Setup / Settings ─────────────────────────────────────────────────
 struct SetupView: View {
     @ObservedObject var manager: ActivityManager
+    @ObservedObject var notifPoller: NotificationPoller
     @Binding var isPresented: Bool
     @State private var url:           String = Settings.bridgeURL
     @State private var token:         String = Settings.bridgeToken
     @State private var showTokenPlain = false
     @State private var keepAliveMode: Settings.KeepAliveMode = Settings.keepAliveMode
+    @State private var nativeNotifs:  Bool = Settings.nativeNotificationsEnabled
     @ObservedObject private var keepAlive = ChargingKeepAlive.shared
 
     // Botão/indicador de permissão de localização. O texto e a ação mudam
@@ -179,6 +185,25 @@ struct SetupView: View {
                     }
                 } header: {
                     Text("Segundo plano")
+                }
+
+                Section {
+                    Toggle("Notificações nativas", isOn: $nativeNotifs)
+                        .onChange(of: nativeNotifs) { _, on in
+                            Settings.nativeNotificationsEnabled = on
+                            if on {
+                                Task {
+                                    await notifPoller.requestPermission()
+                                    notifPoller.start()
+                                }
+                            } else {
+                                notifPoller.stop()
+                            }
+                        }
+                    Text("Desligado (recomendado): você recebe notificações em tempo real só pelo PWA. Ligado: o app nativo também busca o histórico e re-dispara como notificação local — útil só se você não usa o PWA na tela de início.")
+                        .font(.caption).foregroundStyle(.secondary)
+                } header: {
+                    Text("Notificações")
                 }
 
                 Section("Como funciona") {
