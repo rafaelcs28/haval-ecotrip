@@ -98,6 +98,42 @@ struct SetupView: View {
     @State private var token:         String = Settings.bridgeToken
     @State private var showTokenPlain = false
     @State private var keepAliveMode: Settings.KeepAliveMode = Settings.keepAliveMode
+    @ObservedObject private var keepAlive = ChargingKeepAlive.shared
+
+    // Botão/indicador de permissão de localização. O texto e a ação mudam
+    // conforme o status atual — refletindo a escalada em 2 passos do iOS.
+    @ViewBuilder private var locationPermissionRow: some View {
+        switch keepAlive.authStatus {
+        case .authorizedAlways:
+            Label("Localização: Sempre", systemImage: "checkmark.circle.fill")
+                .foregroundStyle(.green)
+        case .authorizedWhenInUse:
+            Button {
+                keepAlive.requestAlwaysUpgrade()
+            } label: {
+                Label("Mudar para localização Sempre", systemImage: "location.fill")
+            }
+            Text("Hoje está em 'Ao Usar' — o app só segue ativo em background com 'Sempre'. Toque acima para liberar.")
+                .font(.caption).foregroundStyle(.secondary)
+        case .denied, .restricted:
+            Button {
+                keepAlive.requestAlwaysUpgrade()
+            } label: {
+                Label("Abrir Ajustes para permitir", systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+            }
+            Text("Localização negada. Ative em Ajustes › Privacidade › Localização › Haval EcoTrip › Sempre.")
+                .font(.caption).foregroundStyle(.secondary)
+        default:   // .notDetermined
+            Button {
+                keepAlive.requestAlwaysUpgrade()
+            } label: {
+                Label("Permitir localização", systemImage: "location")
+            }
+            Text("O iOS pede 'Ao Usar' primeiro; depois aparece a opção 'Sempre'.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
 
     var body: some View {
         NavigationStack {
@@ -131,9 +167,16 @@ struct SetupView: View {
                             Text(mode.label).tag(mode)
                         }
                     }
-                    .onChange(of: keepAliveMode) { _, new in Settings.keepAliveMode = new }
+                    .onChange(of: keepAliveMode) { _, new in
+                        Settings.keepAliveMode = new
+                        if new != .off { keepAlive.requestPermissionIfNeeded() }
+                    }
                     Text("Áudio silencioso mantém o app ativo e atualiza a Live Activity a cada 30s. Não interrompe música. 'Enquanto carrega' é o recomendado.")
                         .font(.caption).foregroundStyle(.secondary)
+
+                    if keepAliveMode != .off {
+                        locationPermissionRow
+                    }
                 } header: {
                     Text("Segundo plano")
                 }

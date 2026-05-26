@@ -19,14 +19,28 @@ import ActivityKit
 import UIKit
 
 @MainActor
-final class ChargingKeepAlive: NSObject {
+final class ChargingKeepAlive: NSObject, ObservableObject {
     static let shared = ChargingKeepAlive()
 
+    /// Status atual de autorização — observável pela UI (botão nas Settings).
+    @Published private(set) var authStatus: CLAuthorizationStatus = .notDetermined
+
+    /// Manager persistente só para monitorar/pedir autorização. Precisa viver
+    /// o app inteiro para o delegate receber a resposta dos prompts.
+    private let authManager = CLLocationManager()
     private var locationManager: CLLocationManager?
     private var pollTimer: Timer?
     private var wantsBackground = false
 
-    private override init() { super.init() }
+    /// iOS só mostra o prompt "Sempre" uma vez por chamada direta. Depois disso,
+    /// o usuário precisa ir aos Ajustes. Guardamos se já pedimos.
+    private let alwaysAskedKey = "always_upgrade_asked"
+
+    private override init() {
+        super.init()
+        authManager.delegate = self
+        authStatus = authManager.authorizationStatus
+    }
 
     // ── Hooks chamados pelo ContentView / ActivityManager ─────────────────────
 
@@ -54,14 +68,43 @@ final class ChargingKeepAlive: NSObject {
 
     /// Pede permissão de localização enquanto o app está em foreground.
     /// Deve ser chamado no onAppear/scenePhase=active se o modo não for .off.
+    ///
+    /// IMPORTANTE: desde o iOS 13, o primeiro prompt NUNCA mostra "Sempre" —
+    /// só "Ao Usar". Por isso pedimos WhenInUse aqui; a escalada para "Sempre"
+    /// é feita explicitamente em `requestAlwaysUpgrade()` (botão nas Settings).
     func requestPermissionIfNeeded() {
         guard Settings.keepAliveMode != .off else { return }
-        let mgr = CLLocationManager()
-        mgr.delegate = self
-        locationManager = mgr
-        if mgr.authorizationStatus == .notDetermined {
-            mgr.requestAlwaysAuthorization()
+        authStatus = authManager.authorizationStatus
+        if authManager.authorizationStatus == .notDetermined {
+            authManager.requestWhenInUseAuthorization()
         }
+    }
+
+    /// Escalada explícita para "Sempre", disparada por um botão consciente.
+    /// O iOS só exibe o prompt "Mudar para Sempre" quando já existe "Ao Usar".
+    func requestAlwaysUpgrade() {
+        switch authManager.authorizationStatus {
+        case .notDetermined:
+            authManager.requestWhenInUseAuthorization()      // 1º passo
+        case .authorizedWhenInUse:
+            if UserDefaults.standard.bool(forKey: alwaysAskedKey) {
+                openAppSettings()                            // iOS não reexibe o prompt
+            } else {
+                UserDefaults.standard.set(true, forKey: alwaysAskedKey)
+                authManager.requestAlwaysAuthorization()     // 2º passo → prompt "Sempre"
+            }
+        case .denied, .restricted:
+            openAppSettings()
+        case .authorizedAlways:
+            break                                            // já concedido
+        @unknown default:
+            break
+        }
+    }
+
+    private func openAppSettings() {
+        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+        UIApplication.shared.open(url)
     }
 
     private func startBackground() {
@@ -160,6 +203,7 @@ final class ChargingKeepAlive: NSObject {
 extension ChargingKeepAlive: CLLocationManagerDelegate {
     nonisolated func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
         Task { @MainActor in
+            self.authStatus = manager.authorizationStatus
             guard self.wantsBackground else { return }
             switch manager.authorizationStatus {
             case .authorizedAlways, .authorizedWhenInUse:
