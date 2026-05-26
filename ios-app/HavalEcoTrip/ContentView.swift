@@ -16,7 +16,6 @@ import SwiftUI
 
 struct ContentView: View {
     @StateObject private var manager = ActivityManager()
-    @StateObject private var notifPoller = NotificationPoller()
     @StateObject private var shortcuts = ShortcutManager.shared
     @Environment(\.scenePhase) private var scenePhase
     @State private var showSetup = false   // sheet por cima da WebView
@@ -53,10 +52,10 @@ struct ContentView: View {
                     showSetup = true
                 }
                 .sheet(isPresented: $showSetup) {
-                    SetupView(manager: manager, notifPoller: notifPoller, isPresented: $showSetup)
+                    SetupView(manager: manager, isPresented: $showSetup)
                 }
             } else {
-                SetupView(manager: manager, notifPoller: notifPoller, isPresented: .constant(true))
+                SetupView(manager: manager, isPresented: .constant(true))
             }
         }
         .task {
@@ -65,9 +64,10 @@ struct ContentView: View {
             // + update). É o que permite o servidor criar/atualizar a LA com o app
             // fechado. Idempotente.
             LiveActivityPush.shared.start()
+            // Notificações via APNs — pede permissão e registra no APNs (o token
+            // chega no AppDelegate e vai pro bridge). O bridge manda os alertas.
             if Settings.nativeNotificationsEnabled {
-                await notifPoller.requestPermission()
-                notifPoller.start()
+                RemoteNotifications.enable()
             }
         }
         // URL scheme havalecotrip://open — disparado pelo SW do PWA standalone
@@ -85,9 +85,7 @@ struct ContentView: View {
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
                 Task { await manager.autoStartIfCharging() }
-                if Settings.nativeNotificationsEnabled { notifPoller.start() }
             } else if newPhase == .background {
-                notifPoller.stop()
                 BackgroundRefresh.schedule()
             }
         }
@@ -97,7 +95,6 @@ struct ContentView: View {
 // ── Tela de Setup / Settings ─────────────────────────────────────────────────
 struct SetupView: View {
     @ObservedObject var manager: ActivityManager
-    @ObservedObject var notifPoller: NotificationPoller
     @Binding var isPresented: Bool
     @State private var url:           String = Settings.bridgeURL
     @State private var token:         String = Settings.bridgeToken
@@ -131,19 +128,12 @@ struct SetupView: View {
                 }
 
                 Section {
-                    Toggle("Notificações nativas", isOn: $nativeNotifs)
+                    Toggle("Notificações", isOn: $nativeNotifs)
                         .onChange(of: nativeNotifs) { _, on in
                             Settings.nativeNotificationsEnabled = on
-                            if on {
-                                Task {
-                                    await notifPoller.requestPermission()
-                                    notifPoller.start()
-                                }
-                            } else {
-                                notifPoller.stop()
-                            }
+                            if on { RemoteNotifications.enable() }
                         }
-                    Text("Recebe as notificações do carro direto neste app. Pode deixar ligado — com a conta paga o push é confiável e não interrompe.")
+                    Text("Recebe as notificações do carro direto neste app via APNs. Para desativar de vez, use Ajustes › Notificações › Haval EcoTrip.")
                         .font(.caption).foregroundStyle(.secondary)
                 } header: {
                     Text("Notificações")

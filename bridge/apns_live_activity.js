@@ -37,14 +37,16 @@ let teamId = '', keyId = '', bundleId = '', env = 'sandbox';
 let privateKeyPem = '';
 // startTokens:  { type, deviceId, token, ts }              — push-to-start (por tipo+device)
 // updateTokens: { type, activityId, deviceId, token, ts }  — update por atividade
+// alertTokens:  { deviceId, token, ts }                    — notificações de alerta
 let startTokens = [];
 let updateTokens = [];
+let alertTokens = [];
 let _jwt = '', _jwtIat = 0;
 
 function _save() {
   try {
     fs.writeFileSync(TOKENS_FILE, JSON.stringify(
-      { updatedAt: new Date().toISOString(), startTokens, updateTokens }, null, 2));
+      { updatedAt: new Date().toISOString(), startTokens, updateTokens, alertTokens }, null, 2));
   } catch (e) { console.error('[apns] falha salvar tokens:', e.message); }
 }
 
@@ -54,6 +56,7 @@ function _load() {
       const d = JSON.parse(fs.readFileSync(TOKENS_FILE, 'utf8'));
       startTokens  = Array.isArray(d.startTokens)  ? d.startTokens  : [];
       updateTokens = Array.isArray(d.updateTokens) ? d.updateTokens : [];
+      alertTokens  = Array.isArray(d.alertTokens)  ? d.alertTokens  : [];
     }
   } catch (e) { console.error('[apns] falha carregar tokens:', e.message); }
 }
@@ -116,10 +119,20 @@ function unregisterActivity(activityId) {
   if (updateTokens.length !== before) _save();
 }
 
-function tokenCount() { return startTokens.length + updateTokens.length; }
+// Token de notificação de alerta (remote notification "normal").
+function registerAlertToken(deviceId, tokenHex) {
+  if (!enabled || !tokenHex) return;
+  alertTokens = alertTokens.filter(t => t.token !== tokenHex && t.deviceId !== (deviceId || ''));
+  alertTokens.push({ deviceId: deviceId || '', token: tokenHex, ts: Date.now() });
+  _save();
+  console.log(`[apns] alert token registrado (device=${(deviceId||'').slice(0,8)}…, total=${alertTokens.length})`);
+}
+
+function tokenCount() { return startTokens.length + updateTokens.length + alertTokens.length; }
 
 // ── Envio HTTP/2 pra uma lista de tokens ──────────────────────────────────────
-async function _send(targets, body) {
+// pushType: 'liveactivity' (topic .push-type.liveactivity) ou 'alert' (topic = bundle).
+async function _send(targets, body, pushType = 'liveactivity') {
   if (!enabled || !targets.length) return { sent: 0, dead: [] };
   const jwt = _getJwt();
   const client = http2.connect(`https://${_apnsHost()}`);
@@ -129,8 +142,8 @@ async function _send(targets, body) {
       ':method': 'POST',
       ':path':   `/3/device/${t.token}`,
       'authorization':  `bearer ${jwt}`,
-      'apns-topic':     `${bundleId}.push-type.liveactivity`,
-      'apns-push-type': 'liveactivity',
+      'apns-topic':     pushType === 'alert' ? bundleId : `${bundleId}.push-type.liveactivity`,
+      'apns-push-type': pushType,
       'apns-priority':  '10',
       'content-type':   'application/json',
     });
@@ -189,8 +202,21 @@ async function pushUpdate(type, sel = {}, contentState, opts = {}) {
   return { sent };
 }
 
+// ── Notificação de alerta (banner/som) direto pro app ─────────────────────────
+// opts.allow(deviceId) → predicado de gating (prefs por device etc.).
+async function pushAlert(title, body, opts = {}) {
+  let targets = alertTokens;
+  if (typeof opts.allow === 'function') targets = targets.filter(t => opts.allow(t.deviceId));
+  if (!targets.length) return { sent: 0 };
+  const aps = { alert: { title, body }, sound: opts.silent ? undefined : 'default' };
+  if (opts.threadId) aps['thread-id'] = opts.threadId;
+  const { sent, dead } = await _send(targets, JSON.stringify({ aps }), 'alert');
+  if (dead.length) { alertTokens = alertTokens.filter(t => !dead.includes(t.token)); _save(); }
+  return { sent };
+}
+
 module.exports = {
-  init, registerStartToken, registerUpdateToken, unregisterActivity,
-  pushStart, pushUpdate, tokenCount,
+  init, registerStartToken, registerUpdateToken, unregisterActivity, registerAlertToken,
+  pushStart, pushUpdate, pushAlert, tokenCount,
   get enabled() { return enabled; },
 };
