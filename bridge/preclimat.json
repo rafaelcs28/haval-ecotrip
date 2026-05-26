@@ -1,0 +1,10 @@
+{
+  "enabled": false,
+  "time": "20:23",
+  "recurrence": "once",
+  "temp": 23.5,
+  "fan": 1,
+  "duration": 5,
+  "lastFiredDate": "",
+  "device_id": "c5e05ed6-9259-4beb-a75d-fafc26e1f523"
+}

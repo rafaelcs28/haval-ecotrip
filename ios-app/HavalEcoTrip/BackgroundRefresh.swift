@@ -44,10 +44,9 @@ enum BackgroundRefresh {
         schedule()
 
         let work = Task {
-            // 1. Puxa notifs novas e dispara Local Notifications
-            await runPoll()
-            // 2. Atualiza a Live Activity ativa, se houver — usa o mesmo
-            //    /api/state que o ActivityManager usa em foreground.
+            // Notificações agora chegam por APNs (não fazemos mais polling do
+            // histórico aqui — evitaria duplicar com o alerta APNs). Mantemos só
+            // a atualização da Live Activity de recarga como fallback.
             await updateActiveLiveActivity()
             task.setTaskCompleted(success: true)
         }
@@ -86,45 +85,4 @@ enum BackgroundRefresh {
         } catch { /* silencioso */ }
     }
 
-    /// Versão standalone do polling (sem UI/Combine), reusa lógica do NotificationPoller.
-    private static func runPoll() async {
-        guard !Settings.bridgeURL.isEmpty, !Settings.bridgeToken.isEmpty else { return }
-        let did = Settings.notifDeviceId
-        let histPath = did.isEmpty ? "/api/push/history"
-            : "/api/push/history?device_id=" + (did.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? did)
-        guard let url = URL(string: Settings.bridgeURL + histPath) else { return }
-        var req = URLRequest(url: url)
-        req.timeoutInterval = 8
-        req.addValue("Bearer " + Settings.bridgeToken, forHTTPHeaderField: "Authorization")
-        do {
-            let (data, resp) = try await URLSession.shared.data(for: req)
-            guard (resp as? HTTPURLResponse)?.statusCode == 200,
-                  let arr = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return }
-            let lastSeenKey = "notif_last_seen_ts"
-            let lastSeen = UserDefaults.standard.double(forKey: lastSeenKey)
-            var newMax = lastSeen
-            var toFire: [(ts: Double, title: String, body: String, type: String)] = []
-            for entry in arr {
-                let ts = (entry["ts"] as? Double) ?? 0
-                if ts <= lastSeen { break }
-                toFire.append((
-                    ts,
-                    (entry["title"] as? String) ?? "EcoTrip",
-                    (entry["body"]  as? String) ?? "",
-                    (entry["type"]  as? String) ?? "generic"
-                ))
-                if ts > newMax { newMax = ts }
-            }
-            for n in toFire.reversed() {
-                let content = UNMutableNotificationContent()
-                content.title = n.title
-                content.body  = n.body
-                content.sound = .default
-                if n.type == "charge_live" { content.interruptionLevel = .passive }
-                let r = UNNotificationRequest(identifier: "\(n.type)-\(Int(n.ts))", content: content, trigger: nil)
-                try? await UNUserNotificationCenter.current().add(r)
-            }
-            if newMax > lastSeen { UserDefaults.standard.set(newMax, forKey: lastSeenKey) }
-        } catch { /* silencioso */ }
-    }
 }

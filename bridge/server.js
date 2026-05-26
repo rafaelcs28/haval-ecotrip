@@ -250,6 +250,19 @@ async function sendPush(title, body, type, opts = {}) {
     dead.reverse().forEach(i => pushSubs.splice(i, 1));
     savePushSubs();
   }
+
+  // APNs alert direto pro app nativo iOS (conta paga). Mesmo gating de device
+  // do web-push. Updates silenciosos (charge_live) não viram banner.
+  if (apnsLive.enabled && !opts.silent) {
+    apnsLive.pushAlert(title, body, {
+      threadId: type || undefined,
+      allow: (deviceId) => {
+        if (opts.onlyDeviceIds && !opts.onlyDeviceIds.includes(deviceId)) return false;
+        if (type && getPrefsForDevice(deviceId)[type] === false) return false;
+        return true;
+      },
+    }).catch(e => console.warn('[apns] alert falhou:', e.message));
+  }
 }
 
 // ── Preferências de notificações push ────────────────────────────────────────
@@ -5494,6 +5507,14 @@ app.post('/api/activity/stop', (req, res) => {
   const { activity_id } = req.body || {};
   if (activity_id) apnsLive.unregisterActivity(String(activity_id));
   res.json({ ok: true, registered: apnsLive.tokenCount() });
+});
+
+// Device token de notificação de alerta (remote notification) do app nativo.
+app.post('/api/apns/register', (req, res) => {
+  const { device_token, device_id } = req.body || {};
+  if (!device_token) return res.status(400).json({ error: 'device_token obrigatório' });
+  apnsLive.registerAlertToken(device_id ? String(device_id) : '', String(device_token));
+  res.json({ ok: true });
 });
 
 function startChargeLiveTimer() {
