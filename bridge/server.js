@@ -193,58 +193,7 @@ function saveNotifHistory() {
  *   o comportamento da notification (usado pra "live update" durante recarga,
  *   onde queremos substituir a notif anterior em silêncio).
  */
-// ── ntfy.sh (push externo grátis, sem APNs paga) ─────────────────────────────
-// Bridge publica notificações também num topic ntfy.sh; user instala o app
-// `ntfy` no iPhone (gratuito) e subscreve nesse topic. Push chega em background
-// instantaneamente. Topic é configurado em NTFY_TOPIC no .env — escolha um
-// nome difícil de adivinhar (ex: eco-trip-7a3b9f2e8c1d), porque topics
-// públicos ntfy.sh sem auth são acessíveis a qualquer um que saiba o nome.
-const NTFY_TOPIC = (process.env.NTFY_TOPIC || '').trim();
-const NTFY_URL   = (process.env.NTFY_URL   || 'https://ntfy.sh').replace(/\/$/, '');
-// Auth opcional pra self-hosted (basic ou token)
-const NTFY_AUTH  = (process.env.NTFY_AUTH || '').trim();
-
-async function sendNtfy(title, body, type) {
-  if (!NTFY_TOPIC) return;
-  // Mapeia type → prioridade + tag
-  const meta = {
-    charge_start:        { prio: 4, tag: 'zap' },
-    charge_end:          { prio: 3, tag: 'battery' },
-    charge_ending:       { prio: 4, tag: 'hourglass_flowing_sand' },
-    charge_live:         { prio: 2, tag: 'zap' },
-    maintenance_soon:    { prio: 4, tag: 'wrench' },
-    maintenance_overdue: { prio: 5, tag: 'warning' },
-    anomaly_detected:    { prio: 4, tag: 'warning' },
-    door_open:           { prio: 3, tag: 'door' },
-    tyre_low:            { prio: 4, tag: 'warning' },
-    geofence_arrival:    { prio: 3, tag: 'house' },
-    geofence_departure:  { prio: 3, tag: 'car' },
-  }[type] || { prio: 3, tag: 'car' };
-
-  try {
-    // ntfy aceita títulos Unicode via RFC 2047 (=?UTF-8?B?<base64>?=).
-    // Sem isso, emoji/acento aparece como mojibake no banner do iOS.
-    const titleEnc = `=?UTF-8?B?${Buffer.from(title, 'utf8').toString('base64')}?=`;
-    const headers = {
-      'Title':    titleEnc,
-      'Priority': String(meta.prio),
-      'Tags':     meta.tag,
-      'Content-Type': 'text/plain; charset=utf-8',
-    };
-    if (NTFY_AUTH) headers['Authorization'] = NTFY_AUTH;
-    await fetch(`${NTFY_URL}/${encodeURIComponent(NTFY_TOPIC)}`, {
-      method: 'POST',
-      headers,
-      body,
-    });
-  } catch (e) {
-    console.warn('[ntfy] falha:', e.message);
-  }
-}
-
 async function sendPush(title, body, type, opts = {}) {
-  // Despacha pro ntfy.sh em paralelo (best-effort, não bloqueia o Web Push)
-  if (!opts.skipNtfy) sendNtfy(title, body, type || 'generic').catch(() => {});
 
   // Registra no histórico — exceto se for live update silencioso (poluiria o feed)
   const ts = Date.now();
@@ -2719,17 +2668,6 @@ app.get('/api/tiles/:z/:x/:y', (req, res) => {
   });
   proxyReq.on('timeout', () => { proxyReq.destroy(); res.status(504).end(); });
   proxyReq.on('error',   () => res.status(502).end());
-});
-
-// ── Admin: restart remoto ─────────────────────────────────────────────────────
-// GET /api/ntfy/config — retorna topic + server pra PWA exibir QR/link de subscribe
-app.get('/api/ntfy/config', (_req, res) => {
-  res.json({
-    enabled: !!NTFY_TOPIC,
-    topic:   NTFY_TOPIC || null,
-    server:  NTFY_URL,
-    subscribe_url: NTFY_TOPIC ? `${NTFY_URL}/${encodeURIComponent(NTFY_TOPIC)}` : null,
-  });
 });
 
 // POST /api/admin/test-charging — simula uma recarga em andamento por N segundos.

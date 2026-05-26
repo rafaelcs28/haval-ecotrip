@@ -349,24 +349,6 @@
         <div id="notif-me-actions"></div>
       </div>
     </div>
-    <!-- ntfy.sh: push externo gratuito, funciona em background sem APNs paga -->
-    <div class="field-group" id="ntfy-card" style="display:none">
-      <div class="group-ti">📡 Push via ntfy.sh (grátis)</div>
-      <div style="padding:10px 12px;background:rgba(56,189,248,.06);border:1px solid rgba(56,189,248,.25);border-radius:10px;font-size:12px">
-        Receba notificações em background instalando o app gratuito <strong>ntfy</strong> na App Store / Play Store e subscrevendo neste topic:
-        <div id="ntfy-topic-row" style="display:flex;gap:6px;margin-top:8px;align-items:center">
-          <code id="ntfy-topic-text" style="flex:1;padding:6px 10px;background:rgba(0,0,0,.3);border-radius:6px;font-size:11px;font-variant-numeric:tabular-nums;overflow-x:auto;white-space:nowrap">--</code>
-          <button onclick="copyNtfyTopic()" style="padding:6px 10px;background:rgba(56,189,248,.15);color:#38bdf8;border:1px solid rgba(56,189,248,.35);border-radius:6px;font-size:11px;font-family:inherit;font-weight:600;cursor:pointer">Copiar</button>
-        </div>
-        <div style="margin-top:10px;font-size:11px;color:var(--muted)">
-          1. Baixa o app "ntfy" (gratuito)<br>
-          2. Toca em "+ Subscribe to topic"<br>
-          3. Server: <code id="ntfy-server-text">ntfy.sh</code><br>
-          4. Topic: cola o valor acima<br>
-          5. Pronto — push chega em segundos, mesmo com iPhone bloqueado
-        </div>
-      </div>
-    </div>
     <div class="field-group">
       <div class="group-ti">Recarga</div>
       <div class="toggle-row" onclick="toggleNotif('charge_start', this)"><div class="label">Início da recarga<div class="sub">Push quando conecta</div></div><div class="toggle" data-key="charge_start"></div></div>
@@ -1805,30 +1787,7 @@ async function _loadNotifPrefs() {
     }
   }
   await _loadPrefsForCurrentDevice();
-  _loadNtfyConfig();
 }
-
-async function _loadNtfyConfig() {
-  const tk = localStorage.getItem('bridge_token');
-  const card = document.getElementById('ntfy-card');
-  if (!tk || !card) return;
-  try {
-    const r = await fetch('/api/ntfy/config', { headers: { 'Authorization': 'Bearer ' + tk } });
-    const d = await r.json();
-    if (!d.enabled) { card.style.display = 'none'; return; }
-    card.style.display = '';
-    document.getElementById('ntfy-topic-text').textContent  = d.topic || '--';
-    document.getElementById('ntfy-server-text').textContent = (d.server || 'ntfy.sh').replace(/^https?:\/\//, '');
-  } catch (_) {}
-}
-
-function copyNtfyTopic() {
-  const t = document.getElementById('ntfy-topic-text')?.textContent || '';
-  if (!t) return;
-  if (navigator.clipboard) navigator.clipboard.writeText(t).catch(() => {});
-  if (typeof showToast === 'function') showToast('✓ Topic copiado', 'ok');
-}
-window.copyNtfyTopic = copyNtfyTopic;
 
 function _renderNotifPickerButton() {
   const btn = document.getElementById('notif-device-picker-label');
