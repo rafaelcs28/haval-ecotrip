@@ -214,7 +214,18 @@ async function sendPush(title, body, type, opts = {}) {
   if (opts.tag)      payloadObj.tag      = opts.tag;
   if (opts.silent)   payloadObj.silent   = true;
   if (opts.renotify !== undefined) payloadObj.renotify = !!opts.renotify;
+  if (type)          payloadObj.type     = type;
   const payload = JSON.stringify(payloadObj);
+
+  // Opções de envio para push silencioso: baixa prioridade + diz ao APNS pra
+  // entregar como passive (só tela de bloqueio, sem banner, sem acender tela).
+  // Para endpoints não-Apple (FCM, etc.) o header apns-interruption-level é
+  // ignorado; urgency=very-low instrui o push service a não acordar o device.
+  const _silentWpOpts = {
+    urgency: 'very-low',
+    headers: { 'apns-interruption-level': 'passive' },
+  };
+
   const dead = [];
   let sent = 0, skipped = 0;
   await Promise.all(pushSubs.map(async (sub, i) => {
@@ -226,7 +237,7 @@ async function sendPush(title, body, type, opts = {}) {
       if (prefs[type] === false) { skipped++; return; }
     }
     try {
-      await webpush.sendNotification(sub, payload);
+      await webpush.sendNotification(sub, payload, opts.silent ? _silentWpOpts : {});
       sent++;
     } catch (e) {
       const code = e.statusCode;

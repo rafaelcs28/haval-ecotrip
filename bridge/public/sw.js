@@ -1,4 +1,4 @@
-const CACHE = 'ecotrip-v404';
+const CACHE = 'ecotrip-v405';
 
 // Tudo do shell do PWA (HTML/CSS/JS/icons/libs) — pre-cached no install.
 // Bumpar CACHE acima força o navegador a re-baixar tudo na próxima vez.
@@ -118,6 +118,9 @@ self.addEventListener('push', e => {
     tag,
     renotify,
     silent,
+    // data é passado para o UNNotification.userInfo no iOS — permite suprimir
+    // banner em foreground sem regras por título.
+    data:     { type: data.type || null },
   };
   if (!silent) opts.vibrate = [200, 100, 200];
   e.waitUntil(self.registration.showNotification(data.title, opts));

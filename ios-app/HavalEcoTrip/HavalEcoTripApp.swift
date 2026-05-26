@@ -6,6 +6,7 @@
 //
 import SwiftUI
 import UIKit
+import UserNotifications
 
 @main
 struct HavalEcoTripApp: App {
@@ -32,15 +33,37 @@ struct HavalEcoTripApp: App {
 /// pra entregar shortcuts em warm-launches. SwiftUI iOS 13+ usa scene lifecycle,
 /// então performActionFor do AppDelegate NÃO é chamado em warm-launch — Apple
 /// roteia tudo via UIWindowSceneDelegate.
-final class AppDelegate: NSObject, UIApplicationDelegate {
+final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil) -> Bool {
+        // Registra como delegate de notificações para controlar apresentação
+        // em foreground (evitar banner para updates silenciosos de carga).
+        UNUserNotificationCenter.current().delegate = self
+
         if let shortcut = launchOptions?[.shortcutItem] as? UIApplicationShortcutItem {
             DispatchQueue.main.async {
                 ShortcutManager.shared.receive(shortcut)
             }
         }
         return true
+    }
+
+    // Controla como notificações são exibidas quando o app está em foreground.
+    // Para charge_live (updates ao vivo de carga), suprime o banner — a notif
+    // vai só para a central, sem interromper o user. O background já é tratado
+    // pelo apns-interruption-level: passive enviado pelo servidor.
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                 willPresent notification: UNNotification,
+                                 withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        let info = notification.request.content.userInfo
+        // O SW passa data: { type } → iOS armazena em userInfo (direto ou aninhado em "data")
+        let type = (info["type"] as? String)
+            ?? ((info["data"] as? [String: Any])?["type"] as? String)
+        if type == "charge_live" {
+            completionHandler([.list])   // silencioso, sem banner, só central
+        } else {
+            completionHandler([.banner, .sound, .list, .badge])
+        }
     }
 
     func application(_ application: UIApplication,
