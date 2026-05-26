@@ -92,6 +92,19 @@
   letter-spacing: 1.2px; text-transform: uppercase;
   padding: 0 14px 6px;
 }
+/* grupos colapsáveis de notificação */
+.ng { background: rgba(255,255,255,.025); border: 1px solid rgba(255,255,255,.07); border-radius: 14px; margin-bottom: 8px; overflow: hidden; }
+.ng-hd { display: flex; align-items: center; justify-content: space-between; padding: 13px 14px; cursor: pointer; user-select: none; gap: 10px; }
+.ng-hd:active { background: rgba(255,255,255,.05); }
+.ng-hd-left { display: flex; align-items: center; gap: 8px; }
+.ng-hd-left span:first-child { font-size: 13px; font-weight: 700; color: var(--text); }
+.ng-chv { font-size: 18px; color: var(--muted); transition: transform .22s; line-height: 1; flex-shrink: 0; }
+.ng.open .ng-chv { transform: rotate(90deg); }
+.ng-bd { display: none; padding: 0 8px 8px; border-top: 1px solid rgba(255,255,255,.05); }
+.ng.open .ng-bd { display: block; }
+.ng-bd .toggle-row:first-child { margin-top: 8px; }
+.ng-ct { font-size: 10px; color: var(--green); font-weight: 700; background: rgba(74,222,128,.12); padding: 2px 8px; border-radius: 10px; white-space: nowrap; }
+.ng-ct:empty { display: none; }
 
 .toggle-row {
   display: flex; align-items: center; gap: 12px;
@@ -349,113 +362,147 @@
         <div id="notif-me-actions"></div>
       </div>
     </div>
-    <div class="field-group">
-      <div class="group-ti">Recarga</div>
-      <div class="toggle-row" onclick="toggleNotif('charge_start', this)"><div class="label">Início da recarga<div class="sub">Push quando conecta</div></div><div class="toggle" data-key="charge_start"></div></div>
-      <div class="toggle-row" onclick="toggleNotif('charge_end', this)"><div class="label">Fim da recarga<div class="sub">Quando atinge meta SOC</div></div><div class="toggle" data-key="charge_end"></div></div>
-      <div class="toggle-row" onclick="toggleChargeEnding(this)"><div class="label">Próximo do fim<div class="sub" id="charge-ending-sub">Aviso minutos antes</div></div><div class="toggle" data-key="charge_ending"></div></div>
-      <div class="toggle-row" onclick="toggleNotif('charge_live', this)"><div class="label">Notif ao vivo (recarga)<div class="sub">Fica no lock screen mostrando SOC · potência · tempo, atualiza a cada minuto</div></div><div class="toggle" data-key="charge_live"></div></div>
+    <!-- ⚡ Recarga -->
+    <div class="ng" id="ng-recarga">
+      <div class="ng-hd" onclick="toggleNg('ng-recarga')">
+        <div class="ng-hd-left"><span>⚡ Recarga</span><span class="ng-ct" id="ng-recarga-ct"></span></div>
+        <span class="ng-chv">›</span>
+      </div>
+      <div class="ng-bd">
+        <div class="toggle-row" onclick="toggleNotif('charge_start', this)"><div class="label">Início da recarga<div class="sub">Push quando conecta</div></div><div class="toggle" data-key="charge_start"></div></div>
+        <div class="toggle-row" onclick="toggleNotif('charge_end', this)"><div class="label">Fim da recarga<div class="sub">Quando atinge meta SOC</div></div><div class="toggle" data-key="charge_end"></div></div>
+        <div class="toggle-row" onclick="toggleChargeEnding(this)"><div class="label">Próximo do fim<div class="sub" id="charge-ending-sub">Aviso minutos antes</div></div><div class="toggle" data-key="charge_ending"></div></div>
+        <div class="toggle-row" onclick="toggleNotif('charge_live', this)"><div class="label">Notif ao vivo<div class="sub">Lock screen com SOC · potência · tempo, atualiza a cada minuto</div></div><div class="toggle" data-key="charge_live"></div></div>
+        <div class="toggle-row" onclick="toggleNotif('charge_slow', this)"><div class="label">Recarga desacelerou<div class="sub">Potência caiu mais de 30% do pico por 5+ min</div></div><div class="toggle" data-key="charge_slow"></div></div>
+      </div>
     </div>
-    <div class="field-group">
-      <div class="group-ti">Eventos do carro</div>
-      <div class="toggle-row" onclick="toggleNotif('engine_on', this)"><div class="label">Motor ligado<div class="sub">Quando o motor é acionado</div></div><div class="toggle" data-key="engine_on"></div></div>
-      <div class="toggle-row" onclick="toggleNotif('engine_off', this)"><div class="label">Motor desligado<div class="sub">Quando desligam o motor</div></div><div class="toggle" data-key="engine_off"></div></div>
-      <div class="toggle-row" onclick="toggleNotif('door_open', this)"><div class="label">Porta aberta<div class="sub">Qualquer porta lateral</div></div><div class="toggle" data-key="door_open"></div></div>
-      <div class="toggle-row" onclick="toggleNotif('door_close', this)"><div class="label">Porta fechada<div class="sub">Qualquer porta lateral</div></div><div class="toggle" data-key="door_close"></div></div>
-      <div class="toggle-row" onclick="toggleNotif('trunk_open', this)"><div class="label">Porta-malas aberto<div class="sub">Quando o porta-malas abre</div></div><div class="toggle" data-key="trunk_open"></div></div>
-      <div class="toggle-row" onclick="toggleNotif('trunk_close', this)"><div class="label">Porta-malas fechado<div class="sub">Quando o porta-malas fecha</div></div><div class="toggle" data-key="trunk_close"></div></div>
+
+    <!-- 🚗 Eventos do carro -->
+    <div class="ng" id="ng-eventos">
+      <div class="ng-hd" onclick="toggleNg('ng-eventos')">
+        <div class="ng-hd-left"><span>🚗 Eventos do carro</span><span class="ng-ct" id="ng-eventos-ct"></span></div>
+        <span class="ng-chv">›</span>
+      </div>
+      <div class="ng-bd">
+        <div class="toggle-row" onclick="toggleNotif('engine_on', this)"><div class="label">Motor ligado<div class="sub">Quando o motor é acionado</div></div><div class="toggle" data-key="engine_on"></div></div>
+        <div class="toggle-row" onclick="toggleNotif('engine_off', this)"><div class="label">Motor desligado<div class="sub">Quando desligam o motor</div></div><div class="toggle" data-key="engine_off"></div></div>
+        <div class="toggle-row" onclick="toggleNotif('door_open', this)"><div class="label">Porta aberta<div class="sub">Qualquer porta lateral</div></div><div class="toggle" data-key="door_open"></div></div>
+        <div class="toggle-row" onclick="toggleNotif('door_close', this)"><div class="label">Porta fechada<div class="sub">Qualquer porta lateral</div></div><div class="toggle" data-key="door_close"></div></div>
+        <div class="toggle-row" onclick="toggleNotif('trunk_open', this)"><div class="label">Porta-malas aberta<div class="sub">Quando o porta-malas abre</div></div><div class="toggle" data-key="trunk_open"></div></div>
+        <div class="toggle-row" onclick="toggleNotif('trunk_close', this)"><div class="label">Porta-malas fechada<div class="sub">Quando o porta-malas fecha</div></div><div class="toggle" data-key="trunk_close"></div></div>
+        <div class="toggle-row" onclick="toggleNotif('refuel_detected', this)"><div class="label">Abastecimento detectado<div class="sub">Variação de combustível registrada</div></div><div class="toggle" data-key="refuel_detected"></div></div>
+      </div>
     </div>
-    <div class="field-group">
-      <div class="group-ti">Localização</div>
-      <div class="toggle-row" onclick="toggleNotif('geofence_arrival', this)"><div class="label">Chegada em local conhecido<div class="sub">Quando entra na geofence</div></div><div class="toggle" data-key="geofence_arrival"></div></div>
-      <div id="geofence-arrival-row" style="display:none;padding:0 4px 6px"><button class="btn secondary" style="width:100%" onclick="openGeofencePlaces('arrival')">📍 Selecionar locais (<span id="geofence-arrival-count">todos</span>)</button></div>
-      <div class="toggle-row" onclick="toggleNotif('geofence_departure', this)"><div class="label">Saída de local conhecido<div class="sub">Quando sai da geofence</div></div><div class="toggle" data-key="geofence_departure"></div></div>
-      <div id="geofence-departure-row" style="display:none;padding:0 4px 6px"><button class="btn secondary" style="width:100%" onclick="openGeofencePlaces('departure')">📍 Selecionar locais (<span id="geofence-departure-count">todos</span>)</button></div>
-      <div class="toggle-row" onclick="toggleNotif('trip_end', this)"><div class="label">Fim de viagem<div class="sub">Resumo ao terminar deslocamento</div></div><div class="toggle" data-key="trip_end"></div></div>
+
+    <!-- 📍 Localização -->
+    <div class="ng" id="ng-local">
+      <div class="ng-hd" onclick="toggleNg('ng-local')">
+        <div class="ng-hd-left"><span>📍 Localização</span><span class="ng-ct" id="ng-local-ct"></span></div>
+        <span class="ng-chv">›</span>
+      </div>
+      <div class="ng-bd">
+        <div class="toggle-row" onclick="toggleNotif('geofence_arrival', this)"><div class="label">Chegada em local conhecido<div class="sub">Quando entra na geofence</div></div><div class="toggle" data-key="geofence_arrival"></div></div>
+        <div id="geofence-arrival-row" style="display:none;padding:0 4px 6px"><button class="btn secondary" style="width:100%" onclick="openGeofencePlaces('arrival')">📍 Selecionar locais (<span id="geofence-arrival-count">todos</span>)</button></div>
+        <div class="toggle-row" onclick="toggleNotif('geofence_departure', this)"><div class="label">Saída de local conhecido<div class="sub">Quando sai da geofence</div></div><div class="toggle" data-key="geofence_departure"></div></div>
+        <div id="geofence-departure-row" style="display:none;padding:0 4px 6px"><button class="btn secondary" style="width:100%" onclick="openGeofencePlaces('departure')">📍 Selecionar locais (<span id="geofence-departure-count">todos</span>)</button></div>
+        <div class="toggle-row" onclick="toggleNotif('trip_end', this)"><div class="label">Fim de viagem<div class="sub">Resumo ao terminar deslocamento</div></div><div class="toggle" data-key="trip_end"></div></div>
+      </div>
     </div>
-    <div class="field-group">
-      <div class="group-ti">Alertas inteligentes</div>
-      <div class="toggle-row" onclick="toggleNotif('ac_on_parked', this)"><div class="label">AC ligado com carro parado<div class="sub">Avisa quando velocidade=0 por X minutos com ventilação ativa</div></div><div class="toggle" data-key="ac_on_parked"></div></div>
-      <div id="ac-parked-min-row" style="display:none;padding:4px 4px 8px">
-        <div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:rgba(255,255,255,.04);border-radius:8px">
-          <span style="flex:1;font-size:12px;color:var(--muted)">Minutos parado antes de alertar</span>
-          <input type="number" id="ac-parked-min-input" min="1" max="60" value="10"
-            style="width:52px;padding:4px 8px;border-radius:6px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);color:var(--text);font-size:13px;font-family:inherit;text-align:center"
-            onchange="saveAcParkedMin(this.value)">
-        </div>
+
+    <!-- 🧠 Alertas inteligentes -->
+    <div class="ng" id="ng-alertas">
+      <div class="ng-hd" onclick="toggleNg('ng-alertas')">
+        <div class="ng-hd-left"><span>🧠 Alertas inteligentes</span><span class="ng-ct" id="ng-alertas-ct"></span></div>
+        <span class="ng-chv">›</span>
       </div>
-      <div class="toggle-row" onclick="toggleNotif('window_forgotten', this)"><div class="label">Vidro esquecido aberto<div class="sub">Motor desligado e vidro aberto por X minutos</div></div><div class="toggle" data-key="window_forgotten"></div></div>
-      <div id="window-forgotten-min-row" style="display:none;padding:4px 4px 8px">
-        <div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:rgba(255,255,255,.04);border-radius:8px">
-          <span style="flex:1;font-size:12px;color:var(--muted)">Minutos antes de alertar</span>
-          <input type="number" id="window-forgotten-min-input" min="1" max="60" value="10"
-            style="width:52px;padding:4px 8px;border-radius:6px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);color:var(--text);font-size:13px;font-family:inherit;text-align:center"
-            onchange="saveWindowForgottenMin(this.value)">
-        </div>
-      </div>
-      <div class="toggle-row" onclick="toggleNotif('lock_forgotten', this)"><div class="label">Carro destravado esquecido<div class="sub">Motor desligado e carro destravado por X minutos</div></div><div class="toggle" data-key="lock_forgotten"></div></div>
-      <div id="lock-forgotten-min-row" style="display:none;padding:4px 4px 8px">
-        <div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:rgba(255,255,255,.04);border-radius:8px">
-          <span style="flex:1;font-size:12px;color:var(--muted)">Minutos antes de alertar</span>
-          <input type="number" id="lock-forgotten-min-input" min="1" max="60" value="5"
-            style="width:52px;padding:4px 8px;border-radius:6px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);color:var(--text);font-size:13px;font-family:inherit;text-align:center"
-            onchange="saveLockForgottenMin(this.value)">
-        </div>
-      </div>
-      <div class="toggle-row" onclick="toggleNotif('trunk_forgotten', this)"><div class="label">Porta-malas esquecida aberta<div class="sub">Motor desligado e porta-malas aberta por X minutos</div></div><div class="toggle" data-key="trunk_forgotten"></div></div>
-      <div id="trunk-forgotten-min-row" style="display:none;padding:4px 4px 8px">
-        <div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:rgba(255,255,255,.04);border-radius:8px">
-          <span style="flex:1;font-size:12px;color:var(--muted)">Minutos antes de alertar</span>
-          <input type="number" id="trunk-forgotten-min-input" min="1" max="60" value="10"
-            style="width:52px;padding:4px 8px;border-radius:6px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);color:var(--text);font-size:13px;font-family:inherit;text-align:center"
-            onchange="saveTrunkForgottenMin(this.value)">
-        </div>
-      </div>
-      <div class="toggle-row" onclick="toggleNotif('soc_low_idle', this)"><div class="label">SOC baixo sem carregar<div class="sub">Bateria abaixo de X% e carro não está plugado</div></div><div class="toggle" data-key="soc_low_idle"></div></div>
-      <div id="soc-low-idle-row" style="display:none;padding:4px 4px 8px">
-        <div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:rgba(255,255,255,.04);border-radius:8px">
-          <span style="flex:1;font-size:12px;color:var(--muted)">Alertar abaixo de (% SOC)</span>
-          <input type="number" id="soc-low-idle-pct-input" min="5" max="80" value="20"
-            style="width:52px;padding:4px 8px;border-radius:6px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);color:var(--text);font-size:13px;font-family:inherit;text-align:center"
-            onchange="saveSocLowIdlePct(this.value)">
-        </div>
-      </div>
-      <div class="toggle-row" onclick="toggleNotif('soc_arrival', this)"><div class="label">Bateria baixa ao chegar num local<div class="sub">Carro chegou num local configurado com SOC baixo e sem carregar</div></div><div class="toggle" data-key="soc_arrival"></div></div>
-      <div id="soc-arrival-row" style="display:none;padding:4px 4px 8px">
-        <div style="display:flex;flex-direction:column;gap:6px;padding:8px 12px;background:rgba(255,255,255,.04);border-radius:8px">
-          <div style="display:flex;align-items:center;gap:10px">
-            <span style="flex:1;font-size:12px;color:var(--muted)">Alertar se SOC abaixo de (%)</span>
-            <input type="number" id="soc-arrival-pct-input" min="5" max="80" value="30"
-              style="width:52px;padding:4px 8px;border-radius:6px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);color:var(--text);font-size:13px;font-family:inherit;text-align:center"
-              onchange="saveSocArrivalPct(this.value)">
+      <div class="ng-bd">
+        <div class="toggle-row" onclick="toggleNotif('ac_on_parked', this)"><div class="label">AC ligado com carro parado<div class="sub">Velocidade=0 por X min com ventilação ativa</div></div><div class="toggle" data-key="ac_on_parked"></div></div>
+        <div id="ac-parked-min-row" style="display:none;padding:4px 4px 8px">
+          <div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:rgba(255,255,255,.04);border-radius:8px">
+            <span style="flex:1;font-size:12px;color:var(--muted)">Minutos parado antes de alertar</span>
+            <input type="number" id="ac-parked-min-input" min="1" max="60" value="10" style="width:52px;padding:4px 8px;border-radius:6px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);color:var(--text);font-size:13px;font-family:inherit;text-align:center" onchange="saveAcParkedMin(this.value)">
           </div>
-          <div style="display:flex;align-items:center;gap:10px">
-            <span style="flex:1;font-size:12px;color:var(--muted)">Minutos após chegar</span>
-            <input type="number" id="soc-arrival-min-input" min="1" max="60" value="5"
-              style="width:52px;padding:4px 8px;border-radius:6px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);color:var(--text);font-size:13px;font-family:inherit;text-align:center"
-              onchange="saveSocArrivalMin(this.value)">
+        </div>
+        <div class="toggle-row" onclick="toggleNotif('window_forgotten', this)"><div class="label">Vidro esquecido aberto<div class="sub">Motor desligado e vidro aberto por X minutos</div></div><div class="toggle" data-key="window_forgotten"></div></div>
+        <div id="window-forgotten-min-row" style="display:none;padding:4px 4px 8px">
+          <div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:rgba(255,255,255,.04);border-radius:8px">
+            <span style="flex:1;font-size:12px;color:var(--muted)">Minutos antes de alertar</span>
+            <input type="number" id="window-forgotten-min-input" min="1" max="60" value="10" style="width:52px;padding:4px 8px;border-radius:6px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);color:var(--text);font-size:13px;font-family:inherit;text-align:center" onchange="saveWindowForgottenMin(this.value)">
           </div>
-          <button class="btn secondary" style="margin-top:4px" onclick="openSocArrivalPlaces()">📍 Selecionar locais (<span id="soc-arrival-places-count">todos</span>)</button>
         </div>
-      </div>
-      <div class="toggle-row" onclick="toggleNotif('soc_full_long', this)"><div class="label">Bateria cheia por muito tempo<div class="sub">SOC acima de 95% por mais de 24h — preserva a bateria</div></div><div class="toggle" data-key="soc_full_long"></div></div>
-      <div class="toggle-row" onclick="toggleNotif('tyre_drop', this)"><div class="label">Queda de pressão em viagem<div class="sub">Detecta queda rápida de PSI durante a condução</div></div><div class="toggle" data-key="tyre_drop"></div></div>
-      <div id="tyre-drop-psi-row" style="display:none;padding:4px 4px 8px">
-        <div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:rgba(255,255,255,.04);border-radius:8px">
-          <span style="flex:1;font-size:12px;color:var(--muted)">Queda mínima para alertar (PSI)</span>
-          <input type="number" id="tyre-drop-psi-input" min="1" max="15" value="4"
-            style="width:52px;padding:4px 8px;border-radius:6px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);color:var(--text);font-size:13px;font-family:inherit;text-align:center"
-            onchange="saveTyreDropPsi(this.value)">
+        <div class="toggle-row" onclick="toggleNotif('lock_forgotten', this)"><div class="label">Carro destravado esquecido<div class="sub">Motor desligado e carro destravado por X minutos</div></div><div class="toggle" data-key="lock_forgotten"></div></div>
+        <div id="lock-forgotten-min-row" style="display:none;padding:4px 4px 8px">
+          <div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:rgba(255,255,255,.04);border-radius:8px">
+            <span style="flex:1;font-size:12px;color:var(--muted)">Minutos antes de alertar</span>
+            <input type="number" id="lock-forgotten-min-input" min="1" max="60" value="5" style="width:52px;padding:4px 8px;border-radius:6px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);color:var(--text);font-size:13px;font-family:inherit;text-align:center" onchange="saveLockForgottenMin(this.value)">
+          </div>
         </div>
+        <div class="toggle-row" onclick="toggleNotif('trunk_forgotten', this)"><div class="label">Porta-malas esquecida aberta<div class="sub">Motor desligado e porta-malas aberta por X minutos</div></div><div class="toggle" data-key="trunk_forgotten"></div></div>
+        <div id="trunk-forgotten-min-row" style="display:none;padding:4px 4px 8px">
+          <div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:rgba(255,255,255,.04);border-radius:8px">
+            <span style="flex:1;font-size:12px;color:var(--muted)">Minutos antes de alertar</span>
+            <input type="number" id="trunk-forgotten-min-input" min="1" max="60" value="10" style="width:52px;padding:4px 8px;border-radius:6px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);color:var(--text);font-size:13px;font-family:inherit;text-align:center" onchange="saveTrunkForgottenMin(this.value)">
+          </div>
+        </div>
+        <div class="toggle-row" onclick="toggleNotif('soc_low_idle', this)"><div class="label">SOC baixo sem carregar<div class="sub">Bateria abaixo de X% e carro não está plugado</div></div><div class="toggle" data-key="soc_low_idle"></div></div>
+        <div id="soc-low-idle-row" style="display:none;padding:4px 4px 8px">
+          <div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:rgba(255,255,255,.04);border-radius:8px">
+            <span style="flex:1;font-size:12px;color:var(--muted)">Alertar abaixo de (% SOC)</span>
+            <input type="number" id="soc-low-idle-pct-input" min="5" max="80" value="20" style="width:52px;padding:4px 8px;border-radius:6px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);color:var(--text);font-size:13px;font-family:inherit;text-align:center" onchange="saveSocLowIdlePct(this.value)">
+          </div>
+        </div>
+        <div class="toggle-row" onclick="toggleNotif('soc_arrival', this)"><div class="label">Bateria baixa ao chegar num local<div class="sub">SOC baixo sem carregar após chegar no local</div></div><div class="toggle" data-key="soc_arrival"></div></div>
+        <div id="soc-arrival-row" style="display:none;padding:4px 4px 8px">
+          <div style="display:flex;flex-direction:column;gap:6px;padding:8px 12px;background:rgba(255,255,255,.04);border-radius:8px">
+            <div style="display:flex;align-items:center;gap:10px">
+              <span style="flex:1;font-size:12px;color:var(--muted)">Alertar se SOC abaixo de (%)</span>
+              <input type="number" id="soc-arrival-pct-input" min="5" max="80" value="30" style="width:52px;padding:4px 8px;border-radius:6px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);color:var(--text);font-size:13px;font-family:inherit;text-align:center" onchange="saveSocArrivalPct(this.value)">
+            </div>
+            <div style="display:flex;align-items:center;gap:10px">
+              <span style="flex:1;font-size:12px;color:var(--muted)">Minutos após chegar</span>
+              <input type="number" id="soc-arrival-min-input" min="1" max="60" value="5" style="width:52px;padding:4px 8px;border-radius:6px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);color:var(--text);font-size:13px;font-family:inherit;text-align:center" onchange="saveSocArrivalMin(this.value)">
+            </div>
+            <button class="btn secondary" style="margin-top:4px" onclick="openSocArrivalPlaces()">📍 Selecionar locais (<span id="soc-arrival-places-count">todos</span>)</button>
+          </div>
+        </div>
+        <div class="toggle-row" onclick="toggleNotif('soc_full_long', this)"><div class="label">Bateria cheia por muito tempo<div class="sub">SOC acima de 95% por mais de 24h — saúde da bateria</div></div><div class="toggle" data-key="soc_full_long"></div></div>
+        <div class="toggle-row" onclick="toggleNotif('tyre_low', this)"><div class="label">Pressão de pneu baixa<div class="sub">Abaixo do mínimo com pneu a frio</div></div><div class="toggle" data-key="tyre_low"></div></div>
+        <div class="toggle-row" onclick="toggleNotif('tyre_high', this)"><div class="label">Pressão de pneu alta<div class="sub">Acima do máximo com pneu a frio</div></div><div class="toggle" data-key="tyre_high"></div></div>
+        <div class="toggle-row" onclick="toggleNotif('tyre_drop', this)"><div class="label">Queda de pressão em viagem<div class="sub">Queda rápida de PSI durante a condução</div></div><div class="toggle" data-key="tyre_drop"></div></div>
+        <div id="tyre-drop-psi-row" style="display:none;padding:4px 4px 8px">
+          <div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:rgba(255,255,255,.04);border-radius:8px">
+            <span style="flex:1;font-size:12px;color:var(--muted)">Queda mínima para alertar (PSI)</span>
+            <input type="number" id="tyre-drop-psi-input" min="1" max="15" value="4" style="width:52px;padding:4px 8px;border-radius:6px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);color:var(--text);font-size:13px;font-family:inherit;text-align:center" onchange="saveTyreDropPsi(this.value)">
+          </div>
+        </div>
+        <div class="toggle-row" onclick="toggleNotif('batt12_low', this)"><div class="label">Bateria auxiliar baixa<div class="sub">12V abaixo de 50% — possível dreno</div></div><div class="toggle" data-key="batt12_low"></div></div>
       </div>
-      <div class="toggle-row" onclick="toggleNotif('batt12_low', this)"><div class="label">Bateria auxiliar baixa<div class="sub">12V abaixo de 50% — possível dreno</div></div><div class="toggle" data-key="batt12_low"></div></div>
     </div>
-    <div class="field-group">
-      <div class="group-ti">Manutenção e atualizações</div>
-      <div class="toggle-row" onclick="toggleNotif('maintenance_soon', this)"><div class="label">Manutenção próxima<div class="sub">Aviso quando faltar &lt; 1000 km</div></div><div class="toggle" data-key="maintenance_soon"></div></div>
-      <div class="toggle-row" onclick="toggleNotif('maintenance_overdue', this)"><div class="label">Manutenção atrasada<div class="sub">Aviso quando ultrapassar o prazo</div></div><div class="toggle" data-key="maintenance_overdue"></div></div>
-      <div class="toggle-row" onclick="toggleNotif('anomaly_detected', this)"><div class="label">Anomalias detectadas<div class="sub">Eventos incomuns no carro</div></div><div class="toggle" data-key="anomaly_detected"></div></div>
-      <div class="toggle-row" onclick="toggleNotif('app_update', this)"><div class="label">Atualização do app<div class="sub">Nova versão disponível</div></div><div class="toggle" data-key="app_update"></div></div>
+
+    <!-- 🛠 Manutenção -->
+    <div class="ng" id="ng-manut">
+      <div class="ng-hd" onclick="toggleNg('ng-manut')">
+        <div class="ng-hd-left"><span>🛠 Manutenção</span><span class="ng-ct" id="ng-manut-ct"></span></div>
+        <span class="ng-chv">›</span>
+      </div>
+      <div class="ng-bd">
+        <div class="toggle-row" onclick="toggleNotif('maintenance_soon', this)"><div class="label">Manutenção próxima<div class="sub">Aviso quando faltar &lt; 1000 km</div></div><div class="toggle" data-key="maintenance_soon"></div></div>
+        <div class="toggle-row" onclick="toggleNotif('maintenance_overdue', this)"><div class="label">Manutenção atrasada<div class="sub">Aviso quando ultrapassar o prazo</div></div><div class="toggle" data-key="maintenance_overdue"></div></div>
+        <div class="toggle-row" onclick="toggleNotif('anomaly_detected', this)"><div class="label">Anomalias detectadas<div class="sub">Eventos incomuns no carro</div></div><div class="toggle" data-key="anomaly_detected"></div></div>
+        <div class="toggle-row" onclick="toggleNotif('app_update', this)"><div class="label">Atualização do app<div class="sub">Nova versão disponível</div></div><div class="toggle" data-key="app_update"></div></div>
+      </div>
+    </div>
+
+    <!-- 📊 Resumo -->
+    <div class="ng" id="ng-resumo">
+      <div class="ng-hd" onclick="toggleNg('ng-resumo')">
+        <div class="ng-hd-left"><span>📊 Resumo</span><span class="ng-ct" id="ng-resumo-ct"></span></div>
+        <span class="ng-chv">›</span>
+      </div>
+      <div class="ng-bd">
+        <div class="toggle-row" onclick="toggleNotif('daily_summary', this)"><div class="label">Resumo diário<div class="sub">Às 20h: km rodados, kWh consumido, recargas do dia</div></div><div class="toggle" data-key="daily_summary"></div></div>
+        <div class="toggle-row" onclick="toggleNotif('refuel_detected', this)"><div class="label">Abastecimento detectado<div class="sub">Variação de combustível registrada</div></div><div class="toggle" data-key="refuel_detected"></div></div>
+      </div>
     </div>
   </div>
 </div>
@@ -2071,7 +2118,23 @@ async function _loadPrefsForCurrentDevice() {
     if (_notifPrefsLocal.tyre_drop_psi) document.getElementById('tyre-drop-psi-input').value = _notifPrefsLocal.tyre_drop_psi;
 
     _updateGeofenceLocalControls();
+    _updateNgBadges();
   } catch (_) {}
+}
+
+function toggleNg(id) {
+  document.getElementById(id)?.classList.toggle('open');
+}
+
+function _updateNgBadges() {
+  document.querySelectorAll('.ng[id]').forEach(g => {
+    const ct = document.getElementById(g.id + '-ct');
+    if (!ct) return;
+    const n = g.querySelectorAll('.ng-bd .toggle.on').length;
+    ct.textContent = n ? n + ' ativo' + (n > 1 ? 's' : '') : '';
+    // auto-abre o grupo se tiver algum toggle ativo
+    if (n > 0) g.classList.add('open');
+  });
 }
 
 async function saveAcParkedMin(val) {
@@ -2400,10 +2463,12 @@ async function toggleNotif(key) {
       const d = await r.json().catch(() => ({}));
       throw new Error(d.error || 'HTTP ' + r.status);
     }
+    _updateNgBadges();
   } catch (e) {
     el.classList.toggle('on', !newVal);
     _notifPrefsLocal[key] = !newVal;
     if (key === 'geofence_arrival' || key === 'geofence_departure') _updateGeofenceLocalControls();
+    _updateNgBadges();
     showToast('✗ Falha ao salvar: ' + e.message, 'err');
   }
 }
@@ -3073,7 +3138,7 @@ window.markMaintDone = async function(id) {
 };
 
   // Expõe handlers de onclick no window
-  Object.assign(window, { openSub: typeof openSub !== 'undefined' ? openSub : undefined, closeSub: typeof closeSub !== 'undefined' ? closeSub : undefined, saveSection: typeof saveSection !== 'undefined' ? saveSection : undefined, toggle2fa: typeof toggle2fa !== 'undefined' ? toggle2fa : undefined, confirmClearHistory: typeof confirmClearHistory !== 'undefined' ? confirmClearHistory : undefined, confirmClearPwaCache: typeof confirmClearPwaCache !== 'undefined' ? confirmClearPwaCache : undefined, clearDriveHistory: typeof clearDriveHistory !== 'undefined' ? clearDriveHistory : undefined, confirmClearEventLogs: typeof confirmClearEventLogs !== 'undefined' ? confirmClearEventLogs : undefined, openMaintAdd: openMaintAdd, closeMaintModal: closeMaintModal, saveMaintItem: saveMaintItem, deleteMaintItem: deleteMaintItem, markMaintDone: markMaintDone, saveVehicle: saveVehicle, setChargeLimit: setChargeLimit, actionReprocessPlaces: actionReprocessPlaces, actionRecomputeTripCosts: actionRecomputeTripCosts, actionRestartBridge: actionRestartBridge, actionUpdateBridge: actionUpdateBridge, openPlaceAdd: openPlaceAdd, openPlaceEdit: openPlaceEdit, closePlaceModal: closePlaceModal, usePlaceGps: usePlaceGps, savePlace: savePlace, deletePlace: deletePlace, toggleNotif: toggleNotif, _onNotifDeviceChange: _onNotifDeviceChange, renameNotifDevice: renameNotifDevice, removeNotifDevice: removeNotifDevice, renameMyDevice: renameMyDevice, forceSubscribePush: forceSubscribePush, openNotifDevicePicker: openNotifDevicePicker, closeNotifDevicePicker: closeNotifDevicePicker, _pickNotifDevice: _pickNotifDevice, renameNotifDeviceById: renameNotifDeviceById, removeNotifDeviceById: removeNotifDeviceById, changePassword: changePassword, toggle2faNew: toggle2faNew, closeTotpModal: closeTotpModal, activate2fa: activate2fa, show2faBackup: show2faBackup, regenBackupCodes: regenBackupCodes, openGeofencePlaces: openGeofencePlaces, _toggleGeofencePick: _toggleGeofencePick, saveGeofencePlaces: saveGeofencePlaces, saveWindowForgottenMin: saveWindowForgottenMin, saveLockForgottenMin: saveLockForgottenMin, saveTrunkForgottenMin: saveTrunkForgottenMin, saveSocLowIdlePct: saveSocLowIdlePct, saveSocArrivalPct: saveSocArrivalPct, saveSocArrivalMin: saveSocArrivalMin, saveTyreDropPsi: saveTyreDropPsi, openSocArrivalPlaces: openSocArrivalPlaces, toggleChargeEnding: toggleChargeEnding, editChargeEndingMin: editChargeEndingMin, downloadBackup: downloadBackup, uploadBackup: uploadBackup, copyBackupToClipboard: copyBackupToClipboard, shareBackup: shareBackup, clearLocalCache: clearLocalCache, toggleDiag: toggleDiag, saveDiagInterval: saveDiagInterval, exportDiag: exportDiag, clearDiag: clearDiag, openDiagSet: openDiagSet, confirmDiagSet: confirmDiagSet, _scheduleDiagRender: _scheduleDiagRender });
+  Object.assign(window, { openSub: typeof openSub !== 'undefined' ? openSub : undefined, closeSub: typeof closeSub !== 'undefined' ? closeSub : undefined, saveSection: typeof saveSection !== 'undefined' ? saveSection : undefined, toggle2fa: typeof toggle2fa !== 'undefined' ? toggle2fa : undefined, confirmClearHistory: typeof confirmClearHistory !== 'undefined' ? confirmClearHistory : undefined, confirmClearPwaCache: typeof confirmClearPwaCache !== 'undefined' ? confirmClearPwaCache : undefined, clearDriveHistory: typeof clearDriveHistory !== 'undefined' ? clearDriveHistory : undefined, confirmClearEventLogs: typeof confirmClearEventLogs !== 'undefined' ? confirmClearEventLogs : undefined, openMaintAdd: openMaintAdd, closeMaintModal: closeMaintModal, saveMaintItem: saveMaintItem, deleteMaintItem: deleteMaintItem, markMaintDone: markMaintDone, saveVehicle: saveVehicle, setChargeLimit: setChargeLimit, actionReprocessPlaces: actionReprocessPlaces, actionRecomputeTripCosts: actionRecomputeTripCosts, actionRestartBridge: actionRestartBridge, actionUpdateBridge: actionUpdateBridge, openPlaceAdd: openPlaceAdd, openPlaceEdit: openPlaceEdit, closePlaceModal: closePlaceModal, usePlaceGps: usePlaceGps, savePlace: savePlace, deletePlace: deletePlace, toggleNotif: toggleNotif, _onNotifDeviceChange: _onNotifDeviceChange, renameNotifDevice: renameNotifDevice, removeNotifDevice: removeNotifDevice, renameMyDevice: renameMyDevice, forceSubscribePush: forceSubscribePush, openNotifDevicePicker: openNotifDevicePicker, closeNotifDevicePicker: closeNotifDevicePicker, _pickNotifDevice: _pickNotifDevice, renameNotifDeviceById: renameNotifDeviceById, removeNotifDeviceById: removeNotifDeviceById, changePassword: changePassword, toggle2faNew: toggle2faNew, closeTotpModal: closeTotpModal, activate2fa: activate2fa, show2faBackup: show2faBackup, regenBackupCodes: regenBackupCodes, openGeofencePlaces: openGeofencePlaces, _toggleGeofencePick: _toggleGeofencePick, saveGeofencePlaces: saveGeofencePlaces, toggleNg: toggleNg, saveWindowForgottenMin: saveWindowForgottenMin, saveLockForgottenMin: saveLockForgottenMin, saveTrunkForgottenMin: saveTrunkForgottenMin, saveSocLowIdlePct: saveSocLowIdlePct, saveSocArrivalPct: saveSocArrivalPct, saveSocArrivalMin: saveSocArrivalMin, saveTyreDropPsi: saveTyreDropPsi, openSocArrivalPlaces: openSocArrivalPlaces, toggleChargeEnding: toggleChargeEnding, editChargeEndingMin: editChargeEndingMin, downloadBackup: downloadBackup, uploadBackup: uploadBackup, copyBackupToClipboard: copyBackupToClipboard, shareBackup: shareBackup, clearLocalCache: clearLocalCache, toggleDiag: toggleDiag, saveDiagInterval: saveDiagInterval, exportDiag: exportDiag, clearDiag: clearDiag, openDiagSet: openDiagSet, confirmDiagSet: confirmDiagSet, _scheduleDiagRender: _scheduleDiagRender });
   if (!window['initView_config']) window['initView_config'] = function() {};
 })();
 </script>
