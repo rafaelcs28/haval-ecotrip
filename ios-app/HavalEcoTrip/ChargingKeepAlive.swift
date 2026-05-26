@@ -127,6 +127,17 @@ final class ChargingKeepAlive: NSObject {
             charging: charging,
             updatedAtMs: Date().timeIntervalSince1970 * 1000
         )
+
+        if !charging {
+            // Recarga encerrada — encerra a Live Activity e para o keep-alive.
+            let content = ActivityContent(state: state, staleDate: nil)
+            await activity.end(content, dismissalPolicy: .default)
+            wantsBackground = false
+            stopBackground()
+            print("[keepalive] recarga encerrada — LA finalizada")
+            return
+        }
+
         await activity.update(ActivityContent(state: state, staleDate: Date().addingTimeInterval(3600)))
         print("[keepalive] LA atualizada — SOC \(Int(soc))%")
     }

@@ -153,10 +153,13 @@ final class ActivityManager: ObservableObject {
                 updatedAtMs: Date().timeIntervalSince1970 * 1000
             )
             let content = ActivityContent(state: state, staleDate: Date().addingTimeInterval(60 * 60))
+            if !charging {
+                // Recarga encerrada — para Live Activity e keep-alive.
+                await stop()
+                return
+            }
             await activity.update(content)
-            status = charging
-                ? String(format: "Ativa · SOC %.0f%% · %.1f kW", soc, pwr)
-                : "Não está carregando"
+            status = String(format: "Ativa · SOC %.0f%% · %.1f kW", soc, pwr)
         } catch {
             status = "Erro fetch: \(error.localizedDescription)"
         }
