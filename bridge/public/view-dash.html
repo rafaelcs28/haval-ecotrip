@@ -1128,6 +1128,7 @@ function fmtChargeEta(min) {
 }
 
 let _lastCenteredPos = null;
+let _lastCenteredEngOn = null;   // recentra o mapa quando o motor liga/desliga
 function _haversine(a, b) {
   const R = 6371000, toRad = x => x * Math.PI / 180;
   const dLat = toRad(b[0] - a[0]), dLng = toRad(b[1] - a[1]);
@@ -1535,14 +1536,20 @@ function render(s, kpData) {
       html: '<div style="width:18px;height:18px;background:#22c55e;border:3px solid #fff;border-radius:50%;box-shadow:0 0 0 6px rgba(34,197,94,.35),0 0 0 14px rgba(34,197,94,.12),0 2px 8px rgba(0,0,0,.4);"></div>',
       iconSize: [18,18], iconAnchor: [9,9]
     }) }).addTo(map);
-    // Centra simples (sem rAF aninhado) — só recentra se carro andou >50m
-    const moved = !_lastCenteredPos || _haversine(_lastCenteredPos, pos) > 50;
+    // Recentra se o carro andou >50m OU se o motor ligou/desligou (muda a
+    // altura do sheet e a posição alvo do pin).
+    const engOn = s.engine_state === '1' || s.engine_state === 'on';
+    const moved = !_lastCenteredPos || _haversine(_lastCenteredPos, pos) > 50
+                  || engOn !== _lastCenteredEngOn;
     if (moved) {
       const sheet = document.querySelector('.bottom-sheet');
       const sheetH = sheet && !sheet.classList.contains('collapsed') ? sheet.offsetHeight : 0;
       map.setView(pos, map.getZoom() || 16, { animate: false });
-      if (sheetH > 0) map.panBy([0, sheetH / 2], { animate: false });
+      // Carro ligado: sobe o pin pra centralizar na área visível acima do sheet.
+      // Carro desligado: centraliza no mapa de verdade — pin fica mais embaixo.
+      if (sheetH > 0 && engOn) map.panBy([0, sheetH / 2], { animate: false });
       _lastCenteredPos = pos;
+      _lastCenteredEngOn = engOn;
     }
     currentKp = _findKp(kpData, s.gps_lat, s.gps_lng);
     updateAddress(s.gps_lat, s.gps_lng);
@@ -1950,8 +1957,10 @@ function _centerMapOnVisibleArea(pos, forceInvalidate = false) {
     const sheet = document.getElementById('bottom-sheet');
     const collapsed = sheet?.classList.contains('collapsed');
     const sheetH = (sheet && !collapsed) ? sheet.offsetHeight : 0;
+    const _s = _latestState || SNAPSHOT.state || {};
+    const engOn = _s.engine_state === '1' || _s.engine_state === 'on';
     map.setView(pos, map.getZoom() || 16, { animate: false });
-    if (sheetH > 0) {
+    if (sheetH > 0 && engOn) {
       requestAnimationFrame(() => {
         map.panBy([0, sheetH / 2], { animate: false });
       });
