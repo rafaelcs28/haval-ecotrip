@@ -217,12 +217,12 @@ async function sendPush(title, body, type, opts = {}) {
   if (type)          payloadObj.type     = type;
   const payload = JSON.stringify(payloadObj);
 
-  // Opções de envio para push silencioso: baixa prioridade + diz ao APNS pra
-  // entregar como passive (só tela de bloqueio, sem banner, sem acender tela).
-  // Para endpoints não-Apple (FCM, etc.) o header apns-interruption-level é
-  // ignorado; urgency=very-low instrui o push service a não acordar o device.
+  // Opções de envio para push silencioso: diz ao APNS pra entregar como passive
+  // (sem banner, sem acender tela, só aparece na central/tela de bloqueio).
+  // Mantém urgency padrão (normal) — urgency muito baixo faz o APNS segurar/
+  // descartar a notificação indefinidamente. Para endpoints não-Apple (FCM, etc.)
+  // o header apns-interruption-level é ignorado silenciosamente.
   const _silentWpOpts = {
-    urgency: 'very-low',
     headers: { 'apns-interruption-level': 'passive' },
   };
 
