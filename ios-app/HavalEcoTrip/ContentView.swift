@@ -45,12 +45,6 @@ struct ContentView: View {
                         }
                     }
                 }
-                // Long-press com 3 dedos por 1s abre Settings. Gesto invisível
-                // pro user normal, fácil pra dev.
-                .onLongPressGesture(minimumDuration: 1.0,
-                                    maximumDistance: 30) {
-                    showSetup = true
-                }
                 .onReceive(NotificationCenter.default.publisher(for: .openHavalSettings)) { _ in
                     showSetup = true
                 }

@@ -55,6 +55,17 @@ struct PwaWebView: UIViewRepresentable {
         web.allowsBackForwardNavigationGestures = true
         web.scrollView.bounces = false
         web.navigationDelegate = context.coordinator
+
+        // Long-press com 3 dedos por 1s abre configurações nativas.
+        // Adicionado direto na WKWebView porque SwiftUI .onLongPressGesture
+        // não chega através dela (a WebView consome todos os toques).
+        let lp = UILongPressGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(Coordinator.handleThreeFingerLongPress(_:)))
+        lp.minimumPressDuration = 1.0
+        lp.numberOfTouchesRequired = 3
+        lp.delegate = context.coordinator
+        web.addGestureRecognizer(lp)
         // WKWebView no iOS bloqueia alert/confirm/prompt JS por padrão. Sem
         // uiDelegate, chamadas retornam false silenciosamente e botões como
         // "Limpar histórico" (que confirma com confirm()) ficam inertes.
@@ -74,9 +85,19 @@ struct PwaWebView: UIViewRepresentable {
     }
 
     @MainActor
-    final class Coordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate, WKUIDelegate {
+    final class Coordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate, WKUIDelegate, UIGestureRecognizerDelegate {
         let manager: ActivityManager
         init(manager: ActivityManager) { self.manager = manager }
+
+        @objc func handleThreeFingerLongPress(_ gr: UILongPressGestureRecognizer) {
+            guard gr.state == .began else { return }
+            NotificationCenter.default.post(name: .openHavalSettings, object: nil)
+        }
+
+        func gestureRecognizer(_ gr: UIGestureRecognizer,
+                               shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+            return true
+        }
 
         func userContentController(_ controller: WKUserContentController,
                                    didReceive message: WKScriptMessage) {
