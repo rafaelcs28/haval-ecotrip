@@ -27,6 +27,7 @@ DERIVED=/tmp/HavalEcoTrip-build
 rm -rf "$DERIVED"
 
 echo "→ Building (xcodebuild)…"
+BUILD_LOG=/tmp/HavalEcoTrip-build.log
 xcodebuild \
   -project HavalEcoTrip.xcodeproj \
   -scheme HavalEcoTrip \
@@ -34,7 +35,12 @@ xcodebuild \
   -destination "id=$DEVICE_ID" \
   -derivedDataPath "$DERIVED" \
   -allowProvisioningUpdates \
-  build 2>&1 | tail -20
+  build 2>&1 | tee "$BUILD_LOG" | grep -E "error:|warning:|BUILD (SUCCEEDED|FAILED)"
+if grep -q "BUILD FAILED" "$BUILD_LOG"; then
+  echo "— erros detalhados —"
+  grep "error:" "$BUILD_LOG"
+  exit 1
+fi
 
 APP_PATH="$DERIVED/Build/Products/Debug-iphoneos/HavalEcoTrip.app"
 if [ ! -d "$APP_PATH" ]; then
