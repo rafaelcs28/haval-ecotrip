@@ -1106,11 +1106,12 @@ class MqttManager private constructor() {
 
             // Drive settings — o carro não faz push via listener para essas chaves;
             // poll ativo a cada ciclo garante que mudanças feitas no carro reflitam no app.
-            try { car.fetchCurrent("car.drive_setting.drive_mode")?.trim()?.toIntOrNull()?.let { syncTerrainModeFromCar(it) } } catch (_: Exception) {}
-            try { car.fetchCurrent("car.ev_setting.energy_recovery_level")?.trim()?.toIntOrNull()?.let { syncRegenLevelFromCar(it) } } catch (_: Exception) {}
-            try { car.fetchCurrent("car.configure.pedal_control_enable")?.trim()?.toIntOrNull()?.let { syncOnePedalFromCar(it) } } catch (_: Exception) {}
-            try { car.fetchCurrent("car.drive_setting.esp_enable")?.trim()?.toIntOrNull()?.let { syncEspFromCar(it) } } catch (_: Exception) {}
-            try { car.fetchCurrent("car.drive_setting.steering_wheel_assist_mode")?.trim()?.toIntOrNull()?.let { syncSteerModeFromCar(it) } } catch (_: Exception) {}
+            val cdm = CarDataManager.getInstance()
+            try { cdm.fetchCurrent("car.drive_setting.drive_mode")?.trim()?.toIntOrNull()?.let { syncTerrainModeFromCar(it) } } catch (_: Exception) {}
+            try { cdm.fetchCurrent("car.ev_setting.energy_recovery_level")?.trim()?.toIntOrNull()?.let { syncRegenLevelFromCar(it) } } catch (_: Exception) {}
+            try { cdm.fetchCurrent("car.configure.pedal_control_enable")?.trim()?.toIntOrNull()?.let { syncOnePedalFromCar(it) } } catch (_: Exception) {}
+            try { cdm.fetchCurrent("car.drive_setting.esp_enable")?.trim()?.toIntOrNull()?.let { syncEspFromCar(it) } } catch (_: Exception) {}
+            try { cdm.fetchCurrent("car.drive_setting.steering_wheel_assist_mode")?.trim()?.toIntOrNull()?.let { syncSteerModeFromCar(it) } } catch (_: Exception) {}
 
             lastSuccessfulPublishMs = System.currentTimeMillis()
             // Publica timestamp ISO para a entidade "Última Atualização" no HA
