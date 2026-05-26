@@ -1918,7 +1918,8 @@ async function _loadNotifPrefs() {
       meStatus.style.color = 'var(--green)';
       meStatus.textContent = 'Push ativo neste dispositivo';
       meHint.textContent = 'As preferências abaixo se aplicam só a este dispositivo.';
-      meActions.innerHTML = '<button class="btn secondary" style="width:auto;padding:6px 12px;font-size:11px;margin:0" onclick="reRegisterPush()">🔄 Re-registrar</button>';
+      meActions.innerHTML = '<button class="btn secondary" style="width:auto;padding:6px 12px;font-size:11px;margin:0">🔄 Re-registrar</button>';
+      meActions.querySelector('button').addEventListener('click', reRegisterPush);
     } else if (pushPerm === 'granted') {
       meCard.style.background = 'rgba(234,179,8,.08)';
       meCard.style.border = '1px solid rgba(234,179,8,.35)';
