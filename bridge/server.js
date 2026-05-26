@@ -278,6 +278,17 @@ const NOTIF_DEFAULTS = {
   window_forgotten_min: 10,    // minutos antes de alertar (padrão 10)
   lock_forgotten:       false, // carro destravado X min após motor desligar
   lock_forgotten_min:   5,     // minutos antes de alertar (padrão 5)
+  trunk_forgotten:      false,  // porta-malas aberta X min após motor desligar
+  trunk_forgotten_min:  10,
+  soc_low_idle:         false,  // SOC < X% sem estar carregando
+  soc_low_idle_pct:     20,
+  soc_arrival:          false,  // SOC baixo ao chegar num local sem carregar
+  soc_arrival_places:   [],     // IDs dos locais a monitorar (por device)
+  soc_arrival_min:      5,      // minutos após chegar antes de alertar
+  soc_arrival_pct:      30,     // threshold SOC % na chegada
+  soc_full_long:        false,  // SOC > 95% por mais de 24h (saúde da bateria)
+  tyre_drop:            false,  // queda de pressão > X PSI durante viagem
+  tyre_drop_psi:        4,      // queda mínima para alertar (PSI)
 };
 let notifPrefs = { ...NOTIF_DEFAULTS };
 try {
@@ -1174,6 +1185,148 @@ function _scheduleLockForgottenAlert() {
   }, mins * 60_000);
 }
 
+// ── Porta-malas esquecida aberta após motor desligar ──────────────────────────
+let _trunkForgottenTimer  = null;
+let _trunkForgottenSentAt = 0;
+
+function _cancelTrunkForgottenTimer() {
+  if (_trunkForgottenTimer) { clearTimeout(_trunkForgottenTimer); _trunkForgottenTimer = null; }
+}
+
+function _scheduleTrunkForgottenAlert() {
+  _cancelTrunkForgottenTimer();
+  if (state.door_trunk !== 'on') return;  // porta-malas já fechada
+  const minsArr = pushSubs
+    .map(s => getPrefsForDevice(s.device_id))
+    .filter(p => p.trunk_forgotten)
+    .map(p => Math.max(1, +(p.trunk_forgotten_min) || 10));
+  if (!minsArr.length) return;
+  const mins = Math.min(...minsArr);
+  _trunkForgottenTimer = setTimeout(() => {
+    _trunkForgottenTimer = null;
+    if (state.engine_state !== '0') return;
+    if (state.door_trunk !== 'on') return;
+    if (Date.now() - _trunkForgottenSentAt < 30 * 60_000) return;
+    _trunkForgottenSentAt = Date.now();
+    sendPush('🧳 Porta-malas aberta com carro desligado',
+      `Porta-malas continua aberta há mais de ${mins} min.`, 'trunk_forgotten');
+  }, mins * 60_000);
+}
+
+// ── SOC baixo sem estar carregando ───────────────────────────────────────────
+let _socLowIdleSentAt = 0;
+const SOC_LOW_IDLE_COOLDOWN = 4 * 60 * 60_000; // 4h entre notifs
+
+function checkSocLowIdle() {
+  const minsArr = pushSubs
+    .map(s => getPrefsForDevice(s.device_id))
+    .filter(p => p.soc_low_idle);
+  if (!minsArr.length) return;
+  if (state.charging_state === 'Carregando') return;
+  if (Date.now() - _socLowIdleSentAt < SOC_LOW_IDLE_COOLDOWN) return;
+  const soc = +state.soc_pct || 0;
+  if (!soc) return;
+  // Use the lowest threshold across enabled devices
+  const thresholds = minsArr.map(p => Math.max(1, Math.min(100, +(p.soc_low_idle_pct) || 20)));
+  const threshold = Math.max(...thresholds); // alert if below ANY device's threshold
+  if (soc >= threshold) return;
+  _socLowIdleSentAt = Date.now();
+  sendPush('🔋 Bateria do EV baixa',
+    `SOC em ${soc.toFixed(0)}% e carro não está carregando.`, 'soc_low_idle');
+}
+
+// ── SOC baixo ao chegar num local sem carregar ────────────────────────────────
+const _socArrivalTimers = {};  // { [placeId]: timeoutHandle }
+
+function _scheduleSocArrivalAlert(place) {
+  if (_socArrivalTimers[place.id]) return;  // já agendado pra este local
+  // Verifica se algum device tem esta notif + este local configurado
+  const eligible = pushSubs
+    .map(s => ({ prefs: getPrefsForDevice(s.device_id) }))
+    .filter(({ prefs }) => {
+      if (!prefs.soc_arrival) return false;
+      const places = (prefs.soc_arrival_places || []).map(String);
+      return places.length === 0 || places.includes(String(place.id));
+    })
+    .map(({ prefs }) => prefs);
+  if (!eligible.length) return;
+  const mins = Math.min(...eligible.map(p => Math.max(1, +(p.soc_arrival_min) || 5)));
+  _socArrivalTimers[place.id] = setTimeout(() => {
+    delete _socArrivalTimers[place.id];
+    if (geofenceState[place.id] !== 'in') return;  // saiu antes do timer
+    if (state.charging_state === 'Carregando') return;  // está carregando
+    const soc = +state.soc_pct || 0;
+    if (!soc) return;
+    const threshold = Math.max(...eligible.map(p => Math.max(1, Math.min(100, +(p.soc_arrival_pct) || 30))));
+    if (soc >= threshold) return;
+    sendPush('🔌 Chegou em ' + place.name + ' — bateria baixa',
+      `SOC em ${soc.toFixed(0)}% e carro não está carregando.`, 'soc_arrival');
+  }, mins * 60_000);
+}
+
+// ── Bateria mantida cheia (>95%) por mais de 24h ──────────────────────────────
+let _socFullTimer   = null;
+let _socFullSentAt  = 0;
+const SOC_FULL_THRESHOLD = 95;
+const SOC_FULL_HOURS     = 24;
+
+function _checkSocFullLong(soc) {
+  const enabled = pushSubs.some(s => getPrefsForDevice(s.device_id).soc_full_long);
+  if (!enabled) { _cancelSocFullTimer(); return; }
+  if (soc < SOC_FULL_THRESHOLD) { _cancelSocFullTimer(); return; }
+  if (_socFullTimer) return;  // já agendado
+  _socFullTimer = setTimeout(() => {
+    _socFullTimer = null;
+    const curSoc = +state.soc_pct || 0;
+    if (curSoc < SOC_FULL_THRESHOLD) return;  // caiu entre o agendamento e o disparo
+    if (Date.now() - _socFullSentAt < SOC_FULL_HOURS * 60 * 60_000) return;
+    _socFullSentAt = Date.now();
+    sendPush('⚡ Bateria mantida cheia',
+      `SOC acima de ${SOC_FULL_THRESHOLD}% há mais de ${SOC_FULL_HOURS}h. Considere descarregar um pouco para preservar a bateria.`,
+      'soc_full_long');
+  }, SOC_FULL_HOURS * 60 * 60_000);
+}
+
+function _cancelSocFullTimer() {
+  if (_socFullTimer) { clearTimeout(_socFullTimer); _socFullTimer = null; }
+}
+
+// ── Queda de pressão do pneu durante viagem ───────────────────────────────────
+const TYRE_POSITIONS = ['fl', 'fr', 'rl', 'rr'];
+let _tyreTripBaseline = {};    // { fl: psi, fr: psi, rl: psi, rr: psi }
+let _tyreDropAlertSent = {};   // { fl: bool, ... }
+
+function _resetTyreTrip() {
+  _tyreTripBaseline = {};
+  _tyreDropAlertSent = {};
+}
+
+function _captureTyreBaseline() {
+  for (const pos of TYRE_POSITIONS) {
+    const psi = +state[`tyre_pressure_${pos}`] || 0;
+    if (psi > 5 && !_tyreTripBaseline[pos]) _tyreTripBaseline[pos] = psi;
+  }
+}
+
+function checkTyreDrop(pos, currentPsi) {
+  const enabled = pushSubs.some(s => getPrefsForDevice(s.device_id).tyre_drop);
+  if (!enabled) return;
+  if ((+state.speed_kmh || 0) < 5) return;  // parado — não alerta
+  if (!_tyreTripBaseline[pos]) { _captureTyreBaseline(); return; }
+  if (_tyreDropAlertSent[pos]) return;
+  const dropPsi = Math.max(...pushSubs
+    .map(s => getPrefsForDevice(s.device_id))
+    .filter(p => p.tyre_drop)
+    .map(p => Math.max(1, +(p.tyre_drop_psi) || 4)));
+  const drop = _tyreTripBaseline[pos] - currentPsi;
+  if (drop < dropPsi) return;
+  _tyreDropAlertSent[pos] = true;
+  const name = { fl: 'Dianteiro Esq.', fr: 'Dianteiro Dir.', rl: 'Traseiro Esq.', rr: 'Traseiro Dir.' }[pos] || pos.toUpperCase();
+  sendPush('⚠️ Queda de pressão detectada',
+    `${name}: ${currentPsi.toFixed(1)} PSI (era ${_tyreTripBaseline[pos].toFixed(1)} PSI, queda de ${drop.toFixed(1)} PSI)`,
+    'tyre_drop');
+}
+
 // ── Bateria 12V baixa ────────────────────────────────────────────────────────
 let _batt12LowSentAt = 0;
 const BATT12_LOW_PCT = 50;       // threshold %
@@ -1618,9 +1771,11 @@ function checkGeofence() {
         const arrPlaces = notifPrefs.geofence_arrival_places || [];
         if (arrPlaces.length === 0 || arrPlaces.includes(String(loc.id)))
           sendPush(`📍 Chegou em ${loc.name}`, `Veículo dentro da zona.`, 'geofence_arrival');
+        _scheduleSocArrivalAlert(loc);
       }
     } else if (isOutside && prev !== 'out') {
       geofenceState[loc.id] = 'out';
+      if (_socArrivalTimers[loc.id]) { clearTimeout(_socArrivalTimers[loc.id]); delete _socArrivalTimers[loc.id]; }
       if (prev === 'in' && engineOn) {  // saída só com motor ligado
         addEvent('geofence_out', `🚗 Saiu de ${loc.name}`);
         const depPlaces = notifPrefs.geofence_departure_places || [];
@@ -5231,6 +5386,7 @@ function applyGwmEntity(id, value, isRetained = false) {
         } else {
           addEvent('trunk_close', 'Porta-malas fechada');
           sendPush('🧳 Porta-malas fechada', 'Porta-malas foi fechada.', 'trunk_close');
+          _cancelTrunkForgottenTimer();
         }
       } else {
         // door_fl/fr/rl/rr
@@ -5283,6 +5439,8 @@ function applyGwmEntity(id, value, isRetained = false) {
         addEvent('engine_on',  'Motor ligado');
         sendPush('🔑 Motor ligado',  'O veículo foi ligado.', 'engine_on');
         checkRefuelOnEngineOn();
+        _cancelTrunkForgottenTimer();
+        _resetTyreTrip();
       } else if (value === '0') {
         addEvent('engine_off', 'Motor desligado');
         sendPush('🔑 Motor desligado', 'O veículo foi desligado.', 'engine_off');
@@ -5290,9 +5448,13 @@ function applyGwmEntity(id, value, isRetained = false) {
         _fuelParkTs  = Date.now();
         _scheduleWindowForgottenAlert();
         _scheduleLockForgottenAlert();
+        _scheduleTrunkForgottenAlert();
+        _resetTyreTrip();
       } else {
         _cancelWindowForgottenTimer();
         _cancelLockForgottenTimer();
+        _cancelTrunkForgottenTimer();
+        _resetTyreTrip();
       }
     }
     return;
@@ -5322,6 +5484,7 @@ function applyGwmEntity(id, value, isRetained = false) {
   // ── Sensores numéricos (soc, 12v, odo, pneus, autonomia, remaining_min) ──
   state[field] = num(value);
   if (field === 'odometer_km') checkMaintenanceAlerts();
+  if (field === 'soc_pct') { checkSocLowIdle(); _checkSocFullLong(+state.soc_pct || 0); }
 }
 
 function applyMqttMessage(key, value, isRetained = false) {
@@ -5367,14 +5530,20 @@ function applyMqttMessage(key, value, isRetained = false) {
         if (value === '1') {
           addEvent('engine_on',  'Motor ligado');
           sendPush('🔑 Motor ligado',  'O veículo foi ligado.', 'engine_on');
+          _cancelTrunkForgottenTimer();
+          _resetTyreTrip();
         } else if (value === '0') {
           addEvent('engine_off', 'Motor desligado');
           sendPush('🔑 Motor desligado', 'O veículo foi desligado.', 'engine_off');
           _scheduleWindowForgottenAlert();
           _scheduleLockForgottenAlert();
+          _scheduleTrunkForgottenAlert();
+          _resetTyreTrip();
         } else {
           _cancelWindowForgottenTimer();
           _cancelLockForgottenTimer();
+          _cancelTrunkForgottenTimer();
+          _resetTyreTrip();
         }
       }
       break;
@@ -5504,6 +5673,7 @@ function applyMqttMessage(key, value, isRetained = false) {
           } else {
             addEvent('trunk_close', 'Porta-malas fechada');
             sendPush('🧳 Porta-malas fechada', 'Porta-malas foi fechada.', 'trunk_close');
+            _cancelTrunkForgottenTimer();
           }
         }
       }, HYSTERESIS_MS);
@@ -5587,10 +5757,10 @@ function applyMqttMessage(key, value, isRetained = false) {
       console.log(`[lock:raw] value='${value}' isRetained=${isRetained}`);
       break;
     }
-    case 'tyre_pressure_fl': { state.tyre_pressure_fl = num(value); checkTyrePressure('FL', num(value), isRetained, state.tyre_temp_fl); break; }
-    case 'tyre_pressure_fr': { state.tyre_pressure_fr = num(value); checkTyrePressure('FR', num(value), isRetained, state.tyre_temp_fr); break; }
-    case 'tyre_pressure_rl': { state.tyre_pressure_rl = num(value); checkTyrePressure('RL', num(value), isRetained, state.tyre_temp_rl); break; }
-    case 'tyre_pressure_rr': { state.tyre_pressure_rr = num(value); checkTyrePressure('RR', num(value), isRetained, state.tyre_temp_rr); break; }
+    case 'tyre_pressure_fl': { state.tyre_pressure_fl = num(value); checkTyrePressure('FL', num(value), isRetained, state.tyre_temp_fl); checkTyreDrop('fl', num(value)); break; }
+    case 'tyre_pressure_fr': { state.tyre_pressure_fr = num(value); checkTyrePressure('FR', num(value), isRetained, state.tyre_temp_fr); checkTyreDrop('fr', num(value)); break; }
+    case 'tyre_pressure_rl': { state.tyre_pressure_rl = num(value); checkTyrePressure('RL', num(value), isRetained, state.tyre_temp_rl); checkTyreDrop('rl', num(value)); break; }
+    case 'tyre_pressure_rr': { state.tyre_pressure_rr = num(value); checkTyrePressure('RR', num(value), isRetained, state.tyre_temp_rr); checkTyreDrop('rr', num(value)); break; }
     case 'tyre_temp_fl': state.tyre_temp_fl = num(value); break;
     case 'tyre_temp_fr': state.tyre_temp_fr = num(value); break;
     case 'tyre_temp_rl': state.tyre_temp_rl = num(value); break;
@@ -5619,6 +5789,7 @@ function applyMqttMessage(key, value, isRetained = false) {
         // Carro acabou de parar; agenda alerta se AC estiver ligado
         if ((parseInt(state.hvac_fan_speed, 10) || 0) > 0) _scheduleAcParkedAlert();
       }
+      if (curSpeed >= 5 && prevSpeed < 5) _captureTyreBaseline();
       break;
     }
     case 'gear': {

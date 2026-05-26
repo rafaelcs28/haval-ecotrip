@@ -402,6 +402,52 @@
             onchange="saveLockForgottenMin(this.value)">
         </div>
       </div>
+      <div class="toggle-row" onclick="toggleNotif('trunk_forgotten', this)"><div class="label">Porta-malas esquecida aberta<div class="sub">Motor desligado e porta-malas aberta por X minutos</div></div><div class="toggle" data-key="trunk_forgotten"></div></div>
+      <div id="trunk-forgotten-min-row" style="display:none;padding:4px 4px 8px">
+        <div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:rgba(255,255,255,.04);border-radius:8px">
+          <span style="flex:1;font-size:12px;color:var(--muted)">Minutos antes de alertar</span>
+          <input type="number" id="trunk-forgotten-min-input" min="1" max="60" value="10"
+            style="width:52px;padding:4px 8px;border-radius:6px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);color:var(--text);font-size:13px;font-family:inherit;text-align:center"
+            onchange="saveTrunkForgottenMin(this.value)">
+        </div>
+      </div>
+      <div class="toggle-row" onclick="toggleNotif('soc_low_idle', this)"><div class="label">SOC baixo sem carregar<div class="sub">Bateria abaixo de X% e carro não está plugado</div></div><div class="toggle" data-key="soc_low_idle"></div></div>
+      <div id="soc-low-idle-row" style="display:none;padding:4px 4px 8px">
+        <div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:rgba(255,255,255,.04);border-radius:8px">
+          <span style="flex:1;font-size:12px;color:var(--muted)">Alertar abaixo de (% SOC)</span>
+          <input type="number" id="soc-low-idle-pct-input" min="5" max="80" value="20"
+            style="width:52px;padding:4px 8px;border-radius:6px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);color:var(--text);font-size:13px;font-family:inherit;text-align:center"
+            onchange="saveSocLowIdlePct(this.value)">
+        </div>
+      </div>
+      <div class="toggle-row" onclick="toggleNotif('soc_arrival', this)"><div class="label">Bateria baixa ao chegar num local<div class="sub">Carro chegou num local configurado com SOC baixo e sem carregar</div></div><div class="toggle" data-key="soc_arrival"></div></div>
+      <div id="soc-arrival-row" style="display:none;padding:4px 4px 8px">
+        <div style="display:flex;flex-direction:column;gap:6px;padding:8px 12px;background:rgba(255,255,255,.04);border-radius:8px">
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="flex:1;font-size:12px;color:var(--muted)">Alertar se SOC abaixo de (%)</span>
+            <input type="number" id="soc-arrival-pct-input" min="5" max="80" value="30"
+              style="width:52px;padding:4px 8px;border-radius:6px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);color:var(--text);font-size:13px;font-family:inherit;text-align:center"
+              onchange="saveSocArrivalPct(this.value)">
+          </div>
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="flex:1;font-size:12px;color:var(--muted)">Minutos após chegar</span>
+            <input type="number" id="soc-arrival-min-input" min="1" max="60" value="5"
+              style="width:52px;padding:4px 8px;border-radius:6px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);color:var(--text);font-size:13px;font-family:inherit;text-align:center"
+              onchange="saveSocArrivalMin(this.value)">
+          </div>
+          <button class="btn secondary" style="margin-top:4px" onclick="openSocArrivalPlaces()">📍 Selecionar locais (<span id="soc-arrival-places-count">todos</span>)</button>
+        </div>
+      </div>
+      <div class="toggle-row" onclick="toggleNotif('soc_full_long', this)"><div class="label">Bateria cheia por muito tempo<div class="sub">SOC acima de 95% por mais de 24h — preserva a bateria</div></div><div class="toggle" data-key="soc_full_long"></div></div>
+      <div class="toggle-row" onclick="toggleNotif('tyre_drop', this)"><div class="label">Queda de pressão em viagem<div class="sub">Detecta queda rápida de PSI durante a condução</div></div><div class="toggle" data-key="tyre_drop"></div></div>
+      <div id="tyre-drop-psi-row" style="display:none;padding:4px 4px 8px">
+        <div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:rgba(255,255,255,.04);border-radius:8px">
+          <span style="flex:1;font-size:12px;color:var(--muted)">Queda mínima para alertar (PSI)</span>
+          <input type="number" id="tyre-drop-psi-input" min="1" max="15" value="4"
+            style="width:52px;padding:4px 8px;border-radius:6px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);color:var(--text);font-size:13px;font-family:inherit;text-align:center"
+            onchange="saveTyreDropPsi(this.value)">
+        </div>
+      </div>
       <div class="toggle-row" onclick="toggleNotif('batt12_low', this)"><div class="label">Bateria auxiliar baixa<div class="sub">12V abaixo de 50% — possível dreno</div></div><div class="toggle" data-key="batt12_low"></div></div>
     </div>
     <div class="field-group">
@@ -2004,6 +2050,26 @@ async function _loadPrefsForCurrentDevice() {
     const lfOn = !!_notifPrefsLocal.lock_forgotten;
     document.getElementById('lock-forgotten-min-row').style.display = lfOn ? '' : 'none';
     if (_notifPrefsLocal.lock_forgotten_min) document.getElementById('lock-forgotten-min-input').value = _notifPrefsLocal.lock_forgotten_min;
+
+    const tfOn = !!_notifPrefsLocal.trunk_forgotten;
+    document.getElementById('trunk-forgotten-min-row').style.display = tfOn ? '' : 'none';
+    if (_notifPrefsLocal.trunk_forgotten_min) document.getElementById('trunk-forgotten-min-input').value = _notifPrefsLocal.trunk_forgotten_min;
+
+    const sliOn = !!_notifPrefsLocal.soc_low_idle;
+    document.getElementById('soc-low-idle-row').style.display = sliOn ? '' : 'none';
+    if (_notifPrefsLocal.soc_low_idle_pct) document.getElementById('soc-low-idle-pct-input').value = _notifPrefsLocal.soc_low_idle_pct;
+
+    const saOn = !!_notifPrefsLocal.soc_arrival;
+    document.getElementById('soc-arrival-row').style.display = saOn ? '' : 'none';
+    if (_notifPrefsLocal.soc_arrival_pct) document.getElementById('soc-arrival-pct-input').value = _notifPrefsLocal.soc_arrival_pct;
+    if (_notifPrefsLocal.soc_arrival_min) document.getElementById('soc-arrival-min-input').value = _notifPrefsLocal.soc_arrival_min;
+    const saPlaces = _notifPrefsLocal.soc_arrival_places || [];
+    document.getElementById('soc-arrival-places-count').textContent = saPlaces.length ? saPlaces.length + ' locais' : 'todos';
+
+    const tdOn = !!_notifPrefsLocal.tyre_drop;
+    document.getElementById('tyre-drop-psi-row').style.display = tdOn ? '' : 'none';
+    if (_notifPrefsLocal.tyre_drop_psi) document.getElementById('tyre-drop-psi-input').value = _notifPrefsLocal.tyre_drop_psi;
+
     _updateGeofenceLocalControls();
   } catch (_) {}
 }
@@ -2050,6 +2116,55 @@ async function saveLockForgottenMin(val) {
       body: JSON.stringify({ key: 'lock_forgotten_min', value: mins }),
     });
     _notifPrefsLocal.lock_forgotten_min = mins;
+  } catch (e) { showToast('✗ ' + e.message, 'err'); }
+}
+
+async function _saveNotifNum(key, val, inputId, min, max, def) {
+  const n = Math.max(min, Math.min(max, parseInt(val, 10) || def));
+  document.getElementById(inputId).value = n;
+  const tk = localStorage.getItem('bridge_token');
+  if (!tk || !_currentNotifDeviceId) return;
+  try {
+    await fetch('/api/notif/prefs/' + encodeURIComponent(_currentNotifDeviceId), {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + tk, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key, value: n }),
+    });
+    _notifPrefsLocal[key] = n;
+  } catch (e) { showToast('✗ ' + e.message, 'err'); }
+}
+
+async function saveTrunkForgottenMin(val) { await _saveNotifNum('trunk_forgotten_min', val, 'trunk-forgotten-min-input', 1, 60, 10); }
+async function saveSocLowIdlePct(val) { await _saveNotifNum('soc_low_idle_pct', val, 'soc-low-idle-pct-input', 5, 80, 20); }
+async function saveSocArrivalPct(val) { await _saveNotifNum('soc_arrival_pct', val, 'soc-arrival-pct-input', 5, 80, 30); }
+async function saveSocArrivalMin(val) { await _saveNotifNum('soc_arrival_min', val, 'soc-arrival-min-input', 1, 60, 5); }
+async function saveTyreDropPsi(val) { await _saveNotifNum('tyre_drop_psi', val, 'tyre-drop-psi-input', 1, 15, 4); }
+
+let _socArrivalPicking = false;
+
+async function openSocArrivalPlaces() {
+  _socArrivalPicking = true;
+  _geofenceKind = null;  // signal that we're in SOC arrival mode
+  document.getElementById('geofence-places-ti').textContent = '🔌 Alertar bateria baixa em:';
+  const tk = localStorage.getItem('bridge_token');
+  if (!tk) return;
+  try {
+    const r = await fetch('/api/known-places', { headers: { 'Authorization': 'Bearer ' + tk } });
+    const places = await r.json();
+    const selected = new Set((_notifPrefsLocal.soc_arrival_places || []).map(String));
+    _geofencePicked = new Set(selected);
+    const list = document.getElementById('geofence-places-list');
+    list.innerHTML = (places || []).map(p => {
+      const id = String(p.id);
+      return `<label style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:rgba(255,255,255,.03);border-radius:10px;cursor:pointer">
+        <input type="checkbox" data-id="${id}" ${selected.has(id) ? 'checked' : ''} onchange="_toggleGeofencePick(this)" style="width:18px;height:18px;accent-color:var(--green)">
+        <div style="flex:1">
+          <div style="font-size:13px;font-weight:600;color:var(--text)">📍 ${p.name || '(sem nome)'}</div>
+          <div style="font-size:10px;color:var(--muted)">raio ${p.radius_m || 200}m</div>
+        </div>
+      </label>`;
+    }).join('') + (places.length ? '' : '<div style="text-align:center;padding:18px;color:var(--muted);font-size:12px">Nenhum local cadastrado</div>');
+    document.getElementById('geofence-places-modal').style.display = 'flex';
   } catch (e) { showToast('✗ ' + e.message, 'err'); }
 }
 
@@ -2222,10 +2337,17 @@ function _toggleGeofencePick(inp) {
 
 async function saveGeofencePlaces() {
   const tk = localStorage.getItem('bridge_token');
-  const key = 'geofence_' + _geofenceKind + '_places';
-  const value = [..._geofencePicked];
+  let key, endpoint, value = [..._geofencePicked];
+  if (_socArrivalPicking) {
+    _socArrivalPicking = false;
+    key = 'soc_arrival_places';
+    endpoint = '/api/notif/prefs/' + encodeURIComponent(_currentNotifDeviceId);
+  } else {
+    key = 'geofence_' + _geofenceKind + '_places';
+    endpoint = '/api/push/prefs';
+  }
   try {
-    const r = await fetch('/api/push/prefs', {
+    const r = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Authorization': 'Bearer ' + tk, 'Content-Type': 'application/json' },
       body: JSON.stringify({ key, value }),
@@ -2233,8 +2355,12 @@ async function saveGeofencePlaces() {
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || 'HTTP ' + r.status);
     _notifPrefsLocal[key] = value;
-    _geofencePending.delete(_geofenceKind);  // salvo: esconde o botão até próximo toggle on
-    _updateGeofenceLocalControls();
+    if (key === 'soc_arrival_places') {
+      document.getElementById('soc-arrival-places-count').textContent = value.length ? value.length + ' locais' : 'todos';
+    } else {
+      _geofencePending.delete(_geofenceKind);  // salvo: esconde o botão até próximo toggle on
+      _updateGeofenceLocalControls();
+    }
     document.getElementById('geofence-places-modal').style.display = 'none';
     showToast('✓ Locais salvos', 'ok');
   } catch (e) { showToast('✗ ' + e.message, 'err'); }
@@ -2253,6 +2379,10 @@ async function toggleNotif(key) {
   if (key === 'ac_on_parked')      document.getElementById('ac-parked-min-row').style.display      = newVal ? '' : 'none';
   if (key === 'window_forgotten')  document.getElementById('window-forgotten-min-row').style.display = newVal ? '' : 'none';
   if (key === 'lock_forgotten')    document.getElementById('lock-forgotten-min-row').style.display   = newVal ? '' : 'none';
+  if (key === 'trunk_forgotten')   document.getElementById('trunk-forgotten-min-row').style.display  = newVal ? '' : 'none';
+  if (key === 'soc_low_idle')      document.getElementById('soc-low-idle-row').style.display          = newVal ? '' : 'none';
+  if (key === 'soc_arrival')       document.getElementById('soc-arrival-row').style.display           = newVal ? '' : 'none';
+  if (key === 'tyre_drop')         document.getElementById('tyre-drop-psi-row').style.display         = newVal ? '' : 'none';
   // Atualiza controles dependentes (botão "Selecionar locais" pra geofence)
   if (key === 'geofence_arrival' || key === 'geofence_departure') {
     const kind = key === 'geofence_arrival' ? 'arrival' : 'departure';
@@ -2943,7 +3073,7 @@ window.markMaintDone = async function(id) {
 };
 
   // Expõe handlers de onclick no window
-  Object.assign(window, { openSub: typeof openSub !== 'undefined' ? openSub : undefined, closeSub: typeof closeSub !== 'undefined' ? closeSub : undefined, saveSection: typeof saveSection !== 'undefined' ? saveSection : undefined, toggle2fa: typeof toggle2fa !== 'undefined' ? toggle2fa : undefined, confirmClearHistory: typeof confirmClearHistory !== 'undefined' ? confirmClearHistory : undefined, confirmClearPwaCache: typeof confirmClearPwaCache !== 'undefined' ? confirmClearPwaCache : undefined, clearDriveHistory: typeof clearDriveHistory !== 'undefined' ? clearDriveHistory : undefined, confirmClearEventLogs: typeof confirmClearEventLogs !== 'undefined' ? confirmClearEventLogs : undefined, openMaintAdd: openMaintAdd, closeMaintModal: closeMaintModal, saveMaintItem: saveMaintItem, deleteMaintItem: deleteMaintItem, markMaintDone: markMaintDone, saveVehicle: saveVehicle, setChargeLimit: setChargeLimit, actionReprocessPlaces: actionReprocessPlaces, actionRecomputeTripCosts: actionRecomputeTripCosts, actionRestartBridge: actionRestartBridge, actionUpdateBridge: actionUpdateBridge, openPlaceAdd: openPlaceAdd, openPlaceEdit: openPlaceEdit, closePlaceModal: closePlaceModal, usePlaceGps: usePlaceGps, savePlace: savePlace, deletePlace: deletePlace, toggleNotif: toggleNotif, _onNotifDeviceChange: _onNotifDeviceChange, renameNotifDevice: renameNotifDevice, removeNotifDevice: removeNotifDevice, renameMyDevice: renameMyDevice, forceSubscribePush: forceSubscribePush, openNotifDevicePicker: openNotifDevicePicker, closeNotifDevicePicker: closeNotifDevicePicker, _pickNotifDevice: _pickNotifDevice, renameNotifDeviceById: renameNotifDeviceById, removeNotifDeviceById: removeNotifDeviceById, changePassword: changePassword, toggle2faNew: toggle2faNew, closeTotpModal: closeTotpModal, activate2fa: activate2fa, show2faBackup: show2faBackup, regenBackupCodes: regenBackupCodes, openGeofencePlaces: openGeofencePlaces, _toggleGeofencePick: _toggleGeofencePick, saveGeofencePlaces: saveGeofencePlaces, saveWindowForgottenMin: saveWindowForgottenMin, saveLockForgottenMin: saveLockForgottenMin, toggleChargeEnding: toggleChargeEnding, editChargeEndingMin: editChargeEndingMin, downloadBackup: downloadBackup, uploadBackup: uploadBackup, copyBackupToClipboard: copyBackupToClipboard, shareBackup: shareBackup, clearLocalCache: clearLocalCache, toggleDiag: toggleDiag, saveDiagInterval: saveDiagInterval, exportDiag: exportDiag, clearDiag: clearDiag, openDiagSet: openDiagSet, confirmDiagSet: confirmDiagSet, _scheduleDiagRender: _scheduleDiagRender });
+  Object.assign(window, { openSub: typeof openSub !== 'undefined' ? openSub : undefined, closeSub: typeof closeSub !== 'undefined' ? closeSub : undefined, saveSection: typeof saveSection !== 'undefined' ? saveSection : undefined, toggle2fa: typeof toggle2fa !== 'undefined' ? toggle2fa : undefined, confirmClearHistory: typeof confirmClearHistory !== 'undefined' ? confirmClearHistory : undefined, confirmClearPwaCache: typeof confirmClearPwaCache !== 'undefined' ? confirmClearPwaCache : undefined, clearDriveHistory: typeof clearDriveHistory !== 'undefined' ? clearDriveHistory : undefined, confirmClearEventLogs: typeof confirmClearEventLogs !== 'undefined' ? confirmClearEventLogs : undefined, openMaintAdd: openMaintAdd, closeMaintModal: closeMaintModal, saveMaintItem: saveMaintItem, deleteMaintItem: deleteMaintItem, markMaintDone: markMaintDone, saveVehicle: saveVehicle, setChargeLimit: setChargeLimit, actionReprocessPlaces: actionReprocessPlaces, actionRecomputeTripCosts: actionRecomputeTripCosts, actionRestartBridge: actionRestartBridge, actionUpdateBridge: actionUpdateBridge, openPlaceAdd: openPlaceAdd, openPlaceEdit: openPlaceEdit, closePlaceModal: closePlaceModal, usePlaceGps: usePlaceGps, savePlace: savePlace, deletePlace: deletePlace, toggleNotif: toggleNotif, _onNotifDeviceChange: _onNotifDeviceChange, renameNotifDevice: renameNotifDevice, removeNotifDevice: removeNotifDevice, renameMyDevice: renameMyDevice, forceSubscribePush: forceSubscribePush, openNotifDevicePicker: openNotifDevicePicker, closeNotifDevicePicker: closeNotifDevicePicker, _pickNotifDevice: _pickNotifDevice, renameNotifDeviceById: renameNotifDeviceById, removeNotifDeviceById: removeNotifDeviceById, changePassword: changePassword, toggle2faNew: toggle2faNew, closeTotpModal: closeTotpModal, activate2fa: activate2fa, show2faBackup: show2faBackup, regenBackupCodes: regenBackupCodes, openGeofencePlaces: openGeofencePlaces, _toggleGeofencePick: _toggleGeofencePick, saveGeofencePlaces: saveGeofencePlaces, saveWindowForgottenMin: saveWindowForgottenMin, saveLockForgottenMin: saveLockForgottenMin, saveTrunkForgottenMin: saveTrunkForgottenMin, saveSocLowIdlePct: saveSocLowIdlePct, saveSocArrivalPct: saveSocArrivalPct, saveSocArrivalMin: saveSocArrivalMin, saveTyreDropPsi: saveTyreDropPsi, openSocArrivalPlaces: openSocArrivalPlaces, toggleChargeEnding: toggleChargeEnding, editChargeEndingMin: editChargeEndingMin, downloadBackup: downloadBackup, uploadBackup: uploadBackup, copyBackupToClipboard: copyBackupToClipboard, shareBackup: shareBackup, clearLocalCache: clearLocalCache, toggleDiag: toggleDiag, saveDiagInterval: saveDiagInterval, exportDiag: exportDiag, clearDiag: clearDiag, openDiagSet: openDiagSet, confirmDiagSet: confirmDiagSet, _scheduleDiagRender: _scheduleDiagRender });
   if (!window['initView_config']) window['initView_config'] = function() {};
 })();
 </script>
