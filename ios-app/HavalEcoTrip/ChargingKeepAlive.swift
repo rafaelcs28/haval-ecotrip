@@ -52,6 +52,18 @@ final class ChargingKeepAlive: NSObject {
 
     // ── CLLocationManager keep-alive ──────────────────────────────────────────
 
+    /// Pede permissão de localização enquanto o app está em foreground.
+    /// Deve ser chamado no onAppear/scenePhase=active se o modo não for .off.
+    func requestPermissionIfNeeded() {
+        guard Settings.keepAliveMode != .off else { return }
+        let mgr = CLLocationManager()
+        mgr.delegate = self
+        locationManager = mgr
+        if mgr.authorizationStatus == .notDetermined {
+            mgr.requestAlwaysAuthorization()
+        }
+    }
+
     private func startBackground() {
         wantsBackground = true
 

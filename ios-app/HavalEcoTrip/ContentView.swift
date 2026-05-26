@@ -77,6 +77,7 @@ struct ContentView: View {
                 Task { await manager.autoStartIfCharging() }
                 notifPoller.start()
                 ChargingKeepAlive.shared.appDidForeground()
+                ChargingKeepAlive.shared.requestPermissionIfNeeded()
             } else if newPhase == .background {
                 notifPoller.stop()
                 BackgroundRefresh.schedule()
