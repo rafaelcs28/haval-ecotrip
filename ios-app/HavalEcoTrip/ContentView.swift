@@ -59,6 +59,7 @@ struct ContentView: View {
             await manager.autoStartIfCharging()
             await notifPoller.requestPermission()
             notifPoller.start()
+            ChargingKeepAlive.shared.requestPermissionIfNeeded()
         }
         // URL scheme havalecotrip://open — disparado pelo SW do PWA standalone
         // quando user toca em notif Web Push.
