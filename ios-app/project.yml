@@ -42,8 +42,17 @@ targets:
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
         ITSAppUsesNonExemptEncryption: false
-        # UIBackgroundModes gerenciado direto no Info.plist (xcodegen não
-        # sobrescreve chaves já existentes, então áudio ficava faltando).
+        # IMPORTANTE: xcodegen REGENERA o Info.plist do zero a cada `generate`,
+        # apagando qualquer chave não listada aqui. Por isso localização e
+        # UIBackgroundModes precisam ficar NESTE arquivo (antes ficavam só no
+        # Info.plist e sumiam no build, deixando o app sem permissão/background).
+        NSLocationWhenInUseUsageDescription: "Usado apenas durante sessões de recarga para manter a Live Activity atualizada em segundo plano. A localização não é armazenada nem compartilhada."
+        NSLocationAlwaysAndWhenInUseUsageDescription: "Usado apenas durante sessões de recarga para manter a Live Activity atualizada em segundo plano. A localização não é armazenada nem compartilhada."
+        UIBackgroundModes:
+          - audio
+          - fetch
+          - location
+          - processing
         # Quick Actions (3D/Haptic Touch no ícone do app). 4 atalhos: travar,
         # destravar, ligar motor, desligar motor. AppDelegate captura o
         # shortcut e dispara o action via URL scheme havalecotrip://action/<name>.
