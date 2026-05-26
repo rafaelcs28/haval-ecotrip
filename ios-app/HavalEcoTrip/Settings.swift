@@ -51,19 +51,11 @@ enum Settings {
     }
 
     private static let deviceIdKey  = "notif_device_id"
-    private static let apnsKey      = "apns_push_enabled"
 
     /// device_id do PWA — usado para filtrar /api/push/history por prefs do device.
     static var notifDeviceId: String {
         get { defaults.string(forKey: deviceIdKey) ?? "" }
         set { defaults.set(newValue, forKey: deviceIdKey) }
-    }
-
-    /// Liga pushType: .token na Live Activity. Requer APNS_ENABLED=true no bridge.
-    /// Padrão false para não quebrar quem não tem .p8 configurado.
-    static var apnsEnabled: Bool {
-        get { defaults.bool(forKey: apnsKey) }
-        set { defaults.set(newValue, forKey: apnsKey) }
     }
 
     // ── Keep-alive em background ──────────────────────────────────────────────
