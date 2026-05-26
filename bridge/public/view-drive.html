@@ -216,6 +216,17 @@
   color: var(--green);
   border-color: var(--green);
 }
+/* Cores por modo — sobrescrevem o verde padrão */
+/* Modo de condução */
+.dm-chip.active[data-mode="0"] { color:#e2e8f0; border-color:#e2e8f0; background:rgba(226,232,240,.12); }
+.dm-chip.active[data-mode="3"] { color:var(--blue); border-color:var(--blue); background:rgba(96,165,250,.15); }
+/* Estilo de condução: Sport vermelho, Conforto azul */
+.dm-chip.active[data-terrain="1"],
+.dm-chip.active[data-steer="1"]  { color:var(--red);  border-color:var(--red);  background:rgba(248,113,113,.15); }
+.dm-chip.active[data-steer="2"]  { color:var(--blue); border-color:var(--blue); background:rgba(96,165,250,.15); }
+/* Regeneração: Normal amarelo, Baixo laranja */
+.dm-chip.active[data-regen="0"] { color:var(--yellow); border-color:var(--yellow); background:rgba(251,191,36,.15); }
+.dm-chip.active[data-regen="2"] { color:var(--orange); border-color:var(--orange); background:rgba(251,146,60,.15); }
 .dm-chip.pending {
   background: rgba(234,179,8,.18);
   color: var(--yellow);
@@ -305,10 +316,16 @@
   font-size: 11px; font-weight: 700; color: #475569; white-space: nowrap;
 }
 .dc-pill.known .dc-pill-val { color: #cbd5e1; }
-.dc-pill.hi    { background: rgba(34,197,94,.08); border-color: rgba(34,197,94,.2); }
-.dc-pill.hi    .dc-pill-val { color: var(--green); }
-.dc-pill.warn  { background: rgba(234,179,8,.08); border-color: rgba(234,179,8,.2); }
-.dc-pill.warn  .dc-pill-val { color: var(--yellow); }
+.dc-pill.hi     { background: rgba(34,197,94,.08);  border-color: rgba(34,197,94,.2); }
+.dc-pill.hi     .dc-pill-val { color: var(--green); }
+.dc-pill.warn   { background: rgba(234,179,8,.08);  border-color: rgba(234,179,8,.2); }
+.dc-pill.warn   .dc-pill-val { color: var(--yellow); }
+.dc-pill.blue   { background: rgba(96,165,250,.08); border-color: rgba(96,165,250,.2); }
+.dc-pill.blue   .dc-pill-val { color: var(--blue); }
+.dc-pill.red    { background: rgba(248,113,113,.08);border-color: rgba(248,113,113,.2); }
+.dc-pill.red    .dc-pill-val { color: var(--red); }
+.dc-pill.orange { background: rgba(251,146,60,.08); border-color: rgba(251,146,60,.2); }
+.dc-pill.orange .dc-pill-val { color: var(--orange); }
 .dc-body {
   background: rgba(31,31,31,.85);
   border: 1px solid rgba(255,255,255,.06);
@@ -3771,7 +3788,7 @@ window._onEspResult = function(data) {
     // Pill: Condução EV
     const dm = s.drive_mode;
     if (dm == null)      _setPill('dc-pill-ev', '--', '');
-    else if (dm === 3)   _setPill('dc-pill-ev', 'EV Puro', 'known hi');
+    else if (dm === 3)   _setPill('dc-pill-ev', 'EV Puro', 'known blue');
     else if (dm === 1)   _setPill('dc-pill-ev', 'Prior. EV', 'known hi');
     else if (dm === 0) {
       if (s.power_reserve === 1)      _setPill('dc-pill-ev', 'Intel.', 'known');
@@ -3781,13 +3798,16 @@ window._onEspResult = function(data) {
     // Pill: Estilo de condução
     const t = s.terrain_mode;
     const tLabel = t != null ? (_DC_TERRAIN[+t] || '?') : null;
-    if (t == null)        _setPill('dc-pill-terrain', '--', '');
-    else if (t === 0)     _setPill('dc-pill-terrain', 'Normal', 'known');
-    else                  _setPill('dc-pill-terrain', tLabel, 'known hi');
+    if (t == null)    _setPill('dc-pill-terrain', '--', '');
+    else if (t === 0) _setPill('dc-pill-terrain', 'Normal', 'known');
+    else if (t === 1) _setPill('dc-pill-terrain', 'Sport',  'known red');
+    else if (t === 2) _setPill('dc-pill-terrain', 'Eco',    'known hi');
+    else              _setPill('dc-pill-terrain', tLabel,   'known hi');
     // Pill: Regeneração
     const r = s.regen_level;
     const rText = r == null ? '--' : r === 0 ? 'Normal' : r === 1 ? 'Alto' : 'Baixo';
-    _setPill('dc-pill-regen', rText, r == null ? '' : r === 1 ? 'known hi' : 'known');
+    const rCls  = r == null ? '' : r === 1 ? 'known hi' : r === 0 ? 'known warn' : 'known orange';
+    _setPill('dc-pill-regen', rText, rCls);
     // Pill: One-Pedal
     const op = s.one_pedal;
     _setPill('dc-pill-onepedal', op == null ? '--' : op === 1 ? 'ON' : 'OFF', op == null ? '' : op === 1 ? 'known hi' : 'known');
