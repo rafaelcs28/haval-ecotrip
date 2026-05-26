@@ -55,7 +55,10 @@ final class NotificationPoller: ObservableObject {
 
     private func pollOnce() async {
         guard Settings.isConfigured else { return }
-        guard let url = URL(string: Settings.bridgeURL + "/api/push/history") else { return }
+        let did = Settings.notifDeviceId
+        let histPath = did.isEmpty ? "/api/push/history"
+            : "/api/push/history?device_id=" + (did.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? did)
+        guard let url = URL(string: Settings.bridgeURL + histPath) else { return }
         var req = URLRequest(url: url)
         req.timeoutInterval = 8
         req.addValue("Bearer " + Settings.bridgeToken, forHTTPHeaderField: "Authorization")

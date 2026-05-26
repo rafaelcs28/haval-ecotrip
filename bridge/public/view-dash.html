@@ -1213,38 +1213,61 @@ window.openMaintModal = function() {
     const baseOdo = last ? last.odometer_km : 0;
     const nextAt = baseOdo + (it.every_km || 0);
     const rem = it.every_km ? nextAt - odo : null;
-    let status = 'OK', color = '#22c55e', bg = 'rgba(34,197,94,.12)';
-    if (rem != null && rem <= 0) { status = `${Math.abs(Math.round(rem)).toLocaleString('pt-BR')} km atrasado`; color = '#f87171'; bg = 'rgba(248,113,113,.12)'; }
-    else if (rem != null && rem < 1000) { status = `em ${Math.round(rem).toLocaleString('pt-BR')} km — urgente`; color = '#f87171'; bg = 'rgba(248,113,113,.12)'; }
-    else if (rem != null && rem < 2000) { status = `em ${Math.round(rem).toLocaleString('pt-BR')} km — próximo`; color = '#fbbf24'; bg = 'rgba(251,191,36,.12)'; }
-    else if (rem != null) { status = `em ${Math.round(rem).toLocaleString('pt-BR')} km`; }
+    // Data de vencimento real: último + meses
+    let nextDateStr = '';
+    if (it.every_months && last?.date_ms) {
+      const d = new Date(last.date_ms);
+      d.setMonth(d.getMonth() + it.every_months);
+      const remainDays = Math.round((d.getTime() - Date.now()) / 86400000);
+      nextDateStr = d.toLocaleDateString('pt-BR');
+      if (remainDays <= 0) nextDateStr += ` — venceu há ${Math.abs(remainDays)} dias`;
+      else if (remainDays <= 30) nextDateStr += ` — ${remainDays} dias`;
+    }
+    let color = '#22c55e', bg = 'rgba(34,197,94,.12)';
+    if (rem != null && rem <= 0) { color = '#f87171'; bg = 'rgba(248,113,113,.12)'; }
+    else if (rem != null && rem < 1000) { color = '#f87171'; bg = 'rgba(248,113,113,.12)'; }
+    else if (rem != null && rem < 2000) { color = '#fbbf24'; bg = 'rgba(251,191,36,.12)'; }
+    const remStr = rem == null ? '' : rem > 0 ? `faltam ${Math.round(rem).toLocaleString('pt-BR')} km` : `${Math.abs(Math.round(rem)).toLocaleString('pt-BR')} km atrasado`;
     return `<div style="background:rgba(255,255,255,.04);border-radius:10px;padding:12px 14px;margin-bottom:8px">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
         <div style="font-size:14px;font-weight:700">${it.icon || '🔧'} ${it.label}</div>
-        <span style="font-size:11px;font-weight:700;color:${color};background:${bg};padding:4px 10px;border-radius:8px;white-space:nowrap">${status}</span>
+        ${remStr ? `<span style="font-size:11px;font-weight:700;color:${color};background:${bg};padding:4px 10px;border-radius:8px;white-space:nowrap">${remStr}</span>` : ''}
       </div>
       <div style="font-size:10px;color:var(--muted);margin-top:4px">
-        a cada ${(it.every_km||0).toLocaleString('pt-BR')} km${it.every_months ? ` · ${it.every_months} meses` : ''}
-        ${last ? `<br>último: ${(last.odometer_km||0).toLocaleString('pt-BR')} km` : ''}
+        ${nextDateStr ? `<div style="color:#5eead4;font-weight:600;margin-bottom:2px">📅 vence ${nextDateStr}</div>` : ''}
+        a cada ${it.every_km ? (it.every_km||0).toLocaleString('pt-BR')+' km' : ''}${it.every_months ? `${it.every_km ? ' · ' : ''}${it.every_months} meses` : ''}
+        ${last ? `<br>último: ${last.date_ms ? new Date(last.date_ms).toLocaleDateString('pt-BR') : ''} · ${(last.odometer_km||0).toLocaleString('pt-BR')} km` : ''}
       </div>
     </div>`;
   }).join('') : '<div style="text-align:center;padding:24px;color:var(--muted);font-size:13px">Nenhuma manutenção configurada</div>';
 
-  const recentHist = history.slice().sort((a,b) => (b.date_ms||0) - (a.date_ms||0)).slice(0, 3);
+  const recentHist = history.slice().sort((a,b) => (b.date_ms||0) - (a.date_ms||0)).slice(0, 4);
   const histHtml = recentHist.length ? recentHist.map(h => {
     const it = intervals.find(i => i.id === h.type_id);
     const d = h.date_ms ? new Date(h.date_ms) : null;
-    return `<div style="display:flex;justify-content:space-between;padding:8px 0;border-top:1px solid rgba(255,255,255,.06);font-size:11px">
-      <div>${(it?.icon || '🔧')} ${(it?.label || h.type_id)}</div>
-      <div style="color:var(--muted)">${d ? d.toLocaleDateString('pt-BR') : '—'} · ${(h.odometer_km||0).toLocaleString('pt-BR')} km</div>
+    const lbl = it ? `${it.icon||'🔧'} ${it.label}` : (h.label || h.type_id || '—');
+    return `<div style="display:flex;justify-content:space-between;padding:8px 0;border-top:1px solid rgba(255,255,255,.06);font-size:11px;gap:8px">
+      <div style="color:#cbd5e1">${lbl}</div>
+      <div style="color:var(--muted);text-align:right;flex-shrink:0">${d ? d.toLocaleDateString('pt-BR') : '—'} · ${(h.odometer_km||0).toLocaleString('pt-BR')} km${h.cost ? `<br><span style="color:#fbbf24;font-weight:700">R$ ${(+h.cost).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})}</span>` : ''}</div>
     </div>`;
   }).join('') : '';
+
+  const totalCost = +_maintData.total_cost || 0;
+  const costPerKm = +_maintData.cost_per_km || 0;
+  const costHtml = totalCost > 0 ? `<div style="background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.2);border-radius:10px;padding:10px 14px;margin-top:16px;display:flex;gap:18px;align-items:center">
+    <div style="flex:1"><div style="font-size:10px;color:var(--yellow);font-weight:700;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">💰 Custos manutenção</div>
+      <div style="font-size:15px;font-weight:800;color:var(--text)">R$ ${totalCost.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
+      <div style="font-size:10px;color:var(--muted)">total gasto</div>
+    </div>
+    ${costPerKm > 0 ? `<div><div style="font-size:15px;font-weight:800;color:var(--text)">R$ ${costPerKm.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})}</div><div style="font-size:10px;color:var(--muted)">por km</div></div>` : ''}
+  </div>` : '';
 
   modal.innerHTML = `<div style="width:100%;max-width:480px;background:#1f1f1f;border-top-left-radius:18px;border-top-right-radius:18px;padding:18px 18px calc(env(safe-area-inset-bottom) + 18px);border-top:1px solid rgba(255,255,255,.08);max-height:80vh;overflow-y:auto">
     <div style="width:42px;height:5px;background:rgba(255,255,255,.18);border-radius:3px;margin:-8px auto 14px"></div>
     <div style="font-size:18px;font-weight:700;margin-bottom:2px">🔧 Manutenção</div>
     <div style="font-size:11px;color:var(--muted);margin-bottom:14px">Odômetro atual: ${odo.toLocaleString('pt-BR')} km</div>
     ${itemsHtml}
+    ${costHtml}
     ${histHtml ? `<div style="margin-top:18px"><div style="font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:1.4px;margin-bottom:6px">Últimos serviços</div>${histHtml}</div>` : ''}
     <button onclick="document.getElementById('maint-dash-modal').remove();switchView('config');setTimeout(()=>window.openSub&&window.openSub('maint'),200)" style="width:100%;margin-top:18px;padding:12px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.08);color:#cbd5e1;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">⚙ Gerenciar em Configurações</button>
     <button onclick="document.getElementById('maint-dash-modal').remove()" style="width:100%;margin-top:8px;padding:12px;background:var(--green);color:#000;border:none;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit">Fechar</button>
@@ -1978,14 +2001,23 @@ async function doAction() {
       document.getElementById('action-msg').textContent = `Em produção, isto enviaria ${action} pro carro. Faça login na PWA principal pra acionar de verdade.`;
       setTimeout(closeAction, 1800);
     } else {
-      const r = await fetch('/api/action/' + action, {
-        method: 'POST',
-        headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-      });
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      document.getElementById('action-title').textContent = '✓ Comando enviado';
-      document.getElementById('action-msg').textContent = 'O carro vai responder em alguns segundos.';
-      setTimeout(closeAction, 1500);
+      const ctrl = new AbortController();
+      const tId  = setTimeout(() => ctrl.abort(), 12000);
+      try {
+        const r = await fetch('/api/action/' + action, {
+          method: 'POST',
+          headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+          signal: ctrl.signal,
+        });
+        clearTimeout(tId);
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        document.getElementById('action-title').textContent = '✓ Comando enviado';
+        document.getElementById('action-msg').textContent = 'O carro vai responder em alguns segundos.';
+        setTimeout(closeAction, 1500);
+      } catch (e) {
+        clearTimeout(tId);
+        throw e.name === 'AbortError' ? new Error('Sem resposta (timeout 12s)') : e;
+      }
     }
   } catch (e) {
     document.getElementById('action-title').textContent = '✗ Falha';

@@ -293,6 +293,9 @@ document.addEventListener('DOMContentLoaded', () => {
   loadKnownLocations();
   loadKnownPlaces();
   _fetchNotifCache();
+  // Envia device_id pro app nativo iOS pra ele filtrar /api/push/history
+  const _nativeDevId = localStorage.getItem('eco_device_id');
+  if (_nativeDevId && window.HavalNative?.setDeviceId) window.HavalNative.setDeviceId(_nativeDevId);
   checkAutoBackup();
   // Mostra build atual no admin para confirmar versão carregada
   const as = document.getElementById('admin-status');
@@ -483,9 +486,14 @@ let _notifCache      = null;   // último array buscado
 let _notifLatestSeen = 0;      // último notif_latest_ts processado
 let _notifReadTs     = parseInt(localStorage.getItem('notif_read_ts') || '0', 10);
 
+function _notifHistoryUrl() {
+  const did = localStorage.getItem('eco_device_id');
+  return did ? '/api/push/history?device_id=' + encodeURIComponent(did) : '/api/push/history';
+}
+
 async function _fetchNotifCache() {
   try {
-    _notifCache = await apiFetch('/api/push/history').then(r => r.json());
+    _notifCache = await apiFetch(_notifHistoryUrl()).then(r => r.json());
   } catch (_) { _notifCache = _notifCache || []; }
   _updateBellBadge();
 }
@@ -520,7 +528,7 @@ window.openNotifHistory = function() {
   else document.getElementById('notif-overlay-body').innerHTML =
     '<div style="font-size:12px;color:#3D5166;text-align:center;padding:20px 0">Carregando…</div>';
   // Busca versão mais recente e marca como lido
-  apiFetch('/api/push/history').then(r => r.json()).then(data => {
+  apiFetch(_notifHistoryUrl()).then(r => r.json()).then(data => {
     _notifCache = data;
     _renderNotifItems(data);          // renderiza antes de atualizar _notifReadTs
     _notifReadTs = Date.now();

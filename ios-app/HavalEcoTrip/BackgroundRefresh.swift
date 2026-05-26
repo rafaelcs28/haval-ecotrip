@@ -89,7 +89,10 @@ enum BackgroundRefresh {
     /// Versão standalone do polling (sem UI/Combine), reusa lógica do NotificationPoller.
     private static func runPoll() async {
         guard !Settings.bridgeURL.isEmpty, !Settings.bridgeToken.isEmpty else { return }
-        guard let url = URL(string: Settings.bridgeURL + "/api/push/history") else { return }
+        let did = Settings.notifDeviceId
+        let histPath = did.isEmpty ? "/api/push/history"
+            : "/api/push/history?device_id=" + (did.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? did)
+        guard let url = URL(string: Settings.bridgeURL + histPath) else { return }
         var req = URLRequest(url: url)
         req.timeoutInterval = 8
         req.addValue("Bearer " + Settings.bridgeToken, forHTTPHeaderField: "Authorization")

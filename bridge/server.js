@@ -218,6 +218,8 @@ async function sendPush(title, body, type, opts = {}) {
   const dead = [];
   let sent = 0, skipped = 0;
   await Promise.all(pushSubs.map(async (sub, i) => {
+    // Restrição por lista de devices (ex: preclimat só pro device que agendou)
+    if (opts.onlyDeviceIds && !opts.onlyDeviceIds.includes(sub.device_id)) { skipped++; return; }
     // Gating por device: se a sub tem device_id e o tipo está OFF nas prefs, pula.
     if (type) {
       const prefs = getPrefsForDevice(sub.device_id);
@@ -399,7 +401,7 @@ async function firePreClimat() {
       console.log('[preclimat] comando engine_on enviado via HA');
     } catch (e) {
       console.error(`[preclimat] falha ao ligar motor: ${e.message}`);
-      sendPush('⏰ Pré-climatização falhou', 'Não foi possível ligar o motor.', 'preclimat');
+      _sendPreclimatPush('⏰ Pré-climatização falhou', 'Não foi possível ligar o motor.');
       return;
     }
   } else {
@@ -419,7 +421,7 @@ async function firePreClimat() {
 
   if (!engineOk) {
     console.warn('[preclimat] timeout esperando engine_state=1');
-    sendPush('⏰ Pré-climatização falhou', 'Motor não confirmou em 2 min.', 'preclimat');
+    _sendPreclimatPush('⏰ Pré-climatização falhou', 'Motor não confirmou em 2 min.');
     return;
   }
 
@@ -438,8 +440,8 @@ async function firePreClimat() {
   mqttClient.publish(`${MQTT_PREFIX}/cmd/hvac/fan_speed`,      fanStr,  { qos: 1, retain: false });
 
   const durStr = duration > 0 ? ` · desliga em ${duration} min` : '';
-  sendPush('⏰ Pré-climatização ativada',
-    `Motor ligado · AC ${temp.toFixed(0)}° · ventilação ${fan}/7${durStr}`, 'preclimat');
+  _sendPreclimatPush('⏰ Pré-climatização ativada',
+    `Motor ligado · AC ${temp.toFixed(0)}° · ventilação ${fan}/7${durStr}`);
   console.log(`[preclimat] AC ativado — temp=${temp} fan=${fan} duration=${duration}min (prev: fan=${prevFan} temp=${prevDrvTemp})`);
 
   // Passo 4: restaurar AC ao estado anterior + desligar motor após X minutos
@@ -467,10 +469,16 @@ async function firePreClimat() {
           console.error(`[preclimat] falha ao desligar motor: ${e.message}`);
         }
       }
-      sendPush('⏰ Pré-climatização encerrada',
-        `AC restaurado · motor desligado após ${duration} min.`, 'preclimat');
+      _sendPreclimatPush('⏰ Pré-climatização encerrada',
+        `AC restaurado · motor desligado após ${duration} min.`);
     }, duration * 60_000);
   }
+}
+
+// Envia push de preclimat apenas pro device que agendou (se conhecido).
+function _sendPreclimatPush(title, body) {
+  const opts = preclimat.device_id ? { onlyDeviceIds: [preclimat.device_id] } : {};
+  sendPush(title, body, 'preclimat', opts);
 }
 
 // ── Histórico de modos de condução ────────────────────────────────────────
@@ -2544,25 +2552,34 @@ app.delete('/api/known-places/:id', (req, res) => {
 
 // ── Manutenções ──────────────────────────────────────────────────────────────
 app.get('/api/maintenance', (_req, res) => {
+  const totalCost = maintenance.history.reduce((s, h) => s + (h.cost || 0), 0);
+  let costPerKm = 0;
+  const curOdo = +state.odometer_km || 0;
+  if (totalCost > 0 && curOdo > 0) costPerKm = totalCost / curOdo;
   res.json({
     intervals: maintenance.intervals,
-    history:   [...maintenance.history].sort((a, b) => (b.odometer_km || 0) - (a.odometer_km || 0)),
+    history:   [...maintenance.history].sort((a, b) => (b.date_ms || 0) - (a.date_ms || 0)),
     next:      computeMaintenance(),
     current_odometer_km: +state.odometer_km || 0,
     daily_km_avg: parseFloat(avgDailyKm(30).toFixed(1)),
+    total_cost:  parseFloat(totalCost.toFixed(2)),
+    cost_per_km: parseFloat(costPerKm.toFixed(4)),
   });
 });
 
 // POST /api/maintenance/intervals  — cria ou atualiza um intervalo
 app.post('/api/maintenance/intervals', (req, res) => {
-  const { id, label, every_km, every_months, icon, alert_km, alert_days } = req.body || {};
+  const { id, label, every_km, every_months, icon, alert_km, alert_days, category } = req.body || {};
   const km   = parseFloat(every_km)   || 0;
   const mths = parseFloat(every_months) || 0;
-  if (!id || !label || (!(km > 0) && !(mths > 0)))
-    return res.status(400).json({ error: 'id, label e pelo menos every_km ou every_months > 0 obrigatórios' });
+  if (!label || (!(km > 0) && !(mths > 0)))
+    return res.status(400).json({ error: 'label e pelo menos every_km ou every_months > 0 obrigatórios' });
+  const slug = String(label).trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 28);
+  const safeId = id ? String(id).trim() : slug + '-' + Math.random().toString(36).slice(2, 6);
   const interval = {
-    id: String(id).trim(),
+    id: safeId,
     label: String(label).trim(),
+    category: category ? String(category).trim() : 'outros',
     every_km:     km,
     every_months: mths,
     alert_km:    parseFloat(alert_km)   || 500,
@@ -2585,27 +2602,28 @@ app.delete('/api/maintenance/intervals/:id', (req, res) => {
 });
 
 // POST /api/maintenance/history — registra manutenção feita
+// type_id nulo = entrada avulsa (não periódica); nesse caso label obrigatório.
 app.post('/api/maintenance/history', (req, res) => {
-  const { type_id, odometer_km, date_ms, notes, cost } = req.body || {};
-  if (!type_id) return res.status(400).json({ error: 'type_id obrigatório' });
-  if (!maintenance.intervals.find(i => i.id === type_id))
+  const { type_id, label, category, odometer_km, date_ms, notes, cost } = req.body || {};
+  const tid = type_id ? String(type_id).trim() : null;
+  if (!tid && !label) return res.status(400).json({ error: 'type_id ou label obrigatório' });
+  if (tid && !maintenance.intervals.find(i => i.id === tid))
     return res.status(400).json({ error: 'type_id inválido' });
   const odo = parseFloat(odometer_km);
   if (!(odo > 0)) return res.status(400).json({ error: 'odometer_km > 0 obrigatório' });
   const rec = {
     id: 'h-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
-    type_id: String(type_id),
+    type_id: tid,
     odometer_km: odo,
     date_ms: parseInt(date_ms) || Date.now(),
     notes: notes ? String(notes).slice(0, 240) : '',
   };
-  // Custo opcional — entra no cálculo de R$/km nas estatísticas de Desloc.
-  // Lançamentos antigos sem custo continuam válidos (não contam pro TCO).
+  if (!tid) rec.label = String(label).slice(0, 120);
+  if (category) rec.category = String(category).slice(0, 40);
   const c = parseFloat(cost);
   if (!isNaN(c) && c > 0) rec.cost = parseFloat(c.toFixed(2));
   maintenance.history.push(rec);
-  // Reseta o alerta do tipo — novo ciclo começa
-  if (maintenance._alerts) delete maintenance._alerts[rec.type_id];
+  if (maintenance._alerts && tid) delete maintenance._alerts[tid];
   saveMaintenance();
   res.json({ ok: true, record: rec });
 });
@@ -2637,12 +2655,18 @@ app.patch('/api/maintenance/history/:id', (req, res) => {
     rec.date_ms = d;
   }
   if (b.type_id !== undefined) {
-    if (!maintenance.intervals.find(i => i.id === b.type_id))
+    if (b.type_id && !maintenance.intervals.find(i => i.id === b.type_id))
       return res.status(400).json({ error: 'type_id inválido' });
-    rec.type_id = String(b.type_id);
+    rec.type_id = b.type_id ? String(b.type_id) : null;
   }
-  if (b.notes !== undefined) rec.notes = String(b.notes).slice(0, 240);
-  // Reseta alertas pros tipos afetados — registro mudou, ciclo novo
+  if (b.notes    !== undefined) rec.notes    = String(b.notes).slice(0, 240);
+  if (b.label    !== undefined) rec.label    = b.label ? String(b.label).slice(0, 120) : undefined;
+  if (b.category !== undefined) rec.category = b.category ? String(b.category).slice(0, 40) : undefined;
+  if (b.cost !== undefined) {
+    const c = parseFloat(b.cost);
+    if (!isNaN(c) && c > 0) rec.cost = parseFloat(c.toFixed(2));
+    else delete rec.cost;
+  }
   if (maintenance._alerts) maintenance._alerts = {};
   saveMaintenance();
   res.json({ ok: true, record: rec, next: computeMaintenance() });
@@ -4635,7 +4659,8 @@ app.post('/api/action/:name', async (req, res) => {
 app.get('/api/preclimat', requireAuth, (_req, res) => res.json(preclimat));
 
 app.post('/api/preclimat', requireAuth, (req, res) => {
-  const { enabled, time, recurrence, temp, fan, duration } = req.body;
+  const { enabled, time, recurrence, temp, fan, duration, device_id } = req.body;
+  if (device_id) preclimat.device_id = String(device_id);
   if (time !== undefined) {
     if (!/^\d{2}:\d{2}$/.test(time)) return res.status(400).json({ error: 'time inválido (HH:MM)' });
     preclimat.time = time;

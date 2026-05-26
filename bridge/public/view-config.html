@@ -312,13 +312,26 @@
     <div class="sub-title">🔧 Manutenção</div>
   </div>
   <div class="sub-body">
+    <!-- Resumo de custos -->
+    <div id="maint-cost-summary" style="display:none;background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.2);border-radius:12px;padding:12px 14px;margin-bottom:12px">
+      <div style="font-size:11px;color:var(--yellow);font-weight:700;text-transform:uppercase;letter-spacing:1.2px;margin-bottom:6px">💰 Custos de manutenção</div>
+      <div style="display:flex;gap:18px">
+        <div><div id="maint-total-cost" style="font-size:18px;font-weight:800;color:var(--text)">—</div><div style="font-size:10px;color:var(--muted)">total gasto</div></div>
+        <div style="width:1px;background:rgba(255,255,255,.08)"></div>
+        <div><div id="maint-cost-per-km" style="font-size:18px;font-weight:800;color:var(--text)">—</div><div style="font-size:10px;color:var(--muted)">por km rodado</div></div>
+      </div>
+    </div>
+
     <div class="field-group">
-      <div class="group-ti">Itens</div>
+      <div class="group-ti">Itens periódicos</div>
       <div id="maint-list" style="display:flex;flex-direction:column;gap:6px">
         <div style="font-size:11px;color:var(--muted);padding:12px;text-align:center">Carregando…</div>
       </div>
     </div>
-    <button class="btn secondary" onclick="openMaintAdd()">+ Adicionar item de manutenção</button>
+    <div style="display:flex;gap:8px;margin-top:6px">
+      <button class="btn secondary" style="flex:1" onclick="openMaintAdd()">+ Item periódico</button>
+      <button class="btn secondary" style="flex:1" onclick="openMaintRecord(null)">+ Lançar serviço</button>
+    </div>
 
     <div class="field-group" style="margin-top:18px">
       <div class="group-ti">Histórico</div>
@@ -327,14 +340,23 @@
   </div>
 </div>
 
-<!-- Modal de adicionar/editar manutenção -->
+<!-- Modal de adicionar/editar item periódico de manutenção -->
 <div id="maint-modal" style="display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,.7);align-items:flex-end;justify-content:center;backdrop-filter:blur(8px)">
   <div style="background:#1f1f1f;width:100%;max-width:480px;border-top-left-radius:18px;border-top-right-radius:18px;padding:18px 18px calc(env(safe-area-inset-bottom) + 18px);border-top:1px solid rgba(255,255,255,.08);max-height:80vh;overflow-y:auto">
     <div style="width:42px;height:5px;background:rgba(255,255,255,.18);border-radius:3px;margin:-8px auto 14px"></div>
-    <div style="font-size:16px;font-weight:700;color:var(--text);margin-bottom:4px" id="maint-modal-ti">Adicionar manutenção</div>
-    <div style="font-size:11px;color:var(--muted);margin-bottom:16px">Defina periodicidade em km e/ou meses</div>
+    <div style="font-size:16px;font-weight:700;color:var(--text);margin-bottom:4px" id="maint-modal-ti">Adicionar item periódico</div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:16px">Define periodicidade em km e/ou meses</div>
     <div style="display:flex;flex-direction:column;gap:10px">
       <input id="maint-label" placeholder="Ex: Revisão geral" style="width:100%;padding:12px 14px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:10px;color:var(--text);font-size:14px;font-family:inherit">
+      <select id="maint-cat" style="width:100%;padding:12px 14px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:10px;color:var(--text);font-size:14px;font-family:inherit">
+        <option value="mecanica">🔧 Mecânica</option>
+        <option value="oleo">🛢 Óleo/Filtros</option>
+        <option value="pneus">🛞 Pneus</option>
+        <option value="freios">🛑 Freios</option>
+        <option value="eletrica">⚡ Elétrica</option>
+        <option value="carroceria">🚘 Carroceria</option>
+        <option value="outros">📋 Outros</option>
+      </select>
       <input id="maint-icon" placeholder="Ícone (emoji opcional)" maxlength="3" style="width:100%;padding:12px 14px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:10px;color:var(--text);font-size:14px;font-family:inherit">
       <input id="maint-every-km" type="number" placeholder="A cada quantos km" style="width:100%;padding:12px 14px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:10px;color:var(--text);font-size:14px;font-family:inherit">
       <input id="maint-every-months" type="number" placeholder="OU a cada quantos meses (opcional)" style="width:100%;padding:12px 14px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:10px;color:var(--text);font-size:14px;font-family:inherit">
@@ -342,6 +364,44 @@
     <div style="display:flex;gap:10px;margin-top:16px">
       <button onclick="closeMaintModal()" style="flex:1;padding:12px;background:rgba(255,255,255,.06);color:#cbd5e1;border:none;border-radius:10px;font-size:14px;font-weight:700;font-family:inherit">Cancelar</button>
       <button onclick="saveMaintItem()" style="flex:1;padding:12px;background:var(--green);color:#000;border:none;border-radius:10px;font-size:14px;font-weight:700;font-family:inherit">Salvar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal de registrar serviço (periódico ou avulso) -->
+<div id="maint-record-modal" style="display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,.7);align-items:flex-end;justify-content:center;backdrop-filter:blur(8px)">
+  <div style="background:#1f1f1f;width:100%;max-width:480px;border-top-left-radius:18px;border-top-right-radius:18px;padding:18px 18px calc(env(safe-area-inset-bottom) + 18px);border-top:1px solid rgba(255,255,255,.08);max-height:88vh;overflow-y:auto">
+    <div style="width:42px;height:5px;background:rgba(255,255,255,.18);border-radius:3px;margin:-8px auto 14px"></div>
+    <div style="font-size:16px;font-weight:700;color:var(--text);margin-bottom:14px" id="maint-rec-title">Lançar serviço</div>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <!-- Tipo (periódico ou avulso) -->
+      <select id="maint-rec-type" onchange="window._onMaintRecTypeChange()" style="width:100%;padding:12px 14px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:10px;color:var(--text);font-size:14px;font-family:inherit">
+        <option value="_avulso">📋 Serviço avulso</option>
+      </select>
+      <!-- Campos só para avulso -->
+      <div id="maint-rec-avulso-fields">
+        <div style="display:flex;flex-direction:column;gap:10px">
+          <input id="maint-rec-label" placeholder="Descrição (ex: Troca de pneu traseiro)" style="width:100%;padding:12px 14px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:10px;color:var(--text);font-size:14px;font-family:inherit">
+          <select id="maint-rec-cat" style="width:100%;padding:12px 14px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:10px;color:var(--text);font-size:14px;font-family:inherit">
+            <option value="mecanica">🔧 Mecânica</option>
+            <option value="oleo">🛢 Óleo/Filtros</option>
+            <option value="pneus">🛞 Pneus</option>
+            <option value="freios">🛑 Freios</option>
+            <option value="eletrica">⚡ Elétrica</option>
+            <option value="carroceria">🚘 Carroceria</option>
+            <option value="outros">📋 Outros</option>
+          </select>
+        </div>
+      </div>
+      <!-- Campos comuns -->
+      <input id="maint-rec-odo" type="number" placeholder="Odômetro (km)" style="width:100%;padding:12px 14px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:10px;color:var(--text);font-size:14px;font-family:inherit">
+      <input id="maint-rec-date" type="date" style="width:100%;padding:12px 14px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:10px;color:var(--text);font-size:14px;font-family:inherit">
+      <input id="maint-rec-cost" type="number" step="0.01" placeholder="Custo R$ (opcional)" style="width:100%;padding:12px 14px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:10px;color:var(--text);font-size:14px;font-family:inherit">
+      <input id="maint-rec-notes" placeholder="Notas (opcional)" style="width:100%;padding:12px 14px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:10px;color:var(--text);font-size:14px;font-family:inherit">
+    </div>
+    <div style="display:flex;gap:10px;margin-top:16px">
+      <button onclick="closeMaintRecord()" style="flex:1;padding:12px;background:rgba(255,255,255,.06);color:#cbd5e1;border:none;border-radius:10px;font-size:14px;font-weight:700;font-family:inherit">Cancelar</button>
+      <button onclick="saveMaintRecord()" style="flex:1;padding:12px;background:var(--green);color:#000;border:none;border-radius:10px;font-size:14px;font-weight:700;font-family:inherit">Salvar</button>
     </div>
   </div>
 </div>
@@ -2996,7 +3056,21 @@ async function _loadMaint() {
     _maintLocal = await r.json();
     _renderMaintList();
     _renderMaintHistory();
+    _renderMaintCostSummary();
   } catch (_) {}
+}
+
+function _renderMaintCostSummary() {
+  const card = document.getElementById('maint-cost-summary');
+  const totalEl = document.getElementById('maint-total-cost');
+  const perKmEl = document.getElementById('maint-cost-per-km');
+  if (!card || !totalEl || !perKmEl) return;
+  const total = +_maintLocal.total_cost || 0;
+  if (total <= 0) { card.style.display = 'none'; return; }
+  card.style.display = '';
+  totalEl.textContent = 'R$ ' + total.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const perKm = +_maintLocal.cost_per_km || 0;
+  perKmEl.textContent = perKm > 0 ? 'R$ ' + perKm.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '/km' : '—';
 }
 
 function _renderMaintList() {
@@ -3026,27 +3100,36 @@ function _renderMaintList() {
     if (it.every_km)     lines.push(`a cada ${_fmtBR(it.every_km)} km`);
     if (it.every_months) lines.push(`${it.every_months} meses`);
     if (remKm != null && Number.isFinite(remKm)) {
-      lines.push(remKm > 0 ? `próx em ${_fmtBR(Math.round(remKm))} km` : `${_fmtBR(Math.round(-remKm))} km atrasado`);
+      lines.push(remKm > 0 ? `faltam ${_fmtBR(Math.round(remKm))} km` : `${_fmtBR(Math.round(-remKm))} km atrasado`);
     }
-    // Previsão dinâmica (km/dia médio)
+    // Vencimento real (por data) — sempre prioridade sobre estimativa por km
     let etaLine = '';
-    if (it.eta_date_ms_from_km && it.eta_days_from_km != null) {
-      const dias = it.eta_days_from_km;
-      etaLine = `🔮 vence em ~${_fmtBR(dias)} ${dias === 1 ? 'dia' : 'dias'} (${_fmtDt(it.eta_date_ms_from_km)})`;
-    } else if (it.next_date_ms && it.remaining_days != null && it.remaining_days > 0) {
-      // Fallback: previsão por meses quando km/dia não disponível
-      etaLine = `🔮 vence em ${it.remaining_days} ${it.remaining_days === 1 ? 'dia' : 'dias'} (${_fmtDt(it.next_date_ms)})`;
+    if (it.next_date_ms && it.remaining_days != null) {
+      const dias = it.remaining_days;
+      if (dias <= 0) {
+        etaLine = `📅 venceu há ${_fmtBR(Math.abs(dias))} dias (${_fmtDt(it.next_date_ms)})`;
+      } else {
+        etaLine = `📅 vence em ${_fmtBR(dias)} ${dias === 1 ? 'dia' : 'dias'} — ${_fmtDt(it.next_date_ms)}`;
+      }
     }
+    // Estimativa por km/dia como linha secundária (só quando falta > 30 dias pelo tempo)
+    let etaKmLine = '';
+    if (it.eta_date_ms_from_km && it.eta_days_from_km != null && (!it.remaining_days || it.remaining_days > 30)) {
+      etaKmLine = `🛣 km: prev. ${_fmtDt(it.eta_date_ms_from_km)} (~${_fmtBR(it.eta_days_from_km)} dias)`;
+    }
+    const catBadge = it.category && it.category !== 'outros' ? `<span style="font-size:9px;color:var(--muted);background:rgba(255,255,255,.06);padding:1px 6px;border-radius:6px;margin-left:6px">${(_MAINT_CATS||{})[it.category]||it.category}</span>` : '';
     return `<div style="display:flex;justify-content:space-between;align-items:center;padding:10px;background:rgba(255,255,255,.03);border-radius:10px;gap:8px">
       <div style="flex:1;min-width:0">
-        <div style="font-size:13px;font-weight:700">${icon} ${it.label || it.id}</div>
+        <div style="font-size:13px;font-weight:700">${icon} ${it.label || it.id}${catBadge}</div>
         <div style="font-size:10px;color:var(--muted);margin-top:2px">${lines.join(' · ')}</div>
         ${etaLine ? `<div style="font-size:10px;color:var(--teal,#5eead4);margin-top:3px;font-weight:600">${etaLine}</div>` : ''}
+        ${etaKmLine ? `<div style="font-size:10px;color:var(--muted);margin-top:2px">${etaKmLine}</div>` : ''}
       </div>
       <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">
         <span style="font-size:11px;color:${statusColor};font-weight:700">${status}</span>
         <div style="display:flex;gap:4px">
           <button onclick="markMaintDone('${it.id}')" title="Marcar feito" style="background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.3);color:var(--green);font-size:11px;padding:3px 8px;border-radius:6px;font-family:inherit;font-weight:600;cursor:pointer">✓ feito</button>
+          <button onclick="openMaintEdit('${it.id}')" title="Editar" style="background:rgba(99,179,237,.12);border:1px solid rgba(99,179,237,.3);color:#63b3ed;font-size:11px;padding:3px 8px;border-radius:6px;font-family:inherit;font-weight:600;cursor:pointer">✏</button>
           <button onclick="deleteMaintItem('${it.id}')" title="Remover" style="background:rgba(248,113,113,.12);border:1px solid rgba(248,113,113,.3);color:var(--red);font-size:11px;padding:3px 8px;border-radius:6px;font-family:inherit;font-weight:600;cursor:pointer">🗑</button>
         </div>
       </div>
@@ -3054,34 +3137,41 @@ function _renderMaintList() {
   }).join('') + (dailyKm > 0 ? `<div style="font-size:10px;color:var(--muted);text-align:center;padding:6px 0 0">Previsão baseada em ${dailyKm.toLocaleString('pt-BR')} km/dia (média dos últimos 30 dias)</div>` : '');
 }
 
+const _MAINT_CATS = { mecanica:'🔧 Mecânica', oleo:'🛢 Óleo/Filtros', pneus:'🛞 Pneus', freios:'🛑 Freios', eletrica:'⚡ Elétrica', carroceria:'🚘 Carroceria', outros:'📋 Outros' };
+
 function _renderMaintHistory() {
   const el = document.getElementById('maint-history');
   if (!el) return;
-  const hist = (_maintLocal.history || []).slice().sort((a,b) => (b.ts||0) - (a.ts||0));
+  const hist = (_maintLocal.history || []).slice().sort((a,b) => (b.date_ms||0) - (a.date_ms||0));
   if (!hist.length) {
     el.innerHTML = '<div style="font-size:11px;color:var(--muted);padding:8px;text-align:center">Nenhum registro ainda</div>';
     return;
   }
-  el.innerHTML = hist.slice(0, 10).map(h => {
+  el.innerHTML = hist.map(h => {
     const it = (_maintLocal.intervals || []).find(i => i.id === h.type_id);
-    const ts = h.date_ms || h.ts;
-    const d = ts ? new Date(ts) : null;
+    const d = h.date_ms ? new Date(h.date_ms) : null;
     const dateStr = d && !isNaN(d.getTime()) ? d.toLocaleDateString('pt-BR') : '—';
-    return `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:rgba(255,255,255,.02);border-radius:8px;font-size:11px">
-      <div>
-        <div style="font-weight:700;color:#cbd5e1">${(it?.icon || '🔧')} ${(it?.label || h.type_id || 'item removido')}</div>
-        <div style="color:var(--muted);font-size:10px;margin-top:1px">${dateStr} · ${(h.odometer_km||0).toLocaleString('pt-BR')} km</div>
+    const displayLabel = it ? `${it.icon || '🔧'} ${it.label}` : (h.label || h.type_id || 'item removido');
+    const catLabel = h.category ? (_MAINT_CATS[h.category] || h.category) : (it?.category ? (_MAINT_CATS[it.category] || it.category) : '');
+    return `<div style="display:flex;justify-content:space-between;align-items:flex-start;padding:8px 10px;background:rgba(255,255,255,.02);border-radius:8px;font-size:11px;gap:8px">
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:700;color:#cbd5e1">${displayLabel}</div>
+        <div style="color:var(--muted);font-size:10px;margin-top:1px">${dateStr} · ${(h.odometer_km||0).toLocaleString('pt-BR')} km${catLabel ? ' · ' + catLabel : ''}</div>
         ${h.notes ? `<div style="color:var(--muted);font-size:10px;margin-top:1px;font-style:italic">${h.notes}</div>` : ''}
       </div>
-      ${h.cost ? `<div style="color:var(--yellow);font-weight:700">R$ ${(+h.cost).toFixed(2)}</div>` : ''}
+      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0">
+        ${h.cost ? `<div style="color:var(--yellow);font-weight:700;font-size:12px">R$ ${(+h.cost).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})}</div>` : ''}
+        <button onclick="deleteMaintHistory('${h.id}')" style="background:rgba(248,113,113,.1);border:1px solid rgba(248,113,113,.25);color:var(--red);font-size:10px;padding:2px 6px;border-radius:5px;cursor:pointer;font-family:inherit">🗑</button>
+      </div>
     </div>`;
   }).join('');
 }
 
 window.openMaintAdd = function() {
   _maintEditId = null;
-  document.getElementById('maint-modal-ti').textContent = 'Adicionar manutenção';
+  document.getElementById('maint-modal-ti').textContent = 'Adicionar item periódico';
   document.getElementById('maint-label').value = '';
+  document.getElementById('maint-cat').value = 'mecanica';
   document.getElementById('maint-icon').value = '🔧';
   document.getElementById('maint-every-km').value = '';
   document.getElementById('maint-every-months').value = '';
@@ -3094,11 +3184,13 @@ window.saveMaintItem = async function() {
   const tk = localStorage.getItem('bridge_token');
   if (!tk) return;
   const body = {
-    label: document.getElementById('maint-label').value.trim(),
-    icon:  document.getElementById('maint-icon').value.trim() || '🔧',
-    every_km: parseInt(document.getElementById('maint-every-km').value || '0', 10) || null,
+    label:    document.getElementById('maint-label').value.trim(),
+    category: document.getElementById('maint-cat').value,
+    icon:     document.getElementById('maint-icon').value.trim() || '🔧',
+    every_km:     parseInt(document.getElementById('maint-every-km').value || '0', 10) || null,
     every_months: parseInt(document.getElementById('maint-every-months').value || '0', 10) || null,
   };
+  if (_maintEditId) body.id = _maintEditId;
   if (!body.label) { alert('Informe o nome'); return; }
   if (!body.every_km && !body.every_months) { alert('Informe km ou meses'); return; }
   try {
@@ -3123,35 +3215,98 @@ window.deleteMaintItem = async function(id) {
     _loadMaint();
   } catch (e) { alert('Erro: ' + e.message); }
 };
-window.markMaintDone = async function(id) {
+window.openMaintEdit = function(id) {
+  const it = (_maintLocal.intervals || []).find(i => i.id === id);
+  if (!it) return;
+  _maintEditId = id;
+  document.getElementById('maint-modal-ti').textContent = 'Editar item periódico';
+  document.getElementById('maint-label').value = it.label || '';
+  document.getElementById('maint-cat').value = it.category || 'outros';
+  document.getElementById('maint-icon').value = it.icon || '🔧';
+  document.getElementById('maint-every-km').value = it.every_km || '';
+  document.getElementById('maint-every-months').value = it.every_months || '';
+  document.getElementById('maint-modal').style.display = 'flex';
+};
+window.markMaintDone = function(id) { openMaintRecord(id); };
+
+// Abre o modal de registrar serviço
+// typeId: string = pré-seleciona um item periódico; null = modo avulso
+window.openMaintRecord = function(typeId) {
+  const modal = document.getElementById('maint-record-modal');
+  if (!modal) return;
+  // Popula o select com intervalos + opção avulsa
+  const sel = document.getElementById('maint-rec-type');
+  const intervals = _maintLocal.intervals || [];
+  sel.innerHTML = intervals.map(i =>
+    `<option value="${i.id}">${i.icon || '🔧'} ${i.label}${i.category ? ' (' + (_MAINT_CATS[i.category] || i.category) + ')' : ''}</option>`
+  ).join('') + '<option value="_avulso">📋 Serviço avulso</option>';
+  sel.value = typeId || '_avulso';
+  window._onMaintRecTypeChange();
+  // Pré-preenche data e km
+  const today = new Date();
+  const pad = n => String(n).padStart(2,'0');
+  document.getElementById('maint-rec-date').value = `${today.getFullYear()}-${pad(today.getMonth()+1)}-${pad(today.getDate())}`;
+  const odo = +(window.state?.odometer_km) || 0;
+  document.getElementById('maint-rec-odo').value = odo > 0 ? Math.round(odo) : '';
+  document.getElementById('maint-rec-cost').value = '';
+  document.getElementById('maint-rec-notes').value = '';
+  document.getElementById('maint-rec-label').value = '';
+  modal.style.display = 'flex';
+};
+window.closeMaintRecord = function() {
+  document.getElementById('maint-record-modal').style.display = 'none';
+};
+window._onMaintRecTypeChange = function() {
+  const val = document.getElementById('maint-rec-type').value;
+  const avulsoFields = document.getElementById('maint-rec-avulso-fields');
+  if (avulsoFields) avulsoFields.style.display = val === '_avulso' ? '' : 'none';
+};
+window.saveMaintRecord = async function() {
   const tk = localStorage.getItem('bridge_token');
   if (!tk) return;
-  const odo = +(window.state?.odometer_km) || 0;
-  const notes = prompt('Notas dessa manutenção (opcional)') || '';
-  const costStr = prompt('Custo em R$ (opcional — entra no cálculo de custo/km do Desloc)') || '';
-  const cost = parseFloat(costStr.replace(',', '.'));
+  const typeVal = document.getElementById('maint-rec-type').value;
+  const isAvulso = typeVal === '_avulso';
+  const odo = parseFloat(document.getElementById('maint-rec-odo').value);
+  if (!(odo > 0)) { alert('Informe o odômetro'); return; }
+  const dateStr = document.getElementById('maint-rec-date').value;
+  const date_ms = dateStr ? new Date(dateStr).getTime() : Date.now();
+  const cost = parseFloat(String(document.getElementById('maint-rec-cost').value).replace(',', '.'));
+  const notes = document.getElementById('maint-rec-notes').value.trim();
+  const body = { odometer_km: odo, date_ms, notes };
+  if (!isNaN(cost) && cost > 0) body.cost = cost;
+  if (isAvulso) {
+    const label = document.getElementById('maint-rec-label').value.trim();
+    if (!label) { alert('Informe a descrição do serviço'); return; }
+    body.label = label;
+    body.category = document.getElementById('maint-rec-cat').value;
+  } else {
+    body.type_id = typeVal;
+  }
   try {
     const r = await fetch('/api/maintenance/history', {
       method: 'POST',
       headers: { 'Authorization': 'Bearer ' + tk, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        type_id: id,
-        odometer_km: odo,
-        date_ms: Date.now(),
-        notes,
-        cost: (!isNaN(cost) && cost > 0) ? cost : undefined,
-      }),
+      body: JSON.stringify(body),
     });
-    if (!r.ok) {
-      const err = await r.json().catch(() => ({}));
-      throw new Error(err.error || ('HTTP ' + r.status));
-    }
+    if (!r.ok) { const err = await r.json().catch(()=>({})); throw new Error(err.error || ('HTTP '+r.status)); }
+    closeMaintRecord();
+    _loadMaint();
+  } catch (e) { alert('Erro: ' + e.message); }
+};
+window.deleteMaintHistory = async function(id) {
+  if (!confirm('Remover este registro?')) return;
+  const tk = localStorage.getItem('bridge_token');
+  if (!tk) return;
+  try {
+    await fetch('/api/maintenance/history/' + encodeURIComponent(id), {
+      method: 'DELETE', headers: { 'Authorization': 'Bearer ' + tk },
+    });
     _loadMaint();
   } catch (e) { alert('Erro: ' + e.message); }
 };
 
   // Expõe handlers de onclick no window
-  Object.assign(window, { openSub: typeof openSub !== 'undefined' ? openSub : undefined, closeSub: typeof closeSub !== 'undefined' ? closeSub : undefined, saveSection: typeof saveSection !== 'undefined' ? saveSection : undefined, toggle2fa: typeof toggle2fa !== 'undefined' ? toggle2fa : undefined, confirmClearHistory: typeof confirmClearHistory !== 'undefined' ? confirmClearHistory : undefined, confirmClearPwaCache: typeof confirmClearPwaCache !== 'undefined' ? confirmClearPwaCache : undefined, clearDriveHistory: typeof clearDriveHistory !== 'undefined' ? clearDriveHistory : undefined, confirmClearEventLogs: typeof confirmClearEventLogs !== 'undefined' ? confirmClearEventLogs : undefined, openMaintAdd: openMaintAdd, closeMaintModal: closeMaintModal, saveMaintItem: saveMaintItem, deleteMaintItem: deleteMaintItem, markMaintDone: markMaintDone, saveVehicle: saveVehicle, setChargeLimit: setChargeLimit, actionReprocessPlaces: actionReprocessPlaces, actionRecomputeTripCosts: actionRecomputeTripCosts, actionRestartBridge: actionRestartBridge, actionUpdateBridge: actionUpdateBridge, openPlaceAdd: openPlaceAdd, openPlaceEdit: openPlaceEdit, closePlaceModal: closePlaceModal, usePlaceGps: usePlaceGps, savePlace: savePlace, deletePlace: deletePlace, toggleNotif: toggleNotif, _onNotifDeviceChange: _onNotifDeviceChange, renameNotifDevice: renameNotifDevice, removeNotifDevice: removeNotifDevice, renameMyDevice: renameMyDevice, forceSubscribePush: forceSubscribePush, openNotifDevicePicker: openNotifDevicePicker, closeNotifDevicePicker: closeNotifDevicePicker, _pickNotifDevice: _pickNotifDevice, renameNotifDeviceById: renameNotifDeviceById, removeNotifDeviceById: removeNotifDeviceById, changePassword: changePassword, toggle2faNew: toggle2faNew, closeTotpModal: closeTotpModal, activate2fa: activate2fa, show2faBackup: show2faBackup, regenBackupCodes: regenBackupCodes, openGeofencePlaces: openGeofencePlaces, _toggleGeofencePick: _toggleGeofencePick, saveGeofencePlaces: saveGeofencePlaces, toggleNg: toggleNg, saveWindowForgottenMin: saveWindowForgottenMin, saveLockForgottenMin: saveLockForgottenMin, saveTrunkForgottenMin: saveTrunkForgottenMin, saveSocLowIdlePct: saveSocLowIdlePct, saveSocArrivalPct: saveSocArrivalPct, saveSocArrivalMin: saveSocArrivalMin, saveTyreDropPsi: saveTyreDropPsi, openSocArrivalPlaces: openSocArrivalPlaces, toggleChargeEnding: toggleChargeEnding, editChargeEndingMin: editChargeEndingMin, downloadBackup: downloadBackup, uploadBackup: uploadBackup, copyBackupToClipboard: copyBackupToClipboard, shareBackup: shareBackup, clearLocalCache: clearLocalCache, toggleDiag: toggleDiag, saveDiagInterval: saveDiagInterval, exportDiag: exportDiag, clearDiag: clearDiag, openDiagSet: openDiagSet, confirmDiagSet: confirmDiagSet, _scheduleDiagRender: _scheduleDiagRender });
+  Object.assign(window, { openSub: typeof openSub !== 'undefined' ? openSub : undefined, closeSub: typeof closeSub !== 'undefined' ? closeSub : undefined, saveSection: typeof saveSection !== 'undefined' ? saveSection : undefined, toggle2fa: typeof toggle2fa !== 'undefined' ? toggle2fa : undefined, confirmClearHistory: typeof confirmClearHistory !== 'undefined' ? confirmClearHistory : undefined, confirmClearPwaCache: typeof confirmClearPwaCache !== 'undefined' ? confirmClearPwaCache : undefined, clearDriveHistory: typeof clearDriveHistory !== 'undefined' ? clearDriveHistory : undefined, confirmClearEventLogs: typeof confirmClearEventLogs !== 'undefined' ? confirmClearEventLogs : undefined, openMaintAdd: openMaintAdd, openMaintEdit: openMaintEdit, closeMaintModal: closeMaintModal, saveMaintItem: saveMaintItem, deleteMaintItem: deleteMaintItem, markMaintDone: markMaintDone, openMaintRecord: openMaintRecord, closeMaintRecord: closeMaintRecord, saveMaintRecord: saveMaintRecord, deleteMaintHistory: deleteMaintHistory, _onMaintRecTypeChange: window._onMaintRecTypeChange, saveVehicle: saveVehicle, setChargeLimit: setChargeLimit, actionReprocessPlaces: actionReprocessPlaces, actionRecomputeTripCosts: actionRecomputeTripCosts, actionRestartBridge: actionRestartBridge, actionUpdateBridge: actionUpdateBridge, openPlaceAdd: openPlaceAdd, openPlaceEdit: openPlaceEdit, closePlaceModal: closePlaceModal, usePlaceGps: usePlaceGps, savePlace: savePlace, deletePlace: deletePlace, toggleNotif: toggleNotif, _onNotifDeviceChange: _onNotifDeviceChange, renameNotifDevice: renameNotifDevice, removeNotifDevice: removeNotifDevice, renameMyDevice: renameMyDevice, forceSubscribePush: forceSubscribePush, openNotifDevicePicker: openNotifDevicePicker, closeNotifDevicePicker: closeNotifDevicePicker, _pickNotifDevice: _pickNotifDevice, renameNotifDeviceById: renameNotifDeviceById, removeNotifDeviceById: removeNotifDeviceById, changePassword: changePassword, toggle2faNew: toggle2faNew, closeTotpModal: closeTotpModal, activate2fa: activate2fa, show2faBackup: show2faBackup, regenBackupCodes: regenBackupCodes, openGeofencePlaces: openGeofencePlaces, _toggleGeofencePick: _toggleGeofencePick, saveGeofencePlaces: saveGeofencePlaces, toggleNg: toggleNg, saveWindowForgottenMin: saveWindowForgottenMin, saveLockForgottenMin: saveLockForgottenMin, saveTrunkForgottenMin: saveTrunkForgottenMin, saveSocLowIdlePct: saveSocLowIdlePct, saveSocArrivalPct: saveSocArrivalPct, saveSocArrivalMin: saveSocArrivalMin, saveTyreDropPsi: saveTyreDropPsi, openSocArrivalPlaces: openSocArrivalPlaces, toggleChargeEnding: toggleChargeEnding, editChargeEndingMin: editChargeEndingMin, downloadBackup: downloadBackup, uploadBackup: uploadBackup, copyBackupToClipboard: copyBackupToClipboard, shareBackup: shareBackup, clearLocalCache: clearLocalCache, toggleDiag: toggleDiag, saveDiagInterval: saveDiagInterval, exportDiag: exportDiag, clearDiag: clearDiag, openDiagSet: openDiagSet, confirmDiagSet: confirmDiagSet, _scheduleDiagRender: _scheduleDiagRender });
   if (!window['initView_config']) window['initView_config'] = function() {};
 })();
 </script>

@@ -42,6 +42,9 @@ struct PwaWebView: UIViewRepresentable {
           },
           openSettings: function() {
             window.webkit.messageHandlers.haval.postMessage({ action: 'openSettings' });
+          },
+          setDeviceId: function(id) {
+            window.webkit.messageHandlers.haval.postMessage({ action: 'setDeviceId', deviceId: id });
           }
         };
         """
@@ -84,6 +87,10 @@ struct PwaWebView: UIViewRepresentable {
                 case "startLiveActivity": await manager.start()
                 case "stopLiveActivity":  await manager.stop()
                 case "openSettings":      NotificationCenter.default.post(name: .openHavalSettings, object: nil)
+                case "setDeviceId":
+                    if let id = body["deviceId"] as? String, !id.isEmpty {
+                        Settings.notifDeviceId = id
+                    }
                 default: print("[bridge] ação desconhecida:", action)
                 }
             }
@@ -114,19 +121,24 @@ struct PwaWebView: UIViewRepresentable {
                      runJavaScriptAlertPanelWithMessage message: String,
                      initiatedByFrame frame: WKFrameInfo,
                      completionHandler: @escaping () -> Void) {
+            // Guard obrigatório: sem isso, se topController() for nil (app em
+            // transição), o completionHandler nunca é chamado e o WKWebView
+            // congela todo o JavaScript permanentemente até o app ser morto.
+            guard let vc = topController() else { completionHandler(); return }
             let alert = UIAlertController(title: nil, message: message, preferredStyle: .alert)
             alert.addAction(UIAlertAction(title: "OK", style: .default) { _ in completionHandler() })
-            topController()?.present(alert, animated: true)
+            vc.present(alert, animated: true)
         }
 
         func webView(_ webView: WKWebView,
                      runJavaScriptConfirmPanelWithMessage message: String,
                      initiatedByFrame frame: WKFrameInfo,
                      completionHandler: @escaping (Bool) -> Void) {
+            guard let vc = topController() else { completionHandler(false); return }
             let alert = UIAlertController(title: nil, message: message, preferredStyle: .alert)
             alert.addAction(UIAlertAction(title: "Cancelar", style: .cancel) { _ in completionHandler(false) })
             alert.addAction(UIAlertAction(title: "OK", style: .default) { _ in completionHandler(true) })
-            topController()?.present(alert, animated: true)
+            vc.present(alert, animated: true)
         }
 
         func webView(_ webView: WKWebView,
@@ -134,13 +146,14 @@ struct PwaWebView: UIViewRepresentable {
                      defaultText: String?,
                      initiatedByFrame frame: WKFrameInfo,
                      completionHandler: @escaping (String?) -> Void) {
+            guard let vc = topController() else { completionHandler(nil); return }
             let alert = UIAlertController(title: nil, message: prompt, preferredStyle: .alert)
             alert.addTextField { tf in tf.text = defaultText }
             alert.addAction(UIAlertAction(title: "Cancelar", style: .cancel) { _ in completionHandler(nil) })
             alert.addAction(UIAlertAction(title: "OK", style: .default) { _ in
                 completionHandler(alert.textFields?.first?.text)
             })
-            topController()?.present(alert, animated: true)
+            vc.present(alert, animated: true)
         }
     }
 }

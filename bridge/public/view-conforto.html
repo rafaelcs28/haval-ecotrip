@@ -885,6 +885,8 @@ async function savePreclimatField(field, value) {
   if (!LIVE_MODE) { showToast('Agendamento salvo ✓', 'ok'); return; }
   try {
     const body = {}; body[field] = value;
+    const _did = localStorage.getItem('eco_device_id');
+    if (_did) body.device_id = _did;
     const r = await fetch('/api/preclimat', {
       method: 'POST',
       headers: { 'Authorization': 'Bearer ' + BRIDGE_TOKEN, 'Content-Type': 'application/json' },

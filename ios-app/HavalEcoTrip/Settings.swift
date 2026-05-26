@@ -49,4 +49,12 @@ enum Settings {
     static var isConfigured: Bool {
         !bridgeURL.isEmpty && !bridgeToken.isEmpty
     }
+
+    private static let deviceIdKey = "notif_device_id"
+
+    /// device_id do PWA — usado para filtrar /api/push/history por prefs do device.
+    static var notifDeviceId: String {
+        get { defaults.string(forKey: deviceIdKey) ?? "" }
+        set { defaults.set(newValue, forKey: deviceIdKey) }
+    }
 }
