@@ -13,6 +13,7 @@
 //
 import AVFoundation
 import ActivityKit
+import UIKit
 
 @MainActor
 final class ChargingKeepAlive {
@@ -157,6 +158,26 @@ final class ChargingKeepAlive {
     // ── Polling de estado ─────────────────────────────────────────────────────
 
     private func pollAndUpdateLA() async {
+        // Pede tempo extra ao iOS para garantir que o fetch complete.
+        // beginBackgroundTask dá ~30s adicionais mesmo se o engine parar.
+        var bgTask = UIBackgroundTaskIdentifier.invalid
+        bgTask = UIApplication.shared.beginBackgroundTask(withName: "keepalive-poll") {
+            UIApplication.shared.endBackgroundTask(bgTask)
+            bgTask = .invalid
+        }
+        defer {
+            if bgTask != .invalid {
+                UIApplication.shared.endBackgroundTask(bgTask)
+            }
+        }
+
+        // Verifica se o engine ainda está rodando — iOS pode pará-lo
+        // silenciosamente após a primeira execução com áudio inaudível.
+        if let eng = engine, !eng.isRunning {
+            print("[keepalive] engine parou — reiniciando")
+            startAudio()
+        }
+
         let activities = Activity<ChargeActivityAttributes>.activities.filter {
             $0.activityState == .active
         }
