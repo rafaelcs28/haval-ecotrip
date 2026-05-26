@@ -75,7 +75,7 @@ final class ChargingKeepAlive {
         do {
             let p = try AVAudioPlayer(data: makeToneWAV())
             p.numberOfLoops = -1   // loop infinito
-            p.volume = 0.01        // quase inaudível mas não zero
+            p.volume = 0.1         // baixo mas não zero — iOS precisa ver sinal real
             p.prepareToPlay()
             guard p.play() else {
                 print("[keepalive] AVAudioPlayer.play() retornou false")
@@ -91,12 +91,12 @@ final class ChargingKeepAlive {
         if pollTimer == nil { startTimer() }
     }
 
-    /// Gera 100ms de tom senoidal a 18kHz em formato WAV (16-bit, mono, 44100 Hz).
+    /// Gera 1s de tom senoidal a 19.5kHz em formato WAV (16-bit, mono, 44100 Hz).
     private func makeToneWAV() -> Data {
         let sampleRate: Int   = 44100
-        let frequency:  Float = 18000     // 18 kHz — acima da faixa audível humana
-        let amplitude:  Float = 0.05      // ~-26 dBFS
-        let numSamples        = sampleRate / 10   // 100ms
+        let frequency:  Float = 19500     // 19.5 kHz — praticamente inaudível, acima do range de adultos
+        let amplitude:  Float = 0.1       // ~-20 dBFS — sinal real, não detectável como silêncio
+        let numSamples        = sampleRate * 1    // 1 segundo — menos loopings por minuto
         let dataSize          = numSamples * 2    // 16-bit PCM
 
         var wav = Data(capacity: 44 + dataSize)
