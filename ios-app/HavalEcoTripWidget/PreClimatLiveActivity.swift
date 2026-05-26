@@ -1,8 +1,7 @@
 //
 //  PreClimatLiveActivity.swift
 //  Layouts da Live Activity da pré-climatização (lock screen + Dynamic Island).
-//  Iniciada/atualizada LOCALMENTE pelo app (PreClimatManager) — conta gratuita
-//  não tem APNs, então não há push-to-start; a LA só existe com o app vivo.
+//  Criada e atualizada pelo bridge via APNs (push-to-start + updates).
 //
 import ActivityKit
 import SwiftUI

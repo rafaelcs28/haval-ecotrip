@@ -313,7 +313,7 @@ function saveNotifPrefs() {
 // ── Pré-climatização agendada ─────────────────────────────────────────────
 // Estrutura: { enabled, time:"HH:MM", recurrence:"once"|"daily"|"weekdays"|"weekends",
 //              temp:22.0, fan:3, lastFiredDate:"YYYY-MM-DD" }
-const PRECLIMAT_DEFAULTS = { enabled: false, time: '07:30', recurrence: 'daily', temp: 22.0, fan: 3, duration: 20, lastFiredDate: '' };
+const PRECLIMAT_DEFAULTS = { enabled: false, time: '07:30', recurrence: 'daily', temp: 22.0, fan: 3, duration: 20, lastFiredDate: '', startedDate: '' };
 let preclimat = { ...PRECLIMAT_DEFAULTS };
 try {
   if (fs.existsSync(PRECLIMAT_FILE))
@@ -327,6 +327,19 @@ function savePreclimat() {
 // pra dirigir a Live Activity local. phase: idle|scheduled|starting|engine_on|
 // cooling|restoring|ended|failed. `endsAtMs` alimenta a contagem regressiva.
 let preclimatStatus = { phase: 'idle', detail: '', endsAtMs: 0, temp: 0, fan: 0, updatedAtMs: 0 };
+const PRECLIMAT_LA_TYPE = 'PreClimatActivityAttributes';
+function _preclimatAttributes() {
+  return { scheduledTime: preclimat.time, carName: 'Haval H6 PHEV' };
+}
+function _preclimatContentState() {
+  return {
+    phase: preclimatStatus.phase, detail: preclimatStatus.detail,
+    temp: preclimatStatus.temp, fan: preclimatStatus.fan,
+    endsAtMs: preclimatStatus.endsAtMs, updatedAtMs: preclimatStatus.updatedAtMs,
+  };
+}
+// Atualiza o status E empurra pra Live Activity via APNs (update). Para fases
+// finais (ended/failed), agenda o end da LA ~5 min depois (mantém visível).
 function _setPreclimatStatus(phase, detail, extra = {}) {
   preclimatStatus = {
     phase, detail,
@@ -336,6 +349,43 @@ function _setPreclimatStatus(phase, detail, extra = {}) {
     updatedAtMs: Date.now(),
   };
   console.log(`[preclimat] status → ${phase}: ${detail}`);
+  if (!apnsLive.enabled || !preclimat.device_id) return;
+  const isFinal = phase === 'ended' || phase === 'failed';
+  apnsLive.pushUpdate(PRECLIMAT_LA_TYPE, { deviceId: preclimat.device_id }, _preclimatContentState(),
+    { staleDate: preclimatStatus.endsAtMs || undefined })
+    .catch(e => console.warn('[apns] preclimat update falhou:', e.message));
+  if (isFinal) {
+    // Encerra a LA 5 min depois (deixa o usuário ver o estado final).
+    setTimeout(() => {
+      apnsLive.pushUpdate(PRECLIMAT_LA_TYPE, { deviceId: preclimat.device_id }, _preclimatContentState(),
+        { isFinal: true, dismissalDate: Date.now() })
+        .catch(e => console.warn('[apns] preclimat end falhou:', e.message));
+    }, 5 * 60_000);
+  }
+}
+// Cria a Live Activity (push-to-start) na janela T-5min, fase "scheduled".
+function _startPreclimatLA(fireMs) {
+  preclimatStatus = {
+    phase: 'scheduled', detail: `Agendada para ${preclimat.time}`,
+    endsAtMs: fireMs, temp: preclimat.temp, fan: preclimat.fan, updatedAtMs: Date.now(),
+  };
+  console.log(`[preclimat] LA push-to-start (agendada p/ ${preclimat.time})`);
+  if (!apnsLive.enabled || !preclimat.device_id) return;
+  apnsLive.pushStart(PRECLIMAT_LA_TYPE, preclimat.device_id, _preclimatAttributes(), _preclimatContentState(),
+    { staleDate: fireMs })
+    .catch(e => console.warn('[apns] preclimat pushStart falhou:', e.message));
+}
+function _preclimatEligibleToday(now) {
+  const dow = now.getDay(); // 0=Dom … 6=Sáb
+  if (preclimat.recurrence === 'weekdays' && (dow === 0 || dow === 6)) return false;
+  if (preclimat.recurrence === 'weekends' && dow !== 0 && dow !== 6) return false;
+  return true;
+}
+function _preclimatFireMsToday(now) {
+  const [h, m] = String(preclimat.time).split(':').map(Number);
+  if (isNaN(h) || isNaN(m)) return null;
+  const d = new Date(now); d.setHours(h, m, 0, 0);
+  return d.getTime();
 }
 
 // ── Resumo diário ─────────────────────────────────────────────────────────────
@@ -347,29 +397,34 @@ let _chargePeakKw        = 0;
 let _chargeSlowAlertSent = false;
 let _chargeSlowCheckTs   = 0;
 
-// Checker rodando a cada 60s — dispara quando hora local bate com agendamento.
+// Checker rodando a cada 60s — duas etapas: T-5min cria a Live Activity
+// (push-to-start) e T dispara motor+AC.
 let _preclimatFiring = false;
 setInterval(() => {
-  if (!preclimat.enabled || _preclimatFiring) return;
-  const now  = new Date();
-  const hhmm = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
-  if (hhmm !== preclimat.time) return;
-
-  // Evita re-disparo dentro do mesmo minuto ou no mesmo dia (recurrence=once)
+  if (!preclimat.enabled) return;
+  const now   = new Date();
   const today = now.toISOString().slice(0, 10);
-  if (preclimat.lastFiredDate === today) return;
+  if (!_preclimatEligibleToday(now)) return;
+  const fireMs = _preclimatFireMsToday(now);
+  if (fireMs == null) return;
+  const nowMs = now.getTime();
 
-  // Verifica dia da semana para recorrência
-  const dow = now.getDay(); // 0=Dom … 6=Sáb
-  if (preclimat.recurrence === 'weekdays' && (dow === 0 || dow === 6)) return;
-  if (preclimat.recurrence === 'weekends' && dow !== 0 && dow !== 6) return;
+  // Etapa 1 — T-5min: cria a Live Activity via push-to-start (uma vez por dia).
+  if (nowMs >= fireMs - 5 * 60_000 && nowMs < fireMs && preclimat.startedDate !== today) {
+    preclimat.startedDate = today;
+    savePreclimat();
+    _startPreclimatLA(fireMs);
+  }
 
-  preclimat.lastFiredDate = today;
-  if (preclimat.recurrence === 'once') preclimat.enabled = false;
-  savePreclimat();
-
-  _preclimatFiring = true;
-  firePreClimat().finally(() => { _preclimatFiring = false; });
+  // Etapa 2 — T (até +90s de folga): dispara motor+AC.
+  if (!_preclimatFiring && preclimat.lastFiredDate !== today
+      && nowMs >= fireMs && nowMs < fireMs + 90_000) {
+    preclimat.lastFiredDate = today;
+    if (preclimat.recurrence === 'once') preclimat.enabled = false;
+    savePreclimat();
+    _preclimatFiring = true;
+    firePreClimat().finally(() => { _preclimatFiring = false; });
+  }
 }, 60_000);
 
 // ── Resumo diário às 20h ──────────────────────────────────────────────────────
@@ -4707,7 +4762,7 @@ app.post('/api/preclimat', requireAuth, (req, res) => {
   if (device_id) preclimat.device_id = String(device_id);
   if (time !== undefined) {
     if (!/^\d{2}:\d{2}$/.test(time)) return res.status(400).json({ error: 'time inválido (HH:MM)' });
-    if (time !== preclimat.time) preclimat.lastFiredDate = '';  // novo horário → pode disparar de novo hoje
+    if (time !== preclimat.time) { preclimat.lastFiredDate = ''; preclimat.startedDate = ''; }  // novo horário → pode disparar/criar LA de novo hoje
     preclimat.time = time;
   }
   if (recurrence !== undefined) {
@@ -4731,7 +4786,7 @@ app.post('/api/preclimat', requireAuth, (req, res) => {
     preclimat.duration = d;
   }
   if (enabled !== undefined) {
-    if (!!enabled && !preclimat.enabled) preclimat.lastFiredDate = '';  // reabilitou → pode disparar hoje
+    if (!!enabled && !preclimat.enabled) { preclimat.lastFiredDate = ''; preclimat.startedDate = ''; }  // reabilitou → pode disparar/criar LA hoje
     preclimat.enabled = !!enabled;
   }
   savePreclimat();
@@ -5401,8 +5456,8 @@ function sendChargeLiveUpdate(isFinal = false) {
   });
   // Live Activity (iOS) via APNs — manda o mesmo content-state pra todos os
   // pushTokens registrados pelo app companion. No-op se APNS_ENABLED=false.
-  if (apnsLive.tokenCount() > 0) {
-    apnsLive.pushUpdate({
+  if (apnsLive.enabled) {
+    apnsLive.pushUpdate('ChargeActivityAttributes', {}, {
       soc, powerKw: pwr,
       sessionKwh: +state.charge_session_kwh || 0,
       remainingMin: Math.max(0, Math.round(rem)),
@@ -5413,17 +5468,31 @@ function sendChargeLiveUpdate(isFinal = false) {
 }
 
 // ── Endpoints da Live Activity (iOS companion) ────────────────────────────────
-// O app companion swift chama esses dois endpoints; o bridge usa o pushToken
-// retornado pra disparar updates da Live Activity via APNs HTTP/2.
+// O app registra:
+//  - push-to-start token (por TIPO de LA): permite o servidor CRIAR a LA.
+//  - update token (por atividade): permite atualizar/encerrar uma LA específica.
+const LA_TYPES = ['ChargeActivityAttributes', 'PreClimatActivityAttributes'];
+
+// push-to-start token (por tipo de Live Activity)
+app.post('/api/activity/pts-token', (req, res) => {
+  const { type, push_to_start_token, device_id } = req.body || {};
+  if (!type || !push_to_start_token || !LA_TYPES.includes(String(type)))
+    return res.status(400).json({ error: 'type válido e push_to_start_token obrigatórios' });
+  apnsLive.registerStartToken(String(type), device_id ? String(device_id) : '', String(push_to_start_token));
+  res.json({ ok: true, registered: apnsLive.tokenCount() });
+});
+
+// update token (por atividade)
 app.post('/api/activity/start', (req, res) => {
-  const { push_token, activity_id } = req.body || {};
+  const { push_token, activity_id, type, device_id } = req.body || {};
   if (!push_token || !activity_id) return res.status(400).json({ error: 'push_token e activity_id obrigatórios' });
-  apnsLive.registerToken(String(activity_id), String(push_token));
+  const t = LA_TYPES.includes(String(type)) ? String(type) : 'ChargeActivityAttributes';
+  apnsLive.registerUpdateToken(t, String(activity_id), device_id ? String(device_id) : '', String(push_token));
   res.json({ ok: true, registered: apnsLive.tokenCount() });
 });
 app.post('/api/activity/stop', (req, res) => {
   const { activity_id } = req.body || {};
-  if (activity_id) apnsLive.unregisterToken(String(activity_id));
+  if (activity_id) apnsLive.unregisterActivity(String(activity_id));
   res.json({ ok: true, registered: apnsLive.tokenCount() });
 });
 

@@ -1,13 +1,13 @@
 //
 //  PreClimatActivityAttributes.swift
-//  Live Activity da pré-climatização agendada. Como a conta Apple é gratuita
-//  (sem APNs), NÃO há push-to-start — a LA é iniciada e atualizada LOCALMENTE
-//  pelo PreClimatManager, que faz polling de /api/preclimat e reflete a fase
-//  reportada pelo bridge (ligar motor → AC → restaurar → encerrar).
-//  Funciona com o app vivo (foreground; background best-effort via keep-alive).
+//  Live Activity da pré-climatização agendada. Com a conta Apple paga, é o
+//  BRIDGE que cria a LA via APNs push-to-start (~5 min antes) e atualiza cada
+//  passo (ligar motor → AC → restaurar → encerrar), mesmo com o app fechado.
 //
 //  ⚠ Target Membership: este arquivo está nos DOIS targets (app + widget) via
-//    project.yml — o PreClimatManager (app) usa o tipo e o widget renderiza a LA.
+//    project.yml — o app referencia o tipo (LiveActivityPush registra os tokens)
+//    e o widget renderiza a LA. O nome do struct e os campos do ContentState
+//    precisam casar com o attributes-type/content-state enviados pelo bridge.
 //
 import ActivityKit
 import Foundation

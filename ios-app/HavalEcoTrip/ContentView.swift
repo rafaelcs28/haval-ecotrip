@@ -8,6 +8,10 @@
 //  em qualquer lugar abre a sheet de Settings. Também pode ser disparado pelo
 //  próprio PWA via window.HavalNative.openSettings().
 //
+//  As Live Activities (recarga + pré-climatização) são dirigidas pelo BRIDGE via
+//  APNs (push-to-start + updates) — ver LiveActivityPush. Não há mais keep-alive
+//  de localização/áudio.
+//
 import SwiftUI
 
 struct ContentView: View {
@@ -16,19 +20,6 @@ struct ContentView: View {
     @StateObject private var shortcuts = ShortcutManager.shared
     @Environment(\.scenePhase) private var scenePhase
     @State private var showSetup = false   // sheet por cima da WebView
-    @State private var preclimatTask: Task<Void, Never>? = nil
-
-    // Loop de foreground que mantém a Live Activity da pré-climatização em dia.
-    // (Em background quem cobre é o timer do ChargingKeepAlive, best-effort.)
-    private func startPreclimatLoop() {
-        preclimatTask?.cancel()
-        preclimatTask = Task {
-            while !Task.isCancelled {
-                await PreClimatManager.shared.tick()
-                try? await Task.sleep(nanoseconds: 60 * 1_000_000_000)
-            }
-        }
-    }
 
     private var bridgeURL: URL? {
         URL(string: Settings.bridgeURL)
@@ -70,14 +61,14 @@ struct ContentView: View {
         }
         .task {
             await manager.autoStartIfCharging()
-            // Notificações nativas são opt-in (padrão OFF) — o PWA standalone
-            // já notifica em tempo real. Sem isso, o poller re-dispara o backlog.
+            // Registra os tokens APNs das Live Activities no bridge (push-to-start
+            // + update). É o que permite o servidor criar/atualizar a LA com o app
+            // fechado. Idempotente.
+            LiveActivityPush.shared.start()
             if Settings.nativeNotificationsEnabled {
                 await notifPoller.requestPermission()
                 notifPoller.start()
             }
-            ChargingKeepAlive.shared.requestPermissionIfNeeded()
-            startPreclimatLoop()
         }
         // URL scheme havalecotrip://open — disparado pelo SW do PWA standalone
         // quando user toca em notif Web Push.
@@ -95,16 +86,9 @@ struct ContentView: View {
             if newPhase == .active {
                 Task { await manager.autoStartIfCharging() }
                 if Settings.nativeNotificationsEnabled { notifPoller.start() }
-                ChargingKeepAlive.shared.appDidForeground()
-                ChargingKeepAlive.shared.requestPermissionIfNeeded()
-                startPreclimatLoop()
             } else if newPhase == .background {
                 notifPoller.stop()
-                preclimatTask?.cancel()
                 BackgroundRefresh.schedule()
-                ChargingKeepAlive.shared.appDidBackground(
-                    hasActiveCharging: manager.currentActivity != nil
-                )
             }
         }
     }
@@ -118,44 +102,7 @@ struct SetupView: View {
     @State private var url:           String = Settings.bridgeURL
     @State private var token:         String = Settings.bridgeToken
     @State private var showTokenPlain = false
-    @State private var keepAliveMode: Settings.KeepAliveMode = Settings.keepAliveMode
     @State private var nativeNotifs:  Bool = Settings.nativeNotificationsEnabled
-    @ObservedObject private var keepAlive = ChargingKeepAlive.shared
-
-    // Botão/indicador de permissão de localização. O texto e a ação mudam
-    // conforme o status atual — refletindo a escalada em 2 passos do iOS.
-    @ViewBuilder private var locationPermissionRow: some View {
-        switch keepAlive.authStatus {
-        case .authorizedAlways:
-            Label("Localização: Sempre", systemImage: "checkmark.circle.fill")
-                .foregroundStyle(.green)
-        case .authorizedWhenInUse:
-            Button {
-                keepAlive.requestAlwaysUpgrade()
-            } label: {
-                Label("Mudar para localização Sempre", systemImage: "location.fill")
-            }
-            Text("Hoje está em 'Ao Usar' — o app só segue ativo em background com 'Sempre'. Toque acima para liberar.")
-                .font(.caption).foregroundStyle(.secondary)
-        case .denied, .restricted:
-            Button {
-                keepAlive.requestAlwaysUpgrade()
-            } label: {
-                Label("Abrir Ajustes para permitir", systemImage: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.orange)
-            }
-            Text("Localização negada. Ative em Ajustes › Privacidade › Localização › Haval EcoTrip › Sempre.")
-                .font(.caption).foregroundStyle(.secondary)
-        default:   // .notDetermined
-            Button {
-                keepAlive.requestAlwaysUpgrade()
-            } label: {
-                Label("Permitir localização", systemImage: "location")
-            }
-            Text("O iOS pede 'Ao Usar' primeiro; depois aparece a opção 'Sempre'.")
-                .font(.caption).foregroundStyle(.secondary)
-        }
-    }
 
     var body: some View {
         NavigationStack {
@@ -184,26 +131,6 @@ struct SetupView: View {
                 }
 
                 Section {
-                    Picker("Live Activity em background", selection: $keepAliveMode) {
-                        ForEach(Settings.KeepAliveMode.allCases, id: \.self) { mode in
-                            Text(mode.label).tag(mode)
-                        }
-                    }
-                    .onChange(of: keepAliveMode) { _, new in
-                        Settings.keepAliveMode = new
-                        if new != .off { keepAlive.requestPermissionIfNeeded() }
-                    }
-                    Text("Áudio silencioso mantém o app ativo e atualiza a Live Activity a cada 30s. Não interrompe música. 'Enquanto carrega' é o recomendado.")
-                        .font(.caption).foregroundStyle(.secondary)
-
-                    if keepAliveMode != .off {
-                        locationPermissionRow
-                    }
-                } header: {
-                    Text("Segundo plano")
-                }
-
-                Section {
                     Toggle("Notificações nativas", isOn: $nativeNotifs)
                         .onChange(of: nativeNotifs) { _, on in
                             Settings.nativeNotificationsEnabled = on
@@ -216,14 +143,14 @@ struct SetupView: View {
                                 notifPoller.stop()
                             }
                         }
-                    Text("Desligado (recomendado): você recebe notificações em tempo real só pelo PWA. Ligado: o app nativo também busca o histórico e re-dispara como notificação local — útil só se você não usa o PWA na tela de início.")
+                    Text("Recebe as notificações do carro direto neste app. Pode deixar ligado — com a conta paga o push é confiável e não interrompe.")
                         .font(.caption).foregroundStyle(.secondary)
                 } header: {
                     Text("Notificações")
                 }
 
                 Section("Como funciona") {
-                    Text("Esse app é o PWA inteiro dentro de um wrapper nativo. Pra reabrir essas configurações: pressione e segure com 3 dedos por 1 segundo em qualquer parte da tela.\n\nA Live Activity é controlada direto pelo Dash → 'Recarga em andamento'. Auto-start quando o carro começa a carregar e o app está aberto.")
+                    Text("Esse app é o PWA inteiro dentro de um wrapper nativo. Pra reabrir essas configurações: pressione e segure com 3 dedos por 1 segundo em qualquer parte da tela.\n\nAs Live Activities (recarga e pré-climatização) são iniciadas e atualizadas pelo servidor via push — aparecem mesmo com o app fechado.")
                         .font(.caption)
                     if manager.currentActivity != nil {
                         HStack {

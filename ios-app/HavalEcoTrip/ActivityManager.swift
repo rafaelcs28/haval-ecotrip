@@ -93,7 +93,6 @@ final class ActivityManager: ObservableObject {
     }
 
     func stop() async {
-        ChargingKeepAlive.shared.chargingDidStop()
         stopPolling()
         guard let activity = currentActivity else { return }
         let final = ChargeActivityAttributes.ContentState(

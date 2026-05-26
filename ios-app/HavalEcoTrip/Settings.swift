@@ -67,30 +67,4 @@ enum Settings {
         get { defaults.bool(forKey: nativeNotifsKey) }   // ausente = false = OFF
         set { defaults.set(newValue, forKey: nativeNotifsKey) }
     }
-
-    // ── Keep-alive em background ──────────────────────────────────────────────
-
-    /// Comportamento do áudio silencioso que mantém o app vivo em background
-    /// para atualizar a Live Activity em tempo real (~30s).
-    enum KeepAliveMode: String, CaseIterable {
-        case off           = "off"
-        case whileCharging = "whileCharging"
-        case always        = "always"
-
-        var label: String {
-            switch self {
-            case .off:           return "Desativado"
-            case .whileCharging: return "Enquanto carrega"
-            case .always:        return "Sempre"
-            }
-        }
-    }
-
-    private static let keepAliveModeKey = "keep_alive_mode"
-
-    /// Padrão: whileCharging — ativo apenas durante sessão de recarga.
-    static var keepAliveMode: KeepAliveMode {
-        get { KeepAliveMode(rawValue: defaults.string(forKey: keepAliveModeKey) ?? "") ?? .whileCharging }
-        set { defaults.set(newValue.rawValue, forKey: keepAliveModeKey) }
-    }
 }

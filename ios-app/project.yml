@@ -23,6 +23,10 @@ targets:
     entitlements:
       path: HavalEcoTrip/HavalEcoTrip.entitlements
       properties:
+        # APNs (Live Activity push-to-start + notificações). development = sandbox,
+        # casa com build de desenvolvimento via Xcode. xcodegen REGENERA este
+        # arquivo a partir daqui — não editar o .entitlements direto.
+        aps-environment: development
         com.apple.security.application-groups:
           - group.br.com.consorciolimpagyn.havalecotrip
     sources:
@@ -45,16 +49,13 @@ targets:
           UIApplicationSupportsMultipleScenes: false
         ITSAppUsesNonExemptEncryption: false
         # IMPORTANTE: xcodegen REGENERA o Info.plist do zero a cada `generate`,
-        # apagando qualquer chave não listada aqui. Por isso localização e
-        # UIBackgroundModes precisam ficar NESTE arquivo (antes ficavam só no
-        # Info.plist e sumiam no build, deixando o app sem permissão/background).
-        NSLocationWhenInUseUsageDescription: "Usado apenas durante sessões de recarga para manter a Live Activity atualizada em segundo plano. A localização não é armazenada nem compartilhada."
-        NSLocationAlwaysAndWhenInUseUsageDescription: "Usado apenas durante sessões de recarga para manter a Live Activity atualizada em segundo plano. A localização não é armazenada nem compartilhada."
+        # apagando qualquer chave não listada aqui.
+        # Com APNs (conta paga) as Live Activities são dirigidas por push — não há
+        # mais keep-alive de localização/áudio. Mantemos só fetch/processing p/ BGTask.
         UIBackgroundModes:
-          - audio
           - fetch
-          - location
           - processing
+          - remote-notification
         # Quick Actions (3D/Haptic Touch no ícone do app). 4 atalhos: travar,
         # destravar, ligar motor, desligar motor. AppDelegate captura o
         # shortcut e dispara o action via URL scheme havalecotrip://action/<name>.

@@ -37,10 +37,6 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
-	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>Usado apenas durante sessões de recarga para manter a Live Activity atualizada em segundo plano. A localização não é armazenada nem compartilhada.</string>
-	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Usado apenas durante sessões de recarga para manter a Live Activity atualizada em segundo plano. A localização não é armazenada nem compartilhada.</string>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
 	<key>NSSupportsLiveActivitiesFrequentUpdates</key>
@@ -107,10 +103,9 @@
 	</array>
 	<key>UIBackgroundModes</key>
 	<array>
-		<string>audio</string>
 		<string>fetch</string>
-		<string>location</string>
 		<string>processing</string>
+		<string>remote-notification</string>
 	</array>
 	<key>UILaunchScreen</key>
 	<dict/>
