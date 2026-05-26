@@ -3793,7 +3793,7 @@ window._onEspResult = function(data) {
     _setPill('dc-pill-onepedal', op == null ? '--' : op === 1 ? 'ON' : 'OFF', op == null ? '' : op === 1 ? 'known hi' : 'known');
     // Pill: ESP
     const espOn = s.esp_enable !== 0;
-    _setPill('dc-pill-esp', s.esp_enable == null ? '--' : espOn ? 'ON' : 'OFF', s.esp_enable == null ? '' : espOn ? 'known' : 'known warn');
+    _setPill('dc-pill-esp', s.esp_enable == null ? '--' : espOn ? 'ON' : 'OFF', s.esp_enable == null ? '' : espOn ? 'known hi' : 'known warn');
   }
 
   function toggleDriveControls() {
