@@ -1566,6 +1566,10 @@ function render(s, kpData) {
     chgDetail.classList.remove('show');
   }
 
+  // Enquanto carregando: oculta Condução e as linhas de status (menos relevantes)
+  document.getElementById('hc-drive-card').style.display  = charging ? 'none' : '';
+  document.querySelector('.status-lines').style.display    = charging ? 'none' : '';
+
   // ── SOC (card especial quando carregando)
   const soc = s.soc_pct != null ? +s.soc_pct : null;
   document.getElementById('hc-soc').textContent = soc != null ? Math.round(soc) : '--';
