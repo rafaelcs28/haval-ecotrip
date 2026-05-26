@@ -19,7 +19,6 @@ import UIKit
 final class ChargingKeepAlive {
     static let shared = ChargingKeepAlive()
     private init() {
-        // Observa interrupções de áudio (chamada, outro app) para reiniciar.
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(handleAudioInterruption(_:)),
@@ -27,10 +26,9 @@ final class ChargingKeepAlive {
             object: nil)
     }
 
-    private var engine: AVAudioEngine?
-    private var sourceNode: AVAudioSourceNode?
+    private var player: AVAudioPlayer?
     private var pollTimer: Timer?
-    private var wantsBackground = false   // intenção — reinicia após interrupção
+    private var wantsBackground = false
 
     // ── Hooks chamados pelo ContentView / ActivityManager ─────────────────────
 
@@ -54,56 +52,81 @@ final class ChargingKeepAlive {
         }
     }
 
-    // ── Engine de áudio ───────────────────────────────────────────────────────
+    // ── AVAudioPlayer com tom 18kHz ───────────────────────────────────────────
+    // AVAudioPlayer é mais confiável que AVAudioEngine para background keepalive.
+    // 18kHz está acima da faixa audível para a maioria dos adultos; o iOS
+    // reconhece como sinal real e mantém a sessão ativa.
 
     private func startAudio() {
-        // Não recria se já está rodando.
-        if let eng = engine, eng.isRunning { return }
+        if let p = player, p.isPlaying { return }
 
-        // Para qualquer instância anterior sem limpar o timer.
-        engine?.stop()
-        engine = nil
-        sourceNode = nil
+        player?.stop()
+        player = nil
 
         let session = AVAudioSession.sharedInstance()
         do {
             try session.setCategory(.playback, options: [.mixWithOthers])
             try session.setActive(true)
         } catch {
-            print("[keepalive] AVAudioSession falhou: \(error) — sem keep-alive")
+            print("[keepalive] AVAudioSession falhou: \(error)")
             return
         }
 
-        // Ruído sub-threshold (< -80 dBFS): inaudível mas evita que o iOS
-        // detecte silêncio puro e suspenda a sessão em background.
-        let fmt = AVAudioFormat(standardFormatWithSampleRate: 44100, channels: 1)!
-        let node = AVAudioSourceNode(format: fmt) { _, _, frameCount, audioBufferList in
-            let ptr = UnsafeMutableAudioBufferListPointer(audioBufferList)
-            for buf in ptr {
-                guard let data = buf.mData?.assumingMemoryBound(to: Float.self) else { continue }
-                for i in 0..<Int(frameCount) {
-                    data[i] = Float.random(in: -0.0001...0.0001)
-                }
-            }
-            return noErr
-        }
-        let eng = AVAudioEngine()
-        eng.attach(node)
-        eng.connect(node, to: eng.mainMixerNode, format: fmt)
-
         do {
-            try eng.start()
+            let p = try AVAudioPlayer(data: makeToneWAV())
+            p.numberOfLoops = -1   // loop infinito
+            p.volume = 0.01        // quase inaudível mas não zero
+            p.prepareToPlay()
+            guard p.play() else {
+                print("[keepalive] AVAudioPlayer.play() retornou false")
+                return
+            }
+            player = p
+            print("[keepalive] áudio iniciado (modo: \(Settings.keepAliveMode.rawValue))")
         } catch {
-            print("[keepalive] AVAudioEngine.start falhou: \(error) — sem keep-alive")
-            return   // NÃO seta engine — permite retry na próxima interrupção
+            print("[keepalive] AVAudioPlayer falhou: \(error)")
+            return
         }
 
-        sourceNode = node
-        engine = eng
-        print("[keepalive] áudio iniciado (modo: \(Settings.keepAliveMode.rawValue))")
-
-        // Inicia timer só se ainda não existe.
         if pollTimer == nil { startTimer() }
+    }
+
+    /// Gera 100ms de tom senoidal a 18kHz em formato WAV (16-bit, mono, 44100 Hz).
+    private func makeToneWAV() -> Data {
+        let sampleRate: Int   = 44100
+        let frequency:  Float = 18000     // 18 kHz — acima da faixa audível humana
+        let amplitude:  Float = 0.05      // ~-26 dBFS
+        let numSamples        = sampleRate / 10   // 100ms
+        let dataSize          = numSamples * 2    // 16-bit PCM
+
+        var wav = Data(capacity: 44 + dataSize)
+        func le32(_ v: UInt32) -> Data { var x = v.littleEndian; return Data(bytes: &x, count: 4) }
+        func le16(_ v: UInt16) -> Data { var x = v.littleEndian; return Data(bytes: &x, count: 2) }
+
+        wav.append("RIFF".data(using: .ascii)!)
+        wav.append(le32(UInt32(36 + dataSize)))
+        wav.append("WAVE".data(using: .ascii)!)
+        wav.append("fmt ".data(using: .ascii)!)
+        wav.append(le32(16))
+        wav.append(le16(1))                          // PCM
+        wav.append(le16(1))                          // mono
+        wav.append(le32(UInt32(sampleRate)))
+        wav.append(le32(UInt32(sampleRate * 2)))     // byte rate
+        wav.append(le16(2))                          // block align
+        wav.append(le16(16))                         // bits per sample
+        wav.append("data".data(using: .ascii)!)
+        wav.append(le32(UInt32(dataSize)))
+
+        var phase: Float = 0
+        let step = frequency / Float(sampleRate)
+        for _ in 0..<numSamples {
+            let sample = Int16(sin(2 * .pi * phase) * amplitude * Float(Int16.max))
+            var s = sample.littleEndian
+            wav.append(Data(bytes: &s, count: 2))
+            phase += step
+            if phase >= 1 { phase -= 1 }
+        }
+        return wav
     }
 
     private func startTimer() {
@@ -117,9 +140,8 @@ final class ChargingKeepAlive {
     private func stopBackground() {
         pollTimer?.invalidate()
         pollTimer = nil
-        engine?.stop()
-        engine = nil
-        sourceNode = nil
+        player?.stop()
+        player = nil
         try? AVAudioSession.sharedInstance().setActive(false,
                                                        options: .notifyOthersOnDeactivation)
         print("[keepalive] background parado")
@@ -171,10 +193,9 @@ final class ChargingKeepAlive {
             }
         }
 
-        // Verifica se o engine ainda está rodando — iOS pode pará-lo
-        // silenciosamente após a primeira execução com áudio inaudível.
-        if let eng = engine, !eng.isRunning {
-            print("[keepalive] engine parou — reiniciando")
+        // Verifica se o player ainda está tocando e reinicia se necessário.
+        if let p = player, !p.isPlaying {
+            print("[keepalive] player parou — reiniciando")
             startAudio()
         }
 
