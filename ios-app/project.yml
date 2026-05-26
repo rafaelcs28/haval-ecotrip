@@ -45,6 +45,7 @@ targets:
         # BG refresh: iOS exige declarar tanto o capability quanto a lista
         # de identifiers permitidos pra BGTaskScheduler.
         UIBackgroundModes:
+          - audio
           - fetch
           - processing
         # Quick Actions (3D/Haptic Touch no ícone do app). 4 atalhos: travar,

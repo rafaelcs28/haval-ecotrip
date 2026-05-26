@@ -17,6 +17,7 @@
 import AVFoundation
 import ActivityKit
 
+@MainActor
 final class ChargingKeepAlive {
     static let shared = ChargingKeepAlive()
     private init() {}
@@ -25,15 +26,17 @@ final class ChargingKeepAlive {
     private var sourceNode: AVAudioSourceNode?
     private var pollTimer: Timer?
 
-    // ── Hooks chamados pelo ContentView ───────────────────────────────────────
+    // ── Hooks chamados pelo ContentView / ActivityManager ─────────────────────
 
     /// App foi para background. Passa se há Live Activity ativa no momento.
     func appDidBackground(hasActiveCharging: Bool) {
         switch Settings.keepAliveMode {
-        case .off:          break
-        case .whileCharging where hasActiveCharging: startBackground()
-        case .whileCharging: break
-        case .always:       startBackground()
+        case .off:
+            break
+        case .whileCharging:
+            if hasActiveCharging { startBackground() }
+        case .always:
+            startBackground()
         }
     }
 
@@ -59,7 +62,7 @@ final class ChargingKeepAlive {
 
         // AVAudioSourceNode gerando zeros — silêncio sem arquivo de áudio.
         let fmt = AVAudioFormat(standardFormatWithSampleRate: 44100, channels: 1)!
-        let node = AVAudioSourceNode(format: fmt) { _, _, frameCount, audioBufferList in
+        let node = AVAudioSourceNode(format: fmt) { _, _, _, audioBufferList in
             let ptr = UnsafeMutableAudioBufferListPointer(audioBufferList)
             for buf in ptr { memset(buf.mData, 0, Int(buf.mDataByteSize)) }
             return noErr
@@ -72,9 +75,10 @@ final class ChargingKeepAlive {
         sourceNode = node
         engine    = eng
 
-        // Polling a cada 30s para atualizar a Live Activity em background.
-        let timer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
-            Task { await self?.pollAndUpdateLA() }
+        // Timer em .common mode para disparar mesmo com scroll ativo.
+        // Usa Timer() + RunLoop.add (não scheduledTimer) para controlar o mode.
+        let timer = Timer(timeInterval: 30, repeats: true) { [weak self] _ in
+            Task { @MainActor in await self?.pollAndUpdateLA() }
         }
         RunLoop.main.add(timer, forMode: .common)
         pollTimer = timer
@@ -96,8 +100,8 @@ final class ChargingKeepAlive {
     // ── Polling de estado ─────────────────────────────────────────────────────
 
     private func pollAndUpdateLA() async {
-        let activities = await MainActor.run {
-            Activity<ChargeActivityAttributes>.activities.filter { $0.activityState == .active }
+        let activities = Activity<ChargeActivityAttributes>.activities.filter {
+            $0.activityState == .active
         }
         guard let activity = activities.first else { return }
         guard let url = URL(string: Settings.bridgeURL + "/api/state") else { return }
