@@ -232,7 +232,7 @@
     </div>
     <div class="settings-item muted" onclick="openSub('backup')">
       <div class="icon-box">💾</div>
-      <div class="info"><div class="label">Backup & Dados</div><div class="sub">Exportar · restaurar · limpar</div></div>
+      <div class="info"><div class="label">Backup & Dados</div><div class="sub">Exportar · restaurar · limpar cache e histórico</div></div>
       <span class="chevron">›</span>
     </div>
   </div>
@@ -251,24 +251,6 @@
     </div>
   </div>
 
-  <!-- Grupo 4: Dados locais -->
-  <div class="settings-group">
-    <div class="settings-item red" onclick="confirmClearPwaCache()">
-      <div class="icon-box">🧹</div>
-      <div class="info"><div class="label">Limpar cache PWA</div><div class="sub">Service Worker + caches do browser · recarrega</div></div>
-      <span class="chevron">›</span>
-    </div>
-    <div class="settings-item yellow" onclick="clearDriveHistory()">
-      <div class="icon-box">🗂</div>
-      <div class="info"><div class="label">Limpar histórico de modos</div><div class="sub">Apaga histórico de modos de condução</div></div>
-      <span class="chevron">›</span>
-    </div>
-    <div class="settings-item red" onclick="confirmClearEventLogs()">
-      <div class="icon-box">🗑</div>
-      <div class="info"><div class="label">Limpar logs de eventos</div><div class="sub">Apaga todo o histórico de eventos do servidor</div></div>
-      <span class="chevron">›</span>
-    </div>
-  </div>
 </div>
 
 <!-- ── Subviews ── -->
@@ -549,6 +531,26 @@
         <div style="font-size:13px;font-weight:600;margin-bottom:4px">Limpar dados locais</div>
         <div style="font-size:11px;color:var(--muted);margin-bottom:10px">Apaga listas cacheadas (viagens, recargas, eventos), telemetria do IndexedDB, tiles de mapa e cache do Service Worker. Os dados do servidor <strong style="color:var(--green)">não são afetados</strong> — tudo será baixado de novo na próxima abertura.</div>
         <button class="btn secondary" onclick="clearLocalCache()">🧹 Limpar cache local</button>
+      </div>
+    </div>
+    <div class="field-group">
+      <div class="group-ti">Limpar dados do servidor</div>
+      <div class="field" style="display:flex;flex-direction:column;gap:10px">
+        <div>
+          <div style="font-size:13px;font-weight:600;margin-bottom:2px">Cache PWA</div>
+          <div style="font-size:11px;color:var(--muted);margin-bottom:8px">Service Worker + caches do browser. A página recarrega.</div>
+          <button class="btn secondary" onclick="confirmClearPwaCache()">🧹 Limpar cache PWA</button>
+        </div>
+        <div>
+          <div style="font-size:13px;font-weight:600;margin-bottom:2px">Histórico de modos de condução</div>
+          <div style="font-size:11px;color:var(--muted);margin-bottom:8px">Apaga os segmentos gravados de modo HEV/EV/Prior.EV.</div>
+          <button class="btn secondary" style="color:var(--yellow);border-color:rgba(234,179,8,.3)" onclick="clearDriveHistory()">🗂 Limpar histórico de modos</button>
+        </div>
+        <div>
+          <div style="font-size:13px;font-weight:600;margin-bottom:2px">Logs de eventos</div>
+          <div style="font-size:11px;color:var(--muted);margin-bottom:8px">Apaga todo o histórico de eventos do servidor. Irreversível.</div>
+          <button class="btn secondary" style="color:var(--red,#f87171);border-color:rgba(248,113,113,.3)" onclick="confirmClearEventLogs()">🗑 Limpar logs de eventos</button>
+        </div>
       </div>
     </div>
   </div>
