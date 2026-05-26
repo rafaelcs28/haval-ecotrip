@@ -16,6 +16,19 @@ struct ContentView: View {
     @StateObject private var shortcuts = ShortcutManager.shared
     @Environment(\.scenePhase) private var scenePhase
     @State private var showSetup = false   // sheet por cima da WebView
+    @State private var preclimatTask: Task<Void, Never>? = nil
+
+    // Loop de foreground que mantém a Live Activity da pré-climatização em dia.
+    // (Em background quem cobre é o timer do ChargingKeepAlive, best-effort.)
+    private func startPreclimatLoop() {
+        preclimatTask?.cancel()
+        preclimatTask = Task {
+            while !Task.isCancelled {
+                await PreClimatManager.shared.tick()
+                try? await Task.sleep(nanoseconds: 60 * 1_000_000_000)
+            }
+        }
+    }
 
     private var bridgeURL: URL? {
         URL(string: Settings.bridgeURL)
@@ -64,6 +77,7 @@ struct ContentView: View {
                 notifPoller.start()
             }
             ChargingKeepAlive.shared.requestPermissionIfNeeded()
+            startPreclimatLoop()
         }
         // URL scheme havalecotrip://open — disparado pelo SW do PWA standalone
         // quando user toca em notif Web Push.
@@ -83,8 +97,10 @@ struct ContentView: View {
                 if Settings.nativeNotificationsEnabled { notifPoller.start() }
                 ChargingKeepAlive.shared.appDidForeground()
                 ChargingKeepAlive.shared.requestPermissionIfNeeded()
+                startPreclimatLoop()
             } else if newPhase == .background {
                 notifPoller.stop()
+                preclimatTask?.cancel()
                 BackgroundRefresh.schedule()
                 ChargingKeepAlive.shared.appDidBackground(
                     hasActiveCharging: manager.currentActivity != nil

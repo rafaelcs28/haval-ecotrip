@@ -30,6 +30,8 @@ targets:
       # ChargeActivityAttributes precisa estar nos DOIS targets — app referencia
       # o tipo, widget também. Sem duplicação física: mesmo arquivo, duas memberships.
       - path: HavalEcoTripWidget/ChargeActivityAttributes.swift
+      # Idem para a pré-climatização: o PreClimatManager (app) usa o tipo.
+      - path: HavalEcoTripWidget/PreClimatActivityAttributes.swift
     info:
       path: HavalEcoTrip/Info.plist
       properties:

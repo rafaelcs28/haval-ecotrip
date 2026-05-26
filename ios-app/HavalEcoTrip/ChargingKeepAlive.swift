@@ -45,6 +45,12 @@ final class ChargingKeepAlive: NSObject, ObservableObject {
     // ── Hooks chamados pelo ContentView / ActivityManager ─────────────────────
 
     func appDidBackground(hasActiveCharging: Bool) {
+        // Se há Live Activity de pré-climatização ativa, mantém o app vivo pra
+        // continuar atualizando-a em background (best-effort), independente do modo.
+        let preclimatActive = !Activity<PreClimatActivityAttributes>.activities
+            .filter { $0.activityState == .active }.isEmpty
+        if preclimatActive { startBackground(); return }
+
         switch Settings.keepAliveMode {
         case .off:           break
         case .whileCharging: if hasActiveCharging { startBackground() }
@@ -157,6 +163,10 @@ final class ChargingKeepAlive: NSObject, ObservableObject {
         defer {
             if bgTask != .invalid { UIApplication.shared.endBackgroundTask(bgTask) }
         }
+
+        // Best-effort: atualiza também a Live Activity da pré-climatização
+        // enquanto o keep-alive estiver vivo em background.
+        await PreClimatManager.shared.tick()
 
         let activities = Activity<ChargeActivityAttributes>.activities.filter {
             $0.activityState == .active

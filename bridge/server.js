@@ -323,6 +323,21 @@ function savePreclimat() {
   try { fs.writeFileSync(PRECLIMAT_FILE, JSON.stringify(preclimat, null, 2)); } catch (_) {}
 }
 
+// Status ao vivo da pré-climatização — lido pelo app iOS (GET /api/preclimat)
+// pra dirigir a Live Activity local. phase: idle|scheduled|starting|engine_on|
+// cooling|restoring|ended|failed. `endsAtMs` alimenta a contagem regressiva.
+let preclimatStatus = { phase: 'idle', detail: '', endsAtMs: 0, temp: 0, fan: 0, updatedAtMs: 0 };
+function _setPreclimatStatus(phase, detail, extra = {}) {
+  preclimatStatus = {
+    phase, detail,
+    endsAtMs: extra.endsAtMs != null ? extra.endsAtMs : preclimatStatus.endsAtMs,
+    temp: extra.temp != null ? extra.temp : preclimat.temp,
+    fan:  extra.fan  != null ? extra.fan  : preclimat.fan,
+    updatedAtMs: Date.now(),
+  };
+  console.log(`[preclimat] status → ${phase}: ${detail}`);
+}
+
 // ── Resumo diário ─────────────────────────────────────────────────────────────
 // Estado operacional — não é preferência, não persiste em notif_prefs.json.
 let daily_summary_last_date = '';
@@ -396,6 +411,7 @@ setInterval(() => {
 async function firePreClimat() {
   const { temp, fan, duration } = preclimat;
   console.log(`[preclimat] disparando — temp=${temp}°C fan=${fan}`);
+  _setPreclimatStatus('starting', 'Ligando o motor…', { temp, fan, endsAtMs: 0 });
 
   // Passo 1: ligar motor via HA (mesmo mecanismo do botão do dashboard)
   if (HA_URL && HA_TOKEN) {
@@ -410,6 +426,7 @@ async function firePreClimat() {
       console.log('[preclimat] comando engine_on enviado via HA');
     } catch (e) {
       console.error(`[preclimat] falha ao ligar motor: ${e.message}`);
+      _setPreclimatStatus('failed', 'Não foi possível ligar o motor', { endsAtMs: Date.now() + 5 * 60_000 });
       _sendPreclimatPush('⏰ Pré-climatização falhou', 'Não foi possível ligar o motor.');
       return;
     }
@@ -430,11 +447,13 @@ async function firePreClimat() {
 
   if (!engineOk) {
     console.warn('[preclimat] timeout esperando engine_state=1');
+    _setPreclimatStatus('failed', 'Motor não confirmou em 2 min', { endsAtMs: Date.now() + 5 * 60_000 });
     _sendPreclimatPush('⏰ Pré-climatização falhou', 'Motor não confirmou em 2 min.');
     return;
   }
 
   console.log('[preclimat] motor confirmado — enviando HVAC');
+  _setPreclimatStatus('engine_on', 'Motor ligado ✓', { temp, fan, endsAtMs: 0 });
 
   // Captura estado anterior do AC antes de sobrescrever
   const prevFan      = parseInt(state.hvac_fan_speed, 10) || 0;
@@ -449,6 +468,9 @@ async function firePreClimat() {
   mqttClient.publish(`${MQTT_PREFIX}/cmd/hvac/fan_speed`,      fanStr,  { qos: 1, retain: false });
 
   const durStr = duration > 0 ? ` · desliga em ${duration} min` : '';
+  const acEndsAtMs = duration > 0 ? Date.now() + duration * 60_000 : 0;
+  _setPreclimatStatus('cooling', `Climatizando · ${temp.toFixed(0)}° · fan ${fan}/7`,
+    { temp, fan, endsAtMs: acEndsAtMs });
   _sendPreclimatPush('⏰ Pré-climatização ativada',
     `Motor ligado · AC ${temp.toFixed(0)}° · ventilação ${fan}/7${durStr}`);
   console.log(`[preclimat] AC ativado — temp=${temp} fan=${fan} duration=${duration}min (prev: fan=${prevFan} temp=${prevDrvTemp})`);
@@ -457,6 +479,7 @@ async function firePreClimat() {
   if (duration > 0) {
     setTimeout(async () => {
       console.log('[preclimat] timer expirado — restaurando AC e desligando motor');
+      _setPreclimatStatus('restoring', 'Restaurando AC e desligando motor…', { endsAtMs: 0 });
 
       // Restaura temperatura anterior (se havia) antes de desligar o fan
       if (prevDrvTemp  !== null) mqttClient.publish(`${MQTT_PREFIX}/cmd/hvac/driver_temp`,    prevDrvTemp.toFixed(1),  { qos: 1, retain: false });
@@ -478,9 +501,15 @@ async function firePreClimat() {
           console.error(`[preclimat] falha ao desligar motor: ${e.message}`);
         }
       }
+      _setPreclimatStatus('ended', `Encerrada · motor desligado após ${duration} min`,
+        { endsAtMs: Date.now() + 5 * 60_000 });
       _sendPreclimatPush('⏰ Pré-climatização encerrada',
         `AC restaurado · motor desligado após ${duration} min.`);
     }, duration * 60_000);
+  } else {
+    // Sem duração definida: marca como encerrada na hora (LA some em 5 min).
+    _setPreclimatStatus('ended', 'Pré-climatização ativada (sem desligamento automático)',
+      { endsAtMs: Date.now() + 5 * 60_000 });
   }
 }
 
@@ -4671,7 +4700,7 @@ app.post('/api/action/:name', async (req, res) => {
 });
 
 // ── Pré-climatização — GET / POST / DELETE ────────────────────────────────
-app.get('/api/preclimat', requireAuth, (_req, res) => res.json(preclimat));
+app.get('/api/preclimat', requireAuth, (_req, res) => res.json({ ...preclimat, status: preclimatStatus }));
 
 app.post('/api/preclimat', requireAuth, (req, res) => {
   const { enabled, time, recurrence, temp, fan, duration, device_id } = req.body;
