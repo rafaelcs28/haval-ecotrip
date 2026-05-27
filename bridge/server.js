@@ -2302,7 +2302,8 @@ app.use('/api', (req, res, next) => {
       req.path === '/auth/google/login' ||
       req.path === '/auth/passkey/available' ||
       req.path === '/auth/passkey/login/begin' ||
-      req.path === '/auth/passkey/login/finish') return next();
+      req.path === '/auth/passkey/login/finish' ||
+      req.path === '/pair/redeem') return next();   // carro resgata o pareamento sem login (gateado pelo código one-time)
   requireAuth(req, res, next);
 });
 
@@ -4549,6 +4550,52 @@ app.post('/api/la-prefs', (req, res) => {
   notifPrefs[key] = !!value;
   saveNotifPrefs();
   res.json({ ok: true, key, value: notifPrefs[key] });
+});
+
+// ── Pareamento do carro (provisioning) ────────────────────────────────────
+// Celular gera um código curto (one-time, expira). O carro resgata via
+// /api/pair/redeem (SEM login) e recebe a config MQTT — assim ninguém digita
+// broker/senha no carro nem vê as credenciais lá.
+const _pairCodes = new Map();            // code -> { config, expiresAt }
+const PAIR_TTL_MS = 10 * 60_000;
+const _PAIR_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';   // sem I/O/0/1 (ambíguos)
+function _prunePairCodes() { const now = Date.now(); for (const [k, v] of _pairCodes) if (v.expiresAt < now) _pairCodes.delete(k); }
+function _genPairCode() {
+  const buf = require('crypto').randomBytes(6); let c = '';
+  for (let i = 0; i < 6; i++) c += _PAIR_ALPHABET[buf[i] % _PAIR_ALPHABET.length];
+  return c;
+}
+app.post('/api/pair/generate', (_req, res) => {   // autenticado (passa pelo guard /api)
+  _prunePairCodes();
+  const code = _genPairCode();
+  _pairCodes.set(code, {
+    expiresAt: Date.now() + PAIR_TTL_MS,
+    config: {
+      mqtt_host:   MQTT_HOST.replace(/^mqtts?:\/\//, ''),
+      mqtt_port:   MQTT_PORT,
+      mqtt_user:   MQTT_USER,
+      mqtt_pass:   MQTT_PASS,
+      mqtt_prefix: MQTT_PREFIX,
+      mqtt_tls:    MQTT_HOST.startsWith('mqtts://'),
+    },
+  });
+  console.log(`[pair] código gerado (expira em ${PAIR_TTL_MS / 60000} min)`);
+  res.json({ code, expires_in_sec: Math.round(PAIR_TTL_MS / 1000) });
+});
+// SEM auth — gateado pelo código one-time + expiração + rate-limit por IP.
+const _pairRedeemHits = new Map();
+app.post('/api/pair/redeem', (req, res) => {
+  const ip = req.ip || 'unknown', now = Date.now();
+  const hits = (_pairRedeemHits.get(ip) || []).filter(t => now - t < 60_000);
+  if (hits.length >= 10) return res.status(429).json({ error: 'muitas tentativas' });
+  hits.push(now); _pairRedeemHits.set(ip, hits);
+  _prunePairCodes();
+  const code = String((req.body || {}).code || '').toUpperCase().trim();
+  const entry = _pairCodes.get(code);
+  if (!entry) return res.status(404).json({ error: 'código inválido ou expirado' });
+  _pairCodes.delete(code);   // one-time
+  console.log(`[pair] código resgatado por ${ip}`);
+  res.json({ ok: true, config: entry.config });
 });
 
 // PATCH /api/notif/devices/:device_id  { device_name }
