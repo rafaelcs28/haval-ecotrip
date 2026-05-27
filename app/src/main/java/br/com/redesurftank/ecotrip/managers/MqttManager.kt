@@ -539,6 +539,20 @@ class MqttManager private constructor() {
         saveAndApply()
     }
 
+    // Desparear: apaga as credenciais (inclusive a criptografada) e volta ao estado
+    // não-pareado (a tela mostra o campo de código de novo).
+    fun unpair() {
+        paired = false; host = ""; username = ""; password = ""
+        securePrefs?.edit()?.remove("mqtt_password")?.apply()
+        prefs.edit()
+            .putBoolean(SharedPreferencesKeys.MQTT_PAIRED, false)
+            .remove(SharedPreferencesKeys.MQTT_PASSWORD)
+            .putString(SharedPreferencesKeys.MQTT_HOST, "")
+            .putString(SharedPreferencesKeys.MQTT_USERNAME, "")
+            .apply()
+        executor.submit { client?.let { safeDisconnect(it) }; client = null; setStatus(Status.DISCONNECTED) }
+    }
+
     // POST <base>/api/pair/redeem {code} → aplica. onResult chamado no main thread.
     fun pairWithCode(base: String, code: String, onResult: (Boolean, String) -> Unit) {
         executor.submit {
