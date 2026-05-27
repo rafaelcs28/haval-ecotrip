@@ -2005,6 +2005,7 @@ function confirmAction(type) {
   document.getElementById('action-msg').textContent   = conf.msg;
   const btn = document.getElementById('action-confirm');
   btn.textContent = conf.btn;
+  btn.disabled = false;   // reabilita: doAction() deixa disabled=true no sucesso e nunca reseta
   btn.classList.toggle('danger', !!conf.danger);
   _pendingAction = conf;
   document.getElementById('action-modal').classList.add('show');
