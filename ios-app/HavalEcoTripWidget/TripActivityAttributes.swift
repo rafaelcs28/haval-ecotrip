@@ -19,6 +19,11 @@ struct TripActivityAttributes: ActivityAttributes {
         var fuelL:       Double   // combustível usado (L); 0 = viagem 100% elétrica
         var active:      Bool     // false quando a viagem encerra
         var updatedAtMs: Double
+        // Enriquecimento ao vivo (opcionais p/ compat com payloads antigos):
+        var socPct:     Double?   // SOC % atual
+        var rangeKm:    Double?   // autonomia EV restante (km)
+        var tyreMinPsi: Double?   // menor pressão dos 4 pneus (PSI)
+        var tyreAlert:  Bool?     // pneu baixo (<30) ou assimétrico (≥5 PSI)
 
         var isEV: Bool { fuelL <= 0.05 }
     }

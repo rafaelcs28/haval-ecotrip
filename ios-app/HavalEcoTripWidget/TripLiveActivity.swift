@@ -101,6 +101,28 @@ struct TripLockScreenView: View {
                 Spacer()
                 Label(String(format: "%.0f km/h", state.avgSpeedKmh), systemImage: "speedometer").font(.caption).foregroundStyle(.secondary)
             }
+            // Enriquecimento: bateria/autonomia + pneu (glance ao vivo dirigindo)
+            if state.socPct != nil || state.rangeKm != nil || state.tyreAlert == true {
+                HStack(spacing: 12) {
+                    if let soc = state.socPct {
+                        Label("\(Int(soc))%", systemImage: "battery.50")
+                            .font(.caption).foregroundStyle(soc < 15 ? .red : .green)
+                    }
+                    if let rng = state.rangeKm, rng > 0 {
+                        Label("\(Int(rng)) km", systemImage: "bolt.car")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    if state.tyreAlert == true {
+                        Label(state.tyreMinPsi.map { String(format: "%.0f PSI", $0) } ?? "pneu",
+                              systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption.bold()).foregroundStyle(.red)
+                    } else if let psi = state.tyreMinPsi, psi > 0 {
+                        Label(String(format: "%.0f PSI", psi), systemImage: "gauge")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
+            }
         }
         .padding(14)
     }

@@ -322,6 +322,14 @@ const NOTIF_DEFAULTS = {
   soc_full_long:        false,  // SOC > 95% por mais de 24h (saúde da bateria)
   tyre_drop:            false,  // queda de pressão > X PSI durante viagem
   tyre_drop_psi:        4,      // queda mínima para alertar (PSI)
+  // ── Live Activities (masters GLOBAIS, default LIGADO — preserva comportamento atual).
+  // Controlam se cada card ao vivo nasce na tela de bloqueio. via /api/la-prefs.
+  la_charge:            true,
+  la_preclimat:         true,
+  la_trip:              true,
+  la_motor:             true,
+  la_security:          true,
+  preclimat_steps:      true,   // alerta (som) a cada passo da pré-climatização
 };
 let notifPrefs = { ...NOTIF_DEFAULTS };
 try {
@@ -410,13 +418,15 @@ function _setPreclimatStatus(phase, detail, extra = {}) {
   // extra.alert = { title, body }: este passo deve TOCAR (som+vibração).
   // Nativo: o toque vem pelo alert da própria LA (abaixo). PWA: web-push aqui
   // com skipApnsAlert (sem banner nativo duplicado).
-  if (extra.alert) {
-    sendPush(extra.alert.title, extra.alert.body, 'preclimat',
+  // "cada passo" toca som? respeita o toggle preclimat_steps (default ligado).
+  const stepAlert = (notifPrefs.preclimat_steps !== false) ? extra.alert : undefined;
+  if (stepAlert) {
+    sendPush(stepAlert.title, stepAlert.body, 'preclimat',
       { onlyDeviceIds: dev ? [dev] : undefined, skipApnsAlert: true });
   }
-  if (!apnsLive.enabled || !dev) return;
+  if (!apnsLive.enabled || !dev || notifPrefs.la_preclimat === false) return;
   apnsLive.pushUpdate(PRECLIMAT_LA_TYPE, { deviceId: dev }, _preclimatContentState(),
-    { staleDate: preclimatStatus.endsAtMs || undefined, alert: extra.alert })
+    { staleDate: preclimatStatus.endsAtMs || undefined, alert: stepAlert })
     .catch(e => console.warn('[apns] preclimat update falhou:', e.message));
   if (phase === 'ended' || phase === 'failed') {
     setTimeout(() => {
@@ -432,7 +442,7 @@ function _startPreclimatLA(sched, fireMs) {
   preclimatStatus = { phase: 'scheduled', detail: `Agendada para ${sched.time}`,
     endsAtMs: fireMs, temp: sched.temp, fan: sched.fan, updatedAtMs: Date.now() };
   console.log(`[preclimat] LA push-to-start (agendada p/ ${sched.time})`);
-  if (!apnsLive.enabled || !sched.device_id) return;
+  if (!apnsLive.enabled || !sched.device_id || notifPrefs.la_preclimat === false) return;
   // O `alert` é necessário: sem ele o iOS trata o push-to-start como silencioso.
   apnsLive.pushStart(PRECLIMAT_LA_TYPE, sched.device_id, _preclimatAttributes(), _preclimatContentState(),
     { staleDate: fireMs, alert: { title: '⏰ Pré-climatização', body: `Começa às ${sched.time}` } })
@@ -4529,6 +4539,21 @@ app.post('/api/notif/prefs/:device_id', (req, res) => {
   res.json({ ok: true, prefs: getPrefsForDevice(id) });
 });
 
+// ── Live Activities: masters GLOBAIS (nível da instância) ─────────────────────
+const LA_PREF_KEYS = ['la_charge', 'la_preclimat', 'la_trip', 'la_motor', 'la_security', 'preclimat_steps'];
+app.get('/api/la-prefs', (_req, res) => {
+  const out = {};
+  for (const k of LA_PREF_KEYS) out[k] = notifPrefs[k] !== false;   // default ligado
+  res.json(out);
+});
+app.post('/api/la-prefs', (req, res) => {
+  const { key, value } = req.body || {};
+  if (!LA_PREF_KEYS.includes(key)) return res.status(400).json({ error: 'chave inválida' });
+  notifPrefs[key] = !!value;
+  saveNotifPrefs();
+  res.json({ ok: true, key, value: notifPrefs[key] });
+});
+
 // PATCH /api/notif/devices/:device_id  { device_name }
 app.patch('/api/notif/devices/:device_id', (req, res) => {
   const id = req.params.device_id;
@@ -5616,12 +5641,21 @@ let _lastTripSnapshot = null;   // último snapshot não-vazio (p/ estado final 
 function _tripContentState(ct, active) {
   const dist = +ct.distKm || 0;
   const net  = Math.abs(+ct.netKwh || 0);
+  // Enriquecimento ao vivo: SOC, autonomia EV e pneus (glance no bloqueio dirigindo).
+  const tyres = ['fl', 'fr', 'rl', 'rr'].map(p => +state[`tyre_pressure_${p}`] || 0).filter(v => v > 0);
+  const tyreMin = tyres.length ? Math.min(...tyres) : 0;
+  const tyreMax = tyres.length ? Math.max(...tyres) : 0;
   return {
     distKm: dist, netKwh: net,
     effKwh100: dist > 0.5 ? net / dist * 100 : 0,
     timeSec: Math.max(0, Math.round(+ct.timeSec || 0)),
     avgSpeedKmh: +ct.avgSpeedKmh || 0,
     fuelL: +ct.fuelL || 0,
+    socPct:  Math.round(+state.soc_pct || 0),
+    rangeKm: Math.round(+state.range_ev_km || 0),
+    tyreMinPsi: tyreMin,
+    // alerta: pneu baixo (<30 PSI) ou assimetria ≥5 PSI entre os 4 (provável furo)
+    tyreAlert: tyres.length === 4 && (tyreMin < 30 || (tyreMax - tyreMin) >= 5),
     active: !!active,
     updatedAtMs: Date.now(),
   };
@@ -5632,7 +5666,7 @@ function _tripContentState(ct, active) {
 // (era a causa de aparecerem 2 LAs idênticas).
 function handleTripUpdate(ct, isRetained) {
   if (ct) _lastTripSnapshot = ct;   // guarda o último snapshot não-vazio
-  if (!apnsLive.enabled) { _tripActive = !!ct; return; }
+  if (!apnsLive.enabled || notifPrefs.la_trip === false) { _tripActive = !!ct; return; }
   if (ct) {
     const cs = _tripContentState(ct, true);
     if (!_tripActive) {
@@ -5693,7 +5727,7 @@ function markRemoteEngineStart() {
   _remoteEnginePendingTimer = setTimeout(() => { _remoteEnginePending = false; }, 120_000);
 }
 function _startMotorLA() {
-  if (!apnsLive.enabled || _motorActive) return;
+  if (!apnsLive.enabled || _motorActive || notifPrefs.la_motor === false) return;
   _motorActive      = true;
   _motorStartedAtMs = Date.now();
   apnsLive.pushStart(MOTOR_LA_TYPE, '', { carName: 'Haval H6 PHEV' }, _motorContentState(true),
@@ -5763,7 +5797,7 @@ function _evalSecurityAlert() {
   if (!apnsLive.enabled) return;
   const parked = state.engine_state === '0';   // só estacionado (evita falso alarme dirigindo)
   const snap = _securitySnapshot();
-  if (parked && snap.issues.length > 0) {
+  if (parked && snap.issues.length > 0 && notifPrefs.la_security !== false) {
     const cs = _securityContentState(snap, true);
     if (!_securityActive) {
       _securityActive = true;
@@ -5812,7 +5846,7 @@ function handleChargingStateTransition(value, isRetained) {
     // Cria a Live Activity de recarga via push-to-start (app fechado/bloqueado).
     // O alert é necessário pra apresentar a LA; o timer de live update mantém ela
     // atualizada e o fim encerra com sendChargeLiveUpdate(true).
-    if (apnsLive.enabled && !isRetained) {
+    if (apnsLive.enabled && !isRetained && notifPrefs.la_charge !== false) {
       apnsLive.pushStart('ChargeActivityAttributes', '', { carName: 'Haval H6 PHEV' }, _chargeContentState(),
         { staleDate: Date.now() + 3600_000, alert: { title: '⚡ Recarga iniciada', body: 'Acompanhe o progresso na tela bloqueada.' } })
         .catch(e => console.warn('[apns] charge pushStart falhou:', e.message));
