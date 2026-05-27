@@ -8,4 +8,8 @@
 # faltando. Ignora os warnings e mantém o Tink.
 -dontwarn javax.annotation.**
 -dontwarn com.google.errorprone.annotations.**
+# Tink.KeysDownloader referencia Google API client + joda-time (deps opcionais que
+# não usamos no EncryptedSharedPreferences) — ignora os warnings de classe ausente.
+-dontwarn com.google.api.client.**
+-dontwarn org.joda.time.**
 -keep class com.google.crypto.tink.** { *; }
