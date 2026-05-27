@@ -25,7 +25,7 @@ private const val CLIENT_ID = "haval_ecotrip"
 private const val DEFAULT_PUBLISH_INTERVAL_MS           = 20_000
 private const val DEFAULT_PUBLISH_INTERVAL_WIFI_MS      =  5_000
 private const val DEFAULT_PUBLISH_INTERVAL_CELLULAR_MS  = 30_000
-private const val RECONNECT_DELAY_MS = 2_000L   // base; backoff suave por falha (teto 20s)
+// Backoff de reconexão escalonado: 5×1s → 10×2s → depois 5 em 5s (ver reconnectDelayMs).
 private const val MAX_QUEUED_SNAPSHOTS = 50   // ~17 min at 20s interval
 
 class MqttManager private constructor() {
@@ -69,6 +69,7 @@ class MqttManager private constructor() {
 
     private var consecutiveFailures = 0
     val hasRepeatedFailures: Boolean get() = consecutiveFailures >= 3
+    private var reconnectAttempts = 0   // p/ backoff escalonado da reconexão
 
     // Config
     var enabled:                    Boolean = false
@@ -815,6 +816,7 @@ class MqttManager private constructor() {
             c.subscribe("$prefix/cmd/#", 1)
             client = c
             consecutiveFailures = 0
+            reconnectAttempts = 0   // conectou → zera o backoff de reconexão
             lastPublishedChargeLimitPct = -1  // força re-sync com o carro após reconexão
             lastPublishedDriveMode = -1       // idem pro modo de condução
             lastPublishedPowerReserve = -1    // sub-modo HEV
@@ -1201,14 +1203,22 @@ class MqttManager private constructor() {
         }
     }
 
+    // Backoff escalonado: queda breve (satélite/carro) recupera quase na hora;
+    // se o broker estiver fora de vez, espaça pra não martelar.
+    //   tentativas 1–5   → 1s   (recuperação rápida)
+    //   tentativas 6–15  → 2s
+    //   16ª em diante     → 5s
+    private fun reconnectDelayMs(): Long = when {
+        reconnectAttempts <= 5  -> 1_000L
+        reconnectAttempts <= 15 -> 2_000L
+        else                    -> 5_000L
+    }
+
     private fun scheduleReconnect() {
         if (!enabled || isReconnecting.getAndSet(true)) return
         executor.submit {
-            // Reconexão RÁPIDA no caso comum (queda breve de rede/satélite no carro):
-            // 2s na 1ª tentativa, +2s por falha consecutiva, teto 20s (não martela o
-            // broker se ele estiver realmente fora). Antes era fixo 15s → gaps longos.
-            val delay = minOf(RECONNECT_DELAY_MS * (consecutiveFailures + 1), 20_000L)
-            Thread.sleep(delay)
+            reconnectAttempts++
+            Thread.sleep(reconnectDelayMs())
             isReconnecting.set(false)
             if (enabled && host.isNotEmpty()) connectInternal()
         }
