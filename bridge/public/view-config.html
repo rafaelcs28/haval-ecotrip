@@ -446,6 +446,7 @@
       <div class="ng-bd">
         <div style="font-size:10.5px;color:var(--muted);padding:8px 6px 2px;line-height:1.4">Cards ao vivo na tela de bloqueio. Valem pra esta instância (todos os aparelhos).</div>
         <div class="toggle-row" onclick="toggleLa('la_charge', this)"><div class="label">⚡ Recarga<div class="sub">SOC · potência · tempo, ao vivo</div></div><div class="toggle" data-la-key="la_charge"></div></div>
+        <div class="toggle-row" onclick="toggleChargeEnding(this)"><div class="label">↳ Avisar faltando pouco<div class="sub" id="charge-ending-sub">Toca minutos antes do fim</div></div><div class="toggle" data-key="charge_ending"></div></div>
         <div class="toggle-row" onclick="toggleLa('la_preclimat', this)"><div class="label">❄️ Pré-climatização<div class="sub">Contagem regressiva + status</div></div><div class="toggle" data-la-key="la_preclimat"></div></div>
         <div class="toggle-row" onclick="toggleLa('preclimat_steps', this)"><div class="label">↳ Som a cada passo<div class="sub">Toca/vibra em cada etapa da pré-clima</div></div><div class="toggle" data-la-key="preclimat_steps"></div></div>
         <div class="toggle-row" onclick="toggleLa('la_trip', this)"><div class="label">🚗 Viagem ao vivo<div class="sub">Distância · consumo durante a viagem</div></div><div class="toggle" data-la-key="la_trip"></div></div>
@@ -463,7 +464,6 @@
       <div class="ng-bd">
         <div class="toggle-row" onclick="toggleNotif('charge_start', this)"><div class="label">Início da recarga<div class="sub">Push quando conecta</div></div><div class="toggle" data-key="charge_start"></div></div>
         <div class="toggle-row" onclick="toggleNotif('charge_end', this)"><div class="label">Fim da recarga<div class="sub">Quando atinge meta SOC</div></div><div class="toggle" data-key="charge_end"></div></div>
-        <div class="toggle-row" onclick="toggleChargeEnding(this)"><div class="label">Próximo do fim<div class="sub" id="charge-ending-sub">Aviso minutos antes</div></div><div class="toggle" data-key="charge_ending"></div></div>
         <div class="toggle-row" onclick="toggleNotif('charge_live', this)"><div class="label">Notif ao vivo<div class="sub">Lock screen com SOC · potência · tempo, atualiza a cada minuto</div></div><div class="toggle" data-key="charge_live"></div></div>
         <div class="toggle-row" onclick="toggleNotif('charge_slow', this)"><div class="label">Recarga desacelerou<div class="sub">Potência caiu mais de 30% do pico por 5+ min</div></div><div class="toggle" data-key="charge_slow"></div></div>
       </div>
