@@ -556,6 +556,7 @@ async function firePreClimat(sched) {
         body: JSON.stringify({ entity_id: entityId }),
       });
       if (!r.ok) throw new Error(`HA HTTP ${r.status}`);
+      _lastEngineOnCmdMs = Date.now();   // marca: foi comando NOSSO (pré-clima)
       console.log('[preclimat] comando engine_on enviado via HA');
     } catch (e) {
       console.error(`[preclimat] falha ao ligar motor: ${e.message}`);
@@ -5532,6 +5533,9 @@ let _motorStartedAtMs  = 0;
 let _remoteEnginePending = false;   // setado pelo /api/action/engine_on
 let _remoteEnginePendingTimer = null;
 const PRECLIMAT_BUSY_PHASES = ['starting', 'engine_on', 'cooling', 'restoring'];
+// Detecção de AUTO-START (motor ligou sem comando nosso e sem ninguém entrar).
+let _lastEngineOnCmdMs = 0;   // último engine_on comandado por nós (app/pré-clima)
+let _lastDoorOpenMs    = 0;   // última porta aberta (sinal de que alguém entrou)
 
 function _motorContentState(active) {
   return {
@@ -5546,6 +5550,7 @@ function _motorContentState(active) {
 // Chamado quando o app dispara o ligar-motor remoto.
 function markRemoteEngineStart() {
   _remoteEnginePending = true;
+  _lastEngineOnCmdMs = Date.now();   // marca: foi comando NOSSO (não é auto-start)
   clearTimeout(_remoteEnginePendingTimer);
   // Janela de 2 min pra o engine_state='1' confirmar; senão descarta a intenção.
   _remoteEnginePendingTimer = setTimeout(() => { _remoteEnginePending = false; }, 120_000);
@@ -5902,6 +5907,7 @@ function applyGwmEntity(id, value, isRetained = false) {
         const side = field.slice(5);
         const label = DOOR_NAMES[side] || side.toUpperCase();
         if (norm === 'on') {
+          _lastDoorOpenMs = Date.now();
           addEvent('door_open',  `${label} aberta`);
           sendPush('🚪 Porta aberta', label, 'door_open');
         } else {
@@ -6041,6 +6047,18 @@ function applyMqttMessage(key, value, isRetained = false) {
           sendPush('🔑 Motor ligado',  'O veículo foi ligado.', 'engine_on');
           _cancelTrunkForgottenTimer();
           _resetTyreTrip();
+          // AUTO-START: motor ligou SEM comando nosso (>30s) E sem ninguém entrar
+          // (nenhuma porta aberta nos últimos 3 min) E fora de pré-clima ativa.
+          // Distingue "ligou sozinho estacionado" de "ligou pra dirigir" (que abre porta).
+          const _nowEng = Date.now();
+          const _commandedByUs = (_nowEng - _lastEngineOnCmdMs < 30_000)
+            || PRECLIMAT_BUSY_PHASES.includes(preclimatStatus.phase);
+          const _someoneEntered = (_nowEng - _lastDoorOpenMs < 180_000);
+          if (!_commandedByUs && !_someoneEntered) {
+            addEvent('engine_self_start', 'Motor ligou sozinho (sem comando e sem ninguém entrar) — provável auto-start do carro');
+            sendPush('⚠️ Motor ligou sozinho', 'O motor ligou sem comando do app e sem ninguém entrar — provável auto-start do PHEV ou remote start externo.', 'engine_self_start');
+            console.log('[engine] ⚠️ AUTO-START detectado (sem comando nosso, sem porta aberta recente)');
+          }
           // Motor ligado pelo app (fora da pré-clima): inicia a LA de lembrete.
           if (_remoteEnginePending && !PRECLIMAT_BUSY_PHASES.includes(preclimatStatus.phase)) {
             _remoteEnginePending = false;
@@ -6163,6 +6181,7 @@ function applyMqttMessage(key, value, isRetained = false) {
           prevDoorStates[side] = norm;
           const label = DOOR_NAMES[side] || side.toUpperCase();
           if (norm === 'on') {
+            _lastDoorOpenMs = Date.now();
             addEvent('door_open',  `${label} aberta`);
             sendPush('🚪 Porta aberta', label, 'door_open');
           } else {
