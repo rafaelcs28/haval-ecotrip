@@ -19,6 +19,7 @@ enum class CarConstants(val value: String) {
     CAR_BASIC_CUR_JOURNEY_ODOMETER("car.basic.cur_journey_odometer"),
     CAR_BASIC_TOTAL_ODOMETER("car.basic.total_odometer"),
     CAR_BASIC_VEHICLE_SPEED("car.basic.vehicle_speed"),
+    CAR_BASIC_STEERING_WHEEL_ANGLE("car.basic.steering_wheel_angle"),  // ângulo do volante (graus, ±)
     CAR_BASIC_ENGINE_SPEED("car.basic.engine_speed"),
     CAR_BASIC_POWER_MODE("car.basic.power_mode"),
 

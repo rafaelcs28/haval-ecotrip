@@ -71,6 +71,7 @@ private val mainHandler = Handler(Looper.getMainLooper())
 // pra PWA atualizar speed/RPM/power em quase tempo real.
 private val FAST_LANE_KEYS: Set<String> = setOf(
     CarConstants.CAR_BASIC_VEHICLE_SPEED.value,
+    CarConstants.CAR_BASIC_STEERING_WHEEL_ANGLE.value,       // ângulo do volante (gira o volante no PWA)
     CarConstants.CAR_BASIC_ENGINE_SPEED.value,
     CarConstants.CAR_EV_INFO_ENERGY_OUTPUT_PERCENTAGE.value,  // % potência motor
     CarConstants.CAR_EV_INFO_CUR_CHARGE_CURRENT.value,        // recalcula motor_power_kw
@@ -235,6 +236,9 @@ fun ConsumptionScreen() {
                     CarConstants.CAR_BASIC_VEHICLE_SPEED.value -> {
                         mqttManager.latestSpeedKmh = value.trim().toFloatOrNull() ?: 0f
                         tripManager.onDataChanged(key, value)
+                    }
+                    CarConstants.CAR_BASIC_STEERING_WHEEL_ANGLE.value -> {
+                        mqttManager.latestSteeringAngle = value.trim().toFloatOrNull() ?: 0f
                     }
                     CarConstants.CAR_BASIC_INSIDE_TEMP.value -> {
                         mqttManager.latestInsideTemp = value.trim().toFloatOrNull() ?: 0f

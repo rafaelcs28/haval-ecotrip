@@ -976,6 +976,7 @@ const state = {
   gps_ts:           0,   // timestamp ms da última posição recebida
 
   speed_kmh:        0,
+  steering_angle:   0,      // ângulo do volante (graus, ±) — gira o volante no PWA
   gear:             '--',
   inside_temp:      0,
   outside_temp:     0,
@@ -6272,6 +6273,7 @@ function applyMqttMessage(key, value, isRetained = false) {
     }
 
     // Telemetria ao vivo
+    case 'steering_angle': state.steering_angle = num(value); break;
     case 'speed_kmh': {
       const prevSpeed = +state.speed_kmh || 0;
       state.speed_kmh = num(value);
