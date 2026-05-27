@@ -369,7 +369,6 @@ fun SettingsScreen(
                 }
 
                 MqttField("Prefixo de tópico", prefix, KeyboardType.Uri) { prefix = it }
-                }   // fim do if (!pairedState || showMqttManual)
 
                 Spacer(Modifier.height(2.dp))
                 MqttField("URL do Bridge (iPhone PWA)", bridgeUrlStr, KeyboardType.Uri) { bridgeUrlStr = it }
@@ -421,6 +420,7 @@ fun SettingsScreen(
                     color      = TextSecondary,
                     lineHeight = 14.sp,
                 )
+                }   // fim do if (!pairedState || showMqttManual) — esconde broker + bridge quando pareado
 
                 Spacer(Modifier.height(2.dp))
                 Text("Intervalo de envio", fontSize = 13.sp, color = TextSecondary,
