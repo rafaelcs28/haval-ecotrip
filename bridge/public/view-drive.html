@@ -3108,12 +3108,10 @@ function render(s, kpData) {
       routeLine = null;
       _routeLineLen = 0;
     }
+    const _heading = _updateCarHeading(s.gps_lat, s.gps_lng, s.speed_kmh);
     if (marker) marker.setLatLng(pos);
-    else marker = L.marker(pos, { icon: L.divIcon({
-      className: '',
-      html: '<div style="width:20px;height:20px;background:#22c55e;border:3px solid #fff;border-radius:50%;box-shadow:0 0 0 6px rgba(34,197,94,.35),0 0 0 14px rgba(34,197,94,.12),0 2px 8px rgba(0,0,0,.4);"></div>',
-      iconSize: [20,20], iconAnchor: [10,10]
-    }) }).addTo(map);
+    else marker = L.marker(pos, { icon: _carMarkerIcon(_heading) }).addTo(map);
+    _applyCarRotation(marker, _heading);
     // Re-centra só na primeira call OU se o carro andou >50m desde o último centro.
     // Antes recentrava a cada 1s e o setView animado conflitava com o panBy imediato,
     // causando piscada do pin entre centro absoluto e centro da área visível.

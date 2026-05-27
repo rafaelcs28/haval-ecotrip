@@ -22,6 +22,9 @@ final class LiveActivityPush {
         started = true
         observe(ChargeActivityAttributes.self,   type: "ChargeActivityAttributes")
         observe(PreClimatActivityAttributes.self, type: "PreClimatActivityAttributes")
+        observe(TripActivityAttributes.self,      type: "TripActivityAttributes")
+        observe(MotorActivityAttributes.self,     type: "MotorActivityAttributes")
+        observe(SecurityActivityAttributes.self,  type: "SecurityActivityAttributes")
     }
 
     private func observe<T: ActivityAttributes>(_ attr: T.Type, type: String) {

@@ -4786,6 +4786,8 @@ app.post('/api/action/:name', async (req, res) => {
       return res.status(502).json({ error: `HA HTTP ${r.status}` });
     }
     console.log(`[action] ${name} → ${entityId} OK`);
+    // Ligar motor pelo app arma a LA de lembrete (confirma no engine_state='1').
+    if (name === 'engine_on') markRemoteEngineStart();
     res.json({ ok: true });
   } catch (e) {
     console.error(`[action] ${name} erro: ${e.message}`);
@@ -5374,6 +5376,163 @@ function _chargeContentState() {
   };
 }
 
+// ── Live Activity de viagem ao vivo ───────────────────────────────────────
+const TRIP_LA_TYPE = 'TripActivityAttributes';
+let _tripActive = false;
+function _tripContentState(ct, active) {
+  const dist = +ct.distKm || 0;
+  const net  = Math.abs(+ct.netKwh || 0);
+  return {
+    distKm: dist, netKwh: net,
+    effKwh100: dist > 0.5 ? net / dist * 100 : 0,
+    timeSec: Math.max(0, Math.round(+ct.timeSec || 0)),
+    avgSpeedKmh: +ct.avgSpeedKmh || 0,
+    fuelL: +ct.fuelL || 0,
+    active: !!active,
+    updatedAtMs: Date.now(),
+  };
+}
+// Chamado pelo handler de current_trip a cada atualização do snapshot.
+function handleTripUpdate(ct) {
+  if (!apnsLive.enabled) { _tripActive = !!ct; return; }
+  if (ct) {
+    const cs = _tripContentState(ct, true);
+    if (!_tripActive) {
+      _tripActive = true;
+      apnsLive.pushStart(TRIP_LA_TYPE, '', { carName: 'Haval H6 PHEV' }, cs,
+        { staleDate: Date.now() + 6 * 3600_000, alert: { title: '🚗 Viagem iniciada', body: 'Acompanhe na tela bloqueada.' } })
+        .catch(e => console.warn('[apns] trip pushStart falhou:', e.message));
+    } else {
+      apnsLive.pushUpdate(TRIP_LA_TYPE, {}, cs, {}).catch(() => {});
+    }
+  } else if (_tripActive) {
+    // Viagem encerrada — last snapshot vira final (some em ~5 min).
+    _tripActive = false;
+    const last = _tripContentState(state.current_trip || {}, false);
+    apnsLive.pushUpdate(TRIP_LA_TYPE, {}, last, { isFinal: true, dismissalDate: Date.now() + 5 * 60_000 })
+      .catch(e => console.warn('[apns] trip end falhou:', e.message));
+  }
+}
+
+// ── Live Activity de motor ligado remotamente ─────────────────────────────
+// Lembrete de segurança: quando você liga o motor PELO APP (POST /api/action/
+// engine_on), aparece uma LA "Motor ligado há X min · interna 24°" que conta
+// sozinha no device e encerra quando o motor desliga. A pré-climatização liga
+// o motor por outro caminho (HA direto) e tem LA própria, então não cai aqui.
+const MOTOR_LA_TYPE = 'MotorActivityAttributes';
+let _motorActive       = false;
+let _motorStartedAtMs  = 0;
+let _remoteEnginePending = false;   // setado pelo /api/action/engine_on
+let _remoteEnginePendingTimer = null;
+const PRECLIMAT_BUSY_PHASES = ['starting', 'engine_on', 'cooling', 'restoring'];
+
+function _motorContentState(active) {
+  return {
+    startedAtMs: _motorStartedAtMs || Date.now(),
+    cabinTemp:   +state.inside_temp  || 0,
+    outsideTemp: +state.outside_temp || 0,
+    acOn:        state.ac_state === 'on' || (parseInt(state.hvac_fan_speed, 10) || 0) > 0,
+    active:      !!active,
+    updatedAtMs: Date.now(),
+  };
+}
+// Chamado quando o app dispara o ligar-motor remoto.
+function markRemoteEngineStart() {
+  _remoteEnginePending = true;
+  clearTimeout(_remoteEnginePendingTimer);
+  // Janela de 2 min pra o engine_state='1' confirmar; senão descarta a intenção.
+  _remoteEnginePendingTimer = setTimeout(() => { _remoteEnginePending = false; }, 120_000);
+}
+function _startMotorLA() {
+  if (!apnsLive.enabled || _motorActive) return;
+  _motorActive      = true;
+  _motorStartedAtMs = Date.now();
+  apnsLive.pushStart(MOTOR_LA_TYPE, '', { carName: 'Haval H6 PHEV' }, _motorContentState(true),
+    { staleDate: Date.now() + 3 * 3600_000,
+      alert: { title: '🔑 Motor ligado remotamente', body: 'Não esqueça o veículo ligado.' } })
+    .catch(e => console.warn('[apns] motor pushStart falhou:', e.message));
+}
+function _updateMotorLA() {
+  if (!_motorActive || !apnsLive.enabled) return;
+  apnsLive.pushUpdate(MOTOR_LA_TYPE, {}, _motorContentState(true), {}).catch(() => {});
+}
+function _endMotorLA() {
+  if (!_motorActive) return;
+  _motorActive = false;
+  if (!apnsLive.enabled) return;
+  apnsLive.pushUpdate(MOTOR_LA_TYPE, {}, _motorContentState(false),
+    { isFinal: true, dismissalDate: Date.now() + 10_000 })
+    .catch(e => console.warn('[apns] motor end falhou:', e.message));
+}
+
+// ── Live Activity persistente: veículo desprotegido ───────────────────────
+// Fica visível na tela bloqueada enquanto o carro estacionado estiver
+// destrancado e/ou com porta/vidro/teto/porta-malas aberto. Some sozinha
+// quando tudo for fechado/trancado. Suprimida com o motor ligado (dirigindo
+// com vidro aberto é normal).
+const SECURITY_LA_TYPE = 'SecurityActivityAttributes';
+let _securityActive = false;
+
+const _DOOR_LABELS = { fl: 'Porta diant. esq.', fr: 'Porta diant. dir.', rl: 'Porta tras. esq.', rr: 'Porta tras. dir.' };
+const _WIN_LABELS  = { fl: 'Vidro diant. esq.', fr: 'Vidro diant. dir.', rl: 'Vidro tras. esq.', rr: 'Vidro tras. dir.' };
+
+function _securitySnapshot() {
+  // Estado por posição (vista de cima): fl=diant.esq, fr=diant.dir, rl=tras.esq, rr=tras.dir.
+  const door = {};
+  const win  = {};
+  for (const s of ['fl', 'fr', 'rl', 'rr']) {
+    door[s] = state['door_' + s] === 'on';
+    win[s]  = state['window_' + s] === 'on';
+  }
+  const trunkOpen   = state.door_trunk === 'on';
+  const sunroofOpen = state.sunroof === 'on';
+  const unlocked    = state.lock_state === 'on';   // 'on' = destrancado
+  // Resumo nomeando cada item aberto (a LA desenha as posições; isto é o fallback textual).
+  const issues = [];
+  if (unlocked) issues.push('Destrancado');
+  for (const s of ['fl', 'fr', 'rl', 'rr']) if (door[s]) issues.push(_DOOR_LABELS[s]);
+  if (trunkOpen) issues.push('Porta-malas');
+  for (const s of ['fl', 'fr', 'rl', 'rr']) if (win[s]) issues.push(_WIN_LABELS[s]);
+  if (sunroofOpen) issues.push('Teto solar');
+  return { issues, unlocked, door, win, trunkOpen, sunroofOpen };
+}
+function _securityContentState(snap, active) {
+  return {
+    unlocked:    snap.unlocked,
+    doorFL: snap.door.fl, doorFR: snap.door.fr, doorRL: snap.door.rl, doorRR: snap.door.rr,
+    winFL:  snap.win.fl,  winFR:  snap.win.fr,  winRL:  snap.win.rl,  winRR:  snap.win.rr,
+    trunk:       snap.trunkOpen,
+    sunroof:     snap.sunroofOpen,
+    summary:     snap.issues.join(' · ') || 'Tudo seguro',
+    active:      !!active,
+    updatedAtMs: Date.now(),
+  };
+}
+// Reavalia e cria/atualiza/encerra a LA. Chamado após cada transição de
+// lock/door/window/sunroof/trunk e do motor.
+function _evalSecurityAlert() {
+  if (!apnsLive.enabled) return;
+  const parked = state.engine_state === '0';   // só estacionado (evita falso alarme dirigindo)
+  const snap = _securitySnapshot();
+  if (parked && snap.issues.length > 0) {
+    const cs = _securityContentState(snap, true);
+    if (!_securityActive) {
+      _securityActive = true;
+      apnsLive.pushStart(SECURITY_LA_TYPE, '', { carName: 'Haval H6 PHEV' }, cs,
+        { staleDate: Date.now() + 12 * 3600_000,
+          alert: { title: '🔓 Veículo desprotegido', body: snap.issues.join(' · ') } })
+        .catch(e => console.warn('[apns] security pushStart falhou:', e.message));
+    } else {
+      apnsLive.pushUpdate(SECURITY_LA_TYPE, {}, cs, {}).catch(() => {});
+    }
+  } else if (_securityActive) {
+    _securityActive = false;
+    apnsLive.pushUpdate(SECURITY_LA_TYPE, {}, _securityContentState(snap, false),
+      { isFinal: true, dismissalDate: Date.now() + 10_000 })
+      .catch(e => console.warn('[apns] security end falhou:', e.message));
+  }
+}
+
 function handleChargingStateTransition(value, isRetained) {
   const prev = prevChargingState;
   state.charging_state = value;
@@ -5543,7 +5702,8 @@ function sendChargeLiveUpdate(isFinal = false) {
 // O app registra:
 //  - push-to-start token (por TIPO de LA): permite o servidor CRIAR a LA.
 //  - update token (por atividade): permite atualizar/encerrar uma LA específica.
-const LA_TYPES = ['ChargeActivityAttributes', 'PreClimatActivityAttributes'];
+const LA_TYPES = ['ChargeActivityAttributes', 'PreClimatActivityAttributes', 'TripActivityAttributes',
+                  'MotorActivityAttributes', 'SecurityActivityAttributes'];
 
 // push-to-start token (por tipo de Live Activity)
 app.post('/api/activity/pts-token', (req, res) => {
@@ -5764,6 +5924,11 @@ function applyMqttMessage(key, value, isRetained = false) {
           sendPush('🔑 Motor ligado',  'O veículo foi ligado.', 'engine_on');
           _cancelTrunkForgottenTimer();
           _resetTyreTrip();
+          // Motor ligado pelo app (fora da pré-clima): inicia a LA de lembrete.
+          if (_remoteEnginePending && !PRECLIMAT_BUSY_PHASES.includes(preclimatStatus.phase)) {
+            _remoteEnginePending = false;
+            _startMotorLA();
+          }
         } else if (value === '0') {
           addEvent('engine_off', 'Motor desligado');
           sendPush('🔑 Motor desligado', 'O veículo foi desligado.', 'engine_off');
@@ -5771,6 +5936,7 @@ function applyMqttMessage(key, value, isRetained = false) {
           _scheduleLockForgottenAlert();
           _scheduleTrunkForgottenAlert();
           _resetTyreTrip();
+          _endMotorLA();
         } else {
           _cancelWindowForgottenTimer();
           _cancelLockForgottenTimer();
@@ -5778,6 +5944,8 @@ function applyMqttMessage(key, value, isRetained = false) {
           _resetTyreTrip();
         }
       }
+      // Estacionou/ligou → reavalia a LA de "veículo desprotegido".
+      if (!isRetained) _evalSecurityAlert();
       break;
     }
     case 'lock_state': {
@@ -5806,6 +5974,7 @@ function applyMqttMessage(key, value, isRetained = false) {
             _cancelLockForgottenTimer();   // carro foi trancado — cancela alerta
           }
         }
+        _evalSecurityAlert();
       }, HYSTERESIS_MS);
       break;
     }
@@ -5881,6 +6050,7 @@ function applyMqttMessage(key, value, isRetained = false) {
             sendPush('🚪 Porta fechada', label, 'door_close');
           }
         }
+        _evalSecurityAlert();
       }, HYSTERESIS_MS);
       break;
     }
@@ -5908,6 +6078,7 @@ function applyMqttMessage(key, value, isRetained = false) {
             _cancelTrunkForgottenTimer();
           }
         }
+        _evalSecurityAlert();
       }, HYSTERESIS_MS);
       break;
     }
@@ -5930,6 +6101,7 @@ function applyMqttMessage(key, value, isRetained = false) {
           if (norm === 'on') addEvent('sunroof_open',  'Teto solar aberto');
           else               addEvent('sunroof_close', 'Teto solar fechado');
         }
+        _evalSecurityAlert();
       }, HYSTERESIS_MS);
       break;
     }
@@ -5969,6 +6141,7 @@ function applyMqttMessage(key, value, isRetained = false) {
             if (!anyOpen) _cancelWindowForgottenTimer();
           }
         }
+        _evalSecurityAlert();
       }, HYSTERESIS_MS);
       break;
     }
@@ -6035,7 +6208,7 @@ function applyMqttMessage(key, value, isRetained = false) {
       }
       break;
     }
-    case 'inside_temp':       state.inside_temp        = num(value); break;
+    case 'inside_temp':       state.inside_temp        = num(value); _updateMotorLA(); break;
     case 'outside_temp': {
       const t = num(value);
       state.outside_temp = t;
@@ -6457,6 +6630,7 @@ function applyMqttMessage(key, value, isRetained = false) {
           console.error('current_trip JSON inválido:', e.message);
         }
       }
+      handleTripUpdate(state.current_trip);
       break;
     }
 

@@ -152,6 +152,24 @@ struct SetupView: View {
                     } label: {
                         Label("Pré-visualizar · Pré-climatização", systemImage: "snowflake")
                     }
+                    Button {
+                        LivePreview.trip()
+                        isPresented = false
+                    } label: {
+                        Label("Pré-visualizar · Viagem ao vivo", systemImage: "car.fill")
+                    }
+                    Button {
+                        LivePreview.motor()
+                        isPresented = false
+                    } label: {
+                        Label("Pré-visualizar · Motor ligado", systemImage: "key.fill")
+                    }
+                    Button {
+                        LivePreview.security()
+                        isPresented = false
+                    } label: {
+                        Label("Pré-visualizar · Veículo desprotegido", systemImage: "lock.open.trianglebadge.exclamationmark.fill")
+                    }
                     Button(role: .destructive) {
                         LivePreview.stopAll()
                     } label: {

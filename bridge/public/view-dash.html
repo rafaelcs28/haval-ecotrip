@@ -1530,12 +1530,10 @@ function render(s, kpData) {
       setTimeout(() => { try { map.invalidateSize(); } catch (_) {} }, 100);
       setTimeout(() => { try { map.invalidateSize(); } catch (_) {} }, 500);
     }
+    const _heading = _updateCarHeading(s.gps_lat, s.gps_lng, s.speed_kmh);
     if (marker) marker.setLatLng(pos);
-    else marker = L.marker(pos, { icon: L.divIcon({
-      className: '',
-      html: '<div style="width:18px;height:18px;background:#22c55e;border:3px solid #fff;border-radius:50%;box-shadow:0 0 0 6px rgba(34,197,94,.35),0 0 0 14px rgba(34,197,94,.12),0 2px 8px rgba(0,0,0,.4);"></div>',
-      iconSize: [18,18], iconAnchor: [9,9]
-    }) }).addTo(map);
+    else marker = L.marker(pos, { icon: _carMarkerIcon(_heading) }).addTo(map);
+    _applyCarRotation(marker, _heading);
     // Recentra se o carro andou >50m OU se o motor ligou/desligou (muda a
     // altura do sheet e a posição alvo do pin).
     const engOn = s.engine_state === '1' || s.engine_state === 'on';
