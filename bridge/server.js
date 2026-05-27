@@ -390,6 +390,15 @@ function _startPreclimatLA(fireMs) {
     { staleDate: fireMs, alert: { title: '⏰ Pré-climatização', body: `Começa às ${preclimat.time}` } })
     .catch(e => console.warn('[apns] preclimat pushStart falhou:', e.message));
 }
+// Encerra a Live Activity de pré-climatização agora (ao desativar/reagendar).
+function _dismissPreclimatLA() {
+  preclimatStatus = { phase: 'ended', detail: 'Cancelada', temp: 0, fan: 0, endsAtMs: 0, updatedAtMs: Date.now() };
+  if (!apnsLive.enabled || !preclimat.device_id) return;
+  console.log('[preclimat] encerrando LA (desativada/reagendada)');
+  apnsLive.pushUpdate(PRECLIMAT_LA_TYPE, { deviceId: preclimat.device_id }, _preclimatContentState(),
+    { isFinal: true, dismissalDate: Date.now() })
+    .catch(e => console.warn('[apns] preclimat dismiss falhou:', e.message));
+}
 function _preclimatEligibleToday(now) {
   const dow = now.getDay(); // 0=Dom … 6=Sáb
   if (preclimat.recurrence === 'weekdays' && (dow === 0 || dow === 6)) return false;
@@ -4777,7 +4786,10 @@ app.post('/api/preclimat', requireAuth, (req, res) => {
   if (device_id) preclimat.device_id = String(device_id);
   if (time !== undefined) {
     if (!/^\d{2}:\d{2}$/.test(time)) return res.status(400).json({ error: 'time inválido (HH:MM)' });
-    if (time !== preclimat.time) { preclimat.lastFiredDate = ''; preclimat.startedDate = ''; }  // novo horário → pode disparar/criar LA de novo hoje
+    if (time !== preclimat.time) {
+      if (preclimat.startedDate) _dismissPreclimatLA();          // some a LA agendada antiga
+      preclimat.lastFiredDate = ''; preclimat.startedDate = '';  // novo horário → pode disparar/criar LA de novo hoje
+    }
     preclimat.time = time;
   }
   if (recurrence !== undefined) {
@@ -4801,6 +4813,7 @@ app.post('/api/preclimat', requireAuth, (req, res) => {
     preclimat.duration = d;
   }
   if (enabled !== undefined) {
+    if (!enabled && preclimat.enabled) { _dismissPreclimatLA(); preclimat.startedDate = ''; }       // desativou → encerra a LA
     if (!!enabled && !preclimat.enabled) { preclimat.lastFiredDate = ''; preclimat.startedDate = ''; }  // reabilitou → pode disparar/criar LA hoje
     preclimat.enabled = !!enabled;
   }
@@ -5326,6 +5339,18 @@ const GWM_BODY_BINARY = new Set([
  *   - chargeStartTimer (30s pra potência estabilizar) nunca disparava
  *   - _chargeTempSamples ficava sempre vazio → avg_temp_c null nos charges
  */
+// Content-state da Live Activity de recarga (casa com ChargeActivityAttributes.ContentState).
+function _chargeContentState() {
+  return {
+    soc:          +state.soc_pct || 0,
+    powerKw:      +state.charge_power_kw || 0,
+    sessionKwh:   +state.charge_session_kwh || 0,
+    remainingMin: Math.max(0, Math.round(+state.charge_remaining_min || 0)),
+    charging:     state.charging_state === 'Carregando',
+    updatedAtMs:  Date.now(),
+  };
+}
+
 function handleChargingStateTransition(value, isRetained) {
   const prev = prevChargingState;
   state.charging_state = value;
@@ -5353,6 +5378,14 @@ function handleChargingStateTransition(value, isRetained) {
     _chargeSlowAlertSent = false;
     _chargeSlowCheckTs   = 0;
     addEvent('charge_start', `Recarga iniciada · SOC: ${chargeStartSoc.toFixed(0)}%`);
+    // Cria a Live Activity de recarga via push-to-start (app fechado/bloqueado).
+    // O alert é necessário pra apresentar a LA; o timer de live update mantém ela
+    // atualizada e o fim encerra com sendChargeLiveUpdate(true).
+    if (apnsLive.enabled && !isRetained) {
+      apnsLive.pushStart('ChargeActivityAttributes', '', { carName: 'Haval H6 PHEV' }, _chargeContentState(),
+        { staleDate: Date.now() + 3600_000, alert: { title: '⚡ Recarga iniciada', body: 'Acompanhe o progresso na tela bloqueada.' } })
+        .catch(e => console.warn('[apns] charge pushStart falhou:', e.message));
+    }
     if (!isRetained) {
       // Aguarda 30s para a potência estabilizar antes de notificar
       if (chargeStartTimer) clearTimeout(chargeStartTimer);

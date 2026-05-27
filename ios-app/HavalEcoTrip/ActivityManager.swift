@@ -23,28 +23,16 @@ final class ActivityManager: ObservableObject {
     //   (a) Já tem Activity → garante polling ativo e força update imediato
     //       (cobre o caso "iPhone bloqueado por horas, Activity congelada").
     //   (b) Sem Activity → se carro está carregando, inicia.
+    // A LA de recarga agora é CRIADA pelo bridge via push-to-start (mesmo com o
+    // app fechado). O app não cria mais localmente — apenas adota a que existir
+    // (indicador na UI + refresh imediato em foreground). Isso evita LA duplicada.
     func autoStartIfCharging() async {
         guard Settings.isConfigured else { return }
-        // (a) Activity já existe — pode estar congelada. Garante que o polling
-        // está rodando e força 1 update imediato pra trazer dados frescos.
         if let existing = Activity<ChargeActivityAttributes>.activities.first(where: { $0.activityState == .active }) {
             if currentActivity == nil { currentActivity = existing }
             if pollingTask == nil { startPolling() }
             await pollOnce()   // refresh imediato
-            return
         }
-        // (b) Sem Activity — só cria se carro está carregando
-        guard let url = URL(string: Settings.bridgeURL + "/api/state") else { return }
-        var req = URLRequest(url: url)
-        req.timeoutInterval = 4
-        req.addValue("Bearer " + Settings.bridgeToken, forHTTPHeaderField: "Authorization")
-        do {
-            let (data, resp) = try await URLSession.shared.data(for: req)
-            guard (resp as? HTTPURLResponse)?.statusCode == 200,
-                  let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  (json["charging_state"] as? String) == "Carregando" else { return }
-            await start()
-        } catch { /* offline, sem rede etc. — silencia */ }
     }
 
     func start() async {
