@@ -5908,6 +5908,10 @@ function applyGwmEntity(id, value, isRetained = false) {
         const label = DOOR_NAMES[side] || side.toUpperCase();
         if (norm === 'on') {
           _lastDoorOpenMs = Date.now();
+          // Trava de segurança da pré-clima: porta aberta = motorista entrou →
+          // cancela o desligamento remoto (esta via, applyGwmEntity, é a que roda
+          // com o app aberto/HF ligado — faltava o abort aqui).
+          if (_preclimatAutoOffPending()) _abortPreclimatAutoOff('porta aberta');
           addEvent('door_open',  `${label} aberta`);
           sendPush('🚪 Porta aberta', label, 'door_open');
         } else {
