@@ -155,11 +155,11 @@ async function _send(targets, body, pushType = 'liveactivity') {
       if (status === 200) { sent++; }
       else {
         console.warn(`[apns] HTTP ${status} token ${t.token.slice(0,8)}…: ${respBody.slice(0,140)}`);
-        // 410 ExpiredToken | 400 BadDeviceToken | 403 BadEnvironmentKeyInToken (token
-        // de outro ambiente — ex.: sandbox do build dev contra produção do TestFlight).
-        if (status === 410
-            || (status === 400 && /BadDeviceToken|BadCollapseId/i.test(respBody))
-            || (status === 403 && /BadEnvironmentKeyInToken/i.test(respBody))) dead.push(t.token);
+        // Prune só 410 ExpiredToken e 400 BadDeviceToken. NÃO prunar 403
+        // BadEnvironmentKeyInToken: enquanto a Apple não ativa o APNs de produção
+        // (conta nova), tokens de produção VÁLIDOS dão 403 — prunar perderia o token
+        // que precisamos pra notificar quando ativar.
+        if (status === 410 || (status === 400 && /BadDeviceToken|BadCollapseId/i.test(respBody))) dead.push(t.token);
       }
       resolve();
     });
