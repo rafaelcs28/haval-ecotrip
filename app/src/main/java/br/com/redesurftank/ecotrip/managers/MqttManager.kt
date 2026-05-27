@@ -25,7 +25,7 @@ private const val CLIENT_ID = "haval_ecotrip"
 private const val DEFAULT_PUBLISH_INTERVAL_MS           = 20_000
 private const val DEFAULT_PUBLISH_INTERVAL_WIFI_MS      =  5_000
 private const val DEFAULT_PUBLISH_INTERVAL_CELLULAR_MS  = 30_000
-private const val RECONNECT_DELAY_MS = 15_000L
+private const val RECONNECT_DELAY_MS = 2_000L   // base; backoff suave por falha (teto 20s)
 private const val MAX_QUEUED_SNAPSHOTS = 50   // ~17 min at 20s interval
 
 class MqttManager private constructor() {
@@ -795,8 +795,8 @@ class MqttManager private constructor() {
             })
 
             val opts = MqttConnectOptions().apply {
-                connectionTimeout    = 20   // longer timeout for mobile networks
-                keepAliveInterval    = 30
+                connectionTimeout    = 15   // satélite/Starlink tem latência baixa; falha logo se cair
+                keepAliveInterval    = 20   // detecta queda silenciosa em ~30s (1.5×) em vez de 45s
                 isCleanSession       = true
                 isAutomaticReconnect = false
                 if (username.isNotEmpty()) {
@@ -1204,7 +1204,11 @@ class MqttManager private constructor() {
     private fun scheduleReconnect() {
         if (!enabled || isReconnecting.getAndSet(true)) return
         executor.submit {
-            Thread.sleep(RECONNECT_DELAY_MS)
+            // Reconexão RÁPIDA no caso comum (queda breve de rede/satélite no carro):
+            // 2s na 1ª tentativa, +2s por falha consecutiva, teto 20s (não martela o
+            // broker se ele estiver realmente fora). Antes era fixo 15s → gaps longos.
+            val delay = minOf(RECONNECT_DELAY_MS * (consecutiveFailures + 1), 20_000L)
+            Thread.sleep(delay)
             isReconnecting.set(false)
             if (enabled && host.isNotEmpty()) connectInternal()
         }
