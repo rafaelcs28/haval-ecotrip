@@ -99,47 +99,46 @@ struct PreClimatLockScreenView: View {
 
     var body: some View {
         let meta = phaseMeta(state.phase)
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Image(systemName: meta.icon).foregroundStyle(meta.color)
-                Text(meta.title).font(.headline)
+                Text(meta.title).font(.subheadline).bold()
                 Spacer()
-                Text(scheduledTime).font(.caption).foregroundStyle(.secondary)
+                Text(scheduledTime).font(.caption2).foregroundStyle(.secondary)
             }
             if let endsAt = state.endsAt, !state.isFinal {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text(endsAt, style: .timer)
-                        .font(.system(size: 40, weight: .bold, design: .rounded))
+                        .font(.system(size: 30, weight: .bold, design: .rounded))
                         .monospacedDigit().foregroundStyle(meta.color)
                     Text(countdownCaption(state.phase))
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(.caption2).foregroundStyle(.secondary)
                     Spacer()
                 }
                 ProgressView(timerInterval: state.updatedAt...endsAt, countsDown: false)
                     .tint(meta.color).labelsHidden()
             } else {
-                Text(state.detail).font(.title3).bold()
+                Text(state.detail).font(.headline)
             }
-            // Temperaturas do carro em destaque
-            HStack(spacing: 18) {
+            // Interna/Externa + AC/ventilação numa linha só (compacto)
+            HStack(alignment: .bottom, spacing: 16) {
                 tempCell("Interna", state.tempIn, .cyan)
                 tempCell("Externa", state.tempOut, .orange)
                 Spacer()
-            }
-            // AC alvo + ventilação (secundário)
-            HStack {
-                if state.temp > 0 {
-                    Label(String(format: "AC %.0f°", state.temp), systemImage: "snowflake")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                Spacer()
-                if state.fan > 0 {
-                    Label("ventilação \(state.fan)/7", systemImage: "wind")
-                        .font(.caption).foregroundStyle(.secondary)
+                VStack(alignment: .trailing, spacing: 1) {
+                    if state.temp > 0 {
+                        Text(String(format: "AC %.0f°", state.temp))
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                    if state.fan > 0 {
+                        Text("ventilação \(state.fan)/7")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
                 }
             }
         }
-        .padding(14)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
     }
 
     @ViewBuilder
@@ -148,7 +147,7 @@ struct PreClimatLockScreenView: View {
             VStack(alignment: .leading, spacing: 0) {
                 Text(label).font(.caption2).foregroundStyle(.secondary)
                 Text(String(format: "%.0f°", value))
-                    .font(.system(size: 22, weight: .bold, design: .rounded))
+                    .font(.system(size: 18, weight: .bold, design: .rounded))
                     .foregroundStyle(color)
             }
         }
