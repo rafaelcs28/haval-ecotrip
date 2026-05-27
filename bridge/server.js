@@ -592,13 +592,17 @@ async function firePreClimat(sched) {
     { temp, fan, endsAtMs: 0, alert: { title: '🔑 Motor ligado', body: 'Pré-climatização: enviando temperatura e ventilação…' } });
 
   // Captura estado anterior do AC antes de sobrescrever
-  const prevFan      = parseInt(state.hvac_fan_speed, 10) || 0;
+  const prevFan      = Math.max(0, parseInt(state.hvac_fan_speed, 10) || 0);  // -1/off → 0
   const prevDrvTemp  = parseFloat(state.hvac_driver_temp)    || null;
   const prevPassTemp = parseFloat(state.hvac_passenger_temp) || null;
+  const prevAcEnable = state.hvac_ac_enable;   // '0'|'1'|null — pra restaurar no fim
 
-  // Passo 3: enviar temperatura e fan via MQTT
+  // Passo 3: LIGA o A/C (master) + temperatura + fan via MQTT.
+  // ac_enable=1 é ESSENCIAL: sem ele o compressor fica desligado e o fan só sopra
+  // ar ambiente (não climatiza). Por isso o AC "não ligava" no agendamento.
   const fanStr  = fan.toString();
   const tempStr = temp.toFixed(1);
+  mqttClient.publish(`${MQTT_PREFIX}/cmd/hvac/ac_enable`,      '1',     { qos: 1, retain: false });
   mqttClient.publish(`${MQTT_PREFIX}/cmd/hvac/driver_temp`,    tempStr, { qos: 1, retain: false });
   mqttClient.publish(`${MQTT_PREFIX}/cmd/hvac/passenger_temp`, tempStr, { qos: 1, retain: false });
   mqttClient.publish(`${MQTT_PREFIX}/cmd/hvac/fan_speed`,      fanStr,  { qos: 1, retain: false });
@@ -640,6 +644,8 @@ async function firePreClimat(sched) {
       if (prevPassTemp !== null) mqttClient.publish(`${MQTT_PREFIX}/cmd/hvac/passenger_temp`, prevPassTemp.toFixed(1), { qos: 1, retain: false });
       await new Promise(r => setTimeout(r, 1_000));
       mqttClient.publish(`${MQTT_PREFIX}/cmd/hvac/fan_speed`, prevFan.toString(), { qos: 1, retain: false });
+      // Restaura o master do A/C ao estado anterior (desliga se estava desligado).
+      mqttClient.publish(`${MQTT_PREFIX}/cmd/hvac/ac_enable`, prevAcEnable === '1' ? '1' : '0', { qos: 1, retain: false });
       await new Promise(r => setTimeout(r, 3_000));
 
       // Reconfirma a trava após os delays (a porta pode ter aberto nesse meio).
