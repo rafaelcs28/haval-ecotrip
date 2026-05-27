@@ -155,7 +155,11 @@ async function _send(targets, body, pushType = 'liveactivity') {
       if (status === 200) { sent++; }
       else {
         console.warn(`[apns] HTTP ${status} token ${t.token.slice(0,8)}…: ${respBody.slice(0,140)}`);
-        if (status === 410 || (status === 400 && /BadDeviceToken|BadCollapseId/i.test(respBody))) dead.push(t.token);
+        // 410 ExpiredToken | 400 BadDeviceToken | 403 BadEnvironmentKeyInToken (token
+        // de outro ambiente — ex.: sandbox do build dev contra produção do TestFlight).
+        if (status === 410
+            || (status === 400 && /BadDeviceToken|BadCollapseId/i.test(respBody))
+            || (status === 403 && /BadEnvironmentKeyInToken/i.test(respBody))) dead.push(t.token);
       }
       resolve();
     });

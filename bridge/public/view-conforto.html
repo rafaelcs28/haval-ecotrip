@@ -21,18 +21,20 @@
 }
 .ac-power .label { flex: 1; font-size: 13px; font-weight: 700; }
 .ac-power .label .sub { font-size: 10px; color: var(--muted); font-weight: 500; }
-.ac-power .toggle {
+/* Toggle genérico (AC power + ON/OFF de cada agendamento de pré-clima) */
+.toggle {
   width: 50px; height: 28px; border-radius: 14px;
   background: rgba(255,255,255,.08);
   position: relative; cursor: pointer; transition: background .2s;
+  flex: none;
 }
-.ac-power .toggle::after {
+.toggle::after {
   content: ''; position: absolute; top: 3px; left: 3px;
   width: 22px; height: 22px; border-radius: 50%; background: #94a3b8;
   transition: left .2s, background .2s;
 }
-.ac-power .toggle.on { background: rgba(34,197,94,.3); }
-.ac-power .toggle.on::after { left: 25px; background: var(--green); }
+.toggle.on { background: rgba(34,197,94,.3); }
+.toggle.on::after { left: 25px; background: var(--green); }
 
 /* Linha das temperaturas (motorista | SYNC | passageiro) */
 .temp-row {

@@ -4973,31 +4973,34 @@ const HVAC_CONTROLS = {
 // Heartbeat: PWA bate a cada 5s. Se passar 10s sem chamada, o watchdog
 // publica '0' automaticamente — evita ficar travado em HF se o PWA crashar.
 let _hfModeActive = false;
-let _hfLastBeatMs = 0;
-// 15s (antes 10s): PWA bate heartbeat a cada 3s. Margem grande pra cobrir
-// throttle de timer do iOS Safari e variação de rede. Sintoma do timeout
-// curto era Drive "congelar" alguns segundos enquanto HF desligava sozinho.
+// Ref-count POR CLIENTE: HF fica ON enquanto QUALQUER cliente quiser, e só
+// desliga quando todos saem ou expiram. Acaba o flapping (múltiplos clientes
+// brigando pelo estado global, ou o app indo pro background por segundos).
+const _hfClients = new Map();   // clientId -> lastBeatMs
+// 15s: cada cliente bate heartbeat a cada 3s. Margem cobre throttle de timer do
+// iOS e o app indo pro background por poucos segundos (volta sem "congelar").
 const HF_HEARTBEAT_TIMEOUT_MS = 15_000;
 function _publishHfMode(active) {
   if (!mqttClient?.connected) return;
   mqttClient.publish(`${MQTT_PREFIX}/cmd/hf_mode`, active ? '1' : '0', { qos: 1, retain: false });
 }
-setInterval(() => {
-  if (_hfModeActive && Date.now() - _hfLastBeatMs > HF_HEARTBEAT_TIMEOUT_MS) {
-    console.log('[hf_mode] heartbeat expirou — desligando');
-    _hfModeActive = false;
-    _publishHfMode(false);
+function _recomputeHf() {
+  const now = Date.now();
+  for (const [id, ts] of _hfClients) if (now - ts > HF_HEARTBEAT_TIMEOUT_MS) _hfClients.delete(id);
+  const want = _hfClients.size > 0;
+  if (want !== _hfModeActive) {
+    _hfModeActive = want;
+    _publishHfMode(want);
+    console.log(`[hf_mode] ${want ? 'ON' : 'OFF'} (clients=${_hfClients.size})`);
   }
-}, 2000);
+}
+setInterval(_recomputeHf, 2000);
 app.post('/api/hf_mode', (req, res) => {
   const active = req.body?.active === true;
-  _hfLastBeatMs = Date.now();
-  if (active !== _hfModeActive) {
-    _hfModeActive = active;
-    _publishHfMode(active);
-    console.log(`[hf_mode] ${active ? 'ON' : 'OFF'}`);
-  }
-  res.json({ ok: true, active: _hfModeActive });
+  const cid = String(req.body?.client_id || req.ip || 'anon');
+  if (active) _hfClients.set(cid, Date.now()); else _hfClients.delete(cid);
+  _recomputeHf();
+  res.json({ ok: true, active: _hfModeActive, clients: _hfClients.size });
 });
 
 app.post('/api/hvac/:control', (req, res) => {
