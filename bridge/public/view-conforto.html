@@ -787,7 +787,12 @@ function cycleSeatVent(side) {
 
 // ── Pré-climatização (lista de agendamentos) ──────────────────────────────
 let _pcList = [];
+let _pcExpanded = new Set();   // ids dos agendamentos expandidos (padrão: minimizado)
 const PC_REC_LABEL = { once: 'Uma vez', daily: 'Todo dia', weekdays: 'Dias úteis', weekends: 'Fins de semana' };
+function togglePreclimatExpand(id) {
+  if (_pcExpanded.has(id)) _pcExpanded.delete(id); else _pcExpanded.add(id);
+  renderPreclimat();
+}
 
 async function loadPreclimat() {
   if (!LIVE_MODE) { renderPreclimat(); return; }
@@ -812,22 +817,36 @@ function _pcRow(label, color, valueText, minus, plus) {
 }
 
 function _pcCard(s) {
+  const open = _pcExpanded.has(s.id);
+  const summary = `${PC_REC_LABEL[s.recurrence] || s.recurrence} · ${s.temp.toFixed(0)}°C · fan ${s.fan}/7${s.duration > 0 ? ' · ' + s.duration + 'min' : ''}`;
   const rec = ['once','daily','weekdays','weekends'].map(r =>
     `<button class="rec-btn ${s.recurrence===r?'active':''}" onclick="setPreclimatRec('${s.id}','${r}')">${PC_REC_LABEL[r]}</button>`).join('');
-  return `<div class="pc-sched" style="border:1px solid rgba(255,255,255,.08);border-radius:12px;padding:10px 12px;margin-bottom:8px;${s.enabled?'':'opacity:.5'}">
-    <div style="display:flex;align-items:center;justify-content:space-between">
+  const bodyHtml = !open ? '' : `
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-top:1px solid rgba(255,255,255,.06)">
+      <span style="font-size:12px;font-weight:600;color:#cbd5e1">Horário</span>
       <input type="time" value="${s.time}" onchange="savePreclimatSched('${s.id}','time',this.value)"
-        style="background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:8px;color:#f1f5f9;font-size:18px;font-weight:800;padding:5px 10px;-webkit-appearance:none;cursor:pointer">
-      <div style="display:flex;align-items:center;gap:14px">
+        style="background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:8px;color:#f1f5f9;font-size:15px;font-weight:700;padding:5px 10px;-webkit-appearance:none;cursor:pointer">
+    </div>
+    <div style="padding:8px 0 2px"><div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">${rec}</div></div>
+    ${_pcRow('Temperatura','#22c55e', s.temp.toFixed(0)+'°C', _pcStep(`adjustPreclimatTemp('${s.id}',-0.5)`,'−'), _pcStep(`adjustPreclimatTemp('${s.id}',0.5)`,'+'))}
+    ${_pcRow('Ventilação','#22c55e', s.fan+'/7', _pcStep(`adjustPreclimatFan('${s.id}',-1)`,'−'), _pcStep(`adjustPreclimatFan('${s.id}',1)`,'+'))}
+    ${_pcRow('Desligar após','#22c55e', s.duration>0 ? s.duration+' min' : 'Manual', _pcStep(`adjustPreclimatDur('${s.id}',-5)`,'−'), _pcStep(`adjustPreclimatDur('${s.id}',5)`,'+'))}
+    ${_pcRow('Avisar antes','#38bdf8', (s.leadMin||0)+' min', _pcStep(`adjustPreclimatLead('${s.id}',-5)`,'−'), _pcStep(`adjustPreclimatLead('${s.id}',5)`,'+'))}`;
+  return `<div class="pc-sched" style="border:1px solid rgba(255,255,255,.08);border-radius:12px;padding:10px 12px;margin-bottom:8px;${s.enabled?'':'opacity:.5'}">
+    <div onclick="togglePreclimatExpand('${s.id}')" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer">
+      <div style="display:flex;align-items:center;gap:10px;min-width:0">
+        <span style="font-size:12px;color:#64748b;width:12px">${open ? '▾' : '▸'}</span>
+        <div style="min-width:0">
+          <div style="font-size:18px;font-weight:800;color:#f1f5f9">${s.time}</div>
+          <div style="font-size:11px;color:#94a3b8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${summary}</div>
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;gap:14px" onclick="event.stopPropagation()">
         <div class="toggle ${s.enabled?'on':''}" onclick="togglePreclimatSched('${s.id}')"></div>
         <button onclick="removePreclimatSched('${s.id}')" style="background:none;border:none;color:#f87171;font-size:18px;cursor:pointer">🗑</button>
       </div>
     </div>
-    <div style="padding:10px 0 2px"><div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">${rec}</div></div>
-    ${_pcRow('Temperatura','#22c55e', s.temp.toFixed(0)+'°C', _pcStep(`adjustPreclimatTemp('${s.id}',-0.5)`,'−'), _pcStep(`adjustPreclimatTemp('${s.id}',0.5)`,'+'))}
-    ${_pcRow('Ventilação','#22c55e', s.fan+'/7', _pcStep(`adjustPreclimatFan('${s.id}',-1)`,'−'), _pcStep(`adjustPreclimatFan('${s.id}',1)`,'+'))}
-    ${_pcRow('Desligar após','#22c55e', s.duration>0 ? s.duration+' min' : 'Manual', _pcStep(`adjustPreclimatDur('${s.id}',-5)`,'−'), _pcStep(`adjustPreclimatDur('${s.id}',5)`,'+'))}
-    ${_pcRow('Avisar antes','#38bdf8', (s.leadMin||0)+' min', _pcStep(`adjustPreclimatLead('${s.id}',-5)`,'−'), _pcStep(`adjustPreclimatLead('${s.id}',5)`,'+'))}
+    ${bodyHtml}
   </div>`;
 }
 
@@ -862,13 +881,13 @@ async function savePreclimatSched(id, field, value) {
 }
 
 async function addPreclimatSchedule() {
-  if (!LIVE_MODE) { _pcList.push({ id: 'l'+Date.now(), enabled: true, time: '07:30', recurrence: 'daily', temp: 22, fan: 3, duration: 20, leadMin: 10 }); renderPreclimat(); return; }
+  if (!LIVE_MODE) { const s = { id: 'l'+Date.now(), enabled: true, time: '07:30', recurrence: 'daily', temp: 22, fan: 3, duration: 20, leadMin: 10 }; _pcList.push(s); _pcExpanded.add(s.id); renderPreclimat(); return; }
   try {
     const r = await fetch('/api/preclimat/schedule', {
       method: 'POST', headers: { 'Authorization': 'Bearer ' + BRIDGE_TOKEN, 'Content-Type': 'application/json' },
       body: JSON.stringify({ device_id: localStorage.getItem('eco_device_id') || '' }),
     });
-    if (r.ok) { _pcList.push(await r.json()); renderPreclimat(); showToast('Agendamento adicionado ✓', 'ok'); }
+    if (r.ok) { const s = await r.json(); _pcList.push(s); _pcExpanded.add(s.id); renderPreclimat(); showToast('Agendamento adicionado ✓', 'ok'); }
     else showToast('Erro ao adicionar', 'err');
   } catch (_) { showToast('Erro ao adicionar', 'err'); }
 }
@@ -963,7 +982,7 @@ async function bootstrapState() {
 bootstrapState();
 loadPreclimat();
   // Expõe handlers de onclick no window
-  Object.assign(window, { toggleAC, adjustTemp, toggleSync, toggleAuto, adjustFan, toggleCycle, cycleSeatVent, addPreclimatSchedule, removePreclimatSched, togglePreclimatSched, setPreclimatRec, adjustPreclimatTemp, adjustPreclimatFan, adjustPreclimatDur, adjustPreclimatLead, savePreclimatSched });
+  Object.assign(window, { toggleAC, adjustTemp, toggleSync, toggleAuto, adjustFan, toggleCycle, cycleSeatVent, addPreclimatSchedule, removePreclimatSched, togglePreclimatSched, togglePreclimatExpand, setPreclimatRec, adjustPreclimatTemp, adjustPreclimatFan, adjustPreclimatDur, adjustPreclimatLead, savePreclimatSched });
   // Handler de resultado HVAC via WS push (mais rápido que polling — confirma logo
   // que o APK faz fetchCurrent ~2.5s após requestSetting).
   window._onHvacResult = function({ control, result }) {
