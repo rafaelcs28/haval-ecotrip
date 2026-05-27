@@ -69,10 +69,12 @@
 		192BA3BE182AC3D50F636DA9 /* HavalEcoTripWidget.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = HavalEcoTripWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		19F1EE1E1159233D66EEAFA8 /* LiveActivityPush.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveActivityPush.swift; sourceTree = "<group>"; };
 		1C2F4161732FE79AB2415337 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		26B936D2B31C5DE61815546A /* HavalEcoTrip-dev.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "HavalEcoTrip-dev.entitlements"; sourceTree = "<group>"; };
 		2A0F1250A4346D17F0539FE8 /* MotorLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MotorLiveActivity.swift; sourceTree = "<group>"; };
 		2F97B54C85FEC5A112CB0C9E /* BackgroundRefresh.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundRefresh.swift; sourceTree = "<group>"; };
 		33D5F8203565F8E20D91E100 /* ShortcutManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutManager.swift; sourceTree = "<group>"; };
 		36AA01E4F54D0727EF341F49 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		40111AE0EB130BFE6B0757E3 /* HavalEcoTrip-prod.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "HavalEcoTrip-prod.entitlements"; sourceTree = "<group>"; };
 		4A804763C29A6FBD8871C5A7 /* LivePreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LivePreview.swift; sourceTree = "<group>"; };
 		636438201B328EA34B285F3A /* MotorActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MotorActivityAttributes.swift; sourceTree = "<group>"; };
 		6AB3E13D26098FB169B559E2 /* HavalEcoTrip.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = HavalEcoTrip.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -106,6 +108,8 @@
 				2F97B54C85FEC5A112CB0C9E /* BackgroundRefresh.swift */,
 				C88C20EF0FDB1AB8EB036191 /* CarActions.swift */,
 				36AA01E4F54D0727EF341F49 /* ContentView.swift */,
+				26B936D2B31C5DE61815546A /* HavalEcoTrip-dev.entitlements */,
+				40111AE0EB130BFE6B0757E3 /* HavalEcoTrip-prod.entitlements */,
 				7BA445855D7E9BCBC513DE19 /* HavalEcoTrip.entitlements */,
 				B5A372CA99C89C5712EE54BC /* HavalEcoTripApp.swift */,
 				968AA8DFD87E74A832ED71A5 /* Info.plist */,
@@ -353,7 +357,6 @@
 				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
-				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
 				CURRENT_PROJECT_VERSION = 1;
@@ -392,7 +395,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_ENTITLEMENTS = HavalEcoTrip/HavalEcoTrip.entitlements;
+				CODE_SIGN_ENTITLEMENTS = "HavalEcoTrip/HavalEcoTrip-dev.entitlements";
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				INFOPLIST_FILE = HavalEcoTrip/Info.plist;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -410,7 +413,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_ENTITLEMENTS = HavalEcoTrip/HavalEcoTrip.entitlements;
+				CODE_SIGN_ENTITLEMENTS = "HavalEcoTrip/HavalEcoTrip-prod.entitlements";
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				INFOPLIST_FILE = HavalEcoTrip/Info.plist;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -457,7 +460,6 @@
 				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
-				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
 				CURRENT_PROJECT_VERSION = 1;
