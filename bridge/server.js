@@ -348,6 +348,8 @@ function _preclimatContentState() {
   return {
     phase: preclimatStatus.phase, detail: preclimatStatus.detail,
     temp: preclimatStatus.temp, fan: preclimatStatus.fan,
+    tempIn:  +state.inside_temp  || 0,
+    tempOut: +state.outside_temp || 0,
     endsAtMs: preclimatStatus.endsAtMs, updatedAtMs: preclimatStatus.updatedAtMs,
   };
 }
@@ -5347,6 +5349,7 @@ function _chargeContentState() {
     sessionKwh:   +state.charge_session_kwh || 0,
     remainingMin: Math.max(0, Math.round(+state.charge_remaining_min || 0)),
     charging:     state.charging_state === 'Carregando',
+    targetPct:    +state.charge_limit_pct || 100,
     updatedAtMs:  Date.now(),
   };
 }
@@ -5510,6 +5513,7 @@ function sendChargeLiveUpdate(isFinal = false) {
       sessionKwh: +state.charge_session_kwh || 0,
       remainingMin: Math.max(0, Math.round(rem)),
       charging: !isFinal,
+      targetPct: +state.charge_limit_pct || 100,
       updatedAtMs: now,
     }, { isFinal }).catch(err => console.warn('[apns] push falhou:', err.message));
   }

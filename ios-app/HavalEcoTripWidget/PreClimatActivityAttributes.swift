@@ -18,6 +18,8 @@ struct PreClimatActivityAttributes: ActivityAttributes {
         var detail:      String   // linha de texto pronta do bridge (ex: "Climatizando…")
         var temp:        Double    // °C alvo do AC
         var fan:         Int       // 1..7
+        var tempIn:      Double    // °C interna do carro (0 = sem leitura)
+        var tempOut:     Double    // °C externa (0 = sem leitura)
         var endsAtMs:    Double    // epoch ms do fim previsto (0 = sem contagem)
         var updatedAtMs: Double    // epoch ms
 

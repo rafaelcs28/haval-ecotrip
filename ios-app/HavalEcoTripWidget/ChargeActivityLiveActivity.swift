@@ -42,8 +42,7 @@ struct ChargeActivityLiveActivity: Widget {
                 }
                 DynamicIslandExpandedRegion(.bottom) {
                     VStack(spacing: 6) {
-                        ProgressView(value: min(100, max(0, s.soc)), total: 100)
-                            .tint(s.charging ? .green : .blue)
+                        ChargeBar(soc: s.soc, target: s.targetPct, accent: s.charging ? .green : .blue)
                         HStack {
                             Label(s.charging ? "Carregando" : "Concluído",
                                   systemImage: s.charging ? "bolt.fill" : "checkmark.circle.fill")
@@ -90,16 +89,42 @@ struct ChargeLockScreenView: View {
                 Text(String(format: "%.1f kW", state.powerKw))
                     .font(.title3).bold().foregroundStyle(accent)
             }
-            ProgressView(value: min(100, max(0, state.soc)), total: 100)
-                .tint(accent)
+            ChargeBar(soc: state.soc, target: state.targetPct, accent: accent)
             HStack {
                 Label(chargeRemainingLabel(state.remainingMin), systemImage: "clock")
                     .font(.caption).foregroundStyle(.secondary)
+                if state.targetPct > 0 && state.targetPct < 100 {
+                    Text("· meta \(Int(state.targetPct))%").font(.caption).foregroundStyle(.secondary)
+                }
                 Spacer()
                 Label(String(format: "%.1f kWh", state.sessionKwh), systemImage: "bolt.batteryblock")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
         .padding(14)
+    }
+}
+
+// Barra de carga: preenche até o SOC e marca a META (limite) com um tick sutil.
+struct ChargeBar: View {
+    let soc: Double
+    let target: Double
+    let accent: Color
+    var body: some View {
+        GeometryReader { geo in
+            let w = geo.size.width
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color.white.opacity(0.15)).frame(height: 6)
+                Capsule().fill(accent)
+                    .frame(width: w * CGFloat(min(100, max(0, soc)) / 100), height: 6)
+                if target > 0 && target < 100 {
+                    RoundedRectangle(cornerRadius: 1).fill(Color.white.opacity(0.75))
+                        .frame(width: 2, height: 11)
+                        .offset(x: w * CGFloat(min(100, max(0, target)) / 100) - 1)
+                }
+            }
+            .frame(height: 11, alignment: .leading)
+        }
+        .frame(height: 11)
     }
 }
