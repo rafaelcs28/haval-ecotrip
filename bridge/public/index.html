@@ -1467,6 +1467,11 @@ window.HavalBack = function() {
 const _HF_VIEWS = new Set(['dash', 'drive', 'conforto']);
 let _hfHeartbeatTimer = null;
 let _hfLastSent = null;
+// id único por carregamento da página — o bridge faz ref-count POR CLIENTE
+// (HF só desliga quando todos os clientes saem). Sem isso, dois clientes
+// abertos ficavam piscando o HF (um manda ON, outro OFF).
+const _hfClientId = (self.crypto && crypto.randomUUID) ? crypto.randomUUID()
+  : ('hf-' + Date.now() + '-' + Math.random().toString(36).slice(2));
 
 async function _hfPost(active) {
   if (!bridgeToken) return;
@@ -1474,19 +1479,21 @@ async function _hfPost(active) {
     await fetch('/api/hf_mode', {
       method: 'POST',
       headers: { 'Authorization': 'Bearer ' + bridgeToken, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ active }),
+      body: JSON.stringify({ active, client_id: _hfClientId }),
     });
   } catch (_) { /* sem rede: bridge watchdog desliga sozinho */ }
 }
 
 function _updateHfMode() {
-  const shouldBe = _HF_VIEWS.has(activeView) && document.visibilityState !== 'hidden';
+  // Background: NÃO mexe no HF — deixa o watchdog do bridge (15s) cuidar.
+  // Evita desligar na hora e "congelar" o Drive quando você volta rápido.
+  if (document.visibilityState === 'hidden') return;
+  const shouldBe = _HF_VIEWS.has(activeView);
   if (shouldBe !== _hfLastSent) {
     _hfLastSent = shouldBe;
     _hfPost(shouldBe);
   } else if (shouldBe) {
-    // Heartbeat (mesmo estado) — mantém o bridge feliz pelos próximos 10s
-    _hfPost(true);
+    _hfPost(true);   // heartbeat (mantém o ref-count do cliente vivo)
   }
 }
 
@@ -1501,13 +1508,9 @@ function _startHfHeartbeat() {
 }
 
 document.addEventListener('visibilitychange', () => {
-  // Quando o PWA vai pro background, desliga HF imediato (não desperdiça bateria do carro)
-  if (document.visibilityState === 'hidden' && _hfLastSent) {
-    _hfLastSent = false;
-    _hfPost(false);
-  } else if (document.visibilityState === 'visible') {
-    _updateHfMode();
-  }
+  // NÃO desliga HF na hora ao ir pro background — o watchdog do bridge (15s)
+  // desliga sozinho se não voltar. Voltar rápido = HF nunca caiu = sem "congelar".
+  if (document.visibilityState === 'visible') _updateHfMode();
 });
 
 // ═════════════════════════════════════════════════════════
