@@ -1,9 +1,10 @@
-const CACHE = 'ecotrip-v425';
+const CACHE = 'ecotrip-v432';
 
 // Tudo do shell do PWA (HTML/CSS/JS/icons/libs) — pre-cached no install.
 // Bumpar CACHE acima força o navegador a re-baixar tudo na próxima vez.
 const PRECACHE = [
-  '/',
+  // '/' NÃO entra: atrás do porteiro multi-tenant, "/" pode ser a tela de login
+  // (depende do cookie). Cachear "/" envenenaria o shell. Usamos /index.html.
   '/index.html',
   '/manifest.json',
   '/view-dash.html',
@@ -76,13 +77,32 @@ self.addEventListener('fetch', e => {
     return;
   }
 
-  // Shell (HTML/CSS/JS/icons): stale-while-revalidate
+  // Navegação ("/" ou documento): NETWORK-FIRST. Atrás do porteiro multi-tenant,
+  // "/" decide login-vs-PWA pelo cookie — precisa ser fresco. Cai pro cache offline.
+  // Nunca cacheia resposta com no-store (página de login) nem redirecionada.
+  const isNav = e.request.mode === 'navigate' || url.pathname === '/';
+  if (isNav) {
+    e.respondWith(
+      fetch(e.request).then(r => {
+        const noStore = (r.headers.get('cache-control') || '').includes('no-store');
+        if (r.ok && !r.redirected && !noStore) {
+          const clone = r.clone();
+          caches.open(CACHE).then(c => c.put('/index.html', clone));
+        }
+        return r;
+      }).catch(() => caches.match('/index.html').then(c => c || caches.match(e.request)))
+    );
+    return;
+  }
+
+  // Demais assets do shell (js/css/png): stale-while-revalidate.
   e.respondWith(
     caches.match(e.request).then(cached => {
       const networkFetch = fetch(e.request).then(r => {
-        if (r.ok && (url.pathname === '/' || url.pathname.endsWith('.html') ||
-                     url.pathname.endsWith('.js') || url.pathname.endsWith('.css') ||
-                     url.pathname.endsWith('.png'))) {
+        const noStore = (r.headers.get('cache-control') || '').includes('no-store');
+        if (r.ok && !r.redirected && !noStore &&
+            (url.pathname.endsWith('.html') || url.pathname.endsWith('.js') ||
+             url.pathname.endsWith('.css') || url.pathname.endsWith('.png'))) {
           const clone = r.clone();
           caches.open(CACHE).then(c => c.put(e.request, clone));
         }

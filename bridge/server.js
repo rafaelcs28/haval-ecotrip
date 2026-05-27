@@ -1,6 +1,12 @@
 'use strict';
 
-require('dotenv').config({ path: require('path').join(__dirname, '.env') });
+// DATA_DIR: raiz dos dados MUTÁVEIS (state/trips/charges/tokens/.env). Em multi-tenant
+// cada instância recebe ECOTRIP_DATA_DIR=<.../tenants/NOME>; sem ela cai em __dirname
+// (instância principal, comportamento legado inalterado). Código/estáticos (public/, certs,
+// git) continuam em __dirname e são compartilhados. NUNCA gravar dados em __dirname.
+const DATA_DIR = process.env.ECOTRIP_DATA_DIR || __dirname;
+try { require('fs').mkdirSync(DATA_DIR, { recursive: true }); } catch (_) {}
+require('dotenv').config({ path: require('path').join(DATA_DIR, '.env') });
 const express  = require('express');
 const { WebSocketServer } = require('ws');
 const mqtt     = require('mqtt');
@@ -26,7 +32,7 @@ const PORT           = parseInt(process.env.PORT || '3000', 10);
 // Origem do chassi (precedência): vehicle.json (editável via UI) → .env (legacy).
 // vehicle.json vence porque é a fonte autoritativa quando o usuário configura
 // pela tela de Settings → Veículo. .env é fallback pra setups antigos.
-const VEHICLE_FILE = path.join(__dirname, 'vehicle.json');
+const VEHICLE_FILE = path.join(DATA_DIR, 'vehicle.json');
 function _loadVehicleChassiFromFile() {
   try {
     if (!fs.existsSync(VEHICLE_FILE)) return '';
@@ -74,7 +80,7 @@ let BRIDGE_TOKEN_HASH = process.env.BRIDGE_TOKEN_HASH
 const otplib = require('otplib');
 otplib.authenticator.options = { window: 1 };  // tolera ±30s de drift
 const QRCode = require('qrcode');
-const AUTH_FILE = path.join(__dirname, 'auth.json');
+const AUTH_FILE = path.join(DATA_DIR, 'auth.json');
 let authConfig = { totp_secret: '', backup_codes: [] };
 try {
   if (fs.existsSync(AUTH_FILE)) authConfig = JSON.parse(fs.readFileSync(AUTH_FILE, 'utf8'));
@@ -108,28 +114,28 @@ function genBackupCodes(n = 10) {
 }
 
 // TRIPS_FILE removido — Trip A/B descontinuados.
-const CHARGES_FILE    = path.join(__dirname, 'charges.json');
-const STATE_FILE      = path.join(__dirname, 'state.json');
-const AUTOTRIPS_DIR   = path.join(__dirname, 'autotrips');
-const SNAPSHOTS_FILE  = path.join(__dirname, 'lifetime_snapshots.json');
-const VAPID_FILE        = path.join(__dirname, 'vapid_keys.json');
-const PUSH_SUBS_FILE    = path.join(__dirname, 'push_subscriptions.json');
-const RENAMES_FILE      = path.join(__dirname, 'pending_renames.json');
-const CHARGE_LOCS_FILE    = path.join(__dirname, 'charge_locations.json');
-const KNOWN_PLACES_FILE   = path.join(__dirname, 'known_places.json');
-const MAINTENANCE_FILE    = path.join(__dirname, 'maintenance.json');
-const REFUELS_FILE        = path.join(__dirname, 'refuels.json');
-const TELEMETRY_LOG_FILE  = path.join(__dirname, 'telemetry_history.json');
-const DELETED_IDS_FILE    = path.join(__dirname, 'deleted_ids.json');
-const PRECLIMAT_FILE      = path.join(__dirname, 'preclimat.json');
-const DRIVE_HISTORY_FILE  = path.join(__dirname, 'drive_history.json');
+const CHARGES_FILE    = path.join(DATA_DIR, 'charges.json');
+const STATE_FILE      = path.join(DATA_DIR, 'state.json');
+const AUTOTRIPS_DIR   = path.join(DATA_DIR, 'autotrips');
+const SNAPSHOTS_FILE  = path.join(DATA_DIR, 'lifetime_snapshots.json');
+const VAPID_FILE        = path.join(DATA_DIR, 'vapid_keys.json');
+const PUSH_SUBS_FILE    = path.join(DATA_DIR, 'push_subscriptions.json');
+const RENAMES_FILE      = path.join(DATA_DIR, 'pending_renames.json');
+const CHARGE_LOCS_FILE    = path.join(DATA_DIR, 'charge_locations.json');
+const KNOWN_PLACES_FILE   = path.join(DATA_DIR, 'known_places.json');
+const MAINTENANCE_FILE    = path.join(DATA_DIR, 'maintenance.json');
+const REFUELS_FILE        = path.join(DATA_DIR, 'refuels.json');
+const TELEMETRY_LOG_FILE  = path.join(DATA_DIR, 'telemetry_history.json');
+const DELETED_IDS_FILE    = path.join(DATA_DIR, 'deleted_ids.json');
+const PRECLIMAT_FILE      = path.join(DATA_DIR, 'preclimat.json');
+const DRIVE_HISTORY_FILE  = path.join(DATA_DIR, 'drive_history.json');
 
 // Capacidades do Haval H6 PHEV (uso pra estimar kWh atual a partir do SOC%)
 const BATTERY_CAPACITY_KWH = 34;
 const TANK_CAPACITY_L      = 55;
-const NOTIF_PREFS_FILE    = path.join(__dirname, 'notif_prefs.json');
-const NOTIF_HISTORY_FILE  = path.join(__dirname, 'notif_history.json');
-const EVENTS_FILE         = path.join(__dirname, 'events.json');
+const NOTIF_PREFS_FILE    = path.join(DATA_DIR, 'notif_prefs.json');
+const NOTIF_HISTORY_FILE  = path.join(DATA_DIR, 'notif_history.json');
+const EVENTS_FILE         = path.join(DATA_DIR, 'events.json');
 
 if (!fs.existsSync(AUTOTRIPS_DIR)) fs.mkdirSync(AUTOTRIPS_DIR, { recursive: true });
 
@@ -725,7 +731,7 @@ function _onDriveModeChange() {
 // guardado no localStorage). Quando uma notificação dispara, cada sub é
 // avaliada contra as prefs do seu device — não há mais "global".
 // `notifPrefs` acima vira o fallback default pra devices sem prefs próprias.
-const NOTIF_PREFS_BY_DEVICE_FILE = path.join(__dirname, 'notif_prefs_by_device.json');
+const NOTIF_PREFS_BY_DEVICE_FILE = path.join(DATA_DIR, 'notif_prefs_by_device.json');
 let notifPrefsByDevice = {};
 try {
   if (fs.existsSync(NOTIF_PREFS_BY_DEVICE_FILE))
@@ -2051,8 +2057,8 @@ const server = http.createServer(app);
 //        mkcert mac-mini.local localhost 127.0.0.1 <IP-LAN>
 //        mv mac-mini.local+*.pem cert.pem; mv mac-mini.local+*-key.pem key.pem
 const HTTPS_PORT = parseInt(process.env.HTTPS_PORT || '3443', 10);
-const _certFile  = path.join(__dirname, 'cert.pem');
-const _keyFile   = path.join(__dirname, 'key.pem');
+const _certFile  = path.join(DATA_DIR, 'cert.pem');
+const _keyFile   = path.join(DATA_DIR, 'key.pem');
 let httpsServer  = null;
 if (fs.existsSync(_certFile) && fs.existsSync(_keyFile)) {
   try {
@@ -2135,6 +2141,10 @@ app.get('/api/auth/2fa/status', (_req, res) => res.json({ enabled: is2faEnabled(
 
 // ── Google Sign-In ────────────────────────────────────────────────────────────
 const GOOGLE_OAUTH_CLIENT_ID = process.env.GOOGLE_OAUTH_CLIENT_ID || '';
+// O app iOS usa um OAuth client iOS próprio → o ID token vem com aud = client iOS,
+// diferente do client web. Aceitamos ambos como audiência válida.
+const GOOGLE_IOS_CLIENT_ID   = process.env.GOOGLE_IOS_CLIENT_ID || '';
+const GOOGLE_AUDIENCES = [GOOGLE_OAUTH_CLIENT_ID, GOOGLE_IOS_CLIENT_ID].filter(Boolean);
 const GOOGLE_ALLOWED_EMAILS  = (process.env.GOOGLE_ALLOWED_EMAILS || '')
   .split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
 let googleAuthClient = null;
@@ -2169,7 +2179,7 @@ app.post('/api/auth/google/login', async (req, res) => {
   try {
     const ticket = await googleAuthClient.verifyIdToken({
       idToken:  credential,
-      audience: GOOGLE_OAUTH_CLIENT_ID,
+      audience: GOOGLE_AUDIENCES,
     });
     payload = ticket.getPayload();
   } catch (e) {
@@ -2198,6 +2208,80 @@ app.post('/api/auth/google/login', async (req, res) => {
 
   _registerSuccess(ip);
   console.log(`[auth] login Google OK · ${email}`);
+  res.json({ ok: true, token: BRIDGE_TOKEN_HASH, email });
+});
+
+// ── Sign in with Apple ────────────────────────────────────────────────────
+// aud do ID token nativo = o App ID (bundle). Verificamos a assinatura RS256 com
+// as chaves públicas da Apple (JWKS) — Node converte JWK→chave nativamente.
+const APPLE_CLIENT_IDS = (process.env.APPLE_CLIENT_ID || process.env.APNS_BUNDLE_ID || '')
+  .split(',').map(s => s.trim()).filter(Boolean);
+const APPLE_ALLOWED_EMAILS = (process.env.APPLE_ALLOWED_EMAILS || process.env.GOOGLE_ALLOWED_EMAILS || '')
+  .split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+const APPLE_ENABLED = APPLE_CLIENT_IDS.length > 0;
+if (APPLE_ENABLED) console.log(`✓ Sign in with Apple: aud=${APPLE_CLIENT_IDS.join(',')} · ${APPLE_ALLOWED_EMAILS.length} email(s) na whitelist`);
+
+let _appleJwksCache = { keys: [], ts: 0 };
+async function _appleJwks() {
+  if (_appleJwksCache.keys.length && (Date.now() - _appleJwksCache.ts) < 3600_000) return _appleJwksCache.keys;
+  const r = await fetch('https://appleid.apple.com/auth/keys');
+  const d = await r.json();
+  _appleJwksCache = { keys: d.keys || [], ts: Date.now() };
+  return _appleJwksCache.keys;
+}
+async function _verifyAppleIdToken(idToken) {
+  const crypto = require('crypto');
+  const [h, p, s] = String(idToken).split('.');
+  if (!h || !p || !s) throw new Error('token malformado');
+  const header  = JSON.parse(Buffer.from(h, 'base64').toString('utf8'));
+  const jwk = (await _appleJwks()).find(k => k.kid === header.kid);
+  if (!jwk) throw new Error('kid desconhecido');
+  const pub = crypto.createPublicKey({ key: jwk, format: 'jwk' });
+  const ok  = crypto.verify('RSA-SHA256', Buffer.from(`${h}.${p}`), pub, Buffer.from(s, 'base64url'));
+  if (!ok) throw new Error('assinatura inválida');
+  const payload = JSON.parse(Buffer.from(p, 'base64').toString('utf8'));
+  if (payload.iss !== 'https://appleid.apple.com') throw new Error('iss inválido');
+  if (!APPLE_CLIENT_IDS.includes(payload.aud)) throw new Error('aud inválido (' + payload.aud + ')');
+  if ((payload.exp || 0) * 1000 < Date.now()) throw new Error('expirado');
+  return payload;
+}
+
+app.get('/api/auth/apple/config', (_req, res) => res.json({
+  enabled: APPLE_ENABLED, client_id: APPLE_CLIENT_IDS[0] || null,
+}));
+
+// POST /api/auth/apple/login — { credential (ID token), totp_code? } → { ok, token }
+app.post('/api/auth/apple/login', async (req, res) => {
+  if (!APPLE_ENABLED) return res.status(503).json({ error: 'apple_login_disabled' });
+  const ip = req.ip || req.connection?.remoteAddress || 'unknown';
+  const rl = _checkRateLimit(ip);
+  if (!rl.ok) return res.status(429).json({ error: 'rate_limited', retry_after_sec: rl.retryAfterSec });
+  if (rl.state.count >= 5) return res.status(429).json({ error: 'too_many_attempts' });
+
+  const { credential, totp_code } = req.body || {};
+  if (!credential) return res.status(400).json({ error: 'missing_credential' });
+
+  let payload;
+  try { payload = await _verifyAppleIdToken(credential); }
+  catch (e) { _registerFailure(rl.state); return res.status(401).json({ error: 'invalid_credential', detail: e.message }); }
+
+  const email = (payload.email || '').toLowerCase();
+  if (!email) {  // Apple só manda email se o usuário concedeu; sub é estável
+    _registerFailure(rl.state);
+    return res.status(401).json({ error: 'email_missing', sub: payload.sub });
+  }
+  if (APPLE_ALLOWED_EMAILS.length > 0 && !APPLE_ALLOWED_EMAILS.includes(email)) {
+    _registerFailure(rl.state);
+    console.warn(`[auth] login Apple NEGADO · email fora da whitelist: ${email}`);
+    return res.status(403).json({ error: 'email_not_allowed', email });
+  }
+  if (is2faEnabled()) {
+    if (!totp_code) return res.status(401).json({ error: 'totp_required', requires_2fa: true, email });
+    if (!verifyTotpOrBackup(totp_code)) { _registerFailure(rl.state); return res.status(401).json({ error: 'invalid_totp' }); }
+  }
+
+  _registerSuccess(ip);
+  console.log(`[auth] login Apple OK · ${email}`);
   res.json({ ok: true, token: BRIDGE_TOKEN_HASH, email });
 });
 
@@ -2276,7 +2360,7 @@ app.post('/api/auth/2fa/regenerate-backup', (req, res) => {
 // faz login normal com senha+TOTP; daí registra a passkey nesse device. Próximas
 // vezes pode entrar direto com biometria. O caminho senha+TOTP continua existindo
 // como fallback se o device for perdido.
-const PASSKEYS_FILE = path.join(__dirname, 'passkeys.json');
+const PASSKEYS_FILE = path.join(DATA_DIR, 'passkeys.json');
 let passkeys = [];
 try {
   if (fs.existsSync(PASSKEYS_FILE)) {
@@ -2547,7 +2631,7 @@ app.delete('/api/charges/:ts', (req, res) => {
 });
 
 // ── Linha do tempo de recarga (amostras de potência/energia) ─────────────────
-const CHARGE_TELEMETRY_DIR = path.join(__dirname, 'charge_telemetry');
+const CHARGE_TELEMETRY_DIR = path.join(DATA_DIR, 'charge_telemetry');
 try { require('fs').mkdirSync(CHARGE_TELEMETRY_DIR, { recursive: true }); } catch (_) {}
 
 app.post('/api/charges/:ts/samples', (req, res) => {
@@ -3278,6 +3362,53 @@ app.post('/api/vehicle', (req, res) => {
   }
 });
 
+// ── Auto-serviço: cada dono configura a conexão do PRÓPRIO broker + HA + chassi ──
+// (Multi-tenant Modelo B: a instância conecta no broker da HA da pessoa, via tailnet.)
+// Atualiza chaves específicas no .env do tenant, preservando o resto.
+function _updateEnvKeys(updates) {
+  const envPath = path.join(DATA_DIR, '.env');
+  let lines = [];
+  try { lines = fs.readFileSync(envPath, 'utf8').split('\n'); } catch (_) {}
+  const keys = Object.keys(updates);
+  const kept = lines.filter(l => !keys.some(k => l.startsWith(k + '=')));
+  for (const k of keys) kept.push(`${k}=${updates[k]}`);
+  fs.writeFileSync(envPath, kept.join('\n').replace(/\n+$/, '') + '\n');
+}
+
+app.get('/api/my-setup', (req, res) => {
+  res.json({
+    mqtt_host:   MQTT_HOST, mqtt_port: MQTT_PORT, mqtt_user: MQTT_USER,
+    mqtt_prefix: MQTT_PREFIX, has_mqtt_pass: !!MQTT_PASS,
+    chassi:      GWM_CHASSI, ha_url: HA_URL, has_ha_token: !!HA_TOKEN,
+    mqtt_connected: !!(mqttClient && mqttClient.connected),
+  });
+});
+
+app.post('/api/my-setup', (req, res) => {
+  const b = req.body || {};
+  const env = {};
+  if (b.mqtt_host   !== undefined) { let h = String(b.mqtt_host).trim(); if (h && !h.includes('://')) h = 'mqtt://' + h; env.MQTT_HOST = h; }
+  if (b.mqtt_port   !== undefined) env.MQTT_PORT   = String(parseInt(b.mqtt_port, 10) || 1883);
+  if (b.mqtt_user   !== undefined) env.MQTT_USER   = String(b.mqtt_user).trim();
+  if (b.mqtt_pass)                 env.MQTT_PASS   = String(b.mqtt_pass);          // só troca se veio
+  if (b.mqtt_prefix !== undefined) env.MQTT_PREFIX = String(b.mqtt_prefix).trim().replace(/\/+$/, '');
+  if (b.ha_url      !== undefined) env.HA_URL      = String(b.ha_url).trim().replace(/\/+$/, '');
+  if (b.ha_token)                  env.HA_TOKEN    = String(b.ha_token);            // só troca se veio
+  // Chassi → vehicle.json (mesma fonte da aba Veículo)
+  if (b.chassi !== undefined) {
+    const raw = String(b.chassi).toLowerCase().trim();
+    if (raw && !/^lgw[a-z0-9]{14}$/.test(raw)) return res.status(400).json({ error: 'Chassi inválido (esperado: lgw + 14 alfanuméricos)' });
+    try { const cur = _loadVehicleFile(); fs.writeFileSync(VEHICLE_FILE, JSON.stringify({ ...cur, chassi: raw, updated_at: Date.now() }, null, 2)); }
+    catch (e) { return res.status(500).json({ error: 'Falha ao salvar chassi: ' + e.message }); }
+  }
+  try { if (Object.keys(env).length) _updateEnvKeys(env); }
+  catch (e) { return res.status(500).json({ error: 'Falha ao salvar config: ' + e.message }); }
+  res.json({ ok: true, restarting: true });
+  // .env é lido no boot → reinicia pra aplicar (pm2 sobe de novo).
+  console.log('[my-setup] config atualizada — reiniciando pra aplicar…');
+  setTimeout(() => process.exit(0), 800);
+});
+
 app.post('/api/admin/update', (req, res) => {
   if (!adminCheckToken(req, res)) return;
   const { exec } = require('child_process');
@@ -3310,7 +3441,7 @@ app.post('/api/admin/change-password', (req, res) => {
     return res.status(400).json({ error: 'Nova senha muito curta (mínimo 4 caracteres)' });
   }
   // Atualiza o .env: substitui BRIDGE_TOKEN e BRIDGE_TOKEN_HASH pelo novo hash
-  const envPath = path.join(__dirname, '.env');
+  const envPath = path.join(DATA_DIR, '.env');
   let envContent = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf8') : '';
   envContent = envContent.split('\n')
     .filter(l => !l.startsWith('BRIDGE_TOKEN=') && !l.startsWith('BRIDGE_TOKEN_HASH='))
@@ -5179,8 +5310,8 @@ mqttClient.on('disconnect', ()    => console.log('MQTT desconectado'));
 // quando habilitado via cmd/diag. Bridge mantém snapshot em memória + log em
 // disco (rotacionado), broadcast pelo WS (msg type=diag_update) e expõe
 // endpoints REST.
-const DIAG_FILE      = path.join(__dirname, 'diag_state.json');
-const DIAG_LOG_FILE  = path.join(__dirname, 'diag_log.json');
+const DIAG_FILE      = path.join(DATA_DIR, 'diag_state.json');
+const DIAG_LOG_FILE  = path.join(DATA_DIR, 'diag_log.json');
 const DIAG_LOG_MAX   = 5000;  // rotação por linhas
 let diagState        = { enabled: false, interval_sec: 5, values: {}, last_update_ms: 0 };
 let diagLog          = [];

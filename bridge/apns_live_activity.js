@@ -30,7 +30,9 @@ const path  = require('path');
 const crypto = require('crypto');
 const http2 = require('http2');
 
-const TOKENS_FILE = path.join(__dirname, 'activity_tokens.json');
+// Tokens APNs são por-tenant → vão na pasta de dados (ECOTRIP_DATA_DIR), não no código.
+const DATA_DIR = process.env.ECOTRIP_DATA_DIR || __dirname;
+const TOKENS_FILE = path.join(DATA_DIR, 'activity_tokens.json');
 
 let enabled = false;
 let teamId = '', keyId = '', bundleId = '', env = 'sandbox';

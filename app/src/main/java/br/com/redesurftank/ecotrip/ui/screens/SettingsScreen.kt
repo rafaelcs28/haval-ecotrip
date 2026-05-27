@@ -61,6 +61,7 @@ fun SettingsScreen(
     var port             by remember { mutableStateOf(mqttManager.port.toString()) }
     var username         by remember { mutableStateOf(mqttManager.username) }
     var password         by remember { mutableStateOf(mqttManager.password) }
+    var tls              by remember { mutableStateOf(mqttManager.tls) }
     var prefix           by remember { mutableStateOf(mqttManager.prefix) }
     var bridgeUrlStr     by remember {
         mutableStateOf(
@@ -302,6 +303,18 @@ fun SettingsScreen(
                     colors = mqttFieldColors(),
                 )
 
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("TLS / SSL", fontSize = 13.sp)
+                        Text("Ligue para broker público (porta 8883).", fontSize = 10.sp, color = TextSecondary)
+                    }
+                    Switch(checked = tls, onCheckedChange = { tls = it })
+                }
+
                 MqttField("Prefixo de tópico", prefix, KeyboardType.Uri) { prefix = it }
 
                 Spacer(Modifier.height(2.dp))
@@ -398,6 +411,7 @@ fun SettingsScreen(
                             mqttManager.port                      = port.toIntOrNull() ?: 1883
                             mqttManager.username                  = username
                             mqttManager.password                  = password
+                            mqttManager.tls                       = tls
                             mqttManager.prefix                    = prefix.ifEmpty { "haval/ecotrip" }
                             mqttManager.bridgeUrl   = bridgeUrlStr.trim()
                             mqttManager.bridgeToken = bridgeTokenStr.trim()

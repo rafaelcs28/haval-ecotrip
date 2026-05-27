@@ -447,6 +447,7 @@ input { font-family: inherit; }
       <div style="display:flex;justify-content:space-between;padding:8px 10px;background:rgba(255,255,255,.04);border-radius:8px;gap:8px"><span style="color:#94a3b8;flex-shrink:0">IP deste dispositivo</span><span id="net-info-ip-local" style="font-weight:700;color:#cbd5e1;font-family:monospace;font-size:11px;text-align:right">—</span></div>
       <div style="display:flex;justify-content:space-between;padding:8px 10px;background:rgba(255,255,255,.04);border-radius:8px;gap:8px"><span style="color:#94a3b8;flex-shrink:0">IP de saída (Tailscale/internet)</span><span id="net-info-ip" style="font-weight:700;color:#cbd5e1;font-family:monospace;font-size:11px;text-align:right">—</span></div>
       <div style="display:flex;justify-content:space-between;padding:8px 10px;background:rgba(255,255,255,.04);border-radius:8px;gap:8px"><span style="color:#94a3b8;flex-shrink:0">Host do bridge</span><span id="net-info-host" style="font-weight:600;color:#cbd5e1;font-family:monospace;font-size:11px;text-align:right">—</span></div>
+      <div style="display:flex;justify-content:space-between;padding:8px 10px;background:rgba(255,255,255,.04);border-radius:8px;gap:8px"><span style="color:#94a3b8;flex-shrink:0">🚗 Última atualização do carro</span><span id="net-info-car-update" style="font-weight:600;color:#cbd5e1;text-align:right">—</span></div>
     </div>
     <button onclick="closeNetInfo()" style="width:100%;margin-top:14px;padding:12px;background:rgba(255,255,255,.06);color:#cbd5e1;border:none;border-radius:10px;font-size:14px;font-weight:700;font-family:inherit">Fechar</button>
   </div>
@@ -724,6 +725,13 @@ function setStatus(s) {
 let _pendingGoogleCredential = null;
 
 function showLogin(errorMsg) {
+  // No app iOS nativo, o login federado embutido não funciona (Google bloqueia
+  // OAuth em WebView). Em vez da tela web de login, dispara o login NATIVO:
+  // limpa a sessão → o ContentView mostra Apple/Google nativos.
+  if (window.HavalNative && window.HavalNative.isNative) {
+    try { window.HavalNative.logout(); } catch (_) {}
+    return;
+  }
   document.getElementById('login-overlay').style.display = 'flex';
   const err = document.getElementById('login-error');
   if (errorMsg) { err.style.display = ''; err.textContent = errorMsg; }
@@ -873,10 +881,16 @@ async function doLogin() {
 document.getElementById('login-input')?.addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
 document.getElementById('login-totp')?.addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
 
-function adminLogout() {
+async function adminLogout() {
   localStorage.removeItem('bridge_token');
   bridgeToken = '';
   ws?.close();
+  // Limpa também o cookie de sessão do porteiro (gateway), se estiver no ar.
+  // Em acesso direto (sem gateway) o endpoint não existe — ignora o erro.
+  try { await fetch('/gw/logout', { redirect: 'manual' }); } catch (_) {}
+  // No app nativo, limpa a sessão guardada no Settings (App Group) — senão o
+  // token re-injeta no próximo open e "volta logado".
+  try { window.HavalNative?.logout?.(); } catch (_) {}
   showLogin();
 }
 
@@ -1852,6 +1866,12 @@ async function openNetInfo() {
   onlineEl.textContent = navigator.onLine ? 'sim' : 'não';
   onlineEl.style.color = navigator.onLine ? 'var(--green)' : 'var(--red)';
   document.getElementById('net-info-host').textContent = location.host;
+  // Última vez que o CARRO comunicou (report real do APK), NÃO o último WS do PWA.
+  // Mesma fonte da aba Sobre: prefere car_last_update (ISO do APK), cai no last_update_ms.
+  let carMs = null;
+  if (state.car_last_update) { const t = Date.parse(state.car_last_update); if (!isNaN(t)) carMs = t; }
+  if (!carMs && state.last_update_ms) carMs = state.last_update_ms;
+  document.getElementById('net-info-car-update').textContent = carMs ? relTime(carMs) : '—';
   document.getElementById('net-info-ip-local').textContent = '…';
   document.getElementById('net-info-ip').textContent = '…';
   m.style.display = 'flex';

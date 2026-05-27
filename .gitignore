@@ -28,6 +28,8 @@ bridge/.env.*
 # Chaves .p8 (APNs + App Store Connect API) — NUNCA commitar
 *.p8
 **/*.p8
+# Multi-tenant: dados + .env de cada pessoa hospedada (segredos, dados pessoais) — NUNCA commitar
+bridge/tenants/
 bridge/*.bak
 bridge/*.bak.*
 bridge/state.json.bak*

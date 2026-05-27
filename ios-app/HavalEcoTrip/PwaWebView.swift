@@ -26,6 +26,20 @@ struct PwaWebView: UIViewRepresentable {
         // Persistente: cookies, localStorage, IndexedDB ficam guardados entre
         // launches do app. Sem isso, login expira a cada open.
         config.websiteDataStore = .default()
+        // Injeta o bridge_token (obtido no login nativo Apple/Google) no
+        // localStorage ANTES da PWA carregar — assim ela já entra autenticada,
+        // sem mostrar a própria tela de login. O cookie de rota (etenant) já
+        // foi posto no WKWebsiteDataStore.default() pelo AuthManager.
+        let savedToken = Settings.bridgeToken
+        if !savedToken.isEmpty {
+            let esc = savedToken
+                .replacingOccurrences(of: "\\", with: "\\\\")
+                .replacingOccurrences(of: "'", with: "\\'")
+            config.userContentController.addUserScript(WKUserScript(
+                source: "try{localStorage.setItem('bridge_token','\(esc)');}catch(e){}",
+                injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        }
+
         // Bridge JS: registra o handler "haval".
         config.userContentController.add(context.coordinator, name: "haval")
 
@@ -45,6 +59,9 @@ struct PwaWebView: UIViewRepresentable {
           },
           setDeviceId: function(id) {
             window.webkit.messageHandlers.haval.postMessage({ action: 'setDeviceId', deviceId: id });
+          },
+          logout: function() {
+            window.webkit.messageHandlers.haval.postMessage({ action: 'logout' });
           }
         };
         """
@@ -135,6 +152,15 @@ struct PwaWebView: UIViewRepresentable {
                 case "setDeviceId":
                     if let id = body["deviceId"] as? String, !id.isEmpty {
                         Settings.notifDeviceId = id
+                    }
+                case "logout":
+                    // Limpa a sessão NATIVA: sem isso o token re-injeta no próximo
+                    // open e o app "volta logado". Zera o token (→ ContentView
+                    // mostra a tela de login) e apaga o cookie de rota do porteiro.
+                    Settings.bridgeToken = ""
+                    let store = WKWebsiteDataStore.default().httpCookieStore
+                    store.getAllCookies { cookies in
+                        for c in cookies where c.name == "etenant" { store.delete(c) }
                     }
                 default: print("[bridge] ação desconhecida:", action)
                 }

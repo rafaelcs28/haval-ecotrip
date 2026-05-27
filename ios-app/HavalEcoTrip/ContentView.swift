@@ -13,20 +13,25 @@
 //  de localização/áudio.
 //
 import SwiftUI
+import AuthenticationServices
 
 struct ContentView: View {
     @StateObject private var manager = ActivityManager()
     @StateObject private var shortcuts = ShortcutManager.shared
     @Environment(\.scenePhase) private var scenePhase
     @State private var showSetup = false   // sheet por cima da WebView
+    // Observa o token no App Group: ao logar (nativo ou manual), SwiftUI
+    // re-renderiza e troca da tela de login pra WebView automaticamente.
+    @AppStorage("bridge_token", store: UserDefaults(suiteName: Settings.appGroupId))
+    private var storedToken: String = ""
 
     private var bridgeURL: URL? {
-        URL(string: Settings.bridgeURL)
+        URL(string: Settings.bridgeURL.isEmpty ? AuthConfig.bridgeURL : Settings.bridgeURL)
     }
 
     var body: some View {
         Group {
-            if let url = bridgeURL, Settings.isConfigured {
+            if let url = bridgeURL, !storedToken.isEmpty, !Settings.bridgeURL.isEmpty {
                 ZStack {
                     PwaWebView(url: url, manager: manager)
                         .ignoresSafeArea()
@@ -96,15 +101,56 @@ struct ContentView: View {
 struct SetupView: View {
     @ObservedObject var manager: ActivityManager
     @Binding var isPresented: Bool
-    @State private var url:           String = Settings.bridgeURL
+    @StateObject private var auth = AuthManager()
+    @State private var url:           String = Settings.bridgeURL.isEmpty
+        ? AuthConfig.bridgeURL : Settings.bridgeURL
     @State private var token:         String = Settings.bridgeToken
+    @State private var totpCode       = ""
     @State private var showTokenPlain = false
+    @State private var showAdvanced   = false
     @State private var nativeNotifs:  Bool = Settings.nativeNotificationsEnabled
 
     var body: some View {
         NavigationStack {
             Form {
-                Section("Bridge") {
+                Section {
+                    SignInWithAppleButton(.signIn) { request in
+                        request.requestedScopes = [.email]
+                    } onCompletion: { result in
+                        auth.handleAppleResult(result, base: url)
+                    }
+                    .signInWithAppleButtonStyle(.white)
+                    .frame(height: 46)
+                    .cornerRadius(10)
+
+                    if AuthConfig.googleEnabled {
+                        Button { auth.startGoogle(base: url) } label: {
+                            HStack {
+                                Image(systemName: "globe")
+                                Text("Entrar com Google").bold()
+                            }
+                            .frame(maxWidth: .infinity).frame(height: 46)
+                        }
+                        .buttonStyle(.bordered)
+                    }
+
+                    if auth.needsTotp {
+                        TextField("Código 2FA (6 dígitos)", text: $totpCode)
+                            .keyboardType(.numberPad)
+                        Button("Confirmar código") { auth.submitTotp(totpCode) }
+                    }
+                    if auth.busy { ProgressView() }
+                    if let e = auth.errorMessage {
+                        Text(e).font(.caption).foregroundStyle(.red)
+                    }
+                } header: {
+                    Text("Entrar")
+                } footer: {
+                    Text("Use sua conta autorizada. Sem senha — a autenticação é feita pela Apple ou Google.")
+                }
+
+                Section {
+                    DisclosureGroup("Configuração manual (opcional · debug)", isExpanded: $showAdvanced) {
                     TextField("URL (https://…)", text: $url)
                         .keyboardType(.URL)
                         .textInputAutocapitalization(.never)
@@ -125,6 +171,7 @@ struct SetupView: View {
                     .onChange(of: token) { _, new in Settings.bridgeToken = new }
                     Text("Mesmo bridge_token do PWA. Copia do localStorage do Safari/Chrome.")
                         .font(.caption).foregroundStyle(.secondary)
+                    }
                 }
 
                 Section {
@@ -202,6 +249,11 @@ struct SetupView: View {
                         Button("Concluído") { isPresented = false }
                     }
                 }
+            }
+            .onAppear {
+                // Ao logar (Apple/Google) o token é gravado e a tela some;
+                // se estiver aberto como sheet (já configurado), fecha.
+                auth.onSuccess = { isPresented = false }
             }
         }
     }

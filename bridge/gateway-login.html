@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Haval EcoTrip — Entrar</title>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100dvh; display: grid; place-items: center;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: radial-gradient(1200px 600px at 50% -10%, #15324a 0%, #0b1622 55%, #070d15 100%);
+    color: #e7eef6; padding: 24px;
+  }
+  .card {
+    width: 100%; max-width: 360px; background: #0f1c2b; border: 1px solid #1e3147;
+    border-radius: 18px; padding: 32px 26px; text-align: center;
+    box-shadow: 0 20px 60px rgba(0,0,0,.45);
+  }
+  .logo { font-size: 30px; }
+  h1 { font-size: 19px; margin: 12px 0 4px; }
+  p.sub { margin: 0 0 22px; font-size: 13px; color: #8aa0b6; line-height: 1.45; }
+  .gbtn { display: flex; justify-content: center; min-height: 44px; }
+  .step2 { display: none; margin-top: 6px; }
+  .step2.on { display: block; }
+  input[type=text] {
+    width: 100%; padding: 13px; font-size: 18px; letter-spacing: 4px; text-align: center;
+    background: #0a1420; border: 1px solid #27405a; border-radius: 12px; color: #e7eef6; margin: 14px 0 12px;
+  }
+  button.go {
+    width: 100%; padding: 12px; font-size: 15px; font-weight: 600; border: 0; border-radius: 12px;
+    background: #2f81f7; color: #fff; cursor: pointer;
+  }
+  button.go:disabled { opacity: .5; cursor: default; }
+  .msg { margin-top: 16px; font-size: 13px; min-height: 18px; }
+  .msg.err { color: #ff8a8a; }
+  .msg.ok  { color: #7ee0a0; }
+  .foot { margin-top: 22px; font-size: 11px; color: #56708a; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">🚗⚡</div>
+    <h1>Haval EcoTrip</h1>
+    <p class="sub">Entre com sua conta Google autorizada.</p>
+
+    <div id="step1">
+      <div id="g_id_onload"
+           data-client_id="__GOOGLE_CLIENT_ID__"
+           data-callback="onGoogle"
+           data-auto_prompt="false"></div>
+      <div class="gbtn">
+        <div class="g_id_signin" data-type="standard" data-shape="pill"
+             data-theme="filled_blue" data-text="signin_with" data-size="large"></div>
+      </div>
+    </div>
+
+    <div id="step2" class="step2">
+      <p class="sub">Verificação em duas etapas — código do app autenticador:</p>
+      <input id="totp" type="text" inputmode="numeric" autocomplete="one-time-code"
+             maxlength="6" placeholder="000000">
+      <button class="go" id="totpBtn" onclick="submitTotp()">Confirmar</button>
+    </div>
+
+    <div class="msg" id="msg"></div>
+    <div class="foot">Sem senha — autenticação pela sua conta Google.</div>
+  </div>
+
+<script>
+  // Dentro do app iOS nativo, o login federado embutido não funciona (Google
+  // bloqueia OAuth em WebView). Detecta o wrapper e dispara o login NATIVO:
+  // limpa a sessão → o ContentView mostra a tela de login nativa (Apple/Google).
+  if (window.HavalNative && window.HavalNative.isNative) {
+    try { window.HavalNative.logout(); } catch (e) {}
+  }
+  let lastCredential = null;
+  const msg = (t, cls) => { const m = document.getElementById('msg'); m.textContent = t || ''; m.className = 'msg ' + (cls || ''); };
+
+  async function post(body) {
+    const r = await fetch('/gw/google', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    });
+    return { status: r.status, data: await r.json().catch(() => ({})) };
+  }
+
+  function succeed(data) {
+    if (data.token) localStorage.setItem('bridge_token', data.token);
+    msg('Entrando…', 'ok');
+    location.href = '/';
+  }
+
+  function handle({ status, data }) {
+    if (status === 200 && data.ok) return succeed(data);
+    if (data.error === 'totp_required' || data.requires_2fa) {
+      document.getElementById('step2').classList.add('on');
+      msg('Digite o código de verificação.', '');
+      setTimeout(() => document.getElementById('totp').focus(), 100);
+      return;
+    }
+    if (data.error === 'email_not_allowed') return msg('Conta não autorizada' + (data.email ? ' (' + data.email + ')' : '') + '.', 'err');
+    if (data.error === 'invalid_totp')      return msg('Código inválido. Tente de novo.', 'err');
+    if (status === 429)                      return msg('Muitas tentativas. Aguarde um pouco.', 'err');
+    msg('Falha no login (' + (data.error || status) + ').', 'err');
+  }
+
+  window.onGoogle = async (resp) => {
+    lastCredential = resp.credential;
+    msg('Validando…', '');
+    handle(await post({ credential: lastCredential }));
+  };
+
+  window.submitTotp = async () => {
+    const code = (document.getElementById('totp').value || '').trim();
+    if (code.length < 6) return msg('Digite os 6 dígitos.', 'err');
+    document.getElementById('totpBtn').disabled = true;
+    handle(await post({ credential: lastCredential, totp_code: code }));
+    document.getElementById('totpBtn').disabled = false;
+  };
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && document.getElementById('step2').classList.contains('on')) window.submitTotp();
+  });
+</script>
+</body>
+</html>

@@ -282,6 +282,19 @@
       <div id="cfg-chassi-warn" style="display:none;font-size:11px;color:var(--yellow);margin-top:6px;font-weight:600">⚠ Reinicie o bridge pra ativar (Avançado &gt; Reiniciar bridge)</div>
     </div>
     <button class="btn primary" onclick="saveVehicle()">Salvar</button>
+
+    <div style="height:20px"></div>
+    <div class="lbl" style="font-weight:700;font-size:14px">📡 Conexão (broker MQTT + Home Assistant)</div>
+    <div class="hint" style="margin-bottom:12px">Sua instância conecta no broker da SUA Home Assistant (pela rede Tailscale) pra receber os dados do carro e enviar comandos. Status atual: <b id="ms-conn">—</b></div>
+    <div class="field"><div class="lbl">Broker — host (Tailscale)</div><input type="text" id="ms-host" placeholder="ex: 100.x.y.z ou nome-da-maquina.ts.net"></div>
+    <div class="field"><div class="lbl">Broker — porta</div><input type="number" id="ms-port" placeholder="1883"></div>
+    <div class="field"><div class="lbl">Broker — usuário</div><input type="text" id="ms-user" placeholder="usuário do MQTT"></div>
+    <div class="field"><div class="lbl">Broker — senha</div><input type="password" id="ms-pass" placeholder="•••• (em branco mantém a atual)"></div>
+    <div class="field"><div class="lbl">Prefixo MQTT</div><input type="text" id="ms-prefix" placeholder="haval/ecotrip"><div class="hint">Use o MESMO prefixo no app do carro (APK → Ajustes → MQTT).</div></div>
+    <div class="field"><div class="lbl">Home Assistant — URL</div><input type="text" id="ms-haurl" placeholder="http://100.x.y.z:8123"></div>
+    <div class="field"><div class="lbl">Home Assistant — token</div><input type="password" id="ms-hatok" placeholder="•••• (em branco mantém o atual)"><div class="hint">Token de longa duração (HA → Perfil → Tokens). Necessário pros comandos (motor, pré-clima, tranca).</div></div>
+    <button class="btn primary" onclick="saveMySetup()" id="ms-save-btn">Salvar e conectar</button>
+    <div class="hint" style="margin-top:8px">Ao salvar, sua instância reinicia pra aplicar (alguns segundos). No app do carro: aponte o MQTT pro mesmo broker e use o mesmo prefixo.</div>
   </div>
 </div>
 
@@ -605,6 +618,26 @@
       <div class="group-ti">Login biométrico</div>
       <div style="padding:10px 12px;background:rgba(255,255,255,.04);border-radius:10px;font-size:12px;color:var(--muted)">
         Cadastro de biometria não é suportado dentro do app nativo (limitação iOS WKWebView). O app já está autenticado pelo token salvo — não precisa cadastrar passkey aqui. Pra usar passkey, abre o PWA standalone do Safari.
+      </div>
+    </div>
+
+    <div class="field-group">
+      <div class="group-ti">Sessão</div>
+      <button class="btn secondary" onclick="adminLogout()" style="background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.35);color:#f87171">🚪 Sair desta conta</button>
+    </div>
+
+    <!-- Área de Admin — só aparece pra quem é admin (via /gw/admin/me) -->
+    <div class="field-group" id="admin-area" style="display:none">
+      <div class="group-ti">🛠️ Admin</div>
+      <button class="btn secondary" onclick="adminToggle()" id="admin-toggle-btn">Gerenciar pessoas</button>
+      <div id="admin-body" style="display:none;margin-top:14px">
+        <div id="admin-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:14px"></div>
+        <div class="group-ti" style="margin-top:2px">Adicionar pessoa</div>
+        <input id="adm-name"   placeholder="apelido (ex: joao) — a-z 0-9 _" style="width:100%;margin-bottom:8px">
+        <input id="adm-email"  placeholder="email Google/Apple da pessoa" style="width:100%;margin-bottom:8px">
+        <button class="btn primary" onclick="adminAddTenant()" id="adm-add-btn">+ Criar acesso</button>
+        <div class="hint" style="font-size:10px;color:var(--muted);margin-top:6px">Cria a instância isolada e vincula o email. A pessoa entra com Google/Apple e configura o carro dela sozinha (broker da HA dela + chassi). Você não precisa de mais nada.</div>
+        <pre id="admin-result" style="display:none;white-space:pre-wrap;word-break:break-word;font-family:ui-monospace,'SF Mono',monospace;font-size:11px;background:rgba(0,0,0,.45);color:#cbd5e1;padding:12px;border-radius:10px;margin-top:10px;line-height:1.5"></pre>
       </div>
     </div>
   </div>
@@ -2933,6 +2966,59 @@ async function _loadVehicle() {
     const warn = document.getElementById('cfg-chassi-warn');
     if (warn) warn.style.display = d.needs_restart ? 'block' : 'none';
   } catch (_) {}
+  _loadMySetup();
+}
+
+// Conexão (Modelo B): broker da própria HA + HA url/token. Auto-serviço.
+async function _loadMySetup() {
+  const tk = localStorage.getItem('bridge_token');
+  if (!tk) return;
+  try {
+    const r = await fetch('/api/my-setup', { headers: { 'Authorization': 'Bearer ' + tk } });
+    if (!r.ok) return;
+    const d = await r.json();
+    const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v ?? ''; };
+    set('ms-host',   (d.mqtt_host || '').replace(/^mqtt:\/\//, ''));
+    set('ms-port',   d.mqtt_port || 1883);
+    set('ms-user',   d.mqtt_user);
+    set('ms-prefix', d.mqtt_prefix);
+    set('ms-haurl',  d.ha_url);
+    const pass = document.getElementById('ms-pass'); if (pass) pass.placeholder = d.has_mqtt_pass ? '•••• (em branco mantém)' : 'senha do MQTT';
+    const htok = document.getElementById('ms-hatok'); if (htok) htok.placeholder = d.has_ha_token ? '•••• (em branco mantém)' : 'token da HA';
+    const conn = document.getElementById('ms-conn');
+    if (conn) { conn.textContent = d.mqtt_connected ? '🟢 conectado' : '🔴 desconectado'; conn.style.color = d.mqtt_connected ? 'var(--green)' : 'var(--red)'; }
+  } catch (_) {}
+}
+
+async function saveMySetup() {
+  const tk = localStorage.getItem('bridge_token');
+  if (!tk) return;
+  const g = id => (document.getElementById(id).value || '').trim();
+  const body = {
+    mqtt_host: g('ms-host'), mqtt_port: g('ms-port'), mqtt_user: g('ms-user'),
+    mqtt_prefix: g('ms-prefix') || 'haval/ecotrip', ha_url: g('ms-haurl'),
+  };
+  if (g('ms-pass'))  body.mqtt_pass = g('ms-pass');   // só envia se digitou
+  if (g('ms-hatok')) body.ha_token  = g('ms-hatok');
+  const ch = (document.getElementById('cfg-chassi').value || '').trim().toLowerCase();
+  if (ch) body.chassi = ch;
+  const btn = document.getElementById('ms-save-btn');
+  btn.disabled = true; btn.textContent = 'Salvando…';
+  try {
+    const r = await fetch('/api/my-setup', {
+      method: 'POST', headers: { 'Authorization': 'Bearer ' + tk, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.error || 'HTTP ' + r.status);
+    showToast('✓ Salvo — reiniciando pra conectar…', 'ok');
+    btn.textContent = 'Reiniciando…';
+    // A instância reinicia (~5s). Recarrega a config depois pra mostrar o status.
+    setTimeout(() => { _loadMySetup(); btn.disabled = false; btn.textContent = 'Salvar e conectar'; }, 7000);
+  } catch (e) {
+    showToast('✗ ' + e.message, 'err');
+    btn.disabled = false; btn.textContent = 'Salvar e conectar';
+  }
 }
 
 async function saveVehicle() {
@@ -3320,8 +3406,74 @@ window.deleteMaintHistory = async function(id) {
   } catch (e) { alert('Erro: ' + e.message); }
 };
 
+// ── Painel de Admin (multi-tenant) — só aparece pra admin, e só com o porteiro ativo ──
+window.adminInit = async function() {
+  try {
+    const r = await fetch('/gw/admin/me', { headers: { 'Accept': 'application/json' } });
+    if (!r.ok) return;
+    const d = await r.json().catch(() => ({}));
+    if (!d || !d.admin) return;
+    const area = document.getElementById('admin-area');
+    if (area) area.style.display = '';   // revela só o botão "Gerenciar pessoas"
+  } catch (_) {}
+};
+window.adminToggle = function() {
+  const body = document.getElementById('admin-body');
+  const btn = document.getElementById('admin-toggle-btn');
+  if (!body) return;
+  const open = body.style.display === 'none';
+  body.style.display = open ? '' : 'none';
+  if (btn) btn.textContent = open ? 'Fechar' : 'Gerenciar pessoas';
+  if (open) window.adminLoadList();
+};
+window.adminLoadList = async function() {
+  try {
+    const r = await fetch('/gw/admin/tenants'); const d = await r.json();
+    const el = document.getElementById('admin-list'); if (!el) return;
+    el.innerHTML = (d.tenants || []).map(t =>
+      `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;background:rgba(255,255,255,.04);padding:8px 12px;border-radius:8px">
+         <div style="font-size:12px;min-width:0"><div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.email}</div>
+         <div style="font-size:10px;color:var(--muted)">${t.name} · :${t.port}${t.admin ? ' · admin' : ''}</div></div>
+         ${t.admin ? '' : `<button onclick="adminRemove('${t.email.replace(/'/g, "\\'")}')" style="flex-shrink:0;background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.35);color:#f87171;border-radius:8px;padding:6px 10px;font-size:11px;font-family:inherit">remover</button>`}
+       </div>`).join('') || '<div style="font-size:11px;color:var(--muted)">Nenhuma pessoa ainda.</div>';
+  } catch (_) {}
+};
+window.adminAddTenant = async function() {
+  const btn = document.getElementById('adm-add-btn');
+  const g = id => (document.getElementById(id).value || '').trim();
+  const body = { name: g('adm-name'), email: g('adm-email') };
+  if (!body.name || !body.email) { alert('Preencha apelido e email.'); return; }
+  btn.disabled = true; btn.textContent = 'Criando…';
+  try {
+    const r = await fetch('/gw/admin/tenants', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const d = await r.json().catch(() => ({}));
+    const out = document.getElementById('admin-result'); out.style.display = '';
+    if (!r.ok) { out.textContent = '✗ ' + (d.error || ('HTTP ' + r.status)); }
+    else {
+      out.textContent =
+        `✅ Acesso criado pra ${d.email} — ${d.instance}\n\n` +
+        `Mande pra pessoa:\n  ${d.app_url}\n\n` +
+        `Ela entra com Google/Apple (conta ${d.email}) e configura o carro dela em\n` +
+        `Ajustes → Veículo → Conexão (broker da HA dela + chassi). Você não faz mais nada.`;
+      ['adm-name', 'adm-email'].forEach(id => document.getElementById(id).value = '');
+      window.adminLoadList();
+    }
+  } catch (e) { alert('Erro: ' + e.message); }
+  btn.disabled = false; btn.textContent = '+ Criar acesso';
+};
+window.adminRemove = async function(email) {
+  if (!confirm('Remover o acesso de ' + email + '? A instância para; os dados ficam guardados.')) return;
+  try {
+    const r = await fetch('/gw/admin/tenants/' + encodeURIComponent(email), { method: 'DELETE' });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) alert('✗ ' + (d.error || r.status));
+    window.adminLoadList();
+  } catch (e) { alert('Erro: ' + e.message); }
+};
+window.adminInit();
+
   // Expõe handlers de onclick no window
-  Object.assign(window, { openSub: typeof openSub !== 'undefined' ? openSub : undefined, closeSub: typeof closeSub !== 'undefined' ? closeSub : undefined, saveSection: typeof saveSection !== 'undefined' ? saveSection : undefined, toggle2fa: typeof toggle2fa !== 'undefined' ? toggle2fa : undefined, confirmClearHistory: typeof confirmClearHistory !== 'undefined' ? confirmClearHistory : undefined, confirmClearPwaCache: typeof confirmClearPwaCache !== 'undefined' ? confirmClearPwaCache : undefined, clearDriveHistory: typeof clearDriveHistory !== 'undefined' ? clearDriveHistory : undefined, confirmClearEventLogs: typeof confirmClearEventLogs !== 'undefined' ? confirmClearEventLogs : undefined, openMaintAdd: openMaintAdd, openMaintEdit: openMaintEdit, closeMaintModal: closeMaintModal, saveMaintItem: saveMaintItem, deleteMaintItem: deleteMaintItem, markMaintDone: markMaintDone, openMaintRecord: openMaintRecord, closeMaintRecord: closeMaintRecord, saveMaintRecord: saveMaintRecord, deleteMaintHistory: deleteMaintHistory, _onMaintRecTypeChange: window._onMaintRecTypeChange, saveVehicle: saveVehicle, setChargeLimit: setChargeLimit, actionReprocessPlaces: actionReprocessPlaces, actionRecomputeTripCosts: actionRecomputeTripCosts, actionRestartBridge: actionRestartBridge, actionUpdateBridge: actionUpdateBridge, openPlaceAdd: openPlaceAdd, openPlaceEdit: openPlaceEdit, closePlaceModal: closePlaceModal, usePlaceGps: usePlaceGps, savePlace: savePlace, deletePlace: deletePlace, toggleNotif: toggleNotif, _onNotifDeviceChange: _onNotifDeviceChange, renameNotifDevice: renameNotifDevice, removeNotifDevice: removeNotifDevice, renameMyDevice: renameMyDevice, forceSubscribePush: forceSubscribePush, reRegisterPush: reRegisterPush, openNotifDevicePicker: openNotifDevicePicker, closeNotifDevicePicker: closeNotifDevicePicker, _pickNotifDevice: _pickNotifDevice, renameNotifDeviceById: renameNotifDeviceById, removeNotifDeviceById: removeNotifDeviceById, changePassword: changePassword, toggle2faNew: toggle2faNew, closeTotpModal: closeTotpModal, activate2fa: activate2fa, show2faBackup: show2faBackup, regenBackupCodes: regenBackupCodes, openGeofencePlaces: openGeofencePlaces, _toggleGeofencePick: _toggleGeofencePick, saveGeofencePlaces: saveGeofencePlaces, toggleNg: toggleNg, saveWindowForgottenMin: saveWindowForgottenMin, saveLockForgottenMin: saveLockForgottenMin, saveTrunkForgottenMin: saveTrunkForgottenMin, saveSocLowIdlePct: saveSocLowIdlePct, saveSocArrivalPct: saveSocArrivalPct, saveSocArrivalMin: saveSocArrivalMin, saveTyreDropPsi: saveTyreDropPsi, openSocArrivalPlaces: openSocArrivalPlaces, toggleChargeEnding: toggleChargeEnding, editChargeEndingMin: editChargeEndingMin, downloadBackup: downloadBackup, uploadBackup: uploadBackup, copyBackupToClipboard: copyBackupToClipboard, shareBackup: shareBackup, clearLocalCache: clearLocalCache, toggleDiag: toggleDiag, saveDiagInterval: saveDiagInterval, exportDiag: exportDiag, clearDiag: clearDiag, openDiagSet: openDiagSet, confirmDiagSet: confirmDiagSet, _scheduleDiagRender: _scheduleDiagRender });
+  Object.assign(window, { openSub: typeof openSub !== 'undefined' ? openSub : undefined, closeSub: typeof closeSub !== 'undefined' ? closeSub : undefined, saveSection: typeof saveSection !== 'undefined' ? saveSection : undefined, toggle2fa: typeof toggle2fa !== 'undefined' ? toggle2fa : undefined, confirmClearHistory: typeof confirmClearHistory !== 'undefined' ? confirmClearHistory : undefined, confirmClearPwaCache: typeof confirmClearPwaCache !== 'undefined' ? confirmClearPwaCache : undefined, clearDriveHistory: typeof clearDriveHistory !== 'undefined' ? clearDriveHistory : undefined, confirmClearEventLogs: typeof confirmClearEventLogs !== 'undefined' ? confirmClearEventLogs : undefined, openMaintAdd: openMaintAdd, openMaintEdit: openMaintEdit, closeMaintModal: closeMaintModal, saveMaintItem: saveMaintItem, deleteMaintItem: deleteMaintItem, markMaintDone: markMaintDone, openMaintRecord: openMaintRecord, closeMaintRecord: closeMaintRecord, saveMaintRecord: saveMaintRecord, deleteMaintHistory: deleteMaintHistory, _onMaintRecTypeChange: window._onMaintRecTypeChange, saveVehicle: saveVehicle, saveMySetup: saveMySetup, setChargeLimit: setChargeLimit, actionReprocessPlaces: actionReprocessPlaces, actionRecomputeTripCosts: actionRecomputeTripCosts, actionRestartBridge: actionRestartBridge, actionUpdateBridge: actionUpdateBridge, openPlaceAdd: openPlaceAdd, openPlaceEdit: openPlaceEdit, closePlaceModal: closePlaceModal, usePlaceGps: usePlaceGps, savePlace: savePlace, deletePlace: deletePlace, toggleNotif: toggleNotif, _onNotifDeviceChange: _onNotifDeviceChange, renameNotifDevice: renameNotifDevice, removeNotifDevice: removeNotifDevice, renameMyDevice: renameMyDevice, forceSubscribePush: forceSubscribePush, reRegisterPush: reRegisterPush, openNotifDevicePicker: openNotifDevicePicker, closeNotifDevicePicker: closeNotifDevicePicker, _pickNotifDevice: _pickNotifDevice, renameNotifDeviceById: renameNotifDeviceById, removeNotifDeviceById: removeNotifDeviceById, changePassword: changePassword, toggle2faNew: toggle2faNew, closeTotpModal: closeTotpModal, activate2fa: activate2fa, show2faBackup: show2faBackup, regenBackupCodes: regenBackupCodes, openGeofencePlaces: openGeofencePlaces, _toggleGeofencePick: _toggleGeofencePick, saveGeofencePlaces: saveGeofencePlaces, toggleNg: toggleNg, saveWindowForgottenMin: saveWindowForgottenMin, saveLockForgottenMin: saveLockForgottenMin, saveTrunkForgottenMin: saveTrunkForgottenMin, saveSocLowIdlePct: saveSocLowIdlePct, saveSocArrivalPct: saveSocArrivalPct, saveSocArrivalMin: saveSocArrivalMin, saveTyreDropPsi: saveTyreDropPsi, openSocArrivalPlaces: openSocArrivalPlaces, toggleChargeEnding: toggleChargeEnding, editChargeEndingMin: editChargeEndingMin, downloadBackup: downloadBackup, uploadBackup: uploadBackup, copyBackupToClipboard: copyBackupToClipboard, shareBackup: shareBackup, clearLocalCache: clearLocalCache, toggleDiag: toggleDiag, saveDiagInterval: saveDiagInterval, exportDiag: exportDiag, clearDiag: clearDiag, openDiagSet: openDiagSet, confirmDiagSet: confirmDiagSet, _scheduleDiagRender: _scheduleDiagRender });
   if (!window['initView_config']) window['initView_config'] = function() {};
 })();
 </script>
