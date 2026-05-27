@@ -3377,7 +3377,9 @@ function _updateEnvKeys(updates) {
 
 app.get('/api/my-setup', (req, res) => {
   res.json({
-    mqtt_host:   MQTT_HOST, mqtt_port: MQTT_PORT, mqtt_user: MQTT_USER,
+    mqtt_host:   MQTT_HOST.replace(/^mqtts?:\/\//, ''),   // sem o scheme (a UI mostra limpo)
+    mqtt_port:   MQTT_PORT, mqtt_user: MQTT_USER,
+    mqtt_tls:    MQTT_HOST.startsWith('mqtts://'),         // TLS = scheme mqtts://
     mqtt_prefix: MQTT_PREFIX, has_mqtt_pass: !!MQTT_PASS,
     chassi:      GWM_CHASSI, ha_url: HA_URL, has_ha_token: !!HA_TOKEN,
     mqtt_connected: !!(mqttClient && mqttClient.connected),
@@ -3387,7 +3389,11 @@ app.get('/api/my-setup', (req, res) => {
 app.post('/api/my-setup', (req, res) => {
   const b = req.body || {};
   const env = {};
-  if (b.mqtt_host   !== undefined) { let h = String(b.mqtt_host).trim(); if (h && !h.includes('://')) h = 'mqtt://' + h; env.MQTT_HOST = h; }
+  // Host + TLS: broker público da pessoa usa mqtts:// (TLS na 8883). Sem TLS → mqtt://.
+  if (b.mqtt_host !== undefined) {
+    const bare = String(b.mqtt_host).trim().replace(/^mqtts?:\/\//, '');
+    if (bare) env.MQTT_HOST = (b.mqtt_tls ? 'mqtts://' : 'mqtt://') + bare;
+  }
   if (b.mqtt_port   !== undefined) env.MQTT_PORT   = String(parseInt(b.mqtt_port, 10) || 1883);
   if (b.mqtt_user   !== undefined) env.MQTT_USER   = String(b.mqtt_user).trim();
   if (b.mqtt_pass)                 env.MQTT_PASS   = String(b.mqtt_pass);          // só troca se veio
