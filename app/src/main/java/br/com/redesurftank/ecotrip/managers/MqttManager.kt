@@ -78,6 +78,7 @@ class MqttManager private constructor() {
     var username:                   String  = ""
     var password:                   String  = ""
     var tls:                        Boolean = false   // ssl:// — broker público com TLS
+    var paired:                     Boolean = false   // config veio por pareamento (esconde credenciais na UI)
     var prefix:                     String  = "haval/ecotrip"
     var bridgeUrl:                  String  = ""
     var bridgeToken:                String  = ""
@@ -477,20 +478,92 @@ class MqttManager private constructor() {
             .putString (SharedPreferencesKeys.MQTT_HOST,                        host)
             .putInt    (SharedPreferencesKeys.MQTT_PORT,                        port)
             .putString (SharedPreferencesKeys.MQTT_USERNAME,                    username)
-            .putString (SharedPreferencesKeys.MQTT_PASSWORD,                    password)
+            // senha NÃO vai aqui — vai pro storage criptografado (_saveSecurePassword)
             .putBoolean(SharedPreferencesKeys.MQTT_TLS,                         tls)
+            .putBoolean(SharedPreferencesKeys.MQTT_PAIRED,                      paired)
             .putString (SharedPreferencesKeys.MQTT_PREFIX,                      prefix)
             .putString (SharedPreferencesKeys.BRIDGE_URL,                       bridgeUrl)
             .putString (SharedPreferencesKeys.BRIDGE_TOKEN,                     bridgeToken)
             .putInt    (SharedPreferencesKeys.MQTT_PUBLISH_INTERVAL_WIFI_MS,     publishIntervalWifiMs)
             .putInt    (SharedPreferencesKeys.MQTT_PUBLISH_INTERVAL_CELLULAR_MS, publishIntervalCellularMs)
             .apply()
+        _saveSecurePassword(password)
 
         executor.submit {
             client?.let { safeDisconnect(it) }
             client = null
             if (enabled && host.isNotEmpty()) connectInternal()
             else setStatus(Status.DISCONNECTED)
+        }
+    }
+
+    // ── Storage seguro da senha (EncryptedSharedPreferences / Keystore) ───────────
+    private val securePrefs: android.content.SharedPreferences? by lazy {
+        try {
+            val ctx = appContext ?: return@lazy null
+            val mk = androidx.security.crypto.MasterKey.Builder(ctx)
+                .setKeyScheme(androidx.security.crypto.MasterKey.KeyScheme.AES256_GCM).build()
+            androidx.security.crypto.EncryptedSharedPreferences.create(
+                ctx, "mqtt_secure", mk,
+                androidx.security.crypto.EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                androidx.security.crypto.EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM)
+        } catch (e: Exception) { AppLogger.w(TAG, "EncryptedSharedPreferences indisponível: ${e.message}"); null }
+    }
+    private fun _saveSecurePassword(p: String) {
+        val sp = securePrefs
+        if (sp != null) {
+            sp.edit().putString("mqtt_password", p).apply()
+            prefs.edit().remove(SharedPreferencesKeys.MQTT_PASSWORD).apply()   // limpa qualquer resíduo plaintext
+        } else {
+            prefs.edit().putString(SharedPreferencesKeys.MQTT_PASSWORD, p).apply()   // fallback
+        }
+    }
+    private fun _loadSecurePassword(): String {
+        val sp = securePrefs
+        sp?.getString("mqtt_password", null)?.let { return it }
+        // migração: senha antiga no prefs plano → move pro seguro e limpa
+        val old = prefs.getString(SharedPreferencesKeys.MQTT_PASSWORD, "") ?: ""
+        if (old.isNotEmpty() && sp != null) {
+            sp.edit().putString("mqtt_password", old).apply()
+            prefs.edit().remove(SharedPreferencesKeys.MQTT_PASSWORD).apply()
+        }
+        return old
+    }
+
+    // ── Pareamento: aplica a config vinda do bridge (sem digitar/ver credenciais) ──
+    fun applyPairedConfig(host: String, port: Int, username: String, password: String,
+                          prefix: String, tls: Boolean) {
+        this.host = host; this.port = port; this.username = username
+        this.password = password; this.prefix = prefix.ifEmpty { "haval/ecotrip" }; this.tls = tls
+        this.enabled = true; this.paired = true
+        saveAndApply()
+    }
+
+    // POST <base>/api/pair/redeem {code} → aplica. onResult chamado no main thread.
+    fun pairWithCode(base: String, code: String, onResult: (Boolean, String) -> Unit) {
+        executor.submit {
+            val res: Pair<Boolean, String> = try {
+                val b = base.trim().trimEnd('/')
+                val conn = (java.net.URL("$b/api/pair/redeem").openConnection() as java.net.HttpURLConnection).apply {
+                    requestMethod = "POST"; doOutput = true
+                    setRequestProperty("Content-Type", "application/json")
+                    connectTimeout = 15000; readTimeout = 15000
+                }
+                conn.outputStream.use { it.write("{\"code\":\"${code.trim().uppercase()}\"}".toByteArray()) }
+                val rc = conn.responseCode
+                if (rc !in 200..299) {
+                    Pair(false, if (rc == 404) "Código inválido ou expirado" else "Erro $rc")
+                } else {
+                    val body = conn.inputStream.bufferedReader().use { it.readText() }
+                    val cfg = org.json.JSONObject(body).getJSONObject("config")
+                    applyPairedConfig(
+                        cfg.optString("mqtt_host"), cfg.optInt("mqtt_port", 1883),
+                        cfg.optString("mqtt_user"), cfg.optString("mqtt_pass"),
+                        cfg.optString("mqtt_prefix", "haval/ecotrip"), cfg.optBoolean("mqtt_tls", false))
+                    Pair(true, "Pareado com sucesso ✓")
+                }
+            } catch (e: Exception) { Pair(false, "Falha: ${e.message}") }
+            android.os.Handler(android.os.Looper.getMainLooper()).post { onResult(res.first, res.second) }
         }
     }
 
@@ -1398,8 +1471,9 @@ class MqttManager private constructor() {
         host             = prefs.getString (SharedPreferencesKeys.MQTT_HOST,              "") ?: ""
         port             = prefs.getInt    (SharedPreferencesKeys.MQTT_PORT,              1883)
         username         = prefs.getString (SharedPreferencesKeys.MQTT_USERNAME,          "") ?: ""
-        password         = prefs.getString (SharedPreferencesKeys.MQTT_PASSWORD,          "") ?: ""
+        password         = _loadSecurePassword()
         tls              = prefs.getBoolean(SharedPreferencesKeys.MQTT_TLS,               false)
+        paired           = prefs.getBoolean(SharedPreferencesKeys.MQTT_PAIRED,            false)
         prefix           = prefs.getString (SharedPreferencesKeys.MQTT_PREFIX,            "haval/ecotrip") ?: "haval/ecotrip"
         bridgeUrl        = prefs.getString (SharedPreferencesKeys.BRIDGE_URL,              "") ?: ""
         bridgeToken      = prefs.getString (SharedPreferencesKeys.BRIDGE_TOKEN,            "") ?: ""
