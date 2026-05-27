@@ -660,26 +660,7 @@
       <div class="sub" id="hc-other-sub">Toque pra ver tudo</div>
       <div class="sub" id="hc-other-prices" style="font-size:10px;margin-top:1px;font-variant-numeric:tabular-nums;color:#94a3b8">--</div>
     </div>
-    <div class="hero-card" id="hc-drive-card" style="grid-column:1/-1;cursor:pointer;padding:12px 14px" onclick="window.switchView&&window.switchView('drive')">
-      <div class="lbl" style="margin-bottom:10px">🏎 Condução <span style="float:right;font-size:11px;opacity:.4;font-weight:500">›</span></div>
-      <!-- 3 colunas: MODO · ESTILO · REGEN -->
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
-        <div id="hc-dc-mode" style="background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.07);border-radius:10px;padding:8px 10px;min-width:0">
-          <div style="font-size:8px;font-weight:700;color:#475569;letter-spacing:1.2px;text-transform:uppercase;margin-bottom:4px">MODO</div>
-          <div id="hc-dc-mode-v" style="font-size:15px;font-weight:800;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">--</div>
-        </div>
-        <div id="hc-dc-style" style="background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.07);border-radius:10px;padding:8px 10px;min-width:0">
-          <div style="font-size:8px;font-weight:700;color:#475569;letter-spacing:1.2px;text-transform:uppercase;margin-bottom:4px">ESTILO</div>
-          <div id="hc-dc-style-v" style="font-size:15px;font-weight:800;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">--</div>
-        </div>
-        <div id="hc-dc-regen" style="background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.07);border-radius:10px;padding:8px 10px;min-width:0">
-          <div style="font-size:8px;font-weight:700;color:#475569;letter-spacing:1.2px;text-transform:uppercase;margin-bottom:4px">REGEN</div>
-          <div id="hc-dc-regen-v" style="font-size:15px;font-weight:800;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">--</div>
-        </div>
-      </div>
-      <!-- Indicadores secundários: One-Pedal · ESP · Direção -->
-      <div id="hc-dc-extras" style="display:flex;gap:5px;margin-top:8px;flex-wrap:wrap"></div>
-    </div>
+    <!-- Card "Condução" removido do Dash (a pedido). Detalhes de condução ficam na aba Drive. -->
   </div>
 
   <!-- Status do veículo: 4 chips compactos.
@@ -1576,8 +1557,6 @@ function render(s, kpData) {
   // cada linha decide a própria visibilidade (porta/vidro só com anomalia, clima
   // só com AC, pneu só fora da faixa) via _setStatusLine, e o bloco inteiro é
   // recolhido no fim de renderCarLayers se nada sobrar.
-  const _engOn = s.engine_state === '1' || s.engine_state === 'on';
-  document.getElementById('hc-drive-card').style.display  = (charging || !_engOn) ? 'none' : '';
   document.querySelector('.status-lines').style.display    = charging ? 'none' : '';
 
   // ── SOC (card especial quando carregando)
