@@ -104,6 +104,10 @@ targets:
           - CFBundleURLName: br.com.consorciolimpagyn.havalecotrip
             CFBundleURLSchemes:
               - havalecotrip
+          # Google Sign-In nativo: callback = reversed client id do OAuth client iOS.
+          - CFBundleURLName: google-signin
+            CFBundleURLSchemes:
+              - com.googleusercontent.apps.757576020219-bl2kofq49ksrpfgk4nt2g0k2qq00u7o6
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: br.com.consorciolimpagyn.havalecotrip

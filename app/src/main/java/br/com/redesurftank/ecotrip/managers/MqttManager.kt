@@ -76,6 +76,7 @@ class MqttManager private constructor() {
     var port:                       Int     = 1883
     var username:                   String  = ""
     var password:                   String  = ""
+    var tls:                        Boolean = false   // ssl:// — broker público com TLS
     var prefix:                     String  = "haval/ecotrip"
     var bridgeUrl:                  String  = ""
     var bridgeToken:                String  = ""
@@ -476,6 +477,7 @@ class MqttManager private constructor() {
             .putInt    (SharedPreferencesKeys.MQTT_PORT,                        port)
             .putString (SharedPreferencesKeys.MQTT_USERNAME,                    username)
             .putString (SharedPreferencesKeys.MQTT_PASSWORD,                    password)
+            .putBoolean(SharedPreferencesKeys.MQTT_TLS,                         tls)
             .putString (SharedPreferencesKeys.MQTT_PREFIX,                      prefix)
             .putString (SharedPreferencesKeys.BRIDGE_URL,                       bridgeUrl)
             .putString (SharedPreferencesKeys.BRIDGE_TOKEN,                     bridgeToken)
@@ -776,7 +778,7 @@ class MqttManager private constructor() {
         try {
             setStatus(Status.CONNECTING)
             val cleanedHost = cleanHost(host)
-            val serverUri = "tcp://$cleanedHost:$port"
+            val serverUri = if (tls) "ssl://$cleanedHost:$port" else "tcp://$cleanedHost:$port"
             Log.i(TAG, "Connecting to $serverUri")
             val c = MqttClient(serverUri, CLIENT_ID + "_${System.currentTimeMillis() % 10000}", MemoryPersistence())
 
@@ -800,6 +802,10 @@ class MqttManager private constructor() {
                 if (username.isNotEmpty()) {
                     userName = username
                     password = this@MqttManager.password.toCharArray()
+                }
+                if (tls) {
+                    // Broker público com TLS: confia nas CAs do sistema (ex. Let's Encrypt).
+                    socketFactory = javax.net.ssl.SSLSocketFactory.getDefault()
                 }
                 setWill("$prefix/status", "offline".toByteArray(), 1, true)
             }
@@ -1379,6 +1385,7 @@ class MqttManager private constructor() {
         port             = prefs.getInt    (SharedPreferencesKeys.MQTT_PORT,              1883)
         username         = prefs.getString (SharedPreferencesKeys.MQTT_USERNAME,          "") ?: ""
         password         = prefs.getString (SharedPreferencesKeys.MQTT_PASSWORD,          "") ?: ""
+        tls              = prefs.getBoolean(SharedPreferencesKeys.MQTT_TLS,               false)
         prefix           = prefs.getString (SharedPreferencesKeys.MQTT_PREFIX,            "haval/ecotrip") ?: "haval/ecotrip"
         bridgeUrl        = prefs.getString (SharedPreferencesKeys.BRIDGE_URL,              "") ?: ""
         bridgeToken      = prefs.getString (SharedPreferencesKeys.BRIDGE_TOKEN,            "") ?: ""

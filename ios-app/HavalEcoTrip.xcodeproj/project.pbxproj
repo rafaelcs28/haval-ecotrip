@@ -36,7 +36,9 @@
 		BA989F1F5994F2921A13B3D3 /* ShortcutManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33D5F8203565F8E20D91E100 /* ShortcutManager.swift */; };
 		C25004AC6E9825F287951DC4 /* MotorLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A0F1250A4346D17F0539FE8 /* MotorLiveActivity.swift */; };
 		CFA18AF48CB7CF8DF7C40EC3 /* BatteryWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6B65FA59825E09151BBC7C3 /* BatteryWidget.swift */; };
+		D6B7CC3FAD98C1CC134911FE /* AuthManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBC80D42C32C99C47E1B7222 /* AuthManager.swift */; };
 		DAFD168AE90C50CE05BA20A8 /* PreClimatActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBBB57D2D187DD310113F34A /* PreClimatActivityAttributes.swift */; };
+		DE39B1C98DBD4A0B7B3D515F /* AuthConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = A799F69A43F78E263048C8F4 /* AuthConfig.swift */; };
 		E7A22E919521A94E9004D8F2 /* LivePreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A804763C29A6FBD8871C5A7 /* LivePreview.swift */; };
 /* End PBXBuildFile section */
 
@@ -83,6 +85,7 @@
 		7BA445855D7E9BCBC513DE19 /* HavalEcoTrip.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = HavalEcoTrip.entitlements; sourceTree = "<group>"; };
 		915E7661920B0022793D3A63 /* PreClimatLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreClimatLiveActivity.swift; sourceTree = "<group>"; };
 		968AA8DFD87E74A832ED71A5 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		A799F69A43F78E263048C8F4 /* AuthConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthConfig.swift; sourceTree = "<group>"; };
 		B41BC4A6A889A1B5BBFCF7C6 /* PwaWebView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PwaWebView.swift; sourceTree = "<group>"; };
 		B5A372CA99C89C5712EE54BC /* HavalEcoTripApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HavalEcoTripApp.swift; sourceTree = "<group>"; };
 		B6A433A5AA48336FD73F1C85 /* ChargeActivityLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChargeActivityLiveActivity.swift; sourceTree = "<group>"; };
@@ -95,6 +98,7 @@
 		E4593E338CE49445D2B4E37A /* Settings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Settings.swift; sourceTree = "<group>"; };
 		E612200FCE6AA9F646191052 /* TripActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripActivityAttributes.swift; sourceTree = "<group>"; };
 		EBBB57D2D187DD310113F34A /* PreClimatActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreClimatActivityAttributes.swift; sourceTree = "<group>"; };
+		EBC80D42C32C99C47E1B7222 /* AuthManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthManager.swift; sourceTree = "<group>"; };
 		EEEFCC8135B0627DFDB60013 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		F6B65FA59825E09151BBC7C3 /* BatteryWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BatteryWidget.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -105,6 +109,8 @@
 			children = (
 				D9926C58E001CD8511E829FB /* ActivityManager.swift */,
 				EEEFCC8135B0627DFDB60013 /* Assets.xcassets */,
+				A799F69A43F78E263048C8F4 /* AuthConfig.swift */,
+				EBC80D42C32C99C47E1B7222 /* AuthManager.swift */,
 				2F97B54C85FEC5A112CB0C9E /* BackgroundRefresh.swift */,
 				C88C20EF0FDB1AB8EB036191 /* CarActions.swift */,
 				36AA01E4F54D0727EF341F49 /* ContentView.swift */,
@@ -278,6 +284,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				97D85BD3A8D8D549ABD6A944 /* ActivityManager.swift in Sources */,
+				DE39B1C98DBD4A0B7B3D515F /* AuthConfig.swift in Sources */,
+				D6B7CC3FAD98C1CC134911FE /* AuthManager.swift in Sources */,
 				AE6DF0BA2B76E13159F83FE3 /* BackgroundRefresh.swift in Sources */,
 				605ED8EEC91528FFBC054A48 /* CarActions.swift in Sources */,
 				920A0533D20932EF36FC4D49 /* ChargeActivityAttributes.swift in Sources */,
