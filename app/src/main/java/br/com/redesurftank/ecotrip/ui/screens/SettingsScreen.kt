@@ -63,6 +63,11 @@ fun SettingsScreen(
     var password         by remember { mutableStateOf(mqttManager.password) }
     var tls              by remember { mutableStateOf(mqttManager.tls) }
     var prefix           by remember { mutableStateOf(mqttManager.prefix) }
+    var pairCode         by remember { mutableStateOf("") }
+    var pairMsg          by remember { mutableStateOf("") }
+    var pairing          by remember { mutableStateOf(false) }
+    var pairedState      by remember { mutableStateOf(mqttManager.paired) }
+    var showMqttManual   by remember { mutableStateOf(false) }
     var bridgeUrlStr     by remember {
         mutableStateOf(
             mqttManager.bridgeUrl.ifEmpty {
@@ -283,6 +288,54 @@ fun SettingsScreen(
             if (mqttEnabled) {
                 Spacer(Modifier.height(4.dp))
 
+                // ── Parear (recomendado): busca broker/senha do servidor com um código ──
+                if (pairedState) {
+                    Text("✅ Pareado — credenciais recebidas do app (ocultas por segurança)",
+                        fontSize = 12.sp, color = Green)
+                    TextButton(onClick = { showMqttManual = !showMqttManual }) {
+                        Text(if (showMqttManual) "Ocultar configuração manual" else "Configuração manual / re-parear",
+                            fontSize = 12.sp, color = TextSecondary)
+                    }
+                } else {
+                    Text("Parear com o app", fontSize = 13.sp, color = TextPrimary, fontWeight = FontWeight.SemiBold)
+                    Text("Gere o código no app (Ajustes → Conexão → Parear o carro) e digite aqui. Vem pronto — você não digita broker/senha.",
+                        fontSize = 11.sp, color = TextSecondary)
+                    OutlinedTextField(
+                        value = pairCode,
+                        onValueChange = { pairCode = it.uppercase() },
+                        label = { Text("Código de pareamento", fontSize = 12.sp) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = mqttFieldColors(),
+                    )
+                    Button(
+                        onClick = {
+                            pairing = true; pairMsg = ""
+                            val base = bridgeUrlStr.ifBlank { "https://mac-mini.tailacc6e7.ts.net" }
+                            mqttManager.pairWithCode(base, pairCode) { ok, msg ->
+                                pairing = false; pairMsg = msg
+                                if (ok) {
+                                    pairedState = true; showMqttManual = false; pairCode = ""; mqttEnabled = true
+                                    host = mqttManager.host; port = mqttManager.port.toString()
+                                    username = mqttManager.username; password = mqttManager.password
+                                    prefix = mqttManager.prefix; tls = mqttManager.tls
+                                }
+                            }
+                        },
+                        enabled = !pairing && pairCode.isNotBlank(),
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = Green),
+                        shape = RoundedCornerShape(8.dp),
+                    ) {
+                        Text(if (pairing) "Pareando…" else "Parear", fontSize = 13.sp, color = SurfaceDeep, fontWeight = FontWeight.SemiBold)
+                    }
+                    if (pairMsg.isNotBlank()) {
+                        Text(pairMsg, fontSize = 12.sp, color = if (pairMsg.contains("✓")) Green else Color(0xFFFF4444))
+                    }
+                    Spacer(Modifier.height(6.dp))
+                }
+
+                if (!pairedState || showMqttManual) {
                 MqttField("Host / IP", host, KeyboardType.Uri) { host = it }
                 MqttField("Porta", port, KeyboardType.Number) { port = it }
                 MqttField("Usuário", username, KeyboardType.Email) { username = it }
@@ -316,6 +369,7 @@ fun SettingsScreen(
                 }
 
                 MqttField("Prefixo de tópico", prefix, KeyboardType.Uri) { prefix = it }
+                }   // fim do if (!pairedState || showMqttManual)
 
                 Spacer(Modifier.height(2.dp))
                 MqttField("URL do Bridge (iPhone PWA)", bridgeUrlStr, KeyboardType.Uri) { bridgeUrlStr = it }
@@ -412,6 +466,7 @@ fun SettingsScreen(
                             mqttManager.username                  = username
                             mqttManager.password                  = password
                             mqttManager.tls                       = tls
+                            mqttManager.paired                    = pairedState
                             mqttManager.prefix                    = prefix.ifEmpty { "haval/ecotrip" }
                             mqttManager.bridgeUrl   = bridgeUrlStr.trim()
                             mqttManager.bridgeToken = bridgeTokenStr.trim()

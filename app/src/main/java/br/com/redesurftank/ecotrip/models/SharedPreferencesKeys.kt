@@ -97,6 +97,7 @@ object SharedPreferencesKeys {
     const val MQTT_USERNAME = "mqtt_username"
     const val MQTT_PASSWORD = "mqtt_password"
     const val MQTT_TLS      = "mqtt_tls"   // ssl:// (broker público com TLS)
+    const val MQTT_PAIRED   = "mqtt_paired"   // config veio por pareamento
     const val MQTT_PREFIX            = "mqtt_prefix"
     const val MQTT_PUBLISH_INTERVAL_S           = "mqtt_publish_interval_s"           // legado (segundos)
     const val MQTT_PUBLISH_INTERVAL_MS          = "mqtt_publish_interval_ms"          // legado (ms único)

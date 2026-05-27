@@ -24,8 +24,8 @@ android {
         minSdk = 28
         //noinspection ExpiredTargetSdkVersion
         targetSdk = 28
-        versionCode = 176
-        versionName = "5.45"
+        versionCode = 177
+        versionName = "5.46"
 
         buildConfigField("String", "GITHUB_REPO", "\"rafaelcs28/haval-ecotrip\"")
     }
@@ -83,6 +83,7 @@ dependencies {
     implementation("com.google.android.material:material:1.12.0")
     implementation("org.eclipse.paho:org.eclipse.paho.client.mqttv3:1.2.5")
     implementation("org.slf4j:slf4j-nop:1.7.36")
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")   // EncryptedSharedPreferences (credenciais)
     implementation(libs.material.icons.extended)
     annotationProcessor(libs.annotation.processor)
     compileOnly(libs.annotation)
