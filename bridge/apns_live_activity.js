@@ -151,6 +151,7 @@ async function _send(targets, body, pushType = 'liveactivity') {
     req.on('response', h => { status = h[':status']; });
     req.on('data', c => { respBody += c; });
     req.on('end', () => {
+      console.log(`[apns] resp ${status} (${pushType}) token=${t.token.slice(0,8)}…${respBody ? ' body=' + respBody.slice(0,160) : ''}`);
       if (status === 200) { sent++; }
       else {
         console.warn(`[apns] HTTP ${status} token ${t.token.slice(0,8)}…: ${respBody.slice(0,140)}`);

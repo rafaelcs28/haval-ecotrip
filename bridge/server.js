@@ -384,8 +384,10 @@ function _startPreclimatLA(fireMs) {
   };
   console.log(`[preclimat] LA push-to-start (agendada p/ ${preclimat.time})`);
   if (!apnsLive.enabled || !preclimat.device_id) return;
+  // O `alert` é necessário: sem ele o iOS trata o push-to-start como silencioso
+  // e não apresenta a Live Activity com a tela bloqueada/app fechado.
   apnsLive.pushStart(PRECLIMAT_LA_TYPE, preclimat.device_id, _preclimatAttributes(), _preclimatContentState(),
-    { staleDate: fireMs })
+    { staleDate: fireMs, alert: { title: '⏰ Pré-climatização', body: `Começa às ${preclimat.time}` } })
     .catch(e => console.warn('[apns] preclimat pushStart falhou:', e.message));
 }
 function _preclimatEligibleToday(now) {
