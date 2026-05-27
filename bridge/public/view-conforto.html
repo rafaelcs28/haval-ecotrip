@@ -824,7 +824,7 @@ function _pcCard(s) {
   const bodyHtml = !open ? '' : `
     <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-top:1px solid rgba(255,255,255,.06)">
       <span style="font-size:12px;font-weight:600;color:#cbd5e1">Horário</span>
-      <input type="time" value="${s.time}" onchange="savePreclimatSched('${s.id}','time',this.value)"
+      <input type="time" value="${s.time}" onchange="savePreclimatTime('${s.id}',this.value)"
         style="background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:8px;color:#f1f5f9;font-size:15px;font-weight:700;padding:5px 10px;-webkit-appearance:none;cursor:pointer">
     </div>
     <div style="padding:8px 0 2px"><div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">${rec}</div></div>
@@ -837,7 +837,7 @@ function _pcCard(s) {
       <div style="display:flex;align-items:center;gap:10px;min-width:0">
         <span style="font-size:12px;color:#64748b;width:12px">${open ? '▾' : '▸'}</span>
         <div style="min-width:0">
-          <div style="font-size:18px;font-weight:800;color:#f1f5f9">${s.time}</div>
+          <div id="pc-time-${s.id}" style="font-size:18px;font-weight:800;color:#f1f5f9">${s.time}</div>
           <div style="font-size:11px;color:#94a3b8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${summary}</div>
         </div>
       </div>
@@ -878,6 +878,22 @@ async function savePreclimatSched(id, field, value) {
     if (r.ok) { Object.assign(s, await r.json()); renderPreclimat(); }
     else showToast('Erro ao salvar', 'err');
   } catch (_) { showToast('Erro ao salvar', 'err'); }
+}
+
+// Horário: salva SEM re-renderizar (re-render destruiria o <input> e fecharia o
+// picker da hora antes do usuário confirmar). Atualiza só o texto do cabeçalho.
+function savePreclimatTime(id, value) {
+  const s = _pcGet(id); if (!s) return;
+  s.time = value;
+  const el = document.getElementById('pc-time-' + id);
+  if (el) el.textContent = value;
+  if (!LIVE_MODE) return;
+  const body = { id, time: value, device_id: localStorage.getItem('eco_device_id') || '' };
+  fetch('/api/preclimat/schedule', {
+    method: 'POST', headers: { 'Authorization': 'Bearer ' + BRIDGE_TOKEN, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }).then(r => r.ok ? r.json() : null).then(upd => { if (upd) Object.assign(s, upd); })
+    .catch(() => showToast('Erro ao salvar horário', 'err'));
 }
 
 async function addPreclimatSchedule() {
@@ -982,7 +998,7 @@ async function bootstrapState() {
 bootstrapState();
 loadPreclimat();
   // Expõe handlers de onclick no window
-  Object.assign(window, { toggleAC, adjustTemp, toggleSync, toggleAuto, adjustFan, toggleCycle, cycleSeatVent, addPreclimatSchedule, removePreclimatSched, togglePreclimatSched, togglePreclimatExpand, setPreclimatRec, adjustPreclimatTemp, adjustPreclimatFan, adjustPreclimatDur, adjustPreclimatLead, savePreclimatSched });
+  Object.assign(window, { toggleAC, adjustTemp, toggleSync, toggleAuto, adjustFan, toggleCycle, cycleSeatVent, addPreclimatSchedule, removePreclimatSched, togglePreclimatSched, togglePreclimatExpand, setPreclimatRec, adjustPreclimatTemp, adjustPreclimatFan, adjustPreclimatDur, adjustPreclimatLead, savePreclimatSched, savePreclimatTime });
   // Handler de resultado HVAC via WS push (mais rápido que polling — confirma logo
   // que o APK faz fetchCurrent ~2.5s após requestSetting).
   window._onHvacResult = function({ control, result }) {
