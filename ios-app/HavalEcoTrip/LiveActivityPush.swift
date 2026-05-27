@@ -41,9 +41,23 @@ final class LiveActivityPush {
             }
         }
         // Atividades já ativas + futuras (inclui as criadas por push-to-start).
-        for activity in Activity<T>.activities { track(activity, type: type) }
+        let existing = Activity<T>.activities
+        for activity in existing { track(activity, type: type) }
+        // Só pode haver UMA LA ativa por tipo. Se sobraram duplicatas (ex.: restart
+        // do bridge no meio da viagem criou outra), encerra as extras agora.
+        if let keep = existing.last, existing.count > 1 { dedupe(type: T.self, keeping: keep.id) }
         Task {
-            for await activity in Activity<T>.activityUpdates { track(activity, type: type) }
+            for await activity in Activity<T>.activityUpdates {
+                track(activity, type: type)
+                dedupe(type: T.self, keeping: activity.id)   // mantém a mais nova, encerra as outras
+            }
+        }
+    }
+
+    // Encerra todas as Live Activities ativas do tipo, exceto a `keepID`.
+    private func dedupe<T: ActivityAttributes>(type: T.Type, keeping keepID: String) {
+        for a in Activity<T>.activities where a.id != keepID && a.activityState == .active {
+            Task { await a.end(nil, dismissalPolicy: .immediate) }
         }
     }
 

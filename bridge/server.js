@@ -5439,6 +5439,7 @@ function _chargeContentState() {
 // ── Live Activity de viagem ao vivo ───────────────────────────────────────
 const TRIP_LA_TYPE = 'TripActivityAttributes';
 let _tripActive = false;
+let _lastTripSnapshot = null;   // último snapshot não-vazio (p/ estado final correto)
 function _tripContentState(ct, active) {
   const dist = +ct.distKm || 0;
   const net  = Math.abs(+ct.netKwh || 0);
@@ -5453,22 +5454,33 @@ function _tripContentState(ct, active) {
   };
 }
 // Chamado pelo handler de current_trip a cada atualização do snapshot.
-function handleTripUpdate(ct) {
+// isRetained: mensagem reentregue pelo broker (ex.: restart do bridge no meio da
+// viagem). Nesse caso a LA JÁ existe no telefone → só atualiza, nunca cria outra
+// (era a causa de aparecerem 2 LAs idênticas).
+function handleTripUpdate(ct, isRetained) {
+  if (ct) _lastTripSnapshot = ct;   // guarda o último snapshot não-vazio
   if (!apnsLive.enabled) { _tripActive = !!ct; return; }
   if (ct) {
     const cs = _tripContentState(ct, true);
     if (!_tripActive) {
       _tripActive = true;
-      apnsLive.pushStart(TRIP_LA_TYPE, '', { carName: 'Haval H6 PHEV' }, cs,
-        { staleDate: Date.now() + 6 * 3600_000, alert: { title: '🚗 Viagem iniciada', body: 'Acompanhe na tela bloqueada.' } })
-        .catch(e => console.warn('[apns] trip pushStart falhou:', e.message));
+      if (isRetained) {
+        // Redelivery: a LA já existe (token de update persistido) — só atualiza.
+        apnsLive.pushUpdate(TRIP_LA_TYPE, {}, cs, {}).catch(() => {});
+      } else {
+        apnsLive.pushStart(TRIP_LA_TYPE, '', { carName: 'Haval H6 PHEV' }, cs,
+          { staleDate: Date.now() + 6 * 3600_000, alert: { title: '🚗 Viagem iniciada', body: 'Acompanhe na tela bloqueada.' } })
+          .catch(e => console.warn('[apns] trip pushStart falhou:', e.message));
+      }
     } else {
       apnsLive.pushUpdate(TRIP_LA_TYPE, {}, cs, {}).catch(() => {});
     }
   } else if (_tripActive) {
-    // Viagem encerrada — last snapshot vira final (some em ~5 min).
+    // Viagem encerrada. Usa o ÚLTIMO snapshot não-vazio — current_trip já é null
+    // aqui, senão a LA final mostraria 0.0 km (era o bug do "zerou ao encerrar").
     _tripActive = false;
-    const last = _tripContentState(state.current_trip || {}, false);
+    const last = _tripContentState(_lastTripSnapshot || {}, false);
+    _lastTripSnapshot = null;
     apnsLive.pushUpdate(TRIP_LA_TYPE, {}, last, { isFinal: true, dismissalDate: Date.now() + 5 * 60_000 })
       .catch(e => console.warn('[apns] trip end falhou:', e.message));
   }
@@ -6703,7 +6715,7 @@ function applyMqttMessage(key, value, isRetained = false) {
           console.error('current_trip JSON inválido:', e.message);
         }
       }
-      handleTripUpdate(state.current_trip);
+      handleTripUpdate(state.current_trip, isRetained);
       break;
     }
 
