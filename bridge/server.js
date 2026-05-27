@@ -1977,7 +1977,7 @@ function _maybeUpdateCarHeading() {
   if (!lat || !lng) return;
   if (_headingPrevLat == null) { _headingPrevLat = lat; _headingPrevLng = lng; return; }
   if (haversineM(_headingPrevLat, _headingPrevLng, lat, lng) < 5) return;   // movimento mínimo (~5 m)
-  if ((+state.speed_kmh || 0) > 3) {
+  if ((+state.speed_kmh || 0) > 1) {   // ≥1 km/h: atualiza rumo até em manobra lenta (5 m filtra jitter)
     const toRad = d => d * Math.PI / 180, toDeg = r => r * 180 / Math.PI;
     const f1 = toRad(_headingPrevLat), f2 = toRad(lat), dl = toRad(lng - _headingPrevLng);
     const y = Math.sin(dl) * Math.cos(f2);
