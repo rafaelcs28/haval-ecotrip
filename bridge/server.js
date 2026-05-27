@@ -320,7 +320,7 @@ const NOTIF_DEFAULTS = {
   soc_arrival_min:      5,      // minutos após chegar antes de alertar
   soc_arrival_pct:      30,     // threshold SOC % na chegada
   soc_full_long:        false,  // SOC > 95% por mais de 24h (saúde da bateria)
-  tyre_drop:            false,  // queda de pressão > X PSI durante viagem
+  tyre_drop:            true,   // queda de pressão > X PSI durante viagem (segurança — default ON)
   tyre_drop_psi:        4,      // queda mínima para alertar (PSI)
   // ── Live Activities (masters GLOBAIS, default LIGADO — preserva comportamento atual).
   // Controlam se cada card ao vivo nasce na tela de bloqueio. via /api/la-prefs.
@@ -1541,18 +1541,15 @@ function _captureTyreBaseline() {
 }
 
 function checkTyreDrop(pos, currentPsi) {
-  const enabled = pushSubs.some(s => getPrefsForDevice(s.device_id).tyre_drop);
-  if (!enabled) return;
-  if ((+state.speed_kmh || 0) < 5) return;  // parado — não alerta
+  // Segurança: detecta SEMPRE (independe do toggle) pra destacar o pneu na LA de
+  // Viagem. A notificação respeita a pref tyre_drop (default LIGADA).
+  if ((+state.speed_kmh || 0) < 5) return;  // parado — não avalia
   if (!_tyreTripBaseline[pos]) { _captureTyreBaseline(); return; }
   if (_tyreDropAlertSent[pos]) return;
-  const dropPsi = Math.max(...pushSubs
-    .map(s => getPrefsForDevice(s.device_id))
-    .filter(p => p.tyre_drop)
-    .map(p => Math.max(1, +(p.tyre_drop_psi) || 4)));
+  const dropPsi = Math.max(1, +notifPrefs.tyre_drop_psi || 4);
   const drop = _tyreTripBaseline[pos] - currentPsi;
   if (drop < dropPsi) return;
-  _tyreDropAlertSent[pos] = true;
+  _tyreDropAlertSent[pos] = true;   // ← destaca o pneu na LA de Viagem
   const name = { fl: 'Dianteiro Esq.', fr: 'Dianteiro Dir.', rl: 'Traseiro Esq.', rr: 'Traseiro Dir.' }[pos] || pos.toUpperCase();
   sendPush('⚠️ Queda de pressão detectada',
     `${name}: ${currentPsi.toFixed(1)} PSI (era ${_tyreTripBaseline[pos].toFixed(1)} PSI, queda de ${drop.toFixed(1)} PSI)`,
@@ -5644,7 +5641,6 @@ function _tripContentState(ct, active) {
   // Enriquecimento ao vivo: SOC, autonomia EV e pneus (glance no bloqueio dirigindo).
   const tyres = ['fl', 'fr', 'rl', 'rr'].map(p => +state[`tyre_pressure_${p}`] || 0).filter(v => v > 0);
   const tyreMin = tyres.length ? Math.min(...tyres) : 0;
-  const tyreMax = tyres.length ? Math.max(...tyres) : 0;
   return {
     distKm: dist, netKwh: net,
     effKwh100: dist > 0.5 ? net / dist * 100 : 0,
@@ -5654,8 +5650,9 @@ function _tripContentState(ct, active) {
     socPct:  Math.round(+state.soc_pct || 0),
     rangeKm: Math.round(+state.range_ev_km || 0),
     tyreMinPsi: tyreMin,
-    // alerta: pneu baixo (<30 PSI) ou assimetria ≥5 PSI entre os 4 (provável furo)
-    tyreAlert: tyres.length === 4 && (tyreMin < 30 || (tyreMax - tyreMin) >= 5),
+    // alerta = perda de pressão DETECTADA na viagem (checkTyreDrop) → pneu em
+    // destaque na LA + notificação. Sem isso, fica só o PSI normal.
+    tyreAlert: Object.values(_tyreDropAlertSent).some(Boolean),
     active: !!active,
     updatedAtMs: Date.now(),
   };
