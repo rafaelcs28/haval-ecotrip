@@ -78,6 +78,7 @@ enum BackgroundRefresh {
                 soc: soc, powerKw: pwr, sessionKwh: kwh,
                 remainingMin: Int(rem.rounded()),
                 charging: charging,
+                targetPct: (json["charge_limit_pct"] as? Double) ?? 100,
                 updatedAtMs: Date().timeIntervalSince1970 * 1000
             )
             let content = ActivityContent(state: state, staleDate: Date().addingTimeInterval(60 * 60))

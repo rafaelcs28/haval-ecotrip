@@ -49,6 +49,7 @@ final class ActivityManager: ObservableObject {
         let attributes = ChargeActivityAttributes(carName: "Haval H6 PHEV")
         let initial = ChargeActivityAttributes.ContentState(
             soc: 0, powerKw: 0, sessionKwh: 0, remainingMin: 0, charging: false,
+            targetPct: 100,
             updatedAtMs: Date().timeIntervalSince1970 * 1000
         )
         do {
@@ -75,6 +76,7 @@ final class ActivityManager: ObservableObject {
         let state = ChargeActivityAttributes.ContentState(
             soc: soc, powerKw: pwr, sessionKwh: kwh,
             remainingMin: Int(rem.rounded()), charging: true,
+            targetPct: 100,
             updatedAtMs: Date().timeIntervalSince1970 * 1000
         )
         await activity.update(ActivityContent(state: state, staleDate: Date().addingTimeInterval(60 * 60)))
@@ -85,6 +87,7 @@ final class ActivityManager: ObservableObject {
         guard let activity = currentActivity else { return }
         let final = ChargeActivityAttributes.ContentState(
             soc: 0, powerKw: 0, sessionKwh: 0, remainingMin: 0, charging: false,
+            targetPct: 100,
             updatedAtMs: Date().timeIntervalSince1970 * 1000
         )
         let content = ActivityContent(state: final, staleDate: nil)
@@ -137,6 +140,7 @@ final class ActivityManager: ObservableObject {
                 sessionKwh: kwh,
                 remainingMin: Int(rem.rounded()),
                 charging: charging,
+                targetPct: (json["charge_limit_pct"] as? Double) ?? 100,
                 updatedAtMs: Date().timeIntervalSince1970 * 1000
             )
             let content = ActivityContent(state: state, staleDate: Date().addingTimeInterval(60 * 60))

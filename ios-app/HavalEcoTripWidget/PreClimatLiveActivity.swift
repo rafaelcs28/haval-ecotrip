@@ -47,8 +47,11 @@ struct PreClimatLiveActivity: Widget {
                         Label(meta.title, systemImage: meta.icon)
                             .font(.caption).bold().foregroundStyle(meta.color)
                             .labelStyle(.titleAndIcon)
-                        if s.temp > 0 {
-                            Text(String(format: "%.0f° · fan %d/7", s.temp, s.fan))
+                        if s.tempIn != 0 || s.tempOut != 0 {
+                            Text("Int \(Int(s.tempIn))° · Ext \(Int(s.tempOut))°")
+                                .font(.caption2).foregroundStyle(.secondary)
+                        } else if s.temp > 0 {
+                            Text(String(format: "AC %.0f° · fan %d/7", s.temp, s.fan))
                                 .font(.caption2).foregroundStyle(.secondary)
                         }
                     }
@@ -117,9 +120,16 @@ struct PreClimatLockScreenView: View {
             } else {
                 Text(state.detail).font(.title3).bold()
             }
+            // Temperaturas do carro em destaque
+            HStack(spacing: 18) {
+                tempCell("Interna", state.tempIn, .cyan)
+                tempCell("Externa", state.tempOut, .orange)
+                Spacer()
+            }
+            // AC alvo + ventilação (secundário)
             HStack {
                 if state.temp > 0 {
-                    Label(String(format: "%.0f °C", state.temp), systemImage: "thermometer")
+                    Label(String(format: "AC %.0f°", state.temp), systemImage: "snowflake")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -130,5 +140,17 @@ struct PreClimatLockScreenView: View {
             }
         }
         .padding(14)
+    }
+
+    @ViewBuilder
+    private func tempCell(_ label: String, _ value: Double, _ color: Color) -> some View {
+        if value != 0 {
+            VStack(alignment: .leading, spacing: 0) {
+                Text(label).font(.caption2).foregroundStyle(.secondary)
+                Text(String(format: "%.0f°", value))
+                    .font(.system(size: 22, weight: .bold, design: .rounded))
+                    .foregroundStyle(color)
+            }
+        }
     }
 }
