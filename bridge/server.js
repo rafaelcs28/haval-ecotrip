@@ -326,23 +326,33 @@ function saveNotifPrefs() {
 // ── Pré-climatização agendada ─────────────────────────────────────────────
 // Estrutura: { enabled, time:"HH:MM", recurrence:"once"|"daily"|"weekdays"|"weekends",
 //              temp:22.0, fan:3, lastFiredDate:"YYYY-MM-DD" }
-const PRECLIMAT_DEFAULTS = { enabled: false, time: '07:30', recurrence: 'daily', temp: 22.0, fan: 3, duration: 20, lastFiredDate: '', startedDate: '' };
-let preclimat = { ...PRECLIMAT_DEFAULTS };
+// Lista de agendamentos. Cada um: { id, enabled, time:"HH:MM", recurrence,
+//   temp, fan, duration, leadMin, device_id, lastFiredDate, startedDate }.
+const PRECLIMAT_SCHED_DEFAULTS = { enabled: true, time: '07:30', recurrence: 'daily', temp: 22.0, fan: 3, duration: 20, leadMin: 10, device_id: '', lastFiredDate: '', startedDate: '' };
+function _genSchedId() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
+let preclimat = { schedules: [] };
 try {
-  if (fs.existsSync(PRECLIMAT_FILE))
-    preclimat = { ...PRECLIMAT_DEFAULTS, ...JSON.parse(fs.readFileSync(PRECLIMAT_FILE, 'utf8')) };
+  if (fs.existsSync(PRECLIMAT_FILE)) {
+    const raw = JSON.parse(fs.readFileSync(PRECLIMAT_FILE, 'utf8'));
+    if (Array.isArray(raw.schedules)) {
+      preclimat.schedules = raw.schedules.map(s => ({ ...PRECLIMAT_SCHED_DEFAULTS, ...s, id: s.id || _genSchedId() }));
+    } else if (raw && raw.time) {
+      // Migra o formato antigo (agendamento único) pra um item da lista.
+      preclimat.schedules = [{ ...PRECLIMAT_SCHED_DEFAULTS, ...raw, id: _genSchedId() }];
+    }
+  }
 } catch (_) {}
 function savePreclimat() {
   try { fs.writeFileSync(PRECLIMAT_FILE, JSON.stringify(preclimat, null, 2)); } catch (_) {}
 }
 
-// Status ao vivo da pré-climatização — lido pelo app iOS (GET /api/preclimat)
-// pra dirigir a Live Activity local. phase: idle|scheduled|starting|engine_on|
-// cooling|restoring|ended|failed. `endsAtMs` alimenta a contagem regressiva.
+// Live Activity: uma por vez. `_activeSched` é o agendamento que a controla.
+// phase: idle|scheduled|starting|engine_on|cooling|restoring|ended|failed.
 let preclimatStatus = { phase: 'idle', detail: '', endsAtMs: 0, temp: 0, fan: 0, updatedAtMs: 0 };
+let _activeSched = null;
 const PRECLIMAT_LA_TYPE = 'PreClimatActivityAttributes';
 function _preclimatAttributes() {
-  return { scheduledTime: preclimat.time, carName: 'Haval H6 PHEV' };
+  return { scheduledTime: _activeSched ? _activeSched.time : '', carName: 'Haval H6 PHEV' };
 }
 function _preclimatContentState() {
   return {
@@ -353,62 +363,60 @@ function _preclimatContentState() {
     endsAtMs: preclimatStatus.endsAtMs, updatedAtMs: preclimatStatus.updatedAtMs,
   };
 }
-// Atualiza o status E empurra pra Live Activity via APNs (update). Para fases
-// finais (ended/failed), agenda o end da LA ~5 min depois (mantém visível).
 function _setPreclimatStatus(phase, detail, extra = {}) {
   preclimatStatus = {
     phase, detail,
     endsAtMs: extra.endsAtMs != null ? extra.endsAtMs : preclimatStatus.endsAtMs,
-    temp: extra.temp != null ? extra.temp : preclimat.temp,
-    fan:  extra.fan  != null ? extra.fan  : preclimat.fan,
+    temp: extra.temp != null ? extra.temp : preclimatStatus.temp,
+    fan:  extra.fan  != null ? extra.fan  : preclimatStatus.fan,
     updatedAtMs: Date.now(),
   };
   console.log(`[preclimat] status → ${phase}: ${detail}`);
-  if (!apnsLive.enabled || !preclimat.device_id) return;
-  const isFinal = phase === 'ended' || phase === 'failed';
-  apnsLive.pushUpdate(PRECLIMAT_LA_TYPE, { deviceId: preclimat.device_id }, _preclimatContentState(),
+  const dev = _activeSched && _activeSched.device_id;
+  if (!apnsLive.enabled || !dev) return;
+  apnsLive.pushUpdate(PRECLIMAT_LA_TYPE, { deviceId: dev }, _preclimatContentState(),
     { staleDate: preclimatStatus.endsAtMs || undefined })
     .catch(e => console.warn('[apns] preclimat update falhou:', e.message));
-  if (isFinal) {
-    // Encerra a LA 5 min depois (deixa o usuário ver o estado final).
+  if (phase === 'ended' || phase === 'failed') {
     setTimeout(() => {
-      apnsLive.pushUpdate(PRECLIMAT_LA_TYPE, { deviceId: preclimat.device_id }, _preclimatContentState(),
+      apnsLive.pushUpdate(PRECLIMAT_LA_TYPE, { deviceId: dev }, _preclimatContentState(),
         { isFinal: true, dismissalDate: Date.now() })
         .catch(e => console.warn('[apns] preclimat end falhou:', e.message));
     }, 5 * 60_000);
   }
 }
-// Cria a Live Activity (push-to-start) na janela T-5min, fase "scheduled".
-function _startPreclimatLA(fireMs) {
-  preclimatStatus = {
-    phase: 'scheduled', detail: `Agendada para ${preclimat.time}`,
-    endsAtMs: fireMs, temp: preclimat.temp, fan: preclimat.fan, updatedAtMs: Date.now(),
-  };
-  console.log(`[preclimat] LA push-to-start (agendada p/ ${preclimat.time})`);
-  if (!apnsLive.enabled || !preclimat.device_id) return;
-  // O `alert` é necessário: sem ele o iOS trata o push-to-start como silencioso
-  // e não apresenta a Live Activity com a tela bloqueada/app fechado.
-  apnsLive.pushStart(PRECLIMAT_LA_TYPE, preclimat.device_id, _preclimatAttributes(), _preclimatContentState(),
-    { staleDate: fireMs, alert: { title: '⏰ Pré-climatização', body: `Começa às ${preclimat.time}` } })
+// Cria a Live Activity (push-to-start) na janela T-leadMin, fase "scheduled".
+function _startPreclimatLA(sched, fireMs) {
+  _activeSched = sched;
+  preclimatStatus = { phase: 'scheduled', detail: `Agendada para ${sched.time}`,
+    endsAtMs: fireMs, temp: sched.temp, fan: sched.fan, updatedAtMs: Date.now() };
+  console.log(`[preclimat] LA push-to-start (agendada p/ ${sched.time})`);
+  if (!apnsLive.enabled || !sched.device_id) return;
+  // O `alert` é necessário: sem ele o iOS trata o push-to-start como silencioso.
+  apnsLive.pushStart(PRECLIMAT_LA_TYPE, sched.device_id, _preclimatAttributes(), _preclimatContentState(),
+    { staleDate: fireMs, alert: { title: '⏰ Pré-climatização', body: `Começa às ${sched.time}` } })
     .catch(e => console.warn('[apns] preclimat pushStart falhou:', e.message));
 }
-// Encerra a Live Activity de pré-climatização agora (ao desativar/reagendar).
-function _dismissPreclimatLA() {
+// Encerra a LA agora SE ela for deste agendamento (ao desativar/reagendar/remover).
+function _dismissPreclimatLA(sched) {
+  if (!_activeSched || _activeSched.id !== sched.id) return;
+  const dev = sched.device_id;
+  _activeSched = null;
   preclimatStatus = { phase: 'ended', detail: 'Cancelada', temp: 0, fan: 0, endsAtMs: 0, updatedAtMs: Date.now() };
-  if (!apnsLive.enabled || !preclimat.device_id) return;
-  console.log('[preclimat] encerrando LA (desativada/reagendada)');
-  apnsLive.pushUpdate(PRECLIMAT_LA_TYPE, { deviceId: preclimat.device_id }, _preclimatContentState(),
+  if (!apnsLive.enabled || !dev) return;
+  console.log('[preclimat] encerrando LA (desativado/reagendado/removido)');
+  apnsLive.pushUpdate(PRECLIMAT_LA_TYPE, { deviceId: dev }, _preclimatContentState(),
     { isFinal: true, dismissalDate: Date.now() })
     .catch(e => console.warn('[apns] preclimat dismiss falhou:', e.message));
 }
-function _preclimatEligibleToday(now) {
+function _schedEligibleToday(sched, now) {
   const dow = now.getDay(); // 0=Dom … 6=Sáb
-  if (preclimat.recurrence === 'weekdays' && (dow === 0 || dow === 6)) return false;
-  if (preclimat.recurrence === 'weekends' && dow !== 0 && dow !== 6) return false;
+  if (sched.recurrence === 'weekdays' && (dow === 0 || dow === 6)) return false;
+  if (sched.recurrence === 'weekends' && dow !== 0 && dow !== 6) return false;
   return true;
 }
-function _preclimatFireMsToday(now) {
-  const [h, m] = String(preclimat.time).split(':').map(Number);
+function _schedFireMsToday(sched, now) {
+  const [h, m] = String(sched.time).split(':').map(Number);
   if (isNaN(h) || isNaN(m)) return null;
   const d = new Date(now); d.setHours(h, m, 0, 0);
   return d.getTime();
@@ -423,34 +431,38 @@ let _chargePeakKw        = 0;
 let _chargeSlowAlertSent = false;
 let _chargeSlowCheckTs   = 0;
 
-// Checker rodando a cada 60s — duas etapas: T-5min cria a Live Activity
-// (push-to-start) e T dispara motor+AC.
+// Checker a cada 60s — percorre TODOS os agendamentos. Pra cada um: T-leadMin
+// cria a Live Activity (push-to-start) e T dispara motor+AC.
 let _preclimatFiring = false;
 setInterval(() => {
-  if (!preclimat.enabled) return;
   const now   = new Date();
   const today = now.toISOString().slice(0, 10);
-  if (!_preclimatEligibleToday(now)) return;
-  const fireMs = _preclimatFireMsToday(now);
-  if (fireMs == null) return;
   const nowMs = now.getTime();
+  let dirty = false;
+  for (const sched of preclimat.schedules) {
+    if (!sched.enabled) continue;
+    if (!_schedEligibleToday(sched, now)) continue;
+    const fireMs = _schedFireMsToday(sched, now);
+    if (fireMs == null) continue;
+    const lead = (sched.leadMin != null ? sched.leadMin : 10) * 60_000;
 
-  // Etapa 1 — T-10min: cria a Live Activity via push-to-start (uma vez por dia).
-  if (nowMs >= fireMs - 10 * 60_000 && nowMs < fireMs && preclimat.startedDate !== today) {
-    preclimat.startedDate = today;
-    savePreclimat();
-    _startPreclimatLA(fireMs);
-  }
+    // Etapa 1 — T-leadMin: cria a LA via push-to-start (uma vez por dia).
+    if (lead > 0 && nowMs >= fireMs - lead && nowMs < fireMs && sched.startedDate !== today) {
+      sched.startedDate = today; dirty = true;
+      _startPreclimatLA(sched, fireMs);
+    }
 
-  // Etapa 2 — T (até +90s de folga): dispara motor+AC.
-  if (!_preclimatFiring && preclimat.lastFiredDate !== today
-      && nowMs >= fireMs && nowMs < fireMs + 90_000) {
-    preclimat.lastFiredDate = today;
-    if (preclimat.recurrence === 'once') preclimat.enabled = false;
-    savePreclimat();
-    _preclimatFiring = true;
-    firePreClimat().finally(() => { _preclimatFiring = false; });
+    // Etapa 2 — T (até +90s de folga): dispara motor+AC.
+    if (!_preclimatFiring && sched.lastFiredDate !== today
+        && nowMs >= fireMs && nowMs < fireMs + 90_000) {
+      sched.lastFiredDate = today;
+      if (sched.recurrence === 'once') sched.enabled = false;
+      dirty = true;
+      _preclimatFiring = true;
+      firePreClimat(sched).finally(() => { _preclimatFiring = false; });
+    }
   }
+  if (dirty) savePreclimat();
 }, 60_000);
 
 // ── Resumo diário às 20h ──────────────────────────────────────────────────────
@@ -489,9 +501,10 @@ setInterval(() => {
   sendPush('📊 Resumo do dia', parts.join(' · '), 'daily_summary', { tag: 'daily_summary' });
 }, 60_000);
 
-async function firePreClimat() {
-  const { temp, fan, duration } = preclimat;
-  console.log(`[preclimat] disparando — temp=${temp}°C fan=${fan}`);
+async function firePreClimat(sched) {
+  _activeSched = sched;
+  const { temp, fan, duration } = sched;
+  console.log(`[preclimat] disparando — temp=${temp}°C fan=${fan} (${sched.time})`);
   _setPreclimatStatus('starting', 'Ligando o motor…', { temp, fan, endsAtMs: 0 });
 
   // Passo 1: ligar motor via HA (mesmo mecanismo do botão do dashboard)
@@ -508,7 +521,7 @@ async function firePreClimat() {
     } catch (e) {
       console.error(`[preclimat] falha ao ligar motor: ${e.message}`);
       _setPreclimatStatus('failed', 'Não foi possível ligar o motor', { endsAtMs: Date.now() + 5 * 60_000 });
-      _sendPreclimatPush('⏰ Pré-climatização falhou', 'Não foi possível ligar o motor.');
+      _sendPreclimatPush(sched, '⏰ Pré-climatização falhou', 'Não foi possível ligar o motor.');
       return;
     }
   } else {
@@ -529,7 +542,7 @@ async function firePreClimat() {
   if (!engineOk) {
     console.warn('[preclimat] timeout esperando engine_state=1');
     _setPreclimatStatus('failed', 'Motor não confirmou em 2 min', { endsAtMs: Date.now() + 5 * 60_000 });
-    _sendPreclimatPush('⏰ Pré-climatização falhou', 'Motor não confirmou em 2 min.');
+    _sendPreclimatPush(sched, '⏰ Pré-climatização falhou', 'Motor não confirmou em 2 min.');
     return;
   }
 
@@ -552,7 +565,7 @@ async function firePreClimat() {
   const acEndsAtMs = duration > 0 ? Date.now() + duration * 60_000 : 0;
   _setPreclimatStatus('cooling', `Climatizando · ${temp.toFixed(0)}° · fan ${fan}/7`,
     { temp, fan, endsAtMs: acEndsAtMs });
-  _sendPreclimatPush('⏰ Pré-climatização ativada',
+  _sendPreclimatPush(sched, '⏰ Pré-climatização ativada',
     `Motor ligado · AC ${temp.toFixed(0)}° · ventilação ${fan}/7${durStr}`);
   console.log(`[preclimat] AC ativado — temp=${temp} fan=${fan} duration=${duration}min (prev: fan=${prevFan} temp=${prevDrvTemp})`);
 
@@ -584,7 +597,7 @@ async function firePreClimat() {
       }
       _setPreclimatStatus('ended', `Encerrada · motor desligado após ${duration} min`,
         { endsAtMs: Date.now() + 5 * 60_000 });
-      _sendPreclimatPush('⏰ Pré-climatização encerrada',
+      _sendPreclimatPush(sched, '⏰ Pré-climatização encerrada',
         `AC restaurado · motor desligado após ${duration} min.`);
     }, duration * 60_000);
   } else {
@@ -595,8 +608,8 @@ async function firePreClimat() {
 }
 
 // Envia push de preclimat apenas pro device que agendou (se conhecido).
-function _sendPreclimatPush(title, body) {
-  const opts = preclimat.device_id ? { onlyDeviceIds: [preclimat.device_id] } : {};
+function _sendPreclimatPush(sched, title, body) {
+  const opts = sched && sched.device_id ? { onlyDeviceIds: [sched.device_id] } : {};
   sendPush(title, body, 'preclimat', opts);
 }
 
@@ -4780,52 +4793,59 @@ app.post('/api/action/:name', async (req, res) => {
   }
 });
 
-// ── Pré-climatização — GET / POST / DELETE ────────────────────────────────
-app.get('/api/preclimat', requireAuth, (_req, res) => res.json({ ...preclimat, status: preclimatStatus }));
+// ── Pré-climatização — lista de agendamentos ──────────────────────────────
+app.get('/api/preclimat', requireAuth, (_req, res) =>
+  res.json({ schedules: preclimat.schedules, status: preclimatStatus }));
 
-app.post('/api/preclimat', requireAuth, (req, res) => {
-  const { enabled, time, recurrence, temp, fan, duration, device_id } = req.body;
-  if (device_id) preclimat.device_id = String(device_id);
-  if (time !== undefined) {
-    if (!/^\d{2}:\d{2}$/.test(time)) return res.status(400).json({ error: 'time inválido (HH:MM)' });
-    if (time !== preclimat.time) {
-      if (preclimat.startedDate) _dismissPreclimatLA();          // some a LA agendada antiga
-      preclimat.lastFiredDate = ''; preclimat.startedDate = '';  // novo horário → pode disparar/criar LA de novo hoje
-    }
-    preclimat.time = time;
-  }
-  if (recurrence !== undefined) {
-    if (!['once', 'daily', 'weekdays', 'weekends'].includes(recurrence))
-      return res.status(400).json({ error: 'recurrence inválido' });
-    preclimat.recurrence = recurrence;
-  }
-  if (temp !== undefined) {
-    const t = parseFloat(temp);
-    if (isNaN(t) || t < 16 || t > 32) return res.status(400).json({ error: 'temp fora do range 16-32' });
-    preclimat.temp = t;
-  }
-  if (fan !== undefined) {
-    const f = parseInt(fan, 10);
-    if (isNaN(f) || f < 1 || f > 7) return res.status(400).json({ error: 'fan fora do range 1-7' });
-    preclimat.fan = f;
-  }
-  if (duration !== undefined) {
-    const d = parseInt(duration, 10);
-    if (isNaN(d) || d < 0 || d > 180) return res.status(400).json({ error: 'duration fora do range 0-180 min' });
-    preclimat.duration = d;
-  }
-  if (enabled !== undefined) {
-    if (!enabled && preclimat.enabled) { _dismissPreclimatLA(); preclimat.startedDate = ''; }       // desativou → encerra a LA
-    if (!!enabled && !preclimat.enabled) { preclimat.lastFiredDate = ''; preclimat.startedDate = ''; }  // reabilitou → pode disparar/criar LA hoje
-    preclimat.enabled = !!enabled;
-  }
+// Cria (sem id) ou atualiza (com id) um agendamento.
+app.post('/api/preclimat/schedule', requireAuth, (req, res) => {
+  const b = req.body || {};
+  if (b.time !== undefined && !/^\d{2}:\d{2}$/.test(b.time))
+    return res.status(400).json({ error: 'time inválido (HH:MM)' });
+  if (b.recurrence !== undefined && !['once', 'daily', 'weekdays', 'weekends'].includes(b.recurrence))
+    return res.status(400).json({ error: 'recurrence inválido' });
+  const t = b.temp !== undefined ? parseFloat(b.temp) : null;
+  if (t !== null && (isNaN(t) || t < 16 || t > 32)) return res.status(400).json({ error: 'temp fora de 16-32' });
+  const f = b.fan !== undefined ? parseInt(b.fan, 10) : null;
+  if (f !== null && (isNaN(f) || f < 1 || f > 7)) return res.status(400).json({ error: 'fan fora de 1-7' });
+  const dur = b.duration !== undefined ? parseInt(b.duration, 10) : null;
+  if (dur !== null && (isNaN(dur) || dur < 0 || dur > 180)) return res.status(400).json({ error: 'duration fora de 0-180' });
+  const lead = b.leadMin !== undefined ? parseInt(b.leadMin, 10) : null;
+  if (lead !== null && (isNaN(lead) || lead < 0 || lead > 60)) return res.status(400).json({ error: 'leadMin fora de 0-60' });
+
+  let sched = b.id ? preclimat.schedules.find(s => s.id === b.id) : null;
+  if (!sched) { sched = { ...PRECLIMAT_SCHED_DEFAULTS, id: _genSchedId() }; preclimat.schedules.push(sched); }
+
+  const timeChanged = b.time !== undefined && b.time !== sched.time;
+  const disabling   = b.enabled !== undefined && !b.enabled && sched.enabled;
+  const enabling    = b.enabled !== undefined && !!b.enabled && !sched.enabled;
+
+  if (b.device_id)        sched.device_id  = String(b.device_id);
+  if (b.time !== undefined)       sched.time = b.time;
+  if (b.recurrence !== undefined) sched.recurrence = b.recurrence;
+  if (t !== null)         sched.temp = t;
+  if (f !== null)         sched.fan = f;
+  if (dur !== null)       sched.duration = dur;
+  if (lead !== null)      sched.leadMin = lead;
+  if (b.enabled !== undefined)    sched.enabled = !!b.enabled;
+
+  // Efeitos: mudar horário ou desativar encerra a LA ativa deste agendamento;
+  // reagendar/reabilitar libera disparo/criação de novo hoje.
+  if (timeChanged || disabling) _dismissPreclimatLA(sched);
+  if (timeChanged || disabling || enabling) { sched.lastFiredDate = ''; sched.startedDate = ''; }
+
   savePreclimat();
-  res.json(preclimat);
+  res.json(sched);
 });
 
-app.delete('/api/preclimat', requireAuth, (_req, res) => {
-  preclimat = { ...PRECLIMAT_DEFAULTS };
-  savePreclimat();
+// Remove um agendamento por id.
+app.delete('/api/preclimat/schedule/:id', requireAuth, (req, res) => {
+  const sched = preclimat.schedules.find(s => s.id === req.params.id);
+  if (sched) {
+    _dismissPreclimatLA(sched);
+    preclimat.schedules = preclimat.schedules.filter(s => s.id !== req.params.id);
+    savePreclimat();
+  }
   res.json({ ok: true });
 });
 
