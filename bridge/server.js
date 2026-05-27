@@ -350,6 +350,31 @@ function savePreclimat() {
 // phase: idle|scheduled|starting|engine_on|cooling|restoring|ended|failed.
 let preclimatStatus = { phase: 'idle', detail: '', endsAtMs: 0, temp: 0, fan: 0, updatedAtMs: 0 };
 let _activeSched = null;
+// Trava de segurança: handle do timer que desliga o motor no fim da pré-clima e
+// flag de cancelamento. Se o motorista ENTRAR no carro (abrir porta) antes do
+// fim, cancelamos o desligamento remoto — senão o motor poderia desligar com a
+// pessoa já dirigindo. Ver _abortPreclimatAutoOff() e o handler de portas.
+let _preclimatRestoreTimer   = null;
+let _preclimatAutoOffCancelled = false;
+
+// Fases em que o motor foi ligado pela pré-clima e o desligamento automático
+// ainda está pendente — só aí faz sentido a trava da porta agir.
+function _preclimatAutoOffPending() {
+  return ['starting', 'engine_on', 'cooling'].includes(preclimatStatus.phase);
+}
+
+// Cancela o desligamento remoto agendado (motor segue ligado, AC como está).
+function _abortPreclimatAutoOff(reason) {
+  if (_preclimatAutoOffCancelled && !_preclimatRestoreTimer) return;
+  _preclimatAutoOffCancelled = true;
+  if (_preclimatRestoreTimer) { clearTimeout(_preclimatRestoreTimer); _preclimatRestoreTimer = null; }
+  console.log(`[preclimat] desligamento automático CANCELADO (${reason}) — motor segue ligado`);
+  _setPreclimatStatus('ended', 'Você entrou no carro — desligamento automático cancelado',
+    { endsAtMs: Date.now() + 2 * 60_000 });
+  _sendPreclimatPush(_activeSched, '🚗 Pré-climatização',
+    'Você entrou no carro — o desligamento automático foi cancelado. O motor segue ligado.');
+}
+
 const PRECLIMAT_LA_TYPE = 'PreClimatActivityAttributes';
 function _preclimatAttributes() {
   return { scheduledTime: _activeSched ? _activeSched.time : '', carName: 'Haval H6 PHEV' };
@@ -503,6 +528,9 @@ setInterval(() => {
 
 async function firePreClimat(sched) {
   _activeSched = sched;
+  // Nova sessão: zera a trava e limpa qualquer desligamento pendente de antes.
+  _preclimatAutoOffCancelled = false;
+  if (_preclimatRestoreTimer) { clearTimeout(_preclimatRestoreTimer); _preclimatRestoreTimer = null; }
   const { temp, fan, duration } = sched;
   console.log(`[preclimat] disparando — temp=${temp}°C fan=${fan} (${sched.time})`);
   _setPreclimatStatus('starting', 'Ligando o motor…', { temp, fan, endsAtMs: 0 });
@@ -571,7 +599,24 @@ async function firePreClimat(sched) {
 
   // Passo 4: restaurar AC ao estado anterior + desligar motor após X minutos
   if (duration > 0) {
-    setTimeout(async () => {
+    // Se o motorista já entrou (porta aberta) enquanto subíamos o AC, nem agenda.
+    if (_preclimatAutoOffCancelled) {
+      console.log('[preclimat] entrada detectada antes do timer — não agenda desligamento');
+      return;
+    }
+    _preclimatRestoreTimer = setTimeout(async () => {
+      _preclimatRestoreTimer = null;
+      // Trava de segurança: aborta o desligamento se o motorista entrou (porta)
+      // ou se o carro já está em movimento — nunca desligar o motor dirigindo.
+      if (_preclimatAutoOffCancelled) {
+        console.log('[preclimat] timer expirou mas desligamento já foi cancelado — ignorando');
+        return;
+      }
+      if ((+state.speed_kmh || 0) > 3) {
+        console.log('[preclimat] carro em movimento no fim do timer — desligamento abortado');
+        _abortPreclimatAutoOff('em movimento');
+        return;
+      }
       console.log('[preclimat] timer expirado — restaurando AC e desligando motor');
       _setPreclimatStatus('restoring', 'Restaurando AC e desligando motor…', { endsAtMs: 0 });
 
@@ -582,6 +627,11 @@ async function firePreClimat(sched) {
       mqttClient.publish(`${MQTT_PREFIX}/cmd/hvac/fan_speed`, prevFan.toString(), { qos: 1, retain: false });
       await new Promise(r => setTimeout(r, 3_000));
 
+      // Reconfirma a trava após os delays (a porta pode ter aberto nesse meio).
+      if (_preclimatAutoOffCancelled || (+state.speed_kmh || 0) > 3) {
+        console.log('[preclimat] entrada/movimento durante a restauração — NÃO desliga o motor');
+        return;
+      }
       if (HA_URL && HA_TOKEN) {
         const entityId = `button.${GWM_TOPIC_PREFIX}_desligar_o_motor`;
         try {
@@ -6034,6 +6084,9 @@ function applyMqttMessage(key, value, isRetained = false) {
         prevDoorStates[side] = norm;
         break;
       }
+      // Trava de segurança da pré-clima: porta aberta = motorista entrou →
+      // cancela o desligamento remoto NA HORA (sem esperar a histerese de 3s).
+      if (norm === 'on' && _preclimatAutoOffPending()) _abortPreclimatAutoOff('porta aberta');
       if (norm === _hystPending[key]) break;
       _hystPending[key] = norm;
       clearTimeout(_hystTimers[key]);
