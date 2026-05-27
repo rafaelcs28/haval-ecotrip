@@ -294,6 +294,14 @@
     <div class="field"><div class="lbl">Prefixo MQTT</div><input type="text" id="ms-prefix" placeholder="haval/ecotrip"><div class="hint">Use o MESMO prefixo no app do carro (APK → Ajustes → MQTT).</div></div>
     <div class="field"><div class="lbl">Home Assistant — URL</div><input type="text" id="ms-haurl" placeholder="http://100.x.y.z:8123"></div>
     <div class="field"><div class="lbl">Home Assistant — token</div><input type="password" id="ms-hatok" placeholder="•••• (em branco mantém o atual)"><div class="hint">Token de longa duração (HA → Perfil → Tokens). Necessário pros comandos (motor, pré-clima, tranca).</div></div>
+
+    <div style="height:14px"></div>
+    <div class="lbl" style="font-weight:700;font-size:13px">📡 Broker público (pro CARRO no 4G)</div>
+    <div class="hint" style="margin-bottom:8px">Endereço que o <b>carro</b> usa pela internet (seu IP público/DDNS + a porta encaminhada pro broker). É diferente do host acima (que o servidor usa na rede local). <b>É isto que vai no pareamento.</b></div>
+    <div class="field"><div class="lbl">Host público / DDNS</div><input type="text" id="ms-carhost" placeholder="ex: meu-ddns.duckdns.org ou IP público"></div>
+    <div class="field"><div class="lbl">Porta (pública)</div><input type="number" id="ms-carport" placeholder="8883"></div>
+    <div class="field"><label class="lbl" style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="ms-cartls" style="width:auto;transform:scale(1.2)"> TLS (porta pública com TLS)</label></div>
+
     <button class="btn primary" onclick="saveMySetup()" id="ms-save-btn">Salvar e conectar</button>
     <div class="hint" style="margin-top:8px">Ao salvar, sua instância reinicia pra aplicar (alguns segundos).</div>
 
@@ -3043,6 +3051,9 @@ async function _loadMySetup() {
     set('ms-host',   (d.mqtt_host || '').replace(/^mqtts?:\/\//, ''));
     set('ms-port',   d.mqtt_port || 1883);
     const tls = document.getElementById('ms-tls'); if (tls) tls.checked = !!d.mqtt_tls;
+    set('ms-carhost', d.car_mqtt_host);
+    set('ms-carport', d.car_mqtt_port || 8883);
+    const ctls = document.getElementById('ms-cartls'); if (ctls) ctls.checked = !!d.car_mqtt_tls;
     set('ms-user',   d.mqtt_user);
     set('ms-prefix', d.mqtt_prefix);
     set('ms-haurl',  d.ha_url);
@@ -3087,6 +3098,8 @@ async function saveMySetup() {
   const body = {
     mqtt_host: g('ms-host'), mqtt_port: g('ms-port'), mqtt_user: g('ms-user'),
     mqtt_tls: document.getElementById('ms-tls').checked,
+    car_mqtt_host: g('ms-carhost'), car_mqtt_port: g('ms-carport'),
+    car_mqtt_tls: document.getElementById('ms-cartls').checked,
     mqtt_prefix: g('ms-prefix') || 'haval/ecotrip', ha_url: g('ms-haurl'),
   };
   if (g('ms-pass'))  body.mqtt_pass = g('ms-pass');   // só envia se digitou
