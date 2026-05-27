@@ -139,6 +139,25 @@ struct SetupView: View {
                     Text("Notificações")
                 }
 
+                Section {
+                    Button {
+                        LivePreview.charge()
+                        isPresented = false
+                    } label: {
+                        Label("Pré-visualizar · Recarga", systemImage: "bolt.car.fill")
+                    }
+                    Button {
+                        LivePreview.preclimat()
+                        isPresented = false
+                    } label: {
+                        Label("Pré-visualizar · Pré-climatização", systemImage: "snowflake")
+                    }
+                    Text("Mostra a Live Activity localmente (sem push) pra validar o layout. Bloqueie a tela pra ver o card.")
+                        .font(.caption).foregroundStyle(.secondary)
+                } header: {
+                    Text("Pré-visualizar Live Activities")
+                }
+
                 Section("Como funciona") {
                     Text("Esse app é o PWA inteiro dentro de um wrapper nativo. Pra reabrir essas configurações: pressione e segure com 3 dedos por 1 segundo em qualquer parte da tela.\n\nAs Live Activities (recarga e pré-climatização) são iniciadas e atualizadas pelo servidor via push — aparecem mesmo com o app fechado.")
                         .font(.caption)

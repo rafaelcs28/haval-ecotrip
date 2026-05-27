@@ -28,6 +28,7 @@
 		BA989F1F5994F2921A13B3D3 /* ShortcutManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33D5F8203565F8E20D91E100 /* ShortcutManager.swift */; };
 		CFA18AF48CB7CF8DF7C40EC3 /* BatteryWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6B65FA59825E09151BBC7C3 /* BatteryWidget.swift */; };
 		DAFD168AE90C50CE05BA20A8 /* PreClimatActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBBB57D2D187DD310113F34A /* PreClimatActivityAttributes.swift */; };
+		E7A22E919521A94E9004D8F2 /* LivePreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A804763C29A6FBD8871C5A7 /* LivePreview.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -62,6 +63,7 @@
 		2F97B54C85FEC5A112CB0C9E /* BackgroundRefresh.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundRefresh.swift; sourceTree = "<group>"; };
 		33D5F8203565F8E20D91E100 /* ShortcutManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutManager.swift; sourceTree = "<group>"; };
 		36AA01E4F54D0727EF341F49 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		4A804763C29A6FBD8871C5A7 /* LivePreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LivePreview.swift; sourceTree = "<group>"; };
 		6AB3E13D26098FB169B559E2 /* HavalEcoTrip.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = HavalEcoTrip.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		6F5328FAA367AE3DF93613BE /* HavalEcoTripWidgetBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HavalEcoTripWidgetBundle.swift; sourceTree = "<group>"; };
 		7BA445855D7E9BCBC513DE19 /* HavalEcoTrip.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = HavalEcoTrip.entitlements; sourceTree = "<group>"; };
@@ -93,6 +95,7 @@
 				B5A372CA99C89C5712EE54BC /* HavalEcoTripApp.swift */,
 				968AA8DFD87E74A832ED71A5 /* Info.plist */,
 				19F1EE1E1159233D66EEAFA8 /* LiveActivityPush.swift */,
+				4A804763C29A6FBD8871C5A7 /* LivePreview.swift */,
 				B41BC4A6A889A1B5BBFCF7C6 /* PwaWebView.swift */,
 				0AFED4CCA277E184649006B9 /* RemoteNotifications.swift */,
 				E4593E338CE49445D2B4E37A /* Settings.swift */,
@@ -250,6 +253,7 @@
 				87640D1FE3604A94892D6723 /* ContentView.swift in Sources */,
 				AACDCF32BF0A0A36A4A2F84F /* HavalEcoTripApp.swift in Sources */,
 				4C94F890D15203640F57B31D /* LiveActivityPush.swift in Sources */,
+				E7A22E919521A94E9004D8F2 /* LivePreview.swift in Sources */,
 				0C3838E769FD23A972E10B3E /* PreClimatActivityAttributes.swift in Sources */,
 				5E3E822BD69F7F11ED12B2D6 /* PwaWebView.swift in Sources */,
 				51B5F9B9255D183BDCDE0CC7 /* RemoteNotifications.swift in Sources */,
