@@ -25,6 +25,11 @@ const MQTT_PORT   = parseInt(process.env.MQTT_PORT || '1883', 10);
 const MQTT_USER   = process.env.MQTT_USER   || '';
 const MQTT_PASS   = process.env.MQTT_PASS   || '';
 const MQTT_PREFIX    = process.env.MQTT_PREFIX || 'haval/ecotrip';
+// Endereço PÚBLICO do broker que o CARRO usa (4G/internet) — diferente do MQTT_HOST,
+// que é o endereço LOCAL usado pelo bridge. O carro recebe este no pareamento.
+const CAR_MQTT_HOST = (process.env.CAR_MQTT_HOST || '').replace(/^mqtts?:\/\//, '');
+const CAR_MQTT_PORT = parseInt(process.env.CAR_MQTT_PORT || '8883', 10);
+const CAR_MQTT_TLS  = process.env.CAR_MQTT_TLS === 'true';
 const PORT           = parseInt(process.env.PORT || '3000', 10);
 // Integração GWM Brasil — publica direto via MQTT (sem passar pelo app).
 // Bridge subscribe nesses tópicos pra ter estado confiável de body/lock/etc.
@@ -3388,6 +3393,7 @@ app.get('/api/my-setup', (req, res) => {
     mqtt_host:   MQTT_HOST.replace(/^mqtts?:\/\//, ''),   // sem o scheme (a UI mostra limpo)
     mqtt_port:   MQTT_PORT, mqtt_user: MQTT_USER,
     mqtt_tls:    MQTT_HOST.startsWith('mqtts://'),         // TLS = scheme mqtts://
+    car_mqtt_host: CAR_MQTT_HOST, car_mqtt_port: CAR_MQTT_PORT, car_mqtt_tls: CAR_MQTT_TLS,
     mqtt_prefix: MQTT_PREFIX, has_mqtt_pass: !!MQTT_PASS,
     chassi:      GWM_CHASSI, ha_url: HA_URL, has_ha_token: !!HA_TOKEN,
     mqtt_connected: !!(mqttClient && mqttClient.connected),
@@ -3403,6 +3409,10 @@ app.post('/api/my-setup', (req, res) => {
     if (bare) env.MQTT_HOST = (b.mqtt_tls ? 'mqtts://' : 'mqtt://') + bare;
   }
   if (b.mqtt_port   !== undefined) env.MQTT_PORT   = String(parseInt(b.mqtt_port, 10) || 1883);
+  // Broker PÚBLICO do carro (pareamento) — separado do host local do bridge.
+  if (b.car_mqtt_host !== undefined) env.CAR_MQTT_HOST = String(b.car_mqtt_host).trim().replace(/^mqtts?:\/\//, '');
+  if (b.car_mqtt_port !== undefined) env.CAR_MQTT_PORT = String(parseInt(b.car_mqtt_port, 10) || 8883);
+  if (b.car_mqtt_tls  !== undefined) env.CAR_MQTT_TLS  = b.car_mqtt_tls ? 'true' : 'false';
   if (b.mqtt_user   !== undefined) env.MQTT_USER   = String(b.mqtt_user).trim();
   if (b.mqtt_pass)                 env.MQTT_PASS   = String(b.mqtt_pass);          // só troca se veio
   if (b.mqtt_prefix !== undefined) env.MQTT_PREFIX = String(b.mqtt_prefix).trim().replace(/\/+$/, '');
@@ -4568,15 +4578,20 @@ function _genPairCode() {
 app.post('/api/pair/generate', (_req, res) => {   // autenticado (passa pelo guard /api)
   _prunePairCodes();
   const code = _genPairCode();
+  // O CARRO usa o endereço PÚBLICO (CAR_MQTT_*); se não configurado, cai pro local
+  // (MQTT_HOST) — que só funciona se o carro estiver na mesma rede do broker.
+  const carHost = CAR_MQTT_HOST || MQTT_HOST.replace(/^mqtts?:\/\//, '');
+  const carPort = CAR_MQTT_HOST ? CAR_MQTT_PORT : MQTT_PORT;
+  const carTls  = CAR_MQTT_HOST ? CAR_MQTT_TLS : MQTT_HOST.startsWith('mqtts://');
   _pairCodes.set(code, {
     expiresAt: Date.now() + PAIR_TTL_MS,
     config: {
-      mqtt_host:   MQTT_HOST.replace(/^mqtts?:\/\//, ''),
-      mqtt_port:   MQTT_PORT,
+      mqtt_host:   carHost,
+      mqtt_port:   carPort,
       mqtt_user:   MQTT_USER,
       mqtt_pass:   MQTT_PASS,
       mqtt_prefix: MQTT_PREFIX,
-      mqtt_tls:    MQTT_HOST.startsWith('mqtts://'),
+      mqtt_tls:    carTls,
     },
   });
   console.log(`[pair] código gerado (expira em ${PAIR_TTL_MS / 60000} min)`);
