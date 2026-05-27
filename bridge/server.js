@@ -974,6 +974,7 @@ const state = {
   gps_lat:          0,
   gps_lng:          0,
   gps_ts:           0,   // timestamp ms da última posição recebida
+  car_heading:      0,   // rumo do carro (graus, 0=N) do deslocamento GPS; PERSISTIDO
 
   speed_kmh:        0,
   steering_angle:   0,      // ângulo do volante (graus, ±) — gira o volante no PWA
@@ -1957,6 +1958,29 @@ function matchKnownPlace(lat, lng) {
 // flapping na borda. Saída só notifica se motor ligado (evita ruído de
 // reconexão GPS). Loga eventos `geofence_in` / `geofence_out` em events.json.
 const geofenceState = {};  // { placeId: 'in' | 'out' }
+// ── Heading do carro (orientação no mapa) ───────────────────────────────────
+// Calculado do deslocamento GPS quando em movimento (>3 km/h e >5 m), guardado
+// em state.car_heading (PERSISTIDO via scheduleStateSave). Assim o marcador do
+// PWA acerta o rumo mesmo parado, ao abrir o app ou após restart do bridge —
+// não depende de cada cliente recalcular. 0 = Norte.
+let _headingPrevLat = null, _headingPrevLng = null;
+function _maybeUpdateCarHeading() {
+  const lat = +state.gps_lat, lng = +state.gps_lng;
+  if (!lat || !lng) return;
+  if (_headingPrevLat == null) { _headingPrevLat = lat; _headingPrevLng = lng; return; }
+  if (haversineM(_headingPrevLat, _headingPrevLng, lat, lng) < 5) return;   // movimento mínimo (~5 m)
+  if ((+state.speed_kmh || 0) > 3) {
+    const toRad = d => d * Math.PI / 180, toDeg = r => r * 180 / Math.PI;
+    const f1 = toRad(_headingPrevLat), f2 = toRad(lat), dl = toRad(lng - _headingPrevLng);
+    const y = Math.sin(dl) * Math.cos(f2);
+    const x = Math.cos(f1) * Math.sin(f2) - Math.sin(f1) * Math.cos(f2) * Math.cos(dl);
+    state.car_heading = Math.round((toDeg(Math.atan2(y, x)) + 360) % 360);
+    scheduleStateSave();
+  }
+  _headingPrevLat = lat;
+  _headingPrevLng = lng;
+}
+
 function checkGeofence() {
   const lat = state.gps_lat, lng = state.gps_lng;
   if (!lat || !lng) return;
@@ -6268,7 +6292,7 @@ function applyMqttMessage(key, value, isRetained = false) {
     }
     case 'gps_lng': {
       const lng = parseFloat(value);
-      if (lng && lng !== 0) { state.gps_lng = lng; state.gps_ts = Date.now(); checkGeofence(); }
+      if (lng && lng !== 0) { state.gps_lng = lng; state.gps_ts = Date.now(); _maybeUpdateCarHeading(); checkGeofence(); }
       break;
     }
 
