@@ -22,6 +22,7 @@ struct PreClimatActivityAttributes: ActivityAttributes {
         var updatedAtMs: Double    // epoch ms
 
         var endsAt: Date? { endsAtMs > 0 ? Date(timeIntervalSince1970: endsAtMs / 1000.0) : nil }
+        var updatedAt: Date { Date(timeIntervalSince1970: updatedAtMs / 1000.0) }
         var isFinal: Bool { phase == "ended" || phase == "failed" }
     }
 
