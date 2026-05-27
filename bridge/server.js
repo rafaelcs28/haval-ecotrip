@@ -435,8 +435,8 @@ setInterval(() => {
   if (fireMs == null) return;
   const nowMs = now.getTime();
 
-  // Etapa 1 — T-5min: cria a Live Activity via push-to-start (uma vez por dia).
-  if (nowMs >= fireMs - 5 * 60_000 && nowMs < fireMs && preclimat.startedDate !== today) {
+  // Etapa 1 — T-10min: cria a Live Activity via push-to-start (uma vez por dia).
+  if (nowMs >= fireMs - 10 * 60_000 && nowMs < fireMs && preclimat.startedDate !== today) {
     preclimat.startedDate = today;
     savePreclimat();
     _startPreclimatLA(fireMs);
