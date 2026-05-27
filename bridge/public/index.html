@@ -1303,6 +1303,82 @@ if ('serviceWorker' in navigator) {
   });
 }
 
+// ── Marcador do carro no mapa (silhueta + orientação) ──────────────────────
+// Compartilhado pelas views (dash/drive). O carro não publica heading; o rumo
+// é calculado pelo deslocamento entre posições GPS, atualizado só com
+// velocidade > 3 km/h (evita girar com jitter de GPS parado) e mantido quando
+// estacionado. O SVG aponta pra cima (norte) em 0°; rotação CSS = bearing.
+const _CAR_SVG = '<svg viewBox="0 0 32 32" width="30" height="30" aria-hidden="true">'
+  + '<path d="M16 1.5c4 0 6 3 6 7.5v15c0 4-2 6.5-6 6.5s-6-2.5-6-6.5v-15c0-4.5 2-7.5 6-7.5z" '
+  + 'fill="#cbd5e1" stroke="#1e293b" stroke-width="1.6" stroke-linejoin="round"/>'
+  + '<path d="M12.4 8.5h7.2l-1 4h-5.2z" fill="#334155" opacity="0.75"/>'
+  + '<path d="M13.2 24.5h5.6l-0.9-3h-3.8z" fill="#334155" opacity="0.55"/></svg>';
+const _CAR_WRAP_STYLE = 'width:30px;height:30px;transform-origin:50% 50%;'
+  + 'transition:transform .55s ease-out;filter:drop-shadow(0 1px 3px rgba(0,0,0,.55));';
+
+let _carDisplayAngle = 0;       // ângulo CONTÍNUO aplicado no CSS (sem salto no wrap 360→0)
+let _carHeadingInit  = false;   // já fixou um rumo nesta sessão?
+let _carHeadingPrevLat = null, _carHeadingPrevLng = null;
+
+const CAR_MIN_KMH      = 5;     // só atualiza rumo acima disso (GPS confiável)
+const CAR_MIN_MOVE_DEG = 5e-5;  // ~5,5 m: trecho mínimo pro bearing não ser ruído
+const CAR_DEADBAND_DEG = 8;     // ignora micro-variações de rumo (anti-tremida)
+
+function _geoBearing(lat1, lng1, lat2, lng2) {
+  const toRad = d => d * Math.PI / 180, toDeg = r => r * 180 / Math.PI;
+  const f1 = toRad(lat1), f2 = toRad(lat2), dl = toRad(lng2 - lng1);
+  const y = Math.sin(dl) * Math.cos(f2);
+  const x = Math.cos(f1) * Math.sin(f2) - Math.sin(f1) * Math.cos(f2) * Math.cos(dl);
+  return (toDeg(Math.atan2(y, x)) + 360) % 360;
+}
+
+// Menor giro (−180..+180) do ângulo contínuo atual até o bearing alvo.
+function _shortestDelta(fromAngle, toBearing) {
+  return ((toBearing - (fromAngle % 360) + 540) % 360) - 180;
+}
+
+// Calcula o rumo pelo deslocamento GPS e devolve um ângulo CONTÍNUO pra rotação.
+// Defesas contra "rodopio": só com velocidade > CAR_MIN_KMH, trecho mínimo real,
+// deadband pra micro-jitter, e sempre o caminho angular mais curto.
+function _updateCarHeading(lat, lng, kmh) {
+  if (!lat || !lng) return _carDisplayAngle;
+  if (_carHeadingPrevLat == null) { _carHeadingPrevLat = lat; _carHeadingPrevLng = lng; return _carDisplayAngle; }
+  const movedEnough = Math.abs(lat - _carHeadingPrevLat) > CAR_MIN_MOVE_DEG
+                   || Math.abs(lng - _carHeadingPrevLng) > CAR_MIN_MOVE_DEG;
+  if (movedEnough) {
+    if ((+kmh || 0) > CAR_MIN_KMH) {
+      const bearing = _geoBearing(_carHeadingPrevLat, _carHeadingPrevLng, lat, lng);
+      if (!_carHeadingInit) {
+        _carDisplayAngle = bearing;     // primeira fixação: snap direto (sem animar do 0)
+        _carHeadingInit = true;
+      } else {
+        const delta = _shortestDelta(_carDisplayAngle, bearing);
+        if (Math.abs(delta) > CAR_DEADBAND_DEG) _carDisplayAngle += delta;
+      }
+    }
+    _carHeadingPrevLat = lat;
+    _carHeadingPrevLng = lng;
+  }
+  return _carDisplayAngle;
+}
+
+function _carMarkerIcon(headingDeg) {
+  return L.divIcon({
+    className: '',
+    html: '<div class="car-marker" style="' + _CAR_WRAP_STYLE
+      + 'transform:rotate(' + (headingDeg || 0) + 'deg)">' + _CAR_SVG + '</div>',
+    iconSize: [30, 30],
+    iconAnchor: [15, 15],
+  });
+}
+
+function _applyCarRotation(marker, headingDeg) {
+  if (!marker) return;
+  const el = marker.getElement();
+  const car = el && el.querySelector('.car-marker');
+  if (car) car.style.transform = 'rotate(' + (headingDeg || 0) + 'deg)';
+}
+
 // ═════════════════════════════════════════════════════════
 //  VIEW SWITCHING (lazy load: fetch view-X.html on demand)
 // ═════════════════════════════════════════════════════════

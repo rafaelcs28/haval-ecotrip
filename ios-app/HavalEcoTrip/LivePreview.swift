@@ -36,10 +36,54 @@ enum LivePreview {
             content: ActivityContent(state: state, staleDate: now.addingTimeInterval(1200)))
     }
 
-    // Encerra todas as Live Activities ativas (recarga + pré-climatização).
+    static func trip() {
+        guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
+        endActive(Activity<TripActivityAttributes>.activities)
+        let state = TripActivityAttributes.ContentState(
+            distKm: 23.7, netKwh: 4.1, effKwh100: 17.3, timeSec: 1860,
+            avgSpeedKmh: 46, fuelL: 0, active: true,
+            updatedAtMs: Date().timeIntervalSince1970 * 1000)
+        _ = try? Activity.request(
+            attributes: TripActivityAttributes(carName: carName),
+            content: ActivityContent(state: state, staleDate: Date().addingTimeInterval(3600)))
+    }
+
+    static func motor() {
+        guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
+        endActive(Activity<MotorActivityAttributes>.activities)
+        let now = Date()
+        let state = MotorActivityAttributes.ContentState(
+            startedAtMs: now.addingTimeInterval(-360).timeIntervalSince1970 * 1000,  // ligado há 6 min
+            cabinTemp: 24, outsideTemp: 31, acOn: true, active: true,
+            updatedAtMs: now.timeIntervalSince1970 * 1000)
+        _ = try? Activity.request(
+            attributes: MotorActivityAttributes(carName: carName),
+            content: ActivityContent(state: state, staleDate: now.addingTimeInterval(3600)))
+    }
+
+    static func security() {
+        guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
+        endActive(Activity<SecurityActivityAttributes>.activities)
+        let state = SecurityActivityAttributes.ContentState(
+            unlocked: true,
+            doorFL: true, doorFR: false, doorRL: false, doorRR: false,
+            winFL: false, winFR: false, winRL: false, winRR: true,
+            trunk: false, sunroof: true,
+            summary: "Destrancado · Porta diant. esq. · Vidro tras. dir. · Teto solar",
+            active: true,
+            updatedAtMs: Date().timeIntervalSince1970 * 1000)
+        _ = try? Activity.request(
+            attributes: SecurityActivityAttributes(carName: carName),
+            content: ActivityContent(state: state, staleDate: Date().addingTimeInterval(3600)))
+    }
+
+    // Encerra todas as Live Activities ativas.
     static func stopAll() {
         endActive(Activity<ChargeActivityAttributes>.activities)
         endActive(Activity<PreClimatActivityAttributes>.activities)
+        endActive(Activity<TripActivityAttributes>.activities)
+        endActive(Activity<MotorActivityAttributes>.activities)
+        endActive(Activity<SecurityActivityAttributes>.activities)
     }
 
     // Encerra atividades ativas do tipo antes de criar a de preview (evita duplicar).

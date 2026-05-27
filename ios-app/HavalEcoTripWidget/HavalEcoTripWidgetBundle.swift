@@ -11,6 +11,9 @@ struct HavalEcoTripWidgetBundle: WidgetBundle {
     var body: some Widget {
         ChargeActivityLiveActivity()
         PreClimatLiveActivity()
+        TripLiveActivity()
+        MotorLiveActivity()
+        SecurityLiveActivity()
         BatteryWidget()
     }
 }

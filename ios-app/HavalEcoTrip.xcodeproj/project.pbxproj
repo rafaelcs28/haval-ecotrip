@@ -9,10 +9,13 @@
 /* Begin PBXBuildFile section */
 		0C3838E769FD23A972E10B3E /* PreClimatActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBBB57D2D187DD310113F34A /* PreClimatActivityAttributes.swift */; };
 		1A900DDEB8C0BB74EAD4A130 /* Settings.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4593E338CE49445D2B4E37A /* Settings.swift */; };
+		2480E68526B78CFE04F2C37B /* TripActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = E612200FCE6AA9F646191052 /* TripActivityAttributes.swift */; };
 		253A6649A6A5B25C6DEBB140 /* HavalEcoTripWidgetBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F5328FAA367AE3DF93613BE /* HavalEcoTripWidgetBundle.swift */; };
+		447016E58ECF062223D41618 /* TripActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = E612200FCE6AA9F646191052 /* TripActivityAttributes.swift */; };
 		4C94F890D15203640F57B31D /* LiveActivityPush.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19F1EE1E1159233D66EEAFA8 /* LiveActivityPush.swift */; };
 		51B5F9B9255D183BDCDE0CC7 /* RemoteNotifications.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0AFED4CCA277E184649006B9 /* RemoteNotifications.swift */; };
 		5258D112C16CFD21020F41B2 /* Settings.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4593E338CE49445D2B4E37A /* Settings.swift */; };
+		5CF964F8F567C8A30A20996D /* SecurityActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = D15756C1CEF1EFDD6804C05D /* SecurityActivityAttributes.swift */; };
 		5E3E822BD69F7F11ED12B2D6 /* PwaWebView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B41BC4A6A889A1B5BBFCF7C6 /* PwaWebView.swift */; };
 		605ED8EEC91528FFBC054A48 /* CarActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = C88C20EF0FDB1AB8EB036191 /* CarActions.swift */; };
 		6223380A259556C149F9E067 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = EEEFCC8135B0627DFDB60013 /* Assets.xcassets */; };
@@ -20,12 +23,18 @@
 		77472ED6F598E53605506B96 /* ChargeActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = C110A5E3EADD0B1D4DA52BE6 /* ChargeActivityAttributes.swift */; };
 		87640D1FE3604A94892D6723 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36AA01E4F54D0727EF341F49 /* ContentView.swift */; };
 		89B5CF62DAD11B34026CB4C5 /* HavalEcoTripWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 192BA3BE182AC3D50F636DA9 /* HavalEcoTripWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		8B1DEE4FCD8F3304A07A33C9 /* MotorActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 636438201B328EA34B285F3A /* MotorActivityAttributes.swift */; };
+		8C3FA5DCF7133607EC275A89 /* TripLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B0EC768E77CEDD141861D39 /* TripLiveActivity.swift */; };
 		920A0533D20932EF36FC4D49 /* ChargeActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = C110A5E3EADD0B1D4DA52BE6 /* ChargeActivityAttributes.swift */; };
 		97D85BD3A8D8D549ABD6A944 /* ActivityManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9926C58E001CD8511E829FB /* ActivityManager.swift */; };
+		985C98EC482371EDBE14B4E2 /* SecurityActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = D15756C1CEF1EFDD6804C05D /* SecurityActivityAttributes.swift */; };
+		9CC60221177D73FA6ED4E7F8 /* SecurityLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFE9C8DD63C6163B5AF174C8 /* SecurityLiveActivity.swift */; };
 		A059FEDAB126C345DAAD9802 /* PreClimatLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 915E7661920B0022793D3A63 /* PreClimatLiveActivity.swift */; };
 		AACDCF32BF0A0A36A4A2F84F /* HavalEcoTripApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5A372CA99C89C5712EE54BC /* HavalEcoTripApp.swift */; };
+		AB83E9252E2D2EA3B5AAAC0A /* MotorActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 636438201B328EA34B285F3A /* MotorActivityAttributes.swift */; };
 		AE6DF0BA2B76E13159F83FE3 /* BackgroundRefresh.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F97B54C85FEC5A112CB0C9E /* BackgroundRefresh.swift */; };
 		BA989F1F5994F2921A13B3D3 /* ShortcutManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33D5F8203565F8E20D91E100 /* ShortcutManager.swift */; };
+		C25004AC6E9825F287951DC4 /* MotorLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A0F1250A4346D17F0539FE8 /* MotorLiveActivity.swift */; };
 		CFA18AF48CB7CF8DF7C40EC3 /* BatteryWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6B65FA59825E09151BBC7C3 /* BatteryWidget.swift */; };
 		DAFD168AE90C50CE05BA20A8 /* PreClimatActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBBB57D2D187DD310113F34A /* PreClimatActivityAttributes.swift */; };
 		E7A22E919521A94E9004D8F2 /* LivePreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A804763C29A6FBD8871C5A7 /* LivePreview.swift */; };
@@ -60,11 +69,14 @@
 		192BA3BE182AC3D50F636DA9 /* HavalEcoTripWidget.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = HavalEcoTripWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		19F1EE1E1159233D66EEAFA8 /* LiveActivityPush.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveActivityPush.swift; sourceTree = "<group>"; };
 		1C2F4161732FE79AB2415337 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		2A0F1250A4346D17F0539FE8 /* MotorLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MotorLiveActivity.swift; sourceTree = "<group>"; };
 		2F97B54C85FEC5A112CB0C9E /* BackgroundRefresh.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundRefresh.swift; sourceTree = "<group>"; };
 		33D5F8203565F8E20D91E100 /* ShortcutManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutManager.swift; sourceTree = "<group>"; };
 		36AA01E4F54D0727EF341F49 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		4A804763C29A6FBD8871C5A7 /* LivePreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LivePreview.swift; sourceTree = "<group>"; };
+		636438201B328EA34B285F3A /* MotorActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MotorActivityAttributes.swift; sourceTree = "<group>"; };
 		6AB3E13D26098FB169B559E2 /* HavalEcoTrip.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = HavalEcoTrip.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		6B0EC768E77CEDD141861D39 /* TripLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripLiveActivity.swift; sourceTree = "<group>"; };
 		6F5328FAA367AE3DF93613BE /* HavalEcoTripWidgetBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HavalEcoTripWidgetBundle.swift; sourceTree = "<group>"; };
 		7BA445855D7E9BCBC513DE19 /* HavalEcoTrip.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = HavalEcoTrip.entitlements; sourceTree = "<group>"; };
 		915E7661920B0022793D3A63 /* PreClimatLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreClimatLiveActivity.swift; sourceTree = "<group>"; };
@@ -75,8 +87,11 @@
 		C110A5E3EADD0B1D4DA52BE6 /* ChargeActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChargeActivityAttributes.swift; sourceTree = "<group>"; };
 		C4C25F23B2E85136F2735757 /* HavalEcoTripWidget.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = HavalEcoTripWidget.entitlements; sourceTree = "<group>"; };
 		C88C20EF0FDB1AB8EB036191 /* CarActions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarActions.swift; sourceTree = "<group>"; };
+		D15756C1CEF1EFDD6804C05D /* SecurityActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecurityActivityAttributes.swift; sourceTree = "<group>"; };
 		D9926C58E001CD8511E829FB /* ActivityManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityManager.swift; sourceTree = "<group>"; };
+		DFE9C8DD63C6163B5AF174C8 /* SecurityLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecurityLiveActivity.swift; sourceTree = "<group>"; };
 		E4593E338CE49445D2B4E37A /* Settings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Settings.swift; sourceTree = "<group>"; };
+		E612200FCE6AA9F646191052 /* TripActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripActivityAttributes.swift; sourceTree = "<group>"; };
 		EBBB57D2D187DD310113F34A /* PreClimatActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreClimatActivityAttributes.swift; sourceTree = "<group>"; };
 		EEEFCC8135B0627DFDB60013 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		F6B65FA59825E09151BBC7C3 /* BatteryWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BatteryWidget.swift; sourceTree = "<group>"; };
@@ -113,8 +128,14 @@
 				C4C25F23B2E85136F2735757 /* HavalEcoTripWidget.entitlements */,
 				6F5328FAA367AE3DF93613BE /* HavalEcoTripWidgetBundle.swift */,
 				1C2F4161732FE79AB2415337 /* Info.plist */,
+				636438201B328EA34B285F3A /* MotorActivityAttributes.swift */,
+				2A0F1250A4346D17F0539FE8 /* MotorLiveActivity.swift */,
 				EBBB57D2D187DD310113F34A /* PreClimatActivityAttributes.swift */,
 				915E7661920B0022793D3A63 /* PreClimatLiveActivity.swift */,
+				D15756C1CEF1EFDD6804C05D /* SecurityActivityAttributes.swift */,
+				DFE9C8DD63C6163B5AF174C8 /* SecurityLiveActivity.swift */,
+				E612200FCE6AA9F646191052 /* TripActivityAttributes.swift */,
+				6B0EC768E77CEDD141861D39 /* TripLiveActivity.swift */,
 			);
 			path = HavalEcoTripWidget;
 			sourceTree = "<group>";
@@ -236,9 +257,15 @@
 				77472ED6F598E53605506B96 /* ChargeActivityAttributes.swift in Sources */,
 				659B7DF18D1CC3CBBC1615F3 /* ChargeActivityLiveActivity.swift in Sources */,
 				253A6649A6A5B25C6DEBB140 /* HavalEcoTripWidgetBundle.swift in Sources */,
+				AB83E9252E2D2EA3B5AAAC0A /* MotorActivityAttributes.swift in Sources */,
+				C25004AC6E9825F287951DC4 /* MotorLiveActivity.swift in Sources */,
 				DAFD168AE90C50CE05BA20A8 /* PreClimatActivityAttributes.swift in Sources */,
 				A059FEDAB126C345DAAD9802 /* PreClimatLiveActivity.swift in Sources */,
+				985C98EC482371EDBE14B4E2 /* SecurityActivityAttributes.swift in Sources */,
+				9CC60221177D73FA6ED4E7F8 /* SecurityLiveActivity.swift in Sources */,
 				1A900DDEB8C0BB74EAD4A130 /* Settings.swift in Sources */,
+				447016E58ECF062223D41618 /* TripActivityAttributes.swift in Sources */,
+				8C3FA5DCF7133607EC275A89 /* TripLiveActivity.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -254,11 +281,14 @@
 				AACDCF32BF0A0A36A4A2F84F /* HavalEcoTripApp.swift in Sources */,
 				4C94F890D15203640F57B31D /* LiveActivityPush.swift in Sources */,
 				E7A22E919521A94E9004D8F2 /* LivePreview.swift in Sources */,
+				8B1DEE4FCD8F3304A07A33C9 /* MotorActivityAttributes.swift in Sources */,
 				0C3838E769FD23A972E10B3E /* PreClimatActivityAttributes.swift in Sources */,
 				5E3E822BD69F7F11ED12B2D6 /* PwaWebView.swift in Sources */,
 				51B5F9B9255D183BDCDE0CC7 /* RemoteNotifications.swift in Sources */,
+				5CF964F8F567C8A30A20996D /* SecurityActivityAttributes.swift in Sources */,
 				5258D112C16CFD21020F41B2 /* Settings.swift in Sources */,
 				BA989F1F5994F2921A13B3D3 /* ShortcutManager.swift in Sources */,
+				2480E68526B78CFE04F2C37B /* TripActivityAttributes.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

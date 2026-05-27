@@ -36,6 +36,12 @@ targets:
       - path: HavalEcoTripWidget/ChargeActivityAttributes.swift
       # Idem para a pré-climatização: o PreClimatManager (app) usa o tipo.
       - path: HavalEcoTripWidget/PreClimatActivityAttributes.swift
+      # Viagem ao vivo: LiveActivityPush (app) registra os tokens do tipo.
+      - path: HavalEcoTripWidget/TripActivityAttributes.swift
+      # Motor ligado remotamente: idem.
+      - path: HavalEcoTripWidget/MotorActivityAttributes.swift
+      # Veículo desprotegido (alerta persistente): idem.
+      - path: HavalEcoTripWidget/SecurityActivityAttributes.swift
     info:
       path: HavalEcoTrip/Info.plist
       properties:
