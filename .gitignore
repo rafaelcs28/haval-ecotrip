@@ -25,6 +25,9 @@ bridge/push_subscriptions.json
 .env
 bridge/.env
 bridge/.env.*
+# Chaves .p8 (APNs + App Store Connect API) — NUNCA commitar
+*.p8
+**/*.p8
 bridge/*.bak
 bridge/*.bak.*
 bridge/state.json.bak*
@@ -36,3 +39,7 @@ bridge/auth.json
 bridge/cert.pem
 bridge/key.pem
 bridge/*.pem
+
+# Artefatos de build/archive do iOS
+ios-app/build/
+*.xcarchive

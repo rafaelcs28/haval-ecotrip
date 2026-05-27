@@ -9,26 +9,27 @@ options:
 
 settings:
   base:
-    DEVELOPMENT_TEAM: "7Y6MPKR5CD"       # Personal Team do Rafael
+    DEVELOPMENT_TEAM: "7Y6MPKR5CD"       # time pago do Rafael
     CODE_SIGN_STYLE: Automatic
-    CODE_SIGN_IDENTITY: "Apple Development"
     MARKETING_VERSION: "1.0"
     CURRENT_PROJECT_VERSION: "1"
     SWIFT_VERSION: "5.10"
+  # NOTA: assinatura AUTOMÁTICA (sem fixar CODE_SIGN_IDENTITY — fixar dá conflito
+  # com o style automático). No Release, o entitlements exige aps-environment
+  # production, o que FORÇA a assinatura automática a usar o perfil de
+  # distribuição. No Debug, usa development/sandbox. O export app-store
+  # (ExportOptions.plist) re-assina tudo como distribuição.
 
 targets:
   HavalEcoTrip:
     type: application
     platform: iOS
-    entitlements:
-      path: HavalEcoTrip/HavalEcoTrip.entitlements
-      properties:
-        # APNs (Live Activity push-to-start + notificações). development = sandbox,
-        # casa com build de desenvolvimento via Xcode. xcodegen REGENERA este
-        # arquivo a partir daqui — não editar o .entitlements direto.
-        aps-environment: development
-        com.apple.security.application-groups:
-          - group.br.com.consorciolimpagyn.havalecotrip
+    # Entitlements POR CONFIGURAÇÃO (CODE_SIGN_ENTITLEMENTS em settings.configs):
+    #   Debug   → HavalEcoTrip-dev.entitlements  (aps-environment development / sandbox)
+    #             — build local via Xcode/devicectl, push no endpoint sandbox.
+    #   Release → HavalEcoTrip-prod.entitlements (aps-environment production)
+    #             — archive p/ TestFlight, push no endpoint de produção.
+    # Estes .entitlements são mantidos À MÃO (não gerados pelo xcodegen).
     sources:
       - HavalEcoTrip
       # ChargeActivityAttributes precisa estar nos DOIS targets — app referencia
@@ -49,6 +50,15 @@ targets:
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         UILaunchScreen: {}
+        # Orientações: iPhone só retrato (PWA é vertical). iPad precisa das 4
+        # pra passar a validação de multitarefa da App Store/TestFlight.
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
         NSSupportsLiveActivities: true
         NSSupportsLiveActivitiesFrequentUpdates: true
         UIApplicationSceneManifest:
@@ -100,6 +110,11 @@ targets:
         TARGETED_DEVICE_FAMILY: "1,2"      # iPhone + iPad
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+      configs:
+        Debug:
+          CODE_SIGN_ENTITLEMENTS: HavalEcoTrip/HavalEcoTrip-dev.entitlements
+        Release:
+          CODE_SIGN_ENTITLEMENTS: HavalEcoTrip/HavalEcoTrip-prod.entitlements
     dependencies:
       - target: HavalEcoTripWidget
     scheme:
