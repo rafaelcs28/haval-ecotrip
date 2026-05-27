@@ -442,71 +442,19 @@
     </div>
   </div>
 
-  <!-- ── Pré-climatização agendada ─────────────────────────────────── -->
+  <!-- ── Pré-climatização agendada (lista) ───────────────────────────── -->
   <div class="ac-card" id="preclimat-card" style="margin-top:10px">
     <div class="ac-power">
       <div class="label">
         ⏰ Pré-climatização
-        <div class="sub" id="preclimat-sub">Agendamento desativado</div>
-      </div>
-      <div class="toggle" id="preclimat-toggle" onclick="togglePreclimat()"></div>
-    </div>
-
-    <div id="preclimat-body" style="display:none;margin-top:12px">
-      <!-- Hora -->
-      <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.06)">
-        <span style="font-size:12px;font-weight:600;color:#cbd5e1">Horário</span>
-        <input type="time" id="preclimat-time" value="07:30"
-          style="background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:8px;
-                 color:#f1f5f9;font-size:14px;font-weight:700;padding:6px 10px;text-align:center;
-                 -webkit-appearance:none;cursor:pointer"
-          onchange="savePreclimatField('time', this.value)">
-      </div>
-
-      <!-- Recorrência -->
-      <div style="padding:10px 0;border-bottom:1px solid rgba(255,255,255,.06)">
-        <div style="font-size:12px;font-weight:600;color:#cbd5e1;margin-bottom:8px">Recorrência</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px" id="preclimat-rec-btns">
-          <button class="rec-btn active" data-rec="once"     onclick="setPreclimatRec('once')">Uma vez</button>
-          <button class="rec-btn"        data-rec="daily"    onclick="setPreclimatRec('daily')">Todo dia</button>
-          <button class="rec-btn"        data-rec="weekdays" onclick="setPreclimatRec('weekdays')">Dias úteis</button>
-          <button class="rec-btn"        data-rec="weekends" onclick="setPreclimatRec('weekends')">Fins de semana</button>
-        </div>
-      </div>
-
-      <!-- Temperatura alvo -->
-      <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid rgba(255,255,255,.06)">
-        <span style="font-size:12px;font-weight:600;color:#cbd5e1">Temperatura</span>
-        <div style="display:flex;align-items:center;gap:10px">
-          <button onclick="adjustPreclimatTemp(-0.5)" style="background:rgba(255,255,255,.08);border:none;border-radius:6px;color:#f1f5f9;font-size:16px;width:32px;height:32px;cursor:pointer">−</button>
-          <span id="preclimat-temp-v" style="font-size:16px;font-weight:800;color:#22c55e;min-width:44px;text-align:center">22°C</span>
-          <button onclick="adjustPreclimatTemp(+0.5)" style="background:rgba(255,255,255,.08);border:none;border-radius:6px;color:#f1f5f9;font-size:16px;width:32px;height:32px;cursor:pointer">+</button>
-        </div>
-      </div>
-
-      <!-- Ventilação -->
-      <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid rgba(255,255,255,.06)">
-        <span style="font-size:12px;font-weight:600;color:#cbd5e1">Ventilação</span>
-        <div style="display:flex;align-items:center;gap:10px">
-          <button onclick="adjustPreclimatFan(-1)" style="background:rgba(255,255,255,.08);border:none;border-radius:6px;color:#f1f5f9;font-size:16px;width:32px;height:32px;cursor:pointer">−</button>
-          <span id="preclimat-fan-v" style="font-size:16px;font-weight:800;color:#22c55e;min-width:36px;text-align:center">3/7</span>
-          <button onclick="adjustPreclimatFan(+1)" style="background:rgba(255,255,255,.08);border:none;border-radius:6px;color:#f1f5f9;font-size:16px;width:32px;height:32px;cursor:pointer">+</button>
-        </div>
-      </div>
-
-      <!-- Duração (timer de desligamento) -->
-      <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0">
-        <div>
-          <span style="font-size:12px;font-weight:600;color:#cbd5e1">Desligar após</span>
-          <div style="font-size:10px;color:#475569;margin-top:2px">AC + motor desligam automaticamente</div>
-        </div>
-        <div style="display:flex;align-items:center;gap:10px">
-          <button onclick="adjustPreclimatDur(-5)" style="background:rgba(255,255,255,.08);border:none;border-radius:6px;color:#f1f5f9;font-size:16px;width:32px;height:32px;cursor:pointer">−</button>
-          <span id="preclimat-dur-v" style="font-size:16px;font-weight:800;color:#22c55e;min-width:52px;text-align:center">20 min</span>
-          <button onclick="adjustPreclimatDur(+5)" style="background:rgba(255,255,255,.08);border:none;border-radius:6px;color:#f1f5f9;font-size:16px;width:32px;height:32px;cursor:pointer">+</button>
-        </div>
+        <div class="sub" id="preclimat-sub">--</div>
       </div>
     </div>
+    <div id="preclimat-list" style="margin-top:10px"></div>
+    <button onclick="addPreclimatSchedule()"
+      style="width:100%;margin-top:10px;padding:11px;background:rgba(34,197,94,.14);border:1px solid rgba(34,197,94,.3);color:#22c55e;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit">
+      + Adicionar agendamento
+    </button>
   </div>
 </div>
 
@@ -837,103 +785,111 @@ function cycleSeatVent(side) {
     [`vent-${side}-btn`]);
 }
 
-// ── Pré-climatização ──────────────────────────────────────────────────────
-let _pc = { enabled: false, time: '07:30', recurrence: 'daily', temp: 22.0, fan: 3, duration: 20 };
+// ── Pré-climatização (lista de agendamentos) ──────────────────────────────
+let _pcList = [];
+const PC_REC_LABEL = { once: 'Uma vez', daily: 'Todo dia', weekdays: 'Dias úteis', weekends: 'Fins de semana' };
 
 async function loadPreclimat() {
-  if (!LIVE_MODE) return;
+  if (!LIVE_MODE) { renderPreclimat(); return; }
   try {
     const r = await fetch('/api/preclimat', { headers: { 'Authorization': 'Bearer ' + BRIDGE_TOKEN } });
     if (!r.ok) return;
-    _pc = await r.json();
+    const data = await r.json();
+    _pcList = Array.isArray(data.schedules) ? data.schedules : [];
     renderPreclimat();
   } catch (_) {}
 }
 
-function renderPreclimat() {
-  const tog = document.getElementById('preclimat-toggle');
-  const sub = document.getElementById('preclimat-sub');
-  const body = document.getElementById('preclimat-body');
-  if (!tog) return;
-
-  tog.classList.toggle('on', !!_pc.enabled);
-  body.style.display = _pc.enabled ? '' : 'none';
-
-  const REC_LABEL = { once: 'Uma vez', daily: 'Todo dia', weekdays: 'Dias úteis', weekends: 'Fins de semana' };
-  const durSummary = _pc.duration > 0 ? ` · ${_pc.duration} min` : '';
-  sub.textContent = _pc.enabled
-    ? `✓ Agendado: ${_pc.time} · ${REC_LABEL[_pc.recurrence] || _pc.recurrence} · ${_pc.temp.toFixed(0)}°C · fan ${_pc.fan}/7${durSummary}`
-    : 'Toque pra agendar';
-
-  const timeEl = document.getElementById('preclimat-time');
-  if (timeEl) timeEl.value = _pc.time;
-  document.getElementById('preclimat-temp-v').textContent = _pc.temp.toFixed(0) + '°C';
-  document.getElementById('preclimat-fan-v').textContent  = _pc.fan + '/7';
-  const durEl = document.getElementById('preclimat-dur-v');
-  if (durEl) durEl.textContent = _pc.duration > 0 ? _pc.duration + ' min' : 'Manual';
-
-  document.querySelectorAll('.rec-btn').forEach(b => {
-    b.classList.toggle('active', b.dataset.rec === _pc.recurrence);
-  });
+function _pcStep(onclick, sym) {
+  return `<button onclick="${onclick}" style="background:rgba(255,255,255,.08);border:none;border-radius:6px;color:#f1f5f9;font-size:16px;width:30px;height:30px;cursor:pointer">${sym}</button>`;
 }
 
-async function savePreclimatField(field, value) {
-  // Update otimista imediato
-  _pc[field] = value;
-  renderPreclimat();
+function _pcRow(label, color, valueText, minus, plus) {
+  return `<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-top:1px solid rgba(255,255,255,.06)">
+    <span style="font-size:12px;font-weight:600;color:#cbd5e1">${label}</span>
+    <div style="display:flex;align-items:center;gap:8px">${minus}<span style="font-size:15px;font-weight:800;color:${color};min-width:54px;text-align:center">${valueText}</span>${plus}</div>
+  </div>`;
+}
 
-  if (!LIVE_MODE) { showToast('Agendamento salvo ✓', 'ok'); return; }
+function _pcCard(s) {
+  const rec = ['once','daily','weekdays','weekends'].map(r =>
+    `<button class="rec-btn ${s.recurrence===r?'active':''}" onclick="setPreclimatRec('${s.id}','${r}')">${PC_REC_LABEL[r]}</button>`).join('');
+  return `<div class="pc-sched" style="border:1px solid rgba(255,255,255,.08);border-radius:12px;padding:10px 12px;margin-bottom:8px;${s.enabled?'':'opacity:.5'}">
+    <div style="display:flex;align-items:center;justify-content:space-between">
+      <input type="time" value="${s.time}" onchange="savePreclimatSched('${s.id}','time',this.value)"
+        style="background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:8px;color:#f1f5f9;font-size:18px;font-weight:800;padding:5px 10px;-webkit-appearance:none;cursor:pointer">
+      <div style="display:flex;align-items:center;gap:14px">
+        <div class="toggle ${s.enabled?'on':''}" onclick="togglePreclimatSched('${s.id}')"></div>
+        <button onclick="removePreclimatSched('${s.id}')" style="background:none;border:none;color:#f87171;font-size:18px;cursor:pointer">🗑</button>
+      </div>
+    </div>
+    <div style="padding:10px 0 2px"><div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">${rec}</div></div>
+    ${_pcRow('Temperatura','#22c55e', s.temp.toFixed(0)+'°C', _pcStep(`adjustPreclimatTemp('${s.id}',-0.5)`,'−'), _pcStep(`adjustPreclimatTemp('${s.id}',0.5)`,'+'))}
+    ${_pcRow('Ventilação','#22c55e', s.fan+'/7', _pcStep(`adjustPreclimatFan('${s.id}',-1)`,'−'), _pcStep(`adjustPreclimatFan('${s.id}',1)`,'+'))}
+    ${_pcRow('Desligar após','#22c55e', s.duration>0 ? s.duration+' min' : 'Manual', _pcStep(`adjustPreclimatDur('${s.id}',-5)`,'−'), _pcStep(`adjustPreclimatDur('${s.id}',5)`,'+'))}
+    ${_pcRow('Avisar antes','#38bdf8', (s.leadMin||0)+' min', _pcStep(`adjustPreclimatLead('${s.id}',-5)`,'−'), _pcStep(`adjustPreclimatLead('${s.id}',5)`,'+'))}
+  </div>`;
+}
+
+function renderPreclimat() {
+  const list = document.getElementById('preclimat-list');
+  const sub  = document.getElementById('preclimat-sub');
+  if (!list) return;
+  list.innerHTML = _pcList.length
+    ? _pcList.map(_pcCard).join('')
+    : '<div style="font-size:12px;color:#64748b;padding:4px 0">Nenhum agendamento ainda.</div>';
+  if (sub) {
+    const on = _pcList.filter(s => s.enabled).length;
+    sub.textContent = _pcList.length ? `${_pcList.length} agendamento(s) · ${on} ativo(s)` : 'Toque em adicionar';
+  }
+}
+
+function _pcGet(id) { return _pcList.find(s => s.id === id); }
+
+async function savePreclimatSched(id, field, value) {
+  const s = _pcGet(id); if (!s) return;
+  s[field] = value; renderPreclimat();   // otimista
+  if (!LIVE_MODE) { showToast('Salvo ✓', 'ok'); return; }
   try {
-    const body = {}; body[field] = value;
-    const _did = localStorage.getItem('eco_device_id');
-    if (_did) body.device_id = _did;
-    const r = await fetch('/api/preclimat', {
-      method: 'POST',
-      headers: { 'Authorization': 'Bearer ' + BRIDGE_TOKEN, 'Content-Type': 'application/json' },
+    const body = { id, [field]: value, device_id: localStorage.getItem('eco_device_id') || '' };
+    const r = await fetch('/api/preclimat/schedule', {
+      method: 'POST', headers: { 'Authorization': 'Bearer ' + BRIDGE_TOKEN, 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-    if (r.ok) {
-      _pc = await r.json();
-      renderPreclimat();
-      if (field === 'enabled') showToast(_pc.enabled ? 'Agendamento ativo ✓' : 'Agendamento cancelado', _pc.enabled ? 'ok' : '');
-      else showToast('Agendamento salvo ✓', 'ok');
-    } else {
-      showToast('Erro ao salvar agendamento', 'err');
-    }
-  } catch (_) { showToast('Erro ao salvar agendamento', 'err'); }
+    if (r.ok) { Object.assign(s, await r.json()); renderPreclimat(); }
+    else showToast('Erro ao salvar', 'err');
+  } catch (_) { showToast('Erro ao salvar', 'err'); }
 }
 
-function togglePreclimat() {
-  savePreclimatField('enabled', !_pc.enabled);
+async function addPreclimatSchedule() {
+  if (!LIVE_MODE) { _pcList.push({ id: 'l'+Date.now(), enabled: true, time: '07:30', recurrence: 'daily', temp: 22, fan: 3, duration: 20, leadMin: 10 }); renderPreclimat(); return; }
+  try {
+    const r = await fetch('/api/preclimat/schedule', {
+      method: 'POST', headers: { 'Authorization': 'Bearer ' + BRIDGE_TOKEN, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ device_id: localStorage.getItem('eco_device_id') || '' }),
+    });
+    if (r.ok) { _pcList.push(await r.json()); renderPreclimat(); showToast('Agendamento adicionado ✓', 'ok'); }
+    else showToast('Erro ao adicionar', 'err');
+  } catch (_) { showToast('Erro ao adicionar', 'err'); }
 }
 
-function setPreclimatRec(rec) {
-  savePreclimatField('recurrence', rec);
+async function removePreclimatSched(id) {
+  if (!confirm('Remover este agendamento?')) return;
+  _pcList = _pcList.filter(s => s.id !== id); renderPreclimat();
+  if (!LIVE_MODE) return;
+  try {
+    await fetch('/api/preclimat/schedule/' + encodeURIComponent(id), {
+      method: 'DELETE', headers: { 'Authorization': 'Bearer ' + BRIDGE_TOKEN } });
+    showToast('Removido', '');
+  } catch (_) {}
 }
 
-function adjustPreclimatTemp(delta) {
-  const t = Math.max(16, Math.min(32, _pc.temp + delta));
-  if (t === _pc.temp) return;
-  _pc.temp = t;
-  document.getElementById('preclimat-temp-v').textContent = t.toFixed(0) + '°C';
-  savePreclimatField('temp', t);
-}
-
-function adjustPreclimatFan(delta) {
-  const f = Math.max(1, Math.min(7, _pc.fan + delta));
-  if (f === _pc.fan) return;
-  _pc.fan = f;
-  document.getElementById('preclimat-fan-v').textContent = f + '/7';
-  savePreclimatField('fan', f);
-}
-
-function adjustPreclimatDur(delta) {
-  const d = Math.max(0, Math.min(180, _pc.duration + delta));
-  if (d === _pc.duration) return;
-  _pc.duration = d;
-  document.getElementById('preclimat-dur-v').textContent = d > 0 ? d + ' min' : 'Manual';
-  savePreclimatField('duration', d);
-}
+function togglePreclimatSched(id) { const s = _pcGet(id); if (s) savePreclimatSched(id, 'enabled', !s.enabled); }
+function setPreclimatRec(id, rec) { savePreclimatSched(id, 'recurrence', rec); }
+function adjustPreclimatTemp(id, d) { const s = _pcGet(id); if (!s) return; const v = Math.max(16, Math.min(32, s.temp + d)); if (v !== s.temp) savePreclimatSched(id, 'temp', v); }
+function adjustPreclimatFan(id, d)  { const s = _pcGet(id); if (!s) return; const v = Math.max(1, Math.min(7, s.fan + d)); if (v !== s.fan) savePreclimatSched(id, 'fan', v); }
+function adjustPreclimatDur(id, d)  { const s = _pcGet(id); if (!s) return; const v = Math.max(0, Math.min(180, s.duration + d)); if (v !== s.duration) savePreclimatSched(id, 'duration', v); }
+function adjustPreclimatLead(id, d) { const s = _pcGet(id); if (!s) return; const v = Math.max(0, Math.min(60, (s.leadMin || 0) + d)); if (v !== (s.leadMin || 0)) savePreclimatSched(id, 'leadMin', v); }
 
 function openVersionInfo() {
   alert('App: EcoTrip v5.27 (b171)\nCarro: APK v5.27 (157)\nÚltima atualização carro: 1 min atrás\nÚltima atualização app: agora');
@@ -1007,7 +963,7 @@ async function bootstrapState() {
 bootstrapState();
 loadPreclimat();
   // Expõe handlers de onclick no window
-  Object.assign(window, { toggleAC, adjustTemp, toggleSync, toggleAuto, adjustFan, toggleCycle, cycleSeatVent, togglePreclimat, setPreclimatRec, adjustPreclimatTemp, adjustPreclimatFan, adjustPreclimatDur, savePreclimatField });
+  Object.assign(window, { toggleAC, adjustTemp, toggleSync, toggleAuto, adjustFan, toggleCycle, cycleSeatVent, addPreclimatSchedule, removePreclimatSched, togglePreclimatSched, setPreclimatRec, adjustPreclimatTemp, adjustPreclimatFan, adjustPreclimatDur, adjustPreclimatLead, savePreclimatSched });
   // Handler de resultado HVAC via WS push (mais rápido que polling — confirma logo
   // que o APK faz fetchCurrent ~2.5s após requestSetting).
   window._onHvacResult = function({ control, result }) {
