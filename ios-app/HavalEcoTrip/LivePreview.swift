@@ -36,6 +36,12 @@ enum LivePreview {
             content: ActivityContent(state: state, staleDate: now.addingTimeInterval(1200)))
     }
 
+    // Encerra todas as Live Activities ativas (recarga + pré-climatização).
+    static func stopAll() {
+        endActive(Activity<ChargeActivityAttributes>.activities)
+        endActive(Activity<PreClimatActivityAttributes>.activities)
+    }
+
     // Encerra atividades ativas do tipo antes de criar a de preview (evita duplicar).
     private static func endActive<T: ActivityAttributes>(_ activities: [Activity<T>]) {
         for a in activities where a.activityState == .active {

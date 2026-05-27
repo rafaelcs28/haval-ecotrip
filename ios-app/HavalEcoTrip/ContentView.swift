@@ -152,6 +152,11 @@ struct SetupView: View {
                     } label: {
                         Label("Pré-visualizar · Pré-climatização", systemImage: "snowflake")
                     }
+                    Button(role: .destructive) {
+                        LivePreview.stopAll()
+                    } label: {
+                        Label("Parar Live Activity (teste)", systemImage: "stop.circle")
+                    }
                     Text("Mostra a Live Activity localmente (sem push) pra validar o layout. Bloqueie a tela pra ver o card.")
                         .font(.caption).foregroundStyle(.secondary)
                 } header: {
