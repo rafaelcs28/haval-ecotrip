@@ -287,7 +287,8 @@
     <div class="lbl" style="font-weight:700;font-size:14px">📡 Conexão (broker MQTT + Home Assistant)</div>
     <div class="hint" style="margin-bottom:12px">Sua instância conecta no broker da SUA Home Assistant (pela rede Tailscale) pra receber os dados do carro e enviar comandos. Status atual: <b id="ms-conn">—</b></div>
     <div class="field"><div class="lbl">Broker — host (Tailscale)</div><input type="text" id="ms-host" placeholder="ex: 100.x.y.z ou nome-da-maquina.ts.net"></div>
-    <div class="field"><div class="lbl">Broker — porta</div><input type="number" id="ms-port" placeholder="1883"></div>
+    <div class="field"><div class="lbl">Broker — porta</div><input type="number" id="ms-port" placeholder="8883 (TLS) ou 1883"></div>
+    <div class="field"><label class="lbl" style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="ms-tls" style="width:auto;transform:scale(1.2)"> TLS (broker público — recomendado, porta 8883)</label><div class="hint">Ligue se o broker está exposto na internet com TLS (mqtts://). Use a MESMA opção no app do carro.</div></div>
     <div class="field"><div class="lbl">Broker — usuário</div><input type="text" id="ms-user" placeholder="usuário do MQTT"></div>
     <div class="field"><div class="lbl">Broker — senha</div><input type="password" id="ms-pass" placeholder="•••• (em branco mantém a atual)"></div>
     <div class="field"><div class="lbl">Prefixo MQTT</div><input type="text" id="ms-prefix" placeholder="haval/ecotrip"><div class="hint">Use o MESMO prefixo no app do carro (APK → Ajustes → MQTT).</div></div>
@@ -2978,8 +2979,9 @@ async function _loadMySetup() {
     if (!r.ok) return;
     const d = await r.json();
     const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v ?? ''; };
-    set('ms-host',   (d.mqtt_host || '').replace(/^mqtt:\/\//, ''));
+    set('ms-host',   (d.mqtt_host || '').replace(/^mqtts?:\/\//, ''));
     set('ms-port',   d.mqtt_port || 1883);
+    const tls = document.getElementById('ms-tls'); if (tls) tls.checked = !!d.mqtt_tls;
     set('ms-user',   d.mqtt_user);
     set('ms-prefix', d.mqtt_prefix);
     set('ms-haurl',  d.ha_url);
@@ -2996,6 +2998,7 @@ async function saveMySetup() {
   const g = id => (document.getElementById(id).value || '').trim();
   const body = {
     mqtt_host: g('ms-host'), mqtt_port: g('ms-port'), mqtt_user: g('ms-user'),
+    mqtt_tls: document.getElementById('ms-tls').checked,
     mqtt_prefix: g('ms-prefix') || 'haval/ecotrip', ha_url: g('ms-haurl'),
   };
   if (g('ms-pass'))  body.mqtt_pass = g('ms-pass');   // só envia se digitou
