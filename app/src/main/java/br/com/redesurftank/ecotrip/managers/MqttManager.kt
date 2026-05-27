@@ -94,6 +94,7 @@ class MqttManager private constructor() {
 
     // Real-time values — updated by ConsumptionScreen on every car data event
     var latestSpeedKmh: Float = 0f
+    var latestSteeringAngle: Float = 0f   // ângulo do volante (graus, ±) — via expressa
     var latestGear: String = ""
     var latestInsideTemp: Float = 0f
         set(value) { field = value; if (::prefs.isInitialized) prefs.edit().putFloat(SharedPreferencesKeys.LATEST_INSIDE_TEMP, value).apply() }
@@ -334,6 +335,7 @@ class MqttManager private constructor() {
             fun fmt1(v: Float) = String.format(java.util.Locale.US, "%.1f", v)
             fun fmt2(v: Float) = String.format(java.util.Locale.US, "%.2f", v)
             pub("speed_kmh",         fmt1(latestSpeedKmh))
+            pub("steering_angle",    fmt1(latestSteeringAngle))
             pub("engine_rpm",        latestEngineRpm.toString())
             pub("battery_power_pct", latestBattPowerPct.toString())
             pub("motor_power_kw",    fmt2(latestMotorPowerKw))

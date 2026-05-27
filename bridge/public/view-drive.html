@@ -63,9 +63,14 @@
   padding: 10px 14px;
   margin-bottom: 6px;
   border: 1px solid rgba(255,255,255,.04);
-  display: grid; grid-template-columns: 1fr auto; gap: 12px;
+  display: grid; grid-template-columns: 1fr auto auto; gap: 12px;
   align-items: center;
 }
+/* Volante: gira com car.basic.steering_wheel_angle (transição suave entre amostras) */
+.steer { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.steer-wheel { width: 46px; height: 46px; transform-origin: 50% 50%; transition: transform .12s ease-out; will-change: transform; }
+.steer-wheel svg { display: block; width: 100%; height: 100%; }
+.steer-lbl { font-size: 9px; color: var(--muted); font-weight: 700; letter-spacing: .5px; white-space: nowrap; }
 .speed-hero .speed-block { display: flex; flex-direction: column; gap: 2px; line-height: 1; }
 .speed-hero .speed-v {
   font-size: 52px; font-weight: 200;
@@ -453,6 +458,18 @@
       <div class="speed-block">
         <span class="speed-v" id="speed-v">--</span>
         <span class="speed-u">km/h</span>
+      </div>
+      <div class="steer">
+        <div class="steer-wheel" id="steer-wheel">
+          <svg viewBox="0 0 48 48" aria-hidden="true">
+            <circle cx="24" cy="24" r="20" fill="none" stroke="#cbd5e1" stroke-width="3.5"/>
+            <circle cx="24" cy="24" r="5.5" fill="#cbd5e1"/>
+            <line x1="24" y1="24" x2="6"  y2="24" stroke="#cbd5e1" stroke-width="3.5" stroke-linecap="round"/>
+            <line x1="24" y1="24" x2="42" y2="24" stroke="#cbd5e1" stroke-width="3.5" stroke-linecap="round"/>
+            <line x1="24" y1="24" x2="24" y2="43" stroke="#cbd5e1" stroke-width="3.5" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <div class="steer-lbl" id="steer-lbl">reto</div>
       </div>
       <div class="power-block">
         <div class="power-lbl" id="power-lbl">POTÊNCIA</div>
@@ -3138,6 +3155,17 @@ function render(s, kpData) {
   const spdRaw = +s.speed_kmh;
   const spd = (Number.isFinite(spdRaw) && spdRaw >= 0) ? spdRaw : 0;
   document.getElementById('speed-v').textContent = Math.round(spd);
+
+  // ── Volante: gira pelo ângulo real (car.basic.steering_wheel_angle).
+  // Convenção assumida: + = direita (horário), − = esquerda. Calibrar com dado real.
+  const swEl = document.getElementById('steer-wheel');
+  if (swEl) {
+    const ang = +s.steering_angle || 0;
+    swEl.style.transform = 'rotate(' + ang + 'deg)';
+    const sl = document.getElementById('steer-lbl');
+    if (sl) sl.textContent = Math.abs(ang) < 5 ? 'reto'
+      : Math.round(Math.abs(ang)) + '° ' + (ang < 0 ? 'esq' : 'dir');
+  }
 
   // ── Potência atual (motor_power_kw):
   // > 0 = acelerando (verde), < 0 = regen (teal), ~0 = idle (muted)
