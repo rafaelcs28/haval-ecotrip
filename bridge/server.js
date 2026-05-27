@@ -253,7 +253,10 @@ async function sendPush(title, body, type, opts = {}) {
 
   // APNs alert direto pro app nativo iOS (conta paga). Mesmo gating de device
   // do web-push. Updates silenciosos (charge_live) não viram banner.
-  if (apnsLive.enabled && !opts.silent) {
+  // skipApnsAlert: o evento já vai TOCAR via alert da própria Live Activity
+  // (recarga/pré-clima) — não manda banner separado pro nativo (evita duplicar).
+  // O web-push acima continua indo pro PWA, que não tem Live Activity.
+  if (apnsLive.enabled && !opts.silent && !opts.skipApnsAlert) {
     apnsLive.pushAlert(title, body, {
       threadId: type || undefined,
       allow: (deviceId) => {
@@ -370,9 +373,9 @@ function _abortPreclimatAutoOff(reason) {
   if (_preclimatRestoreTimer) { clearTimeout(_preclimatRestoreTimer); _preclimatRestoreTimer = null; }
   console.log(`[preclimat] desligamento automático CANCELADO (${reason}) — motor segue ligado`);
   _setPreclimatStatus('ended', 'Você entrou no carro — desligamento automático cancelado',
-    { endsAtMs: Date.now() + 2 * 60_000 });
-  _sendPreclimatPush(_activeSched, '🚗 Pré-climatização',
-    'Você entrou no carro — o desligamento automático foi cancelado. O motor segue ligado.');
+    { endsAtMs: Date.now() + 2 * 60_000,
+      alert: { title: '🚗 Pré-climatização',
+               body: 'Você entrou no carro — desligamento automático cancelado. O motor segue ligado.' } });
 }
 
 const PRECLIMAT_LA_TYPE = 'PreClimatActivityAttributes';
@@ -398,9 +401,16 @@ function _setPreclimatStatus(phase, detail, extra = {}) {
   };
   console.log(`[preclimat] status → ${phase}: ${detail}`);
   const dev = _activeSched && _activeSched.device_id;
+  // extra.alert = { title, body }: este passo deve TOCAR (som+vibração).
+  // Nativo: o toque vem pelo alert da própria LA (abaixo). PWA: web-push aqui
+  // com skipApnsAlert (sem banner nativo duplicado).
+  if (extra.alert) {
+    sendPush(extra.alert.title, extra.alert.body, 'preclimat',
+      { onlyDeviceIds: dev ? [dev] : undefined, skipApnsAlert: true });
+  }
   if (!apnsLive.enabled || !dev) return;
   apnsLive.pushUpdate(PRECLIMAT_LA_TYPE, { deviceId: dev }, _preclimatContentState(),
-    { staleDate: preclimatStatus.endsAtMs || undefined })
+    { staleDate: preclimatStatus.endsAtMs || undefined, alert: extra.alert })
     .catch(e => console.warn('[apns] preclimat update falhou:', e.message));
   if (phase === 'ended' || phase === 'failed') {
     setTimeout(() => {
@@ -533,7 +543,8 @@ async function firePreClimat(sched) {
   if (_preclimatRestoreTimer) { clearTimeout(_preclimatRestoreTimer); _preclimatRestoreTimer = null; }
   const { temp, fan, duration } = sched;
   console.log(`[preclimat] disparando — temp=${temp}°C fan=${fan} (${sched.time})`);
-  _setPreclimatStatus('starting', 'Ligando o motor…', { temp, fan, endsAtMs: 0 });
+  _setPreclimatStatus('starting', 'Ligando o motor…',
+    { temp, fan, endsAtMs: 0, alert: { title: '⏰ Pré-climatização', body: 'Ligando o motor…' } });
 
   // Passo 1: ligar motor via HA (mesmo mecanismo do botão do dashboard)
   if (HA_URL && HA_TOKEN) {
@@ -548,8 +559,9 @@ async function firePreClimat(sched) {
       console.log('[preclimat] comando engine_on enviado via HA');
     } catch (e) {
       console.error(`[preclimat] falha ao ligar motor: ${e.message}`);
-      _setPreclimatStatus('failed', 'Não foi possível ligar o motor', { endsAtMs: Date.now() + 5 * 60_000 });
-      _sendPreclimatPush(sched, '⏰ Pré-climatização falhou', 'Não foi possível ligar o motor.');
+      _setPreclimatStatus('failed', 'Não foi possível ligar o motor',
+        { endsAtMs: Date.now() + 5 * 60_000,
+          alert: { title: '⏰ Pré-climatização falhou', body: 'Não foi possível ligar o motor.' } });
       return;
     }
   } else {
@@ -569,13 +581,15 @@ async function firePreClimat(sched) {
 
   if (!engineOk) {
     console.warn('[preclimat] timeout esperando engine_state=1');
-    _setPreclimatStatus('failed', 'Motor não confirmou em 2 min', { endsAtMs: Date.now() + 5 * 60_000 });
-    _sendPreclimatPush(sched, '⏰ Pré-climatização falhou', 'Motor não confirmou em 2 min.');
+    _setPreclimatStatus('failed', 'Motor não confirmou em 2 min',
+      { endsAtMs: Date.now() + 5 * 60_000,
+        alert: { title: '⏰ Pré-climatização falhou', body: 'Motor não confirmou em 2 min.' } });
     return;
   }
 
   console.log('[preclimat] motor confirmado — enviando HVAC');
-  _setPreclimatStatus('engine_on', 'Motor ligado ✓', { temp, fan, endsAtMs: 0 });
+  _setPreclimatStatus('engine_on', 'Motor ligado ✓',
+    { temp, fan, endsAtMs: 0, alert: { title: '🔑 Motor ligado', body: 'Pré-climatização: enviando temperatura e ventilação…' } });
 
   // Captura estado anterior do AC antes de sobrescrever
   const prevFan      = parseInt(state.hvac_fan_speed, 10) || 0;
@@ -592,9 +606,9 @@ async function firePreClimat(sched) {
   const durStr = duration > 0 ? ` · desliga em ${duration} min` : '';
   const acEndsAtMs = duration > 0 ? Date.now() + duration * 60_000 : 0;
   _setPreclimatStatus('cooling', `Climatizando · ${temp.toFixed(0)}° · fan ${fan}/7`,
-    { temp, fan, endsAtMs: acEndsAtMs });
-  _sendPreclimatPush(sched, '⏰ Pré-climatização ativada',
-    `Motor ligado · AC ${temp.toFixed(0)}° · ventilação ${fan}/7${durStr}`);
+    { temp, fan, endsAtMs: acEndsAtMs,
+      alert: { title: '⏰ Pré-climatização ativada',
+               body: `Motor ligado · AC ${temp.toFixed(0)}° · ventilação ${fan}/7${durStr}` } });
   console.log(`[preclimat] AC ativado — temp=${temp} fan=${fan} duration=${duration}min (prev: fan=${prevFan} temp=${prevDrvTemp})`);
 
   // Passo 4: restaurar AC ao estado anterior + desligar motor após X minutos
@@ -618,7 +632,8 @@ async function firePreClimat(sched) {
         return;
       }
       console.log('[preclimat] timer expirado — restaurando AC e desligando motor');
-      _setPreclimatStatus('restoring', 'Restaurando AC e desligando motor…', { endsAtMs: 0 });
+      _setPreclimatStatus('restoring', 'Restaurando AC e desligando motor…',
+        { endsAtMs: 0, alert: { title: '⏰ Pré-climatização', body: 'Tempo encerrado — restaurando AC e desligando o motor…' } });
 
       // Restaura temperatura anterior (se havia) antes de desligar o fan
       if (prevDrvTemp  !== null) mqttClient.publish(`${MQTT_PREFIX}/cmd/hvac/driver_temp`,    prevDrvTemp.toFixed(1),  { qos: 1, retain: false });
@@ -646,21 +661,16 @@ async function firePreClimat(sched) {
         }
       }
       _setPreclimatStatus('ended', `Encerrada · motor desligado após ${duration} min`,
-        { endsAtMs: Date.now() + 5 * 60_000 });
-      _sendPreclimatPush(sched, '⏰ Pré-climatização encerrada',
-        `AC restaurado · motor desligado após ${duration} min.`);
+        { endsAtMs: Date.now() + 5 * 60_000,
+          alert: { title: '⏰ Pré-climatização encerrada',
+                   body: `AC restaurado · motor desligado após ${duration} min.` } });
     }, duration * 60_000);
   } else {
     // Sem duração definida: marca como encerrada na hora (LA some em 5 min).
     _setPreclimatStatus('ended', 'Pré-climatização ativada (sem desligamento automático)',
-      { endsAtMs: Date.now() + 5 * 60_000 });
+      { endsAtMs: Date.now() + 5 * 60_000,
+        alert: { title: '⏰ Pré-climatização ativada', body: `AC ${temp.toFixed(0)}° · ventilação ${fan}/7 · sem desligamento automático` } });
   }
-}
-
-// Envia push de preclimat apenas pro device que agendou (se conhecido).
-function _sendPreclimatPush(sched, title, body) {
-  const opts = sched && sched.device_id ? { onlyDeviceIds: [sched.device_id] } : {};
-  sendPush(title, body, 'preclimat', opts);
 }
 
 // ── Histórico de modos de condução ────────────────────────────────────────
@@ -5630,8 +5640,10 @@ function handleChargingStateTransition(value, isRetained) {
           : '~?';
         // Usa o mesmo tag das live-updates pra que o 1º update silencioso substitua
         // esta notif (sem acumular) em vez de criar uma segunda notification separada.
+        // skipApnsAlert: o nativo já tocou no alert do push-to-start da LA;
+        // este é só refinamento (potência/tempo) → web-push pro PWA, sem banner duplo.
         sendPush('⚡ Recarga iniciada', `${pwr.toFixed(1)} kW · tempo restante: ${remStr}`, 'charge_start',
-          { tag: CHARGE_LIVE_TAG });
+          { tag: CHARGE_LIVE_TAG, skipApnsAlert: true });
       }, 30000);
     }
   } else if (prev === 'Carregando') {
@@ -5663,8 +5675,11 @@ function handleChargingStateTransition(value, isRetained) {
       if (kwh > 0.05) parts.push(`${kwh.toFixed(2)} kWh`);
       if (durStr)     parts.push(durStr);
       if (avgKw)      parts.push(`${avgKw.toFixed(1)} kW médios`);
-      sendPush('✅ Recarga concluída', parts.length ? parts.join(' · ') : 'Sessão encerrada', 'charge_end');
-      // Encerra a "live notification" (substitui pela final, agora com som)
+      // skipApnsAlert: o toque do fim vem pelo alert da LA final (logo abaixo).
+      // Web-push continua indo pro PWA. Evita banner duplicado no nativo.
+      sendPush('✅ Recarga concluída', parts.length ? parts.join(' · ') : 'Sessão encerrada', 'charge_end',
+        { skipApnsAlert: true });
+      // Encerra a "live notification" (substitui pela final, agora com som via LA)
       stopChargeLiveTimer();
       sendChargeLiveUpdate(true /* final */);
       chargeSessionStartMs = 0;
@@ -5725,17 +5740,21 @@ function sendChargeLiveUpdate(isFinal = false) {
   const body  = isFinal
     ? _fmtChargeLiveBody(state) || 'Sessão encerrada'
     : _fmtChargeLiveBody(state);
+  // skipApnsAlert: no nativo o som vem pelo alert da LA (abaixo, só no final).
+  // Updates não-finais são silent de qualquer forma. Web-push segue pro PWA.
   sendPush(title, body, 'charge_live', {
     tag: CHARGE_LIVE_TAG,
     silent: !isFinal,                // updates não fazem barulho; a final sim
     renotify: isFinal,
     skipHistory: !isFinal,           // updates ao vivo não entram na central de notif
+    skipApnsAlert: true,
     // Dados de estado embarcados no payload: o app nativo iOS usa para atualizar
     // a Live Activity diretamente a partir da notificação (sem fetch extra).
     state: { soc, pwr, rem: Math.max(0, Math.round(rem)), kwh, charging: !isFinal },
   });
   // Live Activity (iOS) via APNs — manda o mesmo content-state pra todos os
   // pushTokens registrados pelo app companion. No-op se APNS_ENABLED=false.
+  // No FINAL leva alert → toca/vibra no nativo (é o "toque" do fim da recarga).
   if (apnsLive.enabled) {
     apnsLive.pushUpdate('ChargeActivityAttributes', {}, {
       soc, powerKw: pwr,
@@ -5744,7 +5763,8 @@ function sendChargeLiveUpdate(isFinal = false) {
       charging: !isFinal,
       targetPct: +state.charge_limit_pct || 100,
       updatedAtMs: now,
-    }, { isFinal }).catch(err => console.warn('[apns] push falhou:', err.message));
+    }, { isFinal, alert: isFinal ? { title, body } : undefined })
+      .catch(err => console.warn('[apns] push falhou:', err.message));
   }
 }
 
