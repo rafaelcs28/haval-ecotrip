@@ -436,6 +436,24 @@
         <div id="notif-me-actions"></div>
       </div>
     </div>
+
+    <!-- 🏝️ Live Activities (cards ao vivo na tela de bloqueio) -->
+    <div class="ng open" id="ng-la">
+      <div class="ng-hd" onclick="toggleNg('ng-la')">
+        <div class="ng-hd-left"><span>🏝️ Live Activities</span><span class="ng-ct" id="ng-la-ct"></span></div>
+        <span class="ng-chv">›</span>
+      </div>
+      <div class="ng-bd">
+        <div style="font-size:10.5px;color:var(--muted);padding:8px 6px 2px;line-height:1.4">Cards ao vivo na tela de bloqueio. Valem pra esta instância (todos os aparelhos).</div>
+        <div class="toggle-row" onclick="toggleLa('la_charge', this)"><div class="label">⚡ Recarga<div class="sub">SOC · potência · tempo, ao vivo</div></div><div class="toggle" data-la-key="la_charge"></div></div>
+        <div class="toggle-row" onclick="toggleLa('la_preclimat', this)"><div class="label">❄️ Pré-climatização<div class="sub">Contagem regressiva + status</div></div><div class="toggle" data-la-key="la_preclimat"></div></div>
+        <div class="toggle-row" onclick="toggleLa('preclimat_steps', this)"><div class="label">↳ Som a cada passo<div class="sub">Toca/vibra em cada etapa da pré-clima</div></div><div class="toggle" data-la-key="preclimat_steps"></div></div>
+        <div class="toggle-row" onclick="toggleLa('la_trip', this)"><div class="label">🚗 Viagem ao vivo<div class="sub">Distância · consumo durante a viagem</div></div><div class="toggle" data-la-key="la_trip"></div></div>
+        <div class="toggle-row" onclick="toggleLa('la_motor', this)"><div class="label">🔑 Motor remoto<div class="sub">Tempo de motor ligado remotamente</div></div><div class="toggle" data-la-key="la_motor"></div></div>
+        <div class="toggle-row" onclick="toggleLa('la_security', this)"><div class="label">🔓 Veículo desprotegido<div class="sub">Mostra o que está aberto/destravado</div></div><div class="toggle" data-la-key="la_security"></div></div>
+      </div>
+    </div>
+
     <!-- ⚡ Recarga -->
     <div class="ng" id="ng-recarga">
       <div class="ng-hd" onclick="toggleNg('ng-recarga')">
@@ -1928,6 +1946,7 @@ let _notifDevicesList = [];
 async function _loadNotifPrefs() {
   const tk = localStorage.getItem('bridge_token');
   if (!tk) return;
+  _loadLaPrefs();   // masters de Live Activities (globais)
   const myId = localStorage.getItem('eco_device_id') || '';
   // UI simplificada: cada dispositivo edita só as próprias prefs, sem
   // listar/renomear/escolher. Backend salva tudo por device_id automático.
@@ -2549,6 +2568,39 @@ async function saveGeofencePlaces() {
     document.getElementById('geofence-places-modal').style.display = 'none';
     showToast('✓ Locais salvos', 'ok');
   } catch (e) { showToast('✗ ' + e.message, 'err'); }
+}
+
+// ── Live Activities (masters GLOBAIS via /api/la-prefs) ────────────────────
+async function _loadLaPrefs() {
+  const tk = localStorage.getItem('bridge_token');
+  if (!tk) return;
+  try {
+    const r = await fetch('/api/la-prefs', { headers: { 'Authorization': 'Bearer ' + tk } });
+    if (!r.ok) return;
+    const d = await r.json();
+    document.querySelectorAll('#sv-notif .toggle[data-la-key]').forEach(el => {
+      el.classList.toggle('on', d[el.getAttribute('data-la-key')] !== false);
+    });
+  } catch (_) {}
+}
+async function toggleLa(key) {
+  const tk = localStorage.getItem('bridge_token');
+  if (!tk) return;
+  const el = document.querySelector(`#sv-notif .toggle[data-la-key="${key}"]`);
+  if (!el) return;
+  const newVal = !el.classList.contains('on');
+  el.classList.toggle('on', newVal);   // otimista
+  try {
+    const r = await fetch('/api/la-prefs', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + tk, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key, value: newVal }),
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+  } catch (e) {
+    el.classList.toggle('on', !newVal);  // reverte
+    showToast('✗ ' + e.message, 'err');
+  }
 }
 
 async function toggleNotif(key) {
@@ -3476,7 +3528,7 @@ window.adminRemove = async function(email) {
 window.adminInit();
 
   // Expõe handlers de onclick no window
-  Object.assign(window, { openSub: typeof openSub !== 'undefined' ? openSub : undefined, closeSub: typeof closeSub !== 'undefined' ? closeSub : undefined, saveSection: typeof saveSection !== 'undefined' ? saveSection : undefined, toggle2fa: typeof toggle2fa !== 'undefined' ? toggle2fa : undefined, confirmClearHistory: typeof confirmClearHistory !== 'undefined' ? confirmClearHistory : undefined, confirmClearPwaCache: typeof confirmClearPwaCache !== 'undefined' ? confirmClearPwaCache : undefined, clearDriveHistory: typeof clearDriveHistory !== 'undefined' ? clearDriveHistory : undefined, confirmClearEventLogs: typeof confirmClearEventLogs !== 'undefined' ? confirmClearEventLogs : undefined, openMaintAdd: openMaintAdd, openMaintEdit: openMaintEdit, closeMaintModal: closeMaintModal, saveMaintItem: saveMaintItem, deleteMaintItem: deleteMaintItem, markMaintDone: markMaintDone, openMaintRecord: openMaintRecord, closeMaintRecord: closeMaintRecord, saveMaintRecord: saveMaintRecord, deleteMaintHistory: deleteMaintHistory, _onMaintRecTypeChange: window._onMaintRecTypeChange, saveVehicle: saveVehicle, saveMySetup: saveMySetup, setChargeLimit: setChargeLimit, actionReprocessPlaces: actionReprocessPlaces, actionRecomputeTripCosts: actionRecomputeTripCosts, actionRestartBridge: actionRestartBridge, actionUpdateBridge: actionUpdateBridge, openPlaceAdd: openPlaceAdd, openPlaceEdit: openPlaceEdit, closePlaceModal: closePlaceModal, usePlaceGps: usePlaceGps, savePlace: savePlace, deletePlace: deletePlace, toggleNotif: toggleNotif, _onNotifDeviceChange: _onNotifDeviceChange, renameNotifDevice: renameNotifDevice, removeNotifDevice: removeNotifDevice, renameMyDevice: renameMyDevice, forceSubscribePush: forceSubscribePush, reRegisterPush: reRegisterPush, openNotifDevicePicker: openNotifDevicePicker, closeNotifDevicePicker: closeNotifDevicePicker, _pickNotifDevice: _pickNotifDevice, renameNotifDeviceById: renameNotifDeviceById, removeNotifDeviceById: removeNotifDeviceById, changePassword: changePassword, toggle2faNew: toggle2faNew, closeTotpModal: closeTotpModal, activate2fa: activate2fa, show2faBackup: show2faBackup, regenBackupCodes: regenBackupCodes, openGeofencePlaces: openGeofencePlaces, _toggleGeofencePick: _toggleGeofencePick, saveGeofencePlaces: saveGeofencePlaces, toggleNg: toggleNg, saveWindowForgottenMin: saveWindowForgottenMin, saveLockForgottenMin: saveLockForgottenMin, saveTrunkForgottenMin: saveTrunkForgottenMin, saveSocLowIdlePct: saveSocLowIdlePct, saveSocArrivalPct: saveSocArrivalPct, saveSocArrivalMin: saveSocArrivalMin, saveTyreDropPsi: saveTyreDropPsi, openSocArrivalPlaces: openSocArrivalPlaces, toggleChargeEnding: toggleChargeEnding, editChargeEndingMin: editChargeEndingMin, downloadBackup: downloadBackup, uploadBackup: uploadBackup, copyBackupToClipboard: copyBackupToClipboard, shareBackup: shareBackup, clearLocalCache: clearLocalCache, toggleDiag: toggleDiag, saveDiagInterval: saveDiagInterval, exportDiag: exportDiag, clearDiag: clearDiag, openDiagSet: openDiagSet, confirmDiagSet: confirmDiagSet, _scheduleDiagRender: _scheduleDiagRender });
+  Object.assign(window, { openSub: typeof openSub !== 'undefined' ? openSub : undefined, closeSub: typeof closeSub !== 'undefined' ? closeSub : undefined, saveSection: typeof saveSection !== 'undefined' ? saveSection : undefined, toggle2fa: typeof toggle2fa !== 'undefined' ? toggle2fa : undefined, confirmClearHistory: typeof confirmClearHistory !== 'undefined' ? confirmClearHistory : undefined, confirmClearPwaCache: typeof confirmClearPwaCache !== 'undefined' ? confirmClearPwaCache : undefined, clearDriveHistory: typeof clearDriveHistory !== 'undefined' ? clearDriveHistory : undefined, confirmClearEventLogs: typeof confirmClearEventLogs !== 'undefined' ? confirmClearEventLogs : undefined, openMaintAdd: openMaintAdd, openMaintEdit: openMaintEdit, closeMaintModal: closeMaintModal, saveMaintItem: saveMaintItem, deleteMaintItem: deleteMaintItem, markMaintDone: markMaintDone, openMaintRecord: openMaintRecord, closeMaintRecord: closeMaintRecord, saveMaintRecord: saveMaintRecord, deleteMaintHistory: deleteMaintHistory, _onMaintRecTypeChange: window._onMaintRecTypeChange, saveVehicle: saveVehicle, saveMySetup: saveMySetup, setChargeLimit: setChargeLimit, actionReprocessPlaces: actionReprocessPlaces, actionRecomputeTripCosts: actionRecomputeTripCosts, actionRestartBridge: actionRestartBridge, actionUpdateBridge: actionUpdateBridge, openPlaceAdd: openPlaceAdd, openPlaceEdit: openPlaceEdit, closePlaceModal: closePlaceModal, usePlaceGps: usePlaceGps, savePlace: savePlace, deletePlace: deletePlace, toggleNotif: toggleNotif, toggleLa: toggleLa, _onNotifDeviceChange: _onNotifDeviceChange, renameNotifDevice: renameNotifDevice, removeNotifDevice: removeNotifDevice, renameMyDevice: renameMyDevice, forceSubscribePush: forceSubscribePush, reRegisterPush: reRegisterPush, openNotifDevicePicker: openNotifDevicePicker, closeNotifDevicePicker: closeNotifDevicePicker, _pickNotifDevice: _pickNotifDevice, renameNotifDeviceById: renameNotifDeviceById, removeNotifDeviceById: removeNotifDeviceById, changePassword: changePassword, toggle2faNew: toggle2faNew, closeTotpModal: closeTotpModal, activate2fa: activate2fa, show2faBackup: show2faBackup, regenBackupCodes: regenBackupCodes, openGeofencePlaces: openGeofencePlaces, _toggleGeofencePick: _toggleGeofencePick, saveGeofencePlaces: saveGeofencePlaces, toggleNg: toggleNg, saveWindowForgottenMin: saveWindowForgottenMin, saveLockForgottenMin: saveLockForgottenMin, saveTrunkForgottenMin: saveTrunkForgottenMin, saveSocLowIdlePct: saveSocLowIdlePct, saveSocArrivalPct: saveSocArrivalPct, saveSocArrivalMin: saveSocArrivalMin, saveTyreDropPsi: saveTyreDropPsi, openSocArrivalPlaces: openSocArrivalPlaces, toggleChargeEnding: toggleChargeEnding, editChargeEndingMin: editChargeEndingMin, downloadBackup: downloadBackup, uploadBackup: uploadBackup, copyBackupToClipboard: copyBackupToClipboard, shareBackup: shareBackup, clearLocalCache: clearLocalCache, toggleDiag: toggleDiag, saveDiagInterval: saveDiagInterval, exportDiag: exportDiag, clearDiag: clearDiag, openDiagSet: openDiagSet, confirmDiagSet: confirmDiagSet, _scheduleDiagRender: _scheduleDiagRender });
   if (!window['initView_config']) window['initView_config'] = function() {};
 })();
 </script>
