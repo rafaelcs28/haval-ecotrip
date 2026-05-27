@@ -45,7 +45,7 @@ struct ChargeActivityLiveActivity: Widget {
                         ChargeBar(soc: s.soc, target: s.targetPct, accent: s.charging ? .green : .blue)
                         HStack {
                             Label(s.charging ? "Carregando" : "Concluído",
-                                  systemImage: s.charging ? "bolt.fill" : "checkmark.circle.fill")
+                                  systemImage: s.charging ? "bolt.car.fill" : "checkmark.circle.fill")
                                 .font(.caption2).foregroundStyle(s.charging ? .green : .blue)
                             Spacer()
                             Text(String(format: "%.1f kWh", s.sessionKwh))
@@ -54,12 +54,12 @@ struct ChargeActivityLiveActivity: Widget {
                     }
                 }
             } compactLeading: {
-                Image(systemName: s.charging ? "bolt.fill" : "checkmark.circle.fill")
+                Image(systemName: s.charging ? "bolt.car.fill" : "checkmark.circle.fill")
                     .foregroundStyle(s.charging ? .green : .blue)
             } compactTrailing: {
                 Text("\(Int(s.soc))%").bold().foregroundStyle(s.charging ? .green : .blue)
             } minimal: {
-                Image(systemName: "bolt.fill").foregroundStyle(.green)
+                Image(systemName: "bolt.car.fill").foregroundStyle(.green)
             }
             .keylineTint(.green)
         }
@@ -74,7 +74,7 @@ struct ChargeLockScreenView: View {
         let accent: Color = state.charging ? .green : .blue
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Image(systemName: state.charging ? "bolt.fill" : "checkmark.circle.fill")
+                Image(systemName: state.charging ? "bolt.car.fill" : "checkmark.circle.fill")
                     .foregroundStyle(accent)
                 Text(state.charging ? "Carregando" : "Recarga concluída").font(.headline)
                 Spacer()
