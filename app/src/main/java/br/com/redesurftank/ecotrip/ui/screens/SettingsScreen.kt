@@ -244,233 +244,46 @@ fun SettingsScreen(
             )
         }
 
-        // ── MQTT ─────────────────────────────────────────────────────────────
-        SectionCard(title = "MQTT / Home Assistant") {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Text("Habilitar MQTT", fontSize = 14.sp, color = TextPrimary)
-                Switch(
-                    checked = mqttEnabled,
-                    onCheckedChange = { mqttEnabled = it },
-                    colors = SwitchDefaults.colors(checkedThumbColor = Green, checkedTrackColor = Green.copy(alpha = 0.4f)),
-                )
-            }
-
-            if (mqttEnabled) {
-                Spacer(Modifier.height(4.dp))
-
-                // ── Parear (recomendado): busca broker/senha do servidor com um código ──
-                if (pairedState) {
-                    Text("✅ Pareado — credenciais recebidas do app (ocultas por segurança)",
-                        fontSize = 12.sp, color = Green)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Button(
-                            onClick = {
-                                mqttManager.unpair()
-                                pairedState = false; pairCode = ""; pairMsg = ""
-                                host = ""; username = ""; password = ""
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFB91C1C)),
-                            shape = RoundedCornerShape(8.dp),
-                        ) { Text("Desparear", fontSize = 13.sp, color = Color.White) }
-                        TextButton(onClick = { showMqttManual = !showMqttManual }) {
-                            Text(if (showMqttManual) "Ocultar manual" else "Config manual",
-                                fontSize = 12.sp, color = TextSecondary)
-                        }
-                    }
-                } else {
-                    Text("Parear com o app", fontSize = 13.sp, color = TextPrimary, fontWeight = FontWeight.SemiBold)
-                    Text("Gere o código no app (Ajustes → Conexão → Parear o carro) e digite aqui. Vem pronto — você não digita broker/senha.",
-                        fontSize = 11.sp, color = TextSecondary)
-                    OutlinedTextField(
-                        value = pairCode,
-                        onValueChange = { pairCode = it.uppercase() },
-                        label = { Text("Código de pareamento", fontSize = 12.sp) },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = mqttFieldColors(),
-                    )
-                    Button(
-                        onClick = {
-                            pairing = true; pairMsg = ""
-                            val base = bridgeUrlStr.ifBlank { "https://mac-mini.tailacc6e7.ts.net" }
-                            mqttManager.pairWithCode(base, pairCode) { ok, msg ->
-                                pairing = false; pairMsg = msg
-                                if (ok) {
-                                    pairedState = true; showMqttManual = false; pairCode = ""; mqttEnabled = true
-                                    host = mqttManager.host; port = mqttManager.port.toString()
-                                    username = mqttManager.username; password = mqttManager.password
-                                    prefix = mqttManager.prefix; tls = mqttManager.tls
-                                }
-                            }
-                        },
-                        enabled = !pairing && pairCode.isNotBlank(),
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.buttonColors(containerColor = Green),
-                        shape = RoundedCornerShape(8.dp),
-                    ) {
-                        Text(if (pairing) "Pareando…" else "Parear", fontSize = 13.sp, color = SurfaceDeep, fontWeight = FontWeight.SemiBold)
-                    }
-                    if (pairMsg.isNotBlank()) {
-                        Text(pairMsg, fontSize = 12.sp, color = if (pairMsg.contains("✓")) Green else Color(0xFFFF4444))
-                    }
-                    Spacer(Modifier.height(6.dp))
-                }
-
-                if (!pairedState || showMqttManual) {
-                MqttField("Host / IP", host, KeyboardType.Uri) { host = it }
-                MqttField("Porta", port, KeyboardType.Number) { port = it }
-                MqttField("Usuário", username, KeyboardType.Email) { username = it }
-
+        // ── Conexão (SOMENTE pareamento — nada de IP/senha digitável) ─────────
+        SectionCard(title = "Conexão") {
+            StatusBadge(mqttStatus, if (mqttStatus == MqttManager.Status.ERROR) mqttManager.lastErrorMessage else "")
+            if (pairedState) {
+                Text("✅ Pareado com o app", fontSize = 14.sp, color = Green, fontWeight = FontWeight.SemiBold)
+                Text("Broker, usuário e senha vêm do app — nada é digitado nem fica visível aqui.",
+                    fontSize = 11.sp, color = TextSecondary)
+                Button(
+                    onClick = { mqttManager.unpair(); pairedState = false; pairCode = ""; pairMsg = "" },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFB91C1C)),
+                    shape = RoundedCornerShape(8.dp),
+                ) { Text("Desparear", fontSize = 13.sp, color = Color.White) }
+            } else {
+                Text("Parear com o app", fontSize = 14.sp, color = TextPrimary, fontWeight = FontWeight.SemiBold)
+                Text("No app: Ajustes → Veículo → Conexão → Parear o carro → Gerar código. Digite o código abaixo.",
+                    fontSize = 11.sp, color = TextSecondary)
                 OutlinedTextField(
-                    value = password,
-                    onValueChange = { password = it },
-                    label = { Text("Senha", fontSize = 12.sp) },
-                    modifier = Modifier.fillMaxWidth(),
+                    value = pairCode,
+                    onValueChange = { pairCode = it.uppercase() },
+                    label = { Text("Código de pareamento", fontSize = 12.sp) },
                     singleLine = true,
-                    visualTransformation = if (showPass) VisualTransformation.None else PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                    trailingIcon = {
-                        TextButton(onClick = { showPass = !showPass }, contentPadding = PaddingValues(horizontal = 8.dp)) {
-                            Text(if (showPass) "Ocultar" else "Mostrar", fontSize = 11.sp, color = TextSecondary)
-                        }
-                    },
+                    modifier = Modifier.fillMaxWidth(),
                     colors = mqttFieldColors(),
                 )
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("TLS / SSL", fontSize = 13.sp)
-                        Text("Ligue para broker público (porta 8883).", fontSize = 10.sp, color = TextSecondary)
-                    }
-                    Switch(checked = tls, onCheckedChange = { tls = it })
-                }
-
-                MqttField("Prefixo de tópico", prefix, KeyboardType.Uri) { prefix = it }
-
-                Spacer(Modifier.height(2.dp))
-                MqttField("URL do Bridge (iPhone PWA)", bridgeUrlStr, KeyboardType.Uri) { bridgeUrlStr = it }
-                val haFill = deriveBridgeFromHaUrl(backupManager.haExportUrl)
-                val effectiveUrl = bridgeUrlStr.ifBlank { haFill }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            "URL do servidor Node.js do PWA (porta 3000).\nPadrão: mesmo IP do Home Assistant.",
-                            fontSize   = 10.sp,
-                            color      = TextSecondary,
-                            lineHeight = 14.sp,
-                        )
-                        if (effectiveUrl.isNotBlank()) {
-                            Text(
-                                "Usando: $effectiveUrl",
-                                fontSize   = 10.sp,
-                                color      = AccentBlue,
-                                lineHeight = 14.sp,
-                            )
-                        } else {
-                            Text(
-                                "⚠ Nenhuma URL configurada — sync com iPhone desativado.",
-                                fontSize   = 10.sp,
-                                color      = WarnYellow,
-                                lineHeight = 14.sp,
-                            )
+                Button(
+                    onClick = {
+                        pairing = true; pairMsg = ""
+                        mqttManager.pairWithCode("https://mac-mini.tailacc6e7.ts.net", pairCode) { ok, msg ->
+                            pairing = false; pairMsg = msg
+                            if (ok) { pairedState = true; pairCode = "" }
                         }
-                    }
-                    if (haFill.isNotBlank() && bridgeUrlStr != haFill) {
-                        TextButton(
-                            onClick = { bridgeUrlStr = haFill },
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                        ) {
-                            Text("Usar IP do HA", fontSize = 11.sp, color = AccentBlue)
-                        }
-                    }
-                }
-
-                Spacer(Modifier.height(2.dp))
-                MqttField("Senha do Bridge (iPhone PWA)", bridgeTokenStr, KeyboardType.Password) { bridgeTokenStr = it }
-                Text(
-                    "Mesma senha configurada no servidor (BRIDGE_TOKEN). Deixe em branco se sem autenticação.",
-                    fontSize   = 10.sp,
-                    color      = TextSecondary,
-                    lineHeight = 14.sp,
-                )
-                }   // fim do if (!pairedState || showMqttManual) — esconde broker + bridge quando pareado
-
-                Spacer(Modifier.height(2.dp))
-                Text("Intervalo de envio", fontSize = 13.sp, color = TextSecondary,
-                    fontWeight = FontWeight.SemiBold)
-
-                // ── WiFi ──────────────────────────────────────────────────────
-                IntervalSlider(
-                    icon        = "📶",
-                    label       = "Com WiFi",
-                    index       = wifiIntervalIdx,
-                    options     = intervalOptions,
-                    accentColor = Cyan,
-                    labelFn     = ::intervalLabel,
-                    onIndexChange = { wifiIntervalIdx = it },
-                )
-
-                // ── 4G / Celular ──────────────────────────────────────────────
-                IntervalSlider(
-                    icon        = "📡",
-                    label       = "Sem WiFi (4G/celular)",
-                    index       = cellularIntervalIdx,
-                    options     = intervalOptions,
-                    accentColor = MoltenOrange,
-                    labelFn     = ::intervalLabel,
-                    onIndexChange = { cellularIntervalIdx = it },
-                )
-
-                Spacer(Modifier.height(4.dp))
-
-                // Status + Salvar
-                Row(
+                    },
+                    enabled = !pairing && pairCode.isNotBlank(),
                     modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    StatusBadge(mqttStatus, if (mqttStatus == MqttManager.Status.ERROR) mqttManager.lastErrorMessage else "")
-
-                    Button(
-                        onClick = {
-                            mqttManager.enabled                   = mqttEnabled
-                            mqttManager.host                      = host
-                            mqttManager.port                      = port.toIntOrNull() ?: 1883
-                            mqttManager.username                  = username
-                            mqttManager.password                  = password
-                            mqttManager.tls                       = tls
-                            mqttManager.paired                    = pairedState
-                            mqttManager.prefix                    = prefix.ifEmpty { "haval/ecotrip" }
-                            mqttManager.bridgeUrl   = bridgeUrlStr.trim()
-                            mqttManager.bridgeToken = bridgeTokenStr.trim()
-                            mqttManager.publishIntervalWifiMs     = publishIntervalWifiMs
-                            mqttManager.publishIntervalCellularMs = publishIntervalCellularMs
-                            mqttManager.saveAndApply()
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Green),
-                        shape  = RoundedCornerShape(8.dp),
-                    ) {
-                        Text("Salvar e conectar", fontSize = 13.sp, color = SurfaceDeep, fontWeight = FontWeight.SemiBold)
-                    }
+                    colors = ButtonDefaults.buttonColors(containerColor = Green),
+                    shape = RoundedCornerShape(8.dp),
+                ) { Text(if (pairing) "Pareando…" else "Parear", fontSize = 13.sp, color = SurfaceDeep, fontWeight = FontWeight.SemiBold) }
+                if (pairMsg.isNotBlank()) {
+                    Text(pairMsg, fontSize = 12.sp, color = if (pairMsg.contains("✓")) Green else Color(0xFFFF4444))
                 }
-
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    "Os sensores aparecem automaticamente no Home Assistant via MQTT Discovery.",
-                    fontSize = 11.sp, color = TextSecondary,
-                )
             }
         }
 
