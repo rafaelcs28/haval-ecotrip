@@ -3160,11 +3160,13 @@ function render(s, kpData) {
   // Convenção assumida: + = direita (horário), − = esquerda. Calibrar com dado real.
   const swEl = document.getElementById('steer-wheel');
   if (swEl) {
-    const ang = +s.steering_angle || 0;
-    swEl.style.transform = 'rotate(' + ang + 'deg)';
+    // Calibrado 2026-05-27: dado do carro tem direita = NEGATIVO, esquerda = POSITIVO.
+    // Inverte (disp = -ang) pra a tela girar no mesmo sentido do volante (direita = horário).
+    const disp = -(+s.steering_angle || 0);
+    swEl.style.transform = 'rotate(' + disp + 'deg)';
     const sl = document.getElementById('steer-lbl');
-    if (sl) sl.textContent = Math.abs(ang) < 5 ? 'reto'
-      : Math.round(Math.abs(ang)) + '° ' + (ang < 0 ? 'esq' : 'dir');
+    if (sl) sl.textContent = Math.abs(disp) < 5 ? 'reto'
+      : Math.round(Math.abs(disp)) + '° ' + (disp < 0 ? 'esq' : 'dir');
   }
 
   // ── Potência atual (motor_power_kw):
