@@ -1358,6 +1358,31 @@ window._renderActiveView = function() {
   if (window['renderView_' + activeView]) window['renderView_' + activeView]();
 };
 
+// Voltar nativo: chamado pelo gesto de arrastar da borda esquerda no app iOS.
+// Fecha a camada aberta no topo (modal → sub-página de config → painel de notif).
+// Retorna true se fechou algo; false se não havia nada pra voltar.
+window.HavalBack = function() {
+  // 1) Modal/overlay visível com classe .show (status, action, soc-limit, hev…)
+  const modals = Array.from(document.querySelectorAll('[class*="modal"].show'))
+    .filter(el => el.offsetParent !== null);
+  if (modals.length) { modals[modals.length - 1].classList.remove('show'); return true; }
+  // 2) Sub-página de Configurações aberta
+  const sub = document.querySelector('.subview.show');
+  if (sub) {
+    if (typeof window.closeSub === 'function') window.closeSub();
+    else sub.classList.remove('show');
+    return true;
+  }
+  // 3) Painel de notificações
+  const notif = document.getElementById('notif-overlay');
+  if (notif && getComputedStyle(notif).display !== 'none') {
+    if (typeof window.closeNotifPanel === 'function') window.closeNotifPanel();
+    else notif.style.display = 'none';
+    return true;
+  }
+  return false;
+};
+
 // ═════════════════════════════════════════════════════════
 //  HF MODE — pede pro APK publicar a 250ms enquanto Dash/Drive estão ativas
 // ═════════════════════════════════════════════════════════

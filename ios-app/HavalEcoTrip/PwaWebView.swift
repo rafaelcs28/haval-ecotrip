@@ -52,9 +52,21 @@ struct PwaWebView: UIViewRepresentable {
             source: bridgeJS, injectionTime: .atDocumentStart, forMainFrameOnly: false))
 
         let web = WKWebView(frame: .zero, configuration: config)
-        web.allowsBackForwardNavigationGestures = true
+        // PWA é SPA (navega por JS, sem histórico de página) — o gesto nativo de
+        // back/forward da WebView não tem o que percorrer. Desligamos e usamos um
+        // edge-pan próprio que chama window.HavalBack() (com fallback pro goBack).
+        web.allowsBackForwardNavigationGestures = false
         web.scrollView.bounces = false
         web.navigationDelegate = context.coordinator
+
+        // Gesto: arrastar da borda ESQUERDA pra direita → "voltar" (fecha a
+        // camada aberta no topo via window.HavalBack()).
+        let edge = UIScreenEdgePanGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(Coordinator.handleEdgeBack(_:)))
+        edge.edges = .left
+        edge.delegate = context.coordinator
+        web.addGestureRecognizer(edge)
 
         // Long-press com 3 dedos por 1s abre configurações nativas.
         // Adicionado direto na WKWebView porque SwiftUI .onLongPressGesture
@@ -92,6 +104,18 @@ struct PwaWebView: UIViewRepresentable {
         @objc func handleThreeFingerLongPress(_ gr: UILongPressGestureRecognizer) {
             guard gr.state == .began else { return }
             NotificationCenter.default.post(name: .openHavalSettings, object: nil)
+        }
+
+        // Swipe da borda esquerda → voltar. Fecha a camada aberta no PWA via
+        // HavalBack(); se não houver nada, tenta o histórico da WebView.
+        @objc func handleEdgeBack(_ gr: UIScreenEdgePanGestureRecognizer) {
+            guard gr.state == .ended, let web = gr.view as? WKWebView else { return }
+            let t = gr.translation(in: web)
+            guard t.x > 50, abs(t.y) < 80 else { return }   // swipe horizontal deliberado
+            web.evaluateJavaScript("window.HavalBack ? window.HavalBack() : false") { result, _ in
+                let handled = (result as? Bool) ?? false
+                if !handled, web.canGoBack { web.goBack() }
+            }
         }
 
         func gestureRecognizer(_ gr: UIGestureRecognizer,
