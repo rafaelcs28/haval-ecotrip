@@ -292,9 +292,20 @@ fun SettingsScreen(
                 if (pairedState) {
                     Text("✅ Pareado — credenciais recebidas do app (ocultas por segurança)",
                         fontSize = 12.sp, color = Green)
-                    TextButton(onClick = { showMqttManual = !showMqttManual }) {
-                        Text(if (showMqttManual) "Ocultar configuração manual" else "Configuração manual / re-parear",
-                            fontSize = 12.sp, color = TextSecondary)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Button(
+                            onClick = {
+                                mqttManager.unpair()
+                                pairedState = false; pairCode = ""; pairMsg = ""
+                                host = ""; username = ""; password = ""
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFB91C1C)),
+                            shape = RoundedCornerShape(8.dp),
+                        ) { Text("Desparear", fontSize = 13.sp, color = Color.White) }
+                        TextButton(onClick = { showMqttManual = !showMqttManual }) {
+                            Text(if (showMqttManual) "Ocultar manual" else "Config manual",
+                                fontSize = 12.sp, color = TextSecondary)
+                        }
                     }
                 } else {
                     Text("Parear com o app", fontSize = 13.sp, color = TextPrimary, fontWeight = FontWeight.SemiBold)
