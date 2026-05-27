@@ -975,6 +975,7 @@ const state = {
   gps_lng:          0,
   gps_ts:           0,   // timestamp ms da última posição recebida
   car_heading:      0,   // rumo do carro (graus, 0=N) do deslocamento GPS; PERSISTIDO
+  apns_prod_confirmed: false,  // watchdog: já confirmou (e notificou) o APNs de produção ativo
 
   speed_kmh:        0,
   steering_angle:   0,      // ângulo do volante (graus, ±) — gira o volante no PWA
@@ -6755,9 +6756,40 @@ function applyMqttMessage(key, value, isRetained = false) {
 
 // ── Start ─────────────────────────────────────────────────────────────────────
 
+// ── Watchdog: avisa quando o APNs de PRODUÇÃO for ativado pela Apple ─────────
+// Conta paga recém-criada → produção pode levar horas pra liberar. Tenta enviar
+// a notificação de "ativado" periodicamente; ela só CHEGA quando a produção
+// estiver ativa (antes falha em silêncio com 403). No 1º sucesso, marca
+// confirmado (PERSISTIDO) e para — o usuário recebe 1 push no app avisando.
+let _apnsWatchTimer = null;
+async function _apnsProdCheck() {
+  if (state.apns_prod_confirmed) { if (_apnsWatchTimer) { clearInterval(_apnsWatchTimer); _apnsWatchTimer = null; } return; }
+  if (!apnsLive.enabled) return;
+  try {
+    const r = await apnsLive.pushAlert(
+      '✅ Live Activities ativadas',
+      'O APNs de produção foi liberado pela Apple — recarga, pré-clima, viagem e motor agora aparecem com o app fechado/bloqueado.',
+      { threadId: 'apns_ready' });
+    if (r && r.sent > 0) {
+      state.apns_prod_confirmed = true;
+      scheduleStateSave();
+      console.log('[apns-watch] ✅ produção ATIVA — notificação enviada, watchdog encerrado');
+      if (_apnsWatchTimer) { clearInterval(_apnsWatchTimer); _apnsWatchTimer = null; }
+    } else {
+      console.log('[apns-watch] produção ainda não ativa — segue tentando');
+    }
+  } catch (e) { console.warn('[apns-watch] erro:', e.message); }
+}
+function _startApnsProdWatch() {
+  if (state.apns_prod_confirmed || _apnsWatchTimer) return;
+  setTimeout(_apnsProdCheck, 30_000);                          // 1ª tentativa 30s após boot
+  _apnsWatchTimer = setInterval(_apnsProdCheck, 15 * 60_000);  // depois a cada 15 min
+}
+
 server.listen(PORT, () => {
   const pkg = require('./package.json');
   console.log(`\n🚗  EcoTrip Bridge v${pkg.version}`);
+  _startApnsProdWatch();
   console.log(`    HTTP PWA:  http://localhost:${PORT}`);
   console.log(`    WebSocket: ws://localhost:${PORT}/ws`);
   if (httpsServer) {
