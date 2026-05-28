@@ -482,6 +482,29 @@ input { font-family: inherit; }
   </div>
 </div>
 
+<!-- ──────────────────────── 🤖 AI ASK (Ollama local) ──────────────────────── -->
+<button id="ai-ask-fab" onclick="openAiAsk()" title="Pergunte ao assistente local"
+        style="display:none;position:fixed;bottom:calc(env(safe-area-inset-bottom) + 76px);right:14px;z-index:240;width:48px;height:48px;border-radius:50%;background:linear-gradient(135deg,#7c3aed,#3b82f6);border:none;color:#fff;font-size:22px;box-shadow:0 4px 14px rgba(124,58,237,.5);cursor:pointer">🤖</button>
+
+<div id="ai-modal" style="display:none;position:fixed;inset:0;z-index:260;background:rgba(0,0,0,.78);align-items:flex-end;justify-content:center;backdrop-filter:blur(8px)" onclick="if(event.target===this) closeAiAsk()">
+  <div style="background:#1f1f1f;width:100%;max-width:560px;border-top-left-radius:18px;border-top-right-radius:18px;padding:18px 18px calc(env(safe-area-inset-bottom) + 18px);border-top:1px solid rgba(255,255,255,.08);max-height:88vh;display:flex;flex-direction:column">
+    <div style="width:42px;height:5px;background:rgba(255,255,255,.18);border-radius:3px;margin:-8px auto 14px"></div>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+      <div style="font-size:24px">🤖</div>
+      <div style="flex:1">
+        <div style="font-size:15px;font-weight:700;color:#fff">Assistente local</div>
+        <div style="font-size:11px;color:#94a3b8">100% no Mac Mini · suas viagens e recargas como contexto</div>
+      </div>
+      <button onclick="closeAiAsk()" style="background:none;border:none;color:#fff;font-size:22px;cursor:pointer">×</button>
+    </div>
+    <div id="ai-answer" style="flex:1;overflow-y:auto;background:rgba(255,255,255,.04);border-radius:10px;padding:12px;font-size:13px;line-height:1.5;color:#e2e8f0;min-height:80px;white-space:pre-wrap"></div>
+    <div id="ai-meta" style="font-size:10px;color:#64748b;margin-top:6px;text-align:right"></div>
+    <textarea id="ai-input" placeholder="Ex: Da minha última viagem, quanto andei em modo elétrico? Ou: qual recarga mais barata por kWh efetivo?"
+              rows="2" style="margin-top:10px;width:100%;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:10px;color:#fff;padding:10px;font-family:inherit;font-size:13px;resize:none;box-sizing:border-box"></textarea>
+    <button onclick="askAi()" id="ai-send-btn" style="margin-top:10px;padding:12px;background:linear-gradient(135deg,#7c3aed,#3b82f6);color:#fff;border:none;border-radius:10px;font-size:14px;font-weight:700;font-family:inherit;cursor:pointer">Perguntar</button>
+  </div>
+</div>
+
 <!-- ──────────────────────── NOTIF OVERLAY ──────────────────────── -->
 <div id="notif-overlay" style="display:none">
   <div class="notif-head">
@@ -1991,6 +2014,64 @@ function closeNetInfo() {
   const m = document.getElementById('net-info-modal');
   if (m) m.style.display = 'none';
 }
+
+// ── 🤖 AI Ask (Ollama local) ───────────────────────────────────────────────
+window.openAiAsk = function() {
+  const m = document.getElementById('ai-modal');
+  if (!m) return;
+  m.style.display = 'flex';
+  setTimeout(() => document.getElementById('ai-input')?.focus(), 100);
+};
+window.closeAiAsk = function() {
+  const m = document.getElementById('ai-modal');
+  if (m) m.style.display = 'none';
+};
+window.askAi = async function() {
+  const inp = document.getElementById('ai-input');
+  const ans = document.getElementById('ai-answer');
+  const meta = document.getElementById('ai-meta');
+  const btn = document.getElementById('ai-send-btn');
+  const question = (inp?.value || '').trim();
+  if (!question) return;
+  const tk = localStorage.getItem('bridge_token');
+  if (!tk) { ans.textContent = 'Faça login pra usar.'; return; }
+  btn.disabled = true;
+  btn.textContent = 'Pensando…';
+  ans.textContent = '⏳ Consultando assistente local…';
+  meta.textContent = '';
+  const t0 = Date.now();
+  try {
+    const r = await fetch('/api/ai/ask', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + tk, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question }),
+    });
+    const d = await r.json();
+    if (!r.ok) { ans.textContent = '✗ ' + (d.error || ('HTTP ' + r.status)); return; }
+    ans.textContent = d.answer || '(sem resposta)';
+    const dt = ((Date.now() - t0) / 1000).toFixed(1);
+    meta.textContent = `⏱ ${d.duration_sec || dt}s · ${d.tokens || '?'} tokens · local`;
+    inp.value = '';
+  } catch (e) {
+    ans.textContent = '✗ erro: ' + e.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Perguntar';
+  }
+};
+// Atalho Enter (sem shift) envia. Shift+Enter quebra linha.
+document.addEventListener('keydown', function(e) {
+  if (e.key !== 'Enter' || e.shiftKey) return;
+  const inp = document.getElementById('ai-input');
+  if (document.activeElement === inp) { e.preventDefault(); window.askAi(); }
+});
+// Mostra o FAB depois que o app boot — só pra usuário autenticado.
+setTimeout(() => {
+  if (localStorage.getItem('bridge_token')) {
+    const f = document.getElementById('ai-ask-fab');
+    if (f) f.style.display = 'block';
+  }
+}, 1500);
 
 // Boot do indicador: render inicial + listeners de mudança
 _renderNetIndicator();
