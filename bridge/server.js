@@ -6090,10 +6090,15 @@ function sendChargeLiveUpdate(isFinal = false) {
   const rem = +state.charge_remaining_min || 0;
   const now = Date.now();
   if (!isFinal) {
-    // Throttle: só envia se mudou SOC≥1%, potência≥0.5kW, ou 60s desde o último
+    const dT = now - _chargeLiveLast.ts;
+    // Mínimo de 10s entre pushes event-driven — respeita o budget do APNs
+    // mesmo se dados chegarem em rajada do carro. Updates atrasados sao
+    // capturados no proximo evento ou no heartbeat de 60s.
+    if (dT < 10_000) return;
+    // Throttle: passada a porta de 10s, so envia se houve mudança REAL
+    // significativa (SOC≥1%, potência≥0.5kW) ou se completou 60s sem update.
     const dSoc = Math.abs(soc - _chargeLiveLast.soc);
     const dPwr = Math.abs(pwr - _chargeLiveLast.pwr);
-    const dT   = now - _chargeLiveLast.ts;
     const significant = dSoc >= 1 || dPwr >= 0.5 || dT >= 60_000;
     if (!significant) return;
   }
@@ -6745,6 +6750,8 @@ function applyMqttMessage(key, value, isRetained = false) {
           _chargeSlowCheckTs = 0; // recuperou ou entrou no final da carga — reinicia janela
         }
       }
+      // Event-driven: potência mudou → tenta atualizar a LA (throttle interno gateia).
+      if (state.charging_state === 'Carregando') sendChargeLiveUpdate(false);
       break;
     }
     case 'charge_session_kwh': {
@@ -6794,6 +6801,8 @@ function applyMqttMessage(key, value, isRetained = false) {
           'charge_ending'
         );
       }
+      // Event-driven: tempo restante mudou → tenta atualizar a LA (throttle interno gateia).
+      if (state.charging_state === 'Carregando') sendChargeLiveUpdate(false);
       break;
     }
     case 'network/info': {
@@ -6911,6 +6920,10 @@ function applyMqttMessage(key, value, isRetained = false) {
     case 'soc_pct':
       haSocActive   = true;
       state.soc_pct = num(value);
+      // Event-driven: SOC mudou → tenta atualizar a Live Activity de recarga
+      // na hora (em vez de esperar o timer de 60s). O throttle interno
+      // (dSoc≥1 / dPwr≥0.5 / 60s) garante que não vira spam.
+      if (state.charging_state === 'Carregando') sendChargeLiveUpdate(false);
       break;
 
     // Trip A/B foram descontinuados — bridge ignora os tópicos legados.
