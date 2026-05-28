@@ -1733,6 +1733,17 @@ function checkMaintenanceAlerts() {
 // Verificação diária pros alertas por tempo (km já dispara em cada update do odo)
 setInterval(checkMaintenanceAlerts, 60 * 60 * 1000);  // 1h
 
+// Watchdog do car_online: se não chega mensagem do carro há >30s, marca offline.
+// Cobre o caso raro de queda silenciosa em que nem a LWT chegou.
+setInterval(() => {
+  if (!state.car_online) return;
+  const ageSec = (Date.now() - (state.last_update_ms || 0)) / 1000;
+  if (ageSec > 30) {
+    state.car_online = false;
+    console.log(`[mqtt] watchdog: marcando carro offline (sem msg há ${Math.round(ageSec)}s)`);
+  }
+}, 10_000);
+
 // ── Detecção de anomalia preventiva ────────────────────────────────────────
 // Mantém histórico de snapshots diários (telemetry_history.json) e dispara
 // push notif quando uma métrica se desvia significativamente da média móvel
@@ -6307,7 +6318,30 @@ function applyGwmEntity(id, value, isRetained = false) {
 }
 
 function applyMqttMessage(key, value, isRetained = false) {
-  state.last_update_ms = Date.now();
+  const _now = Date.now();
+  // Status (LWT) é tratado ANTES de atualizar last_update_ms — assim conseguimos
+  // detectar LWT 'offline' que chega atrasado da sessão anterior (corrida com
+  // o reconnect rápido): se uma mensagem fresca do carro chegou nos últimos
+  // ~5s, a LWT é stale e deve ser ignorada (senão o app mostra "Desconectado"
+  // mesmo com o carro publicando dados).
+  if (key === 'status') {
+    if (value === 'online') {
+      state.car_online = true;
+    } else if (value === 'offline') {
+      const ageSec = (_now - (state.last_update_ms || 0)) / 1000;
+      if (ageSec > 5) {
+        state.car_online = false;
+      } else {
+        console.log(`[mqtt] LWT 'offline' stale ignorado (última msg do carro há ${ageSec.toFixed(1)}s)`);
+      }
+    }
+    state.last_update_ms = _now;
+    return;
+  }
+  state.last_update_ms = _now;
+  // Qualquer mensagem do carro (não-status) = carro está online. Fonte mais
+  // confiável que a LWT — se o carro publica, está conectado por definição.
+  state.car_online = true;
 
   // Body/lock/etc. migradas pra HA — ignora publishes do app pra essas chaves.
   // Bridge usa exclusivamente os tópicos da integração GWM Brasil (sem ruído).
@@ -6322,10 +6356,7 @@ function applyMqttMessage(key, value, isRetained = false) {
   }
 
   switch (key) {
-    // Status
-    case 'status':
-      state.car_online = (value === 'online');
-      break;
+    // Status já tratado no topo da função (com proteção contra LWT stale).
     case 'last_update':
       state.car_last_update = value;   // ISO timestamp publicado pelo Android (retain=true)
       break;
