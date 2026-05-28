@@ -34037,7 +34037,7 @@ function onScrub(pctStr) {
     distEl.textContent = `${kmCum.toFixed(1)}/${total.toFixed(1)}km`;
   }
   // Move cursores dos charts
-  ['tl-chart-spd', 'tl-chart-kw', 'tl-chart-soc'].forEach(id => {
+  ['tl-chart-spd', 'tl-chart-kw', 'tl-chart-rpm', 'tl-chart-soc'].forEach(id => {
     const cur = document.getElementById('cur-' + id);
     if (cur) cur.style.left = pct + '%';
   });
