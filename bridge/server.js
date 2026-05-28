@@ -1735,6 +1735,38 @@ function checkMaintenanceAlerts() {
 // Verificação diária pros alertas por tempo (km já dispara em cada update do odo)
 setInterval(checkMaintenanceAlerts, 60 * 60 * 1000);  // 1h
 
+// ── Monitor do certificado TLS Let's Encrypt ─────────────────────────────────
+// DuckDNS add-on renova sozinho, mas se quebrar (rate limit, bug, DNS) o cert
+// expira em silêncio. Checamos 1×/dia (e 1× no boot) via handshake TLS na
+// porta 8883 e parseamos o validTo. Alerta se faltar menos de 7 dias.
+const CERT_HOST = (process.env.CAR_MQTT_HOST || 'mqttrafael.duckdns.org').replace(/^mqtts?:\/\//, '');
+const CERT_PORT = parseInt(process.env.CAR_MQTT_PORT || '8883', 10);
+let _certWarnNotifiedDay = '';   // 'YYYY-MM-DD' do último alerta — anti-spam diário
+function _checkCertExpiry() {
+  const tls = require('tls');
+  const socket = tls.connect({ host: CERT_HOST, port: CERT_PORT, servername: CERT_HOST, rejectUnauthorized: false, timeout: 8000 }, () => {
+    try {
+      const cert = socket.getPeerCertificate();
+      socket.end();
+      if (!cert || !cert.valid_to) return;
+      const expiry = new Date(cert.valid_to).getTime();
+      const daysLeft = Math.floor((expiry - Date.now()) / 86_400_000);
+      console.log(`[cert] ${CERT_HOST}:${CERT_PORT} valid until ${cert.valid_to} (${daysLeft}d restantes)`);
+      const today = new Date().toISOString().slice(0, 10);
+      if (daysLeft < 7 && _certWarnNotifiedDay !== today) {
+        _certWarnNotifiedDay = today;
+        sendPush('🔒 Certificado TLS próximo do vencimento',
+          `Cert do broker expira em ${daysLeft} dia(s). Verifique o add-on DuckDNS no HA.`,
+          'anomaly_detected', { renotify: true });
+      }
+    } catch (e) { console.warn('[cert] parse falhou:', e.message); }
+  });
+  socket.on('error', e => console.warn(`[cert] check falhou: ${e.code || e.message}`));
+  socket.on('timeout', () => { console.warn('[cert] check timeout'); socket.destroy(); });
+}
+setTimeout(_checkCertExpiry, 30_000);          // 1ª verificação 30s após boot
+setInterval(_checkCertExpiry, 24 * 60 * 60_000); // depois diário
+
 // Watchdog do car_online: se não chega mensagem do carro há >30s, marca offline.
 // Cobre o caso raro de queda silenciosa em que nem a LWT chegou.
 setInterval(() => {
