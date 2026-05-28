@@ -548,19 +548,18 @@ class MqttManager private constructor() {
     // bridgeUrl/bridgeToken (opcionais — quando vazios, mantém o que ja estava
     // nas prefs). São usados pelo TripManager pra fazer POST /api/autotrips
     // no fim da viagem (rota HTTP, separada do MQTT).
-    fun applyPairedConfig(host: String, port: Int, username: String, password: String,
+    // BUG corrigido v5.60: precisa atualizar MEMBROS DA CLASSE this.bridgeUrl/
+    // this.bridgeToken ANTES de chamar saveAndApply(), senão saveAndApply
+    // sobrescreve as prefs com o valor antigo (vazio).
+    fun applyPairedConfig(carHost: String, port: Int, username: String, password: String,
                           prefix: String, tls: Boolean,
-                          bridgeUrl: String = "", bridgeToken: String = "") {
-        this.host = host; this.port = port; this.username = username
+                          bridgeUrlNew: String = "", bridgeTokenNew: String = "") {
+        this.host = carHost; this.port = port; this.username = username
         this.password = password; this.prefix = prefix.ifEmpty { "haval/ecotrip" }; this.tls = tls
         this.enabled = true; this.paired = true
-        if (bridgeUrl.isNotBlank() || bridgeToken.isNotBlank()) {
-            val ed = prefs.edit()
-            if (bridgeUrl.isNotBlank())   ed.putString(SharedPreferencesKeys.BRIDGE_URL,   bridgeUrl.trimEnd('/'))
-            if (bridgeToken.isNotBlank()) ed.putString(SharedPreferencesKeys.BRIDGE_TOKEN, bridgeToken)
-            ed.apply()
-        }
-        saveAndApply()
+        if (bridgeUrlNew.isNotBlank())   this.bridgeUrl   = bridgeUrlNew.trimEnd('/')
+        if (bridgeTokenNew.isNotBlank()) this.bridgeToken = bridgeTokenNew
+        saveAndApply()   // agora vai persistir os novos bridgeUrl/bridgeToken corretamente
     }
 
     // Desparear: apaga as credenciais (inclusive a criptografada) e volta ao estado
