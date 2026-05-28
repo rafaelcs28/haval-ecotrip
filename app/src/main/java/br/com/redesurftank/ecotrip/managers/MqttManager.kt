@@ -545,11 +545,21 @@ class MqttManager private constructor() {
     }
 
     // ── Pareamento: aplica a config vinda do bridge (sem digitar/ver credenciais) ──
+    // bridgeUrl/bridgeToken (opcionais — quando vazios, mantém o que ja estava
+    // nas prefs). São usados pelo TripManager pra fazer POST /api/autotrips
+    // no fim da viagem (rota HTTP, separada do MQTT).
     fun applyPairedConfig(host: String, port: Int, username: String, password: String,
-                          prefix: String, tls: Boolean) {
+                          prefix: String, tls: Boolean,
+                          bridgeUrl: String = "", bridgeToken: String = "") {
         this.host = host; this.port = port; this.username = username
         this.password = password; this.prefix = prefix.ifEmpty { "haval/ecotrip" }; this.tls = tls
         this.enabled = true; this.paired = true
+        if (bridgeUrl.isNotBlank() || bridgeToken.isNotBlank()) {
+            val ed = prefs.edit()
+            if (bridgeUrl.isNotBlank())   ed.putString(SharedPreferencesKeys.BRIDGE_URL,   bridgeUrl.trimEnd('/'))
+            if (bridgeToken.isNotBlank()) ed.putString(SharedPreferencesKeys.BRIDGE_TOKEN, bridgeToken)
+            ed.apply()
+        }
         saveAndApply()
     }
 
@@ -587,7 +597,9 @@ class MqttManager private constructor() {
                     applyPairedConfig(
                         cfg.optString("mqtt_host"), cfg.optInt("mqtt_port", 1883),
                         cfg.optString("mqtt_user"), cfg.optString("mqtt_pass"),
-                        cfg.optString("mqtt_prefix", "haval/ecotrip"), cfg.optBoolean("mqtt_tls", false))
+                        cfg.optString("mqtt_prefix", "haval/ecotrip"), cfg.optBoolean("mqtt_tls", false),
+                        cfg.optString("bridge_url", ""),
+                        cfg.optString("bridge_token", ""))
                     Pair(true, "Pareado com sucesso ✓")
                 }
             } catch (e: Exception) { Pair(false, "Falha: ${e.message}") }
