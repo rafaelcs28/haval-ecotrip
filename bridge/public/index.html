@@ -2052,35 +2052,49 @@ function closeNetInfo() {
 // FAB persiste posição em localStorage. Quatro cantos com snap. Toque rápido
 // (sem mover) abre o popup. Arrastar move; ao soltar, snap pro canto mais próximo.
 
-function _aiFabPosition() {
-  const saved = localStorage.getItem('ai_fab_corner') || 'br';   // default bottom-right
-  return saved;
+// Posição salva em PIXELS exatos (left, top). Persistida em localStorage.
+// Salvo como percentual do viewport quando salva → robusto a rotação/resize.
+// Default: canto inferior direito (próximo do tabbar).
+function _aiFabGetPos() {
+  try {
+    const p = JSON.parse(localStorage.getItem('ai_fab_pos') || 'null');
+    if (p && Number.isFinite(p.xPct) && Number.isFinite(p.yPct)) return p;
+  } catch {}
+  // Default: inferior-direito (sobre o tabbar)
+  return { xPct: 95, yPct: 88 };
 }
-function _aiFabApplyCorner(corner) {
+function _aiFabApplyPos(pos) {
   const f = document.getElementById('ai-ask-fab');
   if (!f) return;
-  // Margem dos cantos (respeitando safe-area e tabbar inferior).
-  const safe = 14;
-  const tabbar = 76;   // espaço pro tabbar (botão fica acima)
-  const top = `calc(env(safe-area-inset-top) + ${safe}px)`;
-  const bot = `calc(env(safe-area-inset-bottom) + ${tabbar}px)`;
-  f.style.left = f.style.right = f.style.top = f.style.bottom = 'auto';
-  switch (corner) {
-    case 'tl': f.style.top = top;          f.style.left  = safe + 'px'; break;
-    case 'tr': f.style.top = top;          f.style.right = safe + 'px'; break;
-    case 'bl': f.style.bottom = bot;       f.style.left  = safe + 'px'; break;
-    default:   f.style.bottom = bot;       f.style.right = safe + 'px'; corner = 'br';
-  }
-  localStorage.setItem('ai_fab_corner', corner);
+  const w = window.innerWidth, h = window.innerHeight;
+  const fw = 48, fh = 48;   // tamanho do FAB
+  const margin = 4;          // mínimo de borda visível
+  // Calcula left/top em pixels a partir dos percentuais, garantindo que fica visível.
+  let x = (pos.xPct / 100) * w - fw / 2;
+  let y = (pos.yPct / 100) * h - fh / 2;
+  x = Math.max(margin, Math.min(w - fw - margin, x));
+  y = Math.max(margin, Math.min(h - fh - margin, y));
+  f.style.left = x + 'px';
+  f.style.top  = y + 'px';
+  f.style.right = 'auto';
+  f.style.bottom = 'auto';
 }
-_aiFabApplyCorner(_aiFabPosition());   // posição inicial
+function _aiFabSavePos(centerX, centerY) {
+  const w = window.innerWidth, h = window.innerHeight;
+  const xPct = +(centerX / w * 100).toFixed(2);
+  const yPct = +(centerY / h * 100).toFixed(2);
+  localStorage.setItem('ai_fab_pos', JSON.stringify({ xPct, yPct }));
+}
+_aiFabApplyPos(_aiFabGetPos());   // posição inicial
 
-// Drag handlers (touch + mouse) com snap pros 4 cantos.
+// Drag handlers (touch + mouse) — movimento LIVRE, sem snap. Pequeno threshold
+// pra distinguir toque (abre popup) de arrasto.
 (function() {
   const f = document.getElementById('ai-ask-fab');
   if (!f) return;
   let dragging = false, moved = false, sx = 0, sy = 0, ox = 0, oy = 0;
   function getPt(e) { return e.touches ? { x: e.touches[0].clientX, y: e.touches[0].clientY } : { x: e.clientX, y: e.clientY }; }
+  function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
   function onDown(e) {
     const p = getPt(e);
     sx = p.x; sy = p.y;
@@ -2096,8 +2110,11 @@ _aiFabApplyCorner(_aiFabPosition());   // posição inicial
     const dx = p.x - sx, dy = p.y - sy;
     if (Math.abs(dx) > 6 || Math.abs(dy) > 6) moved = true;
     if (moved) {
-      f.style.left = (ox + dx) + 'px';
-      f.style.top  = (oy + dy) + 'px';
+      const W = window.innerWidth, H = window.innerHeight;
+      const nx = clamp(ox + dx, 4, W - 48 - 4);
+      const ny = clamp(oy + dy, 4, H - 48 - 4);
+      f.style.left = nx + 'px';
+      f.style.top  = ny + 'px';
       f.style.right = 'auto'; f.style.bottom = 'auto';
     }
     e.preventDefault();
@@ -2107,12 +2124,9 @@ _aiFabApplyCorner(_aiFabPosition());   // posição inicial
     dragging = false;
     f.style.cursor = 'grab';
     if (moved) {
-      // Snap pro canto mais próximo do CENTRO do FAB.
+      // Salva exatamente onde o user soltou (centro do FAB).
       const r = f.getBoundingClientRect();
-      const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
-      const W = window.innerWidth, H = window.innerHeight;
-      const corner = (cy < H/2 ? 't' : 'b') + (cx < W/2 ? 'l' : 'r');
-      _aiFabApplyCorner(corner);
+      _aiFabSavePos(r.left + r.width / 2, r.top + r.height / 2);
     } else {
       // Sem mover = clique → abre popup.
       window.openAiAsk();
@@ -2125,8 +2139,8 @@ _aiFabApplyCorner(_aiFabPosition());   // posição inicial
   window.addEventListener('mouseup',    onUp);
   window.addEventListener('touchend',   onUp);
   window.addEventListener('touchcancel', onUp);
-  // Re-aplica posição em resize (rotaciona / muda viewport).
-  window.addEventListener('resize', () => _aiFabApplyCorner(_aiFabPosition()));
+  // Re-aplica posição em resize/rotação (percentual mantém proporção).
+  window.addEventListener('resize', () => _aiFabApplyPos(_aiFabGetPos()));
 })();
 
 // ── Conversas (cada uma com várias mensagens user/assistant) ─────────────
