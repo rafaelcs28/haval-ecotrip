@@ -43,6 +43,8 @@ targets:
       - path: HavalEcoTripWidget/MotorActivityAttributes.swift
       # Veículo desprotegido (alerta persistente): idem.
       - path: HavalEcoTripWidget/SecurityActivityAttributes.swift
+      # BYD Song Pro (recarga do carro da esposa): LA paralela ao Haval, azul.
+      - path: HavalEcoTripWidget/SongProActivityAttributes.swift
     info:
       path: HavalEcoTrip/Info.plist
       properties:
