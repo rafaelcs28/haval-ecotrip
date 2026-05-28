@@ -4613,6 +4613,42 @@ app.post('/api/pair/redeem', (req, res) => {
   res.json({ ok: true, config: entry.config });
 });
 
+// ── Reativar Live Activities em andamento ─────────────────────────────────
+// Se o usuário dispensou (swipe) uma LA sem querer, re-lança via push-to-start
+// com o ESTADO ATUAL (continua dali, como se nunca tivesse saído).
+app.post('/api/la/relaunch', async (req, res) => {
+  if (!apnsLive.enabled) return res.status(503).json({ error: 'apns desativado' });
+  const done = [];
+  try {
+    if (state.charging_state === 'Carregando' && notifPrefs.la_charge !== false) {
+      await apnsLive.pushStart('ChargeActivityAttributes', '', { carName: 'Haval H6 PHEV' }, _chargeContentState(),
+        { staleDate: Date.now() + 3600_000, alert: { title: '⚡ Recarga', body: 'Card reativado — acompanhe na tela bloqueada.' } });
+      done.push('recarga');
+    }
+    if (_tripActive && notifPrefs.la_trip !== false) {
+      await apnsLive.pushStart(TRIP_LA_TYPE, '', { carName: 'Haval H6 PHEV' }, _tripContentState(_lastTripSnapshot || {}, true),
+        { staleDate: Date.now() + 6 * 3600_000, alert: { title: '🚗 Viagem', body: 'Card reativado.' } });
+      done.push('viagem');
+    }
+    if (_motorActive && notifPrefs.la_motor !== false) {
+      await apnsLive.pushStart(MOTOR_LA_TYPE, '', { carName: 'Haval H6 PHEV' }, _motorContentState(true),
+        { staleDate: Date.now() + 3 * 3600_000, alert: { title: '🔑 Motor ligado', body: 'Card reativado.' } });
+      done.push('motor');
+    }
+    if (['starting', 'engine_on', 'cooling'].includes(preclimatStatus.phase) && _activeSched && notifPrefs.la_preclimat !== false) {
+      await apnsLive.pushStart(PRECLIMAT_LA_TYPE, _activeSched.device_id, _preclimatAttributes(), _preclimatContentState(),
+        { staleDate: preclimatStatus.endsAtMs || (Date.now() + 1800_000), alert: { title: '❄️ Pré-climatização', body: 'Card reativado.' } });
+      done.push('pre-clima');
+    }
+    if (_securityActive && notifPrefs.la_security !== false) {
+      _securityActive = false; _evalSecurityAlert();   // re-cria se ainda há problema
+      done.push('seguranca');
+    }
+  } catch (e) { return res.status(500).json({ error: e.message }); }
+  console.log(`[la-relaunch] reativadas: ${done.join(', ') || '(nenhuma ativa)'}`);
+  res.json({ ok: true, relaunched: done });
+});
+
 // PATCH /api/notif/devices/:device_id  { device_name }
 app.patch('/api/notif/devices/:device_id', (req, res) => {
   const id = req.params.device_id;
