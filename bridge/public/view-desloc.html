@@ -33829,11 +33829,19 @@ async function openMapFull(id) {
   // Samples não vêm com /api/autotrips — busca sob demanda. Cache em IndexedDB
   // (samples de uma viagem pode ter 1000+ pontos, ~50KB cada; estoura localStorage).
   if (!t.route || !t.route.length) {
-    const tripKey = 'telemetry_' + (t.tripId || t.id);
+    // Cache bumped v2 (2026-05-28): caches antigos podem ter snapshot PARCIAL de
+    // viagens que estavam em andamento quando foram abertas. Forçar re-fetch.
+    const tripKey = 'telemetry_v2_' + (t.tripId || t.id);
     // 1. Cache instantâneo (normaliza samples antigos sem campo kw)
     if (window.idbGet) {
       const cached = await window.idbGet(tripKey);
-      if (cached && Array.isArray(cached.samples) && cached.samples.length) {
+      // Heurística de "cache stale": se a viagem durou X minutos e o cache
+      // tem MENOS de X*0.9 samples (1/min médio), provavelmente foi snapshotado
+      // mid-trip → joga fora e re-fetch.
+      const expectedMin = Math.max(60, Math.floor((t.timeSec || 0) / 60));
+      const stale = cached && Array.isArray(cached.samples) &&
+                    cached.samples.length < expectedMin * 0.9;
+      if (cached && Array.isArray(cached.samples) && cached.samples.length && !stale) {
         t.samples = cached.samples.map(s => ({
           t: s.t, lat: s.lat, lng: s.lng, spd: s.spd, soc: s.soc, rpm: s.rpm,
           kw: (s.kw != null ? s.kw : (s.pwr != null ? s.pwr : (s.evKw != null ? s.evKw : 0))),
