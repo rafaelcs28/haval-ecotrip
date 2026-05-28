@@ -996,7 +996,9 @@ const state = {
   car_online:        false,
   car_network:       null,   // { type, ip, downlink_kbps, ts } publicado pelo APK
   bridge_online:     true,
-  last_update_ms:    null,
+  last_update_ms:    null,    // última msg de QUALQUER fonte (carro APK ou GWM)
+  last_apk_ms:       null,    // última msg do APK (haval/ecotrip/*)
+  last_gwm_ms:       null,    // última msg da integração GWM Brasil (gwmbrasil_*)
   car_last_update:   null,
   car_app_version:   null,
 
@@ -1743,6 +1745,42 @@ setInterval(() => {
     console.log(`[mqtt] watchdog: marcando carro offline (sem msg há ${Math.round(ageSec)}s)`);
   }
 }, 10_000);
+
+// Watchdog POR FONTE: detecta quando UMA das pernas (APK ou GWM) cai sozinha.
+// Cenário que motivou: GWM Brasil parou de publicar mas o APK continuou — sem
+// alerta visível, dados ficaram defasados (SOC). Agora, se uma fonte ficar >10min
+// silenciosa enquanto a outra continua atualizando, notifica uma vez por hora.
+let _sourceStallNotifiedApk = 0;
+let _sourceStallNotifiedGwm = 0;
+const SOURCE_STALL_MS  = 10 * 60_000;          // 10 min de silêncio = stalled
+const SOURCE_NOTIF_GAP = 60 * 60_000;          // não repete antes de 1h
+setInterval(() => {
+  const now    = Date.now();
+  const apkMs  = state.last_apk_ms || 0;
+  const gwmMs  = state.last_gwm_ms || 0;
+  // Só faz sentido comparar quando AMBAS fontes já produziram algo nesta sessão.
+  if (apkMs === 0 || gwmMs === 0) return;
+  const apkAge = now - apkMs;
+  const gwmAge = now - gwmMs;
+  // APK silente mas GWM ativo → carro/app caiu, integração HA segue.
+  if (apkAge > SOURCE_STALL_MS && gwmAge < SOURCE_STALL_MS && (now - _sourceStallNotifiedApk) > SOURCE_NOTIF_GAP) {
+    _sourceStallNotifiedApk = now;
+    const min = Math.round(apkAge / 60_000);
+    console.log(`[watchdog] APK silente há ${min}min (GWM ativo)`);
+    sendPush('📡 App do carro silente',
+      `Sem dados do app no carro há ${min}min (integração GWM continua ativa).`,
+      'anomaly_detected');
+  }
+  // GWM silente mas APK ativo → integração HA caiu, carro segue (caso de hoje).
+  if (gwmAge > SOURCE_STALL_MS && apkAge < SOURCE_STALL_MS && (now - _sourceStallNotifiedGwm) > SOURCE_NOTIF_GAP) {
+    _sourceStallNotifiedGwm = now;
+    const min = Math.round(gwmAge / 60_000);
+    console.log(`[watchdog] GWM silente há ${min}min (APK ativo)`);
+    sendPush('🛰️ Integração GWM silente',
+      `Sem dados da GWM Brasil/HA há ${min}min (app do carro continua ativo). Verifique a integração.`,
+      'anomaly_detected');
+  }
+}, 60_000);
 
 // ── Detecção de anomalia preventiva ────────────────────────────────────────
 // Mantém histórico de snapshots diários (telemetry_history.json) e dispara
@@ -6191,6 +6229,7 @@ function stopChargeLiveTimer() {
  * Aplica conversão por tipo e dispara eventos quando há transição binária real.
  */
 function applyGwmEntity(id, value, isRetained = false) {
+  state.last_gwm_ms = Date.now();   // marca atividade da integração GWM Brasil
   const field = GWM_TOPIC_MAP[id];
   if (!field) {
     console.log(`[gwm] id desconhecido='${id}' value='${value}' isRetained=${isRetained}`);
@@ -6324,6 +6363,7 @@ function applyGwmEntity(id, value, isRetained = false) {
 
 function applyMqttMessage(key, value, isRetained = false) {
   const _now = Date.now();
+  state.last_apk_ms = _now;   // qualquer msg em haval/ecotrip/* = APK do carro vivo
   // Status (LWT) é tratado ANTES de atualizar last_update_ms — assim conseguimos
   // detectar LWT 'offline' que chega atrasado da sessão anterior (corrida com
   // o reconnect rápido): se uma mensagem fresca do carro chegou nos últimos
