@@ -650,7 +650,7 @@
   <!-- Painel "Linha do tempo" — gráficos + scrubber. Sobrescreve mf-bottom quando ativo. -->
   <div class="timeline-panel" id="timeline-panel">
     <div class="tl-hdr">
-      <span class="tl-ti">📊 Linha do tempo <small style="opacity:.4;font-size:9px">v445</small></span>
+      <span class="tl-ti">📊 Linha do tempo <small style="opacity:.4;font-size:9px">v447</small></span>
       <span class="tl-current" id="tl-dist">--</span>
       <span class="tl-current" id="tl-time">--</span>
       <button class="tl-close" onclick="toggleTimeline()">×</button>
@@ -33978,7 +33978,16 @@ function renderTimelineCharts(t) {
   renderTlChart('tl-chart-rpm', samples.map(s => +s.rpm || 0), '#f59e0b');
   // SOC: escala fixa 0–100 (não auto-min/max) pra barra refletir o valor real
   // e ficar mais visível. Cor amarelo-vivo + opacity maior pra destacar.
-  renderTlChart('tl-chart-soc', samples.map(s => s.soc), '#facc15', false,
+  // Forward-fill: alguns samples têm soc=undefined (CAN drop momentâneo).
+  // Sem fill, o SVG vê NaN e fecha o polígono no ponto, criando triângulo
+  // diagonal pra zero. Carregamos o último SOC conhecido pra todos os gaps.
+  let _lastSoc = 0;
+  const socValues = samples.map(s => {
+    const v = +s.soc;
+    if (Number.isFinite(v) && v > 0) _lastSoc = v;
+    return _lastSoc;
+  });
+  renderTlChart('tl-chart-soc', socValues, '#facc15', false,
                 { fixedMax: 100, fixedMin: 0, fillOpacity: 0.40 });
 }
 
