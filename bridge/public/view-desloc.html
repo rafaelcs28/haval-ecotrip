@@ -449,6 +449,7 @@
 .tl-row.kw .lbl { color: var(--teal); }
 .tl-row.rpm .lbl { color: #f59e0b; }   /* laranja — motor térmico */
 .tl-row.soc .lbl { color: var(--yellow); }
+.tl-row.kwh .lbl { color: #a78bfa; }   /* roxo — energia acumulada (net = consumo − regen) */
 .tl-row .v {
   font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums;
   min-width: 60px; text-align: right;
@@ -650,7 +651,7 @@
   <!-- Painel "Linha do tempo" — gráficos + scrubber. Sobrescreve mf-bottom quando ativo. -->
   <div class="timeline-panel" id="timeline-panel">
     <div class="tl-hdr">
-      <span class="tl-ti">📊 Linha do tempo <small style="opacity:.4;font-size:9px">v447</small></span>
+      <span class="tl-ti">📊 Linha do tempo <small style="opacity:.4;font-size:9px">v448</small></span>
       <span class="tl-current" id="tl-dist">--</span>
       <span class="tl-current" id="tl-time">--</span>
       <button class="tl-close" onclick="toggleTimeline()">×</button>
@@ -659,6 +660,7 @@
     <div class="tl-row kw"><span class="lbl">Potênc</span><div class="tl-chart" id="tl-chart-kw"></div><span class="v"><span id="tl-kw-val">--</span> kW</span></div>
     <div class="tl-row rpm"><span class="lbl">RPM</span><div class="tl-chart" id="tl-chart-rpm"></div><span class="v"><span id="tl-rpm-val">--</span></span></div>
     <div class="tl-row soc"><span class="lbl">SOC</span><div class="tl-chart" id="tl-chart-soc"></div><span class="v"><span id="tl-soc-val">--</span>%</span></div>
+    <div class="tl-row kwh"><span class="lbl">kWh</span><div class="tl-chart" id="tl-chart-kwh"></div><span class="v"><span id="tl-kwh-val">--</span> kWh</span></div>
     <div class="tl-scrubber">
       <input type="range" id="tl-scrubber" min="0" max="100" value="0" step="0.1" oninput="onScrub(this.value)">
     </div>
@@ -33947,6 +33949,7 @@ function closeMapFull() {
 // ── 📊 Linha do tempo (gráficos + scrubber sincronizado com mapa) ──
 let _tlTrip = null;      // viagem atualmente aberta no modal
 let _tlMarker = null;    // marker que segue o scrubber no mapa
+let _tlCumKwh = null;    // array pré-computado de kWh acumulado (net) sample-a-sample
 
 function toggleTimeline() {
   const panel = document.getElementById('timeline-panel');
@@ -33989,6 +33992,21 @@ function renderTimelineCharts(t) {
   });
   renderTlChart('tl-chart-soc', socValues, '#facc15', false,
                 { fixedMax: 100, fixedMin: 0, fillOpacity: 0.40 });
+
+  // kWh acumulado (net = consumo − regen): integra power × dt sample-a-sample.
+  // Positivo = bateria descarregando (consumo). Negativo (raro) = regen líquido.
+  // Mostrado no scrubber: "X.XX kWh consumidos desde o início" até o ponto atual.
+  _tlCumKwh = new Array(samples.length);
+  let _accKwh = 0;
+  for (let i = 0; i < samples.length; i++) {
+    if (i > 0) {
+      const dtSec = Math.max(0, (samples[i].t || 0) - (samples[i-1].t || 0));
+      const kw    = +samples[i].kw || 0;
+      _accKwh += kw * (dtSec / 3600);   // kWh = kW × horas
+    }
+    _tlCumKwh[i] = _accKwh;
+  }
+  renderTlChart('tl-chart-kwh', _tlCumKwh, '#a78bfa', true, { fillOpacity: 0.35 });
 }
 
 function renderTlChart(id, values, color, allowNegative, opts) {
@@ -34034,10 +34052,12 @@ function onScrub(pctStr) {
   const kw  = Number.isFinite(kwRaw) ? kwRaw.toFixed(1) : '--';
   const soc = Number.isFinite(+s.soc) ? Math.round(+s.soc) : '--';
   const rpm = Number.isFinite(+s.rpm) ? Math.round(+s.rpm) : '--';
+  const cumKwh = (_tlCumKwh && Number.isFinite(_tlCumKwh[idx])) ? _tlCumKwh[idx].toFixed(2) : '--';
   document.getElementById('tl-spd-val').textContent = spd;
   document.getElementById('tl-kw-val').textContent  = kw;
   document.getElementById('tl-rpm-val').textContent = rpm;
   document.getElementById('tl-soc-val').textContent = soc;
+  document.getElementById('tl-kwh-val').textContent = cumKwh;
   // Atualiza tempo
   const tsec = Number.isFinite(+s.t) ? +s.t : 0;
   const min = Math.floor(tsec / 60), sec = tsec % 60;
@@ -34060,7 +34080,7 @@ function onScrub(pctStr) {
     distEl.textContent = `${kmCum.toFixed(1)}/${total.toFixed(1)}km`;
   }
   // Move cursores dos charts
-  ['tl-chart-spd', 'tl-chart-kw', 'tl-chart-rpm', 'tl-chart-soc'].forEach(id => {
+  ['tl-chart-spd', 'tl-chart-kw', 'tl-chart-rpm', 'tl-chart-soc', 'tl-chart-kwh'].forEach(id => {
     const cur = document.getElementById('cur-' + id);
     if (cur) cur.style.left = pct + '%';
   });
