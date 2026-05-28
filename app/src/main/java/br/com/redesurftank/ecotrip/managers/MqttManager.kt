@@ -365,6 +365,12 @@ class MqttManager private constructor() {
     @Volatile private var lastPublishedEsp: Int = -1          // 0=off, 1=on
     @Volatile private var lastPublishedSteerMode: Int = -1    // 0=Normal, 1=Sport, 2=Conforto
 
+    // Cache de dedupe por-tópico do snapshot periódico: só publica se o valor mudou.
+    // Reseta no reconnect (clear no connect bem-sucedido) → ao reconectar tudo é
+    // republicado. Tocado apenas dentro do executor single-thread (publishSnapshotInternal
+    // e connectInternal), por isso HashMap simples é seguro.
+    private val lastPubSnapshot = HashMap<String, String>()
+
     fun init(context: Context) {
         // Prevent "Error locating the logging class" crash on Android: set a no-op logger
         // before any MqttClient is constructed so Paho never tries Class.forName().
@@ -884,7 +890,7 @@ class MqttManager private constructor() {
 
             val opts = MqttConnectOptions().apply {
                 connectionTimeout    = 15   // satélite/Starlink tem latência baixa; falha logo se cair
-                keepAliveInterval    = 20   // detecta queda silenciosa em ~30s (1.5×) em vez de 45s
+                keepAliveInterval    = 10   // WiFi+Starlink tem mini-blips; detecta queda em ~15s (1.5×) em vez de 30s
                 isCleanSession       = true
                 isAutomaticReconnect = false
                 if (username.isNotEmpty()) {
@@ -904,6 +910,7 @@ class MqttManager private constructor() {
             client = c
             consecutiveFailures = 0
             reconnectAttempts = 0   // conectou → zera o backoff de reconexão
+            lastPubSnapshot.clear()           // dedupe do snapshot: força re-publish completo na primeira rodada
             lastPublishedChargeLimitPct = -1  // força re-sync com o carro após reconexão
             lastPublishedDriveMode = -1       // idem pro modo de condução
             lastPublishedPowerReserve = -1    // sub-modo HEV
@@ -1068,14 +1075,22 @@ class MqttManager private constructor() {
                 c.publish("$prefix/$topic", value.toByteArray(), 0, false)
             fun pubR(topic: String, value: String) =   // retained — para sensores que devem sobreviver a reinício do HA
                 c.publish("$prefix/$topic", value.toByteArray(), 0, true)
+            // Dedupe: só publica se o valor mudou. Reseta no reconnect (re-publica tudo).
+            // Qualquer mudança real (porta fecha→abre, vidro, sunroof, trava, RPM, temp) sai
+            // imediatamente. Reduz tráfego de portas/vidros/etc. em ordem de magnitude.
+            fun pubD(topic: String, value: String, retained: Boolean = true) {
+                if (lastPubSnapshot[topic] == value) return
+                lastPubSnapshot[topic] = value
+                c.publish("$prefix/$topic", value.toByteArray(), 0, retained)
+            }
             fun fmt2(v: Float) = String.format(java.util.Locale.US, "%.2f", v)
             fun fmt3(v: Float) = String.format(java.util.Locale.US, "%.3f", v)
             fun fmt1(v: Float) = String.format(java.util.Locale.US, "%.1f", v)
 
             pub("speed_kmh",             fmt1(latestSpeedKmh))
-            pub("inside_temp",           fmt1(latestInsideTemp))
-            pub("outside_temp",          fmt1(latestOutsideTemp))
-            if (latestGear.isNotEmpty()) pub("gear",  latestGear)
+            pubD("inside_temp",  fmt1(latestInsideTemp),  retained = false)
+            pubD("outside_temp", fmt1(latestOutsideTemp), retained = false)
+            if (latestGear.isNotEmpty()) pubD("gear", latestGear, retained = false)
 
             // GPS — publica apenas quando há sinal válido (≠ 0.0)
             val (gpsLat, gpsLng) = TripManager.getInstance().getLastGps()
@@ -1096,52 +1111,54 @@ class MqttManager private constructor() {
             pubR("motor_power_kw",    fmt2(latestMotorPowerKw))
             // % potência motor elétrico — car.ev_info.cur_battery_power_percentage
             pubR("battery_power_pct", latestBattPowerPct.toString())
-            pubR("engine_rpm",        latestEngineRpm.toString())
-            pubR("seat_vent_drv",     latestDriverSeatVent.toString())
-            pubR("seat_vent_pass",    latestPassengerSeatVent.toString())
-            pubR("hvac_driver_temp",     fmt1(latestHvacDriverTemp))
-            pubR("hvac_passenger_temp",  fmt1(latestHvacPassengerTemp))
-            pubR("hvac_fan_speed",    latestHvacFanSpeed.toString())
-            pubR("hvac_sync_enable",  latestHvacSyncEnable.toString())
-            pubR("hvac_auto_enable",  latestHvacAutoEnable.toString())
-            pubR("hvac_ac_enable",    latestHvacAcEnable.toString())  // master ON/OFF do AC
-            pubR("ac_state",          if (snAcEnable > 0) "1" else "0")
-            pubR("hvac_cycle_mode",   latestHvacCycleMode.toString())
+            pubD("engine_rpm",        latestEngineRpm.toString())
+            pubD("seat_vent_drv",     latestDriverSeatVent.toString())
+            pubD("seat_vent_pass",    latestPassengerSeatVent.toString())
+            pubD("hvac_driver_temp",     fmt1(latestHvacDriverTemp))
+            pubD("hvac_passenger_temp",  fmt1(latestHvacPassengerTemp))
+            pubD("hvac_fan_speed",    latestHvacFanSpeed.toString())
+            pubD("hvac_sync_enable",  latestHvacSyncEnable.toString())
+            pubD("hvac_auto_enable",  latestHvacAutoEnable.toString())
+            pubD("hvac_ac_enable",    latestHvacAcEnable.toString())  // master ON/OFF do AC
+            pubD("ac_state",          if (snAcEnable > 0) "1" else "0")
+            pubD("hvac_cycle_mode",   latestHvacCycleMode.toString())
 
             // Body — normaliza tudo pra binário "1=aberto/destrancado, 0=fechado/trancado"
-            pubR("door_fl",    if (snDoorFl > 0) "1" else "0")
-            pubR("door_fr",    if (snDoorFr > 0) "1" else "0")
-            pubR("door_rl",    if (snDoorRl > 0) "1" else "0")
-            pubR("door_rr",    if (snDoorRr > 0) "1" else "0")
-            pubR("door_trunk", if (snTrunk  > 0) "1" else "0")
+            // pubD: só sai se o valor MUDOU (porta fechada→aberta etc.). Mudanças reais
+            // saem na hora; estado parado não enche a banda nem o log.
+            pubD("door_fl",    if (snDoorFl > 0) "1" else "0")
+            pubD("door_fr",    if (snDoorFr > 0) "1" else "0")
+            pubD("door_rl",    if (snDoorRl > 0) "1" else "0")
+            pubD("door_rr",    if (snDoorRr > 0) "1" else "0")
+            pubD("door_trunk", if (snTrunk  > 0) "1" else "0")
             // Vidros: cru "1" = fechado, qualquer outro valor = aberto/entreaberto.
             // Formato: "valor:ms_da_mudanca" — bridge usa o ms pra timestamp do evento
             // no log, compensando os ~40s de latência do voting filter. Bridge aceita
             // ambos formatos (com ou sem ms) pra backward compat.
-            pubR("window_fl",  "${if (snWinFl == 1) "0" else "1"}:$snWinFlMs")
-            pubR("window_fr",  "${if (snWinFr == 1) "0" else "1"}:$snWinFrMs")
-            pubR("window_rl",  "${if (snWinRl == 1) "0" else "1"}:$snWinRlMs")
-            pubR("window_rr",  "${if (snWinRr == 1) "0" else "1"}:$snWinRrMs")
+            pubD("window_fl",  "${if (snWinFl == 1) "0" else "1"}:$snWinFlMs")
+            pubD("window_fr",  "${if (snWinFr == 1) "0" else "1"}:$snWinFrMs")
+            pubD("window_rl",  "${if (snWinRl == 1) "0" else "1"}:$snWinRlMs")
+            pubD("window_rr",  "${if (snWinRr == 1) "0" else "1"}:$snWinRrMs")
             // Sunroof: 0=fechado, >0=aberto (confirmado em uso).
-            pubR("sunroof",    if (snSunroof  > 0) "1" else "0")
+            pubD("sunroof",    if (snSunroof  > 0) "1" else "0")
             // Trava: cru "3"=destrancado, "1"=trancado. Voting filter aplicado em
             // applyLockStatus pra filtrar ruído. Formato "valor:ms_da_mudanca".
-            pubR("lock_state", "${if (snLockStat == 3) "1" else "0"}:$snLockMs")
+            pubD("lock_state", "${if (snLockStat == 3) "1" else "0"}:$snLockMs")
             // Estado da ignição (carro on/off): derivado de driving_ready_state.
-            pubR("engine_state", if (snDrvReady > 0) "1" else "0")
+            pubD("engine_state", if (snDrvReady > 0) "1" else "0")
             // Debug — valores crus do barramento + resultado do parsing (sem afetar lógica)
             if (snDoorRaw.isNotEmpty()) {
-                pubR("debug/door_status_raw", snDoorRaw)
-                pubR("debug/door_parsed",     "$snDoorFl,$snDoorFr,$snDoorRl,$snDoorRr,$snTrunk")
+                pubD("debug/door_status_raw", snDoorRaw)
+                pubD("debug/door_parsed",     "$snDoorFl,$snDoorFr,$snDoorRl,$snDoorRr,$snTrunk")
             }
             if (snWinRaw.isNotEmpty()) {
-                pubR("debug/window_status_raw", snWinRaw)
-                pubR("debug/window_parsed",     "$snWinFl,$snWinFr,$snWinRl,$snWinRr")
+                pubD("debug/window_status_raw", snWinRaw)
+                pubD("debug/window_parsed",     "$snWinFl,$snWinFr,$snWinRl,$snWinRr")
             }
-            pubR("debug/sunroof_raw",      snSunroof.toString())
-            pubR("debug/lock_status_raw",  snLockStat.toString())
-            if (latestOdometerKm > 0f) pubR("odometer_km", fmt1(latestOdometerKm))
-            if (latestBatt12vPct > 0f) pubR("batt_12v_pct", fmt1(latestBatt12vPct))
+            pubD("debug/sunroof_raw",      snSunroof.toString())
+            pubD("debug/lock_status_raw",  snLockStat.toString())
+            if (latestOdometerKm > 0f) pubD("odometer_km", fmt1(latestOdometerKm))
+            if (latestBatt12vPct > 0f) pubD("batt_12v_pct", fmt1(latestBatt12vPct))
             // Potência de recarga: apenas quando charging_state == 1 (Carregando)
             // Corrente AC (cur_charge_current) × tensão do pack (car.ev_info.power_battery_voltage) / 1000
             val chargePowerKw = if (latestChargingState == 1 && latestBatteryVoltageV > 0f)
@@ -1156,9 +1173,9 @@ class MqttManager private constructor() {
                 5 -> "Aguardando liberação"
                 else -> "Desconhecido"
             }
-            pubR("charging_state",       chargingStateText)
-            pubR("charge_session_kwh",   fmt2(TripManager.getInstance().getChargeSessionEnergyKwh()))
-            pubR("charge_remaining_min", latestChargeRemainingMin.toString())
+            pubD("charging_state",       chargingStateText)
+            pubD("charge_session_kwh",   fmt2(TripManager.getInstance().getChargeSessionEnergyKwh()))
+            pubD("charge_remaining_min", latestChargeRemainingMin.toString())
             pub("rolling/kwh_per_100km", fmt2(q.rolling.netKwhPer100km))
             pub("rolling/km_per_l",      fmt2(q.rolling.kmPerL))
             pub("rolling/distance_km",   fmt2(q.rolling.windowKm))
