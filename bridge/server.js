@@ -335,6 +335,7 @@ const NOTIF_DEFAULTS = {
   la_trip:              true,
   la_motor:             true,
   la_security:          true,
+  la_songpro:           false,  // LA paralela da BYD Song Pro (esposa) — opt-in, só admin
   preclimat_steps:      true,   // alerta (som) a cada passo da pré-climatização
 };
 let notifPrefs = { ...NOTIF_DEFAULTS };
@@ -4630,7 +4631,7 @@ app.post('/api/notif/prefs/:device_id', (req, res) => {
 });
 
 // ── Live Activities: masters GLOBAIS (nível da instância) ─────────────────────
-const LA_PREF_KEYS = ['la_charge', 'la_preclimat', 'la_trip', 'la_motor', 'la_security', 'preclimat_steps'];
+const LA_PREF_KEYS = ['la_charge', 'la_preclimat', 'la_trip', 'la_motor', 'la_security', 'la_songpro', 'preclimat_steps'];
 app.get('/api/la-prefs', (_req, res) => {
   const out = {};
   for (const k of LA_PREF_KEYS) out[k] = notifPrefs[k] !== false;   // default ligado
@@ -5504,6 +5505,11 @@ mqttClient.on('connect', () => {
   // direto da fonte oficial via cloud, sem ruído do barramento do app.
   mqttClient.subscribe(`${GWM_TOPIC_PREFIX}/+/state`, { qos: 1 });
   console.log(`✓ Subscribed em ${GWM_TOPIC_PREFIX}/+/state (integração HA)`);
+  // BYD Song Pro (carro da esposa) — JSON payload com charging_power + soc.
+  // Usado pra mostrar LA paralela quando carrega no mesmo carregador. Opt-in
+  // via toggle la_songpro (default OFF). NÃO persiste dado.
+  mqttClient.subscribe('electro/telemetry/song-pro/data', { qos: 0 });
+  console.log('✓ Subscribed em electro/telemetry/song-pro/data (LA esposa)');
   // A integração não publica esses tópicos com retain — broker fica sem o
   // estado atual ao subscribe. Puxamos via REST do HA no boot pra popular.
   fetchInitialStateFromHA();
@@ -5577,6 +5583,10 @@ mqttClient.on('message', (topic, payload, packet) => {
   if (topic.startsWith(GWM_TOPIC_PREFIX + '/') && topic.endsWith('/state')) {
     const id = topic.slice(GWM_TOPIC_PREFIX.length + 1, topic.length - '/state'.length);
     applyGwmEntity(id, value, isRetained);
+  } else if (topic === 'electro/telemetry/song-pro/data') {
+    // BYD Song Pro da esposa — JSON com charging_power + soc. No-op se ninguém
+    // tem la_songpro=true (evita CPU inútil quando feature desligada).
+    if (!isRetained) handleSongProMessage(value);
   } else if (topic === MQTT_PREFIX + '/diag/state') {
     // APK confirma estado real do modo diagnóstico — single source of truth
     try {
@@ -5867,6 +5877,104 @@ function handleTripUpdate(ct, isRetained) {
     _lastTripSnapshot = null;
     apnsLive.pushUpdate(TRIP_LA_TYPE, {}, last, { isFinal: true, dismissalDate: Date.now() + 5 * 60_000 })
       .catch(e => console.warn('[apns] trip end falhou:', e.message));
+  }
+}
+
+// ── BYD Song Pro (esposa) — LA paralela de recarga ───────────────────────────
+// Tópico único `electro/telemetry/song-pro/data` traz JSON completo (charging_power,
+// soc, etc.). Tracker em MEMÓRIA: sessão começa quando power>0, energia é integrada
+// (P × dt), termina quando power=0 OU soc=100. Opt-in via la_songpro (default OFF).
+// Como o usuário pediu: NÃO persiste dado — só LA pra acompanhar visualmente.
+const SONGPRO_LA_TYPE = 'SongProActivityAttributes';
+const SONGPRO_BATTERY_KWH = 18;  // BYD Song Pro PHEV — capacidade nominal
+let _songProSession = null;   // { startMs, lastMs, lastPower, lastSoc, sessionKwh, active }
+const SONGPRO_STOP_GRACE_MS = 60_000;  // power=0 sustentado por 60s pra encerrar (evita flicker)
+let _songProZeroSinceMs = 0;
+
+// Estima minutos restantes pra atingir 100%: (100−soc)·battery_kwh / power · 60.
+// Retorna 0 quando power insuficiente (=0 ou irreal).
+function _songProRemainingMin(soc, power) {
+  if (power <= 0.1 || soc >= 100) return 0;
+  const kwhFaltam = (100 - soc) / 100 * SONGPRO_BATTERY_KWH;
+  return Math.round(kwhFaltam / power * 60);
+}
+
+function _songProContentState(active) {
+  const s = _songProSession || {};
+  const soc   = +s.lastSoc   || 0;
+  const power = active ? (+s.lastPower || 0) : 0;
+  return {
+    soc,
+    powerKw:      power,
+    sessionKwh:   +(s.sessionKwh || 0).toFixed(2),
+    remainingMin: active ? _songProRemainingMin(soc, power) : 0,
+    charging:     !!active,
+    updatedAtMs:  Date.now(),
+  };
+}
+
+function _songProEnabled() {
+  // Pelo menos um device com la_songpro=true → vale a pena enviar push.
+  return pushSubs.some(s => getPrefsForDevice(s.device_id).la_songpro === true);
+}
+
+function handleSongProMessage(jsonStr) {
+  let o;
+  try { o = JSON.parse(jsonStr); } catch (_) { return; }
+  const power = +o.charging_power || 0;
+  const soc   = +o.soc || +o.soc_panel || 0;
+  if (soc <= 0 && power <= 0) return;   // amostra ruim — ignora
+  if (!_songProEnabled() && !_songProSession) return;   // feature off + sem sessão = ignora
+
+  const now = Date.now();
+
+  if (power > 0) {
+    _songProZeroSinceMs = 0;
+    if (!_songProSession) {
+      // Início da sessão.
+      _songProSession = { startMs: now, lastMs: now, lastPower: power, lastSoc: soc, sessionKwh: 0, active: true };
+      console.log(`[songpro] sessão iniciada (SOC ${soc}% · ${power} kW)`);
+      if (_songProEnabled() && apnsLive.enabled) {
+        apnsLive.pushStart(SONGPRO_LA_TYPE, '', { carName: 'BYD Song Pro' }, _songProContentState(true),
+          { staleDate: now + 6 * 3600_000, alert: { title: '🔵 Esposa carregando', body: `SOC ${soc.toFixed(0)}% · ${power.toFixed(1)} kW` } })
+          .catch(e => console.warn('[songpro] pushStart falhou:', e.message));
+      }
+    } else {
+      // Update: integra energia (power kW × dt h).
+      const dtH = (now - _songProSession.lastMs) / 3_600_000;
+      _songProSession.sessionKwh += _songProSession.lastPower * dtH;
+      _songProSession.lastMs = now;
+      _songProSession.lastPower = power;
+      _songProSession.lastSoc = soc;
+      // Throttle: só envia se SOC mudou ≥1%, power ≥0.5kW, ou 60s desde último.
+      const lastUpd = _songProSession.lastPushMs || 0;
+      const dSocOk  = Math.abs(soc - (_songProSession.lastPushedSoc || 0)) >= 1;
+      const dPwrOk  = Math.abs(power - (_songProSession.lastPushedPwr || 0)) >= 0.5;
+      const dTOk    = (now - lastUpd) > 60_000;
+      if (apnsLive.enabled && _songProEnabled() && (dSocOk || dPwrOk || dTOk)) {
+        _songProSession.lastPushMs = now;
+        _songProSession.lastPushedSoc = soc;
+        _songProSession.lastPushedPwr = power;
+        apnsLive.pushUpdate(SONGPRO_LA_TYPE, {}, _songProContentState(true), {}).catch(() => {});
+      }
+    }
+  } else {
+    // power = 0: pode ser pausa breve do carregador. Espera 60s pra concluir.
+    if (!_songProSession) return;
+    if (_songProZeroSinceMs === 0) _songProZeroSinceMs = now;
+    _songProSession.lastSoc = soc;
+    if (now - _songProZeroSinceMs > SONGPRO_STOP_GRACE_MS || soc >= 100) {
+      const finalKwh = _songProSession.sessionKwh;
+      console.log(`[songpro] sessão encerrada · ${finalKwh.toFixed(2)} kWh · SOC final ${soc}%`);
+      if (apnsLive.enabled && _songProEnabled()) {
+        apnsLive.pushUpdate(SONGPRO_LA_TYPE, {}, _songProContentState(false),
+          { isFinal: true, dismissalDate: now + 5 * 60_000,
+            alert: { title: '🔵 Esposa terminou', body: `SOC ${soc.toFixed(0)}% · ${finalKwh.toFixed(2)} kWh` } })
+          .catch(e => console.warn('[songpro] end falhou:', e.message));
+      }
+      _songProSession = null;
+      _songProZeroSinceMs = 0;
+    }
   }
 }
 
@@ -6211,7 +6319,7 @@ function sendChargeLiveUpdate(isFinal = false) {
 //  - push-to-start token (por TIPO de LA): permite o servidor CRIAR a LA.
 //  - update token (por atividade): permite atualizar/encerrar uma LA específica.
 const LA_TYPES = ['ChargeActivityAttributes', 'PreClimatActivityAttributes', 'TripActivityAttributes',
-                  'MotorActivityAttributes', 'SecurityActivityAttributes'];
+                  'MotorActivityAttributes', 'SecurityActivityAttributes', 'SongProActivityAttributes'];
 
 // push-to-start token (por tipo de Live Activity)
 app.post('/api/activity/pts-token', (req, res) => {
