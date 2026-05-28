@@ -614,7 +614,7 @@ function relTime(ms) {
 // ── IndexedDB key/value pra dados grandes (telemetria de viagens) ─
 // localStorage tem ~5MB no iOS PWA, telemetria com 1000+ samples por viagem
 // estoura rápido. IndexedDB tem 50MB+ e é assíncrono (não trava UI).
-const _IDB_NAME = 'ecotrip_v2', _IDB_STORE = 'kv';
+const _IDB_NAME = 'ecotrip_v3', _IDB_STORE = 'kv';   // bumped v3 2026-05-28: caches de telemetria parciais ficaram orfãos
 let _idbPromise = null;
 function _idb() {
   if (_idbPromise) return _idbPromise;
