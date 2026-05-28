@@ -4666,15 +4666,24 @@ app.post('/api/pair/generate', (_req, res) => {   // autenticado (passa pelo gua
   const carHost = CAR_MQTT_HOST || MQTT_HOST.replace(/^mqtts?:\/\//, '');
   const carPort = CAR_MQTT_HOST ? CAR_MQTT_PORT : MQTT_PORT;
   const carTls  = CAR_MQTT_HOST ? CAR_MQTT_TLS : MQTT_HOST.startsWith('mqtts://');
+  // BRIDGE URL/TOKEN pra HTTP (POST /api/autotrips no fim da viagem).
+  // Detecta a URL externa: prioridade BRIDGE_PUBLIC_URL → Tailscale funnel → vazio.
+  const bridgeUrl = (process.env.BRIDGE_PUBLIC_URL ||
+                     process.env.TAILSCALE_FUNNEL_URL ||
+                     'https://mac-mini.tailacc6e7.ts.net').replace(/\/+$/, '');
+  // Token: o hash do .env (o bridge aceita tanto plain quanto hash como Bearer).
+  const bridgeToken = BRIDGE_TOKEN_HASH || '';
   _pairCodes.set(code, {
     expiresAt: Date.now() + PAIR_TTL_MS,
     config: {
-      mqtt_host:   carHost,
-      mqtt_port:   carPort,
-      mqtt_user:   MQTT_USER,
-      mqtt_pass:   MQTT_PASS,
-      mqtt_prefix: MQTT_PREFIX,
-      mqtt_tls:    carTls,
+      mqtt_host:    carHost,
+      mqtt_port:    carPort,
+      mqtt_user:    MQTT_USER,
+      mqtt_pass:    MQTT_PASS,
+      mqtt_prefix:  MQTT_PREFIX,
+      mqtt_tls:     carTls,
+      bridge_url:   bridgeUrl,    // pra POST /api/autotrips no fim da viagem
+      bridge_token: bridgeToken,  // Authorization: Bearer <token>
     },
   });
   console.log(`[pair] código gerado (expira em ${PAIR_TTL_MS / 60000} min)`);
