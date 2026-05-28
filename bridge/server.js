@@ -4827,9 +4827,25 @@ function _buildAiContext(N = 10) {
 }
 
 app.post('/api/ai/ask', async (req, res) => {
-  const question = (req.body?.question || '').toString().trim();
-  if (!question) return res.status(400).json({ error: 'question vazia' });
-  if (question.length > 2000) return res.status(400).json({ error: 'question muito longa' });
+  // Aceita 2 formatos:
+  //   { question: '...' }       — single-turn (backward compat).
+  //   { messages: [...] }       — multi-turn (chat com histórico).
+  // Em multi-turn, o cliente envia toda a thread (user+assistant alternados);
+  // o bridge antepõe um system prompt com o contexto atual.
+  let userMsgs;
+  if (Array.isArray(req.body?.messages) && req.body.messages.length > 0) {
+    userMsgs = req.body.messages
+      .filter(m => m && (m.role === 'user' || m.role === 'assistant') && m.content)
+      .map(m => ({ role: m.role, content: String(m.content).slice(0, 4000) }));
+    if (!userMsgs.length) return res.status(400).json({ error: 'messages vazias' });
+  } else {
+    const question = (req.body?.question || '').toString().trim();
+    if (!question) return res.status(400).json({ error: 'question vazia' });
+    if (question.length > 2000) return res.status(400).json({ error: 'question muito longa' });
+    userMsgs = [{ role: 'user', content: question }];
+  }
+  // Limita histórico ao máximo de 20 turnos pra evitar context window estourar.
+  if (userMsgs.length > 20) userMsgs = userMsgs.slice(-20);
 
   const ctx = _buildAiContext(req.body?.context_size || 10);
   const sys = `Você é um assistente especializado em telemetria de carros híbridos plug-in (PHEV) integrado ao app Haval EcoTrip. Responda em português brasileiro, com clareza e precisão. Use APENAS os dados fornecidos abaixo no JSON de contexto pra responder. Não invente números. Se a pergunta exigir algo fora do contexto, diga.
@@ -4841,7 +4857,8 @@ DICAS:
 - "Modo HEV" = motor térmico ligado (rpm > 0). "Modo EV" = elétrico puro.
 - "kWh efetivo" da recarga = custo / energia que entrou na bateria.
 - Datas em viagens_recentes.startMs/endMs são milissegundos epoch (use Date(ms).toLocaleString se precisar formatar).
-- Seja conciso. Tabelas simples ou bullets quando útil.`;
+- Seja conciso. Tabelas simples ou bullets quando útil.
+- Mantenha continuidade da conversa: se o usuário pergunta "e nessa outra?" assume o contexto da mensagem anterior.`;
 
   try {
     const r = await fetch(`${OLLAMA_URL}/api/chat`, {
@@ -4849,10 +4866,7 @@ DICAS:
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: OLLAMA_MODEL,
-        messages: [
-          { role: 'system', content: sys },
-          { role: 'user',   content: question },
-        ],
+        messages: [{ role: 'system', content: sys }, ...userMsgs],
         stream: false,
         options: { temperature: 0.2, num_ctx: 8192 },
       }),
