@@ -4727,6 +4727,13 @@ app.post('/api/la/relaunch', async (req, res) => {
       _securityActive = false; _evalSecurityAlert();   // re-cria se ainda há problema
       done.push('seguranca');
     }
+    // BYD Song Pro (esposa) — só relança se sessão ativa e algum device opt-in.
+    if (_songProSession && _songProSession.active && _songProEnabled()) {
+      const cs = _songProContentState(true);
+      await apnsLive.pushStart(SONGPRO_LA_TYPE, '', { carName: 'BYD Song Pro' }, cs,
+        { staleDate: Date.now() + 6 * 3600_000, alert: { title: '🔵 Esposa carregando', body: 'Card reativado.' } });
+      done.push('song-pro');
+    }
   } catch (e) { return res.status(500).json({ error: e.message }); }
   console.log(`[la-relaunch] reativadas: ${done.join(', ') || '(nenhuma ativa)'}`);
   res.json({ ok: true, relaunched: done });
