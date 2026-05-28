@@ -485,7 +485,7 @@ input { font-family: inherit; }
 <!-- ──────────────────────── 🤖 AI ASK (Ollama local) ──────────────────────── -->
 <!-- FAB arrastável: o JS de runtime posiciona via top/left e salva no localStorage. -->
 <button id="ai-ask-fab" title="Arraste pra mover · toque pra perguntar"
-        style="display:none;position:fixed;z-index:240;width:24px;height:24px;border-radius:50%;background:linear-gradient(135deg,#7c3aed,#3b82f6);border:none;color:#fff;font-size:13px;box-shadow:0 2px 8px rgba(124,58,237,.5);cursor:grab;touch-action:none;user-select:none;-webkit-user-select:none;padding:0;line-height:1">🤖</button>
+        style="display:none;position:fixed;z-index:240;width:36px;height:36px;border-radius:50%;background:linear-gradient(135deg,#7c3aed,#3b82f6);border:none;color:#fff;font-size:17px;box-shadow:0 3px 10px rgba(124,58,237,.5);cursor:grab;touch-action:none;user-select:none;-webkit-user-select:none;padding:0;line-height:1">🤖</button>
 
 <!-- Popup: 3 chats recentes (clicáveis) + nova pergunta + atalho pro chat completo -->
 <div id="ai-modal" style="display:none;position:fixed;inset:0;z-index:260;background:rgba(0,0,0,.78);align-items:flex-end;justify-content:center;backdrop-filter:blur(8px)" onclick="if(event.target===this) closeAiAsk()">
@@ -2067,7 +2067,7 @@ function _aiFabApplyPos(pos) {
   const f = document.getElementById('ai-ask-fab');
   if (!f) return;
   const w = window.innerWidth, h = window.innerHeight;
-  const fw = 24, fh = 24;   // tamanho do FAB (compacto)
+  const fw = 36, fh = 36;   // tamanho do FAB
   const margin = 4;          // mínimo de borda visível
   // Calcula left/top em pixels a partir dos percentuais, garantindo que fica visível.
   let x = (pos.xPct / 100) * w - fw / 2;
@@ -2111,8 +2111,8 @@ _aiFabApplyPos(_aiFabGetPos());   // posição inicial
     if (Math.abs(dx) > 6 || Math.abs(dy) > 6) moved = true;
     if (moved) {
       const W = window.innerWidth, H = window.innerHeight;
-      const nx = clamp(ox + dx, 4, W - 24 - 4);
-      const ny = clamp(oy + dy, 4, H - 24 - 4);
+      const nx = clamp(ox + dx, 4, W - 36 - 4);
+      const ny = clamp(oy + dy, 4, H - 36 - 4);
       f.style.left = nx + 'px';
       f.style.top  = ny + 'px';
       f.style.right = 'auto'; f.style.bottom = 'auto';
