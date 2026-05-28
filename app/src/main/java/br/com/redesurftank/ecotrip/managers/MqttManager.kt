@@ -900,7 +900,7 @@ class MqttManager private constructor() {
 
             val opts = MqttConnectOptions().apply {
                 connectionTimeout    = 10   // Starlink: latência baixa; falha logo se cair
-                keepAliveInterval    = 3    // Starlink recupera em <1s; detecta queda em ~4.5s (1.5×). Custo: 12B a cada 3s, desprezível
+                keepAliveInterval    = 10   // 4G+TLS+cellular pode ter jitter; 1.5×=15s timeout. Heartbeat 5s do app faz a detecção rápida real
                 isCleanSession       = true
                 isAutomaticReconnect = false
                 if (username.isNotEmpty()) {
