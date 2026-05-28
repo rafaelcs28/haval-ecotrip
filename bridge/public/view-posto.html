@@ -1354,8 +1354,10 @@ function renderEntries() {
             <span>SOC: <span class="v">${it.soc_start}% → ${it.soc_end}%</span></span>
             <span>Pot. média: <span class="v">${it.avg_power_kw.toFixed(1)} kW</span></span>
             <span>Custo: <span class="v">R$ ${fmtBRL(it.cost)}</span></span>
+            ${(it.cost > 0 && it.kwh > 0) ? `<span title="Custo dividido pelos kWh que ENTRARAM na bateria (medido pelo carro). Reflete o valor real pago por unidade de energia aproveitada — inclui perdas do carregador.">R$/kWh efetivo: <span class="v">R$ ${(it.cost / it.kwh).toFixed(2).replace('.', ',')}</span></span>` : ''}
             ${hasCharger ? `<span>Carregador: <span class="v">${it.charger_kwh.toFixed(2)} kWh</span></span>
-            <span>Perda: <span class="v loss">${lossPct.toFixed(1)}%</span></span>` : ''}
+            <span>Perda: <span class="v loss">${lossPct.toFixed(1)}%</span></span>
+            <span title="Preço por kWh medido no carregador (rede elétrica) — comparar com o efetivo mostra o quanto a perda do AC encarece.">R$/kWh medidor: <span class="v">R$ ${(it.cost / it.charger_kwh).toFixed(2).replace('.', ',')}</span></span>` : ''}
           </div>
           <div class="entry-actions">
             <button title="Definir local" class="${hasLoc ? 'has-value' : ''}" onclick="openLocationEdit(${esc(it.id)})">📍</button>
