@@ -4704,6 +4704,16 @@ app.post('/api/la/relaunch', async (req, res) => {
   const done = [];
   try {
     if (state.charging_state === 'Carregando' && notifPrefs.la_charge !== false) {
+      // iOS ignora pushStart se já existe LA do mesmo tipo "viva" (mesmo que
+      // o user tenha dispensado por swipe). Encerra a existente PRIMEIRO
+      // (isFinal + dismissalDate imediata) e DEPOIS cria nova. Garante que
+      // o card reaparece visível ao usuário.
+      try {
+        await apnsLive.pushUpdate('ChargeActivityAttributes', {}, _chargeContentState(),
+          { isFinal: true, dismissalDate: Date.now() });
+      } catch (_) {}
+      // Pequeno delay pra iOS processar o end antes do start.
+      await new Promise(r => setTimeout(r, 250));
       await apnsLive.pushStart('ChargeActivityAttributes', '', { carName: 'Haval H6 PHEV' }, _chargeContentState(),
         { staleDate: Date.now() + 3600_000, alert: { title: '⚡ Recarga', body: 'Card reativado — acompanhe na tela bloqueada.' } });
       done.push('recarga');
