@@ -33968,16 +33968,22 @@ function renderTimelineCharts(t) {
   renderTlChart('tl-chart-kw',  samples.map(s => s.kw),  '#22d3ee', true);
   // RPM do motor térmico — 0 quando 100% elétrico. Usa amarelo/laranja.
   renderTlChart('tl-chart-rpm', samples.map(s => +s.rpm || 0), '#f59e0b');
-  renderTlChart('tl-chart-soc', samples.map(s => s.soc), '#fbbf24');
+  // SOC: escala fixa 0–100 (não auto-min/max) pra barra refletir o valor real
+  // e ficar mais visível. Cor amarelo-vivo + opacity maior pra destacar.
+  renderTlChart('tl-chart-soc', samples.map(s => s.soc), '#facc15', false,
+                { fixedMax: 100, fixedMin: 0, fillOpacity: 0.40 });
 }
 
-function renderTlChart(id, values, color, allowNegative) {
+function renderTlChart(id, values, color, allowNegative, opts) {
   const el = document.getElementById(id);
   if (!el || !values.length) return;
   const W = 100, H = 100;
-  const max = Math.max(...values, allowNegative ? 0 : 1);
-  const min = allowNegative ? Math.min(...values, 0) : 0;
+  // opts: { fixedMax, fixedMin, fillOpacity }
+  opts = opts || {};
+  const max = (opts.fixedMax != null) ? opts.fixedMax : Math.max(...values, allowNegative ? 0 : 1);
+  const min = (opts.fixedMin != null) ? opts.fixedMin : (allowNegative ? Math.min(...values, 0) : 0);
   const range = max - min || 1;
+  const fillOpacity = opts.fillOpacity != null ? opts.fillOpacity : 0.18;
   const points = values.map((v, i) => {
     const x = (i / (values.length - 1)) * W;
     const y = H - ((v - min) / range) * H * 0.9 - 5;
@@ -33991,7 +33997,7 @@ function renderTlChart(id, values, color, allowNegative) {
   el.innerHTML = `
     <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
       ${zeroLine}
-      <path d="${fillPath}" fill="${color}" fill-opacity=".18"/>
+      <path d="${fillPath}" fill="${color}" fill-opacity="${fillOpacity}"/>
       <polyline points="${points}" fill="none" stroke="${color}" stroke-width="1.2" vector-effect="non-scaling-stroke" stroke-linejoin="round"/>
     </svg>
     <div class="tl-cursor" id="cur-${id}" style="left: 0%"></div>
