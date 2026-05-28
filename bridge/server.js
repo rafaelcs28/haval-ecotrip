@@ -4749,6 +4749,127 @@ app.post('/api/la/relaunch', async (req, res) => {
   res.json({ ok: true, relaunched: done });
 });
 
+// ── 🤖 AI local (Ollama) — pergunte sobre viagens/recargas ────────────────
+// 100% local: nenhum dado sai do Mac Mini. Modelo configurável via .env
+// (default llama3.1:8b). Bridge monta contexto com últimas viagens/recargas/
+// estado e manda pro Ollama. Resposta em PT-BR.
+const OLLAMA_URL   = process.env.OLLAMA_URL   || 'http://localhost:11434';
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'llama3.1:8b';
+
+// Resumo compacto de uma viagem — agrega samples por modo (HEV/EV) e calcula
+// km/L só do HEV (assumindo que todo combustível foi queimado em HEV, que é
+// quase sempre verdade num PHEV: motor ICE só liga em HEV).
+function _summarizeTrip(tripFile) {
+  try {
+    const t = JSON.parse(fs.readFileSync(tripFile, 'utf8'));
+    const a = t.autoTrip || {};
+    const ss = t.samples || [];
+    let evDist = 0, evTime = 0, hevDist = 0, hevTime = 0;
+    for (let i = 1; i < ss.length; i++) {
+      const dt = Math.max(0, (ss[i].t || 0) - (ss[i-1].t || 0));
+      const spd = +ss[i].spd || 0;
+      const dKm = spd * dt / 3600;
+      if ((+ss[i].rpm || 0) > 0) { hevDist += dKm; hevTime += dt; }
+      else                       { evDist  += dKm; evTime  += dt; }
+    }
+    const kmLhev = (a.fuelL > 0) ? (hevDist / a.fuelL) : null;
+    return {
+      startMs: a.startMs, endMs: a.endMs,
+      origem: a.startAddress || null, destino: a.endAddress || null,
+      distKm: +(a.distKm || 0).toFixed(1),
+      timeMin: Math.round((a.timeSec || 0) / 60),
+      fuelL: +(a.fuelL || 0).toFixed(2),
+      netKwh: +(a.netKwh || 0).toFixed(2),
+      maxSpeedKmh: a.maxSpeedKmh,
+      socStart: a.startSocPct, socEnd: a.endSocPct,
+      modo_ev:  { distKm: +evDist.toFixed(1),  timeMin: Math.round(evTime/60)  },
+      modo_hev: { distKm: +hevDist.toFixed(1), timeMin: Math.round(hevTime/60), kmL: kmLhev ? +kmLhev.toFixed(2) : null },
+    };
+  } catch (e) { return null; }
+}
+
+function _buildAiContext(N = 10) {
+  // Últimas N viagens
+  const files = fs.readdirSync(AUTOTRIPS_DIR)
+    .filter(f => f.endsWith('.json'))
+    .sort()
+    .slice(-N);
+  const trips = files.map(f => _summarizeTrip(path.join(AUTOTRIPS_DIR, f))).filter(Boolean);
+
+  // Últimas N recargas
+  let charges = [];
+  try {
+    const cj = JSON.parse(fs.readFileSync(CHARGES_FILE, 'utf8'));
+    charges = (cj.charges || []).slice(-N).map(c => ({
+      timestamp: c.timestamp,
+      duration_min: Math.round((c.duration_sec || 0) / 60),
+      energy_kwh_bateria: c.energy_kwh,
+      energy_kwh_medidor: c.charger_kwh || null,
+      soc: `${c.soc_start}→${c.soc_end}%`,
+      avg_power_kw: c.avg_power_kw,
+      local: c.location_name || null,
+      custo_brl: c.cost_override?.total || null,
+      preco_kwh_efetivo: (c.cost_override?.total && c.energy_kwh > 0) ? +(c.cost_override.total / c.energy_kwh).toFixed(2) : null,
+    }));
+  } catch (_) {}
+
+  const cur = {
+    soc_pct: state.soc_pct,
+    charging_state: state.charging_state,
+    charge_power_kw: state.charge_power_kw,
+    odometer_km: state.odometer_km,
+    autonomy_ev_km: state.autonomy_ev_km,
+    autonomy_ice_km: state.autonomy_ice_km,
+    fuel_l: state.fuel_l,
+  };
+
+  return { now_iso: new Date().toISOString(), atual: cur, viagens_recentes: trips, recargas_recentes: charges };
+}
+
+app.post('/api/ai/ask', async (req, res) => {
+  const question = (req.body?.question || '').toString().trim();
+  if (!question) return res.status(400).json({ error: 'question vazia' });
+  if (question.length > 2000) return res.status(400).json({ error: 'question muito longa' });
+
+  const ctx = _buildAiContext(req.body?.context_size || 10);
+  const sys = `Você é um assistente especializado em telemetria de carros híbridos plug-in (PHEV) integrado ao app Haval EcoTrip. Responda em português brasileiro, com clareza e precisão. Use APENAS os dados fornecidos abaixo no JSON de contexto pra responder. Não invente números. Se a pergunta exigir algo fora do contexto, diga.
+
+CONTEXTO (JSON):
+${JSON.stringify(ctx, null, 2)}
+
+DICAS:
+- "Modo HEV" = motor térmico ligado (rpm > 0). "Modo EV" = elétrico puro.
+- "kWh efetivo" da recarga = custo / energia que entrou na bateria.
+- Datas em viagens_recentes.startMs/endMs são milissegundos epoch (use Date(ms).toLocaleString se precisar formatar).
+- Seja conciso. Tabelas simples ou bullets quando útil.`;
+
+  try {
+    const r = await fetch(`${OLLAMA_URL}/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: OLLAMA_MODEL,
+        messages: [
+          { role: 'system', content: sys },
+          { role: 'user',   content: question },
+        ],
+        stream: false,
+        options: { temperature: 0.2, num_ctx: 8192 },
+      }),
+    });
+    if (!r.ok) return res.status(502).json({ error: `Ollama ${r.status}` });
+    const o = await r.json();
+    res.json({
+      answer: o.message?.content || '(sem resposta)',
+      duration_sec: o.total_duration ? +(o.total_duration/1e9).toFixed(2) : null,
+      tokens: o.eval_count || null,
+    });
+  } catch (e) {
+    console.warn('[ai] erro:', e.message);
+    res.status(500).json({ error: 'falha ao consultar Ollama: ' + e.message });
+  }
+});
+
 // PATCH /api/notif/devices/:device_id  { device_name }
 app.patch('/api/notif/devices/:device_id', (req, res) => {
   const id = req.params.device_id;
