@@ -1123,6 +1123,13 @@ class MqttManager private constructor() {
                 pubR("gps_lng", String.format(java.util.Locale.US, "%.6f", gpsLng))
             }
 
+            // SOC do carro (CAN: CAR_EV_INFO_SOC_OF_BATTERY) — fonte primária pro bridge.
+            // Mesmo tópico que a automação HA usa; APK publica mais frequente, então
+            // o valor MAIS FRESCO sempre vence. Quando carro está parado, HA atualiza
+            // (5s) e cobre o gap. Guard >0 evita publicar 0 antes do CAN inicializar.
+            val socNow = q.rolling.currentSocPct
+            if (socNow > 0f) pubD("soc_pct", socNow.toInt().toString())
+
             // Electrical: corrente de carga, tensão e corrente do pack + potência derivada
             // retain=true — persiste no broker; HA não fica em branco se a conexão cair brevemente
             pubR("charge_current_a",  fmt2(latestChargeCurrentA))
