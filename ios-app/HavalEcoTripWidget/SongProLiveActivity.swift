@@ -60,7 +60,11 @@ struct SongProLiveActivity: Widget {
                 Image(systemName: s.charging ? "bolt.car.fill" : "checkmark.circle.fill")
                     .foregroundStyle(s.charging ? songProAccent : .blue)
             } compactTrailing: {
-                Text("\(Int(s.soc))%").bold().foregroundStyle(s.charging ? songProAccent : .blue)
+                // SOC + tempo restante quando carregando (ex: "57%·2h15")
+                let label = (s.charging && s.remainingMin > 0)
+                    ? "\(Int(s.soc))%·\(songProRemainingLabel(s.remainingMin).replacingOccurrences(of: "~", with: ""))"
+                    : "\(Int(s.soc))%"
+                Text(label).bold().foregroundStyle(s.charging ? songProAccent : .blue)
             } minimal: {
                 Image(systemName: "bolt.car.fill").foregroundStyle(songProAccent)
             }

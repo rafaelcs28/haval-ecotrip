@@ -57,7 +57,11 @@ struct ChargeActivityLiveActivity: Widget {
                 Image(systemName: s.charging ? "bolt.car.fill" : "checkmark.circle.fill")
                     .foregroundStyle(s.charging ? .green : .blue)
             } compactTrailing: {
-                Text("\(Int(s.soc))%").bold().foregroundStyle(s.charging ? .green : .blue)
+                // SOC + tempo restante (ex: "57%·2h15") — só quando carregando e há estimativa.
+                let label = (s.charging && s.remainingMin > 0)
+                    ? "\(Int(s.soc))%·\(chargeRemainingLabel(s.remainingMin).replacingOccurrences(of: "~", with: ""))"
+                    : "\(Int(s.soc))%"
+                Text(label).bold().foregroundStyle(s.charging ? .green : .blue)
             } minimal: {
                 Image(systemName: "bolt.car.fill").foregroundStyle(.green)
             }
