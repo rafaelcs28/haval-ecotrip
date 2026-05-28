@@ -5931,7 +5931,10 @@ function handleSongProMessage(jsonStr) {
   const power = +o.charging_power || 0;
   const soc   = +o.soc || +o.soc_panel || 0;
   if (soc <= 0 && power <= 0) return;   // amostra ruim — ignora
-  if (!_songProEnabled() && !_songProSession) return;   // feature off + sem sessão = ignora
+  // Tracking SEMPRE rola (custo zero — memória). PUSH da LA gateado por
+  // _songProEnabled(). Assim, mesmo sem toggle ligado a sessão existe e o
+  // user pode clicar em "Reativar cards" depois de ligar pra ver a LA do
+  // que JÁ estava carregando.
 
   const now = Date.now();
 
