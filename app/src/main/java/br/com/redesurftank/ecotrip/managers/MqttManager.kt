@@ -371,6 +371,14 @@ class MqttManager private constructor() {
     // e connectInternal), por isso HashMap simples é seguro.
     private val lastPubSnapshot = HashMap<String, String>()
 
+    // Heartbeat de 5s no tópico haval/ecotrip/heartbeat — bypassa o dedupe e
+    // garante TRÁFEGO MQTT real a cada 5s, mesmo com o carro parado/com dedupe
+    // total. Função: (1) "ping de aplicação" — se a publish falha, o Paho dispara
+    // connectionLost na hora (detecção em ~5-6s, mais rápido que o keepalive
+    // do broker); (2) faz a métrica per-second do bridge refletir UPTIME REAL,
+    // não o intervalo natural entre snapshots.
+    @Volatile private var heartbeatFuture: java.util.concurrent.ScheduledFuture<*>? = null
+
     fun init(context: Context) {
         // Prevent "Error locating the logging class" crash on Android: set a no-op logger
         // before any MqttClient is constructed so Paho never tries Class.forName().
@@ -879,6 +887,8 @@ class MqttManager private constructor() {
             c.setCallback(object : MqttCallback {
                 override fun connectionLost(cause: Throwable?) {
                     Log.w(TAG, "Connection lost: ${cause?.message}")
+                    heartbeatFuture?.cancel(false)
+                    heartbeatFuture = null
                     setStatus(Status.DISCONNECTED)
                     scheduleReconnect()
                 }
@@ -890,7 +900,7 @@ class MqttManager private constructor() {
 
             val opts = MqttConnectOptions().apply {
                 connectionTimeout    = 10   // Starlink: latência baixa; falha logo se cair
-                keepAliveInterval    = 5    // Starlink recupera em <1s; detecta queda em ~7.5s (1.5×). Custo: 12B a cada 5s, desprezível
+                keepAliveInterval    = 3    // Starlink recupera em <1s; detecta queda em ~4.5s (1.5×). Custo: 12B a cada 3s, desprezível
                 isCleanSession       = true
                 isAutomaticReconnect = false
                 if (username.isNotEmpty()) {
@@ -921,6 +931,20 @@ class MqttManager private constructor() {
             lastPublishedEsp = -1
             lastPublishedSteerMode = -1
             setStatus(Status.CONNECTED)
+            // Heartbeat 5s — pequena publicação fire-and-forget pra manter TCP
+            // ativo + a métrica de uptime do bridge enxergar tráfego constante.
+            // Se a publish falhar, Paho dispara connectionLost imediatamente.
+            heartbeatFuture?.cancel(false)
+            heartbeatFuture = fastExecutor.scheduleAtFixedRate({
+                try {
+                    val cur = client
+                    if (cur != null && cur.isConnected) {
+                        cur.publish("$prefix/heartbeat", System.currentTimeMillis().toString().toByteArray(), 0, false)
+                    }
+                } catch (e: Exception) {
+                    AppLogger.w(TAG, "heartbeat falhou: ${e.message}")
+                }
+            }, 5, 5, java.util.concurrent.TimeUnit.SECONDS)
             publishDiscovery(c)
             // Publica versão do app com retain=true — sempre visível no HA mesmo offline
             try {

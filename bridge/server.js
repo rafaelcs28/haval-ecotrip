@@ -6362,6 +6362,9 @@ function applyMqttMessage(key, value, isRetained = false) {
 
   switch (key) {
     // Status já tratado no topo da função (com proteção contra LWT stale).
+    // Heartbeat (5s, do carro): só serve pra manter last_update_ms fresco e
+    // detectar TCP morto rápido. last_update_ms já foi atualizado no topo.
+    case 'heartbeat': return;
     case 'last_update':
       state.car_last_update = value;   // ISO timestamp publicado pelo Android (retain=true)
       break;
