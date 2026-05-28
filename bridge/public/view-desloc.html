@@ -447,6 +447,7 @@
 }
 .tl-row.spd .lbl { color: var(--green); }
 .tl-row.kw .lbl { color: var(--teal); }
+.tl-row.rpm .lbl { color: #f59e0b; }   /* laranja — motor térmico */
 .tl-row.soc .lbl { color: var(--yellow); }
 .tl-row .v {
   font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums;
@@ -656,6 +657,7 @@
     </div>
     <div class="tl-row spd"><span class="lbl">Veloc</span><div class="tl-chart" id="tl-chart-spd"></div><span class="v"><span id="tl-spd-val">--</span> km/h</span></div>
     <div class="tl-row kw"><span class="lbl">Potênc</span><div class="tl-chart" id="tl-chart-kw"></div><span class="v"><span id="tl-kw-val">--</span> kW</span></div>
+    <div class="tl-row rpm"><span class="lbl">RPM</span><div class="tl-chart" id="tl-chart-rpm"></div><span class="v"><span id="tl-rpm-val">--</span></span></div>
     <div class="tl-row soc"><span class="lbl">SOC</span><div class="tl-chart" id="tl-chart-soc"></div><span class="v"><span id="tl-soc-val">--</span>%</span></div>
     <div class="tl-scrubber">
       <input type="range" id="tl-scrubber" min="0" max="100" value="0" step="0.1" oninput="onScrub(this.value)">
@@ -33964,6 +33966,8 @@ function renderTimelineCharts(t) {
   if (!samples.length) return;
   renderTlChart('tl-chart-spd', samples.map(s => s.spd), '#22c55e');
   renderTlChart('tl-chart-kw',  samples.map(s => s.kw),  '#22d3ee', true);
+  // RPM do motor térmico — 0 quando 100% elétrico. Usa amarelo/laranja.
+  renderTlChart('tl-chart-rpm', samples.map(s => +s.rpm || 0), '#f59e0b');
   renderTlChart('tl-chart-soc', samples.map(s => s.soc), '#fbbf24');
 }
 
@@ -34006,8 +34010,10 @@ function onScrub(pctStr) {
   const kwRaw = s.kw != null ? +s.kw : (s.pwr != null ? +s.pwr : (s.evKw != null ? +s.evKw : NaN));
   const kw  = Number.isFinite(kwRaw) ? kwRaw.toFixed(1) : '--';
   const soc = Number.isFinite(+s.soc) ? Math.round(+s.soc) : '--';
+  const rpm = Number.isFinite(+s.rpm) ? Math.round(+s.rpm) : '--';
   document.getElementById('tl-spd-val').textContent = spd;
   document.getElementById('tl-kw-val').textContent  = kw;
+  document.getElementById('tl-rpm-val').textContent = rpm;
   document.getElementById('tl-soc-val').textContent = soc;
   // Atualiza tempo
   const tsec = Number.isFinite(+s.t) ? +s.t : 0;
