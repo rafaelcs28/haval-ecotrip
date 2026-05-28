@@ -889,8 +889,8 @@ class MqttManager private constructor() {
             })
 
             val opts = MqttConnectOptions().apply {
-                connectionTimeout    = 15   // satélite/Starlink tem latência baixa; falha logo se cair
-                keepAliveInterval    = 10   // WiFi+Starlink tem mini-blips; detecta queda em ~15s (1.5×) em vez de 30s
+                connectionTimeout    = 10   // Starlink: latência baixa; falha logo se cair
+                keepAliveInterval    = 5    // Starlink recupera em <1s; detecta queda em ~7.5s (1.5×). Custo: 12B a cada 5s, desprezível
                 isCleanSession       = true
                 isAutomaticReconnect = false
                 if (username.isNotEmpty()) {
@@ -1307,15 +1307,18 @@ class MqttManager private constructor() {
         }
     }
 
-    // Backoff escalonado: queda breve (satélite/carro) recupera quase na hora;
-    // se o broker estiver fora de vez, espaça pra não martelar.
-    //   tentativas 1–5   → 1s   (recuperação rápida)
-    //   tentativas 6–15  → 2s
-    //   16ª em diante     → 5s
+    // Backoff escalonado: Starlink/4G recuperam quase na hora — a primeira
+    // tentativa em 250ms quase sempre cola. Se o broker estiver fora de vez,
+    // espaça pra não martelar.
+    //   tentativas 1–3    → 250ms (Starlink/WiFi blip)
+    //   tentativas 4–8    → 500ms
+    //   tentativas 9–18   → 1s
+    //   19ª em diante     → 3s
     private fun reconnectDelayMs(): Long = when {
-        reconnectAttempts <= 5  -> 1_000L
-        reconnectAttempts <= 15 -> 2_000L
-        else                    -> 5_000L
+        reconnectAttempts <= 3  -> 250L
+        reconnectAttempts <= 8  -> 500L
+        reconnectAttempts <= 18 -> 1_000L
+        else                    -> 3_000L
     }
 
     private fun scheduleReconnect() {
@@ -2097,8 +2100,41 @@ class MqttManager private constructor() {
         }
     }
 
+    // Handler pra debounce do status: blips curtos de WiFi/Starlink fazem o
+    // socket cair e voltar em <10s. Sem debounce, a UI pisca "Desconectado"
+    // mesmo quando a recuperação foi quase imediata. status interno é atualizado
+    // na hora; só o evento p/ UI atrasa 12s no DOWNGRADE de CONNECTED.
+    private val statusDebounceHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private var pendingDowngrade: Runnable? = null
+
     private fun setStatus(s: Status) {
+        val prev = status
         status = s
-        onStatusChange?.invoke(s)
+
+        // Cancela downgrade pendente (subida volta a ser instantânea).
+        pendingDowngrade?.let { statusDebounceHandler.removeCallbacks(it) }
+        pendingDowngrade = null
+
+        when {
+            s == Status.CONNECTED -> {
+                // Subida pra CONNECTED: instantâneo (mostra logo "Conectado").
+                onStatusChange?.invoke(s)
+            }
+            prev == Status.CONNECTED -> {
+                // Saindo de CONNECTED: segura o evento pra UI por 12s. Se a
+                // conexão voltar nesse tempo (Starlink/WiFi blip), nem mostra
+                // "Desconectado"/"Conectando" pro user.
+                val r = Runnable {
+                    if (status != Status.CONNECTED) onStatusChange?.invoke(status)
+                    pendingDowngrade = null
+                }
+                pendingDowngrade = r
+                statusDebounceHandler.postDelayed(r, 12_000L)
+            }
+            else -> {
+                // Transições entre estados não-CONNECTED (CONNECTING↔ERROR↔DISCONNECTED): direto.
+                onStatusChange?.invoke(s)
+            }
+        }
     }
 }
