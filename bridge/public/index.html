@@ -448,6 +448,12 @@ input { font-family: inherit; }
       <div style="display:flex;justify-content:space-between;padding:8px 10px;background:rgba(255,255,255,.04);border-radius:8px;gap:8px"><span style="color:#94a3b8;flex-shrink:0">IP de saída (Tailscale/internet)</span><span id="net-info-ip" style="font-weight:700;color:#cbd5e1;font-family:monospace;font-size:11px;text-align:right">—</span></div>
       <div style="display:flex;justify-content:space-between;padding:8px 10px;background:rgba(255,255,255,.04);border-radius:8px;gap:8px"><span style="color:#94a3b8;flex-shrink:0">Host do bridge</span><span id="net-info-host" style="font-weight:600;color:#cbd5e1;font-family:monospace;font-size:11px;text-align:right">—</span></div>
       <div style="display:flex;justify-content:space-between;padding:8px 10px;background:rgba(255,255,255,.04);border-radius:8px;gap:8px"><span style="color:#94a3b8;flex-shrink:0">🚗 Última atualização do carro</span><span id="net-info-car-update" style="font-weight:600;color:#cbd5e1;text-align:right">—</span></div>
+      <div style="display:flex;justify-content:space-between;padding:8px 10px;background:rgba(255,255,255,.04);border-radius:8px;gap:8px"><span style="color:#94a3b8;flex-shrink:0">🚗 App do carro (APK)</span><span id="net-info-apk-age" style="font-weight:600;color:#cbd5e1;text-align:right">—</span></div>
+      <div style="display:flex;justify-content:space-between;padding:8px 10px;background:rgba(255,255,255,.04);border-radius:8px;gap:8px"><span style="color:#94a3b8;flex-shrink:0">📡 Integração GWM (HA)</span><span id="net-info-gwm-age" style="font-weight:600;color:#cbd5e1;text-align:right">—</span></div>
+      <div style="margin-top:8px;padding:8px 10px;background:rgba(255,255,255,.04);border-radius:8px;font-size:11.5px;line-height:1.5">
+        <div style="color:#94a3b8;margin-bottom:6px;font-weight:600">📊 Fonte dos campos principais</div>
+        <div id="net-info-sources" style="color:#cbd5e1">—</div>
+      </div>
     </div>
     <button onclick="closeNetInfo()" style="width:100%;margin-top:14px;padding:12px;background:rgba(255,255,255,.06);color:#cbd5e1;border:none;border-radius:10px;font-size:14px;font-weight:700;font-family:inherit">Fechar</button>
   </div>
@@ -1872,6 +1878,25 @@ async function openNetInfo() {
   if (state.car_last_update) { const t = Date.parse(state.car_last_update); if (!isNaN(t)) carMs = t; }
   if (!carMs && state.last_update_ms) carMs = state.last_update_ms;
   document.getElementById('net-info-car-update').textContent = carMs ? relTime(carMs) : '—';
+  // Fontes separadas (APK do carro vs integração GWM via HA) — útil pra
+  // diagnosticar quando uma das pernas cai sozinha.
+  document.getElementById('net-info-apk-age').textContent = state.last_apk_ms ? relTime(state.last_apk_ms) : '—';
+  document.getElementById('net-info-gwm-age').textContent = state.last_gwm_ms ? relTime(state.last_gwm_ms) : '—';
+  // Mapa de campos principais → fonte que produziu o último valor.
+  const fs = state._field_source || {};
+  const fieldsToShow = [
+    ['soc_pct', 'SOC'], ['charging_state', 'Estado recarga'],
+    ['charge_remaining_min', 'Tempo restante'], ['odometer_km', 'Odômetro'],
+    ['speed_kmh', 'Velocidade'], ['motor_power_kw', 'Potência motor'],
+    ['fuel_l', 'Combustível'], ['autonomy_ev_km', 'Autonomia EV'],
+    ['door_fl', 'Portas'], ['lock_state', 'Trava'], ['sunroof', 'Sunroof'],
+  ];
+  const html = fieldsToShow.map(([k, lbl]) => {
+    const src = fs[k];
+    const icon = src === 'apk' ? '🚗' : src === 'gwm' ? '📡' : '—';
+    return `<span style="display:inline-block;margin:1px 6px 1px 0">${icon} ${lbl}</span>`;
+  }).join('');
+  document.getElementById('net-info-sources').innerHTML = html;
   document.getElementById('net-info-ip-local').textContent = '…';
   document.getElementById('net-info-ip').textContent = '…';
   m.style.display = 'flex';

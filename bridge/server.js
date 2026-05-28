@@ -2641,7 +2641,7 @@ app.get('/api/auth/passkey/available', (_req, res) => {
   res.json({ count: passkeys.length, available: passkeys.length > 0 });
 });
 
-app.get('/api/state',  (_req, res) => res.json(state));
+app.get('/api/state',  (_req, res) => res.json({ ...state, _field_source: _fieldSource }));
 app.get('/api/counts', (_req, res) => res.json({
   trips:     0,                  // Trip A/B descontinuados
   autotrips: autoTripsArr.length,
@@ -6235,6 +6235,7 @@ function applyGwmEntity(id, value, isRetained = false) {
     console.log(`[gwm] id desconhecido='${id}' value='${value}' isRetained=${isRetained}`);
     return;
   }
+  _fieldSource[field] = 'gwm';   // rastreia origem por campo
 
   // ── Binary body (doors, lock, AC) ─────────────────────────────────────────
   if (GWM_BODY_BINARY.has(field)) {
@@ -6361,9 +6362,15 @@ function applyGwmEntity(id, value, isRetained = false) {
   if (field === 'soc_pct') { checkSocLowIdle(); _checkSocFullLong(+state.soc_pct || 0); }
 }
 
+// Fonte de origem do último valor de cada campo: 'apk' (carro) ou 'gwm' (HA).
+// Atualizado em applyMqttMessage / applyGwmEntity. Exposto via /api/state pro
+// PWA mostrar ícone 🚗/📡 ao lado de cada métrica.
+const _fieldSource = {};
+
 function applyMqttMessage(key, value, isRetained = false) {
   const _now = Date.now();
   state.last_apk_ms = _now;   // qualquer msg em haval/ecotrip/* = APK do carro vivo
+  _fieldSource[key] = 'apk';  // rastreia origem por chave
   // Status (LWT) é tratado ANTES de atualizar last_update_ms — assim conseguimos
   // detectar LWT 'offline' que chega atrasado da sessão anterior (corrida com
   // o reconnect rápido): se uma mensagem fresca do carro chegou nos últimos
