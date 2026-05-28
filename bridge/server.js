@@ -289,6 +289,7 @@ const NOTIF_DEFAULTS = {
   charge_ending:     false,
   charge_ending_min: 5,
   charge_live:       false,   // notif "ao vivo" na tela de bloqueio durante recarga
+  charge_stopped:    true,     // recarga PAROU antes do limite − 1% (falha) — default ON (segurança)
   door_open:         false,
   door_close:        false,
   trunk_open:        false,
@@ -5976,7 +5977,40 @@ function handleChargingStateTransition(value, isRetained) {
       console.log(`🌡 Temp média recarga: ${_lastChargeAvgTemp}°C (${_chargeTempSamples.length} amostras)`);
     }
     _chargeTempSamples = [];
-    if (!isRetained && value === 'Finalizado') {
+
+    // ── Alerta de FALHA de carregamento ────────────────────────────────────
+    // Recarga parou (qualquer motivo) ANTES de atingir o limite, com 1% de
+    // tolerância (limite − 1). Ex.: limite 100 → alerta se parar em ≤98%.
+    // Pega problema no carregamento (cabo soltou, falha do carregador, etc.).
+    // endSoc > 0 evita falso alarme se o SOC vier zerado/desconhecido.
+    const chargeLimit  = +state.charge_limit_pct || 100;
+    const chargeFailed = endSoc > 0 && endSoc < (chargeLimit - 1);
+    if (!isRetained && chargeFailed) {
+      const aTitle = '⚠️ Carregamento interrompido';
+      const aBody  = `Parou em ${endSoc.toFixed(0)}% (limite ${chargeLimit}%). Verifique o carregamento.`;
+      sendPush(aTitle, aBody, 'charge_stopped', { renotify: true });
+      // Encerra a Live Activity de recarga com o alerta (em vez do "concluída").
+      // Mesmo toggle (charge_stopped, por-device) governa o push E o alerta na LA.
+      const chargeStoppedOn = pushSubs.some(s => getPrefsForDevice(s.device_id).charge_stopped !== false);
+      if (apnsLive.enabled && notifPrefs.la_charge !== false && chargeStoppedOn) {
+        stopChargeLiveTimer();
+        apnsLive.pushUpdate('ChargeActivityAttributes', {}, {
+          soc: endSoc, powerKw: 0,
+          sessionKwh: +state.charge_session_kwh || 0,
+          remainingMin: 0, charging: false,
+          targetPct: chargeLimit, updatedAtMs: Date.now(),
+        }, { isFinal: true, alert: { title: aTitle, body: aBody } })
+          .catch(e => console.warn('[apns] charge-stopped end falhou:', e.message));
+      }
+    }
+
+    if (!isRetained && value === 'Finalizado' && chargeFailed) {
+      // "Finalizou" abaixo do limite → já alertamos acima; só limpa a sessão.
+      stopChargeLiveTimer();
+      chargeSessionStartMs = 0;
+      state.charge_session_start_ms    = 0;
+      state.charge_session_kwh_at_init = 0;
+    } else if (!isRetained && value === 'Finalizado') {
       const kwh = state.charge_session_kwh || 0;
       const durSec = chargeSessionStartMs > 0
         ? Math.round((Date.now() - chargeSessionStartMs) / 1000)
