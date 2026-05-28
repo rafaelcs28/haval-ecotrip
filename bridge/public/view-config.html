@@ -2592,7 +2592,21 @@ async function saveGeofencePlaces() {
 }
 
 // ── Live Activities (masters GLOBAIS via /api/la-prefs) ────────────────────
+// Live Activities são EXCLUSIVAS do iOS — Android/desktop não suportam.
+// Esconde a seção inteira quando não estiver num device iOS (PWA-Safari ou
+// app nativo via HavalNative). Evita confusão com toggles que não fazem nada.
+function _isIOS() {
+  const ua = navigator.userAgent || '';
+  return (window.HavalNative && window.HavalNative.isNative === true) ||
+         (/iPad|iPhone|iPod/.test(ua) && !window.MSStream);
+}
+
 async function _loadLaPrefs() {
+  const laSection = document.getElementById('ng-la');
+  if (laSection && !_isIOS()) {
+    laSection.style.display = 'none';
+    return;   // pula o fetch — toggles não serão usados
+  }
   const tk = localStorage.getItem('bridge_token');
   if (!tk) return;
   try {
