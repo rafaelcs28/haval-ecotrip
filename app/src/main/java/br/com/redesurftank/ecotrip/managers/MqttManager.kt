@@ -1144,32 +1144,14 @@ class MqttManager private constructor() {
             pubD("hvac_sync_enable",  latestHvacSyncEnable.toString())
             pubD("hvac_auto_enable",  latestHvacAutoEnable.toString())
             pubD("hvac_ac_enable",    latestHvacAcEnable.toString())  // master ON/OFF do AC
-            pubD("ac_state",          if (snAcEnable > 0) "1" else "0")
             pubD("hvac_cycle_mode",   latestHvacCycleMode.toString())
 
-            // Body — normaliza tudo pra binário "1=aberto/destrancado, 0=fechado/trancado"
-            // pubD: só sai se o valor MUDOU (porta fechada→aberta etc.). Mudanças reais
-            // saem na hora; estado parado não enche a banda nem o log.
-            pubD("door_fl",    if (snDoorFl > 0) "1" else "0")
-            pubD("door_fr",    if (snDoorFr > 0) "1" else "0")
-            pubD("door_rl",    if (snDoorRl > 0) "1" else "0")
-            pubD("door_rr",    if (snDoorRr > 0) "1" else "0")
-            pubD("door_trunk", if (snTrunk  > 0) "1" else "0")
-            // Vidros: cru "1" = fechado, qualquer outro valor = aberto/entreaberto.
-            // Formato: "valor:ms_da_mudanca" — bridge usa o ms pra timestamp do evento
-            // no log, compensando os ~40s de latência do voting filter. Bridge aceita
-            // ambos formatos (com ou sem ms) pra backward compat.
-            pubD("window_fl",  "${if (snWinFl == 1) "0" else "1"}:$snWinFlMs")
-            pubD("window_fr",  "${if (snWinFr == 1) "0" else "1"}:$snWinFrMs")
-            pubD("window_rl",  "${if (snWinRl == 1) "0" else "1"}:$snWinRlMs")
-            pubD("window_rr",  "${if (snWinRr == 1) "0" else "1"}:$snWinRrMs")
-            // Sunroof: 0=fechado, >0=aberto (confirmado em uso).
-            pubD("sunroof",    if (snSunroof  > 0) "1" else "0")
-            // Trava: cru "3"=destrancado, "1"=trancado. Voting filter aplicado em
-            // applyLockStatus pra filtrar ruído. Formato "valor:ms_da_mudanca".
-            pubD("lock_state", "${if (snLockStat == 3) "1" else "0"}:$snLockMs")
-            // Estado da ignição (carro on/off): derivado de driving_ready_state.
-            pubD("engine_state", if (snDrvReady > 0) "1" else "0")
+            // ── MIGRATED_TO_HA ────────────────────────────────────────────────
+            // O bridge IGNORA publishes do carro para: door_*, window_*, sunroof,
+            // lock_state, ac_state, engine_state (usa integração GWM Brasil em vez).
+            // Stopamos de publicar — economiza banda + simplifica. Os valores
+            // latestDoorFl/etc. continuam rastreados internamente pra UI do carro.
+            // Mantemos os debug/* (diagnóstico — valores CRUS do CAN antes do parse).
             // Debug — valores crus do barramento + resultado do parsing (sem afetar lógica)
             if (snDoorRaw.isNotEmpty()) {
                 pubD("debug/door_status_raw", snDoorRaw)
@@ -1181,25 +1163,14 @@ class MqttManager private constructor() {
             }
             pubD("debug/sunroof_raw",      snSunroof.toString())
             pubD("debug/lock_status_raw",  snLockStat.toString())
-            if (latestOdometerKm > 0f) pubD("odometer_km", fmt1(latestOdometerKm))
-            if (latestBatt12vPct > 0f) pubD("batt_12v_pct", fmt1(latestBatt12vPct))
+            // odometer_km e batt_12v_pct movidos pra GWM Brasil (MIGRATED_TO_HA) — bridge ignora.
             // Potência de recarga: apenas quando charging_state == 1 (Carregando)
             // Corrente AC (cur_charge_current) × tensão do pack (car.ev_info.power_battery_voltage) / 1000
             val chargePowerKw = if (latestChargingState == 1 && latestBatteryVoltageV > 0f)
                 kotlin.math.abs(latestChargeCurrentA) * latestBatteryVoltageV / 1000f else 0f
             pubR("charge_power_kw",   fmt2(chargePowerKw))
-            // Estado de recarga em texto legível
-            val chargingStateText = when (latestChargingState) {
-                0 -> "Desconectado"
-                1 -> "Carregando"
-                2 -> "Programado"
-                3 -> "Finalizado"
-                5 -> "Aguardando liberação"
-                else -> "Desconhecido"
-            }
-            pubD("charging_state",       chargingStateText)
+            // charging_state e charge_remaining_min movidos pra GWM Brasil (MIGRATED_TO_HA).
             pubD("charge_session_kwh",   fmt2(TripManager.getInstance().getChargeSessionEnergyKwh()))
-            pubD("charge_remaining_min", latestChargeRemainingMin.toString())
             pub("rolling/kwh_per_100km", fmt2(q.rolling.netKwhPer100km))
             pub("rolling/km_per_l",      fmt2(q.rolling.kmPerL))
             pub("rolling/distance_km",   fmt2(q.rolling.windowKm))
