@@ -483,25 +483,58 @@ input { font-family: inherit; }
 </div>
 
 <!-- ──────────────────────── 🤖 AI ASK (Ollama local) ──────────────────────── -->
-<button id="ai-ask-fab" onclick="openAiAsk()" title="Pergunte ao assistente local"
-        style="display:none;position:fixed;bottom:calc(env(safe-area-inset-bottom) + 76px);right:14px;z-index:240;width:48px;height:48px;border-radius:50%;background:linear-gradient(135deg,#7c3aed,#3b82f6);border:none;color:#fff;font-size:22px;box-shadow:0 4px 14px rgba(124,58,237,.5);cursor:pointer">🤖</button>
+<!-- FAB arrastável: o JS de runtime posiciona via top/left e salva no localStorage. -->
+<button id="ai-ask-fab" title="Arraste pra mover · toque pra perguntar"
+        style="display:none;position:fixed;z-index:240;width:48px;height:48px;border-radius:50%;background:linear-gradient(135deg,#7c3aed,#3b82f6);border:none;color:#fff;font-size:22px;box-shadow:0 4px 14px rgba(124,58,237,.5);cursor:grab;touch-action:none;user-select:none;-webkit-user-select:none">🤖</button>
 
+<!-- Popup: 3 chats recentes (clicáveis) + nova pergunta + atalho pro chat completo -->
 <div id="ai-modal" style="display:none;position:fixed;inset:0;z-index:260;background:rgba(0,0,0,.78);align-items:flex-end;justify-content:center;backdrop-filter:blur(8px)" onclick="if(event.target===this) closeAiAsk()">
-  <div style="background:#1f1f1f;width:100%;max-width:560px;border-top-left-radius:18px;border-top-right-radius:18px;padding:18px 18px calc(env(safe-area-inset-bottom) + 18px);border-top:1px solid rgba(255,255,255,.08);max-height:88vh;display:flex;flex-direction:column">
+  <div style="background:#1f1f1f;width:100%;max-width:560px;border-top-left-radius:18px;border-top-right-radius:18px;padding:18px 18px calc(env(safe-area-inset-bottom) + 18px);border-top:1px solid rgba(255,255,255,.08);max-height:80vh;display:flex;flex-direction:column">
     <div style="width:42px;height:5px;background:rgba(255,255,255,.18);border-radius:3px;margin:-8px auto 14px"></div>
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
       <div style="font-size:24px">🤖</div>
       <div style="flex:1">
-        <div style="font-size:15px;font-weight:700;color:#fff">Assistente local</div>
-        <div style="font-size:11px;color:#94a3b8">100% no Mac Mini · suas viagens e recargas como contexto</div>
+        <div style="font-size:15px;font-weight:700;color:#fff" id="ai-popup-title">Pergunta rápida</div>
+        <div style="font-size:11px;color:#94a3b8">100% local · viagens + recargas + estado</div>
       </div>
+      <button onclick="openAiChat()" title="Abrir chat completo" style="background:rgba(124,58,237,.2);border:1px solid rgba(124,58,237,.4);color:#c4b5fd;border-radius:8px;padding:6px 10px;font-size:11px;font-weight:600;cursor:pointer">💬 Chat</button>
       <button onclick="closeAiAsk()" style="background:none;border:none;color:#fff;font-size:22px;cursor:pointer">×</button>
     </div>
-    <div id="ai-answer" style="flex:1;overflow-y:auto;background:rgba(255,255,255,.04);border-radius:10px;padding:12px;font-size:13px;line-height:1.5;color:#e2e8f0;min-height:80px;white-space:pre-wrap"></div>
-    <div id="ai-meta" style="font-size:10px;color:#64748b;margin-top:6px;text-align:right"></div>
-    <textarea id="ai-input" placeholder="Ex: Da minha última viagem, quanto andei em modo elétrico? Ou: qual recarga mais barata por kWh efetivo?"
-              rows="2" style="margin-top:10px;width:100%;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:10px;color:#fff;padding:10px;font-family:inherit;font-size:13px;resize:none;box-sizing:border-box"></textarea>
-    <button onclick="askAi()" id="ai-send-btn" style="margin-top:10px;padding:12px;background:linear-gradient(135deg,#7c3aed,#3b82f6);color:#fff;border:none;border-radius:10px;font-size:14px;font-weight:700;font-family:inherit;cursor:pointer">Perguntar</button>
+    <!-- Chats recentes (até 3) — clica pra continuar; ou abre o + pra nova -->
+    <div id="ai-recent-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px"></div>
+    <!-- Resposta da pergunta atual (oculto até ter algo) -->
+    <div id="ai-answer-wrap" style="display:none;flex-direction:column;gap:6px;margin-bottom:8px">
+      <div id="ai-answer" style="background:rgba(255,255,255,.04);border-radius:10px;padding:12px;font-size:13px;line-height:1.5;color:#e2e8f0;white-space:pre-wrap;max-height:240px;overflow-y:auto"></div>
+      <div id="ai-meta" style="font-size:10px;color:#64748b;text-align:right"></div>
+    </div>
+    <textarea id="ai-input" placeholder="Pergunte algo…"
+              rows="2" style="width:100%;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:10px;color:#fff;padding:10px;font-family:inherit;font-size:13px;resize:none;box-sizing:border-box"></textarea>
+    <div style="display:flex;gap:8px;margin-top:10px">
+      <button onclick="askAi(true)" id="ai-newconv-btn" style="flex:1;padding:12px;background:rgba(255,255,255,.06);color:#cbd5e1;border:1px solid rgba(255,255,255,.1);border-radius:10px;font-size:12px;font-weight:600;cursor:pointer">+ Nova conversa</button>
+      <button onclick="askAi()" id="ai-send-btn" style="flex:2;padding:12px;background:linear-gradient(135deg,#7c3aed,#3b82f6);color:#fff;border:none;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer">Perguntar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Chat completo: barra superior com lista de conversas + thread da conversa ativa -->
+<div id="ai-chat" style="display:none;position:fixed;inset:0;z-index:265;background:#0a0a0a;flex-direction:column">
+  <div style="padding:calc(env(safe-area-inset-top) + 10px) 16px 12px;background:linear-gradient(180deg,#1a1a2e,#0a0a0a);border-bottom:1px solid rgba(255,255,255,.06);display:flex;align-items:center;gap:10px">
+    <button onclick="closeAiChat()" style="background:rgba(255,255,255,.06);border:none;color:#fff;font-size:18px;width:36px;height:36px;border-radius:8px;cursor:pointer">←</button>
+    <div style="font-size:22px">🤖</div>
+    <div style="flex:1;min-width:0">
+      <div style="font-size:15px;font-weight:700;color:#fff" id="ai-chat-title">Assistente Local</div>
+      <div style="font-size:11px;color:#94a3b8" id="ai-chat-sub">llama3.1:8b · offline</div>
+    </div>
+    <button onclick="aiNewConversation(true)" title="Nova conversa" style="background:rgba(124,58,237,.2);border:1px solid rgba(124,58,237,.4);color:#c4b5fd;border-radius:8px;padding:7px 10px;font-size:11px;font-weight:600;cursor:pointer">+ Nova</button>
+    <button onclick="aiToggleConvList()" id="ai-list-toggle" title="Histórico de conversas" style="background:rgba(255,255,255,.06);border:none;color:#fff;border-radius:8px;padding:7px 10px;font-size:13px;cursor:pointer">📚</button>
+  </div>
+  <!-- Lista lateral/dropdown de conversas (toggleable) -->
+  <div id="ai-conv-list" style="display:none;background:#0f0f17;border-bottom:1px solid rgba(255,255,255,.06);max-height:50vh;overflow-y:auto;padding:8px 12px"></div>
+  <div id="ai-chat-history" style="flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px"></div>
+  <div style="padding:10px 14px calc(env(safe-area-inset-bottom) + 12px);background:#1a1a1a;border-top:1px solid rgba(255,255,255,.06);display:flex;gap:8px;align-items:flex-end">
+    <textarea id="ai-chat-input" placeholder="Pergunte algo…" rows="1"
+              style="flex:1;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:14px;color:#fff;padding:11px 14px;font-family:inherit;font-size:14px;resize:none;max-height:120px;line-height:1.4;box-sizing:border-box"></textarea>
+    <button onclick="askAiChat()" id="ai-chat-send" style="background:linear-gradient(135deg,#7c3aed,#3b82f6);color:#fff;border:none;width:44px;height:44px;border-radius:50%;font-size:18px;cursor:pointer;flex-shrink:0">↑</button>
   </div>
 </div>
 
@@ -2015,55 +2048,386 @@ function closeNetInfo() {
   if (m) m.style.display = 'none';
 }
 
-// ── 🤖 AI Ask (Ollama local) ───────────────────────────────────────────────
+// ── 🤖 AI Ask (Ollama local) — FAB arrastável + popup rápido + chat completo ──
+// FAB persiste posição em localStorage. Quatro cantos com snap. Toque rápido
+// (sem mover) abre o popup. Arrastar move; ao soltar, snap pro canto mais próximo.
+
+function _aiFabPosition() {
+  const saved = localStorage.getItem('ai_fab_corner') || 'br';   // default bottom-right
+  return saved;
+}
+function _aiFabApplyCorner(corner) {
+  const f = document.getElementById('ai-ask-fab');
+  if (!f) return;
+  // Margem dos cantos (respeitando safe-area e tabbar inferior).
+  const safe = 14;
+  const tabbar = 76;   // espaço pro tabbar (botão fica acima)
+  const top = `calc(env(safe-area-inset-top) + ${safe}px)`;
+  const bot = `calc(env(safe-area-inset-bottom) + ${tabbar}px)`;
+  f.style.left = f.style.right = f.style.top = f.style.bottom = 'auto';
+  switch (corner) {
+    case 'tl': f.style.top = top;          f.style.left  = safe + 'px'; break;
+    case 'tr': f.style.top = top;          f.style.right = safe + 'px'; break;
+    case 'bl': f.style.bottom = bot;       f.style.left  = safe + 'px'; break;
+    default:   f.style.bottom = bot;       f.style.right = safe + 'px'; corner = 'br';
+  }
+  localStorage.setItem('ai_fab_corner', corner);
+}
+_aiFabApplyCorner(_aiFabPosition());   // posição inicial
+
+// Drag handlers (touch + mouse) com snap pros 4 cantos.
+(function() {
+  const f = document.getElementById('ai-ask-fab');
+  if (!f) return;
+  let dragging = false, moved = false, sx = 0, sy = 0, ox = 0, oy = 0;
+  function getPt(e) { return e.touches ? { x: e.touches[0].clientX, y: e.touches[0].clientY } : { x: e.clientX, y: e.clientY }; }
+  function onDown(e) {
+    const p = getPt(e);
+    sx = p.x; sy = p.y;
+    const r = f.getBoundingClientRect();
+    ox = r.left; oy = r.top;
+    dragging = true; moved = false;
+    f.style.cursor = 'grabbing';
+    e.preventDefault();
+  }
+  function onMove(e) {
+    if (!dragging) return;
+    const p = getPt(e);
+    const dx = p.x - sx, dy = p.y - sy;
+    if (Math.abs(dx) > 6 || Math.abs(dy) > 6) moved = true;
+    if (moved) {
+      f.style.left = (ox + dx) + 'px';
+      f.style.top  = (oy + dy) + 'px';
+      f.style.right = 'auto'; f.style.bottom = 'auto';
+    }
+    e.preventDefault();
+  }
+  function onUp(e) {
+    if (!dragging) return;
+    dragging = false;
+    f.style.cursor = 'grab';
+    if (moved) {
+      // Snap pro canto mais próximo do CENTRO do FAB.
+      const r = f.getBoundingClientRect();
+      const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+      const W = window.innerWidth, H = window.innerHeight;
+      const corner = (cy < H/2 ? 't' : 'b') + (cx < W/2 ? 'l' : 'r');
+      _aiFabApplyCorner(corner);
+    } else {
+      // Sem mover = clique → abre popup.
+      window.openAiAsk();
+    }
+  }
+  f.addEventListener('mousedown',  onDown);
+  f.addEventListener('touchstart', onDown, { passive: false });
+  window.addEventListener('mousemove',  onMove);
+  window.addEventListener('touchmove',  onMove, { passive: false });
+  window.addEventListener('mouseup',    onUp);
+  window.addEventListener('touchend',   onUp);
+  window.addEventListener('touchcancel', onUp);
+  // Re-aplica posição em resize (rotaciona / muda viewport).
+  window.addEventListener('resize', () => _aiFabApplyCorner(_aiFabPosition()));
+})();
+
+// ── Conversas (cada uma com várias mensagens user/assistant) ─────────────
+// Storage: localStorage 'ai_conversations' = [{ id, ts, title, messages }]
+//   messages: [{ role: 'user'|'assistant', content, ts, dur?, tok? }]
+// _aiActiveId: id da conversa atualmente ativa (null = nova).
+let _aiActiveId = null;
+
+function _esc(s) { return String(s||'').replace(/[<>&"]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c])); }
+function _aiConvsGet()  { try { return JSON.parse(localStorage.getItem('ai_conversations') || '[]'); } catch { return []; } }
+function _aiConvsSet(c) { try { localStorage.setItem('ai_conversations', JSON.stringify(c.slice(-50))); } catch {} }
+function _aiFindConv(id) { return _aiConvsGet().find(c => c.id === id); }
+function _aiUpdateConv(id, mutator) {
+  const all = _aiConvsGet();
+  const i = all.findIndex(c => c.id === id);
+  if (i < 0) return null;
+  mutator(all[i]);
+  all[i].ts = Date.now();   // bump pra ficar no topo
+  _aiConvsSet(all);
+  return all[i];
+}
+function _aiNewConv(firstQuestion) {
+  const id = 'c' + Date.now() + Math.random().toString(36).slice(2,6);
+  const conv = {
+    id, ts: Date.now(),
+    title: firstQuestion.slice(0, 60),   // título = início da 1ª pergunta
+    messages: [],
+  };
+  const all = _aiConvsGet();
+  all.push(conv);
+  _aiConvsSet(all);
+  return conv;
+}
+function _aiRecentConvs(n = 3) {
+  // Mais recentes primeiro
+  return _aiConvsGet().slice().sort((a,b) => (b.ts||0) - (a.ts||0)).slice(0, n);
+}
+
+// Chama o bridge com messages array (multi-turn).
+async function _aiCallApi(messages) {
+  const tk = localStorage.getItem('bridge_token');
+  if (!tk) return { error: 'login' };
+  try {
+    const r = await fetch('/api/ai/ask', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + tk, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages }),
+    });
+    return await r.json();
+  } catch (e) { return { error: e.message }; }
+}
+
+// ── Popup (rápido) ───────────────────────────────────────────────────────
 window.openAiAsk = function() {
   const m = document.getElementById('ai-modal');
   if (!m) return;
   m.style.display = 'flex';
+  _aiActiveId = null;   // popup começa sem conversa ativa
+  _aiRenderPopupRecent();
+  _aiHideAnswerArea();
   setTimeout(() => document.getElementById('ai-input')?.focus(), 100);
 };
 window.closeAiAsk = function() {
   const m = document.getElementById('ai-modal');
   if (m) m.style.display = 'none';
 };
-window.askAi = async function() {
+function _aiHideAnswerArea() {
+  const wrap = document.getElementById('ai-answer-wrap');
+  if (wrap) wrap.style.display = 'none';
+}
+function _aiShowAnswerArea() {
+  const wrap = document.getElementById('ai-answer-wrap');
+  if (wrap) wrap.style.display = 'flex';
+}
+
+function _aiRenderPopupRecent() {
+  const list = document.getElementById('ai-recent-list');
+  const titleEl = document.getElementById('ai-popup-title');
+  if (!list) return;
+  const recent = _aiRecentConvs(3);
+  if (_aiActiveId) {
+    const cur = _aiFindConv(_aiActiveId);
+    if (titleEl) titleEl.textContent = cur ? ('💬 ' + cur.title) : 'Pergunta rápida';
+    list.innerHTML = '';
+    return;
+  }
+  if (titleEl) titleEl.textContent = 'Pergunta rápida';
+  if (!recent.length) { list.innerHTML = ''; return; }
+  list.innerHTML = '<div style="font-size:10px;color:#94a3b8;text-transform:uppercase;letter-spacing:.5px;margin:4px 0 4px 2px">Conversas recentes</div>' +
+    recent.map(c => {
+      const t = new Date(c.ts).toLocaleString('pt-BR', { hour:'2-digit', minute:'2-digit', day:'2-digit', month:'2-digit' });
+      const preview = (c.messages[c.messages.length-1]?.content || '').slice(0, 80);
+      return `<div onclick="aiResumeConv('${c.id}')" style="background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.05);border-radius:10px;padding:9px 11px;cursor:pointer">
+        <div style="font-size:12px;font-weight:600;color:#cbd5e1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_esc(c.title)}</div>
+        <div style="font-size:10.5px;color:#64748b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px">${_esc(preview)}</div>
+        <div style="font-size:9px;color:#475569;margin-top:3px">${t} · ${c.messages.length} msgs</div>
+      </div>`;
+    }).join('');
+}
+
+window.aiResumeConv = function(id) {
+  _aiActiveId = id;
+  const conv = _aiFindConv(id);
+  _aiRenderPopupRecent();
+  _aiShowAnswerArea();
+  // Mostra a última resposta da conversa no popup
+  const ans = document.getElementById('ai-answer');
+  const meta = document.getElementById('ai-meta');
+  const lastA = conv?.messages.slice().reverse().find(m => m.role === 'assistant');
+  if (lastA) {
+    ans.textContent = lastA.content;
+    meta.textContent = `↩ ${conv.messages.length} mensagens nesta conversa`;
+  } else {
+    ans.textContent = '(conversa vazia)';
+  }
+};
+
+window.askAi = async function(forceNew) {
   const inp = document.getElementById('ai-input');
   const ans = document.getElementById('ai-answer');
   const meta = document.getElementById('ai-meta');
   const btn = document.getElementById('ai-send-btn');
   const question = (inp?.value || '').trim();
   if (!question) return;
-  const tk = localStorage.getItem('bridge_token');
-  if (!tk) { ans.textContent = 'Faça login pra usar.'; return; }
-  btn.disabled = true;
-  btn.textContent = 'Pensando…';
+
+  let conv;
+  if (forceNew || !_aiActiveId) {
+    conv = _aiNewConv(question);
+    _aiActiveId = conv.id;
+  } else {
+    conv = _aiFindConv(_aiActiveId) || _aiNewConv(question);
+    _aiActiveId = conv.id;
+  }
+  // Adiciona a user msg
+  _aiUpdateConv(conv.id, c => c.messages.push({ role: 'user', content: question, ts: Date.now() }));
+
+  btn.disabled = true; btn.textContent = 'Pensando…';
+  _aiShowAnswerArea();
   ans.textContent = '⏳ Consultando assistente local…';
   meta.textContent = '';
+
   const t0 = Date.now();
-  try {
-    const r = await fetch('/api/ai/ask', {
-      method: 'POST',
-      headers: { 'Authorization': 'Bearer ' + tk, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ question }),
-    });
-    const d = await r.json();
-    if (!r.ok) { ans.textContent = '✗ ' + (d.error || ('HTTP ' + r.status)); return; }
-    ans.textContent = d.answer || '(sem resposta)';
-    const dt = ((Date.now() - t0) / 1000).toFixed(1);
-    meta.textContent = `⏱ ${d.duration_sec || dt}s · ${d.tokens || '?'} tokens · local`;
-    inp.value = '';
-  } catch (e) {
-    ans.textContent = '✗ erro: ' + e.message;
-  } finally {
-    btn.disabled = false;
-    btn.textContent = 'Perguntar';
+  const updated = _aiFindConv(conv.id);
+  const d = await _aiCallApi(updated.messages);
+  const dt = +((Date.now() - t0) / 1000).toFixed(1);
+  if (d.error) {
+    ans.textContent = '✗ ' + d.error;
+    btn.disabled = false; btn.textContent = 'Perguntar';
+    return;
+  }
+  ans.textContent = d.answer || '(sem resposta)';
+  meta.textContent = `⏱ ${d.duration_sec || dt}s · ${d.tokens || '?'} tokens · local`;
+  _aiUpdateConv(conv.id, c => c.messages.push({ role: 'assistant', content: d.answer, ts: Date.now(), dur: d.duration_sec || dt, tok: d.tokens }));
+  inp.value = '';
+  _aiRenderPopupRecent();
+  btn.disabled = false; btn.textContent = 'Perguntar';
+};
+
+// ── Chat completo ────────────────────────────────────────────────────────
+window.openAiChat = function() {
+  window.closeAiAsk();
+  const c = document.getElementById('ai-chat');
+  if (!c) return;
+  c.style.display = 'flex';
+  // Se nenhuma ativa, mantém vazio (placeholder). Senão, mostra a ativa.
+  _aiRenderChatThread();
+  _aiUpdateChatTitle();
+  setTimeout(() => document.getElementById('ai-chat-input')?.focus(), 100);
+};
+window.closeAiChat = function() {
+  const c = document.getElementById('ai-chat');
+  if (c) c.style.display = 'none';
+  const list = document.getElementById('ai-conv-list');
+  if (list) list.style.display = 'none';
+};
+window.aiNewConversation = function(focusInput) {
+  _aiActiveId = null;
+  _aiRenderChatThread();
+  _aiUpdateChatTitle();
+  const list = document.getElementById('ai-conv-list');
+  if (list) list.style.display = 'none';
+  if (focusInput) setTimeout(() => document.getElementById('ai-chat-input')?.focus(), 100);
+};
+window.aiToggleConvList = function() {
+  const list = document.getElementById('ai-conv-list');
+  if (!list) return;
+  if (list.style.display === 'none' || !list.style.display) {
+    _aiRenderConvList();
+    list.style.display = 'block';
+  } else {
+    list.style.display = 'none';
   }
 };
-// Atalho Enter (sem shift) envia. Shift+Enter quebra linha.
+window.aiSelectConv = function(id) {
+  _aiActiveId = id;
+  _aiRenderChatThread();
+  _aiUpdateChatTitle();
+  document.getElementById('ai-conv-list').style.display = 'none';
+};
+window.aiDeleteConv = function(id, ev) {
+  if (ev) ev.stopPropagation();
+  if (!confirm('Apagar esta conversa?')) return;
+  const all = _aiConvsGet().filter(c => c.id !== id);
+  _aiConvsSet(all);
+  if (_aiActiveId === id) _aiActiveId = null;
+  _aiRenderConvList();
+  _aiRenderChatThread();
+  _aiUpdateChatTitle();
+};
+function _aiUpdateChatTitle() {
+  const t = document.getElementById('ai-chat-title');
+  const s = document.getElementById('ai-chat-sub');
+  if (!t) return;
+  if (_aiActiveId) {
+    const c = _aiFindConv(_aiActiveId);
+    t.textContent = c ? c.title : 'Nova conversa';
+    s.textContent = c ? `${c.messages.length} mensagens · ${new Date(c.ts).toLocaleString('pt-BR',{hour:'2-digit',minute:'2-digit',day:'2-digit',month:'2-digit'})}` : 'llama3.1:8b · offline';
+  } else {
+    t.textContent = 'Nova conversa';
+    s.textContent = 'llama3.1:8b · offline';
+  }
+}
+function _aiRenderConvList() {
+  const list = document.getElementById('ai-conv-list');
+  if (!list) return;
+  const all = _aiConvsGet().slice().sort((a,b) => (b.ts||0) - (a.ts||0));
+  if (!all.length) { list.innerHTML = '<div style="text-align:center;color:#64748b;font-size:12px;padding:20px">Sem conversas ainda</div>'; return; }
+  list.innerHTML = all.map(c => {
+    const isActive = c.id === _aiActiveId;
+    const t = new Date(c.ts).toLocaleString('pt-BR', { hour:'2-digit', minute:'2-digit', day:'2-digit', month:'2-digit' });
+    return `<div onclick="aiSelectConv('${c.id}')" style="background:${isActive?'rgba(124,58,237,.18)':'rgba(255,255,255,.03)'};border:1px solid ${isActive?'rgba(124,58,237,.5)':'rgba(255,255,255,.05)'};border-radius:10px;padding:10px 12px;margin-bottom:6px;cursor:pointer;display:flex;align-items:center;gap:10px">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;font-weight:600;color:#e2e8f0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_esc(c.title)}</div>
+        <div style="font-size:10px;color:#64748b;margin-top:2px">${t} · ${c.messages.length} msgs</div>
+      </div>
+      <button onclick="aiDeleteConv('${c.id}', event)" title="Apagar" style="background:none;border:none;color:#64748b;cursor:pointer;padding:4px;font-size:14px">🗑</button>
+    </div>`;
+  }).join('');
+}
+function _aiRenderChatThread() {
+  const el = document.getElementById('ai-chat-history');
+  if (!el) return;
+  const conv = _aiActiveId ? _aiFindConv(_aiActiveId) : null;
+  if (!conv || !conv.messages.length) {
+    el.innerHTML = `<div style="text-align:center;color:#64748b;font-size:13px;margin:30px auto;max-width:300px">👋 Pergunte algo sobre suas viagens, recargas ou estado atual do carro.<br><br>Ex.: <em>"Quanto andei em modo elétrico hoje?"</em><br><br><span style="font-size:11px">📚 acima abre conversas anteriores.</span></div>`;
+    return;
+  }
+  el.innerHTML = conv.messages.map(m => {
+    if (m.role === 'user') {
+      return `<div style="align-self:flex-end;background:linear-gradient(135deg,#7c3aed,#3b82f6);color:#fff;padding:10px 14px;border-radius:18px 18px 4px 18px;max-width:85%;font-size:14px;line-height:1.4">${_esc(m.content)}</div>`;
+    }
+    const t = new Date(m.ts).toLocaleString('pt-BR', { hour:'2-digit', minute:'2-digit' });
+    const meta = (m.dur || m.tok) ? `<div style="font-size:9px;color:#64748b;margin-top:4px">⏱ ${m.dur||'?'}s · ${m.tok||'?'} tokens · ${t}</div>` : '';
+    return `<div style="align-self:flex-start;background:rgba(255,255,255,.06);color:#e2e8f0;padding:10px 14px;border-radius:18px 18px 18px 4px;max-width:90%;font-size:14px;line-height:1.5;white-space:pre-wrap">${_esc(m.content)}${meta}</div>`;
+  }).join('');
+  el.scrollTop = el.scrollHeight;
+}
+
+window.askAiChat = async function() {
+  const inp = document.getElementById('ai-chat-input');
+  const btn = document.getElementById('ai-chat-send');
+  const question = (inp?.value || '').trim();
+  if (!question) return;
+  let conv;
+  if (_aiActiveId) {
+    conv = _aiFindConv(_aiActiveId) || _aiNewConv(question);
+  } else {
+    conv = _aiNewConv(question);
+  }
+  _aiActiveId = conv.id;
+  _aiUpdateConv(conv.id, c => c.messages.push({ role: 'user', content: question, ts: Date.now() }));
+  _aiUpdateConv(conv.id, c => c.messages.push({ role: 'assistant', content: '⏳ pensando…', ts: Date.now() }));
+  _aiRenderChatThread();
+  _aiUpdateChatTitle();
+  inp.value = '';
+  btn.disabled = true;
+  const t0 = Date.now();
+  // Envia tudo MENOS o placeholder
+  const cur = _aiFindConv(_aiActiveId);
+  const toSend = cur.messages.slice(0, -1);
+  const d = await _aiCallApi(toSend);
+  const dt = +((Date.now() - t0) / 1000).toFixed(1);
+  _aiUpdateConv(conv.id, c => {
+    const last = c.messages[c.messages.length-1];
+    if (last && last.role === 'assistant') {
+      last.content = d.answer || ('✗ ' + (d.error || 'erro'));
+      last.dur = d.duration_sec || dt;
+      last.tok = d.tokens || null;
+      last.ts = Date.now();
+    }
+  });
+  _aiRenderChatThread();
+  _aiUpdateChatTitle();
+  btn.disabled = false;
+};
+
+// Atalho Enter (sem shift) envia. Shift+Enter quebra linha. Aplica em popup + chat.
 document.addEventListener('keydown', function(e) {
   if (e.key !== 'Enter' || e.shiftKey) return;
-  const inp = document.getElementById('ai-input');
-  if (document.activeElement === inp) { e.preventDefault(); window.askAi(); }
+  if (document.activeElement?.id === 'ai-input')      { e.preventDefault(); window.askAi(); }
+  else if (document.activeElement?.id === 'ai-chat-input') { e.preventDefault(); window.askAiChat(); }
 });
 // Mostra o FAB depois que o app boot — só pra usuário autenticado.
 setTimeout(() => {
