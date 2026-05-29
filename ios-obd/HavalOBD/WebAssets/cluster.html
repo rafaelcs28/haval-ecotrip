@@ -765,7 +765,7 @@ window.applyNativeSnapshot = function(payload) {
     state[k] = v;
   }
   lastUpdateMs = Date.now();
-  render();
+  try { render(); } catch (e) { console.error('[cluster] render erro:', e); }
 };
 console.log('[cluster] applyNativeSnapshot registrado · aguardando _nativeBridge');
 function setConn(ok) {
@@ -957,7 +957,6 @@ function render() {
   // SOC
   const socPct = +state.soc_pct || 0;
   $('soc-pct').textContent = Math.round(socPct);
-  $('soc-pct-mini').textContent = Math.round(socPct);
   $('soc-arc').setAttribute('stroke-dashoffset', socCirc * (1 - socPct/100));
   const kwhLeft = (socPct / 100) * PACK_KWH;
   $('soc-kwh').textContent = fmt1(kwhLeft) + ' kWh';
