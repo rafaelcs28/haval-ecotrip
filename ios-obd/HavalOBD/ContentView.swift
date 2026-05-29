@@ -30,6 +30,36 @@ struct SettingsView: View {
                         .disabled(bt.state != .ready)
                 }
 
+                // Log de comandos AT — diagnóstico de comunicação ELM327
+                if !bt.commandLog.isEmpty {
+                    Section("Log de comandos (últimos 20)") {
+                        ForEach(Array(bt.commandLog.enumerated().reversed()), id: \.offset) { (i, entry) in
+                            HStack(alignment: .top, spacing: 6) {
+                                Text(entry.dir)
+                                    .font(.system(.caption, design: .monospaced))
+                                    .foregroundStyle(colorForDir(entry.dir))
+                                    .frame(width: 28, alignment: .leading)
+                                Text(entry.text)
+                                    .font(.system(.caption2, design: .monospaced))
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(2)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                        }
+                    }
+                }
+
+                // Characteristics descobertas — debug detalhado
+                if !bt.debugChars.isEmpty {
+                    Section("BLE characteristics descobertas") {
+                        ForEach(Array(bt.debugChars.enumerated()), id: \.offset) { (_, c) in
+                            Text(c)
+                                .font(.system(.caption2, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+
                 // Lista de TODOS os dispositivos BLE detectados — clica pra conectar
                 // manualmente se o filtro automático não pegou o ELM327
                 if !bt.nearbyDevices.isEmpty {
@@ -110,6 +140,16 @@ struct SettingsView: View {
                     Button("✕") { dismiss() }
                 }
             }
+        }
+    }
+
+    private func colorForDir(_ dir: String) -> Color {
+        switch dir {
+        case "→":   return .blue
+        case "←":   return .green
+        case "ERR": return .red
+        case "BT":  return .yellow
+        default:    return .secondary
         }
     }
 
