@@ -91,7 +91,10 @@ enum PIDRegistry {
             parser: { b in
                 guard b.count >= 2 else { return nil }
                 let v = signed16(b[0], b[1])
-                return v == 32767 ? 0 : Double(v)
+                // Sentinelas de "inválido"/"inicializando" do MCU:
+                //   0x7FFC..0x7FFF (32764..32767) e 0x8000 (-32768)
+                if v >= 32760 || v <= -32760 { return 0 }
+                return Double(v)
             }),
         PIDDefinition(id: "gmcu_winding_temp_c", label: "GMCU enrol.", command: "221111", unit: "°C",
             priority: .slow, header: "787", receiveFilter: "7C7",
@@ -107,7 +110,10 @@ enum PIDRegistry {
             parser: { b in
                 guard b.count >= 2 else { return nil }
                 let v = signed16(b[0], b[1])
-                return v == 32767 ? 0 : Double(v)
+                // Sentinelas de "inválido"/"inicializando" do MCU:
+                //   0x7FFC..0x7FFF (32764..32767) e 0x8000 (-32768)
+                if v >= 32760 || v <= -32760 { return 0 }
+                return Double(v)
             }),
         PIDDefinition(id: "tmcu_winding_temp_c", label: "TMCU enrol.", command: "222111", unit: "°C",
             priority: .slow, header: "787", receiveFilter: "7C7",
