@@ -7,26 +7,70 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		0375AE94C4E589EEEA229403 /* OBDBridgeChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 468ECB807358837A0C061283 /* OBDBridgeChannel.swift */; };
+		176CA7B7578FA18E5F7329D5 /* icon-60.png in Resources */ = {isa = PBXBuildFile; fileRef = B53786B47556E22824410221 /* icon-60.png */; };
+		20AA6A08D38226297C02B0C3 /* icon-20.png in Resources */ = {isa = PBXBuildFile; fileRef = 85664D286E352206936DA584 /* icon-20.png */; };
 		336F4738680C9F37F0BAB80E /* PIDRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 755440078FE4C82EDB00294B /* PIDRegistry.swift */; };
+		36C1AAEECF68B07B3F4BDCCA /* WebAssets in Resources */ = {isa = PBXBuildFile; fileRef = 69EA98EC6F6856F98840194C /* WebAssets */; };
 		38A9C602085EAA1B2760D743 /* BridgePublisher.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA810DE57A758BD5354D56D8 /* BridgePublisher.swift */; };
+		3A2A4290198C6FCF68024020 /* leaflet.css in Resources */ = {isa = PBXBuildFile; fileRef = 43DF73B277E0679C079ACF33 /* leaflet.css */; };
 		3A60995969A90FAF7B7CC4DF /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3BE37259CB68FE851CE8B1F0 /* ContentView.swift */; };
 		40B23DE768E969FD148A2B12 /* ELM327.swift in Sources */ = {isa = PBXBuildFile; fileRef = 580FD7A6488F5ED158F98911 /* ELM327.swift */; };
+		4BF5AAD3F45A614980156A20 /* Contents.json in Resources */ = {isa = PBXBuildFile; fileRef = DB8C9716964BC5C294F1D4D6 /* Contents.json */; };
+		4F7A35E4A73FB2DBFA77391D /* ClusterWebView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DB2431E036A46C598ED226B /* ClusterWebView.swift */; };
+		6435AB2ED05CDCBBFD849D0A /* icon-80.png in Resources */ = {isa = PBXBuildFile; fileRef = 9DA252771BAB8F955E048264 /* icon-80.png */; };
+		64B2AE490AC3A6989A3218FF /* icon-76.png in Resources */ = {isa = PBXBuildFile; fileRef = E92085B11C70E0011AA4A189 /* icon-76.png */; };
+		684F97CE050F6D340DE72869 /* icon-512.png in Resources */ = {isa = PBXBuildFile; fileRef = AF88B1E9823CEDF7BBF333F3 /* icon-512.png */; };
+		711927C6617EB305FBC22896 /* icon-87.png in Resources */ = {isa = PBXBuildFile; fileRef = 7A739B21C42D7826CA99B651 /* icon-87.png */; };
+		73B40707860C3961F6316A59 /* leaflet.js in Resources */ = {isa = PBXBuildFile; fileRef = 50D4B9492F6DACED1389D1D3 /* leaflet.js */; };
 		7FCEA2E4B427D1BF30CD42E0 /* HavalOBDApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 172E39887EBFC9A9FC203472 /* HavalOBDApp.swift */; };
+		82C162E117C228B2A1179FD9 /* icon-40.png in Resources */ = {isa = PBXBuildFile; fileRef = 910DE8778E7F2FB46B36BF58 /* icon-40.png */; };
+		8F56BDD8D3F078850166063A /* OBDSample.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DE7C57B84DD72FBD4B89E46 /* OBDSample.swift */; };
+		934AA59413FDF5B15296C16D /* icon-167.png in Resources */ = {isa = PBXBuildFile; fileRef = BD491B8C6E54F77456B6F67A /* icon-167.png */; };
+		99350CED9200BDD3F984CA75 /* icon-120.png in Resources */ = {isa = PBXBuildFile; fileRef = C4486C8478222938339DA1EF /* icon-120.png */; };
+		A038BD87390F52681CA16AC6 /* icon-58.png in Resources */ = {isa = PBXBuildFile; fileRef = 7976E0DF2B51BBA006E5627B /* icon-58.png */; };
 		C20EF54D46DFEFAE08452B42 /* PIDDefinition.swift in Sources */ = {isa = PBXBuildFile; fileRef = D628AE83944CDC07BC9BE4DA /* PIDDefinition.swift */; };
+		C3DB8525FD048B5A54B7D20B /* cluster.html in Resources */ = {isa = PBXBuildFile; fileRef = 5A5830CED94C50446F954B18 /* cluster.html */; };
+		C50A078A7CDCFAC904DDA78C /* icon-29.png in Resources */ = {isa = PBXBuildFile; fileRef = 0AD8C72CA6607CBCCEEDC8E5 /* icon-29.png */; };
 		C8B77D8F3CD363B90221DB20 /* CocoaMQTT in Frameworks */ = {isa = PBXBuildFile; productRef = 89834CDCAEBBFF42B9C81FC0 /* CocoaMQTT */; };
+		D10EA7C643BD386C00DED6CF /* icon-152.png in Resources */ = {isa = PBXBuildFile; fileRef = DC44D6D1F424C9B1249D9CF3 /* icon-152.png */; };
 		E28631C58B22771B6227884F /* BluetoothManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52A9923D70D2EE9AC17A5457 /* BluetoothManager.swift */; };
+		EA214991293511FB8F08A602 /* icon-1024.png in Resources */ = {isa = PBXBuildFile; fileRef = EBE0060E04AFBB181E318EB0 /* icon-1024.png */; };
+		FFAA48C9793AD1D25DA3AE36 /* icon-180.png in Resources */ = {isa = PBXBuildFile; fileRef = D2FAB2F08C0A54A922D497D2 /* icon-180.png */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		0592AF4ABBE74AD1E2211818 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		0AD8C72CA6607CBCCEEDC8E5 /* icon-29.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "icon-29.png"; sourceTree = "<group>"; };
 		172E39887EBFC9A9FC203472 /* HavalOBDApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HavalOBDApp.swift; sourceTree = "<group>"; };
 		3BE37259CB68FE851CE8B1F0 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		43DF73B277E0679C079ACF33 /* leaflet.css */ = {isa = PBXFileReference; lastKnownFileType = text.css; path = leaflet.css; sourceTree = "<group>"; };
+		468ECB807358837A0C061283 /* OBDBridgeChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OBDBridgeChannel.swift; sourceTree = "<group>"; };
+		50D4B9492F6DACED1389D1D3 /* leaflet.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = leaflet.js; sourceTree = "<group>"; };
 		52A9923D70D2EE9AC17A5457 /* BluetoothManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BluetoothManager.swift; sourceTree = "<group>"; };
 		580FD7A6488F5ED158F98911 /* ELM327.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ELM327.swift; sourceTree = "<group>"; };
+		5A5830CED94C50446F954B18 /* cluster.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = cluster.html; sourceTree = "<group>"; };
+		5DE7C57B84DD72FBD4B89E46 /* OBDSample.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OBDSample.swift; sourceTree = "<group>"; };
+		69EA98EC6F6856F98840194C /* WebAssets */ = {isa = PBXFileReference; lastKnownFileType = folder; name = WebAssets; path = HavalOBD/WebAssets; sourceTree = SOURCE_ROOT; };
 		755440078FE4C82EDB00294B /* PIDRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PIDRegistry.swift; sourceTree = "<group>"; };
+		7976E0DF2B51BBA006E5627B /* icon-58.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "icon-58.png"; sourceTree = "<group>"; };
+		7A739B21C42D7826CA99B651 /* icon-87.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "icon-87.png"; sourceTree = "<group>"; };
+		85664D286E352206936DA584 /* icon-20.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "icon-20.png"; sourceTree = "<group>"; };
+		8DB2431E036A46C598ED226B /* ClusterWebView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClusterWebView.swift; sourceTree = "<group>"; };
+		910DE8778E7F2FB46B36BF58 /* icon-40.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "icon-40.png"; sourceTree = "<group>"; };
+		9DA252771BAB8F955E048264 /* icon-80.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "icon-80.png"; sourceTree = "<group>"; };
 		AA810DE57A758BD5354D56D8 /* BridgePublisher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgePublisher.swift; sourceTree = "<group>"; };
+		AF88B1E9823CEDF7BBF333F3 /* icon-512.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "icon-512.png"; sourceTree = "<group>"; };
+		B53786B47556E22824410221 /* icon-60.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "icon-60.png"; sourceTree = "<group>"; };
+		BD491B8C6E54F77456B6F67A /* icon-167.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "icon-167.png"; sourceTree = "<group>"; };
+		C4486C8478222938339DA1EF /* icon-120.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "icon-120.png"; sourceTree = "<group>"; };
 		CB3800777EEEE04B22A58CEC /* HavalOBD.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = HavalOBD.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		D2FAB2F08C0A54A922D497D2 /* icon-180.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "icon-180.png"; sourceTree = "<group>"; };
 		D628AE83944CDC07BC9BE4DA /* PIDDefinition.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PIDDefinition.swift; sourceTree = "<group>"; };
+		DB8C9716964BC5C294F1D4D6 /* Contents.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = Contents.json; sourceTree = "<group>"; };
+		DC44D6D1F424C9B1249D9CF3 /* icon-152.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "icon-152.png"; sourceTree = "<group>"; };
+		E92085B11C70E0011AA4A189 /* icon-76.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "icon-76.png"; sourceTree = "<group>"; };
+		EBE0060E04AFBB181E318EB0 /* icon-1024.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "icon-1024.png"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -41,21 +85,44 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		185C15FF03BF578960015E1F /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				F63D26FEDD59BC35D5CD0A9F /* AppIcon.appiconset */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
 		56452F9772786D9C715A7DD6 /* HavalOBD */ = {
 			isa = PBXGroup;
 			children = (
 				3BE37259CB68FE851CE8B1F0 /* ContentView.swift */,
 				172E39887EBFC9A9FC203472 /* HavalOBDApp.swift */,
 				0592AF4ABBE74AD1E2211818 /* Info.plist */,
+				69EA98EC6F6856F98840194C /* WebAssets */,
 				849E6B8D40C3E49D41054C1B /* Models */,
+				185C15FF03BF578960015E1F /* Resources */,
 				DCF3B88553C3391D3A9640C9 /* Services */,
+				622D2028A57122313892E90F /* WebAssets */,
 			);
 			path = HavalOBD;
+			sourceTree = "<group>";
+		};
+		622D2028A57122313892E90F /* WebAssets */ = {
+			isa = PBXGroup;
+			children = (
+				5A5830CED94C50446F954B18 /* cluster.html */,
+				AF88B1E9823CEDF7BBF333F3 /* icon-512.png */,
+				43DF73B277E0679C079ACF33 /* leaflet.css */,
+				50D4B9492F6DACED1389D1D3 /* leaflet.js */,
+			);
+			path = WebAssets;
 			sourceTree = "<group>";
 		};
 		849E6B8D40C3E49D41054C1B /* Models */ = {
 			isa = PBXGroup;
 			children = (
+				5DE7C57B84DD72FBD4B89E46 /* OBDSample.swift */,
 				D628AE83944CDC07BC9BE4DA /* PIDDefinition.swift */,
 			);
 			path = Models;
@@ -82,10 +149,33 @@
 			children = (
 				52A9923D70D2EE9AC17A5457 /* BluetoothManager.swift */,
 				AA810DE57A758BD5354D56D8 /* BridgePublisher.swift */,
+				8DB2431E036A46C598ED226B /* ClusterWebView.swift */,
 				580FD7A6488F5ED158F98911 /* ELM327.swift */,
+				468ECB807358837A0C061283 /* OBDBridgeChannel.swift */,
 				755440078FE4C82EDB00294B /* PIDRegistry.swift */,
 			);
 			path = Services;
+			sourceTree = "<group>";
+		};
+		F63D26FEDD59BC35D5CD0A9F /* AppIcon.appiconset */ = {
+			isa = PBXGroup;
+			children = (
+				DB8C9716964BC5C294F1D4D6 /* Contents.json */,
+				85664D286E352206936DA584 /* icon-20.png */,
+				0AD8C72CA6607CBCCEEDC8E5 /* icon-29.png */,
+				910DE8778E7F2FB46B36BF58 /* icon-40.png */,
+				7976E0DF2B51BBA006E5627B /* icon-58.png */,
+				B53786B47556E22824410221 /* icon-60.png */,
+				E92085B11C70E0011AA4A189 /* icon-76.png */,
+				9DA252771BAB8F955E048264 /* icon-80.png */,
+				7A739B21C42D7826CA99B651 /* icon-87.png */,
+				C4486C8478222938339DA1EF /* icon-120.png */,
+				DC44D6D1F424C9B1249D9CF3 /* icon-152.png */,
+				BD491B8C6E54F77456B6F67A /* icon-167.png */,
+				D2FAB2F08C0A54A922D497D2 /* icon-180.png */,
+				EBE0060E04AFBB181E318EB0 /* icon-1024.png */,
+			);
+			path = AppIcon.appiconset;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -96,6 +186,7 @@
 			buildConfigurationList = FC1C1E58C387B6B498B46828 /* Build configuration list for PBXNativeTarget "HavalOBD" */;
 			buildPhases = (
 				CCF44FDD8CAD9CD5E15DFBFB /* Sources */,
+				E927E6524E784A79EEE3FF97 /* Resources */,
 				C0A3F3664A380C26E2D922E6 /* Frameworks */,
 			);
 			buildRules = (
@@ -147,6 +238,35 @@
 		};
 /* End PBXProject section */
 
+/* Begin PBXResourcesBuildPhase section */
+		E927E6524E784A79EEE3FF97 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				4BF5AAD3F45A614980156A20 /* Contents.json in Resources */,
+				36C1AAEECF68B07B3F4BDCCA /* WebAssets in Resources */,
+				C3DB8525FD048B5A54B7D20B /* cluster.html in Resources */,
+				EA214991293511FB8F08A602 /* icon-1024.png in Resources */,
+				99350CED9200BDD3F984CA75 /* icon-120.png in Resources */,
+				D10EA7C643BD386C00DED6CF /* icon-152.png in Resources */,
+				934AA59413FDF5B15296C16D /* icon-167.png in Resources */,
+				FFAA48C9793AD1D25DA3AE36 /* icon-180.png in Resources */,
+				20AA6A08D38226297C02B0C3 /* icon-20.png in Resources */,
+				C50A078A7CDCFAC904DDA78C /* icon-29.png in Resources */,
+				82C162E117C228B2A1179FD9 /* icon-40.png in Resources */,
+				684F97CE050F6D340DE72869 /* icon-512.png in Resources */,
+				A038BD87390F52681CA16AC6 /* icon-58.png in Resources */,
+				176CA7B7578FA18E5F7329D5 /* icon-60.png in Resources */,
+				64B2AE490AC3A6989A3218FF /* icon-76.png in Resources */,
+				6435AB2ED05CDCBBFD849D0A /* icon-80.png in Resources */,
+				711927C6617EB305FBC22896 /* icon-87.png in Resources */,
+				3A2A4290198C6FCF68024020 /* leaflet.css in Resources */,
+				73B40707860C3961F6316A59 /* leaflet.js in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
 		CCF44FDD8CAD9CD5E15DFBFB /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
@@ -154,9 +274,12 @@
 			files = (
 				E28631C58B22771B6227884F /* BluetoothManager.swift in Sources */,
 				38A9C602085EAA1B2760D743 /* BridgePublisher.swift in Sources */,
+				4F7A35E4A73FB2DBFA77391D /* ClusterWebView.swift in Sources */,
 				3A60995969A90FAF7B7CC4DF /* ContentView.swift in Sources */,
 				40B23DE768E969FD148A2B12 /* ELM327.swift in Sources */,
 				7FCEA2E4B427D1BF30CD42E0 /* HavalOBDApp.swift in Sources */,
+				0375AE94C4E589EEEA229403 /* OBDBridgeChannel.swift in Sources */,
+				8F56BDD8D3F078850166063A /* OBDSample.swift in Sources */,
 				C20EF54D46DFEFAE08452B42 /* PIDDefinition.swift in Sources */,
 				336F4738680C9F37F0BAB80E /* PIDRegistry.swift in Sources */,
 			);

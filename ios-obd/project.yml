@@ -28,6 +28,11 @@ targets:
     platform: iOS
     sources:
       - HavalOBD
+      # WebAssets vão pro bundle como folder reference (com subdir preservado).
+      # Permite Bundle.url(forResource:withExtension:subdirectory: "WebAssets").
+      - path: HavalOBD/WebAssets
+        type: folder
+        buildPhase: resources
     info:
       path: HavalOBD/Info.plist
       properties:
