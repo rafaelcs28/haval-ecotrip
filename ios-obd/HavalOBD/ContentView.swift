@@ -30,6 +30,32 @@ struct SettingsView: View {
                         .disabled(bt.state != .ready)
                 }
 
+                // Lista de TODOS os dispositivos BLE detectados — clica pra conectar
+                // manualmente se o filtro automático não pegou o ELM327
+                if !bt.nearbyDevices.isEmpty {
+                    Section("Dispositivos BLE próximos (\(bt.nearbyDevices.count))") {
+                        ForEach(bt.nearbyDevices, id: \.id) { d in
+                            Button {
+                                bt.connectManually(id: d.id)
+                            } label: {
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(d.name).font(.body)
+                                        Text(d.id.uuidString.prefix(13) + "…")
+                                            .font(.caption2).foregroundStyle(.secondary)
+                                            .monospaced()
+                                    }
+                                    Spacer()
+                                    Text("\(d.rssi) dB")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                        .monospaced()
+                                }
+                            }
+                            .foregroundColor(.primary)
+                        }
+                    }
+                }
+
                 Section("Bridge MQTT (opcional)") {
                     LabeledContent("Status") {
                         statusDot(label: publisher.connected ? "online" : "offline",
