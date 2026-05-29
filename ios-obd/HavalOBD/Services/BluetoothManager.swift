@@ -38,8 +38,10 @@ final class BluetoothManager: NSObject, ObservableObject {
         get { UserDefaults.standard.string(forKey: lastDeviceKey).flatMap(UUID.init(uuidString:)) }
         set { UserDefaults.standard.set(newValue?.uuidString, forKey: lastDeviceKey) }
     }
-    /// Liga/desliga auto-conexão. Default ON. Pode ser desabilitado em Settings.
-    @Published var autoConnectEnabled: Bool = UserDefaults.standard.object(forKey: "haval_obd_autoconnect") as? Bool ?? true {
+    /// Liga/desliga auto-conexão. Default OFF — app agora puxa state via MQTT
+    /// do servidor (fonte única, em tempo real do APK do carro).
+    /// Usuário pode reativar em Settings se quiser modo offline OBD direto.
+    @Published var autoConnectEnabled: Bool = UserDefaults.standard.object(forKey: "haval_obd_autoconnect") as? Bool ?? false {
         didSet { UserDefaults.standard.set(autoConnectEnabled, forKey: "haval_obd_autoconnect") }
     }
 
