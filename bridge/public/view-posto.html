@@ -1469,8 +1469,17 @@ function renderStats() {
     const _spp  = document.getElementById('view-posto') || document;
     const fv = _spp.querySelector('#custom-from')?.value;
     const tv = _spp.querySelector('#custom-to')?.value;
-    if (fv) { const d = new Date(fv); d.setHours(0,0,0,0); start = d.getTime(); }
-    if (tv) { const d = new Date(tv); d.setHours(23,59,59,999); end = d.getTime(); }
+    // IMPORTANTE: new Date("YYYY-MM-DD") parsea como UTC midnight, que em BRT
+    // (UTC-3) é o dia ANTERIOR às 21h. setHours em cima disso ainda pega o dia
+    // errado. Parseia em parts pra criar Date no fuso LOCAL diretamente.
+    if (fv) {
+      const [y,m,d] = fv.split('-').map(Number);
+      start = new Date(y, m-1, d, 0, 0, 0, 0).getTime();
+    }
+    if (tv) {
+      const [y,m,d] = tv.split('-').map(Number);
+      end = new Date(y, m-1, d, 23, 59, 59, 999).getTime();
+    }
   }
   const filtered = items.filter(i => i.ts >= start && i.ts <= end);
   const charges = filtered.filter(i => i.type === 'recarga');
