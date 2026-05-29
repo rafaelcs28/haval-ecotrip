@@ -1788,10 +1788,28 @@ setInterval(() => {
 // Cenário que motivou: GWM Brasil parou de publicar mas o APK continuou — sem
 // alerta visível, dados ficaram defasados (SOC). Agora, se uma fonte ficar >10min
 // silenciosa enquanto a outra continua atualizando, notifica uma vez por hora.
+//
+// REGRA PRÁTICA: o APK só transmite quando o head unit do carro está ligado.
+// Quando o carro está estacionado/dormindo (gear=P, sem carregar, sem driving_ready),
+// é NORMAL o APK ficar silencioso — não dispara alerta. Já o GWM (HA Brasil) é
+// polled pelo HA e DEVE continuar respondendo mesmo com carro dormindo — silêncio
+// dele é sempre anomalia.
 let _sourceStallNotifiedApk = 0;
 let _sourceStallNotifiedGwm = 0;
 const SOURCE_STALL_MS  = 10 * 60_000;          // 10 min de silêncio = stalled
 const SOURCE_NOTIF_GAP = 60 * 60_000;          // não repete antes de 1h
+
+/** True quando há sinal de que o carro está "em uso" — em movimento, com
+ *  motor pronto, ou carregando. Nesses casos o APK DEVE estar publicando. */
+function _carIsAwake() {
+  const gear   = String(state.gear || 'P').toUpperCase();
+  const ready  = state.driving_ready === 1 || state.driving_ready === true;
+  const chrg   = state.charging_state === 1;
+  const speed  = +state.speed_kmh || 0;
+  const power  = state.power_mode != null && +state.power_mode > 0;
+  return ready || chrg || speed > 1 || power || (gear !== 'P' && gear !== 'N');
+}
+
 setInterval(() => {
   const now    = Date.now();
   const apkMs  = state.last_apk_ms || 0;
@@ -1800,16 +1818,19 @@ setInterval(() => {
   if (apkMs === 0 || gwmMs === 0) return;
   const apkAge = now - apkMs;
   const gwmAge = now - gwmMs;
-  // APK silente mas GWM ativo → carro/app caiu, integração HA segue.
-  if (apkAge > SOURCE_STALL_MS && gwmAge < SOURCE_STALL_MS && (now - _sourceStallNotifiedApk) > SOURCE_NOTIF_GAP) {
+  // APK silente mas GWM ativo → só alerta se o carro estiver ACORDADO.
+  // Carro dormindo (gear=P + parado + sem carregar) silencia esse alerta — é o normal.
+  if (apkAge > SOURCE_STALL_MS && gwmAge < SOURCE_STALL_MS &&
+      (now - _sourceStallNotifiedApk) > SOURCE_NOTIF_GAP &&
+      _carIsAwake()) {
     _sourceStallNotifiedApk = now;
     const min = Math.round(apkAge / 60_000);
-    console.log(`[watchdog] APK silente há ${min}min (GWM ativo)`);
+    console.log(`[watchdog] APK silente há ${min}min com CARRO ACORDADO (gear=${state.gear} chrg=${state.charging_state} ready=${state.driving_ready})`);
     sendPush('📡 App do carro silente',
       `Sem dados do app no carro há ${min}min (integração GWM continua ativa).`,
       'anomaly_detected');
   }
-  // GWM silente mas APK ativo → integração HA caiu, carro segue (caso de hoje).
+  // GWM silente mas APK ativo → SEMPRE notifica (HA é polled, deveria sempre responder).
   if (gwmAge > SOURCE_STALL_MS && apkAge < SOURCE_STALL_MS && (now - _sourceStallNotifiedGwm) > SOURCE_NOTIF_GAP) {
     _sourceStallNotifiedGwm = now;
     const min = Math.round(gwmAge / 60_000);
