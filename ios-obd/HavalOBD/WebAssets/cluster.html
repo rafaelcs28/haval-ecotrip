@@ -248,65 +248,52 @@
   .trip-val.orange { color: var(--orange); }
   .trip-val.yellow { color: var(--yellow); }
 
-  /* ───────── Fluxo de energia (v2 — SVG diagrama) ───────── */
-  .flow-stage {
-    flex: 1; position: relative;
-    display: flex; flex-direction: column; gap: 6px;
-  }
+  /* ───────── Fluxo de energia v3 — top view 2 eixos (TMCU/GMCU) ───────── */
+  .flow-stage { flex: 1; position: relative; display: flex; flex-direction: column; gap: 4px; }
   .flow-svg { flex: 1; width: 100%; height: 100%; min-height: 0; }
-  /* Linhas / setas */
-  .flow-line {
-    stroke: var(--border-hi); stroke-width: 3; fill: none;
-    transition: stroke .3s, stroke-width .3s;
-  }
-  .flow-line.active   { stroke: var(--green); stroke-width: 4; }
+  .car-body { fill: rgba(255,255,255,.03); stroke: var(--border-hi); stroke-width: 1.5; }
+  .car-windshield { fill: rgba(56,189,248,.06); stroke: var(--border); stroke-width: 1; }
+  .wheel { fill: #0a0a0a; stroke: var(--border-hi); stroke-width: 1.5; transition: stroke .3s, fill .3s; }
+  .wheel.tracting-ev  { stroke: var(--green); fill: rgba(34,197,94,.22); }
+  .wheel.tracting-ice { stroke: var(--orange); fill: rgba(251,146,60,.22); }
+  .wheel.regen        { stroke: var(--teal); fill: rgba(34,211,238,.30); }
+  .comp-bg { fill: var(--panel-lift); stroke: var(--border-hi); stroke-width: 1.5; transition: stroke .3s, fill .3s; }
+  .comp-bg.active { stroke: var(--green); fill: rgba(34,197,94,.15); }
+  .comp-bg.ice    { stroke: var(--orange); fill: rgba(251,146,60,.18); }
+  .comp-bg.charge { stroke: var(--blue); fill: rgba(56,189,248,.15); }
+  .comp-emoji { font-size: 13px; text-anchor: middle; dominant-baseline: middle; pointer-events: none; }
+  .comp-label { font-size: 7.5px; fill: var(--muted); text-anchor: middle; letter-spacing: .08em; text-transform: uppercase; font-weight: 700; }
+  .comp-value { font-size: 9px; fill: var(--text); text-anchor: middle; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .comp-value.ice   { fill: var(--orange); }
+  .comp-value.green { fill: var(--green); }
+  .comp-value.teal  { fill: var(--teal); }
+  .comp-value.blue  { fill: var(--blue); }
+  .comp-value.muted { fill: var(--muted); }
+  .flow-line { stroke: var(--border-hi); stroke-width: 2; fill: none; transition: stroke .3s, stroke-width .3s, opacity .3s; opacity: .25; }
+  .flow-line.active   { stroke: var(--green); stroke-width: 2.5; opacity: 1; }
   .flow-line.ice      { stroke: var(--orange); }
-  .flow-line.regen    { stroke: var(--green); }
+  .flow-line.regen    { stroke: var(--teal); }
   .flow-line.charge   { stroke: var(--blue); }
-  /* Tracejado animado (dash) — só ativo quando há fluxo */
-  .flow-line.flowing { stroke-dasharray: 6 6; animation: dash-flow 1s linear infinite; }
+  .flow-line.flowing  { stroke-dasharray: 5 4; animation: dash-flow 1.1s linear infinite; }
   .flow-line.flowing.reverse { animation-direction: reverse; }
-  @keyframes dash-flow { to { stroke-dashoffset: -24; } }
-  /* Nós */
-  .flow-node-bg {
-    fill: var(--panel-lift); stroke: var(--border-hi); stroke-width: 2;
-    transition: stroke .3s, fill .3s;
-  }
-  .flow-node-bg.active { stroke: var(--green); fill: rgba(34,197,94,.1); }
-  .flow-node-bg.ice    { stroke: var(--orange); fill: rgba(251,146,60,.1); }
-  .flow-node-bg.charge { stroke: var(--blue); fill: rgba(56,189,248,.1); }
-  .flow-emoji {
-    font-size: 22px; text-anchor: middle; dominant-baseline: middle;
-    pointer-events: none;
-  }
-  .flow-label {
-    font-size: 9px; fill: var(--muted); text-anchor: middle;
-    letter-spacing: .1em; text-transform: uppercase;
-  }
-  .flow-value {
-    font-size: 10px; fill: var(--text); text-anchor: middle; font-weight: 600;
-    font-variant-numeric: tabular-nums;
-  }
-  .flow-value.ice { fill: var(--orange); }
-  .flow-value.green { fill: var(--green); }
-  /* Badge do modo atual no centro */
+  @keyframes dash-flow { to { stroke-dashoffset: -18; } }
   .flow-mode {
-    position: absolute; left: 50%; bottom: 8px;
-    transform: translateX(-50%);
+    position: absolute; left: 50%; bottom: 6px; transform: translateX(-50%);
     background: var(--panel-lift); border: 1px solid var(--border-hi);
     color: var(--text); font-size: 10px; font-weight: 700;
     letter-spacing: .18em; text-transform: uppercase;
-    padding: 5px 14px; border-radius: 999px;
-    pointer-events: none;
-    transition: color .3s, border-color .3s, background .3s;
+    padding: 4px 12px; border-radius: 999px;
+    pointer-events: none; transition: color .3s, border-color .3s, background .3s;
   }
-  .flow-mode.ev      { color: var(--green);  border-color: var(--green);  background: rgba(34,197,94,.12); }
-  .flow-mode.regen   { color: var(--green);  border-color: var(--green);  background: rgba(34,197,94,.18); }
-  .flow-mode.serie   { color: var(--orange); border-color: var(--orange); background: rgba(251,146,60,.12); }
-  .flow-mode.paralelo{ color: var(--orange); border-color: var(--orange); background: rgba(251,146,60,.12); }
-  .flow-mode.split   { color: var(--yellow); border-color: var(--yellow); background: rgba(250,204,21,.12); }
-  .flow-mode.carga   { color: var(--blue);   border-color: var(--blue);   background: rgba(56,189,248,.12); }
-  .flow-mode.idle    { color: var(--muted);  border-color: var(--border); }
+  .flow-mode.ev-awd   { color: var(--green);  border-color: var(--green);  background: rgba(34,197,94,.20); }
+  .flow-mode.ev-rwd   { color: var(--green);  border-color: var(--green);  background: rgba(34,197,94,.12); }
+  .flow-mode.ev-fwd   { color: var(--green);  border-color: var(--green);  background: rgba(34,197,94,.12); }
+  .flow-mode.regen    { color: var(--teal);   border-color: var(--teal);   background: rgba(34,211,238,.18); }
+  .flow-mode.serie    { color: var(--orange); border-color: var(--orange); background: rgba(251,146,60,.14); }
+  .flow-mode.paralelo { color: var(--orange); border-color: var(--orange); background: rgba(251,146,60,.18); }
+  .flow-mode.split    { color: var(--yellow); border-color: var(--yellow); background: rgba(250,204,21,.16); }
+  .flow-mode.carga    { color: var(--blue);   border-color: var(--blue);   background: rgba(56,189,248,.16); }
+  .flow-mode.idle     { color: var(--muted);  border-color: var(--border); }
 
   /* ───────── Stale dim ───────── */
   body.stale .float-card, body.stale .widget { filter: brightness(.6) saturate(.5); }
@@ -491,48 +478,67 @@
       </div>
     </div>
 
-    <!-- Fluxo de energia (v2 — diagrama com modo) -->
+    <!-- Fluxo de energia v3 — top view do carro com 2 eixos (TMCU/GMCU/ICE) -->
     <div class="widget">
       <h3><span class="ico">🔄</span> Fluxo de energia</h3>
       <div class="flow-stage">
-        <svg class="flow-svg" viewBox="0 0 360 200" preserveAspectRatio="xMidYMid meet">
-          <!-- Linhas de conexão (definidas antes dos nós pra ficarem atrás) -->
-          <!-- ICE → Battery (série: motor a comb. carrega bateria) -->
-          <path id="line-ice-batt"   class="flow-line" d="M 60 80 L 180 80"/>
-          <!-- Battery → Motor → Wheels (EV: bateria propulsiona) -->
-          <path id="line-batt-motor" class="flow-line" d="M 180 95 L 180 145"/>
-          <path id="line-motor-wheels" class="flow-line" d="M 195 160 L 285 160"/>
-          <!-- ICE → Wheels direto (paralelo: motor a comb. na roda) -->
-          <path id="line-ice-wheels" class="flow-line" d="M 60 95 Q 60 160 165 160"/>
-          <!-- Carga externa → Battery -->
-          <path id="line-charge" class="flow-line" d="M 295 50 L 195 75"/>
+        <svg class="flow-svg" viewBox="0 0 360 220" preserveAspectRatio="xMidYMid meet">
+          <!-- FRENTE (topo da tela) / TRÁS (fundo) — carro visto de cima -->
 
-          <!-- Nós -->
-          <!-- ICE -->
-          <circle class="flow-node-bg ice" id="node-ice"   cx="45" cy="80" r="22"/>
-          <text class="flow-emoji" x="45" y="82">⛽</text>
-          <text class="flow-label" x="45" y="115">ICE</text>
-          <text class="flow-value ice" id="val-ice" x="45" y="55">—</text>
+          <!-- Linhas de fluxo (atrás de tudo) -->
+          <!-- Bateria → GMCU (eixo dianteiro EV / série regen) -->
+          <path id="line-batt-gmcu"  class="flow-line" d="M 175 110 L 130 60"/>
+          <!-- Bateria → TMCU (eixo traseiro EV) -->
+          <path id="line-batt-tmcu"  class="flow-line" d="M 185 110 L 185 165"/>
+          <!-- ICE → GMCU (paralelo dianteiro / série gerador) -->
+          <path id="line-ice-gmcu"   class="flow-line" d="M 220 60 L 155 60"/>
+          <!-- ICE → bateria (série explícito, contorna por baixo) -->
+          <path id="line-ice-batt"   class="flow-line" d="M 240 75 Q 270 110 215 115"/>
+          <!-- Wallbox externo → Bateria (carga AC) -->
+          <path id="line-charge"     class="flow-line" d="M 340 30 L 200 100"/>
 
-          <!-- Battery -->
-          <circle class="flow-node-bg" id="node-batt"     cx="180" cy="80" r="22"/>
-          <text class="flow-emoji" x="180" y="82">🔋</text>
-          <text class="flow-label" x="180" y="115">Bateria</text>
-          <text class="flow-value green" id="val-batt" x="180" y="55">—</text>
+          <!-- Carro silhueta (top view) -->
+          <!-- chassis arredondado -->
+          <rect class="car-body" x="70" y="20" width="220" height="180" rx="35" ry="35"/>
+          <!-- parabrisa frontal (faixa azulada na frente) -->
+          <path class="car-windshield" d="M 100 38 L 260 38 L 250 76 L 110 76 Z"/>
+          <!-- linha capô-teto -->
+          <line class="car-hood-line" x1="80" y1="100" x2="280" y2="100"/>
+          <line class="car-hood-line" x1="80" y1="140" x2="280" y2="140"/>
 
-          <!-- Wheels -->
-          <circle class="flow-node-bg" id="node-wheels"   cx="300" cy="160" r="22"/>
-          <text class="flow-emoji" x="300" y="162">🛞</text>
-          <text class="flow-label" x="300" y="195">Rodas</text>
-          <text class="flow-value" id="val-wheels" x="300" y="135">—</text>
+          <!-- Rodas (4 retângulos arredondados nos cantos) -->
+          <rect class="wheel" id="wheel-fl" x="55"  y="55"  width="18" height="34" rx="4"/>
+          <rect class="wheel" id="wheel-fr" x="287" y="55"  width="18" height="34" rx="4"/>
+          <rect class="wheel" id="wheel-rl" x="55"  y="148" width="18" height="34" rx="4"/>
+          <rect class="wheel" id="wheel-rr" x="287" y="148" width="18" height="34" rx="4"/>
 
-          <!-- Motor elétrico (intermediário) -->
-          <circle class="flow-node-bg" id="node-motor"    cx="180" cy="160" r="18"/>
-          <text class="flow-emoji" x="180" y="162" style="font-size:18px">⚙️</text>
+          <!-- ICE (motor a combustão, frente direita) -->
+          <rect class="comp-bg ice" id="node-ice" x="218" y="44" width="44" height="32" rx="6"/>
+          <text class="comp-emoji" x="240" y="62">⛽</text>
+          <text class="comp-label" x="240" y="88">ICE 1.5T</text>
+          <text class="comp-value ice" id="val-ice" x="240" y="38">—</text>
 
-          <!-- Carga externa (mostra só quando charging) -->
-          <circle class="flow-node-bg charge" id="node-charge" cx="310" cy="40" r="14" opacity="0"/>
-          <text class="flow-emoji" id="emoji-charge" x="310" y="42" style="font-size:14px;opacity:0">🔌</text>
+          <!-- GMCU (motor/gerador dianteiro, esquerda) -->
+          <rect class="comp-bg" id="node-gmcu" x="98" y="44" width="44" height="32" rx="6"/>
+          <text class="comp-emoji" x="120" y="62">⚙️</text>
+          <text class="comp-label" x="120" y="88">GMCU</text>
+          <text class="comp-value green" id="val-gmcu" x="120" y="38">—</text>
+
+          <!-- Bateria central -->
+          <rect class="comp-bg" id="node-batt" x="135" y="100" width="90" height="34" rx="6"/>
+          <text class="comp-emoji" x="180" y="119">🔋</text>
+          <text class="comp-label" x="180" y="146">Bateria 34kWh</text>
+          <text class="comp-value green" id="val-batt" x="180" y="92">—</text>
+
+          <!-- TMCU (motor traseiro de tração) -->
+          <rect class="comp-bg" id="node-tmcu" x="148" y="160" width="64" height="32" rx="6"/>
+          <text class="comp-emoji" x="180" y="178">🔋⚡</text>
+          <text class="comp-label" x="180" y="204">TMCU</text>
+          <text class="comp-value green" id="val-tmcu" x="180" y="154">—</text>
+
+          <!-- Wallbox externo (mostra só quando carregando) -->
+          <rect class="comp-bg charge" id="node-charge" x="320" y="18" width="32" height="22" rx="5" opacity="0"/>
+          <text class="comp-emoji" id="emoji-charge" x="336" y="31" style="font-size:12px;opacity:0">🔌</text>
         </svg>
         <div class="flow-mode idle" id="flow-mode">parado</div>
       </div>
@@ -886,16 +892,20 @@ function render() {
     $('trip-hev-km').textContent  = '— km';
   }
 
-  // ═══════ Fluxo de energia v2 — detecta modo + anima fluxos ═══════
-  const rpm        = +state.engine_rpm || 0;
-  const engineSt   = +state.engine_state || 0;
-  const battCurr   = +state.battery_current_a || 0;   // + entrando, - saindo
+  // ═══════ Fluxo de energia v3 — top view 2 eixos (TMCU/GMCU) ═══════
+  const rpm         = +state.engine_rpm || 0;
+  const engineSt    = +state.engine_state || 0;
+  const battCurr    = +state.battery_current_a || 0;     // + entrando, - saindo
   const battEntering = battCurr > 1;
-  const iceOn   = engineSt >= 1 || rpm > 100;
-  const motorOn = Math.abs(motorKw) > 0.5;
-  const regen   = motorKw < -0.5;
+  const iceOn       = engineSt >= 1 || rpm > 100;
+  const regen       = motorKw < -0.5;
+  // MCU PIDs (vêm do OBD quando conectado; fallback heurístico)
+  const gmcuRpm     = +state.gmcu_motor_speed || 0;
+  const tmcuRpm     = +state.tmcu_motor_speed || 0;
+  const gmcuActive  = gmcuRpm > 100 || (state.gmcu_motor_speed === undefined && iceOn);
+  const tmcuActive  = tmcuRpm > 100 || (state.tmcu_motor_speed === undefined && Math.abs(motorKw) > 0.5);
 
-  // Estima consumo ICE em L/h por RPM (lookup empírica do H6 PHEV 1.5T)
+  // Estima consumo ICE em L/h por RPM (lookup empírica H6 PHEV 1.5T)
   let fuelRate = 0;
   if (iceOn) {
     if (rpm < 800)       fuelRate = 0.3;
@@ -911,80 +921,111 @@ function render() {
     mode = 'carga'; modeLbl = 'carga externa';
   } else if (regen) {
     mode = 'regen'; modeLbl = 'regenerando';
-  } else if (!iceOn && motorKw > 0.5 && spd > 0) {
-    mode = 'ev'; modeLbl = 'modo EV';
-  } else if (iceOn && spd < 20 && battEntering) {
-    mode = 'serie'; modeLbl = 'série';
-  } else if (iceOn && motorKw > 5 && spd > 30) {
+  } else if (!iceOn && gmcuActive && tmcuActive) {
+    mode = 'ev-awd'; modeLbl = 'EV AWD';
+  } else if (!iceOn && tmcuActive) {
+    mode = 'ev-rwd'; modeLbl = 'EV traseiro';
+  } else if (!iceOn && gmcuActive) {
+    mode = 'ev-fwd'; modeLbl = 'EV dianteiro';
+  } else if (iceOn && gmcuActive && tmcuActive && motorKw > 5) {
     mode = 'split'; modeLbl = 'split';
   } else if (iceOn && spd > 50 && motorKw < 5 && rpm > 1200) {
     mode = 'paralelo'; modeLbl = 'paralelo';
-  } else if (motorOn) {
-    mode = 'ev'; modeLbl = 'modo EV';
+  } else if (iceOn && (spd < 20 || battEntering)) {
+    mode = 'serie'; modeLbl = 'série';
+  } else if (iceOn) {
+    mode = 'paralelo'; modeLbl = 'paralelo';
   }
 
-  // Aplica modo no badge
+  // Badge do modo
   const modeEl = $('flow-mode');
   modeEl.className = 'flow-mode ' + mode;
   modeEl.textContent = modeLbl;
 
-  // Ativa nós conforme estado
-  $('node-ice').classList.toggle('ice', iceOn);
-  $('node-batt').classList.toggle('active', motorOn || iceOn || isCharging);
-  $('node-wheels').classList.toggle('active', spd > 1);
-  $('node-motor').classList.toggle('active', motorOn);
-  // Carga externa: mostra/esconde nó+emoji do plug
-  const showCharge = isCharging;
-  $('node-charge').setAttribute('opacity', showCharge ? '1' : '0');
-  $('emoji-charge').style.opacity = showCharge ? '1' : '0';
+  // Estado dos componentes (cor de fundo)
+  $('node-ice').classList.toggle('ice',    iceOn);
+  $('node-gmcu').classList.toggle('active', gmcuActive && !iceOn);
+  $('node-gmcu').classList.toggle('ice',    gmcuActive && iceOn);
+  $('node-tmcu').classList.toggle('active', tmcuActive);
+  $('node-batt').classList.toggle('active', tmcuActive || gmcuActive || isCharging);
+  $('node-batt').classList.toggle('charge', isCharging);
+  // Wallbox externo: mostra só durante carga
+  $('node-charge').setAttribute('opacity', isCharging ? '1' : '0');
+  $('emoji-charge').style.opacity = isCharging ? '1' : '0';
 
-  // Animação das linhas — cada uma conforme modo
-  function setLine(id, opts) {
+  // Estado das rodas (cores indicam quem traciona)
+  function setWheel(id, cls) {
     const el = $(id);
+    el.classList.remove('tracting-ev','tracting-ice','regen');
+    if (cls) el.classList.add(cls);
+  }
+  setWheel('wheel-fl', null); setWheel('wheel-fr', null);
+  setWheel('wheel-rl', null); setWheel('wheel-rr', null);
+  if (regen) {
+    setWheel('wheel-rl','regen'); setWheel('wheel-rr','regen');
+    if (gmcuActive) { setWheel('wheel-fl','regen'); setWheel('wheel-fr','regen'); }
+  } else if (mode === 'ev-awd' || mode === 'split') {
+    setWheel('wheel-fl','tracting-ev'); setWheel('wheel-fr','tracting-ev');
+    setWheel('wheel-rl','tracting-ev'); setWheel('wheel-rr','tracting-ev');
+    if (mode === 'split') { setWheel('wheel-fl','tracting-ice'); setWheel('wheel-fr','tracting-ice'); }
+  } else if (mode === 'ev-rwd') {
+    setWheel('wheel-rl','tracting-ev'); setWheel('wheel-rr','tracting-ev');
+  } else if (mode === 'ev-fwd') {
+    setWheel('wheel-fl','tracting-ev'); setWheel('wheel-fr','tracting-ev');
+  } else if (mode === 'paralelo') {
+    setWheel('wheel-fl','tracting-ice'); setWheel('wheel-fr','tracting-ice');
+  }
+
+  // Linhas de fluxo
+  function setLine(id, opts) {
+    const el = $(id); if (!el) return;
     el.classList.remove('active','ice','regen','charge','flowing','reverse');
-    if (opts.color) el.classList.add(opts.color);
-    if (opts.active) el.classList.add('active');
+    if (opts.color)   el.classList.add(opts.color);
+    if (opts.active)  el.classList.add('active');
     if (opts.flowing) el.classList.add('flowing');
     if (opts.reverse) el.classList.add('reverse');
   }
-  // Reset todas
-  setLine('line-ice-batt',   {});
-  setLine('line-batt-motor', {});
-  setLine('line-motor-wheels', {});
-  setLine('line-ice-wheels', {});
-  setLine('line-charge',     {});
+  setLine('line-batt-gmcu', {}); setLine('line-batt-tmcu', {});
+  setLine('line-ice-gmcu',  {}); setLine('line-ice-batt',  {});
+  setLine('line-charge',    {});
 
-  if (mode === 'ev') {
-    setLine('line-batt-motor',   { active: true, flowing: true });
-    setLine('line-motor-wheels', { active: true, flowing: true });
+  if (mode === 'ev-awd' || mode === 'ev-rwd' || mode === 'ev-fwd') {
+    if (tmcuActive) setLine('line-batt-tmcu', { active: true, flowing: true });
+    if (gmcuActive) setLine('line-batt-gmcu', { active: true, flowing: true });
   } else if (mode === 'regen') {
-    setLine('line-motor-wheels', { color: 'regen', flowing: true, reverse: true });
-    setLine('line-batt-motor',   { color: 'regen', flowing: true, reverse: true });
+    setLine('line-batt-tmcu', { color: 'regen', flowing: true, reverse: true });
+    if (gmcuActive) setLine('line-batt-gmcu', { color: 'regen', flowing: true, reverse: true });
   } else if (mode === 'serie') {
-    setLine('line-ice-batt', { color: 'ice', flowing: true });
-    if (motorOn) {
-      setLine('line-batt-motor',   { active: true, flowing: true });
-      setLine('line-motor-wheels', { active: true, flowing: true });
-    }
+    setLine('line-ice-gmcu',  { color: 'ice', flowing: true });
+    setLine('line-ice-batt',  { color: 'ice', flowing: true });
+    if (tmcuActive) setLine('line-batt-tmcu', { active: true, flowing: true });
   } else if (mode === 'paralelo') {
-    setLine('line-ice-wheels', { color: 'ice', flowing: true });
+    setLine('line-ice-gmcu',  { color: 'ice', flowing: true });
   } else if (mode === 'split') {
-    setLine('line-ice-wheels',   { color: 'ice', flowing: true });
-    setLine('line-batt-motor',   { active: true, flowing: true });
-    setLine('line-motor-wheels', { active: true, flowing: true });
+    setLine('line-ice-gmcu',  { color: 'ice', flowing: true });
+    setLine('line-batt-tmcu', { active: true, flowing: true });
+    setLine('line-batt-gmcu', { active: true, flowing: true });
   } else if (mode === 'carga') {
-    setLine('line-charge', { color: 'charge', flowing: true });
+    setLine('line-charge',    { color: 'charge', flowing: true });
   }
 
   // Valores em cada nó
-  $('val-ice').textContent    = iceOn ? fuelRate.toFixed(1) + ' L/h' : 'off';
-  $('val-batt').textContent   = Math.round(socPct) + '%';
-  if (isCharging) {
-    $('val-wheels').textContent = '+' + Math.abs(chargeKw).toFixed(1) + ' kW';
-  } else if (motorOn) {
-    $('val-wheels').textContent = (motorKw > 0 ? '−' : '+') + Math.abs(motorKw).toFixed(1) + ' kW';
+  $('val-ice').textContent  = iceOn ? fuelRate.toFixed(1) + ' L/h' : 'off';
+  $('val-batt').textContent = Math.round(socPct) + '%';
+  // GMCU/TMCU: mostra rpm se temos PID; senão estima kW via motor_power_kw
+  if (gmcuRpm > 0) {
+    $('val-gmcu').textContent = (gmcuRpm / 1000).toFixed(1) + 'k rpm';
+  } else if (gmcuActive && !iceOn) {
+    $('val-gmcu').textContent = Math.abs(motorKw * 0.3).toFixed(1) + ' kW';
   } else {
-    $('val-wheels').textContent = spd > 0 ? fmt0(spd) + ' km/h' : '—';
+    $('val-gmcu').textContent = iceOn ? 'gerando' : 'off';
+  }
+  if (tmcuRpm > 0) {
+    $('val-tmcu').textContent = (tmcuRpm / 1000).toFixed(1) + 'k rpm';
+  } else if (tmcuActive) {
+    $('val-tmcu').textContent = Math.abs(motorKw * (iceOn ? 0.7 : 1)).toFixed(1) + ' kW';
+  } else {
+    $('val-tmcu').textContent = 'off';
   }
 }
 
