@@ -2417,7 +2417,8 @@ app.use('/api', (req, res, next) => {
       req.path === '/auth/passkey/available' ||
       req.path === '/auth/passkey/login/begin' ||
       req.path === '/auth/passkey/login/finish' ||
-      req.path === '/pair/redeem') return next();   // carro resgata o pareamento sem login (gateado pelo código one-time)
+      req.path === '/pair/redeem' ||
+      req.path === '/mapkit/token') return next();   // mapkit/token: JWT só vale pra Apple Maps, não dá acesso a nada do bridge
   requireAuth(req, res, next);
 });
 
@@ -2947,6 +2948,53 @@ app.delete('/api/charge-locations/:id', (req, res) => {
   saveChargeLocations();
   res.json({ ok: true });
 });
+
+// ── MapKit JS — JWT ES256 pro cluster do iPad ─────────────────────────────────
+// Apple exige token assinado pra inicializar o SDK web (mapkit.js). Token é
+// válido por até 1 ano, mas a recomendação é regenerar a cada ~30min e cachear.
+// Caching: regenera só quando faltarem <5min pra expirar.
+const _mapkitCfg = {
+  teamId:   process.env.MAPKIT_TEAM_ID  || '',
+  keyId:    process.env.MAPKIT_KEY_ID   || '',
+  p8Path:   process.env.MAPKIT_KEY_P8_PATH || '',
+};
+let _mapkitJwt = null, _mapkitJwtExp = 0, _mapkitKeyPem = null;
+function _mapkitKey() {
+  if (_mapkitKeyPem) return _mapkitKeyPem;
+  if (!_mapkitCfg.p8Path) return null;
+  try {
+    const abs = path.isAbsolute(_mapkitCfg.p8Path)
+      ? _mapkitCfg.p8Path
+      : path.join(__dirname, _mapkitCfg.p8Path);
+    _mapkitKeyPem = fs.readFileSync(abs, 'utf8');
+    return _mapkitKeyPem;
+  } catch (e) {
+    console.warn('[mapkit] falha lendo .p8:', e.message);
+    return null;
+  }
+}
+function _mapkitToken() {
+  const now = Math.floor(Date.now() / 1000);
+  if (_mapkitJwt && (_mapkitJwtExp - now) > 300) return _mapkitJwt;
+  const key = _mapkitKey();
+  if (!key || !_mapkitCfg.teamId || !_mapkitCfg.keyId) return null;
+  const ttl = 30 * 60;  // 30 min
+  const header  = Buffer.from(JSON.stringify({ alg: 'ES256', kid: _mapkitCfg.keyId, typ: 'JWT' })).toString('base64url');
+  const payload = Buffer.from(JSON.stringify({ iss: _mapkitCfg.teamId, iat: now, exp: now + ttl })).toString('base64url');
+  const data    = `${header}.${payload}`;
+  const sig     = require('crypto').sign('sha256', Buffer.from(data), { key, dsaEncoding: 'ieee-p1363' });
+  _mapkitJwt    = `${data}.${sig.toString('base64url')}`;
+  _mapkitJwtExp = now + ttl;
+  return _mapkitJwt;
+}
+app.get('/api/mapkit/token', (req, res) => {
+  const token = _mapkitToken();
+  if (!token) return res.status(503).json({ error: 'MapKit não configurado (faltam MAPKIT_TEAM_ID/KEY_ID/KEY_P8_PATH)' });
+  res.json({ token, expires_at: new Date(_mapkitJwtExp * 1000).toISOString() });
+});
+if (_mapkitCfg.teamId && _mapkitCfg.keyId && _mapkitCfg.p8Path) {
+  console.log(`[mapkit] pronto · team=${_mapkitCfg.teamId} key=${_mapkitCfg.keyId}`);
+}
 
 // ── API Locais Conhecidos ─────────────────────────────────────────────────────
 app.get('/api/known-places', (_req, res) => res.json(knownPlaces));

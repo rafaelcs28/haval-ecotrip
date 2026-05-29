@@ -12,6 +12,11 @@
 <link rel="apple-touch-icon" href="/icon-512.png">
 <link rel="stylesheet" href="/leaflet.css">
 <script src="/leaflet.js" defer></script>
+<!-- Apple MapKit JS — carrega assíncrono; se falhar (sem internet ou token inválido), cai pro Leaflet -->
+<script src="https://cdn.apple-mapkit.com/mk/5.x.x/mapkit.js" crossorigin async
+        data-libraries="map,annotations,services"
+        data-callback="onMapKitLoad"
+        data-initial-token=""></script>
 <style>
   :root {
     --bg: #000000; --panel: #0d0d0f; --panel-lift: #16161a;
@@ -568,43 +573,116 @@ setInterval(() => {
 }, 3000);
 
 // ═══════════════════════════════════════════════════════════════════════════
-//  Mapa Leaflet — tile preto Carto, sem controles, foco no carro
+//  Mapa — Apple MapKit JS (preferido) com fallback pra Leaflet Carto Dark
+//
+//  Estratégia: tenta MapKit JS primeiro. Se em 5s não inicializar (sem
+//  internet, token expirado, SDK Apple offline), cai pro Leaflet.
 // ═══════════════════════════════════════════════════════════════════════════
-let map = null, marker = null, _mapCenteredOnce = false;
-function initMap() {
-  if (!window.L || map) return;
-  map = L.map('cluster-map', {
-    zoomControl: false, attributionControl: false,
-    dragging: false, touchZoom: false, scrollWheelZoom: false, doubleClickZoom: false, boxZoom: false, keyboard: false,
-    tap: false
-  }).setView([-16.6869, -49.2648], 13);
-  // Carto Dark Matter — fundo preto, ruas brancas
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-    maxZoom: 19, subdomains: 'abcd'
-  }).addTo(map);
-}
-function updateMap() {
-  if (!map) initMap();
-  if (!map) return;
-  const lat = state.gps_lat, lng = state.gps_lng;
-  if (!Number.isFinite(+lat) || !Number.isFinite(+lng) || +lat === 0) return;
-  const ll = [+lat, +lng];
-  if (!marker) {
-    const icon = L.divIcon({
-      className: 'car-icon',
-      html: '<div style="width:28px;height:28px;background:radial-gradient(circle,#22c55e,#15803d);border:3px solid #000;border-radius:50%;box-shadow:0 0 20px rgba(34,197,94,.7),0 0 4px #000"></div>',
-      iconSize: [28,28], iconAnchor: [14,14]
+let _mapEngine = null;     // 'mapkit' | 'leaflet'
+let _mkMap = null, _mkAnnotation = null;
+let _lfMap = null, _lfMarker = null;
+let _mapCenteredOnce = false;
+const DEFAULT_CENTER = { lat: -16.6869, lng: -49.2648 };
+
+// ── MapKit JS init via data-callback ───────────────────────────────────────
+window.onMapKitLoad = async function() {
+  try {
+    mapkit.init({
+      authorizationCallback: async (done) => {
+        try {
+          const r = await fetch('/api/mapkit/token');
+          const j = await r.json();
+          if (!j.token) throw new Error('no token');
+          done(j.token);
+        } catch (e) {
+          console.warn('[mapkit] token fetch falhou, fallback Leaflet:', e);
+          initLeaflet();
+        }
+      },
+      language: 'pt-BR',
     });
-    marker = L.marker(ll, {icon}).addTo(map);
-  } else {
-    marker.setLatLng(ll);
+    _mkMap = new mapkit.Map('cluster-map', {
+      center: new mapkit.Coordinate(DEFAULT_CENTER.lat, DEFAULT_CENTER.lng),
+      colorScheme: mapkit.Map.ColorSchemes.Dark,
+      mapType: mapkit.Map.MapTypes.Standard,
+      isZoomEnabled: false, isScrollEnabled: false, isRotationEnabled: false,
+      showsZoomControl: false, showsCompass: mapkit.FeatureVisibility.Hidden,
+      showsScale: mapkit.FeatureVisibility.Hidden,
+      showsMapTypeControl: false, showsUserLocationControl: false,
+      _showsZoomControl: false,
+    });
+    _mkMap.region = new mapkit.CoordinateRegion(
+      new mapkit.Coordinate(DEFAULT_CENTER.lat, DEFAULT_CENTER.lng),
+      new mapkit.CoordinateSpan(0.04, 0.04)
+    );
+    _mapEngine = 'mapkit';
+    console.log('[mapkit] inicializado · dark scheme');
+    updateMap();
+  } catch (e) {
+    console.warn('[mapkit] init falhou:', e);
+    initLeaflet();
   }
-  // Re-center suave; primeira vez sem animação
-  map.setView(ll, Math.max(map.getZoom(), 15), { animate: _mapCenteredOnce, duration: 1 });
-  _mapCenteredOnce = true;
+};
+
+// Fallback: se MapKit não carregar em 6s, sobe o Leaflet
+setTimeout(() => { if (!_mapEngine) initLeaflet(); }, 6000);
+
+function initLeaflet() {
+  if (_mapEngine === 'leaflet' || !window.L) return;
+  if (window.L && !_lfMap) {
+    _lfMap = L.map('cluster-map', {
+      zoomControl: false, attributionControl: false,
+      dragging: false, touchZoom: false, scrollWheelZoom: false,
+      doubleClickZoom: false, boxZoom: false, keyboard: false, tap: false,
+    }).setView([DEFAULT_CENTER.lat, DEFAULT_CENTER.lng], 13);
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+      maxZoom: 19, subdomains: 'abcd',
+    }).addTo(_lfMap);
+    _mapEngine = 'leaflet';
+    console.log('[map] fallback Leaflet ativo');
+    updateMap();
+  }
+}
+
+function updateMap() {
+  const lat = +state.gps_lat, lng = +state.gps_lng;
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat === 0) return;
+
+  if (_mapEngine === 'mapkit' && _mkMap) {
+    const coord = new mapkit.Coordinate(lat, lng);
+    if (!_mkAnnotation) {
+      _mkAnnotation = new mapkit.Annotation(coord, () => {
+        const el = document.createElement('div');
+        el.style.cssText = 'width:28px;height:28px;background:radial-gradient(circle,#22c55e,#15803d);border:3px solid #000;border-radius:50%;box-shadow:0 0 20px rgba(34,197,94,.7),0 0 4px #000';
+        return el;
+      }, { anchorOffset: new DOMPoint(0, 0) });
+      _mkMap.addAnnotation(_mkAnnotation);
+    } else {
+      _mkAnnotation.coordinate = coord;
+    }
+    // Re-center
+    _mkMap.setCenterAnimated(coord, _mapCenteredOnce);
+    if (!_mapCenteredOnce) {
+      _mkMap.region = new mapkit.CoordinateRegion(coord, new mapkit.CoordinateSpan(0.02, 0.02));
+    }
+    _mapCenteredOnce = true;
+  } else if (_mapEngine === 'leaflet' && _lfMap) {
+    const ll = [lat, lng];
+    if (!_lfMarker) {
+      const icon = L.divIcon({
+        className: 'car-icon',
+        html: '<div style="width:28px;height:28px;background:radial-gradient(circle,#22c55e,#15803d);border:3px solid #000;border-radius:50%;box-shadow:0 0 20px rgba(34,197,94,.7),0 0 4px #000"></div>',
+        iconSize: [28,28], iconAnchor: [14,14],
+      });
+      _lfMarker = L.marker(ll, { icon }).addTo(_lfMap);
+    } else {
+      _lfMarker.setLatLng(ll);
+    }
+    _lfMap.setView(ll, Math.max(_lfMap.getZoom(), 15), { animate: _mapCenteredOnce, duration: 1 });
+    _mapCenteredOnce = true;
+  }
 }
 setInterval(updateMap, 3000);
-window.addEventListener('load', () => { initMap(); });
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  Menu de navegação externa
