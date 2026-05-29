@@ -14,6 +14,9 @@ final class ELM327: ObservableObject {
     @Published var initialized = false
     @Published var lastErrorMsg: String?
     @Published private(set) var samples: [String: OBDSample] = [:]    // último valor por PID
+    /// PIDs que ELM respondeu mas parser não conseguiu extrair valor.
+    /// Útil pra diagnosticar formatos inesperados (multi-frame, len errado, etc).
+    @Published private(set) var failedPids: [String: String] = [:]   // pid.id → raw hex recebido
 
     let bt: BluetoothManager
     private var pollTask: Task<Void, Never>?
@@ -149,8 +152,8 @@ final class ELM327: ObservableObject {
             dataHex = String(cleaned[from...])
         }
         guard var hex = dataHex, hex.count >= 2 else { return nil }
-        // Cap em 16 bytes pra ignorar trailing
-        if hex.count > 32 { hex = String(hex.prefix(32)) }
+        // Cap em 48 bytes — cobre multi-frame ISO-TP típico e elimina trailing
+        if hex.count > 96 { hex = String(hex.prefix(96)) }
         // Converte pares hex em UInt8
         var bytes: [UInt8] = []
         var idx = hex.startIndex
@@ -159,8 +162,14 @@ final class ELM327: ObservableObject {
             if let b = UInt8(hex[idx..<next], radix: 16) { bytes.append(b) }
             idx = next
         }
-        guard let value = pid.parser(bytes) else { return nil }
         let hexJoined = bytes.map { String(format: "%02X", $0) }.joined(separator: " ")
+        guard let value = pid.parser(bytes) else {
+            // Bytes chegaram mas parser não soube extrair — registra pra debug
+            failedPids[pid.id] = hexJoined
+            return nil
+        }
+        // Removeu falha anterior se desta vez parseou OK
+        failedPids.removeValue(forKey: pid.id)
         let s = OBDSample(pidId: pid.id, value: value, unit: pid.unit, ts: Date(), rawHex: hexJoined)
         samples[pid.id] = s
         return s
