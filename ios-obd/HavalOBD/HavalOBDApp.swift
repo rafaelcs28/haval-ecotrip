@@ -41,9 +41,12 @@ struct HavalOBDApp: App {
 ///   2. Hotspot ampliado 120×120 nesse mesmo canto (toque longo 0.6s)
 ///   3. Triplo tap em qualquer lugar da tela
 struct RootView: View {
-    @EnvironmentObject var channel: OBDBridgeChannel
-    @State private var showSettings = false
-    @State private var splashHidden = false
+    @EnvironmentObject var channel:   OBDBridgeChannel
+    @EnvironmentObject var bt:        BluetoothManager
+    @EnvironmentObject var elm:       ELM327
+    @State private var showSettings   = false
+    @State private var splashHidden   = false
+    @State private var initInFlight   = false
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
@@ -91,8 +94,34 @@ struct RootView: View {
                 }
             }
         }
+        // Auto-init: assim que o BLE engata (.ready), dispara elm.initialize()
+        // sem precisar abrir Settings. initInFlight evita re-disparar em reconexões.
+        .onChange(of: bt.state) { _, newState in
+            if newState == .ready && !elm.initialized && !initInFlight {
+                initInFlight = true
+                Task {
+                    await elm.initialize()
+                    initInFlight = false
+                }
+            }
+            // Reset do gate quando perde conexão pra permitir re-init na próxima
+            if newState == .poweredOff || newState == .error {
+                initInFlight = false
+            }
+        }
         // Fallback: se webViewReady demorar muito (>5s), some o splash assim mesmo
         .onAppear {
+            // Tenta auto-conectar logo na entrada (caso BT já estivesse ON
+            // antes do app abrir — onChange não dispara nesse caso).
+            bt.attemptAutoConnect()
+            // E se BT já estiver pronto e ELM ainda não, dispara init.
+            if bt.state == .ready && !elm.initialized && !initInFlight {
+                initInFlight = true
+                Task {
+                    await elm.initialize()
+                    initInFlight = false
+                }
+            }
             DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) {
                 if !splashHidden { withAnimation(.easeOut(duration: 0.4)) { splashHidden = true } }
             }

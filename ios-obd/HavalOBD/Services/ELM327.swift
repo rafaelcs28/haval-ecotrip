@@ -200,7 +200,7 @@ final class ELM327: ObservableObject {
             // Agrupa PIDs por header (nil = Mode 01 broadcast)
             let groups = Dictionary(grouping: PIDRegistry.all, by: { $0.header ?? "_universal" })
             // Ordem: Mode 01 primeiro (mais usados), depois customs
-            let groupOrder = ["_universal", "787", "763", "76C", "782", "78B"]
+            let groupOrder = ["_universal", "78B", "787", "7E0", "7E1", "782", "763"]
             while !Task.isCancelled {
                 for headerKey in groupOrder {
                     guard let pids = groups[headerKey], !pids.isEmpty else { continue }

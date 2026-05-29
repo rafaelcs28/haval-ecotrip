@@ -31,6 +31,17 @@ final class BluetoothManager: NSObject, ObservableObject {
     private var txChar: CBCharacteristic?   // write (envia)
     private var rxBuffer = ""
     private var pendingCallback: ((String) -> Void)?
+    /// Auto-conexão: quando central liga, tenta reconectar no último UUID conhecido.
+    /// Salvo em UserDefaults após cada conexão bem-sucedida.
+    private let lastDeviceKey = "haval_obd_last_device_uuid"
+    private var lastDeviceUUID: UUID? {
+        get { UserDefaults.standard.string(forKey: lastDeviceKey).flatMap(UUID.init(uuidString:)) }
+        set { UserDefaults.standard.set(newValue?.uuidString, forKey: lastDeviceKey) }
+    }
+    /// Liga/desliga auto-conexão. Default ON. Pode ser desabilitado em Settings.
+    @Published var autoConnectEnabled: Bool = UserDefaults.standard.object(forKey: "haval_obd_autoconnect") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(autoConnectEnabled, forKey: "haval_obd_autoconnect") }
+    }
 
     /// UUIDs conhecidos de adaptadores ELM327 BLE — preferidos quando aparecem
     private let preferredCharUUIDs: [CBUUID] = [
@@ -119,7 +130,39 @@ final class BluetoothManager: NSObject, ObservableObject {
 
 extension BluetoothManager: CBCentralManagerDelegate {
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
-        if central.state != .poweredOn { state = .poweredOff }
+        if central.state != .poweredOn {
+            state = .poweredOff
+            return
+        }
+        // Bluetooth acabou de ligar — tenta auto-conexão se habilitada.
+        if autoConnectEnabled { attemptAutoConnect() }
+    }
+
+    /// Tenta reconectar no último adaptador conhecido. Se não tiver UUID salvo
+    /// ou o sistema não retornar peripheral (não pareado), cai pro scan.
+    func attemptAutoConnect() {
+        guard central.state == .poweredOn else { return }
+        guard state != .ready, state != .connecting else { return }
+        if let uuid = lastDeviceUUID,
+           let p = central.retrievePeripherals(withIdentifiers: [uuid]).first {
+            log("BT", "auto-reconnect → \(p.name ?? uuid.uuidString.prefix(8))")
+            self.peripheral = p
+            p.delegate = self
+            state = .connecting
+            deviceName = p.name ?? "auto"
+            central.connect(p, options: nil)
+            // Fallback: se em 8s não ficou .ready, sai pro scan
+            DispatchQueue.main.asyncAfter(deadline: .now() + 8) { [weak self] in
+                guard let self = self else { return }
+                if self.state != .ready {
+                    self.log("BT", "auto-reconnect falhou — iniciando scan")
+                    self.startScan()
+                }
+            }
+        } else {
+            log("BT", "sem device salvo — iniciando scan")
+            startScan()
+        }
     }
 
     func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral,
@@ -211,6 +254,7 @@ extension BluetoothManager: CBPeripheralDelegate {
             rxChar = n
             peripheral.setNotifyValue(true, for: n)
             state = .ready
+            lastDeviceUUID = peripheral.identifier   // salva pra auto-conexão futura
             log("BT", "rx (notify): \(n.uuid)")
             log("BT", "tx (write):  \(w.uuid)")
             log("BT", "pronto · split rx/tx")
@@ -221,6 +265,7 @@ extension BluetoothManager: CBPeripheralDelegate {
             rxChar = c; txChar = c
             peripheral.setNotifyValue(true, for: c)
             state = .ready
+            lastDeviceUUID = peripheral.identifier   // salva pra auto-conexão futura
             log("BT", "rx+tx: \(c.uuid)")
             log("BT", "pronto · single char")
             return
