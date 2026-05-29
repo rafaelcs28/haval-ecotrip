@@ -9,6 +9,7 @@ struct SettingsView: View {
     @EnvironmentObject var elm: ELM327
     @EnvironmentObject var publisher: BridgePublisher
     @EnvironmentObject var discovery: OBDDiscovery
+    @EnvironmentObject var channel: OBDBridgeChannel
     @Environment(\.dismiss) var dismiss
     @State private var copiedFeedback = false
 
@@ -181,6 +182,12 @@ struct SettingsView: View {
                             }
                         }
                     }
+                }
+
+                Section("Debug") {
+                    Toggle("Mostrar overlay de PIDs no cluster", isOn: $channel.debugMode)
+                    Text("Quando ligado, aparece uma tabela flutuante no cluster com TODOS os PIDs lidos (id, valor, unidade, idade). Útil pra diagnosticar quais PIDs estão respondendo.")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
 
                 Section("Sobre") {
