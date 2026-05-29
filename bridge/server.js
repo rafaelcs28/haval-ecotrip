@@ -935,7 +935,12 @@ try {
         const hybrid = (d.hybridTimeSec != null && d.hybridDistKm != null)
           ? { hybridTimeSec: d.hybridTimeSec, hybridDistKm: d.hybridDistKm }
           : _calcHybrid(d.samples || []);
-        autoTripsArr.push({ tripId: d.tripId, ...d.autoTrip, ...hybrid });
+        const meta = d._estimated ? {
+          _estimated:       true,
+          _estimatedFields: d._estimatedFields || [],
+          _estimatedReason: d._estimatedReason || '',
+        } : {};
+        autoTripsArr.push({ tripId: d.tripId, ...d.autoTrip, ...hybrid, ...meta });
       }
     } catch (_) {}
   }
@@ -3857,6 +3862,11 @@ app.post('/api/admin/clear-history', (req, res) => {
 // ── Auto-trips + Telemetria ───────────────────────────────────────────────────
 
 app.post('/api/autotrips', (req, res) => {
+  // DEBUG temporário: loga TODA tentativa pra rastrear viagens travadas no APK
+  const ua = req.headers['user-agent'] || '?';
+  const auth = req.headers['authorization'] ? 'OK' : 'FALTANDO';
+  const tid = req.body?.tripId || 'sem tripId';
+  console.log(`[autotrip] POST recebido · tripId=${tid} · auth=${auth} · ua=${ua.slice(0,40)} · ip=${req.ip}`);
   try {
     const { tripId, autoTrip, samples } = req.body;
     if (!tripId || !autoTrip) return res.status(400).json({ error: 'missing fields' });
@@ -3953,25 +3963,66 @@ app.post('/api/autotrips', (req, res) => {
       }
     }
 
-    // Calcula tempo e distância em modo híbrido (ICE ligado, rpm > 0)
-    let hybridTimeSec = 0, hybridDistKm = 0;
-    for (let i = 1; i < finalSamples.length; i++) {
-      const a = finalSamples[i - 1], b = finalSamples[i];
-      const dt = (b.t || 0) - (a.t || 0);
-      if (dt > 0 && dt < 30 && (a.rpm || 0) > 50) {
-        hybridTimeSec += dt;
-        hybridDistKm  += ((a.spd || 0) + (b.spd || 0)) / 2 / 3600 * dt;
-      }
+    // Calcula tempo e distância em modo híbrido (ICE ligado, rpm > 0).
+    // Se o arquivo existente foi marcado como _estimated (telemetria parou no
+    // meio da viagem e os hybrid foram inferidos por média histórica), PRESERVA
+    // a estimativa em vez de recalcular dos samples (que dariam 0 ou subestimaria).
+    let existingEstimated = null;
+    if (fs.existsSync(filePath)) {
+      try {
+        const ex = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+        if (ex._estimated && ex.hybridTimeSec != null && ex.hybridDistKm != null) {
+          existingEstimated = {
+            hybridTimeSec:        ex.hybridTimeSec,
+            hybridDistKm:         ex.hybridDistKm,
+            _estimated:           true,
+            _estimatedFields:     ex._estimatedFields  || ['hybridDistKm','hybridTimeSec'],
+            _estimatedReason:     ex._estimatedReason  || '',
+            _estimatedAppliedAt:  ex._estimatedAppliedAt || '',
+          };
+        }
+      } catch (_) {}
     }
-    hybridTimeSec = Math.round(hybridTimeSec);
-    hybridDistKm  = parseFloat(hybridDistKm.toFixed(3));
+
+    let hybridTimeSec, hybridDistKm;
+    if (existingEstimated) {
+      hybridTimeSec = existingEstimated.hybridTimeSec;
+      hybridDistKm  = existingEstimated.hybridDistKm;
+      console.log(`↻ AutoTrip ${safeId}: hybrid preservado (estimado): ${hybridDistKm}km / ${hybridTimeSec}s`);
+    } else {
+      hybridTimeSec = 0;
+      hybridDistKm  = 0;
+      for (let i = 1; i < finalSamples.length; i++) {
+        const a = finalSamples[i - 1], b = finalSamples[i];
+        const dt = (b.t || 0) - (a.t || 0);
+        if (dt > 0 && dt < 30 && (a.rpm || 0) > 50) {
+          hybridTimeSec += dt;
+          hybridDistKm  += ((a.spd || 0) + (b.spd || 0)) / 2 / 3600 * dt;
+        }
+      }
+      hybridTimeSec = Math.round(hybridTimeSec);
+      hybridDistKm  = parseFloat(hybridDistKm.toFixed(3));
+    }
 
     // Persiste hybrid junto — boot não precisa recalcular.
-    fs.writeFileSync(filePath, JSON.stringify({
+    // Se foi estimado, marca o arquivo também com os campos _estimated*.
+    const persisted = {
       tripId: safeId, autoTrip, samples: finalSamples, hybridTimeSec, hybridDistKm,
-    }));
+    };
+    if (existingEstimated) {
+      persisted._estimated          = true;
+      persisted._estimatedFields    = existingEstimated._estimatedFields;
+      persisted._estimatedReason    = existingEstimated._estimatedReason;
+      persisted._estimatedAppliedAt = existingEstimated._estimatedAppliedAt;
+    }
+    fs.writeFileSync(filePath, JSON.stringify(persisted));
 
     const record = { tripId: safeId, ...autoTrip, hybridTimeSec, hybridDistKm };
+    if (existingEstimated) {
+      record._estimated       = true;
+      record._estimatedFields = existingEstimated._estimatedFields;
+      record._estimatedReason = existingEstimated._estimatedReason;
+    }
 
     // Auto-naming por Locais Conhecidos
     const _sp = matchKnownPlace(autoTrip.startLat, autoTrip.startLng);
