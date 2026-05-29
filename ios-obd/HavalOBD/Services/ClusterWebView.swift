@@ -13,6 +13,8 @@ struct ClusterWebView: UIViewRepresentable {
     @EnvironmentObject var elm: ELM327
     @EnvironmentObject var channel: OBDBridgeChannel
 
+    func makeCoordinator() -> Coordinator { Coordinator(channel: channel) }
+
     func makeUIView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
         config.allowsInlineMediaPlayback = true
@@ -86,9 +88,10 @@ struct ClusterWebView: UIViewRepresentable {
         // No-op — atualizações são via OBDBridgeChannel.
     }
 
-    func makeCoordinator() -> Coordinator { Coordinator() }
-
     final class Coordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
+        let channel: OBDBridgeChannel
+        init(channel: OBDBridgeChannel) { self.channel = channel }
+
         func userContentController(_ controller: WKUserContentController,
                                    didReceive message: WKScriptMessage) {
             guard let dict = message.body as? [String: Any] else { return }
@@ -112,7 +115,10 @@ struct ClusterWebView: UIViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            print("[obd-bridge] cluster.html carregado")
+            print("[obd-bridge] cluster.html carregado — marca channel ready")
+            DispatchQueue.main.async {
+                Task { @MainActor in self.channel.markReady() }
+            }
         }
     }
 }
