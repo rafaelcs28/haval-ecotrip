@@ -145,7 +145,7 @@ extension BluetoothManager: CBCentralManagerDelegate {
         guard state != .ready, state != .connecting else { return }
         if let uuid = lastDeviceUUID,
            let p = central.retrievePeripherals(withIdentifiers: [uuid]).first {
-            log("BT", "auto-reconnect → \(p.name ?? uuid.uuidString.prefix(8))")
+            log("BT", "auto-reconnect → \(p.name ?? String(uuid.uuidString.prefix(8)))")
             self.peripheral = p
             p.delegate = self
             state = .connecting
