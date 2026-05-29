@@ -26,7 +26,10 @@ struct HavalOBDApp: App {
                 .ignoresSafeArea()
                 .statusBarHidden(true)
                 .persistentSystemOverlays(.hidden)
-                .onAppear { publisher.bind(elm) }
+                .onAppear {
+                    publisher.bind(elm)
+                    publisher.autoConnectIfConfigured()
+                }
         }
     }
 }
