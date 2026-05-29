@@ -28,15 +28,15 @@ final class ELM327: ObservableObject {
         // 500 kbps — protocolo do Haval H6 PHEV (e maioria pós-2008). Pular
         // a fase SEARCHING do auto-detect (ATSP0) que demora 5-10s e mete
         // STOPPED nos primeiros polls.
-        // Sequência mínima e robusta — todos universais ELM327 v1.x+
+        // Sequência mínima e robusta — Veepeak BLE é lento, todos com folga.
         let initCommands: [(cmd: String, timeout: TimeInterval, abortOnError: Bool)] = [
-            ("ATZ",  5.0, true),   // reset (mandatório)
-            ("ATE0", 1.0, true),   // echo off (mandatório pra parser funcionar)
-            ("ATL0", 1.0, true),   // line feed off
-            ("ATH0", 1.0, false),  // headers off (opcional)
-            ("ATS0", 1.0, false),  // spaces off (opcional)
-            ("ATSP0", 1.5, true),  // AUTO protocol
-            ("0100", 10.0, false), // primeira query — pode dar NO DATA se carro não READY
+            ("ATZ",  6.0, true),   // reset (demora ~3-4s)
+            ("ATE0", 2.0, true),   // echo off
+            ("ATL0", 2.0, true),   // line feed off
+            ("ATH0", 2.0, false),  // headers off
+            ("ATS0", 2.0, false),  // spaces off
+            ("ATSP0", 4.0, false), // AUTO protocol — Veepeak BLE responde lento aqui
+            ("0100", 12.0, false), // primeira query — auto-detect pode demorar 8s
         ]
         for (cmd, to, mandatory) in initCommands {
             let resp = await send(cmd, timeout: to)
