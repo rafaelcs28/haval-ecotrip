@@ -52,21 +52,26 @@ final class OBDBridgeChannel: ObservableObject {
 
     /// Mapeia PIDs do OBD pros nomes que o cluster.html consome.
     /// Sem isso, dados chegam no JS mas com chaves erradas — gauges ficam vazios.
+    /// Mapeamentos confirmados via cruzamento com Car Scanner v2.1.25.
     private func translateForCluster(_ raw: [String: Any]) -> [String: Any] {
         var out: [String: Any] = [:]
         for (k, v) in raw {
             out[k] = v
-            // Aliases — mesmo dado com chaves diferentes pro cluster pegar
             switch k {
-            case "rpm":
-                out["engine_rpm"] = v
+            // ── Mode 01 universais ──
+            case "rpm":              out["engine_rpm"] = v
             case "fuel_level_pct":
-                // Cluster usa fuel_l (litros). Tank Haval = 55L.
                 if let pct = v as? Double { out["fuel_l"] = pct / 100.0 * 55.0 }
-            case "control_voltage":
-                out["batt_12v_v"] = v
-            case "ect_c":
-                out["engine_temp_c"] = v
+            case "control_voltage":  out["batt_12v_v"] = v
+            case "ect_c":            out["engine_temp_c"] = v
+
+            // ── Mode 22 customs Haval (mapeamento via Car Scanner) ──
+            case "haval_787_2304":
+                // GMCU Torque Max em N·m (motor elétrico dianteiro)
+                out["gmcu_torque_max_nm"] = v
+            case "haval_787_2108":
+                // Pack Recharge current limit em A (× 10 inferido)
+                if let n = v as? Double { out["pack_recharge_limit_a"] = n }
             default:
                 break
             }
