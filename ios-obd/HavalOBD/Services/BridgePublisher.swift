@@ -15,10 +15,15 @@ final class BridgePublisher: ObservableObject {
     @Published var brokerUser = UserDefaults.standard.string(forKey: "mqtt_user") ?? "obd_companion"
     @Published var brokerPass = UserDefaults.standard.string(forKey: "mqtt_pass") ?? ""
     @Published var topicPrefix = UserDefaults.standard.string(forKey: "mqtt_prefix") ?? "haval/ecotrip/obd"
+    /// HTTP API do bridge — fonte primária de state. PWA usa GET /api/state.
+    /// Ex: bridgeBaseUrl = "https://mqttrafael.duckdns.org" (sem path, sem /ws)
+    @Published var bridgeBaseUrl: String = UserDefaults.standard.string(forKey: "bridge_base_url") ?? ""
+    @Published var bridgeAuthToken: String = UserDefaults.standard.string(forKey: "bridge_auth_token") ?? ""
 
     private var mqtt: CocoaMQTT?
     private weak var elm: ELM327?
     private var publishTimer: Timer?
+    private var httpPollTimer: Timer?
     /// Callback chamado quando o bridge publica state extra (viagem em curso,
     /// preços, charging) via MQTT. Permite o cluster.html receber dados que
     /// não vêm do OBD direto.
@@ -46,6 +51,46 @@ final class BridgePublisher: ObservableObject {
         UserDefaults.standard.set(brokerUser, forKey: "mqtt_user")
         UserDefaults.standard.set(brokerPass, forKey: "mqtt_pass")
         UserDefaults.standard.set(topicPrefix, forKey: "mqtt_prefix")
+        UserDefaults.standard.set(bridgeBaseUrl, forKey: "bridge_base_url")
+        UserDefaults.standard.set(bridgeAuthToken, forKey: "bridge_auth_token")
+        restartHttpPoll()
+    }
+
+    /// HTTP poll do /api/state do bridge — fonte ÚNICA de state pro cluster.
+    /// Mesma estratégia do PWA: GET /api/state com Bearer token a cada 1s.
+    func restartHttpPoll() {
+        httpPollTimer?.invalidate()
+        httpPollTimer = nil
+        guard !bridgeBaseUrl.isEmpty, !bridgeAuthToken.isEmpty else {
+            print("[bridge http] URL/token vazios — poll inativo")
+            return
+        }
+        // Dispara imediato + a cada 1s
+        Task { await fetchState() }
+        httpPollTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            Task { await self?.fetchState() }
+        }
+        print("[bridge http] poll iniciado em \(bridgeBaseUrl)/api/state")
+    }
+
+    private func fetchState() async {
+        let base = bridgeBaseUrl.hasSuffix("/") ? String(bridgeBaseUrl.dropLast()) : bridgeBaseUrl
+        guard let url = URL(string: "\(base)/api/state") else { return }
+        var req = URLRequest(url: url)
+        req.timeoutInterval = 3
+        req.setValue("Bearer \(bridgeAuthToken)", forHTTPHeaderField: "Authorization")
+        do {
+            let (data, resp) = try await URLSession.shared.data(for: req)
+            guard let http = resp as? HTTPURLResponse, http.statusCode == 200 else {
+                print("[bridge http] status não-200: \((resp as? HTTPURLResponse)?.statusCode ?? -1)")
+                return
+            }
+            guard let obj = try? JSONSerialization.jsonObject(with: data),
+                  let dict = obj as? [String: Any] else { return }
+            await MainActor.run { self.onClusterExtra?(dict) }
+        } catch {
+            // Silent — só primeiro erro com timeout
+        }
     }
 
     func connect() {

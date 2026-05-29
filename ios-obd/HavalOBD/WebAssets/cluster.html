@@ -48,15 +48,15 @@
   body.native .floating-cards { display: none !important; }
   body.native .row-top { flex: 0 0 6px !important; }
   body.native .row-bot {
-    grid-template-columns: 1.6fr 1fr 1.1fr !important;
+    grid-template-columns: 0.9fr 2fr 1fr !important;   /* Atalhos | Trip GRANDE | Power */
     grid-template-rows: 1fr !important;
     padding: 14px !important;
     gap: 14px !important;
   }
   body.native .row-bot .widget { grid-row: 1; }
-  body.native .row-bot .widget:nth-child(1) { grid-column: 2; } /* Power */
-  body.native .row-bot .widget:nth-child(2) { grid-column: 1; } /* Trip (1º maior) */
-  body.native .row-bot .widget:nth-child(3) { grid-column: 3; } /* Atalhos */
+  body.native .row-bot .widget:nth-child(1) { grid-column: 3; } /* Power (direita) */
+  body.native .row-bot .widget:nth-child(2) { grid-column: 2; } /* Trip (centro, maior) */
+  body.native .row-bot .widget:nth-child(3) { grid-column: 1; } /* Atalhos (ESQUERDA) */
   body.native .widget.flow-widget { display: none !important; }
   body.native .widget.quick-widget { display: flex !important; }
   /* Trip widget: fonte ainda maior no nativo (sem row-top competindo) */
