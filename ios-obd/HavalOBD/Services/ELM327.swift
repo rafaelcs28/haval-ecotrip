@@ -114,10 +114,14 @@ final class ELM327: ObservableObject {
     /// repetido — só configura quando troca de ECU).
     private func ensureHeader(for pid: PIDDefinition) async {
         guard let header = pid.header else {
-            // Mode 01 padrão usa broadcast — só reseta se a última foi custom
+            // Mode 01 padrão usa broadcast — reseta TUDO se a última foi custom
             if !currentHeader.isEmpty && currentHeader != "7DF" {
-                _ = await send("ATSH7DF", timeout: 1.0)
-                _ = await send("ATCRA", timeout: 1.0)  // limpa filter
+                _ = await send("ATSH7DF", timeout: 1.5)
+                try? await Task.sleep(nanoseconds: 50_000_000)
+                _ = await send("ATCRA", timeout: 1.5)        // limpa filter
+                try? await Task.sleep(nanoseconds: 50_000_000)
+                _ = await send("ATFCSM0", timeout: 1.5)      // DESLIGA flow control (estava em 1 do Mode 22)
+                try? await Task.sleep(nanoseconds: 100_000_000)
                 currentHeader = "7DF"
             }
             return
