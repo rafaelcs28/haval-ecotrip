@@ -53,6 +53,7 @@ struct RootView: View {
     @EnvironmentObject var channel:   OBDBridgeChannel
     @EnvironmentObject var bt:        BluetoothManager
     @EnvironmentObject var elm:       ELM327
+    @StateObject  private var nav     = NavigationService()
     @State private var showSettings   = false
     @State private var showNav        = false
     @State private var splashHidden   = false
@@ -60,6 +61,12 @@ struct RootView: View {
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
+            // MapKit nativo no FUNDO (atrás do WebView transparente).
+            // O cluster.html no app nativo esconde o Leaflet e deixa este
+            // mapa aparecer através da row-top.
+            ClusterMapView(nav: nav)
+                .ignoresSafeArea()
+
             ClusterWebView()
                 .ignoresSafeArea()
                 .onTapGesture(count: 3) { showSettings = true }
@@ -86,12 +93,16 @@ struct RootView: View {
             .padding(.top, 12)
             .padding(.trailing, 12)
             .opacity(splashHidden ? 1 : 0)
+
+            // Overlay de navegação sobre o cluster (não cobre tudo)
+            if showNav {
+                NavigationOverlay(nav: nav, isPresented: $showNav)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
         }
         .sheet(isPresented: $showSettings) { SettingsView() }
-        .fullScreenCover(isPresented: $showNav) { NavigationModalView() }
         .onChange(of: channel.navRequestId) { old, new in
-            print("[RootView] navRequestId \(old) → \(new) — abrindo modal")
-            if new > old { showNav = true }
+            if new > old { withAnimation(.spring(response: 0.3)) { showNav = true } }
         }
         .onChange(of: channel.webViewReady) { _, ready in
             if ready {
