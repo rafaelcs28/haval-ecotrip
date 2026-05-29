@@ -906,15 +906,20 @@ function setPostoView(v) {
 
 function setPeriod(p) {
   currentPeriod = p;
-  document.querySelectorAll('.opt').forEach(el => {
+  // Escopa ao container — IDs/classes (.opt, #custom-range, #custom-from/to)
+  // são duplicados em view-desloc, e _$ por ID pega o primeiro no DOM (a outra
+  // view), fazendo o filtro Personalizar não ter efeito real na lista filtrada.
+  const _scope = document.getElementById('view-posto') || document;
+  _scope.querySelectorAll('.opt').forEach(el => {
     el.classList.toggle('active', el.dataset.period === p);
   });
-  _$('custom-range').style.display = (p === 'custom') ? '' : 'none';
+  const rangeEl = _scope.querySelector('#custom-range');
+  if (rangeEl) rangeEl.style.display = (p === 'custom') ? '' : 'none';
   // Default custom range: últimos 7 dias até hoje
   if (p === 'custom') {
-    const from = _$('custom-from');
-    const to   = _$('custom-to');
-    if (!to.value) {
+    const from = _scope.querySelector('#custom-from');
+    const to   = _scope.querySelector('#custom-to');
+    if (from && to && !to.value) {
       const today = new Date();
       to.value = today.toISOString().slice(0, 10);
       const past = new Date(today); past.setDate(past.getDate() - 7);
@@ -1460,8 +1465,10 @@ function renderStats() {
   } else if (currentPeriod === '7d')  start = now - 7  * day;
   else if (currentPeriod === '30d') start = now - 30 * day;
   else if (currentPeriod === 'custom') {
-    const fv = _$('custom-from')?.value;
-    const tv = _$('custom-to')?.value;
+    // Lê do input correto da view (custom-from/to são IDs duplicados em view-desloc)
+    const _spp  = document.getElementById('view-posto') || document;
+    const fv = _spp.querySelector('#custom-from')?.value;
+    const tv = _spp.querySelector('#custom-to')?.value;
     if (fv) { const d = new Date(fv); d.setHours(0,0,0,0); start = d.getTime(); }
     if (tv) { const d = new Date(tv); d.setHours(23,59,59,999); end = d.getTime(); }
   }
