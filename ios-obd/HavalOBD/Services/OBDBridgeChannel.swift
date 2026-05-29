@@ -67,6 +67,9 @@ final class OBDBridgeChannel: ObservableObject {
         else if let pct = raw["fuel_level_pct_22"] as? Double {
             out["fuel_l"] = pct / 100.0 * 55.0   // tanque H6 PHEV ≈ 55L
         }
+        // Motor speed: cluster.html usa *_motor_speed; registry usa *_motor_rpm
+        if let v = raw["gmcu_motor_rpm"]         { out["gmcu_motor_speed"] = v }
+        if let v = raw["tmcu_motor_rpm"]         { out["tmcu_motor_speed"] = v }
 
         // ── Motor power derivado: P = V × I / 1000 ──
         // Bateria descarregando (I positiva) → motor_power_kw positivo (consumo)
@@ -74,6 +77,16 @@ final class OBDBridgeChannel: ObservableObject {
         if let v = raw["pack_voltage_v"] as? Double,
            let i = raw["battery_current_a"] as? Double {
             out["motor_power_kw"] = v * i / 1000.0
+        }
+
+        // ── Derivados de estado ──
+        // engine_state: motor a combustão ligado se RPM > 200 (idle ≈ 700)
+        if let rpm = raw["rpm"] as? Double {
+            out["engine_state"] = rpm > 200 ? "running" : "off"
+        }
+        // rolling: carro em movimento se velocidade > 1 km/h
+        if let kmh = raw["speed_kmh_obd"] as? Double {
+            out["rolling"] = kmh > 1
         }
 
         return out
