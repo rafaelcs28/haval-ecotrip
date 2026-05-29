@@ -43,10 +43,6 @@
   body.native .row-top { background: transparent !important; }
   body.native #cluster-map { display: none !important; }
   body.native .row-top::after { display: none !important; }
-  /* Fluxo de Energia oculto no nativo — versão compacta vai pro topbar */
-  body.native .widget.flow-widget { display: none !important; }
-  /* row-bot: 2 colunas no nativo (Power + Trip) — 3ª área é o MiniPlayer SwiftUI */
-  body.native .row-bot { grid-template-columns: 1fr 1fr !important; padding-right: 50% !important; }
   /* Mantém o resto: */
   html, body {
     font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, sans-serif;
@@ -84,9 +80,9 @@
     flex: 1; display: flex; flex-direction: column;
     overflow: hidden;
   }
-  /* Linha superior: mapa full + cards flutuando */
+  /* Linha superior: cards de status (SOC, Combustível, Atalhos) */
   .row-top {
-    flex: 1.05;
+    flex: 0.85;
     position: relative;
     overflow: hidden;
     background: #000;
@@ -123,7 +119,7 @@
   .floating-cards {
     position: absolute; inset: 0; z-index: 4;
     display: flex; justify-content: space-between; align-items: stretch;
-    padding: 22px; gap: 22px;
+    padding: 14px 18px; gap: 14px;
     pointer-events: none;  /* o mapa abaixo recebe touch, exceto nos cards */
   }
   .float-card {
@@ -132,11 +128,12 @@
     backdrop-filter: blur(24px) saturate(1.6);
     -webkit-backdrop-filter: blur(24px) saturate(1.6);
     border: 1px solid var(--glass-border);
-    border-radius: 24px;
-    padding: 18px 22px;
+    border-radius: 22px;
+    padding: 14px 18px;
     box-shadow: 0 8px 32px rgba(0,0,0,.6), inset 0 1px 0 rgba(255,255,255,.05);
     display: flex; flex-direction: column;
-    width: 290px;
+    flex: 1;
+    min-width: 0;
     transition: transform .25s ease-out;
   }
   .float-card .head {
@@ -490,9 +487,9 @@
                     transform="rotate(-90 100 100)"/>
           </svg>
           <div class="gauge-center">
-            <div class="gauge-big"><span id="fuel-l">—</span><span class="pct">L</span></div>
+            <div class="gauge-big"><span id="fuel-range-big">—</span><span class="pct">km</span></div>
             <div class="gauge-sub">
-              <strong id="fuel-range">— km</strong> ICE<br>
+              <strong id="fuel-l">— L</strong><br>
               <span id="fuel-pct">— % tanque</span>
             </div>
           </div>
@@ -999,18 +996,24 @@ function render() {
   $('soc-range').textContent = Number.isFinite(rangeEv) ? fmt0(rangeEv) + ' km'
     : fmt0(kwhLeft * KM_PER_KWH_EV) + ' km';
 
-  // Fuel — usa range_ice_km do SERVIDOR; derivar fuel_l de range/8
+  // Fuel — usa range_ice_km do SERVIDOR como principal (não calcula L localmente)
   const rangeIce = +state.range_ice_km;
+  $('fuel-range-big').textContent = Number.isFinite(rangeIce) ? fmt0(rangeIce) : '—';
+  // Fuel L vem do servidor (state.fuel_l) ou deriva como aproximação
   let fuelL = +state.fuel_l;
   if (!Number.isFinite(fuelL) && Number.isFinite(rangeIce)) {
-    fuelL = rangeIce / KM_PER_L_HEV;
+    // Aproximação: 8.65 km/L é o consumo médio empírico H6 PHEV em HEV mode
+    fuelL = rangeIce / 8.65;
   }
-  fuelL = fuelL || 0;
-  $('fuel-l').textContent = fmt1(fuelL);
-  const fuelPct = clamp((fuelL / TANK_L) * 100, 0, 100);
-  $('fuel-arc').setAttribute('stroke-dashoffset', socCirc * (1 - fuelPct/100));
-  $('fuel-pct').textContent = Math.round(fuelPct) + ' % tanque';
-  $('fuel-range').textContent = Number.isFinite(rangeIce) ? fmt0(rangeIce) + ' km' : '— km';
+  if (Number.isFinite(fuelL)) {
+    $('fuel-l').textContent = fmt1(fuelL) + ' L';
+    const fuelPct = clamp((fuelL / TANK_L) * 100, 0, 100);
+    $('fuel-arc').setAttribute('stroke-dashoffset', socCirc * (1 - fuelPct/100));
+    $('fuel-pct').textContent = Math.round(fuelPct) + '% tanque';
+  } else {
+    $('fuel-l').textContent = '— L';
+    $('fuel-pct').textContent = '— % tanque';
+  }
 
   // Power
   const motorKw    = +state.motor_power_kw || 0;
