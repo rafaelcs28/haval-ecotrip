@@ -21,6 +21,9 @@ final class OBDBridgeChannel: ObservableObject {
     @Published var webViewReady = false
     @Published var pushCount = 0
     @Published var lastError: String?
+    /// Flag setado quando o cluster pede pra abrir a navegação Apple Maps.
+    /// RootView observa via onChange e apresenta o NavigationModalView.
+    @Published var navRequested = false
     /// Modo debug — quando ON, snapshot inclui lista crua de PIDs lidos.
     /// O cluster.html renderiza overlay flutuante com tabela id/value/unit/age.
     @Published var debugMode: Bool = UserDefaults.standard.bool(forKey: "haval_obd_debug") {
@@ -79,7 +82,17 @@ final class OBDBridgeChannel: ObservableObject {
 
         // ── Aliases pros nomes que o cluster.html espera ──
         if let v = raw["rpm"]                    { out["engine_rpm"] = v }
-        if let v = raw["speed_kmh_obd"]          { out["speed_kmh"] = v }
+        // Velocidade: prefere OBD se > 0, senão GPS (PHEV em modo elétrico
+        // muitas vezes não responde 010D)
+        let obdKmh = raw["speed_kmh_obd"] as? Double
+        let gpsKmh = (location?.speedKmh)
+        if let o = obdKmh, o > 0.5 {
+            out["speed_kmh"] = o
+        } else if let g = gpsKmh, g >= 0 {
+            out["speed_kmh"] = g
+        } else if let o = obdKmh {
+            out["speed_kmh"] = o
+        }
         if let v = raw["control_voltage"]        { out["batt_12v_v"] = v }
         if let v = raw["oil_temp_c"]             { out["engine_temp_c"] = v }   // melhor proxy disponível
         if let v = raw["fuel_level_pct_22"]      { out["fuel_level_pct"] = v }
@@ -97,12 +110,24 @@ final class OBDBridgeChannel: ObservableObject {
         if let v = raw["pack_cells_total_v"] {
             out["pack_voltage_v"] = v   // sobrescreve E006 no estado do cluster
         }
-        // ── Motor power derivado: P = V × I / 1000 ──
-        // Bateria descarregando (I positiva) → motor_power_kw positivo (consumo)
-        // Bateria recarregando (I negativa) → motor_power_kw negativo (regen)
+        // ── Motor power derivado ──
+        // Preferência 1: P = V × I / 1000 (mais preciso, requer battery_current_a)
+        // Fallback: P_motor ≈ Σ(torque × rpm) / 9549 — quando E0A4 ausente
+        //   Como torque_max NÃO é o atual, uso uma heurística: rpm * 0.05 kW/rpm
+        //   (= ~50W por rpm) só pra ter movimento visível no card.
         let voltageForPower = (raw["pack_cells_total_v"] as? Double) ?? (raw["pack_voltage_v"] as? Double)
         if let v = voltageForPower, let i = raw["battery_current_a"] as? Double {
             out["motor_power_kw"] = v * i / 1000.0
+        } else {
+            // Fallback heurístico: rpm × 0.005 (kW)
+            let gmcuRpm = (raw["gmcu_motor_rpm"] as? Double) ?? 0
+            let tmcuRpm = (raw["tmcu_motor_rpm"] as? Double) ?? 0
+            let totalRpm = abs(gmcuRpm) + abs(tmcuRpm)
+            if totalRpm > 50 {
+                // Estimativa grosseira — só pra dar feedback visual
+                let sign: Double = (gmcuRpm + tmcuRpm) < 0 ? -1 : 1
+                out["motor_power_kw"] = sign * (totalRpm * 0.005)
+            }
         }
 
         // ── Derivados de estado ──
