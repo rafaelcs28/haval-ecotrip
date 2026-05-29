@@ -23,17 +23,21 @@ final class ELM327: ObservableObject {
     func initialize() async {
         initialized = false
         lastErrorMsg = nil
-        // Delay inicial — alguns adaptadores precisam de tempo após connect
         try? await Task.sleep(nanoseconds: 800_000_000)
-        // Sequência de boot. ATZ é reset completo — demora até 4s.
-        // Comandos seguintes respondem rápido.
+        // Sequência de boot. Importante: ATSP6 força CAN ISO 15765-4 11-bit
+        // 500 kbps — protocolo do Haval H6 PHEV (e maioria pós-2008). Pular
+        // a fase SEARCHING do auto-detect (ATSP0) que demora 5-10s e mete
+        // STOPPED nos primeiros polls.
         let initCommands: [(cmd: String, timeout: TimeInterval)] = [
             ("ATZ",  5.0),   // reset
             ("ATE0", 1.0),   // echo off
             ("ATL0", 1.0),   // line feed off
             ("ATH0", 1.0),   // headers off
             ("ATS0", 1.0),   // spaces off
-            ("ATSP0", 1.5),  // auto protocol
+            ("ATSP6", 1.5),  // CAN ISO 15765-4 11-bit 500kbps — Haval H6 PHEV
+            ("ATAT1", 1.0),  // adaptive timing
+            ("ATST32", 1.0), // ST = 50ms (timeout entre resposta e prompt)
+            ("0100",  6.0),  // primeira query — força negociação do protocolo agora
         ]
         for (cmd, to) in initCommands {
             let resp = await send(cmd, timeout: to)
@@ -41,12 +45,17 @@ final class ELM327: ObservableObject {
                 lastErrorMsg = "Sem resposta em \(cmd)"
                 return
             }
-            // Detecta erros explícitos
-            if resp.uppercased().contains("?") && cmd != "ATZ" {
+            // Detecta erros explícitos (mas "SEARCHING..." é normal em 0100 primeira vez)
+            let up = resp.uppercased()
+            if up.contains("?") && cmd != "ATZ" {
                 lastErrorMsg = "Erro em \(cmd): \(resp)"
                 return
             }
-            try? await Task.sleep(nanoseconds: 150_000_000)
+            if up.contains("UNABLE TO CONNECT") {
+                lastErrorMsg = "ECU não responde (carro desligado?)"
+                return
+            }
+            try? await Task.sleep(nanoseconds: 200_000_000)
         }
         initialized = true
         startPolling()
@@ -65,8 +74,15 @@ final class ELM327: ObservableObject {
     @discardableResult
     func poll(_ pid: PIDDefinition) async -> OBDSample? {
         guard initialized else { return nil }
-        let raw = await send(pid.command, timeout: 1.0)
+        // Timeout 2s — Haval responde em ~50-200ms, mas pode subir em rajada
+        let raw = await send(pid.command, timeout: 2.0)
         guard !raw.isEmpty else { return nil }
+        // Ignora respostas administrativas que não são dados de PID
+        let up = raw.uppercased()
+        if up.contains("STOPPED") || up.contains("SEARCHING") ||
+           up.contains("NO DATA") || up.contains("UNABLE") {
+            return nil
+        }
         // Limpa o eco/prompt/whitespace e pega só os bytes hex
         let cleaned = raw
             .replacingOccurrences(of: ">", with: "")
