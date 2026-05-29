@@ -108,25 +108,67 @@ extension BridgePublisher: CocoaMQTTDelegate {
             DispatchQueue.main.async {
                 self.connected = true
                 self.startPublishLoop()
-                // Inscreve no tópico que o bridge publica com state extra
-                // (viagem em curso, preços, charging) pra alimentar o cluster.
-                let extraTopic = "haval/ecotrip/cluster_extra"
-                mqtt.subscribe(extraTopic, qos: .qos0)
-                print("[bridge] subscribed em \(extraTopic)")
+                // Tópicos pra alimentar o cluster do iPad:
+                // - cluster_extra: payload JSON consolidado (publicado pelo bridge novo)
+                // - current_trip: viagem em curso (publicado direto pelo APK do carro)
+                // - charging_state / charge_power_kw / preços: campos individuais
+                let topics = [
+                    "haval/ecotrip/cluster_extra",
+                    "haval/ecotrip/current_trip",
+                    "haval/ecotrip/charging_state",
+                    "haval/ecotrip/charge_power_kw",
+                    "haval/ecotrip/price_kwh",
+                    "haval/ecotrip/price_gas_per_l",
+                    "haval/ecotrip/battery_avg_price_per_kwh",
+                    "haval/ecotrip/tank_avg_price_per_l",
+                ]
+                for t in topics {
+                    mqtt.subscribe(t, qos: .qos0)
+                }
+                print("[bridge] subscribed em \(topics.count) tópicos")
             }
         }
     }
     func mqtt(_ mqtt: CocoaMQTT, didPublishMessage message: CocoaMQTTMessage, id: UInt16) {}
     func mqtt(_ mqtt: CocoaMQTT, didPublishAck id: UInt16) {}
     func mqtt(_ mqtt: CocoaMQTT, didReceiveMessage message: CocoaMQTTMessage, id: UInt16) {
-        // Tópico cluster_extra: JSON com campos bridge-only pro cluster do iPad
-        if message.topic == "haval/ecotrip/cluster_extra" {
-            guard let data = message.string?.data(using: .utf8),
-                  let obj  = try? JSONSerialization.jsonObject(with: data),
-                  let dict = obj as? [String: Any] else { return }
-            DispatchQueue.main.async {
-                self.onClusterExtra?(dict)
+        guard let str = message.string else { return }
+        var dict: [String: Any] = [:]
+        switch message.topic {
+        case "haval/ecotrip/cluster_extra":
+            // JSON consolidado (bridge novo)
+            if let data = str.data(using: .utf8),
+               let obj  = try? JSONSerialization.jsonObject(with: data),
+               let d = obj as? [String: Any] {
+                dict = d
             }
+        case "haval/ecotrip/current_trip":
+            // Viagem em curso publicada DIRETO pelo APK do carro
+            if let data = str.data(using: .utf8),
+               let obj  = try? JSONSerialization.jsonObject(with: data),
+               let trip = obj as? [String: Any] {
+                dict["current_trip"] = trip
+            }
+        case "haval/ecotrip/charging_state":
+            // String "Carregando" / "Direção" / "Parado" / etc → bool numérico
+            let isCharging = str.lowercased().contains("carreg") || str.lowercased() == "charging"
+            dict["charging_state"] = isCharging ? 1 : 0
+        case "haval/ecotrip/charge_power_kw":
+            if let v = Double(str) { dict["charge_power_kw"] = v }
+        case "haval/ecotrip/price_kwh":
+            if let v = Double(str) { dict["price_kwh"] = v }
+        case "haval/ecotrip/price_gas_per_l":
+            if let v = Double(str) { dict["price_gas_per_l"] = v }
+        case "haval/ecotrip/battery_avg_price_per_kwh":
+            if let v = Double(str) { dict["battery_avg_price_per_kwh"] = v }
+        case "haval/ecotrip/tank_avg_price_per_l":
+            if let v = Double(str) { dict["tank_avg_price_per_l"] = v }
+        default:
+            return
+        }
+        if dict.isEmpty { return }
+        DispatchQueue.main.async {
+            self.onClusterExtra?(dict)
         }
     }
     func mqtt(_ mqtt: CocoaMQTT, didSubscribeTopics success: NSDictionary, failed: [String]) {}
