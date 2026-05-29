@@ -74,6 +74,17 @@ final class BridgePublisher: ObservableObject {
         // Mantido o método pra não quebrar callers.
     }
 
+    /// Publica um comando MQTT (ligar A/C, mudar drive mode, etc).
+    /// Tópicos comuns: haval/ecotrip/cmd/hvac/ac_enable, .../charge_limit, etc.
+    func publishCommand(topic: String, value: String) {
+        guard let m = mqtt, connected else {
+            print("[bridge] não conectado, comando descartado: \(topic) = \(value)")
+            return
+        }
+        m.publish(topic, withString: value, qos: .qos1, retained: false)
+        print("[bridge] cmd publicado: \(topic) = \(value)")
+    }
+
     private func flushSnapshot() {
         guard connected else { return }
         var dict: [String: Any] = [

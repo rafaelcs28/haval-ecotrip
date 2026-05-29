@@ -18,8 +18,9 @@ extension Notification.Name {
 struct ClusterWebView: UIViewRepresentable {
     @EnvironmentObject var elm: ELM327
     @EnvironmentObject var channel: OBDBridgeChannel
+    @EnvironmentObject var publisher: BridgePublisher
 
-    func makeCoordinator() -> Coordinator { Coordinator(channel: channel) }
+    func makeCoordinator() -> Coordinator { Coordinator(channel: channel, publisher: publisher) }
 
     func makeUIView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
@@ -70,18 +71,34 @@ struct ClusterWebView: UIViewRepresentable {
 
     final class Coordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
         let channel: OBDBridgeChannel
-        init(channel: OBDBridgeChannel) { self.channel = channel }
+        let publisher: BridgePublisher
+        init(channel: OBDBridgeChannel, publisher: BridgePublisher) {
+            self.channel = channel
+            self.publisher = publisher
+        }
 
         func userContentController(_ controller: WKUserContentController,
                                    didReceive message: WKScriptMessage) {
             guard let dict = message.body as? [String: Any] else { return }
             let action = dict["action"] as? String ?? ""
+            let value = dict["value"] as? String ?? ""
             switch action {
             case "open_nav_modal":
                 print("[obd-bridge] open_nav_modal recebido — incrementando navRequestId")
                 DispatchQueue.main.async {
                     self.channel.navRequestId += 1
                 }
+            case "hvac_ac":
+                publisher.publishCommand(topic: "haval/ecotrip/cmd/hvac/ac_enable", value: value)
+            case "hvac_temp":
+                publisher.publishCommand(topic: "haval/ecotrip/cmd/hvac/driver_temp", value: value)
+                publisher.publishCommand(topic: "haval/ecotrip/cmd/hvac/passenger_temp", value: value)
+            case "hvac_fan":
+                publisher.publishCommand(topic: "haval/ecotrip/cmd/hvac/fan_speed", value: value)
+            case "regen_level":
+                publisher.publishCommand(topic: "haval/ecotrip/cmd/regen_level", value: value)
+            case "drive_mode":
+                publisher.publishCommand(topic: "haval/ecotrip/cmd/drive_mode", value: value)
             case "open_nav":
                 let app = (dict["app"] as? String ?? "waze").lowercased()
                 let schemes: [String: String] = [
