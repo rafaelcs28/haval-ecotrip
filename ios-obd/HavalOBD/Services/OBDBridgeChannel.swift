@@ -83,16 +83,17 @@ final class OBDBridgeChannel: ObservableObject {
 
         // ── Aliases pros nomes que o cluster.html espera ──
         if let v = raw["rpm"]                    { out["engine_rpm"] = v }
-        // Velocidade: prefere OBD se > 0, senão GPS (PHEV em modo elétrico
-        // muitas vezes não responde 010D)
+        // Velocidade: GPS é fonte preferida (sempre atualiza enquanto move).
+        // OBD 010D é fallback (ECM dorme em modo elétrico).
+        // SEMPRE seta speed_kmh — mesmo com 0 — pra resetar valor stale.
         let obdKmh = raw["speed_kmh_obd"] as? Double
-        let gpsKmh = (location?.speedKmh)
-        if let o = obdKmh, o > 0.5 {
-            out["speed_kmh"] = o
-        } else if let g = gpsKmh, g >= 0 {
+        let gpsKmh = location?.speedKmh
+        if let g = gpsKmh, g >= 0 {
             out["speed_kmh"] = g
-        } else if let o = obdKmh {
+        } else if let o = obdKmh, o >= 0 {
             out["speed_kmh"] = o
+        } else {
+            out["speed_kmh"] = 0
         }
         if let v = raw["control_voltage"]        { out["batt_12v_v"] = v }
         if let v = raw["oil_temp_c"]             { out["engine_temp_c"] = v }   // melhor proxy disponível
@@ -192,6 +193,35 @@ final class OBDBridgeChannel: ObservableObject {
         if debugMode {
             let now = Date()
             var debugList: [[String: Any]] = []
+            // GPS no debug pra diagnosticar se autorização/fix está chegando
+            if let loc = location {
+                let gpsAuth = loc.authorized ? "ok" : "negado"
+                debugList.append([
+                    "id": "_gps_status", "value": gpsAuth, "unit": "", "age_ms": 0,
+                ])
+                if let la = loc.lat, let lo = loc.lng {
+                    let lastFix = loc.lastFixAt.map { Int(now.timeIntervalSince($0) * 1000) } ?? 0
+                    debugList.append([
+                        "id": "_gps_lat", "value": la, "unit": "°", "age_ms": lastFix,
+                    ])
+                    debugList.append([
+                        "id": "_gps_lng", "value": lo, "unit": "°", "age_ms": lastFix,
+                    ])
+                    if let s = loc.speedKmh {
+                        debugList.append([
+                            "id": "_gps_speed", "value": s, "unit": "km/h", "age_ms": lastFix,
+                        ])
+                    } else {
+                        debugList.append([
+                            "id": "_gps_speed", "value": "nil (-1)", "unit": "km/h", "age_ms": lastFix,
+                        ])
+                    }
+                } else {
+                    debugList.append([
+                        "id": "_gps_lat", "value": "nil", "unit": "", "age_ms": 0,
+                    ])
+                }
+            }
             for (key, sample) in elm.samples {
                 if let v = sample.value {
                     var item: [String: Any] = [
