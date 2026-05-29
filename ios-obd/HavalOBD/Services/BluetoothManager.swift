@@ -181,37 +181,53 @@ extension BluetoothManager: CBPeripheralDelegate {
             DispatchQueue.main.async { self.debugChars.append(desc) }
             log("BT", "char \(desc)")
         }
-        // Estratégia de seleção:
-        //   1. Se UUID está nos preferred — assume papel apropriado
-        //   2. Se não, usa heurística por properties
+        // Estratégia robusta de seleção (corrige Veepeak BLE 5.0 e similares):
+        //
+        // Veepeak / clones modernos usam DUAS characteristics separadas:
+        //   • Char "Write-only" [-W]  → canal de COMANDO (TX)
+        //   • Char "Notify+Write" [NW] → canal de RESPOSTA (RX), Write é só pra subscribe
+        //
+        // Se eu usar a mesma char pra rx+tx, o comando AT é interpretado como
+        // subscribe-config e o adaptador nunca responde.
+        //
+        // Estratégia:
+        //   1. Se temos write-only E notify (em chars diferentes) → SPLIT
+        //   2. Caso contrário → fallback pra char que faz ambos
+        var writeOnlyChar: CBCharacteristic? = nil
+        var notifyChar:    CBCharacteristic? = nil
+        var bothChar:      CBCharacteristic? = nil
         for c in chars {
-            let isPreferred = preferredCharUUIDs.contains(c.uuid)
             let canNotify = c.properties.contains(.notify) || c.properties.contains(.indicate)
             let canWrite  = c.properties.contains(.write)  || c.properties.contains(.writeWithoutResponse)
-            // Caso 1: characteristic faz AMBOS — ideal pra clones genéricos
-            if canNotify && canWrite {
-                rxChar = c; txChar = c
-                peripheral.setNotifyValue(true, for: c)
-                log("BT", "rx+tx: \(c.uuid)")
-                break
-            }
-            // Caso 2: notify só — vai ser rx
-            if canNotify && rxChar == nil {
-                rxChar = c
-                peripheral.setNotifyValue(true, for: c)
-                log("BT", "rx: \(c.uuid)")
-            }
-            // Caso 3: write só — vai ser tx
-            if canWrite && txChar == nil {
-                txChar = c
-                log("BT", "tx: \(c.uuid)")
-            }
-            _ = isPreferred  // (poderia priorizar — não complica pro MVP)
+            if canNotify && canWrite { bothChar     = bothChar     ?? c }
+            else if canWrite         { writeOnlyChar = writeOnlyChar ?? c }
+            else if canNotify        { notifyChar   = notifyChar   ?? c }
         }
-        if rxChar != nil && txChar != nil && state != .ready {
+        if state == .ready { return }  // já mapeou em service anterior
+
+        // Caso 1: SPLIT (preferido pra Veepeak/clones modernos)
+        if let w = writeOnlyChar, let n = (notifyChar ?? bothChar) {
+            txChar = w
+            rxChar = n
+            peripheral.setNotifyValue(true, for: n)
             state = .ready
-            log("BT", "pronto · rx + tx mapeados")
+            log("BT", "rx (notify): \(n.uuid)")
+            log("BT", "tx (write):  \(w.uuid)")
+            log("BT", "pronto · split rx/tx")
+            return
         }
+        // Caso 2: SAME (clones que aceitam comando+resposta na mesma char)
+        if let c = bothChar {
+            rxChar = c; txChar = c
+            peripheral.setNotifyValue(true, for: c)
+            state = .ready
+            log("BT", "rx+tx: \(c.uuid)")
+            log("BT", "pronto · single char")
+            return
+        }
+        // Caso 3: parcial (rx OU tx, nunca os dois — não vai funcionar mas logamos)
+        if let n = notifyChar { rxChar = n; peripheral.setNotifyValue(true, for: n); log("BT", "só rx: \(n.uuid)") }
+        if let w = writeOnlyChar { txChar = w; log("BT", "só tx: \(w.uuid)") }
     }
 
     func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
