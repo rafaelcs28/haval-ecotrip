@@ -108,11 +108,33 @@ final class ELM327: ObservableObject {
         }
     }
 
+    private var currentHeader: String = ""
+
+    /// Aplica configuração de ECU se mudou desde o último poll (evita ATSH
+    /// repetido — só configura quando troca de ECU).
+    private func ensureHeader(for pid: PIDDefinition) async {
+        guard let header = pid.header else {
+            // Mode 01 padrão usa broadcast — só reseta se a última foi custom
+            if !currentHeader.isEmpty && currentHeader != "7DF" {
+                _ = await send("ATSH7DF", timeout: 1.0)
+                _ = await send("ATCRA", timeout: 1.0)  // limpa filter
+                currentHeader = "7DF"
+            }
+            return
+        }
+        if currentHeader == header { return }
+        for cmd in PIDRegistry.setupCommands(forHeader: header, receiveFilter: pid.receiveFilter) {
+            _ = await send(cmd, timeout: 1.5)
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+        currentHeader = header
+    }
+
     /// Manda um PID específico, parseia e atualiza o store.
     @discardableResult
     func poll(_ pid: PIDDefinition) async -> OBDSample? {
         guard initialized else { return nil }
-        // Timeout 2s — Haval responde em ~50-200ms, mas pode subir em rajada
+        await ensureHeader(for: pid)
         let raw = await send(pid.command, timeout: 2.0)
         guard !raw.isEmpty else { return nil }
         // Ignora respostas administrativas que não são dados de PID
