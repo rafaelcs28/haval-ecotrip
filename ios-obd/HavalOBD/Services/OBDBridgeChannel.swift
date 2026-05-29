@@ -5,38 +5,53 @@ import Combine
 /// Bombeia os dados do ELM327 pro WebView a 5Hz (suave pros gauges) +
 /// estado completo a 1Hz (pra widgets menos críticos).
 ///
-/// Em paralelo, mantém a publicação MQTT pro bridge como fallback/sync.
-/// Tudo offline-first: o app NÃO depende de internet pra funcionar.
+/// Tem 2 gates de segurança:
+///   • webViewReady — só pusha depois do cluster.html terminar de carregar
+///                    (didFinish navigation). Antes disso, evaluateJavaScript
+///                    falha porque window._nativeBridge ainda não existe.
+///   • completionHandler do evaluateJavaScript silencia erros pra não poluir
+///     logs (e impedir o WebKit de spamear o Console).
 @MainActor
 final class OBDBridgeChannel: ObservableObject {
     weak var webView: WKWebView?
     private weak var elm: ELM327?
-    private var bag = Set<AnyCancellable>()
     private var fastTimer: Timer?
     private var slowTimer: Timer?
+    @Published var webViewReady = false
+    @Published var pushCount = 0
+    @Published var lastError: String?
 
     func attach(webView: WKWebView, elm: ELM327) {
         self.webView = webView
         self.elm = elm
-        // Loop rápido (5Hz) — só os fast PIDs (RPM, speed, motor_kw)
+        // NÃO inicia os timers ainda — só após webViewReady = true
+    }
+
+    /// Chamado pelo ClusterWebView quando o cluster.html termina de carregar.
+    func markReady() {
+        guard !webViewReady else { return }
+        webViewReady = true
+        // Loop rápido — só os fast PIDs (RPM, speed, motor_kw)
         fastTimer?.invalidate()
         fastTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.pushFast() }
         }
-        // Loop lento (1Hz) — payload completo com todas as samples
+        // Loop lento — payload completo
         slowTimer?.invalidate()
         slowTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.pushFull() }
         }
+        print("[OBDBridgeChannel] webView ready — push iniciado")
     }
 
-    deinit {
-        fastTimer?.invalidate(); slowTimer?.invalidate()
+    func stop() {
+        fastTimer?.invalidate(); fastTimer = nil
+        slowTimer?.invalidate(); slowTimer = nil
+        webViewReady = false
     }
 
-    /// Push apenas dos PIDs marcados como `fast` — sem JSON encoding pesado.
     private func pushFast() {
-        guard let webView = webView, let elm = elm, !elm.samples.isEmpty else { return }
+        guard webViewReady, let webView = webView, let elm = elm, !elm.samples.isEmpty else { return }
         let fastIds: Set<String> = ["rpm", "speed_kmh", "motor_power_kw", "engine_rpm",
                                     "throttle_pct", "battery_current_a", "soc_pct"]
         var dict: [String: Any] = ["__fast": true]
@@ -49,9 +64,8 @@ final class OBDBridgeChannel: ObservableObject {
         injectSnapshot(dict, on: webView)
     }
 
-    /// Push completo a 1Hz com todos os PIDs ativos.
     private func pushFull() {
-        guard let webView = webView, let elm = elm else { return }
+        guard webViewReady, let webView = webView, let elm = elm else { return }
         var dict: [String: Any] = [
             "ts": ISO8601DateFormatter().string(from: Date()),
             "source": "obd_ble",
@@ -67,8 +81,19 @@ final class OBDBridgeChannel: ObservableObject {
     private func injectSnapshot(_ dict: [String: Any], on webView: WKWebView) {
         guard let data = try? JSONSerialization.data(withJSONObject: dict, options: []),
               let json = String(data: data, encoding: .utf8) else { return }
-        // evaluateJavaScript tem que ser na main thread (já estamos por @MainActor)
         let js = "if (window._nativeBridge && window._nativeBridge.update) window._nativeBridge.update(\(json));"
-        webView.evaluateJavaScript(js, completionHandler: nil)
+        // Completion handler SILENCIA erros (sem propagar pro Console).
+        // Erros comuns:
+        //   • WKErrorDomain Code=5 (JavaScript exception)
+        //   • WKErrorDomain Code=14 (frame load interrupted) — durante reload
+        webView.evaluateJavaScript(js) { [weak self] _, error in
+            if let error = error {
+                let msg = (error as NSError).localizedDescription
+                self?.lastError = msg
+            } else {
+                self?.pushCount &+= 1
+                self?.lastError = nil
+            }
+        }
     }
 }
