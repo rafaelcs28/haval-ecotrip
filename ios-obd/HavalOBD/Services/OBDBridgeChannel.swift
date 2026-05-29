@@ -21,9 +21,10 @@ final class OBDBridgeChannel: ObservableObject {
     @Published var webViewReady = false
     @Published var pushCount = 0
     @Published var lastError: String?
-    /// Flag setado quando o cluster pede pra abrir a navegação Apple Maps.
+    /// Contador incrementado quando o cluster pede pra abrir a navegação Apple Maps.
     /// RootView observa via onChange e apresenta o NavigationModalView.
-    @Published var navRequested = false
+    /// Usar Int em vez de Bool evita race condition de reset.
+    @Published var navRequestId: Int = 0
     /// Modo debug — quando ON, snapshot inclui lista crua de PIDs lidos.
     /// O cluster.html renderiza overlay flutuante com tabela id/value/unit/age.
     @Published var debugMode: Bool = UserDefaults.standard.bool(forKey: "haval_obd_debug") {

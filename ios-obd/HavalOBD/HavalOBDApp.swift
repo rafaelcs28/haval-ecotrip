@@ -97,11 +97,9 @@ struct RootView: View {
         }
         .sheet(isPresented: $showSettings) { SettingsView() }
         .fullScreenCover(isPresented: $showNav) { NavigationModalView() }
-        .onChange(of: channel.navRequested) { _, requested in
-            if requested {
-                showNav = true
-                channel.navRequested = false   // reset pra próxima
-            }
+        .onChange(of: channel.navRequestId) { old, new in
+            print("[RootView] navRequestId \(old) → \(new) — abrindo modal")
+            if new > old { showNav = true }
         }
         .onChange(of: channel.webViewReady) { _, ready in
             if ready {

@@ -76,9 +76,9 @@ struct ClusterWebView: UIViewRepresentable {
             let action = dict["action"] as? String ?? ""
             switch action {
             case "open_nav_modal":
-                // Abre modal de navegação nativa Apple Maps com turn-by-turn
-                Task { @MainActor in
-                    self.channel.navRequested = true
+                print("[obd-bridge] open_nav_modal recebido — incrementando navRequestId")
+                DispatchQueue.main.async {
+                    self.channel.navRequestId += 1
                 }
             case "open_nav":
                 let app = (dict["app"] as? String ?? "waze").lowercased()
