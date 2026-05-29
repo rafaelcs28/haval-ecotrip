@@ -245,47 +245,65 @@
   .trip-val.orange { color: var(--orange); }
   .trip-val.yellow { color: var(--yellow); }
 
-  /* ───────── Fluxo de energia ───────── */
+  /* ───────── Fluxo de energia (v2 — SVG diagrama) ───────── */
   .flow-stage {
-    flex: 1; display: grid;
-    grid-template-columns: 1fr 1fr 1fr;
-    grid-template-rows: 1fr 1fr;
-    place-items: center;
-    gap: 8px; padding: 6px;
+    flex: 1; position: relative;
+    display: flex; flex-direction: column; gap: 6px;
   }
-  .flow-node {
-    width: 76px; height: 76px; border-radius: 50%;
-    background: var(--panel-lift);
-    border: 2px solid var(--border-hi);
-    display: flex; align-items: center; justify-content: center;
-    font-size: 34px;
-    position: relative;
-    transition: border-color .3s, transform .3s, box-shadow .3s;
+  .flow-svg { flex: 1; width: 100%; height: 100%; min-height: 0; }
+  /* Linhas / setas */
+  .flow-line {
+    stroke: var(--border-hi); stroke-width: 3; fill: none;
+    transition: stroke .3s, stroke-width .3s;
   }
-  .flow-node.active { border-color: var(--green); transform: scale(1.05); box-shadow: 0 0 16px rgba(34,197,94,.4); }
-  .flow-node.active.ice { border-color: var(--orange); box-shadow: 0 0 16px rgba(251,146,60,.4); }
-  .flow-node .lbl {
-    position: absolute; bottom: -16px; left: 50%; transform: translateX(-50%);
-    font-size: 9px; letter-spacing: .12em; color: var(--muted);
-    white-space: nowrap; text-transform: uppercase;
+  .flow-line.active   { stroke: var(--green); stroke-width: 4; }
+  .flow-line.ice      { stroke: var(--orange); }
+  .flow-line.regen    { stroke: var(--green); }
+  .flow-line.charge   { stroke: var(--blue); }
+  /* Tracejado animado (dash) — só ativo quando há fluxo */
+  .flow-line.flowing { stroke-dasharray: 6 6; animation: dash-flow 1s linear infinite; }
+  .flow-line.flowing.reverse { animation-direction: reverse; }
+  @keyframes dash-flow { to { stroke-dashoffset: -24; } }
+  /* Nós */
+  .flow-node-bg {
+    fill: var(--panel-lift); stroke: var(--border-hi); stroke-width: 2;
+    transition: stroke .3s, fill .3s;
   }
-  .flow-node .val {
-    position: absolute; top: -14px; left: 50%; transform: translateX(-50%);
-    font-size: 11px; font-weight: 600; color: var(--green);
-    white-space: nowrap;
+  .flow-node-bg.active { stroke: var(--green); fill: rgba(34,197,94,.1); }
+  .flow-node-bg.ice    { stroke: var(--orange); fill: rgba(251,146,60,.1); }
+  .flow-node-bg.charge { stroke: var(--blue); fill: rgba(56,189,248,.1); }
+  .flow-emoji {
+    font-size: 22px; text-anchor: middle; dominant-baseline: middle;
+    pointer-events: none;
   }
-  .flow-node.ice .val { color: var(--orange); }
-  .flow-arrow {
-    color: var(--dim); font-size: 22px; font-weight: 100;
-    transition: color .3s;
+  .flow-label {
+    font-size: 9px; fill: var(--muted); text-anchor: middle;
+    letter-spacing: .1em; text-transform: uppercase;
   }
-  .flow-arrow.active { color: var(--green); animation: flow-pulse 1.2s ease-in-out infinite; }
-  .flow-arrow.active.ice { color: var(--orange); }
-  .flow-arrow.regen { color: var(--green); animation: flow-pulse 1.2s ease-in-out infinite reverse; }
-  @keyframes flow-pulse {
-    0%, 100% { opacity: .4; transform: scale(.95); }
-    50%      { opacity: 1; transform: scale(1.1); }
+  .flow-value {
+    font-size: 10px; fill: var(--text); text-anchor: middle; font-weight: 600;
+    font-variant-numeric: tabular-nums;
   }
+  .flow-value.ice { fill: var(--orange); }
+  .flow-value.green { fill: var(--green); }
+  /* Badge do modo atual no centro */
+  .flow-mode {
+    position: absolute; left: 50%; bottom: 8px;
+    transform: translateX(-50%);
+    background: var(--panel-lift); border: 1px solid var(--border-hi);
+    color: var(--text); font-size: 10px; font-weight: 700;
+    letter-spacing: .18em; text-transform: uppercase;
+    padding: 5px 14px; border-radius: 999px;
+    pointer-events: none;
+    transition: color .3s, border-color .3s, background .3s;
+  }
+  .flow-mode.ev      { color: var(--green);  border-color: var(--green);  background: rgba(34,197,94,.12); }
+  .flow-mode.regen   { color: var(--green);  border-color: var(--green);  background: rgba(34,197,94,.18); }
+  .flow-mode.serie   { color: var(--orange); border-color: var(--orange); background: rgba(251,146,60,.12); }
+  .flow-mode.paralelo{ color: var(--orange); border-color: var(--orange); background: rgba(251,146,60,.12); }
+  .flow-mode.split   { color: var(--yellow); border-color: var(--yellow); background: rgba(250,204,21,.12); }
+  .flow-mode.carga   { color: var(--blue);   border-color: var(--blue);   background: rgba(56,189,248,.12); }
+  .flow-mode.idle    { color: var(--muted);  border-color: var(--border); }
 
   /* ───────── Stale dim ───────── */
   body.stale .float-card, body.stale .widget { filter: brightness(.6) saturate(.5); }
@@ -461,28 +479,50 @@
       </div>
     </div>
 
-    <!-- Fluxo -->
+    <!-- Fluxo de energia (v2 — diagrama com modo) -->
     <div class="widget">
       <h3><span class="ico">🔄</span> Fluxo de energia</h3>
       <div class="flow-stage">
-        <div class="flow-node ice" id="node-ice">
-          ⛽
-          <div class="val" id="flow-ice">0 L/h</div>
-          <div class="lbl">Motor</div>
-        </div>
-        <div class="flow-arrow" id="arrow-ice-batt">→</div>
-        <div class="flow-node" id="node-batt">
-          🔋
-          <div class="val" id="flow-batt"><span id="soc-pct-mini">—</span>%</div>
-          <div class="lbl">Bateria</div>
-        </div>
-        <div class="flow-arrow regen" id="arrow-wheels-batt" style="grid-column:1; grid-row:2"></div>
-        <div class="flow-arrow" id="arrow-batt-motor" style="grid-column:2; grid-row:2">→</div>
-        <div class="flow-node" id="node-wheels" style="grid-column:3; grid-row:2">
-          🛞
-          <div class="val" id="flow-wheels">0 kW</div>
-          <div class="lbl">Rodas</div>
-        </div>
+        <svg class="flow-svg" viewBox="0 0 360 200" preserveAspectRatio="xMidYMid meet">
+          <!-- Linhas de conexão (definidas antes dos nós pra ficarem atrás) -->
+          <!-- ICE → Battery (série: motor a comb. carrega bateria) -->
+          <path id="line-ice-batt"   class="flow-line" d="M 60 80 L 180 80"/>
+          <!-- Battery → Motor → Wheels (EV: bateria propulsiona) -->
+          <path id="line-batt-motor" class="flow-line" d="M 180 95 L 180 145"/>
+          <path id="line-motor-wheels" class="flow-line" d="M 195 160 L 285 160"/>
+          <!-- ICE → Wheels direto (paralelo: motor a comb. na roda) -->
+          <path id="line-ice-wheels" class="flow-line" d="M 60 95 Q 60 160 165 160"/>
+          <!-- Carga externa → Battery -->
+          <path id="line-charge" class="flow-line" d="M 295 50 L 195 75"/>
+
+          <!-- Nós -->
+          <!-- ICE -->
+          <circle class="flow-node-bg ice" id="node-ice"   cx="45" cy="80" r="22"/>
+          <text class="flow-emoji" x="45" y="82">⛽</text>
+          <text class="flow-label" x="45" y="115">ICE</text>
+          <text class="flow-value ice" id="val-ice" x="45" y="55">—</text>
+
+          <!-- Battery -->
+          <circle class="flow-node-bg" id="node-batt"     cx="180" cy="80" r="22"/>
+          <text class="flow-emoji" x="180" y="82">🔋</text>
+          <text class="flow-label" x="180" y="115">Bateria</text>
+          <text class="flow-value green" id="val-batt" x="180" y="55">—</text>
+
+          <!-- Wheels -->
+          <circle class="flow-node-bg" id="node-wheels"   cx="300" cy="160" r="22"/>
+          <text class="flow-emoji" x="300" y="162">🛞</text>
+          <text class="flow-label" x="300" y="195">Rodas</text>
+          <text class="flow-value" id="val-wheels" x="300" y="135">—</text>
+
+          <!-- Motor elétrico (intermediário) -->
+          <circle class="flow-node-bg" id="node-motor"    cx="180" cy="160" r="18"/>
+          <text class="flow-emoji" x="180" y="162" style="font-size:18px">⚙️</text>
+
+          <!-- Carga externa (mostra só quando charging) -->
+          <circle class="flow-node-bg charge" id="node-charge" cx="310" cy="40" r="14" opacity="0"/>
+          <text class="flow-emoji" id="emoji-charge" x="310" y="42" style="font-size:14px;opacity:0">🔌</text>
+        </svg>
+        <div class="flow-mode idle" id="flow-mode">parado</div>
       </div>
     </div>
 
@@ -778,21 +818,106 @@ function render() {
   const eqL = pGas > 0.01 ? tripCost / pGas : 0;
   $('trip-eff').textContent = (distKm > 1 && eqL > 0.01) ? fmt1(distKm / eqL) : '—';
 
-  // Fluxo
-  const iceOn   = (+state.engine_state || 0) >= 1 || (+state.engine_rpm || 0) > 100;
+  // ═══════ Fluxo de energia v2 — detecta modo + anima fluxos ═══════
+  const rpm        = +state.engine_rpm || 0;
+  const engineSt   = +state.engine_state || 0;
+  const battCurr   = +state.battery_current_a || 0;   // + entrando, - saindo
+  const battEntering = battCurr > 1;
+  const iceOn   = engineSt >= 1 || rpm > 100;
   const motorOn = Math.abs(motorKw) > 0.5;
   const regen   = motorKw < -0.5;
-  $('node-ice').classList.toggle('active', iceOn);
-  $('arrow-ice-batt').classList.toggle('active', iceOn);
-  $('arrow-ice-batt').classList.add('ice');
-  $('node-batt').classList.toggle('active', motorOn || iceOn);
-  $('arrow-batt-motor').classList.toggle('active', motorOn && !regen);
-  $('arrow-wheels-batt').textContent = regen ? '←' : '→';
-  $('arrow-wheels-batt').classList.toggle('regen', regen);
-  $('arrow-wheels-batt').classList.toggle('active', motorOn);
+
+  // Estima consumo ICE em L/h por RPM (lookup empírica do H6 PHEV 1.5T)
+  let fuelRate = 0;
+  if (iceOn) {
+    if (rpm < 800)       fuelRate = 0.3;
+    else if (rpm < 1500) fuelRate = 2.0;
+    else if (rpm < 2500) fuelRate = 4.0;
+    else if (rpm < 3500) fuelRate = 6.5;
+    else                 fuelRate = 9.0;
+  }
+
+  // Detecta modo (ordem importa — mais específico primeiro)
+  let mode = 'idle', modeLbl = 'parado';
+  if (isCharging) {
+    mode = 'carga'; modeLbl = 'carga externa';
+  } else if (regen) {
+    mode = 'regen'; modeLbl = 'regenerando';
+  } else if (!iceOn && motorKw > 0.5 && spd > 0) {
+    mode = 'ev'; modeLbl = 'modo EV';
+  } else if (iceOn && spd < 20 && battEntering) {
+    mode = 'serie'; modeLbl = 'série';
+  } else if (iceOn && motorKw > 5 && spd > 30) {
+    mode = 'split'; modeLbl = 'split';
+  } else if (iceOn && spd > 50 && motorKw < 5 && rpm > 1200) {
+    mode = 'paralelo'; modeLbl = 'paralelo';
+  } else if (motorOn) {
+    mode = 'ev'; modeLbl = 'modo EV';
+  }
+
+  // Aplica modo no badge
+  const modeEl = $('flow-mode');
+  modeEl.className = 'flow-mode ' + mode;
+  modeEl.textContent = modeLbl;
+
+  // Ativa nós conforme estado
+  $('node-ice').classList.toggle('ice', iceOn);
+  $('node-batt').classList.toggle('active', motorOn || iceOn || isCharging);
   $('node-wheels').classList.toggle('active', spd > 1);
-  $('flow-wheels').textContent = Math.abs(motorKw).toFixed(1) + ' kW';
-  $('flow-ice').textContent = iceOn ? '~' + ((+state.engine_rpm || 0) / 1000).toFixed(1) + 'krpm' : 'off';
+  $('node-motor').classList.toggle('active', motorOn);
+  // Carga externa: mostra/esconde nó+emoji do plug
+  const showCharge = isCharging;
+  $('node-charge').setAttribute('opacity', showCharge ? '1' : '0');
+  $('emoji-charge').style.opacity = showCharge ? '1' : '0';
+
+  // Animação das linhas — cada uma conforme modo
+  function setLine(id, opts) {
+    const el = $(id);
+    el.classList.remove('active','ice','regen','charge','flowing','reverse');
+    if (opts.color) el.classList.add(opts.color);
+    if (opts.active) el.classList.add('active');
+    if (opts.flowing) el.classList.add('flowing');
+    if (opts.reverse) el.classList.add('reverse');
+  }
+  // Reset todas
+  setLine('line-ice-batt',   {});
+  setLine('line-batt-motor', {});
+  setLine('line-motor-wheels', {});
+  setLine('line-ice-wheels', {});
+  setLine('line-charge',     {});
+
+  if (mode === 'ev') {
+    setLine('line-batt-motor',   { active: true, flowing: true });
+    setLine('line-motor-wheels', { active: true, flowing: true });
+  } else if (mode === 'regen') {
+    setLine('line-motor-wheels', { color: 'regen', flowing: true, reverse: true });
+    setLine('line-batt-motor',   { color: 'regen', flowing: true, reverse: true });
+  } else if (mode === 'serie') {
+    setLine('line-ice-batt', { color: 'ice', flowing: true });
+    if (motorOn) {
+      setLine('line-batt-motor',   { active: true, flowing: true });
+      setLine('line-motor-wheels', { active: true, flowing: true });
+    }
+  } else if (mode === 'paralelo') {
+    setLine('line-ice-wheels', { color: 'ice', flowing: true });
+  } else if (mode === 'split') {
+    setLine('line-ice-wheels',   { color: 'ice', flowing: true });
+    setLine('line-batt-motor',   { active: true, flowing: true });
+    setLine('line-motor-wheels', { active: true, flowing: true });
+  } else if (mode === 'carga') {
+    setLine('line-charge', { color: 'charge', flowing: true });
+  }
+
+  // Valores em cada nó
+  $('val-ice').textContent    = iceOn ? fuelRate.toFixed(1) + ' L/h' : 'off';
+  $('val-batt').textContent   = Math.round(socPct) + '%';
+  if (isCharging) {
+    $('val-wheels').textContent = '+' + Math.abs(chargeKw).toFixed(1) + ' kW';
+  } else if (motorOn) {
+    $('val-wheels').textContent = (motorKw > 0 ? '−' : '+') + Math.abs(motorKw).toFixed(1) + ' kW';
+  } else {
+    $('val-wheels').textContent = spd > 0 ? fmt0(spd) + ' km/h' : '—';
+  }
 }
 
 // Boot
