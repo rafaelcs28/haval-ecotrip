@@ -12,6 +12,7 @@ struct SettingsView: View {
     @EnvironmentObject var channel: OBDBridgeChannel
     @Environment(\.dismiss) var dismiss
     @State private var copiedFeedback = false
+    @State private var bridgePassword: String = ""
 
     var body: some View {
         NavigationStack {
@@ -129,15 +130,30 @@ struct SettingsView: View {
                             .multilineTextAlignment(.trailing).autocorrectionDisabled().textInputAutocapitalization(.never)
                             .keyboardType(.URL)
                     }
-                    LabeledContent("Bearer token") {
-                        SecureField("•••••••", text: $publisher.bridgeAuthToken)
+                    LabeledContent("Senha do app") {
+                        SecureField("digite a senha do PWA", text: $bridgePassword)
                             .multilineTextAlignment(.trailing).autocorrectionDisabled().textInputAutocapitalization(.never)
                     }
-                    Text("Copie o token do PWA: abra o DevTools no iPhone → Application → Local Storage → bridge_token. URL é a base sem /api ou /ws.")
-                        .font(.caption).foregroundStyle(.secondary)
-                    Button("Aplicar / Reconectar") {
-                        publisher.saveConfig()
+                    if let err = publisher.loginError {
+                        Label(err, systemImage: "exclamationmark.triangle")
+                            .font(.callout).foregroundStyle(.orange)
                     }
+                    HStack {
+                        if !publisher.bridgeAuthToken.isEmpty {
+                            Label("Logado", systemImage: "checkmark.circle.fill")
+                                .foregroundStyle(.green)
+                        }
+                        Spacer()
+                        Button(publisher.loggingIn ? "Entrando…" : "Entrar") {
+                            Task {
+                                await publisher.login(password: bridgePassword)
+                                bridgePassword = ""
+                            }
+                        }
+                        .disabled(bridgePassword.isEmpty || publisher.bridgeBaseUrl.isEmpty || publisher.loggingIn)
+                    }
+                    Text("Use a mesma senha do PWA do iPhone. Após login, o token fica salvo e o cluster puxa todo o state do servidor.")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
 
                 // Modo Discovery — varre PIDs Mode 22 customizados do Haval

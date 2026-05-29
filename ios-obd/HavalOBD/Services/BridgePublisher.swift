@@ -1,5 +1,6 @@
 import Foundation
 import CocoaMQTT
+import CommonCrypto
 
 /// Publica amostras OBD pro bridge via MQTT (mesmo broker que o resto do
 /// sistema usa). Topic: `haval/ecotrip/obd/snapshot` — JSON consolidado a 1Hz
@@ -17,7 +18,7 @@ final class BridgePublisher: ObservableObject {
     @Published var topicPrefix = UserDefaults.standard.string(forKey: "mqtt_prefix") ?? "haval/ecotrip/obd"
     /// HTTP API do bridge — fonte primária de state. PWA usa GET /api/state.
     /// Ex: bridgeBaseUrl = "https://mqttrafael.duckdns.org" (sem path, sem /ws)
-    @Published var bridgeBaseUrl: String = UserDefaults.standard.string(forKey: "bridge_base_url") ?? ""
+    @Published var bridgeBaseUrl: String = UserDefaults.standard.string(forKey: "bridge_base_url") ?? "https://mqttrafael.duckdns.org"
     @Published var bridgeAuthToken: String = UserDefaults.standard.string(forKey: "bridge_auth_token") ?? ""
 
     private var mqtt: CocoaMQTT?
@@ -54,6 +55,57 @@ final class BridgePublisher: ObservableObject {
         UserDefaults.standard.set(bridgeBaseUrl, forKey: "bridge_base_url")
         UserDefaults.standard.set(bridgeAuthToken, forKey: "bridge_auth_token")
         restartHttpPoll()
+    }
+
+    /// Login no bridge — POST /api/auth/login com SHA256(senha). Salva token
+    /// retornado e inicia polling. Mesmo fluxo do PWA.
+    @Published var loginError: String?
+    @Published var loggingIn: Bool = false
+    func login(password: String) async {
+        let base = bridgeBaseUrl.hasSuffix("/") ? String(bridgeBaseUrl.dropLast()) : bridgeBaseUrl
+        guard let url = URL(string: "\(base)/api/auth/login") else {
+            loginError = "URL inválida"; return
+        }
+        await MainActor.run { self.loggingIn = true; self.loginError = nil }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.timeoutInterval = 8
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let hash = Self.sha256Hex(password)
+        let body: [String: Any] = ["password_hash": hash]
+        req.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        do {
+            let (data, resp) = try await URLSession.shared.data(for: req)
+            let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                await MainActor.run { self.loginError = "Resposta inválida (status \(status))"; self.loggingIn = false }
+                return
+            }
+            if status == 200, let token = obj["token"] as? String {
+                await MainActor.run {
+                    self.bridgeAuthToken = token
+                    self.saveConfig()    // já chama restartHttpPoll
+                    self.loggingIn = false
+                    self.loginError = nil
+                }
+            } else {
+                let err = (obj["error"] as? String) ?? "erro \(status)"
+                await MainActor.run { self.loginError = err; self.loggingIn = false }
+            }
+        } catch {
+            await MainActor.run {
+                self.loginError = error.localizedDescription
+                self.loggingIn = false
+            }
+        }
+    }
+    private static func sha256Hex(_ s: String) -> String {
+        let data = Data(s.utf8)
+        var hash = [UInt8](repeating: 0, count: 32)
+        data.withUnsafeBytes { ptr in
+            _ = CC_SHA256(ptr.baseAddress, CC_LONG(data.count), &hash)
+        }
+        return hash.map { String(format: "%02x", $0) }.joined()
     }
 
     /// HTTP poll do /api/state do bridge — fonte ÚNICA de state pro cluster.
