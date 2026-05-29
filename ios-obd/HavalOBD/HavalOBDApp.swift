@@ -35,11 +35,13 @@ struct HavalOBDApp: App {
                     discovery.bind(elm: elm)
                     channel.bind(location: location)
                     location.start()
-                    // Bridge MQTT publica cluster_extra (trip, preços, charging)
-                    // a cada 3s. Injeta no cluster via _nativeBridge.update.
+                    // Injeta state recebido (MQTT ou HTTP) no cluster.html
                     publisher.onClusterExtra = { [channel] dict in
                         channel.injectExtra(dict)
                     }
+                    // Bridge HTTP — fonte PRINCIPAL agora (igual PWA).
+                    // Faz GET /api/state com Bearer token a cada 1s.
+                    publisher.restartHttpPoll()
                 }
         }
     }

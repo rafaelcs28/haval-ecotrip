@@ -122,6 +122,24 @@ struct SettingsView: View {
                     }
                 }
 
+                // Bridge HTTP — fonte primária do state (igual o PWA do iPhone)
+                Section("Bridge HTTP (recomendado)") {
+                    LabeledContent("Base URL") {
+                        TextField("https://mqttrafael.duckdns.org", text: $publisher.bridgeBaseUrl)
+                            .multilineTextAlignment(.trailing).autocorrectionDisabled().textInputAutocapitalization(.never)
+                            .keyboardType(.URL)
+                    }
+                    LabeledContent("Bearer token") {
+                        SecureField("•••••••", text: $publisher.bridgeAuthToken)
+                            .multilineTextAlignment(.trailing).autocorrectionDisabled().textInputAutocapitalization(.never)
+                    }
+                    Text("Copie o token do PWA: abra o DevTools no iPhone → Application → Local Storage → bridge_token. URL é a base sem /api ou /ws.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Button("Aplicar / Reconectar") {
+                        publisher.saveConfig()
+                    }
+                }
+
                 // Modo Discovery — varre PIDs Mode 22 customizados do Haval
                 Section("Discovery Mode 22 (PIDs custom Haval)") {
                     if discovery.isRunning {
