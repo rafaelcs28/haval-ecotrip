@@ -69,6 +69,17 @@ targets:
         UIStatusBarHidden: YES
         UIViewControllerBasedStatusBarAppearance: NO
         UIRequiresFullScreen: YES
+        # ATS exceção pra tiles do mapa (Carto CDN) + Apple MapKit JS.
+        # WKWebView de file:// bloqueia HTTPS externo por padrão sem isso.
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoadsInWebContent: YES
+          NSExceptionDomains:
+            basemaps.cartocdn.com:
+              NSExceptionAllowsInsecureHTTPLoads: NO
+              NSIncludesSubdomains: YES
+            apple-mapkit.com:
+              NSExceptionAllowsInsecureHTTPLoads: NO
+              NSIncludesSubdomains: YES
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: br.com.consorciolimpagyn.havalobd
