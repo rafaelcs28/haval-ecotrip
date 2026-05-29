@@ -52,30 +52,30 @@ final class OBDBridgeChannel: ObservableObject {
 
     /// Mapeia PIDs do OBD pros nomes que o cluster.html consome.
     /// Sem isso, dados chegam no JS mas com chaves erradas — gauges ficam vazios.
-    /// Mapeamentos confirmados via cruzamento com Car Scanner v2.1.25.
+    /// Mapeamentos confirmados via OBDb/Haval-Jolion-HEV (mesma plataforma Lemon B30).
     private func translateForCluster(_ raw: [String: Any]) -> [String: Any] {
         var out: [String: Any] = [:]
-        for (k, v) in raw {
-            out[k] = v
-            switch k {
-            // ── Mode 01 universais ──
-            case "rpm":              out["engine_rpm"] = v
-            case "fuel_level_pct":
-                if let pct = v as? Double { out["fuel_l"] = pct / 100.0 * 55.0 }
-            case "control_voltage":  out["batt_12v_v"] = v
-            case "ect_c":            out["engine_temp_c"] = v
+        for (k, v) in raw { out[k] = v }
 
-            // ── Mode 22 customs Haval (mapeamento via Car Scanner) ──
-            case "haval_787_2304":
-                // GMCU Torque Max em N·m (motor elétrico dianteiro)
-                out["gmcu_torque_max_nm"] = v
-            case "haval_787_2108":
-                // Pack Recharge current limit em A (× 10 inferido)
-                if let n = v as? Double { out["pack_recharge_limit_a"] = n }
-            default:
-                break
-            }
+        // ── Aliases pros nomes que o cluster.html espera ──
+        if let v = raw["rpm"]                    { out["engine_rpm"] = v }
+        if let v = raw["speed_kmh_obd"]          { out["speed_kmh"] = v }
+        if let v = raw["control_voltage"]        { out["batt_12v_v"] = v }
+        if let v = raw["oil_temp_c"]             { out["engine_temp_c"] = v }   // melhor proxy disponível
+        if let v = raw["fuel_level_pct_22"]      { out["fuel_level_pct"] = v }
+        if let v = raw["fuel_level_l_22"]        { out["fuel_l"] = v }
+        else if let pct = raw["fuel_level_pct_22"] as? Double {
+            out["fuel_l"] = pct / 100.0 * 55.0   // tanque H6 PHEV ≈ 55L
         }
+
+        // ── Motor power derivado: P = V × I / 1000 ──
+        // Bateria descarregando (I positiva) → motor_power_kw positivo (consumo)
+        // Bateria recarregando (I negativa) → motor_power_kw negativo (regen)
+        if let v = raw["pack_voltage_v"] as? Double,
+           let i = raw["battery_current_a"] as? Double {
+            out["motor_power_kw"] = v * i / 1000.0
+        }
+
         return out
     }
 
