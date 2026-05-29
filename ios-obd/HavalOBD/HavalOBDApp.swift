@@ -97,15 +97,6 @@ struct RootView: View {
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
 
-            // MiniPlayer no canto INFERIOR DIREITO (sobre o cluster).
-            // Usa frame(.bottomTrailing) em vez de Spacer pra evitar problemas
-            // com ignoresSafeArea na hierarquia.
-            MiniPlayerView()
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-                .allowsHitTesting(true)
-
-            MiniPlayerToggleButton()
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
         }
         .sheet(isPresented: $showSettings) { SettingsView() }
         .onChange(of: channel.navRequestId) { old, new in

@@ -5807,10 +5807,9 @@ mqttClient.on('error',      (err) => console.error('MQTT erro:', err.message));
 mqttClient.on('reconnect',  ()    => console.log('MQTT reconectando...'));
 
 // ── Cluster extra (iPad HEC) ──────────────────────────────────────────────
-// O cluster nativo no iPad usa MQTT (não WebSocket) pra puxar campos que NÃO
-// vêm do OBD direto — viagem em curso, preços, charging state. Publica a cada
-// 3s no tópico haval/ecotrip/cluster_extra com retain pra novos subscribers
-// pegarem o último state imediatamente.
+// O cluster nativo no iPad usa MQTT pra puxar campos que NÃO vêm direto do
+// APK no MQTT individual. Publica a cada 3s no tópico cluster_extra (JSON
+// consolidado) + tópicos individuais retained pra valores essenciais.
 const CLUSTER_EXTRA_FIELDS = [
   'current_trip',
   'price_kwh',
@@ -5822,6 +5821,11 @@ const CLUSTER_EXTRA_FIELDS = [
   'last_apk_ms',
   'last_gwm_ms',
 ];
+// Campos numéricos individuais publicados retained — clientes pegam o último
+// valor imediatamente ao subscribar (sem esperar próximo refresh).
+const CLUSTER_INDIVIDUAL_FIELDS = [
+  'fuel_l',            // litros no tanque (state interno do bridge, não publicado pelo APK)
+];
 function publishClusterExtra() {
   if (!mqttClient || !mqttClient.connected) return;
   const extra = {};
@@ -5830,6 +5834,15 @@ function publishClusterExtra() {
   }
   mqttClient.publish(`${MQTT_PREFIX}/cluster_extra`, JSON.stringify(extra),
     { qos: 0, retain: true });
+  // Tópicos individuais (retained) — o cluster do iPad subscrita em #
+  // e pega esses automaticamente.
+  for (const k of CLUSTER_INDIVIDUAL_FIELDS) {
+    const v = state[k];
+    if (v !== undefined && v !== null) {
+      mqttClient.publish(`${MQTT_PREFIX}/${k}`, String(v),
+        { qos: 0, retain: true });
+    }
+  }
 }
 setInterval(publishClusterExtra, 3000);
 mqttClient.on('disconnect', ()    => console.log('MQTT desconectado'));
