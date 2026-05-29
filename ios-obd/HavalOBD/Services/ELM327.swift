@@ -55,6 +55,31 @@ final class ELM327: ObservableObject {
             }
             try? await Task.sleep(nanoseconds: 200_000_000)
         }
+        // Handshake: faz 0100 em loop até receber resposta válida (41 00 XX...),
+        // confirmando que o protocolo foi negociado e a ECU responde.
+        // Sem isso, polling começa enquanto adapter ainda está SEARCHING e
+        // cada PID vira STOPPED.
+        var handshakeOk = false
+        for attempt in 0..<5 {
+            let resp = await send("0100", timeout: 8.0)
+            let up = resp.uppercased().replacingOccurrences(of: " ", with: "")
+            if up.contains("4100") {
+                handshakeOk = true
+                lastErrorMsg = nil
+                break
+            }
+            if up.contains("UNABLE") {
+                lastErrorMsg = "ECU não responde — carro precisa estar em DRIVING READY"
+                return
+            }
+            // SEARCHING / NO DATA / STOPPED — espera e tenta de novo
+            lastErrorMsg = "Handshake #\(attempt+1): \(resp.prefix(40))…"
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+        }
+        if !handshakeOk {
+            lastErrorMsg = "ECU não respondeu ao 0100 após 5 tentativas (carro READY?)"
+            return
+        }
         initialized = true
         startPolling()
     }
