@@ -225,19 +225,23 @@
   .trip-metrics {
     flex: 1; display: grid;
     grid-template-columns: 1fr 1fr;
-    grid-template-rows: 1fr 1fr 1fr;
-    gap: 14px; align-content: center;
+    grid-template-rows: repeat(4, 1fr);
+    gap: 8px 14px; align-content: center;
   }
   .trip-cell { display: flex; flex-direction: column; justify-content: center; }
   .trip-val {
-    font-size: 30px; font-weight: 300; line-height: 1;
+    font-size: 24px; font-weight: 300; line-height: 1;
     font-variant-numeric: tabular-nums;
   }
   .trip-val .u {
-    font-size: 13px; color: var(--muted); font-weight: 500; margin-left: 4px;
+    font-size: 12px; color: var(--muted); font-weight: 500; margin-left: 4px;
+  }
+  .trip-val .sub {
+    font-size: 10px; color: var(--muted); font-weight: 500; margin-left: 6px;
+    font-variant-numeric: tabular-nums;
   }
   .trip-lbl {
-    margin-top: 4px; font-size: 9px; letter-spacing: .14em;
+    margin-top: 3px; font-size: 9px; letter-spacing: .14em;
     color: var(--muted); text-transform: uppercase;
   }
   .trip-val.green { color: var(--green); }
@@ -473,8 +477,17 @@
           <div class="trip-lbl">Custo estimado</div>
         </div>
         <div class="trip-cell">
-          <div class="trip-val"><span id="trip-eff">—</span></div>
-          <div class="trip-lbl">km/L equivalente</div>
+          <div class="trip-val yellow"><span id="trip-cost-km">R$ 0,00</span><span class="u">/km</span></div>
+          <div class="trip-lbl">Custo por km</div>
+        </div>
+        <!-- Split EV / HEV -->
+        <div class="trip-cell">
+          <div class="trip-val green"><span id="trip-ev-pct">—</span><span class="u">%</span><span class="sub" id="trip-ev-km">— km</span></div>
+          <div class="trip-lbl">Elétrico</div>
+        </div>
+        <div class="trip-cell">
+          <div class="trip-val orange"><span id="trip-hev-pct">—</span><span class="u">%</span><span class="sub" id="trip-hev-km">— km</span></div>
+          <div class="trip-lbl">Híbrido</div>
         </div>
       </div>
     </div>
@@ -804,7 +817,8 @@ function render() {
 
   // Trip
   const tr = state.current_trip || state.rolling || {};
-  $('trip-dist').textContent = fmt1(+tr.distKm || +tr.dist_km || 0);
+  const distKm = +tr.distKm || +tr.dist_km || 0;
+  $('trip-dist').textContent = fmt1(distKm);
   const tSec = +tr.timeSec || +tr.time_sec || 0;
   const h = Math.floor(tSec/3600), m = Math.floor((tSec%3600)/60);
   $('trip-time').textContent = h > 0 ? `${h}:${String(m).padStart(2,'0')}` : `${m} min`;
@@ -814,9 +828,26 @@ function render() {
   const pGas = +state.tank_avg_price_per_l      || +state.price_gas_per_l || 6.40;
   const tripCost = (+tr.netKwh || 0) * pKwh + (+tr.fuelL || 0) * pGas;
   $('trip-cost').textContent = fmtBRL(tripCost);
-  const distKm = +tr.distKm || 0;
-  const eqL = pGas > 0.01 ? tripCost / pGas : 0;
-  $('trip-eff').textContent = (distKm > 1 && eqL > 0.01) ? fmt1(distKm / eqL) : '—';
+  // R$/km — só faz sentido com distância > 0
+  $('trip-cost-km').textContent = (distKm > 0.5 && tripCost > 0.01)
+    ? 'R$ ' + (tripCost / distKm).toFixed(2).replace('.', ',')
+    : 'R$ —';
+  // Split EV/HEV — hev vem do current_trip.hybridDistKm; ev = total − hev
+  const hevKm = +tr.hybridDistKm || +tr.hybrid_dist_km || 0;
+  const evKm  = Math.max(0, distKm - hevKm);
+  if (distKm > 0.5) {
+    const hevPct = (hevKm / distKm) * 100;
+    const evPct  = 100 - hevPct;
+    $('trip-ev-pct').textContent  = Math.round(evPct);
+    $('trip-hev-pct').textContent = Math.round(hevPct);
+    $('trip-ev-km').textContent   = evKm.toFixed(1) + ' km';
+    $('trip-hev-km').textContent  = hevKm.toFixed(1) + ' km';
+  } else {
+    $('trip-ev-pct').textContent  = '—';
+    $('trip-hev-pct').textContent = '—';
+    $('trip-ev-km').textContent   = '— km';
+    $('trip-hev-km').textContent  = '— km';
+  }
 
   // ═══════ Fluxo de energia v2 — detecta modo + anima fluxos ═══════
   const rpm        = +state.engine_rpm || 0;
