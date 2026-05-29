@@ -28,31 +28,29 @@ final class ELM327: ObservableObject {
         // 500 kbps — protocolo do Haval H6 PHEV (e maioria pós-2008). Pular
         // a fase SEARCHING do auto-detect (ATSP0) que demora 5-10s e mete
         // STOPPED nos primeiros polls.
-        let initCommands: [(cmd: String, timeout: TimeInterval)] = [
-            ("ATZ",  5.0),   // reset
-            ("ATE0", 1.0),   // echo off
-            ("ATL0", 1.0),   // line feed off
-            ("ATH0", 1.0),   // headers off
-            ("ATS0", 1.0),   // spaces off
-            ("ATSP0", 1.5),  // AUTO — deixa o ELM descobrir o protocolo certo
-            ("ATAT2", 1.0),  // adaptive timing 2 (mais conservador, espera mais)
-            ("ATST64", 1.0), // ST = 100ms (timeout mais folgado entre resposta e prompt)
-            ("0100", 10.0),  // primeira query — auto-detect demora até 8s
+        // Sequência mínima e robusta — todos universais ELM327 v1.x+
+        let initCommands: [(cmd: String, timeout: TimeInterval, abortOnError: Bool)] = [
+            ("ATZ",  5.0, true),   // reset (mandatório)
+            ("ATE0", 1.0, true),   // echo off (mandatório pra parser funcionar)
+            ("ATL0", 1.0, true),   // line feed off
+            ("ATH0", 1.0, false),  // headers off (opcional)
+            ("ATS0", 1.0, false),  // spaces off (opcional)
+            ("ATSP0", 1.5, true),  // AUTO protocol
+            ("0100", 10.0, false), // primeira query — pode dar NO DATA se carro não READY
         ]
-        for (cmd, to) in initCommands {
+        for (cmd, to, mandatory) in initCommands {
             let resp = await send(cmd, timeout: to)
-            if resp.isEmpty {
+            if resp.isEmpty && mandatory {
                 lastErrorMsg = "Sem resposta em \(cmd)"
                 return
             }
-            // Detecta erros explícitos (mas "SEARCHING..." é normal em 0100 primeira vez)
             let up = resp.uppercased()
-            if up.contains("?") && cmd != "ATZ" {
+            if up.contains("?") && mandatory {
                 lastErrorMsg = "Erro em \(cmd): \(resp)"
                 return
             }
             if up.contains("UNABLE TO CONNECT") {
-                lastErrorMsg = "ECU não responde (carro desligado?)"
+                lastErrorMsg = "ECU não responde — carro pisado no freio + START (driving ready)?"
                 return
             }
             try? await Task.sleep(nanoseconds: 200_000_000)
