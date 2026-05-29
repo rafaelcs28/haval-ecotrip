@@ -37,6 +37,16 @@ final class OBDBridgeChannel: ObservableObject {
         self.location = location
     }
 
+    /// Injeta dados vindos do bridge (não-OBD: trip, preços, charging) no
+    /// cluster.html. Chamado pelo BridgePublisher quando recebe MQTT em
+    /// haval/ecotrip/cluster_extra. Marca-os com `__from_bridge` pra debug.
+    func injectExtra(_ dict: [String: Any]) {
+        guard webViewReady, let webView = webView, !dict.isEmpty else { return }
+        var payload = dict
+        payload["__from_bridge"] = true
+        injectSnapshot(payload, on: webView)
+    }
+
     /// Chamado pelo ClusterWebView quando o cluster.html termina de carregar.
     func markReady() {
         guard !webViewReady else { return }
