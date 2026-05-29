@@ -726,7 +726,17 @@ function bridgeUrl() {
   return proto + '//' + location.host + '/ws';
 }
 let ws, wsRetry = 0;
+const PREVIEW_MODE = new URLSearchParams(location.search).get('demo') === '1';
 function connect() {
+  // Modo PREVIEW (?demo=1): pula WS e injeta state mock animado pra
+  // testar layout sem precisar do app/bridge.
+  if (PREVIEW_MODE) {
+    setConn(true);
+    const lbl = document.getElementById('conn-lbl');
+    if (lbl) lbl.textContent = 'PREVIEW';
+    startPreviewLoop();
+    return;
+  }
   // Modo nativo (dentro do app HavalOBD WKWebView): pula WebSocket, dados vêm
   // direto do ELM327 via Bluetooth injetados em applyNativeSnapshot().
   if (isNativeBridge()) {
@@ -1310,6 +1320,65 @@ toast('🚗 Haval Cluster pronto');
 // Overlay debug + extras OBD rodam independente (não patcha render — evita erro de strict mode)
 setInterval(renderObdDebug, 1000);
 setInterval(renderQuickActions, 1000);
+
+// Preview mode (?demo=1): injeta state mock animado pra testar layout
+function startPreviewLoop() {
+  let tStart = Date.now();
+  let trip = { startMs: tStart, distKm: 0, timeSec: 0, parkedInPSec: 0,
+               engineOffSec: 0, maxSpeedKmh: 72.4, avgSpeedKmh: 28.5,
+               netKwh: 0, fuelL: 0, avgPowerKw: 4.8,
+               startSocPct: 86.0, currentSocPct: 76.0, hybridDistKm: 0 };
+  const update = () => {
+    const t = (Date.now() - tStart) / 1000;
+    // Velocidade oscila como num trajeto urbano (0-65 km/h)
+    const speed = Math.max(0, Math.sin(t / 8) * 35 + 30 + Math.sin(t / 2) * 5);
+    const power = (speed > 3) ? Math.sin(t / 4) * 25 + 18 : 0;
+    trip.timeSec = Math.floor(t);
+    trip.distKm = +(trip.distKm + (speed / 3600)).toFixed(3);
+    trip.netKwh = +(trip.netKwh + (Math.max(0, power) * (1/3600))).toFixed(3);
+    if (speed < 1) trip.parkedInPSec++;
+    const mock = {
+      // Bateria
+      soc_pct: 76,
+      range_ev_km: 121,
+      // Combustível — só range_ice_km vem do servidor; fuel_l é derivado
+      range_ice_km: 476,
+      // Power / speed
+      motor_power_kw: power,
+      speed_kmh: speed,
+      engine_rpm: 0,
+      battery_current_a: -power * 3,
+      battery_voltage_v: 348,
+      battery_power_pct: Math.round(power),
+      // Charging
+      charging_state: 0,
+      charge_power_kw: 0,
+      // Atalhos
+      ac_state: 1,
+      regen_level: 2,
+      drive_mode: 2,
+      hvac_fan_speed: 3,
+      hvac_driver_temp: 22,
+      engine_state: 0,
+      // Trip
+      current_trip: { ...trip },
+      // Preços
+      price_kwh: 0.65,
+      price_gas_per_l: 6.40,
+      battery_avg_price_per_kwh: 0.62,
+      tank_avg_price_per_l: 6.35,
+      // GPS (Goiânia, BR)
+      gps_lat: -16.6869,
+      gps_lng: -49.2648,
+    };
+    Object.assign(state, mock);
+    lastUpdateMs = Date.now();
+    try { render(); } catch(e) { console.error('[preview] render error:', e); }
+  };
+  update();
+  setInterval(update, 500);
+  console.log('[preview] modo demo ativo — state mock a cada 500ms');
+}
 
 // Bloqueia zoom/scroll
 document.addEventListener('gesturestart', e => e.preventDefault());
