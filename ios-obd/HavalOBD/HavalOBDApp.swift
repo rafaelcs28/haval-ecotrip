@@ -96,6 +96,23 @@ struct RootView: View {
                 NavigationOverlay(nav: nav, isPresented: $showNav)
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
+
+            // MiniPlayer no canto INFERIOR DIREITO (sobre o cluster)
+            VStack {
+                Spacer()
+                HStack {
+                    Spacer()
+                    MiniPlayerView()
+                }
+            }
+            // Botão flutuante pra reabrir mini-player quando fechado
+            VStack {
+                Spacer()
+                HStack {
+                    Spacer()
+                    MiniPlayerToggleButton()
+                }
+            }
         }
         .sheet(isPresented: $showSettings) { SettingsView() }
         .onChange(of: channel.navRequestId) { old, new in
