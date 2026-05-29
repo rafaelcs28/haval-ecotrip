@@ -17,6 +17,9 @@ final class BluetoothManager: NSObject, ObservableObject {
     @Published var lastResponse: String = ""
     @Published var deviceName: String = "—"
     @Published var rssi: Int = 0
+    /// Lista de TODOS os peripherals encontrados durante o scan (não filtrados).
+    /// Útil pra debug quando o filtro não pega o ELM327 por nome.
+    @Published var nearbyDevices: [(name: String, rssi: Int, id: UUID)] = []
 
     private var central: CBCentralManager!
     private var peripheral: CBPeripheral?
@@ -40,19 +43,37 @@ final class BluetoothManager: NSObject, ObservableObject {
     func startScan() {
         guard central.state == .poweredOn else { return }
         peripheral = nil; rxTxChar = nil; rxBuffer = ""
+        nearbyDevices.removeAll()
         state = .scanning
-        // Scanear SEM filtrar por serviço (alguns clones não anunciam o serviço)
         central.scanForPeripherals(withServices: nil, options: [
             CBCentralManagerScanOptionAllowDuplicatesKey: false
         ])
-        // Timeout: 15s — se não achar ELM327, volta pra idle e mostra dica
-        DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in
+        // Timeout: 30s (era 15s). Se não achar pelo filtro automático mas
+        // tiver candidatos manuais em nearbyDevices, o usuário escolhe.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 30) { [weak self] in
             guard let self = self else { return }
             if self.state == .scanning {
                 self.central.stopScan()
-                self.deviceName = "Nenhum ELM327 encontrado"
+                if self.nearbyDevices.isEmpty {
+                    self.deviceName = "Nenhum dispositivo BLE encontrado"
+                } else {
+                    self.deviceName = "ELM327 não detectado — \(self.nearbyDevices.count) dispositivos próximos"
+                }
                 self.state = .poweredOff
             }
+        }
+    }
+
+    /// Conexão manual pelo UUID — usado quando o filtro automático não pega
+    /// mas o usuário identifica o ELM327 na lista de nearbyDevices.
+    func connectManually(id: UUID) {
+        if let p = central.retrievePeripherals(withIdentifiers: [id]).first {
+            central.stopScan()
+            self.peripheral = p
+            p.delegate = self
+            state = .connecting
+            deviceName = p.name ?? "Manual"
+            central.connect(p, options: nil)
         }
     }
 
@@ -99,15 +120,23 @@ extension BluetoothManager: CBCentralManagerDelegate {
 
     func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral,
                         advertisementData: [String : Any], rssi RSSI: NSNumber) {
-        // Heurística: nome contém "OBD", "Vgate", "ELM", "ICAR"
         let name = peripheral.name ?? (advertisementData[CBAdvertisementDataLocalNameKey] as? String) ?? ""
+        // Loga TODOS os dispositivos encontrados (mesmo sem nome) na lista.
+        // Permite o usuário escolher manualmente se o filtro automático
+        // não pega.
+        let display = name.isEmpty ? "(sem nome)" : name
+        if !nearbyDevices.contains(where: { $0.id == peripheral.identifier }) {
+            nearbyDevices.append((name: display, rssi: RSSI.intValue, id: peripheral.identifier))
+            nearbyDevices.sort { $0.rssi > $1.rssi }
+        }
+        // Auto-connect só se nome bate com OBD/ELM/Vgate/iCar/etc.
         let upper = name.uppercased()
         let isObd = upper.contains("OBD") || upper.contains("VGATE") || upper.contains("ELM") ||
-                    upper.contains("ICAR") || upper.contains("OBDII") || upper.contains("327")
+                    upper.contains("ICAR") || upper.contains("327") ||
+                    upper.contains("VLINK") || upper.contains("VEEPEAK")
         if !isObd { return }
         deviceName = name
         rssi = RSSI.intValue
-        // Conecta no primeiro candidato
         central.stopScan()
         self.peripheral = peripheral
         peripheral.delegate = self
