@@ -907,10 +907,19 @@ setInterval(updateMap, 3000);
 window.openNavMenu  = () => {
   // No app iOS nativo, abre direto o modal de navegação Apple Maps
   // (turn-by-turn embutido). No browser, mostra o menu Waze/GMaps/Apple.
+  console.log('[nav] openNavMenu — IN_NATIVE_APP:', IN_NATIVE_APP,
+              '· hasObdHandler:', !!window.webkit?.messageHandlers?.obd);
   if (IN_NATIVE_APP && window.webkit?.messageHandlers?.obd) {
-    window.webkit.messageHandlers.obd.postMessage({ action: 'open_nav_modal' });
+    try {
+      window.webkit.messageHandlers.obd.postMessage({ action: 'open_nav_modal' });
+      toast('📍 abrindo navegação…');
+    } catch (e) {
+      toast('Erro: ' + e.message);
+      console.error('[nav] postMessage falhou:', e);
+    }
     return;
   }
+  toast('Modo browser — mostrando menu');
   $('nav-overlay').classList.add('show');
 };
 window.closeNavMenu = () => $('nav-overlay').classList.remove('show');
