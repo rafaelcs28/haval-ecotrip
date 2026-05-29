@@ -11,17 +11,21 @@ struct MiniPlayerView: View {
 
     var body: some View {
         if visible {
-            VStack(spacing: 0) {
+            ZStack(alignment: .topLeading) {
                 MiniWebView(urlString: url)
                     .cornerRadius(14)
-                    .overlay(alignment: .topLeading) {
-                        controls
-                            .padding(6)
-                    }
+                controls
+                    .padding(6)
             }
             .frame(width: 480, height: 280)
-            .padding(.bottom, 16)
-            .padding(.trailing, 16)
+            .background(Color.black)
+            .cornerRadius(14)
+            .overlay(
+                RoundedRectangle(cornerRadius: 14)
+                    .stroke(Color.white.opacity(0.18), lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.6), radius: 12)
+            .padding(16)
             .sheet(isPresented: $showUrlEditor) {
                 NavigationStack {
                     Form {
