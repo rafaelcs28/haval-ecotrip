@@ -61,7 +61,8 @@ final class BridgePublisher: ObservableObject {
     /// retornado e inicia polling. Mesmo fluxo do PWA.
     @Published var loginError: String?
     @Published var loggingIn: Bool = false
-    func login(password: String) async {
+    @Published var needs2FA: Bool = false   // true quando server pediu TOTP
+    func login(password: String, totp: String = "") async {
         let base = bridgeBaseUrl.hasSuffix("/") ? String(bridgeBaseUrl.dropLast()) : bridgeBaseUrl
         guard let url = URL(string: "\(base)/api/auth/login") else {
             loginError = "URL inválida"; return
@@ -72,7 +73,8 @@ final class BridgePublisher: ObservableObject {
         req.timeoutInterval = 8
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         let hash = Self.sha256Hex(password)
-        let body: [String: Any] = ["password_hash": hash]
+        var body: [String: Any] = ["password_hash": hash]
+        if !totp.isEmpty { body["totp_code"] = totp }
         req.httpBody = try? JSONSerialization.data(withJSONObject: body)
         do {
             let (data, resp) = try await URLSession.shared.data(for: req)
@@ -87,6 +89,19 @@ final class BridgePublisher: ObservableObject {
                     self.saveConfig()    // já chama restartHttpPoll
                     self.loggingIn = false
                     self.loginError = nil
+                    self.needs2FA = false
+                }
+            } else if status == 401, (obj["error"] as? String) == "totp_required" {
+                await MainActor.run {
+                    self.needs2FA = true
+                    self.loggingIn = false
+                    self.loginError = "Digite o código 2FA"
+                }
+            } else if status == 401, (obj["error"] as? String) == "invalid_totp" {
+                await MainActor.run {
+                    self.needs2FA = true
+                    self.loggingIn = false
+                    self.loginError = "Código 2FA inválido"
                 }
             } else {
                 let err = (obj["error"] as? String) ?? "erro \(status)"
