@@ -13,116 +13,11 @@ struct SettingsView: View {
     @Environment(\.dismiss) var dismiss
     @State private var copiedFeedback = false
     @State private var bridgePassword: String = ""
+    @State private var bridgeTotp: String = ""
 
     var body: some View {
         NavigationStack {
             Form {
-                Section("ELM327 (Bluetooth)") {
-                    LabeledContent("Status") {
-                        statusDot(label: bt.state.rawValue, color: btColor)
-                    }
-                    LabeledContent("Adaptador") {
-                        Text(bt.deviceName).font(.system(.body, design: .monospaced)).foregroundStyle(.secondary)
-                    }
-                    if bt.rssi != 0 { LabeledContent("RSSI") { Text("\(bt.rssi) dB") } }
-                    LabeledContent("ELM inicializado") {
-                        Text(elm.initialized ? "✓ pronto" : "—").foregroundStyle(elm.initialized ? .green : .secondary)
-                    }
-                    LabeledContent("PIDs lendo") { Text("\(elm.samples.count)") }
-                    Button("Buscar ELM327")  { bt.startScan() }
-                    Button("Inicializar ELM327") { Task { await elm.initialize() } }
-                        .disabled(bt.state != .ready)
-                }
-
-                // Log de comandos AT — diagnóstico de comunicação ELM327
-                if !bt.commandLog.isEmpty {
-                    Section("Log de comandos (últimos 20)") {
-                        ForEach(Array(bt.commandLog.enumerated().reversed()), id: \.offset) { (i, entry) in
-                            HStack(alignment: .top, spacing: 6) {
-                                Text(entry.dir)
-                                    .font(.system(.caption, design: .monospaced))
-                                    .foregroundStyle(colorForDir(entry.dir))
-                                    .frame(width: 28, alignment: .leading)
-                                Text(entry.text)
-                                    .font(.system(.caption2, design: .monospaced))
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(2)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                        }
-                    }
-                }
-
-                // Characteristics descobertas — debug detalhado
-                if !bt.debugChars.isEmpty {
-                    Section("BLE characteristics descobertas") {
-                        ForEach(Array(bt.debugChars.enumerated()), id: \.offset) { (_, c) in
-                            Text(c)
-                                .font(.system(.caption2, design: .monospaced))
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-
-                // Lista de TODOS os dispositivos BLE detectados — clica pra conectar
-                // manualmente se o filtro automático não pegou o ELM327
-                if !bt.nearbyDevices.isEmpty {
-                    Section("Dispositivos BLE próximos (\(bt.nearbyDevices.count))") {
-                        ForEach(bt.nearbyDevices, id: \.id) { d in
-                            Button {
-                                bt.connectManually(id: d.id)
-                            } label: {
-                                HStack {
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(d.name).font(.body)
-                                        Text(d.id.uuidString.prefix(13) + "…")
-                                            .font(.caption2).foregroundStyle(.secondary)
-                                            .monospaced()
-                                    }
-                                    Spacer()
-                                    Text("\(d.rssi) dB")
-                                        .font(.caption).foregroundStyle(.secondary)
-                                        .monospaced()
-                                }
-                            }
-                            .foregroundColor(.primary)
-                        }
-                    }
-                }
-
-                Section("Bridge MQTT (opcional)") {
-                    LabeledContent("Status") {
-                        statusDot(label: publisher.connected ? "online" : "offline",
-                                  color: publisher.connected ? .green : .red)
-                    }
-                    LabeledContent("Host") {
-                        TextField("mqttrafael.duckdns.org", text: $publisher.brokerHost)
-                            .multilineTextAlignment(.trailing).autocorrectionDisabled().textInputAutocapitalization(.never)
-                    }
-                    LabeledContent("Porta") {
-                        TextField("8883", value: $publisher.brokerPort, format: .number)
-                            .multilineTextAlignment(.trailing).keyboardType(.numberPad)
-                    }
-                    LabeledContent("Usuário") {
-                        TextField("obd_companion", text: $publisher.brokerUser)
-                            .multilineTextAlignment(.trailing).autocorrectionDisabled().textInputAutocapitalization(.never)
-                    }
-                    LabeledContent("Senha") {
-                        SecureField("•••••••", text: $publisher.brokerPass).multilineTextAlignment(.trailing)
-                    }
-                    LabeledContent("Topic prefix") {
-                        TextField("haval/ecotrip/obd", text: $publisher.topicPrefix)
-                            .multilineTextAlignment(.trailing).autocorrectionDisabled().textInputAutocapitalization(.never)
-                    }
-                    if let err = elm.lastErrorMsg {
-                        Label(err, systemImage: "exclamationmark.triangle")
-                            .font(.callout).foregroundStyle(.orange)
-                    }
-                    Button(publisher.connected ? "Desconectar" : "Conectar Bridge") {
-                        if publisher.connected { publisher.disconnect() } else { publisher.connect() }
-                    }
-                }
-
                 // Bridge HTTP — fonte primária do state (igual o PWA do iPhone)
                 Section("Bridge HTTP (recomendado)") {
                     LabeledContent("Base URL") {
@@ -134,25 +29,35 @@ struct SettingsView: View {
                         SecureField("digite a senha do PWA", text: $bridgePassword)
                             .multilineTextAlignment(.trailing).autocorrectionDisabled().textInputAutocapitalization(.never)
                     }
+                    if publisher.needs2FA {
+                        LabeledContent("Código 2FA") {
+                            TextField("6 dígitos", text: $bridgeTotp)
+                                .multilineTextAlignment(.trailing).autocorrectionDisabled()
+                                .keyboardType(.numberPad)
+                        }
+                    }
                     if let err = publisher.loginError {
                         Label(err, systemImage: "exclamationmark.triangle")
                             .font(.callout).foregroundStyle(.orange)
                     }
                     HStack {
-                        if !publisher.bridgeAuthToken.isEmpty {
+                        if !publisher.bridgeAuthToken.isEmpty && !publisher.needs2FA {
                             Label("Logado", systemImage: "checkmark.circle.fill")
                                 .foregroundStyle(.green)
                         }
                         Spacer()
                         Button(publisher.loggingIn ? "Entrando…" : "Entrar") {
                             Task {
-                                await publisher.login(password: bridgePassword)
-                                bridgePassword = ""
+                                await publisher.login(password: bridgePassword, totp: bridgeTotp)
+                                if !publisher.bridgeAuthToken.isEmpty && !publisher.needs2FA {
+                                    bridgePassword = ""
+                                    bridgeTotp = ""
+                                }
                             }
                         }
                         .disabled(bridgePassword.isEmpty || publisher.bridgeBaseUrl.isEmpty || publisher.loggingIn)
                     }
-                    Text("Use a mesma senha do PWA do iPhone. Após login, o token fica salvo e o cluster puxa todo o state do servidor.")
+                    Text("Use a mesma senha do PWA do iPhone. Se tiver 2FA ativo, vai aparecer campo pro código.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
 

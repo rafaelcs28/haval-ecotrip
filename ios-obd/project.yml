@@ -15,7 +15,7 @@ settings:
     CURRENT_PROJECT_VERSION: "1"
     SWIFT_VERSION: "5.10"
     TARGETED_DEVICE_FAMILY: "1,2"   # iPhone + iPad
-    INFOPLIST_KEY_UIRequiresFullScreen: NO
+    INFOPLIST_KEY_UIRequiresFullScreen: YES
 
 packages:
   CocoaMQTT:
