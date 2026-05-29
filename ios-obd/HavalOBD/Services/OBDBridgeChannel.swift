@@ -76,11 +76,17 @@ final class OBDBridgeChannel: ObservableObject {
         if let v = raw["gmcu_motor_rpm"]         { out["gmcu_motor_speed"] = v }
         if let v = raw["tmcu_motor_rpm"]         { out["tmcu_motor_speed"] = v }
 
+        // E007 (Cell voltages total) é o pack voltage REAL — soma das 96 células.
+        // E006 ("HV battery voltage") reporta ~149V, que é outra coisa (talvez
+        // tensão pós-relé ou sub-bus). E007 ~347V bate com SOC × 96 células.
+        if let v = raw["pack_cells_total_v"] {
+            out["pack_voltage_v"] = v   // sobrescreve E006 no estado do cluster
+        }
         // ── Motor power derivado: P = V × I / 1000 ──
         // Bateria descarregando (I positiva) → motor_power_kw positivo (consumo)
         // Bateria recarregando (I negativa) → motor_power_kw negativo (regen)
-        if let v = raw["pack_voltage_v"] as? Double,
-           let i = raw["battery_current_a"] as? Double {
+        let voltageForPower = (raw["pack_cells_total_v"] as? Double) ?? (raw["pack_voltage_v"] as? Double)
+        if let v = voltageForPower, let i = raw["battery_current_a"] as? Double {
             out["motor_power_kw"] = v * i / 1000.0
         }
 
