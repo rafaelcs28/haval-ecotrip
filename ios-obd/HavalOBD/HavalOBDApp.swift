@@ -6,12 +6,12 @@ struct HavalOBDApp: App {
     @StateObject private var elm:       ELM327
     @StateObject private var publisher = BridgePublisher()
     @StateObject private var channel   = OBDBridgeChannel()
+    @StateObject private var discovery = OBDDiscovery()
 
     init() {
         let bluetooth = BluetoothManager()
         _bt  = StateObject(wrappedValue: bluetooth)
         _elm = StateObject(wrappedValue: ELM327(bt: bluetooth))
-        // Mantém tela acesa em foreground (cluster é always-on)
         UIApplication.shared.isIdleTimerDisabled = true
     }
 
@@ -22,6 +22,7 @@ struct HavalOBDApp: App {
                 .environmentObject(elm)
                 .environmentObject(publisher)
                 .environmentObject(channel)
+                .environmentObject(discovery)
                 .preferredColorScheme(.dark)
                 .ignoresSafeArea()
                 .statusBarHidden(true)
@@ -29,6 +30,7 @@ struct HavalOBDApp: App {
                 .onAppear {
                     publisher.bind(elm)
                     publisher.autoConnectIfConfigured()
+                    discovery.bind(elm: elm)
                 }
         }
     }
