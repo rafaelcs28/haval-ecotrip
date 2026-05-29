@@ -129,6 +129,11 @@ final class ELM327: ObservableObject {
         let up = raw.uppercased()
         if up.contains("STOPPED") || up.contains("SEARCHING") ||
            up.contains("NO DATA") || up.contains("UNABLE") {
+            // Guarda no failedPids pra dar visibilidade no overlay debug.
+            // Útil pra confirmar se o BMS está respondendo ou não cada PID.
+            let trimmed = raw.replacingOccurrences(of: ">", with: "")
+                             .trimmingCharacters(in: .whitespacesAndNewlines)
+            failedPids[pid.id] = trimmed
             return nil
         }
         // Limpa o eco/prompt/whitespace e pega só os bytes hex
