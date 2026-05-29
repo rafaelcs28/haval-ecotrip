@@ -105,6 +105,46 @@ class TelemetryRecorder(private val context: Context) {
     /** SOC% da bateria de tração (0–100). */
     @Volatile var latestSocPct:          Int   = 0
 
+    // ── Persistência opcional dos últimos sensores conhecidos ─────────────────
+    // Sobrevive a crash/restart do processo APK. Permite que o primeiro sample
+    // do recorder não seja 0 quando o listener CAN ainda não propagou eventos
+    // novos após o restart.
+    private val SENSOR_PREFS      = "ecotrip_sensors_cache"
+    private val SENSOR_KEY_TS     = "ts"
+    private val SENSOR_KEY_SPD    = "spd"
+    private val SENSOR_KEY_RPM    = "rpm"
+    private val SENSOR_KEY_EVKW   = "evkw"
+    private val SENSOR_KEY_PWR    = "pwr"
+    private val SENSOR_KEY_SOC    = "soc"
+    private val SENSOR_MAX_AGE_MS = 5 * 60 * 1000L   // 5 min
+
+    fun persistSensors(ctx: Context = context) {
+        try {
+            val p = ctx.getSharedPreferences(SENSOR_PREFS, Context.MODE_PRIVATE)
+            p.edit()
+                .putLong (SENSOR_KEY_TS,   System.currentTimeMillis())
+                .putFloat(SENSOR_KEY_SPD,  latestSpeedKmh)
+                .putInt  (SENSOR_KEY_RPM,  latestEngineRpm)
+                .putFloat(SENSOR_KEY_EVKW, latestMotorPowerKw)
+                .putInt  (SENSOR_KEY_PWR,  latestBattPowerPct)
+                .putInt  (SENSOR_KEY_SOC,  latestSocPct)
+                .apply()
+        } catch (_: Exception) {}
+    }
+
+    fun restoreSensors(ctx: Context = context) {
+        try {
+            val p = ctx.getSharedPreferences(SENSOR_PREFS, Context.MODE_PRIVATE)
+            val ts = p.getLong(SENSOR_KEY_TS, 0L)
+            if (ts == 0L || System.currentTimeMillis() - ts > SENSOR_MAX_AGE_MS) return
+            if (latestSpeedKmh     == 0f) latestSpeedKmh     = p.getFloat(SENSOR_KEY_SPD,  0f)
+            if (latestEngineRpm    == 0)  latestEngineRpm    = p.getInt  (SENSOR_KEY_RPM,  0)
+            if (latestMotorPowerKw == 0f) latestMotorPowerKw = p.getFloat(SENSOR_KEY_EVKW, 0f)
+            if (latestBattPowerPct == 0)  latestBattPowerPct = p.getInt  (SENSOR_KEY_PWR,  0)
+            if (latestSocPct       == 0)  latestSocPct       = p.getInt  (SENSOR_KEY_SOC,  0)
+        } catch (_: Exception) {}
+    }
+
     // ── Gravação ──────────────────────────────────────────────────────────────
     private val samples   = mutableListOf<TelemetrySample>()
     private var startMs   = 0L
@@ -130,6 +170,11 @@ class TelemetryRecorder(private val context: Context) {
         flushFile: java.io.File? = null,
     ) {
         if (recording) return
+        // Restaura sensores cacheados antes do primeiro tick: se o listener CAN
+        // ainda não propagou eventos após restart, evitamos gravar 0s espúrios
+        // (especialmente SOC, que ficava 0/49 em vez do valor real ~98).
+        try { restoreSensors(context) } catch (_: Exception) {}
+
         recording       = true
         this.startMs    = startMs
         this.flushFile  = flushFile
@@ -191,6 +236,11 @@ class TelemetryRecorder(private val context: Context) {
                         val snapshot = synchronized(samples) { samples.toList() }
                         try { f.writeText(gson.toJson(snapshot)) } catch (_: Exception) {}
                     }
+                    // Persiste últimos valores conhecidos dos sensores (mesma cadência do flush, 30s)
+                    persistSensors(context)
+                    // Heartbeat: log "estou vivo" pra facilitar diagnose futura
+                    val sampleCount = synchronized(samples) { samples.size }
+                    Log.i(TAG, "TelemetryRecorder vivo: samples=$sampleCount, spd=$latestSpeedKmh, rpm=$latestEngineRpm, soc=$latestSocPct, evKw=$latestMotorPowerKw")
                 }
                 delay(500L)
             }

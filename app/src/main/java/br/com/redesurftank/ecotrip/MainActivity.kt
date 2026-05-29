@@ -12,6 +12,7 @@ import br.com.redesurftank.ecotrip.managers.CarDataManager
 import br.com.redesurftank.ecotrip.managers.MqttManager
 import br.com.redesurftank.ecotrip.managers.TripManager
 import br.com.redesurftank.ecotrip.managers.UpdateManager
+import br.com.redesurftank.ecotrip.services.CarTelemetryService
 import br.com.redesurftank.ecotrip.ui.screens.ConsumptionScreen
 import br.com.redesurftank.ecotrip.ui.theme.EcotripTheme
 
@@ -33,6 +34,11 @@ class MainActivity : ComponentActivity() {
         MqttManager.getInstance().init(this)
         BackupManager.getInstance().init(this)
         UpdateManager.getInstance().init(this)
+
+        // Garante que o foreground service esteja rodando — Application.onCreate
+        // já tenta iniciá-lo, mas em alguns cenários (ex.: relaunch via Intent
+        // após o processo ter sido morto) é redundante chamar aqui.
+        CarTelemetryService.start(this)
 
         // Localização para telemetria de auto-trips
         val hasFine = ContextCompat.checkSelfPermission(

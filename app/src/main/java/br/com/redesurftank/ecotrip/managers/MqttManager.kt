@@ -28,6 +28,41 @@ private const val DEFAULT_PUBLISH_INTERVAL_CELLULAR_MS  = 30_000
 // Backoff de reconexão escalonado: 5×1s → 10×2s → depois 5 em 5s (ver reconnectDelayMs).
 private const val MAX_QUEUED_SNAPSHOTS = 50   // ~17 min at 20s interval
 
+// Chaves de telemetria contínua que mudam o tempo todo durante a condução.
+// Vão pra via expressa: publish só desses tópicos a até 20 Hz (debounce 50ms),
+// pra PWA atualizar speed/RPM/power em quase tempo real.
+private val FAST_LANE_KEYS: Set<String> = setOf(
+    CarConstants.CAR_BASIC_VEHICLE_SPEED.value,
+    CarConstants.CAR_BASIC_STEERING_WHEEL_ANGLE.value,       // ângulo do volante (gira o volante no PWA)
+    CarConstants.CAR_BASIC_ENGINE_SPEED.value,
+    CarConstants.CAR_EV_INFO_ENERGY_OUTPUT_PERCENTAGE.value,  // % potência motor
+    CarConstants.CAR_EV_INFO_CUR_CHARGE_CURRENT.value,        // recalcula motor_power_kw
+    CarConstants.CAR_EV_INFO_POWER_BATTERY_VOLTAGE.value,     // recalcula motor_power_kw
+)
+
+// Chaves event-driven: mudanças discretas e raras (toggle/seleção) onde latência importa.
+// Publicam IMEDIATAMENTE no MQTT (full snapshot), ignorando o debounce de 1s do markChanged.
+// Demais chaves (telemetria contínua não-rápida) seguem pelo fluxo debounced de 1s.
+private val IMMEDIATE_PUBLISH_KEYS: Set<String> = setOf(
+    CarConstants.CAR_BASIC_GEAR_STATUS.value,
+    CarConstants.CAR_BASIC_DRIVING_READY_STATE.value,
+    CarConstants.CAR_BASIC_POWER_MODE.value,
+    CarConstants.CAR_EV_INFO_CHARGING_STATE.value,
+    CarConstants.CAR_COMFORT_DRIVER_SEAT_VENT.value,
+    CarConstants.CAR_COMFORT_PASSENGER_SEAT_VENT.value,
+    CarConstants.CAR_HVAC_FAN_SPEED.value,
+    CarConstants.CAR_HVAC_SYNC_ENABLE.value,
+    CarConstants.CAR_HVAC_AUTO_ENABLE.value,
+    CarConstants.CAR_HVAC_AC_ENABLE.value,
+    CarConstants.CAR_HVAC_CYCLE_MODE.value,
+    CarConstants.CAR_HVAC_DRIVER_TEMPERATURE.value,
+    CarConstants.CAR_HVAC_PASSENGER_TEMPERATURE.value,
+    CarConstants.CAR_BASIC_DOOR_LOCK_STATUS.value,
+    CarConstants.CAR_BASIC_DOOR_STATUS.value,
+    CarConstants.CAR_BASIC_WINDOW_STATUS.value,
+    CarConstants.CAR_BASIC_SUNROOF_STATUS.value,
+)
+
 class MqttManager private constructor() {
 
     enum class Status { DISCONNECTED, CONNECTING, CONNECTED, ERROR }
@@ -391,43 +426,283 @@ class MqttManager private constructor() {
         prefs = ctx.getSharedPreferences(SharedPreferencesKeys.PREFS_NAME, Context.MODE_PRIVATE)
         loadConfig()
         restoreDiagState(prefs)
-        // Listener GLOBAL pra charge_soc_limit_config — antes só funcionava com
-        // ConsumptionScreen montado. Agora qualquer mudança feita diretamente
-        // no carro é refletida no HA mesmo com a tela do app fechada.
-        CarDataManager.getInstance().addListener { key, value ->
-            if (key == CarConstants.CAR_EV_SETTING_CHARGE_SOC_LIMIT.value) {
-                val carVal = value.trim().toIntOrNull()
-                if (carVal != null) syncChargeLimitFromCar(carVal)
-            } else if (key == CarConstants.CAR_EV_SETTING_POWER_MODEL_CONFIG.value) {
-                val carVal = value.trim().toIntOrNull()
-                if (carVal != null) syncDriveModeFromCar(carVal)
-            } else if (key == CarConstants.CAR_EV_SETTING_POWER_RESERVE_CONFIG.value) {
-                val carVal = value.trim().toIntOrNull()
-                if (carVal != null) syncPowerReserveFromCar(carVal)
-            } else if (key == CarConstants.CAR_EV_SETTING_CHARGE_SOC_TARGET_CONFIG.value) {
-                val carVal = value.trim().toIntOrNull()
-                if (carVal != null) syncSocTargetFromCar(carVal)
-            } else if (key == CarConstants.CAR_DRIVE_SETTING_DRIVE_MODE.value) {
-                val carVal = value.trim().toIntOrNull()
-                if (carVal != null) syncTerrainModeFromCar(carVal)
-            } else if (key == CarConstants.CAR_EV_SETTING_ENERGY_RECOVERY_LEVEL.value) {
-                val carVal = value.trim().toIntOrNull()
-                if (carVal != null) syncRegenLevelFromCar(carVal)
-            } else if (key == CarConstants.CAR_EV_SETTING_PEDAL_CONTROL_ENABLE.value) {
-                val carVal = value.trim().toIntOrNull()
-                if (carVal != null) syncOnePedalFromCar(carVal)
-            } else if (key == CarConstants.CAR_EV_INFO_ENERGY_OUTPUT_PERCENTAGE.value) {
-                val carVal = value.trim().toFloatOrNull()
-                if (carVal != null) publishRegenPower(carVal)
-            } else if (key == CarConstants.CAR_DRIVE_SETTING_ESP_ENABLE.value) {
-                val carVal = value.trim().toIntOrNull()
-                if (carVal != null) syncEspFromCar(carVal)
-            } else if (key == CarConstants.CAR_DRIVE_SETTING_STEER_MODE.value) {
-                val carVal = value.trim().toIntOrNull()
-                if (carVal != null) syncSteerModeFromCar(carVal)
+        // Listener GLOBAL pro car bus — antes vivia em ConsumptionScreen.kt (dentro
+        // de um DisposableEffect que descadastrava ao sair da tela). Agora roda
+        // SEMPRE — RPM/SOC/speed continuam sendo capturados independente da UI.
+        attachGlobalCarDataListener(context)
+        if (enabled && host.isNotEmpty()) connect()
+    }
+
+    /**
+     * Cadastra o listener completo do car bus + o connectedListener (startup scan).
+     * Chamado uma vez por init(), processa TODAS as chaves do CAN bus e nutre os
+     * latest* + TripManager + sync*FromCar(). Sem este listener, dados de viagem
+     * ficam congelados quando o usuário sai da ConsumptionScreen.
+     */
+    private fun attachGlobalCarDataListener(context: Context) {
+        val tripManager = TripManager.getInstance()
+        val carManager  = CarDataManager.getInstance()
+
+        // Recalcula potência de recarga e notifica TripManager quando qualquer
+        // dado elétrico relevante muda (estado, corrente ou tensão).
+        fun syncCharging() {
+            val state   = latestChargingState
+            val powerKw = if (state == 1 && latestBatteryVoltageV > 0f)
+                kotlin.math.abs(latestChargeCurrentA) * latestBatteryVoltageV / 1000f
+            else 0f
+            tripManager.onChargingUpdate(state == 1, powerKw)
+        }
+
+        lateinit var carListener: (String, String) -> Unit
+        carListener = { key, value ->
+            lastCarDataMs = System.currentTimeMillis()
+            when (key) {
+                CarConstants.CAR_BASIC_POWER_MODE.value -> {
+                    val mode = value.trim().toIntOrNull() ?: 0
+                    when (mode) {
+                        1, 2, 3 -> tripManager.onSessionStart()
+                        0       -> tripManager.onSessionEnd()
+                    }
+                }
+                CarConstants.CAR_BASIC_VEHICLE_SPEED.value -> {
+                    latestSpeedKmh = value.trim().toFloatOrNull() ?: 0f
+                    tripManager.onDataChanged(key, value)
+                }
+                CarConstants.CAR_BASIC_STEERING_WHEEL_ANGLE.value -> {
+                    latestSteeringAngle = value.trim().toFloatOrNull() ?: 0f
+                }
+                CarConstants.CAR_BASIC_INSIDE_TEMP.value -> {
+                    latestInsideTemp = value.trim().toFloatOrNull() ?: 0f
+                    tripManager.onDataChanged(key, value)
+                }
+                CarConstants.CAR_BASIC_OUTSIDE_TEMP.value -> {
+                    latestOutsideTemp = value.trim().toFloatOrNull() ?: 0f
+                    tripManager.onDataChanged(key, value)
+                }
+                CarConstants.CAR_EV_SETTING_CHARGE_SOC_LIMIT.value -> {
+                    val carVal = value.trim().toIntOrNull()
+                    if (carVal != null) syncChargeLimitFromCar(carVal)
+                    tripManager.onDataChanged(key, value)
+                }
+                CarConstants.CAR_BASIC_GEAR_STATUS.value -> {
+                    val raw = value.trim().toIntOrNull()
+                    val gearStr = when (raw) {
+                        0    -> "N"
+                        2    -> "D"
+                        3    -> "P"
+                        4    -> "R"
+                        else -> raw?.toString() ?: value.trim()
+                    }
+                    latestGear = gearStr
+                    tripManager.onGear(gearStr)
+                }
+                CarConstants.CAR_BASIC_DRIVING_READY_STATE.value -> {
+                    val state = value.trim().toIntOrNull()
+                    if (state != null) {
+                        latestDrivingReadyState = state
+                        tripManager.onDrivingReady(state)
+                    }
+                }
+                CarConstants.CAR_EV_INFO_CUR_CHARGE_CURRENT.value -> {
+                    val raw = value.trim().toFloatOrNull() ?: 0f
+                    // O bus retorna sentinelas tipo -1001 quando o carro está
+                    // parado/sem dado. Range físico real: ~ -400..+400 A.
+                    val current = if (kotlin.math.abs(raw) > 500f) 0f else raw
+                    latestChargeCurrentA = current
+                    // Potência do motor: V (car.ev_info.power_battery_voltage) × A / 1000 = kW
+                    val motorKw = latestBatteryVoltageV * current / 1000f
+                    latestMotorPowerKw = motorKw
+                    tripManager.updateMotorPowerKw(motorKw)
+                    syncCharging()
+                }
+                CarConstants.CAR_BASIC_BATTERY_VOLTAGE.value -> {
+                    // Apenas armazena — não entra no cálculo de potência
+                    latestBasicBattVoltageV = value.trim().toFloatOrNull() ?: 0f
+                }
+                CarConstants.CAR_EV_INFO_POWER_BATTERY_VOLTAGE.value -> {
+                    val rawV = value.trim().toFloatOrNull() ?: 0f
+                    // Filtra sentinelas (range físico real: ~250..450 V)
+                    val voltage = if (rawV < 100f || rawV > 600f) 0f else rawV
+                    latestBatteryVoltageV = voltage
+                    val motorKw = voltage * latestChargeCurrentA / 1000f
+                    latestMotorPowerKw = motorKw
+                    tripManager.updateMotorPowerKw(motorKw)
+                    tripManager.onDataChanged(key, value)
+                    syncCharging()
+                }
+                CarConstants.CAR_EV_INFO_POWER_BATTERY_CURRENT.value -> {
+                    latestBatteryCurrentA = value.trim().toFloatOrNull() ?: 0f
+                    tripManager.onDataChanged(key, value)
+                }
+                CarConstants.CAR_BASIC_TOTAL_ODOMETER.value -> {
+                    val km = value.trim().toFloatOrNull() ?: 0f
+                    latestOdometerKm = km
+                    // não passa para TripManager (não é usado em cálculos de trip)
+                }
+                CarConstants.CAR_EV_INFO_CHARGING_STATE.value -> {
+                    latestChargingState = value.trim().toIntOrNull() ?: -1
+                    syncCharging()
+                }
+                CarConstants.CAR_EV_INFO_CHARGE_REMAINING_TIME.value -> {
+                    latestChargeRemainingMin = value.trim().toIntOrNull() ?: 0
+                }
+                CarConstants.CAR_EV_INFO_ENERGY_OUTPUT_PERCENTAGE.value -> {
+                    // % potência motor elétrico em tempo real → barra no iPhone + telemetria
+                    latestBattPowerPct = value.trim().toIntOrNull() ?: 0
+                    tripManager.onDataChanged(key, value)  // rastreia pico no auto-trip + telemetria
+                    // Listener parcial antigo também publicava o sinal de regen aqui;
+                    // mantém o comportamento pra HA continuar recebendo.
+                    val carValF = value.trim().toFloatOrNull()
+                    if (carValF != null) publishRegenPower(carValF)
+                }
+                CarConstants.CAR_EV_INFO_CUR_BATTERY_POWER_PERCENTAGE.value -> {
+                    // SOC da bateria → alimenta latestSocPct para SOC inicial/final dos trips
+                    tripManager.onDataChanged(key, value)
+                }
+                CarConstants.CAR_BASIC_ENGINE_SPEED.value -> {
+                    latestEngineRpm = value.trim().toIntOrNull() ?: 0
+                    tripManager.onDataChanged(key, value)  // alimenta telemetryRecorder.latestEngineRpm
+                }
+                CarConstants.CAR_COMFORT_DRIVER_SEAT_VENT.value -> {
+                    latestDriverSeatVent = value.trim().toIntOrNull() ?: 0
+                }
+                CarConstants.CAR_COMFORT_PASSENGER_SEAT_VENT.value -> {
+                    latestPassengerSeatVent = value.trim().toIntOrNull() ?: 0
+                }
+                CarConstants.CAR_HVAC_DRIVER_TEMPERATURE.value -> {
+                    latestHvacDriverTemp = value.trim().toFloatOrNull() ?: 0f
+                }
+                CarConstants.CAR_HVAC_PASSENGER_TEMPERATURE.value -> {
+                    latestHvacPassengerTemp = value.trim().toFloatOrNull() ?: 0f
+                }
+                CarConstants.CAR_HVAC_FAN_SPEED.value -> {
+                    latestHvacFanSpeed = value.trim().toIntOrNull() ?: 0
+                }
+                CarConstants.CAR_HVAC_SYNC_ENABLE.value -> {
+                    latestHvacSyncEnable = value.trim().toIntOrNull() ?: 0
+                }
+                CarConstants.CAR_HVAC_AUTO_ENABLE.value -> {
+                    latestHvacAutoEnable = value.trim().toIntOrNull() ?: 0
+                }
+                CarConstants.CAR_HVAC_AC_ENABLE.value -> {
+                    latestHvacAcEnable = value.trim().toIntOrNull() ?: 0
+                }
+                CarConstants.CAR_HVAC_CYCLE_MODE.value -> {
+                    latestHvacCycleMode = value.trim().toIntOrNull() ?: 0
+                }
+                CarConstants.CAR_BASIC_DOOR_LOCK_STATUS.value -> {
+                    val raw = value.trim().toIntOrNull() ?: 0
+                    applyLockStatus(raw)  // voting filter K=8
+                }
+                CarConstants.CAR_BASIC_DOOR_STATUS.value -> {
+                    // Formato esperado: CSV "FL,FR,RL,RR,Trunk" — 0=fechada, 1=aberta.
+                    // O carro emite o CSV envolvido em chaves: "{0,0,0,0,0}". Limpa
+                    // qualquer não-dígito (exceto vírgula e sinal) antes de parsear,
+                    // se não o primeiro/último elemento ficam grudados com `{`/`}` e
+                    // viram 0 (toIntOrNull falha).
+                    latestDoorStatusRaw = value
+                    val cleaned = value.replace(Regex("[^0-9,\\-]"), "")
+                    val parts = cleaned.split(",").mapNotNull { it.trim().toIntOrNull() }
+                    if (parts.size >= 4) {
+                        latestDoorFl = parts.getOrElse(0) { 0 }
+                        latestDoorFr = parts.getOrElse(1) { 0 }
+                        latestDoorRl = parts.getOrElse(2) { 0 }
+                        latestDoorRr = parts.getOrElse(3) { 0 }
+                        latestTrunk  = parts.getOrElse(4) { 0 }
+                    }
+                }
+                CarConstants.CAR_BASIC_WINDOW_STATUS.value -> {
+                    // CSV "FL,FR,RL,RR" — cru "1"=fechado, demais valores=aberto.
+                    // O carro emite envolvido em chaves: "{1,1,1,1}". Limpa qualquer
+                    // não-dígito (exceto vírgula e sinal) antes de parsear — senão o
+                    // primeiro/último elemento ficam grudados com `{`/`}` e viram 0.
+                    // applyWindowStatus aplica voting filter (K=8 leituras consecutivas)
+                    // pra filtrar rajadas de ruído do barramento.
+                    latestWindowStatusRaw = value
+                    val cleaned = value.replace(Regex("[^0-9,\\-]"), "")
+                    val parts = cleaned.split(",").mapNotNull { it.trim().toIntOrNull() }
+                    if (parts.size >= 4) {
+                        applyWindowStatus(parts[0], parts[1], parts[2], parts[3])
+                    }
+                }
+                CarConstants.CAR_BASIC_SUNROOF_STATUS.value -> {
+                    // 0=fechado, >0=aberto (vários estágios)
+                    latestSunroof = value.trim().toIntOrNull() ?: 0
+                }
+                // ── Chaves de configuração espelhadas no HA (eram o "listener parcial") ──
+                // Não existem branches na CS pra elas; vinham do listener global antigo.
+                CarConstants.CAR_EV_SETTING_POWER_MODEL_CONFIG.value -> {
+                    val carVal = value.trim().toIntOrNull()
+                    if (carVal != null) syncDriveModeFromCar(carVal)
+                }
+                CarConstants.CAR_EV_SETTING_POWER_RESERVE_CONFIG.value -> {
+                    val carVal = value.trim().toIntOrNull()
+                    if (carVal != null) syncPowerReserveFromCar(carVal)
+                }
+                CarConstants.CAR_EV_SETTING_CHARGE_SOC_TARGET_CONFIG.value -> {
+                    val carVal = value.trim().toIntOrNull()
+                    if (carVal != null) syncSocTargetFromCar(carVal)
+                }
+                CarConstants.CAR_DRIVE_SETTING_DRIVE_MODE.value -> {
+                    val carVal = value.trim().toIntOrNull()
+                    if (carVal != null) syncTerrainModeFromCar(carVal)
+                }
+                CarConstants.CAR_EV_SETTING_ENERGY_RECOVERY_LEVEL.value -> {
+                    val carVal = value.trim().toIntOrNull()
+                    if (carVal != null) syncRegenLevelFromCar(carVal)
+                }
+                CarConstants.CAR_EV_SETTING_PEDAL_CONTROL_ENABLE.value -> {
+                    val carVal = value.trim().toIntOrNull()
+                    if (carVal != null) syncOnePedalFromCar(carVal)
+                }
+                CarConstants.CAR_DRIVE_SETTING_ESP_ENABLE.value -> {
+                    val carVal = value.trim().toIntOrNull()
+                    if (carVal != null) syncEspFromCar(carVal)
+                }
+                CarConstants.CAR_DRIVE_SETTING_STEER_MODE.value -> {
+                    val carVal = value.trim().toIntOrNull()
+                    if (carVal != null) syncSteerModeFromCar(carVal)
+                }
+                else -> tripManager.onDataChanged(key, value)
+            }
+            // Roteamento por tipo de chave:
+            //   - IMMEDIATE_PUBLISH_KEYS  → full snapshot na hora
+            //   - FAST_LANE_KEYS          → só speed/RPM/power, ~20 Hz (50ms debounce)
+            //   - resto                   → full snapshot debounced a 1s
+            when (key) {
+                in IMMEDIATE_PUBLISH_KEYS -> markChangedImmediate()
+                in FAST_LANE_KEYS         -> markChangedFast()
+                else                      -> markChanged()
             }
         }
-        if (enabled && host.isNotEmpty()) connect()
+
+        val connectedListener: () -> Unit = {
+            try {
+                // Vehicle model — precisa ser lido ANTES do publishDiscovery do MQTT para popular
+                // o device JSON. carListener não tem branch pra essas chaves.
+                vehicleModel1 = carManager.fetchCurrent(CarConstants.CAR_BASIC_VEHICLE_MODEL1.value)?.trim() ?: ""
+                vehicleModel2 = carManager.fetchCurrent(CarConstants.CAR_BASIC_VEHICLE_MODEL2.value)?.trim() ?: ""
+
+                // Startup scan: lê TODAS as chaves do barramento e propaga via carListener.
+                // Garante que latest* e tripManager fiquem populados desde o primeiro
+                // segundo, sem depender do listener passivo do car bus (que pode demorar
+                // para certas chaves chegarem). Toda a lógica per-key (parsing,
+                // syncCharging, syncChargeLimitFromCar, onSessionStart, etc.) é reusada
+                // via carListener.
+                for (key in CarConstants.entries) {
+                    if (key == CarConstants.CAR_BASIC_VEHICLE_MODEL1 ||
+                        key == CarConstants.CAR_BASIC_VEHICLE_MODEL2) continue  // já lidos acima
+                    val v = try { carManager.fetchCurrent(key.value)?.trim() } catch (_: Exception) { null }
+                    if (!v.isNullOrEmpty()) carListener(key.value, v)
+                }
+                // Snapshot completo logo após o scan.
+                markChangedImmediate()
+            } catch (_: Exception) {}
+        }
+
+        carManager.addListener(carListener)
+        carManager.addConnectedListener(connectedListener)
+        if (carManager.isConnected) connectedListener()
     }
 
     /** Retorna true se a conexão ativa for WiFi. */
