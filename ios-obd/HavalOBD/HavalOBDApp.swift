@@ -24,6 +24,8 @@ struct HavalOBDApp: App {
                 .environmentObject(channel)
                 .preferredColorScheme(.dark)
                 .ignoresSafeArea()
+                .statusBarHidden(true)
+                .persistentSystemOverlays(.hidden)
                 .onAppear { publisher.bind(elm) }
         }
     }

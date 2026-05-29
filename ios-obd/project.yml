@@ -64,6 +64,11 @@ targets:
           - bluetooth-peripheral
         # Disable idle timer no app config — também controlado em código.
         UIApplicationSupportsIndirectInputEvents: YES
+        # Cluster é fullscreen — esconde status bar (hora, bateria, WiFi)
+        # pra não sobrepor a topbar do cluster.html.
+        UIStatusBarHidden: YES
+        UIViewControllerBasedStatusBarAppearance: NO
+        UIRequiresFullScreen: YES
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: br.com.consorciolimpagyn.havalobd
