@@ -112,22 +112,15 @@ final class OBDBridgeChannel: ObservableObject {
             out["pack_voltage_v"] = v   // sobrescreve E006 no estado do cluster
         }
         // ── Motor power derivado ──
-        // Preferência 1: P = V × I / 1000 (mais preciso, requer battery_current_a)
-        // Fallback: P_motor ≈ Σ(torque × rpm) / 9549 — quando E0A4 ausente
-        //   Como torque_max NÃO é o atual, uso uma heurística: rpm * 0.05 kW/rpm
-        //   (= ~50W por rpm) só pra ter movimento visível no card.
+        // P = V × I / 1000. Sem battery_current_a, deixa nil (sem fallback
+        // ruim — anteriores estavam gerando -151 kW absurdo).
         let voltageForPower = (raw["pack_cells_total_v"] as? Double) ?? (raw["pack_voltage_v"] as? Double)
         if let v = voltageForPower, let i = raw["battery_current_a"] as? Double {
-            out["motor_power_kw"] = v * i / 1000.0
-        } else {
-            // Fallback heurístico: rpm × 0.005 (kW)
-            let gmcuRpm = (raw["gmcu_motor_rpm"] as? Double) ?? 0
-            let tmcuRpm = (raw["tmcu_motor_rpm"] as? Double) ?? 0
-            let totalRpm = abs(gmcuRpm) + abs(tmcuRpm)
-            if totalRpm > 50 {
-                // Estimativa grosseira — só pra dar feedback visual
-                let sign: Double = (gmcuRpm + tmcuRpm) < 0 ? -1 : 1
-                out["motor_power_kw"] = sign * (totalRpm * 0.005)
+            let kw = v * i / 1000.0
+            // Clamp em ±200 kW (motor real do H6 PHEV: ~184 kW pico).
+            // Valor fora disso é certeza de erro de parser.
+            if abs(kw) < 250 {
+                out["motor_power_kw"] = kw
             }
         }
 
@@ -146,12 +139,24 @@ final class OBDBridgeChannel: ObservableObject {
 
     private func pushFast() {
         guard webViewReady, let webView = webView, let elm = elm, !elm.samples.isEmpty else { return }
-        let fastIds: Set<String> = ["rpm", "speed_kmh", "motor_power_kw", "engine_rpm",
-                                    "throttle_pct", "battery_current_a", "soc_pct"]
+        // IDs reais do registry (não os aliases do cluster) — sem nada disso,
+        // pushFast não pega NADA do elm.samples e o fallback heurístico
+        // explode com valores absurdos.
+        let fastIds: Set<String> = [
+            "rpm", "speed_kmh_obd", "throttle_pct", "control_voltage",
+            "soc_pct", "battery_current_a",
+            "pack_voltage_v", "pack_cells_total_v",
+            "gmcu_motor_rpm", "tmcu_motor_rpm",
+        ]
+        let now = Date()
         var dict: [String: Any] = ["__fast": true]
         for id in fastIds {
             if let s = elm.samples[id], let v = s.value {
-                dict[id] = v
+                // Drop sample stale (> 3s) — evita valores travados enquanto
+                // ECU dormindo (típico em modo elétrico parado)
+                if now.timeIntervalSince(s.ts) < 3.0 {
+                    dict[id] = v
+                }
             }
         }
         guard dict.count > 1 else { return }
@@ -166,8 +171,16 @@ final class OBDBridgeChannel: ObservableObject {
             "obd_connected": elm.bt.state == .ready,
             "obd_initialized": elm.initialized,
         ]
+        let now = Date()
         for (key, sample) in elm.samples {
-            if let v = sample.value { dict[key] = v }
+            if let v = sample.value {
+                // Samples velhos (> 10s) NÃO entram — evita display de dados
+                // congelados quando ECU adormece (especialmente speed/rpm
+                // do ECM em modo elétrico)
+                if now.timeIntervalSince(sample.ts) < 10.0 {
+                    dict[key] = v
+                }
+            }
         }
         // GPS do iPad — cluster.html usa gps_lat/gps_lng pra mover marker
         if let loc = location {

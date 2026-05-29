@@ -19,8 +19,11 @@ final class LocationManager: NSObject, ObservableObject {
     override init() {
         super.init()
         manager.delegate = self
-        manager.desiredAccuracy = kCLLocationAccuracyBest
-        manager.distanceFilter = 5   // metros
+        // BestForNavigation usa sensores extras (giroscópio, acelerômetro) +
+        // GPS pra precisão sub-3m e updates contínuos enquanto move. Necessário
+        // pro cluster mostrar km/h fluido (a 60 km/h = 16 m/s).
+        manager.desiredAccuracy = kCLLocationAccuracyBestForNavigation
+        manager.distanceFilter = kCLDistanceFilterNone   // todo update
         manager.activityType = .automotiveNavigation
     }
 
