@@ -856,15 +856,17 @@ class TripManager private constructor() {
         // Carrega as amostras já gravadas em disco (flush a cada 60 s) para preservar a rota.
         // Arquivos _inprogress de outras sessões (orphans) são apagados.
         if (autoTripStartMs > 0L) {
+            // Sempre passa flushFile válido — mesmo se o arquivo _inprogress sumiu,
+            // o recorder começa a persistir do zero pra não perder os próximos samples.
             val inProgressFile = java.io.File(samplesDir, "${autoTripStartMs}_inprogress.json")
             val preloaded: List<TelemetrySample> = if (inProgressFile.exists()) {
                 try {
                     val type = object : TypeToken<List<TelemetrySample>>() {}.type
-                    gson.fromJson<List<TelemetrySample>>(inProgressFile.readText(), type)
+                    gson.fromJson<List<TelemetrySample>>(inProgressFile.readText(), type) ?: emptyList()
                 } catch (_: Exception) { emptyList() }
             } else emptyList()
             telemetryRecorder?.startRecording(autoTripStartMs, preloaded, inProgressFile)
-            AppLogger.i(TAG, "AutoTrip retomado após reinício: ${preloaded.size} amostras carregadas do disco")
+            AppLogger.i(TAG, "AutoTrip retomado após reinício: ${preloaded.size} amostras carregadas do disco (inProgressExistia=${inProgressFile.exists()})")
         }
         // Limpa arquivos _inprogress órfãos (sessões anteriores abandonadas)
         try {
