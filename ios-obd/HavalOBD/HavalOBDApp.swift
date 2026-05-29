@@ -97,8 +97,11 @@ struct RootView: View {
         }
         .sheet(isPresented: $showSettings) { SettingsView() }
         .fullScreenCover(isPresented: $showNav) { NavigationModalView() }
-        .onReceive(NotificationCenter.default.publisher(for: .openNavigation)) { _ in
-            showNav = true
+        .onChange(of: channel.navRequested) { _, requested in
+            if requested {
+                showNav = true
+                channel.navRequested = false   // reset pra próxima
+            }
         }
         .onChange(of: channel.webViewReady) { _, ready in
             if ready {
