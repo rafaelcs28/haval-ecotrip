@@ -69,28 +69,66 @@
   /* Browser/PWA: Atalhos escondido (mantém layout original Power|Trip|Fluxo) */
   .widget.quick-widget { display: none; }
 
-  /* Atalhos: 3 botões grandes empilhados verticalmente no widget */
-  .quick-widget .quick-grid {
-    flex: 1;
-    display: grid; grid-template-columns: 1fr;
-    gap: 12px; align-content: center;
+  /* Controles drive — chips estilo PWA aba Drive */
+  .quick-widget .dc-body {
+    flex: 1; display: flex; flex-direction: column;
+    gap: 10px; overflow-y: auto; padding-right: 4px;
   }
-  .quick-widget .qb {
-    appearance: none; -webkit-appearance: none;
-    background: rgba(255,255,255,.06);
-    border: 1px solid rgba(255,255,255,.1);
-    border-radius: 16px;
-    padding: 16px 12px;
-    display: flex; align-items: center; gap: 14px;
-    color: var(--text); cursor: pointer;
-    transition: background .15s, transform .1s;
-    font-family: inherit;
+  .quick-widget .dc-card {
+    background: rgba(255,255,255,.04);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 10px 12px;
+    display: flex; flex-direction: column; gap: 8px;
   }
-  .quick-widget .qb:active { transform: scale(.96); background: rgba(255,255,255,.14); }
-  .quick-widget .qb.on { background: rgba(34,197,94,.18); border-color: rgba(34,197,94,.5); }
-  .quick-widget .qb-ico { font-size: 32px; line-height: 1; min-width: 44px; text-align: center; }
-  .quick-widget .qb-lbl { font-size: 12px; letter-spacing: .14em; color: var(--muted); text-transform: uppercase; flex: 1; text-align: left; }
-  .quick-widget .qb-val { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; min-width: 60px; text-align: right; }
+  .quick-widget .dc-label {
+    font-size: 11px; font-weight: 700; letter-spacing: .12em;
+    color: var(--muted); text-transform: uppercase;
+  }
+  .quick-widget .dm-chips { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .quick-widget .tm-chips-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+  .quick-widget .tm-chips-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .quick-widget .dm-chip {
+    padding: 10px 8px;
+    border: 1px solid rgba(255,255,255,.12);
+    border-radius: 10px;
+    background: rgba(255,255,255,.03);
+    color: var(--text);
+    font-size: 13px; font-weight: 500;
+    text-align: center; cursor: pointer;
+    transition: background .15s, border-color .15s, color .15s, transform .1s;
+    user-select: none; -webkit-user-select: none;
+  }
+  .quick-widget .dm-chip:active { transform: scale(.95); background: rgba(255,255,255,.10); }
+  .quick-widget .dm-chip.active {
+    background: rgba(34,197,94,.16);
+    border-color: rgba(34,197,94,.6);
+    color: var(--green);
+  }
+  .quick-widget .dm-chip.pending {
+    opacity: .6;
+    background: rgba(255,200,50,.12);
+    border-color: rgba(255,200,50,.4);
+  }
+  /* Toggles — A/C, ESP, One-Pedal */
+  .quick-widget .one-pedal-row,
+  .quick-widget .dc-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 4px 2px;
+  }
+  .quick-widget .op-lbl { font-size: 13px; color: var(--text); }
+  .quick-widget .op-toggle {
+    width: 48px; height: 28px; border-radius: 14px;
+    background: rgba(255,255,255,.12); position: relative;
+    transition: background .2s; cursor: pointer;
+  }
+  .quick-widget .op-toggle.on { background: var(--green); }
+  .quick-widget .op-knob {
+    position: absolute; top: 3px; left: 3px;
+    width: 22px; height: 22px; border-radius: 50%;
+    background: #fff; transition: left .2s;
+  }
+  .quick-widget .op-toggle.on .op-knob { left: 23px; }
   /* Fluxo de Energia oculto no nativo — versão compacta vai pro topbar */
   body.native .widget.flow-widget { display: none !important; }
   /* row-bot: 2 colunas no nativo (Power + Trip) — 3ª área é o MiniPlayer SwiftUI */
@@ -644,25 +682,73 @@
       </div>
     </div>
 
-    <!-- Atalhos (A/C, Regen, Modo) — substituiu Fluxo no modo nativo -->
+    <!-- Atalhos: mesmos controles da aba Drive do PWA -->
     <div class="widget quick-widget">
-      <h3><span class="ico">⚡</span> Atalhos</h3>
-      <div class="quick-grid">
-        <button class="qb" id="qb-ac" onclick="qb_toggleAc()">
-          <span class="qb-ico">❄️</span>
-          <span class="qb-lbl">A/C</span>
-          <span class="qb-val" id="qb-ac-val">off</span>
-        </button>
-        <button class="qb" id="qb-regen" onclick="qb_cycleRegen()">
-          <span class="qb-ico">↻</span>
-          <span class="qb-lbl">Regen</span>
-          <span class="qb-val" id="qb-regen-val">—</span>
-        </button>
-        <button class="qb" id="qb-drive" onclick="qb_cycleDrive()">
-          <span class="qb-ico">🚗</span>
-          <span class="qb-lbl">Modo</span>
-          <span class="qb-val" id="qb-drive-val">—</span>
-        </button>
+      <h3><span class="ico">🎛</span> Controles</h3>
+      <div class="dc-body">
+        <!-- Modo de condução PHEV -->
+        <div class="dc-card">
+          <div class="dc-label">⚙ Modo</div>
+          <div class="dm-chips">
+            <div class="dm-chip" data-mode="0" onclick="setDriveMode(0)">HEV</div>
+            <div class="dm-chip" data-mode="1" onclick="setDriveMode(1)">Prior. EV</div>
+            <div class="dm-chip" data-mode="3" onclick="setDriveMode(3)">EV</div>
+          </div>
+        </div>
+        <!-- Estilo (terrain) -->
+        <div class="dc-card">
+          <div class="dc-label">🏁 Estilo</div>
+          <div class="tm-chips-4">
+            <div class="dm-chip" data-terrain="0" onclick="setTerrainMode(0)">Normal</div>
+            <div class="dm-chip" data-terrain="1" onclick="setTerrainMode(1)">Sport</div>
+            <div class="dm-chip" data-terrain="2" onclick="setTerrainMode(2)">Eco</div>
+            <div class="dm-chip" data-terrain="3" onclick="setTerrainMode(3)">Neve</div>
+          </div>
+          <div class="tm-chips-3">
+            <div class="dm-chip" data-terrain="4" onclick="setTerrainMode(4)">Areia</div>
+            <div class="dm-chip" data-terrain="5" onclick="setTerrainMode(5)">Lama</div>
+            <div class="dm-chip" data-terrain="11" onclick="setTerrainMode(11)">AWD</div>
+          </div>
+        </div>
+        <!-- Regeneração -->
+        <div class="dc-card">
+          <div class="dc-label">⚡ Regeneração</div>
+          <div class="dm-chips">
+            <div class="dm-chip" data-regen="2" onclick="setRegenLevel(2)">Baixo</div>
+            <div class="dm-chip" data-regen="0" onclick="setRegenLevel(0)">Normal</div>
+            <div class="dm-chip" data-regen="1" onclick="setRegenLevel(1)">Alto</div>
+          </div>
+          <div class="one-pedal-row">
+            <span class="op-lbl">One-Pedal</span>
+            <div class="op-toggle" id="one-pedal-toggle" onclick="toggleOnePedal()">
+              <div class="op-knob"></div>
+            </div>
+          </div>
+        </div>
+        <!-- Direção -->
+        <div class="dc-card">
+          <div class="dc-label">🎯 Direção</div>
+          <div class="dm-chips">
+            <div class="dm-chip" data-steer="2" onclick="setSteerMode(2)">Conforto</div>
+            <div class="dm-chip" data-steer="0" onclick="setSteerMode(0)">Normal</div>
+            <div class="dm-chip" data-steer="1" onclick="setSteerMode(1)">Sport</div>
+          </div>
+        </div>
+        <!-- A/C + ESP -->
+        <div class="dc-card">
+          <div class="dc-row">
+            <span class="op-lbl">❄ A/C</span>
+            <div class="op-toggle" id="ac-toggle" onclick="toggleAc()">
+              <div class="op-knob"></div>
+            </div>
+          </div>
+          <div class="dc-row">
+            <span class="op-lbl">🛡 ESP</span>
+            <div class="op-toggle" id="esp-toggle" onclick="toggleEsp()">
+              <div class="op-knob"></div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -1300,55 +1386,72 @@ function renderObdDebug() {
     ).join('');
   }
 }
-// Atalhos rápidos — atualiza estado visual dos botões (A/C on/off, regen, etc)
-const REGEN_NAMES   = ['baixo', 'médio', 'alto', 'auto'];
-const DRIVE_NAMES   = { 1: 'Eco', 2: 'Norm', 3: 'Sport', 4: 'Auto' };
+// Atalhos: chips estilo Drive do PWA. Atualiza .active baseado em state.
 function renderQuickActions() {
-  // A/C
-  const acOn = +state.ac_state === 1;
-  $('qb-ac').classList.toggle('on', acOn);
-  $('qb-ac-val').textContent = acOn ? 'on' : 'off';
-  // Regen level
-  const regen = +state.regen_level;
-  $('qb-regen-val').textContent = Number.isFinite(regen) ? (REGEN_NAMES[regen] ?? regen) : '—';
-  // Drive mode
-  const dm = +state.drive_mode;
-  $('qb-drive-val').textContent = Number.isFinite(dm) ? (DRIVE_NAMES[dm] ?? dm) : '—';
+  setActiveChip('mode',    state.drive_mode);
+  setActiveChip('terrain', state.terrain_mode);
+  setActiveChip('regen',   state.regen_level);
+  setActiveChip('steer',   state.steer_mode);
+  setToggle('one-pedal-toggle', state.one_pedal === 1 || state.one_pedal === '1');
+  setToggle('ac-toggle',        +state.ac_state === 1);
+  setToggle('esp-toggle',       +state.esp_state === 1 || state.esp_state === '1');
+}
+function setActiveChip(attr, val) {
+  if (val === undefined || val === null) return;
+  document.querySelectorAll(`.quick-widget .dm-chip[data-${attr}]`).forEach(c => {
+    c.classList.toggle('active', String(c.dataset[attr]) === String(val));
+    // Tira 'pending' quando a confirmação chega
+    if (String(c.dataset[attr]) === String(val)) c.classList.remove('pending');
+  });
+}
+function setToggle(id, on) {
+  const el = document.getElementById(id);
+  if (el) el.classList.toggle('on', !!on);
 }
 
-// Handlers dos botões — publica comando via _nativeBridge (Swift → MQTT)
-function sendHvacCmd(action, value) {
-  if (!window.webkit?.messageHandlers?.obd) return;
+// Handlers — postam comando pro Swift; Swift faz POST HTTP no bridge.
+function sendCmd(action, value) {
+  if (!window.webkit?.messageHandlers?.obd) {
+    toast('Modo browser — comandos só no app nativo');
+    return;
+  }
   window.webkit.messageHandlers.obd.postMessage({ action, value: String(value) });
 }
-window.qb_toggleAc = () => {
-  const next = +state.ac_state === 1 ? '0' : '1';
-  sendHvacCmd('hvac_ac', next);
-  toast(next === '1' ? '❄️ A/C ligado' : 'A/C desligado');
+window.setDriveMode = (mode) => {
+  const chip = document.querySelector(`.dm-chip[data-mode="${mode}"]`);
+  if (chip) chip.classList.add('pending');
+  sendCmd('drive_mode_set', mode);
+  toast('⏳ Modo enviado…');
 };
-window.qb_cycleRegen = () => {
-  const cur = +state.regen_level || 0;
-  const next = (cur + 1) % 4;
-  sendHvacCmd('regen_level', next);
-  toast('Regen: ' + (REGEN_NAMES[next] ?? next));
+window.setTerrainMode = (mode) => {
+  const chip = document.querySelector(`.dm-chip[data-terrain="${mode}"]`);
+  if (chip) chip.classList.add('pending');
+  sendCmd('terrain_mode_set', mode);
+  toast('⏳ Estilo enviado…');
 };
-window.qb_cycleDrive = () => {
-  const cur = +state.drive_mode || 1;
-  const next = cur >= 4 ? 1 : cur + 1;
-  sendHvacCmd('drive_mode', next);
-  toast('Modo: ' + (DRIVE_NAMES[next] ?? next));
+window.setRegenLevel = (level) => {
+  const chip = document.querySelector(`.dm-chip[data-regen="${level}"]`);
+  if (chip) chip.classList.add('pending');
+  sendCmd('regen_level_set', level);
+  toast('⏳ Regen enviado…');
 };
-window.qb_temp = (delta) => {
-  const cur = +state.hvac_driver_temp || 22;
-  const next = clamp(cur + delta, 16, 31);
-  sendHvacCmd('hvac_temp', next);
-  toast('Temp: ' + Math.round(next) + '°');
+window.setSteerMode = (mode) => {
+  const chip = document.querySelector(`.dm-chip[data-steer="${mode}"]`);
+  if (chip) chip.classList.add('pending');
+  sendCmd('steer_mode_set', mode);
+  toast('⏳ Direção enviada…');
 };
-window.qb_cycleFan = () => {
-  const cur = +state.hvac_fan_speed || 1;
-  const next = cur >= 7 ? 1 : cur + 1;
-  sendHvacCmd('hvac_fan', next);
-  toast('Vent: ' + next);
+window.toggleOnePedal = () => {
+  const cur = state.one_pedal === 1 || state.one_pedal === '1';
+  sendCmd('one_pedal_set', cur ? 'false' : 'true');
+};
+window.toggleAc = () => {
+  const cur = +state.ac_state === 1;
+  sendCmd('hvac_ac', cur ? '0' : '1');
+};
+window.toggleEsp = () => {
+  const cur = +state.esp_state === 1 || state.esp_state === '1';
+  sendCmd('esp_set', cur ? 'false' : 'true');
 };
 
 // Boot

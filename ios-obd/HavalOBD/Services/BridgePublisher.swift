@@ -140,6 +140,31 @@ final class BridgePublisher: ObservableObject {
         print("[bridge http] poll iniciado em \(bridgeBaseUrl)/api/state")
     }
 
+    /// POST genérico no bridge (drive-mode, terrain-mode, regen-level, etc).
+    /// Mesmo padrão do PWA: Authorization: Bearer + JSON body.
+    func postCommand(path: String, body: [String: Any]) async {
+        let base = bridgeBaseUrl.hasSuffix("/") ? String(bridgeBaseUrl.dropLast()) : bridgeBaseUrl
+        guard !bridgeAuthToken.isEmpty,
+              let url = URL(string: "\(base)\(path)") else {
+            print("[bridge http] POST cancelado: token/url ausente")
+            return
+        }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.timeoutInterval = 6
+        req.setValue("Bearer \(bridgeAuthToken)", forHTTPHeaderField: "Authorization")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        do {
+            let (data, resp) = try await URLSession.shared.data(for: req)
+            let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            let txt = String(data: data, encoding: .utf8) ?? ""
+            print("[bridge http] POST \(path) → \(status) \(txt.prefix(120))")
+        } catch {
+            print("[bridge http] POST \(path) erro: \(error.localizedDescription)")
+        }
+    }
+
     private func fetchState() async {
         let base = bridgeBaseUrl.hasSuffix("/") ? String(bridgeBaseUrl.dropLast()) : bridgeBaseUrl
         guard let url = URL(string: "\(base)/api/state") else { return }
