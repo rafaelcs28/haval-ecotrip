@@ -179,7 +179,8 @@ final class ELM327: ObservableObject {
             idx = next
         }
         guard let value = pid.parser(bytes) else { return nil }
-        let s = OBDSample(pidId: pid.id, value: value, unit: pid.unit, ts: Date())
+        let hexJoined = bytes.map { String(format: "%02X", $0) }.joined(separator: " ")
+        let s = OBDSample(pidId: pid.id, value: value, unit: pid.unit, ts: Date(), rawHex: hexJoined)
         samples[pid.id] = s
         return s
     }
