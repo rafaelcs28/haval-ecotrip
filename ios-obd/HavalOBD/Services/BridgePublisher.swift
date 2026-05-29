@@ -19,6 +19,10 @@ final class BridgePublisher: ObservableObject {
     private var mqtt: CocoaMQTT?
     private weak var elm: ELM327?
     private var publishTimer: Timer?
+    /// Callback chamado quando o bridge publica state extra (viagem em curso,
+    /// preços, charging) via MQTT. Permite o cluster.html receber dados que
+    /// não vêm do OBD direto.
+    var onClusterExtra: (([String: Any]) -> Void)?
 
     func bind(_ elm: ELM327) {
         self.elm = elm
@@ -104,12 +108,27 @@ extension BridgePublisher: CocoaMQTTDelegate {
             DispatchQueue.main.async {
                 self.connected = true
                 self.startPublishLoop()
+                // Inscreve no tópico que o bridge publica com state extra
+                // (viagem em curso, preços, charging) pra alimentar o cluster.
+                let extraTopic = "haval/ecotrip/cluster_extra"
+                mqtt.subscribe(extraTopic, qos: .qos0)
+                print("[bridge] subscribed em \(extraTopic)")
             }
         }
     }
     func mqtt(_ mqtt: CocoaMQTT, didPublishMessage message: CocoaMQTTMessage, id: UInt16) {}
     func mqtt(_ mqtt: CocoaMQTT, didPublishAck id: UInt16) {}
-    func mqtt(_ mqtt: CocoaMQTT, didReceiveMessage message: CocoaMQTTMessage, id: UInt16) {}
+    func mqtt(_ mqtt: CocoaMQTT, didReceiveMessage message: CocoaMQTTMessage, id: UInt16) {
+        // Tópico cluster_extra: JSON com campos bridge-only pro cluster do iPad
+        if message.topic == "haval/ecotrip/cluster_extra" {
+            guard let data = message.string?.data(using: .utf8),
+                  let obj  = try? JSONSerialization.jsonObject(with: data),
+                  let dict = obj as? [String: Any] else { return }
+            DispatchQueue.main.async {
+                self.onClusterExtra?(dict)
+            }
+        }
+    }
     func mqtt(_ mqtt: CocoaMQTT, didSubscribeTopics success: NSDictionary, failed: [String]) {}
     func mqtt(_ mqtt: CocoaMQTT, didUnsubscribeTopics topics: [String]) {}
     func mqttDidPing(_ mqtt: CocoaMQTT) {}
