@@ -32,8 +32,10 @@ struct ClusterWebView: UIViewRepresentable {
         // via evaluateJavaScript dentro do didFinish navigation (Coordinator).
 
         let web = WKWebView(frame: .zero, configuration: config)
+        // Transparente pra MapKit nativo aparecer por baixo (na área do mapa)
         web.isOpaque = false
-        web.backgroundColor = .black
+        web.backgroundColor = .clear
+        web.scrollView.backgroundColor = .clear
         web.scrollView.isScrollEnabled = false
         web.scrollView.bounces = false
         web.scrollView.contentInsetAdjustmentBehavior = .never

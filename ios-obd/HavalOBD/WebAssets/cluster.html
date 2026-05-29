@@ -33,6 +33,18 @@
   html, body {
     width: 100vw; height: 100vh; overflow: hidden;
     background: var(--bg); color: var(--text);
+  }
+  /* Quando rodando no app nativo iOS (HavalOBD), body fica transparente
+     pra MapKit nativo aparecer no fundo. Class adicionada via JS quando
+     IN_NATIVE_APP é true. */
+  body.native html, body.native {
+    background: transparent !important;
+  }
+  body.native .row-top { background: transparent !important; }
+  body.native #cluster-map { display: none !important; }
+  body.native .row-top::after { display: none !important; }
+  /* Mantém o resto: */
+  html, body {
     font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, sans-serif;
     font-feature-settings: "tnum" 1, "lnum" 1;
     -webkit-font-smoothing: antialiased;
@@ -830,6 +842,12 @@ window.onMapKitLoad = async function() {
 // _nativeBridge que só aparece no didFinish). O messageHandlers.obd já
 // existe assim que o WebView é criado, ANTES do HTML rodar.
 const IN_NATIVE_APP = !!(window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.obd);
+
+// No app nativo: body.native faz body/row-top transparentes e esconde
+// o Leaflet — MapKit nativo (Swift) ocupa o fundo da tela.
+if (IN_NATIVE_APP) {
+  document.body.classList.add('native');
+}
 
 if (IN_NATIVE_APP) {
   console.log('[map] app nativo — Leaflet direto (sem esperar MapKit JS)');

@@ -1,57 +1,60 @@
 import SwiftUI
 import MapKit
 
-/// Modal fullscreen de navegação turn-by-turn nativa Apple Maps.
-///
-/// Apresentado pelo botão Navegar do cluster. Substitui temporariamente
-/// o WebView pelo MapKit nativo + busca + lista de manobras + voz.
-struct NavigationModalView: View {
+/// MapKit nativo que fica no FUNDO da tela do cluster (atrás do WebView
+/// transparente). Substitui o Leaflet HTML quando rodando no app nativo.
+/// Recebe a rota do NavigationService pra desenhar polyline + auto-fit.
+struct ClusterMapView: View {
+    @ObservedObject var nav: NavigationService
     @EnvironmentObject var location: LocationManager
-    @StateObject private var nav = NavigationService()
-    @Environment(\.dismiss) var dismiss
-    @State private var query: String = ""
-    @State private var searching: Bool = false
-    @FocusState private var queryFocused: Bool
 
     var body: some View {
-        ZStack {
-            MapViewRepresentable(route: nav.route, userLocation: userCLL)
-                .ignoresSafeArea()
-                .preferredColorScheme(.dark)
-
-            VStack(spacing: 0) {
-                // ── Topo: busca + close ──
-                topBar
-                Spacer()
-                // ── Bottom: status de navegação OU resultados de busca ──
-                if nav.isNavigating {
-                    guidanceBar
-                } else if !nav.searchResults.isEmpty {
-                    resultsList
-                } else if nav.route != nil {
-                    routeSummary
-                }
-            }
-        }
-        .onAppear { nav.bind(location) }
-        .onDisappear { nav.stopGuidance() }
+        MapViewRepresentable(route: nav.route, userLocation: userCLL)
+            .ignoresSafeArea()
     }
 
     private var userCLL: CLLocationCoordinate2D? {
         guard let la = location.lat, let lo = location.lng else { return nil }
         return CLLocationCoordinate2D(latitude: la, longitude: lo)
     }
+}
 
-    // ── Top bar: campo de busca + fechar ──
+/// Overlay flutuante que aparece sobre o cluster quando o usuário clica
+/// "Navegar". Tem search no topo + (se calculada) cartão de rota / guidance
+/// no rodapé. Não cobre o cluster inteiro — só os 2 cantos.
+struct NavigationOverlay: View {
+    @EnvironmentObject var location: LocationManager
+    @ObservedObject var nav: NavigationService
+    @Binding var isPresented: Bool
+    @State private var query: String = ""
+    @State private var searching: Bool = false
+    @FocusState private var queryFocused: Bool
+
+    var body: some View {
+        VStack(spacing: 0) {
+            topBar
+            if !nav.searchResults.isEmpty {
+                resultsList
+            }
+            Spacer()
+            if nav.isNavigating {
+                guidanceBar
+            } else if nav.route != nil {
+                routeSummary
+            }
+        }
+        .padding(.horizontal, 64)
+        .padding(.vertical, 60)
+    }
+
+    // ── Top bar: busca + fechar ──
     private var topBar: some View {
         HStack(spacing: 10) {
-            Image(systemName: "magnifyingglass")
-                .foregroundStyle(.white.opacity(0.7))
+            Image(systemName: "magnifyingglass").foregroundStyle(.white.opacity(0.7))
             TextField("Endereço, lugar ou ponto…", text: $query)
                 .focused($queryFocused)
                 .submitLabel(.search)
-                .foregroundStyle(.white)
-                .tint(.white)
+                .foregroundStyle(.white).tint(.white)
                 .onSubmit { Task { searching = true; await nav.search(query: query); searching = false } }
             if searching { ProgressView().tint(.white) }
             if !query.isEmpty {
@@ -59,7 +62,11 @@ struct NavigationModalView: View {
                     Image(systemName: "xmark.circle.fill").foregroundStyle(.white.opacity(0.6))
                 }
             }
-            Button { dismiss() } label: {
+            Button {
+                if nav.isNavigating { nav.stopGuidance() }
+                else { nav.route = nil; nav.steps = []; nav.searchResults = [] }
+                isPresented = false
+            } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 16, weight: .bold))
                     .foregroundStyle(.white)
@@ -70,11 +77,9 @@ struct NavigationModalView: View {
         .padding(14)
         .background(.ultraThinMaterial)
         .cornerRadius(16)
-        .padding(.horizontal, 16)
-        .padding(.top, 16)
+        .onAppear { nav.bind(location); queryFocused = true }
     }
 
-    // ── Lista de resultados da busca ──
     private var resultsList: some View {
         VStack(spacing: 0) {
             ScrollView {
@@ -92,15 +97,12 @@ struct NavigationModalView: View {
                                 Image(systemName: "mappin.circle.fill")
                                     .font(.title2).foregroundStyle(.red)
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(item.name ?? "—")
-                                        .font(.body).foregroundStyle(.white)
+                                    Text(item.name ?? "—").font(.body).foregroundStyle(.white)
                                     Text(addressLine(item.placemark))
-                                        .font(.caption).foregroundStyle(.white.opacity(0.7))
-                                        .lineLimit(2)
+                                        .font(.caption).foregroundStyle(.white.opacity(0.7)).lineLimit(2)
                                 }
                                 Spacer()
-                            }
-                            .padding(12)
+                            }.padding(12)
                         }
                         Divider().background(.white.opacity(0.1))
                     }
@@ -110,48 +112,35 @@ struct NavigationModalView: View {
         .frame(maxHeight: 280)
         .background(.ultraThinMaterial)
         .cornerRadius(16)
-        .padding(.horizontal, 16)
-        .padding(.bottom, 16)
+        .padding(.top, 8)
     }
 
-    // ── Resumo de rota antes de iniciar ──
     private var routeSummary: some View {
-        VStack(spacing: 10) {
-            if let err = nav.lastError {
-                Label(err, systemImage: "exclamationmark.triangle")
-                    .font(.caption).foregroundStyle(.orange)
+        HStack(spacing: 16) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(formatDistance(nav.route?.distance ?? 0))
+                    .font(.system(size: 22, weight: .bold)).foregroundStyle(.white)
+                Text("Distância").font(.caption).foregroundStyle(.white.opacity(0.7))
             }
-            HStack(spacing: 16) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(formatDistance(nav.route?.distance ?? 0))
-                        .font(.system(size: 22, weight: .bold)).foregroundStyle(.white)
-                    Text("Distância").font(.caption).foregroundStyle(.white.opacity(0.7))
-                }
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(formatTime(nav.route?.expectedTravelTime ?? 0))
-                        .font(.system(size: 22, weight: .bold)).foregroundStyle(.white)
-                    Text("Tempo").font(.caption).foregroundStyle(.white.opacity(0.7))
-                }
-                Spacer()
-                Button {
-                    nav.startGuidance()
-                } label: {
-                    Label("Iniciar", systemImage: "play.fill")
-                        .font(.headline)
-                        .padding(.horizontal, 22).padding(.vertical, 12)
-                        .background(.green, in: Capsule())
-                        .foregroundStyle(.white)
-                }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(formatTime(nav.route?.expectedTravelTime ?? 0))
+                    .font(.system(size: 22, weight: .bold)).foregroundStyle(.white)
+                Text("Tempo").font(.caption).foregroundStyle(.white.opacity(0.7))
+            }
+            Spacer()
+            Button { nav.startGuidance() } label: {
+                Label("Iniciar", systemImage: "play.fill")
+                    .font(.headline)
+                    .padding(.horizontal, 22).padding(.vertical, 12)
+                    .background(.green, in: Capsule())
+                    .foregroundStyle(.white)
             }
         }
         .padding(16)
         .background(.ultraThinMaterial)
         .cornerRadius(16)
-        .padding(.horizontal, 16)
-        .padding(.bottom, 16)
     }
 
-    // ── Barra de guidance ao vivo (próxima manobra) ──
     private var guidanceBar: some View {
         VStack(spacing: 8) {
             if nav.currentStepIndex < nav.steps.count {
@@ -159,21 +148,16 @@ struct NavigationModalView: View {
                 HStack(spacing: 14) {
                     Image(systemName: maneuverIcon(for: step.instructions))
                         .font(.system(size: 34, weight: .bold))
-                        .foregroundStyle(.white)
-                        .frame(width: 56)
+                        .foregroundStyle(.white).frame(width: 56)
                     VStack(alignment: .leading, spacing: 4) {
                         Text(formatDistance(nav.distanceToNextStepM))
-                            .font(.system(size: 28, weight: .heavy))
-                            .foregroundStyle(.cyan)
+                            .font(.system(size: 28, weight: .heavy)).foregroundStyle(.cyan)
                         Text(step.instructions.isEmpty ? "Siga em frente" : step.instructions)
                             .font(.system(size: 17, weight: .medium))
-                            .foregroundStyle(.white)
-                            .lineLimit(2)
+                            .foregroundStyle(.white).lineLimit(2)
                     }
                     Spacer()
-                    Button {
-                        nav.stopGuidance()
-                    } label: {
+                    Button { nav.stopGuidance() } label: {
                         Image(systemName: "stop.fill")
                             .frame(width: 44, height: 44)
                             .background(.red, in: Circle())
@@ -185,17 +169,13 @@ struct NavigationModalView: View {
                 Label(formatTime(nav.etaSeconds), systemImage: "clock")
                 Label(formatDistance(nav.remainingDistanceM), systemImage: "ruler")
                 Spacer()
-            }
-            .font(.caption).foregroundStyle(.white.opacity(0.7))
+            }.font(.caption).foregroundStyle(.white.opacity(0.7))
         }
         .padding(16)
         .background(.ultraThinMaterial)
         .cornerRadius(20)
-        .padding(.horizontal, 16)
-        .padding(.bottom, 16)
     }
 
-    // ── Helpers ──
     private func addressLine(_ p: MKPlacemark) -> String {
         var parts: [String] = []
         if let s = p.thoroughfare { parts.append(s) }
@@ -225,7 +205,7 @@ struct NavigationModalView: View {
     }
 }
 
-// MARK: - MapKit UIKit bridge
+// MARK: - MapKit UIKit bridge (mantém intacto, usado pelo ClusterMapView)
 
 struct MapViewRepresentable: UIViewRepresentable {
     let route: MKRoute?
@@ -241,14 +221,13 @@ struct MapViewRepresentable: UIViewRepresentable {
     }
 
     func updateUIView(_ map: MKMapView, context: Context) {
-        // Limpa overlays antigos
         map.removeOverlays(map.overlays)
         if let r = route {
             map.addOverlay(r.polyline, level: .aboveRoads)
-            // Ajusta câmera pra mostrar rota inteira
             let rect = r.polyline.boundingMapRect.insetBy(dx: -800, dy: -800)
             map.setVisibleMapRect(rect, edgePadding: UIEdgeInsets(top: 100, left: 40, bottom: 240, right: 40), animated: true)
-        } else if let loc = userLocation {
+        } else if let loc = userLocation, map.region.span.latitudeDelta > 0.5 {
+            // Só centraliza no usuário se ainda não foi posicionado (zoom inicial)
             let region = MKCoordinateRegion(center: loc,
                 span: MKCoordinateSpan(latitudeDelta: 0.01, longitudeDelta: 0.01))
             map.setRegion(region, animated: false)
