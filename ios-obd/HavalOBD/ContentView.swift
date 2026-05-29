@@ -8,7 +8,9 @@ struct SettingsView: View {
     @EnvironmentObject var bt: BluetoothManager
     @EnvironmentObject var elm: ELM327
     @EnvironmentObject var publisher: BridgePublisher
+    @EnvironmentObject var discovery: OBDDiscovery
     @Environment(\.dismiss) var dismiss
+    @State private var copiedFeedback = false
 
     var body: some View {
         NavigationStack {
@@ -116,6 +118,65 @@ struct SettingsView: View {
                     }
                     Button(publisher.connected ? "Desconectar" : "Conectar Bridge") {
                         if publisher.connected { publisher.disconnect() } else { publisher.connect() }
+                    }
+                }
+
+                // Modo Discovery — varre PIDs Mode 22 customizados do Haval
+                Section("Discovery Mode 22 (PIDs custom Haval)") {
+                    if discovery.isRunning {
+                        LabeledContent("Status") {
+                            Text(discovery.statusMsg)
+                                .font(.caption.monospaced())
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+                        }
+                        ProgressView(value: discovery.progress).tint(.green)
+                        LabeledContent("PIDs achados") {
+                            Text("\(discovery.foundPids.count)")
+                                .foregroundStyle(.green).bold()
+                        }
+                        Button("Parar varredura", role: .destructive) { discovery.stop() }
+                    } else {
+                        if !discovery.foundPids.isEmpty {
+                            LabeledContent("Última varredura") {
+                                Text("\(discovery.foundPids.count) achados de \(discovery.totalScanned) testados")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                        Text(discovery.statusMsg.isEmpty
+                             ? "Brute force dos PIDs custom do Haval (Mode 22). Cobre BMS, motor elétrico, TPMS, HVAC. Demora ~7min. **Precisa estar em DRIVING READY.**"
+                             : discovery.statusMsg)
+                            .font(.caption).foregroundStyle(.secondary)
+                        Button("Iniciar varredura") { discovery.start() }
+                            .disabled(!elm.initialized)
+                        if !discovery.foundPids.isEmpty {
+                            Button {
+                                let json = discovery.exportJSON()
+                                UIPasteboard.general.string = json
+                                copiedFeedback = true
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                                    copiedFeedback = false
+                                }
+                            } label: {
+                                HStack {
+                                    Image(systemName: copiedFeedback ? "checkmark.circle.fill" : "doc.on.clipboard")
+                                    Text(copiedFeedback ? "Copiado!" : "Copiar JSON pra clipboard")
+                                }
+                            }
+                        }
+                    }
+                    // Lista compacta dos PIDs achados
+                    if !discovery.foundPids.isEmpty {
+                        ForEach(Array(discovery.foundPids.enumerated()), id: \.offset) { (_, entry) in
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(String(format: "22 %04X", entry.pid))
+                                    .font(.caption.monospaced()).bold()
+                                Text(entry.response.prefix(60))
+                                    .font(.caption2.monospaced())
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                        }
                     }
                 }
 
