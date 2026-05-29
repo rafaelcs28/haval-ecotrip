@@ -600,7 +600,7 @@ let ws, wsRetry = 0;
 function connect() {
   // Modo nativo (dentro do app HavalOBD WKWebView): pula WebSocket, dados vêm
   // direto do ELM327 via Bluetooth injetados em applyNativeSnapshot().
-  if (USING_NATIVE_BRIDGE) {
+  if (isNativeBridge()) {
     setConn(true);
     const lbl = document.getElementById('conn-lbl');
     if (lbl) lbl.textContent = 'OBD direto';
@@ -623,11 +623,23 @@ function connect() {
 //  Native bridge — quando rodando dentro do app HavalOBD (WKWebView):
 //    `window._nativeBridge.source === 'havalobd-ios'`. Dados chegam via
 //    `applyNativeSnapshot(payload)` injetado pelo Swift a 5Hz (fast) + 1Hz
-//    (full). Mesmos campos do `state` que o WebSocket popularia.
+//    (full). MAS o Swift injeta _nativeBridge APÓS o didFinish do WebView,
+//    então não dá pra avaliar uma vez no load — precisa verificar dinâmico.
 // ═══════════════════════════════════════════════════════════════════════════
-const USING_NATIVE_BRIDGE = !!(window._nativeBridge && window._nativeBridge.source === 'havalobd-ios');
+function isNativeBridge() {
+  return !!(window._nativeBridge && window._nativeBridge.source === 'havalobd-ios');
+}
 window.applyNativeSnapshot = function(payload) {
   if (!payload || typeof payload !== 'object') return;
+  // Primeira chamada nativa? Fecha o WebSocket se estava conectado (modo browser
+  // por engano enquanto o native bridge ainda não tinha aparecido).
+  if (ws && ws.readyState !== WebSocket.CLOSED) {
+    try { ws.close(); } catch(_) {}
+    ws = null;
+    setConn(true);
+    const lbl = document.getElementById('conn-lbl');
+    if (lbl) lbl.textContent = 'OBD direto';
+  }
   for (const [k, v] of Object.entries(payload)) {
     if (k === 'ts' || k === 'source' || k.startsWith('__')) continue;
     state[k] = v;
@@ -635,7 +647,7 @@ window.applyNativeSnapshot = function(payload) {
   lastUpdateMs = Date.now();
   render();
 };
-if (USING_NATIVE_BRIDGE) console.log('[cluster] modo nativo — dados via OBDBridgeChannel');
+console.log('[cluster] applyNativeSnapshot registrado · aguardando _nativeBridge');
 function setConn(ok) {
   $('conn-dot').classList.toggle('ok', ok);
   $('conn-lbl').textContent = ok ? 'online' : 'reconectando…';
