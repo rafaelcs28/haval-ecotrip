@@ -1,6 +1,12 @@
 import SwiftUI
 import WebKit
 
+/// Notificação postada quando o usuário clica no botão Navegar do cluster.
+/// O RootView ouve e apresenta o NavigationModalView (Apple Maps nativo).
+extension Notification.Name {
+    static let openNavigation = Notification.Name("openNavigation")
+}
+
 /// WebView fullscreen que hospeda o `cluster.html` (mesmo do PWA, copiado pro
 /// bundle). Canal JS bidirecional:
 ///
@@ -69,6 +75,11 @@ struct ClusterWebView: UIViewRepresentable {
             guard let dict = message.body as? [String: Any] else { return }
             let action = dict["action"] as? String ?? ""
             switch action {
+            case "open_nav_modal":
+                // Abre modal de navegação nativa Apple Maps com turn-by-turn
+                DispatchQueue.main.async {
+                    NotificationCenter.default.post(name: .openNavigation, object: nil)
+                }
             case "open_nav":
                 let app = (dict["app"] as? String ?? "waze").lowercased()
                 let schemes: [String: String] = [
