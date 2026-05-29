@@ -171,13 +171,19 @@
   }
   .gauge-sub strong { color: var(--text); font-weight: 600; }
 
-  /* Atalhos rápidos (A/C, regen, drive, fan) */
-  .float-card.quick { padding: 14px 16px; }
-  .quick-grid {
-    flex: 1;
-    display: grid; grid-template-columns: 1fr 1fr 1fr;
-    gap: 8px;
-    align-content: center;
+  /* Atalhos flutuantes — canto inferior esquerdo, sobreposto ao cluster */
+  .quick-controls {
+    position: fixed; bottom: 24px; left: 20px;
+    z-index: 50;
+    display: flex; flex-direction: row; gap: 12px;
+    pointer-events: none;   /* só os botões clicáveis */
+  }
+  .quick-controls .qb {
+    pointer-events: auto;
+    min-width: 92px; min-height: 92px;
+    backdrop-filter: blur(20px) saturate(1.6);
+    -webkit-backdrop-filter: blur(20px) saturate(1.6);
+    box-shadow: 0 8px 24px rgba(0,0,0,.55);
   }
   .qb {
     appearance: none; -webkit-appearance: none;
@@ -198,14 +204,18 @@
   .qb-lbl { font-size: 9px; letter-spacing: .14em; color: var(--muted); text-transform: uppercase; }
   .qb-val { font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
 
-  /* Linha inferior: 3 widgets clássicos */
+  /* Linha inferior: Fluxo (esq, +largo) | Trip (centro) | Power (dir, com gráfico) */
   .row-bot {
     flex: 1;
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: 1.25fr 1fr 1fr;
     gap: 10px;
     padding: 10px;
   }
+  /* Reordena widgets via grid-column: Fluxo→1, Trip→2, Power→3 */
+  .row-bot .widget:nth-child(1) { grid-column: 3; }   /* Power vai pra direita */
+  .row-bot .widget:nth-child(2) { grid-column: 2; }   /* Trip continua no meio */
+  .row-bot .widget:nth-child(3) { grid-column: 1; }   /* Fluxo vai pra esquerda */
   .widget {
     background: var(--panel);
     border: 1px solid var(--border);
@@ -228,6 +238,19 @@
     flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
     text-align: center;
   }
+  /* Sparkline 30s do Power widget — fundo atrás do valor central */
+  .power-widget { position: relative; }
+  .power-spark {
+    position: absolute; inset: 36px 18px 18px 18px;
+    width: calc(100% - 36px); height: calc(100% - 54px);
+    z-index: 0; pointer-events: none;
+  }
+  .spark-zero { stroke: rgba(255,255,255,.08); stroke-width: 1; stroke-dasharray: 4 4; }
+  .spark-line { fill: none; stroke: var(--teal); stroke-width: 1.5;
+                filter: drop-shadow(0 0 6px rgba(34,211,238,.5)); }
+  .spark-area { fill: url(#sparkGrad); opacity: .35; }
+  .power-display { position: relative; z-index: 1; }
+
   .power-value {
     font-size: 96px; font-weight: 200; line-height: 1;
     font-variant-numeric: tabular-nums;
@@ -496,42 +519,25 @@
         </div>
       </div>
 
-      <!-- Atalhos rápidos: A/C, regen, drive mode -->
-      <div class="float-card quick">
-        <div class="head"><span class="ico">⚡</span>Atalhos</div>
-        <div class="quick-grid">
-          <button class="qb" id="qb-ac" onclick="qb_toggleAc()">
-            <span class="qb-ico">❄️</span>
-            <span class="qb-lbl">A/C</span>
-            <span class="qb-val" id="qb-ac-val">off</span>
-          </button>
-          <button class="qb" id="qb-regen" onclick="qb_cycleRegen()">
-            <span class="qb-ico">↻</span>
-            <span class="qb-lbl">Regen</span>
-            <span class="qb-val" id="qb-regen-val">—</span>
-          </button>
-          <button class="qb" id="qb-drive" onclick="qb_cycleDrive()">
-            <span class="qb-ico">🚗</span>
-            <span class="qb-lbl">Modo</span>
-            <span class="qb-val" id="qb-drive-val">—</span>
-          </button>
-          <button class="qb" id="qb-temp-dn" onclick="qb_temp(-1)">
-            <span class="qb-ico">−</span>
-            <span class="qb-lbl">Temp</span>
-            <span class="qb-val" id="qb-temp-val">—</span>
-          </button>
-          <button class="qb" id="qb-temp-up" onclick="qb_temp(+1)">
-            <span class="qb-ico">+</span>
-            <span class="qb-lbl">Temp</span>
-            <span class="qb-val">↑</span>
-          </button>
-          <button class="qb" id="qb-fan" onclick="qb_cycleFan()">
-            <span class="qb-ico">🌀</span>
-            <span class="qb-lbl">Vent</span>
-            <span class="qb-val" id="qb-fan-val">—</span>
-          </button>
-        </div>
-      </div>
+    </div>
+
+    <!-- Atalhos flutuantes no canto inferior esquerdo (sobrepostos ao cluster) -->
+    <div class="quick-controls">
+      <button class="qb" id="qb-ac" onclick="qb_toggleAc()">
+        <span class="qb-ico">❄️</span>
+        <span class="qb-lbl">A/C</span>
+        <span class="qb-val" id="qb-ac-val">off</span>
+      </button>
+      <button class="qb" id="qb-regen" onclick="qb_cycleRegen()">
+        <span class="qb-ico">↻</span>
+        <span class="qb-lbl">Regen</span>
+        <span class="qb-val" id="qb-regen-val">—</span>
+      </button>
+      <button class="qb" id="qb-drive" onclick="qb_cycleDrive()">
+        <span class="qb-ico">🚗</span>
+        <span class="qb-lbl">Modo</span>
+        <span class="qb-val" id="qb-drive-val">—</span>
+      </button>
     </div>
 
     <!-- Menu navegação -->
@@ -551,9 +557,21 @@
   <!-- ═══════ LINHA INFERIOR: 3 widgets clássicos ═══════ -->
   <div class="row-bot">
 
-    <!-- Power Gauge -->
-    <div class="widget">
+    <!-- Power Gauge — com sparkline 30s de fundo -->
+    <div class="widget power-widget">
       <h3><span class="ico">⚡</span> Potência</h3>
+      <!-- Sparkline SVG cobrindo o widget (atrás do valor central) -->
+      <svg class="power-spark" viewBox="0 0 300 100" preserveAspectRatio="none">
+        <defs>
+          <linearGradient id="sparkGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%"  stop-color="#22d3ee" stop-opacity="0.6"/>
+            <stop offset="100%" stop-color="#22d3ee" stop-opacity="0"/>
+          </linearGradient>
+        </defs>
+        <line class="spark-zero" x1="0" y1="50" x2="300" y2="50"/>
+        <path class="spark-area" id="spark-area" d=""/>
+        <path class="spark-line" id="spark-line" d=""/>
+      </svg>
       <div class="power-display">
         <div>
           <span class="power-value idle" id="power-val">0</span><span class="power-unit">kW</span>
@@ -1261,21 +1279,24 @@ const REGEN_NAMES   = ['baixo', 'médio', 'alto', 'auto'];
 const DRIVE_NAMES   = { 1: 'Eco', 2: 'Norm', 3: 'Sport', 4: 'Auto' };
 function renderQuickActions() {
   // A/C
-  const acOn = +state.ac_state === 1;
-  $('qb-ac').classList.toggle('on', acOn);
-  $('qb-ac-val').textContent = acOn ? 'on' : 'off';
+  const acEl = document.getElementById('qb-ac');
+  if (acEl) {
+    const acOn = +state.ac_state === 1;
+    acEl.classList.toggle('on', acOn);
+    document.getElementById('qb-ac-val').textContent = acOn ? 'on' : 'off';
+  }
   // Regen level
-  const regen = +state.regen_level;
-  $('qb-regen-val').textContent = Number.isFinite(regen) ? (REGEN_NAMES[regen] ?? regen) : '—';
+  const regenVal = document.getElementById('qb-regen-val');
+  if (regenVal) {
+    const regen = +state.regen_level;
+    regenVal.textContent = Number.isFinite(regen) ? (REGEN_NAMES[regen] ?? regen) : '—';
+  }
   // Drive mode
-  const dm = +state.drive_mode;
-  $('qb-drive-val').textContent = Number.isFinite(dm) ? (DRIVE_NAMES[dm] ?? dm) : '—';
-  // Temp do motorista
-  const t = +state.hvac_driver_temp;
-  $('qb-temp-val').textContent = Number.isFinite(t) ? Math.round(t) + '°' : '—';
-  // Fan speed
-  const fan = +state.hvac_fan_speed;
-  $('qb-fan-val').textContent = Number.isFinite(fan) ? fan : '—';
+  const driveVal = document.getElementById('qb-drive-val');
+  if (driveVal) {
+    const dm = +state.drive_mode;
+    driveVal.textContent = Number.isFinite(dm) ? (DRIVE_NAMES[dm] ?? dm) : '—';
+  }
 }
 
 // Handlers dos botões — publica comando via _nativeBridge (Swift → MQTT)
@@ -1320,6 +1341,41 @@ toast('🚗 Haval Cluster pronto');
 // Overlay debug + extras OBD rodam independente (não patcha render — evita erro de strict mode)
 setInterval(renderObdDebug, 1000);
 setInterval(renderQuickActions, 1000);
+
+// Sparkline 30s do Power widget — sampling a 1Hz, mantém últimos 30 valores
+const POWER_HISTORY = [];   // valores em kW, [oldest, ..., newest]
+const POWER_HIST_MAX = 30;
+function tickPowerSpark() {
+  const kw = +state.motor_power_kw;
+  POWER_HISTORY.push(Number.isFinite(kw) ? kw : 0);
+  if (POWER_HISTORY.length > POWER_HIST_MAX) POWER_HISTORY.shift();
+  drawPowerSpark();
+}
+function drawPowerSpark() {
+  const line = document.getElementById('spark-line');
+  const area = document.getElementById('spark-area');
+  if (!line || !area || POWER_HISTORY.length < 2) return;
+  // viewBox 300×100. y=50 = zero. +50 boost top, -50 regen bottom (clamp ±50).
+  const w = 300, h = 100, mid = 50, ymax = 50;
+  const step = w / (POWER_HIST_MAX - 1);
+  // Indexa pela direita (mais novo na borda direita)
+  const offset = POWER_HIST_MAX - POWER_HISTORY.length;
+  const pts = POWER_HISTORY.map((v, i) => {
+    const x = (offset + i) * step;
+    const y = mid - clamp(v, -ymax, ymax);   // +kW pra cima
+    return [x, y];
+  });
+  // Path da linha
+  let d = `M ${pts[0][0]} ${pts[0][1]}`;
+  for (let i = 1; i < pts.length; i++) d += ` L ${pts[i][0]} ${pts[i][1]}`;
+  line.setAttribute('d', d);
+  // Path da área (fechada na linha zero)
+  const last = pts[pts.length - 1];
+  const first = pts[0];
+  const dArea = d + ` L ${last[0]} ${mid} L ${first[0]} ${mid} Z`;
+  area.setAttribute('d', dArea);
+}
+setInterval(tickPowerSpark, 1000);
 
 // Preview mode (?demo=1): injeta state mock animado pra testar layout
 function startPreviewLoop() {
