@@ -720,11 +720,13 @@ window.onMapKitLoad = async function() {
   }
 };
 
-// Em modo nativo (dentro do app HavalOBD), MapKit JS não funciona offline
-// (precisa carregar SDK do CDN + token do bridge). Força Leaflet direto.
-// Em modo browser, espera 6s e cai pro Leaflet se MapKit não inicializar.
-if (USING_NATIVE_BRIDGE) {
-  console.log('[map] modo nativo — usando Leaflet direto (sem MapKit)');
+// Detecta CEDO se estamos dentro do app HavalOBD WKWebView (sem esperar
+// _nativeBridge que só aparece no didFinish). O messageHandlers.obd já
+// existe assim que o WebView é criado, ANTES do HTML rodar.
+const IN_NATIVE_APP = !!(window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.obd);
+
+if (IN_NATIVE_APP) {
+  console.log('[map] app nativo — Leaflet direto (sem esperar MapKit JS)');
   // Espera o leaflet.js terminar de carregar
   if (window.L) {
     initLeaflet();
@@ -732,6 +734,7 @@ if (USING_NATIVE_BRIDGE) {
     window.addEventListener('load', initLeaflet);
   }
 } else {
+  // Modo browser: dá 6s pro MapKit JS carregar do CDN; senão cai pro Leaflet
   setTimeout(() => { if (!_mapEngine) initLeaflet(); }, 6000);
 }
 
