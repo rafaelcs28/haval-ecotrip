@@ -414,6 +414,8 @@
 <div id="obd-debug">
   <h3>DEBUG OBD · <span class="count">0</span> PIDs</h3>
   <table><thead><tr><th>id</th><th style="text-align:right">valor</th><th>un</th><th>raw</th><th style="text-align:right">idade</th></tr></thead><tbody></tbody></table>
+  <h3 style="margin-top:10px; color:#f88;">PARSER FALHOU · <span class="failed-count">0</span></h3>
+  <table><thead><tr><th>id</th><th colspan="3">raw recebido</th></tr></thead><tbody class="failed-tbody"></tbody></table>
 </div>
 
 <div class="stage">
@@ -1188,6 +1190,18 @@ function renderObdDebug() {
     return `<tr title="raw bytes: ${raw}"><td>${p.id}</td><td class="val">${val}</td><td>${p.unit||''}</td><td class="raw">${raw}</td><td class="age${stale}">${ageS}s</td></tr>`;
   }).join('');
   el.querySelector('tbody').innerHTML = rows;
+
+  // Seção "PARSER FALHOU" — PIDs que responderam mas o parser nem chegou a extrair
+  const failed = Array.isArray(state._debug_failed) ? state._debug_failed : [];
+  el.querySelector('.failed-count').textContent = failed.length;
+  const failedTbody = el.querySelector('.failed-tbody');
+  if (failed.length === 0) {
+    failedTbody.innerHTML = '<tr><td colspan="4" style="opacity:0.5;font-size:10px">nenhum · todos os PIDs que responderam parsearam OK</td></tr>';
+  } else {
+    failedTbody.innerHTML = failed.map(f =>
+      `<tr><td>${f.id}</td><td class="raw" colspan="3">${f.raw||'(vazio)'}</td></tr>`
+    ).join('');
+  }
 }
 // Mini-cards OBD (motores, bateria, células, ICE) — popula a faixa .row-mid
 function renderMiniCards() {

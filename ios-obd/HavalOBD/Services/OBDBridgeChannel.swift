@@ -168,6 +168,13 @@ final class OBDBridgeChannel: ObservableObject {
             debugList.sort { ($0["id"] as? String ?? "") < ($1["id"] as? String ?? "") }
             dict["_debug_obd"] = true
             dict["_debug_pids"] = debugList
+            // PIDs que responderam mas parser falhou (bytes inesperados)
+            var failed: [[String: Any]] = []
+            for (id, raw) in elm.failedPids {
+                failed.append(["id": id, "raw": raw])
+            }
+            failed.sort { ($0["id"] as? String ?? "") < ($1["id"] as? String ?? "") }
+            dict["_debug_failed"] = failed
         } else {
             dict["_debug_obd"] = false
         }
