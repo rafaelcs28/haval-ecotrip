@@ -1080,11 +1080,18 @@ function render() {
 function renderObdDebug() {
   const el = document.getElementById('obd-debug');
   if (!el) return;
-  if (!state._debug_obd || !Array.isArray(state._debug_pids)) {
+  if (state._debug_obd !== true) {
     el.style.display = 'none';
     return;
   }
-  const rows = state._debug_pids.map(p => {
+  el.style.display = 'block';
+  const pids = Array.isArray(state._debug_pids) ? state._debug_pids : [];
+  el.querySelector('.count').textContent = pids.length;
+  if (pids.length === 0) {
+    el.querySelector('tbody').innerHTML = '<tr><td colspan="4" style="text-align:center;opacity:0.6;padding:8px">aguardando dados do ELM…</td></tr>';
+    return;
+  }
+  const rows = pids.map(p => {
     const val = typeof p.value === 'number'
       ? (Math.abs(p.value) >= 100 ? p.value.toFixed(0) : p.value.toFixed(2))
       : String(p.value);
@@ -1093,8 +1100,6 @@ function renderObdDebug() {
     return `<tr><td>${p.id}</td><td class="val">${val}</td><td>${p.unit||''}</td><td class="age${stale}">${ageS}s</td></tr>`;
   }).join('');
   el.querySelector('tbody').innerHTML = rows;
-  el.querySelector('.count').textContent = state._debug_pids.length;
-  el.style.display = 'block';
 }
 // Boot
 requestWakeLock();
