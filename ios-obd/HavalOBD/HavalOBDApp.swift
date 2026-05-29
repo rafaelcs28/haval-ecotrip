@@ -122,8 +122,8 @@ struct RootView: View {
                     initInFlight = false
                 }
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) {
-                if !splashHidden { withAnimation(.easeOut(duration: 0.4)) { splashHidden = true } }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+                if !splashHidden { withAnimation(.easeOut(duration: 0.3)) { splashHidden = true } }
             }
         }
     }
