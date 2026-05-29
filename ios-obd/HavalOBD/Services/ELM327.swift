@@ -180,52 +180,55 @@ final class ELM327: ObservableObject {
         return s
     }
 
-    /// Loop de polling priorizado por frequência:
-    ///   • .fast    — pollados TODOS a cada tick (speed, rpm, soc, battery_current)
-    ///   • .normal  — 1 por tick em rotação
-    ///   • .slow    — 1 a cada 3 ticks em rotação (temps, células, limites)
+    /// Loop de polling com SPEED interleaved — speed_kmh_obd é pollado entre
+    /// CADA outro PID, garantindo update a cada ~150ms (~7 Hz, ~mesmo que
+    /// Car Scanner).
     ///
-    /// Resultado típico: fast PIDs atualizam a ~1.5Hz (~600ms cada),
-    /// normal a cada 4s, slow a cada 30s. Speed nunca trava porque
-    /// é pollado a cada ciclo.
-    ///
-    /// Agrupamento por ECU: normals e slows do mesmo header são
-    /// agrupados pra evitar re-setup constante (cada switch de ECU
-    /// custa ~500ms em 5 AT commands ATSH/ATCRA/ATFCSH/ATFCSD/ATFCSM).
+    /// Speed (010D) é Mode 01 broadcast 7DF — não precisa de setup AT entre
+    /// ele e qualquer outro Mode 01. Switch pra ECU custom volta pra 7DF
+    /// automaticamente no próximo speed.
     func startPolling() {
         pollTask?.cancel()
         pollTask = Task { [weak self] in
             guard let self else { return }
-            let allFast   = PIDRegistry.all.filter { $0.priority == .fast }
-            let allNormal = PIDRegistry.all.filter { $0.priority == .normal }
-            let allSlow   = PIDRegistry.all.filter { $0.priority == .slow }
-            var normalIdx = 0
-            var slowIdx = 0
-            var tick = 0
+            let speedPid = PIDRegistry.all.first { $0.id == "speed_kmh_obd" }
+            let rpmPid   = PIDRegistry.all.first { $0.id == "rpm" }
+            // PIDs que não são speed/rpm — rodam intercalados com speed
+            let otherFast   = PIDRegistry.all.filter { $0.priority == .fast && $0.id != "speed_kmh_obd" && $0.id != "rpm" }
+            let allNormal   = PIDRegistry.all.filter { $0.priority == .normal }
+            let allSlow     = PIDRegistry.all.filter { $0.priority == .slow }
+            var queue: [PIDDefinition] = []      // fila circular de PIDs lentos
+            var slowTick = 0
+
+            // Helper: refill da fila quando esvazia (1 round = todos normal + 1/3 slow)
+            func refillIfEmpty() {
+                guard queue.isEmpty else { return }
+                queue.append(contentsOf: otherFast)
+                queue.append(contentsOf: allNormal)
+                if slowTick % 3 == 0 { queue.append(contentsOf: allSlow) }
+                slowTick &+= 1
+            }
+
             while !Task.isCancelled {
-                // 1) FAST — todos a cada tick (speed_kmh_obd, rpm, soc, battery_current)
-                for pid in allFast {
+                // 1) SPEED — pollado SEMPRE primeiro (priority absoluta)
+                if let s = speedPid {
+                    await self.poll(s)
                     if Task.isCancelled { return }
-                    await self.poll(pid)
-                    try? await Task.sleep(nanoseconds: 50_000_000)   // 50ms
                 }
-                // 2) NORMAL — 1 por tick rotativo
-                if !allNormal.isEmpty {
-                    let pid = allNormal[normalIdx % allNormal.count]
-                    normalIdx += 1
+                // 2) RPM — sempre depois (ambos Mode 01, sem setup)
+                if let r = rpmPid {
+                    await self.poll(r)
                     if Task.isCancelled { return }
-                    await self.poll(pid)
-                    try? await Task.sleep(nanoseconds: 50_000_000)
                 }
-                // 3) SLOW — 1 a cada 3 ticks rotativo
-                if tick % 3 == 0 && !allSlow.isEmpty {
-                    let pid = allSlow[slowIdx % allSlow.count]
-                    slowIdx += 1
+                // 3) 1 PID da fila circular (alterna entre os demais)
+                refillIfEmpty()
+                if !queue.isEmpty {
+                    let pid = queue.removeFirst()
+                    await self.poll(pid)
                     if Task.isCancelled { return }
-                    await self.poll(pid)
-                    try? await Task.sleep(nanoseconds: 50_000_000)
                 }
-                tick &+= 1
+                // Pausa curta — total ciclo ~150-300ms = speed a 3-7 Hz
+                try? await Task.sleep(nanoseconds: 20_000_000)
             }
         }
     }
