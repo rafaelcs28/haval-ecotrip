@@ -1005,6 +1005,7 @@ const state = {
   last_update_ms:    null,    // última msg de QUALQUER fonte (carro APK ou GWM)
   last_apk_ms:       null,    // última msg do APK (haval/ecotrip/*)
   last_gwm_ms:       null,    // última msg da integração GWM Brasil (gwmbrasil_*)
+  last_obd_ms:       null,    // última msg do OBD Companion (haval/ecotrip/obd/snapshot)
   car_last_update:   null,
   car_app_version:   null,
 
@@ -5791,6 +5792,12 @@ mqttClient.on('connect', () => {
   // via toggle la_songpro (default OFF). NÃO persiste dado.
   mqttClient.subscribe('electro/telemetry/song-pro/data', { qos: 0 });
   console.log('✓ Subscribed em electro/telemetry/song-pro/data (LA esposa)');
+  // OBD Companion (iPad com ELM327 BLE) — fonte alternativa de telemetria
+  // direto do CAN. Payload é JSON consolidado a 1Hz em haval/ecotrip/obd/snapshot
+  // com campos planos: { ts, source, rpm, speed_kmh, ect_c, ... }. Atualiza
+  // state.last_obd_ms e mescla os campos numéricos.
+  mqttClient.subscribe(`${MQTT_PREFIX}/obd/snapshot`, { qos: 0 });
+  console.log(`✓ Subscribed em ${MQTT_PREFIX}/obd/snapshot (OBD Companion)`);
   // A integração não publica esses tópicos com retain — broker fica sem o
   // estado atual ao subscribe. Puxamos via REST do HA no boot pra popular.
   fetchInitialStateFromHA();
@@ -5868,6 +5875,43 @@ mqttClient.on('message', (topic, payload, packet) => {
     // BYD Song Pro da esposa — JSON com charging_power + soc. No-op se ninguém
     // tem la_songpro=true (evita CPU inútil quando feature desligada).
     if (!isRetained) handleSongProMessage(value);
+  } else if (topic === MQTT_PREFIX + '/obd/snapshot') {
+    // OBD Companion (iPad+ELM327) — fonte alternativa via BLE direto do CAN.
+    // Payload: { ts, source, <pidId>: <number>, ... }. Atualiza state com os
+    // campos numéricos (sem sobrescrever fonte APK se ele estiver fresh).
+    if (isRetained) return;   // ignora retained antigo
+    try {
+      const o = JSON.parse(value);
+      if (!o || typeof o !== 'object') return;
+      const now = Date.now();
+      // Idade da fonte APK pra decidir se o OBD complementa ou substitui
+      const apkFresh = state.last_apk_ms && (now - state.last_apk_ms) < 30_000;
+      let nApplied = 0;
+      for (const [k, v] of Object.entries(o)) {
+        if (k === 'ts' || k === 'source') continue;
+        if (typeof v !== 'number' || !Number.isFinite(v)) continue;
+        // Quando APK está fresco, OBD só preenche campos que o APK NÃO publica
+        // (ex: temperaturas BMS, pressões dos pneus, knock retard, etc.).
+        // Quando APK silente, OBD vira fonte primária pra tudo.
+        const apkOwnsField = apkFresh && state[k] !== undefined && state[k] !== null;
+        if (!apkOwnsField) {
+          state[k] = v;
+          nApplied++;
+        }
+      }
+      state.last_obd_ms = now;
+      if (nApplied > 0) {
+        markStateChanged();
+        // Log throttled — só primeiro msg ou a cada 60s
+        const sinceLog = now - (state._obdLastLogMs || 0);
+        if (sinceLog > 60_000) {
+          state._obdLastLogMs = now;
+          console.log(`[obd] snapshot · ${nApplied} campos · apkFresh=${apkFresh}`);
+        }
+      }
+    } catch (e) {
+      console.warn('[obd] payload inválido:', e.message);
+    }
   } else if (topic === MQTT_PREFIX + '/diag/state') {
     // APK confirma estado real do modo diagnóstico — single source of truth
     try {
