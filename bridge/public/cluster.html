@@ -10,6 +10,8 @@
 <title>Haval Ecotrip Cluster</title>
 <link rel="manifest" href="/cluster-manifest.json">
 <link rel="apple-touch-icon" href="/icon-512.png">
+<link rel="stylesheet" href="/leaflet.css">
+<script src="/leaflet.js" defer></script>
 <style>
   :root {
     --bg: #000000; --panel: #0d0d0f; --panel-lift: #16161a;
@@ -20,6 +22,8 @@
     --teal: #22d3ee; --yellow: #facc15;
     --red: #ef4444;
     --text: #f5f5f5; --muted: #6b7280; --dim: #3f3f46;
+    --glass-bg: rgba(13,13,15,.55);
+    --glass-border: rgba(255,255,255,.08);
   }
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   html, body {
@@ -37,14 +41,15 @@
   /* ───────── Top bar ───────── */
   .topbar {
     display: flex; align-items: center; justify-content: space-between;
-    height: 36px; padding: 0 20px;
+    height: 32px; padding: 0 20px;
     font-size: 12px; color: var(--muted);
-    background: linear-gradient(180deg, rgba(255,255,255,.02), transparent);
+    background: rgba(0,0,0,.6);
     border-bottom: 1px solid var(--border);
-    flex-shrink: 0;
+    flex-shrink: 0; z-index: 10;
+    position: relative;
   }
-  .topbar .left, .topbar .right { display: flex; gap: 14px; align-items: center; }
-  .topbar .clock { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--text); font-size: 14px; }
+  .topbar .left, .topbar .right { display: flex; gap: 12px; align-items: center; }
+  .topbar .clock { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--text); font-size: 13px; }
   .topbar .dot {
     width: 8px; height: 8px; border-radius: 50%; background: var(--red);
     box-shadow: 0 0 8px rgba(239,68,68,.6);
@@ -54,12 +59,107 @@
   .topbar .dot.warn { background: var(--yellow); box-shadow: 0 0 8px rgba(250,204,21,.6); }
   .topbar .lbl { letter-spacing: .12em; text-transform: uppercase; font-size: 10px; }
 
-  /* ───────── Grid 3×2 ───────── */
-  .grid {
-    flex: 1; display: grid;
+  /* ───────── Layout principal (2 linhas) ───────── */
+  .stage {
+    flex: 1; display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+  /* Linha superior: mapa full + cards flutuando */
+  .row-top {
+    flex: 1.05;
+    position: relative;
+    overflow: hidden;
+    background: #000;
+  }
+  /* Vinheta sutil pras bordas do mapa ficarem mais escuras (legibilidade dos cards) */
+  .row-top::after {
+    content: ''; position: absolute; inset: 0; pointer-events: none;
+    background: radial-gradient(ellipse at center, transparent 35%, rgba(0,0,0,.55) 100%);
+    z-index: 2;
+  }
+  #cluster-map { position: absolute; inset: 0; z-index: 1; }
+  .leaflet-container { background: #000 !important; }
+  .leaflet-control-attribution { display: none !important; }
+  .leaflet-control-zoom { display: none !important; }
+  /* Tiles ficam levemente atenuados, ruas brancas saltam */
+  .leaflet-tile-pane { filter: brightness(.85) contrast(1.15); }
+
+  /* Botão Navegar (canto sup. direito do mapa) */
+  .nav-btn {
+    position: absolute; top: 14px; right: 14px; z-index: 5;
+    background: linear-gradient(135deg, #38bdf8, #0ea5e9);
+    color: #fff; border: none; border-radius: 999px;
+    padding: 9px 18px; font-size: 13px; font-weight: 700;
+    display: flex; align-items: center; gap: 6px;
+    cursor: pointer;
+    box-shadow: 0 6px 20px rgba(14,165,233,.45);
+    -webkit-tap-highlight-color: transparent;
+    transition: transform .12s ease-out;
+  }
+  .nav-btn:active { transform: scale(.94); }
+  .nav-btn .ico { font-size: 15px; }
+
+  /* Cards flutuantes (SOC + Fuel) por cima do mapa */
+  .floating-cards {
+    position: absolute; inset: 0; z-index: 4;
+    display: flex; justify-content: space-between; align-items: stretch;
+    padding: 22px; gap: 22px;
+    pointer-events: none;  /* o mapa abaixo recebe touch, exceto nos cards */
+  }
+  .float-card {
+    pointer-events: auto;
+    background: var(--glass-bg);
+    backdrop-filter: blur(24px) saturate(1.6);
+    -webkit-backdrop-filter: blur(24px) saturate(1.6);
+    border: 1px solid var(--glass-border);
+    border-radius: 24px;
+    padding: 18px 22px;
+    box-shadow: 0 8px 32px rgba(0,0,0,.6), inset 0 1px 0 rgba(255,255,255,.05);
+    display: flex; flex-direction: column;
+    width: 240px;
+    transition: transform .25s ease-out;
+  }
+  .float-card .head {
+    font-size: 10px; letter-spacing: .14em; color: var(--muted);
+    text-transform: uppercase; display: flex; align-items: center; gap: 6px;
+    margin-bottom: 6px;
+  }
+  .float-card .head .ico { font-size: 13px; }
+  .float-card .gauge-wrap {
+    flex: 1; position: relative;
+    display: flex; align-items: center; justify-content: center;
+    min-height: 0;
+  }
+  .float-card svg { width: 100%; max-width: 200px; max-height: 200px; }
+  .gauge-track { fill: none; stroke: rgba(255,255,255,.08); stroke-width: 14; }
+  .gauge-fill  { fill: none; stroke-width: 14; stroke-linecap: round; transition: stroke-dashoffset .6s ease-out; filter: drop-shadow(0 0 8px currentColor); }
+  .gauge-fill.soc  { stroke: var(--green); color: var(--green); }
+  .gauge-fill.fuel { stroke: var(--orange); color: var(--orange); }
+  .gauge-center {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center;
+  }
+  .gauge-big {
+    font-size: 52px; font-weight: 200; line-height: 1;
+    font-variant-numeric: tabular-nums;
+    text-shadow: 0 2px 12px rgba(0,0,0,.6);
+  }
+  .gauge-big .pct { font-size: 22px; color: var(--muted); margin-left: 2px; }
+  .gauge-sub {
+    margin-top: 6px; font-size: 11px; color: rgba(245,245,245,.7);
+    font-weight: 500; letter-spacing: .03em;
+    text-shadow: 0 1px 6px rgba(0,0,0,.7);
+  }
+  .gauge-sub strong { color: var(--text); font-weight: 600; }
+
+  /* Linha inferior: 3 widgets clássicos */
+  .row-bot {
+    flex: 1;
+    display: grid;
     grid-template-columns: repeat(3, 1fr);
-    grid-template-rows: repeat(2, 1fr);
-    gap: 10px; padding: 10px;
+    gap: 10px;
+    padding: 10px;
   }
   .widget {
     background: var(--panel);
@@ -78,34 +178,6 @@
   }
   .widget h3 .ico { font-size: 14px; }
 
-  /* ───────── Gauges SOC e Fuel (mesma classe) ───────── */
-  .gauge-circle {
-    flex: 1; display: flex; align-items: center; justify-content: center;
-    position: relative;
-  }
-  .gauge-circle svg { width: 100%; height: 100%; max-height: 280px; max-width: 280px; }
-  .gauge-track { fill: none; stroke: var(--border); stroke-width: 16; }
-  .gauge-fill { fill: none; stroke-width: 16; stroke-linecap: round; transition: stroke-dashoffset .6s ease-out; }
-  .gauge-fill.soc  { stroke: var(--green); }
-  .gauge-fill.fuel { stroke: var(--orange); }
-  .gauge-center {
-    position: absolute; inset: 0;
-    display: flex; flex-direction: column; align-items: center; justify-content: center;
-    text-align: center;
-  }
-  .gauge-big {
-    font-size: 64px; font-weight: 200; line-height: 1;
-    font-variant-numeric: tabular-nums;
-  }
-  .gauge-big .pct { font-size: 28px; color: var(--muted); margin-left: 2px; }
-  .gauge-sub {
-    margin-top: 8px; font-size: 13px; color: var(--muted);
-    font-weight: 500; letter-spacing: .03em;
-  }
-  .gauge-sub strong { color: var(--text); font-weight: 600; }
-  .gauge-soc-color .gauge-fill   { stroke: var(--green); }
-  .gauge-fuel-color .gauge-fill  { stroke: var(--orange); }
-
   /* ───────── Power Gauge ───────── */
   .power-display {
     flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -121,7 +193,7 @@
   .power-value.idle   { color: var(--muted); }
   .power-unit { font-size: 22px; color: var(--muted); margin-left: 4px; }
   .power-bar {
-    width: 90%; height: 18px; margin-top: 22px;
+    width: 90%; height: 16px; margin-top: 18px;
     background: var(--border); border-radius: 999px;
     position: relative; overflow: hidden;
   }
@@ -140,37 +212,83 @@
     font-size: 10px; color: var(--dim); letter-spacing: .06em;
   }
   .power-speed {
-    margin-top: 16px; font-size: 14px; color: var(--muted);
+    margin-top: 14px; font-size: 14px; color: var(--muted);
   }
   .power-speed strong { color: var(--text); font-size: 28px; font-weight: 300; font-variant-numeric: tabular-nums; margin: 0 4px; }
 
-  /* ───────── Mapa (Waze Live) ───────── */
-  #map-widget { padding: 0; overflow: hidden; }
-  #map-widget h3 {
-    position: absolute; top: 12px; left: 14px; z-index: 401;
-    background: rgba(13,13,15,.85); padding: 5px 12px; border-radius: 999px;
-    backdrop-filter: blur(8px); margin: 0;
-    box-shadow: 0 2px 8px rgba(0,0,0,.4);
+  /* ───────── Trip em curso ───────── */
+  .trip-metrics {
+    flex: 1; display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr 1fr;
+    gap: 14px; align-content: center;
   }
-  #waze-iframe {
-    flex: 1; width: 100%; height: 100%;
-    border: 0; border-radius: 18px;
-    pointer-events: auto;
+  .trip-cell { display: flex; flex-direction: column; justify-content: center; }
+  .trip-val {
+    font-size: 30px; font-weight: 300; line-height: 1;
+    font-variant-numeric: tabular-nums;
   }
-  .nav-btn {
-    position: absolute; top: 12px; right: 12px; z-index: 401;
-    background: linear-gradient(135deg, #38b6ff, #1e90ff);
-    color: #fff; border: none; border-radius: 999px;
-    padding: 8px 16px; font-size: 13px; font-weight: 700;
-    display: flex; align-items: center; gap: 6px;
-    cursor: pointer; box-shadow: 0 4px 14px rgba(56,182,255,.4);
-    -webkit-tap-highlight-color: transparent;
-    transition: transform .12s ease-out;
+  .trip-val .u {
+    font-size: 13px; color: var(--muted); font-weight: 500; margin-left: 4px;
   }
-  .nav-btn:active { transform: scale(.94); }
-  .nav-btn .ico { font-size: 15px; }
+  .trip-lbl {
+    margin-top: 4px; font-size: 9px; letter-spacing: .14em;
+    color: var(--muted); text-transform: uppercase;
+  }
+  .trip-val.green { color: var(--green); }
+  .trip-val.teal  { color: var(--teal); }
+  .trip-val.orange { color: var(--orange); }
+  .trip-val.yellow { color: var(--yellow); }
+
+  /* ───────── Fluxo de energia ───────── */
+  .flow-stage {
+    flex: 1; display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+    place-items: center;
+    gap: 8px; padding: 6px;
+  }
+  .flow-node {
+    width: 76px; height: 76px; border-radius: 50%;
+    background: var(--panel-lift);
+    border: 2px solid var(--border-hi);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 34px;
+    position: relative;
+    transition: border-color .3s, transform .3s, box-shadow .3s;
+  }
+  .flow-node.active { border-color: var(--green); transform: scale(1.05); box-shadow: 0 0 16px rgba(34,197,94,.4); }
+  .flow-node.active.ice { border-color: var(--orange); box-shadow: 0 0 16px rgba(251,146,60,.4); }
+  .flow-node .lbl {
+    position: absolute; bottom: -16px; left: 50%; transform: translateX(-50%);
+    font-size: 9px; letter-spacing: .12em; color: var(--muted);
+    white-space: nowrap; text-transform: uppercase;
+  }
+  .flow-node .val {
+    position: absolute; top: -14px; left: 50%; transform: translateX(-50%);
+    font-size: 11px; font-weight: 600; color: var(--green);
+    white-space: nowrap;
+  }
+  .flow-node.ice .val { color: var(--orange); }
+  .flow-arrow {
+    color: var(--dim); font-size: 22px; font-weight: 100;
+    transition: color .3s;
+  }
+  .flow-arrow.active { color: var(--green); animation: flow-pulse 1.2s ease-in-out infinite; }
+  .flow-arrow.active.ice { color: var(--orange); }
+  .flow-arrow.regen { color: var(--green); animation: flow-pulse 1.2s ease-in-out infinite reverse; }
+  @keyframes flow-pulse {
+    0%, 100% { opacity: .4; transform: scale(.95); }
+    50%      { opacity: 1; transform: scale(1.1); }
+  }
+
+  /* ───────── Stale dim ───────── */
+  body.stale .float-card, body.stale .widget { filter: brightness(.6) saturate(.5); }
+  body.stale .topbar .dot { background: var(--red); }
+
+  /* ───────── Menu de navegação ───────── */
   .nav-overlay {
-    position: absolute; inset: 0; z-index: 402;
+    position: absolute; inset: 0; z-index: 100;
     background: rgba(0,0,0,.75); backdrop-filter: blur(8px);
     display: none; align-items: center; justify-content: center; padding: 24px;
   }
@@ -193,78 +311,6 @@
   .nav-card button .em { font-size: 18px; }
   .nav-card button.close { justify-content: center; color: var(--muted); border-style: dashed; }
 
-  /* ───────── Trip em curso ───────── */
-  .trip-metrics {
-    flex: 1; display: grid;
-    grid-template-columns: 1fr 1fr;
-    grid-template-rows: 1fr 1fr 1fr;
-    gap: 14px; align-content: center;
-  }
-  .trip-cell { display: flex; flex-direction: column; justify-content: center; }
-  .trip-val {
-    font-size: 32px; font-weight: 300; line-height: 1;
-    font-variant-numeric: tabular-nums;
-  }
-  .trip-val .u {
-    font-size: 14px; color: var(--muted); font-weight: 500; margin-left: 4px;
-  }
-  .trip-lbl {
-    margin-top: 4px; font-size: 10px; letter-spacing: .14em;
-    color: var(--muted); text-transform: uppercase;
-  }
-  .trip-val.green { color: var(--green); }
-  .trip-val.teal { color: var(--teal); }
-  .trip-val.orange { color: var(--orange); }
-  .trip-val.yellow { color: var(--yellow); }
-
-  /* ───────── Fluxo de energia ───────── */
-  .flow-stage {
-    flex: 1; display: grid;
-    grid-template-columns: 1fr 1fr 1fr;
-    grid-template-rows: 1fr 1fr;
-    place-items: center;
-    gap: 8px; padding: 6px;
-  }
-  .flow-node {
-    width: 84px; height: 84px; border-radius: 50%;
-    background: var(--panel-lift);
-    border: 2px solid var(--border-hi);
-    display: flex; align-items: center; justify-content: center;
-    font-size: 38px;
-    position: relative;
-    transition: border-color .3s, transform .3s;
-  }
-  .flow-node.active { border-color: var(--green); transform: scale(1.05); }
-  .flow-node.active.ice { border-color: var(--orange); }
-  .flow-node .lbl {
-    position: absolute; bottom: -18px; left: 50%; transform: translateX(-50%);
-    font-size: 9px; letter-spacing: .12em; color: var(--muted);
-    white-space: nowrap; text-transform: uppercase;
-  }
-  .flow-node .val {
-    position: absolute; top: -16px; left: 50%; transform: translateX(-50%);
-    font-size: 11px; font-weight: 600; color: var(--green);
-    white-space: nowrap;
-  }
-  .flow-node.ice .val { color: var(--orange); }
-
-  .flow-arrow {
-    color: var(--dim); font-size: 22px; font-weight: 100;
-    transition: color .3s;
-  }
-  .flow-arrow.active { color: var(--green); animation: flow-pulse 1.2s ease-in-out infinite; }
-  .flow-arrow.active.ice { color: var(--orange); }
-  .flow-arrow.regen { color: var(--green); animation: flow-pulse 1.2s ease-in-out infinite reverse; }
-  @keyframes flow-pulse {
-    0%, 100% { opacity: .4; transform: scale(.95); }
-    50%      { opacity: 1; transform: scale(1.1); }
-  }
-
-  /* ───────── Stale dim ───────── */
-  body.stale .widget { filter: brightness(.6) saturate(.5); }
-  body.stale .topbar .dot { background: var(--red); }
-
-  /* ───────── Toast ───────── */
   #toast {
     position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%);
     background: var(--panel-lift); border: 1px solid var(--border-hi);
@@ -280,7 +326,7 @@
 <div class="topbar">
   <div class="left">
     <div class="clock" id="clock">--:--</div>
-    <div class="lbl" id="version">HEC v1.0</div>
+    <div class="lbl" id="version">HEC v1.1</div>
   </div>
   <div class="right">
     <div class="lbl">Bridge</div>
@@ -292,144 +338,150 @@
   </div>
 </div>
 
-<div class="grid">
+<div class="stage">
 
-  <!-- 1. Gauge SOC -->
-  <div class="widget gauge-soc-color">
-    <h3><span class="ico">🔋</span> Bateria</h3>
-    <div class="gauge-circle">
-      <svg viewBox="0 0 200 200">
-        <circle class="gauge-track" cx="100" cy="100" r="80"/>
-        <circle class="gauge-fill soc" id="soc-arc" cx="100" cy="100" r="80"
-                stroke-dasharray="502.65" stroke-dashoffset="502.65"
-                transform="rotate(-90 100 100)"/>
-      </svg>
-      <div class="gauge-center">
-        <div class="gauge-big"><span id="soc-pct">—</span><span class="pct">%</span></div>
-        <div class="gauge-sub">
-          <strong id="soc-range">— km</strong> de autonomia<br>
-          <span id="soc-kwh">— kWh restantes</span>
+  <!-- ═══════ LINHA SUPERIOR: mapa + cards flutuantes ═══════ -->
+  <div class="row-top">
+    <div id="cluster-map"></div>
+
+    <button class="nav-btn" onclick="openNavMenu()"><span class="ico">📍</span>Navegar</button>
+
+    <div class="floating-cards">
+      <!-- SOC -->
+      <div class="float-card">
+        <div class="head"><span class="ico">🔋</span>Bateria</div>
+        <div class="gauge-wrap">
+          <svg viewBox="0 0 200 200">
+            <circle class="gauge-track" cx="100" cy="100" r="80"/>
+            <circle class="gauge-fill soc" id="soc-arc" cx="100" cy="100" r="80"
+                    stroke-dasharray="502.65" stroke-dashoffset="502.65"
+                    transform="rotate(-90 100 100)"/>
+          </svg>
+          <div class="gauge-center">
+            <div class="gauge-big"><span id="soc-pct">—</span><span class="pct">%</span></div>
+            <div class="gauge-sub">
+              <strong id="soc-range">— km</strong> EV<br>
+              <span id="soc-kwh">— kWh</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Fuel -->
+      <div class="float-card">
+        <div class="head"><span class="ico">⛽</span>Combustível</div>
+        <div class="gauge-wrap">
+          <svg viewBox="0 0 200 200">
+            <circle class="gauge-track" cx="100" cy="100" r="80"/>
+            <circle class="gauge-fill fuel" id="fuel-arc" cx="100" cy="100" r="80"
+                    stroke-dasharray="502.65" stroke-dashoffset="502.65"
+                    transform="rotate(-90 100 100)"/>
+          </svg>
+          <div class="gauge-center">
+            <div class="gauge-big"><span id="fuel-l">—</span><span class="pct">L</span></div>
+            <div class="gauge-sub">
+              <strong id="fuel-range">— km</strong> ICE<br>
+              <span id="fuel-pct">— % tanque</span>
+            </div>
+          </div>
         </div>
       </div>
     </div>
-  </div>
 
-  <!-- 2. Mapa Waze Live -->
-  <div class="widget" id="map-widget">
-    <h3><span class="ico">🗺</span> Waze Live</h3>
-    <button class="nav-btn" onclick="openNavMenu()"><span class="ico">📍</span>Navegar</button>
-    <iframe id="waze-iframe" src="about:blank" allow="geolocation"></iframe>
+    <!-- Menu navegação -->
     <div class="nav-overlay" id="nav-overlay" onclick="if(event.target===this)closeNavMenu()">
       <div class="nav-card">
         <h4>📍 Abrir navegação em</h4>
         <div class="nav-btn-row">
           <button onclick="openExternalNav('waze')"><span class="em">🟦</span><b>Waze</b><span style="color:var(--muted);margin-left:auto;font-size:11px">tráfego ao vivo</span></button>
           <button onclick="openExternalNav('gmaps')"><span class="em">🟥</span><b>Google Maps</b><span style="color:var(--muted);margin-left:auto;font-size:11px">rota completa</span></button>
-          <button onclick="openExternalNav('apple')"><span class="em">⬜️</span><b>Apple Maps</b><span style="color:var(--muted);margin-left:auto;font-size:11px">nativo iPad</span></button>
+          <button onclick="openExternalNav('apple')"><span class="em">⬜️</span><b>Apple Maps</b><span style="color:var(--muted);margin-left:auto;font-size:11px">turn-by-turn nativo</span></button>
           <button class="close" onclick="closeNavMenu()">Cancelar</button>
         </div>
       </div>
     </div>
   </div>
 
-  <!-- 3. Gauge Combustível -->
-  <div class="widget gauge-fuel-color">
-    <h3><span class="ico">⛽</span> Combustível</h3>
-    <div class="gauge-circle">
-      <svg viewBox="0 0 200 200">
-        <circle class="gauge-track" cx="100" cy="100" r="80"/>
-        <circle class="gauge-fill fuel" id="fuel-arc" cx="100" cy="100" r="80"
-                stroke-dasharray="502.65" stroke-dashoffset="502.65"
-                transform="rotate(-90 100 100)"/>
-      </svg>
-      <div class="gauge-center">
-        <div class="gauge-big"><span id="fuel-l">—</span><span class="pct">L</span></div>
-        <div class="gauge-sub">
-          <strong id="fuel-range">— km</strong> de autonomia<br>
-          <span id="fuel-pct">— % do tanque</span>
+  <!-- ═══════ LINHA INFERIOR: 3 widgets clássicos ═══════ -->
+  <div class="row-bot">
+
+    <!-- Power Gauge -->
+    <div class="widget">
+      <h3><span class="ico">⚡</span> Potência</h3>
+      <div class="power-display">
+        <div>
+          <span class="power-value idle" id="power-val">0</span><span class="power-unit">kW</span>
+        </div>
+        <div class="power-bar">
+          <div class="power-bar-mid"></div>
+          <div class="power-bar-fill drive" id="power-bar-drive"></div>
+          <div class="power-bar-fill regen" id="power-bar-regen"></div>
+        </div>
+        <div class="power-scale"><span>−50 regen</span><span>0</span><span>+120 boost</span></div>
+        <div class="power-speed">
+          <strong id="speed-val">—</strong>km/h ·
+          máx <strong id="speed-max">—</strong>
         </div>
       </div>
     </div>
-  </div>
 
-  <!-- 4. Power Gauge -->
-  <div class="widget">
-    <h3><span class="ico">⚡</span> Potência</h3>
-    <div class="power-display">
-      <div>
-        <span class="power-value idle" id="power-val">0</span><span class="power-unit">kW</span>
-      </div>
-      <div class="power-bar">
-        <div class="power-bar-mid"></div>
-        <div class="power-bar-fill drive" id="power-bar-drive"></div>
-        <div class="power-bar-fill regen" id="power-bar-regen"></div>
-      </div>
-      <div class="power-scale"><span>−50 regen</span><span>0</span><span>+120 boost</span></div>
-      <div class="power-speed">
-        <strong id="speed-val">—</strong>km/h ·
-        máx <strong id="speed-max">—</strong>
+    <!-- Trip -->
+    <div class="widget">
+      <h3><span class="ico">🚗</span> Viagem em curso</h3>
+      <div class="trip-metrics">
+        <div class="trip-cell">
+          <div class="trip-val teal"><span id="trip-dist">0,0</span><span class="u">km</span></div>
+          <div class="trip-lbl">Distância</div>
+        </div>
+        <div class="trip-cell">
+          <div class="trip-val"><span id="trip-time">0:00</span></div>
+          <div class="trip-lbl">Tempo</div>
+        </div>
+        <div class="trip-cell">
+          <div class="trip-val green"><span id="trip-kwh">0,0</span><span class="u">kWh</span></div>
+          <div class="trip-lbl">Energia (net)</div>
+        </div>
+        <div class="trip-cell">
+          <div class="trip-val orange"><span id="trip-fuel">0,0</span><span class="u">L</span></div>
+          <div class="trip-lbl">Combustível</div>
+        </div>
+        <div class="trip-cell">
+          <div class="trip-val yellow"><span id="trip-cost">R$ 0,00</span></div>
+          <div class="trip-lbl">Custo estimado</div>
+        </div>
+        <div class="trip-cell">
+          <div class="trip-val"><span id="trip-eff">—</span></div>
+          <div class="trip-lbl">km/L equivalente</div>
+        </div>
       </div>
     </div>
-  </div>
 
-  <!-- 5. Trip em curso -->
-  <div class="widget">
-    <h3><span class="ico">🚗</span> Viagem em curso</h3>
-    <div class="trip-metrics">
-      <div class="trip-cell">
-        <div class="trip-val teal"><span id="trip-dist">0,0</span><span class="u">km</span></div>
-        <div class="trip-lbl">Distância</div>
-      </div>
-      <div class="trip-cell">
-        <div class="trip-val"><span id="trip-time">0:00</span></div>
-        <div class="trip-lbl">Tempo</div>
-      </div>
-      <div class="trip-cell">
-        <div class="trip-val green"><span id="trip-kwh">0,0</span><span class="u">kWh</span></div>
-        <div class="trip-lbl">Energia (net)</div>
-      </div>
-      <div class="trip-cell">
-        <div class="trip-val orange"><span id="trip-fuel">0,0</span><span class="u">L</span></div>
-        <div class="trip-lbl">Combustível</div>
-      </div>
-      <div class="trip-cell">
-        <div class="trip-val yellow"><span id="trip-cost">R$ 0,00</span></div>
-        <div class="trip-lbl">Custo estimado</div>
-      </div>
-      <div class="trip-cell">
-        <div class="trip-val"><span id="trip-eff">—</span></div>
-        <div class="trip-lbl">km/L equivalente</div>
+    <!-- Fluxo -->
+    <div class="widget">
+      <h3><span class="ico">🔄</span> Fluxo de energia</h3>
+      <div class="flow-stage">
+        <div class="flow-node ice" id="node-ice">
+          ⛽
+          <div class="val" id="flow-ice">0 L/h</div>
+          <div class="lbl">Motor</div>
+        </div>
+        <div class="flow-arrow" id="arrow-ice-batt">→</div>
+        <div class="flow-node" id="node-batt">
+          🔋
+          <div class="val" id="flow-batt"><span id="soc-pct-mini">—</span>%</div>
+          <div class="lbl">Bateria</div>
+        </div>
+        <div class="flow-arrow regen" id="arrow-wheels-batt" style="grid-column:1; grid-row:2"></div>
+        <div class="flow-arrow" id="arrow-batt-motor" style="grid-column:2; grid-row:2">→</div>
+        <div class="flow-node" id="node-wheels" style="grid-column:3; grid-row:2">
+          🛞
+          <div class="val" id="flow-wheels">0 kW</div>
+          <div class="lbl">Rodas</div>
+        </div>
       </div>
     </div>
-  </div>
 
-  <!-- 6. Fluxo de Energia -->
-  <div class="widget">
-    <h3><span class="ico">🔄</span> Fluxo de energia</h3>
-    <div class="flow-stage">
-      <!-- linha 1: ICE → gerador → bateria -->
-      <div class="flow-node ice" id="node-ice">
-        ⛽
-        <div class="val" id="flow-ice">0 L/h</div>
-        <div class="lbl">Motor</div>
-      </div>
-      <div class="flow-arrow" id="arrow-ice-batt">→</div>
-      <div class="flow-node" id="node-batt">
-        🔋
-        <div class="val" id="flow-batt"><span id="soc-pct-mini">—</span>%</div>
-        <div class="lbl">Bateria</div>
-      </div>
-      <!-- linha 2: bateria → motor elétrico → rodas -->
-      <div class="flow-arrow regen" id="arrow-wheels-batt" style="grid-column:1; grid-row:2"></div>
-      <div class="flow-arrow" id="arrow-batt-motor" style="grid-column:2; grid-row:2">→</div>
-      <div class="flow-node" id="node-wheels" style="grid-column:3; grid-row:2; background: var(--panel-lift)">
-        🛞
-        <div class="val" id="flow-wheels">0 kW</div>
-        <div class="lbl">Rodas</div>
-      </div>
-    </div>
   </div>
-
 </div>
 
 <div id="toast"></div>
@@ -437,9 +489,6 @@
 <script>
 'use strict';
 
-// ═══════════════════════════════════════════════════════════════════════════
-//  Helpers
-// ═══════════════════════════════════════════════════════════════════════════
 const $ = id => document.getElementById(id);
 const fmt0 = n => Math.round(n).toLocaleString('pt-BR');
 const fmt1 = n => (Number.isFinite(+n) ? (+n).toLocaleString('pt-BR', {minimumFractionDigits:1, maximumFractionDigits:1}) : '—');
@@ -451,7 +500,7 @@ function toast(msg) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-//  Wake Lock — mantém tela acesa
+//  Wake Lock + relógio
 // ═══════════════════════════════════════════════════════════════════════════
 let _wakeLock = null;
 async function requestWakeLock() {
@@ -459,7 +508,6 @@ async function requestWakeLock() {
     if ('wakeLock' in navigator) {
       _wakeLock = await navigator.wakeLock.request('screen');
       _wakeLock.addEventListener('release', () => {
-        // Re-request quando a tela sair do foco e voltar
         if (document.visibilityState === 'visible') requestWakeLock();
       });
     }
@@ -468,40 +516,27 @@ async function requestWakeLock() {
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && !_wakeLock) requestWakeLock();
 });
-
-// ═══════════════════════════════════════════════════════════════════════════
-//  Relógio
-// ═══════════════════════════════════════════════════════════════════════════
 function tickClock() {
   const d = new Date();
   $('clock').textContent = d.toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'});
 }
-tickClock();
-setInterval(tickClock, 30_000);
+tickClock(); setInterval(tickClock, 30_000);
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  State + WebSocket
 // ═══════════════════════════════════════════════════════════════════════════
 let state = {};
 let lastUpdateMs = 0;
-let _socStartTrip = null;     // pra calcular kWh delta na viagem em curso
-let _tripStartMs = null;
 let _speedMax = 0;
 
 function bridgeUrl() {
-  // Pra rodar standalone (iPad) — usa o mesmo host
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   return proto + '//' + location.host + '/ws';
 }
-
 let ws, wsRetry = 0;
 function connect() {
-  const url = bridgeUrl();
-  ws = new WebSocket(url);
-  ws.onopen = () => {
-    wsRetry = 0;
-    setConn(true);
-  };
+  ws = new WebSocket(bridgeUrl());
+  ws.onopen = () => { wsRetry = 0; setConn(true); };
   ws.onmessage = ev => {
     try {
       const msg = JSON.parse(ev.data);
@@ -509,11 +544,7 @@ function connect() {
       else if (msg.type === 'update') { Object.assign(state, msg.data || {}); lastUpdateMs = Date.now(); render(); }
     } catch (e) {}
   };
-  ws.onclose = () => {
-    setConn(false);
-    wsRetry++;
-    setTimeout(connect, Math.min(8000, 500 * wsRetry));
-  };
+  ws.onclose = () => { setConn(false); wsRetry++; setTimeout(connect, Math.min(8000, 500 * wsRetry)); };
   ws.onerror = () => { try { ws.close(); } catch(_) {} };
 }
 function setConn(ok) {
@@ -521,9 +552,7 @@ function setConn(ok) {
   $('conn-lbl').textContent = ok ? 'online' : 'reconectando…';
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-//  Stale watchdog — se o bridge para de mandar dados, dim os widgets
-// ═══════════════════════════════════════════════════════════════════════════
+// Stale watchdog
 setInterval(() => {
   const age = Date.now() - lastUpdateMs;
   document.body.classList.toggle('stale', lastUpdateMs > 0 && age > 30_000);
@@ -539,44 +568,57 @@ setInterval(() => {
 }, 3000);
 
 // ═══════════════════════════════════════════════════════════════════════════
-//  Waze Live Map (iframe) + URL schemes pra navegação nativa
+//  Mapa Leaflet — tile preto Carto, sem controles, foco no carro
 // ═══════════════════════════════════════════════════════════════════════════
-let _lastWazeLatLng = null;
+let map = null, marker = null, _mapCenteredOnce = false;
+function initMap() {
+  if (!window.L || map) return;
+  map = L.map('cluster-map', {
+    zoomControl: false, attributionControl: false,
+    dragging: false, touchZoom: false, scrollWheelZoom: false, doubleClickZoom: false, boxZoom: false, keyboard: false,
+    tap: false
+  }).setView([-16.6869, -49.2648], 13);
+  // Carto Dark Matter — fundo preto, ruas brancas
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    maxZoom: 19, subdomains: 'abcd'
+  }).addTo(map);
+}
 function updateMap() {
-  const lat = +state.gps_lat, lng = +state.gps_lng;
-  if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat === 0) return;
-  // Re-carrega o iframe só quando o carro andou >1km (Waze re-centra sozinho dentro do mesmo viewport).
-  // Sem isso, o iframe pisca em qualquer mudança de GPS.
-  if (_lastWazeLatLng) {
-    const [pLat, pLng] = _lastWazeLatLng;
-    const dKm = Math.hypot((lat - pLat) * 111, (lng - pLng) * 111 * Math.cos(lat * Math.PI/180));
-    if (dKm < 1) return;
+  if (!map) initMap();
+  if (!map) return;
+  const lat = state.gps_lat, lng = state.gps_lng;
+  if (!Number.isFinite(+lat) || !Number.isFinite(+lng) || +lat === 0) return;
+  const ll = [+lat, +lng];
+  if (!marker) {
+    const icon = L.divIcon({
+      className: 'car-icon',
+      html: '<div style="width:28px;height:28px;background:radial-gradient(circle,#22c55e,#15803d);border:3px solid #000;border-radius:50%;box-shadow:0 0 20px rgba(34,197,94,.7),0 0 4px #000"></div>',
+      iconSize: [28,28], iconAnchor: [14,14]
+    });
+    marker = L.marker(ll, {icon}).addTo(map);
+  } else {
+    marker.setLatLng(ll);
   }
-  _lastWazeLatLng = [lat, lng];
-  const iframe = document.getElementById('waze-iframe');
-  // ct=livemap = modo tráfego ao vivo (sem turn-by-turn)
-  iframe.src = `https://embed.waze.com/iframe?zoom=14&lat=${lat}&lon=${lng}&ct=livemap`;
+  // Re-center suave; primeira vez sem animação
+  map.setView(ll, Math.max(map.getZoom(), 15), { animate: _mapCenteredOnce, duration: 1 });
+  _mapCenteredOnce = true;
 }
-// Carrega Goiânia como default até GPS chegar
-function bootMap() {
-  const iframe = document.getElementById('waze-iframe');
-  iframe.src = `https://embed.waze.com/iframe?zoom=12&lat=-16.6869&lon=-49.2648&ct=livemap`;
-}
-window.addEventListener('load', bootMap);
+setInterval(updateMap, 3000);
+window.addEventListener('load', () => { initMap(); });
 
-// ───── Menu de navegação ─────
-window.openNavMenu  = () => document.getElementById('nav-overlay').classList.add('show');
-window.closeNavMenu = () => document.getElementById('nav-overlay').classList.remove('show');
+// ═══════════════════════════════════════════════════════════════════════════
+//  Menu de navegação externa
+// ═══════════════════════════════════════════════════════════════════════════
+window.openNavMenu  = () => $('nav-overlay').classList.add('show');
+window.closeNavMenu = () => $('nav-overlay').classList.remove('show');
 window.openExternalNav = (app) => {
   closeNavMenu();
-  // Pra MVP abre o app na home; em iterações futuras vamos integrar destino (locais conhecidos).
-  const fallbacks = {
+  const fb = {
     waze:  { scheme: 'waze://?navigate=yes', web: 'https://waze.com/ul' },
     gmaps: { scheme: 'comgooglemaps://?center=&zoom=14&views=traffic', web: 'https://maps.google.com' },
     apple: { scheme: 'maps://', web: 'https://maps.apple.com' },
   };
-  const t = fallbacks[app]; if (!t) return;
-  // Tenta scheme nativo; se app não estiver instalado, cai pro web depois de 1.2s
+  const t = fb[app]; if (!t) return;
   const startedAt = Date.now();
   const handler = () => {
     if (Date.now() - startedAt < 1500 && document.visibilityState === 'visible') {
@@ -590,66 +632,59 @@ window.openExternalNav = (app) => {
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
-//  Cálculo de constantes do carro (Haval H6 PHEV34)
+//  Constantes Haval H6 PHEV34
 // ═══════════════════════════════════════════════════════════════════════════
-const PACK_KWH       = 34;     // bruta — usa pra estimar kWh restantes (SOC%·0.34)
-const TANK_L         = 55;     // capacidade tanque
-const KM_PER_L_HEV   = 8;      // pra autonomia ICE
-const KM_PER_KWH_EV  = 5.3;    // pra autonomia EV (aprox 19 kWh/100km)
+const PACK_KWH      = 34;
+const TANK_L        = 55;
+const KM_PER_L_HEV  = 8;
+const KM_PER_KWH_EV = 5.3;
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  Render
 // ═══════════════════════════════════════════════════════════════════════════
 function render() {
-  // ── SOC
+  const socCirc = 502.65;
+
+  // SOC
   const socPct = +state.soc_pct || 0;
   $('soc-pct').textContent = Math.round(socPct);
   $('soc-pct-mini').textContent = Math.round(socPct);
-  const socArc = $('soc-arc');
-  const socCirc = 502.65;
-  socArc.setAttribute('stroke-dashoffset', socCirc * (1 - socPct/100));
+  $('soc-arc').setAttribute('stroke-dashoffset', socCirc * (1 - socPct/100));
   const kwhLeft = (socPct / 100) * PACK_KWH;
-  $('soc-kwh').textContent = fmt1(kwhLeft) + ' kWh restantes';
+  $('soc-kwh').textContent = fmt1(kwhLeft) + ' kWh';
   $('soc-range').textContent = fmt0(kwhLeft * KM_PER_KWH_EV) + ' km';
 
-  // ── Fuel
+  // Fuel
   const fuelL = +state.fuel_l || 0;
   $('fuel-l').textContent = fmt1(fuelL);
   const fuelPct = clamp((fuelL / TANK_L) * 100, 0, 100);
   $('fuel-arc').setAttribute('stroke-dashoffset', socCirc * (1 - fuelPct/100));
-  $('fuel-pct').textContent = Math.round(fuelPct) + ' % do tanque';
+  $('fuel-pct').textContent = Math.round(fuelPct) + ' % tanque';
   $('fuel-range').textContent = fmt0(fuelL * KM_PER_L_HEV) + ' km';
 
-  // ── Power (kW): drive=positive, regen=negative
+  // Power
   const motorKw    = +state.motor_power_kw || 0;
   const chargeKw   = +state.charge_power_kw || 0;
   const isCharging = state.charging_state === 1;
-  // Quando carregando, mostra potência de carga; senão, mostra do motor
-  const displayKw = isCharging ? -chargeKw : motorKw;
+  const displayKw  = isCharging ? -chargeKw : motorKw;
   const pVal = $('power-val');
   pVal.textContent = Math.round(displayKw);
   pVal.classList.remove('regen','drive','idle');
   if (displayKw <= -1)     pVal.classList.add('regen');
   else if (displayKw >= 1) pVal.classList.add('drive');
   else                     pVal.classList.add('idle');
-  // Barra horizontal (−50 a +120)
-  const bDrive = $('power-bar-drive');
-  const bRegen = $('power-bar-regen');
-  bDrive.style.width = '0';
-  bRegen.style.width = '0';
-  if (displayKw > 0) {
-    bDrive.style.width = clamp((displayKw / 120) * 50, 0, 50) + '%';
-  } else if (displayKw < 0) {
-    bRegen.style.width = clamp((-displayKw / 50) * 50, 0, 50) + '%';
-  }
+  const bDrive = $('power-bar-drive'), bRegen = $('power-bar-regen');
+  bDrive.style.width = '0'; bRegen.style.width = '0';
+  if (displayKw > 0)      bDrive.style.width = clamp((displayKw / 120) * 50, 0, 50) + '%';
+  else if (displayKw < 0) bRegen.style.width = clamp((-displayKw / 50) * 50, 0, 50) + '%';
 
-  // ── Speed
+  // Speed
   const spd = +state.speed_kmh || 0;
   $('speed-val').textContent = fmt0(spd);
   if (spd > _speedMax) _speedMax = spd;
   $('speed-max').textContent = fmt0(_speedMax);
 
-  // ── Trip em curso (vem de state.current_trip se existir, senão calcula)
+  // Trip
   const tr = state.current_trip || state.rolling || {};
   $('trip-dist').textContent = fmt1(+tr.distKm || +tr.dist_km || 0);
   const tSec = +tr.timeSec || +tr.time_sec || 0;
@@ -665,8 +700,7 @@ function render() {
   const eqL = pGas > 0.01 ? tripCost / pGas : 0;
   $('trip-eff').textContent = (distKm > 1 && eqL > 0.01) ? fmt1(distKm / eqL) : '—';
 
-  // ── Fluxo de energia
-  // ICE on quando motor a combustão rodando (engine_state OU rpm > 0)
+  // Fluxo
   const iceOn   = (+state.engine_state || 0) >= 1 || (+state.engine_rpm || 0) > 100;
   const motorOn = Math.abs(motorKw) > 0.5;
   const regen   = motorKw < -0.5;
@@ -683,32 +717,12 @@ function render() {
   $('flow-ice').textContent = iceOn ? '~' + ((+state.engine_rpm || 0) / 1000).toFixed(1) + 'krpm' : 'off';
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-//  Mapa updater — refresh quando state muda + a cada 5s pra suavidade
-// ═══════════════════════════════════════════════════════════════════════════
-let _lastMapUpdate = 0;
-function maybeUpdateMap() {
-  const now = Date.now();
-  if (now - _lastMapUpdate < 2000) return;
-  _lastMapUpdate = now;
-  updateMap();
-}
-setInterval(maybeUpdateMap, 3000);
-
-// Reagenda updateMap após o render
-const _origRender = render;
-window._renderWrap = function() { _origRender(); maybeUpdateMap(); };
-
-// ═══════════════════════════════════════════════════════════════════════════
-//  Boot
-// ═══════════════════════════════════════════════════════════════════════════
+// Boot
 requestWakeLock();
 connect();
 toast('🚗 Haval Cluster pronto');
 
-// ═══════════════════════════════════════════════════════════════════════════
-//  Bloqueia gestos de zoom/scroll
-// ═══════════════════════════════════════════════════════════════════════════
+// Bloqueia zoom/scroll
 document.addEventListener('gesturestart', e => e.preventDefault());
 document.addEventListener('dblclick', e => e.preventDefault());
 </script>
