@@ -84,21 +84,24 @@ struct ClusterWebView: UIViewRepresentable {
             let value = dict["value"] as? String ?? ""
             switch action {
             case "open_nav_modal":
-                print("[obd-bridge] open_nav_modal recebido — incrementando navRequestId")
                 DispatchQueue.main.async {
                     self.channel.navRequestId += 1
                 }
+            // Comandos drive (POST HTTP no bridge, mesmo padrão do PWA)
+            case "drive_mode_set":
+                Task { await publisher.postCommand(path: "/api/drive-mode", body: ["mode": Int(value) ?? 0]) }
+            case "terrain_mode_set":
+                Task { await publisher.postCommand(path: "/api/terrain-mode", body: ["mode": Int(value) ?? 0]) }
+            case "regen_level_set":
+                Task { await publisher.postCommand(path: "/api/regen-level", body: ["level": Int(value) ?? 0]) }
+            case "steer_mode_set":
+                Task { await publisher.postCommand(path: "/api/steer-mode", body: ["mode": Int(value) ?? 0]) }
+            case "one_pedal_set":
+                Task { await publisher.postCommand(path: "/api/one-pedal", body: ["enabled": value == "true"]) }
+            case "esp_set":
+                Task { await publisher.postCommand(path: "/api/esp", body: ["enabled": value == "true"]) }
             case "hvac_ac":
-                publisher.publishCommand(topic: "haval/ecotrip/cmd/hvac/ac_enable", value: value)
-            case "hvac_temp":
-                publisher.publishCommand(topic: "haval/ecotrip/cmd/hvac/driver_temp", value: value)
-                publisher.publishCommand(topic: "haval/ecotrip/cmd/hvac/passenger_temp", value: value)
-            case "hvac_fan":
-                publisher.publishCommand(topic: "haval/ecotrip/cmd/hvac/fan_speed", value: value)
-            case "regen_level":
-                publisher.publishCommand(topic: "haval/ecotrip/cmd/regen_level", value: value)
-            case "drive_mode":
-                publisher.publishCommand(topic: "haval/ecotrip/cmd/drive_mode", value: value)
+                Task { await publisher.postCommand(path: "/api/hvac/ac", body: ["enabled": value == "1"]) }
             case "open_nav":
                 let app = (dict["app"] as? String ?? "waze").lowercased()
                 let schemes: [String: String] = [
