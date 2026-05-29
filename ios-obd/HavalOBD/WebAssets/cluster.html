@@ -145,49 +145,33 @@
     text-align: center;
   }
   .gauge-big {
-    font-size: 52px; font-weight: 200; line-height: 1;
+    font-size: 72px; font-weight: 200; line-height: 1;
     font-variant-numeric: tabular-nums;
     text-shadow: 0 2px 12px rgba(0,0,0,.6);
   }
-  .gauge-big .pct { font-size: 22px; color: var(--muted); margin-left: 2px; }
+  .gauge-big .pct { font-size: 30px; color: var(--muted); margin-left: 2px; }
   .gauge-sub {
-    margin-top: 6px; font-size: 11px; color: rgba(245,245,245,.7);
+    margin-top: 10px; font-size: 16px; color: rgba(245,245,245,.7);
     font-weight: 500; letter-spacing: .03em;
     text-shadow: 0 1px 6px rgba(0,0,0,.7);
+    line-height: 1.4;
   }
   .gauge-sub strong { color: var(--text); font-weight: 600; }
 
-  /* Linha do meio: mini-cards de telemetria OBD (motor, bateria, células, ICE) */
-  .row-mid {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 8px;
-    padding: 0 10px;
-    height: 78px;
+  /* Alertas/info extra dentro do float-card (células + ICE/sistema) */
+  .gauge-extra {
+    margin-top: 12px; padding-top: 10px;
+    border-top: 1px solid var(--border);
+    display: grid; grid-template-columns: 1fr 1fr; gap: 6px 10px;
+    font-size: 14px; color: var(--muted);
+    text-shadow: 0 1px 6px rgba(0,0,0,.7);
   }
-  .mini-card {
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 14px;
-    padding: 8px 12px;
-    display: flex; flex-direction: column; gap: 4px;
-    overflow: hidden;
+  .gauge-extra strong { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .gauge-extra .full { grid-column: 1 / -1; }
+  .gauge-extra .alert {
+    color: var(--orange); font-weight: 700;
   }
-  .mini-card h4 {
-    font-size: 10px; font-weight: 700; letter-spacing: .14em;
-    color: var(--muted); text-transform: uppercase;
-    margin: 0; display: flex; align-items: center; gap: 4px;
-  }
-  .mini-card h4 .ico { font-size: 12px; }
-  .mini-row {
-    display: flex; gap: 12px; flex-wrap: nowrap; align-items: baseline;
-    font-size: 12px; color: var(--muted);
-    white-space: nowrap; overflow: hidden;
-  }
-  .mini-row .v { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
-  .mini-row .v.hot { color: var(--orange); }
-  .mini-row .v.cold { color: #6cf; }
-  .mini-row .v.neg { color: var(--green); }
+  .gauge-extra .alert::before { content: '⚠ '; }
 
   /* Linha inferior: 3 widgets clássicos */
   .row-bot {
@@ -207,12 +191,12 @@
     position: relative;
   }
   .widget h3 {
-    font-size: 11px; font-weight: 700; letter-spacing: .14em;
+    font-size: 13px; font-weight: 700; letter-spacing: .14em;
     color: var(--muted); text-transform: uppercase;
-    margin-bottom: 12px;
+    margin-bottom: 10px;
     display: flex; align-items: center; gap: 6px;
   }
-  .widget h3 .ico { font-size: 14px; }
+  .widget h3 .ico { font-size: 16px; }
 
   /* ───────── Power Gauge ───────── */
   .power-display {
@@ -220,14 +204,33 @@
     text-align: center;
   }
   .power-value {
-    font-size: 72px; font-weight: 200; line-height: 1;
+    font-size: 96px; font-weight: 200; line-height: 1;
     font-variant-numeric: tabular-nums;
     transition: color .25s;
   }
   .power-value.regen  { color: var(--green); }
   .power-value.drive  { color: var(--orange); }
   .power-value.idle   { color: var(--muted); }
-  .power-unit { font-size: 22px; color: var(--muted); margin-left: 4px; }
+  .power-unit { font-size: 30px; color: var(--muted); margin-left: 4px; }
+
+  /* Extra: corrente bateria + pack voltage logo abaixo do kW */
+  .power-extra {
+    margin-top: 8px; display: flex; gap: 16px; justify-content: center;
+    font-size: 22px; color: var(--muted); font-variant-numeric: tabular-nums;
+  }
+  .power-extra strong { color: var(--text); font-weight: 500; }
+  .power-extra .a-pos { color: var(--orange); }
+  .power-extra .a-neg { color: var(--green); }
+
+  /* Motores elétricos: linha no rodapé do widget Potência */
+  .motors-row {
+    margin-top: 14px; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px;
+    font-size: 14px; color: var(--muted); border-top: 1px solid var(--border); padding-top: 10px;
+  }
+  .motors-cell { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+  .motors-cell .lbl { font-size: 10px; letter-spacing: .12em; opacity: .7; }
+  .motors-cell .val { color: var(--text); font-size: 18px; font-weight: 500; font-variant-numeric: tabular-nums; }
+  .motors-cell .sub { font-size: 11px; opacity: .7; }
   .power-bar {
     width: 90%; height: 16px; margin-top: 18px;
     background: var(--border); border-radius: 999px;
@@ -245,12 +248,12 @@
   .power-bar-fill.regen { background: linear-gradient(270deg, transparent, var(--green)); transform: translateX(-100%); }
   .power-scale {
     width: 90%; margin-top: 6px; display: flex; justify-content: space-between;
-    font-size: 10px; color: var(--dim); letter-spacing: .06em;
+    font-size: 12px; color: var(--dim); letter-spacing: .06em;
   }
   .power-speed {
-    margin-top: 14px; font-size: 14px; color: var(--muted);
+    margin-top: 14px; font-size: 18px; color: var(--muted);
   }
-  .power-speed strong { color: var(--text); font-size: 28px; font-weight: 300; font-variant-numeric: tabular-nums; margin: 0 4px; }
+  .power-speed strong { color: var(--text); font-size: 38px; font-weight: 300; font-variant-numeric: tabular-nums; margin: 0 4px; }
 
   /* ───────── Trip em curso ───────── */
   .trip-metrics {
@@ -261,18 +264,18 @@
   }
   .trip-cell { display: flex; flex-direction: column; justify-content: center; }
   .trip-val {
-    font-size: 24px; font-weight: 300; line-height: 1;
+    font-size: 32px; font-weight: 300; line-height: 1;
     font-variant-numeric: tabular-nums;
   }
   .trip-val .u {
-    font-size: 12px; color: var(--muted); font-weight: 500; margin-left: 4px;
+    font-size: 14px; color: var(--muted); font-weight: 500; margin-left: 4px;
   }
   .trip-val .sub {
-    font-size: 10px; color: var(--muted); font-weight: 500; margin-left: 6px;
+    font-size: 12px; color: var(--muted); font-weight: 500; margin-left: 6px;
     font-variant-numeric: tabular-nums;
   }
   .trip-lbl {
-    margin-top: 3px; font-size: 9px; letter-spacing: .14em;
+    margin-top: 4px; font-size: 12px; letter-spacing: .14em;
     color: var(--muted); text-transform: uppercase;
   }
   .trip-val.green { color: var(--green); }
@@ -446,6 +449,12 @@
             </div>
           </div>
         </div>
+        <!-- Bloco extra: pack voltage, SoH, alerta células -->
+        <div class="gauge-extra">
+          <span>Pack <strong id="soc-pack-v">—</strong>V</span>
+          <span id="soc-soh-cell">SoH <strong id="soc-soh">—</strong>%</span>
+          <span class="full" id="soc-cell-info">células Δ <strong id="soc-cell-delta">—</strong>mV · módulo <strong id="soc-mod-temp">—</strong>°C</span>
+        </div>
       </div>
 
       <!-- Fuel -->
@@ -466,6 +475,13 @@
             </div>
           </div>
         </div>
+        <!-- Bloco extra: ICE / sistema -->
+        <div class="gauge-extra">
+          <span>óleo <strong id="ice-oil">—</strong>°C</span>
+          <span>12V <strong id="ice-12v">—</strong>V</span>
+          <span>amb <strong id="ice-amb">—</strong>°C</span>
+          <span>cabine <strong id="ice-cab">—</strong>°C</span>
+        </div>
       </div>
     </div>
 
@@ -483,61 +499,6 @@
     </div>
   </div>
 
-  <!-- ═══════ LINHA DO MEIO: mini-cards de telemetria OBD ═══════ -->
-  <div class="row-mid">
-    <!-- Motores elétricos: TMCU + GMCU + Inverter -->
-    <div class="mini-card">
-      <h4><span class="ico">⚙️</span>Motores elétricos</h4>
-      <div class="mini-row">
-        <span>GMCU <span class="v" id="mc-gmcu-t">—</span>°C</span>
-        <span>TMCU <span class="v" id="mc-tmcu-t">—</span>°C</span>
-        <span>INV <span class="v" id="mc-inv-t">—</span>°C</span>
-      </div>
-      <div class="mini-row">
-        <span>G <span class="v" id="mc-gmcu-rpm">—</span>rpm</span>
-        <span>T <span class="v" id="mc-tmcu-rpm">—</span>rpm</span>
-      </div>
-    </div>
-    <!-- Bateria HV -->
-    <div class="mini-card">
-      <h4><span class="ico">🔋</span>Bateria HV</h4>
-      <div class="mini-row">
-        <span><span class="v" id="mc-pack-v">—</span>V</span>
-        <span><span class="v" id="mc-pack-a">—</span>A</span>
-        <span><span class="v" id="mc-pack-kw">—</span>kW</span>
-      </div>
-      <div class="mini-row">
-        <span>SoH <span class="v" id="mc-soh">—</span>%</span>
-        <span>SoE <span class="v" id="mc-soe">—</span>kWh</span>
-      </div>
-    </div>
-    <!-- Células + temps módulo -->
-    <div class="mini-card">
-      <h4><span class="ico">🧪</span>Células · Temps</h4>
-      <div class="mini-row">
-        <span>max <span class="v" id="mc-cell-max">—</span></span>
-        <span>min <span class="v" id="mc-cell-min">—</span></span>
-        <span>Δ <span class="v" id="mc-cell-delta">—</span>mV</span>
-      </div>
-      <div class="mini-row">
-        <span>módulo <span class="v" id="mc-mod-min">—</span>–<span class="v" id="mc-mod-max">—</span>°C</span>
-      </div>
-    </div>
-    <!-- ICE / sistema -->
-    <div class="mini-card">
-      <h4><span class="ico">⛽</span>ICE / Sistema</h4>
-      <div class="mini-row">
-        <span>óleo <span class="v" id="mc-oil">—</span>°C</span>
-        <span>amb <span class="v" id="mc-amb">—</span>°C</span>
-        <span>cab <span class="v" id="mc-cab">—</span>°C</span>
-      </div>
-      <div class="mini-row">
-        <span>12V <span class="v" id="mc-12v">—</span>V</span>
-        <span>boost <span class="v" id="mc-boost">—</span>kPa</span>
-      </div>
-    </div>
-  </div>
-
   <!-- ═══════ LINHA INFERIOR: 3 widgets clássicos ═══════ -->
   <div class="row-bot">
 
@@ -548,6 +509,10 @@
         <div>
           <span class="power-value idle" id="power-val">0</span><span class="power-unit">kW</span>
         </div>
+        <div class="power-extra">
+          <span><strong id="power-curr-a">—</strong> A</span>
+          <span><strong id="power-pack-v">—</strong> V</span>
+        </div>
         <div class="power-bar">
           <div class="power-bar-mid"></div>
           <div class="power-bar-fill drive" id="power-bar-drive"></div>
@@ -557,6 +522,24 @@
         <div class="power-speed">
           <strong id="speed-val">—</strong>km/h ·
           máx <strong id="speed-max">—</strong>
+        </div>
+        <!-- Motores elétricos (rodapé do widget) -->
+        <div class="motors-row">
+          <div class="motors-cell">
+            <span class="lbl">GMCU</span>
+            <span class="val"><span id="m-gmcu-t">—</span>°C</span>
+            <span class="sub"><span id="m-gmcu-rpm">0</span> rpm</span>
+          </div>
+          <div class="motors-cell">
+            <span class="lbl">TMCU</span>
+            <span class="val"><span id="m-tmcu-t">—</span>°C</span>
+            <span class="sub"><span id="m-tmcu-rpm">0</span> rpm</span>
+          </div>
+          <div class="motors-cell">
+            <span class="lbl">INVERSOR</span>
+            <span class="val"><span id="m-inv-t">—</span>°C</span>
+            <span class="sub">boost <span id="m-boost">—</span></span>
+          </div>
         </div>
       </div>
     </div>
@@ -1212,55 +1195,58 @@ function renderObdDebug() {
     ).join('');
   }
 }
-// Mini-cards OBD (motores, bateria, células, ICE) — popula a faixa .row-mid
-function renderMiniCards() {
-  const fmtTemp = v => Number.isFinite(+v) ? Math.round(+v) : '—';
-  const fmtVolt = v => Number.isFinite(+v) ? Math.round(+v) : '—';
-  const fmtAmp  = v => Number.isFinite(+v) ? (+v).toFixed(0) : '—';
-  const fmtKw   = v => Number.isFinite(+v) ? (+v).toFixed(1) : '—';
-  const fmtPct  = v => Number.isFinite(+v) ? Math.round(+v) : '—';
-  const fmtKwh  = v => Number.isFinite(+v) ? (+v).toFixed(1) : '—';
-  const fmtRpm  = v => Number.isFinite(+v) ? Math.round(+v) : '—';
-  const fmtMv   = v => Number.isFinite(+v) ? Math.round(+v) : '—';
+// Telemetria OBD secundária — popula os blocos extras dos widgets
+// (alertas no SOC, ICE no fuel, motores no Power)
+function renderObdExtras() {
+  const T = v => Number.isFinite(+v) ? Math.round(+v) : '—';
+  const F1 = v => Number.isFinite(+v) ? (+v).toFixed(1) : '—';
 
-  // Motores
-  $('mc-gmcu-t').textContent  = fmtTemp(state.gmcu_motor_temp_c);
-  $('mc-tmcu-t').textContent  = fmtTemp(state.tmcu_motor_temp_c);
-  $('mc-inv-t').textContent   = fmtTemp(state.inverter_temp_c);
-  $('mc-gmcu-rpm').textContent = fmtRpm(state.gmcu_motor_speed ?? state.gmcu_motor_rpm);
-  $('mc-tmcu-rpm').textContent = fmtRpm(state.tmcu_motor_speed ?? state.tmcu_motor_rpm);
+  // ── Power widget: corrente + pack voltage + motores ──
+  const battA = +state.battery_current_a;
+  const pv = $('power-curr-a');
+  pv.textContent = Number.isFinite(battA) ? Math.round(battA) : '—';
+  pv.classList.remove('a-pos', 'a-neg');
+  if (Number.isFinite(battA)) {
+    if (battA > 1) pv.classList.add('a-pos');
+    else if (battA < -1) pv.classList.add('a-neg');
+  }
+  $('power-pack-v').textContent = T(state.pack_voltage_v);
+  $('m-gmcu-t').textContent   = T(state.gmcu_motor_temp_c);
+  $('m-tmcu-t').textContent   = T(state.tmcu_motor_temp_c);
+  $('m-inv-t').textContent    = T(state.inverter_temp_c);
+  $('m-gmcu-rpm').textContent = T(state.gmcu_motor_speed ?? state.gmcu_motor_rpm);
+  $('m-tmcu-rpm').textContent = T(state.tmcu_motor_speed ?? state.tmcu_motor_rpm);
+  const boost = +state.boost_actual_kpa;
+  $('m-boost').textContent = Number.isFinite(boost) ? Math.round(boost) + 'kPa' : '—';
 
-  // Bateria HV
-  $('mc-pack-v').textContent = fmtVolt(state.pack_voltage_v);
-  $('mc-pack-a').textContent = fmtAmp(state.battery_current_a);
-  $('mc-pack-kw').textContent = fmtKw(state.motor_power_kw);
-  $('mc-soh').textContent    = fmtPct(state.soh_pct);
-  $('mc-soe').textContent    = fmtKwh(state.soe_kwh);
-
-  // Células + módulo
+  // ── SOC float-card: pack V, SoH, alerta células ──
+  $('soc-pack-v').textContent = T(state.pack_voltage_v);
+  $('soc-soh').textContent    = T(state.soh_pct);
   const cmax = +state.cell_voltage_max_mv;
   const cmin = +state.cell_voltage_min_mv;
-  $('mc-cell-max').textContent   = fmtMv(cmax);
-  $('mc-cell-min').textContent   = fmtMv(cmin);
-  $('mc-cell-delta').textContent = (Number.isFinite(cmax) && Number.isFinite(cmin)) ? Math.round(cmax - cmin) : '—';
-  $('mc-mod-min').textContent    = fmtTemp(state.module_temp_min_c);
-  $('mc-mod-max').textContent    = fmtTemp(state.module_temp_max_c);
+  const delta = (Number.isFinite(cmax) && Number.isFinite(cmin)) ? Math.round(cmax - cmin) : null;
+  const modMax = +state.module_temp_max_c;
+  const cellInfo = $('soc-cell-info');
+  $('soc-cell-delta').textContent = delta != null ? delta : '—';
+  $('soc-mod-temp').textContent   = T(modMax);
+  // Alerta visual se Δ > 80 mV (desbalanceamento) ou temp módulo > 45°C
+  const isAlert = (delta != null && delta > 80) || (Number.isFinite(modMax) && modMax > 45);
+  cellInfo.classList.toggle('alert', isAlert);
 
-  // ICE / sistema
-  $('mc-oil').textContent   = fmtTemp(state.oil_temp_c);
-  $('mc-amb').textContent   = fmtTemp(state.ambient_c);
-  $('mc-cab').textContent   = fmtTemp(state.cabin_temp_c);
-  $('mc-12v').textContent   = Number.isFinite(+state.batt_12v_v) ? (+state.batt_12v_v).toFixed(1) : '—';
-  $('mc-boost').textContent = Number.isFinite(+state.boost_actual_kpa) ? Math.round(+state.boost_actual_kpa) : '—';
+  // ── Fuel float-card: ICE info (óleo, 12V, ambiente, cabine) ──
+  $('ice-oil').textContent = T(state.oil_temp_c);
+  $('ice-12v').textContent = Number.isFinite(+state.batt_12v_v) ? (+state.batt_12v_v).toFixed(1) : '—';
+  $('ice-amb').textContent = T(state.ambient_c);
+  $('ice-cab').textContent = T(state.cabin_temp_c);
 }
 
 // Boot
 requestWakeLock();
 connect();
 toast('🚗 Haval Cluster pronto');
-// Overlay debug + mini-cards rodam independente (não patcha render — evita erro de strict mode)
+// Overlay debug + extras OBD rodam independente (não patcha render — evita erro de strict mode)
 setInterval(renderObdDebug, 1000);
-setInterval(renderMiniCards, 1000);
+setInterval(renderObdExtras, 1000);
 
 // Bloqueia zoom/scroll
 document.addEventListener('gesturestart', e => e.preventDefault());
