@@ -24,6 +24,18 @@ final class BridgePublisher: ObservableObject {
         self.elm = elm
     }
 
+    /// Conecta automaticamente se tiver credenciais salvas (host + user + senha).
+    /// Chamado no boot do app — evita o usuário ter que abrir Settings toda vez.
+    func autoConnectIfConfigured() {
+        guard !connected else { return }
+        guard !brokerHost.isEmpty, !brokerUser.isEmpty, !brokerPass.isEmpty else {
+            print("[bridge] auto-connect pulado — credenciais incompletas")
+            return
+        }
+        print("[bridge] auto-connect → \(brokerHost):\(brokerPort) como \(brokerUser)")
+        connect()
+    }
+
     func saveConfig() {
         UserDefaults.standard.set(brokerHost, forKey: "mqtt_host")
         UserDefaults.standard.set(brokerPort, forKey: "mqtt_port")
