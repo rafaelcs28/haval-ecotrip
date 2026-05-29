@@ -534,8 +534,8 @@
         <div class="opt" data-period="custom" onclick="setPeriod('custom')">Personalizar</div>
       </div>
       <div class="custom-range" id="custom-range" style="display:none">
-        <div class="range-row"><label>De:</label><input type="date" id="custom-from" onchange="renderStats()"></div>
-        <div class="range-row"><label>Até:</label><input type="date" id="custom-to" onchange="renderStats()"></div>
+        <div class="range-row"><label>De:</label><input type="date" id="custom-from" onchange="renderStats()" oninput="renderStats()"></div>
+        <div class="range-row"><label>Até:</label><input type="date" id="custom-to" onchange="renderStats()" oninput="renderStats()"></div>
       </div>
     </div>
 
