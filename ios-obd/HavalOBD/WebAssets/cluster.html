@@ -1096,14 +1096,12 @@ function renderObdDebug() {
   el.querySelector('.count').textContent = state._debug_pids.length;
   el.style.display = 'block';
 }
-// Patch render() pra chamar overlay também
-const _origRender = render;
-render = function() { _origRender(); renderObdDebug(); };
-
 // Boot
 requestWakeLock();
 connect();
 toast('🚗 Haval Cluster pronto');
+// Overlay debug roda independente (não patcha render — evita erro de strict mode)
+setInterval(renderObdDebug, 1000);
 
 // Bloqueia zoom/scroll
 document.addEventListener('gesturestart', e => e.preventDefault());
