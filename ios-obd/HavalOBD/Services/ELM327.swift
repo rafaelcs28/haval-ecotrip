@@ -28,15 +28,15 @@ final class ELM327: ObservableObject {
         // 500 kbps — protocolo do Haval H6 PHEV (e maioria pós-2008). Pular
         // a fase SEARCHING do auto-detect (ATSP0) que demora 5-10s e mete
         // STOPPED nos primeiros polls.
-        // Sequência mínima e robusta — Veepeak BLE é lento, todos com folga.
+        // Sequência: forçar ATSP6 (CAN ISO 15765-4 11-bit 500kbps) — protocolo
+        // do Haval H6 PHEV. Pular ATSP0 auto-detect que dava SEARCHING infinito.
         let initCommands: [(cmd: String, timeout: TimeInterval, abortOnError: Bool)] = [
-            ("ATZ",  6.0, true),   // reset (demora ~3-4s)
-            ("ATE0", 2.0, true),   // echo off
-            ("ATL0", 2.0, true),   // line feed off
-            ("ATH0", 2.0, false),  // headers off
-            ("ATS0", 2.0, false),  // spaces off
-            ("ATSP0", 4.0, false), // AUTO protocol — Veepeak BLE responde lento aqui
-            ("0100", 12.0, false), // primeira query — auto-detect pode demorar 8s
+            ("ATZ",  6.0, true),
+            ("ATE0", 2.0, true),
+            ("ATL0", 2.0, true),
+            ("ATH0", 2.0, false),
+            ("ATS0", 2.0, false),
+            ("ATSP6", 2.0, false), // CAN ISO 15765-4 11-bit 500kbps — Haval
         ]
         for (cmd, to, mandatory) in initCommands {
             let resp = await send(cmd, timeout: to)
@@ -55,29 +55,44 @@ final class ELM327: ObservableObject {
             }
             try? await Task.sleep(nanoseconds: 200_000_000)
         }
-        // Handshake: faz 0100 em loop até receber resposta válida (41 00 XX...),
-        // confirmando que o protocolo foi negociado e a ECU responde.
-        // Sem isso, polling começa enquanto adapter ainda está SEARCHING e
-        // cada PID vira STOPPED.
+        // Handshake: tenta 0100 com timeout LONGO (15s — auto-detect pode levar
+        // tudo isso) e ESPERA o ELM terminar de processar antes de retentar.
+        // Se ATSP6 falhar, tenta ATSP7 (CAN 29-bit) e depois ATSP0 (auto).
+        let protocolsToTry = ["ATSP6", "ATSP7", "ATSP0"]
         var handshakeOk = false
-        for attempt in 0..<5 {
-            let resp = await send("0100", timeout: 8.0)
-            let up = resp.uppercased().replacingOccurrences(of: " ", with: "")
-            if up.contains("4100") {
-                handshakeOk = true
-                lastErrorMsg = nil
-                break
+        for proto in protocolsToTry {
+            // Já mandei ATSP6 acima; nas próximas iterações troca protocolo
+            if proto != "ATSP6" {
+                _ = await send(proto, timeout: 2.0)
+                try? await Task.sleep(nanoseconds: 300_000_000)
             }
-            if up.contains("UNABLE") {
-                lastErrorMsg = "ECU não responde — carro precisa estar em DRIVING READY"
-                return
+            lastErrorMsg = "Testando \(proto)…"
+            // 2 tentativas por protocolo, cada uma com timeout BEM longo
+            for attempt in 0..<2 {
+                let resp = await send("0100", timeout: 15.0)
+                let up = resp.uppercased().replacingOccurrences(of: " ", with: "")
+                if up.contains("4100") {
+                    handshakeOk = true
+                    lastErrorMsg = nil
+                    break
+                }
+                if up.contains("UNABLE") || up.contains("BUS INIT") {
+                    // Esse protocolo não funciona — vai pro próximo
+                    break
+                }
+                if up.contains("STOPPED") {
+                    // ELM cancelou — espera ele resetar
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                    continue
+                }
+                // SEARCHING ainda — espera mais 3s e tenta de novo
+                lastErrorMsg = "\(proto) #\(attempt+1): \(resp.prefix(30))…"
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
             }
-            // SEARCHING / NO DATA / STOPPED — espera e tenta de novo
-            lastErrorMsg = "Handshake #\(attempt+1): \(resp.prefix(40))…"
-            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            if handshakeOk { break }
         }
         if !handshakeOk {
-            lastErrorMsg = "ECU não respondeu ao 0100 após 5 tentativas (carro READY?)"
+            lastErrorMsg = "Carro não respondeu — precisa estar em DRIVING READY (freio+START)"
             return
         }
         initialized = true
