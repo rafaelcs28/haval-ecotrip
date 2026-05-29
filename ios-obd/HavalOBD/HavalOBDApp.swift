@@ -54,6 +54,7 @@ struct RootView: View {
     @EnvironmentObject var bt:        BluetoothManager
     @EnvironmentObject var elm:       ELM327
     @State private var showSettings   = false
+    @State private var showNav        = false
     @State private var splashHidden   = false
     @State private var initInFlight   = false
 
@@ -95,6 +96,10 @@ struct RootView: View {
             .opacity(splashHidden ? 1 : 0)
         }
         .sheet(isPresented: $showSettings) { SettingsView() }
+        .fullScreenCover(isPresented: $showNav) { NavigationModalView() }
+        .onReceive(NotificationCenter.default.publisher(for: .openNavigation)) { _ in
+            showNav = true
+        }
         .onChange(of: channel.webViewReady) { _, ready in
             if ready {
                 // Fade out suave do splash 200ms depois do cluster estar pronto
