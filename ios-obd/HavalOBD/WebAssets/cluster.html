@@ -43,10 +43,51 @@
   body.native .row-top { background: transparent !important; }
   body.native #cluster-map { display: none !important; }
   body.native .row-top::after { display: none !important; }
-  /* Fluxo de Energia oculto no nativo — sem dados OBD diretos pra alimentar.
-     row-bot vira 2 colunas (Power | Trip) com espaço proporcional. */
-  body.native .row-bot { grid-template-columns: 1fr 1.4fr !important; }
+  /* Nativo: Bateria e Combustível ESCONDIDOS (user já tem no painel do carro).
+     Row-top colapsa, Row-bot ocupa toda tela com Trip + Power + Atalhos. */
+  body.native .floating-cards { display: none !important; }
+  body.native .row-top { flex: 0 0 6px !important; }
+  body.native .row-bot {
+    grid-template-columns: 1.6fr 1fr 1.1fr !important;
+    grid-template-rows: 1fr !important;
+    padding: 14px !important;
+    gap: 14px !important;
+  }
+  body.native .row-bot .widget { grid-row: 1; }
+  body.native .row-bot .widget:nth-child(1) { grid-column: 2; } /* Power */
+  body.native .row-bot .widget:nth-child(2) { grid-column: 1; } /* Trip (1º maior) */
+  body.native .row-bot .widget:nth-child(3) { grid-column: 3; } /* Atalhos */
   body.native .widget.flow-widget { display: none !important; }
+  body.native .widget.quick-widget { display: flex !important; }
+  /* Trip widget: fonte ainda maior no nativo (sem row-top competindo) */
+  body.native .trip-val { font-size: 38px !important; }
+  body.native .trip-lbl { font-size: 13px !important; }
+  body.native .trip-metrics { gap: 12px 18px !important; }
+  /* Browser/PWA: Atalhos escondido (mantém layout original Power|Trip|Fluxo) */
+  .widget.quick-widget { display: none; }
+
+  /* Atalhos: 3 botões grandes empilhados verticalmente no widget */
+  .quick-widget .quick-grid {
+    flex: 1;
+    display: grid; grid-template-columns: 1fr;
+    gap: 12px; align-content: center;
+  }
+  .quick-widget .qb {
+    appearance: none; -webkit-appearance: none;
+    background: rgba(255,255,255,.06);
+    border: 1px solid rgba(255,255,255,.1);
+    border-radius: 16px;
+    padding: 16px 12px;
+    display: flex; align-items: center; gap: 14px;
+    color: var(--text); cursor: pointer;
+    transition: background .15s, transform .1s;
+    font-family: inherit;
+  }
+  .quick-widget .qb:active { transform: scale(.96); background: rgba(255,255,255,.14); }
+  .quick-widget .qb.on { background: rgba(34,197,94,.18); border-color: rgba(34,197,94,.5); }
+  .quick-widget .qb-ico { font-size: 32px; line-height: 1; min-width: 44px; text-align: center; }
+  .quick-widget .qb-lbl { font-size: 12px; letter-spacing: .14em; color: var(--muted); text-transform: uppercase; flex: 1; text-align: left; }
+  .quick-widget .qb-val { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; min-width: 60px; text-align: right; }
   /* Fluxo de Energia oculto no nativo — versão compacta vai pro topbar */
   body.native .widget.flow-widget { display: none !important; }
   /* row-bot: 2 colunas no nativo (Power + Trip) — 3ª área é o MiniPlayer SwiftUI */
@@ -514,42 +555,6 @@
         </div>
       </div>
 
-      <!-- Atalhos rápidos: A/C, regen, drive mode -->
-      <div class="float-card quick">
-        <div class="head"><span class="ico">⚡</span>Atalhos</div>
-        <div class="quick-grid">
-          <button class="qb" id="qb-ac" onclick="qb_toggleAc()">
-            <span class="qb-ico">❄️</span>
-            <span class="qb-lbl">A/C</span>
-            <span class="qb-val" id="qb-ac-val">off</span>
-          </button>
-          <button class="qb" id="qb-regen" onclick="qb_cycleRegen()">
-            <span class="qb-ico">↻</span>
-            <span class="qb-lbl">Regen</span>
-            <span class="qb-val" id="qb-regen-val">—</span>
-          </button>
-          <button class="qb" id="qb-drive" onclick="qb_cycleDrive()">
-            <span class="qb-ico">🚗</span>
-            <span class="qb-lbl">Modo</span>
-            <span class="qb-val" id="qb-drive-val">—</span>
-          </button>
-          <button class="qb" id="qb-temp-dn" onclick="qb_temp(-1)">
-            <span class="qb-ico">−</span>
-            <span class="qb-lbl">Temp</span>
-            <span class="qb-val" id="qb-temp-val">—</span>
-          </button>
-          <button class="qb" id="qb-temp-up" onclick="qb_temp(+1)">
-            <span class="qb-ico">+</span>
-            <span class="qb-lbl">Temp</span>
-            <span class="qb-val">↑</span>
-          </button>
-          <button class="qb" id="qb-fan" onclick="qb_cycleFan()">
-            <span class="qb-ico">🌀</span>
-            <span class="qb-lbl">Vent</span>
-            <span class="qb-val" id="qb-fan-val">—</span>
-          </button>
-        </div>
-      </div>
     </div>
 
     <!-- Menu navegação -->
@@ -636,7 +641,29 @@
       </div>
     </div>
 
-    <!-- Fluxo de energia v3 — top view do carro com 2 eixos (TMCU/GMCU/ICE) -->
+    <!-- Atalhos (A/C, Regen, Modo) — substituiu Fluxo no modo nativo -->
+    <div class="widget quick-widget">
+      <h3><span class="ico">⚡</span> Atalhos</h3>
+      <div class="quick-grid">
+        <button class="qb" id="qb-ac" onclick="qb_toggleAc()">
+          <span class="qb-ico">❄️</span>
+          <span class="qb-lbl">A/C</span>
+          <span class="qb-val" id="qb-ac-val">off</span>
+        </button>
+        <button class="qb" id="qb-regen" onclick="qb_cycleRegen()">
+          <span class="qb-ico">↻</span>
+          <span class="qb-lbl">Regen</span>
+          <span class="qb-val" id="qb-regen-val">—</span>
+        </button>
+        <button class="qb" id="qb-drive" onclick="qb_cycleDrive()">
+          <span class="qb-ico">🚗</span>
+          <span class="qb-lbl">Modo</span>
+          <span class="qb-val" id="qb-drive-val">—</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Fluxo de energia v3 — escondido no modo nativo (CSS) -->
     <div class="widget flow-widget">
       <h3><span class="ico">🔄</span> Fluxo de energia</h3>
       <div class="flow-stage">
@@ -1025,17 +1052,18 @@ function render() {
   $('soc-range').textContent = Number.isFinite(rangeEv) ? fmt0(rangeEv) + ' km'
     : fmt0(kwhLeft * KM_PER_KWH_EV) + ' km';
 
-  // Fuel — usa range_ice_km do SERVIDOR; derivar fuel_l de range/8
+  // Fuel — usa fuel_l + range_ice_km DIRETOS do servidor. Sem deriva.
   const rangeIce = +state.range_ice_km;
-  let fuelL = +state.fuel_l;
-  if (!Number.isFinite(fuelL) && Number.isFinite(rangeIce)) {
-    fuelL = rangeIce / KM_PER_L_HEV;
+  const fuelL    = +state.fuel_l;
+  $('fuel-l').textContent = Number.isFinite(fuelL) ? fmt1(fuelL) : '—';
+  if (Number.isFinite(fuelL)) {
+    const fuelPct = clamp((fuelL / TANK_L) * 100, 0, 100);
+    $('fuel-arc').setAttribute('stroke-dashoffset', socCirc * (1 - fuelPct/100));
+    $('fuel-pct').textContent = Math.round(fuelPct) + ' % tanque';
+  } else {
+    $('fuel-arc').setAttribute('stroke-dashoffset', 502.65);
+    $('fuel-pct').textContent = '— % tanque';
   }
-  fuelL = fuelL || 0;
-  $('fuel-l').textContent = fmt1(fuelL);
-  const fuelPct = clamp((fuelL / TANK_L) * 100, 0, 100);
-  $('fuel-arc').setAttribute('stroke-dashoffset', socCirc * (1 - fuelPct/100));
-  $('fuel-pct').textContent = Math.round(fuelPct) + ' % tanque';
   $('fuel-range').textContent = Number.isFinite(rangeIce) ? fmt0(rangeIce) + ' km' : '— km';
 
   // Power
@@ -1283,12 +1311,6 @@ function renderQuickActions() {
   // Drive mode
   const dm = +state.drive_mode;
   $('qb-drive-val').textContent = Number.isFinite(dm) ? (DRIVE_NAMES[dm] ?? dm) : '—';
-  // Temp do motorista
-  const t = +state.hvac_driver_temp;
-  $('qb-temp-val').textContent = Number.isFinite(t) ? Math.round(t) + '°' : '—';
-  // Fan speed
-  const fan = +state.hvac_fan_speed;
-  $('qb-fan-val').textContent = Number.isFinite(fan) ? fan : '—';
 }
 
 // Handlers dos botões — publica comando via _nativeBridge (Swift → MQTT)
