@@ -20,6 +20,11 @@ final class OBDBridgeChannel: ObservableObject {
     @Published var webViewReady = false
     @Published var pushCount = 0
     @Published var lastError: String?
+    /// Modo debug — quando ON, snapshot inclui lista crua de PIDs lidos.
+    /// O cluster.html renderiza overlay flutuante com tabela id/value/unit/age.
+    @Published var debugMode: Bool = UserDefaults.standard.bool(forKey: "haval_obd_debug") {
+        didSet { UserDefaults.standard.set(debugMode, forKey: "haval_obd_debug") }
+    }
 
     func attach(webView: WKWebView, elm: ELM327) {
         self.webView = webView
@@ -116,6 +121,25 @@ final class OBDBridgeChannel: ObservableObject {
         ]
         for (key, sample) in elm.samples {
             if let v = sample.value { dict[key] = v }
+        }
+        if debugMode {
+            let now = Date()
+            var debugList: [[String: Any]] = []
+            for (key, sample) in elm.samples {
+                if let v = sample.value {
+                    debugList.append([
+                        "id": key,
+                        "value": v,
+                        "unit": sample.unit,
+                        "age_ms": Int(now.timeIntervalSince(sample.ts) * 1000),
+                    ])
+                }
+            }
+            debugList.sort { ($0["id"] as? String ?? "") < ($1["id"] as? String ?? "") }
+            dict["_debug_obd"] = true
+            dict["_debug_pids"] = debugList
+        } else {
+            dict["_debug_obd"] = false
         }
         injectSnapshot(translateForCluster(dict), on: webView)
     }
