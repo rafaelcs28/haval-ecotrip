@@ -20,8 +20,13 @@ struct PIDDefinition: Identifiable, Hashable {
     let command: String           // string ASCII enviada (sem CR) — ex: "010C" ou "22D002"
     let unit: String
     let priority: Priority
+    /// ATSH (Set Header) — ECU específica pra mandar este PID.
+    /// nil = usa broadcast 7DF (Mode 01 universal).
+    /// Mode 22 customs do Haval precisam de ATSH específica:
+    ///   "763" (com ATCRA 7A3), "76C" (7AC), "782" (7C2), "787" (7C7), "78B" (7CB)
+    let header: String?
+    let receiveFilter: String?    // ATCRA — corresponde ao header (+ 8 ou similar)
     /// Fórmula que aplica nos bytes de dados (após o header de resposta).
-    /// `bytes` já vem só com os bytes do PAYLOAD (sem 41 XX ou 62 XX XX).
     let parser: ([UInt8]) -> Double?
 
     static func == (a: Self, b: Self) -> Bool { a.id == b.id }
