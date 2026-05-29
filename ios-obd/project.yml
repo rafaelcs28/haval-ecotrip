@@ -57,6 +57,9 @@ targets:
           Conecta ao adaptador OBD via Bluetooth.
         NSLocalNetworkUsageDescription: >
           Conecta ao Bridge na sua rede local pra enviar a telemetria.
+        NSLocationWhenInUseUsageDescription: >
+          O Haval OBD usa sua localização pra centralizar o mapa do cluster
+          e calcular velocidade/heading do GPS como fallback do OBD.
         # Background mode: ler BLE quando app em segundo plano (carro
         # continua mandando dados mesmo com tela bloqueada).
         UIBackgroundModes:

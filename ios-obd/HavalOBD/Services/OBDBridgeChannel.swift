@@ -15,6 +15,7 @@ import Combine
 final class OBDBridgeChannel: ObservableObject {
     weak var webView: WKWebView?
     private weak var elm: ELM327?
+    private weak var location: LocationManager?
     private var fastTimer: Timer?
     private var slowTimer: Timer?
     @Published var webViewReady = false
@@ -30,6 +31,10 @@ final class OBDBridgeChannel: ObservableObject {
         self.webView = webView
         self.elm = elm
         // NÃO inicia os timers ainda — só após webViewReady = true
+    }
+
+    func bind(location: LocationManager) {
+        self.location = location
     }
 
     /// Chamado pelo ClusterWebView quando o cluster.html termina de carregar.
@@ -127,6 +132,13 @@ final class OBDBridgeChannel: ObservableObject {
         ]
         for (key, sample) in elm.samples {
             if let v = sample.value { dict[key] = v }
+        }
+        // GPS do iPad — cluster.html usa gps_lat/gps_lng pra mover marker
+        if let loc = location {
+            if let la = loc.lat { dict["gps_lat"] = la }
+            if let lo = loc.lng { dict["gps_lng"] = lo }
+            if let h  = loc.headingDeg { dict["gps_heading"] = h }
+            if let s  = loc.speedKmh { dict["speed_kmh_gps"] = s }
         }
         if debugMode {
             let now = Date()

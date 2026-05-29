@@ -626,11 +626,11 @@
           <line class="car-hood-line" x1="80" y1="100" x2="280" y2="100"/>
           <line class="car-hood-line" x1="80" y1="140" x2="280" y2="140"/>
 
-          <!-- Rodas (4 retângulos arredondados nos cantos) -->
-          <rect class="wheel" id="wheel-fl" x="55"  y="55"  width="18" height="34" rx="4"/>
-          <rect class="wheel" id="wheel-fr" x="287" y="55"  width="18" height="34" rx="4"/>
-          <rect class="wheel" id="wheel-rl" x="55"  y="148" width="18" height="34" rx="4"/>
-          <rect class="wheel" id="wheel-rr" x="287" y="148" width="18" height="34" rx="4"/>
+          <!-- Rodas (4 retângulos arredondados nos cantos) — meio dentro do chassis -->
+          <rect class="wheel" id="wheel-fl" x="64"  y="55"  width="16" height="34" rx="4"/>
+          <rect class="wheel" id="wheel-fr" x="280" y="55"  width="16" height="34" rx="4"/>
+          <rect class="wheel" id="wheel-rl" x="64"  y="148" width="16" height="34" rx="4"/>
+          <rect class="wheel" id="wheel-rr" x="280" y="148" width="16" height="34" rx="4"/>
 
           <!-- ICE (motor a combustão, frente direita) -->
           <rect class="comp-bg ice" id="node-ice" x="218" y="44" width="44" height="32" rx="6"/>
@@ -863,9 +863,9 @@ function initLeaflet() {
   if (window.L && !_lfMap) {
     _lfMap = L.map('cluster-map', {
       zoomControl: false, attributionControl: false,
-      dragging: false, touchZoom: false, scrollWheelZoom: false,
-      doubleClickZoom: false, boxZoom: false, keyboard: false, tap: false,
-    }).setView([DEFAULT_CENTER.lat, DEFAULT_CENTER.lng], 13);
+      dragging: true, touchZoom: true, scrollWheelZoom: true,
+      doubleClickZoom: true, boxZoom: false, keyboard: false, tap: true,
+    }).setView([DEFAULT_CENTER.lat, DEFAULT_CENTER.lng], 14);
     L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
       maxZoom: 19, subdomains: 'abcd',
     }).addTo(_lfMap);

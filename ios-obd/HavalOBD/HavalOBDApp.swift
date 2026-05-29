@@ -7,6 +7,7 @@ struct HavalOBDApp: App {
     @StateObject private var publisher = BridgePublisher()
     @StateObject private var channel   = OBDBridgeChannel()
     @StateObject private var discovery = OBDDiscovery()
+    @StateObject private var location  = LocationManager()
 
     init() {
         let bluetooth = BluetoothManager()
@@ -23,6 +24,7 @@ struct HavalOBDApp: App {
                 .environmentObject(publisher)
                 .environmentObject(channel)
                 .environmentObject(discovery)
+                .environmentObject(location)
                 .preferredColorScheme(.dark)
                 .ignoresSafeArea()
                 .statusBarHidden(true)
@@ -31,6 +33,8 @@ struct HavalOBDApp: App {
                     publisher.bind(elm)
                     publisher.autoConnectIfConfigured()
                     discovery.bind(elm: elm)
+                    channel.bind(location: location)
+                    location.start()
                 }
         }
     }
