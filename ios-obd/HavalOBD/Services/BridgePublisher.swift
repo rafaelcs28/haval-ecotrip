@@ -61,13 +61,21 @@ final class BridgePublisher: ObservableObject {
     }
 
     private func flushSnapshot() {
-        guard connected, let elm = elm, !elm.samples.isEmpty else { return }
+        guard connected else { return }
         var dict: [String: Any] = [
             "ts": ISO8601DateFormatter().string(from: Date()),
             "source": "obd_ble",
         ]
-        for (key, sample) in elm.samples {
-            if let v = sample.value { dict[key] = v }
+        // Mesmo sem samples, publica heartbeat — valida o caminho MQTT e
+        // permite o bridge atualizar last_obd_ms enquanto o usuário ainda
+        // não conectou o ELM327.
+        if let elm = elm {
+            dict["obd_connected"] = (elm.bt.state == .ready ? 1.0 : 0.0)
+            dict["obd_initialized"] = (elm.initialized ? 1.0 : 0.0)
+            dict["obd_samples"] = Double(elm.samples.count)
+            for (key, sample) in elm.samples {
+                if let v = sample.value { dict[key] = v }
+            }
         }
         guard let json = try? JSONSerialization.data(withJSONObject: dict, options: []),
               let str = String(data: json, encoding: .utf8) else { return }

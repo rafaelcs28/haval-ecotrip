@@ -45,11 +45,20 @@ final class BluetoothManager: NSObject, ObservableObject {
         central.scanForPeripherals(withServices: nil, options: [
             CBCentralManagerScanOptionAllowDuplicatesKey: false
         ])
+        // Timeout: 15s — se não achar ELM327, volta pra idle e mostra dica
+        DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in
+            guard let self = self else { return }
+            if self.state == .scanning {
+                self.central.stopScan()
+                self.deviceName = "Nenhum ELM327 encontrado"
+                self.state = .poweredOff
+            }
+        }
     }
 
     func stopScan() {
         central.stopScan()
-        if state == .scanning { state = .poweredOn == central.state ? .scanning : .error }
+        if state == .scanning { state = .poweredOff }
     }
 
     /// Envia comando ASCII (ex: "010C") com CR como terminador. ELM327
