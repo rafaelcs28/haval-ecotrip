@@ -22,18 +22,33 @@ final class ELM327: ObservableObject {
 
     func initialize() async {
         initialized = false
-        // Sequência mínima de boot do ELM327
-        let initCommands = ["ATZ", "ATE0", "ATL0", "ATH0", "ATS0", "ATSP0"]
-        for cmd in initCommands {
-            let resp = await send(cmd, timeout: 2.0)
+        lastErrorMsg = nil
+        // Delay inicial — alguns adaptadores precisam de tempo após connect
+        try? await Task.sleep(nanoseconds: 800_000_000)
+        // Sequência de boot. ATZ é reset completo — demora até 4s.
+        // Comandos seguintes respondem rápido.
+        let initCommands: [(cmd: String, timeout: TimeInterval)] = [
+            ("ATZ",  5.0),   // reset
+            ("ATE0", 1.0),   // echo off
+            ("ATL0", 1.0),   // line feed off
+            ("ATH0", 1.0),   // headers off
+            ("ATS0", 1.0),   // spaces off
+            ("ATSP0", 1.5),  // auto protocol
+        ]
+        for (cmd, to) in initCommands {
+            let resp = await send(cmd, timeout: to)
             if resp.isEmpty {
                 lastErrorMsg = "Sem resposta em \(cmd)"
                 return
             }
-            try? await Task.sleep(nanoseconds: 100_000_000)
+            // Detecta erros explícitos
+            if resp.uppercased().contains("?") && cmd != "ATZ" {
+                lastErrorMsg = "Erro em \(cmd): \(resp)"
+                return
+            }
+            try? await Task.sleep(nanoseconds: 150_000_000)
         }
         initialized = true
-        lastErrorMsg = nil
         startPolling()
     }
 

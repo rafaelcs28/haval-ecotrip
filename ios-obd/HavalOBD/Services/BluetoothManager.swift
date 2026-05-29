@@ -3,13 +3,15 @@ import CoreBluetooth
 
 /// Gerencia a conexão BLE com o adaptador ELM327.
 ///
-/// ELM327 BLE clones (Vgate iCar Pro, OBDLink MX+, etc.) tipicamente expõem:
-///   Service UUID:  FFE0 (alguns) ou 18F0 (OBDLink) ou customizado
-///   Characteristic: FFE1 (TX/RX) ou 2AF0/2AF1 (OBDLink — separados)
+/// Suporta vários padrões de characteristics conhecidos:
+///   • Service FFE0 + char FFE1  (clones genéricos, Vgate iCar Pro)
+///   • Service 18F0 + chars 2AF0 (notify) + 2AF1 (write)  (Veepeak novo)
+///   • Service customizado com pares notify/write separados
 ///
-/// Estratégia: escaneia por TODOS os service UUIDs conhecidos. Quando
-/// conectar, descobre serviços e seleciona o primeiro characteristic que
-/// suporta `.notify | .writeWithResponse | .writeWithoutResponse`.
+/// Estratégia robusta:
+///   1. Lista TODAS as services + characteristics descobertas
+///   2. Prefere UUIDs conhecidos
+///   3. Aceita rx/tx em characteristics separadas (não exige notify+write juntos)
 final class BluetoothManager: NSObject, ObservableObject {
     enum State: String { case poweredOff, scanning, connecting, ready, error }
 
@@ -17,22 +19,27 @@ final class BluetoothManager: NSObject, ObservableObject {
     @Published var lastResponse: String = ""
     @Published var deviceName: String = "—"
     @Published var rssi: Int = 0
-    /// Lista de TODOS os peripherals encontrados durante o scan (não filtrados).
-    /// Útil pra debug quando o filtro não pega o ELM327 por nome.
     @Published var nearbyDevices: [(name: String, rssi: Int, id: UUID)] = []
+    /// Log dos últimos 20 comandos enviados + respostas — visível na UI
+    @Published var commandLog: [(t: Date, dir: String, text: String)] = []
+    /// Lista de characteristics descobertas — útil pra debug
+    @Published var debugChars: [String] = []
 
     private var central: CBCentralManager!
     private var peripheral: CBPeripheral?
-    private var rxTxChar: CBCharacteristic?
+    private var rxChar: CBCharacteristic?   // notify (recebe)
+    private var txChar: CBCharacteristic?   // write (envia)
     private var rxBuffer = ""
     private var pendingCallback: ((String) -> Void)?
 
-    /// Service UUIDs conhecidos de adaptadores ELM327 BLE
-    private let knownServices: [CBUUID] = [
-        CBUUID(string: "FFE0"),     // genérico mais comum
-        CBUUID(string: "FFF0"),     // alternativo
-        CBUUID(string: "18F0"),     // OBDLink MX+
-        CBUUID(string: "E7810A71-73AE-499D-8C15-FAA9AEF0C3F2"),  // OBDII Bluetooth Pro
+    /// UUIDs conhecidos de adaptadores ELM327 BLE — preferidos quando aparecem
+    private let preferredCharUUIDs: [CBUUID] = [
+        CBUUID(string: "FFE1"),       // genérico
+        CBUUID(string: "FFF1"),       // alternativo
+        CBUUID(string: "2AF0"),       // Veepeak BLE+ notify
+        CBUUID(string: "2AF1"),       // Veepeak BLE+ write
+        CBUUID(string: "ABF1"),       // OBDLink
+        CBUUID(string: "ABF2"),       // OBDLink alt
     ]
 
     override init() {
@@ -40,16 +47,21 @@ final class BluetoothManager: NSObject, ObservableObject {
         central = CBCentralManager(delegate: self, queue: .main)
     }
 
+    private func log(_ dir: String, _ text: String) {
+        DispatchQueue.main.async {
+            self.commandLog.append((t: Date(), dir: dir, text: text))
+            if self.commandLog.count > 20 { self.commandLog.removeFirst() }
+        }
+    }
+
     func startScan() {
         guard central.state == .poweredOn else { return }
-        peripheral = nil; rxTxChar = nil; rxBuffer = ""
-        nearbyDevices.removeAll()
+        peripheral = nil; rxChar = nil; txChar = nil; rxBuffer = ""
+        nearbyDevices.removeAll(); debugChars.removeAll()
         state = .scanning
         central.scanForPeripherals(withServices: nil, options: [
             CBCentralManagerScanOptionAllowDuplicatesKey: false
         ])
-        // Timeout: 30s (era 15s). Se não achar pelo filtro automático mas
-        // tiver candidatos manuais em nearbyDevices, o usuário escolhe.
         DispatchQueue.main.asyncAfter(deadline: .now() + 30) { [weak self] in
             guard let self = self else { return }
             if self.state == .scanning {
@@ -57,15 +69,13 @@ final class BluetoothManager: NSObject, ObservableObject {
                 if self.nearbyDevices.isEmpty {
                     self.deviceName = "Nenhum dispositivo BLE encontrado"
                 } else {
-                    self.deviceName = "ELM327 não detectado — \(self.nearbyDevices.count) dispositivos próximos"
+                    self.deviceName = "ELM327 não detectado — \(self.nearbyDevices.count) próximos"
                 }
                 self.state = .poweredOff
             }
         }
     }
 
-    /// Conexão manual pelo UUID — usado quando o filtro automático não pega
-    /// mas o usuário identifica o ELM327 na lista de nearbyDevices.
     func connectManually(id: UUID) {
         if let p = central.retrievePeripherals(withIdentifiers: [id]).first {
             central.stopScan()
@@ -77,29 +87,27 @@ final class BluetoothManager: NSObject, ObservableObject {
         }
     }
 
-    func stopScan() {
-        central.stopScan()
-        if state == .scanning { state = .poweredOff }
-    }
-
-    /// Envia comando ASCII (ex: "010C") com CR como terminador. ELM327
-    /// responde no `peripheral:didUpdateValueFor:`. Callback dispara quando
-    /// recebemos o prompt ">" indicando fim da resposta.
+    /// Envia comando ELM327 (AT ou PID hex). Termina com \r. Aguarda prompt ">"
+    /// como fim da resposta. Timeout default 1s — ATZ precisa de mais (5s).
     func send(_ command: String, timeout: TimeInterval = 1.0, completion: @escaping (String) -> Void) {
-        guard state == .ready, let p = peripheral, let c = rxTxChar else {
+        guard state == .ready, let p = peripheral, let c = txChar else {
+            log("ERR", "send sem ready ou txChar")
             completion(""); return
         }
         rxBuffer = ""
         pendingCallback = completion
+        log("→", command)
         let payload = (command + "\r").data(using: .ascii)!
-        let type: CBCharacteristicWriteType = c.properties.contains(.writeWithoutResponse) ? .withoutResponse : .withResponse
+        let type: CBCharacteristicWriteType = c.properties.contains(.writeWithoutResponse)
+            ? .withoutResponse : .withResponse
         p.writeValue(payload, for: c, type: type)
-        // Timeout — se não responder dentro do prazo, fecha pendente com vazio
         DispatchQueue.main.asyncAfter(deadline: .now() + timeout) { [weak self] in
             guard let self = self else { return }
             if let cb = self.pendingCallback {
                 self.pendingCallback = nil
-                cb(self.rxBuffer.trimmingCharacters(in: .whitespacesAndNewlines))
+                let resp = self.rxBuffer.trimmingCharacters(in: .whitespacesAndNewlines)
+                self.log("←", resp.isEmpty ? "(timeout)" : resp)
+                cb(resp)
             }
         }
     }
@@ -111,25 +119,17 @@ final class BluetoothManager: NSObject, ObservableObject {
 
 extension BluetoothManager: CBCentralManagerDelegate {
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
-        switch central.state {
-        case .poweredOn:  if state == .poweredOff { state = .poweredOff /* aguarda startScan */ }
-        case .poweredOff: state = .poweredOff
-        default:          state = .error
-        }
+        if central.state != .poweredOn { state = .poweredOff }
     }
 
     func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral,
                         advertisementData: [String : Any], rssi RSSI: NSNumber) {
         let name = peripheral.name ?? (advertisementData[CBAdvertisementDataLocalNameKey] as? String) ?? ""
-        // Loga TODOS os dispositivos encontrados (mesmo sem nome) na lista.
-        // Permite o usuário escolher manualmente se o filtro automático
-        // não pega.
         let display = name.isEmpty ? "(sem nome)" : name
         if !nearbyDevices.contains(where: { $0.id == peripheral.identifier }) {
             nearbyDevices.append((name: display, rssi: RSSI.intValue, id: peripheral.identifier))
             nearbyDevices.sort { $0.rssi > $1.rssi }
         }
-        // Auto-connect só se nome bate com OBD/ELM/Vgate/iCar/etc.
         let upper = name.uppercased()
         let isObd = upper.contains("OBD") || upper.contains("VGATE") || upper.contains("ELM") ||
                     upper.contains("ICAR") || upper.contains("327") ||
@@ -145,40 +145,72 @@ extension BluetoothManager: CBCentralManagerDelegate {
     }
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
+        log("BT", "conectado · descobrindo serviços")
         peripheral.discoverServices(nil)
     }
 
     func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
         state = .error
+        log("ERR", "falha de conexão: \(error?.localizedDescription ?? "?")")
     }
 
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
         state = .poweredOff
-        rxTxChar = nil
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-            self?.startScan()  // tenta reconectar
-        }
+        rxChar = nil; txChar = nil
+        log("BT", "desconectado: \(error?.localizedDescription ?? "OK")")
     }
 }
 
 extension BluetoothManager: CBPeripheralDelegate {
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
         guard let services = peripheral.services else { return }
-        for s in services { peripheral.discoverCharacteristics(nil, for: s) }
+        log("BT", "\(services.count) serviços encontrados")
+        for s in services {
+            log("BT", "service \(s.uuid)")
+            peripheral.discoverCharacteristics(nil, for: s)
+        }
     }
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
         guard let chars = service.characteristics else { return }
         for c in chars {
-            // Seleciona o primeiro que suporta notify + write
             let canNotify = c.properties.contains(.notify) || c.properties.contains(.indicate)
             let canWrite  = c.properties.contains(.write)  || c.properties.contains(.writeWithoutResponse)
+            let flags = "\(canNotify ? "N" : "-")\(canWrite ? "W" : "-")"
+            let desc = "\(c.uuid) [\(flags)]"
+            DispatchQueue.main.async { self.debugChars.append(desc) }
+            log("BT", "char \(desc)")
+        }
+        // Estratégia de seleção:
+        //   1. Se UUID está nos preferred — assume papel apropriado
+        //   2. Se não, usa heurística por properties
+        for c in chars {
+            let isPreferred = preferredCharUUIDs.contains(c.uuid)
+            let canNotify = c.properties.contains(.notify) || c.properties.contains(.indicate)
+            let canWrite  = c.properties.contains(.write)  || c.properties.contains(.writeWithoutResponse)
+            // Caso 1: characteristic faz AMBOS — ideal pra clones genéricos
             if canNotify && canWrite {
-                rxTxChar = c
+                rxChar = c; txChar = c
                 peripheral.setNotifyValue(true, for: c)
-                state = .ready
-                return
+                log("BT", "rx+tx: \(c.uuid)")
+                break
             }
+            // Caso 2: notify só — vai ser rx
+            if canNotify && rxChar == nil {
+                rxChar = c
+                peripheral.setNotifyValue(true, for: c)
+                log("BT", "rx: \(c.uuid)")
+            }
+            // Caso 3: write só — vai ser tx
+            if canWrite && txChar == nil {
+                txChar = c
+                log("BT", "tx: \(c.uuid)")
+            }
+            _ = isPreferred  // (poderia priorizar — não complica pro MVP)
+        }
+        if rxChar != nil && txChar != nil && state != .ready {
+            state = .ready
+            log("BT", "pronto · rx + tx mapeados")
         }
     }
 
@@ -186,9 +218,9 @@ extension BluetoothManager: CBPeripheralDelegate {
         guard let data = characteristic.value, let str = String(data: data, encoding: .ascii) else { return }
         rxBuffer += str
         if str.contains(">") {
-            // Prompt — fim da resposta
             let payload = rxBuffer.trimmingCharacters(in: .whitespacesAndNewlines)
             lastResponse = payload
+            log("←", payload)
             if let cb = pendingCallback {
                 pendingCallback = nil
                 cb(payload)
