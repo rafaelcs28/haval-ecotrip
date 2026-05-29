@@ -34,10 +34,10 @@ final class ELM327: ObservableObject {
             ("ATL0", 1.0),   // line feed off
             ("ATH0", 1.0),   // headers off
             ("ATS0", 1.0),   // spaces off
-            ("ATSP6", 1.5),  // CAN ISO 15765-4 11-bit 500kbps — Haval H6 PHEV
-            ("ATAT1", 1.0),  // adaptive timing
-            ("ATST32", 1.0), // ST = 50ms (timeout entre resposta e prompt)
-            ("0100",  6.0),  // primeira query — força negociação do protocolo agora
+            ("ATSP0", 1.5),  // AUTO — deixa o ELM descobrir o protocolo certo
+            ("ATAT2", 1.0),  // adaptive timing 2 (mais conservador, espera mais)
+            ("ATST64", 1.0), // ST = 100ms (timeout mais folgado entre resposta e prompt)
+            ("0100", 10.0),  // primeira query — auto-detect demora até 8s
         ]
         for (cmd, to) in initCommands {
             let resp = await send(cmd, timeout: to)
@@ -120,7 +120,10 @@ final class ELM327: ObservableObject {
         return s
     }
 
-    /// Loop de polling — alterna PIDs por priority. Fast a 5Hz, normal 1Hz, slow ~0.16Hz.
+    /// Loop de polling — espaça mais que antes pra evitar "STOPPED".
+    /// ELM327 BLE não acompanha 5Hz com Haval — fica STOPPED em cascata.
+    /// Agora 2 Hz: tick a cada 500ms. Cada tick faz 1 PID fast + round-robin
+    /// dos normal/slow.
     func startPolling() {
         pollTask?.cancel()
         pollTask = Task { [weak self] in
@@ -128,28 +131,28 @@ final class ELM327: ObservableObject {
             let fastPids   = PIDRegistry.all.filter { $0.priority == .fast }
             let normalPids = PIDRegistry.all.filter { $0.priority == .normal }
             let slowPids   = PIDRegistry.all.filter { $0.priority == .slow }
-            var tickFast = 0, tickNormal = 0, tickSlow = 0
+            var tickAll = 0, tickFast = 0, tickNormal = 0, tickSlow = 0
             while !Task.isCancelled {
-                // Cada tick de ~200ms (5Hz):
-                //   • TODOS os fast PIDs
-                //   • Round-robin 1 normal PID por tick (cobre lista em len(normal) ticks)
-                //   • Round-robin 1 slow PID a cada 30 ticks (6s)
-                for pid in fastPids {
-                    if Task.isCancelled { return }
+                // 1 fast PID por tick (round-robin) — cobre fastPids.count em N ticks
+                if !fastPids.isEmpty {
+                    let pid = fastPids[tickFast % fastPids.count]
                     await self.poll(pid)
+                    tickFast &+= 1
                 }
-                if !normalPids.isEmpty {
-                    let i = tickFast % normalPids.count
-                    await self.poll(normalPids[i])
+                // 1 normal PID a cada 2 ticks
+                if !normalPids.isEmpty && tickAll % 2 == 0 {
+                    let pid = normalPids[tickNormal % normalPids.count]
+                    await self.poll(pid)
                     tickNormal &+= 1
                 }
-                if !slowPids.isEmpty && tickFast % 30 == 0 {
-                    let i = tickSlow % slowPids.count
-                    await self.poll(slowPids[i])
+                // 1 slow PID a cada 12 ticks (6s)
+                if !slowPids.isEmpty && tickAll % 12 == 0 {
+                    let pid = slowPids[tickSlow % slowPids.count]
+                    await self.poll(pid)
                     tickSlow &+= 1
                 }
-                tickFast &+= 1
-                try? await Task.sleep(nanoseconds: 200_000_000)
+                tickAll &+= 1
+                try? await Task.sleep(nanoseconds: 500_000_000)
             }
         }
     }
