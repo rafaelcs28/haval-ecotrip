@@ -180,39 +180,36 @@ final class ELM327: ObservableObject {
         return s
     }
 
-    /// Loop de polling — espaça mais que antes pra evitar "STOPPED".
-    /// ELM327 BLE não acompanha 5Hz com Haval — fica STOPPED em cascata.
-    /// Agora 2 Hz: tick a cada 500ms. Cada tick faz 1 PID fast + round-robin
-    /// dos normal/slow.
+    /// Loop de polling — agrupa PIDs por ECU pra evitar re-setup de header.
+    /// Cada switch de ECU faz 5 comandos AT (ATSH/ATCRA/ATFCSH/ATFCSD/ATFCSM)
+    /// = ~500ms overhead. Sem agrupamento, polling round-robin gastava 80%
+    /// do tempo em setup.
+    ///
+    /// Estratégia nova:
+    ///   • Itera ECUs em ordem (Mode 01 broadcast + 5 ECUs custom)
+    ///   • Pra cada ECU, pollar TODOS os PIDs daquela ECU em sequência
+    ///   • Próxima iteração reseta o índice
     func startPolling() {
         pollTask?.cancel()
         pollTask = Task { [weak self] in
             guard let self else { return }
-            let fastPids   = PIDRegistry.all.filter { $0.priority == .fast }
-            let normalPids = PIDRegistry.all.filter { $0.priority == .normal }
-            let slowPids   = PIDRegistry.all.filter { $0.priority == .slow }
-            var tickAll = 0, tickFast = 0, tickNormal = 0, tickSlow = 0
+            // Agrupa PIDs por header (nil = Mode 01 broadcast)
+            let groups = Dictionary(grouping: PIDRegistry.all, by: { $0.header ?? "_universal" })
+            // Ordem: Mode 01 primeiro (mais usados), depois customs
+            let groupOrder = ["_universal", "787", "763", "76C", "782", "78B"]
             while !Task.isCancelled {
-                // 1 fast PID por tick (round-robin) — cobre fastPids.count em N ticks
-                if !fastPids.isEmpty {
-                    let pid = fastPids[tickFast % fastPids.count]
-                    await self.poll(pid)
-                    tickFast &+= 1
+                for headerKey in groupOrder {
+                    guard let pids = groups[headerKey], !pids.isEmpty else { continue }
+                    if Task.isCancelled { return }
+                    for pid in pids {
+                        if Task.isCancelled { return }
+                        await self.poll(pid)
+                        // Pausa curta entre PIDs da MESMA ECU (sem re-setup)
+                        try? await Task.sleep(nanoseconds: 150_000_000)
+                    }
                 }
-                // 1 normal PID a cada 2 ticks
-                if !normalPids.isEmpty && tickAll % 2 == 0 {
-                    let pid = normalPids[tickNormal % normalPids.count]
-                    await self.poll(pid)
-                    tickNormal &+= 1
-                }
-                // 1 slow PID a cada 12 ticks (6s)
-                if !slowPids.isEmpty && tickAll % 12 == 0 {
-                    let pid = slowPids[tickSlow % slowPids.count]
-                    await self.poll(pid)
-                    tickSlow &+= 1
-                }
-                tickAll &+= 1
-                try? await Task.sleep(nanoseconds: 500_000_000)
+                // Pausa entre ciclos completos
+                try? await Task.sleep(nanoseconds: 300_000_000)
             }
         }
     }
