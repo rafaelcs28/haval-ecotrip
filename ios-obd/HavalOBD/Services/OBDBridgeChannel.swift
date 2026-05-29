@@ -50,6 +50,30 @@ final class OBDBridgeChannel: ObservableObject {
         webViewReady = false
     }
 
+    /// Mapeia PIDs do OBD pros nomes que o cluster.html consome.
+    /// Sem isso, dados chegam no JS mas com chaves erradas — gauges ficam vazios.
+    private func translateForCluster(_ raw: [String: Any]) -> [String: Any] {
+        var out: [String: Any] = [:]
+        for (k, v) in raw {
+            out[k] = v
+            // Aliases — mesmo dado com chaves diferentes pro cluster pegar
+            switch k {
+            case "rpm":
+                out["engine_rpm"] = v
+            case "fuel_level_pct":
+                // Cluster usa fuel_l (litros). Tank Haval = 55L.
+                if let pct = v as? Double { out["fuel_l"] = pct / 100.0 * 55.0 }
+            case "control_voltage":
+                out["batt_12v_v"] = v
+            case "ect_c":
+                out["engine_temp_c"] = v
+            default:
+                break
+            }
+        }
+        return out
+    }
+
     private func pushFast() {
         guard webViewReady, let webView = webView, let elm = elm, !elm.samples.isEmpty else { return }
         let fastIds: Set<String> = ["rpm", "speed_kmh", "motor_power_kw", "engine_rpm",
@@ -61,7 +85,7 @@ final class OBDBridgeChannel: ObservableObject {
             }
         }
         guard dict.count > 1 else { return }
-        injectSnapshot(dict, on: webView)
+        injectSnapshot(translateForCluster(dict), on: webView)
     }
 
     private func pushFull() {
@@ -75,7 +99,7 @@ final class OBDBridgeChannel: ObservableObject {
         for (key, sample) in elm.samples {
             if let v = sample.value { dict[key] = v }
         }
-        injectSnapshot(dict, on: webView)
+        injectSnapshot(translateForCluster(dict), on: webView)
     }
 
     private func injectSnapshot(_ dict: [String: Any], on webView: WKWebView) {
