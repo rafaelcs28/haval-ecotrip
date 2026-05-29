@@ -118,8 +118,8 @@
   /* Cards flutuantes (SOC + Fuel) por cima do mapa */
   .floating-cards {
     position: absolute; inset: 0; z-index: 4;
-    display: flex; justify-content: space-between; align-items: stretch;
-    padding: 14px 18px; gap: 14px;
+    display: flex; justify-content: space-around; align-items: stretch;
+    padding: 14px 18px; gap: 18px;
     pointer-events: none;  /* o mapa abaixo recebe touch, exceto nos cards */
   }
   .float-card {
@@ -132,8 +132,9 @@
     padding: 14px 18px;
     box-shadow: 0 8px 32px rgba(0,0,0,.6), inset 0 1px 0 rgba(255,255,255,.05);
     display: flex; flex-direction: column;
-    flex: 1;
-    min-width: 0;
+    flex: 0 1 auto;
+    width: 360px;
+    max-width: 40vw;
     transition: transform .25s ease-out;
   }
   .float-card .head {
@@ -209,10 +210,12 @@
     flex: 1;
     display: grid;
     grid-template-columns: 1.25fr 1fr 1fr;
+    grid-template-rows: 1fr;
     gap: 10px;
     padding: 10px;
   }
-  /* Reordena widgets via grid-column: Fluxo→1, Trip→2, Power→3 */
+  /* Reordena widgets via grid-column (todos em row 1) */
+  .row-bot .widget { grid-row: 1; }
   .row-bot .widget:nth-child(1) { grid-column: 3; }   /* Power vai pra direita */
   .row-bot .widget:nth-child(2) { grid-column: 2; }   /* Trip continua no meio */
   .row-bot .widget:nth-child(3) { grid-column: 1; }   /* Fluxo vai pra esquerda */
