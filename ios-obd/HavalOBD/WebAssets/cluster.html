@@ -1,0 +1,991 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover,user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Haval Cluster">
+<meta name="theme-color" content="#000000">
+<title>Haval Ecotrip Cluster</title>
+<link rel="manifest" href="/cluster-manifest.json">
+<link rel="apple-touch-icon" href="/icon-512.png">
+<link rel="stylesheet" href="/leaflet.css">
+<script src="/leaflet.js" defer></script>
+<!-- Apple MapKit JS — carrega assíncrono; se falhar (sem internet ou token inválido), cai pro Leaflet -->
+<script src="https://cdn.apple-mapkit.com/mk/5.x.x/mapkit.js" crossorigin async
+        data-libraries="map,annotations,services"
+        data-callback="onMapKitLoad"
+        data-initial-token=""></script>
+<style>
+  :root {
+    --bg: #000000; --panel: #0d0d0f; --panel-lift: #16161a;
+    --border: #1f1f24; --border-hi: #2c2c33;
+    --green: #22c55e; --green-dim: #15803d;
+    --orange: #fb923c; --orange-dim: #c2410c;
+    --blue: #38bdf8; --blue-dim: #0369a1;
+    --teal: #22d3ee; --yellow: #facc15;
+    --red: #ef4444;
+    --text: #f5f5f5; --muted: #6b7280; --dim: #3f3f46;
+    --glass-bg: rgba(13,13,15,.55);
+    --glass-border: rgba(255,255,255,.08);
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    width: 100vw; height: 100vh; overflow: hidden;
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, sans-serif;
+    font-feature-settings: "tnum" 1, "lnum" 1;
+    -webkit-font-smoothing: antialiased;
+    -webkit-user-select: none; user-select: none;
+    -webkit-touch-callout: none;
+    touch-action: pan-x;
+  }
+  body { display: flex; flex-direction: column; }
+
+  /* ───────── Top bar ───────── */
+  .topbar {
+    display: flex; align-items: center; justify-content: space-between;
+    height: 32px; padding: 0 20px;
+    font-size: 12px; color: var(--muted);
+    background: rgba(0,0,0,.6);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0; z-index: 10;
+    position: relative;
+  }
+  .topbar .left, .topbar .right { display: flex; gap: 12px; align-items: center; }
+  .topbar .clock { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--text); font-size: 13px; }
+  .topbar .dot {
+    width: 8px; height: 8px; border-radius: 50%; background: var(--red);
+    box-shadow: 0 0 8px rgba(239,68,68,.6);
+    transition: background .3s, box-shadow .3s;
+  }
+  .topbar .dot.ok { background: var(--green); box-shadow: 0 0 8px rgba(34,197,94,.6); }
+  .topbar .dot.warn { background: var(--yellow); box-shadow: 0 0 8px rgba(250,204,21,.6); }
+  .topbar .lbl { letter-spacing: .12em; text-transform: uppercase; font-size: 10px; }
+
+  /* ───────── Layout principal (2 linhas) ───────── */
+  .stage {
+    flex: 1; display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+  /* Linha superior: mapa full + cards flutuando */
+  .row-top {
+    flex: 1.05;
+    position: relative;
+    overflow: hidden;
+    background: #000;
+  }
+  /* Vinheta sutil pras bordas do mapa ficarem mais escuras (legibilidade dos cards) */
+  .row-top::after {
+    content: ''; position: absolute; inset: 0; pointer-events: none;
+    background: radial-gradient(ellipse at center, transparent 35%, rgba(0,0,0,.55) 100%);
+    z-index: 2;
+  }
+  #cluster-map { position: absolute; inset: 0; z-index: 1; }
+  .leaflet-container { background: #000 !important; }
+  .leaflet-control-attribution { display: none !important; }
+  .leaflet-control-zoom { display: none !important; }
+  /* Tiles ficam levemente atenuados, ruas brancas saltam */
+  .leaflet-tile-pane { filter: brightness(.85) contrast(1.15); }
+
+  /* Botão Navegar (canto sup. direito do mapa) */
+  .nav-btn {
+    position: absolute; top: 14px; right: 14px; z-index: 5;
+    background: linear-gradient(135deg, #38bdf8, #0ea5e9);
+    color: #fff; border: none; border-radius: 999px;
+    padding: 9px 18px; font-size: 13px; font-weight: 700;
+    display: flex; align-items: center; gap: 6px;
+    cursor: pointer;
+    box-shadow: 0 6px 20px rgba(14,165,233,.45);
+    -webkit-tap-highlight-color: transparent;
+    transition: transform .12s ease-out;
+  }
+  .nav-btn:active { transform: scale(.94); }
+  .nav-btn .ico { font-size: 15px; }
+
+  /* Cards flutuantes (SOC + Fuel) por cima do mapa */
+  .floating-cards {
+    position: absolute; inset: 0; z-index: 4;
+    display: flex; justify-content: space-between; align-items: stretch;
+    padding: 22px; gap: 22px;
+    pointer-events: none;  /* o mapa abaixo recebe touch, exceto nos cards */
+  }
+  .float-card {
+    pointer-events: auto;
+    background: var(--glass-bg);
+    backdrop-filter: blur(24px) saturate(1.6);
+    -webkit-backdrop-filter: blur(24px) saturate(1.6);
+    border: 1px solid var(--glass-border);
+    border-radius: 24px;
+    padding: 18px 22px;
+    box-shadow: 0 8px 32px rgba(0,0,0,.6), inset 0 1px 0 rgba(255,255,255,.05);
+    display: flex; flex-direction: column;
+    width: 240px;
+    transition: transform .25s ease-out;
+  }
+  .float-card .head {
+    font-size: 10px; letter-spacing: .14em; color: var(--muted);
+    text-transform: uppercase; display: flex; align-items: center; gap: 6px;
+    margin-bottom: 6px;
+  }
+  .float-card .head .ico { font-size: 13px; }
+  .float-card .gauge-wrap {
+    flex: 1; position: relative;
+    display: flex; align-items: center; justify-content: center;
+    min-height: 0;
+  }
+  .float-card svg { width: 100%; max-width: 200px; max-height: 200px; }
+  .gauge-track { fill: none; stroke: rgba(255,255,255,.08); stroke-width: 14; }
+  .gauge-fill  { fill: none; stroke-width: 14; stroke-linecap: round; transition: stroke-dashoffset .6s ease-out; filter: drop-shadow(0 0 8px currentColor); }
+  .gauge-fill.soc  { stroke: var(--green); color: var(--green); }
+  .gauge-fill.fuel { stroke: var(--orange); color: var(--orange); }
+  .gauge-center {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center;
+  }
+  .gauge-big {
+    font-size: 52px; font-weight: 200; line-height: 1;
+    font-variant-numeric: tabular-nums;
+    text-shadow: 0 2px 12px rgba(0,0,0,.6);
+  }
+  .gauge-big .pct { font-size: 22px; color: var(--muted); margin-left: 2px; }
+  .gauge-sub {
+    margin-top: 6px; font-size: 11px; color: rgba(245,245,245,.7);
+    font-weight: 500; letter-spacing: .03em;
+    text-shadow: 0 1px 6px rgba(0,0,0,.7);
+  }
+  .gauge-sub strong { color: var(--text); font-weight: 600; }
+
+  /* Linha inferior: 3 widgets clássicos */
+  .row-bot {
+    flex: 1;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+    padding: 10px;
+  }
+  .widget {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    padding: 18px;
+    display: flex; flex-direction: column;
+    overflow: hidden;
+    position: relative;
+  }
+  .widget h3 {
+    font-size: 11px; font-weight: 700; letter-spacing: .14em;
+    color: var(--muted); text-transform: uppercase;
+    margin-bottom: 12px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .widget h3 .ico { font-size: 14px; }
+
+  /* ───────── Power Gauge ───────── */
+  .power-display {
+    flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center;
+  }
+  .power-value {
+    font-size: 72px; font-weight: 200; line-height: 1;
+    font-variant-numeric: tabular-nums;
+    transition: color .25s;
+  }
+  .power-value.regen  { color: var(--green); }
+  .power-value.drive  { color: var(--orange); }
+  .power-value.idle   { color: var(--muted); }
+  .power-unit { font-size: 22px; color: var(--muted); margin-left: 4px; }
+  .power-bar {
+    width: 90%; height: 16px; margin-top: 18px;
+    background: var(--border); border-radius: 999px;
+    position: relative; overflow: hidden;
+  }
+  .power-bar-mid {
+    position: absolute; top: 0; bottom: 0; left: 50%; width: 2px;
+    background: var(--border-hi);
+  }
+  .power-bar-fill {
+    position: absolute; top: 0; bottom: 0; left: 50%;
+    width: 0; transition: width .25s ease-out, background .25s;
+  }
+  .power-bar-fill.drive { background: linear-gradient(90deg, transparent, var(--orange)); }
+  .power-bar-fill.regen { background: linear-gradient(270deg, transparent, var(--green)); transform: translateX(-100%); }
+  .power-scale {
+    width: 90%; margin-top: 6px; display: flex; justify-content: space-between;
+    font-size: 10px; color: var(--dim); letter-spacing: .06em;
+  }
+  .power-speed {
+    margin-top: 14px; font-size: 14px; color: var(--muted);
+  }
+  .power-speed strong { color: var(--text); font-size: 28px; font-weight: 300; font-variant-numeric: tabular-nums; margin: 0 4px; }
+
+  /* ───────── Trip em curso ───────── */
+  .trip-metrics {
+    flex: 1; display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: repeat(4, 1fr);
+    gap: 8px 14px; align-content: center;
+  }
+  .trip-cell { display: flex; flex-direction: column; justify-content: center; }
+  .trip-val {
+    font-size: 24px; font-weight: 300; line-height: 1;
+    font-variant-numeric: tabular-nums;
+  }
+  .trip-val .u {
+    font-size: 12px; color: var(--muted); font-weight: 500; margin-left: 4px;
+  }
+  .trip-val .sub {
+    font-size: 10px; color: var(--muted); font-weight: 500; margin-left: 6px;
+    font-variant-numeric: tabular-nums;
+  }
+  .trip-lbl {
+    margin-top: 3px; font-size: 9px; letter-spacing: .14em;
+    color: var(--muted); text-transform: uppercase;
+  }
+  .trip-val.green { color: var(--green); }
+  .trip-val.teal  { color: var(--teal); }
+  .trip-val.orange { color: var(--orange); }
+  .trip-val.yellow { color: var(--yellow); }
+
+  /* ───────── Fluxo de energia (v2 — SVG diagrama) ───────── */
+  .flow-stage {
+    flex: 1; position: relative;
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .flow-svg { flex: 1; width: 100%; height: 100%; min-height: 0; }
+  /* Linhas / setas */
+  .flow-line {
+    stroke: var(--border-hi); stroke-width: 3; fill: none;
+    transition: stroke .3s, stroke-width .3s;
+  }
+  .flow-line.active   { stroke: var(--green); stroke-width: 4; }
+  .flow-line.ice      { stroke: var(--orange); }
+  .flow-line.regen    { stroke: var(--green); }
+  .flow-line.charge   { stroke: var(--blue); }
+  /* Tracejado animado (dash) — só ativo quando há fluxo */
+  .flow-line.flowing { stroke-dasharray: 6 6; animation: dash-flow 1s linear infinite; }
+  .flow-line.flowing.reverse { animation-direction: reverse; }
+  @keyframes dash-flow { to { stroke-dashoffset: -24; } }
+  /* Nós */
+  .flow-node-bg {
+    fill: var(--panel-lift); stroke: var(--border-hi); stroke-width: 2;
+    transition: stroke .3s, fill .3s;
+  }
+  .flow-node-bg.active { stroke: var(--green); fill: rgba(34,197,94,.1); }
+  .flow-node-bg.ice    { stroke: var(--orange); fill: rgba(251,146,60,.1); }
+  .flow-node-bg.charge { stroke: var(--blue); fill: rgba(56,189,248,.1); }
+  .flow-emoji {
+    font-size: 22px; text-anchor: middle; dominant-baseline: middle;
+    pointer-events: none;
+  }
+  .flow-label {
+    font-size: 9px; fill: var(--muted); text-anchor: middle;
+    letter-spacing: .1em; text-transform: uppercase;
+  }
+  .flow-value {
+    font-size: 10px; fill: var(--text); text-anchor: middle; font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  .flow-value.ice { fill: var(--orange); }
+  .flow-value.green { fill: var(--green); }
+  /* Badge do modo atual no centro */
+  .flow-mode {
+    position: absolute; left: 50%; bottom: 8px;
+    transform: translateX(-50%);
+    background: var(--panel-lift); border: 1px solid var(--border-hi);
+    color: var(--text); font-size: 10px; font-weight: 700;
+    letter-spacing: .18em; text-transform: uppercase;
+    padding: 5px 14px; border-radius: 999px;
+    pointer-events: none;
+    transition: color .3s, border-color .3s, background .3s;
+  }
+  .flow-mode.ev      { color: var(--green);  border-color: var(--green);  background: rgba(34,197,94,.12); }
+  .flow-mode.regen   { color: var(--green);  border-color: var(--green);  background: rgba(34,197,94,.18); }
+  .flow-mode.serie   { color: var(--orange); border-color: var(--orange); background: rgba(251,146,60,.12); }
+  .flow-mode.paralelo{ color: var(--orange); border-color: var(--orange); background: rgba(251,146,60,.12); }
+  .flow-mode.split   { color: var(--yellow); border-color: var(--yellow); background: rgba(250,204,21,.12); }
+  .flow-mode.carga   { color: var(--blue);   border-color: var(--blue);   background: rgba(56,189,248,.12); }
+  .flow-mode.idle    { color: var(--muted);  border-color: var(--border); }
+
+  /* ───────── Stale dim ───────── */
+  body.stale .float-card, body.stale .widget { filter: brightness(.6) saturate(.5); }
+  body.stale .topbar .dot { background: var(--red); }
+
+  /* ───────── Menu de navegação ───────── */
+  .nav-overlay {
+    position: absolute; inset: 0; z-index: 100;
+    background: rgba(0,0,0,.75); backdrop-filter: blur(8px);
+    display: none; align-items: center; justify-content: center; padding: 24px;
+  }
+  .nav-overlay.show { display: flex; }
+  .nav-card {
+    background: var(--panel); border: 1px solid var(--border-hi);
+    border-radius: 16px; padding: 20px; max-width: 90%; width: 360px;
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  .nav-card h4 { font-size: 14px; color: var(--muted); letter-spacing: .12em; text-transform: uppercase; margin-bottom: 6px; }
+  .nav-btn-row { display: flex; flex-direction: column; gap: 8px; }
+  .nav-card button {
+    background: var(--panel-lift); border: 1px solid var(--border);
+    color: var(--text); padding: 14px; border-radius: 12px; font-size: 14px;
+    cursor: pointer; text-align: left;
+    display: flex; align-items: center; gap: 10px;
+    transition: background .15s, border-color .15s;
+  }
+  .nav-card button:active { background: var(--border-hi); }
+  .nav-card button .em { font-size: 18px; }
+  .nav-card button.close { justify-content: center; color: var(--muted); border-style: dashed; }
+
+  #toast {
+    position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%);
+    background: var(--panel-lift); border: 1px solid var(--border-hi);
+    color: var(--text); padding: 12px 22px; border-radius: 999px;
+    font-size: 13px; opacity: 0; transition: opacity .3s;
+    pointer-events: none; z-index: 9999;
+  }
+  #toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="left">
+    <div class="clock" id="clock">--:--</div>
+    <div class="lbl" id="version">HEC v1.1</div>
+  </div>
+  <div class="right">
+    <div class="lbl">Bridge</div>
+    <div class="dot" id="conn-dot"></div>
+    <div class="lbl" id="conn-lbl">conectando…</div>
+    <div class="lbl" style="margin-left:14px">Carro</div>
+    <div class="dot" id="car-dot"></div>
+    <div class="lbl" id="car-lbl">—</div>
+  </div>
+</div>
+
+<div class="stage">
+
+  <!-- ═══════ LINHA SUPERIOR: mapa + cards flutuantes ═══════ -->
+  <div class="row-top">
+    <div id="cluster-map"></div>
+
+    <button class="nav-btn" onclick="openNavMenu()"><span class="ico">📍</span>Navegar</button>
+
+    <div class="floating-cards">
+      <!-- SOC -->
+      <div class="float-card">
+        <div class="head"><span class="ico">🔋</span>Bateria</div>
+        <div class="gauge-wrap">
+          <svg viewBox="0 0 200 200">
+            <circle class="gauge-track" cx="100" cy="100" r="80"/>
+            <circle class="gauge-fill soc" id="soc-arc" cx="100" cy="100" r="80"
+                    stroke-dasharray="502.65" stroke-dashoffset="502.65"
+                    transform="rotate(-90 100 100)"/>
+          </svg>
+          <div class="gauge-center">
+            <div class="gauge-big"><span id="soc-pct">—</span><span class="pct">%</span></div>
+            <div class="gauge-sub">
+              <strong id="soc-range">— km</strong> EV<br>
+              <span id="soc-kwh">— kWh</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Fuel -->
+      <div class="float-card">
+        <div class="head"><span class="ico">⛽</span>Combustível</div>
+        <div class="gauge-wrap">
+          <svg viewBox="0 0 200 200">
+            <circle class="gauge-track" cx="100" cy="100" r="80"/>
+            <circle class="gauge-fill fuel" id="fuel-arc" cx="100" cy="100" r="80"
+                    stroke-dasharray="502.65" stroke-dashoffset="502.65"
+                    transform="rotate(-90 100 100)"/>
+          </svg>
+          <div class="gauge-center">
+            <div class="gauge-big"><span id="fuel-l">—</span><span class="pct">L</span></div>
+            <div class="gauge-sub">
+              <strong id="fuel-range">— km</strong> ICE<br>
+              <span id="fuel-pct">— % tanque</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Menu navegação -->
+    <div class="nav-overlay" id="nav-overlay" onclick="if(event.target===this)closeNavMenu()">
+      <div class="nav-card">
+        <h4>📍 Abrir navegação em</h4>
+        <div class="nav-btn-row">
+          <button onclick="openExternalNav('waze')"><span class="em">🟦</span><b>Waze</b><span style="color:var(--muted);margin-left:auto;font-size:11px">tráfego ao vivo</span></button>
+          <button onclick="openExternalNav('gmaps')"><span class="em">🟥</span><b>Google Maps</b><span style="color:var(--muted);margin-left:auto;font-size:11px">rota completa</span></button>
+          <button onclick="openExternalNav('apple')"><span class="em">⬜️</span><b>Apple Maps</b><span style="color:var(--muted);margin-left:auto;font-size:11px">turn-by-turn nativo</span></button>
+          <button class="close" onclick="closeNavMenu()">Cancelar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════ LINHA INFERIOR: 3 widgets clássicos ═══════ -->
+  <div class="row-bot">
+
+    <!-- Power Gauge -->
+    <div class="widget">
+      <h3><span class="ico">⚡</span> Potência</h3>
+      <div class="power-display">
+        <div>
+          <span class="power-value idle" id="power-val">0</span><span class="power-unit">kW</span>
+        </div>
+        <div class="power-bar">
+          <div class="power-bar-mid"></div>
+          <div class="power-bar-fill drive" id="power-bar-drive"></div>
+          <div class="power-bar-fill regen" id="power-bar-regen"></div>
+        </div>
+        <div class="power-scale"><span>−50 regen</span><span>0</span><span>+120 boost</span></div>
+        <div class="power-speed">
+          <strong id="speed-val">—</strong>km/h ·
+          máx <strong id="speed-max">—</strong>
+        </div>
+      </div>
+    </div>
+
+    <!-- Trip -->
+    <div class="widget">
+      <h3><span class="ico">🚗</span> Viagem em curso</h3>
+      <div class="trip-metrics">
+        <div class="trip-cell">
+          <div class="trip-val teal"><span id="trip-dist">0,0</span><span class="u">km</span></div>
+          <div class="trip-lbl">Distância</div>
+        </div>
+        <div class="trip-cell">
+          <div class="trip-val"><span id="trip-time">0:00</span></div>
+          <div class="trip-lbl">Tempo</div>
+        </div>
+        <div class="trip-cell">
+          <div class="trip-val green"><span id="trip-kwh">0,0</span><span class="u">kWh</span></div>
+          <div class="trip-lbl">Energia (net)</div>
+        </div>
+        <div class="trip-cell">
+          <div class="trip-val orange"><span id="trip-fuel">0,0</span><span class="u">L</span></div>
+          <div class="trip-lbl">Combustível</div>
+        </div>
+        <div class="trip-cell">
+          <div class="trip-val yellow"><span id="trip-cost">R$ 0,00</span></div>
+          <div class="trip-lbl">Custo estimado</div>
+        </div>
+        <div class="trip-cell">
+          <div class="trip-val yellow"><span id="trip-cost-km">R$ 0,00</span><span class="u">/km</span></div>
+          <div class="trip-lbl">Custo por km</div>
+        </div>
+        <!-- Split EV / HEV -->
+        <div class="trip-cell">
+          <div class="trip-val green"><span id="trip-ev-pct">—</span><span class="u">%</span><span class="sub" id="trip-ev-km">— km</span></div>
+          <div class="trip-lbl">Elétrico</div>
+        </div>
+        <div class="trip-cell">
+          <div class="trip-val orange"><span id="trip-hev-pct">—</span><span class="u">%</span><span class="sub" id="trip-hev-km">— km</span></div>
+          <div class="trip-lbl">Híbrido</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Fluxo de energia (v2 — diagrama com modo) -->
+    <div class="widget">
+      <h3><span class="ico">🔄</span> Fluxo de energia</h3>
+      <div class="flow-stage">
+        <svg class="flow-svg" viewBox="0 0 360 200" preserveAspectRatio="xMidYMid meet">
+          <!-- Linhas de conexão (definidas antes dos nós pra ficarem atrás) -->
+          <!-- ICE → Battery (série: motor a comb. carrega bateria) -->
+          <path id="line-ice-batt"   class="flow-line" d="M 60 80 L 180 80"/>
+          <!-- Battery → Motor → Wheels (EV: bateria propulsiona) -->
+          <path id="line-batt-motor" class="flow-line" d="M 180 95 L 180 145"/>
+          <path id="line-motor-wheels" class="flow-line" d="M 195 160 L 285 160"/>
+          <!-- ICE → Wheels direto (paralelo: motor a comb. na roda) -->
+          <path id="line-ice-wheels" class="flow-line" d="M 60 95 Q 60 160 165 160"/>
+          <!-- Carga externa → Battery -->
+          <path id="line-charge" class="flow-line" d="M 295 50 L 195 75"/>
+
+          <!-- Nós -->
+          <!-- ICE -->
+          <circle class="flow-node-bg ice" id="node-ice"   cx="45" cy="80" r="22"/>
+          <text class="flow-emoji" x="45" y="82">⛽</text>
+          <text class="flow-label" x="45" y="115">ICE</text>
+          <text class="flow-value ice" id="val-ice" x="45" y="55">—</text>
+
+          <!-- Battery -->
+          <circle class="flow-node-bg" id="node-batt"     cx="180" cy="80" r="22"/>
+          <text class="flow-emoji" x="180" y="82">🔋</text>
+          <text class="flow-label" x="180" y="115">Bateria</text>
+          <text class="flow-value green" id="val-batt" x="180" y="55">—</text>
+
+          <!-- Wheels -->
+          <circle class="flow-node-bg" id="node-wheels"   cx="300" cy="160" r="22"/>
+          <text class="flow-emoji" x="300" y="162">🛞</text>
+          <text class="flow-label" x="300" y="195">Rodas</text>
+          <text class="flow-value" id="val-wheels" x="300" y="135">—</text>
+
+          <!-- Motor elétrico (intermediário) -->
+          <circle class="flow-node-bg" id="node-motor"    cx="180" cy="160" r="18"/>
+          <text class="flow-emoji" x="180" y="162" style="font-size:18px">⚙️</text>
+
+          <!-- Carga externa (mostra só quando charging) -->
+          <circle class="flow-node-bg charge" id="node-charge" cx="310" cy="40" r="14" opacity="0"/>
+          <text class="flow-emoji" id="emoji-charge" x="310" y="42" style="font-size:14px;opacity:0">🔌</text>
+        </svg>
+        <div class="flow-mode idle" id="flow-mode">parado</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+'use strict';
+
+const $ = id => document.getElementById(id);
+const fmt0 = n => Math.round(n).toLocaleString('pt-BR');
+const fmt1 = n => (Number.isFinite(+n) ? (+n).toLocaleString('pt-BR', {minimumFractionDigits:1, maximumFractionDigits:1}) : '—');
+const fmtBRL = n => 'R$ ' + (Number.isFinite(+n) ? (+n).toFixed(2).replace('.', ',') : '0,00');
+const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
+function toast(msg) {
+  const el = $('toast'); el.textContent = msg; el.classList.add('show');
+  clearTimeout(toast._t); toast._t = setTimeout(() => el.classList.remove('show'), 2200);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  Wake Lock + relógio
+// ═══════════════════════════════════════════════════════════════════════════
+let _wakeLock = null;
+async function requestWakeLock() {
+  try {
+    if ('wakeLock' in navigator) {
+      _wakeLock = await navigator.wakeLock.request('screen');
+      _wakeLock.addEventListener('release', () => {
+        if (document.visibilityState === 'visible') requestWakeLock();
+      });
+    }
+  } catch (e) { console.warn('wakeLock:', e); }
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && !_wakeLock) requestWakeLock();
+});
+function tickClock() {
+  const d = new Date();
+  $('clock').textContent = d.toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'});
+}
+tickClock(); setInterval(tickClock, 30_000);
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  State + WebSocket
+// ═══════════════════════════════════════════════════════════════════════════
+let state = {};
+let lastUpdateMs = 0;
+let _speedMax = 0;
+
+function bridgeUrl() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  return proto + '//' + location.host + '/ws';
+}
+let ws, wsRetry = 0;
+function connect() {
+  // Modo nativo (dentro do app HavalOBD WKWebView): pula WebSocket, dados vêm
+  // direto do ELM327 via Bluetooth injetados em applyNativeSnapshot().
+  if (USING_NATIVE_BRIDGE) {
+    setConn(true);
+    const lbl = document.getElementById('conn-lbl');
+    if (lbl) lbl.textContent = 'OBD direto';
+    return;
+  }
+  ws = new WebSocket(bridgeUrl());
+  ws.onopen = () => { wsRetry = 0; setConn(true); };
+  ws.onmessage = ev => {
+    try {
+      const msg = JSON.parse(ev.data);
+      if (msg.type === 'full_state') { state = msg.data || {}; lastUpdateMs = Date.now(); render(); }
+      else if (msg.type === 'update') { Object.assign(state, msg.data || {}); lastUpdateMs = Date.now(); render(); }
+    } catch (e) {}
+  };
+  ws.onclose = () => { setConn(false); wsRetry++; setTimeout(connect, Math.min(8000, 500 * wsRetry)); };
+  ws.onerror = () => { try { ws.close(); } catch(_) {} };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  Native bridge — quando rodando dentro do app HavalOBD (WKWebView):
+//    `window._nativeBridge.source === 'havalobd-ios'`. Dados chegam via
+//    `applyNativeSnapshot(payload)` injetado pelo Swift a 5Hz (fast) + 1Hz
+//    (full). Mesmos campos do `state` que o WebSocket popularia.
+// ═══════════════════════════════════════════════════════════════════════════
+const USING_NATIVE_BRIDGE = !!(window._nativeBridge && window._nativeBridge.source === 'havalobd-ios');
+window.applyNativeSnapshot = function(payload) {
+  if (!payload || typeof payload !== 'object') return;
+  for (const [k, v] of Object.entries(payload)) {
+    if (k === 'ts' || k === 'source' || k.startsWith('__')) continue;
+    state[k] = v;
+  }
+  lastUpdateMs = Date.now();
+  render();
+};
+if (USING_NATIVE_BRIDGE) console.log('[cluster] modo nativo — dados via OBDBridgeChannel');
+function setConn(ok) {
+  $('conn-dot').classList.toggle('ok', ok);
+  $('conn-lbl').textContent = ok ? 'online' : 'reconectando…';
+}
+
+// Stale watchdog
+setInterval(() => {
+  const age = Date.now() - lastUpdateMs;
+  document.body.classList.toggle('stale', lastUpdateMs > 0 && age > 30_000);
+  const carAge = Math.min(
+    Date.now() - (state.last_apk_ms || 0),
+    Date.now() - (state.last_gwm_ms || 0)
+  );
+  const carDot = $('car-dot');
+  carDot.classList.remove('ok', 'warn');
+  if (carAge < 60_000)       { carDot.classList.add('ok');   $('car-lbl').textContent = 'online'; }
+  else if (carAge < 300_000) { carDot.classList.add('warn'); $('car-lbl').textContent = Math.round(carAge/1000) + 's atrás'; }
+  else                       { $('car-lbl').textContent = 'offline'; }
+}, 3000);
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  Mapa — Apple MapKit JS (preferido) com fallback pra Leaflet Carto Dark
+//
+//  Estratégia: tenta MapKit JS primeiro. Se em 5s não inicializar (sem
+//  internet, token expirado, SDK Apple offline), cai pro Leaflet.
+// ═══════════════════════════════════════════════════════════════════════════
+let _mapEngine = null;     // 'mapkit' | 'leaflet'
+let _mkMap = null, _mkAnnotation = null;
+let _lfMap = null, _lfMarker = null;
+let _mapCenteredOnce = false;
+const DEFAULT_CENTER = { lat: -16.6869, lng: -49.2648 };
+
+// ── MapKit JS init via data-callback ───────────────────────────────────────
+window.onMapKitLoad = async function() {
+  try {
+    mapkit.init({
+      authorizationCallback: async (done) => {
+        try {
+          const r = await fetch('/api/mapkit/token');
+          const j = await r.json();
+          if (!j.token) throw new Error('no token');
+          done(j.token);
+        } catch (e) {
+          console.warn('[mapkit] token fetch falhou, fallback Leaflet:', e);
+          initLeaflet();
+        }
+      },
+      language: 'pt-BR',
+    });
+    _mkMap = new mapkit.Map('cluster-map', {
+      center: new mapkit.Coordinate(DEFAULT_CENTER.lat, DEFAULT_CENTER.lng),
+      colorScheme: mapkit.Map.ColorSchemes.Dark,
+      mapType: mapkit.Map.MapTypes.Standard,
+      isZoomEnabled: false, isScrollEnabled: false, isRotationEnabled: false,
+      showsZoomControl: false, showsCompass: mapkit.FeatureVisibility.Hidden,
+      showsScale: mapkit.FeatureVisibility.Hidden,
+      showsMapTypeControl: false, showsUserLocationControl: false,
+      _showsZoomControl: false,
+    });
+    _mkMap.region = new mapkit.CoordinateRegion(
+      new mapkit.Coordinate(DEFAULT_CENTER.lat, DEFAULT_CENTER.lng),
+      new mapkit.CoordinateSpan(0.04, 0.04)
+    );
+    _mapEngine = 'mapkit';
+    console.log('[mapkit] inicializado · dark scheme');
+    updateMap();
+  } catch (e) {
+    console.warn('[mapkit] init falhou:', e);
+    initLeaflet();
+  }
+};
+
+// Fallback: se MapKit não carregar em 6s, sobe o Leaflet
+setTimeout(() => { if (!_mapEngine) initLeaflet(); }, 6000);
+
+function initLeaflet() {
+  if (_mapEngine === 'leaflet' || !window.L) return;
+  if (window.L && !_lfMap) {
+    _lfMap = L.map('cluster-map', {
+      zoomControl: false, attributionControl: false,
+      dragging: false, touchZoom: false, scrollWheelZoom: false,
+      doubleClickZoom: false, boxZoom: false, keyboard: false, tap: false,
+    }).setView([DEFAULT_CENTER.lat, DEFAULT_CENTER.lng], 13);
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+      maxZoom: 19, subdomains: 'abcd',
+    }).addTo(_lfMap);
+    _mapEngine = 'leaflet';
+    console.log('[map] fallback Leaflet ativo');
+    updateMap();
+  }
+}
+
+function updateMap() {
+  const lat = +state.gps_lat, lng = +state.gps_lng;
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat === 0) return;
+
+  if (_mapEngine === 'mapkit' && _mkMap) {
+    const coord = new mapkit.Coordinate(lat, lng);
+    if (!_mkAnnotation) {
+      _mkAnnotation = new mapkit.Annotation(coord, () => {
+        const el = document.createElement('div');
+        el.style.cssText = 'width:28px;height:28px;background:radial-gradient(circle,#22c55e,#15803d);border:3px solid #000;border-radius:50%;box-shadow:0 0 20px rgba(34,197,94,.7),0 0 4px #000';
+        return el;
+      }, { anchorOffset: new DOMPoint(0, 0) });
+      _mkMap.addAnnotation(_mkAnnotation);
+    } else {
+      _mkAnnotation.coordinate = coord;
+    }
+    // Re-center
+    _mkMap.setCenterAnimated(coord, _mapCenteredOnce);
+    if (!_mapCenteredOnce) {
+      _mkMap.region = new mapkit.CoordinateRegion(coord, new mapkit.CoordinateSpan(0.02, 0.02));
+    }
+    _mapCenteredOnce = true;
+  } else if (_mapEngine === 'leaflet' && _lfMap) {
+    const ll = [lat, lng];
+    if (!_lfMarker) {
+      const icon = L.divIcon({
+        className: 'car-icon',
+        html: '<div style="width:28px;height:28px;background:radial-gradient(circle,#22c55e,#15803d);border:3px solid #000;border-radius:50%;box-shadow:0 0 20px rgba(34,197,94,.7),0 0 4px #000"></div>',
+        iconSize: [28,28], iconAnchor: [14,14],
+      });
+      _lfMarker = L.marker(ll, { icon }).addTo(_lfMap);
+    } else {
+      _lfMarker.setLatLng(ll);
+    }
+    _lfMap.setView(ll, Math.max(_lfMap.getZoom(), 15), { animate: _mapCenteredOnce, duration: 1 });
+    _mapCenteredOnce = true;
+  }
+}
+setInterval(updateMap, 3000);
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  Menu de navegação externa
+// ═══════════════════════════════════════════════════════════════════════════
+window.openNavMenu  = () => $('nav-overlay').classList.add('show');
+window.closeNavMenu = () => $('nav-overlay').classList.remove('show');
+window.openExternalNav = (app) => {
+  closeNavMenu();
+  const fb = {
+    waze:  { scheme: 'waze://?navigate=yes', web: 'https://waze.com/ul' },
+    gmaps: { scheme: 'comgooglemaps://?center=&zoom=14&views=traffic', web: 'https://maps.google.com' },
+    apple: { scheme: 'maps://', web: 'https://maps.apple.com' },
+  };
+  const t = fb[app]; if (!t) return;
+  const startedAt = Date.now();
+  const handler = () => {
+    if (Date.now() - startedAt < 1500 && document.visibilityState === 'visible') {
+      window.location.href = t.web;
+    }
+    window.removeEventListener('blur', handler);
+  };
+  window.addEventListener('blur', handler, { once: true });
+  setTimeout(handler, 1300);
+  window.location.href = t.scheme;
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  Constantes Haval H6 PHEV34
+// ═══════════════════════════════════════════════════════════════════════════
+const PACK_KWH      = 34;
+const TANK_L        = 55;
+const KM_PER_L_HEV  = 8;
+const KM_PER_KWH_EV = 5.3;
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  Render
+// ═══════════════════════════════════════════════════════════════════════════
+function render() {
+  const socCirc = 502.65;
+
+  // SOC
+  const socPct = +state.soc_pct || 0;
+  $('soc-pct').textContent = Math.round(socPct);
+  $('soc-pct-mini').textContent = Math.round(socPct);
+  $('soc-arc').setAttribute('stroke-dashoffset', socCirc * (1 - socPct/100));
+  const kwhLeft = (socPct / 100) * PACK_KWH;
+  $('soc-kwh').textContent = fmt1(kwhLeft) + ' kWh';
+  $('soc-range').textContent = fmt0(kwhLeft * KM_PER_KWH_EV) + ' km';
+
+  // Fuel
+  const fuelL = +state.fuel_l || 0;
+  $('fuel-l').textContent = fmt1(fuelL);
+  const fuelPct = clamp((fuelL / TANK_L) * 100, 0, 100);
+  $('fuel-arc').setAttribute('stroke-dashoffset', socCirc * (1 - fuelPct/100));
+  $('fuel-pct').textContent = Math.round(fuelPct) + ' % tanque';
+  $('fuel-range').textContent = fmt0(fuelL * KM_PER_L_HEV) + ' km';
+
+  // Power
+  const motorKw    = +state.motor_power_kw || 0;
+  const chargeKw   = +state.charge_power_kw || 0;
+  const isCharging = state.charging_state === 1;
+  const displayKw  = isCharging ? -chargeKw : motorKw;
+  const pVal = $('power-val');
+  pVal.textContent = Math.round(displayKw);
+  pVal.classList.remove('regen','drive','idle');
+  if (displayKw <= -1)     pVal.classList.add('regen');
+  else if (displayKw >= 1) pVal.classList.add('drive');
+  else                     pVal.classList.add('idle');
+  const bDrive = $('power-bar-drive'), bRegen = $('power-bar-regen');
+  bDrive.style.width = '0'; bRegen.style.width = '0';
+  if (displayKw > 0)      bDrive.style.width = clamp((displayKw / 120) * 50, 0, 50) + '%';
+  else if (displayKw < 0) bRegen.style.width = clamp((-displayKw / 50) * 50, 0, 50) + '%';
+
+  // Speed
+  const spd = +state.speed_kmh || 0;
+  $('speed-val').textContent = fmt0(spd);
+  if (spd > _speedMax) _speedMax = spd;
+  $('speed-max').textContent = fmt0(_speedMax);
+
+  // Trip
+  const tr = state.current_trip || state.rolling || {};
+  const distKm = +tr.distKm || +tr.dist_km || 0;
+  $('trip-dist').textContent = fmt1(distKm);
+  const tSec = +tr.timeSec || +tr.time_sec || 0;
+  const h = Math.floor(tSec/3600), m = Math.floor((tSec%3600)/60);
+  $('trip-time').textContent = h > 0 ? `${h}:${String(m).padStart(2,'0')}` : `${m} min`;
+  $('trip-kwh').textContent = fmt1(+tr.netKwh || +tr.net_kwh || 0);
+  $('trip-fuel').textContent = fmt1(+tr.fuelL || +tr.fuel_l || 0);
+  const pKwh = +state.battery_avg_price_per_kwh || +state.price_kwh || 0.55;
+  const pGas = +state.tank_avg_price_per_l      || +state.price_gas_per_l || 6.40;
+  const tripCost = (+tr.netKwh || 0) * pKwh + (+tr.fuelL || 0) * pGas;
+  $('trip-cost').textContent = fmtBRL(tripCost);
+  // R$/km — só faz sentido com distância > 0
+  $('trip-cost-km').textContent = (distKm > 0.5 && tripCost > 0.01)
+    ? 'R$ ' + (tripCost / distKm).toFixed(2).replace('.', ',')
+    : 'R$ —';
+  // Split EV/HEV — hev vem do current_trip.hybridDistKm; ev = total − hev
+  const hevKm = +tr.hybridDistKm || +tr.hybrid_dist_km || 0;
+  const evKm  = Math.max(0, distKm - hevKm);
+  if (distKm > 0.5) {
+    const hevPct = (hevKm / distKm) * 100;
+    const evPct  = 100 - hevPct;
+    $('trip-ev-pct').textContent  = Math.round(evPct);
+    $('trip-hev-pct').textContent = Math.round(hevPct);
+    $('trip-ev-km').textContent   = evKm.toFixed(1) + ' km';
+    $('trip-hev-km').textContent  = hevKm.toFixed(1) + ' km';
+  } else {
+    $('trip-ev-pct').textContent  = '—';
+    $('trip-hev-pct').textContent = '—';
+    $('trip-ev-km').textContent   = '— km';
+    $('trip-hev-km').textContent  = '— km';
+  }
+
+  // ═══════ Fluxo de energia v2 — detecta modo + anima fluxos ═══════
+  const rpm        = +state.engine_rpm || 0;
+  const engineSt   = +state.engine_state || 0;
+  const battCurr   = +state.battery_current_a || 0;   // + entrando, - saindo
+  const battEntering = battCurr > 1;
+  const iceOn   = engineSt >= 1 || rpm > 100;
+  const motorOn = Math.abs(motorKw) > 0.5;
+  const regen   = motorKw < -0.5;
+
+  // Estima consumo ICE em L/h por RPM (lookup empírica do H6 PHEV 1.5T)
+  let fuelRate = 0;
+  if (iceOn) {
+    if (rpm < 800)       fuelRate = 0.3;
+    else if (rpm < 1500) fuelRate = 2.0;
+    else if (rpm < 2500) fuelRate = 4.0;
+    else if (rpm < 3500) fuelRate = 6.5;
+    else                 fuelRate = 9.0;
+  }
+
+  // Detecta modo (ordem importa — mais específico primeiro)
+  let mode = 'idle', modeLbl = 'parado';
+  if (isCharging) {
+    mode = 'carga'; modeLbl = 'carga externa';
+  } else if (regen) {
+    mode = 'regen'; modeLbl = 'regenerando';
+  } else if (!iceOn && motorKw > 0.5 && spd > 0) {
+    mode = 'ev'; modeLbl = 'modo EV';
+  } else if (iceOn && spd < 20 && battEntering) {
+    mode = 'serie'; modeLbl = 'série';
+  } else if (iceOn && motorKw > 5 && spd > 30) {
+    mode = 'split'; modeLbl = 'split';
+  } else if (iceOn && spd > 50 && motorKw < 5 && rpm > 1200) {
+    mode = 'paralelo'; modeLbl = 'paralelo';
+  } else if (motorOn) {
+    mode = 'ev'; modeLbl = 'modo EV';
+  }
+
+  // Aplica modo no badge
+  const modeEl = $('flow-mode');
+  modeEl.className = 'flow-mode ' + mode;
+  modeEl.textContent = modeLbl;
+
+  // Ativa nós conforme estado
+  $('node-ice').classList.toggle('ice', iceOn);
+  $('node-batt').classList.toggle('active', motorOn || iceOn || isCharging);
+  $('node-wheels').classList.toggle('active', spd > 1);
+  $('node-motor').classList.toggle('active', motorOn);
+  // Carga externa: mostra/esconde nó+emoji do plug
+  const showCharge = isCharging;
+  $('node-charge').setAttribute('opacity', showCharge ? '1' : '0');
+  $('emoji-charge').style.opacity = showCharge ? '1' : '0';
+
+  // Animação das linhas — cada uma conforme modo
+  function setLine(id, opts) {
+    const el = $(id);
+    el.classList.remove('active','ice','regen','charge','flowing','reverse');
+    if (opts.color) el.classList.add(opts.color);
+    if (opts.active) el.classList.add('active');
+    if (opts.flowing) el.classList.add('flowing');
+    if (opts.reverse) el.classList.add('reverse');
+  }
+  // Reset todas
+  setLine('line-ice-batt',   {});
+  setLine('line-batt-motor', {});
+  setLine('line-motor-wheels', {});
+  setLine('line-ice-wheels', {});
+  setLine('line-charge',     {});
+
+  if (mode === 'ev') {
+    setLine('line-batt-motor',   { active: true, flowing: true });
+    setLine('line-motor-wheels', { active: true, flowing: true });
+  } else if (mode === 'regen') {
+    setLine('line-motor-wheels', { color: 'regen', flowing: true, reverse: true });
+    setLine('line-batt-motor',   { color: 'regen', flowing: true, reverse: true });
+  } else if (mode === 'serie') {
+    setLine('line-ice-batt', { color: 'ice', flowing: true });
+    if (motorOn) {
+      setLine('line-batt-motor',   { active: true, flowing: true });
+      setLine('line-motor-wheels', { active: true, flowing: true });
+    }
+  } else if (mode === 'paralelo') {
+    setLine('line-ice-wheels', { color: 'ice', flowing: true });
+  } else if (mode === 'split') {
+    setLine('line-ice-wheels',   { color: 'ice', flowing: true });
+    setLine('line-batt-motor',   { active: true, flowing: true });
+    setLine('line-motor-wheels', { active: true, flowing: true });
+  } else if (mode === 'carga') {
+    setLine('line-charge', { color: 'charge', flowing: true });
+  }
+
+  // Valores em cada nó
+  $('val-ice').textContent    = iceOn ? fuelRate.toFixed(1) + ' L/h' : 'off';
+  $('val-batt').textContent   = Math.round(socPct) + '%';
+  if (isCharging) {
+    $('val-wheels').textContent = '+' + Math.abs(chargeKw).toFixed(1) + ' kW';
+  } else if (motorOn) {
+    $('val-wheels').textContent = (motorKw > 0 ? '−' : '+') + Math.abs(motorKw).toFixed(1) + ' kW';
+  } else {
+    $('val-wheels').textContent = spd > 0 ? fmt0(spd) + ' km/h' : '—';
+  }
+}
+
+// Boot
+requestWakeLock();
+connect();
+toast('🚗 Haval Cluster pronto');
+
+// Bloqueia zoom/scroll
+document.addEventListener('gesturestart', e => e.preventDefault());
+document.addEventListener('dblclick', e => e.preventDefault());
+</script>
+
+</body>
+</html>
