@@ -5,3 +5,7 @@ DerivedData/
 build/
 .swiftpm/
 *.xcuserdatad/
+
+# Gerados pelo xcodegen — source of truth é project.yml
+HavalOBD.xcodeproj/
+HavalOBD/Info.plist
