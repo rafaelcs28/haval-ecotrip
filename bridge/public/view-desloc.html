@@ -534,8 +534,8 @@
         <div class="opt" data-period="custom" onclick="setPeriod('custom')">Personalizar</div>
       </div>
       <div class="custom-range" id="custom-range" style="display:none">
-        <div class="range-row"><label>De:</label><input type="date" id="custom-from" onchange="renderStats()" oninput="renderStats()"></div>
-        <div class="range-row"><label>Até:</label><input type="date" id="custom-to" onchange="renderStats()" oninput="renderStats()"></div>
+        <div class="range-row"><label>De:</label><input type="date" id="custom-from" onchange="renderStatsDesloc()" oninput="renderStatsDesloc()"></div>
+        <div class="range-row"><label>Até:</label><input type="date" id="custom-to" onchange="renderStatsDesloc()" oninput="renderStatsDesloc()"></div>
       </div>
     </div>
 
@@ -34712,7 +34712,9 @@ function openVersionInfo() {
   // entre views (posto reescreve as do desloc), guardamos a função de "re-
   // export" e o shell chama em cada switchView.
   function _exportDeslocFns() {
-    Object.assign(window, { setFilter: typeof setFilter !== 'undefined' ? setFilter : undefined, navDay: typeof navDay !== 'undefined' ? navDay : undefined, openCalendar: typeof openCalendar !== 'undefined' ? openCalendar : undefined, setPeriod: typeof setPeriod !== 'undefined' ? setPeriod : undefined, closeMapFull: typeof closeMapFull !== 'undefined' ? closeMapFull : undefined, toggleTimeline: typeof toggleTimeline !== 'undefined' ? toggleTimeline : undefined, setDeslocView: typeof setDeslocView !== 'undefined' ? setDeslocView : undefined, openMapFull: typeof openMapFull !== 'undefined' ? openMapFull : undefined, openRename: typeof openRename !== 'undefined' ? openRename : undefined, openShare: typeof openShare !== 'undefined' ? openShare : undefined, confirmDelete: typeof confirmDelete !== 'undefined' ? confirmDelete : undefined, closeAction: typeof closeAction !== 'undefined' ? closeAction : undefined, saveRename: typeof saveRename !== 'undefined' ? saveRename : undefined, doDelete: typeof doDelete !== 'undefined' ? doDelete : undefined, changeMonth: typeof changeMonth !== 'undefined' ? changeMonth : undefined, selectDate: typeof selectDate !== 'undefined' ? selectDate : undefined, onScrub: typeof onScrub !== 'undefined' ? onScrub : undefined });
+    Object.assign(window, { setFilter: typeof setFilter !== 'undefined' ? setFilter : undefined, navDay: typeof navDay !== 'undefined' ? navDay : undefined, openCalendar: typeof openCalendar !== 'undefined' ? openCalendar : undefined, setPeriod: typeof setPeriod !== 'undefined' ? setPeriod : undefined, closeMapFull: typeof closeMapFull !== 'undefined' ? closeMapFull : undefined, toggleTimeline: typeof toggleTimeline !== 'undefined' ? toggleTimeline : undefined, setDeslocView: typeof setDeslocView !== 'undefined' ? setDeslocView : undefined, openMapFull: typeof openMapFull !== 'undefined' ? openMapFull : undefined, openRename: typeof openRename !== 'undefined' ? openRename : undefined, openShare: typeof openShare !== 'undefined' ? openShare : undefined, confirmDelete: typeof confirmDelete !== 'undefined' ? confirmDelete : undefined, closeAction: typeof closeAction !== 'undefined' ? closeAction : undefined, saveRename: typeof saveRename !== 'undefined' ? saveRename : undefined, doDelete: typeof doDelete !== 'undefined' ? doDelete : undefined, changeMonth: typeof changeMonth !== 'undefined' ? changeMonth : undefined, selectDate: typeof selectDate !== 'undefined' ? selectDate : undefined, onScrub: typeof onScrub !== 'undefined' ? onScrub : undefined,
+      // renderStats da view-desloc — chamada pelos inputs date personalizados
+      renderStatsDesloc: typeof renderStats !== 'undefined' ? renderStats : undefined });
   }
   window._havalActivate_desloc = _exportDeslocFns;
   _exportDeslocFns();
