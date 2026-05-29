@@ -5901,7 +5901,7 @@ mqttClient.on('message', (topic, payload, packet) => {
       }
       state.last_obd_ms = now;
       if (nApplied > 0) {
-        markStateChanged();
+        broadcast('update', state);
         // Log throttled — só primeiro msg ou a cada 60s
         const sinceLog = now - (state._obdLastLogMs || 0);
         if (sinceLog > 60_000) {
