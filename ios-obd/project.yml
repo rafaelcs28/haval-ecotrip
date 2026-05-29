@@ -74,5 +74,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: br.com.consorciolimpagyn.havalobd
         ENABLE_PREVIEWS: YES
         GENERATE_INFOPLIST_FILE: NO
+        # Asset Catalog — usa AppIcon.appiconset dentro de Resources/Assets.xcassets
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     dependencies:
       - package: CocoaMQTT

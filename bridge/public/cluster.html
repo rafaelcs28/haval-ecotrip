@@ -593,6 +593,14 @@ function bridgeUrl() {
 }
 let ws, wsRetry = 0;
 function connect() {
+  // Modo nativo (dentro do app HavalOBD WKWebView): pula WebSocket, dados vêm
+  // direto do ELM327 via Bluetooth injetados em applyNativeSnapshot().
+  if (USING_NATIVE_BRIDGE) {
+    setConn(true);
+    const lbl = document.getElementById('conn-lbl');
+    if (lbl) lbl.textContent = 'OBD direto';
+    return;
+  }
   ws = new WebSocket(bridgeUrl());
   ws.onopen = () => { wsRetry = 0; setConn(true); };
   ws.onmessage = ev => {
@@ -605,6 +613,24 @@ function connect() {
   ws.onclose = () => { setConn(false); wsRetry++; setTimeout(connect, Math.min(8000, 500 * wsRetry)); };
   ws.onerror = () => { try { ws.close(); } catch(_) {} };
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  Native bridge — quando rodando dentro do app HavalOBD (WKWebView):
+//    `window._nativeBridge.source === 'havalobd-ios'`. Dados chegam via
+//    `applyNativeSnapshot(payload)` injetado pelo Swift a 5Hz (fast) + 1Hz
+//    (full). Mesmos campos do `state` que o WebSocket popularia.
+// ═══════════════════════════════════════════════════════════════════════════
+const USING_NATIVE_BRIDGE = !!(window._nativeBridge && window._nativeBridge.source === 'havalobd-ios');
+window.applyNativeSnapshot = function(payload) {
+  if (!payload || typeof payload !== 'object') return;
+  for (const [k, v] of Object.entries(payload)) {
+    if (k === 'ts' || k === 'source' || k.startsWith('__')) continue;
+    state[k] = v;
+  }
+  lastUpdateMs = Date.now();
+  render();
+};
+if (USING_NATIVE_BRIDGE) console.log('[cluster] modo nativo — dados via OBDBridgeChannel');
 function setConn(ok) {
   $('conn-dot').classList.toggle('ok', ok);
   $('conn-lbl').textContent = ok ? 'online' : 'reconectando…';
@@ -677,8 +703,20 @@ window.onMapKitLoad = async function() {
   }
 };
 
-// Fallback: se MapKit não carregar em 6s, sobe o Leaflet
-setTimeout(() => { if (!_mapEngine) initLeaflet(); }, 6000);
+// Em modo nativo (dentro do app HavalOBD), MapKit JS não funciona offline
+// (precisa carregar SDK do CDN + token do bridge). Força Leaflet direto.
+// Em modo browser, espera 6s e cai pro Leaflet se MapKit não inicializar.
+if (USING_NATIVE_BRIDGE) {
+  console.log('[map] modo nativo — usando Leaflet direto (sem MapKit)');
+  // Espera o leaflet.js terminar de carregar
+  if (window.L) {
+    initLeaflet();
+  } else {
+    window.addEventListener('load', initLeaflet);
+  }
+} else {
+  setTimeout(() => { if (!_mapEngine) initLeaflet(); }, 6000);
+}
 
 function initLeaflet() {
   if (_mapEngine === 'leaflet' || !window.L) return;
