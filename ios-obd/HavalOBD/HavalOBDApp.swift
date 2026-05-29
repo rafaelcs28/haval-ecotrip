@@ -73,14 +73,6 @@ struct RootView: View {
                     .transition(.opacity)
             }
 
-            // Hotspot 120×120 + long-press 0.6s
-            Color.clear
-                .frame(width: 120, height: 120)
-                .contentShape(Rectangle())
-                .onLongPressGesture(minimumDuration: 0.6) {
-                    showSettings = true
-                }
-
             // Botão visível
             Button { showSettings = true } label: {
                 Image(systemName: "gearshape.fill")
