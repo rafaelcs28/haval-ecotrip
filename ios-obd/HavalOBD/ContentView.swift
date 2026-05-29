@@ -169,8 +169,11 @@ struct SettingsView: View {
                     if !discovery.foundPids.isEmpty {
                         ForEach(Array(discovery.foundPids.enumerated()), id: \.offset) { (_, entry) in
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(String(format: "22 %04X", entry.pid))
-                                    .font(.caption.monospaced()).bold()
+                                HStack {
+                                    Text(entry.ecu).font(.caption2).foregroundStyle(.blue).bold()
+                                    Text(String(format: "22 %04X", entry.pid))
+                                        .font(.caption.monospaced()).bold()
+                                }
                                 Text(entry.response.prefix(60))
                                     .font(.caption2.monospaced())
                                     .foregroundStyle(.secondary)

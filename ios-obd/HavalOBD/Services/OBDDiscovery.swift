@@ -17,16 +17,28 @@ final class OBDDiscovery: ObservableObject {
     @Published var isRunning = false
     @Published var progress: Double = 0
     @Published var currentPid: UInt16 = 0
+    @Published var currentEcu: String = ""
     @Published var totalScanned = 0
-    @Published var foundPids: [(pid: UInt16, response: String)] = []
+    @Published var foundPids: [(ecu: String, pid: UInt16, response: String)] = []
     @Published var statusMsg: String = ""
 
     private weak var elm: ELM327?
     private var task: Task<Void, Never>?
 
-    /// Ranges conhecidos de PIDs Mode 22 em PHEVs/Hybrids GWM.
-    /// Cada range = (high byte mínimo, máximo). Low byte 0x00-0xFF.
-    /// ~16 high bytes × 256 = 4096 PIDs. A 100ms cada = ~7min total.
+    /// ECUs típicas do Haval H6 PHEV. ATSH define qual módulo recebe o comando.
+    /// Cada ECU tem seu próprio conjunto de PIDs Mode 22.
+    private let ecuHeaders: [(name: String, header: String)] = [
+        ("ECM",  "7E0"),  // Motor a combustão
+        ("TCM",  "7E1"),  // Transmissão
+        ("BMS",  "7E2"),  // Bateria
+        ("TMCU", "7E3"),  // Motor elétrico traseiro
+        ("GMCU", "7E4"),  // Gerador/motor dianteiro
+        ("HVAC", "7B0"),  // Ar-condicionado
+        ("BCM",  "720"),  // Body Control (portas, luzes)
+        ("EPB",  "760"),  // Freio de estacionamento
+    ]
+
+    /// Ranges de PIDs por ECU. Cada range = high byte. Low byte 0x00-0xFF.
     private let scanRanges: [ClosedRange<UInt8>] = [
         0x10...0x14,   // motores elétricos (TMCU, GMCU)
         0x20...0x24,   // ECM extras
@@ -54,53 +66,62 @@ final class OBDDiscovery: ObservableObject {
 
         task = Task { [weak self] in
             guard let self else { return }
-            // Para o polling regular durante o scan (não conflita)
             elm.stopPolling()
             try? await Task.sleep(nanoseconds: 300_000_000)
 
-            // Calcula total de PIDs
-            var totalPids = 0
-            for range in scanRanges { totalPids += range.count * 256 }
+            // Total = ECUs × ranges × 256
+            var pidsPerEcu = 0
+            for range in scanRanges { pidsPerEcu += range.count * 256 }
+            let totalPids = pidsPerEcu * ecuHeaders.count
             var scanned = 0
             let startTime = Date()
 
-            for range in scanRanges {
+            for ecu in ecuHeaders {
                 if Task.isCancelled { break }
-                for high in range {
+                // Muda header pra a ECU atual
+                await MainActor.run { self.currentEcu = ecu.name }
+                _ = await elm.send("ATSH \(ecu.header)", timeout: 1.0)
+                try? await Task.sleep(nanoseconds: 200_000_000)
+
+                for range in scanRanges {
                     if Task.isCancelled { break }
-                    for low in 0...0xFF {
+                    for high in range {
                         if Task.isCancelled { break }
-                        let pid = (UInt16(high) << 8) | UInt16(low)
-                        await MainActor.run {
-                            self.currentPid = pid
-                            self.statusMsg = String(format: "22 %04X · %d/%d · %d achados",
-                                                     pid, scanned, totalPids, self.foundPids.count)
-                        }
-                        let cmd = String(format: "22%04X", pid)
-                        let resp = await elm.send(cmd, timeout: 1.0)
-                        let up = resp.uppercased().replacingOccurrences(of: " ", with: "")
-                        let expectedPrefix = String(format: "62%04X", pid)
-                        if up.contains(expectedPrefix) {
+                        for low in 0...0xFF {
+                            if Task.isCancelled { break }
+                            let pid = (UInt16(high) << 8) | UInt16(low)
                             await MainActor.run {
-                                self.foundPids.append((pid: pid, response: resp))
+                                self.currentPid = pid
+                                self.statusMsg = String(format: "[%@] 22 %04X · %d/%d · %d achados",
+                                                         ecu.name, pid, scanned, totalPids, self.foundPids.count)
                             }
+                            let cmd = String(format: "22%04X", pid)
+                            let resp = await elm.send(cmd, timeout: 1.0)
+                            let up = resp.uppercased().replacingOccurrences(of: " ", with: "")
+                            let expectedPrefix = String(format: "62%04X", pid)
+                            if up.contains(expectedPrefix) {
+                                await MainActor.run {
+                                    self.foundPids.append((ecu: ecu.name, pid: pid, response: resp))
+                                }
+                            }
+                            scanned += 1
+                            await MainActor.run {
+                                self.totalScanned = scanned
+                                self.progress = Double(scanned) / Double(totalPids)
+                            }
+                            try? await Task.sleep(nanoseconds: 60_000_000)
                         }
-                        scanned += 1
-                        await MainActor.run {
-                            self.totalScanned = scanned
-                            self.progress = Double(scanned) / Double(totalPids)
-                        }
-                        // Throttle 80ms — Veepeak BLE precisa de tempo
-                        try? await Task.sleep(nanoseconds: 80_000_000)
                     }
                 }
             }
+
+            // Volta header pro default
+            _ = await elm.send("ATSH 7DF", timeout: 1.0)
 
             let elapsed = Int(Date().timeIntervalSince(startTime))
             await MainActor.run {
                 self.isRunning = false
                 self.statusMsg = "Concluído: \(self.foundPids.count) PIDs válidos em \(elapsed)s"
-                // Retoma polling normal
                 if elm.initialized { elm.startPolling() }
             }
         }
@@ -117,6 +138,7 @@ final class OBDDiscovery: ObservableObject {
     func exportJSON() -> String {
         let dict = foundPids.map { entry -> [String: Any] in
             return [
+                "ecu": entry.ecu,
                 "pid_hex": String(format: "%04X", entry.pid),
                 "command": String(format: "22%04X", entry.pid),
                 "response": entry.response,
