@@ -43,6 +43,10 @@
   body.native .row-top { background: transparent !important; }
   body.native #cluster-map { display: none !important; }
   body.native .row-top::after { display: none !important; }
+  /* Fluxo de Energia oculto no nativo — versão compacta vai pro topbar */
+  body.native .widget.flow-widget { display: none !important; }
+  /* row-bot: 2 colunas no nativo (Power + Trip) — 3ª área é o MiniPlayer SwiftUI */
+  body.native .row-bot { grid-template-columns: 1fr 1fr !important; padding-right: 50% !important; }
   /* Mantém o resto: */
   html, body {
     font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, sans-serif;
@@ -170,20 +174,32 @@
   }
   .gauge-sub strong { color: var(--text); font-weight: 600; }
 
-  /* Alertas/info extra dentro do float-card (células + ICE/sistema) */
-  .gauge-extra {
-    margin-top: 12px; padding-top: 10px;
-    border-top: 1px solid var(--border);
-    display: grid; grid-template-columns: 1fr 1fr; gap: 6px 10px;
-    font-size: 14px; color: var(--muted);
-    text-shadow: 0 1px 6px rgba(0,0,0,.7);
+  /* Atalhos rápidos (A/C, regen, drive, fan) */
+  .float-card.quick { padding: 14px 16px; }
+  .quick-grid {
+    flex: 1;
+    display: grid; grid-template-columns: 1fr 1fr 1fr;
+    gap: 8px;
+    align-content: center;
   }
-  .gauge-extra strong { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
-  .gauge-extra .full { grid-column: 1 / -1; }
-  .gauge-extra .alert {
-    color: var(--orange); font-weight: 700;
+  .qb {
+    appearance: none; -webkit-appearance: none;
+    background: rgba(255,255,255,.06);
+    border: 1px solid rgba(255,255,255,.1);
+    border-radius: 14px;
+    padding: 10px 4px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 2px;
+    color: var(--text); cursor: pointer;
+    transition: background .15s, transform .1s;
+    min-height: 64px;
+    font-family: inherit;
   }
-  .gauge-extra .alert::before { content: '⚠ '; }
+  .qb:active { transform: scale(.92); background: rgba(255,255,255,.14); }
+  .qb.on { background: rgba(34,197,94,.18); border-color: rgba(34,197,94,.5); }
+  .qb-ico { font-size: 22px; line-height: 1; }
+  .qb-lbl { font-size: 9px; letter-spacing: .14em; color: var(--muted); text-transform: uppercase; }
+  .qb-val { font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
 
   /* Linha inferior: 3 widgets clássicos */
   .row-bot {
@@ -461,12 +477,6 @@
             </div>
           </div>
         </div>
-        <!-- Bloco extra: pack voltage, SoH, alerta células -->
-        <div class="gauge-extra">
-          <span>Pack <strong id="soc-pack-v">—</strong>V</span>
-          <span id="soc-soh-cell">SoH <strong id="soc-soh">—</strong>%</span>
-          <span class="full" id="soc-cell-info">células Δ <strong id="soc-cell-delta">—</strong>mV · módulo <strong id="soc-mod-temp">—</strong>°C</span>
-        </div>
       </div>
 
       <!-- Fuel -->
@@ -487,12 +497,42 @@
             </div>
           </div>
         </div>
-        <!-- Bloco extra: ICE / sistema -->
-        <div class="gauge-extra">
-          <span>óleo <strong id="ice-oil">—</strong>°C</span>
-          <span>12V <strong id="ice-12v">—</strong>V</span>
-          <span>amb <strong id="ice-amb">—</strong>°C</span>
-          <span>cabine <strong id="ice-cab">—</strong>°C</span>
+      </div>
+
+      <!-- Atalhos rápidos: A/C, regen, drive mode -->
+      <div class="float-card quick">
+        <div class="head"><span class="ico">⚡</span>Atalhos</div>
+        <div class="quick-grid">
+          <button class="qb" id="qb-ac" onclick="qb_toggleAc()">
+            <span class="qb-ico">❄️</span>
+            <span class="qb-lbl">A/C</span>
+            <span class="qb-val" id="qb-ac-val">off</span>
+          </button>
+          <button class="qb" id="qb-regen" onclick="qb_cycleRegen()">
+            <span class="qb-ico">↻</span>
+            <span class="qb-lbl">Regen</span>
+            <span class="qb-val" id="qb-regen-val">—</span>
+          </button>
+          <button class="qb" id="qb-drive" onclick="qb_cycleDrive()">
+            <span class="qb-ico">🚗</span>
+            <span class="qb-lbl">Modo</span>
+            <span class="qb-val" id="qb-drive-val">—</span>
+          </button>
+          <button class="qb" id="qb-temp-dn" onclick="qb_temp(-1)">
+            <span class="qb-ico">−</span>
+            <span class="qb-lbl">Temp</span>
+            <span class="qb-val" id="qb-temp-val">—</span>
+          </button>
+          <button class="qb" id="qb-temp-up" onclick="qb_temp(+1)">
+            <span class="qb-ico">+</span>
+            <span class="qb-lbl">Temp</span>
+            <span class="qb-val">↑</span>
+          </button>
+          <button class="qb" id="qb-fan" onclick="qb_cycleFan()">
+            <span class="qb-ico">🌀</span>
+            <span class="qb-lbl">Vent</span>
+            <span class="qb-val" id="qb-fan-val">—</span>
+          </button>
         </div>
       </div>
     </div>
@@ -521,38 +561,12 @@
         <div>
           <span class="power-value idle" id="power-val">0</span><span class="power-unit">kW</span>
         </div>
-        <div class="power-extra">
-          <span><strong id="power-curr-a">—</strong> A</span>
-          <span><strong id="power-pack-v">—</strong> V</span>
-        </div>
         <div class="power-bar">
           <div class="power-bar-mid"></div>
           <div class="power-bar-fill drive" id="power-bar-drive"></div>
           <div class="power-bar-fill regen" id="power-bar-regen"></div>
         </div>
         <div class="power-scale"><span>−50 regen</span><span>0</span><span>+120 boost</span></div>
-        <div class="power-speed">
-          <strong id="speed-val">—</strong>km/h ·
-          máx <strong id="speed-max">—</strong>
-        </div>
-        <!-- Motores elétricos (rodapé do widget) -->
-        <div class="motors-row">
-          <div class="motors-cell">
-            <span class="lbl">GMCU</span>
-            <span class="val"><span id="m-gmcu-t">—</span>°C</span>
-            <span class="sub"><span id="m-gmcu-rpm">0</span> rpm</span>
-          </div>
-          <div class="motors-cell">
-            <span class="lbl">TMCU</span>
-            <span class="val"><span id="m-tmcu-t">—</span>°C</span>
-            <span class="sub"><span id="m-tmcu-rpm">0</span> rpm</span>
-          </div>
-          <div class="motors-cell">
-            <span class="lbl">INVERSOR</span>
-            <span class="val"><span id="m-inv-t">—</span>°C</span>
-            <span class="sub">boost <span id="m-boost">—</span></span>
-          </div>
-        </div>
       </div>
     </div>
 
@@ -597,7 +611,7 @@
     </div>
 
     <!-- Fluxo de energia v3 — top view do carro com 2 eixos (TMCU/GMCU/ICE) -->
-    <div class="widget">
+    <div class="widget flow-widget">
       <h3><span class="ico">🔄</span> Fluxo de energia</h3>
       <div class="flow-stage">
         <svg class="flow-svg" viewBox="0 0 360 220" preserveAspectRatio="xMidYMid meet">
@@ -975,21 +989,28 @@ const KM_PER_KWH_EV = 5.3;
 function render() {
   const socCirc = 502.65;
 
-  // SOC
+  // SOC — usa range_ev_km do SERVIDOR (não calcula local)
   const socPct = +state.soc_pct || 0;
   $('soc-pct').textContent = Math.round(socPct);
   $('soc-arc').setAttribute('stroke-dashoffset', socCirc * (1 - socPct/100));
   const kwhLeft = (socPct / 100) * PACK_KWH;
   $('soc-kwh').textContent = fmt1(kwhLeft) + ' kWh';
-  $('soc-range').textContent = fmt0(kwhLeft * KM_PER_KWH_EV) + ' km';
+  const rangeEv = +state.range_ev_km;
+  $('soc-range').textContent = Number.isFinite(rangeEv) ? fmt0(rangeEv) + ' km'
+    : fmt0(kwhLeft * KM_PER_KWH_EV) + ' km';
 
-  // Fuel
-  const fuelL = +state.fuel_l || 0;
+  // Fuel — usa range_ice_km do SERVIDOR; derivar fuel_l de range/8
+  const rangeIce = +state.range_ice_km;
+  let fuelL = +state.fuel_l;
+  if (!Number.isFinite(fuelL) && Number.isFinite(rangeIce)) {
+    fuelL = rangeIce / KM_PER_L_HEV;
+  }
+  fuelL = fuelL || 0;
   $('fuel-l').textContent = fmt1(fuelL);
   const fuelPct = clamp((fuelL / TANK_L) * 100, 0, 100);
   $('fuel-arc').setAttribute('stroke-dashoffset', socCirc * (1 - fuelPct/100));
   $('fuel-pct').textContent = Math.round(fuelPct) + ' % tanque';
-  $('fuel-range').textContent = fmt0(fuelL * KM_PER_L_HEV) + ' km';
+  $('fuel-range').textContent = Number.isFinite(rangeIce) ? fmt0(rangeIce) + ' km' : '— km';
 
   // Power
   const motorKw    = +state.motor_power_kw || 0;
@@ -1222,50 +1243,62 @@ function renderObdDebug() {
     ).join('');
   }
 }
-// Telemetria OBD secundária — popula os blocos extras dos widgets
-// (alertas no SOC, ICE no fuel, motores no Power)
-function renderObdExtras() {
-  const T = v => Number.isFinite(+v) ? Math.round(+v) : '—';
-  const F1 = v => Number.isFinite(+v) ? (+v).toFixed(1) : '—';
-
-  // ── Power widget: corrente + pack voltage + motores ──
-  const battA = +state.battery_current_a;
-  const pv = $('power-curr-a');
-  pv.textContent = Number.isFinite(battA) ? Math.round(battA) : '—';
-  pv.classList.remove('a-pos', 'a-neg');
-  if (Number.isFinite(battA)) {
-    if (battA > 1) pv.classList.add('a-pos');
-    else if (battA < -1) pv.classList.add('a-neg');
-  }
-  $('power-pack-v').textContent = T(state.pack_voltage_v);
-  $('m-gmcu-t').textContent   = T(state.gmcu_motor_temp_c);
-  $('m-tmcu-t').textContent   = T(state.tmcu_motor_temp_c);
-  $('m-inv-t').textContent    = T(state.inverter_temp_c);
-  $('m-gmcu-rpm').textContent = T(state.gmcu_motor_speed ?? state.gmcu_motor_rpm);
-  $('m-tmcu-rpm').textContent = T(state.tmcu_motor_speed ?? state.tmcu_motor_rpm);
-  const boost = +state.boost_actual_kpa;
-  $('m-boost').textContent = Number.isFinite(boost) ? Math.round(boost) + 'kPa' : '—';
-
-  // ── SOC float-card: pack V, SoH, alerta células ──
-  $('soc-pack-v').textContent = T(state.pack_voltage_v);
-  $('soc-soh').textContent    = T(state.soh_pct);
-  const cmax = +state.cell_voltage_max_mv;
-  const cmin = +state.cell_voltage_min_mv;
-  const delta = (Number.isFinite(cmax) && Number.isFinite(cmin)) ? Math.round(cmax - cmin) : null;
-  const modMax = +state.module_temp_max_c;
-  const cellInfo = $('soc-cell-info');
-  $('soc-cell-delta').textContent = delta != null ? delta : '—';
-  $('soc-mod-temp').textContent   = T(modMax);
-  // Alerta visual se Δ > 80 mV (desbalanceamento) ou temp módulo > 45°C
-  const isAlert = (delta != null && delta > 80) || (Number.isFinite(modMax) && modMax > 45);
-  cellInfo.classList.toggle('alert', isAlert);
-
-  // ── Fuel float-card: ICE info (óleo, 12V, ambiente, cabine) ──
-  $('ice-oil').textContent = T(state.oil_temp_c);
-  $('ice-12v').textContent = Number.isFinite(+state.batt_12v_v) ? (+state.batt_12v_v).toFixed(1) : '—';
-  $('ice-amb').textContent = T(state.ambient_c);
-  $('ice-cab').textContent = T(state.cabin_temp_c);
+// Atalhos rápidos — atualiza estado visual dos botões (A/C on/off, regen, etc)
+const REGEN_NAMES   = ['baixo', 'médio', 'alto', 'auto'];
+const DRIVE_NAMES   = { 1: 'Eco', 2: 'Norm', 3: 'Sport', 4: 'Auto' };
+function renderQuickActions() {
+  // A/C
+  const acOn = +state.ac_state === 1;
+  $('qb-ac').classList.toggle('on', acOn);
+  $('qb-ac-val').textContent = acOn ? 'on' : 'off';
+  // Regen level
+  const regen = +state.regen_level;
+  $('qb-regen-val').textContent = Number.isFinite(regen) ? (REGEN_NAMES[regen] ?? regen) : '—';
+  // Drive mode
+  const dm = +state.drive_mode;
+  $('qb-drive-val').textContent = Number.isFinite(dm) ? (DRIVE_NAMES[dm] ?? dm) : '—';
+  // Temp do motorista
+  const t = +state.hvac_driver_temp;
+  $('qb-temp-val').textContent = Number.isFinite(t) ? Math.round(t) + '°' : '—';
+  // Fan speed
+  const fan = +state.hvac_fan_speed;
+  $('qb-fan-val').textContent = Number.isFinite(fan) ? fan : '—';
 }
+
+// Handlers dos botões — publica comando via _nativeBridge (Swift → MQTT)
+function sendHvacCmd(action, value) {
+  if (!window.webkit?.messageHandlers?.obd) return;
+  window.webkit.messageHandlers.obd.postMessage({ action, value: String(value) });
+}
+window.qb_toggleAc = () => {
+  const next = +state.ac_state === 1 ? '0' : '1';
+  sendHvacCmd('hvac_ac', next);
+  toast(next === '1' ? '❄️ A/C ligado' : 'A/C desligado');
+};
+window.qb_cycleRegen = () => {
+  const cur = +state.regen_level || 0;
+  const next = (cur + 1) % 4;
+  sendHvacCmd('regen_level', next);
+  toast('Regen: ' + (REGEN_NAMES[next] ?? next));
+};
+window.qb_cycleDrive = () => {
+  const cur = +state.drive_mode || 1;
+  const next = cur >= 4 ? 1 : cur + 1;
+  sendHvacCmd('drive_mode', next);
+  toast('Modo: ' + (DRIVE_NAMES[next] ?? next));
+};
+window.qb_temp = (delta) => {
+  const cur = +state.hvac_driver_temp || 22;
+  const next = clamp(cur + delta, 16, 31);
+  sendHvacCmd('hvac_temp', next);
+  toast('Temp: ' + Math.round(next) + '°');
+};
+window.qb_cycleFan = () => {
+  const cur = +state.hvac_fan_speed || 1;
+  const next = cur >= 7 ? 1 : cur + 1;
+  sendHvacCmd('hvac_fan', next);
+  toast('Vent: ' + next);
+};
 
 // Boot
 requestWakeLock();
@@ -1273,7 +1306,7 @@ connect();
 toast('🚗 Haval Cluster pronto');
 // Overlay debug + extras OBD rodam independente (não patcha render — evita erro de strict mode)
 setInterval(renderObdDebug, 1000);
-setInterval(renderObdExtras, 1000);
+setInterval(renderQuickActions, 1000);
 
 // Bloqueia zoom/scroll
 document.addEventListener('gesturestart', e => e.preventDefault());

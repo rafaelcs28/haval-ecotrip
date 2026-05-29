@@ -61,11 +61,8 @@ struct RootView: View {
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
-            // MapKit nativo no FUNDO (atrás do WebView transparente).
-            // O cluster.html no app nativo esconde o Leaflet e deixa este
-            // mapa aparecer através da row-top.
-            ClusterMapView(nav: nav)
-                .ignoresSafeArea()
+            // Fundo preto sólido (mapa removido — app é cluster puro)
+            Color.black.ignoresSafeArea()
 
             ClusterWebView()
                 .ignoresSafeArea()
