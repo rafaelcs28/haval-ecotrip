@@ -127,12 +127,14 @@ final class OBDBridgeChannel: ObservableObject {
             var debugList: [[String: Any]] = []
             for (key, sample) in elm.samples {
                 if let v = sample.value {
-                    debugList.append([
+                    var item: [String: Any] = [
                         "id": key,
                         "value": v,
                         "unit": sample.unit,
                         "age_ms": Int(now.timeIntervalSince(sample.ts) * 1000),
-                    ])
+                    ]
+                    if let h = sample.rawHex { item["raw"] = h }
+                    debugList.append(item)
                 }
             }
             debugList.sort { ($0["id"] as? String ?? "") < ($1["id"] as? String ?? "") }

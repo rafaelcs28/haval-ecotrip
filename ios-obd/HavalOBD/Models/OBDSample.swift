@@ -8,6 +8,9 @@ struct OBDSample: Codable {
     let value: Double?         // nil = inválido
     let unit: String
     let ts: Date
+    /// Bytes brutos parseados (hex sem espaço) — útil pra diagnosticar
+    /// fórmulas: se valor não bate, dá pra ver o hex e descobrir offset/scale.
+    var rawHex: String? = nil
 
     /// Pra serializar como JSON estilo `{ "rpm": 1850, "speed": 60, ... }`.
     var jsonKeyValue: (key: String, value: Double?) {
