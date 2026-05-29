@@ -15,6 +15,7 @@ final class LocationManager: NSObject, ObservableObject {
     @Published var lastFixAt: Date?
 
     private let manager = CLLocationManager()
+    private var lastLocation: CLLocation?    // pra calcular speed manualmente se loc.speed < 0
 
     override init() {
         super.init()
@@ -59,12 +60,25 @@ extension LocationManager: CLLocationManagerDelegate {
         guard let loc = locations.last else { return }
         let la = loc.coordinate.latitude
         let lo = loc.coordinate.longitude
-        let s  = loc.speed >= 0 ? loc.speed * 3.6 : nil   // m/s → km/h
         Task { @MainActor in
+            // Speed: prefere loc.speed (oficial CoreLocation), senão calcula
+            // a partir da distância pra última posição. Em iPad com GPS frio
+            // loc.speed às vezes vem -1 por minutos — fallback evita travamento.
+            var kmh: Double? = nil
+            if loc.speed >= 0 {
+                kmh = loc.speed * 3.6
+            } else if let prev = self.lastLocation {
+                let dist = loc.distance(from: prev)   // metros
+                let dt = loc.timestamp.timeIntervalSince(prev.timestamp)
+                if dt > 0.1, dt < 10, dist >= 0 {
+                    kmh = (dist / dt) * 3.6
+                }
+            }
             self.lat = la
             self.lng = lo
-            self.speedKmh = s
+            self.speedKmh = kmh
             self.lastFixAt = Date()
+            self.lastLocation = loc
         }
     }
 
