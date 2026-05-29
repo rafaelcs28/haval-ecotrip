@@ -2,7 +2,7 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover,user-scalable=no">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Haval Cluster">
@@ -33,7 +33,10 @@
   html, body {
     width: 100vw; height: 100vh; overflow: hidden;
     background: var(--bg); color: var(--text);
+    margin: 0; padding: 0;
   }
+  body { width: 100% !important; max-width: none !important; }
+  .stage, .row-bot, .row-top { width: 100% !important; max-width: none !important; box-sizing: border-box; }
   /* Quando rodando no app nativo iOS (HavalOBD), body fica transparente
      pra MapKit nativo aparecer no fundo. Class adicionada via JS quando
      IN_NATIVE_APP é true. */

@@ -68,6 +68,7 @@ struct RootView: View {
 
             ClusterWebView()
                 .ignoresSafeArea()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .onTapGesture(count: 3) { showSettings = true }
 
             // Splash com logo enquanto o cluster.html carrega.
