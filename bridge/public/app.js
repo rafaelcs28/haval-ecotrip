@@ -2948,6 +2948,13 @@ function renderAutoTrips() {
       const tip   = `Eco score: ${score} · ${_ecoScoreDetail(t, effInfo)}`;
       ecoBadge = `<span class="trip-eco-badge ${cls}" title="${tip}">${icon} ${score}</span>`;
     }
+    // Badge "estimado": viagens onde a telemetria parou no meio e o split HEV/EV foi
+    // inferido por média histórica (em vez de medido pelos samples com RPM>0).
+    let estBadge = '';
+    if (t._estimated) {
+      const reason = (t._estimatedReason || 'Telemetria parcial — split HEV/EV estimado por média histórica').replace(/"/g,"'");
+      estBadge = `<span class="trip-est-badge" title="${reason}" style="display:inline-block;font-size:10px;padding:2px 6px;border-radius:8px;background:#3b2c0f;color:#fcd34d;border:1px solid #b45309;margin-left:4px">📊 estim.</span>`;
+    }
     const atOv     = _tripCostOverride(t.tripId);
     const atFuelL  = t.fuelL  || 0;
     const atNetKwh = t.netKwh || 0;
@@ -2974,7 +2981,7 @@ function renderAutoTrips() {
     <div style="flex:1;min-width:0">
       <div class="trip-name-row">
         ${displayName ? `<span class="trip-name"${nameStyle ? ` style="${nameStyle}"` : ''}>${displayName}</span>${statusBadge}` : ''}
-        ${ecoBadge}${effBadge}${radarBadge}
+        ${ecoBadge}${effBadge}${radarBadge}${estBadge}
         <button class="rename-btn" onclick="startRenameTrip('${t.tripId}','auto')" title="${displayName ? 'Renomear' : 'Nomear'}">✏️</button>
         ${effInfo ? `<button class="rename-btn" onclick="openCompareModal('${t.tripId}')" title="Comparar com outra viagem do mesmo trecho" style="opacity:.6">🔀</button>` : ''}
         <button class="rename-btn" onclick="deleteTrip('${t.tripId}','auto')" title="Apagar viagem" style="opacity:.35">🗑</button>
