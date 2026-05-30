@@ -174,6 +174,10 @@
     transition: background .2s; cursor: pointer;
   }
   .quick-widget .op-toggle.on { background: var(--green); }
+  .quick-widget .op-toggle.pending {
+    background: rgba(255,200,50,.5);
+    box-shadow: 0 0 0 2px rgba(255,200,50,.3);
+  }
   .quick-widget .op-knob {
     position: absolute; top: 3px; left: 3px;
     width: 26px; height: 26px; border-radius: 50%;
@@ -666,7 +670,7 @@
 <div class="topbar">
   <div class="left">
     <div class="clock" id="clock">--:--</div>
-    <div class="lbl" id="version">HEC v1.28</div>
+    <div class="lbl" id="version">HEC v1.29</div>
   </div>
   <div class="right">
     <div class="lbl">Carro</div>
@@ -1673,9 +1677,8 @@ function renderQuickActions() {
   setActiveChip('terrain', state.terrain_mode);
   setActiveChip('regen',   state.regen_level);
   setActiveChip('steer',   state.steer_mode);
-  setToggle('one-pedal-toggle', state.one_pedal === 1 || state.one_pedal === '1');
-  setToggle('ac-toggle',        +state.ac_state === 1);
-  setToggle('esp-toggle',       +state.esp_state === 1 || state.esp_state === '1');
+  _renderEspToggle();
+  _renderOnePedalToggle();
 }
 function setActiveChip(attr, val) {
   if (val === undefined || val === null) return;
@@ -1722,17 +1725,76 @@ window.setSteerMode = (mode) => {
   sendCmd('steer_mode_set', mode);
   toast('⏳ Direção enviada…');
 };
-window.toggleOnePedal = () => {
-  const cur = state.one_pedal === 1 || state.one_pedal === '1';
-  sendCmd('one_pedal_set', cur ? 'false' : 'true');
-};
-window.toggleAc = () => {
-  const cur = +state.ac_state === 1;
-  sendCmd('hvac_ac', cur ? '0' : '1');
-};
+// ESP / One-Pedal — espelha lógica do PWA (view-drive.html): pending visual
+// + timeout 15s + key correta (state.esp_enable, state.one_pedal).
+let _espPending = null, _espTimer = null;
+let _opPending  = null, _opTimer  = null;
+
+function _renderEspToggle() {
+  const tog = document.getElementById('esp-toggle');
+  if (!tog) return;
+  // Se state confirmou o valor pendente, encerra o pending
+  if (_espPending !== null && state.esp_enable === _espPending) {
+    clearTimeout(_espTimer);
+    _espPending = null;
+  }
+  if (_espPending !== null) {
+    tog.classList.toggle('on', _espPending === 1);
+    tog.classList.add('pending');
+    return;
+  }
+  tog.classList.remove('pending');
+  tog.classList.toggle('on', state.esp_enable === 1);
+}
+
+function _renderOnePedalToggle() {
+  const tog = document.getElementById('one-pedal-toggle');
+  if (!tog) return;
+  if (_opPending !== null && state.one_pedal === _opPending) {
+    clearTimeout(_opTimer);
+    _opPending = null;
+  }
+  if (_opPending !== null) {
+    tog.classList.toggle('on', _opPending === 1);
+    tog.classList.add('pending');
+    return;
+  }
+  tog.classList.remove('pending');
+  tog.classList.toggle('on', state.one_pedal === 1);
+}
+
 window.toggleEsp = () => {
-  const cur = +state.esp_state === 1 || state.esp_state === '1';
-  sendCmd('esp_set', cur ? 'false' : 'true');
+  const cur = state.esp_enable;
+  const next = cur === 1 ? 0 : 1;   // qualquer estado != ON → liga
+  _espPending = next;
+  _renderEspToggle();
+  clearTimeout(_espTimer);
+  _espTimer = setTimeout(() => {
+    if (_espPending !== null) {
+      _espPending = null;
+      toast('⚠ Carro não respondeu — ESP');
+      _renderEspToggle();
+    }
+  }, 15000);
+  sendCmd('esp_set', next ? 'true' : 'false');
+  toast(next === 1 ? '⏳ Ligando ESP…' : '⏳ Desligando ESP…');
+};
+
+window.toggleOnePedal = () => {
+  const cur = state.one_pedal;
+  const next = cur === 1 ? 0 : 1;
+  _opPending = next;
+  _renderOnePedalToggle();
+  clearTimeout(_opTimer);
+  _opTimer = setTimeout(() => {
+    if (_opPending !== null) {
+      _opPending = null;
+      toast('⚠ Carro não respondeu — One-Pedal');
+      _renderOnePedalToggle();
+    }
+  }, 15000);
+  sendCmd('one_pedal_set', next ? 'true' : 'false');
+  toast(next === 1 ? '⏳ Ligando One-Pedal…' : '⏳ Desligando One-Pedal…');
 };
 
 // Boot
