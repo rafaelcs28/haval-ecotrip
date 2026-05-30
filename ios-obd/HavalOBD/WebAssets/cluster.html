@@ -695,7 +695,7 @@
 <div class="topbar">
   <div class="left">
     <div class="clock" id="clock">--:--</div>
-    <div class="lbl" id="version">HEC v1.35</div>
+    <div class="lbl" id="version">HEC v1.36</div>
     <!-- Indicador da fonte de dados (📡 LAN direta · ☁ Mac mini via Tailscale) -->
     <div class="lbl" id="source-badge" style="opacity:.6;font-size:11px;letter-spacing:.08em">☁</div>
   </div>
@@ -1887,11 +1887,11 @@ setInterval(renderQuickActions, 1000);
 // Gráficos X/Y — eixo X = últimos 30s. Dois painéis:
 //  - Potência: ±50 kW, zero no meio (y=60), viewBox 300x120
 //  - Velocidade: 0–160 km/h, base embaixo (y=120 = 0), viewBox 300x120
-// Atualiza a 4 Hz (250ms) — velocidade/kW vêm via LAN em tempo real.
-// 120 amostras × 250ms = janela de 30s.
+// Atualiza a 10 Hz (100ms) — velocidade/kW vêm via LAN em tempo real.
+// 300 amostras × 100ms = janela de 30s.
 const POWER_HISTORY = [];
 const SPEED_HISTORY = [];
-const POWER_HIST_MAX = 120;
+const POWER_HIST_MAX = 300;
 
 function _drawLine(history, lineId, mapY) {
   const line = document.getElementById(lineId);
@@ -1920,7 +1920,7 @@ function tickPowerSpark() {
   if (SPEED_HISTORY.length > POWER_HIST_MAX) SPEED_HISTORY.shift();
   _drawLine(SPEED_HISTORY, 'chart-line-spd', v => 120 - (clamp(v, 0, 160) / 160) * 120);
 }
-setInterval(tickPowerSpark, 250);
+setInterval(tickPowerSpark, 100);
 
 // Bloqueia zoom/scroll
 document.addEventListener('gesturestart', e => e.preventDefault());
