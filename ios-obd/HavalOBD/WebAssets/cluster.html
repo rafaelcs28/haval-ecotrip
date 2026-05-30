@@ -575,7 +575,7 @@
 <div class="topbar">
   <div class="left">
     <div class="clock" id="clock">--:--</div>
-    <div class="lbl" id="version">HEC v1.5</div>
+    <div class="lbl" id="version">HEC v1.6</div>
     <div class="lbl" id="env-badge" style="background:rgba(255,200,50,.2);border:1px solid rgba(255,200,50,.5);border-radius:6px;padding:2px 8px;color:#ffcc33">env=?</div>
   </div>
   <div class="right">
@@ -1293,11 +1293,11 @@ function render() {
   $('trip-time').textContent = timeStr;
   const netKwh = +tr.netKwh || +tr.net_kwh || 0;
   $('trip-kwh').textContent = fmt1(netKwh);
-  const fuelL = +tr.fuelL || +tr.fuel_l || 0;
-  $('trip-fuel').textContent = fmt1(fuelL);
+  const tripFuelL = +tr.fuelL || +tr.fuel_l || 0;
+  $('trip-fuel').textContent = fmt1(tripFuelL);
   const pKwh = +state.battery_avg_price_per_kwh || +state.price_kwh || 0.55;
   const pGas = +state.tank_avg_price_per_l      || +state.price_gas_per_l || 6.40;
-  const tripCost = netKwh * pKwh + fuelL * pGas;
+  const tripCost = netKwh * pKwh + tripFuelL * pGas;
   $('trip-cost').textContent = fmtBRL(tripCost);
   // R$/km — só faz sentido com distância > 0
   const costKmStr = (distKm > 0.5 && tripCost > 0.01)
@@ -1310,7 +1310,7 @@ function render() {
   tov('tov-dist',     fmt1(distKm));
   tov('tov-time',     timeStr);
   tov('tov-kwh',      fmt1(netKwh));
-  tov('tov-fuel',     fmt1(fuelL));
+  tov('tov-fuel',     fmt1(tripFuelL));
   tov('tov-cost',     fmtBRL(tripCost));
   tov('tov-cost-km',  costKmStr);
 
