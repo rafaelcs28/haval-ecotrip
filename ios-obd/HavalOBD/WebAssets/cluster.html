@@ -57,7 +57,7 @@
      Coluna dir: 2fr (~2/3 da tela) */
   body.native .row-bot {
     grid-template-columns: 1.25fr 2fr !important;
-    grid-template-rows: minmax(0, 0.95fr) minmax(0, 1.05fr) !important;
+    grid-template-rows: minmax(0, 1.25fr) minmax(0, 0.75fr) !important;
     padding: 10px !important;
     gap: 10px !important;
   }
@@ -393,7 +393,7 @@
     margin-top: 4px;
   }
   .power-value {
-    font-size: 88px; font-weight: 300; line-height: 1;
+    font-size: 64px; font-weight: 300; line-height: 1;
     font-variant-numeric: tabular-nums;
     color: var(--text);
     transition: color .25s;
@@ -407,7 +407,7 @@
   }
   .power-sub-cell { display: flex; align-items: baseline; gap: 4px; }
   .power-sub-cell .sub-val {
-    font-size: 30px; font-weight: 300; color: var(--text);
+    font-size: 22px; font-weight: 300; color: var(--text);
   }
   .power-sub-cell .sub-val.ice { color: var(--orange); }
   .power-sub-cell .sub-unit { font-size: 11px; color: var(--muted); letter-spacing: .08em; }
@@ -419,14 +419,14 @@
   .power-value.regen  { color: var(--green); }
   .power-value.drive  { color: var(--orange); }
   .power-value.idle   { color: var(--text); }
-  .power-unit { font-size: 32px; color: var(--muted); font-weight: 300; }
+  .power-unit { font-size: 24px; color: var(--muted); font-weight: 300; }
 
-  /* Gráfico potência X/Y — flex item GRANDE embaixo */
+  /* Gráfico potência X/Y — flex item embaixo (compacto pra caber no widget menor) */
   .power-chart-wrap {
     position: relative;
-    flex: 1; min-height: 0;
-    margin-top: 12px;
-    padding: 0 8px 16px 32px;
+    flex: 1; min-height: 60px;
+    margin-top: 6px;
+    padding: 0 8px 14px 30px;
     box-sizing: border-box;
   }
   .power-chart {
@@ -670,7 +670,7 @@
 <div class="topbar">
   <div class="left">
     <div class="clock" id="clock">--:--</div>
-    <div class="lbl" id="version">HEC v1.31</div>
+    <div class="lbl" id="version">HEC v1.32</div>
     <!-- Indicador da fonte de dados (📡 LAN direta · ☁ Mac mini via Tailscale) -->
     <div class="lbl" id="source-badge" style="opacity:.6;font-size:11px;letter-spacing:.08em">☁</div>
   </div>
