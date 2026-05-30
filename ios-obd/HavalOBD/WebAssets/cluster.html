@@ -57,7 +57,7 @@
      Coluna dir: 2fr (~2/3 da tela) */
   body.native .row-bot {
     grid-template-columns: 1.25fr 2fr !important;
-    grid-template-rows: 1fr 1fr !important;
+    grid-template-rows: minmax(0, 1fr) minmax(0, 1fr) !important;
     padding: 10px !important;
     gap: 10px !important;
   }
@@ -225,9 +225,24 @@
   #cluster-map { position: absolute; inset: 0; z-index: 1; }
   .leaflet-container { background: #000 !important; }
   .leaflet-control-attribution { display: none !important; }
-  .leaflet-control-zoom { display: none !important; }
+  /* Controles de zoom visíveis no nativo (eram escondidos no PWA do iPhone) */
+  body.native .leaflet-control-zoom {
+    border: 1px solid rgba(255,255,255,.15) !important;
+    border-radius: 12px !important; overflow: hidden;
+    box-shadow: 0 4px 16px rgba(0,0,0,.4);
+  }
+  body.native .leaflet-control-zoom a {
+    background: rgba(0,0,0,.7) !important; color: #fff !important;
+    width: 44px !important; height: 44px !important; line-height: 44px !important;
+    font-size: 22px !important; font-weight: 300 !important;
+    border-color: rgba(255,255,255,.1) !important;
+  }
+  body.native .leaflet-control-zoom a:hover { background: rgba(34,197,94,.3) !important; }
+  /* Esconde no browser/PWA antigo */
+  .leaflet-control-zoom { display: none; }
+  body.native .leaflet-control-zoom { display: block !important; }
   /* Tiles ficam levemente atenuados, ruas brancas saltam */
-  .leaflet-tile-pane { filter: brightness(.85) contrast(1.15); }
+  .leaflet-tile-pane { filter: brightness(1.35) contrast(1.05); }
 
   /* Botão Navegar (canto sup. direito do mapa) */
   .nav-btn {
@@ -370,7 +385,7 @@
   .power-widget .power-display { position: relative; z-index: 1; }
 
   .power-value {
-    font-size: 96px; font-weight: 200; line-height: 1;
+    font-size: 72px; font-weight: 200; line-height: 1;
     font-variant-numeric: tabular-nums;
     transition: color .25s;
   }
@@ -577,7 +592,7 @@
 <div class="topbar">
   <div class="left">
     <div class="clock" id="clock">--:--</div>
-    <div class="lbl" id="version">HEC v1.15</div>
+    <div class="lbl" id="version">HEC v1.16</div>
   </div>
   <div class="right">
     <div class="lbl">Carro</div>
@@ -1126,21 +1141,26 @@ if (IN_NATIVE_APP) {
   setTimeout(() => { if (!_mapEngine) initLeaflet(); }, 6000);
 }
 
+// Flag: user mexeu manualmente no mapa? Se sim, para de auto-zoom.
+let _userZoomed = false;
 function initLeaflet() {
   if (_mapEngine === 'leaflet' || !window.L) return;
   if (window.L && !_lfMap) {
     // No app nativo o mapa fica no widget do row-bot (#cluster-map-bot)
     const mapId = document.getElementById('cluster-map-bot') ? 'cluster-map-bot' : 'cluster-map';
     _lfMap = L.map(mapId, {
-      zoomControl: false, attributionControl: false,
+      zoomControl: true, attributionControl: false,
       dragging: true, touchZoom: true, scrollWheelZoom: true,
       doubleClickZoom: true, boxZoom: false, keyboard: false, tap: true,
-    }).setView([DEFAULT_CENTER.lat, DEFAULT_CENTER.lng], 14);
+    }).setView([DEFAULT_CENTER.lat, DEFAULT_CENTER.lng], 17);
     L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
       maxZoom: 19, subdomains: 'abcd',
     }).addTo(_lfMap);
     _mapEngine = 'leaflet';
     console.log('[map] Leaflet ativo em #' + mapId);
+    // User interagiu? Marca pra não auto-zoom mais.
+    _lfMap.on('zoomstart', (e) => { if (e.target._zoomAnimated !== false) _userZoomed = true; });
+    _lfMap.on('dragstart', () => { _userZoomed = true; });
     // Força recalcular tamanho após o widget grid layoutar
     setTimeout(() => _lfMap.invalidateSize(), 200);
     updateMap();
@@ -1174,14 +1194,29 @@ function updateMap() {
     if (!_lfMarker) {
       const icon = L.divIcon({
         className: 'car-icon',
-        html: '<div style="width:28px;height:28px;background:radial-gradient(circle,#22c55e,#15803d);border:3px solid #000;border-radius:50%;box-shadow:0 0 20px rgba(34,197,94,.7),0 0 4px #000"></div>',
-        iconSize: [28,28], iconAnchor: [14,14],
+        html: '<div style="width:32px;height:32px;background:radial-gradient(circle,#22c55e,#15803d);border:3px solid #000;border-radius:50%;box-shadow:0 0 22px rgba(34,197,94,.85),0 0 4px #000"></div>',
+        iconSize: [32,32], iconAnchor: [16,16],
       });
       _lfMarker = L.marker(ll, { icon }).addTo(_lfMap);
     } else {
       _lfMarker.setLatLng(ll);
     }
-    _lfMap.setView(ll, Math.max(_lfMap.getZoom(), 15), { animate: _mapCenteredOnce, duration: 1 });
+    // Auto-center só se user ainda não interagiu manualmente.
+    if (!_userZoomed) {
+      // Pin mais acima: offset vertical pra empurrar o carro pra cima da viewport
+      // (center do mapa fica ~25% abaixo do pin → pin a ~25% do topo).
+      const targetZoom = Math.max(_lfMap.getZoom(), 17);
+      _lfMap.setView(ll, targetZoom, { animate: _mapCenteredOnce, duration: 0.6 });
+      // Depois do setView, desloca o center pra baixo (pin sobe na tela).
+      setTimeout(() => {
+        if (!_userZoomed && _lfMap) {
+          const size = _lfMap.getSize();
+          _lfMap.panBy([0, -size.y * 0.22], { animate: false });
+        }
+      }, 50);
+    } else if (!_mapCenteredOnce) {
+      _lfMap.setView(ll, _lfMap.getZoom(), { animate: false });
+    }
     _mapCenteredOnce = true;
   }
 }
