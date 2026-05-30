@@ -69,26 +69,26 @@
   body.native .widget.quick-widget { display: flex !important; }
   body.native .widget.map-widget  { display: flex !important; position: relative; overflow: hidden; }
   body.native #cluster-map-bot { flex: 1; min-height: 0; border-radius: 12px; overflow: hidden; }
-  /* Vinheta radial: escurece bordas, deixa centro do mapa visível */
+  /* Vinheta radial: centro grande visível, escurece SÓ as bordas */
   body.native .map-widget::after {
     content: ''; position: absolute; inset: 0; pointer-events: none;
-    background: radial-gradient(ellipse 35% 40% at 50% 50%, transparent 0%, rgba(0,0,0,0.55) 60%, rgba(0,0,0,0.85) 100%);
+    background: radial-gradient(ellipse 55% 60% at 50% 50%, transparent 40%, rgba(0,0,0,0.6) 85%, rgba(0,0,0,0.85) 100%);
     border-radius: 18px;
-    z-index: 500;   /* acima das tiles do Leaflet (200) */
+    z-index: 500;
   }
   body.native .map-widget > h3 { z-index: 600; position: relative; }
-  /* Trip overlay sobre o mapa: 8 métricas distribuídas nos 4 cantos */
+  /* Trip overlay sobre o mapa: 4 cantos. 2 rows iguais (1fr 1fr) */
   .trip-overlay { display: none; }
   body.native .trip-overlay {
     display: grid !important;
     position: absolute; inset: 36px 18px 18px 18px;
     grid-template-columns: 1fr 1fr;
-    grid-template-rows: auto 1fr auto;
+    grid-template-rows: 1fr 1fr;
     gap: 8px;
     pointer-events: none;
-    z-index: 700;   /* acima da vinheta (500) e do Leaflet (max ~400) */
+    z-index: 700;
     color: var(--text);
-    text-shadow: 0 2px 8px rgba(0,0,0,0.8), 0 0 2px rgba(0,0,0,0.9);
+    text-shadow: 0 2px 8px rgba(0,0,0,0.95), 0 0 4px rgba(0,0,0,0.9), 0 0 1px #000;
   }
   .trip-overlay .tov {
     font-size: 24px; font-weight: 300; font-variant-numeric: tabular-nums; line-height: 1;
@@ -575,7 +575,7 @@
 <div class="topbar">
   <div class="left">
     <div class="clock" id="clock">--:--</div>
-    <div class="lbl" id="version">HEC v1.7</div>
+    <div class="lbl" id="version">HEC v1.8</div>
     <div class="lbl" id="env-badge" style="background:rgba(255,200,50,.2);border:1px solid rgba(255,200,50,.5);border-radius:6px;padding:2px 8px;color:#ffcc33">env=?</div>
   </div>
   <div class="right">
