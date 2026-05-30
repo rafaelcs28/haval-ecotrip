@@ -45,6 +45,7 @@ final class BridgePublisher: ObservableObject {
     private var httpPollTimer: Timer?
     private var lanWsTask: URLSessionWebSocketTask?
     private var lanWsHeartbeat: Timer?
+    private var lanHttpPollTimer: Timer?
     /// Callback chamado quando o bridge publica state extra (viagem em curso,
     /// preços, charging) via MQTT. Permite o cluster.html receber dados que
     /// não vêm do OBD direto.
@@ -79,7 +80,7 @@ final class BridgePublisher: ObservableObject {
     }
 
     /// Chamado pelo `LocalDiscovery` quando o APK aparece/some na LAN.
-    /// Decide se ativa WS local ou volta pro modo cloud.
+    /// Decide se ativa LAN (WS + HTTP poll local) ou volta pro modo cloud.
     /// Se mDNS falhar, usa URL manual configurada pelo user (fallback).
     func updateLanUrl(_ url: URL?) {
         // Prioridade: URL do mDNS > URL manual configurada
@@ -88,12 +89,49 @@ final class BridgePublisher: ObservableObject {
         lanUrl = resolved
         if useLanWhenAvailable, let u = resolved {
             if prev?.absoluteString != u.absoluteString {
-                connectLanWs(to: u)
                 activeSource = "lan"
+                // HTTP poll local imediato (garante dados na LAN mesmo se WS
+                // falhar) + tenta WS em paralelo (mais rápido se conectar)
+                startLanHttpPoll(base: u)
+                connectLanWs(to: u)
             }
         } else {
             disconnectLanWs()
+            stopLanHttpPoll()
             activeSource = "cloud"
+        }
+    }
+
+    // ── HTTP poll local (fallback / garantia quando WS não conecta) ──────
+    private func startLanHttpPoll(base: URL) {
+        stopLanHttpPoll()
+        let stateUrl = URL(string: "\(base.absoluteString)/api/state") ?? base
+        Task { await fetchStateLan(stateUrl) }
+        lanHttpPollTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+            Task { await self?.fetchStateLan(stateUrl) }
+        }
+        print("[lan http] poll local iniciado em \(stateUrl) (500ms)")
+    }
+
+    private func stopLanHttpPoll() {
+        lanHttpPollTimer?.invalidate()
+        lanHttpPollTimer = nil
+    }
+
+    private func fetchStateLan(_ url: URL) async {
+        var req = URLRequest(url: url)
+        req.timeoutInterval = 2
+        do {
+            let (data, resp) = try await URLSession.shared.data(for: req)
+            guard let http = resp as? HTTPURLResponse, http.statusCode == 200,
+                  let obj = try? JSONSerialization.jsonObject(with: data),
+                  let dict = obj as? [String: Any] else { return }
+            self.onClusterExtra?(dict)
+        } catch {
+            // LAN caiu — volta pra cloud
+            print("[lan http] poll local falhou: \(error.localizedDescription) — cloud")
+            stopLanHttpPoll()
+            if !lanWsConnected { activeSource = "cloud" }
         }
     }
 
@@ -198,8 +236,8 @@ final class BridgePublisher: ObservableObject {
                 }
             }
         }
-        lanWsConnected = true
-        print("[lan ws] conectando em \(wsUrl)")
+        // lanWsConnected só vira true quando RECEBE a 1ª msg (handshake confirmado)
+        print("[lan ws] tentando conectar em \(wsUrl)")
     }
 
     private func disconnectLanWs() {
@@ -215,14 +253,24 @@ final class BridgePublisher: ObservableObject {
             switch result {
             case .success(let msg):
                 Task { @MainActor in
+                    // WS funcionando → para HTTP poll local (WS é mais eficiente)
+                    if !self.lanWsConnected {
+                        self.lanWsConnected = true
+                        self.stopLanHttpPoll()
+                        print("[lan ws] conectado — usando WS push, HTTP poll parado")
+                    }
                     self.handleLanWsMessage(msg)
                     self.receiveLanWs(task)
                 }
             case .failure(let err):
                 Task { @MainActor in
-                    print("[lan ws] receive err: \(err.localizedDescription) — caindo pra cloud")
-                    self.disconnectLanWs()
-                    self.activeSource = "cloud"
+                    // WS falhou — NÃO cai pra cloud. O HTTP poll local assume
+                    // (ainda é ~5ms na LAN). Só vai pra cloud se a LAN sumir.
+                    print("[lan ws] falhou: \(err.localizedDescription) — usando HTTP poll local")
+                    self.lanWsTask = nil
+                    self.lanWsConnected = false
+                    self.lanWsHeartbeat?.invalidate(); self.lanWsHeartbeat = nil
+                    if let u = self.lanUrl { self.startLanHttpPoll(base: u) }
                 }
             }
         }
