@@ -98,30 +98,46 @@ class CarTelemetryService : Service() {
     /**
      * Liga ou desliga o servidor LAN sem matar o foreground service.
      * Chamado pelo onCreate (lê pref) e pelo toggle das Settings.
+     *
+     * Tenta portas em ordem: 8088, 8080, 9080, 7777, 9999. Se TODAS estiverem
+     * em uso (improvável), loga e não inicia.
      */
     fun applyLanEnabled(on: Boolean) {
         if (on && localApi == null) {
             val mqtt = try { MqttManager.getInstance() } catch (_: Exception) { null } ?: return
             val carData = try { CarDataManager.getInstance() } catch (_: Exception) { null }
-            try {
-                val api = LocalApiServer(mqtt)
-                api.startServer()
-                localApi = api
-
-                // Hook: cada update do CAN dispara push WS pros clients
-                val listener: (String, String) -> Unit = { _, _ ->
-                    try { api.notifyStateChange() } catch (_: Exception) {}
+            val portsToTry = listOf(LocalApiServer.LOCAL_API_PORT) + LocalApiServer.FALLBACK_PORTS
+            var started: LocalApiServer? = null
+            for (port in portsToTry) {
+                try {
+                    val api = LocalApiServer(mqtt, port)
+                    api.startServer()
+                    if (LocalApiServer.activePort > 0) {
+                        started = api
+                        break
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.w(TAG, "porta $port falhou: ${e.message}")
                 }
-                carData?.addListener(listener)
-                carDataListener = listener
-
-                val adv = LocalServiceAdvertiser(this)
-                adv.start(LocalApiServer.LOCAL_API_PORT, versionName = packageVersionName())
-                advertiser = adv
-                android.util.Log.i(TAG, "LAN server LIGADO")
-            } catch (e: Exception) {
-                android.util.Log.w(TAG, "LocalApiServer start falhou: ${e.message}")
             }
+            val api = started
+            if (api == null) {
+                android.util.Log.e(TAG, "✗ todas as portas em uso — LAN server NÃO iniciado")
+                return
+            }
+            localApi = api
+
+            // Hook: cada update do CAN dispara push WS pros clients
+            val listener: (String, String) -> Unit = { _, _ ->
+                try { api.notifyStateChange() } catch (_: Exception) {}
+            }
+            carData?.addListener(listener)
+            carDataListener = listener
+
+            val adv = LocalServiceAdvertiser(this)
+            adv.start(LocalApiServer.activePort, versionName = packageVersionName())
+            advertiser = adv
+            android.util.Log.i(TAG, "✓ LAN server LIGADO em :${LocalApiServer.activePort}")
         } else if (!on && localApi != null) {
             try { advertiser?.stop() } catch (_: Exception) {}
             advertiser = null

@@ -36,9 +36,15 @@ class LocalApiServer(
 ) : NanoWSD(port) {
 
     companion object {
-        const val LOCAL_API_PORT = 8080
+        // Porta default. Se 8080 estiver em uso, tenta fallbacks.
+        const val LOCAL_API_PORT = 8088
+        val FALLBACK_PORTS = listOf(8080, 9080, 7777, 9999)
         private const val TAG = "LocalApiServer"
         private const val MAX_FPS = 10  // throttle WS push
+
+        /** Porta que conseguiu bindar — atualizada por startServer(). */
+        @Volatile var activePort: Int = -1
+            private set
     }
 
     private val gson = Gson()
@@ -50,9 +56,12 @@ class LocalApiServer(
     fun startServer() {
         try {
             start(SOCKET_READ_TIMEOUT, false)
-            Log.i(TAG, "rodando em :$LOCAL_API_PORT (${clients.size} clients)")
+            activePort = listeningPort
+            Log.i(TAG, "✓ rodando em 0.0.0.0:$activePort (bind OK, daemon=false)")
+            Log.i(TAG, "  teste: curl http://<ip>:$activePort/")
         } catch (e: Exception) {
-            Log.e(TAG, "falha ao iniciar: ${e.message}")
+            Log.e(TAG, "✗ falha ao iniciar na porta $listeningPort: ${e.message}")
+            activePort = -1
         }
     }
 

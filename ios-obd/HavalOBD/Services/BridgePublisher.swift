@@ -97,7 +97,7 @@ final class BridgePublisher: ObservableObject {
         }
     }
 
-    /// Aceita "192.168.x.x", "192.168.x.x:8080", "http://192.168.x.x" — normaliza.
+    /// Aceita "192.168.x.x", "192.168.x.x:8088", "http://192.168.x.x" — normaliza.
     /// Versão sem URLComponents (que falha em URLs IPv4 raw em alguns iOS).
     private func parseLanManualUrl() -> URL? {
         var s = lanManualUrl.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -112,10 +112,11 @@ final class BridgePublisher: ObservableObject {
             print("[lan parse] URL() retornou nil pra '\(s)'")
             return nil
         }
-        // Sem porta? Adiciona 8080
+        // Sem porta? Adiciona 8088 (default novo) — user pode digitar com :porta
+        // pra forçar 8080 ou outra porta de fallback.
         if url.port == nil, let host = url.host {
             let scheme = url.scheme ?? "http"
-            return URL(string: "\(scheme)://\(host):8080")
+            return URL(string: "\(scheme)://\(host):8088")
         }
         return url
     }

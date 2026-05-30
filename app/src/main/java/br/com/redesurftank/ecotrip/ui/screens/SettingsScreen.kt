@@ -24,6 +24,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import br.com.redesurftank.ecotrip.managers.BackupManager
+import br.com.redesurftank.ecotrip.managers.LocalApiServer
 import br.com.redesurftank.ecotrip.managers.MqttManager
 import br.com.redesurftank.ecotrip.managers.TripManager
 import br.com.redesurftank.ecotrip.services.CarTelemetryService
@@ -341,6 +342,16 @@ fun SettingsScreen(
                 )
             }
             if (lanEnabled) {
+                val activePort = LocalApiServer.activePort
+                val portStr = if (activePort > 0) "$activePort" else "—"
+                if (activePort <= 0) {
+                    Text(
+                        "⚠ Servidor NÃO está rodando (bind falhou em todas as portas)",
+                        fontSize = 11.sp,
+                        color = Color(0xFFFF4444),
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
                 Text(
                     "Endereços ativos (use o da MESMA rede do iPad):",
                     fontSize = 11.sp,
@@ -352,7 +363,7 @@ fun SettingsScreen(
                 } else {
                     ips.forEach { ifAddr ->
                         Text(
-                            "${ifAddr.ip}:8080  ·  ${ifAddr.ifName}",
+                            "${ifAddr.ip}:$portStr  ·  ${ifAddr.ifName}",
                             fontSize = 13.sp,
                             color = NeonLime,
                             fontWeight = FontWeight.SemiBold,
@@ -361,7 +372,9 @@ fun SettingsScreen(
                 }
                 Text(
                     "wlan0 normalmente é a WiFi cliente (rede de casa/hotspot do " +
-                    "iPad). ap0 / 10.x.x.x costuma ser o hotspot interno do carro.",
+                    "iPad). ap0 / 10.x.x.x costuma ser o hotspot interno do carro. " +
+                    "Teste cada IP no Safari do iPad: http://<ip>:$portStr/ — se " +
+                    "responder JSON {\"ok\":true}, esse é o IP certo.",
                     fontSize = 10.sp,
                     color = TextSecondary,
                 )
