@@ -68,6 +68,9 @@ struct SettingsView: View {
                         get: { publisher.useLanWhenAvailable },
                         set: { publisher.setUseLan($0) }
                     ))
+                    Button("Reconectar LAN agora") {
+                        publisher.reconnectLan()
+                    }
                     HStack {
                         Text("Status")
                         Spacer()

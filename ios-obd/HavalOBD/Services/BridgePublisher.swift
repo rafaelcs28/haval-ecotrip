@@ -185,6 +185,20 @@ final class BridgePublisher: ObservableObject {
         }
     }
 
+    /// Força reconexão do WS LAN. Botão "Reconectar" nas Settings.
+    /// Usa lanUrl (do mDNS) ou a URL manual configurada.
+    func reconnectLan() {
+        let target = lanUrl ?? parseLanManualUrl()
+        print("[lan ws] reconnectLan() — alvo=\(target?.absoluteString ?? "nil")")
+        guard let u = target else {
+            print("[lan ws] reconnectLan: nenhuma URL (mDNS não achou + sem manual)")
+            return
+        }
+        lanUrl = u
+        activeSource = "lan"
+        connectLanWs(to: u)
+    }
+
     // ── WebSocket pro APK local — via Network framework (NWConnection) ────
     // URLSession dá timeout em IPs locais por causa do Local Network Privacy
     // do iOS, mesmo com permissão concedida. NWConnection usa a mesma stack do
