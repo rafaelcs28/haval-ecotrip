@@ -670,7 +670,7 @@
 <div class="topbar">
   <div class="left">
     <div class="clock" id="clock">--:--</div>
-    <div class="lbl" id="version">HEC v1.29</div>
+    <div class="lbl" id="version">HEC v1.30</div>
   </div>
   <div class="right">
     <div class="lbl">Carro</div>
@@ -1671,26 +1671,66 @@ function renderObdDebug() {
     ).join('');
   }
 }
-// Atalhos: chips estilo Drive do PWA. Atualiza .active baseado em state.
+// Atalhos: chips estilo Drive do PWA. Atualiza .active baseado em state,
+// preservando .pending durante 15s ou até state confirmar.
 function renderQuickActions() {
-  setActiveChip('mode',    state.drive_mode);
-  setActiveChip('terrain', state.terrain_mode);
-  setActiveChip('regen',   state.regen_level);
-  setActiveChip('steer',   state.steer_mode);
+  _renderChip('mode',    state.drive_mode);
+  _renderChip('terrain', state.terrain_mode);
+  _renderChip('regen',   state.regen_level);
+  _renderChip('steer',   state.steer_mode);
   _renderEspToggle();
   _renderOnePedalToggle();
 }
-function setActiveChip(attr, val) {
-  if (val === undefined || val === null) return;
+
+// Estado de pendência por chip-attr (mode/terrain/regen/steer).
+// Cada entry: { val: número pendente, timer: ID do setTimeout }
+const _chipPending = {};
+
+function _setChipUI(attr, val, status /* null | 'pending' */) {
   document.querySelectorAll(`.quick-widget .dm-chip[data-${attr}]`).forEach(c => {
-    c.classList.toggle('active', String(c.dataset[attr]) === String(val));
-    // Tira 'pending' quando a confirmação chega
-    if (String(c.dataset[attr]) === String(val)) c.classList.remove('pending');
+    const isThis = String(c.dataset[attr]) === String(val);
+    c.classList.toggle('active', isThis && status !== 'pending');
+    c.classList.toggle('pending', isThis && status === 'pending');
   });
 }
-function setToggle(id, on) {
-  const el = document.getElementById(id);
-  if (el) el.classList.toggle('on', !!on);
+
+function _renderChip(attr, currentVal) {
+  if (currentVal === undefined || currentVal === null) return;
+  const pending = _chipPending[attr];
+  if (pending) {
+    // State confirmou o valor pendente? Limpa.
+    if (String(currentVal) === String(pending.val)) {
+      clearTimeout(pending.timer);
+      delete _chipPending[attr];
+      toast(`✓ ${_chipLabel(attr)} aplicado`);
+    } else {
+      return; // ainda esperando — não sobrescreve o visual pending
+    }
+  }
+  _setChipUI(attr, currentVal, null);
+}
+
+function _chipLabel(attr) {
+  return { mode: 'Modo', terrain: 'Estilo', regen: 'Regen', steer: 'Direção' }[attr] || attr;
+}
+
+function _sendChip(attr, val, action, payloadKey) {
+  // Cancela pendente antigo do mesmo attr
+  if (_chipPending[attr]?.timer) clearTimeout(_chipPending[attr].timer);
+  _chipPending[attr] = {
+    val,
+    timer: setTimeout(() => {
+      delete _chipPending[attr];
+      toast(`⚠ Carro não respondeu — ${_chipLabel(attr)}`);
+      // Re-renderiza com state atual
+      const stateMap = { mode: state.drive_mode, terrain: state.terrain_mode,
+                         regen: state.regen_level, steer: state.steer_mode };
+      _setChipUI(attr, stateMap[attr], null);
+    }, 15000),
+  };
+  _setChipUI(attr, val, 'pending');
+  sendCmd(action, val);
+  toast(`⏳ Enviando ${_chipLabel(attr)}…`);
 }
 
 // Handlers — postam comando pro Swift; Swift faz POST HTTP no bridge.
@@ -1701,30 +1741,11 @@ function sendCmd(action, value) {
   }
   window.webkit.messageHandlers.obd.postMessage({ action, value: String(value) });
 }
-window.setDriveMode = (mode) => {
-  const chip = document.querySelector(`.dm-chip[data-mode="${mode}"]`);
-  if (chip) chip.classList.add('pending');
-  sendCmd('drive_mode_set', mode);
-  toast('⏳ Modo enviado…');
-};
-window.setTerrainMode = (mode) => {
-  const chip = document.querySelector(`.dm-chip[data-terrain="${mode}"]`);
-  if (chip) chip.classList.add('pending');
-  sendCmd('terrain_mode_set', mode);
-  toast('⏳ Estilo enviado…');
-};
-window.setRegenLevel = (level) => {
-  const chip = document.querySelector(`.dm-chip[data-regen="${level}"]`);
-  if (chip) chip.classList.add('pending');
-  sendCmd('regen_level_set', level);
-  toast('⏳ Regen enviado…');
-};
-window.setSteerMode = (mode) => {
-  const chip = document.querySelector(`.dm-chip[data-steer="${mode}"]`);
-  if (chip) chip.classList.add('pending');
-  sendCmd('steer_mode_set', mode);
-  toast('⏳ Direção enviada…');
-};
+
+window.setDriveMode   = (mode)  => _sendChip('mode',    mode,  'drive_mode_set',   'mode');
+window.setTerrainMode = (mode)  => _sendChip('terrain', mode,  'terrain_mode_set', 'mode');
+window.setRegenLevel  = (level) => _sendChip('regen',   level, 'regen_level_set',  'level');
+window.setSteerMode   = (mode)  => _sendChip('steer',   mode,  'steer_mode_set',   'mode');
 // ESP / One-Pedal — espelha lógica do PWA (view-drive.html): pending visual
 // + timeout 15s + key correta (state.esp_enable, state.one_pedal).
 let _espPending = null, _espTimer = null;
