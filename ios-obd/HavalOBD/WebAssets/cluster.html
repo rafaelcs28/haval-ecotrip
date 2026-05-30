@@ -72,7 +72,15 @@
   /* Vinheta radial: centro grande visível, escurece SÓ as bordas */
   body.native .map-widget::after {
     content: ''; position: absolute; inset: 0; pointer-events: none;
-    background: radial-gradient(ellipse 55% 60% at 50% 50%, transparent 40%, rgba(0,0,0,0.6) 85%, rgba(0,0,0,0.85) 100%);
+    /* Vinheta + gradient vertical: topo (onde está o pin) limpo,
+       fundo cada vez mais escuro/translúcido pra dar profundidade */
+    background:
+      linear-gradient(to bottom,
+        transparent 0%,
+        transparent 30%,
+        rgba(0,0,0,0.35) 65%,
+        rgba(0,0,0,0.7) 100%),
+      radial-gradient(ellipse 60% 50% at 50% 28%, transparent 30%, rgba(0,0,0,0.45) 85%);
     border-radius: 18px;
     z-index: 500;
   }
@@ -666,7 +674,7 @@
 <div class="topbar">
   <div class="left">
     <div class="clock" id="clock">--:--</div>
-    <div class="lbl" id="version">HEC v1.24</div>
+    <div class="lbl" id="version">HEC v1.25</div>
   </div>
   <div class="right">
     <div class="lbl">Carro</div>
@@ -1305,7 +1313,8 @@ function updateMap() {
       setTimeout(() => {
         if (!_userZoomed && _lfMap) {
           const size = _lfMap.getSize();
-          _lfMap.panBy([0, -size.y * 0.22], { animate: false });
+          // Pin a ~22% do topo (center deslocado 28% pra baixo)
+          _lfMap.panBy([0, -size.y * 0.28], { animate: false });
         }
       }, 50);
     } else if (!_mapCenteredOnce) {
