@@ -372,12 +372,7 @@
     display: flex; flex-direction: column; align-items: center; justify-content: center;
     text-align: center;
   }
-  /* Debug v1.17: garantir que power widget é visível mesmo apertado */
   body.native .power-widget { overflow: visible !important; }
-  body.native .power-widget .power-display {
-    background: rgba(255,0,0,0.05);
-    outline: 1px dashed rgba(255,255,0,0.4);
-  }
   /* Sparkline 30s do Power widget — atrás do valor central */
   .power-widget { position: relative; }
   .power-spark {
@@ -599,7 +594,7 @@
 <div class="topbar">
   <div class="left">
     <div class="clock" id="clock">--:--</div>
-    <div class="lbl" id="version">HEC v1.17</div>
+    <div class="lbl" id="version">HEC v1.18</div>
   </div>
   <div class="right">
     <div class="lbl">Carro</div>
@@ -684,7 +679,7 @@
   <!-- ═══════ LINHA INFERIOR: 3 widgets clássicos ═══════ -->
   <div class="row-bot">
 
-    <!-- Power Gauge — com sparkline 30s de fundo -->
+    <!-- Power Gauge — versão simplificada inline pra garantir renderização -->
     <div class="widget power-widget">
       <h3><span class="ico">⚡</span> Potência</h3>
       <svg class="power-spark" viewBox="0 0 300 100" preserveAspectRatio="none">
@@ -698,20 +693,21 @@
         <path class="spark-area" id="spark-area" d=""/>
         <path class="spark-line" id="spark-line" d=""/>
       </svg>
-      <div class="power-display">
-        <div>
-          <span class="power-value idle" id="power-val">0</span><span class="power-unit">kW</span>
+      <div class="power-display" style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;position:relative;z-index:5;">
+        <div style="display:flex;align-items:baseline;justify-content:center;color:#f5f5f5;">
+          <span class="power-value idle" id="power-val" style="font-size:72px;font-weight:200;line-height:1;font-variant-numeric:tabular-nums;color:#f5f5f5;">0,0</span><span style="font-size:30px;color:#6b7280;margin-left:6px;">kW</span>
         </div>
-        <div class="power-bar">
-          <div class="power-bar-mid"></div>
-          <div class="power-bar-fill drive" id="power-bar-drive"></div>
-          <div class="power-bar-fill regen" id="power-bar-regen"></div>
+        <div class="power-bar" style="width:80%;height:14px;margin-top:14px;background:#1f1f24;border-radius:999px;position:relative;overflow:hidden;">
+          <div style="position:absolute;top:0;bottom:0;left:50%;width:2px;background:#2c2c33;"></div>
+          <div class="power-bar-fill drive" id="power-bar-drive" style="position:absolute;top:0;bottom:0;left:50%;width:0;background:linear-gradient(90deg,transparent,#fb923c);"></div>
+          <div class="power-bar-fill regen" id="power-bar-regen" style="position:absolute;top:0;bottom:0;left:50%;width:0;background:linear-gradient(270deg,transparent,#22c55e);transform:translateX(-100%);"></div>
         </div>
-        <div class="power-scale"><span>−50 regen</span><span>0</span><span>+120 boost</span></div>
-        <!-- RPM motor a combustão (ICE) — abaixo da escala de potência -->
-        <div class="power-rpm">
-          <span class="rpm-val" id="power-rpm">0</span>
-          <span class="rpm-unit">rpm <small>ICE</small></span>
+        <div style="width:80%;margin-top:6px;display:flex;justify-content:space-between;font-size:12px;color:#6b7280;letter-spacing:.06em;">
+          <span>−50 regen</span><span>0</span><span>+120 boost</span>
+        </div>
+        <div style="margin-top:18px;text-align:center;font-variant-numeric:tabular-nums;color:#f5f5f5;">
+          <span id="power-rpm" style="font-size:28px;font-weight:400;color:#fb923c;">0</span>
+          <span style="font-size:12px;color:#6b7280;margin-left:4px;letter-spacing:.08em;">rpm <span style="font-size:9px;opacity:.8;letter-spacing:.12em;">ICE</span></span>
         </div>
       </div>
     </div>
