@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.sp
 import br.com.redesurftank.ecotrip.managers.BackupManager
 import br.com.redesurftank.ecotrip.managers.MqttManager
 import br.com.redesurftank.ecotrip.managers.TripManager
+import br.com.redesurftank.ecotrip.services.CarTelemetryService
 import br.com.redesurftank.ecotrip.ui.theme.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -284,6 +285,39 @@ fun SettingsScreen(
                 if (pairMsg.isNotBlank()) {
                     Text(pairMsg, fontSize = 12.sp, color = if (pairMsg.contains("✓")) Green else Color(0xFFFF4444))
                 }
+            }
+        }
+
+        // ── LAN direta carro↔iPad ─────────────────────────────────────────────
+        val ctx = LocalContext.current
+        var lanEnabled by remember { mutableStateOf(CarTelemetryService.isLanEnabledPref(ctx)) }
+        SectionCard("📡 Servidor LAN direta (iPad)") {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        if (lanEnabled) "Ligado" else "Desligado",
+                        fontSize = 13.sp,
+                        color = if (lanEnabled) NeonLime else TextSecondary,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        "Anuncia _havalobd._tcp na rede via mDNS. iPad descobre " +
+                        "automaticamente e consome telemetria direto (~5ms vs ~200ms " +
+                        "via Mac mini). Mantém MQTT pra Mac mini independente.",
+                        fontSize = 11.sp,
+                        color    = TextSecondary,
+                    )
+                }
+                Switch(
+                    checked = lanEnabled,
+                    onCheckedChange = {
+                        lanEnabled = it
+                        CarTelemetryService.setLanEnabled(ctx, it)
+                    },
+                )
             }
         }
 
