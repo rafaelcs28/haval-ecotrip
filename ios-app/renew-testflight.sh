@@ -13,14 +13,22 @@ cd "$(dirname "$0")"
 
 SCHEME="${1:?uso: renew-testflight.sh <HavalEcoTrip|BydRecarga>}"
 BUILD_NUMBER="$(date +%y%m%d%H%M)"
-NTFY_TOPIC="${NTFY_TOPIC:-ecotrip-8a3b28289e0c3cae}"
 ASC_KEY_ID="${ASC_KEY_ID:-956AX2CY9V}"
 ASC_ISSUER_ID="${ASC_ISSUER_ID:-ecb6f30a-c529-4c6c-a786-0b52d3c3783f}"
 ASC_KEY_PATH="${ASC_KEY_PATH:-$HOME/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8}"
 ARCHIVE="/tmp/${SCHEME}-renew.xcarchive"
 EXPORT="/tmp/${SCHEME}-renew-export"
 
-notify() { curl -s -H "Title: TestFlight ${SCHEME}" -d "$1" "https://ntfy.sh/${NTFY_TOPIC}" >/dev/null 2>&1 || true; }
+# Aviso via push APNs (endpoint admin do bridge → só o iPhone do Rafael).
+BRIDGE_LOCAL="${BRIDGE_LOCAL:-http://localhost:3000}"
+ADMIN_TOKEN="$(grep -E '^ADMIN_TOKEN=' ../bridge/.env 2>/dev/null | cut -d= -f2-)"
+notify() {
+  [ -n "$ADMIN_TOKEN" ] || return 0
+  curl -s -X POST "$BRIDGE_LOCAL/api/admin/notify" \
+    -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
+    -d "{\"title\":\"TestFlight ${SCHEME}\",\"body\":$(printf '%s' "$1" | python3 -c 'import json,sys;print(json.dumps(sys.stdin.read()))')}" \
+    >/dev/null 2>&1 || true
+}
 fail()   { echo "❌ $1"; notify "❌ FALHA: ${SCHEME} (build ${BUILD_NUMBER}). $1"; exit 1; }
 
 AUTH=(-allowProvisioningUpdates
