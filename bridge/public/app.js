@@ -4506,9 +4506,11 @@ function _buildPriceTimelines() {
     const energy = +c.energy_kwh || 0;
     if (energy < 0.05) continue;
     const ovr = c.cost_override;
+    // PREFERE total/energy atual em vez do perKwh salvo (que pode estar
+    // defasado se energy_kwh foi corrigido depois pelo bridge).
     const pricePerKwh = ovr?.free === true ? 0
-                       : ovr && +ovr.perKwh > 0 ? +ovr.perKwh
                        : ovr && +ovr.total  > 0 ? (+ovr.total / energy)
+                       : ovr && +ovr.perKwh > 0 ? +ovr.perKwh
                        : SEED_KWH_PRICE_PWA;
     const socStart  = +c.soc_start || 0;
     const kWhBefore = socStart * BATTERY_CAPACITY_KWH_PWA / 100;
@@ -5254,10 +5256,12 @@ function _statsPricesHTML(charges, refuels) {
     const e = +c.energy_kwh || 0;
     if (e < 0.05) continue;
     const ov = c.cost_override;
+    // PREFERE total/energy atual em vez do perKwh salvo (que pode estar
+    // defasado se energy_kwh foi corrigido depois pelo bridge).
     let pricePerKwh;
     if (ov?.free === true)                           pricePerKwh = 0;
-    else if (ov && +ov.perKwh > 0)                   pricePerKwh = +ov.perKwh;
     else if (ov && +ov.total > 0)                    pricePerKwh = +ov.total / e;
+    else if (ov && +ov.perKwh > 0)                   pricePerKwh = +ov.perKwh;
     else                                              pricePerKwh = SEED_KWH_PRICE_PWA;
     kwhSpend += pricePerKwh * e;
     kwhTotal += e;
