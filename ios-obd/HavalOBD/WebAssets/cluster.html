@@ -575,7 +575,7 @@
 <div class="topbar">
   <div class="left">
     <div class="clock" id="clock">--:--</div>
-    <div class="lbl" id="version">HEC v1.4</div>
+    <div class="lbl" id="version">HEC v1.5</div>
     <div class="lbl" id="env-badge" style="background:rgba(255,200,50,.2);border:1px solid rgba(255,200,50,.5);border-radius:6px;padding:2px 8px;color:#ffcc33">env=?</div>
   </div>
   <div class="right">
@@ -1084,25 +1084,28 @@ const IN_NATIVE_APP = !!(window.webkit && window.webkit.messageHandlers && windo
 // No app nativo: body.native faz body/row-top transparentes e esconde
 // o Leaflet — MapKit nativo (Swift) ocupa o fundo da tela.
 // Diagnóstico expandido pra entender por que o badge ficou 'env=?'.
-(function() {
-  const hasWebkit = !!window.webkit;
+try {
+  const hasWebkit   = !!window.webkit;
   const hasHandlers = !!(window.webkit && window.webkit.messageHandlers);
-  const hasObd = !!(window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.obd);
-  // Bonus check: WKWebView injeta window.webkit; Safari não.
-  const ua = navigator.userAgent || '';
-  // Aplica .native se tiver QUALQUER sinal de WKWebView do app
+  const hasObd      = !!(window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.obd);
+  const ua          = navigator.userAgent || '';
+  // Marca o title pra debug — Swift pode ler via observeValue / KVO
+  const dbg = `IIFE: webkit=${hasWebkit?1:0} mh=${hasHandlers?1:0} obd=${hasObd?1:0}`;
+  document.title = dbg;
   const isNative = hasObd || (hasWebkit && /iPad|iPhone/.test(ua) && !/Safari/.test(ua.split(' ').pop() || ''));
   if (isNative) document.body.classList.add('native');
-  // Atualiza badge IMEDIATO (sem setTimeout — elemento já no DOM)
   const b = document.getElementById('env-badge');
   if (b) {
-    const txt = `webkit=${hasWebkit?1:0} mh=${hasHandlers?1:0} obd=${hasObd?1:0} native=${isNative?1:0}`;
-    b.textContent = txt;
+    b.textContent = `wk=${hasWebkit?1:0} mh=${hasHandlers?1:0} obd=${hasObd?1:0} nat=${isNative?1:0}`;
     b.style.background  = isNative ? 'rgba(34,197,94,.25)' : 'rgba(255,100,100,.25)';
     b.style.borderColor = isNative ? 'rgba(34,197,94,.6)'  : 'rgba(255,100,100,.6)';
     b.style.color       = isNative ? '#22c55e' : '#ff6464';
   }
-})();
+} catch (e) {
+  const b = document.getElementById('env-badge');
+  if (b) { b.textContent = 'ERR: ' + e.message; b.style.color = '#ff6464'; }
+  document.title = 'ERR: ' + e.message;
+}
 
 if (IN_NATIVE_APP) {
   console.log('[map] app nativo — Leaflet direto (sem esperar MapKit JS)');
