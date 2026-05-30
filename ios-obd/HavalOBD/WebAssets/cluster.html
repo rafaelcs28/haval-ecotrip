@@ -74,9 +74,9 @@
     content: ''; position: absolute; inset: 0; pointer-events: none;
     background: radial-gradient(ellipse 35% 40% at 50% 50%, transparent 0%, rgba(0,0,0,0.55) 60%, rgba(0,0,0,0.85) 100%);
     border-radius: 18px;
-    z-index: 5;
+    z-index: 500;   /* acima das tiles do Leaflet (200) */
   }
-  body.native .map-widget > h3 { z-index: 10; position: relative; }
+  body.native .map-widget > h3 { z-index: 600; position: relative; }
   /* Trip overlay sobre o mapa: 8 métricas distribuídas nos 4 cantos */
   .trip-overlay { display: none; }
   body.native .trip-overlay {
@@ -86,7 +86,7 @@
     grid-template-rows: auto 1fr auto;
     gap: 8px;
     pointer-events: none;
-    z-index: 8;
+    z-index: 700;   /* acima da vinheta (500) e do Leaflet (max ~400) */
     color: var(--text);
     text-shadow: 0 2px 8px rgba(0,0,0,0.8), 0 0 2px rgba(0,0,0,0.9);
   }
@@ -575,7 +575,7 @@
 <div class="topbar">
   <div class="left">
     <div class="clock" id="clock">--:--</div>
-    <div class="lbl" id="version">HEC v1.6</div>
+    <div class="lbl" id="version">HEC v1.7</div>
     <div class="lbl" id="env-badge" style="background:rgba(255,200,50,.2);border:1px solid rgba(255,200,50,.5);border-radius:6px;padding:2px 8px;color:#ffcc33">env=?</div>
   </div>
   <div class="right">
