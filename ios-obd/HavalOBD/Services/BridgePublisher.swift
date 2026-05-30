@@ -18,7 +18,7 @@ final class BridgePublisher: ObservableObject {
     @Published var topicPrefix = UserDefaults.standard.string(forKey: "mqtt_prefix") ?? "haval/ecotrip/obd"
     /// HTTP API do bridge — fonte primária de state. PWA usa GET /api/state.
     /// Ex: bridgeBaseUrl = "https://mqttrafael.duckdns.org" (sem path, sem /ws)
-    @Published var bridgeBaseUrl: String = UserDefaults.standard.string(forKey: "bridge_base_url") ?? "https://mqttrafael.duckdns.org"
+    @Published var bridgeBaseUrl: String = UserDefaults.standard.string(forKey: "bridge_base_url") ?? "https://mac-mini.tailacc6e7.ts.net"
     @Published var bridgeAuthToken: String = UserDefaults.standard.string(forKey: "bridge_auth_token") ?? ""
 
     private var mqtt: CocoaMQTT?
