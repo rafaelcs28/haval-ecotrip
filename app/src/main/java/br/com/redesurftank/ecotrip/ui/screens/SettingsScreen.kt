@@ -32,19 +32,23 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/** IP local da interface WiFi/ethernet (não loopback). Pra mostrar no settings
- *  como fallback manual quando o iPad não conseguir achar via mDNS. */
-private fun getLocalIpAddress(): String? = try {
+/** Todos os IPs locais de interfaces ativas (não loopback). Head unit do Haval
+ *  costuma ter múltiplas: WiFi cliente (192.168.x.x), AP interno (10.x.x.x),
+ *  USB tethering, etc. iPad só alcança o IP da MESMA rede dele. Listamos todos
+ *  pra user descobrir qual usar. */
+private data class NetIfAddr(val ifName: String, val ip: String)
+
+private fun getLocalIpAddresses(): List<NetIfAddr> = try {
     java.net.NetworkInterface.getNetworkInterfaces().toList()
         .filter { it.isUp && !it.isLoopback }
-        .flatMap { it.inetAddresses.toList() }
-        .firstOrNull { addr ->
-            !addr.isLoopbackAddress && addr is java.net.Inet4Address &&
-            (addr.hostAddress?.startsWith("192.168.") == true ||
-             addr.hostAddress?.startsWith("10.") == true ||
-             addr.hostAddress?.startsWith("172.") == true)
-        }?.hostAddress
-} catch (_: Exception) { null }
+        .flatMap { iface ->
+            iface.inetAddresses.toList()
+                .filter { it is java.net.Inet4Address && !it.isLoopbackAddress }
+                .mapNotNull { addr ->
+                    addr.hostAddress?.let { NetIfAddr(iface.name, it) }
+                }
+        }
+} catch (_: Exception) { emptyList() }
 
 /** Extrai o host da URL do Home Assistant e monta a URL do Bridge na porta 3000. */
 private fun deriveBridgeFromHaUrl(haUrl: String): String {
@@ -305,8 +309,9 @@ fun SettingsScreen(
         // ── LAN direta carro↔iPad ─────────────────────────────────────────────
         val ctx = LocalContext.current
         var lanEnabled by remember { mutableStateOf(CarTelemetryService.isLanEnabledPref(ctx)) }
-        // IP local do head unit pra fallback manual no iPad
-        val localIp = remember { getLocalIpAddress() ?: "—" }
+        // Lista de IPs do head unit — recarrega a cada vez que abrir Settings
+        // (em caso de WiFi reconectar e mudar IP).
+        val ips = remember { getLocalIpAddresses() }
         SectionCard("📡 Servidor LAN direta (iPad)") {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -337,13 +342,26 @@ fun SettingsScreen(
             }
             if (lanEnabled) {
                 Text(
-                    "Endereço: $localIp:8080",
-                    fontSize = 12.sp,
-                    color = NeonLime,
+                    "Endereços ativos (use o da MESMA rede do iPad):",
+                    fontSize = 11.sp,
+                    color = TextSecondary,
                     fontWeight = FontWeight.SemiBold,
                 )
+                if (ips.isEmpty()) {
+                    Text("—", fontSize = 12.sp, color = TextSecondary)
+                } else {
+                    ips.forEach { ifAddr ->
+                        Text(
+                            "${ifAddr.ip}:8080  ·  ${ifAddr.ifName}",
+                            fontSize = 13.sp,
+                            color = NeonLime,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+                }
                 Text(
-                    "Use isso no iPad se a descoberta automática falhar.",
+                    "wlan0 normalmente é a WiFi cliente (rede de casa/hotspot do " +
+                    "iPad). ap0 / 10.x.x.x costuma ser o hotspot interno do carro.",
                     fontSize = 10.sp,
                     color = TextSecondary,
                 )
