@@ -152,6 +152,7 @@ class MqttManager private constructor() {
     var latestChargeRemainingMin: Int = 0   // minutos restantes de recarga (0 = indisponível)
     var latestBattPowerPct: Int = 0    // % da potência da bateria (-100=regen total, +100=consumo total)
     var latestEngineRpm:    Int = 0    // rpm — rotação do motor térmico (ICE)
+    var latestSocPct:       Float = 0f // % — SOC consolidado (pro LocalApiServer LAN)
     var latestDriverSeatVent:    Int = 0    // 0=off, 1–3 nível de ventilação banco motorista
     var latestPassengerSeatVent: Int = 0    // 0=off, 1–3 nível de ventilação banco passageiro
     var latestHvacDriverTemp:    Float = 0f // °C — temperatura definida do AC (zona motorista)
@@ -391,14 +392,16 @@ class MqttManager private constructor() {
     // -1 = ainda não publicado nesta sessão.
     // Usado para evitar publicações redundantes e detectar divergência carro ↔ HA.
     @Volatile private var lastPublishedChargeLimitPct: Int = -1
-    @Volatile private var lastPublishedDriveMode: Int = -1   // 0=HEV, 1=Prior. EV, 3=EV
-    @Volatile private var lastPublishedPowerReserve: Int = -1 // 1=inteligente, 2=prioritário
-    @Volatile private var lastPublishedSocTarget: Int = -1    // 20..80 %
-    @Volatile private var lastPublishedTerrainMode: Int = -1  // 0=Normal,1=Sport,2=Eco,3=Neve,4=Areia,5=Lama,11=AWD
-    @Volatile private var lastPublishedRegenLevel: Int = -1   // 0=Normal, 1=Alto, 2=Baixo
-    @Volatile private var lastPublishedOnePedal: Int = -1     // 0=off, 1=on
-    @Volatile private var lastPublishedEsp: Int = -1          // 0=off, 1=on
-    @Volatile private var lastPublishedSteerMode: Int = -1    // 0=Normal, 1=Sport, 2=Conforto
+    // Estados dos controles drive — internal (não private) pra LocalApiServer
+    // expor via LAN. Atualizados pelas funções syncXxxFromCar / publishXxxState.
+    @Volatile var lastPublishedDriveMode: Int = -1   // 0=HEV, 1=Prior. EV, 3=EV
+    @Volatile var lastPublishedPowerReserve: Int = -1 // 1=inteligente, 2=prioritário
+    @Volatile var lastPublishedSocTarget: Int = -1    // 20..80 %
+    @Volatile var lastPublishedTerrainMode: Int = -1  // 0=Normal,1=Sport,2=Eco,3=Neve,4=Areia,5=Lama,11=AWD
+    @Volatile var lastPublishedRegenLevel: Int = -1   // 0=Normal, 1=Alto, 2=Baixo
+    @Volatile var lastPublishedOnePedal: Int = -1     // 0=off, 1=on
+    @Volatile var lastPublishedEsp: Int = -1          // 0=off, 1=on
+    @Volatile var lastPublishedSteerMode: Int = -1    // 0=Normal, 1=Sport, 2=Conforto
 
     // Cache de dedupe por-tópico do snapshot periódico: só publica se o valor mudou.
     // Reseta no reconnect (clear no connect bem-sucedido) → ao reconectar tudo é
@@ -1414,7 +1417,7 @@ class MqttManager private constructor() {
             // o valor MAIS FRESCO sempre vence. Quando carro está parado, HA atualiza
             // (5s) e cobre o gap. Guard >0 evita publicar 0 antes do CAN inicializar.
             val socNow = q.rolling.currentSocPct
-            if (socNow > 0f) pubD("soc_pct", socNow.toInt().toString())
+            if (socNow > 0f) { pubD("soc_pct", socNow.toInt().toString()); latestSocPct = socNow }
 
             // Electrical: corrente de carga, tensão e corrente do pack + potência derivada
             // retain=true — persiste no broker; HA não fica em branco se a conexão cair brevemente

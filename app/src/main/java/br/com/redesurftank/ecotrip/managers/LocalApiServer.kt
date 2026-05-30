@@ -271,6 +271,16 @@ class LocalApiServer(
             "gear"              to m.latestGear,
             "odometer_km"       to m.latestOdometerKm,
             "steering_angle"    to m.latestSteeringAngle,
+            "soc_pct"           to (if (m.latestSocPct > 0f) m.latestSocPct.toInt() else null),
+            // Estados dos controles drive — pra confirmação visual rápida dos
+            // comandos no iPad (toggle/chip vira verde sem esperar o Mac mini).
+            // -1 = ainda não lido do carro → envia null pra não sobrescrever.
+            "drive_mode"        to m.lastPublishedDriveMode.takeIf { it >= 0 },
+            "terrain_mode"      to m.lastPublishedTerrainMode.takeIf { it >= 0 },
+            "regen_level"       to m.lastPublishedRegenLevel.takeIf { it >= 0 },
+            "steer_mode"        to m.lastPublishedSteerMode.takeIf { it >= 0 },
+            "one_pedal"         to m.lastPublishedOnePedal.takeIf { it >= 0 },
+            "esp_enable"        to m.lastPublishedEsp.takeIf { it >= 0 },
         )
         return gson.toJson(data)
     }
