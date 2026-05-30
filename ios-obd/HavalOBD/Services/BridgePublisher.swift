@@ -98,13 +98,26 @@ final class BridgePublisher: ObservableObject {
     }
 
     /// Aceita "192.168.x.x", "192.168.x.x:8080", "http://192.168.x.x" — normaliza.
+    /// Versão sem URLComponents (que falha em URLs IPv4 raw em alguns iOS).
     private func parseLanManualUrl() -> URL? {
-        let s = lanManualUrl.trimmingCharacters(in: .whitespaces)
+        var s = lanManualUrl.trimmingCharacters(in: .whitespacesAndNewlines)
+        print("[lan parse] input='\(s)'")
         guard !s.isEmpty else { return nil }
-        let withScheme = s.hasPrefix("http://") || s.hasPrefix("https://") ? s : "http://\(s)"
-        guard var comps = URLComponents(string: withScheme) else { return nil }
-        if comps.port == nil { comps.port = 8080 }
-        return comps.url
+        // Adiciona scheme se faltar
+        if !s.lowercased().hasPrefix("http://") && !s.lowercased().hasPrefix("https://") {
+            s = "http://\(s)"
+        }
+        // URL() direto — funciona com IPv4 + porta sem URLComponents
+        guard let url = URL(string: s) else {
+            print("[lan parse] URL() retornou nil pra '\(s)'")
+            return nil
+        }
+        // Sem porta? Adiciona 8080
+        if url.port == nil, let host = url.host {
+            let scheme = url.scheme ?? "http"
+            return URL(string: "\(scheme)://\(host):8080")
+        }
+        return url
     }
 
     /// Testa conectividade com URL manual. Chamado pelo botão "Testar" das Settings.
