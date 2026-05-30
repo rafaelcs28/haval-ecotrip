@@ -379,13 +379,33 @@
   .widget h3 .ico { font-size: 16px; }
 
   /* ───────── Power Gauge ───────── */
-  /* Layout flex column: número kW em cima, gráfico GRANDE embaixo */
+  body.native .power-widget { overflow: visible !important; }
+  .power-widget { position: relative; }
+  /* Dual panel: Potência (esq) | Velocidade (dir) — divisão no eixo X */
+  .power-widget .dual-panel {
+    flex: 1; min-height: 0;
+    display: flex; flex-direction: row; align-items: stretch;
+    gap: 14px;
+  }
+  .dual-cell {
+    flex: 1; min-width: 0;
+    display: flex; flex-direction: column; align-items: stretch;
+  }
+  .dual-cell h3 { margin-bottom: 6px; }
+  .dual-divider { width: 1px; background: var(--border); align-self: stretch; }
+  .dual-readout {
+    display: flex; align-items: baseline; justify-content: center; gap: 6px;
+  }
+  .dual-sub {
+    text-align: center; font-size: 12px; color: var(--muted);
+    font-variant-numeric: tabular-nums; margin-top: 2px;
+  }
+  .dual-sub .ice { color: var(--orange); font-size: 16px; font-weight: 500; }
+  /* Layout flex column legado (mantido p/ compat) */
   .power-display {
     flex: 1; min-height: 0;
     display: flex; flex-direction: column; align-items: stretch;
   }
-  body.native .power-widget { overflow: visible !important; }
-  .power-widget { position: relative; }
 
   .power-readout {
     display: flex; align-items: baseline; justify-content: center;
@@ -393,7 +413,7 @@
     margin-top: 4px;
   }
   .power-value {
-    font-size: 64px; font-weight: 300; line-height: 1;
+    font-size: 52px; font-weight: 300; line-height: 1;
     font-variant-numeric: tabular-nums;
     color: var(--text);
     transition: color .25s;
@@ -479,6 +499,11 @@
     opacity: 0.7;
     filter: drop-shadow(0 0 3px rgba(34,211,238,.35));
     vector-effect: non-scaling-stroke;
+  }
+  /* Linha da velocidade — verde-limão pra distinguir da potência (ciano) */
+  .chart-line.spd {
+    stroke: #a3e635;
+    filter: drop-shadow(0 0 3px rgba(163,230,53,.35));
   }
 
   /* Extra: corrente bateria + pack voltage logo abaixo do kW */
@@ -670,7 +695,7 @@
 <div class="topbar">
   <div class="left">
     <div class="clock" id="clock">--:--</div>
-    <div class="lbl" id="version">HEC v1.33</div>
+    <div class="lbl" id="version">HEC v1.34</div>
     <!-- Indicador da fonte de dados (📡 LAN direta · ☁ Mac mini via Tailscale) -->
     <div class="lbl" id="source-badge" style="opacity:.6;font-size:11px;letter-spacing:.08em">☁</div>
   </div>
@@ -757,54 +782,58 @@
   <!-- ═══════ LINHA INFERIOR: 3 widgets clássicos ═══════ -->
   <div class="row-bot">
 
-    <!-- Power Gauge v1.28 — kW + velocidade + RPM + gráfico X/Y 30s -->
+    <!-- Power Gauge v1.34 — dividido: Potência (esq) | Velocidade (dir) -->
     <div class="widget power-widget">
-      <h3><span class="ico">⚡</span> Potência</h3>
-      <div class="power-display">
-        <div class="power-readout">
-          <span class="power-value idle" id="power-val">0,0</span><span class="power-unit">kW</span>
+      <div class="dual-panel">
+        <!-- ─── Painel Potência (±50 kW, zero no meio) ─── -->
+        <div class="dual-cell">
+          <h3><span class="ico">⚡</span> Potência</h3>
+          <div class="dual-readout">
+            <span class="power-value idle" id="power-val">0,0</span><span class="power-unit">kW</span>
+          </div>
+          <div class="dual-sub"><span class="ice" id="power-rpm">0</span> rpm ICE</div>
+          <div class="power-chart-wrap">
+            <div class="chart-y-labels">
+              <span>+50</span><span>+25</span><span class="zero">0</span><span>−25</span><span>−50</span>
+            </div>
+            <svg class="power-chart" viewBox="0 0 300 120" preserveAspectRatio="none">
+              <line class="grid-y" x1="0" y1="10"  x2="300" y2="10"/>
+              <line class="grid-y" x1="0" y1="35"  x2="300" y2="35"/>
+              <line class="grid-zero" x1="0" y1="60"  x2="300" y2="60"/>
+              <line class="grid-y" x1="0" y1="85"  x2="300" y2="85"/>
+              <line class="grid-y" x1="0" y1="110" x2="300" y2="110"/>
+              <line class="grid-x" x1="100" y1="0" x2="100" y2="120"/>
+              <line class="grid-x" x1="200" y1="0" x2="200" y2="120"/>
+              <path class="chart-line" id="chart-line" d="M 0 60 L 300 60"/>
+            </svg>
+            <div class="chart-x-labels"><span>−30s</span><span>agora</span></div>
+          </div>
         </div>
-        <div class="power-sub-row">
-          <div class="power-sub-cell">
-            <span class="sub-val" id="power-speed">0</span>
-            <span class="sub-unit">km/h</span>
+
+        <div class="dual-divider"></div>
+
+        <!-- ─── Painel Velocidade (0–160 km/h, base embaixo) ─── -->
+        <div class="dual-cell">
+          <h3><span class="ico">🏎️</span> Velocidade</h3>
+          <div class="dual-readout">
+            <span class="power-value idle" id="power-speed">0</span><span class="power-unit">km/h</span>
           </div>
-          <div class="power-sub-divider"></div>
-          <div class="power-sub-cell">
-            <span class="sub-val ice" id="power-rpm">0</span>
-            <span class="sub-unit">rpm <small>ICE</small></span>
-          </div>
-        </div>
-        <div class="power-chart-wrap">
-          <!-- Labels eixo Y (kW) -->
-          <div class="chart-y-labels">
-            <span>+50</span>
-            <span>+25</span>
-            <span class="zero">0</span>
-            <span>−25</span>
-            <span>−50</span>
-          </div>
-          <!-- Gráfico SVG: X = 30s (0→300px), Y = ±50 kW (0→120px com zero em y=60) -->
-          <svg class="power-chart" viewBox="0 0 300 120" preserveAspectRatio="none">
-            <!-- Gridlines Y -->
-            <line class="grid-y" x1="0" y1="10"  x2="300" y2="10"/>
-            <line class="grid-y" x1="0" y1="35"  x2="300" y2="35"/>
-            <line class="grid-zero" x1="0" y1="60"  x2="300" y2="60"/>
-            <line class="grid-y" x1="0" y1="85"  x2="300" y2="85"/>
-            <line class="grid-y" x1="0" y1="110" x2="300" y2="110"/>
-            <!-- Gridlines X (a cada 5s) -->
-            <line class="grid-x" x1="50"  y1="0" x2="50"  y2="120"/>
-            <line class="grid-x" x1="100" y1="0" x2="100" y2="120"/>
-            <line class="grid-x" x1="150" y1="0" x2="150" y2="120"/>
-            <line class="grid-x" x1="200" y1="0" x2="200" y2="120"/>
-            <line class="grid-x" x1="250" y1="0" x2="250" y2="120"/>
-            <!-- Série de potência (atualizada a cada 1s). Default = linha do zero -->
-            <path class="chart-line" id="chart-line" d="M 0 60 L 300 60"/>
-            <!-- Sentinels invisíveis pra render() — barras antigas escondidas -->
-          </svg>
-          <!-- Labels eixo X (tempo) -->
-          <div class="chart-x-labels">
-            <span>−30s</span><span>−20s</span><span>−10s</span><span>agora</span>
+          <div class="dual-sub"><span id="speed-max-v">0</span> km/h máx</div>
+          <div class="power-chart-wrap">
+            <div class="chart-y-labels">
+              <span>160</span><span>120</span><span>80</span><span>40</span><span>0</span>
+            </div>
+            <svg class="power-chart" viewBox="0 0 300 120" preserveAspectRatio="none">
+              <line class="grid-y" x1="0" y1="0"   x2="300" y2="0"/>
+              <line class="grid-y" x1="0" y1="30"  x2="300" y2="30"/>
+              <line class="grid-y" x1="0" y1="60"  x2="300" y2="60"/>
+              <line class="grid-y" x1="0" y1="90"  x2="300" y2="90"/>
+              <line class="grid-zero" x1="0" y1="120" x2="300" y2="120"/>
+              <line class="grid-x" x1="100" y1="0" x2="100" y2="120"/>
+              <line class="grid-x" x1="200" y1="0" x2="200" y2="120"/>
+              <path class="chart-line spd" id="chart-line-spd" d="M 0 120 L 300 120"/>
+            </svg>
+            <div class="chart-x-labels"><span>−30s</span><span>agora</span></div>
           </div>
         </div>
       </div>
@@ -1459,7 +1488,7 @@ function render() {
   if (displayKw > 0)      bDrive.style.width = clamp((displayKw / 120) * 50, 0, 50) + '%';
   else if (displayKw < 0) bRegen.style.width = clamp((-displayKw / 50) * 50, 0, 50) + '%';
 
-  // Speed — mostrado no widget Potência (id="power-speed") + legacy speed-val/max
+  // Speed — painel Velocidade (id="power-speed") + máx + legacy speed-val/max
   const spd = +state.speed_kmh || 0;
   const powerSpeedEl = document.getElementById('power-speed');
   if (powerSpeedEl) powerSpeedEl.textContent = fmt0(spd);
@@ -1468,6 +1497,8 @@ function render() {
   if (spd > _speedMax) _speedMax = spd;
   const speedMaxEl = $('speed-max');
   if (speedMaxEl) speedMaxEl.textContent = fmt0(_speedMax);
+  const speedMaxV = document.getElementById('speed-max-v');
+  if (speedMaxV) speedMaxV.textContent = fmt0(_speedMax);
 
   // Trip
   const tr = state.current_trip || state.rolling || {};
@@ -1853,29 +1884,40 @@ toast('🚗 Haval Cluster pronto');
 setInterval(renderObdDebug, 1000);
 setInterval(renderQuickActions, 1000);
 
-// Gráfico potência X/Y — eixo X = últimos 30s, eixo Y = ±50 kW (zero no meio)
-// Atualiza a 1 Hz. Coords SVG: viewBox 300x120, zero em y=60.
+// Gráficos X/Y — eixo X = últimos 30s. Dois painéis:
+//  - Potência: ±50 kW, zero no meio (y=60), viewBox 300x120
+//  - Velocidade: 0–160 km/h, base embaixo (y=120 = 0), viewBox 300x120
+// Atualiza a 1 Hz.
 const POWER_HISTORY = [];
+const SPEED_HISTORY = [];
 const POWER_HIST_MAX = 30;
+
+function _drawLine(history, lineId, mapY) {
+  const line = document.getElementById(lineId);
+  if (!line || history.length < 2) return;
+  const W = 300, step = W / (POWER_HIST_MAX - 1);
+  const offset = POWER_HIST_MAX - history.length;
+  let d = '';
+  history.forEach((v, i) => {
+    const x = ((offset + i) * step).toFixed(1);
+    const y = mapY(v).toFixed(1);
+    d += (i === 0 ? `M ${x} ${y}` : ` L ${x} ${y}`);
+  });
+  line.setAttribute('d', d);
+}
+
 function tickPowerSpark() {
+  // Potência (±50 kW, zero em y=60)
   const kw = +state.motor_power_kw;
   POWER_HISTORY.push(Number.isFinite(kw) ? kw : 0);
   if (POWER_HISTORY.length > POWER_HIST_MAX) POWER_HISTORY.shift();
-  const line = document.getElementById('chart-line');
-  if (!line || POWER_HISTORY.length < 2) return;
-  const W = 300, Y_CENTER = 60, Y_RANGE = 50; // 1 px = 1 kW
-  const step = W / (POWER_HIST_MAX - 1);
-  const offset = POWER_HIST_MAX - POWER_HISTORY.length;
-  const pts = POWER_HISTORY.map((v, i) => {
-    const x = (offset + i) * step;
-    const clamped = clamp(v, -Y_RANGE, Y_RANGE);
-    // +kW sobe na tela (y menor); -kW desce (y maior)
-    const y = Y_CENTER - clamped;
-    return [x.toFixed(1), y.toFixed(1)];
-  });
-  let d = `M ${pts[0][0]} ${pts[0][1]}`;
-  for (let i = 1; i < pts.length; i++) d += ` L ${pts[i][0]} ${pts[i][1]}`;
-  line.setAttribute('d', d);
+  _drawLine(POWER_HISTORY, 'chart-line', v => 60 - clamp(v, -50, 50));
+
+  // Velocidade (0–160 km/h, base em y=120, topo em y=0)
+  const spd = +state.speed_kmh || 0;
+  SPEED_HISTORY.push(Number.isFinite(spd) ? spd : 0);
+  if (SPEED_HISTORY.length > POWER_HIST_MAX) SPEED_HISTORY.shift();
+  _drawLine(SPEED_HISTORY, 'chart-line-spd', v => 120 - (clamp(v, 0, 160) / 160) * 120);
 }
 setInterval(tickPowerSpark, 1000);
 
