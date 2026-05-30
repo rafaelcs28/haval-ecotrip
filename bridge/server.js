@@ -7559,6 +7559,14 @@ function applyMqttMessage(key, value, isRetained = false) {
                 if (newCharge.duration_sec > 0) {
                   newCharge.avg_power_kw = +((newCharge.energy_kwh / (newCharge.duration_sec / 3600)).toFixed(2));
                 }
+                // Se há cost_override com total, recalcula perKwh com a nova energy.
+                // Sem isso, perKwh ficaria inflado (calculado quando energy era parcial)
+                // e contamina o battery_avg_price_per_kwh.
+                if (newCharge.cost_override && +newCharge.cost_override.total > 0) {
+                  const newPerKwh = newCharge.cost_override.total / newCharge.energy_kwh;
+                  console.log(`[charge] cost_override.perKwh recalculado: ${newCharge.cost_override.perKwh}→${newPerKwh.toFixed(4)}`);
+                  newCharge.cost_override.perKwh = +newPerKwh.toFixed(4);
+                }
               }
             }
             if (!existing) {
