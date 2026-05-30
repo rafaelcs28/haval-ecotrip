@@ -57,7 +57,7 @@
      Coluna dir: 2fr (~2/3 da tela) */
   body.native .row-bot {
     grid-template-columns: 1.25fr 2fr !important;
-    grid-template-rows: minmax(0, 1fr) minmax(0, 1fr) !important;
+    grid-template-rows: minmax(0, 0.95fr) minmax(0, 1.05fr) !important;
     padding: 10px !important;
     gap: 10px !important;
   }
@@ -394,15 +394,24 @@
     color: var(--text);
     transition: color .25s;
   }
-  .power-rpm {
-    margin-top: 6px; text-align: center;
+  /* Sub-row: velocidade | RPM ICE */
+  .power-sub-row {
+    margin-top: 10px;
+    display: flex; align-items: center; justify-content: center;
+    gap: 16px;
     font-variant-numeric: tabular-nums;
   }
-  .power-rpm .rpm-val {
-    font-size: 22px; font-weight: 400; color: var(--orange);
+  .power-sub-cell { display: flex; align-items: baseline; gap: 4px; }
+  .power-sub-cell .sub-val {
+    font-size: 30px; font-weight: 300; color: var(--text);
   }
-  .power-rpm .rpm-unit { font-size: 11px; color: var(--muted); margin-left: 4px; letter-spacing: .08em; }
-  .power-rpm .rpm-unit small { font-size: 9px; opacity: 0.8; letter-spacing: .12em; }
+  .power-sub-cell .sub-val.ice { color: var(--orange); }
+  .power-sub-cell .sub-unit { font-size: 11px; color: var(--muted); letter-spacing: .08em; }
+  .power-sub-cell .sub-unit small { font-size: 9px; opacity: 0.8; letter-spacing: .12em; margin-left: 2px; }
+  .power-sub-divider {
+    width: 1px; height: 22px;
+    background: var(--border);
+  }
   .power-value.regen  { color: var(--green); }
   .power-value.drive  { color: var(--orange); }
   .power-value.idle   { color: var(--text); }
@@ -657,7 +666,7 @@
 <div class="topbar">
   <div class="left">
     <div class="clock" id="clock">--:--</div>
-    <div class="lbl" id="version">HEC v1.27</div>
+    <div class="lbl" id="version">HEC v1.28</div>
   </div>
   <div class="right">
     <div class="lbl">Carro</div>
@@ -742,16 +751,23 @@
   <!-- ═══════ LINHA INFERIOR: 3 widgets clássicos ═══════ -->
   <div class="row-bot">
 
-    <!-- Power Gauge v1.21 — número grande no topo + gráfico X/Y 30s embaixo -->
+    <!-- Power Gauge v1.28 — kW + velocidade + RPM + gráfico X/Y 30s -->
     <div class="widget power-widget">
       <h3><span class="ico">⚡</span> Potência</h3>
       <div class="power-display">
         <div class="power-readout">
           <span class="power-value idle" id="power-val">0,0</span><span class="power-unit">kW</span>
         </div>
-        <div class="power-rpm">
-          <span class="rpm-val" id="power-rpm">0</span>
-          <span class="rpm-unit">rpm <small>ICE</small></span>
+        <div class="power-sub-row">
+          <div class="power-sub-cell">
+            <span class="sub-val" id="power-speed">0</span>
+            <span class="sub-unit">km/h</span>
+          </div>
+          <div class="power-sub-divider"></div>
+          <div class="power-sub-cell">
+            <span class="sub-val ice" id="power-rpm">0</span>
+            <span class="sub-unit">rpm <small>ICE</small></span>
+          </div>
         </div>
         <div class="power-chart-wrap">
           <!-- Labels eixo Y (kW) -->
@@ -776,8 +792,8 @@
             <line class="grid-x" x1="150" y1="0" x2="150" y2="120"/>
             <line class="grid-x" x1="200" y1="0" x2="200" y2="120"/>
             <line class="grid-x" x1="250" y1="0" x2="250" y2="120"/>
-            <!-- Série de potência (atualizada a cada 1s) -->
-            <path class="chart-line" id="chart-line" d=""/>
+            <!-- Série de potência (atualizada a cada 1s). Default = linha do zero -->
+            <path class="chart-line" id="chart-line" d="M 0 60 L 300 60"/>
             <!-- Sentinels invisíveis pra render() — barras antigas escondidas -->
           </svg>
           <!-- Labels eixo X (tempo) -->
@@ -874,6 +890,12 @@
               <div class="op-knob"></div>
             </div>
           </div>
+          <div class="one-pedal-row">
+            <span class="op-lbl">🛡 ESP</span>
+            <div class="op-toggle" id="esp-toggle" onclick="toggleEsp()">
+              <div class="op-knob"></div>
+            </div>
+          </div>
         </div>
         <!-- Direção -->
         <div class="dc-card">
@@ -882,21 +904,6 @@
             <div class="dm-chip" data-steer="2" onclick="setSteerMode(2)">Conforto</div>
             <div class="dm-chip" data-steer="0" onclick="setSteerMode(0)">Normal</div>
             <div class="dm-chip" data-steer="1" onclick="setSteerMode(1)">Sport</div>
-          </div>
-        </div>
-        <!-- A/C + ESP -->
-        <div class="dc-card">
-          <div class="dc-row">
-            <span class="op-lbl">❄ A/C</span>
-            <div class="op-toggle" id="ac-toggle" onclick="toggleAc()">
-              <div class="op-knob"></div>
-            </div>
-          </div>
-          <div class="dc-row">
-            <span class="op-lbl">🛡 ESP</span>
-            <div class="op-toggle" id="esp-toggle" onclick="toggleEsp()">
-              <div class="op-knob"></div>
-            </div>
           </div>
         </div>
       </div>
@@ -1252,9 +1259,24 @@ function initLeaflet() {
   }
 }
 
+let _mapNoGpsBadge = null;
 function updateMap() {
   const lat = +state.gps_lat, lng = +state.gps_lng;
-  if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat === 0) return;
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat === 0) {
+    // Mostra badge "GPS aguardando…" no widget de mapa pra usuário saber
+    if (document.body.classList.contains('native') && !_mapNoGpsBadge) {
+      const mw = document.querySelector('.map-widget');
+      if (mw) {
+        _mapNoGpsBadge = document.createElement('div');
+        _mapNoGpsBadge.textContent = '⌖ aguardando GPS…';
+        _mapNoGpsBadge.style.cssText = 'position:absolute;bottom:14px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.65);color:#fbbf24;font-size:11px;letter-spacing:.08em;padding:6px 14px;border-radius:8px;z-index:550;pointer-events:none;';
+        mw.appendChild(_mapNoGpsBadge);
+      }
+    }
+    return;
+  }
+  // Tem GPS — remove o badge se ainda existia
+  if (_mapNoGpsBadge) { _mapNoGpsBadge.remove(); _mapNoGpsBadge = null; }
 
   if (_mapEngine === 'mapkit' && _mkMap) {
     const coord = new mapkit.Coordinate(lat, lng);
@@ -1406,8 +1428,10 @@ function render() {
   if (displayKw > 0)      bDrive.style.width = clamp((displayKw / 120) * 50, 0, 50) + '%';
   else if (displayKw < 0) bRegen.style.width = clamp((-displayKw / 50) * 50, 0, 50) + '%';
 
-  // Speed (elementos podem não existir mais — render não pode quebrar aqui)
+  // Speed — mostrado no widget Potência (id="power-speed") + legacy speed-val/max
   const spd = +state.speed_kmh || 0;
+  const powerSpeedEl = document.getElementById('power-speed');
+  if (powerSpeedEl) powerSpeedEl.textContent = fmt0(spd);
   const speedValEl = $('speed-val');
   if (speedValEl) speedValEl.textContent = fmt0(spd);
   if (spd > _speedMax) _speedMax = spd;
