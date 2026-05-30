@@ -166,10 +166,17 @@ final class BridgePublisher: ObservableObject {
     // ── WebSocket pro APK local ──────────────────────────────────────────
     private func connectLanWs(to baseUrl: URL) {
         disconnectLanWs()
-        guard var comps = URLComponents(url: baseUrl, resolvingAgainstBaseURL: false) else { return }
-        comps.scheme = "ws"
-        comps.path = "/ws/state"
-        guard let wsUrl = comps.url else { return }
+        // Constrói ws:// manualmente (URLComponents.url retorna nil em alguns iOS
+        // pra IPv4 com porta — mesmo bug do parseLanManualUrl)
+        guard let host = baseUrl.host else {
+            print("[lan ws] baseUrl sem host: \(baseUrl)")
+            return
+        }
+        let port = baseUrl.port ?? 8080
+        guard let wsUrl = URL(string: "ws://\(host):\(port)/ws/state") else {
+            print("[lan ws] não consegui montar ws URL pra host=\(host) port=\(port)")
+            return
+        }
 
         let task = URLSession.shared.webSocketTask(with: wsUrl)
         lanWsTask = task
