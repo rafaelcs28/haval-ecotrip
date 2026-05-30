@@ -1246,7 +1246,7 @@ function render() {
   const isCharging = state.charging_state === 1;
   const displayKw  = isCharging ? -chargeKw : motorKw;
   const pVal = $('power-val');
-  pVal.textContent = Math.round(displayKw);
+  pVal.textContent = displayKw.toFixed(1).replace('.', ',');
   pVal.classList.remove('regen','drive','idle');
   if (displayKw <= -1)     pVal.classList.add('regen');
   else if (displayKw >= 1) pVal.classList.add('drive');
