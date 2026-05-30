@@ -90,8 +90,11 @@
   .trip-overlay > div {
     position: absolute;
     text-shadow: 0 2px 8px rgba(0,0,0,0.95), 0 0 4px rgba(0,0,0,0.9), 0 0 1px #000;
-    border: 1px solid rgba(0,255,0,0.6);    /* DEBUG */
-    padding: 2px;
+    border: 2px solid rgba(0,255,0,0.9);    /* DEBUG */
+    background: rgba(255,0,255,0.35);       /* DEBUG: magenta */
+    min-width: 140px; min-height: 60px;
+    z-index: 9999;
+    padding: 4px;
   }
   .trip-overlay .tov {
     font-size: 24px; font-weight: 300; font-variant-numeric: tabular-nums; line-height: 1;
@@ -578,7 +581,7 @@
 <div class="topbar">
   <div class="left">
     <div class="clock" id="clock">--:--</div>
-    <div class="lbl" id="version">HEC v1.10 DEBUG</div>
+    <div class="lbl" id="version">HEC v1.11 DEBUG2</div>
     <div class="lbl" id="env-badge" style="background:rgba(255,200,50,.2);border:1px solid rgba(255,200,50,.5);border-radius:6px;padding:2px 8px;color:#ffcc33">env=?</div>
   </div>
   <div class="right">
