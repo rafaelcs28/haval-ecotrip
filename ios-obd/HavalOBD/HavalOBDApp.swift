@@ -8,6 +8,7 @@ struct HavalOBDApp: App {
     @StateObject private var channel   = OBDBridgeChannel()
     @StateObject private var discovery = OBDDiscovery()
     @StateObject private var location  = LocationManager()
+    @StateObject private var lanDisc   = LocalDiscovery()
 
     init() {
         let bluetooth = BluetoothManager()
@@ -25,6 +26,7 @@ struct HavalOBDApp: App {
                 .environmentObject(channel)
                 .environmentObject(discovery)
                 .environmentObject(location)
+                .environmentObject(lanDisc)
                 .preferredColorScheme(.dark)
                 .ignoresSafeArea()
                 .statusBarHidden(true)
@@ -42,6 +44,17 @@ struct HavalOBDApp: App {
                     // Bridge HTTP — fonte PRINCIPAL agora (igual PWA).
                     // Faz GET /api/state com Bearer token a cada 1s.
                     publisher.restartHttpPoll()
+                    // ── LAN direta carro↔iPad (descoberta mDNS) ───────────
+                    // Quando achar APK na LAN, BridgePublisher conecta WS
+                    // local pra telemetria fast (~5ms) e usa POST direto pros
+                    // comandos. Fallback automático pra Tailscale.
+                    lanDisc.setEnabled(publisher.useLanWhenAvailable)
+                    // Repassa o URL descoberto pro publisher
+                    Task { @MainActor in
+                        for await url in lanDisc.$localUrl.values {
+                            publisher.updateLanUrl(url)
+                        }
+                    }
                 }
         }
     }

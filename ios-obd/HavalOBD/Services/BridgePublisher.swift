@@ -21,10 +21,24 @@ final class BridgePublisher: ObservableObject {
     @Published var bridgeBaseUrl: String = UserDefaults.standard.string(forKey: "bridge_base_url") ?? "https://mac-mini.tailacc6e7.ts.net"
     @Published var bridgeAuthToken: String = UserDefaults.standard.string(forKey: "bridge_auth_token") ?? ""
 
+    // ── LAN direta (descoberta via mDNS do APK no carro) ──────────────────
+    /// URL HTTP do APK na LAN. Preenchido pelo `LocalDiscovery` quando o iPad
+    /// está na mesma rede do carro. nil → não disponível, usa Tailscale.
+    @Published var lanUrl: URL? = nil
+    /// Toggle do user: usar LAN quando disponível. Default ON.
+    @Published var useLanWhenAvailable: Bool =
+        UserDefaults.standard.object(forKey: "use_lan_when_available") as? Bool ?? true
+    /// Fonte ativa atual — "lan" ou "cloud". Pro indicador na topbar.
+    @Published var activeSource: String = "cloud"
+    /// True quando WS local tá conectado.
+    @Published var lanWsConnected: Bool = false
+
     private var mqtt: CocoaMQTT?
     private weak var elm: ELM327?
     private var publishTimer: Timer?
     private var httpPollTimer: Timer?
+    private var lanWsTask: URLSessionWebSocketTask?
+    private var lanWsHeartbeat: Timer?
     /// Callback chamado quando o bridge publica state extra (viagem em curso,
     /// preços, charging) via MQTT. Permite o cluster.html receber dados que
     /// não vêm do OBD direto.
@@ -54,7 +68,104 @@ final class BridgePublisher: ObservableObject {
         UserDefaults.standard.set(topicPrefix, forKey: "mqtt_prefix")
         UserDefaults.standard.set(bridgeBaseUrl, forKey: "bridge_base_url")
         UserDefaults.standard.set(bridgeAuthToken, forKey: "bridge_auth_token")
+        UserDefaults.standard.set(useLanWhenAvailable, forKey: "use_lan_when_available")
         restartHttpPoll()
+    }
+
+    /// Chamado pelo `LocalDiscovery` quando o APK aparece/some na LAN.
+    /// Decide se ativa WS local ou volta pro modo cloud.
+    func updateLanUrl(_ url: URL?) {
+        let prev = lanUrl
+        lanUrl = url
+        if useLanWhenAvailable, let u = url {
+            if prev?.absoluteString != u.absoluteString {
+                connectLanWs(to: u)
+                activeSource = "lan"
+            }
+        } else {
+            disconnectLanWs()
+            activeSource = "cloud"
+        }
+    }
+
+    /// Toggle nas Settings. Quando vira OFF, força modo cloud.
+    func setUseLan(_ on: Bool) {
+        useLanWhenAvailable = on
+        UserDefaults.standard.set(on, forKey: "use_lan_when_available")
+        if on {
+            if let u = lanUrl { connectLanWs(to: u); activeSource = "lan" }
+        } else {
+            disconnectLanWs()
+            activeSource = "cloud"
+        }
+    }
+
+    // ── WebSocket pro APK local ──────────────────────────────────────────
+    private func connectLanWs(to baseUrl: URL) {
+        disconnectLanWs()
+        guard var comps = URLComponents(url: baseUrl, resolvingAgainstBaseURL: false) else { return }
+        comps.scheme = "ws"
+        comps.path = "/ws/state"
+        guard let wsUrl = comps.url else { return }
+
+        let task = URLSession.shared.webSocketTask(with: wsUrl)
+        lanWsTask = task
+        task.resume()
+        receiveLanWs(task)
+
+        // Heartbeat ping a cada 15s
+        lanWsHeartbeat?.invalidate()
+        lanWsHeartbeat = Timer.scheduledTimer(withTimeInterval: 15.0, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.lanWsTask?.send(.string("ping")) { err in
+                    if let err = err { print("[lan ws] ping err: \(err)") }
+                }
+            }
+        }
+        lanWsConnected = true
+        print("[lan ws] conectando em \(wsUrl)")
+    }
+
+    private func disconnectLanWs() {
+        lanWsHeartbeat?.invalidate(); lanWsHeartbeat = nil
+        lanWsTask?.cancel(with: .goingAway, reason: nil)
+        lanWsTask = nil
+        lanWsConnected = false
+    }
+
+    private func receiveLanWs(_ task: URLSessionWebSocketTask) {
+        task.receive { [weak self] result in
+            guard let self = self else { return }
+            switch result {
+            case .success(let msg):
+                Task { @MainActor in
+                    self.handleLanWsMessage(msg)
+                    self.receiveLanWs(task)
+                }
+            case .failure(let err):
+                Task { @MainActor in
+                    print("[lan ws] receive err: \(err.localizedDescription) — caindo pra cloud")
+                    self.disconnectLanWs()
+                    self.activeSource = "cloud"
+                }
+            }
+        }
+    }
+
+    private func handleLanWsMessage(_ msg: URLSessionWebSocketTask.Message) {
+        switch msg {
+        case .string(let txt):
+            if txt == "pong" { return }
+            guard let data = txt.data(using: .utf8),
+                  let obj = try? JSONSerialization.jsonObject(with: data),
+                  let dict = obj as? [String: Any] else { return }
+            self.onClusterExtra?(dict)
+        case .data(let data):
+            guard let obj = try? JSONSerialization.jsonObject(with: data),
+                  let dict = obj as? [String: Any] else { return }
+            self.onClusterExtra?(dict)
+        @unknown default: break
+        }
     }
 
     /// Login no bridge — POST /api/auth/login com SHA256(senha). Salva token
@@ -140,9 +251,40 @@ final class BridgePublisher: ObservableObject {
         print("[bridge http] poll iniciado em \(bridgeBaseUrl)/api/state")
     }
 
-    /// POST genérico no bridge (drive-mode, terrain-mode, regen-level, etc).
-    /// Mesmo padrão do PWA: Authorization: Bearer + JSON body.
+    /// POST genérico — prefere LAN (APK direto, ~5ms) e cai pra Tailscale
+    /// (Mac mini, ~200ms) se LAN falhar ou estiver desabilitada.
     func postCommand(path: String, body: [String: Any]) async {
+        // Tenta LAN se ativo (path /api/X vira /api/cmd/X no APK)
+        if useLanWhenAvailable, let base = lanUrl {
+            let cmdPath = path.replacingOccurrences(of: "/api/", with: "/api/cmd/")
+                .replacingOccurrences(of: "-", with: "_")
+            let lanOk = await postCommandLan(base: base, path: cmdPath, body: body)
+            if lanOk { return }
+            print("[lan http] POST falhou — fallback Tailscale")
+        }
+        await postCommandCloud(path: path, body: body)
+    }
+
+    private func postCommandLan(base: URL, path: String, body: [String: Any]) async -> Bool {
+        guard let url = URL(string: path, relativeTo: base) else { return false }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.timeoutInterval = 2
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        do {
+            let (data, resp) = try await URLSession.shared.data(for: req)
+            let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            let txt = String(data: data, encoding: .utf8) ?? ""
+            print("[lan http] POST \(path) → \(status) \(txt.prefix(120))")
+            return (200..<300).contains(status)
+        } catch {
+            print("[lan http] POST \(path) erro: \(error.localizedDescription)")
+            return false
+        }
+    }
+
+    private func postCommandCloud(path: String, body: [String: Any]) async {
         let base = bridgeBaseUrl.hasSuffix("/") ? String(bridgeBaseUrl.dropLast()) : bridgeBaseUrl
         guard !bridgeAuthToken.isEmpty,
               let url = URL(string: "\(base)\(path)") else {
