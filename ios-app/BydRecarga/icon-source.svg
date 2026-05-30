@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%"  stop-color="#3a0a24"/>
+      <stop offset="55%" stop-color="#a01457"/>
+      <stop offset="100%" stop-color="#ff5fa2"/>
+    </linearGradient>
+    <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"  stop-color="#ffd0e6"/>
+      <stop offset="100%" stop-color="#ff79b6"/>
+    </linearGradient>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="10" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <!-- Fundo (iOS aplica máscara arredondada) -->
+  <rect width="1024" height="1024" fill="url(#bg)"/>
+
+  <!-- ───────── Carro SUV (silhueta de lado) ───────── -->
+  <g transform="translate(180 300)">
+    <!-- corpo -->
+    <path d="M 30 170
+             Q 40 92 132 86
+             L 250 82
+             Q 300 18 396 16
+             L 470 16
+             Q 560 20 604 86
+             L 636 92
+             Q 664 100 664 150
+             L 664 188
+             Q 664 210 640 210
+             L 54 210
+             Q 30 210 30 186 Z"
+          fill="url(#body)" stroke="#fff0f7" stroke-width="6"/>
+    <!-- janelas -->
+    <path d="M 268 86 Q 312 38 392 38 L 430 38 L 430 86 Z" fill="#3a0a24" opacity="0.55"/>
+    <path d="M 452 38 L 470 38 Q 540 40 576 86 L 452 86 Z" fill="#3a0a24" opacity="0.55"/>
+    <!-- rodas -->
+    <circle cx="170" cy="212" r="62" fill="#3a0a24" stroke="#fff0f7" stroke-width="14"/>
+    <circle cx="170" cy="212" r="22" fill="#ff79b6"/>
+    <circle cx="520" cy="212" r="62" fill="#3a0a24" stroke="#fff0f7" stroke-width="14"/>
+    <circle cx="520" cy="212" r="22" fill="#ff79b6"/>
+  </g>
+
+  <!-- ───────── Raio de recarga (canto sup direito) ───────── -->
+  <g filter="url(#glow)">
+    <path d="M 690 150
+             L 590 330
+             L 662 330
+             L 612 470
+             L 760 290
+             L 678 290 Z"
+          fill="#ffffff" stroke="#3a0a24" stroke-width="9" stroke-linejoin="round"/>
+  </g>
+
+  <!-- ───────── Texto "Grasi" ───────── -->
+  <text x="512" y="720" text-anchor="middle"
+        font-family="Helvetica, Arial, sans-serif" font-weight="bold"
+        font-size="180" fill="#ffffff" letter-spacing="2">Grasi</text>
+  <text x="512" y="810" text-anchor="middle"
+        font-family="Helvetica, Arial, sans-serif" font-weight="600"
+        font-size="68" fill="#ffd0e6" letter-spacing="6">RECARGA</text>
+</svg>
