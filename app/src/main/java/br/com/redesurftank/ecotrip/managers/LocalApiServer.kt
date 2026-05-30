@@ -72,6 +72,9 @@ class LocalApiServer(
 
     private fun startHeartbeat() {
         heartbeatTimer?.cancel()
+        // 250ms (4 Hz): mantém o stream vivo E dá resolução temporal pros
+        // gráficos do iPad (velocidade/kW). Na LAN o tráfego é desprezível
+        // (~1.6 KB/s). Só envia se há clients conectados.
         heartbeatTimer = java.util.Timer("lan-ws-heartbeat", true).apply {
             scheduleAtFixedRate(object : java.util.TimerTask() {
                 override fun run() {
@@ -81,7 +84,7 @@ class LocalApiServer(
                         try { ws.send(json) } catch (_: Exception) {}
                     }
                 }
-            }, 1000L, 1000L)
+            }, 250L, 250L)
         }
     }
 
