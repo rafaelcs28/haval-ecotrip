@@ -97,38 +97,43 @@ final class BridgePublisher: ObservableObject {
         }
     }
 
-    /// Aceita "192.168.x.x", "192.168.x.x:8088", "http://192.168.x.x" — normaliza.
-    /// Versão sem URLComponents (que falha em URLs IPv4 raw em alguns iOS).
+    /// Parse defensivo — quebra IP:porta manual pra evitar qualquer surpresa
+    /// do URL() do iOS. Aceita "192.168.x.x", "192.168.x.x:8088",
+    /// "http://192.168.x.x:8088".
     private func parseLanManualUrl() -> URL? {
-        var s = lanManualUrl.trimmingCharacters(in: .whitespacesAndNewlines)
-        print("[lan parse] input='\(s)'")
+        // Sanitize agressivo — remove whitespace, controle, qualquer não-printável
+        var s = lanManualUrl.unicodeScalars
+            .filter { $0.value > 0x20 && $0.value < 0x7F }
+            .map { Character($0) }
+            .reduce("") { $0 + String($1) }
+        print("[lan parse] raw='\(lanManualUrl)' cleaned='\(s)' bytes=\(Array(lanManualUrl.utf8))")
         guard !s.isEmpty else { return nil }
-        // Adiciona scheme se faltar
-        if !s.lowercased().hasPrefix("http://") && !s.lowercased().hasPrefix("https://") {
-            s = "http://\(s)"
-        }
-        // URL() direto — funciona com IPv4 + porta sem URLComponents
-        guard let url = URL(string: s) else {
-            print("[lan parse] URL() retornou nil pra '\(s)'")
+        // Tira scheme se já tiver
+        if s.lowercased().hasPrefix("http://") { s = String(s.dropFirst(7)) }
+        else if s.lowercased().hasPrefix("https://") { s = String(s.dropFirst(8)) }
+        // Separa host e port manualmente
+        let parts = s.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
+        let host = String(parts[0])
+        let port: Int = parts.count > 1 ? (Int(parts[1]) ?? 8088) : 8088
+        guard !host.isEmpty else {
+            print("[lan parse] host vazio")
             return nil
         }
-        // Sem porta? Adiciona 8088 (default novo) — user pode digitar com :porta
-        // pra forçar 8080 ou outra porta de fallback.
-        if url.port == nil, let host = url.host {
-            let scheme = url.scheme ?? "http"
-            return URL(string: "\(scheme)://\(host):8088")
-        }
+        let urlStr = "http://\(host):\(port)"
+        let url = URL(string: urlStr)
+        print("[lan parse] resultado: '\(urlStr)' → \(url?.absoluteString ?? "nil")")
         return url
     }
 
     /// Testa conectividade com URL manual. Chamado pelo botão "Testar" das Settings.
     func testLanManualUrl() async {
         guard let url = parseLanManualUrl() else {
-            lanTestResult = "❌ URL inválida"
+            lanTestResult = "❌ Não consegui montar URL — veja log Xcode"
             return
         }
-        lanTestResult = "⏳ Testando…"
-        var req = URLRequest(url: url.appendingPathComponent("/api/state"))
+        lanTestResult = "⏳ Testando \(url.absoluteString)…"
+        let stateUrl = URL(string: "\(url.absoluteString)/api/state") ?? url
+        var req = URLRequest(url: stateUrl)
         req.timeoutInterval = 3
         do {
             let (_, resp) = try await URLSession.shared.data(for: req)
