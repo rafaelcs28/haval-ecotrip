@@ -174,7 +174,10 @@ async function _send(targets, body, pushType = 'liveactivity') {
 
 // ── push-to-start: cria a Live Activity (app fechado/bloqueado) ───────────────
 async function pushStart(type, deviceId, attributes, contentState, opts = {}) {
-  const targets = startTokens.filter(t => t.type === type && (!deviceId || t.deviceId === deviceId));
+  let targets = startTokens.filter(t => t.type === type && (!deviceId || t.deviceId === deviceId));
+  // Gating opcional por device (ex.: só devices com la_songpro=true). Sem isso,
+  // qualquer device que registrou o pts-token do tipo receberia a LA.
+  if (typeof opts.allow === 'function') targets = targets.filter(t => opts.allow(t.deviceId));
   if (!targets.length) { console.warn(`[apns] pushStart sem token (type=${type})`); return { sent: 0 }; }
   const aps = {
     timestamp: Math.floor(Date.now() / 1000),

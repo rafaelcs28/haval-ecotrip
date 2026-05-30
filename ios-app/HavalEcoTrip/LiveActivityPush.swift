@@ -25,6 +25,7 @@ final class LiveActivityPush {
         observe(TripActivityAttributes.self,      type: "TripActivityAttributes")
         observe(MotorActivityAttributes.self,     type: "MotorActivityAttributes")
         observe(SecurityActivityAttributes.self,  type: "SecurityActivityAttributes")
+        observe(SongProActivityAttributes.self,   type: "SongProActivityAttributes")
     }
 
     private func observe<T: ActivityAttributes>(_ attr: T.Type, type: String) {
