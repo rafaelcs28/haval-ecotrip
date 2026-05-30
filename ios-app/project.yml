@@ -153,3 +153,65 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: br.com.consorciolimpagyn.havalecotrip.HavalEcoTripWidget
         TARGETED_DEVICE_FAMILY: "1,2"
         INFOPLIST_KEY_NSHumanReadableCopyright: ""
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  #  App minimal "BYD Recarga" (iPhone da esposa) — função única: Live Activity
+  #  da recarga do BYD Song Pro. Reusa SongProActivityAttributes + a view da LA.
+  # ═══════════════════════════════════════════════════════════════════════════
+  BydRecarga:
+    type: application
+    platform: iOS
+    sources:
+      - BydRecarga
+      # Tipo da LA compartilhado (app referencia, widget renderiza)
+      - path: HavalEcoTripWidget/SongProActivityAttributes.swift
+    info:
+      path: BydRecarga/Info.plist
+      properties:
+        CFBundleDisplayName: "BYD Recarga"
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        NSSupportsLiveActivities: true
+        NSSupportsLiveActivitiesFrequentUpdates: true
+        ITSAppUsesNonExemptEncryption: false
+        UIBackgroundModes:
+          - remote-notification
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: br.com.consorciolimpagyn.songpro
+        TARGETED_DEVICE_FAMILY: "1"        # só iPhone
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+      configs:
+        Debug:
+          CODE_SIGN_ENTITLEMENTS: BydRecarga/BydRecarga-dev.entitlements
+        Release:
+          CODE_SIGN_ENTITLEMENTS: BydRecarga/BydRecarga-prod.entitlements
+    dependencies:
+      - target: BydRecargaWidget
+    scheme:
+      gatherCoverageData: false
+
+  BydRecargaWidget:
+    type: app-extension
+    platform: iOS
+    sources:
+      - BydRecargaWidget
+      # Reusa o tipo + a view da LA do Song Pro (mesmos arquivos do widget Haval)
+      - path: HavalEcoTripWidget/SongProActivityAttributes.swift
+      - path: HavalEcoTripWidget/SongProLiveActivity.swift
+    info:
+      path: BydRecargaWidget/Info.plist
+      properties:
+        CFBundleDisplayName: "BYD Recarga Widget"
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: br.com.consorciolimpagyn.songpro.BydRecargaWidget
+        TARGETED_DEVICE_FAMILY: "1"
+        INFOPLIST_KEY_NSHumanReadableCopyright: ""

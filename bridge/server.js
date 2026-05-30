@@ -4893,7 +4893,8 @@ app.post('/api/la/relaunch', async (req, res) => {
     if (_songProSession && _songProSession.active && _songProEnabled()) {
       const cs = _songProContentState(true);
       await apnsLive.pushStart(SONGPRO_LA_TYPE, '', { carName: 'BYD Song Pro' }, cs,
-        { staleDate: Date.now() + 6 * 3600_000, alert: { title: '🔵 Esposa carregando', body: 'Card reativado.' } });
+        { staleDate: Date.now() + 6 * 3600_000, alert: { title: '🔵 Esposa carregando', body: 'Card reativado.' },
+          allow: (deviceId) => getPrefsForDevice(deviceId).la_songpro === true });
       done.push('song-pro');
     }
   } catch (e) { return res.status(500).json({ error: e.message }); }
@@ -6326,7 +6327,8 @@ function handleSongProMessage(jsonStr) {
       console.log(`[songpro] sessão iniciada (SOC ${soc}% · ${power} kW)`);
       if (_songProEnabled() && apnsLive.enabled) {
         apnsLive.pushStart(SONGPRO_LA_TYPE, '', { carName: 'BYD Song Pro' }, _songProContentState(true),
-          { staleDate: now + 6 * 3600_000, alert: { title: '🔵 Esposa carregando', body: `SOC ${soc.toFixed(0)}% · ${power.toFixed(1)} kW` } })
+          { staleDate: now + 6 * 3600_000, alert: { title: '🔵 Esposa carregando', body: `SOC ${soc.toFixed(0)}% · ${power.toFixed(1)} kW` },
+            allow: (deviceId) => getPrefsForDevice(deviceId).la_songpro === true })
           .catch(e => console.warn('[songpro] pushStart falhou:', e.message));
       }
     } else {
