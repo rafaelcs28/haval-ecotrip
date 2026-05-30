@@ -575,7 +575,8 @@
 <div class="topbar">
   <div class="left">
     <div class="clock" id="clock">--:--</div>
-    <div class="lbl" id="version">HEC v1.1</div>
+    <div class="lbl" id="version">HEC v1.3</div>
+    <div class="lbl" id="env-badge" style="background:rgba(255,200,50,.2);border:1px solid rgba(255,200,50,.5);border-radius:6px;padding:2px 8px;color:#ffcc33">env=?</div>
   </div>
   <div class="right">
     <div class="lbl">Bridge</div>
@@ -1085,6 +1086,17 @@ const IN_NATIVE_APP = !!(window.webkit && window.webkit.messageHandlers && windo
 if (IN_NATIVE_APP) {
   document.body.classList.add('native');
 }
+// Badge de diagnóstico — confirma visualmente se body.native foi aplicado.
+// Sumir em prod depois de confirmar.
+setTimeout(() => {
+  const b = document.getElementById('env-badge');
+  if (b) {
+    b.textContent = IN_NATIVE_APP ? 'env=NATIVO' : 'env=browser';
+    b.style.background = IN_NATIVE_APP ? 'rgba(34,197,94,.25)' : 'rgba(255,100,100,.25)';
+    b.style.borderColor = IN_NATIVE_APP ? 'rgba(34,197,94,.6)' : 'rgba(255,100,100,.6)';
+    b.style.color = IN_NATIVE_APP ? '#22c55e' : '#ff6464';
+  }
+}, 100);
 
 if (IN_NATIVE_APP) {
   console.log('[map] app nativo — Leaflet direto (sem esperar MapKit JS)');
