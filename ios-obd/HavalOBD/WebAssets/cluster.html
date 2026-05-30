@@ -375,63 +375,46 @@
   .widget h3 .ico { font-size: 16px; }
 
   /* ───────── Power Gauge ───────── */
-  /* Layout: gráfico ocupa quase todo o card; texto kW sobreposto no centro */
+  /* Layout flex column: número kW em cima, gráfico GRANDE embaixo */
   .power-display {
     flex: 1; min-height: 0;
-    position: relative;
-    display: block;
+    display: flex; flex-direction: column; align-items: stretch;
   }
   body.native .power-widget { overflow: visible !important; }
   .power-widget { position: relative; }
 
   .power-readout {
-    position: absolute;
-    top: 50%; left: 50%;
-    transform: translate(-50%, -58%);
     display: flex; align-items: baseline; justify-content: center;
     gap: 8px;
-    padding: 8px 26px;
-    background: rgba(8,8,12,0.55);
-    border-radius: 16px;
-    z-index: 50;
-    pointer-events: none;
+    margin-top: 4px;
   }
   .power-value {
-    font-size: 112px; font-weight: 300; line-height: 1;
+    font-size: 88px; font-weight: 300; line-height: 1;
     font-variant-numeric: tabular-nums;
     color: var(--text);
     transition: color .25s;
-    text-shadow: 0 2px 14px rgba(0,0,0,.9), 0 0 4px rgba(0,0,0,.7);
   }
   .power-rpm {
-    position: absolute;
-    top: 50%; left: 50%;
-    transform: translate(-50%, 70px);
-    text-align: center;
+    margin-top: 6px; text-align: center;
     font-variant-numeric: tabular-nums;
-    z-index: 50;
-    padding: 4px 14px;
-    background: rgba(8,8,12,0.5);
-    border-radius: 12px;
-    pointer-events: none;
   }
   .power-rpm .rpm-val {
-    font-size: 24px; font-weight: 400; color: var(--orange);
+    font-size: 22px; font-weight: 400; color: var(--orange);
   }
   .power-rpm .rpm-unit { font-size: 11px; color: var(--muted); margin-left: 4px; letter-spacing: .08em; }
   .power-rpm .rpm-unit small { font-size: 9px; opacity: 0.8; letter-spacing: .12em; }
-  .power-value.regen  { color: var(--green);  text-shadow: 0 2px 14px rgba(34,197,94,.45), 0 0 4px rgba(0,0,0,.5); }
-  .power-value.drive  { color: var(--orange); text-shadow: 0 2px 14px rgba(251,146,60,.45), 0 0 4px rgba(0,0,0,.5); }
+  .power-value.regen  { color: var(--green); }
+  .power-value.drive  { color: var(--orange); }
   .power-value.idle   { color: var(--text); }
-  .power-unit { font-size: 38px; color: var(--muted); font-weight: 300; }
+  .power-unit { font-size: 32px; color: var(--muted); font-weight: 300; }
 
-  /* Gráfico potência X/Y — ocupa todo o display, atrás do texto */
+  /* Gráfico potência X/Y — flex item GRANDE embaixo */
   .power-chart-wrap {
-    position: absolute;
-    inset: 0;
-    padding: 6px 8px 16px 32px;
+    position: relative;
+    flex: 1; min-height: 0;
+    margin-top: 12px;
+    padding: 0 8px 16px 32px;
     box-sizing: border-box;
-    z-index: 1;
   }
   .power-chart {
     width: 100%; height: 100%;
@@ -674,7 +657,7 @@
 <div class="topbar">
   <div class="left">
     <div class="clock" id="clock">--:--</div>
-    <div class="lbl" id="version">HEC v1.25</div>
+    <div class="lbl" id="version">HEC v1.26</div>
   </div>
   <div class="right">
     <div class="lbl">Carro</div>
