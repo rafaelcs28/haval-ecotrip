@@ -367,47 +367,67 @@
   .widget h3 .ico { font-size: 16px; }
 
   /* ───────── Power Gauge ───────── */
+  /* Layout: gráfico ocupa quase todo o card; texto kW sobreposto no centro */
   .power-display {
     flex: 1; min-height: 0;
-    display: flex; flex-direction: column; align-items: stretch; justify-content: center;
-    text-align: center;
+    position: relative;
+    display: block;
   }
   body.native .power-widget { overflow: visible !important; }
   .power-widget { position: relative; }
 
   .power-readout {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -58%);
     display: flex; align-items: baseline; justify-content: center;
     gap: 8px;
+    padding: 6px 22px;
+    background: rgba(15,15,20,0.42);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    border-radius: 16px;
+    z-index: 5;
+    pointer-events: none;
   }
   .power-value {
-    font-size: 104px; font-weight: 300; line-height: 1;
+    font-size: 112px; font-weight: 300; line-height: 1;
     font-variant-numeric: tabular-nums;
     color: var(--text);
     transition: color .25s;
-    text-shadow: 0 2px 12px rgba(0,0,0,.5);
+    text-shadow: 0 2px 14px rgba(0,0,0,.7), 0 0 4px rgba(0,0,0,.5);
   }
   .power-rpm {
-    margin-top: 10px; text-align: center;
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, 60px);
+    text-align: center;
     font-variant-numeric: tabular-nums;
+    z-index: 5;
+    padding: 4px 14px;
+    background: rgba(15,15,20,0.35);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    border-radius: 12px;
+    pointer-events: none;
   }
   .power-rpm .rpm-val {
     font-size: 24px; font-weight: 400; color: var(--orange);
   }
   .power-rpm .rpm-unit { font-size: 11px; color: var(--muted); margin-left: 4px; letter-spacing: .08em; }
   .power-rpm .rpm-unit small { font-size: 9px; opacity: 0.8; letter-spacing: .12em; }
-  .power-value.regen  { color: var(--green);  text-shadow: 0 2px 12px rgba(34,197,94,.35); }
-  .power-value.drive  { color: var(--orange); text-shadow: 0 2px 12px rgba(251,146,60,.35); }
+  .power-value.regen  { color: var(--green);  text-shadow: 0 2px 14px rgba(34,197,94,.45), 0 0 4px rgba(0,0,0,.5); }
+  .power-value.drive  { color: var(--orange); text-shadow: 0 2px 14px rgba(251,146,60,.45), 0 0 4px rgba(0,0,0,.5); }
   .power-value.idle   { color: var(--text); }
-  .power-unit { font-size: 36px; color: var(--muted); font-weight: 300; }
+  .power-unit { font-size: 38px; color: var(--muted); font-weight: 300; }
 
-  /* Gráfico potência X/Y — últimos 30s, zero no meio, linha translúcida */
+  /* Gráfico potência X/Y — ocupa todo o display, atrás do texto */
   .power-chart-wrap {
-    position: relative;
-    margin-top: 18px;
-    width: 100%;
-    flex: 1; min-height: 140px;
-    padding: 0 8px 16px 32px;
+    position: absolute;
+    inset: 0;
+    padding: 6px 8px 16px 32px;
     box-sizing: border-box;
+    z-index: 1;
   }
   .power-chart {
     width: 100%; height: 100%;
@@ -650,7 +670,7 @@
 <div class="topbar">
   <div class="left">
     <div class="clock" id="clock">--:--</div>
-    <div class="lbl" id="version">HEC v1.22</div>
+    <div class="lbl" id="version">HEC v1.23</div>
   </div>
   <div class="right">
     <div class="lbl">Carro</div>
