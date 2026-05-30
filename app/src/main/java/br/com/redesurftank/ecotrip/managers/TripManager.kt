@@ -397,10 +397,20 @@ class TripManager private constructor() {
                     val avgTempC = if (chargeSessionTempCount > 0)
                         (chargeSessionTempSum / chargeSessionTempCount).toFloat()
                     else null
+                    // Camada 2: fallback SOC delta. Se a integração P×t ficou
+                    // muito atrás do que o SOC indica (ex app suspenso por
+                    // horas), usa o cálculo via SOC. PACK_KWH ≈ 34, eficiência
+                    // ~90% (perda interna pack DC). Pega o MAIOR dos dois.
+                    val socDelta = (latestSocPct - chargeSessionStartSoc).coerceAtLeast(0f)
+                    val energyFromSoc = (socDelta / 100f) * 34f * 0.92f
+                    val finalEnergyKwh = maxOf(chargeSessionEnergyKwh, energyFromSoc)
+                    if (energyFromSoc > chargeSessionEnergyKwh * 1.5f) {
+                        AppLogger.w(TAG, "Energy via P×t (${chargeSessionEnergyKwh}kWh) muito menor que SOC delta (${energyFromSoc}kWh) — usando o maior (provável sleep do app)")
+                    }
                     val entry = ChargeHistoryEntry(
                         timestampMs = System.currentTimeMillis(),
                         durationSec = chargeSessionSec,
-                        energyKwh   = chargeSessionEnergyKwh,
+                        energyKwh   = finalEnergyKwh,
                         startSocPct = chargeSessionStartSoc,
                         endSocPct   = latestSocPct,
                         avgTempC    = avgTempC,
@@ -1395,8 +1405,10 @@ class TripManager private constructor() {
             if (isChargingNow && currentChargePowerKw > 0f) {
                 val now = System.currentTimeMillis()
                 if (lastChargeTickMs > 0L) {
-                    // Cap a 60s para não contar intervalos longos (ex: app suspenso)
-                    val dtSec = ((now - lastChargeTickMs) / 1000L).coerceIn(1L, 60L)
+                    // Cap a 10min — tolera sleeps curtos do app em background.
+                    // Sleeps mais longos (ex carro estacionado carregando lento por
+                    // 1h) são cobertos pelo fallback SOC delta no fim da sessão.
+                    val dtSec = ((now - lastChargeTickMs) / 1000L).coerceIn(1L, 600L)
                     val dKwh  = currentChargePowerKw * dtSec / 3600f
                     lifeChargeKwh          += dKwh
                     lifeChargeSec          += dtSec
