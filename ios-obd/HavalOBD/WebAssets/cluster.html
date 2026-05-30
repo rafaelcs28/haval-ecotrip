@@ -695,7 +695,7 @@
 <div class="topbar">
   <div class="left">
     <div class="clock" id="clock">--:--</div>
-    <div class="lbl" id="version">HEC v1.36</div>
+    <div class="lbl" id="version">HEC v1.37</div>
     <!-- Indicador da fonte de dados (📡 LAN direta · ☁ Mac mini via Tailscale) -->
     <div class="lbl" id="source-badge" style="opacity:.6;font-size:11px;letter-spacing:.08em">☁</div>
   </div>
@@ -1167,13 +1167,30 @@ window.applyNativeSnapshot = function(payload) {
     if (lbl) lbl.textContent = 'OBD direto';
   }
   _updateSourceBadge(payload.source);
+  // PRIORIDADE LAN: quando o LAN (APK local) está fresco (<2s), o snapshot do
+  // Mac mini (Tailscale) NÃO sobrescreve as chaves de telemetria fast — senão
+  // os dois competem e a velocidade fica "piscando" (ex: LAN=0 vs Mac mini=-1
+  // com carro desligado). Mac mini só preenche os calculados (trip, range...).
+  const isLan = payload.source === 'havalobd-apk-local';
+  const lanFresh = (Date.now() - _lastLanMs) < 2000;
   for (const [k, v] of Object.entries(payload)) {
     if (k === 'ts' || k === 'source' || k.startsWith('__')) continue;
+    if (!isLan && lanFresh && LAN_FAST_KEYS.has(k)) continue;  // LAN tem prioridade
     state[k] = v;
   }
   lastUpdateMs = Date.now();
   try { render(); } catch (e) { console.error('[cluster] render erro:', e); }
 };
+// Chaves de telemetria fast servidas pelo LAN (APK local). Quando LAN ativo,
+// o Mac mini não sobrescreve essas — evita conflito/piscar entre fontes.
+const LAN_FAST_KEYS = new Set([
+  'speed_kmh','motor_power_kw','engine_rpm','batt_power_pct','steering_angle',
+  'gear','odometer_km','driving_ready','soc_pct','battery_current_a',
+  'pack_voltage_v','batt_12v_pct','charging_state','charge_current_a',
+  'charge_power_kw','charge_remaining_min','outside_temp','inside_temp',
+  'ac_state','hvac_driver_temp','hvac_passenger_temp','hvac_fan_speed',
+  'drive_mode','terrain_mode','regen_level','steer_mode','one_pedal','esp_enable',
+]);
 console.log('[cluster] applyNativeSnapshot registrado · aguardando _nativeBridge');
 function setConn(ok) {
   $('conn-dot').classList.toggle('ok', ok);
@@ -1489,7 +1506,8 @@ function render() {
   else if (displayKw < 0) bRegen.style.width = clamp((-displayKw / 50) * 50, 0, 50) + '%';
 
   // Speed — painel Velocidade (id="power-speed") + máx + legacy speed-val/max
-  const spd = +state.speed_kmh || 0;
+  // Clamp >= 0: o carro reporta -1 como sentinela "sem leitura" (desligado).
+  const spd = Math.max(0, +state.speed_kmh || 0);
   const powerSpeedEl = document.getElementById('power-speed');
   if (powerSpeedEl) powerSpeedEl.textContent = fmt0(spd);
   const speedValEl = $('speed-val');
