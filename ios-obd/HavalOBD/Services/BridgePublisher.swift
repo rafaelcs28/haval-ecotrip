@@ -1,6 +1,7 @@
 import Foundation
 import CocoaMQTT
 import CommonCrypto
+import Network
 
 /// Publica amostras OBD pro bridge via MQTT (mesmo broker que o resto do
 /// sistema usa). Topic: `haval/ecotrip/obd/snapshot` — JSON consolidado a 1Hz
@@ -43,7 +44,7 @@ final class BridgePublisher: ObservableObject {
     private weak var elm: ELM327?
     private var publishTimer: Timer?
     private var httpPollTimer: Timer?
-    private var lanWsTask: URLSessionWebSocketTask?
+    private var lanWsConn: NWConnection?
     private var lanWsHeartbeat: Timer?
     private var lanHttpPollTimer: Timer?
     /// Callback chamado quando o bridge publica state extra (viagem em curso,
@@ -90,9 +91,8 @@ final class BridgePublisher: ObservableObject {
         if useLanWhenAvailable, let u = resolved {
             if prev?.absoluteString != u.absoluteString {
                 activeSource = "lan"
-                // HTTP poll local imediato (garante dados na LAN mesmo se WS
-                // falhar) + tenta WS em paralelo (mais rápido se conectar)
-                startLanHttpPoll(base: u)
+                // WS via NWConnection (única forma que funciona em LAN no iOS —
+                // URLSession é bloqueado pelo Local Network Privacy)
                 connectLanWs(to: u)
             }
         } else {
@@ -102,37 +102,15 @@ final class BridgePublisher: ObservableObject {
         }
     }
 
-    // ── HTTP poll local (fallback / garantia quando WS não conecta) ──────
+    // HTTP poll local NÃO funciona (URLSession bloqueado pelo Local Network
+    // Privacy do iOS). Mantido só como no-op pra não quebrar callers.
     private func startLanHttpPoll(base: URL) {
-        stopLanHttpPoll()
-        let stateUrl = URL(string: "\(base.absoluteString)/api/state") ?? base
-        Task { await fetchStateLan(stateUrl) }
-        lanHttpPollTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
-            Task { await self?.fetchStateLan(stateUrl) }
-        }
-        print("[lan http] poll local iniciado em \(stateUrl) (500ms)")
+        // Sem fallback HTTP — se o WS NWConnection cair, vai pra cloud.
+        if !lanWsConnected { activeSource = "cloud" }
     }
-
     private func stopLanHttpPoll() {
         lanHttpPollTimer?.invalidate()
         lanHttpPollTimer = nil
-    }
-
-    private func fetchStateLan(_ url: URL) async {
-        var req = URLRequest(url: url)
-        req.timeoutInterval = 2
-        do {
-            let (data, resp) = try await URLSession.shared.data(for: req)
-            guard let http = resp as? HTTPURLResponse, http.statusCode == 200,
-                  let obj = try? JSONSerialization.jsonObject(with: data),
-                  let dict = obj as? [String: Any] else { return }
-            self.onClusterExtra?(dict)
-        } catch {
-            // LAN caiu — volta pra cloud
-            print("[lan http] poll local falhou: \(error.localizedDescription) — cloud")
-            stopLanHttpPoll()
-            if !lanWsConnected { activeSource = "cloud" }
-        }
     }
 
     /// Parse defensivo — quebra IP:porta manual pra evitar qualquer surpresa
@@ -207,88 +185,89 @@ final class BridgePublisher: ObservableObject {
         }
     }
 
-    // ── WebSocket pro APK local ──────────────────────────────────────────
+    // ── WebSocket pro APK local — via Network framework (NWConnection) ────
+    // URLSession dá timeout em IPs locais por causa do Local Network Privacy
+    // do iOS, mesmo com permissão concedida. NWConnection usa a mesma stack do
+    // NWBrowser (que funciona pra mDNS), então respeita a permissão certo.
+    // NanoWSD aceita upgrade WS em qualquer path, então conecta na raiz "/".
     private func connectLanWs(to baseUrl: URL) {
         disconnectLanWs()
-        // Constrói ws:// manualmente (URLComponents.url retorna nil em alguns iOS
-        // pra IPv4 com porta — mesmo bug do parseLanManualUrl)
         guard let host = baseUrl.host else {
             print("[lan ws] baseUrl sem host: \(baseUrl)")
             return
         }
-        let port = baseUrl.port ?? 8080
-        guard let wsUrl = URL(string: "ws://\(host):\(port)/ws/state") else {
-            print("[lan ws] não consegui montar ws URL pra host=\(host) port=\(port)")
-            return
-        }
+        let port = UInt16(baseUrl.port ?? 8088)
 
-        let task = URLSession.shared.webSocketTask(with: wsUrl)
-        lanWsTask = task
-        task.resume()
-        receiveLanWs(task)
+        let wsOpts = NWProtocolWebSocket.Options()
+        wsOpts.autoReplyPing = true
+        // Path do upgrade HTTP — NanoWSD aceita qualquer, usamos /ws/state
+        wsOpts.setAdditionalHeaders([("Host", "\(host):\(port)")])
 
-        // Heartbeat ping a cada 15s
-        lanWsHeartbeat?.invalidate()
-        lanWsHeartbeat = Timer.scheduledTimer(withTimeInterval: 15.0, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                self?.lanWsTask?.send(.string("ping")) { err in
-                    if let err = err { print("[lan ws] ping err: \(err)") }
+        let params = NWParameters.tcp
+        params.defaultProtocolStack.applicationProtocols.insert(wsOpts, at: 0)
+
+        let endpoint = NWEndpoint.hostPort(
+            host: NWEndpoint.Host(host),
+            port: NWEndpoint.Port(rawValue: port)!
+        )
+        let conn = NWConnection(to: endpoint, using: params)
+        lanWsConn = conn
+
+        conn.stateUpdateHandler = { [weak self] state in
+            Task { @MainActor in
+                guard let self = self else { return }
+                switch state {
+                case .ready:
+                    print("[lan ws] NWConnection ready — WS conectado")
+                    self.receiveNwWs(conn)
+                case .failed(let err):
+                    print("[lan ws] NWConnection falhou: \(err) — HTTP poll local")
+                    self.lanWsConnected = false
+                    self.lanWsConn = nil
+                    if let u = self.lanUrl { self.startLanHttpPoll(base: u) }
+                case .cancelled:
+                    self.lanWsConnected = false
+                default: break
                 }
             }
         }
-        // lanWsConnected só vira true quando RECEBE a 1ª msg (handshake confirmado)
-        print("[lan ws] tentando conectar em \(wsUrl)")
+        conn.start(queue: .main)
+        print("[lan ws] tentando NWConnection WS em ws://\(host):\(port)/")
     }
 
     private func disconnectLanWs() {
         lanWsHeartbeat?.invalidate(); lanWsHeartbeat = nil
-        lanWsTask?.cancel(with: .goingAway, reason: nil)
-        lanWsTask = nil
+        lanWsConn?.cancel()
+        lanWsConn = nil
         lanWsConnected = false
     }
 
-    private func receiveLanWs(_ task: URLSessionWebSocketTask) {
-        task.receive { [weak self] result in
+    private func receiveNwWs(_ conn: NWConnection) {
+        conn.receiveMessage { [weak self] data, context, _, error in
             guard let self = self else { return }
-            switch result {
-            case .success(let msg):
+            if let data = data, !data.isEmpty {
                 Task { @MainActor in
-                    // WS funcionando → para HTTP poll local (WS é mais eficiente)
                     if !self.lanWsConnected {
                         self.lanWsConnected = true
                         self.stopLanHttpPoll()
-                        print("[lan ws] conectado — usando WS push, HTTP poll parado")
+                        print("[lan ws] 1ª msg recebida — WS push ativo, HTTP poll parado")
                     }
-                    self.handleLanWsMessage(msg)
-                    self.receiveLanWs(task)
-                }
-            case .failure(let err):
-                Task { @MainActor in
-                    // WS falhou — NÃO cai pra cloud. O HTTP poll local assume
-                    // (ainda é ~5ms na LAN). Só vai pra cloud se a LAN sumir.
-                    print("[lan ws] falhou: \(err.localizedDescription) — usando HTTP poll local")
-                    self.lanWsTask = nil
-                    self.lanWsConnected = false
-                    self.lanWsHeartbeat?.invalidate(); self.lanWsHeartbeat = nil
-                    if let u = self.lanUrl { self.startLanHttpPoll(base: u) }
+                    if let obj = try? JSONSerialization.jsonObject(with: data),
+                       let dict = obj as? [String: Any] {
+                        self.onClusterExtra?(dict)
+                    }
                 }
             }
-        }
-    }
-
-    private func handleLanWsMessage(_ msg: URLSessionWebSocketTask.Message) {
-        switch msg {
-        case .string(let txt):
-            if txt == "pong" { return }
-            guard let data = txt.data(using: .utf8),
-                  let obj = try? JSONSerialization.jsonObject(with: data),
-                  let dict = obj as? [String: Any] else { return }
-            self.onClusterExtra?(dict)
-        case .data(let data):
-            guard let obj = try? JSONSerialization.jsonObject(with: data),
-                  let dict = obj as? [String: Any] else { return }
-            self.onClusterExtra?(dict)
-        @unknown default: break
+            if let error = error {
+                Task { @MainActor in
+                    print("[lan ws] receive err: \(error) — HTTP poll local")
+                    self.lanWsConnected = false
+                    if let u = self.lanUrl { self.startLanHttpPoll(base: u) }
+                }
+                return
+            }
+            // Continua recebendo enquanto a conexão estiver viva
+            if conn.state == .ready { self.receiveNwWs(conn) }
         }
     }
 
@@ -375,37 +354,33 @@ final class BridgePublisher: ObservableObject {
         print("[bridge http] poll iniciado em \(bridgeBaseUrl)/api/state")
     }
 
-    /// POST genérico — prefere LAN (APK direto, ~5ms) e cai pra Tailscale
-    /// (Mac mini, ~200ms) se LAN falhar ou estiver desabilitada.
+    /// POST genérico — se WS LAN conectado, manda comando via WS (NWConnection,
+    /// ~5ms). Senão usa Tailscale (Mac mini, ~200ms). NÃO tenta HTTP LAN via
+    /// URLSession (bloqueado pelo Local Network Privacy do iOS).
     func postCommand(path: String, body: [String: Any]) async {
-        // Tenta LAN se ativo (path /api/X vira /api/cmd/X no APK)
-        if useLanWhenAvailable, let base = lanUrl {
-            let cmdPath = path.replacingOccurrences(of: "/api/", with: "/api/cmd/")
+        if useLanWhenAvailable, lanWsConnected, lanWsConn != nil {
+            // Extrai o comando do path: "/api/esp" → "esp", "/api/drive-mode" → "drive_mode"
+            let cmd = path.replacingOccurrences(of: "/api/", with: "")
                 .replacingOccurrences(of: "-", with: "_")
-            let lanOk = await postCommandLan(base: base, path: cmdPath, body: body)
-            if lanOk { return }
-            print("[lan http] POST falhou — fallback Tailscale")
+            if sendLanCommandWs(cmd: cmd, body: body) { return }
+            print("[lan ws] envio de comando falhou — fallback Tailscale")
         }
         await postCommandCloud(path: path, body: body)
     }
 
-    private func postCommandLan(base: URL, path: String, body: [String: Any]) async -> Bool {
-        guard let url = URL(string: path, relativeTo: base) else { return false }
-        var req = URLRequest(url: url)
-        req.httpMethod = "POST"
-        req.timeoutInterval = 2
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.httpBody = try? JSONSerialization.data(withJSONObject: body)
-        do {
-            let (data, resp) = try await URLSession.shared.data(for: req)
-            let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
-            let txt = String(data: data, encoding: .utf8) ?? ""
-            print("[lan http] POST \(path) → \(status) \(txt.prefix(120))")
-            return (200..<300).contains(status)
-        } catch {
-            print("[lan http] POST \(path) erro: \(error.localizedDescription)")
-            return false
-        }
+    /// Envia comando pelo WS (frame texto JSON). APK processa em onMessage.
+    private func sendLanCommandWs(cmd: String, body: [String: Any]) -> Bool {
+        guard let conn = lanWsConn, lanWsConnected else { return false }
+        var payload = body
+        payload["__cmd"] = cmd
+        guard let data = try? JSONSerialization.data(withJSONObject: payload) else { return false }
+        let meta = NWProtocolWebSocket.Metadata(opcode: .text)
+        let ctx = NWConnection.ContentContext(identifier: "cmd", metadata: [meta])
+        conn.send(content: data, contentContext: ctx, isComplete: true, completion: .contentProcessed { err in
+            if let err = err { print("[lan ws] send cmd erro: \(err)") }
+            else { print("[lan ws] cmd '\(cmd)' enviado via WS") }
+        })
+        return true
     }
 
     private func postCommandCloud(path: String, body: [String: Any]) async {

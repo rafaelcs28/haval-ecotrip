@@ -199,7 +199,23 @@ class LocalApiServer(
             // iPad só recebe — não esperamos mensagens. Mas se vier "ping" texto,
             // responde "pong" pra cliente medir latência.
             val txt = message.textPayload ?: return
-            if (txt == "ping") try { send("pong") } catch (_: Exception) {}
+            if (txt == "ping") { try { send("pong") } catch (_: Exception) {}; return }
+            // Comando via WS: {"__cmd":"esp","value":1} — iPad manda comandos
+            // pelo WS porque URLSession POST é bloqueado pelo Local Network
+            // Privacy do iOS. Delega pro MqttManager (mesmo handler do MQTT).
+            try {
+                @Suppress("UNCHECKED_CAST")
+                val map = gson.fromJson(txt, Map::class.java) as? Map<String, Any?> ?: return
+                val cmd = map["__cmd"]?.toString() ?: return
+                val value = (map["value"] ?: map["enable"] ?: map["mode"] ?: map["level"])
+                    ?.toString()?.trim()?.removeSuffix(".0") ?: ""
+                if (cmd in ALLOWED_COMMANDS) {
+                    Log.i(TAG, "comando via WS: $cmd = '$value'")
+                    mqttManager.dispatchLocalCommand(cmd, value)
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "WS cmd parse falhou: ${e.message}")
+            }
         }
 
         override fun onPong(pong: WebSocketFrame) { /* heartbeat OK */ }
