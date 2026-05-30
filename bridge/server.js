@@ -7541,6 +7541,26 @@ function applyMqttMessage(key, value, isRetained = false) {
           // que o Android não conhece — sem isso o MQTT retained apaga tudo
           chargesArr = charges.map(newCharge => {
             const existing = chargesArr.find(c => c.timestamp_ms === newCharge.timestamp_ms);
+            // Validação de energy_kwh: o APK às vezes envia valor parcial
+            // (perdeu samples no meio da sessão). Se SOC delta × capacidade
+            // for muito maior que o reportado, recalcula via SOC.
+            const PACK_KWH = 34;
+            const socDelta = (newCharge.soc_end || 0) - (newCharge.soc_start || 0);
+            if (socDelta > 0) {
+              const expected = (socDelta / 100) * PACK_KWH;
+              const reported = +newCharge.energy_kwh || 0;
+              // Tolerância: se expected > 2× reported, o APK perdeu telemetria
+              if (reported > 0 && expected > reported * 2 && !newCharge.energy_kwh_overridden) {
+                console.log(`[charge] energy_kwh corrigido ts=${newCharge.timestamp_ms}: ${reported.toFixed(2)}→${expected.toFixed(2)} kWh (SOC ${newCharge.soc_start}→${newCharge.soc_end})`);
+                newCharge.energy_kwh_reported = reported;     // mantém o original pra debug
+                newCharge.energy_kwh = +expected.toFixed(3);
+                newCharge.energy_kwh_corrected = true;
+                // Recalcula avg_power_kw com base na nova energia
+                if (newCharge.duration_sec > 0) {
+                  newCharge.avg_power_kw = +((newCharge.energy_kwh / (newCharge.duration_sec / 3600)).toFixed(2));
+                }
+              }
+            }
             if (!existing) {
               // Nova sessão — preferência: avg_temp_c do Android; fallback: cálculo bridge-side
               const entry = { ...newCharge };
