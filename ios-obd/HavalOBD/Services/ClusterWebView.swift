@@ -121,6 +121,12 @@ struct ClusterWebView: UIViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            // Garante body.native — caso IIFE do cluster.html não tenha
+            // detectado o WKWebView corretamente.
+            webView.evaluateJavaScript("document.body && document.body.classList.add('native');") { _, err in
+                if let err = err { print("[obd-bridge] add('native') erro: \(err)") }
+                else { print("[obd-bridge] body.native injetado via Swift") }
+            }
             // INJEÇÃO DO BRIDGE — feita aqui (não via WKUserScript) pra
             // funcionar com loadFileURL.
             let initJs = """
