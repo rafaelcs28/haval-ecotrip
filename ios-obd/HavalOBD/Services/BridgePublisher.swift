@@ -32,6 +32,12 @@ final class BridgePublisher: ObservableObject {
     @Published var activeSource: String = "cloud"
     /// True quando WS local tá conectado.
     @Published var lanWsConnected: Bool = false
+    /// URL manual configurada pelo user (fallback quando mDNS não funciona).
+    /// Ex: "http://192.168.1.100:8080" ou só "192.168.1.100".
+    @Published var lanManualUrl: String =
+        UserDefaults.standard.string(forKey: "lan_manual_url") ?? ""
+    /// Última mensagem do "Testar conexão" — exibida nas Settings.
+    @Published var lanTestResult: String = ""
 
     private var mqtt: CocoaMQTT?
     private weak var elm: ELM327?
@@ -74,10 +80,13 @@ final class BridgePublisher: ObservableObject {
 
     /// Chamado pelo `LocalDiscovery` quando o APK aparece/some na LAN.
     /// Decide se ativa WS local ou volta pro modo cloud.
+    /// Se mDNS falhar, usa URL manual configurada pelo user (fallback).
     func updateLanUrl(_ url: URL?) {
+        // Prioridade: URL do mDNS > URL manual configurada
+        let resolved: URL? = url ?? parseLanManualUrl()
         let prev = lanUrl
-        lanUrl = url
-        if useLanWhenAvailable, let u = url {
+        lanUrl = resolved
+        if useLanWhenAvailable, let u = resolved {
             if prev?.absoluteString != u.absoluteString {
                 connectLanWs(to: u)
                 activeSource = "lan"
@@ -86,6 +95,47 @@ final class BridgePublisher: ObservableObject {
             disconnectLanWs()
             activeSource = "cloud"
         }
+    }
+
+    /// Aceita "192.168.x.x", "192.168.x.x:8080", "http://192.168.x.x" — normaliza.
+    private func parseLanManualUrl() -> URL? {
+        let s = lanManualUrl.trimmingCharacters(in: .whitespaces)
+        guard !s.isEmpty else { return nil }
+        let withScheme = s.hasPrefix("http://") || s.hasPrefix("https://") ? s : "http://\(s)"
+        guard var comps = URLComponents(string: withScheme) else { return nil }
+        if comps.port == nil { comps.port = 8080 }
+        return comps.url
+    }
+
+    /// Testa conectividade com URL manual. Chamado pelo botão "Testar" das Settings.
+    func testLanManualUrl() async {
+        guard let url = parseLanManualUrl() else {
+            lanTestResult = "❌ URL inválida"
+            return
+        }
+        lanTestResult = "⏳ Testando…"
+        var req = URLRequest(url: url.appendingPathComponent("/api/state"))
+        req.timeoutInterval = 3
+        do {
+            let (_, resp) = try await URLSession.shared.data(for: req)
+            let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            if (200..<300).contains(status) {
+                lanTestResult = "✅ Conectado em \(url.absoluteString)"
+                UserDefaults.standard.set(lanManualUrl, forKey: "lan_manual_url")
+                updateLanUrl(nil)  // re-resolve usando manual
+            } else {
+                lanTestResult = "⚠ APK respondeu HTTP \(status)"
+            }
+        } catch {
+            lanTestResult = "❌ Sem resposta: \(error.localizedDescription)"
+        }
+    }
+
+    func clearLanManualUrl() {
+        lanManualUrl = ""
+        UserDefaults.standard.set("", forKey: "lan_manual_url")
+        lanTestResult = ""
+        updateLanUrl(nil)
     }
 
     /// Toggle nas Settings. Quando vira OFF, força modo cloud.

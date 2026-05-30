@@ -98,6 +98,36 @@ struct SettingsView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
 
+                // ── URL manual (fallback se mDNS não funcionar) ─────────
+                Section("URL manual do APK (fallback)") {
+                    LabeledContent("IP:porta") {
+                        TextField("192.168.x.x:8080", text: $publisher.lanManualUrl)
+                            .multilineTextAlignment(.trailing)
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.never)
+                            .keyboardType(.URL)
+                    }
+                    HStack {
+                        Button("Testar conexão") {
+                            Task { await publisher.testLanManualUrl() }
+                        }.disabled(publisher.lanManualUrl.isEmpty)
+                        Spacer()
+                        if !publisher.lanManualUrl.isEmpty {
+                            Button("Limpar", role: .destructive) {
+                                publisher.clearLanManualUrl()
+                            }
+                        }
+                    }
+                    if !publisher.lanTestResult.isEmpty {
+                        Text(publisher.lanTestResult)
+                            .font(.callout)
+                            .foregroundStyle(publisher.lanTestResult.hasPrefix("✅") ? .green :
+                                            publisher.lanTestResult.hasPrefix("⏳") ? .secondary : .orange)
+                    }
+                    Text("Use isso se o descobrimento automático (mDNS) não funcionar. Pegue o IP no APK do carro (Settings → Servidor LAN).")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+
                 Section("Sobre") {
                     LabeledContent("App") { Text("Haval OBD v1.0") }
                     LabeledContent("Cluster") { Text("local · offline-first").foregroundStyle(.secondary) }

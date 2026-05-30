@@ -20,6 +20,9 @@ class LocalServiceAdvertiser(private val context: Context) {
 
     companion object {
         private const val TAG = "LocalServiceAdvertiser"
+        // NsdManager exige o tipo SEM ponto final ("_havalobd._tcp"). O OS já
+        // adiciona o ponto na publicação. Se incluir ".", NsdManager registra
+        // OK mas alguns clients (NWBrowser do iOS) podem não encontrar.
         const val SERVICE_TYPE = "_havalobd._tcp"
         private const val SERVICE_NAME_PREFIX = "Haval-EcoTrip"
     }

@@ -32,6 +32,20 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+/** IP local da interface WiFi/ethernet (não loopback). Pra mostrar no settings
+ *  como fallback manual quando o iPad não conseguir achar via mDNS. */
+private fun getLocalIpAddress(): String? = try {
+    java.net.NetworkInterface.getNetworkInterfaces().toList()
+        .filter { it.isUp && !it.isLoopback }
+        .flatMap { it.inetAddresses.toList() }
+        .firstOrNull { addr ->
+            !addr.isLoopbackAddress && addr is java.net.Inet4Address &&
+            (addr.hostAddress?.startsWith("192.168.") == true ||
+             addr.hostAddress?.startsWith("10.") == true ||
+             addr.hostAddress?.startsWith("172.") == true)
+        }?.hostAddress
+} catch (_: Exception) { null }
+
 /** Extrai o host da URL do Home Assistant e monta a URL do Bridge na porta 3000. */
 private fun deriveBridgeFromHaUrl(haUrl: String): String {
     if (haUrl.isBlank()) return ""
@@ -291,6 +305,8 @@ fun SettingsScreen(
         // ── LAN direta carro↔iPad ─────────────────────────────────────────────
         val ctx = LocalContext.current
         var lanEnabled by remember { mutableStateOf(CarTelemetryService.isLanEnabledPref(ctx)) }
+        // IP local do head unit pra fallback manual no iPad
+        val localIp = remember { getLocalIpAddress() ?: "—" }
         SectionCard("📡 Servidor LAN direta (iPad)") {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -317,6 +333,19 @@ fun SettingsScreen(
                         lanEnabled = it
                         CarTelemetryService.setLanEnabled(ctx, it)
                     },
+                )
+            }
+            if (lanEnabled) {
+                Text(
+                    "Endereço: $localIp:8080",
+                    fontSize = 12.sp,
+                    color = NeonLime,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    "Use isso no iPad se a descoberta automática falhar.",
+                    fontSize = 10.sp,
+                    color = TextSecondary,
                 )
             }
         }
