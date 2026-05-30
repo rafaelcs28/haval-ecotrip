@@ -1634,10 +1634,19 @@ function recomputeBatteryAvgPrice() {
     const energy = +c.energy_kwh || 0;
     if (energy < 0.05) continue;
     const ovr = c.cost_override;
-    const pricePerKwh = ovr?.free === true ? 0
-                       : ovr && +ovr.perKwh > 0 ? ovr.perKwh
-                       : ovr && +ovr.total  > 0 ? (ovr.total / energy)
-                       : SEED_KWH_PRICE;
+    // PREFERE total/energy_kwh atual em vez do perKwh salvo. Se energy_kwh
+    // for corrigido após o user setar override, o perKwh fica defasado
+    // mas (total / energy) sempre reflete a realidade da sessão.
+    let pricePerKwh = ovr?.free === true ? 0
+                    : ovr && +ovr.total  > 0 ? (+ovr.total / energy)
+                    : ovr && +ovr.perKwh > 0 ? +ovr.perKwh
+                    : SEED_KWH_PRICE;
+    // Anti-outlier: R$/kWh > 5 indica erro de input ou energy_kwh parcial.
+    // Cai pro SEED em vez de contaminar o avg.
+    if (pricePerKwh > 5) {
+      console.warn(`[charge] pricePerKwh anormal ts=${c.timestamp_ms}: R$ ${pricePerKwh.toFixed(2)}/kWh — usando SEED ${SEED_KWH_PRICE}`);
+      pricePerKwh = SEED_KWH_PRICE;
+    }
     const socStart = +c.soc_start || 0;
     const kWhBefore = socStart * BATTERY_CAPACITY_KWH / 100;
     const kWhAfter  = kWhBefore + energy;
