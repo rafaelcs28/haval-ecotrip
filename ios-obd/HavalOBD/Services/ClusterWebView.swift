@@ -97,11 +97,12 @@ struct ClusterWebView: UIViewRepresentable {
             case "steer_mode_set":
                 Task { await publisher.postCommand(path: "/api/steer-mode", body: ["mode": Int(value) ?? 0]) }
             case "one_pedal_set":
-                Task { await publisher.postCommand(path: "/api/one-pedal", body: ["enabled": value == "true"]) }
+                Task { await publisher.postCommand(path: "/api/one-pedal", body: ["enable": value == "true" ? 1 : 0]) }
             case "esp_set":
-                Task { await publisher.postCommand(path: "/api/esp", body: ["enabled": value == "true"]) }
+                Task { await publisher.postCommand(path: "/api/esp", body: ["enable": value == "true" ? 1 : 0]) }
             case "hvac_ac":
-                Task { await publisher.postCommand(path: "/api/hvac/ac", body: ["enabled": value == "1"]) }
+                // Bridge tem /api/hvac/:control que espera body.value (string '0' ou '1')
+                Task { await publisher.postCommand(path: "/api/hvac/ac_enable", body: ["value": value]) }
             case "open_nav":
                 let app = (dict["app"] as? String ?? "waze").lowercased()
                 let schemes: [String: String] = [
