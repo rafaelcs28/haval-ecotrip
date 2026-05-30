@@ -71,8 +71,9 @@ struct SettingsView: View {
                     HStack {
                         Text("Status")
                         Spacer()
-                        if publisher.activeSource == "lan", publisher.lanWsConnected {
-                            Label("📡 Conectado direto", systemImage: "antenna.radiowaves.left.and.right")
+                        if publisher.activeSource == "lan" {
+                            let mode = publisher.lanWsConnected ? "WS push" : "HTTP local"
+                            Label("📡 Direto (\(mode))", systemImage: "antenna.radiowaves.left.and.right")
                                 .foregroundStyle(.green)
                                 .font(.callout)
                         } else if publisher.lanUrl != nil {
