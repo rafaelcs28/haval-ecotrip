@@ -3496,6 +3496,25 @@ app.post('/api/admin/restart', (req, res) => {
   }, 500);
 });
 
+// POST /api/admin/notify { token, title, body } — push de aviso admin (ex.:
+// renovação TestFlight). Vai SÓ pros devices do Rafael (alguma LA do Haval
+// ativa); o device da Grasi (só la_songpro) é excluído.
+app.post('/api/admin/notify', async (req, res) => {
+  if (!adminCheckToken(req, res)) return;
+  const title = String(req.body?.title || 'Ecotrip').slice(0, 120);
+  const body  = String(req.body?.body  || '').slice(0, 400);
+  try {
+    const isHavalDevice = (deviceId) => {
+      const p = getPrefsForDevice(deviceId);
+      return !!(p.la_charge || p.la_trip || p.la_motor || p.la_security || p.la_preclimat);
+    };
+    const r = await apnsLive.pushAlert(title, body, { allow: isHavalDevice });
+    res.json({ ok: true, sent: r.sent });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ── Veículo (chassi GWM) ─────────────────────────────────────────────────────
 // GET retorna config ATIVA (a que o bridge subiu com) + a que está salva em
 // vehicle.json — podem divergir se o user editou mas não reiniciou.
