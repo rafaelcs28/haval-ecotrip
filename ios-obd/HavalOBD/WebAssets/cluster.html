@@ -369,22 +369,11 @@
   /* ───────── Power Gauge ───────── */
   .power-display {
     flex: 1; min-height: 0;
-    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    display: flex; flex-direction: column; align-items: stretch; justify-content: center;
     text-align: center;
   }
   body.native .power-widget { overflow: visible !important; }
-  /* Sparkline 30s do Power widget — atrás do valor central */
   .power-widget { position: relative; }
-  .power-spark {
-    position: absolute; left: 14px; right: 14px; top: 36px; bottom: 14px;
-    width: calc(100% - 28px); height: calc(100% - 50px);
-    z-index: 0; pointer-events: none;
-  }
-  .spark-zero { stroke: rgba(255,255,255,.08); stroke-width: 1; stroke-dasharray: 4 4; }
-  .spark-line { fill: none; stroke: var(--teal); stroke-width: 1.5;
-                filter: drop-shadow(0 0 6px rgba(34,211,238,.5)); }
-  .spark-area { fill: url(#sparkGrad); }
-  .power-widget .power-display { position: relative; z-index: 1; }
 
   .power-readout {
     display: flex; align-items: baseline; justify-content: center;
@@ -396,18 +385,79 @@
     transition: color .25s;
   }
   .power-rpm {
-    margin-top: 14px; text-align: center;
+    margin-top: 10px; text-align: center;
     font-variant-numeric: tabular-nums;
   }
   .power-rpm .rpm-val {
-    font-size: 28px; font-weight: 400; color: var(--orange);
+    font-size: 24px; font-weight: 400; color: var(--orange);
   }
-  .power-rpm .rpm-unit { font-size: 12px; color: var(--muted); margin-left: 4px; letter-spacing: .08em; }
+  .power-rpm .rpm-unit { font-size: 11px; color: var(--muted); margin-left: 4px; letter-spacing: .08em; }
   .power-rpm .rpm-unit small { font-size: 9px; opacity: 0.8; letter-spacing: .12em; }
   .power-value.regen  { color: var(--green); }
   .power-value.drive  { color: var(--orange); }
   .power-value.idle   { color: var(--muted); }
   .power-unit { font-size: 30px; color: var(--muted); margin-left: 4px; }
+
+  /* Gráfico potência X/Y — últimos 30s, zero no meio, linha translúcida */
+  .power-chart-wrap {
+    position: relative;
+    margin-top: 18px;
+    width: 100%;
+    flex: 1; min-height: 140px;
+    padding: 0 8px 16px 32px;
+    box-sizing: border-box;
+  }
+  .power-chart {
+    width: 100%; height: 100%;
+    display: block;
+    overflow: visible;
+  }
+  .chart-y-labels {
+    position: absolute;
+    left: 0; top: 0; bottom: 16px;
+    width: 28px;
+    display: flex; flex-direction: column;
+    justify-content: space-between;
+    font-size: 9px;
+    color: var(--muted);
+    text-align: right;
+    padding-right: 4px;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: .04em;
+    opacity: 0.65;
+  }
+  .chart-y-labels .zero { color: var(--text); opacity: 0.85; }
+  .chart-x-labels {
+    position: absolute;
+    left: 32px; right: 8px; bottom: 0;
+    display: flex;
+    justify-content: space-between;
+    font-size: 9px;
+    color: var(--muted);
+    letter-spacing: .04em;
+    opacity: 0.55;
+  }
+  .grid-y, .grid-x {
+    stroke: rgba(255,255,255,.07);
+    stroke-width: 0.5;
+    stroke-dasharray: 2 3;
+    vector-effect: non-scaling-stroke;
+  }
+  .grid-zero {
+    stroke: rgba(255,255,255,.22);
+    stroke-width: 0.7;
+    vector-effect: non-scaling-stroke;
+  }
+  .chart-line {
+    fill: none;
+    stroke: #22d3ee;
+    stroke-width: 1.2;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+    opacity: 0.7;
+    filter: drop-shadow(0 0 3px rgba(34,211,238,.35));
+    vector-effect: non-scaling-stroke;
+  }
 
   /* Extra: corrente bateria + pack voltage logo abaixo do kW */
   .power-extra {
@@ -598,7 +648,7 @@
 <div class="topbar">
   <div class="left">
     <div class="clock" id="clock">--:--</div>
-    <div class="lbl" id="version">HEC v1.20</div>
+    <div class="lbl" id="version">HEC v1.21</div>
   </div>
   <div class="right">
     <div class="lbl">Carro</div>
@@ -683,37 +733,54 @@
   <!-- ═══════ LINHA INFERIOR: 3 widgets clássicos ═══════ -->
   <div class="row-bot">
 
-    <!-- Power Gauge v1.20 — completo: sparkline 30s + kW + barra regen/boost + RPM -->
+    <!-- Power Gauge v1.21 — número grande no topo + gráfico X/Y 30s embaixo -->
     <div class="widget power-widget">
       <h3><span class="ico">⚡</span> Potência</h3>
-      <svg class="power-spark" viewBox="0 0 300 100" preserveAspectRatio="none">
-        <defs>
-          <linearGradient id="sparkGrad" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%"  stop-color="#22d3ee" stop-opacity="0.55"/>
-            <stop offset="100%" stop-color="#22d3ee" stop-opacity="0"/>
-          </linearGradient>
-        </defs>
-        <line class="spark-zero" x1="0" y1="50" x2="300" y2="50"/>
-        <path class="spark-area" id="spark-area" d=""/>
-        <path class="spark-line" id="spark-line" d=""/>
-      </svg>
       <div class="power-display">
         <div class="power-readout">
           <span class="power-value idle" id="power-val">0,0</span><span class="power-unit">kW</span>
-        </div>
-        <div class="power-bar">
-          <div class="power-bar-mid"></div>
-          <div class="power-bar-fill drive" id="power-bar-drive"></div>
-          <div class="power-bar-fill regen" id="power-bar-regen"></div>
-        </div>
-        <div class="power-scale">
-          <span>−50 regen</span><span>0</span><span>+120 boost</span>
         </div>
         <div class="power-rpm">
           <span class="rpm-val" id="power-rpm">0</span>
           <span class="rpm-unit">rpm <small>ICE</small></span>
         </div>
+        <div class="power-chart-wrap">
+          <!-- Labels eixo Y (kW) -->
+          <div class="chart-y-labels">
+            <span>+50</span>
+            <span>+25</span>
+            <span class="zero">0</span>
+            <span>−25</span>
+            <span>−50</span>
+          </div>
+          <!-- Gráfico SVG: X = 30s (0→300px), Y = ±50 kW (0→120px com zero em y=60) -->
+          <svg class="power-chart" viewBox="0 0 300 120" preserveAspectRatio="none">
+            <!-- Gridlines Y -->
+            <line class="grid-y" x1="0" y1="10"  x2="300" y2="10"/>
+            <line class="grid-y" x1="0" y1="35"  x2="300" y2="35"/>
+            <line class="grid-zero" x1="0" y1="60"  x2="300" y2="60"/>
+            <line class="grid-y" x1="0" y1="85"  x2="300" y2="85"/>
+            <line class="grid-y" x1="0" y1="110" x2="300" y2="110"/>
+            <!-- Gridlines X (a cada 5s) -->
+            <line class="grid-x" x1="50"  y1="0" x2="50"  y2="120"/>
+            <line class="grid-x" x1="100" y1="0" x2="100" y2="120"/>
+            <line class="grid-x" x1="150" y1="0" x2="150" y2="120"/>
+            <line class="grid-x" x1="200" y1="0" x2="200" y2="120"/>
+            <line class="grid-x" x1="250" y1="0" x2="250" y2="120"/>
+            <!-- Série de potência (atualizada a cada 1s) -->
+            <path class="chart-line" id="chart-line" d=""/>
+            <!-- Sentinels invisíveis pra render() — barras antigas escondidas -->
+          </svg>
+          <!-- Labels eixo X (tempo) -->
+          <div class="chart-x-labels">
+            <span>−30s</span><span>−20s</span><span>−10s</span><span>agora</span>
+          </div>
+        </div>
       </div>
+      <!-- Sentinels pra render() não quebrar (IDs antigos) -->
+      <div id="power-bar-drive" style="display:none"></div>
+      <div id="power-bar-regen" style="display:none"></div>
+      <svg style="display:none"><path id="spark-area"/><path id="spark-line"/></svg>
     </div>
 
     <!-- Trip -->
@@ -1641,29 +1708,29 @@ toast('🚗 Haval Cluster pronto');
 setInterval(renderObdDebug, 1000);
 setInterval(renderQuickActions, 1000);
 
-// Sparkline 30s do Power widget — histórico de motor_power_kw a 1Hz
+// Gráfico potência X/Y — eixo X = últimos 30s, eixo Y = ±50 kW (zero no meio)
+// Atualiza a 1 Hz. Coords SVG: viewBox 300x120, zero em y=60.
 const POWER_HISTORY = [];
 const POWER_HIST_MAX = 30;
 function tickPowerSpark() {
   const kw = +state.motor_power_kw;
   POWER_HISTORY.push(Number.isFinite(kw) ? kw : 0);
   if (POWER_HISTORY.length > POWER_HIST_MAX) POWER_HISTORY.shift();
-  const line = document.getElementById('spark-line');
-  const area = document.getElementById('spark-area');
-  if (!line || !area || POWER_HISTORY.length < 2) return;
-  const w = 300, h = 100, mid = 50, ymax = 50;
-  const step = w / (POWER_HIST_MAX - 1);
+  const line = document.getElementById('chart-line');
+  if (!line || POWER_HISTORY.length < 2) return;
+  const W = 300, Y_CENTER = 60, Y_RANGE = 50; // 1 px = 1 kW
+  const step = W / (POWER_HIST_MAX - 1);
   const offset = POWER_HIST_MAX - POWER_HISTORY.length;
   const pts = POWER_HISTORY.map((v, i) => {
     const x = (offset + i) * step;
-    const y = mid - clamp(v, -ymax, ymax);
-    return [x, y];
+    const clamped = clamp(v, -Y_RANGE, Y_RANGE);
+    // +kW sobe na tela (y menor); -kW desce (y maior)
+    const y = Y_CENTER - clamped;
+    return [x.toFixed(1), y.toFixed(1)];
   });
   let d = `M ${pts[0][0]} ${pts[0][1]}`;
   for (let i = 1; i < pts.length; i++) d += ` L ${pts[i][0]} ${pts[i][1]}`;
   line.setAttribute('d', d);
-  const last = pts[pts.length - 1], first = pts[0];
-  area.setAttribute('d', d + ` L ${last[0]} ${mid} L ${first[0]} ${mid} Z`);
 }
 setInterval(tickPowerSpark, 1000);
 
