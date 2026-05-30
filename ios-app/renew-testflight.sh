@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# Renova um build no TestFlight (expira a cada 90 dias) — archive Release +
+# upload pro App Store Connect. Avisa sucesso/falha via ntfy.
+#
+# Uso:
+#   ./renew-testflight.sh HavalEcoTrip   # app principal (internal testing)
+#   ./renew-testflight.sh BydRecarga     # Grasi Recarga (external + review)
+#
+# Pré-requisitos: API key em ~/.appstoreconnect/private_keys/AuthKey_<KEYID>.p8,
+# certificados de distribuição no keychain (Mac mini logado), Xcode + xcodegen.
+set -uo pipefail
+cd "$(dirname "$0")"
+
+SCHEME="${1:?uso: renew-testflight.sh <HavalEcoTrip|BydRecarga>}"
+BUILD_NUMBER="$(date +%y%m%d%H%M)"
+NTFY_TOPIC="${NTFY_TOPIC:-ecotrip-8a3b28289e0c3cae}"
+ASC_KEY_ID="${ASC_KEY_ID:-956AX2CY9V}"
+ASC_ISSUER_ID="${ASC_ISSUER_ID:-ecb6f30a-c529-4c6c-a786-0b52d3c3783f}"
+ASC_KEY_PATH="${ASC_KEY_PATH:-$HOME/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8}"
+ARCHIVE="/tmp/${SCHEME}-renew.xcarchive"
+EXPORT="/tmp/${SCHEME}-renew-export"
+
+notify() { curl -s -H "Title: TestFlight ${SCHEME}" -d "$1" "https://ntfy.sh/${NTFY_TOPIC}" >/dev/null 2>&1 || true; }
+fail()   { echo "❌ $1"; notify "❌ FALHA: ${SCHEME} (build ${BUILD_NUMBER}). $1"; exit 1; }
+
+AUTH=(-allowProvisioningUpdates
+      -authenticationKeyPath "$ASC_KEY_PATH"
+      -authenticationKeyID "$ASC_KEY_ID"
+      -authenticationKeyIssuerID "$ASC_ISSUER_ID")
+
+[ -f "$ASC_KEY_PATH" ] || fail "API key não encontrada: $ASC_KEY_PATH"
+
+echo "▶︎ [$SCHEME] xcodegen…"
+xcodegen generate >/dev/null || fail "xcodegen falhou"
+
+echo "▶︎ [$SCHEME] archive Release (build $BUILD_NUMBER)…"
+rm -rf "$ARCHIVE"
+xcodebuild -project HavalEcoTrip.xcodeproj -scheme "$SCHEME" \
+  -configuration Release -destination 'generic/platform=iOS' \
+  -archivePath "$ARCHIVE" CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
+  "${AUTH[@]}" archive >/tmp/${SCHEME}-archive.log 2>&1 || fail "archive falhou (ver /tmp/${SCHEME}-archive.log)"
+
+echo "▶︎ [$SCHEME] export + upload…"
+rm -rf "$EXPORT"
+xcodebuild -exportArchive -archivePath "$ARCHIVE" \
+  -exportOptionsPlist ExportOptions.plist -exportPath "$EXPORT" \
+  "${AUTH[@]}" >/tmp/${SCHEME}-export.log 2>&1 || fail "upload falhou (ver /tmp/${SCHEME}-export.log)"
+
+# Grasi (external com link público) precisa associar ao grupo + submeter review.
+# HavalEcoTrip (internal) não precisa — internal testers já veem todos os builds.
+if [ "$SCHEME" = "BydRecarga" ]; then
+  echo "▶︎ [$SCHEME] associando ao grupo + beta review…"
+  ASC_KEY_ID="$ASC_KEY_ID" ASC_ISSUER_ID="$ASC_ISSUER_ID" ASC_KEY_PATH="$ASC_KEY_PATH" \
+    node scripts/asc-promote-grasi.mjs >/tmp/${SCHEME}-promote.log 2>&1 || echo "⚠ promote teve erro (ver log) — build subiu mesmo assim"
+fi
+
+echo "✅ [$SCHEME] build $BUILD_NUMBER enviado."
+notify "✅ ${SCHEME} renovado (build ${BUILD_NUMBER}). Válido +90 dias."
