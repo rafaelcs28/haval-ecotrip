@@ -50,22 +50,63 @@
      Row-top colapsa, Row-bot ocupa toda tela com Trip + Power + Atalhos. */
   body.native .floating-cards { display: none !important; }
   body.native .row-top { flex: 0 0 6px !important; }
+  /* Layout 2 colunas × 2 linhas:
+       [Controles]  [Viagem em curso]
+       [Potência ]  [Mapa            ]
+     Coluna esq: 1fr (~1/3 da tela)
+     Coluna dir: 2fr (~2/3 da tela) */
   body.native .row-bot {
-    grid-template-columns: 0.9fr 2fr 1fr !important;   /* Atalhos | Trip GRANDE | Power */
-    grid-template-rows: 1fr !important;
-    padding: 14px !important;
-    gap: 14px !important;
+    grid-template-columns: 1fr 2fr !important;
+    grid-template-rows: 1fr 1fr !important;
+    padding: 10px !important;
+    gap: 10px !important;
   }
-  body.native .row-bot .widget { grid-row: 1; }
-  body.native .row-bot .widget:nth-child(1) { grid-column: 3; } /* Power (direita) */
-  body.native .row-bot .widget:nth-child(2) { grid-column: 2; } /* Trip (centro, maior) */
-  body.native .row-bot .widget:nth-child(3) { grid-column: 1; } /* Atalhos (ESQUERDA) */
+  body.native .row-bot .widget:nth-child(1) { grid-column: 1; grid-row: 2; } /* Power esq inf */
+  body.native .row-bot .widget:nth-child(2) { display: none !important; }   /* Trip widget some — vira overlay */
+  body.native .row-bot .widget:nth-child(3) { grid-column: 1; grid-row: 1; } /* Controles esq sup */
+  body.native .row-bot .widget:nth-child(4) { grid-column: 2; grid-row: 1 / span 2; } /* Mapa span 2 linhas */
   body.native .widget.flow-widget { display: none !important; }
   body.native .widget.quick-widget { display: flex !important; }
-  /* Trip widget: fonte ainda maior no nativo (sem row-top competindo) */
-  body.native .trip-val { font-size: 38px !important; }
-  body.native .trip-lbl { font-size: 13px !important; }
-  body.native .trip-metrics { gap: 12px 18px !important; }
+  body.native .widget.map-widget  { display: flex !important; position: relative; overflow: hidden; }
+  body.native #cluster-map-bot { flex: 1; min-height: 0; border-radius: 12px; overflow: hidden; }
+  /* Vinheta radial: escurece bordas, deixa centro do mapa visível */
+  body.native .map-widget::after {
+    content: ''; position: absolute; inset: 0; pointer-events: none;
+    background: radial-gradient(ellipse 35% 40% at 50% 50%, transparent 0%, rgba(0,0,0,0.55) 60%, rgba(0,0,0,0.85) 100%);
+    border-radius: 18px;
+    z-index: 5;
+  }
+  body.native .map-widget > h3 { z-index: 10; position: relative; }
+  /* Trip overlay sobre o mapa: 8 métricas distribuídas nos 4 cantos */
+  .trip-overlay { display: none; }
+  body.native .trip-overlay {
+    display: grid !important;
+    position: absolute; inset: 36px 18px 18px 18px;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: auto 1fr auto;
+    gap: 8px;
+    pointer-events: none;
+    z-index: 8;
+    color: var(--text);
+    text-shadow: 0 2px 8px rgba(0,0,0,0.8), 0 0 2px rgba(0,0,0,0.9);
+  }
+  .trip-overlay .tov {
+    font-size: 24px; font-weight: 300; font-variant-numeric: tabular-nums; line-height: 1;
+  }
+  .trip-overlay .tol {
+    font-size: 10px; letter-spacing: .14em; opacity: 0.75;
+    text-transform: uppercase; margin-top: 2px;
+  }
+  .trip-overlay .top-left  { justify-self: start; align-self: start; }
+  .trip-overlay .top-right { justify-self: end;   align-self: start; text-align: right; }
+  .trip-overlay .bot-left  { justify-self: start; align-self: end; }
+  .trip-overlay .bot-right { justify-self: end;   align-self: end; text-align: right; }
+  .trip-overlay .tov.teal   { color: var(--teal); }
+  .trip-overlay .tov.green  { color: var(--green); }
+  .trip-overlay .tov.orange { color: var(--orange); }
+  .trip-overlay .tov.yellow { color: var(--yellow); }
+  /* Map-widget e quick-widget escondidos no browser (default PWA usa Leaflet/widgets diferentes) */
+  .widget.map-widget { display: none; }
   /* Browser/PWA: Atalhos escondido (mantém layout original Power|Trip|Fluxo) */
   .widget.quick-widget { display: none; }
 
@@ -331,6 +372,15 @@
     font-variant-numeric: tabular-nums;
     transition: color .25s;
   }
+  .power-rpm {
+    margin-top: 14px; text-align: center;
+    font-variant-numeric: tabular-nums;
+  }
+  .power-rpm .rpm-val {
+    font-size: 28px; font-weight: 400; color: var(--orange);
+  }
+  .power-rpm .rpm-unit { font-size: 12px; color: var(--muted); margin-left: 4px; letter-spacing: .08em; }
+  .power-rpm .rpm-unit small { font-size: 9px; opacity: 0.8; letter-spacing: .12em; }
   .power-value.regen  { color: var(--green); }
   .power-value.drive  { color: var(--orange); }
   .power-value.idle   { color: var(--muted); }
@@ -635,6 +685,11 @@
           <div class="power-bar-fill regen" id="power-bar-regen"></div>
         </div>
         <div class="power-scale"><span>−50 regen</span><span>0</span><span>+120 boost</span></div>
+        <!-- RPM motor a combustão (ICE) — abaixo da escala de potência -->
+        <div class="power-rpm">
+          <span class="rpm-val" id="power-rpm">0</span>
+          <span class="rpm-unit">rpm <small>ICE</small></span>
+        </div>
       </div>
     </div>
 
@@ -744,6 +799,36 @@
               <div class="op-knob"></div>
             </div>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Mapa em tempo real — só aparece no nativo (CSS).
+         Trip data fica como overlay sobre o mapa, com vinheta escurecendo
+         as bordas pra deixar o texto legível. -->
+    <div class="widget map-widget">
+      <h3><span class="ico">📍</span> Viagem em curso</h3>
+      <div id="cluster-map-bot"></div>
+      <div class="trip-overlay">
+        <div class="top-left">
+          <div class="tov teal"><span id="tov-dist">0,0</span><span style="font-size:14px;opacity:.7"> km</span></div>
+          <div class="tol">Distância</div>
+        </div>
+        <div class="top-right">
+          <div class="tov"><span id="tov-time">0:00</span></div>
+          <div class="tol">Tempo</div>
+        </div>
+        <div class="bot-left">
+          <div class="tov green"><span id="tov-kwh">0,0</span><span style="font-size:14px;opacity:.7"> kWh</span></div>
+          <div class="tol">Energia (net)</div>
+          <div class="tov orange" style="margin-top:8px"><span id="tov-fuel">0,0</span><span style="font-size:14px;opacity:.7"> L</span></div>
+          <div class="tol">Combustível</div>
+        </div>
+        <div class="bot-right">
+          <div class="tov yellow"><span id="tov-cost">R$ 0,00</span></div>
+          <div class="tol">Custo</div>
+          <div class="tov yellow" style="margin-top:8px"><span id="tov-cost-km">R$ 0,00</span><span style="font-size:14px;opacity:.7">/km</span></div>
+          <div class="tol">Custo por km</div>
         </div>
       </div>
     </div>
@@ -1017,7 +1102,9 @@ if (IN_NATIVE_APP) {
 function initLeaflet() {
   if (_mapEngine === 'leaflet' || !window.L) return;
   if (window.L && !_lfMap) {
-    _lfMap = L.map('cluster-map', {
+    // No app nativo o mapa fica no widget do row-bot (#cluster-map-bot)
+    const mapId = document.getElementById('cluster-map-bot') ? 'cluster-map-bot' : 'cluster-map';
+    _lfMap = L.map(mapId, {
       zoomControl: false, attributionControl: false,
       dragging: true, touchZoom: true, scrollWheelZoom: true,
       doubleClickZoom: true, boxZoom: false, keyboard: false, tap: true,
@@ -1026,7 +1113,9 @@ function initLeaflet() {
       maxZoom: 19, subdomains: 'abcd',
     }).addTo(_lfMap);
     _mapEngine = 'leaflet';
-    console.log('[map] fallback Leaflet ativo');
+    console.log('[map] Leaflet ativo em #' + mapId);
+    // Força recalcular tamanho após o widget grid layoutar
+    setTimeout(() => _lfMap.invalidateSize(), 200);
     updateMap();
   }
 }
@@ -1179,17 +1268,34 @@ function render() {
   $('trip-dist').textContent = fmt1(distKm);
   const tSec = +tr.timeSec || +tr.time_sec || 0;
   const h = Math.floor(tSec/3600), m = Math.floor((tSec%3600)/60);
-  $('trip-time').textContent = h > 0 ? `${h}:${String(m).padStart(2,'0')}` : `${m} min`;
-  $('trip-kwh').textContent = fmt1(+tr.netKwh || +tr.net_kwh || 0);
-  $('trip-fuel').textContent = fmt1(+tr.fuelL || +tr.fuel_l || 0);
+  const timeStr = h > 0 ? `${h}:${String(m).padStart(2,'0')}` : `${m} min`;
+  $('trip-time').textContent = timeStr;
+  const netKwh = +tr.netKwh || +tr.net_kwh || 0;
+  $('trip-kwh').textContent = fmt1(netKwh);
+  const fuelL = +tr.fuelL || +tr.fuel_l || 0;
+  $('trip-fuel').textContent = fmt1(fuelL);
   const pKwh = +state.battery_avg_price_per_kwh || +state.price_kwh || 0.55;
   const pGas = +state.tank_avg_price_per_l      || +state.price_gas_per_l || 6.40;
-  const tripCost = (+tr.netKwh || 0) * pKwh + (+tr.fuelL || 0) * pGas;
+  const tripCost = netKwh * pKwh + fuelL * pGas;
   $('trip-cost').textContent = fmtBRL(tripCost);
   // R$/km — só faz sentido com distância > 0
-  $('trip-cost-km').textContent = (distKm > 0.5 && tripCost > 0.01)
+  const costKmStr = (distKm > 0.5 && tripCost > 0.01)
     ? 'R$ ' + (tripCost / distKm).toFixed(2).replace('.', ',')
     : 'R$ —';
+  $('trip-cost-km').textContent = costKmStr;
+
+  // Espelha pro overlay sobre o mapa (app nativo)
+  const tov = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+  tov('tov-dist',     fmt1(distKm));
+  tov('tov-time',     timeStr);
+  tov('tov-kwh',      fmt1(netKwh));
+  tov('tov-fuel',     fmt1(fuelL));
+  tov('tov-cost',     fmtBRL(tripCost));
+  tov('tov-cost-km',  costKmStr);
+
+  // RPM do motor a combustão (no widget Potência)
+  const rpmEl = document.getElementById('power-rpm');
+  if (rpmEl) rpmEl.textContent = fmt0(+state.engine_rpm || 0);
   // Split EV/HEV — hev vem do current_trip.hybridDistKm; ev = total − hev
   const hevKm = +tr.hybridDistKm || +tr.hybrid_dist_km || 0;
   const evKm  = Math.max(0, distKm - hevKm);
