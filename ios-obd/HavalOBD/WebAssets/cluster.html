@@ -368,8 +368,15 @@
 
   /* ───────── Power Gauge ───────── */
   .power-display {
-    flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    flex: 1; min-height: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
     text-align: center;
+  }
+  /* Debug v1.17: garantir que power widget é visível mesmo apertado */
+  body.native .power-widget { overflow: visible !important; }
+  body.native .power-widget .power-display {
+    background: rgba(255,0,0,0.05);
+    outline: 1px dashed rgba(255,255,0,0.4);
   }
   /* Sparkline 30s do Power widget — atrás do valor central */
   .power-widget { position: relative; }
@@ -592,7 +599,7 @@
 <div class="topbar">
   <div class="left">
     <div class="clock" id="clock">--:--</div>
-    <div class="lbl" id="version">HEC v1.16</div>
+    <div class="lbl" id="version">HEC v1.17</div>
   </div>
   <div class="right">
     <div class="lbl">Carro</div>
@@ -1149,10 +1156,12 @@ function initLeaflet() {
     // No app nativo o mapa fica no widget do row-bot (#cluster-map-bot)
     const mapId = document.getElementById('cluster-map-bot') ? 'cluster-map-bot' : 'cluster-map';
     _lfMap = L.map(mapId, {
-      zoomControl: true, attributionControl: false,
+      zoomControl: false, attributionControl: false,
       dragging: true, touchZoom: true, scrollWheelZoom: true,
       doubleClickZoom: true, boxZoom: false, keyboard: false, tap: true,
     }).setView([DEFAULT_CENTER.lat, DEFAULT_CENTER.lng], 17);
+    // Zoom +/- no canto SUPERIOR DIREITO (longe do trip-info no canto sup esq)
+    L.control.zoom({ position: 'topright' }).addTo(_lfMap);
     L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
       maxZoom: 19, subdomains: 'abcd',
     }).addTo(_lfMap);
@@ -1318,11 +1327,13 @@ function render() {
   if (displayKw > 0)      bDrive.style.width = clamp((displayKw / 120) * 50, 0, 50) + '%';
   else if (displayKw < 0) bRegen.style.width = clamp((-displayKw / 50) * 50, 0, 50) + '%';
 
-  // Speed
+  // Speed (elementos podem não existir mais — render não pode quebrar aqui)
   const spd = +state.speed_kmh || 0;
-  $('speed-val').textContent = fmt0(spd);
+  const speedValEl = $('speed-val');
+  if (speedValEl) speedValEl.textContent = fmt0(spd);
   if (spd > _speedMax) _speedMax = spd;
-  $('speed-max').textContent = fmt0(_speedMax);
+  const speedMaxEl = $('speed-max');
+  if (speedMaxEl) speedMaxEl.textContent = fmt0(_speedMax);
 
   // Trip
   const tr = state.current_trip || state.rolling || {};
