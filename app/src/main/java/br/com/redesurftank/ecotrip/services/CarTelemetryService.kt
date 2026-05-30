@@ -12,6 +12,8 @@ import androidx.core.app.NotificationCompat
 import br.com.redesurftank.ecotrip.MainActivity
 import br.com.redesurftank.ecotrip.R
 import br.com.redesurftank.ecotrip.managers.CarDataManager
+import br.com.redesurftank.ecotrip.managers.LocalApiServer
+import br.com.redesurftank.ecotrip.managers.LocalServiceAdvertiser
 import br.com.redesurftank.ecotrip.managers.MqttManager
 import br.com.redesurftank.ecotrip.managers.TripManager
 
@@ -50,6 +52,10 @@ class CarTelemetryService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    private var localApi: LocalApiServer? = null
+    private var advertiser: LocalServiceAdvertiser? = null
+    private var carDataListener: ((String, String) -> Unit)? = null
+
     override fun onCreate() {
         super.onCreate()
         createChannel()
@@ -57,9 +63,33 @@ class CarTelemetryService : Service() {
 
         // Os managers já são singletons inicializados pela Application/Activity; aqui só
         // garantimos que estão "tocados" (init feito). Nenhum trabalho extra.
-        try { MqttManager.getInstance() } catch (_: Exception) {}
+        val mqtt = try { MqttManager.getInstance() } catch (_: Exception) { null }
         try { TripManager.getInstance() } catch (_: Exception) {}
-        try { CarDataManager.getInstance() } catch (_: Exception) {}
+        val carData = try { CarDataManager.getInstance() } catch (_: Exception) { null }
+
+        // ── Servidor LAN local: HTTP + WS pra iPad descobrir e consumir
+        // telemetria fast direto (sem passar pelo Mac mini via Tailscale).
+        // Anunciado via mDNS pra descoberta automática.
+        if (mqtt != null) {
+            try {
+                val api = LocalApiServer(mqtt)
+                api.startServer()
+                localApi = api
+
+                // Hook: cada update do CAN dispara push WS pros clients
+                val listener: (String, String) -> Unit = { _, _ ->
+                    try { api.notifyStateChange() } catch (_: Exception) {}
+                }
+                carData?.addListener(listener)
+                carDataListener = listener
+
+                val adv = LocalServiceAdvertiser(this)
+                adv.start(LocalApiServer.LOCAL_API_PORT, versionName = packageVersionName())
+                advertiser = adv
+            } catch (e: Exception) {
+                android.util.Log.w(TAG, "LocalApiServer start falhou: ${e.message}")
+            }
+        }
 
         android.util.Log.i(TAG, "CarTelemetryService.onCreate — foreground started")
     }
@@ -71,8 +101,20 @@ class CarTelemetryService : Service() {
 
     override fun onDestroy() {
         android.util.Log.i(TAG, "CarTelemetryService.onDestroy")
+        // Para LAN server e desregistra mDNS
+        try { advertiser?.stop() } catch (_: Exception) {}
+        try { localApi?.stopServer() } catch (_: Exception) {}
+        try {
+            val l = carDataListener
+            if (l != null) CarDataManager.getInstance().removeListener(l)
+        } catch (_: Exception) {}
         super.onDestroy()
     }
+
+    private fun packageVersionName(): String = try {
+        val pkg = packageManager.getPackageInfo(packageName, 0)
+        pkg.versionName ?: "0"
+    } catch (_: Exception) { "0" }
 
     private fun createChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

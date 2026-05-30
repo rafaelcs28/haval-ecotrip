@@ -62,6 +62,42 @@ struct SettingsView: View {
                 }
 
 
+                // ── Conexão LAN direta com o carro ──────────────────────
+                Section("Conexão LAN direta (carro)") {
+                    Toggle("Usar LAN quando disponível", isOn: Binding(
+                        get: { publisher.useLanWhenAvailable },
+                        set: { publisher.setUseLan($0) }
+                    ))
+                    HStack {
+                        Text("Status")
+                        Spacer()
+                        if publisher.activeSource == "lan", publisher.lanWsConnected {
+                            Label("📡 Conectado direto", systemImage: "antenna.radiowaves.left.and.right")
+                                .foregroundStyle(.green)
+                                .font(.callout)
+                        } else if publisher.lanUrl != nil {
+                            Label("aguardando…", systemImage: "wifi")
+                                .foregroundStyle(.orange)
+                                .font(.callout)
+                        } else {
+                            Label("☁ Via Mac mini", systemImage: "icloud")
+                                .foregroundStyle(.secondary)
+                                .font(.callout)
+                        }
+                    }
+                    if let url = publisher.lanUrl {
+                        LabeledContent("APK em") {
+                            Text(url.absoluteString)
+                                .font(.caption.monospaced())
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                    }
+                    Text("Quando o iPad está na mesma WiFi/hotspot do carro, conecta direto no APK sem passar pelo Mac mini. Latência ~5ms vs ~200ms. Failover automático se cair.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+
                 Section("Sobre") {
                     LabeledContent("App") { Text("Haval OBD v1.0") }
                     LabeledContent("Cluster") { Text("local · offline-first").foregroundStyle(.secondary) }

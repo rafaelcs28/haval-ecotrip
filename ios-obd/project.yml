@@ -57,6 +57,14 @@ targets:
           Conecta ao adaptador OBD via Bluetooth.
         NSLocalNetworkUsageDescription: >
           Conecta ao Bridge na sua rede local pra enviar a telemetria.
+        # Bonjour services declarados (iOS 14+ exige) — descoberta do APK do
+        # carro via mDNS quando na mesma LAN.
+        NSBonjourServices:
+          - _havalobd._tcp
+        # ATS exception: permite HTTP plain pra LAN privada (APK do carro
+        # serve em http://192.168.x.x:8080 sem TLS porque é só LAN).
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: YES
         NSLocationWhenInUseUsageDescription: >
           O Haval OBD usa sua localização pra centralizar o mapa do cluster
           e calcular velocidade/heading do GPS como fallback do OBD.

@@ -670,7 +670,9 @@
 <div class="topbar">
   <div class="left">
     <div class="clock" id="clock">--:--</div>
-    <div class="lbl" id="version">HEC v1.30</div>
+    <div class="lbl" id="version">HEC v1.31</div>
+    <!-- Indicador da fonte de dados (📡 LAN direta · ☁ Mac mini via Tailscale) -->
+    <div class="lbl" id="source-badge" style="opacity:.6;font-size:11px;letter-spacing:.08em">☁</div>
   </div>
   <div class="right">
     <div class="lbl">Carro</div>
@@ -1100,6 +1102,28 @@ function connect() {
 function isNativeBridge() {
   return !!(window._nativeBridge && window._nativeBridge.source === 'havalobd-ios');
 }
+// Source badge: 📡 quando snapshot veio do APK local (LAN) · ☁ quando veio
+// do Mac mini via Tailscale. Atualiza a cada snapshot e tem timeout — se
+// LAN parou de chegar por 3s, volta pro ☁.
+let _lastLanMs = 0;
+function _updateSourceBadge(source) {
+  const el = document.getElementById('source-badge');
+  if (!el) return;
+  const isLan = source === 'havalobd-apk-local';
+  if (isLan) _lastLanMs = Date.now();
+  const lanFresh = (Date.now() - _lastLanMs) < 3000;
+  if (lanFresh) {
+    el.textContent = '📡';
+    el.style.color = '#22c55e';
+    el.style.opacity = '0.85';
+  } else {
+    el.textContent = '☁';
+    el.style.color = '';
+    el.style.opacity = '0.5';
+  }
+}
+setInterval(() => _updateSourceBadge(null), 1000);
+
 window.applyNativeSnapshot = function(payload) {
   if (!payload || typeof payload !== 'object') return;
   // Primeira chamada nativa? Fecha o WebSocket se estava conectado (modo browser
@@ -1111,6 +1135,7 @@ window.applyNativeSnapshot = function(payload) {
     const lbl = document.getElementById('conn-lbl');
     if (lbl) lbl.textContent = 'OBD direto';
   }
+  _updateSourceBadge(payload.source);
   for (const [k, v] of Object.entries(payload)) {
     if (k === 'ts' || k === 'source' || k.startsWith('__')) continue;
     state[k] = v;

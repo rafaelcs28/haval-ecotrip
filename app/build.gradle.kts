@@ -84,6 +84,10 @@ dependencies {
     implementation("org.eclipse.paho:org.eclipse.paho.client.mqttv3:1.2.5")
     implementation("org.slf4j:slf4j-nop:1.7.36")
     implementation("androidx.security:security-crypto:1.1.0-alpha06")   // EncryptedSharedPreferences (credenciais)
+    // Servidor HTTP + WebSocket embedded pra comunicação LAN direta com iPad
+    // (telemetria fast + comandos). Anunciado via NsdManager mDNS.
+    implementation("org.nanohttpd:nanohttpd:2.3.1")
+    implementation("org.nanohttpd:nanohttpd-websocket:2.3.1")
     implementation(libs.material.icons.extended)
     annotationProcessor(libs.annotation.processor)
     compileOnly(libs.annotation)

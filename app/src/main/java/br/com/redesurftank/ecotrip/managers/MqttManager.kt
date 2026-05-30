@@ -2294,6 +2294,16 @@ class MqttManager private constructor() {
         }
     }
 
+    /**
+     * Entry point pra comandos vindos do LocalApiServer (LAN do iPad).
+     * Reusa o mesmo handler do MQTT — execução vai pro executor single-thread
+     * (serializa todos os comandos) e publica resultado via MQTT pro Mac mini
+     * (dual-publish), igual se tivesse vindo do bridge.
+     */
+    fun dispatchLocalCommand(cmd: String, payload: String) {
+        handleIncomingCommand("$prefix/cmd/$cmd", payload)
+    }
+
     // ─── Modo diagnóstico ────────────────────────────────────────────
     // Quando ativado pela PWA via cmd/diag, o APK lê TODAS as constantes
     // do CarConstants em loop e publica em diag/<KEY> a cada N segundos.
