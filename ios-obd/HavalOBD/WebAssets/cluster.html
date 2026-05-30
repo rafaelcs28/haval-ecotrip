@@ -670,7 +670,7 @@
 <div class="topbar">
   <div class="left">
     <div class="clock" id="clock">--:--</div>
-    <div class="lbl" id="version">HEC v1.32</div>
+    <div class="lbl" id="version">HEC v1.33</div>
     <!-- Indicador da fonte de dados (📡 LAN direta · ☁ Mac mini via Tailscale) -->
     <div class="lbl" id="source-badge" style="opacity:.6;font-size:11px;letter-spacing:.08em">☁</div>
   </div>
@@ -1113,11 +1113,13 @@ function _updateSourceBadge(source) {
   if (isLan) _lastLanMs = Date.now();
   const lanFresh = (Date.now() - _lastLanMs) < 3000;
   if (lanFresh) {
-    el.textContent = '📡';
+    // LAN direta via WebSocket (Network framework) — telemetria do APK local
+    el.textContent = '📡 LAN·WS';
     el.style.color = '#22c55e';
-    el.style.opacity = '0.85';
+    el.style.opacity = '0.9';
   } else {
-    el.textContent = '☁';
+    // Via Mac mini (Tailscale) — HTTP poll do bridge
+    el.textContent = '☁ Nuvem';
     el.style.color = '';
     el.style.opacity = '0.5';
   }
