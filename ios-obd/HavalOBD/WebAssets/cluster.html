@@ -77,17 +77,17 @@
     z-index: 500;
   }
   body.native .map-widget > h3 { z-index: 600; position: relative; }
-  /* Trip overlay sobre o mapa: 4 cantos. 2 rows iguais (1fr 1fr) */
+  /* Trip overlay sobre o mapa: 4 cantos como absolute */
   .trip-overlay { display: none; }
   body.native .trip-overlay {
-    display: grid !important;
-    position: absolute; inset: 36px 18px 18px 18px;
-    grid-template-columns: 1fr 1fr;
-    grid-template-rows: 1fr 1fr;
-    gap: 8px;
+    display: block !important;
+    position: absolute; inset: 0;
     pointer-events: none;
     z-index: 700;
     color: var(--text);
+  }
+  .trip-overlay > div {
+    position: absolute;
     text-shadow: 0 2px 8px rgba(0,0,0,0.95), 0 0 4px rgba(0,0,0,0.9), 0 0 1px #000;
   }
   .trip-overlay .tov {
@@ -97,10 +97,10 @@
     font-size: 10px; letter-spacing: .14em; opacity: 0.75;
     text-transform: uppercase; margin-top: 2px;
   }
-  .trip-overlay .top-left  { justify-self: start; align-self: start; }
-  .trip-overlay .top-right { justify-self: end;   align-self: start; text-align: right; }
-  .trip-overlay .bot-left  { justify-self: start; align-self: end; }
-  .trip-overlay .bot-right { justify-self: end;   align-self: end; text-align: right; }
+  .trip-overlay .top-left  { top: 38px;     left: 18px;  }
+  .trip-overlay .top-right { top: 38px;     right: 18px; text-align: right; }
+  .trip-overlay .bot-left  { bottom: 16px;  left: 18px;  }
+  .trip-overlay .bot-right { bottom: 16px;  right: 18px; text-align: right; }
   .trip-overlay .tov.teal   { color: var(--teal); }
   .trip-overlay .tov.green  { color: var(--green); }
   .trip-overlay .tov.orange { color: var(--orange); }
@@ -575,7 +575,7 @@
 <div class="topbar">
   <div class="left">
     <div class="clock" id="clock">--:--</div>
-    <div class="lbl" id="version">HEC v1.8</div>
+    <div class="lbl" id="version">HEC v1.9</div>
     <div class="lbl" id="env-badge" style="background:rgba(255,200,50,.2);border:1px solid rgba(255,200,50,.5);border-radius:6px;padding:2px 8px;color:#ffcc33">env=?</div>
   </div>
   <div class="right">
