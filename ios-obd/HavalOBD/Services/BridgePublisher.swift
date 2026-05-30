@@ -210,20 +210,22 @@ final class BridgePublisher: ObservableObject {
             print("[lan ws] baseUrl sem host: \(baseUrl)")
             return
         }
-        let port = UInt16(baseUrl.port ?? 8088)
+        let port = baseUrl.port ?? 8088
+        // NWProtocolWebSocket precisa de URL COMPLETA (com path) pra montar o
+        // handshake HTTP. NWEndpoint.hostPort não tem path → "unable to create
+        // url endpoint". Usar NWEndpoint.url com ws://host:port/ws/state.
+        guard let wsUrl = URL(string: "ws://\(host):\(port)/ws/state") else {
+            print("[lan ws] não consegui montar ws URL")
+            return
+        }
 
         let wsOpts = NWProtocolWebSocket.Options()
         wsOpts.autoReplyPing = true
-        // Path do upgrade HTTP — NanoWSD aceita qualquer, usamos /ws/state
-        wsOpts.setAdditionalHeaders([("Host", "\(host):\(port)")])
 
         let params = NWParameters.tcp
         params.defaultProtocolStack.applicationProtocols.insert(wsOpts, at: 0)
 
-        let endpoint = NWEndpoint.hostPort(
-            host: NWEndpoint.Host(host),
-            port: NWEndpoint.Port(rawValue: port)!
-        )
+        let endpoint = NWEndpoint.url(wsUrl)
         let conn = NWConnection(to: endpoint, using: params)
         lanWsConn = conn
 
@@ -246,7 +248,7 @@ final class BridgePublisher: ObservableObject {
             }
         }
         conn.start(queue: .main)
-        print("[lan ws] tentando NWConnection WS em ws://\(host):\(port)/")
+        print("[lan ws] tentando NWConnection WS em \(wsUrl.absoluteString)")
     }
 
     private func disconnectLanWs() {
