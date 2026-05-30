@@ -105,8 +105,9 @@
   }
   .trip-overlay .top-left  { top: 38px;     left: 18px;  }
   .trip-overlay .top-right { top: 38px;     right: 18px; text-align: right; }
-  .trip-overlay .bot-left  { bottom: 16px;  left: 18px;  }
-  .trip-overlay .bot-right { bottom: 16px;  right: 18px; text-align: right; }
+  /* DEBUG v1.12: BL/BR forçados em top/left absolute pra ver se aparecem */
+  .trip-overlay .bot-left  { top: 250px; left: 250px; background: rgba(0,255,255,0.7) !important; }
+  .trip-overlay .bot-right { top: 250px; left: 600px; background: rgba(255,255,0,0.7) !important; text-align: right; }
   .trip-overlay .tov.teal   { color: var(--teal); }
   .trip-overlay .tov.green  { color: var(--green); }
   .trip-overlay .tov.orange { color: var(--orange); }
@@ -581,7 +582,7 @@
 <div class="topbar">
   <div class="left">
     <div class="clock" id="clock">--:--</div>
-    <div class="lbl" id="version">HEC v1.11 DEBUG2</div>
+    <div class="lbl" id="version">HEC v1.12 DEBUG3</div>
     <div class="lbl" id="env-badge" style="background:rgba(255,200,50,.2);border:1px solid rgba(255,200,50,.5);border-radius:6px;padding:2px 8px;color:#ffcc33">env=?</div>
   </div>
   <div class="right">
