@@ -256,27 +256,40 @@ class LocalApiServer(
         // tem valor cru direto do CAN). Dados calculados (trip cost, history,
         // soc_pct consolidado, fuel_l preciso, etc) continuam vindo do Mac mini
         // via Tailscale — o iPad consome ambos em paralelo.
+        // Potência de recarga AC derivada (V × A / 1000) quando carregando
+        val chargePowerKw = if (m.latestChargingState == 1)
+            (m.latestBatteryVoltageV * m.latestChargeCurrentA) / 1000f else 0f
         val data = linkedMapOf<String, Any?>(
             "source"            to "havalobd-apk-local",
             "ts"                to System.currentTimeMillis(),
-            // Telemetria fast (alvo principal do canal LAN)
+            // ── Telemetria movimento ──
             "speed_kmh"         to m.latestSpeedKmh,
             "motor_power_kw"    to m.latestMotorPowerKw,
             "engine_rpm"        to m.latestEngineRpm,
+            "batt_power_pct"    to m.latestBattPowerPct,
+            "steering_angle"    to m.latestSteeringAngle,
+            "gear"              to m.latestGear,
+            "odometer_km"       to m.latestOdometerKm,
+            "driving_ready"     to m.latestDrivingReadyState,
+            // ── Bateria de tração / elétrico ──
+            "soc_pct"           to (if (m.latestSocPct > 0f) m.latestSocPct.toInt() else null),
             "battery_current_a" to m.latestBatteryCurrentA,
             "pack_voltage_v"    to m.latestBatteryVoltageV,
-            "batt_power_pct"    to m.latestBattPowerPct,
+            "batt_12v_pct"      to m.latestBatt12vPct,
+            // ── Recarga ──
             "charging_state"    to m.latestChargingState,
+            "charge_current_a"  to m.latestChargeCurrentA,
+            "charge_power_kw"   to chargePowerKw,
+            "charge_remaining_min" to m.latestChargeRemainingMin,
+            // ── Clima / HVAC ──
             "outside_temp"      to m.latestOutsideTemp,
             "inside_temp"       to m.latestInsideTemp,
             "ac_state"          to m.latestHvacAcEnable,
-            "gear"              to m.latestGear,
-            "odometer_km"       to m.latestOdometerKm,
-            "steering_angle"    to m.latestSteeringAngle,
-            "soc_pct"           to (if (m.latestSocPct > 0f) m.latestSocPct.toInt() else null),
-            // Estados dos controles drive — pra confirmação visual rápida dos
-            // comandos no iPad (toggle/chip vira verde sem esperar o Mac mini).
-            // -1 = ainda não lido do carro → envia null pra não sobrescrever.
+            "hvac_driver_temp"  to m.latestHvacDriverTemp,
+            "hvac_passenger_temp" to m.latestHvacPassengerTemp,
+            "hvac_fan_speed"    to m.latestHvacFanSpeed,
+            // ── Estados dos controles drive (confirmação visual rápida) ──
+            // -1 = ainda não lido do carro → null pra não sobrescrever.
             "drive_mode"        to m.lastPublishedDriveMode.takeIf { it >= 0 },
             "terrain_mode"      to m.lastPublishedTerrainMode.takeIf { it >= 0 },
             "regen_level"       to m.lastPublishedRegenLevel.takeIf { it >= 0 },
