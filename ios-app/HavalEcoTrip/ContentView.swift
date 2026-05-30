@@ -71,9 +71,11 @@ struct ContentView: View {
             LiveActivityPush.shared.start()
             // Notificações via APNs — pede permissão e registra no APNs (o token
             // chega no AppDelegate e vai pro bridge). O bridge manda os alertas.
-            if Settings.nativeNotificationsEnabled {
-                RemoteNotifications.enable()
-            }
+            // SEMPRE chama no boot: o iOS só mostra o prompt 1x (notDetermined);
+            // depois é no-op. Não depende de Settings.nativeNotificationsEnabled,
+            // que pode estar dessincronizada com a pref do PWA/bridge (device novo
+            // restaurado de backup mostrava o toggle ON mas nunca pedia a permissão).
+            RemoteNotifications.enable()
         }
         // URL scheme havalecotrip://open — disparado pelo SW do PWA standalone
         // quando user toca em notif Web Push.

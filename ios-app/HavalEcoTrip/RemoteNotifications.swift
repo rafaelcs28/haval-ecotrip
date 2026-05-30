@@ -16,6 +16,7 @@ enum RemoteNotifications {
             let center = UNUserNotificationCenter.current()
             let granted = (try? await center.requestAuthorization(options: [.alert, .sound, .badge])) ?? false
             guard granted else { return }
+            Settings.nativeNotificationsEnabled = true   // sincroniza a flag nativa
             UIApplication.shared.registerForRemoteNotifications()
         }
     }
