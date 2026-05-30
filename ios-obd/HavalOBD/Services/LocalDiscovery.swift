@@ -70,20 +70,30 @@ final class LocalDiscovery: ObservableObject {
             case .ready:
                 // Extrai host/port do path resolvido
                 if let resolved = conn.currentPath?.remoteEndpoint, case let .hostPort(host, port) = resolved {
+                    // IPv4Address.debugDescription às vezes inclui "%interface"
+                    // (ex: "192.168.0.169%en0") que faz URL(string:) retornar nil.
+                    // Tira tudo depois do %.
                     let hostStr: String = {
                         switch host {
-                        case .ipv4(let addr): return addr.debugDescription
-                        case .ipv6(let addr): return "[\(addr.debugDescription)]"
+                        case .ipv4(let addr):
+                            let raw = "\(addr)"
+                            return raw.split(separator: "%").first.map(String.init) ?? raw
+                        case .ipv6(let addr):
+                            let raw = "\(addr)"
+                            let clean = raw.split(separator: "%").first.map(String.init) ?? raw
+                            return "[\(clean)]"
                         case .name(let name, _): return name
                         @unknown default: return ""
                         }
                     }()
+                    NSLog("[LocalDiscovery] resolved host='\(hostStr)' port=\(port.rawValue)")
                     if !hostStr.isEmpty {
-                        let url = URL(string: "http://\(hostStr):\(port.rawValue)")
+                        let urlStr = "http://\(hostStr):\(port.rawValue)"
+                        let url = URL(string: urlStr)
                         Task { @MainActor in
                             self?.localUrl = url
                             self?.lastSeen = Date()
-                            NSLog("[LocalDiscovery] APK local em \(url?.absoluteString ?? "?")")
+                            NSLog("[LocalDiscovery] APK em '\(urlStr)' → \(url?.absoluteString ?? "URL nil!")")
                         }
                     }
                 }
