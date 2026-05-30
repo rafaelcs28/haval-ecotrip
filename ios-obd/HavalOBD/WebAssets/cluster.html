@@ -386,9 +386,13 @@
   .spark-area { fill: url(#sparkGrad); }
   .power-widget .power-display { position: relative; z-index: 1; }
 
+  .power-readout {
+    display: flex; align-items: baseline; justify-content: center;
+  }
   .power-value {
-    font-size: 72px; font-weight: 200; line-height: 1;
+    font-size: 76px; font-weight: 200; line-height: 1;
     font-variant-numeric: tabular-nums;
+    color: var(--text);
     transition: color .25s;
   }
   .power-rpm {
@@ -594,7 +598,7 @@
 <div class="topbar">
   <div class="left">
     <div class="clock" id="clock">--:--</div>
-    <div class="lbl" id="version">HEC v1.19</div>
+    <div class="lbl" id="version">HEC v1.20</div>
   </div>
   <div class="right">
     <div class="lbl">Carro</div>
@@ -679,22 +683,37 @@
   <!-- ═══════ LINHA INFERIOR: 3 widgets clássicos ═══════ -->
   <div class="row-bot">
 
-    <!-- Power Gauge — v1.19 ULTRA MINIMAL: só o número kW grande -->
-    <div class="widget power-widget" style="overflow:visible !important;">
-      <h3 style="color:#6b7280;"><span class="ico">⚡</span> Potência</h3>
-      <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#fff;">
-        <div style="font-size:96px;font-weight:200;line-height:1;color:#f5f5f5;font-variant-numeric:tabular-nums;">
-          <span id="power-val">0,0</span><span style="font-size:36px;color:#6b7280;margin-left:8px;font-weight:300;">kW</span>
+    <!-- Power Gauge v1.20 — completo: sparkline 30s + kW + barra regen/boost + RPM -->
+    <div class="widget power-widget">
+      <h3><span class="ico">⚡</span> Potência</h3>
+      <svg class="power-spark" viewBox="0 0 300 100" preserveAspectRatio="none">
+        <defs>
+          <linearGradient id="sparkGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%"  stop-color="#22d3ee" stop-opacity="0.55"/>
+            <stop offset="100%" stop-color="#22d3ee" stop-opacity="0"/>
+          </linearGradient>
+        </defs>
+        <line class="spark-zero" x1="0" y1="50" x2="300" y2="50"/>
+        <path class="spark-area" id="spark-area" d=""/>
+        <path class="spark-line" id="spark-line" d=""/>
+      </svg>
+      <div class="power-display">
+        <div class="power-readout">
+          <span class="power-value idle" id="power-val">0,0</span><span class="power-unit">kW</span>
         </div>
-        <div style="margin-top:24px;font-size:32px;color:#fb923c;font-variant-numeric:tabular-nums;">
-          <span id="power-rpm">0</span><span style="font-size:14px;color:#6b7280;margin-left:6px;letter-spacing:.1em;">RPM ICE</span>
+        <div class="power-bar">
+          <div class="power-bar-mid"></div>
+          <div class="power-bar-fill drive" id="power-bar-drive"></div>
+          <div class="power-bar-fill regen" id="power-bar-regen"></div>
+        </div>
+        <div class="power-scale">
+          <span>−50 regen</span><span>0</span><span>+120 boost</span>
+        </div>
+        <div class="power-rpm">
+          <span class="rpm-val" id="power-rpm">0</span>
+          <span class="rpm-unit">rpm <small>ICE</small></span>
         </div>
       </div>
-      <!-- Sentinels invisíveis pra render() — barras escondidas -->
-      <div id="power-bar-drive" style="display:none"></div>
-      <div id="power-bar-regen" style="display:none"></div>
-      <!-- Sparkline também sentinel invisível -->
-      <svg style="display:none"><path id="spark-area"/><path id="spark-line"/></svg>
     </div>
 
     <!-- Trip -->
