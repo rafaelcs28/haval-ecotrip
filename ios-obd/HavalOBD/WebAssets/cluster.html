@@ -657,7 +657,7 @@
 <div class="topbar">
   <div class="left">
     <div class="clock" id="clock">--:--</div>
-    <div class="lbl" id="version">HEC v1.26</div>
+    <div class="lbl" id="version">HEC v1.27</div>
   </div>
   <div class="right">
     <div class="lbl">Carro</div>
@@ -1296,8 +1296,9 @@ function updateMap() {
       setTimeout(() => {
         if (!_userZoomed && _lfMap) {
           const size = _lfMap.getSize();
-          // Pin a ~22% do topo (center deslocado 28% pra baixo)
-          _lfMap.panBy([0, -size.y * 0.28], { animate: false });
+          // Pin a ~22% do topo: panBy positivo Y move o center pra baixo
+          // geograficamente, fazendo o pin subir na viewport.
+          _lfMap.panBy([0, size.y * 0.28], { animate: false });
         }
       }, 50);
     } else if (!_mapCenteredOnce) {
