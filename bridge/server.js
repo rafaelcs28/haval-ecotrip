@@ -1801,8 +1801,21 @@ const SOURCE_STALL_MS  = 10 * 60_000;          // 10 min de silêncio = stalled
 const SOURCE_NOTIF_GAP = 60 * 60_000;          // não repete antes de 1h
 
 /** True quando há sinal de que o carro está "em uso" — em movimento, com
- *  motor pronto, ou carregando. Nesses casos o APK DEVE estar publicando. */
+ *  motor pronto, ou carregando. Nesses casos o APK DEVE estar publicando.
+ *
+ *  IMPORTANTE: só confia em state.gear/driving_ready/speed se a FONTE que
+ *  publicou esses campos ainda está VIVA. Se APK silente E GWM também stale,
+ *  tudo no state é antigo — não dá pra saber. Trata como "carro dormindo"
+ *  (não-acordado) e evita falso-positivo de notificação. */
 function _carIsAwake() {
+  const now    = Date.now();
+  const apkAge = now - (state.last_apk_ms || 0);
+  const gwmAge = now - (state.last_gwm_ms || 0);
+  // Se NENHUMA fonte publicou recentemente, state está stale —
+  // não há como saber se o carro está em uso. Assume dormindo.
+  const apkFresh = state.last_apk_ms && apkAge < 90_000;          // APK publica a cada poucos segundos
+  const gwmFresh = state.last_gwm_ms && gwmAge < 5 * 60_000;      // GWM é polled a cada 30s-2min
+  if (!apkFresh && !gwmFresh) return false;
   const gear   = String(state.gear || 'P').toUpperCase();
   const ready  = state.driving_ready === 1 || state.driving_ready === true;
   const chrg   = state.charging_state === 1;
