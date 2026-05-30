@@ -50,6 +50,10 @@ class LocalApiServer(
     private val gson = Gson()
     private val clients = CopyOnWriteArrayList<StateWebSocket>()
     private var lastPushMs = 0L
+    // Heartbeat: manda snapshot a cada 1s mesmo sem mudança no CAN. Mantém o
+    // stream WS vivo (senão o iOS NWConnection seca a conexão com POSIX 96
+    // "No message available on STREAM" quando o carro está parado/idle).
+    private var heartbeatTimer: java.util.Timer? = null
 
     // ── Lifecycle ────────────────────────────────────────────────────────────
 
@@ -59,13 +63,30 @@ class LocalApiServer(
             activePort = listeningPort
             Log.i(TAG, "✓ rodando em 0.0.0.0:$activePort (bind OK, daemon=false)")
             Log.i(TAG, "  teste: curl http://<ip>:$activePort/")
+            startHeartbeat()
         } catch (e: Exception) {
             Log.e(TAG, "✗ falha ao iniciar na porta $listeningPort: ${e.message}")
             activePort = -1
         }
     }
 
+    private fun startHeartbeat() {
+        heartbeatTimer?.cancel()
+        heartbeatTimer = java.util.Timer("lan-ws-heartbeat", true).apply {
+            scheduleAtFixedRate(object : java.util.TimerTask() {
+                override fun run() {
+                    if (clients.isEmpty()) return
+                    val json = buildStateJson()
+                    clients.forEach { ws ->
+                        try { ws.send(json) } catch (_: Exception) {}
+                    }
+                }
+            }, 1000L, 1000L)
+        }
+    }
+
     fun stopServer() {
+        heartbeatTimer?.cancel(); heartbeatTimer = null
         clients.toList().forEach { try { it.close(WebSocketFrame.CloseCode.GoingAway, "shutdown", false) } catch (_: Exception) {} }
         clients.clear()
         try { stop() } catch (_: Exception) {}

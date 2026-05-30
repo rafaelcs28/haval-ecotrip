@@ -276,9 +276,20 @@ final class BridgePublisher: ObservableObject {
             }
             if let error = error {
                 Task { @MainActor in
-                    print("[lan ws] receive err: \(error) — HTTP poll local")
+                    print("[lan ws] receive err: \(error) — reconectando em 1s")
                     self.lanWsConnected = false
-                    if let u = self.lanUrl { self.startLanHttpPoll(base: u) }
+                    self.lanWsConn?.cancel()
+                    self.lanWsConn = nil
+                    // Reconecta o WS (a conexão inicial funciona, só seca quando
+                    // idle). Só cai pra cloud se a LAN sumir de vez.
+                    if self.useLanWhenAvailable, let u = self.lanUrl {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                            guard let self = self, self.lanWsConn == nil else { return }
+                            self.connectLanWs(to: u)
+                        }
+                    } else {
+                        self.activeSource = "cloud"
+                    }
                 }
                 return
             }
