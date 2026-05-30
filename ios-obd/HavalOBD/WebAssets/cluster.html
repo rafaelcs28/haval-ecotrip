@@ -77,7 +77,7 @@
     z-index: 500;
   }
   body.native .map-widget > h3 { z-index: 600; position: relative; }
-  /* Trip overlay sobre o mapa: 4 cantos como absolute */
+  /* Trip overlay sobre o mapa: bloco único top-esq com grid 2 colunas */
   .trip-overlay { display: none; }
   body.native .trip-overlay {
     display: block !important;
@@ -85,33 +85,28 @@
     pointer-events: none;
     z-index: 700;
     color: var(--text);
-    border: 2px dashed rgba(255,0,0,0.5);   /* DEBUG */
   }
-  .trip-overlay > div {
+  .trip-info {
     position: absolute;
+    top: 38px; left: 18px;
+    display: grid;
+    grid-template-columns: max-content max-content;
+    column-gap: 28px;
+    row-gap: 14px;
     text-shadow: 0 2px 8px rgba(0,0,0,0.95), 0 0 4px rgba(0,0,0,0.9), 0 0 1px #000;
-    border: 2px solid rgba(0,255,0,0.9);    /* DEBUG */
-    background: rgba(255,0,255,0.35);       /* DEBUG: magenta */
-    min-width: 140px; min-height: 60px;
-    z-index: 9999;
-    padding: 4px;
   }
-  .trip-overlay .tov {
-    font-size: 24px; font-weight: 300; font-variant-numeric: tabular-nums; line-height: 1;
+  .trip-info .ti-cell { display: flex; flex-direction: column; gap: 3px; }
+  .trip-info .tov {
+    font-size: 26px; font-weight: 300; font-variant-numeric: tabular-nums; line-height: 1;
   }
-  .trip-overlay .tol {
+  .trip-info .tol {
     font-size: 10px; letter-spacing: .14em; opacity: 0.75;
-    text-transform: uppercase; margin-top: 2px;
+    text-transform: uppercase;
   }
-  .trip-overlay .top-left  { top: 38px;     left: 18px;  }
-  .trip-overlay .top-right { top: 38px;     right: 18px; text-align: right; }
-  /* DEBUG v1.12: BL/BR forçados em top/left absolute pra ver se aparecem */
-  .trip-overlay .bot-left  { top: 250px; left: 250px; background: rgba(0,255,255,0.7) !important; }
-  .trip-overlay .bot-right { top: 250px; left: 600px; background: rgba(255,255,0,0.7) !important; text-align: right; }
-  .trip-overlay .tov.teal   { color: var(--teal); }
-  .trip-overlay .tov.green  { color: var(--green); }
-  .trip-overlay .tov.orange { color: var(--orange); }
-  .trip-overlay .tov.yellow { color: var(--yellow); }
+  .trip-info .tov.teal   { color: var(--teal); }
+  .trip-info .tov.green  { color: var(--green); }
+  .trip-info .tov.orange { color: var(--orange); }
+  .trip-info .tov.yellow { color: var(--yellow); }
   /* Map-widget e quick-widget escondidos no browser (default PWA usa Leaflet/widgets diferentes) */
   .widget.map-widget { display: none; }
   /* Browser/PWA: Atalhos escondido (mantém layout original Power|Trip|Fluxo) */
@@ -582,7 +577,7 @@
 <div class="topbar">
   <div class="left">
     <div class="clock" id="clock">--:--</div>
-    <div class="lbl" id="version">HEC v1.12 DEBUG3</div>
+    <div class="lbl" id="version">HEC v1.13</div>
     <div class="lbl" id="env-badge" style="background:rgba(255,200,50,.2);border:1px solid rgba(255,200,50,.5);border-radius:6px;padding:2px 8px;color:#ffcc33">env=?</div>
   </div>
   <div class="right">
@@ -818,25 +813,31 @@
       <h3><span class="ico">📍</span> Viagem em curso</h3>
       <div id="cluster-map-bot"></div>
       <div class="trip-overlay">
-        <div class="top-left">
-          <div class="tov teal"><span id="tov-dist">0,0</span><span style="font-size:14px;opacity:.7"> km</span></div>
-          <div class="tol">Distância</div>
-        </div>
-        <div class="top-right">
-          <div class="tov"><span id="tov-time">0:00</span></div>
-          <div class="tol">Tempo</div>
-        </div>
-        <div class="bot-left">
-          <div class="tov green"><span id="tov-kwh">0,0</span><span style="font-size:14px;opacity:.7"> kWh</span></div>
-          <div class="tol">Energia (net)</div>
-          <div class="tov orange" style="margin-top:8px"><span id="tov-fuel">0,0</span><span style="font-size:14px;opacity:.7"> L</span></div>
-          <div class="tol">Combustível</div>
-        </div>
-        <div class="bot-right">
-          <div class="tov yellow"><span id="tov-cost">R$ 0,00</span></div>
-          <div class="tol">Custo</div>
-          <div class="tov yellow" style="margin-top:8px"><span id="tov-cost-km">R$ 0,00</span><span style="font-size:14px;opacity:.7">/km</span></div>
-          <div class="tol">Custo por km</div>
+        <div class="trip-info">
+          <div class="ti-cell">
+            <div class="tov teal"><span id="tov-dist">0,0</span><span style="font-size:14px;opacity:.7"> km</span></div>
+            <div class="tol">Distância</div>
+          </div>
+          <div class="ti-cell">
+            <div class="tov"><span id="tov-time">0:00</span></div>
+            <div class="tol">Tempo</div>
+          </div>
+          <div class="ti-cell">
+            <div class="tov green"><span id="tov-kwh">0,0</span><span style="font-size:14px;opacity:.7"> kWh</span></div>
+            <div class="tol">Energia (net)</div>
+          </div>
+          <div class="ti-cell">
+            <div class="tov orange"><span id="tov-fuel">0,0</span><span style="font-size:14px;opacity:.7"> L</span></div>
+            <div class="tol">Combustível</div>
+          </div>
+          <div class="ti-cell">
+            <div class="tov yellow"><span id="tov-cost">R$ 0,00</span></div>
+            <div class="tol">Custo</div>
+          </div>
+          <div class="ti-cell">
+            <div class="tov yellow"><span id="tov-cost-km">R$ 0,00</span><span style="font-size:14px;opacity:.7">/km</span></div>
+            <div class="tol">Custo por km</div>
+          </div>
         </div>
       </div>
     </div>
