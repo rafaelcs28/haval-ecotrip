@@ -16,6 +16,7 @@ import br.com.redesurftank.ecotrip.managers.LocalApiServer
 import br.com.redesurftank.ecotrip.managers.LocalServiceAdvertiser
 import br.com.redesurftank.ecotrip.managers.MqttManager
 import br.com.redesurftank.ecotrip.managers.TripManager
+import br.com.redesurftank.ecotrip.models.SharedPreferencesKeys
 
 /**
  * Serviço persistente que mantém o processo APK vivo enquanto o carro estiver
@@ -48,6 +49,26 @@ class CarTelemetryService : Service() {
         fun stop(ctx: Context) {
             try { ctx.stopService(Intent(ctx, CarTelemetryService::class.java)) } catch (_: Exception) {}
         }
+
+        /** Singleton da instância em execução — pra UI toggle on/off do LAN server. */
+        @Volatile var current: CarTelemetryService? = null
+            private set
+
+        /** True = LAN HTTP/WS está ativa. */
+        fun isLanServerRunning(): Boolean = current?.localApi != null
+
+        /** Liga ou desliga o LAN server em tempo real (sem matar o foreground). */
+        fun setLanEnabled(ctx: Context, on: Boolean) {
+            val prefs = ctx.getSharedPreferences(SharedPreferencesKeys.PREFS_NAME, Context.MODE_PRIVATE)
+            prefs.edit().putBoolean(SharedPreferencesKeys.LOCAL_LAN_ENABLED, on).apply()
+            current?.applyLanEnabled(on)
+        }
+
+        /** Leitura do estado salvo (default ON). */
+        fun isLanEnabledPref(ctx: Context): Boolean {
+            val prefs = ctx.getSharedPreferences(SharedPreferencesKeys.PREFS_NAME, Context.MODE_PRIVATE)
+            return prefs.getBoolean(SharedPreferencesKeys.LOCAL_LAN_ENABLED, true)
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -58,19 +79,30 @@ class CarTelemetryService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        current = this
         createChannel()
         startForeground(NOTIF_ID, buildNotification("Capturando dados do carro"))
 
         // Os managers já são singletons inicializados pela Application/Activity; aqui só
         // garantimos que estão "tocados" (init feito). Nenhum trabalho extra.
-        val mqtt = try { MqttManager.getInstance() } catch (_: Exception) { null }
+        try { MqttManager.getInstance() } catch (_: Exception) {}
         try { TripManager.getInstance() } catch (_: Exception) {}
-        val carData = try { CarDataManager.getInstance() } catch (_: Exception) { null }
+        try { CarDataManager.getInstance() } catch (_: Exception) {}
 
-        // ── Servidor LAN local: HTTP + WS pra iPad descobrir e consumir
-        // telemetria fast direto (sem passar pelo Mac mini via Tailscale).
-        // Anunciado via mDNS pra descoberta automática.
-        if (mqtt != null) {
+        // ── Servidor LAN local: respeita pref (default ON)
+        if (isLanEnabledPref(this)) applyLanEnabled(true)
+
+        android.util.Log.i(TAG, "CarTelemetryService.onCreate — foreground started")
+    }
+
+    /**
+     * Liga ou desliga o servidor LAN sem matar o foreground service.
+     * Chamado pelo onCreate (lê pref) e pelo toggle das Settings.
+     */
+    fun applyLanEnabled(on: Boolean) {
+        if (on && localApi == null) {
+            val mqtt = try { MqttManager.getInstance() } catch (_: Exception) { null } ?: return
+            val carData = try { CarDataManager.getInstance() } catch (_: Exception) { null }
             try {
                 val api = LocalApiServer(mqtt)
                 api.startServer()
@@ -86,12 +118,22 @@ class CarTelemetryService : Service() {
                 val adv = LocalServiceAdvertiser(this)
                 adv.start(LocalApiServer.LOCAL_API_PORT, versionName = packageVersionName())
                 advertiser = adv
+                android.util.Log.i(TAG, "LAN server LIGADO")
             } catch (e: Exception) {
                 android.util.Log.w(TAG, "LocalApiServer start falhou: ${e.message}")
             }
+        } else if (!on && localApi != null) {
+            try { advertiser?.stop() } catch (_: Exception) {}
+            advertiser = null
+            try { localApi?.stopServer() } catch (_: Exception) {}
+            localApi = null
+            try {
+                val l = carDataListener
+                if (l != null) CarDataManager.getInstance().removeListener(l)
+            } catch (_: Exception) {}
+            carDataListener = null
+            android.util.Log.i(TAG, "LAN server DESLIGADO")
         }
-
-        android.util.Log.i(TAG, "CarTelemetryService.onCreate — foreground started")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -101,13 +143,8 @@ class CarTelemetryService : Service() {
 
     override fun onDestroy() {
         android.util.Log.i(TAG, "CarTelemetryService.onDestroy")
-        // Para LAN server e desregistra mDNS
-        try { advertiser?.stop() } catch (_: Exception) {}
-        try { localApi?.stopServer() } catch (_: Exception) {}
-        try {
-            val l = carDataListener
-            if (l != null) CarDataManager.getInstance().removeListener(l)
-        } catch (_: Exception) {}
+        applyLanEnabled(false)
+        if (current === this) current = null
         super.onDestroy()
     }
 
