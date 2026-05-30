@@ -90,7 +90,7 @@ struct RootView: View {
                     .overlay(Circle().stroke(.white.opacity(0.15), lineWidth: 1))
                     .shadow(color: .black.opacity(0.4), radius: 8, x: 0, y: 2)
             }
-            .padding(.top, 12)
+            .padding(.top, 44)
             .padding(.trailing, 12)
             .opacity(splashHidden ? 1 : 0)
 

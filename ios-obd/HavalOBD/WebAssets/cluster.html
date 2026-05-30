@@ -577,18 +577,16 @@
 <div class="topbar">
   <div class="left">
     <div class="clock" id="clock">--:--</div>
-    <div class="lbl" id="version">HEC v1.14</div>
-    <div class="lbl" id="env-badge" style="background:rgba(255,200,50,.2);border:1px solid rgba(255,200,50,.5);border-radius:6px;padding:2px 8px;color:#ffcc33">env=?</div>
+    <div class="lbl" id="version">HEC v1.15</div>
   </div>
   <div class="right">
-    <div class="lbl">Bridge</div>
-    <div class="dot" id="conn-dot"></div>
-    <div class="lbl" id="conn-lbl">conectando…</div>
-    <div class="lbl" style="margin-left:14px">Carro</div>
+    <div class="lbl">Carro</div>
     <div class="dot" id="car-dot"></div>
     <div class="lbl" id="car-lbl">—</div>
   </div>
 </div>
+<!-- Sentinels invisíveis pra JS antigo que ainda referencia conn-dot/conn-lbl -->
+<div id="conn-dot" style="display:none"></div><div id="conn-lbl" style="display:none"></div>
 
 <!-- Debug OBD overlay — só aparece quando Settings → "Mostrar overlay de PIDs" estiver ON -->
 <div id="obd-debug">
