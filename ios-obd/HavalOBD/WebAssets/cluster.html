@@ -377,12 +377,14 @@
 
   .power-readout {
     display: flex; align-items: baseline; justify-content: center;
+    gap: 8px;
   }
   .power-value {
-    font-size: 76px; font-weight: 200; line-height: 1;
+    font-size: 104px; font-weight: 300; line-height: 1;
     font-variant-numeric: tabular-nums;
     color: var(--text);
     transition: color .25s;
+    text-shadow: 0 2px 12px rgba(0,0,0,.5);
   }
   .power-rpm {
     margin-top: 10px; text-align: center;
@@ -393,10 +395,10 @@
   }
   .power-rpm .rpm-unit { font-size: 11px; color: var(--muted); margin-left: 4px; letter-spacing: .08em; }
   .power-rpm .rpm-unit small { font-size: 9px; opacity: 0.8; letter-spacing: .12em; }
-  .power-value.regen  { color: var(--green); }
-  .power-value.drive  { color: var(--orange); }
-  .power-value.idle   { color: var(--muted); }
-  .power-unit { font-size: 30px; color: var(--muted); margin-left: 4px; }
+  .power-value.regen  { color: var(--green);  text-shadow: 0 2px 12px rgba(34,197,94,.35); }
+  .power-value.drive  { color: var(--orange); text-shadow: 0 2px 12px rgba(251,146,60,.35); }
+  .power-value.idle   { color: var(--text); }
+  .power-unit { font-size: 36px; color: var(--muted); font-weight: 300; }
 
   /* Gráfico potência X/Y — últimos 30s, zero no meio, linha translúcida */
   .power-chart-wrap {
@@ -648,7 +650,7 @@
 <div class="topbar">
   <div class="left">
     <div class="clock" id="clock">--:--</div>
-    <div class="lbl" id="version">HEC v1.21</div>
+    <div class="lbl" id="version">HEC v1.22</div>
   </div>
   <div class="right">
     <div class="lbl">Carro</div>
