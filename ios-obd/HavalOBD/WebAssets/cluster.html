@@ -382,12 +382,10 @@
     transform: translate(-50%, -58%);
     display: flex; align-items: baseline; justify-content: center;
     gap: 8px;
-    padding: 6px 22px;
-    background: rgba(15,15,20,0.42);
-    backdrop-filter: blur(6px);
-    -webkit-backdrop-filter: blur(6px);
+    padding: 8px 26px;
+    background: rgba(8,8,12,0.55);
     border-radius: 16px;
-    z-index: 5;
+    z-index: 50;
     pointer-events: none;
   }
   .power-value {
@@ -395,19 +393,17 @@
     font-variant-numeric: tabular-nums;
     color: var(--text);
     transition: color .25s;
-    text-shadow: 0 2px 14px rgba(0,0,0,.7), 0 0 4px rgba(0,0,0,.5);
+    text-shadow: 0 2px 14px rgba(0,0,0,.9), 0 0 4px rgba(0,0,0,.7);
   }
   .power-rpm {
     position: absolute;
     top: 50%; left: 50%;
-    transform: translate(-50%, 60px);
+    transform: translate(-50%, 70px);
     text-align: center;
     font-variant-numeric: tabular-nums;
-    z-index: 5;
+    z-index: 50;
     padding: 4px 14px;
-    background: rgba(15,15,20,0.35);
-    backdrop-filter: blur(4px);
-    -webkit-backdrop-filter: blur(4px);
+    background: rgba(8,8,12,0.5);
     border-radius: 12px;
     pointer-events: none;
   }
@@ -670,7 +666,7 @@
 <div class="topbar">
   <div class="left">
     <div class="clock" id="clock">--:--</div>
-    <div class="lbl" id="version">HEC v1.23</div>
+    <div class="lbl" id="version">HEC v1.24</div>
   </div>
   <div class="right">
     <div class="lbl">Carro</div>
