@@ -41,6 +41,12 @@ bridge/auth.json
 bridge/cert.pem
 bridge/key.pem
 bridge/*.pem
+# Dados pessoais runtime — não compartilhar (o servidor recria vazios no 1º boot)
+bridge/drive_history.json
+bridge/preclimat.json
+bridge/songpro.json
+bridge/songpro_charges.json
+bridge/songpro_locations.json
 
 # Artefatos de build/archive do iOS
 ios-app/build/

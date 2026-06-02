@@ -1,5 +1,11 @@
 <style>
 .container { padding: 0 16px; max-width: 480px; margin: 0 auto; }
+@keyframes cf-flow-dash { to { stroke-dashoffset: -34; } }
+.cf-flow { transition: opacity .3s; }
+.cf-wind path { fill: none; stroke: currentColor; stroke-width: 2.6; stroke-linecap: round; stroke-dasharray: 7 11; }
+.cf-flow.cf-flow-on path { animation: cf-flow-dash .8s linear infinite; }
+.cf-flow.cf-flow-on path:nth-child(2) { animation-delay: .14s; }
+.cf-flow.cf-flow-on path:nth-child(3) { animation-delay: .28s; }
 
 
 /* ── Card de AC principal ────────────────────────────────────────────── */
@@ -426,6 +432,50 @@
     </svg>
   </div>
 
+  <!-- ── Extras de AR (toggles) + PM2.5 ────────────────────────────── -->
+  <div class="seats-card conforto-tight" style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px">
+    <button class="ctrl-btn" id="acmax-btn"         onclick="toggleHvacBool('acmax','hvac_acmax','acmax-btn')"><span class="ic">❄️</span><span class="lbl">AC MAX</span></button>
+    <button class="ctrl-btn" id="heating-btn"       onclick="toggleHvacBool('heating','hvac_heating','heating-btn')"><span class="ic">🔥</span><span class="lbl">AQUECER</span></button>
+    <button class="ctrl-btn" id="front-defrost-btn" onclick="toggleHvacBool('front_defrost','hvac_front_defrost','front-defrost-btn')"><span class="ic">🌫</span><span class="lbl">DESEMB. DIANT.</span></button>
+    <button class="ctrl-btn" id="rear-defrost-btn"  onclick="toggleHvacBool('rear_defrost','hvac_rear_defrost','rear-defrost-btn')"><span class="ic">🌫</span><span class="lbl">DESEMB. TRAS.</span></button>
+    <button class="ctrl-btn" id="auto-defrost-btn"  onclick="toggleHvacBool('auto_defrost','hvac_auto_defrost','auto-defrost-btn')"><span class="ic">🌫</span><span class="lbl">DESEMB. AUTO</span></button>
+    <button class="ctrl-btn" id="anion-btn"         onclick="toggleHvacBool('anion','hvac_anion','anion-btn')"><span class="ic">✨</span><span class="lbl">IONIZADOR</span></button>
+    <button class="ctrl-btn" id="aqs-btn"           onclick="toggleHvacBool('aqs','hvac_aqs','aqs-btn')"><span class="ic">🍃</span><span class="lbl">AQS</span></button>
+    <div class="ctrl-btn" style="cursor:default"><span class="ic">🌬</span><span class="lbl">PM2.5 <span id="pm25-val">--</span></span></div>
+  </div>
+
+  <!-- ── Direção do ar (blower_mode) — cabine com fluxo visual ─────── -->
+  <div class="seats-card conforto-tight" onclick="cycleBlower()" style="cursor:pointer">
+    <div class="ti">🌬 Direção do ar</div>
+    <svg viewBox="0 0 240 120" style="width:100%;height:130px">
+      <!-- cabine (linhas sutis): teto, pára-brisa, piso -->
+      <path d="M126 14 L232 14" stroke="#334155" stroke-width="2" fill="none"/>
+      <path d="M126 14 L84 58" stroke="#334155" stroke-width="2" fill="none"/>
+      <path d="M40 108 L228 108" stroke="#334155" stroke-width="2" fill="none"/>
+      <rect x="74" y="54" width="16" height="20" rx="3" fill="#1e293b" stroke="#334155"/>
+      <circle cx="168" cy="40" r="10" fill="#334155"/>
+      <path d="M150 100 L150 52 Q150 46 156 46 L172 46" stroke="#334155" stroke-width="7" fill="none" stroke-linecap="round"/>
+      <path d="M150 100 L196 100" stroke="#334155" stroke-width="7" fill="none" stroke-linecap="round"/>
+      <!-- correntes de vento (mechas onduladas animadas) -->
+      <g class="cf-flow cf-wind" id="cf-flow-defrost" style="color:#22d3ee">
+        <path d="M82 52 C 78 38 90 30 102 22"/>
+        <path d="M88 54 C 85 40 97 31 109 24"/>
+        <path d="M80 50 C 75 37 87 28 99 20"/>
+      </g>
+      <g class="cf-flow cf-wind" id="cf-flow-face" style="color:#22d3ee">
+        <path d="M92 50 q10 -6 20 0 q10 6 20 0 q10 -6 18 0"/>
+        <path d="M92 58 q10 6 20 0 q10 -6 20 0 q10 6 18 0"/>
+        <path d="M92 66 q10 -6 20 0 q10 6 20 0 q8 -6 14 0"/>
+      </g>
+      <g class="cf-flow cf-wind" id="cf-flow-feet" style="color:#22d3ee">
+        <path d="M84 72 C 92 90 110 96 128 100"/>
+        <path d="M88 74 C 98 92 116 98 134 102"/>
+        <path d="M82 76 C 90 92 108 98 124 102"/>
+      </g>
+    </svg>
+    <div style="text-align:center;font-size:13px;color:#cbd5e1;margin-top:-4px"><b id="blow-lbl">--</b> <span style="color:#64748b;font-size:11px">· toque p/ alternar</span></div>
+  </div>
+
   <!-- ── Temperaturas externas/internas ────────────────────────────── -->
   <div class="info-row">
     <div class="info-card cold">
@@ -613,10 +663,10 @@ async function _pollUntilConfirmed(field, expected, label) {
 }
 
 function render() {
-  // AC on/off derivado de fan_speed (proxy: fan=0 → desligado)
+  // AC on/off pelo mestre power_mode.
   const acOn = isAcOn();
   // Card geral fica fade só se realmente desligado (e não pending)
-  document.getElementById('ac-card').classList.toggle('off', !acOn && !_pending.hvac_fan_speed);
+  document.getElementById('ac-card').classList.toggle('off', !acOn && !_pending.hvac_power_mode);
   document.getElementById('ac-power-toggle').classList.toggle('on', acOn);
   document.getElementById('ac-power-sub').textContent = acOn
     ? `Climatização ativa · fan ${STATE.hvac_fan_speed}`
@@ -648,6 +698,23 @@ function render() {
   document.getElementById('sync-btn').classList.toggle('on', STATE.hvac_sync_enable === '1');
   // AUTO
   document.getElementById('auto-btn').classList.toggle('on', STATE.hvac_auto_enable === '1');
+  // Extras (toggles) + PM2.5
+  [['acmax-btn','hvac_acmax'],['heating-btn','hvac_heating'],['front-defrost-btn','hvac_front_defrost'],
+   ['rear-defrost-btn','hvac_rear_defrost'],['auto-defrost-btn','hvac_auto_defrost'],
+   ['anion-btn','hvac_anion'],['aqs-btn','hvac_aqs']].forEach(([id, f]) => {
+    const el = document.getElementById(id);
+    if (el && !el.classList.contains('pending')) el.classList.toggle('on', STATE[f] === '1');
+  });
+  const pm = document.getElementById('pm25-val');
+  if (pm) { const v = parseInt(STATE.hvac_pm25, 10); pm.textContent = Number.isFinite(v) ? v : '--'; }
+  // Direção do ar (blower_mode) — acende os fluxos do desenho
+  const blow = parseInt(STATE.hvac_blower_mode, 10);
+  const bfl = BLOWER_FLOWS[blow] || [];
+  ['face', 'feet', 'defrost'].forEach(f => {
+    const g = document.getElementById('cf-flow-' + f);
+    if (g) { const on = bfl.includes(f); g.style.opacity = on ? '1' : '0.12'; g.classList.toggle('cf-flow-on', on); }
+  });
+  const blbl = document.getElementById('blow-lbl'); if (blbl) blbl.textContent = BLOWER_LABELS[blow] || '--';
   // Modo de circulação
   const recirc = STATE.hvac_cycle_mode === '0';
   document.getElementById('cycle-btn').classList.toggle('on', recirc);
@@ -685,38 +752,68 @@ function render() {
 // ── Helper: AC está ligado se fan_speed>0.
 // hvac_ac_enable reflete o ciclo do compressor no barramento (com histerese),
 // não é um controle direto confiável — fan_speed é o proxy canônico.
+// ── DEBOUNCE: o power_mode pode chegar inconsistente nos primeiros segundos após
+// ligar (fan vem por push, power_mode por poll) ou em piscadas de fonte. Só troca
+// o estado exibido depois de ~2,5s consistente — evita mostrar "desligado" errado.
+let _acOnStable = false, _acOnPend = null, _acOnPendSince = 0;
+const _AC_DEBOUNCE_MS = 2500;
+function _acOnRaw() { return String(STATE.hvac_power_mode) === '1'; }
 function isAcOn() {
-  return (parseInt(STATE.hvac_fan_speed, 10) || 0) > 0;
+  const raw = _acOnRaw();
+  if (raw === _acOnStable) { _acOnPend = null; return _acOnStable; }
+  const now = Date.now();
+  if (_acOnPend !== raw) { _acOnPend = raw; _acOnPendSince = now; }
+  if (now - _acOnPendSince >= _AC_DEBOUNCE_MS) { _acOnStable = raw; _acOnPend = null; }
+  return _acOnStable;
 }
 
-// ── ON/OFF do AC: fan_speed é o controle canônico (drive o toggle visual).
-// ac_enable é enviado como best-effort: o carro pode confirmar com valor
-// diferente por causa do ciclo do compressor, então não bloqueia o toggle.
-function toggleAC() {
+// ── ON/OFF do AC: usa o MESTRE car.hvac.power_mode (0=tudo off, 1=on) via
+// /api/hvac/power. Confirma pelo próprio power_mode.
+async function toggleAC() {
   const turningOn = !isAcOn();
-  if (!turningOn) {
-    // Guarda velocidade atual antes de desligar (mín 1 pra não restaurar 0)
-    const cur = parseInt(STATE.hvac_fan_speed, 10) || 0;
-    if (cur > 0) _lastFanSpeed = cur;
+  const label = turningOn ? 'AC ligado' : 'AC desligado';
+  // Otimista: reflete o toque na hora (sem esperar o debounce confirmar via poll).
+  _acOnStable = turningOn; _acOnPend = null; _acOnPendSince = Date.now();
+  markPending('hvac_power_mode', turningOn ? 1 : 0, ['fan-card', 'ac-power-toggle']);
+  if (!LIVE_MODE) {
+    setTimeout(() => {
+      STATE.hvac_power_mode = turningOn ? '1' : '0';
+      confirmPending('hvac_power_mode', STATE.hvac_power_mode, label);
+    }, PENDING_SIM_MIN_MS + Math.random() * 500);
+    return;
   }
-  const fanTarget = turningOn ? _lastFanSpeed : 0;
-  const label = turningOn ? `AC ligado · fan ${fanTarget}` : 'AC desligado';
-
-  // Comando principal — fan_speed controla airflow e drive o pending visual
-  sendHvacCommand('fan_speed', fanTarget, 'hvac_fan_speed', label,
-    ['fan-card', 'ac-power-toggle']);
-
-  // ac_enable: best-effort (sem pending UI para não gerar timeout/toast falso)
-  if (LIVE_MODE) {
-    fetch('/api/hvac/ac_enable', {
+  try {
+    const r = await fetch('/api/hvac/power', {
       method: 'POST',
       headers: { 'Authorization': 'Bearer ' + BRIDGE_TOKEN, 'Content-Type': 'application/json' },
       body: JSON.stringify({ value: turningOn ? 1 : 0 })
-    }).catch(() => {});
-  } else {
-    setTimeout(() => { STATE.hvac_ac_enable = turningOn ? '1' : '0'; render(); },
-      PENDING_SIM_MIN_MS + Math.random() * 500);
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    _pollUntilAcState(turningOn, label);
+  } catch (e) {
+    clearTimeout(_pending['hvac_power_mode']?.timeoutId);
+    _clearPendingVisual(_pending['hvac_power_mode']?.elements);
+    delete _pending['hvac_power_mode'];
+    showToast('✗ Falha: ' + e.message, 'var(--red)');
+    render();
   }
+}
+async function _pollUntilAcState(wantOn, label) {
+  const field = 'hvac_power_mode';
+  const startedAt = Date.now();
+  const interval = setInterval(async () => {
+    if (!_pending[field] || Date.now() - startedAt > PENDING_TIMEOUT_MS) { clearInterval(interval); return; }
+    try {
+      const r = await fetch('/api/state', { headers: { 'Authorization': 'Bearer ' + BRIDGE_TOKEN } });
+      const s = await r.json();
+      Object.assign(STATE, s);
+      const on = String(s.hvac_power_mode) === '1';
+      if (on === wantOn) {
+        clearInterval(interval);
+        confirmPending(field, s.hvac_power_mode, label);
+      }
+    } catch (_) {}
+  }, 1500);
 }
 
 function adjustTemp(side, delta) {
@@ -759,11 +856,27 @@ function toggleAuto() {
 }
 
 function toggleCycle() {
-  if (!isAcOn()) return showToast('AC desligado', 'var(--muted)');
+  // Recirculação (interno/externo) funciona com o AC desligado — sem trava de isAcOn().
   const newVal = STATE.hvac_cycle_mode === '0' ? 1 : 0;
   sendHvacCommand('cycle_mode', newVal, 'hvac_cycle_mode',
     newVal === 0 ? 'Recirculação interna' : 'Ar externo',
     ['cycle-btn']);
+}
+
+// Extras de AR (toggles on/off). Não exigem AC ligado (desembaçador funciona à parte).
+function toggleHvacBool(control, field, btnId) {
+  const newVal = STATE[field] === '1' ? 0 : 1;
+  sendHvacCommand(control, newVal, field, `${control} ${newVal ? 'ligado' : 'desligado'}`, [btnId]);
+}
+
+const BLOWER_LABELS = ['Frente', 'Frente + Pés', 'Pés', 'Pés + Pára-brisa', 'Pára-brisa'];
+const BLOWER_FLOWS  = [['face'], ['face','feet'], ['feet'], ['feet','defrost'], ['defrost']];
+function setBlower(mode) {
+  sendHvacCommand('blower_mode', mode, 'hvac_blower_mode', `Ar: ${BLOWER_LABELS[mode] || mode}`, []);
+}
+function cycleBlower() {
+  const c = parseInt(STATE.hvac_blower_mode, 10);
+  setBlower(((Number.isFinite(c) ? c : 0) + 1) % 5);
 }
 
 function adjustFan(delta) {
@@ -954,10 +1067,12 @@ async function bootstrapState() {
     const live = await r.json();
     // Sobrescreve só os campos HVAC + temps + ac_state — preserva defaults se ausentes
     const fields = [
-      'ac_state', 'hvac_ac_enable',
+      'ac_state', 'hvac_power_mode', 'hvac_ac_enable',
       'hvac_driver_temp', 'hvac_passenger_temp',
       'hvac_fan_speed', 'hvac_sync_enable', 'hvac_auto_enable',
-      'hvac_cycle_mode', 'seat_vent_drv', 'seat_vent_pass',
+      'hvac_cycle_mode', 'hvac_blower_mode', 'seat_vent_drv', 'seat_vent_pass',
+      'hvac_acmax', 'hvac_anion', 'hvac_aqs', 'hvac_heating',
+      'hvac_front_defrost', 'hvac_rear_defrost', 'hvac_auto_defrost', 'hvac_pm25',
       'inside_temp', 'outside_temp',
     ];
     for (const f of fields) {
@@ -981,10 +1096,12 @@ async function bootstrapState() {
       const live = await r.json();
       let changed = false;
       const fields = [
-        'ac_state', 'hvac_ac_enable',
+        'ac_state', 'hvac_power_mode', 'hvac_ac_enable',
         'hvac_driver_temp', 'hvac_passenger_temp',
         'hvac_fan_speed', 'hvac_sync_enable', 'hvac_auto_enable',
-        'hvac_cycle_mode', 'seat_vent_drv', 'seat_vent_pass',
+        'hvac_cycle_mode', 'hvac_blower_mode', 'seat_vent_drv', 'seat_vent_pass',
+        'hvac_acmax', 'hvac_anion', 'hvac_aqs', 'hvac_heating',
+        'hvac_front_defrost', 'hvac_rear_defrost', 'hvac_auto_defrost', 'hvac_pm25',
         'inside_temp', 'outside_temp',
       ];
       for (const f of fields) {

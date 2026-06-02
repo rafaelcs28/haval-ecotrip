@@ -83,17 +83,11 @@ final class OBDBridgeChannel: ObservableObject {
 
         // ── Aliases pros nomes que o cluster.html espera ──
         if let v = raw["rpm"]                    { out["engine_rpm"] = v }
-        // Velocidade: GPS é fonte preferida (sempre atualiza enquanto move).
-        // OBD 010D é fallback (ECM dorme em modo elétrico).
-        // SEMPRE seta speed_kmh — mesmo com 0 — pra resetar valor stale.
-        let obdKmh = raw["speed_kmh_obd"] as? Double
-        let gpsKmh = location?.speedKmh
-        if let g = gpsKmh, g >= 0 {
-            out["speed_kmh"] = g
-        } else if let o = obdKmh, o >= 0 {
+        // Velocidade: SÓ do carro (OBD 010D). O GPS do iPad foi descartado — dava
+        // picos absurdos (81, 272 km/h). Só seta speed_kmh se tiver leitura OBD;
+        // senão deixa o CAN do APK (LAN/cloud) mandar.
+        if let o = raw["speed_kmh_obd"] as? Double, o >= 0 {
             out["speed_kmh"] = o
-        } else {
-            out["speed_kmh"] = 0
         }
         if let v = raw["control_voltage"]        { out["batt_12v_v"] = v }
         if let v = raw["oil_temp_c"]             { out["engine_temp_c"] = v }   // melhor proxy disponível
@@ -183,12 +177,12 @@ final class OBDBridgeChannel: ObservableObject {
                 }
             }
         }
-        // GPS do iPad — cluster.html usa gps_lat/gps_lng pra mover marker
+        // Mapa usa o GPS do CARRO (publicado pelo APK → bridge), NÃO o do iPad.
+        // Antes injetávamos gps_lat/gps_lng do CoreLocation aqui e isso brigava
+        // com o GPS do carro (chega via bridge), fazendo o marker pular entre dois
+        // pontos. A velocidade segue podendo usar o GPS do iPad (speed_kmh_gps).
         if let loc = location {
-            if let la = loc.lat { dict["gps_lat"] = la }
-            if let lo = loc.lng { dict["gps_lng"] = lo }
-            if let h  = loc.headingDeg { dict["gps_heading"] = h }
-            if let s  = loc.speedKmh { dict["speed_kmh_gps"] = s }
+            if let s = loc.speedKmh { dict["speed_kmh_gps"] = s }
         }
         if debugMode {
             let now = Date()

@@ -40,6 +40,10 @@ targets:
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         UILaunchScreen: {}
+        # App não usa criptografia além da do iOS → declara a isenção aqui pra NÃO
+        # pedir "Conformidade de Exportação" a cada build (senão o build fica
+        # "Missing Compliance" e não aparece pros testers no TestFlight).
+        ITSAppUsesNonExemptEncryption: false
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight

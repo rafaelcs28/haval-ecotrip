@@ -1,6 +1,6 @@
 //
 //  SongProActivityAttributes.swift
-//  Live Activity da recarga do BYD Song Pro (carro da esposa) — cor azul clarinho
+//  Live Activity da recarga do BYD Song Pro (BYD da Grasi) — cor azul clarinho
 //  pra diferenciar visualmente da LA de recarga do Haval (verde).
 //  Mesmo shape de ContentState do ChargeActivityAttributes pra reuso do código
 //  da view; só muda o ActivityAttributes type pra o iOS tratar como LA distinta.

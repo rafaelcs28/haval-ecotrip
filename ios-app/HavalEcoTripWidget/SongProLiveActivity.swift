@@ -1,6 +1,6 @@
 //
 //  SongProLiveActivity.swift
-//  Live Activity da BYD Song Pro (esposa) — visual idêntico ao Charge,
+//  Live Activity da BYD Song Pro (Grasi) — visual idêntico ao Charge,
 //  porém com cor AZUL CLARINHO em vez de verde, pra distinção rápida.
 //
 import ActivityKit
@@ -46,14 +46,19 @@ struct SongProLiveActivity: Widget {
                 DynamicIslandExpandedRegion(.bottom) {
                     VStack(spacing: 6) {
                         SongProBar(soc: s.soc, accent: s.charging ? songProAccent : .blue)
-                        HStack {
+                        HStack(spacing: 6) {
                             Label(s.charging ? "Carregando" : "Concluído",
                                   systemImage: s.charging ? "bolt.car.fill" : "checkmark.circle.fill")
                                 .font(.caption2).foregroundStyle(s.charging ? songProAccent : .blue)
-                            Spacer()
-                            Text("👩 esposa")
+                                .lineLimit(1)
+                            Spacer(minLength: 4)
+                            Text("BYD da Grasi")
                                 .font(.caption2).foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.7)
+                                .layoutPriority(1)
                         }
+                        .padding(.horizontal, 2)
                     }
                 }
             } compactLeading: {
@@ -83,9 +88,10 @@ struct SongProLockScreenView: View {
             HStack {
                 Image(systemName: state.charging ? "bolt.car.fill" : "checkmark.circle.fill")
                     .foregroundStyle(accent)
-                Text(state.charging ? "Carregando (esposa)" : "Recarga concluída (esposa)").font(.headline)
-                Spacer()
-                Text(carName).font(.caption).foregroundStyle(.secondary)
+                Text(state.charging ? "Carregando · BYD da Grasi" : "Recarga concluída · BYD da Grasi")
+                    .font(.headline).lineLimit(1).minimumScaleFactor(0.7)
+                Spacer(minLength: 6)
+                Text(carName).font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
             HStack(alignment: .firstTextBaseline, spacing: 3) {
                 Text("\(Int(state.soc))")

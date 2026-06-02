@@ -14,7 +14,6 @@ struct HavalEcoTripWidgetBundle: WidgetBundle {
         TripLiveActivity()
         MotorLiveActivity()
         SecurityLiveActivity()
-        SongProLiveActivity()
         BatteryWidget()
     }
 }

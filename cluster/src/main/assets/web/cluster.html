@@ -1,0 +1,2561 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Haval Cluster">
+<meta name="theme-color" content="#000000">
+<title>Haval Ecotrip Cluster</title>
+<link rel="apple-touch-icon" href="icon-512.png">
+<script src="android-shim.js"></script>
+<link rel="stylesheet" href="leaflet.css">
+<script src="leaflet.js" defer></script>
+<!-- Apple MapKit JS — carrega assíncrono; se falhar (sem internet ou token inválido), cai pro Leaflet -->
+<script src="https://cdn.apple-mapkit.com/mk/5.x.x/mapkit.js" crossorigin async
+        data-libraries="map,annotations,services"
+        data-callback="onMapKitLoad"
+        data-initial-token=""></script>
+<style>
+  :root {
+    --bg: #000000; --panel: #0d0d0f; --panel-lift: #16161a;
+    --border: #1f1f24; --border-hi: #2c2c33;
+    --green: #22c55e; --green-dim: #15803d;
+    --orange: #fb923c; --orange-dim: #c2410c;
+    --blue: #38bdf8; --blue-dim: #0369a1;
+    --teal: #22d3ee; --yellow: #facc15;
+    --red: #ef4444;
+    --text: #f5f5f5; --muted: #6b7280; --dim: #3f3f46;
+    --glass-bg: rgba(13,13,15,.55);
+    --glass-border: rgba(255,255,255,.08);
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    width: 100vw; height: 100vh; overflow: hidden;
+    background: var(--bg); color: var(--text);
+    margin: 0; padding: 0;
+  }
+  body { width: 100% !important; max-width: none !important; }
+  .stage, .row-bot, .row-top { width: 100% !important; max-width: none !important; box-sizing: border-box; }
+  /* Quando rodando no app nativo iOS (HavalOBD), body fica transparente
+     pra MapKit nativo aparecer no fundo. Class adicionada via JS quando
+     IN_NATIVE_APP é true. */
+  body.native html, body.native {
+    background: transparent !important;
+  }
+  body.native .row-top { background: transparent !important; }
+  body.native #cluster-map { display: none !important; }
+  body.native .row-top::after { display: none !important; }
+  /* Nativo: Bateria e Combustível ESCONDIDOS (user já tem no painel do carro).
+     Row-top colapsa, Row-bot ocupa toda tela com Trip + Power + Atalhos. */
+  body.native .floating-cards { display: none !important; }
+  body.native .row-top { flex: 0 0 6px !important; }
+  /* Layout 2 colunas × 2 linhas:
+       [Controles]  [Viagem em curso]
+       [Potência ]  [Mapa            ]
+     Coluna esq: 1fr (~1/3 da tela)
+     Coluna dir: 2fr (~2/3 da tela) */
+  body.native .row-bot {
+    grid-template-columns: 1fr 2.3fr !important;
+    grid-template-rows: 1fr !important;
+    padding: 10px !important;
+    gap: 10px !important;
+  }
+  body.native .row-bot .widget:nth-child(1) { display: none !important; } /* Power vira overlay no mapa */
+  body.native .row-bot .widget:nth-child(2) { display: none !important; } /* Trip widget — overlay */
+  body.native .row-bot .widget:nth-child(3) { grid-column: 1; grid-row: 1; } /* Controles altura cheia */
+  body.native .row-bot .widget:nth-child(4) { grid-column: 2; grid-row: 1; } /* Mapa altura cheia */
+  body.native .widget.flow-widget { display: none !important; }
+  body.native .widget.quick-widget { display: flex !important; flex-direction: column; min-height: 0; overflow: hidden; }
+  body.native .widget.map-widget  { display: flex !important; position: relative; overflow: hidden; }
+  body.native #cluster-map-bot { flex: 1; min-height: 0; border-radius: 12px; overflow: hidden;
+    /* course-up: gira via CSS. scale 1.5 cobre os cantos quando rotacionado
+       (o .map-widget recorta o excesso). transform-origin no centro = pin. */
+    transform-origin: 50% 50%; transition: transform .55s ease-out; will-change: transform; }
+  /* Vinheta radial: centro grande visível, escurece SÓ as bordas */
+  body.native .map-widget::after {
+    content: ''; position: absolute; inset: 0; pointer-events: none;
+    /* 1) Scrim no TOPO: escurece a faixa onde ficam Pot./Vel. (esq) e Viagem
+          (dir), pra o texto não se misturar com o mapa.
+       2) Gradient inferior + vinheta dão profundidade. */
+    background:
+      linear-gradient(to bottom,
+        rgba(0,0,0,0.55) 0%,
+        rgba(0,0,0,0.30) 18%,
+        transparent 40%),
+      linear-gradient(to bottom,
+        transparent 0%,
+        transparent 55%,
+        rgba(0,0,0,0.35) 78%,
+        rgba(0,0,0,0.7) 100%),
+      radial-gradient(ellipse 60% 50% at 50% 28%, transparent 30%, rgba(0,0,0,0.45) 85%);
+    border-radius: 18px;
+    z-index: 500;
+  }
+  body.native .map-widget > h3 { z-index: 600; position: relative; }
+  /* Trip overlay sobre o mapa: bloco único top-esq com grid 2 colunas */
+  .trip-overlay { display: none; }
+  body.native .trip-overlay {
+    display: block !important;
+    position: absolute; inset: 0;
+    pointer-events: none;
+    z-index: 700;
+    color: var(--text);
+  }
+  .trip-info {
+    position: absolute;
+    top: 44px; right: 26px;
+    display: grid;
+    grid-template-columns: repeat(4, max-content);   /* 8 itens → 2 linhas */
+    column-gap: 34px;
+    row-gap: 18px;
+    text-shadow: 0 2px 8px rgba(0,0,0,0.95), 0 0 4px rgba(0,0,0,0.9), 0 0 1px #000;
+  }
+  /* Overlay Potência/Velocidade (canto sup-esq do mapa) */
+  .pwr-overlay { display: none; }
+  body.native .pwr-overlay {
+    display: block; position: absolute; top: 40px; left: 26px; z-index: 700;
+    pointer-events: none;
+    text-shadow: 0 2px 8px rgba(0,0,0,0.95), 0 0 4px rgba(0,0,0,0.9), 0 0 1px #000;
+  }
+  .pwr-overlay .pwr-spd { font-size: 116px; font-weight: 300; color: var(--text); line-height: .82; font-variant-numeric: tabular-nums; }
+  .pwr-overlay .pwr-unit { font-size: 30px; opacity: .7; font-weight: 400; color: var(--text); margin-top: 2px; }
+  .pwr-overlay .pwr-sub { margin-top: 34px; font-size: 40px; font-weight: 400; color: var(--teal); font-variant-numeric: tabular-nums; }
+  .pwr-overlay .pwr-sub .sep { color: var(--muted); margin: 0 10px; }
+  .pwr-overlay .pwr-sub .rpm { color: var(--muted); font-size: 26px; }
+  /* Botão pisca-alerta (4 setas) — sobre o mapa, no rodapé */
+  .hazard-btn { display: none; }
+  body.native .hazard-btn {
+    position: absolute; bottom: 16px; left: 16px;   /* colado na borda da climatização (à esq) */
+    width: 124px; height: 124px; border-radius: 24px; z-index: 800; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(0,0,0,.5); border: 3px solid var(--red); color: var(--red);
+    -webkit-tap-highlight-color: transparent;
+  }
+  body.native .hazard-btn.active { background: var(--red); color: #fff; animation: hazblink 2s steps(1) infinite; }
+  @keyframes hazblink { 50% { opacity: .3; } }
+  .trip-info .ti-cell { display: flex; flex-direction: column; gap: 5px; }
+  .trip-info .tov {
+    font-size: 30px; font-weight: 300; font-variant-numeric: tabular-nums; line-height: 1;
+  }
+  .trip-info .tol {
+    font-size: 13px; letter-spacing: .14em; opacity: 0.78;
+    text-transform: uppercase;
+  }
+  .trip-info .tov.teal   { color: var(--teal); }
+  .trip-info .tov.green  { color: var(--green); }
+  .trip-info .tov.orange { color: var(--orange); }
+  .trip-info .tov.yellow { color: var(--yellow); }
+  /* Map-widget e quick-widget escondidos no browser (default PWA usa Leaflet/widgets diferentes) */
+  .widget.map-widget { display: none; }
+  /* Browser/PWA: Atalhos escondido (mantém layout original Power|Trip|Fluxo) */
+  .widget.quick-widget { display: none; }
+
+  /* Controles drive — chips estilo PWA aba Drive */
+  .quick-widget .dc-body {
+    flex: 1; min-height: 0; display: flex; flex-direction: column;
+    gap: 14px; overflow-y: auto; padding-right: 4px;
+  }
+  .quick-widget .dc-card {
+    background: rgba(255,255,255,.04);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 14px 16px;
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  .quick-widget .dc-label {
+    font-size: 14px; font-weight: 700; letter-spacing: .12em;
+    color: var(--muted); text-transform: uppercase;
+  }
+  .quick-widget .dm-chips { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .quick-widget .tm-chips-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+  .quick-widget .tm-chips-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .quick-widget .dm-chip {
+    padding: 14px 10px;
+    border: 1px solid rgba(255,255,255,.12);
+    border-radius: 12px;
+    background: rgba(255,255,255,.03);
+    color: var(--text);
+    font-size: 17px; font-weight: 500;
+    text-align: center; cursor: pointer;
+    transition: background .15s, border-color .15s, color .15s, transform .1s;
+    user-select: none; -webkit-user-select: none;
+  }
+  .quick-widget .dm-chip:active { transform: scale(.95); background: rgba(255,255,255,.10); }
+  .quick-widget .dm-chip.active {
+    background: rgba(34,197,94,.16);
+    border-color: rgba(34,197,94,.6);
+    color: var(--green);
+  }
+  .quick-widget .dm-chip.pending {
+    opacity: .6;
+    background: rgba(255,200,50,.12);
+    border-color: rgba(255,200,50,.4);
+  }
+  /* Toggles — A/C, ESP, One-Pedal */
+  .quick-widget .one-pedal-row,
+  .quick-widget .dc-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 6px 2px;
+  }
+  .quick-widget .op-lbl { font-size: 17px; color: var(--text); }
+  .quick-widget .op-toggle {
+    width: 56px; height: 32px; border-radius: 16px;
+    background: rgba(255,255,255,.12); position: relative;
+    transition: background .2s; cursor: pointer;
+  }
+  .quick-widget .op-toggle.on { background: var(--green); }
+  .quick-widget .op-toggle.pending {
+    background: rgba(255,200,50,.5);
+    box-shadow: 0 0 0 2px rgba(255,200,50,.3);
+  }
+  .quick-widget .op-knob {
+    position: absolute; top: 3px; left: 3px;
+    width: 26px; height: 26px; border-radius: 50%;
+    background: #fff; transition: left .2s;
+  }
+  .quick-widget .op-toggle.on .op-knob { left: 27px; }
+  /* Mantém o resto: */
+  html, body {
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, sans-serif;
+    font-feature-settings: "tnum" 1, "lnum" 1;
+    -webkit-font-smoothing: antialiased;
+    -webkit-user-select: none; user-select: none;
+    -webkit-touch-callout: none;
+    touch-action: pan-x;
+  }
+  body { display: flex; flex-direction: column; }
+
+  /* ───────── Top bar ───────── */
+  .topbar {
+    display: flex; align-items: center; justify-content: space-between;
+    height: 32px; padding: 0 20px;
+    font-size: 12px; color: var(--muted);
+    background: rgba(0,0,0,.6);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0; z-index: 10;
+    position: relative;
+  }
+  .topbar .left, .topbar .right { display: flex; gap: 12px; align-items: center; }
+  .topbar .clock { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--text); font-size: 13px; }
+  .topbar .dot {
+    width: 8px; height: 8px; border-radius: 50%; background: var(--red);
+    box-shadow: 0 0 8px rgba(239,68,68,.6);
+    transition: background .3s, box-shadow .3s;
+  }
+  .topbar .dot.ok { background: var(--green); box-shadow: 0 0 8px rgba(34,197,94,.6); }
+  .topbar .dot.warn { background: var(--yellow); box-shadow: 0 0 8px rgba(250,204,21,.6); }
+  .topbar .lbl { letter-spacing: .12em; text-transform: uppercase; font-size: 10px; }
+
+  /* ───────── Layout principal (2 linhas) ───────── */
+  .stage {
+    flex: 1; display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+  /* Linha superior: mapa full + cards flutuando */
+  .row-top {
+    flex: 1.05;
+    position: relative;
+    overflow: hidden;
+    background: #000;
+  }
+  /* Vinheta sutil pras bordas do mapa ficarem mais escuras (legibilidade dos cards) */
+  .row-top::after {
+    content: ''; position: absolute; inset: 0; pointer-events: none;
+    background: radial-gradient(ellipse at center, transparent 35%, rgba(0,0,0,.55) 100%);
+    z-index: 2;
+  }
+  #cluster-map { position: absolute; inset: 0; z-index: 1; }
+  .leaflet-container { background: #000 !important; }
+  .leaflet-control-attribution { display: none !important; }
+  /* Controles de zoom visíveis no nativo (eram escondidos no PWA do iPhone) */
+  body.native .leaflet-control-zoom {
+    border: 1px solid rgba(255,255,255,.15) !important;
+    border-radius: 12px !important; overflow: hidden;
+    box-shadow: 0 4px 16px rgba(0,0,0,.4);
+  }
+  body.native .leaflet-control-zoom a {
+    background: rgba(0,0,0,.7) !important; color: #fff !important;
+    width: 44px !important; height: 44px !important; line-height: 44px !important;
+    font-size: 22px !important; font-weight: 300 !important;
+    border-color: rgba(255,255,255,.1) !important;
+  }
+  body.native .leaflet-control-zoom a:hover { background: rgba(34,197,94,.3) !important; }
+  /* Esconde no browser/PWA antigo */
+  .leaflet-control-zoom { display: none; }
+  body.native .leaflet-control-zoom { display: block !important; }
+  /* Tiles ficam levemente atenuados, ruas brancas saltam */
+  .leaflet-tile-pane { filter: brightness(1.35) contrast(1.05); }
+
+  /* Botão Navegar (canto sup. direito do mapa) */
+  .nav-btn {
+    position: absolute; top: 14px; right: 14px; z-index: 5;
+    background: linear-gradient(135deg, #38bdf8, #0ea5e9);
+    color: #fff; border: none; border-radius: 999px;
+    padding: 9px 18px; font-size: 13px; font-weight: 700;
+    display: flex; align-items: center; gap: 6px;
+    cursor: pointer;
+    box-shadow: 0 6px 20px rgba(14,165,233,.45);
+    -webkit-tap-highlight-color: transparent;
+    transition: transform .12s ease-out;
+  }
+  .nav-btn:active { transform: scale(.94); }
+  .nav-btn .ico { font-size: 15px; }
+
+  /* Cards flutuantes (SOC + Fuel) por cima do mapa */
+  .floating-cards {
+    position: absolute; inset: 0; z-index: 4;
+    display: flex; justify-content: space-between; align-items: stretch;
+    padding: 22px; gap: 22px;
+    pointer-events: none;  /* o mapa abaixo recebe touch, exceto nos cards */
+  }
+  .float-card {
+    pointer-events: auto;
+    background: var(--glass-bg);
+    backdrop-filter: blur(24px) saturate(1.6);
+    -webkit-backdrop-filter: blur(24px) saturate(1.6);
+    border: 1px solid var(--glass-border);
+    border-radius: 24px;
+    padding: 18px 22px;
+    box-shadow: 0 8px 32px rgba(0,0,0,.6), inset 0 1px 0 rgba(255,255,255,.05);
+    display: flex; flex-direction: column;
+    width: 290px;
+    transition: transform .25s ease-out;
+  }
+  .float-card .head {
+    font-size: 10px; letter-spacing: .14em; color: var(--muted);
+    text-transform: uppercase; display: flex; align-items: center; gap: 6px;
+    margin-bottom: 6px;
+  }
+  .float-card .head .ico { font-size: 13px; }
+  .float-card .gauge-wrap {
+    flex: 1; position: relative;
+    display: flex; align-items: center; justify-content: center;
+    min-height: 0;
+  }
+  .float-card svg { width: 100%; max-width: 250px; max-height: 250px; }
+  .gauge-track { fill: none; stroke: rgba(255,255,255,.08); stroke-width: 12; }
+  .gauge-fill  { fill: none; stroke-width: 12; stroke-linecap: round; transition: stroke-dashoffset .6s ease-out; filter: drop-shadow(0 0 8px currentColor); }
+  .gauge-fill.soc  { stroke: var(--green); color: var(--green); }
+  .gauge-fill.fuel { stroke: var(--orange); color: var(--orange); }
+  .gauge-center {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center;
+  }
+  .gauge-big {
+    font-size: 72px; font-weight: 200; line-height: 1;
+    font-variant-numeric: tabular-nums;
+    text-shadow: 0 2px 12px rgba(0,0,0,.6);
+  }
+  .gauge-big .pct { font-size: 30px; color: var(--muted); margin-left: 2px; }
+  .gauge-sub {
+    margin-top: 10px; font-size: 16px; color: rgba(245,245,245,.7);
+    font-weight: 500; letter-spacing: .03em;
+    text-shadow: 0 1px 6px rgba(0,0,0,.7);
+    line-height: 1.4;
+  }
+  .gauge-sub strong { color: var(--text); font-weight: 600; }
+
+  /* Atalhos rápidos (A/C, regen, drive, fan) */
+  .float-card.quick { padding: 14px 16px; }
+  .quick-grid {
+    flex: 1;
+    display: grid; grid-template-columns: 1fr 1fr 1fr;
+    gap: 8px;
+    align-content: center;
+  }
+  .qb {
+    appearance: none; -webkit-appearance: none;
+    background: rgba(255,255,255,.06);
+    border: 1px solid rgba(255,255,255,.1);
+    border-radius: 14px;
+    padding: 10px 4px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 2px;
+    color: var(--text); cursor: pointer;
+    transition: background .15s, transform .1s;
+    min-height: 64px;
+    font-family: inherit;
+  }
+  .qb:active { transform: scale(.92); background: rgba(255,255,255,.14); }
+  .qb.on { background: rgba(34,197,94,.18); border-color: rgba(34,197,94,.5); }
+  .qb-ico { font-size: 22px; line-height: 1; }
+  .qb-lbl { font-size: 9px; letter-spacing: .14em; color: var(--muted); text-transform: uppercase; }
+  .qb-val { font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+  /* Linha inferior: 3 widgets clássicos */
+  .row-bot {
+    flex: 1;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+    padding: 10px;
+  }
+  .widget {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    padding: 18px;
+    display: flex; flex-direction: column;
+    overflow: hidden;
+    position: relative;
+  }
+  .widget h3 {
+    font-size: 13px; font-weight: 700; letter-spacing: .14em;
+    color: var(--muted); text-transform: uppercase;
+    margin-bottom: 10px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .widget h3 .ico { font-size: 16px; }
+
+  /* ───────── Power Gauge ───────── */
+  body.native .power-widget { overflow: visible !important; }
+  .power-widget { position: relative; }
+  /* Dual panel: Potência (esq) | Velocidade (dir) — divisão no eixo X */
+  .power-widget .dual-panel {
+    flex: 1; min-height: 0;
+    display: flex; flex-direction: row; align-items: stretch;
+    gap: 14px;
+  }
+  .dual-cell {
+    flex: 1; min-width: 0;
+    display: flex; flex-direction: column; align-items: stretch;
+  }
+  .dual-cell h3 { margin-bottom: 6px; }
+  .dual-divider { width: 1px; background: var(--border); align-self: stretch; }
+  .dual-readout {
+    display: flex; align-items: baseline; justify-content: center; gap: 6px;
+  }
+  .dual-sub {
+    text-align: center; font-size: 12px; color: var(--muted);
+    font-variant-numeric: tabular-nums; margin-top: 2px;
+  }
+  .dual-sub .ice { color: var(--orange); font-size: 16px; font-weight: 500; }
+  /* Layout flex column legado (mantido p/ compat) */
+  .power-display {
+    flex: 1; min-height: 0;
+    display: flex; flex-direction: column; align-items: stretch;
+  }
+
+  .power-readout {
+    display: flex; align-items: baseline; justify-content: center;
+    gap: 8px;
+    margin-top: 4px;
+  }
+  .power-value {
+    font-size: 52px; font-weight: 300; line-height: 1;
+    font-variant-numeric: tabular-nums;
+    color: var(--text);
+    transition: color .25s;
+  }
+  /* Sub-row: velocidade | RPM ICE */
+  .power-sub-row {
+    margin-top: 10px;
+    display: flex; align-items: center; justify-content: center;
+    gap: 16px;
+    font-variant-numeric: tabular-nums;
+  }
+  .power-sub-cell { display: flex; align-items: baseline; gap: 4px; }
+  .power-sub-cell .sub-val {
+    font-size: 22px; font-weight: 300; color: var(--text);
+  }
+  .power-sub-cell .sub-val.ice { color: var(--orange); }
+  .power-sub-cell .sub-unit { font-size: 11px; color: var(--muted); letter-spacing: .08em; }
+  .power-sub-cell .sub-unit small { font-size: 9px; opacity: 0.8; letter-spacing: .12em; margin-left: 2px; }
+  .power-sub-divider {
+    width: 1px; height: 22px;
+    background: var(--border);
+  }
+  .power-value.regen  { color: var(--green); }
+  .power-value.drive  { color: var(--orange); }
+  .power-value.idle   { color: var(--text); }
+  .power-unit { font-size: 24px; color: var(--muted); font-weight: 300; }
+
+  /* Gráfico potência X/Y — flex item embaixo (compacto pra caber no widget menor) */
+  .power-chart-wrap {
+    position: relative;
+    flex: 1; min-height: 60px;
+    margin-top: 6px;
+    padding: 0 8px 14px 30px;
+    box-sizing: border-box;
+  }
+  .power-chart {
+    width: 100%; height: 100%;
+    display: block;
+    overflow: visible;
+  }
+  .chart-y-labels {
+    position: absolute;
+    left: 0; top: 0; bottom: 16px;
+    width: 28px;
+    display: flex; flex-direction: column;
+    justify-content: space-between;
+    font-size: 9px;
+    color: var(--muted);
+    text-align: right;
+    padding-right: 4px;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: .04em;
+    opacity: 0.65;
+  }
+  .chart-y-labels .zero { color: var(--text); opacity: 0.85; }
+  .chart-x-labels {
+    position: absolute;
+    left: 32px; right: 8px; bottom: 0;
+    display: flex;
+    justify-content: space-between;
+    font-size: 9px;
+    color: var(--muted);
+    letter-spacing: .04em;
+    opacity: 0.55;
+  }
+  .grid-y, .grid-x {
+    stroke: rgba(255,255,255,.07);
+    stroke-width: 0.5;
+    stroke-dasharray: 2 3;
+    vector-effect: non-scaling-stroke;
+  }
+  .grid-zero {
+    stroke: rgba(255,255,255,.22);
+    stroke-width: 0.7;
+    vector-effect: non-scaling-stroke;
+  }
+  .chart-line {
+    fill: none;
+    stroke: #22d3ee;
+    stroke-width: 1.2;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+    opacity: 0.7;
+    filter: drop-shadow(0 0 3px rgba(34,211,238,.35));
+    vector-effect: non-scaling-stroke;
+  }
+  /* Linha da velocidade — verde-limão pra distinguir da potência (ciano) */
+  .chart-line.spd {
+    stroke: #a3e635;
+    filter: drop-shadow(0 0 3px rgba(163,230,53,.35));
+  }
+
+  /* Extra: corrente bateria + pack voltage logo abaixo do kW */
+  .power-extra {
+    margin-top: 8px; display: flex; gap: 16px; justify-content: center;
+    font-size: 22px; color: var(--muted); font-variant-numeric: tabular-nums;
+  }
+  .power-extra strong { color: var(--text); font-weight: 500; }
+  .power-extra .a-pos { color: var(--orange); }
+  .power-extra .a-neg { color: var(--green); }
+
+  /* Motores elétricos: linha no rodapé do widget Potência */
+  .motors-row {
+    margin-top: 14px; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px;
+    font-size: 14px; color: var(--muted); border-top: 1px solid var(--border); padding-top: 10px;
+  }
+  .motors-cell { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+  .motors-cell .lbl { font-size: 10px; letter-spacing: .12em; opacity: .7; }
+  .motors-cell .val { color: var(--text); font-size: 18px; font-weight: 500; font-variant-numeric: tabular-nums; }
+  .motors-cell .sub { font-size: 11px; opacity: .7; }
+  .power-bar {
+    width: 90%; height: 16px; margin-top: 18px;
+    background: var(--border); border-radius: 999px;
+    position: relative; overflow: hidden;
+  }
+  .power-bar-mid {
+    position: absolute; top: 0; bottom: 0; left: 50%; width: 2px;
+    background: var(--border-hi);
+  }
+  .power-bar-fill {
+    position: absolute; top: 0; bottom: 0; left: 50%;
+    width: 0; transition: width .25s ease-out, background .25s;
+  }
+  .power-bar-fill.drive { background: linear-gradient(90deg, transparent, var(--orange)); }
+  .power-bar-fill.regen { background: linear-gradient(270deg, transparent, var(--green)); transform: translateX(-100%); }
+  .power-scale {
+    width: 90%; margin-top: 6px; display: flex; justify-content: space-between;
+    font-size: 12px; color: var(--dim); letter-spacing: .06em;
+  }
+  .power-speed {
+    margin-top: 14px; font-size: 18px; color: var(--muted);
+  }
+  .power-speed strong { color: var(--text); font-size: 38px; font-weight: 300; font-variant-numeric: tabular-nums; margin: 0 4px; }
+
+  /* ───────── Trip em curso ───────── */
+  .trip-metrics {
+    flex: 1; display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: repeat(4, 1fr);
+    gap: 8px 14px; align-content: center;
+  }
+  .trip-cell { display: flex; flex-direction: column; justify-content: center; }
+  .trip-val {
+    font-size: 32px; font-weight: 300; line-height: 1;
+    font-variant-numeric: tabular-nums;
+  }
+  .trip-val .u {
+    font-size: 14px; color: var(--muted); font-weight: 500; margin-left: 4px;
+  }
+  .trip-val .sub {
+    font-size: 12px; color: var(--muted); font-weight: 500; margin-left: 6px;
+    font-variant-numeric: tabular-nums;
+  }
+  .trip-lbl {
+    margin-top: 4px; font-size: 12px; letter-spacing: .14em;
+    color: var(--muted); text-transform: uppercase;
+  }
+  .trip-val.green { color: var(--green); }
+  .trip-val.teal  { color: var(--teal); }
+  .trip-val.orange { color: var(--orange); }
+  .trip-val.yellow { color: var(--yellow); }
+
+  /* ───────── Fluxo de energia v3 — top view 2 eixos (TMCU/GMCU) ───────── */
+  .flow-stage { flex: 1; position: relative; display: flex; flex-direction: column; gap: 4px; }
+  .flow-svg { flex: 1; width: 100%; height: 100%; min-height: 0; }
+  .car-body { fill: rgba(255,255,255,.03); stroke: var(--border-hi); stroke-width: 1.5; }
+  .car-windshield { fill: rgba(56,189,248,.06); stroke: var(--border); stroke-width: 1; }
+  .wheel { fill: #0a0a0a; stroke: var(--border-hi); stroke-width: 1.5; transition: stroke .3s, fill .3s; }
+  .wheel.tracting-ev  { stroke: var(--green); fill: rgba(34,197,94,.22); }
+  .wheel.tracting-ice { stroke: var(--orange); fill: rgba(251,146,60,.22); }
+  .wheel.regen        { stroke: var(--teal); fill: rgba(34,211,238,.30); }
+  .comp-bg { fill: var(--panel-lift); stroke: var(--border-hi); stroke-width: 1.5; transition: stroke .3s, fill .3s; }
+  .comp-bg.active { stroke: var(--green); fill: rgba(34,197,94,.15); }
+  .comp-bg.ice    { stroke: var(--orange); fill: rgba(251,146,60,.18); }
+  .comp-bg.charge { stroke: var(--blue); fill: rgba(56,189,248,.15); }
+  .comp-emoji { font-size: 13px; text-anchor: middle; dominant-baseline: middle; pointer-events: none; }
+  .comp-label { font-size: 7.5px; fill: var(--muted); text-anchor: middle; letter-spacing: .08em; text-transform: uppercase; font-weight: 700; }
+  .comp-value { font-size: 9px; fill: var(--text); text-anchor: middle; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .comp-value.ice   { fill: var(--orange); }
+  .comp-value.green { fill: var(--green); }
+  .comp-value.teal  { fill: var(--teal); }
+  .comp-value.blue  { fill: var(--blue); }
+  .comp-value.muted { fill: var(--muted); }
+  .flow-line { stroke: var(--border-hi); stroke-width: 2; fill: none; transition: stroke .3s, stroke-width .3s, opacity .3s; opacity: .25; }
+  .flow-line.active   { stroke: var(--green); stroke-width: 2.5; opacity: 1; }
+  .flow-line.ice      { stroke: var(--orange); }
+  .flow-line.regen    { stroke: var(--teal); }
+  .flow-line.charge   { stroke: var(--blue); }
+  .flow-line.flowing  { stroke-dasharray: 5 4; animation: dash-flow 1.1s linear infinite; }
+  .flow-line.flowing.reverse { animation-direction: reverse; }
+  @keyframes dash-flow { to { stroke-dashoffset: -18; } }
+  @keyframes ac-flow-dash { to { stroke-dashoffset: -34; } }
+  .ac-flow { transition: opacity .3s; }
+  .ac-wind path { fill: none; stroke: currentColor; stroke-width: 2.6; stroke-linecap: round; stroke-dasharray: 7 11; }
+  .ac-flow.ac-flow-on path { animation: ac-flow-dash .8s linear infinite; }
+  .ac-flow.ac-flow-on path:nth-child(2) { animation-delay: .14s; }
+  .ac-flow.ac-flow-on path:nth-child(3) { animation-delay: .28s; }
+  /* Sliders horizontais do AC (← aumenta): fill ancorado à direita */
+  .ac-hsl { position: relative; height: 52px; border-radius: 12px; background: rgba(255,255,255,.06);
+            margin-bottom: 10px; overflow: hidden; touch-action: none; cursor: pointer; }
+  .ac-hsl-fill { position: absolute; top: 0; left: 0; bottom: 0; width: 50%;
+                 background: linear-gradient(90deg, rgba(34,211,238,.42), rgba(34,211,238,.12)); }
+  .ac-hsl-top { position: absolute; inset: 0; display: flex; align-items: center;
+                justify-content: space-between; padding: 0 16px; pointer-events: none; }
+  .ac-hsl-name { font-size: 12px; letter-spacing: .08em; color: #cbd5e1; }
+  .ac-hsl-val { font-size: 22px; font-weight: 700; color: #fff; }
+  /* Bancos verticais (▼ aumenta): fill ancorado embaixo */
+  .ac-seat { position: relative; width: 104px; height: 132px; border-radius: 14px;
+             background: rgba(255,255,255,.06); overflow: hidden; touch-action: none; cursor: pointer; }
+  .ac-seat-fill { position: absolute; left: 0; right: 0; bottom: 0; height: 0%;
+                  background: linear-gradient(0deg, rgba(34,197,94,.5), rgba(34,197,94,.12)); transition: height .12s; }
+  .ac-seat-lbl { position: absolute; inset: 0; display: flex; flex-direction: column;
+                 align-items: center; justify-content: center; gap: 2px; pointer-events: none; }
+  .flow-mode {
+    position: absolute; left: 50%; bottom: 6px; transform: translateX(-50%);
+    background: var(--panel-lift); border: 1px solid var(--border-hi);
+    color: var(--text); font-size: 10px; font-weight: 700;
+    letter-spacing: .18em; text-transform: uppercase;
+    padding: 4px 12px; border-radius: 999px;
+    pointer-events: none; transition: color .3s, border-color .3s, background .3s;
+  }
+  .flow-mode.ev-awd   { color: var(--green);  border-color: var(--green);  background: rgba(34,197,94,.20); }
+  .flow-mode.ev-rwd   { color: var(--green);  border-color: var(--green);  background: rgba(34,197,94,.12); }
+  .flow-mode.ev-fwd   { color: var(--green);  border-color: var(--green);  background: rgba(34,197,94,.12); }
+  .flow-mode.regen    { color: var(--teal);   border-color: var(--teal);   background: rgba(34,211,238,.18); }
+  .flow-mode.serie    { color: var(--orange); border-color: var(--orange); background: rgba(251,146,60,.14); }
+  .flow-mode.paralelo { color: var(--orange); border-color: var(--orange); background: rgba(251,146,60,.18); }
+  .flow-mode.split    { color: var(--yellow); border-color: var(--yellow); background: rgba(250,204,21,.16); }
+  .flow-mode.carga    { color: var(--blue);   border-color: var(--blue);   background: rgba(56,189,248,.16); }
+  .flow-mode.idle     { color: var(--muted);  border-color: var(--border); }
+
+  /* ───────── Stale dim ───────── */
+  body.stale .float-card, body.stale .widget { filter: brightness(.6) saturate(.5); }
+  body.stale .topbar .dot { background: var(--red); }
+
+  /* ───────── Menu de navegação ───────── */
+  .nav-overlay {
+    position: absolute; inset: 0; z-index: 100;
+    background: rgba(0,0,0,.75); backdrop-filter: blur(8px);
+    display: none; align-items: center; justify-content: center; padding: 24px;
+  }
+  .nav-overlay.show { display: flex; }
+  .nav-card {
+    background: var(--panel); border: 1px solid var(--border-hi);
+    border-radius: 16px; padding: 20px; max-width: 90%; width: 360px;
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  .nav-card h4 { font-size: 14px; color: var(--muted); letter-spacing: .12em; text-transform: uppercase; margin-bottom: 6px; }
+  .nav-btn-row { display: flex; flex-direction: column; gap: 8px; }
+  .nav-card button {
+    background: var(--panel-lift); border: 1px solid var(--border);
+    color: var(--text); padding: 14px; border-radius: 12px; font-size: 14px;
+    cursor: pointer; text-align: left;
+    display: flex; align-items: center; gap: 10px;
+    transition: background .15s, border-color .15s;
+  }
+  .nav-card button:active { background: var(--border-hi); }
+  .nav-card button .em { font-size: 18px; }
+  .nav-card button.close { justify-content: center; color: var(--muted); border-style: dashed; }
+
+  #toast {
+    position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%);
+    background: var(--panel-lift); border: 1px solid var(--border-hi);
+    color: var(--text); padding: 12px 22px; border-radius: 999px;
+    font-size: 13px; opacity: 0; transition: opacity .3s;
+    pointer-events: none; z-index: 9999;
+  }
+  #toast.show { opacity: 1; }
+
+  /* Debug overlay — só aparece quando state._debug_obd === true */
+  #obd-debug {
+    position: fixed; top: 60px; left: 12px;
+    width: 360px; max-height: 75vh; overflow-y: auto;
+    font-size: 10px;
+    background: rgba(0,0,0,0.85); color: #6f6;
+    font: 11px/1.3 ui-monospace, SFMono-Regular, monospace;
+    padding: 10px 12px; border-radius: 10px;
+    border: 1px solid rgba(127,255,127,0.25);
+    box-shadow: 0 6px 20px rgba(0,0,0,0.5);
+    display: none; z-index: 9998;
+    backdrop-filter: blur(6px);
+  }
+  #obd-debug h3 {
+    margin: 0 0 8px; font-size: 11px; letter-spacing: 1.5px;
+    text-transform: uppercase; color: #9fa; opacity: 0.85;
+    display: flex; justify-content: space-between;
+  }
+  #obd-debug table { width: 100%; border-collapse: collapse; }
+  #obd-debug th, #obd-debug td {
+    text-align: left; padding: 2px 4px; border-bottom: 1px solid rgba(127,255,127,0.08);
+  }
+  #obd-debug th { color: #9fa; opacity: 0.6; font-weight: 500; }
+  #obd-debug td.val { color: #fff; text-align: right; }
+  #obd-debug td.raw { color: #99d; font-size: 10px; letter-spacing: 0.5px; }
+  #obd-debug td.age { color: #888; text-align: right; }
+  #obd-debug td.age.stale { color: #f77; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="left">
+    <div class="clock" id="clock">--:--</div>
+    <div class="lbl" id="version">HEC v1.37</div>
+    <!-- Indicador da fonte de dados (📡 LAN direta · ☁ Mac mini via Tailscale) -->
+    <div class="lbl" id="source-badge" style="opacity:.6;font-size:11px;letter-spacing:.08em">☁</div>
+  </div>
+  <div class="right">
+    <div class="lbl">Carro</div>
+    <div class="dot" id="car-dot"></div>
+    <div class="lbl" id="car-lbl">—</div>
+  </div>
+</div>
+<!-- Sentinels invisíveis pra JS antigo que ainda referencia conn-dot/conn-lbl -->
+<div id="conn-dot" style="display:none"></div><div id="conn-lbl" style="display:none"></div>
+
+<!-- Debug OBD overlay — só aparece quando Settings → "Mostrar overlay de PIDs" estiver ON -->
+<div id="obd-debug">
+  <h3>DEBUG OBD · <span class="count">0</span> PIDs</h3>
+  <table><thead><tr><th>id</th><th style="text-align:right">valor</th><th>un</th><th>raw</th><th style="text-align:right">idade</th></tr></thead><tbody></tbody></table>
+  <h3 style="margin-top:10px; color:#f88;">PARSER FALHOU · <span class="failed-count">0</span></h3>
+  <table><thead><tr><th>id</th><th colspan="3">raw recebido</th></tr></thead><tbody class="failed-tbody"></tbody></table>
+</div>
+
+<div class="stage">
+
+  <!-- ═══════ LINHA SUPERIOR: mapa + cards flutuantes ═══════ -->
+  <div class="row-top">
+    <div id="cluster-map"></div>
+
+    <div class="floating-cards">
+      <!-- SOC -->
+      <div class="float-card">
+        <div class="head"><span class="ico">🔋</span>Bateria</div>
+        <div class="gauge-wrap">
+          <svg viewBox="0 0 200 200">
+            <circle class="gauge-track" cx="100" cy="100" r="80"/>
+            <circle class="gauge-fill soc" id="soc-arc" cx="100" cy="100" r="80"
+                    stroke-dasharray="502.65" stroke-dashoffset="502.65"
+                    transform="rotate(-90 100 100)"/>
+          </svg>
+          <div class="gauge-center">
+            <div class="gauge-big"><span id="soc-pct">—</span><span class="pct">%</span></div>
+            <div class="gauge-sub">
+              <strong id="soc-range">— km</strong> EV<br>
+              <span id="soc-kwh">— kWh</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Fuel -->
+      <div class="float-card">
+        <div class="head"><span class="ico">⛽</span>Combustível</div>
+        <div class="gauge-wrap">
+          <svg viewBox="0 0 200 200">
+            <circle class="gauge-track" cx="100" cy="100" r="80"/>
+            <circle class="gauge-fill fuel" id="fuel-arc" cx="100" cy="100" r="80"
+                    stroke-dasharray="502.65" stroke-dashoffset="502.65"
+                    transform="rotate(-90 100 100)"/>
+          </svg>
+          <div class="gauge-center">
+            <div class="gauge-big"><span id="fuel-l">—</span><span class="pct">L</span></div>
+            <div class="gauge-sub">
+              <strong id="fuel-range">— km</strong> ICE<br>
+              <span id="fuel-pct">— % tanque</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Menu navegação -->
+    <div class="nav-overlay" id="nav-overlay" onclick="if(event.target===this)closeNavMenu()">
+      <div class="nav-card">
+        <h4>📍 Abrir navegação em</h4>
+        <div class="nav-btn-row">
+          <button onclick="openExternalNav('waze')"><span class="em">🟦</span><b>Waze</b><span style="color:var(--muted);margin-left:auto;font-size:11px">tráfego ao vivo</span></button>
+          <button onclick="openExternalNav('gmaps')"><span class="em">🟥</span><b>Google Maps</b><span style="color:var(--muted);margin-left:auto;font-size:11px">rota completa</span></button>
+          <button onclick="openExternalNav('apple')"><span class="em">⬜️</span><b>Apple Maps</b><span style="color:var(--muted);margin-left:auto;font-size:11px">turn-by-turn nativo</span></button>
+          <button class="close" onclick="closeNavMenu()">Cancelar</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal HEV: sub-modo (Inteligente/Prioritário) + slider % se Prioritário -->
+    <div id="hev-modal" onclick="if(event.target===this)closeHevModal()" style="display:none;position:fixed;inset:0;z-index:2000;background:rgba(0,0,0,.6);align-items:center;justify-content:center">
+      <div style="background:#0f172a;border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:22px;width:min(440px,86vw);box-shadow:0 20px 60px rgba(0,0,0,.6)">
+        <div style="font-size:18px;font-weight:700;margin-bottom:14px;color:#e2e8f0">⚙ Modo HEV</div>
+        <label style="display:flex;gap:10px;align-items:flex-start;padding:12px;border-radius:10px;background:rgba(255,255,255,.05);margin-bottom:8px;cursor:pointer">
+          <input type="radio" name="hev-mode" value="1" id="hev-r-smart" onchange="_toggleHevSlider()" style="margin-top:3px">
+          <span><strong style="color:#e2e8f0">Inteligente</strong><br><span style="font-size:12px;color:#94a3b8">Carro decide quando ligar o motor</span></span>
+        </label>
+        <label style="display:flex;gap:10px;align-items:flex-start;padding:12px;border-radius:10px;background:rgba(255,255,255,.05);margin-bottom:8px;cursor:pointer">
+          <input type="radio" name="hev-mode" value="2" id="hev-r-priority" onchange="_toggleHevSlider()" style="margin-top:3px">
+          <span><strong style="color:#e2e8f0">Prioritário</strong><br><span style="font-size:12px;color:#94a3b8">Preserva uma % de bateria definida</span></span>
+        </label>
+        <div id="hev-slider-wrap" style="display:none;margin:14px 4px 6px">
+          <div style="display:flex;justify-content:space-between;font-size:13px;color:#cbd5e1;margin-bottom:8px">
+            <span>% de bateria a preservar</span><span><b id="hev-soc-val">50</b>%</span>
+          </div>
+          <input type="range" min="20" max="80" step="5" value="50" id="hev-soc-slider" style="width:100%" oninput="document.getElementById('hev-soc-val').textContent=this.value">
+          <div style="font-size:11px;color:#64748b;margin-top:4px">20–80 %</div>
+        </div>
+        <div style="display:flex;gap:10px;margin-top:16px">
+          <button onclick="closeHevModal()" style="flex:1;padding:12px;border-radius:10px;border:1px solid rgba(255,255,255,.15);background:transparent;color:#cbd5e1;font-size:15px">Cancelar</button>
+          <button onclick="applyHevModal()" style="flex:1;padding:12px;border-radius:10px;border:none;background:var(--green);color:#04210f;font-weight:700;font-size:15px">Aplicar</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Menu do AC: tudo da aba Conforto (fan, temps, sync, recirc, bancos) -->
+    <div id="ac-modal" onclick="if(event.target===this)closeAcModal()" style="display:none;position:fixed;inset:0;z-index:2000;background:rgba(0,0,0,.6);align-items:center;justify-content:center">
+      <div style="background:#0f172a;border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:20px;width:min(560px,92vw);max-height:88vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.6)">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+          <div style="font-size:18px;font-weight:700;color:#e2e8f0">❄️ Climatização</div>
+          <button onclick="closeAcModal()" style="background:transparent;border:none;color:#94a3b8;font-size:22px;line-height:1">✕</button>
+        </div>
+        <button class="ac-power-btn" onclick="toggleAcPower()" style="width:100%;padding:14px;border-radius:12px;border:none;font-weight:700;font-size:16px;margin-bottom:14px;cursor:pointer">AC</button>
+        <!-- Sliders: deslize ← aumenta · → reduz -->
+        <div class="ac-hsl" data-ctrl="driver_temp" data-min="16" data-max="32" data-step="0.5" data-state="hvac_driver_temp" data-unit="°">
+          <div class="ac-hsl-fill"></div>
+          <div class="ac-hsl-top"><span class="ac-hsl-name">🌡 MOTORISTA</span><span class="ac-hsl-val">--</span></div>
+        </div>
+        <div class="ac-hsl" data-ctrl="passenger_temp" data-min="16" data-max="32" data-step="0.5" data-state="hvac_passenger_temp" data-unit="°">
+          <div class="ac-hsl-fill"></div>
+          <div class="ac-hsl-top"><span class="ac-hsl-name">🌡 PASSAGEIRO</span><span class="ac-hsl-val">--</span></div>
+        </div>
+        <div class="ac-hsl" data-ctrl="fan_speed" data-min="0" data-max="7" data-step="1" data-state="hvac_fan_speed" data-unit="/7">
+          <div class="ac-hsl-fill"></div>
+          <div class="ac-hsl-top"><span class="ac-hsl-name">⚙ VENTILADOR</span><span class="ac-hsl-val">--</span></div>
+        </div>
+        <div style="text-align:center;font-size:11px;color:#64748b;margin:-2px 0 10px">deslize ► aumenta · ◄ reduz</div>
+        <!-- Sync / Auto / Recirc -->
+        <div style="display:flex;gap:8px;margin-bottom:12px">
+          <button class="ac-sync-btn" onclick="toggleAcSync()" style="flex:1;padding:11px 4px;border-radius:10px;border:1px solid rgba(255,255,255,.15);background:transparent;color:#cbd5e1;font-size:11px;font-weight:700">🔗 SYNC</button>
+          <button class="ac-auto-btn" onclick="toggleAcAuto()" style="flex:1;padding:11px 4px;border-radius:10px;border:1px solid rgba(255,255,255,.15);background:transparent;color:#cbd5e1;font-size:11px;font-weight:700">AUTO</button>
+          <button class="ac-cycle-btn" onclick="toggleAcCycle()" style="flex:1;padding:11px 4px;border-radius:10px;border:1px solid rgba(255,255,255,.15);background:transparent;color:#cbd5e1;font-size:11px;font-weight:700">↺ RECIRC</button>
+          <button class="ac-comp-btn" onclick="toggleAcCompressor()" style="flex:1;padding:11px 4px;border-radius:10px;border:1px solid rgba(255,255,255,.15);background:transparent;color:#cbd5e1;font-size:11px;font-weight:700">❄️ COMP</button>
+        </div>
+        <!-- Direção do ar (blower_mode) — desenho da cabine com fluxo visual -->
+        <div style="margin-bottom:12px">
+          <div style="font-size:11px;color:#94a3b8;margin-bottom:6px">DIREÇÃO DO AR</div>
+          <div onclick="cycleBlower()" style="background:rgba(255,255,255,.05);border-radius:12px;padding:10px 10px 6px;cursor:pointer">
+            <svg viewBox="0 0 240 120" style="width:100%;height:120px">
+              <defs>
+                <marker id="ac-ah" markerWidth="8" markerHeight="8" refX="5" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="currentColor"/></marker>
+              </defs>
+              <!-- cabine (linhas sutis): teto, pára-brisa, piso -->
+              <path d="M126 14 L232 14" stroke="#334155" stroke-width="2" fill="none"/>
+              <path d="M126 14 L84 58" stroke="#334155" stroke-width="2" fill="none"/>
+              <path d="M40 108 L228 108" stroke="#334155" stroke-width="2" fill="none"/>
+              <!-- vent (origem do ar) -->
+              <rect x="74" y="54" width="16" height="20" rx="3" fill="#1e293b" stroke="#334155"/>
+              <!-- pessoa sentada (de frente p/ a esquerda) -->
+              <circle cx="168" cy="40" r="10" fill="#334155"/>
+              <path d="M150 100 L150 52 Q150 46 156 46 L172 46" stroke="#334155" stroke-width="7" fill="none" stroke-linecap="round"/>
+              <path d="M150 100 L196 100" stroke="#334155" stroke-width="7" fill="none" stroke-linecap="round"/>
+              <!-- correntes de vento a partir do vent (mechas onduladas animadas) -->
+              <g class="ac-flow ac-wind" id="ac-flow-defrost" style="color:#22d3ee">
+                <path d="M82 52 C 78 38 90 30 102 22"/>
+                <path d="M88 54 C 85 40 97 31 109 24"/>
+                <path d="M80 50 C 75 37 87 28 99 20"/>
+              </g>
+              <g class="ac-flow ac-wind" id="ac-flow-face" style="color:#22d3ee">
+                <path d="M92 50 q10 -6 20 0 q10 6 20 0 q10 -6 18 0"/>
+                <path d="M92 58 q10 6 20 0 q10 -6 20 0 q10 6 18 0"/>
+                <path d="M92 66 q10 -6 20 0 q10 6 20 0 q8 -6 14 0"/>
+              </g>
+              <g class="ac-flow ac-wind" id="ac-flow-feet" style="color:#22d3ee">
+                <path d="M84 72 C 92 90 110 96 128 100"/>
+                <path d="M88 74 C 98 92 116 98 134 102"/>
+                <path d="M82 76 C 90 92 108 98 124 102"/>
+              </g>
+            </svg>
+            <div style="text-align:center;font-size:13px;color:#cbd5e1;margin-top:2px"><b id="ac-blow-lbl">--</b> <span style="color:#64748b;font-size:11px">· toque p/ alternar</span></div>
+          </div>
+        </div>
+        <!-- Ventilação dos bancos — arraste ↓ aumenta · ↑ reduz -->
+        <div style="font-size:11px;color:#94a3b8;margin-bottom:6px">VENTILAÇÃO DOS BANCOS</div>
+        <div style="display:flex;gap:14px;justify-content:center">
+          <div class="ac-seat" data-ctrl="seat_vent_drv" data-state="seat_vent_drv">
+            <div class="ac-seat-fill"></div>
+            <div class="ac-seat-lbl"><span style="font-size:24px">💺</span><span style="font-size:11px;color:#cbd5e1">Motorista</span><span class="ac-seat-val" style="font-size:13px;font-weight:700;color:#fff">OFF</span></div>
+          </div>
+          <div class="ac-seat" data-ctrl="seat_vent_pass" data-state="seat_vent_pass">
+            <div class="ac-seat-fill"></div>
+            <div class="ac-seat-lbl"><span style="font-size:24px">💺</span><span style="font-size:11px;color:#cbd5e1">Passageiro</span><span class="ac-seat-val" style="font-size:13px;font-weight:700;color:#fff">OFF</span></div>
+          </div>
+        </div>
+        <div style="text-align:center;font-size:11px;color:#64748b;margin-top:6px">arraste ▲ aumenta · ▼ reduz (base = desliga)</div>
+        <!-- Extras: toggles on/off -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px">
+          <button id="ac-acmax-btn"  onclick="toggleAcExtra('acmax')"         style="padding:11px;border-radius:10px;border:1px solid rgba(255,255,255,.15);background:transparent;color:#cbd5e1;font-size:13px;font-weight:700">❄️ AC MAX</button>
+          <button id="ac-heating-btn" onclick="toggleAcExtra('heating')"       style="padding:11px;border-radius:10px;border:1px solid rgba(255,255,255,.15);background:transparent;color:#cbd5e1;font-size:13px;font-weight:700">🔥 Aquecimento</button>
+          <button id="ac-front-defrost-btn" onclick="toggleAcExtra('front_defrost')" style="padding:11px;border-radius:10px;border:1px solid rgba(255,255,255,.15);background:transparent;color:#cbd5e1;font-size:13px;font-weight:700">🌫 Desemb. diant.</button>
+          <button id="ac-rear-defrost-btn"  onclick="toggleAcExtra('rear_defrost')"  style="padding:11px;border-radius:10px;border:1px solid rgba(255,255,255,.15);background:transparent;color:#cbd5e1;font-size:13px;font-weight:700">🌫 Desemb. tras.</button>
+          <button id="ac-auto-defrost-btn"  onclick="toggleAcExtra('auto_defrost')"  style="padding:11px;border-radius:10px;border:1px solid rgba(255,255,255,.15);background:transparent;color:#cbd5e1;font-size:13px;font-weight:700">🌫 Desemb. auto</button>
+          <button id="ac-anion-btn"  onclick="toggleAcExtra('anion')"         style="padding:11px;border-radius:10px;border:1px solid rgba(255,255,255,.15);background:transparent;color:#cbd5e1;font-size:13px;font-weight:700">✨ Ionizador</button>
+          <button id="ac-aqs-btn"    onclick="toggleAcExtra('aqs')"           style="padding:11px;border-radius:10px;border:1px solid rgba(255,255,255,.15);background:transparent;color:#cbd5e1;font-size:13px;font-weight:700">🍃 AQS</button>
+          <div style="display:flex;align-items:center;justify-content:center;gap:6px;padding:11px;border-radius:10px;background:rgba(255,255,255,.05);color:#cbd5e1;font-size:13px">🌬 PM2.5 <b id="ac-pm25" style="color:#e2e8f0">--</b></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════ LINHA INFERIOR: 3 widgets clássicos ═══════ -->
+  <div class="row-bot">
+
+    <!-- Power Gauge v1.34 — dividido: Potência (esq) | Velocidade (dir) -->
+    <div class="widget power-widget">
+      <div class="dual-panel">
+        <!-- ─── Painel Potência (±50 kW, zero no meio) ─── -->
+        <div class="dual-cell">
+          <h3><span class="ico">⚡</span> Potência</h3>
+          <div class="dual-readout">
+            <span class="power-value idle" id="power-val">0,0</span><span class="power-unit">kW</span>
+          </div>
+          <div class="dual-sub"><span class="ice" id="power-rpm">0</span> rpm ICE</div>
+          <div class="power-chart-wrap">
+            <div class="chart-y-labels">
+              <span>+50</span><span>+25</span><span class="zero">0</span><span>−25</span><span>−50</span>
+            </div>
+            <svg class="power-chart" viewBox="0 0 300 120" preserveAspectRatio="none">
+              <line class="grid-y" x1="0" y1="10"  x2="300" y2="10"/>
+              <line class="grid-y" x1="0" y1="35"  x2="300" y2="35"/>
+              <line class="grid-zero" x1="0" y1="60"  x2="300" y2="60"/>
+              <line class="grid-y" x1="0" y1="85"  x2="300" y2="85"/>
+              <line class="grid-y" x1="0" y1="110" x2="300" y2="110"/>
+              <line class="grid-x" x1="100" y1="0" x2="100" y2="120"/>
+              <line class="grid-x" x1="200" y1="0" x2="200" y2="120"/>
+              <path class="chart-line" id="chart-line" d="M 0 60 L 300 60"/>
+            </svg>
+            <div class="chart-x-labels"><span>−30s</span><span>agora</span></div>
+          </div>
+        </div>
+
+        <div class="dual-divider"></div>
+
+        <!-- ─── Painel Velocidade (0–160 km/h, base embaixo) ─── -->
+        <div class="dual-cell">
+          <h3><span class="ico">🏎️</span> Velocidade</h3>
+          <div class="dual-readout">
+            <span class="power-value idle" id="power-speed">0</span><span class="power-unit">km/h</span>
+          </div>
+          <div class="dual-sub"><span id="speed-max-v">0</span> km/h máx</div>
+          <div class="power-chart-wrap">
+            <div class="chart-y-labels">
+              <span>160</span><span>120</span><span>80</span><span>40</span><span>0</span>
+            </div>
+            <svg class="power-chart" viewBox="0 0 300 120" preserveAspectRatio="none">
+              <line class="grid-y" x1="0" y1="0"   x2="300" y2="0"/>
+              <line class="grid-y" x1="0" y1="30"  x2="300" y2="30"/>
+              <line class="grid-y" x1="0" y1="60"  x2="300" y2="60"/>
+              <line class="grid-y" x1="0" y1="90"  x2="300" y2="90"/>
+              <line class="grid-zero" x1="0" y1="120" x2="300" y2="120"/>
+              <line class="grid-x" x1="100" y1="0" x2="100" y2="120"/>
+              <line class="grid-x" x1="200" y1="0" x2="200" y2="120"/>
+              <path class="chart-line spd" id="chart-line-spd" d="M 0 120 L 300 120"/>
+            </svg>
+            <div class="chart-x-labels"><span>−30s</span><span>agora</span></div>
+          </div>
+        </div>
+      </div>
+      <!-- Sentinels pra render() não quebrar (IDs antigos) -->
+      <div id="power-bar-drive" style="display:none"></div>
+      <div id="power-bar-regen" style="display:none"></div>
+      <svg style="display:none"><path id="spark-area"/><path id="spark-line"/></svg>
+    </div>
+
+    <!-- Trip -->
+    <div class="widget">
+      <h3><span class="ico">🚗</span> Viagem em curso</h3>
+      <div class="trip-metrics">
+        <div class="trip-cell">
+          <div class="trip-val teal"><span id="trip-dist">0,0</span><span class="u">km</span></div>
+          <div class="trip-lbl">Distância</div>
+        </div>
+        <div class="trip-cell">
+          <div class="trip-val"><span id="trip-time">0:00</span></div>
+          <div class="trip-lbl">Tempo</div>
+        </div>
+        <div class="trip-cell">
+          <div class="trip-val green"><span id="trip-kwh">0,0</span><span class="u">kWh</span></div>
+          <div class="trip-lbl">Energia (net)</div>
+        </div>
+        <div class="trip-cell">
+          <div class="trip-val orange"><span id="trip-fuel">0,0</span><span class="u">L</span></div>
+          <div class="trip-lbl">Combustível</div>
+        </div>
+        <div class="trip-cell">
+          <div class="trip-val teal"><span id="trip-kwh100">—</span><span class="u">kWh/100km</span></div>
+          <div class="trip-lbl">Consumo</div>
+        </div>
+        <div class="trip-cell">
+          <div class="trip-val green"><span id="trip-kml">—</span><span class="u">km/L</span></div>
+          <div class="trip-lbl">Econômico</div>
+        </div>
+        <div class="trip-cell">
+          <div class="trip-val yellow"><span id="trip-cost">R$ 0,00</span></div>
+          <div class="trip-lbl">Custo estimado</div>
+        </div>
+        <div class="trip-cell">
+          <div class="trip-val yellow"><span id="trip-cost-km">R$ 0,00</span><span class="u">/km</span></div>
+          <div class="trip-lbl">Custo por km</div>
+        </div>
+        <!-- Split EV / HEV -->
+        <div class="trip-cell">
+          <div class="trip-val green"><span id="trip-ev-pct">—</span><span class="u">%</span><span class="sub" id="trip-ev-km">— km</span></div>
+          <div class="trip-lbl">Elétrico</div>
+        </div>
+        <div class="trip-cell">
+          <div class="trip-val orange"><span id="trip-hev-pct">—</span><span class="u">%</span><span class="sub" id="trip-hev-km">— km</span></div>
+          <div class="trip-lbl">Híbrido</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Atalhos: mesmos controles da aba Drive do PWA -->
+    <div class="widget quick-widget">
+      <h3><span class="ico">🎛</span> Controles</h3>
+      <div class="dc-body">
+        <!-- Modo de condução PHEV -->
+        <div class="dc-card">
+          <div class="dc-label">⚙ Modo<span id="hev-sub-label" style="opacity:.6;font-weight:600;margin-left:6px"></span></div>
+          <div class="dm-chips">
+            <div class="dm-chip" data-mode="0" onclick="openHevModal()">HEV</div>
+            <div class="dm-chip" data-mode="1" onclick="setDriveMode(1)">Prior. EV</div>
+            <div class="dm-chip" data-mode="3" onclick="setDriveMode(3)">EV</div>
+          </div>
+        </div>
+        <!-- Estilo (terrain) -->
+        <div class="dc-card">
+          <div class="dc-label">🏁 Estilo</div>
+          <div class="tm-chips-4">
+            <div class="dm-chip" data-terrain="0" onclick="setTerrainMode(0)">Normal</div>
+            <div class="dm-chip" data-terrain="1" onclick="setTerrainMode(1)">Sport</div>
+            <div class="dm-chip" data-terrain="2" onclick="setTerrainMode(2)">Eco</div>
+            <div class="dm-chip" data-terrain="3" onclick="setTerrainMode(3)">Neve</div>
+          </div>
+          <div class="tm-chips-3">
+            <div class="dm-chip" data-terrain="4" onclick="setTerrainMode(4)">Areia</div>
+            <div class="dm-chip" data-terrain="5" onclick="setTerrainMode(5)">Lama</div>
+            <div class="dm-chip" data-terrain="11" onclick="setTerrainMode(11)">AWD</div>
+          </div>
+        </div>
+        <!-- Regeneração -->
+        <div class="dc-card">
+          <div class="dc-label">⚡ Regeneração</div>
+          <div class="dm-chips">
+            <div class="dm-chip" data-regen="2" onclick="setRegenLevel(2)">Baixo</div>
+            <div class="dm-chip" data-regen="0" onclick="setRegenLevel(0)">Normal</div>
+            <div class="dm-chip" data-regen="1" onclick="setRegenLevel(1)">Alto</div>
+          </div>
+          <div class="one-pedal-row">
+            <span class="op-lbl">One-Pedal</span>
+            <div class="op-toggle" id="one-pedal-toggle" onclick="toggleOnePedal()">
+              <div class="op-knob"></div>
+            </div>
+          </div>
+          <div class="one-pedal-row">
+            <span class="op-lbl">🛡 ESP</span>
+            <div class="op-toggle" id="esp-toggle" onclick="toggleEsp()">
+              <div class="op-knob"></div>
+            </div>
+          </div>
+        </div>
+        <!-- Direção -->
+        <div class="dc-card">
+          <div class="dc-label">🎯 Direção</div>
+          <div class="dm-chips">
+            <div class="dm-chip" data-steer="2" onclick="setSteerMode(2)">Conforto</div>
+            <div class="dm-chip" data-steer="0" onclick="setSteerMode(0)">Normal</div>
+            <div class="dm-chip" data-steer="1" onclick="setSteerMode(1)">Sport</div>
+          </div>
+        </div>
+        <!-- Clima / AC — básicos inline + botão p/ menu completo -->
+        <div class="dc-card">
+          <div class="dc-label" style="display:flex;align-items:center;justify-content:space-between">
+            <span>❄️ Climatização<span id="ac-sub-label" style="opacity:.6;font-weight:600;margin-left:6px"></span></span>
+            <button onclick="openAcModal()" style="background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15);color:#94a3b8;border-radius:8px;padding:4px 10px;font-size:11px;letter-spacing:.04em">⛶ menu</button>
+          </div>
+          <button class="ac-power-btn" onclick="toggleAcPower()" data-compact="1" style="width:100%;padding:12px;border-radius:10px;border:none;font-weight:700;font-size:14px;margin:8px 0;cursor:pointer">AC</button>
+          <div class="ac-hsl" data-ctrl="driver_temp" data-min="16" data-max="32" data-step="0.5" data-state="hvac_driver_temp" data-unit="°">
+            <div class="ac-hsl-fill"></div><div class="ac-hsl-top"><span class="ac-hsl-name">🌡 MOT.</span><span class="ac-hsl-val">--</span></div>
+          </div>
+          <div class="ac-hsl" data-ctrl="passenger_temp" data-min="16" data-max="32" data-step="0.5" data-state="hvac_passenger_temp" data-unit="°">
+            <div class="ac-hsl-fill"></div><div class="ac-hsl-top"><span class="ac-hsl-name">🌡 PASS.</span><span class="ac-hsl-val">--</span></div>
+          </div>
+          <div class="ac-hsl" data-ctrl="fan_speed" data-min="0" data-max="7" data-step="1" data-state="hvac_fan_speed" data-unit="/7">
+            <div class="ac-hsl-fill"></div><div class="ac-hsl-top"><span class="ac-hsl-name">⚙ VENT.</span><span class="ac-hsl-val">--</span></div>
+          </div>
+          <div style="display:flex;gap:6px;margin-top:4px">
+            <button class="ac-sync-btn"  onclick="toggleAcSync()"  style="flex:1;padding:10px 3px;border-radius:10px;border:1px solid rgba(255,255,255,.15);background:transparent;color:#cbd5e1;font-size:11px;font-weight:700">🔗 SYNC</button>
+            <button class="ac-auto-btn"  onclick="toggleAcAuto()"  style="flex:1;padding:10px 3px;border-radius:10px;border:1px solid rgba(255,255,255,.15);background:transparent;color:#cbd5e1;font-size:11px;font-weight:700">AUTO</button>
+            <button class="ac-cycle-btn" onclick="toggleAcCycle()" style="flex:1;padding:10px 3px;border-radius:10px;border:1px solid rgba(255,255,255,.15);background:transparent;color:#cbd5e1;font-size:11px;font-weight:700">↺ RECIRC</button>
+            <button class="ac-comp-btn"  onclick="toggleAcCompressor()" style="flex:1;padding:10px 3px;border-radius:10px;border:1px solid rgba(255,255,255,.15);background:transparent;color:#cbd5e1;font-size:11px;font-weight:700">❄️ COMP</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Mapa em tempo real — só aparece no nativo (CSS).
+         Trip data fica como overlay sobre o mapa, com vinheta escurecendo
+         as bordas pra deixar o texto legível. -->
+    <div class="widget map-widget">
+      <h3><span class="ico">📍</span> Viagem em curso</h3>
+      <div id="cluster-map-bot"></div>
+      <!-- Botão pisca-alerta (4 setas), sobre o mapa no rodapé -->
+      <button class="hazard-btn" id="hazard-btn" aria-label="Pisca-alerta">
+        <svg viewBox="0 0 24 24" width="68" height="68" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round">
+          <path d="M12 3.5 L22 20 L2 20 Z"/>
+          <line x1="12" y1="10" x2="12" y2="14.5"/>
+          <circle cx="12" cy="17.3" r="0.7" fill="currentColor" stroke="none"/>
+        </svg>
+      </button>
+      <!-- Overlay Potência/Velocidade (canto sup-esq do mapa) -->
+      <div class="pwr-overlay">
+        <div class="pwr-spd"><span id="ov-speed">0</span></div>
+        <div class="pwr-unit">km/h</div>
+        <div class="pwr-sub"><span id="ov-power">0,0</span> kW<span class="sep">·</span><span class="rpm"><span id="ov-rpm">0</span> rpm</span></div>
+      </div>
+      <div class="trip-overlay">
+        <div class="trip-info">
+          <div class="ti-cell">
+            <div class="tov teal"><span id="tov-dist">0,0</span><span style="font-size:18px;opacity:.7"> km</span></div>
+            <div class="tol">Distância</div>
+          </div>
+          <div class="ti-cell">
+            <div class="tov"><span id="tov-time">0:00</span></div>
+            <div class="tol">Tempo</div>
+          </div>
+          <div class="ti-cell">
+            <div class="tov green"><span id="tov-kwh">0,0</span><span style="font-size:18px;opacity:.7"> kWh</span></div>
+            <div class="tol">Energia (net)</div>
+          </div>
+          <div class="ti-cell">
+            <div class="tov orange"><span id="tov-fuel">0,0</span><span style="font-size:18px;opacity:.7"> L</span></div>
+            <div class="tol">Combustível</div>
+          </div>
+          <div class="ti-cell">
+            <div class="tov teal"><span id="tov-kwh100">—</span><span style="font-size:18px;opacity:.7"> kWh/100km</span></div>
+            <div class="tol">Consumo</div>
+          </div>
+          <div class="ti-cell">
+            <div class="tov green"><span id="tov-kml">—</span><span style="font-size:18px;opacity:.7"> km/L</span></div>
+            <div class="tol">Econômico</div>
+          </div>
+          <div class="ti-cell">
+            <div class="tov yellow"><span id="tov-cost">R$ 0,00</span></div>
+            <div class="tol">Custo</div>
+          </div>
+          <div class="ti-cell">
+            <div class="tov yellow"><span id="tov-cost-km">R$ 0,00</span><span style="font-size:18px;opacity:.7">/km</span></div>
+            <div class="tol">Custo por km</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Fluxo de energia v3 — escondido no modo nativo (CSS) -->
+    <div class="widget flow-widget">
+      <h3><span class="ico">🔄</span> Fluxo de energia</h3>
+      <div class="flow-stage">
+        <svg class="flow-svg" viewBox="0 0 360 220" preserveAspectRatio="xMidYMid meet">
+          <!-- FRENTE (topo da tela) / TRÁS (fundo) — carro visto de cima -->
+
+          <!-- Linhas de fluxo (atrás de tudo) -->
+          <!-- Bateria → GMCU (eixo dianteiro EV / série regen) -->
+          <path id="line-batt-gmcu"  class="flow-line" d="M 175 110 L 130 60"/>
+          <!-- Bateria → TMCU (eixo traseiro EV) -->
+          <path id="line-batt-tmcu"  class="flow-line" d="M 185 110 L 185 165"/>
+          <!-- ICE → GMCU (paralelo dianteiro / série gerador) -->
+          <path id="line-ice-gmcu"   class="flow-line" d="M 220 60 L 155 60"/>
+          <!-- ICE → bateria (série explícito, contorna por baixo) -->
+          <path id="line-ice-batt"   class="flow-line" d="M 240 75 Q 270 110 215 115"/>
+          <!-- Wallbox externo → Bateria (carga AC) -->
+          <path id="line-charge"     class="flow-line" d="M 340 30 L 200 100"/>
+
+          <!-- Carro silhueta (top view) -->
+          <!-- chassis arredondado -->
+          <rect class="car-body" x="70" y="20" width="220" height="180" rx="35" ry="35"/>
+          <!-- parabrisa frontal (faixa azulada na frente) -->
+          <path class="car-windshield" d="M 100 38 L 260 38 L 250 76 L 110 76 Z"/>
+          <!-- linha capô-teto -->
+          <line class="car-hood-line" x1="80" y1="100" x2="280" y2="100"/>
+          <line class="car-hood-line" x1="80" y1="140" x2="280" y2="140"/>
+
+          <!-- Rodas (4 retângulos arredondados nos cantos) — meio dentro do chassis -->
+          <rect class="wheel" id="wheel-fl" x="64"  y="55"  width="16" height="34" rx="4"/>
+          <rect class="wheel" id="wheel-fr" x="280" y="55"  width="16" height="34" rx="4"/>
+          <rect class="wheel" id="wheel-rl" x="64"  y="148" width="16" height="34" rx="4"/>
+          <rect class="wheel" id="wheel-rr" x="280" y="148" width="16" height="34" rx="4"/>
+
+          <!-- ICE (motor a combustão, frente direita) -->
+          <rect class="comp-bg ice" id="node-ice" x="218" y="44" width="44" height="32" rx="6"/>
+          <text class="comp-emoji" x="240" y="62">⛽</text>
+          <text class="comp-label" x="240" y="88">ICE 1.5T</text>
+          <text class="comp-value ice" id="val-ice" x="240" y="38">—</text>
+
+          <!-- GMCU (motor/gerador dianteiro, esquerda) -->
+          <rect class="comp-bg" id="node-gmcu" x="98" y="44" width="44" height="32" rx="6"/>
+          <text class="comp-emoji" x="120" y="62">⚙️</text>
+          <text class="comp-label" x="120" y="88">GMCU</text>
+          <text class="comp-value green" id="val-gmcu" x="120" y="38">—</text>
+
+          <!-- Bateria central -->
+          <rect class="comp-bg" id="node-batt" x="135" y="100" width="90" height="34" rx="6"/>
+          <text class="comp-emoji" x="180" y="119">🔋</text>
+          <text class="comp-label" x="180" y="146">Bateria 34kWh</text>
+          <text class="comp-value green" id="val-batt" x="180" y="92">—</text>
+
+          <!-- TMCU (motor traseiro de tração) -->
+          <rect class="comp-bg" id="node-tmcu" x="148" y="160" width="64" height="32" rx="6"/>
+          <text class="comp-emoji" x="180" y="178">🔋⚡</text>
+          <text class="comp-label" x="180" y="204">TMCU</text>
+          <text class="comp-value green" id="val-tmcu" x="180" y="154">—</text>
+
+          <!-- Wallbox externo (mostra só quando carregando) -->
+          <rect class="comp-bg charge" id="node-charge" x="320" y="18" width="32" height="22" rx="5" opacity="0"/>
+          <text class="comp-emoji" id="emoji-charge" x="336" y="31" style="font-size:12px;opacity:0">🔌</text>
+        </svg>
+        <div class="flow-mode idle" id="flow-mode">parado</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+'use strict';
+
+const $ = id => document.getElementById(id);
+const fmt0 = n => Math.round(n).toLocaleString('pt-BR');
+const fmt1 = n => (Number.isFinite(+n) ? (+n).toLocaleString('pt-BR', {minimumFractionDigits:1, maximumFractionDigits:1}) : '—');
+const fmtBRL = n => 'R$ ' + (Number.isFinite(+n) ? (+n).toFixed(2).replace('.', ',') : '0,00');
+const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
+function toast(msg) {
+  const el = $('toast'); el.textContent = msg; el.classList.add('show');
+  clearTimeout(toast._t); toast._t = setTimeout(() => el.classList.remove('show'), 2200);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  Wake Lock + relógio
+// ═══════════════════════════════════════════════════════════════════════════
+let _wakeLock = null;
+async function requestWakeLock() {
+  try {
+    if ('wakeLock' in navigator) {
+      _wakeLock = await navigator.wakeLock.request('screen');
+      _wakeLock.addEventListener('release', () => {
+        if (document.visibilityState === 'visible') requestWakeLock();
+      });
+    }
+  } catch (e) { console.warn('wakeLock:', e); }
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && !_wakeLock) requestWakeLock();
+});
+function tickClock() {
+  const d = new Date();
+  $('clock').textContent = d.toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'});
+}
+tickClock(); setInterval(tickClock, 30_000);
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  State + WebSocket
+// ═══════════════════════════════════════════════════════════════════════════
+let state = {};
+let lastUpdateMs = 0;
+let _speedMax = 0;
+let _lastSpd = 0;            // p/ filtro anti-pico do máximo
+let _drivingReadyPrev = -1;  // reset do máximo por partida
+
+function bridgeUrl() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  return proto + '//' + location.host + '/ws';
+}
+let ws, wsRetry = 0;
+function connect() {
+  // Modo nativo (dentro do app HavalOBD WKWebView): pula WebSocket, dados vêm
+  // direto do ELM327 via Bluetooth injetados em applyNativeSnapshot().
+  if (isNativeBridge()) {
+    setConn(true);
+    const lbl = document.getElementById('conn-lbl');
+    if (lbl) lbl.textContent = 'OBD direto';
+    return;
+  }
+  ws = new WebSocket(bridgeUrl());
+  ws.onopen = () => { wsRetry = 0; setConn(true); };
+  ws.onmessage = ev => {
+    try {
+      const msg = JSON.parse(ev.data);
+      if (msg.type === 'full_state') { state = msg.data || {}; lastUpdateMs = Date.now(); render(); }
+      else if (msg.type === 'update') { Object.assign(state, msg.data || {}); lastUpdateMs = Date.now(); render(); }
+    } catch (e) {}
+  };
+  ws.onclose = () => { setConn(false); wsRetry++; setTimeout(connect, Math.min(8000, 500 * wsRetry)); };
+  ws.onerror = () => { try { ws.close(); } catch(_) {} };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  Native bridge — quando rodando dentro do app HavalOBD (WKWebView):
+//    `window._nativeBridge.source === 'havalobd-ios'`. Dados chegam via
+//    `applyNativeSnapshot(payload)` injetado pelo Swift a 5Hz (fast) + 1Hz
+//    (full). MAS o Swift injeta _nativeBridge APÓS o didFinish do WebView,
+//    então não dá pra avaliar uma vez no load — precisa verificar dinâmico.
+// ═══════════════════════════════════════════════════════════════════════════
+function isNativeBridge() {
+  return !!(window._nativeBridge && window._nativeBridge.source === 'havalobd-ios');
+}
+// Source badge: 📡 quando snapshot veio do APK local (LAN) · ☁ quando veio
+// do Mac mini via Tailscale. Atualiza a cada snapshot e tem timeout — se
+// LAN parou de chegar por 3s, volta pro ☁.
+let _lastLanMs = 0;
+function _updateSourceBadge(source) {
+  const el = document.getElementById('source-badge');
+  if (!el) return;
+  const isLan = source === 'havalobd-apk-local';
+  if (isLan) _lastLanMs = Date.now();
+  const lanFresh = (Date.now() - _lastLanMs) < 3000;
+  if (lanFresh) {
+    // LAN direta via WebSocket (Network framework) — telemetria do APK local
+    el.textContent = '📡 LAN·WS';
+    el.style.color = '#22c55e';
+    el.style.opacity = '0.9';
+  } else {
+    // Via Mac mini (Tailscale) — HTTP poll do bridge
+    el.textContent = '☁ Nuvem';
+    el.style.color = '';
+    el.style.opacity = '0.5';
+  }
+}
+setInterval(() => _updateSourceBadge(null), 1000);
+
+window.applyNativeSnapshot = function(payload) {
+  if (!payload || typeof payload !== 'object') return;
+  // Primeira chamada nativa? Fecha o WebSocket se estava conectado (modo browser
+  // por engano enquanto o native bridge ainda não tinha aparecido).
+  if (ws && ws.readyState !== WebSocket.CLOSED) {
+    try { ws.close(); } catch(_) {}
+    ws = null;
+    setConn(true);
+    const lbl = document.getElementById('conn-lbl');
+    if (lbl) lbl.textContent = 'OBD direto';
+  }
+  _updateSourceBadge(payload.source);
+  // PRIORIDADE LAN: quando o LAN (APK local) está fresco (<2s), o snapshot do
+  // Mac mini (Tailscale) NÃO sobrescreve as chaves de telemetria fast — senão
+  // os dois competem e a velocidade fica "piscando" (ex: LAN=0 vs Mac mini=-1
+  // com carro desligado). Mac mini só preenche os calculados (trip, range...).
+  const isLan = payload.source === 'havalobd-apk-local';
+  // Janela ampla (5s) e "grudenta": brecha curta da LAN não deixa o cloud
+  // (atrasado ~1–3s) assumir a velocidade/telemetria fast → sem piscar.
+  const lanFresh = (Date.now() - _lastLanMs) < 5000;
+  // Velocidade vem SÓ do CAN do carro (APK). GPS do iPad descartado — dava valores
+  // absurdos (81, 272 km/h). speed_kmh_gps é ignorado pro display.
+  for (const [k, v] of Object.entries(payload)) {
+    if (k === 'ts' || k === 'source' || k.startsWith('__')) continue;
+    if (k === 'speed_kmh_gps') continue;                       // GPS nunca vira velocidade
+    if (!isLan && lanFresh && LAN_FAST_KEYS.has(k)) continue;  // LAN tem prioridade
+    state[k] = v;
+  }
+  lastUpdateMs = Date.now();
+  try { render(); } catch (e) { console.error('[cluster] render erro:', e); }
+};
+// Chaves de telemetria fast servidas pelo LAN (APK local). Quando LAN ativo,
+// o Mac mini não sobrescreve essas — evita conflito/piscar entre fontes.
+// Prioridade LAN: quando o LAN está fresco, o cloud (atrasado) NÃO sobrescreve
+// essas chaves — evita piscar entre fontes. Inclui o AC/HVAC (o estado ao vivo
+// do LAN deve mandar; o cloud lagado piscava o indicador do AC).
+const LAN_FAST_KEYS = new Set([
+  'speed_kmh','motor_power_kw','engine_rpm','batt_power_pct','steering_angle',
+  'gear','driving_ready','soc_pct','battery_current_a','pack_voltage_v','batt_12v_pct',
+  'charging_state','charge_current_a','charge_power_kw','charge_remaining_min',
+  'ac_state','hvac_power_mode','hvac_ac_enable','hvac_fan_speed','hvac_driver_temp',
+  'hvac_passenger_temp','hvac_sync_enable','hvac_auto_enable','hvac_cycle_mode',
+  'hvac_blower_mode','seat_vent_drv','seat_vent_pass','hvac_acmax','hvac_anion',
+  'hvac_aqs','hvac_heating','hvac_front_defrost','hvac_rear_defrost','hvac_auto_defrost',
+]);
+console.log('[cluster] applyNativeSnapshot registrado · aguardando _nativeBridge');
+function setConn(ok) {
+  $('conn-dot').classList.toggle('ok', ok);
+  $('conn-lbl').textContent = ok ? 'online' : 'reconectando…';
+}
+
+// Stale watchdog
+setInterval(() => {
+  const age = Date.now() - lastUpdateMs;
+  document.body.classList.toggle('stale', lastUpdateMs > 0 && age > 30_000);
+  const carAge = Math.min(
+    Date.now() - (state.last_apk_ms || 0),
+    Date.now() - (state.last_gwm_ms || 0)
+  );
+  const carDot = $('car-dot');
+  carDot.classList.remove('ok', 'warn');
+  if (carAge < 60_000)       { carDot.classList.add('ok');   $('car-lbl').textContent = 'online'; }
+  else if (carAge < 300_000) { carDot.classList.add('warn'); $('car-lbl').textContent = Math.round(carAge/1000) + 's atrás'; }
+  else                       { $('car-lbl').textContent = 'offline'; }
+}, 3000);
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  Mapa — Apple MapKit JS (preferido) com fallback pra Leaflet Carto Dark
+//
+//  Estratégia: tenta MapKit JS primeiro. Se em 5s não inicializar (sem
+//  internet, token expirado, SDK Apple offline), cai pro Leaflet.
+// ═══════════════════════════════════════════════════════════════════════════
+let _mapEngine = null;     // 'mapkit' | 'leaflet'
+let _mkMap = null, _mkAnnotation = null;
+let _lfMap = null, _lfMarker = null;
+let _mapCenteredOnce = false;
+let _lastRecenterMs = 0;   // throttle do recenter (mapa estático, só o pin anda)
+const DEFAULT_CENTER = { lat: -16.6869, lng: -49.2648 };
+
+// ── Course-up: mapa gira pro rumo do carro (pra-frente = pra-cima) ──────────
+const COURSE_UP   = true;       // ativo no cluster nativo (Leaflet)
+// Só roda no mapa nativo (#cluster-map-bot existe). No browser, no-op.
+function courseUpActive() { return COURSE_UP && !!document.getElementById('cluster-map-bot'); }
+let _mapHeading   = 0;          // rumo suavizado em graus (0=norte, 90=leste)
+let _prevHdgGps   = null;       // última posição usada pra calcular o rumo
+let _hdgValid     = false;      // já temos um rumo confiável?
+// Atualiza _mapHeading a partir do deslocamento GPS. Só recalcula quando andou
+// o suficiente (>4m) pra não girar com ruído parado; suaviza pelo arco curto.
+function updateHeading(lat, lng) {
+  if (!_prevHdgGps) { _prevHdgGps = { lat, lng }; return; }
+  const R = Math.PI / 180;
+  const dLatM = (lat - _prevHdgGps.lat) * 111320;
+  const dLngM = (lng - _prevHdgGps.lng) * 111320 * Math.cos(lat * R);
+  if (Math.hypot(dLatM, dLngM) < 4) return;   // parado/ruído → mantém rumo
+  const dLng = (lng - _prevHdgGps.lng) * R;
+  const y = Math.sin(dLng) * Math.cos(lat * R);
+  const x = Math.cos(_prevHdgGps.lat * R) * Math.sin(lat * R)
+          - Math.sin(_prevHdgGps.lat * R) * Math.cos(lat * R) * Math.cos(dLng);
+  const brng = (Math.atan2(y, x) / R + 360) % 360;
+  if (!_hdgValid) { _mapHeading = brng; _hdgValid = true; }
+  else {
+    let diff = ((brng - _mapHeading + 540) % 360) - 180;   // arco curto [-180,180]
+    _mapHeading = (_mapHeading + diff * 0.35 + 360) % 360;  // low-pass
+  }
+  _prevHdgGps = { lat, lng };
+}
+// Silhueta do carro (mesma do app do iPhone/PWA). Aponta pra cima (norte) a 0°.
+// ~18px (metade do antigo ponto verde, que com o scale 1.5 ficava enorme).
+const _CAR_SVG = '<svg viewBox="0 0 32 32" width="54" height="54" aria-hidden="true">'
+  + '<path d="M16 1.5c4 0 6 3 6 7.5v15c0 4-2 6.5-6 6.5s-6-2.5-6-6.5v-15c0-4.5 2-7.5 6-7.5z" '
+  + 'fill="#cbd5e1" stroke="#1e293b" stroke-width="1.6" stroke-linejoin="round"/>'
+  + '<path d="M12.4 8.5h7.2l-1 4h-5.2z" fill="#334155" opacity="0.75"/>'
+  + '<path d="M13.2 24.5h5.6l-0.9-3h-3.8z" fill="#334155" opacity="0.55"/></svg>';
+const _CAR_WRAP_STYLE = 'width:54px;height:54px;transform-origin:50% 50%;'
+  + 'transition:transform .4s ease-out;filter:drop-shadow(0 1px 3px rgba(0,0,0,.6));';
+function _clusterCarIcon() {
+  return L.divIcon({
+    className: '',
+    html: '<div class="car-marker" style="' + _CAR_WRAP_STYLE + '">' + _CAR_SVG + '</div>',
+    iconSize: [54, 54], iconAnchor: [27, 27],
+  });
+}
+function applyCourseUp() {
+  const el = document.getElementById('cluster-map-bot');
+  if (!el) return;
+  const cu  = courseUpActive() && _hdgValid;
+  const rot = cu ? -_mapHeading : 0;
+  el.style.transform = `scale(1.5) rotate(${rot}deg)`;
+  // Orienta o carro pro rumo. Em course-up o container gira -rumo, então o carro
+  // gira +rumo → fica apontando pra CIMA (pra-frente). No browser (sem course-up,
+  // norte pra cima) o carro aponta pro rumo, igual no iPhone.
+  if (_lfMarker) {
+    const mEl = _lfMarker.getElement && _lfMarker.getElement();
+    const car = mEl && mEl.querySelector('.car-marker');
+    if (car) car.style.transform = `rotate(${_hdgValid ? _mapHeading : 0}deg)`;
+  }
+}
+
+// ── MapKit JS init via data-callback ───────────────────────────────────────
+window.onMapKitLoad = async function() {
+  try {
+    mapkit.init({
+      authorizationCallback: async (done) => {
+        try {
+          const r = await fetch('/api/mapkit/token');
+          const j = await r.json();
+          if (!j.token) throw new Error('no token');
+          done(j.token);
+        } catch (e) {
+          console.warn('[mapkit] token fetch falhou, fallback Leaflet:', e);
+          initLeaflet();
+        }
+      },
+      language: 'pt-BR',
+    });
+    _mkMap = new mapkit.Map('cluster-map', {
+      center: new mapkit.Coordinate(DEFAULT_CENTER.lat, DEFAULT_CENTER.lng),
+      colorScheme: mapkit.Map.ColorSchemes.Dark,
+      mapType: mapkit.Map.MapTypes.Standard,
+      isZoomEnabled: false, isScrollEnabled: false, isRotationEnabled: false,
+      showsZoomControl: false, showsCompass: mapkit.FeatureVisibility.Hidden,
+      showsScale: mapkit.FeatureVisibility.Hidden,
+      showsMapTypeControl: false, showsUserLocationControl: false,
+      _showsZoomControl: false,
+    });
+    _mkMap.region = new mapkit.CoordinateRegion(
+      new mapkit.Coordinate(DEFAULT_CENTER.lat, DEFAULT_CENTER.lng),
+      new mapkit.CoordinateSpan(0.04, 0.04)
+    );
+    _mapEngine = 'mapkit';
+    console.log('[mapkit] inicializado · dark scheme');
+    updateMap();
+  } catch (e) {
+    console.warn('[mapkit] init falhou:', e);
+    initLeaflet();
+  }
+};
+
+// Detecta CEDO se estamos dentro do app HavalOBD WKWebView (sem esperar
+// _nativeBridge que só aparece no didFinish). O messageHandlers.obd já
+// existe assim que o WebView é criado, ANTES do HTML rodar.
+const IN_NATIVE_APP = !!(window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.obd);
+
+// No app nativo: body.native faz body/row-top transparentes e esconde
+// o Leaflet — MapKit nativo (Swift) ocupa o fundo da tela.
+// Diagnóstico expandido pra entender por que o badge ficou 'env=?'.
+try {
+  const hasWebkit   = !!window.webkit;
+  const hasHandlers = !!(window.webkit && window.webkit.messageHandlers);
+  const hasObd      = !!(window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.obd);
+  const ua          = navigator.userAgent || '';
+  // Marca o title pra debug — Swift pode ler via observeValue / KVO
+  const dbg = `IIFE: webkit=${hasWebkit?1:0} mh=${hasHandlers?1:0} obd=${hasObd?1:0}`;
+  document.title = dbg;
+  const isNative = hasObd || (hasWebkit && /iPad|iPhone/.test(ua) && !/Safari/.test(ua.split(' ').pop() || ''));
+  if (isNative) document.body.classList.add('native');
+  const b = document.getElementById('env-badge');
+  if (b) {
+    b.textContent = `wk=${hasWebkit?1:0} mh=${hasHandlers?1:0} obd=${hasObd?1:0} nat=${isNative?1:0}`;
+    b.style.background  = isNative ? 'rgba(34,197,94,.25)' : 'rgba(255,100,100,.25)';
+    b.style.borderColor = isNative ? 'rgba(34,197,94,.6)'  : 'rgba(255,100,100,.6)';
+    b.style.color       = isNative ? '#22c55e' : '#ff6464';
+  }
+} catch (e) {
+  const b = document.getElementById('env-badge');
+  if (b) { b.textContent = 'ERR: ' + e.message; b.style.color = '#ff6464'; }
+  document.title = 'ERR: ' + e.message;
+}
+
+if (IN_NATIVE_APP) {
+  console.log('[map] app nativo — Leaflet direto (sem esperar MapKit JS)');
+  // Espera o leaflet.js terminar de carregar
+  if (window.L) {
+    initLeaflet();
+  } else {
+    window.addEventListener('load', initLeaflet);
+  }
+} else {
+  // Modo browser: dá 6s pro MapKit JS carregar do CDN; senão cai pro Leaflet
+  setTimeout(() => { if (!_mapEngine) initLeaflet(); }, 6000);
+}
+
+// Flag: user mexeu manualmente no mapa? Se sim, pausa o auto-follow por um tempo.
+let _userZoomed = false;
+let _userZoomedMs = 0;          // quando o usuário mexeu (pra retomar follow depois)
+let _programmaticMove = false;  // true enquanto NÓS movemos o mapa (não conta como gesto)
+function initLeaflet() {
+  if (_mapEngine === 'leaflet' || !window.L) return;
+  if (window.L && !_lfMap) {
+    // No app nativo o mapa fica no widget do row-bot (#cluster-map-bot)
+    const mapId = document.getElementById('cluster-map-bot') ? 'cluster-map-bot' : 'cluster-map';
+    _lfMap = L.map(mapId, {
+      zoomControl: false, attributionControl: false,
+      dragging: true, touchZoom: true, scrollWheelZoom: true,
+      doubleClickZoom: true, boxZoom: false, keyboard: false, tap: true,
+    }).setView([DEFAULT_CENTER.lat, DEFAULT_CENTER.lng], 17);
+    // Zoom +/- no canto SUPERIOR DIREITO (longe do trip-info no canto sup esq)
+    L.control.zoom({ position: 'bottomright' }).addTo(_lfMap);
+    L.tileLayer(window._mapTileUrl || 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+      maxZoom: 19, subdomains: 'abcd',
+    }).addTo(_lfMap);
+    _mapEngine = 'leaflet';
+    console.log('[map] Leaflet ativo em #' + mapId);
+    // User interagiu? Marca pra não auto-zoom mais.
+    // Só marca _userZoomed em gesto REAL do usuário (não no nosso setView/recenter).
+    _lfMap.on('zoomstart', () => { if (!_programmaticMove) { _userZoomed = true; _userZoomedMs = Date.now(); } });
+    _lfMap.on('dragstart', () => { if (!_programmaticMove) { _userZoomed = true; _userZoomedMs = Date.now(); } });
+    // Força recalcular tamanho após o widget grid layoutar
+    setTimeout(() => _lfMap.invalidateSize(), 200);
+    updateMap();
+  }
+}
+
+let _mapNoGpsBadge = null;
+function updateMap() {
+  const lat = +state.gps_lat, lng = +state.gps_lng;
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat === 0) {
+    // Mostra badge "GPS aguardando…" no widget de mapa pra usuário saber
+    if (document.body.classList.contains('native') && !_mapNoGpsBadge) {
+      const mw = document.querySelector('.map-widget');
+      if (mw) {
+        _mapNoGpsBadge = document.createElement('div');
+        _mapNoGpsBadge.textContent = '⌖ aguardando GPS…';
+        _mapNoGpsBadge.style.cssText = 'position:absolute;bottom:14px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.65);color:#fbbf24;font-size:11px;letter-spacing:.08em;padding:6px 14px;border-radius:8px;z-index:550;pointer-events:none;';
+        mw.appendChild(_mapNoGpsBadge);
+      }
+    }
+    return;
+  }
+  // Tem GPS — remove o badge se ainda existia
+  if (_mapNoGpsBadge) { _mapNoGpsBadge.remove(); _mapNoGpsBadge = null; }
+
+  const now = Date.now();
+  if (_mapEngine === 'mapkit' && _mkMap) {
+    const coord = new mapkit.Coordinate(lat, lng);
+    if (!_mkAnnotation) {
+      _mkAnnotation = new mapkit.Annotation(coord, () => {
+        const el = document.createElement('div');
+        el.style.cssText = 'width:28px;height:28px;background:radial-gradient(circle,#22c55e,#15803d);border:3px solid #000;border-radius:50%;box-shadow:0 0 20px rgba(34,197,94,.7),0 0 4px #000';
+        return el;
+      }, { anchorOffset: new DOMPoint(0, 0) });
+      _mkMap.addAnnotation(_mkAnnotation);
+    } else {
+      _mkAnnotation.coordinate = coord;   // SÓ a bolinha se move por tick
+    }
+    if (!_mapCenteredOnce) {
+      _mkMap.region = new mapkit.CoordinateRegion(coord, new mapkit.CoordinateSpan(0.02, 0.02));
+      _mapCenteredOnce = true; _lastRecenterMs = now;
+    } else if (!_userZoomed && now - _lastRecenterMs > 4000) {
+      // Recentraliza no MÁX a cada 4s (mapa não fica saltando a 10Hz).
+      _mkMap.setCenterAnimated(coord, true); _lastRecenterMs = now;
+    }
+  } else if (_mapEngine === 'leaflet' && _lfMap) {
+    const ll = [lat, lng];
+    if (!_lfMarker) {
+      _lfMarker = L.marker(ll, { icon: _clusterCarIcon() }).addTo(_lfMap);
+    } else {
+      _lfMarker.setLatLng(ll);   // SÓ a bolinha se move por tick → mapa estático
+    }
+    updateHeading(lat, lng);     // atualiza o rumo p/ o course-up
+    applyCourseUp();             // gira o container conforme o rumo
+    // Não congela o follow pra sempre: retoma 8s após o usuário mexer no mapa.
+    if (_userZoomed && now - _userZoomedMs > 8000) _userZoomed = false;
+    if (_userZoomed) return;   // usuário mexeu há pouco → não recentraliza
+    const cu = courseUpActive();
+    let recenter = !_mapCenteredOnce;
+    if (!recenter) {
+      const pt = _lfMap.latLngToContainerPoint(ll), size = _lfMap.getSize();
+      if (cu) {
+        // Course-up: o pin É o pivô da rotação → mantém centralizado. Recentraliza
+        // quando ele sai de uma zona central pequena (segue o carro), com throttle
+        // pra não repintar a cada frame (evita o "piscar" de antes).
+        const drift = Math.hypot(pt.x - size.x / 2, pt.y - size.y / 2);
+        recenter = drift > size.x * 0.10 && (now - _lastRecenterMs > 900);
+      } else {
+        // Sem course-up: pin no quadrante superior; só recentra perto da borda.
+        const mx = size.x * 0.20, myTop = size.y * 0.14, myBot = size.y * 0.30;
+        const outOfZone = pt.x < mx || pt.x > size.x - mx || pt.y < myTop || pt.y > size.y - myBot;
+        recenter = outOfZone && (now - _lastRecenterMs > 1500);
+      }
+    }
+    if (recenter) {
+      _lastRecenterMs = now;
+      const targetZoom = Math.max(_lfMap.getZoom(), 17);
+      _programmaticMove = true;   // marca que o move é nosso (não conta como _userZoomed)
+      // Course-up centraliza sem animar (segue suave); sem course-up anima leve.
+      _lfMap.setView(ll, targetZoom, { animate: _mapCenteredOnce && !cu, duration: 0.5 });
+      requestAnimationFrame(() => { _programmaticMove = false; });
+      if (!cu) {
+        // pin no quadrante superior pra ver mais pista à frente
+        requestAnimationFrame(() => {
+          if (!_userZoomed && _lfMap) _lfMap.panBy([0, _lfMap.getSize().y * 0.28], { animate: false });
+        });
+      }
+      _mapCenteredOnce = true;
+    }
+  }
+}
+// Mapa em tempo real: tick rápido + também é chamado ao final do render()
+setInterval(updateMap, 1000);
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  Menu de navegação externa
+// ═══════════════════════════════════════════════════════════════════════════
+window.openNavMenu  = () => {
+  // No app iOS nativo, abre direto o modal de navegação Apple Maps
+  // (turn-by-turn embutido). No browser, mostra o menu Waze/GMaps/Apple.
+  console.log('[nav] openNavMenu — IN_NATIVE_APP:', IN_NATIVE_APP,
+              '· hasObdHandler:', !!window.webkit?.messageHandlers?.obd);
+  if (IN_NATIVE_APP && window.webkit?.messageHandlers?.obd) {
+    try {
+      window.webkit.messageHandlers.obd.postMessage({ action: 'open_nav_modal' });
+      toast('📍 abrindo navegação…');
+    } catch (e) {
+      toast('Erro: ' + e.message);
+      console.error('[nav] postMessage falhou:', e);
+    }
+    return;
+  }
+  toast('Modo browser — mostrando menu');
+  $('nav-overlay').classList.add('show');
+};
+window.closeNavMenu = () => $('nav-overlay').classList.remove('show');
+window.openExternalNav = (app) => {
+  closeNavMenu();
+  const fb = {
+    waze:  { scheme: 'waze://?navigate=yes', web: 'https://waze.com/ul' },
+    gmaps: { scheme: 'comgooglemaps://?center=&zoom=14&views=traffic', web: 'https://maps.google.com' },
+    apple: { scheme: 'maps://', web: 'https://maps.apple.com' },
+  };
+  const t = fb[app]; if (!t) return;
+  const startedAt = Date.now();
+  const handler = () => {
+    if (Date.now() - startedAt < 1500 && document.visibilityState === 'visible') {
+      window.location.href = t.web;
+    }
+    window.removeEventListener('blur', handler);
+  };
+  window.addEventListener('blur', handler, { once: true });
+  setTimeout(handler, 1300);
+  window.location.href = t.scheme;
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  Constantes Haval H6 PHEV34
+// ═══════════════════════════════════════════════════════════════════════════
+const PACK_KWH      = 34;
+const TANK_L        = 55;
+const KM_PER_L_HEV  = 8;
+const KM_PER_KWH_EV = 5.3;
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  Render
+// ═══════════════════════════════════════════════════════════════════════════
+function render() {
+  const socCirc = 502.65;
+
+  // SOC — usa range_ev_km do SERVIDOR (não calcula local)
+  const socPct = +state.soc_pct || 0;
+  $('soc-pct').textContent = Math.round(socPct);
+  $('soc-arc').setAttribute('stroke-dashoffset', socCirc * (1 - socPct/100));
+  const kwhLeft = (socPct / 100) * PACK_KWH;
+  $('soc-kwh').textContent = fmt1(kwhLeft) + ' kWh';
+  const rangeEv = +state.range_ev_km;
+  $('soc-range').textContent = Number.isFinite(rangeEv) ? fmt0(rangeEv) + ' km'
+    : fmt0(kwhLeft * KM_PER_KWH_EV) + ' km';
+
+  // Fuel — usa fuel_l + range_ice_km DIRETOS do servidor. Sem deriva.
+  const rangeIce = +state.range_ice_km;
+  const fuelL    = +state.fuel_l;
+  $('fuel-l').textContent = Number.isFinite(fuelL) ? fmt1(fuelL) : '—';
+  if (Number.isFinite(fuelL)) {
+    const fuelPct = clamp((fuelL / TANK_L) * 100, 0, 100);
+    $('fuel-arc').setAttribute('stroke-dashoffset', socCirc * (1 - fuelPct/100));
+    $('fuel-pct').textContent = Math.round(fuelPct) + ' % tanque';
+  } else {
+    $('fuel-arc').setAttribute('stroke-dashoffset', 502.65);
+    $('fuel-pct').textContent = '— % tanque';
+  }
+  $('fuel-range').textContent = Number.isFinite(rangeIce) ? fmt0(rangeIce) + ' km' : '— km';
+
+  // Power
+  const motorKw    = +state.motor_power_kw || 0;
+  const chargeKw   = +state.charge_power_kw || 0;
+  const isCharging = state.charging_state === 1;
+  const displayKw  = isCharging ? -chargeKw : motorKw;
+  const pVal = $('power-val');
+  pVal.textContent = displayKw.toFixed(1).replace('.', ',');
+  pVal.classList.remove('regen','drive','idle');
+  if (displayKw <= -1)     pVal.classList.add('regen');
+  else if (displayKw >= 1) pVal.classList.add('drive');
+  else                     pVal.classList.add('idle');
+  const bDrive = $('power-bar-drive'), bRegen = $('power-bar-regen');
+  bDrive.style.width = '0'; bRegen.style.width = '0';
+  if (displayKw > 0)      bDrive.style.width = clamp((displayKw / 120) * 50, 0, 50) + '%';
+  else if (displayKw < 0) bRegen.style.width = clamp((-displayKw / 50) * 50, 0, 50) + '%';
+
+  // Speed — painel Velocidade (id="power-speed") + máx + legacy speed-val/max
+  // Clamp >= 0: o carro reporta -1 como sentinela "sem leitura" (desligado).
+  const spd = Math.max(0, +state.speed_kmh || 0);
+  // Reset do MÁX a cada nova partida (driving_ready 0→1).
+  const dr = +state.driving_ready || 0;
+  if (dr === 1 && _drivingReadyPrev !== 1) { _speedMax = 0; }
+  _drivingReadyPrev = dr;
+  const powerSpeedEl = document.getElementById('power-speed');
+  if (powerSpeedEl) powerSpeedEl.textContent = fmt0(spd);
+  const speedValEl = $('speed-val');
+  if (speedValEl) speedValEl.textContent = fmt0(spd);
+  // Overlay sobre o mapa (layout nativo): velocidade + potência + rpm
+  const ovS = document.getElementById('ov-speed'); if (ovS) ovS.textContent = fmt0(spd);
+  const ovP = document.getElementById('ov-power');
+  if (ovP) {
+    ovP.textContent = displayKw.toFixed(1).replace('.', ',');
+    // Azul = consumindo (positivo) · Verde = regenerando (negativo) · neutro = ~0
+    ovP.style.color = (displayKw <= -0.1) ? 'var(--green)'
+                    : (displayKw >=  0.1) ? 'var(--blue)'
+                    : 'var(--text)';
+  }
+  const ovR = document.getElementById('ov-rpm');   if (ovR) ovR.textContent = fmt0(+state.engine_rpm || 0);
+  // Anti-pico no MÁX: ignora salto absurdo num tick (ex.: 40→116) e valores
+  // implausíveis. Real a 10Hz sobe pouco por amostra; >35 km/h num tick = ruído.
+  if (spd <= 220 && spd <= _lastSpd + 35 && spd > _speedMax) _speedMax = spd;
+  _lastSpd = spd;
+  const speedMaxEl = $('speed-max');
+  if (speedMaxEl) speedMaxEl.textContent = fmt0(_speedMax);
+  const speedMaxV = document.getElementById('speed-max-v');
+  if (speedMaxV) speedMaxV.textContent = fmt0(_speedMax);
+
+  // Trip
+  const tr = state.current_trip || state.rolling || {};
+  const distKm = +tr.distKm || +tr.dist_km || 0;
+  $('trip-dist').textContent = fmt1(distKm);
+  const tSec = +tr.timeSec || +tr.time_sec || 0;
+  const h = Math.floor(tSec/3600), m = Math.floor((tSec%3600)/60);
+  const timeStr = h > 0 ? `${h}:${String(m).padStart(2,'0')}` : `${m} min`;
+  $('trip-time').textContent = timeStr;
+  const netKwh = +tr.netKwh || +tr.net_kwh || 0;
+  $('trip-kwh').textContent = fmt1(netKwh);
+  const tripFuelL = +tr.fuelL || +tr.fuel_l || 0;
+  $('trip-fuel').textContent = fmt1(tripFuelL);
+  const pKwh = +state.battery_avg_price_per_kwh || +state.price_kwh || 0.55;
+  const pGas = +state.tank_avg_price_per_l      || +state.price_gas_per_l || 6.40;
+  const tripCost = netKwh * pKwh + tripFuelL * pGas;
+  $('trip-cost').textContent = fmtBRL(tripCost);
+  // R$/km — só faz sentido com distância > 0
+  const costKmStr = (distKm > 0.5 && tripCost > 0.01)
+    ? 'R$ ' + (tripCost / distKm).toFixed(2).replace('.', ',')
+    : 'R$ —';
+  $('trip-cost-km').textContent = costKmStr;
+
+  // Espelha pro overlay sobre o mapa (app nativo)
+  const tov = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+  tov('tov-dist',     fmt1(distKm));
+  tov('tov-time',     timeStr);
+  tov('tov-kwh',      fmt1(netKwh));
+  tov('tov-fuel',     fmt1(tripFuelL));
+  tov('tov-cost',     fmtBRL(tripCost));
+  tov('tov-cost-km',  costKmStr);
+
+  // kWh/100km (consumo elétrico líq.) e km/L econômico (energia+combustível
+  // convertidos a litros equivalentes pela razão de preço, igual à PWA).
+  const kwh100 = distKm > 0.3 ? netKwh / distKm * 100 : 0;
+  const equivL = (pGas > 0 ? netKwh * pKwh / pGas : 0) + tripFuelL;
+  const kmL    = (distKm > 0.3 && equivL > 0.001) ? distKm / equivL : 0;
+  const kwh100Str = kwh100 > 0 ? fmt1(kwh100) : '—';
+  const kmLStr    = kmL    > 0 ? fmt1(kmL)    : '—';
+  tov('trip-kwh100', kwh100Str); tov('trip-kml', kmLStr);
+  tov('tov-kwh100',  kwh100Str); tov('tov-kml',  kmLStr);
+
+  // RPM do motor a combustão (no widget Potência)
+  const rpmEl = document.getElementById('power-rpm');
+  if (rpmEl) rpmEl.textContent = fmt0(+state.engine_rpm || 0);
+  // Split EV/HEV — hev vem do current_trip.hybridDistKm; ev = total − hev
+  const hevKm = +tr.hybridDistKm || +tr.hybrid_dist_km || 0;
+  const evKm  = Math.max(0, distKm - hevKm);
+  if (distKm > 0.5) {
+    const hevPct = (hevKm / distKm) * 100;
+    const evPct  = 100 - hevPct;
+    $('trip-ev-pct').textContent  = Math.round(evPct);
+    $('trip-hev-pct').textContent = Math.round(hevPct);
+    $('trip-ev-km').textContent   = evKm.toFixed(1) + ' km';
+    $('trip-hev-km').textContent  = hevKm.toFixed(1) + ' km';
+  } else {
+    $('trip-ev-pct').textContent  = '—';
+    $('trip-hev-pct').textContent = '—';
+    $('trip-ev-km').textContent   = '— km';
+    $('trip-hev-km').textContent  = '— km';
+  }
+
+  // ═══════ Fluxo de energia v3 — top view 2 eixos (TMCU/GMCU) ═══════
+  const rpm         = +state.engine_rpm || 0;
+  const engineSt    = +state.engine_state || 0;
+  const battCurr    = +state.battery_current_a || 0;     // + entrando, - saindo
+  const battEntering = battCurr > 1;
+  const iceOn       = engineSt >= 1 || rpm > 100;
+  const regen       = motorKw < -0.5;
+  // MCU PIDs (vêm do OBD quando conectado; fallback heurístico)
+  const gmcuRpm     = +state.gmcu_motor_speed || 0;
+  const tmcuRpm     = +state.tmcu_motor_speed || 0;
+  const gmcuActive  = gmcuRpm > 100 || (state.gmcu_motor_speed === undefined && iceOn);
+  const tmcuActive  = tmcuRpm > 100 || (state.tmcu_motor_speed === undefined && Math.abs(motorKw) > 0.5);
+
+  // Estima consumo ICE em L/h por RPM (lookup empírica H6 PHEV 1.5T)
+  let fuelRate = 0;
+  if (iceOn) {
+    if (rpm < 800)       fuelRate = 0.3;
+    else if (rpm < 1500) fuelRate = 2.0;
+    else if (rpm < 2500) fuelRate = 4.0;
+    else if (rpm < 3500) fuelRate = 6.5;
+    else                 fuelRate = 9.0;
+  }
+
+  // Detecta modo (ordem importa — mais específico primeiro)
+  let mode = 'idle', modeLbl = 'parado';
+  if (isCharging) {
+    mode = 'carga'; modeLbl = 'carga externa';
+  } else if (regen) {
+    mode = 'regen'; modeLbl = 'regenerando';
+  } else if (!iceOn && gmcuActive && tmcuActive) {
+    mode = 'ev-awd'; modeLbl = 'EV AWD';
+  } else if (!iceOn && tmcuActive) {
+    mode = 'ev-rwd'; modeLbl = 'EV traseiro';
+  } else if (!iceOn && gmcuActive) {
+    mode = 'ev-fwd'; modeLbl = 'EV dianteiro';
+  } else if (iceOn && gmcuActive && tmcuActive && motorKw > 5) {
+    mode = 'split'; modeLbl = 'split';
+  } else if (iceOn && spd > 50 && motorKw < 5 && rpm > 1200) {
+    mode = 'paralelo'; modeLbl = 'paralelo';
+  } else if (iceOn && (spd < 20 || battEntering)) {
+    mode = 'serie'; modeLbl = 'série';
+  } else if (iceOn) {
+    mode = 'paralelo'; modeLbl = 'paralelo';
+  }
+
+  // Badge do modo
+  const modeEl = $('flow-mode');
+  modeEl.className = 'flow-mode ' + mode;
+  modeEl.textContent = modeLbl;
+
+  // Estado dos componentes (cor de fundo)
+  $('node-ice').classList.toggle('ice',    iceOn);
+  $('node-gmcu').classList.toggle('active', gmcuActive && !iceOn);
+  $('node-gmcu').classList.toggle('ice',    gmcuActive && iceOn);
+  $('node-tmcu').classList.toggle('active', tmcuActive);
+  $('node-batt').classList.toggle('active', tmcuActive || gmcuActive || isCharging);
+  $('node-batt').classList.toggle('charge', isCharging);
+  // Wallbox externo: mostra só durante carga
+  $('node-charge').setAttribute('opacity', isCharging ? '1' : '0');
+  $('emoji-charge').style.opacity = isCharging ? '1' : '0';
+
+  // Estado das rodas (cores indicam quem traciona)
+  function setWheel(id, cls) {
+    const el = $(id);
+    el.classList.remove('tracting-ev','tracting-ice','regen');
+    if (cls) el.classList.add(cls);
+  }
+  setWheel('wheel-fl', null); setWheel('wheel-fr', null);
+  setWheel('wheel-rl', null); setWheel('wheel-rr', null);
+  if (regen) {
+    setWheel('wheel-rl','regen'); setWheel('wheel-rr','regen');
+    if (gmcuActive) { setWheel('wheel-fl','regen'); setWheel('wheel-fr','regen'); }
+  } else if (mode === 'ev-awd' || mode === 'split') {
+    setWheel('wheel-fl','tracting-ev'); setWheel('wheel-fr','tracting-ev');
+    setWheel('wheel-rl','tracting-ev'); setWheel('wheel-rr','tracting-ev');
+    if (mode === 'split') { setWheel('wheel-fl','tracting-ice'); setWheel('wheel-fr','tracting-ice'); }
+  } else if (mode === 'ev-rwd') {
+    setWheel('wheel-rl','tracting-ev'); setWheel('wheel-rr','tracting-ev');
+  } else if (mode === 'ev-fwd') {
+    setWheel('wheel-fl','tracting-ev'); setWheel('wheel-fr','tracting-ev');
+  } else if (mode === 'paralelo') {
+    setWheel('wheel-fl','tracting-ice'); setWheel('wheel-fr','tracting-ice');
+  }
+
+  // Linhas de fluxo
+  function setLine(id, opts) {
+    const el = $(id); if (!el) return;
+    el.classList.remove('active','ice','regen','charge','flowing','reverse');
+    if (opts.color)   el.classList.add(opts.color);
+    if (opts.active)  el.classList.add('active');
+    if (opts.flowing) el.classList.add('flowing');
+    if (opts.reverse) el.classList.add('reverse');
+  }
+  setLine('line-batt-gmcu', {}); setLine('line-batt-tmcu', {});
+  setLine('line-ice-gmcu',  {}); setLine('line-ice-batt',  {});
+  setLine('line-charge',    {});
+
+  if (mode === 'ev-awd' || mode === 'ev-rwd' || mode === 'ev-fwd') {
+    if (tmcuActive) setLine('line-batt-tmcu', { active: true, flowing: true });
+    if (gmcuActive) setLine('line-batt-gmcu', { active: true, flowing: true });
+  } else if (mode === 'regen') {
+    setLine('line-batt-tmcu', { color: 'regen', flowing: true, reverse: true });
+    if (gmcuActive) setLine('line-batt-gmcu', { color: 'regen', flowing: true, reverse: true });
+  } else if (mode === 'serie') {
+    setLine('line-ice-gmcu',  { color: 'ice', flowing: true });
+    setLine('line-ice-batt',  { color: 'ice', flowing: true });
+    if (tmcuActive) setLine('line-batt-tmcu', { active: true, flowing: true });
+  } else if (mode === 'paralelo') {
+    setLine('line-ice-gmcu',  { color: 'ice', flowing: true });
+  } else if (mode === 'split') {
+    setLine('line-ice-gmcu',  { color: 'ice', flowing: true });
+    setLine('line-batt-tmcu', { active: true, flowing: true });
+    setLine('line-batt-gmcu', { active: true, flowing: true });
+  } else if (mode === 'carga') {
+    setLine('line-charge',    { color: 'charge', flowing: true });
+  }
+
+  // Valores em cada nó
+  $('val-ice').textContent  = iceOn ? fuelRate.toFixed(1) + ' L/h' : 'off';
+  $('val-batt').textContent = Math.round(socPct) + '%';
+  // GMCU/TMCU: mostra rpm se temos PID; senão estima kW via motor_power_kw
+  if (gmcuRpm > 0) {
+    $('val-gmcu').textContent = (gmcuRpm / 1000).toFixed(1) + 'k rpm';
+  } else if (gmcuActive && !iceOn) {
+    $('val-gmcu').textContent = Math.abs(motorKw * 0.3).toFixed(1) + ' kW';
+  } else {
+    $('val-gmcu').textContent = iceOn ? 'gerando' : 'off';
+  }
+  if (tmcuRpm > 0) {
+    $('val-tmcu').textContent = (tmcuRpm / 1000).toFixed(1) + 'k rpm';
+  } else if (tmcuActive) {
+    $('val-tmcu').textContent = Math.abs(motorKw * (iceOn ? 0.7 : 1)).toFixed(1) + ' kW';
+  } else {
+    $('val-tmcu').textContent = 'off';
+  }
+
+  // Mapa em tempo real: atualiza marker assim que chega novo gps_lat/lng
+  try { updateMap(); } catch (_) {}
+}
+
+// Debug overlay — toggle via Settings do app (publica state._debug_obd + state._debug_pids)
+function renderObdDebug() {
+  const el = document.getElementById('obd-debug');
+  if (!el) return;
+  if (state._debug_obd !== true) {
+    el.style.display = 'none';
+    return;
+  }
+  el.style.display = 'block';
+  const pids = Array.isArray(state._debug_pids) ? state._debug_pids : [];
+  el.querySelector('.count').textContent = pids.length;
+  if (pids.length === 0) {
+    el.querySelector('tbody').innerHTML = '<tr><td colspan="4" style="text-align:center;opacity:0.6;padding:8px">aguardando dados do ELM…</td></tr>';
+    return;
+  }
+  const rows = pids.map(p => {
+    const val = typeof p.value === 'number'
+      ? (Math.abs(p.value) >= 100 ? p.value.toFixed(0) : p.value.toFixed(2))
+      : String(p.value);
+    const ageS = Math.round((p.age_ms || 0) / 1000);
+    const stale = ageS > 10 ? ' stale' : '';
+    const raw = p.raw || '';
+    return `<tr title="raw bytes: ${raw}"><td>${p.id}</td><td class="val">${val}</td><td>${p.unit||''}</td><td class="raw">${raw}</td><td class="age${stale}">${ageS}s</td></tr>`;
+  }).join('');
+  el.querySelector('tbody').innerHTML = rows;
+
+  // Seção "PARSER FALHOU" — PIDs que responderam mas o parser nem chegou a extrair
+  const failed = Array.isArray(state._debug_failed) ? state._debug_failed : [];
+  el.querySelector('.failed-count').textContent = failed.length;
+  const failedTbody = el.querySelector('.failed-tbody');
+  if (failed.length === 0) {
+    failedTbody.innerHTML = '<tr><td colspan="4" style="opacity:0.5;font-size:10px">nenhum · todos os PIDs que responderam parsearam OK</td></tr>';
+  } else {
+    failedTbody.innerHTML = failed.map(f =>
+      `<tr><td>${f.id}</td><td class="raw" colspan="3">${f.raw||'(vazio)'}</td></tr>`
+    ).join('');
+  }
+}
+// Atalhos: chips estilo Drive do PWA. Atualiza .active baseado em state,
+// preservando .pending durante 15s ou até state confirmar.
+function renderQuickActions() {
+  _renderChip('mode',    state.drive_mode);
+  _renderChip('terrain', state.terrain_mode);
+  _renderChip('regen',   state.regen_level);
+  _renderChip('steer',   state.steer_mode);
+  _renderEspToggle();
+  _renderOnePedalToggle();
+  _renderHevSubLabel();
+  _renderAcSubLabel();
+  _renderAcCommon();   // power/temps/fan/sync/auto/recirc — inline + modal
+  renderAcModal();     // direção do ar, bancos, extras (só no modal)
+}
+
+// Estado de pendência por chip-attr (mode/terrain/regen/steer).
+// Cada entry: { val: número pendente, timer: ID do setTimeout }
+const _chipPending = {};
+
+function _setChipUI(attr, val, status /* null | 'pending' */) {
+  document.querySelectorAll(`.quick-widget .dm-chip[data-${attr}]`).forEach(c => {
+    const isThis = String(c.dataset[attr]) === String(val);
+    c.classList.toggle('active', isThis && status !== 'pending');
+    c.classList.toggle('pending', isThis && status === 'pending');
+  });
+}
+
+function _renderChip(attr, currentVal) {
+  if (currentVal === undefined || currentVal === null) return;
+  const pending = _chipPending[attr];
+  if (pending) {
+    // State confirmou o valor pendente? Limpa.
+    if (String(currentVal) === String(pending.val)) {
+      clearTimeout(pending.timer);
+      delete _chipPending[attr];
+      toast(`✓ ${_chipLabel(attr)} aplicado`);
+    } else {
+      return; // ainda esperando — não sobrescreve o visual pending
+    }
+  }
+  _setChipUI(attr, currentVal, null);
+}
+
+function _chipLabel(attr) {
+  return { mode: 'Modo', terrain: 'Estilo', regen: 'Regen', steer: 'Direção' }[attr] || attr;
+}
+
+function _sendChip(attr, val, action, payloadKey) {
+  // Cancela pendente antigo do mesmo attr
+  if (_chipPending[attr]?.timer) clearTimeout(_chipPending[attr].timer);
+  _chipPending[attr] = {
+    val,
+    timer: setTimeout(() => {
+      delete _chipPending[attr];
+      toast(`⚠ Carro não respondeu — ${_chipLabel(attr)}`);
+      // Re-renderiza com state atual
+      const stateMap = { mode: state.drive_mode, terrain: state.terrain_mode,
+                         regen: state.regen_level, steer: state.steer_mode };
+      _setChipUI(attr, stateMap[attr], null);
+    }, 15000),
+  };
+  _setChipUI(attr, val, 'pending');
+  sendCmd(action, val);
+  toast(`⏳ Enviando ${_chipLabel(attr)}…`);
+}
+
+// ── Pisca-alerta (4 setas) ──────────────────────────────────────────────────
+// Alterna car.light_setting.sport_mode_light entre 0/1 a cada 1s (cada "1" pisca
+// 3-4x rápido). iPad-driven: se o app fechar/perder foco o timer para sozinho —
+// fail-safe (cada "1" só dá um burst e cessa). Botão fica em destaque quando ativo.
+let _hazardOn = false, _hazardTimer = null, _hazardVal = 0;
+window.toggleHazard = function() {
+  _hazardOn = !_hazardOn;
+  const btn = document.getElementById('hazard-btn');
+  if (btn) btn.classList.toggle('active', _hazardOn);
+  if (_hazardOn) {
+    _hazardVal = 0;
+    // Intervalo vem da Config do iPad (native → window._hazardIntervalMs). Default 2s.
+    const ms = Math.max(100, Math.min(5000, +window._hazardIntervalMs || 2000));
+    if (btn) btn.style.animationDuration = ms + 'ms';   // piscar visual acompanha
+    const tick = () => { _hazardVal = _hazardVal ? 0 : 1; sendCmd('hazard', _hazardVal); };
+    tick();                                  // dispara já
+    _hazardTimer = setInterval(tick, ms);
+  } else {
+    if (_hazardTimer) { clearInterval(_hazardTimer); _hazardTimer = null; }
+    sendCmd('hazard', 0);                     // garante repouso
+  }
+};
+
+// Botão flutuante/arrastável: toque (<6px) aciona; arraste reposiciona (salvo).
+(function initHazardDrag() {
+  const btn = document.getElementById('hazard-btn');
+  if (!btn) return;
+  const sx = localStorage.getItem('hazardBtnX'), sy = localStorage.getItem('hazardBtnY');
+  if (sx !== null && sy !== null) { btn.style.left = sx + 'px'; btn.style.top = sy + 'px'; btn.style.bottom = 'auto'; }
+  let drag = false, moved = false, px = 0, py = 0, ox = 0, oy = 0;
+  btn.addEventListener('pointerdown', e => {
+    drag = true; moved = false; px = e.clientX; py = e.clientY;
+    const r = btn.getBoundingClientRect(); ox = r.left; oy = r.top;
+    try { btn.setPointerCapture(e.pointerId); } catch (_) {}
+  });
+  btn.addEventListener('pointermove', e => {
+    if (!drag) return;
+    const dx = e.clientX - px, dy = e.clientY - py;
+    if (!moved && (Math.abs(dx) > 6 || Math.abs(dy) > 6)) moved = true;
+    if (!moved) return;
+    const par = (btn.offsetParent || btn.parentElement).getBoundingClientRect();
+    let nx = ox - par.left + dx, ny = oy - par.top + dy;
+    nx = Math.max(0, Math.min(par.width  - btn.offsetWidth,  nx));
+    ny = Math.max(0, Math.min(par.height - btn.offsetHeight, ny));
+    btn.style.left = nx + 'px'; btn.style.top = ny + 'px'; btn.style.bottom = 'auto';
+  });
+  const end = () => {
+    if (!drag) return; drag = false;
+    if (moved) {
+      localStorage.setItem('hazardBtnX', parseInt(btn.style.left) || 0);
+      localStorage.setItem('hazardBtnY', parseInt(btn.style.top)  || 0);
+    } else {
+      toggleHazard();   // foi um toque
+    }
+  };
+  btn.addEventListener('pointerup', end);
+  btn.addEventListener('pointercancel', () => { drag = false; });
+})();
+
+// Handlers — postam comando pro Swift; Swift faz POST HTTP no bridge.
+function sendCmd(action, value) {
+  if (!window.webkit?.messageHandlers?.obd) {
+    toast('Modo browser — comandos só no app nativo');
+    return;
+  }
+  window.webkit.messageHandlers.obd.postMessage({ action, value: String(value) });
+}
+
+window.setDriveMode   = (mode)  => _sendChip('mode',    mode,  'drive_mode_set',   'mode');
+window.setTerrainMode = (mode)  => _sendChip('terrain', mode,  'terrain_mode_set', 'mode');
+window.setRegenLevel  = (level) => _sendChip('regen',   level, 'regen_level_set',  'level');
+window.setSteerMode   = (mode)  => _sendChip('steer',   mode,  'steer_mode_set',   'mode');
+
+// ── Modo HEV: sub-modo (Inteligente/Prioritário) + % de save (igual ao iPhone) ──
+window.openHevModal = function() {
+  const pr = (state.power_reserve === 2) ? 2 : 1;
+  const target = (typeof state.charge_soc_target === 'number')
+    ? Math.max(20, Math.min(80, state.charge_soc_target)) : 50;
+  const rs = document.getElementById('hev-r-smart');
+  const rp = document.getElementById('hev-r-priority');
+  if (rs) rs.checked = (pr === 1);
+  if (rp) rp.checked = (pr === 2);
+  const sl = document.getElementById('hev-soc-slider');
+  const sv = document.getElementById('hev-soc-val');
+  if (sl) sl.value = String(target);
+  if (sv) sv.textContent = String(target);
+  _toggleHevSlider();
+  document.getElementById('hev-modal').style.display = 'flex';
+};
+window.closeHevModal = function() {
+  document.getElementById('hev-modal').style.display = 'none';
+};
+window._toggleHevSlider = function() {
+  const rp = document.getElementById('hev-r-priority');
+  const wrap = document.getElementById('hev-slider-wrap');
+  if (wrap) wrap.style.display = (rp && rp.checked) ? '' : 'none';
+};
+window.applyHevModal = function() {
+  const rp = document.getElementById('hev-r-priority');
+  const pr = (rp && rp.checked) ? 2 : 1;
+  const target = parseInt(document.getElementById('hev-soc-slider').value, 10) || 50;
+  closeHevModal();
+  // Tudo via LAN (sendCmd → WS). Série: drive_mode=0 (HEV) → power_reserve → soc_target.
+  if (state.drive_mode !== 0) setDriveMode(0);
+  sendCmd('power_reserve_set', pr);
+  if (pr === 2) sendCmd('charge_soc_target_set', target);
+  toast(pr === 2 ? `⏳ HEV Prioritário ${target}%…` : '⏳ HEV Inteligente…');
+};
+// Sub-rótulo "· Inteligente" / "· Prioritário X%" ao lado do título Modo.
+function _renderHevSubLabel() {
+  const lbl = document.getElementById('hev-sub-label');
+  if (!lbl) return;
+  if (state.drive_mode !== 0) { lbl.textContent = ''; return; }
+  if (state.power_reserve === 1) lbl.textContent = '· Inteligente';
+  else if (state.power_reserve === 2) {
+    const t = state.charge_soc_target;
+    lbl.textContent = t ? `· Prioritário ${t}%` : '· Prioritário';
+  } else lbl.textContent = '';
+}
+
+// ── Menu do AC (espelha a aba Conforto do iPhone, tudo via LAN) ──────────────
+function _acFan() { const f = parseInt(state.hvac_fan_speed, 10); return (Number.isFinite(f) && f > 0) ? f : 0; }
+// ── Liga/desliga do AC com DEBOUNCE ─────────────────────────────────────────
+// O power_mode chega por LAN (carro) + cloud (Mac mini). Se o LAN pisca, um
+// snapshot atrasado do cloud inverte o valor por 1 quadro → o indicador piscava
+// (ligado/desligado) mesmo com o AC estável no carro. Só troca o estado exibido
+// depois de ~2,5s consistente; o toque do usuário aplica otimista na hora.
+let _acOnStable = false, _acOnPendingVal = null, _acOnPendingSince = 0;
+const _AC_DEBOUNCE_MS = 2500;
+function _acOnRaw() { return +state.hvac_power_mode === 1; }
+function _acOn() {
+  const raw = _acOnRaw();
+  if (raw === _acOnStable) { _acOnPendingVal = null; return _acOnStable; }
+  const now = Date.now();
+  if (_acOnPendingVal !== raw) { _acOnPendingVal = raw; _acOnPendingSince = now; }
+  if (now - _acOnPendingSince >= _AC_DEBOUNCE_MS) { _acOnStable = raw; _acOnPendingVal = null; }
+  return _acOnStable;
+}
+function _acOnOptimistic(v) { _acOnStable = !!v; _acOnPendingVal = null; _acOnPendingSince = Date.now(); }
+function sendHvac(control, value) {
+  if (!window.webkit?.messageHandlers?.obd) { toast('Modo browser — comandos só no app'); return; }
+  window.webkit.messageHandlers.obd.postMessage({ action: 'hvac_set', control, value: String(value) });
+}
+window.openAcModal  = function() {
+  document.getElementById('ac-modal').style.display = 'flex';
+  _acInitControls();   // garante handlers nos sliders/bancos do modal (idempotente)
+  renderAcModal();
+};
+window.closeAcModal = function() { document.getElementById('ac-modal').style.display = 'none'; };
+window.toggleAcPower = function() {
+  const on = !_acOn();
+  // ON/OFF inteligente: o APK guarda/restaura o fan e liga o ac_enable.
+  if (window.webkit?.messageHandlers?.obd)
+    window.webkit.messageHandlers.obd.postMessage({ action: 'hvac_power', value: on ? '1' : '0' });
+  else toast('Modo browser — comandos só no app');
+  toast(on ? '⏳ Ligando AC…' : '⏳ Desligando AC…');
+};
+// ── Controles deslizantes do AC: sliders (◄ aumenta) + bancos (▼ aumenta) ────
+let _acDrag = null;   // elemento sendo arrastado agora (pausa o render)
+const _acClampN = (v, mn, mx) => Math.max(mn, Math.min(mx, v));
+function _hslValue(el, clientX) {
+  const r = el.getBoundingClientRect();
+  const mn = +el.dataset.min, mx = +el.dataset.max, st = +el.dataset.step;
+  const f = _acClampN((clientX - r.left) / r.width, 0, 1);
+  return _acClampN(Math.round((mn + f * (mx - mn)) / st) * st, mn, mx);   // direita = máx
+}
+function _hslPaint(el, v) {
+  const mn = +el.dataset.min, mx = +el.dataset.max;
+  const fill = el.querySelector('.ac-hsl-fill'); if (fill) fill.style.width = ((v - mn) / (mx - mn) * 100) + '%';
+  const lbl = el.querySelector('.ac-hsl-val');   if (lbl) lbl.textContent = (el.dataset.unit === '°') ? _fmtTemp(v) + '°' : v + (el.dataset.unit || '');
+}
+function _seatValue(el, clientY) {
+  const r = el.getBoundingClientRect();
+  return Math.round((1 - _acClampN((clientY - r.top) / r.height, 0, 1)) * 3);   // topo=3, base=0 (▲ = mais)
+}
+function _seatPaint(el, v) {
+  const fill = el.querySelector('.ac-seat-fill'); if (fill) fill.style.height = (v / 3 * 100) + '%';
+  const lbl = el.querySelector('.ac-seat-val');   if (lbl) lbl.textContent = v > 0 ? ('Nível ' + v) : 'OFF';
+}
+function _acInitControls() {
+  document.querySelectorAll('.ac-hsl').forEach(el => {
+    if (el._acInit) return; el._acInit = true;
+    const mv = e => { const v = _hslValue(el, e.clientX); el._v = v; _hslPaint(el, v); };
+    const up = () => { if (_acDrag !== el) return; _acDrag = null; const v = el._v;
+      if (el.dataset.unit === '°' && +state.hvac_sync_enable === 1) { sendHvac('driver_temp', (+v).toFixed(1)); sendHvac('passenger_temp', (+v).toFixed(1)); }
+      else sendHvac(el.dataset.ctrl, el.dataset.step === '0.5' ? (+v).toFixed(1) : v); };
+    el.addEventListener('pointerdown', e => { try { el.setPointerCapture(e.pointerId); } catch (_) {} _acDrag = el; mv(e); });
+    el.addEventListener('pointermove', e => { if (_acDrag === el) mv(e); });
+    el.addEventListener('pointerup', up); el.addEventListener('pointercancel', up);
+  });
+  document.querySelectorAll('.ac-seat').forEach(el => {
+    if (el._acInit) return; el._acInit = true;
+    const mv = e => { const v = _seatValue(el, e.clientY); el._v = v; _seatPaint(el, v); };
+    const up = () => { if (_acDrag !== el) return; _acDrag = null; sendHvac(el.dataset.ctrl, el._v); };
+    el.addEventListener('pointerdown', e => { try { el.setPointerCapture(e.pointerId); } catch (_) {} _acDrag = el; mv(e); });
+    el.addEventListener('pointermove', e => { if (_acDrag === el) mv(e); });
+    el.addEventListener('pointerup', up); el.addEventListener('pointercancel', up);
+  });
+}
+window.toggleAcSync  = function() { if (!_acOn()) { toast('AC desligado'); return; } sendHvac('sync',  (+state.hvac_sync_enable === 1) ? 0 : 1); };
+window.toggleAcAuto  = function() { if (!_acOn()) { toast('AC desligado'); return; } sendHvac('auto',  (+state.hvac_auto_enable === 1) ? 0 : 1); };
+// Recirculação (interno/externo) funciona mesmo com AC desligado — dá pra puxar
+// ar de fora sem ligar o compressor. Por isso NÃO tem trava de _acOn() aqui.
+window.toggleAcCycle = function() { sendHvac('cycle_mode', (+state.hvac_cycle_mode === 0) ? 1 : 0); };
+// Compressor (car.hvac.ac_enable): independente do mestre — dá pra ventilar sem AC.
+window.toggleAcCompressor = function() { sendHvac('ac_enable', (+state.hvac_ac_enable === 1) ? 0 : 1); };
+const _AC_EXTRA_KEY = { acmax:'hvac_acmax', anion:'hvac_anion', aqs:'hvac_aqs', heating:'hvac_heating',
+  front_defrost:'hvac_front_defrost', rear_defrost:'hvac_rear_defrost', auto_defrost:'hvac_auto_defrost' };
+window.toggleAcExtra = function(control) {
+  const cur = +state[_AC_EXTRA_KEY[control]] === 1;
+  sendHvac(control, cur ? 0 : 1);
+};
+const BLOWER_LABELS = ['Frente', 'Frente + Pés', 'Pés', 'Pés + Pára-brisa', 'Pára-brisa'];
+const BLOWER_FLOWS  = [['face'], ['face','feet'], ['feet'], ['feet','defrost'], ['defrost']];
+window.setBlower = function(mode) { sendHvac('blower_mode', mode); };
+window.cycleBlower = function() {
+  // Cicla só Frente→Frente+Pés→Pés→Pés+Pára-brisa→(volta) Frente. O modo 4
+  // (só pára-brisa, que liga o desembaçador) fica de fora do ciclo do botão.
+  const c = parseInt(state.hvac_blower_mode, 10);
+  const cur = Number.isFinite(c) ? c : 0;
+  setBlower(cur >= 3 ? 0 : cur + 1);
+};
+function _fmtTemp(v) { const n = parseFloat(v); return Number.isFinite(n) ? (n % 1 === 0 ? String(n) : n.toFixed(1)) : '--'; }
+// Controles que existem inline (card) E no modal — renderiza por CLASSE (todos).
+function _renderAcCommon() {
+  const on = _acOn();
+  document.querySelectorAll('.ac-power-btn').forEach(pb => {
+    pb.textContent = pb.dataset.compact ? (on ? 'AC LIGADO' : 'AC DESLIGADO')
+                                         : (on ? 'AC LIGADO — toque pra desligar' : 'AC DESLIGADO — toque pra ligar');
+    pb.style.background = on ? 'var(--green)' : 'rgba(255,255,255,.10)';
+    pb.style.color = on ? '#04210f' : '#cbd5e1';
+  });
+  document.querySelectorAll('.ac-hsl').forEach(el => {
+    if (_acDrag === el) return;
+    const sv = parseFloat(state[el.dataset.state]);
+    const mn = +el.dataset.min, mx = +el.dataset.max;
+    if (Number.isFinite(sv) && sv >= mn && sv <= mx) _hslPaint(el, sv);
+    else { const f = el.querySelector('.ac-hsl-fill'); if (f) f.style.width = '0%'; const l = el.querySelector('.ac-hsl-val'); if (l) l.textContent = '--'; }   // sentinela -1 / sem dado
+  });
+  document.querySelectorAll('.ac-seat').forEach(el => {
+    if (_acDrag === el) return;
+    const sv = parseInt(state[el.dataset.state], 10);
+    _seatPaint(el, (Number.isFinite(sv) && sv > 0) ? Math.min(3, sv) : 0);
+  });
+  const tog = (cls, active) => document.querySelectorAll(cls).forEach(e => { e.style.background = active ? 'var(--teal)' : 'transparent'; e.style.color = active ? '#04210f' : '#cbd5e1'; });
+  tog('.ac-sync-btn', +state.hvac_sync_enable === 1);
+  tog('.ac-auto-btn', +state.hvac_auto_enable === 1);
+  tog('.ac-comp-btn', +state.hvac_ac_enable === 1);
+  const recirc = +state.hvac_cycle_mode === 0;
+  document.querySelectorAll('.ac-cycle-btn').forEach(cb => cb.textContent = recirc ? '↺ RECIRC' : '↪ EXTERNO');
+}
+// Itens que SÓ existem no modal completo (direção do ar, extras, PM2.5).
+function renderAcModal() {
+  if (document.getElementById('ac-modal')?.style.display !== 'flex') return;
+  const setExtra = (id, key) => { const e = document.getElementById(id); if (e) { const on = +state[key] === 1; e.style.background = on ? 'var(--teal)' : 'transparent'; e.style.color = on ? '#04210f' : '#cbd5e1'; } };
+  setExtra('ac-acmax-btn', 'hvac_acmax');
+  setExtra('ac-heating-btn', 'hvac_heating');
+  setExtra('ac-front-defrost-btn', 'hvac_front_defrost');
+  setExtra('ac-rear-defrost-btn', 'hvac_rear_defrost');
+  setExtra('ac-auto-defrost-btn', 'hvac_auto_defrost');
+  setExtra('ac-anion-btn', 'hvac_anion');
+  setExtra('ac-aqs-btn', 'hvac_aqs');
+  const pm = document.getElementById('ac-pm25'); if (pm) { const v = parseInt(state.hvac_pm25, 10); pm.textContent = Number.isFinite(v) ? v : '--'; }
+  const blow = parseInt(state.hvac_blower_mode, 10);
+  const active = BLOWER_FLOWS[blow] || [];
+  ['face', 'feet', 'defrost'].forEach(f => {
+    const g = document.getElementById('ac-flow-' + f);
+    if (g) { const on = active.includes(f); g.style.opacity = on ? '1' : '0.12'; g.classList.toggle('ac-flow-on', on); }
+  });
+  const bl = document.getElementById('ac-blow-lbl'); if (bl) bl.textContent = BLOWER_LABELS[blow] || '--';
+}
+function _renderAcSubLabel() {
+  const lbl = document.getElementById('ac-sub-label');
+  if (!lbl) return;
+  lbl.textContent = _acOn() ? `· ligado · fan ${_acFan()}` : '· desligado';
+}
+// ESP / One-Pedal — espelha lógica do PWA (view-drive.html): pending visual
+// + timeout 15s + key correta (state.esp_enable, state.one_pedal).
+let _espPending = null, _espTimer = null;
+let _opPending  = null, _opTimer  = null;
+
+function _renderEspToggle() {
+  const tog = document.getElementById('esp-toggle');
+  if (!tog) return;
+  // Se state confirmou o valor pendente, encerra o pending
+  if (_espPending !== null && state.esp_enable === _espPending) {
+    clearTimeout(_espTimer);
+    _espPending = null;
+  }
+  if (_espPending !== null) {
+    tog.classList.toggle('on', _espPending === 1);
+    tog.classList.add('pending');
+    return;
+  }
+  tog.classList.remove('pending');
+  tog.classList.toggle('on', state.esp_enable === 1);
+}
+
+function _renderOnePedalToggle() {
+  const tog = document.getElementById('one-pedal-toggle');
+  if (!tog) return;
+  if (_opPending !== null && state.one_pedal === _opPending) {
+    clearTimeout(_opTimer);
+    _opPending = null;
+  }
+  if (_opPending !== null) {
+    tog.classList.toggle('on', _opPending === 1);
+    tog.classList.add('pending');
+    return;
+  }
+  tog.classList.remove('pending');
+  tog.classList.toggle('on', state.one_pedal === 1);
+}
+
+window.toggleEsp = () => {
+  const cur = state.esp_enable;
+  const next = cur === 1 ? 0 : 1;   // qualquer estado != ON → liga
+  _espPending = next;
+  _renderEspToggle();
+  clearTimeout(_espTimer);
+  _espTimer = setTimeout(() => {
+    if (_espPending !== null) {
+      _espPending = null;
+      toast('⚠ Carro não respondeu — ESP');
+      _renderEspToggle();
+    }
+  }, 15000);
+  sendCmd('esp_set', next ? 'true' : 'false');
+  toast(next === 1 ? '⏳ Ligando ESP…' : '⏳ Desligando ESP…');
+};
+
+window.toggleOnePedal = () => {
+  const cur = state.one_pedal;
+  const next = cur === 1 ? 0 : 1;
+  _opPending = next;
+  _renderOnePedalToggle();
+  clearTimeout(_opTimer);
+  _opTimer = setTimeout(() => {
+    if (_opPending !== null) {
+      _opPending = null;
+      toast('⚠ Carro não respondeu — One-Pedal');
+      _renderOnePedalToggle();
+    }
+  }, 15000);
+  sendCmd('one_pedal_set', next ? 'true' : 'false');
+  toast(next === 1 ? '⏳ Ligando One-Pedal…' : '⏳ Desligando One-Pedal…');
+};
+
+// Boot
+requestWakeLock();
+connect();
+_acInitControls();   // sliders/toggles do AC no card de Controles (e modal) prontos já
+toast('🚗 Haval Cluster pronto');
+// Overlay debug + extras OBD rodam independente (não patcha render — evita erro de strict mode)
+setInterval(renderObdDebug, 1000);
+setInterval(renderQuickActions, 1000);
+
+// Gráficos X/Y — eixo X = últimos 30s. Dois painéis:
+//  - Potência: ±50 kW, zero no meio (y=60), viewBox 300x120
+//  - Velocidade: 0–160 km/h, base embaixo (y=120 = 0), viewBox 300x120
+// Atualiza a 10 Hz (100ms) — velocidade/kW vêm via LAN em tempo real.
+// 300 amostras × 100ms = janela de 30s.
+const POWER_HISTORY = [];
+const SPEED_HISTORY = [];
+const POWER_HIST_MAX = 300;
+
+function _drawLine(history, lineId, mapY) {
+  const line = document.getElementById(lineId);
+  if (!line || history.length < 2) return;
+  const W = 300, step = W / (POWER_HIST_MAX - 1);
+  const offset = POWER_HIST_MAX - history.length;
+  let d = '';
+  history.forEach((v, i) => {
+    const x = ((offset + i) * step).toFixed(1);
+    const y = mapY(v).toFixed(1);
+    d += (i === 0 ? `M ${x} ${y}` : ` L ${x} ${y}`);
+  });
+  line.setAttribute('d', d);
+}
+
+function tickPowerSpark() {
+  // Potência (±50 kW, zero em y=60)
+  const kw = +state.motor_power_kw;
+  POWER_HISTORY.push(Number.isFinite(kw) ? kw : 0);
+  if (POWER_HISTORY.length > POWER_HIST_MAX) POWER_HISTORY.shift();
+  _drawLine(POWER_HISTORY, 'chart-line', v => 60 - clamp(v, -50, 50));
+
+  // Velocidade (0–160 km/h, base em y=120, topo em y=0)
+  const spd = +state.speed_kmh || 0;
+  SPEED_HISTORY.push(Number.isFinite(spd) ? spd : 0);
+  if (SPEED_HISTORY.length > POWER_HIST_MAX) SPEED_HISTORY.shift();
+  _drawLine(SPEED_HISTORY, 'chart-line-spd', v => 120 - (clamp(v, 0, 160) / 160) * 120);
+}
+setInterval(tickPowerSpark, 100);
+
+// Bloqueia zoom/scroll
+document.addEventListener('gesturestart', e => e.preventDefault());
+document.addEventListener('dblclick', e => e.preventDefault());
+</script>
+
+</body>
+</html>

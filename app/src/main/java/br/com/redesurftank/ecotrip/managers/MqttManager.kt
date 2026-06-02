@@ -57,6 +57,16 @@ private val IMMEDIATE_PUBLISH_KEYS: Set<String> = setOf(
     CarConstants.CAR_HVAC_CYCLE_MODE.value,
     CarConstants.CAR_HVAC_DRIVER_TEMPERATURE.value,
     CarConstants.CAR_HVAC_PASSENGER_TEMPERATURE.value,
+    CarConstants.CAR_HVAC_ACMAX_ENABLE.value,
+    CarConstants.CAR_HVAC_ANION_ENABLE.value,
+    CarConstants.CAR_HVAC_AQS_ENABLE.value,
+    CarConstants.CAR_HVAC_HEATING_ENABLE.value,
+    CarConstants.CAR_HVAC_FRONT_DEFROST_ENABLE.value,
+    CarConstants.CAR_HVAC_REAR_DEFROST_ENABLE.value,
+    CarConstants.CAR_HVAC_AUTO_DEFROST_ENABLE.value,
+    CarConstants.CAR_HVAC_PM25_VALUE.value,
+    CarConstants.CAR_HVAC_BLOWER_MODE.value,
+    CarConstants.CAR_HVAC_POWER_MODE.value,
     CarConstants.CAR_BASIC_DOOR_LOCK_STATUS.value,
     CarConstants.CAR_BASIC_DOOR_STATUS.value,
     CarConstants.CAR_BASIC_WINDOW_STATUS.value,
@@ -83,6 +93,12 @@ class MqttManager private constructor() {
     private lateinit var prefs: SharedPreferences
     private var appContext: Context? = null
     private val executor       = Executors.newSingleThreadExecutor()
+    // Executor SEPARADO pros comandos do usuário. Antes os comandos iam no mesmo
+    // `executor` single-thread da telemetria e cada um faz Thread.sleep(3–10s) pra
+    // reler a confirmação do carro — o 2º comando ficava na fila esperando o 1º, e
+    // a publicação de telemetria travava durante o sleep. Pool dedicado: comandos
+    // back-to-back rodam em paralelo e não bloqueiam a telemetria.
+    private val cmdExecutor    = Executors.newFixedThreadPool(3)
     private val isReconnecting = AtomicBoolean(false)
     @Volatile private var client: MqttClient? = null
     private var lastPublishMs  = 0L
@@ -162,6 +178,19 @@ class MqttManager private constructor() {
     var latestHvacAutoEnable:    Int   = 0  // 0=off, 1=on (modo AUTO do AC)
     var latestHvacAcEnable:      Int   = 0  // 0=off, 1=on (master AC)
     var latestHvacCycleMode:     Int   = 0  // 0=recirc interna, 1=ar externo
+    var latestHvacAcMax:         Int   = 0  // 0=off, 1=on (resfriamento máximo)
+    var latestHvacAnion:         Int   = 0  // 0=off, 1=on (ionizador)
+    var latestHvacAqs:           Int   = 0  // 0=off, 1=on (recirc. autom. qualidade do ar)
+    var latestHvacHeating:       Int   = 0  // 0=off, 1=on (aquecimento)
+    var latestHvacFrontDefrost:  Int   = 0  // 0=off, 1=on
+    var latestHvacRearDefrost:   Int   = 0  // 0=off, 1=on
+    var latestHvacAutoDefrost:   Int   = 0  // 0=off, 1=on
+    var latestHvacPm25:          Int   = 0  // µg/m³ (leitura)
+    var latestHvacBlowerMode:    Int   = 0  // 0=frente,1=frente+pés,2=pés,3=pés+parabrisa,4=parabrisa
+    var latestHvacPowerMode:     Int   = 0  // 0=AC desligado (mestre) | 1=ligado
+    // Fan que estava ANTES do último OFF do AC (pra restaurar ao ligar). Como o
+    // APK monitora o fan a todo momento, ele sabe o valor sem depender do app.
+    @Volatile private var hvacFanBeforeOff: Int = 4   // default razoável se nunca desligou
 
     // Body — estados normalizados pra binário "1=aberto/destrancado, 0=fechado/trancado"
     // Doors (de car.basic.door_status, CSV FL,FR,RL,RR,Trunk — cada índice 0=fechada, 1=aberta)
@@ -592,6 +621,36 @@ class MqttManager private constructor() {
                 }
                 CarConstants.CAR_HVAC_CYCLE_MODE.value -> {
                     latestHvacCycleMode = value.trim().toIntOrNull() ?: 0
+                }
+                CarConstants.CAR_HVAC_ACMAX_ENABLE.value -> {
+                    latestHvacAcMax = value.trim().toIntOrNull() ?: 0
+                }
+                CarConstants.CAR_HVAC_ANION_ENABLE.value -> {
+                    latestHvacAnion = value.trim().toIntOrNull() ?: 0
+                }
+                CarConstants.CAR_HVAC_AQS_ENABLE.value -> {
+                    latestHvacAqs = value.trim().toIntOrNull() ?: 0
+                }
+                CarConstants.CAR_HVAC_HEATING_ENABLE.value -> {
+                    latestHvacHeating = value.trim().toIntOrNull() ?: 0
+                }
+                CarConstants.CAR_HVAC_FRONT_DEFROST_ENABLE.value -> {
+                    latestHvacFrontDefrost = value.trim().toIntOrNull() ?: 0
+                }
+                CarConstants.CAR_HVAC_REAR_DEFROST_ENABLE.value -> {
+                    latestHvacRearDefrost = value.trim().toIntOrNull() ?: 0
+                }
+                CarConstants.CAR_HVAC_AUTO_DEFROST_ENABLE.value -> {
+                    latestHvacAutoDefrost = value.trim().toIntOrNull() ?: 0
+                }
+                CarConstants.CAR_HVAC_PM25_VALUE.value -> {
+                    latestHvacPm25 = value.trim().toFloatOrNull()?.toInt() ?: 0
+                }
+                CarConstants.CAR_HVAC_BLOWER_MODE.value -> {
+                    latestHvacBlowerMode = value.trim().toIntOrNull() ?: 0
+                }
+                CarConstants.CAR_HVAC_POWER_MODE.value -> {
+                    latestHvacPowerMode = value.trim().toIntOrNull() ?: 0
                 }
                 CarConstants.CAR_BASIC_DOOR_LOCK_STATUS.value -> {
                     val raw = value.trim().toIntOrNull() ?: 0
@@ -1441,6 +1500,16 @@ class MqttManager private constructor() {
             pubD("hvac_auto_enable",  latestHvacAutoEnable.toString())
             pubD("hvac_ac_enable",    latestHvacAcEnable.toString())  // master ON/OFF do AC
             pubD("hvac_cycle_mode",   latestHvacCycleMode.toString())
+            pubD("hvac_acmax",         latestHvacAcMax.toString())
+            pubD("hvac_anion",         latestHvacAnion.toString())
+            pubD("hvac_aqs",           latestHvacAqs.toString())
+            pubD("hvac_heating",       latestHvacHeating.toString())
+            pubD("hvac_front_defrost", latestHvacFrontDefrost.toString())
+            pubD("hvac_rear_defrost",  latestHvacRearDefrost.toString())
+            pubD("hvac_auto_defrost",  latestHvacAutoDefrost.toString())
+            pubD("hvac_pm25",          latestHvacPm25.toString())
+            pubD("hvac_blower_mode",   latestHvacBlowerMode.toString())
+            pubD("hvac_power_mode",    latestHvacPowerMode.toString())
 
             // ── MIGRATED_TO_HA ────────────────────────────────────────────────
             // O bridge IGNORA publishes do carro para: door_*, window_*, sunroof,
@@ -1517,6 +1586,9 @@ class MqttManager private constructor() {
             try { cdm.fetchCurrent("car.ev.setting.pedal_control_enable")?.trim()?.toIntOrNull()?.let { syncOnePedalFromCar(it) } } catch (_: Exception) {}
             try { cdm.fetchCurrent("car.drive_setting.esp_enable")?.trim()?.toIntOrNull()?.let { syncEspFromCar(it) } } catch (_: Exception) {}
             try { cdm.fetchCurrent("car.drive_setting.steering_wheel_assist_mode")?.trim()?.toIntOrNull()?.let { syncSteerModeFromCar(it) } } catch (_: Exception) {}
+            // car.hvac.power_mode (mestre do AC) não vem por push confiável — poll ativo
+            // garante valor estável no LAN e no cloud (corrige PWA "desligado" + flicker iPad).
+            try { cdm.fetchCurrent("car.hvac.power_mode")?.trim()?.toIntOrNull()?.let { latestHvacPowerMode = it } } catch (_: Exception) {}
 
             lastSuccessfulPublishMs = System.currentTimeMillis()
             // Publica timestamp ISO para a entidade "Última Atualização" no HA
@@ -1831,7 +1903,7 @@ class MqttManager private constructor() {
         val cmd = topic.removePrefix(cmdPrefix).trimEnd('/')
         AppLogger.i(TAG, "Comando recebido: $cmd = '$payload'")
 
-        executor.submit {
+        cmdExecutor.submit {
             val car = CarDataManager.getInstance()
             when (cmd) {
                 "charge_limit" -> {
@@ -2117,6 +2189,15 @@ class MqttManager private constructor() {
                         publishResult("terrain_mode", "ok:$target (fallback)")
                     }
                 }
+                "hazard" -> {
+                    // Pisca-alerta (4 setas): alterna car.light_setting.sport_mode_light.
+                    // Chamado pelo iPad a cada ~1s (0/1). Mantém SIMPLES e rápido — sem
+                    // confirmação/sleep, pois roda repetidamente em sequência.
+                    val target = if (payload.trim() == "1") 1 else 0
+                    val ok = car.requestSetting(key = "car.light_setting.sport_mode_light", value = target.toString())
+                    publishResult("hazard", if (ok) "ok:$target" else "error: recusado/dormindo")
+                    return@submit
+                }
                 "regen_level" -> {
                     val target = payload.trim().toIntOrNull()
                     if (target == null || target !in setOf(0, 1, 2)) {
@@ -2141,8 +2222,14 @@ class MqttManager private constructor() {
                         publishResult("one_pedal", "error: valor inválido ('$payload')")
                         return@submit
                     }
+                    // OTIMISTA ANTES do requestSetting (que pode bloquear) → confirma já.
+                    publishOnePedalState(target)
                     val ok = car.requestSetting(key = "car.ev.setting.pedal_control_enable", value = target.toString())
-                    if (!ok) { publishResult("one_pedal", "error: carro recusou ou está dormindo"); return@submit }
+                    if (!ok) {
+                        val actual = try { car.fetchCurrent("car.ev.setting.pedal_control_enable")?.trim()?.toIntOrNull() } catch (_: Exception) { null }
+                        if (actual != null && actual in setOf(0, 1)) publishOnePedalState(actual)  // reverte
+                        publishResult("one_pedal", "error: carro recusou ou está dormindo"); return@submit
+                    }
                     Thread.sleep(3_000)
                     val confirmed = try { car.fetchCurrent("car.ev.setting.pedal_control_enable")?.trim()?.toIntOrNull() } catch (_: Exception) { null }
                     if (confirmed != null && confirmed in setOf(0, 1)) {
@@ -2159,8 +2246,16 @@ class MqttManager private constructor() {
                         publishResult("esp", "error: valor inválido ('$payload')")
                         return@submit
                     }
+                    // OTIMISTA ANTES do requestSetting: o requestSetting pode bloquear
+                    // segundos; ecoar já faz o cluster confirmar na hora. Se o carro
+                    // recusar, revertemos logo abaixo.
+                    publishEspState(target)
                     val ok = car.requestSetting(key = "car.drive_setting.esp_enable", value = target.toString())
-                    if (!ok) { publishResult("esp", "error: carro recusou ou está dormindo"); return@submit }
+                    if (!ok) {
+                        val actual = try { car.fetchCurrent("car.drive_setting.esp_enable")?.trim()?.toIntOrNull() } catch (_: Exception) { null }
+                        if (actual != null && actual in setOf(0, 1)) publishEspState(actual)  // reverte o otimista
+                        publishResult("esp", "error: carro recusou ou está dormindo"); return@submit
+                    }
                     Thread.sleep(3_000)
                     val confirmed = try { car.fetchCurrent("car.drive_setting.esp_enable")?.trim()?.toIntOrNull() } catch (_: Exception) { null }
                     if (confirmed != null && confirmed in setOf(0, 1)) {
@@ -2245,6 +2340,17 @@ class MqttManager private constructor() {
                     }
                     if (cmd.startsWith("hvac/")) {
                         val control = cmd.removePrefix("hvac/")
+                        // ON/OFF "inteligente": OFF zera o fan (guardando o valor atual);
+                        // ON liga o compressor (ac_enable=1) e restaura o fan anterior.
+                        if (control == "power") {
+                            // Mestre do AC: car.hvac.power_mode (0=tudo desligado, 1=ligado).
+                            val target = if (payload.trim() == "1") 1 else 0
+                            val ok = car.requestSetting(key = "car.hvac.power_mode", value = target.toString())
+                            if (!ok) { publishResult("hvac/power", "error: carro recusou ou está dormindo"); return@submit }
+                            latestHvacPowerMode = target
+                            publishResult("hvac/power", "ok:$target")
+                            return@submit
+                        }
                         val busKey = when (control) {
                             "driver_temp"    -> "car.hvac.driver_temperature"
                             "passenger_temp" -> "car.hvac.pass_temperature"
@@ -2253,6 +2359,14 @@ class MqttManager private constructor() {
                             "auto"           -> "car.hvac.auto_enable"
                             "ac_enable"      -> "car.hvac.ac_enable"  // master ON/OFF do AC (compressor)
                             "cycle_mode"     -> "car.hvac.cycle_mode"
+                            "blower_mode"    -> "car.hvac.blower_mode"
+                            "acmax"          -> "car.hvac.acmax_enable"
+                            "anion"          -> "car.hvac.anion_enable"
+                            "aqs"            -> "car.hvac.aqs_enable"
+                            "heating"        -> "car.hvac.heating_enable"
+                            "front_defrost"  -> "car.hvac.front_defrost_enable"
+                            "rear_defrost"   -> "car.hvac.rear_defrost_enable"
+                            "auto_defrost"   -> "car.hvac.setting.auto_defrost_enable"
                             "seat_vent_drv"  -> "car.comfort_setting.driver_seat_ventilation_level"
                             "seat_vent_pass" -> "car.comfort_setting.passenger_seat_ventilation_level"
                             else -> null

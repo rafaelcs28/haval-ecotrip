@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Exporta o IPA assinado (app-store). O upload é feito por altool no
+	     script (mais estável que destination=upload, que já travou). -->
+	<key>method</key>
+	<string>app-store</string>
+	<key>teamID</key>
+	<string>7Y6MPKR5CD</string>
+	<key>signingStyle</key>
+	<string>automatic</string>
+	<key>uploadSymbols</key>
+	<true/>
+</dict>
+</plist>

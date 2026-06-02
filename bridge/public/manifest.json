@@ -1,10 +1,12 @@
 {
+  "id": "/",
   "name": "EcoTrip Impulse",
   "short_name": "EcoTrip",
   "description": "Monitor de consumo Haval H6 PHEV34",
   "display": "standalone",
   "orientation": "portrait",
   "start_url": "/",
+  "scope": "/",
   "background_color": "#06080C",
   "theme_color": "#39FF88",
   "icons": [

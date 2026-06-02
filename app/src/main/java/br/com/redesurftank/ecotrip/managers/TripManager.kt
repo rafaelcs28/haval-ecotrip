@@ -1442,6 +1442,27 @@ class TripManager private constructor() {
                 lastChargeTickMs = 0L   // reset para não contar tempo parado
             }
 
+            // Auto-recuperação: viagem ativa (driving_ready=1 → autoTripStartMs!=0) mas a
+            // sessão caiu — ex.: o carro reportou car.basic.power_mode=0 espúrio (sem
+            // desligar de fato) ou o APK perdeu o evento de volta a 1/2/3. Sem isso, a
+            // distância/tempo da viagem CONGELAM (current_trip trava no último valor).
+            // Religa re-baselinando nos valores atuais (não duplica; o trecho da brecha
+            // não é recuperado, mas a viagem volta a contar e não trava mais).
+            if (!sessionActive && autoTripStartMs != 0L) {
+                val now = System.currentTimeMillis()
+                sessionActive        = true
+                lifeSessStartMs      = now
+                lifeSessStartEnergy  = curEnergy
+                lifeSessStartRegen   = curRegen
+                lifeSessStartDist    = curDist
+                lifeSessDistReady    = curDist > 0f
+                lifeTotalPausedMs    = 0L
+                lifeGearPauseStartMs = if (isDrivingGear(currentGear)) 0L else now
+                prevRollingDist = -1f; prevRollingEnergy = -1f; prevRollingRegen = -1f
+                checkpointTickCount  = 0
+                AppLogger.w(TAG, "Sessão religada (self-heal): driving_ready ativo mas sessionActive=false (power_mode espúrio)")
+            }
+
             if (sessionActive) {
                 checkpointTickCount++
                 if (checkpointTickCount >= 5) {

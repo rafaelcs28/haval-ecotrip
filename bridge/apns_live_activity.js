@@ -35,7 +35,7 @@ const DATA_DIR = process.env.ECOTRIP_DATA_DIR || __dirname;
 const TOKENS_FILE = path.join(DATA_DIR, 'activity_tokens.json');
 
 let enabled = false;
-let teamId = '', keyId = '', bundleId = '', env = 'sandbox';
+let teamId = '', keyId = '', bundleId = '', songProBundleId = '', env = 'sandbox';
 let privateKeyPem = '';
 // startTokens:  { type, deviceId, token, ts }              — push-to-start (por tipo+device)
 // updateTokens: { type, activityId, deviceId, token, ts }  — update por atividade
@@ -69,6 +69,7 @@ function init() {
   teamId   = process.env.APNS_TEAM_ID   || '';
   keyId    = process.env.APNS_KEY_ID    || '';
   bundleId = process.env.APNS_BUNDLE_ID || '';
+  songProBundleId = process.env.APNS_SONGPRO_BUNDLE_ID || '';  // app "Grasi Recarga"
   env      = process.env.APNS_ENV       || 'sandbox';
   const keyPath = process.env.APNS_KEY_P8_PATH || '';
   if (!teamId || !keyId || !bundleId || !keyPath) {
@@ -140,11 +141,16 @@ async function _send(targets, body, pushType = 'liveactivity') {
   const client = http2.connect(`https://${_apnsHost()}`);
   let sent = 0; const dead = [];
   await Promise.all(targets.map(t => new Promise((resolve) => {
+    // Bundle por TOKEN: o app "Grasi Recarga" tem bundle próprio (songpro) e
+    // device id com prefixo "byd-". Mesma chave .p8 (do time) assina os dois;
+    // só o apns-topic precisa bater com o bundle de quem registrou o token.
+    const tokBundle = (songProBundleId && typeof t.deviceId === 'string' && t.deviceId.startsWith('byd-'))
+      ? songProBundleId : bundleId;
     const req = client.request({
       ':method': 'POST',
       ':path':   `/3/device/${t.token}`,
       'authorization':  `bearer ${jwt}`,
-      'apns-topic':     pushType === 'alert' ? bundleId : `${bundleId}.push-type.liveactivity`,
+      'apns-topic':     pushType === 'alert' ? tokBundle : `${tokBundle}.push-type.liveactivity`,
       'apns-push-type': pushType,
       'apns-priority':  '10',
       'content-type':   'application/json',

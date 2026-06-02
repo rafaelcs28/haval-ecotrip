@@ -32,7 +32,15 @@ final class BridgePublisher: ObservableObject {
     /// Fonte ativa atual — "lan" ou "cloud". Pro indicador na topbar.
     @Published var activeSource: String = "cloud"
     /// True quando WS local tá conectado.
-    @Published var lanWsConnected: Bool = false
+    @Published var lanWsConnected: Bool = false {
+        didSet {
+            // LAN conectou/caiu → reajusta a cadência do poll cloud (8s c/ LAN
+            // pra não competir com o WS 10Hz; 1s sem LAN). Evita o "lag" de
+            // alguns segundos quando o cloud (atrasado) sobrepõe a telemetria.
+            guard oldValue != lanWsConnected else { return }
+            restartHttpPoll()
+        }
+    }
     /// URL manual configurada pelo user (fallback quando mDNS não funciona).
     /// Ex: "http://192.168.1.100:8080" ou só "192.168.1.100".
     @Published var lanManualUrl: String =
@@ -51,6 +59,38 @@ final class BridgePublisher: ObservableObject {
     /// preços, charging) via MQTT. Permite o cluster.html receber dados que
     /// não vêm do OBD direto.
     var onClusterExtra: (([String: Any]) -> Void)?
+
+    // Chaves de telemetria "fast" que vêm em tempo real pelo LAN WS (10Hz). Quando
+    // o WS está conectado, NÃO repassamos essas chaves vindas do MQTT/HTTP (cloud,
+    // atrasado ~1-3s) pro cluster — senão competem com o WS e os valores "pulam"
+    // (acima/abaixo do real). Espelha LAN_FAST_KEYS do cluster.html.
+    // SÓ telemetria de alta taxa (10 Hz) que PISCA se 2 fontes divergirem.
+    // HVAC/bancos/modos/recarga são valores lentos (set-points) → NÃO entram aqui:
+    // se entrassem, o cloud os removeria com LAN ligada e, se a LAN oscilasse,
+    // sumiam (botão de AC dessincronizado, banco mostrando OFF). Deixando-os fora,
+    // chegam de forma confiável pelo cloud também, sem piscar (mudam devagar).
+    private static let lanFastKeys: Set<String> = [
+        "speed_kmh","motor_power_kw","engine_rpm","batt_power_pct","steering_angle",
+        "gear","driving_ready","soc_pct","battery_current_a","pack_voltage_v","batt_12v_pct",
+        "charging_state","charging_state_text","charge_current_a","charge_power_kw","charge_remaining_min",
+        // AC/HVAC ao vivo: LAN manda; cloud lagado piscava o indicador do AC.
+        "ac_state","hvac_power_mode","hvac_ac_enable","hvac_fan_speed","hvac_driver_temp",
+        "hvac_passenger_temp","hvac_sync_enable","hvac_auto_enable","hvac_cycle_mode",
+        "hvac_blower_mode","seat_vent_drv","seat_vent_pass","hvac_acmax","hvac_anion",
+        "hvac_aqs","hvac_heating","hvac_front_defrost","hvac_rear_defrost","hvac_auto_defrost",
+    ]
+
+    /// Repassa dados de CLOUD (MQTT/HTTP) pro cluster. Com LAN WS conectada,
+    /// remove as chaves fast (o WS já as fornece em tempo real) — só passam os
+    /// calculados (viagem, autonomia, preços, etc.). Sem LAN, passa tudo.
+    private func forwardCloud(_ dict: [String: Any]) {
+        var d = dict
+        if useLanWhenAvailable && lanWsConnected {
+            for k in Self.lanFastKeys { d.removeValue(forKey: k) }
+            if d.isEmpty { return }
+        }
+        onClusterExtra?(d)
+    }
 
     func bind(_ elm: ELM327) {
         self.elm = elm
@@ -373,12 +413,15 @@ final class BridgePublisher: ObservableObject {
             print("[bridge http] URL/token vazios — poll inativo")
             return
         }
-        // Dispara imediato + a cada 1s
+        // Com LAN WS ativa, o cloud só precisa preencher os CALCULADOS (trip,
+        // range, preços) — então cai pra 8s pra não competir com o WS 10Hz.
+        // Sem LAN, mantém 1s (fonte principal).
+        let interval: TimeInterval = (useLanWhenAvailable && lanWsConnected) ? 8.0 : 1.0
         Task { await fetchState() }
-        httpPollTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+        httpPollTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             Task { await self?.fetchState() }
         }
-        print("[bridge http] poll iniciado em \(bridgeBaseUrl)/api/state")
+        print("[bridge http] poll iniciado em \(bridgeBaseUrl)/api/state · cadência \(interval)s (LAN \(lanWsConnected ? "on" : "off"))")
     }
 
     /// POST genérico — se WS LAN conectado, manda comando via WS (NWConnection,
@@ -447,7 +490,7 @@ final class BridgePublisher: ObservableObject {
             }
             guard let obj = try? JSONSerialization.jsonObject(with: data),
                   let dict = obj as? [String: Any] else { return }
-            await MainActor.run { self.onClusterExtra?(dict) }
+            await MainActor.run { self.forwardCloud(dict) }
         } catch {
             // Silent — só primeiro erro com timeout
         }
@@ -571,7 +614,7 @@ extension BridgePublisher: CocoaMQTTDelegate {
 
         if dict.isEmpty { return }
         DispatchQueue.main.async {
-            self.onClusterExtra?(dict)
+            self.forwardCloud(dict)
         }
     }
     func mqtt(_ mqtt: CocoaMQTT, didSubscribeTopics success: NSDictionary, failed: [String]) {}

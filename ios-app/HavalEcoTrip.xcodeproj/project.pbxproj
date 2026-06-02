@@ -8,9 +8,13 @@
 
 /* Begin PBXBuildFile section */
 		0C3838E769FD23A972E10B3E /* PreClimatActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBBB57D2D187DD310113F34A /* PreClimatActivityAttributes.swift */; };
+		1505BBD9630C5E03C190C203 /* SongProActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF8BF0D6E8837DEC20056AB8 /* SongProActivityAttributes.swift */; };
+		16E429E57E193AFF3942D11F /* BydRecargaApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECAEED044A902791C1B43435 /* BydRecargaApp.swift */; };
 		1A900DDEB8C0BB74EAD4A130 /* Settings.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4593E338CE49445D2B4E37A /* Settings.swift */; };
+		1BC63D4315A2BB6BFAE49F0E /* BydRecargaWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 0275BC86719533522473C87B /* BydRecargaWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		2480E68526B78CFE04F2C37B /* TripActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = E612200FCE6AA9F646191052 /* TripActivityAttributes.swift */; };
 		253A6649A6A5B25C6DEBB140 /* HavalEcoTripWidgetBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F5328FAA367AE3DF93613BE /* HavalEcoTripWidgetBundle.swift */; };
+		31C4EEF5E7D54B74A2F8DCA1 /* SongProLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8667439515FC27589EEEDBC9 /* SongProLiveActivity.swift */; };
 		447016E58ECF062223D41618 /* TripActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = E612200FCE6AA9F646191052 /* TripActivityAttributes.swift */; };
 		4C94F890D15203640F57B31D /* LiveActivityPush.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19F1EE1E1159233D66EEAFA8 /* LiveActivityPush.swift */; };
 		51B5F9B9255D183BDCDE0CC7 /* RemoteNotifications.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0AFED4CCA277E184649006B9 /* RemoteNotifications.swift */; };
@@ -20,11 +24,14 @@
 		605ED8EEC91528FFBC054A48 /* CarActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = C88C20EF0FDB1AB8EB036191 /* CarActions.swift */; };
 		6223380A259556C149F9E067 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = EEEFCC8135B0627DFDB60013 /* Assets.xcassets */; };
 		659B7DF18D1CC3CBBC1615F3 /* ChargeActivityLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6A433A5AA48336FD73F1C85 /* ChargeActivityLiveActivity.swift */; };
+		6D2D2B81A43BB7E8D26EE81F /* SongProActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF8BF0D6E8837DEC20056AB8 /* SongProActivityAttributes.swift */; };
 		77472ED6F598E53605506B96 /* ChargeActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = C110A5E3EADD0B1D4DA52BE6 /* ChargeActivityAttributes.swift */; };
+		783721D1E37916F23F2149D8 /* BydSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = E810689502D9D028774D6792 /* BydSettings.swift */; };
 		87640D1FE3604A94892D6723 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36AA01E4F54D0727EF341F49 /* ContentView.swift */; };
 		89B5CF62DAD11B34026CB4C5 /* HavalEcoTripWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 192BA3BE182AC3D50F636DA9 /* HavalEcoTripWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		8B1DEE4FCD8F3304A07A33C9 /* MotorActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 636438201B328EA34B285F3A /* MotorActivityAttributes.swift */; };
 		8C3FA5DCF7133607EC275A89 /* TripLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B0EC768E77CEDD141861D39 /* TripLiveActivity.swift */; };
+		91E8922CD20B94185D7454A2 /* BydLiveActivityPush.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60050A5D1678A9235BEB0730 /* BydLiveActivityPush.swift */; };
 		920A0533D20932EF36FC4D49 /* ChargeActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = C110A5E3EADD0B1D4DA52BE6 /* ChargeActivityAttributes.swift */; };
 		97D85BD3A8D8D549ABD6A944 /* ActivityManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9926C58E001CD8511E829FB /* ActivityManager.swift */; };
 		985C98EC482371EDBE14B4E2 /* SecurityActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = D15756C1CEF1EFDD6804C05D /* SecurityActivityAttributes.swift */; };
@@ -33,12 +40,15 @@
 		AACDCF32BF0A0A36A4A2F84F /* HavalEcoTripApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5A372CA99C89C5712EE54BC /* HavalEcoTripApp.swift */; };
 		AB83E9252E2D2EA3B5AAAC0A /* MotorActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 636438201B328EA34B285F3A /* MotorActivityAttributes.swift */; };
 		AE6DF0BA2B76E13159F83FE3 /* BackgroundRefresh.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F97B54C85FEC5A112CB0C9E /* BackgroundRefresh.swift */; };
+		B81E30EC9F98C5B71D4E12E8 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 940E4AE86B859186BAE647F3 /* Assets.xcassets */; };
 		BA989F1F5994F2921A13B3D3 /* ShortcutManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33D5F8203565F8E20D91E100 /* ShortcutManager.swift */; };
+		BD7C6AB06DD0FA3DFCB15EBD /* BydRecargaWidgetBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD1B9E17C1177A48B806D3B9 /* BydRecargaWidgetBundle.swift */; };
 		C25004AC6E9825F287951DC4 /* MotorLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A0F1250A4346D17F0539FE8 /* MotorLiveActivity.swift */; };
 		CFA18AF48CB7CF8DF7C40EC3 /* BatteryWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6B65FA59825E09151BBC7C3 /* BatteryWidget.swift */; };
 		D6B7CC3FAD98C1CC134911FE /* AuthManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBC80D42C32C99C47E1B7222 /* AuthManager.swift */; };
 		DAFD168AE90C50CE05BA20A8 /* PreClimatActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBBB57D2D187DD310113F34A /* PreClimatActivityAttributes.swift */; };
 		DE39B1C98DBD4A0B7B3D515F /* AuthConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = A799F69A43F78E263048C8F4 /* AuthConfig.swift */; };
+		E43E5551EEE28BC0621FA123 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 492762BFD473DC0FD6D89688 /* ContentView.swift */; };
 		E7A22E919521A94E9004D8F2 /* LivePreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A804763C29A6FBD8871C5A7 /* LivePreview.swift */; };
 /* End PBXBuildFile section */
 
@@ -50,9 +60,27 @@
 			remoteGlobalIDString = 7C6F91A3D976662D4231F695;
 			remoteInfo = HavalEcoTripWidget;
 		};
+		FBC92699CDE4026C5046490F /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = CB4F87A590F61F207CFCDD6A /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = BBC06950EA1E47A8982A0457;
+			remoteInfo = BydRecargaWidget;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
+		0D7894168FF60091841DF6FF /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				1BC63D4315A2BB6BFAE49F0E /* BydRecargaWidget.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		DCCDFE484E2CC324AC0D8146 /* Embed Foundation Extensions */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
@@ -67,6 +95,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		0275BC86719533522473C87B /* BydRecargaWidget.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = BydRecargaWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		0AFED4CCA277E184649006B9 /* RemoteNotifications.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteNotifications.swift; sourceTree = "<group>"; };
 		192BA3BE182AC3D50F636DA9 /* HavalEcoTripWidget.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = HavalEcoTripWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		19F1EE1E1159233D66EEAFA8 /* LiveActivityPush.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveActivityPush.swift; sourceTree = "<group>"; };
@@ -76,29 +105,42 @@
 		2F97B54C85FEC5A112CB0C9E /* BackgroundRefresh.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundRefresh.swift; sourceTree = "<group>"; };
 		33D5F8203565F8E20D91E100 /* ShortcutManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutManager.swift; sourceTree = "<group>"; };
 		36AA01E4F54D0727EF341F49 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		36E8C01B5F034767C7B96E69 /* BydRecarga-dev.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "BydRecarga-dev.entitlements"; sourceTree = "<group>"; };
 		40111AE0EB130BFE6B0757E3 /* HavalEcoTrip-prod.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "HavalEcoTrip-prod.entitlements"; sourceTree = "<group>"; };
+		492762BFD473DC0FD6D89688 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		4A804763C29A6FBD8871C5A7 /* LivePreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LivePreview.swift; sourceTree = "<group>"; };
+		5C78BF7DF42C2CEA8466E30F /* BydRecarga.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = BydRecarga.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		60050A5D1678A9235BEB0730 /* BydLiveActivityPush.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BydLiveActivityPush.swift; sourceTree = "<group>"; };
 		636438201B328EA34B285F3A /* MotorActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MotorActivityAttributes.swift; sourceTree = "<group>"; };
 		6AB3E13D26098FB169B559E2 /* HavalEcoTrip.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = HavalEcoTrip.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		6B0EC768E77CEDD141861D39 /* TripLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripLiveActivity.swift; sourceTree = "<group>"; };
 		6F5328FAA367AE3DF93613BE /* HavalEcoTripWidgetBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HavalEcoTripWidgetBundle.swift; sourceTree = "<group>"; };
 		7BA445855D7E9BCBC513DE19 /* HavalEcoTrip.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = HavalEcoTrip.entitlements; sourceTree = "<group>"; };
+		7E729D2E78EAC7CD0D7E8D10 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		8667439515FC27589EEEDBC9 /* SongProLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SongProLiveActivity.swift; sourceTree = "<group>"; };
 		915E7661920B0022793D3A63 /* PreClimatLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreClimatLiveActivity.swift; sourceTree = "<group>"; };
+		940E4AE86B859186BAE647F3 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		968AA8DFD87E74A832ED71A5 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		A53601AA6DAB2F8858F60A3D /* BydRecarga-prod.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "BydRecarga-prod.entitlements"; sourceTree = "<group>"; };
 		A799F69A43F78E263048C8F4 /* AuthConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthConfig.swift; sourceTree = "<group>"; };
+		AF8BF0D6E8837DEC20056AB8 /* SongProActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SongProActivityAttributes.swift; sourceTree = "<group>"; };
 		B41BC4A6A889A1B5BBFCF7C6 /* PwaWebView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PwaWebView.swift; sourceTree = "<group>"; };
 		B5A372CA99C89C5712EE54BC /* HavalEcoTripApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HavalEcoTripApp.swift; sourceTree = "<group>"; };
 		B6A433A5AA48336FD73F1C85 /* ChargeActivityLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChargeActivityLiveActivity.swift; sourceTree = "<group>"; };
+		BF4805E2E098ECAD51E0A441 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		C110A5E3EADD0B1D4DA52BE6 /* ChargeActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChargeActivityAttributes.swift; sourceTree = "<group>"; };
 		C4C25F23B2E85136F2735757 /* HavalEcoTripWidget.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = HavalEcoTripWidget.entitlements; sourceTree = "<group>"; };
 		C88C20EF0FDB1AB8EB036191 /* CarActions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarActions.swift; sourceTree = "<group>"; };
 		D15756C1CEF1EFDD6804C05D /* SecurityActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecurityActivityAttributes.swift; sourceTree = "<group>"; };
 		D9926C58E001CD8511E829FB /* ActivityManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityManager.swift; sourceTree = "<group>"; };
+		DD1B9E17C1177A48B806D3B9 /* BydRecargaWidgetBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BydRecargaWidgetBundle.swift; sourceTree = "<group>"; };
 		DFE9C8DD63C6163B5AF174C8 /* SecurityLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecurityLiveActivity.swift; sourceTree = "<group>"; };
 		E4593E338CE49445D2B4E37A /* Settings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Settings.swift; sourceTree = "<group>"; };
 		E612200FCE6AA9F646191052 /* TripActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripActivityAttributes.swift; sourceTree = "<group>"; };
+		E810689502D9D028774D6792 /* BydSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BydSettings.swift; sourceTree = "<group>"; };
 		EBBB57D2D187DD310113F34A /* PreClimatActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreClimatActivityAttributes.swift; sourceTree = "<group>"; };
 		EBC80D42C32C99C47E1B7222 /* AuthManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthManager.swift; sourceTree = "<group>"; };
+		ECAEED044A902791C1B43435 /* BydRecargaApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BydRecargaApp.swift; sourceTree = "<group>"; };
 		EEEFCC8135B0627DFDB60013 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		F6B65FA59825E09151BBC7C3 /* BatteryWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BatteryWidget.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -129,6 +171,21 @@
 			path = HavalEcoTrip;
 			sourceTree = "<group>";
 		};
+		2981E987A19370F17B72CF19 /* BydRecarga */ = {
+			isa = PBXGroup;
+			children = (
+				940E4AE86B859186BAE647F3 /* Assets.xcassets */,
+				60050A5D1678A9235BEB0730 /* BydLiveActivityPush.swift */,
+				36E8C01B5F034767C7B96E69 /* BydRecarga-dev.entitlements */,
+				A53601AA6DAB2F8858F60A3D /* BydRecarga-prod.entitlements */,
+				ECAEED044A902791C1B43435 /* BydRecargaApp.swift */,
+				E810689502D9D028774D6792 /* BydSettings.swift */,
+				492762BFD473DC0FD6D89688 /* ContentView.swift */,
+				7E729D2E78EAC7CD0D7E8D10 /* Info.plist */,
+			);
+			path = BydRecarga;
+			sourceTree = "<group>";
+		};
 		45616B981A51EAA946EC9D44 /* HavalEcoTripWidget */ = {
 			isa = PBXGroup;
 			children = (
@@ -144,15 +201,28 @@
 				915E7661920B0022793D3A63 /* PreClimatLiveActivity.swift */,
 				D15756C1CEF1EFDD6804C05D /* SecurityActivityAttributes.swift */,
 				DFE9C8DD63C6163B5AF174C8 /* SecurityLiveActivity.swift */,
+				AF8BF0D6E8837DEC20056AB8 /* SongProActivityAttributes.swift */,
+				8667439515FC27589EEEDBC9 /* SongProLiveActivity.swift */,
 				E612200FCE6AA9F646191052 /* TripActivityAttributes.swift */,
 				6B0EC768E77CEDD141861D39 /* TripLiveActivity.swift */,
 			);
 			path = HavalEcoTripWidget;
 			sourceTree = "<group>";
 		};
+		8189E525203ABEDA3C0DE197 /* BydRecargaWidget */ = {
+			isa = PBXGroup;
+			children = (
+				DD1B9E17C1177A48B806D3B9 /* BydRecargaWidgetBundle.swift */,
+				BF4805E2E098ECAD51E0A441 /* Info.plist */,
+			);
+			path = BydRecargaWidget;
+			sourceTree = "<group>";
+		};
 		E3F9CDB4A84F984C5043F62B /* Products */ = {
 			isa = PBXGroup;
 			children = (
+				5C78BF7DF42C2CEA8466E30F /* BydRecarga.app */,
+				0275BC86719533522473C87B /* BydRecargaWidget.appex */,
 				6AB3E13D26098FB169B559E2 /* HavalEcoTrip.app */,
 				192BA3BE182AC3D50F636DA9 /* HavalEcoTripWidget.appex */,
 			);
@@ -162,6 +232,8 @@
 		F978D81279B4F6D52E87CFA3 = {
 			isa = PBXGroup;
 			children = (
+				2981E987A19370F17B72CF19 /* BydRecarga */,
+				8189E525203ABEDA3C0DE197 /* BydRecargaWidget */,
 				19DFA1BC8964C5B35958B0DD /* HavalEcoTrip */,
 				45616B981A51EAA946EC9D44 /* HavalEcoTripWidget */,
 				E3F9CDB4A84F984C5043F62B /* Products */,
@@ -208,6 +280,43 @@
 			productReference = 6AB3E13D26098FB169B559E2 /* HavalEcoTrip.app */;
 			productType = "com.apple.product-type.application";
 		};
+		BAD07D7175AD5AECF511A382 /* BydRecarga */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 3015C415EDB970F7231758F6 /* Build configuration list for PBXNativeTarget "BydRecarga" */;
+			buildPhases = (
+				6C0BEC491ABF43B8BD9C57F1 /* Sources */,
+				8EC07FA7DF6482ED2F84CC5C /* Resources */,
+				0D7894168FF60091841DF6FF /* Embed Foundation Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				1CC48166560F6121A3AFD0D5 /* PBXTargetDependency */,
+			);
+			name = BydRecarga;
+			packageProductDependencies = (
+			);
+			productName = BydRecarga;
+			productReference = 5C78BF7DF42C2CEA8466E30F /* BydRecarga.app */;
+			productType = "com.apple.product-type.application";
+		};
+		BBC06950EA1E47A8982A0457 /* BydRecargaWidget */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = CF3F755563989EDFAACFF030 /* Build configuration list for PBXNativeTarget "BydRecargaWidget" */;
+			buildPhases = (
+				A8E2E19858992723C7BE54D9 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = BydRecargaWidget;
+			packageProductDependencies = (
+			);
+			productName = BydRecargaWidget;
+			productReference = 0275BC86719533522473C87B /* BydRecargaWidget.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -222,6 +331,14 @@
 						ProvisioningStyle = Automatic;
 					};
 					B16158F6000997CD3450942E = {
+						DevelopmentTeam = 7Y6MPKR5CD;
+						ProvisioningStyle = Automatic;
+					};
+					BAD07D7175AD5AECF511A382 = {
+						DevelopmentTeam = 7Y6MPKR5CD;
+						ProvisioningStyle = Automatic;
+					};
+					BBC06950EA1E47A8982A0457 = {
 						DevelopmentTeam = 7Y6MPKR5CD;
 						ProvisioningStyle = Automatic;
 					};
@@ -241,6 +358,8 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
+				BAD07D7175AD5AECF511A382 /* BydRecarga */,
+				BBC06950EA1E47A8982A0457 /* BydRecargaWidget */,
 				B16158F6000997CD3450942E /* HavalEcoTrip */,
 				7C6F91A3D976662D4231F695 /* HavalEcoTripWidget */,
 			);
@@ -253,6 +372,14 @@
 			buildActionMask = 2147483647;
 			files = (
 				6223380A259556C149F9E067 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		8EC07FA7DF6482ED2F84CC5C /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B81E30EC9F98C5B71D4E12E8 /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -276,6 +403,18 @@
 				1A900DDEB8C0BB74EAD4A130 /* Settings.swift in Sources */,
 				447016E58ECF062223D41618 /* TripActivityAttributes.swift in Sources */,
 				8C3FA5DCF7133607EC275A89 /* TripLiveActivity.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		6C0BEC491ABF43B8BD9C57F1 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				91E8922CD20B94185D7454A2 /* BydLiveActivityPush.swift in Sources */,
+				16E429E57E193AFF3942D11F /* BydRecargaApp.swift in Sources */,
+				783721D1E37916F23F2149D8 /* BydSettings.swift in Sources */,
+				E43E5551EEE28BC0621FA123 /* ContentView.swift in Sources */,
+				6D2D2B81A43BB7E8D26EE81F /* SongProActivityAttributes.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -304,9 +443,24 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A8E2E19858992723C7BE54D9 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				BD7C6AB06DD0FA3DFCB15EBD /* BydRecargaWidgetBundle.swift in Sources */,
+				1505BBD9630C5E03C190C203 /* SongProActivityAttributes.swift in Sources */,
+				31C4EEF5E7D54B74A2F8DCA1 /* SongProLiveActivity.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		1CC48166560F6121A3AFD0D5 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = BBC06950EA1E47A8982A0457 /* BydRecargaWidget */;
+			targetProxy = FBC92699CDE4026C5046490F /* PBXContainerItemProxy */;
+		};
 		ABF9ACFC5BF036BDAAFA7381 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 7C6F91A3D976662D4231F695 /* HavalEcoTripWidget */;
@@ -315,6 +469,24 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		0CC57BE520CC8D458A43C736 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = "BydRecarga/BydRecarga-prod.entitlements";
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				INFOPLIST_FILE = BydRecarga/Info.plist;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = br.com.consorciolimpagyn.songpro;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
 		1D34F5FCE58AFC691B5725C5 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -396,6 +568,40 @@
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.10;
+			};
+			name = Debug;
+		};
+		6A1D00F46D2724B861938589 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = "BydRecarga/BydRecarga-dev.entitlements";
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				INFOPLIST_FILE = BydRecarga/Info.plist;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = br.com.consorciolimpagyn.songpro;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		8AB1BC2F61E731CE93607B51 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				INFOPLIST_FILE = BydRecargaWidget/Info.plist;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = br.com.consorciolimpagyn.songpro.BydRecargaWidget;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Debug;
 		};
@@ -495,6 +701,22 @@
 			};
 			name = Release;
 		};
+		EB71BC05F53D2BCD423C1E48 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				INFOPLIST_FILE = BydRecargaWidget/Info.plist;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = br.com.consorciolimpagyn.songpro.BydRecargaWidget;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
 		EDA60AEDD405EBE94B248C5E /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -515,6 +737,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		3015C415EDB970F7231758F6 /* Build configuration list for PBXNativeTarget "BydRecarga" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				6A1D00F46D2724B861938589 /* Debug */,
+				0CC57BE520CC8D458A43C736 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
 		33F8B95A0DBFD663A5DE1E30 /* Build configuration list for PBXNativeTarget "HavalEcoTrip" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
@@ -538,6 +769,15 @@
 			buildConfigurations = (
 				1D34F5FCE58AFC691B5725C5 /* Debug */,
 				EDA60AEDD405EBE94B248C5E /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		CF3F755563989EDFAACFF030 /* Build configuration list for PBXNativeTarget "BydRecargaWidget" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				8AB1BC2F61E731CE93607B51 /* Debug */,
+				EB71BC05F53D2BCD423C1E48 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;

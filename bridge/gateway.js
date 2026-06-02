@@ -196,8 +196,17 @@ function loadLoginHtml() {
 }
 loadLoginHtml();
 
+// Bypass total pra Ellevar Clockin (app de ponto da esposa): sem auth no gateway,
+// proxy direto pra :3010. O app tem sua propria auth (convite + PIN + WebAuthn).
+const CLOCKIN_TARGET = 'http://127.0.0.1:3010';
+function isClockinPath(u) { return typeof u === 'string' && (u === '/clockin' || u.startsWith('/clockin/') || u.startsWith('/clockin?')); }
+
 const server = http.createServer(async (req, res) => {
   const url = req.url || '/';
+
+  if (isClockinPath(url)) {
+    return proxy.web(req, res, { target: CLOCKIN_TARGET });
+  }
 
   // login federado (Google/Apple) → roteia por email, backend verifica + 2FA
   if (req.method === 'POST' && (url === '/gw/google' || url === '/gw/apple')) {
@@ -255,6 +264,10 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.on('upgrade', (req, socket, head) => {
+  if (isClockinPath(req.url)) {
+    proxy.ws(req, socket, head, { target: CLOCKIN_TARGET });
+    return;
+  }
   const t = tenantOf(req);
   if (!t) { socket.destroy(); return; }
   proxy.ws(req, socket, head, { target: `http://127.0.0.1:${t.port}` });

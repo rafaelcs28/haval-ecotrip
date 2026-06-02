@@ -169,7 +169,12 @@ class TelemetryRecorder(private val context: Context) {
         preloadedSamples: List<TelemetrySample> = emptyList(),
         flushFile: java.io.File? = null,
     ) {
-        if (recording) return
+        // Já gravando DE VERDADE (job vivo) → não reinicia (evita duplicar).
+        // Mas se virou "zumbi" (recording=true porém o job morreu — ex.: após
+        // completar a viagem e depois RETOMAR), reinicia: senão o trecho seguinte
+        // não é amostrado e a linha do tempo trava no primeiro trecho.
+        if (recording && sampleJob?.isActive == true) return
+        sampleJob?.cancel()
         // Restaura sensores cacheados antes do primeiro tick: se o listener CAN
         // ainda não propagou eventos após restart, evitamos gravar 0s espúrios
         // (especialmente SOC, que ficava 0/49 em vez do valor real ~98).

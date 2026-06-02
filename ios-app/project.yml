@@ -43,8 +43,7 @@ targets:
       - path: HavalEcoTripWidget/MotorActivityAttributes.swift
       # Veículo desprotegido (alerta persistente): idem.
       - path: HavalEcoTripWidget/SecurityActivityAttributes.swift
-      # BYD Song Pro (recarga do carro da esposa): LA paralela ao Haval, azul.
-      - path: HavalEcoTripWidget/SongProActivityAttributes.swift
+      # SongPro (recarga BYD) saiu daqui — agora só no app "Grasi Recarga".
     info:
       path: HavalEcoTrip/Info.plist
       properties:
@@ -137,7 +136,13 @@ targets:
         com.apple.security.application-groups:
           - group.br.com.consorciolimpagyn.havalecotrip
     sources:
-      - HavalEcoTripWidget
+      - path: HavalEcoTripWidget
+        # Os arquivos do SongPro (recarga BYD) ficam fisicamente nesta pasta porque
+        # o app "Grasi Recarga" (targets BydRecarga*) os referencia por path. Mas
+        # NÃO entram no widget do Haval — a LA do BYD agora é só no app da Grasi.
+        excludes:
+          - SongProActivityAttributes.swift
+          - SongProLiveActivity.swift
       # Settings.swift compartilhado pra widget acessar URL/token via App Group
       - path: HavalEcoTrip/Settings.swift
     info:

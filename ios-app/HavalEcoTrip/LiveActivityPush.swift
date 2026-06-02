@@ -25,7 +25,8 @@ final class LiveActivityPush {
         observe(TripActivityAttributes.self,      type: "TripActivityAttributes")
         observe(MotorActivityAttributes.self,     type: "MotorActivityAttributes")
         observe(SecurityActivityAttributes.self,  type: "SecurityActivityAttributes")
-        observe(SongProActivityAttributes.self,   type: "SongProActivityAttributes")
+        // A LA de recarga do BYD (SongPro) vive no app dedicado "Grasi Recarga"
+        // (target BydRecarga), não mais aqui — fica separado do app do Haval.
     }
 
     private func observe<T: ActivityAttributes>(_ attr: T.Type, type: String) {

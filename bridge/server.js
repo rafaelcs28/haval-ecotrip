@@ -335,7 +335,7 @@ const NOTIF_DEFAULTS = {
   la_trip:              true,
   la_motor:             true,
   la_security:          true,
-  la_songpro:           false,  // LA paralela da BYD Song Pro (esposa) — opt-in, só admin
+  la_songpro:           false,  // LA paralela da BYD Song Pro (Grasi) — opt-in, só admin
   preclimat_steps:      true,   // alerta (som) a cada passo da pré-climatização
 };
 let notifPrefs = { ...NOTIF_DEFAULTS };
@@ -621,11 +621,13 @@ async function firePreClimat(sched) {
   const prevPassTemp = parseFloat(state.hvac_passenger_temp) || null;
   const prevAcEnable = state.hvac_ac_enable;   // '0'|'1'|null — pra restaurar no fim
 
-  // Passo 3: LIGA o A/C (master) + temperatura + fan via MQTT.
-  // ac_enable=1 é ESSENCIAL: sem ele o compressor fica desligado e o fan só sopra
-  // ar ambiente (não climatiza). Por isso o AC "não ligava" no agendamento.
+  // Passo 3: LIGA o A/C via MQTT.
+  // 1) power=1 → car.hvac.power_mode (MESTRE: 0=tudo off, 1=on). É o liga/desliga real.
+  // 2) ac_enable=1 → compressor (sem ele só sopra ar ambiente, não climatiza).
+  // 3) temperatura + fan.
   const fanStr  = fan.toString();
   const tempStr = temp.toFixed(1);
+  mqttClient.publish(`${MQTT_PREFIX}/cmd/hvac/power`,          '1',     { qos: 1, retain: false });
   mqttClient.publish(`${MQTT_PREFIX}/cmd/hvac/ac_enable`,      '1',     { qos: 1, retain: false });
   mqttClient.publish(`${MQTT_PREFIX}/cmd/hvac/driver_temp`,    tempStr, { qos: 1, retain: false });
   mqttClient.publish(`${MQTT_PREFIX}/cmd/hvac/passenger_temp`, tempStr, { qos: 1, retain: false });
@@ -1071,6 +1073,16 @@ const state = {
   hvac_sync_enable:    null, // null | '0'=desligado | '1'=ligado
   hvac_auto_enable:    null, // null | '0'=desligado | '1'=ligado
   hvac_ac_enable:      null, // null | '0'=desligado | '1'=ligado — car.hvac.ac_enable
+  hvac_acmax:          null, // null | '0'|'1' — resfriamento máximo
+  hvac_anion:          null, // null | '0'|'1' — ionizador
+  hvac_aqs:            null, // null | '0'|'1' — recirc. autom. qualidade do ar
+  hvac_heating:        null, // null | '0'|'1' — aquecimento
+  hvac_front_defrost:  null, // null | '0'|'1'
+  hvac_rear_defrost:   null, // null | '0'|'1'
+  hvac_auto_defrost:   null, // null | '0'|'1'
+  hvac_pm25:           null, // null | int µg/m³ (leitura)
+  hvac_blower_mode:    null, // null | 0..4 — direção do sopro
+  hvac_power_mode:     null, // null | '0'|'1' — mestre do AC
   door_fl:          null,   // front-left  | 'on'=aberta | 'off'=fechada
   door_fr:          null,   // front-right
   door_rl:          null,   // rear-left
@@ -2215,6 +2227,24 @@ if (fs.existsSync(_certFile) && fs.existsSync(_keyFile)) {
     console.warn('⚠️  HTTPS: falha ao ler certificado —', e.message);
   }
 }
+
+// ── Proxy pra Ellevar Clockin (app de ponto separado em :3010) ─────────────
+// /clockin/* passa direto, sem auth do Haval. App tem auth propria (PIN + WebAuthn).
+const _clockinProxy = require('http-proxy').createProxyServer({ ws: true, xfwd: true });
+_clockinProxy.on('error', (err, req, res) => {
+  console.warn('[clockin] proxy erro:', err.message);
+  if (res && res.writeHead && !res.headersSent) { res.writeHead(502); res.end('clockin offline'); }
+});
+function _isClockinPath(u) {
+  return typeof u === 'string' && (u === '/clockin' || u.startsWith('/clockin/') || u.startsWith('/clockin?'));
+}
+app.use((req, res, next) => {
+  if (_isClockinPath(req.url)) return _clockinProxy.web(req, res, { target: 'http://127.0.0.1:3010' });
+  next();
+});
+server.on('upgrade', (req, socket, head) => {
+  if (_isClockinPath(req.url)) _clockinProxy.ws(req, socket, head, { target: 'http://127.0.0.1:3010' });
+});
 
 app.use(require('compression')());  // gzip — backup de 11MB cai pra ~1.5MB
 app.use(express.json({ limit: '200mb' }));
@@ -3497,19 +3527,21 @@ app.post('/api/admin/restart', (req, res) => {
 });
 
 // POST /api/admin/notify { token, title, body } — push de aviso admin (ex.:
-// renovação TestFlight). Vai SÓ pros devices do Rafael (alguma LA do Haval
-// ativa); o device da Grasi (só la_songpro) é excluído.
+// renovação TestFlight). Manda APNs alert (banner real na tela bloqueada, app
+// fechado) gated SÓ pro device do Rafael (ADMIN_DEVICE_ID) — assim não vaza pro
+// iPhone da Grasi. Web Push no PWA iOS só aparece com o app em foco, por isso
+// agora vai pelo APNs nativo. skipHistory pra não poluir o feed.
+const ADMIN_DEVICE_ID = process.env.ADMIN_DEVICE_ID || '';
 app.post('/api/admin/notify', async (req, res) => {
   if (!adminCheckToken(req, res)) return;
   const title = String(req.body?.title || 'Ecotrip').slice(0, 120);
   const body  = String(req.body?.body  || '').slice(0, 400);
   try {
-    const isHavalDevice = (deviceId) => {
-      const p = getPrefsForDevice(deviceId);
-      return !!(p.la_charge || p.la_trip || p.la_motor || p.la_security || p.la_preclimat);
-    };
-    const r = await apnsLive.pushAlert(title, body, { allow: isHavalDevice });
-    res.json({ ok: true, sent: r.sent });
+    await sendPush(title, body, null, {
+      skipHistory: true,
+      onlyDeviceIds: ADMIN_DEVICE_ID ? [ADMIN_DEVICE_ID] : undefined,
+    });
+    res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -4775,7 +4807,10 @@ app.get('/api/notif/prefs/:device_id', (req, res) => {
 app.post('/api/notif/prefs/:device_id', (req, res) => {
   const id = req.params.device_id;
   const { key, value } = req.body || {};
-  if (!key || !(key in NOTIF_DEFAULTS)) return res.status(400).json({ error: 'chave inválida' });
+  // Aceita chaves do Haval (NOTIF_DEFAULTS) E as do BYD/Grasi (prefixo `byd_`,
+  // inclui as sub-chaves de geofence por local byd_geofence_*_<locId>).
+  const isByd = typeof key === 'string' && key.startsWith('byd_');
+  if (!key || (!(key in NOTIF_DEFAULTS) && !isByd)) return res.status(400).json({ error: 'chave inválida' });
   if (!notifPrefsByDevice[id]) notifPrefsByDevice[id] = {};
   const def = NOTIF_DEFAULTS[key];
   if (Array.isArray(def)) {
@@ -4785,6 +4820,9 @@ app.post('/api/notif/prefs/:device_id', (req, res) => {
     const n = parseInt(value);
     if (isNaN(n)) return res.status(400).json({ error: 'valor numérico inválido' });
     notifPrefsByDevice[id][key] = Math.max(1, Math.min(60, n));
+  } else if (isByd && typeof value === 'number') {
+    // Prefs numéricas do BYD (ex.: byd_unlocked_min) — minutos/limiares.
+    notifPrefsByDevice[id][key] = Math.max(0, Math.min(240, value));
   } else {
     notifPrefsByDevice[id][key] = !!value;
   }
@@ -4908,11 +4946,11 @@ app.post('/api/la/relaunch', async (req, res) => {
       _securityActive = false; _evalSecurityAlert();   // re-cria se ainda há problema
       done.push('seguranca');
     }
-    // BYD Song Pro (esposa) — só relança se sessão ativa e algum device opt-in.
+    // BYD Song Pro (Grasi) — só relança se sessão ativa e algum device opt-in.
     if (_songProSession && _songProSession.active && _songProEnabled()) {
       const cs = _songProContentState(true);
       await apnsLive.pushStart(SONGPRO_LA_TYPE, '', { carName: 'BYD Song Pro' }, cs,
-        { staleDate: Date.now() + 6 * 3600_000, alert: { title: '🔵 Esposa carregando', body: 'Card reativado.' },
+        { staleDate: Date.now() + 6 * 3600_000, alert: { title: '🔵 BYD da Grasi carregando', body: 'Card reativado.' },
           allow: (deviceId) => getPrefsForDevice(deviceId).la_songpro === true });
       done.push('song-pro');
     }
@@ -5391,6 +5429,18 @@ app.post('/api/charge-limit', (req, res) => {
   });
 });
 
+// POST /api/hazard  { value: 0|1 } — pisca-alerta (4 setas). Alterna
+// car.light_setting.sport_mode_light. O iPad chama isto a cada ~1s (0/1).
+app.post('/api/hazard', (req, res) => {
+  const v = (String(req.body?.value).trim() === '1') ? 1 : 0;
+  if (!mqttClient?.connected)
+    return res.status(503).json({ error: 'MQTT offline' });
+  mqttClient.publish(`${MQTT_PREFIX}/cmd/hazard`, v.toString(), { retain: false, qos: 0 }, err => {
+    if (err) return res.status(500).json({ error: 'Falha ao publicar no MQTT' });
+    res.json({ ok: true });
+  });
+});
+
 // POST /api/drive-mode  { mode: 0|1|3 } — publica cmd/drive_mode no MQTT.
 // Valores: 0=HEV (híbrido), 1=Prior. EV, 3=EV puro.
 app.post('/api/drive-mode', (req, res) => {
@@ -5656,12 +5706,24 @@ const HVAC_CONTROLS = {
   sync:           { type: 'bool' },
   auto:           { type: 'bool' },
   cycle_mode:     { type: 'int',   min: 0,  max: 1 },
+  blower_mode:    { type: 'int',   min: 0,  max: 4 },   // 0=frente,1=frente+pés,2=pés,3=pés+parabrisa,4=parabrisa
   seat_vent_drv:  { type: 'int',   min: 0,  max: 3 },
   seat_vent_pass: { type: 'int',   min: 0,  max: 3 },
   // Liga/desliga o compressor do AC (não só o fan). Mapeia para
   // `car.hvac.ac_enable` no barramento via Shizuku. Usar junto com fan_speed
   // pra garantir que liga o AC e não só sopra ar.
   ac_enable:      { type: 'bool' },
+  // ON/OFF "inteligente" do AC: o APK guarda o fan anterior. OFF→fan=0;
+  // ON→ac_enable=1 + restaura o fan que estava antes de desligar.
+  power:          { type: 'bool' },
+  // Extras (toggles on/off)
+  acmax:          { type: 'bool' },   // resfriamento máximo
+  anion:          { type: 'bool' },   // ionizador
+  aqs:            { type: 'bool' },   // recirc. automática por qualidade do ar
+  heating:        { type: 'bool' },   // aquecimento
+  front_defrost:  { type: 'bool' },   // desembaçador dianteiro
+  rear_defrost:   { type: 'bool' },   // desembaçador traseiro
+  auto_defrost:   { type: 'bool' },   // desembaçar automático
 };
 
 // ── HF mode (alta frequência sob demanda) ─────────────────────────────────
@@ -5829,11 +5891,11 @@ mqttClient.on('connect', () => {
   // direto da fonte oficial via cloud, sem ruído do barramento do app.
   mqttClient.subscribe(`${GWM_TOPIC_PREFIX}/+/state`, { qos: 1 });
   console.log(`✓ Subscribed em ${GWM_TOPIC_PREFIX}/+/state (integração HA)`);
-  // BYD Song Pro (carro da esposa) — JSON payload com charging_power + soc.
+  // BYD Song Pro (BYD da Grasi) — JSON payload com charging_power + soc.
   // Usado pra mostrar LA paralela quando carrega no mesmo carregador. Opt-in
   // via toggle la_songpro (default OFF). NÃO persiste dado.
   mqttClient.subscribe('electro/telemetry/song-pro/data', { qos: 0 });
-  console.log('✓ Subscribed em electro/telemetry/song-pro/data (LA esposa)');
+  console.log('✓ Subscribed em electro/telemetry/song-pro/data (LA Grasi)');
   // OBD Companion (iPad com ELM327 BLE) — fonte alternativa de telemetria
   // direto do CAN. Payload é JSON consolidado a 1Hz em haval/ecotrip/obd/snapshot
   // com campos planos: { ts, source, rpm, speed_kmh, ect_c, ... }. Atualiza
@@ -5954,7 +6016,7 @@ mqttClient.on('message', (topic, payload, packet) => {
     const id = topic.slice(GWM_TOPIC_PREFIX.length + 1, topic.length - '/state'.length);
     applyGwmEntity(id, value, isRetained);
   } else if (topic === 'electro/telemetry/song-pro/data') {
-    // BYD Song Pro da esposa — JSON com charging_power + soc. No-op se ninguém
+    // BYD Song Pro da Grasi — JSON com charging_power + soc. No-op se ninguém
     // tem la_songpro=true (evita CPU inútil quando feature desligada).
     if (!isRetained) handleSongProMessage(value);
   } else if (topic === MQTT_PREFIX + '/obd/snapshot') {
@@ -6221,7 +6283,7 @@ function _chargeContentState() {
     soc:          +state.soc_pct || 0,
     powerKw:      +state.charge_power_kw || 0,
     sessionKwh:   +state.charge_session_kwh || 0,
-    remainingMin: Math.max(0, Math.round(+state.charge_remaining_min || 0)),
+    remainingMin: chargeEtaMin(),   // ETA calculado por nós (o do carro trava em ~5min)
     charging:     state.charging_state === 'Carregando',
     targetPct:    +state.charge_limit_pct || 100,
     updatedAtMs:  Date.now(),
@@ -6287,7 +6349,7 @@ function handleTripUpdate(ct, isRetained) {
   }
 }
 
-// ── BYD Song Pro (esposa) — LA paralela de recarga ───────────────────────────
+// ── BYD Song Pro (Grasi) — LA paralela de recarga ───────────────────────────
 // Tópico único `electro/telemetry/song-pro/data` traz JSON completo (charging_power,
 // soc, etc.). Tracker em MEMÓRIA: sessão começa quando power>0, energia é integrada
 // (P × dt), termina quando power=0 OU soc=100. Opt-in via la_songpro (default OFF).
@@ -6297,6 +6359,301 @@ const SONGPRO_BATTERY_KWH = 18;  // BYD Song Pro PHEV — capacidade nominal
 let _songProSession = null;   // { startMs, lastMs, lastPower, lastSoc, sessionKwh, active }
 const SONGPRO_STOP_GRACE_MS = 60_000;  // power=0 sustentado por 60s pra encerrar (evita flicker)
 let _songProZeroSinceMs = 0;
+// Última amostra recebida (mesmo ocioso) — pro app mostrar o % da bateria sempre,
+// não só durante a sessão de recarga. Persistido em disco pra sobreviver a restart.
+const SONGPRO_FILE = path.join(DATA_DIR, 'songpro.json');
+let _songProLatest  = { soc: 0, powerKw: 0, ts: 0 };
+let _songProLastEnd = { soc: 0, sessionKwh: 0, endedMs: 0 };  // resumo da última recarga
+let _songProTele    = { ts: 0 };   // telemetria completa (último payload mapeado)
+// Estado pra detecção de borda das notificações (lock/porta/soc/etc + odômetro
+// da última manutenção). Persistido pra não repetir alertas após restart.
+let _spEv = { locked: null, doorOpen: null, carOn: null, moving: false, movingNotified: false, socLow: false,
+              batt12: false, cellTemp: false, imbal: false, tyrePress: false, tyreTemp: false,
+              curLocId: null, lastMaintOdo: 0 };
+let _songProTrail = [];      // trilha [{t,lat,lng,spd,kw,soc},…] desde a última ignição
+let _songProLastTrail = null; // { trail, startMs, endMs } da viagem anterior (linha do tempo)
+try {
+  const d = JSON.parse(fs.readFileSync(SONGPRO_FILE, 'utf8'));
+  if (d.latest)  _songProLatest  = d.latest;
+  if (d.lastEnd) _songProLastEnd = d.lastEnd;
+  if (d.tele)    _songProTele    = d.tele;
+  if (d.evstate) _spEv = { ..._spEv, ...d.evstate };
+  // Migração: descarta pontos no formato antigo [lat,lng] (sem telemetria).
+  if (Array.isArray(d.trail)) _songProTrail = d.trail.filter(p => p && typeof p === 'object' && !Array.isArray(p));
+  if (d.lastTrail) _songProLastTrail = d.lastTrail;
+} catch (_) {}
+let _songProSaveTs = 0;
+function _saveSongPro(force) {
+  const now = Date.now();
+  if (!force && now - _songProSaveTs < 30_000) return;   // throttle: no máx a cada 30s
+  _songProSaveTs = now;
+  try { fs.writeFileSync(SONGPRO_FILE, JSON.stringify({ latest: _songProLatest, lastEnd: _songProLastEnd, tele: _songProTele, evstate: _spEv, trail: _songProTrail, lastTrail: _songProLastTrail })); } catch (_) {}
+}
+
+// Limiares das notificações (configuráveis depois; manutenção a cada 12.000 km).
+const SP_THRESH = {
+  chargeTargetPct: 100, slowKw: 3,
+  socLowPct: 20, batt12Low: 11.8, cellTempHigh: 45, imbalanceMv: 50,
+  tyreMin: 30, tyreMax: 38, tyreTempHigh: 60, maintKm: 12000,
+};
+
+// Dispara um alerta gated pela pref POR DEVICE (só quem ligou recebe).
+function _spNotify(key, title, body) {
+  if (!apnsLive.enabled) return;
+  apnsLive.pushAlert(title, body, {
+    threadId: key,
+    allow: (deviceId) => getPrefsForDevice(deviceId)[key] === true,
+  }).catch(() => {});
+}
+
+// Geofence: gating por master (key) + sub-pref por local (key_<locId>). O sub
+// default é TRUE (se o master está ON e o usuário não desmarcou aquele local,
+// notifica). Cada device escolhe livremente os locais de chegada e de saída.
+function _spNotifyLoc(key, locId, title, body) {
+  if (!apnsLive.enabled) return;
+  apnsLive.pushAlert(title, body, {
+    threadId: key,
+    allow: (deviceId) => {
+      const p = getPrefsForDevice(deviceId);
+      return p[key] === true && p[`${key}_${locId}`] !== false;
+    },
+  }).catch(() => {});
+}
+
+// Geofence: casa só locais JÁ configurados (não cria nem usa "Local N" novo).
+function _spGeofenceLoc(lat, lng) {
+  if (!lat && !lng) return null;
+  let best = null, bestD = Infinity;
+  for (const l of songProLocs) {
+    if (l.configured === false || (!l.lat && !l.lng)) continue;
+    const d = haversineM(lat, lng, l.lat, l.lng);
+    const r = (+l.radiusM) || 200;
+    if (d <= r && d < bestD) { bestD = d; best = l; }
+  }
+  return best;
+}
+
+// Detecção de eventos (borda) a cada telemetria do BYD. Cada um é gated por
+// pref do device em _spNotify; o estado só atualiza (não spamma).
+function _songProEvents(o) {
+  const locked = +o.car_locked === 1, doorOpen = +o.any_door_opened === 1, carOn = +o.car_on === 1;
+  const speed = +o.speed || 0, soc = +o.soc || +o.soc_panel || 0, b12 = +o.battery_12v_voltage || 0;
+  const ctMax = +o.battery_cell_temp_max || 0;
+  const imbal = Math.round(((+o.battery_cell_voltage_max || 0) - (+o.battery_cell_voltage_min || 0)) * 1000);
+  const charging = !!(_songProSession && _songProSession.active);
+
+  _spEv.locked = locked;
+  if (_spEv.doorOpen === false && doorOpen) _spNotify('byd_door_open', '🚪 Porta aberta', 'Uma porta do BYD foi aberta.');
+  _spEv.doorOpen = doorOpen;
+  const nowMs = Date.now();
+  if (_spEv.carOn === false && carOn) {
+    _spNotify('byd_ignition_on', '🔑 BYD ligado', 'A ignição do carro da Grasi foi ligada.');
+    _spEv.movingNotified = false;   // rearma o aviso "começou a andar"
+    // Obs: o início/fim da viagem é por MOVIMENTO (abaixo), não pela ignição —
+    // assim "carro ligado parado" não infla o tempo nem mantém viagem fantasma.
+  }
+  // Estacionou (desligou): carro ON→OFF. Inclui o nome do local se conhecido.
+  if (_spEv.carOn === true && !carOn) {
+    const plat = +o.location_latitude || 0, plng = +o.location_longitude || 0;
+    const place = matchKnownPlace(plat, plng);
+    _spNotify('byd_parked', '🅿️ BYD estacionou',
+      place ? `O carro foi desligado em ${place.name}.` : 'O carro foi desligado.');
+  }
+  _spEv.carOn = carOn;
+
+  // ── Viagem por MOVIMENTO ──────────────────────────────────────────────────
+  // tripStartMs = início do deslocamento; tripLastMs = último movimento. Volta a
+  // andar após >60min parado (ou 1ª vez) = viagem NOVA (salva a anterior, zera a
+  // trilha). Assim o tempo "em andamento" reflete só o deslocamento real, e carro
+  // ligado parado não gera viagem fantasma.
+  const moving = speed > 3;
+  if (moving) {
+    const idleMin = _spEv.tripLastMs ? (nowMs - _spEv.tripLastMs) / 60000 : Infinity;
+    if (idleMin >= 60 || !_spEv.tripStartMs) {
+      if (_songProTrail.length > 1) {
+        _songProLastTrail = { trail: _songProTrail, startMs: _spEv.tripStartMs || 0, endMs: _spEv.tripLastMs || 0 };
+      }
+      _songProTrail = [];
+      _spEv.tripStartMs = nowMs;
+      _spEv.movingNotified = false;
+    }
+    _spEv.tripLastMs = nowMs;
+    if (!_spEv.movingNotified) {
+      _spNotify('byd_moving', '🚗 BYD em movimento', `O carro começou a andar (${Math.round(speed)} km/h).`);
+      _spEv.movingNotified = true;
+    }
+  }
+  _spEv.moving = moving;
+
+  // Acumula a trilha enquanto ligado (dedup 5m → trajeto detalhado; teto 60000
+  // pontos ≈ 300km por viagem). Coordenadas a 5 casas (~1m) pra encolher o JSON.
+  if (carOn) {
+    const lat = +o.location_latitude || 0, lng = +o.location_longitude || 0;
+    if (lat || lng) {
+      const last = _songProTrail[_songProTrail.length - 1];
+      if (!last || haversineM(lat, lng, last.lat, last.lng) > 5) {
+        // Ponto enriquecido p/ a linha do tempo (scrubber): tempo, posição,
+        // velocidade, potência de tração (kW) e SOC no instante.
+        _songProTrail.push({
+          t:   Math.round((nowMs - (_spEv.tripStartMs || nowMs)) / 1000),
+          lat: Math.round(lat * 1e5) / 1e5,
+          lng: Math.round(lng * 1e5) / 1e5,
+          spd: Math.round(+o.speed || 0),
+          kw:  Math.round((+o.engine_power || 0) * 10) / 10,
+          soc: Math.round(+o.soc || +o.soc_panel || 0),
+        });
+        if (_songProTrail.length > 60000) _songProTrail.shift();
+      }
+    }
+  }
+
+  // Destrancado: notifica só após X min com motor DESLIGADO e destrancado.
+  // X é configurável por device (byd_unlocked_min, default 5). Dispara uma vez
+  // por "episódio" (reseta quando tranca ou liga o carro).
+  if (!carOn && !locked) {
+    if (!_spEv.unlockedSinceMs) { _spEv.unlockedSinceMs = nowMs; _spEv.unlockedNotified = []; }
+    const elapsedMin = (nowMs - _spEv.unlockedSinceMs) / 60000;
+    for (const [dev, p] of Object.entries(notifPrefsByDevice)) {
+      if (p.byd_unlocked !== true) continue;
+      if ((_spEv.unlockedNotified || []).includes(dev)) continue;
+      const min = Math.max(0, +p.byd_unlocked_min || 5);
+      if (elapsedMin >= min && apnsLive.enabled) {
+        apnsLive.pushAlert('🔓 BYD destrancado',
+          `Destrancado há ${Math.round(elapsedMin)} min com o motor desligado.`,
+          { threadId: 'byd_unlocked', allow: (d) => d === dev }).catch(() => {});
+        (_spEv.unlockedNotified ||= []).push(dev);
+      }
+    }
+  } else {
+    _spEv.unlockedSinceMs = 0;
+    _spEv.unlockedNotified = [];
+  }
+
+  const socLow = !charging && soc > 0 && soc < SP_THRESH.socLowPct;
+  if (!_spEv.socLow && socLow) _spNotify('byd_soc_low', '🔋 Bateria baixa', `SOC do BYD em ${Math.round(soc)}%.`);
+  _spEv.socLow = socLow;
+
+  const b12low = b12 > 0 && b12 < SP_THRESH.batt12Low;
+  if (!_spEv.batt12 && b12low) _spNotify('byd_batt12_low', '⚠️ Bateria 12V baixa', `12V em ${b12.toFixed(1)} V.`);
+  _spEv.batt12 = b12low;
+
+  const ctHigh = ctMax >= SP_THRESH.cellTempHigh;
+  if (!_spEv.cellTemp && ctHigh) _spNotify('byd_cell_temp_high', '🌡️ Bateria quente', `Célula a ${Math.round(ctMax)}°C.`);
+  _spEv.cellTemp = ctHigh;
+
+  const imb = imbal >= SP_THRESH.imbalanceMv;
+  if (!_spEv.imbal && imb) _spNotify('byd_cell_imbalance', '⚖️ Células desbalanceadas', `Δ ${imbal} mV entre células.`);
+  _spEv.imbal = imb;
+
+  const ps = [+o.tyre_pressure_left_front_psi, +o.tyre_pressure_right_front_psi, +o.tyre_pressure_left_rear_psi, +o.tyre_pressure_right_rear_psi];
+  const tBad = ps.some(p => p > 0 && (p < SP_THRESH.tyreMin || p > SP_THRESH.tyreMax));
+  if (!_spEv.tyrePress && tBad) _spNotify('byd_tyre_pressure', '🛞 Pressão de pneu', 'Um pneu está fora da faixa ideal (30–38 psi).');
+  _spEv.tyrePress = tBad;
+
+  const ts = [+o.tyre_temperature_left_front_c, +o.tyre_temperature_right_front_c, +o.tyre_temperature_left_rear_c, +o.tyre_temperature_right_rear_c];
+  const ttHigh = ts.some(t => t >= SP_THRESH.tyreTempHigh);
+  if (!_spEv.tyreTemp && ttHigh) _spNotify('byd_tyre_temp_high', '🛞 Pneu quente', 'Temperatura de pneu alta.');
+  _spEv.tyreTemp = ttHigh;
+
+  const gl = _spGeofenceLoc(+o.location_latitude || 0, +o.location_longitude || 0);
+  const glId = gl ? gl.id : null;
+  if (glId && glId !== _spEv.curLocId) _spNotifyLoc('byd_geofence_arrival', glId, '📍 Chegou', `BYD chegou em ${gl.name}.`);
+  if (!glId && _spEv.curLocId) {
+    const prev = songProLocs.find(l => l.id === _spEv.curLocId);
+    if (prev) _spNotifyLoc('byd_geofence_departure', prev.id, '📍 Saiu', `BYD saiu de ${prev.name}.`);
+  }
+  _spEv.curLocId = glId;
+
+  const odo = +o.odometer || 0;
+  if (odo > 0) {
+    if (!_spEv.lastMaintOdo) { _spEv.lastMaintOdo = odo; }   // 1ª leitura: só semeia
+    else if (Math.floor(odo / SP_THRESH.maintKm) > Math.floor(_spEv.lastMaintOdo / SP_THRESH.maintKm)) {
+      const mark = Math.floor(odo / SP_THRESH.maintKm) * SP_THRESH.maintKm;
+      _spNotify('byd_maintenance_km', '🔧 Revisão do BYD', `Atingiu ${mark.toLocaleString('pt-BR')} km — revisão recomendada (a cada ${SP_THRESH.maintKm.toLocaleString('pt-BR')} km).`);
+      _spEv.lastMaintOdo = odo;
+    } else { _spEv.lastMaintOdo = odo; }
+  }
+}
+
+// Mapeia o payload cru do BYD Song Pro (electro/telemetry/song-pro/data) pro
+// shape camelCase que o app consome. Todos os campos numéricos viram número.
+function _mapSongProTele(o) {
+  const n = v => { const x = +v; return Number.isFinite(x) ? x : 0; };
+  return {
+    soc:          n(o.soc),
+    socPanel:     n(o.soc_panel),
+    soh:          n(o.soh),
+    powerKw:      n(o.charging_power),
+    enginePowerKw:n(o.engine_power),
+    rpmFront:     n(o.engine_speed_front),
+    rpmRear:      n(o.engine_speed_rear),
+    packVoltage:  n(o.battery_total_voltage),
+    batt12v:      n(o.battery_12v_voltage),
+    cellTempMax:  n(o.battery_cell_temp_max),
+    cellTempMin:  n(o.battery_cell_temp_min),
+    cellVoltMax:  n(o.battery_cell_voltage_max),
+    cellVoltMin:  n(o.battery_cell_voltage_min),
+    evRangeKm:    n(o.electric_driving_range_km),
+    fuelRangeKm:  n(o.fuel_driving_range_km),
+    fuelPct:      n(o.fuel_percentage),
+    odometer:     n(o.odometer),
+    totalDischarge: n(o.total_discharge),
+    speed:        n(o.speed),
+    carLocked:    n(o.car_locked) === 1,
+    carOn:        n(o.car_on) === 1,
+    anyDoorOpen:  n(o.any_door_opened) === 1,
+    gear:         String(o.gear || '-'),
+    lat:          n(o.location_latitude),
+    lng:          n(o.location_longitude),
+    altitude:     n(o.location_altitude),
+    tyrePressFL:  n(o.tyre_pressure_left_front_psi),
+    tyrePressFR:  n(o.tyre_pressure_right_front_psi),
+    tyrePressRL:  n(o.tyre_pressure_left_rear_psi),
+    tyrePressRR:  n(o.tyre_pressure_right_rear_psi),
+    tyreTempFL:   n(o.tyre_temperature_left_front_c),
+    tyreTempFR:   n(o.tyre_temperature_right_front_c),
+    tyreTempRL:   n(o.tyre_temperature_left_rear_c),
+    tyreTempRR:   n(o.tyre_temperature_right_rear_c),
+    carTime:      String(o.current_datetime || ''),   // horário do envio (relógio do carro, UTC)
+  };
+}
+
+// Shape "vazio" — garante TODAS as chaves quando ainda não há telemetria
+// (o Decodable do Swift exige todas as chaves não-opcionais presentes).
+function _emptySongProTele() {
+  return _mapSongProTele({});
+}
+
+// "Recarga finalizada" fica visível por até 24h depois de encerrar (some sozinho).
+const SONGPRO_FINISHED_WINDOW_MS = 24 * 3600_000;
+
+// Status consolidado pro app (Grasi Recarga): % sempre + infos da LA se carregando
+// + estado "finalizada" logo após terminar.
+function songProStatus() {
+  const charging = !!(_songProSession && _songProSession.active);
+  const finished = !charging && _songProLastEnd.endedMs > 0
+    && (Date.now() - _songProLastEnd.endedMs) < SONGPRO_FINISHED_WINDOW_MS;
+  const cs = charging ? _songProContentState(true) : null;
+  const tele = (_songProTele && _songProTele.ts) ? _songProTele : _emptySongProTele();
+  // Shape SEMPRE completo (todas as chaves nas duas situações): o Decodable
+  // sintetizado do Swift lança erro se uma chave não-opcional faltar — então
+  // nunca omitir finishedKwh/etc, senão o app não decodifica e mostra "Sem dados".
+  return {
+    soc:          charging ? cs.soc        : (_songProLatest.soc || tele.soc || 0),
+    powerKw:      charging ? cs.powerKw     : 0,
+    sessionKwh:   charging ? cs.sessionKwh  : 0,
+    remainingMin: charging ? cs.remainingMin: 0,
+    charging,
+    finished,
+    finishedSoc:  _songProLastEnd.soc || 0,
+    finishedKwh:  +(_songProLastEnd.sessionKwh || 0).toFixed(2),
+    finishedAtMs: _songProLastEnd.endedMs || 0,
+    updatedAtMs:  _songProLatest.ts || (charging ? Date.now() : 0),
+    hasData:      charging || _songProLatest.ts > 0 || finished,
+    // Telemetria completa do veículo (bateria, pneus, autonomia, localização…)
+    tele,
+  };
+}
 
 // Estima minutos restantes pra atingir 100%: (100−soc)·battery_kwh / power · 60.
 // Retorna 0 quando power insuficiente (=0 ou irreal).
@@ -6320,9 +6677,73 @@ function _songProContentState(active) {
   };
 }
 
+// ── Histórico de recargas do BYD Song Pro (por local, com custo estimado) ────
+const SONGPRO_CHARGES_FILE = path.join(DATA_DIR, 'songpro_charges.json');
+const SONGPRO_LOCS_FILE    = path.join(DATA_DIR, 'songpro_locations.json');
+let songProCharges = [];
+let songProLocs    = [];
+try { songProCharges = JSON.parse(fs.readFileSync(SONGPRO_CHARGES_FILE, 'utf8')) || []; } catch (_) {}
+try { songProLocs    = JSON.parse(fs.readFileSync(SONGPRO_LOCS_FILE, 'utf8'))    || []; } catch (_) {}
+function _saveSongProCharges() { try { fs.writeFileSync(SONGPRO_CHARGES_FILE, JSON.stringify(songProCharges, null, 2)); } catch (_) {} }
+function _saveSongProLocs()    { try { fs.writeFileSync(SONGPRO_LOCS_FILE, JSON.stringify(songProLocs, null, 2)); } catch (_) {} }
+
+// Acha o local existente a ≤200m, ou cria um novo (preço 0 — usuário edita depois).
+function _songProLocFor(lat, lng) {
+  if (!lat && !lng) return null;
+  // Casa um local pré-configurado se estiver dentro do RAIO dele (cada local tem
+  // o seu; default 200m). Pega o mais próximo entre os que casam.
+  let best = null, bestD = Infinity;
+  for (const l of songProLocs) {
+    if (!l.lat && !l.lng) continue;
+    const d = haversineM(lat, lng, l.lat, l.lng);
+    const r = (+l.radiusM) || 200;
+    if (d <= r && d < bestD) { bestD = d; best = l; }
+  }
+  if (best) return best;
+  // Nenhum casou → local NOVO (configured:false pro app pedir nome + R$/kWh).
+  const loc = { id: 'loc-' + Date.now().toString(36), name: `Local ${songProLocs.length + 1}`,
+                lat, lng, radiusM: 200, pricePerKwh: 0, free: false, configured: false };
+  songProLocs.push(loc); _saveSongProLocs();
+  return loc;
+}
+
+// Custo de uma recarga dado o local (grátis → 0).
+function _songProCost(energyKwh, loc) {
+  if (!loc || loc.free) return 0;
+  return +(energyKwh * (+loc.pricePerKwh || 0)).toFixed(2);
+}
+
+// Salva uma recarga concluída no histórico. `s` é o _songProSession encerrado.
+function _recordSongProCharge(s, finalSoc, endMs) {
+  const energy = +(s.sessionKwh || 0);
+  if (energy < 0.05) return;   // descarta ruído (cabo plugado sem carga real)
+  const durationSec = Math.max(1, Math.round((endMs - s.startMs) / 1000));
+  const avgPowerKw  = +(energy / (durationSec / 3600)).toFixed(2);
+  const loc  = _songProLocFor(s.lat || 0, s.lng || 0);
+  const cost = _songProCost(energy, loc);
+  songProCharges.unshift({
+    id: 'sp-' + endMs.toString(36),
+    startMs: s.startMs, endMs, durationSec,
+    socStart: Math.round(s.startSoc || 0), socEnd: Math.round(finalSoc || 0),
+    energyKwh: +energy.toFixed(2),
+    avgPowerKw,
+    lat: s.lat || 0, lng: s.lng || 0,
+    locationId: loc ? loc.id : null,
+    pricePerKwh: loc ? (+loc.pricePerKwh || 0) : 0,   // preço do momento (histórico)
+    free: loc ? !!loc.free : false,
+    costEstimate: cost,
+  });
+  if (songProCharges.length > 1000) songProCharges.length = 1000;
+  _saveSongProCharges();
+  console.log(`[songpro] recarga salva · ${energy.toFixed(2)}kWh · ${loc ? loc.name : 'sem local'}${loc && !loc.configured ? ' (novo)' : ''} · R$ ${cost.toFixed(2)}`);
+}
+
 function _songProEnabled() {
   // Pelo menos um device com la_songpro=true → vale a pena enviar push.
-  return pushSubs.some(s => getPrefsForDevice(s.device_id).la_songpro === true);
+  // Varre as prefs POR DEVICE (não só pushSubs): o app "Grasi Recarga" é nativo
+  // (APNs), não tem Web Push sub — então não aparecia em pushSubs e o pushStart
+  // nunca disparava. O gating fino (quem recebe) continua no allow() do pushStart.
+  return Object.values(notifPrefsByDevice).some(p => p && p.la_songpro === true);
 }
 
 function handleSongProMessage(jsonStr) {
@@ -6337,16 +6758,23 @@ function handleSongProMessage(jsonStr) {
   // que JÁ estava carregando.
 
   const now = Date.now();
+  _songProLatest = { soc, powerKw: power, ts: now };   // % sempre disponível pro app
+  _songProTele = { ..._mapSongProTele(o), ts: now };   // telemetria completa pro dash
+  _songProEvents(o);                                   // notificações por borda (gated)
+  _saveSongPro(false);
 
   if (power > 0) {
     _songProZeroSinceMs = 0;
     if (!_songProSession) {
       // Início da sessão.
-      _songProSession = { startMs: now, lastMs: now, lastPower: power, lastSoc: soc, sessionKwh: 0, active: true };
+      _songProSession = { startMs: now, lastMs: now, lastPower: power, lastSoc: soc, startSoc: soc,
+                          lat: +o.location_latitude || 0, lng: +o.location_longitude || 0,
+                          sessionKwh: 0, active: true, targetNotified: false, slowNotified: false };
       console.log(`[songpro] sessão iniciada (SOC ${soc}% · ${power} kW)`);
+      _spNotify('byd_charge_start', '🔌 Recarga iniciada', `BYD começou a carregar · SOC ${soc.toFixed(0)}% · ${power.toFixed(1)} kW`);
       if (_songProEnabled() && apnsLive.enabled) {
         apnsLive.pushStart(SONGPRO_LA_TYPE, '', { carName: 'BYD Song Pro' }, _songProContentState(true),
-          { staleDate: now + 6 * 3600_000, alert: { title: '🔵 Esposa carregando', body: `SOC ${soc.toFixed(0)}% · ${power.toFixed(1)} kW` },
+          { staleDate: now + 6 * 3600_000, alert: { title: '🔵 BYD da Grasi carregando', body: `SOC ${soc.toFixed(0)}% · ${power.toFixed(1)} kW` },
             allow: (deviceId) => getPrefsForDevice(deviceId).la_songpro === true })
           .catch(e => console.warn('[songpro] pushStart falhou:', e.message));
       }
@@ -6357,6 +6785,16 @@ function handleSongProMessage(jsonStr) {
       _songProSession.lastMs = now;
       _songProSession.lastPower = power;
       _songProSession.lastSoc = soc;
+      // Alvo atingido (ex.: 100%) — uma vez por sessão.
+      if (!_songProSession.targetNotified && soc >= SP_THRESH.chargeTargetPct) {
+        _songProSession.targetNotified = true;
+        _spNotify('byd_charge_target', '✅ Recarga no alvo', `BYD atingiu ${soc.toFixed(0)}%.`);
+      }
+      // Carregamento lento — uma vez por sessão.
+      if (!_songProSession.slowNotified && power > 0 && power < SP_THRESH.slowKw) {
+        _songProSession.slowNotified = true;
+        _spNotify('byd_charge_slow', '🐌 Carregamento lento', `BYD carregando a só ${power.toFixed(1)} kW.`);
+      }
       // Throttle: só envia se SOC mudou ≥1%, power ≥0.5kW, ou 60s desde último.
       const lastUpd = _songProSession.lastPushMs || 0;
       const dSocOk  = Math.abs(soc - (_songProSession.lastPushedSoc || 0)) >= 1;
@@ -6376,12 +6814,26 @@ function handleSongProMessage(jsonStr) {
     _songProSession.lastSoc = soc;
     if (now - _songProZeroSinceMs > SONGPRO_STOP_GRACE_MS || soc >= 100) {
       const finalKwh = _songProSession.sessionKwh;
-      console.log(`[songpro] sessão encerrada · ${finalKwh.toFixed(2)} kWh · SOC final ${soc}%`);
+      const finalSoc = soc || _songProSession.lastSoc || 0;
+      console.log(`[songpro] sessão encerrada · ${finalKwh.toFixed(2)} kWh · SOC final ${finalSoc}%`);
+      // Persiste o resumo (app mostra "recarga finalizada" + % por até 24h).
+      _songProLastEnd = { soc: finalSoc, sessionKwh: finalKwh, endedMs: now };
+      _songProLatest  = { soc: finalSoc, powerKw: 0, ts: now };
+      _saveSongPro(true);
+      const stoppedEarly = finalSoc > 0 && finalSoc < (SP_THRESH.chargeTargetPct - 1) && soc < 100;
+      _recordSongProCharge(_songProSession, finalSoc, now);   // grava no histórico
+      // LA final atualiza em silêncio (gated por la_songpro); o card vira "finalizada".
       if (apnsLive.enabled && _songProEnabled()) {
         apnsLive.pushUpdate(SONGPRO_LA_TYPE, {}, _songProContentState(false),
-          { isFinal: true, dismissalDate: now + 5 * 60_000,
-            alert: { title: '🔵 Esposa terminou', body: `SOC ${soc.toFixed(0)}% · ${finalKwh.toFixed(2)} kWh` } })
+          { isFinal: true, dismissalDate: now + 5 * 60_000 })
           .catch(e => console.warn('[songpro] end falhou:', e.message));
+      }
+      // Notificações (banner) por toggle independente da LA.
+      _spNotify('byd_charge_end', '🔋 Recarga finalizada',
+                `BYD · SOC ${finalSoc.toFixed(0)}% · ${finalKwh.toFixed(2)} kWh nesta sessão`);
+      if (stoppedEarly) {
+        _spNotify('byd_charge_stopped', '⚠️ Recarga interrompida',
+                  `BYD parou em ${finalSoc.toFixed(0)}% (antes do alvo de ${SP_THRESH.chargeTargetPct}%).`);
       }
       _songProSession = null;
       _songProZeroSinceMs = 0;
@@ -6451,6 +6903,13 @@ function _endMotorLA() {
 // com vidro aberto é normal).
 const SECURITY_LA_TYPE = 'SecurityActivityAttributes';
 let _securityActive = false;
+let _securitySig    = '';   // assinatura do último conteúdo enviado (anti-spam de updates)
+// Portão de saída: só alerta "desprotegido" depois que o motorista REALMENTE saiu.
+//  • Caso normal (dirigiu e desligou): exige a porta do MOTORISTA (dianteira esq.).
+//  • Caso destrancou com o motor já desligado: aí qualquer porta abrindo vale.
+// Enquanto isso não ocorre (você ainda dentro), segura o alerta. Religar zera tudo.
+let _exitedSincePark   = false;
+let _unlockedWhileOff  = false;   // carro foi destrancado com o motor desligado?
 
 const _DOOR_LABELS = { fl: 'Porta diant. esq.', fr: 'Porta diant. dir.', rl: 'Porta tras. esq.', rr: 'Porta tras. dir.' };
 const _WIN_LABELS  = { fl: 'Vidro diant. esq.', fr: 'Vidro diant. dir.', rl: 'Vidro tras. esq.', rr: 'Vidro tras. dir.' };
@@ -6493,19 +6952,28 @@ function _evalSecurityAlert() {
   if (!apnsLive.enabled) return;
   const parked = state.engine_state === '0';   // só estacionado (evita falso alarme dirigindo)
   const snap = _securitySnapshot();
-  if (parked && snap.issues.length > 0 && notifPrefs.la_security !== false) {
-    const cs = _securityContentState(snap, true);
+  // Só alerta se o motorista já saiu (porta abriu após desligar). Se ainda não
+  // abriu nenhuma porta, segura — você provavelmente continua dentro do carro.
+  if (parked && _exitedSincePark && snap.issues.length > 0 && notifPrefs.la_security !== false) {
+    const cs  = _securityContentState(snap, true);
+    // Assinatura só dos campos que importam (ignora updatedAtMs) — evita reenviar
+    // update a cada mensagem do GWM quando nada mudou.
+    const sig = snap.issues.join('|');
     if (!_securityActive) {
       _securityActive = true;
+      _securitySig    = sig;
       apnsLive.pushStart(SECURITY_LA_TYPE, '', { carName: 'Haval H6 PHEV' }, cs,
         { staleDate: Date.now() + 12 * 3600_000,
           alert: { title: '🔓 Veículo desprotegido', body: snap.issues.join(' · ') } })
         .catch(e => console.warn('[apns] security pushStart falhou:', e.message));
-    } else {
+    } else if (sig !== _securitySig) {
+      _securitySig = sig;
       apnsLive.pushUpdate(SECURITY_LA_TYPE, {}, cs, {}).catch(() => {});
     }
+    // sig igual → nada mudou, não reenvia (anti-spam).
   } else if (_securityActive) {
     _securityActive = false;
+    _securitySig    = '';
     apnsLive.pushUpdate(SECURITY_LA_TYPE, {}, _securityContentState(snap, false),
       { isFinal: true, dismissalDate: Date.now() + 10_000 })
       .catch(e => console.warn('[apns] security end falhou:', e.message));
@@ -6534,6 +7002,8 @@ function handleChargingStateTransition(value, isRetained) {
     state.charge_max_power_kw        = 0;
     state.charge_avg_power_kw        = 0;
     state.charge_session_kwh_at_init = 0;
+    _chargeFinalKwh                  = 0;   // nova sessão → zera o total guardado
+    _chargePwrWin = []; _chargeEtaMin = 0;  // zera o ETA calculado
     // Reinicia tracking de desaceleração da recarga
     _chargePeakKw        = 0;
     _chargeSlowAlertSent = false;
@@ -6596,7 +7066,7 @@ function handleChargingStateTransition(value, isRetained) {
         stopChargeLiveTimer();
         apnsLive.pushUpdate('ChargeActivityAttributes', {}, {
           soc: endSoc, powerKw: 0,
-          sessionKwh: +state.charge_session_kwh || 0,
+          sessionKwh: Math.max(_chargeFinalKwh, +state.charge_session_kwh || 0),
           remainingMin: 0, charging: false,
           targetPct: chargeLimit, updatedAtMs: Date.now(),
         }, { isFinal: true, alert: { title: aTitle, body: aBody } })
@@ -6653,11 +7123,43 @@ function handleChargingStateTransition(value, isRetained) {
 let _chargeLiveTimer = null;
 let _chargeLiveLast  = { soc: -1, pwr: -1, rem: -1, ts: 0 };
 const CHARGE_LIVE_TAG = 'charge-live';
+// Maior kWh visto na sessão atual. O APK zera o contador ao terminar a recarga,
+// então guardamos o total aqui pra a LA final NÃO mostrar 0 (fica fixo até o
+// usuário limpar a LA). Reseta ao iniciar uma nova sessão.
+let _chargeFinalKwh = 0;
+
+// ── ETA de recarga calculado por NÓS ──────────────────────────────────────
+// O tempo do carro trava em ~5 min e nunca zera. Calculamos: kWh faltante até o
+// alvo (SOC) ÷ potência média recente (lado bateria, V×I) → minutos. Zera ao
+// atingir o alvo. Janela de 60s + EMA pra contagem suave; mantém o último valor
+// se a potência cai a ~0 (pausa). charge_power_kw é lado-bateria → sem fator de
+// eficiência. Reseta a cada nova sessão.
+let _chargePwrWin = [];          // {ts, kw} dos últimos CHARGE_ETA_WIN_MS
+let _chargeEtaMin = 0;           // ETA suavizado (min)
+const CHARGE_ETA_WIN_MS = 60_000;
+function _recalcChargeEta() {
+  const soc  = +state.soc_pct || 0;
+  const lim  = +state.charge_limit_pct || 100;
+  const need = Math.max(0, (lim - soc) / 100 * BATTERY_CAPACITY_KWH);   // kWh até o alvo
+  if (need <= 0.05) { _chargeEtaMin = 0; return; }
+  const now = Date.now();
+  _chargePwrWin = _chargePwrWin.filter(s => now - s.ts <= CHARGE_ETA_WIN_MS);
+  const avg = _chargePwrWin.length
+    ? _chargePwrWin.reduce((a, s) => a + s.kw, 0) / _chargePwrWin.length
+    : (+state.charge_avg_power_kw || 0);
+  if (avg < 0.3) return;   // potência ~0 (pausa) → mantém o último ETA
+  const raw = need / avg * 60;
+  _chargeEtaMin = _chargeEtaMin > 0 ? (_chargeEtaMin * 0.6 + raw * 0.4) : raw;   // EMA
+}
+// Minutos a mostrar: nosso ETA enquanto carregando; 0 caso contrário.
+function chargeEtaMin() {
+  return (state.charging_state === 'Carregando') ? Math.max(0, Math.round(_chargeEtaMin)) : 0;
+}
 
 function _fmtChargeLiveBody(stateObj) {
   const soc = +stateObj.soc_pct || 0;
   const pwr = +stateObj.charge_power_kw || 0;
-  const rem = +stateObj.charge_remaining_min || 0;
+  const rem = chargeEtaMin();   // nosso ETA
   const kwh = +stateObj.charge_session_kwh || 0;
   const parts = [];
   parts.push(`SOC ${soc.toFixed(0)}%`);
@@ -6676,7 +7178,7 @@ function sendChargeLiveUpdate(isFinal = false) {
   if (!charging && !isFinal) return;
   const soc = +state.soc_pct || 0;
   const pwr = +state.charge_power_kw || 0;
-  const rem = +state.charge_remaining_min || 0;
+  const rem = chargeEtaMin();   // nosso ETA (o do carro trava em ~5min)
   const now = Date.now();
   if (!isFinal) {
     const dT = now - _chargeLiveLast.ts;
@@ -6692,11 +7194,11 @@ function sendChargeLiveUpdate(isFinal = false) {
     if (!significant) return;
   }
   _chargeLiveLast = { soc, pwr, rem, ts: now };
-  const kwh   = +state.charge_session_kwh || 0;
+  // No final, usa o total guardado (o APK zera o contador ao terminar a recarga).
+  const kwh   = isFinal ? Math.max(_chargeFinalKwh, +state.charge_session_kwh || 0) : (+state.charge_session_kwh || 0);
   const title = isFinal ? '✅ Recarga concluída' : '⚡ Carregando…';
-  const body  = isFinal
-    ? _fmtChargeLiveBody(state) || 'Sessão encerrada'
-    : _fmtChargeLiveBody(state);
+  const bodyState = isFinal ? { ...state, charge_session_kwh: kwh } : state;
+  const body  = _fmtChargeLiveBody(bodyState) || 'Sessão encerrada';
   // skipApnsAlert: no nativo o som vem pelo alert da LA (abaixo, só no final).
   // Updates não-finais são silent de qualquer forma. Web-push segue pro PWA.
   sendPush(title, body, 'charge_live', {
@@ -6715,7 +7217,8 @@ function sendChargeLiveUpdate(isFinal = false) {
   if (apnsLive.enabled) {
     apnsLive.pushUpdate('ChargeActivityAttributes', {}, {
       soc, powerKw: pwr,
-      sessionKwh: +state.charge_session_kwh || 0,
+      // No final, usa o total guardado (o APK zera o contador ao terminar).
+      sessionKwh: isFinal ? Math.max(_chargeFinalKwh, +state.charge_session_kwh || 0) : (+state.charge_session_kwh || 0),
       remainingMin: Math.max(0, Math.round(rem)),
       charging: !isFinal,
       targetPct: +state.charge_limit_pct || 100,
@@ -6733,6 +7236,143 @@ const LA_TYPES = ['ChargeActivityAttributes', 'PreClimatActivityAttributes', 'Tr
                   'MotorActivityAttributes', 'SecurityActivityAttributes', 'SongProActivityAttributes'];
 
 // push-to-start token (por tipo de Live Activity)
+// GET /api/songpro/status — % da bateria do BYD Song Pro sempre, + infos da
+// recarga (potência, kWh, min restantes) quando carregando. Consumido pelo app
+// "Grasi Recarga" pra mostrar num card. Protegido pelo requireAuth global.
+app.get('/api/songpro/status', (req, res) => {
+  res.json(songProStatus());
+});
+
+// Trilha do trajeto atual (desde a última partida). Endpoint separado do status
+// porque o app puxa o status a 500ms (gauges) e a trilha bem mais devagar — a
+// rota cresce lentamente e pode ser grande (viagem inteira).
+app.get('/api/songpro/trail', (req, res) => {
+  // Busca incremental: o app manda ?since=<nº de pontos que já tem> e recebe só
+  // os novos. `full=true` = mande tudo (primeira carga, ou trilha resetada/nova
+  // ignição → since fica > total). Evita rebaixar a trilha inteira a cada 4s.
+  const total = _songProTrail.length;
+  let since = parseInt(req.query.since, 10);
+  if (!Number.isFinite(since) || since < 0 || since > total) since = 0;   // inválido/reset → full
+  res.json({
+    trail:       _songProTrail.slice(since),
+    full:        since === 0,
+    total,
+    tripStartMs: _spEv.tripStartMs || 0,
+    tripLastMs:  _spEv.tripLastMs || 0,
+  });
+});
+
+// Última viagem encerrada (enriquecida) — pra linha do tempo quando o carro está
+// parado. Estática até a próxima viagem terminar, então não precisa de incremental.
+app.get('/api/songpro/last-trip', (req, res) => {
+  const lt = _songProLastTrail || {};
+  res.json({ trail: lt.trail || [], startMs: lt.startMs || 0, endMs: lt.endMs || 0 });
+});
+
+// Histórico de recargas do BYD + locais (com preço/kWh). O app filtra por
+// local e mês e soma energia/custo. Protegido pelo requireAuth global.
+app.get('/api/songpro/charges', (req, res) => {
+  res.json({ charges: songProCharges, locations: songProLocs });
+});
+
+// Lançamento MANUAL de recarga (ex.: recargas antigas). Body:
+// { endMs, durationSec, energyKwh, socStart, socEnd, locationId? | locationName?, pricePerKwh?, free? }
+app.post('/api/songpro/charges', (req, res) => {
+  const b = req.body || {};
+  const energy = +b.energyKwh;
+  if (!Number.isFinite(energy) || energy <= 0) return res.status(400).json({ error: 'energyKwh inválido' });
+  const endMs = +b.endMs || Date.now();
+  const durationSec = Math.max(1, parseInt(b.durationSec, 10) || 0);
+  let loc = null;
+  if (b.locationId) {
+    loc = songProLocs.find(l => l.id === b.locationId) || null;
+  } else if (typeof b.locationName === 'string' && b.locationName.trim()) {
+    loc = { id: 'loc-' + endMs.toString(36), name: b.locationName.trim().slice(0, 60),
+            lat: +b.lat || 0, lng: +b.lng || 0,
+            pricePerKwh: +b.pricePerKwh || 0, free: !!b.free, configured: true };
+    songProLocs.push(loc); _saveSongProLocs();
+  }
+  const charge = {
+    id: 'sp-m-' + endMs.toString(36) + '-' + Math.random().toString(36).slice(2, 6),
+    startMs: endMs - durationSec * 1000, endMs, durationSec,
+    socStart: Math.round(+b.socStart || 0), socEnd: Math.round(+b.socEnd || 0),
+    energyKwh: +energy.toFixed(2),
+    avgPowerKw: +(energy / (durationSec / 3600)).toFixed(2),
+    lat: loc?.lat || 0, lng: loc?.lng || 0,
+    locationId: loc ? loc.id : null,
+    pricePerKwh: loc ? (+loc.pricePerKwh || 0) : (+b.pricePerKwh || 0),
+    free: loc ? !!loc.free : !!b.free,
+    costEstimate: _songProCost(energy, loc),
+    manual: true,
+  };
+  songProCharges.push(charge);
+  songProCharges.sort((a, b) => b.endMs - a.endMs);
+  _saveSongProCharges();
+  res.json(charge);
+});
+
+// Edita uma recarga: energia e/ou custo. Custo informado = override manual
+// (fica fixo, não é recalculado por mudança de preço do local).
+app.patch('/api/songpro/charges/:id', (req, res) => {
+  const c = songProCharges.find(x => x.id === req.params.id);
+  if (!c) return res.status(404).json({ error: 'not found' });
+  const b = req.body || {};
+  if (b.energyKwh !== undefined) {
+    const e = +b.energyKwh;
+    if (Number.isFinite(e) && e >= 0) {
+      c.energyKwh = +e.toFixed(2);
+      if (c.durationSec > 0) c.avgPowerKw = +(e / (c.durationSec / 3600)).toFixed(2);
+      // Recalcula custo pelo preço guardado, exceto se houver override manual.
+      if (b.costEstimate === undefined && !c.costManual) {
+        c.costEstimate = c.free ? 0 : +(e * (+c.pricePerKwh || 0)).toFixed(2);
+      }
+    }
+  }
+  if (b.costEstimate !== undefined) {
+    const v = +b.costEstimate;
+    if (Number.isFinite(v) && v >= 0) { c.costEstimate = +v.toFixed(2); c.costManual = true; }
+  }
+  _saveSongProCharges();
+  res.json(c);
+});
+
+// Cria um local PRÉ-configurado (ponto + raio + nome + preço). Quando o carro
+// recarregar dentro do raio, já puxa nome/preço automaticamente.
+app.post('/api/songpro/locations', (req, res) => {
+  const b = req.body || {};
+  const loc = {
+    id: 'loc-' + Date.now().toString(36),
+    name: (typeof b.name === 'string' && b.name.trim() ? b.name.trim() : 'Local').slice(0, 60),
+    lat: +b.lat || 0, lng: +b.lng || 0,
+    radiusM: Math.max(30, Math.min(5000, parseInt(b.radiusM, 10) || 200)),
+    pricePerKwh: Math.max(0, +b.pricePerKwh || 0),
+    free: !!b.free, configured: true,
+  };
+  songProLocs.push(loc); _saveSongProLocs();
+  res.json(loc);
+});
+
+// Edita nome/preço/raio/posição de um local; recomputa o custo das recargas dele.
+app.patch('/api/songpro/locations/:id', (req, res) => {
+  const loc = songProLocs.find(l => l.id === req.params.id);
+  if (!loc) return res.status(404).json({ error: 'not found' });
+  const b = req.body || {};
+  if (typeof b.name === 'string' && b.name.trim()) loc.name = b.name.trim().slice(0, 60);
+  if (b.pricePerKwh !== undefined) {
+    const p = +b.pricePerKwh;
+    if (Number.isFinite(p) && p >= 0) loc.pricePerKwh = p;
+  }
+  if (b.free !== undefined) loc.free = !!b.free;
+  if (b.radiusM !== undefined) loc.radiusM = Math.max(30, Math.min(5000, parseInt(b.radiusM, 10) || loc.radiusM || 200));
+  if (b.lat !== undefined) loc.lat = +b.lat || loc.lat;
+  if (b.lng !== undefined) loc.lng = +b.lng || loc.lng;
+  loc.configured = true;   // editou → deixa de ser "novo"
+  _saveSongProLocs();
+  // NÃO recalcula recargas passadas: o preço é histórico — cada recarga guarda
+  // o custo do momento. A mudança só vale pras PRÓXIMAS recargas.
+  res.json(loc);
+});
+
 app.post('/api/activity/pts-token', (req, res) => {
   const { type, push_to_start_token, device_id } = req.body || {};
   if (!type || !push_to_start_token || !LA_TYPES.includes(String(type)))
@@ -6795,13 +7435,17 @@ function applyGwmEntity(id, value, isRetained = false) {
     state[field] = norm;
     if (!isRetained && prev !== undefined && prev !== null && prev !== norm) {
       if (field === 'lock_state') {
-        if (norm === 'on') addEvent('lock_open',  'Carro destrancado');
-        else               addEvent('lock_close', 'Carro trancado');
+        if (norm === 'on') {
+          if (state.engine_state === '0') _unlockedWhileOff = true;   // destrancou parado
+          addEvent('lock_open',  'Carro destrancado');
+        } else             addEvent('lock_close', 'Carro trancado');
       } else if (field === 'ac_state') {
         if (norm === 'on') addEvent('ac_on',  'Ar condicionado ligado');
         else               addEvent('ac_off', 'Ar condicionado desligado');
       } else if (field === 'door_trunk') {
         if (norm === 'on') {
+          // Porta-malas só conta como "saída" no caso de destrancar parado.
+          if (state.engine_state === '0' && _unlockedWhileOff) _exitedSincePark = true;
           addEvent('trunk_open',  'Porta-malas aberta');
           sendPush('🧳 Porta-malas aberta', 'Verifique se está segura.', 'trunk_open');
         } else {
@@ -6814,6 +7458,9 @@ function applyGwmEntity(id, value, isRetained = false) {
         const side = field.slice(5);
         const label = DOOR_NAMES[side] || side.toUpperCase();
         if (norm === 'on') {
+          // Saída confirmada: porta do MOTORISTA (fl) com motor desligado, OU
+          // qualquer porta quando o carro foi destrancado com o motor já parado.
+          if (state.engine_state === '0' && (side === 'fl' || _unlockedWhileOff)) _exitedSincePark = true;
           _lastDoorOpenMs = Date.now();
           // Trava de segurança da pré-clima: porta aberta = motorista entrou →
           // cancela o desligamento remoto (esta via, applyGwmEntity, é a que roda
@@ -6827,6 +7474,9 @@ function applyGwmEntity(id, value, isRetained = false) {
         }
       }
     }
+    // Trava/portas mudaram → reavalia a LA de "veículo desprotegido". (AC não é
+    // problema de segurança, mas o eval ignora — chamar é idempotente.)
+    if (field !== 'ac_state') _evalSecurityAlert();
     return;
   }
 
@@ -6841,6 +7491,7 @@ function applyGwmEntity(id, value, isRetained = false) {
       if (norm === 'on') addEvent('window_open',  `${label} aberto`);
       else               addEvent('window_close', `${label} fechado`);
     }
+    _evalSecurityAlert();
     return;
   }
 
@@ -6853,6 +7504,7 @@ function applyGwmEntity(id, value, isRetained = false) {
       if (norm === 'on') addEvent('sunroof_open',  'Teto solar aberto');
       else               addEvent('sunroof_close', 'Teto solar fechado');
     }
+    _evalSecurityAlert();
     return;
   }
 
@@ -6862,6 +7514,7 @@ function applyGwmEntity(id, value, isRetained = false) {
     state.engine_state = value;
     if (!isRetained && prev !== undefined && prev !== null && prev !== value) {
       if (value === '1') {
+        _exitedSincePark = false; _unlockedWhileOff = false;   // voltou/dirigindo → rearma o portão
         addEvent('engine_on',  'Motor ligado');
         sendPush('🔑 Motor ligado',  'O veículo foi ligado.', 'engine_on');
         checkRefuelOnEngineOn();
@@ -6883,6 +7536,9 @@ function applyGwmEntity(id, value, isRetained = false) {
         _resetTyreTrip();
       }
     }
+    // Estacionou/ligou → reavalia a LA de "veículo desprotegido" (só dispara
+    // estacionado; ligar o motor encerra a LA se estava ativa).
+    _evalSecurityAlert();
     return;
   }
 
@@ -7097,6 +7753,16 @@ function applyMqttMessage(key, value, isRetained = false) {
     case 'hvac_sync_enable':    state.hvac_sync_enable    = value; break; // '0'|'1'
     case 'hvac_auto_enable':    state.hvac_auto_enable    = value; break; // '0'|'1'
     case 'hvac_ac_enable':      state.hvac_ac_enable      = value; break; // '0'|'1' — car.hvac.ac_enable
+    case 'hvac_acmax':          state.hvac_acmax          = value; break; // '0'|'1' — resfriamento máximo
+    case 'hvac_anion':          state.hvac_anion          = value; break; // '0'|'1' — ionizador
+    case 'hvac_aqs':            state.hvac_aqs            = value; break; // '0'|'1' — recirc. autom. qualidade do ar
+    case 'hvac_heating':        state.hvac_heating        = value; break; // '0'|'1' — aquecimento
+    case 'hvac_front_defrost':  state.hvac_front_defrost  = value; break; // '0'|'1'
+    case 'hvac_rear_defrost':   state.hvac_rear_defrost   = value; break; // '0'|'1'
+    case 'hvac_auto_defrost':   state.hvac_auto_defrost   = value; break; // '0'|'1'
+    case 'hvac_pm25':           state.hvac_pm25           = value; break; // µg/m³ (leitura)
+    case 'hvac_blower_mode':    state.hvac_blower_mode    = value; break; // 0..4 direção do sopro
+    case 'hvac_power_mode':     state.hvac_power_mode     = value; break; // 0=AC off (mestre) | 1=on
     case 'door_fl':
     case 'door_fr':
     case 'door_rl':
@@ -7332,6 +7998,10 @@ function applyMqttMessage(key, value, isRetained = false) {
         if (elapsedH > 0.0167 && deltaKwh > 0.1) {
           state.charge_avg_power_kw = +(deltaKwh / elapsedH).toFixed(2);
         }
+        // Janela de potência (60s) + recálculo do nosso ETA.
+        if (p > 0.3) _chargePwrWin.push({ ts: Date.now(), kw: p });
+        _recalcChargeEta();
+        state.charge_remaining_min = chargeEtaMin();   // sobrescreve o valor travado do carro
         // ── Alerta carga desacelera ──────────────────────────────────────────
         // Rastreia pico da sessão e detecta queda >30% sustentada por 5+ min.
         if (p > _chargePeakKw) _chargePeakKw = p;
@@ -7372,14 +8042,18 @@ function applyMqttMessage(key, value, isRetained = false) {
         state.charge_max_power_kw      = 0;
         state.charge_avg_power_kw      = 0;
         _chargeTempSamples             = [];
+        _chargeFinalKwh                = 0;
+        _chargePwrWin = []; _chargeEtaMin = 0;
         addEvent('charge_start', `Recarga iniciada · SOC: ${chargeStartSoc.toFixed(0)}%`);
       }
       state.charge_session_kwh = newKwh;
+      // Guarda o maior kWh da sessão (só cresce) p/ a LA final não cair pra 0.
+      if (state.charging_state === 'Carregando' && newKwh > _chargeFinalKwh) _chargeFinalKwh = newKwh;
       break;
     }
     case 'charge_remaining_min': {
-      const rem = num(value);
-      state.charge_remaining_min = rem;
+      // Ignoramos o valor do carro (trava em ~5min) — usamos NOSSO ETA.
+      const rem = chargeEtaMin();
       // Dispara notificação quando threshold atingido — apenas uma vez por sessão
       // (chargeEndingNotifSent só é resetado quando charging_state sai de 'Carregando')
       // Charge_ending: threshold pra disparar é o MÍNIMO entre todos os devices.

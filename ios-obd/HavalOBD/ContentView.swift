@@ -14,6 +14,7 @@ struct SettingsView: View {
     @State private var copiedFeedback = false
     @State private var bridgePassword: String = ""
     @State private var bridgeTotp: String = ""
+    @AppStorage("hazardIntervalSec") private var hazardIntervalSec: Double = 2.0
 
     var body: some View {
         NavigationStack {
@@ -132,6 +133,19 @@ struct SettingsView: View {
                                             publisher.lanTestResult.hasPrefix("⏳") ? .secondary : .orange)
                     }
                     Text("Use isso se o descobrimento automático (mDNS) não funcionar. Pegue o IP no APK do carro (Settings → Servidor LAN).")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+
+                Section("Pisca-alerta (4 setas)") {
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Text("Intervalo")
+                            Spacer()
+                            Text(String(format: "%.1f s", hazardIntervalSec)).foregroundStyle(.secondary)
+                        }
+                        Slider(value: $hazardIntervalSec, in: 0.1...5.0, step: 0.1)
+                    }
+                    Text("Tempo entre cada troca (0/1) do pisca. O botão flutuante fica no mapa do cluster — toque pra ligar/desligar, arraste pra reposicionar.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
 

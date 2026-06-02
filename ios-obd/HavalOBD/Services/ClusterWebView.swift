@@ -19,6 +19,8 @@ struct ClusterWebView: UIViewRepresentable {
     @EnvironmentObject var elm: ELM327
     @EnvironmentObject var channel: OBDBridgeChannel
     @EnvironmentObject var publisher: BridgePublisher
+    // Intervalo do pisca-alerta (Config do iPad) — injetado no JS como window._hazardIntervalMs.
+    @AppStorage("hazardIntervalSec") private var hazardIntervalSec: Double = 2.0
 
     func makeCoordinator() -> Coordinator { Coordinator(channel: channel, publisher: publisher) }
 
@@ -66,7 +68,9 @@ struct ClusterWebView: UIViewRepresentable {
     }
 
     func updateUIView(_ webView: WKWebView, context: Context) {
-        // No-op — atualizações são via OBDBridgeChannel.
+        // Propaga o intervalo do pisca-alerta (muda quando o slider da Config muda).
+        let ms = Int((hazardIntervalSec * 1000).rounded())
+        webView.evaluateJavaScript("window._hazardIntervalMs = \(ms);", completionHandler: nil)
     }
 
     final class Coordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
@@ -90,6 +94,10 @@ struct ClusterWebView: UIViewRepresentable {
             // Comandos drive (POST HTTP no bridge, mesmo padrão do PWA)
             case "drive_mode_set":
                 Task { await publisher.postCommand(path: "/api/drive-mode", body: ["mode": Int(value) ?? 0]) }
+            case "power_reserve_set":   // sub-modo HEV: 1=inteligente, 2=prioritário
+                Task { await publisher.postCommand(path: "/api/power-reserve", body: ["mode": Int(value) ?? 1]) }
+            case "charge_soc_target_set":   // % de bateria a preservar (20..80)
+                Task { await publisher.postCommand(path: "/api/charge-soc-target", body: ["pct": Int(value) ?? 50]) }
             case "terrain_mode_set":
                 Task { await publisher.postCommand(path: "/api/terrain-mode", body: ["mode": Int(value) ?? 0]) }
             case "regen_level_set":
@@ -103,6 +111,19 @@ struct ClusterWebView: UIViewRepresentable {
             case "hvac_ac":
                 // Bridge tem /api/hvac/:control que espera body.value (string '0' ou '1')
                 Task { await publisher.postCommand(path: "/api/hvac/ac_enable", body: ["value": value]) }
+            case "hvac_set":
+                // Menu de AC: control vem em dict["control"], valor em value.
+                let control = (dict["control"] as? String) ?? ""
+                if !control.isEmpty {
+                    Task { await publisher.postCommand(path: "/api/hvac/\(control)", body: ["value": value]) }
+                }
+            case "hvac_power":
+                // ON/OFF inteligente (APK guarda o fan anterior). value = "0" | "1".
+                Task { await publisher.postCommand(path: "/api/hvac/power", body: ["value": value]) }
+            case "hazard":
+                // Pisca-alerta (4 setas): alterna car.light_setting.sport_mode_light.
+                // O cluster chama a cada ~1s com value "0"/"1".
+                Task { await publisher.postCommand(path: "/api/hazard", body: ["value": value]) }
             case "open_nav":
                 let app = (dict["app"] as? String ?? "waze").lowercased()
                 let schemes: [String: String] = [
@@ -127,6 +148,10 @@ struct ClusterWebView: UIViewRepresentable {
                 if let err = err { print("[obd-bridge] add('native') erro: \(err)") }
                 else { print("[obd-bridge] body.native injetado via Swift") }
             }
+            // Intervalo do pisca-alerta (Config do iPad) — injeta após carregar.
+            let hzSec = UserDefaults.standard.object(forKey: "hazardIntervalSec") as? Double ?? 2.0
+            let hzMs = Int((hzSec * 1000).rounded())
+            webView.evaluateJavaScript("window._hazardIntervalMs = \(hzMs);", completionHandler: nil)
             // INJEÇÃO DO BRIDGE — feita aqui (não via WKUserScript) pra
             // funcionar com loadFileURL.
             let initJs = """

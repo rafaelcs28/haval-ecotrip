@@ -651,7 +651,7 @@
   <!-- Painel "Linha do tempo" — gráficos + scrubber. Sobrescreve mf-bottom quando ativo. -->
   <div class="timeline-panel" id="timeline-panel">
     <div class="tl-hdr">
-      <span class="tl-ti">📊 Linha do tempo <small style="opacity:.4;font-size:9px">v449</small></span>
+      <span class="tl-ti">📊 Linha do tempo <small style="opacity:.4;font-size:9px">v450</small></span>
       <span class="tl-current" id="tl-dist">--</span>
       <span class="tl-current" id="tl-time">--</span>
       <button class="tl-close" onclick="toggleTimeline()">×</button>
@@ -34007,7 +34007,12 @@ function renderTimelineCharts(t) {
   let _accKwh = 0;
   for (let i = 0; i < samples.length; i++) {
     if (i > 0) {
-      const dtSec = Math.max(0, (samples[i].t || 0) - (samples[i-1].t || 0));
+      const rawDt = (samples[i].t || 0) - (samples[i-1].t || 0);
+      // Gap grande = carro DESLIGADO entre trechos (resume). Não há energia
+      // fluindo no buraco; integrar a potência instantânea ao longo de minutos
+      // gerava um salto espúrio (ex.: -1.3 kW × 528 s = -0.19 kWh de uma vez,
+      // fazendo o acumulado "cair e recomeçar"). Mesmo guard do backend (<30s).
+      const dtSec = (rawDt > 0 && rawDt < 30) ? rawDt : 0;
       const kw    = +samples[i].kw || 0;
       _accKwh += kw * (dtSec / 3600);   // kWh = kW × horas
     }

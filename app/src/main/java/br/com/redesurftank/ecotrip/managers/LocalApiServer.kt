@@ -179,7 +179,7 @@ class LocalApiServer(
                 """{"ok":false,"error":"json inválido: ${e.message}"}""")
         }
 
-        if (cmd !in ALLOWED_COMMANDS) {
+        if (cmd !in ALLOWED_COMMANDS && !cmd.startsWith("hvac/")) {
             return newFixedLengthResponse(Response.Status.BAD_REQUEST, "application/json",
                 """{"ok":false,"error":"comando desconhecido: $cmd"}""")
         }
@@ -230,9 +230,9 @@ class LocalApiServer(
                 @Suppress("UNCHECKED_CAST")
                 val map = gson.fromJson(txt, Map::class.java) as? Map<String, Any?> ?: return
                 val cmd = map["__cmd"]?.toString() ?: return
-                val value = (map["value"] ?: map["enable"] ?: map["mode"] ?: map["level"])
+                val value = (map["value"] ?: map["enable"] ?: map["mode"] ?: map["level"] ?: map["pct"])
                     ?.toString()?.trim()?.removeSuffix(".0") ?: ""
-                if (cmd in ALLOWED_COMMANDS) {
+                if (cmd in ALLOWED_COMMANDS || cmd.startsWith("hvac/")) {
                     Log.i(TAG, "comando via WS: $cmd = '$value'")
                     mqttManager.dispatchLocalCommand(cmd, value)
                 }
@@ -288,9 +288,26 @@ class LocalApiServer(
             "hvac_driver_temp"  to m.latestHvacDriverTemp,
             "hvac_passenger_temp" to m.latestHvacPassengerTemp,
             "hvac_fan_speed"    to m.latestHvacFanSpeed,
+            "hvac_sync_enable"  to m.latestHvacSyncEnable,
+            "hvac_auto_enable"  to m.latestHvacAutoEnable,
+            "hvac_cycle_mode"   to m.latestHvacCycleMode,
+            "hvac_acmax"        to m.latestHvacAcMax,
+            "hvac_anion"        to m.latestHvacAnion,
+            "hvac_aqs"          to m.latestHvacAqs,
+            "hvac_heating"      to m.latestHvacHeating,
+            "hvac_front_defrost" to m.latestHvacFrontDefrost,
+            "hvac_rear_defrost" to m.latestHvacRearDefrost,
+            "hvac_auto_defrost" to m.latestHvacAutoDefrost,
+            "hvac_pm25"         to m.latestHvacPm25,
+            "hvac_blower_mode"  to m.latestHvacBlowerMode,
+            "hvac_power_mode"   to m.latestHvacPowerMode,
+            "seat_vent_drv"     to m.latestDriverSeatVent,
+            "seat_vent_pass"    to m.latestPassengerSeatVent,
             // ── Estados dos controles drive (confirmação visual rápida) ──
             // -1 = ainda não lido do carro → null pra não sobrescrever.
             "drive_mode"        to m.lastPublishedDriveMode.takeIf { it >= 0 },
+            "power_reserve"     to m.lastPublishedPowerReserve.takeIf { it >= 0 },   // 1=intel., 2=prior.
+            "charge_soc_target" to m.lastPublishedSocTarget.takeIf { it >= 0 },      // % a preservar
             "terrain_mode"      to m.lastPublishedTerrainMode.takeIf { it >= 0 },
             "regen_level"       to m.lastPublishedRegenLevel.takeIf { it >= 0 },
             "steer_mode"        to m.lastPublishedSteerMode.takeIf { it >= 0 },
@@ -319,6 +336,8 @@ class LocalApiServer(
         val SET = setOf(
             "esp", "one_pedal", "drive_mode", "terrain_mode",
             "regen_level", "steer_mode", "charge_limit", "hf_mode",
+            "power_reserve", "charge_soc_target",   // sub-modo HEV (iPad)
+            "hazard",   // pisca-alerta (4 setas) — alterna car.light_setting.sport_mode_light
         )
     }
 }

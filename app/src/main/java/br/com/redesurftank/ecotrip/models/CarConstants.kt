@@ -83,6 +83,16 @@ enum class CarConstants(val value: String) {
     CAR_HVAC_AUTO_ENABLE("car.hvac.auto_enable"),       // 0=off, 1=on
     CAR_HVAC_AC_ENABLE("car.hvac.ac_enable"),           // 0=off, 1=on (master AC)
     CAR_HVAC_CYCLE_MODE("car.hvac.cycle_mode"),         // 0=recirculação interna, 1=ar externo
+    CAR_HVAC_ACMAX_ENABLE("car.hvac.acmax_enable"),         // 0=off, 1=on (resfriamento máximo)
+    CAR_HVAC_ANION_ENABLE("car.hvac.anion_enable"),         // 0=off, 1=on (ionizador)
+    CAR_HVAC_AQS_ENABLE("car.hvac.aqs_enable"),             // 0=off, 1=on (recirc. autom. por qualidade do ar)
+    CAR_HVAC_HEATING_ENABLE("car.hvac.heating_enable"),     // 0=off, 1=on (aquecimento)
+    CAR_HVAC_FRONT_DEFROST_ENABLE("car.hvac.front_defrost_enable"),  // 0=off, 1=on
+    CAR_HVAC_REAR_DEFROST_ENABLE("car.hvac.rear_defrost_enable"),    // 0=off, 1=on
+    CAR_HVAC_AUTO_DEFROST_ENABLE("car.hvac.setting.auto_defrost_enable"), // 0=off, 1=on
+    CAR_HVAC_PM25_VALUE("car.hvac.pm2.5_value"),            // µg/m³ (leitura — qualidade do ar)
+    CAR_HVAC_BLOWER_MODE("car.hvac.blower_mode"),           // 0=frente,1=frente+pés,2=pés,3=pés+parabrisa,4=parabrisa
+    CAR_HVAC_POWER_MODE("car.hvac.power_mode"),             // 0=AC desligado (mestre) | 1=ligado
 
     // Body — portas, vidros, trava, teto solar
     // door_lock_status: status da trava (semântica do valor a confirmar — assumimos 0=trancado, 1=destrancado)
