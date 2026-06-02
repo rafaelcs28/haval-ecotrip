@@ -122,6 +122,21 @@ function unregisterActivity(activityId) {
   if (updateTokens.length !== before) _save();
 }
 
+// Existe alguma LA viva (token de update) desse tipo? Usado pra decidir entre
+// criar (pushStart) e atualizar (pushUpdate) — robusto a restart/redelivery.
+function hasUpdateToken(type) {
+  return updateTokens.some(t => t.type === type);
+}
+
+// Limpa os tokens de update de um tipo (chamar quando a LA daquele tipo encerra,
+// pra que a próxima sessão recrie a LA via pushStart).
+function clearUpdateTokensByType(type) {
+  if (!enabled) return;
+  const before = updateTokens.length;
+  updateTokens = updateTokens.filter(t => t.type !== type);
+  if (updateTokens.length !== before) _save();
+}
+
 // Token de notificação de alerta (remote notification "normal").
 function registerAlertToken(deviceId, tokenHex) {
   if (!enabled || !tokenHex) return;
@@ -233,6 +248,7 @@ async function pushAlert(title, body, opts = {}) {
 
 module.exports = {
   init, registerStartToken, registerUpdateToken, unregisterActivity, registerAlertToken,
+  hasUpdateToken, clearUpdateTokensByType,
   pushStart, pushUpdate, pushAlert, tokenCount,
   get enabled() { return enabled; },
 };

@@ -133,6 +133,12 @@ final class ConfigStore: ObservableObject {
 
     func setChargeLimit(_ pct: Int) async { await send("/api/charge-limit", "POST", ["pct": pct]) }
 
+    /// Reativa as Live Activities em andamento (recria as que travaram, sem reiniciar o bridge).
+    func relaunchLA() async {
+        if let (c, _) = await send("/api/la/relaunch", "POST", [:]), c == 200 { toast = "✓ Live Activities reativadas" }
+        else { toast = "✗ Falha ao reativar" }
+    }
+
     func generatePair() async {
         if let (c, d) = await send("/api/pair/generate", "POST", [:]), c == 200 {
             pairCode = (obj(d)["code"] as? String) ?? (obj(d)["pairCode"] as? String)

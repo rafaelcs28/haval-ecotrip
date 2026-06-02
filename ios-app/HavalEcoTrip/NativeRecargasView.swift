@@ -90,13 +90,15 @@ final class ChargesLoader: ObservableObject {
         r.httpBody = try? JSONSerialization.data(withJSONObject: body)
         _ = try? await URLSession.shared.data(for: r)
     }
-    /// Edita o MEDIDOR do carregador (charger_kwh) e/ou o custo total.
-    /// perKwh do custo é calculado sobre a energia que entrou na bateria.
-    func edit(_ ts: Double, charger: Double?, total: Double?, batteryKwh: Double) async {
+    /// Edita o MEDIDOR (charger_kwh), o custo total e/ou o local da recarga.
+    func edit(_ ts: Double, charger: Double?, total: Double?, location: String?, batteryKwh: Double) async {
         let id = Int(ts)
         if let charger, charger >= 0 { await patch("/api/charges/\(id)/charger_kwh", ["charger_kwh": charger]) }
         if let total, total >= 0 {
             await patch("/api/charges/\(id)/cost", ["total": total, "per_kwh": batteryKwh > 0 ? total / batteryKwh : 0])
+        }
+        if let location, !location.isEmpty {
+            await patch("/api/charges/\(id)/location", ["name": location, "save_known": true])
         }
         await load()
     }
@@ -291,9 +293,9 @@ struct NativeRecargasView: View {
                         Text("Medidor: \(f1(c.chargerKwh)) kWh · entrou \(f1(c.kwh)) kWh · perda \(f1(c.lossKwh)) kWh (\(f0(c.lossPct))%)")
                             .font(.caption2).foregroundStyle(DS.muted)
                     }
-                    ChargeEditFields(meter: c.chargerKwh, total: c.costTotal) { m, t in
+                    ChargeEditFields(meter: c.chargerKwh, total: c.costTotal, location: c.location == "Local desconhecido" ? "" : c.location) { m, t, loc in
                         Task {
-                            await loader.edit(c.id, charger: m, total: t, batteryKwh: c.kwh)
+                            await loader.edit(c.id, charger: m, total: t, location: loc, batteryKwh: c.kwh)
                             withAnimation { expandedCharge = nil }
                             toast = "Recarga salva ✓"
                         }
@@ -467,28 +469,31 @@ struct NativeRecargasView: View {
 private struct ChargeEditFields: View {
     let meter: Double
     let total: Double
-    let onSave: (Double?, Double?) -> Void
+    let location: String
+    let onSave: (Double?, Double?, String?) -> Void
     @State private var m = ""
     @State private var t = ""
+    @State private var loc = ""
     @State private var loaded = false
 
     var body: some View {
         VStack(spacing: 8) {
             HStack(spacing: 8) {
-                field("Medidor (kWh)", $m)
-                field("Custo total (R$)", $t)
+                field("Medidor (kWh)", $m, .decimalPad)
+                field("Custo total (R$)", $t, .decimalPad)
             }
-            Button { onSave(Double(m.replacingOccurrences(of: ",", with: ".")), Double(t.replacingOccurrences(of: ",", with: "."))) } label: {
+            field("Local", $loc, .default)
+            Button { onSave(Double(m.replacingOccurrences(of: ",", with: ".")), Double(t.replacingOccurrences(of: ",", with: ".")), loc) } label: {
                 Text("Salvar").font(.system(size: 14, weight: .bold)).frame(maxWidth: .infinity).frame(height: 42)
                     .foregroundStyle(.black).background(DS.green).clipShape(RoundedRectangle(cornerRadius: 11))
             }
         }
-        .onAppear { if !loaded { m = meter > 0 ? String(format: "%.2f", meter) : ""; t = total > 0 ? String(format: "%.2f", total) : ""; loaded = true } }
+        .onAppear { if !loaded { m = meter > 0 ? String(format: "%.2f", meter) : ""; t = total > 0 ? String(format: "%.2f", total) : ""; loc = location; loaded = true } }
     }
-    private func field(_ ph: String, _ text: Binding<String>) -> some View {
+    private func field(_ ph: String, _ text: Binding<String>, _ kb: UIKeyboardType) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(ph.uppercased()).font(.system(size: 9, weight: .semibold)).foregroundStyle(DS.muted)
-            TextField(ph, text: text).keyboardType(.decimalPad).foregroundStyle(DS.text)
+            TextField(ph, text: text).keyboardType(kb).foregroundStyle(DS.text)
                 .padding(9).background(DS.panel2).clipShape(RoundedRectangle(cornerRadius: 9))
                 .overlay(RoundedRectangle(cornerRadius: 9).stroke(DS.border, lineWidth: 1))
         }

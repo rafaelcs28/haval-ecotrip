@@ -6327,8 +6327,11 @@ function handleTripUpdate(ct, isRetained) {
     const cs = _tripContentState(ct, true);
     if (!_tripActive) {
       _tripActive = true;
-      if (isRetained) {
-        // Redelivery: a LA já existe (token de update persistido) — só atualiza.
+      // Decide CRIAR (pushStart) vs ATUALIZAR (pushUpdate) pela existência de uma
+      // LA viva (token de update), não pelo `isRetained`. Antes, após restart do
+      // bridge no meio da viagem, a mensagem retida só atualizava e a LA nunca era
+      // criada → nenhuma LA aparecia. iOS dedupa pushStart se já houver LA viva.
+      if (apnsLive.hasUpdateToken(TRIP_LA_TYPE)) {
         apnsLive.pushUpdate(TRIP_LA_TYPE, {}, cs, {}).catch(() => {});
       } else {
         apnsLive.pushStart(TRIP_LA_TYPE, '', { carName: 'Haval H6 PHEV' }, cs,
@@ -6346,6 +6349,8 @@ function handleTripUpdate(ct, isRetained) {
     _lastTripSnapshot = null;
     apnsLive.pushUpdate(TRIP_LA_TYPE, {}, last, { isFinal: true, dismissalDate: Date.now() + 5 * 60_000 })
       .catch(e => console.warn('[apns] trip end falhou:', e.message));
+    // Próxima viagem recria a LA do zero (não fica presa num token de LA morta).
+    apnsLive.clearUpdateTokensByType(TRIP_LA_TYPE);
   }
 }
 
@@ -7012,10 +7017,16 @@ function handleChargingStateTransition(value, isRetained) {
     // Cria a Live Activity de recarga via push-to-start (app fechado/bloqueado).
     // O alert é necessário pra apresentar a LA; o timer de live update mantém ela
     // atualizada e o fim encerra com sendChargeLiveUpdate(true).
-    if (apnsLive.enabled && !isRetained && notifPrefs.la_charge !== false) {
-      apnsLive.pushStart('ChargeActivityAttributes', '', { carName: 'Haval H6 PHEV' }, _chargeContentState(),
-        { staleDate: Date.now() + 3600_000, alert: { title: '⚡ Recarga iniciada', body: 'Acompanhe o progresso na tela bloqueada.' } })
-        .catch(e => console.warn('[apns] charge pushStart falhou:', e.message));
+    if (apnsLive.enabled && notifPrefs.la_charge !== false) {
+      // Cria a LA só se não houver uma viva (robusto a restart/redelivery — antes
+      // o !isRetained impedia a criação após restart no meio da recarga).
+      if (apnsLive.hasUpdateToken('ChargeActivityAttributes')) {
+        apnsLive.pushUpdate('ChargeActivityAttributes', {}, _chargeContentState(), {}).catch(() => {});
+      } else {
+        apnsLive.pushStart('ChargeActivityAttributes', '', { carName: 'Haval H6 PHEV' }, _chargeContentState(),
+          { staleDate: Date.now() + 3600_000, alert: { title: '⚡ Recarga iniciada', body: 'Acompanhe o progresso na tela bloqueada.' } })
+          .catch(e => console.warn('[apns] charge pushStart falhou:', e.message));
+      }
     }
     if (!isRetained) {
       // Aguarda 30s para a potência estabilizar antes de notificar
@@ -7038,6 +7049,9 @@ function handleChargingStateTransition(value, isRetained) {
   } else if (prev === 'Carregando') {
     if (chargeStartTimer) { clearTimeout(chargeStartTimer); chargeStartTimer = null; }
     chargeEndingNotifSent = false;       // reset para próxima sessão
+    // Recarga encerrou: limpa o token de update da LA com folga (deixa o update
+    // final ser entregue) pra que a PRÓXIMA recarga recrie a LA do zero.
+    setTimeout(() => apnsLive.clearUpdateTokensByType('ChargeActivityAttributes'), 60_000);
     const endSoc = state.soc_pct || 0;
     addEvent('charge_end', `Recarga concluída · SOC: ${chargeStartSoc.toFixed(0)}% → ${endSoc.toFixed(0)}%`);
     // Calcula temperatura média da sessão encerrada

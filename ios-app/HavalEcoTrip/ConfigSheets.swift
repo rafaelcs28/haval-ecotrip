@@ -74,6 +74,12 @@ struct NotificationsSheet: View {
                             ForEach(laItems, id: \.0) { k, label in
                                 Toggle(label, isOn: Binding(get: { cfg.laPrefs[k] ?? true }, set: { v in Task { await cfg.setLa(k, v) } })).tint(DS.green).font(.system(size: 14))
                             }
+                            Divider().overlay(DS.border)
+                            Button { Task { await cfg.relaunchLA() } } label: {
+                                Label("Reativar Live Activities", systemImage: "arrow.clockwise").font(.system(size: 14, weight: .semibold))
+                                    .frame(maxWidth: .infinity).frame(height: 42).foregroundStyle(.black).background(DS.green).clipShape(RoundedRectangle(cornerRadius: 11))
+                            }
+                            Text("Use se uma viagem/recarga em andamento não mostrou o card.").font(.caption2).foregroundStyle(DS.muted)
                         }
                     }
                     ForEach(groups, id: \.title) { g in
