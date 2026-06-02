@@ -46,6 +46,9 @@ struct Charge: Identifiable {
     var costTotal: Double { (cost("cost_override") ?? cost("cost"))?.0 ?? 0 }
     var costPerKwh: Double { (cost("cost_override") ?? cost("cost"))?.1 ?? 0 }
     var isCharge: Bool { kwh > 0 }
+    /// Perda: (medidor − energia na bateria) / medidor. Só com medidor lançado.
+    var lossKwh: Double { max(0, chargerKwh - kwh) }
+    var lossPct: Double { chargerKwh > 0 ? lossKwh / chargerKwh * 100 : 0 }
 }
 
 // MARK: - Loader
@@ -87,13 +90,13 @@ final class ChargesLoader: ObservableObject {
         r.httpBody = try? JSONSerialization.data(withJSONObject: body)
         _ = try? await URLSession.shared.data(for: r)
     }
-    /// Edita energia medida (kWh na bateria) e/ou custo total. perKwh = total/energia.
-    func edit(_ ts: Double, energy: Double?, total: Double?) async {
+    /// Edita o MEDIDOR do carregador (charger_kwh) e/ou o custo total.
+    /// perKwh do custo é calculado sobre a energia que entrou na bateria.
+    func edit(_ ts: Double, charger: Double?, total: Double?, batteryKwh: Double) async {
         let id = Int(ts)
-        if let energy, energy >= 0 { await patch("/api/charges/\(id)/edit", ["energy_kwh": energy]) }
+        if let charger, charger >= 0 { await patch("/api/charges/\(id)/charger_kwh", ["charger_kwh": charger]) }
         if let total, total >= 0 {
-            let e = energy ?? 0
-            await patch("/api/charges/\(id)/cost", ["total": total, "per_kwh": e > 0 ? total / e : 0])
+            await patch("/api/charges/\(id)/cost", ["total": total, "per_kwh": batteryKwh > 0 ? total / batteryKwh : 0])
         }
         await load()
     }
@@ -274,11 +277,11 @@ struct NativeRecargasView: View {
                         if c.avgPowerKw > 0 { miniLabel("Potência média", "\(f1(c.avgPowerKw)) kW") }
                     }
                     if c.chargerKwh > 0 {
-                        Text("Carregador: \(f1(c.chargerKwh)) kWh · perdas \(f1(max(0, c.chargerKwh - c.kwh))) kWh")
+                        Text("Medidor: \(f1(c.chargerKwh)) kWh · entrou \(f1(c.kwh)) kWh · perda \(f1(c.lossKwh)) kWh (\(f0(c.lossPct))%)")
                             .font(.caption2).foregroundStyle(DS.muted)
                     }
-                    ChargeEditFields(energy: c.kwh, total: c.costTotal) { e, t in
-                        Task { await loader.edit(c.id, energy: e, total: t) }
+                    ChargeEditFields(meter: c.chargerKwh, total: c.costTotal) { m, t in
+                        Task { await loader.edit(c.id, charger: m, total: t, batteryKwh: c.kwh) }
                     }
                 }
             }
@@ -349,20 +352,33 @@ struct NativeRecargasView: View {
     }
 
     private func locationsCard(_ f: [Charge]) -> some View {
-        var map: [String: (Double, Double, Int)] = [:]
+        struct Agg { var kwh = 0.0; var charger = 0.0; var cost = 0.0; var count = 0 }
+        var map: [String: Agg] = [:]
         for c in f {
-            let p = map[c.location] ?? (0, 0, 0)
-            map[c.location] = (p.0 + c.kwh, p.1 + c.costTotal, p.2 + 1)
+            var a = map[c.location] ?? Agg()
+            a.kwh += c.kwh; a.charger += c.chargerKwh; a.cost += c.costTotal; a.count += 1
+            map[c.location] = a
         }
-        let rows = map.sorted { $0.value.0 > $1.value.0 }.prefix(6)
-        return DSCard(title: "Por local", icon: "mappin.and.ellipse") {
-            VStack(spacing: 10) {
-                ForEach(Array(rows), id: \.key) { loc, v in
-                    HStack {
-                        Text(loc).font(.system(size: 14, weight: .medium)).foregroundStyle(DS.text).lineLimit(1)
-                        Spacer()
-                        Text("\(v.2)× · \(f0(v.0)) kWh").font(.caption).foregroundStyle(DS.muted)
-                        Text(brl(v.1)).font(.system(size: 13, weight: .semibold)).foregroundStyle(DS.text).frame(minWidth: 72, alignment: .trailing)
+        let rows = map.sorted { $0.value.kwh > $1.value.kwh }.prefix(8)
+        return DSCard(title: "Por carregador", icon: "mappin.and.ellipse") {
+            VStack(spacing: 12) {
+                ForEach(Array(rows), id: \.key) { loc, a in
+                    let loss = a.charger > 0 ? (a.charger - a.kwh) / a.charger * 100 : 0
+                    VStack(spacing: 3) {
+                        HStack {
+                            Text(loc).font(.system(size: 14, weight: .semibold)).foregroundStyle(DS.text).lineLimit(1)
+                            Spacer()
+                            Text(brl(a.cost)).font(.system(size: 13, weight: .semibold)).foregroundStyle(DS.text)
+                        }
+                        HStack(spacing: 10) {
+                            Text("\(a.count)×").font(.caption2).foregroundStyle(DS.muted)
+                            Text("bateria \(f1(a.kwh)) kWh").font(.caption2).foregroundStyle(DS.green)
+                            if a.charger > 0 {
+                                Text("medidor \(f1(a.charger)) kWh").font(.caption2).foregroundStyle(DS.teal)
+                                Text("perda \(f0(loss))%").font(.caption2.weight(.bold)).foregroundStyle(loss > 15 ? DS.red : DS.orange)
+                            }
+                            Spacer()
+                        }
                     }
                 }
             }
@@ -434,25 +450,25 @@ struct NativeRecargasView: View {
 
 // Edição inline de uma recarga: medidor (kWh) + custo total.
 private struct ChargeEditFields: View {
-    let energy: Double
+    let meter: Double
     let total: Double
     let onSave: (Double?, Double?) -> Void
-    @State private var e = ""
+    @State private var m = ""
     @State private var t = ""
     @State private var loaded = false
 
     var body: some View {
         VStack(spacing: 8) {
             HStack(spacing: 8) {
-                field("Medidor (kWh)", $e)
+                field("Medidor (kWh)", $m)
                 field("Custo total (R$)", $t)
             }
-            Button { onSave(Double(e.replacingOccurrences(of: ",", with: ".")), Double(t.replacingOccurrences(of: ",", with: "."))) } label: {
+            Button { onSave(Double(m.replacingOccurrences(of: ",", with: ".")), Double(t.replacingOccurrences(of: ",", with: "."))) } label: {
                 Text("Salvar").font(.system(size: 14, weight: .bold)).frame(maxWidth: .infinity).frame(height: 42)
                     .foregroundStyle(.black).background(DS.green).clipShape(RoundedRectangle(cornerRadius: 11))
             }
         }
-        .onAppear { if !loaded { e = String(format: "%.2f", energy); t = total > 0 ? String(format: "%.2f", total) : ""; loaded = true } }
+        .onAppear { if !loaded { m = meter > 0 ? String(format: "%.2f", meter) : ""; t = total > 0 ? String(format: "%.2f", total) : ""; loaded = true } }
     }
     private func field(_ ph: String, _ text: Binding<String>) -> some View {
         VStack(alignment: .leading, spacing: 3) {
