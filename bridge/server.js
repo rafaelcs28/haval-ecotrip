@@ -4233,7 +4233,12 @@ app.post('/api/autotrips', (req, res) => {
 
 app.get('/api/autotrips', (req, res) => {
   const since = parseInt(req.query.since || '0', 10);
-  const arr   = since > 0 ? autoTripsArr.filter(t => t.startMs > since) : autoTripsArr;
+  // Inclui também viagens ATUALIZADAS (rename, reprocessamento de locais) via
+  // _updated_ms — senão o sync incremental do app (que filtra por startMs) nunca
+  // recebe o nome novo de uma viagem antiga.
+  const arr   = since > 0
+    ? autoTripsArr.filter(t => (t.startMs || 0) > since || (t._updated_ms || 0) > since)
+    : autoTripsArr;
   if (Array.isArray(deletedIds.autotrips) && deletedIds.autotrips.length) {
     res.setHeader('X-Tombstones', deletedIds.autotrips.join(','));
     res.setHeader('Access-Control-Expose-Headers', 'X-Tombstones');
@@ -4399,9 +4404,9 @@ app.post('/api/rename', (req, res) => {
   const trimmed = name ? String(name).trim().slice(0, 80) : '';
 
   if (type === 'auto') {
-    // Atualiza array em memória
+    // Atualiza array em memória + marca _updated_ms (pro sync incremental do app).
     const t = autoTripsArr.find(r => r.tripId === String(tripId));
-    if (t) t.name = trimmed;
+    if (t) { t.name = trimmed; t._updated_ms = Date.now(); }
     // Atualiza arquivo do auto-trip
     const safeId   = String(tripId).replace(/\D/g, '');
     const filePath = path.join(AUTOTRIPS_DIR, `${safeId}.json`);
@@ -4410,6 +4415,7 @@ app.post('/api/rename', (req, res) => {
         const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
         data.autoTrip = data.autoTrip || {};
         data.autoTrip.name = trimmed;
+        data._updated_ms = Date.now();
         fs.writeFileSync(filePath, JSON.stringify(data));
       } catch (_) {}
     }
