@@ -150,6 +150,7 @@ struct NativeRecargasView: View {
     @AppStorage("rec_to") private var toTS: Double = 0
     @State private var showCal = false
     @State private var expandedCharge: Double?
+    @State private var toast: String?
 
     private var fromDate: Binding<Date> {
         Binding(get: { fromTS > 0 ? Date(timeIntervalSince1970: fromTS) : Date() }, set: { fromTS = $0.timeIntervalSince1970 })
@@ -209,6 +210,16 @@ struct NativeRecargasView: View {
         }
         .background(DS.bg.ignoresSafeArea())
         .overlay { if loader.loading && loader.charges.isEmpty { ProgressView().tint(DS.green) } }
+        .overlay(alignment: .bottom) {
+            if let t = toast {
+                Text(t).font(.system(size: 14, weight: .semibold)).foregroundStyle(DS.text)
+                    .padding(.horizontal, 18).padding(.vertical, 12).background(DS.panel2)
+                    .clipShape(Capsule()).overlay(Capsule().stroke(DS.border, lineWidth: 1))
+                    .padding(.bottom, 30).transition(.opacity)
+                    .task { try? await Task.sleep(nanoseconds: 2_000_000_000); toast = nil }
+            }
+        }
+        .animation(.easeInOut, value: toast)
         .refreshable { await loader.load(); await refLoader.load() }
         .task { if loader.charges.isEmpty { await loader.load() }; if refLoader.refuels.isEmpty { await refLoader.load() } }
     }
@@ -281,7 +292,11 @@ struct NativeRecargasView: View {
                             .font(.caption2).foregroundStyle(DS.muted)
                     }
                     ChargeEditFields(meter: c.chargerKwh, total: c.costTotal) { m, t in
-                        Task { await loader.edit(c.id, charger: m, total: t, batteryKwh: c.kwh) }
+                        Task {
+                            await loader.edit(c.id, charger: m, total: t, batteryKwh: c.kwh)
+                            withAnimation { expandedCharge = nil }
+                            toast = "Recarga salva ✓"
+                        }
                     }
                 }
             }
