@@ -15,6 +15,7 @@
 		1BC63D4315A2BB6BFAE49F0E /* BydRecargaWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 0275BC86719533522473C87B /* BydRecargaWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		2480E68526B78CFE04F2C37B /* TripActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = E612200FCE6AA9F646191052 /* TripActivityAttributes.swift */; };
 		253A6649A6A5B25C6DEBB140 /* HavalEcoTripWidgetBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F5328FAA367AE3DF93613BE /* HavalEcoTripWidgetBundle.swift */; };
+		2BBB45182185499D3B954868 /* LANDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA22E658C7AE7CB3679725CF /* LANDiscovery.swift */; };
 		31C4EEF5E7D54B74A2F8DCA1 /* SongProLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8667439515FC27589EEEDBC9 /* SongProLiveActivity.swift */; };
 		3ED1321FB7B61D7ADDAA032F /* DesignSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7376EEA5C86B0C60FE3CE4E3 /* DesignSystem.swift */; };
 		447016E58ECF062223D41618 /* TripActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = E612200FCE6AA9F646191052 /* TripActivityAttributes.swift */; };
@@ -146,6 +147,7 @@
 		D15756C1CEF1EFDD6804C05D /* SecurityActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecurityActivityAttributes.swift; sourceTree = "<group>"; };
 		D7A442E88C358C98CE318DF9 /* ControlSheets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ControlSheets.swift; sourceTree = "<group>"; };
 		D9926C58E001CD8511E829FB /* ActivityManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityManager.swift; sourceTree = "<group>"; };
+		DA22E658C7AE7CB3679725CF /* LANDiscovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LANDiscovery.swift; sourceTree = "<group>"; };
 		DD1B9E17C1177A48B806D3B9 /* BydRecargaWidgetBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BydRecargaWidgetBundle.swift; sourceTree = "<group>"; };
 		DFE9C8DD63C6163B5AF174C8 /* SecurityLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecurityLiveActivity.swift; sourceTree = "<group>"; };
 		E4593E338CE49445D2B4E37A /* Settings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Settings.swift; sourceTree = "<group>"; };
@@ -178,6 +180,7 @@
 				7BA445855D7E9BCBC513DE19 /* HavalEcoTrip.entitlements */,
 				B5A372CA99C89C5712EE54BC /* HavalEcoTripApp.swift */,
 				968AA8DFD87E74A832ED71A5 /* Info.plist */,
+				DA22E658C7AE7CB3679725CF /* LANDiscovery.swift */,
 				19F1EE1E1159233D66EEAFA8 /* LiveActivityPush.swift */,
 				4A804763C29A6FBD8871C5A7 /* LivePreview.swift */,
 				8036EB500E09B8F08A9EA755 /* MaintenanceStore.swift */,
@@ -454,6 +457,7 @@
 				07FC719000D999AB80CF8C4C /* ControlSheets.swift in Sources */,
 				3ED1321FB7B61D7ADDAA032F /* DesignSystem.swift in Sources */,
 				AACDCF32BF0A0A36A4A2F84F /* HavalEcoTripApp.swift in Sources */,
+				2BBB45182185499D3B954868 /* LANDiscovery.swift in Sources */,
 				4C94F890D15203640F57B31D /* LiveActivityPush.swift in Sources */,
 				E7A22E919521A94E9004D8F2 /* LivePreview.swift in Sources */,
 				9726912E15C4196ACF166260 /* MaintenanceStore.swift in Sources */,

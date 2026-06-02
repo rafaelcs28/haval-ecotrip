@@ -23,6 +23,9 @@ final class CarStore: ObservableObject {
     @Published private(set) var connected = false
     @Published private(set) var lastUpdate: Date?
     @Published private(set) var address: String = ""
+    /// LAN direta com o APK do carro ativa (mesma Wi-Fi). Overlay de telemetria
+    /// rápida + comandos sem passar pelo Mac mini.
+    @Published private(set) var lanConnected = false
 
     private let geocoder = CLGeocoder()
     private var lastGeoCoord: CLLocationCoordinate2D?
@@ -33,6 +36,11 @@ final class CarStore: ObservableObject {
     private var pollTask: Task<Void, Never>?
     private var reconnectDelay: TimeInterval = 1
     private var started = false
+
+    // LAN
+    private let lan = LANDiscovery()
+    private var lanWS: URLSessionWebSocketTask?
+    private var lanHostPort: (String, Int)?
 
     private var base: String {
         let u = Settings.bridgeURL.isEmpty ? AuthConfig.bridgeURL : Settings.bridgeURL
@@ -47,6 +55,12 @@ final class CarStore: ObservableObject {
         started = true
         connectWS()
         startPolling()
+        lan.onResolve = { [weak self] hostPort in
+            guard let self else { return }
+            if let hp = hostPort { self.connectLAN(host: hp.0, port: hp.1) }
+            else { self.disconnectLAN() }
+        }
+        lan.start()
     }
 
     func stop() {
@@ -54,6 +68,7 @@ final class CarStore: ObservableObject {
         ws?.cancel(with: .goingAway, reason: nil); ws = nil
         pollTask?.cancel(); pollTask = nil
         connected = false
+        lan.stop(); disconnectLAN()
     }
 
     // MARK: - WebSocket (ao vivo)
@@ -165,6 +180,95 @@ final class CarStore: ObservableObject {
             if !bairro.isEmpty { line = line.isEmpty ? bairro : "\(line) · \(bairro)" }
             Task { @MainActor in self?.address = line }
         }
+    }
+
+    // MARK: - LAN direta (ws://host:port/ws/state com o APK)
+
+    private func connectLAN(host: String, port: Int) {
+        if let cur = lanHostPort, cur.0 == host, cur.1 == port, lanWS != nil { return }
+        disconnectLAN()
+        lanHostPort = (host, port)
+        guard let url = URL(string: "ws://\(host):\(port)/ws/state") else { return }
+        let task = session.webSocketTask(with: url)
+        lanWS = task
+        task.resume()
+        lanReceive(task)
+    }
+
+    private func disconnectLAN() {
+        lanWS?.cancel(with: .goingAway, reason: nil); lanWS = nil
+        lanHostPort = nil
+        if lanConnected { lanConnected = false }
+    }
+
+    private func lanReceive(_ task: URLSessionWebSocketTask) {
+        task.receive { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success(let msg):
+                Task { @MainActor in
+                    self.lanConnected = true
+                    switch msg {
+                    case .string(let s): self.mergeLAN(s)
+                    case .data(let d):   self.mergeLAN(String(data: d, encoding: .utf8) ?? "")
+                    @unknown default: break
+                    }
+                    if self.lanWS === task { self.lanReceive(task) }
+                }
+            case .failure:
+                Task { @MainActor in
+                    if self.lanWS === task {
+                        self.lanConnected = false; self.lanWS = nil
+                        // tenta reabrir com o mesmo host (a descoberta segue ativa)
+                        if let hp = self.lanHostPort, self.started {
+                            try? await Task.sleep(nanoseconds: 2_000_000_000)
+                            if self.started, self.lanWS == nil { self.connectLAN(host: hp.0, port: hp.1) }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// O APK serve um SUBCONJUNTO RAW (sem GPS/fuel/trip). Sobrepõe só as chaves
+    /// de telemetria rápida com semântica idêntica à do cloud; remapeia as poucas
+    /// com nome diferente; ignora o resto (cloud continua dono).
+    private static let lanPassthrough: Set<String> = [
+        "speed_kmh", "motor_power_kw", "engine_rpm", "batt_power_pct", "steering_angle",
+        "gear", "odometer_km", "soc_pct", "battery_current_a", "batt_12v_pct",
+        "charge_power_kw", "charge_remaining_min", "outside_temp", "inside_temp",
+        "hvac_driver_temp", "hvac_passenger_temp", "hvac_fan_speed", "hvac_cycle_mode",
+        "hvac_acmax", "hvac_anion", "hvac_aqs", "hvac_heating", "hvac_front_defrost",
+        "hvac_rear_defrost", "hvac_auto_defrost", "hvac_blower_mode", "hvac_power_mode",
+        "drive_mode", "power_reserve", "charge_soc_target", "terrain_mode",
+        "regen_level", "steer_mode", "one_pedal", "esp_enable",
+    ]
+    private static let lanRename: [String: String] = [
+        "ac_state": "hvac_ac_enable", "hvac_sync_enable": "hvac_sync",
+        "hvac_auto_enable": "hvac_auto", "seat_vent_drv": "hvac_seat_vent_drv",
+        "seat_vent_pass": "hvac_seat_vent_pass",
+    ]
+
+    private func mergeLAN(_ jsonString: String) {
+        guard let data = jsonString.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+        for (k, v) in obj {
+            if v is NSNull { continue }
+            if Self.lanPassthrough.contains(k) { raw[k] = v }
+            else if let renamed = Self.lanRename[k] { raw[renamed] = v }
+        }
+        lastUpdate = Date()
+    }
+
+    /// Envia comando pela LAN se conectado. `cmd` no formato do APK (ex.: "drive_mode",
+    /// "hvac/power"). Retorna true se despachou pela LAN.
+    private func sendLAN(_ cmd: String, _ value: Any) -> Bool {
+        guard lanConnected, let ws = lanWS else { return false }
+        let payload: [String: Any] = ["__cmd": cmd, "value": value]
+        guard let data = try? JSONSerialization.data(withJSONObject: payload),
+              let s = String(data: data, encoding: .utf8) else { return false }
+        ws.send(.string(s)) { _ in }
+        return true
     }
 
     // MARK: - Acessores tolerantes (o JSON mistura String e Number)
@@ -337,38 +441,51 @@ final class CarStore: ObservableObject {
     @discardableResult func action(_ name: String) async -> Bool {
         await command("/api/action/\(name)", body: [:])
     }
+    // Comandos suportados pela LAN vão pelo WS local (ws __cmd) quando conectado;
+    // senão caem no POST cloud. Trava/motor (action) NÃO existem na LAN → só cloud.
     @discardableResult func setDriveMode(_ mode: Int) async -> Bool {
-        await command("/api/drive-mode", body: ["mode": mode])
+        if sendLAN("drive_mode", mode) { return true }
+        return await command("/api/drive-mode", body: ["mode": mode])
     }
     @discardableResult func setRegen(_ level: Int) async -> Bool {
-        await command("/api/regen-level", body: ["level": level])
+        if sendLAN("regen_level", level) { return true }
+        return await command("/api/regen-level", body: ["level": level])
     }
     @discardableResult func setOnePedal(_ on: Bool) async -> Bool {
-        await command("/api/one-pedal", body: ["enable": on ? 1 : 0])
+        if sendLAN("one_pedal", on ? 1 : 0) { return true }
+        return await command("/api/one-pedal", body: ["enable": on ? 1 : 0])
     }
     @discardableResult func setEsp(_ on: Bool) async -> Bool {
-        await command("/api/esp", body: ["enable": on ? 1 : 0])
+        if sendLAN("esp", on ? 1 : 0) { return true }
+        return await command("/api/esp", body: ["enable": on ? 1 : 0])
     }
     @discardableResult func setAcPower(_ on: Bool) async -> Bool {
-        await command("/api/hvac/power", body: ["value": on ? 1 : 0])
+        if sendLAN("hvac/power", on ? 1 : 0) { return true }
+        return await command("/api/hvac/power", body: ["value": on ? 1 : 0])
     }
     @discardableResult func setPowerReserve(_ mode: Int) async -> Bool {
-        await command("/api/power-reserve", body: ["mode": mode])
+        if sendLAN("power_reserve", mode) { return true }
+        return await command("/api/power-reserve", body: ["mode": mode])
     }
     @discardableResult func setChargeSocTarget(_ pct: Int) async -> Bool {
-        await command("/api/charge-soc-target", body: ["pct": pct])
+        if sendLAN("charge_soc_target", pct) { return true }
+        return await command("/api/charge-soc-target", body: ["pct": pct])
     }
     @discardableResult func setTerrain(_ mode: Int) async -> Bool {
-        await command("/api/terrain-mode", body: ["mode": mode])
+        if sendLAN("terrain_mode", mode) { return true }
+        return await command("/api/terrain-mode", body: ["mode": mode])
     }
     @discardableResult func setSteer(_ mode: Int) async -> Bool {
-        await command("/api/steer-mode", body: ["mode": mode])
+        if sendLAN("steer_mode", mode) { return true }
+        return await command("/api/steer-mode", body: ["mode": mode])
     }
-    /// HVAC genérico: POST /api/hvac/<control> { value }. bool vira 1/0.
+    /// HVAC genérico: LAN __cmd "hvac/<control>" ou POST /api/hvac/<control>.
     @discardableResult func setHvac(_ control: String, _ value: Double) async -> Bool {
-        await command("/api/hvac/\(control)", body: ["value": value])
+        if sendLAN("hvac/\(control)", value) { return true }
+        return await command("/api/hvac/\(control)", body: ["value": value])
     }
     @discardableResult func setHvac(_ control: String, on: Bool) async -> Bool {
-        await command("/api/hvac/\(control)", body: ["value": on ? 1 : 0])
+        if sendLAN("hvac/\(control)", on ? 1 : 0) { return true }
+        return await command("/api/hvac/\(control)", body: ["value": on ? 1 : 0])
     }
 }

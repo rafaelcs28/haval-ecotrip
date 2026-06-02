@@ -45,6 +45,12 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_havalobd._tcp</string>
+	</array>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Conecta direto ao carro na mesma rede Wi-Fi para telemetria e comandos com baixa latência.</string>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
 	<key>NSSupportsLiveActivitiesFrequentUpdates</key>

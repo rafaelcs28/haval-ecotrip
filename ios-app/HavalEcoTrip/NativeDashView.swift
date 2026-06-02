@@ -63,6 +63,7 @@ struct NativeDashView: View {
             Text(store.hasGps ? (store.address.isEmpty ? "Localizando endereço…" : store.address) : "Localização indisponível")
                 .font(.subheadline.weight(.medium)).foregroundStyle(DS.text).lineLimit(2)
             Spacer(minLength: 6)
+            if store.lanConnected { DSChip(text: "LAN", color: DS.teal, filled: true) }
             Circle().fill(store.carOnline ? DS.green : DS.red).frame(width: 9, height: 9)
         }
         .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 4)
