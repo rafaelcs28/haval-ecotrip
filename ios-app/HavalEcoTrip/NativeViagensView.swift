@@ -416,15 +416,18 @@ struct RouteMapSheet: View {
             let la = anyNum2(s["lat"]), lo = anyNum2(s["lng"])
             return (la != 0 && lo != 0) ? CLLocationCoordinate2D(latitude: la, longitude: lo) : nil
         }
-        var cum = 0.0; var lastT = 0.0; var out: [TripSample] = []
+        // kWh acumulado: integra evKw × dt (igual ao PWA — positivo=consumo).
+        // Guard de gap <30s: salto grande = carro desligado entre trechos (resume),
+        // sem energia fluindo no buraco — evita o acumulado "cair e recomeçar".
+        var cum = 0.0; var lastT = 0.0; var first = true; var out: [TripSample] = []
         for s in raw {
             let t = anyNum2(s["t"])
-            let pwr = anyNum2(s["pwr"]) != 0 ? anyNum2(s["pwr"]) : anyNum2(s["evKw"])
-            let dt = max(0, t - lastT); lastT = t
-            cum += pwr * dt / 3600.0
+            let kw = anyNum2(s["evKw"])
+            if !first { let rawDt = t - lastT; let dt = (rawDt > 0 && rawDt < 30) ? rawDt : 0; cum += kw * dt / 3600.0 }
+            first = false; lastT = t
             let la = anyNum2(s["lat"]), lo = anyNum2(s["lng"])
             out.append(TripSample(t: t, coord: (la != 0 && lo != 0) ? .init(latitude: la, longitude: lo) : nil,
-                                  spd: anyNum2(s["spd"]), rpm: anyNum2(s["rpm"]), pwr: pwr, soc: anyNum2(s["soc"]), cumKwh: cum))
+                                  spd: anyNum2(s["spd"]), rpm: anyNum2(s["rpm"]), pwr: kw, soc: anyNum2(s["soc"]), cumKwh: cum))
         }
         if out.count > 600 { let step = out.count / 600 + 1; out = out.enumerated().filter { $0.offset % step == 0 }.map { $0.element } }
         samples = out
