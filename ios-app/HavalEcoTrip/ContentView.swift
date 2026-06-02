@@ -85,9 +85,15 @@ struct ContentView: View {
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
                 Task { await manager.autoStartIfCharging() }
+                LiveActivityPush.shared.reregisterAll()   // garante pts-token no servidor
             } else if newPhase == .background {
                 BackgroundRefresh.schedule()
             }
+        }
+        // Ao logar (token salvo), re-registra os push-to-start tokens (o iOS pode
+        // tê-los emitido antes do login, quando o registro foi abortado).
+        .onChange(of: storedToken) { _, newToken in
+            if !newToken.isEmpty { LiveActivityPush.shared.reregisterAll() }
         }
     }
 }

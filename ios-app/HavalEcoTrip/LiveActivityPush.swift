@@ -16,6 +16,22 @@ final class LiveActivityPush {
     static let shared = LiveActivityPush()
     private init() {}
     private var started = false
+    // Cache dos push-to-start tokens (tipo → hex). O iOS emite o token uma vez
+    // (às vezes ANTES do login); guardamos e re-registramos quando logar/abrir.
+    private var ptsCache: [String: String] = [:]
+
+    /// Reenvia os push-to-start tokens cacheados (chamar após login e ao abrir o app).
+    func reregisterAll() {
+        guard Settings.isConfigured, !ptsCache.isEmpty else { return }
+        let snapshot = ptsCache
+        Task {
+            for (type, tok) in snapshot {
+                await register("/api/activity/pts-token", body: [
+                    "type": type, "push_to_start_token": tok, "device_id": Settings.notifDeviceId,
+                ])
+            }
+        }
+    }
 
     func start() {
         guard !started else { return }
@@ -34,9 +50,11 @@ final class LiveActivityPush {
         if #available(iOS 17.2, *) {
             Task {
                 for await tokenData in Activity<T>.pushToStartTokenUpdates {
+                    let tok = hex(tokenData)
+                    self.ptsCache[type] = tok   // cacheia mesmo se ainda não logado
                     await register("/api/activity/pts-token", body: [
                         "type": type,
-                        "push_to_start_token": hex(tokenData),
+                        "push_to_start_token": tok,
                         "device_id": Settings.notifDeviceId,
                     ])
                 }
