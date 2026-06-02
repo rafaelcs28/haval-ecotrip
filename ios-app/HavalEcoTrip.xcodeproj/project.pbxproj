@@ -27,6 +27,7 @@
 		6223380A259556C149F9E067 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = EEEFCC8135B0627DFDB60013 /* Assets.xcassets */; };
 		659B7DF18D1CC3CBBC1615F3 /* ChargeActivityLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6A433A5AA48336FD73F1C85 /* ChargeActivityLiveActivity.swift */; };
 		6601E0AF99CFBF6068D0180D /* NativeDashView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0412CD48BFB11B79D8D550D4 /* NativeDashView.swift */; };
+		694901AB2FD60B4D5A1322DA /* NativeRecargasView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB5145A32C36D0D8E2E36E83 /* NativeRecargasView.swift */; };
 		6D2D2B81A43BB7E8D26EE81F /* SongProActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF8BF0D6E8837DEC20056AB8 /* SongProActivityAttributes.swift */; };
 		77472ED6F598E53605506B96 /* ChargeActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = C110A5E3EADD0B1D4DA52BE6 /* ChargeActivityAttributes.swift */; };
 		783721D1E37916F23F2149D8 /* BydSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = E810689502D9D028774D6792 /* BydSettings.swift */; };
@@ -153,6 +154,7 @@
 		ECAEED044A902791C1B43435 /* BydRecargaApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BydRecargaApp.swift; sourceTree = "<group>"; };
 		EEEFCC8135B0627DFDB60013 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		F6B65FA59825E09151BBC7C3 /* BatteryWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BatteryWidget.swift; sourceTree = "<group>"; };
+		FB5145A32C36D0D8E2E36E83 /* NativeRecargasView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeRecargasView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -178,6 +180,7 @@
 				4A804763C29A6FBD8871C5A7 /* LivePreview.swift */,
 				0412CD48BFB11B79D8D550D4 /* NativeDashView.swift */,
 				C0D6E362CB348E539FA519CC /* NativeDriveView.swift */,
+				FB5145A32C36D0D8E2E36E83 /* NativeRecargasView.swift */,
 				B41BC4A6A889A1B5BBFCF7C6 /* PwaWebView.swift */,
 				0AFED4CCA277E184649006B9 /* RemoteNotifications.swift */,
 				E4593E338CE49445D2B4E37A /* Settings.swift */,
@@ -453,6 +456,7 @@
 				8B1DEE4FCD8F3304A07A33C9 /* MotorActivityAttributes.swift in Sources */,
 				6601E0AF99CFBF6068D0180D /* NativeDashView.swift in Sources */,
 				8B73DFD0957C51F2398BED33 /* NativeDriveView.swift in Sources */,
+				694901AB2FD60B4D5A1322DA /* NativeRecargasView.swift in Sources */,
 				0C3838E769FD23A972E10B3E /* PreClimatActivityAttributes.swift in Sources */,
 				5E3E822BD69F7F11ED12B2D6 /* PwaWebView.swift in Sources */,
 				51B5F9B9255D183BDCDE0CC7 /* RemoteNotifications.swift in Sources */,
