@@ -274,8 +274,34 @@ final class CarStore: ObservableObject {
     /// lock_state: 'off'=trancado, 'on'=destrancado (semântica do bridge).
     var lockKnown: Bool { let s = str("lock_state"); return s == "on" || s == "off" }
     var isLocked: Bool  { str("lock_state") == "off" }
-    /// AC ligado pelo mestre hvac_power_mode (1) — fallback ac_state.
-    var acOn: Bool { ["1", "on", "true"].contains(str("hvac_power_mode").lowercased()) || str("ac_state") == "on" }
+    /// AC ligado: mestre hvac_power_mode (1) OU ventilador girando — fallback ac_state.
+    var acOn: Bool { hvacPowerOn || fanSpeed > 0 || str("ac_state") == "on" }
+
+    // HVAC (campos hvac_* do estado)
+    var hvacPowerOn: Bool { ["1", "on", "true"].contains(str("hvac_power_mode").lowercased()) }
+    var acEnable: Bool    { bool("hvac_ac_enable") }
+    var fanSpeed: Int     { Int(num("hvac_fan_speed")) }       // 0–7
+    var blowerMode: Int   { Int(num("hvac_blower_mode")) }     // 0–4
+    var cycleMode: Int    { Int(num("hvac_cycle_mode")) }      // 0=recirc, 1=externo
+    var driverTemp: Double { num("hvac_driver_temp") }         // 16–32
+    var passengerTemp: Double { num("hvac_passenger_temp") }
+    var acmax: Bool       { bool("hvac_acmax") }
+    var autoMode: Bool    { bool("hvac_auto") }
+    var syncTemp: Bool    { bool("hvac_sync") }
+    var anion: Bool       { bool("hvac_anion") }
+    var aqs: Bool         { bool("hvac_aqs") }
+    var heating: Bool     { bool("hvac_heating") }
+    var frontDefrost: Bool { bool("hvac_front_defrost") }
+    var rearDefrost: Bool  { bool("hvac_rear_defrost") }
+    var autoDefrost: Bool  { bool("hvac_auto_defrost") }
+    var seatVentDrv: Int  { Int(num("hvac_seat_vent_drv")) }   // 0–3
+    var seatVentPass: Int { Int(num("hvac_seat_vent_pass")) }
+
+    // Sub-modos de condução / terreno / direção
+    var powerReserve: Int?    { intOrNil("power_reserve") }    // 1=Inteligente, 2=Prioritário
+    var chargeSocTarget: Int  { Int(num("charge_soc_target")) }// 20–80
+    var terrainMode: Int?     { intOrNil("terrain_mode") }     // 0/1/2/3/4/5/11
+    var steerMode: Int?       { intOrNil("steer_mode") }       // 0=Normal,1=Sport,2=Conforto
 
     // Portas / janelas / teto abertos ('on' = aberto)
     private func openLabels(_ map: [(String, String)]) -> [String] {
@@ -325,5 +351,24 @@ final class CarStore: ObservableObject {
     }
     @discardableResult func setAcPower(_ on: Bool) async -> Bool {
         await command("/api/hvac/power", body: ["value": on ? 1 : 0])
+    }
+    @discardableResult func setPowerReserve(_ mode: Int) async -> Bool {
+        await command("/api/power-reserve", body: ["mode": mode])
+    }
+    @discardableResult func setChargeSocTarget(_ pct: Int) async -> Bool {
+        await command("/api/charge-soc-target", body: ["pct": pct])
+    }
+    @discardableResult func setTerrain(_ mode: Int) async -> Bool {
+        await command("/api/terrain-mode", body: ["mode": mode])
+    }
+    @discardableResult func setSteer(_ mode: Int) async -> Bool {
+        await command("/api/steer-mode", body: ["mode": mode])
+    }
+    /// HVAC genérico: POST /api/hvac/<control> { value }. bool vira 1/0.
+    @discardableResult func setHvac(_ control: String, _ value: Double) async -> Bool {
+        await command("/api/hvac/\(control)", body: ["value": value])
+    }
+    @discardableResult func setHvac(_ control: String, on: Bool) async -> Bool {
+        await command("/api/hvac/\(control)", body: ["value": on ? 1 : 0])
     }
 }

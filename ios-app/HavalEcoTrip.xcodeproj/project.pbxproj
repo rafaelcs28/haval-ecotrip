@@ -38,6 +38,7 @@
 		8C3FA5DCF7133607EC275A89 /* TripLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B0EC768E77CEDD141861D39 /* TripLiveActivity.swift */; };
 		91E8922CD20B94185D7454A2 /* BydLiveActivityPush.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60050A5D1678A9235BEB0730 /* BydLiveActivityPush.swift */; };
 		920A0533D20932EF36FC4D49 /* ChargeActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = C110A5E3EADD0B1D4DA52BE6 /* ChargeActivityAttributes.swift */; };
+		9726912E15C4196ACF166260 /* MaintenanceStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8036EB500E09B8F08A9EA755 /* MaintenanceStore.swift */; };
 		97D85BD3A8D8D549ABD6A944 /* ActivityManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9926C58E001CD8511E829FB /* ActivityManager.swift */; };
 		985C98EC482371EDBE14B4E2 /* SecurityActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = D15756C1CEF1EFDD6804C05D /* SecurityActivityAttributes.swift */; };
 		9CC60221177D73FA6ED4E7F8 /* SecurityLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFE9C8DD63C6163B5AF174C8 /* SecurityLiveActivity.swift */; };
@@ -125,6 +126,7 @@
 		7376EEA5C86B0C60FE3CE4E3 /* DesignSystem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignSystem.swift; sourceTree = "<group>"; };
 		7BA445855D7E9BCBC513DE19 /* HavalEcoTrip.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = HavalEcoTrip.entitlements; sourceTree = "<group>"; };
 		7E729D2E78EAC7CD0D7E8D10 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		8036EB500E09B8F08A9EA755 /* MaintenanceStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MaintenanceStore.swift; sourceTree = "<group>"; };
 		8667439515FC27589EEEDBC9 /* SongProLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SongProLiveActivity.swift; sourceTree = "<group>"; };
 		915E7661920B0022793D3A63 /* PreClimatLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreClimatLiveActivity.swift; sourceTree = "<group>"; };
 		940E4AE86B859186BAE647F3 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -178,6 +180,7 @@
 				968AA8DFD87E74A832ED71A5 /* Info.plist */,
 				19F1EE1E1159233D66EEAFA8 /* LiveActivityPush.swift */,
 				4A804763C29A6FBD8871C5A7 /* LivePreview.swift */,
+				8036EB500E09B8F08A9EA755 /* MaintenanceStore.swift */,
 				0412CD48BFB11B79D8D550D4 /* NativeDashView.swift */,
 				C0D6E362CB348E539FA519CC /* NativeDriveView.swift */,
 				FB5145A32C36D0D8E2E36E83 /* NativeRecargasView.swift */,
@@ -453,6 +456,7 @@
 				AACDCF32BF0A0A36A4A2F84F /* HavalEcoTripApp.swift in Sources */,
 				4C94F890D15203640F57B31D /* LiveActivityPush.swift in Sources */,
 				E7A22E919521A94E9004D8F2 /* LivePreview.swift in Sources */,
+				9726912E15C4196ACF166260 /* MaintenanceStore.swift in Sources */,
 				8B1DEE4FCD8F3304A07A33C9 /* MotorActivityAttributes.swift in Sources */,
 				6601E0AF99CFBF6068D0180D /* NativeDashView.swift in Sources */,
 				8B73DFD0957C51F2398BED33 /* NativeDriveView.swift in Sources */,

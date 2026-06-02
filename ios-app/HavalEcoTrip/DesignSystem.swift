@@ -132,6 +132,68 @@ struct DSChoiceRow<T: Hashable>: View {
     }
 }
 
+/// Card que recolhe/expande. `alert` força aberto e pinta de alerta (anomalia).
+/// Recolhido mostra um resumo de uma linha; expandido mostra `content`.
+struct CollapsibleCard<Content: View>: View {
+    let icon: String
+    let title: String
+    let summary: String
+    var alert: Bool = false
+    @ViewBuilder var content: () -> Content
+    @State private var userOpen = false
+
+    var body: some View {
+        let open = userOpen || alert
+        let tint = alert ? DS.yellow : DS.muted
+        DSCard {
+            VStack(alignment: .leading, spacing: open ? 12 : 0) {
+                Button { withAnimation(.easeInOut(duration: 0.2)) { userOpen.toggle() } } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: alert ? "exclamationmark.triangle.fill" : icon)
+                            .font(.caption).foregroundStyle(tint)
+                        Text(title.uppercased()).font(.caption.weight(.semibold)).foregroundStyle(tint).tracking(0.5)
+                        Spacer()
+                        if !open { Text(summary).font(.caption).foregroundStyle(tint).lineLimit(1) }
+                        Image(systemName: open ? "chevron.up" : "chevron.down").font(.caption2).foregroundStyle(DS.muted)
+                    }
+                }
+                .buttonStyle(.plain)
+                if open { content() }
+            }
+        }
+    }
+}
+
+/// Medidor de nível: ícone tingido + barra de preenchimento + valor/rótulo.
+struct LevelBadge: View {
+    let icon: String
+    let fraction: Double       // 0…1
+    let value: String
+    let unit: String
+    let label: String
+    let tint: Color
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon).font(.system(size: 26)).foregroundStyle(tint).frame(width: 30)
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(alignment: .firstTextBaseline, spacing: 3) {
+                    Text(value).font(.system(size: 24, weight: .semibold, design: .rounded)).foregroundStyle(DS.text).monospacedDigit()
+                    Text(unit).font(.system(size: 12)).foregroundStyle(DS.muted)
+                }
+                GeometryReader { g in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(DS.panel2)
+                        Capsule().fill(tint).frame(width: max(4, g.size.width * min(1, max(0, fraction))))
+                    }
+                }.frame(height: 6)
+                Text(label.uppercased()).font(.system(size: 9, weight: .semibold)).foregroundStyle(DS.muted).tracking(0.4)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
 /// Chip/pill (estado, marcha, etc.)
 struct DSChip: View {
     let text: String
