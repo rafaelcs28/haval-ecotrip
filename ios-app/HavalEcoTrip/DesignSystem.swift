@@ -27,6 +27,7 @@ enum DS {
 struct DSCard<Content: View>: View {
     var title: String? = nil
     var icon: String? = nil
+    var glass: Bool = false   // true = fundo translúcido (legível sobre o mapa)
     @ViewBuilder var content: Content
 
     var body: some View {
@@ -44,7 +45,16 @@ struct DSCard<Content: View>: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DS.panel)
+        .background {
+            if glass {
+                ZStack {
+                    Rectangle().fill(.ultraThinMaterial)
+                    Rectangle().fill(Color.black.opacity(0.35))
+                }.environment(\.colorScheme, .dark)
+            } else {
+                Rectangle().fill(DS.panel)
+            }
+        }
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(DS.border, lineWidth: 1))
     }

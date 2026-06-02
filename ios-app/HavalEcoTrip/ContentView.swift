@@ -35,6 +35,8 @@ struct ContentView: View {
                 TabView {
                   NativeDashView()
                     .tabItem { Label("Painel", systemImage: "gauge.with.dots.needle.bottom.50percent") }
+                  NativeDriveView()
+                    .tabItem { Label("Drive", systemImage: "steeringwheel") }
                   ZStack {
                     PwaWebView(url: url, manager: manager)
                         .ignoresSafeArea()

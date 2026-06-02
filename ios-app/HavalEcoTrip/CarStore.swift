@@ -12,6 +12,7 @@
 
 import Foundation
 import Combine
+import CoreLocation
 
 @MainActor
 final class CarStore: ObservableObject {
@@ -165,13 +166,24 @@ final class CarStore: ObservableObject {
         }
     }
     func has(_ key: String) -> Bool { raw[key] != nil }
+    /// Int ou nil (campos null = desconhecido, ex. drive_mode).
+    func intOrNil(_ key: String) -> Int? {
+        switch raw[key] {
+        case let i as Int: return i
+        case let d as Double: return Int(d)
+        case let s as String: return Int(s)
+        default: return nil
+        }
+    }
 
     // Atalhos usados nas telas (expandir por bloco)
-    var speedKmh: Double      { num("speed_kmh") }
+    var speedKmh: Double      { max(0, num("speed_kmh")) }   // -1 = desconhecido → 0
     var motorPowerKw: Double   { num("motor_power_kw") }
-    var engineRpm: Int         { Int(num("engine_rpm")) }
+    var engineRpm: Int         { max(0, Int(num("engine_rpm"))) }
     var socPct: Double         { num("soc_pct") }
     var gear: String           { str("gear") }
+    /// Marcha só quando válida (P/R/N/D). "" = desconhecida (carro desligado → -1).
+    var gearDisplay: String    { ["P", "R", "N", "D"].contains(gear) ? gear : "" }
     var insideTemp: Double     { num("inside_temp") }
     var outsideTemp: Double    { num("outside_temp") }
     var rangeEvKm: Double      { num("range_ev_km") }
@@ -180,6 +192,48 @@ final class CarStore: ObservableObject {
         let age = Date().timeIntervalSince1970 * 1000 - num("last_apk_ms")
         return num("last_apk_ms") > 0 && age < 60_000
     }
+
+    // GPS (mapa do Painel)
+    var lat: Double { num("gps_lat") }
+    var lng: Double { num("gps_lng") }
+    var hasGps: Bool { lat != 0 && lng != 0 }
+    var coordinate: CLLocationCoordinate2D { .init(latitude: lat, longitude: lng) }
+
+    // Bateria 12V, hodômetro, pneus
+    var batt12vPct: Double { num("batt_12v_pct") }
+    var odometerKm: Double  { num("odometer_km") }
+    var tyreFL: Double { num("tyre_pressure_fl") }
+    var tyreFR: Double { num("tyre_pressure_fr") }
+    var tyreRL: Double { num("tyre_pressure_rl") }
+    var tyreRR: Double { num("tyre_pressure_rr") }
+
+    // Recarga
+    var isCharging: Bool       { chargingState == "Carregando" }
+    var chargePowerKw: Double  { num("charge_power_kw") }
+    var chargeSessionKwh: Double { num("charge_session_kwh") }
+    var chargeRemainingMin: Int { Int(num("charge_remaining_min")) }
+
+    // Status de condução (leitura — controles vêm no Bloco 2)
+    var driveModeLabel: String {
+        switch intOrNil("drive_mode") { case 0: return "HEV"; case 1: return "Prior. EV"; case 3: return "EV Puro"; default: return "" }
+    }
+    var regenLabel: String {
+        switch intOrNil("regen_level") { case 0: return "Normal"; case 1: return "Alto"; case 2: return "Baixo"; default: return "" }
+    }
+    var onePedalOn: Bool { intOrNil("one_pedal") == 1 }
+    var espOn: Bool { intOrNil("esp_enable") == 1 }
+
+    // Viagem em curso (objeto current_trip, publicado pelo carro)
+    var trip: [String: Any]? { raw["current_trip"] as? [String: Any] }
+    var tripActive: Bool { trip != nil }
+    private func tnum(_ k: String) -> Double {
+        switch trip?[k] { case let d as Double: return d; case let i as Int: return Double(i); case let s as String: return Double(s) ?? 0; default: return 0 }
+    }
+    var tripDistKm: Double  { tnum("distKm") }
+    var tripTimeSec: Int    { Int(tnum("timeSec")) }
+    var tripNetKwh: Double  { tnum("netKwh") }
+    var tripFuelL: Double   { tnum("fuelL") }
+    var tripAvgKmh: Double  { tnum("avgSpeedKmh") }
 
     // MARK: - Comandos (POST /api/<path>)
 
