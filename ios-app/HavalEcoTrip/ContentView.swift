@@ -32,7 +32,10 @@ struct ContentView: View {
     var body: some View {
         Group {
             if let url = bridgeURL, !storedToken.isEmpty, !Settings.bridgeURL.isEmpty {
-                ZStack {
+                TabView {
+                  NativeDashView()
+                    .tabItem { Label("Painel", systemImage: "gauge.with.dots.needle.bottom.50percent") }
+                  ZStack {
                     PwaWebView(url: url, manager: manager)
                         .ignoresSafeArea()
                     // Indicador discreto da Live Activity (não invasivo)
@@ -52,7 +55,10 @@ struct ContentView: View {
                             Spacer()
                         }
                     }
+                  }
+                  .tabItem { Label("Completo", systemImage: "square.grid.2x2.fill") }
                 }
+                .tint(DS.green)
                 .onReceive(NotificationCenter.default.publisher(for: .openHavalSettings)) { _ in
                     showSetup = true
                 }

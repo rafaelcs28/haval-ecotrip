@@ -17,8 +17,9 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 BUILD_NUMBER="${1:-$(date +%y%m%d%H%M)}"
-: "${ASC_KEY_ID:?defina ASC_KEY_ID (Key ID da App Store Connect API)}"
-: "${ASC_ISSUER_ID:?defina ASC_ISSUER_ID (Issuer ID da App Store Connect API)}"
+# Defaults da conta (só identificadores; o segredo é o .p8, que é gitignorado).
+ASC_KEY_ID="${ASC_KEY_ID:-956AX2CY9V}"
+ASC_ISSUER_ID="${ASC_ISSUER_ID:-ecb6f30a-c529-4c6c-a786-0b52d3c3783f}"
 ASC_KEY_PATH="${ASC_KEY_PATH:-$HOME/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8}"
 [ -f "$ASC_KEY_PATH" ] || { echo "❌ chave não encontrada: $ASC_KEY_PATH"; exit 1; }
 
