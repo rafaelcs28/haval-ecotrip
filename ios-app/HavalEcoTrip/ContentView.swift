@@ -39,6 +39,8 @@ struct ContentView: View {
                     .tabItem { Label("Drive", systemImage: "steeringwheel") }
                   NativeRecargasView()
                     .tabItem { Label("Recargas", systemImage: "bolt.fill") }
+                  NativeViagensView()
+                    .tabItem { Label("Viagens", systemImage: "map.fill") }
                   ZStack {
                     PwaWebView(url: url, manager: manager)
                         .ignoresSafeArea()

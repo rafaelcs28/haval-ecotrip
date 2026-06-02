@@ -26,6 +26,7 @@
 		5E3E822BD69F7F11ED12B2D6 /* PwaWebView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B41BC4A6A889A1B5BBFCF7C6 /* PwaWebView.swift */; };
 		605ED8EEC91528FFBC054A48 /* CarActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = C88C20EF0FDB1AB8EB036191 /* CarActions.swift */; };
 		6223380A259556C149F9E067 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = EEEFCC8135B0627DFDB60013 /* Assets.xcassets */; };
+		62435AEEC1C0E57CFBB27ABE /* NativeViagensView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 638ACE606ED94D317501DB0E /* NativeViagensView.swift */; };
 		659B7DF18D1CC3CBBC1615F3 /* ChargeActivityLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6A433A5AA48336FD73F1C85 /* ChargeActivityLiveActivity.swift */; };
 		6601E0AF99CFBF6068D0180D /* NativeDashView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0412CD48BFB11B79D8D550D4 /* NativeDashView.swift */; };
 		694901AB2FD60B4D5A1322DA /* NativeRecargasView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB5145A32C36D0D8E2E36E83 /* NativeRecargasView.swift */; };
@@ -123,6 +124,7 @@
 		60050A5D1678A9235BEB0730 /* BydLiveActivityPush.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BydLiveActivityPush.swift; sourceTree = "<group>"; };
 		6215EB2F3EA8C80FA49D1477 /* PreclimatSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreclimatSheet.swift; sourceTree = "<group>"; };
 		636438201B328EA34B285F3A /* MotorActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MotorActivityAttributes.swift; sourceTree = "<group>"; };
+		638ACE606ED94D317501DB0E /* NativeViagensView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeViagensView.swift; sourceTree = "<group>"; };
 		6AB3E13D26098FB169B559E2 /* HavalEcoTrip.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = HavalEcoTrip.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		6B0EC768E77CEDD141861D39 /* TripLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripLiveActivity.swift; sourceTree = "<group>"; };
 		6F5328FAA367AE3DF93613BE /* HavalEcoTripWidgetBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HavalEcoTripWidgetBundle.swift; sourceTree = "<group>"; };
@@ -189,6 +191,7 @@
 				0412CD48BFB11B79D8D550D4 /* NativeDashView.swift */,
 				C0D6E362CB348E539FA519CC /* NativeDriveView.swift */,
 				FB5145A32C36D0D8E2E36E83 /* NativeRecargasView.swift */,
+				638ACE606ED94D317501DB0E /* NativeViagensView.swift */,
 				6215EB2F3EA8C80FA49D1477 /* PreclimatSheet.swift */,
 				B41BC4A6A889A1B5BBFCF7C6 /* PwaWebView.swift */,
 				0AFED4CCA277E184649006B9 /* RemoteNotifications.swift */,
@@ -468,6 +471,7 @@
 				6601E0AF99CFBF6068D0180D /* NativeDashView.swift in Sources */,
 				8B73DFD0957C51F2398BED33 /* NativeDriveView.swift in Sources */,
 				694901AB2FD60B4D5A1322DA /* NativeRecargasView.swift in Sources */,
+				62435AEEC1C0E57CFBB27ABE /* NativeViagensView.swift in Sources */,
 				0C3838E769FD23A972E10B3E /* PreClimatActivityAttributes.swift in Sources */,
 				A01430293347A18D099263AF /* PreclimatSheet.swift in Sources */,
 				5E3E822BD69F7F11ED12B2D6 /* PwaWebView.swift in Sources */,

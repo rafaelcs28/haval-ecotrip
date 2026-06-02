@@ -54,6 +54,7 @@ final class ChargesLoader: ObservableObject {
     @Published var charges: [Charge] = []
     @Published var loading = false
     @Published var failed = false
+    @Published var diag = ""
 
     private var base: String {
         let u = Settings.bridgeURL.isEmpty ? AuthConfig.bridgeURL : Settings.bridgeURL
@@ -61,16 +62,20 @@ final class ChargesLoader: ObservableObject {
     }
 
     func load() async {
-        guard Settings.isConfigured, let url = URL(string: "\(base)/api/charges") else { return }
+        guard Settings.isConfigured, let url = URL(string: "\(base)/api/charges") else { diag = "app não configurado"; return }
         loading = true; failed = false
         var req = URLRequest(url: url); req.timeoutInterval = 12
         req.addValue("Bearer " + Settings.bridgeToken, forHTTPHeaderField: "Authorization")
         do {
             let (data, resp) = try await URLSession.shared.data(for: req)
-            guard (resp as? HTTPURLResponse)?.statusCode == 200 else { failed = true; loading = false; return }
-            let arr = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] ?? []
-            charges = arr.map(Charge.init).filter { $0.isCharge }.sorted { $0.id > $1.id }
-        } catch { failed = true }
+            let code = (resp as? HTTPURLResponse)?.statusCode ?? -1
+            guard code == 200 else { failed = true; diag = "HTTP \(code) em /api/charges"; loading = false; return }
+            let any = try? JSONSerialization.jsonObject(with: data)
+            let arr = (any as? [[String: Any]]) ?? ((any as? [String: Any])?["charges"] as? [[String: Any]]) ?? []
+            let parsed = arr.map(Charge.init)
+            charges = parsed.filter { $0.isCharge }.sorted { $0.id > $1.id }
+            diag = "recebidas \(arr.count) · válidas \(charges.count)"
+        } catch { failed = true; diag = "erro: \(error.localizedDescription)" }
         loading = false
     }
 }
@@ -146,8 +151,13 @@ struct NativeRecargasView: View {
     private var historico: some View {
         VStack(spacing: 14) {
             if filtered.isEmpty {
-                Text(loader.failed ? "Não foi possível carregar." : "Nenhuma recarga no período.")
-                    .font(.subheadline).foregroundStyle(DS.muted).frame(maxWidth: .infinity, alignment: .leading).padding(.top, 20)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(loader.failed ? "Não foi possível carregar." : "Nenhuma recarga no período.")
+                        .font(.subheadline).foregroundStyle(DS.muted)
+                    if !loader.diag.isEmpty {
+                        Text(loader.diag).font(.caption2).foregroundStyle(DS.muted.opacity(0.7))
+                    }
+                }.frame(maxWidth: .infinity, alignment: .leading).padding(.top, 20)
             }
             ForEach(filtered) { c in chargeCard(c) }
         }

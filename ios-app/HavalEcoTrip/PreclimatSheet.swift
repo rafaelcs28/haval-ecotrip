@@ -89,7 +89,7 @@ struct PreclimatSheet: View {
                         Text("Nenhum agendamento. Adicione um para o carro pré-climatizar antes de você sair.")
                             .font(.subheadline).foregroundStyle(DS.muted).frame(maxWidth: .infinity, alignment: .leading).padding(.top, 16)
                     }
-                    ForEach($store.scheds) { $s in SchedCard(s: $s, store: store) }
+                    ForEach(store.scheds) { s in SchedCard(sched: s, store: store) }
                     Button { Task { await store.add() } } label: {
                         Label("Adicionar agendamento", systemImage: "plus.circle.fill")
                             .font(.system(size: 15, weight: .bold)).frame(maxWidth: .infinity).frame(height: 50)
@@ -107,21 +107,39 @@ struct PreclimatSheet: View {
 }
 
 private struct SchedCard: View {
-    @Binding var s: PreclimatSched
+    let sched: PreclimatSched
     let store: PreclimatStore
+
+    // Estado local (não fica preso ao array do store → deletar não invalida binding).
+    @State private var enabled: Bool
+    @State private var time: String
+    @State private var recurrence: String
+    @State private var temp: Double
+    @State private var fan: Double
+    @State private var duration: Double
+
+    init(sched: PreclimatSched, store: PreclimatStore) {
+        self.sched = sched; self.store = store
+        _enabled = State(initialValue: sched.enabled)
+        _time = State(initialValue: sched.time)
+        _recurrence = State(initialValue: sched.recurrence)
+        _temp = State(initialValue: sched.temp)
+        _fan = State(initialValue: Double(sched.fan))
+        _duration = State(initialValue: Double(sched.duration))
+    }
 
     private static let recOpts: [(String, String)] = [("once", "Uma vez"), ("daily", "Diário"), ("weekdays", "Dias úteis"), ("weekends", "Fim de semana")]
     private func f1(_ v: Double) -> String { String(format: "%.1f", v).replacingOccurrences(of: ".", with: ",") }
 
     private var timeBinding: Binding<Date> {
         Binding(get: {
-            let p = s.time.split(separator: ":"); var c = DateComponents()
+            let p = time.split(separator: ":"); var c = DateComponents()
             c.hour = Int(p.first ?? "7") ?? 7; c.minute = Int(p.last ?? "30") ?? 30
             return Calendar.current.date(from: c) ?? Date()
         }, set: { d in
             let c = Calendar.current.dateComponents([.hour, .minute], from: d)
-            s.time = String(format: "%02d:%02d", c.hour ?? 7, c.minute ?? 30)
-            Task { await store.update(s.id, "time", s.time) }
+            time = String(format: "%02d:%02d", c.hour ?? 7, c.minute ?? 30)
+            Task { await store.update(sched.id, "time", time) }
         })
     }
 
@@ -131,32 +149,25 @@ private struct SchedCard: View {
                 HStack {
                     DatePicker("", selection: timeBinding, displayedComponents: .hourAndMinute).labelsHidden()
                     Spacer()
-                    Toggle("", isOn: Binding(get: { s.enabled }, set: { v in s.enabled = v; Task { await store.update(s.id, "enabled", v) } })).labelsHidden().tint(DS.green)
-                    Button { Task { await store.remove(s.id) } } label: {
+                    Toggle("", isOn: Binding(get: { enabled }, set: { v in enabled = v; Task { await store.update(sched.id, "enabled", v) } })).labelsHidden().tint(DS.green)
+                    Button { Task { await store.remove(sched.id) } } label: {
                         Image(systemName: "trash").foregroundStyle(DS.red)
-                    }
+                    }.buttonStyle(.plain)
                 }
-                DSChoiceRow(options: Self.recOpts, selected: s.recurrence, color: DS.teal) { v in
-                    s.recurrence = v; Task { await store.update(s.id, "recurrence", v) }
+                DSChoiceRow(options: Self.recOpts, selected: recurrence, color: DS.teal) { v in
+                    recurrence = v; Task { await store.update(sched.id, "recurrence", v) }
                 }
-                sliderRow("Temperatura", "\(f1(s.temp))°", value: s.temp, range: 16...32, step: 0.5) { v in
-                    s.temp = v; Task { await store.update(s.id, "temp", v) }
-                }
-                sliderRow("Ventilador", "\(s.fan)/7", value: Double(s.fan), range: 1...7, step: 1) { v in
-                    s.fan = Int(v); Task { await store.update(s.id, "fan", Int(v)) }
-                }
-                sliderRow("Duração", "\(s.duration) min", value: Double(s.duration), range: 5...60, step: 5) { v in
-                    s.duration = Int(v); Task { await store.update(s.id, "duration", Int(v)) }
-                }
+                sliderRow("Temperatura", "\(f1(temp))°", v: $temp, range: 16...32, step: 0.5) { Task { await store.update(sched.id, "temp", temp) } }
+                sliderRow("Ventilador", "\(Int(fan))/7", v: $fan, range: 1...7, step: 1) { Task { await store.update(sched.id, "fan", Int(fan)) } }
+                sliderRow("Duração", "\(Int(duration)) min", v: $duration, range: 5...60, step: 5) { Task { await store.update(sched.id, "duration", Int(duration)) } }
             }
         }
     }
 
-    @State private var editing = false
-    private func sliderRow(_ label: String, _ value: String, value v: Double, range: ClosedRange<Double>, step: Double, onCommit: @escaping (Double) -> Void) -> some View {
+    private func sliderRow(_ label: String, _ value: String, v: Binding<Double>, range: ClosedRange<Double>, step: Double, onCommit: @escaping () -> Void) -> some View {
         VStack(spacing: 4) {
             HStack { Text(label).font(.system(size: 14, weight: .medium)).foregroundStyle(DS.text); Spacer(); Text(value).font(.system(size: 14, weight: .bold)).foregroundStyle(DS.teal) }
-            Slider(value: Binding(get: { v }, set: { nv in onCommit(nv) }), in: range, step: step).tint(DS.teal)
+            Slider(value: v, in: range, step: step) { editing in if !editing { onCommit() } }.tint(DS.teal)
         }
     }
 }

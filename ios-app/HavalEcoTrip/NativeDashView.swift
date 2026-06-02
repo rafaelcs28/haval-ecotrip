@@ -12,7 +12,6 @@ struct NativeDashView: View {
     @StateObject private var maint = MaintenanceStore()
     @State private var pending: PendingAction?
     @State private var busy = false
-    @State private var hazardOn = false
     @State private var showPreclimat = false
 
     struct PendingAction: Identifiable {
@@ -88,11 +87,6 @@ struct NativeDashView: View {
                     pending = store.engineOn
                         ? .init(name: "engine_off", title: "Desligar motor?", confirm: "Desligar", danger: true)
                         : .init(name: "engine_on", title: "Ligar motor?", confirm: "Ligar", danger: false)
-                }
-                iconButton(icon: "exclamationmark.triangle.fill",
-                           tint: hazardOn ? DS.yellow : DS.muted,
-                           caption: hazardOn ? "Pisca on" : "Pisca") {
-                    hazardOn.toggle(); Task { await store.setHazard(hazardOn) }
                 }
                 Spacer()
             }
