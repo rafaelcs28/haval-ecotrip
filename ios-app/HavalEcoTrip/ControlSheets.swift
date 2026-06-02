@@ -134,6 +134,34 @@ struct DriveControlsSheet: View {
     }
 }
 
+// Slider HVAC com estado próprio (aplica no fim do arraste, como o iPad).
+private struct HvacSlider: View {
+    let label: String
+    let value: Double
+    let range: ClosedRange<Double>
+    let step: Double
+    let format: (Double) -> String
+    let onCommit: (Double) -> Void
+    @State private var v: Double = 0
+    @State private var editing = false
+
+    var body: some View {
+        VStack(spacing: 4) {
+            HStack {
+                Text(label).font(.system(size: 14, weight: .medium)).foregroundStyle(DS.text)
+                Spacer()
+                Text(format(editing ? v : value)).font(.system(size: 15, weight: .bold)).foregroundStyle(DS.blue)
+            }
+            Slider(value: $v, in: range, step: step) { ed in
+                editing = ed
+                if !ed { onCommit(v) }
+            }.tint(DS.blue)
+        }
+        .onAppear { v = max(range.lowerBound, min(range.upperBound, value)) }
+        .onChange(of: value) { _, nv in if !editing { v = max(range.lowerBound, min(range.upperBound, nv)) } }
+    }
+}
+
 // MARK: - Ar-condicionado (completo, com seções)
 struct ACSheet: View {
     @ObservedObject var store = CarStore.shared
@@ -146,7 +174,7 @@ struct ACSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
-                    // Mestre
+                    // Mestre + AUTO/AC/MAX + circulação
                     DSCard {
                         VStack(spacing: 12) {
                             HStack {
@@ -162,43 +190,57 @@ struct ACSheet: View {
                                 miniToggle("A/C", store.acEnable) { v in Task { await store.setHvac("ac_enable", on: v) } }
                                 miniToggle("MAX", store.acmax) { v in Task { await store.setHvac("acmax", on: v) } }
                             }
-                        }
-                    }
-
-                    // Temperatura
-                    DSCard(title: "Temperatura", icon: "thermometer.medium") {
-                        VStack(spacing: 12) {
-                            stepperRow(label: "Motorista", value: "\(f1(store.driverTemp))°",
-                                       dec: { adjustTemp("driver_temp", store.driverTemp, -0.5) },
-                                       inc: { adjustTemp("driver_temp", store.driverTemp, 0.5) })
-                            Divider().overlay(DS.border)
-                            miniToggle("Sincronizar lados", store.syncTemp, wide: true) { v in Task { await store.setHvac("sync", on: v) } }
-                            if !store.syncTemp {
-                                stepperRow(label: "Passageiro", value: "\(f1(store.passengerTemp))°",
-                                           dec: { adjustTemp("passenger_temp", store.passengerTemp, -0.5) },
-                                           inc: { adjustTemp("passenger_temp", store.passengerTemp, 0.5) })
+                            // Circulação: um botão representando o estado, toca pra alternar
+                            Button {
+                                Task { await store.setHvac("cycle_mode", Double(store.cycleMode == 0 ? 1 : 0)) }
+                            } label: {
+                                HStack {
+                                    Image(systemName: store.cycleMode == 0 ? "arrow.triangle.2.circlepath" : "wind")
+                                    Text(store.cycleMode == 0 ? "Recirculação interna" : "Ar externo").font(.system(size: 14, weight: .bold))
+                                    Spacer()
+                                    Image(systemName: "arrow.left.arrow.right").font(.caption).foregroundStyle(DS.muted)
+                                }
+                                .frame(maxWidth: .infinity).frame(height: 46).padding(.horizontal, 14)
+                                .foregroundStyle(DS.text).background(DS.panel2)
+                                .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+                                .overlay(RoundedRectangle(cornerRadius: 11).stroke(DS.border, lineWidth: 1))
                             }
                         }
                     }
 
-                    // Ventilação
-                    DSCard(title: "Ventilação", icon: "wind") {
+                    // Temperatura (sliders)
+                    DSCard(title: "Temperatura", icon: "thermometer.medium") {
                         VStack(spacing: 12) {
-                            stepperRow(label: "Velocidade", value: "\(store.fanSpeed)/7",
-                                       dec: { adjustInt("fan_speed", store.fanSpeed, -1, 0, 7) },
-                                       inc: { adjustInt("fan_speed", store.fanSpeed, 1, 0, 7) })
+                            HvacSlider(label: "Motorista", value: store.driverTemp == 0 ? 22 : store.driverTemp,
+                                       range: 16...32, step: 0.5, format: { "\(f1($0))°" }) { v in Task { await store.setHvac("driver_temp", v) } }
                             Divider().overlay(DS.border)
-                            Text("DIREÇÃO DO FLUXO").font(.system(size: 10, weight: .semibold)).foregroundStyle(DS.muted)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                            ChoiceGrid(options: [(0,"Frente"),(1,"Frente+Pés"),(2,"Pés"),(3,"Pés+Vidro"),(4,"Para-brisa")],
-                                       selected: store.blowerMode, color: DS.blue) { v in Task { await store.setHvac("blower_mode", Double(v)) } }
+                            miniToggle("Sincronizar lados", store.syncTemp, wide: true) { v in Task { await store.setHvac("sync", on: v) } }
+                            if !store.syncTemp {
+                                HvacSlider(label: "Passageiro", value: store.passengerTemp == 0 ? 22 : store.passengerTemp,
+                                           range: 16...32, step: 0.5, format: { "\(f1($0))°" }) { v in Task { await store.setHvac("passenger_temp", v) } }
+                            }
                         }
                     }
 
-                    // Ar / circulação
-                    DSCard(title: "Circulação", icon: "arrow.triangle.2.circlepath") {
-                        DSChoiceRow(options: [(0, "Recircular"), (1, "Ar externo")], selected: store.cycleMode, color: DS.teal) { v in
-                            Task { await store.setHvac("cycle_mode", Double(v)) }
+                    // Ventilação: slider + direção do fluxo em linha única
+                    DSCard(title: "Ventilação", icon: "wind") {
+                        VStack(spacing: 12) {
+                            HvacSlider(label: "Velocidade", value: Double(store.fanSpeed), range: 0...7, step: 1,
+                                       format: { "\(Int($0))/7" }) { v in Task { await store.setHvac("fan_speed", v) } }
+                            Divider().overlay(DS.border)
+                            Text("DIREÇÃO DO FLUXO").font(.system(size: 10, weight: .semibold)).foregroundStyle(DS.muted)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            blowerRow
+                        }
+                    }
+
+                    // Bancos ventilados (sliders)
+                    DSCard(title: "Bancos ventilados", icon: "carseat.right.fill") {
+                        VStack(spacing: 12) {
+                            HvacSlider(label: "Motorista", value: Double(store.seatVentDrv), range: 0...3, step: 1,
+                                       format: { "\(Int($0))/3" }) { v in Task { await store.setHvac("seat_vent_drv", v) } }
+                            HvacSlider(label: "Passageiro", value: Double(store.seatVentPass), range: 0...3, step: 1,
+                                       format: { "\(Int($0))/3" }) { v in Task { await store.setHvac("seat_vent_pass", v) } }
                         }
                     }
 
@@ -222,13 +264,6 @@ struct ACSheet: View {
                                 miniToggle("Recirc. automática (AQS)", store.aqs, wide: true) { v in Task { await store.setHvac("aqs", on: v) } }
                                 Divider().overlay(DS.border)
                                 miniToggle("Desembaçar automático", store.autoDefrost, wide: true) { v in Task { await store.setHvac("auto_defrost", on: v) } }
-                                Divider().overlay(DS.border)
-                                stepperRow(label: "Vent. banco motorista", value: "\(store.seatVentDrv)/3",
-                                           dec: { adjustInt("seat_vent_drv", store.seatVentDrv, -1, 0, 3) },
-                                           inc: { adjustInt("seat_vent_drv", store.seatVentDrv, 1, 0, 3) })
-                                stepperRow(label: "Vent. banco passageiro", value: "\(store.seatVentPass)/3",
-                                           dec: { adjustInt("seat_vent_pass", store.seatVentPass, -1, 0, 3) },
-                                           inc: { adjustInt("seat_vent_pass", store.seatVentPass, 1, 0, 3) })
                             }.padding(.top, 8)
                         } label: {
                             Text("Mais opções").font(.system(size: 15, weight: .semibold)).foregroundStyle(DS.text)
@@ -243,22 +278,20 @@ struct ACSheet: View {
         }
     }
 
-    private func adjustTemp(_ control: String, _ cur: Double, _ delta: Double) {
-        let v = min(32, max(16, (cur == 0 ? 22 : cur) + delta))
-        Task { await store.setHvac(control, v) }
-    }
-    private func adjustInt(_ control: String, _ cur: Int, _ delta: Int, _ lo: Int, _ hi: Int) {
-        let v = min(hi, max(lo, cur + delta))
-        Task { await store.setHvac(control, Double(v)) }
-    }
-
-    private func stepperRow(label: String, value: String, dec: @escaping () -> Void, inc: @escaping () -> Void) -> some View {
-        HStack {
-            Text(label).font(.system(size: 15, weight: .medium)).foregroundStyle(DS.text)
-            Spacer()
-            Button(action: dec) { Image(systemName: "minus.circle.fill").font(.title2).foregroundStyle(DS.muted) }
-            Text(value).font(.system(size: 16, weight: .bold)).foregroundStyle(DS.text).frame(minWidth: 54)
-            Button(action: inc) { Image(systemName: "plus.circle.fill").font(.title2).foregroundStyle(DS.blue) }
+    // Direção do fluxo: 5 botões compactos numa linha
+    private var blowerRow: some View {
+        let opts: [(Int, String)] = [(0, "Frente"), (1, "F+Pés"), (2, "Pés"), (3, "Pés+V"), (4, "Vidro")]
+        return HStack(spacing: 6) {
+            ForEach(opts, id: \.0) { v, label in
+                let on = store.blowerMode == v
+                Button { Task { await store.setHvac("blower_mode", Double(v)) } } label: {
+                    Text(label).font(.system(size: 12, weight: .bold)).minimumScaleFactor(0.7).lineLimit(1)
+                        .frame(maxWidth: .infinity).frame(height: 40)
+                        .foregroundStyle(on ? .black : DS.text).background(on ? DS.blue : DS.panel2)
+                        .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 9).stroke(on ? .clear : DS.border, lineWidth: 1))
+                }
+            }
         }
     }
 
