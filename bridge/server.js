@@ -4004,6 +4004,20 @@ app.post('/api/admin/clear-history', (req, res) => {
 
 // ── Auto-trips + Telemetria ───────────────────────────────────────────────────
 
+// Detecta re-POST do mesmo trecho (retry de rede): o trecho `incoming` já está no
+// FIM dos `existing` (pós-merge anterior). Compara assinatura de coords (lat/lng/spd)
+// no início/meio/fim — o rebasing de `t` no resume só altera o `t`, não as coords.
+function _isDuplicateTail(existing, incoming) {
+  if (incoming.length === 0 || existing.length < incoming.length) return false;
+  const tail = existing.slice(existing.length - incoming.length);
+  const eq = (a, b) => Math.abs((a || 0) - (b || 0)) < 1e-5;
+  const idxs = [0, incoming.length >> 1, incoming.length - 1];
+  return idxs.every(i =>
+    eq(tail[i].lat, incoming[i].lat) &&
+    eq(tail[i].lng, incoming[i].lng) &&
+    eq(tail[i].spd, incoming[i].spd));
+}
+
 app.post('/api/autotrips', (req, res) => {
   // DEBUG temporário: loga TODA tentativa pra rastrear viagens travadas no APK
   const ua = req.headers['user-agent'] || '?';
@@ -4072,14 +4086,21 @@ app.post('/api/autotrips', (req, res) => {
         if (minNewT > maxExistingT) {
           // Ranges disjuntos — apenas concatena
           finalSamples = [...existingSamples, ...newSamples];
+        } else if (_isDuplicateTail(existingSamples, newSamples)) {
+          // Re-POST do mesmo trecho (retry de rede): o trecho novo já está no fim
+          // dos existentes. Mantém como está pra não duplicar.
+          finalSamples = existingSamples;
         } else {
-          // Overlap — corta os existentes em maxExistingT e usa novos pra t > cutT.
-          // Em prática raro porque o APK reseta o array ao iniciar (resume traz
-          // só t a partir do retomar). Mas é defensivo.
-          finalSamples = [
-            ...existingSamples.filter(s => (s.t || 0) <= maxExistingT),
-            ...newSamples.filter(s => (s.t || 0) > maxExistingT),
-          ];
+          // Overlap de `t` SEM ser duplicata = RESUME em que o APK re-baseou o `t`
+          // do segundo trecho (começa perto de 0 de novo). Se a gente cortasse em
+          // maxExistingT, TODO o segundo trecho sumiria do trajeto (era o bug: km e
+          // tempo vinham completos do autoTrip, mas a rota só mostrava o 1º trecho).
+          // Correção: re-baseia o `t` do trecho novo pra continuar DEPOIS do
+          // existente, preservando o espaçamento interno, e concatena.
+          const offset = maxExistingT + 1 - minNewT;
+          const rebased = newSamples.map(s => ({ ...s, t: (s.t || 0) + offset }));
+          finalSamples = [...existingSamples, ...rebased];
+          console.log(`↻ AutoTrip ${safeId}: resume detectado (t re-baseado +${offset}s) — 2º trecho preservado`);
         }
         if (finalSamples.length > newSamples.length) {
           didMerge = true;
