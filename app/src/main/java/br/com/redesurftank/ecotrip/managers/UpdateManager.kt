@@ -33,8 +33,11 @@ class UpdateManager private constructor() {
             instance ?: UpdateManager().also { instance = it }
         }
 
+        // Lista de releases (NÃO /releases/latest): o "latest" do GitHub pega a
+        // release mais recente de QUALQUER app (incl. o do tablet, tag cluster-vX.Y).
+        // Filtramos só as tags do CARRO ("vX.Y") em fetchLatestRelease().
         private val API_URL =
-            "https://api.github.com/repos/${BuildConfig.GITHUB_REPO}/releases/latest"
+            "https://api.github.com/repos/${BuildConfig.GITHUB_REPO}/releases?per_page=100"
     }
 
     private var appContext: Context? = null
@@ -233,19 +236,26 @@ class UpdateManager private constructor() {
             return null
         }
         val body = conn.inputStream.bufferedReader().readText()
-        val json = JSONObject(body)
-        val tag  = json.optString("tag_name") ?: return null
-        val version = tag.trimStart('v')
-        val notes   = json.optString("body", "")
-
-        val assets = json.optJSONArray("assets")
-        val apkUrl = (0 until (assets?.length() ?: 0))
-            .mapNotNull { assets!!.optJSONObject(it) }
-            .firstOrNull { it.optString("name").endsWith(".apk") }
-            ?.optString("browser_download_url")
-            ?: return null
-
-        return ReleaseInfo(tag, version, apkUrl, notes)
+        val arr = org.json.JSONArray(body)
+        // Considera SÓ releases do carro: tag "vX.Y". Ignora "cluster-vX.Y" (tablet)
+        // e qualquer outra. Pega a de maior versão.
+        val carTag = Regex("^v\\d")
+        var best: ReleaseInfo? = null
+        for (i in 0 until arr.length()) {
+            val rel = arr.optJSONObject(i) ?: continue
+            val tag = rel.optString("tag_name")
+            if (!carTag.containsMatchIn(tag)) continue   // pula cluster-* e não-carro
+            val version = tag.trimStart('v')
+            val assets = rel.optJSONArray("assets")
+            val apkUrl = (0 until (assets?.length() ?: 0))
+                .mapNotNull { assets!!.optJSONObject(it) }
+                .firstOrNull { it.optString("name").endsWith(".apk") }
+                ?.optString("browser_download_url") ?: continue
+            if (best == null || isNewer(version, best!!.version)) {
+                best = ReleaseInfo(tag, version, apkUrl, rel.optString("body", ""))
+            }
+        }
+        return best
     }
 
     /**
