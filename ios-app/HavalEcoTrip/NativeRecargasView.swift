@@ -80,9 +80,47 @@ final class ChargesLoader: ObservableObject {
     }
 }
 
+// MARK: - Abastecimento
+struct Refuel: Identifiable {
+    let raw: [String: Any]
+    init(_ r: [String: Any]) { raw = r }
+    private func n(_ k: String) -> Double { anyNum(raw[k]) }
+    var id: Double { n("timestamp_ms") }
+    var date: Date { Date(timeIntervalSince1970: id / 1000) }
+    var liters: Double { n("liters_added") }
+    var pricePerL: Double { n("price_per_liter") }
+    var total: Double { n("total_cost") }
+    var odometer: Double { n("odometer_km") }
+    var location: String { (raw["location_name"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "Posto" }
+    var valid: Bool { liters > 0 }
+}
+
+@MainActor
+final class RefuelsLoader: ObservableObject {
+    @Published var refuels: [Refuel] = []
+    @Published var diag = ""
+    private var base: String {
+        let u = Settings.bridgeURL.isEmpty ? AuthConfig.bridgeURL : Settings.bridgeURL
+        return u.hasSuffix("/") ? String(u.dropLast()) : u
+    }
+    func load() async {
+        guard Settings.isConfigured, let url = URL(string: "\(base)/api/refuels") else { return }
+        var req = URLRequest(url: url); req.timeoutInterval = 12
+        req.addValue("Bearer " + Settings.bridgeToken, forHTTPHeaderField: "Authorization")
+        guard let (data, resp) = try? await URLSession.shared.data(for: req),
+              (resp as? HTTPURLResponse)?.statusCode == 200 else { diag = "falha ao carregar"; return }
+        let any = try? JSONSerialization.jsonObject(with: data)
+        let arr = ((any as? [String: Any])?["refuels"] as? [[String: Any]]) ?? (any as? [[String: Any]]) ?? []
+        refuels = arr.map(Refuel.init).filter { $0.valid }.sorted { $0.id > $1.id }
+        diag = "recebidos \(arr.count)"
+    }
+}
+
 // MARK: - View
 struct NativeRecargasView: View {
     @StateObject private var loader = ChargesLoader()
+    @StateObject private var refLoader = RefuelsLoader()
+    @State private var source = 0       // 0=Recargas, 1=Abastecimento
     @State private var tab = 0          // 0=Histórico, 1=Estatísticas
     // 0=Hoje, 1=7d, 2=30d, 3=Tudo, 4=Calendário (intervalo). Persistido.
     @AppStorage("rec_period") private var period = 0
@@ -104,23 +142,28 @@ struct NativeRecargasView: View {
     private func dur(_ s: Double) -> String { let t = Int(s), h = t/3600, m = (t%3600)/60; return h > 0 ? "\(h)h \(m)min" : "\(m) min" }
     private static let df: DateFormatter = { let f = DateFormatter(); f.locale = Locale(identifier: "pt_BR"); f.dateFormat = "d MMM · HH:mm"; return f }()
 
-    private var filtered: [Charge] {
+    private func inPeriod(_ d: Date) -> Bool {
         let now = Date(); let cal = Calendar.current
         switch period {
-        case 0: return loader.charges.filter { cal.isDate($0.date, inSameDayAs: now) }
-        case 1: let lim = now.addingTimeInterval(-7*86400);  return loader.charges.filter { $0.date >= lim }
-        case 2: let lim = now.addingTimeInterval(-30*86400); return loader.charges.filter { $0.date >= lim }
+        case 0: return cal.isDate(d, inSameDayAs: now)
+        case 1: return d >= now.addingTimeInterval(-7*86400)
+        case 2: return d >= now.addingTimeInterval(-30*86400)
         case 4:
             let lo = cal.startOfDay(for: fromDate.wrappedValue)
             let hi = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: toDate.wrappedValue)) ?? toDate.wrappedValue
-            return loader.charges.filter { $0.date >= lo && $0.date < hi }
-        default: return loader.charges
+            return d >= lo && d < hi
+        default: return true
         }
     }
+    private var filtered: [Charge] { loader.charges.filter { inPeriod($0.date) } }
+    private var filteredRefuels: [Refuel] { refLoader.refuels.filter { inPeriod($0.date) } }
 
     var body: some View {
         ScrollView {
             VStack(spacing: 14) {
+                Picker("", selection: $source) {
+                    Text("Recargas").tag(0); Text("Abastecimento").tag(1)
+                }.pickerStyle(.segmented)
                 Picker("", selection: $tab) {
                     Text("Histórico").tag(0); Text("Estatísticas").tag(1)
                 }.pickerStyle(.segmented)
@@ -136,14 +179,15 @@ struct NativeRecargasView: View {
                     }
                 }
 
-                if tab == 0 { historico } else { estatisticas }
+                if source == 0 { if tab == 0 { historico } else { estatisticas } }
+                else { if tab == 0 { refHistorico } else { refEstatisticas } }
             }
             .padding(16)
         }
         .background(DS.bg.ignoresSafeArea())
         .overlay { if loader.loading && loader.charges.isEmpty { ProgressView().tint(DS.green) } }
-        .refreshable { await loader.load() }
-        .task { if loader.charges.isEmpty { await loader.load() } }
+        .refreshable { await loader.load(); await refLoader.load() }
+        .task { if loader.charges.isEmpty { await loader.load() }; if refLoader.refuels.isEmpty { await refLoader.load() } }
     }
 
     private var periodChips: some View {
@@ -286,6 +330,61 @@ struct NativeRecargasView: View {
                         Spacer()
                         Text("\(v.2)× · \(f0(v.0)) kWh").font(.caption).foregroundStyle(DS.muted)
                         Text(brl(v.1)).font(.system(size: 13, weight: .semibold)).foregroundStyle(DS.text).frame(minWidth: 72, alignment: .trailing)
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: Abastecimento
+    private var refHistorico: some View {
+        VStack(spacing: 14) {
+            if filteredRefuels.isEmpty {
+                Text("Nenhum abastecimento no período.").font(.subheadline).foregroundStyle(DS.muted)
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 20)
+            }
+            ForEach(filteredRefuels) { r in
+                DSCard {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            Image(systemName: "fuelpump.fill").font(.caption).foregroundStyle(DS.orange)
+                            Text(r.location).font(.system(size: 15, weight: .semibold)).foregroundStyle(DS.text).lineLimit(1)
+                            Spacer()
+                            Text(Self.df.string(from: r.date)).font(.caption).foregroundStyle(DS.muted)
+                        }
+                        HStack {
+                            DSMetric(value: f1(r.liters), unit: "L", label: "Litros", color: DS.orange)
+                            DSMetric(value: brl(r.total), label: "Total")
+                            DSMetric(value: perKwh(r.pricePerL), unit: "R$/L", label: "Preço")
+                        }
+                        if r.odometer > 0 {
+                            Text("Hodômetro: \(String(format: "%.0f", r.odometer)) km").font(.caption2).foregroundStyle(DS.muted)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var refEstatisticas: some View {
+        let f = filteredRefuels
+        let liters = f.reduce(0) { $0 + $1.liters }
+        let cost = f.reduce(0) { $0 + $1.total }
+        return VStack(spacing: 14) {
+            if f.isEmpty {
+                Text("Sem dados no período.").font(.subheadline).foregroundStyle(DS.muted).frame(maxWidth: .infinity, alignment: .leading).padding(.top, 20)
+            } else {
+                DSCard {
+                    HStack {
+                        DSMetric(value: "\(f.count)", label: "Abastec.", color: DS.orange)
+                        DSMetric(value: f1(liters), unit: "L", label: "Litros", color: DS.orange)
+                        DSMetric(value: brl(cost), label: "Custo total")
+                    }
+                }
+                DSCard {
+                    HStack {
+                        DSMetric(value: liters > 0 ? perKwh(cost/liters) : "—", unit: "R$/L", label: "Preço médio")
+                        DSMetric(value: brl(cost / Double(f.count)), label: "Custo médio")
                     }
                 }
             }

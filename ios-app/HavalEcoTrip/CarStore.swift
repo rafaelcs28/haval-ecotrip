@@ -55,12 +55,17 @@ final class CarStore: ObservableObject {
         started = true
         connectWS()
         startPolling()
-        lan.onResolve = { [weak self] hostPort in
-            guard let self else { return }
-            if let hp = hostPort { self.connectLAN(host: hp.0, port: hp.1) }
-            else { self.disconnectLAN() }
+        // LAN direta é OPCIONAL (default off). Ligar Bonjour dispara o prompt de
+        // "Rede Local" do iOS; se negado, pode bloquear a rota até o carro/bridge
+        // na Wi-Fi de casa. Só liga quando o usuário ativa em Configurações.
+        if UserDefaults.standard.bool(forKey: "lan_enabled") {
+            lan.onResolve = { [weak self] hostPort in
+                guard let self else { return }
+                if let hp = hostPort { self.connectLAN(host: hp.0, port: hp.1) }
+                else { self.disconnectLAN() }
+            }
+            lan.start()
         }
-        lan.start()
     }
 
     func stop() {

@@ -20,6 +20,7 @@ struct NativeConfigView: View {
     @State private var danger: Danger?
     @AppStorage("notif_expanded") private var notifExpanded = false
     @AppStorage("faceid_lock") private var faceIDLock = false
+    @AppStorage("lan_enabled") private var lanEnabled = false
 
     struct Danger: Identifiable { let id = UUID(); let title: String; let msg: String; let confirm: String; let action: () async -> Void }
 
@@ -80,6 +81,13 @@ struct NativeConfigView: View {
                         }
                     }
                 }
+                Divider().overlay(DS.border)
+                Toggle(isOn: $lanEnabled) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Label("LAN direta", systemImage: "wifi").font(.system(size: 14)).foregroundStyle(DS.text)
+                        Text("Conecta direto ao carro na mesma Wi-Fi. Reabra o app ao alterar.").font(.caption2).foregroundStyle(DS.muted)
+                    }
+                }.tint(DS.green)
                 Divider().overlay(DS.border)
                 rowButton(icon: "qrcode", title: "Parear carro", subtitle: "Gera um código pro app do carro") {
                     cfg.pairCode = nil; showPair = true; Task { await cfg.generatePair() }
