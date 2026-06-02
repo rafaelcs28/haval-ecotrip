@@ -10,9 +10,11 @@ import SwiftUI
 struct NativeDashView: View {
     @ObservedObject private var store = CarStore.shared
     @StateObject private var maint = MaintenanceStore()
+    @StateObject private var trips = TripsLoader()
     @State private var pending: PendingAction?
     @State private var busy = false
     @State private var showPreclimat = false
+    @State private var showMaint = false
 
     struct PendingAction: Identifiable {
         let id = UUID(); let name: String; let title: String; let confirm: String; let danger: Bool
@@ -42,13 +44,15 @@ struct NativeDashView: View {
                 tyresCard
                 doorsCard
                 windowsCard
-                serviceCard
+                revisaoCard
+                tripCard
             }
             .padding(16)
         }
         .background(DS.bg.ignoresSafeArea())
-        .onAppear { store.start(); Task { await maint.load() } }
+        .onAppear { store.start(); Task { await maint.load() }; Task { await trips.load() } }
         .sheet(isPresented: $showPreclimat) { PreclimatSheet() }
+        .sheet(isPresented: $showMaint) { MaintenanceSheet(store: maint) }
         .confirmationDialog(pending?.title ?? "", isPresented: .init(
             get: { pending != nil }, set: { if !$0 { pending = nil } }), presenting: pending) { p in
             Button(p.confirm, role: p.danger ? .destructive : nil) {
@@ -71,24 +75,31 @@ struct NativeDashView: View {
         .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 4)
     }
 
-    // MARK: trava + motor (ícones com confirmação)
+    // MARK: trava + motor (ícones com confirmação) + hodômetro/12V
     private var statusCard: some View {
         DSCard {
-            HStack(spacing: 16) {
-                iconButton(icon: store.isLocked ? "lock.fill" : "lock.open.fill",
-                           tint: store.isLocked ? DS.green : DS.orange,
-                           caption: !store.lockKnown ? "—" : (store.isLocked ? "Trancado" : "Destrancado")) {
-                    pending = store.isLocked
-                        ? .init(name: "lock_open", title: "Destravar carro?", confirm: "Destravar", danger: true)
-                        : .init(name: "lock_close", title: "Travar carro?", confirm: "Travar", danger: false)
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(spacing: 16) {
+                    iconButton(icon: store.isLocked ? "lock.fill" : "lock.open.fill",
+                               tint: store.isLocked ? DS.green : DS.orange,
+                               caption: !store.lockKnown ? "—" : (store.isLocked ? "Trancado" : "Destrancado")) {
+                        pending = store.isLocked
+                            ? .init(name: "lock_open", title: "Destravar carro?", confirm: "Destravar", danger: true)
+                            : .init(name: "lock_close", title: "Travar carro?", confirm: "Travar", danger: false)
+                    }
+                    iconButton(icon: "power", tint: store.engineOn ? DS.green : DS.muted,
+                               caption: store.engineOn ? "Ligado" : "Desligado") {
+                        pending = store.engineOn
+                            ? .init(name: "engine_off", title: "Desligar motor?", confirm: "Desligar", danger: true)
+                            : .init(name: "engine_on", title: "Ligar motor?", confirm: "Ligar", danger: false)
+                    }
+                    Spacer()
                 }
-                iconButton(icon: "power", tint: store.engineOn ? DS.green : DS.muted,
-                           caption: store.engineOn ? "Ligado" : "Desligado") {
-                    pending = store.engineOn
-                        ? .init(name: "engine_off", title: "Desligar motor?", confirm: "Desligar", danger: true)
-                        : .init(name: "engine_on", title: "Ligar motor?", confirm: "Ligar", danger: false)
+                Divider().overlay(DS.border)
+                HStack {
+                    DSMetric(value: store.odometerKm > 0 ? miles(store.odometerKm) : "—", unit: "km", label: "Hodômetro")
+                    if store.batt12vPct > 0 { DSMetric(value: f0(store.batt12vPct), unit: "%", label: "Bateria 12V") }
                 }
-                Spacer()
             }
         }
     }
@@ -217,38 +228,60 @@ struct NativeDashView: View {
         }
     }
 
-    // MARK: hodômetro + 12V + manutenção
-    private var serviceCard: some View {
-        DSCard(title: "Veículo", icon: "wrench.and.screwdriver.fill") {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack {
-                    DSMetric(value: store.odometerKm > 0 ? miles(store.odometerKm) : "—", unit: "km", label: "Hodômetro")
-                    if store.batt12vPct > 0 { DSMetric(value: f0(store.batt12vPct), unit: "%", label: "Bateria 12V") }
-                }
-                if !maint.items.isEmpty {
-                    Divider().overlay(DS.border)
-                    ForEach(maint.items.prefix(3)) { m in
-                        HStack(spacing: 8) {
-                            Circle().fill(m.statusColor).frame(width: 8, height: 8)
-                            Text(m.label ?? "Manutenção").font(.system(size: 13, weight: .medium)).foregroundStyle(DS.text)
-                            Spacer()
-                            Text(maintWhen(m)).font(.caption).foregroundStyle(DS.muted)
-                        }
+    // MARK: revisão (botão → popup com tudo)
+    private var revisaoCard: some View {
+        let next = maint.items.first
+        return DSCard {
+            Button { showMaint = true } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "wrench.and.screwdriver.fill").font(.subheadline).foregroundStyle(DS.muted)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Revisão").font(.system(size: 15, weight: .semibold)).foregroundStyle(DS.text)
+                        Text(next.map { "\($0.label ?? "Próxima") · \(maintWhen($0))" } ?? "Ver histórico e custos")
+                            .font(.caption).foregroundStyle(DS.muted)
                     }
+                    Spacer()
+                    if let n = next { Circle().fill(n.statusColor).frame(width: 9, height: 9) }
+                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(DS.muted)
+                }
+            }.buttonStyle(.plain)
+        }
+    }
+
+    private func maintWhen(_ m: MaintItem) -> String {
+        if let km = m.remaining_km { return km <= 0 ? "vencida" : "faltam \(miles(km)) km" }
+        if let d = m.remaining_days { return d <= 0 ? "vencida" : "faltam \(f0(d)) dias" }
+        return ""
+    }
+
+    // MARK: viagem em andamento (ou última)
+    @ViewBuilder private var tripCard: some View {
+        if store.tripActive {
+            DSCard(title: "Viagem em andamento", icon: "car.fill") {
+                tripMetrics(distKm: store.tripDistKm, timeSec: Double(store.tripTimeSec),
+                            netKwh: store.tripNetKwh, fuelL: store.tripFuelL)
+            }
+        } else if let t = trips.trips.first {
+            DSCard(title: "Última viagem", icon: "car.fill") {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(lastTripDate(t)).font(.caption).foregroundStyle(DS.muted).frame(maxWidth: .infinity, alignment: .leading)
+                    tripMetrics(distKm: t.distKm, timeSec: t.timeSec, netKwh: t.netKwh, fuelL: t.fuelL)
                 }
             }
         }
     }
 
-    private func maintWhen(_ m: MaintItem) -> String {
-        if let km = m.remaining_km {
-            if km <= 0 { return "vencida" }
-            return "faltam \(miles(km)) km"
+    private func tripMetrics(distKm: Double, timeSec: Double, netKwh: Double, fuelL: Double) -> some View {
+        let cons = distKm > 0.5 ? netKwh / distKm * 100 : 0
+        let h = Int(timeSec) / 3600, m = (Int(timeSec) % 3600) / 60
+        return HStack {
+            DSMetric(value: f1(distKm), unit: "km", label: "Distância", color: DS.teal)
+            DSMetric(value: h > 0 ? "\(h)h \(m)min" : "\(m) min", label: "Tempo")
+            DSMetric(value: f1(netKwh), unit: "kWh", label: "Energia", color: DS.green)
+            DSMetric(value: cons > 0 ? f1(cons) : "—", unit: "kWh/100", label: "Consumo")
         }
-        if let d = m.remaining_days {
-            if d <= 0 { return "vencida" }
-            return "faltam \(f0(d)) dias"
-        }
-        return ""
     }
+
+    private static let tripDF: DateFormatter = { let f = DateFormatter(); f.locale = Locale(identifier: "pt_BR"); f.dateFormat = "d MMM · HH:mm"; return f }()
+    private func lastTripDate(_ t: Trip) -> String { Self.tripDF.string(from: t.date) }
 }
