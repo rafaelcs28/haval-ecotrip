@@ -374,6 +374,10 @@ final class CarStore: ObservableObject {
     var rangeIceKm: Double { num("range_ice_km") }
     var fuelL: Double      { num("fuel_l") }
 
+    // Preços atuais (p/ estimar custo de viagem — autotrips não guarda custo)
+    var priceKwh: Double { num("price_kwh") }
+    var priceGas: Double { num("price_gas_per_l") }
+
     // Motor / trava / AC
     var engineOn: Bool { str("engine_state") == "1" }
     /// lock_state: 'off'=trancado, 'on'=destrancado (semântica do bridge).

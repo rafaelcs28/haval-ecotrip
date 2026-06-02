@@ -1,10 +1,13 @@
 //
 //  NativeViagensView.swift
-//  Aba Viagens — histórico de viagens (auto-trips). GET /api/autotrips.
-//  Histórico + Estatísticas, filtro por período com calendário.
+//  Aba Viagens — histórico (/api/autotrips). Nome (campo name + geocode de
+//  fallback), custo estimado (preço×energia), filtro Hoje/período/calendário.
+//  Card expansível: excluir, editar nome (/api/rename), ver trajeto (telemetry).
 //
 
 import SwiftUI
+import MapKit
+import CoreLocation
 import Charts
 
 private func anyNum2(_ v: Any?) -> Double {
@@ -23,17 +26,19 @@ struct Trip: Identifiable {
     private func n(_ k: String) -> Double { anyNum2(raw[k]) }
 
     var id: Double { let s = n("startMs"); return s > 0 ? s : n("tripId") }
+    var tripId: String { (raw["tripId"] as? String) ?? String(Int(id)) }
     var date: Date { Date(timeIntervalSince1970: id / 1000) }
     var distKm: Double { n("distKm") }
     var netKwh: Double { n("netKwh") }
     var fuelL: Double { n("fuelL") }
     var timeSec: Double { n("timeSec") }
-    var cost: Double {
-        if let d = raw["cost"] as? [String: Any] { return anyNum2(d["total"]) }
-        return n("cost")
-    }
+    var rawName: String? { (raw["name"] as? String).flatMap { $0.isEmpty ? nil : $0 } }
+    var knownStart: String? { raw["knownStart"] as? String }
+    var knownEnd: String? { raw["knownEnd"] as? String }
+    var startCoord: CLLocationCoordinate2D? { let la = n("startLat"), lo = n("startLng"); return (la != 0 && lo != 0) ? .init(latitude: la, longitude: lo) : nil }
+    var endCoord: CLLocationCoordinate2D? { let la = n("endLat"), lo = n("endLng"); return (la != 0 && lo != 0) ? .init(latitude: la, longitude: lo) : nil }
+    func cost(_ pKwh: Double, _ pGas: Double) -> Double { netKwh * pKwh + fuelL * pGas }
     var consumo: Double { distKm > 0.5 ? netKwh / distKm * 100 : 0 }
-    var rPerKm: Double { distKm > 0.5 ? cost / distKm : 0 }
     var valid: Bool { distKm > 0.1 || timeSec > 60 }
 }
 
@@ -42,19 +47,26 @@ final class TripsLoader: ObservableObject {
     @Published var trips: [Trip] = []
     @Published var loading = false
     @Published var diag = ""
+    @Published var geoNames: [Double: String] = [:]   // tripId(startMs) → "Bairro, Cidade"
+    private let geocoder = CLGeocoder()
 
     private var base: String {
         let u = Settings.bridgeURL.isEmpty ? AuthConfig.bridgeURL : Settings.bridgeURL
         return u.hasSuffix("/") ? String(u.dropLast()) : u
     }
+    private func req(_ path: String, _ method: String, _ body: [String: Any]? = nil) -> URLRequest? {
+        guard let url = URL(string: "\(base)\(path)") else { return nil }
+        var r = URLRequest(url: url); r.httpMethod = method; r.timeoutInterval = 12
+        r.addValue("Bearer " + Settings.bridgeToken, forHTTPHeaderField: "Authorization")
+        if let body { r.addValue("application/json", forHTTPHeaderField: "Content-Type"); r.httpBody = try? JSONSerialization.data(withJSONObject: body) }
+        return r
+    }
 
     func load() async {
-        guard Settings.isConfigured, let url = URL(string: "\(base)/api/autotrips") else { diag = "app não configurado"; return }
+        guard Settings.isConfigured, let r = req("/api/autotrips", "GET") else { diag = "app não configurado"; return }
         loading = true
-        var req = URLRequest(url: url); req.timeoutInterval = 12
-        req.addValue("Bearer " + Settings.bridgeToken, forHTTPHeaderField: "Authorization")
         do {
-            let (data, resp) = try await URLSession.shared.data(for: req)
+            let (data, resp) = try await URLSession.shared.data(for: r)
             let code = (resp as? HTTPURLResponse)?.statusCode ?? -1
             guard code == 200 else { diag = "HTTP \(code) em /api/autotrips"; loading = false; return }
             let any = try? JSONSerialization.jsonObject(with: data)
@@ -64,13 +76,49 @@ final class TripsLoader: ObservableObject {
         } catch { diag = "erro: \(error.localizedDescription)" }
         loading = false
     }
+
+    /// Nome de exibição: name salvo → conhecidos → geocode (bairro+cidade) → "Trajeto".
+    func displayName(_ t: Trip) -> String {
+        if let n = t.rawName { return n }
+        let ks = t.knownStart, ke = t.knownEnd
+        if ks != nil || ke != nil { return "\(ks ?? "?") → \(ke ?? "?")" }
+        return geoNames[t.id] ?? "Trajeto"
+    }
+    func geocodeIfNeeded(_ t: Trip) {
+        guard t.rawName == nil, t.knownStart == nil, t.knownEnd == nil, geoNames[t.id] == nil, let c = t.endCoord else { return }
+        geoNames[t.id] = "Trajeto"   // evita repetir
+        geocoder.reverseGeocodeLocation(CLLocation(latitude: c.latitude, longitude: c.longitude)) { [weak self] places, _ in
+            guard let p = places?.first else { return }
+            let parts = [p.subLocality ?? p.thoroughfare, p.locality].compactMap { $0 }
+            if !parts.isEmpty { Task { @MainActor in self?.geoNames[t.id] = parts.joined(separator: ", ") } }
+        }
+    }
+
+    func remove(_ tripId: String) async {
+        trips.removeAll { $0.tripId == tripId }
+        guard let r = req("/api/autotrips/\(tripId)", "DELETE") else { return }
+        _ = try? await URLSession.shared.data(for: r)
+    }
+    func rename(_ tripId: String, _ name: String) async {
+        guard let r = req("/api/rename", "POST", ["tripId": tripId, "type": "auto", "name": name]) else { return }
+        _ = try? await URLSession.shared.data(for: r)
+        await load()
+    }
 }
 
 struct NativeViagensView: View {
     @StateObject private var loader = TripsLoader()
+    @ObservedObject private var car = CarStore.shared
     @State private var tab = 0
-    @State private var period = 2
-    @State private var day = Date()
+    @AppStorage("via_period") private var period = 0
+    @AppStorage("via_from") private var fromTS: Double = 0
+    @AppStorage("via_to") private var toTS: Double = 0
+    @State private var showCal = false
+    @State private var expandedId: Double?
+    @State private var routeTrip: Trip?
+
+    private var fromDate: Binding<Date> { Binding(get: { fromTS > 0 ? Date(timeIntervalSince1970: fromTS) : Date() }, set: { fromTS = $0.timeIntervalSince1970 }) }
+    private var toDate: Binding<Date> { Binding(get: { toTS > 0 ? Date(timeIntervalSince1970: toTS) : Date() }, set: { toTS = $0.timeIntervalSince1970 }) }
 
     private func f0(_ v: Double) -> String { String(format: "%.0f", v) }
     private func f1(_ v: Double) -> String { String(format: "%.1f", v).replacingOccurrences(of: ".", with: ",") }
@@ -79,11 +127,15 @@ struct NativeViagensView: View {
     private static let df: DateFormatter = { let f = DateFormatter(); f.locale = Locale(identifier: "pt_BR"); f.dateFormat = "d MMM · HH:mm"; return f }()
 
     private var filtered: [Trip] {
-        let now = Date()
+        let now = Date(); let cal = Calendar.current
         switch period {
-        case 0: let lim = now.addingTimeInterval(-7*86400);  return loader.trips.filter { $0.date >= lim }
-        case 1: let lim = now.addingTimeInterval(-30*86400); return loader.trips.filter { $0.date >= lim }
-        case 3: let cal = Calendar.current; return loader.trips.filter { cal.isDate($0.date, inSameDayAs: day) }
+        case 0: return loader.trips.filter { cal.isDate($0.date, inSameDayAs: now) }
+        case 1: let lim = now.addingTimeInterval(-7*86400);  return loader.trips.filter { $0.date >= lim }
+        case 2: let lim = now.addingTimeInterval(-30*86400); return loader.trips.filter { $0.date >= lim }
+        case 4:
+            let lo = cal.startOfDay(for: fromDate.wrappedValue)
+            let hi = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: toDate.wrappedValue)) ?? toDate.wrappedValue
+            return loader.trips.filter { $0.date >= lo && $0.date < hi }
         default: return loader.trips
         }
     }
@@ -93,10 +145,12 @@ struct NativeViagensView: View {
             VStack(spacing: 14) {
                 Picker("", selection: $tab) { Text("Histórico").tag(0); Text("Estatísticas").tag(1) }.pickerStyle(.segmented)
                 periodChips
-                if period == 3 {
+                if period == 4 && showCal {
                     DSCard {
-                        DatePicker("", selection: $day, displayedComponents: .date)
-                            .datePickerStyle(.graphical).tint(DS.green).environment(\.locale, Locale(identifier: "pt_BR"))
+                        VStack(spacing: 10) {
+                            DatePicker("De", selection: fromDate, displayedComponents: .date)
+                            DatePicker("Até", selection: toDate, in: fromDate.wrappedValue..., displayedComponents: .date)
+                        }.font(.system(size: 14)).foregroundStyle(DS.text).tint(DS.green).environment(\.locale, Locale(identifier: "pt_BR"))
                     }
                 }
                 if tab == 0 { historico } else { estatisticas }
@@ -107,15 +161,20 @@ struct NativeViagensView: View {
         .overlay { if loader.loading && loader.trips.isEmpty { ProgressView().tint(DS.green) } }
         .refreshable { await loader.load() }
         .task { if loader.trips.isEmpty { await loader.load() } }
+        .sheet(item: $routeTrip) { t in RouteMapSheet(trip: t) }
     }
 
     private var periodChips: some View {
-        let opts = ["7 dias", "30 dias", "Tudo", "Calendário"]
-        return HStack(spacing: 8) {
+        let opts = ["Hoje", "7 dias", "30 dias", "Tudo", "Calendário"]
+        return HStack(spacing: 6) {
             ForEach(Array(opts.enumerated()), id: \.offset) { i, label in
                 let on = period == i
-                Button { period = i } label: {
-                    Text(label).font(.system(size: 12, weight: .bold)).frame(maxWidth: .infinity).frame(height: 36)
+                Button {
+                    if i == 4 { showCal = (period == 4) ? !showCal : true } else { showCal = false }
+                    period = i
+                } label: {
+                    Text(label).font(.system(size: 11, weight: .bold)).minimumScaleFactor(0.8).lineLimit(1)
+                        .frame(maxWidth: .infinity).frame(height: 36)
                         .foregroundStyle(on ? .black : DS.text).background(on ? DS.green : DS.panel2).clipShape(Capsule())
                 }
             }
@@ -135,26 +194,47 @@ struct NativeViagensView: View {
     }
 
     private func tripCard(_ t: Trip) -> some View {
-        DSCard {
+        let cost = t.cost(car.priceKwh, car.priceGas)
+        let expanded = expandedId == t.id
+        return DSCard {
             VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Image(systemName: "car.fill").font(.caption).foregroundStyle(DS.teal)
-                    Text(Self.df.string(from: t.date)).font(.system(size: 14, weight: .semibold)).foregroundStyle(DS.text)
-                    Spacer()
-                    Text(dur(t.timeSec)).font(.caption).foregroundStyle(DS.muted)
-                }
-                HStack {
-                    DSMetric(value: f1(t.distKm), unit: "km", label: "Distância", color: DS.teal)
-                    DSMetric(value: f1(t.netKwh), unit: "kWh", label: "Energia", color: DS.green)
-                    DSMetric(value: t.cost > 0 ? brl(t.cost) : "—", label: "Custo")
-                }
-                HStack(spacing: 14) {
-                    miniLabel("Consumo", t.consumo > 0 ? "\(f1(t.consumo)) kWh/100" : "—")
-                    miniLabel("R$/km", t.rPerKm > 0 ? brl(t.rPerKm) : "—")
-                    if t.fuelL > 0.05 { miniLabel("Gasolina", "\(f1(t.fuelL)) L") }
+                Button { withAnimation(.easeInOut(duration: 0.2)) { expandedId = expanded ? nil : t.id } } label: {
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            Image(systemName: "car.fill").font(.caption).foregroundStyle(DS.teal)
+                            Text(loader.displayName(t)).font(.system(size: 14, weight: .semibold)).foregroundStyle(DS.text).lineLimit(1)
+                            Spacer()
+                            Image(systemName: expanded ? "chevron.up" : "chevron.down").font(.caption2).foregroundStyle(DS.muted)
+                        }
+                        Text(Self.df.string(from: t.date)).font(.caption).foregroundStyle(DS.muted).frame(maxWidth: .infinity, alignment: .leading)
+                        HStack {
+                            DSMetric(value: f1(t.distKm), unit: "km", label: "Distância", color: DS.teal)
+                            DSMetric(value: f1(t.netKwh), unit: "kWh", label: "Energia", color: DS.green)
+                            DSMetric(value: cost > 0 ? brl(cost) : "—", label: "Custo")
+                        }
+                    }
+                }.buttonStyle(.plain)
+
+                if expanded {
+                    Divider().overlay(DS.border)
+                    HStack(spacing: 14) {
+                        miniLabel("Tempo", dur(t.timeSec))
+                        miniLabel("Consumo", t.consumo > 0 ? "\(f1(t.consumo)) kWh/100" : "—")
+                        if t.fuelL > 0.05 { miniLabel("Gasolina", "\(f1(t.fuelL)) L") }
+                    }
+                    RenameField(tripId: t.tripId, current: loader.displayName(t)) { name in
+                        Task { await loader.rename(t.tripId, name) }
+                    }
+                    HStack(spacing: 10) {
+                        DSActionButton(icon: "map.fill", title: "Ver trajeto", color: DS.teal) { routeTrip = t }
+                        DSActionButton(icon: "trash.fill", title: "Excluir", color: DS.red) {
+                            Task { await loader.remove(t.tripId); expandedId = nil }
+                        }
+                    }
                 }
             }
         }
+        .onAppear { loader.geocodeIfNeeded(t) }
     }
 
     private var estatisticas: some View {
@@ -162,30 +242,23 @@ struct NativeViagensView: View {
         let km = f.reduce(0) { $0 + $1.distKm }
         let kwh = f.reduce(0) { $0 + $1.netKwh }
         let fuel = f.reduce(0) { $0 + $1.fuelL }
-        let cost = f.reduce(0) { $0 + $1.cost }
+        let cost = f.reduce(0) { $0 + $1.cost(car.priceKwh, car.priceGas) }
         return VStack(spacing: 14) {
             if f.isEmpty {
-                Text("Sem dados no período.").font(.subheadline).foregroundStyle(DS.muted)
-                    .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 20)
+                Text("Sem dados no período.").font(.subheadline).foregroundStyle(DS.muted).frame(maxWidth: .infinity, alignment: .leading).padding(.top, 20)
             } else {
                 DSCard {
                     HStack {
                         DSMetric(value: "\(f.count)", label: "Viagens", color: DS.teal)
                         DSMetric(value: f0(km), unit: "km", label: "Distância", color: DS.green)
-                        DSMetric(value: brl(cost), label: "Custo total")
+                        DSMetric(value: brl(cost), label: "Custo est.")
                     }
                 }
                 DSCard {
                     HStack {
-                        DSMetric(value: km > 1 ? "\(f1(kwh/km*100))" : "—", unit: "kWh/100", label: "Consumo médio")
+                        DSMetric(value: km > 1 ? f1(kwh/km*100) : "—", unit: "kWh/100", label: "Consumo médio")
                         DSMetric(value: km > 1 ? brl(cost/km) : "—", label: "R$/km", color: DS.green)
                         DSMetric(value: f1(fuel), unit: "L", label: "Gasolina", color: DS.orange)
-                    }
-                }
-                DSCard {
-                    HStack {
-                        DSMetric(value: f1(km / Double(f.count)), unit: "km", label: "Média/viagem")
-                        DSMetric(value: f0(kwh), unit: "kWh", label: "Energia total", color: DS.green)
                     }
                 }
                 monthlyChart(f)
@@ -204,8 +277,7 @@ struct NativeViagensView: View {
             if buckets.count < 2 { Text("Precisa de mais de um mês de dados.").font(.caption).foregroundStyle(DS.muted) }
             else {
                 Chart(buckets) { b in BarMark(x: .value("Mês", b.label), y: .value("km", b.km)).foregroundStyle(DS.teal) }
-                    .frame(height: 160)
-                    .chartYAxis { AxisMarks { _ in AxisGridLine().foregroundStyle(DS.border); AxisValueLabel() } }
+                    .frame(height: 160).chartYAxis { AxisMarks { _ in AxisGridLine().foregroundStyle(DS.border); AxisValueLabel() } }
             }
         }
     }
@@ -215,5 +287,76 @@ struct NativeViagensView: View {
             Text(k.uppercased()).font(.system(size: 9, weight: .semibold)).foregroundStyle(DS.muted)
             Text(v).font(.system(size: 13, weight: .semibold)).foregroundStyle(DS.text)
         }.frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+// Campo de edição de nome (estado local + salvar)
+private struct RenameField: View {
+    let tripId: String
+    let current: String
+    let onSave: (String) -> Void
+    @State private var text = ""
+    @State private var loaded = false
+    var body: some View {
+        HStack {
+            TextField("Nome da viagem", text: $text)
+                .foregroundStyle(DS.text).padding(8).background(DS.panel2)
+                .clipShape(RoundedRectangle(cornerRadius: 9)).overlay(RoundedRectangle(cornerRadius: 9).stroke(DS.border, lineWidth: 1))
+            Button("Salvar") { if !text.isEmpty { onSave(text) } }
+                .font(.system(size: 13, weight: .bold)).foregroundStyle(DS.green)
+        }
+        .onAppear { if !loaded { text = current; loaded = true } }
+    }
+}
+
+// MARK: - Trajeto (polyline do telemetry)
+struct RouteMapSheet: View {
+    let trip: Trip
+    @Environment(\.dismiss) private var dismiss
+    @State private var coords: [CLLocationCoordinate2D] = []
+    @State private var loading = true
+
+    private var base: String {
+        let u = Settings.bridgeURL.isEmpty ? AuthConfig.bridgeURL : Settings.bridgeURL
+        return u.hasSuffix("/") ? String(u.dropLast()) : u
+    }
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                if coords.count > 1 {
+                    Map {
+                        MapPolyline(coordinates: coords).stroke(DS.green, lineWidth: 4)
+                        if let s = coords.first { Marker("Início", coordinate: s).tint(.green) }
+                        if let e = coords.last { Marker("Fim", coordinate: e).tint(.red) }
+                    }
+                    .mapStyle(.standard(pointsOfInterest: .excludingAll))
+                    .environment(\.colorScheme, .dark)
+                    .ignoresSafeArea(edges: .bottom)
+                } else if loading {
+                    ProgressView().tint(DS.green)
+                } else {
+                    Text("Trajeto indisponível.").font(.subheadline).foregroundStyle(DS.muted)
+                }
+            }
+            .background(DS.bg.ignoresSafeArea())
+            .navigationTitle("Trajeto").navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Concluído") { dismiss() } } }
+        }
+        .task { await load() }
+    }
+
+    private func load() async {
+        guard let url = URL(string: "\(base)/api/telemetry/\(trip.tripId)") else { loading = false; return }
+        var req = URLRequest(url: url); req.timeoutInterval = 15
+        req.addValue("Bearer " + Settings.bridgeToken, forHTTPHeaderField: "Authorization")
+        defer { loading = false }
+        guard let (data, _) = try? await URLSession.shared.data(for: req),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let samples = obj["samples"] as? [[String: Any]] else { return }
+        coords = samples.compactMap { s in
+            let la = anyNum2(s["lat"]), lo = anyNum2(s["lng"])
+            return (la != 0 && lo != 0) ? CLLocationCoordinate2D(latitude: la, longitude: lo) : nil
+        }
     }
 }

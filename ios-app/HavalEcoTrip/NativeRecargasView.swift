@@ -28,24 +28,24 @@ struct Charge: Identifiable {
 
     var id: Double { let v = n("timestamp_ms"); if v > 0 { return v }; let t = n("ts"); return t > 0 ? t : n("id") }
     var date: Date { Date(timeIntervalSince1970: id / 1000) }
-    var kwh: Double { n("kwh") }
+    // Campos REAIS do /api/charges: energy_kwh (na bateria) + location_name.
+    var kwh: Double { let e = n("energy_kwh"); return e > 0 ? e : n("kwh") }
     var chargerKwh: Double { n("charger_kwh") }
     var durationSec: Double { n("duration_sec") }
     var avgPowerKw: Double { n("avg_power_kw") }
     var socStart: Double { n("soc_start") }
     var socEnd: Double { n("soc_end") }
-    var location: String { (raw["location"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "Local desconhecido" }
-    var type: String { (raw["type"] as? String) ?? "recarga" }
+    var location: String { (raw["location_name"] as? String ?? raw["location"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "Local desconhecido" }
 
-    /// cost/override_cost podem ser objeto {total,perKwh} ou número solto.
+    /// cost_override / cost: objeto {total, perKwh} (ou número solto).
     private func cost(_ key: String) -> (Double, Double)? {
         if let d = raw[key] as? [String: Any] { return (anyNum(d["total"]), anyNum(d["perKwh"])) }
         if raw[key] != nil { let v = anyNum(raw[key]); if v > 0 { return (v, 0) } }
         return nil
     }
-    var costTotal: Double { (cost("override_cost") ?? cost("cost"))?.0 ?? 0 }
-    var costPerKwh: Double { (cost("override_cost") ?? cost("cost"))?.1 ?? 0 }
-    var isCharge: Bool { type != "abastecimento" && kwh > 0 }
+    var costTotal: Double { (cost("cost_override") ?? cost("cost"))?.0 ?? 0 }
+    var costPerKwh: Double { (cost("cost_override") ?? cost("cost"))?.1 ?? 0 }
+    var isCharge: Bool { kwh > 0 }
 }
 
 // MARK: - Loader
@@ -84,8 +84,18 @@ final class ChargesLoader: ObservableObject {
 struct NativeRecargasView: View {
     @StateObject private var loader = ChargesLoader()
     @State private var tab = 0          // 0=Histórico, 1=Estatísticas
-    @State private var period = 2       // 0=7d, 1=30d, 2=Tudo, 3=Calendário (dia)
-    @State private var day = Date()
+    // 0=Hoje, 1=7d, 2=30d, 3=Tudo, 4=Calendário (intervalo). Persistido.
+    @AppStorage("rec_period") private var period = 0
+    @AppStorage("rec_from") private var fromTS: Double = 0
+    @AppStorage("rec_to") private var toTS: Double = 0
+    @State private var showCal = false
+
+    private var fromDate: Binding<Date> {
+        Binding(get: { fromTS > 0 ? Date(timeIntervalSince1970: fromTS) : Date() }, set: { fromTS = $0.timeIntervalSince1970 })
+    }
+    private var toDate: Binding<Date> {
+        Binding(get: { toTS > 0 ? Date(timeIntervalSince1970: toTS) : Date() }, set: { toTS = $0.timeIntervalSince1970 })
+    }
 
     private func f0(_ v: Double) -> String { String(format: "%.0f", v) }
     private func f1(_ v: Double) -> String { String(format: "%.1f", v).replacingOccurrences(of: ".", with: ",") }
@@ -95,13 +105,15 @@ struct NativeRecargasView: View {
     private static let df: DateFormatter = { let f = DateFormatter(); f.locale = Locale(identifier: "pt_BR"); f.dateFormat = "d MMM · HH:mm"; return f }()
 
     private var filtered: [Charge] {
-        let now = Date()
+        let now = Date(); let cal = Calendar.current
         switch period {
-        case 0: let lim = now.addingTimeInterval(-7*86400);  return loader.charges.filter { $0.date >= lim }
-        case 1: let lim = now.addingTimeInterval(-30*86400); return loader.charges.filter { $0.date >= lim }
-        case 3:
-            let cal = Calendar.current
-            return loader.charges.filter { cal.isDate($0.date, inSameDayAs: day) }
+        case 0: return loader.charges.filter { cal.isDate($0.date, inSameDayAs: now) }
+        case 1: let lim = now.addingTimeInterval(-7*86400);  return loader.charges.filter { $0.date >= lim }
+        case 2: let lim = now.addingTimeInterval(-30*86400); return loader.charges.filter { $0.date >= lim }
+        case 4:
+            let lo = cal.startOfDay(for: fromDate.wrappedValue)
+            let hi = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: toDate.wrappedValue)) ?? toDate.wrappedValue
+            return loader.charges.filter { $0.date >= lo && $0.date < hi }
         default: return loader.charges
         }
     }
@@ -114,10 +126,12 @@ struct NativeRecargasView: View {
                 }.pickerStyle(.segmented)
 
                 periodChips
-                if period == 3 {
+                if period == 4 && showCal {
                     DSCard {
-                        DatePicker("", selection: $day, displayedComponents: .date)
-                            .datePickerStyle(.graphical).tint(DS.green)
+                        VStack(spacing: 10) {
+                            DatePicker("De", selection: fromDate, displayedComponents: .date)
+                            DatePicker("Até", selection: toDate, in: fromDate.wrappedValue..., displayedComponents: .date)
+                        }.font(.system(size: 14)).foregroundStyle(DS.text).tint(DS.green)
                             .environment(\.locale, Locale(identifier: "pt_BR"))
                     }
                 }
@@ -133,12 +147,16 @@ struct NativeRecargasView: View {
     }
 
     private var periodChips: some View {
-        let opts = ["7 dias", "30 dias", "Tudo", "Calendário"]
-        return HStack(spacing: 8) {
+        let opts = ["Hoje", "7 dias", "30 dias", "Tudo", "Calendário"]
+        return HStack(spacing: 6) {
             ForEach(Array(opts.enumerated()), id: \.offset) { i, label in
                 let on = period == i
-                Button { period = i } label: {
-                    Text(label).font(.system(size: 12, weight: .bold))
+                Button {
+                    if i == 4 { showCal = (period == 4) ? !showCal : true }  // re-clicar recolhe
+                    else { showCal = false }
+                    period = i
+                } label: {
+                    Text(label).font(.system(size: 11, weight: .bold)).minimumScaleFactor(0.8).lineLimit(1)
                         .frame(maxWidth: .infinity).frame(height: 36)
                         .foregroundStyle(on ? .black : DS.text).background(on ? DS.green : DS.panel2)
                         .clipShape(Capsule())
