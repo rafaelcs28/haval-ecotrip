@@ -25,7 +25,7 @@ struct NativeDriveView: View {
 
     var body: some View {
         ZStack {
-            if store.hasGps { FollowMap(lat: store.lat, lng: store.lng).ignoresSafeArea() }
+            if store.hasGps { FollowMap(lat: store.lat, lng: store.lng, heading: store.heading).ignoresSafeArea() }
             else { DS.bg.ignoresSafeArea() }
 
             VStack(spacing: 12) {
@@ -110,10 +110,60 @@ struct NativeDriveView: View {
     }
 }
 
+// MARK: - Ícone do carro (reprodução do _CAR_SVG do cluster iPad, visto de cima)
+struct CarBodyShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        let s = rect.width / 32
+        func p(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: x * s, y: y * s) }
+        var path = Path()
+        path.move(to: p(16, 1.5))
+        path.addCurve(to: p(22, 9), control1: p(20, 1.5), control2: p(22, 4.5))
+        path.addLine(to: p(22, 24))
+        path.addCurve(to: p(16, 30.5), control1: p(22, 28), control2: p(20, 30.5))
+        path.addCurve(to: p(10, 24), control1: p(12, 30.5), control2: p(10, 28))
+        path.addLine(to: p(10, 9))
+        path.addCurve(to: p(16, 1.5), control1: p(10, 4.5), control2: p(12, 1.5))
+        path.closeSubpath()
+        return path
+    }
+}
+private struct CarWindow: Shape {
+    let pts: [(CGFloat, CGFloat)]
+    func path(in rect: CGRect) -> Path {
+        let s = rect.width / 32
+        var path = Path()
+        for (i, pt) in pts.enumerated() {
+            let c = CGPoint(x: pt.0 * s, y: pt.1 * s)
+            if i == 0 { path.move(to: c) } else { path.addLine(to: c) }
+        }
+        path.closeSubpath()
+        return path
+    }
+}
+struct CarMarker: View {
+    var size: CGFloat = 40
+    var heading: Double = 0
+    private let bodyColor = Color(red: 0.796, green: 0.835, blue: 0.882)   // #cbd5e1
+    private let strokeColor = Color(red: 0.118, green: 0.161, blue: 0.231) // #1e293b
+    private let glass = Color(red: 0.2, green: 0.255, blue: 0.333)         // #334155
+    var body: some View {
+        ZStack {
+            CarBodyShape().fill(bodyColor)
+            CarBodyShape().stroke(strokeColor, lineWidth: size / 20)
+            CarWindow(pts: [(12.4, 8.5), (19.6, 8.5), (18.6, 12.5), (13.4, 12.5)]).fill(glass.opacity(0.75))
+            CarWindow(pts: [(13.2, 24.5), (18.8, 24.5), (17.9, 21.5), (14.1, 21.5)]).fill(glass.opacity(0.55))
+        }
+        .frame(width: size, height: size)
+        .rotationEffect(.degrees(heading))
+        .shadow(color: .black.opacity(0.5), radius: 3, y: 1)
+    }
+}
+
 // MARK: - Mapa escuro que segue o carro (zoom + reenquadramento; auto 10s)
 struct FollowMap: View {
     let lat: Double
     let lng: Double
+    var heading: Double = 0
     @State private var cam: MapCameraPosition = .automatic
     @State private var span = 0.004
     @State private var autoFollow = true
@@ -130,11 +180,7 @@ struct FollowMap: View {
     var body: some View {
         Map(position: $cam, interactionModes: .all) {
             Annotation("", coordinate: coord) {
-                ZStack {
-                    Circle().fill(DS.green.opacity(0.22)).frame(width: 42, height: 42)
-                    Circle().fill(DS.green).frame(width: 16, height: 16).overlay(Circle().stroke(.white, lineWidth: 2))
-                        .shadow(color: DS.green.opacity(0.6), radius: 6)
-                }
+                CarMarker(size: 42, heading: heading)
             }
         }
         .mapStyle(.standard(pointsOfInterest: .excludingAll))

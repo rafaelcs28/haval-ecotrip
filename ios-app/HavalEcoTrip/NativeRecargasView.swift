@@ -1,38 +1,51 @@
 //
 //  NativeRecargasView.swift
 //  Aba Recargas — Histórico + Estatísticas (sub-abas, como no PWA).
-//  Consome GET /api/charges. Filtro por período (com calendário no Personalizar).
+//  Consome GET /api/charges. Parsing tolerante (tipos mistos), filtro por
+//  período com calendário clicável.
 //
 
 import SwiftUI
 import Charts
 
-// MARK: - Modelo
-struct Charge: Decodable, Identifiable {
-    struct Cost: Decodable { let total: Double?; let perKwh: Double? }
-    let idValue: Double?
-    let ts: Double?
-    let timestamp_ms: Double?
-    let type: String?
-    let kwh: Double?
-    let charger_kwh: Double?
-    let duration_sec: Double?
-    let avg_power_kw: Double?
-    let soc_start: Double?
-    let soc_end: Double?
-    let cost: Cost?
-    let override_cost: Cost?
-    let location: String?
-
-    enum CodingKeys: String, CodingKey {
-        case idValue = "id", ts, timestamp_ms, type, kwh, charger_kwh, duration_sec
-        case avg_power_kw, soc_start, soc_end, cost, override_cost, location
+// Conversão tolerante (o bridge mistura Int/Double/String/NSNumber).
+private func anyNum(_ v: Any?) -> Double {
+    switch v {
+    case let d as Double: return d
+    case let i as Int: return Double(i)
+    case let n as NSNumber: return n.doubleValue
+    case let s as String: return Double(s) ?? 0
+    default: return 0
     }
-    var id: Double { timestamp_ms ?? ts ?? idValue ?? 0 }
+}
+
+// MARK: - Modelo (montado de [String: Any] pra tolerar variações do servidor)
+struct Charge: Identifiable {
+    let raw: [String: Any]
+    init(_ r: [String: Any]) { raw = r }
+
+    private func n(_ k: String) -> Double { anyNum(raw[k]) }
+
+    var id: Double { let v = n("timestamp_ms"); if v > 0 { return v }; let t = n("ts"); return t > 0 ? t : n("id") }
     var date: Date { Date(timeIntervalSince1970: id / 1000) }
-    var costTotal: Double { override_cost?.total ?? cost?.total ?? 0 }
-    var costPerKwh: Double { override_cost?.perKwh ?? cost?.perKwh ?? 0 }
-    var isCharge: Bool { (type ?? "recarga") == "recarga" && (kwh ?? 0) > 0 }
+    var kwh: Double { n("kwh") }
+    var chargerKwh: Double { n("charger_kwh") }
+    var durationSec: Double { n("duration_sec") }
+    var avgPowerKw: Double { n("avg_power_kw") }
+    var socStart: Double { n("soc_start") }
+    var socEnd: Double { n("soc_end") }
+    var location: String { (raw["location"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "Local desconhecido" }
+    var type: String { (raw["type"] as? String) ?? "recarga" }
+
+    /// cost/override_cost podem ser objeto {total,perKwh} ou número solto.
+    private func cost(_ key: String) -> (Double, Double)? {
+        if let d = raw[key] as? [String: Any] { return (anyNum(d["total"]), anyNum(d["perKwh"])) }
+        if raw[key] != nil { let v = anyNum(raw[key]); if v > 0 { return (v, 0) } }
+        return nil
+    }
+    var costTotal: Double { (cost("override_cost") ?? cost("cost"))?.0 ?? 0 }
+    var costPerKwh: Double { (cost("override_cost") ?? cost("cost"))?.1 ?? 0 }
+    var isCharge: Bool { type != "abastecimento" && kwh > 0 }
 }
 
 // MARK: - Loader
@@ -55,8 +68,8 @@ final class ChargesLoader: ObservableObject {
         do {
             let (data, resp) = try await URLSession.shared.data(for: req)
             guard (resp as? HTTPURLResponse)?.statusCode == 200 else { failed = true; loading = false; return }
-            let all = try JSONDecoder().decode([Charge].self, from: data)
-            charges = all.filter { $0.isCharge }.sorted { $0.id > $1.id }
+            let arr = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] ?? []
+            charges = arr.map(Charge.init).filter { $0.isCharge }.sorted { $0.id > $1.id }
         } catch { failed = true }
         loading = false
     }
@@ -66,9 +79,8 @@ final class ChargesLoader: ObservableObject {
 struct NativeRecargasView: View {
     @StateObject private var loader = ChargesLoader()
     @State private var tab = 0          // 0=Histórico, 1=Estatísticas
-    @State private var period = 2       // 0=7d, 1=30d, 2=Tudo, 3=Personalizar
-    @State private var from = Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date()
-    @State private var to = Date()
+    @State private var period = 2       // 0=7d, 1=30d, 2=Tudo, 3=Calendário (dia)
+    @State private var day = Date()
 
     private func f0(_ v: Double) -> String { String(format: "%.0f", v) }
     private func f1(_ v: Double) -> String { String(format: "%.1f", v).replacingOccurrences(of: ".", with: ",") }
@@ -83,9 +95,8 @@ struct NativeRecargasView: View {
         case 0: let lim = now.addingTimeInterval(-7*86400);  return loader.charges.filter { $0.date >= lim }
         case 1: let lim = now.addingTimeInterval(-30*86400); return loader.charges.filter { $0.date >= lim }
         case 3:
-            let lo = Calendar.current.startOfDay(for: from)
-            let hi = Calendar.current.date(byAdding: .day, value: 1, to: Calendar.current.startOfDay(for: to)) ?? to
-            return loader.charges.filter { $0.date >= lo && $0.date < hi }
+            let cal = Calendar.current
+            return loader.charges.filter { cal.isDate($0.date, inSameDayAs: day) }
         default: return loader.charges
         }
     }
@@ -100,10 +111,9 @@ struct NativeRecargasView: View {
                 periodChips
                 if period == 3 {
                     DSCard {
-                        VStack(spacing: 10) {
-                            DatePicker("De", selection: $from, displayedComponents: .date).tint(DS.green)
-                            DatePicker("Até", selection: $to, displayedComponents: .date).tint(DS.green)
-                        }.font(.system(size: 14)).foregroundStyle(DS.text)
+                        DatePicker("", selection: $day, displayedComponents: .date)
+                            .datePickerStyle(.graphical).tint(DS.green)
+                            .environment(\.locale, Locale(identifier: "pt_BR"))
                     }
                 }
 
@@ -118,7 +128,7 @@ struct NativeRecargasView: View {
     }
 
     private var periodChips: some View {
-        let opts = ["7 dias", "30 dias", "Tudo", "Personalizar"]
+        let opts = ["7 dias", "30 dias", "Tudo", "Calendário"]
         return HStack(spacing: 8) {
             ForEach(Array(opts.enumerated()), id: \.offset) { i, label in
                 let on = period == i
@@ -148,23 +158,22 @@ struct NativeRecargasView: View {
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
                     Image(systemName: "bolt.fill").font(.caption).foregroundStyle(DS.green)
-                    Text(c.location?.isEmpty == false ? c.location! : "Local desconhecido")
-                        .font(.system(size: 15, weight: .semibold)).foregroundStyle(DS.text).lineLimit(1)
+                    Text(c.location).font(.system(size: 15, weight: .semibold)).foregroundStyle(DS.text).lineLimit(1)
                     Spacer()
                     Text(Self.df.string(from: c.date)).font(.caption).foregroundStyle(DS.muted)
                 }
                 HStack {
-                    DSMetric(value: f1(c.kwh ?? 0), unit: "kWh", label: "Na bateria", color: DS.green)
+                    DSMetric(value: f1(c.kwh), unit: "kWh", label: "Na bateria", color: DS.green)
                     DSMetric(value: c.costTotal > 0 ? brl(c.costTotal) : "Grátis", label: "Custo", color: DS.text)
                     DSMetric(value: c.costPerKwh > 0 ? perKwh(c.costPerKwh) : "—", unit: "R$/kWh", label: "Preço")
                 }
                 HStack(spacing: 14) {
-                    miniLabel("SOC", "\(f0(c.soc_start ?? 0))% → \(f0(c.soc_end ?? 0))%")
-                    miniLabel("Duração", dur(c.duration_sec ?? 0))
-                    if let p = c.avg_power_kw, p > 0 { miniLabel("Potência média", "\(f1(p)) kW") }
+                    miniLabel("SOC", "\(f0(c.socStart))% → \(f0(c.socEnd))%")
+                    miniLabel("Duração", dur(c.durationSec))
+                    if c.avgPowerKw > 0 { miniLabel("Potência média", "\(f1(c.avgPowerKw)) kW") }
                 }
-                if let cg = c.charger_kwh, cg > 0 {
-                    Text("Carregador: \(f1(cg)) kWh (perdas \(f0(max(0, cg - (c.kwh ?? 0)))) kWh)")
+                if c.chargerKwh > 0 {
+                    Text("Carregador: \(f1(c.chargerKwh)) kWh (perdas \(f0(max(0, c.chargerKwh - c.kwh))) kWh)")
                         .font(.caption2).foregroundStyle(DS.muted)
                 }
             }
@@ -174,8 +183,8 @@ struct NativeRecargasView: View {
     // MARK: Estatísticas
     private var estatisticas: some View {
         let f = filtered
-        let kwh = f.reduce(0) { $0 + ($1.kwh ?? 0) }
-        let chg = f.reduce(0) { $0 + ($1.charger_kwh ?? 0) }
+        let kwh = f.reduce(0) { $0 + $1.kwh }
+        let chg = f.reduce(0) { $0 + $1.chargerKwh }
         let cost = f.reduce(0) { $0 + $1.costTotal }
         let losses = max(0, chg - kwh)
         let eff = chg > 0 ? kwh / chg * 100 : 0
@@ -194,7 +203,7 @@ struct NativeRecargasView: View {
                 DSCard {
                     HStack {
                         DSMetric(value: cost > 0 && kwh > 0 ? perKwh(cost/kwh) : "—", unit: "R$/kWh", label: "Preço médio")
-                        DSMetric(value: f0(eff), unit: "%", label: "Eficiência", color: DS.green)
+                        DSMetric(value: chg > 0 ? f0(eff) : "—", unit: "%", label: "Eficiência", color: DS.green)
                         DSMetric(value: f1(losses), unit: "kWh", label: "Perdas", color: DS.orange)
                     }
                 }
@@ -218,8 +227,7 @@ struct NativeRecargasView: View {
         var map: [String: (String, Double)] = [:]
         for c in f {
             let key = keyFmt.string(from: c.date)
-            let prev = map[key]?.1 ?? 0
-            map[key] = (fmt.string(from: c.date), prev + (c.kwh ?? 0))
+            map[key] = (fmt.string(from: c.date), (map[key]?.1 ?? 0) + c.kwh)
         }
         let buckets = map.sorted { $0.key < $1.key }.map { Bucket(id: $0.key, label: $0.value.0, kwh: $0.value.1) }
         return DSCard(title: "kWh por mês", icon: "chart.bar.fill") {
@@ -227,8 +235,7 @@ struct NativeRecargasView: View {
                 Text("Precisa de mais de um mês de dados.").font(.caption).foregroundStyle(DS.muted)
             } else {
                 Chart(buckets) { b in
-                    BarMark(x: .value("Mês", b.label), y: .value("kWh", b.kwh))
-                        .foregroundStyle(DS.green)
+                    BarMark(x: .value("Mês", b.label), y: .value("kWh", b.kwh)).foregroundStyle(DS.green)
                 }
                 .frame(height: 160)
                 .chartYAxis { AxisMarks { _ in AxisGridLine().foregroundStyle(DS.border); AxisValueLabel() } }
@@ -237,11 +244,10 @@ struct NativeRecargasView: View {
     }
 
     private func locationsCard(_ f: [Charge]) -> some View {
-        var map: [String: (Double, Double, Int)] = [:]   // kwh, cost, count
+        var map: [String: (Double, Double, Int)] = [:]
         for c in f {
-            let loc = (c.location?.isEmpty == false ? c.location! : "Desconhecido")
-            let p = map[loc] ?? (0, 0, 0)
-            map[loc] = (p.0 + (c.kwh ?? 0), p.1 + c.costTotal, p.2 + 1)
+            let p = map[c.location] ?? (0, 0, 0)
+            map[c.location] = (p.0 + c.kwh, p.1 + c.costTotal, p.2 + 1)
         }
         let rows = map.sorted { $0.value.0 > $1.value.0 }.prefix(6)
         return DSCard(title: "Por local", icon: "mappin.and.ellipse") {

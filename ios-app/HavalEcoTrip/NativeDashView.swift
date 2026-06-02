@@ -12,6 +12,8 @@ struct NativeDashView: View {
     @StateObject private var maint = MaintenanceStore()
     @State private var pending: PendingAction?
     @State private var busy = false
+    @State private var hazardOn = false
+    @State private var showPreclimat = false
 
     struct PendingAction: Identifiable {
         let id = UUID(); let name: String; let title: String; let confirm: String; let danger: Bool
@@ -47,6 +49,7 @@ struct NativeDashView: View {
         }
         .background(DS.bg.ignoresSafeArea())
         .onAppear { store.start(); Task { await maint.load() } }
+        .sheet(isPresented: $showPreclimat) { PreclimatSheet() }
         .confirmationDialog(pending?.title ?? "", isPresented: .init(
             get: { pending != nil }, set: { if !$0 { pending = nil } }), presenting: pending) { p in
             Button(p.confirm, role: p.danger ? .destructive : nil) {
@@ -85,6 +88,11 @@ struct NativeDashView: View {
                     pending = store.engineOn
                         ? .init(name: "engine_off", title: "Desligar motor?", confirm: "Desligar", danger: true)
                         : .init(name: "engine_on", title: "Ligar motor?", confirm: "Ligar", danger: false)
+                }
+                iconButton(icon: "exclamationmark.triangle.fill",
+                           tint: hazardOn ? DS.yellow : DS.muted,
+                           caption: hazardOn ? "Pisca on" : "Pisca") {
+                    hazardOn.toggle(); Task { await store.setHazard(hazardOn) }
                 }
                 Spacer()
             }
@@ -133,15 +141,28 @@ struct NativeDashView: View {
     private var climateCard: some View {
         let acActive = store.acOn
         return DSCard {
-            HStack(spacing: 12) {
-                Image(systemName: acActive ? "snowflake" : "thermometer.medium")
-                    .font(.title3).foregroundStyle(acActive ? DS.blue : DS.muted)
-                Text("\(f0(store.insideTemp))°").font(.system(size: 20, weight: .semibold, design: .rounded)).foregroundStyle(DS.text)
-                Text("interna").font(.caption).foregroundStyle(DS.muted)
-                Spacer()
-                Text("\(f0(store.outsideTemp))°").font(.system(size: 16, weight: .medium)).foregroundStyle(DS.text)
-                Text("externa").font(.caption).foregroundStyle(DS.muted)
-                if acActive { DSChip(text: "AC", color: DS.blue, filled: true) }
+            VStack(spacing: 12) {
+                HStack(spacing: 12) {
+                    Image(systemName: acActive ? "snowflake" : "thermometer.medium")
+                        .font(.title3).foregroundStyle(acActive ? DS.blue : DS.muted)
+                    Text("\(f0(store.insideTemp))°").font(.system(size: 20, weight: .semibold, design: .rounded)).foregroundStyle(DS.text)
+                    Text("interna").font(.caption).foregroundStyle(DS.muted)
+                    Spacer()
+                    Text("\(f0(store.outsideTemp))°").font(.system(size: 16, weight: .medium)).foregroundStyle(DS.text)
+                    Text("externa").font(.caption).foregroundStyle(DS.muted)
+                    if acActive { DSChip(text: "AC", color: DS.blue, filled: true) }
+                }
+                Button { showPreclimat = true } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "fan.fill").font(.subheadline)
+                        Text("Pré-climatização").font(.system(size: 14, weight: .semibold))
+                        Spacer()
+                        Image(systemName: "chevron.right").font(.caption).foregroundStyle(DS.muted)
+                    }
+                    .foregroundStyle(DS.text).frame(maxWidth: .infinity).frame(height: 44).padding(.horizontal, 14)
+                    .background(DS.panel2).clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 11).stroke(DS.border, lineWidth: 1))
+                }
             }
         }
     }

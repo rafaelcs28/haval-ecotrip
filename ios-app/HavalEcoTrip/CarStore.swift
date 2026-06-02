@@ -332,6 +332,7 @@ final class CarStore: ObservableObject {
     var lng: Double { num("gps_lng") }
     var hasGps: Bool { lat != 0 && lng != 0 }
     var coordinate: CLLocationCoordinate2D { .init(latitude: lat, longitude: lng) }
+    var heading: Double { num("car_heading") }   // rumo (graus, 0=N) p/ girar o ícone
 
     // Bateria 12V, hodômetro, pneus
     var batt12vPct: Double { num("batt_12v_pct") }
@@ -462,6 +463,11 @@ final class CarStore: ObservableObject {
     @discardableResult func setAcPower(_ on: Bool) async -> Bool {
         if sendLAN("hvac/power", on ? 1 : 0) { return true }
         return await command("/api/hvac/power", body: ["value": on ? 1 : 0])
+    }
+    /// Pisca-alerta (4 setas). Sem estado legível → controlado por toggle local.
+    @discardableResult func setHazard(_ on: Bool) async -> Bool {
+        if sendLAN("hazard", on ? 1 : 0) { return true }
+        return await command("/api/hazard", body: ["value": on ? 1 : 0])
     }
     @discardableResult func setPowerReserve(_ mode: Int) async -> Bool {
         if sendLAN("power_reserve", mode) { return true }
