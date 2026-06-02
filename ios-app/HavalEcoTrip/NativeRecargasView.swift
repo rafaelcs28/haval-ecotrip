@@ -7,6 +7,7 @@
 
 import SwiftUI
 import Charts
+import Combine
 
 // Conversão tolerante (o bridge mistura Int/Double/String/NSNumber).
 private func anyNum(_ v: Any?) -> Double {
@@ -51,56 +52,42 @@ struct Charge: Identifiable {
     var lossPct: Double { chargerKwh > 0 ? lossKwh / chargerKwh * 100 : 0 }
 }
 
-// MARK: - Loader
+// MARK: - Loader (offline-first via SyncedList)
 @MainActor
 final class ChargesLoader: ObservableObject {
-    @Published var charges: [Charge] = []
+    let sync = SyncedList(name: "charges", path: "/api/charges", idKeys: ["timestamp_ms", "ts", "id"], incremental: true, tombstoneKey: "charges")
     @Published var loading = false
     @Published var failed = false
     @Published var diag = ""
+    private var bag: AnyCancellable?
 
-    private var base: String {
-        let u = Settings.bridgeURL.isEmpty ? AuthConfig.bridgeURL : Settings.bridgeURL
-        return u.hasSuffix("/") ? String(u.dropLast()) : u
-    }
+    init() { bag = sync.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() } }
+
+    var charges: [Charge] { sync.items.map(Charge.init).filter { $0.isCharge }.sorted { $0.id > $1.id } }
 
     func load() async {
-        guard Settings.isConfigured, let url = URL(string: "\(base)/api/charges") else { diag = "app não configurado"; return }
-        loading = true; failed = false
-        var req = URLRequest(url: url); req.timeoutInterval = 12
-        req.addValue("Bearer " + Settings.bridgeToken, forHTTPHeaderField: "Authorization")
-        do {
-            let (data, resp) = try await URLSession.shared.data(for: req)
-            let code = (resp as? HTTPURLResponse)?.statusCode ?? -1
-            guard code == 200 else { failed = true; diag = "HTTP \(code) em /api/charges"; loading = false; return }
-            let any = try? JSONSerialization.jsonObject(with: data)
-            let arr = (any as? [[String: Any]]) ?? ((any as? [String: Any])?["charges"] as? [[String: Any]]) ?? []
-            let parsed = arr.map(Charge.init)
-            charges = parsed.filter { $0.isCharge }.sorted { $0.id > $1.id }
-            diag = "recebidas \(arr.count) · válidas \(charges.count)"
-        } catch { failed = true; diag = "erro: \(error.localizedDescription)" }
+        loading = sync.items.isEmpty
+        await sync.sync()
+        diag = "itens \(sync.items.count) · válidas \(charges.count)\(sync.pendingCount > 0 ? " · \(sync.pendingCount) pend." : "")"
         loading = false
     }
 
-    private func patch(_ path: String, _ body: [String: Any]) async {
-        guard let url = URL(string: "\(base)\(path)") else { return }
-        var r = URLRequest(url: url); r.httpMethod = "PATCH"; r.timeoutInterval = 12
-        r.addValue("Bearer " + Settings.bridgeToken, forHTTPHeaderField: "Authorization")
-        r.addValue("application/json", forHTTPHeaderField: "Content-Type")
-        r.httpBody = try? JSONSerialization.data(withJSONObject: body)
-        _ = try? await URLSession.shared.data(for: r)
-    }
-    /// Edita o MEDIDOR (charger_kwh), o custo total e/ou o local da recarga.
+    /// Edita medidor/custo/local — otimista local + fila offline (reenvia online).
     func edit(_ ts: Double, charger: Double?, total: Double?, location: String?, batteryKwh: Double) async {
-        let id = Int(ts)
-        if let charger, charger >= 0 { await patch("/api/charges/\(id)/charger_kwh", ["charger_kwh": charger]) }
+        let id = Int(ts); let lid = "\(Int(ts))"
+        if let charger, charger >= 0 {
+            await sync.mutate(localId: lid, apply: { var d = $0; d["charger_kwh"] = charger; return d },
+                              method: "PATCH", opPath: "/api/charges/\(id)/charger_kwh", body: ["charger_kwh": charger])
+        }
         if let total, total >= 0 {
-            await patch("/api/charges/\(id)/cost", ["total": total, "per_kwh": batteryKwh > 0 ? total / batteryKwh : 0])
+            let perKwh = batteryKwh > 0 ? total / batteryKwh : 0
+            await sync.mutate(localId: lid, apply: { var d = $0; d["cost_override"] = ["total": total, "perKwh": perKwh]; return d },
+                              method: "PATCH", opPath: "/api/charges/\(id)/cost", body: ["total": total, "per_kwh": perKwh])
         }
         if let location, !location.isEmpty {
-            await patch("/api/charges/\(id)/location", ["name": location, "save_known": true])
+            await sync.mutate(localId: lid, apply: { var d = $0; d["location_name"] = location; return d },
+                              method: "PATCH", opPath: "/api/charges/\(id)/location", body: ["name": location, "save_known": true])
         }
-        await load()
     }
 }
 
@@ -121,23 +108,13 @@ struct Refuel: Identifiable {
 
 @MainActor
 final class RefuelsLoader: ObservableObject {
-    @Published var refuels: [Refuel] = []
+    // Abastecimentos não têm ?since= no bridge → full refresh, mas cacheado (offline).
+    let sync = SyncedList(name: "refuels", path: "/api/refuels", idKeys: ["timestamp_ms", "id"], incremental: false, arrayKey: "refuels")
     @Published var diag = ""
-    private var base: String {
-        let u = Settings.bridgeURL.isEmpty ? AuthConfig.bridgeURL : Settings.bridgeURL
-        return u.hasSuffix("/") ? String(u.dropLast()) : u
-    }
-    func load() async {
-        guard Settings.isConfigured, let url = URL(string: "\(base)/api/refuels") else { return }
-        var req = URLRequest(url: url); req.timeoutInterval = 12
-        req.addValue("Bearer " + Settings.bridgeToken, forHTTPHeaderField: "Authorization")
-        guard let (data, resp) = try? await URLSession.shared.data(for: req),
-              (resp as? HTTPURLResponse)?.statusCode == 200 else { diag = "falha ao carregar"; return }
-        let any = try? JSONSerialization.jsonObject(with: data)
-        let arr = ((any as? [String: Any])?["refuels"] as? [[String: Any]]) ?? (any as? [[String: Any]]) ?? []
-        refuels = arr.map(Refuel.init).filter { $0.valid }.sorted { $0.id > $1.id }
-        diag = "recebidos \(arr.count)"
-    }
+    private var bag: AnyCancellable?
+    init() { bag = sync.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() } }
+    var refuels: [Refuel] { sync.items.map(Refuel.init).filter { $0.valid }.sorted { $0.id > $1.id } }
+    func load() async { await sync.sync() }
 }
 
 // MARK: - View

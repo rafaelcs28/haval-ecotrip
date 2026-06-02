@@ -48,18 +48,16 @@ struct LogEvent: Identifiable {
 
 struct LogsSheet: View {
     @Environment(\.dismiss) private var dismiss
-    @State private var all: [LogEvent] = []
+    // Eventos offline-first: carrega do disco e sincroniza só o novo (?since=).
+    @StateObject private var events = SyncedList(name: "events", path: "/api/events", idKeys: ["id", "ts"], incremental: true)
     @State private var loading = true
     @State private var cat = "Tudo"
     @State private var period = 0   // 0=Tudo,1=Hoje,2=7d,3=30d
     @State private var search = ""
 
+    private var all: [LogEvent] { events.items.map(LogEvent.init).sorted { $0.id > $1.id } }
     private let cats = ["Tudo", "Motor", "Viagens", "Recarga", "Trava", "Portas", "Vidros", "AC", "Manut."]
     private static let df: DateFormatter = { let f = DateFormatter(); f.locale = Locale(identifier: "pt_BR"); f.dateFormat = "d MMM HH:mm"; return f }()
-    private var base: String {
-        let u = Settings.bridgeURL.isEmpty ? AuthConfig.bridgeURL : Settings.bridgeURL
-        return u.hasSuffix("/") ? String(u.dropLast()) : u
-    }
 
     private var filtered: [LogEvent] {
         let now = Date(); let cal = Calendar.current
@@ -118,16 +116,6 @@ struct LogsSheet: View {
             .navigationTitle("Logs de eventos").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Concluído") { dismiss() } } }
         }
-        .task { await load() }
-    }
-
-    private func load() async {
-        defer { loading = false }
-        guard let url = URL(string: "\(base)/api/events") else { return }
-        var req = URLRequest(url: url); req.timeoutInterval = 15
-        req.addValue("Bearer " + Settings.bridgeToken, forHTTPHeaderField: "Authorization")
-        guard let (data, _) = try? await URLSession.shared.data(for: req),
-              let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return }
-        all = arr.map(LogEvent.init).sorted { $0.id > $1.id }
+        .task { loading = events.items.isEmpty; await events.sync(); loading = false }
     }
 }

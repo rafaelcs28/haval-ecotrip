@@ -9,6 +9,7 @@ import SwiftUI
 import MapKit
 import CoreLocation
 import Charts
+import Combine
 
 private func anyNum2(_ v: Any?) -> Double {
     switch v {
@@ -44,36 +45,21 @@ struct Trip: Identifiable {
 
 @MainActor
 final class TripsLoader: ObservableObject {
-    @Published var trips: [Trip] = []
+    let sync = SyncedList(name: "autotrips", path: "/api/autotrips", idKeys: ["startMs", "tripId"], incremental: true, tombstoneKey: "autotrips")
     @Published var loading = false
     @Published var diag = ""
     @Published var geoNames: [Double: String] = [:]   // tripId(startMs) → "Bairro, Cidade"
     private let geocoder = CLGeocoder()
+    private var bag: AnyCancellable?
 
-    private var base: String {
-        let u = Settings.bridgeURL.isEmpty ? AuthConfig.bridgeURL : Settings.bridgeURL
-        return u.hasSuffix("/") ? String(u.dropLast()) : u
-    }
-    private func req(_ path: String, _ method: String, _ body: [String: Any]? = nil) -> URLRequest? {
-        guard let url = URL(string: "\(base)\(path)") else { return nil }
-        var r = URLRequest(url: url); r.httpMethod = method; r.timeoutInterval = 12
-        r.addValue("Bearer " + Settings.bridgeToken, forHTTPHeaderField: "Authorization")
-        if let body { r.addValue("application/json", forHTTPHeaderField: "Content-Type"); r.httpBody = try? JSONSerialization.data(withJSONObject: body) }
-        return r
-    }
+    init() { bag = sync.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() } }
+
+    var trips: [Trip] { sync.items.map(Trip.init).filter { $0.valid }.sorted { $0.id > $1.id } }
 
     func load() async {
-        guard Settings.isConfigured, let r = req("/api/autotrips", "GET") else { diag = "app não configurado"; return }
-        loading = true
-        do {
-            let (data, resp) = try await URLSession.shared.data(for: r)
-            let code = (resp as? HTTPURLResponse)?.statusCode ?? -1
-            guard code == 200 else { diag = "HTTP \(code) em /api/autotrips"; loading = false; return }
-            let any = try? JSONSerialization.jsonObject(with: data)
-            let arr = (any as? [[String: Any]]) ?? ((any as? [String: Any])?["trips"] as? [[String: Any]]) ?? []
-            trips = arr.map(Trip.init).filter { $0.valid }.sorted { $0.id > $1.id }
-            diag = "recebidas \(arr.count) · válidas \(trips.count)"
-        } catch { diag = "erro: \(error.localizedDescription)" }
+        loading = sync.items.isEmpty
+        await sync.sync()
+        diag = "itens \(sync.items.count) · válidas \(trips.count)\(sync.pendingCount > 0 ? " · \(sync.pendingCount) pend." : "")"
         loading = false
     }
 
@@ -95,14 +81,20 @@ final class TripsLoader: ObservableObject {
     }
 
     func remove(_ tripId: String) async {
-        trips.removeAll { $0.tripId == tripId }
-        guard let r = req("/api/autotrips/\(tripId)", "DELETE") else { return }
-        _ = try? await URLSession.shared.data(for: r)
+        // localId = startMs (id da lista). Remove local + enfileira DELETE.
+        if let it = sync.items.first(where: { ("\($0["tripId"] ?? "")") == tripId }) {
+            let lid = "\(it["startMs"] ?? tripId)"
+            await sync.mutate(localId: lid, apply: { $0 }, method: "DELETE", opPath: "/api/autotrips/\(tripId)", body: nil)
+        } else {
+            await sync.mutate(localId: tripId, apply: { $0 }, method: "DELETE", opPath: "/api/autotrips/\(tripId)", body: nil)
+        }
     }
     func rename(_ tripId: String, _ name: String) async {
-        guard let r = req("/api/rename", "POST", ["tripId": tripId, "type": "auto", "name": name]) else { return }
-        _ = try? await URLSession.shared.data(for: r)
-        await load()
+        if let it = sync.items.first(where: { ("\($0["tripId"] ?? "")") == tripId }) {
+            let lid = "\(it["startMs"] ?? tripId)"
+            await sync.mutate(localId: lid, apply: { var d = $0; d["name"] = name; return d },
+                              method: "POST", opPath: "/api/rename", body: ["tripId": tripId, "type": "auto", "name": name])
+        }
     }
 }
 

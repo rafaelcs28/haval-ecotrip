@@ -120,7 +120,7 @@ final class CarStore: ObservableObject {
         guard started else { return }
         ws = nil
         let delay = reconnectDelay
-        reconnectDelay = min(reconnectDelay * 2, 15)
+        reconnectDelay = min(reconnectDelay * 2, 5)   // recupera o WS rápido (máx 5s)
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
             if self.started, self.ws == nil { self.connectWS() }
@@ -133,11 +133,12 @@ final class CarStore: ObservableObject {
         pollTask?.cancel()
         pollTask = Task { [weak self] in
             while let self, self.started, !Task.isCancelled {
-                // Só puxa por HTTP quando o WS não está fresco (evita dobrar tráfego).
-                if !self.connected || (self.lastUpdate.map { Date().timeIntervalSince($0) > 5 } ?? true) {
-                    await self.pollOnce()
-                }
-                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                // LAN ativa entrega ~10 Hz pelo WS local (>4/s) → não precisa poll cloud.
+                // Sem LAN: poll FIXO a cada 2s garante atualização contínua mesmo se o
+                // WS cloud travar (era a causa do "trava e volta"). O WS, quando vivo,
+                // ainda traz updates mais frequentes entre os polls.
+                if !self.lanConnected { await self.pollOnce() }
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
             }
         }
     }

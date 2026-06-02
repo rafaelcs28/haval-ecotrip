@@ -35,6 +35,7 @@
 		659B7DF18D1CC3CBBC1615F3 /* ChargeActivityLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6A433A5AA48336FD73F1C85 /* ChargeActivityLiveActivity.swift */; };
 		6601E0AF99CFBF6068D0180D /* NativeDashView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0412CD48BFB11B79D8D550D4 /* NativeDashView.swift */; };
 		694901AB2FD60B4D5A1322DA /* NativeRecargasView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB5145A32C36D0D8E2E36E83 /* NativeRecargasView.swift */; };
+		6B3EDE545B2502D265805216 /* OfflineSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2EBD85F9B7D028E3D520ED77 /* OfflineSync.swift */; };
 		6D2D2B81A43BB7E8D26EE81F /* SongProActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF8BF0D6E8837DEC20056AB8 /* SongProActivityAttributes.swift */; };
 		77472ED6F598E53605506B96 /* ChargeActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = C110A5E3EADD0B1D4DA52BE6 /* ChargeActivityAttributes.swift */; };
 		783721D1E37916F23F2149D8 /* BydSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = E810689502D9D028774D6792 /* BydSettings.swift */; };
@@ -120,6 +121,7 @@
 		25AF744D0A813EC24608D127 /* ConfigSheets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigSheets.swift; sourceTree = "<group>"; };
 		26B936D2B31C5DE61815546A /* HavalEcoTrip-dev.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "HavalEcoTrip-dev.entitlements"; sourceTree = "<group>"; };
 		2A0F1250A4346D17F0539FE8 /* MotorLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MotorLiveActivity.swift; sourceTree = "<group>"; };
+		2EBD85F9B7D028E3D520ED77 /* OfflineSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OfflineSync.swift; sourceTree = "<group>"; };
 		2F97B54C85FEC5A112CB0C9E /* BackgroundRefresh.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundRefresh.swift; sourceTree = "<group>"; };
 		33D5F8203565F8E20D91E100 /* ShortcutManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutManager.swift; sourceTree = "<group>"; };
 		36AA01E4F54D0727EF341F49 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
@@ -210,6 +212,7 @@
 				C0D6E362CB348E539FA519CC /* NativeDriveView.swift */,
 				FB5145A32C36D0D8E2E36E83 /* NativeRecargasView.swift */,
 				638ACE606ED94D317501DB0E /* NativeViagensView.swift */,
+				2EBD85F9B7D028E3D520ED77 /* OfflineSync.swift */,
 				6215EB2F3EA8C80FA49D1477 /* PreclimatSheet.swift */,
 				B41BC4A6A889A1B5BBFCF7C6 /* PwaWebView.swift */,
 				0AFED4CCA277E184649006B9 /* RemoteNotifications.swift */,
@@ -496,6 +499,7 @@
 				8B73DFD0957C51F2398BED33 /* NativeDriveView.swift in Sources */,
 				694901AB2FD60B4D5A1322DA /* NativeRecargasView.swift in Sources */,
 				62435AEEC1C0E57CFBB27ABE /* NativeViagensView.swift in Sources */,
+				6B3EDE545B2502D265805216 /* OfflineSync.swift in Sources */,
 				0C3838E769FD23A972E10B3E /* PreClimatActivityAttributes.swift in Sources */,
 				A01430293347A18D099263AF /* PreclimatSheet.swift in Sources */,
 				5E3E822BD69F7F11ED12B2D6 /* PwaWebView.swift in Sources */,

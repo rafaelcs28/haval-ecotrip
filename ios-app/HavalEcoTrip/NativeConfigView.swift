@@ -122,8 +122,8 @@ struct NativeConfigView: View {
                 Divider().overlay(DS.border)
                 rowButton(icon: "square.and.arrow.down", title: "Importar backup", subtitle: nil) { importing = true }
                 Divider().overlay(DS.border)
-                rowButton(icon: "trash", title: "Limpar cache local", subtitle: "Só neste aparelho") {
-                    URLCache.shared.removeAllCachedResponses(); cfg.toast = "Cache limpo"
+                rowButton(icon: "trash", title: "Limpar cache local", subtitle: "Apaga os dados baixados; recarrega tudo na próxima abertura") {
+                    OfflineCache.clearAll(); cfg.toast = "Cache limpo — reabra as abas"
                 }
                 Divider().overlay(DS.border)
                 ConfirmRow(icon: "exclamationmark.triangle.fill", title: "Apagar dados do servidor", destructive: true,
