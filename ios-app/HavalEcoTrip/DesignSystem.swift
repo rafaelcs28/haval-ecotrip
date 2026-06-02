@@ -83,6 +83,55 @@ struct DSMetric: View {
     }
 }
 
+/// Botão de ação grande (ícone + texto), toque fácil. `busy` mostra spinner.
+struct DSActionButton: View {
+    let icon: String
+    let title: String
+    var color: Color = DS.blue
+    var busy: Bool = false
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                if busy { ProgressView().tint(.black) }
+                else { Image(systemName: icon).font(.headline) }
+                Text(title).font(.system(size: 16, weight: .bold))
+            }
+            .frame(maxWidth: .infinity).frame(height: 52)
+            .foregroundStyle(.black)
+            .background(color)
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+        .disabled(busy)
+    }
+}
+
+/// Seletor de opções em coluna/linha, alvo de toque grande (usado nos sheets).
+struct DSChoiceRow<T: Hashable>: View {
+    let options: [(T, String)]
+    let selected: T
+    var color: Color = DS.green
+    let onPick: (T) -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ForEach(Array(options.enumerated()), id: \.offset) { _, opt in
+                let on = opt.0 == selected
+                Button { onPick(opt.0) } label: {
+                    Text(opt.1)
+                        .font(.system(size: 15, weight: .bold))
+                        .frame(maxWidth: .infinity).frame(height: 50)
+                        .foregroundStyle(on ? Color.black : DS.text)
+                        .background(on ? color : DS.panel2)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 12).stroke(on ? .clear : DS.border, lineWidth: 1))
+                }
+            }
+        }
+    }
+}
+
 /// Chip/pill (estado, marcha, etc.)
 struct DSChip: View {
     let text: String

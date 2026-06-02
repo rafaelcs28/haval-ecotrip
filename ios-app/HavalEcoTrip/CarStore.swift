@@ -22,6 +22,11 @@ final class CarStore: ObservableObject {
     @Published private(set) var raw: [String: Any] = [:]
     @Published private(set) var connected = false
     @Published private(set) var lastUpdate: Date?
+    @Published private(set) var address: String = ""
+
+    private let geocoder = CLGeocoder()
+    private var lastGeoCoord: CLLocationCoordinate2D?
+    private var lastGeoAt: Date = .distantPast
 
     private var ws: URLSessionWebSocketTask?
     private var session: URLSession = .shared
@@ -135,6 +140,31 @@ final class CarStore: ObservableObject {
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
         for (k, v) in obj { raw[k] = v }
         lastUpdate = Date()
+        updateAddressIfNeeded()
+    }
+
+    /// Geocodifica o endereço da posição atual — só quando move >60m e no
+    /// máximo a cada 20s (CLGeocoder tem rate limit).
+    private func updateAddressIfNeeded() {
+        guard hasGps else { return }
+        let c = coordinate
+        if let last = lastGeoCoord {
+            let moved = CLLocation(latitude: last.latitude, longitude: last.longitude)
+                .distance(from: CLLocation(latitude: c.latitude, longitude: c.longitude))
+            if moved < 60 && Date().timeIntervalSince(lastGeoAt) < 20 { return }
+        }
+        lastGeoCoord = c; lastGeoAt = Date()
+        geocoder.reverseGeocodeLocation(CLLocation(latitude: c.latitude, longitude: c.longitude)) { [weak self] places, _ in
+            guard let p = places?.first else { return }
+            var line = ""
+            if let r = p.thoroughfare {
+                line = r
+                if let n = p.subThoroughfare { line += ", \(n)" }
+            }
+            let bairro = p.subLocality ?? p.locality ?? ""
+            if !bairro.isEmpty { line = line.isEmpty ? bairro : "\(line) · \(bairro)" }
+            Task { @MainActor in self?.address = line }
+        }
     }
 
     // MARK: - Acessores tolerantes (o JSON mistura String e Number)
@@ -235,6 +265,33 @@ final class CarStore: ObservableObject {
     var tripFuelL: Double   { tnum("fuelL") }
     var tripAvgKmh: Double  { tnum("avgSpeedKmh") }
 
+    // Motor térmico (autonomia + tanque)
+    var rangeIceKm: Double { num("range_ice_km") }
+    var fuelL: Double      { num("fuel_l") }
+
+    // Motor / trava / AC
+    var engineOn: Bool { str("engine_state") == "1" }
+    /// lock_state: 'off'=trancado, 'on'=destrancado (semântica do bridge).
+    var lockKnown: Bool { let s = str("lock_state"); return s == "on" || s == "off" }
+    var isLocked: Bool  { str("lock_state") == "off" }
+    /// AC ligado pelo mestre hvac_power_mode (1) — fallback ac_state.
+    var acOn: Bool { ["1", "on", "true"].contains(str("hvac_power_mode").lowercased()) || str("ac_state") == "on" }
+
+    // Portas / janelas / teto abertos ('on' = aberto)
+    private func openLabels(_ map: [(String, String)]) -> [String] {
+        map.filter { str($0.0) == "on" }.map { $0.1 }
+    }
+    var openings: [String] {
+        openLabels([
+            ("door_fl", "Porta diant. esq."), ("door_fr", "Porta diant. dir."),
+            ("door_rl", "Porta tras. esq."),  ("door_rr", "Porta tras. dir."),
+            ("door_trunk", "Porta-malas"),
+            ("window_fl", "Vidro diant. esq."), ("window_fr", "Vidro diant. dir."),
+            ("window_rl", "Vidro tras. esq."),  ("window_rr", "Vidro tras. dir."),
+            ("sunroof", "Teto solar"),
+        ])
+    }
+
     // MARK: - Comandos (POST /api/<path>)
 
     @discardableResult
@@ -248,5 +305,25 @@ final class CarStore: ObservableObject {
             let (_, resp) = try await session.data(for: req)
             return (resp as? HTTPURLResponse)?.statusCode == 200
         } catch { return false }
+    }
+
+    // Atalhos de comando (mesmos endpoints/payloads do PWA)
+    @discardableResult func action(_ name: String) async -> Bool {
+        await command("/api/action/\(name)", body: [:])
+    }
+    @discardableResult func setDriveMode(_ mode: Int) async -> Bool {
+        await command("/api/drive-mode", body: ["mode": mode])
+    }
+    @discardableResult func setRegen(_ level: Int) async -> Bool {
+        await command("/api/regen-level", body: ["level": level])
+    }
+    @discardableResult func setOnePedal(_ on: Bool) async -> Bool {
+        await command("/api/one-pedal", body: ["enable": on ? 1 : 0])
+    }
+    @discardableResult func setEsp(_ on: Bool) async -> Bool {
+        await command("/api/esp", body: ["enable": on ? 1 : 0])
+    }
+    @discardableResult func setAcPower(_ on: Bool) async -> Bool {
+        await command("/api/hvac/power", body: ["value": on ? 1 : 0])
     }
 }

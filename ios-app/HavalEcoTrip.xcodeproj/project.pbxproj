@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		07FC719000D999AB80CF8C4C /* ControlSheets.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7A442E88C358C98CE318DF9 /* ControlSheets.swift */; };
 		0C3838E769FD23A972E10B3E /* PreClimatActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBBB57D2D187DD310113F34A /* PreClimatActivityAttributes.swift */; };
 		1505BBD9630C5E03C190C203 /* SongProActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF8BF0D6E8837DEC20056AB8 /* SongProActivityAttributes.swift */; };
 		16E429E57E193AFF3942D11F /* BydRecargaApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECAEED044A902791C1B43435 /* BydRecargaApp.swift */; };
@@ -140,6 +141,7 @@
 		C68353FA3433CBE88BFA4347 /* CarStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarStore.swift; sourceTree = "<group>"; };
 		C88C20EF0FDB1AB8EB036191 /* CarActions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarActions.swift; sourceTree = "<group>"; };
 		D15756C1CEF1EFDD6804C05D /* SecurityActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecurityActivityAttributes.swift; sourceTree = "<group>"; };
+		D7A442E88C358C98CE318DF9 /* ControlSheets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ControlSheets.swift; sourceTree = "<group>"; };
 		D9926C58E001CD8511E829FB /* ActivityManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityManager.swift; sourceTree = "<group>"; };
 		DD1B9E17C1177A48B806D3B9 /* BydRecargaWidgetBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BydRecargaWidgetBundle.swift; sourceTree = "<group>"; };
 		DFE9C8DD63C6163B5AF174C8 /* SecurityLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecurityLiveActivity.swift; sourceTree = "<group>"; };
@@ -165,6 +167,7 @@
 				C88C20EF0FDB1AB8EB036191 /* CarActions.swift */,
 				C68353FA3433CBE88BFA4347 /* CarStore.swift */,
 				36AA01E4F54D0727EF341F49 /* ContentView.swift */,
+				D7A442E88C358C98CE318DF9 /* ControlSheets.swift */,
 				7376EEA5C86B0C60FE3CE4E3 /* DesignSystem.swift */,
 				26B936D2B31C5DE61815546A /* HavalEcoTrip-dev.entitlements */,
 				40111AE0EB130BFE6B0757E3 /* HavalEcoTrip-prod.entitlements */,
@@ -442,6 +445,7 @@
 				E4DBC8604FEF4AF3E5F39336 /* CarStore.swift in Sources */,
 				920A0533D20932EF36FC4D49 /* ChargeActivityAttributes.swift in Sources */,
 				87640D1FE3604A94892D6723 /* ContentView.swift in Sources */,
+				07FC719000D999AB80CF8C4C /* ControlSheets.swift in Sources */,
 				3ED1321FB7B61D7ADDAA032F /* DesignSystem.swift in Sources */,
 				AACDCF32BF0A0A36A4A2F84F /* HavalEcoTripApp.swift in Sources */,
 				4C94F890D15203640F57B31D /* LiveActivityPush.swift in Sources */,
