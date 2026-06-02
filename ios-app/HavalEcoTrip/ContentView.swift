@@ -31,7 +31,7 @@ struct ContentView: View {
 
     var body: some View {
         Group {
-            if let url = bridgeURL, !storedToken.isEmpty, !Settings.bridgeURL.isEmpty {
+            if bridgeURL != nil, !storedToken.isEmpty, !Settings.bridgeURL.isEmpty {
                 TabView {
                   NativeDashView()
                     .tabItem { Label("Painel", systemImage: "gauge.with.dots.needle.bottom.50percent") }
@@ -41,28 +41,6 @@ struct ContentView: View {
                     .tabItem { Label("Recargas", systemImage: "bolt.fill") }
                   NativeViagensView()
                     .tabItem { Label("Viagens", systemImage: "map.fill") }
-                  ZStack {
-                    PwaWebView(url: url, manager: manager)
-                        .ignoresSafeArea()
-                    // Indicador discreto da Live Activity (não invasivo)
-                    if manager.currentActivity != nil {
-                        VStack {
-                            HStack {
-                                Spacer()
-                                Image(systemName: "bolt.fill")
-                                    .font(.caption)
-                                    .padding(6)
-                                    .background(Color.green.opacity(0.85))
-                                    .foregroundStyle(.black)
-                                    .clipShape(Circle())
-                                    .padding(.top, 60)
-                                    .padding(.trailing, 12)
-                            }
-                            Spacer()
-                        }
-                    }
-                  }
-                  .tabItem { Label("Completo", systemImage: "square.grid.2x2.fill") }
                   NativeConfigView()
                     .tabItem { Label("Config", systemImage: "gearshape.fill") }
                 }

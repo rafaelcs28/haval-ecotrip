@@ -383,6 +383,18 @@ final class CarStore: ObservableObject {
     var priceKwh: Double { num("price_kwh") }
     var priceGas: Double { num("price_gas_per_l") }
 
+    // Custo por km (médias ponderadas + consumo rolante do state)
+    var battAvgPrice: Double { num("battery_avg_price_per_kwh") }
+    var tankAvgPrice: Double { num("tank_avg_price_per_l") }
+    private var rolling: [String: Any]? { raw["rolling"] as? [String: Any] }
+    private func roll(_ k: String) -> Double {
+        switch rolling?[k] { case let d as Double: return d; case let i as Int: return Double(i); case let s as String: return Double(s) ?? 0; default: return 0 }
+    }
+    var kwhPer100: Double { roll("kwh_per_100km") }
+    var kmPerL: Double    { roll("km_per_l") }
+    var costPerKmEv: Double { (battAvgPrice > 0 ? battAvgPrice : priceKwh) * kwhPer100 / 100 }
+    var costPerKmGas: Double { kmPerL > 0 ? (tankAvgPrice > 0 ? tankAvgPrice : priceGas) / kmPerL : 0 }
+
     // Motor / trava / AC
     var engineOn: Bool { str("engine_state") == "1" }
     /// lock_state: 'off'=trancado, 'on'=destrancado (semântica do bridge).

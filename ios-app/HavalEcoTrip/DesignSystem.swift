@@ -6,6 +6,20 @@
 
 import SwiftUI
 
+/// Formatação numérica pt-BR com separador de milhares.
+enum Fmt {
+    private static func nf(_ frac: Int) -> NumberFormatter {
+        let f = NumberFormatter(); f.numberStyle = .decimal; f.groupingSeparator = "."
+        f.decimalSeparator = ","; f.minimumFractionDigits = frac; f.maximumFractionDigits = frac; return f
+    }
+    private static let f0 = nf(0)
+    private static let f1 = nf(1)
+    private static let f2 = nf(2)
+    static func int(_ v: Double) -> String { f0.string(from: NSNumber(value: v)) ?? String(format: "%.0f", v) }
+    static func dec1(_ v: Double) -> String { f1.string(from: NSNumber(value: v)) ?? String(format: "%.1f", v) }
+    static func brl(_ v: Double) -> String { "R$ " + (f2.string(from: NSNumber(value: v)) ?? String(format: "%.2f", v)) }
+}
+
 enum DS {
     // Paleta (igual ao :root do cluster.html)
     static let bg     = Color.black
@@ -70,14 +84,15 @@ struct DSMetric: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(alignment: .firstTextBaseline, spacing: 3) {
-                Text(value).font(.system(size: 26, weight: .semibold, design: .rounded))
+                Text(value).font(.system(size: 24, weight: .semibold, design: .rounded))
                     .foregroundStyle(color).monospacedDigit()
+                    .lineLimit(1).minimumScaleFactor(0.5)
                 if !unit.isEmpty {
-                    Text(unit).font(.system(size: 13, weight: .regular)).foregroundStyle(DS.muted)
+                    Text(unit).font(.system(size: 12, weight: .regular)).foregroundStyle(DS.muted).lineLimit(1)
                 }
             }
             Text(label.uppercased()).font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(DS.muted).tracking(0.4)
+                .foregroundStyle(DS.muted).tracking(0.4).lineLimit(1).minimumScaleFactor(0.7)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -161,6 +176,7 @@ struct CollapsibleCard<Content: View>: View {
                 if open { content() }
             }
         }
+        .overlay(alert ? RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(DS.yellow.opacity(0.7), lineWidth: 1.5) : nil)
     }
 }
 

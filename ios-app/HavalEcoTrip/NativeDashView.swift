@@ -11,19 +11,17 @@ struct NativeDashView: View {
     @ObservedObject private var store = CarStore.shared
     @StateObject private var maint = MaintenanceStore()
     @StateObject private var trips = TripsLoader()
-    @State private var pending: PendingAction?
     @State private var busy = false
     @State private var showPreclimat = false
     @State private var showMaint = false
-
-    struct PendingAction: Identifiable {
-        let id = UUID(); let name: String; let title: String; let confirm: String; let danger: Bool
-    }
+    @State private var showLock = false
+    @State private var showEngine = false
 
     private let tankL = 55.0   // capacidade aprox. do tanque (H6 PHEV) p/ o medidor
 
     private func f0(_ v: Double) -> String { String(format: "%.0f", v) }
     private func f1(_ v: Double) -> String { String(format: "%.1f", v).replacingOccurrences(of: ".", with: ",") }
+    private func brl(_ v: Double) -> String { Fmt.brl(v) }
     private static let grp: NumberFormatter = {
         let f = NumberFormatter(); f.numberStyle = .decimal; f.groupingSeparator = "."; f.maximumFractionDigits = 0; return f
     }()
@@ -39,7 +37,8 @@ struct NativeDashView: View {
             VStack(spacing: 14) {
                 header
                 statusCard
-                HStack(spacing: 14) { batteryCard; fuelCard }
+                if store.isCharging { chargingCard } else { HStack(spacing: 14) { batteryCard; fuelCard } }
+                costPerKmCard
                 climateCard
                 tyresCard
                 doorsCard
@@ -53,13 +52,6 @@ struct NativeDashView: View {
         .onAppear { store.start(); Task { await maint.load() }; Task { await trips.load() } }
         .sheet(isPresented: $showPreclimat) { PreclimatSheet() }
         .sheet(isPresented: $showMaint) { MaintenanceSheet(store: maint) }
-        .confirmationDialog(pending?.title ?? "", isPresented: .init(
-            get: { pending != nil }, set: { if !$0 { pending = nil } }), presenting: pending) { p in
-            Button(p.confirm, role: p.danger ? .destructive : nil) {
-                busy = true; Task { _ = await store.action(p.name); busy = false; pending = nil }
-            }
-            Button("Cancelar", role: .cancel) { pending = nil }
-        }
     }
 
     // MARK: localização
@@ -70,38 +62,73 @@ struct NativeDashView: View {
                 .font(.subheadline.weight(.medium)).foregroundStyle(DS.text).lineLimit(2)
             Spacer(minLength: 6)
             if store.lanConnected { DSChip(text: "LAN", color: DS.teal, filled: true) }
+            Text(lastUpdateText).font(.system(size: 10)).foregroundStyle(DS.muted).lineLimit(1)
             Circle().fill(store.carOnline ? DS.green : DS.red).frame(width: 9, height: 9)
         }
         .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 4)
     }
 
-    // MARK: trava + motor (ícones com confirmação) + hodômetro/12V
+    private var lastUpdateText: String {
+        let ms = store.num("last_apk_ms")
+        guard ms > 0 else { return "" }
+        let age = Date().timeIntervalSince1970 - ms / 1000
+        if age < 60 { return "há \(Int(max(0, age)))s" }
+        if age < 3600 { return "há \(Int(age/60))min" }
+        if age < 86400 { return "há \(Int(age/3600))h" }
+        return "há \(Int(age/86400))d"
+    }
+
+    // MARK: trava + motor (ícones com confirmação ancorada) + hodômetro/12V ao lado
     private var statusCard: some View {
         DSCard {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack(spacing: 16) {
-                    iconButton(icon: store.isLocked ? "lock.fill" : "lock.open.fill",
-                               tint: store.isLocked ? DS.green : DS.orange,
-                               caption: !store.lockKnown ? "—" : (store.isLocked ? "Trancado" : "Destrancado")) {
-                        pending = store.isLocked
-                            ? .init(name: "lock_open", title: "Destravar carro?", confirm: "Destravar", danger: true)
-                            : .init(name: "lock_close", title: "Travar carro?", confirm: "Travar", danger: false)
-                    }
-                    iconButton(icon: "power", tint: store.engineOn ? DS.green : DS.muted,
-                               caption: store.engineOn ? "Ligado" : "Desligado") {
-                        pending = store.engineOn
-                            ? .init(name: "engine_off", title: "Desligar motor?", confirm: "Desligar", danger: true)
-                            : .init(name: "engine_on", title: "Ligar motor?", confirm: "Ligar", danger: false)
-                    }
-                    Spacer()
+            HStack(spacing: 16) {
+                iconButton(icon: store.isLocked ? "lock.fill" : "lock.open.fill",
+                           tint: store.isLocked ? DS.green : DS.orange,
+                           caption: !store.lockKnown ? "—" : (store.isLocked ? "Trancado" : "Destrancado")) {
+                    showLock = true
                 }
-                Divider().overlay(DS.border)
-                HStack {
-                    DSMetric(value: store.odometerKm > 0 ? miles(store.odometerKm) : "—", unit: "km", label: "Hodômetro")
-                    if store.batt12vPct > 0 { DSMetric(value: f0(store.batt12vPct), unit: "%", label: "Bateria 12V") }
+                .popover(isPresented: $showLock) {
+                    confirmPopover(title: store.isLocked ? "Destravar carro?" : "Travar carro?",
+                                   confirm: store.isLocked ? "Destravar" : "Travar", danger: store.isLocked,
+                                   name: store.isLocked ? "lock_open" : "lock_close", binding: $showLock)
+                }
+                iconButton(icon: "power", tint: store.engineOn ? DS.green : DS.muted,
+                           caption: store.engineOn ? "Ligado" : "Desligado") {
+                    showEngine = true
+                }
+                .popover(isPresented: $showEngine) {
+                    confirmPopover(title: store.engineOn ? "Desligar motor?" : "Ligar motor?",
+                                   confirm: store.engineOn ? "Desligar" : "Ligar", danger: store.engineOn,
+                                   name: store.engineOn ? "engine_off" : "engine_on", binding: $showEngine)
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 10) {
+                    rightMetric("Hodômetro", store.odometerKm > 0 ? "\(miles(store.odometerKm)) km" : "—")
+                    if store.batt12vPct > 0 { rightMetric("Bateria 12V", "\(f0(store.batt12vPct))%") }
                 }
             }
         }
+    }
+
+    private func rightMetric(_ label: String, _ value: String) -> some View {
+        VStack(alignment: .trailing, spacing: 1) {
+            Text(value).font(.system(size: 18, weight: .semibold, design: .rounded)).foregroundStyle(DS.text).lineLimit(1).minimumScaleFactor(0.6)
+            Text(label.uppercased()).font(.system(size: 9, weight: .semibold)).foregroundStyle(DS.muted)
+        }
+    }
+
+    private func confirmPopover(title: String, confirm: String, danger: Bool, name: String, binding: Binding<Bool>) -> some View {
+        VStack(spacing: 14) {
+            Text(title).font(.system(size: 16, weight: .semibold)).foregroundStyle(DS.text).multilineTextAlignment(.center)
+            HStack(spacing: 10) {
+                Button("Cancelar") { binding.wrappedValue = false }
+                    .frame(maxWidth: .infinity).frame(height: 44).foregroundStyle(DS.text).background(DS.panel2).clipShape(RoundedRectangle(cornerRadius: 11))
+                Button(confirm) { binding.wrappedValue = false; busy = true; Task { _ = await store.action(name); busy = false } }
+                    .frame(maxWidth: .infinity).frame(height: 44).foregroundStyle(.black).background(danger ? DS.red : DS.green).clipShape(RoundedRectangle(cornerRadius: 11)).font(.system(size: 15, weight: .bold))
+            }
+        }
+        .padding(18).frame(width: 280).background(DS.panel)
+        .presentationCompactAdaptation(.popover)
     }
 
     private func iconButton(icon: String, tint: Color, caption: String, action: @escaping () -> Void) -> some View {
@@ -128,6 +155,34 @@ struct NativeDashView: View {
             VStack(alignment: .leading, spacing: 10) {
                 LevelBadge(icon: batteryIcon(soc), fraction: soc/100, value: f0(soc), unit: "%", label: "Bateria", tint: tint)
                 Text("\(f0(store.rangeEvKm)) km EV").font(.caption).foregroundStyle(DS.muted)
+            }
+        }
+    }
+
+    // Recarregando: bateria expandida (esconde tanque) + dados da carga atual
+    private var chargingCard: some View {
+        let soc = store.socPct
+        return DSCard(title: "Carregando", icon: "bolt.fill") {
+            VStack(alignment: .leading, spacing: 12) {
+                LevelBadge(icon: batteryIcon(soc), fraction: soc/100, value: f0(soc), unit: "%", label: "Bateria", tint: DS.green)
+                HStack {
+                    DSMetric(value: f1(store.chargePowerKw), unit: "kW", label: "Potência", color: DS.green)
+                    DSMetric(value: f1(store.chargeSessionKwh), unit: "kWh", label: "Sessão", color: DS.teal)
+                    DSMetric(value: store.chargeRemainingMin > 0 ? "\(store.chargeRemainingMin)" : "—", unit: "min", label: "Faltam")
+                    DSMetric(value: f0(store.rangeEvKm), unit: "km", label: "Autonomia")
+                }
+            }
+        }
+    }
+
+    // Custo por km atual (EV e gasolina)
+    @ViewBuilder private var costPerKmCard: some View {
+        if store.costPerKmEv > 0 || store.costPerKmGas > 0 {
+            DSCard {
+                HStack {
+                    DSMetric(value: store.costPerKmEv > 0 ? brl(store.costPerKmEv) : "—", label: "R$/km EV", color: DS.green)
+                    DSMetric(value: store.costPerKmGas > 0 ? brl(store.costPerKmGas) : "—", label: "R$/km Gasolina", color: DS.orange)
+                }
             }
         }
     }

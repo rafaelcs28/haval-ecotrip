@@ -17,12 +17,9 @@ struct NativeConfigView: View {
     @State private var show2FA = false
     @State private var shareURL: URL?
     @State private var importing = false
-    @State private var danger: Danger?
     @AppStorage("notif_expanded") private var notifExpanded = false
     @AppStorage("faceid_lock") private var faceIDLock = false
     @AppStorage("lan_enabled") private var lanEnabled = false
-
-    struct Danger: Identifiable { let id = UUID(); let title: String; let msg: String; let confirm: String; let action: () async -> Void }
 
     private let laitems: [(String, String)] = [("la_charge","Recarga"),("la_preclimat","Pré-climatização"),("la_trip","Viagem"),("la_motor","Motor ligado"),("la_security","Segurança")]
     private let pushitems: [(String, String)] = [("charge_start","Início de recarga"),("charge_end","Fim de recarga"),("charge_stopped","Parou de recarregar"),("trip_end","Fim de viagem"),("door_open","Porta aberta"),("engine_on","Motor ligado"),("geofence_arrival","Chegada a local"),("tyre_low","Pneu baixo"),("refuel_detected","Abastecimento"),("batt12_low","Bateria 12V baixa"),("daily_summary","Resumo diário")]
@@ -51,14 +48,23 @@ struct NativeConfigView: View {
         .sheet(isPresented: $show2FA) { TwoFASheet(cfg: cfg) }
         .sheet(item: $shareURL) { url in ShareSheet(items: [url]) }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.json]) { result in
-            if case .success(let url) = result, let data = try? Data(contentsOf: url) {
-                Task { _ = await cfg.restoreBackup(data) }
+            guard case .success(let url) = result else { return }
+            let scoped = url.startAccessingSecurityScopedResource()
+            let data = try? Data(contentsOf: url)
+            if scoped { url.stopAccessingSecurityScopedResource() }
+            guard let data else { cfg.toast = "Falha ao ler arquivo"; return }
+            Task { let ok = await cfg.restoreBackup(data); cfg.toast = ok ? "✓ Backup importado" : "✗ Falha ao importar" }
+        }
+        .overlay(alignment: .bottom) {
+            if let t = cfg.toast {
+                Text(t).font(.system(size: 14, weight: .semibold)).foregroundStyle(DS.text)
+                    .padding(.horizontal, 18).padding(.vertical, 12).background(DS.panel2)
+                    .clipShape(Capsule()).overlay(Capsule().stroke(DS.border, lineWidth: 1))
+                    .padding(.bottom, 30).transition(.opacity)
+                    .task { try? await Task.sleep(nanoseconds: 2_200_000_000); cfg.toast = nil }
             }
         }
-        .confirmationDialog(danger?.title ?? "", isPresented: .init(get: { danger != nil }, set: { if !$0 { danger = nil } }), presenting: danger) { d in
-            Button(d.confirm, role: .destructive) { Task { await d.action(); danger = nil } }
-            Button("Cancelar", role: .cancel) { danger = nil }
-        } message: { d in Text(d.msg) }
+        .animation(.easeInOut, value: cfg.toast)
     }
 
     // MARK: Logs
@@ -143,11 +149,9 @@ struct NativeConfigView: View {
                     URLCache.shared.removeAllCachedResponses(); cfg.toast = "Cache limpo"
                 }
                 Divider().overlay(DS.border)
-                dangerRow("Apagar histórico de condução", "Remove os modos de condução registrados.") {
-                    Task { await cfg.adminAction("/api/drive-history/clear") }
-                }
-                dangerRow("Apagar dados do servidor", "Apaga recargas e viagens do servidor. Ação IRREVERSÍVEL.") {
-                    Task { await cfg.adminAction("/api/admin/clear-history") }
+                ConfirmRow(icon: "exclamationmark.triangle.fill", title: "Apagar dados do servidor", destructive: true,
+                           msg: "Apaga recargas e viagens do servidor. Ação IRREVERSÍVEL.") {
+                    let ok = await cfg.adminAction("/api/admin/clear-history"); cfg.toast = ok ? "✓ Dados apagados" : "✗ Falhou"
                 }
             }
         }
@@ -158,12 +162,24 @@ struct NativeConfigView: View {
         DSCard {
             DisclosureGroup {
                 VStack(spacing: 4) {
-                    rowButton(icon: "arrow.triangle.2.circlepath", title: "Recalcular custo das viagens", subtitle: nil) { Task { await cfg.adminAction("/api/admin/recompute-trip-costs") } }
+                    ConfirmRow(icon: "arrow.triangle.2.circlepath", title: "Recalcular custo das viagens",
+                               msg: "Recalcula o custo de todas as viagens com os preços atuais.") {
+                        let ok = await cfg.adminAction("/api/admin/recompute-trip-costs"); cfg.toast = ok ? "✓ Recalculado" : "✗ Falhou"
+                    }
                     Divider().overlay(DS.border)
-                    rowButton(icon: "mappin.and.ellipse", title: "Reprocessar nomes de locais", subtitle: nil) { Task { await cfg.adminAction("/api/admin/reprocess-places") } }
+                    ConfirmRow(icon: "mappin.and.ellipse", title: "Reprocessar nomes de locais",
+                               msg: "Reidentifica os locais conhecidos das viagens/recargas.") {
+                        let ok = await cfg.adminAction("/api/admin/reprocess-places"); cfg.toast = ok ? "✓ Reprocessado" : "✗ Falhou"
+                    }
                     Divider().overlay(DS.border)
-                    dangerRow("Reiniciar bridge", "O servidor reinicia (alguns segundos offline).") { Task { await cfg.adminAction("/api/admin/restart") } }
-                    dangerRow("Atualizar do GitHub", "Puxa a última versão e reinicia o servidor.") { Task { await cfg.adminAction("/api/admin/update") } }
+                    ConfirmRow(icon: "arrow.clockwise", title: "Reiniciar bridge", destructive: true,
+                               msg: "O servidor reinicia (alguns segundos offline).") {
+                        let ok = await cfg.adminAction("/api/admin/restart"); cfg.toast = ok ? "✓ Reiniciando…" : "✗ Falhou"
+                    }
+                    ConfirmRow(icon: "arrow.down.circle", title: "Atualizar do GitHub", destructive: true,
+                               msg: "Puxa a última versão e reinicia o servidor.") {
+                        let ok = await cfg.adminAction("/api/admin/update"); cfg.toast = ok ? "✓ Atualizando…" : "✗ Falhou"
+                    }
                 }
             } label: { Label("Avançado", systemImage: "gearshape.2.fill").font(.system(size: 15, weight: .semibold)).foregroundStyle(DS.text) }.tint(DS.muted)
         }
@@ -201,17 +217,44 @@ struct NativeConfigView: View {
             }.frame(maxWidth: .infinity).padding(.vertical, 6)
         }.buttonStyle(.plain)
     }
-    private func dangerRow(_ title: String, _ msg: String, _ action: @escaping () async -> Void) -> some View {
-        Button { danger = .init(title: title + "?", msg: msg, confirm: title, action: action) } label: {
-            HStack(spacing: 10) {
-                Image(systemName: "exclamationmark.triangle.fill").font(.subheadline).foregroundStyle(DS.red).frame(width: 22)
-                Text(title).font(.system(size: 15, weight: .medium)).foregroundStyle(DS.red)
-                Spacer()
-            }.frame(maxWidth: .infinity).padding(.vertical, 6)
-        }.buttonStyle(.plain)
-    }
     private func aboutRow(_ k: String, _ v: String) -> some View {
         HStack { Text(k).font(.system(size: 14)).foregroundStyle(DS.muted); Spacer(); Text(v).font(.system(size: 14, weight: .medium)).foregroundStyle(DS.text) }
+    }
+}
+
+// Linha com confirmação em popover ancorado (nasce do ponto tocado).
+struct ConfirmRow: View {
+    let icon: String
+    let title: String
+    var destructive: Bool = false
+    let msg: String
+    let onConfirm: () async -> Void
+    @State private var show = false
+
+    var body: some View {
+        Button { show = true } label: {
+            HStack(spacing: 10) {
+                Image(systemName: icon).font(.subheadline).foregroundStyle(destructive ? DS.red : DS.muted).frame(width: 22)
+                Text(title).font(.system(size: 15, weight: .medium)).foregroundStyle(destructive ? DS.red : DS.text)
+                Spacer()
+                Image(systemName: "chevron.right").font(.caption).foregroundStyle(DS.muted)
+            }.frame(maxWidth: .infinity).padding(.vertical, 6)
+        }
+        .buttonStyle(.plain)
+        .popover(isPresented: $show) {
+            VStack(spacing: 14) {
+                Text(title).font(.system(size: 16, weight: .semibold)).foregroundStyle(DS.text).multilineTextAlignment(.center)
+                Text(msg).font(.caption).foregroundStyle(DS.muted).multilineTextAlignment(.center)
+                HStack(spacing: 10) {
+                    Button("Cancelar") { show = false }
+                        .frame(maxWidth: .infinity).frame(height: 44).foregroundStyle(DS.text).background(DS.panel2).clipShape(RoundedRectangle(cornerRadius: 11))
+                    Button(destructive ? "Apagar" : "Confirmar") { show = false; Task { await onConfirm() } }
+                        .frame(maxWidth: .infinity).frame(height: 44).foregroundStyle(.black).background(destructive ? DS.red : DS.green).clipShape(RoundedRectangle(cornerRadius: 11)).font(.system(size: 15, weight: .bold))
+                }
+            }
+            .padding(18).frame(width: 300).background(DS.panel)
+            .presentationCompactAdaptation(.popover)
+        }
     }
 }
 
