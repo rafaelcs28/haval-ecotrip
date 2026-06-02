@@ -34,8 +34,10 @@ struct Trip: Identifiable {
     var fuelL: Double { n("fuelL") }
     var timeSec: Double { n("timeSec") }
     var rawName: String? { (raw["name"] as? String).flatMap { $0.isEmpty ? nil : $0 } }
-    var knownStart: String? { raw["knownStart"] as? String }
-    var knownEnd: String? { raw["knownEnd"] as? String }
+    // O bridge grava o nome do local em startKp/endKp (reprocess-places + Locais
+    // Conhecidos). knownStart/knownEnd são legado/fallback.
+    var knownStart: String? { ((raw["startKp"] ?? raw["knownStart"]) as? String).flatMap { $0.isEmpty ? nil : $0 } }
+    var knownEnd: String? { ((raw["endKp"] ?? raw["knownEnd"]) as? String).flatMap { $0.isEmpty ? nil : $0 } }
     var startCoord: CLLocationCoordinate2D? { let la = n("startLat"), lo = n("startLng"); return (la != 0 && lo != 0) ? .init(latitude: la, longitude: lo) : nil }
     var endCoord: CLLocationCoordinate2D? { let la = n("endLat"), lo = n("endLng"); return (la != 0 && lo != 0) ? .init(latitude: la, longitude: lo) : nil }
     func cost(_ pKwh: Double, _ pGas: Double) -> Double { netKwh * pKwh + fuelL * pGas }
