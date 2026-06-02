@@ -310,10 +310,12 @@ private struct RenameField: View {
     }
 }
 
-// MARK: - Trajeto: mapa + linha do tempo (velocidade/potência/rpm/SOC/kWh acum.)
+// MARK: - Trajeto: mapa de fundo + scrubber (igual PWA — arrasta a linha do tempo
+// e os valores daquele instante aparecem por cima do mapa)
 struct TripSample: Identifiable {
     let id = UUID()
-    let min: Double      // minuto da viagem
+    let t: Double        // segundos desde o início
+    let coord: CLLocationCoordinate2D?
     let spd: Double
     let rpm: Double
     let pwr: Double
@@ -327,62 +329,76 @@ struct RouteMapSheet: View {
     @State private var coords: [CLLocationCoordinate2D] = []
     @State private var samples: [TripSample] = []
     @State private var loading = true
-    @State private var metric = 0   // 0=Vel,1=Pot,2=RPM,3=SOC,4=kWh
-
-    private let metrics = ["Velocidade", "Potência", "RPM", "SOC", "kWh acum."]
-    private let units = ["km/h", "kW", "rpm", "%", "kWh"]
-    private let colors = [DS.teal, DS.blue, DS.orange, DS.green, DS.yellow]
+    @State private var idx: Double = 0
+    @State private var cam: MapCameraPosition = .automatic
 
     private var base: String {
         let u = Settings.bridgeURL.isEmpty ? AuthConfig.bridgeURL : Settings.bridgeURL
         return u.hasSuffix("/") ? String(u.dropLast()) : u
     }
-    private func value(_ s: TripSample) -> Double {
-        switch metric { case 0: return s.spd; case 1: return s.pwr; case 2: return s.rpm; case 3: return s.soc; default: return s.cumKwh }
-    }
+    private var cur: TripSample? { samples.isEmpty ? nil : samples[min(samples.count - 1, max(0, Int(idx)))] }
+    private func f0(_ v: Double) -> String { String(format: "%.0f", v) }
+    private func f1(_ v: Double) -> String { String(format: "%.1f", v).replacingOccurrences(of: ".", with: ",") }
+    private func tStr(_ s: Double) -> String { let t = Int(s), m = t/60, sec = t%60; return String(format: "%d:%02d", m, sec) }
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 14) {
-                    if coords.count > 1 {
-                        Map {
-                            MapPolyline(coordinates: coords).stroke(DS.green, lineWidth: 4)
-                            if let s = coords.first { Marker("Início", coordinate: s).tint(.green) }
-                            if let e = coords.last { Marker("Fim", coordinate: e).tint(.red) }
-                        }
-                        .mapStyle(.standard(pointsOfInterest: .excludingAll))
-                        .environment(\.colorScheme, .dark)
-                        .frame(height: 280)
-                        .clipShape(RoundedRectangle(cornerRadius: 16))
-                    } else if !loading {
-                        Text("Mapa indisponível.").font(.subheadline).foregroundStyle(DS.muted)
-                    }
-
-                    if !samples.isEmpty {
-                        DSCard(title: "Linha do tempo", icon: "waveform.path.ecg") {
-                            VStack(spacing: 10) {
-                                Picker("", selection: $metric) {
-                                    ForEach(Array(metrics.enumerated()), id: \.offset) { i, m in Text(m).tag(i) }
-                                }.pickerStyle(.segmented)
-                                Chart(samples) { s in
-                                    LineMark(x: .value("min", s.min), y: .value("v", value(s)))
-                                        .foregroundStyle(colors[metric]).interpolationMethod(.monotone)
+            ZStack(alignment: .bottom) {
+                if coords.count > 1 {
+                    Map(position: $cam, interactionModes: .all) {
+                        MapPolyline(coordinates: coords).stroke(DS.green, lineWidth: 4)
+                        if let c = cur?.coord {
+                            Annotation("", coordinate: c) {
+                                ZStack {
+                                    Circle().fill(DS.green.opacity(0.25)).frame(width: 34, height: 34)
+                                    Circle().fill(DS.green).frame(width: 14, height: 14).overlay(Circle().stroke(.white, lineWidth: 2))
                                 }
-                                .frame(height: 200)
-                                .chartXAxisLabel("min")
-                                .chartYAxis { AxisMarks { _ in AxisGridLine().foregroundStyle(DS.border); AxisValueLabel() } }
-                                Text(units[metric]).font(.caption2).foregroundStyle(DS.muted).frame(maxWidth: .infinity, alignment: .trailing)
                             }
                         }
-                    } else if loading {
-                        ProgressView().tint(DS.green).padding(.top, 30)
+                    }
+                    .mapStyle(.standard(pointsOfInterest: .excludingAll))
+                    .environment(\.colorScheme, .dark)
+                    .ignoresSafeArea()
+                } else {
+                    DS.bg.ignoresSafeArea()
+                    if loading { ProgressView().tint(DS.green) } else { Text("Trajeto indisponível.").foregroundStyle(DS.muted) }
+                }
+
+                // Valores do instante (topo) + scrubber (base)
+                VStack {
+                    if let s = cur {
+                        DSCard(glass: true) {
+                            HStack {
+                                DSMetric(value: f0(s.spd), unit: "km/h", label: "Velocidade", color: DS.text)
+                                DSMetric(value: f1(s.pwr), unit: "kW", label: "Potência", color: s.pwr < 0 ? DS.green : DS.blue)
+                                DSMetric(value: s.rpm > 0 ? f0(s.rpm) : "—", unit: "rpm", label: "Motor", color: DS.orange)
+                            }
+                            HStack {
+                                DSMetric(value: f0(s.soc), unit: "%", label: "SOC", color: DS.green)
+                                DSMetric(value: f1(s.cumKwh), unit: "kWh", label: "Acumulado", color: DS.teal)
+                                DSMetric(value: tStr(s.t), label: "Tempo", color: DS.muted)
+                            }
+                        }.padding(.horizontal, 12).padding(.top, 8)
+                    }
+                    Spacer()
+                    if samples.count > 1 {
+                        DSCard(glass: true) {
+                            VStack(spacing: 4) {
+                                Slider(value: $idx, in: 0...Double(samples.count - 1), step: 1).tint(DS.green)
+                                HStack {
+                                    Text("Início").font(.caption2).foregroundStyle(DS.muted)
+                                    Spacer()
+                                    Text(tStr(cur?.t ?? 0)).font(.caption.weight(.bold)).foregroundStyle(DS.green)
+                                    Spacer()
+                                    Text(tStr(samples.last?.t ?? 0)).font(.caption2).foregroundStyle(DS.muted)
+                                }
+                            }
+                        }.padding(.horizontal, 12).padding(.bottom, 8)
                     }
                 }
-                .padding(16)
             }
-            .background(DS.bg.ignoresSafeArea())
             .navigationTitle("Trajeto").navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(.hidden, for: .navigationBar)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Concluído") { dismiss() } } }
         }
         .task { await load() }
@@ -406,11 +422,14 @@ struct RouteMapSheet: View {
             let pwr = anyNum2(s["pwr"]) != 0 ? anyNum2(s["pwr"]) : anyNum2(s["evKw"])
             let dt = max(0, t - lastT); lastT = t
             cum += pwr * dt / 3600.0
-            out.append(TripSample(min: t / 60.0, spd: anyNum2(s["spd"]), rpm: anyNum2(s["rpm"]),
-                                  pwr: pwr, soc: anyNum2(s["soc"]), cumKwh: cum))
+            let la = anyNum2(s["lat"]), lo = anyNum2(s["lng"])
+            out.append(TripSample(t: t, coord: (la != 0 && lo != 0) ? .init(latitude: la, longitude: lo) : nil,
+                                  spd: anyNum2(s["spd"]), rpm: anyNum2(s["rpm"]), pwr: pwr, soc: anyNum2(s["soc"]), cumKwh: cum))
         }
-        // Reduz pontos pra render fluida (máx ~400)
-        if out.count > 400 { let step = out.count / 400 + 1; out = out.enumerated().filter { $0.offset % step == 0 }.map { $0.element } }
+        if out.count > 600 { let step = out.count / 600 + 1; out = out.enumerated().filter { $0.offset % step == 0 }.map { $0.element } }
         samples = out
+        if let first = coords.first {
+            cam = .region(MKCoordinateRegion(center: first, span: MKCoordinateSpan(latitudeDelta: 0.02, longitudeDelta: 0.02)))
+        }
     }
 }

@@ -7,10 +7,26 @@
 import Foundation
 import CryptoKit
 
+struct KnownPlace: Identifiable {
+    let id: String
+    var name: String
+    var lat: Double
+    var lng: Double
+    var radiusM: Double
+    init(_ r: [String: Any]) {
+        if let i = r["id"] as? String { id = i } else if let n = r["id"] as? NSNumber { id = n.stringValue } else { id = UUID().uuidString }
+        name = (r["name"] as? String) ?? "Local"
+        lat = (r["lat"] as? Double) ?? (r["lat"] as? NSNumber)?.doubleValue ?? 0
+        lng = (r["lng"] as? Double) ?? (r["lng"] as? NSNumber)?.doubleValue ?? 0
+        radiusM = (r["radius_m"] as? Double) ?? (r["radius_m"] as? NSNumber)?.doubleValue ?? 200
+    }
+}
+
 @MainActor
 final class ConfigStore: ObservableObject {
     @Published var laPrefs: [String: Bool] = [:]
     @Published var pushPrefs: [String: Bool] = [:]
+    @Published var pushNums: [String: Int] = [:]
     @Published var twofaEnabled = false
     // Sobre
     @Published var pwaVersion = "—"
@@ -20,6 +36,13 @@ final class ConfigStore: ObservableObject {
     @Published var mqttHost = "—"
     @Published var pairCode: String?
     @Published var toast: String?
+    // Veículo
+    @Published var modelName = ""
+    @Published var chassi = ""
+    // Locais conhecidos
+    @Published var places: [KnownPlace] = []
+    // Listas de locais por notificação (geofence_*_places, soc_arrival_places)
+    @Published var placeLists: [String: [String]] = [:]
 
     private var base: String {
         let u = Settings.bridgeURL.isEmpty ? AuthConfig.bridgeURL : Settings.bridgeURL
@@ -45,7 +68,17 @@ final class ConfigStore: ObservableObject {
             laPrefs = obj(d).compactMapValues { ($0 as? Bool) ?? (($0 as? Int).map { $0 != 0 }) }
         }
         if let (c, d) = await send("/api/push/prefs", "GET"), c == 200 {
-            pushPrefs = obj(d).compactMapValues { ($0 as? Bool) ?? (($0 as? Int).map { $0 != 0 }) }
+            let o = obj(d)
+            pushPrefs = o.compactMapValues { ($0 as? Bool) ?? (($0 as? Int).map { $0 != 0 }) }
+            var lists: [String: [String]] = [:]
+            for (k, v) in o where k.hasSuffix("_places") {
+                if let arr = v as? [Any] { lists[k] = arr.map { "\($0)" } }
+            }
+            placeLists = lists
+            // valores numéricos (min/pct/psi) ficam disponíveis em pushNums
+            pushNums = o.compactMapValues { v -> Int? in
+                if let i = v as? Int { return i }; if let d = v as? Double { return Int(d) }; return nil
+            }
         }
         if let (c, d) = await send("/api/auth/2fa/status", "GET"), c == 200 {
             twofaEnabled = (obj(d)["enabled"] as? Bool) ?? false
@@ -63,6 +96,40 @@ final class ConfigStore: ObservableObject {
 
     func setLa(_ key: String, _ value: Bool) async { await send("/api/la-prefs", "POST", ["key": key, "value": value]); laPrefs[key] = value }
     func setPush(_ key: String, _ value: Bool) async { await send("/api/push/prefs", "POST", ["key": key, "value": value]); pushPrefs[key] = value }
+    func setPushNum(_ key: String, _ value: Int) async { await send("/api/push/prefs", "POST", ["key": key, "value": value]); pushNums[key] = value }
+    func setPlaceList(_ key: String, _ ids: [String]) async { await send("/api/push/prefs", "POST", ["key": key, "value": ids]); placeLists[key] = ids }
+
+    // Locais conhecidos
+    func loadPlaces() async {
+        if let (c, d) = await send("/api/known-places", "GET"), c == 200,
+           let arr = (try? JSONSerialization.jsonObject(with: d)) as? [[String: Any]] {
+            places = arr.map(KnownPlace.init)
+        }
+    }
+    func addPlace(name: String, lat: Double, lng: Double, radius: Double) async {
+        await send("/api/known-places", "POST", ["name": name, "lat": lat, "lng": lng, "radius_m": radius]); await loadPlaces()
+    }
+    func updatePlace(_ id: String, name: String, radius: Double) async {
+        await send("/api/known-places/\(id)", "PUT", ["name": name, "radius_m": radius]); await loadPlaces()
+    }
+    func deletePlace(_ id: String) async {
+        places.removeAll { $0.id == id }
+        await send("/api/known-places/\(id)", "DELETE"); await loadPlaces()
+    }
+
+    // Veículo
+    func loadVehicle() async {
+        if let (c, d) = await send("/api/vehicle", "GET"), c == 200 {
+            let o = obj(d); modelName = (o["model_name"] as? String) ?? ""; chassi = (o["chassi"] as? String) ?? (o["env_value"] as? String) ?? ""
+        }
+    }
+    func saveVehicle(model: String, chassi: String) async -> Bool {
+        var b: [String: Any] = [:]
+        if !model.isEmpty { b["model_name"] = model }
+        if !chassi.isEmpty { b["chassi"] = chassi }
+        guard let (c, _) = await send("/api/vehicle", "POST", b) else { return false }
+        if c == 200 { self.modelName = model; self.chassi = chassi; return true }; return false
+    }
 
     func setChargeLimit(_ pct: Int) async { await send("/api/charge-limit", "POST", ["pct": pct]) }
 

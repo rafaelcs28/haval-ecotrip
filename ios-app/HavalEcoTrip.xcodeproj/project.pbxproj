@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		07FC719000D999AB80CF8C4C /* ControlSheets.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7A442E88C358C98CE318DF9 /* ControlSheets.swift */; };
+		0BB7525EC9FA3BFAAE77FCB0 /* ConfigSheets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25AF744D0A813EC24608D127 /* ConfigSheets.swift */; };
 		0C3838E769FD23A972E10B3E /* PreClimatActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBBB57D2D187DD310113F34A /* PreClimatActivityAttributes.swift */; };
 		0CC661D339028F8AD4C5270B /* MaintenanceSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D3807C873D02DC8F672F3CD /* MaintenanceSheet.swift */; };
 		1505BBD9630C5E03C190C203 /* SongProActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF8BF0D6E8837DEC20056AB8 /* SongProActivityAttributes.swift */; };
@@ -116,6 +117,7 @@
 		192BA3BE182AC3D50F636DA9 /* HavalEcoTripWidget.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = HavalEcoTripWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		19F1EE1E1159233D66EEAFA8 /* LiveActivityPush.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveActivityPush.swift; sourceTree = "<group>"; };
 		1C2F4161732FE79AB2415337 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		25AF744D0A813EC24608D127 /* ConfigSheets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigSheets.swift; sourceTree = "<group>"; };
 		26B936D2B31C5DE61815546A /* HavalEcoTrip-dev.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "HavalEcoTrip-dev.entitlements"; sourceTree = "<group>"; };
 		2A0F1250A4346D17F0539FE8 /* MotorLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MotorLiveActivity.swift; sourceTree = "<group>"; };
 		2F97B54C85FEC5A112CB0C9E /* BackgroundRefresh.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundRefresh.swift; sourceTree = "<group>"; };
@@ -187,6 +189,7 @@
 				E5C3783F4045873A9A1C2F85 /* BiometricGate.swift */,
 				C88C20EF0FDB1AB8EB036191 /* CarActions.swift */,
 				C68353FA3433CBE88BFA4347 /* CarStore.swift */,
+				25AF744D0A813EC24608D127 /* ConfigSheets.swift */,
 				AD7173E45A0E0AAFE9AD301F /* ConfigStore.swift */,
 				36AA01E4F54D0727EF341F49 /* ContentView.swift */,
 				D7A442E88C358C98CE318DF9 /* ControlSheets.swift */,
@@ -475,6 +478,7 @@
 				605ED8EEC91528FFBC054A48 /* CarActions.swift in Sources */,
 				E4DBC8604FEF4AF3E5F39336 /* CarStore.swift in Sources */,
 				920A0533D20932EF36FC4D49 /* ChargeActivityAttributes.swift in Sources */,
+				0BB7525EC9FA3BFAAE77FCB0 /* ConfigSheets.swift in Sources */,
 				42169A88F8E36FD03EA47301 /* ConfigStore.swift in Sources */,
 				87640D1FE3604A94892D6723 /* ContentView.swift in Sources */,
 				07FC719000D999AB80CF8C4C /* ControlSheets.swift in Sources */,

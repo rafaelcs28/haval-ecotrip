@@ -15,14 +15,13 @@ struct NativeConfigView: View {
     @State private var showPair = false
     @State private var showPassword = false
     @State private var show2FA = false
+    @State private var showNotif = false
+    @State private var showVehicle = false
+    @State private var showPlaces = false
     @State private var shareURL: URL?
     @State private var importing = false
-    @AppStorage("notif_expanded") private var notifExpanded = false
     @AppStorage("faceid_lock") private var faceIDLock = false
     @AppStorage("lan_enabled") private var lanEnabled = false
-
-    private let laitems: [(String, String)] = [("la_charge","Recarga"),("la_preclimat","Pré-climatização"),("la_trip","Viagem"),("la_motor","Motor ligado"),("la_security","Segurança")]
-    private let pushitems: [(String, String)] = [("charge_start","Início de recarga"),("charge_end","Fim de recarga"),("charge_stopped","Parou de recarregar"),("trip_end","Fim de viagem"),("door_open","Porta aberta"),("engine_on","Motor ligado"),("geofence_arrival","Chegada a local"),("tyre_low","Pneu baixo"),("refuel_detected","Abastecimento"),("batt12_low","Bateria 12V baixa"),("daily_summary","Resumo diário")]
 
     var body: some View {
         NavigationStack {
@@ -72,21 +71,13 @@ struct NativeConfigView: View {
         DSCard { rowButton(icon: "list.bullet.rectangle", title: "Logs de eventos", subtitle: "Histórico e filtros") { showLogs = true } }
     }
 
-    // MARK: Veículo
+    // MARK: Veículo (submenu) + Locais + LAN + pareamento
     private var veiculoCard: some View {
-        let limit = Int(car.num("charge_limit_pct"))
-        return DSCard(title: "Veículo", icon: "car.fill") {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("LIMITE DE CARGA (SOC)").font(.system(size: 10, weight: .semibold)).foregroundStyle(DS.muted)
-                HStack(spacing: 6) {
-                    ForEach([50,60,70,80,90,100], id: \.self) { p in
-                        let on = limit == p
-                        Button { Task { await cfg.setChargeLimit(p) } } label: {
-                            Text("\(p)").font(.system(size: 13, weight: .bold)).frame(maxWidth: .infinity).frame(height: 38)
-                                .foregroundStyle(on ? .black : DS.text).background(on ? DS.green : DS.panel2).clipShape(RoundedRectangle(cornerRadius: 9))
-                        }
-                    }
-                }
+        DSCard(title: "Veículo", icon: "car.fill") {
+            VStack(spacing: 4) {
+                rowButton(icon: "slider.horizontal.3", title: "Veículo", subtitle: "Limite de carga, modelo e chassi") { showVehicle = true }
+                Divider().overlay(DS.border)
+                rowButton(icon: "mappin.and.ellipse", title: "Locais conhecidos", subtitle: "Casa, trabalho, postos…") { showPlaces = true }
                 Divider().overlay(DS.border)
                 Toggle(isOn: $lanEnabled) {
                     VStack(alignment: .leading, spacing: 1) {
@@ -95,32 +86,20 @@ struct NativeConfigView: View {
                     }
                 }.tint(DS.green)
                 Divider().overlay(DS.border)
-                rowButton(icon: "qrcode", title: "Parear carro", subtitle: "Gera um código pro app do carro") {
-                    showPair = true
-                }
+                rowButton(icon: "qrcode", title: "Parear carro", subtitle: "Gera um código pro app do carro") { showPair = true }
             }
         }
         .sheet(isPresented: $showPair) { PairCodeSheet(cfg: cfg) }
+        .sheet(isPresented: $showVehicle) { VehicleSheet(cfg: cfg) }
+        .sheet(isPresented: $showPlaces) { KnownPlacesSheet(cfg: cfg) }
     }
 
-    // MARK: Notificações (recolhido, persiste)
+    // MARK: Notificações (catálogo completo em sheet)
     private var notificacoesCard: some View {
         DSCard {
-            DisclosureGroup(isExpanded: $notifExpanded) {
-                VStack(spacing: 4) {
-                    Text("LIVE ACTIVITIES").font(.system(size: 10, weight: .semibold)).foregroundStyle(DS.muted).frame(maxWidth: .infinity, alignment: .leading).padding(.top, 8)
-                    ForEach(laitems, id: \.0) { k, label in
-                        Toggle(label, isOn: Binding(get: { cfg.laPrefs[k] ?? true }, set: { v in Task { await cfg.setLa(k, v) } })).tint(DS.green).font(.system(size: 14))
-                    }
-                    Text("NOTIFICAÇÕES PUSH").font(.system(size: 10, weight: .semibold)).foregroundStyle(DS.muted).frame(maxWidth: .infinity, alignment: .leading).padding(.top, 8)
-                    ForEach(pushitems, id: \.0) { k, label in
-                        Toggle(label, isOn: Binding(get: { cfg.pushPrefs[k] ?? true }, set: { v in Task { await cfg.setPush(k, v) } })).tint(DS.green).font(.system(size: 14))
-                    }
-                }
-            } label: {
-                Label("Notificações", systemImage: "bell.fill").font(.system(size: 15, weight: .semibold)).foregroundStyle(DS.text)
-            }.tint(DS.muted)
+            rowButton(icon: "bell.fill", title: "Notificações", subtitle: "Live Activities + alertas push") { showNotif = true }
         }
+        .sheet(isPresented: $showNotif) { NotificationsSheet(cfg: cfg) }
     }
     // MARK: Conta e segurança
     private var contaCard: some View {
