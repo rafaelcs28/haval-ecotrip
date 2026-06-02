@@ -26,12 +26,11 @@ struct NativeConfigView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 14) {
-                    logsCard
+                VStack(spacing: 18) {
                     veiculoCard
                     notificacoesCard
+                    dadosCard
                     contaCard
-                    backupCard
                     avancadoCard
                     sobreCard
                 }
@@ -66,9 +65,21 @@ struct NativeConfigView: View {
         .animation(.easeInOut, value: cfg.toast)
     }
 
-    // MARK: Logs
-    private var logsCard: some View {
-        DSCard { rowButton(icon: "list.bullet.rectangle", title: "Logs de eventos", subtitle: "Histórico e filtros") { showLogs = true } }
+    // MARK: Dados (logs + backup + cache)
+    private var dadosCard: some View {
+        DSCard(title: "Dados", icon: "externaldrive.fill") {
+            VStack(spacing: 4) {
+                rowButton(icon: "list.bullet.rectangle", title: "Logs de eventos", subtitle: "Histórico e filtros") { showLogs = true }
+                Divider().overlay(DS.border)
+                rowButton(icon: "square.and.arrow.up", title: "Exportar backup", subtitle: nil) { Task { shareURL = await cfg.exportBackup() } }
+                Divider().overlay(DS.border)
+                rowButton(icon: "square.and.arrow.down", title: "Importar backup", subtitle: nil) { importing = true }
+                Divider().overlay(DS.border)
+                rowButton(icon: "trash", title: "Limpar cache local", subtitle: "Apaga os dados baixados; recarrega na próxima abertura") {
+                    OfflineCache.clearAll(); cfg.toast = "Cache limpo — reabra as abas"
+                }
+            }
+        }
     }
 
     // MARK: Veículo (submenu) + Locais + LAN + pareamento
@@ -114,27 +125,7 @@ struct NativeConfigView: View {
         }
     }
 
-    // MARK: Backup e dados
-    private var backupCard: some View {
-        DSCard(title: "Backup e dados", icon: "externaldrive.fill") {
-            VStack(spacing: 4) {
-                rowButton(icon: "square.and.arrow.up", title: "Exportar backup", subtitle: nil) { Task { shareURL = await cfg.exportBackup() } }
-                Divider().overlay(DS.border)
-                rowButton(icon: "square.and.arrow.down", title: "Importar backup", subtitle: nil) { importing = true }
-                Divider().overlay(DS.border)
-                rowButton(icon: "trash", title: "Limpar cache local", subtitle: "Apaga os dados baixados; recarrega tudo na próxima abertura") {
-                    OfflineCache.clearAll(); cfg.toast = "Cache limpo — reabra as abas"
-                }
-                Divider().overlay(DS.border)
-                ConfirmRow(icon: "exclamationmark.triangle.fill", title: "Apagar dados do servidor", destructive: true,
-                           msg: "Apaga recargas e viagens do servidor. Ação IRREVERSÍVEL.") {
-                    let ok = await cfg.adminAction("/api/admin/clear-history"); cfg.toast = ok ? "✓ Dados apagados" : "✗ Falhou"
-                }
-            }
-        }
-    }
-
-    // MARK: Avançado
+    // MARK: Avançado (recolhido) — manutenção do servidor + ações perigosas
     private var avancadoCard: some View {
         DSCard {
             DisclosureGroup {
@@ -153,9 +144,15 @@ struct NativeConfigView: View {
                                msg: "O servidor reinicia (alguns segundos offline).") {
                         let ok = await cfg.adminAction("/api/admin/restart"); cfg.toast = ok ? "✓ Reiniciando…" : "✗ Falhou"
                     }
+                    Divider().overlay(DS.border)
                     ConfirmRow(icon: "arrow.down.circle", title: "Atualizar do GitHub", destructive: true,
                                msg: "Puxa a última versão e reinicia o servidor.") {
                         let ok = await cfg.adminAction("/api/admin/update"); cfg.toast = ok ? "✓ Atualizando…" : "✗ Falhou"
+                    }
+                    Divider().overlay(DS.border)
+                    ConfirmRow(icon: "exclamationmark.triangle.fill", title: "Apagar dados do servidor", destructive: true,
+                               msg: "Apaga recargas e viagens do servidor. Ação IRREVERSÍVEL.") {
+                        let ok = await cfg.adminAction("/api/admin/clear-history"); cfg.toast = ok ? "✓ Dados apagados" : "✗ Falhou"
                     }
                 }
             } label: { Label("Avançado", systemImage: "gearshape.2.fill").font(.system(size: 15, weight: .semibold)).foregroundStyle(DS.text) }.tint(DS.muted)
