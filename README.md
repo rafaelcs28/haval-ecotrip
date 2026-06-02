@@ -1,350 +1,207 @@
-# EcoTrip Impulse
+# EcoTrip Impulse — Haval H6
 
-Monitoramento em tempo real para o **Haval H6 HEV** via app Android + PWA para iPhone.
+Plataforma de **telemetria, painel e controle em tempo real** pro **Haval H6 (PHEV/HEV)**. Um app roda no carro e publica os dados; um servidor (bridge) recebe, guarda histórico e serve as interfaces: **PWA no celular**, **cluster no tablet** e **apps iOS** (opcionais).
+
+> 👉 **Quer só instalar (servidor próprio)?** Vá direto pro guia passo a passo: **[`docs/INSTALACAO-AMIGO.md`](docs/INSTALACAO-AMIGO.md)**.
+
+---
+
+## O que dá pra fazer
+- **Ao vivo:** velocidade, potência, SOC, marcha, RPM, temperaturas, pneus, volante, modo de condução.
+- **Viagem em curso:** distância, tempo, energia líquida (gasto − regen), consumo, custo R$/km, split EV/HEV.
+- **Recarga:** potência, kWh efetivo, ETA, custo por sessão; histórico e linha do tempo.
+- **Controles:** modo de condução, regeneração, one‑pedal, ESP, **A/C completo** (liga/desliga, compressor, temperatura, ventilador, recirculação, desembaçadores, ionizador, direção do ar) e **pisca‑alerta**.
+- **Mapa** em tempo real (Leaflet) com a posição do carro.
+- **Pré‑climatização** agendada, **Live Activities** (iOS) e **notificações push**.
 
 ---
 
 ## Arquitetura
 
 ```
-App Android (no carro)
-      │  publica a cada 5s via MQTT
-      ▼
-Broker MQTT  ◄──── retém últimos valores (retained)
-      │
-      ▼
-Bridge Node.js  (VPS / servidor)
-  ├── /ws          WebSocket → PWA iPhone (dados ao vivo)
-  ├── /api/*       REST → PWA iPhone (histórico)
-  └── /            Serve a PWA (arquivos estáticos)
-      │
-      ▼
-PWA iPhone (Safari / "Adicionar à tela de início")
+  🚗 App no carro (APK)
+        │  publica telemetria via MQTT (e serve LAN HTTP/WS via mDNS)
+        ▼
+  📡 Broker MQTT (Mosquitto)  ──── retém os últimos valores (retained)
+        │
+        ▼
+  🖥️ Bridge Node.js  (servidor próprio: PC/mini‑PC/NAS/VPS)
+     ├── /api/*   REST (estado, histórico, comandos, pareamento)
+     ├── /ws      WebSocket ao vivo
+     └── /        serve a PWA
+        │
+        ├───────────────► 📱 Celular (PWA) — configura tudo + gera código de pareamento
+        ├───────────────► 📟 Tablet (app cluster) — painel grande (cloud + LAN direta)
+        └───────────────► 🍏 Apps iOS (opcionais) — PWA wrapper + Live Activities
 ```
+
+**Pareamento:** você configura o veículo **no PWA** e gera um **código de 6 dígitos**; no carro é só **Ajustes → Parear → digitar o código** (ele baixa broker/senha/URL sozinho — nada é digitado no carro).
 
 ---
 
-## Estrutura do repositório
+## Componentes (estrutura do repositório)
 
 ```
 haval-ecotrip/
-├── app/                        # App Android (Kotlin / Jetpack Compose)
-│   └── src/main/java/…/
-│       ├── managers/
-│       │   ├── MqttManager.kt   # Publicação MQTT
-│       │   └── TripManager.kt   # Toda a lógica de trips, recarga, lifetime
-│       ├── models/
-│       │   ├── CarConstants.kt  # Mapeamento de sinais do carro
-│       │   └── SharedPreferencesKeys.kt
-│       └── ui/screens/          # Telas Compose
-│
-└── bridge/                     # Servidor Node.js
-    ├── server.js                # Entry point — MQTT + WebSocket + REST + serve PWA
-    ├── package.json
-    ├── .env.example             # Template de configuração
-    └── public/                  # PWA (iPhone)
-        ├── index.html
-        ├── app.js
-        ├── style.css
-        ├── manifest.json
-        └── sw.js                # Service Worker (cache offline)
+├── app/        # APK do CARRO (Kotlin) — lê o CAN via Shizuku, publica MQTT,
+│               #   serve HTTP/WS na LAN (mDNS _havalobd._tcp), POSTa viagens.
+├── bridge/     # Servidor Node.js — MQTT→estado, REST+WS, serve a PWA,
+│               #   pareamento, push/APNs, pré‑clima, IA (Ollama), backup.
+│   ├── server.js
+│   ├── public/             # PWA (celular) — dash, drive, conforto, posto, etc.
+│   ├── .env.example
+│   ├── docker-compose.yml  # subir bridge (+ Mosquitto opcional)
+│   └── Dockerfile
+├── cluster/    # APK do TABLET (Android) — WebView do cluster consumindo o
+│               #   bridge (cloud + LAN ws://). Fit‑scaling, auto‑update.
+├── ios-obd/    # App iPad "HavalOBD" — cluster nativo (WebView + Apple Maps).
+├── ios-app/    # Apps iOS — HavalEcoTrip (wrapper PWA + Live Activities) e BydRecarga.
+└── docs/       # Guias (INSTALACAO‑AMIGO.md, GUIA‑HOSPEDAGEM.md).
 ```
+
+> O **app do tablet** (`cluster/`) e o **app do carro** (`app/`) são distribuídos como APK nos [Releases](https://github.com/rafaelcs28/haval-ecotrip/releases) (tags `vX.Y` = carro; `cluster-vX.Y` = tablet).
 
 ---
 
-## App Android
-
-O APK de release está disponível em [Releases](https://github.com/rafaelcs28/haval-ecotrip/releases).
-
-Para compilar localmente:
+## Início rápido (servidor próprio, Docker)
 
 ```bash
-# Requer Android Studio / SDK com compileSdk 36
-./gradlew assembleRelease
-# APK gerado em: app/build/outputs/apk/release/app-release.apk
-```
-
-### Assinatura (release)
-
-Crie `local.properties` na raiz com:
-
-```properties
-SIGNING_STORE_FILE=/caminho/para/keystore.jks
-SIGNING_STORE_PASSWORD=...
-SIGNING_KEY_ALIAS=...
-SIGNING_KEY_PASSWORD=...
-```
-
-### Configuração no app
-
-Após instalar no Android do carro, configure em **Configurações**:
-- Endereço do broker MQTT
-- Usuário / senha do broker
-- URL do Bridge (ex: `https://ecotrip.seudominio.com`)
-- Preço da gasolina (R$/L) e energia (R$/kWh)
-
----
-
-## Bridge — Servidor Node.js
-
-### Pré-requisitos
-
-- Node.js ≥ 18
-- Um broker MQTT acessível pela internet (ver seção abaixo)
-
-### Instalação local (desenvolvimento)
-
-```bash
-cd bridge
-npm install
-cp .env.example .env
-# edite .env com as credenciais do broker
-npm run dev      # reinicia automaticamente ao salvar
-```
-
-Acesse `http://localhost:3000` no navegador.
-
-### Variáveis de ambiente (`.env`)
-
-| Variável | Padrão | Descrição |
-|---|---|---|
-| `MQTT_HOST` | `mqtt://localhost` | URL do broker (ex: `mqtts://broker.com`) |
-| `MQTT_PORT` | `1883` | Porta MQTT (TLS: `8883`) |
-| `MQTT_USER` | *(vazio)* | Usuário do broker |
-| `MQTT_PASS` | *(vazio)* | Senha do broker |
-| `MQTT_PREFIX` | `haval/ecotrip` | Prefixo dos tópicos — deve ser igual ao configurado no app |
-| `PORT` | `3000` | Porta HTTP do servidor |
-| `BRIDGE_TOKEN` | *(vazio)* | Senha de acesso à PWA — se vazio, servidor fica aberto (dev local) |
-| `BRIDGE_TOKEN_HASH` | *(vazio)* | SHA-256 da senha — gerado automaticamente pela PWA ao trocar senha |
-| `ADMIN_TOKEN` | *(vazio)* | Token admin separado (opcional — se vazio, usa `BRIDGE_TOKEN`) |
-
-> **Nota**: defina apenas `BRIDGE_TOKEN` com uma senha curta (ex: `minhasenha`). O campo `BRIDGE_TOKEN_HASH` é gerenciado automaticamente pela PWA quando o usuário troca a senha pelo celular.
-
-> **⚠️ Armadilha — broker em VM com `vmnet-bridged`**: se o Mosquitto rodar dentro de uma VM (UTM/QEMU/Parallels) em **modo bridged** na mesma rede do bridge Node, **o host não consegue alcançar a VM via o IP "público" dela na LAN** — é uma limitação do framework `vmnet` da Apple. Sintoma: `ECONNRESET` + `Keepalive timeout` em loop quando `MQTT_HOST` aponta pro IP público (hairpin NAT instável), ou `EHOSTDOWN` quando aponta pro IP LAN da VM. **Fix**: adicione um 2º adapter de rede na VM em modo `Shared Network` (NAT), descubra o IP interno (`192.168.64.x`) e use-o em `MQTT_HOST`. Dispositivos externos (app do carro etc.) continuam usando o IP público/LAN normalmente.
-
-### Segurança
-
-A autenticação funciona assim:
-
-- O servidor protege todas as rotas `/api/*` (exceto notificações push) e o WebSocket
-- A PWA exibe uma tela de login na primeira abertura
-- A senha é convertida para SHA-256 antes de ser enviada e armazenada (em HTTPS — em HTTP é enviada como texto puro)
-- Para trocar a senha: aba **⚙ Config** → **Alterar senha de acesso** → sem necessidade de acessar o servidor
-- Para "deslogar" de um dispositivo: aba **⚙ Config** → **🔒 Sair**
-
-> **Recomendado**: configure HTTPS com Caddy (seção abaixo) para garantir que a senha trafegue criptografada.
-
-### Arquivos de dados (gerados automaticamente)
-
-O servidor cria estes arquivos na pasta `bridge/` em produção:
-
-| Arquivo/pasta | Conteúdo |
-|---|---|
-| `trips.json` | Histórico de trips manuais A/B |
-| `charges.json` | Histórico de sessões de recarga |
-| `state.json` | Último estado completo do carro |
-| `autotrips/` | Um `.json` por viagem automática |
-| `lifetime_snapshots.json` | Snapshots de acumulados |
-| `vapid_keys.json` | Chaves para Push Notifications (geradas automaticamente) |
-| `push_subscriptions.json` | Assinaturas de push dos dispositivos |
-
-> **Backup**: faça backup periódico desses arquivos. São os dados históricos do usuário.
-
----
-
-## Deploy em VPS
-
-### 1. Criar o servidor
-
-Recomendações:
-- **Hetzner CAX11** — €3,29/mês (ARM, 2 vCPU, 4 GB RAM) — melhor custo-benefício
-- **Oracle Cloud Always Free** — gratuito permanente (requer cadastro com cartão)
-- **DigitalOcean Droplet** — $4/mês
-
-Sistema operacional: **Ubuntu 24.04 LTS**.
-
----
-
-### 2. Broker MQTT no mesmo VPS (Mosquitto)
-
-```bash
-sudo apt update && sudo apt install -y mosquitto mosquitto-clients
-
-# Configuração básica com autenticação
-sudo mosquitto_passwd -c /etc/mosquitto/passwd ecotrip
-# (define a senha no prompt)
-
-sudo nano /etc/mosquitto/conf.d/ecotrip.conf
-```
-
-Conteúdo do arquivo de configuração:
-
-```
-listener 1883
-allow_anonymous false
-password_file /etc/mosquitto/passwd
-persistence true
-persistence_location /var/lib/mosquitto/
-```
-
-```bash
-sudo systemctl enable --now mosquitto
-sudo ufw allow 1883/tcp   # libera porta MQTT
-```
-
-> **Alternativa gerenciada**: [HiveMQ Cloud](https://www.hivemq.com/mqtt-cloud-broker/) tem plano gratuito (100 conexões, TLS incluído). Evita manter broker próprio.
-
----
-
-### 3. Node.js + Bridge
-
-```bash
-# Instala Node.js 22 LTS
-curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
-sudo apt install -y nodejs
-
-# Instala PM2 (gerenciador de processos — auto-restart, logs, boot)
-sudo npm install -g pm2
-
-# Clona o repositório
 git clone https://github.com/rafaelcs28/haval-ecotrip.git
 cd haval-ecotrip/bridge
-
-# Instala dependências
-npm install --production
-
-# Cria o arquivo de configuração
-cp .env.example .env
-nano .env   # preencha MQTT_HOST, MQTT_USER, MQTT_PASS e BRIDGE_TOKEN
-
-# Inicia com PM2
-pm2 start server.js --name ecotrip-bridge
-
-# Configura para iniciar automaticamente no boot
-pm2 startup    # executa o comando que ele imprimir
-pm2 save
+cp .env.example .env          # edite: MQTT_*, BRIDGE_TOKEN, BRIDGE_PUBLIC_URL, CAR_MQTT_*
+docker compose up -d --build  # sobe o bridge (descomente 'mosquitto:' no compose se precisar de broker)
 ```
-
-Comandos úteis do PM2:
-
-```bash
-pm2 logs ecotrip-bridge       # ver logs em tempo real
-pm2 restart ecotrip-bridge    # reiniciar
-pm2 status                    # status de todos os processos
-```
+Abra `http://IP-DO-SERVIDOR:3000`, entre com a senha (`BRIDGE_TOKEN`), e siga o **[guia de instalação](docs/INSTALACAO-AMIGO.md)** (configurar veículo → gerar código → parear o carro → tablet → celular).
 
 ---
 
-### 4. HTTPS com Caddy (recomendado)
+## App do carro (APK)
 
-O Caddy obtém e renova certificado TLS automaticamente via Let's Encrypt.
+- Baixe o APK em [Releases](https://github.com/rafaelcs28/haval-ecotrip/releases).
+- Requer **Shizuku** rodando na multimídia (acesso ao CAN do carro).
+- **Configuração = pareamento** (não se digita broker no carro): no PWA gere o código e no carro use **Ajustes → Parear**.
 
+Compilar localmente:
 ```bash
-sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \
-  | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \
-  | sudo tee /etc/apt/sources.list.d/caddy-stable.list
-sudo apt update && sudo apt install caddy
+export JAVA_HOME=".../openjdk@17/..."
+./gradlew :app:assembleRelease     # APK em app/build/outputs/apk/release/
+```
+Assinatura: crie `local.properties` na raiz com `SIGNING_STORE_FILE`, `SIGNING_STORE_PASSWORD`, `SIGNING_KEY_ALIAS`, `SIGNING_KEY_PASSWORD`.
 
-sudo nano /etc/caddy/Caddyfile
+---
+
+## App do tablet (cluster)
+
+APK Android que roda o **mesmo cluster do iPad** numa WebView, consumindo o bridge:
+- **Cloud** (HTTP/HTTPS) e **LAN direta** (descobre o carro por mDNS e usa `ws://…/ws/state` ~10 fps).
+- **Fit‑scaling** adaptativo (qualquer tela — tablet, dobrável), **auto‑update** (⚙ → Atualizar app).
+- Config: **⚙ → Base URL + senha** (a do `BRIDGE_TOKEN`).
+
+Baixe a tag `cluster-vX.Y` em Releases. Compilar: `./gradlew :cluster:assembleRelease`.
+
+---
+
+## Bridge — servidor Node.js
+
+### Pré‑requisitos
+- **Docker** (recomendado) **ou** Node.js ≥ 18.
+- Um **broker MQTT** (Mosquitto local/HA, ou gerenciado).
+
+### Rodar sem Docker (dev)
+```bash
+cd bridge && npm install && cp .env.example .env
+npm run dev        # http://localhost:3000
 ```
 
-Conteúdo do `Caddyfile`:
+### Variáveis de ambiente (`.env`) — principais
+| Variável | Descrição |
+|---|---|
+| `MQTT_HOST` / `MQTT_PORT` | broker que o **bridge** lê (ex. `mqtt://mosquitto`, `mqtts://broker`) |
+| `MQTT_USER` / `MQTT_PASS` | credenciais do broker |
+| `MQTT_PREFIX` | prefixo dos tópicos (`haval/ecotrip`) — vai no pareamento |
+| `BRIDGE_TOKEN` | **senha de acesso** (texto puro; o bridge calcula o hash) |
+| `BRIDGE_PUBLIC_URL` | URL externa do bridge (Tailscale/DDNS) — **enviada no pareamento** pro carro mandar viagens |
+| `CAR_MQTT_HOST` / `_PORT` / `_TLS` | endereço do broker que o **carro** usa pela internet (4G). Vazio = usa o local |
+| `GWM_CHASSI` | chassi (`lgw`+14) — opcional aqui (dá pra pôr no PWA) |
+| `HA_URL` / `HA_TOKEN` | Home Assistant (opcional) — estados iniciais + comandos remotos |
+| `PORT` / `HTTPS_PORT` | portas HTTP/HTTPS |
+| `GOOGLE_OAUTH_CLIENT_ID` / `*_ALLOWED_EMAILS` | login Google no PWA (opcional) |
 
+> Segredos (`.env`, `*.p8`, `auth.json`, certs) **nunca** são versionados (ver `.gitignore`). Dados pessoais (viagens/recargas) ficam só na pasta `bridge/` do seu servidor.
+
+### Segurança
+- Todas as rotas `/api/*` (exceto push e `/api/pair/redeem`) exigem `Authorization: Bearer <senha-ou-hash>`.
+- O `requireAuth` aceita a **senha em texto** ou o **SHA‑256** dela — por isso o tablet/PWA usam só a senha.
+- Login por senha + opcional **Google** e **2FA (TOTP)**. Troca de senha pela própria PWA.
+- Recomendado **HTTPS** (Caddy/Tailscale) pra senha trafegar criptografada e push da PWA funcionar.
+
+### Dados gerados (na pasta `bridge/`)
+`state.json`, `charges.json`, `autotrips/`, `lifetime_snapshots.json`, `drive_history.json`, `preclimat.json`, `vapid_keys.json`, `push_subscriptions.json`… → **faça backup** (ou use `scripts/backup.sh`). Não são versionados.
+
+---
+
+## Deploy avançado (VPS + Mosquitto + Caddy)
+
+<details>
+<summary>Passos detalhados (Ubuntu + PM2 + Caddy)</summary>
+
+**Broker (Mosquitto):**
+```bash
+sudo apt install -y mosquitto mosquitto-clients
+sudo mosquitto_passwd -c /etc/mosquitto/passwd ecotrip
+printf 'listener 1883\nallow_anonymous false\npassword_file /etc/mosquitto/passwd\npersistence true\npersistence_location /var/lib/mosquitto/\n' | sudo tee /etc/mosquitto/conf.d/ecotrip.conf
+sudo systemctl enable --now mosquitto
+```
+
+**Bridge com PM2:**
+```bash
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt install -y nodejs
+sudo npm install -g pm2
+cd haval-ecotrip/bridge && npm install --production && cp .env.example .env && nano .env
+pm2 start server.js --name ecotrip-bridge && pm2 startup && pm2 save
+```
+
+**HTTPS (Caddy):**
 ```
 ecotrip.seudominio.com {
     reverse_proxy localhost:3000
 }
 ```
 
-```bash
-sudo systemctl enable --now caddy
-sudo ufw allow 80/tcp
-sudo ufw allow 443/tcp
-```
-
-Após isso a PWA estará disponível em `https://ecotrip.seudominio.com`.
-
-> **DNS**: aponte um registro A do seu domínio para o IP do VPS antes de iniciar o Caddy.
+> **Armadilha — broker em VM `vmnet-bridged`** (UTM/QEMU/Parallels): o host pode não alcançar a VM pelo IP "público" da LAN (limitação do `vmnet` da Apple) → `ECONNRESET`/`Keepalive timeout`. **Fix:** adicione um 2º adapter em **Shared Network (NAT)**, descubra o IP `192.168.64.x` e use em `MQTT_HOST`.
+</details>
 
 ---
 
-### 5. Configurar o app do carro
+## API (principais endpoints)
+| Método | Endpoint | Descrição |
+|---|---|---|
+| `GET` | `/api/state` | estado atual completo |
+| `GET` | `/api/charges` · `/api/auto-trips` | histórico de recargas / viagens |
+| `POST` | `/api/pair/generate` | gera código de pareamento (autenticado) |
+| `POST` | `/api/pair/redeem` | carro resgata o código e recebe a config (sem login) |
+| `POST` | `/api/hvac/<control>` · `/api/hazard` · `/api/drive-mode` … | comandos |
+| `POST` | `/api/auto-trips` | carro envia a viagem ao fim |
+| `WS` | `/ws` | stream ao vivo |
 
-No app Android, em Configurações:
-- **URL do Bridge**: `https://ecotrip.seudominio.com`
-- **MQTT Host**: IP do VPS (ex: `mqtt://1.2.3.4`) ou domínio do broker gerenciado
-- **MQTT Usuário/Senha**: as credenciais criadas no passo 2
+`/api/*` exige `Authorization: Bearer <token>` quando `BRIDGE_TOKEN` está setado (exceto push e `pair/redeem`).
 
 ---
 
-### 6. Instalar a PWA no iPhone
-
-1. Abra `https://ecotrip.seudominio.com` no Safari
-2. Toque no ícone de compartilhar (⬆)
-3. **"Adicionar à Tela de Início"**
-4. O app fica disponível como ícone nativo, com cache offline
+## Tópicos MQTT (prefixo `haval/ecotrip/`)
+`speed_kmh`, `gear`, `soc_pct`, `motor_power_kw`, `engine_rpm`, `inside_temp`/`outside_temp`, `charging_state`, `charge_power_kw`, `charge_session_kwh`, `charge_remaining_min`, `gps_lat`/`gps_lng`, `hvac_*` (ac_enable, power_mode, fan_speed, temp, blower, defrost…), `lifetime/*`, `status` (online/offline, retained). Comandos chegam em `…/cmd/<nome>`.
 
 ---
 
 ## Atualização do servidor
-
 ```bash
-cd haval-ecotrip
-git pull
-cd bridge && npm install --production
-pm2 restart ecotrip-bridge
+cd haval-ecotrip && git pull
+# Docker:  cd bridge && docker compose up -d --build
+# PM2:     cd bridge && npm install --production && pm2 restart ecotrip-bridge
 ```
-
-> Os arquivos de dados (`trips.json`, `charges.json`, etc.) não são versionados e não são afetados pelo `git pull`.
-
----
-
-## Endpoints da API
-
-| Método | Endpoint | Descrição |
-|---|---|---|
-| `GET` | `/api/state` | Estado atual completo do carro |
-| `GET` | `/api/trips` | Histórico de trips manuais |
-| `GET` | `/api/charges` | Histórico de recargas |
-| `GET` | `/api/auto-trips` | Viagens automáticas |
-| `GET` | `/api/vapidPublicKey` | Chave pública para Push Notifications |
-| `POST` | `/api/push/subscribe` | Registrar dispositivo para push |
-| `POST` | `/api/auto-trips` | Receber viagens do app Android |
-| `POST` | `/api/admin/change-password` | Trocar senha de acesso (requer auth) |
-| `POST` | `/api/admin/clear-history` | Apagar todo o histórico (requer auth) |
-| `POST` | `/api/admin/restart` | Reiniciar o servidor (requer auth) |
-| `WS` | `/ws?token=<hash>` | WebSocket — stream de dados ao vivo |
-
-Todas as rotas `/api/*` (exceto `/api/push/*`) exigem header `Authorization: Bearer <token>` quando `BRIDGE_TOKEN` está configurado no `.env`.
-
----
-
-## Tópicos MQTT publicados pelo app
-
-Prefixo padrão: `haval/ecotrip/`
-
-| Tópico | Tipo | Descrição |
-|---|---|---|
-| `speed_kmh` | Float | Velocidade atual |
-| `gear` | String | Marcha (P/R/N/D) |
-| `soc_pct` | Float | Bateria % |
-| `fuel_pct` | Float | Combustível % |
-| `inside_temp` / `outside_temp` | Float | Temperaturas |
-| `charging_state` | String | Estado de recarga |
-| `charge_power_kw` | Float | Potência de carga |
-| `charge_session_kwh` | Float | kWh injetados na sessão atual |
-| `charge_remaining_min` | Int | Minutos restantes para carga completa |
-| `trip_a/*` / `trip_b/*` | Float | Métricas dos trips manuais |
-| `rolling/*` | Float | Métricas desde a última partida |
-| `lifetime/*` | Float | Acumulados totais |
-| `price_gas_per_l` | Float | Preço da gasolina configurado no app |
-| `price_kwh` | Float | Preço da energia configurado no app |
-| `status` | String | `online` / `offline` (retained) |
+Os dados (`bridge/*.json`, `autotrips/`) não são versionados — `git pull` não os afeta.
 
 ---
 
 ## Licença
-
-Uso pessoal. Desenvolvido para Haval H6 HEV (versão HEV 2023+).
+Uso pessoal/educacional. Desenvolvido para o Haval H6 (PHEV34 / HEV).
