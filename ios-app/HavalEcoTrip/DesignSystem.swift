@@ -17,6 +17,9 @@ enum Fmt {
     private static let f2 = nf(2)
     static func int(_ v: Double) -> String { f0.string(from: NSNumber(value: v)) ?? String(format: "%.0f", v) }
     static func dec1(_ v: Double) -> String { f1.string(from: NSNumber(value: v)) ?? String(format: "%.1f", v) }
+    static func dec2(_ v: Double) -> String { f2.string(from: NSNumber(value: v)) ?? String(format: "%.2f", v) }
+    /// km: <100 com 2 casas, >=100 inteiro (com milhares).
+    static func km(_ v: Double) -> String { v < 100 ? dec2(v) : int(v) }
     static func brl(_ v: Double) -> String { "R$ " + (f2.string(from: NSNumber(value: v)) ?? String(format: "%.2f", v)) }
 }
 

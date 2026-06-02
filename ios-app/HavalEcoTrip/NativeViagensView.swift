@@ -121,7 +121,8 @@ struct NativeViagensView: View {
     private var toDate: Binding<Date> { Binding(get: { toTS > 0 ? Date(timeIntervalSince1970: toTS) : Date() }, set: { toTS = $0.timeIntervalSince1970 }) }
 
     private func f0(_ v: Double) -> String { Fmt.int(v) }
-    private func f1(_ v: Double) -> String { Fmt.dec1(v) }
+    private func f1(_ v: Double) -> String { Fmt.dec2(v) }   // 2 casas
+    private func km(_ v: Double) -> String { Fmt.km(v) }      // <100: 2 casas, >=100: inteiro
     private func brl(_ v: Double) -> String { Fmt.brl(v) }
     private func dur(_ s: Double) -> String { let t = Int(s), h = t/3600, m = (t%3600)/60; return h > 0 ? "\(h)h \(m)min" : "\(m) min" }
     private static let df: DateFormatter = { let f = DateFormatter(); f.locale = Locale(identifier: "pt_BR"); f.dateFormat = "d MMM · HH:mm"; return f }()
@@ -208,7 +209,7 @@ struct NativeViagensView: View {
                         }
                         Text(Self.df.string(from: t.date)).font(.caption).foregroundStyle(DS.muted).frame(maxWidth: .infinity, alignment: .leading)
                         HStack {
-                            DSMetric(value: f1(t.distKm), unit: "km", label: "Distância", color: DS.teal)
+                            DSMetric(value: km(t.distKm), unit: "km", label: "Distância", color: DS.teal)
                             DSMetric(value: f1(t.netKwh), unit: "kWh", label: "Energia", color: DS.green)
                             DSMetric(value: cost > 0 ? brl(cost) : "—", label: "Custo")
                         }
@@ -239,7 +240,7 @@ struct NativeViagensView: View {
 
     private var estatisticas: some View {
         let f = filtered
-        let km = f.reduce(0) { $0 + $1.distKm }
+        let totalKm = f.reduce(0) { $0 + $1.distKm }
         let kwh = f.reduce(0) { $0 + $1.netKwh }
         let fuel = f.reduce(0) { $0 + $1.fuelL }
         let cost = f.reduce(0) { $0 + $1.cost(car.priceKwh, car.priceGas) }
@@ -250,14 +251,14 @@ struct NativeViagensView: View {
                 DSCard {
                     HStack {
                         DSMetric(value: "\(f.count)", label: "Viagens", color: DS.teal)
-                        DSMetric(value: f0(km), unit: "km", label: "Distância", color: DS.green)
+                        DSMetric(value: km(totalKm), unit: "km", label: "Distância", color: DS.green)
                         DSMetric(value: brl(cost), label: "Custo est.")
                     }
                 }
                 DSCard {
                     HStack {
-                        DSMetric(value: km > 1 ? f1(kwh/km*100) : "—", unit: "kWh/100", label: "Consumo médio")
-                        DSMetric(value: km > 1 ? brl(cost/km) : "—", label: "R$/km", color: DS.green)
+                        DSMetric(value: totalKm > 1 ? f1(kwh/totalKm*100) : "—", unit: "kWh/100", label: "Consumo médio")
+                        DSMetric(value: totalKm > 1 ? brl(cost/totalKm) : "—", label: "R$/km", color: DS.green)
                         DSMetric(value: f1(fuel), unit: "L", label: "Gasolina", color: DS.orange)
                     }
                 }
@@ -309,35 +310,76 @@ private struct RenameField: View {
     }
 }
 
-// MARK: - Trajeto (polyline do telemetry)
+// MARK: - Trajeto: mapa + linha do tempo (velocidade/potência/rpm/SOC/kWh acum.)
+struct TripSample: Identifiable {
+    let id = UUID()
+    let min: Double      // minuto da viagem
+    let spd: Double
+    let rpm: Double
+    let pwr: Double
+    let soc: Double
+    let cumKwh: Double
+}
+
 struct RouteMapSheet: View {
     let trip: Trip
     @Environment(\.dismiss) private var dismiss
     @State private var coords: [CLLocationCoordinate2D] = []
+    @State private var samples: [TripSample] = []
     @State private var loading = true
+    @State private var metric = 0   // 0=Vel,1=Pot,2=RPM,3=SOC,4=kWh
+
+    private let metrics = ["Velocidade", "Potência", "RPM", "SOC", "kWh acum."]
+    private let units = ["km/h", "kW", "rpm", "%", "kWh"]
+    private let colors = [DS.teal, DS.blue, DS.orange, DS.green, DS.yellow]
 
     private var base: String {
         let u = Settings.bridgeURL.isEmpty ? AuthConfig.bridgeURL : Settings.bridgeURL
         return u.hasSuffix("/") ? String(u.dropLast()) : u
     }
+    private func value(_ s: TripSample) -> Double {
+        switch metric { case 0: return s.spd; case 1: return s.pwr; case 2: return s.rpm; case 3: return s.soc; default: return s.cumKwh }
+    }
 
     var body: some View {
         NavigationStack {
-            ZStack {
-                if coords.count > 1 {
-                    Map {
-                        MapPolyline(coordinates: coords).stroke(DS.green, lineWidth: 4)
-                        if let s = coords.first { Marker("Início", coordinate: s).tint(.green) }
-                        if let e = coords.last { Marker("Fim", coordinate: e).tint(.red) }
+            ScrollView {
+                VStack(spacing: 14) {
+                    if coords.count > 1 {
+                        Map {
+                            MapPolyline(coordinates: coords).stroke(DS.green, lineWidth: 4)
+                            if let s = coords.first { Marker("Início", coordinate: s).tint(.green) }
+                            if let e = coords.last { Marker("Fim", coordinate: e).tint(.red) }
+                        }
+                        .mapStyle(.standard(pointsOfInterest: .excludingAll))
+                        .environment(\.colorScheme, .dark)
+                        .frame(height: 280)
+                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                    } else if !loading {
+                        Text("Mapa indisponível.").font(.subheadline).foregroundStyle(DS.muted)
                     }
-                    .mapStyle(.standard(pointsOfInterest: .excludingAll))
-                    .environment(\.colorScheme, .dark)
-                    .ignoresSafeArea(edges: .bottom)
-                } else if loading {
-                    ProgressView().tint(DS.green)
-                } else {
-                    Text("Trajeto indisponível.").font(.subheadline).foregroundStyle(DS.muted)
+
+                    if !samples.isEmpty {
+                        DSCard(title: "Linha do tempo", icon: "waveform.path.ecg") {
+                            VStack(spacing: 10) {
+                                Picker("", selection: $metric) {
+                                    ForEach(Array(metrics.enumerated()), id: \.offset) { i, m in Text(m).tag(i) }
+                                }.pickerStyle(.segmented)
+                                Chart(samples) { s in
+                                    LineMark(x: .value("min", s.min), y: .value("v", value(s)))
+                                        .foregroundStyle(colors[metric]).interpolationMethod(.monotone)
+                                }
+                                .frame(height: 200)
+                                .chartXAxisLabel("min")
+                                .chartYAxis { AxisMarks { _ in AxisGridLine().foregroundStyle(DS.border); AxisValueLabel() } }
+                                Text(units[metric]).font(.caption2).foregroundStyle(DS.muted).frame(maxWidth: .infinity, alignment: .trailing)
+                            }
+                        }
+                    } else if loading {
+                        ProgressView().tint(DS.green).padding(.top, 30)
+                    }
                 }
+                .padding(16)
             }
             .background(DS.bg.ignoresSafeArea())
             .navigationTitle("Trajeto").navigationBarTitleDisplayMode(.inline)
@@ -353,10 +395,22 @@ struct RouteMapSheet: View {
         defer { loading = false }
         guard let (data, _) = try? await URLSession.shared.data(for: req),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let samples = obj["samples"] as? [[String: Any]] else { return }
-        coords = samples.compactMap { s in
+              let raw = obj["samples"] as? [[String: Any]] else { return }
+        coords = raw.compactMap { s in
             let la = anyNum2(s["lat"]), lo = anyNum2(s["lng"])
             return (la != 0 && lo != 0) ? CLLocationCoordinate2D(latitude: la, longitude: lo) : nil
         }
+        var cum = 0.0; var lastT = 0.0; var out: [TripSample] = []
+        for s in raw {
+            let t = anyNum2(s["t"])
+            let pwr = anyNum2(s["pwr"]) != 0 ? anyNum2(s["pwr"]) : anyNum2(s["evKw"])
+            let dt = max(0, t - lastT); lastT = t
+            cum += pwr * dt / 3600.0
+            out.append(TripSample(min: t / 60.0, spd: anyNum2(s["spd"]), rpm: anyNum2(s["rpm"]),
+                                  pwr: pwr, soc: anyNum2(s["soc"]), cumKwh: cum))
+        }
+        // Reduz pontos pra render fluida (máx ~400)
+        if out.count > 400 { let step = out.count / 400 + 1; out = out.enumerated().filter { $0.offset % step == 0 }.map { $0.element } }
+        samples = out
     }
 }

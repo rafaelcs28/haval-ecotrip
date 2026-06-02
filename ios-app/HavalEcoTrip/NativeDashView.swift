@@ -38,7 +38,6 @@ struct NativeDashView: View {
                 header
                 statusCard
                 if store.isCharging { chargingCard } else { HStack(spacing: 14) { batteryCard; fuelCard } }
-                costPerKmCard
                 climateCard
                 tyresCard
                 doorsCard
@@ -154,7 +153,11 @@ struct NativeDashView: View {
         return DSCard {
             VStack(alignment: .leading, spacing: 10) {
                 LevelBadge(icon: batteryIcon(soc), fraction: soc/100, value: f0(soc), unit: "%", label: "Bateria", tint: tint)
-                Text("\(f0(store.rangeEvKm)) km EV").font(.caption).foregroundStyle(DS.muted)
+                HStack {
+                    Text("\(f0(store.rangeEvKm)) km EV").font(.caption).foregroundStyle(DS.muted)
+                    Spacer()
+                    if store.priceKwh > 0 { Text("\(brl(store.priceKwh))/kWh").font(.caption).foregroundStyle(DS.green) }
+                }
             }
         }
     }
@@ -175,24 +178,17 @@ struct NativeDashView: View {
         }
     }
 
-    // Custo por km atual (EV e gasolina)
-    @ViewBuilder private var costPerKmCard: some View {
-        if store.costPerKmEv > 0 || store.costPerKmGas > 0 {
-            DSCard {
-                HStack {
-                    DSMetric(value: store.costPerKmEv > 0 ? brl(store.costPerKmEv) : "—", label: "R$/km EV", color: DS.green)
-                    DSMetric(value: store.costPerKmGas > 0 ? brl(store.costPerKmGas) : "—", label: "R$/km Gasolina", color: DS.orange)
-                }
-            }
-        }
-    }
     private var fuelCard: some View {
         let frac = min(1, store.fuelL / tankL)
         let tint: Color = frac < 0.15 ? DS.red : (frac < 0.35 ? DS.yellow : DS.orange)
         return DSCard {
             VStack(alignment: .leading, spacing: 10) {
                 LevelBadge(icon: "fuelpump.fill", fraction: frac, value: f0(store.fuelL), unit: "L", label: "Tanque", tint: tint)
-                Text("\(f0(store.rangeIceKm)) km térmico").font(.caption).foregroundStyle(DS.muted)
+                HStack {
+                    Text("\(f0(store.rangeIceKm)) km térmico").font(.caption).foregroundStyle(DS.muted)
+                    Spacer()
+                    if store.priceGas > 0 { Text("\(brl(store.priceGas))/L").font(.caption).foregroundStyle(DS.orange) }
+                }
             }
         }
     }

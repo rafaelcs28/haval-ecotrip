@@ -96,13 +96,11 @@ struct NativeConfigView: View {
                 }.tint(DS.green)
                 Divider().overlay(DS.border)
                 rowButton(icon: "qrcode", title: "Parear carro", subtitle: "Gera um código pro app do carro") {
-                    cfg.pairCode = nil; showPair = true; Task { await cfg.generatePair() }
+                    showPair = true
                 }
             }
         }
-        .alert("Código de pareamento", isPresented: $showPair) {
-            Button("OK") {}
-        } message: { Text(cfg.pairCode ?? "Gerando…") }
+        .sheet(isPresented: $showPair) { PairCodeSheet(cfg: cfg) }
     }
 
     // MARK: Notificações (recolhido, persiste)
@@ -255,6 +253,32 @@ struct ConfirmRow: View {
             .padding(18).frame(width: 300).background(DS.panel)
             .presentationCompactAdaptation(.popover)
         }
+    }
+}
+
+// Código de pareamento (gera ao abrir; atualiza reativamente).
+struct PairCodeSheet: View {
+    @ObservedObject var cfg: ConfigStore
+    @Environment(\.dismiss) private var dismiss
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 20) {
+                Image(systemName: "qrcode").font(.system(size: 44)).foregroundStyle(DS.green)
+                Text("No app do carro: Ajustes → Parear → digite o código").font(.subheadline).foregroundStyle(DS.muted).multilineTextAlignment(.center)
+                if let code = cfg.pairCode {
+                    Text(code).font(.system(size: 44, weight: .bold, design: .monospaced)).foregroundStyle(DS.text).tracking(4)
+                    Text("Válido por 10 minutos").font(.caption).foregroundStyle(DS.muted)
+                } else {
+                    ProgressView().tint(DS.green).padding(.top, 8)
+                }
+                Spacer()
+            }.padding(24)
+            .frame(maxWidth: .infinity)
+            .background(DS.bg.ignoresSafeArea())
+            .navigationTitle("Parear carro").navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Fechar") { dismiss() } } }
+        }
+        .task { cfg.pairCode = nil; await cfg.generatePair() }
     }
 }
 

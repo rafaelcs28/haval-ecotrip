@@ -78,6 +78,25 @@ final class ChargesLoader: ObservableObject {
         } catch { failed = true; diag = "erro: \(error.localizedDescription)" }
         loading = false
     }
+
+    private func patch(_ path: String, _ body: [String: Any]) async {
+        guard let url = URL(string: "\(base)\(path)") else { return }
+        var r = URLRequest(url: url); r.httpMethod = "PATCH"; r.timeoutInterval = 12
+        r.addValue("Bearer " + Settings.bridgeToken, forHTTPHeaderField: "Authorization")
+        r.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        r.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        _ = try? await URLSession.shared.data(for: r)
+    }
+    /// Edita energia medida (kWh na bateria) e/ou custo total. perKwh = total/energia.
+    func edit(_ ts: Double, energy: Double?, total: Double?) async {
+        let id = Int(ts)
+        if let energy, energy >= 0 { await patch("/api/charges/\(id)/edit", ["energy_kwh": energy]) }
+        if let total, total >= 0 {
+            let e = energy ?? 0
+            await patch("/api/charges/\(id)/cost", ["total": total, "per_kwh": e > 0 ? total / e : 0])
+        }
+        await load()
+    }
 }
 
 // MARK: - Abastecimento
@@ -127,6 +146,7 @@ struct NativeRecargasView: View {
     @AppStorage("rec_from") private var fromTS: Double = 0
     @AppStorage("rec_to") private var toTS: Double = 0
     @State private var showCal = false
+    @State private var expandedCharge: Double?
 
     private var fromDate: Binding<Date> {
         Binding(get: { fromTS > 0 ? Date(timeIntervalSince1970: fromTS) : Date() }, set: { fromTS = $0.timeIntervalSince1970 })
@@ -136,9 +156,9 @@ struct NativeRecargasView: View {
     }
 
     private func f0(_ v: Double) -> String { Fmt.int(v) }
-    private func f1(_ v: Double) -> String { Fmt.dec1(v) }
+    private func f1(_ v: Double) -> String { Fmt.dec2(v) }   // recargas: 2 casas
     private func brl(_ v: Double) -> String { Fmt.brl(v) }
-    private func perKwh(_ v: Double) -> String { String(format: "%.2f", v).replacingOccurrences(of: ".", with: ",") }
+    private func perKwh(_ v: Double) -> String { Fmt.dec2(v) }
     private func dur(_ s: Double) -> String { let t = Int(s), h = t/3600, m = (t%3600)/60; return h > 0 ? "\(h)h \(m)min" : "\(m) min" }
     private static let df: DateFormatter = { let f = DateFormatter(); f.locale = Locale(identifier: "pt_BR"); f.dateFormat = "d MMM · HH:mm"; return f }()
 
@@ -226,27 +246,40 @@ struct NativeRecargasView: View {
     }
 
     private func chargeCard(_ c: Charge) -> some View {
-        DSCard {
+        let expanded = expandedCharge == c.id
+        return DSCard {
             VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Image(systemName: "bolt.fill").font(.caption).foregroundStyle(DS.green)
-                    Text(c.location).font(.system(size: 15, weight: .semibold)).foregroundStyle(DS.text).lineLimit(1)
-                    Spacer()
-                    Text(Self.df.string(from: c.date)).font(.caption).foregroundStyle(DS.muted)
-                }
-                HStack {
-                    DSMetric(value: f1(c.kwh), unit: "kWh", label: "Na bateria", color: DS.green)
-                    DSMetric(value: c.costTotal > 0 ? brl(c.costTotal) : "Grátis", label: "Custo", color: DS.text)
-                    DSMetric(value: c.costPerKwh > 0 ? perKwh(c.costPerKwh) : "—", unit: "R$/kWh", label: "Preço")
-                }
-                HStack(spacing: 14) {
-                    miniLabel("SOC", "\(f0(c.socStart))% → \(f0(c.socEnd))%")
-                    miniLabel("Duração", dur(c.durationSec))
-                    if c.avgPowerKw > 0 { miniLabel("Potência média", "\(f1(c.avgPowerKw)) kW") }
-                }
-                if c.chargerKwh > 0 {
-                    Text("Carregador: \(f1(c.chargerKwh)) kWh (perdas \(f0(max(0, c.chargerKwh - c.kwh))) kWh)")
-                        .font(.caption2).foregroundStyle(DS.muted)
+                Button { withAnimation(.easeInOut(duration: 0.2)) { expandedCharge = expanded ? nil : c.id } } label: {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            Image(systemName: "bolt.fill").font(.caption).foregroundStyle(DS.green)
+                            Text(c.location).font(.system(size: 15, weight: .semibold)).foregroundStyle(DS.text).lineLimit(1)
+                            Spacer()
+                            Text(Self.df.string(from: c.date)).font(.caption).foregroundStyle(DS.muted)
+                            Image(systemName: expanded ? "chevron.up" : "chevron.down").font(.caption2).foregroundStyle(DS.muted)
+                        }
+                        HStack {
+                            DSMetric(value: f1(c.kwh), unit: "kWh", label: "Na bateria", color: DS.green)
+                            DSMetric(value: c.costTotal > 0 ? brl(c.costTotal) : "Grátis", label: "Custo", color: DS.text)
+                            DSMetric(value: c.costPerKwh > 0 ? perKwh(c.costPerKwh) : "—", unit: "R$/kWh", label: "Preço")
+                        }
+                    }
+                }.buttonStyle(.plain)
+
+                if expanded {
+                    Divider().overlay(DS.border)
+                    HStack(spacing: 14) {
+                        miniLabel("SOC", "\(f0(c.socStart))% → \(f0(c.socEnd))%")
+                        miniLabel("Duração", dur(c.durationSec))
+                        if c.avgPowerKw > 0 { miniLabel("Potência média", "\(f1(c.avgPowerKw)) kW") }
+                    }
+                    if c.chargerKwh > 0 {
+                        Text("Carregador: \(f1(c.chargerKwh)) kWh · perdas \(f1(max(0, c.chargerKwh - c.kwh))) kWh")
+                            .font(.caption2).foregroundStyle(DS.muted)
+                    }
+                    ChargeEditFields(energy: c.kwh, total: c.costTotal) { e, t in
+                        Task { await loader.edit(c.id, energy: e, total: t) }
+                    }
                 }
             }
         }
@@ -396,5 +429,37 @@ struct NativeRecargasView: View {
             Text(k.uppercased()).font(.system(size: 9, weight: .semibold)).foregroundStyle(DS.muted)
             Text(v).font(.system(size: 13, weight: .semibold)).foregroundStyle(DS.text)
         }.frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+// Edição inline de uma recarga: medidor (kWh) + custo total.
+private struct ChargeEditFields: View {
+    let energy: Double
+    let total: Double
+    let onSave: (Double?, Double?) -> Void
+    @State private var e = ""
+    @State private var t = ""
+    @State private var loaded = false
+
+    var body: some View {
+        VStack(spacing: 8) {
+            HStack(spacing: 8) {
+                field("Medidor (kWh)", $e)
+                field("Custo total (R$)", $t)
+            }
+            Button { onSave(Double(e.replacingOccurrences(of: ",", with: ".")), Double(t.replacingOccurrences(of: ",", with: "."))) } label: {
+                Text("Salvar").font(.system(size: 14, weight: .bold)).frame(maxWidth: .infinity).frame(height: 42)
+                    .foregroundStyle(.black).background(DS.green).clipShape(RoundedRectangle(cornerRadius: 11))
+            }
+        }
+        .onAppear { if !loaded { e = String(format: "%.2f", energy); t = total > 0 ? String(format: "%.2f", total) : ""; loaded = true } }
+    }
+    private func field(_ ph: String, _ text: Binding<String>) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(ph.uppercased()).font(.system(size: 9, weight: .semibold)).foregroundStyle(DS.muted)
+            TextField(ph, text: text).keyboardType(.decimalPad).foregroundStyle(DS.text)
+                .padding(9).background(DS.panel2).clipShape(RoundedRectangle(cornerRadius: 9))
+                .overlay(RoundedRectangle(cornerRadius: 9).stroke(DS.border, lineWidth: 1))
+        }
     }
 }
