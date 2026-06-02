@@ -12,6 +12,7 @@
 		0CC661D339028F8AD4C5270B /* MaintenanceSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D3807C873D02DC8F672F3CD /* MaintenanceSheet.swift */; };
 		1505BBD9630C5E03C190C203 /* SongProActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF8BF0D6E8837DEC20056AB8 /* SongProActivityAttributes.swift */; };
 		16E429E57E193AFF3942D11F /* BydRecargaApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECAEED044A902791C1B43435 /* BydRecargaApp.swift */; };
+		18E278B160F80938E45E8463 /* NativeConfigView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6CE9B63AE0A75344509696C /* NativeConfigView.swift */; };
 		1A900DDEB8C0BB74EAD4A130 /* Settings.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4593E338CE49445D2B4E37A /* Settings.swift */; };
 		1BC63D4315A2BB6BFAE49F0E /* BydRecargaWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 0275BC86719533522473C87B /* BydRecargaWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		2480E68526B78CFE04F2C37B /* TripActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = E612200FCE6AA9F646191052 /* TripActivityAttributes.swift */; };
@@ -19,8 +20,10 @@
 		2BBB45182185499D3B954868 /* LANDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA22E658C7AE7CB3679725CF /* LANDiscovery.swift */; };
 		31C4EEF5E7D54B74A2F8DCA1 /* SongProLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8667439515FC27589EEEDBC9 /* SongProLiveActivity.swift */; };
 		3ED1321FB7B61D7ADDAA032F /* DesignSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7376EEA5C86B0C60FE3CE4E3 /* DesignSystem.swift */; };
+		42169A88F8E36FD03EA47301 /* ConfigStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD7173E45A0E0AAFE9AD301F /* ConfigStore.swift */; };
 		447016E58ECF062223D41618 /* TripActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = E612200FCE6AA9F646191052 /* TripActivityAttributes.swift */; };
 		4C94F890D15203640F57B31D /* LiveActivityPush.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19F1EE1E1159233D66EEAFA8 /* LiveActivityPush.swift */; };
+		4EB218A639630413D48F777D /* LogsSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = C25344C215F40EDE5B072CEF /* LogsSheet.swift */; };
 		51B5F9B9255D183BDCDE0CC7 /* RemoteNotifications.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0AFED4CCA277E184649006B9 /* RemoteNotifications.swift */; };
 		5258D112C16CFD21020F41B2 /* Settings.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4593E338CE49445D2B4E37A /* Settings.swift */; };
 		5CF964F8F567C8A30A20996D /* SecurityActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = D15756C1CEF1EFDD6804C05D /* SecurityActivityAttributes.swift */; };
@@ -61,6 +64,7 @@
 		E43E5551EEE28BC0621FA123 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 492762BFD473DC0FD6D89688 /* ContentView.swift */; };
 		E4DBC8604FEF4AF3E5F39336 /* CarStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C68353FA3433CBE88BFA4347 /* CarStore.swift */; };
 		E7A22E919521A94E9004D8F2 /* LivePreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A804763C29A6FBD8871C5A7 /* LivePreview.swift */; };
+		EB170A75BD1ABB3462C6AF9E /* BiometricGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5C3783F4045873A9A1C2F85 /* BiometricGate.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -140,6 +144,7 @@
 		968AA8DFD87E74A832ED71A5 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		A53601AA6DAB2F8858F60A3D /* BydRecarga-prod.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "BydRecarga-prod.entitlements"; sourceTree = "<group>"; };
 		A799F69A43F78E263048C8F4 /* AuthConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthConfig.swift; sourceTree = "<group>"; };
+		AD7173E45A0E0AAFE9AD301F /* ConfigStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigStore.swift; sourceTree = "<group>"; };
 		AF8BF0D6E8837DEC20056AB8 /* SongProActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SongProActivityAttributes.swift; sourceTree = "<group>"; };
 		B41BC4A6A889A1B5BBFCF7C6 /* PwaWebView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PwaWebView.swift; sourceTree = "<group>"; };
 		B5A372CA99C89C5712EE54BC /* HavalEcoTripApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HavalEcoTripApp.swift; sourceTree = "<group>"; };
@@ -147,16 +152,19 @@
 		BF4805E2E098ECAD51E0A441 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		C0D6E362CB348E539FA519CC /* NativeDriveView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeDriveView.swift; sourceTree = "<group>"; };
 		C110A5E3EADD0B1D4DA52BE6 /* ChargeActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChargeActivityAttributes.swift; sourceTree = "<group>"; };
+		C25344C215F40EDE5B072CEF /* LogsSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogsSheet.swift; sourceTree = "<group>"; };
 		C4C25F23B2E85136F2735757 /* HavalEcoTripWidget.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = HavalEcoTripWidget.entitlements; sourceTree = "<group>"; };
 		C68353FA3433CBE88BFA4347 /* CarStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarStore.swift; sourceTree = "<group>"; };
 		C88C20EF0FDB1AB8EB036191 /* CarActions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarActions.swift; sourceTree = "<group>"; };
 		D15756C1CEF1EFDD6804C05D /* SecurityActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecurityActivityAttributes.swift; sourceTree = "<group>"; };
+		D6CE9B63AE0A75344509696C /* NativeConfigView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeConfigView.swift; sourceTree = "<group>"; };
 		D7A442E88C358C98CE318DF9 /* ControlSheets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ControlSheets.swift; sourceTree = "<group>"; };
 		D9926C58E001CD8511E829FB /* ActivityManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityManager.swift; sourceTree = "<group>"; };
 		DA22E658C7AE7CB3679725CF /* LANDiscovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LANDiscovery.swift; sourceTree = "<group>"; };
 		DD1B9E17C1177A48B806D3B9 /* BydRecargaWidgetBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BydRecargaWidgetBundle.swift; sourceTree = "<group>"; };
 		DFE9C8DD63C6163B5AF174C8 /* SecurityLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecurityLiveActivity.swift; sourceTree = "<group>"; };
 		E4593E338CE49445D2B4E37A /* Settings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Settings.swift; sourceTree = "<group>"; };
+		E5C3783F4045873A9A1C2F85 /* BiometricGate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BiometricGate.swift; sourceTree = "<group>"; };
 		E612200FCE6AA9F646191052 /* TripActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripActivityAttributes.swift; sourceTree = "<group>"; };
 		E810689502D9D028774D6792 /* BydSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BydSettings.swift; sourceTree = "<group>"; };
 		EBBB57D2D187DD310113F34A /* PreClimatActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreClimatActivityAttributes.swift; sourceTree = "<group>"; };
@@ -176,8 +184,10 @@
 				A799F69A43F78E263048C8F4 /* AuthConfig.swift */,
 				EBC80D42C32C99C47E1B7222 /* AuthManager.swift */,
 				2F97B54C85FEC5A112CB0C9E /* BackgroundRefresh.swift */,
+				E5C3783F4045873A9A1C2F85 /* BiometricGate.swift */,
 				C88C20EF0FDB1AB8EB036191 /* CarActions.swift */,
 				C68353FA3433CBE88BFA4347 /* CarStore.swift */,
+				AD7173E45A0E0AAFE9AD301F /* ConfigStore.swift */,
 				36AA01E4F54D0727EF341F49 /* ContentView.swift */,
 				D7A442E88C358C98CE318DF9 /* ControlSheets.swift */,
 				7376EEA5C86B0C60FE3CE4E3 /* DesignSystem.swift */,
@@ -189,8 +199,10 @@
 				DA22E658C7AE7CB3679725CF /* LANDiscovery.swift */,
 				19F1EE1E1159233D66EEAFA8 /* LiveActivityPush.swift */,
 				4A804763C29A6FBD8871C5A7 /* LivePreview.swift */,
+				C25344C215F40EDE5B072CEF /* LogsSheet.swift */,
 				3D3807C873D02DC8F672F3CD /* MaintenanceSheet.swift */,
 				8036EB500E09B8F08A9EA755 /* MaintenanceStore.swift */,
+				D6CE9B63AE0A75344509696C /* NativeConfigView.swift */,
 				0412CD48BFB11B79D8D550D4 /* NativeDashView.swift */,
 				C0D6E362CB348E539FA519CC /* NativeDriveView.swift */,
 				FB5145A32C36D0D8E2E36E83 /* NativeRecargasView.swift */,
@@ -459,9 +471,11 @@
 				DE39B1C98DBD4A0B7B3D515F /* AuthConfig.swift in Sources */,
 				D6B7CC3FAD98C1CC134911FE /* AuthManager.swift in Sources */,
 				AE6DF0BA2B76E13159F83FE3 /* BackgroundRefresh.swift in Sources */,
+				EB170A75BD1ABB3462C6AF9E /* BiometricGate.swift in Sources */,
 				605ED8EEC91528FFBC054A48 /* CarActions.swift in Sources */,
 				E4DBC8604FEF4AF3E5F39336 /* CarStore.swift in Sources */,
 				920A0533D20932EF36FC4D49 /* ChargeActivityAttributes.swift in Sources */,
+				42169A88F8E36FD03EA47301 /* ConfigStore.swift in Sources */,
 				87640D1FE3604A94892D6723 /* ContentView.swift in Sources */,
 				07FC719000D999AB80CF8C4C /* ControlSheets.swift in Sources */,
 				3ED1321FB7B61D7ADDAA032F /* DesignSystem.swift in Sources */,
@@ -469,9 +483,11 @@
 				2BBB45182185499D3B954868 /* LANDiscovery.swift in Sources */,
 				4C94F890D15203640F57B31D /* LiveActivityPush.swift in Sources */,
 				E7A22E919521A94E9004D8F2 /* LivePreview.swift in Sources */,
+				4EB218A639630413D48F777D /* LogsSheet.swift in Sources */,
 				0CC661D339028F8AD4C5270B /* MaintenanceSheet.swift in Sources */,
 				9726912E15C4196ACF166260 /* MaintenanceStore.swift in Sources */,
 				8B1DEE4FCD8F3304A07A33C9 /* MotorActivityAttributes.swift in Sources */,
+				18E278B160F80938E45E8463 /* NativeConfigView.swift in Sources */,
 				6601E0AF99CFBF6068D0180D /* NativeDashView.swift in Sources */,
 				8B73DFD0957C51F2398BED33 /* NativeDriveView.swift in Sources */,
 				694901AB2FD60B4D5A1322DA /* NativeRecargasView.swift in Sources */,

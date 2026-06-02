@@ -49,6 +49,8 @@
 	<array>
 		<string>_havalobd._tcp</string>
 	</array>
+	<key>NSFaceIDUsageDescription</key>
+	<string>Use o Face ID para desbloquear o app.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Conecta direto ao carro na mesma rede Wi-Fi para telemetria e comandos com baixa latência.</string>
 	<key>NSSupportsLiveActivities</key>

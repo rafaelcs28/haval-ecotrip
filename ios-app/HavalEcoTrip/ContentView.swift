@@ -63,8 +63,11 @@ struct ContentView: View {
                     }
                   }
                   .tabItem { Label("Completo", systemImage: "square.grid.2x2.fill") }
+                  NativeConfigView()
+                    .tabItem { Label("Config", systemImage: "gearshape.fill") }
                 }
                 .tint(DS.green)
+                .overlay { BiometricGate() }
                 .onReceive(NotificationCenter.default.publisher(for: .openHavalSettings)) { _ in
                     showSetup = true
                 }
