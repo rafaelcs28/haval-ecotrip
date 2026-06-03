@@ -140,6 +140,17 @@ struct ObdAutomationsView: View {
 
 private struct PlaceOpt: Identifiable { let id: String; let name: String; let lat: Double; let lng: Double }
 
+struct ObdCond: Identifiable {
+    let id = UUID()
+    var type = "compare"     // "compare" (estado do carro) | "visited" (passou por local)
+    var field = "car.basic.vehicle_speed"
+    var customKey = ""
+    var cmp = ">="
+    var value = ""
+    var placeId = ""
+    var withinMin = 5.0
+}
+
 struct ObdRuleEditor: View {
     @ObservedObject var store: ObdAutomationsStore
     let existing: [String: Any]?
@@ -158,9 +169,19 @@ struct ObdRuleEditor: View {
     @State private var advKey = ""
     @State private var advValue = ""
     @State private var debounce = 120.0
-    @State private var requireVisited = false
-    @State private var visitedPlaceId = ""
-    @State private var visitedWithinMin = 5.0
+    @State private var condOp = "AND"
+    @State private var conditions: [ObdCond] = []
+
+    private let condFields: [(String, String)] = [
+        ("Velocidade km/h", "car.basic.vehicle_speed"),
+        ("SOC %", "car.ev_info.soc_of_battery"),
+        ("Trava", "car.basic.door_lock_status"),
+        ("Marcha", "car.basic.gear_status"),
+        ("Carregando", "car.ev_info.charging_state"),
+        ("Motor (rpm)", "car.basic.engine_speed"),
+        ("Power mode", "car.basic.power_mode"),
+        ("Outro (chave)", "__custom__"),
+    ]
 
     private var places: [PlaceOpt] {
         store.places.map { p in
@@ -194,18 +215,46 @@ struct ObdRuleEditor: View {
                     }
                 }
 
-                if trigKind != 2 {
-                    Section("Exigir passagem antes (anti-falso-positivo)") {
-                        Toggle("Só se passou por outro local", isOn: $requireVisited)
-                        if requireVisited {
-                            Picker("Local anterior", selection: $visitedPlaceId) {
-                                Text("Selecione…").tag("")
-                                ForEach(places) { Text($0.name).tag($0.id) }
-                            }
-                            HStack { Text("Há no máximo"); Slider(value: $visitedWithinMin, in: 1...30, step: 1); Text("\(Int(visitedWithinMin)) min").foregroundStyle(.secondary) }
-                        }
+                Section {
+                    if conditions.count > 1 {
+                        Picker("Combinar", selection: $condOp) {
+                            Text("Todas (E)").tag("AND"); Text("Qualquer (OU)").tag("OR")
+                        }.pickerStyle(.segmented)
                     }
-                }
+                    ForEach($conditions) { $c in
+                        VStack(alignment: .leading, spacing: 8) {
+                            Picker("Tipo", selection: $c.type) {
+                                Text("Estado do carro").tag("compare")
+                                Text("Passou por local").tag("visited")
+                            }.pickerStyle(.segmented)
+                            if c.type == "compare" {
+                                Picker("Campo", selection: $c.field) {
+                                    ForEach(condFields, id: \.1) { Text($0.0).tag($0.1) }
+                                }
+                                if c.field == "__custom__" {
+                                    TextField("chave (car.xxx.yyy)", text: $c.customKey)
+                                        .autocorrectionDisabled().textInputAutocapitalization(.never)
+                                }
+                                HStack {
+                                    Picker("", selection: $c.cmp) {
+                                        ForEach(["==", "!=", ">", "<", ">=", "<="], id: \.self) { Text($0).tag($0) }
+                                    }.pickerStyle(.menu)
+                                    TextField("valor", text: $c.value).keyboardType(.decimalPad).multilineTextAlignment(.trailing)
+                                }
+                            } else {
+                                Picker("Local", selection: $c.placeId) {
+                                    Text("Selecione…").tag("")
+                                    ForEach(places) { Text($0.name).tag($0.id) }
+                                }
+                                HStack { Text("Há no máximo"); Slider(value: $c.withinMin, in: 1...60, step: 1); Text("\(Int(c.withinMin)) min").foregroundStyle(.secondary) }
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
+                    .onDelete { conditions.remove(atOffsets: $0) }
+                    Button { conditions.append(ObdCond()) } label: { Label("Adicionar condição", systemImage: "plus") }
+                } header: { Text("Condições (opcional)") }
+                  footer: { Text("Tudo precisa ser verdadeiro no momento do gatilho (ou qualquer uma, se OU). Combine quantas quiser.") }
 
                 Section("Fazer") {
                     Picker("Ação", selection: $actKind) {
@@ -243,7 +292,6 @@ struct ObdRuleEditor: View {
     private var isValid: Bool {
         if name.trimmingCharacters(in: .whitespaces).isEmpty { return false }
         if trigKind <= 1 && placeId.isEmpty { return false }
-        if requireVisited && visitedPlaceId.isEmpty { return false }
         if actKind == 3 && advKey.trimmingCharacters(in: .whitespaces).isEmpty { return false }
         return true
     }
@@ -263,11 +311,18 @@ struct ObdRuleEditor: View {
             let cal = Calendar.current
             rule["trigger"] = ["type": "time", "hhmm": cal.component(.hour, from: time) * 60 + cal.component(.minute, from: time), "days": [Int]()]
         }
-        // Condição "passou por X antes" vale pra geofence e velocidade.
-        if trigKind != 2, requireVisited, let b = places.first(where: { $0.id == visitedPlaceId }) {
-            rule["conditions"] = ["op": "AND", "items": [[
-                "type": "visited", "lat": b.lat, "lng": b.lng, "radius_m": 30, "within_s": Int(visitedWithinMin * 60)]]]
+        // Condições (lista flexível: estado do carro e/ou passagem por locais).
+        let items: [[String: Any]] = conditions.compactMap { c in
+            if c.type == "visited" {
+                guard let p = places.first(where: { $0.id == c.placeId }) else { return nil }
+                return ["type": "visited", "lat": p.lat, "lng": p.lng, "radius_m": 30, "within_s": Int(c.withinMin * 60)]
+            } else {
+                let key = c.field == "__custom__" ? c.customKey.trimmingCharacters(in: .whitespaces) : c.field
+                guard !key.isEmpty, !c.value.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
+                return ["field": key, "cmp": c.cmp, "value": c.value]
+            }
         }
+        if !items.isEmpty { rule["conditions"] = ["op": condOp, "items": items] }
         switch actKind {
         case 0:
             if winTarget == 4 { rule["action"] = ["type": "window", "all": true, "status": winOpen ? 2 : 1] }
@@ -301,12 +356,25 @@ struct ObdRuleEditor: View {
             default: break
             }
         }
-        if let c = e["conditions"] as? [String: Any], let items = c["items"] as? [[String: Any]],
-           let v = items.first(where: { ($0["type"] as? String) == "visited" }) {
-            requireVisited = true
-            visitedWithinMin = Double(((v["within_s"] as? Int) ?? 300) / 60)
-            if let lat = v["lat"] as? Double, let lng = v["lng"] as? Double,
-               let p = places.min(by: { abs($0.lat - lat) + abs($0.lng - lng) < abs($1.lat - lat) + abs($1.lng - lng) }) { visitedPlaceId = p.id }
+        if let cg = e["conditions"] as? [String: Any], let items = cg["items"] as? [[String: Any]] {
+            condOp = (cg["op"] as? String) ?? "AND"
+            conditions = items.map { it in
+                var c = ObdCond()
+                if (it["type"] as? String) == "visited" {
+                    c.type = "visited"
+                    c.withinMin = Double(((it["within_s"] as? Int) ?? 300) / 60)
+                    if let lat = it["lat"] as? Double, let lng = it["lng"] as? Double,
+                       let p = places.min(by: { abs($0.lat - lat) + abs($0.lng - lng) < abs($1.lat - lat) + abs($1.lng - lng) }) { c.placeId = p.id }
+                } else {
+                    c.type = "compare"
+                    let key = (it["field"] as? String) ?? ""
+                    if condFields.contains(where: { $0.1 == key }) { c.field = key }
+                    else { c.field = "__custom__"; c.customKey = key }
+                    c.cmp = (it["cmp"] as? String) ?? "=="
+                    c.value = (it["value"] as? String) ?? ""
+                }
+                return c
+            }
         }
         if let a = e["action"] as? [String: Any] {
             switch a["type"] as? String {
