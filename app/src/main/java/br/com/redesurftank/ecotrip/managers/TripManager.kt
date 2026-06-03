@@ -216,6 +216,10 @@ class TripManager private constructor() {
 
     private lateinit var prefs: SharedPreferences
     private lateinit var appContext: android.content.Context
+    // startMs de viagens que o user recusou continuar — PERSISTIDO (sobrevive
+    // reinício/update do app). Sem isso o popup reaparecia após update e podia
+    // retomar a viagem ERRADA (bug que mesclou a viagem em curso na antiga).
+    private val dismissedResumeIds = HashSet<Long>()
     private val samplesDir: java.io.File
         get() = java.io.File(appContext.filesDir, "autotrip_samples").also { it.mkdirs() }
     private val chargeSamplesDir: java.io.File
@@ -480,6 +484,21 @@ class TripManager private constructor() {
         // Gap = intervalo entre o FIM da viagem anterior e o INÍCIO da próxima.
         // Se já há nova viagem em curso: gap = autoTripStartMs - last.endMs.
         // Se ainda não começou: gap = agora - last.endMs.
+        // Já recusada pelo usuário (persistido) — nunca mais oferece esta viagem.
+        if (dismissedResumeIds.contains(last.startMs)) {
+            AppLogger.d(TAG, "getResumableLastTrip: viagem ${last.startMs} já recusada — ignora")
+            return@synchronized null
+        }
+        // Se já existe uma viagem EM CURSO com distância (não está "fresca"), NÃO
+        // oferece continuar a anterior — senão retomar a antiga atropela a atual
+        // (foi o bug que mesclou 10km da viagem atual na viagem da academia).
+        if (autoTripStartMs != 0L) {
+            val curDist = lifeDistKm - autoTripStartDist
+            if (curDist > 1.0f) {
+                AppLogger.d(TAG, "getResumableLastTrip: viagem em curso já tem ${"%.1f".format(curDist)}km — não oferece resume")
+                return@synchronized null
+            }
+        }
         val newTripStartOrNow = if (autoTripStartMs != 0L) autoTripStartMs else System.currentTimeMillis()
         val gapMs = newTripStartOrNow - last.endMs
         if (gapMs < 0 || gapMs > RESUME_WINDOW_MS) {
@@ -505,6 +524,20 @@ class TripManager private constructor() {
      * Quando a viagem (agora estendida) terminar, ela é salva com o mesmo
      * startMs original — o bridge faz UPSERT, sem duplicação.
      */
+    /** Marca uma viagem como recusada (persistido) — não oferece continuar de novo. */
+    fun dismissResume(startMs: Long) = synchronized(lock) {
+        if (dismissedResumeIds.add(startMs)) {
+            // mantém só os últimos 50 pra não crescer sem limite
+            if (dismissedResumeIds.size > 50) {
+                val keep = dismissedResumeIds.sortedDescending().take(50)
+                dismissedResumeIds.clear(); dismissedResumeIds.addAll(keep)
+            }
+            prefs.edit().putString(SharedPreferencesKeys.DISMISSED_RESUME_IDS,
+                dismissedResumeIds.joinToString(",")).apply()
+            AppLogger.i(TAG, "Resume recusado e persistido: viagem $startMs")
+        }
+    }
+
     fun resumeLastTrip(): Boolean {
         val last = getResumableLastTrip() ?: return false
         synchronized(lock) {
@@ -834,6 +867,12 @@ class TripManager private constructor() {
         appContext = ctx
         prefs = ctx.getSharedPreferences(SharedPreferencesKeys.PREFS_NAME, Context.MODE_PRIVATE)
         loadFromPrefs()
+        // Carrega as viagens recusadas (persistidas).
+        synchronized(lock) {
+            dismissedResumeIds.clear()
+            prefs.getString(SharedPreferencesKeys.DISMISSED_RESUME_IDS, "")?.split(",")
+                ?.mapNotNull { it.trim().toLongOrNull() }?.let { dismissedResumeIds.addAll(it) }
+        }
 
         // Retenção ao iniciar: remove viagens >90 dias e arquivos de amostras >7 dias
         val cutoff90d = System.currentTimeMillis() - 90L * 24 * 3_600_000L

@@ -621,8 +621,9 @@ fun ConsumptionScreen() {
                     }
                     OutlinedButton(
                         onClick = {
-                            // Registra essa viagem como dismissada — o polling não vai
-                            // ressuscitar o banner enquanto for a mesma viagem retomável.
+                            // Recusa PERSISTIDA (sobrevive reinício/update) — o banner não
+                            // ressuscita pra esta viagem nem depois de atualizar o app.
+                            tripManager.dismissResume(last.startMs)
                             dismissedResumeStartMs = last.startMs
                             resumableTrip = null
                         },
