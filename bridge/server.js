@@ -142,6 +142,7 @@ const NOTIF_PREFS_FILE    = path.join(DATA_DIR, 'notif_prefs.json');
 const NOTIF_HISTORY_FILE  = path.join(DATA_DIR, 'notif_history.json');
 const EVENTS_FILE         = path.join(DATA_DIR, 'events.json');
 const RULES_FILE          = path.join(DATA_DIR, 'automation_rules.json');
+const AUTO_PLACES_FILE    = path.join(DATA_DIR, 'automation_places.json');
 
 if (!fs.existsSync(AUTOTRIPS_DIR)) fs.mkdirSync(AUTOTRIPS_DIR, { recursive: true });
 
@@ -3064,6 +3065,44 @@ app.delete('/api/rules/:id', (req, res) => {
   saveRules();
   const relayed = relayRules();
   res.json({ ok: true, relayed });
+});
+
+// ── Locais de AUTOMAÇÃO (separados dos Locais Conhecidos de recarga/trajeto) ───
+// Automação LÊ os locais conhecidos (pra oferecer como opção), mas o que cria na
+// automação fica AQUI — nunca polui known_places.
+let automationPlaces = [];
+try {
+  if (fs.existsSync(AUTO_PLACES_FILE)) automationPlaces = JSON.parse(fs.readFileSync(AUTO_PLACES_FILE, 'utf8'));
+  if (!Array.isArray(automationPlaces)) automationPlaces = [];
+} catch (_) { automationPlaces = []; }
+function saveAutoPlaces() {
+  try { fs.writeFileSync(AUTO_PLACES_FILE, JSON.stringify(automationPlaces, null, 2)); }
+  catch (e) { console.error('saveAutoPlaces:', e.message); }
+}
+
+app.get('/api/automation-places', (_req, res) => res.json(automationPlaces));
+
+app.post('/api/automation-places', (req, res) => {
+  const { name, lat, lng, radius_m } = req.body || {};
+  if (!name || !String(name).trim()) return res.status(400).json({ error: 'nome obrigatório' });
+  const place = {
+    id: 'ap_' + Date.now(),
+    name: String(name).trim(),
+    lat: lat ?? null, lng: lng ?? null,
+    radius_m: radius_m ?? 30,
+  };
+  automationPlaces.push(place);
+  saveAutoPlaces();
+  res.json(place);
+});
+
+app.delete('/api/automation-places/:id', (req, res) => {
+  const id = String(req.params.id);
+  const idx = automationPlaces.findIndex(p => String(p.id) === id);
+  if (idx === -1) return res.status(404).json({ error: 'não encontrado' });
+  automationPlaces.splice(idx, 1);
+  saveAutoPlaces();
+  res.json({ ok: true });
 });
 
 // ── MapKit JS — JWT ES256 pro cluster do iPad ─────────────────────────────────

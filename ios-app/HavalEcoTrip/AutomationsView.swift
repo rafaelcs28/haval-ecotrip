@@ -116,7 +116,7 @@ struct AutomationsSheet: View {
                     Task { await loader.upsert(rule) }
                 }
             }
-            .task { await cfg.loadPlaces(); await loader.load() }
+            .task { await cfg.loadPlaces(); await cfg.loadAutomationPlaces(); await loader.load() }
         }
     }
 
@@ -186,6 +186,8 @@ struct RuleEditorSheet: View {
     ]
     private let winTargets = ["Motorista", "Passageiro", "Tras. esq.", "Tras. dir.", "Todas"]
     private let weekdays = ["D", "S", "T", "Q", "Q", "S", "S"]
+    // Locais conhecidos (recarga/trajeto) + de automação — automação só LÊ os conhecidos.
+    private var allPlaces: [KnownPlace] { cfg.places + cfg.automationPlaces }
 
     var body: some View {
         NavigationStack {
@@ -200,13 +202,13 @@ struct RuleEditorSheet: View {
                     }.pickerStyle(.segmented)
 
                     if trigKind <= 1 {
-                        if cfg.places.isEmpty {
-                            Text("Cadastre um Local Conhecido primeiro (Config › Locais conhecidos).")
+                        if allPlaces.isEmpty {
+                            Text("Cadastre um local primeiro (no iPad: Novo local pelo mapa, ou Config › Locais conhecidos).")
                                 .font(.caption).foregroundStyle(.orange)
                         } else {
                             Picker("Local", selection: $placeId) {
                                 Text("Selecione…").tag("")
-                                ForEach(cfg.places) { p in Text(p.name).tag(p.id) }
+                                ForEach(allPlaces) { p in Text(p.name).tag(p.id) }
                             }
                             HStack { Text("Raio"); Slider(value: $radius, in: 5...300, step: 5); Text("\(Int(radius)) m").foregroundStyle(DS.muted) }
                         }
@@ -323,7 +325,7 @@ struct RuleEditorSheet: View {
         // Trigger
         switch trigKind {
         case 0, 1:
-            if let p = cfg.places.first(where: { $0.id == placeId }) {
+            if let p = allPlaces.first(where: { $0.id == placeId }) {
                 rule["trigger"] = ["type": "geofence", "lat": p.lat, "lng": p.lng,
                                    "radius_m": radius, "edge": trigKind == 1 ? "exit" : "enter"]
             }
@@ -370,7 +372,7 @@ struct RuleEditorSheet: View {
                 radius = (t["radius_m"] as? Double) ?? 50
                 // casa o local pelo lat/lng mais próximo
                 if let lat = t["lat"] as? Double, let lng = t["lng"] as? Double,
-                   let p = cfg.places.min(by: { abs($0.lat - lat) + abs($0.lng - lng) < abs($1.lat - lat) + abs($1.lng - lng) }) {
+                   let p = allPlaces.min(by: { abs($0.lat - lat) + abs($0.lng - lng) < abs($1.lat - lat) + abs($1.lng - lng) }) {
                     placeId = p.id
                 }
             case "time":

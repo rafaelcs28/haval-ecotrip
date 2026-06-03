@@ -42,6 +42,7 @@ final class ConfigStore: ObservableObject {
     @Published var chassi = ""
     // Locais conhecidos
     @Published var places: [KnownPlace] = []
+    @Published var automationPlaces: [KnownPlace] = []   // locais só de automação (separados)
     // Listas de locais por notificação (geofence_*_places, soc_arrival_places)
     @Published var placeLists: [String: [String]] = [:]
 
@@ -109,6 +110,13 @@ final class ConfigStore: ObservableObject {
         if let (c, d) = await send("/api/known-places", "GET"), c == 200,
            let arr = (try? JSONSerialization.jsonObject(with: d)) as? [[String: Any]] {
             places = arr.map(KnownPlace.init)
+        }
+    }
+    // Locais de AUTOMAÇÃO (lista separada; só leitura aqui — só o iPad adiciona).
+    func loadAutomationPlaces() async {
+        if let (c, d) = await send("/api/automation-places", "GET"), c == 200,
+           let arr = (try? JSONSerialization.jsonObject(with: d)) as? [[String: Any]] {
+            automationPlaces = arr.map(KnownPlace.init)
         }
     }
     func addPlace(name: String, lat: Double, lng: Double, radius: Double) async {

@@ -42,11 +42,20 @@ final class ObdAutomationsStore: ObservableObject {
            let arr = try? JSONSerialization.jsonObject(with: d) as? [[String: Any]] {
             rules = arr
         }
+        // Locais: LÊ os conhecidos (recarga/trajeto) + os de automação. Novos vão
+        // só pra automação (POST abaixo) — nunca poluem os conhecidos.
+        var merged: [[String: Any]] = []
         if let r = makeReq("/api/known-places"),
            let (d, _) = try? await URLSession.shared.data(for: r),
            let arr = try? JSONSerialization.jsonObject(with: d) as? [[String: Any]] {
-            places = arr
+            merged += arr
         }
+        if let r = makeReq("/api/automation-places"),
+           let (d, _) = try? await URLSession.shared.data(for: r),
+           let arr = try? JSONSerialization.jsonObject(with: d) as? [[String: Any]] {
+            merged += arr
+        }
+        places = merged
     }
 
     func save(_ rule: [String: Any]) async {
@@ -61,9 +70,9 @@ final class ObdAutomationsStore: ObservableObject {
         await load()
     }
 
-    /// Cria um Local Conhecido e recarrega. Retorna o id novo (pra já selecionar).
+    /// Cria um local de AUTOMAÇÃO (lista separada dos conhecidos) e recarrega.
     func addPlace(name: String, lat: Double, lng: Double, radius: Double) async -> String? {
-        guard let r = makeReq("/api/known-places", "POST",
+        guard let r = makeReq("/api/automation-places", "POST",
                               body: ["name": name, "lat": lat, "lng": lng, "radius_m": radius]) else { return nil }
         guard let (d, _) = try? await URLSession.shared.data(for: r),
               let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any] else { return nil }
