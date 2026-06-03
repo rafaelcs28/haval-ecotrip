@@ -141,6 +141,7 @@ const TANK_CAPACITY_L      = 55;
 const NOTIF_PREFS_FILE    = path.join(DATA_DIR, 'notif_prefs.json');
 const NOTIF_HISTORY_FILE  = path.join(DATA_DIR, 'notif_history.json');
 const EVENTS_FILE         = path.join(DATA_DIR, 'events.json');
+const RULES_FILE          = path.join(DATA_DIR, 'automation_rules.json');
 
 if (!fs.existsSync(AUTOTRIPS_DIR)) fs.mkdirSync(AUTOTRIPS_DIR, { recursive: true });
 
@@ -1270,17 +1271,17 @@ function saveMaintenance() {
 // Sem isso, o APK reenviaria via MQTT (trips/history, charging/history) e o
 // bridge re-aceitaria. Tombstone bloqueia o re-insert. Mantém últimos 2000
 // por categoria pra não crescer infinito.
-let deletedIds = { autotrips: [], charges: [], refuels: [] };
+let deletedIds = { autotrips: [], charges: [], refuels: [], rules: [] };
 // Sets paralelos pra lookup O(1) — array continua sendo a fonte de verdade
 // (mantém ordem de inserção e serializa direto pro JSON).
-let deletedIdsSets = { autotrips: new Set(), charges: new Set(), refuels: new Set() };
+let deletedIdsSets = { autotrips: new Set(), charges: new Set(), refuels: new Set(), rules: new Set() };
 try {
   if (fs.existsSync(DELETED_IDS_FILE)) {
     const loaded = JSON.parse(fs.readFileSync(DELETED_IDS_FILE, 'utf8'));
-    deletedIds = { autotrips: [], charges: [], refuels: [], ...loaded };
+    deletedIds = { autotrips: [], charges: [], refuels: [], rules: [], ...loaded };
   }
-  for (const k of ['autotrips', 'charges', 'refuels']) {
-    deletedIdsSets[k] = new Set(deletedIds[k].map(String));
+  for (const k of ['autotrips', 'charges', 'refuels', 'rules']) {
+    deletedIdsSets[k] = new Set((deletedIds[k] || []).map(String));
   }
   const total = deletedIds.autotrips.length + deletedIds.charges.length + deletedIds.refuels.length;
   if (total > 0) console.log(`✓ Tombstones: ${deletedIds.autotrips.length} viagens, ${deletedIds.charges.length} recargas, ${deletedIds.refuels.length} abastecimentos`);
@@ -3000,6 +3001,69 @@ app.delete('/api/charge-locations/:id', (req, res) => {
   chargeLocations.splice(idx, 1);
   saveChargeLocations();
   res.json({ ok: true });
+});
+
+// ── Automações (regras) ───────────────────────────────────────────────────────
+// Fonte da verdade pra EDIÇÃO (sincroniza iPhone↔iPad via ?since=). A EXECUÇÃO é
+// no carro: ao salvar, publica a lista completa em cmd/rules/set (retido) e o APK
+// persiste + avalia sozinho. Ver AutomationManager no app.
+let automationRules = [];
+try {
+  if (fs.existsSync(RULES_FILE)) automationRules = JSON.parse(fs.readFileSync(RULES_FILE, 'utf8'));
+  if (!Array.isArray(automationRules)) automationRules = [];
+  if (automationRules.length) console.log(`✓ Automações carregadas: ${automationRules.length}`);
+} catch (_) { automationRules = []; }
+
+function saveRules() {
+  try { fs.writeFileSync(RULES_FILE, JSON.stringify(automationRules, null, 2)); }
+  catch (e) { console.error('saveRules:', e.message); }
+}
+// Publica a lista completa no carro (RETIDO → chega mesmo se o carro estava off).
+function relayRules() {
+  if (!mqttClient?.connected) return false;
+  try {
+    mqttClient.publish(`${MQTT_PREFIX}/cmd/rules/set`, JSON.stringify(automationRules), { qos: 1, retain: true });
+    return true;
+  } catch (e) { console.error('relayRules:', e.message); return false; }
+}
+
+// GET /api/rules?since=  → array (espelha SyncedList: _updated_ms + X-Tombstones)
+app.get('/api/rules', (req, res) => {
+  const since = parseInt(req.query.since || '0', 10);
+  const arr = since > 0 ? automationRules.filter(r => (r._updated_ms || 0) > since) : automationRules;
+  if (Array.isArray(deletedIds.rules) && deletedIds.rules.length) {
+    res.setHeader('X-Tombstones', deletedIds.rules.join(','));
+    res.setHeader('Access-Control-Expose-Headers', 'X-Tombstones');
+  }
+  res.json(arr);
+});
+
+// POST /api/rules  → cria/atualiza uma regra (upsert por id) + relay pro carro.
+app.post('/api/rules', (req, res) => {
+  const r = req.body;
+  if (!r || typeof r !== 'object' || !r.trigger || !r.action) {
+    return res.status(400).json({ error: 'regra inválida (precisa de trigger e action)' });
+  }
+  if (!r.id) r.id = 'rule_' + Date.now();
+  r._updated_ms = Date.now();
+  if (r.enabled === undefined) r.enabled = true;
+  const idx = automationRules.findIndex(x => x.id === r.id);
+  if (idx >= 0) automationRules[idx] = r; else automationRules.push(r);
+  saveRules();
+  const relayed = relayRules();
+  res.json({ ok: true, rule: r, relayed });
+});
+
+// DELETE /api/rules/:id → remove + tombstone + relay
+app.delete('/api/rules/:id', (req, res) => {
+  const id = String(req.params.id);
+  const idx = automationRules.findIndex(x => String(x.id) === id);
+  if (idx === -1) return res.status(404).json({ error: 'não encontrada' });
+  automationRules.splice(idx, 1);
+  markDeleted('rules', id);
+  saveRules();
+  const relayed = relayRules();
+  res.json({ ok: true, relayed });
 });
 
 // ── MapKit JS — JWT ES256 pro cluster do iPad ─────────────────────────────────
@@ -5938,6 +6002,9 @@ mqttClient.on('connect', () => {
   // Reset cache de publish pra forçar republicação dos preços ao reconectar
   _lastPublishedGas = null; _lastPublishedKwh = null;
   publishPricesToCar();
+  // Re-afirma as regras de automação no tópico retido (caso o broker tenha
+  // perdido o retain num restart). O carro só reprocessa se mudou.
+  relayRules();
   // Subscribe nos tópicos da integração GWM Brasil — body/lock/AC/etc. vêm
   // direto da fonte oficial via cloud, sem ruído do barramento do app.
   mqttClient.subscribe(`${GWM_TOPIC_PREFIX}/+/state`, { qos: 1 });
