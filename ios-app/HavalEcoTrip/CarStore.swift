@@ -166,7 +166,9 @@ final class CarStore: ObservableObject {
                 // campos que a LAN dona, então não atropela a telemetria rápida.
                 // Com LAN: poll mais lento (5s) só pros agregados; sem LAN: 2s.
                 await self.pollOnce()
-                let ns: UInt64 = self.lanConnected ? 5_000_000_000 : 2_000_000_000
+                // Mesma estratégia do iPad (BridgePublisher, funciona redondinho):
+                // poll cloud SEMPRE ligado — 8s sob LAN (só agregados do bridge), 2s sem LAN.
+                let ns: UInt64 = self.lanConnected ? 8_000_000_000 : 2_000_000_000
                 try? await Task.sleep(nanoseconds: ns)
             }
         }
