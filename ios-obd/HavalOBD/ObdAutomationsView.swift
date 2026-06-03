@@ -1,4 +1,6 @@
 import SwiftUI
+import MapKit
+import CoreLocation
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  Automações (versão Haval OBD / iPad) — autocontida.
@@ -57,6 +59,25 @@ final class ObdAutomationsStore: ObservableObject {
         guard let r = makeReq("/api/rules/\(id)", "DELETE") else { return }
         _ = try? await URLSession.shared.data(for: r)
         await load()
+    }
+
+    /// Cria um Local Conhecido e recarrega. Retorna o id novo (pra já selecionar).
+    func addPlace(name: String, lat: Double, lng: Double, radius: Double) async -> String? {
+        guard let r = makeReq("/api/known-places", "POST",
+                              body: ["name": name, "lat": lat, "lng": lng, "radius_m": radius]) else { return nil }
+        guard let (d, _) = try? await URLSession.shared.data(for: r),
+              let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any] else { return nil }
+        await load()
+        return "\(o["id"] ?? "")"
+    }
+
+    /// Posição atual do carro (state.gps_lat/lng) pra centralizar o mapa.
+    func carLocation() async -> CLLocationCoordinate2D? {
+        guard let r = makeReq("/api/state") else { return nil }
+        guard let (d, _) = try? await URLSession.shared.data(for: r),
+              let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+              let la = o["gps_lat"] as? Double, let ln = o["gps_lng"] as? Double, la != 0, ln != 0 else { return nil }
+        return CLLocationCoordinate2D(latitude: la, longitude: ln)
     }
 }
 
@@ -175,6 +196,8 @@ struct ObdRuleEditor: View {
     @State private var debounce = 120.0
     @State private var condOp = "AND"
     @State private var conditions: [ObdCond] = []
+    @State private var showPlacePicker = false
+    @State private var pickerAutoSelectTrigger = false
 
     private let condFields: [(String, String)] = [
         ("Velocidade km/h", "car.basic.vehicle_speed"),
@@ -208,6 +231,9 @@ struct ObdRuleEditor: View {
                         Picker("Local", selection: $placeId) {
                             Text("Selecione…").tag("")
                             ForEach(places) { Text($0.name).tag($0.id) }
+                        }
+                        Button { pickerAutoSelectTrigger = true; showPlacePicker = true } label: {
+                            Label("Novo local pelo mapa", systemImage: "mappin.and.ellipse")
                         }
                         HStack { Text("Raio"); Slider(value: $radius, in: 5...300, step: 5); Text("\(Int(radius)) m").foregroundStyle(.secondary) }
                     } else if trigKind == 3 {
@@ -269,6 +295,9 @@ struct ObdRuleEditor: View {
                     }
                     .onDelete { conditions.remove(atOffsets: $0) }
                     Button { conditions.append(ObdCond()) } label: { Label("Adicionar condição", systemImage: "plus") }
+                    Button { pickerAutoSelectTrigger = false; showPlacePicker = true } label: {
+                        Label("Novo local pelo mapa", systemImage: "mappin.and.ellipse")
+                    }
                 } header: { Text("Condições (opcional)") }
                   footer: { Text("Tudo precisa ser verdadeiro no momento do gatilho (ou qualquer uma, se OU). Combine quantas quiser.") }
 
@@ -302,6 +331,11 @@ struct ObdRuleEditor: View {
                 ToolbarItem(placement: .confirmationAction) { Button("Salvar") { save() }.disabled(!isValid) }
             }
             .onAppear { loadExisting() }
+            .sheet(isPresented: $showPlacePicker) {
+                ObdPlacePickerView(store: store) { newId in
+                    if pickerAutoSelectTrigger { placeId = newId }
+                }
+            }
         }
     }
 
@@ -410,5 +444,96 @@ struct ObdRuleEditor: View {
             default: break
             }
         }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  Seletor de local pelo mapa — busca endereço, arrasta o mapa (pino central
+//  fixo) ou centraliza no carro. Salva como Local Conhecido (/api/known-places).
+// ═══════════════════════════════════════════════════════════════════════════
+struct ObdPlacePickerView: View {
+    @ObservedObject var store: ObdAutomationsStore
+    let onSaved: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    private static let fallback = CLLocationCoordinate2D(latitude: -16.6869, longitude: -49.2648) // Goiânia
+    @State private var camera: MapCameraPosition = .region(MKCoordinateRegion(
+        center: ObdPlacePickerView.fallback,
+        span: MKCoordinateSpan(latitudeDelta: 0.02, longitudeDelta: 0.02)))
+    @State private var center = ObdPlacePickerView.fallback
+    @State private var query = ""
+    @State private var name = ""
+    @State private var radius = 30.0
+    @State private var saving = false
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                Map(position: $camera)
+                    .onMapCameraChange(frequency: .continuous) { ctx in center = ctx.region.center }
+                    .ignoresSafeArea(edges: .bottom)
+                // Pino fixo no centro — arrastar o mapa move o ponto.
+                Image(systemName: "mappin.circle.fill")
+                    .font(.system(size: 36)).foregroundStyle(.red)
+                    .shadow(radius: 3).offset(y: -18).allowsHitTesting(false)
+            }
+            .safeAreaInset(edge: .top) {
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                    TextField("Buscar endereço", text: $query)
+                        .autocorrectionDisabled().submitLabel(.search)
+                        .onSubmit { Task { await searchAddress() } }
+                    Button { Task { await centerOnCar() } } label: {
+                        Image(systemName: "car.fill")
+                    }
+                }
+                .padding(10).background(.regularMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: 12)).padding()
+            }
+            .safeAreaInset(edge: .bottom) {
+                VStack(spacing: 10) {
+                    TextField("Nome do local (ex: Portaria)", text: $name)
+                        .textFieldStyle(.roundedBorder)
+                    HStack { Text("Raio"); Slider(value: $radius, in: 5...300, step: 5); Text("\(Int(radius)) m").foregroundStyle(.secondary) }
+                    Button {
+                        Task {
+                            saving = true
+                            if let id = await store.addPlace(
+                                name: name.trimmingCharacters(in: .whitespaces),
+                                lat: center.latitude, lng: center.longitude, radius: radius), !id.isEmpty {
+                                onSaved(id); dismiss()
+                            }
+                            saving = false
+                        }
+                    } label: {
+                        Text(saving ? "Salvando…" : "Salvar local").bold().frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || saving)
+                }
+                .padding().background(.regularMaterial)
+            }
+            .navigationTitle("Novo local").navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancelar") { dismiss() } } }
+            .task {
+                if let c = await store.carLocation() { recenter(c, span: 0.01) }
+            }
+        }
+    }
+
+    private func recenter(_ c: CLLocationCoordinate2D, span: Double) {
+        center = c
+        camera = .region(MKCoordinateRegion(center: c, span: MKCoordinateSpan(latitudeDelta: span, longitudeDelta: span)))
+    }
+    private func searchAddress() async {
+        let req = MKLocalSearch.Request()
+        req.naturalLanguageQuery = query
+        if let resp = try? await MKLocalSearch(request: req).start(), let item = resp.mapItems.first {
+            recenter(item.placemark.coordinate, span: 0.005)
+            if name.isEmpty { name = item.name ?? "" }
+        }
+    }
+    private func centerOnCar() async {
+        if let c = await store.carLocation() { recenter(c, span: 0.005) }
     }
 }
