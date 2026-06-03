@@ -36,7 +36,8 @@ struct NativeDriveView: View {
             }
             .padding(16)
         }
-        .onAppear { store.start() }
+        .onAppear { store.start(); store.startHF() }   // HF: dados ~4×/s enquanto na aba
+        .onDisappear { store.stopHF() }
         .sheet(isPresented: $showControls) { DriveControlsSheet() }
         .sheet(isPresented: $showAC) { ACSheet() }
     }

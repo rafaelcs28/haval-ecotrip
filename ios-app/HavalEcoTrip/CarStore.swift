@@ -76,6 +76,32 @@ final class CarStore: ObservableObject {
         lan.stop(); disconnectLAN()
     }
 
+    // MARK: - HF mode (alta frequência) — pedido enquanto a aba Drive está aberta.
+    // Faz o carro publicar a ~250ms (4×/s) em vez da cadência normal (5s WiFi /
+    // 30s celular). Heartbeat a cada 3s (bridge desliga sozinho após 15s sem beat).
+    private var hfTask: Task<Void, Never>?
+    func startHF() {
+        guard hfTask == nil, Settings.isConfigured else { return }
+        hfTask = Task { [weak self] in
+            while let self, !Task.isCancelled {
+                await self.postHF(active: true)
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+            }
+        }
+    }
+    func stopHF() {
+        hfTask?.cancel(); hfTask = nil
+        Task { [weak self] in await self?.postHF(active: false) }
+    }
+    private func postHF(active: Bool) async {
+        guard let url = URL(string: "\(base)/api/hf_mode") else { return }
+        var req = URLRequest(url: url); req.httpMethod = "POST"; req.timeoutInterval = 6
+        req.addValue("Bearer " + token, forHTTPHeaderField: "Authorization")
+        req.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try? JSONSerialization.data(withJSONObject: ["active": active, "client_id": Settings.notifDeviceId])
+        _ = try? await session.data(for: req)
+    }
+
     // MARK: - WebSocket (ao vivo)
 
     private func connectWS() {
