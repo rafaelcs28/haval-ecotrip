@@ -33,6 +33,7 @@ struct Trip: Identifiable {
     var netKwh: Double { n("netKwh") }
     var fuelL: Double { n("fuelL") }
     var timeSec: Double { n("timeSec") }
+    var updatedMs: Double { n("_updated_ms") }
     var rawName: String? { (raw["name"] as? String).flatMap { $0.isEmpty ? nil : $0 } }
     // O bridge grava o nome do local em startKp/endKp (reprocess-places + Locais
     // Conhecidos). knownStart/knownEnd são legado/fallback.
@@ -51,10 +52,9 @@ final class TripsLoader: ObservableObject {
     @Published var loading = false
     @Published var diag = ""
     @Published var geoNames: [Double: String] = [:]   // tripId(startMs) → "Bairro, Cidade"
-    @Published var dlDone = 0
-    @Published var dlTotal = 0          // > 0 enquanto baixa tudo offline
     private let geocoder = CLGeocoder()
     private var bag: AnyCancellable?
+    private var prefetching = false
 
     init() { bag = sync.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() } }
 
@@ -65,23 +65,25 @@ final class TripsLoader: ObservableObject {
         return u.hasSuffix("/") ? String(u.dropLast()) : u
     }
 
-    /// Baixa o trajeto (samples) de TODAS as viagens pro disco — abre offline depois.
-    /// ~23 MB no total hoje. Sobrescreve pra manter fresco (resume/reprocess).
-    func downloadAllTrajetos() async {
-        let ids = trips.map { $0.tripId }
-        guard !ids.isEmpty, dlTotal == 0 else { return }
-        dlDone = 0; dlTotal = ids.count
-        for id in ids {
-            guard let url = URL(string: "\(base)/api/telemetry/\(id)") else { dlDone += 1; continue }
+    /// Baixa em background o trajeto (samples) das viagens que ainda não estão em
+    /// disco OU cujo cache ficou velho (resume/reprocess bumpou _updated_ms). Roda
+    /// sozinho a cada load() — sem botão. ~23 MB pra coleção inteira; depois cada
+    /// viagem abre offline. Silencioso: falhas (offline) só ficam pra próxima vez.
+    func prefetchTrajetos() async {
+        guard !prefetching, Settings.isConfigured else { return }
+        prefetching = true; defer { prefetching = false }
+        for t in trips {
+            let id = t.tripId
+            let cachedMs = OfflineCache.trajMtimeMs(id)
+            if cachedMs > 0 && t.updatedMs <= cachedMs { continue }   // já em disco e fresco
+            guard let url = URL(string: "\(base)/api/telemetry/\(id)") else { continue }
             var req = URLRequest(url: url); req.timeoutInterval = 20
             req.addValue("Bearer " + Settings.bridgeToken, forHTTPHeaderField: "Authorization")
             if let (d, resp) = try? await URLSession.shared.data(for: req),
                let http = resp as? HTTPURLResponse, http.statusCode == 200 {
                 OfflineCache.saveTraj(id, d)
             }
-            dlDone += 1
         }
-        dlTotal = 0
     }
 
     func load() async {
@@ -89,6 +91,8 @@ final class TripsLoader: ObservableObject {
         await sync.sync()
         diag = "itens \(sync.items.count) · válidas \(trips.count)\(sync.pendingCount > 0 ? " · \(sync.pendingCount) pend." : "")"
         loading = false
+        // Em background, baixa os trajetos que faltam/ficaram velhos (sem bloquear a UI).
+        Task { await prefetchTrajetos() }
     }
 
     /// Nome de exibição: name salvo → conhecidos → geocode (bairro+cidade) → "Trajeto".
@@ -174,7 +178,7 @@ struct NativeViagensView: View {
                         }.font(.system(size: 14)).foregroundStyle(DS.text).tint(DS.green).environment(\.locale, Locale(identifier: "pt_BR"))
                     }
                 }
-                if tab == 0 { downloadAllButton; historico } else { estatisticas }
+                if tab == 0 { historico } else { estatisticas }
             }
             .padding(16)
         }
@@ -183,26 +187,6 @@ struct NativeViagensView: View {
         .refreshable { await loader.load() }
         .task { if loader.trips.isEmpty { await loader.load() } }
         .sheet(item: $routeTrip) { t in RouteMapSheet(trip: t) }
-    }
-
-    private var downloadAllButton: some View {
-        Button {
-            Task { await loader.downloadAllTrajetos() }
-        } label: {
-            HStack(spacing: 8) {
-                if loader.dlTotal > 0 {
-                    ProgressView().tint(DS.green).scaleEffect(0.8)
-                    Text("Baixando trajetos… \(loader.dlDone)/\(loader.dlTotal)")
-                } else {
-                    Image(systemName: "arrow.down.circle")
-                    Text("Baixar todos os trajetos offline")
-                }
-            }
-            .font(.system(size: 13, weight: .semibold)).foregroundStyle(DS.text)
-            .frame(maxWidth: .infinity).frame(height: 40)
-            .background(DS.panel2).clipShape(RoundedRectangle(cornerRadius: 10))
-        }
-        .disabled(loader.dlTotal > 0)
     }
 
     private var periodChips: some View {

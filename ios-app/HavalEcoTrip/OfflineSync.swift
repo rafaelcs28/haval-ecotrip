@@ -177,4 +177,11 @@ enum OfflineCache {
     }
     static func saveTraj(_ id: String, _ data: Data) { try? data.write(to: trajURL(id)) }
     static func loadTraj(_ id: String) -> Data? { try? Data(contentsOf: trajURL(id)) }
+    /// Quando o trajeto foi gravado (ms). 0 se não há cache. Usado pra decidir se
+    /// o cache está velho (trip._updated_ms > mtime → re-baixa).
+    static func trajMtimeMs(_ id: String) -> Double {
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: trajURL(id).path),
+              let d = attrs[.modificationDate] as? Date else { return 0 }
+        return d.timeIntervalSince1970 * 1000
+    }
 }
