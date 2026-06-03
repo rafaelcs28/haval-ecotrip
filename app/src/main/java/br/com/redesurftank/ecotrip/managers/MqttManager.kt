@@ -2338,6 +2338,52 @@ class MqttManager private constructor() {
                         } catch (e: Exception) { AppLogger.w(TAG, "publish ack falhou: ${e.message}") }
                         return@submit
                     }
+                    if (cmd.startsWith("vehicle/")) {
+                        // Comandos físicos via binder IVehicle (vidro/teto/cortina/porta).
+                        // Usados pelo motor de automações e por teste manual. Payloads:
+                        //   vehicle/window         {"window":0,"status":1}  ou {"all":true,"status":1}
+                        //   vehicle/skylight       <int level>   (0=fechado)
+                        //   vehicle/shade          <int level>
+                        //   vehicle/door           {"p1":0,"p2":1}
+                        //   vehicle/windows_status (sem payload) → lê e publica o array
+                        val sub = cmd.removePrefix("vehicle/")
+                        try {
+                            when (sub) {
+                                "window" -> {
+                                    val o = JSONObject(payload)
+                                    val status = o.getInt("status")
+                                    val ok = if (o.optBoolean("all", false))
+                                        VehicleControlManager.setAllWindows(status)
+                                    else
+                                        VehicleControlManager.setWindowStatus(o.getInt("window"), status)
+                                    publishResult("vehicle/window", if (ok) "ok" else "error")
+                                }
+                                "skylight" -> {
+                                    val ok = VehicleControlManager.setSkylightLevel(payload.trim().toInt())
+                                    publishResult("vehicle/skylight", if (ok) "ok" else "error")
+                                }
+                                "shade" -> {
+                                    val ok = VehicleControlManager.setShadeScreensLevel(payload.trim().toInt())
+                                    publishResult("vehicle/shade", if (ok) "ok" else "error")
+                                }
+                                "door" -> {
+                                    val o = JSONObject(payload)
+                                    val ok = VehicleControlManager.setDoorOpen(o.getInt("p1"), o.getInt("p2"))
+                                    publishResult("vehicle/door", if (ok) "ok" else "error")
+                                }
+                                "windows_status" -> {
+                                    val arr = VehicleControlManager.getWindowsStatus()
+                                    publishResult("vehicle/windows_status",
+                                        arr?.joinToString(",", "[", "]") ?: "error")
+                                }
+                                else -> publishResult("vehicle/$sub", "error: subcomando desconhecido")
+                            }
+                        } catch (e: Exception) {
+                            AppLogger.w(TAG, "[vehicle] '$sub' payload inválido: ${e.message}")
+                            publishResult("vehicle/$sub", "error: ${e.message}")
+                        }
+                        return@submit
+                    }
                     if (cmd.startsWith("hvac/")) {
                         val control = cmd.removePrefix("hvac/")
                         // ON/OFF "inteligente": OFF zera o fan (guardando o valor atual);

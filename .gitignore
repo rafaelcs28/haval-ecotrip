@@ -51,3 +51,6 @@ bridge/songpro_locations.json
 # Artefatos de build/archive do iOS
 ios-app/build/
 *.xcarchive
+
+# análise de apps de referência (não versionar)
+_analise/
