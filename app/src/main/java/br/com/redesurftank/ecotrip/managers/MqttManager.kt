@@ -2390,6 +2390,13 @@ class MqttManager private constructor() {
                                     publishResult("vehicle/windows_status",
                                         arr?.joinToString(",", "[", "]") ?: "error")
                                 }
+                                "read" -> {
+                                    // Lê qualquer chave: car.* via fetchCurrent, ou "rain_intensity" via IVehicle.
+                                    val key = payload.trim()
+                                    val v = if (key == "rain_intensity") VehicleControlManager.getRainIntensity()?.toString()
+                                            else CarDataManager.getInstance().fetchCurrent(key)
+                                    publishResult("vehicle/read", v ?: "null")
+                                }
                                 else -> publishResult("vehicle/$sub", "error: subcomando desconhecido")
                             }
                         } catch (e: Exception) {
