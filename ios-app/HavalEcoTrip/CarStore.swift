@@ -159,12 +159,15 @@ final class CarStore: ObservableObject {
         pollTask?.cancel()
         pollTask = Task { [weak self] in
             while let self, self.started, !Task.isCancelled {
-                // LAN ativa entrega ~10 Hz pelo WS local (>4/s) → não precisa poll cloud.
-                // Sem LAN: poll FIXO a cada 2s garante atualização contínua mesmo se o
-                // WS cloud travar (era a causa do "trava e volta"). O WS, quando vivo,
-                // ainda traz updates mais frequentes entre os polls.
-                if !self.lanConnected { await self.pollOnce() }
-                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                // SEMPRE faz poll do snapshot do bridge — mesmo com LAN ativa. A LAN
+                // só entrega telemetria crua (velocidade/rpm/…); os agregados do bridge
+                // (current_trip, preços, históricos) só vêm da nuvem. Antes, com LAN, o
+                // poll era desligado e a viagem atual CONGELAVA. O merge ignora os
+                // campos que a LAN dona, então não atropela a telemetria rápida.
+                // Com LAN: poll mais lento (5s) só pros agregados; sem LAN: 2s.
+                await self.pollOnce()
+                let ns: UInt64 = self.lanConnected ? 5_000_000_000 : 2_000_000_000
+                try? await Task.sleep(nanoseconds: ns)
             }
         }
     }
@@ -182,10 +185,20 @@ final class CarStore: ObservableObject {
 
     // MARK: - Merge
 
+    // Campos que a LAN entrega ao vivo (telemetria rápida). Quando a LAN está
+    // conectada, o merge da nuvem NÃO sobrescreve esses (senão "pula" pro valor
+    // mais velho do snapshot). Todo o RESTO (current_trip, preços, históricos,
+    // limites…) continua vindo da nuvem — por isso o poll cloud segue rodando.
+    private static let lanOwnedKeys: Set<String> = lanPassthrough.union(lanRename.values)
+
     private func merge(_ jsonString: String) {
         guard let data = jsonString.data(using: .utf8),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
-        for (k, v) in obj { raw[k] = v }
+        let skipLan = lanConnected
+        for (k, v) in obj {
+            if skipLan && Self.lanOwnedKeys.contains(k) { continue }
+            raw[k] = v
+        }
         lastUpdate = Date()
         updateAddressIfNeeded()
     }
