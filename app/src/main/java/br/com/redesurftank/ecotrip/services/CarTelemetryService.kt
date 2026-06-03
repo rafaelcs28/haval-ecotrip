@@ -88,6 +88,8 @@ class CarTelemetryService : Service() {
         try { MqttManager.getInstance() } catch (_: Exception) {}
         try { TripManager.getInstance() } catch (_: Exception) {}
         try { CarDataManager.getInstance() } catch (_: Exception) {}
+        // Motor de automações local (geofence/horário/estado → vidro/teto/cortina…).
+        try { br.com.redesurftank.ecotrip.managers.AutomationManager.init(this) } catch (_: Exception) {}
 
         // ── Servidor LAN local: respeita pref (default ON)
         if (isLanEnabledPref(this)) applyLanEnabled(true)

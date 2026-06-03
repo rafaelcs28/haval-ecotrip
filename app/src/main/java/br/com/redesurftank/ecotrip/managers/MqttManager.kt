@@ -1294,6 +1294,14 @@ class MqttManager private constructor() {
                 }
             }, 5, 5, java.util.concurrent.TimeUnit.SECONDS)
             publishDiscovery(c)
+            // Publica disparos do motor de automações pro bridge/app verem (log).
+            AutomationManager.onFired = { id, name, ok ->
+                try {
+                    val p = JSONObject().put("id", id).put("name", name).put("ok", ok)
+                        .put("ts", System.currentTimeMillis())
+                    client?.publish("$prefix/rules/fired", p.toString().toByteArray(), 1, false)
+                } catch (_: Exception) {}
+            }
             // Publica versão do app com retain=true — sempre visível no HA mesmo offline
             try {
                 c.publish("$prefix/app_version", BuildConfig.VERSION_NAME.toByteArray(), 1, true)
@@ -2006,6 +2014,12 @@ class MqttManager private constructor() {
                         TripManager.getInstance().setPriceEnergy(v)
                         AppLogger.i(TAG, "Preço energia atualizado pelo bridge: R$ $v/kWh")
                     }
+                }
+                "rules/set" -> {
+                    // Lista completa de regras de automação (JSON array), entregue
+                    // pelo bridge via MQTT retido. O motor persiste e passa a avaliar.
+                    AutomationManager.setRules(payload)
+                    publishResult("rules/set", "ok")
                 }
                 "refresh_charge_limit" -> {
                     // Força releitura do limite real do carro e re-publica em ha/charge_limit/state.
