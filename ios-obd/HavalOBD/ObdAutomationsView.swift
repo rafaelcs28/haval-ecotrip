@@ -161,7 +161,11 @@ struct ObdRuleEditor: View {
     @State private var placeId = ""
     @State private var radius = 30.0
     @State private var time = Date()
-    @State private var speedKmh = 10.0       // gatilho por velocidade (>=)
+    // Gatilho por estado (genérico): qualquer chave + comparador + valor (borda).
+    @State private var trigField = "car.basic.vehicle_speed"
+    @State private var trigCustomKey = ""
+    @State private var trigCmp = ">="
+    @State private var trigValue = "10"
     @State private var actKind = 0           // 0=vidro,1=teto,2=cortina,3=avançado
     @State private var winTarget = 0         // 0..3, 4=todas
     @State private var winOpen = false
@@ -198,7 +202,7 @@ struct ObdRuleEditor: View {
 
                 Section("Quando") {
                     Picker("Gatilho", selection: $trigKind) {
-                        Text("Chegar").tag(0); Text("Sair").tag(1); Text("Horário").tag(2); Text("Velocidade").tag(3)
+                        Text("Chegar").tag(0); Text("Sair").tag(1); Text("Horário").tag(2); Text("Estado").tag(3)
                     }.pickerStyle(.segmented)
                     if trigKind <= 1 {
                         Picker("Local", selection: $placeId) {
@@ -207,8 +211,20 @@ struct ObdRuleEditor: View {
                         }
                         HStack { Text("Raio"); Slider(value: $radius, in: 5...300, step: 5); Text("\(Int(radius)) m").foregroundStyle(.secondary) }
                     } else if trigKind == 3 {
-                        HStack { Text("Ao atingir"); Slider(value: $speedKmh, in: 1...60, step: 1); Text("\(Int(speedKmh)) km/h").foregroundStyle(.secondary) }
-                        Text("Dispara quando a velocidade sobe e cruza esse valor (ex: sair da catraca). Combine com 'passou por X antes' pra limitar ao contexto certo.")
+                        Picker("Campo", selection: $trigField) {
+                            ForEach(condFields, id: \.1) { Text($0.0).tag($0.1) }
+                        }
+                        if trigField == "__custom__" {
+                            TextField("chave (car.xxx.yyy)", text: $trigCustomKey)
+                                .autocorrectionDisabled().textInputAutocapitalization(.never)
+                        }
+                        HStack {
+                            Picker("", selection: $trigCmp) {
+                                ForEach(["==", "!=", ">", "<", ">=", "<="], id: \.self) { Text($0).tag($0) }
+                            }.pickerStyle(.menu)
+                            TextField("valor", text: $trigValue).keyboardType(.decimalPad).multilineTextAlignment(.trailing)
+                        }
+                        Text("Dispara na borda: quando o estado passa a satisfazer (ex: velocidade ≥ 10, carregando = 1, trava = 0).")
                             .font(.caption).foregroundStyle(.secondary)
                     } else {
                         DatePicker("Horário", selection: $time, displayedComponents: .hourAndMinute)
@@ -292,6 +308,10 @@ struct ObdRuleEditor: View {
     private var isValid: Bool {
         if name.trimmingCharacters(in: .whitespaces).isEmpty { return false }
         if trigKind <= 1 && placeId.isEmpty { return false }
+        if trigKind == 3 {
+            let key = trigField == "__custom__" ? trigCustomKey.trimmingCharacters(in: .whitespaces) : trigField
+            if key.isEmpty || trigValue.trimmingCharacters(in: .whitespaces).isEmpty { return false }
+        }
         if actKind == 3 && advKey.trimmingCharacters(in: .whitespaces).isEmpty { return false }
         return true
     }
@@ -306,7 +326,8 @@ struct ObdRuleEditor: View {
                                    "radius_m": radius, "edge": trigKind == 1 ? "exit" : "enter"]
             }
         case 3:
-            rule["trigger"] = ["type": "state", "field": "car.basic.vehicle_speed", "cmp": ">=", "value": "\(Int(speedKmh))"]
+            let key = trigField == "__custom__" ? trigCustomKey.trimmingCharacters(in: .whitespaces) : trigField
+            rule["trigger"] = ["type": "state", "field": key, "cmp": trigCmp, "value": trigValue]
         default:
             let cal = Calendar.current
             rule["trigger"] = ["type": "time", "hhmm": cal.component(.hour, from: time) * 60 + cal.component(.minute, from: time), "days": [Int]()]
@@ -352,7 +373,11 @@ struct ObdRuleEditor: View {
                 time = Calendar.current.date(bySettingHour: m / 60, minute: m % 60, second: 0, of: Date()) ?? Date()
             case "state":
                 trigKind = 3
-                speedKmh = Double((t["value"] as? String).flatMap { Int($0) } ?? 10)
+                let key = (t["field"] as? String) ?? "car.basic.vehicle_speed"
+                if condFields.contains(where: { $0.1 == key }) { trigField = key }
+                else { trigField = "__custom__"; trigCustomKey = key }
+                trigCmp = (t["cmp"] as? String) ?? ">="
+                trigValue = (t["value"] as? String) ?? ""
             default: break
             }
         }

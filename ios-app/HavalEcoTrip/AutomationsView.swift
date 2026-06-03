@@ -152,8 +152,13 @@ struct RuleEditorSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var name = ""
-    @State private var trigKind = 0          // 0=chegar, 1=sair, 2=horário, 3=velocidade
-    @State private var speedKmh = 10.0
+    @State private var trigKind = 0          // 0=chegar, 1=sair, 2=horário, 3=estado
+    @State private var trigField = "car.basic.vehicle_speed"
+    @State private var trigCustomKey = ""
+    @State private var trigCmp = ">="
+    @State private var trigValue = "10"
+    @State private var condOp = "AND"
+    @State private var preservedConditions: [[String: Any]] = []   // condições não-compare (ex: visited do iPad)
     @State private var placeId = ""
     @State private var radius = 50.0
     @State private var time = Date()
@@ -167,7 +172,7 @@ struct RuleEditorSheet: View {
     @State private var debounce = 120.0
     @State private var conditions: [Cond] = []
 
-    struct Cond: Identifiable { let id = UUID(); var field = "car.basic.vehicle_speed"; var cmp = "=="; var value = "" }
+    struct Cond: Identifiable { let id = UUID(); var field = "car.basic.vehicle_speed"; var customKey = ""; var cmp = "=="; var value = "" }
 
     private let condFields: [(String, String)] = [
         ("Velocidade km/h", "car.basic.vehicle_speed"),
@@ -175,7 +180,9 @@ struct RuleEditorSheet: View {
         ("Trava", "car.basic.door_lock_status"),
         ("Marcha", "car.basic.gear_status"),
         ("Carregando", "car.ev_info.charging_state"),
+        ("Motor (rpm)", "car.basic.engine_speed"),
         ("Power mode", "car.basic.power_mode"),
+        ("Outro (chave)", "__custom__"),
     ]
     private let winTargets = ["Motorista", "Passageiro", "Tras. esq.", "Tras. dir.", "Todas"]
     private let weekdays = ["D", "S", "T", "Q", "Q", "S", "S"]
@@ -189,7 +196,7 @@ struct RuleEditorSheet: View {
 
                 Section("Quando") {
                     Picker("Gatilho", selection: $trigKind) {
-                        Text("Chegar").tag(0); Text("Sair").tag(1); Text("Horário").tag(2); Text("Veloc.").tag(3)
+                        Text("Chegar").tag(0); Text("Sair").tag(1); Text("Horário").tag(2); Text("Estado").tag(3)
                     }.pickerStyle(.segmented)
 
                     if trigKind <= 1 {
@@ -204,8 +211,20 @@ struct RuleEditorSheet: View {
                             HStack { Text("Raio"); Slider(value: $radius, in: 5...300, step: 5); Text("\(Int(radius)) m").foregroundStyle(DS.muted) }
                         }
                     } else if trigKind == 3 {
-                        HStack { Text("Ao atingir"); Slider(value: $speedKmh, in: 1...60, step: 1); Text("\(Int(speedKmh)) km/h").foregroundStyle(DS.muted) }
-                        Text("Dispara quando a velocidade sobe e cruza esse valor (ex: sair da catraca).")
+                        Picker("Campo", selection: $trigField) {
+                            ForEach(condFields, id: \.1) { Text($0.0).tag($0.1) }
+                        }
+                        if trigField == "__custom__" {
+                            TextField("chave (car.xxx.yyy)", text: $trigCustomKey)
+                                .autocorrectionDisabled().textInputAutocapitalization(.never)
+                        }
+                        HStack {
+                            Picker("", selection: $trigCmp) {
+                                ForEach(["==", "!=", ">", "<", ">=", "<="], id: \.self) { Text($0).tag($0) }
+                            }.pickerStyle(.menu)
+                            TextField("valor", text: $trigValue).keyboardType(.decimalPad)
+                        }
+                        Text("Dispara na borda: quando o estado passa a satisfazer (ex: velocidade ≥ 10, carregando = 1).")
                             .font(.caption).foregroundStyle(DS.muted)
                     } else {
                         DatePicker("Horário", selection: $time, displayedComponents: .hourAndMinute)
@@ -251,6 +270,10 @@ struct RuleEditorSheet: View {
                             Picker("Campo", selection: $c.field) {
                                 ForEach(condFields, id: \.1) { Text($0.0).tag($0.1) }
                             }
+                            if c.field == "__custom__" {
+                                TextField("chave (car.xxx.yyy)", text: $c.customKey)
+                                    .autocorrectionDisabled().textInputAutocapitalization(.never)
+                            }
                             HStack {
                                 Picker("", selection: $c.cmp) {
                                     ForEach(["==", "!=", ">", "<", ">=", "<="], id: \.self) { Text($0).tag($0) }
@@ -285,6 +308,10 @@ struct RuleEditorSheet: View {
     private var isValid: Bool {
         if name.trimmingCharacters(in: .whitespaces).isEmpty { return false }
         if trigKind <= 1 && placeId.isEmpty { return false }
+        if trigKind == 3 {
+            let key = trigField == "__custom__" ? trigCustomKey.trimmingCharacters(in: .whitespaces) : trigField
+            if key.isEmpty || trigValue.trimmingCharacters(in: .whitespaces).isEmpty { return false }
+        }
         if actKind == 3 && advKey.trimmingCharacters(in: .whitespaces).isEmpty { return false }
         return true
     }
@@ -301,7 +328,8 @@ struct RuleEditorSheet: View {
                                    "radius_m": radius, "edge": trigKind == 1 ? "exit" : "enter"]
             }
         case 3:
-            rule["trigger"] = ["type": "state", "field": "car.basic.vehicle_speed", "cmp": ">=", "value": "\(Int(speedKmh))"]
+            let key = trigField == "__custom__" ? trigCustomKey.trimmingCharacters(in: .whitespaces) : trigField
+            rule["trigger"] = ["type": "state", "field": key, "cmp": trigCmp, "value": trigValue]
         default:
             let cal = Calendar.current
             let h = cal.component(.hour, from: time), m = cal.component(.minute, from: time)
@@ -318,11 +346,14 @@ struct RuleEditorSheet: View {
         default: rule["action"] = ["type": "request", "key": advKey, "value": advValue]
         }
 
-        // Conditions
-        let items = conditions.filter { !$0.value.isEmpty }.map {
-            ["field": $0.field, "cmp": $0.cmp, "value": $0.value]
+        // Conditions: as editáveis (compare) + as preservadas (ex: visited do iPad).
+        var items: [[String: Any]] = conditions.compactMap { c in
+            let key = c.field == "__custom__" ? c.customKey.trimmingCharacters(in: .whitespaces) : c.field
+            guard !key.isEmpty, !c.value.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
+            return ["field": key, "cmp": c.cmp, "value": c.value]
         }
-        if !items.isEmpty { rule["conditions"] = ["op": "AND", "items": items] }
+        items.append(contentsOf: preservedConditions)
+        if !items.isEmpty { rule["conditions"] = ["op": condOp, "items": items] }
 
         onSave(rule)
         dismiss()
@@ -349,7 +380,11 @@ struct RuleEditorSheet: View {
                 days = Set((t["days"] as? [Int]) ?? [])
             case "state":
                 trigKind = 3
-                speedKmh = Double((t["value"] as? String).flatMap { Int($0) } ?? 10)
+                let key = (t["field"] as? String) ?? "car.basic.vehicle_speed"
+                if condFields.contains(where: { $0.1 == key }) { trigField = key }
+                else { trigField = "__custom__"; trigCustomKey = key }
+                trigCmp = (t["cmp"] as? String) ?? ">="
+                trigValue = (t["value"] as? String) ?? ""
             default: break
             }
         }
@@ -362,9 +397,16 @@ struct RuleEditorSheet: View {
             default: break
             }
         }
-        if let c = e["conditions"] as? [String: Any], let items = c["items"] as? [[String: Any]] {
-            conditions = items.map { Cond(field: ($0["field"] as? String) ?? "car.basic.vehicle_speed",
-                                          cmp: ($0["cmp"] as? String) ?? "==", value: ($0["value"] as? String) ?? "") }
+        if let cg = e["conditions"] as? [String: Any], let items = cg["items"] as? [[String: Any]] {
+            condOp = (cg["op"] as? String) ?? "AND"
+            // Compare → editáveis; o resto (ex: visited do iPad) é preservado intacto.
+            conditions = items.filter { $0["type"] == nil && $0["field"] != nil }.map { it in
+                let key = (it["field"] as? String) ?? "car.basic.vehicle_speed"
+                let known = condFields.contains(where: { $0.1 == key })
+                return Cond(field: known ? key : "__custom__", customKey: known ? "" : key,
+                            cmp: (it["cmp"] as? String) ?? "==", value: (it["value"] as? String) ?? "")
+            }
+            preservedConditions = items.filter { $0["type"] != nil || $0["field"] == nil }
         }
     }
 }
