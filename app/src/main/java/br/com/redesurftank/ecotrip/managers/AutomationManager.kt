@@ -53,10 +53,11 @@ object AutomationManager {
             synchronized(lock) { state[key] = value }
             evaluate(stateKey = key)
         }
-        // Tick leve pra geofence + horário (3s). Só matemática trivial sobre poucas regras.
+        // Tick leve pra geofence + horário (1s p/ disparo rápido ao chegar/sair).
+        // Só matemática trivial (haversine) sobre poucas regras — custo desprezível.
         tick.scheduleWithFixedDelay({
             try { evaluate(stateKey = null) } catch (e: Exception) { AppLogger.w(TAG, "tick: ${e.message}") }
-        }, 3, 3, TimeUnit.SECONDS)
+        }, 1, 1, TimeUnit.SECONDS)
         AppLogger.i(TAG, "AutomationManager iniciado (${rules.size} regras)")
     }
 
@@ -108,7 +109,17 @@ object AutomationManager {
                 val fire = when (r.trigger.type) {
                     "geofence" -> if (hasGps) checkGeofence(r, lat, lng) else false
                     "time"     -> if (stateKey == null) checkTime(r, now) else false
-                    "state"    -> if (stateKey != null && stateKey == r.trigger.field) checkStateEdge(r) else false
+                    "state"    -> {
+                        if (stateKey == null) {
+                            // Tick: lê o valor fresco do barramento e checa a borda — assim o
+                            // disparo (ex: fechar vidro ao atingir X km/h) não fica preso à
+                            // cadência de publish do MQTT.
+                            CarDataManager.getInstance().fetchCurrent(r.trigger.field)?.let { v ->
+                                synchronized(lock) { state[r.trigger.field] = v }
+                            }
+                            checkStateEdge(r)
+                        } else if (stateKey == r.trigger.field) checkStateEdge(r) else false
+                    }
                     else       -> false
                 }
                 if (!fire) continue
