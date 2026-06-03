@@ -179,7 +179,7 @@ struct RuleEditorSheet: View {
         let id = UUID()
         var type = "compare"     // "compare" | "recent" | "visited"
         var field = "car.basic.vehicle_speed"; var customKey = ""; var cmp = "=="; var value = ""
-        var placeId = ""; var withinMin = 5.0
+        var placeIds: [String] = []; var withinMin = 5.0   // "visited": 1+ locais (OU)
         var withinSec = 60.0; var negate = false   // "recent"
     }
 
@@ -312,9 +312,18 @@ struct RuleEditorSheet: View {
                                     HStack { Text("Janela"); Slider(value: $c.withinSec, in: 5...600, step: 5); Text("\(Int(c.withinSec))s").foregroundStyle(DS.muted) }
                                 }
                             } else {
-                                Picker("Local", selection: $c.placeId) {
-                                    Text("Selecione…").tag("")
-                                    ForEach(allPlaces) { Text($0.name).tag($0.id) }
+                                Text("Passou por QUALQUER um (selecione 1+):").font(.caption).foregroundStyle(DS.muted)
+                                ForEach(allPlaces) { p in
+                                    Button {
+                                        if c.placeIds.contains(p.id) { $c.placeIds.wrappedValue.removeAll { $0 == p.id } }
+                                        else { $c.placeIds.wrappedValue.append(p.id) }
+                                    } label: {
+                                        HStack {
+                                            Image(systemName: c.placeIds.contains(p.id) ? "checkmark.circle.fill" : "circle")
+                                                .foregroundStyle(c.placeIds.contains(p.id) ? DS.green : DS.muted)
+                                            Text(p.name).foregroundStyle(DS.text)
+                                        }
+                                    }
                                 }
                                 HStack { Text("Há no máximo"); Slider(value: $c.withinMin, in: 1...60, step: 1); Text("\(Int(c.withinMin)) min").foregroundStyle(DS.muted) }
                             }
@@ -393,8 +402,10 @@ struct RuleEditorSheet: View {
         // Conditions: estado do carro (compare) e/ou passagem por locais (visited).
         let items: [[String: Any]] = conditions.compactMap { c in
             if c.type == "visited" {
-                guard let p = allPlaces.first(where: { $0.id == c.placeId }) else { return nil }
-                return ["type": "visited", "lat": p.lat, "lng": p.lng, "radius_m": 30, "within_s": Int(c.withinMin * 60)]
+                let pts = c.placeIds.compactMap { id in allPlaces.first(where: { $0.id == id }) }
+                    .map { ["lat": $0.lat, "lng": $0.lng, "radius_m": 30] as [String: Any] }
+                guard !pts.isEmpty else { return nil }
+                return ["type": "visited", "points": pts, "within_s": Int(c.withinMin * 60)]
             }
             let key = c.field == "__custom__" ? c.customKey.trimmingCharacters(in: .whitespaces) : c.field
             guard !key.isEmpty, !c.value.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
@@ -456,8 +467,18 @@ struct RuleEditorSheet: View {
                 if t == "visited" {
                     c.type = "visited"
                     c.withinMin = Double(((it["within_s"] as? Int) ?? 300) / 60)
-                    if let lat = it["lat"] as? Double, let lng = it["lng"] as? Double,
-                       let p = allPlaces.min(by: { abs($0.lat - lat) + abs($0.lng - lng) < abs($1.lat - lat) + abs($1.lng - lng) }) { c.placeId = p.id }
+                    let coords: [(Double, Double)]
+                    if let pts = it["points"] as? [[String: Any]] {
+                        coords = pts.compactMap { p in
+                            guard let la = p["lat"] as? Double, let ln = p["lng"] as? Double else { return nil }
+                            return (la, ln)
+                        }
+                    } else if let la = it["lat"] as? Double, let ln = it["lng"] as? Double {
+                        coords = [(la, ln)]
+                    } else { coords = [] }
+                    c.placeIds = coords.compactMap { (la, ln) in
+                        allPlaces.min(by: { abs($0.lat - la) + abs($0.lng - ln) < abs($1.lat - la) + abs($1.lng - ln) })?.id
+                    }
                 } else {
                     c.type = (t == "recent") ? "recent" : "compare"
                     let key = (it["field"] as? String) ?? "car.basic.vehicle_speed"
