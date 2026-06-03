@@ -5789,6 +5789,30 @@ app.post('/api/hf_mode', (req, res) => {
   res.json({ ok: true, active: _hfModeActive, clients: _hfClients.size });
 });
 
+// Resultados dos comandos físicos de teste, por sub (window/skylight/...).
+const _vehicleResults = {};
+
+// POST /api/vehicle/test  { sub, payload } — dispara cmd/vehicle/<sub> no carro e
+// aguarda o /result (até 12s). Atalho pra descobrir o valor de "abrir" vidro etc.
+//   sub: window | skylight | shade | door | windows_status
+//   payload: objeto ou string. Ex: window → {"window":0,"status":0}; skylight → "1"
+app.post('/api/vehicle/test', async (req, res) => {
+  const sub = String(req.body?.sub || '').trim();
+  if (!sub) return res.status(400).json({ error: 'sub obrigatório (window|skylight|shade|door|windows_status)' });
+  if (!mqttClient?.connected) return res.status(503).json({ error: 'MQTT offline' });
+  let payload = req.body?.payload;
+  if (payload === undefined || payload === null) payload = '';
+  if (typeof payload !== 'string') payload = JSON.stringify(payload);
+  delete _vehicleResults[sub];
+  mqttClient.publish(`${MQTT_PREFIX}/cmd/vehicle/${sub}`, payload, { qos: 1, retain: false });
+  const start = Date.now();
+  while (Date.now() - start < 12_000) {
+    if (_vehicleResults[sub]) return res.json({ ok: true, sub, sent: payload, result: _vehicleResults[sub].value });
+    await new Promise(r => setTimeout(r, 250));
+  }
+  res.json({ ok: true, sub, sent: payload, result: null, note: 'sem resposta em 12s (carro dormindo?)' });
+});
+
 app.post('/api/hvac/:control', (req, res) => {
   const { control } = req.params;
   const spec = HVAC_CONTROLS[control];
@@ -6036,6 +6060,14 @@ function handleDiagMessage(key, raw) {
 mqttClient.on('message', (topic, payload, packet) => {
   const value      = payload.toString().trim();
   const isRetained = !!(packet && packet.retain);
+
+  // Resultado dos comandos de teste físico (cmd/vehicle/<sub>/result) — guarda o
+  // último por sub pra o endpoint POST /api/vehicle/test devolver na resposta.
+  if (topic.startsWith(`${MQTT_PREFIX}/cmd/vehicle/`) && topic.endsWith('/result')) {
+    const sub = topic.slice(`${MQTT_PREFIX}/cmd/vehicle/`.length, -'/result'.length);
+    _vehicleResults[sub] = { value, ts: Date.now() };
+    return;
+  }
 
   // Dispatcher: tópicos da integração GWM Brasil vão pro handler dedicado;
   // outros caem no handler legado do app.
