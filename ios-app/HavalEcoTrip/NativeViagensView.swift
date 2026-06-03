@@ -51,12 +51,38 @@ final class TripsLoader: ObservableObject {
     @Published var loading = false
     @Published var diag = ""
     @Published var geoNames: [Double: String] = [:]   // tripId(startMs) → "Bairro, Cidade"
+    @Published var dlDone = 0
+    @Published var dlTotal = 0          // > 0 enquanto baixa tudo offline
     private let geocoder = CLGeocoder()
     private var bag: AnyCancellable?
 
     init() { bag = sync.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() } }
 
     var trips: [Trip] { sync.items.map(Trip.init).filter { $0.valid }.sorted { $0.id > $1.id } }
+
+    private var base: String {
+        let u = Settings.bridgeURL.isEmpty ? AuthConfig.bridgeURL : Settings.bridgeURL
+        return u.hasSuffix("/") ? String(u.dropLast()) : u
+    }
+
+    /// Baixa o trajeto (samples) de TODAS as viagens pro disco — abre offline depois.
+    /// ~23 MB no total hoje. Sobrescreve pra manter fresco (resume/reprocess).
+    func downloadAllTrajetos() async {
+        let ids = trips.map { $0.tripId }
+        guard !ids.isEmpty, dlTotal == 0 else { return }
+        dlDone = 0; dlTotal = ids.count
+        for id in ids {
+            guard let url = URL(string: "\(base)/api/telemetry/\(id)") else { dlDone += 1; continue }
+            var req = URLRequest(url: url); req.timeoutInterval = 20
+            req.addValue("Bearer " + Settings.bridgeToken, forHTTPHeaderField: "Authorization")
+            if let (d, resp) = try? await URLSession.shared.data(for: req),
+               let http = resp as? HTTPURLResponse, http.statusCode == 200 {
+                OfflineCache.saveTraj(id, d)
+            }
+            dlDone += 1
+        }
+        dlTotal = 0
+    }
 
     func load() async {
         loading = sync.items.isEmpty
@@ -148,7 +174,7 @@ struct NativeViagensView: View {
                         }.font(.system(size: 14)).foregroundStyle(DS.text).tint(DS.green).environment(\.locale, Locale(identifier: "pt_BR"))
                     }
                 }
-                if tab == 0 { historico } else { estatisticas }
+                if tab == 0 { downloadAllButton; historico } else { estatisticas }
             }
             .padding(16)
         }
@@ -157,6 +183,26 @@ struct NativeViagensView: View {
         .refreshable { await loader.load() }
         .task { if loader.trips.isEmpty { await loader.load() } }
         .sheet(item: $routeTrip) { t in RouteMapSheet(trip: t) }
+    }
+
+    private var downloadAllButton: some View {
+        Button {
+            Task { await loader.downloadAllTrajetos() }
+        } label: {
+            HStack(spacing: 8) {
+                if loader.dlTotal > 0 {
+                    ProgressView().tint(DS.green).scaleEffect(0.8)
+                    Text("Baixando trajetos… \(loader.dlDone)/\(loader.dlTotal)")
+                } else {
+                    Image(systemName: "arrow.down.circle")
+                    Text("Baixar todos os trajetos offline")
+                }
+            }
+            .font(.system(size: 13, weight: .semibold)).foregroundStyle(DS.text)
+            .frame(maxWidth: .infinity).frame(height: 40)
+            .background(DS.panel2).clipShape(RoundedRectangle(cornerRadius: 10))
+        }
+        .disabled(loader.dlTotal > 0)
     }
 
     private var periodChips: some View {
