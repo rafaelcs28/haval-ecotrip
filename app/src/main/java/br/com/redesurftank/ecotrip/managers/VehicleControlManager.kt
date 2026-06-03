@@ -73,6 +73,10 @@ object VehicleControlManager {
         return ok
     }
 
+    /** Intensidade do sensor de chuva (via IVehicle). Semântica/escala a confirmar no carro. */
+    fun getRainIntensity(): Double? = try { connect()?.getRainIntensity(0.0, 0) }
+        catch (e: Exception) { AppLogger.e(TAG, "getRainIntensity: ${e.message}"); null }
+
     fun getSkylightLevel(): Int? = try { connect()?.getSkylightLevel(0) }
         catch (e: Exception) { AppLogger.e(TAG, "getSkylightLevel: ${e.message}"); null }
 

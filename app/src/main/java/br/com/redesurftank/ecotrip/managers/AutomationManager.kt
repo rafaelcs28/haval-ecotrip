@@ -39,6 +39,7 @@ object AutomationManager {
     private val lastFiredMs = HashMap<String, Long>()       // ruleId → último disparo
     private val lastFiredMinute = HashMap<String, Int>()    // ruleId → minuto do dia já disparado (time)
     private val geofenceLastInside = HashMap<String, Long>() // coordKey → última vez dentro (ms) — p/ condição "visited"
+    private val lastSatisfiedMs = HashMap<String, Long>()    // "field|cmp|value" → última vez que o predicado foi verdadeiro (p/ condição "recent")
 
     /** Callback pra publicar disparos (MqttManager seta isto). */
     @Volatile var onFired: ((ruleId: String, name: String, ok: Boolean) -> Unit)? = null
@@ -103,6 +104,8 @@ object AutomationManager {
         val (lat, lng) = TripManager.getInstance().getLastGps()
         val hasGps = !(lat == 0.0 && lng == 0.0)
         if (hasGps) updateVisits(snapshot, lat, lng, now)      // rastreia passagem por pontos (p/ condição "visited")
+        refreshDynamicFields(snapshot)                          // popula chaves "sob demanda" (ex: rain_intensity)
+        trackRecent(snapshot, now)                              // rastreia "última vez que o predicado foi verdade" (p/ "recent")
         for (r in snapshot) {
             if (!r.enabled) continue
             try {
@@ -154,6 +157,30 @@ object AutomationManager {
         if (haversine(lat, lng, plat, plng) <= radius) geofenceLastInside[coordKey(plat, plng, radius)] = now
     }
 
+    // Chaves que não são do barramento normal e precisam ser lidas via IVehicle sob
+    // demanda (só quando alguma regra as referencia). Ex: rain_intensity.
+    private fun refreshDynamicFields(rules: List<Rule>) {
+        val refs = HashSet<String>()
+        for (r in rules) {
+            if (r.trigger.type == "state") refs.add(r.trigger.field)
+            r.conditions?.items?.forEach { if (it.type != "visited") refs.add(it.field) }
+        }
+        if (refs.contains("rain_intensity")) {
+            VehicleControlManager.getRainIntensity()?.let { synchronized(lock) { state["rain_intensity"] = it.toString() } }
+        }
+    }
+
+    // Pra cada condição "recent", se o predicado (campo cmp valor) é verdade AGORA,
+    // grava o timestamp. Depois conditionsPass checa se foi (ou não) dentro da janela.
+    private fun recentKey(c: Condition) = "${c.field}|${c.cmp}|${c.value}"
+    private fun trackRecent(rules: List<Rule>, now: Long) {
+        for (r in rules) {
+            r.conditions?.items?.forEach { c ->
+                if (c.type == "recent" && compareField(c.field, c.cmp, c.value)) lastSatisfiedMs[recentKey(c)] = now
+            }
+        }
+    }
+
     private fun checkGeofence(r: Rule, lat: Double, lng: Double): Boolean {
         val d = haversine(lat, lng, r.trigger.lat, r.trigger.lng)
         val nowInside = d <= r.trigger.radiusM
@@ -192,12 +219,21 @@ object AutomationManager {
     private fun conditionsPass(group: ConditionGroup?, now: Long): Boolean {
         if (group == null || group.items.isEmpty()) return true
         val results = group.items.map { c ->
-            if (c.type == "visited") {
-                // Verdadeiro se o carro passou pelo ponto nos últimos within_s (default 600s).
-                val last = geofenceLastInside[coordKey(c.lat, c.lng, c.radiusM)] ?: return@map false
-                now - last <= (if (c.withinS > 0) c.withinS else 600) * 1000L
-            } else {
-                compareField(c.field, c.cmp, c.value)
+            when (c.type) {
+                "visited" -> {
+                    // Verdadeiro se o carro passou pelo ponto nos últimos within_s (default 600s).
+                    val last = geofenceLastInside[coordKey(c.lat, c.lng, c.radiusM)]
+                    val within = last != null && now - last <= (if (c.withinS > 0) c.withinS else 600) * 1000L
+                    within
+                }
+                "recent" -> {
+                    // O predicado (campo cmp valor) foi verdade nos últimos within_s?
+                    // negate=true → passa quando NÃO foi (ex: limpador não acionou nos últimos 60s).
+                    val last = lastSatisfiedMs[recentKey(c)]
+                    val within = last != null && now - last <= (if (c.withinS > 0) c.withinS else 60) * 1000L
+                    if (c.negate) !within else within
+                }
+                else -> compareField(c.field, c.cmp, c.value)
             }
         }
         return if (group.op == "OR") results.any { it } else results.all { it }
@@ -266,6 +302,7 @@ object AutomationManager {
                                 field = ci.optString("field", ""), cmp = ci.optString("cmp", "=="), value = ci.optString("value", ""),
                                 lat = ci.optDouble("lat", 0.0), lng = ci.optDouble("lng", 0.0),
                                 radiusM = ci.optDouble("radius_m", 50.0), withinS = ci.optInt("within_s", 600),
+                                negate = ci.optBoolean("negate", false),
                             )
                         }
                     } ?: emptyList(),
@@ -297,9 +334,10 @@ object AutomationManager {
     )
     data class ConditionGroup(val op: String, val items: List<Condition>)
     data class Condition(
-        val type: String = "compare",                 // "compare" (campo do bus) | "visited" (passou por um ponto)
+        val type: String = "compare",                 // "compare" (estado agora) | "visited" (passou por ponto) | "recent" (estado nos últimos N s)
         val field: String = "", val cmp: String = "==", val value: String = "",
         val lat: Double = 0.0, val lng: Double = 0.0, val radiusM: Double = 50.0, val withinS: Int = 600,
+        val negate: Boolean = false,                   // "recent": true = passa quando NÃO ocorreu na janela
     )
     data class Action(
         val type: String, val window: Int, val all: Boolean, val status: Int,
