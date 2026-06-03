@@ -172,13 +172,15 @@ private struct PlaceOpt: Identifiable { let id: String; let name: String; let la
 
 struct ObdCond: Identifiable {
     let id = UUID()
-    var type = "compare"     // "compare" (estado do carro) | "visited" (passou por local)
+    var type = "compare"     // "compare" (estado agora) | "recent" (nos últimos N s) | "visited" (passou por local)
     var field = "car.basic.vehicle_speed"
     var customKey = ""
     var cmp = ">="
     var value = ""
     var placeId = ""
     var withinMin = 5.0
+    var withinSec = 60.0     // janela do "recent"
+    var negate = false       // "recent": true = NÃO ocorreu na janela
 }
 
 struct ObdRuleEditor: View {
@@ -216,6 +218,9 @@ struct ObdRuleEditor: View {
         ("Carregando", "car.ev_info.charging_state"),
         ("Motor (rpm)", "car.basic.engine_speed"),
         ("Power mode", "car.basic.power_mode"),
+        ("Limpador diant.", "car.basic.front_wipwer_status"),
+        ("Limpador tras.", "car.basic.rear_wipwer_status"),
+        ("Chuva (intens.)", "rain_intensity"),
         ("Outro (chave)", "__custom__"),
     ]
 
@@ -275,10 +280,11 @@ struct ObdRuleEditor: View {
                     ForEach($conditions) { $c in
                         VStack(alignment: .leading, spacing: 8) {
                             Picker("Tipo", selection: $c.type) {
-                                Text("Estado do carro").tag("compare")
-                                Text("Passou por local").tag("visited")
+                                Text("Estado").tag("compare")
+                                Text("Recente").tag("recent")
+                                Text("Local").tag("visited")
                             }.pickerStyle(.segmented)
-                            if c.type == "compare" {
+                            if c.type == "compare" || c.type == "recent" {
                                 Picker("Campo", selection: $c.field) {
                                     ForEach(condFields, id: \.1) { Text($0.0).tag($0.1) }
                                 }
@@ -291,6 +297,13 @@ struct ObdRuleEditor: View {
                                         ForEach(["==", "!=", ">", "<", ">=", "<="], id: \.self) { Text($0).tag($0) }
                                     }.pickerStyle(.menu)
                                     TextField("valor", text: $c.value).keyboardType(.decimalPad).multilineTextAlignment(.trailing)
+                                }
+                                if c.type == "recent" {
+                                    Toggle("NÃO ocorreu na janela", isOn: $c.negate)
+                                    HStack { Text("Janela"); Slider(value: $c.withinSec, in: 5...600, step: 5); Text("\(Int(c.withinSec))s").foregroundStyle(.secondary) }
+                                    Text(c.negate ? "Passa se o campo NÃO satisfez nos últimos segundos (ex: limpador != 0 → não acionou)."
+                                                  : "Passa se o campo satisfez em algum momento nos últimos segundos.")
+                                        .font(.caption2).foregroundStyle(.secondary)
                                 }
                             } else {
                                 Picker("Local", selection: $c.placeId) {
@@ -380,11 +393,14 @@ struct ObdRuleEditor: View {
             if c.type == "visited" {
                 guard let p = places.first(where: { $0.id == c.placeId }) else { return nil }
                 return ["type": "visited", "lat": p.lat, "lng": p.lng, "radius_m": 30, "within_s": Int(c.withinMin * 60)]
-            } else {
-                let key = c.field == "__custom__" ? c.customKey.trimmingCharacters(in: .whitespaces) : c.field
-                guard !key.isEmpty, !c.value.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
-                return ["field": key, "cmp": c.cmp, "value": c.value]
             }
+            let key = c.field == "__custom__" ? c.customKey.trimmingCharacters(in: .whitespaces) : c.field
+            guard !key.isEmpty, !c.value.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
+            if c.type == "recent" {
+                return ["type": "recent", "field": key, "cmp": c.cmp, "value": c.value,
+                        "within_s": Int(c.withinSec), "negate": c.negate]
+            }
+            return ["field": key, "cmp": c.cmp, "value": c.value]
         }
         if !items.isEmpty { rule["conditions"] = ["op": condOp, "items": items] }
         switch actKind {
@@ -428,18 +444,21 @@ struct ObdRuleEditor: View {
             condOp = (cg["op"] as? String) ?? "AND"
             conditions = items.map { it in
                 var c = ObdCond()
-                if (it["type"] as? String) == "visited" {
+                let t = (it["type"] as? String) ?? "compare"
+                if t == "visited" {
                     c.type = "visited"
                     c.withinMin = Double(((it["within_s"] as? Int) ?? 300) / 60)
                     if let lat = it["lat"] as? Double, let lng = it["lng"] as? Double,
                        let p = places.min(by: { abs($0.lat - lat) + abs($0.lng - lng) < abs($1.lat - lat) + abs($1.lng - lng) }) { c.placeId = p.id }
                 } else {
-                    c.type = "compare"
+                    c.type = (t == "recent") ? "recent" : "compare"
                     let key = (it["field"] as? String) ?? ""
                     if condFields.contains(where: { $0.1 == key }) { c.field = key }
                     else { c.field = "__custom__"; c.customKey = key }
                     c.cmp = (it["cmp"] as? String) ?? "=="
                     c.value = (it["value"] as? String) ?? ""
+                    c.withinSec = Double((it["within_s"] as? Int) ?? 60)
+                    c.negate = (it["negate"] as? Bool) ?? false
                 }
                 return c
             }

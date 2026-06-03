@@ -177,9 +177,10 @@ struct RuleEditorSheet: View {
 
     struct Cond: Identifiable {
         let id = UUID()
-        var type = "compare"     // "compare" | "visited"
+        var type = "compare"     // "compare" | "recent" | "visited"
         var field = "car.basic.vehicle_speed"; var customKey = ""; var cmp = "=="; var value = ""
         var placeId = ""; var withinMin = 5.0
+        var withinSec = 60.0; var negate = false   // "recent"
     }
 
     private let condFields: [(String, String)] = [
@@ -190,6 +191,9 @@ struct RuleEditorSheet: View {
         ("Carregando", "car.ev_info.charging_state"),
         ("Motor (rpm)", "car.basic.engine_speed"),
         ("Power mode", "car.basic.power_mode"),
+        ("Limpador diant.", "car.basic.front_wipwer_status"),
+        ("Limpador tras.", "car.basic.rear_wipwer_status"),
+        ("Chuva (intens.)", "rain_intensity"),
         ("Outro (chave)", "__custom__"),
     ]
     private let winTargets = ["Motorista", "Passageiro", "Tras. esq.", "Tras. dir.", "Todas"]
@@ -286,10 +290,11 @@ struct RuleEditorSheet: View {
                     ForEach($conditions) { $c in
                         VStack(alignment: .leading, spacing: 8) {
                             Picker("Tipo", selection: $c.type) {
-                                Text("Estado do carro").tag("compare")
-                                Text("Passou por local").tag("visited")
+                                Text("Estado").tag("compare")
+                                Text("Recente").tag("recent")
+                                Text("Local").tag("visited")
                             }.pickerStyle(.segmented)
-                            if c.type == "compare" {
+                            if c.type == "compare" || c.type == "recent" {
                                 Picker("Campo", selection: $c.field) {
                                     ForEach(condFields, id: \.1) { Text($0.0).tag($0.1) }
                                 }
@@ -302,6 +307,10 @@ struct RuleEditorSheet: View {
                                         ForEach(["==", "!=", ">", "<", ">=", "<="], id: \.self) { Text($0).tag($0) }
                                     }.pickerStyle(.menu)
                                     TextField("valor", text: $c.value).keyboardType(.decimalPad)
+                                }
+                                if c.type == "recent" {
+                                    Toggle("NÃO ocorreu na janela", isOn: $c.negate)
+                                    HStack { Text("Janela"); Slider(value: $c.withinSec, in: 5...600, step: 5); Text("\(Int(c.withinSec))s").foregroundStyle(DS.muted) }
                                 }
                             } else {
                                 Picker("Local", selection: $c.placeId) {
@@ -387,11 +396,14 @@ struct RuleEditorSheet: View {
             if c.type == "visited" {
                 guard let p = allPlaces.first(where: { $0.id == c.placeId }) else { return nil }
                 return ["type": "visited", "lat": p.lat, "lng": p.lng, "radius_m": 30, "within_s": Int(c.withinMin * 60)]
-            } else {
-                let key = c.field == "__custom__" ? c.customKey.trimmingCharacters(in: .whitespaces) : c.field
-                guard !key.isEmpty, !c.value.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
-                return ["field": key, "cmp": c.cmp, "value": c.value]
             }
+            let key = c.field == "__custom__" ? c.customKey.trimmingCharacters(in: .whitespaces) : c.field
+            guard !key.isEmpty, !c.value.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
+            if c.type == "recent" {
+                return ["type": "recent", "field": key, "cmp": c.cmp, "value": c.value,
+                        "within_s": Int(c.withinSec), "negate": c.negate]
+            }
+            return ["field": key, "cmp": c.cmp, "value": c.value]
         }
         if !items.isEmpty { rule["conditions"] = ["op": condOp, "items": items] }
 
@@ -441,17 +453,20 @@ struct RuleEditorSheet: View {
             condOp = (cg["op"] as? String) ?? "AND"
             conditions = items.map { it in
                 var c = Cond()
-                if (it["type"] as? String) == "visited" {
+                let t = (it["type"] as? String) ?? "compare"
+                if t == "visited" {
                     c.type = "visited"
                     c.withinMin = Double(((it["within_s"] as? Int) ?? 300) / 60)
                     if let lat = it["lat"] as? Double, let lng = it["lng"] as? Double,
                        let p = allPlaces.min(by: { abs($0.lat - lat) + abs($0.lng - lng) < abs($1.lat - lat) + abs($1.lng - lng) }) { c.placeId = p.id }
                 } else {
-                    c.type = "compare"
+                    c.type = (t == "recent") ? "recent" : "compare"
                     let key = (it["field"] as? String) ?? "car.basic.vehicle_speed"
                     let known = condFields.contains(where: { $0.1 == key })
                     c.field = known ? key : "__custom__"; c.customKey = known ? "" : key
                     c.cmp = (it["cmp"] as? String) ?? "=="; c.value = (it["value"] as? String) ?? ""
+                    c.withinSec = Double((it["within_s"] as? Int) ?? 60)
+                    c.negate = (it["negate"] as? Bool) ?? false
                 }
                 return c
             }
