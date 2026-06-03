@@ -149,7 +149,10 @@ object AutomationManager {
             if (r.trigger.type == "geofence")
                 markVisitIfInside(lat, lng, r.trigger.lat, r.trigger.lng, r.trigger.radiusM, now)
             r.conditions?.items?.forEach { c ->
-                if (c.type == "visited") markVisitIfInside(lat, lng, c.lat, c.lng, c.radiusM, now)
+                if (c.type == "visited") {
+                    if (c.points.isNotEmpty()) c.points.forEach { p -> markVisitIfInside(lat, lng, p.lat, p.lng, p.radiusM, now) }
+                    else markVisitIfInside(lat, lng, c.lat, c.lng, c.radiusM, now)
+                }
             }
         }
     }
@@ -221,10 +224,13 @@ object AutomationManager {
         val results = group.items.map { c ->
             when (c.type) {
                 "visited" -> {
-                    // Verdadeiro se o carro passou pelo ponto nos últimos within_s (default 600s).
-                    val last = geofenceLastInside[coordKey(c.lat, c.lng, c.radiusM)]
-                    val within = last != null && now - last <= (if (c.withinS > 0) c.withinS else 600) * 1000L
-                    within
+                    // Verdadeiro se passou por QUALQUER ponto nos últimos within_s (default 600s).
+                    val janela = (if (c.withinS > 0) c.withinS else 600) * 1000L
+                    val pts = if (c.points.isNotEmpty()) c.points else listOf(VPoint(c.lat, c.lng, c.radiusM))
+                    pts.any { p ->
+                        val last = geofenceLastInside[coordKey(p.lat, p.lng, p.radiusM)]
+                        last != null && now - last <= janela
+                    }
                 }
                 "recent" -> {
                     // O predicado (campo cmp valor) foi verdade nos últimos within_s?
@@ -303,6 +309,12 @@ object AutomationManager {
                                 lat = ci.optDouble("lat", 0.0), lng = ci.optDouble("lng", 0.0),
                                 radiusM = ci.optDouble("radius_m", 50.0), withinS = ci.optInt("within_s", 600),
                                 negate = ci.optBoolean("negate", false),
+                                points = ci.optJSONArray("points")?.let { pa ->
+                                    (0 until pa.length()).map { pi ->
+                                        val po = pa.getJSONObject(pi)
+                                        VPoint(po.optDouble("lat", 0.0), po.optDouble("lng", 0.0), po.optDouble("radius_m", 30.0))
+                                    }
+                                } ?: emptyList(),
                             )
                         }
                     } ?: emptyList(),
@@ -333,11 +345,13 @@ object AutomationManager {
         val hhmm: Int, val days: List<Int>, val field: String, val cmp: String, val value: String,
     )
     data class ConditionGroup(val op: String, val items: List<Condition>)
+    data class VPoint(val lat: Double, val lng: Double, val radiusM: Double)
     data class Condition(
         val type: String = "compare",                 // "compare" (estado agora) | "visited" (passou por ponto) | "recent" (estado nos últimos N s)
         val field: String = "", val cmp: String = "==", val value: String = "",
         val lat: Double = 0.0, val lng: Double = 0.0, val radiusM: Double = 50.0, val withinS: Int = 600,
         val negate: Boolean = false,                   // "recent": true = passa quando NÃO ocorreu na janela
+        val points: List<VPoint> = emptyList(),        // "visited": se preenchido, passa se visitou QUALQUER um (OU)
     )
     data class Action(
         val type: String, val window: Int, val all: Boolean, val status: Int,
