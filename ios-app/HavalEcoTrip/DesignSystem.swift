@@ -87,11 +87,12 @@ struct DSMetric: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(alignment: .firstTextBaseline, spacing: 3) {
-                Text(value).font(.system(size: 24, weight: .semibold, design: .rounded))
+                Text(value).font(.system(size: 21, weight: .semibold, design: .rounded))
                     .foregroundStyle(color).monospacedDigit()
-                    .lineLimit(1).minimumScaleFactor(0.5)
+                    .lineLimit(1).minimumScaleFactor(0.5).layoutPriority(1)
                 if !unit.isEmpty {
-                    Text(unit).font(.system(size: 12, weight: .regular)).foregroundStyle(DS.muted).lineLimit(1)
+                    Text(unit).font(.system(size: 11, weight: .regular)).foregroundStyle(DS.muted)
+                        .lineLimit(1).minimumScaleFactor(0.5)
                 }
             }
             Text(label.uppercased()).font(.system(size: 10, weight: .semibold))
