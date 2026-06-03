@@ -14,6 +14,7 @@ struct SettingsView: View {
     @State private var copiedFeedback = false
     @State private var bridgePassword: String = ""
     @State private var bridgeTotp: String = ""
+    @State private var showAutomations = false
     @AppStorage("hazardIntervalSec") private var hazardIntervalSec: Double = 2.0
 
     var body: some View {
@@ -62,6 +63,16 @@ struct SettingsView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
 
+                // ── Automações (regras que rodam no carro) ──────────────
+                Section("Automações") {
+                    Button {
+                        showAutomations = true
+                    } label: {
+                        Label("Automações do carro", systemImage: "wand.and.stars")
+                    }
+                    Text("Cria regras que rodam no próprio carro (ex: abrir vidro ao chegar num local). Mesmas regras do app do iPhone.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
 
                 // ── Conexão LAN direta com o carro ──────────────────────
                 Section("Conexão LAN direta (carro)") {
@@ -169,6 +180,10 @@ struct SettingsView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("✕") { dismiss() }
                 }
+            }
+            // Janela grande (tela cheia no iPad) pra operar as automações com folga.
+            .fullScreenCover(isPresented: $showAutomations) {
+                ObdAutomationsView(publisher: publisher)
             }
         }
     }
