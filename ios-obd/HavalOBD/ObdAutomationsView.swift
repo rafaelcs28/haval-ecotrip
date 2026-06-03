@@ -219,7 +219,6 @@ struct ObdRuleEditor: View {
         ("Motor (rpm)", "car.basic.engine_speed"),
         ("Power mode", "car.basic.power_mode"),
         ("Limpador diant.", "car.basic.front_wipwer_status"),
-        ("Limpador tras.", "car.basic.rear_wipwer_status"),
         ("Chuva (intens.)", "rain_intensity"),
         ("Outro (chave)", "__custom__"),
     ]
