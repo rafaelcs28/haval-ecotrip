@@ -146,10 +146,11 @@ struct ObdRuleEditor: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var name = ""
-    @State private var trigKind = 0          // 0=chegar,1=sair,2=horário
+    @State private var trigKind = 0          // 0=chegar,1=sair,2=horário,3=velocidade
     @State private var placeId = ""
     @State private var radius = 30.0
     @State private var time = Date()
+    @State private var speedKmh = 10.0       // gatilho por velocidade (>=)
     @State private var actKind = 0           // 0=vidro,1=teto,2=cortina,3=avançado
     @State private var winTarget = 0         // 0..3, 4=todas
     @State private var winOpen = false
@@ -176,20 +177,24 @@ struct ObdRuleEditor: View {
 
                 Section("Quando") {
                     Picker("Gatilho", selection: $trigKind) {
-                        Text("Ao chegar").tag(0); Text("Ao sair").tag(1); Text("Em horário").tag(2)
+                        Text("Chegar").tag(0); Text("Sair").tag(1); Text("Horário").tag(2); Text("Velocidade").tag(3)
                     }.pickerStyle(.segmented)
                     if trigKind <= 1 {
                         Picker("Local", selection: $placeId) {
                             Text("Selecione…").tag("")
                             ForEach(places) { Text($0.name).tag($0.id) }
                         }
-                        HStack { Text("Raio"); Slider(value: $radius, in: 15...300, step: 5); Text("\(Int(radius)) m").foregroundStyle(.secondary) }
+                        HStack { Text("Raio"); Slider(value: $radius, in: 5...300, step: 5); Text("\(Int(radius)) m").foregroundStyle(.secondary) }
+                    } else if trigKind == 3 {
+                        HStack { Text("Ao atingir"); Slider(value: $speedKmh, in: 1...60, step: 1); Text("\(Int(speedKmh)) km/h").foregroundStyle(.secondary) }
+                        Text("Dispara quando a velocidade sobe e cruza esse valor (ex: sair da catraca). Combine com 'passou por X antes' pra limitar ao contexto certo.")
+                            .font(.caption).foregroundStyle(.secondary)
                     } else {
                         DatePicker("Horário", selection: $time, displayedComponents: .hourAndMinute)
                     }
                 }
 
-                if trigKind <= 1 {
+                if trigKind != 2 {
                     Section("Exigir passagem antes (anti-falso-positivo)") {
                         Toggle("Só se passou por outro local", isOn: $requireVisited)
                         if requireVisited {
@@ -246,18 +251,22 @@ struct ObdRuleEditor: View {
     private func save() {
         var rule: [String: Any] = ["name": name, "enabled": true, "debounce_s": Int(debounce)]
         if let e = existing, let id = e["id"] as? String { rule["id"] = id }
-        if trigKind <= 1 {
+        switch trigKind {
+        case 0, 1:
             if let p = places.first(where: { $0.id == placeId }) {
                 rule["trigger"] = ["type": "geofence", "lat": p.lat, "lng": p.lng,
                                    "radius_m": radius, "edge": trigKind == 1 ? "exit" : "enter"]
             }
-            if requireVisited, let b = places.first(where: { $0.id == visitedPlaceId }) {
-                rule["conditions"] = ["op": "AND", "items": [[
-                    "type": "visited", "lat": b.lat, "lng": b.lng, "radius_m": 30, "within_s": Int(visitedWithinMin * 60)]]]
-            }
-        } else {
+        case 3:
+            rule["trigger"] = ["type": "state", "field": "car.basic.vehicle_speed", "cmp": ">=", "value": "\(Int(speedKmh))"]
+        default:
             let cal = Calendar.current
             rule["trigger"] = ["type": "time", "hhmm": cal.component(.hour, from: time) * 60 + cal.component(.minute, from: time), "days": [Int]()]
+        }
+        // Condição "passou por X antes" vale pra geofence e velocidade.
+        if trigKind != 2, requireVisited, let b = places.first(where: { $0.id == visitedPlaceId }) {
+            rule["conditions"] = ["op": "AND", "items": [[
+                "type": "visited", "lat": b.lat, "lng": b.lng, "radius_m": 30, "within_s": Int(visitedWithinMin * 60)]]]
         }
         switch actKind {
         case 0:
@@ -286,6 +295,9 @@ struct ObdRuleEditor: View {
                 trigKind = 2
                 let m = (t["hhmm"] as? Int) ?? 0
                 time = Calendar.current.date(bySettingHour: m / 60, minute: m % 60, second: 0, of: Date()) ?? Date()
+            case "state":
+                trigKind = 3
+                speedKmh = Double((t["value"] as? String).flatMap { Int($0) } ?? 10)
             default: break
             }
         }

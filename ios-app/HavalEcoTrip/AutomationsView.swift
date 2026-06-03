@@ -152,7 +152,8 @@ struct RuleEditorSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var name = ""
-    @State private var trigKind = 0          // 0=chegar, 1=sair, 2=horário
+    @State private var trigKind = 0          // 0=chegar, 1=sair, 2=horário, 3=velocidade
+    @State private var speedKmh = 10.0
     @State private var placeId = ""
     @State private var radius = 50.0
     @State private var time = Date()
@@ -188,7 +189,7 @@ struct RuleEditorSheet: View {
 
                 Section("Quando") {
                     Picker("Gatilho", selection: $trigKind) {
-                        Text("Ao chegar").tag(0); Text("Ao sair").tag(1); Text("Em horário").tag(2)
+                        Text("Chegar").tag(0); Text("Sair").tag(1); Text("Horário").tag(2); Text("Veloc.").tag(3)
                     }.pickerStyle(.segmented)
 
                     if trigKind <= 1 {
@@ -200,8 +201,12 @@ struct RuleEditorSheet: View {
                                 Text("Selecione…").tag("")
                                 ForEach(cfg.places) { p in Text(p.name).tag(p.id) }
                             }
-                            HStack { Text("Raio"); Slider(value: $radius, in: 20...300, step: 10); Text("\(Int(radius)) m").foregroundStyle(DS.muted) }
+                            HStack { Text("Raio"); Slider(value: $radius, in: 5...300, step: 5); Text("\(Int(radius)) m").foregroundStyle(DS.muted) }
                         }
+                    } else if trigKind == 3 {
+                        HStack { Text("Ao atingir"); Slider(value: $speedKmh, in: 1...60, step: 1); Text("\(Int(speedKmh)) km/h").foregroundStyle(DS.muted) }
+                        Text("Dispara quando a velocidade sobe e cruza esse valor (ex: sair da catraca).")
+                            .font(.caption).foregroundStyle(DS.muted)
                     } else {
                         DatePicker("Horário", selection: $time, displayedComponents: .hourAndMinute)
                         HStack(spacing: 6) {
@@ -289,12 +294,15 @@ struct RuleEditorSheet: View {
         if let e = existing, let id = e["id"] as? String { rule["id"] = id }
 
         // Trigger
-        if trigKind <= 1 {
+        switch trigKind {
+        case 0, 1:
             if let p = cfg.places.first(where: { $0.id == placeId }) {
                 rule["trigger"] = ["type": "geofence", "lat": p.lat, "lng": p.lng,
                                    "radius_m": radius, "edge": trigKind == 1 ? "exit" : "enter"]
             }
-        } else {
+        case 3:
+            rule["trigger"] = ["type": "state", "field": "car.basic.vehicle_speed", "cmp": ">=", "value": "\(Int(speedKmh))"]
+        default:
             let cal = Calendar.current
             let h = cal.component(.hour, from: time), m = cal.component(.minute, from: time)
             rule["trigger"] = ["type": "time", "hhmm": h * 60 + m, "days": Array(days).sorted()]
@@ -339,6 +347,9 @@ struct RuleEditorSheet: View {
                 let m = (t["hhmm"] as? Int) ?? 0
                 time = Calendar.current.date(bySettingHour: m / 60, minute: m % 60, second: 0, of: Date()) ?? Date()
                 days = Set((t["days"] as? [Int]) ?? [])
+            case "state":
+                trigKind = 3
+                speedKmh = Double((t["value"] as? String).flatMap { Int($0) } ?? 10)
             default: break
             }
         }
