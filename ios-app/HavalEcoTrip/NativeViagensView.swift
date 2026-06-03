@@ -403,7 +403,16 @@ struct RouteMapSheet: View {
         var req = URLRequest(url: url); req.timeoutInterval = 15
         req.addValue("Bearer " + Settings.bridgeToken, forHTTPHeaderField: "Authorization")
         defer { loading = false }
-        guard let (data, _) = try? await URLSession.shared.data(for: req),
+        // Online: busca e cacheia em disco. Offline/erro: usa o cache (se já abriu antes).
+        var data: Data?
+        if let (d, resp) = try? await URLSession.shared.data(for: req),
+           let http = resp as? HTTPURLResponse, http.statusCode == 200 {
+            data = d
+            OfflineCache.saveTraj(trip.tripId, d)
+        } else {
+            data = OfflineCache.loadTraj(trip.tripId)
+        }
+        guard let data,
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let raw = obj["samples"] as? [[String: Any]] else { return }
         coords = raw.compactMap { s in

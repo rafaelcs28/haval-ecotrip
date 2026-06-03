@@ -162,8 +162,19 @@ enum OfflineCache {
     static func clearAll() {
         let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         if let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) {
-            for f in files where f.lastPathComponent.hasPrefix("sync_") { try? FileManager.default.removeItem(at: f) }
+            for f in files where f.lastPathComponent.hasPrefix("sync_") || f.lastPathComponent.hasPrefix("traj_") {
+                try? FileManager.default.removeItem(at: f)
+            }
         }
         URLCache.shared.removeAllCachedResponses()
     }
+
+    // Cache sob demanda do trajeto (samples de /api/telemetry/:id). Só viagens
+    // abertas são gravadas — ~0,27 MB por 100 km. Abre offline depois.
+    private static func trajURL(_ id: String) -> URL {
+        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        return dir.appendingPathComponent("traj_\(id).json")
+    }
+    static func saveTraj(_ id: String, _ data: Data) { try? data.write(to: trajURL(id)) }
+    static func loadTraj(_ id: String) -> Data? { try? Data(contentsOf: trajURL(id)) }
 }
