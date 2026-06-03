@@ -18,6 +18,7 @@ struct NativeConfigView: View {
     @State private var showNotif = false
     @State private var showVehicle = false
     @State private var showPlaces = false
+    @State private var showAutomations = false
     @State private var shareURL: URL?
     @State private var importing = false
     @AppStorage("faceid_lock") private var faceIDLock = false
@@ -90,6 +91,8 @@ struct NativeConfigView: View {
                 Divider().overlay(DS.border)
                 rowButton(icon: "mappin.and.ellipse", title: "Locais conhecidos", subtitle: "Casa, trabalho, postos…") { showPlaces = true }
                 Divider().overlay(DS.border)
+                rowButton(icon: "wand.and.stars", title: "Automações", subtitle: "Ações no carro por local ou horário") { showAutomations = true }
+                Divider().overlay(DS.border)
                 Toggle(isOn: $lanEnabled) {
                     VStack(alignment: .leading, spacing: 1) {
                         Label("LAN direta", systemImage: "wifi").font(.system(size: 14)).foregroundStyle(DS.text)
@@ -103,6 +106,7 @@ struct NativeConfigView: View {
         .sheet(isPresented: $showPair) { PairCodeSheet(cfg: cfg) }
         .sheet(isPresented: $showVehicle) { VehicleSheet(cfg: cfg) }
         .sheet(isPresented: $showPlaces) { KnownPlacesSheet(cfg: cfg) }
+        .sheet(isPresented: $showAutomations) { AutomationsSheet(cfg: cfg) }
     }
 
     // MARK: Notificações (catálogo completo em sheet)

@@ -38,6 +38,7 @@ object AutomationManager {
     private val inside = HashMap<String, Boolean>()         // ruleId → dentro do geofence?
     private val lastFiredMs = HashMap<String, Long>()       // ruleId → último disparo
     private val lastFiredMinute = HashMap<String, Int>()    // ruleId → minuto do dia já disparado (time)
+    private val geofenceLastInside = HashMap<String, Long>() // coordKey → última vez dentro (ms) — p/ condição "visited"
 
     /** Callback pra publicar disparos (MqttManager seta isto). */
     @Volatile var onFired: ((ruleId: String, name: String, ok: Boolean) -> Unit)? = null
@@ -98,17 +99,20 @@ object AutomationManager {
         val snapshot = synchronized(lock) { rules }
         if (snapshot.isEmpty()) return
         val now = System.currentTimeMillis()
+        val (lat, lng) = TripManager.getInstance().getLastGps()
+        val hasGps = !(lat == 0.0 && lng == 0.0)
+        if (hasGps) updateVisits(snapshot, lat, lng, now)      // rastreia passagem por pontos (p/ condição "visited")
         for (r in snapshot) {
             if (!r.enabled) continue
             try {
                 val fire = when (r.trigger.type) {
-                    "geofence" -> checkGeofence(r)
+                    "geofence" -> if (hasGps) checkGeofence(r, lat, lng) else false
                     "time"     -> if (stateKey == null) checkTime(r, now) else false
                     "state"    -> if (stateKey != null && stateKey == r.trigger.field) checkStateEdge(r) else false
                     else       -> false
                 }
                 if (!fire) continue
-                if (!conditionsPass(r.conditions)) continue
+                if (!conditionsPass(r.conditions, now)) continue
                 val last = lastFiredMs[r.id] ?: 0L
                 if (r.debounceS > 0 && now - last < r.debounceS * 1000L) continue
                 lastFiredMs[r.id] = now
@@ -121,9 +125,25 @@ object AutomationManager {
         }
     }
 
-    private fun checkGeofence(r: Rule): Boolean {
-        val (lat, lng) = TripManager.getInstance().getLastGps()
-        if (lat == 0.0 && lng == 0.0) return false            // sem fix → ignora
+    private fun coordKey(lat: Double, lng: Double, radius: Double) =
+        "%.5f,%.5f,%.0f".format(lat, lng, radius)
+
+    // Marca a passagem por TODOS os pontos referenciados (gatilhos geofence +
+    // condições "visited"), pra a condição "visited" saber se o carro passou lá.
+    private fun updateVisits(rules: List<Rule>, lat: Double, lng: Double, now: Long) {
+        for (r in rules) {
+            if (r.trigger.type == "geofence")
+                markVisitIfInside(lat, lng, r.trigger.lat, r.trigger.lng, r.trigger.radiusM, now)
+            r.conditions?.items?.forEach { c ->
+                if (c.type == "visited") markVisitIfInside(lat, lng, c.lat, c.lng, c.radiusM, now)
+            }
+        }
+    }
+    private fun markVisitIfInside(lat: Double, lng: Double, plat: Double, plng: Double, radius: Double, now: Long) {
+        if (haversine(lat, lng, plat, plng) <= radius) geofenceLastInside[coordKey(plat, plng, radius)] = now
+    }
+
+    private fun checkGeofence(r: Rule, lat: Double, lng: Double): Boolean {
         val d = haversine(lat, lng, r.trigger.lat, r.trigger.lng)
         val nowInside = d <= r.trigger.radiusM
         val prev = inside[r.id]
@@ -158,9 +178,17 @@ object AutomationManager {
         return cur && !prev
     }
 
-    private fun conditionsPass(group: ConditionGroup?): Boolean {
+    private fun conditionsPass(group: ConditionGroup?, now: Long): Boolean {
         if (group == null || group.items.isEmpty()) return true
-        val results = group.items.map { compareField(it.field, it.cmp, it.value) }
+        val results = group.items.map { c ->
+            if (c.type == "visited") {
+                // Verdadeiro se o carro passou pelo ponto nos últimos within_s (default 600s).
+                val last = geofenceLastInside[coordKey(c.lat, c.lng, c.radiusM)] ?: return@map false
+                now - last <= (if (c.withinS > 0) c.withinS else 600) * 1000L
+            } else {
+                compareField(c.field, c.cmp, c.value)
+            }
+        }
         return if (group.op == "OR") results.any { it } else results.all { it }
     }
 
@@ -222,7 +250,12 @@ object AutomationManager {
                     items = c.optJSONArray("items")?.let { it2 ->
                         (0 until it2.length()).map { idx ->
                             val ci = it2.getJSONObject(idx)
-                            Condition(ci.getString("field"), ci.optString("cmp", "=="), ci.optString("value", ""))
+                            Condition(
+                                type = ci.optString("type", "compare"),
+                                field = ci.optString("field", ""), cmp = ci.optString("cmp", "=="), value = ci.optString("value", ""),
+                                lat = ci.optDouble("lat", 0.0), lng = ci.optDouble("lng", 0.0),
+                                radiusM = ci.optDouble("radius_m", 50.0), withinS = ci.optInt("within_s", 600),
+                            )
                         }
                     } ?: emptyList(),
                 )
@@ -252,7 +285,11 @@ object AutomationManager {
         val hhmm: Int, val days: List<Int>, val field: String, val cmp: String, val value: String,
     )
     data class ConditionGroup(val op: String, val items: List<Condition>)
-    data class Condition(val field: String, val cmp: String, val value: String)
+    data class Condition(
+        val type: String = "compare",                 // "compare" (campo do bus) | "visited" (passou por um ponto)
+        val field: String = "", val cmp: String = "==", val value: String = "",
+        val lat: Double = 0.0, val lng: Double = 0.0, val radiusM: Double = 50.0, val withinS: Int = 600,
+    )
     data class Action(
         val type: String, val window: Int, val all: Boolean, val status: Int,
         val level: Int, val p1: Int, val p2: Int, val key: String, val value: String,
