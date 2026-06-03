@@ -19,6 +19,7 @@ struct NativeConfigView: View {
     @State private var showVehicle = false
     @State private var showPlaces = false
     @State private var showAutomations = false
+    @State private var showNotifCenter = false
     @State private var shareURL: URL?
     @State private var importing = false
     @AppStorage("faceid_lock") private var faceIDLock = false
@@ -112,9 +113,14 @@ struct NativeConfigView: View {
     // MARK: Notificações (catálogo completo em sheet)
     private var notificacoesCard: some View {
         DSCard {
-            rowButton(icon: "bell.fill", title: "Notificações", subtitle: "Live Activities + alertas push") { showNotif = true }
+            VStack(spacing: 4) {
+                rowButton(icon: "bell.badge.fill", title: "Central de notificações", subtitle: "Histórico de alertas recebidos") { showNotifCenter = true }
+                Divider().overlay(DS.border)
+                rowButton(icon: "bell.fill", title: "Notificações", subtitle: "Live Activities + alertas push") { showNotif = true }
+            }
         }
         .sheet(isPresented: $showNotif) { NotificationsSheet(cfg: cfg) }
+        .sheet(isPresented: $showNotifCenter) { NotificationsCenterSheet() }
     }
     // MARK: Conta e segurança
     private var contaCard: some View {
@@ -168,6 +174,7 @@ struct NativeConfigView: View {
         DSCard(title: "Sobre", icon: "info.circle.fill") {
             VStack(spacing: 8) {
                 aboutRow("App", appVersion)
+                aboutRow("Carro", cfg.carVersion)
                 aboutRow("Bridge", cfg.gitCommit)
                 aboutRow("Node", cfg.nodeVersion)
                 aboutRow("Uptime", cfg.bridgeUptime)

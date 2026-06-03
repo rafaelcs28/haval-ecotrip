@@ -34,6 +34,7 @@ final class ConfigStore: ObservableObject {
     @Published var bridgeUptime = "—"
     @Published var nodeVersion = "—"
     @Published var mqttHost = "—"
+    @Published var carVersion = "—"   // versão do APK rodando no carro (state.car_app_version)
     @Published var pairCode: String?
     @Published var toast: String?
     // Veículo
@@ -91,6 +92,10 @@ final class ConfigStore: ObservableObject {
             mqttHost = (o["mqtt_host"] as? String) ?? "—"
             if let up = o["bridge_uptime_sec"] as? Double { bridgeUptime = "\(Int(up/3600))h \(Int(up.truncatingRemainder(dividingBy: 3600)/60))min" }
             else if let up = o["bridge_uptime_sec"] as? Int { bridgeUptime = "\(up/3600)h \((up%3600)/60)min" }
+        }
+        // Versão do APK do carro (publicada em $prefix/app_version → state.car_app_version).
+        if let (c, d) = await send("/api/state", "GET"), c == 200 {
+            carVersion = (obj(d)["car_app_version"] as? String) ?? "—"
         }
     }
 
