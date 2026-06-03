@@ -40,6 +40,8 @@ object AutomationManager {
     private val lastFiredMinute = HashMap<String, Int>()    // ruleId → minuto do dia já disparado (time)
     private val geofenceLastInside = HashMap<String, Long>() // coordKey → última vez dentro (ms) — p/ condição "visited"
     private val lastSatisfiedMs = HashMap<String, Long>()    // "field|cmp|value" → última vez que o predicado foi verdadeiro (p/ condição "recent")
+    private val condPrevPass = HashMap<String, Boolean>()    // ruleId → conditionsPass no tick anterior (detecta re-arme)
+    private val firedThisWindow = HashMap<String, Boolean>() // ruleId → já disparou nesta janela de condições satisfeitas
 
     /** Callback pra publicar disparos (MqttManager seta isto). */
     @Volatile var onFired: ((ruleId: String, name: String, ok: Boolean) -> Unit)? = null
@@ -75,6 +77,8 @@ object AutomationManager {
                 inside.keys.retainAll(ids)
                 lastFiredMs.keys.retainAll(ids)
                 lastFiredMinute.keys.retainAll(ids)
+                condPrevPass.keys.retainAll(ids)
+                firedThisWindow.keys.retainAll(ids)
             }
             saveToDisk(json)
             AppLogger.i(TAG, "Regras atualizadas: ${parsed.size}")
@@ -109,6 +113,14 @@ object AutomationManager {
         for (r in snapshot) {
             if (!r.enabled) continue
             try {
+                // Edge nas CONDIÇÕES: a regra com condições dispara uma única vez
+                // enquanto elas seguem satisfeitas; só re-arma quando deixam de ser
+                // satisfeitas e voltam (ex: re-visitar o ponto). Sem isso, um gatilho
+                // repetível (cruzar 8 km/h) re-disparava a cada vez dentro da janela
+                // "visited". Regras SEM condições não são afetadas (gatilho já é borda).
+                val hasConds = r.conditions?.items?.isNotEmpty() == true
+                val condNow = conditionsPass(r.conditions, now)
+                if (hasConds && !condNow) firedThisWindow[r.id] = false   // re-arma
                 val fire = when (r.trigger.type) {
                     "geofence" -> if (hasGps) checkGeofence(r, lat, lng) else false
                     "time"     -> if (stateKey == null) checkTime(r, now) else false
@@ -126,10 +138,12 @@ object AutomationManager {
                     else       -> false
                 }
                 if (!fire) continue
-                if (!conditionsPass(r.conditions, now)) continue
+                if (!condNow) continue
+                if (hasConds && firedThisWindow[r.id] == true) continue   // já disparou nesta janela
                 val last = lastFiredMs[r.id] ?: 0L
                 if (r.debounceS > 0 && now - last < r.debounceS * 1000L) continue
                 lastFiredMs[r.id] = now
+                if (hasConds) firedThisWindow[r.id] = true
                 val ok = runAction(r.action)
                 AppLogger.i(TAG, "Regra '${r.name}' disparou → ${r.action.type} (ok=$ok)")
                 onFired?.invoke(r.id, r.name, ok)
