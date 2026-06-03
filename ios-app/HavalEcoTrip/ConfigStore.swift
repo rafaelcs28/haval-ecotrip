@@ -112,12 +112,20 @@ final class ConfigStore: ObservableObject {
             places = arr.map(KnownPlace.init)
         }
     }
-    // Locais de AUTOMAÇÃO (lista separada; só leitura aqui — só o iPad adiciona).
+    // Locais de AUTOMAÇÃO (lista separada dos conhecidos de recarga/trajeto).
     func loadAutomationPlaces() async {
         if let (c, d) = await send("/api/automation-places", "GET"), c == 200,
            let arr = (try? JSONSerialization.jsonObject(with: d)) as? [[String: Any]] {
             automationPlaces = arr.map(KnownPlace.init)
         }
+    }
+    /// Cria um local de automação e recarrega. Retorna o id novo (pra já selecionar).
+    func addAutomationPlace(name: String, lat: Double, lng: Double, radius: Double) async -> String? {
+        guard let (c, d) = await send("/api/automation-places", "POST",
+                                      ["name": name, "lat": lat, "lng": lng, "radius_m": radius]), c == 200,
+              let o = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any] else { return nil }
+        await loadAutomationPlaces()
+        return "\(o["id"] ?? "")"
     }
     func addPlace(name: String, lat: Double, lng: Double, radius: Double) async {
         await send("/api/known-places", "POST", ["name": name, "lat": lat, "lng": lng, "radius_m": radius]); await loadPlaces()

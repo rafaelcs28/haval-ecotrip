@@ -11,6 +11,8 @@
 
 import SwiftUI
 import Combine
+import MapKit
+import CoreLocation
 
 // MARK: - Model
 
@@ -158,7 +160,6 @@ struct RuleEditorSheet: View {
     @State private var trigCmp = ">="
     @State private var trigValue = "10"
     @State private var condOp = "AND"
-    @State private var preservedConditions: [[String: Any]] = []   // condições não-compare (ex: visited do iPad)
     @State private var placeId = ""
     @State private var radius = 50.0
     @State private var time = Date()
@@ -171,8 +172,15 @@ struct RuleEditorSheet: View {
     @State private var advValue = ""
     @State private var debounce = 120.0
     @State private var conditions: [Cond] = []
+    @State private var showPlacePicker = false
+    @State private var pickerAutoSelectTrigger = false
 
-    struct Cond: Identifiable { let id = UUID(); var field = "car.basic.vehicle_speed"; var customKey = ""; var cmp = "=="; var value = "" }
+    struct Cond: Identifiable {
+        let id = UUID()
+        var type = "compare"     // "compare" | "visited"
+        var field = "car.basic.vehicle_speed"; var customKey = ""; var cmp = "=="; var value = ""
+        var placeId = ""; var withinMin = 5.0
+    }
 
     private let condFields: [(String, String)] = [
         ("Velocidade km/h", "car.basic.vehicle_speed"),
@@ -209,6 +217,9 @@ struct RuleEditorSheet: View {
                             Picker("Local", selection: $placeId) {
                                 Text("Selecione…").tag("")
                                 ForEach(allPlaces) { p in Text(p.name).tag(p.id) }
+                            }
+                            Button { pickerAutoSelectTrigger = true; showPlacePicker = true } label: {
+                                Label("Novo local pelo mapa", systemImage: "mappin.and.ellipse")
                             }
                             HStack { Text("Raio"); Slider(value: $radius, in: 5...300, step: 5); Text("\(Int(radius)) m").foregroundStyle(DS.muted) }
                         }
@@ -267,29 +278,47 @@ struct RuleEditorSheet: View {
                 }
 
                 Section {
+                    if conditions.count > 1 {
+                        Picker("Combinar", selection: $condOp) {
+                            Text("Todas (E)").tag("AND"); Text("Qualquer (OU)").tag("OR")
+                        }.pickerStyle(.segmented)
+                    }
                     ForEach($conditions) { $c in
-                        VStack(spacing: 6) {
-                            Picker("Campo", selection: $c.field) {
-                                ForEach(condFields, id: \.1) { Text($0.0).tag($0.1) }
-                            }
-                            if c.field == "__custom__" {
-                                TextField("chave (car.xxx.yyy)", text: $c.customKey)
-                                    .autocorrectionDisabled().textInputAutocapitalization(.never)
-                            }
-                            HStack {
-                                Picker("", selection: $c.cmp) {
-                                    ForEach(["==", "!=", ">", "<", ">=", "<="], id: \.self) { Text($0).tag($0) }
-                                }.pickerStyle(.menu)
-                                TextField("valor", text: $c.value).keyboardType(.decimalPad)
+                        VStack(alignment: .leading, spacing: 8) {
+                            Picker("Tipo", selection: $c.type) {
+                                Text("Estado do carro").tag("compare")
+                                Text("Passou por local").tag("visited")
+                            }.pickerStyle(.segmented)
+                            if c.type == "compare" {
+                                Picker("Campo", selection: $c.field) {
+                                    ForEach(condFields, id: \.1) { Text($0.0).tag($0.1) }
+                                }
+                                if c.field == "__custom__" {
+                                    TextField("chave (car.xxx.yyy)", text: $c.customKey)
+                                        .autocorrectionDisabled().textInputAutocapitalization(.never)
+                                }
+                                HStack {
+                                    Picker("", selection: $c.cmp) {
+                                        ForEach(["==", "!=", ">", "<", ">=", "<="], id: \.self) { Text($0).tag($0) }
+                                    }.pickerStyle(.menu)
+                                    TextField("valor", text: $c.value).keyboardType(.decimalPad)
+                                }
+                            } else {
+                                Picker("Local", selection: $c.placeId) {
+                                    Text("Selecione…").tag("")
+                                    ForEach(allPlaces) { Text($0.name).tag($0.id) }
+                                }
+                                HStack { Text("Há no máximo"); Slider(value: $c.withinMin, in: 1...60, step: 1); Text("\(Int(c.withinMin)) min").foregroundStyle(DS.muted) }
                             }
                         }
                     }
+                    .onDelete { conditions.remove(atOffsets: $0) }
                     Button { conditions.append(Cond()) } label: { Label("Adicionar condição", systemImage: "plus") }
-                    if !conditions.isEmpty {
-                        Button(role: .destructive) { conditions.removeLast() } label: { Text("Remover última") }
+                    Button { pickerAutoSelectTrigger = false; showPlacePicker = true } label: {
+                        Label("Novo local pelo mapa", systemImage: "mappin.and.ellipse")
                     }
-                } header: { Text("Condições (E) — opcional") }
-                  footer: { Text("Todas precisam ser verdadeiras no momento do gatilho.") }
+                } header: { Text("Condições (opcional)") }
+                  footer: { Text("Tudo precisa ser verdadeiro no gatilho (ou qualquer um, se OU).") }
 
                 Section("Avançado") {
                     HStack { Text("Intervalo mínimo"); Slider(value: $debounce, in: 0...600, step: 30); Text("\(Int(debounce))s").foregroundStyle(DS.muted) }
@@ -304,6 +333,11 @@ struct RuleEditorSheet: View {
                 }
             }
             .onAppear { loadExisting() }
+            .sheet(isPresented: $showPlacePicker) {
+                PlaceMapPicker(cfg: cfg) { newId in
+                    if pickerAutoSelectTrigger { placeId = newId }
+                }
+            }
         }
     }
 
@@ -348,13 +382,17 @@ struct RuleEditorSheet: View {
         default: rule["action"] = ["type": "request", "key": advKey, "value": advValue]
         }
 
-        // Conditions: as editáveis (compare) + as preservadas (ex: visited do iPad).
-        var items: [[String: Any]] = conditions.compactMap { c in
-            let key = c.field == "__custom__" ? c.customKey.trimmingCharacters(in: .whitespaces) : c.field
-            guard !key.isEmpty, !c.value.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
-            return ["field": key, "cmp": c.cmp, "value": c.value]
+        // Conditions: estado do carro (compare) e/ou passagem por locais (visited).
+        let items: [[String: Any]] = conditions.compactMap { c in
+            if c.type == "visited" {
+                guard let p = allPlaces.first(where: { $0.id == c.placeId }) else { return nil }
+                return ["type": "visited", "lat": p.lat, "lng": p.lng, "radius_m": 30, "within_s": Int(c.withinMin * 60)]
+            } else {
+                let key = c.field == "__custom__" ? c.customKey.trimmingCharacters(in: .whitespaces) : c.field
+                guard !key.isEmpty, !c.value.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
+                return ["field": key, "cmp": c.cmp, "value": c.value]
+            }
         }
-        items.append(contentsOf: preservedConditions)
         if !items.isEmpty { rule["conditions"] = ["op": condOp, "items": items] }
 
         onSave(rule)
@@ -401,14 +439,101 @@ struct RuleEditorSheet: View {
         }
         if let cg = e["conditions"] as? [String: Any], let items = cg["items"] as? [[String: Any]] {
             condOp = (cg["op"] as? String) ?? "AND"
-            // Compare → editáveis; o resto (ex: visited do iPad) é preservado intacto.
-            conditions = items.filter { $0["type"] == nil && $0["field"] != nil }.map { it in
-                let key = (it["field"] as? String) ?? "car.basic.vehicle_speed"
-                let known = condFields.contains(where: { $0.1 == key })
-                return Cond(field: known ? key : "__custom__", customKey: known ? "" : key,
-                            cmp: (it["cmp"] as? String) ?? "==", value: (it["value"] as? String) ?? "")
+            conditions = items.map { it in
+                var c = Cond()
+                if (it["type"] as? String) == "visited" {
+                    c.type = "visited"
+                    c.withinMin = Double(((it["within_s"] as? Int) ?? 300) / 60)
+                    if let lat = it["lat"] as? Double, let lng = it["lng"] as? Double,
+                       let p = allPlaces.min(by: { abs($0.lat - lat) + abs($0.lng - lng) < abs($1.lat - lat) + abs($1.lng - lng) }) { c.placeId = p.id }
+                } else {
+                    c.type = "compare"
+                    let key = (it["field"] as? String) ?? "car.basic.vehicle_speed"
+                    let known = condFields.contains(where: { $0.1 == key })
+                    c.field = known ? key : "__custom__"; c.customKey = known ? "" : key
+                    c.cmp = (it["cmp"] as? String) ?? "=="; c.value = (it["value"] as? String) ?? ""
+                }
+                return c
             }
-            preservedConditions = items.filter { $0["type"] != nil || $0["field"] == nil }
+        }
+    }
+}
+
+// MARK: - Seletor de local pelo mapa (iPhone) — busca endereço, arrasta o pino,
+// ou centraliza no carro. Salva como local de AUTOMAÇÃO (separado dos conhecidos).
+struct PlaceMapPicker: View {
+    @ObservedObject var cfg: ConfigStore
+    let onSaved: (String) -> Void
+    @ObservedObject private var car = CarStore.shared
+    @Environment(\.dismiss) private var dismiss
+
+    private static let fallback = CLLocationCoordinate2D(latitude: -16.6869, longitude: -49.2648)
+    @State private var camera: MapCameraPosition = .region(MKCoordinateRegion(
+        center: PlaceMapPicker.fallback, span: MKCoordinateSpan(latitudeDelta: 0.02, longitudeDelta: 0.02)))
+    @State private var center = PlaceMapPicker.fallback
+    @State private var query = ""
+    @State private var name = ""
+    @State private var radius = 30.0
+    @State private var saving = false
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                Map(position: $camera)
+                    .onMapCameraChange(frequency: .continuous) { ctx in center = ctx.region.center }
+                    .ignoresSafeArea(edges: .bottom)
+                Image(systemName: "mappin.circle.fill")
+                    .font(.system(size: 36)).foregroundStyle(.red).shadow(radius: 3).offset(y: -18)
+                    .allowsHitTesting(false)
+            }
+            .safeAreaInset(edge: .top) {
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                    TextField("Buscar endereço", text: $query)
+                        .autocorrectionDisabled().submitLabel(.search)
+                        .onSubmit { Task { await search() } }
+                    Button { centerOnCar() } label: { Image(systemName: "car.fill") }
+                }
+                .padding(10).background(.regularMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: 12)).padding()
+            }
+            .safeAreaInset(edge: .bottom) {
+                VStack(spacing: 10) {
+                    TextField("Nome do local (ex: Portaria)", text: $name).textFieldStyle(.roundedBorder)
+                    HStack { Text("Raio"); Slider(value: $radius, in: 5...300, step: 5); Text("\(Int(radius)) m").foregroundStyle(.secondary) }
+                    Button {
+                        Task {
+                            saving = true
+                            if let id = await cfg.addAutomationPlace(name: name.trimmingCharacters(in: .whitespaces),
+                                lat: center.latitude, lng: center.longitude, radius: radius), !id.isEmpty {
+                                onSaved(id); dismiss()
+                            }
+                            saving = false
+                        }
+                    } label: { Text(saving ? "Salvando…" : "Salvar local").bold().frame(maxWidth: .infinity) }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || saving)
+                }
+                .padding().background(.regularMaterial)
+            }
+            .navigationTitle("Novo local").navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancelar") { dismiss() } } }
+            .onAppear { centerOnCar() }
+        }
+    }
+
+    private func recenter(_ c: CLLocationCoordinate2D, span: Double) {
+        center = c
+        camera = .region(MKCoordinateRegion(center: c, span: MKCoordinateSpan(latitudeDelta: span, longitudeDelta: span)))
+    }
+    private func centerOnCar() {
+        if car.lat != 0, car.lng != 0 { recenter(CLLocationCoordinate2D(latitude: car.lat, longitude: car.lng), span: 0.01) }
+    }
+    private func search() async {
+        let req = MKLocalSearch.Request(); req.naturalLanguageQuery = query
+        if let resp = try? await MKLocalSearch(request: req).start(), let item = resp.mapItems.first {
+            recenter(item.placemark.coordinate, span: 0.005)
+            if name.isEmpty { name = item.name ?? "" }
         }
     }
 }
