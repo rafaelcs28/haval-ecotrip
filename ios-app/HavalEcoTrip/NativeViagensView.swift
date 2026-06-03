@@ -140,6 +140,7 @@ struct NativeViagensView: View {
     @State private var showCal = false
     @State private var expandedId: Double?
     @State private var routeTrip: Trip?
+    @State private var search = ""
 
     private var fromDate: Binding<Date> { Binding(get: { fromTS > 0 ? Date(timeIntervalSince1970: fromTS) : Date() }, set: { fromTS = $0.timeIntervalSince1970 }) }
     private var toDate: Binding<Date> { Binding(get: { toTS > 0 ? Date(timeIntervalSince1970: toTS) : Date() }, set: { toTS = $0.timeIntervalSince1970 }) }
@@ -153,16 +154,21 @@ struct NativeViagensView: View {
 
     private var filtered: [Trip] {
         let now = Date(); let cal = Calendar.current
+        let base: [Trip]
         switch period {
-        case 0: return loader.trips.filter { cal.isDate($0.date, inSameDayAs: now) }
-        case 1: let lim = now.addingTimeInterval(-7*86400);  return loader.trips.filter { $0.date >= lim }
-        case 2: let lim = now.addingTimeInterval(-30*86400); return loader.trips.filter { $0.date >= lim }
+        case 0: base = loader.trips.filter { cal.isDate($0.date, inSameDayAs: now) }
+        case 1: let lim = now.addingTimeInterval(-7*86400);  base = loader.trips.filter { $0.date >= lim }
+        case 2: let lim = now.addingTimeInterval(-30*86400); base = loader.trips.filter { $0.date >= lim }
         case 4:
             let lo = cal.startOfDay(for: fromDate.wrappedValue)
             let hi = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: toDate.wrappedValue)) ?? toDate.wrappedValue
-            return loader.trips.filter { $0.date >= lo && $0.date < hi }
-        default: return loader.trips
+            base = loader.trips.filter { $0.date >= lo && $0.date < hi }
+        default: base = loader.trips
         }
+        let q = search.trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else { return base }
+        // Busca por nome ignora o período — procura em todas as viagens.
+        return loader.trips.filter { loader.displayName($0).localizedCaseInsensitiveContains(q) }
     }
 
     var body: some View {
@@ -178,7 +184,7 @@ struct NativeViagensView: View {
                         }.font(.system(size: 14)).foregroundStyle(DS.text).tint(DS.green).environment(\.locale, Locale(identifier: "pt_BR"))
                     }
                 }
-                if tab == 0 { historico } else { estatisticas }
+                if tab == 0 { searchBar; historico } else { estatisticas }
             }
             .padding(16)
         }
@@ -204,6 +210,20 @@ struct NativeViagensView: View {
                 }
             }
         }
+    }
+
+    private var searchBar: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass").font(.system(size: 14)).foregroundStyle(DS.muted)
+            TextField("Buscar por local", text: $search)
+                .font(.system(size: 15)).foregroundStyle(DS.text)
+                .autocorrectionDisabled().textInputAutocapitalization(.never)
+            if !search.isEmpty {
+                Button { search = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(DS.muted) }
+            }
+        }
+        .padding(.horizontal, 12).frame(height: 40)
+        .background(DS.panel2).clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
     private var historico: some View {
