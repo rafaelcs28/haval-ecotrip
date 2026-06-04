@@ -27,6 +27,7 @@ import kotlin.math.sqrt
 object AutomationManager {
     private const val TAG = "AutomationManager"
     private const val FILE = "automations.json"
+    private const val FILE_TRIG = "automation_trig_state.json"   // estado das bordas (gatilho "state") entre sessões
 
     private lateinit var appContext: Context
     private val tick = Executors.newSingleThreadScheduledExecutor()
@@ -51,6 +52,7 @@ object AutomationManager {
         initialized = true
         appContext = context.applicationContext
         loadFromDisk()
+        loadTrigState()
         // Estado do carro: reavalia regras a cada mudança (event-driven, custo ~0).
         CarDataManager.getInstance().addListener { key, value ->
             synchronized(lock) { state[key] = value }
@@ -79,8 +81,10 @@ object AutomationManager {
                 lastFiredMinute.keys.retainAll(ids)
                 condPrevPass.keys.retainAll(ids)
                 firedThisWindow.keys.retainAll(ids)
+                stateTrigSatisfied.keys.retainAll(ids)
             }
             saveToDisk(json)
+            saveTrigState()
             AppLogger.i(TAG, "Regras atualizadas: ${parsed.size}")
         } catch (e: Exception) {
             AppLogger.e(TAG, "setRules falhou: ${e.message}")
@@ -229,8 +233,27 @@ object AutomationManager {
     private fun checkStateEdge(r: Rule): Boolean {
         val cur = compareField(r.trigger.field, r.trigger.cmp, r.trigger.value)
         val prev = stateTrigSatisfied[r.id] ?: false
-        stateTrigSatisfied[r.id] = cur
+        // Persiste a borda entre sessões: ao desligar (true→false) grava false;
+        // então ligar de novo com o app já aberto conta como borda real e dispara,
+        // mas um reinício do app com o carro já ligado (prev=true salvo) NÃO dispara.
+        if (cur != prev) { stateTrigSatisfied[r.id] = cur; saveTrigState() }
         return cur && !prev
+    }
+
+    private fun loadTrigState() {
+        try {
+            val f = File(appContext.filesDir, FILE_TRIG)
+            if (!f.exists()) return
+            val o = JSONObject(f.readText())
+            o.keys().forEach { k -> stateTrigSatisfied[k] = o.getBoolean(k) }
+        } catch (e: Exception) { AppLogger.w(TAG, "loadTrigState: ${e.message}") }
+    }
+    private fun saveTrigState() {
+        try {
+            val o = JSONObject()
+            synchronized(lock) { stateTrigSatisfied.forEach { (k, v) -> o.put(k, v) } }
+            File(appContext.filesDir, FILE_TRIG).writeText(o.toString())
+        } catch (e: Exception) { AppLogger.w(TAG, "saveTrigState: ${e.message}") }
     }
 
     private fun conditionsPass(group: ConditionGroup?, now: Long): Boolean {
