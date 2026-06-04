@@ -253,6 +253,22 @@ object AutomationManager {
                     val within = last != null && now - last <= (if (c.withinS > 0) c.withinS else 60) * 1000L
                     if (c.negate) !within else within
                 }
+                "time" -> {
+                    // Janela de horário (+ dias opcionais): passa se AGORA está dentro da
+                    // faixa from..to e o dia da semana bate. Faixa que cruza meia-noite
+                    // (ex: 22:00→06:00) é tratada. negate=true inverte (FORA da janela).
+                    val cal = java.util.Calendar.getInstance()
+                    val mod = cal.get(java.util.Calendar.HOUR_OF_DAY) * 60 + cal.get(java.util.Calendar.MINUTE)
+                    val dow = cal.get(java.util.Calendar.DAY_OF_WEEK) - 1   // 0=Dom..6=Sáb
+                    val dayOk = c.days.isEmpty() || c.days.contains(dow)
+                    val timeOk = when {
+                        c.fromHHMM < 0 || c.toHHMM < 0 -> true
+                        c.fromHHMM <= c.toHHMM         -> mod in c.fromHHMM..c.toHHMM
+                        else                           -> mod >= c.fromHHMM || mod <= c.toHHMM
+                    }
+                    val pass = dayOk && timeOk
+                    if (c.negate) !pass else pass
+                }
                 else -> compareField(c.field, c.cmp, c.value)
             }
         }
@@ -329,6 +345,8 @@ object AutomationManager {
                                         VPoint(po.optDouble("lat", 0.0), po.optDouble("lng", 0.0), po.optDouble("radius_m", 30.0))
                                     }
                                 } ?: emptyList(),
+                                fromHHMM = ci.optInt("from_hhmm", -1), toHHMM = ci.optInt("to_hhmm", -1),
+                                days = ci.optJSONArray("days")?.let { da -> (0 until da.length()).map { da.getInt(it) } } ?: emptyList(),
                             )
                         }
                     } ?: emptyList(),
@@ -361,11 +379,13 @@ object AutomationManager {
     data class ConditionGroup(val op: String, val items: List<Condition>)
     data class VPoint(val lat: Double, val lng: Double, val radiusM: Double)
     data class Condition(
-        val type: String = "compare",                 // "compare" (estado agora) | "visited" (passou por ponto) | "recent" (estado nos últimos N s)
+        val type: String = "compare",                 // "compare" | "visited" | "recent" | "time" (janela de horário/dias)
         val field: String = "", val cmp: String = "==", val value: String = "",
         val lat: Double = 0.0, val lng: Double = 0.0, val radiusM: Double = 50.0, val withinS: Int = 600,
         val negate: Boolean = false,                   // "recent": true = passa quando NÃO ocorreu na janela
         val points: List<VPoint> = emptyList(),        // "visited": se preenchido, passa se visitou QUALQUER um (OU)
+        val fromHHMM: Int = -1, val toHHMM: Int = -1,  // "time": faixa de horário (minuto do dia 0..1439; -1 = sem limite)
+        val days: List<Int> = emptyList(),             // "time": dias da semana (0=Dom..6=Sáb; vazio = todo dia)
     )
     data class Action(
         val type: String, val window: Int, val all: Boolean, val status: Int,
