@@ -133,11 +133,12 @@ object AutomationManager {
                             // Tick: lê o valor fresco do barramento e checa a borda — assim o
                             // disparo (ex: fechar vidro ao atingir X km/h) não fica preso à
                             // cadência de publish do MQTT.
-                            CarDataManager.getInstance().fetchCurrent(r.trigger.field)?.let { v ->
-                                synchronized(lock) { state[r.trigger.field] = v }
+                            val bk = r.trigger.field.substringBefore('[')
+                            CarDataManager.getInstance().fetchCurrent(bk)?.let { v ->
+                                synchronized(lock) { state[bk] = v }
                             }
                             checkStateEdge(r)
-                        } else if (stateKey == r.trigger.field) checkStateEdge(r) else false
+                        } else if (stateKey == r.trigger.field.substringBefore('[')) checkStateEdge(r) else false
                     }
                     else       -> false
                 }
@@ -302,9 +303,18 @@ object AutomationManager {
         // Lê do cache (chaves já assinadas) e, se não tiver, busca direto no carro.
         // Assim QUALQUER chave do barramento serve de condição sem precisar atualizar
         // o APK — basta a regra referenciar a chave.
-        val cur = synchronized(lock) { state[field] }
-            ?: CarDataManager.getInstance().fetchCurrent(field)?.also { synchronized(lock) { state[field] = it } }
+        // Suporte a ÍNDICE de CSV: "car.basic.seated_state[1]" lê a 2ª posição do CSV
+        // "(0,1,0,0,0)" (cada slot 0/1). Serve p/ seated_state, door_status, window_status…
+        val br = field.indexOf('[')
+        val baseField = if (br > 0) field.substring(0, br) else field
+        val csvIdx = if (br > 0) field.substring(br + 1).trimEnd(']').trim().toIntOrNull() else null
+        var cur = synchronized(lock) { state[baseField] }
+            ?: CarDataManager.getInstance().fetchCurrent(baseField)?.also { synchronized(lock) { state[baseField] = it } }
             ?: return false
+        if (csvIdx != null) {
+            val parts = cur.replace(Regex("[^0-9,\\-]"), "").split(",")
+            cur = parts.getOrNull(csvIdx)?.trim() ?: return false
+        }
         val a = cur.toDoubleOrNull()
         val b = value.toDoubleOrNull()
         return if (a != null && b != null) when (cmp) {
