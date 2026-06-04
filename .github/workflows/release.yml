@@ -42,7 +42,15 @@ jobs:
           SIGNING_STORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           SIGNING_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           SIGNING_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        run: ./gradlew assembleRelease --no-daemon
+        run: |
+          # Deriva a versão da tag (vX.Y): versionName=X.Y, versionCode=X*1000+Y.
+          # Garante que cada release reporte sua própria versão (senão o OTA do
+          # carro não reconhece a atualização — ficava sempre "5.92").
+          VNAME="${GITHUB_REF_NAME#v}"
+          MAJOR="${VNAME%%.*}"; MINOR="${VNAME#*.}"; MINOR="${MINOR%%.*}"
+          VCODE=$(( MAJOR * 1000 + MINOR ))
+          echo "Building versionName=$VNAME versionCode=$VCODE"
+          ./gradlew assembleRelease --no-daemon -PvName="$VNAME" -PvCode="$VCODE"
 
       - name: Rename APK
         run: |

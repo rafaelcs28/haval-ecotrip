@@ -24,8 +24,9 @@ android {
         minSdk = 28
         //noinspection ExpiredTargetSdkVersion
         targetSdk = 28
-        versionCode = 223
-        versionName = "5.92"
+        // Versão vem da tag (workflow passa -PvName/-PvCode); fallback p/ build local.
+        versionCode = (project.findProperty("vCode") as String?)?.toIntOrNull() ?: 223
+        versionName = (project.findProperty("vName") as String?) ?: "5.92"
 
         buildConfigField("String", "GITHUB_REPO", "\"rafaelcs28/haval-ecotrip\"")
     }
