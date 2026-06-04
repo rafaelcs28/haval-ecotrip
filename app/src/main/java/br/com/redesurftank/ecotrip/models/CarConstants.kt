@@ -103,6 +103,8 @@ enum class CarConstants(val value: String) {
     CAR_BASIC_WINDOW_STATUS("car.basic.window_status"),
     // sunroof_status: 0=fechado, >0=aberto (vários estágios — normalizamos pra binário)
     CAR_BASIC_SUNROOF_STATUS("car.basic.sunroof_status"),
+    // seat_belt_warning: alerta de ocupante sentado SEM cinto afivelado (0=ok, >0=alerta)
+    CAR_BASIC_SEAT_BELT_WARNING("car.basic.seat_belt_warning"),
 
     // Terrain / driving style — writable. 0=Normal, 1=Sport, 2=Eco, 3=Neve, 4=Areia, 5=Lama, 11=AWD
     CAR_DRIVE_SETTING_DRIVE_MODE("car.drive_setting.drive_mode"),
