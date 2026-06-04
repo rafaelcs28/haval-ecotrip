@@ -72,6 +72,7 @@ private val IMMEDIATE_PUBLISH_KEYS: Set<String> = setOf(
     CarConstants.CAR_BASIC_WINDOW_STATUS.value,
     CarConstants.CAR_BASIC_SUNROOF_STATUS.value,
     CarConstants.CAR_BASIC_SEAT_BELT_WARNING.value,
+    CarConstants.CAR_BASIC_SEATED_STATE.value,
 )
 
 class MqttManager private constructor() {
@@ -209,6 +210,8 @@ class MqttManager private constructor() {
     var latestSunroof: Int = 0
     // Aviso de cinto (de car.basic.seat_belt_warning — 0=ok, >0=ocupante sem cinto)
     var latestSeatBeltWarning: Int = 0
+    // Ocupação dos bancos (de car.basic.seated_state — formato cru a confirmar)
+    var latestSeatedState: String = ""
     // Trava (de car.basic.door_lock_status — semântica do valor cru, a confirmar com o carro real)
     var latestLockStatus: Int = 0
 
@@ -697,6 +700,10 @@ class MqttManager private constructor() {
                 CarConstants.CAR_BASIC_SEAT_BELT_WARNING.value -> {
                     // 0=ok, >0=ocupante sentado sem cinto afivelado
                     latestSeatBeltWarning = value.trim().toIntOrNull() ?: 0
+                }
+                CarConstants.CAR_BASIC_SEATED_STATE.value -> {
+                    // ocupação dos bancos — valor cru (formato a confirmar no teste)
+                    latestSeatedState = value.trim()
                 }
                 // ── Chaves de configuração espelhadas no HA (eram o "listener parcial") ──
                 // Não existem branches na CS pra elas; vinham do listener global antigo.
@@ -1526,6 +1533,7 @@ class MqttManager private constructor() {
             pubD("hvac_blower_mode",   latestHvacBlowerMode.toString())
             pubD("hvac_power_mode",    latestHvacPowerMode.toString())
             pubD("seat_belt_warning",  latestSeatBeltWarning.toString())
+            pubD("seated_state",       latestSeatedState)
 
             // ── MIGRATED_TO_HA ────────────────────────────────────────────────
             // O bridge IGNORA publishes do carro para: door_*, window_*, sunroof,

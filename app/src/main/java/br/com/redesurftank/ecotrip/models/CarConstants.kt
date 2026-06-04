@@ -105,6 +105,8 @@ enum class CarConstants(val value: String) {
     CAR_BASIC_SUNROOF_STATUS("car.basic.sunroof_status"),
     // seat_belt_warning: alerta de ocupante sentado SEM cinto afivelado (0=ok, >0=alerta)
     CAR_BASIC_SEAT_BELT_WARNING("car.basic.seat_belt_warning"),
+    // seated_state: ocupação dos bancos (formato cru a confirmar — bitmask/CSV por assento)
+    CAR_BASIC_SEATED_STATE("car.basic.seated_state"),
 
     // Terrain / driving style — writable. 0=Normal, 1=Sport, 2=Eco, 3=Neve, 4=Areia, 5=Lama, 11=AWD
     CAR_DRIVE_SETTING_DRIVE_MODE("car.drive_setting.drive_mode"),
