@@ -114,7 +114,8 @@ fun ConsumptionScreen() {
             if (w != null) carWindows = w
             if (s != null) carSunroof = s.toFloatOrNull()?.toInt() ?: 0
             if (l != null) carLocked = (l.toFloatOrNull()?.toInt() == 1) // 1=trancado (confirmado no barramento)
-            if (fl != null) carFrontLight = (fl.toFloatOrNull()?.toInt() == 1) // 1=farol ligado
+            // Farol: vale o fetchCurrent OU o valor da inscrição (evento) — o que reportar ligado
+            carFrontLight = (fl?.toFloatOrNull()?.toInt() == 1) || (mqttManager.latestFrontLight == 1)
             delay(3_000L)
         }
     }

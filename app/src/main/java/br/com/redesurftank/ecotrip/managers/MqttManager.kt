@@ -73,6 +73,7 @@ private val IMMEDIATE_PUBLISH_KEYS: Set<String> = setOf(
     CarConstants.CAR_BASIC_SUNROOF_STATUS.value,
     CarConstants.CAR_BASIC_SEAT_BELT_WARNING.value,
     CarConstants.CAR_BASIC_SEATED_STATE.value,
+    CarConstants.CAR_BASIC_FRONT_LIGHT_STATUS.value,
 )
 
 class MqttManager private constructor() {
@@ -101,6 +102,10 @@ class MqttManager private constructor() {
     // a publicação de telemetria travava durante o sleep. Pool dedicado: comandos
     // back-to-back rodam em paralelo e não bloqueiam a telemetria.
     private val cmdExecutor    = Executors.newFixedThreadPool(3)
+    // Comandos HVAC escrevem no MESMO barramento; concorrência faz o carro descartar
+    // escritas (ex.: ao ligar o pré-clima só o passageiro aplicava). Executor de thread
+    // ÚNICA serializa hvac/* — um comando por vez, todos aplicam.
+    private val hvacExecutor   = Executors.newSingleThreadExecutor()
     private val isReconnecting = AtomicBoolean(false)
     @Volatile private var client: MqttClient? = null
     private var lastPublishMs  = 0L
@@ -214,6 +219,8 @@ class MqttManager private constructor() {
     var latestSeatedState: String = ""
     // Trava (de car.basic.door_lock_status — semântica do valor cru, a confirmar com o carro real)
     var latestLockStatus: Int = 0
+    // Farol (de car.basic.front_light_status — 0=desligado, 1=ligado)
+    var latestFrontLight: Int = 0
 
     // ── Voting filter pra car.basic.window_status ─────────────────────────────
     // O car bus emite valores ruidosos em rajadas (até 6 leituras consecutivas
@@ -661,6 +668,9 @@ class MqttManager private constructor() {
                 CarConstants.CAR_BASIC_DOOR_LOCK_STATUS.value -> {
                     val raw = value.trim().toIntOrNull() ?: 0
                     applyLockStatus(raw)  // voting filter K=8
+                }
+                CarConstants.CAR_BASIC_FRONT_LIGHT_STATUS.value -> {
+                    latestFrontLight = value.trim().toFloatOrNull()?.toInt() ?: 0
                 }
                 CarConstants.CAR_BASIC_DOOR_STATUS.value -> {
                     // Formato esperado: CSV "FL,FR,RL,RR,Trunk" — 0=fechada, 1=aberta.
@@ -1552,6 +1562,7 @@ class MqttManager private constructor() {
             }
             pubD("debug/sunroof_raw",      snSunroof.toString())
             pubD("debug/lock_status_raw",  snLockStat.toString())
+            pubD("debug/front_light_raw",  latestFrontLight.toString())
             // odometer_km e batt_12v_pct movidos pra GWM Brasil (MIGRATED_TO_HA) — bridge ignora.
             // Potência de recarga: apenas quando charging_state == 1 (Carregando)
             // Corrente AC (cur_charge_current) × tensão do pack (car.ev_info.power_battery_voltage) / 1000
@@ -1927,7 +1938,9 @@ class MqttManager private constructor() {
         val cmd = topic.removePrefix(cmdPrefix).trimEnd('/')
         AppLogger.i(TAG, "Comando recebido: $cmd = '$payload'")
 
-        cmdExecutor.submit {
+        // hvac/* serializado (thread única) pra não floodar o barramento; resto no pool.
+        val exec = if (cmd.startsWith("hvac/")) hvacExecutor else cmdExecutor
+        exec.submit {
             val car = CarDataManager.getInstance()
             when (cmd) {
                 "charge_limit" -> {
