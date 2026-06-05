@@ -70,7 +70,7 @@ data class HomeData(
             kwh100 = 14.2f, effPct = 0.74f, netKwh = 3.3f, regenKwh = 0.8f, regenPct = 20,
             fuelL = 0.0f, costBrl = 1.92f, costPerKm = 0.082f,
             socPct = 62, startSocPct = 78, rangeEvKm = 95, outsideTempC = 27, modeEv = true,
-            doorFL = true, doorFR = false, doorRL = false, doorRR = false,
+            doorFL = false, doorFR = false, doorRL = false, doorRR = false,
             trunk = false, sunroof = true, locked = false,
             winFL = false, winFR = false, winRL = false, winRR = false,
             frontLight = true,
@@ -272,6 +272,9 @@ fun InteractiveCar(d: HomeData, modifier: Modifier = Modifier) {
             Image(painterResource(res), null, Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
         }
         layer(R.drawable.h6)
+        // Retrovisores: só com a porta dianteira FECHADA (a porta aberta já traz o espelho no PNG).
+        if (!d.doorFL) layer(R.drawable.retrovisor_esquerdo)
+        if (!d.doorFR) layer(R.drawable.retrovisor_direito)
         if (d.frontLight) layer(R.drawable.farol)
         if (d.turnLeft || d.turnRight) {   // setas PISCAM (~1 Hz); os 2 lados = pisca-alerta
             val tr = rememberInfiniteTransition(label = "turn")
