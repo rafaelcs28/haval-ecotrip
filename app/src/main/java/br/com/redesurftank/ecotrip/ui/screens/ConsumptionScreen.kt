@@ -101,6 +101,8 @@ fun ConsumptionScreen() {
     var carSunroof by remember { mutableStateOf(0) }
     var carLocked  by remember { mutableStateOf(true) }
     var carFrontLight by remember { mutableStateOf(false) }
+    var carTurnLeft  by remember { mutableStateOf(false) }
+    var carTurnRight by remember { mutableStateOf(false) }
 
     // Lê o estado do corpo do carro a cada 3s (portas/vidros/teto/trava)
     LaunchedEffect(Unit) {
@@ -145,6 +147,9 @@ fun ConsumptionScreen() {
             nowMs = System.currentTimeMillis()
             ticks++
             inProgressTrip = tripManager.getInProgressAutoTrip()
+            // Setas (atualiza a cada 1s — barato, em memória): pisca enquanto ativa
+            carTurnLeft  = mqttManager.isTurnLeftActive()
+            carTurnRight = mqttManager.isTurnRightActive()
             if (ticks % 5 == 0) tripManager.tickTime()
             // SOC e combustível chegam raramente via listener passivo no GWM —
             // busca ativa a cada 60 s garante que o auto-trip capture o valor correto ao finalizar
@@ -420,6 +425,7 @@ fun ConsumptionScreen() {
         socNowPct = rolling.currentSocPct, tempC = displayTrip?.outsideTempC?.toInt() ?: 0,
         rangeEvKm = 0, doorCsv = carDoors, windowCsv = carWindows,
         sunroof = carSunroof, locked = carLocked, frontLight = carFrontLight,
+        turnLeft = carTurnLeft, turnRight = carTurnRight,
     )
 
     // Ações de navegação no header do layout: chip de update + 4 botões

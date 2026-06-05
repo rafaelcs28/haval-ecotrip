@@ -105,6 +105,11 @@ enum class CarConstants(val value: String) {
     CAR_BASIC_SUNROOF_STATUS("car.basic.sunroof_status"),
     // front_fog_light_status: 0=desligado, 1=ligado (farol) — chave real confirmada no carro
     CAR_BASIC_FRONT_LIGHT_STATUS("car.basic.front_fog_light_status"),
+    // Setas — lâmpada (pisca; acende nos 2 lados no pisca-alerta) + alavanca (seta simples)
+    CAR_BASIC_LEFT_TURN_LIGHT_STATUS("car.basic.left_turn_light_status"),
+    CAR_BASIC_RIGHT_TURN_LIGHT_STATUS("car.basic.right_turn_light_status"),
+    CAR_BASIC_LEFT_TURN_SWITCH_STATUS("car.basic.left_turn_switch_status"),
+    CAR_BASIC_RIGHT_TURN_SWITCH_STATUS("car.basic.right_turn_switch_status"),
     // seat_belt_warning: alerta de ocupante sentado SEM cinto afivelado (0=ok, >0=alerta)
     CAR_BASIC_SEAT_BELT_WARNING("car.basic.seat_belt_warning"),
     // seated_state: ocupação dos bancos (formato cru a confirmar — bitmask/CSV por assento)

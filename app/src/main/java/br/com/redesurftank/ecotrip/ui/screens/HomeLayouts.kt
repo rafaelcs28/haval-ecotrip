@@ -18,6 +18,13 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.runtime.getValue
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
@@ -53,6 +60,9 @@ data class HomeData(
     val trunk: Boolean, val sunroof: Boolean, val locked: Boolean,
     val winFL: Boolean, val winFR: Boolean, val winRL: Boolean, val winRR: Boolean,
     val frontLight: Boolean = false,
+    // Setas: cada lado pisca independente; os dois juntos = pisca-alerta (4 setas).
+    val turnLeft: Boolean = false,
+    val turnRight: Boolean = false,
 ) {
     companion object {
         val sample = HomeData(
@@ -64,6 +74,7 @@ data class HomeData(
             trunk = false, sunroof = true, locked = false,
             winFL = false, winFR = false, winRL = false, winRR = false,
             frontLight = true,
+            turnLeft = true, turnRight = true,
         )
     }
 }
@@ -92,6 +103,8 @@ fun buildHomeData(
     sunroof: Int,
     locked: Boolean,
     frontLight: Boolean,
+    turnLeft: Boolean = false,
+    turnRight: Boolean = false,
 ): HomeData {
     val timeSec = when {
         trip == null -> 0L
@@ -129,6 +142,7 @@ fun buildHomeData(
         winFL = winOpen(windowCsv, 0), winFR = winOpen(windowCsv, 1),
         winRL = winOpen(windowCsv, 2), winRR = winOpen(windowCsv, 3),
         frontLight = frontLight,
+        turnLeft = turnLeft, turnRight = turnRight,
     )
 }
 
@@ -259,6 +273,17 @@ fun InteractiveCar(d: HomeData, modifier: Modifier = Modifier) {
         }
         layer(R.drawable.h6)
         if (d.frontLight) layer(R.drawable.farol)
+        if (d.turnLeft || d.turnRight) {   // setas PISCAM (~1 Hz); os 2 lados = pisca-alerta
+            val tr = rememberInfiniteTransition(label = "turn")
+            val phase by tr.animateFloat(
+                initialValue = 0f, targetValue = 1f,
+                animationSpec = infiniteRepeatable(tween(900, easing = LinearEasing), RepeatMode.Restart),
+                label = "blink",
+            )
+            val a = if (phase < 0.5f) 1f else 0f
+            if (d.turnLeft)  Image(painterResource(R.drawable.seta_esquerda_porta_fechada), null, Modifier.fillMaxSize(), contentScale = ContentScale.Fit, alpha = a)
+            if (d.turnRight) Image(painterResource(R.drawable.seta_direita_porta_fechada),  null, Modifier.fillMaxSize(), contentScale = ContentScale.Fit, alpha = a)
+        }
         if (d.doorFL) layer(R.drawable.porta_dianteira_esquerda_aberta)
         if (d.doorFR) layer(R.drawable.porta_dianteira_direita_aberta)
         if (d.doorRL) layer(R.drawable.porta_traseira_esquerda_aberta)

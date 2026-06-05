@@ -221,6 +221,18 @@ class MqttManager private constructor() {
     var latestLockStatus: Int = 0
     // Farol (de car.basic.front_light_status — 0=desligado, 1=ligado)
     var latestFrontLight: Int = 0
+    // Setas: alavanca (switch, fica firme) + última vez que a lâmpada (que pisca) foi vista
+    // acesa. "Ativa" = alavanca ligada OU lâmpada vista nos últimos ~1,6s (cobre seta + pisca-alerta).
+    @Volatile var latestLeftSwitch: Int = 0
+    @Volatile var latestRightSwitch: Int = 0
+    @Volatile var latestLeftTurnLampSeenMs: Long = 0L
+    @Volatile var latestRightTurnLampSeenMs: Long = 0L
+    @Volatile var latestLeftTurnLampRaw: String = "0"
+    @Volatile var latestRightTurnLampRaw: String = "0"
+    fun isTurnLeftActive(): Boolean =
+        latestLeftSwitch != 0 || (System.currentTimeMillis() - latestLeftTurnLampSeenMs < 1600L)
+    fun isTurnRightActive(): Boolean =
+        latestRightSwitch != 0 || (System.currentTimeMillis() - latestRightTurnLampSeenMs < 1600L)
 
     // ── Voting filter pra car.basic.window_status ─────────────────────────────
     // O car bus emite valores ruidosos em rajadas (até 6 leituras consecutivas
@@ -671,6 +683,20 @@ class MqttManager private constructor() {
                 }
                 CarConstants.CAR_BASIC_FRONT_LIGHT_STATUS.value -> {
                     latestFrontLight = value.trim().toFloatOrNull()?.toInt() ?: 0
+                }
+                CarConstants.CAR_BASIC_LEFT_TURN_LIGHT_STATUS.value -> {
+                    latestLeftTurnLampRaw = value.trim()
+                    if ((value.trim().toFloatOrNull() ?: 0f) != 0f) latestLeftTurnLampSeenMs = System.currentTimeMillis()
+                }
+                CarConstants.CAR_BASIC_RIGHT_TURN_LIGHT_STATUS.value -> {
+                    latestRightTurnLampRaw = value.trim()
+                    if ((value.trim().toFloatOrNull() ?: 0f) != 0f) latestRightTurnLampSeenMs = System.currentTimeMillis()
+                }
+                CarConstants.CAR_BASIC_LEFT_TURN_SWITCH_STATUS.value -> {
+                    latestLeftSwitch = value.trim().toFloatOrNull()?.toInt() ?: 0
+                }
+                CarConstants.CAR_BASIC_RIGHT_TURN_SWITCH_STATUS.value -> {
+                    latestRightSwitch = value.trim().toFloatOrNull()?.toInt() ?: 0
                 }
                 CarConstants.CAR_BASIC_DOOR_STATUS.value -> {
                     // Formato esperado: CSV "FL,FR,RL,RR,Trunk" — 0=fechada, 1=aberta.
@@ -1563,6 +1589,8 @@ class MqttManager private constructor() {
             pubD("debug/sunroof_raw",      snSunroof.toString())
             pubD("debug/lock_status_raw",  snLockStat.toString())
             pubD("debug/front_light_raw",  latestFrontLight.toString())
+            pubD("debug/turn_left",  "lamp=$latestLeftTurnLampRaw sw=$latestLeftSwitch", retained = false)
+            pubD("debug/turn_right", "lamp=$latestRightTurnLampRaw sw=$latestRightSwitch", retained = false)
             // odometer_km e batt_12v_pct movidos pra GWM Brasil (MIGRATED_TO_HA) — bridge ignora.
             // Potência de recarga: apenas quando charging_state == 1 (Carregando)
             // Corrente AC (cur_charge_current) × tensão do pack (car.ev_info.power_battery_voltage) / 1000
