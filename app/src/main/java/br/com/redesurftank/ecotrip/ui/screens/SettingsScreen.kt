@@ -159,22 +159,13 @@ fun SettingsScreen(
         onDispose { mqttManager.onStatusChange = null }
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(SurfaceDeep)
-            .systemBarsPadding()
-            .padding(horizontal = 14.dp, vertical = 4.dp)
-            .verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        // Header
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Voltar", tint = TextSecondary)
-            }
-            Text("Configurações", fontSize = 21.sp, fontWeight = FontWeight.Bold, color = Green)
-        }
+    ClaudeScreen(title = "Configurações", onBack = onBack, accent = NeonLime, spacing = 16.dp) {
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
 
         // ── Tela inicial (layout) ───────────────────────────────────────────────
         SectionCard(title = "Tela inicial") {
@@ -435,6 +426,7 @@ fun SettingsScreen(
         }
 
         Spacer(Modifier.height(8.dp))  // breathing room at bottom of scroll
+        }
     }
 
     // Diálogo de confirmação
@@ -479,12 +471,11 @@ private fun SectionCard(title: String, content: @Composable ColumnScope.() -> Un
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(SurfaceCard, RoundedCornerShape(12.dp))
-            .border(1.dp, BorderColor, RoundedCornerShape(12.dp))
-            .padding(14.dp),
+            .claudeCard(NeonLime)
+            .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Text(title, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = TextSecondary)
+        Text(title, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = NeonLime, letterSpacing = 1.sp)
         HorizontalDivider(color = Separator, thickness = 0.5.dp)
         content()
     }

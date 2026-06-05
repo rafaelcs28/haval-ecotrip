@@ -203,27 +203,11 @@ fun AutoTripsScreen(
     }
 
     // ── Layout ────────────────────────────────────────────────────────────────
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(SurfaceDeep)
-            .systemBarsPadding()
-            .padding(horizontal = 10.dp, vertical = 4.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-
-        // Cabeçalho
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Voltar", tint = TextSecondary)
-                }
-                Text("Viagens Auto", fontSize = 21.sp, fontWeight = FontWeight.Bold, color = AccentBlue)
-            }
+    ClaudeScreen(
+        title = "Viagens",
+        onBack = onBack,
+        accent = AccentBlue,
+        headerRight = {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 if (syncLabel.isNotEmpty()) {
                     Text(syncLabel, fontSize = 10.sp, color = when {
@@ -260,11 +244,12 @@ fun AutoTripsScreen(
                 )
                 if (entries.isNotEmpty()) {
                     TextButton(onClick = onClear) {
-                        Text("Limpar", fontSize = 13.sp, color = TextSecondary)
+                        Text("Limpar", fontSize = 14.sp, color = TextSecondary)
                     }
                 }
             }
-        }
+        },
+    ) {
 
         // ── Chips de período predefinido ──────────────────────────────────────
         Row(
@@ -367,9 +352,8 @@ fun AutoTripsScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(AccentBlue.copy(alpha = 0.07f), RoundedCornerShape(12.dp))
-                    .border(1.dp, AccentBlue.copy(alpha = 0.25f), RoundedCornerShape(12.dp))
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                    .claudeCard(AccentBlue)
+                    .padding(horizontal = 18.dp, vertical = 14.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 Row(
@@ -405,9 +389,8 @@ fun AutoTripsScreen(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(SurfaceCard, RoundedCornerShape(12.dp))
-                    .border(1.dp, BorderColor, RoundedCornerShape(12.dp))
-                    .padding(16.dp),
+                    .claudeCard(AccentBlue)
+                    .padding(18.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 val label = if (hasCustomRange) {
@@ -483,9 +466,8 @@ private fun InProgressAutoTripCard(inProgress: AutoTripEntry) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Green.copy(alpha = 0.07f), RoundedCornerShape(12.dp))
-            .border(1.dp, Green.copy(alpha = 0.35f), RoundedCornerShape(12.dp))
-            .padding(horizontal = 14.dp, vertical = 10.dp),
+            .claudeCard(NeonLime)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         // Cabeçalho: indicador verde + rótulo + tempo decorrido
@@ -677,8 +659,7 @@ private fun AutoTripEntryRow(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(SurfaceCard, RoundedCornerShape(12.dp))
-            .border(1.dp, BorderColor, RoundedCornerShape(12.dp))
+            .claudeCard(AccentBlue)
             .clickable { expanded = !expanded },
     ) {
         // ── Linha compacta ─────────────────────────────────────────────────────

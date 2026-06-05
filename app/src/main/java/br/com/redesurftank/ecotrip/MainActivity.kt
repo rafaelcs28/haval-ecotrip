@@ -13,6 +13,8 @@ import br.com.redesurftank.ecotrip.managers.MqttManager
 import br.com.redesurftank.ecotrip.managers.TripManager
 import br.com.redesurftank.ecotrip.managers.UpdateManager
 import br.com.redesurftank.ecotrip.services.CarTelemetryService
+import br.com.redesurftank.ecotrip.ui.screens.AutoTripsScreen
+import br.com.redesurftank.ecotrip.ui.screens.ChargeHistoryScreen
 import br.com.redesurftank.ecotrip.ui.screens.ConsumptionScreen
 import br.com.redesurftank.ecotrip.ui.screens.HomeClaudeLayout
 import br.com.redesurftank.ecotrip.ui.screens.HomeData
@@ -39,11 +41,31 @@ class MainActivity : ComponentActivity() {
         val preview = intent.getStringExtra("preview")?.toIntOrNull()
         if (BuildConfig.DEBUG && preview != null) {
             val d = HomeData.sample
+            val now = System.currentTimeMillis()
+            val sampleCharges = listOf(
+                br.com.redesurftank.ecotrip.managers.ChargeHistoryEntry(now - 3_600_000L, 5400, 12.4f, 38f, 78f),
+                br.com.redesurftank.ecotrip.managers.ChargeHistoryEntry(now - 2 * 86_400_000L, 7200, 18.9f, 20f, 90f),
+                br.com.redesurftank.ecotrip.managers.ChargeHistoryEntry(now - 5 * 86_400_000L, 3600, 8.2f, 55f, 80f),
+            )
+            val sampleTrips = listOf(
+                br.com.redesurftank.ecotrip.managers.AutoTripEntry(
+                    startMs = now - 3_600_000L, endMs = now - 1_800_000L, startSocPct = 78f, endSocPct = 62f,
+                    startFuelPct = 50f, endFuelPct = 50f, distKm = 23.4f, timeSec = 1800, energyKwh = 4.1f,
+                    regenKwh = 0.8f, netKwh = 3.3f, fuelL = 0f, name = "Casa → Trabalho", maxSpeedKmh = 82f, outsideTempC = 27f,
+                ),
+                br.com.redesurftank.ecotrip.managers.AutoTripEntry(
+                    startMs = now - 2 * 86_400_000L, endMs = now - 2 * 86_400_000L + 2_400_000L, startSocPct = 90f, endSocPct = 70f,
+                    startFuelPct = 50f, endFuelPct = 48f, distKm = 41.2f, timeSec = 2400, energyKwh = 7.0f,
+                    regenKwh = 1.5f, netKwh = 5.5f, fuelL = 0.6f, maxSpeedKmh = 98f, outsideTempC = 24f,
+                ),
+            )
             setContent {
                 EcotripTheme {
                     when (preview) {
                         0 -> HomeTeslaLayout(d) { m -> InteractiveCar(d, m) }
                         1 -> HomeEuropeanLayout(d)
+                        3 -> ChargeHistoryScreen(entries = sampleCharges, onClearHistory = {}, onBack = {})
+                        4 -> AutoTripsScreen(entries = sampleTrips, onClear = {}, onBack = {})
                         else -> HomeClaudeLayout(d) { m -> InteractiveCar(d, m) }
                     }
                 }

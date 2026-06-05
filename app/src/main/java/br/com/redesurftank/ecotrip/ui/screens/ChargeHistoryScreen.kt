@@ -167,40 +167,23 @@ fun ChargeHistoryScreen(
     }
 
     // ── Layout principal ──────────────────────────────────────────────────────
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(SurfaceDeep)
-            .systemBarsPadding()
-            .padding(horizontal = 10.dp, vertical = 4.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ClaudeScreen(
+        title = "Recargas",
+        onBack = onBack,
+        accent = AuroraTeal,
+        headerRight = {
+            Text(
+                if (showSummary) "${filtered.size}/${entries.size} sessões"
+                else "${entries.size} sessões",
+                fontSize = 14.sp, color = TextSecondary,
+            )
+            if (entries.isNotEmpty()) {
+                TextButton(onClick = onClearHistory) {
+                    Text("Limpar", fontSize = 14.sp, color = TextSecondary)
+                }
+            }
+        },
     ) {
-
-        // Cabeçalho
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Voltar", tint = TextSecondary)
-                }
-                Text("Recargas", fontSize = 21.sp, fontWeight = FontWeight.Bold, color = AuroraTeal)
-            }
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(
-                    if (showSummary) "${filtered.size}/${entries.size} sessões"
-                    else "${entries.size} sessões",
-                    fontSize = 12.sp, color = TextSecondary,
-                )
-                if (entries.isNotEmpty()) {
-                    TextButton(onClick = onClearHistory) {
-                        Text("Limpar", fontSize = 13.sp, color = TextSecondary)
-                    }
-                }
-            }
-        }
 
         // ── Chips de período predefinido ──────────────────────────────────────
         Row(
@@ -307,9 +290,8 @@ fun ChargeHistoryScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(AuroraTeal.copy(alpha = 0.07f), RoundedCornerShape(12.dp))
-                    .border(1.dp, AuroraTeal.copy(alpha = 0.25f), RoundedCornerShape(12.dp))
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                    .claudeCard(AuroraTeal)
+                    .padding(horizontal = 18.dp, vertical = 14.dp),
                 horizontalArrangement = Arrangement.spacedBy(0.dp),
             ) {
                 PeriodStat(value = "${filtered.size}", label = "Sessões", modifier = Modifier.weight(1f))
@@ -338,9 +320,8 @@ fun ChargeHistoryScreen(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(SurfaceCard, RoundedCornerShape(12.dp))
-                    .border(1.dp, BorderColor, RoundedCornerShape(12.dp))
-                    .padding(16.dp),
+                    .claudeCard(AuroraTeal)
+                    .padding(18.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 val label = if (hasCustomRange) {
@@ -379,8 +360,8 @@ private fun PeriodStat(
     color:    androidx.compose.ui.graphics.Color = TextPrimary,
 ) {
     Column(modifier = modifier) {
-        Text(value, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = color)
-        Text(label, fontSize = 10.sp,  color = TextSecondary)
+        Text(value, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = color)
+        Text(label, fontSize = 12.sp,  color = TextSecondary)
     }
 }
 
@@ -393,9 +374,8 @@ private fun ChargeEntryRow(entry: ChargeHistoryEntry) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(SurfaceCard, RoundedCornerShape(12.dp))
-            .border(1.dp, BorderColor, RoundedCornerShape(12.dp))
-            .padding(horizontal = 14.dp, vertical = 10.dp),
+            .claudeCard(AuroraTeal)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Row(
@@ -406,11 +386,11 @@ private fun ChargeEntryRow(entry: ChargeHistoryEntry) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Box(
                     modifier = Modifier
-                        .background(AuroraTeal.copy(alpha = 0.12f), RoundedCornerShape(6.dp))
-                        .border(1.dp, AuroraTeal.copy(alpha = 0.3f), RoundedCornerShape(6.dp))
-                        .padding(horizontal = 6.dp, vertical = 2.dp),
-                ) { Text("⚡", fontSize = 11.sp) }
-                Text(dateFmt.format(Date(entry.timestampMs)), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
+                        .background(AuroraTeal.copy(alpha = 0.12f), RoundedCornerShape(8.dp))
+                        .border(1.dp, AuroraTeal.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
+                        .padding(horizontal = 7.dp, vertical = 3.dp),
+                ) { Text("⚡", fontSize = 13.sp) }
+                Text(dateFmt.format(Date(entry.timestampMs)), fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text("%.0f%%".format(entry.startSocPct), fontSize = 13.sp, color = TextSecondary)
@@ -439,8 +419,8 @@ private fun ChargeMetric(
     color:    androidx.compose.ui.graphics.Color = TextPrimary,
 ) {
     Column(modifier = modifier) {
-        Text(value, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = color)
-        Text(label, fontSize = 11.sp, color = TextSecondary)
+        Text(value, fontSize = 19.sp, fontWeight = FontWeight.Bold, color = color)
+        Text(label, fontSize = 12.sp, color = TextSecondary)
     }
 }
 
