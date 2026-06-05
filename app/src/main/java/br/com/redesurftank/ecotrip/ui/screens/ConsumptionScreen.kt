@@ -100,6 +100,7 @@ fun ConsumptionScreen() {
     var carWindows by remember { mutableStateOf("") }
     var carSunroof by remember { mutableStateOf(0) }
     var carLocked  by remember { mutableStateOf(true) }
+    var carFrontLight by remember { mutableStateOf(false) }
 
     // Lê o estado do corpo do carro a cada 3s (portas/vidros/teto/trava)
     LaunchedEffect(Unit) {
@@ -108,10 +109,12 @@ fun ConsumptionScreen() {
             val w = withContext(Dispatchers.IO) { carManager.fetchCurrent(CarConstants.CAR_BASIC_WINDOW_STATUS.value)?.trim() }
             val s = withContext(Dispatchers.IO) { carManager.fetchCurrent(CarConstants.CAR_BASIC_SUNROOF_STATUS.value)?.trim() }
             val l = withContext(Dispatchers.IO) { carManager.fetchCurrent(CarConstants.CAR_BASIC_DOOR_LOCK_STATUS.value)?.trim() }
+            val fl = withContext(Dispatchers.IO) { carManager.fetchCurrent(CarConstants.CAR_BASIC_FRONT_LIGHT_STATUS.value)?.trim() }
             if (d != null) carDoors = d
             if (w != null) carWindows = w
             if (s != null) carSunroof = s.toFloatOrNull()?.toInt() ?: 0
             if (l != null) carLocked = (l.toFloatOrNull()?.toInt() == 1) // 1=trancado (confirmado no barramento)
+            if (fl != null) carFrontLight = (fl.toFloatOrNull()?.toInt() == 1) // 1=farol ligado
             delay(3_000L)
         }
     }
@@ -415,7 +418,7 @@ fun ConsumptionScreen() {
         priceGasL = priceGasoline, priceKwh = priceEnergy,
         socNowPct = rolling.currentSocPct, tempC = displayTrip?.outsideTempC?.toInt() ?: 0,
         rangeEvKm = 0, doorCsv = carDoors, windowCsv = carWindows,
-        sunroof = carSunroof, locked = carLocked,
+        sunroof = carSunroof, locked = carLocked, frontLight = carFrontLight,
     )
 
     // Ações de navegação no header do layout: chip de update + 4 botões

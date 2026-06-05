@@ -52,6 +52,7 @@ data class HomeData(
     val doorFL: Boolean, val doorFR: Boolean, val doorRL: Boolean, val doorRR: Boolean,
     val trunk: Boolean, val sunroof: Boolean, val locked: Boolean,
     val winFL: Boolean, val winFR: Boolean, val winRL: Boolean, val winRR: Boolean,
+    val frontLight: Boolean = false,
 ) {
     companion object {
         val sample = HomeData(
@@ -62,6 +63,7 @@ data class HomeData(
             doorFL = true, doorFR = false, doorRL = false, doorRR = false,
             trunk = false, sunroof = true, locked = false,
             winFL = false, winFR = false, winRL = false, winRR = false,
+            frontLight = true,
         )
     }
 }
@@ -89,6 +91,7 @@ fun buildHomeData(
     windowCsv: String,
     sunroof: Int,
     locked: Boolean,
+    frontLight: Boolean,
 ): HomeData {
     val timeSec = when {
         trip == null -> 0L
@@ -125,6 +128,7 @@ fun buildHomeData(
         trunk = doorOpen(doorCsv, 4), sunroof = sunroof > 0, locked = locked,
         winFL = winOpen(windowCsv, 0), winFR = winOpen(windowCsv, 1),
         winRL = winOpen(windowCsv, 2), winRR = winOpen(windowCsv, 3),
+        frontLight = frontLight,
     )
 }
 
@@ -254,6 +258,7 @@ fun InteractiveCar(d: HomeData, modifier: Modifier = Modifier) {
             Image(painterResource(res), null, Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
         }
         layer(R.drawable.h6)
+        if (d.frontLight) layer(R.drawable.farol)
         if (d.doorFL) layer(R.drawable.porta_dianteira_esquerda_aberta)
         if (d.doorFR) layer(R.drawable.porta_dianteira_direita_aberta)
         if (d.doorRL) layer(R.drawable.porta_traseira_esquerda_aberta)
@@ -264,7 +269,7 @@ fun InteractiveCar(d: HomeData, modifier: Modifier = Modifier) {
         if (d.winFR) layer(R.drawable.vidro_dianteiro_direito_aberto)
         if (d.winRL) layer(R.drawable.vidro_traseiro_esquerdo_aberto)
         if (d.winRR) layer(R.drawable.vidro_traseiro_direito_aberto)
-        if (!d.locked) layer(R.drawable.trava) // ondas = destravado
+        if (d.locked) layer(R.drawable.trava) // trava.png = veículo TRANCADO (ondas de confirmação)
     }
 }
 
