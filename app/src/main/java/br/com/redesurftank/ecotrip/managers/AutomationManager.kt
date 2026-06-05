@@ -5,6 +5,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 import kotlin.math.atan2
 import kotlin.math.cos
@@ -43,6 +44,7 @@ object AutomationManager {
     private val lastSatisfiedMs = HashMap<String, Long>()    // "field|cmp|value" → última vez que o predicado foi verdadeiro (p/ condição "recent")
     private val condPrevPass = HashMap<String, Boolean>()    // ruleId → conditionsPass no tick anterior (detecta re-arme)
     private val firedThisWindow = HashMap<String, Boolean>() // ruleId → já disparou nesta janela de condições satisfeitas
+    private val repeatTasks = HashMap<String, ScheduledFuture<*>>() // ruleId → loop de reexecução (repeat_s)
 
     /** Callback pra publicar disparos (MqttManager seta isto). */
     @Volatile var onFired: ((ruleId: String, name: String, ok: Boolean) -> Unit)? = null
@@ -83,6 +85,7 @@ object AutomationManager {
                 firedThisWindow.keys.retainAll(ids)
                 stateTrigSatisfied.keys.retainAll(ids)
             }
+            cancelAllRepeats()   // regras mudaram → encerra loops antigos (reiniciam ao disparar de novo)
             saveToDisk(json)
             saveTrigState()
             AppLogger.i(TAG, "Regras atualizadas: ${parsed.size}")
@@ -137,8 +140,8 @@ object AutomationManager {
                             CarDataManager.getInstance().fetchCurrent(bk)?.let { v ->
                                 synchronized(lock) { state[bk] = v }
                             }
-                            checkStateEdge(r)
-                        } else if (stateKey == r.trigger.field.substringBefore('[')) checkStateEdge(r) else false
+                            checkStateEdge(r, now)
+                        } else if (stateKey == r.trigger.field.substringBefore('[')) checkStateEdge(r, now) else false
                     }
                     else       -> false
                 }
@@ -149,13 +152,57 @@ object AutomationManager {
                 if (r.debounceS > 0 && now - last < r.debounceS * 1000L) continue
                 lastFiredMs[r.id] = now
                 if (hasConds) firedThisWindow[r.id] = true
-                val ok = runAction(r.action)
-                AppLogger.i(TAG, "Regra '${r.name}' disparou → ${r.action.type} (ok=$ok)")
-                onFired?.invoke(r.id, r.name, ok)
+                if (r.delayS > 0) {
+                    val rule = r
+                    AppLogger.i(TAG, "Regra '${rule.name}' disparou → aguardando ${rule.delayS}s antes de ${rule.action.type}")
+                    tick.schedule({
+                        try {
+                            // Re-lê as condições no fim da espera: só executa se ainda
+                            // estiverem satisfeitas (o estado pode ter mudado nesse tempo).
+                            val stillOk = conditionsPass(rule.conditions, System.currentTimeMillis())
+                            if (stillOk) {
+                                val ok = runAction(rule.action)
+                                AppLogger.i(TAG, "Regra '${rule.name}' (após ${rule.delayS}s) → ${rule.action.type} (ok=$ok)")
+                                onFired?.invoke(rule.id, rule.name, ok)
+                                startRepeat(rule)
+                            } else {
+                                AppLogger.i(TAG, "Regra '${rule.name}': condição não persistiu após ${rule.delayS}s — não executou")
+                            }
+                        } catch (e: Exception) { AppLogger.w(TAG, "ação atrasada '${rule.name}': ${e.message}") }
+                    }, r.delayS.toLong(), TimeUnit.SECONDS)
+                } else {
+                    val ok = runAction(r.action)
+                    AppLogger.i(TAG, "Regra '${r.name}' disparou → ${r.action.type} (ok=$ok)")
+                    onFired?.invoke(r.id, r.name, ok)
+                    startRepeat(r)
+                }
             } catch (e: Exception) {
                 AppLogger.w(TAG, "avaliar '${r.name}': ${e.message}")
             }
         }
+    }
+
+    // Loop de reexecução (repeat_s): após disparar, reexecuta a ação a cada repeat_s
+    // ENQUANTO as condições seguem satisfeitas; para sozinho quando deixam de valer.
+    // (ex: manter ventilação enquanto a temperatura interna estiver alta.)
+    private fun startRepeat(r: Rule) {
+        if (r.repeatS <= 0) return
+        synchronized(lock) {
+            repeatTasks.remove(r.id)?.cancel(false)
+            repeatTasks[r.id] = tick.scheduleWithFixedDelay({
+                try {
+                    if (!conditionsPass(r.conditions, System.currentTimeMillis())) {
+                        synchronized(lock) { repeatTasks.remove(r.id)?.cancel(false) }
+                        return@scheduleWithFixedDelay
+                    }
+                    val ok = runAction(r.action)
+                    AppLogger.i(TAG, "Regra '${r.name}' (loop ${r.repeatS}s) → ${r.action.type} (ok=$ok)")
+                } catch (e: Exception) { AppLogger.w(TAG, "loop '${r.name}': ${e.message}") }
+            }, r.repeatS.toLong(), r.repeatS.toLong(), TimeUnit.SECONDS)
+        }
+    }
+    private fun cancelAllRepeats() {
+        synchronized(lock) { repeatTasks.values.forEach { it.cancel(false) }; repeatTasks.clear() }
     }
 
     private fun coordKey(lat: Double, lng: Double, radius: Double) =
@@ -231,14 +278,26 @@ object AutomationManager {
     // Gatilho "state": dispara quando o valor da chave passa a satisfazer cmp/value
     // (borda de subida — não estava satisfazendo antes desta mudança).
     private val stateTrigSatisfied = HashMap<String, Boolean>()
-    private fun checkStateEdge(r: Rule): Boolean {
+    private val stateTrigSince = HashMap<String, Long>()    // quando o predicado virou verdadeiro (p/ stable_s)
+    private val stateTrigFired = HashMap<String, Boolean>() // já disparou nesta subida (p/ stable_s)
+    private fun checkStateEdge(r: Rule, now: Long): Boolean {
         val cur = compareField(r.trigger.field, r.trigger.cmp, r.trigger.value)
         val prev = stateTrigSatisfied[r.id] ?: false
         // Persiste a borda entre sessões: ao desligar (true→false) grava false;
         // então ligar de novo com o app já aberto conta como borda real e dispara,
         // mas um reinício do app com o carro já ligado (prev=true salvo) NÃO dispara.
-        if (cur != prev) { stateTrigSatisfied[r.id] = cur; saveTrigState() }
-        return cur && !prev
+        if (cur != prev) {
+            stateTrigSatisfied[r.id] = cur; saveTrigState()
+            if (cur) { stateTrigSince[r.id] = now; stateTrigFired[r.id] = false }
+        }
+        if (r.stableS <= 0) return cur && !prev   // sem estabilidade: borda simples (comportamento original)
+        // Com estabilidade: dispara uma vez por subida, só depois do predicado ficar
+        // verdadeiro por stable_s contínuos (filtra picos momentâneos).
+        if (!cur) return false
+        if (stateTrigFired[r.id] == true) return false
+        if (now - (stateTrigSince[r.id] ?: now) < r.stableS * 1000L) return false
+        stateTrigFired[r.id] = true
+        return true
     }
 
     private fun loadTrigState() {
@@ -396,6 +455,7 @@ object AutomationManager {
                 id = o.getString("id"), name = o.optString("name", o.getString("id")),
                 enabled = o.optBoolean("enabled", true), trigger = trigger,
                 conditions = cg, action = action, debounceS = o.optInt("debounce_s", 60),
+                delayS = o.optInt("delay_s", 0), stableS = o.optInt("stable_s", 0), repeatS = o.optInt("repeat_s", 0),
             ))
         }
         return out
@@ -404,6 +464,7 @@ object AutomationManager {
     data class Rule(
         val id: String, val name: String, val enabled: Boolean,
         val trigger: Trigger, val conditions: ConditionGroup?, val action: Action, val debounceS: Int,
+        val delayS: Int = 0, val stableS: Int = 0, val repeatS: Int = 0,
     )
     data class Trigger(
         val type: String, val lat: Double, val lng: Double, val radiusM: Double, val edge: String,
