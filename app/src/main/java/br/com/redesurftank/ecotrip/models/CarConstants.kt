@@ -95,11 +95,11 @@ enum class CarConstants(val value: String) {
     CAR_HVAC_POWER_MODE("car.hvac.power_mode"),             // 0=AC desligado (mestre) | 1=ligado
 
     // Body — portas, vidros, trava, teto solar
-    // door_lock_status: status da trava (semântica do valor a confirmar — assumimos 0=trancado, 1=destrancado)
+    // door_lock_status: 1=trancado, 0=destrancado (confirmado no barramento 2026-06-05)
     CAR_BASIC_DOOR_LOCK_STATUS("car.basic.door_lock_status"),
-    // door_status: CSV "FL,FR,RL,RR,Trunk" — 0=fechada, 1=aberta
+    // door_status: CSV "FL,FR,RL,RR,Trunk(,..)" — 0=fechada, 1=aberta (vem entre chaves: "{0,0,0,0,0,0}")
     CAR_BASIC_DOOR_STATUS("car.basic.door_status"),
-    // window_status: CSV "FL,FR,RL,RR" — 0=fechado, ≠0=aberto (vários estágios)
+    // window_status: CSV "FL,FR,RL,RR" — 1=fechado, 2=aberto, 3=entreaberto (confirmado via dashboard HA havaleiros)
     CAR_BASIC_WINDOW_STATUS("car.basic.window_status"),
     // sunroof_status: 0=fechado, >0=aberto (vários estágios — normalizamos pra binário)
     CAR_BASIC_SUNROOF_STATUS("car.basic.sunroof_status"),

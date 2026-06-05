@@ -66,11 +66,14 @@ data class HomeData(
     }
 }
 
-// CSV "a,b,c,..." → true se o índice idx for ≠ 0 (porta/vidro aberto, etc)
-private fun csvOpen(csv: String, idx: Int): Boolean {
-    val v = csv.split(",").getOrNull(idx)?.trim()?.toFloatOrNull() ?: 0f
-    return v != 0f
+// Valor do índice idx numa CSV do carro (limpa chaves/lixo: "{0,1,0}" → 0,1,0).
+private fun csvVal(csv: String, idx: Int): Int {
+    val clean = csv.replace(Regex("[^0-9,\\-]"), "")
+    return clean.split(",").getOrNull(idx)?.trim()?.toIntOrNull() ?: 0
 }
+// Semântica confirmada via barramento + dashboard HA (havaleiros):
+private fun doorOpen(csv: String, idx: Int): Boolean = csvVal(csv, idx) == 1          // porta: 1=aberta, 0=fechada
+private fun winOpen(csv: String, idx: Int): Boolean = csvVal(csv, idx).let { it == 2 || it == 3 } // vidro: 2=aberto, 3=entreaberto, 1=fechado
 
 // Monta o HomeData a partir da viagem atual/última + estado real do corpo do carro.
 fun buildHomeData(
@@ -117,11 +120,11 @@ fun buildHomeData(
         fuelL = fuelL, costBrl = cost, costPerKm = costPerKm,
         socPct = soc, startSocPct = (trip?.startSocPct ?: 0f).toInt(),
         rangeEvKm = rangeEvKm, outsideTempC = trip?.outsideTempC?.toInt() ?: tempC, modeEv = modeEv,
-        doorFL = csvOpen(doorCsv, 0), doorFR = csvOpen(doorCsv, 1),
-        doorRL = csvOpen(doorCsv, 2), doorRR = csvOpen(doorCsv, 3),
-        trunk = csvOpen(doorCsv, 4), sunroof = sunroof > 0, locked = locked,
-        winFL = csvOpen(windowCsv, 0), winFR = csvOpen(windowCsv, 1),
-        winRL = csvOpen(windowCsv, 2), winRR = csvOpen(windowCsv, 3),
+        doorFL = doorOpen(doorCsv, 0), doorFR = doorOpen(doorCsv, 1),
+        doorRL = doorOpen(doorCsv, 2), doorRR = doorOpen(doorCsv, 3),
+        trunk = doorOpen(doorCsv, 4), sunroof = sunroof > 0, locked = locked,
+        winFL = winOpen(windowCsv, 0), winFR = winOpen(windowCsv, 1),
+        winRL = winOpen(windowCsv, 2), winRR = winOpen(windowCsv, 3),
     )
 }
 

@@ -111,7 +111,7 @@ fun ConsumptionScreen() {
             if (d != null) carDoors = d
             if (w != null) carWindows = w
             if (s != null) carSunroof = s.toFloatOrNull()?.toInt() ?: 0
-            if (l != null) carLocked = (l.toFloatOrNull() ?: 0f) == 0f // 0=trancado
+            if (l != null) carLocked = (l.toFloatOrNull()?.toInt() == 1) // 1=trancado (confirmado no barramento)
             delay(3_000L)
         }
     }
