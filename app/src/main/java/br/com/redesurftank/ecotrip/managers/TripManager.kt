@@ -853,6 +853,14 @@ class TripManager private constructor() {
             prefs.edit().putFloat(SharedPreferencesKeys.MIN_AUTO_TRIP_DIST_KM, km.coerceAtLeast(0f)).apply()
     }
 
+    /** Layout da tela inicial: 0=Tesla, 1=Europeu, 2=By Claude (default). */
+    fun getHomeLayout(): Int =
+        if (::prefs.isInitialized) prefs.getInt(SharedPreferencesKeys.HOME_LAYOUT, 2) else 2
+    fun setHomeLayout(v: Int) {
+        if (::prefs.isInitialized)
+            prefs.edit().putInt(SharedPreferencesKeys.HOME_LAYOUT, v.coerceIn(0, 2)).apply()
+    }
+
     /** Para StatsScreen: preços de combustível e energia. */
     fun getPrices(): Pair<Float, Float> = synchronized(lock) {
         Pair(priceGasolinePerL, priceEnergyPerKwh)

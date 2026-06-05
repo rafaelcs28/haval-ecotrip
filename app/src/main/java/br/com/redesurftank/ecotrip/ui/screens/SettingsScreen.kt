@@ -69,6 +69,8 @@ fun SettingsScreen(
     mqttManager: MqttManager,
     minAutoTripDist: Float,
     onMinAutoTripDistChange: (Float) -> Unit,
+    homeLayout: Int,
+    onHomeLayoutChange: (Int) -> Unit,
     backupManager: BackupManager,
     tripManager: TripManager,
     onClearAll: () -> Unit = {},
@@ -172,6 +174,36 @@ fun SettingsScreen(
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Voltar", tint = TextSecondary)
             }
             Text("Configurações", fontSize = 21.sp, fontWeight = FontWeight.Bold, color = Green)
+        }
+
+        // ── Tela inicial (layout) ───────────────────────────────────────────────
+        SectionCard(title = "Tela inicial") {
+            val opts = listOf("Tesla", "Europeu", "By Claude")
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                opts.forEachIndexed { i, label ->
+                    val sel = homeLayout == i
+                    OutlinedButton(
+                        onClick = { onHomeLayoutChange(i) },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(8.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, if (sel) Green else Color.White.copy(alpha = 0.15f)),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            containerColor = if (sel) Green.copy(alpha = 0.12f) else Color.Transparent,
+                            contentColor = if (sel) Green else TextSecondary,
+                        ),
+                    ) {
+                        Text(label, fontSize = 14.sp, fontWeight = if (sel) FontWeight.Bold else FontWeight.Normal)
+                    }
+                }
+            }
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "Estilo da tela inicial do carro, focada na viagem atual.",
+                fontSize = 11.sp, color = TextSecondary,
+            )
         }
 
         // ── Tanque ────────────────────────────────────────────────────────────

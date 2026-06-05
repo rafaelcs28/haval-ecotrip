@@ -14,6 +14,11 @@ import br.com.redesurftank.ecotrip.managers.TripManager
 import br.com.redesurftank.ecotrip.managers.UpdateManager
 import br.com.redesurftank.ecotrip.services.CarTelemetryService
 import br.com.redesurftank.ecotrip.ui.screens.ConsumptionScreen
+import br.com.redesurftank.ecotrip.ui.screens.HomeClaudeLayout
+import br.com.redesurftank.ecotrip.ui.screens.HomeData
+import br.com.redesurftank.ecotrip.ui.screens.HomeEuropeanLayout
+import br.com.redesurftank.ecotrip.ui.screens.HomeTeslaLayout
+import br.com.redesurftank.ecotrip.ui.screens.InteractiveCar
 import br.com.redesurftank.ecotrip.ui.theme.EcotripTheme
 
 class MainActivity : ComponentActivity() {
@@ -28,6 +33,23 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Preview dos layouts da home no emulador (só debug): renderiza com dados
+        // de exemplo e NÃO inicia managers/serviços. am start ... -e preview 0|1|2
+        val preview = intent.getStringExtra("preview")?.toIntOrNull()
+        if (BuildConfig.DEBUG && preview != null) {
+            val d = HomeData.sample
+            setContent {
+                EcotripTheme {
+                    when (preview) {
+                        0 -> HomeTeslaLayout(d) { m -> InteractiveCar(d, m) }
+                        1 -> HomeEuropeanLayout(d)
+                        else -> HomeClaudeLayout(d) { m -> InteractiveCar(d, m) }
+                    }
+                }
+            }
+            return
+        }
 
         CarDataManager.getInstance().init(this)
         TripManager.getInstance().init(this)

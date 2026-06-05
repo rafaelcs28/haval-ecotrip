@@ -94,6 +94,28 @@ fun ConsumptionScreen() {
     var isCheckingUpdate by remember { mutableStateOf(updateMgr.isChecking) }
     var downloadProgress by remember { mutableStateOf(updateMgr.downloadProgress) }
 
+    // Layout da home + estado do corpo do carro (pro carro interativo)
+    var homeLayout by remember { mutableStateOf(tripManager.getHomeLayout()) }
+    var carDoors   by remember { mutableStateOf("") }
+    var carWindows by remember { mutableStateOf("") }
+    var carSunroof by remember { mutableStateOf(0) }
+    var carLocked  by remember { mutableStateOf(true) }
+
+    // Lê o estado do corpo do carro a cada 3s (portas/vidros/teto/trava)
+    LaunchedEffect(Unit) {
+        while (true) {
+            val d = withContext(Dispatchers.IO) { carManager.fetchCurrent(CarConstants.CAR_BASIC_DOOR_STATUS.value)?.trim() }
+            val w = withContext(Dispatchers.IO) { carManager.fetchCurrent(CarConstants.CAR_BASIC_WINDOW_STATUS.value)?.trim() }
+            val s = withContext(Dispatchers.IO) { carManager.fetchCurrent(CarConstants.CAR_BASIC_SUNROOF_STATUS.value)?.trim() }
+            val l = withContext(Dispatchers.IO) { carManager.fetchCurrent(CarConstants.CAR_BASIC_DOOR_LOCK_STATUS.value)?.trim() }
+            if (d != null) carDoors = d
+            if (w != null) carWindows = w
+            if (s != null) carSunroof = s.toFloatOrNull()?.toInt() ?: 0
+            if (l != null) carLocked = (l.toFloatOrNull() ?: 0f) == 0f // 0=trancado
+            delay(3_000L)
+        }
+    }
+
     // Check on startup + repeat every 3 min while app is running
     LaunchedEffect(Unit) {
         updateMgr.checkForUpdate()
@@ -330,6 +352,11 @@ fun ConsumptionScreen() {
                 minAutoTripDist = newVal
                 tripManager.setMinAutoTripDist(newVal)
             },
+            homeLayout = homeLayout,
+            onHomeLayoutChange = { newVal ->
+                homeLayout = newVal
+                tripManager.setHomeLayout(newVal)
+            },
             tripManager = tripManager,
             onClearAll = {
                 history         = emptyList()
@@ -383,222 +410,76 @@ fun ConsumptionScreen() {
     val displayTrip   = inProgressTrip ?: autoTripEntries.firstOrNull()
     val displayIsLive = inProgressTrip != null
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Brush.verticalGradient(listOf(VoidBlack, Color(0xFF04060A))))
-            .systemBarsPadding()
-            .padding(horizontal = 40.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        // ── Header: logo + status pill + update chip + 4 IconButtons ─────────
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            // Esquerda: logo + pill consolidado (versão + MQTT + carro)
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Text(
-                    "ECOTRIP",
-                    fontSize      = 22.sp,
-                    fontWeight    = FontWeight.ExtraBold,
-                    color         = NeonLime,
-                    letterSpacing = 3.sp,
-                    style         = TextStyle(
-                        shadow = Shadow(
-                            color      = NeonLime.copy(alpha = 0.50f),
-                            offset     = Offset.Zero,
-                            blurRadius = 18f,
-                        )
-                    ),
-                )
-                // Pill: ● vX.Y · Haval H6 PHEV34   (com MQTT dot/chip embutido)
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier
-                        .background(NeonLime.copy(alpha = 0.06f), RoundedCornerShape(50))
-                        .border(1.dp, NeonLime.copy(alpha = 0.22f), RoundedCornerShape(50))
-                        .padding(horizontal = 12.dp, vertical = 4.dp),
-                ) {
-                    if (mqttStatus == MqttManager.Status.CONNECTED) {
-                        Box(Modifier.size(6.dp).background(NeonLime, CircleShape))
-                    } else {
-                        val mqttColor = when (mqttStatus) {
-                            MqttManager.Status.CONNECTING -> WarnYellow
-                            MqttManager.Status.ERROR      -> DangerRed
-                            else                          -> TextSecondary
-                        }
-                        Box(Modifier.size(6.dp).background(mqttColor, CircleShape))
-                    }
-                    Text(
-                        "v${BuildConfig.VERSION_NAME}",
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = NeonLime,
-                    )
-                    Text("·", fontSize = 13.sp, color = TextSecondary.copy(alpha = 0.4f))
-                    Text(
-                        "Haval H6 PHEV34",
-                        fontSize = 13.sp,
-                        color = TextSecondary.copy(alpha = 0.85f),
-                    )
-                }
-            }
+    val hd = buildHomeData(
+        trip = displayTrip, isLive = displayIsLive, nowMs = nowMs,
+        priceGasL = priceGasoline, priceKwh = priceEnergy,
+        socNowPct = rolling.currentSocPct, tempC = displayTrip?.outsideTempC?.toInt() ?: 0,
+        rangeEvKm = 0, doorCsv = carDoors, windowCsv = carWindows,
+        sunroof = carSunroof, locked = carLocked,
+    )
 
-            // Direita: update chip + 4 IconButtons (Log, Recargas, AutoTrips, Settings)
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                // Update area — mesmas 4 condições do design anterior
-                when {
-                    downloadProgress in 0..99 -> {
+    // Ações de navegação no header do layout: chip de update + 4 botões
+    val navActions: @Composable RowScope.() -> Unit = {
+        when {
+            downloadProgress in 0..99 -> {
+                Text(
+                    "$downloadProgress%",
+                    fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, color = NeonLime,
+                    modifier = Modifier
+                        .background(NeonLime.copy(alpha = 0.10f), RoundedCornerShape(8.dp))
+                        .border(1.dp, NeonLime.copy(alpha = 0.28f), RoundedCornerShape(8.dp))
+                        .padding(horizontal = 12.dp, vertical = 4.dp),
+                )
+            }
+            isCheckingUpdate -> {
+                Text("...", fontSize = 11.sp, color = TextSecondary, modifier = Modifier.padding(end = 4.dp))
+            }
+            updateAvailable -> {
+                TextButton(
+                    onClick = { updateMgr.downloadAndInstall(context) },
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier
+                            .background(NeonLime.copy(alpha = 0.10f), RoundedCornerShape(8.dp))
+                            .border(1.dp, NeonLime.copy(alpha = 0.28f), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 12.dp, vertical = 4.dp),
+                    ) {
+                        Icon(Icons.Default.SystemUpdate, "Atualizar", tint = NeonLime, modifier = Modifier.size(16.dp))
                         Text(
-                            "$downloadProgress%",
-                            fontSize   = 13.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            color      = NeonLime,
-                            modifier   = Modifier
-                                .background(NeonLime.copy(alpha = 0.10f), RoundedCornerShape(8.dp))
-                                .border(1.dp, NeonLime.copy(alpha = 0.28f), RoundedCornerShape(8.dp))
-                                .padding(horizontal = 12.dp, vertical = 4.dp),
+                            updateMgr.latestRelease?.version?.let { "v$it" } ?: "Atualizar",
+                            fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, color = NeonLime,
                         )
                     }
-                    isCheckingUpdate -> {
-                        Text(
-                            "...",
-                            fontSize = 11.sp,
-                            color    = TextSecondary,
-                            modifier = Modifier.padding(end = 4.dp),
-                        )
-                    }
-                    updateAvailable -> {
-                        TextButton(
-                            onClick        = { updateMgr.downloadAndInstall(context) },
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                modifier = Modifier
-                                    .background(NeonLime.copy(alpha = 0.10f), RoundedCornerShape(8.dp))
-                                    .border(1.dp, NeonLime.copy(alpha = 0.28f), RoundedCornerShape(8.dp))
-                                    .padding(horizontal = 12.dp, vertical = 4.dp),
-                            ) {
-                                Icon(
-                                    Icons.Default.SystemUpdate,
-                                    contentDescription = "Atualizar",
-                                    tint               = NeonLime,
-                                    modifier           = Modifier.size(16.dp),
-                                )
-                                Text(
-                                    updateMgr.latestRelease?.version?.let { "v$it disponível" } ?: "Atualizar",
-                                    fontSize   = 13.sp,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    color      = NeonLime,
-                                )
-                            }
-                        }
-                    }
-                    else -> {
-                        TextButton(
-                            onClick        = { updateMgr.checkForUpdate() },
-                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
-                        ) {
-                            Text(
-                                "v${BuildConfig.VERSION_NAME}",
-                                fontSize = 13.sp,
-                                color    = TextSecondary,
-                            )
-                        }
-                    }
-                }
-                IconButton(onClick = { showLog = true }) {
-                    Icon(Icons.Default.BugReport, contentDescription = "Log", tint = TextSecondary)
-                }
-                IconButton(onClick = { showChargeHistory = true }) {
-                    Icon(Icons.Default.BatteryChargingFull, contentDescription = "Recargas", tint = AuroraTeal)
-                }
-                IconButton(onClick = { showAutoTrips = true }) {
-                    Icon(Icons.Default.DirectionsCar, contentDescription = "Viagens Auto", tint = AccentBlue)
-                }
-                IconButton(onClick = { showSettings = true }) {
-                    Icon(Icons.Default.Settings, contentDescription = "Configurações", tint = TextSecondary)
                 }
             }
         }
+        IconButton(onClick = { showLog = true }) { Icon(Icons.Default.BugReport, "Log", tint = TextSecondary) }
+        IconButton(onClick = { showChargeHistory = true }) { Icon(Icons.Default.BatteryChargingFull, "Recargas", tint = AuroraTeal) }
+        IconButton(onClick = { showAutoTrips = true }) { Icon(Icons.Default.DirectionsCar, "Viagens Auto", tint = AccentBlue) }
+        IconButton(onClick = { showSettings = true }) { Icon(Icons.Default.Settings, "Configurações", tint = TextSecondary) }
+    }
 
-        // ── Ambient gradient strip (sutil linha viva abaixo do header) ───────
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .height(1.dp)
-                .drawBehind {
-                    drawLine(
-                        brush = Brush.horizontalGradient(
-                            listOf(
-                                Color.Transparent,
-                                NeonLime.copy(alpha = 0.35f),
-                                AuroraTeal.copy(alpha = 0.35f),
-                                PlasmaBlue.copy(alpha = 0.20f),
-                                Color.Transparent,
-                            ),
-                        ),
-                        start = Offset(0f, 0f),
-                        end = Offset(size.width, 0f),
-                        strokeWidth = 1.dp.toPx(),
-                    )
-                },
-        )
-
-        // ── Sub-header rolling window: "DESDE ÚLTIMA PARTIDA · X km · Zerar" ─
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
-            ) {
-                Text(
-                    "DESDE ÚLTIMA PARTIDA",
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 2.sp,
-                    color = TextSecondary.copy(alpha = 0.9f),
-                )
-                Text("▸", fontSize = 14.sp, color = TextSecondary.copy(alpha = 0.4f))
-                Text(
-                    "%.1f km".format(rolling.windowKm),
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = AuroraTeal,
-                    style = TextStyle(
-                        shadow = Shadow(AuroraTeal.copy(alpha = 0.4f), Offset.Zero, 8f),
-                    ),
-                )
-            }
-            OutlinedButton(
-                onClick        = { tripManager.resetRolling() },
-                contentPadding = PaddingValues(horizontal = 18.dp, vertical = 4.dp),
-                border         = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.12f)),
-                shape          = RoundedCornerShape(6.dp),
-            ) {
-                Text("Zerar", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = TextSecondary)
-            }
+    Box(modifier = Modifier.fillMaxSize().systemBarsPadding()) {
+        when (homeLayout) {
+            0 -> HomeTeslaLayout(hd, actions = navActions) { m -> InteractiveCar(hd, m) }
+            1 -> HomeEuropeanLayout(hd, actions = navActions)
+            else -> HomeClaudeLayout(hd, actions = navActions) { m -> InteractiveCar(hd, m) }
         }
 
         // ── Banner de continuação: aparece quando há viagem retomável ────────
         resumableTrip?.let { last ->
             val gapMin = ((System.currentTimeMillis() - last.endMs) / 60_000L).toInt().coerceAtLeast(0)
             Surface(
-                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                color    = SurfaceCard,
-                shape    = RoundedCornerShape(10.dp),
-                border   = androidx.compose.foundation.BorderStroke(1.dp, AccentBlue.copy(alpha = 0.4f)),
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(horizontal = 40.dp, vertical = 16.dp)
+                    .fillMaxWidth(),
+                color = SurfaceCard,
+                shape = RoundedCornerShape(10.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, AccentBlue.copy(alpha = 0.4f)),
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
@@ -607,22 +488,11 @@ fun ConsumptionScreen() {
                 ) {
                     Text("🔄", fontSize = 18.sp)
                     Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            "Continuar viagem anterior?",
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = TextPrimary,
-                        )
-                        Text(
-                            "Terminou há ${gapMin} min · ${"%.1f".format(last.distKm)} km",
-                            fontSize = 11.sp,
-                            color = TextSecondary,
-                        )
+                        Text("Continuar viagem anterior?", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                        Text("Terminou há ${gapMin} min · ${"%.1f".format(last.distKm)} km", fontSize = 11.sp, color = TextSecondary)
                     }
                     OutlinedButton(
                         onClick = {
-                            // Recusa PERSISTIDA (sobrevive reinício/update) — o banner não
-                            // ressuscita pra esta viagem nem depois de atualizar o app.
                             tripManager.dismissResume(last.startMs)
                             dismissedResumeStartMs = last.startMs
                             resumableTrip = null
@@ -632,7 +502,6 @@ fun ConsumptionScreen() {
                     Button(
                         onClick = {
                             if (tripManager.resumeLastTrip()) {
-                                // Reset do dismissal — viagem foi consumida pelo resume
                                 dismissedResumeStartMs = null
                                 resumableTrip = null
                                 autoTripEntries = tripManager.getAutoTripHistory()
@@ -642,202 +511,6 @@ fun ConsumptionScreen() {
                     ) { Text("Continuar", fontSize = 12.sp, fontWeight = FontWeight.Bold) }
                 }
             }
-        }
-
-        // ── Center zone: 3 columns (Energy | Hero+Meters | Fuel) ─────────────
-        // Ultrawide 1920×720: gap maior + colunas mais largas + hero bem maior.
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f)
-                .padding(top = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(36.dp),
-        ) {
-            // ── Coluna ESQUERDA: ⚡ Energia ──────────────────────────────────
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxHeight(),
-                verticalArrangement = Arrangement.Top,
-            ) {
-                ColumnTitle(label = "Energia", iconColor = NeonLime, icon = Icons.Default.Bolt)
-                // Bruto
-                MetricBlock(
-                    label = "Bruto",
-                    value = "%.1f".format(rolling.energyKwh),
-                    unitInline = "kWh",
-                )
-                // Regenerada + % + mini-bar
-                val regenPct = if (rolling.energyKwh > 0.01f)
-                    (rolling.regenKwh / rolling.energyKwh).coerceIn(0f, 1f)
-                else 0f
-                MetricBlock(
-                    label = "Regenerada",
-                    value = "%.1f".format(rolling.regenKwh),
-                    valueColor = NeonLime,
-                    unitInline = "kWh",
-                    auxRight = if (regenPct > 0f) "%.0f%%".format(regenPct * 100f) else null,
-                    auxColor = NeonLime,
-                ) {
-                    if (regenPct > 0f) {
-                        Spacer(Modifier.height(4.dp))
-                        MiniBar(
-                            fraction = regenPct,
-                            fillBrush = Brush.horizontalGradient(listOf(NeonLime, NeonLime)),
-                        )
-                    }
-                }
-                // Líquida
-                MetricBlock(
-                    label = "Líquida",
-                    value = "%.1f".format(rolling.netKwh),
-                    valueColor = WarnYellow,
-                    unitInline = "kWh",
-                )
-                // SOC: start → current, com delta
-                val socDeltaRolling = rolling.currentSocPct - rolling.startSocPct
-                MetricBlock(
-                    label = "SOC",
-                    value = if (rolling.startSocPct > 0f || rolling.currentSocPct > 0f)
-                        "%.0f%% → %.0f%%".format(rolling.startSocPct, rolling.currentSocPct)
-                    else "—",
-                    auxRight = if (rolling.startSocPct > 0f) "%+.0f%%".format(socDeltaRolling) else null,
-                    showBottomBorder = false,
-                )
-            }
-
-            // ── Centro: HeroGauge + 2 LinearMeters ──────────────────────────
-            Column(
-                modifier = Modifier.weight(2.2f).fillMaxHeight(),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                HeroGauge(
-                    value      = rolling.netKwhPer100km,
-                    maxValue   = 40f,
-                    label      = "kWh/100km",
-                    color      = kwhPer100kmColor(rolling.netKwhPer100km),
-                    tickValues = listOf(0, 10, 20, 30, 40),
-                    diameter   = 360.dp,
-                    valueFontSize = 80.sp,
-                )
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 0.dp),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                ) {
-                    LinearMeter(
-                        value             = rolling.combinedKmL,
-                        maxValue          = 100f,
-                        label             = "km/L econ.",
-                        unitLabel         = "km/L",
-                        icon              = rememberVectorPainter(Icons.Default.Bolt),
-                        categoryIconColor = AuroraTeal,
-                        perfColor         = kmPerLEqColor(rolling.combinedKmL),
-                        tickValues        = listOf(0, 25, 50, 75, 100),
-                        modifier          = Modifier.weight(1f),
-                    )
-                    LinearMeter(
-                        value             = rolling.kmPerL,
-                        maxValue          = 40f,
-                        label             = "km/L",
-                        unitLabel         = "km/L",
-                        icon              = rememberVectorPainter(Icons.Default.LocalGasStation),
-                        categoryIconColor = MoltenOrange,
-                        perfColor         = kmPerLColor(rolling.kmPerL),
-                        tickValues        = listOf(0, 10, 20, 30, 40),
-                        modifier          = Modifier.weight(1f),
-                    )
-                }
-            }
-
-            // ── Coluna DIREITA: ⛽ Combustível ───────────────────────────────
-            Column(
-                modifier = Modifier.weight(1f).fillMaxHeight(),
-                verticalArrangement = Arrangement.Top,
-            ) {
-                ColumnTitle(label = "Combustível", iconColor = MoltenOrange, icon = Icons.Default.LocalGasStation)
-                // Consumido (L)
-                MetricBlock(
-                    label = "Consumido",
-                    value = "%.1f".format(rolling.fuelL),
-                    valueColor = MoltenOrange,
-                    unitInline = "L",
-                )
-                // Tanque start→current + mini-bar (% atual do tanque)
-                val tankFrac = if (tankCapacity > 0.1f) (rolling.currentTankL / tankCapacity).coerceIn(0f, 1f) else 0f
-                val tankSpent = rolling.startTankL - rolling.currentTankL
-                MetricBlock(
-                    label = "Tanque",
-                    value = if (rolling.startTankL > 0f || rolling.currentTankL > 0f)
-                        "%.1f → %.1f".format(rolling.startTankL, rolling.currentTankL)
-                    else "—",
-                    unitInline = "L",
-                    auxRight = if (tankSpent > 0.01f) "%.1f L gastos".format(tankSpent) else null,
-                ) {
-                    if (tankFrac > 0f) {
-                        Spacer(Modifier.height(4.dp))
-                        MiniBar(
-                            fraction = tankFrac,
-                            fillBrush = Brush.horizontalGradient(listOf(MoltenOrange, Color(0xFFFFB890))),
-                        )
-                    }
-                }
-                // Custo total
-                MetricBlock(
-                    label = "Custo total",
-                    value = if (rolling.costBrl > 0.01f) "R$ %.2f".format(rolling.costBrl) else "—",
-                    valueColor = WarnYellow,
-                )
-                // Custo por km com bullet chart
-                val costPerKm = rolling.costPerKm
-                val costStatus = costPerKmStatus(costPerKm)
-                MetricBlock(
-                    label = "Custo por km",
-                    value = if (costPerKm > 0f) "R$ %.3f".format(costPerKm) else "—",
-                    valueColor = WarnYellow.copy(alpha = 0.95f),
-                    auxRight = if (costPerKm > 0f) null else null,
-                    showBottomBorder = false,
-                ) {
-                    if (costPerKm > 0f) {
-                        Spacer(Modifier.height(6.dp))
-                        BulletBar(
-                            value = costPerKm,
-                            maxScale = 0.60f,
-                            metaPosition = 0.30f,
-                            yellowEnd = 0.45f,
-                        )
-                        Row(
-                            modifier = Modifier.fillMaxWidth().padding(top = 5.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                        ) {
-                            Text("R$ 0",     fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = TextSecondary.copy(alpha = 0.6f))
-                            Text("R$ 0,60+", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = TextSecondary.copy(alpha = 0.6f))
-                        }
-                    }
-                }
-                // Badge de status alinhado no top do bloco (mostra no header do "Custo por km")
-                // — fica fora do bloco pra acompanhar a label visualmente; ajustar se preferir embutido.
-                if (costPerKm > 0f) {
-                    Spacer(Modifier.height(4.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End,
-                    ) {
-                        StatusBadge(label = costStatus.label, color = costStatus.color)
-                    }
-                }
-            }
-        }
-
-        // ── Strip inferior: viagem em andamento / última viagem ──────────────
-        if (displayTrip != null) {
-            StripSection(
-                trip = displayTrip,
-                isLive = displayIsLive,
-                nowMs = nowMs,
-                priceGasL = priceGasoline,
-                priceKwh  = priceEnergy,
-            )
         }
     }
 }

@@ -59,6 +59,9 @@ object SharedPreferencesKeys {
     // Auto-trip display filter
     const val MIN_AUTO_TRIP_DIST_KM  = "min_auto_trip_dist_km"
 
+    // Layout da tela inicial: 0=Tesla, 1=Europeu, 2=By Claude (default)
+    const val HOME_LAYOUT = "home_layout"
+
     // Sessão de recarga em andamento — persiste para sobreviver reinício do app enquanto carregando
     const val CHARGE_SESSION_ENERGY_KWH = "charge_session_energy_kwh"
     const val CHARGE_SESSION_SEC        = "charge_session_sec"
