@@ -338,6 +338,7 @@ const NOTIF_DEFAULTS = {
   la_motor:             true,
   la_security:          true,
   la_songpro:           false,  // LA paralela da BYD Song Pro (Grasi) — opt-in, só admin
+  la_songpro_trip:      false,  // LA de deslocamento do BYD (Grasi) — opt-in, default OFF
   preclimat_steps:      true,   // alerta (som) a cada passo da pré-climatização
 };
 let notifPrefs = { ...NOTIF_DEFAULTS };
@@ -382,6 +383,7 @@ let _activeSched = null;
 // pessoa já dirigindo. Ver _abortPreclimatAutoOff() e o handler de portas.
 let _preclimatRestoreTimer   = null;
 let _preclimatAutoOffCancelled = false;
+let _preclimatPrevHvac       = null;   // { fan, drvTemp, passTemp, acEnable } salvo antes da pré-clima
 
 // Fases em que o motor foi ligado pela pré-clima e o desligamento automático
 // ainda está pendente — só aí faz sentido a trava da porta agir.
@@ -389,16 +391,39 @@ function _preclimatAutoOffPending() {
   return ['starting', 'engine_on', 'cooling'].includes(preclimatStatus.phase);
 }
 
-// Cancela o desligamento remoto agendado (motor segue ligado, AC como está).
+// Restaura o AC ao estado salvo antes da pré-climatização (temperatura/fan/master).
+// Usado no fim normal (timer) E quando o usuário entra e cancela o desligamento —
+// aí o motor segue ligado, mas o AC volta ao que estava antes da pré-clima.
+async function _restorePreclimatHvac() {
+  const prev = _preclimatPrevHvac;
+  if (!prev) return;
+  _preclimatPrevHvac = null;   // evita restaurar duas vezes
+  if (prev.drvTemp  !== null) mqttClient.publish(`${MQTT_PREFIX}/cmd/hvac/driver_temp`,    prev.drvTemp.toFixed(1),  { qos: 1, retain: false });
+  if (prev.passTemp !== null) mqttClient.publish(`${MQTT_PREFIX}/cmd/hvac/passenger_temp`, prev.passTemp.toFixed(1), { qos: 1, retain: false });
+  await new Promise(r => setTimeout(r, 1_000));
+  mqttClient.publish(`${MQTT_PREFIX}/cmd/hvac/fan_speed`, prev.fan.toString(), { qos: 1, retain: false });
+  // Restaura a recirculação (ar interno/externo) ao que estava antes do pré-clima.
+  if (prev.cycle !== null && prev.cycle !== undefined)
+    mqttClient.publish(`${MQTT_PREFIX}/cmd/hvac/cycle_mode`, prev.cycle.toString(), { qos: 1, retain: false });
+  // Restaura o master do A/C ao estado anterior (desliga se estava desligado/desconhecido).
+  mqttClient.publish(`${MQTT_PREFIX}/cmd/hvac/ac_enable`, prev.acEnable === '1' ? '1' : '0', { qos: 1, retain: false });
+  console.log(`[preclimat] AC restaurado ao estado anterior (fan=${prev.fan} acEnable=${prev.acEnable} cycle=${prev.cycle})`);
+}
+
+// Cancela o desligamento remoto agendado (motor segue ligado) e restaura o AC.
 function _abortPreclimatAutoOff(reason) {
-  if (_preclimatAutoOffCancelled && !_preclimatRestoreTimer) return;
+  if (_preclimatAutoOffCancelled && !_preclimatRestoreTimer && !_preclimatPrevHvac) return;
   _preclimatAutoOffCancelled = true;
   if (_preclimatRestoreTimer) { clearTimeout(_preclimatRestoreTimer); _preclimatRestoreTimer = null; }
-  console.log(`[preclimat] desligamento automático CANCELADO (${reason}) — motor segue ligado`);
-  _setPreclimatStatus('ended', 'Você entrou no carro — desligamento automático cancelado',
+  console.log(`[preclimat] desligamento automático CANCELADO (${reason}) — motor segue ligado, restaurando AC`);
+  _restorePreclimatHvac().catch(e => console.warn('[preclimat] restaurar AC falhou:', e.message));
+  _setPreclimatStatus('ended', 'Você entrou no carro — AC restaurado, motor segue ligado',
     { endsAtMs: Date.now() + 2 * 60_000,
       alert: { title: '🚗 Pré-climatização',
-               body: 'Você entrou no carro — desligamento automático cancelado. O motor segue ligado.' } });
+               body: 'Você entrou no carro — desligamento cancelado e AC voltou ao ajuste anterior. O motor segue ligado.' } });
+  // Entrou no carro → encerra a LA logo (1 min, tempo de ver a confirmação),
+  // sobrepondo os 5 min do encerramento normal.
+  _schedulePreclimatLAEnd(_activeSched && _activeSched.device_id, 60_000);
 }
 
 const PRECLIMAT_LA_TYPE = 'PreClimatActivityAttributes';
@@ -433,17 +458,26 @@ function _setPreclimatStatus(phase, detail, extra = {}) {
     sendPush(stepAlert.title, stepAlert.body, 'preclimat',
       { onlyDeviceIds: dev ? [dev] : undefined, skipApnsAlert: true });
   }
-  if (!apnsLive.enabled || !dev || notifPrefs.la_preclimat === false) return;
-  apnsLive.pushUpdate(PRECLIMAT_LA_TYPE, { deviceId: dev }, _preclimatContentState(),
+  if (!apnsLive.enabled || notifPrefs.la_preclimat === false) return;
+  apnsLive.pushUpdate(PRECLIMAT_LA_TYPE, dev ? { deviceId: dev } : {}, _preclimatContentState(),
     { staleDate: preclimatStatus.endsAtMs || undefined, alert: stepAlert })
     .catch(e => console.warn('[apns] preclimat update falhou:', e.message));
-  if (phase === 'ended' || phase === 'failed') {
-    setTimeout(() => {
-      apnsLive.pushUpdate(PRECLIMAT_LA_TYPE, { deviceId: dev }, _preclimatContentState(),
-        { isFinal: true, dismissalDate: Date.now() })
-        .catch(e => console.warn('[apns] preclimat end falhou:', e.message));
-    }, 5 * 60_000);
-  }
+  // Finalizou todo o procedimento (sem entrar no carro): mantém a LA por 5 min e encerra.
+  if (phase === 'ended' || phase === 'failed') _schedulePreclimatLAEnd(dev, 5 * 60_000);
+}
+
+// Agenda o encerramento da LA de pré-climatização (cancela qualquer agendamento
+// anterior). 5 min após finalizar normalmente; ~1 min quando o usuário entra no carro.
+let _preclimatLAEndTimer = null;
+function _schedulePreclimatLAEnd(dev, delayMs) {
+  if (_preclimatLAEndTimer) clearTimeout(_preclimatLAEndTimer);
+  _preclimatLAEndTimer = setTimeout(() => {
+    _preclimatLAEndTimer = null;
+    if (!apnsLive.enabled) return;
+    apnsLive.pushUpdate(PRECLIMAT_LA_TYPE, dev ? { deviceId: dev } : {}, _preclimatContentState(),
+      { isFinal: true, dismissalDate: Date.now() })
+      .catch(e => console.warn('[apns] preclimat end falhou:', e.message));
+  }, delayMs);
 }
 // Cria a Live Activity (push-to-start) na janela T-leadMin, fase "scheduled".
 function _startPreclimatLA(sched, fireMs) {
@@ -451,10 +485,13 @@ function _startPreclimatLA(sched, fireMs) {
   preclimatStatus = { phase: 'scheduled', detail: `Agendada para ${sched.time}`,
     endsAtMs: fireMs, temp: sched.temp, fan: sched.fan, updatedAtMs: Date.now() };
   console.log(`[preclimat] LA push-to-start (agendada p/ ${sched.time})`);
-  if (!apnsLive.enabled || !sched.device_id || notifPrefs.la_preclimat === false) return;
+  if (!apnsLive.enabled || notifPrefs.la_preclimat === false) return;
+  // device_id vazio → broadcast pros devices com la_preclimat ligado (igual às
+  // outras LAs). Antes exigia device_id e a LA não saía quando o agendamento vinha sem ele.
   // O `alert` é necessário: sem ele o iOS trata o push-to-start como silencioso.
-  apnsLive.pushStart(PRECLIMAT_LA_TYPE, sched.device_id, _preclimatAttributes(), _preclimatContentState(),
-    { staleDate: fireMs, alert: { title: '⏰ Pré-climatização', body: `Começa às ${sched.time}` } })
+  apnsLive.pushStart(PRECLIMAT_LA_TYPE, sched.device_id || '', _preclimatAttributes(), _preclimatContentState(),
+    { staleDate: fireMs, alert: { title: '⏰ Pré-climatização', body: `Começa às ${sched.time}` },
+      allow: sched.device_id ? undefined : (d) => getPrefsForDevice(d).la_preclimat !== false })
     .catch(e => console.warn('[apns] preclimat pushStart falhou:', e.message));
 }
 // Encerra a LA agora SE ela for deste agendamento (ao desativar/reagendar/remover).
@@ -565,6 +602,7 @@ async function firePreClimat(sched) {
   _activeSched = sched;
   // Nova sessão: zera a trava e limpa qualquer desligamento pendente de antes.
   _preclimatAutoOffCancelled = false;
+  _preclimatPrevHvac = null;   // descarta estado anterior não-restaurado de uma sessão antiga
   if (_preclimatRestoreTimer) { clearTimeout(_preclimatRestoreTimer); _preclimatRestoreTimer = null; }
   const { temp, fan, duration } = sched;
   console.log(`[preclimat] disparando — temp=${temp}°C fan=${fan} (${sched.time})`);
@@ -613,15 +651,41 @@ async function firePreClimat(sched) {
     return;
   }
 
-  console.log('[preclimat] motor confirmado — enviando HVAC');
+  console.log('[preclimat] motor confirmado — aguardando o carro restaurar o AC');
   _setPreclimatStatus('engine_on', 'Motor ligado ✓',
     { temp, fan, endsAtMs: 0, alert: { title: '🔑 Motor ligado', body: 'Pré-climatização: enviando temperatura e ventilação…' } });
+
+  // Ao acordar, o carro publica fan=-1; só DEPOIS de ligar de fato ele restaura e
+  // reporta o último ajuste do motorista. Espera esse estado real chegar (até ~12s)
+  // antes de capturar — senão guardaríamos o estado "dormindo" e o AC voltaria off.
+  await new Promise(resolve => {
+    const ready = () => {
+      const f = parseInt(state.hvac_fan_speed, 10);
+      return Number.isFinite(f) && f >= 0 && state.hvac_ac_enable != null;
+    };
+    if (ready()) return resolve();
+    let n = 0;
+    const t = setInterval(() => { if (ready() || ++n >= 24) { clearInterval(t); resolve(); } }, 500);
+  });
+  await new Promise(r => setTimeout(r, 1_500));   // margem p/ temp/ac_enable assentarem
+
+  // Se o motorista entrou durante a espera, não sobrescreve o ajuste dele.
+  if (_preclimatAutoOffCancelled) {
+    console.log('[preclimat] entrada detectada antes de aplicar o AC — mantém ajuste do motorista');
+    return;
+  }
+  console.log(`[preclimat] estado real do AC: fan=${state.hvac_fan_speed} ac=${state.hvac_ac_enable} temp=${state.hvac_driver_temp} — enviando HVAC`);
 
   // Captura estado anterior do AC antes de sobrescrever
   const prevFan      = Math.max(0, parseInt(state.hvac_fan_speed, 10) || 0);  // -1/off → 0
   const prevDrvTemp  = parseFloat(state.hvac_driver_temp)    || null;
   const prevPassTemp = parseFloat(state.hvac_passenger_temp) || null;
   const prevAcEnable = state.hvac_ac_enable;   // '0'|'1'|null — pra restaurar no fim
+  const _pc = parseInt(state.hvac_cycle_mode, 10);
+  const prevCycle    = Number.isFinite(_pc) ? _pc : null;   // recirculação anterior (0/1) — restaura no fim
+  // Guarda no escopo de módulo pra também restaurar se o usuário entrar e cancelar
+  // o desligamento (_abortPreclimatAutoOff), não só no timer de fim.
+  _preclimatPrevHvac = { fan: prevFan, drvTemp: prevDrvTemp, passTemp: prevPassTemp, acEnable: prevAcEnable, cycle: prevCycle };
 
   // Passo 3: LIGA o A/C via MQTT.
   // 1) power=1 → car.hvac.power_mode (MESTRE: 0=tudo off, 1=on). É o liga/desliga real.
@@ -634,6 +698,8 @@ async function firePreClimat(sched) {
   mqttClient.publish(`${MQTT_PREFIX}/cmd/hvac/driver_temp`,    tempStr, { qos: 1, retain: false });
   mqttClient.publish(`${MQTT_PREFIX}/cmd/hvac/passenger_temp`, tempStr, { qos: 1, retain: false });
   mqttClient.publish(`${MQTT_PREFIX}/cmd/hvac/fan_speed`,      fanStr,  { qos: 1, retain: false });
+  // Sempre puxa ar de FORA no pré-clima (cycle_mode=1 = ar externo, não recircula).
+  mqttClient.publish(`${MQTT_PREFIX}/cmd/hvac/cycle_mode`,     '1',     { qos: 1, retain: false });
 
   const durStr = duration > 0 ? ` · desliga em ${duration} min` : '';
   const acEndsAtMs = duration > 0 ? Date.now() + duration * 60_000 : 0;
@@ -667,13 +733,8 @@ async function firePreClimat(sched) {
       _setPreclimatStatus('restoring', 'Restaurando AC e desligando motor…',
         { endsAtMs: 0, alert: { title: '⏰ Pré-climatização', body: 'Tempo encerrado — restaurando AC e desligando o motor…' } });
 
-      // Restaura temperatura anterior (se havia) antes de desligar o fan
-      if (prevDrvTemp  !== null) mqttClient.publish(`${MQTT_PREFIX}/cmd/hvac/driver_temp`,    prevDrvTemp.toFixed(1),  { qos: 1, retain: false });
-      if (prevPassTemp !== null) mqttClient.publish(`${MQTT_PREFIX}/cmd/hvac/passenger_temp`, prevPassTemp.toFixed(1), { qos: 1, retain: false });
-      await new Promise(r => setTimeout(r, 1_000));
-      mqttClient.publish(`${MQTT_PREFIX}/cmd/hvac/fan_speed`, prevFan.toString(), { qos: 1, retain: false });
-      // Restaura o master do A/C ao estado anterior (desliga se estava desligado).
-      mqttClient.publish(`${MQTT_PREFIX}/cmd/hvac/ac_enable`, prevAcEnable === '1' ? '1' : '0', { qos: 1, retain: false });
+      // Restaura o AC ao estado anterior (temp/fan/master) antes de desligar o motor.
+      await _restorePreclimatHvac();
       await new Promise(r => setTimeout(r, 3_000));
 
       // Reconfirma a trava após os delays (a porta pode ter aberto nesse meio).
@@ -763,14 +824,16 @@ function saveNotifPrefsByDevice() {
 }
 
 function getPrefsForDevice(deviceId) {
-  // Devices SEM prefs próprias recebem apenas NOTIF_DEFAULTS (tudo OFF).
-  // Não caem mais no fallback `notifPrefs` global — antes isso fazia 7 devices
-  // antigos (sem prefs) receberem tudo automaticamente.
-  // notifPrefs global continua sendo lido só pras listas de places (geofence)
-  // e como ponto de partida quando o user ativa algo no painel global.
+  // Device com prefs próprias (PWA, que salva por device) → elas (override sobre defaults).
   if (deviceId && notifPrefsByDevice[deviceId]) {
     return { ...NOTIF_DEFAULTS, ...notifPrefsByDevice[deviceId] };
   }
+  // Device SEM id → app nativo, que configura via /api/push/prefs (GLOBAL). Usa o
+  // global, senão o gating bloquearia TUDO (era o bug: app nativo registra o token
+  // APNs com device_id vazio e não recebia nenhum banner, mesmo ativando em config).
+  if (!deviceId) return { ...NOTIF_DEFAULTS, ...notifPrefs };
+  // Device COM id mas sem prefs próprias → defaults (tudo OFF), pra não spammar
+  // devices antigos registrados sem configuração.
   return { ...NOTIF_DEFAULTS };
 }
 
@@ -1085,6 +1148,8 @@ const state = {
   hvac_pm25:           null, // null | int µg/m³ (leitura)
   hvac_blower_mode:    null, // null | 0..4 — direção do sopro
   hvac_power_mode:     null, // null | '0'|'1' — mestre do AC
+  seat_belt_warning:   null, // null | '0'=ok | >0 = ocupante sentado sem cinto
+  seated_state:        null, // null | ocupação dos bancos (formato cru, a confirmar)
   door_fl:          null,   // front-left  | 'on'=aberta | 'off'=fechada
   door_fr:          null,   // front-right
   door_rl:          null,   // rear-left
@@ -1380,7 +1445,7 @@ function _scheduleAcParkedAlert() {
     _acParkedTimer = null;
     if ((+state.speed_kmh || 0) > 0) return;             // carro se moveu
     const fan = parseInt(state.hvac_fan_speed, 10) || 0;
-    if (fan === 0) return;                                // AC foi desligado
+    if (fan <= 0) return;                                 // AC desligado (0) ou inválido (-1, carro dormindo)
     if (Date.now() - _acParkedSentAt < 30 * 60_000) return; // re-envio mín 30 min
     _acParkedSentAt = Date.now();
     sendPush('❄️ AC ligado com carro parado',
@@ -2250,6 +2315,12 @@ server.on('upgrade', (req, socket, head) => {
 
 app.use(require('compression')());  // gzip — backup de 11MB cai pra ~1.5MB
 app.use(express.json({ limit: '200mb' }));
+app.use((req, res, next) => {
+  // Sem isso, o URLSession (iOS) pode cachear por heurística respostas de sync
+  // (sem Cache-Control) e servir corpo antigo. Boa prática pra APIs dinâmicas.
+  if (req.path.startsWith('/api')) res.setHeader('Cache-Control', 'no-store, must-revalidate');
+  next();
+});
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ── Autenticação ──────────────────────────────────────────────────────────────
@@ -2780,8 +2851,19 @@ function applyChargeOverrides(c) {
   return eff;
 }
 
+// Cursor de sync incremental: ignora `since` no futuro. O relógio do carro/APK
+// já publicou recargas com timestamp_ms adiantado; o cliente (SyncedList) avança
+// o ponteiro pro maior campo visto e, com um valor futuro, fica preso — `?since=
+// <futuro>` passa a retornar vazio pra sempre e dados novos somem. Clampa pra 0
+// (full sync) quando o cursor está à frente do relógio do servidor.
+function parseSince(req) {
+  const s = parseInt(req.query.since || '0', 10);
+  if (!Number.isFinite(s) || s <= 0) return 0;
+  return s > Date.now() + 60_000 ? 0 : s;
+}
+
 app.get('/api/charges', (req, res) => {
-  const since = parseInt(req.query.since || '0', 10);
+  const since = parseSince(req);
   // Retorna entradas novas (timestamp_ms > since) OU atualizadas (_updated_ms > since)
   const filtered = since > 0
     ? chargesArr.filter(c => (c.timestamp_ms || 0) > since || (c._updated_ms || 0) > since)
@@ -3030,7 +3112,7 @@ function relayRules() {
 
 // GET /api/rules?since=  → array (espelha SyncedList: _updated_ms + X-Tombstones)
 app.get('/api/rules', (req, res) => {
-  const since = parseInt(req.query.since || '0', 10);
+  const since = parseSince(req);
   const arr = since > 0 ? automationRules.filter(r => (r._updated_ms || 0) > since) : automationRules;
   if (Array.isArray(deletedIds.rules) && deletedIds.rules.length) {
     res.setHeader('X-Tombstones', deletedIds.rules.join(','));
@@ -3080,6 +3162,79 @@ function saveAutoPlaces() {
   catch (e) { console.error('saveAutoPlaces:', e.message); }
 }
 
+// Catálogo de chaves do carro (referência pra montar condições/ações de automação).
+// Derivado de CarConstants.kt (APK). `values` descreve o tipo/semântica do valor.
+// `w: true` = gravável (pode ser usado em ação "avançado"). Ordenado por key no GET.
+const CAR_KEYS_CATALOG = [
+  { key: 'car.basic.instant_fuel_consumption', label: 'Consumo instantâneo (combustível)', values: 'número (L/100km)' },
+  { key: 'car.ev_info.instant_energy_consumption', label: 'Consumo instantâneo (energia)', values: 'número (kWh/100km)' },
+  { key: 'car.ev_info.energy_output_percentage', label: 'Saída de energia', values: 'número (%)' },
+  { key: 'car.ev_info.cycle_fuel_consume_info', label: 'Combustível consumido no ciclo', values: 'número' },
+  { key: 'car.ev_info.cycle_energy_consume_info', label: 'Energia consumida no ciclo', values: 'número' },
+  { key: 'car.ev_info.energy_recovery_info', label: 'Energia recuperada (regen)', values: 'número' },
+  { key: 'car.basic.remain_fuel_percentage', label: 'Combustível restante', values: 'número (%)' },
+  { key: 'car.basic.cur_journey_odometer', label: 'Odômetro da viagem', values: 'número (km)' },
+  { key: 'car.basic.total_odometer', label: 'Odômetro total', values: 'número (km)' },
+  { key: 'car.basic.vehicle_speed', label: 'Velocidade', values: 'número (km/h)' },
+  { key: 'car.basic.steering_wheel_angle', label: 'Ângulo do volante', values: 'número (graus, ±)' },
+  { key: 'car.basic.engine_speed', label: 'RPM do motor', values: 'número' },
+  { key: 'car.basic.power_mode', label: 'Power mode (chassi)', values: '0 / 1' },
+  { key: 'car.basic.inside_temp', label: 'Temperatura interna', values: 'número (°C)' },
+  { key: 'car.basic.outside_temp', label: 'Temperatura externa', values: 'número (°C)' },
+  { key: 'car.ev_info.battery_charge_percentage', label: 'Carga da bateria', values: 'número (%)' },
+  { key: 'car.ev_info.soc_of_battery', label: 'SOC da bateria', values: 'número (%)' },
+  { key: 'car.ev_info.cur_battery_power_percentage', label: 'Potência atual da bateria', values: 'número (%)' },
+  { key: 'car.ev_info.cur_charge_current', label: 'Corrente de carga', values: 'número (A)' },
+  { key: 'car.ev_info.power_battery_voltage', label: 'Tensão do pack', values: 'número (V)' },
+  { key: 'car.ev_info.power_battery_current', label: 'Corrente do pack', values: 'número (A)' },
+  { key: 'car.basic.battery_voltage', label: 'Tensão da bateria (basic)', values: 'número (V)' },
+  { key: 'car.ev_info.motor_power', label: 'Potência do motor', values: 'número (kW; + consumo / − regen)' },
+  { key: 'car.ev_info.charging_state', label: 'Estado de recarga', values: '0=Desconectado · 1=Carregando · 2=Programado · 3=Finalizado · 5=Aguardando' },
+  { key: 'car.ev_info.charge_remaining_time', label: 'Tempo restante de recarga', values: 'número (min)' },
+  { key: 'car.basic.vehicle_model1', label: 'ID do modelo (1)', values: 'número' },
+  { key: 'car.basic.vehicle_model2', label: 'ID do modelo (2)', values: 'número' },
+  { key: 'car.ev_setting.charge_soc_limit_config', label: 'Limite de carga (SOC)', values: '0–5 (a confirmar)', w: true },
+  { key: 'car.ev_setting.power_model_config', label: 'Modo PHEV', values: '0=HEV · 1=Prioridade EV · 3=EV puro', w: true },
+  { key: 'car.ev_setting.power_reserve_config', label: 'Reserva de energia (HEV)', values: '1=Inteligente · 2=Prioritário', w: true },
+  { key: 'car.ev_setting.charge_soc_target_config', label: 'SOC alvo (HEV prioritário)', values: '20–80 (%)', w: true },
+  { key: 'car.basic.gear_status', label: 'Marcha', values: '0=N · 2=D · 3=P · 4=R' },
+  { key: 'car.basic.driving_ready_state', label: 'Pronto para condução', values: '0=desligado · 1=pronto' },
+  { key: 'car.comfort_setting.driver_seat_ventilation_level', label: 'Ventilação banco motorista', values: '0=off · 1/2/3=nível' },
+  { key: 'car.comfort_setting.passenger_seat_ventilation_level', label: 'Ventilação banco passageiro', values: '0=off · 1/2/3=nível' },
+  { key: 'car.hvac.driver_temperature', label: 'Temperatura AC (motorista)', values: 'número (°C)' },
+  { key: 'car.hvac.pass_temperature', label: 'Temperatura AC (passageiro)', values: 'número (°C)' },
+  { key: 'car.hvac.fan_speed', label: 'Velocidade do ventilador', values: '1–7' },
+  { key: 'car.hvac.sync_enable', label: 'Sincronizar AC', values: '0=off · 1=on' },
+  { key: 'car.hvac.auto_enable', label: 'AC automático', values: '0=off · 1=on' },
+  { key: 'car.hvac.ac_enable', label: 'AC ligado (mestre)', values: '0=off · 1=on' },
+  { key: 'car.hvac.cycle_mode', label: 'Recirculação do ar', values: '0=interna · 1=externa' },
+  { key: 'car.hvac.acmax_enable', label: 'AC máximo', values: '0=off · 1=on' },
+  { key: 'car.hvac.anion_enable', label: 'Ionizador', values: '0=off · 1=on' },
+  { key: 'car.hvac.aqs_enable', label: 'Recirculação automática (AQS)', values: '0=off · 1=on' },
+  { key: 'car.hvac.heating_enable', label: 'Aquecimento', values: '0=off · 1=on' },
+  { key: 'car.hvac.front_defrost_enable', label: 'Desembaçador dianteiro', values: '0=off · 1=on' },
+  { key: 'car.hvac.rear_defrost_enable', label: 'Desembaçador traseiro', values: '0=off · 1=on' },
+  { key: 'car.hvac.setting.auto_defrost_enable', label: 'Desembaçador automático', values: '0=off · 1=on' },
+  { key: 'car.hvac.pm2.5_value', label: 'PM2.5 (qualidade do ar)', values: 'número (µg/m³)' },
+  { key: 'car.hvac.blower_mode', label: 'Direção do ar', values: '0=frente · 1=frente+pés · 2=pés · 3=pés+parabrisa · 4=parabrisa' },
+  { key: 'car.hvac.power_mode', label: 'AC power mode (mestre)', values: '0=off · 1=on' },
+  { key: 'car.basic.door_lock_status', label: 'Trava das portas', values: '0=trancado · 1=destrancado (a confirmar)' },
+  { key: 'car.basic.door_status', label: 'Portas', values: 'CSV "FL,FR,RL,RR,Trunk" — 0=fechada · 1=aberta' },
+  { key: 'car.basic.window_status', label: 'Vidros', values: 'CSV "FL,FR,RL,RR" — 0=fechado · ≠0=aberto' },
+  { key: 'car.basic.sunroof_status', label: 'Teto solar', values: '0=fechado · >0=aberto' },
+  { key: 'car.basic.seat_belt_warning', label: 'Aviso de cinto', values: '0=ok · >0=ocupante sem cinto' },
+  { key: 'car.basic.seated_state', label: 'Ocupação dos bancos', values: 'CSV (X,X,X,X,X), 0/1 por assento. Use [N] p/ posição: passageiro = car.basic.seated_state[1]' },
+  { key: 'car.drive_setting.drive_mode', label: 'Modo de condução', values: '0=Normal · 1=Sport · 2=Eco · 3=Neve · 4=Areia · 5=Lama · 11=AWD', w: true },
+  { key: 'car.ev_setting.energy_recovery_level', label: 'Nível de regeneração', values: '0=Normal · 1=Alto · 2=Baixo', w: true },
+  { key: 'car.ev.setting.pedal_control_enable', label: 'Condução de um pedal', values: '0=off · 1=on', w: true },
+  { key: 'car.drive_setting.esp_enable', label: 'ESP (estabilidade)', values: '0=off · 1=on', w: true },
+  { key: 'car.drive_setting.steering_wheel_assist_mode', label: 'Assistência da direção', values: '0=Normal · 1=Sport · 2=Conforto', w: true },
+];
+
+app.get('/api/car-keys', (_req, res) => {
+  res.json([...CAR_KEYS_CATALOG].sort((a, b) => a.key.localeCompare(b.key)));
+});
+
 app.get('/api/automation-places', (_req, res) => res.json(automationPlaces));
 
 app.post('/api/automation-places', (req, res) => {
@@ -3094,6 +3249,23 @@ app.post('/api/automation-places', (req, res) => {
   automationPlaces.push(place);
   saveAutoPlaces();
   res.json(place);
+});
+
+app.put('/api/automation-places/:id', (req, res) => {
+  const id = String(req.params.id);
+  const p = automationPlaces.find(x => String(x.id) === id);
+  if (!p) return res.status(404).json({ error: 'não encontrado' });
+  const { name, lat, lng, radius_m } = req.body || {};
+  if (name !== undefined) {
+    if (!String(name).trim()) return res.status(400).json({ error: 'nome obrigatório' });
+    p.name = String(name).trim();
+  }
+  if (lat !== undefined && lat !== null) p.lat = lat;
+  if (lng !== undefined && lng !== null) p.lng = lng;
+  if (radius_m !== undefined && radius_m !== null) p.radius_m = radius_m;
+  p._updated_ms = Date.now();
+  saveAutoPlaces();
+  res.json(p);
 });
 
 app.delete('/api/automation-places/:id', (req, res) => {
@@ -3315,7 +3487,7 @@ app.patch('/api/maintenance/history/:id', (req, res) => {
 
 // ── Abastecimentos ──────────────────────────────────────────────────────────
 app.get('/api/refuels', (req, res) => {
-  const since = parseInt(req.query.since || '0', 10);
+  const since = parseSince(req);
   const all = [...refuels].sort((a, b) => (b.timestamp_ms || 0) - (a.timestamp_ms || 0));
   // Suporta fetch incremental: ?since=ts retorna só registros novos/editados após o ts
   const filtered = since > 0
@@ -4356,7 +4528,7 @@ app.post('/api/autotrips', (req, res) => {
 });
 
 app.get('/api/autotrips', (req, res) => {
-  const since = parseInt(req.query.since || '0', 10);
+  const since = parseSince(req);
   // Inclui também viagens ATUALIZADAS (rename, reprocessamento de locais) via
   // _updated_ms — senão o sync incremental do app (que filtra por startMs) nunca
   // recebe o nome novo de uma viagem antiga.
@@ -4961,7 +5133,7 @@ app.post('/api/notif/prefs/:device_id', (req, res) => {
 });
 
 // ── Live Activities: masters GLOBAIS (nível da instância) ─────────────────────
-const LA_PREF_KEYS = ['la_charge', 'la_preclimat', 'la_trip', 'la_motor', 'la_security', 'la_songpro', 'preclimat_steps'];
+const LA_PREF_KEYS = ['la_charge', 'la_preclimat', 'la_trip', 'la_motor', 'la_security', 'la_songpro', 'la_songpro_trip', 'preclimat_steps'];
 app.get('/api/la-prefs', (_req, res) => {
   const out = {};
   for (const k of LA_PREF_KEYS) out[k] = notifPrefs[k] !== false;   // default ligado
@@ -5068,8 +5240,10 @@ app.post('/api/la/relaunch', async (req, res) => {
       done.push('motor');
     }
     if (['starting', 'engine_on', 'cooling'].includes(preclimatStatus.phase) && _activeSched && notifPrefs.la_preclimat !== false) {
-      await apnsLive.pushStart(PRECLIMAT_LA_TYPE, _activeSched.device_id, _preclimatAttributes(), _preclimatContentState(),
-        { staleDate: preclimatStatus.endsAtMs || (Date.now() + 1800_000), alert: { title: '❄️ Pré-climatização', body: 'Card reativado.' } });
+      const pdev = _activeSched.device_id || '';
+      await apnsLive.pushStart(PRECLIMAT_LA_TYPE, pdev, _preclimatAttributes(), _preclimatContentState(),
+        { staleDate: preclimatStatus.endsAtMs || (Date.now() + 1800_000), alert: { title: '❄️ Pré-climatização', body: 'Card reativado.' },
+          allow: pdev ? undefined : (d) => getPrefsForDevice(d).la_preclimat !== false });
       done.push('pre-clima');
     }
     if (_securityActive && notifPrefs.la_security !== false) {
@@ -5255,7 +5429,8 @@ app.delete('/api/notif/devices/:device_id', (req, res) => {
 // Entradas sem `type` (testes/genéricas) sempre passam.
 app.get('/api/push/history', (req, res) => {
   const deviceId = req.query.device_id || '';
-  if (!deviceId) return res.json(notifHistory);  // sem device: comportamento legado
+  // Mesmo critério do gating de envio (getPrefsForDevice): device sem id usa a
+  // config global; com prefs próprias usa elas. Nunca retorna o histórico cru.
   const prefs = getPrefsForDevice(deviceId);
   const filtered = notifHistory.filter(n => !n.type || prefs[n.type] === true);
   res.json(filtered);
@@ -5381,6 +5556,10 @@ app.post('/api/admin/reprocess-places', async (req, res) => {
             if (force || !at.endKp)   at.endKp   = newEnd   || at.endKp   || null;
             _reprocessStatus.current = (at.startKp || '?') + ' → ' + (at.endKp || '?');
             fs.writeFileSync(filePath, JSON.stringify(d, null, 2));
+            // Atualiza também o array em memória (servido por GET /api/autotrips) —
+            // sem isso os nomes só apareciam após restart do bridge.
+            const _rec = autoTripsArr.find(t => String(t.tripId) === String(d.tripId));
+            if (_rec) { _rec.startKp = at.startKp; _rec.endKp = at.endKp; }
             _reprocessStatus.trips_updated++;
           }
         } catch (e) { _reprocessStatus.errors++; }
@@ -6489,6 +6668,7 @@ function handleTripUpdate(ct, isRetained) {
   if (ct) _lastTripSnapshot = ct;   // guarda o último snapshot não-vazio
   if (!apnsLive.enabled || notifPrefs.la_trip === false) { _tripActive = !!ct; return; }
   if (ct) {
+    _cancelTripEndTimer();   // chegou snapshot → viagem em curso, cancela encerramento agendado
     const cs = _tripContentState(ct, true);
     if (!_tripActive) {
       _tripActive = true;
@@ -6507,16 +6687,42 @@ function handleTripUpdate(ct, isRetained) {
       apnsLive.pushUpdate(TRIP_LA_TYPE, {}, cs, {}).catch(() => {});
     }
   } else if (_tripActive) {
-    // Viagem encerrada. Usa o ÚLTIMO snapshot não-vazio — current_trip já é null
-    // aqui, senão a LA final mostraria 0.0 km (era o bug do "zerou ao encerrar").
-    _tripActive = false;
-    const last = _tripContentState(_lastTripSnapshot || {}, false);
-    _lastTripSnapshot = null;
-    apnsLive.pushUpdate(TRIP_LA_TYPE, {}, last, { isFinal: true, dismissalDate: Date.now() + 5 * 60_000 })
-      .catch(e => console.warn('[apns] trip end falhou:', e.message));
-    // Próxima viagem recria a LA do zero (não fica presa num token de LA morta).
-    apnsLive.clearUpdateTokensByType(TRIP_LA_TYPE);
+    // Viagem encerrada (current_trip foi a null). Mostra o resumo por 5 min e some.
+    _endTripLA(5 * 60_000);
   }
+}
+
+// ── Encerramento da LA de viagem (compartilhado) ──────────────────────────────
+let _tripEndTimer = null;
+function _cancelTripEndTimer() { if (_tripEndTimer) { clearTimeout(_tripEndTimer); _tripEndTimer = null; } }
+
+// Encerra a LA de viagem com o ÚLTIMO snapshot não-vazio (current_trip já é null
+// aqui, senão a LA final mostraria 0.0 km — era o bug do "zerou ao encerrar").
+// dismissMs = quanto tempo o iOS mantém o card no estado final antes de removê-lo.
+function _endTripLA(dismissMs = 5 * 60_000) {
+  _cancelTripEndTimer();
+  if (!_tripActive) return;
+  _tripActive = false;
+  if (!apnsLive.enabled || notifPrefs.la_trip === false) return;
+  const last = _tripContentState(_lastTripSnapshot || {}, false);
+  _lastTripSnapshot = null;
+  apnsLive.pushUpdate(TRIP_LA_TYPE, {}, last, { isFinal: true, dismissalDate: Date.now() + dismissMs })
+    .catch(e => console.warn('[apns] trip end falhou:', e.message));
+  // Próxima viagem recria a LA do zero (não fica presa num token de LA morta).
+  apnsLive.clearUpdateTokensByType(TRIP_LA_TYPE);
+}
+
+// Fallback: o APK nem sempre limpa o current_trip retido ao fim da viagem, então a
+// LA podia ficar presa indefinidamente. Ao desligar o motor, agenda o encerramento
+// da LA em 5 min (cancelado se o motor religar ou chegar novo snapshot antes).
+function _scheduleTripLAEnd() {
+  if (!_tripActive) return;
+  _cancelTripEndTimer();
+  _tripEndTimer = setTimeout(() => {
+    _tripEndTimer = null;
+    if (state.engine_state === '1') return;   // religou no intervalo → viagem continua
+    _endTripLA(0);                            // os 5 min já passaram → remove agora
+  }, 5 * 60_000);
 }
 
 // ── BYD Song Pro (Grasi) — LA paralela de recarga ───────────────────────────
@@ -6533,13 +6739,42 @@ let _songProZeroSinceMs = 0;
 // não só durante a sessão de recarga. Persistido em disco pra sobreviver a restart.
 const SONGPRO_FILE = path.join(DATA_DIR, 'songpro.json');
 let _songProLatest  = { soc: 0, powerKw: 0, ts: 0 };
+// Localização do carro (da telemetria) e do celular do monitor (reportada pelo app),
+// + cache da rota de carro carro→celular (OSRM). Pra LA de viagem mostrar distância/ETA.
+let _spCarLoc   = { lat: 0, lng: 0, ts: 0 };
+let _phoneLoc   = { lat: 0, lng: 0, ts: 0 };
+let _routeToPhone = { distKm: null, etaMin: null, ms: 0, busy: false };
+
+// Calcula (throttle 30s) a rota de CARRO do carro até o celular via OSRM público.
+// Fire-and-forget: atualiza o cache; a LA lê o último valor no próximo ciclo.
+async function _maybeRouteToPhone() {
+  const now = Date.now();
+  if (_routeToPhone.busy || now - _routeToPhone.ms < 30_000) return;
+  if (!(_spCarLoc.lat && _spCarLoc.lng) || !(_phoneLoc.lat && _phoneLoc.lng)) return;
+  if (now - _phoneLoc.ts > 15 * 60_000) return;   // celular sem reportar há 15min → não calcula
+  _routeToPhone.busy = true;
+  try {
+    const url = `https://router.project-osrm.org/route/v1/driving/`
+      + `${_spCarLoc.lng},${_spCarLoc.lat};${_phoneLoc.lng},${_phoneLoc.lat}`
+      + `?overview=false&alternatives=false&steps=false`;
+    const r = await fetch(url, { signal: AbortSignal.timeout(8000) });
+    const j = await r.json();
+    const route = j && j.routes && j.routes[0];
+    if (route) {
+      _routeToPhone.distKm = Math.round((route.distance / 1000) * 10) / 10;
+      _routeToPhone.etaMin = Math.round(route.duration / 60);
+      _routeToPhone.ms = now;
+    }
+  } catch (_) { /* mantém último valor em caso de falha de rede */ }
+  finally { _routeToPhone.busy = false; }
+}
 let _songProLastEnd = { soc: 0, sessionKwh: 0, endedMs: 0 };  // resumo da última recarga
 let _songProTele    = { ts: 0 };   // telemetria completa (último payload mapeado)
 // Estado pra detecção de borda das notificações (lock/porta/soc/etc + odômetro
 // da última manutenção). Persistido pra não repetir alertas após restart.
 let _spEv = { locked: null, doorOpen: null, carOn: null, moving: false, movingNotified: false, socLow: false,
               batt12: false, cellTemp: false, imbal: false, tyrePress: false, tyreTemp: false,
-              curLocId: null, lastMaintOdo: 0 };
+              curLocId: null, lastMaintOdo: 0, tripDistM: 0, tripStartSoc: 0 };
 let _songProTrail = [];      // trilha [{t,lat,lng,spd,kw,soc},…] desde a última ignição
 let _songProLastTrail = null; // { trail, startMs, endMs } da viagem anterior (linha do tempo)
 try {
@@ -6631,6 +6866,10 @@ function _songProEvents(o) {
   }
   _spEv.carOn = carOn;
 
+  // Localização atual do carro (pra distância/ETA até o celular na LA de viagem).
+  const _clat = +o.location_latitude || 0, _clng = +o.location_longitude || 0;
+  if (_clat && _clng) _spCarLoc = { lat: _clat, lng: _clng, ts: nowMs };
+
   // ── Viagem por MOVIMENTO ──────────────────────────────────────────────────
   // tripStartMs = início do deslocamento; tripLastMs = último movimento. Volta a
   // andar após >60min parado (ou 1ª vez) = viagem NOVA (salva a anterior, zera a
@@ -6645,6 +6884,8 @@ function _songProEvents(o) {
       }
       _songProTrail = [];
       _spEv.tripStartMs = nowMs;
+      _spEv.tripDistM = 0;                 // zera odômetro da viagem nova
+      _spEv.tripStartSoc = soc;            // SOC no início (p/ consumo da LA)
       _spEv.movingNotified = false;
     }
     _spEv.tripLastMs = nowMs;
@@ -6662,6 +6903,8 @@ function _songProEvents(o) {
     if (lat || lng) {
       const last = _songProTrail[_songProTrail.length - 1];
       if (!last || haversineM(lat, lng, last.lat, last.lng) > 5) {
+        // Acumula distância só durante o deslocamento (entre tripStartMs e idle).
+        if (last && _spEv.tripStartMs) _spEv.tripDistM += haversineM(lat, lng, last.lat, last.lng);
         // Ponto enriquecido p/ a linha do tempo (scrubber): tempo, posição,
         // velocidade, potência de tração (kW) e SOC no instante.
         _songProTrail.push({
@@ -6742,6 +6985,75 @@ function _songProEvents(o) {
       _spNotify('byd_maintenance_km', '🔧 Revisão do BYD', `Atingiu ${mark.toLocaleString('pt-BR')} km — revisão recomendada (a cada ${SP_THRESH.maintKm.toLocaleString('pt-BR')} km).`);
       _spEv.lastMaintOdo = odo;
     } else { _spEv.lastMaintOdo = odo; }
+  }
+
+  // Live Activity de deslocamento do BYD (tela bloqueada). Opt-in por device.
+  _evalSongProTripLA();
+}
+
+// ── LA de deslocamento do BYD (tempo · km · SOC) ──────────────────────────────
+const SONGPRO_TRIP_LA_TYPE = 'SongProTripActivityAttributes';
+let _songProTripActive = !!(state._songpro_trip_la_active);
+let _songProTripLastStartMs = 0;
+
+function _songProTripEnabled() {
+  return Object.values(notifPrefsByDevice).some(p => p && p.la_songpro_trip === true);
+}
+
+function _songProTripContentState(active) {
+  const distKm  = _spEv.tripDistM / 1000;
+  const timeSec = _spEv.tripStartMs
+    ? Math.max(0, Math.round(((_spEv.tripLastMs || Date.now()) - _spEv.tripStartMs) / 1000))
+    : 0;
+  const soc = Math.round(_songProLatest.soc || 0);
+  const avgSpeedKmh = timeSec > 30 ? distKm / (timeSec / 3600) : 0;
+  return {
+    distKm:      Math.round(distKm * 10) / 10,
+    timeSec,
+    socPct:      soc,
+    avgSpeedKmh: Math.round(avgSpeedKmh),
+    active:      !!active,
+    updatedAtMs: Date.now(),
+    distToPhoneKm: _routeToPhone.distKm,   // null se ainda não calculado/indisponível
+    etaToPhoneMin: _routeToPhone.etaMin,
+  };
+}
+
+// Em deslocamento = carro ligado, viagem iniciada e movimento recente (<60min de
+// idle). Quando desliga ou fica parado demais, encerra. Espelha o handleTripUpdate
+// do Haval, mas dirigido pela telemetria do BYD (não há current_trip publicado).
+function _evalSongProTripLA() {
+  if (!apnsLive.enabled) return;
+  const idleMs   = _spEv.tripLastMs ? Date.now() - _spEv.tripLastMs : Infinity;
+  const inTrip   = !!_spEv.carOn && !!_spEv.tripStartMs && idleMs < 60 * 60_000;
+
+  if (inTrip && _songProTripEnabled()) {
+    _maybeRouteToPhone();   // atualiza cache de distância/ETA até o celular (async, throttle)
+    const cs = _songProTripContentState(true);
+    if (!_songProTripActive) {
+      _songProTripActive = true;
+      state._songpro_trip_la_active = true; scheduleStateSave();
+    }
+    // Decide por TOKEN, não pela flag: se não há update token (LA não está viva no
+    // device — flag presa de uma viagem anterior, app reinstalado, LA expirada),
+    // (re)inicia com pushStart. Throttle de 30s evita spam enquanto o token não chega.
+    if (apnsLive.hasUpdateToken(SONGPRO_TRIP_LA_TYPE)) {
+      apnsLive.pushUpdate(SONGPRO_TRIP_LA_TYPE, {}, cs, {}).catch(() => {});
+    } else if (Date.now() - _songProTripLastStartMs > 30_000) {
+      _songProTripLastStartMs = Date.now();
+      apnsLive.pushStart(SONGPRO_TRIP_LA_TYPE, '', { carName: 'BYD Song Pro' }, cs,
+        { staleDate: Date.now() + 6 * 3600_000,
+          alert: { title: '🚗 BYD em deslocamento', body: 'Acompanhe o trajeto na tela bloqueada.' },
+          allow: (deviceId) => getPrefsForDevice(deviceId).la_songpro_trip === true })
+        .catch(e => console.warn('[songpro-trip] pushStart falhou:', e.message));
+    }
+  } else if (_songProTripActive) {
+    _songProTripActive = false;
+    state._songpro_trip_la_active = false; scheduleStateSave();
+    apnsLive.pushUpdate(SONGPRO_TRIP_LA_TYPE, {}, _songProTripContentState(false),
+      { isFinal: true, dismissalDate: Date.now() + 5 * 60_000 })
+      .catch(e => console.warn('[songpro-trip] end falhou:', e.message));
+    apnsLive.clearUpdateTokensByType(SONGPRO_TRIP_LA_TYPE);
   }
 }
 
@@ -7072,14 +7384,23 @@ function _endMotorLA() {
 // quando tudo for fechado/trancado. Suprimida com o motor ligado (dirigindo
 // com vidro aberto é normal).
 const SECURITY_LA_TYPE = 'SecurityActivityAttributes';
-let _securityActive = false;
-let _securitySig    = '';   // assinatura do último conteúdo enviado (anti-spam de updates)
+// Persistido em state.json (_security_la_active/_sig) — sem isso o restart do
+// bridge perdia o flag e a LA orfã ficava no iPhone pra sempre.
+let _securityActive = !!state._security_la_active;
+let _securitySig    = state._security_la_sig || '';
 // Portão de saída: só alerta "desprotegido" depois que o motorista REALMENTE saiu.
 //  • Caso normal (dirigiu e desligou): exige a porta do MOTORISTA (dianteira esq.).
 //  • Caso destrancou com o motor já desligado: aí qualquer porta abrindo vale.
 // Enquanto isso não ocorre (você ainda dentro), segura o alerta. Religar zera tudo.
-let _exitedSincePark   = false;
-let _unlockedWhileOff  = false;   // carro foi destrancado com o motor desligado?
+// Persistidos em state.json — sem isso, restart do bridge perdia o gate e a LA
+// existente parava de receber updates (sintoma: conteúdo da LA ficava stale).
+let _exitedSincePark   = !!state._security_exited_since_park;
+let _unlockedWhileOff  = !!state._security_unlocked_while_off;
+function _persistSecurityGate() {
+  state._security_exited_since_park   = _exitedSincePark;
+  state._security_unlocked_while_off  = _unlockedWhileOff;
+  scheduleStateSave();
+}
 
 const _DOOR_LABELS = { fl: 'Porta diant. esq.', fr: 'Porta diant. dir.', rl: 'Porta tras. esq.', rr: 'Porta tras. dir.' };
 const _WIN_LABELS  = { fl: 'Vidro diant. esq.', fr: 'Vidro diant. dir.', rl: 'Vidro tras. esq.', rr: 'Vidro tras. dir.' };
@@ -7118,13 +7439,26 @@ function _securityContentState(snap, active) {
 }
 // Reavalia e cria/atualiza/encerra a LA. Chamado após cada transição de
 // lock/door/window/sunroof/trunk e do motor.
+// Ocupação dos bancos (car.basic.seated_state, CSV "{0,0,0,0,0}"):
+//   true  = alguém sentado · false = ninguém · null = indisponível
+function _anyoneSeated() {
+  const raw = state.seated_state;
+  if (raw == null || raw === '') return null;
+  const parts = String(raw).replace(/[^0-9,]/g, '').split(',').filter(x => x !== '');
+  if (parts.length === 0) return null;
+  return parts.some(x => x !== '0');
+}
 function _evalSecurityAlert() {
   if (!apnsLive.enabled) return;
   const parked = state.engine_state === '0';   // só estacionado (evita falso alarme dirigindo)
   const snap = _securitySnapshot();
-  // Só alerta se o motorista já saiu (porta abriu após desligar). Se ainda não
-  // abriu nenhuma porta, segura — você provavelmente continua dentro do carro.
-  if (parked && _exitedSincePark && snap.issues.length > 0 && notifPrefs.la_security !== false) {
+  // "Exposto" = motorista fora do carro. Sinal preferido: ocupação dos bancos
+  // (seated_state) — ninguém sentado → exposto. Se indisponível, cai no gate antigo
+  // (_exitedSincePark: porta abriu após desligar). Evita o alerta ficar preso a uma
+  // transição de porta que pode vir "retida" após restart do bridge.
+  const seated  = _anyoneSeated();
+  const exposed = seated === false ? true : (seated === true ? false : _exitedSincePark);
+  if (parked && exposed && snap.issues.length > 0 && notifPrefs.la_security !== false) {
     const cs  = _securityContentState(snap, true);
     // Assinatura só dos campos que importam (ignora updatedAtMs) — evita reenviar
     // update a cada mensagem do GWM quando nada mudou.
@@ -7132,23 +7466,58 @@ function _evalSecurityAlert() {
     if (!_securityActive) {
       _securityActive = true;
       _securitySig    = sig;
+      state._security_la_active = true; state._security_la_sig = sig; scheduleStateSave();
       apnsLive.pushStart(SECURITY_LA_TYPE, '', { carName: 'Haval H6 PHEV' }, cs,
         { staleDate: Date.now() + 12 * 3600_000,
           alert: { title: '🔓 Veículo desprotegido', body: snap.issues.join(' · ') } })
         .catch(e => console.warn('[apns] security pushStart falhou:', e.message));
     } else if (sig !== _securitySig) {
       _securitySig = sig;
+      state._security_la_sig = sig; scheduleStateSave();
       apnsLive.pushUpdate(SECURITY_LA_TYPE, {}, cs, {}).catch(() => {});
     }
     // sig igual → nada mudou, não reenvia (anti-spam).
   } else if (_securityActive) {
     _securityActive = false;
     _securitySig    = '';
+    state._security_la_active = false; state._security_la_sig = ''; scheduleStateSave();
     apnsLive.pushUpdate(SECURITY_LA_TYPE, {}, _securityContentState(snap, false),
-      { isFinal: true, dismissalDate: Date.now() + 10_000 })
+      { isFinal: true, dismissalDate: Date.now() + 60_000 })   // tudo seguro → mostra 60s e encerra
       .catch(e => console.warn('[apns] security end falhou:', e.message));
   }
 }
+
+// Força reconciliação da LA de segurança com o snapshot atual, ignorando o gate
+// `_exitedSincePark` (que sumia em restart do bridge e deixava LA com conteúdo
+// stale no iPhone). Se issues=0, encerra; senão atualiza com snapshot atual.
+app.post('/api/security/refresh', requireAuth, async (req, res) => {
+  if (!apnsLive.enabled) return res.status(503).json({ error: 'apns desativado' });
+  try {
+    const snap = _securitySnapshot();
+    if (snap.issues.length === 0) {
+      await apnsLive.pushUpdate(SECURITY_LA_TYPE, {}, _securityContentState(snap, false),
+        { isFinal: true, dismissalDate: Date.now() + 60_000 });   // tudo seguro → 60s e encerra
+      _securityActive = false; _securitySig = '';
+    } else {
+      const sig = snap.issues.join('|');
+      await apnsLive.pushUpdate(SECURITY_LA_TYPE, {}, _securityContentState(snap, true), {});
+      _securityActive = true; _securitySig = sig;
+    }
+    state._security_la_active = _securityActive; state._security_la_sig = _securitySig;
+    scheduleStateSave();
+    res.json({ ok: true, issues: snap.issues });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET estado de segurança atual — o app usa pra encerrar LOCALMENTE a LA de
+// "veículo desprotegido" presa (push-to-start sem update token não dá pra encerrar
+// por push enquanto o app está fechado; ao abrir, o app consulta e encerra local).
+app.get('/api/security/status', requireAuth, (_req, res) => {
+  const snap = _securitySnapshot();
+  res.json({ issues: snap.issues, active: _securityActive });
+});
 
 function handleChargingStateTransition(value, isRetained) {
   const prev = prevChargingState;
@@ -7248,7 +7617,7 @@ function handleChargingStateTransition(value, isRetained) {
           sessionKwh: Math.max(_chargeFinalKwh, +state.charge_session_kwh || 0),
           remainingMin: 0, charging: false,
           targetPct: chargeLimit, updatedAtMs: Date.now(),
-        }, { isFinal: true, alert: { title: aTitle, body: aBody } })
+        }, { isFinal: true, dismissalDate: Date.now() + 30 * 60_000, alert: { title: aTitle, body: aBody } })
           .catch(e => console.warn('[apns] charge-stopped end falhou:', e.message));
       }
     }
@@ -7402,7 +7771,7 @@ function sendChargeLiveUpdate(isFinal = false) {
       charging: !isFinal,
       targetPct: +state.charge_limit_pct || 100,
       updatedAtMs: now,
-    }, { isFinal, alert: isFinal ? { title, body } : undefined })
+    }, { isFinal, dismissalDate: isFinal ? Date.now() + 30 * 60_000 : undefined, alert: isFinal ? { title, body } : undefined })
       .catch(err => console.warn('[apns] push falhou:', err.message));
   }
 }
@@ -7412,7 +7781,8 @@ function sendChargeLiveUpdate(isFinal = false) {
 //  - push-to-start token (por TIPO de LA): permite o servidor CRIAR a LA.
 //  - update token (por atividade): permite atualizar/encerrar uma LA específica.
 const LA_TYPES = ['ChargeActivityAttributes', 'PreClimatActivityAttributes', 'TripActivityAttributes',
-                  'MotorActivityAttributes', 'SecurityActivityAttributes', 'SongProActivityAttributes'];
+                  'MotorActivityAttributes', 'SecurityActivityAttributes', 'SongProActivityAttributes',
+                  'SongProTripActivityAttributes'];
 
 // push-to-start token (por tipo de Live Activity)
 // GET /api/songpro/status — % da bateria do BYD Song Pro sempre, + infos da
@@ -7552,6 +7922,98 @@ app.patch('/api/songpro/locations/:id', (req, res) => {
   res.json(loc);
 });
 
+// Localização do celular do monitor — usada pra calcular distância/ETA (carro→celular)
+// na LA de viagem do BYD. O app reporta periodicamente enquanto a LA está ativa.
+app.post('/api/phone-location', (req, res) => {
+  const lat = +(req.body && req.body.lat), lng = +(req.body && req.body.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || (lat === 0 && lng === 0))
+    return res.status(400).json({ error: 'lat/lng válidos obrigatórios' });
+  _phoneLoc = { lat, lng, ts: Date.now() };
+  res.json({ ok: true });
+});
+
+// ── Planejamento de rota p/ previsão de SOC na chegada ──────────────────────
+// Geocoding (Nominatim) + rota de carro (OSRM) + perfil de elevação (Open-Meteo).
+// Retorna distância, duração, subida e descida acumuladas. O app projeta o SOC.
+async function _geocode(q) {
+  const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=${encodeURIComponent(q)}`;
+  const r = await fetch(url, { headers: { 'User-Agent': 'EcotripImpulse/1.0 (haval ecotrip)' }, signal: AbortSignal.timeout(8000) });
+  const j = await r.json();
+  if (!Array.isArray(j) || !j.length) return null;
+  return { lat: +j[0].lat, lng: +j[0].lon, name: j[0].display_name };
+}
+// Busca a rota: Mapbox driving-traffic (ETA COM trânsito ao vivo) se houver MAPBOX_TOKEN;
+// senão OSRM (sem trânsito). Retorna distância(m), duração(s), geometria e flag de trânsito.
+async function _fetchRoute(fromLat, fromLng, toLat, toLng) {
+  const tok = process.env.MAPBOX_TOKEN;
+  if (tok) {
+    try {
+      const mu = `https://api.mapbox.com/directions/v5/mapbox/driving-traffic/`
+        + `${fromLng},${fromLat};${toLng},${toLat}`
+        + `?access_token=${tok}&geometries=geojson&overview=full&alternatives=false`;
+      const mr = await fetch(mu, { signal: AbortSignal.timeout(9000) });
+      const mj = await mr.json();
+      const rt = mj && mj.routes && mj.routes[0];
+      if (rt) return { distance: rt.distance, duration: rt.duration, coords: rt.geometry.coordinates, traffic: true };
+      console.warn('[route] Mapbox sem rota:', mj && mj.message);
+    } catch (e) { console.warn('[route] Mapbox falhou, caindo p/ OSRM:', e.message); }
+  }
+  const u = `https://router.project-osrm.org/route/v1/driving/${fromLng},${fromLat};${toLng},${toLat}`
+    + `?overview=full&geometries=geojson&alternatives=false&steps=false`;
+  const rr = await fetch(u, { signal: AbortSignal.timeout(9000) });
+  const rj = await rr.json();
+  const route = rj && rj.routes && rj.routes[0];
+  if (!route) return null;
+  return { distance: route.distance, duration: route.duration, coords: route.geometry.coordinates, traffic: false };
+}
+async function _routeElevation(fromLat, fromLng, toLat, toLng) {
+  const route = await _fetchRoute(fromLat, fromLng, toLat, toLng);
+  if (!route) return null;
+  const coords = route.coords;   // [lng,lat] ao longo da rota
+  // Downsample p/ ≤100 pontos (limite do Open-Meteo) — ceil garante não estourar.
+  const step = Math.max(1, Math.ceil(coords.length / 99));
+  const pts = []; for (let i = 0; i < coords.length; i += step) pts.push(coords[i]);
+  if (pts[pts.length - 1] !== coords[coords.length - 1]) pts.push(coords[coords.length - 1]);
+  const lats = pts.map(c => c[1]).join(','), lngs = pts.map(c => c[0]).join(',');
+  let climbM = 0, descentM = 0;
+  try {
+    const er = await fetch(`https://api.open-meteo.com/v1/elevation?latitude=${lats}&longitude=${lngs}`, { signal: AbortSignal.timeout(9000) });
+    const ej = await er.json();
+    const elev = ej && ej.elevation;
+    if (Array.isArray(elev)) {
+      for (let i = 1; i < elev.length; i++) {
+        const d = elev[i] - elev[i - 1];
+        if (d > 0) climbM += d; else descentM += -d;
+      }
+    }
+  } catch (_) { /* elevação indisponível → climb/descent ficam 0 */ }
+  return {
+    distanceKm: Math.round((route.distance / 1000) * 10) / 10,
+    durationMin: Math.round(route.duration / 60),
+    climbM: Math.round(climbM), descentM: Math.round(descentM),
+    traffic: route.traffic,
+  };
+}
+app.get('/api/route-plan', async (req, res) => {
+  try {
+    const fromLat = +req.query.from_lat, fromLng = +req.query.from_lng;
+    if (!Number.isFinite(fromLat) || !Number.isFinite(fromLng))
+      return res.status(400).json({ error: 'from_lat/from_lng obrigatórios' });
+    let toLat = +req.query.to_lat, toLng = +req.query.to_lng, toName = req.query.q || '';
+    if (!Number.isFinite(toLat) || !Number.isFinite(toLng)) {
+      if (!req.query.q) return res.status(400).json({ error: 'to_lat/to_lng ou q (destino) obrigatórios' });
+      const g = await _geocode(String(req.query.q));
+      if (!g) return res.status(404).json({ error: 'destino não encontrado' });
+      toLat = g.lat; toLng = g.lng; toName = g.name;
+    }
+    const plan = await _routeElevation(fromLat, fromLng, toLat, toLng);
+    if (!plan) return res.status(502).json({ error: 'rota indisponível' });
+    res.json({ ...plan, destLat: toLat, destLng: toLng, destName: toName });
+  } catch (e) {
+    res.status(500).json({ error: String(e.message || e) });
+  }
+});
+
 app.post('/api/activity/pts-token', (req, res) => {
   const { type, push_to_start_token, device_id } = req.body || {};
   if (!type || !push_to_start_token || !LA_TYPES.includes(String(type)))
@@ -7566,6 +8028,18 @@ app.post('/api/activity/start', (req, res) => {
   if (!push_token || !activity_id) return res.status(400).json({ error: 'push_token e activity_id obrigatórios' });
   const t = LA_TYPES.includes(String(type)) ? String(type) : 'ChargeActivityAttributes';
   apnsLive.registerUpdateToken(t, String(activity_id), device_id ? String(device_id) : '', String(push_token));
+  // Reconcilia a LA de segurança ao registrar o token: se ela iniciou mas o carro
+  // já está seguro, encerra agora. Cobre o race em que o "end" foi enviado ANTES do
+  // app reportar o update token (a LA ficava presa em "Veículo desprotegido").
+  if (t === SECURITY_LA_TYPE && apnsLive.enabled) {
+    const snap = _securitySnapshot();
+    if (snap.issues.length === 0) {
+      _securityActive = false; _securitySig = '';
+      state._security_la_active = false; state._security_la_sig = ''; scheduleStateSave();
+      apnsLive.pushUpdate(SECURITY_LA_TYPE, {}, _securityContentState(snap, false),
+        { isFinal: true, dismissalDate: Date.now() + 60_000 }).catch(() => {});   // tudo seguro → 60s e encerra
+    }
+  }
   res.json({ ok: true, registered: apnsLive.tokenCount() });
 });
 app.post('/api/activity/stop', (req, res) => {
@@ -7615,7 +8089,7 @@ function applyGwmEntity(id, value, isRetained = false) {
     if (!isRetained && prev !== undefined && prev !== null && prev !== norm) {
       if (field === 'lock_state') {
         if (norm === 'on') {
-          if (state.engine_state === '0') _unlockedWhileOff = true;   // destrancou parado
+          if (state.engine_state === '0') { _unlockedWhileOff = true; _persistSecurityGate(); }   // destrancou parado
           addEvent('lock_open',  'Carro destrancado');
         } else             addEvent('lock_close', 'Carro trancado');
       } else if (field === 'ac_state') {
@@ -7624,7 +8098,7 @@ function applyGwmEntity(id, value, isRetained = false) {
       } else if (field === 'door_trunk') {
         if (norm === 'on') {
           // Porta-malas só conta como "saída" no caso de destrancar parado.
-          if (state.engine_state === '0' && _unlockedWhileOff) _exitedSincePark = true;
+          if (state.engine_state === '0' && _unlockedWhileOff) { _exitedSincePark = true; _persistSecurityGate(); }
           addEvent('trunk_open',  'Porta-malas aberta');
           sendPush('🧳 Porta-malas aberta', 'Verifique se está segura.', 'trunk_open');
         } else {
@@ -7639,7 +8113,7 @@ function applyGwmEntity(id, value, isRetained = false) {
         if (norm === 'on') {
           // Saída confirmada: porta do MOTORISTA (fl) com motor desligado, OU
           // qualquer porta quando o carro foi destrancado com o motor já parado.
-          if (state.engine_state === '0' && (side === 'fl' || _unlockedWhileOff)) _exitedSincePark = true;
+          if (state.engine_state === '0' && (side === 'fl' || _unlockedWhileOff)) { _exitedSincePark = true; _persistSecurityGate(); }
           _lastDoorOpenMs = Date.now();
           // Trava de segurança da pré-clima: porta aberta = motorista entrou →
           // cancela o desligamento remoto (esta via, applyGwmEntity, é a que roda
@@ -7693,7 +8167,7 @@ function applyGwmEntity(id, value, isRetained = false) {
     state.engine_state = value;
     if (!isRetained && prev !== undefined && prev !== null && prev !== value) {
       if (value === '1') {
-        _exitedSincePark = false; _unlockedWhileOff = false;   // voltou/dirigindo → rearma o portão
+        _exitedSincePark = false; _unlockedWhileOff = false; _persistSecurityGate();   // voltou/dirigindo → rearma o portão
         addEvent('engine_on',  'Motor ligado');
         sendPush('🔑 Motor ligado',  'O veículo foi ligado.', 'engine_on');
         checkRefuelOnEngineOn();
@@ -7822,6 +8296,7 @@ function applyMqttMessage(key, value, isRetained = false) {
           addEvent('engine_on',  'Motor ligado');
           sendPush('🔑 Motor ligado',  'O veículo foi ligado.', 'engine_on');
           _cancelTrunkForgottenTimer();
+          _cancelTripEndTimer();   // religou → não encerra a LA de viagem
           _resetTyreTrip();
           // AUTO-START: motor ligou SEM comando nosso (>30s) E sem ninguém entrar
           // (nenhuma porta aberta nos últimos 3 min) E fora de pré-clima ativa.
@@ -7848,6 +8323,7 @@ function applyMqttMessage(key, value, isRetained = false) {
           _scheduleTrunkForgottenAlert();
           _resetTyreTrip();
           _endMotorLA();
+          _scheduleTripLAEnd();   // desligou → encerra a LA de viagem em 5 min (fallback p/ current_trip preso)
         } else {
           _cancelWindowForgottenTimer();
           _cancelLockForgottenTimer();
@@ -7922,8 +8398,8 @@ function applyMqttMessage(key, value, isRetained = false) {
     case 'hvac_fan_speed': {
       state.hvac_fan_speed = value;
       const fan = parseInt(value, 10) || 0;
-      if (fan === 0) {
-        _cancelAcParkedTimer(); // AC desligado — cancela alerta pendente
+      if (fan <= 0) {
+        _cancelAcParkedTimer(); // AC desligado (0) ou inválido (-1, carro dormindo) — cancela alerta pendente
       } else if (state.engine_state === '0') {
         _scheduleAcParkedAlert(); // AC ligou com motor parado — agenda alerta
       }
@@ -7942,6 +8418,13 @@ function applyMqttMessage(key, value, isRetained = false) {
     case 'hvac_pm25':           state.hvac_pm25           = value; break; // µg/m³ (leitura)
     case 'hvac_blower_mode':    state.hvac_blower_mode    = value; break; // 0..4 direção do sopro
     case 'hvac_power_mode':     state.hvac_power_mode     = value; break; // 0=AC off (mestre) | 1=on
+    case 'seat_belt_warning':   state.seat_belt_warning   = value; break; // 0=ok | >0 ocupante sem cinto
+    case 'seated_state': {
+      const prevSeat = state.seated_state;
+      state.seated_state = value;   // ocupação dos bancos (CSV cru)
+      if (!isRetained && prevSeat !== value) _evalSecurityAlert();   // saiu/entrou → reavalia desproteção
+      break;
+    }
     case 'door_fl':
     case 'door_fr':
     case 'door_rl':

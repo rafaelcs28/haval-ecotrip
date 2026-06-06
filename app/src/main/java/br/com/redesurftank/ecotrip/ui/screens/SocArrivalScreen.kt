@@ -71,10 +71,17 @@ fun SocArrivalScreen(tripManager: TripManager, onBack: () -> Unit) {
                 val desc   = json.optInt("descentM", 0)
                 val durMin = json.optInt("durationMin", 0)
                 val name   = json.optString("destName", dest.trim())
-                // Energia: consumo plano + efeito da elevação (subida custa, descida regenera ~parcial)
-                val kwhPerKm = tripManager.getRecentKwhPerKm()
+                // Tração pela VELOCIDADE média (modelo aprendido das viagens EV) + elevação
+                // + climatização (AC + temperatura ATUAIS × tempo da rota).
+                val vMed     = if (durMin > 0) distKm / (durMin / 60f) else 40f
+                val kwhPerKm = tripManager.predictKwhPerKm(vMed)
                 val cap      = tripManager.getBatteryCapacityKwh()
-                val energy   = (distKm * kwhPerKm + climb * 0.0064f - desc * 0.0035f).coerceAtLeast(0f)
+                val acOn     = br.com.redesurftank.ecotrip.managers.MqttManager.getInstance().latestHvacAcEnable == 1
+                val tempOut  = tripManager.getOutsideTempC()
+                val eClimate = tripManager.acKwhPerHour(tempOut, acOn) * (durMin / 60f)
+                val eDrive   = distKm * kwhPerKm
+                val eElev    = climb * 0.0064f - desc * 0.0035f
+                val energy   = (eDrive + eElev + eClimate).coerceAtLeast(0f)
                 val cur      = tripManager.getCurrentSocPct().toInt()
                 val pred     = (cur - (energy / cap * 100f)).toInt().coerceIn(0, 100)
                 plan = RoutePlan(name, distKm, durMin, etaFromNow(durMin), climb, desc, cur, pred, energy, cap)

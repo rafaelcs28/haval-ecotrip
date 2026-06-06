@@ -638,10 +638,81 @@ class TripManager private constructor() {
 
     // ── SOC na chegada ──────────────────────────────────────────────────────
     fun getCurrentSocPct(): Float = latestSocPct
+    fun getOutsideTempC(): Float = latestOutsideTempC ?: 28f
     fun getBatteryCapacityKwh(): Float = synchronized(lock) { batteryCapKwh }
+    /** Climatização (kWh/h): AC ligado custa ~0,5–1,5/h crescendo com o |Δtemp 22°C|; sem AC ~0,12. */
+    fun acKwhPerHour(tempC: Float, acOn: Boolean): Float =
+        if (acOn) (0.5f + 0.07f * kotlin.math.abs(tempC - 22f)).coerceIn(0.5f, 1.5f) else 0.12f
     /** Consumo recente (kWh/km) — net lifetime/dist; fallback ~0,16 (16 kWh/100km). */
     fun getRecentKwhPerKm(): Float = synchronized(lock) {
         if (lifeDistKm > 1f) ((lifeEnergyKwh - lifeRegenKwh) / lifeDistKm).coerceIn(0.05f, 0.5f) else 0.16f
+    }
+
+    // ── Modelo de consumo aprendido: kWh/km = a + b·v² + c/v (v em km/h) ─────────
+    // Curva em U: rodovia (v alto, arrasto ∝v²) e trânsito parado (v baixo, AC/aux ∝1/v)
+    // consomem mais. Ajustado por mínimos quadrados das viagens 100% EV (dist+tempo+kWh).
+    @Volatile private var consA = 0.16f
+    @Volatile private var consB = 0f
+    @Volatile private var consC = 0f
+    @Volatile private var consFitted = false
+    @Volatile var consFitN = 0   // nº de viagens usadas (pra UI)
+
+    /** Consumo previsto (kWh/km) numa velocidade média; usa o modelo se calibrado. */
+    fun predictKwhPerKm(vKmh: Float): Float {
+        if (!consFitted) return getRecentKwhPerKm()
+        val v = vKmh.coerceIn(8f, 130f)
+        return (consA + consB * v * v + consC / v).coerceIn(0.03f, 0.6f)
+    }
+
+    /** Reajusta a curva a partir do histórico de viagens 100% EV. */
+    fun recomputeConsumptionModel() {
+        val pts = synchronized(lock) {
+            autoTripHistory
+                .filter { it.fuelL < 0.05f && it.distKm >= 2f && it.timeSec > 120L && it.netKwh > 0.1f }
+                .map {
+                    val tH  = it.timeSec / 3600f
+                    val tmp = it.outsideTempC ?: 28f          // viagens antigas sem temp → assume ~28°C (Goiânia)
+                    val clim = acKwhPerHour(tmp, true) * tH    // assume AC ligado no passado (clima quente)
+                    val driveKwh = (it.netKwh - clim).coerceAtLeast(0.05f)   // energia só de TRAÇÃO
+                    val v = it.distKm / tH
+                    Pair(v.toDouble(), (driveKwh / it.distKm).toDouble())
+                }
+                .filter { it.first in 5.0..130.0 && it.second in 0.03..0.7 }
+        }
+        if (pts.size < 6 || (pts.maxOf { it.first } - pts.minOf { it.first }) < 15.0) {
+            consFitted = false; consFitN = pts.size; return
+        }
+        // Mínimos quadrados p/ features [1, v², 1/v]: resolve (XᵀX)·c = Xᵀy (3x3).
+        val m = Array(3) { DoubleArray(4) }
+        for ((v, y) in pts) {
+            val f = doubleArrayOf(1.0, v * v, 1.0 / v)
+            for (i in 0..2) { for (j in 0..2) m[i][j] += f[i] * f[j]; m[i][3] += f[i] * y }
+        }
+        val sol = solve3x3(m) ?: run { consFitted = false; return }
+        val (a, b, c) = sol
+        // Valida: consumo plausível em toda a faixa útil de velocidade.
+        val ok = listOf(20.0, 40.0, 60.0, 90.0, 120.0).all { v ->
+            val y = a + b * v * v + c / v; y in 0.03..0.6
+        }
+        if (!ok) { consFitted = false; return }
+        consA = a.toFloat(); consB = b.toFloat(); consC = c.toFloat()
+        consFitted = true; consFitN = pts.size
+        Log.i(TAG, "Modelo consumo: a=%.4f b=%.6f c=%.3f (n=%d)".format(a, b, c, pts.size))
+    }
+
+    private fun solve3x3(m: Array<DoubleArray>): Triple<Double, Double, Double>? {
+        // Eliminação de Gauss com pivotamento parcial.
+        for (col in 0..2) {
+            var piv = col
+            for (r in col + 1..2) if (kotlin.math.abs(m[r][col]) > kotlin.math.abs(m[piv][col])) piv = r
+            if (kotlin.math.abs(m[piv][col]) < 1e-12) return null
+            val t = m[col]; m[col] = m[piv]; m[piv] = t
+            for (r in 0..2) if (r != col) {
+                val f = m[r][col] / m[col][col]
+                for (k in col..3) m[r][k] -= f * m[col][k]
+            }
+        }
+        return Triple(m[0][3] / m[0][0], m[1][3] / m[1][1], m[2][3] / m[2][2])
     }
     fun bridgeUrlPublic(): String = getBridgeHttpUrl()
     fun bridgeTokenPublic(): String = getBridgeToken()
@@ -1338,6 +1409,7 @@ class TripManager private constructor() {
         )
         autoTripHistory.add(entry)
         calibrateCapacity(entry.netKwh, entry.startSocPct, entry.endSocPct)   // auto-calibra capacidade EV
+        recomputeConsumptionModel()   // reaprende a curva consumo×velocidade
         // Retenção: descarta viagens com mais de 90 dias
         val cutoff90d = System.currentTimeMillis() - 90L * 24 * 3_600_000L
         autoTripHistory.removeAll { it.endMs < cutoff90d }
@@ -1855,6 +1927,7 @@ class TripManager private constructor() {
                 val type = object : TypeToken<List<AutoTripEntry>>() {}.type
                 autoTripHistory.addAll(gson.fromJson<List<AutoTripEntry>>(atJson, type))
                 AppLogger.i(TAG, "loadFromPrefs: ${autoTripHistory.size} auto-trips carregados")
+                recomputeConsumptionModel()   // calibra a curva consumo×velocidade ao iniciar
             } catch (e: Exception) {
                 AppLogger.e(TAG, "loadFromPrefs: ERRO ao parsear auto_trip_history_json — ${e.message}")
             }
