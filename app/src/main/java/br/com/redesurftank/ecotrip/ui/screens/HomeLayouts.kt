@@ -74,7 +74,7 @@ data class HomeData(
             trunk = false, sunroof = true, locked = false,
             winFL = false, winFR = false, winRL = false, winRR = false,
             frontLight = true,
-            turnLeft = true, turnRight = true,
+            turnLeft = false, turnRight = false,
         )
     }
 }
@@ -272,20 +272,29 @@ fun InteractiveCar(d: HomeData, modifier: Modifier = Modifier) {
             Image(painterResource(res), null, Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
         }
         layer(R.drawable.h6)
-        // Retrovisores: só com a porta dianteira FECHADA (a porta aberta já traz o espelho no PNG).
-        if (!d.doorFL) layer(R.drawable.retrovisor_esquerdo)
-        if (!d.doorFR) layer(R.drawable.retrovisor_direito)
         if (d.frontLight) layer(R.drawable.farol)
-        if (d.turnLeft || d.turnRight) {   // setas PISCAM (~1 Hz); os 2 lados = pisca-alerta
-            val tr = rememberInfiniteTransition(label = "turn")
-            val phase by tr.animateFloat(
-                initialValue = 0f, targetValue = 1f,
-                animationSpec = infiniteRepeatable(tween(900, easing = LinearEasing), RepeatMode.Restart),
-                label = "blink",
-            )
-            val a = if (phase < 0.5f) 1f else 0f
-            if (d.turnLeft)  Image(painterResource(R.drawable.seta_esquerda_porta_fechada), null, Modifier.fillMaxSize(), contentScale = ContentScale.Fit, alpha = a)
-            if (d.turnRight) Image(painterResource(R.drawable.seta_direita_porta_fechada),  null, Modifier.fillMaxSize(), contentScale = ContentScale.Fit, alpha = a)
+        // Retrovisor/seta no MESMO arco curvo (coluna A): cinza = retrovisor (porta fechada);
+        // âmbar piscando = seta ligada (substitui o retrovisor). Mesma forma/posição.
+        val tr = rememberInfiniteTransition(label = "turn")
+        val phase by tr.animateFloat(
+            initialValue = 0f, targetValue = 1f,
+            animationSpec = infiniteRepeatable(tween(900, easing = LinearEasing), RepeatMode.Restart),
+            label = "blink",
+        )
+        val blink = if (phase < 0.5f) 1f else 0f
+        val amber = Color(0xFFFFC107)
+        val mirrorGray = Color(0xFF3C424B)
+        val arc: @Composable (Int, Color, Float) -> Unit = { res, tint, alpha ->
+            Image(painterResource(res), null, Modifier.fillMaxSize(), contentScale = ContentScale.Fit,
+                alpha = alpha, colorFilter = androidx.compose.ui.graphics.ColorFilter.tint(tint))
+        }
+        when {                                   // ESQUERDA
+            d.turnLeft -> arc(R.drawable.retrovisor_esquerdo, amber, blink)
+            !d.doorFL  -> arc(R.drawable.retrovisor_esquerdo, mirrorGray, 1f)
+        }
+        when {                                   // DIREITA
+            d.turnRight -> arc(R.drawable.retrovisor_direito, amber, blink)
+            !d.doorFR   -> arc(R.drawable.retrovisor_direito, mirrorGray, 1f)
         }
         if (d.doorFL) layer(R.drawable.porta_dianteira_esquerda_aberta)
         if (d.doorFR) layer(R.drawable.porta_dianteira_direita_aberta)

@@ -151,18 +151,23 @@ fun ConsumptionScreen() {
             carTurnLeft  = mqttManager.isTurnLeftActive()
             carTurnRight = mqttManager.isTurnRightActive()
             if (ticks % 5 == 0) tripManager.tickTime()
-            // SOC e combustível chegam raramente via listener passivo no GWM —
-            // busca ativa a cada 60 s garante que o auto-trip capture o valor correto ao finalizar
-            if (ticks % 60 == 30) {
-                // Busca ativa dos sinais que chegam raramente via listener passivo
-                val socVal  = withContext(Dispatchers.IO) {
-                    carManager.fetchCurrent(CarConstants.CAR_EV_INFO_SOC_OF_BATTERY.value)?.trim()
-                }
-                val fuelVal = withContext(Dispatchers.IO) {
-                    carManager.fetchCurrent(CarConstants.CAR_BASIC_REMAIN_FUEL_PERCENTAGE.value)?.trim()
-                }
-                socVal?.let  { tripManager.onDataChanged(CarConstants.CAR_EV_INFO_SOC_OF_BATTERY.value, it) }
-                fuelVal?.let { tripManager.onDataChanged(CarConstants.CAR_BASIC_REMAIN_FUEL_PERCENTAGE.value, it) }
+            // Sinais da viagem (distância/energia/regen/SOC/combustível) chegam RARAMENTE
+            // pelo listener passivo do GWM — a distância "travava" por centenas de metros.
+            // Busca ativa a cada 5 s e alimenta o TripManager: a home/viagem atualiza em
+            // ~tempo real (odômetro tem resolução ~100 m). Misturar com o push é seguro:
+            // onDist/onEnergy só somam o DELTA do último valor visto.
+            if (ticks % 5 == 2) {
+                suspend fun pull(key: String) = withContext(Dispatchers.IO) { carManager.fetchCurrent(key)?.trim() }
+                val odo  = pull(CarConstants.CAR_BASIC_CUR_JOURNEY_ODOMETER.value)
+                val enr  = pull(CarConstants.CAR_EV_INFO_CYCLE_ENERGY_CONSUME_INFO.value)
+                val rgn  = pull(CarConstants.CAR_EV_INFO_ENERGY_RECOVERY_INFO.value)
+                val soc  = pull(CarConstants.CAR_EV_INFO_SOC_OF_BATTERY.value)
+                val fuel = pull(CarConstants.CAR_BASIC_REMAIN_FUEL_PERCENTAGE.value)
+                odo?.let  { tripManager.onDataChanged(CarConstants.CAR_BASIC_CUR_JOURNEY_ODOMETER.value, it) }
+                enr?.let  { tripManager.onDataChanged(CarConstants.CAR_EV_INFO_CYCLE_ENERGY_CONSUME_INFO.value, it) }
+                rgn?.let  { tripManager.onDataChanged(CarConstants.CAR_EV_INFO_ENERGY_RECOVERY_INFO.value, it) }
+                soc?.let  { tripManager.onDataChanged(CarConstants.CAR_EV_INFO_SOC_OF_BATTERY.value, it) }
+                fuel?.let { tripManager.onDataChanged(CarConstants.CAR_BASIC_REMAIN_FUEL_PERCENTAGE.value, it) }
             }
         }
     }
