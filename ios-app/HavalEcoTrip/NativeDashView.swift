@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import MapKit
 
 struct NativeDashView: View {
     @ObservedObject private var store = CarStore.shared
@@ -48,7 +49,9 @@ struct NativeDashView: View {
                 statusCard
                 if store.isCharging { chargingCard } else { HStack(spacing: 14) { batteryCard; fuelCard } }
                 climateCard
+                quickActionsCard
                 openingsCard
+                locationCard
                 revisaoCard
                 arrivalCard
                 tripCard
@@ -284,6 +287,59 @@ struct NativeDashView: View {
                 Text("\(f0(store.outsideTemp))°").font(.system(size: 16, weight: .medium)).foregroundStyle(DS.text)
                 Text("externa").font(.caption).foregroundStyle(DS.muted)
                 if acActive { DSChip(text: "AC", color: DS.blue, filled: true) }
+            }
+        }
+    }
+
+    // MARK: ações rápidas (atalhos de controle direto na home)
+    private var quickActionsCard: some View {
+        let winOpen = ["window_fl","window_fr","window_rl","window_rr"].contains { store.str($0) == "on" }
+        return DSCard {
+            HStack(spacing: 10) {
+                quickTile("Pré-clima", "fan.fill", DS.blue) { showPreclimat = true }
+                quickTile(winOpen ? "Fechar vidros" : "Abrir vidros", "macwindow", DS.teal) {
+                    Task { busy = true; _ = await store.action(winOpen ? "windows_close" : "windows_open"); busy = false }
+                }
+                quickTile("Porta-malas", "suitcase.fill", DS.muted) {
+                    Task { busy = true; _ = await store.action("trunk_open"); busy = false }
+                }
+            }
+        }
+    }
+
+    private func quickTile(_ label: String, _ icon: String, _ tint: Color, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 5) {
+                Image(systemName: icon).font(.system(size: 18, weight: .medium)).foregroundStyle(tint).frame(height: 22)
+                Text(label).font(.system(size: 11, weight: .medium)).foregroundStyle(DS.text).lineLimit(1).minimumScaleFactor(0.7)
+            }
+            .frame(maxWidth: .infinity).frame(height: 52)
+            .background(DS.panel2).clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 12).stroke(DS.border, lineWidth: 1))
+        }
+        .buttonStyle(.plain).disabled(busy)
+    }
+
+    // MARK: mini-mapa da localização do carro
+    @ViewBuilder private var locationCard: some View {
+        if store.hasGps {
+            DSCard {
+                VStack(alignment: .leading, spacing: 8) {
+                    Map(initialPosition: .region(MKCoordinateRegion(center: store.coordinate,
+                                                                    latitudinalMeters: 700, longitudinalMeters: 700)),
+                        interactionModes: []) {
+                        Annotation("", coordinate: store.coordinate) { CarMarker(size: 28, heading: store.heading) }
+                    }
+                    .frame(height: 130)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .allowsHitTesting(false)
+                    if !store.address.isEmpty {
+                        HStack(spacing: 6) {
+                            Image(systemName: "location.fill").font(.caption2).foregroundStyle(DS.green)
+                            Text(store.address).font(.caption).foregroundStyle(DS.muted).lineLimit(1)
+                        }
+                    }
+                }
             }
         }
     }
