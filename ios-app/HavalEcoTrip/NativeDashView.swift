@@ -43,7 +43,7 @@ struct NativeDashView: View {
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 14) {
+            VStack(spacing: 8) {
                 header
                 statusCard
                 if store.isCharging { chargingCard } else { HStack(spacing: 14) { batteryCard; fuelCard } }
@@ -150,11 +150,11 @@ struct NativeDashView: View {
 
     private func iconButton(icon: String, tint: Color, caption: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            VStack(spacing: 4) {
-                Image(systemName: icon).font(.system(size: 18, weight: .medium)).foregroundStyle(tint)
-                    .frame(width: 44, height: 44).background(DS.panel2).clipShape(Circle())
+            VStack(spacing: 3) {
+                Image(systemName: icon).font(.system(size: 16, weight: .medium)).foregroundStyle(tint)
+                    .frame(width: 40, height: 40).background(DS.panel2).clipShape(Circle())
                     .overlay(Circle().stroke(DS.border, lineWidth: 1))
-                Text(caption).font(.system(size: 11, weight: .medium)).foregroundStyle(DS.muted)
+                Text(caption).font(.system(size: 10, weight: .medium)).foregroundStyle(DS.muted)
             }
         }
         .buttonStyle(.plain).disabled(busy)

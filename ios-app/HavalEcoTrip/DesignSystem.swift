@@ -60,7 +60,7 @@ struct DSCard<Content: View>: View {
             }
             content
         }
-        .padding(16)
+        .padding(.horizontal, 14).padding(.vertical, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background {
             if glass {
@@ -83,20 +83,21 @@ struct DSMetric: View {
     var unit: String = ""
     let label: String
     var color: Color = DS.text
+    var compact: Bool = false   // fonte menor p/ linhas com 4 colunas (não corta a unidade)
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            HStack(alignment: .firstTextBaseline, spacing: 3) {
-                Text(value).font(.system(size: 21, weight: .semibold, design: .rounded))
+            HStack(alignment: .firstTextBaseline, spacing: 2) {
+                Text(value).font(.system(size: compact ? 17 : 21, weight: .semibold, design: .rounded))
                     .foregroundStyle(color).monospacedDigit()
                     .lineLimit(1).minimumScaleFactor(0.5).layoutPriority(1)
                 if !unit.isEmpty {
-                    Text(unit).font(.system(size: 11, weight: .regular)).foregroundStyle(DS.muted)
-                        .lineLimit(1).minimumScaleFactor(0.5)
+                    Text(unit).font(.system(size: compact ? 9 : 11, weight: .regular)).foregroundStyle(DS.muted)
+                        .lineLimit(1).minimumScaleFactor(0.4).layoutPriority(1)
                 }
             }
-            Text(label.uppercased()).font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(DS.muted).tracking(0.4).lineLimit(1).minimumScaleFactor(0.7)
+            Text(label.uppercased()).font(.system(size: compact ? 9 : 10, weight: .semibold))
+                .foregroundStyle(DS.muted).tracking(0.3).lineLimit(1).minimumScaleFactor(0.6)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -192,6 +193,9 @@ struct LevelBadge: View {
     let unit: String
     let label: String
     let tint: Color
+    var markerFraction: Double? = nil   // tick na barra (ex.: limite de carga)
+    var markerColor: Color = Color.white.opacity(0.85)   // cor do tick (feedback de transição)
+    var labelColor: Color = DS.muted                     // cor do rótulo (feedback de transição)
 
     var body: some View {
         HStack(spacing: 12) {
@@ -205,9 +209,14 @@ struct LevelBadge: View {
                     ZStack(alignment: .leading) {
                         Capsule().fill(DS.panel2)
                         Capsule().fill(tint).frame(width: max(4, g.size.width * min(1, max(0, fraction))))
+                        if let m = markerFraction, m > 0, m < 1 {
+                            RoundedRectangle(cornerRadius: 1).fill(markerColor)
+                                .frame(width: 2, height: 11)
+                                .offset(x: g.size.width * CGFloat(min(1, max(0, m))) - 1)
+                        }
                     }
                 }.frame(height: 6)
-                Text(label.uppercased()).font(.system(size: 9, weight: .semibold)).foregroundStyle(DS.muted).tracking(0.4)
+                Text(label.uppercased()).font(.system(size: 9, weight: .semibold)).foregroundStyle(labelColor).tracking(0.4)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
