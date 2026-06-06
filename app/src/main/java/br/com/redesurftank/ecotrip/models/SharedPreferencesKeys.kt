@@ -62,6 +62,9 @@ object SharedPreferencesKeys {
     // Layout da tela inicial: 0=Tesla, 1=Europeu, 2=By Claude (default)
     const val HOME_LAYOUT = "home_layout"
 
+    // Capacidade ÚTIL da bateria EV (kWh) — auto-calibrada observando SOC↓ por kWh
+    const val BATTERY_CAP_KWH = "battery_cap_kwh"
+
     // Sessão de recarga em andamento — persiste para sobreviver reinício do app enquanto carregando
     const val CHARGE_SESSION_ENERGY_KWH = "charge_session_energy_kwh"
     const val CHARGE_SESSION_SEC        = "charge_session_sec"

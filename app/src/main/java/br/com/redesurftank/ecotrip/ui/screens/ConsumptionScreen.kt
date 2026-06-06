@@ -15,6 +15,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.material.icons.filled.BatteryChargingFull
 import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.LocalGasStation
+import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.BugReport
@@ -175,6 +176,7 @@ fun ConsumptionScreen() {
     var showChargeHistory by remember { mutableStateOf(false) }
     var showAutoTrips     by remember { mutableStateOf(false) }
     var showSettings      by remember { mutableStateOf(false) }
+    var showSocArrival    by remember { mutableStateOf(false) }
     var showLog           by remember { mutableStateOf(false) }
     var minAutoTripDist   by remember { mutableStateOf(tripManager.getMinAutoTripDist()) }
     var lastCompletedTrip by remember { mutableStateOf<AutoTripEntry?>(null) }
@@ -347,6 +349,11 @@ fun ConsumptionScreen() {
         )
     }
 
+    if (showSocArrival) {
+        SocArrivalScreen(tripManager = tripManager, onBack = { showSocArrival = false })
+        return
+    }
+
     if (showSettings) {
         SettingsScreen(
             backupManager = backupMgr,
@@ -471,6 +478,7 @@ fun ConsumptionScreen() {
                 }
             }
         }
+        IconButton(onClick = { showSocArrival = true }) { Icon(Icons.Default.Place, "SOC na chegada", tint = NeonLime) }
         IconButton(onClick = { showLog = true }) { Icon(Icons.Default.BugReport, "Log", tint = TextSecondary) }
         IconButton(onClick = { showChargeHistory = true }) { Icon(Icons.Default.BatteryChargingFull, "Recargas", tint = AuroraTeal) }
         IconButton(onClick = { showAutoTrips = true }) { Icon(Icons.Default.DirectionsCar, "Viagens Auto", tint = AccentBlue) }

@@ -251,6 +251,7 @@ class TripManager private constructor() {
     private var lifeEnergyKwh: Float = 0f
     private var lifeRegenKwh:  Float = 0f
     private var lifeDistKm:    Float = 0f
+    private var batteryCapKwh: Float = 34f   // capacidade EV útil (kWh), auto-calibrada
     private var lifeTimeSec:   Long  = 0L
     // Lifetime session baselines — track energy/regen/dist/time deltas within a session
     private var lifeSessStartEnergy: Float   = 0f
@@ -634,6 +635,25 @@ class TripManager private constructor() {
     /** Para MqttManager: última posição GPS conhecida do veículo. */
     fun getLastGps(): Pair<Double, Double> =
         Pair(telemetryRecorder?.latestLat ?: 0.0, telemetryRecorder?.latestLng ?: 0.0)
+
+    // ── SOC na chegada ──────────────────────────────────────────────────────
+    fun getCurrentSocPct(): Float = latestSocPct
+    fun getBatteryCapacityKwh(): Float = synchronized(lock) { batteryCapKwh }
+    /** Consumo recente (kWh/km) — net lifetime/dist; fallback ~0,16 (16 kWh/100km). */
+    fun getRecentKwhPerKm(): Float = synchronized(lock) {
+        if (lifeDistKm > 1f) ((lifeEnergyKwh - lifeRegenKwh) / lifeDistKm).coerceIn(0.05f, 0.5f) else 0.16f
+    }
+    fun bridgeUrlPublic(): String = getBridgeHttpUrl()
+    fun bridgeTokenPublic(): String = getBridgeToken()
+    /** Auto-calibra a capacidade observando SOC↓ por kWh líquido numa viagem com queda relevante. */
+    private fun calibrateCapacity(netKwh: Float, startSoc: Float, endSoc: Float) {
+        val drop = startSoc - endSoc
+        if (drop < 5f || netKwh < 0.5f) return
+        val est = (netKwh / (drop / 100f)).coerceIn(20f, 60f)   // clamp de sanidade
+        synchronized(lock) { batteryCapKwh = batteryCapKwh * 0.8f + est * 0.2f }   // EMA
+        if (::prefs.isInitialized)
+            prefs.edit().putFloat(SharedPreferencesKeys.BATTERY_CAP_KWH, batteryCapKwh).apply()
+    }
 
     /** Para StatsScreen: baseline de período (último checkpoint ≤ startMs). */
     fun getLifetimeBaselineAt(startMs: Long): LifetimeCheckpoint? = synchronized(lock) {
@@ -1317,6 +1337,7 @@ class TripManager private constructor() {
             elevLossM    = ((telemetryRecorder?.elevLossM ?: 0.0) - autoTripStartElevLoss).coerceAtLeast(0.0).toFloat(),
         )
         autoTripHistory.add(entry)
+        calibrateCapacity(entry.netKwh, entry.startSocPct, entry.endSocPct)   // auto-calibra capacidade EV
         // Retenção: descarta viagens com mais de 90 dias
         val cutoff90d = System.currentTimeMillis() - 90L * 24 * 3_600_000L
         autoTripHistory.removeAll { it.endMs < cutoff90d }
@@ -1806,6 +1827,7 @@ class TripManager private constructor() {
         lifeEnergyKwh = prefs.getFloat(SharedPreferencesKeys.LIFETIME_ENERGY_KWH,  0f)
         lifeRegenKwh  = prefs.getFloat(SharedPreferencesKeys.LIFETIME_REGEN_KWH,   0f)
         lifeDistKm    = prefs.getFloat(SharedPreferencesKeys.LIFETIME_DISTANCE_KM, 0f)
+        batteryCapKwh = prefs.getFloat(SharedPreferencesKeys.BATTERY_CAP_KWH, 34f)
         lifeTimeSec   = prefs.getLong (SharedPreferencesKeys.LIFETIME_TIME_SEC,    0L)
         lifeChargeKwh = prefs.getFloat(SharedPreferencesKeys.LIFETIME_CHARGE_KWH,  0f)
         lifeChargeSec = prefs.getLong (SharedPreferencesKeys.LIFETIME_CHARGE_SEC,   0L)
