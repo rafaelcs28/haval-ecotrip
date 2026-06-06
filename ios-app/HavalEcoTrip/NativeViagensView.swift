@@ -157,6 +157,7 @@ struct NativeViagensView: View {
     @State private var expandedId: Double?
     @State private var routeTrip: Trip?
     @State private var search = ""
+    @State private var showInsights = false
 
     private var fromDate: Binding<Date> { Binding(get: { fromTS > 0 ? Date(timeIntervalSince1970: fromTS) : Date() }, set: { fromTS = $0.timeIntervalSince1970 }) }
     private var toDate: Binding<Date> { Binding(get: { toTS > 0 ? Date(timeIntervalSince1970: toTS) : Date() }, set: { toTS = $0.timeIntervalSince1970 }) }
@@ -200,7 +201,7 @@ struct NativeViagensView: View {
                         }.font(.system(size: 14)).foregroundStyle(DS.text).tint(DS.green).environment(\.locale, Locale(identifier: "pt_BR"))
                     }
                 }
-                if tab == 0 { searchBar; historico } else { estatisticas }
+                if tab == 0 { searchBar; historico } else { insightsButton; estatisticas }
             }
             .padding(16)
         }
@@ -211,6 +212,25 @@ struct NativeViagensView: View {
         // só entravam via pull-to-refresh manual. Mesmo ajuste feito em Recargas.
         .task { await loader.load() }
         .sheet(item: $routeTrip) { t in RouteMapSheet(trip: t) }
+        .sheet(isPresented: $showInsights) {
+            InsightsSheet(trips: loader.trips, priceKwh: car.priceKwh, priceGas: car.priceGas, kmPerLGas: car.kmPerL)
+        }
+    }
+
+    private var insightsButton: some View {
+        DSCard {
+            Button { showInsights = true } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "leaf.fill").font(.title3).foregroundStyle(DS.green)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Economia EV & CO₂").font(.subheadline.weight(.semibold)).foregroundStyle(DS.text)
+                        Text("Quanto você economizou vs. gasolina").font(.caption).foregroundStyle(DS.muted)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(DS.muted)
+                }
+            }
+        }
     }
 
     private var periodChips: some View {

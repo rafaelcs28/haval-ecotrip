@@ -44,6 +44,7 @@
 		77472ED6F598E53605506B96 /* ChargeActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = C110A5E3EADD0B1D4DA52BE6 /* ChargeActivityAttributes.swift */; };
 		77EF0F880D1B98744B21C2C5 /* CarIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD754B29F48E190AD2D8648F /* CarIntents.swift */; };
 		783721D1E37916F23F2149D8 /* BydSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = E810689502D9D028774D6792 /* BydSettings.swift */; };
+		832349E92040F2B54EA3E451 /* InsightsSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = B70CD6CCACB7545098A80F39 /* InsightsSheet.swift */; };
 		87640D1FE3604A94892D6723 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36AA01E4F54D0727EF341F49 /* ContentView.swift */; };
 		89B5CF62DAD11B34026CB4C5 /* HavalEcoTripWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 192BA3BE182AC3D50F636DA9 /* HavalEcoTripWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		8B1DEE4FCD8F3304A07A33C9 /* MotorActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 636438201B328EA34B285F3A /* MotorActivityAttributes.swift */; };
@@ -185,6 +186,7 @@
 		B41BC4A6A889A1B5BBFCF7C6 /* PwaWebView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PwaWebView.swift; sourceTree = "<group>"; };
 		B5A372CA99C89C5712EE54BC /* HavalEcoTripApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HavalEcoTripApp.swift; sourceTree = "<group>"; };
 		B6A433A5AA48336FD73F1C85 /* ChargeActivityLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChargeActivityLiveActivity.swift; sourceTree = "<group>"; };
+		B70CD6CCACB7545098A80F39 /* InsightsSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsightsSheet.swift; sourceTree = "<group>"; };
 		B9BBC1E7EB38A5621A6751AA /* ShareExtension.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = ShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		BF4805E2E098ECAD51E0A441 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		C0D6E362CB348E539FA519CC /* NativeDriveView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeDriveView.swift; sourceTree = "<group>"; };
@@ -240,6 +242,7 @@
 				7BA445855D7E9BCBC513DE19 /* HavalEcoTrip.entitlements */,
 				B5A372CA99C89C5712EE54BC /* HavalEcoTripApp.swift */,
 				968AA8DFD87E74A832ED71A5 /* Info.plist */,
+				B70CD6CCACB7545098A80F39 /* InsightsSheet.swift */,
 				DA22E658C7AE7CB3679725CF /* LANDiscovery.swift */,
 				19F1EE1E1159233D66EEAFA8 /* LiveActivityPush.swift */,
 				4A804763C29A6FBD8871C5A7 /* LivePreview.swift */,
@@ -576,6 +579,7 @@
 				07FC719000D999AB80CF8C4C /* ControlSheets.swift in Sources */,
 				3ED1321FB7B61D7ADDAA032F /* DesignSystem.swift in Sources */,
 				AACDCF32BF0A0A36A4A2F84F /* HavalEcoTripApp.swift in Sources */,
+				832349E92040F2B54EA3E451 /* InsightsSheet.swift in Sources */,
 				2BBB45182185499D3B954868 /* LANDiscovery.swift in Sources */,
 				4C94F890D15203640F57B31D /* LiveActivityPush.swift in Sources */,
 				E7A22E919521A94E9004D8F2 /* LivePreview.swift in Sources */,
