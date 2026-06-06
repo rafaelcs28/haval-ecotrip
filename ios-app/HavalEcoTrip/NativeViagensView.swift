@@ -51,7 +51,8 @@ final class TripsLoader: ObservableObject {
     let sync = SyncedList(name: "autotrips", path: "/api/autotrips", idKeys: ["startMs", "tripId"], incremental: true, tombstoneKey: "autotrips")
     @Published var loading = false
     @Published var diag = ""
-    @Published var geoNames: [Double: String] = [:]   // tripId(startMs) → "Bairro, Cidade"
+    @Published var geoStart: [Double: String] = [:]   // tripId(startMs) → "Bairro, Cidade" (origem)
+    @Published var geoEnd:   [Double: String] = [:]   // tripId(startMs) → "Bairro, Cidade" (destino)
     private let geocoder = CLGeocoder()
     private var bag: AnyCancellable?
     private var prefetching = false
@@ -95,20 +96,33 @@ final class TripsLoader: ObservableObject {
         Task { await prefetchTrajetos() }
     }
 
-    /// Nome de exibição: name salvo → conhecidos → geocode (bairro+cidade) → "Trajeto".
+    /// Nome de exibição: name salvo → "origem → destino", onde cada lado é o local
+    /// conhecido (startKp/endKp) ou, se não cadastrado, o bairro/cidade via geocode.
     func displayName(_ t: Trip) -> String {
         if let n = t.rawName { return n }
-        let ks = t.knownStart, ke = t.knownEnd
-        if ks != nil || ke != nil { return "\(ks ?? "?") → \(ke ?? "?")" }
-        return geoNames[t.id] ?? "Trajeto"
+        let start = t.knownStart ?? geoStart[t.id]
+        let end   = t.knownEnd   ?? geoEnd[t.id]
+        if start == nil && end == nil { return "Trajeto" }
+        return "\(start ?? "…") → \(end ?? "…")"
     }
+    /// Geocodifica QUALQUER ponta sem local conhecido (origem e/ou destino),
+    /// pra não sobrar "?" quando só um lado é cadastrado.
     func geocodeIfNeeded(_ t: Trip) {
-        guard t.rawName == nil, t.knownStart == nil, t.knownEnd == nil, geoNames[t.id] == nil, let c = t.endCoord else { return }
-        geoNames[t.id] = "Trajeto"   // evita repetir
-        geocoder.reverseGeocodeLocation(CLLocation(latitude: c.latitude, longitude: c.longitude)) { [weak self] places, _ in
+        guard t.rawName == nil else { return }
+        if t.knownStart == nil, geoStart[t.id] == nil, let c = t.startCoord {
+            geoStart[t.id] = "…"
+            reverseGeo(c) { [weak self] name in self?.geoStart[t.id] = name }
+        }
+        if t.knownEnd == nil, geoEnd[t.id] == nil, let c = t.endCoord {
+            geoEnd[t.id] = "…"
+            reverseGeo(c) { [weak self] name in self?.geoEnd[t.id] = name }
+        }
+    }
+    private func reverseGeo(_ c: CLLocationCoordinate2D, _ done: @escaping (String) -> Void) {
+        geocoder.reverseGeocodeLocation(CLLocation(latitude: c.latitude, longitude: c.longitude)) { places, _ in
             guard let p = places?.first else { return }
             let parts = [p.subLocality ?? p.thoroughfare, p.locality].compactMap { $0 }
-            if !parts.isEmpty { Task { @MainActor in self?.geoNames[t.id] = parts.joined(separator: ", ") } }
+            if !parts.isEmpty { Task { @MainActor in done(parts.joined(separator: ", ")) } }
         }
     }
 
@@ -191,7 +205,9 @@ struct NativeViagensView: View {
         .background(DS.bg.ignoresSafeArea())
         .overlay { if loader.loading && loader.trips.isEmpty { ProgressView().tint(DS.green) } }
         .refreshable { await loader.load() }
-        .task { if loader.trips.isEmpty { await loader.load() } }
+        // Sincroniza SEMPRE ao abrir (não só com cache vazio): senão viagens novas
+        // só entravam via pull-to-refresh manual. Mesmo ajuste feito em Recargas.
+        .task { await loader.load() }
         .sheet(item: $routeTrip) { t in RouteMapSheet(trip: t) }
     }
 
@@ -300,10 +316,11 @@ struct NativeViagensView: View {
                     }
                 }
                 DSCard {
-                    HStack {
-                        DSMetric(value: totalKm > 1 ? f1(kwh/totalKm*100) : "—", unit: "kWh/100", label: "Consumo médio")
-                        DSMetric(value: totalKm > 1 ? brl(cost/totalKm) : "—", label: "R$/km", color: DS.green)
-                        DSMetric(value: f1(fuel), unit: "L", label: "Gasolina", color: DS.orange)
+                    HStack(spacing: 6) {
+                        DSMetric(value: totalKm > 1 ? f1(kwh/totalKm*100) : "—", unit: "kWh/100", label: "Consumo médio", compact: true)
+                        DSMetric(value: totalKm > 1 ? brl(cost/totalKm) : "—", label: "R$/km", color: DS.green, compact: true)
+                        DSMetric(value: f1(kwh), unit: "kWh", label: "Energia", color: DS.teal, compact: true)
+                        DSMetric(value: f1(fuel), unit: "L", label: "Gasolina", color: DS.orange, compact: true)
                     }
                 }
                 monthlyChart(f)
@@ -364,7 +381,55 @@ struct TripSample: Identifiable {
     let rpm: Double
     let pwr: Double
     let soc: Double
+    let alt: Double      // altitude (m) do GPS — linha do tempo de altimetria
     let cumKwh: Double
+    let cumKm: Double
+}
+
+// Mini-gráfico (sparkline) da série inteira de uma métrica do trajeto, com marcador
+// na posição atual do scrubber. `signed` desenha a linha do zero (ex: potência/regen).
+private struct TripSparkline: View {
+    let title: String
+    let unit: String
+    let values: [Double]
+    let color: Color
+    let progress: Double            // 0...1 — posição atual no tempo
+    let signed: Bool
+    let fmt: (Double) -> String
+    var body: some View {
+        let lo = values.min() ?? 0
+        let hi = values.max() ?? 1
+        let range = (hi - lo) > 0.001 ? (hi - lo) : 1
+        let n = max(1, values.count - 1)
+        let curIdx = max(0, min(values.count - 1, Int((progress * Double(n)).rounded())))
+        let curVal = values.isEmpty ? 0 : values[curIdx]
+        VStack(spacing: 2) {
+            HStack {
+                Text(title).font(.caption2).foregroundStyle(DS.muted)
+                Spacer()
+                Text("\(fmt(curVal)) \(unit)").font(.caption.weight(.bold)).foregroundStyle(color)
+            }
+            Canvas { ctx, size in
+                guard values.count > 1 else { return }
+                let w = size.width, h = size.height
+                func pt(_ i: Int) -> CGPoint {
+                    CGPoint(x: w * Double(i) / Double(n), y: h - (values[i] - lo) / range * h)
+                }
+                if signed && lo < 0 && hi > 0 {
+                    let zy = h - (0 - lo) / range * h
+                    var z = Path(); z.move(to: CGPoint(x: 0, y: zy)); z.addLine(to: CGPoint(x: w, y: zy))
+                    ctx.stroke(z, with: .color(.gray.opacity(0.4)), style: StrokeStyle(lineWidth: 0.5, dash: [3, 3]))
+                }
+                var p = Path(); p.move(to: pt(0))
+                for i in 1..<values.count { p.addLine(to: pt(i)) }
+                ctx.stroke(p, with: .color(color), lineWidth: 1.5)
+                let mx = w * progress
+                var m = Path(); m.move(to: CGPoint(x: mx, y: 0)); m.addLine(to: CGPoint(x: mx, y: h))
+                ctx.stroke(m, with: .color(.white.opacity(0.7)), lineWidth: 1)
+            }
+            .frame(height: 32)
+        }
+    }
 }
 
 struct RouteMapSheet: View {
@@ -420,14 +485,24 @@ struct RouteMapSheet: View {
                             HStack {
                                 DSMetric(value: f0(s.soc), unit: "%", label: "SOC", color: DS.green)
                                 DSMetric(value: f1(s.cumKwh), unit: "kWh", label: "Acumulado", color: DS.teal)
-                                DSMetric(value: tStr(s.t), label: "Tempo", color: DS.muted)
+                                DSMetric(value: f1(s.cumKm), unit: "km", label: "Distância", color: DS.muted)
                             }
                         }.padding(.horizontal, 12).padding(.top, 8)
                     }
                     Spacer()
                     if samples.count > 1 {
+                        let prog = Double(min(samples.count - 1, max(0, Int(idx)))) / Double(samples.count - 1)
                         DSCard(glass: true) {
-                            VStack(spacing: 4) {
+                            VStack(spacing: 8) {
+                                // Linha do tempo completa de velocidade e potência (picos/vales do trajeto)
+                                TripSparkline(title: "Velocidade", unit: "km/h", values: samples.map { $0.spd },
+                                              color: DS.text, progress: prog, signed: false, fmt: f0)
+                                TripSparkline(title: "Potência", unit: "kW", values: samples.map { $0.pwr },
+                                              color: DS.blue, progress: prog, signed: true, fmt: f1)
+                                if samples.contains(where: { $0.alt != 0 }) {
+                                    TripSparkline(title: "Altitude", unit: "m", values: samples.map { $0.alt },
+                                                  color: DS.green, progress: prog, signed: false, fmt: f0)
+                                }
                                 Slider(value: $idx, in: 0...Double(samples.count - 1), step: 1).tint(DS.green)
                                 HStack {
                                     Text("Início").font(.caption2).foregroundStyle(DS.muted)
@@ -472,15 +547,18 @@ struct RouteMapSheet: View {
         // kWh acumulado: integra evKw × dt (igual ao PWA — positivo=consumo).
         // Guard de gap <30s: salto grande = carro desligado entre trechos (resume),
         // sem energia fluindo no buraco — evita o acumulado "cair e recomeçar".
-        var cum = 0.0; var lastT = 0.0; var first = true; var out: [TripSample] = []
+        var cum = 0.0; var cumKm = 0.0; var lastT = 0.0; var first = true; var out: [TripSample] = []
         for s in raw {
             let t = anyNum2(s["t"])
             let kw = anyNum2(s["evKw"])
-            if !first { let rawDt = t - lastT; let dt = (rawDt > 0 && rawDt < 30) ? rawDt : 0; cum += kw * dt / 3600.0 }
+            let spd = anyNum2(s["spd"])
+            // km acumulado: integra velocidade × dt (mesmo guard de gap do kWh).
+            if !first { let rawDt = t - lastT; let dt = (rawDt > 0 && rawDt < 30) ? rawDt : 0; cum += kw * dt / 3600.0; cumKm += spd * dt / 3600.0 }
             first = false; lastT = t
             let la = anyNum2(s["lat"]), lo = anyNum2(s["lng"])
             out.append(TripSample(t: t, coord: (la != 0 && lo != 0) ? .init(latitude: la, longitude: lo) : nil,
-                                  spd: anyNum2(s["spd"]), rpm: anyNum2(s["rpm"]), pwr: kw, soc: anyNum2(s["soc"]), cumKwh: cum))
+                                  spd: spd, rpm: anyNum2(s["rpm"]), pwr: kw, soc: anyNum2(s["soc"]),
+                                  alt: anyNum2(s["altM"]), cumKwh: cum, cumKm: cumKm))
         }
         if out.count > 600 { let step = out.count / 600 + 1; out = out.enumerated().filter { $0.offset % step == 0 }.map { $0.element } }
         samples = out

@@ -824,6 +824,15 @@ private fun AutoTripEntryRow(
                     }
                 }
 
+                // Altimetria (GPS): ganho (subida) e perda (descida) — relevante p/ EV
+                if (entry.elevGainM > 1f || entry.elevLossM > 1f) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        AutoDetailMetric("Subida ↑", "%.0f m".format(entry.elevGainM), Green, Modifier.weight(1f))
+                        AutoDetailMetric("Descida ↓", "%.0f m".format(entry.elevLossM), AccentBlue, Modifier.weight(1f))
+                        Spacer(Modifier.weight(2f))
+                    }
+                }
+
                 // Localização (se GPS disponível)
                 if (entry.startLat != 0.0 || entry.startLng != 0.0) {
                     Text(

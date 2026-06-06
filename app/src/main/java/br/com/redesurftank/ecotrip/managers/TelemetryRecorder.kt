@@ -35,6 +35,7 @@ data class TelemetrySample(
     val evKw: Float,   // potência elétrica em kW (+ consumindo, − regenerando)
     val pwr:  Int = 0, // % potência bateria: −100=regen máx, +100=consumo máx
     val soc:  Int = 0, // SOC% da bateria de tração (0–100)
+    val altM: Int = 0, // altitude (m) do GPS, suavizada — pra linha do tempo de altimetria
 )
 
 class TelemetryRecorder(private val context: Context) {
@@ -51,9 +52,28 @@ class TelemetryRecorder(private val context: Context) {
     @Volatile var latestLng: Double = 0.0
     @Volatile var gpsActive: Boolean = false
 
+    // Altimetria: ganho/perda acumulados (m) desde o início do recorder. A altitude
+    // de GPS é ruidosa → suaviza (EMA) e só conta variação acima do deadband (3 m).
+    @Volatile var elevGainM: Double = 0.0
+    @Volatile var elevLossM: Double = 0.0
+    @Volatile var latestAltM: Int = 0      // altitude suavizada atual (m), pra os samples
+    private var smoothedAlt = Double.NaN
+    private var refAlt      = Double.NaN
+    private val ELEV_DEADBAND_M = 3.0
+
     private val locationListener = LocationListener { loc: Location ->
         latestLat = loc.latitude
         latestLng = loc.longitude
+        // Só GPS tem altitude útil (NETWORK não). Acumula subida/descida com deadband.
+        if (loc.hasAltitude() && loc.provider == LocationManager.GPS_PROVIDER) {
+            val a = loc.altitude
+            smoothedAlt = if (smoothedAlt.isNaN()) a else smoothedAlt * 0.7 + a * 0.3
+            latestAltM = smoothedAlt.toInt()
+            if (refAlt.isNaN()) refAlt = smoothedAlt
+            val d = smoothedAlt - refAlt
+            if (d > ELEV_DEADBAND_M)      { elevGainM += d;  refAlt = smoothedAlt }
+            else if (d < -ELEV_DEADBAND_M) { elevLossM += -d; refAlt = smoothedAlt }
+        }
     }
 
     /** Inicia atualizações de localização (chamado de TripManager.startGps()). */
@@ -225,6 +245,7 @@ class TelemetryRecorder(private val context: Context) {
                             evKw = evKw,
                             pwr  = pwr,
                             soc  = soc,
+                            altM = latestAltM,
                         ))
                     }
                     lastSpd  = spd

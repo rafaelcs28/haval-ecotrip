@@ -186,6 +186,9 @@ data class AutoTripEntry(
     //   tempo total exibido = timeSec + parkedInPSec + engineOffSec
     val parkedInPSec: Long    = 0L,
     val engineOffSec: Long    = 0L,
+    // v6.08 — altimetria (GPS): ganho (subida) e perda (descida) em metros
+    val elevGainM:    Float   = 0f,
+    val elevLossM:    Float   = 0f,
 )
 
 /** Abastecimento auto-detectado pelo APK (pulo no fuel_l com carro parado).
@@ -286,6 +289,8 @@ class TripManager private constructor() {
     private var autoTripStartTime    = 0L
     // v5.20 — tempo parado
     private var autoTripStartPausedMs: Long = 0L  // snapshot de lifeTotalPausedMs no início
+    private var autoTripStartElevGain: Double = 0.0  // baseline de altimetria (recorder) no início
+    private var autoTripStartElevLoss: Double = 0.0
     private var autoTripEngineOffMs:   Long = 0L  // acumulador de gaps entre resumes (ms)
     // v5.26 — preserva a posição original quando há resume. O samples do trecho 1
     // pode ter sido deletado em disco pós-sync com o bridge — sem isso, endTrip
@@ -671,6 +676,8 @@ class TripManager private constructor() {
             outsideTempC = latestOutsideTempC,
             parkedInPSec = parkedInPMs / 1000L,
             engineOffSec = autoTripEngineOffMs / 1000L,
+            elevGainM    = ((telemetryRecorder?.elevGainM ?: 0.0) - autoTripStartElevGain).coerceAtLeast(0.0).toFloat(),
+            elevLossM    = ((telemetryRecorder?.elevLossM ?: 0.0) - autoTripStartElevLoss).coerceAtLeast(0.0).toFloat(),
         )
     }
 
@@ -1227,6 +1234,8 @@ class TripManager private constructor() {
         autoTripStartTime   = lifeTimeSec
         // Snapshot de lifeTotalPausedMs pra calcular o tempo em P durante a viagem
         autoTripStartPausedMs = lifeTotalPausedMs + (if (lifeGearPauseStartMs > 0L) System.currentTimeMillis() - lifeGearPauseStartMs else 0L)
+        autoTripStartElevGain = telemetryRecorder?.elevGainM ?: 0.0
+        autoTripStartElevLoss = telemetryRecorder?.elevLossM ?: 0.0
         autoTripEngineOffMs   = 0L
         // Nova viagem (não-resume): zera o override de posição original
         autoTripResumedStartLat = 0.0
@@ -1304,6 +1313,8 @@ class TripManager private constructor() {
                 ((curPausedMs - autoTripStartPausedMs).coerceAtLeast(0L)) / 1000L
             },
             engineOffSec = autoTripEngineOffMs / 1000L,
+            elevGainM    = ((telemetryRecorder?.elevGainM ?: 0.0) - autoTripStartElevGain).coerceAtLeast(0.0).toFloat(),
+            elevLossM    = ((telemetryRecorder?.elevLossM ?: 0.0) - autoTripStartElevLoss).coerceAtLeast(0.0).toFloat(),
         )
         autoTripHistory.add(entry)
         // Retenção: descarta viagens com mais de 90 dias
