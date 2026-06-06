@@ -7219,6 +7219,9 @@ function songProStatus() {
     finishedAtMs: _songProLastEnd.endedMs || 0,
     updatedAtMs:  _songProLatest.ts || (charging ? Date.now() : 0),
     hasData:      charging || _songProLatest.ts > 0 || finished,
+    // Distância/ETA de carro do veículo até o celular do monitor (null se indisponível).
+    distToPhoneKm: _routeToPhone.distKm,
+    etaToPhoneMin: _routeToPhone.etaMin,
     // Telemetria completa do veículo (bateria, pneus, autonomia, localização…)
     tele,
   };
@@ -7876,6 +7879,7 @@ const LA_TYPES = ['ChargeActivityAttributes', 'PreClimatActivityAttributes', 'Tr
 // recarga (potência, kWh, min restantes) quando carregando. Consumido pelo app
 // "Grasi Recarga" pra mostrar num card. Protegido pelo requireAuth global.
 app.get('/api/songpro/status', (req, res) => {
+  _maybeRouteToPhone();   // mantém distância/ETA até o celular fresca enquanto o app pollia
   res.json(songProStatus());
 });
 

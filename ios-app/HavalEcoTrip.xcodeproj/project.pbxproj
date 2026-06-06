@@ -33,6 +33,7 @@
 		605ED8EEC91528FFBC054A48 /* CarActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = C88C20EF0FDB1AB8EB036191 /* CarActions.swift */; };
 		6223380A259556C149F9E067 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = EEEFCC8135B0627DFDB60013 /* Assets.xcassets */; };
 		62435AEEC1C0E57CFBB27ABE /* NativeViagensView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 638ACE606ED94D317501DB0E /* NativeViagensView.swift */; };
+		628BD86A75E22A5913BB943D /* BydMiniMap.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8C3D7D3EC9E5F913CE28355 /* BydMiniMap.swift */; };
 		659B7DF18D1CC3CBBC1615F3 /* ChargeActivityLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6A433A5AA48336FD73F1C85 /* ChargeActivityLiveActivity.swift */; };
 		6601E0AF99CFBF6068D0180D /* NativeDashView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0412CD48BFB11B79D8D550D4 /* NativeDashView.swift */; };
 		68110724BB249D794F3FE32F /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2E5847D4B630A807A07557A /* ShareViewController.swift */; };
@@ -181,6 +182,7 @@
 		B5A372CA99C89C5712EE54BC /* HavalEcoTripApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HavalEcoTripApp.swift; sourceTree = "<group>"; };
 		B6A433A5AA48336FD73F1C85 /* ChargeActivityLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChargeActivityLiveActivity.swift; sourceTree = "<group>"; };
 		B70CD6CCACB7545098A80F39 /* InsightsSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsightsSheet.swift; sourceTree = "<group>"; };
+		B8C3D7D3EC9E5F913CE28355 /* BydMiniMap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BydMiniMap.swift; sourceTree = "<group>"; };
 		B9BBC1E7EB38A5621A6751AA /* ShareExtension.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = ShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		BF4805E2E098ECAD51E0A441 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		C0D6E362CB348E539FA519CC /* NativeDriveView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeDriveView.swift; sourceTree = "<group>"; };
@@ -267,6 +269,7 @@
 			children = (
 				940E4AE86B859186BAE647F3 /* Assets.xcassets */,
 				60050A5D1678A9235BEB0730 /* BydLiveActivityPush.swift */,
+				B8C3D7D3EC9E5F913CE28355 /* BydMiniMap.swift */,
 				1856321B97D59F9EFBA114E7 /* BydPhoneLocation.swift */,
 				36E8C01B5F034767C7B96E69 /* BydRecarga-dev.entitlements */,
 				A53601AA6DAB2F8858F60A3D /* BydRecarga-prod.entitlements */,
@@ -545,6 +548,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				91E8922CD20B94185D7454A2 /* BydLiveActivityPush.swift in Sources */,
+				628BD86A75E22A5913BB943D /* BydMiniMap.swift in Sources */,
 				D9E640CC25ED1D302FCE3773 /* BydPhoneLocation.swift in Sources */,
 				16E429E57E193AFF3942D11F /* BydRecargaApp.swift in Sources */,
 				783721D1E37916F23F2149D8 /* BydSettings.swift in Sources */,

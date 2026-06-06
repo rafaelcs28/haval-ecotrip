@@ -25,6 +25,8 @@ struct SongProStatus: Decodable {
     var finishedAtMs: Double = 0
     var updatedAtMs: Double = 0
     var hasData: Bool = false
+    var distToPhoneKm: Double? = nil   // distância de carro até o celular do monitor
+    var etaToPhoneMin: Int? = nil
     var tele: Tele = Tele()
 
     struct Tele: Decodable {
@@ -392,6 +394,7 @@ struct RecargaDashboard: View {
                     VStack(spacing: 14) {
                         headerCard(s)
                         heroCard(s)
+                        locationCard(s)
                         autonomyCard(s.tele)
                         healthCard(s.tele)
                         tyresCard(s.tele)
@@ -518,6 +521,26 @@ struct RecargaDashboard: View {
         guard ms > 0 else { return "—" }
         let f = DateFormatter(); f.locale = Locale(identifier: "pt_BR"); f.dateFormat = "dd/MM HH:mm"
         return f.string(from: Date(timeIntervalSince1970: ms / 1000))
+    }
+
+    // ── Localização (mini-mapa escuro em tempo real) + distância até o celular ──
+    @ViewBuilder private func locationCard(_ s: SongProStatus) -> some View {
+        if s.tele.lat != 0 && s.tele.lng != 0 {
+            Card {
+                CardTitle("Localização", icon: "location.fill")
+                BydMiniMap(lat: s.tele.lat, lng: s.tele.lng)
+                    .frame(height: 170)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                if let km = s.distToPhoneKm, let min = s.etaToPhoneMin {
+                    HStack(spacing: 8) {
+                        Image(systemName: "car.fill").font(.subheadline).foregroundStyle(.blue)
+                        Text("\(String(format: "%.1f", km).replacingOccurrences(of: ".", with: ",")) km · \(min) min de carro até você")
+                            .font(.subheadline.weight(.semibold)).foregroundStyle(.primary)
+                        Spacer()
+                    }.padding(.top, 2)
+                }
+            }
+        }
     }
 
     // ── Autonomia EV + combustível ───────────────────────────────────────────
