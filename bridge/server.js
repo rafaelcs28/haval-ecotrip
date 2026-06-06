@@ -7987,8 +7987,14 @@ async function _resolveSharedDest(text) {
       return { lat: hit.lat, lng: hit.lng, name };
     }
   }
-  // Sem coordenada na URL → geocodifica o texto (tira a URL pra não poluir a busca).
-  const q = raw.replace(/https?:\/\/[^\s]+/g, '').trim();
+  // Sem coordenada na URL → tenta extrair o NOME do destino de frases conhecidas
+  // (ex.: Waze "Compartilhar percurso": "...dirigir até <NOME>, chegando às HH:MM").
+  let q = raw.replace(/https?:\/\/[^\s]+/g, '').trim();
+  const m = q.match(/dirigir at[ée]\s+(.+?)\s*,?\s*chegando/i)
+         || q.match(/(?:driving|heading|on my way) to\s+(.+?)\s*[,.]/i);
+  if (m && m[1].trim()) q = m[1].trim();
+  // Remove ruído da frase do Waze caso não tenha casado o nome.
+  if (/usando o Waze|using Waze|percurso em tempo real|map of Waze/i.test(q)) q = '';
   if (q) { const g = await _geocode(q); if (g) return g; }
   return null;
 }
@@ -7999,11 +8005,23 @@ async function _handleSharedDest(value) {
   try { const j = JSON.parse(value); text = j.text || j.url || value; } catch (_) { /* texto puro */ }
   try {
     const d = await _resolveSharedDest(text);
-    if (!d) { console.warn('[shareDest] não resolveu:', String(text).slice(0, 120)); return; }
+    if (!d) {
+      console.warn('[shareDest] não resolveu:', String(text).slice(0, 120));
+      mqttClient.publish(`${MQTT_PREFIX}/car_dest_result`,
+        JSON.stringify({ ok: false, err: 'sem coordenada/nome no compartilhamento', ts: Date.now() }),
+        { qos: 1, retain: false });
+      return;
+    }
     const payload = JSON.stringify({ lat: d.lat, lng: d.lng, name: d.name, ts: Date.now() });
     mqttClient.publish(`${MQTT_PREFIX}/cmd/nav_dest`, payload, { qos: 1, retain: false });
+    mqttClient.publish(`${MQTT_PREFIX}/car_dest_result`,
+      JSON.stringify({ ok: true, name: d.name, ts: Date.now() }), { qos: 1, retain: false });
     console.log(`[shareDest] → carro: ${d.name} (${d.lat.toFixed(5)},${d.lng.toFixed(5)})`);
-  } catch (e) { console.warn('[shareDest] erro:', e.message); }
+  } catch (e) {
+    console.warn('[shareDest] erro:', e.message);
+    mqttClient.publish(`${MQTT_PREFIX}/car_dest_result`,
+      JSON.stringify({ ok: false, err: String(e.message), ts: Date.now() }), { qos: 1, retain: false });
+  }
 }
 // Busca a rota: Mapbox driving-traffic (ETA COM trânsito ao vivo) se houver MAPBOX_TOKEN;
 // senão OSRM (sem trânsito). Retorna distância(m), duração(s), geometria e flag de trânsito.

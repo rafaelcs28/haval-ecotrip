@@ -37,6 +37,8 @@ class ShareActivity : Activity() {
         val navTopic = cfg.getString("topic", "haval/ecotrip/nav_to") ?: "haval/ecotrip/nav_to"
         // car_dest_raw vive no mesmo prefixo do tópico nav_to (haval/ecotrip/*).
         val rawTopic = navTopic.substringBeforeLast('/', "haval/ecotrip") + "/car_dest_raw"
+        val base = navTopic.substringBeforeLast('/', "haval/ecotrip")
+        val resultTopic = "$base/car_dest_result"
         if (broker.isBlank()) { toast("Configure o Nav Relay primeiro"); return }
         try {
             val c = MqttClient(broker, "navshare_" + (System.currentTimeMillis() % 100000), MemoryPersistence())
@@ -45,11 +47,30 @@ class ShareActivity : Activity() {
                 if (user.isNotBlank()) userName = user
                 if (pass.isNotBlank()) password = pass.toCharArray()
             }
+            // Aguarda o bridge confirmar a resolução (ok/erro) por até ~8s.
+            val result = java.util.concurrent.SynchronousQueue<String>()
+            c.setCallback(object : org.eclipse.paho.client.mqttv3.MqttCallback {
+                override fun connectionLost(cause: Throwable?) {}
+                override fun deliveryComplete(t: org.eclipse.paho.client.mqttv3.IMqttDeliveryToken?) {}
+                override fun messageArrived(t: String?, msg: MqttMessage?) {
+                    try {
+                        val j = JSONObject(String(msg!!.payload))
+                        result.offer(if (j.optBoolean("ok", false)) "ok:${j.optString("name", "")}"
+                                     else "err:${j.optString("err", "não resolveu")}")
+                    } catch (_: Exception) {}
+                }
+            })
             c.connect(opts)
+            c.subscribe(resultTopic, 1)
             val payload = JSONObject().put("text", text).put("ts", System.currentTimeMillis()).toString()
             c.publish(rawTopic, MqttMessage(payload.toByteArray()).apply { qos = 1 })
-            c.disconnect()
-            toast("Destino enviado pro carro ✓")
+            val res = result.poll(8, java.util.concurrent.TimeUnit.SECONDS)
+            try { c.disconnect() } catch (_: Exception) {}
+            when {
+                res == null            -> toast("Enviado, mas o carro não confirmou (offline?)")
+                res.startsWith("ok:")  -> toast("Destino no carro ✓ ${res.removePrefix("ok:")}")
+                else                   -> toast("Não consegui o destino: ${res.removePrefix("err:")}")
+            }
         } catch (e: Exception) {
             toast("Falha ao enviar: ${e.message}")
         }
