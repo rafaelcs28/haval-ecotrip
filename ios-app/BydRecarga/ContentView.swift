@@ -216,6 +216,8 @@ final class SongProStore: ObservableObject {
               let s = try? JSONDecoder().decode(SongProStatus.self, from: data) else { return }
         withAnimation(.easeInOut(duration: 0.3)) { status = s }
         appendHistory(s)
+        // Ignição ligada (viagem) → localização fina; desligada → econômica.
+        BydPhoneLocation.shared.setActive(s.tele.carOn)
     }
 
     func fetchPrefs() async {
@@ -371,6 +373,7 @@ struct ContentView: View {
             if configured {
                 BydRemoteNotifications.enable()
                 BydLiveActivityPush.shared.start()
+                BydPhoneLocation.shared.start()
                 await store.fetchPrefs()
                 store.startPolling()
             }
@@ -1730,6 +1733,10 @@ struct ConfigTab: View {
                     Toggle("Mostrar recarga do BYD", isOn: Binding(
                         get: { store.isOn("la_songpro") },
                         set: { v in Task { await store.setPref("la_songpro", v) } }
+                    ))
+                    Toggle("Mostrar deslocamento do BYD", isOn: Binding(
+                        get: { store.isOn("la_songpro_trip") },
+                        set: { v in Task { await store.setPref("la_songpro_trip", v) } }
                     ))
                     Button {
                         Task { await store.relaunch() }

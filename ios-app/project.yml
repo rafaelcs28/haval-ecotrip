@@ -234,6 +234,7 @@ targets:
         NSLocationAlwaysAndWhenInUseUsageDescription: "Permitir 'Sempre' mantém a distância até o veículo atualizada na tela bloqueada, mesmo com o app fechado."
         UIBackgroundModes:
           - remote-notification
+          - location   # atualização fina da localização durante a viagem (allowsBackgroundLocationUpdates)
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: br.com.consorciolimpagyn.songpro
