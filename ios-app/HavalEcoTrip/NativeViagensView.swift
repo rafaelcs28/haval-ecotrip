@@ -32,6 +32,8 @@ struct Trip: Identifiable {
     var distKm: Double { n("distKm") }
     var netKwh: Double { n("netKwh") }
     var fuelL: Double { n("fuelL") }
+    var startSoc: Double { n("startSocPct") }
+    var endSoc: Double { n("endSocPct") }
     var timeSec: Double { n("timeSec") }
     var updatedMs: Double { n("_updated_ms") }
     var rawName: String? { (raw["name"] as? String).flatMap { $0.isEmpty ? nil : $0 } }

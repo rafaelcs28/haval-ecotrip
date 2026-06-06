@@ -11,11 +11,20 @@ struct NativeDashView: View {
     @ObservedObject private var store = CarStore.shared
     @StateObject private var maint = MaintenanceStore()
     @StateObject private var trips = TripsLoader()
+    @StateObject private var cfg = ConfigStore()
     @State private var busy = false
     @State private var showPreclimat = false
     @State private var showMaint = false
     @State private var showLock = false
     @State private var showEngine = false
+    @State private var showNotifCenter = false
+    @State private var showArrival = false
+    // Feedback visual da troca de limite de carga (Haptic Touch no card):
+    // pendingLimit = valor selecionado aguardando o carro confirmar (amarelo);
+    // limitFeedback: 0=nenhum · 1=confirmado (verde) · 2=recusado (vermelho).
+    @State private var pendingLimit: Int? = nil
+    @State private var limitFeedback = 0
+    @State private var limitTimeout: DispatchWorkItem? = nil
 
     private let tankL = 55.0   // capacidade aprox. do tanque (H6 PHEV) p/ o medidor
 
@@ -43,6 +52,7 @@ struct NativeDashView: View {
                 doorsCard
                 windowsCard
                 revisaoCard
+                arrivalCard
                 tripCard
             }
             .padding(16)
@@ -51,17 +61,25 @@ struct NativeDashView: View {
         .onAppear { store.start(); Task { await maint.load() }; Task { await trips.load() } }
         .sheet(isPresented: $showPreclimat) { PreclimatSheet() }
         .sheet(isPresented: $showMaint) { MaintenanceSheet(store: maint) }
+        .sheet(isPresented: $showNotifCenter) { NotificationsCenterSheet() }
+        .sheet(isPresented: $showArrival) { ArrivalSheet(trips: trips.trips) }
     }
 
-    // MARK: localização
+    // MARK: localização + central de notificações + versão do carro
     private var header: some View {
-        HStack(spacing: 8) {
+        let apkVer = store.str("car_app_version")
+        return HStack(spacing: 8) {
             Image(systemName: "location.fill").font(.subheadline).foregroundStyle(DS.green)
             Text(store.hasGps ? (store.address.isEmpty ? "Localizando endereço…" : store.address) : "Localização indisponível")
                 .font(.subheadline.weight(.medium)).foregroundStyle(DS.text).lineLimit(2)
             Spacer(minLength: 6)
             if store.lanConnected { DSChip(text: "LAN", color: DS.teal, filled: true) }
-            Text(lastUpdateText).font(.system(size: 10)).foregroundStyle(DS.muted).lineLimit(1)
+            if !apkVer.isEmpty {
+                Text("carro v\(apkVer)").font(.system(size: 9)).foregroundStyle(DS.muted).lineLimit(1)
+            }
+            Button { showNotifCenter = true } label: {
+                Image(systemName: "bell.fill").font(.system(size: 15)).foregroundStyle(DS.text)
+            }
             Circle().fill(store.carOnline ? DS.green : DS.red).frame(width: 9, height: 9)
         }
         .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 4)
@@ -162,12 +180,29 @@ struct NativeDashView: View {
         }
     }
 
-    // Recarregando: bateria expandida (esconde tanque) + dados da carga atual
+    // Recarregando: bateria expandida (esconde tanque) + dados da carga atual.
+    // O tick branco na barra mostra o limite de carga configurado; segurar o card
+    // (Haptic Touch) abre o menu pra trocar o limite sem ir em Configurações.
     private var chargingCard: some View {
         let soc = store.socPct
+        let limit = store.num("charge_limit_pct")
+        // Estado visual do limite: pendente (amarelo) → confirmado (verde) / recusado (vermelho).
+        let markerFrac: Double? = pendingLimit.map { Double($0)/100 } ?? (limit > 0 ? limit/100 : nil)
+        let accent: Color = pendingLimit != nil ? DS.yellow
+            : (limitFeedback == 1 ? DS.green : (limitFeedback == 2 ? DS.red : DS.muted))
+        let markerColor: Color = pendingLimit != nil ? DS.yellow
+            : (limitFeedback == 1 ? DS.green : (limitFeedback == 2 ? DS.red : Color.white.opacity(0.85)))
+        let badgeLabel: String = {
+            if let p = pendingLimit { return "Aplicando limite \(p)%…" }
+            if limitFeedback == 1 { return "Limite \(f0(limit))% confirmado" }
+            if limitFeedback == 2 { return "Limite não aplicado — tente de novo" }
+            return limit > 0 && limit < 100 ? "Bateria · limite \(f0(limit))%" : "Bateria"
+        }()
         return DSCard(title: "Carregando", icon: "bolt.fill") {
             VStack(alignment: .leading, spacing: 12) {
-                LevelBadge(icon: batteryIcon(soc), fraction: soc/100, value: f0(soc), unit: "%", label: "Bateria", tint: DS.green)
+                LevelBadge(icon: batteryIcon(soc), fraction: soc/100, value: f0(soc), unit: "%",
+                           label: badgeLabel, tint: DS.green,
+                           markerFraction: markerFrac, markerColor: markerColor, labelColor: accent)
                 HStack {
                     DSMetric(value: f1(store.chargePowerKw), unit: "kW", label: "Potência", color: DS.green)
                     DSMetric(value: f1(store.chargeSessionKwh), unit: "kWh", label: "Sessão", color: DS.teal)
@@ -176,6 +211,39 @@ struct NativeDashView: View {
                 }
             }
         }
+        .contextMenu {
+            Text("Limite de carga (SOC)")
+            ForEach([50,60,70,80,90,100], id: \.self) { p in
+                Button { selectChargeLimit(p) } label: {
+                    Label("\(p)%", systemImage: (pendingLimit ?? Int(limit)) == p ? "checkmark" : "bolt")
+                }
+            }
+        }
+        // Carro confirmou: o limite reportado virou o valor pedido.
+        .onChange(of: store.num("charge_limit_pct")) { newVal in
+            if let p = pendingLimit, Int(newVal) == p {
+                limitTimeout?.cancel(); limitTimeout = nil
+                pendingLimit = nil; limitFeedback = 1; clearLimitFeedbackLater()
+            }
+        }
+    }
+
+    // Seleciona um novo limite: marca como pendente (amarelo), envia ao carro e
+    // arma um timeout — se o carro não confirmar, marca como recusado (vermelho).
+    private func selectChargeLimit(_ p: Int) {
+        if Int(store.num("charge_limit_pct")) == p { return }   // já é o limite atual
+        limitTimeout?.cancel()
+        pendingLimit = p
+        limitFeedback = 0
+        Task { await cfg.setChargeLimit(p) }
+        let work = DispatchWorkItem {
+            if pendingLimit == p { pendingLimit = nil; limitFeedback = 2; clearLimitFeedbackLater() }
+        }
+        limitTimeout = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 20, execute: work)
+    }
+    private func clearLimitFeedbackLater() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { limitFeedback = 0 }
     }
 
     private var fuelCard: some View {
@@ -303,6 +371,23 @@ struct NativeDashView: View {
         if let km = m.remaining_km { return km <= 0 ? "vencida" : "faltam \(miles(km)) km" }
         if let d = m.remaining_days { return d <= 0 ? "vencida" : "faltam \(f0(d)) dias" }
         return ""
+    }
+
+    // MARK: SOC na chegada
+    private var arrivalCard: some View {
+        DSCard {
+            Button { showArrival = true } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "location.fill.viewfinder").font(.title3).foregroundStyle(DS.teal)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("SOC na chegada").font(.subheadline.weight(.semibold)).foregroundStyle(DS.text)
+                        Text("Prever bateria + ETA até um destino").font(.caption).foregroundStyle(DS.muted)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(DS.muted)
+                }
+            }
+        }
     }
 
     // MARK: viagem em andamento (ou última)

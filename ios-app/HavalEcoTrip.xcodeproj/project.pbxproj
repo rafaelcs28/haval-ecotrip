@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		064E007225ADC0CDFC776198 /* AutomationsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01AC1877140CC251292718C3 /* AutomationsView.swift */; };
 		07FC719000D999AB80CF8C4C /* ControlSheets.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7A442E88C358C98CE318DF9 /* ControlSheets.swift */; };
 		0BB7525EC9FA3BFAAE77FCB0 /* ConfigSheets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25AF744D0A813EC24608D127 /* ConfigSheets.swift */; };
 		0C3838E769FD23A972E10B3E /* PreClimatActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBBB57D2D187DD310113F34A /* PreClimatActivityAttributes.swift */; };
@@ -36,6 +37,7 @@
 		6601E0AF99CFBF6068D0180D /* NativeDashView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0412CD48BFB11B79D8D550D4 /* NativeDashView.swift */; };
 		694901AB2FD60B4D5A1322DA /* NativeRecargasView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB5145A32C36D0D8E2E36E83 /* NativeRecargasView.swift */; };
 		6B3EDE545B2502D265805216 /* OfflineSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2EBD85F9B7D028E3D520ED77 /* OfflineSync.swift */; };
+		6C1FE4315EFC5408CBF98788 /* NotificationsCenterSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7817E2396F9C3176DF2954E /* NotificationsCenterSheet.swift */; };
 		6D2D2B81A43BB7E8D26EE81F /* SongProActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF8BF0D6E8837DEC20056AB8 /* SongProActivityAttributes.swift */; };
 		77472ED6F598E53605506B96 /* ChargeActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = C110A5E3EADD0B1D4DA52BE6 /* ChargeActivityAttributes.swift */; };
 		783721D1E37916F23F2149D8 /* BydSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = E810689502D9D028774D6792 /* BydSettings.swift */; };
@@ -43,6 +45,7 @@
 		89B5CF62DAD11B34026CB4C5 /* HavalEcoTripWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 192BA3BE182AC3D50F636DA9 /* HavalEcoTripWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		8B1DEE4FCD8F3304A07A33C9 /* MotorActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 636438201B328EA34B285F3A /* MotorActivityAttributes.swift */; };
 		8B73DFD0957C51F2398BED33 /* NativeDriveView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0D6E362CB348E539FA519CC /* NativeDriveView.swift */; };
+		8C38A751217FF17B7A5F5691 /* BydChargeWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84E0CFB1FD73D4EBEF6720A1 /* BydChargeWidget.swift */; };
 		8C3FA5DCF7133607EC275A89 /* TripLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B0EC768E77CEDD141861D39 /* TripLiveActivity.swift */; };
 		91E8922CD20B94185D7454A2 /* BydLiveActivityPush.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60050A5D1678A9235BEB0730 /* BydLiveActivityPush.swift */; };
 		920A0533D20932EF36FC4D49 /* ChargeActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = C110A5E3EADD0B1D4DA52BE6 /* ChargeActivityAttributes.swift */; };
@@ -56,17 +59,22 @@
 		AB83E9252E2D2EA3B5AAAC0A /* MotorActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 636438201B328EA34B285F3A /* MotorActivityAttributes.swift */; };
 		AE6DF0BA2B76E13159F83FE3 /* BackgroundRefresh.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F97B54C85FEC5A112CB0C9E /* BackgroundRefresh.swift */; };
 		B81E30EC9F98C5B71D4E12E8 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 940E4AE86B859186BAE647F3 /* Assets.xcassets */; };
+		BA44D6E648CAA30EFD8C11AF /* ArrivalSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59969E598BACA40911CD6232 /* ArrivalSheet.swift */; };
 		BA989F1F5994F2921A13B3D3 /* ShortcutManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33D5F8203565F8E20D91E100 /* ShortcutManager.swift */; };
 		BD7C6AB06DD0FA3DFCB15EBD /* BydRecargaWidgetBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD1B9E17C1177A48B806D3B9 /* BydRecargaWidgetBundle.swift */; };
 		C25004AC6E9825F287951DC4 /* MotorLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A0F1250A4346D17F0539FE8 /* MotorLiveActivity.swift */; };
+		C53454204CA59200E9360FF8 /* SongProTripLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4982EFADD98ECBA5A75504CD /* SongProTripLiveActivity.swift */; };
 		CFA18AF48CB7CF8DF7C40EC3 /* BatteryWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6B65FA59825E09151BBC7C3 /* BatteryWidget.swift */; };
 		D6B7CC3FAD98C1CC134911FE /* AuthManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBC80D42C32C99C47E1B7222 /* AuthManager.swift */; };
+		D9E640CC25ED1D302FCE3773 /* BydPhoneLocation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1856321B97D59F9EFBA114E7 /* BydPhoneLocation.swift */; };
 		DAFD168AE90C50CE05BA20A8 /* PreClimatActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBBB57D2D187DD310113F34A /* PreClimatActivityAttributes.swift */; };
 		DE39B1C98DBD4A0B7B3D515F /* AuthConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = A799F69A43F78E263048C8F4 /* AuthConfig.swift */; };
+		E0198BA31627A073FDF1B896 /* SongProTripActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DBCF10DECA75C406A67E56B /* SongProTripActivityAttributes.swift */; };
 		E43E5551EEE28BC0621FA123 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 492762BFD473DC0FD6D89688 /* ContentView.swift */; };
 		E4DBC8604FEF4AF3E5F39336 /* CarStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C68353FA3433CBE88BFA4347 /* CarStore.swift */; };
 		E7A22E919521A94E9004D8F2 /* LivePreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A804763C29A6FBD8871C5A7 /* LivePreview.swift */; };
 		EB170A75BD1ABB3462C6AF9E /* BiometricGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5C3783F4045873A9A1C2F85 /* BiometricGate.swift */; };
+		FE7B902A4E0C408709E7B8AD /* SongProTripActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DBCF10DECA75C406A67E56B /* SongProTripActivityAttributes.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -112,9 +120,11 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		01AC1877140CC251292718C3 /* AutomationsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutomationsView.swift; sourceTree = "<group>"; };
 		0275BC86719533522473C87B /* BydRecargaWidget.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = BydRecargaWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		0412CD48BFB11B79D8D550D4 /* NativeDashView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeDashView.swift; sourceTree = "<group>"; };
 		0AFED4CCA277E184649006B9 /* RemoteNotifications.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteNotifications.swift; sourceTree = "<group>"; };
+		1856321B97D59F9EFBA114E7 /* BydPhoneLocation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BydPhoneLocation.swift; sourceTree = "<group>"; };
 		192BA3BE182AC3D50F636DA9 /* HavalEcoTripWidget.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = HavalEcoTripWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		19F1EE1E1159233D66EEAFA8 /* LiveActivityPush.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveActivityPush.swift; sourceTree = "<group>"; };
 		1C2F4161732FE79AB2415337 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
@@ -129,7 +139,9 @@
 		3D3807C873D02DC8F672F3CD /* MaintenanceSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MaintenanceSheet.swift; sourceTree = "<group>"; };
 		40111AE0EB130BFE6B0757E3 /* HavalEcoTrip-prod.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "HavalEcoTrip-prod.entitlements"; sourceTree = "<group>"; };
 		492762BFD473DC0FD6D89688 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		4982EFADD98ECBA5A75504CD /* SongProTripLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SongProTripLiveActivity.swift; sourceTree = "<group>"; };
 		4A804763C29A6FBD8871C5A7 /* LivePreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LivePreview.swift; sourceTree = "<group>"; };
+		59969E598BACA40911CD6232 /* ArrivalSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArrivalSheet.swift; sourceTree = "<group>"; };
 		5C78BF7DF42C2CEA8466E30F /* BydRecarga.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = BydRecarga.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		60050A5D1678A9235BEB0730 /* BydLiveActivityPush.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BydLiveActivityPush.swift; sourceTree = "<group>"; };
 		6215EB2F3EA8C80FA49D1477 /* PreclimatSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreclimatSheet.swift; sourceTree = "<group>"; };
@@ -140,10 +152,13 @@
 		6F5328FAA367AE3DF93613BE /* HavalEcoTripWidgetBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HavalEcoTripWidgetBundle.swift; sourceTree = "<group>"; };
 		7376EEA5C86B0C60FE3CE4E3 /* DesignSystem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignSystem.swift; sourceTree = "<group>"; };
 		7BA445855D7E9BCBC513DE19 /* HavalEcoTrip.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = HavalEcoTrip.entitlements; sourceTree = "<group>"; };
+		7DBCF10DECA75C406A67E56B /* SongProTripActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SongProTripActivityAttributes.swift; sourceTree = "<group>"; };
 		7E729D2E78EAC7CD0D7E8D10 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		8036EB500E09B8F08A9EA755 /* MaintenanceStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MaintenanceStore.swift; sourceTree = "<group>"; };
+		84E0CFB1FD73D4EBEF6720A1 /* BydChargeWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BydChargeWidget.swift; sourceTree = "<group>"; };
 		8667439515FC27589EEEDBC9 /* SongProLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SongProLiveActivity.swift; sourceTree = "<group>"; };
 		915E7661920B0022793D3A63 /* PreClimatLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreClimatLiveActivity.swift; sourceTree = "<group>"; };
+		929650E89833B2397955656E /* BydRecargaWidget.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = BydRecargaWidget.entitlements; sourceTree = "<group>"; };
 		940E4AE86B859186BAE647F3 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		968AA8DFD87E74A832ED71A5 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		A53601AA6DAB2F8858F60A3D /* BydRecarga-prod.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "BydRecarga-prod.entitlements"; sourceTree = "<group>"; };
@@ -159,6 +174,7 @@
 		C25344C215F40EDE5B072CEF /* LogsSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogsSheet.swift; sourceTree = "<group>"; };
 		C4C25F23B2E85136F2735757 /* HavalEcoTripWidget.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = HavalEcoTripWidget.entitlements; sourceTree = "<group>"; };
 		C68353FA3433CBE88BFA4347 /* CarStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarStore.swift; sourceTree = "<group>"; };
+		C7817E2396F9C3176DF2954E /* NotificationsCenterSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationsCenterSheet.swift; sourceTree = "<group>"; };
 		C88C20EF0FDB1AB8EB036191 /* CarActions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarActions.swift; sourceTree = "<group>"; };
 		D15756C1CEF1EFDD6804C05D /* SecurityActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecurityActivityAttributes.swift; sourceTree = "<group>"; };
 		D6CE9B63AE0A75344509696C /* NativeConfigView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeConfigView.swift; sourceTree = "<group>"; };
@@ -184,9 +200,11 @@
 			isa = PBXGroup;
 			children = (
 				D9926C58E001CD8511E829FB /* ActivityManager.swift */,
+				59969E598BACA40911CD6232 /* ArrivalSheet.swift */,
 				EEEFCC8135B0627DFDB60013 /* Assets.xcassets */,
 				A799F69A43F78E263048C8F4 /* AuthConfig.swift */,
 				EBC80D42C32C99C47E1B7222 /* AuthManager.swift */,
+				01AC1877140CC251292718C3 /* AutomationsView.swift */,
 				2F97B54C85FEC5A112CB0C9E /* BackgroundRefresh.swift */,
 				E5C3783F4045873A9A1C2F85 /* BiometricGate.swift */,
 				C88C20EF0FDB1AB8EB036191 /* CarActions.swift */,
@@ -212,6 +230,7 @@
 				C0D6E362CB348E539FA519CC /* NativeDriveView.swift */,
 				FB5145A32C36D0D8E2E36E83 /* NativeRecargasView.swift */,
 				638ACE606ED94D317501DB0E /* NativeViagensView.swift */,
+				C7817E2396F9C3176DF2954E /* NotificationsCenterSheet.swift */,
 				2EBD85F9B7D028E3D520ED77 /* OfflineSync.swift */,
 				6215EB2F3EA8C80FA49D1477 /* PreclimatSheet.swift */,
 				B41BC4A6A889A1B5BBFCF7C6 /* PwaWebView.swift */,
@@ -227,6 +246,7 @@
 			children = (
 				940E4AE86B859186BAE647F3 /* Assets.xcassets */,
 				60050A5D1678A9235BEB0730 /* BydLiveActivityPush.swift */,
+				1856321B97D59F9EFBA114E7 /* BydPhoneLocation.swift */,
 				36E8C01B5F034767C7B96E69 /* BydRecarga-dev.entitlements */,
 				A53601AA6DAB2F8858F60A3D /* BydRecarga-prod.entitlements */,
 				ECAEED044A902791C1B43435 /* BydRecargaApp.swift */,
@@ -254,6 +274,8 @@
 				DFE9C8DD63C6163B5AF174C8 /* SecurityLiveActivity.swift */,
 				AF8BF0D6E8837DEC20056AB8 /* SongProActivityAttributes.swift */,
 				8667439515FC27589EEEDBC9 /* SongProLiveActivity.swift */,
+				7DBCF10DECA75C406A67E56B /* SongProTripActivityAttributes.swift */,
+				4982EFADD98ECBA5A75504CD /* SongProTripLiveActivity.swift */,
 				E612200FCE6AA9F646191052 /* TripActivityAttributes.swift */,
 				6B0EC768E77CEDD141861D39 /* TripLiveActivity.swift */,
 			);
@@ -263,6 +285,8 @@
 		8189E525203ABEDA3C0DE197 /* BydRecargaWidget */ = {
 			isa = PBXGroup;
 			children = (
+				84E0CFB1FD73D4EBEF6720A1 /* BydChargeWidget.swift */,
+				929650E89833B2397955656E /* BydRecargaWidget.entitlements */,
 				DD1B9E17C1177A48B806D3B9 /* BydRecargaWidgetBundle.swift */,
 				BF4805E2E098ECAD51E0A441 /* Info.plist */,
 			);
@@ -462,10 +486,12 @@
 			buildActionMask = 2147483647;
 			files = (
 				91E8922CD20B94185D7454A2 /* BydLiveActivityPush.swift in Sources */,
+				D9E640CC25ED1D302FCE3773 /* BydPhoneLocation.swift in Sources */,
 				16E429E57E193AFF3942D11F /* BydRecargaApp.swift in Sources */,
 				783721D1E37916F23F2149D8 /* BydSettings.swift in Sources */,
 				E43E5551EEE28BC0621FA123 /* ContentView.swift in Sources */,
 				6D2D2B81A43BB7E8D26EE81F /* SongProActivityAttributes.swift in Sources */,
+				E0198BA31627A073FDF1B896 /* SongProTripActivityAttributes.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -474,8 +500,10 @@
 			buildActionMask = 2147483647;
 			files = (
 				97D85BD3A8D8D549ABD6A944 /* ActivityManager.swift in Sources */,
+				BA44D6E648CAA30EFD8C11AF /* ArrivalSheet.swift in Sources */,
 				DE39B1C98DBD4A0B7B3D515F /* AuthConfig.swift in Sources */,
 				D6B7CC3FAD98C1CC134911FE /* AuthManager.swift in Sources */,
+				064E007225ADC0CDFC776198 /* AutomationsView.swift in Sources */,
 				AE6DF0BA2B76E13159F83FE3 /* BackgroundRefresh.swift in Sources */,
 				EB170A75BD1ABB3462C6AF9E /* BiometricGate.swift in Sources */,
 				605ED8EEC91528FFBC054A48 /* CarActions.swift in Sources */,
@@ -499,6 +527,7 @@
 				8B73DFD0957C51F2398BED33 /* NativeDriveView.swift in Sources */,
 				694901AB2FD60B4D5A1322DA /* NativeRecargasView.swift in Sources */,
 				62435AEEC1C0E57CFBB27ABE /* NativeViagensView.swift in Sources */,
+				6C1FE4315EFC5408CBF98788 /* NotificationsCenterSheet.swift in Sources */,
 				6B3EDE545B2502D265805216 /* OfflineSync.swift in Sources */,
 				0C3838E769FD23A972E10B3E /* PreClimatActivityAttributes.swift in Sources */,
 				A01430293347A18D099263AF /* PreclimatSheet.swift in Sources */,
@@ -515,9 +544,12 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				8C38A751217FF17B7A5F5691 /* BydChargeWidget.swift in Sources */,
 				BD7C6AB06DD0FA3DFCB15EBD /* BydRecargaWidgetBundle.swift in Sources */,
 				1505BBD9630C5E03C190C203 /* SongProActivityAttributes.swift in Sources */,
 				31C4EEF5E7D54B74A2F8DCA1 /* SongProLiveActivity.swift in Sources */,
+				FE7B902A4E0C408709E7B8AD /* SongProTripActivityAttributes.swift in Sources */,
+				C53454204CA59200E9360FF8 /* SongProTripLiveActivity.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -660,6 +692,7 @@
 		8AB1BC2F61E731CE93607B51 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = BydRecargaWidget/BydRecargaWidget.entitlements;
 				INFOPLIST_FILE = BydRecargaWidget/Info.plist;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -772,6 +805,7 @@
 		EB71BC05F53D2BCD423C1E48 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = BydRecargaWidget/BydRecargaWidget.entitlements;
 				INFOPLIST_FILE = BydRecargaWidget/Info.plist;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
