@@ -22,6 +22,7 @@ struct NativeDashView: View {
     @State private var showArrival = false
     @State private var showWindows = false
     @State private var showTrunk = false
+    @State private var showHazard = false
     // Feedback visual da troca de limite de carga (Haptic Touch no card):
     // pendingLimit = valor selecionado aguardando o carro confirmar (amarelo);
     // limitFeedback: 0=nenhum · 1=confirmado (verde) · 2=recusado (vermelho).
@@ -99,7 +100,7 @@ struct NativeDashView: View {
     private var statusCard: some View {
         let winOpen = ["window_fl","window_fr","window_rl","window_rr"].contains { store.str($0) == "on" }
         return DSCard {
-            HStack(spacing: 8) {
+            HStack {
                 iconButton(icon: store.isLocked ? "lock.fill" : "lock.open.fill",
                            tint: store.isLocked ? DS.green : DS.orange,
                            caption: !store.lockKnown ? "—" : (store.isLocked ? "Trancado" : "Destranc.")) {
@@ -110,6 +111,7 @@ struct NativeDashView: View {
                                    confirm: store.isLocked ? "Destravar" : "Travar", danger: store.isLocked,
                                    name: store.isLocked ? "lock_open" : "lock_close", binding: $showLock)
                 }
+                Spacer()
                 iconButton(icon: "power", tint: store.engineOn ? DS.green : DS.muted,
                            caption: store.engineOn ? "Ligado" : "Desligado") {
                     showEngine = true
@@ -119,8 +121,9 @@ struct NativeDashView: View {
                                    confirm: store.engineOn ? "Desligar" : "Ligar", danger: store.engineOn,
                                    name: store.engineOn ? "engine_off" : "engine_on", binding: $showEngine)
                 }
-                // Ações rápidas junto dos botões de controle (com confirmação, igual aos demais).
+                Spacer()
                 iconButton(icon: "fan.fill", tint: DS.blue, caption: "Clima") { showPreclimat = true }
+                Spacer()
                 iconButton(icon: "macwindow", tint: DS.teal, caption: winOpen ? "Fechar" : "Vidros") {
                     showWindows = true
                 }
@@ -129,6 +132,7 @@ struct NativeDashView: View {
                                    confirm: winOpen ? "Fechar" : "Abrir", danger: false,
                                    name: winOpen ? "windows_close" : "windows_open", binding: $showWindows)
                 }
+                Spacer()
                 iconButton(icon: "suitcase.fill", tint: DS.muted, caption: "Malas") {
                     showTrunk = true
                 }
@@ -136,10 +140,17 @@ struct NativeDashView: View {
                     confirmPopover(title: "Abrir o porta-malas?", confirm: "Abrir", danger: false,
                                    name: "trunk_open", binding: $showTrunk)
                 }
-                Spacer(minLength: 4)
-                HStack(alignment: .firstTextBaseline, spacing: 12) {
-                    rightMetric("Hodômetro", store.odometerKm > 0 ? "\(miles(store.odometerKm)) km" : "—")
-                    if store.batt12vPct > 0 { rightMetric("12V", "\(f0(store.batt12vPct))%") }
+                Spacer()
+                iconButton(icon: "exclamationmark.triangle.fill", tint: DS.yellow, caption: "Pisca") {
+                    showHazard = true
+                }
+                .popover(isPresented: $showHazard) {
+                    confirmPopoverAction(title: "Piscar o pisca-alerta para localizar o carro?",
+                                         confirm: "Piscar", danger: false, binding: $showHazard) {
+                        _ = await store.setHazard(true)
+                        try? await Task.sleep(nanoseconds: 6_000_000_000)   // pisca ~6s e apaga
+                        _ = await store.setHazard(false)
+                    }
                 }
             }
         }
@@ -159,6 +170,22 @@ struct NativeDashView: View {
                 Button("Cancelar") { binding.wrappedValue = false }
                     .frame(maxWidth: .infinity).frame(height: 44).foregroundStyle(DS.text).background(DS.panel2).clipShape(RoundedRectangle(cornerRadius: 11))
                 Button(confirm) { binding.wrappedValue = false; busy = true; Task { _ = await store.action(name); busy = false } }
+                    .frame(maxWidth: .infinity).frame(height: 44).foregroundStyle(.black).background(danger ? DS.red : DS.green).clipShape(RoundedRectangle(cornerRadius: 11)).font(.system(size: 15, weight: .bold))
+            }
+        }
+        .padding(18).frame(width: 280).background(DS.panel)
+        .presentationCompactAdaptation(.popover)
+    }
+
+    // Igual ao confirmPopover, mas executa uma ação custom (não um /api/action/<name>).
+    private func confirmPopoverAction(title: String, confirm: String, danger: Bool,
+                                      binding: Binding<Bool>, action: @escaping () async -> Void) -> some View {
+        VStack(spacing: 14) {
+            Text(title).font(.system(size: 16, weight: .semibold)).foregroundStyle(DS.text).multilineTextAlignment(.center)
+            HStack(spacing: 10) {
+                Button("Cancelar") { binding.wrappedValue = false }
+                    .frame(maxWidth: .infinity).frame(height: 44).foregroundStyle(DS.text).background(DS.panel2).clipShape(RoundedRectangle(cornerRadius: 11))
+                Button(confirm) { binding.wrappedValue = false; busy = true; Task { await action(); busy = false } }
                     .frame(maxWidth: .infinity).frame(height: 44).foregroundStyle(.black).background(danger ? DS.red : DS.green).clipShape(RoundedRectangle(cornerRadius: 11)).font(.system(size: 15, weight: .bold))
             }
         }
@@ -284,15 +311,18 @@ struct NativeDashView: View {
     private var climateCard: some View {
         let acActive = store.acOn
         return DSCard {
-            HStack(spacing: 10) {
+            HStack(spacing: 8) {
                 Image(systemName: acActive ? "snowflake" : "thermometer.medium")
                     .font(.title3).foregroundStyle(acActive ? DS.blue : DS.muted)
-                Text("\(f0(store.insideTemp))°").font(.system(size: 20, weight: .semibold, design: .rounded)).foregroundStyle(DS.text)
-                Text("interna").font(.caption).foregroundStyle(DS.muted)
-                Spacer()
+                Text("\(f0(store.insideTemp))°").font(.system(size: 19, weight: .semibold, design: .rounded)).foregroundStyle(DS.text)
+                Text("int").font(.caption).foregroundStyle(DS.muted)
+                Text("·").foregroundStyle(DS.muted)
                 Text("\(f0(store.outsideTemp))°").font(.system(size: 16, weight: .medium)).foregroundStyle(DS.text)
-                Text("externa").font(.caption).foregroundStyle(DS.muted)
+                Text("ext").font(.caption).foregroundStyle(DS.muted)
                 if acActive { DSChip(text: "AC", color: DS.blue, filled: true) }
+                Spacer()
+                rightMetric("Hodômetro", store.odometerKm > 0 ? "\(miles(store.odometerKm)) km" : "—")
+                if store.batt12vPct > 0 { rightMetric("12V", "\(f0(store.batt12vPct))%") }
             }
         }
     }
