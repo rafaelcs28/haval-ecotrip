@@ -8233,13 +8233,20 @@ app.post('/api/nav-to', (req, res) => {
   if (!Number.isFinite(lat) || !Number.isFinite(lng) || (lat === 0 && lng === 0))
     return res.status(400).json({ ok: false, error: 'lat/lng obrigatórios' });
   const name = (String(req.body && req.body.name || '').trim() || `${lat.toFixed(5)}, ${lng.toFixed(5)}`).slice(0, 60);
+  const app = String(req.body && req.body.app || '').toLowerCase();   // '', 'maps', 'waze'
   recentNavDests.push({ name, lat, lng, ts: Date.now() });
   if (recentNavDests.length > 30) recentNavDests.shift();
+  // Painel do carro (banner/chegada).
   mqttClient.publish(`${MQTT_PREFIX}/cmd/nav_dest`,
     JSON.stringify({ lat, lng, name, etaClock: '', ts: Date.now() }), { qos: 1, retain: true });
   _navDestRetained = true;
+  // Se pediu Maps/Waze, manda também pro Nav Relay (Android no carro) abrir a navegação.
+  if (app === 'maps' || app === 'waze') {
+    mqttClient.publish(`${MQTT_PREFIX}/nav_to`,
+      JSON.stringify({ lat, lng, name, app, ts: Date.now() }), { qos: 1, retain: false });
+  }
   _maybeComputeArrival(true);   // já calcula a chegada pro cluster/estado
-  console.log(`[navTo] → carro: ${name} (${lat.toFixed(5)},${lng.toFixed(5)})`);
+  console.log(`[navTo] → carro: ${name} (${lat.toFixed(5)},${lng.toFixed(5)})${app ? ' · '+app : ''}`);
   res.json({ ok: true, name });
 });
 
