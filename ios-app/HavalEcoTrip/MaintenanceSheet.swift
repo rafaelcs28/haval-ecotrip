@@ -19,7 +19,7 @@ struct MaintenanceSheet: View {
 
     private static let grp: NumberFormatter = { let f = NumberFormatter(); f.numberStyle = .decimal; f.groupingSeparator = "."; f.maximumFractionDigits = 0; return f }()
     private func miles(_ v: Double) -> String { Self.grp.string(from: NSNumber(value: v)) ?? String(format: "%.0f", v) }
-    private func brl(_ v: Double) -> String { "R$ " + String(format: "%.2f", v).replacingOccurrences(of: ".", with: ",") }
+    private func brl(_ v: Double) -> String { Fmt.brl(v) }
     private static let df: DateFormatter = { let f = DateFormatter(); f.locale = Locale(identifier: "pt_BR"); f.dateFormat = "d MMM yyyy"; return f }()
 
     var body: some View {

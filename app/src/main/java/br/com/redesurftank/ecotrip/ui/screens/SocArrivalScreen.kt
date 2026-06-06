@@ -195,8 +195,8 @@ fun SocArrivalScreen(
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     SocStat("Distância", "${f1c(p.distanceKm)} km", AccentBlue)
-                    SocStat("Subida", "↑ ${p.climbM} m", NeonLime)
-                    SocStat("Descida", "↓ ${p.descentM} m", PlasmaBlue)
+                    SocStat("Subida", "↑ ${fi(p.climbM)} m", NeonLime)
+                    SocStat("Descida", "↓ ${fi(p.descentM)} m", PlasmaBlue)
                     SocStat("Energia", "${f1c(p.energyKwh)} kWh", MoltenOrange)
                 }
                 Text("Estimativa: consumo recente ${f1c(tripManager.getRecentKwhPerKm()*100f)} kWh/100km · bateria ~${p.capacityKwh.toInt()} kWh (auto-calibrada). Altitude por GPS/mapa.",
@@ -235,4 +235,6 @@ private fun SocStat(label: String, value: String, color: androidx.compose.ui.gra
     }
 }
 
-private fun f1c(v: Float): String = String.format("%.1f", v).replace(".", ",")
+private val PTBR = java.util.Locale("pt", "BR")
+private fun f1c(v: Float): String = String.format(PTBR, "%,.1f", v)
+private fun fi(v: Int): String = String.format(PTBR, "%,d", v)   // inteiro com milhares (ex.: 1.234)

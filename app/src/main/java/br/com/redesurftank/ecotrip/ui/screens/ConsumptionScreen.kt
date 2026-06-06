@@ -64,6 +64,7 @@ import br.com.redesurftank.ecotrip.ui.components.SocStripBar
 import br.com.redesurftank.ecotrip.ui.components.StatusBadge
 import br.com.redesurftank.ecotrip.ui.theme.*
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
+private val PTBR = java.util.Locale("pt", "BR")   // milhares "." e decimal ","
 
 private val mainHandler = Handler(Looper.getMainLooper())
 
@@ -342,11 +343,11 @@ fun ConsumptionScreen() {
                     HorizontalDivider(color = Separator, thickness = 0.5.dp)
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         Column {
-                            Text("%.1f km".format(trip.distKm), fontSize = 18.sp, fontWeight = FontWeight.Bold, color = AccentBlue)
+                            Text(String.format(PTBR, "%,.1f km", trip.distKm), fontSize = 18.sp, fontWeight = FontWeight.Bold, color = AccentBlue)
                             Text("distância", fontSize = 11.sp, color = TextSecondary)
                         }
                         Column {
-                            Text("%.2f kWh".format(trip.netKwh), fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Green)
+                            Text(String.format(PTBR, "%,.2f kWh", trip.netKwh), fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Green)
                             Text("kWh líq.", fontSize = 11.sp, color = TextSecondary)
                         }
                         if (kwh100 > 0f) Column {
@@ -363,7 +364,7 @@ fun ConsumptionScreen() {
                                 Text("combustível", fontSize = 11.sp, color = TextSecondary)
                             }
                             if (costBrl > 0.01f) Column {
-                                Text("R$ %.2f".format(costBrl), fontSize = 15.sp, fontWeight = FontWeight.Bold, color = WarnYellow)
+                                Text(String.format(PTBR, "R$ %,.2f", costBrl), fontSize = 15.sp, fontWeight = FontWeight.Bold, color = WarnYellow)
                                 Text("custo est.", fontSize = 11.sp, color = TextSecondary)
                             }
                         }
@@ -690,7 +691,7 @@ private fun StripSection(
                 )
                 Text("▸", fontSize = 13.sp, color = TextSecondary.copy(alpha = 0.4f))
                 Text(
-                    "%.1f km".format(trip.distKm),
+                    String.format(PTBR, "%,.1f km", trip.distKm),
                     fontSize = 15.sp,
                     fontWeight = FontWeight.ExtraBold,
                     color = AuroraTeal,
@@ -781,7 +782,7 @@ private fun StripSection(
                 },
             )
             StripMetric(
-                value = if (trip.netKwh > 0.01f) "%.2f kWh".format(trip.netKwh) else "--",
+                value = if (trip.netKwh > 0.01f) String.format(PTBR, "%,.2f kWh", trip.netKwh) else "--",
                 unit  = "elétrico líq.",
                 color = AuroraTeal,
             )

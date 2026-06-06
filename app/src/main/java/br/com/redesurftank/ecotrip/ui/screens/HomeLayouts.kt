@@ -156,9 +156,11 @@ fun buildHomeData(
     )
 }
 
-private fun f1(v: Float): String = String.format("%.1f", v).replace(".", ",")
-private fun f2(v: Float): String = String.format("%.2f", v).replace(".", ",")
-private fun f3(v: Float): String = String.format("%.3f", v).replace(".", ",")
+// pt-BR: agrupa milhares com "." e decimal com "," (ex.: 2.455,27).
+private val PTBR = java.util.Locale("pt", "BR")
+private fun f1(v: Float): String = String.format(PTBR, "%,.1f", v)
+private fun f2(v: Float): String = String.format(PTBR, "%,.2f", v)
+private fun f3(v: Float): String = String.format(PTBR, "%,.3f", v)
 
 private fun socColor(soc: Int): Color = when {
     soc < 30 -> Color(0xFFFF5F1F)   // vermelho/laranja: chegada crítica

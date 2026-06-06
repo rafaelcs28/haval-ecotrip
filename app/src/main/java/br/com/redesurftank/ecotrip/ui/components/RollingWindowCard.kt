@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import br.com.redesurftank.ecotrip.managers.RollingSnapshot
 import br.com.redesurftank.ecotrip.ui.theme.*
+private val PTBR = java.util.Locale("pt", "BR")   // milhares "." e decimal ","
 
 @Composable
 fun RollingWindowCard(
@@ -76,7 +77,7 @@ fun RollingWindowCard(
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Text(
-                    "%.1f km".format(snapshot.windowKm),
+                    String.format(PTBR, "%,.1f km", snapshot.windowKm),
                     fontSize   = 19.sp,
                     fontWeight = FontWeight.ExtraBold,
                     color      = AuroraTeal,
@@ -117,9 +118,9 @@ fun RollingWindowCard(
                 verticalArrangement = Arrangement.spacedBy(3.dp),
             ) {
                 RMetricSection("⚡ Energia")
-                RMetric("Bruto",       "%.2f kWh".format(snapshot.energyKwh),       TextPrimary)
+                RMetric("Bruto",       String.format(PTBR, "%,.2f kWh", snapshot.energyKwh),       TextPrimary)
                 RRegenMetric(snapshot.regenKwh, snapshot.energyKwh)
-                RMetric("Líquido",     "%.2f kWh".format(snapshot.netKwh),           WarnYellow)
+                RMetric("Líquido",     String.format(PTBR, "%,.2f kWh", snapshot.netKwh),           WarnYellow)
                 if (snapshot.startSocPct > 0f || snapshot.currentSocPct > 0f)
                     RMetric("SOC", "%.0f%% → %.0f%%".format(snapshot.startSocPct, snapshot.currentSocPct), TextPrimary)
                 RMetric("Ef. elétrica", "%.2f kWh/100km".format(snapshot.netKwhPer100km), AuroraTeal)
@@ -172,7 +173,7 @@ fun RollingWindowCard(
                 if (snapshot.startTankL > 0f || snapshot.currentTankL > 0f)
                     RMetric("Tanque", "%.1fL → %.1fL".format(snapshot.startTankL, snapshot.currentTankL), TextPrimary)
                 if (snapshot.costBrl > 0.01f) {
-                    RMetric("💰 Custo", "R$ %.2f".format(snapshot.costBrl), WarnYellow)
+                    RMetric("💰 Custo", String.format(PTBR, "R$ %,.2f", snapshot.costBrl), WarnYellow)
                     if (snapshot.costPerKm > 0f)
                         RMetric("R$/km", "%.3f".format(snapshot.costPerKm), WarnYellow.copy(alpha = 0.8f))
                 }
@@ -310,7 +311,7 @@ private fun RRegenMetric(regenKwh: Float, energyKwh: Float) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text       = "%.2f kWh".format(regenKwh),
+                text       = String.format(PTBR, "%,.2f kWh", regenKwh),
                 fontSize   = 17.sp,
                 fontWeight = FontWeight.Bold,
                 color      = NeonLime,

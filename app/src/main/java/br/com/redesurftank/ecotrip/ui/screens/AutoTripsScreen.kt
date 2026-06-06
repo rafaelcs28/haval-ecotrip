@@ -35,6 +35,9 @@ import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 
+// pt-BR: agrupa milhares com "." e decimal com "," (ex.: 1.234,5 km / R$ 2.455,27).
+private val PTBR = java.util.Locale("pt", "BR")
+
 // ── Filtro de período ─────────────────────────────────────────────────────────
 
 private enum class AutoTripFilter(val label: String) {
@@ -361,9 +364,9 @@ fun AutoTripsScreen(
                     horizontalArrangement = Arrangement.spacedBy(0.dp),
                 ) {
                     AutoPeriodStat("${filtered.size}", "Viagens",   modifier = Modifier.weight(1f))
-                    AutoPeriodStat("%.1f km".format(totalKm),       "Distância", color = AccentBlue, modifier = Modifier.weight(1.4f))
+                    AutoPeriodStat(String.format(PTBR, "%,.1f km",totalKm),       "Distância", color = AccentBlue, modifier = Modifier.weight(1.4f))
                     AutoPeriodStat(fmtAutoTripDur(totalSec),        "Tempo",     modifier = Modifier.weight(1.4f))
-                    AutoPeriodStat("%.2f kWh".format(totalNet),     "kWh líq.",  color = Green,       modifier = Modifier.weight(1.5f))
+                    AutoPeriodStat(String.format(PTBR, "%,.2f kWh",totalNet),     "kWh líq.",  color = Green,       modifier = Modifier.weight(1.5f))
                     if (totalFuel > 0.001f)
                         AutoPeriodStat("%.2f L".format(totalFuel),  "Combust.",  color = AccentOrange, modifier = Modifier.weight(1.3f))
                 }
@@ -372,9 +375,9 @@ fun AutoTripsScreen(
                         Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(0.dp),
                     ) {
-                        AutoPeriodStat("R$ %.2f".format(totalCostBrl), "Custo total", color = WarnYellow, modifier = Modifier.weight(1.5f))
+                        AutoPeriodStat(String.format(PTBR, "R$ %,.2f",totalCostBrl), "Custo total", color = WarnYellow, modifier = Modifier.weight(1.5f))
                         if (filtered.size > 1)
-                            AutoPeriodStat("R$ %.2f".format(totalCostBrl / filtered.size), "Méd/viagem", color = WarnYellow, modifier = Modifier.weight(1.5f))
+                            AutoPeriodStat(String.format(PTBR, "R$ %,.2f",totalCostBrl / filtered.size), "Méd/viagem", color = WarnYellow, modifier = Modifier.weight(1.5f))
                         val avgCostPerKm = if (totalKm > 0.1f) totalCostBrl / totalKm else 0f
                         if (avgCostPerKm > 0f)
                             AutoPeriodStat("%.3f".format(avgCostPerKm), "R$/km", color = WarnYellow, modifier = Modifier.weight(1f))
@@ -506,7 +509,7 @@ private fun InProgressAutoTripCard(inProgress: AutoTripEntry) {
             horizontalArrangement = Arrangement.spacedBy(0.dp),
         ) {
             AutoPeriodStat(
-                "%.1f km".format(inProgress.distKm),
+                String.format(PTBR, "%,.1f km",inProgress.distKm),
                 "Distância",
                 color    = AccentBlue,
                 modifier = Modifier.weight(1.3f),
@@ -545,14 +548,14 @@ private fun InProgressAutoTripCard(inProgress: AutoTripEntry) {
             ) {
                 if (inProgress.netKwh > 0f)
                     AutoPeriodStat(
-                        "%.2f kWh".format(inProgress.netKwh),
+                        String.format(PTBR, "%,.2f kWh",inProgress.netKwh),
                         "kWh líq.",
                         color    = Green,
                         modifier = Modifier.weight(1.5f),
                     )
                 if (inProgress.regenKwh > 0f)
                     AutoPeriodStat(
-                        "%.2f kWh".format(inProgress.regenKwh),
+                        String.format(PTBR, "%,.2f kWh",inProgress.regenKwh),
                         "Regen",
                         color    = AuroraTeal,
                         modifier = Modifier.weight(1.5f),
@@ -702,13 +705,13 @@ private fun AutoTripEntryRow(
             }
 
             // Métricas inline — eficiência elétrica + eficiência térmica + custo
-            AutoCompactMetric("%.1f km".format(entry.distKm), "dist")
+            AutoCompactMetric(String.format(PTBR, "%,.1f km",entry.distKm), "dist")
             if (kwh100km > 0f)
                 AutoCompactMetric("%.1f".format(kwh100km), "kWh/100", valueColor = effColor)
             if (kmPerL > 0f)
                 AutoCompactMetric("%.1f".format(kmPerL), "km/L", valueColor = AccentOrange)
             if (costBrl > 0.01f)
-                AutoCompactMetric("R$ %.2f".format(costBrl), "custo")
+                AutoCompactMetric(String.format(PTBR, "R$ %,.2f",costBrl), "custo")
 
             // Botão expandir
             Icon(
@@ -732,7 +735,7 @@ private fun AutoTripEntryRow(
 
                 // Linha 1: eficiência — km, vel. média, kWh/100km, km/L
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    AutoDetailMetric("Distância",  "%.1f km".format(entry.distKm),  AccentBlue,  Modifier.weight(1f))
+                    AutoDetailMetric("Distância",  String.format(PTBR, "%,.1f km",entry.distKm),  AccentBlue,  Modifier.weight(1f))
                     AutoDetailMetric("Vel. Média", "%.1f km/h".format(avgSpeed),    TextPrimary, Modifier.weight(1f))
                     if (kwh100km > 0f)
                         AutoDetailMetric("kWh/100km", "%.1f".format(kwh100km),      effColor,    Modifier.weight(1f))
@@ -746,9 +749,9 @@ private fun AutoTripEntryRow(
 
                 // Linha 2: energia bruta + condução efetiva
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    AutoDetailMetric("kWh líquido",   "%.2f kWh".format(entry.netKwh),    Green,         Modifier.weight(1f))
-                    AutoDetailMetric("Bruto",         "%.2f kWh".format(entry.energyKwh), TextSecondary, Modifier.weight(1f))
-                    AutoDetailMetric("Regenerado",    "%.2f kWh".format(entry.regenKwh),  AuroraTeal,    Modifier.weight(1f))
+                    AutoDetailMetric("kWh líquido",   String.format(PTBR, "%,.2f kWh",entry.netKwh),    Green,         Modifier.weight(1f))
+                    AutoDetailMetric("Bruto",         String.format(PTBR, "%,.2f kWh",entry.energyKwh), TextSecondary, Modifier.weight(1f))
+                    AutoDetailMetric("Regenerado",    String.format(PTBR, "%,.2f kWh",entry.regenKwh),  AuroraTeal,    Modifier.weight(1f))
                     AutoDetailMetric("Cond. efetiva", fmtAutoTripDur(entry.timeSec),       TextSecondary, Modifier.weight(1f))
                 }
 
@@ -762,7 +765,7 @@ private fun AutoTripEntryRow(
                         else
                             Spacer(Modifier.weight(1f))
                         if (showCost) {
-                            AutoDetailMetric("💰 Custo",   "R$ %.2f".format(costBrl),      WarnYellow, Modifier.weight(1f))
+                            AutoDetailMetric("💰 Custo",   String.format(PTBR, "R$ %,.2f",costBrl),      WarnYellow, Modifier.weight(1f))
                             if (costPerKm > 0f)
                                 AutoDetailMetric("R$/km",  "%.3f".format(costPerKm),       WarnYellow, Modifier.weight(1f))
                             else
@@ -827,8 +830,8 @@ private fun AutoTripEntryRow(
                 // Altimetria (GPS): ganho (subida) e perda (descida) — relevante p/ EV
                 if (entry.elevGainM > 1f || entry.elevLossM > 1f) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        AutoDetailMetric("Subida ↑", "%.0f m".format(entry.elevGainM), Green, Modifier.weight(1f))
-                        AutoDetailMetric("Descida ↓", "%.0f m".format(entry.elevLossM), AccentBlue, Modifier.weight(1f))
+                        AutoDetailMetric("Subida ↑", String.format(PTBR, "%,.0f m",entry.elevGainM), Green, Modifier.weight(1f))
+                        AutoDetailMetric("Descida ↓", String.format(PTBR, "%,.0f m",entry.elevLossM), AccentBlue, Modifier.weight(1f))
                         Spacer(Modifier.weight(2f))
                     }
                 }

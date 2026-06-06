@@ -21,6 +21,7 @@ import androidx.compose.ui.unit.sp
 import br.com.redesurftank.ecotrip.managers.TripManager
 import br.com.redesurftank.ecotrip.ui.theme.*
 import java.util.Calendar
+private val PTBR = java.util.Locale("pt", "BR")   // milhares "." e decimal ","
 
 // ── Filtro de período ─────────────────────────────────────────────────────────
 
@@ -191,7 +192,7 @@ fun StatsScreen(
             // Seção: Deslocamento
             StatsSectionCard(title = "DESLOCAMENTO") {
                 StatsRow {
-                    StatsCell("Distância",  "%.1f km".format(dDist),                                 AccentBlue)
+                    StatsCell("Distância",  String.format(PTBR, "%,.1f km",dDist),                                 AccentBlue)
                     StatsCell("Tempo",      if (dTime > 0) fmtStatDur(dTime) else "—",               TextPrimary)
                     StatsCell("Vel. Média", if (avgSpeed > 0f) "%.1f km/h".format(avgSpeed) else "—", TextPrimary)
                 }
@@ -202,11 +203,11 @@ fun StatsScreen(
                 StatsRow {
                     StatsCell("kWh/100km",    if (kwh100km > 0f) "%.1f".format(kwh100km) else "—",  effColor)
                     StatsCell("km/L",         if (kmPerL   > 0f) "%.1f".format(kmPerL)   else "—",  Green)
-                    StatsCell("kWh líquido",  "%.2f kWh".format(dNet),                              Green)
+                    StatsCell("kWh líquido",  String.format(PTBR, "%,.2f kWh",dNet),                              Green)
                 }
                 StatsRow {
-                    StatsCell("Energia bruta","%.2f kWh".format(dEnergy),                            TextSecondary)
-                    StatsCell("Regenerada",   "%.2f kWh".format(dRegen),                             AuroraTeal)
+                    StatsCell("Energia bruta",String.format(PTBR, "%,.2f kWh",dEnergy),                            TextSecondary)
+                    StatsCell("Regenerada",   String.format(PTBR, "%,.2f kWh",dRegen),                             AuroraTeal)
                     StatsCell("Combustível",  if (dFuel > 0.001f) "%.2f L".format(dFuel) else "—",  AccentOrange)
                 }
             }
@@ -215,9 +216,9 @@ fun StatsScreen(
             if (costTotal > 0.01f) {
                 StatsSectionCard(title = "CUSTO ESTIMADO") {
                     StatsRow {
-                        StatsCell("Total",       "R$ %.2f".format(costTotal),  WarnYellow)
-                        StatsCell("Combustível", "R$ %.2f".format(costFuel),   WarnYellow)
-                        StatsCell("Energia",     "R$ %.2f".format(costEnergy), WarnYellow)
+                        StatsCell("Total",       String.format(PTBR, "R$ %,.2f",costTotal),  WarnYellow)
+                        StatsCell("Combustível", String.format(PTBR, "R$ %,.2f",costFuel),   WarnYellow)
+                        StatsCell("Energia",     String.format(PTBR, "R$ %,.2f",costEnergy), WarnYellow)
                     }
                     if (costPerKm > 0f) {
                         StatsRow {

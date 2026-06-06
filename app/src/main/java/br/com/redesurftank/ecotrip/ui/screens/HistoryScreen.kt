@@ -27,6 +27,7 @@ import br.com.redesurftank.ecotrip.ui.theme.*
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+private val PTBR = Locale("pt", "BR")   // milhares "." e decimal ","
 
 @Composable
 fun HistoryScreen(
@@ -132,8 +133,8 @@ private fun HistoryEntryRow(entry: TripHistoryEntry, index: Int, onDelete: () ->
             }
 
             // Key metrics inline
-            CompactMetric("%.1f km".format(entry.distKm),        "dist")
-            CompactMetric("%.1f kWh".format(entry.kwhPer100km),  "/100km")
+            CompactMetric(String.format(PTBR, "%,.1f km", entry.distKm),        "dist")
+            CompactMetric(String.format(PTBR, "%,.1f kWh", entry.kwhPer100km),  "/100km")
             CompactMetric("%.1f km/L".format(entry.kmPerL),      "comb")
 
             Icon(
@@ -156,7 +157,7 @@ private fun HistoryEntryRow(entry: TripHistoryEntry, index: Int, onDelete: () ->
                 Spacer(Modifier.height(2.dp))
 
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    DetailMetric("Distância",   "%.1f km".format(entry.distKm),        Modifier.weight(1f))
+                    DetailMetric("Distância",   String.format(PTBR, "%,.1f km", entry.distKm),        Modifier.weight(1f))
                     DetailMetric("Tempo",       formatTime(entry.timeSec),              Modifier.weight(1f))
                     DetailMetric("Vel. Média",  "%.1f km/h".format(entry.avgSpeedKmh), Modifier.weight(1f))
                 }
@@ -166,13 +167,13 @@ private fun HistoryEntryRow(entry: TripHistoryEntry, index: Int, onDelete: () ->
                     DetailMetric("Combustível", if (entry.fuelL > 0f)    "%.2f L".format(entry.fuelL)     else "--", Modifier.weight(1f))
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    DetailMetric("Energia",    "%.2f kWh".format(entry.energyKwh), Modifier.weight(1f))
-                    DetailMetric("Regenerada", "%.2f kWh".format(entry.regenKwh),  Modifier.weight(1f))
-                    DetailMetric("Líquido",    "%.2f kWh".format(entry.netKwh),    Modifier.weight(1f), color = Green)
+                    DetailMetric("Energia",    String.format(PTBR, "%,.2f kWh", entry.energyKwh), Modifier.weight(1f))
+                    DetailMetric("Regenerada", String.format(PTBR, "%,.2f kWh", entry.regenKwh),  Modifier.weight(1f))
+                    DetailMetric("Líquido",    String.format(PTBR, "%,.2f kWh", entry.netKwh),    Modifier.weight(1f), color = Green)
                 }
                 if (entry.costBrl > 0.01f) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        DetailMetric("💰 Custo Total", "R$ %.2f".format(entry.costBrl), Modifier.weight(1f), color = WarnYellow)
+                        DetailMetric("💰 Custo Total", String.format(PTBR, "R$ %,.2f", entry.costBrl), Modifier.weight(1f), color = WarnYellow)
                         if (entry.costPerKm > 0f)
                             DetailMetric("R$/km", "%.3f".format(entry.costPerKm), Modifier.weight(1f), color = WarnYellow)
                         else

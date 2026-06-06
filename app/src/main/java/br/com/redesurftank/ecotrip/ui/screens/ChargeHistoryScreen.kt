@@ -25,6 +25,9 @@ import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 
+// pt-BR: agrupa milhares com "." e decimal com "," (ex.: 1.234,5 kWh).
+private val PTBR = java.util.Locale("pt", "BR")
+
 // ── Filtros de período predefinido ────────────────────────────────────────────
 
 private enum class ChargeFilter(val label: String) {
@@ -296,7 +299,7 @@ fun ChargeHistoryScreen(
             ) {
                 PeriodStat(value = "${filtered.size}", label = "Sessões", modifier = Modifier.weight(1f))
                 PeriodStat(
-                    value    = "%.2f kWh".format(totalKwh),
+                    value    = String.format(PTBR, "%,.2f kWh",totalKwh),
                     label    = "Total Carregado",
                     modifier = Modifier.weight(1.8f),
                     color    = AuroraTeal,
@@ -308,7 +311,7 @@ fun ChargeHistoryScreen(
                 )
                 if (filtered.size > 1) {
                     PeriodStat(
-                        value    = "%.2f kWh".format(totalKwh / filtered.size),
+                        value    = String.format(PTBR, "%,.2f kWh",totalKwh / filtered.size),
                         label    = "Média/Sessão",
                         modifier = Modifier.weight(1.4f),
                     )
@@ -403,7 +406,7 @@ private fun ChargeEntryRow(entry: ChargeHistoryEntry) {
 
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(0.dp)) {
             ChargeMetric(value = formatChargeDuration(entry.durationSec), label = "Duração",    modifier = Modifier.weight(1f))
-            ChargeMetric(value = "%.2f kWh".format(entry.energyKwh),     label = "Energia",    modifier = Modifier.weight(1f), color = AuroraTeal)
+            ChargeMetric(value = String.format(PTBR, "%,.2f kWh",entry.energyKwh),     label = "Energia",    modifier = Modifier.weight(1f), color = AuroraTeal)
             ChargeMetric(value = "%.1f kW".format(entry.avgPowerKw),      label = "Pot. Média", modifier = Modifier.weight(1f))
         }
     }
