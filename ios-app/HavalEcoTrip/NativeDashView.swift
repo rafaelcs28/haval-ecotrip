@@ -23,7 +23,6 @@ struct NativeDashView: View {
     @State private var showWindows = false
     @State private var showTrunk = false
     @State private var showHazard = false
-    @State private var mapCam: MapCameraPosition = .automatic
     // Feedback visual da troca de limite de carga (Haptic Touch no card):
     // pendingLimit = valor selecionado aguardando o carro confirmar (amarelo);
     // limitFeedback: 0=nenhum · 1=confirmado (verde) · 2=recusado (vermelho).
@@ -328,22 +327,15 @@ struct NativeDashView: View {
         }
     }
 
-    // MARK: mini-mapa da localização do carro
+    // MARK: mini-mapa da localização — escuro, segue o carro com zoom por velocidade,
+    // permite mexer (pan/zoom) e reenquadra sozinho após 10s parado.
     @ViewBuilder private var locationCard: some View {
         if store.hasGps {
             DSCard {
                 VStack(alignment: .leading, spacing: 8) {
-                    Map(position: $mapCam, interactionModes: []) {
-                        Annotation("", coordinate: store.coordinate) { CarMarker(size: 28, heading: store.heading) }
-                    }
-                    .mapStyle(.standard(elevation: .flat, pointsOfInterest: .excludingAll))
-                    .frame(height: 130)
-                    .overlay(Color.black.opacity(0.28))   // escurece o mapa
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .allowsHitTesting(false)
-                    .onAppear { recenterMap() }
-                    .onChange(of: store.lat) { _, _ in recenterMap() }
-                    .onChange(of: store.lng) { _, _ in recenterMap() }
+                    FollowMap(lat: store.lat, lng: store.lng, heading: store.heading, speedKmh: store.speedKmh)
+                        .frame(height: 170)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                     if !store.address.isEmpty {
                         HStack(spacing: 6) {
                             Image(systemName: "location.fill").font(.caption2).foregroundStyle(DS.green)
@@ -352,15 +344,6 @@ struct NativeDashView: View {
                     }
                 }
             }
-        }
-    }
-
-    // Recentraliza o mini-mapa na posição atual do carro (chamado quando o GPS muda).
-    private func recenterMap() {
-        guard store.hasGps else { return }
-        withAnimation(.easeInOut(duration: 0.5)) {
-            mapCam = .region(MKCoordinateRegion(center: store.coordinate,
-                                                latitudinalMeters: 700, longitudinalMeters: 700))
         }
     }
 

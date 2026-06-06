@@ -25,7 +25,7 @@ struct NativeDriveView: View {
 
     var body: some View {
         ZStack {
-            if store.hasGps { FollowMap(lat: store.lat, lng: store.lng, heading: store.heading).ignoresSafeArea() }
+            if store.hasGps { FollowMap(lat: store.lat, lng: store.lng, heading: store.heading, speedKmh: store.speedKmh).ignoresSafeArea() }
             else { DS.bg.ignoresSafeArea() }
 
             VStack(spacing: 12) {
@@ -165,6 +165,7 @@ struct FollowMap: View {
     let lat: Double
     let lng: Double
     var heading: Double = 0
+    var speedKmh: Double = 0          // zoom adaptativo: mais rápido = mais afastado
     @State private var cam: MapCameraPosition = .automatic
     @State private var span = 0.004
     @State private var autoFollow = true
@@ -172,9 +173,13 @@ struct FollowMap: View {
     private let tick = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     private var coord: CLLocationCoordinate2D { .init(latitude: lat, longitude: lng) }
+    // Span por velocidade: parado ~0,004; ~0,004 + v/120·0,02 (teto 0,03 ≈ ~3 km de visão).
+    private func spanForSpeed() -> Double { min(0.03, max(0.0035, 0.004 + speedKmh / 120 * 0.02)) }
     private func center() { cam = .region(MKCoordinateRegion(center: coord,
         span: MKCoordinateSpan(latitudeDelta: span, longitudeDelta: span))) }
+    private func followCenter() { span = spanForSpeed(); center() }   // auto: zoom pela velocidade
     private func zoom(_ factor: Double) {
+        autoFollow = false; lastTouch = Date()
         span = min(0.08, max(0.0015, span * factor)); center()
     }
 
@@ -185,14 +190,15 @@ struct FollowMap: View {
             }
         }
         .mapStyle(.standard(pointsOfInterest: .excludingAll))
-        .environment(\.colorScheme, .dark)   // mapa escuro
+        .environment(\.colorScheme, .dark)   // mapa escuro (ruas claras)
         .simultaneousGesture(DragGesture().onChanged { _ in autoFollow = false; lastTouch = Date() }
                                           .onEnded { _ in lastTouch = Date() })
-        .onAppear { center() }
-        .onChange(of: lat) { _, _ in if autoFollow { center() } }
-        .onChange(of: lng) { _, _ in if autoFollow { center() } }
+        .onAppear { followCenter() }
+        .onChange(of: lat) { _, _ in if autoFollow { followCenter() } }
+        .onChange(of: lng) { _, _ in if autoFollow { followCenter() } }
+        .onChange(of: speedKmh) { _, _ in if autoFollow { followCenter() } }
         .onReceive(tick) { _ in
-            if !autoFollow && Date().timeIntervalSince(lastTouch) > 10 { autoFollow = true; center() }
+            if !autoFollow && Date().timeIntervalSince(lastTouch) > 10 { autoFollow = true; followCenter() }
         }
         .overlay(alignment: .trailing) {
             VStack(spacing: 10) {
