@@ -63,6 +63,14 @@ data class HomeData(
     // Setas: cada lado pisca independente; os dois juntos = pisca-alerta (4 setas).
     val turnLeft: Boolean = false,
     val turnRight: Boolean = false,
+    // Navegação ativa (destino vindo do celular/tela Chegada): mostra um banner de
+    // "viagem em andamento" com destino, ETA, km restantes e SOC previsto na chegada.
+    val navActive: Boolean = false,
+    val navName: String = "",
+    val navDistKm: Float = 0f,
+    val navEtaMin: Int = 0,
+    val navEtaClock: String = "",
+    val navArrivalSoc: Int = 0,
 ) {
     companion object {
         val sample = HomeData(
@@ -75,6 +83,8 @@ data class HomeData(
             winFL = false, winFR = false, winRL = false, winRR = false,
             frontLight = true,
             turnLeft = false, turnRight = false,
+            navActive = true, navName = "Trindade", navDistKm = 18.3f,
+            navEtaMin = 27, navEtaClock = "14:32", navArrivalSoc = 47,
         )
     }
 }
@@ -150,6 +160,99 @@ private fun f1(v: Float): String = String.format("%.1f", v).replace(".", ",")
 private fun f2(v: Float): String = String.format("%.2f", v).replace(".", ",")
 private fun f3(v: Float): String = String.format("%.3f", v).replace(".", ",")
 
+private fun socColor(soc: Int): Color = when {
+    soc < 30 -> Color(0xFFFF5F1F)   // vermelho/laranja: chegada crítica
+    soc < 50 -> Color(0xFFFFB648)   // amarelo: chegada apertada
+    else     -> Color(0xFF28C98A)   // verde: chegada confortável
+}
+
+// ── Banner "viagem em andamento" — By Claude (glass/neon) ─────────────────────
+@Composable
+private fun ClaudeNavBanner(d: HomeData) {
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(GlassCard)
+            .border(1.5.dp, AuroraTeal.copy(alpha = 0.35f), RoundedCornerShape(16.dp))
+            .padding(horizontal = 22.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("📍", fontSize = 22.sp)
+        Spacer(Modifier.width(12.dp))
+        Column {
+            Text("VIAGEM EM ANDAMENTO", color = AuroraTeal, fontSize = 13.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
+            Text(d.navName, color = TextPrimary, fontSize = 22.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+        }
+        Spacer(Modifier.weight(1f))
+        NavStat("chegada", d.navEtaClock, "${d.navEtaMin} min", TextPrimary)
+        NavDivider()
+        NavStat("restante", "${f1(d.navDistKm)} km", "", TextPrimary)
+        NavDivider()
+        NavStat("SOC chegada", "${d.navArrivalSoc}%", "", socColor(d.navArrivalSoc))
+    }
+}
+
+@Composable
+private fun NavStat(label: String, value: String, sub: String, color: Color) {
+    Column(horizontalAlignment = Alignment.End) {
+        Text(label, color = TextSecondary, fontSize = 13.sp)
+        Text(value, color = color, fontSize = 28.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1)
+        if (sub.isNotBlank()) Text(sub, color = TextSecondary, fontSize = 13.sp)
+    }
+}
+
+@Composable
+private fun NavDivider() {
+    Box(Modifier.padding(horizontal = 22.dp).width(1.dp).height(44.dp).background(Color(0xFF2A3240)))
+}
+
+// ── Banner "viagem em andamento" — Tesla (minimalista) ────────────────────────
+@Composable
+private fun TeslaNavBanner(d: HomeData) {
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Color(0xFF161618))
+            .padding(horizontal = 24.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("➜", color = Color(0xFF28C98A), fontSize = 30.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.width(16.dp))
+        Text(d.navName, color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+        Spacer(Modifier.weight(1f))
+        TeslaNavCell("Chegada", d.navEtaClock, "${d.navEtaMin} min", Color.White)
+        Spacer(Modifier.width(40.dp))
+        TeslaNavCell("Faltam", "${f1(d.navDistKm)} km", "", Color.White)
+        Spacer(Modifier.width(40.dp))
+        TeslaNavCell("SOC na chegada", "${d.navArrivalSoc}%", "", socColor(d.navArrivalSoc))
+    }
+}
+
+@Composable
+private fun TeslaNavCell(label: String, value: String, sub: String, color: Color) {
+    Column(horizontalAlignment = Alignment.End) {
+        Text(label, color = Color(0xFF8E8E93), fontSize = 17.sp)
+        Text(value, color = color, fontSize = 30.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+        if (sub.isNotBlank()) Text(sub, color = Color(0xFF8E8E93), fontSize = 16.sp)
+    }
+}
+
+// ── Banner "viagem em andamento" — Europeu (cockpit, pílula central) ──────────
+@Composable
+private fun EuroNavBanner(d: HomeData) {
+    Row(
+        Modifier.clip(RoundedCornerShape(24.dp))
+            .background(Color(0xFF11202B))
+            .border(1.dp, Color(0xFF2D7DFF).copy(alpha = 0.4f), RoundedCornerShape(24.dp))
+            .padding(horizontal = 26.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("📍 ${d.navName}", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+        Spacer(Modifier.width(28.dp))
+        Text("${d.navEtaClock} · ${d.navEtaMin} min", color = Color(0xFF5EC8FF), fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.width(20.dp))
+        Text("${f1(d.navDistKm)} km", color = Color(0xFF9AA6B4), fontSize = 22.sp)
+        Spacer(Modifier.width(20.dp))
+        Text("SOC ${d.navArrivalSoc}%", color = socColor(d.navArrivalSoc), fontSize = 24.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
 // ════════════════════════════════════════════════════════════════════════════
 //  LAYOUT 3 — "BY CLAUDE": tema neon, carro + anel de eficiência + cards
 // ════════════════════════════════════════════════════════════════════════════
@@ -176,6 +279,7 @@ fun HomeClaudeLayout(d: HomeData, actions: @Composable RowScope.() -> Unit = {},
                 Text(if (d.modeEv) "EV · ${d.outsideTempC}°" else "${d.outsideTempC}°", color = Color(0xFF8DA0BD), fontSize = 20.sp)
                 actions()
             }
+            if (d.navActive) { Spacer(Modifier.height(8.dp)); ClaudeNavBanner(d) }
             Spacer(Modifier.height(10.dp))
             Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(28.dp)) {
                 // ESQUERDA: carro + bateria
@@ -349,6 +453,8 @@ fun HomeTeslaLayout(d: HomeData, actions: @Composable RowScope.() -> Unit = {}, 
             }
             Spacer(Modifier.height(8.dp))
             Box(Modifier.fillMaxWidth().height(1.dp).background(Color(0xFF222226)))
+            if (d.navActive) { Spacer(Modifier.height(10.dp)); TeslaNavBanner(d) }
+            Spacer(Modifier.height(8.dp))
             Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(36.dp)) {
                 // ESQUERDA: carro + bateria
                 Column(Modifier.weight(1f).fillMaxHeight()) {
@@ -364,24 +470,26 @@ fun HomeTeslaLayout(d: HomeData, actions: @Composable RowScope.() -> Unit = {}, 
                             .background(Brush.horizontalGradient(listOf(Color(0xFF1EA672), Color(0xFF28C98A)))))
                     }
                 }
-                // DIREITA: viagem atual
+                // DIREITA: viagem atual. Fontes encolhem um pouco quando há banner de
+                // navegação (pra não espremer a grade de baixo).
+                val nav = d.navActive
                 Column(Modifier.weight(1.25f).fillMaxHeight()) {
-                    Text("VIAGEM ATUAL", color = Color(0xFF8E8E93), fontSize = 24.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 5.sp)
-                    Spacer(Modifier.height(4.dp))
+                    Text("VIAGEM ATUAL", color = Color(0xFF8E8E93), fontSize = if (nav) 20.sp else 24.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 5.sp)
+                    Spacer(Modifier.height(2.dp))
                     Row(verticalAlignment = Alignment.Bottom) {
-                        Text(f1(d.distKm), color = Color.White, fontSize = 96.sp, fontWeight = FontWeight.Bold)
-                        Text(" km", color = Color(0xFF6B6B70), fontSize = 44.sp, modifier = Modifier.padding(bottom = 12.dp))
+                        Text(f1(d.distKm), color = Color.White, fontSize = if (nav) 66.sp else 96.sp, fontWeight = FontWeight.Bold)
+                        Text(" km", color = Color(0xFF6B6B70), fontSize = if (nav) 32.sp else 44.sp, modifier = Modifier.padding(bottom = if (nav) 8.dp else 12.dp))
                     }
-                    Spacer(Modifier.height(8.dp))
+                    Spacer(Modifier.height(6.dp))
                     Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-                        TeslaCell(Modifier.weight(1f), "Tempo", d.timeStr, Color.White, null)
-                        TeslaCell(Modifier.weight(1f), "Velocidade média", "${d.avgSpeedKmh} km/h", Color.White, null)
-                        TeslaCell(Modifier.weight(1f), "Consumo", "${f1(d.kwh100)} kWh/100", Color(0xFF28C98A), null)
+                        TeslaCell(Modifier.weight(1f), "Tempo", d.timeStr, Color.White, null, nav = nav)
+                        TeslaCell(Modifier.weight(1f), "Velocidade média", "${d.avgSpeedKmh} km/h", Color.White, null, nav = nav)
+                        TeslaCell(Modifier.weight(1f), "Consumo", "${f1(d.kwh100)} kWh/100", Color(0xFF28C98A), null, nav = nav)
                     }
                     Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-                        TeslaCell(Modifier.weight(1f), "Energia usada", "${f1(d.netKwh)} kWh", Color.White, "regen ${f1(d.regenKwh)} kWh", Color(0xFF4DBBFF))
-                        TeslaCell(Modifier.weight(1f), "Custo", "R$ ${f2(d.costBrl)}", Color.White, "R$ ${f3(d.costPerKm)} / km", Color(0xFF28C98A))
-                        TeslaCell(Modifier.weight(1f), "Combustível", "${f1(d.fuelL)} L · EV", Color(0xFFFF5F1F), "SOC ${d.startSocPct}% → ${d.socPct}%")
+                        TeslaCell(Modifier.weight(1f), "Energia usada", "${f1(d.netKwh)} kWh", Color.White, "regen ${f1(d.regenKwh)} kWh", Color(0xFF4DBBFF), nav = nav)
+                        TeslaCell(Modifier.weight(1f), "Custo", "R$ ${f2(d.costBrl)}", Color.White, "R$ ${f3(d.costPerKm)} / km", Color(0xFF28C98A), nav = nav)
+                        TeslaCell(Modifier.weight(1f), "Combustível", "${f1(d.fuelL)} L · EV", Color(0xFFFF5F1F), "SOC ${d.startSocPct}% → ${d.socPct}%", nav = nav)
                     }
                 }
             }
@@ -390,14 +498,14 @@ fun HomeTeslaLayout(d: HomeData, actions: @Composable RowScope.() -> Unit = {}, 
 }
 
 @Composable
-private fun TeslaCell(modifier: Modifier, label: String, value: String, valueColor: Color, sub: String?, subColor: Color = Color(0xFF8E8E93)) {
+private fun TeslaCell(modifier: Modifier, label: String, value: String, valueColor: Color, sub: String?, subColor: Color = Color(0xFF8E8E93), nav: Boolean = false) {
     Column(modifier, verticalArrangement = Arrangement.Center) {
-        Text(label, color = Color(0xFF8E8E93), fontSize = 21.sp)
-        Spacer(Modifier.height(4.dp))
-        Text(value, color = valueColor, fontSize = 40.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+        Text(label, color = Color(0xFF8E8E93), fontSize = if (nav) 18.sp else 21.sp)
+        Spacer(Modifier.height(if (nav) 2.dp else 4.dp))
+        Text(value, color = valueColor, fontSize = if (nav) 32.sp else 40.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
         if (sub != null) {
-            Spacer(Modifier.height(4.dp))
-            Text(sub, color = subColor, fontSize = 20.sp)
+            Spacer(Modifier.height(2.dp))
+            Text(sub, color = subColor, fontSize = if (nav) 17.sp else 20.sp)
         }
     }
 }
@@ -419,6 +527,10 @@ fun HomeEuropeanLayout(d: HomeData, actions: @Composable RowScope.() -> Unit = {
                 Spacer(Modifier.weight(1f))
                 Text("${d.outsideTempC}°", color = Color(0xFF9AA6B4), fontSize = 24.sp)
                 actions()
+            }
+            if (d.navActive) {
+                Spacer(Modifier.height(6.dp))
+                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { EuroNavBanner(d) }
             }
             Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
                 // ESQUERDA: gauge eficiência

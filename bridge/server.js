@@ -8051,6 +8051,14 @@ async function _resolveSharedDest(text) {
   return null;
 }
 
+// ETA do Waze: "chegando às HH:MM" / "arriving at HH:MM" → "HH:MM" (a ETA real do
+// Waze, com trânsito ao vivo). Quando presente, o carro usa esse horário em vez de
+// recalcular a duração — mais fiel ao que o usuário vê no celular.
+function _parseShareEta(text) {
+  const m = String(text || '').match(/(?:chegando\s+(?:à|a|às|as)|arriving\s+at|arrival)\s*(\d{1,2}:\d{2})/i);
+  return m ? m[1] : '';
+}
+
 // Recebe o payload do tópico car_dest_raw, resolve o destino e publica pro carro.
 async function _handleSharedDest(value) {
   let text = value;
@@ -8064,7 +8072,8 @@ async function _handleSharedDest(value) {
         { qos: 1, retain: false });
       return;
     }
-    const payload = JSON.stringify({ lat: d.lat, lng: d.lng, name: d.name, ts: Date.now() });
+    const etaClock = _parseShareEta(text);
+    const payload = JSON.stringify({ lat: d.lat, lng: d.lng, name: d.name, etaClock, ts: Date.now() });
     mqttClient.publish(`${MQTT_PREFIX}/cmd/nav_dest`, payload, { qos: 1, retain: false });
     mqttClient.publish(`${MQTT_PREFIX}/car_dest_result`,
       JSON.stringify({ ok: true, name: d.name, ts: Date.now() }), { qos: 1, retain: false });

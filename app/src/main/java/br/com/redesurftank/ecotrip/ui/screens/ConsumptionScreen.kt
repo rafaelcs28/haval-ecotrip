@@ -178,6 +178,7 @@ fun ConsumptionScreen() {
     var showSettings      by remember { mutableStateOf(false) }
     var showSocArrival    by remember { mutableStateOf(false) }
     var navDest           by remember { mutableStateOf<MqttManager.NavDest?>(null) }
+    var navPlan           by remember { mutableStateOf<RoutePlan?>(null) }
     var showLog           by remember { mutableStateOf(false) }
     var minAutoTripDist   by remember { mutableStateOf(tripManager.getMinAutoTripDist()) }
     var lastCompletedTrip by remember { mutableStateOf<AutoTripEntry?>(null) }
@@ -211,17 +212,30 @@ fun ConsumptionScreen() {
         }
     }
 
-    // Destino vindo do celular (Nav Relay → bridge → cmd/nav_dest): abre a Chegada.
+    // Destino vindo do celular (Nav Relay → bridge → cmd/nav_dest): NÃO abre a tela
+    // Chegada; alimenta o banner "viagem em andamento" na home. Recalcula a cada 30s
+    // (km/SOC/ETA mudam conforme dirige) e some quando o carro desliga (driving_ready≠1).
     LaunchedEffect(Unit) {
         var lastTs = 0L
+        var lastCompute = 0L
+        var wasReady = false
         while (true) {
             val nd = mqttManager.incomingNavDest
             if (nd != null && nd.ts != lastTs) {
-                lastTs = nd.ts
-                navDest = nd
-                showSocArrival = true
+                lastTs = nd.ts; navDest = nd
+                navPlan = try { fetchArrivalPlan(tripManager, nd.lat, nd.lng, nd.name, nd.etaClock) } catch (e: Exception) { navPlan }
+                lastCompute = System.currentTimeMillis()
             }
-            delay(1_500L)
+            val cur = navDest
+            if (cur != null && System.currentTimeMillis() - lastCompute > 30_000L) {
+                navPlan = try { fetchArrivalPlan(tripManager, cur.lat, cur.lng, cur.name, cur.etaClock) } catch (e: Exception) { navPlan }
+                lastCompute = System.currentTimeMillis()
+            }
+            // Carro desligou (ready→não-ready) → encerra o banner junto com a viagem.
+            val nowReady = mqttManager.latestDrivingReadyState == 1
+            if (wasReady && !nowReady) { navDest = null; navPlan = null }
+            wasReady = nowReady
+            delay(2_000L)
         }
     }
 
@@ -365,7 +379,7 @@ fun ConsumptionScreen() {
     }
 
     if (showSocArrival) {
-        SocArrivalScreen(tripManager = tripManager, onBack = { showSocArrival = false; navDest = null }, initialDest = navDest)
+        SocArrivalScreen(tripManager = tripManager, onBack = { showSocArrival = false })
         return
     }
 
@@ -446,7 +460,7 @@ fun ConsumptionScreen() {
     val displayTrip   = inProgressTrip ?: autoTripEntries.firstOrNull()
     val displayIsLive = inProgressTrip != null
 
-    val hd = buildHomeData(
+    val baseHd = buildHomeData(
         trip = displayTrip, isLive = displayIsLive, nowMs = nowMs,
         priceGasL = priceGasoline, priceKwh = priceEnergy,
         socNowPct = rolling.currentSocPct, tempC = displayTrip?.outsideTempC?.toInt() ?: 0,
@@ -454,6 +468,13 @@ fun ConsumptionScreen() {
         sunroof = carSunroof, locked = carLocked, frontLight = carFrontLight,
         turnLeft = carTurnLeft, turnRight = carTurnRight,
     )
+    // Banner "viagem em andamento" (destino do celular) sobreposto ao HomeData.
+    val hd = navPlan?.let { p ->
+        baseHd.copy(
+            navActive = true, navName = p.destName, navDistKm = p.distanceKm,
+            navEtaMin = p.durationMin, navEtaClock = p.etaClock, navArrivalSoc = p.predictedSoc,
+        )
+    } ?: baseHd
 
     // Ações de navegação no header do layout: chip de update + 4 botões
     val navActions: @Composable RowScope.() -> Unit = {

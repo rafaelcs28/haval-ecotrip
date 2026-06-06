@@ -250,7 +250,7 @@ class MqttManager private constructor() {
 
     // Destino vindo do celular (Nav Relay compartilhou um local do Maps/Waze →
     // bridge resolveu → cmd/nav_dest). A UI faz polling e abre a tela Chegada.
-    data class NavDest(val lat: Double, val lng: Double, val name: String, val ts: Long)
+    data class NavDest(val lat: Double, val lng: Double, val name: String, val ts: Long, val etaClock: String = "")
     @Volatile var incomingNavDest: NavDest? = null
 
     // ── Voting filter pra car.basic.window_status ─────────────────────────────
@@ -2004,8 +2004,8 @@ class MqttManager private constructor() {
                         val j = org.json.JSONObject(payload)
                         val lat = j.optDouble("lat", 0.0); val lng = j.optDouble("lng", 0.0)
                         if (lat != 0.0 || lng != 0.0) {
-                            incomingNavDest = NavDest(lat, lng, j.optString("name", ""), System.currentTimeMillis())
-                            AppLogger.i(TAG, "nav_dest recebido: ${j.optString("name","")} ($lat,$lng)")
+                            incomingNavDest = NavDest(lat, lng, j.optString("name", ""), System.currentTimeMillis(), j.optString("etaClock", ""))
+                            AppLogger.i(TAG, "nav_dest recebido: ${j.optString("name","")} ($lat,$lng) eta=${j.optString("etaClock","")}")
                         }
                     } catch (e: Exception) { AppLogger.w(TAG, "nav_dest inválido: ${e.message}") }
                 }
