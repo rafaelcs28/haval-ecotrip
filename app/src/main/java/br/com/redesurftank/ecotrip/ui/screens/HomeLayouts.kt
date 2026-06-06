@@ -387,18 +387,18 @@ fun InteractiveCar(d: HomeData, modifier: Modifier = Modifier) {
         )
         val blink = if (phase < 0.5f) 1f else 0f
         val amber = Color(0xFFFFC107)
-        val mirrorGray = Color(0xFF3C424B)
+        val mirrorBody = Color(0xFFE3E7F1)   // mesma cor da lataria do H6 (estado normal)
         val arc: @Composable (Int, Color, Float) -> Unit = { res, tint, alpha ->
             Image(painterResource(res), null, Modifier.fillMaxSize(), contentScale = ContentScale.Fit,
                 alpha = alpha, colorFilter = androidx.compose.ui.graphics.ColorFilter.tint(tint))
         }
         when {                                   // ESQUERDA
             d.turnLeft -> arc(R.drawable.retrovisor_esquerdo, amber, blink)
-            !d.doorFL  -> arc(R.drawable.retrovisor_esquerdo, mirrorGray, 1f)
+            !d.doorFL  -> arc(R.drawable.retrovisor_esquerdo, mirrorBody, 1f)
         }
         when {                                   // DIREITA
             d.turnRight -> arc(R.drawable.retrovisor_direito, amber, blink)
-            !d.doorFR   -> arc(R.drawable.retrovisor_direito, mirrorGray, 1f)
+            !d.doorFR   -> arc(R.drawable.retrovisor_direito, mirrorBody, 1f)
         }
         if (d.doorFL) layer(R.drawable.porta_dianteira_esquerda_aberta)
         if (d.doorFR) layer(R.drawable.porta_dianteira_direita_aberta)
