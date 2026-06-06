@@ -48,9 +48,7 @@ struct NativeDashView: View {
                 statusCard
                 if store.isCharging { chargingCard } else { HStack(spacing: 14) { batteryCard; fuelCard } }
                 climateCard
-                tyresCard
-                doorsCard
-                windowsCard
+                openingsCard
                 revisaoCard
                 arrivalCard
                 tripCard
@@ -290,48 +288,35 @@ struct NativeDashView: View {
         }
     }
 
-    // MARK: pneus (colapsável; abre em anomalia <28 psi)
-    private var tyresCard: some View {
+    private func tyreCell(_ pk: String, _ tk: String, _ label: String) -> some View {
+        let p = store.num(pk), t = store.num(tk)
+        return VStack(alignment: .leading, spacing: 2) {
+            HStack(alignment: .firstTextBaseline, spacing: 3) {
+                Text(p <= 0 ? "—" : f0(p)).font(.system(size: 22, weight: .semibold, design: .rounded))
+                    .foregroundStyle(p > 0 && p < 28 ? DS.red : DS.text).monospacedDigit()
+                Text("psi").font(.system(size: 11)).foregroundStyle(DS.muted)
+                if t > 0 { Text("· \(f0(t))°").font(.system(size: 11)).foregroundStyle(DS.muted) }
+            }
+            Text(label.uppercased()).font(.system(size: 9, weight: .semibold)).foregroundStyle(DS.muted)
+        }.frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    // MARK: Pneus + Portas + Vidros/Teto num card só — fechado mostra só o resumo;
+    // abre sozinho se houver anomalia (pneu <28 psi ou porta/vidro/teto aberto).
+    private var openingsCard: some View {
         let ps = ["tyre_pressure_fl","tyre_pressure_fr","tyre_pressure_rl","tyre_pressure_rr"].map { store.num($0) }
-        let low = ps.contains { $0 > 0 && $0 < 28 }
-        let summary = ps.allSatisfy { $0 <= 0 } ? "sem dados" : ps.map { $0 <= 0 ? "—" : f0($0) }.joined(separator: "/") + " psi"
-        func tyre(_ pk: String, _ tk: String, _ label: String) -> some View {
-            let p = store.num(pk), t = store.num(tk)
-            return VStack(alignment: .leading, spacing: 2) {
-                HStack(alignment: .firstTextBaseline, spacing: 3) {
-                    Text(p <= 0 ? "—" : f0(p)).font(.system(size: 22, weight: .semibold, design: .rounded))
-                        .foregroundStyle(p > 0 && p < 28 ? DS.red : DS.text).monospacedDigit()
-                    Text("psi").font(.system(size: 11)).foregroundStyle(DS.muted)
-                    if t > 0 { Text("· \(f0(t))°").font(.system(size: 11)).foregroundStyle(DS.muted) }
-                }
-                Text(label.uppercased()).font(.system(size: 9, weight: .semibold)).foregroundStyle(DS.muted)
-            }.frame(maxWidth: .infinity, alignment: .leading)
-        }
-        return CollapsibleCard(icon: "circle.grid.2x2.fill", title: "Pneus", summary: summary, alert: low) {
-            VStack(spacing: 12) {
-                HStack { tyre("tyre_pressure_fl","tyre_temp_fl","Diant. Esq."); tyre("tyre_pressure_fr","tyre_temp_fr","Diant. Dir.") }
-                HStack { tyre("tyre_pressure_rl","tyre_temp_rl","Tras. Esq.");  tyre("tyre_pressure_rr","tyre_temp_rr","Tras. Dir.") }
-            }
-        }
-    }
-
-    // MARK: portas (colapsável; abre se alguma aberta)
-    private var doorsCard: some View {
-        let open = openList(doorsMap)
-        return CollapsibleCard(icon: "car.door.front.left.open", title: "Portas",
-                               summary: open.isEmpty ? "Tudo fechado" : open.joined(separator: ", "), alert: !open.isEmpty) {
-            VStack(spacing: 8) {
+        let tyreLow = ps.contains { $0 > 0 && $0 < 28 }
+        let tyreTxt = ps.allSatisfy { $0 <= 0 } ? "s/ dados" : ps.map { $0 <= 0 ? "—" : f0($0) }.joined(separator: "/")
+        let openDoors = openList(doorsMap)
+        let openWins  = openList(windowsMap)
+        let anomaly = tyreLow || !openDoors.isEmpty || !openWins.isEmpty
+        let summary = "🛞 \(tyreTxt) · 🚪 \(openDoors.isEmpty ? "ok" : "\(openDoors.count) aberta") · 🪟 \(openWins.isEmpty ? "ok" : "\(openWins.count) aberto")"
+        return CollapsibleCard(icon: "car.side.fill", title: "Pneus & Aberturas", summary: summary, alert: anomaly) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack { tyreCell("tyre_pressure_fl","tyre_temp_fl","Diant. Esq."); tyreCell("tyre_pressure_fr","tyre_temp_fr","Diant. Dir.") }
+                HStack { tyreCell("tyre_pressure_rl","tyre_temp_rl","Tras. Esq.");  tyreCell("tyre_pressure_rr","tyre_temp_rr","Tras. Dir.") }
+                Divider().background(DS.border)
                 ForEach(doorsMap, id: \.0) { k, label in stateRow(label, store.str(k) == "on") }
-            }
-        }
-    }
-
-    // MARK: vidros + teto (colapsável; abre se algo aberto)
-    private var windowsCard: some View {
-        let open = openList(windowsMap)
-        return CollapsibleCard(icon: "macwindow", title: "Vidros / Teto",
-                               summary: open.isEmpty ? "Tudo fechado" : open.joined(separator: ", "), alert: !open.isEmpty) {
-            VStack(spacing: 8) {
                 ForEach(windowsMap, id: \.0) { k, label in stateRow(label, store.str(k) == "on") }
             }
         }
