@@ -35,6 +35,7 @@
 		62435AEEC1C0E57CFBB27ABE /* NativeViagensView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 638ACE606ED94D317501DB0E /* NativeViagensView.swift */; };
 		659B7DF18D1CC3CBBC1615F3 /* ChargeActivityLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6A433A5AA48336FD73F1C85 /* ChargeActivityLiveActivity.swift */; };
 		6601E0AF99CFBF6068D0180D /* NativeDashView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0412CD48BFB11B79D8D550D4 /* NativeDashView.swift */; };
+		68110724BB249D794F3FE32F /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2E5847D4B630A807A07557A /* ShareViewController.swift */; };
 		694901AB2FD60B4D5A1322DA /* NativeRecargasView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB5145A32C36D0D8E2E36E83 /* NativeRecargasView.swift */; };
 		6B3EDE545B2502D265805216 /* OfflineSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2EBD85F9B7D028E3D520ED77 /* OfflineSync.swift */; };
 		6C1FE4315EFC5408CBF98788 /* NotificationsCenterSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7817E2396F9C3176DF2954E /* NotificationsCenterSheet.swift */; };
@@ -49,9 +50,11 @@
 		8C3FA5DCF7133607EC275A89 /* TripLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B0EC768E77CEDD141861D39 /* TripLiveActivity.swift */; };
 		91E8922CD20B94185D7454A2 /* BydLiveActivityPush.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60050A5D1678A9235BEB0730 /* BydLiveActivityPush.swift */; };
 		920A0533D20932EF36FC4D49 /* ChargeActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = C110A5E3EADD0B1D4DA52BE6 /* ChargeActivityAttributes.swift */; };
+		96755F980B03F6B827D28AC0 /* AuthConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = A799F69A43F78E263048C8F4 /* AuthConfig.swift */; };
 		9726912E15C4196ACF166260 /* MaintenanceStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8036EB500E09B8F08A9EA755 /* MaintenanceStore.swift */; };
 		97D85BD3A8D8D549ABD6A944 /* ActivityManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9926C58E001CD8511E829FB /* ActivityManager.swift */; };
 		985C98EC482371EDBE14B4E2 /* SecurityActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = D15756C1CEF1EFDD6804C05D /* SecurityActivityAttributes.swift */; };
+		9BCE4AFE50A0B7CB2F40A59C /* ShareExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = B9BBC1E7EB38A5621A6751AA /* ShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		9CC60221177D73FA6ED4E7F8 /* SecurityLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFE9C8DD63C6163B5AF174C8 /* SecurityLiveActivity.swift */; };
 		A01430293347A18D099263AF /* PreclimatSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6215EB2F3EA8C80FA49D1477 /* PreclimatSheet.swift */; };
 		A059FEDAB126C345DAAD9802 /* PreClimatLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 915E7661920B0022793D3A63 /* PreClimatLiveActivity.swift */; };
@@ -68,6 +71,7 @@
 		D6B7CC3FAD98C1CC134911FE /* AuthManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBC80D42C32C99C47E1B7222 /* AuthManager.swift */; };
 		D9E640CC25ED1D302FCE3773 /* BydPhoneLocation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1856321B97D59F9EFBA114E7 /* BydPhoneLocation.swift */; };
 		DAFD168AE90C50CE05BA20A8 /* PreClimatActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBBB57D2D187DD310113F34A /* PreClimatActivityAttributes.swift */; };
+		DBD69D16CA773604913A1330 /* Settings.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4593E338CE49445D2B4E37A /* Settings.swift */; };
 		DE39B1C98DBD4A0B7B3D515F /* AuthConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = A799F69A43F78E263048C8F4 /* AuthConfig.swift */; };
 		E0198BA31627A073FDF1B896 /* SongProTripActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DBCF10DECA75C406A67E56B /* SongProTripActivityAttributes.swift */; };
 		E43E5551EEE28BC0621FA123 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 492762BFD473DC0FD6D89688 /* ContentView.swift */; };
@@ -84,6 +88,13 @@
 			proxyType = 1;
 			remoteGlobalIDString = 7C6F91A3D976662D4231F695;
 			remoteInfo = HavalEcoTripWidget;
+		};
+		4D76365725B38DAEB3255C81 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = CB4F87A590F61F207CFCDD6A /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 9A24D993E9771A54D42878BB;
+			remoteInfo = ShareExtension;
 		};
 		FBC92699CDE4026C5046490F /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -113,6 +124,7 @@
 			dstSubfolderSpec = 13;
 			files = (
 				89B5CF62DAD11B34026CB4C5 /* HavalEcoTripWidget.appex in Embed Foundation Extensions */,
+				9BCE4AFE50A0B7CB2F40A59C /* ShareExtension.appex in Embed Foundation Extensions */,
 			);
 			name = "Embed Foundation Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -128,6 +140,7 @@
 		192BA3BE182AC3D50F636DA9 /* HavalEcoTripWidget.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = HavalEcoTripWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		19F1EE1E1159233D66EEAFA8 /* LiveActivityPush.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveActivityPush.swift; sourceTree = "<group>"; };
 		1C2F4161732FE79AB2415337 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		1E3DCC65EEE32FFFC3727847 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		25AF744D0A813EC24608D127 /* ConfigSheets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigSheets.swift; sourceTree = "<group>"; };
 		26B936D2B31C5DE61815546A /* HavalEcoTrip-dev.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "HavalEcoTrip-dev.entitlements"; sourceTree = "<group>"; };
 		2A0F1250A4346D17F0539FE8 /* MotorLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MotorLiveActivity.swift; sourceTree = "<group>"; };
@@ -144,6 +157,7 @@
 		59969E598BACA40911CD6232 /* ArrivalSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArrivalSheet.swift; sourceTree = "<group>"; };
 		5C78BF7DF42C2CEA8466E30F /* BydRecarga.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = BydRecarga.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		60050A5D1678A9235BEB0730 /* BydLiveActivityPush.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BydLiveActivityPush.swift; sourceTree = "<group>"; };
+		6160C161401773B289CF8215 /* ShareExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ShareExtension.entitlements; sourceTree = "<group>"; };
 		6215EB2F3EA8C80FA49D1477 /* PreclimatSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreclimatSheet.swift; sourceTree = "<group>"; };
 		636438201B328EA34B285F3A /* MotorActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MotorActivityAttributes.swift; sourceTree = "<group>"; };
 		638ACE606ED94D317501DB0E /* NativeViagensView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeViagensView.swift; sourceTree = "<group>"; };
@@ -168,6 +182,7 @@
 		B41BC4A6A889A1B5BBFCF7C6 /* PwaWebView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PwaWebView.swift; sourceTree = "<group>"; };
 		B5A372CA99C89C5712EE54BC /* HavalEcoTripApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HavalEcoTripApp.swift; sourceTree = "<group>"; };
 		B6A433A5AA48336FD73F1C85 /* ChargeActivityLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChargeActivityLiveActivity.swift; sourceTree = "<group>"; };
+		B9BBC1E7EB38A5621A6751AA /* ShareExtension.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = ShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		BF4805E2E098ECAD51E0A441 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		C0D6E362CB348E539FA519CC /* NativeDriveView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeDriveView.swift; sourceTree = "<group>"; };
 		C110A5E3EADD0B1D4DA52BE6 /* ChargeActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChargeActivityAttributes.swift; sourceTree = "<group>"; };
@@ -177,6 +192,7 @@
 		C7817E2396F9C3176DF2954E /* NotificationsCenterSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationsCenterSheet.swift; sourceTree = "<group>"; };
 		C88C20EF0FDB1AB8EB036191 /* CarActions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarActions.swift; sourceTree = "<group>"; };
 		D15756C1CEF1EFDD6804C05D /* SecurityActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecurityActivityAttributes.swift; sourceTree = "<group>"; };
+		D2E5847D4B630A807A07557A /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
 		D6CE9B63AE0A75344509696C /* NativeConfigView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeConfigView.swift; sourceTree = "<group>"; };
 		D7A442E88C358C98CE318DF9 /* ControlSheets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ControlSheets.swift; sourceTree = "<group>"; };
 		D9926C58E001CD8511E829FB /* ActivityManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityManager.swift; sourceTree = "<group>"; };
@@ -293,6 +309,16 @@
 			path = BydRecargaWidget;
 			sourceTree = "<group>";
 		};
+		E005AB11A0FEF6448D74F6BF /* ShareExtension */ = {
+			isa = PBXGroup;
+			children = (
+				1E3DCC65EEE32FFFC3727847 /* Info.plist */,
+				6160C161401773B289CF8215 /* ShareExtension.entitlements */,
+				D2E5847D4B630A807A07557A /* ShareViewController.swift */,
+			);
+			path = ShareExtension;
+			sourceTree = "<group>";
+		};
 		E3F9CDB4A84F984C5043F62B /* Products */ = {
 			isa = PBXGroup;
 			children = (
@@ -300,6 +326,7 @@
 				0275BC86719533522473C87B /* BydRecargaWidget.appex */,
 				6AB3E13D26098FB169B559E2 /* HavalEcoTrip.app */,
 				192BA3BE182AC3D50F636DA9 /* HavalEcoTripWidget.appex */,
+				B9BBC1E7EB38A5621A6751AA /* ShareExtension.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -311,6 +338,7 @@
 				8189E525203ABEDA3C0DE197 /* BydRecargaWidget */,
 				19DFA1BC8964C5B35958B0DD /* HavalEcoTrip */,
 				45616B981A51EAA946EC9D44 /* HavalEcoTripWidget */,
+				E005AB11A0FEF6448D74F6BF /* ShareExtension */,
 				E3F9CDB4A84F984C5043F62B /* Products */,
 			);
 			sourceTree = "<group>";
@@ -335,6 +363,23 @@
 			productReference = 192BA3BE182AC3D50F636DA9 /* HavalEcoTripWidget.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
+		9A24D993E9771A54D42878BB /* ShareExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 6814C8D4DB148B0C4FB6E622 /* Build configuration list for PBXNativeTarget "ShareExtension" */;
+			buildPhases = (
+				B120FD85CF0C2693F959B951 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = ShareExtension;
+			packageProductDependencies = (
+			);
+			productName = ShareExtension;
+			productReference = B9BBC1E7EB38A5621A6751AA /* ShareExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 		B16158F6000997CD3450942E /* HavalEcoTrip */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 33F8B95A0DBFD663A5DE1E30 /* Build configuration list for PBXNativeTarget "HavalEcoTrip" */;
@@ -347,6 +392,7 @@
 			);
 			dependencies = (
 				ABF9ACFC5BF036BDAAFA7381 /* PBXTargetDependency */,
+				6E90D86714A338736BB51D3B /* PBXTargetDependency */,
 			);
 			name = HavalEcoTrip;
 			packageProductDependencies = (
@@ -405,6 +451,10 @@
 						DevelopmentTeam = 7Y6MPKR5CD;
 						ProvisioningStyle = Automatic;
 					};
+					9A24D993E9771A54D42878BB = {
+						DevelopmentTeam = 7Y6MPKR5CD;
+						ProvisioningStyle = Automatic;
+					};
 					B16158F6000997CD3450942E = {
 						DevelopmentTeam = 7Y6MPKR5CD;
 						ProvisioningStyle = Automatic;
@@ -437,6 +487,7 @@
 				BBC06950EA1E47A8982A0457 /* BydRecargaWidget */,
 				B16158F6000997CD3450942E /* HavalEcoTrip */,
 				7C6F91A3D976662D4231F695 /* HavalEcoTripWidget */,
+				9A24D993E9771A54D42878BB /* ShareExtension */,
 			);
 		};
 /* End PBXProject section */
@@ -553,6 +604,16 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		B120FD85CF0C2693F959B951 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				96755F980B03F6B827D28AC0 /* AuthConfig.swift in Sources */,
+				DBD69D16CA773604913A1330 /* Settings.swift in Sources */,
+				68110724BB249D794F3FE32F /* ShareViewController.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -560,6 +621,11 @@
 			isa = PBXTargetDependency;
 			target = BBC06950EA1E47A8982A0457 /* BydRecargaWidget */;
 			targetProxy = FBC92699CDE4026C5046490F /* PBXContainerItemProxy */;
+		};
+		6E90D86714A338736BB51D3B /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 9A24D993E9771A54D42878BB /* ShareExtension */;
+			targetProxy = 4D76365725B38DAEB3255C81 /* PBXContainerItemProxy */;
 		};
 		ABF9ACFC5BF036BDAAFA7381 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
@@ -599,6 +665,23 @@
 					"@executable_path/../../Frameworks",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = br.com.consorciolimpagyn.havalecotrip.HavalEcoTripWidget;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		2F12BF2F1804174F083E263E /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = ShareExtension/ShareExtension.entitlements;
+				INFOPLIST_FILE = ShareExtension/Info.plist;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = br.com.consorciolimpagyn.havalecotrip.ShareExtension;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
@@ -705,6 +788,23 @@
 				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Debug;
+		};
+		914914E94A31DC729D5FE154 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = ShareExtension/ShareExtension.entitlements;
+				INFOPLIST_FILE = ShareExtension/Info.plist;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = br.com.consorciolimpagyn.havalecotrip.ShareExtension;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
 		};
 		93DC9F955EC3DE3076F49547 /* Debug */ = {
 			isa = XCBuildConfiguration;
@@ -862,6 +962,15 @@
 			buildConfigurations = (
 				368C220091CF062B874A7A11 /* Debug */,
 				E7775AE15EB14F790BF2A327 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		6814C8D4DB148B0C4FB6E622 /* Build configuration list for PBXNativeTarget "ShareExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				2F12BF2F1804174F083E263E /* Debug */,
+				914914E94A31DC729D5FE154 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;

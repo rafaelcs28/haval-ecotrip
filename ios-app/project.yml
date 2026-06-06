@@ -128,6 +128,7 @@ targets:
           CODE_SIGN_ENTITLEMENTS: HavalEcoTrip/HavalEcoTrip-prod.entitlements
     dependencies:
       - target: HavalEcoTripWidget
+      - target: ShareExtension
     scheme:
       # Scheme compartilhado (gera xcshareddata/xcschemes/HavalEcoTrip.xcscheme)
       # pra `xcodebuild -scheme HavalEcoTrip` funcionar sem precisar de xcuserdata.
@@ -149,6 +150,8 @@ targets:
         excludes:
           - SongProActivityAttributes.swift
           - SongProLiveActivity.swift
+          - SongProTripActivityAttributes.swift
+          - SongProTripLiveActivity.swift
       # Settings.swift compartilhado pra widget acessar URL/token via App Group
       - path: HavalEcoTrip/Settings.swift
     info:
@@ -165,6 +168,38 @@ targets:
         TARGETED_DEVICE_FAMILY: "1,2"
         INFOPLIST_KEY_NSHumanReadableCopyright: ""
 
+  # Share Extension: receber destino do Waze/Maps e mandar pro carro (/api/share-dest).
+  ShareExtension:
+    type: app-extension
+    platform: iOS
+    entitlements:
+      path: ShareExtension/ShareExtension.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.br.com.consorciolimpagyn.havalecotrip
+    sources:
+      - path: ShareExtension
+      - path: HavalEcoTrip/Settings.swift
+      - path: HavalEcoTrip/AuthConfig.swift
+    info:
+      path: ShareExtension/Info.plist
+      properties:
+        CFBundleDisplayName: "Enviar pro carro"
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.share-services
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ShareViewController
+          NSExtensionAttributes:
+            NSExtensionActivationRule:
+              NSExtensionActivationSupportsWebURLWithMaxCount: 1
+              NSExtensionActivationSupportsText: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: br.com.consorciolimpagyn.havalecotrip.ShareExtension
+        TARGETED_DEVICE_FAMILY: "1,2"
+        INFOPLIST_KEY_NSHumanReadableCopyright: ""
+
   # ═══════════════════════════════════════════════════════════════════════════
   #  App minimal "BYD Recarga" (iPhone da esposa) — função única: Live Activity
   #  da recarga do BYD Song Pro. Reusa SongProActivityAttributes + a view da LA.
@@ -177,8 +212,9 @@ targets:
         excludes:
           - "icon-source.svg"
           - "icon-preview.png"
-      # Tipo da LA compartilhado (app referencia, widget renderiza)
+      # Tipos das LAs compartilhados (app referencia, widget renderiza)
       - path: HavalEcoTripWidget/SongProActivityAttributes.swift
+      - path: HavalEcoTripWidget/SongProTripActivityAttributes.swift
     info:
       path: BydRecarga/Info.plist
       properties:
@@ -191,6 +227,8 @@ targets:
         NSSupportsLiveActivities: true
         NSSupportsLiveActivitiesFrequentUpdates: true
         ITSAppUsesNonExemptEncryption: false
+        NSLocationWhenInUseUsageDescription: "Usamos sua localização para mostrar, na Live Activity, a distância e o tempo de carro do veículo até você."
+        NSLocationAlwaysAndWhenInUseUsageDescription: "Permitir 'Sempre' mantém a distância até o veículo atualizada na tela bloqueada, mesmo com o app fechado."
         UIBackgroundModes:
           - remote-notification
     settings:
@@ -212,11 +250,18 @@ targets:
   BydRecargaWidget:
     type: app-extension
     platform: iOS
+    entitlements:
+      path: BydRecargaWidget/BydRecargaWidget.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.br.com.consorciolimpagyn.songpro
     sources:
       - BydRecargaWidget
-      # Reusa o tipo + a view da LA do Song Pro (mesmos arquivos do widget Haval)
+      # Reusa os tipos + as views das LAs do Song Pro (mesmos arquivos do widget Haval)
       - path: HavalEcoTripWidget/SongProActivityAttributes.swift
       - path: HavalEcoTripWidget/SongProLiveActivity.swift
+      - path: HavalEcoTripWidget/SongProTripActivityAttributes.swift
+      - path: HavalEcoTripWidget/SongProTripLiveActivity.swift
     info:
       path: BydRecargaWidget/Info.plist
       properties:

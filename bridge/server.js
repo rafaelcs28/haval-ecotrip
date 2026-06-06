@@ -8094,7 +8094,7 @@ async function _handleSharedDest(value) {
       mqttClient.publish(`${MQTT_PREFIX}/car_dest_result`,
         JSON.stringify({ ok: false, err: 'sem coordenada/nome no compartilhamento', ts: Date.now() }),
         { qos: 1, retain: false });
-      return;
+      return null;
     }
     const etaClock = _parseShareEta(text);
     // Guarda o destino compartilhado pra nomear a viagem que terminar perto dele
@@ -8106,12 +8106,23 @@ async function _handleSharedDest(value) {
     mqttClient.publish(`${MQTT_PREFIX}/car_dest_result`,
       JSON.stringify({ ok: true, name: d.name, ts: Date.now() }), { qos: 1, retain: false });
     console.log(`[shareDest] → carro: ${d.name} (${d.lat.toFixed(5)},${d.lng.toFixed(5)})`);
+    return d;
   } catch (e) {
     console.warn('[shareDest] erro:', e.message);
     mqttClient.publish(`${MQTT_PREFIX}/car_dest_result`,
       JSON.stringify({ ok: false, err: String(e.message), ts: Date.now() }), { qos: 1, retain: false });
+    return null;
   }
 }
+// POST /api/share-dest — Share Extension do iOS (compartilhar do Waze/Maps).
+// Body { text }. Resolve, publica nav_dest pro carro e devolve o nome resolvido.
+app.post('/api/share-dest', async (req, res) => {
+  const text = (req.body && (req.body.text || req.body.url)) || '';
+  if (!String(text).trim()) return res.status(400).json({ ok: false, error: 'text obrigatório' });
+  const d = await _handleSharedDest(String(text));
+  if (!d) return res.status(422).json({ ok: false, error: 'não consegui o destino' });
+  res.json({ ok: true, name: d.name, lat: d.lat, lng: d.lng });
+});
 // Busca a rota: Mapbox driving-traffic (ETA COM trânsito ao vivo) se houver MAPBOX_TOKEN;
 // senão OSRM (sem trânsito). Retorna distância(m), duração(s), geometria e flag de trânsito.
 async function _fetchRoute(fromLat, fromLng, toLat, toLng) {
