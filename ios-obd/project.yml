@@ -36,7 +36,7 @@ targets:
     info:
       path: HavalOBD/Info.plist
       properties:
-        CFBundleDisplayName: "Haval Cluster"
+        CFBundleDisplayName: "Haval Cockpit"
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         UILaunchScreen: {}
