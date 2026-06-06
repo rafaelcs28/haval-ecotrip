@@ -14,6 +14,27 @@ private func chargeRemainingLabel(_ min: Int) -> String {
     return "~\(min) min"
 }
 
+// Ícone compacto pra Dynamic Island: anel mostra o SOC ao redor do carrinho.
+// Resolve o caso de 2 LAs simultâneas (Haval verde + BYD azul) competindo por
+// espaço quando o user pluga o segundo carro — sem texto, só símbolo.
+private struct CarChargeRing: View {
+    let soc: Double
+    let charging: Bool
+    let accent: Color
+    var body: some View {
+        ZStack {
+            Circle().stroke(accent.opacity(0.25), lineWidth: 2.2)
+            Circle().trim(from: 0, to: CGFloat(min(100, max(0, soc)) / 100))
+                .stroke(accent, style: StrokeStyle(lineWidth: 2.2, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+            Image(systemName: charging ? "bolt.car.fill" : "checkmark.circle.fill")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(accent)
+        }
+        .frame(width: 22, height: 22)
+    }
+}
+
 struct ChargeActivityLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: ChargeActivityAttributes.self) { context in
@@ -36,34 +57,39 @@ struct ChargeActivityLiveActivity: Widget {
                     VStack(alignment: .trailing, spacing: 2) {
                         Text(String(format: "%.1f kW", s.powerKw))
                             .font(.title3).bold().foregroundStyle(.green)
+                            .lineLimit(1).minimumScaleFactor(0.5)
                         Text(chargeRemainingLabel(s.remainingMin))
                             .font(.caption2).foregroundStyle(.secondary)
+                            .lineLimit(1).minimumScaleFactor(0.7)
                     }
                 }
                 DynamicIslandExpandedRegion(.bottom) {
                     VStack(spacing: 6) {
                         ChargeBar(soc: s.soc, target: s.targetPct, accent: s.charging ? .green : .blue)
-                        HStack {
-                            Label(s.charging ? "Carregando" : "Concluído",
-                                  systemImage: s.charging ? "bolt.car.fill" : "checkmark.circle.fill")
+                        // HStack manual em vez de Label: na DI expanded o ícone do Label
+                        // era cortado pela safe-area lateral. Image fixa + Text com
+                        // minScale garante que tanto carrinho quanto "Carregando" cabem.
+                        HStack(spacing: 4) {
+                            Image(systemName: s.charging ? "bolt.car.fill" : "checkmark.circle.fill")
                                 .font(.caption2).foregroundStyle(s.charging ? .green : .blue)
-                            Spacer()
+                            Text(s.charging ? "Carregando" : "Concluído")
+                                .font(.caption2).foregroundStyle(s.charging ? .green : .blue)
+                                .lineLimit(1).minimumScaleFactor(0.6)
+                            Spacer(minLength: 4)
                             Text(String(format: "%.1f kWh", s.sessionKwh))
                                 .font(.caption2).foregroundStyle(.secondary)
+                                .lineLimit(1).minimumScaleFactor(0.5).layoutPriority(1)
                         }
                     }
                 }
             } compactLeading: {
-                Image(systemName: s.charging ? "bolt.car.fill" : "checkmark.circle.fill")
-                    .foregroundStyle(s.charging ? .green : .blue)
+                CarChargeRing(soc: s.soc, charging: s.charging, accent: s.charging ? .green : .blue)
             } compactTrailing: {
-                // SOC + tempo restante (ex: "57%·2h15") — só quando carregando e há estimativa.
-                let label = (s.charging && s.remainingMin > 0)
-                    ? "\(Int(s.soc))%·\(chargeRemainingLabel(s.remainingMin).replacingOccurrences(of: "~", with: ""))"
-                    : "\(Int(s.soc))%"
-                Text(label).bold().foregroundStyle(s.charging ? .green : .blue)
+                // Vazio: o anel ao redor do carro já mostra o SOC. Libera espaço
+                // pra outras LAs (ex: BYD da Grasi) também aparecerem na DI.
+                EmptyView()
             } minimal: {
-                Image(systemName: "bolt.car.fill").foregroundStyle(.green)
+                CarChargeRing(soc: s.soc, charging: s.charging, accent: s.charging ? .green : .blue)
             }
             .keylineTint(.green)
         }
@@ -77,12 +103,14 @@ struct ChargeLockScreenView: View {
     var body: some View {
         let accent: Color = state.charging ? .green : .blue
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
+            HStack(spacing: 6) {
                 Image(systemName: state.charging ? "bolt.car.fill" : "checkmark.circle.fill")
                     .foregroundStyle(accent)
-                Text(state.charging ? "Carregando" : "Recarga concluída").font(.headline)
-                Spacer()
+                Text(state.charging ? "Carregando" : "Recarga concluída")
+                    .font(.headline).lineLimit(1).minimumScaleFactor(0.7)
+                Spacer(minLength: 6)
                 Text(carName).font(.caption).foregroundStyle(.secondary)
+                    .lineLimit(1).minimumScaleFactor(0.7)
             }
             HStack(alignment: .firstTextBaseline, spacing: 3) {
                 Text("\(Int(state.soc))")
@@ -92,17 +120,21 @@ struct ChargeLockScreenView: View {
                 Spacer()
                 Text(String(format: "%.1f kW", state.powerKw))
                     .font(.title3).bold().foregroundStyle(accent)
+                    .lineLimit(1).minimumScaleFactor(0.6)
             }
             ChargeBar(soc: state.soc, target: state.targetPct, accent: accent)
-            HStack {
+            HStack(spacing: 6) {
                 Label(chargeRemainingLabel(state.remainingMin), systemImage: "clock")
                     .font(.caption).foregroundStyle(.secondary)
+                    .lineLimit(1).minimumScaleFactor(0.7)
                 if state.targetPct > 0 && state.targetPct < 100 {
                     Text("· meta \(Int(state.targetPct))%").font(.caption).foregroundStyle(.secondary)
+                        .lineLimit(1).minimumScaleFactor(0.7)
                 }
-                Spacer()
+                Spacer(minLength: 6)
                 Label(String(format: "%.1f kWh", state.sessionKwh), systemImage: "bolt.batteryblock")
                     .font(.caption).foregroundStyle(.secondary)
+                    .lineLimit(1).minimumScaleFactor(0.6).layoutPriority(1)
             }
         }
         .padding(14)

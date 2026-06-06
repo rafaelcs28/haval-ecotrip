@@ -286,6 +286,23 @@ struct BatteryWidgetView: View {
                 }
             }
 
+            // Botão interativo: trancar/destrancar direto do widget (iOS 17+).
+            if #available(iOS 17.0, *), entry.isConfigured, entry.error == nil {
+                if entry.lockState != "unlocked" {
+                    Button(intent: UnlockCarIntent()) {
+                        Label("Destrancar", systemImage: "lock.open.fill")
+                            .font(.caption2.weight(.semibold)).frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent).tint(.orange).padding(.top, 6)
+                } else {
+                    Button(intent: LockCarIntent()) {
+                        Label("Trancar", systemImage: "lock.fill")
+                            .font(.caption2.weight(.semibold)).frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent).tint(.green).padding(.top, 6)
+                }
+            }
+
             Spacer(minLength: 0)
             HStack {
                 if let err = entry.error {

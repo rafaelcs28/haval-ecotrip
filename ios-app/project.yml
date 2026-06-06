@@ -43,6 +43,8 @@ targets:
       - path: HavalEcoTripWidget/MotorActivityAttributes.swift
       # Veículo desprotegido (alerta persistente): idem.
       - path: HavalEcoTripWidget/SecurityActivityAttributes.swift
+      # App Intents (Siri/Atalhos) — compartilhados com o widget (botões interativos).
+      - path: HavalEcoTripWidget/CarIntents.swift
       # SongPro (recarga BYD) saiu daqui — agora só no app "Grasi Recarga".
     info:
       path: HavalEcoTrip/Info.plist

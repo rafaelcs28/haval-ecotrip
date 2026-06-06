@@ -17,6 +17,26 @@ private func songProRemainingLabel(_ min: Int) -> String {
     return "~\(min) min"
 }
 
+// Anel ao redor do carro pra Dynamic Island compact/minimal. Reduz a área
+// ocupada quando há 2 LAs (Haval verde + BYD azul) ativas ao mesmo tempo.
+private struct SongProCarRing: View {
+    let soc: Double
+    let charging: Bool
+    let accent: Color
+    var body: some View {
+        ZStack {
+            Circle().stroke(accent.opacity(0.25), lineWidth: 2.2)
+            Circle().trim(from: 0, to: CGFloat(min(100, max(0, soc)) / 100))
+                .stroke(accent, style: StrokeStyle(lineWidth: 2.2, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+            Image(systemName: charging ? "bolt.car.fill" : "checkmark.circle.fill")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(accent)
+        }
+        .frame(width: 22, height: 22)
+    }
+}
+
 struct SongProLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: SongProActivityAttributes.self) { context in
@@ -39,39 +59,39 @@ struct SongProLiveActivity: Widget {
                     VStack(alignment: .trailing, spacing: 2) {
                         Text(String(format: "%.1f kW", s.powerKw))
                             .font(.title3).bold().foregroundStyle(songProAccent)
+                            .lineLimit(1).minimumScaleFactor(0.5)
                         Text(songProRemainingLabel(s.remainingMin))
                             .font(.caption2).foregroundStyle(.secondary)
+                            .lineLimit(1).minimumScaleFactor(0.7)
                     }
                 }
                 DynamicIslandExpandedRegion(.bottom) {
                     VStack(spacing: 6) {
                         SongProBar(soc: s.soc, accent: s.charging ? songProAccent : .blue)
-                        HStack(spacing: 6) {
-                            Label(s.charging ? "Carregando" : "Concluído",
-                                  systemImage: s.charging ? "bolt.car.fill" : "checkmark.circle.fill")
+                        // Label expandido em HStack manual: o `Label` nativo perdia o
+                        // ícone na borda da DI (corte da safe-area). Image fixa + Text
+                        // com minScale garante que ambos cabem mesmo apertado.
+                        HStack(spacing: 4) {
+                            Image(systemName: s.charging ? "bolt.car.fill" : "checkmark.circle.fill")
                                 .font(.caption2).foregroundStyle(s.charging ? songProAccent : .blue)
-                                .lineLimit(1)
+                            Text(s.charging ? "Carregando" : "Concluído")
+                                .font(.caption2).foregroundStyle(s.charging ? songProAccent : .blue)
+                                .lineLimit(1).minimumScaleFactor(0.6)
                             Spacer(minLength: 4)
                             Text("BYD da Grasi")
                                 .font(.caption2).foregroundStyle(.secondary)
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.7)
+                                .lineLimit(1).minimumScaleFactor(0.5)
                                 .layoutPriority(1)
                         }
-                        .padding(.horizontal, 2)
                     }
                 }
             } compactLeading: {
-                Image(systemName: s.charging ? "bolt.car.fill" : "checkmark.circle.fill")
-                    .foregroundStyle(s.charging ? songProAccent : .blue)
+                SongProCarRing(soc: s.soc, charging: s.charging, accent: s.charging ? songProAccent : .blue)
             } compactTrailing: {
-                // SOC + tempo restante quando carregando (ex: "57%·2h15")
-                let label = (s.charging && s.remainingMin > 0)
-                    ? "\(Int(s.soc))%·\(songProRemainingLabel(s.remainingMin).replacingOccurrences(of: "~", with: ""))"
-                    : "\(Int(s.soc))%"
-                Text(label).bold().foregroundStyle(s.charging ? songProAccent : .blue)
+                // Vazio: anel já mostra o SOC. Libera espaço pra LA Haval coexistir.
+                EmptyView()
             } minimal: {
-                Image(systemName: "bolt.car.fill").foregroundStyle(songProAccent)
+                SongProCarRing(soc: s.soc, charging: s.charging, accent: s.charging ? songProAccent : .blue)
             }
             .keylineTint(songProAccent)
         }
@@ -101,14 +121,17 @@ struct SongProLockScreenView: View {
                 Spacer()
                 Text(String(format: "%.1f kW", state.powerKw))
                     .font(.title3).bold().foregroundStyle(accent)
+                    .lineLimit(1).minimumScaleFactor(0.6)
             }
             SongProBar(soc: state.soc, accent: accent)
-            HStack {
+            HStack(spacing: 6) {
                 Label(songProRemainingLabel(state.remainingMin), systemImage: "clock")
                     .font(.caption).foregroundStyle(.secondary)
-                Spacer()
+                    .lineLimit(1).minimumScaleFactor(0.7)
+                Spacer(minLength: 6)
                 Label(String(format: "%.2f kWh", state.sessionKwh), systemImage: "bolt.batteryblock")
                     .font(.caption).foregroundStyle(.secondary)
+                    .lineLimit(1).minimumScaleFactor(0.6).layoutPriority(1)
             }
         }
         .padding(14)

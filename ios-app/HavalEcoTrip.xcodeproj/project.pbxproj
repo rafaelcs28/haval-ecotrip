@@ -37,10 +37,12 @@
 		6601E0AF99CFBF6068D0180D /* NativeDashView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0412CD48BFB11B79D8D550D4 /* NativeDashView.swift */; };
 		68110724BB249D794F3FE32F /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2E5847D4B630A807A07557A /* ShareViewController.swift */; };
 		694901AB2FD60B4D5A1322DA /* NativeRecargasView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB5145A32C36D0D8E2E36E83 /* NativeRecargasView.swift */; };
+		6B1479E8CF6EDE745584DB42 /* LockWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7C8F9D484392C67E49E3E78 /* LockWidgets.swift */; };
 		6B3EDE545B2502D265805216 /* OfflineSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2EBD85F9B7D028E3D520ED77 /* OfflineSync.swift */; };
 		6C1FE4315EFC5408CBF98788 /* NotificationsCenterSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7817E2396F9C3176DF2954E /* NotificationsCenterSheet.swift */; };
 		6D2D2B81A43BB7E8D26EE81F /* SongProActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF8BF0D6E8837DEC20056AB8 /* SongProActivityAttributes.swift */; };
 		77472ED6F598E53605506B96 /* ChargeActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = C110A5E3EADD0B1D4DA52BE6 /* ChargeActivityAttributes.swift */; };
+		77EF0F880D1B98744B21C2C5 /* CarIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD754B29F48E190AD2D8648F /* CarIntents.swift */; };
 		783721D1E37916F23F2149D8 /* BydSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = E810689502D9D028774D6792 /* BydSettings.swift */; };
 		87640D1FE3604A94892D6723 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36AA01E4F54D0727EF341F49 /* ContentView.swift */; };
 		89B5CF62DAD11B34026CB4C5 /* HavalEcoTripWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 192BA3BE182AC3D50F636DA9 /* HavalEcoTripWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
@@ -58,6 +60,7 @@
 		9CC60221177D73FA6ED4E7F8 /* SecurityLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFE9C8DD63C6163B5AF174C8 /* SecurityLiveActivity.swift */; };
 		A01430293347A18D099263AF /* PreclimatSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6215EB2F3EA8C80FA49D1477 /* PreclimatSheet.swift */; };
 		A059FEDAB126C345DAAD9802 /* PreClimatLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 915E7661920B0022793D3A63 /* PreClimatLiveActivity.swift */; };
+		A3622611C72B3B511BA5015D /* CarIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD754B29F48E190AD2D8648F /* CarIntents.swift */; };
 		AACDCF32BF0A0A36A4A2F84F /* HavalEcoTripApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5A372CA99C89C5712EE54BC /* HavalEcoTripApp.swift */; };
 		AB83E9252E2D2EA3B5AAAC0A /* MotorActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 636438201B328EA34B285F3A /* MotorActivityAttributes.swift */; };
 		AE6DF0BA2B76E13159F83FE3 /* BackgroundRefresh.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F97B54C85FEC5A112CB0C9E /* BackgroundRefresh.swift */; };
@@ -190,7 +193,9 @@
 		C4C25F23B2E85136F2735757 /* HavalEcoTripWidget.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = HavalEcoTripWidget.entitlements; sourceTree = "<group>"; };
 		C68353FA3433CBE88BFA4347 /* CarStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarStore.swift; sourceTree = "<group>"; };
 		C7817E2396F9C3176DF2954E /* NotificationsCenterSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationsCenterSheet.swift; sourceTree = "<group>"; };
+		C7C8F9D484392C67E49E3E78 /* LockWidgets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LockWidgets.swift; sourceTree = "<group>"; };
 		C88C20EF0FDB1AB8EB036191 /* CarActions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarActions.swift; sourceTree = "<group>"; };
+		CD754B29F48E190AD2D8648F /* CarIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarIntents.swift; sourceTree = "<group>"; };
 		D15756C1CEF1EFDD6804C05D /* SecurityActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecurityActivityAttributes.swift; sourceTree = "<group>"; };
 		D2E5847D4B630A807A07557A /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
 		D6CE9B63AE0A75344509696C /* NativeConfigView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeConfigView.swift; sourceTree = "<group>"; };
@@ -277,11 +282,13 @@
 			isa = PBXGroup;
 			children = (
 				F6B65FA59825E09151BBC7C3 /* BatteryWidget.swift */,
+				CD754B29F48E190AD2D8648F /* CarIntents.swift */,
 				C110A5E3EADD0B1D4DA52BE6 /* ChargeActivityAttributes.swift */,
 				B6A433A5AA48336FD73F1C85 /* ChargeActivityLiveActivity.swift */,
 				C4C25F23B2E85136F2735757 /* HavalEcoTripWidget.entitlements */,
 				6F5328FAA367AE3DF93613BE /* HavalEcoTripWidgetBundle.swift */,
 				1C2F4161732FE79AB2415337 /* Info.plist */,
+				C7C8F9D484392C67E49E3E78 /* LockWidgets.swift */,
 				636438201B328EA34B285F3A /* MotorActivityAttributes.swift */,
 				2A0F1250A4346D17F0539FE8 /* MotorLiveActivity.swift */,
 				EBBB57D2D187DD310113F34A /* PreClimatActivityAttributes.swift */,
@@ -517,9 +524,11 @@
 			buildActionMask = 2147483647;
 			files = (
 				CFA18AF48CB7CF8DF7C40EC3 /* BatteryWidget.swift in Sources */,
+				A3622611C72B3B511BA5015D /* CarIntents.swift in Sources */,
 				77472ED6F598E53605506B96 /* ChargeActivityAttributes.swift in Sources */,
 				659B7DF18D1CC3CBBC1615F3 /* ChargeActivityLiveActivity.swift in Sources */,
 				253A6649A6A5B25C6DEBB140 /* HavalEcoTripWidgetBundle.swift in Sources */,
+				6B1479E8CF6EDE745584DB42 /* LockWidgets.swift in Sources */,
 				AB83E9252E2D2EA3B5AAAC0A /* MotorActivityAttributes.swift in Sources */,
 				C25004AC6E9825F287951DC4 /* MotorLiveActivity.swift in Sources */,
 				DAFD168AE90C50CE05BA20A8 /* PreClimatActivityAttributes.swift in Sources */,
@@ -558,6 +567,7 @@
 				AE6DF0BA2B76E13159F83FE3 /* BackgroundRefresh.swift in Sources */,
 				EB170A75BD1ABB3462C6AF9E /* BiometricGate.swift in Sources */,
 				605ED8EEC91528FFBC054A48 /* CarActions.swift in Sources */,
+				77EF0F880D1B98744B21C2C5 /* CarIntents.swift in Sources */,
 				E4DBC8604FEF4AF3E5F39336 /* CarStore.swift in Sources */,
 				920A0533D20932EF36FC4D49 /* ChargeActivityAttributes.swift in Sources */,
 				0BB7525EC9FA3BFAAE77FCB0 /* ConfigSheets.swift in Sources */,
