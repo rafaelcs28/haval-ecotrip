@@ -2190,6 +2190,23 @@ function matchKnownPlace(lat, lng) {
   return best;
 }
 
+// Destinos compartilhados do Waze/Maps (in-memory, últimos ~30). Usados pra nomear
+// a viagem que terminar perto deles com o NOME digitado (ex.: "Shopping Flamboyant")
+// em vez do bairro+cidade do reverse-geocode.
+const recentNavDests = [];
+function _navDestNameFor(lat, lng) {
+  if (!lat || !lng) return null;
+  const maxAgeMs = 12 * 3600 * 1000;   // só destinos das últimas 12h
+  const now = Date.now();
+  let best = null, bestDist = Infinity;
+  for (const nd of recentNavDests) {
+    if (now - nd.ts > maxAgeMs) continue;
+    const d = haversineM(lat, lng, nd.lat, nd.lng);
+    if (d < 300 && d < bestDist) { best = nd; bestDist = d; }   // ~300 m do ponto compartilhado
+  }
+  return best ? best.name : null;
+}
+
 // ── Geofence: detecta entrada/saída de locais conhecidos e dispara push ───
 // Mantém estado por place {id → 'in'|'out'}. Histerese de 20% no raio pra evitar
 // flapping na borda. Saída só notifica se motor ligado (evita ruído de
@@ -4468,8 +4485,15 @@ app.post('/api/autotrips', (req, res) => {
     const _ep = matchKnownPlace(autoTrip.endLat,   autoTrip.endLng);
     if (_sp) record.knownStart = _sp.name;
     if (_ep) record.knownEnd   = _ep.name;
-    if (_sp && _ep) {
-      record.name = `${_sp.name} → ${_ep.name}`;
+    // Fim NÃO é um local salvo, mas você compartilhou esse destino pelo Waze/Maps →
+    // usa o nome digitado (ex.: "Shopping Flamboyant") no lugar do bairro+cidade.
+    let _endName = _ep ? _ep.name : null;
+    if (!_ep) {
+      const navName = _navDestNameFor(autoTrip.endLat, autoTrip.endLng);
+      if (navName) { record.endKp = navName; record.knownEnd = navName; _endName = navName; }
+    }
+    if (_sp && _endName) {
+      record.name = `${_sp.name} → ${_endName}`;
       pendingRenames.push({ id: `kp-${safeId}`, type: 'auto', tripId: safeId, name: record.name, createdAt: Date.now() });
       try { fs.writeFileSync(RENAMES_FILE, JSON.stringify(pendingRenames, null, 2)); } catch (_) {}
     }
@@ -8073,6 +8097,10 @@ async function _handleSharedDest(value) {
       return;
     }
     const etaClock = _parseShareEta(text);
+    // Guarda o destino compartilhado pra nomear a viagem que terminar perto dele
+    // (ex.: "Shopping Flamboyant" em vez de "Bairro, Cidade") — ver _navDestNameFor.
+    recentNavDests.push({ name: d.name, lat: d.lat, lng: d.lng, ts: Date.now() });
+    if (recentNavDests.length > 30) recentNavDests.shift();
     const payload = JSON.stringify({ lat: d.lat, lng: d.lng, name: d.name, etaClock, ts: Date.now() });
     mqttClient.publish(`${MQTT_PREFIX}/cmd/nav_dest`, payload, { qos: 1, retain: false });
     mqttClient.publish(`${MQTT_PREFIX}/car_dest_result`,
