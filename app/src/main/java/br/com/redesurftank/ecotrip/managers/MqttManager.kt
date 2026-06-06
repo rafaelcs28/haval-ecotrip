@@ -248,6 +248,11 @@ class MqttManager private constructor() {
     @Volatile var latestSpeedLimitSign: Int = 0
     @Volatile var latestTrafficEyeDist: Int = 0
 
+    // Destino vindo do celular (Nav Relay compartilhou um local do Maps/Waze →
+    // bridge resolveu → cmd/nav_dest). A UI faz polling e abre a tela Chegada.
+    data class NavDest(val lat: Double, val lng: Double, val name: String, val ts: Long)
+    @Volatile var incomingNavDest: NavDest? = null
+
     // ── Voting filter pra car.basic.window_status ─────────────────────────────
     // O car bus emite valores ruidosos em rajadas (até 6 leituras consecutivas
     // reportando o valor errado). Voting: só atualiza latestWindow* quando
@@ -1993,6 +1998,17 @@ class MqttManager private constructor() {
         exec.submit {
             val car = CarDataManager.getInstance()
             when (cmd) {
+                "nav_dest" -> {
+                    // Destino compartilhado do celular (Maps/Waze) → abre a tela Chegada.
+                    try {
+                        val j = org.json.JSONObject(payload)
+                        val lat = j.optDouble("lat", 0.0); val lng = j.optDouble("lng", 0.0)
+                        if (lat != 0.0 || lng != 0.0) {
+                            incomingNavDest = NavDest(lat, lng, j.optString("name", ""), System.currentTimeMillis())
+                            AppLogger.i(TAG, "nav_dest recebido: ${j.optString("name","")} ($lat,$lng)")
+                        }
+                    } catch (e: Exception) { AppLogger.w(TAG, "nav_dest inválido: ${e.message}") }
+                }
                 "charge_limit" -> {
                     val pct = payload.trim().toIntOrNull()
                     val carVal = if (pct != null) pctToCarVal(pct) else null

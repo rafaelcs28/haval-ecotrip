@@ -37,7 +37,11 @@ private fun etaFromNow(durationMin: Int): String {
 // energia = dist × consumo + subida×K − descida×regen; SOC previsto = atual − energia/capacidade.
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SocArrivalScreen(tripManager: TripManager, onBack: () -> Unit) {
+fun SocArrivalScreen(
+    tripManager: TripManager,
+    onBack: () -> Unit,
+    initialDest: br.com.redesurftank.ecotrip.managers.MqttManager.NavDest? = null,
+) {
     var dest    by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(false) }
     var error   by remember { mutableStateOf<String?>(null) }
@@ -45,8 +49,10 @@ fun SocArrivalScreen(tripManager: TripManager, onBack: () -> Unit) {
     var sent    by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
 
-    fun calcular() {
-        if (dest.isBlank() || loading) return
+    // coordDest != null → destino veio do celular (lat/lng prontos); senão usa o texto digitado.
+    fun calcular(coordDest: br.com.redesurftank.ecotrip.managers.MqttManager.NavDest? = null) {
+        if (coordDest == null && dest.isBlank()) return
+        if (loading) return
         loading = true; error = null; plan = null; sent = null
         scope.launch {
             try {
@@ -54,8 +60,13 @@ fun SocArrivalScreen(tripManager: TripManager, onBack: () -> Unit) {
                 if (lat == 0.0 && lng == 0.0) { error = "Sem sinal de GPS ainda."; loading = false; return@launch }
                 val base = tripManager.bridgeUrlPublic()
                 if (base.isBlank()) { error = "Bridge não configurado."; loading = false; return@launch }
-                val q = URLEncoder.encode(dest.trim(), "UTF-8")
-                val urlStr = "$base/api/route-plan?from_lat=$lat&from_lng=$lng&q=$q"
+                val urlStr = if (coordDest != null) {
+                    val nm = URLEncoder.encode(coordDest.name, "UTF-8")
+                    "$base/api/route-plan?from_lat=$lat&from_lng=$lng&to_lat=${coordDest.lat}&to_lng=${coordDest.lng}&q=$nm"
+                } else {
+                    val q = URLEncoder.encode(dest.trim(), "UTF-8")
+                    "$base/api/route-plan?from_lat=$lat&from_lng=$lng&q=$q"
+                }
                 val json = withContext(Dispatchers.IO) {
                     val c = (URL(urlStr).openConnection() as HttpURLConnection).apply {
                         requestMethod = "GET"
@@ -72,7 +83,7 @@ fun SocArrivalScreen(tripManager: TripManager, onBack: () -> Unit) {
                 val climb  = json.optInt("climbM", 0)
                 val desc   = json.optInt("descentM", 0)
                 val durMin = json.optInt("durationMin", 0)
-                val name   = json.optString("destName", dest.trim())
+                val name   = json.optString("destName", "").ifBlank { coordDest?.name ?: dest.trim() }
                 // Tração pela VELOCIDADE média (modelo aprendido das viagens EV) + elevação
                 // + climatização (AC + temperatura ATUAIS × tempo da rota).
                 val vMed     = if (durMin > 0) distKm / (durMin / 60f) else 40f
@@ -93,6 +104,14 @@ fun SocArrivalScreen(tripManager: TripManager, onBack: () -> Unit) {
                 error = "Falha ao calcular (${e.message})"
             }
             loading = false
+        }
+    }
+
+    // Destino chegou do celular → preenche o campo e calcula automaticamente.
+    LaunchedEffect(initialDest?.ts) {
+        if (initialDest != null) {
+            dest = initialDest.name.ifBlank { "${initialDest.lat}, ${initialDest.lng}" }
+            calcular(initialDest)
         }
     }
 

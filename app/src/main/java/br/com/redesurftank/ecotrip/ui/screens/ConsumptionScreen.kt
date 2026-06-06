@@ -177,6 +177,7 @@ fun ConsumptionScreen() {
     var showAutoTrips     by remember { mutableStateOf(false) }
     var showSettings      by remember { mutableStateOf(false) }
     var showSocArrival    by remember { mutableStateOf(false) }
+    var navDest           by remember { mutableStateOf<MqttManager.NavDest?>(null) }
     var showLog           by remember { mutableStateOf(false) }
     var minAutoTripDist   by remember { mutableStateOf(tripManager.getMinAutoTripDist()) }
     var lastCompletedTrip by remember { mutableStateOf<AutoTripEntry?>(null) }
@@ -207,6 +208,20 @@ fun ConsumptionScreen() {
             resumableTrip = if (candidate != null && candidate.startMs == dismissedResumeStartMs) null
                             else candidate
             delay(5_000L)
+        }
+    }
+
+    // Destino vindo do celular (Nav Relay → bridge → cmd/nav_dest): abre a Chegada.
+    LaunchedEffect(Unit) {
+        var lastTs = 0L
+        while (true) {
+            val nd = mqttManager.incomingNavDest
+            if (nd != null && nd.ts != lastTs) {
+                lastTs = nd.ts
+                navDest = nd
+                showSocArrival = true
+            }
+            delay(1_500L)
         }
     }
 
@@ -350,7 +365,7 @@ fun ConsumptionScreen() {
     }
 
     if (showSocArrival) {
-        SocArrivalScreen(tripManager = tripManager, onBack = { showSocArrival = false })
+        SocArrivalScreen(tripManager = tripManager, onBack = { showSocArrival = false; navDest = null }, initialDest = navDest)
         return
     }
 

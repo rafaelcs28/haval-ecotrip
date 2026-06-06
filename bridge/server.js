@@ -6356,6 +6356,12 @@ mqttClient.on('message', (topic, payload, packet) => {
 
   // Dispatcher: tópicos da integração GWM Brasil vão pro handler dedicado;
   // outros caem no handler legado do app.
+  if (topic === MQTT_PREFIX + '/car_dest_raw') {
+    // Nav Relay (celular) compartilhou um destino do Maps/Waze. Resolve a
+    // coordenada e devolve pro carro em cmd/nav_dest → Ecotrip abre a Chegada.
+    if (!isRetained) _handleSharedDest(value);
+    return;
+  }
   if (topic.startsWith(GWM_TOPIC_PREFIX + '/') && topic.endsWith('/state')) {
     const id = topic.slice(GWM_TOPIC_PREFIX.length + 1, topic.length - '/state'.length);
     applyGwmEntity(id, value, isRetained);
@@ -6745,7 +6751,8 @@ let _spCarLoc   = { lat: 0, lng: 0, ts: 0 };
 let _phoneLoc   = { lat: 0, lng: 0, ts: 0 };
 let _routeToPhone = { distKm: null, etaMin: null, ms: 0, busy: false };
 
-// Calcula (throttle 30s) a rota de CARRO do carro até o celular via OSRM público.
+// Calcula (throttle 30s) a rota de CARRO do carro até o celular. Usa _fetchRoute:
+// Mapbox driving-traffic (ETA com TRÂNSITO ao vivo) se houver token, OSRM de fallback.
 // Fire-and-forget: atualiza o cache; a LA lê o último valor no próximo ciclo.
 async function _maybeRouteToPhone() {
   const now = Date.now();
@@ -6754,15 +6761,10 @@ async function _maybeRouteToPhone() {
   if (now - _phoneLoc.ts > 15 * 60_000) return;   // celular sem reportar há 15min → não calcula
   _routeToPhone.busy = true;
   try {
-    const url = `https://router.project-osrm.org/route/v1/driving/`
-      + `${_spCarLoc.lng},${_spCarLoc.lat};${_phoneLoc.lng},${_phoneLoc.lat}`
-      + `?overview=false&alternatives=false&steps=false`;
-    const r = await fetch(url, { signal: AbortSignal.timeout(8000) });
-    const j = await r.json();
-    const route = j && j.routes && j.routes[0];
+    const route = await _fetchRoute(_spCarLoc.lat, _spCarLoc.lng, _phoneLoc.lat, _phoneLoc.lng);
     if (route) {
       _routeToPhone.distKm = Math.round((route.distance / 1000) * 10) / 10;
-      _routeToPhone.etaMin = Math.round(route.duration / 60);
+      _routeToPhone.etaMin = Math.round(route.duration / 60);   // com trânsito (Mapbox)
       _routeToPhone.ms = now;
     }
   } catch (_) { /* mantém último valor em caso de falha de rede */ }
@@ -7941,6 +7943,67 @@ async function _geocode(q) {
   const j = await r.json();
   if (!Array.isArray(j) || !j.length) return null;
   return { lat: +j[0].lat, lng: +j[0].lon, name: j[0].display_name };
+}
+
+// Extrai lat/lng de uma URL de Maps/Waze. Cobre os formatos mais comuns do
+// compartilhamento ("Compartilhar local" do Google Maps e do Waze).
+function _parseLatLngFromUrl(u) {
+  const pats = [
+    /@(-?\d+\.\d+),(-?\d+\.\d+)/,                    // .../maps/place/.../@lat,lng,17z
+    /[?&]q=(-?\d+\.\d+),\s*(-?\d+\.\d+)/,            // ?q=lat,lng
+    /[?&]query=(-?\d+\.\d+),\s*(-?\d+\.\d+)/,        // ?query=lat,lng (api=1)
+    /[?&]daddr=(-?\d+\.\d+),\s*(-?\d+\.\d+)/,        // ?daddr=lat,lng
+    /[?&]destination=(-?\d+\.\d+),\s*(-?\d+\.\d+)/,  // ?destination=lat,lng
+    /[?&]ll=(-?\d+\.\d+),\s*(-?\d+\.\d+)/,           // waze ?ll=lat,lng
+    /[?&]to=ll\.(-?\d+\.\d+),(-?\d+\.\d+)/,          // waze ?to=ll.lat,lng
+    /!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/,                // google data=...!3dlat!4dlng
+  ];
+  for (const re of pats) { const m = u.match(re); if (m) return { lat: +m[1], lng: +m[2] }; }
+  return null;
+}
+
+// Recebe o texto compartilhado pelo Maps/Waze (link e/ou nome) e devolve {lat,lng,name}.
+// Estratégia: pega a 1ª URL → tenta parsear coordenada direto → se for link curto
+// (maps.app.goo.gl / ul.waze.com), segue o redirect e parseia o destino final →
+// se ainda não houver coordenada, geocodifica o texto restante via Nominatim.
+async function _resolveSharedDest(text) {
+  if (!text) return null;
+  const raw = String(text).trim();
+  const urlMatch = raw.match(/https?:\/\/[^\s]+/);
+  const url = urlMatch ? urlMatch[0] : '';
+  if (url) {
+    let hit = _parseLatLngFromUrl(url);
+    if (!hit && /goo\.gl|app\.goo\.gl|ul\.waze\.com|waze\.com\/ul|maps\.apple/.test(url)) {
+      try {
+        const r = await fetch(url, { redirect: 'follow', headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(9000) });
+        const finalUrl = r.url || '';
+        hit = _parseLatLngFromUrl(finalUrl);
+        if (!hit) { const body = await r.text(); hit = _parseLatLngFromUrl(body); }
+      } catch (e) { console.warn('[shareDest] redirect falhou:', e.message); }
+    }
+    if (hit && Number.isFinite(hit.lat) && Number.isFinite(hit.lng)) {
+      // nome = texto sem a URL (ex.: "Aeroporto de Goiânia https://...") ou coordenada.
+      const name = raw.replace(url, '').trim() || `${hit.lat.toFixed(5)}, ${hit.lng.toFixed(5)}`;
+      return { lat: hit.lat, lng: hit.lng, name };
+    }
+  }
+  // Sem coordenada na URL → geocodifica o texto (tira a URL pra não poluir a busca).
+  const q = raw.replace(/https?:\/\/[^\s]+/g, '').trim();
+  if (q) { const g = await _geocode(q); if (g) return g; }
+  return null;
+}
+
+// Recebe o payload do tópico car_dest_raw, resolve o destino e publica pro carro.
+async function _handleSharedDest(value) {
+  let text = value;
+  try { const j = JSON.parse(value); text = j.text || j.url || value; } catch (_) { /* texto puro */ }
+  try {
+    const d = await _resolveSharedDest(text);
+    if (!d) { console.warn('[shareDest] não resolveu:', String(text).slice(0, 120)); return; }
+    const payload = JSON.stringify({ lat: d.lat, lng: d.lng, name: d.name, ts: Date.now() });
+    mqttClient.publish(`${MQTT_PREFIX}/cmd/nav_dest`, payload, { qos: 1, retain: false });
+    console.log(`[shareDest] → carro: ${d.name} (${d.lat.toFixed(5)},${d.lng.toFixed(5)})`);
+  } catch (e) { console.warn('[shareDest] erro:', e.message); }
 }
 // Busca a rota: Mapbox driving-traffic (ETA COM trânsito ao vivo) se houver MAPBOX_TOKEN;
 // senão OSRM (sem trânsito). Retorna distância(m), duração(s), geometria e flag de trânsito.
