@@ -20,6 +20,8 @@ struct NativeDashView: View {
     @State private var showEngine = false
     @State private var showNotifCenter = false
     @State private var showArrival = false
+    @State private var showWindows = false
+    @State private var showTrunk = false
     // Feedback visual da troca de limite de carga (Haptic Touch no card):
     // pendingLimit = valor selecionado aguardando o carro confirmar (amarelo);
     // limitFeedback: 0=nenhum · 1=confirmado (verde) · 2=recusado (vermelho).
@@ -69,9 +71,7 @@ struct NativeDashView: View {
     private var header: some View {
         let apkVer = store.str("car_app_version")
         return HStack(spacing: 8) {
-            Image(systemName: "location.fill").font(.subheadline).foregroundStyle(DS.green)
-            Text(store.hasGps ? (store.address.isEmpty ? "Localizando endereço…" : store.address) : "Localização indisponível")
-                .font(.subheadline.weight(.medium)).foregroundStyle(DS.text).lineLimit(2)
+            Text("Haval Hub").font(.title3.weight(.bold)).foregroundStyle(DS.text)
             Spacer(minLength: 6)
             if store.lanConnected { DSChip(text: "LAN", color: DS.teal, filled: true) }
             if !apkVer.isEmpty {
@@ -119,13 +119,22 @@ struct NativeDashView: View {
                                    confirm: store.engineOn ? "Desligar" : "Ligar", danger: store.engineOn,
                                    name: store.engineOn ? "engine_off" : "engine_on", binding: $showEngine)
                 }
-                // Ações rápidas junto dos botões de controle.
+                // Ações rápidas junto dos botões de controle (com confirmação, igual aos demais).
                 iconButton(icon: "fan.fill", tint: DS.blue, caption: "Clima") { showPreclimat = true }
                 iconButton(icon: "macwindow", tint: DS.teal, caption: winOpen ? "Fechar" : "Vidros") {
-                    Task { busy = true; _ = await store.action(winOpen ? "windows_close" : "windows_open"); busy = false }
+                    showWindows = true
+                }
+                .popover(isPresented: $showWindows) {
+                    confirmPopover(title: winOpen ? "Fechar os vidros?" : "Abrir os vidros?",
+                                   confirm: winOpen ? "Fechar" : "Abrir", danger: false,
+                                   name: winOpen ? "windows_close" : "windows_open", binding: $showWindows)
                 }
                 iconButton(icon: "suitcase.fill", tint: DS.muted, caption: "Malas") {
-                    Task { busy = true; _ = await store.action("trunk_open"); busy = false }
+                    showTrunk = true
+                }
+                .popover(isPresented: $showTrunk) {
+                    confirmPopover(title: "Abrir o porta-malas?", confirm: "Abrir", danger: false,
+                                   name: "trunk_open", binding: $showTrunk)
                 }
                 Spacer(minLength: 4)
                 HStack(alignment: .firstTextBaseline, spacing: 12) {
@@ -310,7 +319,9 @@ struct NativeDashView: View {
                         interactionModes: []) {
                         Annotation("", coordinate: store.coordinate) { CarMarker(size: 28, heading: store.heading) }
                     }
+                    .mapStyle(.standard(elevation: .flat, pointsOfInterest: .excludingAll))
                     .frame(height: 130)
+                    .overlay(Color.black.opacity(0.28))   // escurece o mapa
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                     .allowsHitTesting(false)
                     if !store.address.isEmpty {
