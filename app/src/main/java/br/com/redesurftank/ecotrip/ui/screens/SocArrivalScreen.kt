@@ -1,5 +1,6 @@
 package br.com.redesurftank.ecotrip.ui.screens
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -14,6 +15,7 @@ import androidx.compose.ui.unit.sp
 import br.com.redesurftank.ecotrip.managers.TripManager
 import br.com.redesurftank.ecotrip.ui.theme.*
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -101,6 +103,36 @@ suspend fun fetchArrivalPlan(
     RoutePlan(name, dLat, dLng, distKm, durMin, etaClock, climb, desc, cur, pred, energy, cap)
 }
 
+data class GeoSuggestion(val name: String, val detail: String, val lat: Double, val lng: Double)
+
+// Autocomplete de endereço: /api/geocode-suggest (Mapbox Search Box, viés na GPS do carro).
+suspend fun fetchSuggestions(tripManager: TripManager, q: String): List<GeoSuggestion> = withContext(Dispatchers.IO) {
+    val query = q.trim()
+    if (query.length < 3) return@withContext emptyList()
+    val base = tripManager.bridgeUrlPublic()
+    if (base.isBlank()) return@withContext emptyList()
+    val (lat, lng) = tripManager.getLastGps()
+    var urlStr = "$base/api/geocode-suggest?q=${URLEncoder.encode(query, "UTF-8")}"
+    if (lat != 0.0 || lng != 0.0) urlStr += "&lat=$lat&lng=$lng"
+    try {
+        val c = (URL(urlStr).openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            setRequestProperty("Authorization", "Bearer " + tripManager.bridgeTokenPublic())
+            connectTimeout = 8000; readTimeout = 8000
+        }
+        val code = c.responseCode
+        val body = (if (code in 200..299) c.inputStream else c.errorStream)?.bufferedReader()?.readText() ?: ""
+        c.disconnect()
+        if (code !in 200..299) return@withContext emptyList()
+        val arr = JSONObject(body).optJSONArray("suggestions") ?: return@withContext emptyList()
+        (0 until arr.length()).mapNotNull { i ->
+            val o = arr.optJSONObject(i) ?: return@mapNotNull null
+            val la = o.optDouble("lat", 0.0); val lo = o.optDouble("lng", 0.0)
+            if (la == 0.0 && lo == 0.0) null else GeoSuggestion(o.optString("name"), o.optString("detail"), la, lo)
+        }
+    } catch (e: Exception) { emptyList() }
+}
+
 // Previsão de SOC na chegada: destino → bridge (/api/route-plan: OSRM + elevação) →
 // energia = dist × consumo + subida×K − descida×regen; SOC previsto = atual − energia/capacidade.
 @OptIn(ExperimentalMaterial3Api::class)
@@ -115,6 +147,8 @@ fun SocArrivalScreen(
     var error   by remember { mutableStateOf<String?>(null) }
     var plan    by remember { mutableStateOf<RoutePlan?>(null) }
     var sent    by remember { mutableStateOf<String?>(null) }
+    var suggestions by remember { mutableStateOf<List<GeoSuggestion>>(emptyList()) }
+    var suppressSuggest by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     // coordDest != null → destino veio do celular (lat/lng prontos); senão usa o texto digitado.
@@ -139,12 +173,29 @@ fun SocArrivalScreen(
         }
     }
 
+    fun pick(s: GeoSuggestion) {
+        suppressSuggest = true
+        dest = s.name
+        suggestions = emptyList()
+        calcular(br.com.redesurftank.ecotrip.managers.MqttManager.NavDest(s.lat, s.lng, s.name, System.currentTimeMillis(), ""))
+    }
+
     // Destino chegou do celular → preenche o campo e calcula automaticamente.
     LaunchedEffect(initialDest?.ts) {
         if (initialDest != null) {
+            suppressSuggest = true
             dest = initialDest.name.ifBlank { "${initialDest.lat}, ${initialDest.lng}" }
             calcular(initialDest)
         }
+    }
+
+    // Autocomplete: busca sugestões enquanto digita (debounce 350ms).
+    LaunchedEffect(dest) {
+        if (suppressSuggest) { suppressSuggest = false; return@LaunchedEffect }
+        if (dest.trim().length < 3) { suggestions = emptyList(); return@LaunchedEffect }
+        plan = null
+        delay(350)
+        suggestions = fetchSuggestions(tripManager, dest)
     }
 
     ClaudeScreen(title = "Chegada", onBack = onBack, accent = AuroraTeal) {
@@ -169,6 +220,21 @@ fun SocArrivalScreen(
             ) {
                 if (loading) CircularProgressIndicator(Modifier.size(20.dp), color = VoidBlack, strokeWidth = 2.dp)
                 else Text("Calcular", fontWeight = FontWeight.Bold, color = VoidBlack)
+            }
+        }
+
+        // Sugestões de endereço (autocomplete) enquanto digita.
+        if (suggestions.isNotEmpty() && plan == null) {
+            Column(Modifier.fillMaxWidth().padding(top = 6.dp).claudeCard(AuroraTeal).padding(vertical = 4.dp)) {
+                suggestions.take(6).forEach { s ->
+                    Column(
+                        Modifier.fillMaxWidth().clickable { pick(s) }.padding(horizontal = 16.dp, vertical = 10.dp),
+                    ) {
+                        Text(s.name, color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                        if (s.detail.isNotBlank())
+                            Text(s.detail, color = TextSecondary, fontSize = 12.sp, maxLines = 1)
+                    }
+                }
             }
         }
 

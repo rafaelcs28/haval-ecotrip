@@ -8238,6 +8238,51 @@ app.post('/api/nav-to', (req, res) => {
   console.log(`[navTo] → carro: ${name} (${lat.toFixed(5)},${lng.toFixed(5)})`);
   res.json({ ok: true, name });
 });
+
+// GET /api/geocode-suggest?q= — autocomplete de endereço (carro/PWA). Sugestões com
+// viés na posição atual do carro. Mapbox c/ token (autocomplete), senão Nominatim.
+app.get('/api/geocode-suggest', async (req, res) => {
+  const q = String(req.query.q || '').trim();
+  if (q.length < 3) return res.json({ suggestions: [] });
+  // proximity: lat/lng do chamador (GPS do carro/celular) com fallback pro estado.
+  const nearLat = (+req.query.lat) || (+state.gps_lat), nearLng = (+req.query.lng) || (+state.gps_lng);
+  const tok = process.env.MAPBOX_TOKEN;
+  try {
+    // Ordena por distância ao carro (Mapbox/Nominatim rankeiam por prominência —
+    // pra "perto de mim" o melhor é o mais próximo primeiro).
+    const byNear = (arr) => {
+      if (nearLat && nearLng) arr.sort((a, b) =>
+        haversineM(nearLat, nearLng, a.lat, a.lng) - haversineM(nearLat, nearLng, b.lat, b.lng));
+      return arr.slice(0, 6);
+    };
+    if (tok) {
+      // Search Box API (forward): autocomplete de POIs muito melhor no BR que o geocoding v5.
+      let u = `https://api.mapbox.com/search/searchbox/v1/forward?q=${encodeURIComponent(q)}`
+        + `&access_token=${tok}&language=pt&limit=8&country=br`;
+      if (nearLat && nearLng) u += `&proximity=${nearLng},${nearLat}`;
+      const r = await fetch(u, { signal: AbortSignal.timeout(7000) });
+      const j = await r.json();
+      const all = (j.features || []).filter(f => f.geometry && Array.isArray(f.geometry.coordinates)).map(f => {
+        const p = f.properties || {};
+        return {
+          name: String(p.name || '').slice(0, 60),
+          detail: String(p.full_address || p.place_formatted || '').slice(0, 90),
+          lat: f.geometry.coordinates[1], lng: f.geometry.coordinates[0],
+        };
+      });
+      return res.json({ suggestions: byNear(all) });
+    }
+    let u = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=10&countrycodes=br&q=${encodeURIComponent(q)}`;
+    if (nearLat && nearLng) { const d = 0.7; u += `&viewbox=${nearLng - d},${nearLat + d},${nearLng + d},${nearLat - d}`; }
+    const r = await fetch(u, { headers: { 'User-Agent': 'EcotripImpulse/1.0 (haval ecotrip)' }, signal: AbortSignal.timeout(7000) });
+    const j = await r.json();
+    const all = (Array.isArray(j) ? j : []).map(x => ({
+      name: _shortPlaceName(x.name, x.display_name), detail: String(x.display_name || '').slice(0, 90),
+      lat: +x.lat, lng: +x.lon,
+    }));
+    res.json({ suggestions: byNear(all) });
+  } catch (e) { res.json({ suggestions: [] }); }
+});
 // Busca a rota: Mapbox driving-traffic (ETA COM trânsito ao vivo) se houver MAPBOX_TOKEN;
 // senão OSRM (sem trânsito). Retorna distância(m), duração(s), geometria e flag de trânsito.
 async function _fetchRoute(fromLat, fromLng, toLat, toLng) {
