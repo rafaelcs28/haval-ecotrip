@@ -7947,19 +7947,70 @@ async function _geocode(q) {
 
 // Extrai lat/lng de uma URL de Maps/Waze. Cobre os formatos mais comuns do
 // compartilhamento ("Compartilhar local" do Google Maps e do Waze).
+function _validLatLng(lat, lng) {
+  return Number.isFinite(lat) && Number.isFinite(lng)
+    && Math.abs(lat) <= 90 && Math.abs(lng) <= 180 && (lat !== 0 || lng !== 0);
+}
 function _parseLatLngFromUrl(u) {
+  if (!u) return null;
+  let s = u;
+  try { s = decodeURIComponent(u); } catch (_) { /* %2C etc → vírgula */ }
+  // Rota do Google Maps (/maps/dir/<origem>/<destino>/...): destino = ÚLTIMO par no path.
+  const dir = s.match(/\/maps\/dir\/([^?#]*)/);
+  if (dir) {
+    const pairs = [...dir[1].matchAll(/(-?\d+\.\d+),(-?\d+\.\d+)/g)];
+    if (pairs.length) {
+      const m = pairs[pairs.length - 1];
+      if (_validLatLng(+m[1], +m[2])) return { lat: +m[1], lng: +m[2] };
+    }
+  }
   const pats = [
+    /to=ll\.(-?\d+\.\d+),\s*(-?\d+\.\d+)/,           // waze live-map ?to=ll.lat,lng
     /@(-?\d+\.\d+),(-?\d+\.\d+)/,                    // .../maps/place/.../@lat,lng,17z
     /[?&]q=(-?\d+\.\d+),\s*(-?\d+\.\d+)/,            // ?q=lat,lng
     /[?&]query=(-?\d+\.\d+),\s*(-?\d+\.\d+)/,        // ?query=lat,lng (api=1)
     /[?&]daddr=(-?\d+\.\d+),\s*(-?\d+\.\d+)/,        // ?daddr=lat,lng
     /[?&]destination=(-?\d+\.\d+),\s*(-?\d+\.\d+)/,  // ?destination=lat,lng
     /[?&]ll=(-?\d+\.\d+),\s*(-?\d+\.\d+)/,           // waze ?ll=lat,lng
-    /[?&]to=ll\.(-?\d+\.\d+),(-?\d+\.\d+)/,          // waze ?to=ll.lat,lng
     /!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/,                // google data=...!3dlat!4dlng
   ];
-  for (const re of pats) { const m = u.match(re); if (m) return { lat: +m[1], lng: +m[2] }; }
+  for (const re of pats) { const m = s.match(re); if (m && _validLatLng(+m[1], +m[2])) return { lat: +m[1], lng: +m[2] }; }
   return null;
+}
+
+// Segue os redirects MANUALMENTE (até 8 hops), olhando a coordenada em CADA Location.
+// Necessário porque o Waze põe o destino num redirect intermediário e a cadeia
+// pode terminar em erro (perdendo a coordenada se a gente só olhasse a URL final).
+async function _followForCoords(startUrl) {
+  let url = startUrl;
+  for (let i = 0; i < 8; i++) {
+    const direct = _parseLatLngFromUrl(url);
+    if (direct) return direct;
+    let r;
+    try {
+      r = await fetch(url, { redirect: 'manual', headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(9000) });
+    } catch (e) { return null; }
+    const loc = r.headers.get('location');
+    if (r.status >= 300 && r.status < 400 && loc) {
+      const next = new URL(loc, url).toString();   // resolve Location relativo
+      const hit = _parseLatLngFromUrl(next);
+      if (hit) return hit;
+      url = next; continue;
+    }
+    // Não é mais redirect → página final; tenta achar coordenada no corpo.
+    try { const body = await r.text(); return _parseLatLngFromUrl(body); } catch (_) { return null; }
+  }
+  return null;
+}
+
+// Extrai um nome de destino limpo do texto compartilhado (sem URL nem o blá-blá do Waze).
+function _cleanShareName(raw, url) {
+  let t = String(raw).replace(url || '', '').trim();
+  const m = t.match(/dirigir at[ée]\s+(.+?)\s*(?:,?\s*chegando|:|$)/i)
+         || t.match(/(?:driving|heading|on my way) to\s+(.+?)\s*(?:,?\s*arriving|:|$)/i);
+  if (m && m[1].trim()) t = m[1].trim();
+  if (/usando o Waze|using Waze|percurso em tempo real|map of Waze|dirigir at[ée]/i.test(t)) t = '';
+  return t.replace(/[:\s]+$/, '').trim();
 }
 
 // Recebe o texto compartilhado pelo Maps/Waze (link e/ou nome) e devolve {lat,lng,name}.
@@ -7973,17 +8024,18 @@ async function _resolveSharedDest(text) {
   const url = urlMatch ? urlMatch[0] : '';
   if (url) {
     let hit = _parseLatLngFromUrl(url);
-    if (!hit && /goo\.gl|app\.goo\.gl|ul\.waze\.com|waze\.com\/ul|maps\.apple/.test(url)) {
-      try {
-        const r = await fetch(url, { redirect: 'follow', headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(9000) });
-        const finalUrl = r.url || '';
-        hit = _parseLatLngFromUrl(finalUrl);
-        if (!hit) { const body = await r.text(); hit = _parseLatLngFromUrl(body); }
-      } catch (e) { console.warn('[shareDest] redirect falhou:', e.message); }
+    if (!hit) {
+      try { hit = await _followForCoords(url); }
+      catch (e) { console.warn('[shareDest] redirect falhou:', e.message); }
     }
-    if (hit && Number.isFinite(hit.lat) && Number.isFinite(hit.lng)) {
-      // nome = texto sem a URL (ex.: "Aeroporto de Goiânia https://...") ou coordenada.
-      const name = raw.replace(url, '').trim() || `${hit.lat.toFixed(5)}, ${hit.lng.toFixed(5)}`;
+    if (hit && _validLatLng(hit.lat, hit.lng)) {
+      let name = _cleanShareName(raw, url);
+      if (!name) {
+        // Só sobrou coordenada → reverse-geocode pra um nome amigável.
+        try { const rg = await _reverseGeocode(hit.lat, hit.lng);
+          name = [rg.suburb, rg.city].filter(Boolean).join(', '); } catch (_) {}
+      }
+      if (!name) name = `${hit.lat.toFixed(5)}, ${hit.lng.toFixed(5)}`;
       return { lat: hit.lat, lng: hit.lng, name };
     }
   }
