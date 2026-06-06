@@ -10,6 +10,8 @@ struct BatteryHealthSheet: View {
     let charges: [Charge]
     @Environment(\.dismiss) private var dismiss
 
+    private let factoryKwh = 34.0   // capacidade útil de fábrica (H6 PHEV) — base inicial
+
     private struct Point: Identifiable { let id = UUID(); let date: Date; let cap: Double }
 
     // Capacidade por sessão = energia / (ΔSOC/100). Só sessões com ganho relevante.
@@ -23,17 +25,14 @@ struct BatteryHealthSheet: View {
         }.sorted { $0.date < $1.date }
     }
 
-    private var baseline: Double {
-        let head = points.prefix(5); guard !head.isEmpty else { return 0 }
-        return head.reduce(0) { $0 + $1.cap } / Double(head.count)
-    }
     private var current: Double {
         let tail = points.suffix(5); guard !tail.isEmpty else { return 0 }
         return tail.reduce(0) { $0 + $1.cap } / Double(tail.count)
     }
+    // Degradação medida contra a capacidade de FÁBRICA (34 kWh), não as 1ªs medições.
     private var degradationPct: Double {
-        guard baseline > 0, current > 0 else { return 0 }
-        return max((baseline - current) / baseline * 100, 0)
+        guard current > 0 else { return 0 }
+        return max((factoryKwh - current) / factoryKwh * 100, 0)
     }
 
     var body: some View {
@@ -57,12 +56,18 @@ struct BatteryHealthSheet: View {
                                     .foregroundStyle(DS.green)
                                 PointMark(x: .value("Data", p.date), y: .value("kWh", p.cap))
                                     .foregroundStyle(DS.green.opacity(0.5))
+                                RuleMark(y: .value("Fábrica", factoryKwh))
+                                    .foregroundStyle(DS.muted.opacity(0.6))
+                                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                                    .annotation(position: .top, alignment: .leading) {
+                                        Text("fábrica \(Fmt.int(factoryKwh)) kWh").font(.system(size: 9)).foregroundStyle(DS.muted)
+                                    }
                             }
                             .frame(height: 180)
                             .chartYScale(domain: .automatic(includesZero: false))
                         }
                         DSCard {
-                            metric("Estimativa inicial", "\(Fmt.dec1(baseline)) kWh", DS.muted)
+                            metric("Capacidade de fábrica", "\(Fmt.int(factoryKwh)) kWh", DS.muted)
                         }
                     }
                     Text("Estimativa: capacidade = energia da recarga ÷ ganho de SOC. Valores variam com temperatura e taxa de carga — leia a TENDÊNCIA, não um ponto isolado.")

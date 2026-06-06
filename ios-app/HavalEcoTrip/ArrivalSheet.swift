@@ -49,7 +49,7 @@ final class ArrivalStore: ObservableObject {
             guard t.fuelL < 0.05, drop > 5, t.netKwh > 0.5 else { return nil }
             return t.netKwh / (drop / 100.0)
         }.filter { $0 > 8 && $0 < 80 }
-        guard !caps.isEmpty else { return 20.0 }   // fallback ~H6 PHEV
+        guard !caps.isEmpty else { return 34.0 }   // fallback: capacidade de fábrica (H6 PHEV)
         return caps.reduce(0, +) / Double(caps.count)
     }
 
