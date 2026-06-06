@@ -6773,14 +6773,15 @@ let _songProLatest  = { soc: 0, powerKw: 0, ts: 0 };
 // + cache da rota de carro carro→celular (OSRM). Pra LA de viagem mostrar distância/ETA.
 let _spCarLoc   = { lat: 0, lng: 0, ts: 0 };
 let _phoneLoc   = { lat: 0, lng: 0, ts: 0 };
-let _routeToPhone = { distKm: null, etaMin: null, ms: 0, busy: false };
+let _routeToPhone = { distKm: null, etaMin: null, ms: 0, busy: false, atLat: 0, atLng: 0 };
 
 // Calcula (throttle 30s) a rota de CARRO do carro até o celular. Usa _fetchRoute:
 // Mapbox driving-traffic (ETA com TRÂNSITO ao vivo) se houver token, OSRM de fallback.
 // Fire-and-forget: atualiza o cache; a LA lê o último valor no próximo ciclo.
-async function _maybeRouteToPhone() {
+async function _maybeRouteToPhone(force = false) {
   const now = Date.now();
-  if (_routeToPhone.busy || now - _routeToPhone.ms < 30_000) return;
+  // force ignora só o throttle de tempo (não o lock concorrente).
+  if (_routeToPhone.busy || (!force && now - _routeToPhone.ms < 30_000)) return;
   if (!(_spCarLoc.lat && _spCarLoc.lng) || !(_phoneLoc.lat && _phoneLoc.lng)) return;
   if (now - _phoneLoc.ts > 15 * 60_000) return;   // celular sem reportar há 15min → não calcula
   _routeToPhone.busy = true;
@@ -6790,6 +6791,8 @@ async function _maybeRouteToPhone() {
       _routeToPhone.distKm = Math.round((route.distance / 1000) * 10) / 10;
       _routeToPhone.etaMin = Math.round(route.duration / 60);   // com trânsito (Mapbox)
       _routeToPhone.ms = now;
+      _routeToPhone.atLat = _phoneLoc.lat;   // posição do celular usada neste cálculo
+      _routeToPhone.atLng = _phoneLoc.lng;
     }
   } catch (_) { /* mantém último valor em caso de falha de rede */ }
   finally { _routeToPhone.busy = false; }
@@ -7956,6 +7959,12 @@ app.post('/api/phone-location', (req, res) => {
     return res.status(400).json({ error: 'lat/lng válidos obrigatórios' });
   _phoneLoc = { lat, lng, ts: Date.now() };
   res.json({ ok: true });
+  // Recalcula a rota carro→celular quando VOCÊ se move (não só quando o carro manda
+  // telemetria). Se andou >150m desde o último cálculo, recalcula na hora (ignora o
+  // throttle de 30s); senão, respeita o throttle. Cobre o caso "carro parado, eu indo até ele".
+  const moved = (_routeToPhone.atLat && _routeToPhone.atLng)
+    ? haversineM(lat, lng, _routeToPhone.atLat, _routeToPhone.atLng) : Infinity;
+  _maybeRouteToPhone(moved > 150);
 });
 
 // ── Planejamento de rota p/ previsão de SOC na chegada ──────────────────────
