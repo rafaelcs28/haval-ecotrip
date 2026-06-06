@@ -333,7 +333,7 @@ struct NativeDashView: View {
         if store.hasGps {
             DSCard {
                 VStack(alignment: .leading, spacing: 8) {
-                    FollowMap(lat: store.lat, lng: store.lng, heading: store.heading, speedKmh: store.speedKmh)
+                    DarkFollowMap(lat: store.lat, lng: store.lng, heading: store.heading, speedKmh: store.speedKmh)
                         .frame(height: 170)
                         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                     if !store.address.isEmpty {
