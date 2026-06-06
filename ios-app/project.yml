@@ -49,7 +49,7 @@ targets:
     info:
       path: HavalEcoTrip/Info.plist
       properties:
-        CFBundleDisplayName: "Haval EcoTrip"
+        CFBundleDisplayName: "Haval Hub"
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         UILaunchScreen: {}

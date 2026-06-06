@@ -119,9 +119,9 @@ struct NativeDashView: View {
                                    name: store.engineOn ? "engine_off" : "engine_on", binding: $showEngine)
                 }
                 Spacer()
-                VStack(alignment: .trailing, spacing: 10) {
+                HStack(alignment: .firstTextBaseline, spacing: 18) {
                     rightMetric("Hodômetro", store.odometerKm > 0 ? "\(miles(store.odometerKm)) km" : "—")
-                    if store.batt12vPct > 0 { rightMetric("Bateria 12V", "\(f0(store.batt12vPct))%") }
+                    if store.batt12vPct > 0 { rightMetric("12V", "\(f0(store.batt12vPct))%") }
                 }
             }
         }
@@ -129,7 +129,7 @@ struct NativeDashView: View {
 
     private func rightMetric(_ label: String, _ value: String) -> some View {
         VStack(alignment: .trailing, spacing: 1) {
-            Text(value).font(.system(size: 18, weight: .semibold, design: .rounded)).foregroundStyle(DS.text).lineLimit(1).minimumScaleFactor(0.6)
+            Text(value).font(.system(size: 15, weight: .semibold, design: .rounded)).foregroundStyle(DS.text).lineLimit(1).minimumScaleFactor(0.6)
             Text(label.uppercased()).font(.system(size: 9, weight: .semibold)).foregroundStyle(DS.muted)
         }
     }
@@ -265,28 +265,27 @@ struct NativeDashView: View {
     private var climateCard: some View {
         let acActive = store.acOn
         return DSCard {
-            VStack(spacing: 8) {
-                HStack(spacing: 12) {
-                    Image(systemName: acActive ? "snowflake" : "thermometer.medium")
-                        .font(.title3).foregroundStyle(acActive ? DS.blue : DS.muted)
-                    Text("\(f0(store.insideTemp))°").font(.system(size: 20, weight: .semibold, design: .rounded)).foregroundStyle(DS.text)
-                    Text("interna").font(.caption).foregroundStyle(DS.muted)
-                    Spacer()
-                    Text("\(f0(store.outsideTemp))°").font(.system(size: 16, weight: .medium)).foregroundStyle(DS.text)
-                    Text("externa").font(.caption).foregroundStyle(DS.muted)
-                    if acActive { DSChip(text: "AC", color: DS.blue, filled: true) }
-                }
+            HStack(spacing: 10) {
+                Image(systemName: acActive ? "snowflake" : "thermometer.medium")
+                    .font(.title3).foregroundStyle(acActive ? DS.blue : DS.muted)
+                Text("\(f0(store.insideTemp))°").font(.system(size: 20, weight: .semibold, design: .rounded)).foregroundStyle(DS.text)
+                Text("interna").font(.caption).foregroundStyle(DS.muted)
+                Spacer(minLength: 6)
+                // Botão de pré-climatização compacto, no meio das duas temperaturas.
                 Button { showPreclimat = true } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: "fan.fill").font(.subheadline)
-                        Text("Pré-climatização").font(.system(size: 14, weight: .semibold))
-                        Spacer()
-                        Image(systemName: "chevron.right").font(.caption).foregroundStyle(DS.muted)
+                    HStack(spacing: 6) {
+                        Image(systemName: "fan.fill").font(.caption)
+                        Text("Pré-clima").font(.system(size: 13, weight: .semibold))
+                        Image(systemName: "chevron.right").font(.system(size: 10)).foregroundStyle(DS.muted)
                     }
-                    .foregroundStyle(DS.text).frame(maxWidth: .infinity).frame(height: 38).padding(.horizontal, 14)
-                    .background(DS.panel2).clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 11).stroke(DS.border, lineWidth: 1))
+                    .foregroundStyle(DS.text).frame(height: 34).padding(.horizontal, 12)
+                    .background(DS.panel2).clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(DS.border, lineWidth: 1))
                 }
+                Spacer(minLength: 6)
+                Text("\(f0(store.outsideTemp))°").font(.system(size: 16, weight: .medium)).foregroundStyle(DS.text)
+                Text("externa").font(.caption).foregroundStyle(DS.muted)
+                if acActive { DSChip(text: "AC", color: DS.blue, filled: true) }
             }
         }
     }
