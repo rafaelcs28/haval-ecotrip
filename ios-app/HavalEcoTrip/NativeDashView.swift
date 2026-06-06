@@ -49,7 +49,6 @@ struct NativeDashView: View {
                 statusCard
                 if store.isCharging { chargingCard } else { HStack(spacing: 14) { batteryCard; fuelCard } }
                 climateCard
-                quickActionsCard
                 openingsCard
                 locationCard
                 revisaoCard
@@ -98,11 +97,12 @@ struct NativeDashView: View {
 
     // MARK: trava + motor (ícones com confirmação ancorada) + hodômetro/12V ao lado
     private var statusCard: some View {
-        DSCard {
-            HStack(spacing: 16) {
+        let winOpen = ["window_fl","window_fr","window_rl","window_rr"].contains { store.str($0) == "on" }
+        return DSCard {
+            HStack(spacing: 8) {
                 iconButton(icon: store.isLocked ? "lock.fill" : "lock.open.fill",
                            tint: store.isLocked ? DS.green : DS.orange,
-                           caption: !store.lockKnown ? "—" : (store.isLocked ? "Trancado" : "Destrancado")) {
+                           caption: !store.lockKnown ? "—" : (store.isLocked ? "Trancado" : "Destranc.")) {
                     showLock = true
                 }
                 .popover(isPresented: $showLock) {
@@ -119,8 +119,16 @@ struct NativeDashView: View {
                                    confirm: store.engineOn ? "Desligar" : "Ligar", danger: store.engineOn,
                                    name: store.engineOn ? "engine_off" : "engine_on", binding: $showEngine)
                 }
-                Spacer()
-                HStack(alignment: .firstTextBaseline, spacing: 18) {
+                // Ações rápidas junto dos botões de controle.
+                iconButton(icon: "fan.fill", tint: DS.blue, caption: "Clima") { showPreclimat = true }
+                iconButton(icon: "macwindow", tint: DS.teal, caption: winOpen ? "Fechar" : "Vidros") {
+                    Task { busy = true; _ = await store.action(winOpen ? "windows_close" : "windows_open"); busy = false }
+                }
+                iconButton(icon: "suitcase.fill", tint: DS.muted, caption: "Malas") {
+                    Task { busy = true; _ = await store.action("trunk_open"); busy = false }
+                }
+                Spacer(minLength: 4)
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
                     rightMetric("Hodômetro", store.odometerKm > 0 ? "\(miles(store.odometerKm)) km" : "—")
                     if store.batt12vPct > 0 { rightMetric("12V", "\(f0(store.batt12vPct))%") }
                 }
@@ -152,10 +160,11 @@ struct NativeDashView: View {
     private func iconButton(icon: String, tint: Color, caption: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             VStack(spacing: 3) {
-                Image(systemName: icon).font(.system(size: 16, weight: .medium)).foregroundStyle(tint)
-                    .frame(width: 40, height: 40).background(DS.panel2).clipShape(Circle())
+                Image(systemName: icon).font(.system(size: 15, weight: .medium)).foregroundStyle(tint)
+                    .frame(width: 38, height: 38).background(DS.panel2).clipShape(Circle())
                     .overlay(Circle().stroke(DS.border, lineWidth: 1))
-                Text(caption).font(.system(size: 10, weight: .medium)).foregroundStyle(DS.muted)
+                Text(caption).font(.system(size: 9.5, weight: .medium)).foregroundStyle(DS.muted)
+                    .lineLimit(1).minimumScaleFactor(0.7)
             }
         }
         .buttonStyle(.plain).disabled(busy)
@@ -289,35 +298,6 @@ struct NativeDashView: View {
                 if acActive { DSChip(text: "AC", color: DS.blue, filled: true) }
             }
         }
-    }
-
-    // MARK: ações rápidas (atalhos de controle direto na home)
-    private var quickActionsCard: some View {
-        let winOpen = ["window_fl","window_fr","window_rl","window_rr"].contains { store.str($0) == "on" }
-        return DSCard {
-            HStack(spacing: 10) {
-                quickTile("Pré-clima", "fan.fill", DS.blue) { showPreclimat = true }
-                quickTile(winOpen ? "Fechar vidros" : "Abrir vidros", "macwindow", DS.teal) {
-                    Task { busy = true; _ = await store.action(winOpen ? "windows_close" : "windows_open"); busy = false }
-                }
-                quickTile("Porta-malas", "suitcase.fill", DS.muted) {
-                    Task { busy = true; _ = await store.action("trunk_open"); busy = false }
-                }
-            }
-        }
-    }
-
-    private func quickTile(_ label: String, _ icon: String, _ tint: Color, _ action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            VStack(spacing: 5) {
-                Image(systemName: icon).font(.system(size: 18, weight: .medium)).foregroundStyle(tint).frame(height: 22)
-                Text(label).font(.system(size: 11, weight: .medium)).foregroundStyle(DS.text).lineLimit(1).minimumScaleFactor(0.7)
-            }
-            .frame(maxWidth: .infinity).frame(height: 52)
-            .background(DS.panel2).clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 12).stroke(DS.border, lineWidth: 1))
-        }
-        .buttonStyle(.plain).disabled(busy)
     }
 
     // MARK: mini-mapa da localização do carro
