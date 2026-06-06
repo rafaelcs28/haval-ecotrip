@@ -13,3 +13,4 @@ dependencyResolutionManagement {
 rootProject.name = "haval-ecotrip"
 include(":app")
 include(":cluster")
+include(":companion")

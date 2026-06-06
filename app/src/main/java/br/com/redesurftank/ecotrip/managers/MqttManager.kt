@@ -228,6 +228,19 @@ class MqttManager private constructor() {
     @Volatile var latestRightSwitch: Int = 0
     @Volatile var latestLeftTurnLamp: Int = 0
     @Volatile var latestRightTurnLamp: Int = 0
+    /** Envia um destino pro celular (app companheiro) navegar via Maps/Waze no Android Auto. */
+    fun publishNavTo(lat: Double, lng: Double, name: String, app: String) {
+        executor.submit {
+            val c = client ?: return@submit
+            if (!c.isConnected) return@submit
+            val payload = org.json.JSONObject()
+                .put("lat", lat).put("lng", lng).put("name", name)
+                .put("app", app).put("ts", System.currentTimeMillis()).toString()
+            try { c.publish("$prefix/nav_to", payload.toByteArray(), 1, false) }
+            catch (e: Exception) { AppLogger.w(TAG, "publishNavTo falhou: ${e.message}") }
+        }
+    }
+
     fun isTurnLeftActive(): Boolean  = latestLeftTurnLamp != 0 || latestLeftSwitch != 0
     fun isTurnRightActive(): Boolean = latestRightTurnLamp != 0 || latestRightSwitch != 0
     // TSR — limite de velocidade (km/h, valor cru a confirmar), placa detectada, distância ao radar (m)

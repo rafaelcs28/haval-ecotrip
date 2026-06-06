@@ -22,7 +22,8 @@ import java.net.URL
 import java.net.URLEncoder
 
 private data class RoutePlan(
-    val destName: String, val distanceKm: Float, val durationMin: Int, val etaClock: String,
+    val destName: String, val destLat: Double, val destLng: Double,
+    val distanceKm: Float, val durationMin: Int, val etaClock: String,
     val climbM: Int, val descentM: Int,
     val curSoc: Int, val predictedSoc: Int, val energyKwh: Float, val capacityKwh: Float,
 )
@@ -41,11 +42,12 @@ fun SocArrivalScreen(tripManager: TripManager, onBack: () -> Unit) {
     var loading by remember { mutableStateOf(false) }
     var error   by remember { mutableStateOf<String?>(null) }
     var plan    by remember { mutableStateOf<RoutePlan?>(null) }
+    var sent    by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
 
     fun calcular() {
         if (dest.isBlank() || loading) return
-        loading = true; error = null; plan = null
+        loading = true; error = null; plan = null; sent = null
         scope.launch {
             try {
                 val (lat, lng) = tripManager.getLastGps()
@@ -84,7 +86,9 @@ fun SocArrivalScreen(tripManager: TripManager, onBack: () -> Unit) {
                 val energy   = (eDrive + eElev + eClimate).coerceAtLeast(0f)
                 val cur      = tripManager.getCurrentSocPct().toInt()
                 val pred     = (cur - (energy / cap * 100f)).toInt().coerceIn(0, 100)
-                plan = RoutePlan(name, distKm, durMin, etaFromNow(durMin), climb, desc, cur, pred, energy, cap)
+                val dLat = json.optDouble("destLat", 0.0)
+                val dLng = json.optDouble("destLng", 0.0)
+                plan = RoutePlan(name, dLat, dLng, distKm, durMin, etaFromNow(durMin), climb, desc, cur, pred, energy, cap)
             } catch (e: Exception) {
                 error = "Falha ao calcular (${e.message})"
             }
@@ -146,6 +150,27 @@ fun SocArrivalScreen(tripManager: TripManager, onBack: () -> Unit) {
                 }
                 Text("Estimativa: consumo recente ${f1c(tripManager.getRecentKwhPerKm()*100f)} kWh/100km · bateria ~${p.capacityKwh.toInt()} kWh (auto-calibrada). Altitude por GPS/mapa.",
                     color = TextSecondary, fontSize = 12.sp)
+                // Enviar o destino pro celular navegar (Maps ou Waze) via Android Auto.
+                if (p.destLat != 0.0 || p.destLng != 0.0) {
+                    HorizontalDivider(color = Separator, thickness = 0.5.dp)
+                    Text("Enviar pro celular navegar:", color = TextSecondary, fontSize = 14.sp)
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        val send: (String, String) -> Unit = { app, label ->
+                            br.com.redesurftank.ecotrip.managers.MqttManager.getInstance()
+                                .publishNavTo(p.destLat, p.destLng, p.destName, app)
+                            sent = label
+                        }
+                        Button(onClick = { send("maps", "Maps") }, modifier = Modifier.weight(1f).height(52.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = AccentBlue)) {
+                            Text("📍 Google Maps", fontWeight = FontWeight.Bold, color = VoidBlack)
+                        }
+                        Button(onClick = { send("waze", "Waze") }, modifier = Modifier.weight(1f).height(52.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = AuroraTeal)) {
+                            Text("🚗 Waze", fontWeight = FontWeight.Bold, color = VoidBlack)
+                        }
+                    }
+                    sent?.let { Text("✓ Enviado pro celular ($it) — abrindo navegação.", color = NeonLime, fontSize = 14.sp) }
+                }
             }
         }
     }
