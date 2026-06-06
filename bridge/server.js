@@ -8020,12 +8020,41 @@ app.post('/api/phone-location', (req, res) => {
 // ── Planejamento de rota p/ previsão de SOC na chegada ──────────────────────
 // Geocoding (Nominatim) + rota de carro (OSRM) + perfil de elevação (Open-Meteo).
 // Retorna distância, duração, subida e descida acumuladas. O app projeta o SOC.
+// Nome curto e legível pro card (evita o display_name gigante → card altíssimo).
+function _shortPlaceName(primary, full) {
+  const p = (primary || '').trim();
+  if (p) return p.slice(0, 48);
+  const parts = String(full || '').split(',').map(s => s.trim()).filter(Boolean);
+  return (parts.slice(0, 2).join(', ') || String(full || '')).slice(0, 48);
+}
+// Geocodifica com VIÉS na posição atual do carro (proximity), pra não cair noutra
+// cidade (ex.: Brasília em vez de Goiânia). Mapbox c/ proximity quando há token;
+// senão Nominatim com viewbox em torno do carro. Retorna nome curto.
 async function _geocode(q) {
-  const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=${encodeURIComponent(q)}`;
+  const nearLat = +state.gps_lat, nearLng = +state.gps_lng;
+  const tok = process.env.MAPBOX_TOKEN;
+  if (tok) {
+    try {
+      let u = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(q)}.json`
+        + `?access_token=${tok}&language=pt&limit=1&country=br`;
+      if (nearLat && nearLng) u += `&proximity=${nearLng},${nearLat}`;
+      const r = await fetch(u, { signal: AbortSignal.timeout(8000) });
+      const j = await r.json();
+      const f = j && j.features && j.features[0];
+      if (f && Array.isArray(f.center)) {
+        return { lat: f.center[1], lng: f.center[0], name: _shortPlaceName(f.text, f.place_name) };
+      }
+    } catch (e) { console.warn('[geocode] Mapbox falhou, Nominatim:', e.message); }
+  }
+  let url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=br&q=${encodeURIComponent(q)}`;
+  if (nearLat && nearLng) {
+    const d = 0.7;   // ~70 km de caixa em torno do carro → prefere a região
+    url += `&viewbox=${nearLng - d},${nearLat + d},${nearLng + d},${nearLat - d}`;
+  }
   const r = await fetch(url, { headers: { 'User-Agent': 'EcotripImpulse/1.0 (haval ecotrip)' }, signal: AbortSignal.timeout(8000) });
   const j = await r.json();
   if (!Array.isArray(j) || !j.length) return null;
-  return { lat: +j[0].lat, lng: +j[0].lon, name: j[0].display_name };
+  return { lat: +j[0].lat, lng: +j[0].lon, name: _shortPlaceName(j[0].name, j[0].display_name) };
 }
 
 // Extrai lat/lng de uma URL de Maps/Waze. Cobre os formatos mais comuns do
