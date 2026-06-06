@@ -110,6 +110,10 @@ enum class CarConstants(val value: String) {
     CAR_BASIC_RIGHT_TURN_LIGHT_STATUS("car.basic.right_turn_light_status"),
     CAR_BASIC_LEFT_TURN_SWITCH_STATUS("car.basic.left_turn_switch_status"),
     CAR_BASIC_RIGHT_TURN_SWITCH_STATUS("car.basic.right_turn_switch_status"),
+    // TSR (reconhecimento de sinalização do carro): limite de velocidade + distância ao radar
+    CAR_MAP_TSR_NAV_SPEED_LIMIT("car.map.tsr.nav_speed_limit"),
+    CAR_MAP_TSR_NAV_SPEED_LIMIT_SIGN_STATUS("car.map.tsr.nav_speed_limit_sign_status"),
+    CAR_MAP_TSR_NAV_TO_TRAFFIC_EYE_DISTANCE("car.map.tsr.nav_to_traffic_eye_distance"),
     // seat_belt_warning: alerta de ocupante sentado SEM cinto afivelado (0=ok, >0=alerta)
     CAR_BASIC_SEAT_BELT_WARNING("car.basic.seat_belt_warning"),
     // seated_state: ocupação dos bancos (formato cru a confirmar — bitmask/CSV por assento)

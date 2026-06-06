@@ -230,6 +230,10 @@ class MqttManager private constructor() {
     @Volatile var latestRightTurnLamp: Int = 0
     fun isTurnLeftActive(): Boolean  = latestLeftTurnLamp != 0 || latestLeftSwitch != 0
     fun isTurnRightActive(): Boolean = latestRightTurnLamp != 0 || latestRightSwitch != 0
+    // TSR — limite de velocidade (km/h, valor cru a confirmar), placa detectada, distância ao radar (m)
+    @Volatile var latestSpeedLimit: Int = 0
+    @Volatile var latestSpeedLimitSign: Int = 0
+    @Volatile var latestTrafficEyeDist: Int = 0
 
     // ── Voting filter pra car.basic.window_status ─────────────────────────────
     // O car bus emite valores ruidosos em rajadas (até 6 leituras consecutivas
@@ -692,6 +696,15 @@ class MqttManager private constructor() {
                 }
                 CarConstants.CAR_BASIC_RIGHT_TURN_SWITCH_STATUS.value -> {
                     latestRightSwitch = value.trim().toFloatOrNull()?.toInt() ?: 0
+                }
+                CarConstants.CAR_MAP_TSR_NAV_SPEED_LIMIT.value -> {
+                    latestSpeedLimit = value.trim().toFloatOrNull()?.toInt() ?: 0
+                }
+                CarConstants.CAR_MAP_TSR_NAV_SPEED_LIMIT_SIGN_STATUS.value -> {
+                    latestSpeedLimitSign = value.trim().toFloatOrNull()?.toInt() ?: 0
+                }
+                CarConstants.CAR_MAP_TSR_NAV_TO_TRAFFIC_EYE_DISTANCE.value -> {
+                    latestTrafficEyeDist = value.trim().toFloatOrNull()?.toInt() ?: 0
                 }
                 CarConstants.CAR_BASIC_DOOR_STATUS.value -> {
                     // Formato esperado: CSV "FL,FR,RL,RR,Trunk" — 0=fechada, 1=aberta.
@@ -1586,6 +1599,7 @@ class MqttManager private constructor() {
             pubD("debug/front_light_raw",  latestFrontLight.toString())
             pubD("debug/turn_left",  "lamp=$latestLeftTurnLamp sw=$latestLeftSwitch", retained = false)
             pubD("debug/turn_right", "lamp=$latestRightTurnLamp sw=$latestRightSwitch", retained = false)
+            pubD("debug/tsr", "limit=$latestSpeedLimit sign=$latestSpeedLimitSign eye=$latestTrafficEyeDist", retained = false)
             // odometer_km e batt_12v_pct movidos pra GWM Brasil (MIGRATED_TO_HA) — bridge ignora.
             // Potência de recarga: apenas quando charging_state == 1 (Carregando)
             // Corrente AC (cur_charge_current) × tensão do pack (car.ev_info.power_battery_voltage) / 1000
