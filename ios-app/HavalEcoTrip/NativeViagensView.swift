@@ -34,6 +34,8 @@ struct Trip: Identifiable {
     var fuelL: Double { n("fuelL") }
     var startSoc: Double { n("startSocPct") }
     var endSoc: Double { n("endSocPct") }
+    var elevGain: Double { n("elevGainM") }
+    var elevLoss: Double { n("elevLossM") }
     var timeSec: Double { n("timeSec") }
     var updatedMs: Double { n("_updated_ms") }
     var rawName: String? { (raw["name"] as? String).flatMap { $0.isEmpty ? nil : $0 } }
@@ -304,6 +306,12 @@ struct NativeViagensView: View {
                         miniLabel("Tempo", dur(t.timeSec))
                         miniLabel("Consumo", t.consumo > 0 ? "\(f1(t.consumo)) kWh/100" : "—")
                         if t.fuelL > 0.05 { miniLabel("Gasolina", "\(f1(t.fuelL)) L") }
+                    }
+                    if t.elevGain > 0 || t.elevLoss > 0 {
+                        HStack(spacing: 14) {
+                            miniLabel("Subida", "↑ \(Fmt.int(t.elevGain)) m")
+                            miniLabel("Descida", "↓ \(Fmt.int(t.elevLoss)) m")
+                        }
                     }
                     RenameField(tripId: t.tripId, current: loader.displayName(t)) { name in
                         Task { await loader.rename(t.tripId, name) }
