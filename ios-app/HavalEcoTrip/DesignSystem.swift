@@ -60,7 +60,7 @@ struct DSCard<Content: View>: View {
             }
             content
         }
-        .padding(.horizontal, 14).padding(.vertical, 10)
+        .padding(.horizontal, 14).padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background {
             if glass {

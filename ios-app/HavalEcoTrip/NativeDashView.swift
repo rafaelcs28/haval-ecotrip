@@ -43,7 +43,7 @@ struct NativeDashView: View {
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 8) {
+            VStack(spacing: 11) {
                 header
                 statusCard
                 if store.isCharging { chargingCard } else { HStack(spacing: 14) { batteryCard; fuelCard } }
