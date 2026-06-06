@@ -57,7 +57,6 @@
 		9726912E15C4196ACF166260 /* MaintenanceStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8036EB500E09B8F08A9EA755 /* MaintenanceStore.swift */; };
 		97D85BD3A8D8D549ABD6A944 /* ActivityManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9926C58E001CD8511E829FB /* ActivityManager.swift */; };
 		985C98EC482371EDBE14B4E2 /* SecurityActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = D15756C1CEF1EFDD6804C05D /* SecurityActivityAttributes.swift */; };
-		9BCE4AFE50A0B7CB2F40A59C /* ShareExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = B9BBC1E7EB38A5621A6751AA /* ShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		9CC60221177D73FA6ED4E7F8 /* SecurityLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFE9C8DD63C6163B5AF174C8 /* SecurityLiveActivity.swift */; };
 		A01430293347A18D099263AF /* PreclimatSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6215EB2F3EA8C80FA49D1477 /* PreclimatSheet.swift */; };
 		A059FEDAB126C345DAAD9802 /* PreClimatLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 915E7661920B0022793D3A63 /* PreClimatLiveActivity.swift */; };
@@ -94,13 +93,6 @@
 			remoteGlobalIDString = 7C6F91A3D976662D4231F695;
 			remoteInfo = HavalEcoTripWidget;
 		};
-		4D76365725B38DAEB3255C81 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = CB4F87A590F61F207CFCDD6A /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = 9A24D993E9771A54D42878BB;
-			remoteInfo = ShareExtension;
-		};
 		FBC92699CDE4026C5046490F /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = CB4F87A590F61F207CFCDD6A /* Project object */;
@@ -129,7 +121,6 @@
 			dstSubfolderSpec = 13;
 			files = (
 				89B5CF62DAD11B34026CB4C5 /* HavalEcoTripWidget.appex in Embed Foundation Extensions */,
-				9BCE4AFE50A0B7CB2F40A59C /* ShareExtension.appex in Embed Foundation Extensions */,
 			);
 			name = "Embed Foundation Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -405,7 +396,6 @@
 			);
 			dependencies = (
 				ABF9ACFC5BF036BDAAFA7381 /* PBXTargetDependency */,
-				6E90D86714A338736BB51D3B /* PBXTargetDependency */,
 			);
 			name = HavalEcoTrip;
 			packageProductDependencies = (
@@ -639,11 +629,6 @@
 			isa = PBXTargetDependency;
 			target = BBC06950EA1E47A8982A0457 /* BydRecargaWidget */;
 			targetProxy = FBC92699CDE4026C5046490F /* PBXContainerItemProxy */;
-		};
-		6E90D86714A338736BB51D3B /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = 9A24D993E9771A54D42878BB /* ShareExtension */;
-			targetProxy = 4D76365725B38DAEB3255C81 /* PBXContainerItemProxy */;
 		};
 		ABF9ACFC5BF036BDAAFA7381 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;

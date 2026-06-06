@@ -130,7 +130,8 @@ targets:
           CODE_SIGN_ENTITLEMENTS: HavalEcoTrip/HavalEcoTrip-prod.entitlements
     dependencies:
       - target: HavalEcoTripWidget
-      - target: ShareExtension
+      # - target: ShareExtension   # fora do archive até registrar o App Group do
+      #   App ID br.com.consorciolimpagyn.havalecotrip.ShareExtension no portal.
     scheme:
       # Scheme compartilhado (gera xcshareddata/xcschemes/HavalEcoTrip.xcscheme)
       # pra `xcodebuild -scheme HavalEcoTrip` funcionar sem precisar de xcuserdata.
