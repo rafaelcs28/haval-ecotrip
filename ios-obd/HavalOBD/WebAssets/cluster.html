@@ -127,11 +127,14 @@
   .hazard-btn { display: none; }
   body.native .hazard-btn {
     position: absolute; bottom: 16px; left: 16px;   /* colado na borda da climatização (à esq) */
-    width: 124px; height: 124px; border-radius: 24px; z-index: 800; cursor: pointer;
+    /* tamanho controlável pela Config do iPad (--haz-size); default = dobro do antigo (124→248) */
+    width: var(--haz-size, 248px); height: var(--haz-size, 248px);
+    border-radius: 19%; z-index: 800; cursor: pointer;
     display: flex; align-items: center; justify-content: center;
     background: rgba(0,0,0,.5); border: 3px solid var(--red); color: var(--red);
     -webkit-tap-highlight-color: transparent;
   }
+  body.native .hazard-btn svg { width: 55%; height: 55%; }
   body.native .hazard-btn.active { background: var(--red); color: #fff; animation: hazblink 2s steps(1) infinite; }
   @keyframes hazblink { 50% { opacity: .3; } }
   .trip-info .ti-cell { display: flex; flex-direction: column; gap: 5px; }
@@ -1202,6 +1205,15 @@
             <div class="tov yellow"><span id="tov-cost-km">R$ 0,00</span><span style="font-size:18px;opacity:.7">/km</span></div>
             <div class="tol">Custo por km</div>
           </div>
+          <!-- Chegada (SOC + ETA) — só aparece com destino compartilhado ativo -->
+          <div class="ti-cell ti-arrival" style="display:none">
+            <div class="tov teal"><span id="tov-eta">—</span></div>
+            <div class="tol">Chegada</div>
+          </div>
+          <div class="ti-cell ti-arrival" style="display:none">
+            <div class="tov green"><span id="tov-soc-arr">—</span><span style="font-size:18px;opacity:.7"> %</span></div>
+            <div class="tol">SOC na chegada</div>
+          </div>
         </div>
       </div>
     </div>
@@ -1891,6 +1903,22 @@ function render() {
   const kmLStr    = kmL    > 0 ? fmt1(kmL)    : '—';
   tov('trip-kwh100', kwh100Str); tov('trip-kml', kmLStr);
   tov('tov-kwh100',  kwh100Str); tov('tov-kml',  kmLStr);
+
+  // Chegada (destino compartilhado): ETA + SOC previsto. Sem destino → oculta.
+  const arr = state.arrival;
+  const arrCells = document.querySelectorAll('.ti-arrival');
+  if (arr && arr.socArrival != null) {
+    tov('tov-eta', `${arr.etaClock} · ${arr.etaMin} min`);
+    const socEl = document.getElementById('tov-soc-arr');
+    if (socEl) {
+      socEl.textContent = Math.round(arr.socArrival);
+      const p = arr.socArrival;
+      socEl.parentElement.className = 'tov ' + (p < 30 ? 'orange' : p < 50 ? 'yellow' : 'green');
+    }
+    arrCells.forEach(c => c.style.display = '');
+  } else {
+    arrCells.forEach(c => c.style.display = 'none');
+  }
 
   // RPM do motor a combustão (no widget Potência)
   const rpmEl = document.getElementById('power-rpm');

@@ -1079,6 +1079,7 @@ const state = {
   gps_lat:          0,
   gps_lng:          0,
   gps_ts:           0,   // timestamp ms da última posição recebida
+  arrival:          null, // { name, distKm, etaMin, etaClock, socArrival, traffic } — null sem destino compartilhado
   car_heading:      0,   // rumo do carro (graus, 0=N) do deslocamento GPS; PERSISTIDO
   apns_prod_confirmed: false,  // watchdog: já confirmou (e notificou) o APNs de produção ativo
 
@@ -6797,6 +6798,55 @@ async function _maybeRouteToPhone(force = false) {
   } catch (_) { /* mantém último valor em caso de falha de rede */ }
   finally { _routeToPhone.busy = false; }
 }
+// ── Chegada atual (cluster do iPad e afins) ─────────────────────────────────
+// Rota + ETA (trânsito) + SOC previsto até o destino compartilhado mais recente.
+// Sem destino recente OU sem GPS → state.arrival = null (cluster segue igual a hoje).
+let _arrivalBusy = false, _arrivalMs = 0;
+function _recentKwhPerKm() {
+  const ev = autoTripsArr.filter(t => (t.fuelL || 0) < 0.05 && (t.distKm || 0) >= 2).slice(0, 40);
+  const d = ev.reduce((s, t) => s + (t.distKm || 0), 0);
+  const k = ev.reduce((s, t) => s + (t.netKwh || 0), 0);
+  return (d > 5 && k > 0) ? Math.min(Math.max(k / d, 0.05), 0.5) : 0.16;
+}
+async function _maybeComputeArrival() {
+  const now = Date.now();
+  let dest = null;
+  for (let i = recentNavDests.length - 1; i >= 0; i--) {
+    if (now - recentNavDests[i].ts < 6 * 3600 * 1000) { dest = recentNavDests[i]; break; }
+  }
+  const carLat = +state.gps_lat, carLng = +state.gps_lng, soc = +state.soc_pct;
+  if (!dest || !carLat || !carLng) {
+    if (state.arrival) { state.arrival = null; scheduleStateBroadcast(); }
+    return;
+  }
+  if (_arrivalBusy || now - _arrivalMs < 30_000) return;
+  _arrivalBusy = true;
+  try {
+    const plan = await _routeElevation(carLat, carLng, dest.lat, dest.lng);
+    _arrivalMs = Date.now();
+    if (!plan) return;
+    if (plan.distanceKm < 0.3) {   // chegou ao destino → limpa
+      if (state.arrival) { state.arrival = null; scheduleStateBroadcast(); }
+      return;
+    }
+    const durMin = plan.durationMin || 0;
+    const cap = 34;   // capacidade útil de fábrica (H6 PHEV)
+    const acOn = state.hvac_ac_enable === '1' || state.ac_state === 'on';
+    const tempOut = +state.outside_temp || 28;
+    const acH = acOn ? Math.min(Math.max(0.5 + 0.07 * Math.abs(tempOut - 22), 0.5), 1.5) : 0.12;
+    const energy = Math.max(plan.distanceKm * _recentKwhPerKm()
+      + plan.climbM * 0.0064 - plan.descentM * 0.0035 + acH * (durMin / 60), 0);
+    const pred = Math.min(Math.max(Math.round(soc - energy / cap * 100), 0), 100);
+    const arr = new Date(Date.now() + durMin * 60_000);
+    const etaClock = `${String(arr.getHours()).padStart(2, '0')}:${String(arr.getMinutes()).padStart(2, '0')}`;
+    state.arrival = { name: dest.name, distKm: plan.distanceKm, etaMin: durMin,
+                      etaClock, socArrival: pred, traffic: plan.traffic, ts: Date.now() };
+    scheduleStateBroadcast();
+  } catch (_) { /* mantém último valor */ }
+  finally { _arrivalBusy = false; }
+}
+setInterval(_maybeComputeArrival, 15_000);
+
 let _songProLastEnd = { soc: 0, sessionKwh: 0, endedMs: 0 };  // resumo da última recarga
 let _songProTele    = { ts: 0 };   // telemetria completa (último payload mapeado)
 // Estado pra detecção de borda das notificações (lock/porta/soc/etc + odômetro
