@@ -62,6 +62,7 @@
 		A01430293347A18D099263AF /* PreclimatSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6215EB2F3EA8C80FA49D1477 /* PreclimatSheet.swift */; };
 		A059FEDAB126C345DAAD9802 /* PreClimatLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 915E7661920B0022793D3A63 /* PreClimatLiveActivity.swift */; };
 		A3622611C72B3B511BA5015D /* CarIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD754B29F48E190AD2D8648F /* CarIntents.swift */; };
+		A3A6AF98888B41E747C0D262 /* BatteryHealthSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE7C90F87D39219D3F202F0E /* BatteryHealthSheet.swift */; };
 		AACDCF32BF0A0A36A4A2F84F /* HavalEcoTripApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5A372CA99C89C5712EE54BC /* HavalEcoTripApp.swift */; };
 		AB83E9252E2D2EA3B5AAAC0A /* MotorActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 636438201B328EA34B285F3A /* MotorActivityAttributes.swift */; };
 		AE6DF0BA2B76E13159F83FE3 /* BackgroundRefresh.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F97B54C85FEC5A112CB0C9E /* BackgroundRefresh.swift */; };
@@ -213,6 +214,7 @@
 		EBBB57D2D187DD310113F34A /* PreClimatActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreClimatActivityAttributes.swift; sourceTree = "<group>"; };
 		EBC80D42C32C99C47E1B7222 /* AuthManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthManager.swift; sourceTree = "<group>"; };
 		ECAEED044A902791C1B43435 /* BydRecargaApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BydRecargaApp.swift; sourceTree = "<group>"; };
+		EE7C90F87D39219D3F202F0E /* BatteryHealthSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BatteryHealthSheet.swift; sourceTree = "<group>"; };
 		EEEFCC8135B0627DFDB60013 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		F6B65FA59825E09151BBC7C3 /* BatteryWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BatteryWidget.swift; sourceTree = "<group>"; };
 		FB5145A32C36D0D8E2E36E83 /* NativeRecargasView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeRecargasView.swift; sourceTree = "<group>"; };
@@ -229,6 +231,7 @@
 				EBC80D42C32C99C47E1B7222 /* AuthManager.swift */,
 				01AC1877140CC251292718C3 /* AutomationsView.swift */,
 				2F97B54C85FEC5A112CB0C9E /* BackgroundRefresh.swift */,
+				EE7C90F87D39219D3F202F0E /* BatteryHealthSheet.swift */,
 				E5C3783F4045873A9A1C2F85 /* BiometricGate.swift */,
 				C88C20EF0FDB1AB8EB036191 /* CarActions.swift */,
 				C68353FA3433CBE88BFA4347 /* CarStore.swift */,
@@ -568,6 +571,7 @@
 				D6B7CC3FAD98C1CC134911FE /* AuthManager.swift in Sources */,
 				064E007225ADC0CDFC776198 /* AutomationsView.swift in Sources */,
 				AE6DF0BA2B76E13159F83FE3 /* BackgroundRefresh.swift in Sources */,
+				A3A6AF98888B41E747C0D262 /* BatteryHealthSheet.swift in Sources */,
 				EB170A75BD1ABB3462C6AF9E /* BiometricGate.swift in Sources */,
 				605ED8EEC91528FFBC054A48 /* CarActions.swift in Sources */,
 				77EF0F880D1B98744B21C2C5 /* CarIntents.swift in Sources */,

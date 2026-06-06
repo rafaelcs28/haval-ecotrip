@@ -130,6 +130,7 @@ struct NativeRecargasView: View {
     @State private var showCal = false
     @State private var expandedCharge: Double?
     @State private var toast: String?
+    @State private var showHealth = false
 
     private var fromDate: Binding<Date> {
         Binding(get: { fromTS > 0 ? Date(timeIntervalSince1970: fromTS) : Date() }, set: { fromTS = $0.timeIntervalSince1970 })
@@ -182,11 +183,12 @@ struct NativeRecargasView: View {
                     }
                 }
 
-                if source == 0 { if tab == 0 { historico } else { estatisticas } }
+                if source == 0 { if tab == 0 { historico } else { healthButton; estatisticas } }
                 else { if tab == 0 { refHistorico } else { refEstatisticas } }
             }
             .padding(16)
         }
+        .sheet(isPresented: $showHealth) { BatteryHealthSheet(charges: loader.charges) }
         .background(DS.bg.ignoresSafeArea())
         .overlay { if loader.loading && loader.charges.isEmpty { ProgressView().tint(DS.green) } }
         .overlay(alignment: .bottom) {
@@ -200,7 +202,9 @@ struct NativeRecargasView: View {
         }
         .animation(.easeInOut, value: toast)
         .refreshable { await loader.load(); await refLoader.load() }
-        .task { if loader.charges.isEmpty { await loader.load() }; if refLoader.refuels.isEmpty { await refLoader.load() } }
+        // Sincroniza SEMPRE ao abrir (não só com cache vazio): senão recargas novas
+        // só entravam via pull-to-refresh manual ou WS no exato momento do evento.
+        .task { await loader.load(); await refLoader.load() }
     }
 
     private var periodChips: some View {
@@ -277,6 +281,22 @@ struct NativeRecargasView: View {
                             toast = "Recarga salva ✓"
                         }
                     }
+                }
+            }
+        }
+    }
+
+    private var healthButton: some View {
+        DSCard {
+            Button { showHealth = true } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "heart.text.square.fill").font(.title3).foregroundStyle(DS.teal)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Saúde da bateria").font(.subheadline.weight(.semibold)).foregroundStyle(DS.text)
+                        Text("Capacidade útil e degradação ao longo do tempo").font(.caption).foregroundStyle(DS.muted)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(DS.muted)
                 }
             }
         }
