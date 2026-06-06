@@ -48,7 +48,9 @@ jobs:
           # carro não reconhece a atualização — ficava sempre "5.92").
           VNAME="${GITHUB_REF_NAME#v}"
           MAJOR="${VNAME%%.*}"; MINOR="${VNAME#*.}"; MINOR="${MINOR%%.*}"
-          VCODE=$(( MAJOR * 1000 + MINOR ))
+          # 10# força base-10: sem isso, MINOR "08"/"09" vira octal inválido (build sem
+          # versionCode → cai no default → carro recusa como downgrade) e "10" virava 8.
+          VCODE=$(( 10#$MAJOR * 1000 + 10#$MINOR ))
           echo "Building versionName=$VNAME versionCode=$VCODE"
           ./gradlew assembleRelease --no-daemon -PvName="$VNAME" -PvCode="$VCODE"
 

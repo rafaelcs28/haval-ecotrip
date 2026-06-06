@@ -22,10 +22,15 @@ import java.net.URL
 import java.net.URLEncoder
 
 private data class RoutePlan(
-    val destName: String, val distanceKm: Float, val durationMin: Int,
+    val destName: String, val distanceKm: Float, val durationMin: Int, val etaClock: String,
     val climbM: Int, val descentM: Int,
     val curSoc: Int, val predictedSoc: Int, val energyKwh: Float, val capacityKwh: Float,
 )
+
+private fun etaFromNow(durationMin: Int): String {
+    val arrival = java.util.Date(System.currentTimeMillis() + durationMin * 60_000L)
+    return java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(arrival)
+}
 
 // Previsão de SOC na chegada: destino → bridge (/api/route-plan: OSRM + elevação) →
 // energia = dist × consumo + subida×K − descida×regen; SOC previsto = atual − energia/capacidade.
@@ -72,7 +77,7 @@ fun SocArrivalScreen(tripManager: TripManager, onBack: () -> Unit) {
                 val energy   = (distKm * kwhPerKm + climb * 0.0064f - desc * 0.0035f).coerceAtLeast(0f)
                 val cur      = tripManager.getCurrentSocPct().toInt()
                 val pred     = (cur - (energy / cap * 100f)).toInt().coerceIn(0, 100)
-                plan = RoutePlan(name, distKm, durMin, climb, desc, cur, pred, energy, cap)
+                plan = RoutePlan(name, distKm, durMin, etaFromNow(durMin), climb, desc, cur, pred, energy, cap)
             } catch (e: Exception) {
                 error = "Falha ao calcular (${e.message})"
             }
@@ -113,6 +118,11 @@ fun SocArrivalScreen(tripManager: TripManager, onBack: () -> Unit) {
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
                 Text(p.destName, color = TextSecondary, fontSize = 16.sp, maxLines = 2)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Chegada", color = TextSecondary, fontSize = 16.sp)
+                    Text(p.etaClock, color = AuroraTeal, fontSize = 24.sp, fontWeight = FontWeight.ExtraBold)
+                    Text("· ${p.durationMin} min", color = TextSecondary, fontSize = 16.sp)
+                }
                 Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                     Text("SOC na chegada", color = TextSecondary, fontSize = 18.sp, modifier = Modifier.padding(bottom = 12.dp))
                     Text("${p.predictedSoc}", color = if (p.predictedSoc < 15) MoltenOrange else NeonLime,
@@ -123,7 +133,6 @@ fun SocArrivalScreen(tripManager: TripManager, onBack: () -> Unit) {
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     SocStat("Distância", "${f1c(p.distanceKm)} km", AccentBlue)
-                    SocStat("Tempo", "${p.durationMin} min", TextPrimary)
                     SocStat("Subida", "↑ ${p.climbM} m", NeonLime)
                     SocStat("Descida", "↓ ${p.descentM} m", PlasmaBlue)
                     SocStat("Energia", "${f1c(p.energyKwh)} kWh", MoltenOrange)
