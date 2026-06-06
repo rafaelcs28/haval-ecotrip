@@ -88,16 +88,18 @@ final class ArrivalStore: ObservableObject {
         return caps.reduce(0, +) / Double(caps.count)
     }
 
-    // toLat/toLng != nil → destino já resolvido (sugestão escolhida); senão geocoda por texto.
-    func compute(query: String, trips: [Trip], toLat: Double? = nil, toLng: Double? = nil) async {
+    // toLat/toLng != nil → destino já resolvido. fromLat/fromLng != nil → saída custom
+    // (simular outro ponto de partida); senão usa o local atual do carro.
+    func compute(query: String, trips: [Trip], toLat: Double? = nil, toLng: Double? = nil,
+                 fromLat: Double? = nil, fromLng: Double? = nil) async {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard (!q.isEmpty || (toLat != nil && toLng != nil)), !loading else { return }
         loading = true; error = nil; plan = nil
         defer { loading = false }
 
         let car = CarStore.shared
-        guard car.hasGps else { error = "Sem sinal de GPS do carro ainda."; return }
-        let lat = car.lat, lng = car.lng
+        let lat = fromLat ?? car.lat, lng = fromLng ?? car.lng
+        if lat == 0 && lng == 0 { error = "Defina a saída ou aguarde o GPS do carro."; return }
         let curSoc = Int(car.socPct.rounded())
         let acOn = car.acEnable
         let tempOut = car.outsideTemp != 0 ? car.outsideTemp : 28
@@ -175,46 +177,29 @@ struct ArrivalSheet: View {
     @StateObject private var store = ArrivalStore()
     @StateObject private var completer = AddressCompleter()
     @State private var dest = ""
+    @State private var origin = ""                        // vazio = local atual do carro
+    @State private var destCoord: (Double, Double)? = nil
+    @State private var originCoord: (Double, Double)? = nil
+    @State private var activeField: Field = .dest
     @Environment(\.dismiss) private var dismiss
-    @FocusState private var focused: Bool
+    @FocusState private var focusedField: Field?
+
+    private enum Field { case origin, dest }
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 14) {
                     DSCard {
-                        VStack(spacing: 12) {
-                            TextField("Destino (endereço ou local)", text: $dest)
-                                .focused($focused)
-                                .textFieldStyle(.plain)
-                                .autocorrectionDisabled()
-                                .padding(12)
-                                .background(DS.panel2)
-                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                                .submitLabel(.search)
-                                .onChange(of: dest) { _, q in
-                                    if q.count >= 3 { completer.update(q, near: CarStore.shared.coordinate) }
-                                    else { completer.clear() }
-                                }
-                                .onSubmit { calc() }
-                            // Sugestões de endereço (autocomplete nativo)
-                            if !completer.results.isEmpty && store.plan == nil {
-                                VStack(spacing: 0) {
-                                    ForEach(completer.results.prefix(5), id: \.self) { s in
-                                        Button { pick(s) } label: {
-                                            VStack(alignment: .leading, spacing: 1) {
-                                                Text(s.title).font(.subheadline).foregroundStyle(DS.text)
-                                                if !s.subtitle.isEmpty {
-                                                    Text(s.subtitle).font(.caption2).foregroundStyle(DS.muted).lineLimit(1)
-                                                }
-                                            }.frame(maxWidth: .infinity, alignment: .leading)
-                                                .padding(.vertical, 8).padding(.horizontal, 10)
-                                        }
-                                        Divider().background(DS.border)
-                                    }
-                                }
-                                .background(DS.panel2).clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                            }
+                        VStack(spacing: 8) {
+                            addrField("Saída — local do carro", text: $origin, field: .origin, icon: "location.circle")
+                            Button { swapEnds() } label: {
+                                Image(systemName: "arrow.up.arrow.down").font(.system(size: 13, weight: .bold))
+                                    .foregroundStyle(DS.teal).frame(width: 30, height: 24)
+                                    .background(DS.panel2).clipShape(RoundedRectangle(cornerRadius: 8))
+                            }.frame(maxWidth: .infinity, alignment: .center)
+                            addrField("Destino (endereço ou local)", text: $dest, field: .dest, icon: "mappin.circle")
+                            if !completer.results.isEmpty && store.plan == nil { suggestionsList }
                             DSActionButton(icon: "location.fill.viewfinder", title: "Calcular",
                                            color: DS.teal, busy: store.loading) { calc() }
                         }
@@ -233,24 +218,87 @@ struct ArrivalSheet: View {
             .navigationTitle("SOC na chegada")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Fechar") { dismiss() } } }
-            .onAppear { focused = true }
+            .onAppear { focusedField = .dest }
         }
     }
 
-    private func calc() { focused = false; completer.clear(); Task { await store.compute(query: dest, trips: trips) } }
+    @ViewBuilder private func addrField(_ placeholder: String, text: Binding<String>, field: Field, icon: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon).font(.subheadline).foregroundStyle(field == .origin ? DS.green : DS.teal)
+            TextField(placeholder, text: text)
+                .textFieldStyle(.plain).autocorrectionDisabled()
+                .focused($focusedField, equals: field)
+                .submitLabel(.search)
+                .onChange(of: text.wrappedValue) { _, q in
+                    activeField = field
+                    if field == .dest { destCoord = nil } else { originCoord = nil }
+                    if q.count >= 3 { completer.update(q, near: CarStore.shared.coordinate) } else { completer.clear() }
+                }
+                .onSubmit { calc() }
+        }
+        .padding(12).background(DS.panel2).clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
 
-    // Escolheu uma sugestão → resolve coordenada e calcula direto (sem geocode ambíguo).
-    private func pick(_ s: MKLocalSearchCompletion) {
-        focused = false
-        dest = s.title
-        completer.clear()
-        Task {
-            if let (coord, name) = await completer.resolve(s) {
-                await store.compute(query: name, trips: trips, toLat: coord.latitude, toLng: coord.longitude)
-            } else {
-                await store.compute(query: s.title, trips: trips)
+    private var suggestionsList: some View {
+        VStack(spacing: 0) {
+            ForEach(completer.results.prefix(5), id: \.self) { s in
+                Button { pick(s) } label: {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(s.title).font(.subheadline).foregroundStyle(DS.text)
+                        if !s.subtitle.isEmpty {
+                            Text(s.subtitle).font(.caption2).foregroundStyle(DS.muted).lineLimit(1)
+                        }
+                    }.frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 8).padding(.horizontal, 10)
+                }
+                Divider().background(DS.border)
             }
         }
+        .background(DS.panel2).clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    private func calc() {
+        focusedField = nil; completer.clear()
+        Task {
+            var fromC = originCoord
+            if fromC == nil, !origin.trimmingCharacters(in: .whitespaces).isEmpty {
+                if let c = await resolveQuery(origin) { fromC = (c.latitude, c.longitude) }
+            }
+            await store.compute(query: dest, trips: trips,
+                                toLat: destCoord?.0, toLng: destCoord?.1,
+                                fromLat: fromC?.0, fromLng: fromC?.1)
+        }
+    }
+
+    // Escolheu uma sugestão → preenche o campo ativo + coordenada; se for destino, calcula.
+    private func pick(_ s: MKLocalSearchCompletion) {
+        let field = activeField
+        completer.clear()
+        if field == .origin { origin = s.title } else { dest = s.title }
+        Task {
+            let resolved = await completer.resolve(s)
+            if field == .origin {
+                originCoord = resolved.map { ($0.0.latitude, $0.0.longitude) }
+            } else {
+                destCoord = resolved.map { ($0.0.latitude, $0.0.longitude) }
+                calc()
+            }
+        }
+    }
+
+    private func swapEnds() {
+        swap(&origin, &dest)
+        swap(&originCoord, &destCoord)
+        completer.clear()
+    }
+
+    // Geocoda um texto (origem digitada sem escolher sugestão), com viés na região do carro.
+    private func resolveQuery(_ q: String) async -> CLLocationCoordinate2D? {
+        let req = MKLocalSearch.Request()
+        req.naturalLanguageQuery = q
+        req.region = MKCoordinateRegion(center: CarStore.shared.coordinate, latitudinalMeters: 80_000, longitudinalMeters: 80_000)
+        guard let resp = try? await MKLocalSearch(request: req).start() else { return nil }
+        return resp.mapItems.first?.placemark.coordinate
     }
 
     @ViewBuilder private func resultCard(_ p: ArrivalPlan) -> some View {
