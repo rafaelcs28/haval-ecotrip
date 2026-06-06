@@ -2195,6 +2195,7 @@ function matchKnownPlace(lat, lng) {
 // a viagem que terminar perto deles com o NOME digitado (ex.: "Shopping Flamboyant")
 // em vez do bairro+cidade do reverse-geocode.
 const recentNavDests = [];
+let _navDestRetained = false;   // há um nav_dest retido no broker? (pra limpar ao expirar)
 function _navDestNameFor(lat, lng) {
   if (!lat || !lng) return null;
   const maxAgeMs = 12 * 3600 * 1000;   // só destinos das últimas 12h
@@ -6815,7 +6816,14 @@ async function _maybeComputeArrival() {
     if (now - recentNavDests[i].ts < 6 * 3600 * 1000) { dest = recentNavDests[i]; break; }
   }
   const carLat = +state.gps_lat, carLng = +state.gps_lng, soc = +state.soc_pct;
-  if (!dest || !carLat || !carLng) {
+  if (!dest) {
+    // Sem destino recente (>6h) → limpa o estado E o nav_dest retido (pra não
+    // reaparecer no carro depois de velho).
+    if (state.arrival) { state.arrival = null; scheduleStateBroadcast(); }
+    if (_navDestRetained) { mqttClient.publish(`${MQTT_PREFIX}/cmd/nav_dest`, '', { qos: 1, retain: true }); _navDestRetained = false; }
+    return;
+  }
+  if (!carLat || !carLng) {
     if (state.arrival) { state.arrival = null; scheduleStateBroadcast(); }
     return;
   }
@@ -8190,7 +8198,8 @@ async function _handleSharedDest(value) {
     recentNavDests.push({ name: d.name, lat: d.lat, lng: d.lng, ts: Date.now() });
     if (recentNavDests.length > 30) recentNavDests.shift();
     const payload = JSON.stringify({ lat: d.lat, lng: d.lng, name: d.name, etaClock, ts: Date.now() });
-    mqttClient.publish(`${MQTT_PREFIX}/cmd/nav_dest`, payload, { qos: 1, retain: false });
+    mqttClient.publish(`${MQTT_PREFIX}/cmd/nav_dest`, payload, { qos: 1, retain: true });
+    _navDestRetained = true;
     mqttClient.publish(`${MQTT_PREFIX}/car_dest_result`,
       JSON.stringify({ ok: true, name: d.name, ts: Date.now() }), { qos: 1, retain: false });
     console.log(`[shareDest] → carro: ${d.name} (${d.lat.toFixed(5)},${d.lng.toFixed(5)})`);
@@ -8210,6 +8219,24 @@ app.post('/api/share-dest', async (req, res) => {
   const d = await _handleSharedDest(String(text));
   if (!d) return res.status(422).json({ ok: false, error: 'não consegui o destino' });
   res.json({ ok: true, name: d.name, lat: d.lat, lng: d.lng });
+});
+
+// POST /api/nav-to — manda um destino JÁ resolvido (lat/lng/nome) pro carro, igual ao
+// compartilhamento porém direto (app do iPhone, tela de SOC na chegada). Publica
+// nav_dest pro Ecotrip e registra pra nomear a viagem + computar a chegada.
+app.post('/api/nav-to', (req, res) => {
+  const lat = +(req.body && req.body.lat), lng = +(req.body && req.body.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || (lat === 0 && lng === 0))
+    return res.status(400).json({ ok: false, error: 'lat/lng obrigatórios' });
+  const name = (String(req.body && req.body.name || '').trim() || `${lat.toFixed(5)}, ${lng.toFixed(5)}`).slice(0, 60);
+  recentNavDests.push({ name, lat, lng, ts: Date.now() });
+  if (recentNavDests.length > 30) recentNavDests.shift();
+  mqttClient.publish(`${MQTT_PREFIX}/cmd/nav_dest`,
+    JSON.stringify({ lat, lng, name, etaClock: '', ts: Date.now() }), { qos: 1, retain: true });
+  _navDestRetained = true;
+  _maybeComputeArrival(true);   // já calcula a chegada pro cluster/estado
+  console.log(`[navTo] → carro: ${name} (${lat.toFixed(5)},${lng.toFixed(5)})`);
+  res.json({ ok: true, name });
 });
 // Busca a rota: Mapbox driving-traffic (ETA COM trânsito ao vivo) se houver MAPBOX_TOKEN;
 // senão OSRM (sem trânsito). Retorna distância(m), duração(s), geometria e flag de trânsito.

@@ -1999,13 +1999,18 @@ class MqttManager private constructor() {
             val car = CarDataManager.getInstance()
             when (cmd) {
                 "nav_dest" -> {
-                    // Destino compartilhado do celular (Maps/Waze) → abre a tela Chegada.
+                    // Destino do celular (compartilhar ou "enviar pro carro"). Retido no
+                    // broker: carro desligado recebe ao ligar. Usa o ts do payload (dedupe
+                    // por reconexão) e ignora destino velho (>6h). Payload vazio = limpeza.
                     try {
-                        val j = org.json.JSONObject(payload)
-                        val lat = j.optDouble("lat", 0.0); val lng = j.optDouble("lng", 0.0)
-                        if (lat != 0.0 || lng != 0.0) {
-                            incomingNavDest = NavDest(lat, lng, j.optString("name", ""), System.currentTimeMillis(), j.optString("etaClock", ""))
-                            AppLogger.i(TAG, "nav_dest recebido: ${j.optString("name","")} ($lat,$lng) eta=${j.optString("etaClock","")}")
+                        if (payload.isNotBlank()) {
+                            val j = org.json.JSONObject(payload)
+                            val lat = j.optDouble("lat", 0.0); val lng = j.optDouble("lng", 0.0)
+                            val ts = j.optLong("ts", System.currentTimeMillis())
+                            if ((lat != 0.0 || lng != 0.0) && System.currentTimeMillis() - ts < 6 * 3600_000L) {
+                                incomingNavDest = NavDest(lat, lng, j.optString("name", ""), ts, j.optString("etaClock", ""))
+                                AppLogger.i(TAG, "nav_dest: ${j.optString("name","")} ($lat,$lng) eta=${j.optString("etaClock","")}")
+                            }
                         }
                     } catch (e: Exception) { AppLogger.w(TAG, "nav_dest inválido: ${e.message}") }
                 }

@@ -5,6 +5,41 @@
 //  dados de viagem já sincronizados (viagens 100% EV), sem hardcode.
 
 import SwiftUI
+import MapKit
+
+// Autocomplete de endereço (nativo, sem chave): sugere estabelecimentos/ruas conforme
+// digita, com viés na região do carro.
+@MainActor
+final class AddressCompleter: NSObject, ObservableObject, MKLocalSearchCompleterDelegate {
+    @Published var results: [MKLocalSearchCompletion] = []
+    private let completer = MKLocalSearchCompleter()
+    override init() {
+        super.init()
+        completer.delegate = self
+        completer.resultTypes = [.address, .pointOfInterest]
+    }
+    func update(_ q: String, near: CLLocationCoordinate2D?) {
+        if let c = near, c.latitude != 0 {
+            completer.region = MKCoordinateRegion(center: c, latitudinalMeters: 80_000, longitudinalMeters: 80_000)
+        }
+        completer.queryFragment = q
+    }
+    func clear() { results = []; completer.queryFragment = "" }
+    nonisolated func completerDidUpdateResults(_ c: MKLocalSearchCompleter) {
+        let r = c.results
+        Task { @MainActor in self.results = r }
+    }
+    nonisolated func completer(_ c: MKLocalSearchCompleter, didFailWithError error: Error) {
+        Task { @MainActor in self.results = [] }
+    }
+    // Resolve uma sugestão em coordenada + nome.
+    func resolve(_ s: MKLocalSearchCompletion) async -> (CLLocationCoordinate2D, String)? {
+        let req = MKLocalSearch.Request(completion: s)
+        guard let resp = try? await MKLocalSearch(request: req).start(),
+              let item = resp.mapItems.first else { return nil }
+        return (item.placemark.coordinate, s.title)
+    }
+}
 
 private func num(_ v: Any?) -> Double {
     if let d = v as? Double { return d }
@@ -53,9 +88,10 @@ final class ArrivalStore: ObservableObject {
         return caps.reduce(0, +) / Double(caps.count)
     }
 
-    func compute(query: String, trips: [Trip]) async {
+    // toLat/toLng != nil → destino já resolvido (sugestão escolhida); senão geocoda por texto.
+    func compute(query: String, trips: [Trip], toLat: Double? = nil, toLng: Double? = nil) async {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !q.isEmpty, !loading else { return }
+        guard (!q.isEmpty || (toLat != nil && toLng != nil)), !loading else { return }
         loading = true; error = nil; plan = nil
         defer { loading = false }
 
@@ -66,8 +102,14 @@ final class ArrivalStore: ObservableObject {
         let acOn = car.acEnable
         let tempOut = car.outsideTemp != 0 ? car.outsideTemp : 28
 
-        guard let enc = q.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
-              let url = URL(string: "\(base)/api/route-plan?from_lat=\(lat)&from_lng=\(lng)&q=\(enc)") else {
+        let nm = q.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+        let urlStr: String
+        if let tla = toLat, let tlo = toLng {
+            urlStr = "\(base)/api/route-plan?from_lat=\(lat)&from_lng=\(lng)&to_lat=\(tla)&to_lng=\(tlo)&q=\(nm)"
+        } else {
+            urlStr = "\(base)/api/route-plan?from_lat=\(lat)&from_lng=\(lng)&q=\(nm)"
+        }
+        guard !base.isEmpty, let url = URL(string: urlStr) else {
             error = "Bridge não configurado."; return
         }
         var r = URLRequest(url: url); r.timeoutInterval = 15
@@ -104,6 +146,22 @@ final class ArrivalStore: ObservableObject {
             self.error = "Falha ao calcular (\(error.localizedDescription))"
         }
     }
+
+    @Published var sentMsg: String?
+    // Manda o destino calculado pro carro (igual ao compartilhar, porém direto).
+    func sendToCar(_ p: ArrivalPlan) async {
+        guard !base.isEmpty, let url = URL(string: "\(base)/api/nav-to") else { return }
+        var r = URLRequest(url: url); r.httpMethod = "POST"; r.timeoutInterval = 10
+        r.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        r.addValue("Bearer " + Settings.bridgeToken, forHTTPHeaderField: "Authorization")
+        r.httpBody = try? JSONSerialization.data(withJSONObject: ["lat": p.destLat, "lng": p.destLng, "name": p.destName])
+        if let (_, resp) = try? await URLSession.shared.data(for: r),
+           (resp as? HTTPURLResponse)?.statusCode == 200 {
+            sentMsg = "Enviado pro carro ✓"
+        } else {
+            sentMsg = "Falha ao enviar pro carro"
+        }
+    }
 }
 
 func arrivalSocColor(_ soc: Int) -> Color {
@@ -115,6 +173,7 @@ func arrivalSocColor(_ soc: Int) -> Color {
 struct ArrivalSheet: View {
     let trips: [Trip]
     @StateObject private var store = ArrivalStore()
+    @StateObject private var completer = AddressCompleter()
     @State private var dest = ""
     @Environment(\.dismiss) private var dismiss
     @FocusState private var focused: Bool
@@ -128,11 +187,34 @@ struct ArrivalSheet: View {
                             TextField("Destino (endereço ou local)", text: $dest)
                                 .focused($focused)
                                 .textFieldStyle(.plain)
+                                .autocorrectionDisabled()
                                 .padding(12)
                                 .background(DS.panel2)
                                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                                 .submitLabel(.search)
+                                .onChange(of: dest) { _, q in
+                                    if q.count >= 3 { completer.update(q, near: CarStore.shared.coordinate) }
+                                    else { completer.clear() }
+                                }
                                 .onSubmit { calc() }
+                            // Sugestões de endereço (autocomplete nativo)
+                            if !completer.results.isEmpty && store.plan == nil {
+                                VStack(spacing: 0) {
+                                    ForEach(completer.results.prefix(5), id: \.self) { s in
+                                        Button { pick(s) } label: {
+                                            VStack(alignment: .leading, spacing: 1) {
+                                                Text(s.title).font(.subheadline).foregroundStyle(DS.text)
+                                                if !s.subtitle.isEmpty {
+                                                    Text(s.subtitle).font(.caption2).foregroundStyle(DS.muted).lineLimit(1)
+                                                }
+                                            }.frame(maxWidth: .infinity, alignment: .leading)
+                                                .padding(.vertical, 8).padding(.horizontal, 10)
+                                        }
+                                        Divider().background(DS.border)
+                                    }
+                                }
+                                .background(DS.panel2).clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            }
                             DSActionButton(icon: "location.fill.viewfinder", title: "Calcular",
                                            color: DS.teal, busy: store.loading) { calc() }
                         }
@@ -155,7 +237,21 @@ struct ArrivalSheet: View {
         }
     }
 
-    private func calc() { focused = false; Task { await store.compute(query: dest, trips: trips) } }
+    private func calc() { focused = false; completer.clear(); Task { await store.compute(query: dest, trips: trips) } }
+
+    // Escolheu uma sugestão → resolve coordenada e calcula direto (sem geocode ambíguo).
+    private func pick(_ s: MKLocalSearchCompletion) {
+        focused = false
+        dest = s.title
+        completer.clear()
+        Task {
+            if let (coord, name) = await completer.resolve(s) {
+                await store.compute(query: name, trips: trips, toLat: coord.latitude, toLng: coord.longitude)
+            } else {
+                await store.compute(query: s.title, trips: trips)
+            }
+        }
+    }
 
     @ViewBuilder private func resultCard(_ p: ArrivalPlan) -> some View {
         DSCard {
@@ -187,6 +283,15 @@ struct ArrivalSheet: View {
 
                 Text("Estimativa a partir das suas viagens EV: ~\(Fmt.dec1(p.capacityKwh)) kWh úteis · altimetria por mapa · trânsito ao vivo.")
                     .font(.caption2).foregroundStyle(DS.muted)
+
+                // Manda o destino pro carro (mesmo desligado — ele puxa ao ligar).
+                DSActionButton(icon: "car.fill", title: "Enviar pro carro", color: DS.green) {
+                    Task { await store.sendToCar(p) }
+                }
+                if let m = store.sentMsg {
+                    Text(m).font(.caption).foregroundStyle(m.contains("✓") ? DS.green : DS.orange)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                }
             }
         }
     }
