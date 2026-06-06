@@ -150,9 +150,9 @@ struct NativeDashView: View {
 
     private func iconButton(icon: String, tint: Color, caption: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            VStack(spacing: 6) {
-                Image(systemName: icon).font(.system(size: 22, weight: .medium)).foregroundStyle(tint)
-                    .frame(width: 56, height: 56).background(DS.panel2).clipShape(Circle())
+            VStack(spacing: 4) {
+                Image(systemName: icon).font(.system(size: 18, weight: .medium)).foregroundStyle(tint)
+                    .frame(width: 44, height: 44).background(DS.panel2).clipShape(Circle())
                     .overlay(Circle().stroke(DS.border, lineWidth: 1))
                 Text(caption).font(.system(size: 11, weight: .medium)).foregroundStyle(DS.muted)
             }
@@ -265,7 +265,7 @@ struct NativeDashView: View {
     private var climateCard: some View {
         let acActive = store.acOn
         return DSCard {
-            VStack(spacing: 12) {
+            VStack(spacing: 8) {
                 HStack(spacing: 12) {
                     Image(systemName: acActive ? "snowflake" : "thermometer.medium")
                         .font(.title3).foregroundStyle(acActive ? DS.blue : DS.muted)
@@ -283,7 +283,7 @@ struct NativeDashView: View {
                         Spacer()
                         Image(systemName: "chevron.right").font(.caption).foregroundStyle(DS.muted)
                     }
-                    .foregroundStyle(DS.text).frame(maxWidth: .infinity).frame(height: 44).padding(.horizontal, 14)
+                    .foregroundStyle(DS.text).frame(maxWidth: .infinity).frame(height: 38).padding(.horizontal, 14)
                     .background(DS.panel2).clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
                     .overlay(RoundedRectangle(cornerRadius: 11).stroke(DS.border, lineWidth: 1))
                 }
