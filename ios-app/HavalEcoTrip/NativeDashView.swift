@@ -386,8 +386,20 @@ struct NativeDashView: View {
         let openDoors = openList(doorsMap)
         let openWins  = openList(windowsMap)
         let anomaly = tyreLow || !openDoors.isEmpty || !openWins.isEmpty
-        let summary = "🛞 \(tyreTxt) · 🚪 \(openDoors.isEmpty ? "ok" : "\(openDoors.count) aberta") · 🪟 \(openWins.isEmpty ? "ok" : "\(openWins.count) aberto")"
-        return CollapsibleCard(icon: "car.side.fill", title: "Pneus & Aberturas", summary: summary, alert: anomaly) {
+        let tint = anomaly ? DS.yellow : DS.muted
+        // Resumo com glifos de carro (porta/vidro), não emoji de casa.
+        let summaryView = AnyView(
+            HStack(spacing: 5) {
+                Text("🛞 \(tyreTxt)").font(.caption).foregroundStyle(tint).lineLimit(1)
+                Text("·").font(.caption).foregroundStyle(tint)
+                CarDoorGlyph(color: openDoors.isEmpty ? tint : DS.orange)
+                Text(openDoors.isEmpty ? "ok" : "\(openDoors.count)").font(.caption).foregroundStyle(openDoors.isEmpty ? tint : DS.orange)
+                Text("·").font(.caption).foregroundStyle(tint)
+                CarWindowGlyph(color: openWins.isEmpty ? tint : DS.orange)
+                Text(openWins.isEmpty ? "ok" : "\(openWins.count)").font(.caption).foregroundStyle(openWins.isEmpty ? tint : DS.orange)
+            }
+        )
+        return CollapsibleCard(icon: "car.side.fill", title: "Pneus & Aberturas", summary: "", alert: anomaly, summaryView: summaryView) {
             VStack(alignment: .leading, spacing: 10) {
                 HStack { tyreCell("tyre_pressure_fl","tyre_temp_fl","Diant. Esq."); tyreCell("tyre_pressure_fr","tyre_temp_fr","Diant. Dir.") }
                 HStack { tyreCell("tyre_pressure_rl","tyre_temp_rl","Tras. Esq.");  tyreCell("tyre_pressure_rr","tyre_temp_rr","Tras. Dir.") }
@@ -480,4 +492,42 @@ struct NativeDashView: View {
 
     private static let tripDF: DateFormatter = { let f = DateFormatter(); f.locale = Locale(identifier: "pt_BR"); f.dateFormat = "d MMM · HH:mm"; return f }()
     private func lastTripDate(_ t: Trip) -> String { Self.tripDF.string(from: t.date) }
+}
+
+// Glifos vetoriais de carro pro resumo de aberturas (não há emoji de porta/vidro de carro).
+struct CarDoorGlyph: View {
+    var color: Color
+    var body: some View {
+        Canvas { ctx, size in
+            let w = size.width, h = size.height
+            let body = Path(roundedRect: CGRect(x: w*0.14, y: h*0.16, width: w*0.72, height: h*0.7), cornerRadius: w*0.14)
+            ctx.stroke(body, with: .color(color), lineWidth: 1.4)
+            // janela da porta (parte de cima)
+            let win = Path(roundedRect: CGRect(x: w*0.26, y: h*0.26, width: w*0.48, height: h*0.2), cornerRadius: w*0.05)
+            ctx.fill(win, with: .color(color.opacity(0.45)))
+            // maçaneta
+            var handle = Path(); handle.move(to: CGPoint(x: w*0.56, y: h*0.6)); handle.addLine(to: CGPoint(x: w*0.72, y: h*0.6))
+            ctx.stroke(handle, with: .color(color), lineWidth: 1.4)
+        }
+        .frame(width: 15, height: 15)
+    }
+}
+
+struct CarWindowGlyph: View {
+    var color: Color
+    var body: some View {
+        Canvas { ctx, size in
+            let w = size.width, h = size.height
+            // vidro lateral (trapézio arredondado)
+            var p = Path()
+            p.move(to: CGPoint(x: w*0.18, y: h*0.34))
+            p.addLine(to: CGPoint(x: w*0.80, y: h*0.26))
+            p.addLine(to: CGPoint(x: w*0.86, y: h*0.70))
+            p.addLine(to: CGPoint(x: w*0.14, y: h*0.74))
+            p.closeSubpath()
+            ctx.fill(p, with: .color(color.opacity(0.35)))
+            ctx.stroke(p, with: .color(color), lineWidth: 1.4)
+        }
+        .frame(width: 15, height: 15)
+    }
 }

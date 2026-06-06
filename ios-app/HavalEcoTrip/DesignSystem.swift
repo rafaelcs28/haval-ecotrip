@@ -159,6 +159,7 @@ struct CollapsibleCard<Content: View>: View {
     let title: String
     let summary: String
     var alert: Bool = false
+    var summaryView: AnyView? = nil   // resumo custom (ícones) em vez do texto, quando dado
     @ViewBuilder var content: () -> Content
     @State private var userOpen = false
 
@@ -173,7 +174,10 @@ struct CollapsibleCard<Content: View>: View {
                             .font(.caption).foregroundStyle(tint)
                         Text(title.uppercased()).font(.caption.weight(.semibold)).foregroundStyle(tint).tracking(0.5)
                         Spacer()
-                        if !open { Text(summary).font(.caption).foregroundStyle(tint).lineLimit(1) }
+                        if !open {
+                            if let sv = summaryView { sv }
+                            else { Text(summary).font(.caption).foregroundStyle(tint).lineLimit(1) }
+                        }
                         Image(systemName: open ? "chevron.up" : "chevron.down").font(.caption2).foregroundStyle(DS.muted)
                     }
                 }
