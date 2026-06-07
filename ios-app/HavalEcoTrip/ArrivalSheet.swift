@@ -248,6 +248,7 @@ struct ArrivalSheet: View {
     @State private var navApp: String?                    // "waze"/"maps" → abre o diálogo "abrir em…"
     @State private var pickingSaved = false               // texto setado por favorito/recente (não zerar coord)
     @State private var showMapPicker = false
+    @State private var mapInitial: CLLocationCoordinate2D? = nil   // ponto inicial do mapa (vindo da busca)
     @Environment(\.dismiss) private var dismiss
     @FocusState private var focusedField: Field?
 
@@ -267,10 +268,22 @@ struct ArrivalSheet: View {
                             }.frame(maxWidth: .infinity, alignment: .center)
                             addrField("Destino (endereço ou local)", text: $dest, field: .dest, icon: "mappin.circle")
                             if !completer.results.isEmpty && store.plan == nil { suggestionsList }
-                            Button { showMapPicker = true } label: {
+                            Button {
+                                // Usa a busca atual como ponto de partida (pino já posicionado),
+                                // pra você só ajustar fino no mapa.
+                                Task {
+                                    if let dc = destCoord {
+                                        mapInitial = CLLocationCoordinate2D(latitude: dc.0, longitude: dc.1)
+                                    } else {
+                                        let q = dest.trimmingCharacters(in: .whitespaces)
+                                        mapInitial = q.isEmpty ? nil : await resolveQuery(q)
+                                    }
+                                    showMapPicker = true
+                                }
+                            } label: {
                                 HStack(spacing: 6) {
                                     Image(systemName: "map.fill").font(.caption)
-                                    Text("Escolher no mapa").font(.caption.weight(.semibold))
+                                    Text(dest.trimmingCharacters(in: .whitespaces).isEmpty ? "Escolher no mapa" : "Ajustar no mapa").font(.caption.weight(.semibold))
                                 }.foregroundStyle(DS.teal).frame(maxWidth: .infinity).padding(.vertical, 8)
                                     .background(DS.panel2).clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                             }
@@ -296,7 +309,8 @@ struct ArrivalSheet: View {
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Fechar") { dismiss() } } }
             .onAppear { focusedField = .dest }
             .sheet(isPresented: $showMapPicker) {
-                MapPickerSheet(start: destCoord.map { .init(latitude: $0.0, longitude: $0.1) } ?? CarStore.shared.coordinate) { c, nm in
+                MapPickerSheet(start: mapInitial ?? destCoord.map { .init(latitude: $0.0, longitude: $0.1) } ?? CarStore.shared.coordinate,
+                               initial: mapInitial) { c, nm in
                     usePicked(c, name: nm)
                 }
             }

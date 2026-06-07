@@ -7,6 +7,7 @@ import MapKit
 
 struct MapPickerSheet: View {
     var start: CLLocationCoordinate2D
+    var initial: CLLocationCoordinate2D? = nil       // pino já posicionado (vindo da busca)
     var onPick: (CLLocationCoordinate2D, String) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var coord: CLLocationCoordinate2D?
@@ -16,7 +17,7 @@ struct MapPickerSheet: View {
     var body: some View {
         NavigationStack {
             ZStack(alignment: .bottom) {
-                PickerMap(start: start, mapType: mapType, coord: $coord)
+                PickerMap(start: initial ?? start, initialSet: initial != nil, mapType: mapType, coord: $coord)
                     .ignoresSafeArea(edges: .bottom)
                 VStack(spacing: 10) {
                     Picker("", selection: $mapType) {
@@ -69,6 +70,7 @@ struct MapPickerSheet: View {
 // MKMapView com toque pra marcar o destino. Tipo de mapa controlado de fora.
 private struct PickerMap: UIViewRepresentable {
     var start: CLLocationCoordinate2D
+    var initialSet: Bool = false
     var mapType: MKMapType
     @Binding var coord: CLLocationCoordinate2D?
 
@@ -78,10 +80,17 @@ private struct PickerMap: UIViewRepresentable {
         let mv = MKMapView()
         mv.mapType = mapType
         mv.showsCompass = false
-        mv.setRegion(MKCoordinateRegion(center: start, latitudinalMeters: 6000, longitudinalMeters: 6000), animated: false)
+        let span = initialSet ? 1500.0 : 6000.0
+        mv.setRegion(MKCoordinateRegion(center: start, latitudinalMeters: span, longitudinalMeters: span), animated: false)
         let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coord.onTap(_:)))
         mv.addGestureRecognizer(tap)
         context.coordinator.map = mv
+        // Pino inicial vindo da busca (mais zoom pra ajustar fino).
+        if initialSet {
+            let ann = MKPointAnnotation(); ann.coordinate = start; ann.title = "Destino"
+            mv.addAnnotation(ann)
+            DispatchQueue.main.async { coord = start }
+        }
         return mv
     }
 
