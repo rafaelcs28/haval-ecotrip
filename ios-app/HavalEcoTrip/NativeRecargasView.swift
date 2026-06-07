@@ -246,22 +246,22 @@ struct NativeRecargasView: View {
         let expanded = expandedCharge == c.id
         return DSCard {
             VStack(alignment: .leading, spacing: 12) {
-                Button { withAnimation(.easeInOut(duration: 0.2)) { expandedCharge = expanded ? nil : c.id } } label: {
-                    VStack(alignment: .leading, spacing: 12) {
-                        HStack {
-                            Image(systemName: "bolt.fill").font(.caption).foregroundStyle(DS.green)
-                            Text(c.location).font(.system(size: 15, weight: .semibold)).foregroundStyle(DS.text).lineLimit(1)
-                            Spacer()
-                            Text(Self.df.string(from: c.date)).font(.caption).foregroundStyle(DS.muted)
-                            Image(systemName: expanded ? "chevron.up" : "chevron.down").font(.caption2).foregroundStyle(DS.muted)
-                        }
-                        HStack {
-                            DSMetric(value: f1(c.kwh), unit: "kWh", label: "Na bateria", color: DS.green)
-                            DSMetric(value: c.costTotal > 0 ? brl(c.costTotal) : "Grátis", label: "Custo", color: DS.text)
-                            DSMetric(value: c.costPerKwh > 0 ? perKwh(c.costPerKwh) : "—", unit: "R$/kWh", label: "Preço")
-                        }
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Image(systemName: "bolt.fill").font(.caption).foregroundStyle(DS.green)
+                        Text(c.location).font(.system(size: 15, weight: .semibold)).foregroundStyle(DS.text).lineLimit(1)
+                        Spacer()
+                        Text(Self.df.string(from: c.date)).font(.caption).foregroundStyle(DS.muted)
+                        Image(systemName: expanded ? "chevron.up" : "chevron.down").font(.caption2).foregroundStyle(DS.muted)
                     }
-                }.buttonStyle(.plain)
+                    HStack {
+                        DSMetric(value: f1(c.kwh), unit: "kWh", label: "Na bateria", color: DS.green)
+                        DSMetric(value: c.costTotal > 0 ? brl(c.costTotal) : "Grátis", label: "Custo", color: DS.text)
+                        DSMetric(value: c.costPerKwh > 0 ? perKwh(c.costPerKwh) : "—", unit: "R$/kWh", label: "Preço")
+                    }
+                }
+                .contentShape(Rectangle())
+                .onTapGesture { withAnimation(.easeInOut(duration: 0.2)) { expandedCharge = expanded ? nil : c.id } }
 
                 if expanded {
                     Divider().overlay(DS.border)

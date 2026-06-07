@@ -283,22 +283,22 @@ struct NativeViagensView: View {
         let expanded = expandedId == t.id
         return DSCard {
             VStack(alignment: .leading, spacing: 12) {
-                Button { withAnimation(.easeInOut(duration: 0.2)) { expandedId = expanded ? nil : t.id } } label: {
-                    VStack(alignment: .leading, spacing: 10) {
-                        HStack {
-                            Image(systemName: "car.fill").font(.caption).foregroundStyle(DS.teal)
-                            Text(loader.displayName(t)).font(.system(size: 14, weight: .semibold)).foregroundStyle(DS.text).lineLimit(1)
-                            Spacer()
-                            Image(systemName: expanded ? "chevron.up" : "chevron.down").font(.caption2).foregroundStyle(DS.muted)
-                        }
-                        Text(Self.df.string(from: t.date)).font(.caption).foregroundStyle(DS.muted).frame(maxWidth: .infinity, alignment: .leading)
-                        HStack {
-                            DSMetric(value: km(t.distKm), unit: "km", label: "Distância", color: DS.teal)
-                            DSMetric(value: f1(t.netKwh), unit: "kWh", label: "Energia", color: DS.green)
-                            DSMetric(value: cost > 0 ? brl(cost) : "—", label: "Custo")
-                        }
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        Image(systemName: "car.fill").font(.caption).foregroundStyle(DS.teal)
+                        Text(loader.displayName(t)).font(.system(size: 14, weight: .semibold)).foregroundStyle(DS.text).lineLimit(1)
+                        Spacer()
+                        Image(systemName: expanded ? "chevron.up" : "chevron.down").font(.caption2).foregroundStyle(DS.muted)
                     }
-                }.buttonStyle(.plain)
+                    Text(Self.df.string(from: t.date)).font(.caption).foregroundStyle(DS.muted).frame(maxWidth: .infinity, alignment: .leading)
+                    HStack {
+                        DSMetric(value: km(t.distKm), unit: "km", label: "Distância", color: DS.teal)
+                        DSMetric(value: f1(t.netKwh), unit: "kWh", label: "Energia", color: DS.green)
+                        DSMetric(value: cost > 0 ? brl(cost) : "—", label: "Custo")
+                    }
+                }
+                .contentShape(Rectangle())
+                .onTapGesture { withAnimation(.easeInOut(duration: 0.2)) { expandedId = expanded ? nil : t.id } }
 
                 if expanded {
                     Divider().overlay(DS.border)
