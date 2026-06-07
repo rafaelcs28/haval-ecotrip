@@ -57,6 +57,10 @@ class NavRelayService : Service() {
                     keepAliveInterval = 30
                     if (user.isNotBlank()) userName = user
                     if (pass.isNotBlank()) password = pass.toCharArray()
+                    // ssl:// no Android: o Paho exige o socketFactory explícito (igual ao
+                    // APK do carro), senão dá MqttException no handshake. Cert é Let's
+                    // Encrypt, então o trust store padrão do Android resolve.
+                    if (broker.startsWith("ssl://")) socketFactory = javax.net.ssl.SSLSocketFactory.getDefault()
                 }
                 c.setCallback(object : org.eclipse.paho.client.mqttv3.MqttCallback {
                     override fun connectionLost(cause: Throwable?) { status = "reconectando…"; updateNotif(status) }
@@ -71,7 +75,9 @@ class NavRelayService : Service() {
                 status = "conectado · ${if (role == "phone") "Celular" else "Carro"} · ouvindo $topic"; updateNotif(status)
                 while (running && c.isConnected) Thread.sleep(1000)
             } catch (e: Exception) {
-                status = "erro: ${e.message}"; updateNotif(status)
+                val detail = e.message ?: e.cause?.message ?: e.javaClass.simpleName
+                status = "erro: $detail"; updateNotif(status)
+                Log.w(TAG, "connect falhou: ${e.javaClass.name}: $detail", e)
                 Thread.sleep(8000)   // espera e tenta de novo
             }
         }
