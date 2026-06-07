@@ -7,8 +7,16 @@
     <string>/bin/bash</string>
     <string>/Users/consorciolimpagyn/haval-ecotrip/ios-app/retry-haval-upload.sh</string>
   </array>
-  <key>StartInterval</key><integer>10800</integer>
-  <key>RunAtLoad</key><true/>
+  <!-- Janela diária de upload da Apple reabre ~16h. Tenta às 16:05 e repete a
+       cada 30 min até as 18:05. O script se autodesliga quando o upload passa. -->
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict><key>Hour</key><integer>16</integer><key>Minute</key><integer>5</integer></dict>
+    <dict><key>Hour</key><integer>16</integer><key>Minute</key><integer>35</integer></dict>
+    <dict><key>Hour</key><integer>17</integer><key>Minute</key><integer>5</integer></dict>
+    <dict><key>Hour</key><integer>17</integer><key>Minute</key><integer>35</integer></dict>
+    <dict><key>Hour</key><integer>18</integer><key>Minute</key><integer>5</integer></dict>
+  </array>
   <key>StandardOutPath</key><string>/tmp/haval-retry.out</string>
   <key>StandardErrorPath</key><string>/tmp/haval-retry.err</string>
 </dict>
