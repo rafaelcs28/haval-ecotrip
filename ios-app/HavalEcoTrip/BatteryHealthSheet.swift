@@ -34,6 +34,29 @@ struct BatteryHealthSheet: View {
         guard current > 0 else { return 0 }
         return max((factoryKwh - current) / factoryKwh * 100, 0)
     }
+    // State of Health = capacidade atual / fábrica.
+    private var soh: Double { current > 0 ? min(current / factoryKwh * 100, 100) : 0 }
+    private var sohColor: Color { soh >= 90 ? DS.green : (soh >= 80 ? DS.yellow : DS.orange) }
+
+    // Regressão linear (mínimos quadrados) sobre os pontos: kWh por ano + predição.
+    private var trend: (perYear: Double, predict: (Date) -> Double)? {
+        let pts = points
+        guard pts.count >= 3, let t0 = pts.first?.date else { return nil }
+        let xs = pts.map { $0.date.timeIntervalSince(t0) }, ys = pts.map { $0.cap }
+        let n = Double(pts.count)
+        let sx = xs.reduce(0, +), sy = ys.reduce(0, +)
+        let sxx = zip(xs, xs).reduce(0) { $0 + $1.0 * $1.1 }
+        let sxy = zip(xs, ys).reduce(0) { $0 + $1.0 * $1.1 }
+        let denom = n * sxx - sx * sx
+        guard abs(denom) > 1e-6 else { return nil }
+        let slope = (n * sxy - sx * sy) / denom         // kWh por segundo
+        let intercept = (sy - slope * sx) / n
+        return (slope * 365 * 86400, { d in intercept + slope * d.timeIntervalSince(t0) })
+    }
+    private var trendPoints: [Point] {
+        guard let tr = trend, let f = points.first?.date, let l = points.last?.date, f != l else { return [] }
+        return [Point(date: f, cap: tr.predict(f)), Point(date: l, cap: tr.predict(l))]
+    }
 
     var body: some View {
         NavigationStack {
@@ -45,17 +68,35 @@ struct BatteryHealthSheet: View {
                                 .font(.callout).foregroundStyle(DS.muted)
                         }
                     } else {
+                        DSCard {
+                            VStack(spacing: 6) {
+                                Text("Saúde da bateria (SOH)").font(.caption).foregroundStyle(DS.muted)
+                                Text("\(Int(soh.rounded()))%").font(.system(size: 56, weight: .heavy, design: .rounded)).foregroundStyle(sohColor)
+                                if let tr = trend {
+                                    Text(abs(tr.perYear) < 0.3 ? "tendência estável"
+                                         : "\(tr.perYear < 0 ? "" : "+")\(Fmt.dec1(tr.perYear)) kWh/ano")
+                                        .font(.subheadline).foregroundStyle(tr.perYear < -0.3 ? DS.orange : DS.muted)
+                                }
+                            }.frame(maxWidth: .infinity).padding(.vertical, 4)
+                        }
                         HStack(spacing: 12) {
                             DSCard { metric("Capacidade atual", "\(Fmt.dec1(current)) kWh", DS.green) }
                             DSCard { metric("Degradação", "\(Fmt.dec1(degradationPct))%",
                                             degradationPct > 10 ? DS.orange : DS.muted) }
                         }
                         DSCard(title: "Capacidade útil por recarga", icon: "chart.xyaxis.line") {
-                            Chart(points) { p in
-                                LineMark(x: .value("Data", p.date), y: .value("kWh", p.cap))
-                                    .foregroundStyle(DS.green)
-                                PointMark(x: .value("Data", p.date), y: .value("kWh", p.cap))
-                                    .foregroundStyle(DS.green.opacity(0.5))
+                            Chart {
+                                ForEach(points) { p in
+                                    LineMark(x: .value("Data", p.date), y: .value("kWh", p.cap), series: .value("s", "cap"))
+                                        .foregroundStyle(DS.green)
+                                    PointMark(x: .value("Data", p.date), y: .value("kWh", p.cap))
+                                        .foregroundStyle(DS.green.opacity(0.5))
+                                }
+                                ForEach(trendPoints) { tp in
+                                    LineMark(x: .value("Data", tp.date), y: .value("kWh", tp.cap), series: .value("s", "trend"))
+                                        .foregroundStyle(DS.teal)
+                                        .lineStyle(StrokeStyle(lineWidth: 2, dash: [5, 3]))
+                                }
                                 RuleMark(y: .value("Fábrica", factoryKwh))
                                     .foregroundStyle(DS.muted.opacity(0.6))
                                     .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))

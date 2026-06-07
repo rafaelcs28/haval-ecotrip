@@ -12,6 +12,7 @@ struct ParkingSheet: View {
     @State private var note = ""
     @State private var address = ""
     @State private var confirmClear = false
+    @State private var flashing = false
 
     var body: some View {
         NavigationStack {
@@ -64,6 +65,8 @@ struct ParkingSheet: View {
                 DSActionButton(icon: "figure.walk", title: "Levar até o carro", color: DS.teal) {
                     openWalking(s.coordinate)
                 }
+                DSActionButton(icon: "lightbulb.fill", title: flashing ? "Piscando…" : "Piscar faróis (encontrar)",
+                               color: DS.yellow, busy: flashing) { flashFind() }
                 HStack(spacing: 10) {
                     if car.hasGps {
                         DSActionButton(icon: "arrow.clockwise", title: "Atualizar local", color: DS.blue) {
@@ -89,6 +92,22 @@ struct ParkingSheet: View {
                     }
                 }
             }.frame(maxWidth: .infinity).padding(.vertical, 8)
+        }
+    }
+
+    // "Encontrar meu carro": pisca os faróis em rajada curta (única sinalização
+    // disponível — o carro não expõe buzina). Usa o comando do pisca-alerta.
+    private func flashFind() {
+        guard !flashing else { return }
+        flashing = true
+        Task {
+            for _ in 0..<4 {
+                _ = await CarStore.shared.setHazard(true)
+                try? await Task.sleep(nanoseconds: 800_000_000)
+                _ = await CarStore.shared.setHazard(false)
+                try? await Task.sleep(nanoseconds: 500_000_000)
+            }
+            flashing = false
         }
     }
 
