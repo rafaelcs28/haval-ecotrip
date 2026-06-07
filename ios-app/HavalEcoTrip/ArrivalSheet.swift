@@ -246,6 +246,7 @@ struct ArrivalSheet: View {
     @State private var favTarget: SavedPlace?             // alvo do alerta "salvar favorito"
     @State private var favName = ""
     @State private var navApp: String?                    // "waze"/"maps" → abre o diálogo "abrir em…"
+    @State private var pickingSaved = false               // texto setado por favorito/recente (não zerar coord)
     @Environment(\.dismiss) private var dismiss
     @FocusState private var focusedField: Field?
 
@@ -382,9 +383,14 @@ struct ArrivalSheet: View {
 
     // Usa um lugar salvo: preenche o destino + coordenada e calcula.
     private func use(_ p: SavedPlace) {
-        dest = p.display; destCoord = (p.lat, p.lng)
+        // Marca que o texto foi setado por um lugar salvo, pra o onChange do campo
+        // NÃO zerar a coordenada (senão o cálculo cai no texto "Trabalho" em vez do
+        // endereço salvo). Calcula direto com as coordenadas do favorito/recente.
+        pickingSaved = true
+        dest = p.display
+        destCoord = (p.lat, p.lng)
         completer.clear(); focusedField = nil
-        calc()
+        Task { await store.compute(query: p.name, trips: trips, toLat: p.lat, toLng: p.lng) }
     }
 
     @ViewBuilder private func addrField(_ placeholder: String, text: Binding<String>, field: Field, icon: String) -> some View {
@@ -396,6 +402,8 @@ struct ArrivalSheet: View {
                 .submitLabel(.search)
                 .onChange(of: text.wrappedValue) { _, q in
                     activeField = field
+                    // Texto setado por um favorito/recente → não zera a coordenada salva.
+                    if pickingSaved { pickingSaved = false; completer.clear(); return }
                     if field == .dest { destCoord = nil } else { originCoord = nil }
                     if q.count >= 3 { completer.update(q, near: CarStore.shared.coordinate) } else { completer.clear() }
                 }
