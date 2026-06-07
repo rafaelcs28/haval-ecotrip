@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.consorciolimpagyn.haval-retry</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/Users/consorciolimpagyn/haval-ecotrip/ios-app/retry-haval-upload.sh</string>
+  </array>
+  <key>StartInterval</key><integer>10800</integer>
+  <key>RunAtLoad</key><true/>
+  <key>StandardOutPath</key><string>/tmp/haval-retry.out</string>
+  <key>StandardErrorPath</key><string>/tmp/haval-retry.err</string>
+</dict>
+</plist>
