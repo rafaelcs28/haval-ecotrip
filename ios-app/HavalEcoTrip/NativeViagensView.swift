@@ -162,6 +162,8 @@ struct NativeViagensView: View {
     @State private var showInsights = false
     @State private var showEco = false
     @State private var showReport = false
+    @State private var showRoutes = false
+    @State private var showMilestones = false
 
     private var fromDate: Binding<Date> { Binding(get: { fromTS > 0 ? Date(timeIntervalSince1970: fromTS) : Date() }, set: { fromTS = $0.timeIntervalSince1970 }) }
     private var toDate: Binding<Date> { Binding(get: { toTS > 0 ? Date(timeIntervalSince1970: toTS) : Date() }, set: { toTS = $0.timeIntervalSince1970 }) }
@@ -205,7 +207,7 @@ struct NativeViagensView: View {
                         }.font(.system(size: 14)).foregroundStyle(DS.text).tint(DS.green).environment(\.locale, Locale(identifier: "pt_BR"))
                     }
                 }
-                if tab == 0 { searchBar; historico } else { insightsButton; ecoButton; reportButton; estatisticas }
+                if tab == 0 { searchBar; historico } else { insightsButton; ecoButton; reportButton; routesButton; milestonesButton; estatisticas }
             }
             .padding(16)
         }
@@ -223,6 +225,8 @@ struct NativeViagensView: View {
         .sheet(isPresented: $showReport) {
             MonthlyReportSheet(trips: loader.trips, priceKwh: car.priceKwh, priceGas: car.priceGas, kmPerLGas: car.kmPerL)
         }
+        .sheet(isPresented: $showRoutes) { RouteCompareSheet(trips: loader.trips) }
+        .sheet(isPresented: $showMilestones) { MilestonesSheet(odometerKm: car.num("odometer_km"), trips: loader.trips) }
     }
 
     private var insightsButton: some View {
@@ -233,6 +237,38 @@ struct NativeViagensView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Economia EV & CO₂").font(.subheadline.weight(.semibold)).foregroundStyle(DS.text)
                         Text("Quanto você economizou vs. gasolina").font(.caption).foregroundStyle(DS.muted)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(DS.muted)
+                }
+            }
+        }
+    }
+
+    private var milestonesButton: some View {
+        DSCard {
+            Button { showMilestones = true } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "trophy.fill").font(.title3).foregroundStyle(DS.yellow)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Marcos do carro").font(.subheadline.weight(.semibold)).foregroundStyle(DS.text)
+                        Text("Km, elétrico e viagens — conquistas").font(.caption).foregroundStyle(DS.muted)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(DS.muted)
+                }
+            }
+        }
+    }
+
+    private var routesButton: some View {
+        DSCard {
+            Button { showRoutes = true } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "arrow.triangle.swap").font(.title3).foregroundStyle(DS.orange)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Trajetos recorrentes").font(.subheadline.weight(.semibold)).foregroundStyle(DS.text)
+                        Text("Médias e tendência por origem→destino").font(.caption).foregroundStyle(DS.muted)
                     }
                     Spacer()
                     Image(systemName: "chevron.right").font(.caption).foregroundStyle(DS.muted)

@@ -131,6 +131,7 @@ struct NativeRecargasView: View {
     @State private var expandedCharge: Double?
     @State private var toast: String?
     @State private var showHealth = false
+    @State private var showAnalysis = false
 
     private var fromDate: Binding<Date> {
         Binding(get: { fromTS > 0 ? Date(timeIntervalSince1970: fromTS) : Date() }, set: { fromTS = $0.timeIntervalSince1970 })
@@ -183,12 +184,13 @@ struct NativeRecargasView: View {
                     }
                 }
 
-                if source == 0 { if tab == 0 { historico } else { healthButton; estatisticas } }
+                if source == 0 { if tab == 0 { historico } else { healthButton; analysisButton; estatisticas } }
                 else { if tab == 0 { refHistorico } else { refEstatisticas } }
             }
             .padding(16)
         }
         .sheet(isPresented: $showHealth) { BatteryHealthSheet(charges: loader.charges) }
+        .sheet(isPresented: $showAnalysis) { ChargeAnalysisSheet(charges: loader.charges) }
         .background(DS.bg.ignoresSafeArea())
         .overlay { if loader.loading && loader.charges.isEmpty { ProgressView().tint(DS.green) } }
         .overlay(alignment: .bottom) {
@@ -281,6 +283,22 @@ struct NativeRecargasView: View {
                             toast = "Recarga salva ✓"
                         }
                     }
+                }
+            }
+        }
+    }
+
+    private var analysisButton: some View {
+        DSCard {
+            Button { showAnalysis = true } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "chart.bar.xaxis").font(.title3).foregroundStyle(DS.yellow)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Análise de recarga").font(.subheadline.weight(.semibold)).foregroundStyle(DS.text)
+                        Text("Perda AC, R$/kWh e melhor carregador").font(.caption).foregroundStyle(DS.muted)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(DS.muted)
                 }
             }
         }
