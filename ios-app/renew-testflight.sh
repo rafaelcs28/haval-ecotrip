@@ -54,6 +54,21 @@ xcodebuild -exportArchive -archivePath "$ARCHIVE" \
   -exportOptionsPlist ExportOptions.plist -exportPath "$EXPORT" \
   "${AUTH[@]}" >/tmp/${SCHEME}-export.log 2>&1 || fail "upload falhou (ver /tmp/${SCHEME}-export.log)"
 
+# O upload pode retornar "Upload succeeded" e a Apple descartar o pacote no
+# processamento sem criar o build (aconteceu com o 2606062232). Confirmamos via
+# ASC API que ESTE build apareceu e ficou VALID antes de declarar "enviado".
+case "$SCHEME" in
+  HavalEcoTrip) BUNDLE_ID="br.com.consorciolimpagyn.havalecotrip";;
+  BydRecarga)   BUNDLE_ID="br.com.consorciolimpagyn.songpro";;
+  *)            BUNDLE_ID="";;
+esac
+if [ -n "$BUNDLE_ID" ]; then
+  echo "▶︎ [$SCHEME] aguardando processamento na Apple (build $BUILD_NUMBER)…"
+  ASC_KEY_ID="$ASC_KEY_ID" ASC_ISSUER_ID="$ASC_ISSUER_ID" ASC_KEY_PATH="$ASC_KEY_PATH" \
+    node scripts/asc-wait-build.mjs "$BUNDLE_ID" "$BUILD_NUMBER" \
+    || fail "build $BUILD_NUMBER não ficou VALID na Apple (descarte/recusa no processamento). Reenvie."
+fi
+
 # Grasi (external com link público) precisa associar ao grupo + submeter review.
 # HavalEcoTrip (internal) não precisa — internal testers já veem todos os builds.
 if [ "$SCHEME" = "BydRecarga" ]; then
