@@ -16,5 +16,6 @@ struct HavalEcoTripWidgetBundle: WidgetBundle {
         SecurityLiveActivity()
         BatteryWidget()
         LockBatteryWidget()
+        if #available(iOS 17.0, *) { ControlsWidget() }
     }
 }

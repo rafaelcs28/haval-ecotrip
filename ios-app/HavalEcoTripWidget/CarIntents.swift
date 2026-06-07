@@ -83,6 +83,17 @@ struct EngineOffIntent: AppIntent {
 }
 
 @available(iOS 16.0, *)
+struct PreclimaIntent: AppIntent {
+    static var title: LocalizedStringResource = "Pré-climatizar"
+    static var description = IntentDescription("Liga o ar-condicionado do Haval pra climatizar a cabine.")
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        let ok = await CarIntentAPI.action("ac_on")
+        WidgetCenter.shared.reloadAllTimelines()
+        return .result(dialog: ok ? "Pré-climatização ligada." : "Não consegui ligar o ar agora.")
+    }
+}
+
+@available(iOS 16.0, *)
 struct SocQueryIntent: AppIntent {
     static var title: LocalizedStringResource = "Bateria do carro"
     static var description = IntentDescription("Diz quanto de bateria e autonomia EV o Haval tem agora.")
