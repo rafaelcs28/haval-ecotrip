@@ -76,13 +76,13 @@
     gap: 10px; padding: 0; align-items: stretch;
   }
   body.native .quick-widget .dc-card { flex: 1 1 240px; min-width: 0; justify-content: flex-start; }
-  body.native .quick-widget .dc-label { font-size: 16px; }
-  body.native .quick-widget .dm-chip { font-size: 22px; padding: 22px 10px; }
-  body.native .quick-widget .op-lbl { font-size: 20px; }
+  body.native .quick-widget .dc-label { font-size: 15px; }
+  body.native .quick-widget .dm-chip { font-size: 17px; padding: 18px 6px; white-space: nowrap; }
+  body.native .quick-widget .op-lbl { font-size: 17px; }
   body.native .quick-widget .dc-card.aberturas { flex: 1 1 240px; }
   body.native .quick-widget .dc-card.aberturas .veh-grid { display: flex; flex-direction: column; gap: 10px; }
   body.native .quick-widget .dc-card.aberturas .veh-btn {
-    font-size: 22px; font-weight: 600; padding: 22px 16px; border-radius: 14px; text-align: left;
+    font-size: 18px; font-weight: 600; padding: 18px 14px; border-radius: 14px; text-align: left; white-space: nowrap;
     background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.16); color: var(--text);
   }
   body.native .widget.map-widget  { display: flex !important; position: relative; overflow: hidden; }
@@ -193,6 +193,13 @@
   body.native .hazard-btn svg { width: 55%; height: 55%; }
   body.native .hazard-btn.active { background: var(--red); color: #fff; animation: hazblink 2s steps(1) infinite; }
   @keyframes hazblink { 50% { opacity: .3; } }
+  /* Pisca dentro do card Direção: botão inline (sobrescreve o flutuante). */
+  body.native .dc-card .hazard-btn {
+    position: static; width: 100%; height: auto; margin-top: 4px;
+    flex-direction: row; gap: 8px; padding: 14px 12px; border-width: 2px; border-radius: 12px;
+    font-size: 17px; font-weight: 600;
+  }
+  body.native .dc-card .hazard-btn svg { width: 26px; height: 26px; flex: 0 0 auto; }
   .trip-info .ti-cell { display: flex; flex-direction: column; gap: 5px; }
   .trip-info .tov {
     font-size: 30px; font-weight: 300; font-variant-numeric: tabular-nums; line-height: 1;
@@ -1185,7 +1192,7 @@
             </div>
           </div>
         </div>
-        <!-- Direção -->
+        <!-- Direção + Pisca-alerta -->
         <div class="dc-card">
           <div class="dc-label">🎯 Direção</div>
           <div class="dm-chips">
@@ -1193,6 +1200,14 @@
             <div class="dm-chip" data-steer="0" onclick="setSteerMode(0)">Normal</div>
             <div class="dm-chip" data-steer="1" onclick="setSteerMode(1)">Sport</div>
           </div>
+          <button class="hazard-btn" id="hazard-btn" aria-label="Pisca-alerta">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round">
+              <path d="M12 3.5 L22 20 L2 20 Z"/>
+              <line x1="12" y1="10" x2="12" y2="14.5"/>
+              <circle cx="12" cy="17.3" r="0.7" fill="currentColor" stroke="none"/>
+            </svg>
+            <span>Pisca-alerta</span>
+          </button>
         </div>
         <!-- Clima / AC — básicos inline + botão p/ menu completo -->
         <div class="dc-card">
@@ -1237,14 +1252,6 @@
       <!-- Linha de ETA (destino compartilhado): nome · tempo · chegada · km faltante -->
       <div id="trip-eta-banner" class="eta-banner" style="display:none"></div>
       <div id="cluster-map-bot"></div>
-      <!-- Botão pisca-alerta (4 setas), sobre o mapa no rodapé -->
-      <button class="hazard-btn" id="hazard-btn" aria-label="Pisca-alerta">
-        <svg viewBox="0 0 24 24" width="68" height="68" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round">
-          <path d="M12 3.5 L22 20 L2 20 Z"/>
-          <line x1="12" y1="10" x2="12" y2="14.5"/>
-          <circle cx="12" cy="17.3" r="0.7" fill="currentColor" stroke="none"/>
-        </svg>
-      </button>
       <!-- Overlay Potência/Velocidade (canto sup-esq do mapa) -->
       <div class="pwr-overlay">
         <div class="pwr-spd"><span id="ov-speed">0</span></div>
