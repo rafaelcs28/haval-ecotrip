@@ -4538,12 +4538,22 @@ app.post('/api/autotrips', (req, res) => {
         const pGas = state.tank_avg_price_per_l      || state.price_gas_per_l || 0;
         const cost = (pGas > 0 || pKwh > 0) ? fuelL * pGas + netKwh * pKwh : 0;
 
+        const dropSoc = (autoTrip.startSocPct || 0) - (autoTrip.endSocPct || 0);
+        // Eco-score (mesma fórmula do app): energia-equivalente por 100 km.
+        let eco = null;
+        if (distKm >= 1) {
+          const eq = (netKwh + fuelL * 8.9) / distKm * 100;
+          eco = Math.max(0, Math.min(100, Math.round(100 - (eq - 13) * (70 / 13))));
+        }
+
         const parts = [`${dist} km`, dur];
+        if (dropSoc > 0.5)  parts.push(`−${Math.round(dropSoc)}% bateria`);
         if (netKwh > 0.01) parts.push(`${netKwh.toFixed(2)} kWh`);
         if (kwh100)        parts.push(`${kwh100} kWh/100`);
         if (fuelL > 0.01)  parts.push(`${fuelL.toFixed(2)} L`);
         if (kmL)           parts.push(`${kmL} km/L`);
         if (cost  > 0.01)  parts.push(`R$ ${cost.toFixed(2)}`);
+        if (eco != null)   parts.push(`eco ${eco}`);
 
         sendPush('🏁 Viagem concluída', parts.join(' · '), 'trip_end');
       }
