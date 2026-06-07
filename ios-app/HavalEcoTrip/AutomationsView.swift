@@ -172,6 +172,7 @@ struct RuleEditorSheet: View {
     @State private var trigKind = 0          // 0=chegar, 1=sair, 2=horário, 3=estado, 4=após automação
     @State private var afterRuleId = ""      // gatilho "automation"
     @State private var onlyIfSuccess = true
+    @State private var watchMin = 5.0        // observar condições por X min (0 = checa 1x)
     @State private var trigField = "car.basic.vehicle_speed"
     @State private var trigCustomKey = ""
     @State private var trigCmp = ">="
@@ -444,7 +445,12 @@ struct RuleEditorSheet: View {
                                 }
                             }
                             Toggle("Só se executou com sucesso", isOn: $onlyIfSuccess)
-                            Text("Dispara depois que a automação escolhida executar. Use o Atraso (Avançado) pra esperar antes, e Condições pra exigir algo (ex: velocidade ≥ 10).")
+                            HStack {
+                                Text("Observar por")
+                                Slider(value: $watchMin, in: 0...30, step: 1)
+                                Text(watchMin == 0 ? "checa 1×" : "\(Int(watchMin)) min").foregroundStyle(DS.muted)
+                            }
+                            Text("Dispara depois que a automação escolhida executar. Com \"Observar\", fica vigiando as Condições por esse tempo até serem satisfeitas (ex: esperar a velocidade chegar a 10). 0 = checa só uma vez após o atraso.")
                                 .font(.caption).foregroundStyle(DS.muted)
                         }
                     } else if trigKind <= 1 {
@@ -694,6 +700,7 @@ struct RuleEditorSheet: View {
             rule["trigger"] = ["type": "state", "field": key, "cmp": trigCmp, "value": trigValue]
         case 4:
             rule["trigger"] = ["type": "automation", "after_rule_id": afterRuleId, "only_if_success": onlyIfSuccess]
+            rule["watch_s"] = Int(watchMin * 60)
         default:
             let cal = Calendar.current
             let h = cal.component(.hour, from: time), m = cal.component(.minute, from: time)
@@ -770,6 +777,7 @@ struct RuleEditorSheet: View {
                 trigKind = 4
                 afterRuleId = (t["after_rule_id"] as? String) ?? ""
                 onlyIfSuccess = (t["only_if_success"] as? Bool) ?? true
+                watchMin = Double((e["watch_s"] as? Int) ?? 300) / 60.0
             default: break
             }
         }

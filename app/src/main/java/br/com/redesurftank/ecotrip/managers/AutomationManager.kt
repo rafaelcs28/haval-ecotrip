@@ -44,6 +44,7 @@ object AutomationManager {
     private val lastSatisfiedMs = HashMap<String, Long>()    // "field|cmp|value" → última vez que o predicado foi verdadeiro (p/ condição "recent")
     private val condPrevPass = HashMap<String, Boolean>()    // ruleId → conditionsPass no tick anterior (detecta re-arme)
     private val firedThisWindow = HashMap<String, Boolean>() // ruleId → já disparou nesta janela de condições satisfeitas
+    private val armedWatch = HashMap<String, Long>()         // encadeada armada → deadline (ms) p/ observar condições
     private val repeatTasks = HashMap<String, ScheduledFuture<*>>() // ruleId → loop de reexecução (repeat_s)
 
     /** Callback pra publicar disparos (MqttManager seta isto). */
@@ -112,6 +113,7 @@ object AutomationManager {
         val snapshot = synchronized(lock) { rules }
         if (snapshot.isEmpty()) return
         val now = System.currentTimeMillis()
+        processArmedWatch(now)                                  // encadeadas observando a janela
         val (lat, lng) = TripManager.getInstance().getLastGps()
         val hasGps = !(lat == 0.0 && lng == 0.0)
         if (hasGps) updateVisits(snapshot, lat, lng, now)      // rastreia passagem por pontos (p/ condição "visited")
@@ -197,9 +199,60 @@ object AutomationManager {
             if (b.trigger.onlyIfSuccess && !firedOk) continue
             val last = lastFiredMs[b.id] ?: 0L
             if (b.debounceS > 0 && now - last < b.debounceS * 1000L) continue
-            lastFiredMs[b.id] = now
-            AppLogger.i(TAG, "Encadeada: '${b.name}' após '${firedRuleId}' (ok=$firedOk)")
-            fireRule(b)
+            AppLogger.i(TAG, "Encadeada: '${b.name}' após '$firedRuleId' (ok=$firedOk)")
+            scheduleChained(b)
+        }
+    }
+
+    // Após o atraso da encadeada: se as condições já valem, executa; senão, se watchS>0,
+    // fica observando (armedWatch) até valerem OU a janela expirar.
+    private fun scheduleChained(b: Rule) {
+        val act = Runnable {
+            try {
+                val now = System.currentTimeMillis()
+                if (conditionsPass(b.conditions, now)) {
+                    lastFiredMs[b.id] = now; runChainedAction(b)
+                } else if (b.watchS > 0) {
+                    synchronized(lock) { armedWatch[b.id] = now + b.watchS * 1000L }
+                    AppLogger.i(TAG, "Encadeada '${b.name}': observando condições por ${b.watchS}s")
+                } else {
+                    AppLogger.i(TAG, "Encadeada '${b.name}': condição não satisfeita (sem janela) — não executou")
+                }
+            } catch (e: Exception) { AppLogger.w(TAG, "encadeada '${b.name}': ${e.message}") }
+        }
+        if (b.delayS > 0) tick.schedule(act, b.delayS.toLong(), TimeUnit.SECONDS) else act.run()
+    }
+
+    private fun runChainedAction(b: Rule) {
+        val ok = runAction(b.action)
+        AppLogger.i(TAG, "Encadeada '${b.name}' → ${b.action.type} (ok=$ok)")
+        onFired?.invoke(b.id, b.name, ok)
+        startRepeat(b); fireChained(b.id, ok)
+    }
+
+    // Cada tick: encadeadas armadas leem o estado fresco e executam quando as condições
+    // passam; desarmam quando a janela expira.
+    private fun processArmedWatch(now: Long) {
+        val armed = synchronized(lock) { armedWatch.toMap() }
+        if (armed.isEmpty()) return
+        for ((bId, deadline) in armed) {
+            val b = synchronized(lock) { rules.find { it.id == bId } }
+            if (b == null || now > deadline) {
+                synchronized(lock) { armedWatch.remove(bId) }
+                if (b != null) AppLogger.i(TAG, "Encadeada '${b.name}': janela expirou — não executou")
+                continue
+            }
+            b.conditions?.items?.forEach { c ->
+                if (c.type == "compare" && c.field.isNotEmpty()) {
+                    val bk = c.field.substringBefore('[')
+                    CarDataManager.getInstance().fetchCurrent(bk)?.let { v -> synchronized(lock) { state[bk] = v } }
+                }
+            }
+            if (conditionsPass(b.conditions, now)) {
+                synchronized(lock) { armedWatch.remove(bId) }
+                lastFiredMs[bId] = now
+                runChainedAction(b)
+            }
         }
     }
 
@@ -479,6 +532,7 @@ object AutomationManager {
                 enabled = o.optBoolean("enabled", true), trigger = trigger,
                 conditions = cg, action = action, debounceS = o.optInt("debounce_s", 60),
                 delayS = o.optInt("delay_s", 0), stableS = o.optInt("stable_s", 0), repeatS = o.optInt("repeat_s", 0),
+                watchS = o.optInt("watch_s", 0),
             ))
         }
         return out
@@ -488,6 +542,7 @@ object AutomationManager {
         val id: String, val name: String, val enabled: Boolean,
         val trigger: Trigger, val conditions: ConditionGroup?, val action: Action, val debounceS: Int,
         val delayS: Int = 0, val stableS: Int = 0, val repeatS: Int = 0,
+        val watchS: Int = 0,   // encadeada: após o atraso, observa as condições por watchS s (0 = checa 1x)
     )
     data class Trigger(
         val type: String, val lat: Double, val lng: Double, val radiusM: Double, val edge: String,
