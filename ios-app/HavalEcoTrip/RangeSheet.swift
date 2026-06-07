@@ -60,6 +60,8 @@ struct RangeSheet: View {
     private var iceKm: Double { car.num("range_ice_km") }
     private var totalKm: Double { evKm + iceKm }
     private var soc: Int { Int(car.socPct.rounded()) }
+    // Isócrona (estrada) só vale até 100 km (limite Mapbox); acima disso → círculo (linha reta).
+    private var useCircles: Bool { store.failed || evKm > 100 || totalKm > 100 }
 
     var body: some View {
         NavigationStack {
@@ -77,7 +79,7 @@ struct RangeSheet: View {
                         DSCard {
                             VStack(alignment: .leading, spacing: 12) {
                                 RangeMap(center: car.coordinate, contours: store.contours,
-                                         evKm: evKm, totalKm: totalKm, useCircles: store.failed)
+                                         evKm: evKm, totalKm: totalKm, useCircles: useCircles)
                                     .frame(height: 300)
                                     .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                                     .overlay(alignment: .topTrailing) {
@@ -93,8 +95,8 @@ struct RangeSheet: View {
                                         Text("SOC").font(.caption2).foregroundStyle(DS.muted)
                                     }
                                 }
-                                Text(store.failed
-                                     ? "Raio aproximado em linha reta (isócrona indisponível). Por estrada chega menos."
+                                Text(useCircles
+                                     ? "Raio em linha reta a partir do SOC — por estrada o alcance é menor."
                                      : "Alcance por estrada (Mapbox). Trânsito, relevo e clima alteram o real.")
                                     .font(.caption2).foregroundStyle(DS.muted)
                             }
@@ -108,7 +110,9 @@ struct RangeSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Fechar") { dismiss() } } }
             .task {
-                if car.hasGps && evKm > 0 {
+                // Só busca isócrona (estrada) quando ambos cabem no limite de 100 km;
+                // acima disso usamos círculo (linha reta), sem chamada ao Mapbox.
+                if car.hasGps && evKm > 0 && evKm <= 100 && totalKm <= 100 {
                     await store.load(lat: car.lat, lng: car.lng, evKm: evKm, totalKm: max(totalKm, evKm))
                 }
             }
@@ -158,16 +162,20 @@ private struct RangeMap: UIViewRepresentable {
     private func apply(_ mv: MKMapView, _ co: Coord) {
         mv.overlays.forEach { if !($0 is MKTileOverlay) { mv.removeOverlay($0) } }
         co.evIds.removeAll()
-        let maxKm = max(totalKm, evKm, 1)
+        var evRect = MKMapRect.null, allRect = MKMapRect.null
+        // Overlays no nível aboveLabels (ACIMA do tile, que tem canReplaceMapContent;
+        // senão a área fica escondida sob o mapa).
         func addCircle(_ km: Double, ev: Bool) {
             let c = MKCircle(center: center, radius: km * 1000)
             if ev { co.evIds.insert(ObjectIdentifier(c)) }
-            mv.addOverlay(c)
+            mv.addOverlay(c, level: .aboveLabels)
+            allRect = allRect.union(c.boundingMapRect); if ev { evRect = evRect.union(c.boundingMapRect) }
         }
         func addPoly(_ coords: [CLLocationCoordinate2D], ev: Bool) {
             let p = MKPolygon(coordinates: coords, count: coords.count)
             if ev { co.evIds.insert(ObjectIdentifier(p)) }
-            mv.addOverlay(p)
+            mv.addOverlay(p, level: .aboveLabels)
+            allRect = allRect.union(p.boundingMapRect); if ev { evRect = evRect.union(p.boundingMapRect) }
         }
         if useCircles || contours.isEmpty {
             if totalKm > evKm { addCircle(totalKm, ev: false) }
@@ -175,8 +183,13 @@ private struct RangeMap: UIViewRepresentable {
         } else {
             for c in contours.sorted(by: { $0.kind > $1.kind }) { addPoly(c.coords, ev: c.kind == 0) }
         }
-        let span = min(max((maxKm * 2.4) / 111.0, 0.02), 6.0)
-        mv.setRegion(MKCoordinateRegion(center: center, span: .init(latitudeDelta: span, longitudeDelta: span)), animated: false)
+        // Enquadra pela área ELÉTRICA (mais relevante); total pode extrapolar a tela.
+        let fit = !evRect.isNull ? evRect : allRect
+        if !fit.isNull {
+            mv.setVisibleMapRect(fit, edgePadding: .init(top: 44, left: 40, bottom: 44, right: 40), animated: false)
+        } else {
+            mv.setRegion(MKCoordinateRegion(center: center, latitudinalMeters: 5000, longitudinalMeters: 5000), animated: false)
+        }
     }
 
     final class Coord: NSObject, MKMapViewDelegate {
