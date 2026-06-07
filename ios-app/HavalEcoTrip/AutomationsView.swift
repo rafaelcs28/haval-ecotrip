@@ -208,6 +208,17 @@ struct RuleEditorSheet: View {
         var fromMin = 0; var toMin = 1439; var condDays: Set<Int> = []   // "time": faixa (min do dia) + dias
     }
 
+    // Passo extra (sequência): ação + atraso + verificação opcional (1 condição) + janela.
+    struct StepDraft: Identifiable {
+        let id = UUID()
+        var actKind = 0; var winTarget = 4; var winOpen = false
+        var shadeLevel = 0.0; var advKey = ""; var advValue = ""
+        var delaySec = 5.0
+        var condOn = false; var field = "car.basic.vehicle_speed"; var customKey = ""; var cmp = ">="; var value = "10"
+        var watchMin = 5.0
+    }
+    @State private var steps: [StepDraft] = []
+
     // Conversão minuto-do-dia ↔ Date pros DatePickers da condição "time".
     static func dateFromMin(_ m: Int) -> Date { Calendar.current.date(bySettingHour: m / 60, minute: m % 60, second: 0, of: Date()) ?? Date() }
     static func minFromDate(_ d: Date) -> Int { let c = Calendar.current.dateComponents([.hour, .minute], from: d); return (c.hour ?? 0) * 60 + (c.minute ?? 0) }
@@ -400,6 +411,7 @@ struct RuleEditorSheet: View {
 
                 quandoSection
                 fazerSection
+                passosSection
                 condicoesSection
                 locaisSection
                 avancadoSection
@@ -535,6 +547,60 @@ struct RuleEditorSheet: View {
                     }
                 }
 
+    }
+
+    // Monta o dict de ação (reusado pela ação principal e pelos passos).
+    private func actionDict(_ kind: Int, winTarget: Int, winOpen: Bool, shade: Double, key: String, value: String) -> [String: Any] {
+        switch kind {
+        case 0: return winTarget == 4 ? ["type": "window", "all": true, "status": winOpen ? 2 : 1]
+                                       : ["type": "window", "window": winTarget, "status": winOpen ? 2 : 1]
+        case 1: return ["type": "skylight", "level": 0]
+        case 2: return ["type": "shade", "level": Int(shade)]
+        default: return ["type": "request", "key": key, "value": value]
+        }
+    }
+
+    // Passos extras: sequência de ações com verificação/atraso entre elas (numa regra só).
+    @ViewBuilder private var passosSection: some View {
+        Section {
+            ForEach($steps) { $s in
+                VStack(alignment: .leading, spacing: 8) {
+                    Picker("Ação", selection: $s.actKind) {
+                        Text("Vidro").tag(0); Text("Teto").tag(1); Text("Cortina").tag(2); Text("Avançado").tag(3)
+                    }.pickerStyle(.segmented)
+                    switch s.actKind {
+                    case 0:
+                        Picker("Janela", selection: $s.winTarget) { ForEach(0..<winTargets.count, id: \.self) { Text(winTargets[$0]).tag($0) } }
+                        Toggle("Abrir (desligado = fechar)", isOn: $s.winOpen)
+                    case 2:
+                        HStack { Text("Nível"); Slider(value: $s.shadeLevel, in: 0...100, step: 5)
+                            Text(s.shadeLevel == 0 ? "fechada" : "\(Int(s.shadeLevel))%").foregroundStyle(DS.muted) }
+                    case 3:
+                        TextField("Chave", text: $s.advKey).autocorrectionDisabled().textInputAutocapitalization(.never)
+                        TextField("Valor", text: $s.advValue).autocorrectionDisabled().textInputAutocapitalization(.never)
+                    default: Text("Fecha o teto solar.").font(.caption).foregroundStyle(DS.muted)
+                    }
+                    HStack { Text("Esperar"); Slider(value: $s.delaySec, in: 0...60, step: 1); Text("\(Int(s.delaySec))s").foregroundStyle(DS.muted) }
+                    Toggle("Verificar antes", isOn: $s.condOn)
+                    if s.condOn {
+                        Picker("Campo", selection: $s.field) { ForEach(condFields, id: \.1) { Text($0.0).tag($0.1) } }
+                        if s.field == "__custom__" {
+                            TextField("chave (car.xxx.yyy)", text: $s.customKey).autocorrectionDisabled().textInputAutocapitalization(.never)
+                        }
+                        HStack {
+                            Picker("", selection: $s.cmp) { ForEach(["==","!=",">","<",">=","<="], id: \.self) { Text($0).tag($0) } }.pickerStyle(.menu)
+                            TextField("valor", text: $s.value).keyboardType(.decimalPad)
+                        }
+                        HStack { Text("Observar"); Slider(value: $s.watchMin, in: 0...30, step: 1)
+                            Text(s.watchMin == 0 ? "checa 1×" : "\(Int(s.watchMin)) min").foregroundStyle(DS.muted) }
+                    }
+                    Button(role: .destructive) { steps.removeAll { $0.id == s.id } } label: { Label("Remover passo", systemImage: "trash") }
+                }
+            }
+            Button { steps.append(StepDraft()) } label: { Label("Adicionar passo", systemImage: "plus.circle.fill") }
+        } header: { Text("Passos (em sequência)") } footer: {
+            Text("Após a ação principal, executa cada passo em ordem: espera, verifica (se ligado) e faz a ação. Ex.: abaixar vidro → esperar → velocidade ≥ 10 → subir vidro.")
+        }
     }
 
     @ViewBuilder private var condicoesSection: some View {
@@ -740,6 +806,23 @@ struct RuleEditorSheet: View {
         }
         if !items.isEmpty { rule["conditions"] = ["op": condOp, "items": items] }
 
+        // Passos extras (sequência).
+        if !steps.isEmpty {
+            rule["steps"] = steps.map { s -> [String: Any] in
+                var st: [String: Any] = [
+                    "delay_s": Int(s.delaySec), "watch_s": Int(s.watchMin * 60),
+                    "action": actionDict(s.actKind, winTarget: s.winTarget, winOpen: s.winOpen, shade: s.shadeLevel, key: s.advKey, value: s.advValue),
+                ]
+                if s.condOn {
+                    let key = s.field == "__custom__" ? s.customKey.trimmingCharacters(in: .whitespaces) : s.field
+                    if !key.isEmpty {
+                        st["conditions"] = ["op": "AND", "items": [["field": key, "cmp": s.cmp, "value": s.value]]]
+                    }
+                }
+                return st
+            }
+        }
+
         onSave(rule)
         dismiss()
     }
@@ -825,6 +908,29 @@ struct RuleEditorSheet: View {
                     c.negate = (it["negate"] as? Bool) ?? false
                 }
                 return c
+            }
+        }
+        if let sa = e["steps"] as? [[String: Any]] {
+            steps = sa.map { so in
+                var s = StepDraft()
+                s.delaySec = Double((so["delay_s"] as? Int) ?? 0)
+                s.watchMin = Double((so["watch_s"] as? Int) ?? 0) / 60.0
+                if let a = so["action"] as? [String: Any] {
+                    switch a["type"] as? String {
+                    case "window": s.actKind = 0; s.winTarget = (a["all"] as? Bool) == true ? 4 : ((a["window"] as? Int) ?? 0); s.winOpen = (a["status"] as? Int) == 2
+                    case "skylight": s.actKind = 1
+                    case "shade": s.actKind = 2; s.shadeLevel = Double((a["level"] as? Int) ?? 0)
+                    default: s.actKind = 3; s.advKey = (a["key"] as? String) ?? ""; s.advValue = (a["value"] as? String) ?? ""
+                    }
+                }
+                if let cg = so["conditions"] as? [String: Any], let its = cg["items"] as? [[String: Any]], let it = its.first {
+                    s.condOn = true
+                    let key = (it["field"] as? String) ?? "car.basic.vehicle_speed"
+                    let known = condFields.contains(where: { $0.1 == key })
+                    s.field = known ? key : "__custom__"; s.customKey = known ? "" : key
+                    s.cmp = (it["cmp"] as? String) ?? ">="; s.value = (it["value"] as? String) ?? ""
+                }
+                return s
             }
         }
     }

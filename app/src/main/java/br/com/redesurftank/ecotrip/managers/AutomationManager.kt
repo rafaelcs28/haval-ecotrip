@@ -173,7 +173,7 @@ object AutomationManager {
                         val ok = runAction(rule.action)
                         AppLogger.i(TAG, "Regra '${rule.name}' (após ${rule.delayS}s) → ${rule.action.type} (ok=$ok)")
                         onFired?.invoke(rule.id, rule.name, ok)
-                        startRepeat(rule); fireChained(rule.id, ok)
+                        startRepeat(rule); fireChained(rule.id, ok); runSteps(rule, 0)
                     } else {
                         AppLogger.i(TAG, "Regra '${rule.name}': condição não persistiu após ${rule.delayS}s — não executou")
                     }
@@ -185,8 +185,39 @@ object AutomationManager {
             val ok = runAction(rule.action)
             AppLogger.i(TAG, "Regra '${rule.name}' disparou → ${rule.action.type} (ok=$ok)")
             onFired?.invoke(rule.id, rule.name, ok)
-            startRepeat(rule); fireChained(rule.id, ok)
+            startRepeat(rule); fireChained(rule.id, ok); runSteps(rule, 0)
         }
+    }
+
+    // Executa os passos extras em sequência: cada um espera delayS, observa as condições
+    // por watchS s (lendo o estado fresco) e executa a ação; aí passa pro próximo.
+    private fun runSteps(rule: Rule, fromIndex: Int) {
+        if (fromIndex >= rule.steps.size) return
+        val step = rule.steps[fromIndex]
+        tick.schedule({
+            observeStep(rule, fromIndex, System.currentTimeMillis() + step.watchS * 1000L)
+        }, step.delayS.toLong(), TimeUnit.SECONDS)
+    }
+    private fun observeStep(rule: Rule, i: Int, deadline: Long) {
+        val step = rule.steps[i]
+        try {
+            step.conditions?.items?.forEach { c ->
+                if (c.type == "compare" && c.field.isNotEmpty()) {
+                    val bk = c.field.substringBefore('[')
+                    CarDataManager.getInstance().fetchCurrent(bk)?.let { v -> synchronized(lock) { state[bk] = v } }
+                }
+            }
+            val now = System.currentTimeMillis()
+            if (conditionsPass(step.conditions, now)) {
+                val ok = runAction(step.action)
+                AppLogger.i(TAG, "Passo ${i + 1} de '${rule.name}' → ${step.action.type} (ok=$ok)")
+                runSteps(rule, i + 1)
+            } else if (step.watchS <= 0 || now > deadline) {
+                AppLogger.i(TAG, "Passo ${i + 1} de '${rule.name}': condição não satisfeita — sequência interrompida")
+            } else {
+                tick.schedule({ observeStep(rule, i, deadline) }, 1, TimeUnit.SECONDS)
+            }
+        } catch (e: Exception) { AppLogger.w(TAG, "passo '${rule.name}': ${e.message}") }
     }
 
     // Dispara regras encadeadas (gatilho "automation") após a regra de origem executar.
@@ -227,7 +258,7 @@ object AutomationManager {
         val ok = runAction(b.action)
         AppLogger.i(TAG, "Encadeada '${b.name}' → ${b.action.type} (ok=$ok)")
         onFired?.invoke(b.id, b.name, ok)
-        startRepeat(b); fireChained(b.id, ok)
+        startRepeat(b); fireChained(b.id, ok); runSteps(b, 0)
     }
 
     // Cada tick: encadeadas armadas leem o estado fresco e executam quando as condições
@@ -495,55 +526,72 @@ object AutomationManager {
                 afterRuleId = t.optString("after_rule_id", ""),
                 onlyIfSuccess = t.optBoolean("only_if_success", true),
             )
-            val cg = o.optJSONObject("conditions")?.let { c ->
-                ConditionGroup(
-                    op = c.optString("op", "AND"),
-                    items = c.optJSONArray("items")?.let { it2 ->
-                        (0 until it2.length()).map { idx ->
-                            val ci = it2.getJSONObject(idx)
-                            Condition(
-                                type = ci.optString("type", "compare"),
-                                field = ci.optString("field", ""), cmp = ci.optString("cmp", "=="), value = ci.optString("value", ""),
-                                lat = ci.optDouble("lat", 0.0), lng = ci.optDouble("lng", 0.0),
-                                radiusM = ci.optDouble("radius_m", 50.0), withinS = ci.optInt("within_s", 600),
-                                negate = ci.optBoolean("negate", false),
-                                points = ci.optJSONArray("points")?.let { pa ->
-                                    (0 until pa.length()).map { pi ->
-                                        val po = pa.getJSONObject(pi)
-                                        VPoint(po.optDouble("lat", 0.0), po.optDouble("lng", 0.0), po.optDouble("radius_m", 30.0))
-                                    }
-                                } ?: emptyList(),
-                                fromHHMM = ci.optInt("from_hhmm", -1), toHHMM = ci.optInt("to_hhmm", -1),
-                                days = ci.optJSONArray("days")?.let { da -> (0 until da.length()).map { da.getInt(it) } } ?: emptyList(),
-                            )
-                        }
-                    } ?: emptyList(),
-                )
-            }
-            val ac = o.getJSONObject("action")
-            val action = Action(
-                type = ac.getString("type"),
-                window = ac.optInt("window", 0), all = ac.optBoolean("all", false), status = ac.optInt("status", 1),
-                level = ac.optInt("level", 0), p1 = ac.optInt("p1", 0), p2 = ac.optInt("p2", 0),
-                key = ac.optString("key", ""), value = ac.optString("value", ""),
-            )
+            // Passos extras (sequência numa regra só): cada passo = atraso + condição
+            // (observada por watch_s) + ação. Executados em ordem após a ação principal.
+            val steps = o.optJSONArray("steps")?.let { sa ->
+                (0 until sa.length()).map { si ->
+                    val so = sa.getJSONObject(si)
+                    Step(
+                        delayS = so.optInt("delay_s", 0), watchS = so.optInt("watch_s", 0),
+                        conditions = parseConditionGroup(so.optJSONObject("conditions")),
+                        action = parseAction(so.getJSONObject("action")),
+                    )
+                }
+            } ?: emptyList()
             out.add(Rule(
                 id = o.getString("id"), name = o.optString("name", o.getString("id")),
                 enabled = o.optBoolean("enabled", true), trigger = trigger,
-                conditions = cg, action = action, debounceS = o.optInt("debounce_s", 60),
+                conditions = parseConditionGroup(o.optJSONObject("conditions")),
+                action = parseAction(o.getJSONObject("action")), debounceS = o.optInt("debounce_s", 60),
                 delayS = o.optInt("delay_s", 0), stableS = o.optInt("stable_s", 0), repeatS = o.optInt("repeat_s", 0),
-                watchS = o.optInt("watch_s", 0),
+                watchS = o.optInt("watch_s", 0), steps = steps,
             ))
         }
         return out
     }
+
+    private fun parseConditionGroup(c: JSONObject?): ConditionGroup? = c?.let {
+        ConditionGroup(
+            op = c.optString("op", "AND"),
+            items = c.optJSONArray("items")?.let { it2 ->
+                (0 until it2.length()).map { idx ->
+                    val ci = it2.getJSONObject(idx)
+                    Condition(
+                        type = ci.optString("type", "compare"),
+                        field = ci.optString("field", ""), cmp = ci.optString("cmp", "=="), value = ci.optString("value", ""),
+                        lat = ci.optDouble("lat", 0.0), lng = ci.optDouble("lng", 0.0),
+                        radiusM = ci.optDouble("radius_m", 50.0), withinS = ci.optInt("within_s", 600),
+                        negate = ci.optBoolean("negate", false),
+                        points = ci.optJSONArray("points")?.let { pa ->
+                            (0 until pa.length()).map { pi ->
+                                val po = pa.getJSONObject(pi)
+                                VPoint(po.optDouble("lat", 0.0), po.optDouble("lng", 0.0), po.optDouble("radius_m", 30.0))
+                            }
+                        } ?: emptyList(),
+                        fromHHMM = ci.optInt("from_hhmm", -1), toHHMM = ci.optInt("to_hhmm", -1),
+                        days = ci.optJSONArray("days")?.let { da -> (0 until da.length()).map { da.getInt(it) } } ?: emptyList(),
+                    )
+                }
+            } ?: emptyList(),
+        )
+    }
+
+    private fun parseAction(ac: JSONObject): Action = Action(
+        type = ac.getString("type"),
+        window = ac.optInt("window", 0), all = ac.optBoolean("all", false), status = ac.optInt("status", 1),
+        level = ac.optInt("level", 0), p1 = ac.optInt("p1", 0), p2 = ac.optInt("p2", 0),
+        key = ac.optString("key", ""), value = ac.optString("value", ""),
+    )
 
     data class Rule(
         val id: String, val name: String, val enabled: Boolean,
         val trigger: Trigger, val conditions: ConditionGroup?, val action: Action, val debounceS: Int,
         val delayS: Int = 0, val stableS: Int = 0, val repeatS: Int = 0,
         val watchS: Int = 0,   // encadeada: após o atraso, observa as condições por watchS s (0 = checa 1x)
+        val steps: List<Step> = emptyList(),   // passos extras (sequência) após a ação principal
     )
+    // Passo de uma sequência: espera delayS, observa as condições por watchS (0 = checa 1x) e executa a ação.
+    data class Step(val delayS: Int, val watchS: Int, val conditions: ConditionGroup?, val action: Action)
     data class Trigger(
         val type: String, val lat: Double, val lng: Double, val radiusM: Double, val edge: String,
         val hhmm: Int, val days: List<Int>, val field: String, val cmp: String, val value: String,
