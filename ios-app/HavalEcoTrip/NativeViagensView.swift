@@ -620,6 +620,7 @@ struct RouteMapSheet: View {
                                 }
                             }
                         }.padding(.horizontal, 12).padding(.bottom, 8)
+                        drivingStatsCard.padding(.horizontal, 12).padding(.bottom, 10)
                     }
                 }
             }
@@ -628,6 +629,43 @@ struct RouteMapSheet: View {
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Concluído") { dismiss() } } }
         }
         .task { await load() }
+    }
+
+    // Estatísticas de condução a partir dos samples (velocidade/potência/tempo).
+    private func computeDriving() -> (avg: Double, max: Double, pwr: Double, regenPct: Double, regenKwh: Double) {
+        let spds = samples.map { $0.spd }
+        let maxSpd = spds.max() ?? 0
+        let moving = spds.filter { $0 > 3 }
+        let avgSpd = moving.isEmpty ? 0 : moving.reduce(0, +) / Double(moving.count)
+        let maxPwr = samples.map { $0.pwr }.max() ?? 0
+        let regenPct = samples.isEmpty ? 0 : Double(samples.filter { $0.pwr < -0.5 }.count) / Double(samples.count) * 100
+        var regenKwh = 0.0
+        if samples.count > 1 {
+            for i in 1..<samples.count {
+                let dt = samples[i].t - samples[i-1].t
+                if dt > 0 && dt < 30 && samples[i].pwr < 0 { regenKwh += -samples[i].pwr * dt / 3600 }
+            }
+        }
+        return (avgSpd, maxSpd, maxPwr, regenPct, regenKwh)
+    }
+
+    @ViewBuilder private var drivingStatsCard: some View {
+        let d = computeDriving()
+        DSCard(glass: true) {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Condução").font(.caption).foregroundStyle(DS.muted)
+                HStack(spacing: 12) {
+                    DSMetric(value: f0(d.avg), unit: "km/h", label: "Vel. média", color: DS.text, compact: true)
+                    DSMetric(value: f0(d.max), unit: "km/h", label: "Vel. máx", color: DS.text, compact: true)
+                    DSMetric(value: f1(d.pwr), unit: "kW", label: "Pico potência", color: DS.blue, compact: true)
+                }
+                HStack(spacing: 12) {
+                    DSMetric(value: f0(d.regenPct), unit: "%", label: "Em regeneração", color: DS.green, compact: true)
+                    DSMetric(value: f1(d.regenKwh), unit: "kWh", label: "Recuperado", color: DS.green, compact: true)
+                    DSMetric(value: "\(samples.count)", unit: "", label: "Amostras", color: DS.muted, compact: true)
+                }
+            }
+        }
     }
 
     private func load() async {
