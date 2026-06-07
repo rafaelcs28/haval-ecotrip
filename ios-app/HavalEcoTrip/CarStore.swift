@@ -203,6 +203,7 @@ final class CarStore: ObservableObject {
         }
         lastUpdate = Date()
         updateAddressIfNeeded()
+        ParkingStore.shared.onCarUpdate(engineOn: engineOn, lat: lat, lng: lng)
     }
 
     /// Geocodifica o endereço da posição atual — só quando move >60m e no

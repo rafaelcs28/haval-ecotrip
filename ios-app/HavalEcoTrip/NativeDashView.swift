@@ -23,6 +23,7 @@ struct NativeDashView: View {
     @State private var showWindows = false
     @State private var showTrunk = false
     @State private var showHazard = false
+    @State private var showParking = false
     // Feedback visual da troca de limite de carga (Haptic Touch no card):
     // pendingLimit = valor selecionado aguardando o carro confirmar (amarelo);
     // limitFeedback: 0=nenhum · 1=confirmado (verde) · 2=recusado (vermelho).
@@ -66,6 +67,7 @@ struct NativeDashView: View {
         .sheet(isPresented: $showMaint) { MaintenanceSheet(store: maint) }
         .sheet(isPresented: $showNotifCenter) { NotificationsCenterSheet() }
         .sheet(isPresented: $showArrival) { ArrivalSheet(trips: trips.trips) }
+        .sheet(isPresented: $showParking) { ParkingSheet() }
     }
 
     // MARK: localização + central de notificações + versão do carro
@@ -340,6 +342,14 @@ struct NativeDashView: View {
                         HStack(spacing: 6) {
                             Image(systemName: "location.fill").font(.caption2).foregroundStyle(DS.green)
                             Text(store.address).font(.caption).foregroundStyle(DS.muted).lineLimit(1)
+                        }
+                    }
+                    Button { showParking = true } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "parkingsign.circle.fill").font(.caption).foregroundStyle(DS.teal)
+                            Text("Onde estacionei").font(.caption).foregroundStyle(DS.teal)
+                            Spacer()
+                            Image(systemName: "chevron.right").font(.caption2).foregroundStyle(DS.muted)
                         }
                     }
                 }
