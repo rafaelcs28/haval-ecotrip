@@ -544,6 +544,7 @@ struct RouteMapSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var coords: [CLLocationCoordinate2D] = []
     @State private var samples: [TripSample] = []
+    @State private var gpxURL: URL?
     @State private var loading = true
     @State private var idx: Double = 0
     @State private var cam: MapCameraPosition = .automatic
@@ -626,9 +627,30 @@ struct RouteMapSheet: View {
             }
             .navigationTitle("Trajeto").navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(.hidden, for: .navigationBar)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Concluído") { dismiss() } } }
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) { Button("Concluído") { dismiss() } }
+                if let u = gpxURL {
+                    ToolbarItem(placement: .topBarLeading) { ShareLink(item: u) { Image(systemName: "square.and.arrow.up") } }
+                }
+            }
         }
         .task { await load() }
+    }
+
+    private func buildGPX() {
+        let pts = samples.filter { $0.coord != nil }
+        guard pts.count > 1 else { return }
+        let iso = ISO8601DateFormatter()
+        var s = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<gpx version=\"1.1\" creator=\"Haval Hub\" xmlns=\"http://www.topografix.com/GPX/1/1\">\n<trk><name>Haval \(trip.tripId)</name><trkseg>\n"
+        for sm in pts {
+            guard let c = sm.coord else { continue }
+            let t = iso.string(from: trip.date.addingTimeInterval(sm.t))
+            s += "<trkpt lat=\"\(c.latitude)\" lon=\"\(c.longitude)\"><time>\(t)</time></trkpt>\n"
+        }
+        s += "</trkseg></trk></gpx>"
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("haval-trajeto-\(trip.tripId).gpx")
+        try? s.data(using: .utf8)?.write(to: url)
+        gpxURL = url
     }
 
     // Estatísticas de condução a partir dos samples (velocidade/potência/tempo).
@@ -707,6 +729,7 @@ struct RouteMapSheet: View {
         }
         if out.count > 600 { let step = out.count / 600 + 1; out = out.enumerated().filter { $0.offset % step == 0 }.map { $0.element } }
         samples = out
+        buildGPX()
         if let first = coords.first {
             cam = .region(MKCoordinateRegion(center: first, span: MKCoordinateSpan(latitudeDelta: 0.02, longitudeDelta: 0.02)))
         }

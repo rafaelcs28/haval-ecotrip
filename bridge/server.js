@@ -2237,6 +2237,26 @@ function _maybeUpdateCarHeading() {
   _headingPrevLng = lng;
 }
 
+// Anti-furto: se o carro NÃO está em uso (não ready, motor desligado, parado) e
+// mesmo assim o GPS se desloca >200 m, alerta (rebocado/movido). Baseline segue o
+// carro enquanto está em uso; só dispara desligado. Debounce de 10 min.
+let _theftBase = null, _theftAlertedMs = 0;
+function checkTheft() {
+  const lat = +state.gps_lat, lng = +state.gps_lng;
+  if (!lat || !lng) return;
+  const inUse = state.driving_ready === 1 || state.driving_ready === true
+    || String(state.engine_state) === '1' || (+state.speed_kmh || 0) > 3;
+  if (inUse) { _theftBase = { lat, lng }; return; }     // em uso → acompanha, sem alerta
+  if (!_theftBase) { _theftBase = { lat, lng }; return; }
+  const moved = haversineM(_theftBase.lat, _theftBase.lng, lat, lng);
+  if (moved > 200 && Date.now() - _theftAlertedMs > 10 * 60_000) {
+    _theftAlertedMs = Date.now();
+    _theftBase = { lat, lng };
+    addEvent('theft_move', `Carro se moveu ${Math.round(moved)} m com o motor desligado`);
+    sendPush('⚠️ Carro se moveu', `O Haval saiu do lugar (~${Math.round(moved)} m) com o motor desligado. Verifique.`, 'theft');
+  }
+}
+
 function checkGeofence() {
   const lat = state.gps_lat, lng = state.gps_lng;
   if (!lat || !lng) return;
@@ -9104,12 +9124,12 @@ function applyMqttMessage(key, value, isRetained = false) {
     // GPS — posição ao vivo do veículo
     case 'gps_lat': {
       const lat = parseFloat(value);
-      if (lat && lat !== 0) { state.gps_lat = lat; state.gps_ts = Date.now(); checkGeofence(); }
+      if (lat && lat !== 0) { state.gps_lat = lat; state.gps_ts = Date.now(); checkGeofence(); checkTheft(); }
       break;
     }
     case 'gps_lng': {
       const lng = parseFloat(value);
-      if (lng && lng !== 0) { state.gps_lng = lng; state.gps_ts = Date.now(); _maybeUpdateCarHeading(); checkGeofence(); }
+      if (lng && lng !== 0) { state.gps_lng = lng; state.gps_ts = Date.now(); _maybeUpdateCarHeading(); checkGeofence(); checkTheft(); }
       break;
     }
 
