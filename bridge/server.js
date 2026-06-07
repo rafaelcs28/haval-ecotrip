@@ -8390,6 +8390,37 @@ async function _routeElevation(fromLat, fromLng, toLat, toLng) {
     traffic: route.traffic,
   };
 }
+// GET /api/range-isochrone?lat=&lng=&ev_km=&total_km= — polígonos de alcance por
+// estrada (Mapbox Isochrone). Contornos em metros, máx 100 km cada (limite Mapbox).
+app.get('/api/range-isochrone', async (req, res) => {
+  const lat = +req.query.lat, lng = +req.query.lng;
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || (lat === 0 && lng === 0))
+    return res.status(400).json({ error: 'lat/lng obrigatórios' });
+  const tok = process.env.MAPBOX_TOKEN;
+  if (!tok) return res.status(503).json({ error: 'sem MAPBOX_TOKEN' });
+  const clamp = v => Math.max(1000, Math.min(100000, Math.round(v * 1000)));
+  let meters = [];
+  const ev = +req.query.ev_km, total = +req.query.total_km;
+  if (Number.isFinite(ev) && ev > 0)       meters.push(clamp(ev));
+  if (Number.isFinite(total) && total > 0) meters.push(clamp(total));
+  meters = [...new Set(meters)].sort((a, b) => a - b);     // crescentes e únicos (exigência da API)
+  if (!meters.length) return res.status(400).json({ error: 'ev_km/total_km obrigatórios' });
+  try {
+    const u = `https://api.mapbox.com/isochrone/v1/mapbox/driving/${lng},${lat}`
+      + `?contours_meters=${meters.join(',')}&polygons=true&denoise=1&access_token=${tok}`;
+    const r = await fetch(u);
+    const j = await r.json();
+    const contours = (j.features || []).map(f => ({
+      meters: f.properties && f.properties.contour ? f.properties.contour : null,
+      ring: ((f.geometry && f.geometry.coordinates && f.geometry.coordinates[0]) || [])
+        .map(([lo, la]) => ({ lat: la, lng: lo })),
+    })).filter(c => c.ring.length);
+    res.json({ ok: true, contours });
+  } catch (e) {
+    res.status(500).json({ error: String((e && e.message) || e) });
+  }
+});
+
 app.get('/api/route-plan', async (req, res) => {
   try {
     const fromLat = +req.query.from_lat, fromLng = +req.query.from_lng;
