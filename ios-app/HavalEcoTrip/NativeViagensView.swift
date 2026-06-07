@@ -160,6 +160,7 @@ struct NativeViagensView: View {
     @State private var routeTrip: Trip?
     @State private var search = ""
     @State private var showInsights = false
+    @State private var showEco = false
 
     private var fromDate: Binding<Date> { Binding(get: { fromTS > 0 ? Date(timeIntervalSince1970: fromTS) : Date() }, set: { fromTS = $0.timeIntervalSince1970 }) }
     private var toDate: Binding<Date> { Binding(get: { toTS > 0 ? Date(timeIntervalSince1970: toTS) : Date() }, set: { toTS = $0.timeIntervalSince1970 }) }
@@ -203,7 +204,7 @@ struct NativeViagensView: View {
                         }.font(.system(size: 14)).foregroundStyle(DS.text).tint(DS.green).environment(\.locale, Locale(identifier: "pt_BR"))
                     }
                 }
-                if tab == 0 { searchBar; historico } else { insightsButton; estatisticas }
+                if tab == 0 { searchBar; historico } else { insightsButton; ecoButton; estatisticas }
             }
             .padding(16)
         }
@@ -217,6 +218,7 @@ struct NativeViagensView: View {
         .sheet(isPresented: $showInsights) {
             InsightsSheet(trips: loader.trips, priceKwh: car.priceKwh, priceGas: car.priceGas, kmPerLGas: car.kmPerL)
         }
+        .sheet(isPresented: $showEco) { EcoScoreSheet(trips: loader.trips) }
     }
 
     private var insightsButton: some View {
@@ -229,6 +231,25 @@ struct NativeViagensView: View {
                         Text("Quanto você economizou vs. gasolina").font(.caption).foregroundStyle(DS.muted)
                     }
                     Spacer()
+                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(DS.muted)
+                }
+            }
+        }
+    }
+
+    private var ecoButton: some View {
+        DSCard {
+            Button { showEco = true } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "gauge.with.dots.needle.67percent").font(.title3).foregroundStyle(DS.teal)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Eco-score & metas").font(.subheadline.weight(.semibold)).foregroundStyle(DS.text)
+                        Text("Nota de eficiência, semana e recordes").font(.caption).foregroundStyle(DS.muted)
+                    }
+                    Spacer()
+                    if let a = Eco.avg(loader.trips.filter { $0.date > Date().addingTimeInterval(-7*86400) }) ?? Eco.avg(loader.trips) {
+                        Text("\(a)").font(.headline).foregroundStyle(Eco.color(a))
+                    }
                     Image(systemName: "chevron.right").font(.caption).foregroundStyle(DS.muted)
                 }
             }
