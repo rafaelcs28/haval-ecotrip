@@ -427,8 +427,10 @@ final class BridgePublisher: ObservableObject {
     /// POST genérico — se WS LAN conectado, manda comando via WS (NWConnection,
     /// ~5ms). Senão usa Tailscale (Mac mini, ~200ms). NÃO tenta HTTP LAN via
     /// URLSession (bloqueado pelo Local Network Privacy do iOS).
-    func postCommand(path: String, body: [String: Any]) async {
-        if useLanWhenAvailable, lanWsConnected, lanWsConn != nil {
+    // lanCapable=false força a via Tailscale/cloud (ex.: ações via Home Assistant
+    // como travar/porta-malas, que o APK não atua pela LAN).
+    func postCommand(path: String, body: [String: Any], lanCapable: Bool = true) async {
+        if lanCapable, useLanWhenAvailable, lanWsConnected, lanWsConn != nil {
             // Extrai o comando do path: "/api/esp" → "esp", "/api/drive-mode" → "drive_mode"
             let cmd = path.replacingOccurrences(of: "/api/", with: "")
                 .replacingOccurrences(of: "-", with: "_")

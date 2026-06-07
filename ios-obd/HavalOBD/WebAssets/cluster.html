@@ -55,18 +55,34 @@
        [Potência ]  [Mapa            ]
      Coluna esq: 1fr (~1/3 da tela)
      Coluna dir: 2fr (~2/3 da tela) */
+  /* Dock inferior: mapa em cima (largura cheia) + dock de controles embaixo. */
   body.native .row-bot {
-    grid-template-columns: 1fr 2.3fr !important;
-    grid-template-rows: 1fr !important;
+    grid-template-columns: 1fr !important;
+    grid-template-rows: 1.25fr 1fr !important;
     padding: 10px !important;
     gap: 10px !important;
   }
   body.native .row-bot .widget:nth-child(1) { display: none !important; } /* Power vira overlay no mapa */
   body.native .row-bot .widget:nth-child(2) { display: none !important; } /* Trip widget — overlay */
-  body.native .row-bot .widget:nth-child(3) { grid-column: 1; grid-row: 1; } /* Controles altura cheia */
-  body.native .row-bot .widget:nth-child(4) { grid-column: 2; grid-row: 1; } /* Mapa altura cheia */
+  body.native .row-bot .widget:nth-child(3) { grid-column: 1; grid-row: 2; } /* Dock de controles (embaixo) */
+  body.native .row-bot .widget:nth-child(4) { grid-column: 1; grid-row: 1; } /* Mapa (em cima) */
   body.native .widget.flow-widget { display: none !important; }
   body.native .widget.quick-widget { display: flex !important; flex-direction: column; min-height: 0; overflow: hidden; }
+  /* Dock horizontal: cartões lado a lado, rolagem horizontal, botões grandes (uso em movimento). */
+  body.native .quick-widget .dc-body {
+    flex-direction: row !important; overflow-x: auto; overflow-y: hidden;
+    gap: 12px; padding: 0 2px 6px 0; align-items: stretch;
+  }
+  body.native .quick-widget .dc-card { min-width: 250px; flex: 0 0 auto; justify-content: flex-start; }
+  body.native .quick-widget .dc-label { font-size: 16px; }
+  body.native .quick-widget .dm-chip { font-size: 22px; padding: 22px 10px; }
+  body.native .quick-widget .op-lbl { font-size: 20px; }
+  body.native .quick-widget .dc-card.aberturas { min-width: 300px; }
+  body.native .quick-widget .dc-card.aberturas .veh-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  body.native .quick-widget .dc-card.aberturas .veh-btn {
+    font-size: 21px; font-weight: 600; padding: 20px 12px; border-radius: 14px;
+    background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.16); color: var(--text);
+  }
   body.native .widget.map-widget  { display: flex !important; position: relative; overflow: hidden; }
   body.native #cluster-map-bot { flex: 1; min-height: 0; border-radius: 12px; overflow: hidden;
     /* course-up: gira via CSS. scale 1.5 cobre os cantos quando rotacionado
@@ -131,21 +147,16 @@
     border-radius: 999px; padding: 4px 14px;
   }
   .pwr-overlay .ov-modes .mbadge.accent { color: var(--teal); border-color: rgba(34,211,238,.45); }
-  /* Controles físicos (cortina/teto) — canto inf-dir do mapa */
-  .veh-controls { display: none; }
-  body.native .veh-controls {
-    position: absolute; bottom: 22px; right: 26px; z-index: 800;
-    display: flex; gap: 12px; pointer-events: auto;
-  }
+  /* Controles físicos (aberturas) — botões no dock inferior */
   .veh-btn {
     font-size: 22px; font-weight: 600; color: var(--text);
-    background: rgba(0,0,0,.55); border: 2px solid rgba(255,255,255,.22);
-    border-radius: 16px; padding: 14px 22px; cursor: pointer;
+    background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.16);
+    border-radius: 14px; padding: 16px 18px; cursor: pointer;
     -webkit-tap-highlight-color: transparent;
   }
   .veh-btn:active { border-color: var(--teal); }
   .veh-modal {
-    position: absolute; inset: 0; z-index: 1200; pointer-events: auto;
+    position: fixed; inset: 0; z-index: 2100; pointer-events: auto;
     background: rgba(0,0,0,.6); display: flex; align-items: center; justify-content: center;
   }
   .veh-modal-card {
@@ -1204,6 +1215,17 @@
             <button class="ac-comp-btn"  onclick="toggleAcCompressor()" style="flex:1;padding:10px 3px;border-radius:10px;border:1px solid rgba(255,255,255,.15);background:transparent;color:#cbd5e1;font-size:11px;font-weight:700">❄️ COMP</button>
           </div>
         </div>
+        <!-- Aberturas: controles físicos (vidros/cortina/teto/porta-malas/trava) -->
+        <div class="dc-card aberturas">
+          <div class="dc-label">🚪 Aberturas</div>
+          <div class="veh-grid">
+            <button class="veh-btn" onclick="openVehPicker('windows')">🪟 Vidros</button>
+            <button class="veh-btn" onclick="openVehPicker('shade')">⛱ Cortina</button>
+            <button class="veh-btn" onclick="openVehPicker('skylight')">☀ Teto</button>
+            <button class="veh-btn" onclick="openVehPicker('trunk')">📦 Porta-malas</button>
+            <button class="veh-btn" onclick="openVehPicker('lock')">🔒 Trava</button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -1231,13 +1253,7 @@
         <!-- Badges passivos de modo (read-only): Modo · Estilo · Regen · 1-Pedal -->
         <div id="ov-modes" class="ov-modes"></div>
       </div>
-      <!-- Controles físicos (canto inf-dir do mapa, espaço livre) -->
-      <div class="veh-controls">
-        <button class="veh-btn" onclick="openVehPicker('windows')">🪟 Vidros</button>
-        <button class="veh-btn" onclick="openVehPicker('shade')">⛱ Cortina</button>
-        <button class="veh-btn" onclick="openVehPicker('skylight')">☀ Teto solar</button>
-      </div>
-      <!-- Seletor de valor (modal sobre o mapa) -->
+      <!-- Seletor de valor (modal, fixo sobre a tela) -->
       <div id="veh-modal" class="veh-modal" style="display:none" onclick="if(event.target===this)closeVehPicker()">
         <div class="veh-modal-card">
           <div class="veh-modal-title" id="veh-modal-title">—</div>
@@ -2364,6 +2380,16 @@ function sendCmd(action, value) {
 
 // ── Controles físicos: cortina e teto solar (seletor de valor) ───────────────
 const VEH_PICKERS = {
+  lock: {
+    title: 'Trava das portas', action: 'car_action',
+    opts: [{ label: 'Destravar', value: 'lock_open', cls: 'accent' },
+      { label: 'Travar', value: 'lock_close', cls: 'close' }],
+  },
+  trunk: {
+    title: 'Porta-malas', action: 'car_action',
+    opts: [{ label: 'Abrir', value: 'trunk_open', cls: 'accent' },
+      { label: 'Fechar', value: 'trunk_close', cls: 'close' }],
+  },
   windows: {
     title: 'Vidros (todos)', action: 'vehicle_windows',
     opts: [{ label: 'Fechar', value: 1, cls: 'close' },
@@ -2391,7 +2417,7 @@ function openVehPicker(kind) {
   const cfg = VEH_PICKERS[kind]; if (!cfg) return;
   document.getElementById('veh-modal-title').textContent = cfg.title;
   document.getElementById('veh-modal-grid').innerHTML = cfg.opts.map(o =>
-    `<button class="vopt ${o.cls || ''}" onclick="pickVeh('${cfg.action}',${o.value})">${o.label}</button>`).join('');
+    `<button class="vopt ${o.cls || ''}" onclick='pickVeh(${JSON.stringify(cfg.action)},${JSON.stringify(o.value)})'>${o.label}</button>`).join('');
   document.getElementById('veh-modal').style.display = 'flex';
 }
 function closeVehPicker() { document.getElementById('veh-modal').style.display = 'none'; }

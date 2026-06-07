@@ -138,6 +138,13 @@ struct ClusterWebView: UIViewRepresentable {
             case "vehicle_windows":
                 // Vidros (todos): 1=fechado · 3=entreaberto · 0=aberto.
                 Task { await publisher.postCommand(path: "/api/vehicle/window-all", body: ["level": Int(value) ?? 1]) }
+            case "car_action":
+                // Ações via Home Assistant (travar/destravar, porta-malas). Só via cloud.
+                let name = value.replacingOccurrences(of: "/", with: "")
+                let allowed: Set<String> = ["lock_open", "lock_close", "trunk_open", "trunk_close"]
+                if allowed.contains(name) {
+                    Task { await publisher.postCommand(path: "/api/action/\(name)", body: [:], lanCapable: false) }
+                }
             case "open_nav":
                 let app = (dict["app"] as? String ?? "waze").lowercased()
                 let schemes: [String: String] = [
