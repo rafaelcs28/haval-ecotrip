@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Haval — status ao vivo</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  :root { --bg:#0b0d10; --card:#16181d; --text:#f5f5f5; --muted:#8b93a1; --green:#22c55e; --blue:#38bdf8; --teal:#22d3ee; --orange:#fb923c; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--text); font-family:-apple-system,system-ui,Segoe UI,Roboto,sans-serif; }
+  #map { position:absolute; inset:0; background:var(--bg); }
+  .leaflet-container { background:var(--bg); }
+  .top { position:absolute; top:0; left:0; right:0; z-index:500; padding:12px 14px;
+         background:linear-gradient(180deg, rgba(0,0,0,.8), rgba(0,0,0,0)); pointer-events:none; }
+  .title { font-size:15px; font-weight:700; letter-spacing:.02em; }
+  .badge { display:inline-block; font-size:12px; font-weight:700; padding:3px 9px; border-radius:999px; margin-left:8px; }
+  .badge.on { background:rgba(34,197,94,.2); color:var(--green); }
+  .badge.off { background:rgba(251,146,60,.2); color:var(--orange); }
+  .panel { position:absolute; left:10px; right:10px; bottom:10px; z-index:500;
+           background:rgba(22,24,29,.92); border:1px solid rgba(255,255,255,.08); border-radius:16px;
+           padding:14px; backdrop-filter:blur(8px); }
+  .eta { font-size:15px; font-weight:700; margin-bottom:10px; display:flex; align-items:center; gap:8px; }
+  .eta .km { color:var(--teal); }
+  .grid { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; }
+  .cell { background:rgba(255,255,255,.05); border-radius:12px; padding:9px 6px; text-align:center; }
+  .cell .v { font-size:20px; font-weight:700; font-variant-numeric:tabular-nums; }
+  .cell .l { font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; margin-top:1px; }
+  .v.soc { color:var(--green); } .v.spd { color:var(--text); } .v.gear { color:var(--teal); }
+  .ask { color:var(--muted); font-size:13px; }
+  .ask a { color:var(--teal); text-decoration:underline; cursor:pointer; }
+  .expired { position:absolute; inset:0; z-index:900; display:none; align-items:center; justify-content:center;
+             background:rgba(0,0,0,.85); text-align:center; padding:30px; }
+  .car-ico { background:none; border:none; }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div class="top">
+  <span class="title">🚗 Haval ao vivo</span>
+  <span id="state-badge" class="badge on">conectando…</span>
+</div>
+<div class="panel">
+  <div class="eta" id="eta-line"><span class="ask">Toque em <a onclick="askGeo()">permitir localização</a> para ver a distância até você.</span></div>
+  <div class="grid">
+    <div class="cell"><div class="v spd" id="v-spd">—</div><div class="l">km/h</div></div>
+    <div class="cell"><div class="v gear" id="v-gear">—</div><div class="l">marcha</div></div>
+    <div class="cell"><div class="v soc" id="v-soc">—</div><div class="l">SOC %</div></div>
+    <div class="cell"><div class="v" id="v-ev">—</div><div class="l">km EV</div></div>
+    <div class="cell"><div class="v" id="v-km">—</div><div class="l">km viagem</div></div>
+    <div class="cell"><div class="v" id="v-time">—</div><div class="l">tempo</div></div>
+    <div class="cell"><div class="v" id="v-tin">—</div><div class="l">interna °C</div></div>
+    <div class="cell"><div class="v" id="v-tout">—</div><div class="l">externa °C</div></div>
+  </div>
+</div>
+<div class="expired" id="expired"><div><div style="font-size:40px">🔒</div><div style="font-size:18px;font-weight:700;margin-top:8px">Link expirado</div><div style="color:var(--muted);margin-top:6px">Peça um novo link ao dono do carro.</div><div id="exp-tok" style="color:#475569;margin-top:14px;font-size:11px;word-break:break-all"></div></div></div>
+
+<script>
+const TOKEN = new URLSearchParams(location.search).get('t') || '';
+const API = (p) => `/api/share/${TOKEN}${p}`;
+const map = L.map('map', { zoomControl:false, attributionControl:false }).setView([-16.6869,-49.2648], 14);
+L.tileLayer('https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png', { maxZoom:20 }).addTo(map);
+
+const carIcon = L.divIcon({ className:'car-ico', html:'<div style="width:36px;height:36px;border-radius:50%;background:#22d3ee;border:3px solid #fff;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px #000"><svg width="20" height="20" viewBox="0 0 24 24" fill="#0b0d10"><path d="M18.92 6.01C18.72 5.42 18.16 5 17.5 5h-11c-.66 0-1.21.42-1.42 1.01L3 12v8a1 1 0 0 0 1 1h1a1 1 0 0 0 1-1v-1h12v1a1 1 0 0 0 1 1h1a1 1 0 0 0 1-1v-8l-2.08-5.99zM6.5 16a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm11 0a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zM5 11l1.5-4.5h11L19 11H5z"/></svg></div>', iconSize:[36,36], iconAnchor:[18,18] });
+const meIcon  = L.divIcon({ className:'car-ico', html:'<div style="width:16px;height:16px;border-radius:50%;background:#38bdf8;border:3px solid #fff;box-shadow:0 0 8px #38bdf8"></div>', iconSize:[16,16], iconAnchor:[8,8] });
+let carMarker=null, meMarker=null, trail=null, trailPts=[], me=null, autoFollow=true;
+map.on('dragstart', () => autoFollow=false);
+
+function fmtTime(s){ s=Math.max(0,Math.round(s)); const h=Math.floor(s/3600), m=Math.floor((s%3600)/60); return h>0?`${h}h${String(m).padStart(2,'0')}`:`${m}min`; }
+
+let _fail = 0, _everOK = false;
+function showExpired(){ document.getElementById('exp-tok').textContent = 'token: ' + (TOKEN || '(vazio)'); document.getElementById('expired').style.display='flex'; }
+function hideExpired(){ document.getElementById('expired').style.display='none'; }
+async function poll(){
+  let j;
+  try {
+    const r = await fetch(API('/state') + '?_=' + Date.now(), {cache:'no-store'});
+    if (r.status === 404) { _fail++; if (_fail >= 3 && !_everOK) showExpired(); return; }
+    if (!r.ok) return;                 // transitório (502/timeout do funnel) → tenta de novo
+    j = await r.json();
+  } catch(_) { return; }
+  _fail = 0; _everOK = true; hideExpired();
+  const badge = document.getElementById('state-badge');
+  if (j.on){ badge.className='badge on'; badge.textContent = j.moving ? 'em movimento' : 'ligado'; }
+  else     { badge.className='badge off'; badge.textContent='desligado'; }
+  document.getElementById('v-spd').textContent  = j.on ? Math.round(j.speedKmh) : '—';
+  document.getElementById('v-gear').textContent = ['P','R','N','D'].includes((j.gear||'').toUpperCase()) ? j.gear.toUpperCase() : '—';
+  document.getElementById('v-soc').textContent  = j.soc || '—';
+  document.getElementById('v-ev').textContent   = j.rangeEvKm || '—';
+  document.getElementById('v-km').textContent   = (j.tripKm||0).toFixed(1).replace('.',',');
+  document.getElementById('v-time').textContent = fmtTime(j.tripSec||0);
+  document.getElementById('v-tin').textContent  = j.tempIn  ? Math.round(j.tempIn)  : '—';
+  document.getElementById('v-tout').textContent = j.tempOut ? Math.round(j.tempOut) : '—';
+  if (j.lat && j.lng){
+    const ll = [j.lat, j.lng];
+    if (!carMarker) carMarker = L.marker(ll, {icon:carIcon}).addTo(map);
+    else carMarker.setLatLng(ll);
+    // Trilha do trajeto só acumula com o carro ligado/em movimento (desligado = congela).
+    if (j.on){
+      const last = trailPts[trailPts.length-1];
+      if (!last || (Math.abs(last[0]-j.lat)+Math.abs(last[1]-j.lng)) > 0.00005){
+        trailPts.push(ll);
+        if (trailPts.length>1){ if (!trail) trail=L.polyline(trailPts,{color:'#22d3ee',weight:4,opacity:.8}).addTo(map); else trail.setLatLngs(trailPts); }
+      }
+    }
+    if (autoFollow) map.setView(ll, Math.max(map.getZoom(),14), {animate:true});
+  }
+}
+
+let etaLast=0;
+async function updateEta(){
+  if (!me || Date.now()-etaLast < 15000) return;
+  etaLast = Date.now();
+  try {
+    const r = await fetch(API(`/eta?to_lat=${me[0]}&to_lng=${me[1]}`), {cache:'no-store'});
+    const j = await r.json();
+    if (j.ok) document.getElementById('eta-line').innerHTML =
+      `<span>🧭 <span class="km">${j.distKm.toFixed(1).replace('.',',')} km</span> · ${j.etaMin} min de carro até você</span>`;
+  } catch(_){}
+}
+function askGeo(){
+  if (!navigator.geolocation){ alert('Geolocalização não suportada.'); return; }
+  navigator.geolocation.watchPosition(p => {
+    me = [p.coords.latitude, p.coords.longitude];
+    if (!meMarker) meMarker = L.marker(me,{icon:meIcon}).addTo(map); else meMarker.setLatLng(me);
+    updateEta();
+  }, _ => { document.getElementById('eta-line').innerHTML = '<span class="ask">Sem permissão de localização — não dá pra calcular a distância.</span>'; },
+  { enableHighAccuracy:true, maximumAge:10000 });
+}
+
+if (!TOKEN){ showExpired(); }
+else { poll(); setInterval(poll, 2000); setInterval(updateEta, 2000); }
+</script>
+</body>
+</html>

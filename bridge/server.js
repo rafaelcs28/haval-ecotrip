@@ -2564,6 +2564,8 @@ app.use('/api', (req, res, next) => {
       req.path === '/auth/passkey/login/finish' ||
       req.path === '/pair/redeem' ||
       req.path === '/mapkit/token') return next();   // mapkit/token: JWT só vale pra Apple Maps, não dá acesso a nada do bridge
+  // Compartilhamento de status: páginas públicas validadas pelo token na própria URL.
+  if (/^\/share\/[^/]+\/(state|eta)$/.test(req.path)) return next();
   requireAuth(req, res, next);
 });
 
@@ -8390,6 +8392,89 @@ async function _routeElevation(fromLat, fromLng, toLat, toLng) {
     traffic: route.traffic,
   };
 }
+// ── Compartilhar status (link temporário com localização ao vivo) ───────────
+// Token na URL dá acesso somente-leitura ao estado do carro + ETA até quem abriu.
+const SHARE_TOKENS_FILE = path.join(DATA_DIR, 'share_tokens.json');
+let _shareTokens = {};   // { token: { createdMs, expiresMs } }
+try { _shareTokens = JSON.parse(fs.readFileSync(SHARE_TOKENS_FILE, 'utf8')) || {}; } catch (_) {}
+function _saveShareTokens() { try { fs.writeFileSync(SHARE_TOKENS_FILE, JSON.stringify(_shareTokens)); } catch (_) {} }
+function _shareValid(token) {
+  const t = _shareTokens[token];
+  if (!t) return false;
+  if (Date.now() > t.expiresMs) { delete _shareTokens[token]; _saveShareTokens(); return false; }
+  return true;
+}
+function _shareBaseUrl() {
+  return (process.env.BRIDGE_PUBLIC_URL || 'https://mac-mini.tailacc6e7.ts.net').replace(/\/+$/, '');
+}
+
+app.post('/api/share/create', (req, res) => {
+  const ttlMin = Math.min(Math.max(parseInt(req.body?.ttlMin) || 120, 5), 1440);   // 5 min .. 24 h
+  const crypto = require('crypto');
+  const token = crypto.randomBytes(12).toString('hex');
+  // Código curto pro link encurtado (/s/<code>). Garante unicidade entre os ativos.
+  let code; do { code = crypto.randomBytes(4).toString('base64url').slice(0, 6); }
+  while (Object.values(_shareTokens).some(v => v.code === code));
+  const expiresMs = Date.now() + ttlMin * 60_000;
+  _shareTokens[token] = { createdMs: Date.now(), expiresMs, code };
+  _saveShareTokens();
+  res.json({ ok: true, token, code, url: `${_shareBaseUrl()}/s/${code}`, expiresMs, ttlMin });
+});
+
+// Link encurtado público → redireciona pra página com o token completo.
+app.get('/s/:code', (req, res) => {
+  const entry = Object.entries(_shareTokens).find(([, v]) => v.code === req.params.code && v.expiresMs > Date.now());
+  res.redirect(entry ? `/share.html?t=${entry[0]}` : '/share.html');
+});
+
+app.post('/api/share/revoke', (req, res) => {
+  const token = String(req.body?.token || '');
+  if (_shareTokens[token]) { delete _shareTokens[token]; _saveShareTokens(); }
+  res.json({ ok: true });
+});
+
+app.get('/api/share/list', (_req, res) => {
+  const now = Date.now();
+  const active = Object.entries(_shareTokens)
+    .filter(([, v]) => v.expiresMs > now)
+    .map(([token, v]) => ({ token, expiresMs: v.expiresMs, url: `${_shareBaseUrl()}/share.html?t=${token}` }));
+  res.json({ ok: true, active });
+});
+
+// Público (token na URL): estado ao vivo do carro pra página de compartilhamento.
+app.get('/api/share/:token/state', (req, res) => {
+  if (!_shareValid(req.params.token)) return res.status(404).json({ error: 'link expirado' });
+  const tr = state.current_trip || {};
+  const on = state.engine_state === '1' || state.engine_state === 1 || +state.driving_ready === 1;
+  res.json({
+    on,
+    lat: +state.gps_lat || 0, lng: +state.gps_lng || 0,
+    speedKmh: Math.max(0, +state.speed_kmh || 0),
+    soc: Math.round(+state.soc_pct || 0),
+    tripKm: +(tr.distKm || 0), tripSec: +(tr.timeSec || 0),
+    rangeEvKm: Math.round(+state.range_ev_km || 0),
+    gear: String(state.gear || '--').toUpperCase(),
+    tempIn: +state.inside_temp || 0,
+    tempOut: +state.outside_temp || 0,
+    moving: (+state.speed_kmh || 0) > 2,
+    ts: Date.now(),
+  });
+});
+
+// Público: ETA de carro (posição atual) até onde o destinatário está.
+app.get('/api/share/:token/eta', async (req, res) => {
+  if (!_shareValid(req.params.token)) return res.status(404).json({ error: 'link expirado' });
+  const toLat = +req.query.to_lat, toLng = +req.query.to_lng;
+  const carLat = +state.gps_lat, carLng = +state.gps_lng;
+  if (!Number.isFinite(toLat) || !Number.isFinite(toLng) || !carLat || !carLng)
+    return res.status(400).json({ error: 'coords' });
+  try {
+    const route = await _fetchRoute(carLat, carLng, toLat, toLng);
+    if (!route) return res.json({ ok: false });
+    res.json({ ok: true, distKm: Math.round(route.distance / 100) / 10, etaMin: Math.round(route.duration / 60) });
+  } catch (e) { res.status(500).json({ error: String((e && e.message) || e) }); }
+});
+
 // GET /api/range-isochrone?lat=&lng=&ev_km=&total_km= — polígonos de alcance por
 // estrada (Mapbox Isochrone). Contornos em metros, máx 100 km cada (limite Mapbox).
 app.get('/api/range-isochrone', async (req, res) => {
