@@ -193,13 +193,13 @@
   body.native .hazard-btn svg { width: 55%; height: 55%; }
   body.native .hazard-btn.active { background: var(--red); color: #fff; animation: hazblink 2s steps(1) infinite; }
   @keyframes hazblink { 50% { opacity: .3; } }
-  /* Pisca dentro do card Direção: botão inline (sobrescreve o flutuante). */
+  /* Pisca dentro do card Direção: botão quadrado (sobrescreve o flutuante). */
   body.native .dc-card .hazard-btn {
-    position: static; width: 100%; height: auto; margin-top: 4px;
-    flex-direction: row; gap: 8px; padding: 14px 12px; border-width: 2px; border-radius: 12px;
+    position: static; width: 100%; height: auto; aspect-ratio: 1 / 1; margin-top: 8px;
+    flex-direction: column; gap: 6px; padding: 10px; border-width: 2px; border-radius: 14px;
     font-size: 17px; font-weight: 600;
   }
-  body.native .dc-card .hazard-btn svg { width: 26px; height: 26px; flex: 0 0 auto; }
+  body.native .dc-card .hazard-btn svg { width: 46%; height: 46%; flex: 0 0 auto; }
   .trip-info .ti-cell { display: flex; flex-direction: column; gap: 5px; }
   .trip-info .tov {
     font-size: 30px; font-weight: 300; font-variant-numeric: tabular-nums; line-height: 1;
