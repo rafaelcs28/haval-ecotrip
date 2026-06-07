@@ -75,10 +75,20 @@ struct BydMiniMap: UIViewRepresentable {
             v.annotation = a
             return v
         }
+        // Marcador desenhado (não SF Symbol template, que o mapa pintava de preto):
+        // círculo branco com borda + carro azul no centro — sempre visível no escuro.
         static let carImage: UIImage = {
-            let cfg = UIImage.SymbolConfiguration(pointSize: 22, weight: .bold)
-            return UIImage(systemName: "car.fill", withConfiguration: cfg)?
-                .withTintColor(UIColor.white, renderingMode: .alwaysOriginal) ?? UIImage()
+            let size = CGSize(width: 32, height: 32)
+            return UIGraphicsImageRenderer(size: size).image { ctx in
+                let c = ctx.cgContext
+                let circle = CGRect(x: 2, y: 2, width: 28, height: 28)
+                UIColor.white.setFill(); c.fillEllipse(in: circle)
+                UIColor(white: 0.1, alpha: 1).setStroke(); c.setLineWidth(2); c.strokeEllipse(in: circle)
+                let cfg = UIImage.SymbolConfiguration(pointSize: 15, weight: .bold)
+                UIImage(systemName: "car.fill", withConfiguration: cfg)?
+                    .withTintColor(UIColor.systemBlue, renderingMode: .alwaysOriginal)
+                    .draw(in: CGRect(x: 8.5, y: 9.5, width: 15, height: 13))
+            }
         }()
     }
 }
