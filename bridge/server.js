@@ -6121,6 +6121,33 @@ app.post('/api/vehicle/test', async (req, res) => {
   res.json({ ok: true, sub, sent: payload, result: null, note: 'sem resposta em 12s (carro dormindo?)' });
 });
 
+// POST /api/vehicle/shade  { level: 0..100 } — cortina elétrica (0=fechada, 100=aberta).
+app.post('/api/vehicle/shade', (req, res) => {
+  const level = parseInt(req.body?.level);
+  if (!Number.isInteger(level) || level < 0 || level > 100)
+    return res.status(400).json({ error: 'level inválido (0..100)' });
+  if (!mqttClient?.connected) return res.status(503).json({ error: 'MQTT offline' });
+  mqttClient.publish(`${MQTT_PREFIX}/cmd/vehicle/shade`, String(level), { qos: 1, retain: false }, err => {
+    if (err) return res.status(500).json({ error: 'falha ao publicar' });
+    console.log(`[vehicle] shade = ${level}`);
+    res.json({ ok: true, level });
+  });
+});
+
+// POST /api/vehicle/skylight  { level } — teto solar. 0=fechado · 200=ventilação · 10..100=abertura.
+app.post('/api/vehicle/skylight', (req, res) => {
+  const level = parseInt(req.body?.level);
+  const valid = level === 0 || level === 200 || (level >= 10 && level <= 100);
+  if (!Number.isInteger(level) || !valid)
+    return res.status(400).json({ error: 'level inválido (0, 200, ou 10..100)' });
+  if (!mqttClient?.connected) return res.status(503).json({ error: 'MQTT offline' });
+  mqttClient.publish(`${MQTT_PREFIX}/cmd/vehicle/skylight`, String(level), { qos: 1, retain: false }, err => {
+    if (err) return res.status(500).json({ error: 'falha ao publicar' });
+    console.log(`[vehicle] skylight = ${level}`);
+    res.json({ ok: true, level });
+  });
+});
+
 app.post('/api/hvac/:control', (req, res) => {
   const { control } = req.params;
   const spec = HVAC_CONTROLS[control];

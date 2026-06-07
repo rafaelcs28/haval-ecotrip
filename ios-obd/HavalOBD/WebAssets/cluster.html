@@ -131,6 +131,41 @@
     border-radius: 999px; padding: 4px 14px;
   }
   .pwr-overlay .ov-modes .mbadge.accent { color: var(--teal); border-color: rgba(34,211,238,.45); }
+  /* Controles físicos (cortina/teto) — canto inf-dir do mapa */
+  .veh-controls { display: none; }
+  body.native .veh-controls {
+    position: absolute; bottom: 22px; right: 26px; z-index: 800;
+    display: flex; gap: 12px; pointer-events: auto;
+  }
+  .veh-btn {
+    font-size: 22px; font-weight: 600; color: var(--text);
+    background: rgba(0,0,0,.55); border: 2px solid rgba(255,255,255,.22);
+    border-radius: 16px; padding: 14px 22px; cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .veh-btn:active { border-color: var(--teal); }
+  .veh-modal {
+    position: absolute; inset: 0; z-index: 1200; pointer-events: auto;
+    background: rgba(0,0,0,.6); display: flex; align-items: center; justify-content: center;
+  }
+  .veh-modal-card {
+    background: #16181d; border: 1px solid rgba(255,255,255,.14); border-radius: 22px;
+    padding: 28px; min-width: 460px; max-width: 72%;
+  }
+  .veh-modal-title { font-size: 26px; font-weight: 700; color: var(--text); margin-bottom: 20px; text-align: center; }
+  .veh-modal-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  .veh-modal-grid .vopt {
+    font-size: 24px; font-weight: 600; color: var(--text);
+    background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.16);
+    border-radius: 14px; padding: 18px 0; cursor: pointer; text-align: center;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .veh-modal-grid .vopt.accent { color: var(--teal); border-color: rgba(34,211,238,.5); }
+  .veh-modal-grid .vopt.close  { color: var(--orange); border-color: rgba(251,146,60,.5); }
+  .veh-modal-close {
+    margin-top: 20px; width: 100%; font-size: 20px; color: var(--muted);
+    background: transparent; border: none; padding: 12px; cursor: pointer;
+  }
   /* Botão pisca-alerta (4 setas) — sobre o mapa, no rodapé */
   .hazard-btn { display: none; }
   body.native .hazard-btn {
@@ -1195,6 +1230,19 @@
         <div class="pwr-sub"><span id="ov-power">0,0</span> kW<span class="sep">·</span><span class="rpm"><span id="ov-rpm">0</span> rpm</span><span id="ov-regen" class="ov-regen" style="display:none">♻ REGEN</span></div>
         <!-- Badges passivos de modo (read-only): Modo · Estilo · Regen · 1-Pedal -->
         <div id="ov-modes" class="ov-modes"></div>
+      </div>
+      <!-- Controles físicos (canto inf-dir do mapa, espaço livre) -->
+      <div class="veh-controls">
+        <button class="veh-btn" onclick="openVehPicker('shade')">⛱ Cortina</button>
+        <button class="veh-btn" onclick="openVehPicker('skylight')">☀ Teto solar</button>
+      </div>
+      <!-- Seletor de valor (modal sobre o mapa) -->
+      <div id="veh-modal" class="veh-modal" style="display:none" onclick="if(event.target===this)closeVehPicker()">
+        <div class="veh-modal-card">
+          <div class="veh-modal-title" id="veh-modal-title">—</div>
+          <div class="veh-modal-grid" id="veh-modal-grid"></div>
+          <button class="veh-modal-close" onclick="closeVehPicker()">Cancelar</button>
+        </div>
       </div>
       <div class="trip-overlay">
         <div class="trip-info">
@@ -2311,6 +2359,40 @@ function sendCmd(action, value) {
     return;
   }
   window.webkit.messageHandlers.obd.postMessage({ action, value: String(value) });
+}
+
+// ── Controles físicos: cortina e teto solar (seletor de valor) ───────────────
+const VEH_PICKERS = {
+  shade: {
+    title: 'Cortina — abrir quanto?', action: 'vehicle_shade',
+    opts: [{ label: 'Fechar', value: 0, cls: 'close' },
+      { label: '10%', value: 10 }, { label: '20%', value: 20 }, { label: '30%', value: 30 },
+      { label: '40%', value: 40 }, { label: '50%', value: 50 }, { label: '60%', value: 60 },
+      { label: '70%', value: 70 }, { label: '80%', value: 80 }, { label: '90%', value: 90 },
+      { label: '100%', value: 100, cls: 'accent' }],
+  },
+  skylight: {
+    title: 'Teto solar', action: 'vehicle_skylight',
+    opts: [{ label: 'Fechar', value: 0, cls: 'close' }, { label: 'Ventilar', value: 200, cls: 'accent' },
+      { label: '10%', value: 10 }, { label: '20%', value: 20 }, { label: '30%', value: 30 },
+      { label: '40%', value: 40 }, { label: '50%', value: 50 }, { label: '60%', value: 60 },
+      { label: '70%', value: 70 }, { label: '80%', value: 80 }, { label: '90%', value: 90 },
+      { label: '100%', value: 100, cls: 'accent' }],
+  },
+};
+function openVehPicker(kind) {
+  const cfg = VEH_PICKERS[kind]; if (!cfg) return;
+  document.getElementById('veh-modal-title').textContent = cfg.title;
+  document.getElementById('veh-modal-grid').innerHTML = cfg.opts.map(o =>
+    `<button class="vopt ${o.cls || ''}" onclick="pickVeh('${cfg.action}',${o.value})">${o.label}</button>`).join('');
+  document.getElementById('veh-modal').style.display = 'flex';
+}
+function closeVehPicker() { document.getElementById('veh-modal').style.display = 'none'; }
+function pickVeh(action, value) {
+  closeVehPicker();
+  if (!window.webkit?.messageHandlers?.obd) { toast('Comandos só no app nativo'); return; }
+  window.webkit.messageHandlers.obd.postMessage({ action, value: String(value) });
+  toast('⏳ Enviando ao carro…');
 }
 
 window.setDriveMode   = (mode)  => _sendChip('mode',    mode,  'drive_mode_set',   'mode');

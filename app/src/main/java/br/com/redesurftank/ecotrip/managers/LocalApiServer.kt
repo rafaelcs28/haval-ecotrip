@@ -338,6 +338,9 @@ class LocalApiServer(
             "regen_level", "steer_mode", "charge_limit", "hf_mode",
             "power_reserve", "charge_soc_target",   // sub-modo HEV (iPad)
             "hazard",   // pisca-alerta (4 setas) — alterna car.light_setting.sport_mode_light
+            // Controles físicos com valor único (iPad): cortina 0..100, teto 0/200/10..100.
+            // (vidro/porta usam payload-objeto e seguem só por MQTT, fora da via LAN.)
+            "vehicle/shade", "vehicle/skylight",
         )
     }
 }

@@ -21,6 +21,8 @@ struct ClusterWebView: UIViewRepresentable {
     @EnvironmentObject var publisher: BridgePublisher
     // Intervalo do pisca-alerta (Config do iPad) — injetado no JS como window._hazardIntervalMs.
     @AppStorage("hazardIntervalSec") private var hazardIntervalSec: Double = 2.0
+    // Tamanho do botão de pisca (px) — aplicado via CSS var --haz-size. Default 248 (dobro do antigo).
+    @AppStorage("hazardBtnSize") private var hazardBtnSize: Double = 248
 
     func makeCoordinator() -> Coordinator { Coordinator(channel: channel, publisher: publisher) }
 
@@ -71,6 +73,9 @@ struct ClusterWebView: UIViewRepresentable {
         // Propaga o intervalo do pisca-alerta (muda quando o slider da Config muda).
         let ms = Int((hazardIntervalSec * 1000).rounded())
         webView.evaluateJavaScript("window._hazardIntervalMs = \(ms);", completionHandler: nil)
+        // Propaga o tamanho do botão de pisca via CSS var.
+        let sz = Int(hazardBtnSize.rounded())
+        webView.evaluateJavaScript("document.documentElement.style.setProperty('--haz-size', '\(sz)px');", completionHandler: nil)
     }
 
     final class Coordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
@@ -124,6 +129,12 @@ struct ClusterWebView: UIViewRepresentable {
                 // Pisca-alerta (4 setas): alterna car.light_setting.sport_mode_light.
                 // O cluster chama a cada ~1s com value "0"/"1".
                 Task { await publisher.postCommand(path: "/api/hazard", body: ["value": value]) }
+            case "vehicle_shade":
+                // Cortina elétrica: level 0..100 (0=fechada).
+                Task { await publisher.postCommand(path: "/api/vehicle/shade", body: ["level": Int(value) ?? 0]) }
+            case "vehicle_skylight":
+                // Teto solar: 0=fechado · 200=ventilação · 10..100=abertura.
+                Task { await publisher.postCommand(path: "/api/vehicle/skylight", body: ["level": Int(value) ?? 0]) }
             case "open_nav":
                 let app = (dict["app"] as? String ?? "waze").lowercased()
                 let schemes: [String: String] = [
