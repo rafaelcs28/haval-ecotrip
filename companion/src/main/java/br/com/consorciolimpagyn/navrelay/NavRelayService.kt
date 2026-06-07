@@ -75,9 +75,11 @@ class NavRelayService : Service() {
                 status = "conectado · ${if (role == "phone") "Celular" else "Carro"} · ouvindo $topic"; updateNotif(status)
                 while (running && c.isConnected) Thread.sleep(1000)
             } catch (e: Exception) {
-                val detail = e.message ?: e.cause?.message ?: e.javaClass.simpleName
+                val rc = (e as? org.eclipse.paho.client.mqttv3.MqttException)?.reasonCode
+                val detail = (e.message ?: e.cause?.message ?: e.javaClass.simpleName) +
+                    (rc?.let { " · rc=$it" } ?: "") + (e.cause?.let { " · ${it.javaClass.simpleName}" } ?: "")
                 status = "erro: $detail"; updateNotif(status)
-                Log.w(TAG, "connect falhou: ${e.javaClass.name}: $detail", e)
+                Log.w(TAG, "connect falhou: ${e.javaClass.name} rc=$rc msg=${e.message}", e)
                 Thread.sleep(8000)   // espera e tenta de novo
             }
         }
