@@ -152,33 +152,54 @@ object AutomationManager {
                 if (r.debounceS > 0 && now - last < r.debounceS * 1000L) continue
                 lastFiredMs[r.id] = now
                 if (hasConds) firedThisWindow[r.id] = true
-                if (r.delayS > 0) {
-                    val rule = r
-                    AppLogger.i(TAG, "Regra '${rule.name}' disparou → aguardando ${rule.delayS}s antes de ${rule.action.type}")
-                    tick.schedule({
-                        try {
-                            // Re-lê as condições no fim da espera: só executa se ainda
-                            // estiverem satisfeitas (o estado pode ter mudado nesse tempo).
-                            val stillOk = conditionsPass(rule.conditions, System.currentTimeMillis())
-                            if (stillOk) {
-                                val ok = runAction(rule.action)
-                                AppLogger.i(TAG, "Regra '${rule.name}' (após ${rule.delayS}s) → ${rule.action.type} (ok=$ok)")
-                                onFired?.invoke(rule.id, rule.name, ok)
-                                startRepeat(rule)
-                            } else {
-                                AppLogger.i(TAG, "Regra '${rule.name}': condição não persistiu após ${rule.delayS}s — não executou")
-                            }
-                        } catch (e: Exception) { AppLogger.w(TAG, "ação atrasada '${rule.name}': ${e.message}") }
-                    }, r.delayS.toLong(), TimeUnit.SECONDS)
-                } else {
-                    val ok = runAction(r.action)
-                    AppLogger.i(TAG, "Regra '${r.name}' disparou → ${r.action.type} (ok=$ok)")
-                    onFired?.invoke(r.id, r.name, ok)
-                    startRepeat(r)
-                }
+                fireRule(r)
             } catch (e: Exception) {
                 AppLogger.w(TAG, "avaliar '${r.name}': ${e.message}")
             }
+        }
+    }
+
+    // Executa a regra: respeita delayS (espera + re-checa condições) e, ao concluir,
+    // encadeia regras cujo gatilho é "depois desta". Chamado pelo tick e por encadeamento.
+    private fun fireRule(rule: Rule) {
+        if (rule.delayS > 0) {
+            AppLogger.i(TAG, "Regra '${rule.name}' disparou → aguardando ${rule.delayS}s antes de ${rule.action.type}")
+            tick.schedule({
+                try {
+                    val stillOk = conditionsPass(rule.conditions, System.currentTimeMillis())
+                    if (stillOk) {
+                        val ok = runAction(rule.action)
+                        AppLogger.i(TAG, "Regra '${rule.name}' (após ${rule.delayS}s) → ${rule.action.type} (ok=$ok)")
+                        onFired?.invoke(rule.id, rule.name, ok)
+                        startRepeat(rule); fireChained(rule.id, ok)
+                    } else {
+                        AppLogger.i(TAG, "Regra '${rule.name}': condição não persistiu após ${rule.delayS}s — não executou")
+                    }
+                } catch (e: Exception) { AppLogger.w(TAG, "ação atrasada '${rule.name}': ${e.message}") }
+            }, rule.delayS.toLong(), TimeUnit.SECONDS)
+        } else {
+            // Sem atraso: garante que as condições valem no instante (necessário p/ encadeadas).
+            if (!conditionsPass(rule.conditions, System.currentTimeMillis())) return
+            val ok = runAction(rule.action)
+            AppLogger.i(TAG, "Regra '${rule.name}' disparou → ${rule.action.type} (ok=$ok)")
+            onFired?.invoke(rule.id, rule.name, ok)
+            startRepeat(rule); fireChained(rule.id, ok)
+        }
+    }
+
+    // Dispara regras encadeadas (gatilho "automation") após a regra de origem executar.
+    private fun fireChained(firedRuleId: String, firedOk: Boolean) {
+        val snapshot = synchronized(lock) { rules }
+        val now = System.currentTimeMillis()
+        for (b in snapshot) {
+            if (!b.enabled || b.trigger.type != "automation") continue
+            if (b.trigger.afterRuleId != firedRuleId) continue
+            if (b.trigger.onlyIfSuccess && !firedOk) continue
+            val last = lastFiredMs[b.id] ?: 0L
+            if (b.debounceS > 0 && now - last < b.debounceS * 1000L) continue
+            lastFiredMs[b.id] = now
+            AppLogger.i(TAG, "Encadeada: '${b.name}' após '${firedRuleId}' (ok=$firedOk)")
+            fireRule(b)
         }
     }
 
@@ -418,6 +439,8 @@ object AutomationManager {
                 hhmm = t.optInt("hhmm", -1),
                 days = t.optJSONArray("days")?.let { d -> (0 until d.length()).map { d.getInt(it) } } ?: emptyList(),
                 field = t.optString("field", ""), cmp = t.optString("cmp", "=="), value = t.optString("value", ""),
+                afterRuleId = t.optString("after_rule_id", ""),
+                onlyIfSuccess = t.optBoolean("only_if_success", true),
             )
             val cg = o.optJSONObject("conditions")?.let { c ->
                 ConditionGroup(
@@ -469,6 +492,8 @@ object AutomationManager {
     data class Trigger(
         val type: String, val lat: Double, val lng: Double, val radiusM: Double, val edge: String,
         val hhmm: Int, val days: List<Int>, val field: String, val cmp: String, val value: String,
+        val afterRuleId: String = "",          // type "automation": dispara após esta regra executar
+        val onlyIfSuccess: Boolean = true,      // só encadeia se a regra-origem executou com sucesso
     )
     data class ConditionGroup(val op: String, val items: List<Condition>)
     data class VPoint(val lat: Double, val lng: Double, val radiusM: Double)

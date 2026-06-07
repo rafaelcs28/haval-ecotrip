@@ -78,7 +78,7 @@ struct BydMiniMap: UIViewRepresentable {
         static let carImage: UIImage = {
             let cfg = UIImage.SymbolConfiguration(pointSize: 22, weight: .bold)
             return UIImage(systemName: "car.fill", withConfiguration: cfg)?
-                .withTintColor(UIColor.systemBlue, renderingMode: .alwaysOriginal) ?? UIImage()
+                .withTintColor(UIColor.white, renderingMode: .alwaysOriginal) ?? UIImage()
         }()
     }
 }
