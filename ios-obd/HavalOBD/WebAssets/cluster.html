@@ -411,6 +411,15 @@
     display: flex; align-items: center; gap: 6px;
   }
   .widget h3 .ico { font-size: 16px; }
+  /* Banner de ETA: mesmo tamanho do h3, logo abaixo, levemente separado. */
+  .eta-banner {
+    font-size: 13px; font-weight: 700; letter-spacing: .04em;
+    color: var(--muted); margin: -4px 0 10px;
+    display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px;
+  }
+  .eta-banner .eb-name { color: var(--teal); }
+  .eta-banner .eb-sep { opacity: .35; }
+  body.native .map-widget > .eta-banner { z-index: 600; position: relative; }
 
   /* ───────── Power Gauge ───────── */
   body.native .power-widget { overflow: visible !important; }
@@ -1156,6 +1165,8 @@
          as bordas pra deixar o texto legível. -->
     <div class="widget map-widget">
       <h3><span class="ico">📍</span> Viagem em curso</h3>
+      <!-- Linha de ETA (destino compartilhado): nome · tempo · chegada · km faltante -->
+      <div id="trip-eta-banner" class="eta-banner" style="display:none"></div>
       <div id="cluster-map-bot"></div>
       <!-- Botão pisca-alerta (4 setas), sobre o mapa no rodapé -->
       <button class="hazard-btn" id="hazard-btn" aria-label="Pisca-alerta">
@@ -1205,11 +1216,7 @@
             <div class="tov yellow"><span id="tov-cost-km">R$ 0,00</span><span style="font-size:18px;opacity:.7">/km</span></div>
             <div class="tol">Custo por km</div>
           </div>
-          <!-- Chegada (SOC + ETA) — só aparece com destino compartilhado ativo -->
-          <div class="ti-cell ti-arrival" style="display:none">
-            <div class="tov teal"><span id="tov-eta">—</span></div>
-            <div class="tol">Chegada</div>
-          </div>
+          <!-- SOC na chegada (ETA completo fica no banner do topo) — só com destino ativo -->
           <div class="ti-cell ti-arrival" style="display:none">
             <div class="tov green"><span id="tov-soc-arr">—</span><span style="font-size:18px;opacity:.7"> %</span></div>
             <div class="tol">SOC na chegada</div>
@@ -1904,11 +1911,21 @@ function render() {
   tov('trip-kwh100', kwh100Str); tov('trip-kml', kmLStr);
   tov('tov-kwh100',  kwh100Str); tov('tov-kml',  kmLStr);
 
-  // Chegada (destino compartilhado): ETA + SOC previsto. Sem destino → oculta.
+  // Chegada (destino compartilhado): banner de ETA no topo + SOC previsto na grade.
   const arr = state.arrival;
   const arrCells = document.querySelectorAll('.ti-arrival');
+  const etaBanner = document.getElementById('trip-eta-banner');
   if (arr && arr.socArrival != null) {
-    tov('tov-eta', `${arr.etaClock} · ${arr.etaMin} min`);
+    if (etaBanner) {
+      const esc = s => String(s).replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      const parts = [];
+      if (arr.name)            parts.push(`<span class="eb-name">${esc(arr.name)}</span>`);
+      if (arr.etaMin != null)  parts.push(`${arr.etaMin} min`);
+      if (arr.etaClock)        parts.push(`chega ${esc(arr.etaClock)}`);
+      if (arr.distKm != null)  parts.push(`${fmt1(arr.distKm)} km`);
+      etaBanner.innerHTML = parts.join('<span class="eb-sep">·</span>');
+      etaBanner.style.display = parts.length ? 'flex' : 'none';
+    }
     const socEl = document.getElementById('tov-soc-arr');
     if (socEl) {
       socEl.textContent = Math.round(arr.socArrival);
@@ -1918,6 +1935,7 @@ function render() {
     arrCells.forEach(c => c.style.display = '');
   } else {
     arrCells.forEach(c => c.style.display = 'none');
+    if (etaBanner) etaBanner.style.display = 'none';
   }
 
   // RPM do motor a combustão (no widget Potência)
