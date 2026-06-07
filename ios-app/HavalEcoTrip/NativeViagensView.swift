@@ -161,6 +161,7 @@ struct NativeViagensView: View {
     @State private var search = ""
     @State private var showInsights = false
     @State private var showEco = false
+    @State private var showReport = false
 
     private var fromDate: Binding<Date> { Binding(get: { fromTS > 0 ? Date(timeIntervalSince1970: fromTS) : Date() }, set: { fromTS = $0.timeIntervalSince1970 }) }
     private var toDate: Binding<Date> { Binding(get: { toTS > 0 ? Date(timeIntervalSince1970: toTS) : Date() }, set: { toTS = $0.timeIntervalSince1970 }) }
@@ -204,7 +205,7 @@ struct NativeViagensView: View {
                         }.font(.system(size: 14)).foregroundStyle(DS.text).tint(DS.green).environment(\.locale, Locale(identifier: "pt_BR"))
                     }
                 }
-                if tab == 0 { searchBar; historico } else { insightsButton; ecoButton; estatisticas }
+                if tab == 0 { searchBar; historico } else { insightsButton; ecoButton; reportButton; estatisticas }
             }
             .padding(16)
         }
@@ -219,6 +220,9 @@ struct NativeViagensView: View {
             InsightsSheet(trips: loader.trips, priceKwh: car.priceKwh, priceGas: car.priceGas, kmPerLGas: car.kmPerL)
         }
         .sheet(isPresented: $showEco) { EcoScoreSheet(trips: loader.trips) }
+        .sheet(isPresented: $showReport) {
+            MonthlyReportSheet(trips: loader.trips, priceKwh: car.priceKwh, priceGas: car.priceGas, kmPerLGas: car.kmPerL)
+        }
     }
 
     private var insightsButton: some View {
@@ -229,6 +233,22 @@ struct NativeViagensView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Economia EV & CO₂").font(.subheadline.weight(.semibold)).foregroundStyle(DS.text)
                         Text("Quanto você economizou vs. gasolina").font(.caption).foregroundStyle(DS.muted)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(DS.muted)
+                }
+            }
+        }
+    }
+
+    private var reportButton: some View {
+        DSCard {
+            Button { showReport = true } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "doc.text.fill").font(.title3).foregroundStyle(DS.blue)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Relatório mensal").font(.subheadline.weight(.semibold)).foregroundStyle(DS.text)
+                        Text("Resumo do mês + exportar CSV").font(.caption).foregroundStyle(DS.muted)
                     }
                     Spacer()
                     Image(systemName: "chevron.right").font(.caption).foregroundStyle(DS.muted)
