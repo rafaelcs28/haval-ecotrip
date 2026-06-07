@@ -73,6 +73,10 @@ targets:
         NSLocalNetworkUsageDescription: "Conecta direto ao carro na mesma rede Wi-Fi para telemetria e comandos com baixa latência."
         NSBonjourServices:
           - _havalobd._tcp
+        # canOpenURL p/ abrir a navegação neste iPhone (Waze / Google Maps).
+        LSApplicationQueriesSchemes:
+          - waze
+          - comgooglemaps
         # IMPORTANTE: xcodegen REGENERA o Info.plist do zero a cada `generate`,
         # apagando qualquer chave não listada aqui.
         # Com APNs (conta paga) as Live Activities são dirigidas por push — não há

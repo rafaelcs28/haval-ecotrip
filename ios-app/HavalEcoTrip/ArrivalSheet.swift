@@ -6,6 +6,7 @@
 
 import SwiftUI
 import MapKit
+import UIKit
 
 // Autocomplete de endereço (nativo, sem chave): sugere estabelecimentos/ruas conforme
 // digita, com viés na região do carro.
@@ -244,6 +245,7 @@ struct ArrivalSheet: View {
     @State private var activeField: Field = .dest
     @State private var favTarget: SavedPlace?             // alvo do alerta "salvar favorito"
     @State private var favName = ""
+    @State private var navApp: String?                    // "waze"/"maps" → abre o diálogo "abrir em…"
     @Environment(\.dismiss) private var dismiss
     @FocusState private var focusedField: Field?
 
@@ -359,6 +361,23 @@ struct ArrivalSheet: View {
         if l.contains("casa") { return "house.fill" }
         if l.contains("trabalho") || l.contains("escritório") || l.contains("work") { return "briefcase.fill" }
         return "star.fill"
+    }
+
+    // Abre a navegação neste iPhone. app: "waze" | "apple" (Apple Maps). Cai pro web se faltar o app.
+    private func openLocal(_ p: ArrivalPlan, app: String) {
+        let lat = p.destLat, lng = p.destLng
+        let appURL: URL?, webURL: URL?
+        switch app {
+        case "waze":
+            appURL = URL(string: "waze://?ll=\(lat),\(lng)&navigate=yes")
+            webURL = URL(string: "https://waze.com/ul?ll=\(lat),\(lng)&navigate=yes")
+        default:   // Apple Maps
+            appURL = URL(string: "maps://?daddr=\(lat),\(lng)&dirflg=d")
+            webURL = URL(string: "http://maps.apple.com/?daddr=\(lat),\(lng)&dirflg=d")
+        }
+        if let u = appURL, UIApplication.shared.canOpenURL(u) { UIApplication.shared.open(u) }
+        else if let w = webURL { UIApplication.shared.open(w) }
+        store.sentMsg = "Abrindo \(app == "waze" ? "Waze" : "Maps") neste iPhone ✓"
     }
 
     // Usa um lugar salvo: preenche o destino + coordenada e calcula.
@@ -485,20 +504,35 @@ struct ArrivalSheet: View {
                 DSActionButton(icon: "car.fill", title: "Enviar pro carro", color: DS.green) {
                     Task { await store.sendToCar(p) }
                 }
-                // Abre a navegação no seu celular Android (Nav Relay com papel "Celular").
+                // Um botão por app: ao tocar, pergunta onde abrir (iPhone, Android ou carro).
                 HStack(spacing: 10) {
-                    DSActionButton(icon: "location.north.fill", title: "Waze", color: DS.teal) {
-                        Task { await store.sendToCar(p, app: "waze", target: "phone") }
-                    }
-                    DSActionButton(icon: "map.fill", title: "Maps", color: DS.blue) {
-                        Task { await store.sendToCar(p, app: "maps", target: "phone") }
-                    }
+                    DSActionButton(icon: "location.north.fill", title: "Waze", color: DS.teal) { navApp = "waze" }
+                    DSActionButton(icon: "map.fill", title: "Maps", color: DS.blue) { navApp = "maps" }
                 }
                 if let m = store.sentMsg {
                     Text(m).font(.caption).foregroundStyle(m.contains("✓") ? DS.green : DS.orange)
                         .frame(maxWidth: .infinity, alignment: .center)
                 }
             }
+        }
+        .confirmationDialog(
+            navApp == "waze" ? "Abrir Waze em…" : "Abrir Maps em…",
+            isPresented: Binding(get: { navApp != nil }, set: { if !$0 { navApp = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("Neste iPhone") {
+                let a = navApp; navApp = nil
+                openLocal(p, app: a == "waze" ? "waze" : "apple")
+            }
+            Button("Celular Android") {
+                let a = navApp; navApp = nil
+                Task { await store.sendToCar(p, app: a == "waze" ? "waze" : "maps", target: "phone") }
+            }
+            Button("No carro") {
+                let a = navApp; navApp = nil
+                Task { await store.sendToCar(p, app: a == "waze" ? "waze" : "maps", target: "car") }
+            }
+            Button("Cancelar", role: .cancel) { navApp = nil }
         }
     }
 }
