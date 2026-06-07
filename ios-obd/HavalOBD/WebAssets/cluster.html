@@ -70,15 +70,16 @@
   body.native .widget.quick-widget { display: flex !important; flex-direction: column; min-height: 0; overflow: hidden; }
   /* Dock horizontal: cartões lado a lado, rolagem horizontal, botões grandes (uso em movimento). */
   body.native .quick-widget { overflow: visible; }
+  /* Sem rolagem: cartas quebram em linhas e ocupam toda a largura (cresce pra baixo). */
   body.native .quick-widget .dc-body {
-    flex: none; flex-direction: row !important; overflow-x: auto; overflow-y: hidden;
-    gap: 12px; padding: 0 2px 8px 0; align-items: flex-start;   /* cartas mantêm altura natural (sem vão) */
+    flex: none; flex-direction: row !important; flex-wrap: wrap; overflow: visible;
+    gap: 10px; padding: 0; align-items: stretch;
   }
-  body.native .quick-widget .dc-card { min-width: 250px; flex: 0 0 auto; justify-content: flex-start; }
+  body.native .quick-widget .dc-card { flex: 1 1 240px; min-width: 0; justify-content: flex-start; }
   body.native .quick-widget .dc-label { font-size: 16px; }
   body.native .quick-widget .dm-chip { font-size: 22px; padding: 22px 10px; }
   body.native .quick-widget .op-lbl { font-size: 20px; }
-  body.native .quick-widget .dc-card.aberturas { min-width: 240px; }
+  body.native .quick-widget .dc-card.aberturas { flex: 1 1 240px; }
   body.native .quick-widget .dc-card.aberturas .veh-grid { display: flex; flex-direction: column; gap: 10px; }
   body.native .quick-widget .dc-card.aberturas .veh-btn {
     font-size: 22px; font-weight: 600; padding: 22px 16px; border-radius: 14px; text-align: left;
