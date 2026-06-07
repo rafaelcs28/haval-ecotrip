@@ -86,6 +86,9 @@ struct BatteryProvider: TimelineProvider {
             // Door open: qualquer porta lateral, traseira ou porta-malas aberta
             let doorKeys = ["door_fl", "door_fr", "door_rl", "door_rr", "door_trunk"]
             let anyDoor = doorKeys.contains { (json[$0] as? String) == "open" }
+            // lock_state do bridge é 'off'=trancado / 'on'=destrancado → normaliza.
+            let lockRaw = json["lock_state"] as? String
+            let lockNorm: String? = lockRaw == "off" ? "locked" : (lockRaw == "on" ? "unlocked" : nil)
             return BatteryEntry(
                 date:         Date(),
                 soc:          (json["soc_pct"]              as? Double) ?? 0,
@@ -105,8 +108,8 @@ struct BatteryProvider: TimelineProvider {
                                 ?? (json["price_kwh"]            as? Double),
                 priceGas:     (json["tank_avg_price_per_l"] as? Double)
                                 ?? (json["price_gas_per_l"] as? Double),
-                engineOn:     (json["engine_state"]         as? String) == "on",
-                lockState:    json["lock_state"]            as? String,
+                engineOn:     { let e = json["engine_state"]; return (e as? String) == "1" || (e as? Int) == 1 || (e as? Double) == 1 }(),
+                lockState:    lockNorm,
                 doorOpen:     anyDoor,
                 isConfigured: true,
                 error:        nil

@@ -247,6 +247,7 @@ struct ArrivalSheet: View {
     @State private var favName = ""
     @State private var navApp: String?                    // "waze"/"maps" → abre o diálogo "abrir em…"
     @State private var pickingSaved = false               // texto setado por favorito/recente (não zerar coord)
+    @State private var showMapPicker = false
     @Environment(\.dismiss) private var dismiss
     @FocusState private var focusedField: Field?
 
@@ -266,6 +267,13 @@ struct ArrivalSheet: View {
                             }.frame(maxWidth: .infinity, alignment: .center)
                             addrField("Destino (endereço ou local)", text: $dest, field: .dest, icon: "mappin.circle")
                             if !completer.results.isEmpty && store.plan == nil { suggestionsList }
+                            Button { showMapPicker = true } label: {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "map.fill").font(.caption)
+                                    Text("Escolher no mapa").font(.caption.weight(.semibold))
+                                }.foregroundStyle(DS.teal).frame(maxWidth: .infinity).padding(.vertical, 8)
+                                    .background(DS.panel2).clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            }
                             DSActionButton(icon: "location.fill.viewfinder", title: "Calcular",
                                            color: DS.teal, busy: store.loading) { calc() }
                         }
@@ -287,6 +295,11 @@ struct ArrivalSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Fechar") { dismiss() } } }
             .onAppear { focusedField = .dest }
+            .sheet(isPresented: $showMapPicker) {
+                MapPickerSheet(start: destCoord.map { .init(latitude: $0.0, longitude: $0.1) } ?? CarStore.shared.coordinate) { c, nm in
+                    usePicked(c, name: nm)
+                }
+            }
             .alert("Salvar favorito", isPresented: Binding(
                 get: { favTarget != nil }, set: { if !$0 { favTarget = nil } }), presenting: favTarget) { place in
                 TextField("Nome (Casa, Trabalho…)", text: $favName)
@@ -382,6 +395,15 @@ struct ArrivalSheet: View {
     }
 
     // Usa um lugar salvo: preenche o destino + coordenada e calcula.
+    // Destino escolhido tocando no mapa: usa a coordenada direto.
+    private func usePicked(_ c: CLLocationCoordinate2D, name: String) {
+        pickingSaved = true
+        dest = name
+        destCoord = (c.latitude, c.longitude)
+        completer.clear(); focusedField = nil
+        Task { await store.compute(query: name, trips: trips, toLat: c.latitude, toLng: c.longitude) }
+    }
+
     private func use(_ p: SavedPlace) {
         // Marca que o texto foi setado por um lugar salvo, pra o onChange do campo
         // NÃO zerar a coordenada (senão o cálculo cai no texto "Trabalho" em vez do
