@@ -176,15 +176,74 @@ func arrivalSocColor(_ soc: Int) -> Color {
     return DS.green
 }
 
+// Endereço salvo: recente (busca anterior) ou favorito com apelido (Casa, Trabalho…).
+struct SavedPlace: Codable, Identifiable, Equatable {
+    var id = UUID()
+    var label: String          // apelido do favorito ("" = recente sem apelido)
+    var name: String           // endereço/nome resolvido
+    var lat: Double
+    var lng: Double
+    var favorite: Bool = false
+    var ts: Double = Date().timeIntervalSince1970
+    var display: String { label.isEmpty ? name : label }
+}
+
+// Persiste recentes + favoritos no App Group (compartilhável com widgets/intents).
+@MainActor
+final class PlacesStore: ObservableObject {
+    static let shared = PlacesStore()
+    @Published private(set) var places: [SavedPlace] = []
+    private let key = "arrival_places"
+    private var def: UserDefaults { UserDefaults(suiteName: "group.br.com.consorciolimpagyn.havalecotrip") ?? .standard }
+
+    init() { if let d = def.data(forKey: key), let p = try? JSONDecoder().decode([SavedPlace].self, from: d) { places = p } }
+    private func persist() { if let d = try? JSONEncoder().encode(places) { def.set(d, forKey: key) } }
+
+    var favorites: [SavedPlace] { places.filter { $0.favorite }.sorted { $0.label.localizedCaseInsensitiveCompare($1.label) == .orderedAscending } }
+    var recents: [SavedPlace]   { places.filter { !$0.favorite }.sorted { $0.ts > $1.ts } }
+
+    private func near(_ p: SavedPlace, _ lat: Double, _ lng: Double) -> Bool {
+        abs(p.lat - lat) < 0.0005 && abs(p.lng - lng) < 0.0005
+    }
+
+    // Toda busca calculada vira recente (a menos que já exista como favorito/recente perto).
+    func addRecent(name: String, lat: Double, lng: Double) {
+        guard lat != 0 || lng != 0 else { return }
+        if let i = places.firstIndex(where: { near($0, lat, lng) }) {
+            places[i].ts = Date().timeIntervalSince1970
+            if places[i].name.isEmpty { places[i].name = name }
+        } else {
+            places.append(SavedPlace(label: "", name: name, lat: lat, lng: lng, favorite: false))
+        }
+        for old in recents.dropFirst(12) { places.removeAll { $0.id == old.id } }   // mantém 12 recentes
+        persist()
+    }
+
+    // Move pra favoritos (ou renomeia um favorito existente) com apelido.
+    func favorite(_ p: SavedPlace, label: String) {
+        if let i = places.firstIndex(where: { $0.id == p.id }) {
+            places[i].favorite = true; places[i].label = label
+        } else {
+            places.append(SavedPlace(label: label, name: p.name, lat: p.lat, lng: p.lng, favorite: true))
+        }
+        persist()
+    }
+
+    func remove(_ p: SavedPlace) { places.removeAll { $0.id == p.id }; persist() }
+}
+
 struct ArrivalSheet: View {
     let trips: [Trip]
     @StateObject private var store = ArrivalStore()
     @StateObject private var completer = AddressCompleter()
+    @ObservedObject private var places = PlacesStore.shared
     @State private var dest = ""
     @State private var origin = ""                        // vazio = local atual do carro
     @State private var destCoord: (Double, Double)? = nil
     @State private var originCoord: (Double, Double)? = nil
     @State private var activeField: Field = .dest
+    @State private var favTarget: SavedPlace?             // alvo do alerta "salvar favorito"
+    @State private var favName = ""
     @Environment(\.dismiss) private var dismiss
     @FocusState private var focusedField: Field?
 
@@ -214,6 +273,8 @@ struct ArrivalSheet: View {
                             .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 4)
                     }
 
+                    if store.plan == nil && completer.results.isEmpty { placesSection }
+
                     if let p = store.plan { resultCard(p) }
                 }
                 .padding(16)
@@ -223,7 +284,88 @@ struct ArrivalSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Fechar") { dismiss() } } }
             .onAppear { focusedField = .dest }
+            .alert("Salvar favorito", isPresented: Binding(
+                get: { favTarget != nil }, set: { if !$0 { favTarget = nil } }), presenting: favTarget) { place in
+                TextField("Nome (Casa, Trabalho…)", text: $favName)
+                Button("Salvar") {
+                    let nm = favName.trimmingCharacters(in: .whitespaces)
+                    places.favorite(place, label: nm.isEmpty ? place.name : nm)
+                    favTarget = nil; favName = ""
+                }
+                Button("Cancelar", role: .cancel) { favTarget = nil; favName = "" }
+            } message: { place in Text(place.name) }
         }
+    }
+
+    // Favoritos (chips) + Recentes (lista), mostrados quando não há busca/resultado ativo.
+    @ViewBuilder private var placesSection: some View {
+        if !places.favorites.isEmpty || !places.recents.isEmpty {
+            DSCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    if !places.favorites.isEmpty {
+                        Text("Favoritos").font(.caption).foregroundStyle(DS.muted)
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) { ForEach(places.favorites) { favChip($0) } }
+                        }
+                    }
+                    if !places.recents.isEmpty {
+                        Text("Recentes").font(.caption).foregroundStyle(DS.muted)
+                        VStack(spacing: 0) {
+                            ForEach(places.recents) { r in
+                                recentRow(r)
+                                if r.id != places.recents.last?.id { Divider().background(DS.border) }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func favChip(_ f: SavedPlace) -> some View {
+        Button { use(f) } label: {
+            HStack(spacing: 6) {
+                Image(systemName: placeIcon(f.label)).font(.caption)
+                Text(f.display).font(.subheadline).lineLimit(1)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 8)
+            .background(DS.panel2).clipShape(Capsule()).foregroundStyle(DS.text)
+        }
+        .contextMenu {
+            Button { favName = f.label; favTarget = f } label: { Label("Renomear", systemImage: "pencil") }
+            Button(role: .destructive) { places.remove(f) } label: { Label("Remover", systemImage: "trash") }
+        }
+    }
+
+    private func recentRow(_ r: SavedPlace) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "clock.arrow.circlepath").font(.subheadline).foregroundStyle(DS.muted)
+            Button { use(r) } label: {
+                Text(r.name).font(.subheadline).foregroundStyle(DS.text).lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            Button { favName = ""; favTarget = r } label: {
+                Image(systemName: "star").font(.subheadline).foregroundStyle(DS.yellow)
+            }.buttonStyle(.plain)
+            Button { places.remove(r) } label: {
+                Image(systemName: "xmark.circle.fill").font(.subheadline).foregroundStyle(DS.muted)
+            }.buttonStyle(.plain)
+        }
+        .padding(.vertical, 9)
+    }
+
+    private func placeIcon(_ label: String) -> String {
+        let l = label.lowercased()
+        if l.contains("casa") { return "house.fill" }
+        if l.contains("trabalho") || l.contains("escritório") || l.contains("work") { return "briefcase.fill" }
+        return "star.fill"
+    }
+
+    // Usa um lugar salvo: preenche o destino + coordenada e calcula.
+    private func use(_ p: SavedPlace) {
+        dest = p.display; destCoord = (p.lat, p.lng)
+        completer.clear(); focusedField = nil
+        calc()
     }
 
     @ViewBuilder private func addrField(_ placeholder: String, text: Binding<String>, field: Field, icon: String) -> some View {
@@ -271,6 +413,9 @@ struct ArrivalSheet: View {
             await store.compute(query: dest, trips: trips,
                                 toLat: destCoord?.0, toLng: destCoord?.1,
                                 fromLat: fromC?.0, fromLng: fromC?.1)
+            if let p = store.plan, p.destLat != 0 || p.destLng != 0 {
+                places.addRecent(name: p.destName, lat: p.destLat, lng: p.destLng)
+            }
         }
     }
 
