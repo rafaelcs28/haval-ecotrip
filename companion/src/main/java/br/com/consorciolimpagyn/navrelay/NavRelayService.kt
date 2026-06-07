@@ -29,6 +29,7 @@ class NavRelayService : Service() {
 
     @Volatile private var client: MqttClient? = null
     @Volatile private var running = false
+    @Volatile private var role = "car"   // 'car' (dedicado no carro) ou 'phone' (celular pessoal)
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -44,6 +45,7 @@ class NavRelayService : Service() {
         val user   = cfg.getString("user", "") ?: ""
         val pass   = cfg.getString("pass", "") ?: ""
         val topic  = cfg.getString("topic", "haval/ecotrip/nav_to") ?: "haval/ecotrip/nav_to"
+        role = cfg.getString("role", "car") ?: "car"
         if (broker.isBlank()) { status = "configure o bridge"; updateNotif(status); return }
         while (running) {
             try {
@@ -66,7 +68,7 @@ class NavRelayService : Service() {
                 c.connect(opts)
                 c.subscribe(topic, 1)
                 client = c
-                status = "conectado · ouvindo $topic"; updateNotif(status)
+                status = "conectado · ${if (role == "phone") "Celular" else "Carro"} · ouvindo $topic"; updateNotif(status)
                 while (running && c.isConnected) Thread.sleep(1000)
             } catch (e: Exception) {
                 status = "erro: ${e.message}"; updateNotif(status)
@@ -76,6 +78,10 @@ class NavRelayService : Service() {
     }
 
     private fun onNav(j: JSONObject) {
+        // Filtra pelo papel: 'phone' só atende mensagens target=phone; 'car' (default)
+        // atende target=car ou sem target (legado). Assim o iPhone manda só pro celular.
+        val target = j.optString("target", "")
+        if (target.isNotEmpty() && target != role) return
         val lat = j.optDouble("lat", 0.0); val lng = j.optDouble("lng", 0.0)
         val name = j.optString("name", ""); val app = j.optString("app", "maps")
         if (lat == 0.0 && lng == 0.0) return

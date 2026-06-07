@@ -53,6 +53,7 @@ private fun ConfigScreen(
     var user   by remember { mutableStateOf(prefs.getString("user", "") ?: "") }
     var pass   by remember { mutableStateOf(prefs.getString("pass", "") ?: "") }
     var topic  by remember { mutableStateOf(prefs.getString("topic", "haval/ecotrip/nav_to") ?: "") }
+    var role   by remember { mutableStateOf(prefs.getString("role", "car") ?: "car") }
     var saved  by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf(NavRelayService.status) }
 
@@ -69,9 +70,17 @@ private fun ConfigScreen(
         OutlinedTextField(user, { user = it }, label = { Text("Usuário MQTT") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(pass, { pass = it }, label = { Text("Senha MQTT") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(topic, { topic = it }, label = { Text("Tópico") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        Text("Este aparelho é:", style = MaterialTheme.typography.bodyMedium)
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            FilterChip(selected = role == "car",   onClick = { role = "car" },   label = { Text("Carro (dedicado)") })
+            FilterChip(selected = role == "phone", onClick = { role = "phone" }, label = { Text("Celular") })
+        }
+        Text(if (role == "phone") "Recebe só os envios marcados pro celular (botão Waze/Maps do iPhone)."
+             else "Recebe os envios do carro (e os sem destino definido).",
+            style = MaterialTheme.typography.bodySmall)
         Button(onClick = {
             prefs.edit().putString("broker", broker.trim()).putString("user", user.trim())
-                .putString("pass", pass).putString("topic", topic.trim()).apply()
+                .putString("pass", pass).putString("topic", topic.trim()).putString("role", role).apply()
             saved = true; onStart()
         }, modifier = Modifier.fillMaxWidth()) { Text("Salvar e iniciar serviço") }
         if (saved) Text("✓ Serviço iniciado. Pode deixar o app aberto/em background.")

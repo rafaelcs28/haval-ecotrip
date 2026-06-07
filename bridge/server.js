@@ -8234,19 +8234,23 @@ app.post('/api/nav-to', (req, res) => {
     return res.status(400).json({ ok: false, error: 'lat/lng obrigatórios' });
   const name = (String(req.body && req.body.name || '').trim() || `${lat.toFixed(5)}, ${lng.toFixed(5)}`).slice(0, 60);
   const app = String(req.body && req.body.app || '').toLowerCase();   // '', 'maps', 'waze'
+  const target = String(req.body && req.body.target || '').toLowerCase();  // '', 'car', 'phone'
   recentNavDests.push({ name, lat, lng, ts: Date.now() });
   if (recentNavDests.length > 30) recentNavDests.shift();
-  // Painel do carro (banner/chegada).
-  mqttClient.publish(`${MQTT_PREFIX}/cmd/nav_dest`,
-    JSON.stringify({ lat, lng, name, etaClock: '', ts: Date.now() }), { qos: 1, retain: true });
-  _navDestRetained = true;
-  // Se pediu Maps/Waze, manda também pro Nav Relay (Android no carro) abrir a navegação.
+  // Painel/Chegada do carro: só quando NÃO é navegação dedicada ao celular.
+  if (target !== 'phone') {
+    mqttClient.publish(`${MQTT_PREFIX}/cmd/nav_dest`,
+      JSON.stringify({ lat, lng, name, etaClock: '', ts: Date.now() }), { qos: 1, retain: true });
+    _navDestRetained = true;
+  }
+  // Se pediu Maps/Waze, manda pro Nav Relay abrir a navegação. O campo target
+  // ('car'/'phone') deixa cada aparelho filtrar pelo seu papel (vazio = todos).
   if (app === 'maps' || app === 'waze') {
     mqttClient.publish(`${MQTT_PREFIX}/nav_to`,
-      JSON.stringify({ lat, lng, name, app, ts: Date.now() }), { qos: 1, retain: false });
+      JSON.stringify({ lat, lng, name, app, target, ts: Date.now() }), { qos: 1, retain: false });
   }
   _maybeComputeArrival(true);   // já calcula a chegada pro cluster/estado
-  console.log(`[navTo] → carro: ${name} (${lat.toFixed(5)},${lng.toFixed(5)})${app ? ' · '+app : ''}`);
+  console.log(`[navTo] → ${target || 'carro'}: ${name} (${lat.toFixed(5)},${lng.toFixed(5)})${app ? ' · '+app : ''}`);
   res.json({ ok: true, name });
 });
 

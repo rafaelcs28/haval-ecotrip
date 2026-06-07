@@ -150,21 +150,22 @@ final class ArrivalStore: ObservableObject {
     }
 
     @Published var sentMsg: String?
-    // Manda o destino pro carro. app vazio = só painel; "maps"/"waze" = abre a navegação
-    // no Android (Nav Relay) que fica no carro, além do painel.
-    func sendToCar(_ p: ArrivalPlan, app: String = "") async {
+    // Manda o destino. app vazio = só painel do carro; "maps"/"waze" = abre a navegação
+    // no Nav Relay. target "phone" mira o celular pessoal (não o carro), "" = carro.
+    func sendToCar(_ p: ArrivalPlan, app: String = "", target: String = "") async {
         guard !base.isEmpty, let url = URL(string: "\(base)/api/nav-to") else { return }
         var r = URLRequest(url: url); r.httpMethod = "POST"; r.timeoutInterval = 10
         r.addValue("application/json", forHTTPHeaderField: "Content-Type")
         r.addValue("Bearer " + Settings.bridgeToken, forHTTPHeaderField: "Authorization")
-        r.httpBody = try? JSONSerialization.data(withJSONObject: ["lat": p.destLat, "lng": p.destLng, "name": p.destName, "app": app])
+        r.httpBody = try? JSONSerialization.data(withJSONObject: ["lat": p.destLat, "lng": p.destLng, "name": p.destName, "app": app, "target": target])
         if let (_, resp) = try? await URLSession.shared.data(for: r),
            (resp as? HTTPURLResponse)?.statusCode == 200 {
-            sentMsg = app == "waze" ? "No carro · abrindo Waze ✓"
-                    : app == "maps" ? "No carro · abrindo Maps ✓"
+            let onde = target == "phone" ? "No celular" : "No carro"
+            sentMsg = app == "waze" ? "\(onde) · abrindo Waze ✓"
+                    : app == "maps" ? "\(onde) · abrindo Maps ✓"
                     : "Enviado pro carro ✓"
         } else {
-            sentMsg = "Falha ao enviar pro carro"
+            sentMsg = "Falha ao enviar"
         }
     }
 }
@@ -339,13 +340,13 @@ struct ArrivalSheet: View {
                 DSActionButton(icon: "car.fill", title: "Enviar pro carro", color: DS.green) {
                     Task { await store.sendToCar(p) }
                 }
-                // Abre a navegação no Android (Nav Relay) que fica no carro — sem sacar o aparelho.
+                // Abre a navegação no seu celular Android (Nav Relay com papel "Celular").
                 HStack(spacing: 10) {
                     DSActionButton(icon: "location.north.fill", title: "Waze", color: DS.teal) {
-                        Task { await store.sendToCar(p, app: "waze") }
+                        Task { await store.sendToCar(p, app: "waze", target: "phone") }
                     }
                     DSActionButton(icon: "map.fill", title: "Maps", color: DS.blue) {
-                        Task { await store.sendToCar(p, app: "maps") }
+                        Task { await store.sendToCar(p, app: "maps", target: "phone") }
                     }
                 }
                 if let m = store.sentMsg {
