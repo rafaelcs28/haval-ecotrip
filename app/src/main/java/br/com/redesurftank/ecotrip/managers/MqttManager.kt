@@ -2472,6 +2472,11 @@ class MqttManager private constructor() {
                                         VehicleControlManager.setWindowStatus(o.getInt("window"), status)
                                     publishResult("vehicle/window", if (ok) "ok" else "error")
                                 }
+                                "window_all" -> {
+                                    // Status único aplicado a todos os vidros (1=fechado,3=entreaberto,0=aberto).
+                                    val ok = VehicleControlManager.setAllWindows(payload.trim().toInt())
+                                    publishResult("vehicle/window_all", if (ok) "ok" else "error")
+                                }
                                 "skylight" -> {
                                     val ok = VehicleControlManager.setSkylightLevel(payload.trim().toInt())
                                     publishResult("vehicle/skylight", if (ok) "ok" else "error")

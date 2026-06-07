@@ -1233,6 +1233,7 @@
       </div>
       <!-- Controles físicos (canto inf-dir do mapa, espaço livre) -->
       <div class="veh-controls">
+        <button class="veh-btn" onclick="openVehPicker('windows')">🪟 Vidros</button>
         <button class="veh-btn" onclick="openVehPicker('shade')">⛱ Cortina</button>
         <button class="veh-btn" onclick="openVehPicker('skylight')">☀ Teto solar</button>
       </div>
@@ -2363,6 +2364,12 @@ function sendCmd(action, value) {
 
 // ── Controles físicos: cortina e teto solar (seletor de valor) ───────────────
 const VEH_PICKERS = {
+  windows: {
+    title: 'Vidros (todos)', action: 'vehicle_windows',
+    opts: [{ label: 'Fechar', value: 1, cls: 'close' },
+      { label: 'Entreaberto', value: 3 },
+      { label: 'Abrir tudo', value: 0, cls: 'accent' }],
+  },
   shade: {
     title: 'Cortina — abrir quanto?', action: 'vehicle_shade',
     opts: [{ label: 'Fechar', value: 0, cls: 'close' },

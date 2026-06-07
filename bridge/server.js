@@ -6148,6 +6148,19 @@ app.post('/api/vehicle/skylight', (req, res) => {
   });
 });
 
+// POST /api/vehicle/window-all  { level } — todos os vidros. 1=fechado · 3=entreaberto · 0=aberto.
+app.post('/api/vehicle/window-all', (req, res) => {
+  const level = parseInt(req.body?.level);
+  if (![0, 1, 3].includes(level))
+    return res.status(400).json({ error: 'level inválido (1=fechado, 3=entreaberto, 0=aberto)' });
+  if (!mqttClient?.connected) return res.status(503).json({ error: 'MQTT offline' });
+  mqttClient.publish(`${MQTT_PREFIX}/cmd/vehicle/window_all`, String(level), { qos: 1, retain: false }, err => {
+    if (err) return res.status(500).json({ error: 'falha ao publicar' });
+    console.log(`[vehicle] window_all = ${level}`);
+    res.json({ ok: true, level });
+  });
+});
+
 app.post('/api/hvac/:control', (req, res) => {
   const { control } = req.params;
   const spec = HVAC_CONTROLS[control];

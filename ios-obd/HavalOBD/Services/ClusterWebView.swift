@@ -135,6 +135,9 @@ struct ClusterWebView: UIViewRepresentable {
             case "vehicle_skylight":
                 // Teto solar: 0=fechado · 200=ventilação · 10..100=abertura.
                 Task { await publisher.postCommand(path: "/api/vehicle/skylight", body: ["level": Int(value) ?? 0]) }
+            case "vehicle_windows":
+                // Vidros (todos): 1=fechado · 3=entreaberto · 0=aberto.
+                Task { await publisher.postCommand(path: "/api/vehicle/window-all", body: ["level": Int(value) ?? 1]) }
             case "open_nav":
                 let app = (dict["app"] as? String ?? "waze").lowercased()
                 let schemes: [String: String] = [
