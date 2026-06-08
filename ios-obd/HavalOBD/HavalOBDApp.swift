@@ -118,6 +118,9 @@ struct RootView: View {
         .onChange(of: channel.navRequestId) { old, new in
             if new > old { withAnimation(.spring(response: 0.3)) { showNav = true } }
         }
+        .onChange(of: channel.settingsRequestId) { old, new in
+            if new > old { showSettings = true }
+        }
         .onChange(of: channel.webViewReady) { _, ready in
             if ready {
                 // Fade out suave do splash 200ms depois do cluster estar pronto

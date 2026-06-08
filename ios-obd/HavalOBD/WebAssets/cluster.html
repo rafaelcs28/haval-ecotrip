@@ -835,20 +835,241 @@
   #obd-debug td.age { color: #888; text-align: right; }
   #obd-debug td.age.stale { color: #f77; }
 </style>
+<!-- ═══════════════════════════════════════════════════════════════════════
+     REDESIGN V4 · Controles — estilos novos (vêm DEPOIS do <style> legado,
+     então vencem nas classes em comum; o markup novo usa .cockpit/.v4/.panel/
+     .ctrl-* e ignora o layout antigo .stage/.row-*). Base = cockpit-base.css.
+     ═══════════════════════════════════════════════════════════════════════ -->
+<style>
+  :root {
+    --bg:#000; --panel:#0d0d0f; --panel-lift:#16161a;
+    --border:#1f1f24; --border-hi:#2c2c33;
+    --green:#22c55e; --green-dim:#15803d;
+    --orange:#fb923c; --orange-dim:#c2410c;
+    --blue:#38bdf8; --blue-dim:#0369a1;
+    --teal:#22d3ee; --yellow:#facc15; --red:#ef4444;
+    --text:#f5f5f5; --muted:#8b8f98; --dim:#3f3f46;
+    --glass-bg:rgba(13,13,15,.55); --glass-border:rgba(255,255,255,.08);
+    --r-panel:28px; --r-pill:999px;
+  }
+  html, body { width:100vw; height:100vh; overflow:hidden; background:var(--bg); margin:0; padding:0; }
+  body {
+    color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display",system-ui,sans-serif;
+    font-feature-settings:"tnum" 1,"lnum" 1; -webkit-font-smoothing:antialiased;
+    display:flex; flex-direction:column; user-select:none; -webkit-user-select:none;
+    -webkit-touch-callout:none; touch-action:pan-x;
+  }
+  .tnum { font-variant-numeric:tabular-nums; }
+
+  /* mapa: precisa de tamanho pro Leaflet/MapKit inicializar — fica atrás, invisível */
+  #cluster-map, #cluster-map-bot { position:absolute !important; inset:0 !important; z-index:0 !important; opacity:0 !important; pointer-events:none !important; }
+  /* sentinels do código legado: presentes no DOM, fora da tela */
+  .legacy-hidden { position:absolute !important; left:-99999px !important; top:0 !important; width:1px !important; height:1px !important; overflow:hidden !important; opacity:0 !important; pointer-events:none !important; }
+  #trip-eta-banner { display:none !important; }
+
+  /* ───────── Topbar ───────── */
+  .topbar { display:flex; align-items:center; justify-content:space-between; height:52px; padding:0 28px; flex-shrink:0; font-size:15px; color:var(--muted); background:rgba(0,0,0,.6); border-bottom:1px solid var(--border); position:relative; z-index:20; }
+  .topbar .left, .topbar .right { display:flex; gap:16px; align-items:center; }
+  .topbar .clock { font-variant-numeric:tabular-nums; font-weight:600; color:var(--text); font-size:18px; }
+  .topbar .lbl { letter-spacing:.12em; text-transform:uppercase; font-size:12px; }
+  .topbar .dot { width:10px; height:10px; border-radius:50%; background:var(--red); box-shadow:0 0 8px rgba(239,68,68,.6); transition:background .3s, box-shadow .3s; }
+  .topbar .dot.ok { background:var(--green); box-shadow:0 0 8px rgba(34,197,94,.6); }
+  .topbar .dot.warn { background:var(--yellow); box-shadow:0 0 8px rgba(250,204,21,.6); }
+  .conn-mode { display:flex; align-items:center; gap:5px; font-size:13px; font-weight:700; letter-spacing:.06em; border-radius:999px; padding:5px 12px; cursor:pointer; transition:background .15s, transform .1s; }
+  .conn-mode.lan { color:var(--green); background:rgba(34,197,94,.12); border:1px solid rgba(34,197,94,.4); }
+  .conn-mode.cloud { color:var(--blue); background:rgba(56,189,248,.12); border:1px solid rgba(56,189,248,.4); }
+  .conn-mode:active { transform:scale(.95); }
+  .cfg-btn { margin-left:8px; width:34px; height:34px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:17px; color:var(--text); background:rgba(255,255,255,.06); border:1px solid var(--border-hi); cursor:pointer; transition:transform .1s, background .15s; }
+  .cfg-btn:active { transform:scale(.9); }
+
+  /* ───────── Panels ───────── */
+  .panel { background:var(--panel); border:1px solid var(--border); border-radius:var(--r-panel); position:relative; overflow:hidden; }
+  .panel-h { display:flex; align-items:center; gap:9px; font-size:15px; font-weight:700; letter-spacing:.14em; text-transform:uppercase; color:var(--muted); }
+  .panel-h .ico { font-size:19px; }
+
+  /* ───────── Grid V4 ───────── */
+  .v4 { flex:1; display:grid; grid-template-columns:1.5fr 1fr 1.05fr 1.05fr; grid-template-rows:184px 1fr 124px; gap:14px; padding:14px; min-height:0; }
+  .v4 .p-power { grid-column:1; grid-row:1; padding:20px 26px; display:flex; flex-direction:column; }
+  .v4 .p-speed { grid-column:2; grid-row:1; padding:18px; display:flex; flex-direction:column; }
+  .v4 .p-soc { grid-column:3; grid-row:1; padding:18px; display:flex; flex-direction:column; justify-content:center; }
+  .v4 .p-fuel { grid-column:4; grid-row:1; padding:18px; display:flex; flex-direction:column; justify-content:center; }
+  .v4 .p-ctrl { grid-column:1 / -1; grid-row:2; padding:18px 22px; display:flex; flex-direction:column; gap:14px; }
+  .v4 .p-trip { grid-column:1 / -1; grid-row:3; padding:14px 26px; display:flex; flex-direction:column; gap:8px; }
+
+  /* ───────── Power ───────── */
+  .power-num { display:flex; align-items:baseline; line-height:.9; }
+  .power-val { font-weight:200; letter-spacing:-8px; font-variant-numeric:tabular-nums; transition:color .25s; }
+  .power-val.idle { color:var(--muted); }
+  .power-unit { color:var(--muted); font-weight:300; }
+  .power-bar { height:26px; background:var(--border); border-radius:var(--r-pill); position:relative; overflow:hidden; }
+  .power-bar-mid { position:absolute; top:0; bottom:0; left:50%; width:2px; background:var(--border-hi); }
+  .power-bar-fill { position:absolute; top:0; bottom:0; left:50%; width:0; transition:width .25s ease-out, background .25s; }
+  .power-scale { display:flex; justify-content:space-between; color:var(--dim); letter-spacing:.06em; }
+  .v4 .power-row { flex:1; display:flex; align-items:center; gap:26px; }
+  .v4 .power-val { font-size:116px; letter-spacing:-5px; }
+  .v4 .power-unit { font-size:34px; }
+  .v4 .power-meta { flex:1; display:flex; flex-direction:column; gap:10px; }
+  .v4 .power-bar { width:100%; margin:0; }
+  .v4 .power-scale { width:100%; margin:0; font-size:13px; }
+  .v4 .power-val.drive { color:var(--yellow); }
+  .v4 .power-val.regen { color:var(--green); }
+  .v4 .power-bar-fill.drive { background:linear-gradient(90deg, transparent, var(--yellow)); }
+  .v4 .power-bar-fill.regen { background:linear-gradient(270deg, transparent, var(--green)); }
+
+  /* ───────── Speed ───────── */
+  .speed-block { display:flex; align-items:baseline; gap:12px; }
+  .speed-val { font-weight:300; line-height:1; font-variant-numeric:tabular-nums; color:var(--text); }
+  .speed-unit { color:var(--muted); font-weight:500; }
+  .speed-max { font-size:22px; color:var(--muted); font-variant-numeric:tabular-nums; }
+  .speed-max strong { color:var(--text); font-weight:600; }
+  .v4 .p-speed .mid { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; }
+  .v4 .speed-val { font-size:92px; }
+  .v4 .speed-unit { font-size:22px; }
+
+  /* ───────── Gauges mini ───────── */
+  .gauge-mini { display:flex; align-items:center; gap:12px; }
+  .gauge-mini .ring { position:relative; width:118px; height:118px; flex-shrink:0; }
+  .gauge-mini .ring svg { width:118px; height:118px; }
+  .gauge-track { fill:none; stroke:rgba(255,255,255,.08); stroke-width:14; }
+  .gauge-fill { fill:none; stroke-width:14; stroke-linecap:round; transition:stroke-dashoffset .6s ease-out; filter:drop-shadow(0 0 8px currentColor); }
+  .gauge-fill.soc { stroke:var(--green); color:var(--green); }
+  .gauge-fill.fuel { stroke:var(--orange); color:var(--orange); }
+  .gauge-center { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; }
+  .gauge-big { font-weight:200; line-height:1; font-variant-numeric:tabular-nums; }
+  .gauge-big .pct { color:var(--muted); }
+  .gauge-mini .ring .gauge-center .gauge-big { font-size:40px; }
+  .gauge-mini .ring .gauge-center .gauge-big .pct { font-size:18px; }
+  .v4 .gauge-mini .ring .gauge-center .gauge-big { font-size:33px; letter-spacing:-1px; }
+  .v4 .gauge-mini .ring .gauge-center .gauge-big .pct { font-size:14px; margin-left:1px; }
+  .gauge-mini .meta .m-lbl { font-size:13px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); display:flex; align-items:center; gap:5px; white-space:nowrap; }
+  .gauge-mini .meta .m-main { font-size:22px; font-weight:700; margin-top:4px; }
+  .gauge-mini .meta .m-sub { font-size:14px; color:var(--muted); margin-top:2px; }
+  .gauge-mini .meta .m-main.green { color:var(--green); }
+  .gauge-mini .meta .m-main.orange { color:var(--orange); }
+
+  /* ───────── Controles (3 áreas) ───────── */
+  .ctrl-areas { flex:1; display:grid; grid-template-columns:1.7fr 1.15fr 0.85fr; gap:14px; min-height:0; }
+  .ctrl-area { background:rgba(255,255,255,.02); border:1px solid var(--border); border-radius:20px; padding:14px; display:flex; flex-direction:column; gap:10px; min-height:0; }
+  .area-h { font-size:13px; font-weight:700; letter-spacing:.12em; text-transform:uppercase; color:var(--muted); display:flex; align-items:center; gap:7px; }
+  .area-h .ico { font-size:17px; }
+  .area-grid { flex:1; display:grid; gap:10px; min-height:0; }
+  .area-grid.clima, .area-grid.cond, .area-grid.veic { display:flex; flex-direction:column; gap:9px; }
+  .area-grid.cond { gap:7px; }
+  .clima-toggles { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; }
+  .clima-seats { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .sliders { display:flex; flex-direction:column; gap:9px; flex:1; justify-content:center; }
+  .cond .pair { display:grid; grid-template-columns:1fr 1fr; gap:9px; flex:1; align-items:stretch; }
+  .cond .pair .ctrl-tile { height:100%; }
+
+  .ctrl-tile { background:var(--panel-lift); border:1px solid var(--border-hi); border-radius:16px; padding:10px 8px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; cursor:pointer; min-height:0; text-align:center; -webkit-tap-highlight-color:transparent; transition:transform .12s ease-out, background .2s, border-color .2s; }
+  .ctrl-tile:active { transform:scale(.96); }
+  .ctrl-tile .ic { font-size:26px; line-height:1; }
+  .ctrl-tile .lbl { font-size:13px; font-weight:700; }
+  .ctrl-tile .st { font-size:12px; color:var(--muted); font-weight:600; }
+  .ctrl-tile.on { background:rgba(34,197,94,.06); border-color:rgba(34,197,94,.45); }
+  .ctrl-tile.on .ic, .ctrl-tile.on .st { color:var(--green); }
+  .clima-toggles .ctrl-tile { padding:8px 4px; gap:3px; }
+  .clima-toggles .ctrl-tile .ic { font-size:22px; }
+  .clima-toggles .ctrl-tile .lbl { font-size:11px; }
+  .clima-toggles .ctrl-tile .st { font-size:10px; }
+
+  /* segmented */
+  .seg-tile { display:flex; flex-direction:column; gap:8px; justify-content:center; background:var(--panel-lift); border:1px solid var(--border-hi); border-radius:16px; padding:11px 12px; }
+  .seg-h { font-size:12px; font-weight:700; letter-spacing:.1em; text-transform:uppercase; color:var(--muted); display:flex; align-items:center; gap:6px; }
+  .seg { display:flex; gap:6px; }
+  .seg button { flex:1; padding:13px 4px; border-radius:11px; background:rgba(255,255,255,.04); border:1px solid var(--border-hi); color:var(--text); font-size:14px; font-weight:700; font-family:inherit; cursor:pointer; transition:background .15s, border-color .15s, color .15s; }
+  .seg button:active { transform:scale(.96); }
+  .seg button.on { background:rgba(34,197,94,.06); border-color:rgba(34,197,94,.5); color:var(--green); }
+  .seg button small { display:block; font-size:10px; font-weight:600; opacity:.9; margin-top:1px; letter-spacing:0; }
+  .seg.regen button.on { background:rgba(34,211,238,.15); border-color:var(--teal); color:var(--teal); }
+  .air-seg .seg { gap:4px; }
+  .air-seg .seg button { font-size:11px; padding:11px 1px; }
+
+  /* sliders */
+  .slider-tile { background:var(--panel-lift); border:1px solid var(--border-hi); border-radius:14px; padding:10px 14px; display:flex; flex-direction:column; gap:8px; }
+  .slider-h { display:flex; align-items:center; justify-content:space-between; }
+  .slider-h .lbl { font-size:13px; font-weight:700; color:var(--text); display:flex; gap:6px; align-items:center; }
+  .slider-h .sv { font-size:22px; font-weight:600; font-variant-numeric:tabular-nums; }
+  .cv-slider { -webkit-appearance:none; appearance:none; width:100%; height:12px; border-radius:999px; background:var(--border); outline:none; }
+  .cv-slider::-webkit-slider-thumb { -webkit-appearance:none; width:36px; height:36px; border-radius:50%; background:var(--green); border:4px solid #0a0a0a; cursor:pointer; box-shadow:0 2px 10px rgba(0,0,0,.55); }
+  .cv-slider.teal::-webkit-slider-thumb { background:var(--teal); }
+  .clima-seats .slider-tile { padding:8px 12px; gap:6px; }
+  .clima-seats .slider-h .lbl { font-size:12px; }
+  .clima-seats .slider-h .sv { font-size:16px; color:var(--green); font-weight:700; }
+  .clima-seats .cv-slider { height:9px; }
+  .clima-seats .cv-slider::-webkit-slider-thumb { width:22px; height:22px; border-width:3px; }
+
+  /* veículo / aberturas */
+  .sub-h { font-size:11px; font-weight:700; letter-spacing:.1em; text-transform:uppercase; color:var(--dim); margin-top:2px; }
+  .vent-btn { margin-top:2px; width:100%; padding:9px; border-radius:11px; background:rgba(255,255,255,.04); border:1px solid var(--border-hi); color:var(--muted); font-size:13px; font-weight:700; font-family:inherit; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px; transition:background .15s, border-color .15s, color .15s; }
+  .vent-btn.on { background:rgba(56,189,248,.22); border-color:var(--blue); color:var(--blue); }
+  .vent-btn:active { transform:scale(.97); }
+  #ctrl-sunroof { font-size:15px; font-weight:700; }
+
+  /* pisca grande */
+  .veic .haz-big { margin-top:auto; min-height:130px; border-radius:18px; flex-direction:row; justify-content:center; gap:14px; background:var(--panel-lift); border:1px solid rgba(239,68,68,.55); }
+  .veic .haz-big .ic { display:flex; color:var(--red); }
+  .veic .haz-big .ic svg { width:46px; height:46px; }
+  .veic .haz-big .txt { display:flex; flex-direction:column; }
+  .veic .haz-big .lbl { font-size:22px; color:var(--text); }
+  .veic .haz-big .st { font-size:13px; color:var(--muted); }
+  .veic .haz-big.on .ic { color:#fff; }
+  @keyframes haz-flash { 0%,49% { background:var(--red); } 50%,100% { background:transparent; } }
+  .v4 .veic .haz-big.on { background:var(--red); border-color:#ff6b6b; animation:haz-flash 1s steps(1) infinite; }
+  .veic .haz-big.on .lbl { color:#fff; }
+  .veic .haz-big.on .st { color:rgba(255,255,255,.9); }
+
+  /* trip */
+  .dest-info { margin-left:14px; font-size:13px; font-weight:600; letter-spacing:.02em; color:var(--muted); text-transform:none; }
+  .dest-info b { color:var(--green); }
+  .dest-info .sep { color:var(--dim); margin:0 7px; }
+  .v4 .trip-grid { display:grid; grid-template-columns:repeat(8,1fr); grid-template-rows:1fr; gap:8px; align-content:center; flex:1; }
+  .trip-cell { display:flex; flex-direction:column; justify-content:center; }
+  .trip-val { font-size:24px; font-weight:300; line-height:1; font-variant-numeric:tabular-nums; }
+  .trip-val .u { font-size:14px; color:var(--muted); font-weight:500; margin-left:4px; }
+  .trip-val .sub { display:block; margin:2px 0 0; font-size:13px; color:var(--muted); font-weight:500; font-variant-numeric:tabular-nums; }
+  .trip-lbl { margin-top:5px; font-size:12px; letter-spacing:.14em; color:var(--muted); text-transform:uppercase; }
+  .trip-val.green { color:var(--green); } .trip-val.teal { color:var(--teal); }
+  .trip-val.orange { color:var(--orange); } .trip-val.yellow { color:var(--yellow); }
+  .v4 .trip-val.cost { font-size:17px; white-space:nowrap; }
+  .v4 .trip-val.cost .u { font-size:11px; }
+
+  /* popup modos */
+  #mode-sfx { color:var(--green); font-weight:700; text-transform:none; letter-spacing:0; }
+  .nav-overlay { position:absolute; inset:0; z-index:100; background:rgba(0,0,0,.8); backdrop-filter:blur(10px); display:none; align-items:center; justify-content:center; }
+  .nav-overlay.show { display:flex; }
+  .nav-card { background:var(--panel); border:1px solid var(--border-hi); border-radius:28px; padding:28px; width:560px; max-width:90%; display:flex; flex-direction:column; gap:14px; }
+  .nav-card h4 { font-size:18px; color:var(--muted); letter-spacing:.12em; text-transform:uppercase; margin-bottom:6px; }
+  .nav-btn-row { display:flex; flex-direction:column; gap:14px; }
+  .nav-card button.close { justify-content:center; color:var(--muted); border:1px dashed var(--border); background:var(--panel-lift); min-height:56px; font-size:18px; border-radius:14px; color:var(--text); cursor:pointer; font-family:inherit; }
+  .mode-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
+  .mode-grid button { padding:18px 8px; border-radius:12px; background:var(--panel-lift); border:1px solid var(--border-hi); color:var(--text); font-size:15px; font-weight:700; font-family:inherit; cursor:pointer; transition:background .15s, border-color .15s, color .15s; }
+  .mode-grid button:active { transform:scale(.97); }
+  .mode-grid button.on { background:rgba(34,197,94,.06); border-color:rgba(34,197,94,.5); color:var(--green); }
+
+  /* stale dim (watchdog) */
+  body.stale .panel, body.stale .ctrl-area { filter:brightness(.6) saturate(.5); }
+  body.stale .topbar .dot { background:var(--red); }
+
+  #toast { position:fixed; bottom:22px; left:50%; transform:translateX(-50%); background:var(--panel-lift); border:1px solid var(--border-hi); color:var(--text); padding:14px 26px; border-radius:var(--r-pill); font-size:16px; opacity:0; transition:opacity .3s; pointer-events:none; z-index:9999; }
+  #toast.show { opacity:1; }
+</style>
 </head>
 <body>
 
 <div class="topbar">
   <div class="left">
     <div class="clock" id="clock">--:--</div>
-    <div class="lbl" id="version">HEC v1.37</div>
-    <!-- Indicador da fonte de dados (📡 LAN direta · ☁ Mac mini via Tailscale) -->
-    <div class="lbl" id="source-badge" style="opacity:.6;font-size:11px;letter-spacing:.08em">☁</div>
+    <div class="lbl" id="version">HEC v1.38 · V4</div>
   </div>
   <div class="right">
-    <div class="lbl">Carro</div>
+    <!-- Fonte de dados: 📡 LAN·WS (verde) · ☁ Nuvem (azul). Toque tenta reconectar LAN. -->
+    <div class="conn-mode cloud" id="source-badge" onclick="onConnTap()">☁ Nuvem</div>
+    <div class="lbl" style="margin-left:8px">Carro</div>
     <div class="dot" id="car-dot"></div>
     <div class="lbl" id="car-lbl">—</div>
+    <div class="cfg-btn" id="cfg-btn" onclick="openConfig()">⚙️</div>
   </div>
 </div>
 <!-- Sentinels invisíveis pra JS antigo que ainda referencia conn-dot/conn-lbl -->
@@ -862,521 +1083,298 @@
   <table><thead><tr><th>id</th><th colspan="3">raw recebido</th></tr></thead><tbody class="failed-tbody"></tbody></table>
 </div>
 
-<div class="stage">
+<!-- ═══════════════════════════════════════════════════════════════════════
+     V4 · Controles — layout visível. Readouts mantêm os ids que render() usa.
+     ═══════════════════════════════════════════════════════════════════════ -->
+<div class="v4">
 
-  <!-- ═══════ LINHA SUPERIOR: mapa + cards flutuantes ═══════ -->
-  <div class="row-top">
-    <div id="cluster-map"></div>
-
-    <div class="floating-cards">
-      <!-- SOC -->
-      <div class="float-card">
-        <div class="head"><span class="ico">🔋</span>Bateria</div>
-        <div class="gauge-wrap">
-          <svg viewBox="0 0 200 200">
-            <circle class="gauge-track" cx="100" cy="100" r="80"/>
-            <circle class="gauge-fill soc" id="soc-arc" cx="100" cy="100" r="80"
-                    stroke-dasharray="502.65" stroke-dashoffset="502.65"
-                    transform="rotate(-90 100 100)"/>
-          </svg>
-          <div class="gauge-center">
-            <div class="gauge-big"><span id="soc-pct">—</span><span class="pct">%</span></div>
-            <div class="gauge-sub">
-              <strong id="soc-range">— km</strong> EV<br>
-              <span id="soc-kwh">— kWh</span>
-            </div>
-          </div>
+  <!-- POWER -->
+  <div class="panel p-power">
+    <div class="panel-h"><span class="ico">⚡</span> Potência</div>
+    <div class="power-row">
+      <div class="power-num"><span class="power-val idle" id="power-val">0</span><span class="power-unit">kW</span></div>
+      <div class="power-meta">
+        <div class="power-bar">
+          <div class="power-bar-mid"></div>
+          <div class="power-bar-fill drive" id="power-bar-drive"></div>
+          <div class="power-bar-fill regen" id="power-bar-regen"></div>
         </div>
-      </div>
-
-      <!-- Fuel -->
-      <div class="float-card">
-        <div class="head"><span class="ico">⛽</span>Combustível</div>
-        <div class="gauge-wrap">
-          <svg viewBox="0 0 200 200">
-            <circle class="gauge-track" cx="100" cy="100" r="80"/>
-            <circle class="gauge-fill fuel" id="fuel-arc" cx="100" cy="100" r="80"
-                    stroke-dasharray="502.65" stroke-dashoffset="502.65"
-                    transform="rotate(-90 100 100)"/>
-          </svg>
-          <div class="gauge-center">
-            <div class="gauge-big"><span id="fuel-l">—</span><span class="pct">L</span></div>
-            <div class="gauge-sub">
-              <strong id="fuel-range">— km</strong> ICE<br>
-              <span id="fuel-pct">— % tanque</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-    </div>
-
-    <!-- Menu navegação -->
-    <div class="nav-overlay" id="nav-overlay" onclick="if(event.target===this)closeNavMenu()">
-      <div class="nav-card">
-        <h4>📍 Abrir navegação em</h4>
-        <div class="nav-btn-row">
-          <button onclick="openExternalNav('waze')"><span class="em">🟦</span><b>Waze</b><span style="color:var(--muted);margin-left:auto;font-size:11px">tráfego ao vivo</span></button>
-          <button onclick="openExternalNav('gmaps')"><span class="em">🟥</span><b>Google Maps</b><span style="color:var(--muted);margin-left:auto;font-size:11px">rota completa</span></button>
-          <button onclick="openExternalNav('apple')"><span class="em">⬜️</span><b>Apple Maps</b><span style="color:var(--muted);margin-left:auto;font-size:11px">turn-by-turn nativo</span></button>
-          <button class="close" onclick="closeNavMenu()">Cancelar</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Modal HEV: sub-modo (Inteligente/Prioritário) + slider % se Prioritário -->
-    <div id="hev-modal" onclick="if(event.target===this)closeHevModal()" style="display:none;position:fixed;inset:0;z-index:2000;background:rgba(0,0,0,.6);align-items:center;justify-content:center">
-      <div style="background:#0f172a;border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:22px;width:min(440px,86vw);box-shadow:0 20px 60px rgba(0,0,0,.6)">
-        <div style="font-size:18px;font-weight:700;margin-bottom:14px;color:#e2e8f0">⚙ Modo HEV</div>
-        <label style="display:flex;gap:10px;align-items:flex-start;padding:12px;border-radius:10px;background:rgba(255,255,255,.05);margin-bottom:8px;cursor:pointer">
-          <input type="radio" name="hev-mode" value="1" id="hev-r-smart" onchange="_toggleHevSlider()" style="margin-top:3px">
-          <span><strong style="color:#e2e8f0">Inteligente</strong><br><span style="font-size:12px;color:#94a3b8">Carro decide quando ligar o motor</span></span>
-        </label>
-        <label style="display:flex;gap:10px;align-items:flex-start;padding:12px;border-radius:10px;background:rgba(255,255,255,.05);margin-bottom:8px;cursor:pointer">
-          <input type="radio" name="hev-mode" value="2" id="hev-r-priority" onchange="_toggleHevSlider()" style="margin-top:3px">
-          <span><strong style="color:#e2e8f0">Prioritário</strong><br><span style="font-size:12px;color:#94a3b8">Preserva uma % de bateria definida</span></span>
-        </label>
-        <div id="hev-slider-wrap" style="display:none;margin:14px 4px 6px">
-          <div style="display:flex;justify-content:space-between;font-size:13px;color:#cbd5e1;margin-bottom:8px">
-            <span>% de bateria a preservar</span><span><b id="hev-soc-val">50</b>%</span>
-          </div>
-          <input type="range" min="20" max="80" step="5" value="50" id="hev-soc-slider" style="width:100%" oninput="document.getElementById('hev-soc-val').textContent=this.value">
-          <div style="font-size:11px;color:#64748b;margin-top:4px">20–80 %</div>
-        </div>
-        <div style="display:flex;gap:10px;margin-top:16px">
-          <button onclick="closeHevModal()" style="flex:1;padding:12px;border-radius:10px;border:1px solid rgba(255,255,255,.15);background:transparent;color:#cbd5e1;font-size:15px">Cancelar</button>
-          <button onclick="applyHevModal()" style="flex:1;padding:12px;border-radius:10px;border:none;background:var(--green);color:#04210f;font-weight:700;font-size:15px">Aplicar</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Menu do AC: tudo da aba Conforto (fan, temps, sync, recirc, bancos) -->
-    <div id="ac-modal" onclick="if(event.target===this)closeAcModal()" style="display:none;position:fixed;inset:0;z-index:2000;background:rgba(0,0,0,.6);align-items:center;justify-content:center">
-      <div style="background:#0f172a;border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:20px;width:min(560px,92vw);max-height:88vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.6)">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
-          <div style="font-size:18px;font-weight:700;color:#e2e8f0">❄️ Climatização</div>
-          <button onclick="closeAcModal()" style="background:transparent;border:none;color:#94a3b8;font-size:22px;line-height:1">✕</button>
-        </div>
-        <button class="ac-power-btn" onclick="toggleAcPower()" style="width:100%;padding:14px;border-radius:12px;border:none;font-weight:700;font-size:16px;margin-bottom:14px;cursor:pointer">AC</button>
-        <!-- Sliders: deslize ← aumenta · → reduz -->
-        <div class="ac-hsl" data-ctrl="driver_temp" data-min="16" data-max="32" data-step="0.5" data-state="hvac_driver_temp" data-unit="°">
-          <div class="ac-hsl-fill"></div>
-          <div class="ac-hsl-top"><span class="ac-hsl-name">🌡 MOTORISTA</span><span class="ac-hsl-val">--</span></div>
-        </div>
-        <div class="ac-hsl" data-ctrl="passenger_temp" data-min="16" data-max="32" data-step="0.5" data-state="hvac_passenger_temp" data-unit="°">
-          <div class="ac-hsl-fill"></div>
-          <div class="ac-hsl-top"><span class="ac-hsl-name">🌡 PASSAGEIRO</span><span class="ac-hsl-val">--</span></div>
-        </div>
-        <div class="ac-hsl" data-ctrl="fan_speed" data-min="0" data-max="7" data-step="1" data-state="hvac_fan_speed" data-unit="/7">
-          <div class="ac-hsl-fill"></div>
-          <div class="ac-hsl-top"><span class="ac-hsl-name">⚙ VENTILADOR</span><span class="ac-hsl-val">--</span></div>
-        </div>
-        <div style="text-align:center;font-size:11px;color:#64748b;margin:-2px 0 10px">deslize ► aumenta · ◄ reduz</div>
-        <!-- Sync / Auto / Recirc -->
-        <div style="display:flex;gap:8px;margin-bottom:12px">
-          <button class="ac-sync-btn" onclick="toggleAcSync()" style="flex:1;padding:11px 4px;border-radius:10px;border:1px solid rgba(255,255,255,.15);background:transparent;color:#cbd5e1;font-size:11px;font-weight:700">🔗 SYNC</button>
-          <button class="ac-auto-btn" onclick="toggleAcAuto()" style="flex:1;padding:11px 4px;border-radius:10px;border:1px solid rgba(255,255,255,.15);background:transparent;color:#cbd5e1;font-size:11px;font-weight:700">AUTO</button>
-          <button class="ac-cycle-btn" onclick="toggleAcCycle()" style="flex:1;padding:11px 4px;border-radius:10px;border:1px solid rgba(255,255,255,.15);background:transparent;color:#cbd5e1;font-size:11px;font-weight:700">↺ RECIRC</button>
-          <button class="ac-comp-btn" onclick="toggleAcCompressor()" style="flex:1;padding:11px 4px;border-radius:10px;border:1px solid rgba(255,255,255,.15);background:transparent;color:#cbd5e1;font-size:11px;font-weight:700">❄️ COMP</button>
-        </div>
-        <!-- Direção do ar (blower_mode) — desenho da cabine com fluxo visual -->
-        <div style="margin-bottom:12px">
-          <div style="font-size:11px;color:#94a3b8;margin-bottom:6px">DIREÇÃO DO AR</div>
-          <div onclick="cycleBlower()" style="background:rgba(255,255,255,.05);border-radius:12px;padding:10px 10px 6px;cursor:pointer">
-            <svg viewBox="0 0 240 120" style="width:100%;height:120px">
-              <defs>
-                <marker id="ac-ah" markerWidth="8" markerHeight="8" refX="5" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="currentColor"/></marker>
-              </defs>
-              <!-- cabine (linhas sutis): teto, pára-brisa, piso -->
-              <path d="M126 14 L232 14" stroke="#334155" stroke-width="2" fill="none"/>
-              <path d="M126 14 L84 58" stroke="#334155" stroke-width="2" fill="none"/>
-              <path d="M40 108 L228 108" stroke="#334155" stroke-width="2" fill="none"/>
-              <!-- vent (origem do ar) -->
-              <rect x="74" y="54" width="16" height="20" rx="3" fill="#1e293b" stroke="#334155"/>
-              <!-- pessoa sentada (de frente p/ a esquerda) -->
-              <circle cx="168" cy="40" r="10" fill="#334155"/>
-              <path d="M150 100 L150 52 Q150 46 156 46 L172 46" stroke="#334155" stroke-width="7" fill="none" stroke-linecap="round"/>
-              <path d="M150 100 L196 100" stroke="#334155" stroke-width="7" fill="none" stroke-linecap="round"/>
-              <!-- correntes de vento a partir do vent (mechas onduladas animadas) -->
-              <g class="ac-flow ac-wind" id="ac-flow-defrost" style="color:#22d3ee">
-                <path d="M82 52 C 78 38 90 30 102 22"/>
-                <path d="M88 54 C 85 40 97 31 109 24"/>
-                <path d="M80 50 C 75 37 87 28 99 20"/>
-              </g>
-              <g class="ac-flow ac-wind" id="ac-flow-face" style="color:#22d3ee">
-                <path d="M92 50 q10 -6 20 0 q10 6 20 0 q10 -6 18 0"/>
-                <path d="M92 58 q10 6 20 0 q10 -6 20 0 q10 6 18 0"/>
-                <path d="M92 66 q10 -6 20 0 q10 6 20 0 q8 -6 14 0"/>
-              </g>
-              <g class="ac-flow ac-wind" id="ac-flow-feet" style="color:#22d3ee">
-                <path d="M84 72 C 92 90 110 96 128 100"/>
-                <path d="M88 74 C 98 92 116 98 134 102"/>
-                <path d="M82 76 C 90 92 108 98 124 102"/>
-              </g>
-            </svg>
-            <div style="text-align:center;font-size:13px;color:#cbd5e1;margin-top:2px"><b id="ac-blow-lbl">--</b> <span style="color:#64748b;font-size:11px">· toque p/ alternar</span></div>
-          </div>
-        </div>
-        <!-- Ventilação dos bancos — arraste ↓ aumenta · ↑ reduz -->
-        <div style="font-size:11px;color:#94a3b8;margin-bottom:6px">VENTILAÇÃO DOS BANCOS</div>
-        <div style="display:flex;gap:14px;justify-content:center">
-          <div class="ac-seat" data-ctrl="seat_vent_drv" data-state="seat_vent_drv">
-            <div class="ac-seat-fill"></div>
-            <div class="ac-seat-lbl"><span style="font-size:24px">💺</span><span style="font-size:11px;color:#cbd5e1">Motorista</span><span class="ac-seat-val" style="font-size:13px;font-weight:700;color:#fff">OFF</span></div>
-          </div>
-          <div class="ac-seat" data-ctrl="seat_vent_pass" data-state="seat_vent_pass">
-            <div class="ac-seat-fill"></div>
-            <div class="ac-seat-lbl"><span style="font-size:24px">💺</span><span style="font-size:11px;color:#cbd5e1">Passageiro</span><span class="ac-seat-val" style="font-size:13px;font-weight:700;color:#fff">OFF</span></div>
-          </div>
-        </div>
-        <div style="text-align:center;font-size:11px;color:#64748b;margin-top:6px">arraste ▲ aumenta · ▼ reduz (base = desliga)</div>
-        <!-- Extras: toggles on/off -->
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px">
-          <button id="ac-acmax-btn"  onclick="toggleAcExtra('acmax')"         style="padding:11px;border-radius:10px;border:1px solid rgba(255,255,255,.15);background:transparent;color:#cbd5e1;font-size:13px;font-weight:700">❄️ AC MAX</button>
-          <button id="ac-heating-btn" onclick="toggleAcExtra('heating')"       style="padding:11px;border-radius:10px;border:1px solid rgba(255,255,255,.15);background:transparent;color:#cbd5e1;font-size:13px;font-weight:700">🔥 Aquecimento</button>
-          <button id="ac-front-defrost-btn" onclick="toggleAcExtra('front_defrost')" style="padding:11px;border-radius:10px;border:1px solid rgba(255,255,255,.15);background:transparent;color:#cbd5e1;font-size:13px;font-weight:700">🌫 Desemb. diant.</button>
-          <button id="ac-rear-defrost-btn"  onclick="toggleAcExtra('rear_defrost')"  style="padding:11px;border-radius:10px;border:1px solid rgba(255,255,255,.15);background:transparent;color:#cbd5e1;font-size:13px;font-weight:700">🌫 Desemb. tras.</button>
-          <button id="ac-auto-defrost-btn"  onclick="toggleAcExtra('auto_defrost')"  style="padding:11px;border-radius:10px;border:1px solid rgba(255,255,255,.15);background:transparent;color:#cbd5e1;font-size:13px;font-weight:700">🌫 Desemb. auto</button>
-          <button id="ac-anion-btn"  onclick="toggleAcExtra('anion')"         style="padding:11px;border-radius:10px;border:1px solid rgba(255,255,255,.15);background:transparent;color:#cbd5e1;font-size:13px;font-weight:700">✨ Ionizador</button>
-          <button id="ac-aqs-btn"    onclick="toggleAcExtra('aqs')"           style="padding:11px;border-radius:10px;border:1px solid rgba(255,255,255,.15);background:transparent;color:#cbd5e1;font-size:13px;font-weight:700">🍃 AQS</button>
-          <div style="display:flex;align-items:center;justify-content:center;gap:6px;padding:11px;border-radius:10px;background:rgba(255,255,255,.05);color:#cbd5e1;font-size:13px">🌬 PM2.5 <b id="ac-pm25" style="color:#e2e8f0">--</b></div>
-        </div>
+        <div class="power-scale"><span>−50 regen</span><span>0</span><span>+120 boost</span></div>
       </div>
     </div>
   </div>
 
-  <!-- ═══════ LINHA INFERIOR: 3 widgets clássicos ═══════ -->
-  <div class="row-bot">
-
-    <!-- Power Gauge v1.34 — dividido: Potência (esq) | Velocidade (dir) -->
-    <div class="widget power-widget">
-      <div class="dual-panel">
-        <!-- ─── Painel Potência (±50 kW, zero no meio) ─── -->
-        <div class="dual-cell">
-          <h3><span class="ico">⚡</span> Potência</h3>
-          <div class="dual-readout">
-            <span class="power-value idle" id="power-val">0,0</span><span class="power-unit">kW</span>
-          </div>
-          <div class="dual-sub"><span class="ice" id="power-rpm">0</span> rpm ICE</div>
-          <div class="power-chart-wrap">
-            <div class="chart-y-labels">
-              <span>+50</span><span>+25</span><span class="zero">0</span><span>−25</span><span>−50</span>
-            </div>
-            <svg class="power-chart" viewBox="0 0 300 120" preserveAspectRatio="none">
-              <line class="grid-y" x1="0" y1="10"  x2="300" y2="10"/>
-              <line class="grid-y" x1="0" y1="35"  x2="300" y2="35"/>
-              <line class="grid-zero" x1="0" y1="60"  x2="300" y2="60"/>
-              <line class="grid-y" x1="0" y1="85"  x2="300" y2="85"/>
-              <line class="grid-y" x1="0" y1="110" x2="300" y2="110"/>
-              <line class="grid-x" x1="100" y1="0" x2="100" y2="120"/>
-              <line class="grid-x" x1="200" y1="0" x2="200" y2="120"/>
-              <path class="chart-line" id="chart-line" d="M 0 60 L 300 60"/>
-            </svg>
-            <div class="chart-x-labels"><span>−30s</span><span>agora</span></div>
-          </div>
-        </div>
-
-        <div class="dual-divider"></div>
-
-        <!-- ─── Painel Velocidade (0–160 km/h, base embaixo) ─── -->
-        <div class="dual-cell">
-          <h3><span class="ico">🏎️</span> Velocidade</h3>
-          <div class="dual-readout">
-            <span class="power-value idle" id="power-speed">0</span><span class="power-unit">km/h</span>
-          </div>
-          <div class="dual-sub"><span id="speed-max-v">0</span> km/h máx</div>
-          <div class="power-chart-wrap">
-            <div class="chart-y-labels">
-              <span>160</span><span>120</span><span>80</span><span>40</span><span>0</span>
-            </div>
-            <svg class="power-chart" viewBox="0 0 300 120" preserveAspectRatio="none">
-              <line class="grid-y" x1="0" y1="0"   x2="300" y2="0"/>
-              <line class="grid-y" x1="0" y1="30"  x2="300" y2="30"/>
-              <line class="grid-y" x1="0" y1="60"  x2="300" y2="60"/>
-              <line class="grid-y" x1="0" y1="90"  x2="300" y2="90"/>
-              <line class="grid-zero" x1="0" y1="120" x2="300" y2="120"/>
-              <line class="grid-x" x1="100" y1="0" x2="100" y2="120"/>
-              <line class="grid-x" x1="200" y1="0" x2="200" y2="120"/>
-              <path class="chart-line spd" id="chart-line-spd" d="M 0 120 L 300 120"/>
-            </svg>
-            <div class="chart-x-labels"><span>−30s</span><span>agora</span></div>
-          </div>
-        </div>
-      </div>
-      <!-- Sentinels pra render() não quebrar (IDs antigos) -->
-      <div id="power-bar-drive" style="display:none"></div>
-      <div id="power-bar-regen" style="display:none"></div>
-      <svg style="display:none"><path id="spark-area"/><path id="spark-line"/></svg>
+  <!-- SPEED -->
+  <div class="panel p-speed">
+    <div class="panel-h"><span class="ico">🏎️</span> Velocidade</div>
+    <div class="mid">
+      <div class="speed-block"><span class="speed-val" id="speed-val">—</span><span class="speed-unit">km/h</span></div>
+      <div class="speed-max" style="margin-top:6px">máx <strong id="speed-max-v">—</strong> km/h</div>
     </div>
+  </div>
 
-    <!-- Trip -->
-    <div class="widget">
-      <h3><span class="ico">🚗</span> Viagem em curso</h3>
-      <div class="trip-metrics">
-        <div class="trip-cell">
-          <div class="trip-val teal"><span id="trip-dist">0,0</span><span class="u">km</span></div>
-          <div class="trip-lbl">Distância</div>
-        </div>
-        <div class="trip-cell">
-          <div class="trip-val"><span id="trip-time">0:00</span></div>
-          <div class="trip-lbl">Tempo</div>
-        </div>
-        <div class="trip-cell">
-          <div class="trip-val green"><span id="trip-kwh">0,0</span><span class="u">kWh</span></div>
-          <div class="trip-lbl">Energia (net)</div>
-        </div>
-        <div class="trip-cell">
-          <div class="trip-val orange"><span id="trip-fuel">0,0</span><span class="u">L</span></div>
-          <div class="trip-lbl">Combustível</div>
-        </div>
-        <div class="trip-cell">
-          <div class="trip-val teal"><span id="trip-kwh100">—</span><span class="u">kWh/100km</span></div>
-          <div class="trip-lbl">Consumo</div>
-        </div>
-        <div class="trip-cell">
-          <div class="trip-val green"><span id="trip-kml">—</span><span class="u">km/L</span></div>
-          <div class="trip-lbl">Econômico</div>
-        </div>
-        <div class="trip-cell">
-          <div class="trip-val yellow"><span id="trip-cost">R$ 0,00</span></div>
-          <div class="trip-lbl">Custo estimado</div>
-        </div>
-        <div class="trip-cell">
-          <div class="trip-val yellow"><span id="trip-cost-km">R$ 0,00</span><span class="u">/km</span></div>
-          <div class="trip-lbl">Custo por km</div>
-        </div>
-        <!-- Split EV / HEV -->
-        <div class="trip-cell">
-          <div class="trip-val green"><span id="trip-ev-pct">—</span><span class="u">%</span><span class="sub" id="trip-ev-km">— km</span></div>
-          <div class="trip-lbl">Elétrico</div>
-        </div>
-        <div class="trip-cell">
-          <div class="trip-val orange"><span id="trip-hev-pct">—</span><span class="u">%</span><span class="sub" id="trip-hev-km">— km</span></div>
-          <div class="trip-lbl">Híbrido</div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Atalhos: mesmos controles da aba Drive do PWA -->
-    <div class="widget quick-widget">
-      <h3><span class="ico">🎛</span> Controles</h3>
-      <div class="dc-body">
-        <!-- Climatização (primeiro card) -->
-        <div class="dc-card">
-          <div class="dc-label" style="display:flex;align-items:center;justify-content:space-between">
-            <span>❄️ Climatização<span id="ac-sub-label" style="opacity:.6;font-weight:600;margin-left:6px"></span></span>
-            <button onclick="openAcModal()" style="background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15);color:#94a3b8;border-radius:8px;padding:4px 10px;font-size:11px;letter-spacing:.04em">⛶ menu</button>
-          </div>
-          <button class="ac-power-btn" onclick="toggleAcPower()" data-compact="1" style="width:100%;padding:12px;border-radius:10px;border:none;font-weight:700;font-size:14px;margin:8px 0;cursor:pointer">AC</button>
-          <div class="ac-hsl" data-ctrl="driver_temp" data-min="16" data-max="32" data-step="0.5" data-state="hvac_driver_temp" data-unit="°">
-            <div class="ac-hsl-fill"></div><div class="ac-hsl-top"><span class="ac-hsl-name">🌡 MOT.</span><span class="ac-hsl-val">--</span></div>
-          </div>
-          <div class="ac-hsl" data-ctrl="passenger_temp" data-min="16" data-max="32" data-step="0.5" data-state="hvac_passenger_temp" data-unit="°">
-            <div class="ac-hsl-fill"></div><div class="ac-hsl-top"><span class="ac-hsl-name">🌡 PASS.</span><span class="ac-hsl-val">--</span></div>
-          </div>
-          <div class="ac-hsl" data-ctrl="fan_speed" data-min="0" data-max="7" data-step="1" data-state="hvac_fan_speed" data-unit="/7">
-            <div class="ac-hsl-fill"></div><div class="ac-hsl-top"><span class="ac-hsl-name">⚙ VENT.</span><span class="ac-hsl-val">--</span></div>
-          </div>
-          <div style="display:flex;gap:6px;margin-top:4px">
-            <button class="ac-sync-btn"  onclick="toggleAcSync()"  style="flex:1;padding:10px 3px;border-radius:10px;border:1px solid rgba(255,255,255,.15);background:transparent;color:#cbd5e1;font-size:11px;font-weight:700">🔗 SYNC</button>
-            <button class="ac-auto-btn"  onclick="toggleAcAuto()"  style="flex:1;padding:10px 3px;border-radius:10px;border:1px solid rgba(255,255,255,.15);background:transparent;color:#cbd5e1;font-size:11px;font-weight:700">AUTO</button>
-            <button class="ac-cycle-btn" onclick="toggleAcCycle()" style="flex:1;padding:10px 3px;border-radius:10px;border:1px solid rgba(255,255,255,.15);background:transparent;color:#cbd5e1;font-size:11px;font-weight:700">↺ RECIRC</button>
-            <button class="ac-comp-btn"  onclick="toggleAcCompressor()" style="flex:1;padding:10px 3px;border-radius:10px;border:1px solid rgba(255,255,255,.15);background:transparent;color:#cbd5e1;font-size:11px;font-weight:700">❄️ COMP</button>
-          </div>
-        </div>
-        <!-- Regeneração -->
-        <div class="dc-card">
-          <div class="dc-label">⚡ Regeneração</div>
-          <div class="dm-chips">
-            <div class="dm-chip" data-regen="2" onclick="setRegenLevel(2)">Baixo</div>
-            <div class="dm-chip" data-regen="0" onclick="setRegenLevel(0)">Normal</div>
-            <div class="dm-chip" data-regen="1" onclick="setRegenLevel(1)">Alto</div>
-          </div>
-          <div class="op-btns">
-            <button class="op-btn" id="one-pedal-toggle" onclick="toggleOnePedal()">One-Pedal</button>
-            <button class="op-btn" id="esp-toggle" onclick="toggleEsp()">🛡 ESP</button>
-          </div>
-          <button class="hazard-btn" id="hazard-btn" aria-label="Pisca-alerta">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round">
-              <path d="M12 3.5 L22 20 L2 20 Z"/>
-              <line x1="12" y1="10" x2="12" y2="14.5"/>
-              <circle cx="12" cy="17.3" r="0.7" fill="currentColor" stroke="none"/>
-            </svg>
-            <span>Pisca-alerta</span>
-          </button>
-        </div>
-        <!-- Estilo + Aberturas -->
-        <div class="dc-card">
-          <div class="dc-label">🏁 Estilo</div>
-          <div class="tm-chips-4">
-            <div class="dm-chip" data-terrain="0" onclick="setTerrainMode(0)">Normal</div>
-            <div class="dm-chip" data-terrain="1" onclick="setTerrainMode(1)">Sport</div>
-            <div class="dm-chip" data-terrain="2" onclick="setTerrainMode(2)">Eco</div>
-            <div class="dm-chip" data-terrain="3" onclick="setTerrainMode(3)">Neve</div>
-          </div>
-          <div class="tm-chips-3">
-            <div class="dm-chip" data-terrain="4" onclick="setTerrainMode(4)">Areia</div>
-            <div class="dm-chip" data-terrain="5" onclick="setTerrainMode(5)">Lama</div>
-            <div class="dm-chip" data-terrain="11" onclick="setTerrainMode(11)">AWD</div>
-          </div>
-          <div class="dc-label" style="margin-top:4px">🚪 Aberturas</div>
-          <div class="veh-grid">
-            <button class="veh-btn" onclick="openVehPicker('windows')">🪟 Vidros</button>
-            <button class="veh-btn" onclick="openVehPicker('shade')">⛱ Cortina</button>
-            <button class="veh-btn" onclick="openVehPicker('skylight')">☀ Teto solar</button>
-          </div>
-        </div>
-        <!-- Modo + Direção + Pisca-alerta -->
-        <div class="dc-card">
-          <div class="dc-label">⚙ Modo<span id="hev-sub-label" style="opacity:.6;font-weight:600;margin-left:6px"></span></div>
-          <div class="dm-chips">
-            <div class="dm-chip" data-mode="0" onclick="openHevModal()">HEV</div>
-            <div class="dm-chip" data-mode="1" onclick="setDriveMode(1)">Prior. EV</div>
-            <div class="dm-chip" data-mode="3" onclick="setDriveMode(3)">EV</div>
-          </div>
-          <div class="dc-label" style="margin-top:4px">🎯 Direção</div>
-          <div class="dm-chips">
-            <div class="dm-chip" data-steer="2" onclick="setSteerMode(2)">Conforto</div>
-            <div class="dm-chip" data-steer="0" onclick="setSteerMode(0)">Normal</div>
-            <div class="dm-chip" data-steer="1" onclick="setSteerMode(1)">Sport</div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Mapa em tempo real — só aparece no nativo (CSS).
-         Trip data fica como overlay sobre o mapa, com vinheta escurecendo
-         as bordas pra deixar o texto legível. -->
-    <div class="widget map-widget">
-      <h3><span class="ico">📍</span> Viagem em curso</h3>
-      <!-- Linha de ETA (destino compartilhado): nome · tempo · chegada · km faltante -->
-      <div id="trip-eta-banner" class="eta-banner" style="display:none"></div>
-      <div id="cluster-map-bot"></div>
-      <!-- Overlay Potência/Velocidade (canto sup-esq do mapa) -->
-      <div class="pwr-overlay">
-        <div class="pwr-spd"><span id="ov-speed">0</span></div>
-        <div class="pwr-unit">km/h</div>
-        <div class="pwr-sub"><span id="ov-power">0,0</span><span id="ov-unit"> kW</span><span class="sep">·</span><span class="rpm"><span id="ov-rpm">0</span> rpm</span><span id="ov-regen" class="ov-regen" style="display:none">♻ REGEN</span></div>
-      </div>
-      <!-- Seletor de valor (modal, fixo sobre a tela) -->
-      <div id="veh-modal" class="veh-modal" style="display:none" onclick="if(event.target===this)closeVehPicker()">
-        <div class="veh-modal-card">
-          <div class="veh-modal-title" id="veh-modal-title">—</div>
-          <div class="veh-modal-grid" id="veh-modal-grid"></div>
-          <button class="veh-modal-close" onclick="closeVehPicker()">Cancelar</button>
-        </div>
-      </div>
-      <div class="trip-overlay">
-        <div class="trip-info">
-          <div class="ti-cell">
-            <div class="tov teal"><span id="tov-dist">0,0</span><span style="font-size:18px;opacity:.7"> km</span></div>
-            <div class="tol">Distância</div>
-          </div>
-          <div class="ti-cell">
-            <div class="tov"><span id="tov-time">0:00</span></div>
-            <div class="tol">Tempo</div>
-          </div>
-          <div class="ti-cell">
-            <div class="tov green"><span id="tov-kwh">0,0</span><span style="font-size:18px;opacity:.7"> kWh</span></div>
-            <div class="tol">Energia (net)</div>
-          </div>
-          <div class="ti-cell">
-            <div class="tov orange"><span id="tov-fuel">0,0</span><span style="font-size:18px;opacity:.7"> L</span></div>
-            <div class="tol">Combustível</div>
-          </div>
-          <div class="ti-cell">
-            <div class="tov teal"><span id="tov-kwh100">—</span><span style="font-size:18px;opacity:.7"> kWh/100km</span></div>
-            <div class="tol">Consumo</div>
-          </div>
-          <div class="ti-cell">
-            <div class="tov green"><span id="tov-kml">—</span><span style="font-size:18px;opacity:.7"> km/L</span></div>
-            <div class="tol">Econômico</div>
-          </div>
-          <div class="ti-cell">
-            <div class="tov yellow"><span id="tov-cost">R$ 0,00</span></div>
-            <div class="tol">Custo</div>
-          </div>
-          <div class="ti-cell">
-            <div class="tov yellow"><span id="tov-cost-km">R$ 0,00</span><span style="font-size:18px;opacity:.7">/km</span></div>
-            <div class="tol">Custo por km</div>
-          </div>
-          <!-- SOC na chegada (ETA completo fica no banner do topo) — só com destino ativo -->
-          <div class="ti-cell ti-arrival" style="display:none">
-            <div class="tov green"><span id="tov-soc-arr">—</span><span style="font-size:18px;opacity:.7"> %</span></div>
-            <div class="tol">SOC na chegada</div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Fluxo de energia v3 — escondido no modo nativo (CSS) -->
-    <div class="widget flow-widget">
-      <h3><span class="ico">🔄</span> Fluxo de energia</h3>
-      <div class="flow-stage">
-        <svg class="flow-svg" viewBox="0 0 360 220" preserveAspectRatio="xMidYMid meet">
-          <!-- FRENTE (topo da tela) / TRÁS (fundo) — carro visto de cima -->
-
-          <!-- Linhas de fluxo (atrás de tudo) -->
-          <!-- Bateria → GMCU (eixo dianteiro EV / série regen) -->
-          <path id="line-batt-gmcu"  class="flow-line" d="M 175 110 L 130 60"/>
-          <!-- Bateria → TMCU (eixo traseiro EV) -->
-          <path id="line-batt-tmcu"  class="flow-line" d="M 185 110 L 185 165"/>
-          <!-- ICE → GMCU (paralelo dianteiro / série gerador) -->
-          <path id="line-ice-gmcu"   class="flow-line" d="M 220 60 L 155 60"/>
-          <!-- ICE → bateria (série explícito, contorna por baixo) -->
-          <path id="line-ice-batt"   class="flow-line" d="M 240 75 Q 270 110 215 115"/>
-          <!-- Wallbox externo → Bateria (carga AC) -->
-          <path id="line-charge"     class="flow-line" d="M 340 30 L 200 100"/>
-
-          <!-- Carro silhueta (top view) -->
-          <!-- chassis arredondado -->
-          <rect class="car-body" x="70" y="20" width="220" height="180" rx="35" ry="35"/>
-          <!-- parabrisa frontal (faixa azulada na frente) -->
-          <path class="car-windshield" d="M 100 38 L 260 38 L 250 76 L 110 76 Z"/>
-          <!-- linha capô-teto -->
-          <line class="car-hood-line" x1="80" y1="100" x2="280" y2="100"/>
-          <line class="car-hood-line" x1="80" y1="140" x2="280" y2="140"/>
-
-          <!-- Rodas (4 retângulos arredondados nos cantos) — meio dentro do chassis -->
-          <rect class="wheel" id="wheel-fl" x="64"  y="55"  width="16" height="34" rx="4"/>
-          <rect class="wheel" id="wheel-fr" x="280" y="55"  width="16" height="34" rx="4"/>
-          <rect class="wheel" id="wheel-rl" x="64"  y="148" width="16" height="34" rx="4"/>
-          <rect class="wheel" id="wheel-rr" x="280" y="148" width="16" height="34" rx="4"/>
-
-          <!-- ICE (motor a combustão, frente direita) -->
-          <rect class="comp-bg ice" id="node-ice" x="218" y="44" width="44" height="32" rx="6"/>
-          <text class="comp-emoji" x="240" y="62">⛽</text>
-          <text class="comp-label" x="240" y="88">ICE 1.5T</text>
-          <text class="comp-value ice" id="val-ice" x="240" y="38">—</text>
-
-          <!-- GMCU (motor/gerador dianteiro, esquerda) -->
-          <rect class="comp-bg" id="node-gmcu" x="98" y="44" width="44" height="32" rx="6"/>
-          <text class="comp-emoji" x="120" y="62">⚙️</text>
-          <text class="comp-label" x="120" y="88">GMCU</text>
-          <text class="comp-value green" id="val-gmcu" x="120" y="38">—</text>
-
-          <!-- Bateria central -->
-          <rect class="comp-bg" id="node-batt" x="135" y="100" width="90" height="34" rx="6"/>
-          <text class="comp-emoji" x="180" y="119">🔋</text>
-          <text class="comp-label" x="180" y="146">Bateria 34kWh</text>
-          <text class="comp-value green" id="val-batt" x="180" y="92">—</text>
-
-          <!-- TMCU (motor traseiro de tração) -->
-          <rect class="comp-bg" id="node-tmcu" x="148" y="160" width="64" height="32" rx="6"/>
-          <text class="comp-emoji" x="180" y="178">🔋⚡</text>
-          <text class="comp-label" x="180" y="204">TMCU</text>
-          <text class="comp-value green" id="val-tmcu" x="180" y="154">—</text>
-
-          <!-- Wallbox externo (mostra só quando carregando) -->
-          <rect class="comp-bg charge" id="node-charge" x="320" y="18" width="32" height="22" rx="5" opacity="0"/>
-          <text class="comp-emoji" id="emoji-charge" x="336" y="31" style="font-size:12px;opacity:0">🔌</text>
+  <!-- SOC mini -->
+  <div class="panel p-soc">
+    <div class="gauge-mini">
+      <div class="ring">
+        <svg viewBox="0 0 200 200">
+          <circle class="gauge-track" cx="100" cy="100" r="80"/>
+          <circle class="gauge-fill soc" id="soc-arc" cx="100" cy="100" r="80" stroke-dasharray="502.65" stroke-dashoffset="502.65" transform="rotate(-90 100 100)"/>
         </svg>
-        <div class="flow-mode idle" id="flow-mode">parado</div>
+        <div class="gauge-center"><div class="gauge-big"><span id="soc-pct">—</span><span class="pct">%</span></div></div>
+      </div>
+      <div class="meta">
+        <div class="m-lbl"><span>🔋</span> Bateria</div>
+        <div class="m-main green"><span id="soc-range">— km</span></div>
+        <div class="m-sub">EV · <span id="soc-kwh">— kWh</span></div>
       </div>
     </div>
+  </div>
 
+  <!-- FUEL mini -->
+  <div class="panel p-fuel">
+    <div class="gauge-mini">
+      <div class="ring">
+        <svg viewBox="0 0 200 200">
+          <circle class="gauge-track" cx="100" cy="100" r="80"/>
+          <circle class="gauge-fill fuel" id="fuel-arc" cx="100" cy="100" r="80" stroke-dasharray="502.65" stroke-dashoffset="502.65" transform="rotate(-90 100 100)"/>
+        </svg>
+        <div class="gauge-center"><div class="gauge-big"><span id="fuel-l">—</span><span class="pct">L</span></div></div>
+      </div>
+      <div class="meta">
+        <div class="m-lbl"><span>⛽</span> Combustível</div>
+        <div class="m-main orange"><span id="fuel-range">— km</span></div>
+        <div class="m-sub">ICE · <span id="fuel-pct">— %</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- CONTROLES -->
+  <div class="panel p-ctrl">
+    <div class="panel-h"><span class="ico">🎛️</span> Controles rápidos</div>
+    <div class="ctrl-areas">
+
+      <!-- ÁREA 1 · Condução -->
+      <div class="ctrl-area">
+        <div class="area-h"><span class="ico">🚗</span> Condução</div>
+        <div class="area-grid cond">
+          <div class="seg-tile">
+            <div class="seg-h"><span>🚀</span> Modo de condução<span id="mode-sfx"></span></div>
+            <div class="seg" id="seg-mode">
+              <button data-terrain="2">Eco</button>
+              <button data-terrain="0">Normal</button>
+              <button data-terrain="1">Sport</button>
+            </div>
+          </div>
+          <div class="seg-tile">
+            <div class="seg-h"><span>🎚️</span> Modo de direção</div>
+            <div class="seg" id="seg-steer">
+              <button data-steer="2" onclick="setSteerMode(2)">Conforto</button>
+              <button data-steer="0" onclick="setSteerMode(0)">Normal</button>
+              <button data-steer="1" onclick="setSteerMode(1)">Sport</button>
+            </div>
+          </div>
+          <div class="seg-tile">
+            <div class="seg-h"><span>🔋</span> Tração<span id="hev-sub-label" style="opacity:.7;font-weight:600;margin-left:6px"></span></div>
+            <div class="seg" id="seg-power">
+              <button data-mode="0" id="hev-btn" onclick="openHevModal()" title="Toque: opções HEV (inteligente/prioritário)">HEV</button>
+              <button data-mode="1" onclick="setDriveMode(1)">Prior. EV</button>
+              <button data-mode="3" onclick="setDriveMode(3)">EV</button>
+            </div>
+          </div>
+          <div class="seg-tile">
+            <div class="seg-h"><span>♻️</span> Regeneração</div>
+            <div class="seg regen" id="seg-regen">
+              <button data-regen="2" onclick="setRegenLevel(2)">Baixo</button>
+              <button data-regen="0" onclick="setRegenLevel(0)">Normal</button>
+              <button data-regen="1" onclick="setRegenLevel(1)">Alto</button>
+            </div>
+          </div>
+          <div class="pair">
+            <div class="ctrl-tile" id="ctrl-onepedal" onclick="toggleOnePedal()"><div class="ic">🦶</div><div class="lbl">One-pedal</div><div class="st" id="ctrl-onepedal-st">—</div></div>
+            <div class="ctrl-tile" id="ctrl-esp" onclick="toggleEsp()"><div class="ic">🛞</div><div class="lbl">ESP</div><div class="st" id="ctrl-esp-st">—</div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ÁREA 2 · Climatização -->
+      <div class="ctrl-area">
+        <div class="area-h"><span class="ico">❄️</span> Climatização</div>
+        <div class="area-grid clima">
+          <div class="clima-toggles">
+            <div class="ctrl-tile" id="ctrl-ac" title="Toque: liga/desliga · Segure: mais opções"><div class="ic">❄️</div><div class="lbl">A/C</div><div class="st" id="ctrl-ac-st">—</div></div>
+            <div class="ctrl-tile" id="ctrl-recirc" onclick="toggleAcCycle()"><div class="ic" id="ctrl-recirc-ic">↺</div><div class="lbl">Circul.</div><div class="st" id="ctrl-recirc-st">—</div></div>
+            <div class="ctrl-tile" id="ctrl-sync" onclick="toggleAcSync()"><div class="ic">⇄</div><div class="lbl">SYNC</div><div class="st" id="ctrl-sync-st">—</div></div>
+            <div class="ctrl-tile" id="ctrl-auto" onclick="toggleAcAuto()"><div class="ic">🅰️</div><div class="lbl">AUTO</div><div class="st" id="ctrl-auto-st">—</div></div>
+          </div>
+          <div class="sliders">
+            <div class="slider-tile">
+              <div class="slider-h"><span class="lbl">🌡️ Motorista</span><span class="sv"><span id="ctrl-temp-d">22,0</span>°C</span></div>
+              <input type="range" class="cv-slider" id="sld-temp-d" min="16" max="32" step="0.5" value="22" oninput="setTempSlider('d', this.value)" onchange="commitTempSlider('d', this.value)">
+            </div>
+            <div class="slider-tile">
+              <div class="slider-h"><span class="lbl">🌡️ Passageiro</span><span class="sv"><span id="ctrl-temp-p">22,0</span>°C</span></div>
+              <input type="range" class="cv-slider" id="sld-temp-p" min="16" max="32" step="0.5" value="22" oninput="setTempSlider('p', this.value)" onchange="commitTempSlider('p', this.value)">
+            </div>
+            <div class="slider-tile">
+              <div class="slider-h"><span class="lbl">🌀 Ventilação</span><span class="sv"><span id="ctrl-fan">4</span>/7</span></div>
+              <input type="range" class="cv-slider teal" id="sld-fan" min="0" max="7" step="1" value="4" oninput="setFanSlider(this.value)" onchange="commitFanSlider(this.value)">
+            </div>
+          </div>
+          <div class="seg-tile air-seg">
+            <div class="seg-h"><span>🧭</span> Direção do ar</div>
+            <div class="seg" id="seg-air">
+              <button data-air="0" onclick="setBlower(0)">Rosto</button>
+              <button data-air="1" onclick="setBlower(1)">Rosto+Pés</button>
+              <button data-air="2" onclick="setBlower(2)">Pés</button>
+              <button data-air="3" onclick="setBlower(3)">Pés+Vidro</button>
+              <button data-air="4" onclick="setBlower(4)">Degelo</button>
+            </div>
+          </div>
+          <div class="clima-seats">
+            <div class="slider-tile seat">
+              <div class="slider-h"><span class="lbl">💺 Banco mot.</span><span class="sv" id="ctrl-seat-d-st">OFF</span></div>
+              <input type="range" class="cv-slider" id="sld-seat-d" min="0" max="3" step="1" value="0" oninput="setSeatSlider('d', this.value)" onchange="commitSeatSlider('d', this.value)">
+            </div>
+            <div class="slider-tile seat">
+              <div class="slider-h"><span class="lbl">💺 Banco pass.</span><span class="sv" id="ctrl-seat-p-st">OFF</span></div>
+              <input type="range" class="cv-slider" id="sld-seat-p" min="0" max="3" step="1" value="0" oninput="setSeatSlider('p', this.value)" onchange="commitSeatSlider('p', this.value)">
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ÁREA 3 · Veículo + Aberturas -->
+      <div class="ctrl-area">
+        <div class="area-h"><span class="ico">🔐</span> Veículo</div>
+        <div class="area-grid veic">
+          <div class="sub-h">Aberturas</div>
+          <div class="seg-tile">
+            <div class="seg-h"><span>🪟</span> Vidros</div>
+            <div class="seg" id="seg-windows">
+              <button data-win="1" onclick="setWindows(this,'fechado')">Fechar</button>
+              <button data-win="3" onclick="setWindows(this,'entreaberto')">Entreab.</button>
+              <button data-win="0" onclick="setWindows(this,'aberto')">Abrir</button>
+            </div>
+          </div>
+          <div class="slider-tile">
+            <div class="slider-h"><span class="lbl">🌥️ Cortina</span><span class="sv"><span id="ctrl-curtain">0</span>%</span></div>
+            <input type="range" class="cv-slider" id="sld-curtain" min="0" max="100" step="10" value="0" oninput="setCurtain(this.value)" onchange="commitCurtain(this.value)">
+          </div>
+          <div class="slider-tile">
+            <div class="slider-h"><span class="lbl">☀️ Teto solar</span><span class="sv" id="ctrl-sunroof">Fechado</span></div>
+            <input type="range" class="cv-slider" id="sld-sunroof" min="10" max="100" step="10" value="10" oninput="previewSunroof(this.value)" onchange="commitSunroof(this.value)">
+            <button class="vent-btn" id="ctrl-sunroof-vent" onclick="sunroofVent()">🌬️ Ventilação</button>
+          </div>
+          <div class="ctrl-tile danger haz-big" id="ctrl-haz" onclick="toggleHazard()"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><path d="M12 3.5 L21.5 20 L2.5 20 Z"/><line x1="12" y1="10" x2="12" y2="14.5"/><circle cx="12" cy="17.3" r="0.6" fill="currentColor" stroke="none"/></svg></div><div class="txt"><span class="lbl">Pisca-alerta</span><span class="st" id="ctrl-haz-st">desligado</span></div></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- TRIP -->
+  <div class="panel p-trip">
+    <div class="panel-h"><span class="ico">🚗</span> Viagem em curso<span class="dest-info" id="trip-dest"></span></div>
+    <div class="trip-grid">
+      <div class="trip-cell"><div class="trip-val teal"><span id="trip-dist">0,0</span><span class="u">km</span></div><div class="trip-lbl">Distância</div></div>
+      <div class="trip-cell"><div class="trip-val"><span id="trip-time">0:00</span></div><div class="trip-lbl">Tempo</div></div>
+      <div class="trip-cell"><div class="trip-val green"><span id="trip-kwh">0,0</span><span class="u">kWh</span></div><div class="trip-lbl">Energia</div></div>
+      <div class="trip-cell"><div class="trip-val orange"><span id="trip-fuel">0,0</span><span class="u">L</span></div><div class="trip-lbl">Combust.</div></div>
+      <div class="trip-cell"><div class="trip-val yellow cost"><span id="trip-cost">R$ 0,00</span></div><div class="trip-lbl">Custo</div></div>
+      <div class="trip-cell"><div class="trip-val yellow cost"><span id="trip-cost-km">R$ 0,00</span><span class="u">/km</span></div><div class="trip-lbl">Por km</div></div>
+      <div class="trip-cell"><div class="trip-val green"><span id="trip-ev-pct">—</span><span class="u">%</span><span class="sub" id="trip-ev-km">— km</span></div><div class="trip-lbl">Elétrico</div></div>
+      <div class="trip-cell"><div class="trip-val orange"><span id="trip-hev-pct">—</span><span class="u">%</span><span class="sub" id="trip-hev-km">— km</span></div><div class="trip-lbl">Híbrido</div></div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Popup de modos de condução (terrain) — abre no toque longo de qq botão do seg-mode -->
+<div class="nav-overlay" id="mode-popup" onclick="if(event.target===this)closeModePopup()">
+  <div class="nav-card">
+    <h4>🚀 Modos de condução</h4>
+    <div class="mode-grid" id="mode-grid">
+      <button data-terrain="2">Eco</button>
+      <button data-terrain="0">Normal</button>
+      <button data-terrain="1">Sport</button>
+      <button data-terrain="11">AWD</button>
+      <button data-terrain="3">Neve</button>
+      <button data-terrain="5">Lama</button>
+      <button data-terrain="4">Areia</button>
+    </div>
+    <div class="nav-btn-row" style="margin-top:4px"><button class="close" onclick="closeModePopup()">Fechar</button></div>
   </div>
 </div>
+
+<!-- Climatização — extras (abre no toque longo sobre o A/C) -->
+<div class="nav-overlay" id="ac-extra-popup" onclick="if(event.target===this)closeAcExtras()">
+  <div class="nav-card">
+    <h4>❄️ Climatização — mais opções</h4>
+    <div class="mode-grid" id="ac-extra-grid">
+      <button data-acx="hvac_acmax" onclick="toggleAcExtra('acmax')">❄️ AC Máx</button>
+      <button data-acx="hvac_heating" onclick="toggleAcExtra('heating')">🔥 Aquecimento</button>
+      <button data-acx="hvac_front_defrost" onclick="toggleAcExtra('front_defrost')">🌫 Desemb. diant.</button>
+      <button data-acx="hvac_rear_defrost" onclick="toggleAcExtra('rear_defrost')">🌫 Desemb. tras.</button>
+      <button data-acx="hvac_auto_defrost" onclick="toggleAcExtra('auto_defrost')">🌫 Desemb. auto</button>
+      <button data-acx="hvac_anion" onclick="toggleAcExtra('anion')">✨ Ionizador</button>
+      <button data-acx="hvac_aqs" onclick="toggleAcExtra('aqs')">🍃 AQS</button>
+      <div style="display:flex;align-items:center;justify-content:center;gap:6px;padding:18px 8px;border-radius:12px;background:var(--panel-lift);border:1px solid var(--border-hi);color:var(--text);font-size:14px;font-weight:700">🌬 PM2.5 <b id="acx-pm25">--</b></div>
+    </div>
+    <div class="nav-btn-row" style="margin-top:4px"><button class="close" onclick="closeAcExtras()">Fechar</button></div>
+  </div>
+</div>
+
+<!-- Modal HEV reaproveitado (Inteligente/Prioritário + slider 20–80%) -->
+<div id="hev-modal" onclick="if(event.target===this)closeHevModal()" style="display:none;position:fixed;inset:0;z-index:2000;background:rgba(0,0,0,.6);align-items:center;justify-content:center">
+  <div style="background:#0f172a;border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:22px;width:min(440px,86vw);box-shadow:0 20px 60px rgba(0,0,0,.6)">
+    <div style="font-size:18px;font-weight:700;margin-bottom:14px;color:#e2e8f0">⚙ Modo HEV</div>
+    <label style="display:flex;gap:10px;align-items:flex-start;padding:12px;border-radius:10px;background:rgba(255,255,255,.05);margin-bottom:8px;cursor:pointer">
+      <input type="radio" name="hev-mode" value="1" id="hev-r-smart" onchange="_toggleHevSlider()" style="margin-top:3px">
+      <span><strong style="color:#e2e8f0">Inteligente</strong><br><span style="font-size:12px;color:#94a3b8">Carro decide quando ligar o motor</span></span>
+    </label>
+    <label style="display:flex;gap:10px;align-items:flex-start;padding:12px;border-radius:10px;background:rgba(255,255,255,.05);margin-bottom:8px;cursor:pointer">
+      <input type="radio" name="hev-mode" value="2" id="hev-r-priority" onchange="_toggleHevSlider()" style="margin-top:3px">
+      <span><strong style="color:#e2e8f0">Prioritário</strong><br><span style="font-size:12px;color:#94a3b8">Preserva uma % de bateria definida</span></span>
+    </label>
+    <div id="hev-slider-wrap" style="display:none;margin:14px 4px 6px">
+      <div style="display:flex;justify-content:space-between;font-size:13px;color:#cbd5e1;margin-bottom:8px">
+        <span>% de bateria a preservar</span><span><b id="hev-soc-val">50</b>%</span>
+      </div>
+      <input type="range" min="20" max="80" step="5" value="50" id="hev-soc-slider" style="width:100%" oninput="document.getElementById('hev-soc-val').textContent=this.value">
+      <div style="font-size:11px;color:#64748b;margin-top:4px">20–80 %</div>
+    </div>
+    <div style="display:flex;gap:10px;margin-top:16px">
+      <button onclick="closeHevModal()" style="flex:1;padding:12px;border-radius:10px;border:1px solid rgba(255,255,255,.15);background:transparent;color:#cbd5e1;font-size:15px">Cancelar</button>
+      <button onclick="applyHevModal()" style="flex:1;padding:12px;border-radius:10px;border:none;background:var(--green);color:#04210f;font-weight:700;font-size:15px">Aplicar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Mapa: fora da tela mas presente (Leaflet/MapKit precisa de tamanho p/ init) -->
+<div id="cluster-map"></div>
+<div id="cluster-map-bot"></div>
+
+<!-- Sentinels do código legado: render()/overlays/fluxo escrevem aqui sem aparecer -->
+<span id="soc-pct-mini" style="display:none"></span>
+<div class="legacy-hidden" aria-hidden="true">
+  <div id="env-badge"></div>
+  <div id="trip-eta-banner"></div>
+  <div id="ov-speed"></div><div id="ov-power"></div><div id="ov-unit"></div><div id="ov-rpm"></div>
+  <div id="ov-regen"></div><div id="ov-modes"></div><div id="power-speed"></div><div id="power-rpm"></div>
+  <div id="hazard-btn"></div>
+  <!-- Fluxo de energia (oculto): render escreve classe/valor nesses ids -->
+  <span id="flow-mode"></span>
+  <span id="node-ice"></span><span id="node-gmcu"></span><span id="node-batt"></span><span id="node-tmcu"></span><span id="node-charge"></span>
+  <span id="val-ice"></span><span id="val-gmcu"></span><span id="val-batt"></span><span id="val-tmcu"></span><span id="emoji-charge"></span>
+  <span id="wheel-fl"></span><span id="wheel-fr"></span><span id="wheel-rl"></span><span id="wheel-rr"></span>
+  <span id="line-batt-gmcu"></span><span id="line-batt-tmcu"></span><span id="line-ice-gmcu"></span><span id="line-ice-batt"></span><span id="line-charge"></span>
+  <!-- funções legadas não-acionadas no V4 (openNavMenu/openAcModal/openVehPicker) — sentinels p/ não quebrarem se chamadas -->
+  <div id="nav-overlay"></div>
+  <div id="ac-modal"></div>
+  <div id="veh-modal"><span id="veh-modal-title"></span><div id="veh-modal-grid"></div></div>
+</div>
+
 
 <div id="toast"></div>
 
@@ -2750,6 +2748,188 @@ setInterval(tickPowerSpark, 100);
 // Bloqueia zoom/scroll
 document.addEventListener('gesturestart', e => e.preventDefault());
 document.addEventListener('dblclick', e => e.preventDefault());
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  REDESIGN V4 · wiring ADITIVO dos controles (não altera render/connect/etc).
+//  Comandos vão por sendCmd/sendHvac → postMessage → Swift roteia (LAN/cloud).
+//  Pintura derivada do `state` que o render() já mantém.
+// ═══════════════════════════════════════════════════════════════════════════
+(function () {
+  const SEAT = ['OFF', 'I', 'II', 'III'];
+  const _g = id => document.getElementById(id);
+  const _escV4 = s => String(s).replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+  // ── Climatização (sliders): oninput só pinta o label; onchange envia ──
+  window.setTempSlider = (side, v) => { const e = _g('ctrl-temp-' + side); if (e) e.textContent = (+v).toFixed(1).replace('.', ','); };
+  window.commitTempSlider = (side, v) => {
+    const val = (+v).toFixed(1);
+    if (+state.hvac_sync_enable === 1) { sendHvac('driver_temp', val); sendHvac('passenger_temp', val); }
+    else sendHvac(side === 'd' ? 'driver_temp' : 'passenger_temp', val);
+    toast('⏳ ' + (side === 'd' ? 'Motorista' : 'Passageiro') + ' ' + val.replace('.', ',') + '°C…');
+  };
+  window.setFanSlider = (v) => { const e = _g('ctrl-fan'); if (e) e.textContent = v; };
+  window.commitFanSlider = (v) => { sendHvac('fan_speed', parseInt(v, 10)); toast('⏳ Ventilação ' + v + '/7…'); };
+  window.setSeatSlider = (side, v) => { const e = _g('ctrl-seat-' + side + '-st'); if (e) e.textContent = SEAT[+v] || 'OFF'; };
+  window.commitSeatSlider = (side, v) => { sendHvac(side === 'd' ? 'seat_vent_drv' : 'seat_vent_pass', parseInt(v, 10)); };
+
+  // ── Aberturas ──
+  window.setCurtain = (v) => { const e = _g('ctrl-curtain'); if (e) e.textContent = v; };
+  window.commitCurtain = (v) => { sendCmd('vehicle_shade', parseInt(v, 10)); toast('⏳ Cortina ' + v + '%…'); };
+  window.previewSunroof = (v) => { const e = _g('ctrl-sunroof'); if (e) e.textContent = (+v <= 10 ? 'Fechado' : v + '%'); };
+  window.commitSunroof = (v) => {
+    const vent = _g('ctrl-sunroof-vent'); if (vent) vent.classList.remove('on');
+    sendCmd('vehicle_skylight', parseInt(v, 10)); toast('⏳ Teto ' + (+v <= 10 ? 'fechar' : v + '%') + '…');
+  };
+  window.sunroofVent = () => {
+    const vent = _g('ctrl-sunroof-vent'); const on = vent && !vent.classList.contains('on');
+    if (vent) vent.classList.toggle('on', !!on);
+    const lbl = _g('ctrl-sunroof'); if (lbl && on) lbl.textContent = 'Ventilação';
+    sendCmd('vehicle_skylight', on ? 200 : 0); toast('⏳ Teto ' + (on ? 'ventilação' : 'fechar') + '…');
+  };
+  window.setWindows = (btn, pos) => {
+    const map = { fechado: 1, entreaberto: 3, aberto: 0 };
+    if (btn && btn.parentElement) [...btn.parentElement.children].forEach(b => b.classList.toggle('on', b === btn));
+    sendCmd('vehicle_windows', map[pos]); toast('⏳ Vidros: ' + pos + '…');
+  };
+
+  // ── Pisca-alerta (4 setas) — override que pinta o tile grande #ctrl-haz.
+  //    Mantém o fail-safe: alterna 0/1 no intervalo da Config; se a tela fechar,
+  //    o timer para sozinho. ──
+  let _hazOn = false, _hazTimer = null, _hazVal = 0;
+  window.toggleHazard = function () {
+    _hazOn = !_hazOn;
+    const tile = _g('ctrl-haz'), st = _g('ctrl-haz-st');
+    if (tile) tile.classList.toggle('on', _hazOn);
+    if (st) st.textContent = _hazOn ? '● LIGADO' : 'desligado';
+    if (_hazOn) {
+      _hazVal = 0;
+      const ms = Math.max(100, Math.min(5000, +window._hazardIntervalMs || 2000));
+      const tick = () => { _hazVal = _hazVal ? 0 : 1; sendCmd('hazard', _hazVal); };
+      tick(); _hazTimer = setInterval(tick, ms);
+    } else {
+      if (_hazTimer) { clearInterval(_hazTimer); _hazTimer = null; }
+      sendCmd('hazard', 0);
+    }
+  };
+
+  // ── Topbar: conexão + config ──
+  window.onConnTap = () => {
+    const sb = _g('source-badge');
+    if (sb && /LAN/.test(sb.textContent)) { toast('📡 LAN·WS ativa'); return; }
+    if (window.webkit?.messageHandlers?.obd)
+      window.webkit.messageHandlers.obd.postMessage({ action: 'reconnect_lan' });
+    toast('🔄 Reconectando LAN…');
+  };
+  window.openConfig = () => {
+    if (window.webkit?.messageHandlers?.obd)
+      window.webkit.messageHandlers.obd.postMessage({ action: 'open_settings' });
+    else toast('Configurações (engrenagem nativa / triplo-toque)');
+  };
+
+  // ── Popup de modos (terrain) + long-press no seg-mode ──
+  window.openModePopup = () => { const p = _g('mode-popup'); if (p) p.classList.add('show'); };
+  window.closeModePopup = () => { const p = _g('mode-popup'); if (p) p.classList.remove('show'); };
+  window.openAcExtras = () => { const p = _g('ac-extra-popup'); if (p) p.classList.add('show'); };
+  window.closeAcExtras = () => { const p = _g('ac-extra-popup'); if (p) p.classList.remove('show'); };
+  const TERRAIN_LBL = { 0: 'Normal', 1: 'Sport', 2: 'Eco', 3: 'Neve', 4: 'Areia', 5: 'Lama', 11: 'AWD' };
+  document.querySelectorAll('#seg-mode button').forEach(b => {
+    let t = null, longp = false;
+    const open = () => { longp = true; window.openModePopup(); };
+    b.addEventListener('pointerdown', () => { longp = false; t = setTimeout(open, 500); });
+    ['pointerup', 'pointerleave', 'pointercancel'].forEach(ev => b.addEventListener(ev, () => clearTimeout(t)));
+    b.addEventListener('click', () => { if (longp) { longp = false; return; } setTerrainMode(parseInt(b.dataset.terrain, 10)); });
+    b.addEventListener('contextmenu', e => { e.preventDefault(); clearTimeout(t); open(); });
+  });
+  document.querySelectorAll('#mode-grid button').forEach(b => {
+    b.addEventListener('click', () => { setTerrainMode(parseInt(b.dataset.terrain, 10)); window.closeModePopup(); });
+  });
+
+  // A/C: toque liga/desliga (toggleAcPower) · toque longo / clique-direito abre os extras.
+  (function () {
+    const ac = _g('ctrl-ac'); if (!ac) return;
+    let t = null, longp = false;
+    const open = () => { longp = true; window.openAcExtras(); };
+    ac.addEventListener('pointerdown', () => { longp = false; t = setTimeout(open, 500); });
+    ['pointerup', 'pointerleave', 'pointercancel'].forEach(ev => ac.addEventListener(ev, () => clearTimeout(t)));
+    ac.addEventListener('click', () => { if (longp) { longp = false; return; } toggleAcPower(); });
+    ac.addEventListener('contextmenu', e => { e.preventDefault(); clearTimeout(t); open(); });
+  })();
+
+  // ── Pintura dos controles a partir do state ──
+  function _paintSeg(segId, attr, val) {
+    const seg = _g(segId); if (!seg) return false;
+    let matched = false;
+    seg.querySelectorAll('button').forEach(b => {
+      const has = b.dataset[attr] !== undefined;
+      const on = has && String(b.dataset[attr]) === String(val);
+      b.classList.toggle('on', on); if (on) matched = true;
+    });
+    return matched;
+  }
+  function _paintTile(id, on, stId, onTxt, offTxt) {
+    const t = _g(id); if (t) t.classList.toggle('on', !!on);
+    const s = stId && _g(stId); if (s) s.textContent = on ? onTxt : offTxt;
+  }
+  function _slider(id, v, fixed) {
+    const el = _g(id); if (!el || el === document.activeElement) return;
+    if (Number.isFinite(v)) el.value = fixed != null ? (+v).toFixed(fixed) : v;
+  }
+  function renderV4Controls() {
+    // Condução
+    const okMode = _paintSeg('seg-mode', 'terrain', state.terrain_mode);
+    const sfx = _g('mode-sfx');
+    if (sfx) sfx.textContent = (!okMode && state.terrain_mode != null && TERRAIN_LBL[state.terrain_mode]) ? ' · ' + TERRAIN_LBL[state.terrain_mode] : '';
+    document.querySelectorAll('#mode-grid button').forEach(b => b.classList.toggle('on', String(b.dataset.terrain) === String(state.terrain_mode)));
+    _paintSeg('seg-power', 'mode', state.drive_mode);
+    _paintSeg('seg-regen', 'regen', state.regen_level);
+    _paintSeg('seg-steer', 'steer', state.steer_mode);
+    _paintSeg('seg-air', 'air', state.hvac_blower_mode);
+    _paintTile('ctrl-onepedal', +state.one_pedal === 1, 'ctrl-onepedal-st', 'Ligado', 'Desligado');
+    _paintTile('ctrl-esp', +state.esp_enable === 1, 'ctrl-esp-st', 'Ativo', 'Desativado');
+    // Climatização
+    const acOn = _acOn();
+    _paintTile('ctrl-ac', acOn, 'ctrl-ac-st', 'Ligado', 'Desligado');
+    const recirc = +state.hvac_cycle_mode === 0;
+    _paintTile('ctrl-recirc', recirc, 'ctrl-recirc-st', 'Recircular', 'Ar externo');
+    const ric = _g('ctrl-recirc-ic'); if (ric) ric.textContent = recirc ? '↺' : '↪';
+    _paintTile('ctrl-sync', +state.hvac_sync_enable === 1, 'ctrl-sync-st', 'Ligado', 'Desligado');
+    _paintTile('ctrl-auto', +state.hvac_auto_enable === 1, 'ctrl-auto-st', 'Ligado', 'Desligado');
+    // Sliders (não sobrescreve enquanto o usuário arrasta)
+    const td = parseFloat(state.hvac_driver_temp); if (Number.isFinite(td)) { _slider('sld-temp-d', td, 1); const e = _g('ctrl-temp-d'); if (e && _g('sld-temp-d') !== document.activeElement) e.textContent = td.toFixed(1).replace('.', ','); }
+    const tp = parseFloat(state.hvac_passenger_temp); if (Number.isFinite(tp)) { _slider('sld-temp-p', tp, 1); const e = _g('ctrl-temp-p'); if (e && _g('sld-temp-p') !== document.activeElement) e.textContent = tp.toFixed(1).replace('.', ','); }
+    const fan = parseInt(state.hvac_fan_speed, 10); if (Number.isFinite(fan) && fan >= 0) { _slider('sld-fan', fan); const e = _g('ctrl-fan'); if (e && _g('sld-fan') !== document.activeElement) e.textContent = fan; }
+    const sd = parseInt(state.seat_vent_drv, 10); if (Number.isFinite(sd)) { _slider('sld-seat-d', sd); const e = _g('ctrl-seat-d-st'); if (e && _g('sld-seat-d') !== document.activeElement) e.textContent = SEAT[Math.max(0, Math.min(3, sd))]; }
+    const sp = parseInt(state.seat_vent_pass, 10); if (Number.isFinite(sp)) { _slider('sld-seat-p', sp); const e = _g('ctrl-seat-p-st'); if (e && _g('sld-seat-p') !== document.activeElement) e.textContent = SEAT[Math.max(0, Math.min(3, sp))]; }
+    // Tração (sub-rótulo HEV)
+    const hsl = _g('hev-sub-label');
+    if (hsl) {
+      if (state.drive_mode !== 0) hsl.textContent = '';
+      else if (state.power_reserve === 1) hsl.textContent = '· Intel.';
+      else if (state.power_reserve === 2) hsl.textContent = state.charge_soc_target ? ('· Prior. ' + state.charge_soc_target + '%') : '· Prior.';
+      else hsl.textContent = '';
+    }
+    // Destino na viagem
+    const de = _g('trip-dest'), arr = state.arrival;
+    if (de) {
+      if (arr && arr.socArrival != null) {
+        const p = [];
+        if (arr.name) p.push('→ <b>' + _escV4(arr.name) + '</b>');
+        if (arr.distKm != null) p.push('<b>' + fmt1(arr.distKm) + ' km</b>');
+        if (arr.etaClock) p.push('ETA <b>' + _escV4(arr.etaClock) + '</b>');
+        p.push('chegada <b>' + Math.round(arr.socArrival) + '%</b>');
+        de.innerHTML = p.join('<span class="sep">·</span>');
+      } else de.innerHTML = '';
+    }
+    // Extras do A/C (popup force-touch): estado on/off + PM2.5
+    document.querySelectorAll('#ac-extra-grid button[data-acx]').forEach(b => b.classList.toggle('on', +state[b.dataset.acx] === 1));
+    const pmx = _g('acx-pm25'); if (pmx) { const v = parseInt(state.hvac_pm25, 10); pmx.textContent = Number.isFinite(v) ? v : '--'; }
+    // Badge de conexão: classe lan/cloud conforme o texto que _updateSourceBadge escreve
+    const sb = _g('source-badge');
+    if (sb) { const lan = /LAN/.test(sb.textContent); sb.classList.toggle('lan', lan); sb.classList.toggle('cloud', !lan); }
+  }
+  renderV4Controls();
+  setInterval(renderV4Controls, 800);
+})();
 </script>
 
 </body>

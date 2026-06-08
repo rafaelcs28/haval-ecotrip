@@ -25,6 +25,9 @@ final class OBDBridgeChannel: ObservableObject {
     /// RootView observa via onChange e apresenta o NavigationModalView.
     /// Usar Int em vez de Bool evita race condition de reset.
     @Published var navRequestId: Int = 0
+    /// Incrementado quando o cluster (botão ⚙ do V4) pede pra abrir as Configurações.
+    /// RootView observa via onChange e apresenta o SettingsView.
+    @Published var settingsRequestId: Int = 0
     /// Modo debug — quando ON, snapshot inclui lista crua de PIDs lidos.
     /// O cluster.html renderiza overlay flutuante com tabela id/value/unit/age.
     @Published var debugMode: Bool = UserDefaults.standard.bool(forKey: "haval_obd_debug") {

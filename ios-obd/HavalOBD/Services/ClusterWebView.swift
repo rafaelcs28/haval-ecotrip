@@ -157,6 +157,12 @@ struct ClusterWebView: UIViewRepresentable {
                         UIApplication.shared.open(url, options: [:], completionHandler: nil)
                     }
                 }
+            case "reconnect_lan":
+                // Tap no badge de conexão (V4) — força reconexão da LAN direta.
+                publisher.reconnectLan()
+            case "open_settings":
+                // Botão ⚙ do V4 — abre o SettingsView (mesmo da engrenagem nativa).
+                channel.settingsRequestId += 1
             default:
                 print("[obd-bridge] ação desconhecida: \(action)")
             }
