@@ -2194,13 +2194,13 @@ function computeMaintenance() {
 }
 
 // Retorna o local conhecido mais próximo dentro do raio do local, ou null
-function matchKnownPlace(lat, lng) {
+function matchKnownPlace(lat, lng, tol = 0) {
   if (!lat || !lng) return null;
   let best = null, bestDist = Infinity;
   for (const loc of knownPlaces) {
     if (!loc.lat || !loc.lng) continue;
     const d = haversineM(lat, lng, loc.lat, loc.lng);
-    const r = loc.radius_m || 200;
+    const r = (loc.radius_m || 200) + tol;   // tol extra absorve desvio de GPS em garagem/estacionamento
     if (d < r && d < bestDist) { best = loc; bestDist = d; }
   }
   return best;
@@ -4551,8 +4551,8 @@ app.post('/api/autotrips', (req, res) => {
     }
 
     // Auto-naming por Locais Conhecidos
-    const _sp = matchKnownPlace(autoTrip.startLat, autoTrip.startLng);
-    const _ep = matchKnownPlace(autoTrip.endLat,   autoTrip.endLng);
+    const _sp = matchKnownPlace(autoTrip.startLat, autoTrip.startLng, 80);
+    const _ep = matchKnownPlace(autoTrip.endLat,   autoTrip.endLng, 80);
     if (_sp) record.knownStart = _sp.name;
     if (_ep) record.knownEnd   = _ep.name;
     // Fim NÃO é um local salvo, mas você compartilhou esse destino pelo Waze/Maps →
@@ -5629,10 +5629,14 @@ app.post('/api/admin/reprocess-places', async (req, res) => {
   // o geocode (mesmo quando é KP) pra que a regra "mesma cidade" funcione no
   // OUTRO lado da viagem.
   async function _resolveSide(lat, lng) {
-    const kp = autoMatchLocation(lat, lng);
+    // Local conhecido (com tolerância de GPS) → outro matcher → destino mandado
+    // pro carro (≤300 m) → senão geocode. Mesma régua do fim da viagem.
+    const kp = matchKnownPlace(lat, lng, 80) || autoMatchLocation(lat, lng);
     const geo = await _reverseGeocode(lat, lng);
     await new Promise(r => setTimeout(r, 1100));
     if (kp?.name) return { name: kp.name, from_kp: true, geo };
+    const nav = _navDestNameFor(lat, lng);
+    if (nav) return { name: nav, from_kp: true, geo };
     return { name: null, from_kp: false, geo };
   }
   // Roda em background
@@ -8608,6 +8612,15 @@ app.get('/api/route-plan', async (req, res) => {
     }
     const plan = await _routeElevation(fromLat, fromLng, toLat, toLng);
     if (!plan) return res.status(502).json({ error: 'rota indisponível' });
+    // Registra o destino (celular OU carro) pra nomear a viagem que terminar a
+    // ≤300 m dele (ver _navDestNameFor). Dedup do último pra não inflar a lista.
+    if (toName && toLat && toLng) {
+      const last = recentNavDests[recentNavDests.length - 1];
+      if (!last || last.name !== toName || haversineM(last.lat, last.lng, toLat, toLng) > 50) {
+        recentNavDests.push({ name: toName, lat: toLat, lng: toLng, ts: Date.now() });
+        if (recentNavDests.length > 30) recentNavDests.shift();
+      }
+    }
     res.json({ ...plan, destLat: toLat, destLng: toLng, destName: toName });
   } catch (e) {
     res.status(500).json({ error: String(e.message || e) });
