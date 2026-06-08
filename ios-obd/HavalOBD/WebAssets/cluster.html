@@ -1282,7 +1282,7 @@
             </div>
           </div>
           <div class="slider-tile">
-            <div class="slider-h"><span class="lbl">🌥️ Cortina</span><span class="sv"><span id="ctrl-curtain">0</span>%</span></div>
+            <div class="slider-h"><span class="lbl">🌥️ Cortina</span><span class="sv" id="ctrl-curtain">—</span></div>
             <input type="range" class="cv-slider" id="sld-curtain" min="0" max="100" step="10" value="0" oninput="setCurtain(this.value)" onchange="commitCurtain(this.value)">
           </div>
           <div class="slider-tile">
@@ -2804,7 +2804,7 @@ document.addEventListener('dblclick', e => e.preventDefault());
   window.commitSeatSlider = (side, v) => { sendHvac(side === 'd' ? 'seat_vent_drv' : 'seat_vent_pass', parseInt(v, 10)); };
 
   // ── Aberturas ──
-  window.setCurtain = (v) => { const e = _g('ctrl-curtain'); if (e) e.textContent = v; };
+  window.setCurtain = (v) => { const e = _g('ctrl-curtain'); if (e) e.textContent = v + '%'; };
   window.commitCurtain = (v) => { sendCmd('vehicle_shade', parseInt(v, 10)); toast('⏳ Cortina ' + v + '%…'); };
   window.previewSunroof = (v) => { const e = _g('ctrl-sunroof'); if (e) e.textContent = (+v <= 10 ? 'Fechado' : v + '%'); };
   window.commitSunroof = (v) => {
@@ -2963,6 +2963,21 @@ document.addEventListener('dblclick', e => e.preventDefault());
     // Submenu (force-touch): demais extras + PM2.5
     document.querySelectorAll('#ac-extra-grid button[data-acx]').forEach(b => b.classList.toggle('on', +state[b.dataset.acx] === 1));
     const pmx = _g('acx-pm25'); if (pmx) { const v = parseInt(state.hvac_pm25, 10); pmx.textContent = Number.isFinite(v) ? v : '--'; }
+    // Aberturas — refletem o estado publicado pelo carro (independe de mexer)
+    // Vidros: window_fl/fr/rl/rr (1=fechado · 2=aberto · 3=entreaberto). Agrega o "mais aberto".
+    const wins = [state.window_fl, state.window_fr, state.window_rl, state.window_rr]
+      .map(w => parseInt(w, 10)).filter(Number.isFinite);
+    if (wins.length) {
+      const winState = wins.some(w => w === 2) ? '0' : (wins.some(w => w === 3) ? '3' : '1');
+      document.querySelectorAll('#seg-windows button').forEach(b => b.classList.toggle('on', b.dataset.win === winState));
+    }
+    // Teto: sunroof = 'on'/'off' (o carro só reporta aberto/fechado, sem %).
+    const srEl = _g('ctrl-sunroof');
+    if (srEl && _g('sld-sunroof') !== document.activeElement) {
+      if (state.sunroof === 'off') srEl.textContent = 'Fechado';
+      else if (state.sunroof === 'on') srEl.textContent = 'Aberto';
+    }
+    // Cortina: o carro NÃO publica a posição — sem feedback. Mantém o último ajuste local.
     // Badge de conexão: classe lan/cloud conforme o texto que _updateSourceBadge escreve
     const sb = _g('source-badge');
     if (sb) { const lan = /LAN/.test(sb.textContent); sb.classList.toggle('lan', lan); sb.classList.toggle('cloud', !lan); }
