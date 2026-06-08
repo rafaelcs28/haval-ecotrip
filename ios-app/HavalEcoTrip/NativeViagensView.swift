@@ -682,45 +682,56 @@ struct RouteMapSheet: View {
         .task { await load() }
     }
 
-    // Cartão compartilhável: mapa do trajeto + stats, via MKMapSnapshotter.
+    // Cartão compartilhável: mapa do trajeto INTEIRO (mapRect = limites da rota +
+    // margem) na área acima da barra de stats, então a rota nunca fica cortada
+    // nem coberta. Mostra km, kWh, condução e velocidade média/máx.
     private func makeTripCard() {
         guard coords.count > 1 else { return }
         var rect = MKMapRect.null
         for c in coords { let p = MKMapPoint(c); rect = rect.union(MKMapRect(x: p.x, y: p.y, width: 0, height: 0)) }
         guard rect.size.width > 0 || rect.size.height > 0 else { return }
+
+        let size = CGSize(width: 1080, height: 1350)
+        let barH: CGFloat = 290
+        let mapH = size.height - barH
+
         let opts = MKMapSnapshotter.Options()
-        opts.mapRect = rect.insetBy(dx: -max(rect.size.width, 1) * 0.18, dy: -max(rect.size.height, 1) * 0.18)
-        opts.size = CGSize(width: 1080, height: 1350)
+        // Margem generosa pra rota não encostar nas bordas (zoom afastado o bastante).
+        let padX = max(rect.size.width, 1) * 0.16, padY = max(rect.size.height, 1) * 0.16
+        opts.mapRect = MKMapRect(x: rect.minX - padX, y: rect.minY - padY,
+                                 width: rect.size.width + 2 * padX, height: rect.size.height + 2 * padY)
+        opts.size = CGSize(width: size.width, height: mapH)   // só a área do mapa (acima da barra)
         opts.traitCollection = UITraitCollection(userInterfaceStyle: .dark)
+
         let date = self.trip.date, distKm = self.trip.distKm, netKwh = self.trip.netKwh
-        let score = Eco.score(self.trip), title = cardTitle()
+        let score = Eco.score(self.trip), title = cardTitle(), d = computeDriving()
         MKMapSnapshotter(options: opts).start(with: DispatchQueue.global(qos: .userInitiated)) { snapshot, _ in
             guard let snapshot else { return }
-            let size = opts.size
             let img = UIGraphicsImageRenderer(size: size).image { _ in
-                snapshot.image.draw(at: .zero)
+                UIColor.black.setFill(); UIRectFill(CGRect(origin: .zero, size: size))
+                snapshot.image.draw(at: .zero)   // mapa ocupa o topo (0..mapH)
                 let path = UIBezierPath()
                 for (i, c) in coords.enumerated() {
-                    let pt = snapshot.point(for: c)
+                    let pt = snapshot.point(for: c)   // coords mapeadas dentro do snapshot (0..mapH)
                     if i == 0 { path.move(to: pt) } else { path.addLine(to: pt) }
                 }
                 UIColor(red: 0.13, green: 0.83, blue: 0.93, alpha: 1).setStroke()
                 path.lineWidth = 9; path.lineJoinStyle = .round; path.lineCapStyle = .round; path.stroke()
                 // Barra inferior + textos
-                let barH: CGFloat = 250
-                let bar = CGRect(x: 0, y: size.height - barH, width: size.width, height: barH)
-                UIColor.black.withAlphaComponent(0.8).setFill(); UIRectFill(bar)
-                let df = DateFormatter(); df.locale = Locale(identifier: "pt_BR"); df.dateFormat = "d 'de' MMM yyyy · HH:mm"
-                func draw(_ s: String, _ y: CGFloat, _ size: CGFloat, _ color: UIColor, _ weight: UIFont.Weight) {
-                    let a: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: size, weight: weight), .foregroundColor: color]
+                UIColor(white: 0.04, alpha: 1).setFill(); UIRectFill(CGRect(x: 0, y: mapH, width: size.width, height: barH))
+                func draw(_ s: String, _ y: CGFloat, _ sz: CGFloat, _ color: UIColor, _ weight: UIFont.Weight) {
+                    let a: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: sz, weight: weight), .foregroundColor: color]
                     NSAttributedString(string: s, attributes: a).draw(at: CGPoint(x: 44, y: y))
                 }
-                draw("🚗 " + title, size.height - barH + 26, 44, .white, .bold)
-                draw(df.string(from: date), size.height - barH + 92, 30, UIColor(white: 0.7, alpha: 1), .regular)
-                var stats = "\(Fmt.km(distKm)) km · \(Fmt.dec1(netKwh)) kWh"
-                if let sc = score { stats += " · condução \(sc)" }
-                draw(stats, size.height - barH + 150, 40, UIColor(red: 0.13, green: 0.83, blue: 0.93, alpha: 1), .semibold)
-                draw("Haval Hub", size.height - 56, 26, UIColor(white: 0.5, alpha: 1), .medium)
+                let df = DateFormatter(); df.locale = Locale(identifier: "pt_BR"); df.dateFormat = "d 'de' MMM yyyy · HH:mm"
+                let teal = UIColor(red: 0.13, green: 0.83, blue: 0.93, alpha: 1)
+                draw("🚗 " + title, mapH + 22, 42, .white, .bold)
+                draw(df.string(from: date), mapH + 82, 28, UIColor(white: 0.65, alpha: 1), .regular)
+                var l1 = "\(Fmt.km(distKm)) km · \(Fmt.dec1(netKwh)) kWh"
+                if let sc = score { l1 += " · condução \(sc)" }
+                draw(l1, mapH + 132, 38, teal, .semibold)
+                draw("⌀ \(Int(d.avg.rounded())) km/h · máx \(Int(d.max.rounded())) km/h", mapH + 188, 34, UIColor(white: 0.85, alpha: 1), .regular)
+                draw("Haval Hub", mapH + barH - 50, 24, UIColor(white: 0.45, alpha: 1), .medium)
             }
             let url = FileManager.default.temporaryDirectory.appendingPathComponent("haval-cartao-\(self.trip.tripId).png")
             try? img.pngData()?.write(to: url)
