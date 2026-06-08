@@ -45,6 +45,8 @@ struct DSCard<Content: View>: View {
     var title: String? = nil
     var icon: String? = nil
     var glass: Bool = false   // true = fundo translúcido (legível sobre o mapa)
+    var bg: Color? = nil          // sobrescreve o fundo (ex.: destaque quando ligado)
+    var borderColor: Color? = nil // sobrescreve a borda
     @ViewBuilder var content: Content
 
     var body: some View {
@@ -69,11 +71,11 @@ struct DSCard<Content: View>: View {
                     Rectangle().fill(Color.black.opacity(0.35))
                 }.environment(\.colorScheme, .dark)
             } else {
-                Rectangle().fill(DS.panel)
+                Rectangle().fill(bg ?? DS.panel)
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(DS.border, lineWidth: 1))
+        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(borderColor ?? DS.border, lineWidth: 1))
     }
 }
 
@@ -221,6 +223,7 @@ struct LevelBadge: View {
                     }
                 }.frame(height: 6)
                 Text(label.uppercased()).font(.system(size: 9, weight: .semibold)).foregroundStyle(labelColor).tracking(0.4)
+                    .padding(.top, 3)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

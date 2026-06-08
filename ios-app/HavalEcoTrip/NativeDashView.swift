@@ -110,7 +110,8 @@ struct NativeDashView: View {
     // MARK: trava + motor (ícones com confirmação ancorada) + hodômetro/12V ao lado
     private var statusCard: some View {
         let winOpen = ["window_fl","window_fr","window_rl","window_rr"].contains { store.str($0) == "on" }
-        return DSCard {
+        let on = store.engineOn
+        return DSCard(bg: on ? DS.green.opacity(0.14) : nil, borderColor: on ? DS.green.opacity(0.55) : nil) {
             HStack {
                 iconButton(icon: store.isLocked ? "lock.fill" : "lock.open.fill",
                            tint: store.isLocked ? DS.green : DS.orange,
@@ -406,17 +407,19 @@ struct NativeDashView: View {
         let tint = anomaly ? DS.yellow : DS.muted
         // Resumo com glifos de carro (porta/vidro), não emoji de casa.
         let summaryView = AnyView(
-            HStack(spacing: 5) {
-                Text("🛞 \(tyreTxt)").font(.caption).foregroundStyle(tint).lineLimit(1)
-                Text("·").font(.caption).foregroundStyle(tint)
+            HStack(spacing: 4) {
+                Text("🛞").font(.system(size: 11))
+                Text(tyreTxt).font(.system(size: 11, weight: .medium)).foregroundStyle(tint)
+                    .lineLimit(1).minimumScaleFactor(0.5).layoutPriority(1)
+                Text("·").font(.caption2).foregroundStyle(tint)
                 CarDoorGlyph(color: openDoors.isEmpty ? tint : DS.orange)
-                Text(openDoors.isEmpty ? "ok" : "\(openDoors.count)").font(.caption).foregroundStyle(openDoors.isEmpty ? tint : DS.orange)
-                Text("·").font(.caption).foregroundStyle(tint)
+                Text(openDoors.isEmpty ? "ok" : "\(openDoors.count)").font(.caption2).foregroundStyle(openDoors.isEmpty ? tint : DS.orange)
+                Text("·").font(.caption2).foregroundStyle(tint)
                 CarWindowGlyph(color: openWins.isEmpty ? tint : DS.orange)
-                Text(openWins.isEmpty ? "ok" : "\(openWins.count)").font(.caption).foregroundStyle(openWins.isEmpty ? tint : DS.orange)
-            }
+                Text(openWins.isEmpty ? "ok" : "\(openWins.count)").font(.caption2).foregroundStyle(openWins.isEmpty ? tint : DS.orange)
+            }.layoutPriority(1)
         )
-        return CollapsibleCard(icon: "car.side.fill", title: "Pneus & Aberturas", summary: "", alert: anomaly, summaryView: summaryView) {
+        return CollapsibleCard(icon: "car.side.fill", title: "Pneus & Abert.", summary: "", alert: anomaly, summaryView: summaryView) {
             VStack(alignment: .leading, spacing: 10) {
                 HStack { tyreCell("tyre_pressure_fl","tyre_temp_fl","Diant. Esq."); tyreCell("tyre_pressure_fr","tyre_temp_fr","Diant. Dir.") }
                 HStack { tyreCell("tyre_pressure_rl","tyre_temp_rl","Tras. Esq.");  tyreCell("tyre_pressure_rr","tyre_temp_rr","Tras. Dir.") }
