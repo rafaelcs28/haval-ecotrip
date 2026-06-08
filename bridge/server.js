@@ -2224,6 +2224,17 @@ function _navDestNameFor(lat, lng) {
   return best ? best.name : null;
 }
 
+// Reserva de bateria: o carro guarda os últimos 15% do SOC pro motor a combustão
+// (não dá pra rodar 100% elétrico até 0). A autonomia EV exibida e todos os
+// cálculos de alcance consideram só a energia ATÉ 15% de SOC.
+const EV_RESERVE_PCT = 15;
+let _rangeEvRaw = 0;   // valor cru do sensor (até ~0%), antes da reserva
+function _applyEvReserve() {
+  const soc = +state.soc_pct || 0;
+  if (_rangeEvRaw <= 0) return;
+  state.range_ev_km = soc > EV_RESERVE_PCT ? Math.round(_rangeEvRaw * (soc - EV_RESERVE_PCT) / soc) : 0;
+}
+
 // ── Geofence: detecta entrada/saída de locais conhecidos e dispara push ───
 // Mantém estado por place {id → 'in'|'out'}. Histerese de 20% no raio pra evitar
 // flapping na borda. Saída só notifica se motor ligado (evita ruído de
@@ -9461,7 +9472,7 @@ function applyMqttMessage(key, value, isRetained = false) {
     }
     case 'odometer_km':       state.odometer_km         = num(value); checkMaintenanceAlerts(); break;
     case 'batt_12v_pct':      state.batt_12v_pct        = num(value); checkBatt12Low(); break;
-    case 'range_ev_km':       state.range_ev_km         = Math.round(num(value)); break;
+    case 'range_ev_km':       _rangeEvRaw = Math.round(num(value)); _applyEvReserve(); break;
     case 'range_ice_km':      state.range_ice_km        = Math.round(num(value)); break;
     case 'battery_power_pct': state.battery_power_pct = Math.round(num(value)); break;
     case 'engine_rpm':        state.engine_rpm        = Math.round(num(value)); break;
@@ -9471,6 +9482,7 @@ function applyMqttMessage(key, value, isRetained = false) {
     case 'soc_pct':
       haSocActive   = true;
       state.soc_pct = num(value);
+      _applyEvReserve();   // reaplica reserva de 15% na autonomia EV
       // Event-driven: SOC mudou → tenta atualizar a Live Activity de recarga
       // na hora (em vez de esperar o timer de 60s). O throttle interno
       // (dSoc≥1 / dPwr≥0.5 / 60s) garante que não vira spam.
@@ -9481,7 +9493,7 @@ function applyMqttMessage(key, value, isRetained = false) {
     // SOC vem agora exclusivamente do HA (gwmbrasil_.../soc_pct) ou do
     // próprio app via gwmbrasil; sem fallback do trip_a.
     case 'trip_a/soc_current': case 'trip_b/soc_current':
-      if (!haSocActive) state.soc_pct = num(value);   // legacy fallback até HA estar online
+      if (!haSocActive) { state.soc_pct = num(value); _applyEvReserve(); }   // legacy fallback até HA estar online
       break;
 
     // Rolling

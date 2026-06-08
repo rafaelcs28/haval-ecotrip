@@ -27,7 +27,9 @@ struct ChargeForecastSheet: View {
         return kwh / 14
     }
     private var capacity: Double { capacityKwh(loader.trips) }
-    private var currentKwh: Double { Double(soc) / 100 * capacity }
+    // Reserva: os últimos 15% ficam pro motor a combustão → energia útil até 15%.
+    private var usableKwh: Double { Double(max(0, soc - 15)) / 100 * capacity }
+    private var currentKwh: Double { usableKwh }
     private var daysLeft: Double? { dailyKwh > 0.05 ? currentKwh / dailyKwh : nil }
 
     // Vampire drain: % de SOC perdido parado por dia. Olha o intervalo entre o fim
@@ -72,7 +74,7 @@ struct ChargeForecastSheet: View {
                         DSCard {
                             HStack(spacing: 14) {
                                 cell("\(soc)", "%", "SOC agora", arrivalSocColor(soc))
-                                cell(Fmt.dec1(currentKwh), "kWh", "Disponível", DS.green)
+                                cell(Fmt.dec1(currentKwh), "kWh", "Útil (até 15%)", DS.green)
                                 cell(Fmt.dec1(dailyKwh), "kWh/dia", "Uso médio", DS.teal)
                             }
                         }
