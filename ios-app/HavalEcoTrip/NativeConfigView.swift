@@ -20,6 +20,7 @@ struct NativeConfigView: View {
     @State private var showPlaces = false
     @State private var showAutomations = false
     @State private var showNotifCenter = false
+    @State private var showSpeedFence = false
     @State private var shareURL: URL?
     @State private var importing = false
     @AppStorage("faceid_lock") private var faceIDLock = false
@@ -117,10 +118,13 @@ struct NativeConfigView: View {
                 rowButton(icon: "bell.badge.fill", title: "Central de notificações", subtitle: "Histórico de alertas recebidos") { showNotifCenter = true }
                 Divider().overlay(DS.border)
                 rowButton(icon: "bell.fill", title: "Notificações", subtitle: "Live Activities + alertas push") { showNotif = true }
+                Divider().overlay(DS.border)
+                rowButton(icon: "gauge.open.with.lines.needle.33percent", title: "Cerca de velocidade", subtitle: "Alerta se passar do limite (outro motorista)") { showSpeedFence = true }
             }
         }
         .sheet(isPresented: $showNotif) { NotificationsSheet(cfg: cfg) }
         .sheet(isPresented: $showNotifCenter) { NotificationsCenterSheet() }
+        .sheet(isPresented: $showSpeedFence) { SpeedFenceSheet() }
     }
     // MARK: Conta e segurança
     private var contaCard: some View {
@@ -140,14 +144,21 @@ struct NativeConfigView: View {
         DSCard {
             DisclosureGroup {
                 VStack(spacing: 4) {
+                    // Reabre a tela de Setup (URL + token do bridge). Antes só dava
+                    // pra acessar via 3-finger long press na WebView do PWA.
+                    rowButton(icon: "server.rack", title: "Bridge (URL e token)",
+                              subtitle: "Reconfigurar servidor e credenciais") {
+                        NotificationCenter.default.post(name: .openHavalSettings, object: nil)
+                    }
+                    Divider().overlay(DS.border)
                     ConfirmRow(icon: "arrow.triangle.2.circlepath", title: "Recalcular custo das viagens",
                                msg: "Recalcula o custo de todas as viagens com os preços atuais.") {
                         let ok = await cfg.adminAction("/api/admin/recompute-trip-costs"); cfg.toast = ok ? "✓ Recalculado" : "✗ Falhou"
                     }
                     Divider().overlay(DS.border)
                     ConfirmRow(icon: "mappin.and.ellipse", title: "Reprocessar nomes de locais",
-                               msg: "Reidentifica os locais conhecidos das viagens/recargas.") {
-                        let ok = await cfg.adminAction("/api/admin/reprocess-places"); cfg.toast = ok ? "✓ Reprocessado" : "✗ Falhou"
+                               msg: "Re-identifica TODAS as viagens/recargas (origem→destino por local conhecido ou bairro/cidade). Roda em segundo plano (~1/seg); depois limpe o cache local pra ver.") {
+                        let ok = await cfg.reprocessPlaces(); cfg.toast = ok ? "✓ Reprocessando em 2º plano…" : "✗ Falhou"
                     }
                     Divider().overlay(DS.border)
                     ConfirmRow(icon: "arrow.clockwise", title: "Reiniciar bridge", destructive: true,

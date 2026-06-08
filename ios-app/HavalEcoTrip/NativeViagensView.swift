@@ -553,6 +553,7 @@ struct RouteMapSheet: View {
     @State private var loading = true
     @State private var idx: Double = 0
     @State private var cam: MapCameraPosition = .automatic
+    @State private var follow = true   // mapa segue a posição da linha do tempo
 
     private var base: String {
         let u = Settings.bridgeURL.isEmpty ? AuthConfig.bridgeURL : Settings.bridgeURL
@@ -581,6 +582,21 @@ struct RouteMapSheet: View {
                     .mapStyle(.standard(pointsOfInterest: .excludingAll))
                     .environment(\.colorScheme, .dark)
                     .ignoresSafeArea()
+                    .onChange(of: idx) { _, _ in
+                        guard follow, let c = cur?.coord else { return }
+                        withAnimation(.easeOut(duration: 0.25)) {
+                            cam = .region(MKCoordinateRegion(center: c, span: MKCoordinateSpan(latitudeDelta: 0.01, longitudeDelta: 0.01)))
+                        }
+                    }
+                    .overlay(alignment: .topTrailing) {
+                        Button { follow.toggle(); if follow, let c = cur?.coord { cam = .region(MKCoordinateRegion(center: c, span: MKCoordinateSpan(latitudeDelta: 0.01, longitudeDelta: 0.01))) } } label: {
+                            Image(systemName: follow ? "location.fill" : "location")
+                                .font(.system(size: 16, weight: .bold)).foregroundStyle(follow ? .black : DS.text)
+                                .frame(width: 40, height: 40)
+                                .background(follow ? DS.green : DS.panel2).clipShape(Circle())
+                                .overlay(Circle().stroke(DS.border, lineWidth: 1))
+                        }.padding(.top, 60).padding(.trailing, 14)
+                    }
                 } else {
                     DS.bg.ignoresSafeArea()
                     if loading { ProgressView().tint(DS.green) } else { Text("Trajeto indisponível.").foregroundStyle(DS.muted) }

@@ -350,6 +350,21 @@ function saveNotifPrefs() {
   try { fs.writeFileSync(NOTIF_PREFS_FILE, JSON.stringify(notifPrefs, null, 2)); } catch (_) {}
 }
 
+// ── Cerca de velocidade (alerta p/ outro motorista) ──────────────────────────
+const SPEED_FENCE_FILE = path.join(DATA_DIR, 'speed_fence.json');
+let speedFence = { kmh: 0 };   // 0 = desligado
+try { if (fs.existsSync(SPEED_FENCE_FILE)) speedFence = { ...speedFence, ...JSON.parse(fs.readFileSync(SPEED_FENCE_FILE, 'utf8')) }; } catch (_) {}
+function _saveSpeedFence() { try { fs.writeFileSync(SPEED_FENCE_FILE, JSON.stringify(speedFence)); } catch (_) {} }
+let _speedFenceAlertedMs = 0;
+function checkSpeedFence(cur) {
+  if (!(speedFence.kmh > 0)) return;
+  if (cur > speedFence.kmh && Date.now() - _speedFenceAlertedMs > 120_000) {
+    _speedFenceAlertedMs = Date.now();
+    addEvent('speed_fence', `Velocidade ${Math.round(cur)} km/h (limite ${speedFence.kmh})`);
+    sendPush('🚨 Velocidade alta', `O Haval está a ${Math.round(cur)} km/h (limite ${speedFence.kmh} km/h).`, 'speed_fence');
+  }
+}
+
 // ── Pré-climatização agendada ─────────────────────────────────────────────
 // Estrutura: { enabled, time:"HH:MM", recurrence:"once"|"daily"|"weekdays"|"weekends",
 //              temp:22.0, fan:3, lastFiredDate:"YYYY-MM-DD" }
@@ -8462,6 +8477,14 @@ function _shareBaseUrl() {
   return (process.env.BRIDGE_PUBLIC_URL || 'https://mac-mini.tailacc6e7.ts.net').replace(/\/+$/, '');
 }
 
+// Cerca de velocidade: GET lê, POST { kmh } define (0 = desliga).
+app.get('/api/speed-fence', (_req, res) => res.json({ ok: true, kmh: speedFence.kmh || 0 }));
+app.post('/api/speed-fence', (req, res) => {
+  const kmh = Math.max(0, Math.min(300, parseInt(req.body?.kmh) || 0));
+  speedFence.kmh = kmh; _saveSpeedFence();
+  res.json({ ok: true, kmh });
+});
+
 app.post('/api/share/create', (req, res) => {
   const ttlMin = Math.min(Math.max(parseInt(req.body?.ttlMin) || 120, 5), 1440);   // 5 min .. 24 h
   const crypto = require('crypto');
@@ -9163,6 +9186,7 @@ function applyMqttMessage(key, value, isRetained = false) {
       const prevSpeed = +state.speed_kmh || 0;
       state.speed_kmh = num(value);
       const curSpeed  = +state.speed_kmh || 0;
+      checkSpeedFence(curSpeed);
       if (curSpeed > 0) {
         _cancelAcParkedTimer(); // carro em movimento — cancela alerta pendente
       } else if (prevSpeed > 0) {
