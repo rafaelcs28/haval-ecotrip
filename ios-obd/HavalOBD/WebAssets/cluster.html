@@ -1054,6 +1054,19 @@
 
   #toast { position:fixed; bottom:22px; left:50%; transform:translateX(-50%); background:var(--panel-lift); border:1px solid var(--border-hi); color:var(--text); padding:14px 26px; border-radius:var(--r-pill); font-size:16px; opacity:0; transition:opacity .3s; pointer-events:none; z-index:9999; }
   #toast.show { opacity:1; }
+
+  /* ── Aproveitamento vertical: Climatização + Veículo ── */
+  /* Climatização: temperatura/ventilação esticam e dividem o espaço por igual;
+     bancos maiores; espaçamento uniforme entre todos os blocos. */
+  .area-grid.clima { gap:10px; }
+  .area-grid.clima .sliders { gap:10px; justify-content:stretch; }
+  .area-grid.clima .sliders .slider-tile { flex:1; justify-content:center; padding:16px 14px; }
+  .area-grid.clima .clima-seats { gap:10px; }
+  .area-grid.clima .clima-seats .slider-tile { padding:16px 12px; gap:8px; }
+  /* Veículo: cortina/teto crescem por igual; pisca +30% (130→170px); gaps iguais. */
+  .area-grid.veic { gap:10px; }
+  .area-grid.veic .slider-tile { flex:1; justify-content:center; padding:14px; }
+  .area-grid.veic .haz-big { margin-top:0; min-height:170px; flex:none; }
 </style>
 </head>
 <body>
