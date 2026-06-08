@@ -65,6 +65,14 @@ final class PreclimatStore: ObservableObject {
         scheds.append(PreclimatSched(obj))
     }
 
+    // Cria um agendamento já com horário e temperatura (sugestão inteligente).
+    func addAt(time: String, temp: Double) async {
+        guard let r = req("/api/preclimat/schedule", "POST",
+                          ["device_id": "", "time": time, "temp": temp, "enabled": true]) else { return }
+        _ = try? await URLSession.shared.data(for: r)
+        await load()
+    }
+
     func update(_ id: String, _ field: String, _ value: Any) async {
         guard let r = req("/api/preclimat/schedule", "POST", ["id": id, field: value, "device_id": ""]) else { return }
         _ = try? await URLSession.shared.data(for: r)
@@ -79,12 +87,42 @@ final class PreclimatStore: ObservableObject {
 
 struct PreclimatSheet: View {
     @StateObject private var store = PreclimatStore()
+    @StateObject private var trips = TripsLoader()
+    @ObservedObject private var car = CarStore.shared
     @Environment(\.dismiss) private var dismiss
+
+    // Horário típico de saída (mediana das viagens de manhã em dias úteis), em minutos.
+    private var typicalDeparture: Int? {
+        let cal = Calendar.current
+        let mins = trips.trips.compactMap { t -> Int? in
+            let wd = cal.component(.weekday, from: t.date)
+            guard (2...6).contains(wd) else { return nil }   // seg–sex
+            let h = cal.component(.hour, from: t.date), m = cal.component(.minute, from: t.date)
+            guard h >= 4 && h <= 12 else { return nil }       // manhã
+            return h * 60 + m
+        }
+        guard mins.count >= 4 else { return nil }
+        let s = mins.sorted(); return s[s.count / 2]
+    }
+
+    // Sugestão: só quando não há agendamento, há rotina e a temperatura justifica.
+    private var suggestion: (time: String, temp: Double, why: String)? {
+        guard store.scheds.isEmpty, let dep = typicalDeparture else { return nil }
+        let t = car.outsideTemp
+        let pick: (Double, String)?
+        if t >= 27        { pick = (22, "Faz \(Int(t))°C lá fora — pré-climatizar pra esfriar a cabine") }
+        else if t > 0 && t <= 15 { pick = (23, "Faz \(Int(t))°C lá fora — pré-climatizar pra aquecer a cabine") }
+        else { pick = nil }
+        guard let (target, why) = pick else { return nil }
+        let pre = max(0, dep - 12)
+        return (String(format: "%02d:%02d", pre / 60, pre % 60), target, why)
+    }
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 14) {
+                    if let sug = suggestion { suggestionCard(sug) }
                     if store.scheds.isEmpty && !store.loading {
                         Text("Nenhum agendamento. Adicione um para o carro pré-climatizar antes de você sair.")
                             .font(.subheadline).foregroundStyle(DS.muted).frame(maxWidth: .infinity, alignment: .leading).padding(.top, 16)
@@ -102,7 +140,25 @@ struct PreclimatSheet: View {
             .navigationTitle("Pré-climatização").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Concluído") { dismiss() } } }
         }
-        .task { await store.load() }
+        .task { await store.load(); await trips.load() }
+    }
+
+    @ViewBuilder private func suggestionCard(_ s: (time: String, temp: Double, why: String)) -> some View {
+        DSCard {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    Image(systemName: "sparkles").foregroundStyle(DS.teal)
+                    Text("Sugestão inteligente").font(.caption.weight(.semibold)).foregroundStyle(DS.teal)
+                }
+                Text("\(s.why). Você costuma sair de manhã nos dias úteis — deixar pronto às \(s.time), a \(Int(s.temp))°.")
+                    .font(.subheadline).foregroundStyle(DS.text)
+                Button { Task { await store.addAt(time: s.time, temp: s.temp) } } label: {
+                    Label("Agendar \(s.time) · \(Int(s.temp))°", systemImage: "plus.circle.fill")
+                        .font(.system(size: 14, weight: .bold)).frame(maxWidth: .infinity).frame(height: 44)
+                        .foregroundStyle(.black).background(DS.teal).clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+            }
+        }
     }
 }
 
