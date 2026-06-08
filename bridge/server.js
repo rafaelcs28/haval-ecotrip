@@ -8525,6 +8525,14 @@ app.get('/api/share/:token/state', (req, res) => {
   if (!_shareValid(req.params.token)) return res.status(404).json({ error: 'link expirado' });
   const tr = state.current_trip || {};
   const on = state.engine_state === '1' || state.engine_state === 1 || +state.driving_ready === 1;
+  // Destino ativo (mandado pro carro): nome, distância, ETA e hora de chegada.
+  const a = state.arrival;
+  const dest = (a && a.distKm != null) ? {
+    name: a.name || 'Destino',
+    distKm: +(a.distKm || 0),
+    etaMin: Math.round(a.etaMin || 0),
+    etaClock: a.etaClock || '',
+  } : null;
   res.json({
     on,
     lat: +state.gps_lat || 0, lng: +state.gps_lng || 0,
@@ -8536,6 +8544,7 @@ app.get('/api/share/:token/state', (req, res) => {
     tempIn: +state.inside_temp || 0,
     tempOut: +state.outside_temp || 0,
     moving: (+state.speed_kmh || 0) > 2,
+    dest,
     ts: Date.now(),
   });
 });
