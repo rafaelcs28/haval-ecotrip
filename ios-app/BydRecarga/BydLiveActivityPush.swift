@@ -16,17 +16,18 @@ final class BydLiveActivityPush {
     func start() {
         guard !started else { return }
         started = true
-        observe()
+        observe(SongProActivityAttributes.self, type: "SongProActivityAttributes")
+        observe(SongProTripActivityAttributes.self, type: "SongProTripActivityAttributes")
     }
 
-    private func observe() {
+    private func observe<T: ActivityAttributes>(_ attr: T.Type, type: String) {
         // Push-to-start token (iOS 17.2+) — permite o bridge CRIAR a LA com o
         // app fechado/bloqueado.
         if #available(iOS 17.2, *) {
             Task {
-                for await tokenData in Activity<SongProActivityAttributes>.pushToStartTokenUpdates {
+                for await tokenData in Activity<T>.pushToStartTokenUpdates {
                     await register("/api/activity/pts-token", body: [
-                        "type": "SongProActivityAttributes",
+                        "type": type,
                         "push_to_start_token": hex(tokenData),
                         "device_id": BydSettings.deviceId,
                     ])
@@ -34,20 +35,20 @@ final class BydLiveActivityPush {
             }
         }
         // Atividades já ativas + futuras (inclui as criadas por push-to-start).
-        for activity in Activity<SongProActivityAttributes>.activities { track(activity) }
+        for activity in Activity<T>.activities { track(activity, type: type) }
         Task {
-            for await activity in Activity<SongProActivityAttributes>.activityUpdates {
-                track(activity)
+            for await activity in Activity<T>.activityUpdates {
+                track(activity, type: type)
             }
         }
     }
 
-    private func track(_ activity: Activity<SongProActivityAttributes>) {
+    private func track<T: ActivityAttributes>(_ activity: Activity<T>, type: String) {
         let id = activity.id
         Task {
             for await tokenData in activity.pushTokenUpdates {
                 await register("/api/activity/start", body: [
-                    "type": "SongProActivityAttributes", "activity_id": id,
+                    "type": type, "activity_id": id,
                     "push_token": hex(tokenData),
                     "device_id": BydSettings.deviceId,
                 ])

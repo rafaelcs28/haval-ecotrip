@@ -83,6 +83,13 @@ final class LiveActivityPush {
 
     private func track<T: ActivityAttributes>(_ activity: Activity<T>, type: String) {
         let id = activity.id
+        // LA de "veículo desprotegido": criada por push-to-start, o bridge não
+        // consegue encerrá-la por push enquanto o app está fechado (sem update token).
+        // Ao detectá-la, consulta o estado e encerra LOCALMENTE se já está tudo seguro
+        // — evita a LA ficar "presa" mostrando portas/trava que já normalizaram.
+        if type == "SecurityActivityAttributes" {
+            Task { await endSecurityIfSafe(activity) }
+        }
         Task {
             for await tokenData in activity.pushTokenUpdates {
                 await register("/api/activity/start", body: [
@@ -98,6 +105,21 @@ final class LiveActivityPush {
                     await register("/api/activity/stop", body: ["activity_id": id])
                 }
             }
+        }
+    }
+
+    // Encerra a LA de segurança localmente se o bridge disser que não há mais nada
+    // aberto/destrancado (issues vazio). Cobre o caso da LA presa por push-to-start.
+    private func endSecurityIfSafe<T: ActivityAttributes>(_ activity: Activity<T>) async {
+        guard Settings.isConfigured, let url = URL(string: Settings.bridgeURL + "/api/security/status") else { return }
+        var req = URLRequest(url: url, timeoutInterval: 8)
+        req.addValue("Bearer " + Settings.bridgeToken, forHTTPHeaderField: "Authorization")
+        guard let (data, resp) = try? await URLSession.shared.data(for: req),
+              (resp as? HTTPURLResponse)?.statusCode == 200,
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let issues = obj["issues"] as? [Any] else { return }
+        if issues.isEmpty {
+            await activity.end(nil, dismissalPolicy: .immediate)
         }
     }
 

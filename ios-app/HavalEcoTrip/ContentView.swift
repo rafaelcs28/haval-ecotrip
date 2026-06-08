@@ -29,6 +29,16 @@ struct ContentView: View {
         URL(string: Settings.bridgeURL.isEmpty ? AuthConfig.bridgeURL : Settings.bridgeURL)
     }
 
+    // Altura da barra de status (safe area top) — usada pra cobrir o topo e impedir
+    // que o conteúdo rolável apareça por baixo do relógio/ícones do iPhone.
+    private var topSafeInset: CGFloat {
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first(where: { $0.activationState == .foregroundActive })?
+            .keyWindow?.safeAreaInsets.top
+            ?? 47
+    }
+
     var body: some View {
         Group {
             if bridgeURL != nil, !storedToken.isEmpty, !Settings.bridgeURL.isEmpty {
@@ -45,6 +55,15 @@ struct ContentView: View {
                     .tabItem { Label("Config", systemImage: "gearshape.fill") }
                 }
                 .tint(DS.green)
+                // Cobre a área da status bar com o fundo do app: o conteúdo rolável
+                // some atrás dela em vez de colidir com o relógio/ícones do iPhone.
+                .overlay(alignment: .top) {
+                    DS.bg
+                        .frame(maxWidth: .infinity)
+                        .frame(height: topSafeInset)
+                        .ignoresSafeArea(edges: .top)
+                        .allowsHitTesting(false)
+                }
                 .overlay { BiometricGate() }
                 .onReceive(NotificationCenter.default.publisher(for: .openHavalSettings)) { _ in
                     showSetup = true

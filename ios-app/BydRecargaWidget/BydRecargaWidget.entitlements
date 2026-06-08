@@ -2,10 +2,6 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!-- Build de PRODUÇÃO (Release/TestFlight): push no endpoint production. -->
-	<key>aps-environment</key>
-	<string>production</string>
-	<!-- App Group: compartilha URL/token do bridge com o widget de home screen. -->
 	<key>com.apple.security.application-groups</key>
 	<array>
 		<string>group.br.com.consorciolimpagyn.songpro</string>

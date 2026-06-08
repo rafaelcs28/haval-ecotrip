@@ -12,6 +12,11 @@
 
 import Foundation
 
+extension Notification.Name {
+    /// Disparada por OfflineCache.clearAll() — loaders ativos zeram a memória e re-sincronizam.
+    static let offlineCacheCleared = Notification.Name("OfflineCacheCleared")
+}
+
 /// Operação de escrita pendente (reenviada quando online).
 struct PendingOp: Codable { let method: String; let path: String; let bodyJSON: Data? }
 
@@ -33,6 +38,16 @@ final class SyncedList: ObservableObject {
         self.name = name; self.path = path; self.idKeys = idKeys
         self.incremental = incremental; self.arrayKey = arrayKey; self.tombstoneKey = tombstoneKey
         loadFromDisk()
+        // "Limpar cache local" (OfflineCache.clearAll) só apaga o disco; sem isto,
+        // os loaders já abertos seguiam com os dados antigos em memória até o app
+        // reabrir. Aqui cada loader ativo zera a memória e re-sincroniza na hora.
+        NotificationCenter.default.addObserver(forName: .offlineCacheCleared, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                self.items = []; self.lastSyncMs = 0; self.pending = []; self.pendingCount = 0
+                await self.sync()
+            }
+        }
     }
 
     private var base: String {
@@ -101,8 +116,12 @@ final class SyncedList: ObservableObject {
         else { arr = (any as? [[String: Any]]) ?? ((any as? [String: Any])?["items"] as? [[String: Any]]) ?? [] }
 
         if incremental {
-            // upsert por id; full quando não-incremental
-            var byId = Dictionary(uniqueKeysWithValues: items.map { (idOf($0), $0) })
+            // upsert por id; full quando não-incremental.
+            // `uniquingKeysWith` (não `uniqueKeysWithValues`): se o cache local tiver
+            // dois itens com o mesmo id, `uniqueKeysWithValues` dá CRASH (precondition
+            // failure) e o sync inteiro aborta silenciosamente — dados novos nunca
+            // entram. Tolera a duplicata mantendo a última ocorrência.
+            var byId = Dictionary(items.map { (idOf($0), $0) }, uniquingKeysWith: { _, b in b })
             for d in arr { byId[idOf(d)] = d }
             // tombstones (itens apagados no servidor)
             if let tk = tombstoneKey, let h = http.value(forHTTPHeaderField: "X-Tombstones"), !h.isEmpty {
@@ -167,6 +186,9 @@ enum OfflineCache {
             }
         }
         URLCache.shared.removeAllCachedResponses()
+        // Avisa os loaders ativos pra zerar a memória + re-sincronizar (sem isso,
+        // só o disco era limpo e a tela aberta seguia com dados antigos).
+        NotificationCenter.default.post(name: .offlineCacheCleared, object: nil)
     }
 
     // Cache sob demanda do trajeto (samples de /api/telemetry/:id). Só viagens

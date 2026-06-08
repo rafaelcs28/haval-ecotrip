@@ -11,5 +11,7 @@ import SwiftUI
 struct BydRecargaWidgetBundle: WidgetBundle {
     var body: some Widget {
         SongProLiveActivity()
+        SongProTripLiveActivity()
+        BydChargeWidget()
     }
 }
