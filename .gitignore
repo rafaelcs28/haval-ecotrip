@@ -32,6 +32,7 @@ bridge/.env.*
 bridge/tenants/
 bridge/*.bak
 bridge/*.bak.*
+bridge/*.bak-*
 bridge/state.json.bak*
 bridge/diag_state.json
 bridge/diag_log.json
@@ -47,6 +48,13 @@ bridge/preclimat.json
 bridge/songpro.json
 bridge/songpro_charges.json
 bridge/songpro_locations.json
+bridge/automation_rules.json
+bridge/automation_places.json
+bridge/speed_fence.json
+bridge/share_tokens.json
+bridge/activity_tokens.json
+# Scripts de teste pontuais (lêem o .env real) — não versionar
+bridge/_test_*.js
 
 # Artefatos de build/archive do iOS
 ios-app/build/
