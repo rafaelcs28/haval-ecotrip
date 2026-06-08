@@ -1058,15 +1058,26 @@
   /* ── Aproveitamento vertical: Climatização + Veículo ── */
   /* Climatização: temperatura/ventilação esticam e dividem o espaço por igual;
      bancos maiores; espaçamento uniforme entre todos os blocos. */
-  .area-grid.clima { gap:10px; }
-  .area-grid.clima .sliders { gap:10px; justify-content:stretch; }
-  .area-grid.clima .sliders .slider-tile { flex:1; justify-content:center; padding:16px 14px; }
-  .area-grid.clima .clima-seats { gap:10px; }
-  .area-grid.clima .clima-seats .slider-tile { padding:16px 12px; gap:8px; }
-  /* Veículo: cortina/teto crescem por igual; pisca +30% (130→170px); gaps iguais. */
-  .area-grid.veic { gap:10px; }
-  .area-grid.veic .slider-tile { flex:1; justify-content:center; padding:14px; }
-  .area-grid.veic .haz-big { margin-top:0; min-height:170px; flex:none; }
+  /* Climatização (bancos foram pro Veículo): toggles 2 linhas + sliders esticam + direção do ar */
+  .area-grid.clima { gap:8px; }
+  .area-grid.clima .clima-toggles { gap:8px; }
+  .area-grid.clima .sliders { flex:1; gap:8px; justify-content:center; }
+  .area-grid.clima .sliders .slider-tile { flex:1; justify-content:center; padding:12px 14px; }
+  .area-grid.clima .air-seg { flex:none; padding:10px 12px; gap:6px; }
+  /* Veículo: aberturas + bancos (vindos da climatização), gaps uniformes */
+  .area-grid.veic { gap:9px; }
+  .area-grid.veic .slider-tile { flex:none; padding:12px 14px; }
+  .area-grid.veic .clima-seats { gap:9px; }
+  .area-grid.veic .clima-seats .slider-tile { padding:10px 12px; gap:5px; }
+  /* Impede os cards de controle de transbordarem por trás da Viagem em curso:
+     grid/flex items respeitam suas tracks (min-height:0) e o .panel já corta. */
+  .v4 .p-power, .v4 .p-speed, .v4 .p-soc, .v4 .p-fuel, .v4 .p-ctrl, .v4 .p-trip { min-height:0; }
+  .v4 .ctrl-areas, .v4 .ctrl-area, .v4 .area-grid, .v4 .area-grid .slider-tile { min-height:0; }
+  /* Pisca-alerta como tile (Condução, mesmo tamanho do One-pedal): vermelho + pisca quando ligado */
+  .ctrl-tile.danger .ic { color:var(--red); display:flex; align-items:center; justify-content:center; }
+  .ctrl-tile.danger .ic svg { width:30px; height:30px; }
+  .v4 .ctrl-tile.danger.on { background:var(--red) !important; border-color:#ff6b6b !important; animation:haz-flash 1s steps(1) infinite; }
+  .ctrl-tile.danger.on .ic, .ctrl-tile.danger.on .lbl, .ctrl-tile.danger.on .st { color:#fff !important; }
 </style>
 </head>
 <body>
@@ -1205,7 +1216,7 @@
           </div>
           <div class="pair">
             <div class="ctrl-tile" id="ctrl-onepedal" onclick="toggleOnePedal()"><div class="ic">🦶</div><div class="lbl">One-pedal</div><div class="st" id="ctrl-onepedal-st">—</div></div>
-            <div class="ctrl-tile" id="ctrl-esp" onclick="toggleEsp()"><div class="ic">🛞</div><div class="lbl">ESP</div><div class="st" id="ctrl-esp-st">—</div></div>
+            <div class="ctrl-tile danger" id="ctrl-haz" onclick="toggleHazard()"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><path d="M12 3.5 L21.5 20 L2.5 20 Z"/><line x1="12" y1="10" x2="12" y2="14.5"/><circle cx="12" cy="17.3" r="0.6" fill="currentColor" stroke="none"/></svg></div><div class="lbl">Pisca</div><div class="st" id="ctrl-haz-st">desligado</div></div>
           </div>
         </div>
       </div>
@@ -1219,6 +1230,10 @@
             <div class="ctrl-tile" id="ctrl-recirc" onclick="toggleAcCycle()"><div class="ic" id="ctrl-recirc-ic">↺</div><div class="lbl">Circul.</div><div class="st" id="ctrl-recirc-st">—</div></div>
             <div class="ctrl-tile" id="ctrl-sync" onclick="toggleAcSync()"><div class="ic">⇄</div><div class="lbl">SYNC</div><div class="st" id="ctrl-sync-st">—</div></div>
             <div class="ctrl-tile" id="ctrl-auto" onclick="toggleAcAuto()"><div class="ic">🅰️</div><div class="lbl">AUTO</div><div class="st" id="ctrl-auto-st">—</div></div>
+            <div class="ctrl-tile" id="ctrl-comp" onclick="toggleAcCompressor()"><div class="ic">🌬️</div><div class="lbl">Comp.</div><div class="st" id="ctrl-comp-st">—</div></div>
+            <div class="ctrl-tile" id="ctrl-acmax" onclick="toggleAcExtra('acmax')"><div class="ic">❄️</div><div class="lbl">AC Máx</div><div class="st" id="ctrl-acmax-st">—</div></div>
+            <div class="ctrl-tile" id="ctrl-anion" onclick="toggleAcExtra('anion')"><div class="ic">✨</div><div class="lbl">Ioniz.</div><div class="st" id="ctrl-anion-st">—</div></div>
+            <div class="ctrl-tile" id="ctrl-defauto" onclick="toggleAcExtra('auto_defrost')"><div class="ic">🌫️</div><div class="lbl">Deg. auto</div><div class="st" id="ctrl-defauto-st">—</div></div>
           </div>
           <div class="sliders">
             <div class="slider-tile">
@@ -1242,16 +1257,6 @@
               <button data-air="2" onclick="setBlower(2)">Pés</button>
               <button data-air="3" onclick="setBlower(3)">Pés+Vidro</button>
               <button data-air="4" onclick="setBlower(4)">Degelo</button>
-            </div>
-          </div>
-          <div class="clima-seats">
-            <div class="slider-tile seat">
-              <div class="slider-h"><span class="lbl">💺 Banco mot.</span><span class="sv" id="ctrl-seat-d-st">OFF</span></div>
-              <input type="range" class="cv-slider" id="sld-seat-d" min="0" max="3" step="1" value="0" oninput="setSeatSlider('d', this.value)" onchange="commitSeatSlider('d', this.value)">
-            </div>
-            <div class="slider-tile seat">
-              <div class="slider-h"><span class="lbl">💺 Banco pass.</span><span class="sv" id="ctrl-seat-p-st">OFF</span></div>
-              <input type="range" class="cv-slider" id="sld-seat-p" min="0" max="3" step="1" value="0" oninput="setSeatSlider('p', this.value)" onchange="commitSeatSlider('p', this.value)">
             </div>
           </div>
         </div>
@@ -1279,7 +1284,17 @@
             <input type="range" class="cv-slider" id="sld-sunroof" min="10" max="100" step="10" value="10" oninput="previewSunroof(this.value)" onchange="commitSunroof(this.value)">
             <button class="vent-btn" id="ctrl-sunroof-vent" onclick="sunroofVent()">🌬️ Ventilação</button>
           </div>
-          <div class="ctrl-tile danger haz-big" id="ctrl-haz" onclick="toggleHazard()"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><path d="M12 3.5 L21.5 20 L2.5 20 Z"/><line x1="12" y1="10" x2="12" y2="14.5"/><circle cx="12" cy="17.3" r="0.6" fill="currentColor" stroke="none"/></svg></div><div class="txt"><span class="lbl">Pisca-alerta</span><span class="st" id="ctrl-haz-st">desligado</span></div></div>
+          <div class="sub-h">Ventilação dos bancos</div>
+          <div class="clima-seats">
+            <div class="slider-tile seat">
+              <div class="slider-h"><span class="lbl">💺 Motorista</span><span class="sv" id="ctrl-seat-d-st">OFF</span></div>
+              <input type="range" class="cv-slider" id="sld-seat-d" min="0" max="3" step="1" value="0" oninput="setSeatSlider('d', this.value)" onchange="commitSeatSlider('d', this.value)">
+            </div>
+            <div class="slider-tile seat">
+              <div class="slider-h"><span class="lbl">💺 Passageiro</span><span class="sv" id="ctrl-seat-p-st">OFF</span></div>
+              <input type="range" class="cv-slider" id="sld-seat-p" min="0" max="3" step="1" value="0" oninput="setSeatSlider('p', this.value)" onchange="commitSeatSlider('p', this.value)">
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1325,13 +1340,10 @@
   <div class="nav-card">
     <h4>❄️ Climatização — mais opções</h4>
     <div class="mode-grid" id="ac-extra-grid">
-      <button data-acx="hvac_acmax" onclick="toggleAcExtra('acmax')">❄️ AC Máx</button>
+      <button data-acx="hvac_aqs" onclick="toggleAcExtra('aqs')">🍃 AQS</button>
       <button data-acx="hvac_heating" onclick="toggleAcExtra('heating')">🔥 Aquecimento</button>
       <button data-acx="hvac_front_defrost" onclick="toggleAcExtra('front_defrost')">🌫 Desemb. diant.</button>
       <button data-acx="hvac_rear_defrost" onclick="toggleAcExtra('rear_defrost')">🌫 Desemb. tras.</button>
-      <button data-acx="hvac_auto_defrost" onclick="toggleAcExtra('auto_defrost')">🌫 Desemb. auto</button>
-      <button data-acx="hvac_anion" onclick="toggleAcExtra('anion')">✨ Ionizador</button>
-      <button data-acx="hvac_aqs" onclick="toggleAcExtra('aqs')">🍃 AQS</button>
       <div style="display:flex;align-items:center;justify-content:center;gap:6px;padding:18px 8px;border-radius:12px;background:var(--panel-lift);border:1px solid var(--border-hi);color:var(--text);font-size:14px;font-weight:700">🌬 PM2.5 <b id="acx-pm25">--</b></div>
     </div>
     <div class="nav-btn-row" style="margin-top:4px"><button class="close" onclick="closeAcExtras()">Fechar</button></div>
@@ -2898,7 +2910,6 @@ document.addEventListener('dblclick', e => e.preventDefault());
     _paintSeg('seg-steer', 'steer', state.steer_mode);
     _paintSeg('seg-air', 'air', state.hvac_blower_mode);
     _paintTile('ctrl-onepedal', +state.one_pedal === 1, 'ctrl-onepedal-st', 'Ligado', 'Desligado');
-    _paintTile('ctrl-esp', +state.esp_enable === 1, 'ctrl-esp-st', 'Ativo', 'Desativado');
     // Climatização
     const acOn = _acOn();
     _paintTile('ctrl-ac', acOn, 'ctrl-ac-st', 'Ligado', 'Desligado');
@@ -2908,8 +2919,13 @@ document.addEventListener('dblclick', e => e.preventDefault());
     _paintTile('ctrl-sync', +state.hvac_sync_enable === 1, 'ctrl-sync-st', 'Ligado', 'Desligado');
     _paintTile('ctrl-auto', +state.hvac_auto_enable === 1, 'ctrl-auto-st', 'Ligado', 'Desligado');
     // Sliders (não sobrescreve enquanto o usuário arrasta)
-    const td = parseFloat(state.hvac_driver_temp); if (Number.isFinite(td)) { _slider('sld-temp-d', td, 1); const e = _g('ctrl-temp-d'); if (e && _g('sld-temp-d') !== document.activeElement) e.textContent = td.toFixed(1).replace('.', ','); }
-    const tp = parseFloat(state.hvac_passenger_temp); if (Number.isFinite(tp)) { _slider('sld-temp-p', tp, 1); const e = _g('ctrl-temp-p'); if (e && _g('sld-temp-p') !== document.activeElement) e.textContent = tp.toFixed(1).replace('.', ','); }
+    // Temperaturas: o carro manda -1 (sentinela) com o A/C desligado → mostra "—".
+    const td = parseFloat(state.hvac_driver_temp), eTd = _g('ctrl-temp-d');
+    if (Number.isFinite(td) && td >= 16 && td <= 32) { _slider('sld-temp-d', td, 1); if (eTd && _g('sld-temp-d') !== document.activeElement) eTd.textContent = td.toFixed(1).replace('.', ','); }
+    else if (eTd && _g('sld-temp-d') !== document.activeElement) eTd.textContent = '—';
+    const tp = parseFloat(state.hvac_passenger_temp), eTp = _g('ctrl-temp-p');
+    if (Number.isFinite(tp) && tp >= 16 && tp <= 32) { _slider('sld-temp-p', tp, 1); if (eTp && _g('sld-temp-p') !== document.activeElement) eTp.textContent = tp.toFixed(1).replace('.', ','); }
+    else if (eTp && _g('sld-temp-p') !== document.activeElement) eTp.textContent = '—';
     const fan = parseInt(state.hvac_fan_speed, 10); if (Number.isFinite(fan) && fan >= 0) { _slider('sld-fan', fan); const e = _g('ctrl-fan'); if (e && _g('sld-fan') !== document.activeElement) e.textContent = fan; }
     const sd = parseInt(state.seat_vent_drv, 10); if (Number.isFinite(sd)) { _slider('sld-seat-d', sd); const e = _g('ctrl-seat-d-st'); if (e && _g('sld-seat-d') !== document.activeElement) e.textContent = SEAT[Math.max(0, Math.min(3, sd))]; }
     const sp = parseInt(state.seat_vent_pass, 10); if (Number.isFinite(sp)) { _slider('sld-seat-p', sp); const e = _g('ctrl-seat-p-st'); if (e && _g('sld-seat-p') !== document.activeElement) e.textContent = SEAT[Math.max(0, Math.min(3, sp))]; }
@@ -2933,7 +2949,12 @@ document.addEventListener('dblclick', e => e.preventDefault());
         de.innerHTML = p.join('<span class="sep">·</span>');
       } else de.innerHTML = '';
     }
-    // Extras do A/C (popup force-touch): estado on/off + PM2.5
+    // Linha extra do A/C: compressor + AC máx + ionizador + degelo auto
+    _paintTile('ctrl-comp', +state.hvac_ac_enable === 1, 'ctrl-comp-st', 'Ligado', 'Desligado');
+    _paintTile('ctrl-acmax', +state.hvac_acmax === 1, 'ctrl-acmax-st', 'Ligado', 'Desligado');
+    _paintTile('ctrl-anion', +state.hvac_anion === 1, 'ctrl-anion-st', 'Ligado', 'Desligado');
+    _paintTile('ctrl-defauto', +state.hvac_auto_defrost === 1, 'ctrl-defauto-st', 'Ligado', 'Desligado');
+    // Submenu (force-touch): demais extras + PM2.5
     document.querySelectorAll('#ac-extra-grid button[data-acx]').forEach(b => b.classList.toggle('on', +state[b.dataset.acx] === 1));
     const pmx = _g('acx-pm25'); if (pmx) { const v = parseInt(state.hvac_pm25, 10); pmx.textContent = Number.isFinite(v) ? v : '--'; }
     // Badge de conexão: classe lan/cloud conforme o texto que _updateSourceBadge escreve

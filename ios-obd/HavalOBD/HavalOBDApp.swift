@@ -93,19 +93,8 @@ struct RootView: View {
                     .transition(.opacity)
             }
 
-            // Botão visível
-            Button { showSettings = true } label: {
-                Image(systemName: "gearshape.fill")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.55))
-                    .padding(10)
-                    .background(.ultraThinMaterial, in: Circle())
-                    .overlay(Circle().stroke(.white.opacity(0.15), lineWidth: 1))
-                    .shadow(color: .black.opacity(0.4), radius: 8, x: 0, y: 2)
-            }
-            .padding(.top, 44)
-            .padding(.trailing, 12)
-            .opacity(splashHidden ? 1 : 0)
+            // Config: agora pelo botão ⚙ da topbar do cluster (action open_settings)
+            // + triplo-toque na tela. O botão nativo grande foi removido (era duplicado).
 
             // Overlay de navegação sobre o cluster (não cobre tudo)
             if showNav {
