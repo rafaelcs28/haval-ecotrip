@@ -1577,6 +1577,10 @@ class MqttManager private constructor() {
             pubD("engine_rpm",        latestEngineRpm.toString())
             pubD("seat_vent_drv",     latestDriverSeatVent.toString())
             pubD("seat_vent_pass",    latestPassengerSeatVent.toString())
+            // Cortina do teto (shade): leitura ATIVA via AIDL — não chega pelo CAN listener.
+            // Publica a posição real (0=fechada · 100=aberta) p/ o iPad refletir, mesmo
+            // quando movida fisicamente. getShadeScreensLevel já trata erro (retorna null).
+            VehicleControlManager.getShadeScreensLevel()?.let { pubD("shade_level", it.toString()) }
             pubD("hvac_driver_temp",     fmt1(latestHvacDriverTemp))
             pubD("hvac_passenger_temp",  fmt1(latestHvacPassengerTemp))
             pubD("hvac_fan_speed",    latestHvacFanSpeed.toString())

@@ -2970,7 +2970,12 @@ document.addEventListener('dblclick', e => e.preventDefault());
       if (state.sunroof === 'off') srEl.textContent = 'Fechado';
       else if (state.sunroof === 'on') srEl.textContent = 'Aberto';
     }
-    // Cortina: o carro NÃO publica a posição — sem feedback. Mantém o último ajuste local.
+    // Cortina: shade_level (0..100) — leitura ativa publicada pelo APK (reflete o carro).
+    const shade = parseInt(state.shade_level, 10);
+    if (Number.isFinite(shade) && _g('sld-curtain') !== document.activeElement) {
+      _slider('sld-curtain', shade);
+      const curEl = _g('ctrl-curtain'); if (curEl) curEl.textContent = shade + '%';
+    }
     // Badge de conexão: classe lan/cloud conforme o texto que _updateSourceBadge escreve
     const sb = _g('source-badge');
     if (sb) { const lan = /LAN/.test(sb.textContent); sb.classList.toggle('lan', lan); sb.classList.toggle('cloud', !lan); }
