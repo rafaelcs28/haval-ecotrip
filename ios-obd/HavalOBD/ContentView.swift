@@ -16,6 +16,7 @@ struct SettingsView: View {
     @State private var bridgeTotp: String = ""
     @State private var showAutomations = false
     @AppStorage("hazardIntervalSec") private var hazardIntervalSec: Double = 2.0
+    @AppStorage("hazardBtnSize") private var hazardBtnSize: Double = 248
 
     var body: some View {
         NavigationStack {
@@ -156,7 +157,15 @@ struct SettingsView: View {
                         }
                         Slider(value: $hazardIntervalSec, in: 0.1...5.0, step: 0.1)
                     }
-                    Text("Tempo entre cada troca (0/1) do pisca. O botão flutuante fica no mapa do cluster — toque pra ligar/desligar, arraste pra reposicionar.")
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Text("Tamanho do botão")
+                            Spacer()
+                            Text("\(Int(hazardBtnSize)) px").foregroundStyle(.secondary)
+                        }
+                        Slider(value: $hazardBtnSize, in: 80...360, step: 4)
+                    }
+                    Text("Intervalo = tempo entre cada troca (0/1) do pisca. Tamanho = lado do botão flutuante no mapa do cluster — toque pra ligar/desligar, arraste pra reposicionar.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
 
