@@ -1205,21 +1205,6 @@
             <span>Pisca-alerta</span>
           </button>
         </div>
-        <!-- Modo + Direção + Pisca-alerta -->
-        <div class="dc-card">
-          <div class="dc-label">⚙ Modo<span id="hev-sub-label" style="opacity:.6;font-weight:600;margin-left:6px"></span></div>
-          <div class="dm-chips">
-            <div class="dm-chip" data-mode="0" onclick="openHevModal()">HEV</div>
-            <div class="dm-chip" data-mode="1" onclick="setDriveMode(1)">Prior. EV</div>
-            <div class="dm-chip" data-mode="3" onclick="setDriveMode(3)">EV</div>
-          </div>
-          <div class="dc-label" style="margin-top:4px">🎯 Direção</div>
-          <div class="dm-chips">
-            <div class="dm-chip" data-steer="2" onclick="setSteerMode(2)">Conforto</div>
-            <div class="dm-chip" data-steer="0" onclick="setSteerMode(0)">Normal</div>
-            <div class="dm-chip" data-steer="1" onclick="setSteerMode(1)">Sport</div>
-          </div>
-        </div>
         <!-- Estilo + Aberturas -->
         <div class="dc-card">
           <div class="dc-label">🏁 Estilo</div>
@@ -1239,6 +1224,21 @@
             <button class="veh-btn" onclick="openVehPicker('windows')">🪟 Vidros</button>
             <button class="veh-btn" onclick="openVehPicker('shade')">⛱ Cortina</button>
             <button class="veh-btn" onclick="openVehPicker('skylight')">☀ Teto solar</button>
+          </div>
+        </div>
+        <!-- Modo + Direção + Pisca-alerta -->
+        <div class="dc-card">
+          <div class="dc-label">⚙ Modo<span id="hev-sub-label" style="opacity:.6;font-weight:600;margin-left:6px"></span></div>
+          <div class="dm-chips">
+            <div class="dm-chip" data-mode="0" onclick="openHevModal()">HEV</div>
+            <div class="dm-chip" data-mode="1" onclick="setDriveMode(1)">Prior. EV</div>
+            <div class="dm-chip" data-mode="3" onclick="setDriveMode(3)">EV</div>
+          </div>
+          <div class="dc-label" style="margin-top:4px">🎯 Direção</div>
+          <div class="dm-chips">
+            <div class="dm-chip" data-steer="2" onclick="setSteerMode(2)">Conforto</div>
+            <div class="dm-chip" data-steer="0" onclick="setSteerMode(0)">Normal</div>
+            <div class="dm-chip" data-steer="1" onclick="setSteerMode(1)">Sport</div>
           </div>
         </div>
       </div>
