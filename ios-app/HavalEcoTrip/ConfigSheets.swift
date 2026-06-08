@@ -6,6 +6,7 @@
 
 import SwiftUI
 import CoreLocation
+import MapKit
 
 // MARK: - Notificações (catálogo completo)
 struct NotificationsSheet: View {
@@ -158,9 +159,20 @@ struct FlowChipsSelect: View {
 struct KnownPlacesSheet: View {
     @ObservedObject var cfg: ConfigStore
     @ObservedObject private var car = CarStore.shared
+    @StateObject private var completer = AddressCompleter()
     @Environment(\.dismiss) private var dismiss
     @State private var newName = ""
     @State private var newRadius = 200.0
+    @State private var search = ""
+    @State private var coord: (Double, Double)? = nil
+    @State private var addrLabel = ""
+    @State private var showMap = false
+
+    private var effective: (Double, Double)? { coord ?? (car.hasGps ? (car.lat, car.lng) : nil) }
+    private var locText: String {
+        if coord != nil { return addrLabel.isEmpty ? "Ponto escolhido" : addrLabel }
+        return car.hasGps ? "Posição atual do carro" : "Sem local — busque ou escolha no mapa"
+    }
 
     var body: some View {
         NavigationStack {
@@ -168,18 +180,40 @@ struct KnownPlacesSheet: View {
                 VStack(spacing: 14) {
                     DSCard(title: "Adicionar local", icon: "plus.circle") {
                         VStack(spacing: 10) {
-                            TextField("Nome", text: $newName).foregroundStyle(DS.text)
-                                .padding(9).background(DS.panel2).clipShape(RoundedRectangle(cornerRadius: 9)).overlay(RoundedRectangle(cornerRadius: 9).stroke(DS.border, lineWidth: 1))
+                            field("Nome (Casa, Trabalho…)", $newName)
+                            field("Buscar endereço ou estabelecimento", $search, icon: "magnifyingglass")
+                                .onChange(of: search) { _, q in
+                                    coord = nil
+                                    if q.count >= 3 { completer.update(q, near: car.coordinate) } else { completer.clear() }
+                                }
+                            if !completer.results.isEmpty {
+                                VStack(spacing: 0) {
+                                    ForEach(completer.results.prefix(5), id: \.self) { s in
+                                        Button { pick(s) } label: {
+                                            VStack(alignment: .leading, spacing: 1) {
+                                                Text(s.title).font(.subheadline).foregroundStyle(DS.text)
+                                                if !s.subtitle.isEmpty { Text(s.subtitle).font(.caption2).foregroundStyle(DS.muted).lineLimit(1) }
+                                            }.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 7).padding(.horizontal, 8)
+                                        }
+                                        Divider().background(DS.border)
+                                    }
+                                }.background(DS.panel2).clipShape(RoundedRectangle(cornerRadius: 10))
+                            }
+                            HStack(spacing: 6) {
+                                Image(systemName: "mappin.circle.fill").font(.caption).foregroundStyle(coord != nil ? DS.green : DS.muted)
+                                Text(locText).font(.caption).foregroundStyle(DS.muted).lineLimit(1)
+                                Spacer()
+                                Button { showMap = true } label: { Label("No mapa", systemImage: "map.fill").font(.caption.weight(.semibold)).foregroundStyle(DS.teal) }
+                            }
                             HStack { Text("Raio").font(.caption).foregroundStyle(DS.muted); Spacer(); Text("\(Int(newRadius)) m").font(.system(size: 13, weight: .bold)).foregroundStyle(DS.text) }
                             Slider(value: $newRadius, in: 50...2000, step: 50).tint(DS.green)
-                            Text(car.hasGps ? "Usa a posição atual do carro" : "Carro sem GPS — não dá pra adicionar agora").font(.caption2).foregroundStyle(DS.muted)
                             Button {
-                                guard !newName.isEmpty, car.hasGps else { return }
-                                Task { await cfg.addPlace(name: newName, lat: car.lat, lng: car.lng, radius: newRadius); newName = "" }
+                                guard !newName.isEmpty, let c = effective else { return }
+                                Task { await cfg.addPlace(name: newName, lat: c.0, lng: c.1, radius: newRadius); reset() }
                             } label: {
                                 Text("Adicionar").font(.system(size: 15, weight: .bold)).frame(maxWidth: .infinity).frame(height: 46)
-                                    .foregroundStyle(.black).background((newName.isEmpty || !car.hasGps) ? DS.muted : DS.green).clipShape(RoundedRectangle(cornerRadius: 12))
-                            }.disabled(newName.isEmpty || !car.hasGps)
+                                    .foregroundStyle(.black).background((newName.isEmpty || effective == nil) ? DS.muted : DS.green).clipShape(RoundedRectangle(cornerRadius: 12))
+                            }.disabled(newName.isEmpty || effective == nil)
                         }
                     }
                     ForEach(cfg.places) { p in PlaceRow(place: p, cfg: cfg) }
@@ -188,9 +222,37 @@ struct KnownPlacesSheet: View {
             .background(DS.bg.ignoresSafeArea())
             .navigationTitle("Locais conhecidos").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Concluído") { dismiss() } } }
+            .sheet(isPresented: $showMap) {
+                MapPickerSheet(start: effective.map { .init(latitude: $0.0, longitude: $0.1) } ?? car.coordinate,
+                               initial: coord.map { .init(latitude: $0.0, longitude: $0.1) }) { c, nm in
+                    coord = (c.latitude, c.longitude); addrLabel = nm; completer.clear(); search = ""
+                    if newName.isEmpty { newName = nm }
+                }
+            }
         }
         .task { await cfg.loadPlaces() }
     }
+
+    @ViewBuilder private func field(_ ph: String, _ text: Binding<String>, icon: String? = nil) -> some View {
+        HStack(spacing: 6) {
+            if let icon { Image(systemName: icon).font(.caption).foregroundStyle(DS.muted) }
+            TextField(ph, text: text).foregroundStyle(DS.text).autocorrectionDisabled()
+        }
+        .padding(9).background(DS.panel2).clipShape(RoundedRectangle(cornerRadius: 9)).overlay(RoundedRectangle(cornerRadius: 9).stroke(DS.border, lineWidth: 1))
+    }
+
+    private func pick(_ s: MKLocalSearchCompletion) {
+        let label = s.title
+        completer.clear(); search = s.title
+        Task {
+            if let r = await completer.resolve(s) {
+                coord = (r.0.latitude, r.0.longitude); addrLabel = label
+                if newName.isEmpty { newName = label }
+            }
+        }
+    }
+
+    private func reset() { newName = ""; search = ""; coord = nil; addrLabel = ""; completer.clear() }
 }
 
 private struct PlaceRow: View {
@@ -200,12 +262,16 @@ private struct PlaceRow: View {
     @State private var radius = 200.0
     @State private var loaded = false
     @State private var editing = false
+    @State private var coord: (Double, Double)? = nil
+    @State private var showMap = false
+
+    private var effective: (Double, Double) { coord ?? (place.lat, place.lng) }
 
     var body: some View {
         DSCard {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
-                    Image(systemName: "mappin.circle.fill").foregroundStyle(DS.green)
+                    Image(systemName: "mappin.circle.fill").foregroundStyle(coord != nil ? DS.teal : DS.green)
                     if editing {
                         TextField("Nome", text: $name).foregroundStyle(DS.text)
                     } else {
@@ -217,10 +283,16 @@ private struct PlaceRow: View {
                 if editing {
                     HStack { Text("Raio").font(.caption).foregroundStyle(DS.muted); Spacer(); Text("\(Int(radius)) m").font(.system(size: 13, weight: .bold)).foregroundStyle(DS.text) }
                     Slider(value: $radius, in: 50...2000, step: 50).tint(DS.green)
+                    Button { showMap = true } label: {
+                        Label(coord != nil ? "Local ajustado no mapa ✓" : "Editar local no mapa", systemImage: "map.fill")
+                            .font(.caption.weight(.semibold)).foregroundStyle(coord != nil ? DS.teal : DS.blue)
+                    }
                     HStack(spacing: 10) {
-                        Button("Cancelar") { editing = false; name = place.name; radius = place.radiusM }.foregroundStyle(DS.muted)
+                        Button("Cancelar") { editing = false; name = place.name; radius = place.radiusM; coord = nil }.foregroundStyle(DS.muted)
                         Spacer()
-                        Button("Salvar") { Task { await cfg.updatePlace(place.id, name: name, radius: radius); editing = false } }.font(.system(size: 14, weight: .bold)).foregroundStyle(DS.green)
+                        Button("Salvar") {
+                            Task { await cfg.updatePlace(place.id, name: name, radius: radius, lat: coord?.0, lng: coord?.1); editing = false; coord = nil }
+                        }.font(.system(size: 14, weight: .bold)).foregroundStyle(DS.green)
                     }
                 } else {
                     Button("Editar") { editing = true }.font(.caption).foregroundStyle(DS.blue)
@@ -228,6 +300,12 @@ private struct PlaceRow: View {
             }
         }
         .onAppear { if !loaded { name = place.name; radius = place.radiusM; loaded = true } }
+        .sheet(isPresented: $showMap) {
+            MapPickerSheet(start: .init(latitude: effective.0, longitude: effective.1),
+                           initial: .init(latitude: effective.0, longitude: effective.1)) { c, _ in
+                coord = (c.latitude, c.longitude)
+            }
+        }
     }
 }
 

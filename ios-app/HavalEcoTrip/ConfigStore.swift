@@ -22,6 +22,11 @@ struct KnownPlace: Identifiable {
     }
 }
 
+struct CarKey: Identifiable {
+    let key: String, label: String, values: String
+    var id: String { key }
+}
+
 @MainActor
 final class ConfigStore: ObservableObject {
     @Published var laPrefs: [String: Bool] = [:]
@@ -127,11 +132,31 @@ final class ConfigStore: ObservableObject {
         await loadAutomationPlaces()
         return "\(o["id"] ?? "")"
     }
+    /// Edita um local de automação (nome/raio/posição) e recarrega.
+    func updateAutomationPlace(_ id: String, name: String, lat: Double?, lng: Double?, radius: Double) async {
+        var body: [String: Any] = ["name": name, "radius_m": radius]
+        if let lat { body["lat"] = lat }
+        if let lng { body["lng"] = lng }
+        await send("/api/automation-places/\(id)", "PUT", body); await loadAutomationPlaces()
+    }
+    func deleteAutomationPlace(_ id: String) async {
+        automationPlaces.removeAll { $0.id == id }
+        await send("/api/automation-places/\(id)", "DELETE"); await loadAutomationPlaces()
+    }
     func addPlace(name: String, lat: Double, lng: Double, radius: Double) async {
         await send("/api/known-places", "POST", ["name": name, "lat": lat, "lng": lng, "radius_m": radius]); await loadPlaces()
     }
-    func updatePlace(_ id: String, name: String, radius: Double) async {
-        await send("/api/known-places/\(id)", "PUT", ["name": name, "radius_m": radius]); await loadPlaces()
+    /// Catálogo de chaves do carro (referência pra montar condições/ações).
+    func loadCarKeys() async -> [CarKey] {
+        guard let (c, d) = await send("/api/car-keys", "GET"), c == 200,
+              let arr = (try? JSONSerialization.jsonObject(with: d)) as? [[String: Any]] else { return [] }
+        return arr.map { CarKey(key: ($0["key"] as? String) ?? "", label: ($0["label"] as? String) ?? "", values: ($0["values"] as? String) ?? "") }
+    }
+    func updatePlace(_ id: String, name: String, radius: Double, lat: Double? = nil, lng: Double? = nil) async {
+        var body: [String: Any] = ["name": name, "radius_m": radius]
+        if let lat { body["lat"] = lat }
+        if let lng { body["lng"] = lng }
+        await send("/api/known-places/\(id)", "PUT", body); await loadPlaces()
     }
     func deletePlace(_ id: String) async {
         places.removeAll { $0.id == id }
@@ -189,6 +214,12 @@ final class ConfigStore: ObservableObject {
     // Admin / dados
     @discardableResult func adminAction(_ path: String) async -> Bool {
         guard let (c, _) = await send(path, "POST", [:]) else { return false }
+        return c == 200
+    }
+    /// Reprocessa nomes de locais com force=true (re-identifica TODAS as viagens/
+    /// recargas, não só as sem nome). É assíncrono no servidor (~1/seg).
+    @discardableResult func reprocessPlaces() async -> Bool {
+        guard let (c, _) = await send("/api/admin/reprocess-places", "POST", ["kind": "all", "force": true]) else { return false }
         return c == 200
     }
 
