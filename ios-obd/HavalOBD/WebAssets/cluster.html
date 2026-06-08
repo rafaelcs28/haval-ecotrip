@@ -2963,14 +2963,7 @@ document.addEventListener('dblclick', e => e.preventDefault());
     // Submenu (force-touch): demais extras + PM2.5
     document.querySelectorAll('#ac-extra-grid button[data-acx]').forEach(b => b.classList.toggle('on', +state[b.dataset.acx] === 1));
     const pmx = _g('acx-pm25'); if (pmx) { const v = parseInt(state.hvac_pm25, 10); pmx.textContent = Number.isFinite(v) ? v : '--'; }
-    // Aberturas — refletem o estado publicado pelo carro (independe de mexer)
-    // Vidros: window_fl/fr/rl/rr (1=fechado · 2=aberto · 3=entreaberto). Agrega o "mais aberto".
-    const wins = [state.window_fl, state.window_fr, state.window_rl, state.window_rr]
-      .map(w => parseInt(w, 10)).filter(Number.isFinite);
-    if (wins.length) {
-      const winState = wins.some(w => w === 2) ? '0' : (wins.some(w => w === 3) ? '3' : '1');
-      document.querySelectorAll('#seg-windows button').forEach(b => b.classList.toggle('on', b.dataset.win === winState));
-    }
+    // Aberturas (vidros NÃO refletem, por opção — só reagem ao toque).
     // Teto: sunroof = 'on'/'off' (o carro só reporta aberto/fechado, sem %).
     const srEl = _g('ctrl-sunroof');
     if (srEl && _g('sld-sunroof') !== document.activeElement) {
