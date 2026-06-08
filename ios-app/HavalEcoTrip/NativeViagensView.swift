@@ -549,6 +549,7 @@ struct RouteMapSheet: View {
     @State private var coords: [CLLocationCoordinate2D] = []
     @State private var samples: [TripSample] = []
     @State private var gpxURL: URL?
+    @State private var cardURL: URL?
     @State private var loading = true
     @State private var idx: Double = 0
     @State private var cam: MapCameraPosition = .automatic
@@ -633,12 +634,69 @@ struct RouteMapSheet: View {
             .toolbarBackground(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) { Button("Concluído") { dismiss() } }
-                if let u = gpxURL {
-                    ToolbarItem(placement: .topBarLeading) { ShareLink(item: u) { Image(systemName: "square.and.arrow.up") } }
+                if gpxURL != nil || cardURL != nil {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Menu {
+                            if let c = cardURL { ShareLink(item: c, preview: SharePreview("Viagem", image: Image(systemName: "map"))) { Label("Cartão (imagem)", systemImage: "photo") } }
+                            if let g = gpxURL { ShareLink(item: g) { Label("Trajeto (GPX)", systemImage: "point.topleft.down.curvedto.point.bottomright.up") } }
+                        } label: { Image(systemName: "square.and.arrow.up") }
+                    }
                 }
             }
         }
         .task { await load() }
+    }
+
+    // Cartão compartilhável: mapa do trajeto + stats, via MKMapSnapshotter.
+    private func makeTripCard() {
+        guard coords.count > 1 else { return }
+        var rect = MKMapRect.null
+        for c in coords { let p = MKMapPoint(c); rect = rect.union(MKMapRect(x: p.x, y: p.y, width: 0, height: 0)) }
+        guard rect.size.width > 0 || rect.size.height > 0 else { return }
+        let opts = MKMapSnapshotter.Options()
+        opts.mapRect = rect.insetBy(dx: -max(rect.size.width, 1) * 0.18, dy: -max(rect.size.height, 1) * 0.18)
+        opts.size = CGSize(width: 1080, height: 1350)
+        opts.traitCollection = UITraitCollection(userInterfaceStyle: .dark)
+        let date = self.trip.date, distKm = self.trip.distKm, netKwh = self.trip.netKwh
+        let score = Eco.score(self.trip), title = cardTitle()
+        MKMapSnapshotter(options: opts).start(with: DispatchQueue.global(qos: .userInitiated)) { snapshot, _ in
+            guard let snapshot else { return }
+            let size = opts.size
+            let img = UIGraphicsImageRenderer(size: size).image { _ in
+                snapshot.image.draw(at: .zero)
+                let path = UIBezierPath()
+                for (i, c) in coords.enumerated() {
+                    let pt = snapshot.point(for: c)
+                    if i == 0 { path.move(to: pt) } else { path.addLine(to: pt) }
+                }
+                UIColor(red: 0.13, green: 0.83, blue: 0.93, alpha: 1).setStroke()
+                path.lineWidth = 9; path.lineJoinStyle = .round; path.lineCapStyle = .round; path.stroke()
+                // Barra inferior + textos
+                let barH: CGFloat = 250
+                let bar = CGRect(x: 0, y: size.height - barH, width: size.width, height: barH)
+                UIColor.black.withAlphaComponent(0.8).setFill(); UIRectFill(bar)
+                let df = DateFormatter(); df.locale = Locale(identifier: "pt_BR"); df.dateFormat = "d 'de' MMM yyyy · HH:mm"
+                func draw(_ s: String, _ y: CGFloat, _ size: CGFloat, _ color: UIColor, _ weight: UIFont.Weight) {
+                    let a: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: size, weight: weight), .foregroundColor: color]
+                    NSAttributedString(string: s, attributes: a).draw(at: CGPoint(x: 44, y: y))
+                }
+                draw("🚗 " + title, size.height - barH + 26, 44, .white, .bold)
+                draw(df.string(from: date), size.height - barH + 92, 30, UIColor(white: 0.7, alpha: 1), .regular)
+                var stats = "\(Fmt.km(distKm)) km · \(Fmt.dec1(netKwh)) kWh"
+                if let sc = score { stats += " · condução \(sc)" }
+                draw(stats, size.height - barH + 150, 40, UIColor(red: 0.13, green: 0.83, blue: 0.93, alpha: 1), .semibold)
+                draw("Haval Hub", size.height - 56, 26, UIColor(white: 0.5, alpha: 1), .medium)
+            }
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent("haval-cartao-\(self.trip.tripId).png")
+            try? img.pngData()?.write(to: url)
+            DispatchQueue.main.async { self.cardURL = url }
+        }
+    }
+
+    private func cardTitle() -> String {
+        if let n = trip.rawName { return n }
+        if let a = trip.knownStart, let b = trip.knownEnd { return "\(a) → \(b)" }
+        return trip.knownEnd ?? "Viagem"
     }
 
     private func buildGPX() {
@@ -734,6 +792,7 @@ struct RouteMapSheet: View {
         if out.count > 600 { let step = out.count / 600 + 1; out = out.enumerated().filter { $0.offset % step == 0 }.map { $0.element } }
         samples = out
         buildGPX()
+        makeTripCard()
         if let first = coords.first {
             cam = .region(MKCoordinateRegion(center: first, span: MKCoordinateSpan(latitudeDelta: 0.02, longitudeDelta: 0.02)))
         }

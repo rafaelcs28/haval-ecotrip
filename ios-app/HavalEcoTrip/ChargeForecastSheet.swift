@@ -30,6 +30,24 @@ struct ChargeForecastSheet: View {
     private var currentKwh: Double { Double(soc) / 100 * capacity }
     private var daysLeft: Double? { dailyKwh > 0.05 ? currentKwh / dailyKwh : nil }
 
+    // Vampire drain: % de SOC perdido parado por dia. Olha o intervalo entre o fim
+    // de uma viagem e o início da próxima; só conta quando o SOC caiu (sem recarga).
+    private var vampireDrain: Double? {
+        let sorted = loader.trips.filter { $0.distKm > 0.1 }.sorted { $0.date < $1.date }
+        guard sorted.count >= 3 else { return nil }
+        var rates: [Double] = []
+        for i in 1..<sorted.count {
+            let prev = sorted[i - 1], cur = sorted[i]
+            let parkedH = (cur.date.timeIntervalSince(prev.date) - prev.timeSec) / 3600
+            let drop = prev.endSoc - cur.startSoc
+            if parkedH >= 2 && parkedH <= 24 * 7 && drop > 0 && drop < 40 {
+                rates.append(drop / (parkedH / 24))
+            }
+        }
+        guard rates.count >= 2 else { return nil }
+        return rates.sorted()[rates.count / 2]   // mediana
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -58,7 +76,20 @@ struct ChargeForecastSheet: View {
                                 cell(Fmt.dec1(dailyKwh), "kWh/dia", "Uso médio", DS.teal)
                             }
                         }
-                        Text("Estimativa pelo consumo de bateria dos últimos 14 dias e capacidade útil de ~\(Fmt.dec1(capacity)) kWh. Varia com seu uso e clima.")
+                        if let vd = vampireDrain {
+                            DSCard {
+                                HStack(spacing: 10) {
+                                    Image(systemName: "moon.zzz.fill").foregroundStyle(vd > 2 ? DS.orange : DS.muted)
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        Text("Perda parado").font(.caption2).foregroundStyle(DS.muted)
+                                        Text("~\(Fmt.dec1(vd))%/dia").font(.headline).foregroundStyle(vd > 2 ? DS.orange : DS.text)
+                                    }
+                                    Spacer()
+                                    Text(vd > 2 ? "acima do normal (~1%/dia)" : "normal").font(.caption2).foregroundStyle(DS.muted)
+                                }
+                            }
+                        }
+                        Text("Estimativa pelo consumo de bateria dos últimos 14 dias e capacidade útil de ~\(Fmt.dec1(capacity)) kWh. Perda parado vem da queda de SOC entre viagens. Varia com uso e clima.")
                             .font(.caption2).foregroundStyle(DS.muted).frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
