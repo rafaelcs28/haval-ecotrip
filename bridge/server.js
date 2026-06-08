@@ -1146,6 +1146,7 @@ const state = {
   high_beam:        null,   // null | 'on' | 'off'
   light_state:      null,   // null | 'on' | 'off' — farol (sem sensor por ora)
   ac_state:         null,   // null | 'on' | 'off'
+  shade_level:      null,   // null | '0'..'100' — cortina do teto (0=fechada, 100=aberta)
   seat_vent_drv:    null,   // null | '0'=desligado | '1'=fraco | '2'=médio | '3'=forte
   seat_vent_pass:   null,   // idem motorista
   hvac_driver_temp:    null, // null | float (°C) — temperatura definida (motorista)
@@ -5802,6 +5803,49 @@ app.post('/api/admin/recompute-trip-costs', async (req, res) => {
   res.json({ ok: true, dry_run: dryRun, updated, skipped, errors });
 });
 
+// POST /api/admin/recompute-drive-scores — preenche driveScore/harshAcc/harshBrake
+// nas viagens antigas (gravadas antes de computeDriveScore existir) usando os
+// samples já persistidos. body { force?: bool } — force=true reprocessa também
+// viagens que já têm driveScore.
+app.post('/api/admin/recompute-drive-scores', async (req, res) => {
+  if (!adminCheckToken(req, res)) return;
+  const force = req.body?.force === true;
+  let updated = 0, skipped = 0, errors = 0;
+  try {
+    const files = fs.readdirSync(AUTOTRIPS_DIR).filter(f => f.endsWith('.json'));
+    for (const f of files) {
+      try {
+        const filePath = path.join(AUTOTRIPS_DIR, f);
+        const d = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+        const at = d.autoTrip;
+        if (!at) { skipped++; continue; }
+        const hasScore = at.driveScore != null;
+        if (hasScore && !force) { skipped++; continue; }
+        const samples = Array.isArray(d.samples) ? d.samples : [];
+        const drive = computeDriveScore(samples, at);
+        at.driveScore = drive.score;
+        at.harshAcc = drive.harshAcc;
+        at.harshBrake = drive.harshBrake;
+        at._updated_ms = Date.now();   // força o app a re-sincronizar essa viagem
+        fs.writeFileSync(filePath, JSON.stringify(d, null, 2));
+        // Espelha em memória pra que /api/autotrips reflita sem restart.
+        const mem = autoTripsArr.find(t => String(t.tripId) === String(d.tripId));
+        if (mem) {
+          mem.driveScore = at.driveScore;
+          mem.harshAcc = at.harshAcc;
+          mem.harshBrake = at.harshBrake;
+          mem._updated_ms = at._updated_ms;
+        }
+        updated++;
+      } catch (_) { errors++; }
+    }
+  } catch (e) {
+    return res.status(500).json({ error: 'Falha ao iterar autotrips: ' + e.message });
+  }
+  console.log(`✓ recompute-drive-scores: updated=${updated} skipped=${skipped} errors=${errors} force=${force}`);
+  res.json({ ok: true, updated, skipped, errors, force });
+});
+
 // POST /api/admin/reset-tyre-baseline — zera o histórico de PSI dos pneus.
 // Outras métricas (12V, autonomia, combustível) permanecem. Útil quando a
 // média 14d ficou viciada com leituras em movimento (pneu quente).
@@ -7078,6 +7122,12 @@ function _songProEvents(o) {
     const place = matchKnownPlace(plat, plng);
     _spNotify('byd_parked', '🅿️ BYD estacionou',
       place ? `O carro foi desligado em ${place.name}.` : 'O carro foi desligado.');
+    // Chegou em um local conhecido: só dispara quando DESLIGA dentro da cerca de
+    // um local configurado — passar pela cerca dirigindo não conta (evita falsos
+    // positivos quando o carro só atravessa o raio do local).
+    const gPlace = _spGeofenceLoc(plat, plng);
+    if (gPlace) _spNotifyLoc('byd_geofence_arrival', gPlace.id,
+      '📍 Chegou', `BYD chegou em ${gPlace.name}.`);
   }
   _spEv.carOn = carOn;
 
@@ -7183,9 +7233,10 @@ function _songProEvents(o) {
   if (!_spEv.tyreTemp && ttHigh) _spNotify('byd_tyre_temp_high', '🛞 Pneu quente', 'Temperatura de pneu alta.');
   _spEv.tyreTemp = ttHigh;
 
+  // Trilha do local atual (cerca). Só usada pra detectar SAÍDA — a chegada é
+  // disparada no momento em que o carro desliga dentro da cerca (acima).
   const gl = _spGeofenceLoc(+o.location_latitude || 0, +o.location_longitude || 0);
   const glId = gl ? gl.id : null;
-  if (glId && glId !== _spEv.curLocId) _spNotifyLoc('byd_geofence_arrival', glId, '📍 Chegou', `BYD chegou em ${gl.name}.`);
   if (!glId && _spEv.curLocId) {
     const prev = songProLocs.find(l => l.id === _spEv.curLocId);
     if (prev) _spNotifyLoc('byd_geofence_departure', prev.id, '📍 Saiu', `BYD saiu de ${prev.name}.`);
@@ -8512,7 +8563,15 @@ app.post('/api/share/create', (req, res) => {
   const expiresMs = Date.now() + ttlMin * 60_000;
   _shareTokens[token] = { createdMs: Date.now(), expiresMs, code };
   _saveShareTokens();
-  res.json({ ok: true, token, code, url: `${_shareBaseUrl()}/s/${code}`, expiresMs, ttlMin });
+  // Nome do destino atual (mandado pro carro): permite ao cliente montar
+  // "Acompanhe meu trajeto para X". Cai pro último nav_dest recente (≤6h) se
+  // state.arrival ainda não foi populado.
+  let destName = (state.arrival && state.arrival.name) || null;
+  if (!destName && recentNavDests.length) {
+    const last = recentNavDests[recentNavDests.length - 1];
+    if (Date.now() - last.ts < 6 * 3600_000) destName = last.name;
+  }
+  res.json({ ok: true, token, code, url: `${_shareBaseUrl()}/s/${code}`, expiresMs, ttlMin, destName });
 });
 
 // Link encurtado público → redireciona pra página com o token completo.
@@ -8553,6 +8612,7 @@ app.get('/api/share/:token/state', (req, res) => {
     lat: +state.gps_lat || 0, lng: +state.gps_lng || 0,
     speedKmh: Math.max(0, +state.speed_kmh || 0),
     soc: Math.round(+state.soc_pct || 0),
+    fuelL: +state.fuel_l || 0,
     tripKm: +(tr.distKm || 0), tripSec: +(tr.timeSec || 0),
     rangeEvKm: Math.round(+state.range_ev_km || 0),
     gear: String(state.gear || '--').toUpperCase(),
@@ -8560,6 +8620,7 @@ app.get('/api/share/:token/state', (req, res) => {
     tempOut: +state.outside_temp || 0,
     moving: (+state.speed_kmh || 0) > 2,
     dest,
+    apkAgeMs: state.last_apk_ms ? (Date.now() - state.last_apk_ms) : null,
     ts: Date.now(),
   });
 });
@@ -9017,6 +9078,7 @@ function applyMqttMessage(key, value, isRetained = false) {
     case 'hvac_cycle_mode': state.hvac_cycle_mode = value; break; // '0'=recirc interna, '1'=ar externo
     case 'seat_vent_drv':  state.seat_vent_drv  = value; break; // '0'..'3'
     case 'seat_vent_pass': state.seat_vent_pass = value; break; // '0'..'3'
+    case 'shade_level':    state.shade_level    = value; break; // '0'..'100' — cortina do teto (leitura ativa do APK)
     case 'hvac_driver_temp':    state.hvac_driver_temp    = value; break; // float °C
     case 'hvac_passenger_temp': state.hvac_passenger_temp = value; break; // float °C (pendente)
     case 'hvac_fan_speed': {
