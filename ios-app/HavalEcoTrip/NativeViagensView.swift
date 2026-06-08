@@ -52,6 +52,7 @@ struct Trip: Identifiable {
     var driveScore: Int? { raw["driveScore"] == nil ? nil : Int(n("driveScore")) }
     var harshAcc: Int { Int(n("harshAcc")) }
     var harshBrake: Int { Int(n("harshBrake")) }
+    var outsideTemp: Double? { raw["outsideTemp"] == nil ? nil : n("outsideTemp") }
 }
 
 @MainActor
@@ -168,6 +169,7 @@ struct NativeViagensView: View {
     @State private var showReport = false
     @State private var showRoutes = false
     @State private var showMilestones = false
+    @State private var showTemp = false
 
     private var fromDate: Binding<Date> { Binding(get: { fromTS > 0 ? Date(timeIntervalSince1970: fromTS) : Date() }, set: { fromTS = $0.timeIntervalSince1970 }) }
     private var toDate: Binding<Date> { Binding(get: { toTS > 0 ? Date(timeIntervalSince1970: toTS) : Date() }, set: { toTS = $0.timeIntervalSince1970 }) }
@@ -211,7 +213,7 @@ struct NativeViagensView: View {
                         }.font(.system(size: 14)).foregroundStyle(DS.text).tint(DS.green).environment(\.locale, Locale(identifier: "pt_BR"))
                     }
                 }
-                if tab == 0 { searchBar; historico } else { insightsButton; ecoButton; reportButton; routesButton; milestonesButton; estatisticas }
+                if tab == 0 { searchBar; historico } else { insightsButton; ecoButton; reportButton; routesButton; milestonesButton; tempButton; estatisticas }
             }
             .padding(16)
         }
@@ -231,6 +233,7 @@ struct NativeViagensView: View {
         }
         .sheet(isPresented: $showRoutes) { RouteCompareSheet(trips: loader.trips) }
         .sheet(isPresented: $showMilestones) { MilestonesSheet(odometerKm: car.num("odometer_km"), trips: loader.trips) }
+        .sheet(isPresented: $showTemp) { TempConsumptionSheet(trips: loader.trips) }
     }
 
     private var insightsButton: some View {
@@ -241,6 +244,22 @@ struct NativeViagensView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Economia EV & CO₂").font(.subheadline.weight(.semibold)).foregroundStyle(DS.text)
                         Text("Quanto você economizou vs. gasolina").font(.caption).foregroundStyle(DS.muted)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(DS.muted)
+                }
+            }
+        }
+    }
+
+    private var tempButton: some View {
+        DSCard {
+            Button { showTemp = true } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "thermometer.medium").font(.title3).foregroundStyle(DS.blue)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Consumo × temperatura").font(.subheadline.weight(.semibold)).foregroundStyle(DS.text)
+                        Text("Quanto o frio/calor pesa no consumo").font(.caption).foregroundStyle(DS.muted)
                     }
                     Spacer()
                     Image(systemName: "chevron.right").font(.caption).foregroundStyle(DS.muted)

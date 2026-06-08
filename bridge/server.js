@@ -4526,6 +4526,8 @@ app.post('/api/autotrips', (req, res) => {
       autoTrip.driveScore = drive.score;
       autoTrip.harshAcc = drive.harshAcc;
       autoTrip.harshBrake = drive.harshBrake;
+      const ot = +state.outside_temp;   // temperatura externa no fim da viagem (proxy do ambiente)
+      if (ot) autoTrip.outsideTemp = Math.round(ot * 10) / 10;
     }
 
     // Persiste hybrid junto — boot não precisa recalcular.
