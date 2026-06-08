@@ -7,9 +7,10 @@ import SwiftUI
 enum Eco {
     static let goal = 70
 
-    /// Nota 0–100 da viagem. Base: energia equivalente por 100 km (elétrico + gasolina).
-    /// 13 kWh-eq/100km → 100 · 26 → 30. Quanto menor o consumo, maior a nota.
+    /// Nota 0–100 de CONDUÇÃO: usa o score do bridge (economia + suavidade:
+    /// frenagem/aceleração brusca) quando disponível; senão cai na economia pura.
     static func score(_ t: Trip) -> Int? {
+        if let ds = t.driveScore { return ds }
         guard t.distKm >= 1 else { return nil }
         let eq = (t.netKwh + t.fuelL * 8.9) / t.distKm * 100
         let s = 100.0 - (eq - 13.0) * (70.0 / 13.0)
@@ -39,11 +40,13 @@ struct EcoScoreSheet: View {
                     weekCard
                     recordsCard
                     if !rated.isEmpty { tripsCard }
+                    Text("Nota de condução: combina economia (consumo) com suavidade — penaliza acelerações e frenagens bruscas. Viagens antigas (sem telemetria de condução) usam só a economia.")
+                        .font(.caption2).foregroundStyle(DS.muted).frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .padding(16)
             }
             .background(DS.bg.ignoresSafeArea())
-            .navigationTitle("Eco-score")
+            .navigationTitle("Condução")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Fechar") { dismiss() } } }
         }
@@ -54,7 +57,7 @@ struct EcoScoreSheet: View {
         let streak = streakDays()
         return DSCard {
             VStack(spacing: 10) {
-                Text("Nota média (7 dias)").font(.caption).foregroundStyle(DS.muted)
+                Text("Nota de condução (7 dias)").font(.caption).foregroundStyle(DS.muted)
                 if let a = avg {
                     Text("\(a)").font(.system(size: 66, weight: .heavy, design: .rounded)).foregroundStyle(Eco.color(a))
                     Text("meta \(Eco.goal) · \(a >= Eco.goal ? "na meta ✓" : "abaixo da meta")")
@@ -128,7 +131,12 @@ struct EcoScoreSheet: View {
                             .foregroundStyle(Eco.color(s)).frame(width: 38, alignment: .leading)
                         VStack(alignment: .leading, spacing: 1) {
                             Text(name(t)).font(.subheadline).foregroundStyle(DS.text).lineLimit(1)
-                            Text("\(Fmt.km(t.distKm)) km · \(Fmt.dec1(t.netKwh)) kWh").font(.caption2).foregroundStyle(DS.muted)
+                            HStack(spacing: 6) {
+                                Text("\(Fmt.km(t.distKm)) km · \(Fmt.dec1(t.netKwh)) kWh").font(.caption2).foregroundStyle(DS.muted)
+                                if t.driveScore != nil && (t.harshAcc + t.harshBrake) > 0 {
+                                    Text("· ⚡\(t.harshAcc) 🛑\(t.harshBrake)").font(.caption2).foregroundStyle(DS.orange)
+                                }
+                            }
                         }
                         Spacer()
                     }.padding(.vertical, 8)

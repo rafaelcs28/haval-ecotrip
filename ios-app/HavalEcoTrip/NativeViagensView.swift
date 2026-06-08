@@ -48,6 +48,10 @@ struct Trip: Identifiable {
     func cost(_ pKwh: Double, _ pGas: Double) -> Double { netKwh * pKwh + fuelL * pGas }
     var consumo: Double { distKm > 0.5 ? netKwh / distKm * 100 : 0 }
     var valid: Bool { distKm > 0.1 || timeSec > 60 }
+    // Score de condução calculado no bridge (economia + suavidade). nil = viagem antiga.
+    var driveScore: Int? { raw["driveScore"] == nil ? nil : Int(n("driveScore")) }
+    var harshAcc: Int { Int(n("harshAcc")) }
+    var harshBrake: Int { Int(n("harshBrake")) }
 }
 
 @MainActor
@@ -299,8 +303,8 @@ struct NativeViagensView: View {
                 HStack(spacing: 12) {
                     Image(systemName: "gauge.with.dots.needle.67percent").font(.title3).foregroundStyle(DS.teal)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Eco-score & metas").font(.subheadline.weight(.semibold)).foregroundStyle(DS.text)
-                        Text("Nota de eficiência, semana e recordes").font(.caption).foregroundStyle(DS.muted)
+                        Text("Score de condução").font(.subheadline.weight(.semibold)).foregroundStyle(DS.text)
+                        Text("Economia + suavidade · semana e recordes").font(.caption).foregroundStyle(DS.muted)
                     }
                     Spacer()
                     if let a = Eco.avg(loader.trips.filter { $0.date > Date().addingTimeInterval(-7*86400) }) ?? Eco.avg(loader.trips) {

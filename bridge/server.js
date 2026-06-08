@@ -4334,6 +4334,26 @@ function _isDuplicateTail(existing, incoming) {
     eq(tail[i].spd, incoming[i].spd));
 }
 
+// Score de condução (0-100): combina economia (energia-equiv/100km) com suavidade
+// (poucas acelerações/frenagens bruscas, detectadas pela variação de velocidade).
+function computeDriveScore(samples, t) {
+  const distKm = t.distKm || 0;
+  const eq = distKm >= 1 ? ((t.netKwh || 0) + (t.fuelL || 0) * 8.9) / distKm * 100 : null;
+  const econ = eq != null ? Math.max(0, Math.min(100, 100 - (eq - 13) * (70 / 13))) : 70;
+  let ha = 0, hb = 0;
+  if (Array.isArray(samples)) {
+    for (let i = 1; i < samples.length; i++) {
+      const dt = (samples[i].t || 0) - (samples[i - 1].t || 0);
+      if (dt <= 0 || dt > 5) continue;
+      const a = ((samples[i].spd || 0) - (samples[i - 1].spd || 0)) / dt;  // km/h por s
+      if (a > 9) ha++; else if (a < -11) hb++;     // ~2,5 / 3,0 m/s²
+    }
+  }
+  const perKm = distKm > 0.5 ? (ha + hb) / distKm : 0;
+  const smooth = Math.max(0, 100 - perKm * 18);    // cada evento brusco/km tira ~18 pts
+  return { score: Math.max(0, Math.min(100, Math.round(0.55 * econ + 0.45 * smooth))), harshAcc: ha, harshBrake: hb };
+}
+
 app.post('/api/autotrips', (req, res) => {
   // DEBUG temporário: loga TODA tentativa pra rastrear viagens travadas no APK
   const ua = req.headers['user-agent'] || '?';
@@ -4484,6 +4504,15 @@ app.post('/api/autotrips', (req, res) => {
       hybridDistKm  = parseFloat(hybridDistKm.toFixed(3));
     }
 
+    // Score de condução (economia + suavidade) — grava no autoTrip pra fluir pra
+    // todos os caminhos (persist, record, push, reprocess).
+    {
+      const drive = computeDriveScore(finalSamples, autoTrip);
+      autoTrip.driveScore = drive.score;
+      autoTrip.harshAcc = drive.harshAcc;
+      autoTrip.harshBrake = drive.harshBrake;
+    }
+
     // Persiste hybrid junto — boot não precisa recalcular.
     // Se foi estimado, marca o arquivo também com os campos _estimated*.
     const persisted = {
@@ -4559,12 +4588,7 @@ app.post('/api/autotrips', (req, res) => {
         const cost = (pGas > 0 || pKwh > 0) ? fuelL * pGas + netKwh * pKwh : 0;
 
         const dropSoc = (autoTrip.startSocPct || 0) - (autoTrip.endSocPct || 0);
-        // Eco-score (mesma fórmula do app): energia-equivalente por 100 km.
-        let eco = null;
-        if (distKm >= 1) {
-          const eq = (netKwh + fuelL * 8.9) / distKm * 100;
-          eco = Math.max(0, Math.min(100, Math.round(100 - (eq - 13) * (70 / 13))));
-        }
+        const drive = autoTrip.driveScore;   // score de condução (economia + suavidade)
 
         const parts = [`${dist} km`, dur];
         if (dropSoc > 0.5)  parts.push(`−${Math.round(dropSoc)}% bateria`);
@@ -4573,7 +4597,7 @@ app.post('/api/autotrips', (req, res) => {
         if (fuelL > 0.01)  parts.push(`${fuelL.toFixed(2)} L`);
         if (kmL)           parts.push(`${kmL} km/L`);
         if (cost  > 0.01)  parts.push(`R$ ${cost.toFixed(2)}`);
-        if (eco != null)   parts.push(`eco ${eco}`);
+        if (drive != null) parts.push(`condução ${drive}`);
 
         sendPush('🏁 Viagem concluída', parts.join(' · '), 'trip_end');
       }
