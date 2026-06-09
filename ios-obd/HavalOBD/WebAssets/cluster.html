@@ -2922,6 +2922,53 @@ document.addEventListener('dblclick', e => e.preventDefault());
     _paintTile('ctrl-onepedal', next === 1, 'ctrl-onepedal-st', 'Ligado', 'Desligado');
     sendCmd('one_pedal_set', next ? 'true' : 'false');
   };
+  // ── A/C: pintura otimista — marca na hora e ignora as oscilações do state
+  //    (LAN/cloud + sequência do A/C inteligente) até estabilizar. Mata o piscar
+  //    e o atraso de até ~15s que só os botões de A/C tinham. ──
+  const _curOn = (pk, sk, onIs1 = true) => _pend[pk] ? _pend[pk].v === '1' : (onIs1 ? +state[sk] === 1 : +state[sk] === 0);
+  window.toggleAcPower = () => {
+    const cur = _pend['acpower'] ? _pend['acpower'].v === '1' : _acOn();
+    const next = !cur;
+    _pendSet('acpower', next ? 1 : 0); _acOnOptimistic(next);
+    _paintTile('ctrl-ac', next, 'ctrl-ac-st', 'Ligado', 'Desligado');
+    window.webkit?.messageHandlers?.obd?.postMessage({ action: 'hvac_power', value: next ? '1' : '0' });
+    toast(next ? '⏳ Ligando AC…' : '⏳ Desligando AC…');
+  };
+  window.toggleAcCycle = () => {   // recirc = cycle_mode 0
+    const next = !_curOn('recirc', 'hvac_cycle_mode', false);
+    _pendSet('recirc', next ? 1 : 0);
+    _paintTile('ctrl-recirc', next, 'ctrl-recirc-st', 'Recircular', 'Ar externo');
+    const ic = _g('ctrl-recirc-ic'); if (ic) ic.textContent = next ? '↺' : '↪';
+    sendHvac('cycle_mode', next ? 0 : 1);
+  };
+  window.toggleAcSync = () => {
+    if (!_acOn()) { toast('AC desligado'); return; }
+    const next = !_curOn('sync', 'hvac_sync_enable');
+    _pendSet('sync', next ? 1 : 0); _paintTile('ctrl-sync', next, 'ctrl-sync-st', 'Ligado', 'Desligado');
+    sendHvac('sync', next ? 1 : 0);
+  };
+  window.toggleAcAuto = () => {
+    if (!_acOn()) { toast('AC desligado'); return; }
+    const next = !_curOn('auto', 'hvac_auto_enable');
+    _pendSet('auto', next ? 1 : 0); _paintTile('ctrl-auto', next, 'ctrl-auto-st', 'Ligado', 'Desligado');
+    sendHvac('auto', next ? 1 : 0);
+  };
+  window.toggleAcCompressor = () => {
+    const next = !_curOn('hvac_ac_enable', 'hvac_ac_enable');
+    _pendSet('hvac_ac_enable', next ? 1 : 0); _paintTile('ctrl-comp', next, 'ctrl-comp-st', 'Ligado', 'Desligado');
+    sendHvac('ac_enable', next ? 1 : 0);
+  };
+  const _AC_EXTRA = { acmax: { k: 'hvac_acmax', tile: 'ctrl-acmax' }, anion: { k: 'hvac_anion', tile: 'ctrl-anion' },
+    auto_defrost: { k: 'hvac_auto_defrost', tile: 'ctrl-defauto' }, heating: { k: 'hvac_heating' },
+    front_defrost: { k: 'hvac_front_defrost' }, rear_defrost: { k: 'hvac_rear_defrost' }, aqs: { k: 'hvac_aqs' } };
+  window.toggleAcExtra = (control) => {
+    const cfg = _AC_EXTRA[control]; if (!cfg) return;
+    const next = !_curOn(cfg.k, cfg.k);
+    _pendSet(cfg.k, next ? 1 : 0);
+    if (cfg.tile) _paintTile(cfg.tile, next, cfg.tile + '-st', 'Ligado', 'Desligado');
+    document.querySelectorAll('#ac-extra-grid button[data-acx="' + cfg.k + '"]').forEach(b => b.classList.toggle('on', next));
+    sendHvac(control, next ? 1 : 0);
+  };
   function _paintTile(id, on, stId, onTxt, offTxt) {
     const t = _g(id); if (t) t.classList.toggle('on', !!on);
     const s = stId && _g(stId); if (s) s.textContent = on ? onTxt : offTxt;
@@ -2943,13 +2990,13 @@ document.addEventListener('dblclick', e => e.preventDefault());
     _paintSegRaw('seg-air', 'air', state.hvac_blower_mode);
     _paintTile('ctrl-onepedal', _pendEff('onepedal', (+state.one_pedal === 1 ? 1 : 0)) === '1', 'ctrl-onepedal-st', 'Ligado', 'Desligado');
     // Climatização
-    const acOn = _acOn();
+    const acOn = _pendEff('acpower', _acOn() ? 1 : 0) === '1';
     _paintTile('ctrl-ac', acOn, 'ctrl-ac-st', 'Ligado', 'Desligado');
-    const recirc = +state.hvac_cycle_mode === 0;
+    const recirc = _pendEff('recirc', (+state.hvac_cycle_mode === 0 ? 1 : 0)) === '1';
     _paintTile('ctrl-recirc', recirc, 'ctrl-recirc-st', 'Recircular', 'Ar externo');
     const ric = _g('ctrl-recirc-ic'); if (ric) ric.textContent = recirc ? '↺' : '↪';
-    _paintTile('ctrl-sync', +state.hvac_sync_enable === 1, 'ctrl-sync-st', 'Ligado', 'Desligado');
-    _paintTile('ctrl-auto', +state.hvac_auto_enable === 1, 'ctrl-auto-st', 'Ligado', 'Desligado');
+    _paintTile('ctrl-sync', _pendEff('sync', (+state.hvac_sync_enable === 1 ? 1 : 0)) === '1', 'ctrl-sync-st', 'Ligado', 'Desligado');
+    _paintTile('ctrl-auto', _pendEff('auto', (+state.hvac_auto_enable === 1 ? 1 : 0)) === '1', 'ctrl-auto-st', 'Ligado', 'Desligado');
     // Sliders (não sobrescreve enquanto o usuário arrasta)
     // Temperaturas: o carro manda -1 (sentinela) com o A/C desligado → mostra "—".
     const td = parseFloat(state.hvac_driver_temp), eTd = _g('ctrl-temp-d');
@@ -2985,12 +3032,12 @@ document.addEventListener('dblclick', e => e.preventDefault());
       } else de.innerHTML = '';
     }
     // Linha extra do A/C: compressor + AC máx + ionizador + degelo auto
-    _paintTile('ctrl-comp', +state.hvac_ac_enable === 1, 'ctrl-comp-st', 'Ligado', 'Desligado');
-    _paintTile('ctrl-acmax', +state.hvac_acmax === 1, 'ctrl-acmax-st', 'Ligado', 'Desligado');
-    _paintTile('ctrl-anion', +state.hvac_anion === 1, 'ctrl-anion-st', 'Ligado', 'Desligado');
-    _paintTile('ctrl-defauto', +state.hvac_auto_defrost === 1, 'ctrl-defauto-st', 'Ligado', 'Desligado');
-    // Submenu (force-touch): demais extras + PM2.5
-    document.querySelectorAll('#ac-extra-grid button[data-acx]').forEach(b => b.classList.toggle('on', +state[b.dataset.acx] === 1));
+    _paintTile('ctrl-comp', _pendEff('hvac_ac_enable', (+state.hvac_ac_enable === 1 ? 1 : 0)) === '1', 'ctrl-comp-st', 'Ligado', 'Desligado');
+    _paintTile('ctrl-acmax', _pendEff('hvac_acmax', (+state.hvac_acmax === 1 ? 1 : 0)) === '1', 'ctrl-acmax-st', 'Ligado', 'Desligado');
+    _paintTile('ctrl-anion', _pendEff('hvac_anion', (+state.hvac_anion === 1 ? 1 : 0)) === '1', 'ctrl-anion-st', 'Ligado', 'Desligado');
+    _paintTile('ctrl-defauto', _pendEff('hvac_auto_defrost', (+state.hvac_auto_defrost === 1 ? 1 : 0)) === '1', 'ctrl-defauto-st', 'Ligado', 'Desligado');
+    // Submenu (force-touch): demais extras + PM2.5 (pendKey = chave de state)
+    document.querySelectorAll('#ac-extra-grid button[data-acx]').forEach(b => b.classList.toggle('on', _pendEff(b.dataset.acx, (+state[b.dataset.acx] === 1 ? 1 : 0)) === '1'));
     const pmx = _g('acx-pm25'); if (pmx) { const v = parseInt(state.hvac_pm25, 10); pmx.textContent = Number.isFinite(v) ? v : '--'; }
     // Aberturas (vidros NÃO refletem, por opção — só reagem ao toque).
     // Teto solar: skylight_level (0=fechado · 200=ventilação · 1..100=% aberto) —
