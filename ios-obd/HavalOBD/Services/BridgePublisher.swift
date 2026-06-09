@@ -416,7 +416,10 @@ final class BridgePublisher: ObservableObject {
         // Com LAN WS ativa, o cloud só precisa preencher os CALCULADOS (trip,
         // range, preços) — então cai pra 8s pra não competir com o WS 10Hz.
         // Sem LAN, mantém 1s (fonte principal).
-        let interval: TimeInterval = (useLanWhenAvailable && lanWsConnected) ? 8.0 : 1.0
+        // Com LAN WS ativo, o WS cobre a telemetria fast (10Hz); o cloud só traz os
+        // campos LENTOS que NÃO vêm pelo WS (modo de condução, tração, regen, direção,
+        // cortina, teto, etc). 2.5s mantém esses refletindo rápido sem competir com o WS.
+        let interval: TimeInterval = (useLanWhenAvailable && lanWsConnected) ? 2.5 : 1.0
         Task { await fetchState() }
         httpPollTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             Task { await self?.fetchState() }

@@ -2886,17 +2886,40 @@ document.addEventListener('dblclick', e => e.preventDefault());
     ac.addEventListener('contextmenu', e => { e.preventDefault(); clearTimeout(t); open(); });
   })();
 
-  // ── Pintura dos controles a partir do state ──
-  function _paintSeg(segId, attr, val) {
+  // ── Pintura otimista: ao tocar um chip de condução, marca na hora e ignora o
+  //    state daquele atributo até o carro confirmar (ou ~10s). Mata o atraso do
+  //    poll cloud (8s com LAN) que deixava o verde "preso" no valor antigo.
+  const _pend = {};
+  function _pendSet(k, v) { _pend[k] = { v: String(v), until: Date.now() + 10000 }; }
+  function _pendEff(k, stateVal) {
+    const p = _pend[k];
+    const sv = (stateVal == null) ? null : String(stateVal);
+    if (!p) return sv;
+    if (sv === p.v || Date.now() > p.until) { delete _pend[k]; return sv; }
+    return p.v;   // ainda esperando o carro confirmar — mantém o valor tocado
+  }
+  function _paintSegRaw(segId, attr, eff) {
     const seg = _g(segId); if (!seg) return false;
     let matched = false;
     seg.querySelectorAll('button').forEach(b => {
-      const has = b.dataset[attr] !== undefined;
-      const on = has && String(b.dataset[attr]) === String(val);
+      const on = b.dataset[attr] !== undefined && eff != null && String(b.dataset[attr]) === String(eff);
       b.classList.toggle('on', on); if (on) matched = true;
     });
     return matched;
   }
+  // Setters de condução: pintam otimista + mandam o comando. Sobrescrevem os
+  // antigos (que pintavam os .dm-chip removidos no V4, sem efeito visível).
+  window.setTerrainMode = (m) => { _pendSet('terrain', m); _paintSegRaw('seg-mode', 'terrain', m); sendCmd('terrain_mode_set', m); };
+  window.setRegenLevel  = (l) => { _pendSet('regen', l);   _paintSegRaw('seg-regen', 'regen', l);  sendCmd('regen_level_set', l); };
+  window.setSteerMode   = (m) => { _pendSet('steer', m);   _paintSegRaw('seg-steer', 'steer', m);  sendCmd('steer_mode_set', m); };
+  window.setDriveMode   = (m) => { _pendSet('mode', m);    _paintSegRaw('seg-power', 'mode', m);   sendCmd('drive_mode_set', m); };
+  window.toggleOnePedal = () => {
+    const curOn = _pend['onepedal'] ? _pend['onepedal'].v === '1' : (+state.one_pedal === 1);
+    const next = curOn ? 0 : 1;
+    _pendSet('onepedal', next);
+    _paintTile('ctrl-onepedal', next === 1, 'ctrl-onepedal-st', 'Ligado', 'Desligado');
+    sendCmd('one_pedal_set', next ? 'true' : 'false');
+  };
   function _paintTile(id, on, stId, onTxt, offTxt) {
     const t = _g(id); if (t) t.classList.toggle('on', !!on);
     const s = stId && _g(stId); if (s) s.textContent = on ? onTxt : offTxt;
@@ -2906,16 +2929,17 @@ document.addEventListener('dblclick', e => e.preventDefault());
     if (Number.isFinite(v)) el.value = fixed != null ? (+v).toFixed(fixed) : v;
   }
   function renderV4Controls() {
-    // Condução
-    const okMode = _paintSeg('seg-mode', 'terrain', state.terrain_mode);
+    // Condução (pintura com otimista via _pendEff — confirma quando o state chega)
+    const effT = _pendEff('terrain', state.terrain_mode);
+    const okMode = _paintSegRaw('seg-mode', 'terrain', effT);
     const sfx = _g('mode-sfx');
-    if (sfx) sfx.textContent = (!okMode && state.terrain_mode != null && TERRAIN_LBL[state.terrain_mode]) ? ' · ' + TERRAIN_LBL[state.terrain_mode] : '';
-    document.querySelectorAll('#mode-grid button').forEach(b => b.classList.toggle('on', String(b.dataset.terrain) === String(state.terrain_mode)));
-    _paintSeg('seg-power', 'mode', state.drive_mode);
-    _paintSeg('seg-regen', 'regen', state.regen_level);
-    _paintSeg('seg-steer', 'steer', state.steer_mode);
-    _paintSeg('seg-air', 'air', state.hvac_blower_mode);
-    _paintTile('ctrl-onepedal', +state.one_pedal === 1, 'ctrl-onepedal-st', 'Ligado', 'Desligado');
+    if (sfx) sfx.textContent = (!okMode && effT != null && TERRAIN_LBL[effT]) ? ' · ' + TERRAIN_LBL[effT] : '';
+    document.querySelectorAll('#mode-grid button').forEach(b => b.classList.toggle('on', String(b.dataset.terrain) === String(effT)));
+    _paintSegRaw('seg-power', 'mode',  _pendEff('mode', state.drive_mode));
+    _paintSegRaw('seg-regen', 'regen', _pendEff('regen', state.regen_level));
+    _paintSegRaw('seg-steer', 'steer', _pendEff('steer', state.steer_mode));
+    _paintSegRaw('seg-air', 'air', state.hvac_blower_mode);
+    _paintTile('ctrl-onepedal', _pendEff('onepedal', (+state.one_pedal === 1 ? 1 : 0)) === '1', 'ctrl-onepedal-st', 'Ligado', 'Desligado');
     // Climatização
     const acOn = _acOn();
     _paintTile('ctrl-ac', acOn, 'ctrl-ac-st', 'Ligado', 'Desligado');
@@ -2936,11 +2960,14 @@ document.addEventListener('dblclick', e => e.preventDefault());
     const sd = parseInt(state.seat_vent_drv, 10); if (Number.isFinite(sd)) { _slider('sld-seat-d', sd); const e = _g('ctrl-seat-d-st'); if (e && _g('sld-seat-d') !== document.activeElement) e.textContent = SEAT[Math.max(0, Math.min(3, sd))]; }
     const sp = parseInt(state.seat_vent_pass, 10); if (Number.isFinite(sp)) { _slider('sld-seat-p', sp); const e = _g('ctrl-seat-p-st'); if (e && _g('sld-seat-p') !== document.activeElement) e.textContent = SEAT[Math.max(0, Math.min(3, sp))]; }
     // Tração (sub-rótulo HEV)
+    // Sub-rótulo HEV. O bridge manda string ("0","1","2"), então coage com +/string.
     const hsl = _g('hev-sub-label');
     if (hsl) {
-      if (state.drive_mode !== 0) hsl.textContent = '';
-      else if (state.power_reserve === 1) hsl.textContent = '· Intel.';
-      else if (state.power_reserve === 2) hsl.textContent = state.charge_soc_target ? ('· Prior. ' + state.charge_soc_target + '%') : '· Prior.';
+      const dm = _pendEff('mode', state.drive_mode);   // '0' = HEV
+      const pr = +state.power_reserve;
+      if (dm !== '0') hsl.textContent = '';
+      else if (pr === 1) hsl.textContent = '· Intel.';
+      else if (pr === 2) hsl.textContent = state.charge_soc_target ? ('· Prior. ' + state.charge_soc_target + '%') : '· Prior.';
       else hsl.textContent = '';
     }
     // Destino na viagem
