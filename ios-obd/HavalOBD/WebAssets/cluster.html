@@ -2964,15 +2964,19 @@ document.addEventListener('dblclick', e => e.preventDefault());
     document.querySelectorAll('#ac-extra-grid button[data-acx]').forEach(b => b.classList.toggle('on', +state[b.dataset.acx] === 1));
     const pmx = _g('acx-pm25'); if (pmx) { const v = parseInt(state.hvac_pm25, 10); pmx.textContent = Number.isFinite(v) ? v : '--'; }
     // Aberturas (vidros NÃO refletem, por opção — só reagem ao toque).
-    // Teto: sunroof = 'on'/'off' (o carro só reporta aberto/fechado, sem %).
-    // Ao FECHAR (inclui trancar o carro, que recolhe o teto), desmarca o botão
-    // de Ventilação e mostra "Fechado" — senão ele ficava preso em "ligado".
+    // Teto solar: skylight_level (0=fechado · 200=ventilação · 1..100=% aberto) —
+    // leitura ativa do APK. Reflete tudo, inclusive ventilação mexida no carro.
+    // Fallback: sunroof ('on'/'off') enquanto o APK não publica skylight_level.
     const srEl = _g('ctrl-sunroof');
     const ventBtn = _g('ctrl-sunroof-vent');
-    if (srEl) {
-      if (state.sunroof === 'off') {
-        srEl.textContent = 'Fechado';
-        if (ventBtn) ventBtn.classList.remove('on');
+    const sky = parseInt(state.skylight_level, 10);
+    if (srEl && _g('sld-sunroof') !== document.activeElement) {
+      if (Number.isFinite(sky)) {
+        if (sky === 200) { srEl.textContent = 'Ventilação'; if (ventBtn) ventBtn.classList.add('on'); }
+        else if (sky <= 0) { srEl.textContent = 'Fechado'; if (ventBtn) ventBtn.classList.remove('on'); _slider('sld-sunroof', 10); }
+        else { srEl.textContent = sky + '%'; if (ventBtn) ventBtn.classList.remove('on'); _slider('sld-sunroof', Math.max(10, Math.min(100, sky))); }
+      } else if (state.sunroof === 'off') {
+        srEl.textContent = 'Fechado'; if (ventBtn) ventBtn.classList.remove('on');
       } else if (state.sunroof === 'on' && !(ventBtn && ventBtn.classList.contains('on'))) {
         srEl.textContent = 'Aberto';
       }

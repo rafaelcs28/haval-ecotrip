@@ -1147,6 +1147,7 @@ const state = {
   light_state:      null,   // null | 'on' | 'off' — farol (sem sensor por ora)
   ac_state:         null,   // null | 'on' | 'off'
   shade_level:      null,   // null | '0'..'100' — cortina do teto (0=fechada, 100=aberta)
+  skylight_level:   null,   // null | '0'=fechado | '200'=ventilação | '1'..'100'=% aberto (teto solar)
   seat_vent_drv:    null,   // null | '0'=desligado | '1'=fraco | '2'=médio | '3'=forte
   seat_vent_pass:   null,   // idem motorista
   hvac_driver_temp:    null, // null | float (°C) — temperatura definida (motorista)
@@ -9079,6 +9080,7 @@ function applyMqttMessage(key, value, isRetained = false) {
     case 'seat_vent_drv':  state.seat_vent_drv  = value; break; // '0'..'3'
     case 'seat_vent_pass': state.seat_vent_pass = value; break; // '0'..'3'
     case 'shade_level':    state.shade_level    = value; break; // '0'..'100' — cortina do teto (leitura ativa do APK)
+    case 'skylight_level': state.skylight_level = value; break; // '0'=fechado·'200'=vent·'1'..'100'=% (teto solar)
     case 'hvac_driver_temp':    state.hvac_driver_temp    = value; break; // float °C
     case 'hvac_passenger_temp': state.hvac_passenger_temp = value; break; // float °C (pendente)
     case 'hvac_fan_speed': {

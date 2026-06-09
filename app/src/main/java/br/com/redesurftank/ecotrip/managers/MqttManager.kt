@@ -1581,6 +1581,9 @@ class MqttManager private constructor() {
             // Publica a posição real (0=fechada · 100=aberta) p/ o iPad refletir, mesmo
             // quando movida fisicamente. getShadeScreensLevel já trata erro (retorna null).
             VehicleControlManager.getShadeScreensLevel()?.let { pubD("shade_level", it.toString()) }
+            // Teto solar: leitura ATIVA via AIDL (0=fechado · 200=ventilação · 1..100=% aberto).
+            // Reflete no iPad até a ventilação, que o sinal sunroof (on/off) não distingue.
+            VehicleControlManager.getSkylightLevel()?.let { pubD("skylight_level", it.toString()) }
             pubD("hvac_driver_temp",     fmt1(latestHvacDriverTemp))
             pubD("hvac_passenger_temp",  fmt1(latestHvacPassengerTemp))
             pubD("hvac_fan_speed",    latestHvacFanSpeed.toString())
