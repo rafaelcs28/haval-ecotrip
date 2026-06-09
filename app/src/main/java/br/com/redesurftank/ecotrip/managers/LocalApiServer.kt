@@ -250,6 +250,21 @@ class LocalApiServer(
 
     // ── Helpers ──────────────────────────────────────────────────────────────
 
+    // Cortina/teto: leitura ATIVA via AIDL é cara p/ chamar a 10Hz (heartbeat do WS).
+    // Throttle: relê no máximo 1x/s e serve o cache. Assim o WS reflete em ~1s na LAN
+    // (em vez dos ~2.5s do poll cloud), sem 20 chamadas de binder por segundo.
+    private var _shadeAtMs = 0L; private var _shadeVal = -1
+    private var _skyAtMs = 0L;   private var _skyVal = -1
+    private fun cachedShade(): Int? {
+        val now = System.currentTimeMillis()
+        if (now - _shadeAtMs > 1000L) { _shadeAtMs = now; VehicleControlManager.getShadeScreensLevel()?.let { _shadeVal = it } }
+        return if (_shadeVal >= 0) _shadeVal else null
+    }
+    private fun cachedSkylight(): Int? {
+        val now = System.currentTimeMillis()
+        if (now - _skyAtMs > 1000L) { _skyAtMs = now; VehicleControlManager.getSkylightLevel()?.let { _skyVal = it } }
+        return if (_skyVal >= 0) _skyVal else null
+    }
     private fun buildStateJson(): String {
         val m = mqttManager
         // Escopo HÍBRIDO: APK serve só telemetria RAW fast (que muda rápido +
@@ -303,6 +318,9 @@ class LocalApiServer(
             "hvac_power_mode"   to m.latestHvacPowerMode,
             "seat_vent_drv"     to m.latestDriverSeatVent,
             "seat_vent_pass"    to m.latestPassengerSeatVent,
+            // Aberturas (leitura ativa, throttled 1s) — reflexo rápido em LAN
+            "shade_level"       to cachedShade(),     // cortina: 0..100
+            "skylight_level"    to cachedSkylight(),  // teto: 0=fechado·200=vent·1..100=%
             // ── Estados dos controles drive (confirmação visual rápida) ──
             // -1 = ainda não lido do carro → null pra não sobrescrever.
             "drive_mode"        to m.lastPublishedDriveMode.takeIf { it >= 0 },

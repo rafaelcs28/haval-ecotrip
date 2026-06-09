@@ -78,6 +78,8 @@ final class BridgePublisher: ObservableObject {
         "hvac_passenger_temp","hvac_sync_enable","hvac_auto_enable","hvac_cycle_mode",
         "hvac_blower_mode","seat_vent_drv","seat_vent_pass","hvac_acmax","hvac_anion",
         "hvac_aqs","hvac_heating","hvac_front_defrost","hvac_rear_defrost","hvac_auto_defrost",
+        // Cortina/teto: servidos pelo WS local (cache 1s); cloud não compete (evita piscar).
+        "shade_level","skylight_level",
     ]
 
     /// Repassa dados de CLOUD (MQTT/HTTP) pro cluster. Com LAN WS conectada,
