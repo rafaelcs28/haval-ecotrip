@@ -278,6 +278,7 @@ final class BridgePublisher: ObservableObject {
                 case .ready:
                     print("[lan ws] NWConnection ready — WS conectado")
                     self.receiveNwWs(conn)
+                    self.startLanWsHeartbeat(conn)
                 case .failed(let err):
                     print("[lan ws] NWConnection falhou: \(err) — HTTP poll local")
                     self.lanWsConnected = false
@@ -298,6 +299,26 @@ final class BridgePublisher: ObservableObject {
         lanWsConn?.cancel()
         lanWsConn = nil
         lanWsConnected = false
+    }
+
+    /// Ping WS a cada 8s — gera tráfego pra manter o socket vivo (evita NAT/idle
+    /// matar a conexão sem aviso) e detecta morte cedo. Sem isso, o WS "secava"
+    /// quando o iPad ficava parado e o 1º comando ia pro vácuo.
+    private func startLanWsHeartbeat(_ conn: NWConnection) {
+        lanWsHeartbeat?.invalidate()
+        lanWsHeartbeat = Timer.scheduledTimer(withTimeInterval: 8, repeats: true) { [weak self, weak conn] _ in
+            guard let conn = conn else { return }
+            let meta = NWProtocolWebSocket.Metadata(opcode: .ping)
+            let ctx = NWConnection.ContentContext(identifier: "ping", metadata: [meta])
+            conn.send(content: Data(), contentContext: ctx, isComplete: true, completion: .contentProcessed { err in
+                guard err != nil else { return }
+                Task { @MainActor in
+                    guard let self = self else { return }
+                    self.lanWsConnected = false
+                    if self.useLanWhenAvailable, let u = self.lanUrl { self.connectLanWs(to: u) }
+                }
+            })
+        }
     }
 
     private func receiveNwWs(_ conn: NWConnection) {
@@ -439,23 +460,32 @@ final class BridgePublisher: ObservableObject {
             // Extrai o comando do path: "/api/esp" → "esp", "/api/drive-mode" → "drive_mode"
             let cmd = path.replacingOccurrences(of: "/api/", with: "")
                 .replacingOccurrences(of: "-", with: "_")
-            if sendLanCommandWs(cmd: cmd, body: body) { return }
+            if sendLanCommandWs(cmd: cmd, body: body, fallbackPath: path) { return }
             print("[lan ws] envio de comando falhou — fallback Tailscale")
         }
         await postCommandCloud(path: path, body: body)
     }
 
     /// Envia comando pelo WS (frame texto JSON). APK processa em onMessage.
-    private func sendLanCommandWs(cmd: String, body: [String: Any]) -> Bool {
+    /// Se o send FALHAR (WS morto/zumbi após o iPad ficar parado), reenvia pelo
+    /// cloud e reconecta o WS — assim o comando NÃO se perde. Era o bug do
+    /// "1º toque não vai, só o 2º": o send ia pro socket morto sem fallback.
+    private func sendLanCommandWs(cmd: String, body: [String: Any], fallbackPath: String) -> Bool {
         guard let conn = lanWsConn, lanWsConnected else { return false }
         var payload = body
         payload["__cmd"] = cmd
         guard let data = try? JSONSerialization.data(withJSONObject: payload) else { return false }
         let meta = NWProtocolWebSocket.Metadata(opcode: .text)
         let ctx = NWConnection.ContentContext(identifier: "cmd", metadata: [meta])
-        conn.send(content: data, contentContext: ctx, isComplete: true, completion: .contentProcessed { err in
-            if let err = err { print("[lan ws] send cmd erro: \(err)") }
-            else { print("[lan ws] cmd '\(cmd)' enviado via WS") }
+        conn.send(content: data, contentContext: ctx, isComplete: true, completion: .contentProcessed { [weak self] err in
+            guard let err = err else { print("[lan ws] cmd '\(cmd)' enviado via WS"); return }
+            print("[lan ws] send cmd erro: \(err) — reenvia via cloud + reconecta WS")
+            Task { @MainActor in
+                guard let self = self else { return }
+                self.lanWsConnected = false
+                await self.postCommandCloud(path: fallbackPath, body: body)
+                if self.useLanWhenAvailable, let u = self.lanUrl { self.connectLanWs(to: u) }
+            }
         })
         return true
     }
