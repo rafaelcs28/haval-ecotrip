@@ -2965,10 +2965,17 @@ document.addEventListener('dblclick', e => e.preventDefault());
     const pmx = _g('acx-pm25'); if (pmx) { const v = parseInt(state.hvac_pm25, 10); pmx.textContent = Number.isFinite(v) ? v : '--'; }
     // Aberturas (vidros NÃO refletem, por opção — só reagem ao toque).
     // Teto: sunroof = 'on'/'off' (o carro só reporta aberto/fechado, sem %).
+    // Ao FECHAR (inclui trancar o carro, que recolhe o teto), desmarca o botão
+    // de Ventilação e mostra "Fechado" — senão ele ficava preso em "ligado".
     const srEl = _g('ctrl-sunroof');
-    if (srEl && _g('sld-sunroof') !== document.activeElement) {
-      if (state.sunroof === 'off') srEl.textContent = 'Fechado';
-      else if (state.sunroof === 'on') srEl.textContent = 'Aberto';
+    const ventBtn = _g('ctrl-sunroof-vent');
+    if (srEl) {
+      if (state.sunroof === 'off') {
+        srEl.textContent = 'Fechado';
+        if (ventBtn) ventBtn.classList.remove('on');
+      } else if (state.sunroof === 'on' && !(ventBtn && ventBtn.classList.contains('on'))) {
+        srEl.textContent = 'Aberto';
+      }
     }
     // Cortina: shade_level (0..100) — leitura ativa publicada pelo APK (reflete o carro).
     const shade = parseInt(state.shade_level, 10);
