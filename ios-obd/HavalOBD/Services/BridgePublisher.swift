@@ -54,6 +54,9 @@ final class BridgePublisher: ObservableObject {
     private var httpPollTimer: Timer?
     private var lanWsConn: NWConnection?
     private var lanWsHeartbeat: Timer?
+    /// Epoch (s) do último dado recebido pelo WS — usado pra saber se o socket
+    /// está realmente vivo antes de mandar um comando por ele (evita socket zumbi).
+    private var lanWsLastRecvAt: TimeInterval = 0
     private var lanHttpPollTimer: Timer?
     /// Callback chamado quando o bridge publica state extra (viagem em curso,
     /// preços, charging) via MQTT. Permite o cluster.html receber dados que
@@ -326,6 +329,7 @@ final class BridgePublisher: ObservableObject {
             guard let self = self else { return }
             if let data = data, !data.isEmpty {
                 Task { @MainActor in
+                    self.lanWsLastRecvAt = Date().timeIntervalSince1970   // WS vivo (recv recente)
                     if !self.lanWsConnected {
                         self.lanWsConnected = true
                         self.stopLanHttpPoll()
@@ -456,12 +460,21 @@ final class BridgePublisher: ObservableObject {
     // lanCapable=false força a via Tailscale/cloud (ex.: ações via Home Assistant
     // como travar/porta-malas, que o APK não atua pela LAN).
     func postCommand(path: String, body: [String: Any], lanCapable: Bool = true) async {
-        if lanCapable, useLanWhenAvailable, lanWsConnected, lanWsConn != nil {
+        // Só confia no WS se ele recebeu telemetria há pouco (<2s). Depois do iPad
+        // ficar parado o socket pode estar "zumbi" (ready mas morto): o send iria pro
+        // vácuo SEM erro (sem disparar fallback) e o comando se perdia — era o "1º
+        // toque não vai". Sem recv recente, manda direto pelo cloud e reconecta o WS.
+        let wsAlive = lanWsConnected && lanWsConn != nil
+            && (Date().timeIntervalSince1970 - lanWsLastRecvAt) < 2.0
+        if lanCapable, useLanWhenAvailable, wsAlive {
             // Extrai o comando do path: "/api/esp" → "esp", "/api/drive-mode" → "drive_mode"
             let cmd = path.replacingOccurrences(of: "/api/", with: "")
                 .replacingOccurrences(of: "-", with: "_")
             if sendLanCommandWs(cmd: cmd, body: body, fallbackPath: path) { return }
             print("[lan ws] envio de comando falhou — fallback Tailscale")
+        } else if useLanWhenAvailable, lanWsConnected, let u = lanUrl {
+            // marcado conectado mas sem dados há >2s → provavelmente morto: reconecta.
+            connectLanWs(to: u)
         }
         await postCommandCloud(path: path, body: body)
     }

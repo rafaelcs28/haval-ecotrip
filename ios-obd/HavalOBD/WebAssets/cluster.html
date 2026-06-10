@@ -1548,9 +1548,12 @@ window.applyNativeSnapshot = function(payload) {
     if (k === 'speed_kmh_gps') continue;                       // GPS nunca vira velocidade
     if (isLan) {
       _lanSeen[k] = nowMs;                                     // a LAN é a dona desta chave
-    } else if (lanFresh && (LAN_FAST_KEYS.has(k) || (_lanSeen[k] && (nowMs - _lanSeen[k]) < 5000))) {
-      continue;  // LAN fresca → nuvem NÃO sobrescreve o que a LAN fornece (sem piscar).
-                 // Só passam da nuvem os campos exclusivos dela (viagem, custo, autonomia, fuel).
+    } else if (lanFresh && (LAN_FAST_KEYS.has(k) || _lanSeen[k])) {
+      continue;  // LAN fresca → nuvem NÃO sobrescreve NADA que a LAN já forneceu nesta
+                 // sessão — mesmo que o WS pare de mandar a chave por uns segundos (era
+                 // o que fazia o controle "voltar sozinho" pro valor antigo da nuvem).
+                 // Failover total só quando a LAN cai (lanFresh=false). Cloud só preenche
+                 // o que a LAN nunca manda (viagem em curso, custo, autonomia HA, fuel_l).
     }
     state[k] = v;
   }
