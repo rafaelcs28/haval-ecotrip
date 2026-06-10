@@ -5,6 +5,14 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Mantém CPU acordada durante o serviço (impede o thread MQTT de hibernar). -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Permite pedir ao usuário pra dispensar otimização de bateria — único modo de
+         a conexão MQTT sobreviver Doze mode em dispositivo dedicado. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!-- Sobrepor outros apps: no Android 10+ é o que permite o serviço abrir o
+         Maps/Waze a partir do BACKGROUND (sem isso o launch é bloqueado silenciosamente). -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <!-- Pra abrir Maps/Waze via package em targetSdk alto (boa prática). -->
     <queries>

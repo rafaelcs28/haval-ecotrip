@@ -20,7 +20,12 @@ android {
     }
 
     buildTypes {
-        named("release") { isMinifyEnabled = false }
+        named("release") {
+            isMinifyEnabled = false
+            // App é sideload (download direto), não Play Store. Assina com a debug key
+            // pra a release instalar por cima do build debug já instalado sem desinstalar.
+            signingConfig = signingConfigs.getByName("debug")
+        }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
