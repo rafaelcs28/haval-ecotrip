@@ -1915,7 +1915,7 @@ window.openExternalNav = (app) => {
 //  Constantes Haval H6 PHEV34
 // ═══════════════════════════════════════════════════════════════════════════
 const PACK_KWH      = 34;
-const TANK_L        = 51;   // tanque útil — abastece só até a trava (não 55)
+const TANK_L        = 55;   // capacidade do tanque (litros = % do CAN × 55)
 const KM_PER_L_HEV  = 8;
 const KM_PER_KWH_EV = 5.3;
 
@@ -1942,7 +1942,7 @@ function render() {
   // do carro); cai pro sensor HA legado (range_ice_km) só se a do CAN não chegou.
   const fuelRemainCan = parseInt(state.fuel_remain_km, 10);
   const rangeIce = Number.isFinite(fuelRemainCan) ? fuelRemainCan : +state.range_ice_km;
-  // Litros: prefere o % real do CAN × tanque útil (51 L); cai pro fuel_l do cloud.
+  // Litros: prefere o % real do CAN × tanque (55 L); cai pro fuel_l do cloud.
   const fuelPctCan = parseInt(state.fuel_pct_can, 10);
   const fuelL    = Number.isFinite(fuelPctCan) ? (fuelPctCan / 100 * TANK_L) : +state.fuel_l;
   $('fuel-l').textContent = Number.isFinite(fuelL) ? fmt1(fuelL) : '—';
