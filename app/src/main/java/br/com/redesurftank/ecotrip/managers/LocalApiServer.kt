@@ -265,6 +265,15 @@ class LocalApiServer(
         if (now - _skyAtMs > 1000L) { _skyAtMs = now; VehicleControlManager.getSkylightLevel()?.let { _skyVal = it } }
         return if (_skyVal >= 0) _skyVal else null
     }
+    // Autonomia de combustível REAL do CAN (a do painel) — car.ev_info.fuel_mode_remain_odometer.
+    // Throttle 1s; substitui o sensor HA legado (range_ice_km) que reportava tanque cheio.
+    private var _fuelRemAtMs = 0L; private var _fuelRemVal = -1
+    private fun cachedFuelRemain(): Int? {
+        val now = System.currentTimeMillis()
+        if (now - _fuelRemAtMs > 1000L) { _fuelRemAtMs = now
+            CarDataManager.getInstance().fetchCurrent("car.ev_info.fuel_mode_remain_odometer")?.trim()?.toFloatOrNull()?.let { _fuelRemVal = it.toInt() } }
+        return if (_fuelRemVal >= 0) _fuelRemVal else null
+    }
     private fun buildStateJson(): String {
         val m = mqttManager
         // Escopo HÍBRIDO: APK serve só telemetria RAW fast (que muda rápido +
@@ -321,6 +330,7 @@ class LocalApiServer(
             // Aberturas (leitura ativa, throttled 1s) — reflexo rápido em LAN
             "shade_level"       to cachedShade(),     // cortina: 0..100
             "skylight_level"    to cachedSkylight(),  // teto: 0=fechado·200=vent·1..100=%
+            "fuel_remain_km"    to cachedFuelRemain(),// autonomia ICE real do CAN (painel)
             // ── Estados dos controles drive (confirmação visual rápida) ──
             // -1 = ainda não lido do carro → null pra não sobrescrever.
             "drive_mode"        to m.lastPublishedDriveMode.takeIf { it >= 0 },

@@ -1935,8 +1935,10 @@ function render() {
   $('soc-range').textContent = Number.isFinite(rangeEv) ? fmt0(rangeEv) + ' km'
     : fmt0(kwhLeft * KM_PER_KWH_EV) + ' km';
 
-  // Fuel — usa fuel_l + range_ice_km DIRETOS do servidor. Sem deriva.
-  const rangeIce = +state.range_ice_km;
+  // Fuel — autonomia ICE: prefere a leitura REAL do CAN (fuel_remain_km, = painel
+  // do carro); cai pro sensor HA legado (range_ice_km) só se a do CAN não chegou.
+  const fuelRemainCan = parseInt(state.fuel_remain_km, 10);
+  const rangeIce = Number.isFinite(fuelRemainCan) ? fuelRemainCan : +state.range_ice_km;
   const fuelL    = +state.fuel_l;
   $('fuel-l').textContent = Number.isFinite(fuelL) ? fmt1(fuelL) : '—';
   if (Number.isFinite(fuelL)) {

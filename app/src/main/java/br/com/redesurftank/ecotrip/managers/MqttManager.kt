@@ -1584,6 +1584,9 @@ class MqttManager private constructor() {
             // Teto solar: leitura ATIVA via AIDL (0=fechado · 200=ventilação · 1..100=% aberto).
             // Reflete no iPad até a ventilação, que o sinal sunroof (on/off) não distingue.
             VehicleControlManager.getSkylightLevel()?.let { pubD("skylight_level", it.toString()) }
+            // Autonomia de combustível REAL do CAN (a do painel) — substitui o sensor HA
+            // legado (range_ice_km), que reportava a autonomia de tanque cheio (~476 km).
+            CarDataManager.getInstance().fetchCurrent("car.ev_info.fuel_mode_remain_odometer")?.trim()?.toFloatOrNull()?.let { pubD("fuel_remain_km", it.toInt().toString()) }
             pubD("hvac_driver_temp",     fmt1(latestHvacDriverTemp))
             pubD("hvac_passenger_temp",  fmt1(latestHvacPassengerTemp))
             pubD("hvac_fan_speed",    latestHvacFanSpeed.toString())
