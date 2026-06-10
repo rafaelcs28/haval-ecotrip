@@ -46,7 +46,7 @@ struct NativeDashView: View {
 
     // Aberturas separadas (chave 'on' = aberto)
     private func openList(_ map: [(String, String)]) -> [String] { map.filter { store.str($0.0) == "on" }.map { $0.1 } }
-    private var doorsMap: [(String, String)] { [("door_fl","Diant. esq."),("door_fr","Diant. dir."),("door_rl","Tras. esq."),("door_rr","Tras. dir."),("door_trunk","Porta-malas")] }
+    private var doorsMap: [(String, String)] { [("door_fl","Porta diant. esq."),("door_fr","Porta diant. dir."),("door_rl","Porta tras. esq."),("door_rr","Porta tras. dir."),("door_trunk","Porta-malas")] }
     private var windowsMap: [(String, String)] { [("window_fl","Vidro diant. esq."),("window_fr","Vidro diant. dir."),("window_rl","Vidro tras. esq."),("window_rr","Vidro tras. dir."),("sunroof","Teto solar")] }
 
     var body: some View {
@@ -59,7 +59,6 @@ struct NativeDashView: View {
                 openingsCard
                 locationCard
                 revisaoCard
-                arrivalCard
                 tripCard
             }
             .padding(16)
@@ -339,44 +338,24 @@ struct NativeDashView: View {
         }
     }
 
-    // MARK: mini-mapa da localização — escuro, segue o carro com zoom por velocidade,
-    // permite mexer (pan/zoom) e reenquadra sozinho após 10s parado.
-    @ViewBuilder private var locationCard: some View {
-        if store.hasGps {
-            DSCard {
-                VStack(alignment: .leading, spacing: 8) {
-                    DarkFollowMap(lat: store.lat, lng: store.lng, heading: store.heading, speedKmh: store.speedKmh)
-                        .frame(height: 170)
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    if !store.address.isEmpty {
-                        HStack(spacing: 6) {
-                            Image(systemName: "location.fill").font(.caption2).foregroundStyle(DS.green)
-                            Text(store.address).font(.caption).foregroundStyle(DS.muted).lineLimit(1)
-                        }
+    // MARK: localização + ações (mapa agora vive só na aba Drive). Destino, estacionamento,
+    // autonomia e compartilhar status em botões grandes.
+    private var locationCard: some View {
+        DSCard {
+            VStack(alignment: .leading, spacing: 10) {
+                if !store.address.isEmpty {
+                    HStack(spacing: 6) {
+                        Image(systemName: "location.fill").font(.caption2).foregroundStyle(DS.green)
+                        Text(store.address).font(.caption).foregroundStyle(DS.muted).lineLimit(2)
                     }
-                    HStack(spacing: 14) {
-                        Button { showParking = true } label: {
-                            HStack(spacing: 6) {
-                                Image(systemName: "parkingsign.circle.fill").font(.caption).foregroundStyle(DS.teal)
-                                Text("Onde estacionei").font(.caption).foregroundStyle(DS.teal)
-                            }
-                        }
-                        Button { showRange = true } label: {
-                            HStack(spacing: 6) {
-                                Image(systemName: "map.circle.fill").font(.caption).foregroundStyle(DS.green)
-                                Text("Até onde chego").font(.caption).foregroundStyle(DS.green)
-                            }
-                        }
-                        Spacer()
-                    }
-                    Button { showShare = true } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: "square.and.arrow.up.circle.fill").font(.caption).foregroundStyle(DS.blue)
-                            Text("Compartilhar status").font(.caption).foregroundStyle(DS.blue)
-                            Spacer()
-                            Image(systemName: "chevron.right").font(.caption2).foregroundStyle(DS.muted)
-                        }
-                    }
+                }
+                HStack(spacing: 10) {
+                    DSActionButton(icon: "location.north.fill", title: "Destino", color: DS.teal) { showArrival = true }
+                    DSActionButton(icon: "parkingsign", title: "Estacionei", color: DS.green) { showParking = true }
+                }
+                HStack(spacing: 10) {
+                    DSActionButton(icon: "map.fill", title: "Até onde chego", color: DS.orange) { showRange = true }
+                    DSActionButton(icon: "square.and.arrow.up", title: "Compartilhar", color: DS.blue) { showShare = true }
                 }
             }
         }
@@ -463,23 +442,6 @@ struct NativeDashView: View {
         if let km = m.remaining_km { return km <= 0 ? "vencida" : "faltam \(miles(km)) km" }
         if let d = m.remaining_days { return d <= 0 ? "vencida" : "faltam \(f0(d)) dias" }
         return ""
-    }
-
-    // MARK: SOC na chegada
-    private var arrivalCard: some View {
-        DSCard {
-            Button { showArrival = true } label: {
-                HStack(spacing: 12) {
-                    Image(systemName: "location.fill.viewfinder").font(.title3).foregroundStyle(DS.teal)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("SOC na chegada").font(.subheadline.weight(.semibold)).foregroundStyle(DS.text)
-                        Text("Prever bateria + ETA até um destino").font(.caption).foregroundStyle(DS.muted)
-                    }
-                    Spacer()
-                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(DS.muted)
-                }
-            }
-        }
     }
 
     // MARK: viagem em andamento (ou última)

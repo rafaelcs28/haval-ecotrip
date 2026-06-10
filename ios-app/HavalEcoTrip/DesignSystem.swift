@@ -182,6 +182,7 @@ struct CollapsibleCard<Content: View>: View {
                         }
                         Image(systemName: open ? "chevron.up" : "chevron.down").font(.caption2).foregroundStyle(DS.muted)
                     }
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 if open { content() }

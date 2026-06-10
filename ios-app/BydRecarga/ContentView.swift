@@ -1597,7 +1597,7 @@ let NOTIF_GROUPS: [NotifGroup] = [
     NotifGroup(title: "Movimento e locais", icon: "location.fill", items: [
         NotifItem(key: "byd_moving",              title: "Começou a andar",      sub: ""),
         NotifItem(key: "byd_parked",              title: "Estacionou",           sub: "Carro desligou"),
-        NotifItem(key: "byd_geofence_arrival",    title: "Chegou em um local",   sub: "Locais configurados"),
+        NotifItem(key: "byd_geofence_arrival",    title: "Chegou em um local",   sub: "Quando o carro é desligado dentro de um local configurado"),
         NotifItem(key: "byd_geofence_departure",  title: "Saiu de um local",     sub: ""),
     ]),
     NotifGroup(title: "Manutenção", icon: "wrench.and.screwdriver.fill", items: [

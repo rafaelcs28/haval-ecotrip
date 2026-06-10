@@ -9,6 +9,7 @@ final class ShareStatusStore: ObservableObject {
     @Published var url: String?
     @Published var token: String?
     @Published var expiresMs: Double = 0
+    @Published var destName: String?
     @Published var loading = false
     @Published var error: String?
 
@@ -32,6 +33,7 @@ final class ShareStatusStore: ObservableObject {
             self.url = url
             self.token = j["token"] as? String
             self.expiresMs = (j["expiresMs"] as? Double) ?? 0
+            self.destName = (j["destName"] as? String).flatMap { $0.isEmpty ? nil : $0 }
         } catch { self.error = "Erro de rede: \(error.localizedDescription)" }
     }
 
@@ -42,7 +44,7 @@ final class ShareStatusStore: ObservableObject {
         r.addValue("Bearer " + Settings.bridgeToken, forHTTPHeaderField: "Authorization")
         r.httpBody = try? JSONSerialization.data(withJSONObject: ["token": t])
         _ = try? await URLSession.shared.data(for: r)
-        url = nil; token = nil; expiresMs = 0
+        url = nil; token = nil; expiresMs = 0; destName = nil
     }
 }
 
@@ -79,7 +81,7 @@ struct ShareStatusSheet: View {
                         }
                     }
 
-                    if let url = store.url, let u = URL(string: url) {
+                    if let url = store.url, URL(string: url) != nil {
                         DSCard {
                             VStack(alignment: .leading, spacing: 12) {
                                 HStack(spacing: 6) {
@@ -87,7 +89,11 @@ struct ShareStatusSheet: View {
                                     Text(url).font(.footnote).foregroundStyle(DS.text).lineLimit(1).truncationMode(.middle)
                                 }
                                 Text(expiryText).font(.caption).foregroundStyle(DS.muted)
-                                ShareLink(item: u) {
+                                // Compartilha como TEXTO (não só URL): o destinatário recebe
+                                // "Acompanhe meu trajeto[ para <destino>]. <link>" — apps tipo
+                                // WhatsApp/Messages auto-linkificam a URL no fim da frase.
+                                ShareLink(item: shareText(url: url),
+                                          subject: Text("Trajeto Haval")) {
                                     Label("Compartilhar link", systemImage: "square.and.arrow.up")
                                         .font(.subheadline.weight(.semibold)).frame(maxWidth: .infinity).padding(.vertical, 12)
                                         .background(DS.teal.opacity(0.22)).foregroundStyle(DS.teal)
@@ -123,5 +129,12 @@ struct ShareStatusSheet: View {
         guard store.expiresMs > 0 else { return "" }
         let f = RelativeDateTimeFormatter(); f.locale = Locale(identifier: "pt_BR"); f.unitsStyle = .full
         return "Expira " + f.localizedString(for: Date(timeIntervalSince1970: store.expiresMs / 1000), relativeTo: Date())
+    }
+
+    private func shareText(url: String) -> String {
+        if let n = store.destName?.trimmingCharacters(in: .whitespacesAndNewlines), !n.isEmpty {
+            return "Acompanhe meu trajeto para \(n). \(url)"
+        }
+        return "Acompanhe meu trajeto. \(url)"
     }
 }

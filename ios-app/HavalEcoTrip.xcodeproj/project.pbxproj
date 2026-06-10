@@ -46,7 +46,6 @@
 		6B3EDE545B2502D265805216 /* OfflineSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2EBD85F9B7D028E3D520ED77 /* OfflineSync.swift */; };
 		6C1FE4315EFC5408CBF98788 /* NotificationsCenterSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7817E2396F9C3176DF2954E /* NotificationsCenterSheet.swift */; };
 		6D2D2B81A43BB7E8D26EE81F /* SongProActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF8BF0D6E8837DEC20056AB8 /* SongProActivityAttributes.swift */; };
-		760F8ABBB01553323004BF3C /* DarkFollowMap.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CF629ECD438E47BA16E26B6 /* DarkFollowMap.swift */; };
 		77472ED6F598E53605506B96 /* ChargeActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = C110A5E3EADD0B1D4DA52BE6 /* ChargeActivityAttributes.swift */; };
 		77EF0F880D1B98744B21C2C5 /* CarIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD754B29F48E190AD2D8648F /* CarIntents.swift */; };
 		783721D1E37916F23F2149D8 /* BydSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = E810689502D9D028774D6792 /* BydSettings.swift */; };
@@ -81,6 +80,7 @@
 		BD7C6AB06DD0FA3DFCB15EBD /* BydRecargaWidgetBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD1B9E17C1177A48B806D3B9 /* BydRecargaWidgetBundle.swift */; };
 		C25004AC6E9825F287951DC4 /* MotorLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A0F1250A4346D17F0539FE8 /* MotorLiveActivity.swift */; };
 		C2CBD6E85350C31D1C529BE8 /* RouteCompareSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1F322C191BA5762BDB4C8C4 /* RouteCompareSheet.swift */; };
+		C41F6D9BF236FAA2E0C9F8FE /* DriveScoreDetailSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A08F555DFDD330D4992422B5 /* DriveScoreDetailSheet.swift */; };
 		C53454204CA59200E9360FF8 /* SongProTripLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4982EFADD98ECBA5A75504CD /* SongProTripLiveActivity.swift */; };
 		CFA18AF48CB7CF8DF7C40EC3 /* BatteryWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6B65FA59825E09151BBC7C3 /* BatteryWidget.swift */; };
 		D6B7CC3FAD98C1CC134911FE /* AuthManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBC80D42C32C99C47E1B7222 /* AuthManager.swift */; };
@@ -182,7 +182,6 @@
 		638ACE606ED94D317501DB0E /* NativeViagensView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeViagensView.swift; sourceTree = "<group>"; };
 		6AB3E13D26098FB169B559E2 /* HavalEcoTrip.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = HavalEcoTrip.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		6B0EC768E77CEDD141861D39 /* TripLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripLiveActivity.swift; sourceTree = "<group>"; };
-		6CF629ECD438E47BA16E26B6 /* DarkFollowMap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DarkFollowMap.swift; sourceTree = "<group>"; };
 		6F5328FAA367AE3DF93613BE /* HavalEcoTripWidgetBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HavalEcoTripWidgetBundle.swift; sourceTree = "<group>"; };
 		7376EEA5C86B0C60FE3CE4E3 /* DesignSystem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignSystem.swift; sourceTree = "<group>"; };
 		7BA445855D7E9BCBC513DE19 /* HavalEcoTrip.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = HavalEcoTrip.entitlements; sourceTree = "<group>"; };
@@ -197,6 +196,7 @@
 		940E4AE86B859186BAE647F3 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		968AA8DFD87E74A832ED71A5 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		98AAF0B9FB74534380E99D24 /* ParkingSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParkingSheet.swift; sourceTree = "<group>"; };
+		A08F555DFDD330D4992422B5 /* DriveScoreDetailSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DriveScoreDetailSheet.swift; sourceTree = "<group>"; };
 		A53601AA6DAB2F8858F60A3D /* BydRecarga-prod.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "BydRecarga-prod.entitlements"; sourceTree = "<group>"; };
 		A799F69A43F78E263048C8F4 /* AuthConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthConfig.swift; sourceTree = "<group>"; };
 		AD7173E45A0E0AAFE9AD301F /* ConfigStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigStore.swift; sourceTree = "<group>"; };
@@ -266,8 +266,8 @@
 				AD7173E45A0E0AAFE9AD301F /* ConfigStore.swift */,
 				36AA01E4F54D0727EF341F49 /* ContentView.swift */,
 				D7A442E88C358C98CE318DF9 /* ControlSheets.swift */,
-				6CF629ECD438E47BA16E26B6 /* DarkFollowMap.swift */,
 				7376EEA5C86B0C60FE3CE4E3 /* DesignSystem.swift */,
+				A08F555DFDD330D4992422B5 /* DriveScoreDetailSheet.swift */,
 				F5B823C235ED2AB25740FEEA /* EcoScoreSheet.swift */,
 				E2D72D050A09B86061C6E0C4 /* EventsTimelineSheet.swift */,
 				26B936D2B31C5DE61815546A /* HavalEcoTrip-dev.entitlements */,
@@ -626,8 +626,8 @@
 				42169A88F8E36FD03EA47301 /* ConfigStore.swift in Sources */,
 				87640D1FE3604A94892D6723 /* ContentView.swift in Sources */,
 				07FC719000D999AB80CF8C4C /* ControlSheets.swift in Sources */,
-				760F8ABBB01553323004BF3C /* DarkFollowMap.swift in Sources */,
 				3ED1321FB7B61D7ADDAA032F /* DesignSystem.swift in Sources */,
+				C41F6D9BF236FAA2E0C9F8FE /* DriveScoreDetailSheet.swift in Sources */,
 				AB54B999C13215025CD95776 /* EcoScoreSheet.swift in Sources */,
 				FDC069910888466ECD2333EB /* EventsTimelineSheet.swift in Sources */,
 				AACDCF32BF0A0A36A4A2F84F /* HavalEcoTripApp.swift in Sources */,

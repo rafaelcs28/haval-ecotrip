@@ -8,13 +8,19 @@ enum Eco {
     static let goal = 70
 
     /// Nota 0–100 de CONDUÇÃO: usa o score do bridge (economia + suavidade:
-    /// frenagem/aceleração brusca) quando disponível; senão cai na economia pura.
+    /// frenagem/aceleração brusca) quando disponível. Quando não, aplica a MESMA
+    /// fórmula localmente (0,55·econ + 0,45·suavidade) — assumindo suavidade=100
+    /// se a viagem ainda não tem telemetria de eventos bruscos gravada. Isso
+    /// evita que viagens antigas com consumo alto (AC parado) virem nota 0.
     static func score(_ t: Trip) -> Int? {
         if let ds = t.driveScore { return ds }
         guard t.distKm >= 1 else { return nil }
         let eq = (t.netKwh + t.fuelL * 8.9) / t.distKm * 100
-        let s = 100.0 - (eq - 13.0) * (70.0 / 13.0)
-        return Int(min(100, max(0, s)).rounded())
+        let econ = max(0, min(100, 100 - (eq - 13.0) * (70.0 / 13.0)))
+        let events = t.harshAcc + t.harshBrake
+        let perKm = t.distKm > 0.5 ? Double(events) / t.distKm : 0
+        let smooth = max(0, min(100, 100 - perKm * 18))
+        return Int((0.55 * econ + 0.45 * smooth).rounded())
     }
     static func avg(_ trips: [Trip]) -> Int? {
         let s = trips.compactMap { score($0) }
@@ -26,6 +32,7 @@ enum Eco {
 struct EcoScoreSheet: View {
     let trips: [Trip]
     @Environment(\.dismiss) private var dismiss
+    @State private var detailTrip: Trip?
 
     private var now: Date { Date() }
     private var thisWeek: [Trip] { trips.filter { $0.date > now.addingTimeInterval(-7 * 86400) } }
@@ -49,6 +56,7 @@ struct EcoScoreSheet: View {
             .navigationTitle("Condução")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Fechar") { dismiss() } } }
+            .sheet(item: $detailTrip) { t in DriveScoreDetailSheet(trip: t) }
         }
     }
 
@@ -126,20 +134,23 @@ struct EcoScoreSheet: View {
             VStack(spacing: 0) {
                 ForEach(rated.prefix(20)) { t in
                     let s = Eco.score(t) ?? 0
-                    HStack(spacing: 10) {
-                        Text("\(s)").font(.system(size: 17, weight: .bold, design: .rounded))
-                            .foregroundStyle(Eco.color(s)).frame(width: 38, alignment: .leading)
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(name(t)).font(.subheadline).foregroundStyle(DS.text).lineLimit(1)
-                            HStack(spacing: 6) {
-                                Text("\(Fmt.km(t.distKm)) km · \(Fmt.dec1(t.netKwh)) kWh").font(.caption2).foregroundStyle(DS.muted)
-                                if t.driveScore != nil && (t.harshAcc + t.harshBrake) > 0 {
-                                    Text("· ⚡\(t.harshAcc) 🛑\(t.harshBrake)").font(.caption2).foregroundStyle(DS.orange)
+                    Button { detailTrip = t } label: {
+                        HStack(spacing: 10) {
+                            Text("\(s)").font(.system(size: 17, weight: .bold, design: .rounded))
+                                .foregroundStyle(Eco.color(s)).frame(width: 38, alignment: .leading)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(name(t)).font(.subheadline).foregroundStyle(DS.text).lineLimit(1)
+                                HStack(spacing: 6) {
+                                    Text("\(Fmt.km(t.distKm)) km · \(Fmt.dec1(t.netKwh)) kWh").font(.caption2).foregroundStyle(DS.muted)
+                                    if t.driveScore != nil && (t.harshAcc + t.harshBrake) > 0 {
+                                        Text("· ⚡\(t.harshAcc) 🛑\(t.harshBrake)").font(.caption2).foregroundStyle(DS.orange)
+                                    }
                                 }
                             }
-                        }
-                        Spacer()
-                    }.padding(.vertical, 8)
+                            Spacer()
+                            Image(systemName: "chevron.right").font(.caption).foregroundStyle(DS.muted)
+                        }.padding(.vertical, 8).contentShape(Rectangle())
+                    }.buttonStyle(.plain)
                     if t.id != rated.prefix(20).last?.id { Divider().background(DS.border) }
                 }
             }

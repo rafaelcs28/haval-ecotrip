@@ -151,17 +151,42 @@ final class ArrivalStore: ObservableObject {
     }
 
     @Published var sentMsg: String?
+    // NavRelays Android registrados no bridge — populado por loadNavDevices(). Cada
+    // APK instalado/configurado aparece com seu nome (campo "Nome do dispositivo").
+    @Published var navDevices: [NavDevice] = []
+
+    func loadNavDevices() async {
+        guard !base.isEmpty, let url = URL(string: "\(base)/api/nav-devices") else { return }
+        var r = URLRequest(url: url); r.timeoutInterval = 8
+        r.addValue("Bearer " + Settings.bridgeToken, forHTTPHeaderField: "Authorization")
+        guard let (data, resp) = try? await URLSession.shared.data(for: r),
+              (resp as? HTTPURLResponse)?.statusCode == 200,
+              let j = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let arr = j["devices"] as? [[String: Any]] else { return }
+        navDevices = arr.compactMap { d in
+            guard let id = d["id"] as? String else { return nil }
+            return NavDevice(id: id,
+                             name: (d["name"] as? String) ?? id,
+                             role: (d["role"] as? String) ?? "car",
+                             alwaysOn: (d["alwaysOn"] as? Bool) ?? false)
+        }.sorted { $0.name < $1.name }
+    }
+
     // Manda o destino. app vazio = só painel do carro; "maps"/"waze" = abre a navegação
-    // no Nav Relay. target "phone" mira o celular pessoal (não o carro), "" = carro.
-    func sendToCar(_ p: ArrivalPlan, app: String = "", target: String = "") async {
+    // no Nav Relay. device (id) tem prioridade sobre target (legado "car"/"phone").
+    func sendToCar(_ p: ArrivalPlan, app: String = "", target: String = "", device: String = "", deviceLabel: String = "") async {
         guard !base.isEmpty, let url = URL(string: "\(base)/api/nav-to") else { return }
         var r = URLRequest(url: url); r.httpMethod = "POST"; r.timeoutInterval = 10
         r.addValue("application/json", forHTTPHeaderField: "Content-Type")
         r.addValue("Bearer " + Settings.bridgeToken, forHTTPHeaderField: "Authorization")
-        r.httpBody = try? JSONSerialization.data(withJSONObject: ["lat": p.destLat, "lng": p.destLng, "name": p.destName, "app": app, "target": target])
+        var body: [String: Any] = ["lat": p.destLat, "lng": p.destLng, "name": p.destName, "app": app]
+        if !device.isEmpty { body["device"] = device }
+        if !target.isEmpty { body["target"] = target }
+        r.httpBody = try? JSONSerialization.data(withJSONObject: body)
         if let (_, resp) = try? await URLSession.shared.data(for: r),
            (resp as? HTTPURLResponse)?.statusCode == 200 {
-            let onde = target == "phone" ? "No celular" : "No carro"
+            let onde = !deviceLabel.isEmpty ? deviceLabel
+                     : target == "phone" ? "No celular" : "No carro"
             sentMsg = app == "waze" ? "\(onde) · abrindo Waze ✓"
                     : app == "maps" ? "\(onde) · abrindo Maps ✓"
                     : "Enviado pro carro ✓"
@@ -169,6 +194,13 @@ final class ArrivalStore: ObservableObject {
             sentMsg = "Falha ao enviar"
         }
     }
+}
+
+struct NavDevice: Identifiable, Equatable {
+    let id: String
+    let name: String
+    let role: String         // "car" | "phone" — só pra UI distinguir ícone
+    let alwaysOn: Bool       // sinaliza dispositivo dedicado (sempre online)
 }
 
 func arrivalSocColor(_ soc: Int) -> Color {
@@ -568,15 +600,36 @@ struct ArrivalSheet: View {
                 let a = navApp; navApp = nil
                 openLocal(p, app: a == "waze" ? "waze" : "apple")
             }
-            Button("Celular Android") {
-                let a = navApp; navApp = nil
-                Task { await store.sendToCar(p, app: a == "waze" ? "waze" : "maps", target: "phone") }
+            // Lista dinâmica de NavRelays registrados (cada APK aparece pelo nome).
+            ForEach(store.navDevices) { d in
+                Button("\(d.role == "phone" ? "📱" : "🚗") \(d.name)") {
+                    let a = navApp; navApp = nil
+                    Task { await store.sendToCar(p, app: a == "waze" ? "waze" : "maps",
+                                                 device: d.id, deviceLabel: d.name) }
+                }
             }
-            Button("No carro") {
-                let a = navApp; navApp = nil
-                Task { await store.sendToCar(p, app: a == "waze" ? "waze" : "maps", target: "car") }
+            // Fallback legado (caso nenhum NavRelay registrado ainda): manda pra todos
+            // do tipo. Some quando o bridge novo já tem pelo menos um device listado.
+            if store.navDevices.isEmpty {
+                Button("Celular Android") {
+                    let a = navApp; navApp = nil
+                    Task { await store.sendToCar(p, app: a == "waze" ? "waze" : "maps", target: "phone") }
+                }
+                Button("No carro") {
+                    let a = navApp; navApp = nil
+                    Task { await store.sendToCar(p, app: a == "waze" ? "waze" : "maps", target: "car") }
+                }
             }
             Button("Cancelar", role: .cancel) { navApp = nil }
+        }
+        // Recarrega periodicamente: se o NavRelay (Android) só registrar depois da tela
+        // abrir (estava offline/reconectando), a lista se atualiza sozinha em vez de
+        // ficar travada no fallback "Android/iPhone".
+        .task {
+            while !Task.isCancelled {
+                await store.loadNavDevices()
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+            }
         }
     }
 }

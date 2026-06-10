@@ -213,7 +213,7 @@ struct NativeViagensView: View {
                         }.font(.system(size: 14)).foregroundStyle(DS.text).tint(DS.green).environment(\.locale, Locale(identifier: "pt_BR"))
                     }
                 }
-                if tab == 0 { searchBar; historico } else { insightsButton; ecoButton; reportButton; routesButton; milestonesButton; tempButton; estatisticas }
+                if tab == 0 { searchBar; historico } else { estatisticas; statsGrid }
             }
             .padding(16)
         }
@@ -236,103 +236,59 @@ struct NativeViagensView: View {
         .sheet(isPresented: $showTemp) { TempConsumptionSheet(trips: loader.trips) }
     }
 
-    private var insightsButton: some View {
-        DSCard {
-            Button { showInsights = true } label: {
-                HStack(spacing: 12) {
-                    Image(systemName: "leaf.fill").font(.title3).foregroundStyle(DS.green)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Economia EV & CO₂").font(.subheadline.weight(.semibold)).foregroundStyle(DS.text)
-                        Text("Quanto você economizou vs. gasolina").font(.caption).foregroundStyle(DS.muted)
-                    }
-                    Spacer()
-                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(DS.muted)
-                }
+    private var statsGrid: some View {
+        let cols = [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)]
+        let ecoVal: Int? = Eco.avg(loader.trips.filter { $0.date > Date().addingTimeInterval(-7*86400) }) ?? Eco.avg(loader.trips)
+        return VStack(alignment: .leading, spacing: 10) {
+            sectionHeader("DESTE PERÍODO")
+            LazyVGrid(columns: cols, spacing: 10) {
+                gridTile(icon: "leaf.fill", title: "Economia", color: DS.green, value: economiaValue) { showInsights = true }
+                gridTile(icon: "gauge.with.dots.needle.67percent", title: "Score", color: DS.teal,
+                         value: ecoVal.map { "\($0)" }, valueColor: ecoVal.map { Eco.color($0) }) { showEco = true }
+            }
+            sectionHeader("EXPLORAR").padding(.top, 4)
+            LazyVGrid(columns: cols, spacing: 10) {
+                gridTile(icon: "doc.text.fill", title: "Relatório", color: DS.blue) { showReport = true }
+                gridTile(icon: "arrow.triangle.swap", title: "Trajetos", color: DS.orange) { showRoutes = true }
+                gridTile(icon: "trophy.fill", title: "Marcos", color: DS.yellow) { showMilestones = true }
+                gridTile(icon: "thermometer.medium", title: "Consumo × temp", color: DS.blue) { showTemp = true }
             }
         }
     }
 
-    private var tempButton: some View {
-        DSCard {
-            Button { showTemp = true } label: {
-                HStack(spacing: 12) {
-                    Image(systemName: "thermometer.medium").font(.title3).foregroundStyle(DS.blue)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Consumo × temperatura").font(.subheadline.weight(.semibold)).foregroundStyle(DS.text)
-                        Text("Quanto o frio/calor pesa no consumo").font(.caption).foregroundStyle(DS.muted)
-                    }
-                    Spacer()
-                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(DS.muted)
-                }
-            }
+    private var economiaValue: String? {
+        let f = filtered
+        guard !f.isEmpty else { return nil }
+        let baselineKmL = car.kmPerL > 1 ? car.kmPerL : 11
+        let gasL = car.priceGas > 0 ? car.priceGas : 6.0
+        let saved = f.reduce(0.0) { acc, t in
+            acc + max((t.distKm / baselineKmL) * gasL - (t.netKwh * car.priceKwh + t.fuelL * gasL), 0)
         }
+        return saved > 0 ? brl(saved) : nil
     }
 
-    private var milestonesButton: some View {
-        DSCard {
-            Button { showMilestones = true } label: {
-                HStack(spacing: 12) {
-                    Image(systemName: "trophy.fill").font(.title3).foregroundStyle(DS.yellow)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Marcos do carro").font(.subheadline.weight(.semibold)).foregroundStyle(DS.text)
-                        Text("Km, elétrico e viagens — conquistas").font(.caption).foregroundStyle(DS.muted)
-                    }
-                    Spacer()
-                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(DS.muted)
-                }
-            }
-        }
+    private func sectionHeader(_ s: String) -> some View {
+        Text(s).font(.system(size: 11, weight: .bold)).foregroundStyle(DS.muted).kerning(0.5)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private var routesButton: some View {
-        DSCard {
-            Button { showRoutes = true } label: {
-                HStack(spacing: 12) {
-                    Image(systemName: "arrow.triangle.swap").font(.title3).foregroundStyle(DS.orange)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Trajetos recorrentes").font(.subheadline.weight(.semibold)).foregroundStyle(DS.text)
-                        Text("Médias e tendência por origem→destino").font(.caption).foregroundStyle(DS.muted)
-                    }
+    private func gridTile(icon: String, title: String, color: Color, value: String? = nil,
+                          valueColor: Color? = nil, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Image(systemName: icon).font(.title3).foregroundStyle(color)
                     Spacer()
-                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(DS.muted)
+                    if let v = value { Text(v).font(.headline).foregroundStyle(valueColor ?? DS.text) }
                 }
+                Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(DS.text)
+                    .frame(maxWidth: .infinity, alignment: .leading).lineLimit(1).minimumScaleFactor(0.8)
             }
+            .padding(14).frame(maxWidth: .infinity, minHeight: 86, alignment: .topLeading)
+            .background(DS.panel).clipShape(RoundedRectangle(cornerRadius: 16))
+            .overlay(RoundedRectangle(cornerRadius: 16).stroke(DS.border, lineWidth: 1))
         }
-    }
-
-    private var reportButton: some View {
-        DSCard {
-            Button { showReport = true } label: {
-                HStack(spacing: 12) {
-                    Image(systemName: "doc.text.fill").font(.title3).foregroundStyle(DS.blue)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Relatório mensal").font(.subheadline.weight(.semibold)).foregroundStyle(DS.text)
-                        Text("Resumo do mês + exportar CSV").font(.caption).foregroundStyle(DS.muted)
-                    }
-                    Spacer()
-                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(DS.muted)
-                }
-            }
-        }
-    }
-
-    private var ecoButton: some View {
-        DSCard {
-            Button { showEco = true } label: {
-                HStack(spacing: 12) {
-                    Image(systemName: "gauge.with.dots.needle.67percent").font(.title3).foregroundStyle(DS.teal)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Score de condução").font(.subheadline.weight(.semibold)).foregroundStyle(DS.text)
-                        Text("Economia + suavidade · semana e recordes").font(.caption).foregroundStyle(DS.muted)
-                    }
-                    Spacer()
-                    if let a = Eco.avg(loader.trips.filter { $0.date > Date().addingTimeInterval(-7*86400) }) ?? Eco.avg(loader.trips) {
-                        Text("\(a)").font(.headline).foregroundStyle(Eco.color(a))
-                    }
-                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(DS.muted)
-                }
-            }
-        }
+        .buttonStyle(.plain)
     }
 
     private var periodChips: some View {
