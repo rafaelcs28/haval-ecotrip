@@ -30,7 +30,8 @@
   .cell { background:rgba(255,255,255,.05); border-radius:12px; padding:9px 6px; text-align:center; }
   .cell .v { font-size:20px; font-weight:700; font-variant-numeric:tabular-nums; }
   .cell .l { font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; margin-top:1px; }
-  .v.soc { color:var(--green); } .v.spd { color:var(--text); } .v.gear { color:var(--teal); }
+  .v.soc { color:var(--green); } .v.spd { color:var(--text); }
+  .badge.stale { background:rgba(251,146,60,.25); color:var(--orange); }
   .ask { color:var(--muted); font-size:13px; }
   .ask a { color:var(--teal); text-decoration:underline; cursor:pointer; }
   .expired { position:absolute; inset:0; z-index:900; display:none; align-items:center; justify-content:center;
@@ -49,8 +50,8 @@
   <div class="eta" id="eta-line"><span class="ask">Toque em <a onclick="askGeo()">permitir localização</a> para ver a distância até você.</span></div>
   <div class="grid">
     <div class="cell"><div class="v spd" id="v-spd">—</div><div class="l">km/h</div></div>
-    <div class="cell"><div class="v gear" id="v-gear">—</div><div class="l">marcha</div></div>
     <div class="cell"><div class="v soc" id="v-soc">—</div><div class="l">SOC %</div></div>
+    <div class="cell"><div class="v" id="v-fuel">—</div><div class="l">tanque L</div></div>
     <div class="cell"><div class="v" id="v-ev">—</div><div class="l">km EV</div></div>
     <div class="cell"><div class="v" id="v-km">—</div><div class="l">km viagem</div></div>
     <div class="cell"><div class="v" id="v-time">—</div><div class="l">tempo</div></div>
@@ -68,7 +69,7 @@ L.tileLayer('https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png', { max
 
 const carIcon = L.divIcon({ className:'car-ico', html:'<div style="width:36px;height:36px;border-radius:50%;background:#22d3ee;border:3px solid #fff;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px #000"><svg width="20" height="20" viewBox="0 0 24 24" fill="#0b0d10"><path d="M18.92 6.01C18.72 5.42 18.16 5 17.5 5h-11c-.66 0-1.21.42-1.42 1.01L3 12v8a1 1 0 0 0 1 1h1a1 1 0 0 0 1-1v-1h12v1a1 1 0 0 0 1 1h1a1 1 0 0 0 1-1v-8l-2.08-5.99zM6.5 16a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm11 0a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zM5 11l1.5-4.5h11L19 11H5z"/></svg></div>', iconSize:[36,36], iconAnchor:[18,18] });
 const meIcon  = L.divIcon({ className:'car-ico', html:'<div style="width:16px;height:16px;border-radius:50%;background:#38bdf8;border:3px solid #fff;box-shadow:0 0 8px #38bdf8"></div>', iconSize:[16,16], iconAnchor:[8,8] });
-let carMarker=null, meMarker=null, trail=null, trailPts=[], me=null, autoFollow=true;
+let carMarker=null, meMarker=null, me=null, autoFollow=true;
 map.on('dragstart', () => autoFollow=false);
 
 function fmtTime(s){ s=Math.max(0,Math.round(s)); const h=Math.floor(s/3600), m=Math.floor((s%3600)/60); return h>0?`${h}h${String(m).padStart(2,'0')}`:`${m}min`; }
@@ -86,10 +87,18 @@ async function poll(){
   } catch(_) { return; }
   _fail = 0; _everOK = true; hideExpired();
   const badge = document.getElementById('state-badge');
-  if (j.on){ badge.className='badge on'; badge.textContent = j.moving ? 'em movimento' : 'ligado'; }
+  // apkAgeMs = quanto tempo o BRIDGE está sem mensagem do APK. >15s = MQTT/4G hipiou
+  // e os números abaixo podem estar congelados — avisa o destinatário do link.
+  // (15s tolera o APK reduzir publicação com carro parado em farol/sinal.)
+  const stale = j.apkAgeMs != null && j.apkAgeMs > 15000;
+  if (stale){ badge.className='badge stale'; badge.textContent = `sem sinal há ${Math.round(j.apkAgeMs/1000)}s`; }
+  else if (j.on){ badge.className='badge on'; badge.textContent = j.moving ? 'em movimento' : 'ligado'; }
   else     { badge.className='badge off'; badge.textContent='desligado'; }
-  document.getElementById('v-spd').textContent  = j.on ? Math.round(j.speedKmh) : '—';
-  document.getElementById('v-gear').textContent = ['P','R','N','D'].includes((j.gear||'').toUpperCase()) ? j.gear.toUpperCase() : '—';
+  // Velocidade só vem do APK (não do HA cloud). Se a última msg dela tá velha,
+  // o número anterior fica congelado — melhor mostrar "—" do que enganar.
+  const speedStale = j.speedAgeMs != null && j.speedAgeMs > 10000;
+  document.getElementById('v-spd').textContent  = (j.on && !speedStale) ? Math.round(j.speedKmh) : '—';
+  document.getElementById('v-fuel').textContent = (j.fuelL != null && j.fuelL > 0) ? j.fuelL.toFixed(1).replace('.', ',') : '—';
   document.getElementById('v-soc').textContent  = j.soc || '—';
   document.getElementById('v-ev').textContent   = j.rangeEvKm || '—';
   document.getElementById('v-km').textContent   = (j.tripKm||0).toFixed(1).replace('.',',');
@@ -108,14 +117,6 @@ async function poll(){
     const ll = [j.lat, j.lng];
     if (!carMarker) carMarker = L.marker(ll, {icon:carIcon}).addTo(map);
     else carMarker.setLatLng(ll);
-    // Trilha do trajeto só acumula com o carro ligado/em movimento (desligado = congela).
-    if (j.on){
-      const last = trailPts[trailPts.length-1];
-      if (!last || (Math.abs(last[0]-j.lat)+Math.abs(last[1]-j.lng)) > 0.00005){
-        trailPts.push(ll);
-        if (trailPts.length>1){ if (!trail) trail=L.polyline(trailPts,{color:'#22d3ee',weight:4,opacity:.8}).addTo(map); else trail.setLatLngs(trailPts); }
-      }
-    }
     if (autoFollow) map.setView(ll, Math.max(map.getZoom(),14), {animate:true});
   }
 }
@@ -142,7 +143,7 @@ function askGeo(){
 }
 
 if (!TOKEN){ showExpired(); }
-else { poll(); setInterval(poll, 2000); setInterval(updateEta, 2000); }
+else { poll(); setInterval(poll, 1000); setInterval(updateEta, 2000); }
 </script>
 </body>
 </html>

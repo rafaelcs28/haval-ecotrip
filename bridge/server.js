@@ -206,6 +206,14 @@ function saveNotifHistory() {
  *   o comportamento da notification (usado pra "live update" durante recarga,
  *   onde queremos substituir a notif anterior em silêncio).
  */
+// Devices do app "Grasi Recarga" (BYD da Grasi) têm device_id com prefixo
+// `byd-` — esse app só deve receber notificações `byd_*` / `la_songpro*`,
+// disparadas pelos helpers _spNotify/_spNotifyLoc. Helpers do Haval (sendPush)
+// devem ignorá-los.
+function _isBydDevice(deviceId) {
+  return typeof deviceId === 'string' && deviceId.startsWith('byd-');
+}
+
 async function sendPush(title, body, type, opts = {}) {
 
   // Registra no histórico — exceto se for live update silencioso (poluiria o feed)
@@ -242,6 +250,8 @@ async function sendPush(title, body, type, opts = {}) {
   await Promise.all(pushSubs.map(async (sub, i) => {
     // Restrição por lista de devices (ex: preclimat só pro device que agendou)
     if (opts.onlyDeviceIds && !opts.onlyDeviceIds.includes(sub.device_id)) { skipped++; return; }
+    // Notificações do Haval NUNCA vão pro app da Grasi (device_id `byd-*`).
+    if (_isBydDevice(sub.device_id)) { skipped++; return; }
     // Gating por device: se a sub tem device_id e o tipo está OFF nas prefs, pula.
     if (type) {
       const prefs = getPrefsForDevice(sub.device_id);
@@ -273,6 +283,8 @@ async function sendPush(title, body, type, opts = {}) {
     apnsLive.pushAlert(title, body, {
       threadId: type || undefined,
       allow: (deviceId) => {
+        // Notificações do Haval NUNCA vão pro app da Grasi (device_id `byd-*`).
+        if (_isBydDevice(deviceId)) return false;
         if (opts.onlyDeviceIds && !opts.onlyDeviceIds.includes(deviceId)) return false;
         if (type && getPrefsForDevice(deviceId)[type] === false) return false;
         return true;
@@ -647,22 +659,37 @@ async function firePreClimat(sched) {
     console.warn('[preclimat] HA não configurado — pulando engine_on');
   }
 
-  // Passo 2: aguardar engine_state='1' por até 2 min (poll a cada 5s)
+  // Passo 2: aguardar confirmação de motor ligado por até 5 min (poll 5s).
+  // O sinal pode chegar por: engine_state='1' (APK MQTT, rápido) OU driving_ready=1
+  // (alternativa quando engine_state demora). Quando o APK está offline (gap MQTT),
+  // ainda assim seguimos: HA respondeu 200 → motor foi acionado; ignora confirmação
+  // após 60s se NENHUM dado do APK chegar (o HA cloud é polled e atrasa demais).
+  const t0 = Date.now();
   const engineOk = await new Promise(resolve => {
-    if (state.engine_state === '1') return resolve(true);
-    let attempts = 0;
+    const check = () => {
+      if (state.engine_state === '1' || +state.driving_ready === 1) return 'ok';
+      const apkSilent = !state.last_apk_ms || (Date.now() - state.last_apk_ms) > 60_000;
+      if (apkSilent && (Date.now() - t0) >= 60_000) return 'assumed';   // sem APK pra confirmar → assume
+      if ((Date.now() - t0) >= 300_000) return 'fail';                  // 5 min de timeout duro
+      return null;
+    };
+    const first = check();
+    if (first === 'ok') return resolve(true);
+    if (first === 'fail') return resolve(false);
+    if (first === 'assumed') { console.warn('[preclimat] APK offline; assumindo motor ligado (HA respondeu OK)'); return resolve(true); }
     const t = setInterval(() => {
-      attempts++;
-      if (state.engine_state === '1') { clearInterval(t); resolve(true); return; }
-      if (attempts >= 24) { clearInterval(t); resolve(false); }
+      const r = check();
+      if (r === 'ok')      { clearInterval(t); resolve(true); }
+      else if (r === 'fail') { clearInterval(t); resolve(false); }
+      else if (r === 'assumed') { clearInterval(t); console.warn('[preclimat] APK offline; assumindo motor ligado (HA respondeu OK)'); resolve(true); }
     }, 5_000);
   });
 
   if (!engineOk) {
-    console.warn('[preclimat] timeout esperando engine_state=1');
-    _setPreclimatStatus('failed', 'Motor não confirmou em 2 min',
+    console.warn(`[preclimat] timeout esperando engine_state=1 (${Math.round((Date.now()-t0)/1000)}s)`);
+    _setPreclimatStatus('failed', 'Motor não confirmou em 5 min',
       { endsAtMs: Date.now() + 5 * 60_000,
-        alert: { title: '⏰ Pré-climatização falhou', body: 'Motor não confirmou em 2 min.' } });
+        alert: { title: '⏰ Pré-climatização falhou', body: 'Motor não confirmou em 5 min.' } });
     return;
   }
 
@@ -1148,6 +1175,9 @@ const state = {
   ac_state:         null,   // null | 'on' | 'off'
   shade_level:      null,   // null | '0'..'100' — cortina do teto (0=fechada, 100=aberta)
   skylight_level:   null,   // null | '0'=fechado | '200'=ventilação | '1'..'100'=% aberto (teto solar)
+  fuel_remain_km:   null,   // autonomia ICE real do CAN (car.ev_info.fuel_mode_remain_odometer) — preferida sobre range_ice_km
+  ev_remain_km:     null,   // autonomia EV real do CAN (car.ev_info.electric_mode_remain_odometer) — preferida sobre range_ev_km
+  fuel_pct_can:     null,   // % combustível no tanque (car.basic.remain_fuel_percentage) — litros = pct×51/100 no iPad
   seat_vent_drv:    null,   // null | '0'=desligado | '1'=fraco | '2'=médio | '3'=forte
   seat_vent_pass:   null,   // idem motorista
   hvac_driver_temp:    null, // null | float (°C) — temperatura definida (motorista)
@@ -2212,6 +2242,9 @@ function matchKnownPlace(lat, lng, tol = 0) {
 // a viagem que terminar perto deles com o NOME digitado (ex.: "Shopping Flamboyant")
 // em vez do bairro+cidade do reverse-geocode.
 const recentNavDests = [];
+// Dispositivos NavRelay online: alimentado por mensagens retidas em nav_devices/<id>.
+// LWT esvazia retain ao desconectar — entry é apagada no handler do mqtt.
+const _navDevices = {};
 let _navDestRetained = false;   // há um nav_dest retido no broker? (pra limpar ao expirar)
 function _navDestNameFor(lat, lng) {
   if (!lat || !lng) return null;
@@ -2268,18 +2301,38 @@ function _maybeUpdateCarHeading() {
 // Anti-furto: se o carro NÃO está em uso (não ready, motor desligado, parado) e
 // mesmo assim o GPS se desloca >200 m, alerta (rebocado/movido). Baseline segue o
 // carro enquanto está em uso; só dispara desligado. Debounce de 10 min.
-let _theftBase = null, _theftAlertedMs = 0;
+// Pra filtrar jitter/deriva pontual do GPS, o deslocamento precisa SUSTENTAR
+// >200 m por ≥3 amostras ao longo de ≥60 s antes de virar alerta.
+let _theftBase = null, _theftAlertedMs = 0, _theftPending = null, _theftLastCheckMs = 0;
 function checkTheft() {
   const lat = +state.gps_lat, lng = +state.gps_lng;
   if (!lat || !lng) return;
   const inUse = state.driving_ready === 1 || state.driving_ready === true
     || String(state.engine_state) === '1' || (+state.speed_kmh || 0) > 3;
-  if (inUse) { _theftBase = { lat, lng }; return; }     // em uso → acompanha, sem alerta
+  // Gap de telemetria: se passou >30s entre dois checks (APK MQTT travou e
+  // retomou), o baseline anterior é stale — o carro pode ter chegado dirigindo
+  // mas o bridge não viu as posições intermediárias. Refresca sem alertar.
+  const now = Date.now();
+  const gap = _theftLastCheckMs ? (now - _theftLastCheckMs) : 0;
+  _theftLastCheckMs = now;
+  if (gap > 30_000) { _theftBase = { lat, lng }; _theftPending = null; return; }
+  if (inUse) { _theftBase = { lat, lng }; _theftPending = null; return; }   // em uso → acompanha, sem alerta
   if (!_theftBase) { _theftBase = { lat, lng }; return; }
   const moved = haversineM(_theftBase.lat, _theftBase.lng, lat, lng);
-  if (moved > 200 && Date.now() - _theftAlertedMs > 10 * 60_000) {
+  if (moved <= 200) { _theftPending = null; return; }   // voltou perto → cancela pendência
+  // Deslocamento candidato. Acumula até confirmar; se uma única amostra >200m
+  // (jitter) aparecer isolada, a próxima volta perto e zera _theftPending.
+  if (!_theftPending) {
+    _theftPending = { firstMs: Date.now(), samples: 1 };
+    return;
+  }
+  _theftPending.samples += 1;
+  const sustainedSec = (Date.now() - _theftPending.firstMs) / 1000;
+  if (_theftPending.samples >= 3 && sustainedSec >= 60
+      && Date.now() - _theftAlertedMs > 10 * 60_000) {
     _theftAlertedMs = Date.now();
     _theftBase = { lat, lng };
+    _theftPending = null;
     addEvent('theft_move', `Carro se moveu ${Math.round(moved)} m com o motor desligado`);
     sendPush('⚠️ Carro se moveu', `O Haval saiu do lugar (~${Math.round(moved)} m) com o motor desligado. Verifique.`, 'theft');
   }
@@ -4543,6 +4596,23 @@ app.post('/api/autotrips', (req, res) => {
       if (ot) autoTrip.outsideTemp = Math.round(ot * 10) / 10;
     }
 
+    // Auto-naming por Locais Conhecidos (KP) — grava em autoTrip.startKp/endKp pra
+    // SOBREVIVER restart do bridge (o disco persiste só `autoTrip`, não o `record`).
+    {
+      const _sp = matchKnownPlace(autoTrip.startLat, autoTrip.startLng, 80);
+      const _ep = matchKnownPlace(autoTrip.endLat,   autoTrip.endLng, 80);
+      if (_sp) autoTrip.startKp = _sp.name;
+      if (_ep) autoTrip.endKp   = _ep.name;
+      // Fim sem KP mas com destino mandado pro carro recentemente → usa o nome digitado.
+      if (!_ep) {
+        const navName = _navDestNameFor(autoTrip.endLat, autoTrip.endLng);
+        if (navName) autoTrip.endKp = navName;
+      }
+      if (autoTrip.startKp && autoTrip.endKp && !autoTrip.name) {
+        autoTrip.name = `${autoTrip.startKp} → ${autoTrip.endKp}`;
+      }
+    }
+
     // Persiste hybrid junto — boot não precisa recalcular.
     // Se foi estimado, marca o arquivo também com os campos _estimated*.
     const persisted = {
@@ -5868,6 +5938,23 @@ app.post('/api/admin/reset-tyre-baseline', (req, res) => {
   res.json({ ok: true, cleared, entries: telemetryHistory.length });
 });
 
+// Publica comando MQTT esperando até `waitMs` pela reconexão se o cliente estiver
+// fora no momento. A conexão bridge↔broker oscila com keepalive timeout/connack
+// timeout — sem espera, o user perde o comando por 200ms de gap. Tentar 3s
+// cobre 95% dos saltos vistos nos logs.
+async function publishCmdWithRetry(topic, payload, opts, waitMs = 3000) {
+  const t0 = Date.now();
+  while (!mqttClient?.connected && (Date.now() - t0) < waitMs) {
+    await new Promise(r => setTimeout(r, 200));
+  }
+  if (!mqttClient?.connected) {
+    const e = new Error('MQTT offline'); e.code = 'MQTT_OFFLINE'; throw e;
+  }
+  return new Promise((resolve, reject) => {
+    mqttClient.publish(topic, payload, opts, err => err ? reject(err) : resolve());
+  });
+}
+
 // POST /api/charge-limit/refresh — pede pro APK reler o limite real do carro
 // e re-publicar em ha/charge_limit/state. Útil quando o user muda direto no
 // carro (sem usar o PWA) e o state do bridge ficou desatualizado.
@@ -5884,17 +5971,20 @@ app.post('/api/charge-limit/refresh', (req, res) => {
 // POST /api/charge-limit  { pct: 80 }  — publica cmd/charge_limit no MQTT
 // (requireAuth global já cobre; não precisa do admin gate extra — antes
 // rejeitava o bridge_token do PWA com 401, fazendo o UI reverter o pedido.)
-app.post('/api/charge-limit', (req, res) => {
+app.post('/api/charge-limit', async (req, res) => {
   const pct = parseInt(req.body?.pct);
   if (![50, 60, 70, 80, 90, 100].includes(pct))
     return res.status(400).json({ error: 'Valor inválido. Use 50, 60, 70, 80, 90 ou 100.' });
-  if (!mqttClient?.connected)
-    return res.status(503).json({ error: 'MQTT offline' });
-  mqttClient.publish(`${MQTT_PREFIX}/cmd/charge_limit`, pct.toString(), { retain: false, qos: 1 }, err => {
-    if (err) return res.status(500).json({ error: 'Falha ao publicar no MQTT' });
-    console.log(`[charge-limit] Enviando ${pct}% para o carro via MQTT`);
-    res.json({ ok: true });
-  });
+  try {
+    // retain=true: estado idempotente; se APK estiver offline no momento, lê
+    // o último valor ao reconectar. publishCmdWithRetry tolera gap MQTT <3s.
+    await publishCmdWithRetry(`${MQTT_PREFIX}/cmd/charge_limit`, pct.toString(), { retain: true, qos: 1 });
+    const carFresh = state.last_apk_ms && (Date.now() - state.last_apk_ms < 30_000);
+    console.log(`[charge-limit] Enviando ${pct}% (retain) · APK fresh=${carFresh}`);
+    res.json({ ok: true, carFresh });
+  } catch (err) {
+    res.status(err.code === 'MQTT_OFFLINE' ? 503 : 500).json({ error: err.message });
+  }
 });
 
 // POST /api/hazard  { value: 0|1 } — pisca-alerta (4 setas). Alterna
@@ -5911,17 +6001,18 @@ app.post('/api/hazard', (req, res) => {
 
 // POST /api/drive-mode  { mode: 0|1|3 } — publica cmd/drive_mode no MQTT.
 // Valores: 0=HEV (híbrido), 1=Prior. EV, 3=EV puro.
-app.post('/api/drive-mode', (req, res) => {
+app.post('/api/drive-mode', async (req, res) => {
   const mode = parseInt(req.body?.mode);
   if (![0, 1, 3].includes(mode))
     return res.status(400).json({ error: 'Valor inválido. Use 0 (HEV), 1 (Prior. EV) ou 3 (EV).' });
-  if (!mqttClient?.connected)
-    return res.status(503).json({ error: 'MQTT offline' });
-  mqttClient.publish(`${MQTT_PREFIX}/cmd/drive_mode`, mode.toString(), { retain: false, qos: 1 }, err => {
-    if (err) return res.status(500).json({ error: 'Falha ao publicar no MQTT' });
-    console.log(`[drive-mode] Enviando mode=${mode} para o carro via MQTT`);
-    res.json({ ok: true });
-  });
+  try {
+    await publishCmdWithRetry(`${MQTT_PREFIX}/cmd/drive_mode`, mode.toString(), { retain: true, qos: 1 });
+    const carFresh = state.last_apk_ms && (Date.now() - state.last_apk_ms < 30_000);
+    console.log(`[drive-mode] Enviando mode=${mode} (retain) · APK fresh=${carFresh}`);
+    res.json({ ok: true, carFresh });
+  } catch (err) {
+    res.status(err.code === 'MQTT_OFFLINE' ? 503 : 500).json({ error: err.message });
+  }
 });
 
 // POST /api/drive-mode/refresh — força APK reler valor do carro
@@ -5936,15 +6027,17 @@ app.post('/api/drive-mode/refresh', (_req, res) => {
 // POST /api/power-reserve  { mode: 1|2 } — sub-modo HEV
 //   1 = Inteligente (carro decide quando ligar motor)
 //   2 = Prioritário (preserva SOC alvo definido em charge_soc_target)
-app.post('/api/power-reserve', (req, res) => {
+app.post('/api/power-reserve', async (req, res) => {
   const mode = parseInt(req.body?.mode);
   if (![1, 2].includes(mode))
     return res.status(400).json({ error: 'Valor inválido. Use 1 (Inteligente) ou 2 (Prioritário).' });
-  if (!mqttClient?.connected) return res.status(503).json({ error: 'MQTT offline' });
-  mqttClient.publish(`${MQTT_PREFIX}/cmd/power_reserve`, mode.toString(), { retain: false, qos: 1 }, err => {
-    if (err) return res.status(500).json({ error: 'Falha ao publicar no MQTT' });
-    res.json({ ok: true });
-  });
+  try {
+    await publishCmdWithRetry(`${MQTT_PREFIX}/cmd/power_reserve`, mode.toString(), { retain: true, qos: 1 });
+    const carFresh = state.last_apk_ms && (Date.now() - state.last_apk_ms < 30_000);
+    res.json({ ok: true, carFresh });
+  } catch (err) {
+    res.status(err.code === 'MQTT_OFFLINE' ? 503 : 500).json({ error: err.message });
+  }
 });
 app.post('/api/power-reserve/refresh', (_req, res) => {
   if (!mqttClient?.connected) return res.status(503).json({ error: 'MQTT offline' });
@@ -5955,15 +6048,17 @@ app.post('/api/power-reserve/refresh', (_req, res) => {
 });
 
 // POST /api/charge-soc-target  { pct: 20..80 } — alvo SOC no HEV Prioritário
-app.post('/api/charge-soc-target', (req, res) => {
+app.post('/api/charge-soc-target', async (req, res) => {
   const pct = parseInt(req.body?.pct);
   if (!(pct >= 20 && pct <= 80))
     return res.status(400).json({ error: 'Valor fora da faixa. Use 20..80.' });
-  if (!mqttClient?.connected) return res.status(503).json({ error: 'MQTT offline' });
-  mqttClient.publish(`${MQTT_PREFIX}/cmd/charge_soc_target`, pct.toString(), { retain: false, qos: 1 }, err => {
-    if (err) return res.status(500).json({ error: 'Falha ao publicar no MQTT' });
-    res.json({ ok: true });
-  });
+  try {
+    await publishCmdWithRetry(`${MQTT_PREFIX}/cmd/charge_soc_target`, pct.toString(), { retain: true, qos: 1 });
+    const carFresh = state.last_apk_ms && (Date.now() - state.last_apk_ms < 30_000);
+    res.json({ ok: true, carFresh });
+  } catch (err) {
+    res.status(err.code === 'MQTT_OFFLINE' ? 503 : 500).json({ error: err.message });
+  }
 });
 app.post('/api/charge-soc-target/refresh', (_req, res) => {
   if (!mqttClient?.connected) return res.status(503).json({ error: 'MQTT offline' });
@@ -6561,6 +6656,15 @@ mqttClient.on('message', (topic, payload, packet) => {
     if (!isRetained) _handleSharedDest(value);
     return;
   }
+  // Registro dos NavRelays (Android). Tópico retain por device — quando ele
+  // desconecta, LWT esvazia. Bridge mantém map em memória pra o iOS listar.
+  if (topic.startsWith(MQTT_PREFIX + '/nav_devices/')) {
+    const id = topic.slice((MQTT_PREFIX + '/nav_devices/').length);
+    if (!value) { delete _navDevices[id]; return; }
+    try { _navDevices[id] = { ...JSON.parse(value), _seenMs: Date.now() }; }
+    catch (_) { /* payload inválido — ignora */ }
+    return;
+  }
   if (topic.startsWith(GWM_TOPIC_PREFIX + '/') && topic.endsWith('/state')) {
     const id = topic.slice(GWM_TOPIC_PREFIX.length + 1, topic.length - '/state'.length);
     applyGwmEntity(id, value, isRetained);
@@ -7006,8 +7110,17 @@ async function _maybeComputeArrival() {
     const plan = await _routeElevation(carLat, carLng, dest.lat, dest.lng);
     _arrivalMs = Date.now();
     if (!plan) return;
-    if (plan.distanceKm < 0.3) {   // chegou ao destino → limpa
+    if (plan.distanceKm < 0.5) {   // chegou (raio 500m): limpa estado, retido e marca dest consumido
       if (state.arrival) { state.arrival = null; scheduleStateBroadcast(); }
+      if (_navDestRetained) {
+        mqttClient.publish(`${MQTT_PREFIX}/cmd/nav_dest`, '', { qos: 1, retain: true });
+        _navDestRetained = false;
+      }
+      // Zera ts do dest no histórico pra _maybeComputeArrival não re-detectar
+      // (senão o destino "ressuscita" ao próximo tick e o carro mostra de novo).
+      for (const nd of recentNavDests) {
+        if (Math.abs(nd.lat - dest.lat) < 1e-6 && Math.abs(nd.lng - dest.lng) < 1e-6) nd.ts = 0;
+      }
       return;
     }
     const durMin = plan.durationMin || 0;
@@ -7067,7 +7180,9 @@ function _spNotify(key, title, body) {
   if (!apnsLive.enabled) return;
   apnsLive.pushAlert(title, body, {
     threadId: key,
-    allow: (deviceId) => getPrefsForDevice(deviceId)[key] === true,
+    // Notificações do BYD só vão pra devices do app "Grasi Recarga" (prefixo
+    // `byd-`). Defesa em profundidade — o filtro principal já é o opt-in por pref.
+    allow: (deviceId) => _isBydDevice(deviceId) && getPrefsForDevice(deviceId)[key] === true,
   }).catch(() => {});
 }
 
@@ -7079,6 +7194,8 @@ function _spNotifyLoc(key, locId, title, body) {
   apnsLive.pushAlert(title, body, {
     threadId: key,
     allow: (deviceId) => {
+      // Só devices do app "Grasi Recarga" (prefixo `byd-`).
+      if (!_isBydDevice(deviceId)) return false;
       const p = getPrefsForDevice(deviceId);
       return p[key] === true && p[`${key}_${locId}`] !== false;
     },
@@ -7125,10 +7242,15 @@ function _songProEvents(o) {
       place ? `O carro foi desligado em ${place.name}.` : 'O carro foi desligado.');
     // Chegou em um local conhecido: só dispara quando DESLIGA dentro da cerca de
     // um local configurado — passar pela cerca dirigindo não conta (evita falsos
-    // positivos quando o carro só atravessa o raio do local).
+    // positivos quando o carro só atravessa o raio do local). E só "chega" se
+    // estiver VINDO DE FORA: ligar e desligar dentro do mesmo local (sem ter
+    // saído desde a última chegada) não dispara — evita push duplicado.
     const gPlace = _spGeofenceLoc(plat, plng);
-    if (gPlace) _spNotifyLoc('byd_geofence_arrival', gPlace.id,
-      '📍 Chegou', `BYD chegou em ${gPlace.name}.`);
+    if (gPlace && _spEv.lastArrivedLocId !== gPlace.id) {
+      _spNotifyLoc('byd_geofence_arrival', gPlace.id,
+        '📍 Chegou', `BYD chegou em ${gPlace.name}.`);
+      _spEv.lastArrivedLocId = gPlace.id;
+    }
   }
   _spEv.carOn = carOn;
 
@@ -7241,6 +7363,13 @@ function _songProEvents(o) {
   if (!glId && _spEv.curLocId) {
     const prev = songProLocs.find(l => l.id === _spEv.curLocId);
     if (prev) _spNotifyLoc('byd_geofence_departure', prev.id, '📍 Saiu', `BYD saiu de ${prev.name}.`);
+  }
+  // Rearma a "chegada": só limpa lastArrivedLocId quando o carro está LIGADO
+  // e fora do local da última chegada. Assim, ligar→desligar dentro do mesmo
+  // local não rearma (segue suprimido), e jitter de GPS com carro parado não
+  // limpa o estado.
+  if (carOn && _spEv.lastArrivedLocId && glId !== _spEv.lastArrivedLocId) {
+    _spEv.lastArrivedLocId = null;
   }
   _spEv.curLocId = glId;
 
@@ -8405,9 +8534,23 @@ app.post('/api/share-dest', async (req, res) => {
   res.json({ ok: true, name: d.name, lat: d.lat, lng: d.lng });
 });
 
+// GET /api/nav-devices — lista os NavRelays vivos (registrados via retain).
+// iOS usa pra montar o picker "Enviar pra qual dispositivo".
+app.get('/api/nav-devices', (_req, res) => {
+  const now = Date.now();
+  const devices = Object.entries(_navDevices).map(([id, d]) => ({
+    id, name: d.name || id, role: d.role || 'car',
+    alwaysOn: !!d.alwaysOn, ageMs: now - (d._seenMs || 0),
+  }));
+  res.json({ devices });
+});
+
 // POST /api/nav-to — manda um destino JÁ resolvido (lat/lng/nome) pro carro, igual ao
 // compartilhamento porém direto (app do iPhone, tela de SOC na chegada). Publica
 // nav_dest pro Ecotrip e registra pra nomear a viagem + computar a chegada.
+//   body: { lat, lng, name, app, target?, device? }
+//     device = id de NavRelay específico (preferido sobre target)
+//     target = 'car' | 'phone' | '' (legado — todos NavRelays do tipo)
 app.post('/api/nav-to', (req, res) => {
   const lat = +(req.body && req.body.lat), lng = +(req.body && req.body.lng);
   if (!Number.isFinite(lat) || !Number.isFinite(lng) || (lat === 0 && lng === 0))
@@ -8415,22 +8558,33 @@ app.post('/api/nav-to', (req, res) => {
   const name = (String(req.body && req.body.name || '').trim() || `${lat.toFixed(5)}, ${lng.toFixed(5)}`).slice(0, 60);
   const app = String(req.body && req.body.app || '').toLowerCase();   // '', 'maps', 'waze'
   const target = String(req.body && req.body.target || '').toLowerCase();  // '', 'car', 'phone'
+  const device = String(req.body && req.body.device || '').trim();   // id específico (preferido)
   recentNavDests.push({ name, lat, lng, ts: Date.now() });
   if (recentNavDests.length > 30) recentNavDests.shift();
   // Painel/Chegada do carro: só quando NÃO é navegação dedicada ao celular.
-  if (target !== 'phone') {
+  // Quando device específico foi escolhido, usa o role registrado dele pra decidir.
+  const effectiveRole = device && _navDevices[device]?.role || target;
+  if (effectiveRole !== 'phone') {
     mqttClient.publish(`${MQTT_PREFIX}/cmd/nav_dest`,
       JSON.stringify({ lat, lng, name, etaClock: '', ts: Date.now() }), { qos: 1, retain: true });
     _navDestRetained = true;
   }
-  // Se pediu Maps/Waze, manda pro Nav Relay abrir a navegação. O campo target
-  // ('car'/'phone') deixa cada aparelho filtrar pelo seu papel (vazio = todos).
+  // Se pediu Maps/Waze, manda pro Nav Relay abrir a navegação.
   if (app === 'maps' || app === 'waze') {
-    mqttClient.publish(`${MQTT_PREFIX}/nav_to`,
-      JSON.stringify({ lat, lng, name, app, target, ts: Date.now() }), { qos: 1, retain: false });
+    const payload = JSON.stringify({ lat, lng, name, app, target, device, ts: Date.now() });
+    if (device) {
+      // Direcionado a UM device específico — só ele recebe. retain:true pra o NavRelay
+      // puxar o último destino ao reconectar (estava offline na hora do envio). O
+      // NavRelay deduplica por `ts`, então não re-navega pro mesmo destino a cada resub.
+      mqttClient.publish(`${MQTT_PREFIX}/nav_to/${device}`, payload, { qos: 1, retain: true });
+    } else {
+      // Broadcast legado: todos os NavRelays do tópico antigo filtram por target/role.
+      mqttClient.publish(`${MQTT_PREFIX}/nav_to`, payload, { qos: 1, retain: true });
+    }
   }
   _maybeComputeArrival(true);   // já calcula a chegada pro cluster/estado
-  console.log(`[navTo] → ${target || 'carro'}: ${name} (${lat.toFixed(5)},${lng.toFixed(5)})${app ? ' · '+app : ''}`);
+  const dest = device ? `device=${device}` : (target || 'carro');
+  console.log(`[navTo] → ${dest}: ${name} (${lat.toFixed(5)},${lng.toFixed(5)})${app ? ' · '+app : ''}`);
   res.json({ ok: true, name });
 });
 
@@ -8622,6 +8776,7 @@ app.get('/api/share/:token/state', (req, res) => {
     moving: (+state.speed_kmh || 0) > 2,
     dest,
     apkAgeMs: state.last_apk_ms ? (Date.now() - state.last_apk_ms) : null,
+    speedAgeMs: state._speed_kmh_ms ? (Date.now() - state._speed_kmh_ms) : null,
     ts: Date.now(),
   });
 });
@@ -9081,6 +9236,9 @@ function applyMqttMessage(key, value, isRetained = false) {
     case 'seat_vent_pass': state.seat_vent_pass = value; break; // '0'..'3'
     case 'shade_level':    state.shade_level    = value; break; // '0'..'100' — cortina do teto (leitura ativa do APK)
     case 'skylight_level': state.skylight_level = value; break; // '0'=fechado·'200'=vent·'1'..'100'=% (teto solar)
+    case 'fuel_remain_km': state.fuel_remain_km = Math.round(num(value)); break; // autonomia ICE real do CAN
+    case 'ev_remain_km':   state.ev_remain_km   = Math.round(num(value)); break; // autonomia EV real do CAN
+    case 'fuel_pct_can':   state.fuel_pct_can   = Math.round(num(value)); break; // % combustível no tanque (CAN)
     case 'hvac_driver_temp':    state.hvac_driver_temp    = value; break; // float °C
     case 'hvac_passenger_temp': state.hvac_passenger_temp = value; break; // float °C (pendente)
     case 'hvac_fan_speed': {
@@ -9284,6 +9442,7 @@ function applyMqttMessage(key, value, isRetained = false) {
     case 'speed_kmh': {
       const prevSpeed = +state.speed_kmh || 0;
       state.speed_kmh = num(value);
+      state._speed_kmh_ms = _now;   // ts da última msg de velocidade (pra detectar APK travado)
       const curSpeed  = +state.speed_kmh || 0;
       checkSpeedFence(curSpeed);
       if (curSpeed > 0) {
