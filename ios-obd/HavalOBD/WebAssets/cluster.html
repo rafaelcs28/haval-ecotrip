@@ -1546,15 +1546,9 @@ window.applyNativeSnapshot = function(payload) {
   for (const [k, v] of Object.entries(payload)) {
     if (k === 'ts' || k === 'source' || k.startsWith('__')) continue;
     if (k === 'speed_kmh_gps') continue;                       // GPS nunca vira velocidade
-    if (isLan) {
-      _lanSeen[k] = nowMs;                                     // a LAN é a dona desta chave
-    } else if (lanFresh && (LAN_FAST_KEYS.has(k) || _lanSeen[k])) {
-      continue;  // LAN fresca → nuvem NÃO sobrescreve NADA que a LAN já forneceu nesta
-                 // sessão — mesmo que o WS pare de mandar a chave por uns segundos (era
-                 // o que fazia o controle "voltar sozinho" pro valor antigo da nuvem).
-                 // Failover total só quando a LAN cai (lanFresh=false). Cloud só preenche
-                 // o que a LAN nunca manda (viagem em curso, custo, autonomia HA, fuel_l).
-    }
+    // Com LAN fresca, a nuvem só pode preencher os campos da allowlist (viagem +
+    // preços/status/fallback). Tudo o mais vem só da LAN. Failover total se a LAN cair.
+    if (!isLan && lanFresh && !CLOUD_ALLOW_WHEN_LAN.has(k)) continue;
     state[k] = v;
   }
   lastUpdateMs = Date.now();
@@ -1580,6 +1574,17 @@ const LAN_FAST_KEYS = new Set([
   // sozinho (one-pedal, tração, etc). Em LAN, vêm SÓ do WS.
   'one_pedal','esp_enable','drive_mode','terrain_mode','regen_level','steer_mode',
   'power_reserve','charge_soc_target',
+]);
+// INVERSO (regra principal): com LAN fresca, a nuvem SÓ pode preencher estes
+// campos — a VIAGEM EM CURSO (parte de baixo do app) + o que a LAN não fornece
+// (preços p/ o custo, status do carro, e fallback de autonomia/combustível).
+// TODO o resto (velocidade, potência, SOC, A/C, e todos os controles) vem
+// EXCLUSIVAMENTE da LAN (WS) — acaba com a competição de fontes.
+const CLOUD_ALLOW_WHEN_LAN = new Set([
+  'current_trip','rolling','arrival',
+  'battery_avg_price_per_kwh','tank_avg_price_per_l','price_kwh','price_gas_per_l',
+  'last_apk_ms','last_gwm_ms',
+  'range_ev_km','range_ice_km','fuel_l',
 ]);
 console.log('[cluster] applyNativeSnapshot registrado · aguardando _nativeBridge');
 function setConn(ok) {
