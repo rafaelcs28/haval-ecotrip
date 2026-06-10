@@ -83,6 +83,10 @@ final class BridgePublisher: ObservableObject {
         "hvac_aqs","hvac_heating","hvac_front_defrost","hvac_rear_defrost","hvac_auto_defrost",
         // Cortina/teto: servidos pelo WS local (cache 1s); cloud não compete (evita piscar).
         "shade_level","skylight_level",
+        // Estados de condução (LAN-owned): cloud não compete — corrige o botão
+        // ligando/desligando sozinho (one-pedal/tração/etc) por divergência de fonte.
+        "one_pedal","esp_enable","drive_mode","terrain_mode","regen_level","steer_mode",
+        "power_reserve","charge_soc_target",
     ]
 
     /// Repassa dados de CLOUD (MQTT/HTTP) pro cluster. Com LAN WS conectada,
