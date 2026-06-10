@@ -1915,7 +1915,7 @@ window.openExternalNav = (app) => {
 //  Constantes Haval H6 PHEV34
 // ═══════════════════════════════════════════════════════════════════════════
 const PACK_KWH      = 34;
-const TANK_L        = 55;
+const TANK_L        = 51;   // tanque útil — abastece só até a trava (não 55)
 const KM_PER_L_HEV  = 8;
 const KM_PER_KWH_EV = 5.3;
 
@@ -1931,7 +1931,10 @@ function render() {
   $('soc-arc').setAttribute('stroke-dashoffset', socCirc * (1 - socPct/100));
   const kwhLeft = (socPct / 100) * PACK_KWH;
   $('soc-kwh').textContent = fmt1(kwhLeft) + ' kWh';
-  const rangeEv = +state.range_ev_km;
+  // Autonomia EV: prefere a leitura REAL do CAN (ev_remain_km = painel); cai pro
+  // sensor HA (range_ev_km) e, por fim, estimativa por kWh.
+  const evRemainCan = parseInt(state.ev_remain_km, 10);
+  const rangeEv = Number.isFinite(evRemainCan) ? evRemainCan : +state.range_ev_km;
   $('soc-range').textContent = Number.isFinite(rangeEv) ? fmt0(rangeEv) + ' km'
     : fmt0(kwhLeft * KM_PER_KWH_EV) + ' km';
 
@@ -1939,7 +1942,9 @@ function render() {
   // do carro); cai pro sensor HA legado (range_ice_km) só se a do CAN não chegou.
   const fuelRemainCan = parseInt(state.fuel_remain_km, 10);
   const rangeIce = Number.isFinite(fuelRemainCan) ? fuelRemainCan : +state.range_ice_km;
-  const fuelL    = +state.fuel_l;
+  // Litros: prefere o % real do CAN × tanque útil (51 L); cai pro fuel_l do cloud.
+  const fuelPctCan = parseInt(state.fuel_pct_can, 10);
+  const fuelL    = Number.isFinite(fuelPctCan) ? (fuelPctCan / 100 * TANK_L) : +state.fuel_l;
   $('fuel-l').textContent = Number.isFinite(fuelL) ? fmt1(fuelL) : '—';
   if (Number.isFinite(fuelL)) {
     const fuelPct = clamp((fuelL / TANK_L) * 100, 0, 100);

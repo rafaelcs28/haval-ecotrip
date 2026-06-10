@@ -1587,6 +1587,9 @@ class MqttManager private constructor() {
             // Autonomia de combustível REAL do CAN (a do painel) — substitui o sensor HA
             // legado (range_ice_km), que reportava a autonomia de tanque cheio (~476 km).
             CarDataManager.getInstance().fetchCurrent("car.ev_info.fuel_mode_remain_odometer")?.trim()?.toFloatOrNull()?.let { pubD("fuel_remain_km", it.toInt().toString()) }
+            // Autonomia elétrica real do CAN + % de combustível no tanque (litros calculados no iPad).
+            CarDataManager.getInstance().fetchCurrent("car.ev_info.electric_mode_remain_odometer")?.trim()?.toFloatOrNull()?.let { pubD("ev_remain_km", it.toInt().toString()) }
+            CarDataManager.getInstance().fetchCurrent("car.basic.remain_fuel_percentage")?.trim()?.toFloatOrNull()?.let { pubD("fuel_pct_can", it.toInt().toString()) }
             pubD("hvac_driver_temp",     fmt1(latestHvacDriverTemp))
             pubD("hvac_passenger_temp",  fmt1(latestHvacPassengerTemp))
             pubD("hvac_fan_speed",    latestHvacFanSpeed.toString())

@@ -274,6 +274,22 @@ class LocalApiServer(
             CarDataManager.getInstance().fetchCurrent("car.ev_info.fuel_mode_remain_odometer")?.trim()?.toFloatOrNull()?.let { _fuelRemVal = it.toInt() } }
         return if (_fuelRemVal >= 0) _fuelRemVal else null
     }
+    // Autonomia elétrica real do CAN — car.ev_info.electric_mode_remain_odometer.
+    private var _evRemAtMs = 0L; private var _evRemVal = -1
+    private fun cachedEvRemain(): Int? {
+        val now = System.currentTimeMillis()
+        if (now - _evRemAtMs > 1000L) { _evRemAtMs = now
+            CarDataManager.getInstance().fetchCurrent("car.ev_info.electric_mode_remain_odometer")?.trim()?.toFloatOrNull()?.let { _evRemVal = it.toInt() } }
+        return if (_evRemVal >= 0) _evRemVal else null
+    }
+    // % de combustível no tanque — car.basic.remain_fuel_percentage (litros = pct × 55/100 no iPad).
+    private var _fuelPctAtMs = 0L; private var _fuelPctVal = -1
+    private fun cachedFuelPct(): Int? {
+        val now = System.currentTimeMillis()
+        if (now - _fuelPctAtMs > 1000L) { _fuelPctAtMs = now
+            CarDataManager.getInstance().fetchCurrent("car.basic.remain_fuel_percentage")?.trim()?.toFloatOrNull()?.let { _fuelPctVal = it.toInt() } }
+        return if (_fuelPctVal >= 0) _fuelPctVal else null
+    }
     private fun buildStateJson(): String {
         val m = mqttManager
         // Escopo HÍBRIDO: APK serve só telemetria RAW fast (que muda rápido +
@@ -331,6 +347,8 @@ class LocalApiServer(
             "shade_level"       to cachedShade(),     // cortina: 0..100
             "skylight_level"    to cachedSkylight(),  // teto: 0=fechado·200=vent·1..100=%
             "fuel_remain_km"    to cachedFuelRemain(),// autonomia ICE real do CAN (painel)
+            "ev_remain_km"      to cachedEvRemain(),  // autonomia EV real do CAN
+            "fuel_pct_can"      to cachedFuelPct(),   // % combustível no tanque (CAN)
             // ── Estados dos controles drive (confirmação visual rápida) ──
             // -1 = ainda não lido do carro → null pra não sobrescrever.
             "drive_mode"        to m.lastPublishedDriveMode.takeIf { it >= 0 },
