@@ -1495,6 +1495,11 @@ function isNativeBridge() {
 // do Mac mini via Tailscale. Atualiza a cada snapshot e tem timeout — se
 // LAN parou de chegar por 3s, volta pro ☁.
 let _lastLanMs = 0;
+// Chave → timestamp da última vez que a LAN (APK local) forneceu esse campo.
+// Enquanto a LAN está fresca, a nuvem NÃO sobrescreve nada que a LAN já manda
+// (mata o "piscar" de velocidade/ventilação entre as duas fontes). Só passam da
+// nuvem os campos que só ela tem (viagem em curso, custo, autonomia, combustível).
+const _lanSeen = {};
 function _updateSourceBadge(source) {
   const el = document.getElementById('source-badge');
   if (!el) return;
@@ -1534,13 +1539,19 @@ window.applyNativeSnapshot = function(payload) {
   const isLan = payload.source === 'havalobd-apk-local';
   // Janela ampla (5s) e "grudenta": brecha curta da LAN não deixa o cloud
   // (atrasado ~1–3s) assumir a velocidade/telemetria fast → sem piscar.
-  const lanFresh = (Date.now() - _lastLanMs) < 5000;
+  const nowMs = Date.now();
+  const lanFresh = (nowMs - _lastLanMs) < 5000;
   // Velocidade vem SÓ do CAN do carro (APK). GPS do iPad descartado — dava valores
   // absurdos (81, 272 km/h). speed_kmh_gps é ignorado pro display.
   for (const [k, v] of Object.entries(payload)) {
     if (k === 'ts' || k === 'source' || k.startsWith('__')) continue;
     if (k === 'speed_kmh_gps') continue;                       // GPS nunca vira velocidade
-    if (!isLan && lanFresh && LAN_FAST_KEYS.has(k)) continue;  // LAN tem prioridade
+    if (isLan) {
+      _lanSeen[k] = nowMs;                                     // a LAN é a dona desta chave
+    } else if (lanFresh && (LAN_FAST_KEYS.has(k) || (_lanSeen[k] && (nowMs - _lanSeen[k]) < 5000))) {
+      continue;  // LAN fresca → nuvem NÃO sobrescreve o que a LAN fornece (sem piscar).
+                 // Só passam da nuvem os campos exclusivos dela (viagem, custo, autonomia, fuel).
+    }
     state[k] = v;
   }
   lastUpdateMs = Date.now();
