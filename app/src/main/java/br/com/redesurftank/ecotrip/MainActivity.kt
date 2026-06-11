@@ -36,6 +36,12 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // Edge-to-edge: a janela passa a desenhar ATRÁS das barras do sistema.
+        // As telas Compose seguem seguras (systemBarsPadding insere na área
+        // segura); a tela Controles (WebView fullscreen) ganha o topo e encaixa
+        // a barra do app nos vazios da barra do carro.
+        androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window, false)
+
         // Preview dos layouts da home no emulador (só debug): renderiza com dados
         // de exemplo e NÃO inicia managers/serviços. am start ... -e preview 0|1|2
         val preview = intent.getStringExtra("preview")?.toIntOrNull()
