@@ -62,3 +62,7 @@ ios-app/build/
 
 # análise de apps de referência (não versionar)
 _analise/
+
+# Simulador da tela Controles (não vai pro APK)
+app/src/main/assets/controles/_sim.html
+app/src/main/assets/controles/_debug.js

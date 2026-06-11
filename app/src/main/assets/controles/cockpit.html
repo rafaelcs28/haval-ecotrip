@@ -34,13 +34,15 @@
     position: absolute; left: var(--sys-left); top: var(--sys-top); width: calc(100vw - var(--sys-left)); height: calc(100vh - var(--sys-top));
     display: grid;
     grid-template-columns: 1fr;
-    grid-template-rows: 1fr 78px;
-    gap: 8px; padding: 6px 14px 8px 8px; min-height: 0;
+    grid-template-rows: 1fr 92px;
+    gap: 8px; padding: 5px 14px 8px 8px; min-height: 0;
   }
-  .v4 .p-ctrl .panel-h, .v4 .ctrl-area .area-h { margin: 0; }
-  .v4 .ctrl-area { padding: 10px; gap: 7px; }
-  .v4 .cond .seg-tile { padding: 5px 10px; gap: 4px; }
-  .v4 .cond-actions { gap: 7px; }
+  .v4 .p-ctrl > .panel-h { display: none; }  /* título redundante — os 3 headers já rotulam */
+  .v4 .ctrl-area .area-h { margin: 0; }
+  .v4 .ctrl-area { padding: 8px 9px; gap: 5px; }
+  .v4 .area-grid { gap: 6px; }
+  .v4 .cond .seg-tile { flex: 1 1 auto; padding: 9px 11px; gap: 6px; justify-content: center; }
+  .v4 .cond-actions { gap: 7px; flex: 0 0 auto; }
 
   /* coluna única — controles ocupam toda a largura */
   .v4 .p-ctrl  { grid-column: 1; grid-row: 1; padding: 12px 16px; display: flex; flex-direction: column; gap: 9px; min-height: 0; }
@@ -75,7 +77,7 @@
   .v4 .gauge-mini .meta .m-sub { font-size: 12px; }
 
   /* ── 3 áreas de controles rápidos ── */
-  .ctrl-areas { flex: 1; display: grid; grid-template-columns: 1.18fr 1.32fr 1fr; gap: 12px; min-height: 0; }
+  .ctrl-areas { flex: 1; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; min-height: 0; }
   .ctrl-area { background: rgba(255,255,255,.02); border: 1px solid var(--border); border-radius: 18px; padding: 12px; display: flex; flex-direction: column; gap: 9px; min-height: 0; }
   .area-h { font-size: 12px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); display: flex; align-items: center; gap: 7px; }
   .area-h .ico { font-size: 16px; }
@@ -84,6 +86,10 @@
   .area-grid.cond  { display: flex; flex-direction: column; gap: 8px; }
   .area-grid.veic  { display: flex; flex-direction: column; gap: 8px; }
   .clima-toggles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; }
+  .clima-readout { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; align-items: center; background: var(--panel-lift); border: 1px solid var(--border-hi); border-radius: 10px; padding: 4px 8px; }
+  .clima-readout .ro-cell { text-align: center; display: flex; align-items: baseline; justify-content: center; gap: 5px; }
+  .clima-readout .ro-val { font-size: 16px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
+  .clima-readout .ro-lbl { font-size: 9px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
   /* Ventilação dos bancos — faders verticais (card Veículo) */
   .seat-vfaders { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
   .vfader { background: var(--panel-lift); border: 1px solid var(--border-hi); border-radius: 14px; padding: 7px 7px; display: flex; flex-direction: column; align-items: center; gap: 4px; cursor: pointer; -webkit-tap-highlight-color: transparent; transition: border-color .2s, background .2s; }
@@ -98,26 +104,57 @@
   .vfader .vf-seg.on { background: var(--green); box-shadow: 0 0 8px rgba(34,197,94,.35); }
   .vfader .vf-val { font-size: 13px; font-weight: 700; color: var(--muted); font-variant-numeric: tabular-nums; }
   .vfader.on .vf-val { color: var(--green); }
-  /* compacta o card Veículo p/ caber Aberturas + Bancos */
-  .area-grid.veic { gap: 8px; }
+  /* Veículo: botões mais altos (vidros / cortina / teto / bancos) */
+  .area-grid.veic { gap: 9px; }
   .area-grid.veic .sub-h { margin-top: 0; }
-  .area-grid.veic .seg-tile { padding: 6px 10px; gap: 4px; }
-  .area-grid.veic .seg button { padding: 8px 3px; }
-  .area-grid.veic .slider-tile { padding: 9px 13px; gap: 7px; }
-  .area-grid.veic .cv-slider { height: 14px; }
-  .area-grid.veic .vent-btn { padding: 7px; margin-top: 2px; }
+  .area-grid.veic .seg-tile { padding: 8px 11px; gap: 6px; }
+  .area-grid.veic .seg button { padding: 11px 3px; }
+  .area-grid.veic .slider-tile { padding: 10px 13px; gap: 7px; }
+  .area-grid.veic .vent-btn { padding: 9px; }
+  .win-tile { flex: 1 1 0; padding: 7px 11px !important; gap: 6px !important; min-height: 0; }
+  .win-car { flex: 1 1 auto; }
+  .win-all button { padding: 7px 2px; font-size: 11px; }
+  .area-grid.veic .vent-btn { padding: 9px; }
+  .area-grid.veic { gap: 7px; }
+  .area-grid.veic .seat-vfaders { flex: 1 1 0; align-items: stretch; min-height: 0; }
+  .area-grid.veic .vfader { padding: 7px; gap: 3px; justify-content: space-between; }
+  .area-grid.veic .vfader .vf-track { flex: 1 1 auto; height: auto; min-height: 48px; width: 78px; max-width: 78px; margin: 4px auto; }
+  .area-grid.veic .vfader .vf-segs { gap: 6px; padding: 5px 11px; }
+  .area-grid.veic .vfader .vf-seg { border-radius: 7px; }
+  .area-grid.veic .vfader .vf-head { gap: 5px; }
+  /* Diagrama de vidros (vista de cima) */
+  .win-tile { background: var(--panel-lift); border: 1px solid var(--border-hi); border-radius: 14px; padding: 8px 11px; display: flex; flex-direction: column; gap: 6px; }
+  .win-hint { font-size: 9px; color: var(--dim); font-weight: 600; letter-spacing: 0; text-transform: none; margin-left: auto; }
+  .win-car { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 5px; background: rgba(255,255,255,.03); border: 2px solid var(--border-hi); border-radius: 36px / 20px; padding: 5px 12px; }
+  .wc-win { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0; border-radius: 8px; background: var(--border); border: 1px solid var(--border-hi); color: var(--muted); font-family: inherit; cursor: pointer; padding: 4px 4px; transition: background .15s, color .15s, border-color .15s; }
+  .wc-win:active { transform: scale(.96); }
+  .wc-win b { font-size: 13px; color: var(--text); }
+  .wc-win .wc-st { font-size: 10px; }
+  .wc-win.half { background: rgba(34,211,238,.14); border-color: var(--teal); color: var(--teal); }
+  .wc-win.half b { color: var(--teal); }
+  .wc-win.open { background: rgba(34,197,94,.14); border-color: var(--green); color: var(--green); }
+  .wc-win.open b { color: var(--green); }
+  .win-all { gap: 5px; }
+  .win-all button { padding: 7px 2px; font-size: 11px; }
+  .area-grid.veic .cv-slider { height: 16px; }
   /* faders de temperatura/ventilação maiores (espaço liberado pelos bancos) */
-  .area-grid.clima .sliders { justify-content: space-between; gap: 12px; }
-  .area-grid.clima .sliders .slider-tile { padding: 13px 14px; gap: 12px; }
-  .area-grid.clima .sliders .cv-slider { height: 16px; }
-  .area-grid.clima .sliders .cv-slider::-webkit-slider-thumb { width: 38px; height: 38px; }
-  .area-grid.clima .sliders .cv-slider::-moz-range-thumb { width: 38px; height: 38px; }
+  .area-grid.clima { justify-content: space-between; }
+  .area-grid.clima .sliders { flex: 0 0 auto; justify-content: flex-start; gap: 3px; }
+  .area-grid.clima .sliders .slider-tile { padding: 8px 12px; gap: 5px; }
+  .area-grid.clima .sliders .cv-slider { height: 11px; }
+  .area-grid.clima .sliders .cv-slider::-webkit-slider-thumb { width: 24px; height: 24px; }
+  .area-grid.clima .sliders .cv-slider::-webkit-slider-thumb { width: 28px; height: 28px; }
+  .area-grid.clima .sliders .cv-slider::-moz-range-thumb { width: 28px; height: 28px; }
   .sliders { display: flex; flex-direction: column; gap: 7px; flex: 1; justify-content: center; }
-  .clima-toggles .ctrl-tile { padding: 7px 4px; gap: 3px; }
+  .clima-toggles .ctrl-tile { padding: 4px 4px; gap: 1px; }
   .clima-toggles .ctrl-tile .ic { font-size: 20px; }
   .clima-toggles .ctrl-tile .lbl { font-size: 11px; }
   .clima-toggles .ctrl-tile .st { font-size: 10px; }
-  .cond-actions { flex: 1; display: grid; grid-template-columns: 1fr 1fr 0.66fr; gap: 8px; align-items: stretch; min-height: 0; }
+  .cond-actions { flex: 0 0 auto; display: grid; grid-template-columns: 1fr 1fr 0.66fr; gap: 8px; align-items: stretch; min-height: 0; }
+  .cond-actions .ctrl-tile, .cond-actions .esp-toggle { min-height: 84px; }
+  .cond-actions .ctrl-tile { padding: 6px 6px; gap: 2px; }
+  .cond-actions .ctrl-tile .ic { font-size: 18px; }
+  .cond-actions .esp-toggle { gap: 3px; padding: 6px 6px; }
   .cond-actions .ctrl-tile { height: 100%; }
   .cond-actions .ctrl-tile.danger .ic { display: flex; color: var(--red); }
   .cond-actions .ctrl-tile.danger .ic svg { width: 27px; height: 27px; }
@@ -134,10 +171,11 @@
   .esp-toggle.on .sw { background: var(--green); }
   .esp-toggle.on .sw::after { transform: translateX(20px); }
   .esp-toggle.on .lbl, .esp-toggle.on .st { color: var(--green); }
-  .area-grid.cond { gap: 7px; }
-  .cond .seg-tile { padding: 7px 10px; gap: 5px; }
+  .area-grid.cond { gap: 8px; }
+  /* segmentados mais altos (crescem p/ preencher); ações compactas embaixo */
+  .cond .seg-tile { flex: 1 1 auto; padding: 9px 11px; gap: 6px; justify-content: center; }
   .cond .seg { gap: 5px; }
-  .cond .seg button { padding: 9px 2px; font-size: 12px; }
+  .cond .seg button { padding: 11px 2px; font-size: 13px; }
   .cond .seg-h { font-size: 10px; letter-spacing: .08em; }
   /* tiles compactos dentro das áreas */
   .ctrl-area .ctrl-tile { min-height: 0; padding: 9px 8px; gap: 3px; border-radius: 14px; }
@@ -239,7 +277,7 @@
   .conn-mode.cloud { color: var(--blue); background: rgba(56,189,248,.12); border: 1px solid rgba(56,189,248,.4); }
   .conn-mode:active { transform: scale(.95); }
   .air-seg .seg { gap: 4px; }
-  .air-seg .seg button { font-size: 11px; padding: 9px 1px; }
+  .air-seg .seg button { font-size: 11px; padding: 7px 1px; }
 </style>
 </head>
 <body>
@@ -329,6 +367,13 @@
               <div class="ctrl-tile" id="ctrl-sync" onclick="toggleSync()"><div class="ic">⇄</div><div class="lbl">SYNC</div><div class="st" id="ctrl-sync-st">—</div></div>
               <div class="ctrl-tile" id="ctrl-auto" onclick="toggleAuto()"><div class="ic">🅰️</div><div class="lbl">AUTO</div><div class="st" id="ctrl-auto-st">—</div></div>
             </div>
+            <!-- Mais opções: desembaçadores, ionizador, max A/C (acima dos sliders) -->
+            <div class="clima-toggles">
+              <div class="ctrl-tile" id="ctrl-deff" onclick="toggleDef('f')"><div class="ic">🌫️</div><div class="lbl">Desemb. ↑</div><div class="st" id="ctrl-deff-st">—</div></div>
+              <div class="ctrl-tile" id="ctrl-defr" onclick="toggleDef('r')"><div class="ic">🌁</div><div class="lbl">Desemb. ↓</div><div class="st" id="ctrl-defr-st">—</div></div>
+              <div class="ctrl-tile" id="ctrl-anion" onclick="toggleAnion()"><div class="ic">🍃</div><div class="lbl">Ionizador</div><div class="st" id="ctrl-anion-st">—</div></div>
+              <div class="ctrl-tile" id="ctrl-acmax" onclick="toggleAcMax()"><div class="ic">❄️</div><div class="lbl">Max A/C</div><div class="st" id="ctrl-acmax-st">—</div></div>
+            </div>
             <div class="sliders">
               <div class="slider-tile">
                 <div class="slider-h"><span class="lbl">🌡️ Motorista</span><span class="sv"><span id="ctrl-temp-d">22,0</span>°C</span></div>
@@ -353,6 +398,12 @@
                 <button onclick="setAir(this,4)">Degelo</button>
               </div>
             </div>
+            <!-- Leitura: qualidade do ar + temperaturas -->
+            <div class="clima-readout">
+              <div class="ro-cell"><div class="ro-val" id="ro-pm25">—</div><div class="ro-lbl">PM2.5 µg/m³</div></div>
+              <div class="ro-cell"><div class="ro-val" id="ro-tout">—</div><div class="ro-lbl">🌡️ Externa</div></div>
+              <div class="ro-cell"><div class="ro-val" id="ro-tin">—</div><div class="ro-lbl">🌡️ Interna</div></div>
+            </div>
           </div>
         </div>
 
@@ -360,13 +411,18 @@
         <div class="ctrl-area">
           <div class="area-h"><span class="ico">🔐</span> Veículo</div>
           <div class="area-grid veic">
-            <div class="sub-h">Aberturas</div>
-            <!-- Vidros: 3 opções (fechado / entreaberto / aberto) -->
-            <div class="seg-tile">
-              <div class="seg-h"><span>🪟</span> Vidros</div>
-              <div class="seg" id="seg-windows">
-                <button class="on" onclick="setWindows(this,'fechado')">Fechar</button>
-                <button onclick="setWindows(this,'entreaberto')">Entreab.</button>
+            <!-- Vidros individuais: toque cicla Fechado → Metade → Aberto (vista de cima) -->
+            <div class="win-tile">
+              <div class="seg-h"><span>🪟</span> Vidros <span class="win-hint">toque cicla</span></div>
+              <div class="win-car">
+                <button class="wc-win" data-win="0" onclick="cycleWin(0)"><b>DE</b><span class="wc-st" id="win-0-st">—</span></button>
+                <button class="wc-win" data-win="1" onclick="cycleWin(1)"><b>DD</b><span class="wc-st" id="win-1-st">—</span></button>
+                <button class="wc-win" data-win="2" onclick="cycleWin(2)"><b>TE</b><span class="wc-st" id="win-2-st">—</span></button>
+                <button class="wc-win" data-win="3" onclick="cycleWin(3)"><b>TD</b><span class="wc-st" id="win-3-st">—</span></button>
+              </div>
+              <div class="seg win-all" id="seg-windows">
+                <button onclick="setWindows(this,'fechado')">Todos ✕</button>
+                <button onclick="setWindows(this,'entreaberto')">Metade</button>
                 <button onclick="setWindows(this,'aberto')">Abrir</button>
               </div>
             </div>
@@ -538,6 +594,10 @@
   window.setTempSlider=(side,v)=>{ v=(+v).toFixed(1); $('ctrl-temp-'+side).textContent=v.replace('.',','); markPend('temp'+side); EcotripCmd('hvac/'+(side==='d'?'driver':'passenger')+'_temp', v); if(S.sync){ const other=side==='d'?'p':'d'; $('ctrl-temp-'+other).textContent=v.replace('.',','); markPend('temp'+other); EcotripCmd('hvac/'+(other==='d'?'driver':'passenger')+'_temp', v); } };
   window.setFanSlider=(v)=>{ $('ctrl-fan').textContent=v; markPend('fan'); EcotripCmd('hvac/fan_speed', parseInt(v,10)); };
   window.setAir=(btn,v)=>{ pickSeg(btn); markPend('air'); EcotripCmd('hvac/blower_mode', v); };
+  function genToggle(id, cmd, key){ const el=$(id); const on=!el.classList.contains('on'); el.classList.toggle('on',on); const st=$(id+'-st'); if(st) st.textContent=on?'Ligado':'Deslig.'; markPend(key); EcotripCmd(cmd, on?1:0); }
+  window.toggleDef=(s)=>genToggle('ctrl-def'+s, s==='f'?'hvac/front_defrost':'hvac/rear_defrost', 'def'+s);
+  window.toggleAnion=()=>genToggle('ctrl-anion','hvac/anion','anion');
+  window.toggleAcMax=()=>genToggle('ctrl-acmax','hvac/acmax','acmax');
   window.setSeatSlider=(side,v)=>{ v=Math.max(0,Math.min(3,Math.round(+v))); const el=$('ctrl-seat-'+side+'-st'); if(el) el.textContent=SEAT[v]; const f=document.querySelector('.vfader[data-side="'+side+'"]'); if(f){ f.classList.toggle('on',v>0); f.querySelectorAll('.vf-seg').forEach((s,i)=>s.classList.toggle('on',i<v)); } markPend('seat'+side); EcotripCmd('hvac/seat_vent_'+(side==='d'?'drv':'pass'), v); };
 
   /* ═══════════ CONDUÇÃO ═══════════ */
@@ -577,7 +637,14 @@
 
   /* ═══════════ VEÍCULO / ABERTURAS ═══════════ */
   const WIN = { fechado:1, entreaberto:3, aberto:0 };
-  window.setWindows=(btn,opt)=>{ pickSeg(btn); markPend('windows'); EcotripCmd('vehicle/window_all', WIN[opt] ?? 1); };
+  // Vidros individuais: status 1=fechado · 3=metade · 0=aberto. window 0=DE 1=DD 2=TE 3=TD
+  const WINSTATE = [1,1,1,1];
+  const WINSEQ = [1,3,0];
+  const WINLBL = { 1:'Fechado', 3:'Metade', 0:'Aberto' };
+  function paintWin(idx){ const st=WINSTATE[idx]; const e=$('win-'+idx+'-st'); if(e) e.textContent=WINLBL[st]; const b=document.querySelector('.wc-win[data-win="'+idx+'"]'); if(b){ b.classList.remove('half','open'); if(st===3)b.classList.add('half'); else if(st===0)b.classList.add('open'); } }
+  window.cycleWin=(idx)=>{ const cur=WINSTATE[idx]; const next=WINSEQ[(WINSEQ.indexOf(cur)+1)%3]; WINSTATE[idx]=next; paintWin(idx); markPend('win'+idx); EcotripCmd('vehicle/window', JSON.stringify({window:idx, status:next})); };
+  window.setWindows=(btn,opt)=>{ pickSeg(btn); const st=WIN[opt] ?? 1; for(let i=0;i<4;i++){ WINSTATE[i]=st; paintWin(i); } markPend('windows'); EcotripCmd('vehicle/window_all', st); };
+  [0,1,2,3].forEach(paintWin);
   window.setCurtain=(v)=>{ $('ctrl-curtain').textContent=v; markPend('curtain'); EcotripCmd('vehicle/shade', parseInt(v,10)); };
   window.setSunroof=(v)=>{ $('ctrl-sunroof-vent').classList.remove('on'); $('ctrl-sunroof').textContent=(+v<=10?'Fechado':v+'%'); markPend('sunroof'); EcotripCmd('vehicle/skylight', parseInt(v,10)); };
   window.sunroofVent=()=>{ const on=!$('ctrl-sunroof-vent').classList.contains('on'); $('ctrl-sunroof-vent').classList.toggle('on',on); $('ctrl-sunroof').textContent=on?'Ventilação':'Fechado'; markPend('sunroof'); EcotripCmd('vehicle/skylight', on?200:0); };
@@ -675,6 +742,11 @@
       }
       const fkm=num(state.fuel_remain_km); const fr=$('fuel-range'); if(fr) fr.textContent=(fkm!==null?fmt0(fkm):'—')+' km';
 
+      // ── Leitura climatização: PM2.5 + temperaturas ──
+      const pm=num(state.hvac_pm25); const ep=$('ro-pm25'); if(ep && pm!==null) ep.textContent=fmt0(pm);
+      const to=num(state.outside_temp); const eo=$('ro-tout'); if(eo && to!==null) eo.textContent=fmt0(to)+'°';
+      const ti=num(state.inside_temp); const ei=$('ro-tin'); if(ei && ti!==null) ei.textContent=fmt0(ti)+'°';
+
       // ── VIAGEM (campos in-process do TripManager, quando presentes) ──
       const setT=(id,v)=>{ const e=$(id); if(e && v!==undefined && v!==null) e.textContent=v; };
       setT('trip-dist', state.trip_dist); setT('trip-time', state.trip_time);
@@ -694,6 +766,10 @@
       refl('recirc', ()=>{ if(state.hvac_cycle_mode!=null){ const rec=+state.hvac_cycle_mode===0; onOff('ctrl-recirc','ctrl-recirc-st',rec,'Recircular','Ar externo'); const ic=$('ctrl-recirc-ic'); if(ic) ic.textContent=rec?'↺':'↪'; } });
       refl('sync', ()=>{ if(state.hvac_sync_enable!=null){ S.sync=+state.hvac_sync_enable===1; onOff('ctrl-sync','ctrl-sync-st',S.sync,'Ligado','Desligado'); } });
       refl('auto', ()=>{ if(state.hvac_auto_enable!=null) onOff('ctrl-auto','ctrl-auto-st',+state.hvac_auto_enable===1,'Ligado','Desligado'); });
+      refl('deff', ()=>{ if(state.hvac_front_defrost!=null) onOff('ctrl-deff','ctrl-deff-st',+state.hvac_front_defrost===1,'Ligado','Deslig.'); });
+      refl('defr', ()=>{ if(state.hvac_rear_defrost!=null) onOff('ctrl-defr','ctrl-defr-st',+state.hvac_rear_defrost===1,'Ligado','Deslig.'); });
+      refl('anion', ()=>{ if(state.hvac_anion!=null) onOff('ctrl-anion','ctrl-anion-st',+state.hvac_anion===1,'Ligado','Deslig.'); });
+      refl('acmax', ()=>{ if(state.hvac_acmax!=null) onOff('ctrl-acmax','ctrl-acmax-st',+state.hvac_acmax===1,'Ligado','Deslig.'); });
       refl('tempd', ()=>{ if(state.hvac_driver_temp!=null){ const t=(+state.hvac_driver_temp).toFixed(1); $('ctrl-temp-d').textContent=t.replace('.',','); const s=document.querySelector('.area-grid.clima .sliders .slider-tile:nth-child(1) .cv-slider'); if(s) s.value=t; } });
       refl('tempp', ()=>{ if(state.hvac_passenger_temp!=null){ const t=(+state.hvac_passenger_temp).toFixed(1); $('ctrl-temp-p').textContent=t.replace('.',','); } });
       refl('fan', ()=>{ if(state.hvac_fan_speed!=null){ $('ctrl-fan').textContent=fmt0(+state.hvac_fan_speed); } });
