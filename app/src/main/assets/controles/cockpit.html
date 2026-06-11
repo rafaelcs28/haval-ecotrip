@@ -278,6 +278,20 @@
   .conn-mode:active { transform: scale(.95); }
   .air-seg .seg { gap: 4px; }
   .air-seg .seg button { font-size: 11px; padding: 7px 1px; }
+
+  /* ── Otimização p/ renderização em SOFTWARE (head unit fraco) ──
+     Corta efeitos caros (blur, sombras, transições) que forçam repaint/raster
+     custoso. O fundo é preto sólido, então blur não agrega nada visual. ── */
+  * { transition: none !important; }
+  .panel.glass, .nav-overlay { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
+  .nav-overlay { background: rgba(0,0,0,.92) !important; }
+  .cv-slider::-webkit-slider-thumb { box-shadow: none !important; }
+  .cv-slider::-moz-range-thumb { box-shadow: none !important; }
+  .vfader .vf-seg.on { box-shadow: none !important; }
+  .topbar .dot { box-shadow: none !important; }
+  .gauge-fill { filter: none !important; }
+  /* isola repaints: mexer num card/área não repinta o resto da tela */
+  .ctrl-area, .v4 .p-trip, .topbar { contain: layout paint; }
 </style>
 </head>
 <body>

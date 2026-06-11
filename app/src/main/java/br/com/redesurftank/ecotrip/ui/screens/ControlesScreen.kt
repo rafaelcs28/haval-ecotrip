@@ -101,7 +101,7 @@ fun ControlesLayout(
                     )
                 }
             }
-            delay(330L)
+            delay(800L)
         }
     }
 }
