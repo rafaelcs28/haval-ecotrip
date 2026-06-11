@@ -300,31 +300,28 @@
     width: 100vw; height: 100vh; display: block; position: relative;
     overflow: hidden;
     --r-panel: 22px;
-    /* WebView é FULLSCREEN. A dock esquerda (128) e a barra de status do
-       carro (60) ficam por cima. NÃO reservamos barra própria: nossos itens
-       entram nos VAZIOS da barra do carro (entre os ícones à esquerda e o
-       relógio à direita), e o conteúdo sobe até logo abaixo da barra (y=60).
-       --bar-left/--bar-right = zona segura da topbar (nudgeável). */
-    --sys-left: 128px;
-    --sys-top: 60px;
-    --bar-left: 470px;
-    --bar-right: 200px;
+    /* O app NÃO é edge-to-edge: a janela (e portanto o WebView) JÁ é a área
+       segura (1792×660 = à direita da dock e abaixo da status bar do carro),
+       igual às telas Compose. Então NÃO reservamos faixas aqui — preenchemos
+       100%, com só uma barra fina nossa no topo. --topbar = altura dela. */
+    --sys-left: 0px;
+    --sys-top: 46px;
   }
 
   .cfg-btn { margin-left: 10px; width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 15px; color: var(--text); background: rgba(255,255,255,.06); border: 1px solid var(--border-hi); cursor: pointer; transition: transform .1s, background .15s; }
   .cfg-btn:active { transform: scale(.9); }
 
   /* ───────── Barra de status (topo · à direita da dock do carro) ───────── */
-  /* topbar do app DENTRO da faixa da barra do carro (vazios), sem relógio próprio */
+  /* barra fina do app no topo da área segura (largura total), sem relógio próprio */
   .topbar {
-    position: absolute; left: var(--bar-left); top: 0; right: var(--bar-right); width: auto; height: var(--sys-top);
+    position: absolute; left: 0; top: 0; width: 100%; height: var(--sys-top);
     z-index: 20;
   }
   #clock { display: none; }
 
-  /* ───────── Área útil — sobe até logo abaixo da barra do carro (y=60) ───────── */
+  /* ───────── Área útil — preenche 100% da área segura, abaixo da nossa barra ── */
   .v4 {
-    position: absolute; left: var(--sys-left); top: var(--sys-top); width: calc(100vw - var(--sys-left)); height: calc(100vh - var(--sys-top));
+    position: absolute; left: 0; top: var(--sys-top); width: 100%; height: calc(100vh - var(--sys-top));
     display: grid;
     grid-template-columns: 1fr;
     grid-template-rows: 1fr 92px;
