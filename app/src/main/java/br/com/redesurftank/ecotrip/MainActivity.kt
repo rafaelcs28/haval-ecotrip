@@ -97,11 +97,23 @@ class MainActivity : ComponentActivity() {
             ))
         }
 
-        setContent {
-            EcotripTheme {
-                ConsumptionScreen()
-            }
+        // Raiz = FrameLayout com o ComposeView + (por cima) o WebView overlay do
+        // Controles, gerenciado por ControlesWebHost. O WebView fica FORA da
+        // árvore de desenho do Compose (irmão do ComposeView) — senão renderiza
+        // preto no WebView acelerado deste ROM (Android 9).
+        val root = android.widget.FrameLayout(this)
+        val compose = androidx.compose.ui.platform.ComposeView(this).apply {
+            setContent { EcotripTheme { ConsumptionScreen() } }
         }
+        root.addView(
+            compose,
+            android.widget.FrameLayout.LayoutParams(
+                android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+            ),
+        )
+        br.com.redesurftank.ecotrip.ui.screens.ControlesWebHost.attach(root)
+        setContentView(root)
     }
 
     override fun onDestroy() {
