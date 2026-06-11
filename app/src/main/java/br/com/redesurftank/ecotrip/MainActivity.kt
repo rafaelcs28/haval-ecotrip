@@ -36,6 +36,32 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // Diagnóstico de tela: loga resolução física + insets de system bars do
+        // head unit (rodar `adb logcat -s EcotripScreen`). Área útil = full - insets.
+        window.decorView.post {
+            val tag = "EcotripScreen"
+            val dm = resources.displayMetrics
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                val b = windowManager.currentWindowMetrics.bounds
+                android.util.Log.i(tag, "full(currentWindowMetrics)=${b.width()}x${b.height()} density=${dm.density} dpi=${dm.densityDpi}")
+            } else {
+                val real = android.util.DisplayMetrics()
+                @Suppress("DEPRECATION") windowManager.defaultDisplay.getRealMetrics(real)
+                android.util.Log.i(tag, "full(realMetrics)=${real.widthPixels}x${real.heightPixels} density=${dm.density} dpi=${dm.densityDpi}")
+            }
+            val insets = androidx.core.view.ViewCompat.getRootWindowInsets(window.decorView)
+            if (insets != null) {
+                val sb = insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+                val st = insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.statusBars())
+                val nv = insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.navigationBars())
+                android.util.Log.i(tag, "systemBars L=${sb.left} T=${sb.top} R=${sb.right} B=${sb.bottom}")
+                android.util.Log.i(tag, "statusBar T=${st.top} B=${st.bottom} | navBar T=${nv.top} B=${nv.bottom} L=${nv.left} R=${nv.right}")
+                android.util.Log.i(tag, "areaUtil=${window.decorView.width - sb.left - sb.right}x${window.decorView.height - sb.top - sb.bottom} (decor=${window.decorView.width}x${window.decorView.height})")
+            } else {
+                android.util.Log.i(tag, "rootWindowInsets=null (insets ainda não aplicados)")
+            }
+        }
+
         // Preview dos layouts da home no emulador (só debug): renderiza com dados
         // de exemplo e NÃO inicia managers/serviços. am start ... -e preview 0|1|2
         val preview = intent.getStringExtra("preview")?.toIntOrNull()
