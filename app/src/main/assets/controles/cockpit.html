@@ -403,9 +403,16 @@
   .area-grid.veic .seg button { padding: 11px 3px; }
   .area-grid.veic .slider-tile { padding: 10px 13px; gap: 7px; }
   .area-grid.veic .vent-btn { padding: 9px; }
-  .win-tile { flex: 1 1 0; padding: 7px 11px !important; gap: 6px !important; min-height: 0; }
+  .win-tile { padding: 7px 11px !important; gap: 6px !important; min-height: 0; display: flex; flex-direction: column; }
   .win-car { flex: 1 1 auto; }
   .win-all button { padding: 7px 2px; font-size: 11px; }
+  /* Vidros + Bancos lado a lado no topo do card Veículo */
+  .veic-row { display: grid; grid-template-columns: 1.05fr 1fr; gap: 8px; flex: 1 1 auto; min-height: 0; }
+  .seat-col { display: flex; flex-direction: column; gap: 6px; background: var(--panel-lift); border: 1px solid var(--border-hi); border-radius: 14px; padding: 7px 9px; min-height: 0; }
+  .seat-col .seg-h { flex: none; }
+  .seat-col .seat-vfaders { flex: 1 1 auto; }
+  .seat-col .vfader .vf-track { width: auto; max-width: none; }
+  .seat-col .vfader .vf-name { font-size: 10px; }
   .area-grid.veic .vent-btn { padding: 9px; }
   .area-grid.veic { gap: 7px; }
   .area-grid.veic .seat-vfaders { flex: 1 1 0; align-items: stretch; min-height: 0; }
@@ -717,19 +724,38 @@
         <div class="ctrl-area">
           <div class="area-h"><span class="ico">🔐</span> Veículo</div>
           <div class="area-grid veic">
-            <!-- Vidros individuais: toque cicla Fechado → Metade → Aberto (vista de cima) -->
-            <div class="win-tile">
-              <div class="seg-h"><span>🪟</span> Vidros <span class="win-hint">toque cicla</span></div>
-              <div class="win-car">
-                <button class="wc-win" data-win="0" onclick="cycleWin(0)"><b>DE</b><span class="wc-st" id="win-0-st">—</span></button>
-                <button class="wc-win" data-win="1" onclick="cycleWin(1)"><b>DD</b><span class="wc-st" id="win-1-st">—</span></button>
-                <button class="wc-win" data-win="2" onclick="cycleWin(2)"><b>TE</b><span class="wc-st" id="win-2-st">—</span></button>
-                <button class="wc-win" data-win="3" onclick="cycleWin(3)"><b>TD</b><span class="wc-st" id="win-3-st">—</span></button>
+            <!-- Topo: Vidros (esq) + Ventilação dos bancos (dir), lado a lado -->
+            <div class="veic-row">
+              <!-- Vidros individuais: toque cicla Fechado → Metade → Aberto (vista de cima) -->
+              <div class="win-tile">
+                <div class="seg-h"><span>🪟</span> Vidros <span class="win-hint">toque cicla</span></div>
+                <div class="win-car">
+                  <button class="wc-win" data-win="0" onclick="cycleWin(0)"><b>DE</b><span class="wc-st" id="win-0-st">—</span></button>
+                  <button class="wc-win" data-win="1" onclick="cycleWin(1)"><b>DD</b><span class="wc-st" id="win-1-st">—</span></button>
+                  <button class="wc-win" data-win="2" onclick="cycleWin(2)"><b>TE</b><span class="wc-st" id="win-2-st">—</span></button>
+                  <button class="wc-win" data-win="3" onclick="cycleWin(3)"><b>TD</b><span class="wc-st" id="win-3-st">—</span></button>
+                </div>
+                <div class="seg win-all" id="seg-windows">
+                  <button onclick="setWindows(this,'fechado')">Todos ✕</button>
+                  <button onclick="setWindows(this,'entreaberto')">Metade</button>
+                  <button onclick="setWindows(this,'aberto')">Abrir</button>
+                </div>
               </div>
-              <div class="seg win-all" id="seg-windows">
-                <button onclick="setWindows(this,'fechado')">Todos ✕</button>
-                <button onclick="setWindows(this,'entreaberto')">Metade</button>
-                <button onclick="setWindows(this,'aberto')">Abrir</button>
+              <!-- Ventilação dos bancos — faders verticais 0–3 (coluna ao lado dos vidros) -->
+              <div class="seat-col">
+                <div class="seg-h"><span>💺</span> Bancos</div>
+                <div class="seat-vfaders">
+                  <div class="vfader" data-side="d">
+                    <div class="vf-head"><span class="vf-ic">💺</span><span class="vf-name">Mot.</span></div>
+                    <div class="vf-track" title="Arraste para cima para aumentar"><span class="vf-ar">▲</span><div class="vf-segs"><div class="vf-seg"></div><div class="vf-seg"></div><div class="vf-seg"></div></div><span class="vf-ar">▼</span></div>
+                    <div class="vf-val" id="ctrl-seat-d-st">OFF</div>
+                  </div>
+                  <div class="vfader" data-side="p">
+                    <div class="vf-head"><span class="vf-ic">💺</span><span class="vf-name">Pass.</span></div>
+                    <div class="vf-track" title="Arraste para cima para aumentar"><span class="vf-ar">▲</span><div class="vf-segs"><div class="vf-seg"></div><div class="vf-seg"></div><div class="vf-seg"></div></div><span class="vf-ar">▼</span></div>
+                    <div class="vf-val" id="ctrl-seat-p-st">OFF</div>
+                  </div>
+                </div>
               </div>
             </div>
             <!-- Cortina: slider 0–100 (passo 10) -->
@@ -742,20 +768,6 @@
               <div class="slider-h"><span class="lbl">☀️ Teto solar</span><span class="sv" id="ctrl-sunroof">Fechado</span></div>
               <input type="range" class="cv-slider" id="sld-sunroof" min="10" max="100" step="10" value="10" oninput="setSunroof(this.value)">
               <button class="vent-btn" id="ctrl-sunroof-vent" onclick="sunroofVent()">🌬️ Ventilação</button>
-            </div>
-            <!-- Ventilação dos bancos — faders verticais 0–3 (arrastar p/ cima aumenta, p/ baixo reduz) -->
-            <div class="sub-h">Ventilação dos bancos</div>
-            <div class="seat-vfaders">
-              <div class="vfader" data-side="d">
-                <div class="vf-head"><span class="vf-ic">💺</span><span class="vf-name">Motorista</span></div>
-                <div class="vf-track" title="Arraste para cima para aumentar"><span class="vf-ar">▲</span><div class="vf-segs"><div class="vf-seg"></div><div class="vf-seg"></div><div class="vf-seg"></div></div><span class="vf-ar">▼</span></div>
-                <div class="vf-val" id="ctrl-seat-d-st">OFF</div>
-              </div>
-              <div class="vfader" data-side="p">
-                <div class="vf-head"><span class="vf-ic">💺</span><span class="vf-name">Passageiro</span></div>
-                <div class="vf-track" title="Arraste para cima para aumentar"><span class="vf-ar">▲</span><div class="vf-segs"><div class="vf-seg"></div><div class="vf-seg"></div><div class="vf-seg"></div></div><span class="vf-ar">▼</span></div>
-                <div class="vf-val" id="ctrl-seat-p-st">OFF</div>
-              </div>
             </div>
           </div>
         </div>
