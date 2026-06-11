@@ -304,7 +304,7 @@
        carro, à direita da dock). Preenche 100%, barra fina do app no topo
        (config/recargas/etc. visíveis, logo abaixo da barra do carro). */
     --sys-left: 0px;
-    --sys-top: 40px;
+    --sys-top: 0px;
   }
 
   .cfg-btn { margin-left: 10px; width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 15px; color: var(--text); background: rgba(255,255,255,.06); border: 1px solid var(--border-hi); cursor: pointer; transition: transform .1s, background .15s; }
@@ -339,8 +339,13 @@
   /* coluna única — controles ocupam toda a largura */
   .v4 .p-ctrl  { grid-column: 1; grid-row: 1; padding: 12px 16px; display: flex; flex-direction: column; gap: 9px; min-height: 0; }
   /* base — viagem (faixa horizontal) */
-  .v4 .p-trip  { grid-column: 1 / -1; grid-row: 2; padding: 8px 22px 6px; display: flex; flex-direction: column; gap: 4px; min-height: 0; overflow: hidden; }
+  .v4 .p-trip  { grid-column: 1 / -1; grid-row: 2; padding: 8px 22px 6px; display: flex; flex-direction: column; gap: 4px; min-height: 0; overflow: hidden; position: relative; }
   .v4 .p-trip .panel-h { flex: none; }
+  /* barra do app no canto inferior direito do card de viagem */
+  .trip-controls { position: absolute; right: 16px; bottom: 9px; display: flex; align-items: center; gap: 8px; z-index: 5; }
+  .trip-controls .car-stat { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--muted); }
+  .trip-controls .cfg-btn { margin-left: 0; }
+  .v4 .trip-grid { padding-right: 250px; }
 
   /* POWER — número grande + barra, empilhados na coluna estreita */
   .v4 .power-row { flex: 1; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 14px; }
@@ -550,7 +555,7 @@
   .dest-info b { color: var(--green); }
   .dest-info .sep { color: var(--dim); margin: 0 7px; }
   /* viagem — faixa compacta */
-  .v4 .trip-grid { display: flex; justify-content: flex-start; align-items: center; gap: 56px; flex: 1; padding: 0 4px; flex-wrap: nowrap; }
+  .v4 .trip-grid { display: flex; justify-content: flex-start; align-items: center; gap: 44px; flex: 1; padding: 0 250px 0 4px; flex-wrap: nowrap; }
   .v4 .trip-cell { flex: 0 0 auto; }
   .v4 .trip-val { font-size: 19px; line-height: 1; }
   .v4 .trip-val .sub { display: inline; margin: 0 0 0 5px; font-size: 11px; }
@@ -602,22 +607,9 @@
 
   <!-- A faixa esquerda (128px) fica RESERVADA ao sistema do próprio carro — sem chrome do app aqui. -->
 
-  <!-- ───────── Barra de status (topo · 60px) ───────── -->
-  <div class="topbar">
-    <div class="left">
-      <div class="clock" id="clock">--:--</div>
-      <div class="lbl" id="version">HEC v1.1</div>
-    </div>
-    <div class="right">
-      <span class="dot" id="conn-dot" style="display:none"></span><span class="lbl" id="conn-lbl" style="display:none"></span>
-      <div class="conn-mode cloud" id="source-badge" onclick="onConnTap()">☁ Nuvem</div>
-      <div class="lbl" style="margin-left:8px">Carro</div><div class="dot" id="car-dot"></div><div class="lbl" id="car-lbl">—</div>
-      <div class="cfg-btn" id="upd-btn" onclick="checkUpdate()" title="Atualizar">⬇️</div>
-      <div class="cfg-btn" id="rec-btn" onclick="openRecargas()" title="Recargas">🔋</div>
-      <div class="cfg-btn" id="via-btn" onclick="openViagens()" title="Viagens">🚗</div>
-      <div class="cfg-btn" id="cfg-btn" onclick="openConfig()" title="Configurações">⚙️</div>
-    </div>
-  </div>
+  <!-- Sentinelas ocultos (o JS legado referencia) — a barra do app foi movida
+       pro canto inferior direito do card de Viagem em curso. -->
+  <div style="display:none"><span id="clock"></span><span id="version"></span><span class="dot" id="conn-dot"></span><span class="lbl" id="conn-lbl"></span></div>
 
   <div class="v4">
 
@@ -790,6 +782,15 @@
         <div class="trip-cell"><div class="trip-val yellow cost"><span id="trip-cost-km">R$ 0,00</span><span class="u">/km</span></div><div class="trip-lbl">Por km</div></div>
         <div class="trip-cell"><div class="trip-val green"><span id="trip-ev-pct">—</span><span class="u">%</span><span class="sub" id="trip-ev-km">— km</span></div><div class="trip-lbl">Elétrico</div></div>
         <div class="trip-cell"><div class="trip-val orange"><span id="trip-hev-pct">—</span><span class="u">%</span><span class="sub" id="trip-hev-km">— km</span></div><div class="trip-lbl">Híbrido</div></div>
+      </div>
+      <!-- Barra do app (movida da topbar) — canto inferior direito -->
+      <div class="trip-controls">
+        <div class="conn-mode cloud" id="source-badge" onclick="onConnTap()">☁ Nuvem</div>
+        <span class="car-stat"><span class="lbl">Carro</span><span class="dot" id="car-dot"></span><span class="lbl" id="car-lbl">—</span></span>
+        <div class="cfg-btn" id="upd-btn" onclick="checkUpdate()" title="Atualizar">⬇️</div>
+        <div class="cfg-btn" id="rec-btn" onclick="openRecargas()" title="Recargas">🔋</div>
+        <div class="cfg-btn" id="via-btn" onclick="openViagens()" title="Viagens">🚗</div>
+        <div class="cfg-btn" id="cfg-btn" onclick="openConfig()" title="Configurações">⚙️</div>
       </div>
     </div>
 
@@ -1088,8 +1089,8 @@
       refl('anion', ()=>{ if(state.hvac_anion!=null) onOff('ctrl-anion','ctrl-anion-st',+state.hvac_anion===1,'Ligado','Deslig.'); });
       refl('acmax', ()=>{ if(state.hvac_acmax!=null) onOff('ctrl-acmax','ctrl-acmax-st',+state.hvac_acmax===1,'Ligado','Deslig.'); });
       refl('tempd', ()=>{ if(state.hvac_driver_temp!=null){ const t=(+state.hvac_driver_temp).toFixed(1); $('ctrl-temp-d').textContent=t.replace('.',','); const s=document.querySelector('.area-grid.clima .sliders .slider-tile:nth-child(1) .cv-slider'); if(s) s.value=t; } });
-      refl('tempp', ()=>{ if(state.hvac_passenger_temp!=null){ const t=(+state.hvac_passenger_temp).toFixed(1); $('ctrl-temp-p').textContent=t.replace('.',','); } });
-      refl('fan', ()=>{ if(state.hvac_fan_speed!=null){ $('ctrl-fan').textContent=fmt0(+state.hvac_fan_speed); } });
+      refl('tempp', ()=>{ if(state.hvac_passenger_temp!=null){ const t=(+state.hvac_passenger_temp).toFixed(1); $('ctrl-temp-p').textContent=t.replace('.',','); const s=document.querySelector('.area-grid.clima .sliders .slider-tile:nth-child(2) .cv-slider'); if(s) s.value=t; } });
+      refl('fan', ()=>{ if(state.hvac_fan_speed!=null){ $('ctrl-fan').textContent=fmt0(+state.hvac_fan_speed); const s=document.querySelector('.area-grid.clima .sliders .slider-tile:nth-child(3) .cv-slider'); if(s) s.value=+state.hvac_fan_speed; } });
       refl('air', ()=>{ if(state.hvac_blower_mode!=null) selSeg('seg-air', +state.hvac_blower_mode); });
       refl('seatd', ()=>{ if(state.seat_vent_drv!=null) paintSeat('d', +state.seat_vent_drv); });
       refl('seatp', ()=>{ if(state.seat_vent_pass!=null) paintSeat('p', +state.seat_vent_pass); });
