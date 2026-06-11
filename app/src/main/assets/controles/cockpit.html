@@ -5,7 +5,291 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover">
 <title>Haval Cockpit · V4 Controles · 1920×720</title>
-<link rel="stylesheet" href="cockpit-base.css">
+<style id="base-css">
+/* ===========================================================================
+   Haval Cockpit — REDESIGN base styles (shared by the 3 layout variations)
+   ---------------------------------------------------------------------------
+   Target: iPad Air 13" landscape · 1366×1024 CSS pt (2732×2048 @2x).
+   Goal:   glanceable readouts + big touch targets while driving.
+           Power + Energy-flow are the priority readouts.
+   NOTE:   Palette matches the ORIGINAL cluster.html (OLED black base), not the
+           PWA tokens — this is a redesign of that exact screen.
+   IMPORTANT for implementation: every element id and onclick is preserved from
+   the original so render()/openNavMenu()/etc. keep working untouched.
+   =========================================================================== */
+
+:root {
+  --bg: #000000;
+  --panel: #0d0d0f;
+  --panel-lift: #16161a;
+  --border: #1f1f24;
+  --border-hi: #2c2c33;
+  --green: #22c55e; --green-dim: #15803d;
+  --orange: #fb923c; --orange-dim: #c2410c;
+  --blue: #38bdf8; --blue-dim: #0369a1;
+  --teal: #22d3ee; --yellow: #facc15; --red: #ef4444;
+  --text: #f5f5f5; --muted: #8b8f98; --dim: #3f3f46;
+  --glass-bg: rgba(13,13,15,.55);
+  --glass-border: rgba(255,255,255,.08);
+  --r-panel: 28px;
+  --r-pill: 999px;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+.cockpit {
+  width: 1366px; height: 1024px; overflow: hidden;
+  background: var(--bg); color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, sans-serif;
+  font-feature-settings: "tnum" 1, "lnum" 1;
+  -webkit-font-smoothing: antialiased;
+  position: relative;
+  display: flex; flex-direction: column;
+  user-select: none;
+}
+.tnum { font-variant-numeric: tabular-nums; }
+
+/* ───────── Topbar (status — slim, unchanged role) ───────── */
+.topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  height: 52px; padding: 0 28px; flex-shrink: 0;
+  font-size: 15px; color: var(--muted);
+  background: rgba(0,0,0,.6); border-bottom: 1px solid var(--border);
+  position: relative; z-index: 20;
+}
+.topbar .left, .topbar .right { display: flex; gap: 16px; align-items: center; }
+.topbar .clock { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--text); font-size: 18px; }
+.topbar .lbl { letter-spacing: .12em; text-transform: uppercase; font-size: 12px; }
+.topbar .dot {
+  width: 10px; height: 10px; border-radius: 50%; background: var(--red);
+  box-shadow: 0 0 8px rgba(239,68,68,.6); transition: background .3s, box-shadow .3s;
+}
+.topbar .dot.ok { background: var(--green); box-shadow: 0 0 8px rgba(34,197,94,.6); }
+.topbar .dot.warn { background: var(--yellow); box-shadow: 0 0 8px rgba(250,204,21,.6); }
+
+/* ───────── Panels ───────── */
+.panel {
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: var(--r-panel); position: relative; overflow: hidden;
+}
+.panel.glass {
+  background: var(--glass-bg);
+  backdrop-filter: blur(28px) saturate(1.6); -webkit-backdrop-filter: blur(28px) saturate(1.6);
+  border: 1px solid var(--glass-border);
+  box-shadow: 0 10px 40px rgba(0,0,0,.6), inset 0 1px 0 rgba(255,255,255,.05);
+}
+.panel-h {
+  display: flex; align-items: center; gap: 9px;
+  font-size: 15px; font-weight: 700; letter-spacing: .14em;
+  text-transform: uppercase; color: var(--muted);
+}
+.panel-h .ico { font-size: 19px; }
+
+/* ───────── POWER — the priority readout ───────── */
+.power-hero { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; height: 100%; }
+.power-num { display: flex; align-items: baseline; line-height: .9; }
+.power-val {
+  font-size: 200px; font-weight: 200; letter-spacing: -8px;
+  font-variant-numeric: tabular-nums; transition: color .25s;
+}
+.power-val.regen { color: var(--green); }
+.power-val.drive { color: var(--orange); }
+.power-val.idle  { color: var(--muted); }
+.power-unit { font-size: 56px; color: var(--muted); margin-left: 10px; font-weight: 300; }
+.power-bar {
+  width: 86%; height: 26px; margin-top: 10px;
+  background: var(--border); border-radius: var(--r-pill);
+  position: relative; overflow: hidden;
+}
+.power-bar-mid { position: absolute; top: 0; bottom: 0; left: 50%; width: 2px; background: var(--border-hi); }
+.power-bar-fill { position: absolute; top: 0; bottom: 0; left: 50%; width: 0; transition: width .25s ease-out, background .25s; }
+.power-bar-fill.drive { background: linear-gradient(90deg, transparent, var(--orange)); }
+.power-bar-fill.regen { background: linear-gradient(270deg, transparent, var(--green)); transform: translateX(-100%); }
+.power-scale { width: 86%; margin-top: 8px; display: flex; justify-content: space-between; font-size: 13px; color: var(--dim); letter-spacing: .06em; }
+
+/* Big SPEED block */
+.speed-block { display: flex; align-items: baseline; gap: 12px; }
+.speed-val { font-size: 120px; font-weight: 300; line-height: 1; font-variant-numeric: tabular-nums; color: var(--text); }
+.speed-unit { font-size: 30px; color: var(--muted); font-weight: 500; }
+.speed-max { font-size: 22px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.speed-max strong { color: var(--text); font-weight: 600; }
+
+/* ───────── Gauges (SOC / Fuel) ───────── */
+.gauge-wrap { position: relative; display: flex; align-items: center; justify-content: center; }
+.gauge-wrap svg { width: 100%; max-width: 260px; }
+.gauge-track { fill: none; stroke: rgba(255,255,255,.08); stroke-width: 14; }
+.gauge-fill  { fill: none; stroke-width: 14; stroke-linecap: round; transition: stroke-dashoffset .6s ease-out; filter: drop-shadow(0 0 8px currentColor); }
+.gauge-fill.soc  { stroke: var(--green);  color: var(--green); }
+.gauge-fill.fuel { stroke: var(--orange); color: var(--orange); }
+.gauge-center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+.gauge-big { font-size: 72px; font-weight: 200; line-height: 1; font-variant-numeric: tabular-nums; }
+.gauge-big .pct { font-size: 30px; color: var(--muted); margin-left: 2px; }
+.gauge-sub { margin-top: 8px; font-size: 15px; color: rgba(245,245,245,.7); font-weight: 500; }
+.gauge-sub strong { color: var(--text); font-weight: 700; }
+
+/* Horizontal "rail" variant for SOC/Fuel (big, glanceable bars) */
+.rail { display: flex; flex-direction: column; gap: 8px; }
+.rail .rail-top { display: flex; align-items: baseline; justify-content: space-between; }
+.rail .rail-val { font-size: 64px; font-weight: 200; line-height: 1; font-variant-numeric: tabular-nums; }
+.rail .rail-val .u { font-size: 26px; color: var(--muted); margin-left: 2px; }
+.rail .rail-sub { font-size: 15px; color: var(--muted); font-weight: 500; text-align: right; }
+.rail .rail-sub strong { color: var(--text); font-weight: 700; }
+.rail .bar { height: 16px; border-radius: var(--r-pill); background: var(--border); overflow: hidden; position: relative; }
+.rail .bar .fill { position: absolute; inset: 0 auto 0 0; border-radius: var(--r-pill); transition: width .6s ease-out; }
+.rail .bar .fill.soc  { background: linear-gradient(90deg, var(--green-dim), var(--green)); }
+.rail .bar .fill.fuel { background: linear-gradient(90deg, var(--orange-dim), var(--orange)); }
+
+/* ───────── Trip metrics ───────── */
+.trip-grid { display: grid; gap: 14px 22px; align-content: center; height: 100%; }
+.trip-cell { display: flex; flex-direction: column; justify-content: center; }
+.trip-val { font-size: 34px; font-weight: 300; line-height: 1; font-variant-numeric: tabular-nums; }
+.trip-val .u { font-size: 16px; color: var(--muted); font-weight: 500; margin-left: 4px; }
+.trip-val .sub { font-size: 14px; color: var(--muted); font-weight: 500; margin-left: 6px; font-variant-numeric: tabular-nums; }
+.trip-lbl { margin-top: 5px; font-size: 12px; letter-spacing: .14em; color: var(--muted); text-transform: uppercase; }
+.trip-val.green { color: var(--green); }
+.trip-val.teal  { color: var(--teal); }
+.trip-val.orange { color: var(--orange); }
+.trip-val.yellow { color: var(--yellow); }
+
+/* ───────── Energy flow (priority) ───────── */
+.flow-stage { position: relative; display: flex; flex-direction: column; height: 100%; }
+.flow-svg { flex: 1; width: 100%; height: 100%; min-height: 0; }
+.car-body { fill: rgba(255,255,255,.03); stroke: var(--border-hi); stroke-width: 1.5; }
+.car-windshield { fill: rgba(56,189,248,.06); stroke: var(--border); stroke-width: 1; }
+.car-hood-line { stroke: var(--border); stroke-width: 1; }
+.wheel { fill: #0a0a0a; stroke: var(--border-hi); stroke-width: 1.5; transition: stroke .3s, fill .3s; }
+.wheel.tracting-ev  { stroke: var(--green); fill: rgba(34,197,94,.22); }
+.wheel.tracting-ice { stroke: var(--orange); fill: rgba(251,146,60,.22); }
+.wheel.regen        { stroke: var(--teal); fill: rgba(34,211,238,.30); }
+.comp-bg { fill: var(--panel-lift); stroke: var(--border-hi); stroke-width: 1.5; transition: stroke .3s, fill .3s; }
+.comp-bg.active { stroke: var(--green); fill: rgba(34,197,94,.15); }
+.comp-bg.ice    { stroke: var(--orange); fill: rgba(251,146,60,.18); }
+.comp-bg.charge { stroke: var(--blue); fill: rgba(56,189,248,.15); }
+.comp-emoji { font-size: 16px; text-anchor: middle; dominant-baseline: middle; pointer-events: none; }
+.comp-label { font-size: 9px; fill: var(--muted); text-anchor: middle; letter-spacing: .08em; text-transform: uppercase; font-weight: 700; }
+.comp-value { font-size: 11px; fill: var(--text); text-anchor: middle; font-weight: 700; font-variant-numeric: tabular-nums; }
+.comp-value.ice { fill: var(--orange); } .comp-value.green { fill: var(--green); }
+.comp-value.teal { fill: var(--teal); } .comp-value.blue { fill: var(--blue); } .comp-value.muted { fill: var(--muted); }
+.flow-line { stroke: var(--border-hi); stroke-width: 2; fill: none; transition: stroke .3s, stroke-width .3s, opacity .3s; opacity: .25; }
+.flow-line.active { stroke: var(--green); stroke-width: 2.5; opacity: 1; }
+.flow-line.ice { stroke: var(--orange); } .flow-line.regen { stroke: var(--teal); } .flow-line.charge { stroke: var(--blue); }
+.flow-line.flowing { stroke-dasharray: 5 4; animation: dash-flow 1.1s linear infinite; }
+.flow-line.flowing.reverse { animation-direction: reverse; }
+@keyframes dash-flow { to { stroke-dashoffset: -18; } }
+.flow-mode {
+  align-self: center; margin-top: 2px;
+  background: var(--panel-lift); border: 1px solid var(--border-hi); color: var(--text);
+  font-size: 14px; font-weight: 700; letter-spacing: .18em; text-transform: uppercase;
+  padding: 7px 18px; border-radius: var(--r-pill); transition: color .3s, border-color .3s, background .3s;
+}
+.flow-mode.ev-awd   { color: var(--green);  border-color: var(--green);  background: rgba(34,197,94,.20); }
+.flow-mode.ev-rwd, .flow-mode.ev-fwd { color: var(--green); border-color: var(--green); background: rgba(34,197,94,.12); }
+.flow-mode.regen    { color: var(--teal);   border-color: var(--teal);   background: rgba(34,211,238,.18); }
+.flow-mode.serie    { color: var(--orange); border-color: var(--orange); background: rgba(251,146,60,.14); }
+.flow-mode.paralelo { color: var(--orange); border-color: var(--orange); background: rgba(251,146,60,.18); }
+.flow-mode.split    { color: var(--yellow); border-color: var(--yellow); background: rgba(250,204,21,.16); }
+.flow-mode.carga    { color: var(--blue);   border-color: var(--blue);   background: rgba(56,189,248,.16); }
+.flow-mode.idle     { color: var(--muted);  border-color: var(--border); }
+
+/* ───────── Navegar — BIG fixed touch target ───────── */
+.nav-btn {
+  position: absolute; z-index: 30; right: 32px; bottom: 32px;
+  background: linear-gradient(135deg, #38bdf8, #0ea5e9); color: #fff;
+  border: none; border-radius: var(--r-pill);
+  min-height: 76px; padding: 0 34px;
+  font-size: 22px; font-weight: 700;
+  display: flex; align-items: center; gap: 12px; cursor: pointer;
+  box-shadow: 0 10px 34px rgba(14,165,233,.5);
+  -webkit-tap-highlight-color: transparent; transition: transform .12s ease-out;
+}
+.nav-btn:active { transform: scale(.96); }
+.nav-btn .ico { font-size: 28px; }
+
+/* Nav menu overlay — big rows */
+.nav-overlay { position: absolute; inset: 0; z-index: 100; background: rgba(0,0,0,.8); backdrop-filter: blur(10px); display: none; align-items: center; justify-content: center; }
+.nav-overlay.show { display: flex; }
+.nav-card { background: var(--panel); border: 1px solid var(--border-hi); border-radius: 28px; padding: 28px; width: 560px; max-width: 90%; display: flex; flex-direction: column; gap: 14px; }
+.nav-card h4 { font-size: 18px; color: var(--muted); letter-spacing: .12em; text-transform: uppercase; margin-bottom: 6px; }
+.nav-btn-row { display: flex; flex-direction: column; gap: 14px; }
+.nav-card button {
+  background: var(--panel-lift); border: 1px solid var(--border); color: var(--text);
+  min-height: 78px; padding: 0 24px; border-radius: 18px; font-size: 22px; cursor: pointer;
+  display: flex; align-items: center; gap: 16px; transition: background .15s, border-color .15s;
+}
+.nav-card button:active { background: var(--border-hi); }
+.nav-card button .em { font-size: 28px; }
+.nav-card button .meta { color: var(--muted); margin-left: auto; font-size: 15px; }
+.nav-card button.close { justify-content: center; color: var(--muted); border-style: dashed; min-height: 64px; font-size: 18px; }
+
+/* Map layers */
+.map-bg { position: absolute; inset: 0; z-index: 0; }
+.map-bg.dim::after { content: ''; position: absolute; inset: 0; background: radial-gradient(ellipse at center, rgba(0,0,0,.55) 25%, rgba(0,0,0,.86) 100%); }
+.map-fake { position: absolute; inset: 0; background:
+  radial-gradient(circle at 30% 40%, #14233a, transparent 45%),
+  radial-gradient(circle at 70% 60%, #0e1b2c, transparent 50%),
+  #060a12; }
+.map-fake::before { content:''; position:absolute; inset:0;
+  background-image:
+    linear-gradient(rgba(120,150,190,.10) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(120,150,190,.10) 1px, transparent 1px);
+  background-size: 90px 90px, 90px 90px; }
+.car-pin { position: absolute; top: 50%; left: 50%; width: 30px; height: 30px; transform: translate(-50%,-50%);
+  background: radial-gradient(circle,#22c55e,#15803d); border: 4px solid #000; border-radius: 50%;
+  box-shadow: 0 0 24px rgba(34,197,94,.7), 0 0 4px #000; }
+
+#toast { position: absolute; bottom: 22px; left: 50%; transform: translateX(-50%); background: var(--panel-lift); border: 1px solid var(--border-hi); color: var(--text); padding: 14px 26px; border-radius: var(--r-pill); font-size: 16px; opacity: 0; transition: opacity .3s; pointer-events: none; z-index: 9999; }
+#toast.show { opacity: 1; }
+
+/* ───────── Painel de controles (botões grandes — alvos de toque) ─────────
+   Surfaça aqui as funções que hoje vivem no PWA (lock / A-C / fan / hazard…).
+   Cada tile é um alvo ≥110px. Estado "on" = verde; hazard "on" = vermelho. */
+.ctrl-grid { flex: 1; display: grid; gap: 14px; min-height: 0; }
+.ctrl-tile {
+  background: var(--panel-lift); border: 1px solid var(--border-hi);
+  border-radius: 22px; padding: 16px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
+  cursor: pointer; min-height: 116px; text-align: center;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform .12s ease-out, background .2s, border-color .2s;
+}
+.ctrl-tile:active { transform: scale(.96); }
+.ctrl-tile .ic { font-size: 40px; line-height: 1; }
+.ctrl-tile .lbl { font-size: 18px; font-weight: 700; letter-spacing: .01em; }
+.ctrl-tile .st { font-size: 14px; color: var(--muted); font-weight: 600; }
+.ctrl-tile.on { background: rgba(34,197,94,.15); border-color: var(--green); }
+.ctrl-tile.on .ic, .ctrl-tile.on .st { color: var(--green); }
+.ctrl-tile.danger.on { background: rgba(239,68,68,.16); border-color: var(--red); }
+.ctrl-tile.danger.on .ic, .ctrl-tile.danger.on .st { color: var(--red); animation: haz-blink 1s steps(1) infinite; }
+@keyframes haz-blink { 50% { opacity: .35; } }
+/* tile-stepper (temperatura / ventilação) */
+.ctrl-tile.stepper { gap: 6px; }
+.ctrl-tile.stepper .top { display: flex; align-items: center; gap: 8px; }
+.ctrl-tile.stepper .top .ic { font-size: 24px; }
+.ctrl-tile.stepper .top .lbl { font-size: 14px; color: var(--muted); letter-spacing: .12em; text-transform: uppercase; }
+.ctrl-step-row { display: flex; align-items: center; justify-content: center; gap: 16px; }
+.ctrl-step-row button {
+  width: 64px; height: 64px; border-radius: 50%; flex-shrink: 0;
+  background: rgba(34,197,94,.12); color: var(--green); border: 1px solid var(--green);
+  font-size: 34px; font-weight: 700; cursor: pointer; font-family: inherit;
+  display: flex; align-items: center; justify-content: center;
+}
+.ctrl-step-row button:active { transform: scale(.9); }
+.ctrl-step-row .val { font-size: 46px; font-weight: 300; font-variant-numeric: tabular-nums; min-width: 110px; }
+.ctrl-step-row .val small { font-size: 18px; color: var(--muted); font-weight: 500; }
+
+/* gauge compacto (SOC/Fuel menores p/ liberar espaço aos controles) */
+.gauge-mini { display: flex; align-items: center; gap: 12px; }
+.gauge-mini .ring { position: relative; width: 118px; height: 118px; flex-shrink: 0; }
+.gauge-mini .ring svg { width: 118px; height: 118px; }
+.gauge-mini .ring .gauge-center .gauge-big { font-size: 40px; }
+.gauge-mini .ring .gauge-center .gauge-big .pct { font-size: 18px; }
+.gauge-mini .meta .m-lbl { font-size: 13px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); display: flex; align-items: center; gap: 5px; white-space: nowrap; }
+.gauge-mini .meta .m-main { font-size: 22px; font-weight: 700; margin-top: 4px; }
+.gauge-mini .meta .m-sub { font-size: 14px; color: var(--muted); margin-top: 2px; }
+.gauge-mini .meta .m-main.green { color: var(--green); }
+.gauge-mini .meta .m-main.orange { color: var(--orange); }
+
+</style>
 <style>
   html, body { background: #000; margin: 0; height: 100%; }
   #fit { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: #000; overflow: hidden; }
@@ -809,6 +1093,15 @@
   // relógio inicial + badge offline até o 1º snapshot
   const ck=$('clock'); if(ck) ck.textContent=new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
   setInterval(()=>{ const e=$('clock'); if(e) e.textContent=new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}); }, 30000);
+  try {
+    const cs = getComputedStyle(document.documentElement);
+    const cp = document.querySelector('.cockpit');
+    console.log('[diag] --text=' + cs.getPropertyValue('--text').trim() +
+      ' --panel=' + cs.getPropertyValue('--panel').trim() +
+      ' cockpit=' + (cp ? cp.offsetWidth + 'x' + cp.offsetHeight : 'null') +
+      ' win=' + window.innerWidth + 'x' + window.innerHeight +
+      ' bodyBg=' + getComputedStyle(document.body).backgroundColor);
+  } catch (e) { console.log('[diag] erro: ' + e.message); }
   console.log('[controles] embarcado pronto · aguardando applyNativeSnapshot');
 })();
 </script>
