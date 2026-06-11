@@ -34,7 +34,13 @@ import org.json.JSONObject
  */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-fun ControlesLayout(hd: HomeData, onOpenSettings: () -> Unit) {
+fun ControlesLayout(
+    hd: HomeData,
+    onOpenSettings: () -> Unit,
+    onOpenRecargas: () -> Unit = {},
+    onOpenViagens: () -> Unit = {},
+    onCheckUpdate: () -> Unit = {},
+) {
     val hdState = rememberUpdatedState(hd)
     val webHolder = remember { arrayOfNulls<WebView>(1) }
 
@@ -54,7 +60,10 @@ fun ControlesLayout(hd: HomeData, onOpenSettings: () -> Unit) {
                 isHorizontalScrollBarEnabled = false
                 webViewClient = WebViewClient()
                 WebView.setWebContentsDebuggingEnabled(true)
-                addJavascriptInterface(EcotripCarBridge(onOpenSettings), "EcotripCarBridge")
+                addJavascriptInterface(
+                    EcotripCarBridge(onOpenSettings, onOpenRecargas, onOpenViagens, onCheckUpdate),
+                    "EcotripCarBridge",
+                )
                 loadUrl("file:///android_asset/controles/cockpit.html")
                 webHolder[0] = this
             }
@@ -79,7 +88,14 @@ fun ControlesLayout(hd: HomeData, onOpenSettings: () -> Unit) {
 }
 
 /** Ponte JS→Kotlin. postCommand recebe {__cmd,value} e despacha in-process. */
-private class EcotripCarBridge(private val onOpenSettings: () -> Unit) {
+private class EcotripCarBridge(
+    private val onOpenSettings: () -> Unit,
+    private val onOpenRecargas: () -> Unit,
+    private val onOpenViagens: () -> Unit,
+    private val onCheckUpdate: () -> Unit,
+) {
+    private fun main(block: () -> Unit) = Handler(Looper.getMainLooper()).post(block)
+
     @JavascriptInterface
     fun postCommand(json: String) {
         try {
@@ -94,10 +110,10 @@ private class EcotripCarBridge(private val onOpenSettings: () -> Unit) {
         } catch (_: Exception) { /* comando malformado — ignora */ }
     }
 
-    @JavascriptInterface
-    fun openSettings() {
-        Handler(Looper.getMainLooper()).post { onOpenSettings() }
-    }
+    @JavascriptInterface fun openSettings() = main(onOpenSettings)
+    @JavascriptInterface fun openRecargas() = main(onOpenRecargas)
+    @JavascriptInterface fun openViagens() = main(onOpenViagens)
+    @JavascriptInterface fun checkUpdate() = main(onCheckUpdate)
 }
 
 private fun ptBr(v: Float, dec: Int): String =

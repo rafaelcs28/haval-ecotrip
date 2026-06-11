@@ -522,14 +522,20 @@ fun ConsumptionScreen() {
         IconButton(onClick = { showSettings = true }) { Icon(Icons.Default.Settings, "Configurações", tint = TextSecondary) }
     }
 
-    // Controles (3) ocupa a tela cheia (1920×720): a faixa esquerda 128px + barra
-    // de status 60px são reservadas ao sistema dentro do próprio HTML, então NÃO
-    // aplica systemBarsPadding aqui (senão a área reservada conta em dobro).
-    Box(modifier = Modifier.fillMaxSize().then(if (homeLayout == 3) Modifier else Modifier.systemBarsPadding())) {
+    // systemBarsPadding insere o conteúdo na área segura (1792×660 no head unit):
+    // a dock esquerda (128px) e a barra de status (60px) do sistema ficam fora.
+    // O layout Controles (WebView) preenche essa área (HTML sem reservar faixas).
+    Box(modifier = Modifier.fillMaxSize().systemBarsPadding()) {
         when (homeLayout) {
             0 -> HomeTeslaLayout(hd, actions = navActions) { m -> InteractiveCar(hd, m) }
             1 -> HomeEuropeanLayout(hd, actions = navActions)
-            3 -> ControlesLayout(hd) { showSettings = true }
+            3 -> ControlesLayout(
+                hd,
+                onOpenSettings = { showSettings = true },
+                onOpenRecargas = { showChargeHistory = true },
+                onOpenViagens = { showAutoTrips = true },
+                onCheckUpdate = { if (updateMgr.isUpdateAvailable) updateMgr.downloadAndInstall(context) else updateMgr.checkForUpdate() },
+            )
             else -> HomeClaudeLayout(hd, actions = navActions) { m -> InteractiveCar(hd, m) }
         }
 

@@ -10,41 +10,39 @@
   html, body { background: #000; margin: 0; height: 100%; }
   #fit { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: #000; overflow: hidden; }
 
-  /* ── tela física: 1920×720 ── */
+  /* ── tela embarcada: o WebView JÁ é a área segura (systemBarsPadding no Compose),
+     então o HTML preenche 100% sem reservar faixas. --topbar = nossa barra. ── */
   .cockpit {
-    width: 1920px; height: 720px; display: block; position: relative;
-    transform-origin: center center; overflow: hidden;
+    width: 100vw; height: 100vh; display: block; position: relative;
+    overflow: hidden;
     --r-panel: 22px;
+    --sys-left: 0px;
+    --sys-top: 40px;
   }
 
-  /* ───────── Faixa esquerda (128px) — RESERVADA ao sistema do próprio carro.
-     Deixada em branco de propósito; o conteúdo do app começa em left:128. ───────── */
-  .cfg-btn { margin-left: 12px; width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 16px; color: var(--text); background: rgba(255,255,255,.06); border: 1px solid var(--border-hi); cursor: pointer; transition: transform .1s, background .15s; }
+  .cfg-btn { margin-left: 10px; width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 15px; color: var(--text); background: rgba(255,255,255,.06); border: 1px solid var(--border-hi); cursor: pointer; transition: transform .1s, background .15s; }
   .cfg-btn:active { transform: scale(.9); }
 
-  /* ───────── Barra de status (topo · 60px · à direita da faixa do carro) ───────── */
+  /* ───────── Barra de status (topo · à direita da dock do carro) ───────── */
   .topbar {
-    position: absolute; left: 128px; top: 0; width: 1792px; height: 60px;
+    position: absolute; left: var(--sys-left); top: 0; width: calc(100vw - var(--sys-left)); height: var(--sys-top);
     z-index: 20;
   }
 
-  /* ───────── Área útil (1792×660) ───────── */
+  /* ───────── Área útil — coluna única (controles + viagem), sem vitais ───────── */
   .v4 {
-    position: absolute; left: 128px; top: 60px; width: 1792px; height: 660px;
+    position: absolute; left: var(--sys-left); top: var(--sys-top); width: calc(100vw - var(--sys-left)); height: calc(100vh - var(--sys-top));
     display: grid;
-    grid-template-columns: 1fr 400px;
-    grid-template-rows: 1fr 96px;
-    gap: 12px; padding: 12px 28px 12px 12px; min-height: 0;
+    grid-template-columns: 1fr;
+    grid-template-rows: 1fr 78px;
+    gap: 8px; padding: 6px 14px 8px 8px; min-height: 0;
   }
+  .v4 .p-ctrl .panel-h, .v4 .ctrl-area .area-h { margin: 0; }
+  .v4 .ctrl-area { padding: 10px; gap: 7px; }
+  .v4 .cond .seg-tile { padding: 5px 10px; gap: 4px; }
+  .v4 .cond-actions { gap: 7px; }
 
-  /* coluna direita — vitais empilhados */
-  .v4 .vitals { grid-column: 2; grid-row: 1; display: grid; grid-template-rows: 1.25fr 0.82fr 1fr; gap: 12px; min-height: 0; }
-  .v4 .p-power { padding: 14px 20px; display: flex; flex-direction: column; min-height: 0; }
-  .v4 .p-speed { padding: 12px 18px; display: flex; flex-direction: column; min-height: 0; }
-  .v4 .gauges  { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; min-height: 0; }
-  .v4 .p-soc, .v4 .p-fuel { padding: 12px; display: flex; align-items: center; justify-content: center; min-height: 0; }
-
-  /* centro — controles (à esquerda) */
+  /* coluna única — controles ocupam toda a largura */
   .v4 .p-ctrl  { grid-column: 1; grid-row: 1; padding: 12px 16px; display: flex; flex-direction: column; gap: 9px; min-height: 0; }
   /* base — viagem (faixa horizontal) */
   .v4 .p-trip  { grid-column: 1 / -1; grid-row: 2; padding: 8px 22px 6px; display: flex; flex-direction: column; gap: 4px; min-height: 0; overflow: hidden; }
@@ -263,80 +261,16 @@
       <span class="dot" id="conn-dot" style="display:none"></span><span class="lbl" id="conn-lbl" style="display:none"></span>
       <div class="conn-mode cloud" id="source-badge" onclick="onConnTap()">☁ Nuvem</div>
       <div class="lbl" style="margin-left:8px">Carro</div><div class="dot" id="car-dot"></div><div class="lbl" id="car-lbl">—</div>
-      <div class="cfg-btn" id="cfg-btn" onclick="openConfig()">⚙️</div>
+      <div class="cfg-btn" id="upd-btn" onclick="checkUpdate()" title="Atualizar">⬇️</div>
+      <div class="cfg-btn" id="rec-btn" onclick="openRecargas()" title="Recargas">🔋</div>
+      <div class="cfg-btn" id="via-btn" onclick="openViagens()" title="Viagens">🚗</div>
+      <div class="cfg-btn" id="cfg-btn" onclick="openConfig()" title="Configurações">⚙️</div>
     </div>
   </div>
 
   <div class="v4">
 
-    <!-- COLUNA ESQUERDA · VITAIS -->
-    <div class="vitals">
-
-      <!-- POWER -->
-      <div class="panel p-power">
-        <div class="panel-h"><span class="ico">⚡</span> Potência</div>
-        <div class="power-row">
-          <div class="power-num"><span class="power-val idle" id="power-val">0</span><span class="power-unit">kW</span></div>
-          <div class="power-meta">
-            <div class="power-bar">
-              <div class="power-bar-mid"></div>
-              <div class="power-bar-fill drive" id="power-bar-drive"></div>
-              <div class="power-bar-fill regen" id="power-bar-regen"></div>
-            </div>
-            <div class="power-scale"><span>−50 regen</span><span>0</span><span>+120 boost</span></div>
-          </div>
-        </div>
-      </div>
-
-      <!-- SPEED -->
-      <div class="panel p-speed">
-        <div class="panel-h"><span class="ico">🏎️</span> Velocidade</div>
-        <div class="mid">
-          <div class="speed-block"><span class="speed-val" id="speed-val">—</span><span class="speed-unit">km/h</span></div>
-          <div class="speed-max" style="margin-top:4px">máx <strong id="speed-max">—</strong> km/h</div>
-        </div>
-      </div>
-
-      <!-- SOC + FUEL minis -->
-      <div class="gauges">
-        <div class="panel p-soc">
-          <div class="gauge-mini">
-            <div class="ring">
-              <svg viewBox="0 0 200 200">
-                <circle class="gauge-track" cx="100" cy="100" r="80"/>
-                <circle class="gauge-fill soc" id="soc-arc" cx="100" cy="100" r="80" stroke-dasharray="502.65" stroke-dashoffset="502.65" transform="rotate(-90 100 100)"/>
-              </svg>
-              <div class="gauge-center"><div class="gauge-big"><span id="soc-pct">—</span><span class="pct">%</span></div></div>
-            </div>
-            <div class="meta">
-              <div class="m-lbl"><span>🔋</span> Bateria</div>
-              <div class="m-main green"><span id="soc-range">— km</span></div>
-              <div class="m-sub">EV · <span id="soc-kwh">— kWh</span></div>
-            </div>
-          </div>
-        </div>
-
-        <div class="panel p-fuel">
-          <div class="gauge-mini">
-            <div class="ring">
-              <svg viewBox="0 0 200 200">
-                <circle class="gauge-track" cx="100" cy="100" r="80"/>
-                <circle class="gauge-fill fuel" id="fuel-arc" cx="100" cy="100" r="80" stroke-dasharray="502.65" stroke-dashoffset="502.65" transform="rotate(-90 100 100)"/>
-              </svg>
-              <div class="gauge-center"><div class="gauge-big"><span id="fuel-l">—</span><span class="pct">L</span></div></div>
-            </div>
-            <div class="meta">
-              <div class="m-lbl"><span>⛽</span> Combustível</div>
-              <div class="m-main orange"><span id="fuel-range">— km</span></div>
-              <div class="m-sub">ICE · <span id="fuel-pct">— %</span></div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-    </div>
-
-    <!-- CONTROLES (centro) — 3 áreas: Condução · Climatização · Veículo -->
+    <!-- CONTROLES — 3 áreas: Condução · Climatização · Veículo (coluna única, sem vitais) -->
     <div class="panel p-ctrl">
       <div class="panel-h"><span class="ico">🎛️</span> Controles rápidos</div>
       <div class="ctrl-areas">
@@ -364,7 +298,7 @@
             <div class="seg-tile">
               <div class="seg-h"><span>🔋</span> Tração</div>
               <div class="seg" id="seg-power">
-                <button class="on" id="hev-btn" title="Toque: ativa HEV · Segure (Force Touch): opções">HEV</button>
+                <button id="hev-btn" title="Toque: ativa HEV · Segure (Force Touch): opções">HEV</button>
                 <button onclick="setPower(this,'prio_ev')">Prior. EV</button>
                 <button onclick="setPower(this,'ev')">EV</button>
               </div>
@@ -676,10 +610,19 @@
   }
   bindVFader('d'); bindVFader('p');
 
-  /* ── Config (abre os ajustes do app via bridge) ── */
-  window.openConfig=()=>{ try{ if(window.EcotripCarBridge && window.EcotripCarBridge.openSettings) window.EcotripCarBridge.openSettings(); }catch(_){} };
+  /* ── Botões do topo (abrem overlays Compose via bridge) ── */
+  const _br=(fn)=>{ try{ if(window.EcotripCarBridge && window.EcotripCarBridge[fn]) window.EcotripCarBridge[fn](); }catch(_){} };
+  window.openConfig=()=>_br('openSettings');
+  window.openRecargas=()=>_br('openRecargas');
+  window.openViagens=()=>_br('openViagens');
+  window.checkUpdate=()=>_br('checkUpdate');
   // Badge reproposto: No carro / Offline (sem LAN/Nuvem no embarcado)
   window.onConnTap=()=>{ toast('Rodando no carro'); };
+
+  /* ── Refresh dos estados que não auto-populam (drive_mode some do snapshot
+     até ser lido). Dispara já na carga + de novo após 4s. ── */
+  function refreshDriveStates(){ ['refresh_drive_mode','refresh_power_reserve','refresh_charge_soc_target','refresh_charge_limit'].forEach(c=>EcotripCmd(c,'')); }
+  setTimeout(refreshDriveStates, 800); setTimeout(refreshDriveStates, 4000);
 
   /* ════════════════════════════════════════════════════════════════════════
      applyNativeSnapshot — pinta leituras + reflete estado dos controles.
