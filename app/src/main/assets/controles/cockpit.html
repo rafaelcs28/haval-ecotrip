@@ -1,0 +1,787 @@
+<!-- @dsCard group="Cockpit" viewport="1920x720" name="V4 — Controles · 1920×720" subtitle="A escolhida redimensionada p/ head-unit widescreen · barra status 60 + nav 128 · útil 1792×660" -->
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover">
+<title>Haval Cockpit · V4 Controles · 1920×720</title>
+<link rel="stylesheet" href="cockpit-base.css">
+<style>
+  html, body { background: #000; margin: 0; height: 100%; }
+  #fit { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: #000; overflow: hidden; }
+
+  /* ── tela física: 1920×720 ── */
+  .cockpit {
+    width: 1920px; height: 720px; display: block; position: relative;
+    transform-origin: center center; overflow: hidden;
+    --r-panel: 22px;
+  }
+
+  /* ───────── Faixa esquerda (128px) — RESERVADA ao sistema do próprio carro.
+     Deixada em branco de propósito; o conteúdo do app começa em left:128. ───────── */
+  .cfg-btn { margin-left: 12px; width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 16px; color: var(--text); background: rgba(255,255,255,.06); border: 1px solid var(--border-hi); cursor: pointer; transition: transform .1s, background .15s; }
+  .cfg-btn:active { transform: scale(.9); }
+
+  /* ───────── Barra de status (topo · 60px · à direita da faixa do carro) ───────── */
+  .topbar {
+    position: absolute; left: 128px; top: 0; width: 1792px; height: 60px;
+    z-index: 20;
+  }
+
+  /* ───────── Área útil (1792×660) ───────── */
+  .v4 {
+    position: absolute; left: 128px; top: 60px; width: 1792px; height: 660px;
+    display: grid;
+    grid-template-columns: 1fr 400px;
+    grid-template-rows: 1fr 96px;
+    gap: 12px; padding: 12px 28px 12px 12px; min-height: 0;
+  }
+
+  /* coluna direita — vitais empilhados */
+  .v4 .vitals { grid-column: 2; grid-row: 1; display: grid; grid-template-rows: 1.25fr 0.82fr 1fr; gap: 12px; min-height: 0; }
+  .v4 .p-power { padding: 14px 20px; display: flex; flex-direction: column; min-height: 0; }
+  .v4 .p-speed { padding: 12px 18px; display: flex; flex-direction: column; min-height: 0; }
+  .v4 .gauges  { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; min-height: 0; }
+  .v4 .p-soc, .v4 .p-fuel { padding: 12px; display: flex; align-items: center; justify-content: center; min-height: 0; }
+
+  /* centro — controles (à esquerda) */
+  .v4 .p-ctrl  { grid-column: 1; grid-row: 1; padding: 12px 16px; display: flex; flex-direction: column; gap: 9px; min-height: 0; }
+  /* base — viagem (faixa horizontal) */
+  .v4 .p-trip  { grid-column: 1 / -1; grid-row: 2; padding: 8px 22px 6px; display: flex; flex-direction: column; gap: 4px; min-height: 0; overflow: hidden; }
+  .v4 .p-trip .panel-h { flex: none; }
+
+  /* POWER — número grande + barra, empilhados na coluna estreita */
+  .v4 .power-row { flex: 1; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 14px; }
+  .v4 .power-num { display: flex; align-items: baseline; }
+  .v4 .power-val { font-size: 78px; letter-spacing: -3px; line-height: .9; }
+  .v4 .power-unit { font-size: 26px; }
+  .v4 .power-meta { width: 100%; display: flex; flex-direction: column; gap: 8px; flex: none; }
+  .v4 .power-bar { width: 100%; margin: 0; height: 22px; }
+  .v4 .power-scale { width: 100%; margin: 0; font-size: 12px; }
+
+  /* SPEED */
+  .v4 .p-speed .mid { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+  .v4 .speed-val { font-size: 70px; }
+  .v4 .speed-unit { font-size: 20px; }
+  .v4 .speed-max { font-size: 18px; }
+
+  /* GAUGES mini — empilhados (anel em cima, meta embaixo) p/ caber na coluna */
+  .v4 .gauge-mini { flex-direction: column; gap: 7px; text-align: center; }
+  .v4 .gauge-mini .ring { width: 100px; height: 100px; }
+  .v4 .gauge-mini .ring svg { width: 100px; height: 100px; }
+  .v4 .gauge-mini .ring .gauge-center .gauge-big { font-size: 30px; letter-spacing: -1px; }
+  .v4 .gauge-mini .ring .gauge-center .gauge-big .pct { font-size: 13px; margin-left: 1px; }
+  .v4 .gauge-mini .meta { text-align: center; }
+  .v4 .gauge-mini .meta .m-lbl { justify-content: center; font-size: 12px; }
+  .v4 .gauge-mini .meta .m-main { font-size: 19px; margin-top: 2px; }
+  .v4 .gauge-mini .meta .m-sub { font-size: 12px; }
+
+  /* ── 3 áreas de controles rápidos ── */
+  .ctrl-areas { flex: 1; display: grid; grid-template-columns: 1.18fr 1.32fr 1fr; gap: 12px; min-height: 0; }
+  .ctrl-area { background: rgba(255,255,255,.02); border: 1px solid var(--border); border-radius: 18px; padding: 12px; display: flex; flex-direction: column; gap: 9px; min-height: 0; }
+  .area-h { font-size: 12px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); display: flex; align-items: center; gap: 7px; }
+  .area-h .ico { font-size: 16px; }
+  .area-grid { flex: 1; display: grid; gap: 9px; min-height: 0; }
+  .area-grid.clima { display: flex; flex-direction: column; gap: 7px; }
+  .area-grid.cond  { display: flex; flex-direction: column; gap: 8px; }
+  .area-grid.veic  { display: flex; flex-direction: column; gap: 8px; }
+  .clima-toggles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; }
+  /* Ventilação dos bancos — faders verticais (card Veículo) */
+  .seat-vfaders { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .vfader { background: var(--panel-lift); border: 1px solid var(--border-hi); border-radius: 14px; padding: 7px 7px; display: flex; flex-direction: column; align-items: center; gap: 4px; cursor: pointer; -webkit-tap-highlight-color: transparent; transition: border-color .2s, background .2s; }
+  .vfader.on { border-color: rgba(34,197,94,.45); background: rgba(34,197,94,.06); }
+  .vfader .vf-head { display: flex; align-items: center; gap: 5px; }
+  .vfader .vf-ic { font-size: 18px; line-height: 1; }
+  .vfader .vf-name { font-size: 11px; font-weight: 700; color: var(--text); }
+  .vfader .vf-track { width: 100%; max-width: 66px; height: 56px; border-radius: 12px; background: var(--border); display: flex; flex-direction: column; align-items: center; justify-content: space-between; padding: 4px 0; touch-action: none; user-select: none; }
+  .vfader .vf-ar { font-size: 9px; color: var(--dim); line-height: 1; pointer-events: none; }
+  .vfader .vf-segs { flex: 1; align-self: stretch; display: flex; flex-direction: column-reverse; gap: 5px; padding: 4px 8px; min-height: 0; pointer-events: none; }
+  .vfader .vf-seg { flex: 1; border-radius: 6px; background: rgba(255,255,255,.07); transition: background .15s, box-shadow .15s; }
+  .vfader .vf-seg.on { background: var(--green); box-shadow: 0 0 8px rgba(34,197,94,.35); }
+  .vfader .vf-val { font-size: 13px; font-weight: 700; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .vfader.on .vf-val { color: var(--green); }
+  /* compacta o card Veículo p/ caber Aberturas + Bancos */
+  .area-grid.veic { gap: 8px; }
+  .area-grid.veic .sub-h { margin-top: 0; }
+  .area-grid.veic .seg-tile { padding: 6px 10px; gap: 4px; }
+  .area-grid.veic .seg button { padding: 8px 3px; }
+  .area-grid.veic .slider-tile { padding: 9px 13px; gap: 7px; }
+  .area-grid.veic .cv-slider { height: 14px; }
+  .area-grid.veic .vent-btn { padding: 7px; margin-top: 2px; }
+  /* faders de temperatura/ventilação maiores (espaço liberado pelos bancos) */
+  .area-grid.clima .sliders { justify-content: space-between; gap: 12px; }
+  .area-grid.clima .sliders .slider-tile { padding: 13px 14px; gap: 12px; }
+  .area-grid.clima .sliders .cv-slider { height: 16px; }
+  .area-grid.clima .sliders .cv-slider::-webkit-slider-thumb { width: 38px; height: 38px; }
+  .area-grid.clima .sliders .cv-slider::-moz-range-thumb { width: 38px; height: 38px; }
+  .sliders { display: flex; flex-direction: column; gap: 7px; flex: 1; justify-content: center; }
+  .clima-toggles .ctrl-tile { padding: 7px 4px; gap: 3px; }
+  .clima-toggles .ctrl-tile .ic { font-size: 20px; }
+  .clima-toggles .ctrl-tile .lbl { font-size: 11px; }
+  .clima-toggles .ctrl-tile .st { font-size: 10px; }
+  .cond-actions { flex: 1; display: grid; grid-template-columns: 1fr 1fr 0.66fr; gap: 8px; align-items: stretch; min-height: 0; }
+  .cond-actions .ctrl-tile { height: 100%; }
+  .cond-actions .ctrl-tile.danger .ic { display: flex; color: var(--red); }
+  .cond-actions .ctrl-tile.danger .ic svg { width: 27px; height: 27px; }
+  .cond-actions .ctrl-tile.danger .lbl { white-space: nowrap; }
+  /* ESP — toggle compacto on/off */
+  .esp-toggle { height: 100%; background: var(--panel-lift); border: 1px solid var(--border-hi); border-radius: 14px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 8px 6px; cursor: pointer; -webkit-tap-highlight-color: transparent; transition: background .2s, border-color .2s, transform .12s; }
+  .esp-toggle:active { transform: scale(.96); }
+  .esp-toggle .ic { font-size: 20px; line-height: 1; }
+  .esp-toggle .lbl { font-size: 12px; font-weight: 700; }
+  .esp-toggle .st { font-size: 10px; font-weight: 600; color: var(--muted); }
+  .esp-toggle .sw { width: 44px; height: 24px; border-radius: 999px; background: var(--border); position: relative; flex-shrink: 0; transition: background .2s; }
+  .esp-toggle .sw::after { content: ''; position: absolute; top: 2px; left: 2px; width: 20px; height: 20px; border-radius: 50%; background: #f5f5f5; transition: transform .2s; }
+  .esp-toggle.on { background: rgba(34,197,94,.06); border-color: rgba(34,197,94,.45); }
+  .esp-toggle.on .sw { background: var(--green); }
+  .esp-toggle.on .sw::after { transform: translateX(20px); }
+  .esp-toggle.on .lbl, .esp-toggle.on .st { color: var(--green); }
+  .area-grid.cond { gap: 7px; }
+  .cond .seg-tile { padding: 7px 10px; gap: 5px; }
+  .cond .seg { gap: 5px; }
+  .cond .seg button { padding: 9px 2px; font-size: 12px; }
+  .cond .seg-h { font-size: 10px; letter-spacing: .08em; }
+  /* tiles compactos dentro das áreas */
+  .ctrl-area .ctrl-tile { min-height: 0; padding: 9px 8px; gap: 3px; border-radius: 14px; }
+  .ctrl-area .ctrl-tile .ic { font-size: 23px; }
+  .ctrl-area .ctrl-tile .lbl { font-size: 12px; }
+  .ctrl-area .ctrl-tile .st { font-size: 11px; }
+  .ctrl-area .ctrl-tile.stepper .top .ic { font-size: 18px; }
+  .ctrl-area .ctrl-tile.stepper .top .lbl { font-size: 11px; }
+  .ctrl-area .ctrl-step-row { gap: 7px; }
+  .ctrl-area .ctrl-step-row button { width: 40px; height: 40px; font-size: 22px; }
+  .ctrl-area .ctrl-step-row .val { font-size: 22px; min-width: 48px; }
+  .ctrl-area .ctrl-step-row .val small { font-size: 11px; }
+  .veic .ctrl-tile { flex-direction: row; justify-content: flex-start; gap: 11px; text-align: left; padding: 0 14px; }
+  .veic .ctrl-tile .ic { font-size: 27px; }
+  .veic .ctrl-tile .lbl { font-size: 15px; }
+  .veic .ctrl-tile .txt { display: flex; flex-direction: column; }
+  /* segmentado (modo de condução / regeneração) */
+  .seg-tile { display: flex; flex-direction: column; gap: 7px; justify-content: center; background: var(--panel-lift); border: 1px solid var(--border-hi); border-radius: 14px; padding: 10px 11px; }
+  .seg-h { font-size: 11px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+  .seg { display: flex; gap: 6px; }
+  .seg button { flex: 1; padding: 11px 4px; border-radius: 10px; background: rgba(255,255,255,.04); border: 1px solid var(--border-hi); color: var(--text); font-size: 13px; font-weight: 700; font-family: inherit; cursor: pointer; transition: background .15s, border-color .15s, color .15s; }
+  .seg button:active { transform: scale(.96); }
+  .seg button.on { background: rgba(34,197,94,.06); border-color: rgba(34,197,94,.5); color: var(--green); }
+  .seg button small { display: block; font-size: 10px; font-weight: 600; opacity: .9; margin-top: 1px; letter-spacing: 0; }
+  .seg.regen button.on { background: rgba(34,211,238,.15); border-color: var(--teal); color: var(--teal); }
+  /* sliders (fan / temps) */
+  .slider-tile { background: var(--panel-lift); border: 1px solid var(--border-hi); border-radius: 12px; padding: 8px 13px; display: flex; flex-direction: column; gap: 7px; }
+  .slider-h { display: flex; align-items: center; justify-content: space-between; }
+  .slider-h .lbl { font-size: 12px; font-weight: 700; color: var(--text); display: flex; gap: 6px; align-items: center; }
+  .slider-h .sv { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .cv-slider { -webkit-appearance: none; appearance: none; width: 100%; height: 11px; border-radius: 999px; background: var(--border); outline: none; }
+  .cv-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 32px; height: 32px; border-radius: 50%; background: var(--green); border: 4px solid #0a0a0a; cursor: pointer; box-shadow: 0 2px 10px rgba(0,0,0,.55); }
+  .cv-slider::-moz-range-thumb { width: 32px; height: 32px; border-radius: 50%; background: var(--green); border: 4px solid #0a0a0a; cursor: pointer; }
+  .cv-slider.teal::-webkit-slider-thumb { background: var(--teal); }
+  .cv-slider.teal::-moz-range-thumb { background: var(--teal); }
+  /* sub-rótulo + aberturas */
+  .sub-h { font-size: 11px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--dim); margin-top: 1px; }
+  .veic .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .veic .aberturas { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; }
+  .veic .aberturas .ctrl-tile { flex-direction: column; text-align: center; padding: 9px 4px; gap: 3px; }
+  .veic .aberturas .ctrl-tile .ic { font-size: 22px; }
+  .veic .aberturas .ctrl-tile .lbl { font-size: 11px; }
+  .veic .aberturas .ctrl-tile .st { font-size: 10px; }
+  /* (faders de banco movidos para o card Veículo — ver .seat-vfaders) */
+  /* vidros / cortina / teto + botão de ventilação do teto */
+  .vent-btn { margin-top: 2px; width: 100%; padding: 8px; border-radius: 10px; background: rgba(255,255,255,.04); border: 1px solid var(--border-hi); color: var(--muted); font-size: 12px; font-weight: 700; font-family: inherit; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; transition: background .15s, border-color .15s, color .15s; }
+  .vent-btn.on { background: rgba(56,189,248,.22); border-color: var(--blue); color: var(--blue); }
+  .vent-btn:active { transform: scale(.97); }
+  /* pisca grande na base do card veículo — fundo vermelho, desenho branco */
+  .veic .haz-big { margin-top: auto; min-height: 92px; border-radius: 16px; justify-content: center; gap: 12px; background: var(--panel-lift); border-color: rgba(239,68,68,.55); transition: background .2s, border-color .2s; }
+  .veic .haz-big .ic { font-size: 0; display: flex; color: var(--red); }
+  .veic .haz-big .ic svg { width: 38px; height: 38px; }
+  .veic .haz-big .lbl { font-size: 19px; color: var(--text); }
+  .veic .haz-big .st { font-size: 12px; color: var(--muted); }
+  .veic .haz-big.on .ic { color: #fff; }
+  @keyframes haz-flash { 0%, 49% { background: var(--red); } 50%, 100% { background: transparent; } }
+  .v4 .veic .haz-big.on { background: var(--red); border-color: #ff6b6b; animation: haz-flash 1s steps(1) infinite; }
+  .veic .haz-big.on .lbl { color: #fff; }
+  .veic .haz-big.on .st { color: rgba(255,255,255,.9); }
+  /* popup HEV */
+  .hev-card .opt-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .hev-card .opt { background: var(--panel-lift); border: 1px solid var(--border-hi); border-radius: 16px; padding: 18px 14px; cursor: pointer; text-align: left; color: var(--text); transition: background .15s, border-color .15s; }
+  .hev-card .opt:active { transform: scale(.98); }
+  .hev-card .opt.on { background: rgba(34,197,94,.15); border-color: var(--green); }
+  .hev-card .opt .ot { font-size: 18px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+  .hev-card .opt.on .ot { color: var(--green); }
+  .hev-card .opt .od { font-size: 13px; color: var(--muted); margin-top: 4px; line-height: 1.35; }
+  .hev-soc { margin-top: 4px; display: none; }
+  .hev-soc.show { display: block; }
+  .hev-soc .slider-h .sv { font-size: 26px; color: var(--green); }
+  /* destino na viagem em curso */
+  .dest-info { margin-left: 14px; font-size: 12px; font-weight: 600; letter-spacing: .02em; color: var(--muted); text-transform: none; }
+  .dest-info b { color: var(--green); }
+  .dest-info .sep { color: var(--dim); margin: 0 7px; }
+  /* viagem — faixa compacta */
+  .v4 .trip-grid { display: flex; justify-content: flex-start; align-items: center; gap: 56px; flex: 1; padding: 0 4px; flex-wrap: nowrap; }
+  .v4 .trip-cell { flex: 0 0 auto; }
+  .v4 .trip-val { font-size: 19px; line-height: 1; }
+  .v4 .trip-val .sub { display: inline; margin: 0 0 0 5px; font-size: 11px; }
+  .v4 .trip-lbl { margin-top: 4px; font-size: 10px; }
+  .v4 .trip-val.cost { font-size: 16px; white-space: nowrap; }
+  .v4 .trip-val.cost .u { font-size: 10px; }
+
+  /* ── ajustes herdados da V4 ── */
+  .v4 .power-val.drive { color: var(--yellow); }
+  .v4 .power-val.regen { color: var(--green); }
+  .v4 .power-bar-fill.drive { background: linear-gradient(90deg, transparent, var(--yellow)); }
+  .v4 .power-bar-fill.regen { background: linear-gradient(270deg, transparent, var(--green)); }
+  .v4 .ctrl-tile.on { background: rgba(34,197,94,.06); border-color: rgba(34,197,94,.45); }
+  .hev-card .opt.on { background: rgba(34,197,94,.06); border-color: rgba(34,197,94,.45); }
+  #ctrl-sunroof { font-size: 14px; font-weight: 700; }
+  #mode-sfx { color: var(--green); font-weight: 700; text-transform: none; letter-spacing: 0; }
+  .mode-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .mode-grid button { padding: 18px 8px; border-radius: 12px; background: var(--panel-lift); border: 1px solid var(--border-hi); color: var(--text); font-size: 15px; font-weight: 700; font-family: inherit; cursor: pointer; transition: background .15s, border-color .15s, color .15s; }
+  .mode-grid button:active { transform: scale(.97); }
+  .mode-grid button.on { background: rgba(34,197,94,.06); border-color: rgba(34,197,94,.5); color: var(--green); }
+  .conn-mode { display: flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 700; letter-spacing: .06em; border-radius: 999px; padding: 3px 10px; cursor: pointer; transition: background .15s, transform .1s; }
+  .conn-mode.lan { color: var(--green); background: rgba(34,197,94,.12); border: 1px solid rgba(34,197,94,.4); }
+  .conn-mode.cloud { color: var(--blue); background: rgba(56,189,248,.12); border: 1px solid rgba(56,189,248,.4); }
+  .conn-mode:active { transform: scale(.95); }
+  .air-seg .seg { gap: 4px; }
+  .air-seg .seg button { font-size: 11px; padding: 9px 1px; }
+</style>
+</head>
+<body>
+<div id="fit">
+<div class="cockpit v4-wrap">
+
+  <!-- mapa fica no DOM (render/MapKit dependem dele) porém coberto/oculto ao fundo -->
+  <div id="cluster-map" style="position:absolute;inset:0;z-index:0;opacity:0;pointer-events:none"></div>
+
+  <!-- A faixa esquerda (128px) fica RESERVADA ao sistema do próprio carro — sem chrome do app aqui. -->
+
+  <!-- ───────── Barra de status (topo · 60px) ───────── -->
+  <div class="topbar">
+    <div class="left">
+      <div class="clock" id="clock">--:--</div>
+      <div class="lbl" id="version">HEC v1.1</div>
+    </div>
+    <div class="right">
+      <span class="dot" id="conn-dot" style="display:none"></span><span class="lbl" id="conn-lbl" style="display:none"></span>
+      <div class="conn-mode cloud" id="source-badge" onclick="onConnTap()">☁ Nuvem</div>
+      <div class="lbl" style="margin-left:8px">Carro</div><div class="dot" id="car-dot"></div><div class="lbl" id="car-lbl">—</div>
+      <div class="cfg-btn" id="cfg-btn" onclick="openConfig()">⚙️</div>
+    </div>
+  </div>
+
+  <div class="v4">
+
+    <!-- COLUNA ESQUERDA · VITAIS -->
+    <div class="vitals">
+
+      <!-- POWER -->
+      <div class="panel p-power">
+        <div class="panel-h"><span class="ico">⚡</span> Potência</div>
+        <div class="power-row">
+          <div class="power-num"><span class="power-val idle" id="power-val">0</span><span class="power-unit">kW</span></div>
+          <div class="power-meta">
+            <div class="power-bar">
+              <div class="power-bar-mid"></div>
+              <div class="power-bar-fill drive" id="power-bar-drive"></div>
+              <div class="power-bar-fill regen" id="power-bar-regen"></div>
+            </div>
+            <div class="power-scale"><span>−50 regen</span><span>0</span><span>+120 boost</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- SPEED -->
+      <div class="panel p-speed">
+        <div class="panel-h"><span class="ico">🏎️</span> Velocidade</div>
+        <div class="mid">
+          <div class="speed-block"><span class="speed-val" id="speed-val">—</span><span class="speed-unit">km/h</span></div>
+          <div class="speed-max" style="margin-top:4px">máx <strong id="speed-max">—</strong> km/h</div>
+        </div>
+      </div>
+
+      <!-- SOC + FUEL minis -->
+      <div class="gauges">
+        <div class="panel p-soc">
+          <div class="gauge-mini">
+            <div class="ring">
+              <svg viewBox="0 0 200 200">
+                <circle class="gauge-track" cx="100" cy="100" r="80"/>
+                <circle class="gauge-fill soc" id="soc-arc" cx="100" cy="100" r="80" stroke-dasharray="502.65" stroke-dashoffset="502.65" transform="rotate(-90 100 100)"/>
+              </svg>
+              <div class="gauge-center"><div class="gauge-big"><span id="soc-pct">—</span><span class="pct">%</span></div></div>
+            </div>
+            <div class="meta">
+              <div class="m-lbl"><span>🔋</span> Bateria</div>
+              <div class="m-main green"><span id="soc-range">— km</span></div>
+              <div class="m-sub">EV · <span id="soc-kwh">— kWh</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel p-fuel">
+          <div class="gauge-mini">
+            <div class="ring">
+              <svg viewBox="0 0 200 200">
+                <circle class="gauge-track" cx="100" cy="100" r="80"/>
+                <circle class="gauge-fill fuel" id="fuel-arc" cx="100" cy="100" r="80" stroke-dasharray="502.65" stroke-dashoffset="502.65" transform="rotate(-90 100 100)"/>
+              </svg>
+              <div class="gauge-center"><div class="gauge-big"><span id="fuel-l">—</span><span class="pct">L</span></div></div>
+            </div>
+            <div class="meta">
+              <div class="m-lbl"><span>⛽</span> Combustível</div>
+              <div class="m-main orange"><span id="fuel-range">— km</span></div>
+              <div class="m-sub">ICE · <span id="fuel-pct">— %</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- CONTROLES (centro) — 3 áreas: Condução · Climatização · Veículo -->
+    <div class="panel p-ctrl">
+      <div class="panel-h"><span class="ico">🎛️</span> Controles rápidos</div>
+      <div class="ctrl-areas">
+
+        <!-- ÁREA 1 · Condução (esquerda) -->
+        <div class="ctrl-area">
+          <div class="area-h"><span class="ico">🚗</span> Condução</div>
+          <div class="area-grid cond">
+            <div class="seg-tile">
+              <div class="seg-h"><span>🚀</span> Modo de condução<span id="mode-sfx"></span></div>
+              <div class="seg" id="seg-mode">
+                <button data-mode="Eco">Eco</button>
+                <button class="on" data-mode="Normal">Normal</button>
+                <button data-mode="Sport">Sport</button>
+              </div>
+            </div>
+            <div class="seg-tile">
+              <div class="seg-h"><span>🎚️</span> Modo de direção</div>
+              <div class="seg" id="seg-steer">
+                <button onclick="setSteer(this,'conforto')">Conforto</button>
+                <button class="on" onclick="setSteer(this,'normal')">Normal</button>
+                <button onclick="setSteer(this,'sport')">Sport</button>
+              </div>
+            </div>
+            <div class="seg-tile">
+              <div class="seg-h"><span>🔋</span> Tração</div>
+              <div class="seg" id="seg-power">
+                <button class="on" id="hev-btn" title="Toque: ativa HEV · Segure (Force Touch): opções">HEV</button>
+                <button onclick="setPower(this,'prio_ev')">Prior. EV</button>
+                <button onclick="setPower(this,'ev')">EV</button>
+              </div>
+            </div>
+            <div class="seg-tile">
+              <div class="seg-h"><span>♻️</span> Regeneração</div>
+              <div class="seg regen" id="seg-regen">
+                <button onclick="setRegen(this,'baixo')">Baixo</button>
+                <button class="on" onclick="setRegen(this,'normal')">Normal</button>
+                <button onclick="setRegen(this,'alto')">Alto</button>
+              </div>
+            </div>
+            <div class="cond-actions">
+              <div class="ctrl-tile danger" id="ctrl-haz" onclick="toggleHazard()"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><path d="M12 3.5 L21.5 20 L2.5 20 Z"/><line x1="12" y1="10" x2="12" y2="14.5"/><circle cx="12" cy="17.3" r="0.6" fill="currentColor" stroke="none"/></svg></div><div class="lbl">Pisca-alerta</div><div class="st" id="ctrl-haz-st">desligado</div></div>
+              <div class="ctrl-tile" id="ctrl-onepedal" onclick="toggleOnePedal()"><div class="ic">🦶</div><div class="lbl">One-pedal</div><div class="st" id="ctrl-onepedal-st">—</div></div>
+              <div class="esp-toggle" id="ctrl-esp" onclick="toggleESP()"><span class="ic">🛞</span><span class="lbl">ESP</span><span class="sw"></span><span class="st" id="ctrl-esp-st">—</span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ÁREA 2 · Climatização (meio) — botões menores + sliders -->
+        <div class="ctrl-area">
+          <div class="area-h"><span class="ico">❄️</span> Climatização</div>
+          <div class="area-grid clima">
+            <div class="clima-toggles">
+              <div class="ctrl-tile" id="ctrl-ac" onclick="toggleAC()"><div class="ic">❄️</div><div class="lbl">A/C</div><div class="st" id="ctrl-ac-st">—</div></div>
+              <div class="ctrl-tile" id="ctrl-recirc" onclick="toggleRecirc()"><div class="ic" id="ctrl-recirc-ic">↺</div><div class="lbl">Circul.</div><div class="st" id="ctrl-recirc-st">—</div></div>
+              <div class="ctrl-tile" id="ctrl-sync" onclick="toggleSync()"><div class="ic">⇄</div><div class="lbl">SYNC</div><div class="st" id="ctrl-sync-st">—</div></div>
+              <div class="ctrl-tile" id="ctrl-auto" onclick="toggleAuto()"><div class="ic">🅰️</div><div class="lbl">AUTO</div><div class="st" id="ctrl-auto-st">—</div></div>
+            </div>
+            <div class="sliders">
+              <div class="slider-tile">
+                <div class="slider-h"><span class="lbl">🌡️ Motorista</span><span class="sv"><span id="ctrl-temp-d">22,0</span>°C</span></div>
+                <input type="range" class="cv-slider" min="16" max="32" step="0.5" value="22" oninput="setTempSlider('d', this.value)">
+              </div>
+              <div class="slider-tile">
+                <div class="slider-h"><span class="lbl">🌡️ Passageiro</span><span class="sv"><span id="ctrl-temp-p">22,0</span>°C</span></div>
+                <input type="range" class="cv-slider" min="16" max="32" step="0.5" value="22" oninput="setTempSlider('p', this.value)">
+              </div>
+              <div class="slider-tile">
+                <div class="slider-h"><span class="lbl">🌀 Ventilação</span><span class="sv"><span id="ctrl-fan">4</span>/7</span></div>
+                <input type="range" class="cv-slider teal" min="0" max="7" step="1" value="4" oninput="setFanSlider(this.value)">
+              </div>
+            </div>
+            <div class="seg-tile air-seg">
+              <div class="seg-h"><span>🧭</span> Direção do ar</div>
+              <div class="seg" id="seg-air">
+                <button class="on" onclick="setAir(this,0)">Rosto</button>
+                <button onclick="setAir(this,1)">Rosto+Pés</button>
+                <button onclick="setAir(this,2)">Pés</button>
+                <button onclick="setAir(this,3)">Pés+Vidro</button>
+                <button onclick="setAir(this,4)">Degelo</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ÁREA 3 · Veículo + Aberturas (direita) -->
+        <div class="ctrl-area">
+          <div class="area-h"><span class="ico">🔐</span> Veículo</div>
+          <div class="area-grid veic">
+            <div class="sub-h">Aberturas</div>
+            <!-- Vidros: 3 opções (fechado / entreaberto / aberto) -->
+            <div class="seg-tile">
+              <div class="seg-h"><span>🪟</span> Vidros</div>
+              <div class="seg" id="seg-windows">
+                <button class="on" onclick="setWindows(this,'fechado')">Fechar</button>
+                <button onclick="setWindows(this,'entreaberto')">Entreab.</button>
+                <button onclick="setWindows(this,'aberto')">Abrir</button>
+              </div>
+            </div>
+            <!-- Cortina: slider 0–100 (passo 10) -->
+            <div class="slider-tile">
+              <div class="slider-h"><span class="lbl">🌥️ Cortina</span><span class="sv"><span id="ctrl-curtain">0</span>%</span></div>
+              <input type="range" class="cv-slider" min="0" max="100" step="10" value="0" oninput="setCurtain(this.value)">
+            </div>
+            <!-- Teto: slider 10–100 (passo 10) + botão de ventilação (valor 200) -->
+            <div class="slider-tile">
+              <div class="slider-h"><span class="lbl">☀️ Teto solar</span><span class="sv" id="ctrl-sunroof">Fechado</span></div>
+              <input type="range" class="cv-slider" id="sld-sunroof" min="10" max="100" step="10" value="10" oninput="setSunroof(this.value)">
+              <button class="vent-btn" id="ctrl-sunroof-vent" onclick="sunroofVent()">🌬️ Ventilação</button>
+            </div>
+            <!-- Ventilação dos bancos — faders verticais 0–3 (arrastar p/ cima aumenta, p/ baixo reduz) -->
+            <div class="sub-h">Ventilação dos bancos</div>
+            <div class="seat-vfaders">
+              <div class="vfader" data-side="d">
+                <div class="vf-head"><span class="vf-ic">💺</span><span class="vf-name">Motorista</span></div>
+                <div class="vf-track" title="Arraste para cima para aumentar"><span class="vf-ar">▲</span><div class="vf-segs"><div class="vf-seg"></div><div class="vf-seg"></div><div class="vf-seg"></div></div><span class="vf-ar">▼</span></div>
+                <div class="vf-val" id="ctrl-seat-d-st">OFF</div>
+              </div>
+              <div class="vfader" data-side="p">
+                <div class="vf-head"><span class="vf-ic">💺</span><span class="vf-name">Passageiro</span></div>
+                <div class="vf-track" title="Arraste para cima para aumentar"><span class="vf-ar">▲</span><div class="vf-segs"><div class="vf-seg"></div><div class="vf-seg"></div><div class="vf-seg"></div></div><span class="vf-ar">▼</span></div>
+                <div class="vf-val" id="ctrl-seat-p-st">OFF</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- TRIP -->
+    <div class="panel p-trip">
+      <div class="panel-h"><span class="ico">🚗</span> Viagem em curso<span class="dest-info" id="trip-dest">→ <b>Casa</b><span class="sep">·</span><b>12,3 km</b><span class="sep">·</span>ETA <b>15:52</b><span class="sep">·</span>chegada <b>61%</b></span></div>
+      <div class="trip-grid">
+        <div class="trip-cell"><div class="trip-val teal"><span id="trip-dist">0,0</span><span class="u">km</span></div><div class="trip-lbl">Distância</div></div>
+        <div class="trip-cell"><div class="trip-val"><span id="trip-time">0:00</span></div><div class="trip-lbl">Tempo</div></div>
+        <div class="trip-cell"><div class="trip-val green"><span id="trip-kwh">0,0</span><span class="u">kWh</span></div><div class="trip-lbl">Energia</div></div>
+        <div class="trip-cell"><div class="trip-val teal"><span id="trip-regen-kwh">0,3</span><span class="u">kWh</span><span class="sub" id="trip-regen-pct">38%</span></div><div class="trip-lbl">Regeneração</div></div>
+        <div class="trip-cell"><div class="trip-val orange"><span id="trip-fuel">0,0</span><span class="u">L</span></div><div class="trip-lbl">Combust.</div></div>
+        <div class="trip-cell"><div class="trip-val green"><span id="trip-ce">13,2</span><span class="u">kWh/100km</span></div><div class="trip-lbl">Consumo EV</div></div>
+        <div class="trip-cell"><div class="trip-val orange"><span id="trip-kml">19,0</span><span class="u">km/L</span></div><div class="trip-lbl">Efetivo</div></div>
+        <div class="trip-cell"><div class="trip-val yellow cost"><span id="trip-cost">R$ 0,00</span></div><div class="trip-lbl">Custo</div></div>
+        <div class="trip-cell"><div class="trip-val yellow cost"><span id="trip-cost-km">R$ 0,00</span><span class="u">/km</span></div><div class="trip-lbl">Por km</div></div>
+        <div class="trip-cell"><div class="trip-val green"><span id="trip-ev-pct">—</span><span class="u">%</span><span class="sub" id="trip-ev-km">— km</span></div><div class="trip-lbl">Elétrico</div></div>
+        <div class="trip-cell"><div class="trip-val orange"><span id="trip-hev-pct">—</span><span class="u">%</span><span class="sub" id="trip-hev-km">— km</span></div><div class="trip-lbl">Híbrido</div></div>
+      </div>
+    </div>
+
+  </div>
+
+  <span id="soc-pct-mini" style="display:none"></span>
+
+  <!-- Fluxo de energia: REMOVIDO da tela, mas mantido no DOM (oculto) porque o
+       render() atual escreve nestes ids. NÃO apagar enquanto o <script> existir. -->
+  <div style="display:none" aria-hidden="true">
+    <svg class="flow-svg" viewBox="0 0 360 220">
+      <path id="line-batt-gmcu" class="flow-line" d="M 175 110 L 130 60"/>
+      <path id="line-batt-tmcu" class="flow-line" d="M 185 110 L 185 165"/>
+      <path id="line-ice-gmcu"  class="flow-line" d="M 220 60 L 155 60"/>
+      <path id="line-ice-batt"  class="flow-line" d="M 240 75 Q 270 110 215 115"/>
+      <path id="line-charge"    class="flow-line" d="M 340 30 L 200 100"/>
+      <rect class="wheel" id="wheel-fl"/><rect class="wheel" id="wheel-fr"/>
+      <rect class="wheel" id="wheel-rl"/><rect class="wheel" id="wheel-rr"/>
+      <rect class="comp-bg" id="node-ice"/><text class="comp-value" id="val-ice">—</text>
+      <rect class="comp-bg" id="node-gmcu"/><text class="comp-value" id="val-gmcu">—</text>
+      <rect class="comp-bg" id="node-batt"/><text class="comp-value" id="val-batt">—</text>
+      <rect class="comp-bg" id="node-tmcu"/><text class="comp-value" id="val-tmcu">—</text>
+      <rect class="comp-bg charge" id="node-charge"/><text id="emoji-charge">🔌</text>
+    </svg>
+    <div class="flow-mode" id="flow-mode">parado</div>
+  </div>
+
+  <!-- Popup de modos de condução (Force Touch em qualquer um dos 3 botões) -->
+  <div class="nav-overlay" id="mode-popup" onclick="if(event.target===this)closeModePopup()">
+    <div class="nav-card mode-card">
+      <h4>🚀 Modos de condução</h4>
+      <div class="mode-grid" id="mode-grid">
+        <button data-mode="Eco">Eco</button>
+        <button class="on" data-mode="Normal">Normal</button>
+        <button data-mode="Sport">Sport</button>
+        <button data-mode="AWD">AWD</button>
+        <button data-mode="Neve">Neve</button>
+        <button data-mode="Lama">Lama</button>
+        <button data-mode="Areia">Areia</button>
+      </div>
+      <div class="nav-btn-row" style="margin-top:4px"><button class="close" onclick="closeModePopup()">Fechar</button></div>
+    </div>
+  </div>
+
+  <!-- Popup de tração HEV (HEV prioritário / inteligente + slider de bateria a salvar) -->
+  <div class="nav-overlay" id="hev-popup" onclick="if(event.target===this)closeHev()">
+    <div class="nav-card hev-card">
+      <h4>🔋 Modo HEV</h4>
+      <div class="opt-row">
+        <div class="opt" id="hev-opt-prio" onclick="setHevMode('prioritario')">
+          <div class="ot">🎯 Prioritário</div>
+          <div class="od">Mantém a bateria num nível definido por você.</div>
+        </div>
+        <div class="opt" id="hev-opt-int" onclick="setHevMode('inteligente')">
+          <div class="ot">🧠 Inteligente</div>
+          <div class="od">O carro decide o melhor uso de bateria + motor.</div>
+        </div>
+      </div>
+      <div class="hev-soc slider-tile" id="hev-soc">
+        <div class="slider-h"><span class="lbl">🔋 Bateria a salvar</span><span class="sv"><span id="hev-soc-val">50</span>%</span></div>
+        <input type="range" class="cv-slider" min="20" max="80" step="5" value="50" oninput="setHevSoc(this.value)">
+      </div>
+      <div class="nav-btn-row" style="margin-top:4px">
+        <button class="close" onclick="confirmHev()">Confirmar</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast"></div>
+</div>
+</div>
+
+<script>
+/* ════════════════════════════════════════════════════════════════════════
+   Cockpit Controles · EMBARCADO no head unit (app EcoTrip).
+   Comandos vão DIRETO ao carro in-process (window.EcotripCarBridge), sem rede.
+   Estado chega via window.applyNativeSnapshot(state), injetado pelo Kotlin a
+   partir do CarDataManager (LocalApiServer.buildStateJson) + viagem (TripManager).
+   ════════════════════════════════════════════════════════════════════════ */
+(function () {
+  const $ = (id) => document.getElementById(id);
+  function toast(msg){ const e=$('toast'); if(!e) return; e.textContent=msg; e.classList.add('show'); clearTimeout(toast._t); toast._t=setTimeout(()=>e.classList.remove('show'),1800); }
+
+  /* ── Scale-to-fit: 1920×720 dentro do WebView (fullscreen no head unit) ── */
+  (function () {
+    const cp = document.querySelector('.cockpit');
+    function fit(){ if(!cp) return; const s = Math.min(window.innerWidth/1920, window.innerHeight/720); cp.style.transform='scale('+s+')'; }
+    window.addEventListener('resize', fit); fit();
+  })();
+
+  /* ── Ponte in-process: despacha {__cmd, value} pro Kotlin (dispatchLocalCommand) ── */
+  function EcotripCmd(cmd, value){
+    try {
+      if (window.EcotripCarBridge && window.EcotripCarBridge.postCommand)
+        window.EcotripCarBridge.postCommand(JSON.stringify({ __cmd: cmd, value: value }));
+    } catch (_) {}
+  }
+  window.EcotripCmd = EcotripCmd;
+
+  /* ── Pendências: após tocar um controle, ignora o estado vindo do carro por
+     alguns segundos (o ECU leva 3–15s). Evita o botão "voltar sozinho". ── */
+  const PEND = {};
+  function markPend(key, ms){ PEND[key] = Date.now() + (ms||12000); }
+  function isPend(key){ return PEND[key] && Date.now() < PEND[key]; }
+
+  const SEAT = ['OFF','I','II','III'];
+  const TANK_L = 55;
+  const CIRC = 502.65;
+  const fmt0 = (n) => Math.round(n).toLocaleString('pt-BR');
+  const adjSpeed = (raw) => { const v=Math.max(0,+raw||0); return Math.trunc(v*1.07 - v/180*0.02); };
+  function pickSeg(btn){ if(!btn) return; [...btn.parentElement.children].forEach(b=>b.classList.remove('on')); btn.classList.add('on'); }
+  function selSeg(segId, idx){ const seg=$(segId); if(!seg) return; const bs=[...seg.children]; bs.forEach(b=>b.classList.remove('on')); if(bs[idx]) bs[idx].classList.add('on'); }
+
+  /* ═══════════ CLIMATIZAÇÃO ═══════════ */
+  const S = { sync:false };
+  window.toggleAC=()=>{ const on=!$('ctrl-ac').classList.contains('on'); $('ctrl-ac').classList.toggle('on',on); $('ctrl-ac-st').textContent=on?'Ligado':'Desligado'; markPend('ac'); EcotripCmd('hvac/ac_enable', on?1:0); };
+  window.toggleRecirc=()=>{ const on=!$('ctrl-recirc').classList.contains('on'); $('ctrl-recirc').classList.toggle('on',on); $('ctrl-recirc-ic').textContent=on?'↺':'↪'; $('ctrl-recirc-st').textContent=on?'Recircular':'Ar externo'; markPend('recirc'); EcotripCmd('hvac/cycle_mode', on?0:1); };
+  window.toggleSync=()=>{ S.sync=!$('ctrl-sync').classList.contains('on'); $('ctrl-sync').classList.toggle('on',S.sync); $('ctrl-sync-st').textContent=S.sync?'Ligado':'Desligado'; markPend('sync'); EcotripCmd('hvac/sync', S.sync?1:0); };
+  window.toggleAuto=()=>{ const on=!$('ctrl-auto').classList.contains('on'); $('ctrl-auto').classList.toggle('on',on); $('ctrl-auto-st').textContent=on?'Ligado':'Desligado'; markPend('auto'); EcotripCmd('hvac/auto', on?1:0); };
+  window.setTempSlider=(side,v)=>{ v=(+v).toFixed(1); $('ctrl-temp-'+side).textContent=v.replace('.',','); markPend('temp'+side); EcotripCmd('hvac/'+(side==='d'?'driver':'passenger')+'_temp', v); if(S.sync){ const other=side==='d'?'p':'d'; $('ctrl-temp-'+other).textContent=v.replace('.',','); markPend('temp'+other); EcotripCmd('hvac/'+(other==='d'?'driver':'passenger')+'_temp', v); } };
+  window.setFanSlider=(v)=>{ $('ctrl-fan').textContent=v; markPend('fan'); EcotripCmd('hvac/fan_speed', parseInt(v,10)); };
+  window.setAir=(btn,v)=>{ pickSeg(btn); markPend('air'); EcotripCmd('hvac/blower_mode', v); };
+  window.setSeatSlider=(side,v)=>{ v=Math.max(0,Math.min(3,Math.round(+v))); const el=$('ctrl-seat-'+side+'-st'); if(el) el.textContent=SEAT[v]; const f=document.querySelector('.vfader[data-side="'+side+'"]'); if(f){ f.classList.toggle('on',v>0); f.querySelectorAll('.vf-seg').forEach((s,i)=>s.classList.toggle('on',i<v)); } markPend('seat'+side); EcotripCmd('hvac/seat_vent_'+(side==='d'?'drv':'pass'), v); };
+
+  /* ═══════════ CONDUÇÃO ═══════════ */
+  const TERRAIN = { Normal:0, Sport:1, Eco:2, Neve:3, Areia:4, Lama:5, AWD:11 };
+  window.pickDriveMode=(name)=>{
+    const btns=[...document.querySelectorAll('#seg-mode button')];
+    btns.forEach(b=>b.classList.remove('on'));
+    const match=btns.find(b=>b.dataset.mode===name);
+    if(match){ match.classList.add('on'); $('mode-sfx').textContent=''; } else { $('mode-sfx').textContent=' · '+name; }
+    [...document.querySelectorAll('#mode-grid button')].forEach(b=>b.classList.toggle('on', b.dataset.mode===name));
+    markPend('terrain'); EcotripCmd('terrain_mode', TERRAIN[name] ?? 0);
+  };
+  window.selectDriveMode=(name)=>{ window.pickDriveMode(name); window.closeModePopup(); };
+  window.openModePopup=()=>$('mode-popup').classList.add('show');
+  window.closeModePopup=()=>$('mode-popup').classList.remove('show');
+
+  const STEER = { conforto:2, normal:0, sport:1 };
+  window.setSteer=(btn,m)=>{ pickSeg(btn); markPend('steer'); EcotripCmd('steer_mode', STEER[m] ?? 0); };
+
+  const REGEN = { baixo:2, normal:0, alto:1 };
+  window.setRegen=(btn,l)=>{ pickSeg(btn); markPend('regen'); EcotripCmd('regen_level', REGEN[l] ?? 0); };
+
+  // Tração: EV / Prior.EV diretos; HEV via popup (prioritário/inteligente + SOC)
+  window.setPower=(btn,m)=>{ pickSeg(btn); const hb=$('hev-btn'); if(hb) hb.textContent='HEV'; markPend('power'); EcotripCmd('drive_mode', m==='ev'?3:1); };
+  let _hevMode='inteligente', _hevSoc=50;
+  window.openHevPopup=()=>{ $('hev-popup').classList.add('show'); paintHev(); };
+  window.closeHev=()=>{ $('hev-popup').classList.remove('show'); };
+  window.setHevMode=(mode)=>{ _hevMode=mode; paintHev(); };
+  window.setHevSoc=(v)=>{ _hevSoc=+v; $('hev-soc-val').textContent=v; };
+  function paintHev(){ $('hev-opt-prio').classList.toggle('on',_hevMode==='prioritario'); $('hev-opt-int').classList.toggle('on',_hevMode==='inteligente'); $('hev-soc').classList.toggle('show',_hevMode==='prioritario'); }
+  window.selectHev=()=>{ const hb=$('hev-btn'); pickSeg(hb); markPend('power'); EcotripCmd('drive_mode', 0); };
+  window.confirmHev=()=>{ const hb=$('hev-btn'); if(hb){ pickSeg(hb); hb.innerHTML=_hevMode==='prioritario'?'HEV<small>prioritário '+_hevSoc+'%</small>':'HEV<small>inteligente</small>'; } closeHev(); markPend('power'); EcotripCmd('drive_mode', 0); EcotripCmd('power_reserve', _hevMode==='prioritario'?2:1); if(_hevMode==='prioritario') EcotripCmd('charge_soc_target', _hevSoc); };
+
+  window.toggleHazard=()=>{ const on=!$('ctrl-haz').classList.contains('on'); $('ctrl-haz').classList.toggle('on',on); $('ctrl-haz-st').textContent=on?'● LIGADO':'desligado'; EcotripCmd('hazard', on?1:0); };
+  window.toggleOnePedal=()=>{ const on=!$('ctrl-onepedal').classList.contains('on'); $('ctrl-onepedal').classList.toggle('on',on); $('ctrl-onepedal-st').textContent=on?'Ligado':'Desligado'; markPend('onepedal',15000); EcotripCmd('one_pedal', on?1:0); };
+  window.toggleESP=()=>{ const on=!$('ctrl-esp').classList.contains('on'); $('ctrl-esp').classList.toggle('on',on); $('ctrl-esp-st').textContent=on?'Ativo':'Desativado'; markPend('esp',15000); EcotripCmd('esp', on?1:0); };
+
+  /* ═══════════ VEÍCULO / ABERTURAS ═══════════ */
+  const WIN = { fechado:1, entreaberto:3, aberto:0 };
+  window.setWindows=(btn,opt)=>{ pickSeg(btn); markPend('windows'); EcotripCmd('vehicle/window_all', WIN[opt] ?? 1); };
+  window.setCurtain=(v)=>{ $('ctrl-curtain').textContent=v; markPend('curtain'); EcotripCmd('vehicle/shade', parseInt(v,10)); };
+  window.setSunroof=(v)=>{ $('ctrl-sunroof-vent').classList.remove('on'); $('ctrl-sunroof').textContent=(+v<=10?'Fechado':v+'%'); markPend('sunroof'); EcotripCmd('vehicle/skylight', parseInt(v,10)); };
+  window.sunroofVent=()=>{ const on=!$('ctrl-sunroof-vent').classList.contains('on'); $('ctrl-sunroof-vent').classList.toggle('on',on); $('ctrl-sunroof').textContent=on?'Ventilação':'Fechado'; markPend('sunroof'); EcotripCmd('vehicle/skylight', on?200:0); };
+
+  /* ═══════════ Long-press: modo de condução + HEV ═══════════ */
+  document.querySelectorAll('#seg-mode button').forEach(b=>{
+    let t=null, f=false; const open=()=>{ f=true; window.openModePopup(); };
+    b.addEventListener('pointerdown',()=>{ f=false; t=setTimeout(open,500); });
+    ['pointerup','pointerleave','pointercancel'].forEach(ev=>b.addEventListener(ev,()=>clearTimeout(t)));
+    b.addEventListener('click',()=>{ if(f){ f=false; return; } window.pickDriveMode(b.dataset.mode); });
+    b.addEventListener('contextmenu',e=>{ e.preventDefault(); clearTimeout(t); open(); });
+  });
+  document.querySelectorAll('#mode-grid button').forEach(b=>b.addEventListener('click',()=>window.selectDriveMode(b.dataset.mode)));
+  const _hb=$('hev-btn');
+  if(_hb){ let t=null, f=false; const open=()=>{ f=true; window.openHevPopup(); };
+    _hb.addEventListener('pointerdown',()=>{ f=false; t=setTimeout(open,500); });
+    ['pointerup','pointerleave','pointercancel'].forEach(ev=>_hb.addEventListener(ev,()=>clearTimeout(t)));
+    _hb.addEventListener('click',()=>{ if(f){ f=false; return; } window.selectHev(); });
+    _hb.addEventListener('contextmenu',e=>{ e.preventDefault(); clearTimeout(t); open(); });
+  }
+
+  /* ── Faders verticais dos bancos ── */
+  function bindVFader(side){
+    const f=document.querySelector('.vfader[data-side="'+side+'"]'); if(!f) return;
+    const track=f.querySelector('.vf-track'); let last=-1, dragging=false;
+    const apply=(y)=>{ const r=track.getBoundingClientRect(); let t=(r.bottom-y)/r.height; t=Math.max(0,Math.min(1,t)); const lvl=Math.round(t*3); if(lvl!==last){ last=lvl; window.setSeatSlider(side,lvl); } };
+    track.addEventListener('pointerdown',e=>{ dragging=true; last=-1; try{track.setPointerCapture(e.pointerId);}catch(_){} apply(e.clientY); e.preventDefault(); });
+    track.addEventListener('pointermove',e=>{ if(dragging) apply(e.clientY); });
+    ['pointerup','pointercancel','pointerleave'].forEach(ev=>track.addEventListener(ev,()=>{ dragging=false; }));
+  }
+  bindVFader('d'); bindVFader('p');
+
+  /* ── Config (abre os ajustes do app via bridge) ── */
+  window.openConfig=()=>{ try{ if(window.EcotripCarBridge && window.EcotripCarBridge.openSettings) window.EcotripCarBridge.openSettings(); }catch(_){} };
+  // Badge reproposto: No carro / Offline (sem LAN/Nuvem no embarcado)
+  window.onConnTap=()=>{ toast('Rodando no carro'); };
+
+  /* ════════════════════════════════════════════════════════════════════════
+     applyNativeSnapshot — pinta leituras + reflete estado dos controles.
+     ════════════════════════════════════════════════════════════════════════ */
+  let _speedMax = 0, _drPrev = 0;
+  function num(v){ const n=+v; return Number.isFinite(n)?n:null; }
+
+  window.applyNativeSnapshot = function(state){
+    if(!state || typeof state!=='object') return;
+    try {
+      // relógio
+      const ck=$('clock'); if(ck) ck.textContent=new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
+
+      // conexão (frescor do ts)
+      const fresh = state.ts ? (Date.now()-state.ts < 6000) : true;
+      const badge=$('source-badge'); if(badge){ badge.className='conn-mode '+(fresh?'lan':'cloud'); badge.textContent=fresh?'🟢 No carro':'⚪ Offline'; }
+      const cd=$('car-dot'), cl=$('car-lbl'); if(cd) cd.classList.toggle('ok',fresh); if(cl) cl.textContent=fresh?'online':'—';
+
+      // ── POTÊNCIA ──
+      const kw = num(state.motor_power_kw) || 0;
+      const pv=$('power-val'); if(pv){ pv.textContent=fmt0(kw); pv.className='power-val '+(kw<=-1?'regen':kw>=1?'drive':'idle'); }
+      const bd=$('power-bar-drive'), br=$('power-bar-regen');
+      if(bd) bd.style.width = kw>0 ? Math.max(0,Math.min(50,(kw/120)*50))+'%' : '0';
+      if(br) br.style.width = kw<0 ? Math.max(0,Math.min(50,(-kw/50)*50))+'%' : '0';
+
+      // ── VELOCIDADE (corrigida p/ painel) ──
+      const spd = adjSpeed(state.speed_kmh);
+      const sv=$('speed-val'); if(sv) sv.textContent = (num(state.speed_kmh)===null?'—':fmt0(spd));
+      const dr = num(state.driving_ready)||0;
+      if(dr===1 && _drPrev!==1) _speedMax=0; _drPrev=dr;
+      if(spd<=220 && spd>_speedMax) _speedMax=spd;
+      const sm=$('speed-max'); if(sm) sm.textContent=fmt0(_speedMax);
+
+      // ── SOC ──
+      const soc = num(state.soc_pct);
+      if(soc!==null){
+        const sp=$('soc-pct'); if(sp) sp.textContent=fmt0(soc);
+        const spm=$('soc-pct-mini'); if(spm) spm.textContent=fmt0(soc);
+        const arc=$('soc-arc'); if(arc) arc.setAttribute('stroke-dashoffset', CIRC*(1-soc/100));
+      }
+      const evkm=num(state.ev_remain_km); const sr=$('soc-range'); if(sr) sr.textContent=(evkm!==null?fmt0(evkm):'—')+' km';
+      const sk=$('soc-kwh'); if(sk && soc!==null) sk.textContent=(soc/100*34.4).toFixed(1).replace('.',',')+' kWh';
+
+      // ── COMBUSTÍVEL ──
+      const fpc=num(state.fuel_pct_can);
+      if(fpc!==null){
+        const fl=$('fuel-l'); if(fl) fl.textContent=fmt0(fpc/100*TANK_L);
+        const farc=$('fuel-arc'); if(farc) farc.setAttribute('stroke-dashoffset', CIRC*(1-fpc/100));
+        const fp=$('fuel-pct'); if(fp) fp.textContent=fmt0(fpc)+' %';
+      }
+      const fkm=num(state.fuel_remain_km); const fr=$('fuel-range'); if(fr) fr.textContent=(fkm!==null?fmt0(fkm):'—')+' km';
+
+      // ── VIAGEM (campos in-process do TripManager, quando presentes) ──
+      const setT=(id,v)=>{ const e=$(id); if(e && v!==undefined && v!==null) e.textContent=v; };
+      setT('trip-dist', state.trip_dist); setT('trip-time', state.trip_time);
+      setT('trip-kwh', state.trip_kwh); setT('trip-fuel', state.trip_fuel);
+      setT('trip-cost', state.trip_cost); setT('trip-cost-km', state.trip_cost_km);
+      setT('trip-regen-kwh', state.trip_regen_kwh); setT('trip-regen-pct', state.trip_regen_pct);
+      setT('trip-ce', state.trip_ce); setT('trip-kml', state.trip_kml);
+      setT('trip-ev-pct', state.trip_ev_pct); setT('trip-ev-km', state.trip_ev_km);
+      setT('trip-hev-pct', state.trip_hev_pct); setT('trip-hev-km', state.trip_hev_km);
+      if(state.trip_dest!==undefined){ const td=$('trip-dest'); if(td) td.innerHTML=state.trip_dest; }
+
+      // ════════ REFLEXO DOS CONTROLES (respeita pendências) ════════
+      const refl=(key, fn)=>{ if(!isPend(key)) try{ fn(); }catch(_){} };
+      const onOff=(elId,stId,on,txtOn,txtOff)=>{ const e=$(elId); if(e) e.classList.toggle('on',on); const s=$(stId); if(s) s.textContent=on?txtOn:txtOff; };
+
+      refl('ac', ()=>{ if(state.ac_state!=null) onOff('ctrl-ac','ctrl-ac-st',+state.ac_state===1,'Ligado','Desligado'); });
+      refl('recirc', ()=>{ if(state.hvac_cycle_mode!=null){ const rec=+state.hvac_cycle_mode===0; onOff('ctrl-recirc','ctrl-recirc-st',rec,'Recircular','Ar externo'); const ic=$('ctrl-recirc-ic'); if(ic) ic.textContent=rec?'↺':'↪'; } });
+      refl('sync', ()=>{ if(state.hvac_sync_enable!=null){ S.sync=+state.hvac_sync_enable===1; onOff('ctrl-sync','ctrl-sync-st',S.sync,'Ligado','Desligado'); } });
+      refl('auto', ()=>{ if(state.hvac_auto_enable!=null) onOff('ctrl-auto','ctrl-auto-st',+state.hvac_auto_enable===1,'Ligado','Desligado'); });
+      refl('tempd', ()=>{ if(state.hvac_driver_temp!=null){ const t=(+state.hvac_driver_temp).toFixed(1); $('ctrl-temp-d').textContent=t.replace('.',','); const s=document.querySelector('.area-grid.clima .sliders .slider-tile:nth-child(1) .cv-slider'); if(s) s.value=t; } });
+      refl('tempp', ()=>{ if(state.hvac_passenger_temp!=null){ const t=(+state.hvac_passenger_temp).toFixed(1); $('ctrl-temp-p').textContent=t.replace('.',','); } });
+      refl('fan', ()=>{ if(state.hvac_fan_speed!=null){ $('ctrl-fan').textContent=fmt0(+state.hvac_fan_speed); } });
+      refl('air', ()=>{ if(state.hvac_blower_mode!=null) selSeg('seg-air', +state.hvac_blower_mode); });
+      refl('seatd', ()=>{ if(state.seat_vent_drv!=null) paintSeat('d', +state.seat_vent_drv); });
+      refl('seatp', ()=>{ if(state.seat_vent_pass!=null) paintSeat('p', +state.seat_vent_pass); });
+      refl('onepedal', ()=>{ if(state.one_pedal!=null) onOff('ctrl-onepedal','ctrl-onepedal-st',+state.one_pedal===1,'Ligado','Desligado'); });
+      refl('esp', ()=>{ if(state.esp_enable!=null) onOff('ctrl-esp','ctrl-esp-st',+state.esp_enable===1,'Ativo','Desativado'); });
+      refl('curtain', ()=>{ if(state.shade_level!=null){ const v=Math.round(+state.shade_level/10)*10; $('ctrl-curtain').textContent=v; const s=document.querySelector('.area-grid.veic .slider-tile:nth-child(3) .cv-slider'); } });
+      refl('windows', ()=>{ if(state.window_all!=null){ const m={1:0,3:1,0:2}; selSeg('seg-windows', m[+state.window_all]); } });
+      refl('terrain', ()=>{ if(state.terrain_mode!=null){ const name=Object.keys(TERRAIN).find(k=>TERRAIN[k]===+state.terrain_mode); if(name) window._reflMode(name); } });
+      refl('steer', ()=>{ if(state.steer_mode!=null){ const m={2:0,0:1,1:2}; selSeg('seg-steer', m[+state.steer_mode]); } });
+      refl('regen', ()=>{ if(state.regen_level!=null){ const m={2:0,0:1,1:2}; selSeg('seg-regen', m[+state.regen_level]); } });
+      refl('power', ()=>{ if(state.drive_mode!=null){ const dm=+state.drive_mode; const idx=dm===0?0:dm===1?1:2; selSeg('seg-power', idx); const hb=$('hev-btn'); if(hb && dm===0 && state.power_reserve!=null){ hb.innerHTML=+state.power_reserve===2?('HEV<small>prioritário '+(state.charge_soc_target||50)+'%</small>'):'HEV<small>inteligente</small>'; } } });
+      refl('sunroof', ()=>{ if(state.skylight_level!=null){ const lv=+state.skylight_level; const sb=$('ctrl-sunroof'); const vb=$('ctrl-sunroof-vent'); if(lv===200){ if(sb) sb.textContent='Ventilação'; if(vb) vb.classList.add('on'); } else { if(sb) sb.textContent=(lv<=10?'Fechado':lv+'%'); if(vb) vb.classList.remove('on'); const s=$('sld-sunroof'); if(s && lv>=10) s.value=lv; } } });
+    } catch(e) { /* nunca deixa o snapshot derrubar a UI */ }
+  };
+  function paintSeat(side, v){ v=Math.max(0,Math.min(3,v)); const el=$('ctrl-seat-'+side+'-st'); if(el) el.textContent=SEAT[v]; const f=document.querySelector('.vfader[data-side="'+side+'"]'); if(f){ f.classList.toggle('on',v>0); f.querySelectorAll('.vf-seg').forEach((s,i)=>s.classList.toggle('on',i<v)); } }
+  window._reflMode=(name)=>{ const btns=[...document.querySelectorAll('#seg-mode button')]; btns.forEach(b=>b.classList.remove('on')); const match=btns.find(b=>b.dataset.mode===name); if(match){ match.classList.add('on'); $('mode-sfx').textContent=''; } else { $('mode-sfx').textContent=' · '+name; } [...document.querySelectorAll('#mode-grid button')].forEach(b=>b.classList.toggle('on',b.dataset.mode===name)); };
+
+  // Espelho para o Kotlin (igual ao iPad): _nativeBridge.update(payload)
+  window._nativeBridge = {
+    source: 'havalobd-apk-local', _latest: {},
+    update: function(p){ if(!p||typeof p!=='object') return; Object.assign(this._latest,p); window.applyNativeSnapshot(this._latest); }
+  };
+
+  // relógio inicial + badge offline até o 1º snapshot
+  const ck=$('clock'); if(ck) ck.textContent=new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
+  setInterval(()=>{ const e=$('clock'); if(e) e.textContent=new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}); }, 30000);
+  console.log('[controles] embarcado pronto · aguardando applyNativeSnapshot');
+})();
+</script>
+</body>
+</html>

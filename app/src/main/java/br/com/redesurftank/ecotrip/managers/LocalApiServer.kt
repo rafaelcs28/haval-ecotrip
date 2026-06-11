@@ -45,6 +45,10 @@ class LocalApiServer(
         /** Porta que conseguiu bindar — atualizada por startServer(). */
         @Volatile var activePort: Int = -1
             private set
+
+        /** Instância viva — usada pela tela Controles embarcada p/ snapshot in-process. */
+        @Volatile var current: LocalApiServer? = null
+            private set
     }
 
     private val gson = Gson()
@@ -57,7 +61,11 @@ class LocalApiServer(
 
     // ── Lifecycle ────────────────────────────────────────────────────────────
 
+    /** Snapshot in-process (mesmo JSON que o iPad recebe via LAN). */
+    fun snapshotJson(): String = buildStateJson()
+
     fun startServer() {
+        current = this
         try {
             start(SOCKET_READ_TIMEOUT, false)
             activePort = listeningPort

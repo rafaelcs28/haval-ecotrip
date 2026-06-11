@@ -36,41 +36,6 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Diagnóstico de tela: loga resolução física + insets de system bars do
-        // head unit. Nível W porque o ROM dropa Info no liblog.
-        // Ver: `logcat -d -s EcotripScreen:W`. Área útil = full - insets.
-        // Também grava em /data/local/tmp/ecotrip_screen.txt (lê com `cat`).
-        window.decorView.postDelayed({
-            val tag = "EcotripScreen"
-            val sb_ = StringBuilder()
-            fun emit(s: String) { android.util.Log.w(tag, s); sb_.append(s).append('\n') }
-            try {
-                val dm = resources.displayMetrics
-                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
-                    val b = windowManager.currentWindowMetrics.bounds
-                    emit("full(currentWindowMetrics)=${b.width()}x${b.height()} density=${dm.density} dpi=${dm.densityDpi} sdk=${android.os.Build.VERSION.SDK_INT}")
-                } else {
-                    val real = android.util.DisplayMetrics()
-                    @Suppress("DEPRECATION") windowManager.defaultDisplay.getRealMetrics(real)
-                    emit("full(realMetrics)=${real.widthPixels}x${real.heightPixels} density=${dm.density} dpi=${dm.densityDpi} sdk=${android.os.Build.VERSION.SDK_INT}")
-                }
-                val insets = androidx.core.view.ViewCompat.getRootWindowInsets(window.decorView)
-                if (insets != null) {
-                    val sb = insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.systemBars())
-                    val st = insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.statusBars())
-                    val nv = insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.navigationBars())
-                    emit("systemBars L=${sb.left} T=${sb.top} R=${sb.right} B=${sb.bottom}")
-                    emit("statusBar T=${st.top} B=${st.bottom} | navBar T=${nv.top} B=${nv.bottom} L=${nv.left} R=${nv.right}")
-                    emit("areaUtil=${window.decorView.width - sb.left - sb.right}x${window.decorView.height - sb.top - sb.bottom} (decor=${window.decorView.width}x${window.decorView.height})")
-                } else {
-                    emit("rootWindowInsets=null (insets ainda não aplicados)")
-                }
-                java.io.File("/data/local/tmp/ecotrip_screen.txt").writeText(sb_.toString())
-            } catch (e: Throwable) {
-                android.util.Log.w(tag, "erro no diagnóstico: ${e.message}", e)
-            }
-        }, 1500L)
-
         // Preview dos layouts da home no emulador (só debug): renderiza com dados
         // de exemplo e NÃO inicia managers/serviços. am start ... -e preview 0|1|2
         val preview = intent.getStringExtra("preview")?.toIntOrNull()

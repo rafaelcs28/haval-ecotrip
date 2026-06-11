@@ -522,10 +522,14 @@ fun ConsumptionScreen() {
         IconButton(onClick = { showSettings = true }) { Icon(Icons.Default.Settings, "Configurações", tint = TextSecondary) }
     }
 
-    Box(modifier = Modifier.fillMaxSize().systemBarsPadding()) {
+    // Controles (3) ocupa a tela cheia (1920×720): a faixa esquerda 128px + barra
+    // de status 60px são reservadas ao sistema dentro do próprio HTML, então NÃO
+    // aplica systemBarsPadding aqui (senão a área reservada conta em dobro).
+    Box(modifier = Modifier.fillMaxSize().then(if (homeLayout == 3) Modifier else Modifier.systemBarsPadding())) {
         when (homeLayout) {
             0 -> HomeTeslaLayout(hd, actions = navActions) { m -> InteractiveCar(hd, m) }
             1 -> HomeEuropeanLayout(hd, actions = navActions)
+            3 -> ControlesLayout(hd) { showSettings = true }
             else -> HomeClaudeLayout(hd, actions = navActions) { m -> InteractiveCar(hd, m) }
         }
 
