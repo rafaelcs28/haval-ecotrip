@@ -555,12 +555,8 @@
   const $ = (id) => document.getElementById(id);
   function toast(msg){ const e=$('toast'); if(!e) return; e.textContent=msg; e.classList.add('show'); clearTimeout(toast._t); toast._t=setTimeout(()=>e.classList.remove('show'),1800); }
 
-  /* ── Scale-to-fit: 1920×720 dentro do WebView (fullscreen no head unit) ── */
-  (function () {
-    const cp = document.querySelector('.cockpit');
-    function fit(){ if(!cp) return; const s = Math.min(window.innerWidth/1920, window.innerHeight/720); cp.style.transform='scale('+s+')'; }
-    window.addEventListener('resize', fit); fit();
-  })();
+  /* .cockpit = 100vw/100vh (preenche o WebView). Sem scale-to-fit — no head unit
+     o innerWidth pode chegar 0 na carga e zerar a escala (tela preta). */
 
   /* ── Ponte in-process: despacha {__cmd, value} pro Kotlin (dispatchLocalCommand) ── */
   function EcotripCmd(cmd, value){

@@ -3,7 +3,12 @@ package br.com.redesurftank.ecotrip.ui.screens
 import android.annotation.SuppressLint
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
+import android.webkit.ConsoleMessage
 import android.webkit.JavascriptInterface
+import android.webkit.WebChromeClient
+import android.webkit.WebResourceError
+import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.background
@@ -58,7 +63,17 @@ fun ControlesLayout(
                 settings.mediaPlaybackRequiresUserGesture = false
                 isVerticalScrollBarEnabled = false
                 isHorizontalScrollBarEnabled = false
-                webViewClient = WebViewClient()
+                webViewClient = object : WebViewClient() {
+                    override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: WebResourceError?) {
+                        Log.w("ControlesWeb", "erro ao carregar ${request?.url}: ${error?.errorCode} ${error?.description}")
+                    }
+                }
+                webChromeClient = object : WebChromeClient() {
+                    override fun onConsoleMessage(m: ConsoleMessage): Boolean {
+                        Log.w("ControlesWeb", "console: ${m.message()} @${m.sourceId()}:${m.lineNumber()}")
+                        return true
+                    }
+                }
                 WebView.setWebContentsDebuggingEnabled(true)
                 addJavascriptInterface(
                     EcotripCarBridge(onOpenSettings, onOpenRecargas, onOpenViagens, onCheckUpdate),
