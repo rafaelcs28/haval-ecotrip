@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import android.view.View
 import android.webkit.ConsoleMessage
 import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
@@ -53,6 +54,9 @@ fun ControlesLayout(
         modifier = Modifier.fillMaxSize().background(Color.Black),
         factory = { ctx ->
             WebView(ctx).apply {
+                // Head unit (Android 9): WebView dentro do Compose AndroidView desenha
+                // preto com aceleração de hardware. Camada de software resolve.
+                setLayerType(View.LAYER_TYPE_SOFTWARE, null)
                 setBackgroundColor(android.graphics.Color.BLACK)
                 settings.javaScriptEnabled = true
                 settings.domStorageEnabled = true
