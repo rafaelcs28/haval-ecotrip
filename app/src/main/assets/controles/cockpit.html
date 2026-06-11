@@ -300,32 +300,30 @@
     width: 100vw; height: 100vh; display: block; position: relative;
     overflow: hidden;
     --r-panel: 22px;
-    /* Edge-to-edge: WebView é FULLSCREEN (1920×720). Reserva a dock esquerda
-       (128) p/ o conteúdo; nossa topbar fina divide a faixa da status bar do
-       carro (topo), encaixada nos VAZIOS via --bar-left/--bar-right (nudgeável):
-       badge+botões à esquerda-centro, versão à direita-centro. */
-    --sys-left: 128px;
-    --sys-top: 48px;
-    --bar-left: 640px;
-    --bar-right: 320px;
+    /* App NÃO é edge-to-edge: a janela já é a área segura (abaixo da barra do
+       carro, à direita da dock). Preenche 100%, barra fina do app no topo
+       (config/recargas/etc. visíveis, logo abaixo da barra do carro). */
+    --sys-left: 0px;
+    --sys-top: 40px;
   }
 
   .cfg-btn { margin-left: 10px; width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 15px; color: var(--text); background: rgba(255,255,255,.06); border: 1px solid var(--border-hi); cursor: pointer; transition: transform .1s, background .15s; }
   .cfg-btn:active { transform: scale(.9); }
 
   /* ───────── Barra de status (topo · à direita da dock do carro) ───────── */
-  /* barra do app nos VAZIOS da status bar do carro (badge+botões à esq-centro,
-     versão à dir-centro via row-reverse), sem relógio próprio */
+  /* barra fina do app no topo da área segura (config/recargas/viagens visíveis) */
   .topbar {
-    position: absolute; left: var(--bar-left); top: 0; right: var(--bar-right); width: auto; height: var(--sys-top);
-    display: flex; flex-direction: row-reverse; align-items: center; justify-content: space-between;
+    position: absolute; left: 0; top: 0; width: 100%; height: var(--sys-top);
     z-index: 20;
   }
   #clock { display: none; }
 
-  /* ───────── Área útil — abaixo da status bar e à direita da dock ── */
+  /* cabeçalhos das áreas removidos p/ ganhar altura (controles maiores) */
+  .ctrl-area .area-h { display: none; }
+
+  /* ───────── Área útil — preenche 100% da área segura ── */
   .v4 {
-    position: absolute; left: var(--sys-left); top: var(--sys-top); width: calc(100vw - var(--sys-left)); height: calc(100vh - var(--sys-top));
+    position: absolute; left: 0; top: var(--sys-top); width: 100%; height: calc(100vh - var(--sys-top));
     display: grid;
     grid-template-columns: 1fr;
     grid-template-rows: 1fr 92px;
@@ -1003,6 +1001,9 @@
 
   window.applyNativeSnapshot = function(state){
     if(!state || typeof state!=='object') return;
+    // Durante toque/arraste, NÃO processa o snapshot (pesado) — mantém o
+    // controle instantâneo. Retoma 250ms após soltar.
+    if(window._interacting) return;
     try {
       // relógio
       const ck=$('clock'); if(ck) ck.textContent=new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
@@ -1099,6 +1100,11 @@
     source: 'havalobd-apk-local', _latest: {},
     update: function(p){ if(!p||typeof p!=='object') return; Object.assign(this._latest,p); window.applyNativeSnapshot(this._latest); }
   };
+
+  // Pausa o feed de estado durante toque/arraste (controles instantâneos)
+  document.addEventListener('pointerdown', ()=>{ window._interacting = true; }, true);
+  document.addEventListener('pointerup', ()=>{ setTimeout(()=>{ window._interacting = false; }, 250); }, true);
+  document.addEventListener('pointercancel', ()=>{ window._interacting = false; }, true);
 
   // relógio inicial + badge offline até o 1º snapshot
   const ck=$('clock'); if(ck) ck.textContent=new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
