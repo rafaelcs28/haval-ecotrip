@@ -65,8 +65,8 @@ object ControlesWebHost {
                 @Suppress("DEPRECATION") settings.allowFileAccessFromFileURLs = true
                 @Suppress("DEPRECATION") settings.allowUniversalAccessFromFileURLs = true
                 settings.textZoom = 100
-                settings.useWideViewPort = true
-                settings.loadWithOverviewMode = true
+                // NÃO usar useWideViewPort/loadWithOverviewMode: a página é
+                // responsiva (100vw/100vh) e esses dão "zoom out" deixando vazio.
                 settings.mediaPlaybackRequiresUserGesture = false
                 isVerticalScrollBarEnabled = false
                 isHorizontalScrollBarEnabled = false
