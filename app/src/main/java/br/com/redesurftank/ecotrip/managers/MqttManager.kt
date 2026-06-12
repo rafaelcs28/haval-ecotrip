@@ -172,6 +172,8 @@ class MqttManager private constructor() {
     var latestBatt12vPct:   Float = 0f     // % — carga da bateria auxiliar 12V
     // 0=Desconectado, 1=Carregando, 2=Programado, 3=Finalizado, 5=Aguardando liberação, -1=desconhecido
     var latestChargingState: Int = -1
+    private var customCutoffFired = false   // já freou nesta sessão de carga? (corte custom)
+    private var prevChargingForCutoff = false // estado anterior pra detectar fim da sessão
     var latestChargeRemainingMin: Int = 0   // minutos restantes de recarga (0 = indisponível)
     var latestBattPowerPct: Int = 0    // % da potência da bateria (-100=regen total, +100=consumo total)
     var latestEngineRpm:    Int = 0    // rpm — rotação do motor térmico (ICE)
@@ -527,6 +529,24 @@ class MqttManager private constructor() {
                 kotlin.math.abs(latestChargeCurrentA) * latestBatteryVoltageV / 1000f
             else 0f
             tripManager.onChargingUpdate(state == 1, powerKw)
+
+            // Corte custom: rearma ao iniciar carga; ao encerrar, se freou, restaura
+            // o carro pra "sem limite" (100) pra a próxima sessão carregar descapada.
+            val chargingNow = state == 1
+            if (chargingNow && !prevChargingForCutoff) {
+                customCutoffFired = false
+            } else if (!chargingNow && prevChargingForCutoff) {
+                val target = if (::prefs.isInitialized) prefs.getInt(SharedPreferencesKeys.CHARGE_CUSTOM_TARGET, 0) else 0
+                if (target > 0 && customCutoffFired) {
+                    cmdExecutor.submit {
+                        val ok = writeChargePreset(100)
+                        AppLogger.i(TAG, "charge-cutoff: sessão encerrada → restaura carro p/ 100 ok=$ok")
+                        if (ok) publishChargeLimitState(100)
+                    }
+                    customCutoffFired = false
+                }
+            }
+            prevChargingForCutoff = chargingNow
         }
 
         lateinit var carListener: (String, String) -> Unit
@@ -1091,6 +1111,51 @@ class MqttManager private constructor() {
             AppLogger.i(TAG, "Charge limit publicado no HA: ${pct}%")
         } catch (e: Exception) {
             Log.w(TAG, "publishChargeLimitState falhou: ${e.message}")
+        }
+    }
+
+    /** Publica o alvo custom atual (retido) pra o bridge/app refletirem. 0 = off. */
+    fun publishCustomTargetState(pct: Int) {
+        try {
+            client?.publish("$prefix/ha/charge_custom_target/state", pct.toString().toByteArray(), 1, true)
+            AppLogger.i(TAG, "Alvo custom publicado no HA: ${pct}%")
+        } catch (e: Exception) {
+            Log.w(TAG, "publishCustomTargetState falhou: ${e.message}")
+        }
+    }
+
+    /** Grava um preset de carga no carro (helper pro corte custom). Roda síncrono. */
+    private fun writeChargePreset(pct: Int): Boolean {
+        val carVal = pctToCarVal(pct) ?: return false
+        return try {
+            CarDataManager.getInstance().requestSetting("car.ev_setting.charge_soc_limit_config", carVal.toString())
+        } catch (e: Exception) {
+            AppLogger.w(TAG, "writeChargePreset($pct) falhou: ${e.message}"); false
+        }
+    }
+
+    /**
+     * Corte de carga por software no PRÓPRIO carro (funciona offline, sem bridge).
+     * Chamado pelo TripManager a cada update de SOC do CAN. Quando carregando e o
+     * SOC atinge o alvo custom, freia setando o maior preset ESTRITAMENTE abaixo do
+     * SOC atual — o carro entende que já passou do alvo e encerra a carga. Dispara
+     * uma vez por sessão. Reset/restauração ficam no syncCharging (fim da sessão).
+     */
+    fun evaluateChargeCutoff(socPct: Float) {
+        if (!::prefs.isInitialized) return
+        val target = prefs.getInt(SharedPreferencesKeys.CHARGE_CUSTOM_TARGET, 0)
+        if (target <= 0) return
+        if (latestChargingState != 1) return        // só durante carga (reset é no syncCharging)
+        if (customCutoffFired) return
+        if (socPct < target) return
+        val soc = socPct.toInt()
+        val brake = listOf(90, 80, 70, 60, 50).firstOrNull { it < soc } ?: 50
+        customCutoffFired = true
+        cmdExecutor.submit {
+            val ok = writeChargePreset(brake)
+            AppLogger.i(TAG, "charge-cutoff: alvo ${target}% atingido em ${soc}% → freia preset ${brake}% ok=$ok")
+            if (ok) publishChargeLimitState(brake)
+            publishResult("charge_custom_target", if (ok) "cutoff:$soc" else "error: freio recusado em $soc%")
         }
     }
 
@@ -2092,6 +2157,24 @@ class MqttManager private constructor() {
                         publishChargeLimitState(pct)
                         publishResult("charge_limit", "ok:$pct (fallback — leitura de confirmação falhou)")
                     }
+                }
+                "charge_custom_target" -> {
+                    // Alvo de corte por software (fora dos presets). O bridge repassa o
+                    // valor; o carro persiste e passa a cortar SOZINHO (offline). 0 = off.
+                    val pct = payload.trim().toIntOrNull() ?: 0
+                    val clamped = if (pct in 51..99) pct else 0
+                    prefs.edit().putInt(SharedPreferencesKeys.CHARGE_CUSTOM_TARGET, clamped).apply()
+                    customCutoffFired = false
+                    if (clamped > 0) {
+                        // Descapa o carro pra 100 pra ele conseguir chegar no alvo.
+                        val ok = writeChargePreset(100)
+                        if (ok) publishChargeLimitState(100)
+                        AppLogger.i(TAG, "charge_custom_target: alvo ${clamped}% armado (carro descapado p/ 100, ok=$ok)")
+                    } else {
+                        AppLogger.i(TAG, "charge_custom_target: desligado")
+                    }
+                    publishCustomTargetState(clamped)
+                    publishResult("charge_custom_target", "ok:$clamped")
                 }
                 "delete_trip" -> {
                     val isoTs = payload.trim()

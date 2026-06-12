@@ -56,6 +56,10 @@ object SharedPreferencesKeys {
     // Charge history (JSON array)
     const val CHARGE_HISTORY_JSON    = "charge_history_json"
 
+    // Alvo de carga personalizado (corte por software no carro, fora dos presets).
+    // 0 = desligado. Persistido pra o corte funcionar offline (sem bridge/broker).
+    const val CHARGE_CUSTOM_TARGET   = "charge_custom_target"
+
     // Auto-trip display filter
     const val MIN_AUTO_TRIP_DIST_KM  = "min_auto_trip_dist_km"
 

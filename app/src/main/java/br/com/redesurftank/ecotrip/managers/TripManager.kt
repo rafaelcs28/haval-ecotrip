@@ -1482,6 +1482,7 @@ class TripManager private constructor() {
                     telemetryRecorder?.latestSocPct = value.toInt()
                     prefs.edit().putFloat(SharedPreferencesKeys.LATEST_SOC_PCT, value).apply()
                     captureStartIfNeeded()
+                    MqttManager.getInstance().evaluateChargeCutoff(value)
                 }
                 CarConstants.CAR_EV_INFO_CYCLE_ENERGY_CONSUME_INFO.value -> onEnergy(value)
                 CarConstants.CAR_EV_INFO_ENERGY_RECOVERY_INFO.value      -> onRegen(value)
