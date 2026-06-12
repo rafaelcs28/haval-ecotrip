@@ -850,6 +850,19 @@ class TripManager private constructor() {
         }
     }
 
+    /**
+     * Publica o histórico de auto-trips por MQTT (retained). Canal resiliente,
+     * independente do HTTP/Funnel — o bridge ingere as que faltam. Idempotente:
+     * pode chamar à vontade (trip end, reconexão, periódico).
+     */
+    fun publishAutoTripsOverMqtt() {
+        val entries = synchronized(lock) { autoTripHistory.toList() }
+        if (entries.isEmpty()) return
+        val arr = entries.joinToString(",") { gson.toJson(it) }
+        val payload = """{"count":${entries.size},"autotrips":[$arr]}"""
+        MqttManager.getInstance().publishAutoTripHistoryJson(payload)
+    }
+
     /** Para AutoTripsScreen: limpar histórico de viagens automáticas e reset do controle de sync. */
     fun clearAutoTripHistory() {
         synchronized(lock) {
@@ -1449,6 +1462,9 @@ class TripManager private constructor() {
             persistSyncedIds()
             AppLogger.i(TAG, "Trip $tripId sincronizada com bridge — amostras enviadas")
         }
+        // Canal MQTT resiliente: sobe a viagem mesmo se o HTTP/Funnel estiver
+        // bloqueado na rede atual (CGNAT/IPv6/filtro). Retained + idempotente.
+        publishAutoTripsOverMqtt()
     }
 
     fun onDataChanged(key: String, rawValue: String) {

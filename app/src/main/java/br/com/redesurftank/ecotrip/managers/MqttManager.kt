@@ -504,6 +504,7 @@ class MqttManager private constructor() {
     // do broker); (2) faz a métrica per-second do bridge refletir UPTIME REAL,
     // não o intervalo natural entre snapshots.
     @Volatile private var heartbeatFuture: java.util.concurrent.ScheduledFuture<*>? = null
+    @Volatile private var autotripSyncFuture: java.util.concurrent.ScheduledFuture<*>? = null
 
     fun init(context: Context) {
         // Prevent "Error locating the logging class" crash on Android: set a no-op logger
@@ -1391,6 +1392,8 @@ class MqttManager private constructor() {
                     Log.w(TAG, "Connection lost: ${cause?.message}")
                     heartbeatFuture?.cancel(false)
                     heartbeatFuture = null
+                    autotripSyncFuture?.cancel(false)
+                    autotripSyncFuture = null
                     setStatus(Status.DISCONNECTED)
                     scheduleReconnect()
                 }
@@ -1447,6 +1450,20 @@ class MqttManager private constructor() {
                     AppLogger.w(TAG, "heartbeat falhou: ${e.message}")
                 }
             }, 5, 5, java.util.concurrent.TimeUnit.SECONDS)
+            // Retry periódico do sync de auto-trips por MQTT (a cada 5 min).
+            // Retained + idempotente: se alguma viagem não subiu pelo HTTP/Funnel
+            // (rede bloqueando o caminho HTTPS), o bridge a ingere por aqui.
+            autotripSyncFuture?.cancel(false)
+            autotripSyncFuture = fastExecutor.scheduleAtFixedRate({
+                try {
+                    val cur = client
+                    if (cur != null && cur.isConnected) {
+                        TripManager.getInstance().publishAutoTripsOverMqtt()
+                    }
+                } catch (e: Exception) {
+                    AppLogger.w(TAG, "autotrip sync periódico falhou: ${e.message}")
+                }
+            }, 60, 300, java.util.concurrent.TimeUnit.SECONDS)
             publishDiscovery(c)
             // Publica disparos do motor de automações pro bridge/app verem (log).
             AutomationManager.onFired = { id, name, ok ->
@@ -1547,6 +1564,14 @@ class MqttManager private constructor() {
             }
         } catch (e: Exception) {
             AppLogger.w(TAG, "drainQueues: falha ao publicar histórico: ${e.message}")
+        }
+
+        // Publica histórico de auto-trips como retained após reconexão — sobe
+        // viagens que o HTTP não conseguiu entregar na rede anterior.
+        try {
+            TripManager.getInstance().publishAutoTripsOverMqtt()
+        } catch (e: Exception) {
+            AppLogger.w(TAG, "drainQueues: falha ao publicar auto-trips: ${e.message}")
         }
 
         // Publica histórico de recargas como retained após reconexão
@@ -1789,6 +1814,28 @@ class MqttManager private constructor() {
 
     @Suppress("UNUSED_PARAMETER")
     private fun publishTripHistoryInternal(c: MqttClient, entries: List<TripHistoryEntry>) {}
+
+    // ── Auto-trips por MQTT ─────────────────────────────────────────────────
+    // Canal resiliente de sync das viagens automáticas. O POST /api/autotrips
+    // (HTTP/Funnel) falha em redes que bloqueiam o caminho HTTPS (CGNAT/IPv6/
+    // filtro) enquanto o MQTT (broker público) passa. Publica retained o
+    // histórico completo (payload já montado pelo TripManager); o bridge
+    // deduplica por tripId e só ingere as novas.
+    fun publishAutoTripHistoryJson(payload: String) {
+        val c = client
+        if (c == null || !c.isConnected) {
+            AppLogger.w(TAG, "publishAutoTripHistory: offline, não publicado agora")
+            return
+        }
+        executor.submit {
+            try {
+                c.publish("$prefix/autotrips/history", payload.toByteArray(), 1, true)
+                AppLogger.i(TAG, "✓ Auto-trips publicado (QoS 1, retained): $prefix/autotrips/history")
+            } catch (e: Exception) {
+                AppLogger.e(TAG, "✗ Auto-trips MQTT FALHOU: ${e::class.simpleName}: ${e.message}")
+            }
+        }
+    }
 
     // ── Charge history ────────────────────────────────────────────────────────
 

@@ -4480,24 +4480,23 @@ function computeDriveScore(samples, t) {
   return { score: Math.max(0, Math.min(100, Math.round(0.55 * econ + 0.45 * smooth))), harshAcc: ha, harshBrake: hb };
 }
 
-app.post('/api/autotrips', (req, res) => {
-  // DEBUG temporário: loga TODA tentativa pra rastrear viagens travadas no APK
-  const ua = req.headers['user-agent'] || '?';
-  const auth = req.headers['authorization'] ? 'OK' : 'FALTANDO';
-  const tid = req.body?.tripId || 'sem tripId';
-  console.log(`[autotrip] POST recebido · tripId=${tid} · auth=${auth} · ua=${ua.slice(0,40)} · ip=${req.ip}`);
-  try {
-    const { tripId, autoTrip, samples } = req.body;
-    if (!tripId || !autoTrip) return res.status(400).json({ error: 'missing fields' });
+// Ingest de um auto-trip. Compartilhado entre o POST HTTP /api/autotrips e o
+// handler MQTT autotrips/history (sync resiliente que não depende do Funnel).
+// Retorna { status, body }. `opts.suppressPush` evita o push "Viagem concluída"
+// (usado no backlog republicado por MQTT pra não spammar).
+function ingestAutoTrip({ tripId, autoTrip, samples }, opts = {}) {
+  const suppressPush = !!opts.suppressPush;
+  {
+    if (!tripId || !autoTrip) return { status: 400, body: { error: 'missing fields' } };
 
     // Sanitiza tripId (só dígitos — é o startMs em ms)
     const safeId = String(tripId).replace(/\D/g, '');
-    if (!safeId) return res.status(400).json({ error: 'invalid tripId' });
+    if (!safeId) return { status: 400, body: { error: 'invalid tripId' } };
 
     // Bloqueia viagens explicitamente deletadas pelo usuário (tombstone)
     if (isDeleted('autotrips', safeId)) {
       console.log(`↷ AutoTrip ${safeId} bloqueada (tombstoned)`);
-      return res.json({ ok: true, skipped: true, reason: 'tombstoned' });
+      return { status: 200, body: { ok: true, skipped: true, reason: 'tombstoned' } };
     }
 
     // Descarta viagens irrelevantes: energia E distância zeradas com menos de 1 min
@@ -4506,7 +4505,7 @@ app.post('/api/autotrips', (req, res) => {
     const _timeSec = autoTrip.timeSec || 0;
     if (_distKm <= 0 && _netKwh < 0.10 && _timeSec < 60) {
       console.log(`↷ AutoTrip ${safeId} ignorado (dist=0 energy=0 time=${_timeSec}s)`);
-      return res.json({ ok: true, skipped: true });
+      return { status: 200, body: { ok: true, skipped: true } };
     }
 
     const filePath = path.join(AUTOTRIPS_DIR, `${safeId}.json`);
@@ -4777,7 +4776,7 @@ app.post('/api/autotrips', (req, res) => {
     });
     addEvent('trip_end', `Viagem concluída: ${(autoTrip.distKm||0).toFixed(1)} km`);
     // Push: viagem concluída (só se >1 km OU >3 min). On/off por device.
-    {
+    if (!suppressPush) {
       const distKm = autoTrip.distKm  || 0;
       const sec    = autoTrip.timeSec || 0;
       if (distKm > 1 || sec > 180) {
@@ -4812,7 +4811,19 @@ app.post('/api/autotrips', (req, res) => {
         sendPush('🏁 Viagem concluída', parts.join(' · '), 'trip_end');
       }
     }
-    res.json({ ok: true });
+    return { status: 200, body: { ok: true } };
+  }
+}
+
+app.post('/api/autotrips', (req, res) => {
+  // DEBUG temporário: loga TODA tentativa pra rastrear viagens travadas no APK
+  const ua = req.headers['user-agent'] || '?';
+  const auth = req.headers['authorization'] ? 'OK' : 'FALTANDO';
+  const tid = req.body?.tripId || 'sem tripId';
+  console.log(`[autotrip] POST recebido · tripId=${tid} · auth=${auth} · ua=${ua.slice(0,40)} · ip=${req.ip}`);
+  try {
+    const r = ingestAutoTrip(req.body || {});
+    res.status(r.status).json(r.body);
   } catch (e) {
     console.error('Erro ao salvar auto-trip:', e.message);
     res.status(500).json({ error: e.message });
@@ -10233,6 +10244,35 @@ function applyMqttMessage(key, value, isRetained = false) {
 
     // Histórico de Trip A/B descontinuado — ignora msg do APK
     case 'trips/history': break;
+
+    // ── Auto-trips por MQTT (retained pelo APK) ───────────────────────────
+    // Canal resiliente: o POST /api/autotrips (HTTP/Funnel) falha em redes que
+    // bloqueiam o caminho HTTPS (CGNAT/IPv6/filtro) enquanto o MQTT (broker
+    // público) passa. O APK publica o histórico completo retained; aqui só
+    // ingerimos as que ainda não temos (dedupe por tripId) pra não reprocessar
+    // nem re-pushar a cada republicação. suppressPush evita spam no backlog.
+    case 'autotrips/history': {
+      try {
+        const parsed   = JSON.parse(value);
+        const incoming = parsed.autotrips || [];
+        let added = 0, skipped = 0;
+        for (const at of incoming) {
+          const sid = String(at.startMs || at.tripId || '').replace(/\D/g, '');
+          if (!sid) continue;
+          // Já temos essa viagem (e o arquivo existe) → não reingere.
+          const exists = autoTripsArr.some(t => t.tripId === sid)
+                         && fs.existsSync(path.join(AUTOTRIPS_DIR, `${sid}.json`));
+          if (exists) { skipped++; continue; }
+          const r = ingestAutoTrip({ tripId: sid, autoTrip: at, samples: [] }, { suppressPush: true });
+          if (r.body && r.body.ok && !r.body.skipped) added++;
+          else skipped++;
+        }
+        if (added > 0) console.log(`✓ AutoTrips MQTT: ${added} ingerida(s), ${skipped} já existentes (de ${incoming.length})`);
+      } catch (e) {
+        console.error('Erro ao parsear autotrips/history:', e.message);
+      }
+      break;
+    }
 
     // ── Abastecimentos auto-detectados (retained pelo APK ≥5.20) ──────────
     // O APK detecta pulos no fuel_l com carro parado e registra como
