@@ -2618,7 +2618,20 @@ class MqttManager private constructor() {
                     }
                     AppLogger.i(TAG, "resync_autotrips → $res")
                     try {
-                        client?.publish("$prefix/cmd/resync_autotrips/result", res.toByteArray(), 1, false)
+                        client?.publish("$prefix/cmd/resync_autotrips/result", res.toByteArray(), 1, true)
+                    } catch (_: Exception) {}
+                }
+                "dumplog" -> {
+                    // Publica o buffer de log do app (retained) pra debug remoto.
+                    // Filtro opcional no payload: só linhas contendo essa substring.
+                    val filter = payload.trim()
+                    val lines = AppLogger.entries.value
+                        .filter { filter.isEmpty() || it.msg.contains(filter, true) || it.tag.contains(filter, true) }
+                        .takeLast(80)
+                        .joinToString("\n") { "${it.time} ${it.level} ${it.tag}: ${it.msg}" }
+                    val out = if (lines.isEmpty()) "(sem linhas)" else lines
+                    try {
+                        client?.publish("$prefix/cmd/dumplog/result", out.toByteArray(), 1, true)
                     } catch (_: Exception) {}
                 }
                 else -> {
