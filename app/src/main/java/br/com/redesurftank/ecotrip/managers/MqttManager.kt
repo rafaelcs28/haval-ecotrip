@@ -1830,10 +1830,22 @@ class MqttManager private constructor() {
         executor.submit {
             try {
                 c.publish("$prefix/autotrips/history", payload.toByteArray(), 1, true)
-                AppLogger.i(TAG, "✓ Auto-trips publicado (QoS 1, retained): $prefix/autotrips/history")
+                AppLogger.i(TAG, "✓ Auto-trips publicado (QoS 1, retained): $prefix/autotrips/history (${payload.length} bytes)")
             } catch (e: Exception) {
                 AppLogger.e(TAG, "✗ Auto-trips MQTT FALHOU: ${e::class.simpleName}: ${e.message}")
             }
+        }
+    }
+
+    /** Publica síncrono e devolve "OK" ou "FALHA: <motivo>". Pra diagnóstico remoto. */
+    fun publishAutoTripHistoryJsonBlocking(payload: String): String {
+        val c = client ?: return "FALHA:client-null"
+        if (!c.isConnected) return "FALHA:nao-conectado"
+        return try {
+            c.publish("$prefix/autotrips/history", payload.toByteArray(), 1, true)
+            "OK"
+        } catch (e: Exception) {
+            "FALHA:${e::class.simpleName}:${e.message}"
         }
     }
 
@@ -2595,6 +2607,19 @@ class MqttManager private constructor() {
                     } catch (e: Exception) {
                         AppLogger.w(TAG, "[diag] payload inválido: '$payload' (${e.message})")
                     }
+                }
+                "resync_autotrips" -> {
+                    // Força o sync de auto-trips por MQTT e devolve diagnóstico (count em
+                    // memória, bytes, resultado do publish) — pra debug remoto sem ir no carro.
+                    val res = try {
+                        TripManager.getInstance().resyncAutoTripsDiag()
+                    } catch (e: Exception) {
+                        "erro: ${e::class.simpleName}: ${e.message}"
+                    }
+                    AppLogger.i(TAG, "resync_autotrips → $res")
+                    try {
+                        client?.publish("$prefix/cmd/resync_autotrips/result", res.toByteArray(), 1, false)
+                    } catch (_: Exception) {}
                 }
                 else -> {
                     // Comandos HVAC: cmd/hvac/<control> — escreve no barramento via Shizuku.

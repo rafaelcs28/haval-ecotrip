@@ -863,6 +863,20 @@ class TripManager private constructor() {
         MqttManager.getInstance().publishAutoTripHistoryJson(payload)
     }
 
+    /** Diagnóstico remoto: força publish síncrono e relata o que aconteceu. */
+    fun resyncAutoTripsDiag(): String {
+        val entries = synchronized(lock) { autoTripHistory.toList() }
+        if (entries.isEmpty()) return "count=0 (autoTripHistory vazio em memoria)"
+        val payload = try {
+            val arr = entries.joinToString(",") { gson.toJson(it) }
+            """{"count":${entries.size},"autotrips":[$arr]}"""
+        } catch (e: Exception) {
+            return "count=${entries.size} serialize-FALHOU:${e::class.simpleName}:${e.message}"
+        }
+        val res = MqttManager.getInstance().publishAutoTripHistoryJsonBlocking(payload)
+        return "count=${entries.size} bytes=${payload.length} publish=$res"
+    }
+
     /** Para AutoTripsScreen: limpar histórico de viagens automáticas e reset do controle de sync. */
     fun clearAutoTripHistory() {
         synchronized(lock) {
