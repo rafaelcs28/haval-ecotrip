@@ -753,7 +753,7 @@
             <!-- Cortina: slider 0–100 (passo 10) -->
             <div class="slider-tile">
               <div class="slider-h"><span class="lbl">🌥️ Cortina</span><span class="sv"><span id="ctrl-curtain">0</span>%</span></div>
-              <input type="range" class="cv-slider" min="0" max="100" step="10" value="0" oninput="setCurtain(this.value)">
+              <input type="range" class="cv-slider" id="sld-curtain" min="0" max="100" step="10" value="0" oninput="setCurtain(this.value)">
             </div>
             <!-- Teto: slider 10–100 (passo 10) + botão de ventilação (valor 200) -->
             <div class="slider-tile">
@@ -891,6 +891,11 @@
   const PEND = {};
   function markPend(key, ms){ PEND[key] = Date.now() + (ms||12000); }
   function isPend(key){ return PEND[key] && Date.now() < PEND[key]; }
+  /* Arrastar slider/fader gera um BURST de comandos (um por nível/passo). hvac/* é
+     serializado no APK com sleep 2.5s cada → o valor final só aplica no carro vários
+     segundos depois. Pinta na hora, mas só DISPARA o último valor do arraste. */
+  const _cmdT = {};
+  function cmdSoon(key, fn, ms){ if(_cmdT[key]) clearTimeout(_cmdT[key]); _cmdT[key]=setTimeout(()=>{ _cmdT[key]=null; try{ fn(); }catch(_){} }, ms||300); }
 
   const SEAT = ['OFF','I','II','III'];
   const TANK_L = 55;
@@ -906,14 +911,14 @@
   window.toggleRecirc=()=>{ const on=!$('ctrl-recirc').classList.contains('on'); $('ctrl-recirc').classList.toggle('on',on); $('ctrl-recirc-ic').textContent=on?'↺':'↪'; $('ctrl-recirc-st').textContent=on?'Recircular':'Ar externo'; markPend('recirc'); EcotripCmd('hvac/cycle_mode', on?0:1); };
   window.toggleSync=()=>{ S.sync=!$('ctrl-sync').classList.contains('on'); $('ctrl-sync').classList.toggle('on',S.sync); $('ctrl-sync-st').textContent=S.sync?'Ligado':'Desligado'; markPend('sync'); EcotripCmd('hvac/sync', S.sync?1:0); };
   window.toggleAuto=()=>{ const on=!$('ctrl-auto').classList.contains('on'); $('ctrl-auto').classList.toggle('on',on); $('ctrl-auto-st').textContent=on?'Ligado':'Desligado'; markPend('auto'); EcotripCmd('hvac/auto', on?1:0); };
-  window.setTempSlider=(side,v)=>{ v=(+v).toFixed(1); $('ctrl-temp-'+side).textContent=v.replace('.',','); markPend('temp'+side); EcotripCmd('hvac/'+(side==='d'?'driver':'passenger')+'_temp', v); if(S.sync){ const other=side==='d'?'p':'d'; $('ctrl-temp-'+other).textContent=v.replace('.',','); markPend('temp'+other); EcotripCmd('hvac/'+(other==='d'?'driver':'passenger')+'_temp', v); } };
-  window.setFanSlider=(v)=>{ $('ctrl-fan').textContent=v; markPend('fan'); EcotripCmd('hvac/fan_speed', parseInt(v,10)); };
+  window.setTempSlider=(side,v)=>{ v=(+v).toFixed(1); $('ctrl-temp-'+side).textContent=v.replace('.',','); markPend('temp'+side); cmdSoon('temp'+side, ()=>{ markPend('temp'+side); EcotripCmd('hvac/'+(side==='d'?'driver':'passenger')+'_temp', v); }); if(S.sync){ const other=side==='d'?'p':'d'; $('ctrl-temp-'+other).textContent=v.replace('.',','); markPend('temp'+other); cmdSoon('temp'+other, ()=>{ markPend('temp'+other); EcotripCmd('hvac/'+(other==='d'?'driver':'passenger')+'_temp', v); }); } };
+  window.setFanSlider=(v)=>{ $('ctrl-fan').textContent=v; markPend('fan'); cmdSoon('fan', ()=>{ markPend('fan'); EcotripCmd('hvac/fan_speed', parseInt(v,10)); }); };
   window.setAir=(btn,v)=>{ pickSeg(btn); markPend('air'); EcotripCmd('hvac/blower_mode', v); };
   function genToggle(id, cmd, key){ const el=$(id); const on=!el.classList.contains('on'); el.classList.toggle('on',on); const st=$(id+'-st'); if(st) st.textContent=on?'Ligado':'Deslig.'; markPend(key); EcotripCmd(cmd, on?1:0); }
   window.toggleDef=(s)=>genToggle('ctrl-def'+s, s==='f'?'hvac/front_defrost':'hvac/rear_defrost', 'def'+s);
   window.toggleAnion=()=>genToggle('ctrl-anion','hvac/anion','anion');
   window.toggleAcMax=()=>genToggle('ctrl-acmax','hvac/acmax','acmax');
-  window.setSeatSlider=(side,v)=>{ v=Math.max(0,Math.min(3,Math.round(+v))); const el=$('ctrl-seat-'+side+'-st'); if(el) el.textContent=SEAT[v]; const f=document.querySelector('.vfader[data-side="'+side+'"]'); if(f){ f.classList.toggle('on',v>0); f.querySelectorAll('.vf-seg').forEach((s,i)=>s.classList.toggle('on',i<v)); } markPend('seat'+side); EcotripCmd('hvac/seat_vent_'+(side==='d'?'drv':'pass'), v); };
+  window.setSeatSlider=(side,v)=>{ v=Math.max(0,Math.min(3,Math.round(+v))); paintSeat(side, v); markPend('seat'+side); cmdSoon('seat'+side, ()=>{ markPend('seat'+side); EcotripCmd('hvac/seat_vent_'+(side==='d'?'drv':'pass'), v); }); };
 
   /* ═══════════ CONDUÇÃO ═══════════ */
   const TERRAIN = { Normal:0, Sport:1, Eco:2, Neve:3, Areia:4, Lama:5, AWD:11 };
@@ -960,8 +965,8 @@
   window.cycleWin=(idx)=>{ const cur=WINSTATE[idx]; const next=WINSEQ[(WINSEQ.indexOf(cur)+1)%3]; WINSTATE[idx]=next; paintWin(idx); markPend('win'+idx); EcotripCmd('vehicle/window', JSON.stringify({window:idx, status:next})); };
   window.setWindows=(btn,opt)=>{ pickSeg(btn); const st=WIN[opt] ?? 1; for(let i=0;i<4;i++){ WINSTATE[i]=st; paintWin(i); } markPend('windows'); EcotripCmd('vehicle/window_all', st); };
   [0,1,2,3].forEach(paintWin);
-  window.setCurtain=(v)=>{ $('ctrl-curtain').textContent=v; markPend('curtain'); EcotripCmd('vehicle/shade', parseInt(v,10)); };
-  window.setSunroof=(v)=>{ $('ctrl-sunroof-vent').classList.remove('on'); $('ctrl-sunroof').textContent=(+v<=10?'Fechado':v+'%'); markPend('sunroof'); EcotripCmd('vehicle/skylight', parseInt(v,10)); };
+  window.setCurtain=(v)=>{ $('ctrl-curtain').textContent=v; markPend('curtain'); cmdSoon('curtain', ()=>{ markPend('curtain'); EcotripCmd('vehicle/shade', parseInt(v,10)); }); };
+  window.setSunroof=(v)=>{ $('ctrl-sunroof-vent').classList.remove('on'); $('ctrl-sunroof').textContent=(+v<=10?'Fechado':v+'%'); markPend('sunroof'); cmdSoon('sunroof', ()=>{ markPend('sunroof'); EcotripCmd('vehicle/skylight', parseInt(v,10)); }); };
   window.sunroofVent=()=>{ const on=!$('ctrl-sunroof-vent').classList.contains('on'); $('ctrl-sunroof-vent').classList.toggle('on',on); $('ctrl-sunroof').textContent=on?'Ventilação':'Fechado'; markPend('sunroof'); EcotripCmd('vehicle/skylight', on?200:0); };
 
   /* ═══════════ Modo de condução: SEGURAR (≈700ms) abre o menu com todos os
@@ -1103,7 +1108,7 @@
       refl('seatp', ()=>{ if(state.seat_vent_pass!=null) paintSeat('p', +state.seat_vent_pass); });
       refl('onepedal', ()=>{ if(state.one_pedal!=null) onOff('ctrl-onepedal','ctrl-onepedal-st',+state.one_pedal===1,'Ligado','Desligado'); });
       refl('esp', ()=>{ if(state.esp_enable!=null) onOff('ctrl-esp','ctrl-esp-st',+state.esp_enable===1,'Ativo','Desativado'); });
-      refl('curtain', ()=>{ if(state.shade_level!=null){ const v=Math.round(+state.shade_level/10)*10; $('ctrl-curtain').textContent=v; const s=document.querySelector('.area-grid.veic .slider-tile:nth-child(3) .cv-slider'); } });
+      refl('curtain', ()=>{ if(state.shade_level!=null){ const v=Math.round(+state.shade_level/10)*10; $('ctrl-curtain').textContent=v; const s=$('sld-curtain'); if(s) s.value=v; } });
       refl('windows', ()=>{ if(state.window_all!=null){ const m={1:0,3:1,0:2}; selSeg('seg-windows', m[+state.window_all]); } });
       refl('terrain', ()=>{ if(state.terrain_mode!=null){ const name=Object.keys(TERRAIN).find(k=>TERRAIN[k]===+state.terrain_mode); if(name) window._reflMode(name); } });
       refl('steer', ()=>{ if(state.steer_mode!=null){ const m={2:0,0:1,1:2}; selSeg('seg-steer', m[+state.steer_mode]); } });
