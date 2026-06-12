@@ -19,8 +19,10 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.platform.LocalContext
+import br.com.redesurftank.ecotrip.managers.CarDataManager
 import br.com.redesurftank.ecotrip.managers.LocalApiServer
 import br.com.redesurftank.ecotrip.managers.MqttManager
+import br.com.redesurftank.ecotrip.models.CarConstants
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -156,8 +158,34 @@ private class EcotripCarBridge {
 private fun ptBr(v: Float, dec: Int): String =
     String.format(java.util.Locale.US, "%,.${dec}f", v).replace(",", "X").replace(".", ",").replace("X", ".")
 
+/**
+ * Lê ativamente do CAN as configs de condução (que o carro nem sempre transmite
+ * no barramento quando mudadas por fora) e atualiza o estado via syncXFromCar.
+ * Assim a tela reflete mudanças feitas direto no carro. Throttle ~1,5s.
+ */
+private var _lastSettingsSync = 0L
+private fun syncDriveSettingsFromCar() {
+    val now = System.currentTimeMillis()
+    if (now - _lastSettingsSync < 1500) return
+    _lastSettingsSync = now
+    val m = MqttManager.getInstance()
+    val car = CarDataManager.getInstance()
+    fun rd(k: String): Int? = try { car.fetchCurrent(k)?.trim()?.toFloatOrNull()?.toInt() } catch (_: Exception) { null }
+    try {
+        rd(CarConstants.CAR_EV_SETTING_POWER_MODEL_CONFIG.value)?.let { m.syncDriveModeFromCar(it) }
+        rd(CarConstants.CAR_EV_SETTING_POWER_RESERVE_CONFIG.value)?.let { m.syncPowerReserveFromCar(it) }
+        rd(CarConstants.CAR_EV_SETTING_CHARGE_SOC_TARGET_CONFIG.value)?.let { m.syncSocTargetFromCar(it) }
+        rd(CarConstants.CAR_DRIVE_SETTING_DRIVE_MODE.value)?.let { m.syncTerrainModeFromCar(it) }
+        rd(CarConstants.CAR_EV_SETTING_ENERGY_RECOVERY_LEVEL.value)?.let { m.syncRegenLevelFromCar(it) }
+        rd(CarConstants.CAR_EV_SETTING_PEDAL_CONTROL_ENABLE.value)?.let { m.syncOnePedalFromCar(it) }
+        rd(CarConstants.CAR_DRIVE_SETTING_ESP_ENABLE.value)?.let { m.syncEspFromCar(it) }
+        rd(CarConstants.CAR_DRIVE_SETTING_STEER_MODE.value)?.let { m.syncSteerModeFromCar(it) }
+    } catch (_: Exception) {}
+}
+
 /** Monta o JSON: telemetria/controles (snapshot in-process) + viagem (HomeData). */
 private fun buildControlesSnapshot(hd: HomeData): String {
+    syncDriveSettingsFromCar()
     val o = try {
         LocalApiServer.current?.snapshotJson()?.let { JSONObject(it) } ?: JSONObject()
     } catch (_: Exception) { JSONObject() }
