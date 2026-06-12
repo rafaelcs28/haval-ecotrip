@@ -641,7 +641,7 @@
             <div class="seg-tile">
               <div class="seg-h"><span>🔋</span> Tração</div>
               <div class="seg" id="seg-power">
-                <button id="hev-btn" title="Toque: ativa HEV · Segure (Force Touch): opções">HEV</button>
+                <button id="hev-btn" title="Toque: ativa HEV · Toque de novo: Inteligente/Prioritário">HEV</button>
                 <button onclick="setPower(this,'prio_ev')">Prior. EV</button>
                 <button onclick="setPower(this,'ev')">EV</button>
               </div>
@@ -964,21 +964,28 @@
   window.setSunroof=(v)=>{ $('ctrl-sunroof-vent').classList.remove('on'); $('ctrl-sunroof').textContent=(+v<=10?'Fechado':v+'%'); markPend('sunroof'); EcotripCmd('vehicle/skylight', parseInt(v,10)); };
   window.sunroofVent=()=>{ const on=!$('ctrl-sunroof-vent').classList.contains('on'); $('ctrl-sunroof-vent').classList.toggle('on',on); $('ctrl-sunroof').textContent=on?'Ventilação':'Fechado'; markPend('sunroof'); EcotripCmd('vehicle/skylight', on?200:0); };
 
-  /* ═══════════ Long-press: modo de condução + HEV ═══════════ */
+  /* ═══════════ Modo de condução: SEGURAR (≈700ms) abre o menu com todos os
+     modos (Eco/Normal/Sport/AWD/Neve/Lama/Areia). Toque curto seleciona. ═══════════ */
   document.querySelectorAll('#seg-mode button').forEach(b=>{
-    let t=null, f=false; const open=()=>{ f=true; window.openModePopup(); };
-    b.addEventListener('pointerdown',()=>{ f=false; t=setTimeout(open,500); });
-    ['pointerup','pointerleave','pointercancel'].forEach(ev=>b.addEventListener(ev,()=>clearTimeout(t)));
-    b.addEventListener('click',()=>{ if(f){ f=false; return; } window.pickDriveMode(b.dataset.mode); });
-    b.addEventListener('contextmenu',e=>{ e.preventDefault(); clearTimeout(t); open(); });
+    let t=null, longFired=false, sx=0, sy=0;
+    const cancel=()=>{ clearTimeout(t); t=null; };
+    b.addEventListener('pointerdown',(e)=>{ longFired=false; sx=e.clientX; sy=e.clientY; cancel(); t=setTimeout(()=>{ longFired=true; window.openModePopup(); }, 700); });
+    b.addEventListener('pointermove',(e)=>{ if(Math.abs(e.clientX-sx)>10||Math.abs(e.clientY-sy)>10) cancel(); });
+    ['pointerup','pointerleave','pointercancel'].forEach(ev=>b.addEventListener(ev, cancel));
+    b.addEventListener('click',(e)=>{ if(longFired){ e.preventDefault(); e.stopPropagation(); longFired=false; return; } window.pickDriveMode(b.dataset.mode); });
+    b.addEventListener('contextmenu',e=>{ e.preventDefault(); cancel(); window.openModePopup(); });
   });
   document.querySelectorAll('#mode-grid button').forEach(b=>b.addEventListener('click',()=>window.selectDriveMode(b.dataset.mode)));
+
+  /* ═══════════ Tração HEV: 1º toque seleciona HEV; tocar DE NOVO (já
+     selecionado) abre o menu Inteligente/Prioritário (+% bateria). ═══════════ */
   const _hb=$('hev-btn');
-  if(_hb){ let t=null, f=false; const open=()=>{ f=true; window.openHevPopup(); };
-    _hb.addEventListener('pointerdown',()=>{ f=false; t=setTimeout(open,500); });
-    ['pointerup','pointerleave','pointercancel'].forEach(ev=>_hb.addEventListener(ev,()=>clearTimeout(t)));
-    _hb.addEventListener('click',()=>{ if(f){ f=false; return; } window.selectHev(); });
-    _hb.addEventListener('contextmenu',e=>{ e.preventDefault(); clearTimeout(t); open(); });
+  if(_hb){
+    _hb.addEventListener('click',()=>{
+      if(_hb.classList.contains('on')) window.openHevPopup();   // já em HEV → menu
+      else window.selectHev();                                   // seleciona HEV
+    });
+    _hb.addEventListener('contextmenu',e=>{ e.preventDefault(); window.openHevPopup(); });
   }
 
   /* ── Faders verticais dos bancos ── */
