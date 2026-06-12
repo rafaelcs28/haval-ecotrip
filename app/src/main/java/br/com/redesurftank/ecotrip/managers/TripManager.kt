@@ -856,7 +856,13 @@ class TripManager private constructor() {
      * pode chamar à vontade (trip end, reconexão, periódico).
      */
     fun publishAutoTripsOverMqtt() {
-        val entries = synchronized(lock) { autoTripHistory.toList() }
+        // MQTT é o canal de FALLBACK: publica só o que o HTTP não entregou
+        // (startMs ainda não em bridgeSyncedIds). Mantém o payload pequeno —
+        // o retained gigante com todo o histórico derrubava a conexão instável
+        // do carro ("Conexão perdida") e nunca chegava ao broker.
+        val entries = synchronized(lock) {
+            autoTripHistory.filter { it.startMs !in bridgeSyncedIds }
+        }
         if (entries.isEmpty()) return
         val arr = entries.joinToString(",") { gson.toJson(it) }
         val payload = """{"count":${entries.size},"autotrips":[$arr]}"""
@@ -865,16 +871,20 @@ class TripManager private constructor() {
 
     /** Diagnóstico remoto: força publish síncrono e relata o que aconteceu. */
     fun resyncAutoTripsDiag(): String {
-        val entries = synchronized(lock) { autoTripHistory.toList() }
-        if (entries.isEmpty()) return "count=0 (autoTripHistory vazio em memoria)"
+        val total: Int
+        val entries = synchronized(lock) {
+            total = autoTripHistory.size
+            autoTripHistory.filter { it.startMs !in bridgeSyncedIds }
+        }
+        if (entries.isEmpty()) return "total=$total unsynced=0 (nada pra publicar)"
         val payload = try {
             val arr = entries.joinToString(",") { gson.toJson(it) }
             """{"count":${entries.size},"autotrips":[$arr]}"""
         } catch (e: Exception) {
-            return "count=${entries.size} serialize-FALHOU:${e::class.simpleName}:${e.message}"
+            return "total=$total unsynced=${entries.size} serialize-FALHOU:${e::class.simpleName}:${e.message}"
         }
         val res = MqttManager.getInstance().publishAutoTripHistoryJsonBlocking(payload)
-        return "count=${entries.size} bytes=${payload.length} publish=$res"
+        return "total=$total unsynced=${entries.size} bytes=${payload.length} publish=$res"
     }
 
     /** Para AutoTripsScreen: limpar histórico de viagens automáticas e reset do controle de sync. */
