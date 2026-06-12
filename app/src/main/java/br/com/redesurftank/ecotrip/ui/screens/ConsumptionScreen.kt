@@ -10,6 +10,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.material.icons.filled.BatteryChargingFull
@@ -180,6 +181,7 @@ fun ConsumptionScreen() {
     var showSocArrival    by remember { mutableStateOf(false) }
     var navDest           by remember { mutableStateOf<MqttManager.NavDest?>(null) }
     var navPlan           by remember { mutableStateOf<RoutePlan?>(null) }
+    val undoScope         = rememberCoroutineScope()
     var showLog           by remember { mutableStateOf(false) }
     var minAutoTripDist   by remember { mutableStateOf(tripManager.getMinAutoTripDist()) }
     var lastCompletedTrip by remember { mutableStateOf<AutoTripEntry?>(null) }
@@ -214,28 +216,34 @@ fun ConsumptionScreen() {
     }
 
     // Destino vindo do celular (Nav Relay → bridge → cmd/nav_dest): NÃO abre a tela
-    // Chegada; alimenta o banner "viagem em andamento" na home. Recalcula a cada 30s
-    // (km/SOC/ETA mudam conforme dirige) e some quando o carro desliga (driving_ready≠1).
+    // Chegada; alimenta o banner "viagem em andamento" na home. NÃO some ao desligar
+    // o carro — a rota é dona do bridge (state.route, retido em nav_dest) e só some
+    // quando o bridge a encerra (chegou ao destino final / expirou) publicando vazio,
+    // o que zera incomingNavDest. Assim, parar numa parada e desligar não apaga o destino.
+    //   • Com legs (rota multi-parada do bridge) → usa o ETA/SOC por perna já calculado.
+    //   • Sem legs (payload antigo / offline) → recalcula localmente a cada 30s.
     LaunchedEffect(Unit) {
         var lastTs = 0L
         var lastCompute = 0L
-        var wasReady = false
         while (true) {
             val nd = mqttManager.incomingNavDest
-            if (nd != null && nd.ts != lastTs) {
-                lastTs = nd.ts; navDest = nd
-                navPlan = try { fetchArrivalPlan(tripManager, nd.lat, nd.lng, nd.name, nd.etaClock) } catch (e: Exception) { navPlan }
-                lastCompute = System.currentTimeMillis()
+            if (nd == null) {
+                if (navDest != null) { navDest = null; navPlan = null }
+            } else {
+                if (nd.ts != lastTs) {
+                    lastTs = nd.ts; navDest = nd
+                    navPlan = if (nd.legs.isEmpty())
+                        try { fetchArrivalPlan(tripManager, nd.lat, nd.lng, nd.name, nd.etaClock) } catch (e: Exception) { navPlan }
+                    else null
+                    lastCompute = System.currentTimeMillis()
+                } else {
+                    navDest = nd   // mantém a ref mais nova (janela de desfazer expira sozinha)
+                }
+                if (nd.legs.isEmpty() && System.currentTimeMillis() - lastCompute > 30_000L) {
+                    navPlan = try { fetchArrivalPlan(tripManager, nd.lat, nd.lng, nd.name, nd.etaClock) } catch (e: Exception) { navPlan }
+                    lastCompute = System.currentTimeMillis()
+                }
             }
-            val cur = navDest
-            if (cur != null && System.currentTimeMillis() - lastCompute > 30_000L) {
-                navPlan = try { fetchArrivalPlan(tripManager, cur.lat, cur.lng, cur.name, cur.etaClock) } catch (e: Exception) { navPlan }
-                lastCompute = System.currentTimeMillis()
-            }
-            // Carro desligou (ready→não-ready) → encerra o banner junto com a viagem.
-            val nowReady = mqttManager.latestDrivingReadyState == 1
-            if (wasReady && !nowReady) { navDest = null; navPlan = null }
-            wasReady = nowReady
             delay(2_000L)
         }
     }
@@ -470,12 +478,33 @@ fun ConsumptionScreen() {
         turnLeft = carTurnLeft, turnRight = carTurnRight,
     )
     // Banner "viagem em andamento" (destino do celular) sobreposto ao HomeData.
-    val hd = navPlan?.let { p ->
-        baseHd.copy(
-            navActive = true, navName = p.destName, navDistKm = p.distanceKm,
-            navEtaMin = p.durationMin, navEtaClock = p.etaClock, navArrivalSoc = p.predictedSoc,
+    //   • navDest com legs (rota multi-parada do bridge) → destino final = última perna,
+    //     paradas intermediárias na faixa; a parada recém-concluída (undo) entra riscada.
+    //   • senão, navPlan local (destino único).
+    val nd = navDest
+    val finalLeg = nd?.legs?.lastOrNull()
+    val hd = when {
+        finalLeg != null -> {
+            val stops = mutableListOf<HomeNavStop>()
+            nd.undo?.let { u ->
+                if (u.untilMs > System.currentTimeMillis())
+                    stops.add(HomeNavStop(u.name, "", 0, done = true))
+            }
+            nd.legs.dropLast(1).forEach { l ->
+                stops.add(HomeNavStop(l.name, l.etaClock, l.socArrival, done = false))
+            }
+            baseHd.copy(
+                navActive = true, navName = finalLeg.name, navDistKm = finalLeg.distKm.toFloat(),
+                navEtaMin = finalLeg.etaMin, navEtaClock = finalLeg.etaClock, navArrivalSoc = finalLeg.socArrival,
+                navStops = stops,
+            )
+        }
+        navPlan != null -> baseHd.copy(
+            navActive = true, navName = navPlan!!.destName, navDistKm = navPlan!!.distanceKm,
+            navEtaMin = navPlan!!.durationMin, navEtaClock = navPlan!!.etaClock, navArrivalSoc = navPlan!!.predictedSoc,
         )
-    } ?: baseHd
+        else -> baseHd
+    }
 
     // Ações de navegação no header do layout: chip de update + 4 botões
     val navActions: @Composable RowScope.() -> Unit = {
@@ -579,6 +608,36 @@ fun ConsumptionScreen() {
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = AccentBlue),
                     ) { Text("Continuar", fontSize = 12.sp, fontWeight = FontWeight.Bold) }
+                }
+            }
+        }
+
+        // ── Desfazer avanço de parada: o carro marcou uma parada como concluída por
+        // proximidade. Mostra por ~5 min com a opção de desfazer (volta a parada à rota).
+        navDest?.undo?.takeIf { it.untilMs > System.currentTimeMillis() }?.let { u ->
+            Surface(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(horizontal = 40.dp, vertical = 12.dp)
+                    .fillMaxWidth(),
+                color = SurfaceCard,
+                shape = RoundedCornerShape(10.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, AuroraTeal.copy(alpha = 0.4f)),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Text("✓", fontSize = 18.sp, color = AuroraTeal)
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Parada concluída: ${u.name}", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                        Text("Avançou pra próxima parada", fontSize = 11.sp, color = TextSecondary)
+                    }
+                    OutlinedButton(
+                        onClick = { undoScope.launch { postRouteUndo(tripManager) } },
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = AuroraTeal),
+                    ) { Text("Desfazer", fontSize = 12.sp, fontWeight = FontWeight.Bold) }
                 }
             }
         }

@@ -252,7 +252,20 @@ class MqttManager private constructor() {
 
     // Destino vindo do celular (Nav Relay compartilhou um local do Maps/Waze →
     // bridge resolveu → cmd/nav_dest). A UI faz polling e abre a tela Chegada.
-    data class NavDest(val lat: Double, val lng: Double, val name: String, val ts: Long, val etaClock: String = "")
+    // Uma perna da rota multi-parada (ETA/SOC cumulativo até cada parada/destino),
+    // já calculada pelo bridge (_maybeComputeArrival). A última tem isFinal=true.
+    data class NavLeg(
+        val name: String, val lat: Double, val lng: Double, val isFinal: Boolean,
+        val distKm: Double, val etaMin: Int, val etaClock: String, val socArrival: Int,
+    )
+    // Parada concluída recentemente (avanço por proximidade): fica riscada até untilMs.
+    data class NavUndo(val name: String, val untilMs: Long)
+    data class NavDest(
+        val lat: Double, val lng: Double, val name: String, val ts: Long, val etaClock: String = "",
+        val legs: List<NavLeg> = emptyList(),   // vazio = destino único (sem paradas)
+        val completedIdx: Int = -1,
+        val undo: NavUndo? = null,
+    )
     @Volatile var incomingNavDest: NavDest? = null
 
     // ── Voting filter pra car.basic.window_status ─────────────────────────────
@@ -2081,13 +2094,34 @@ class MqttManager private constructor() {
                     // broker: carro desligado recebe ao ligar. Usa o ts do payload (dedupe
                     // por reconexão) e ignora destino velho (>6h). Payload vazio = limpeza.
                     try {
-                        if (payload.isNotBlank()) {
+                        if (payload.isBlank()) {
+                            // Bridge encerrou a rota (chegou ao destino final / expirou).
+                            incomingNavDest = null
+                            AppLogger.i(TAG, "nav_dest: limpo (rota encerrada)")
+                        } else {
                             val j = org.json.JSONObject(payload)
                             val lat = j.optDouble("lat", 0.0); val lng = j.optDouble("lng", 0.0)
                             val ts = j.optLong("ts", System.currentTimeMillis())
                             if ((lat != 0.0 || lng != 0.0) && System.currentTimeMillis() - ts < 6 * 3600_000L) {
-                                incomingNavDest = NavDest(lat, lng, j.optString("name", ""), ts, j.optString("etaClock", ""))
-                                AppLogger.i(TAG, "nav_dest: ${j.optString("name","")} ($lat,$lng) eta=${j.optString("etaClock","")}")
+                                val legs = mutableListOf<NavLeg>()
+                                j.optJSONArray("legs")?.let { arr ->
+                                    for (i in 0 until arr.length()) {
+                                        val o = arr.optJSONObject(i) ?: continue
+                                        legs.add(NavLeg(
+                                            o.optString("name", ""), o.optDouble("lat", 0.0), o.optDouble("lng", 0.0),
+                                            o.optBoolean("isFinal", false), o.optDouble("distKm", 0.0),
+                                            o.optInt("etaMin", 0), o.optString("etaClock", ""), o.optInt("socArrival", 0),
+                                        ))
+                                    }
+                                }
+                                val undo = j.optJSONObject("undo")?.let {
+                                    NavUndo(it.optString("name", ""), it.optLong("untilMs", 0L))
+                                }
+                                incomingNavDest = NavDest(
+                                    lat, lng, j.optString("name", ""), ts, j.optString("etaClock", ""),
+                                    legs, j.optInt("completedIdx", -1), undo,
+                                )
+                                AppLogger.i(TAG, "nav_dest: ${j.optString("name","")} ($lat,$lng) legs=${legs.size} eta=${j.optString("etaClock","")}")
                             }
                         }
                     } catch (e: Exception) { AppLogger.w(TAG, "nav_dest inválido: ${e.message}") }

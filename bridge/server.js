@@ -915,6 +915,7 @@ let chargeSessionStartMs = 0;   // timestamp de início da sessão (para duraç�
 let chargeStartSoc       = 0;   // SOC% no início da sessão (para log de eventos)
 let _chargeTempSamples   = [];  // amostras de temp externa durante a sessão atual
 let _lastChargeAvgTemp   = null;// média calculada ao fim da sessão, anexada ao próximo charging/history
+let _customCutoffFired   = false;// já freou nesta sessão? (evita re-enviar o preset)
 
 // ── SOC — fonte HA tem prioridade quando disponível ───────────────────────────
 // Após o primeiro tópico haval/ecotrip/soc_pct (publicado via automação HA),
@@ -1121,7 +1122,8 @@ const state = {
   gps_lat:          0,
   gps_lng:          0,
   gps_ts:           0,   // timestamp ms da última posição recebida
-  arrival:          null, // { name, distKm, etaMin, etaClock, socArrival, traffic } — null sem destino compartilhado
+  arrival:          null, // { name, distKm, etaMin, etaClock, socArrival, traffic, legs:[…] } — null sem destino compartilhado
+  route:            null, // { wps:[{lat,lng,name,isFinal}], completedIdx, undo:{idx,name,lat,lng,untilMs}|null, ts } — rota multi-parada PERSISTIDA (sobrevive desligar o carro)
   car_heading:      0,   // rumo do carro (graus, 0=N) do deslocamento GPS; PERSISTIDO
   apns_prod_confirmed: false,  // watchdog: já confirmou (e notificou) o APNs de produção ativo
 
@@ -1146,6 +1148,9 @@ const state = {
   charge_session_kwh:  0,
   charge_remaining_min:0,
   charge_limit_pct:    null,   // % limite de carga SOC (null = desconhecido)
+  charge_custom_target: 0,     // alvo de corte por software (0=off). Para fora dos
+                               // presets do carro: carrega sem limite e freia setando
+                               // um preset abaixo do SOC atual ao atingir o alvo.
   drive_mode:          null,   // 0=HEV, 1=Prior. EV, 3=EV (null = desconhecido)
   power_reserve:       null,   // sub-modo HEV: 1=Inteligente, 2=Prioritário
   charge_soc_target:   null,   // alvo SOC no modo Prioritário (20..80 %)
@@ -1663,6 +1668,25 @@ function _checkSocFullLong(soc) {
 
 function _cancelSocFullTimer() {
   if (_socFullTimer) { clearTimeout(_socFullTimer); _socFullTimer = null; }
+}
+
+// ── Corte de carga por software (alvo custom fora dos presets do carro) ────────
+// Chamado a cada update de soc_pct. Quando carregando e o SOC atinge o alvo,
+// freia setando o maior preset ESTRITAMENTE abaixo do SOC atual — o carro entende
+// que já passou do alvo e encerra a carga. O preset (não o alvo) é o que para a
+// carga; o alvo só define QUANDO. Dispara uma vez por sessão (_customCutoffFired).
+function _checkCustomChargeCutoff(soc) {
+  const target = +state.charge_custom_target || 0;
+  if (!target) return;
+  if (state.charging_state !== 'Carregando') return;
+  if (_customCutoffFired) return;
+  if (soc < target) return;
+  const brake = [90, 80, 70, 60, 50].find(p => p < soc) || 50;
+  _customCutoffFired = true;
+  publishCmdWithRetry(`${MQTT_PREFIX}/cmd/charge_limit`, brake.toString(), { retain: true, qos: 1 })
+    .then(() => console.log(`[charge-cutoff] alvo ${target}% atingido em ${soc.toFixed(0)}% → freia com preset ${brake}%`))
+    .catch(e => console.warn('[charge-cutoff] falha ao frear:', e.message));
+  sendPush('⚡ Carga interrompida', `Atingiu seu alvo de ${target}% (parou em ${soc.toFixed(0)}%).`, 'charge_target');
 }
 
 // ── Queda de pressão do pneu durante viagem ───────────────────────────────────
@@ -4415,6 +4439,27 @@ function _isDuplicateTail(existing, incoming) {
     eq(tail[i].spd, incoming[i].spd));
 }
 
+// Distância derivada dos samples — integração de velocidade (dt<=5s, igual ao
+// score) com fallback/sanidade por GPS (haversine). Usada pra blindar o distKm
+// vindo do APK quando o hodômetro re-baseia no meio da viagem e injeta um pulo
+// (ex.: viagem de 5km vira o acumulado do dia). Retorna {spdKm, gpsKm}.
+function _sampleDistKm(samples) {
+  let spdKm = 0, gpsKm = 0, coveredSec = 0;
+  if (!Array.isArray(samples)) return { spdKm, gpsKm, coveredSec };
+  const R = 6371, rad = d => d * Math.PI / 180;
+  for (let i = 1; i < samples.length; i++) {
+    const a = samples[i - 1], b = samples[i];
+    const dt = (b.t || 0) - (a.t || 0);
+    if (dt > 0 && dt <= 5) { spdKm += ((a.spd || 0) + (b.spd || 0)) / 2 / 3600 * dt; coveredSec += dt; }
+    if (a.lat && a.lng && b.lat && b.lng) {
+      const dLa = rad(b.lat - a.lat), dLo = rad(b.lng - a.lng);
+      const h = Math.sin(dLa / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLo / 2) ** 2;
+      gpsKm += 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+    }
+  }
+  return { spdKm, gpsKm, coveredSec };
+}
+
 // Score de condução (0-100): combina economia (energia-equiv/100km) com suavidade
 // (poucas acelerações/frenagens bruscas, detectadas pela variação de velocidade).
 function computeDriveScore(samples, t) {
@@ -4544,6 +4589,43 @@ app.post('/api/autotrips', (req, res) => {
       }
     }
 
+    // Blindagem do distKm: o hodômetro do APK re-baseia no meio da viagem e
+    // ora INFLA (soma o acumulado do dia: 5km vira 38km) ora SUBCONTA (perde um
+    // trecho num gap de telemetria: 27km vira 23km). Em ambos o tempo/energia
+    // ficam certos, só a distância erra. Quando os samples são CONFIÁVEIS (densos
+    // e spd↔gps concordando) eles batem com a realidade (o scrubber do app usa a
+    // mesma integração) → reconcilia o distKm pra eles, nos dois sentidos.
+    {
+      const rep = +autoTrip.distKm || 0;
+      const tSec = +autoTrip.timeSec || 0;
+      const { spdKm, gpsKm, coveredSec } = _sampleDistKm(finalSamples);
+      const sampleKm = Math.max(spdKm, gpsKm);
+      const avgKmh = tSec >= 60 ? rep / (tSec / 3600) : 0;
+      // Telemetria confiável: a integração de velocidade cobre ~toda a duração
+      // (sem gaps grandes) e spd/gps concordam (mesma ordem de grandeza). Exclui
+      // o caso Palmeiras (gps 2× spd, cobertura furada por timestamps sujos), onde
+      // os samples subcontam um trecho e NÃO podem ditar a distância.
+      const covRatio = tSec >= 60 ? coveredSec / tSec : 0;
+      const agree = spdKm > 0.5 && gpsKm > 0.5 && Math.min(spdKm, gpsKm) / Math.max(spdKm, gpsKm) >= 0.75;
+      const dense = covRatio >= 0.85 && covRatio <= 1.5;
+      const reliableKm = (spdKm + gpsKm) / 2;
+      // Sinal do bug clássico (só infla): média fisicamente impossível, mesmo sem
+      // samples confiáveis. Corrige pro piso de samples (não-zero).
+      const implausible = (avgKmh > 130) || (avgKmh > 90 && sampleKm > 0.5 && rep > sampleKm * 1.8 + 3);
+      if (dense && agree && tSec >= 60) {
+        // Reconciliação bidirecional: diverge >12% (e >2km) → manda nos samples.
+        if (Math.abs(rep - reliableKm) > Math.max(2, reliableKm * 0.12)) {
+          const fixed = parseFloat(reliableKm.toFixed(3));
+          console.log(`⚠ AutoTrip ${safeId}: distKm reconciliado ${rep.toFixed(1)}km → ${fixed}km (samples densos spd=${spdKm.toFixed(2)} gps=${gpsKm.toFixed(2)} cov=${covRatio.toFixed(2)})`);
+          autoTrip.distKm = fixed;
+        }
+      } else if (implausible && sampleKm > 0.5) {
+        const fixed = parseFloat(sampleKm.toFixed(3));
+        console.log(`⚠ AutoTrip ${safeId}: distKm implausível ${rep.toFixed(1)}km (avg ${avgKmh.toFixed(0)}km/h, ${tSec}s) → ${fixed}km (spd=${spdKm.toFixed(2)} gps=${gpsKm.toFixed(2)})`);
+        autoTrip.distKm = fixed;
+      }
+    }
+
     // Calcula tempo e distância em modo híbrido (ICE ligado, rpm > 0).
     // Se o arquivo existente foi marcado como _estimated (telemetria parou no
     // meio da viagem e os hybrid foram inferidos por média histórica), PRESERVA
@@ -4552,7 +4634,7 @@ app.post('/api/autotrips', (req, res) => {
     if (fs.existsSync(filePath)) {
       try {
         const ex = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-        if (ex._estimated && ex.hybridTimeSec != null && ex.hybridDistKm != null) {
+        if (ex._estimated) {
           existingEstimated = {
             hybridTimeSec:        ex.hybridTimeSec,
             hybridDistKm:         ex.hybridDistKm,
@@ -4560,13 +4642,25 @@ app.post('/api/autotrips', (req, res) => {
             _estimatedFields:     ex._estimatedFields  || ['hybridDistKm','hybridTimeSec'],
             _estimatedReason:     ex._estimatedReason  || '',
             _estimatedAppliedAt:  ex._estimatedAppliedAt || '',
+            // Valores corrigidos por viagem (distKm/netKwh/fuelL/etc). Sem isso o
+            // re-POST do APK revertia a estimativa pro dado parcial cru (bug do
+            // trip Palmeiras→Limpa Gyn 25/05 que voltava pra 6,8km de ~84km).
+            _estimatedValues:     ex._estimatedValues || null,
           };
         }
       } catch (_) {}
     }
 
+    // Re-aplica os valores estimados (sticky) por cima do que o APK mandou cru.
+    // O autoTrip do APK sempre traz a telemetria parcial; a correção mora só aqui.
+    if (existingEstimated && existingEstimated._estimatedValues) {
+      for (const [k, v] of Object.entries(existingEstimated._estimatedValues)) {
+        if (v != null) autoTrip[k] = v;
+      }
+    }
+
     let hybridTimeSec, hybridDistKm;
-    if (existingEstimated) {
+    if (existingEstimated && existingEstimated.hybridTimeSec != null && existingEstimated.hybridDistKm != null) {
       hybridTimeSec = existingEstimated.hybridTimeSec;
       hybridDistKm  = existingEstimated.hybridDistKm;
       console.log(`↻ AutoTrip ${safeId}: hybrid preservado (estimado): ${hybridDistKm}km / ${hybridTimeSec}s`);
@@ -4599,6 +4693,18 @@ app.post('/api/autotrips', (req, res) => {
     // Auto-naming por Locais Conhecidos (KP) — grava em autoTrip.startKp/endKp pra
     // SOBREVIVER restart do bridge (o disco persiste só `autoTrip`, não o `record`).
     {
+      // Nomes já gravados no arquivo (reprocess-places / geocode de cidade fora de
+      // KP). O APK não manda startKp/endKp, então sem este fallback o re-POST
+      // zerava a ponta sem KP (bug do trip Palmeiras→Limpa Gyn: cidade de origem
+      // não é Local Conhecido, voltava "sem nome" a cada sync do APK).
+      let prevStartKp = null, prevEndKp = null;
+      if (fs.existsSync(filePath)) {
+        try {
+          const ex = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+          prevStartKp = ex.autoTrip?.startKp || null;
+          prevEndKp   = ex.autoTrip?.endKp   || null;
+        } catch (_) {}
+      }
       const _sp = matchKnownPlace(autoTrip.startLat, autoTrip.startLng, 80);
       const _ep = matchKnownPlace(autoTrip.endLat,   autoTrip.endLng, 80);
       if (_sp) autoTrip.startKp = _sp.name;
@@ -4608,6 +4714,9 @@ app.post('/api/autotrips', (req, res) => {
         const navName = _navDestNameFor(autoTrip.endLat, autoTrip.endLng);
         if (navName) autoTrip.endKp = navName;
       }
+      // Preserva o nome reprocessado quando não há KP/nav pra essa ponta.
+      if (!autoTrip.startKp && prevStartKp) autoTrip.startKp = prevStartKp;
+      if (!autoTrip.endKp   && prevEndKp)   autoTrip.endKp   = prevEndKp;
       if (autoTrip.startKp && autoTrip.endKp && !autoTrip.name) {
         autoTrip.name = `${autoTrip.startKp} → ${autoTrip.endKp}`;
       }
@@ -4623,6 +4732,7 @@ app.post('/api/autotrips', (req, res) => {
       persisted._estimatedFields    = existingEstimated._estimatedFields;
       persisted._estimatedReason    = existingEstimated._estimatedReason;
       persisted._estimatedAppliedAt = existingEstimated._estimatedAppliedAt;
+      persisted._estimatedValues    = existingEstimated._estimatedValues;
     }
     fs.writeFileSync(filePath, JSON.stringify(persisted));
 
@@ -5976,12 +6086,57 @@ app.post('/api/charge-limit', async (req, res) => {
   if (![50, 60, 70, 80, 90, 100].includes(pct))
     return res.status(400).json({ error: 'Valor inválido. Use 50, 60, 70, 80, 90 ou 100.' });
   try {
+    // Escolher um preset nativo desliga o corte por software (mutuamente exclusivos).
+    if (state.charge_custom_target) { state.charge_custom_target = 0; _customCutoffFired = false; scheduleStateSave(); }
+    // Desarma o alvo custom no APK também (ele é o dono offline do corte).
+    publishCmdWithRetry(`${MQTT_PREFIX}/cmd/charge_custom_target`, '0', { retain: true, qos: 1 }).catch(() => {});
     // retain=true: estado idempotente; se APK estiver offline no momento, lê
     // o último valor ao reconectar. publishCmdWithRetry tolera gap MQTT <3s.
     await publishCmdWithRetry(`${MQTT_PREFIX}/cmd/charge_limit`, pct.toString(), { retain: true, qos: 1 });
     const carFresh = state.last_apk_ms && (Date.now() - state.last_apk_ms < 30_000);
     console.log(`[charge-limit] Enviando ${pct}% (retain) · APK fresh=${carFresh}`);
     res.json({ ok: true, carFresh });
+  } catch (err) {
+    res.status(err.code === 'MQTT_OFFLINE' ? 503 : 500).json({ error: err.message });
+  }
+});
+
+// POST /api/charge-target  { pct: 97 | 0 }  — alvo de corte por SOFTWARE.
+// O carro só tem 6 presets (50/60/70/80/90/100). Para parar em qualquer outro
+// valor (ex.: 97%, útil pra regen voltar a funcionar logo abaixo de 97%): carrega
+// sem limite (100) e, quando o SOC chega no alvo, freia setando um preset ABAIXO
+// do SOC atual — o carro vê "já passei do alvo" e encerra a carga. pct=0 desliga.
+// Se pct for um preset nativo, delega pro limite nativo (mais confiável, offline-safe).
+app.post('/api/charge-target', async (req, res) => {
+  const pct = parseInt(req.body?.pct);
+  if (!Number.isFinite(pct) || pct < 0 || pct > 100)
+    return res.status(400).json({ error: 'Valor inválido. Use 0 (desliga) ou 50–100.' });
+  try {
+    if (pct === 0) {
+      state.charge_custom_target = 0; _customCutoffFired = false; scheduleStateSave();
+      // APK é o dono offline: desarma o alvo lá também (retained).
+      await publishCmdWithRetry(`${MQTT_PREFIX}/cmd/charge_custom_target`, '0', { retain: true, qos: 1 });
+      console.log('[charge-target] corte por software desligado');
+      return res.json({ ok: true, target: 0 });
+    }
+    if ([50, 60, 70, 80, 90, 100].includes(pct)) {
+      // É um preset → usa o limite nativo (o carro enforça mesmo com bridge offline).
+      state.charge_custom_target = 0; _customCutoffFired = false; scheduleStateSave();
+      await publishCmdWithRetry(`${MQTT_PREFIX}/cmd/charge_custom_target`, '0', { retain: true, qos: 1 });
+      await publishCmdWithRetry(`${MQTT_PREFIX}/cmd/charge_limit`, pct.toString(), { retain: true, qos: 1 });
+      console.log(`[charge-target] ${pct}% é preset → limite nativo`);
+      return res.json({ ok: true, target: pct, native: true });
+    }
+    if (pct < 50)
+      return res.status(400).json({ error: 'Alvo custom mínimo é 51% (abaixo use os presets).' });
+    // Custom: arma o corte e descapa o carro pra ele conseguir chegar no alvo.
+    // O APK é a autoridade primária (corta offline via CAN); o bridge é fallback online.
+    state.charge_custom_target = pct; _customCutoffFired = false; scheduleStateSave();
+    await publishCmdWithRetry(`${MQTT_PREFIX}/cmd/charge_custom_target`, pct.toString(), { retain: true, qos: 1 });
+    await publishCmdWithRetry(`${MQTT_PREFIX}/cmd/charge_limit`, '100', { retain: true, qos: 1 });
+    const carFresh = state.last_apk_ms && (Date.now() - state.last_apk_ms < 30_000);
+    console.log(`[charge-target] alvo custom ${pct}% armado (carro descapado p/ 100) · APK fresh=${carFresh}`);
+    res.json({ ok: true, target: pct, carFresh });
   } catch (err) {
     res.status(err.code === 'MQTT_OFFLINE' ? 503 : 500).json({ error: err.message });
   }
@@ -6930,6 +7085,15 @@ const GWM_BODY_BINARY = new Set([
  *   - chargeStartTimer (30s pra potência estabilizar) nunca disparava
  *   - _chargeTempSamples ficava sempre vazio → avg_temp_c null nos charges
  */
+// Alvo EFETIVO de carga p/ exibir na LA: o corte custom (se armado) vence o
+// limite nativo — senão a LA mostraria 100% (o carro é descapado pra alcançar
+// o alvo custom) e o tick/meta ficaria errado.
+function _effectiveChargeTarget() {
+  const custom = +state.charge_custom_target || 0;
+  if (custom >= 50 && custom <= 100) return custom;
+  return +state.charge_limit_pct || 100;
+}
+
 // Content-state da Live Activity de recarga (casa com ChargeActivityAttributes.ContentState).
 function _chargeContentState() {
   return {
@@ -6938,7 +7102,7 @@ function _chargeContentState() {
     sessionKwh:   +state.charge_session_kwh || 0,
     remainingMin: chargeEtaMin(),   // ETA calculado por nós (o do carro trava em ~5min)
     charging:     state.charging_state === 'Carregando',
-    targetPct:    +state.charge_limit_pct || 100,
+    targetPct:    _effectiveChargeTarget(),
     updatedAtMs:  Date.now(),
   };
 }
@@ -7086,20 +7250,34 @@ function _recentKwhPerKm() {
   const k = ev.reduce((s, t) => s + (t.netKwh || 0), 0);
   return (d > 5 && k > 0) ? Math.min(Math.max(k / d, 0.05), 0.5) : 0.16;
 }
+// Limpa toda a rota ativa (chegou ao destino final OU expirou). Apaga o estado,
+// o nav_dest retido e a rota persistida.
+function _clearRoute(consumedWps) {
+  if (state.arrival) { state.arrival = null; scheduleStateBroadcast(); }
+  if (state.route)   { state.route   = null; scheduleStateSave(); }
+  if (_navDestRetained) {
+    mqttClient.publish(`${MQTT_PREFIX}/cmd/nav_dest`, '', { qos: 1, retain: true });
+    _navDestRetained = false;
+  }
+  // Zera ts dos pontos consumidos no histórico pra não "ressuscitarem" no próximo tick.
+  for (const w of (consumedWps || [])) {
+    for (const nd of recentNavDests) {
+      if (Math.abs(nd.lat - w.lat) < 1e-6 && Math.abs(nd.lng - w.lng) < 1e-6) nd.ts = 0;
+    }
+  }
+}
 async function _maybeComputeArrival() {
   const now = Date.now();
-  let dest = null;
-  for (let i = recentNavDests.length - 1; i >= 0; i--) {
-    if (now - recentNavDests[i].ts < 6 * 3600 * 1000) { dest = recentNavDests[i]; break; }
-  }
-  const carLat = +state.gps_lat, carLng = +state.gps_lng, soc = +state.soc_pct;
-  if (!dest) {
-    // Sem destino recente (>6h) → limpa o estado E o nav_dest retido (pra não
-    // reaparecer no carro depois de velho).
-    if (state.arrival) { state.arrival = null; scheduleStateBroadcast(); }
-    if (_navDestRetained) { mqttClient.publish(`${MQTT_PREFIX}/cmd/nav_dest`, '', { qos: 1, retain: true }); _navDestRetained = false; }
+  const route = state.route;
+  // Sem rota OU rota velha (>6h) → limpa estado e retido (não reaparece no carro).
+  if (!route || !Array.isArray(route.wps) || !route.wps.length || now - (route.ts || 0) > 6 * 3600 * 1000) {
+    if (route) _clearRoute();
+    else if (state.arrival || _navDestRetained) _clearRoute();
     return;
   }
+  // Expira a janela de desfazer (parada concluída fica riscada por ~5 min).
+  if (route.undo && now > route.undo.untilMs) { route.undo = null; scheduleStateSave(); }
+  const carLat = +state.gps_lat, carLng = +state.gps_lng, soc = +state.soc_pct;
   if (!carLat || !carLng) {
     if (state.arrival) { state.arrival = null; scheduleStateBroadcast(); }
     return;
@@ -7107,35 +7285,66 @@ async function _maybeComputeArrival() {
   if (_arrivalBusy || now - _arrivalMs < 30_000) return;
   _arrivalBusy = true;
   try {
-    const plan = await _routeElevation(carLat, carLng, dest.lat, dest.lng);
+    const remaining = route.wps.slice(route.completedIdx + 1);   // pontos ainda não alcançados
+    if (!remaining.length) { _clearRoute(route.wps); return; }
+    const points = [[carLng, carLat], ...remaining.map(w => [w.lng, w.lat])];
+    const plan = remaining.length > 1
+      ? await _routeElevationMulti(points)
+      : await _routeElevation(carLat, carLng, remaining[0].lat, remaining[0].lng);
     _arrivalMs = Date.now();
     if (!plan) return;
-    if (plan.distanceKm < 0.5) {   // chegou (raio 500m): limpa estado, retido e marca dest consumido
-      if (state.arrival) { state.arrival = null; scheduleStateBroadcast(); }
-      if (_navDestRetained) {
-        mqttClient.publish(`${MQTT_PREFIX}/cmd/nav_dest`, '', { qos: 1, retain: true });
-        _navDestRetained = false;
-      }
-      // Zera ts do dest no histórico pra _maybeComputeArrival não re-detectar
-      // (senão o destino "ressuscita" ao próximo tick e o carro mostra de novo).
-      for (const nd of recentNavDests) {
-        if (Math.abs(nd.lat - dest.lat) < 1e-6 && Math.abs(nd.lng - dest.lng) < 1e-6) nd.ts = 0;
-      }
-      return;
+    // Normaliza pra ter sempre `legs` (o single-leg vira uma perna só).
+    const legsRaw = plan.legs && plan.legs.length ? plan.legs
+      : [{ distanceKm: plan.distanceKm, durationMin: plan.durationMin, climbM: plan.climbM, descentM: plan.descentM }];
+    const next = remaining[0];
+    const distToNext = legsRaw[0] ? legsRaw[0].distanceKm : plan.distanceKm;
+    // Avanço por proximidade. Parada (não-final) alcançada a ≤300 m → marca concluída
+    // e abre janela de desfazer de 5 min (fica riscada). Destino final a ≤500 m → encerra.
+    if (next.isFinal) {
+      if (distToNext < 0.5) { _clearRoute(route.wps); return; }
+    } else if (distToNext < 0.3) {
+      route.completedIdx += 1;
+      route.undo = { idx: route.completedIdx, name: next.name, lat: next.lat, lng: next.lng, untilMs: now + 5 * 60_000 };
+      scheduleStateSave();
+      _arrivalBusy = false;
+      return _maybeComputeArrival();   // recomputa já com o próximo trecho
     }
-    const durMin = plan.durationMin || 0;
     const cap = 34;   // capacidade útil de fábrica (H6 PHEV)
     const acOn = state.hvac_ac_enable === '1' || state.ac_state === 'on';
     const tempOut = +state.outside_temp || 28;
     const acH = acOn ? Math.min(Math.max(0.5 + 0.07 * Math.abs(tempOut - 22), 0.5), 1.5) : 0.12;
-    const energy = Math.max(plan.distanceKm * _recentKwhPerKm()
-      + plan.climbM * 0.0064 - plan.descentM * 0.0035 + acH * (durMin / 60), 0);
-    const pred = Math.min(Math.max(Math.round(soc - energy / cap * 100), 0), 100);
-    const arr = new Date(Date.now() + durMin * 60_000);
-    const etaClock = `${String(arr.getHours()).padStart(2, '0')}:${String(arr.getMinutes()).padStart(2, '0')}`;
-    state.arrival = { name: dest.name, distKm: plan.distanceKm, etaMin: durMin,
-                      etaClock, socArrival: pred, traffic: plan.traffic, ts: Date.now() };
+    const kwhPerKm = _recentKwhPerKm();
+    // ETA + SOC CUMULATIVOS por perna: cada parada e o destino final ganham hora de
+    // chegada e SOC previsto na ordem do trajeto.
+    let cumDur = 0, cumDist = 0, cumEnergy = 0;
+    const legs = legsRaw.map((l, k) => {
+      const dMin = l.durationMin || 0, dKm = l.distanceKm || 0;
+      cumDur += dMin; cumDist += dKm;
+      cumEnergy += dKm * kwhPerKm + (l.climbM || 0) * 0.0064 - (l.descentM || 0) * 0.0035 + acH * (dMin / 60);
+      const arr = new Date(now + cumDur * 60_000);
+      const wp = remaining[k] || next;
+      return {
+        name: wp.name, lat: wp.lat, lng: wp.lng, isFinal: !!wp.isFinal,
+        distKm: Math.round(cumDist * 10) / 10, etaMin: cumDur,
+        etaClock: `${String(arr.getHours()).padStart(2, '0')}:${String(arr.getMinutes()).padStart(2, '0')}`,
+        socArrival: Math.min(Math.max(Math.round(soc - cumEnergy / cap * 100), 0), 100),
+      };
+    });
+    const fin = legs[legs.length - 1];
+    state.arrival = {
+      name: fin.name, distKm: fin.distKm, etaMin: fin.etaMin, etaClock: fin.etaClock,
+      socArrival: fin.socArrival, traffic: plan.traffic, legs, ts: now,
+      undo: route.undo ? { name: route.undo.name, untilMs: route.undo.untilMs } : null,
+    };
     scheduleStateBroadcast();
+    // Republica o nav_dest retido com as pernas + janela de desfazer pro carro renderizar.
+    mqttClient.publish(`${MQTT_PREFIX}/cmd/nav_dest`, JSON.stringify({
+      lat: fin.lat, lng: fin.lng, name: fin.name, etaClock: fin.etaClock,
+      legs, completedIdx: route.completedIdx,
+      undo: route.undo ? { name: route.undo.name, lat: route.undo.lat, lng: route.undo.lng, untilMs: route.undo.untilMs } : null,
+      ts: now,
+    }), { qos: 1, retain: true });
+    _navDestRetained = true;
   } catch (_) { /* mantém último valor */ }
   finally { _arrivalBusy = false; }
 }
@@ -7932,6 +8141,7 @@ function handleChargingStateTransition(value, isRetained) {
   if (!realTransition) return;
 
   if (value === 'Carregando') {
+    _customCutoffFired = false;   // nova sessão → rearma o corte custom
     _chargeTempSamples = [];   // inicia nova coleta de temperatura
     chargeSessionStartMs = Date.now();
     chargeStartSoc = state.soc_pct || 0;
@@ -7986,6 +8196,16 @@ function handleChargingStateTransition(value, isRetained) {
     // final ser entregue) pra que a PRÓXIMA recarga recrie a LA do zero.
     setTimeout(() => apnsLive.clearUpdateTokensByType('ChargeActivityAttributes'), 60_000);
     const endSoc = state.soc_pct || 0;
+    // Corte custom ativo e já freou: restaura o carro pra "sem limite" (100) — assim
+    // a próxima sessão volta a carregar descapada e o corte rearma no alvo. Mantém
+    // charge_custom_target persistido (só o user trocando o alvo o desliga).
+    const cutByCustom = state.charge_custom_target && _customCutoffFired;
+    if (cutByCustom) {
+      publishCmdWithRetry(`${MQTT_PREFIX}/cmd/charge_limit`, '100', { retain: true, qos: 1 })
+        .then(() => console.log('[charge-cutoff] sessão encerrada → carro restaurado p/ 100 (corte rearma na próxima)'))
+        .catch(() => {});
+      _customCutoffFired = false;
+    }
     addEvent('charge_end', `Recarga concluída · SOC: ${chargeStartSoc.toFixed(0)}% → ${endSoc.toFixed(0)}%`);
     // Calcula temperatura média da sessão encerrada
     if (_chargeTempSamples.length > 0) {
@@ -8001,7 +8221,9 @@ function handleChargingStateTransition(value, isRetained) {
     // Pega problema no carregamento (cabo soltou, falha do carregador, etc.).
     // endSoc > 0 evita falso alarme se o SOC vier zerado/desconhecido.
     const chargeLimit  = +state.charge_limit_pct || 100;
-    const chargeFailed = endSoc > 0 && endSoc < (chargeLimit - 1);
+    // Se NÓS cortamos (alvo custom), não é falha — suprime o alerta (o readback do
+    // preset de freio pode nem ter chegado, então cutByCustom é o sinal confiável).
+    const chargeFailed = !cutByCustom && endSoc > 0 && endSoc < (chargeLimit - 1);
     if (!isRetained && chargeFailed) {
       const aTitle = '⚠️ Carregamento interrompido';
       const aBody  = `Parou em ${endSoc.toFixed(0)}% (limite ${chargeLimit}%). Verifique o carregamento.`;
@@ -8015,7 +8237,7 @@ function handleChargingStateTransition(value, isRetained) {
           soc: endSoc, powerKw: 0,
           sessionKwh: Math.max(_chargeFinalKwh, +state.charge_session_kwh || 0),
           remainingMin: 0, charging: false,
-          targetPct: chargeLimit, updatedAtMs: Date.now(),
+          targetPct: _effectiveChargeTarget(), updatedAtMs: Date.now(),
         }, { isFinal: true, dismissalDate: Date.now() + 30 * 60_000, alert: { title: aTitle, body: aBody } })
           .catch(e => console.warn('[apns] charge-stopped end falhou:', e.message));
       }
@@ -8086,7 +8308,7 @@ let _chargeEtaMin = 0;           // ETA suavizado (min)
 const CHARGE_ETA_WIN_MS = 60_000;
 function _recalcChargeEta() {
   const soc  = +state.soc_pct || 0;
-  const lim  = +state.charge_limit_pct || 100;
+  const lim  = _effectiveChargeTarget();   // alvo custom vence o limite nativo (100 descapado)
   const need = Math.max(0, (lim - soc) / 100 * BATTERY_CAPACITY_KWH);   // kWh até o alvo
   if (need <= 0.05) { _chargeEtaMin = 0; return; }
   const now = Date.now();
@@ -8168,7 +8390,7 @@ function sendChargeLiveUpdate(isFinal = false) {
       sessionKwh: isFinal ? Math.max(_chargeFinalKwh, +state.charge_session_kwh || 0) : (+state.charge_session_kwh || 0),
       remainingMin: Math.max(0, Math.round(rem)),
       charging: !isFinal,
-      targetPct: +state.charge_limit_pct || 100,
+      targetPct: _effectiveChargeTarget(),
       updatedAtMs: now,
     }, { isFinal, dismissalDate: isFinal ? Date.now() + 30 * 60_000 : undefined, alert: isFinal ? { title, body } : undefined })
       .catch(err => console.warn('[apns] push falhou:', err.message));
@@ -8510,6 +8732,9 @@ async function _handleSharedDest(value) {
     // (ex.: "Shopping Flamboyant" em vez de "Bairro, Cidade") — ver _navDestNameFor.
     recentNavDests.push({ name: d.name, lat: d.lat, lng: d.lng, ts: Date.now() });
     if (recentNavDests.length > 30) recentNavDests.shift();
+    // Destino único compartilhado → rota de uma perna (PERSISTIDA, sobrevive ao desligar).
+    state.route = { wps: [{ lat: d.lat, lng: d.lng, name: d.name, isFinal: true }], completedIdx: -1, undo: null, ts: Date.now() };
+    scheduleStateSave();
     const payload = JSON.stringify({ lat: d.lat, lng: d.lng, name: d.name, etaClock, ts: Date.now() });
     mqttClient.publish(`${MQTT_PREFIX}/cmd/nav_dest`, payload, { qos: 1, retain: true });
     _navDestRetained = true;
@@ -8556,22 +8781,43 @@ app.post('/api/nav-to', (req, res) => {
   if (!Number.isFinite(lat) || !Number.isFinite(lng) || (lat === 0 && lng === 0))
     return res.status(400).json({ ok: false, error: 'lat/lng obrigatórios' });
   const name = (String(req.body && req.body.name || '').trim() || `${lat.toFixed(5)}, ${lng.toFixed(5)}`).slice(0, 60);
-  const app = String(req.body && req.body.app || '').toLowerCase();   // '', 'maps', 'waze'
+  const app = String(req.body && req.body.app || '').toLowerCase();   // '', 'maps', 'waze', 'gmaps'
   const target = String(req.body && req.body.target || '').toLowerCase();  // '', 'car', 'phone'
   const device = String(req.body && req.body.device || '').trim();   // id específico (preferido)
+  // Paradas (waypoints) antes do destino final — só o Google Maps (app=gmaps) usa;
+  // Waze/Apple Maps ignoram e vão direto ao destino. [{lat,lng,name}]
+  const stops = Array.isArray(req.body && req.body.stops)
+    ? req.body.stops.map(s => ({
+        lat: +(s && s.lat), lng: +(s && s.lng),
+        name: String((s && s.name) || '').slice(0, 60),
+      })).filter(s => Number.isFinite(s.lat) && Number.isFinite(s.lng) && (s.lat !== 0 || s.lng !== 0)).slice(0, 8)
+    : [];
   recentNavDests.push({ name, lat, lng, ts: Date.now() });
   if (recentNavDests.length > 30) recentNavDests.shift();
+  // Registra também cada parada no histórico (pra nomear viagem que termine perto).
+  for (const s of stops) {
+    if (s.name) { recentNavDests.push({ name: s.name, lat: s.lat, lng: s.lng, ts: Date.now() }); }
+  }
+  while (recentNavDests.length > 30) recentNavDests.shift();
   // Painel/Chegada do carro: só quando NÃO é navegação dedicada ao celular.
   // Quando device específico foi escolhido, usa o role registrado dele pra decidir.
   const effectiveRole = device && _navDevices[device]?.role || target;
   if (effectiveRole !== 'phone') {
+    // Rota multi-parada PERSISTIDA: paradas + destino final. _maybeComputeArrival
+    // calcula o ETA por perna e republica o nav_dest com as pernas/undo embutidos.
+    const wps = [
+      ...stops.map(s => ({ lat: s.lat, lng: s.lng, name: s.name || `${s.lat.toFixed(4)},${s.lng.toFixed(4)}`, isFinal: false })),
+      { lat, lng, name, isFinal: true },
+    ];
+    state.route = { wps, completedIdx: -1, undo: null, ts: Date.now() };
+    scheduleStateSave();
     mqttClient.publish(`${MQTT_PREFIX}/cmd/nav_dest`,
       JSON.stringify({ lat, lng, name, etaClock: '', ts: Date.now() }), { qos: 1, retain: true });
     _navDestRetained = true;
   }
-  // Se pediu Maps/Waze, manda pro Nav Relay abrir a navegação.
-  if (app === 'maps' || app === 'waze') {
-    const payload = JSON.stringify({ lat, lng, name, app, target, device, ts: Date.now() });
+  // Se pediu Maps/Waze/Google Maps, manda pro Nav Relay abrir a navegação.
+  if (app === 'maps' || app === 'waze' || app === 'gmaps') {
+    const payload = JSON.stringify({ lat, lng, name, app, target, device, stops, ts: Date.now() });
     if (device) {
       // Direcionado a UM device específico — só ele recebe. retain:true pra o NavRelay
       // puxar o último destino ao reconectar (estava offline na hora do envio). O
@@ -8582,10 +8828,24 @@ app.post('/api/nav-to', (req, res) => {
       mqttClient.publish(`${MQTT_PREFIX}/nav_to`, payload, { qos: 1, retain: true });
     }
   }
+  _arrivalMs = 0;               // ignora o throttle de 30s pra calcular agora
   _maybeComputeArrival(true);   // já calcula a chegada pro cluster/estado
   const dest = device ? `device=${device}` : (target || 'carro');
   console.log(`[navTo] → ${dest}: ${name} (${lat.toFixed(5)},${lng.toFixed(5)})${app ? ' · '+app : ''}`);
   res.json({ ok: true, name });
+});
+
+// POST /api/route-undo — desfaz o avanço automático da última parada concluída
+// (dentro da janela de 5 min). Volta completedIdx pra antes daquela parada.
+app.post('/api/route-undo', (req, res) => {
+  const r = state.route;
+  if (!r || !r.undo) return res.status(404).json({ ok: false, error: 'nada a desfazer' });
+  r.completedIdx = Math.max(-1, r.undo.idx - 1);
+  r.undo = null;
+  scheduleStateSave();
+  _arrivalMs = 0;                  // força recomputo imediato
+  _maybeComputeArrival(true);
+  res.json({ ok: true });
 });
 
 // GET /api/geocode-suggest?q= — autocomplete de endereço (carro/PWA). Sugestões com
@@ -8682,6 +8942,94 @@ async function _routeElevation(fromLat, fromLng, toLat, toLng) {
     durationMin: Math.round(route.duration / 60),
     climbM: Math.round(climbM), descentM: Math.round(descentM),
     traffic: route.traffic,
+  };
+}
+
+// Rota com paradas (waypoints). points = [[lng,lat], …] (≥2). Mapbox/OSRM aceitam
+// coordenadas `;`-separadas e devolvem `legs[]` (uma por trecho origem→parada→…→destino).
+async function _fetchRouteMulti(points) {
+  const coordStr = points.map(p => `${p[0]},${p[1]}`).join(';');
+  const tok = process.env.MAPBOX_TOKEN;
+  if (tok) {
+    try {
+      const mu = `https://api.mapbox.com/directions/v5/mapbox/driving-traffic/${coordStr}`
+        + `?access_token=${tok}&geometries=geojson&overview=full&alternatives=false`;
+      const mr = await fetch(mu, { signal: AbortSignal.timeout(9000) });
+      const mj = await mr.json();
+      const rt = mj && mj.routes && mj.routes[0];
+      if (rt) return {
+        distance: rt.distance, duration: rt.duration, coords: rt.geometry.coordinates, traffic: true,
+        legs: (rt.legs || []).map(l => ({ distance: l.distance, duration: l.duration })),
+      };
+      console.warn('[route] Mapbox multi sem rota:', mj && mj.message);
+    } catch (e) { console.warn('[route] Mapbox multi falhou, OSRM:', e.message); }
+  }
+  const u = `https://router.project-osrm.org/route/v1/driving/${coordStr}`
+    + `?overview=full&geometries=geojson&alternatives=false&steps=false`;
+  const rr = await fetch(u, { signal: AbortSignal.timeout(9000) });
+  const rj = await rr.json();
+  const route = rj && rj.routes && rj.routes[0];
+  if (!route) return null;
+  return {
+    distance: route.distance, duration: route.duration, coords: route.geometry.coordinates, traffic: false,
+    legs: (route.legs || []).map(l => ({ distance: l.distance, duration: l.duration })),
+  };
+}
+
+// Igual ao _routeElevation, mas com paradas: distância/tempo exatos por perna (Mapbox
+// legs) + subida/descida por perna (Open-Meteo na geometria inteira, fatiada pelos
+// índices mais próximos de cada waypoint). points = [origem, …paradas, destino].
+async function _routeElevationMulti(points) {
+  const route = await _fetchRouteMulti(points);
+  if (!route) return null;
+  const coords = route.coords;
+  const step = Math.max(1, Math.ceil(coords.length / 99));
+  const pts = [], idxMap = [];
+  for (let i = 0; i < coords.length; i += step) { pts.push(coords[i]); idxMap.push(i); }
+  if (idxMap[idxMap.length - 1] !== coords.length - 1) { pts.push(coords[coords.length - 1]); idxMap.push(coords.length - 1); }
+  let elev = null;
+  try {
+    const lats = pts.map(c => c[1]).join(','), lngs = pts.map(c => c[0]).join(',');
+    const er = await fetch(`https://api.open-meteo.com/v1/elevation?latitude=${lats}&longitude=${lngs}`, { signal: AbortSignal.timeout(9000) });
+    const ej = await er.json();
+    if (Array.isArray(ej && ej.elevation)) elev = ej.elevation;
+  } catch (_) { /* sem elevação → climb/descent 0 */ }
+  // Índice na geometria mais próximo de cada waypoint de entrada (pra fatiar as pernas).
+  const wpIdx = points.map(p => {
+    let best = 0, bestD = Infinity;
+    for (let i = 0; i < coords.length; i++) {
+      const dx = coords[i][0] - p[0], dy = coords[i][1] - p[1], d = dx * dx + dy * dy;
+      if (d < bestD) { bestD = d; best = i; }
+    }
+    return best;
+  });
+  const legElev = [];
+  for (let k = 0; k < points.length - 1; k++) {
+    const a = wpIdx[k], b = wpIdx[k + 1];
+    let climb = 0, desc = 0;
+    if (elev) {
+      let prev = null;
+      for (let i = 0; i < pts.length; i++) {
+        if (idxMap[i] < a || idxMap[i] > b) continue;
+        if (prev != null) { const d = elev[i] - elev[prev]; if (d > 0) climb += d; else desc += -d; }
+        prev = i;
+      }
+    }
+    legElev.push({ climbM: Math.round(climb), descentM: Math.round(desc) });
+  }
+  let totClimb = 0, totDesc = 0;
+  if (elev) for (let i = 1; i < elev.length; i++) { const d = elev[i] - elev[i - 1]; if (d > 0) totClimb += d; else totDesc += -d; }
+  const legs = (route.legs || []).map((l, k) => ({
+    distanceKm: Math.round((l.distance / 1000) * 10) / 10,
+    durationMin: Math.round(l.duration / 60),
+    climbM: legElev[k] ? legElev[k].climbM : 0,
+    descentM: legElev[k] ? legElev[k].descentM : 0,
+  }));
+  return {
+    distanceKm: Math.round((route.distance / 1000) * 10) / 10,
+    durationMin: Math.round(route.duration / 60),
+    climbM: Math.round(totClimb), descentM: Math.round(totDesc),
+    traffic: route.traffic, legs,
   };
 }
 // ── Compartilhar status (link temporário com localização ao vivo) ───────────
@@ -8838,7 +9186,19 @@ app.get('/api/route-plan', async (req, res) => {
       if (!g) return res.status(404).json({ error: 'destino não encontrado' });
       toLat = g.lat; toLng = g.lng; toName = g.name;
     }
-    const plan = await _routeElevation(fromLat, fromLng, toLat, toLng);
+    // Paradas opcionais: stops=lat,lng;lat,lng (entre origem e destino). Com paradas
+    // usa o roteador multi-waypoint (legs por perna); sem, o caminho de 1 perna.
+    const stops = String(req.query.stops || '').split(';').map(s => {
+      const [la, lo] = s.split(',').map(Number);
+      return (Number.isFinite(la) && Number.isFinite(lo) && (la !== 0 || lo !== 0)) ? [lo, la] : null;
+    }).filter(Boolean);
+    let plan;
+    if (stops.length) {
+      const points = [[fromLng, fromLat], ...stops, [toLng, toLat]];
+      plan = await _routeElevationMulti(points);
+    } else {
+      plan = await _routeElevation(fromLat, fromLng, toLat, toLng);
+    }
     if (!plan) return res.status(502).json({ error: 'rota indisponível' });
     // Registra o destino (celular OU carro) pra nomear a viagem que terminar a
     // ≤300 m dele (ver _navDestNameFor). Dedup do último pra não inflar a lista.
@@ -9060,7 +9420,7 @@ function applyGwmEntity(id, value, isRetained = false) {
   // ── Sensores numéricos (soc, 12v, odo, pneus, autonomia, remaining_min) ──
   state[field] = num(value);
   if (field === 'odometer_km') checkMaintenanceAlerts();
-  if (field === 'soc_pct') { checkSocLowIdle(); _checkSocFullLong(+state.soc_pct || 0); }
+  if (field === 'soc_pct') { checkSocLowIdle(); _checkSocFullLong(+state.soc_pct || 0); _checkCustomChargeCutoff(+state.soc_pct || 0); }
 }
 
 // Fonte de origem do último valor de cada campo: 'apk' (carro) ou 'gwm' (HA).
@@ -9606,6 +9966,16 @@ function applyMqttMessage(key, value, isRetained = false) {
     case 'ha/charge_limit/state': {
       const pct = parseInt(value);
       if ([50,60,70,80,90,100].includes(pct)) state.charge_limit_pct = pct;
+      break;
+    }
+    case 'ha/charge_custom_target/state': {
+      // APK é o dono offline do alvo custom — reflete a verdade dele aqui.
+      const pct = parseInt(value);
+      if (Number.isFinite(pct) && pct >= 0 && pct <= 100) {
+        state.charge_custom_target = pct;
+        if (pct === 0) _customCutoffFired = false;
+        scheduleStateSave();
+      }
       break;
     }
     case 'cmd/charge_limit/result':

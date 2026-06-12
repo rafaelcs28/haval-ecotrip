@@ -103,6 +103,25 @@ suspend fun fetchArrivalPlan(
     RoutePlan(name, dLat, dLng, distKm, durMin, etaClock, climb, desc, cur, pred, energy, cap)
 }
 
+// Desfaz o avanço automático da última parada (janela de 5 min) → POST /api/route-undo.
+suspend fun postRouteUndo(tripManager: TripManager): Boolean = withContext(Dispatchers.IO) {
+    val base = tripManager.bridgeUrlPublic()
+    if (base.isBlank()) return@withContext false
+    try {
+        val c = (URL("$base/api/route-undo").openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            setRequestProperty("Authorization", "Bearer " + tripManager.bridgeTokenPublic())
+            setRequestProperty("Content-Type", "application/json")
+            doOutput = true
+            connectTimeout = 8000; readTimeout = 8000
+        }
+        c.outputStream.use { it.write("{}".toByteArray()) }
+        val ok = c.responseCode in 200..299
+        c.disconnect()
+        ok
+    } catch (e: Exception) { false }
+}
+
 data class GeoSuggestion(val name: String, val detail: String, val lat: Double, val lng: Double)
 
 // Autocomplete de endereço: /api/geocode-suggest (Mapbox Search Box, viés na GPS do carro).

@@ -32,9 +32,13 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
 import br.com.redesurftank.ecotrip.R
 import br.com.redesurftank.ecotrip.managers.AutoTripEntry
 import br.com.redesurftank.ecotrip.ui.theme.*
+
+// Parada da rota multi-parada exibida no banner (ETA + SOC previsto na chegada dela).
+data class HomeNavStop(val name: String, val etaClock: String, val arrivalSoc: Int, val done: Boolean = false)
 
 // ── Dados da tela inicial (viagem atual + bateria + estado do carro) ──────────
 data class HomeData(
@@ -71,6 +75,9 @@ data class HomeData(
     val navEtaMin: Int = 0,
     val navEtaClock: String = "",
     val navArrivalSoc: Int = 0,
+    // Paradas intermediárias (ETA/SOC por parada). Vazio = destino único. A
+    // parada recém-concluída entra com done=true (riscada) durante a janela de desfazer.
+    val navStops: List<HomeNavStop> = emptyList(),
 ) {
     companion object {
         val sample = HomeData(
@@ -171,24 +178,46 @@ private fun socColor(soc: Int): Color = when {
 // ── Banner "viagem em andamento" — By Claude (glass/neon) ─────────────────────
 @Composable
 private fun ClaudeNavBanner(d: HomeData) {
-    Row(
+    Column(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(GlassCard)
             .border(1.5.dp, AuroraTeal.copy(alpha = 0.35f), RoundedCornerShape(16.dp))
             .padding(horizontal = 22.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text("📍", fontSize = 22.sp)
-        Spacer(Modifier.width(12.dp))
-        Column {
-            Text("VIAGEM EM ANDAMENTO", color = AuroraTeal, fontSize = 13.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
-            Text(d.navName, color = TextPrimary, fontSize = 22.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("📍", fontSize = 22.sp)
+            Spacer(Modifier.width(12.dp))
+            Column {
+                Text("VIAGEM EM ANDAMENTO", color = AuroraTeal, fontSize = 13.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
+                Text(d.navName, color = TextPrimary, fontSize = 22.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+            }
+            Spacer(Modifier.weight(1f))
+            NavStat("chegada", d.navEtaClock, "${d.navEtaMin} min", TextPrimary)
+            NavDivider()
+            NavStat("restante", "${f1(d.navDistKm)} km", "", TextPrimary)
+            NavDivider()
+            NavStat("SOC chegada", "${d.navArrivalSoc}%", "", socColor(d.navArrivalSoc))
         }
-        Spacer(Modifier.weight(1f))
-        NavStat("chegada", d.navEtaClock, "${d.navEtaMin} min", TextPrimary)
-        NavDivider()
-        NavStat("restante", "${f1(d.navDistKm)} km", "", TextPrimary)
-        NavDivider()
-        NavStat("SOC chegada", "${d.navArrivalSoc}%", "", socColor(d.navArrivalSoc))
+        if (d.navStops.isNotEmpty()) {
+            Spacer(Modifier.height(8.dp))
+            NavStopsRow(d.navStops, AuroraTeal)
+        }
+    }
+}
+
+// Faixa de paradas: "parada · HH:MM · SOC%" em sequência; concluída fica riscada.
+@Composable
+private fun NavStopsRow(stops: List<HomeNavStop>, accent: Color) {
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+        stops.forEachIndexed { i, s ->
+            if (i > 0) Text("→", color = TextSecondary, fontSize = 14.sp)
+            val deco = if (s.done) TextDecoration.LineThrough else TextDecoration.None
+            Text(
+                "${s.name} · ${s.etaClock} · ${s.arrivalSoc}%",
+                color = if (s.done) TextSecondary else accent,
+                fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
+                textDecoration = deco,
+            )
+        }
     }
 }
 
@@ -209,20 +238,25 @@ private fun NavDivider() {
 // ── Banner "viagem em andamento" — Tesla (minimalista) ────────────────────────
 @Composable
 private fun TeslaNavBanner(d: HomeData) {
-    Row(
+    Column(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Color(0xFF161618))
             .padding(horizontal = 24.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text("➜", color = Color(0xFF28C98A), fontSize = 30.sp, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.width(16.dp))
-        Text(d.navName, color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Medium, maxLines = 1)
-        Spacer(Modifier.weight(1f))
-        TeslaNavCell("Chegada", d.navEtaClock, "${d.navEtaMin} min", Color.White)
-        Spacer(Modifier.width(40.dp))
-        TeslaNavCell("Faltam", "${f1(d.navDistKm)} km", "", Color.White)
-        Spacer(Modifier.width(40.dp))
-        TeslaNavCell("SOC na chegada", "${d.navArrivalSoc}%", "", socColor(d.navArrivalSoc))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("➜", color = Color(0xFF28C98A), fontSize = 30.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.width(16.dp))
+            Text(d.navName, color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+            Spacer(Modifier.weight(1f))
+            TeslaNavCell("Chegada", d.navEtaClock, "${d.navEtaMin} min", Color.White)
+            Spacer(Modifier.width(40.dp))
+            TeslaNavCell("Faltam", "${f1(d.navDistKm)} km", "", Color.White)
+            Spacer(Modifier.width(40.dp))
+            TeslaNavCell("SOC na chegada", "${d.navArrivalSoc}%", "", socColor(d.navArrivalSoc))
+        }
+        if (d.navStops.isNotEmpty()) {
+            Spacer(Modifier.height(10.dp))
+            NavStopsRow(d.navStops, Color(0xFF28C98A))
+        }
     }
 }
 
@@ -238,20 +272,26 @@ private fun TeslaNavCell(label: String, value: String, sub: String, color: Color
 // ── Banner "viagem em andamento" — Europeu (cockpit, pílula central) ──────────
 @Composable
 private fun EuroNavBanner(d: HomeData) {
-    Row(
+    Column(
         Modifier.clip(RoundedCornerShape(24.dp))
             .background(Color(0xFF11202B))
             .border(1.dp, Color(0xFF2D7DFF).copy(alpha = 0.4f), RoundedCornerShape(24.dp))
             .padding(horizontal = 26.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text("📍 ${d.navName}", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
-        Spacer(Modifier.width(28.dp))
-        Text("${d.navEtaClock} · ${d.navEtaMin} min", color = Color(0xFF5EC8FF), fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
-        Spacer(Modifier.width(20.dp))
-        Text("${f1(d.navDistKm)} km", color = Color(0xFF9AA6B4), fontSize = 22.sp)
-        Spacer(Modifier.width(20.dp))
-        Text("SOC ${d.navArrivalSoc}%", color = socColor(d.navArrivalSoc), fontSize = 24.sp, fontWeight = FontWeight.Bold)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("📍 ${d.navName}", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+            Spacer(Modifier.width(28.dp))
+            Text("${d.navEtaClock} · ${d.navEtaMin} min", color = Color(0xFF5EC8FF), fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.width(20.dp))
+            Text("${f1(d.navDistKm)} km", color = Color(0xFF9AA6B4), fontSize = 22.sp)
+            Spacer(Modifier.width(20.dp))
+            Text("SOC ${d.navArrivalSoc}%", color = socColor(d.navArrivalSoc), fontSize = 24.sp, fontWeight = FontWeight.Bold)
+        }
+        if (d.navStops.isNotEmpty()) {
+            Spacer(Modifier.height(8.dp))
+            NavStopsRow(d.navStops, Color(0xFF5EC8FF))
+        }
     }
 }
 

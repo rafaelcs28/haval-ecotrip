@@ -8,10 +8,11 @@ import ActivityKit
 import SwiftUI
 import WidgetKit
 
-private func chargeRemainingLabel(_ min: Int) -> String {
+private func chargeRemainingLabel(_ min: Int, target: Double = 0) -> String {
     guard min > 0 else { return "—" }
-    if min >= 60 { return "~\(min / 60)h\(String(format: "%02d", min % 60))" }
-    return "~\(min) min"
+    let t = (target > 0 && target < 100) ? " até \(Int(target))%" : ""
+    if min >= 60 { return "~\(min / 60)h\(String(format: "%02d", min % 60))\(t)" }
+    return "~\(min) min\(t)"
 }
 
 // Ícone compacto pra Dynamic Island: anel mostra o SOC ao redor do carrinho.
@@ -58,7 +59,7 @@ struct ChargeActivityLiveActivity: Widget {
                         Text(String(format: "%.1f kW", s.powerKw))
                             .font(.title3).bold().foregroundStyle(.green)
                             .lineLimit(1).minimumScaleFactor(0.5)
-                        Text(chargeRemainingLabel(s.remainingMin))
+                        Text(chargeRemainingLabel(s.remainingMin, target: s.targetPct))
                             .font(.caption2).foregroundStyle(.secondary)
                             .lineLimit(1).minimumScaleFactor(0.7)
                     }
@@ -124,13 +125,9 @@ struct ChargeLockScreenView: View {
             }
             ChargeBar(soc: state.soc, target: state.targetPct, accent: accent)
             HStack(spacing: 6) {
-                Label(chargeRemainingLabel(state.remainingMin), systemImage: "clock")
+                Label(chargeRemainingLabel(state.remainingMin, target: state.targetPct), systemImage: "clock")
                     .font(.caption).foregroundStyle(.secondary)
                     .lineLimit(1).minimumScaleFactor(0.7)
-                if state.targetPct > 0 && state.targetPct < 100 {
-                    Text("· meta \(Int(state.targetPct))%").font(.caption).foregroundStyle(.secondary)
-                        .lineLimit(1).minimumScaleFactor(0.7)
-                }
                 Spacer(minLength: 6)
                 Label(String(format: "%.1f kWh", state.sessionKwh), systemImage: "bolt.batteryblock")
                     .font(.caption).foregroundStyle(.secondary)

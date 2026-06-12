@@ -495,6 +495,8 @@
     display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px;
   }
   .eta-banner .eb-name { color: var(--teal); }
+  .eta-banner .eb-stop { color: var(--muted); font-weight: 600; }
+  .eta-banner .eb-stop.done { text-decoration: line-through; opacity: .5; }
   .eta-banner .eb-sep { opacity: .35; }
   .eta-banner .eb-reach { font-weight: 700; }
   .eta-banner .eb-reach.green  { color: var(--green); }
@@ -1417,6 +1419,12 @@ const fmt0 = n => Math.round(n).toLocaleString('pt-BR');
 const fmt1 = n => (Number.isFinite(+n) ? (+n).toLocaleString('pt-BR', {minimumFractionDigits:1, maximumFractionDigits:1}) : '—');
 const fmtBRL = n => 'R$ ' + (Number.isFinite(+n) ? (+n).toFixed(2).replace('.', ',') : '0,00');
 const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
+// Velocidade ajustada p/ bater com o painel do carro (mesma fórmula do cluster).
+// O CAN reporta a velocidade real (menor); o velocímetro indica um pouco a mais.
+const adjSpeed = (raw) => {
+  const v = Math.max(0, +raw || 0);
+  return Math.trunc(v * 1.07 - v / 180 * 0.02);
+};
 function toast(msg) {
   const el = $('toast'); el.textContent = msg; el.classList.add('show');
   clearTimeout(toast._t); toast._t = setTimeout(() => el.classList.remove('show'), 2200);
@@ -1987,7 +1995,7 @@ function render() {
 
   // Speed — painel Velocidade (id="power-speed") + máx + legacy speed-val/max
   // Clamp >= 0: o carro reporta -1 como sentinela "sem leitura" (desligado).
-  const spd = Math.max(0, +state.speed_kmh || 0);
+  const spd = adjSpeed(state.speed_kmh);
   // Reset do MÁX a cada nova partida (driving_ready 0→1).
   const dr = +state.driving_ready || 0;
   if (dr === 1 && _drivingReadyPrev !== 1) { _speedMax = 0; }
@@ -2066,7 +2074,16 @@ function render() {
     if (etaBanner) {
       const esc = s => String(s).replace(/</g, '&lt;').replace(/>/g, '&gt;');
       const parts = [];
-      if (arr.name)            parts.push(`<span class="eb-name">${esc(arr.name)}</span>`);
+      // Paradas intermediárias (rota multi-parada): "nome · HH:MM · SOC%" cada uma,
+      // antes do destino final. A recém-concluída (undo) aparece riscada.
+      const legs = Array.isArray(arr.legs) ? arr.legs : [];
+      if (arr.undo && arr.undo.name && arr.undo.untilMs > Date.now()) {
+        parts.push(`<span class="eb-stop done">✓ ${esc(arr.undo.name)}</span>`);
+      }
+      legs.filter(l => !l.isFinal).forEach(l => {
+        parts.push(`<span class="eb-stop">📍 ${esc(l.name)} · ${esc(l.etaClock || '')} · ${Math.round(l.socArrival)}%</span>`);
+      });
+      if (arr.name)            parts.push(`<span class="eb-name">${legs.length > 1 ? '🏁 ' : ''}${esc(arr.name)}</span>`);
       if (arr.etaMin != null)  parts.push(`${arr.etaMin} min`);
       if (arr.etaClock)        parts.push(`chega ${esc(arr.etaClock)}`);
       if (arr.distKm != null)  parts.push(`${fmt1(arr.distKm)} km`);
@@ -2802,7 +2819,7 @@ function tickPowerSpark() {
   _drawLine(POWER_HISTORY, 'chart-line', v => 60 - clamp(v, -50, 50));
 
   // Velocidade (0–160 km/h, base em y=120, topo em y=0)
-  const spd = +state.speed_kmh || 0;
+  const spd = adjSpeed(state.speed_kmh);
   SPEED_HISTORY.push(Number.isFinite(spd) ? spd : 0);
   if (SPEED_HISTORY.length > POWER_HIST_MAX) SPEED_HISTORY.shift();
   _drawLine(SPEED_HISTORY, 'chart-line-spd', v => 120 - (clamp(v, 0, 160) / 160) * 120);

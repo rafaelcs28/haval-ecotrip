@@ -50,6 +50,17 @@ private func num(_ v: Any?) -> Double {
     return 0
 }
 
+// Uma perna do trajeto: termina numa parada ou no destino final. SOC é cumulativo
+// (desconta a energia de todas as pernas até aqui).
+struct ArrivalLeg: Identifiable {
+    let id = UUID()
+    let name: String
+    let lat: Double, lng: Double
+    let distanceKm: Double, durationMin: Int, etaClock: String
+    let socAtArrival: Int
+    let isFinal: Bool
+}
+
 struct ArrivalPlan {
     let destName: String
     let destLat: Double, destLng: Double
@@ -57,6 +68,8 @@ struct ArrivalPlan {
     let climbM: Int, descentM: Int, traffic: Bool
     let curSoc: Int, predictedSoc: Int
     let energyKwh: Double, capacityKwh: Double
+    var legs: [ArrivalLeg] = []                 // 1 por perna; última = destino final
+    var stops: [(lat: Double, lng: Double, name: String)] = []   // paradas (sem origem/destino)
 }
 
 @MainActor
@@ -92,7 +105,8 @@ final class ArrivalStore: ObservableObject {
     // toLat/toLng != nil → destino já resolvido. fromLat/fromLng != nil → saída custom
     // (simular outro ponto de partida); senão usa o local atual do carro.
     func compute(query: String, trips: [Trip], toLat: Double? = nil, toLng: Double? = nil,
-                 fromLat: Double? = nil, fromLng: Double? = nil) async {
+                 fromLat: Double? = nil, fromLng: Double? = nil,
+                 stops: [(lat: Double, lng: Double, name: String)] = []) async {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard (!q.isEmpty || (toLat != nil && toLng != nil)), !loading else { return }
         loading = true; error = nil; plan = nil
@@ -106,11 +120,14 @@ final class ArrivalStore: ObservableObject {
         let tempOut = car.outsideTemp != 0 ? car.outsideTemp : 28
 
         let nm = q.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-        let urlStr: String
+        var urlStr: String
         if let tla = toLat, let tlo = toLng {
             urlStr = "\(base)/api/route-plan?from_lat=\(lat)&from_lng=\(lng)&to_lat=\(tla)&to_lng=\(tlo)&q=\(nm)"
         } else {
             urlStr = "\(base)/api/route-plan?from_lat=\(lat)&from_lng=\(lng)&q=\(nm)"
+        }
+        if !stops.isEmpty {
+            urlStr += "&stops=" + stops.map { "\($0.lat),\($0.lng)" }.joined(separator: ";")
         }
         guard !base.isEmpty, let url = URL(string: urlStr) else {
             error = "Bridge não configurado."; return
@@ -132,19 +149,46 @@ final class ArrivalStore: ObservableObject {
             let cap = capacityKwh(trips)
             let perKm = kwhPerKm(trips)
             let acH = acOn ? min(max(0.5 + 0.07 * abs(tempOut - 22), 0.5), 1.5) : 0.12
-            let eClimate = acH * (Double(durMin) / 60.0)
-            let eDrive = distKm * perKm
-            let eElev = Double(climb) * 0.0064 - Double(desc) * 0.0035
-            let energy = max(eDrive + eElev + eClimate, 0)
-            let pred = min(max(curSoc - Int((energy / cap * 100).rounded()), 0), 100)
-
-            let arr = Date().addingTimeInterval(Double(durMin) * 60)
+            // Energia de uma perna a partir da geometria (mesmo modelo, por trecho).
+            func legEnergy(_ d: Double, _ dur: Int, _ cl: Int, _ ds: Int) -> Double {
+                max(d * perKm + Double(cl) * 0.0064 - Double(ds) * 0.0035 + acH * (Double(dur) / 60.0), 0)
+            }
             let df = DateFormatter(); df.locale = Locale(identifier: "pt_BR"); df.dateFormat = "HH:mm"
 
+            // Pernas vindas do bridge (com paradas). Sem paradas → sintetiza 1 perna
+            // com os totais, pra a UI tratar tudo igual.
+            let rawLegs = (j["legs"] as? [[String: Any]]) ?? []
+            var legs: [ArrivalLeg] = []
+            var cumEnergy = 0.0, cumMin = 0
+            if rawLegs.isEmpty {
+                let e = legEnergy(distKm, durMin, climb, desc)
+                let soc = min(max(curSoc - Int((e / cap * 100).rounded()), 0), 100)
+                legs = [ArrivalLeg(name: name, lat: dLat, lng: dLng, distanceKm: distKm, durationMin: durMin,
+                                   etaClock: df.string(from: Date().addingTimeInterval(Double(durMin) * 60)),
+                                   socAtArrival: soc, isFinal: true)]
+                cumEnergy = e
+            } else {
+                for (k, lg) in rawLegs.enumerated() {
+                    let d = num(lg["distanceKm"]), dur = Int(num(lg["durationMin"]))
+                    let cl = Int(num(lg["climbM"])), ds = Int(num(lg["descentM"]))
+                    cumEnergy += legEnergy(d, dur, cl, ds); cumMin += dur
+                    let soc = min(max(curSoc - Int((cumEnergy / cap * 100).rounded()), 0), 100)
+                    let isFinal = (k == rawLegs.count - 1)
+                    let pt = isFinal ? (dLat, dLng, name) : (stops[k].lat, stops[k].lng, stops[k].name)
+                    legs.append(ArrivalLeg(name: pt.2, lat: pt.0, lng: pt.1, distanceKm: d, durationMin: dur,
+                                           etaClock: df.string(from: Date().addingTimeInterval(Double(cumMin) * 60)),
+                                           socAtArrival: soc, isFinal: isFinal))
+                }
+            }
+            let energy = cumEnergy
+            let pred = legs.last?.socAtArrival ?? min(max(curSoc - Int((energy / cap * 100).rounded()), 0), 100)
+
             plan = ArrivalPlan(destName: name, destLat: dLat, destLng: dLng,
-                               distanceKm: distKm, durationMin: durMin, etaClock: df.string(from: arr),
+                               distanceKm: distKm, durationMin: durMin,
+                               etaClock: df.string(from: Date().addingTimeInterval(Double(durMin) * 60)),
                                climbM: climb, descentM: desc, traffic: traffic,
-                               curSoc: curSoc, predictedSoc: pred, energyKwh: energy, capacityKwh: cap)
+                               curSoc: curSoc, predictedSoc: pred, energyKwh: energy, capacityKwh: cap,
+                               legs: legs, stops: stops)
         } catch {
             self.error = "Falha ao calcular (\(error.localizedDescription))"
         }
@@ -182,18 +226,33 @@ final class ArrivalStore: ObservableObject {
         var body: [String: Any] = ["lat": p.destLat, "lng": p.destLng, "name": p.destName, "app": app]
         if !device.isEmpty { body["device"] = device }
         if !target.isEmpty { body["target"] = target }
+        // Paradas sempre vão pro bridge: alimentam a rota multi-parada do carro
+        // (ETA por parada + persistência). Só o Google Maps abre as paradas na
+        // navegação; Waze/Apple Maps ignoram e vão direto, mas a rota do carro mantém.
+        if !p.stops.isEmpty {
+            body["stops"] = p.stops.map { ["lat": $0.lat, "lng": $0.lng, "name": $0.name] }
+        }
         r.httpBody = try? JSONSerialization.data(withJSONObject: body)
         if let (_, resp) = try? await URLSession.shared.data(for: r),
            (resp as? HTTPURLResponse)?.statusCode == 200 {
             let onde = !deviceLabel.isEmpty ? deviceLabel
                      : target == "phone" ? "No celular" : "No carro"
             sentMsg = app == "waze" ? "\(onde) · abrindo Waze ✓"
+                    : app == "gmaps" ? "\(onde) · abrindo Google Maps ✓"
                     : app == "maps" ? "\(onde) · abrindo Maps ✓"
                     : "Enviado pro carro ✓"
         } else {
             sentMsg = "Falha ao enviar"
         }
     }
+}
+
+// Parada resolvida (nome + coordenada) na tela de SOC na chegada.
+struct ArrivalWaypoint: Identifiable, Equatable {
+    var id = UUID()
+    var name: String
+    var lat: Double
+    var lng: Double
 }
 
 struct NavDevice: Identifiable, Equatable {
@@ -274,6 +333,9 @@ struct ArrivalSheet: View {
     @State private var origin = ""                        // vazio = local atual do carro
     @State private var destCoord: (Double, Double)? = nil
     @State private var originCoord: (Double, Double)? = nil
+    @State private var stops: [ArrivalWaypoint] = []      // paradas (origem → paradas → destino)
+    @State private var stopText = ""                      // campo transitório de busca de parada
+    @State private var addingStop = false
     @State private var activeField: Field = .dest
     @State private var favTarget: SavedPlace?             // alvo do alerta "salvar favorito"
     @State private var favName = ""
@@ -281,10 +343,29 @@ struct ArrivalSheet: View {
     @State private var pickingSaved = false               // texto setado por favorito/recente (não zerar coord)
     @State private var showMapPicker = false
     @State private var mapInitial: CLLocationCoordinate2D? = nil   // ponto inicial do mapa (vindo da busca)
+    @State private var destWaypointId = UUID()                     // identidade estável do destino na lista reordenável
     @Environment(\.dismiss) private var dismiss
     @FocusState private var focusedField: Field?
 
-    private enum Field { case origin, dest }
+    private enum Field { case origin, dest, stop }
+
+    private var stopsCoords: [(lat: Double, lng: Double, name: String)] {
+        stops.map { (lat: $0.lat, lng: $0.lng, name: $0.name) }
+    }
+
+    // O destino entra na lista reordenável só quando há ≥1 parada (senão a linha
+    // "Destino" só duplicaria o campo de cima). Última linha = destino.
+    private var destInList: Bool { destCoord != nil && !stops.isEmpty }
+
+    private var routePoints: [ArrivalWaypoint] {
+        var arr = stops
+        if let dc = destCoord, !stops.isEmpty {
+            var d = ArrivalWaypoint(name: dest, lat: dc.0, lng: dc.1)
+            d.id = destWaypointId   // id estável: o drag perde a linha se mudar a cada render
+            arr.append(d)
+        }
+        return arr
+    }
 
     var body: some View {
         NavigationStack {
@@ -299,7 +380,8 @@ struct ArrivalSheet: View {
                                     .background(DS.panel2).clipShape(RoundedRectangle(cornerRadius: 8))
                             }.frame(maxWidth: .infinity, alignment: .center)
                             addrField("Destino (endereço ou local)", text: $dest, field: .dest, icon: "mappin.circle")
-                            if !completer.results.isEmpty && store.plan == nil { suggestionsList }
+                            if !completer.results.isEmpty && store.plan == nil && activeField != .stop { suggestionsList }
+                            stopsSection
                             Button {
                                 // Usa a busca atual como ponto de partida (pino já posicionado),
                                 // pra você só ajustar fino no mapa.
@@ -329,7 +411,7 @@ struct ArrivalSheet: View {
                             .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 4)
                     }
 
-                    if store.plan == nil && completer.results.isEmpty { placesSection }
+                    if store.plan == nil && completer.results.isEmpty && !addingStop { placesSection }
 
                     if let p = store.plan { resultCard(p) }
                 }
@@ -356,6 +438,129 @@ struct ArrivalSheet: View {
                 }
                 Button("Cancelar", role: .cancel) { favTarget = nil; favName = "" }
             } message: { place in Text(place.name) }
+        }
+    }
+
+    // Paradas (waypoints): lista reordenável (paradas + destino) + um campo de busca
+    // pra incluir mais. Só o Google Maps recebe as paradas; Waze/Apple Maps usam só o destino.
+    @ViewBuilder private var stopsSection: some View {
+        routeList
+        if addingStop {
+            VStack(spacing: 6) {
+                addrField("Parada (endereço ou local)", text: $stopText, field: .stop, icon: "mappin.and.ellipse")
+                // Sugestões da busca de parada — independente de já existir um plano
+                // calculado (o destino já resolvido não deve esconder a busca da parada).
+                if activeField == .stop && !completer.results.isEmpty {
+                    suggestionsList
+                } else {
+                    // Sem busca ativa: oferece favoritos/recentes como parada (mesma
+                    // paridade do destino — dá pra escolher salvos OU pesquisar).
+                    stopPlacesPicker
+                }
+            }
+        }
+        if stops.count < 8 {
+            Button {
+                addingStop = true; activeField = .stop; focusedField = .stop
+                stopText = ""; completer.clear()
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "plus.circle").font(.caption)
+                    Text("Adicionar parada").font(.caption.weight(.semibold))
+                }.foregroundStyle(DS.orange).frame(maxWidth: .infinity).padding(.vertical, 8)
+                    .background(DS.panel2).clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            }
+        }
+    }
+
+    // Lista reordenável do trajeto: paradas (numeradas) + destino (última linha, quando
+    // há ≥1 parada). Arrasta pra reordenar; soltar uma parada depois do destino a promove
+    // a destino e rebaixa o antigo destino a parada.
+    @ViewBuilder private var routeList: some View {
+        let pts = routePoints
+        if !pts.isEmpty {
+            List {
+                ForEach(Array(pts.enumerated()), id: \.element.id) { i, p in
+                    let isDest = destInList && i == pts.count - 1
+                    HStack(spacing: 10) {
+                        Image(systemName: isDest ? "mappin.circle.fill" : "\(min(i + 1, 50)).circle.fill")
+                            .font(.subheadline).foregroundStyle(isDest ? DS.teal : DS.orange)
+                        VStack(alignment: .leading, spacing: 1) {
+                            if isDest { Text("Destino").font(.caption2).foregroundStyle(DS.muted) }
+                            Text(p.name).font(.subheadline).foregroundStyle(DS.text).lineLimit(1)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .listRowBackground(DS.panel2)
+                    .listRowSeparator(.hidden)
+                    .listRowInsets(EdgeInsets(top: 4, leading: 10, bottom: 4, trailing: 8))
+                    .deleteDisabled(isDest)
+                }
+                .onMove { applyReorder($0, $1) }
+                .onDelete { deleteRoutePoints($0) }
+            }
+            .listStyle(.plain)
+            .scrollDisabled(true)
+            .scrollContentBackground(.hidden)
+            .environment(\.editMode, .constant(.active))
+            .frame(height: CGFloat(pts.count) * 52)
+        }
+    }
+
+    // Reordenou: última linha vira destino; o resto vira parada (na ordem mostrada).
+    private func applyReorder(_ from: IndexSet, _ to: Int) {
+        var pts = routePoints
+        pts.move(fromOffsets: from, toOffset: to)
+        if destInList, let last = pts.last {
+            destWaypointId = UUID()           // destino ganha identidade nova (evita colidir com o antigo)
+            stops = Array(pts.dropLast())     // demais viram paradas, mantendo seus ids
+            pickingSaved = true               // não deixa o onChange do campo zerar a coord
+            dest = last.name
+            destCoord = (last.lat, last.lng)
+            calc()
+        } else {
+            stops = pts
+            if destCoord != nil { calc() }
+        }
+    }
+
+    private func deleteRoutePoints(_ offsets: IndexSet) {
+        // Destino tem deleteDisabled → só sobram índices de parada (0..<stops.count).
+        stops.remove(atOffsets: IndexSet(offsets.filter { $0 < stops.count }))
+        if destCoord != nil { calc() }
+    }
+
+    // Favoritos/recentes pra usar como PARADA (aparece no campo de parada sem busca ativa).
+    @ViewBuilder private var stopPlacesPicker: some View {
+        if !places.favorites.isEmpty || !places.recents.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                if !places.favorites.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(places.favorites) { f in
+                                Button { useStop(f) } label: {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: placeIcon(f.label)).font(.caption)
+                                        Text(f.display).font(.subheadline).lineLimit(1)
+                                    }
+                                    .padding(.horizontal, 12).padding(.vertical, 8)
+                                    .background(DS.panel2).clipShape(Capsule()).foregroundStyle(DS.text)
+                                }
+                            }
+                        }
+                    }
+                }
+                ForEach(places.recents.prefix(4)) { r in
+                    Button { useStop(r) } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "clock.arrow.circlepath").font(.subheadline).foregroundStyle(DS.muted)
+                            Text(r.name).font(.subheadline).foregroundStyle(DS.text).lineLimit(1)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                }
+            }
+            .padding(.top, 2)
         }
     }
 
@@ -423,7 +628,8 @@ struct ArrivalSheet: View {
         return "star.fill"
     }
 
-    // Abre a navegação neste iPhone. app: "waze" | "apple" (Apple Maps). Cai pro web se faltar o app.
+    // Abre a navegação neste iPhone. app: "waze" | "apple" (Apple Maps) | "gmaps" (Google
+    // Maps, único que aceita paradas). Cai pro web se faltar o app.
     private func openLocal(_ p: ArrivalPlan, app: String) {
         let lat = p.destLat, lng = p.destLng
         let appURL: URL?, webURL: URL?
@@ -431,13 +637,25 @@ struct ArrivalSheet: View {
         case "waze":
             appURL = URL(string: "waze://?ll=\(lat),\(lng)&navigate=yes")
             webURL = URL(string: "https://waze.com/ul?ll=\(lat),\(lng)&navigate=yes")
+        case "gmaps":
+            // Paradas: comgooglemaps:// não aceita waypoints, mas a URL universal sim.
+            let way = p.stops.map { "\($0.lat),\($0.lng)" }.joined(separator: "|")
+            let wp = way.isEmpty ? "" : "&waypoints=\(way)"
+            appURL = URL(string: "comgooglemaps://?daddr=\(lat),\(lng)&directionsmode=driving")
+            webURL = URL(string: "https://www.google.com/maps/dir/?api=1&destination=\(lat),\(lng)\(wp)&travelmode=driving")
         default:   // Apple Maps
             appURL = URL(string: "maps://?daddr=\(lat),\(lng)&dirflg=d")
             webURL = URL(string: "http://maps.apple.com/?daddr=\(lat),\(lng)&dirflg=d")
         }
-        if let u = appURL, UIApplication.shared.canOpenURL(u) { UIApplication.shared.open(u) }
-        else if let w = webURL { UIApplication.shared.open(w) }
-        store.sentMsg = "Abrindo \(app == "waze" ? "Waze" : "Maps") neste iPhone ✓"
+        // Google Maps com paradas: sempre usa a URL universal (o esquema do app não tem
+        // waypoints) — o app intercepta o link universal e abre com as paradas.
+        if app == "gmaps", !p.stops.isEmpty, let w = webURL {
+            UIApplication.shared.open(w)
+        } else if let u = appURL, UIApplication.shared.canOpenURL(u) {
+            UIApplication.shared.open(u)
+        } else if let w = webURL { UIApplication.shared.open(w) }
+        let label = app == "waze" ? "Waze" : app == "gmaps" ? "Google Maps" : "Maps"
+        store.sentMsg = "Abrindo \(label) neste iPhone ✓"
     }
 
     // Usa um lugar salvo: preenche o destino + coordenada e calcula.
@@ -447,7 +665,7 @@ struct ArrivalSheet: View {
         dest = name
         destCoord = (c.latitude, c.longitude)
         completer.clear(); focusedField = nil
-        Task { await store.compute(query: name, trips: trips, toLat: c.latitude, toLng: c.longitude) }
+        Task { await store.compute(query: name, trips: trips, toLat: c.latitude, toLng: c.longitude, stops: stopsCoords) }
     }
 
     private func use(_ p: SavedPlace) {
@@ -458,12 +676,20 @@ struct ArrivalSheet: View {
         dest = p.display
         destCoord = (p.lat, p.lng)
         completer.clear(); focusedField = nil
-        Task { await store.compute(query: p.name, trips: trips, toLat: p.lat, toLng: p.lng) }
+        Task { await store.compute(query: p.name, trips: trips, toLat: p.lat, toLng: p.lng, stops: stopsCoords) }
+    }
+
+    // Adiciona um favorito/recente como PARADA (não destino) e recalcula se já há destino.
+    private func useStop(_ p: SavedPlace) {
+        stops.append(ArrivalWaypoint(name: p.display, lat: p.lat, lng: p.lng))
+        stopText = ""; addingStop = false; focusedField = nil; completer.clear()
+        if destCoord != nil { calc() }
     }
 
     @ViewBuilder private func addrField(_ placeholder: String, text: Binding<String>, field: Field, icon: String) -> some View {
         HStack(spacing: 8) {
-            Image(systemName: icon).font(.subheadline).foregroundStyle(field == .origin ? DS.green : DS.teal)
+            Image(systemName: icon).font(.subheadline)
+                .foregroundStyle(field == .origin ? DS.green : field == .stop ? DS.orange : DS.teal)
             TextField(placeholder, text: text)
                 .textFieldStyle(.plain).autocorrectionDisabled()
                 .focused($focusedField, equals: field)
@@ -472,7 +698,7 @@ struct ArrivalSheet: View {
                     activeField = field
                     // Texto setado por um favorito/recente → não zera a coordenada salva.
                     if pickingSaved { pickingSaved = false; completer.clear(); return }
-                    if field == .dest { destCoord = nil } else { originCoord = nil }
+                    if field == .dest { destCoord = nil } else if field == .origin { originCoord = nil }
                     if q.count >= 3 { completer.update(q, near: CarStore.shared.coordinate) } else { completer.clear() }
                 }
                 .onSubmit { calc() }
@@ -507,7 +733,7 @@ struct ArrivalSheet: View {
             }
             await store.compute(query: dest, trips: trips,
                                 toLat: destCoord?.0, toLng: destCoord?.1,
-                                fromLat: fromC?.0, fromLng: fromC?.1)
+                                fromLat: fromC?.0, fromLng: fromC?.1, stops: stopsCoords)
             if let p = store.plan, p.destLat != 0 || p.destLng != 0 {
                 places.addRecent(name: p.destName, lat: p.destLat, lng: p.destLng)
             }
@@ -515,15 +741,27 @@ struct ArrivalSheet: View {
     }
 
     // Escolheu uma sugestão → preenche o campo ativo + coordenada; se for destino, calcula.
+    // Parada: resolve, anexa à lista e recalcula (se já há destino).
     private func pick(_ s: MKLocalSearchCompletion) {
         let field = activeField
         completer.clear()
-        if field == .origin { origin = s.title } else { dest = s.title }
+        switch field {
+        case .origin: origin = s.title
+        case .stop:   break
+        case .dest:   dest = s.title
+        }
         Task {
             let resolved = await completer.resolve(s)
-            if field == .origin {
+            switch field {
+            case .origin:
                 originCoord = resolved.map { ($0.0.latitude, $0.0.longitude) }
-            } else {
+            case .stop:
+                if let r = resolved {
+                    stops.append(ArrivalWaypoint(name: s.title, lat: r.0.latitude, lng: r.0.longitude))
+                }
+                stopText = ""; addingStop = false; focusedField = nil
+                if destCoord != nil { calc() }
+            case .dest:
                 destCoord = resolved.map { ($0.0.latitude, $0.0.longitude) }
                 calc()
             }
@@ -573,6 +811,25 @@ struct ArrivalSheet: View {
                     DSMetric(value: Fmt.dec1(p.energyKwh), unit: "kWh", label: "Energia", color: DS.orange, compact: true)
                 }
 
+                // SOC em cada parada (cumulativo) quando há paradas.
+                if p.legs.count > 1 {
+                    Divider().background(DS.border)
+                    VStack(spacing: 8) {
+                        ForEach(Array(p.legs.enumerated()), id: \.element.id) { i, lg in
+                            HStack(spacing: 8) {
+                                Image(systemName: lg.isFinal ? "flag.checkered.circle.fill" : "\(min(i + 1, 50)).circle.fill")
+                                    .font(.title3).foregroundStyle(lg.isFinal ? DS.teal : DS.orange)
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(lg.name).font(.subheadline.weight(.semibold)).foregroundStyle(DS.text).lineLimit(1)
+                                    Text("\(lg.etaClock) · \(Fmt.km(lg.distanceKm)) km").font(.caption2).foregroundStyle(DS.muted)
+                                }.frame(maxWidth: .infinity, alignment: .leading)
+                                Text("\(lg.socAtArrival)%").font(.system(size: 19, weight: .bold, design: .rounded))
+                                    .foregroundStyle(arrivalSocColor(lg.socAtArrival))
+                            }
+                        }
+                    }
+                }
+
                 Text("Estimativa a partir das suas viagens EV: ~\(Fmt.dec1(p.capacityKwh)) kWh úteis · altimetria por mapa · trânsito ao vivo.")
                     .font(.caption2).foregroundStyle(DS.muted)
 
@@ -581,9 +838,14 @@ struct ArrivalSheet: View {
                     Task { await store.sendToCar(p) }
                 }
                 // Um botão por app: ao tocar, pergunta onde abrir (iPhone, Android ou carro).
-                HStack(spacing: 10) {
+                HStack(spacing: 8) {
                     DSActionButton(icon: "location.north.fill", title: "Waze", color: DS.teal) { navApp = "waze" }
                     DSActionButton(icon: "map.fill", title: "Maps", color: DS.blue) { navApp = "maps" }
+                    DSActionButton(icon: "mappin.and.ellipse", title: "Google", color: DS.orange) { navApp = "gmaps" }
+                }
+                if !p.stops.isEmpty {
+                    Text("Paradas só no Google Maps. Waze e Maps abrem direto no destino final.")
+                        .font(.caption2).foregroundStyle(DS.muted)
                 }
                 if let m = store.sentMsg {
                     Text(m).font(.caption).foregroundStyle(m.contains("✓") ? DS.green : DS.orange)
@@ -592,19 +854,19 @@ struct ArrivalSheet: View {
             }
         }
         .confirmationDialog(
-            navApp == "waze" ? "Abrir Waze em…" : "Abrir Maps em…",
+            navApp == "waze" ? "Abrir Waze em…" : navApp == "gmaps" ? "Abrir Google Maps em…" : "Abrir Maps em…",
             isPresented: Binding(get: { navApp != nil }, set: { if !$0 { navApp = nil } }),
             titleVisibility: .visible
         ) {
             Button("Neste iPhone") {
                 let a = navApp; navApp = nil
-                openLocal(p, app: a == "waze" ? "waze" : "apple")
+                openLocal(p, app: a == "waze" ? "waze" : a == "gmaps" ? "gmaps" : "apple")
             }
             // Lista dinâmica de NavRelays registrados (cada APK aparece pelo nome).
             ForEach(store.navDevices) { d in
                 Button("\(d.role == "phone" ? "📱" : "🚗") \(d.name)") {
                     let a = navApp; navApp = nil
-                    Task { await store.sendToCar(p, app: a == "waze" ? "waze" : "maps",
+                    Task { await store.sendToCar(p, app: a ?? "maps",
                                                  device: d.id, deviceLabel: d.name) }
                 }
             }
@@ -613,11 +875,11 @@ struct ArrivalSheet: View {
             if store.navDevices.isEmpty {
                 Button("Celular Android") {
                     let a = navApp; navApp = nil
-                    Task { await store.sendToCar(p, app: a == "waze" ? "waze" : "maps", target: "phone") }
+                    Task { await store.sendToCar(p, app: a ?? "maps", target: "phone") }
                 }
                 Button("No carro") {
                     let a = navApp; navApp = nil
-                    Task { await store.sendToCar(p, app: a == "waze" ? "waze" : "maps", target: "car") }
+                    Task { await store.sendToCar(p, app: a ?? "maps", target: "car") }
                 }
             }
             Button("Cancelar", role: .cancel) { navApp = nil }
