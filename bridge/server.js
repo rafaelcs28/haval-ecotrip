@@ -9370,8 +9370,10 @@ app.post('/api/speed-fence', (req, res) => {
   res.json({ ok: true, kmh });
 });
 
-app.post('/api/share/create', (req, res) => {
-  const ttlMin = Math.min(Math.max(parseInt(req.body?.ttlMin) || 120, 5), 1440);   // 5 min .. 24 h
+// Cria um link de compartilhamento e devolve token/code/url. Reusável internamente
+// (ex.: auto-share disparado por Shortcut na saída de um local).
+function _createShareToken(ttlMinRaw) {
+  const ttlMin = Math.min(Math.max(parseInt(ttlMinRaw) || 120, 5), 1440);   // 5 min .. 24 h
   const crypto = require('crypto');
   const token = crypto.randomBytes(12).toString('hex');
   // Código curto pro link encurtado (/s/<code>). Garante unicidade entre os ativos.
@@ -9388,7 +9390,41 @@ app.post('/api/share/create', (req, res) => {
     const last = recentNavDests[recentNavDests.length - 1];
     if (Date.now() - last.ts < 6 * 3600_000) destName = last.name;
   }
-  res.json({ ok: true, token, code, url: `${_shareBaseUrl()}/s/${code}`, expiresMs, ttlMin, destName });
+  return { token, code, url: `${_shareBaseUrl()}/s/${code}`, expiresMs, ttlMin, destName };
+}
+
+app.post('/api/share/create', (req, res) => {
+  res.json({ ok: true, ..._createShareToken(req.body?.ttlMin) });
+});
+
+// POST /api/auto-share — chamado por um Atalho do iOS (Personal Automation
+// "Ao sair de <local>"). Avalia a janela dia/hora (definida no próprio Atalho,
+// via body) e, se estiver dentro, cria o link e devolve a mensagem pronta pro
+// passo "Enviar mensagem (WhatsApp)". Fora da janela → { send:false } e o Atalho
+// não faz nada.
+//   body: { place?, days?:[0..6 dom..sáb], from?:"HH:MM", to?:"HH:MM", ttlMin?, message? }
+//   message aceita {link} e {local} como placeholders.
+app.post('/api/auto-share', (req, res) => {
+  const b = req.body || {};
+  const now = new Date();
+  // Janela de dias (0=domingo..6=sábado). Vazio/ausente = todos os dias.
+  const days = Array.isArray(b.days) ? b.days.map(Number).filter(Number.isFinite) : null;
+  if (days && days.length && !days.includes(now.getDay()))
+    return res.json({ ok: true, send: false, reason: 'fora do dia' });
+  // Janela de horas "HH:MM". Suporta virar a meia-noite (to < from).
+  const toMin = s => { const m = /^(\d{1,2}):(\d{2})$/.exec(String(s || '')); return m ? (+m[1]) * 60 + (+m[2]) : null; };
+  const f = toMin(b.from), t = toMin(b.to), cur = now.getHours() * 60 + now.getMinutes();
+  if (f != null && t != null) {
+    const inWin = f <= t ? (cur >= f && cur <= t) : (cur >= f || cur <= t);
+    if (!inWin) return res.json({ ok: true, send: false, reason: 'fora da hora' });
+  }
+  const link = _createShareToken(b.ttlMin);
+  const place = String(b.place || '').trim();
+  const tmpl = (typeof b.message === 'string' && b.message.trim())
+    ? b.message
+    : (place ? 'Saí de {local} — acompanhe ao vivo: {link}' : 'Saí agora — acompanhe ao vivo: {link}');
+  const message = tmpl.replace(/\{link\}/g, link.url).replace(/\{local\}/g, place || link.destName || '');
+  res.json({ ok: true, send: true, url: link.url, code: link.code, expiresMs: link.expiresMs, message });
 });
 
 // Link encurtado público → redireciona pra página com o token completo.
