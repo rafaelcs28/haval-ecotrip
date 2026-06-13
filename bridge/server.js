@@ -3044,7 +3044,19 @@ function parseSince(req) {
   return s > Date.now() + 60_000 ? 0 : s;
 }
 
+// Watermark de sync: o cliente usa X-Sync-Ms (relógio do SERVIDOR no instante da
+// resposta) como cursor do próximo ?since=. Sem isso o cliente adivinhava o cursor
+// pelo maior timestamp dos itens — que vem do relógio do CARRO (adiantado) e
+// travava o sync no futuro (bug do pull-to-refresh).
+function setSyncWatermark(res) {
+  // −1ms: o filtro do ?since= é `>` estrito — item ingerido no MESMO ms da
+  // resposta seria perdido. Recuar 1ms só re-envia (upsert, inofensivo).
+  res.setHeader('X-Sync-Ms', String(Date.now() - 1));
+  res.setHeader('Access-Control-Expose-Headers', 'X-Tombstones, X-Sync-Ms');
+}
+
 app.get('/api/charges', (req, res) => {
+  setSyncWatermark(res);
   const since = parseSince(req);
   // Retorna entradas novas (timestamp_ms > since) OU atualizadas (_updated_ms > since)
   const filtered = since > 0
@@ -3294,6 +3306,7 @@ function relayRules() {
 
 // GET /api/rules?since=  → array (espelha SyncedList: _updated_ms + X-Tombstones)
 app.get('/api/rules', (req, res) => {
+  setSyncWatermark(res);
   const since = parseSince(req);
   const arr = since > 0 ? automationRules.filter(r => (r._updated_ms || 0) > since) : automationRules;
   if (Array.isArray(deletedIds.rules) && deletedIds.rules.length) {
@@ -3669,6 +3682,7 @@ app.patch('/api/maintenance/history/:id', (req, res) => {
 
 // ── Abastecimentos ──────────────────────────────────────────────────────────
 app.get('/api/refuels', (req, res) => {
+  setSyncWatermark(res);
   const since = parseSince(req);
   const all = [...refuels].sort((a, b) => (b.timestamp_ms || 0) - (a.timestamp_ms || 0));
   // Suporta fetch incremental: ?since=ts retorna só registros novos/editados após o ts
@@ -4757,6 +4771,10 @@ function ingestAutoTrip({ tripId, autoTrip, samples }, opts = {}) {
       }
     }
 
+    // Watermark de ingest (relógio do SERVIDOR): viagem que chega atrasada
+    // (fallback MQTT horas depois) tem startMs antigo — sem isto, o sync
+    // incremental dos apps (?since=) nunca a veria.
+    autoTrip._updated_ms = Date.now();
     // Persiste hybrid junto — boot não precisa recalcular.
     // Se foi estimado, marca o arquivo também com os campos _estimated*.
     const persisted = {
@@ -4867,6 +4885,7 @@ app.post('/api/autotrips', (req, res) => {
 });
 
 app.get('/api/autotrips', (req, res) => {
+  setSyncWatermark(res);
   const since = parseSince(req);
   // Inclui também viagens ATUALIZADAS (rename, reprocessamento de locais) via
   // _updated_ms — senão o sync incremental do app (que filtra por startMs) nunca
@@ -10209,6 +10228,9 @@ function applyMqttMessage(key, value, isRetained = false) {
             if (!existing) {
               // Nova sessão — preferência: avg_temp_c do Android; fallback: cálculo bridge-side
               const entry = { ...newCharge };
+              // Watermark de ingest: recarga que chega atrasada (bridge estava fora
+              // durante a sessão) tem timestamp_ms antigo — o ?since= só a vê por aqui.
+              entry._updated_ms = Date.now();
               if (entry.avg_temp_c != null) {
                 // Android enviou temperatura média diretamente — consume a do bridge
                 _lastChargeAvgTemp = null;

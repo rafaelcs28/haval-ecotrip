@@ -140,13 +140,19 @@ final class SyncedList: ObservableObject {
                 else if let v = d[key] as? Int { maxMs = max(maxMs, Double(v)) }
             }
         }
-        // Clampa o cursor ao relógio do cliente. O carro publica timestamp_ms/startMs
-        // adiantados (clock à frente); sem clamp o ponteiro pula pro futuro e
-        // ?since=<futuro> volta vazio até o relógio de parede alcançar — daí o app
-        // "só atualizava fechando e reabrindo". `min(_, nowMs)` também puxa de volta
-        // um cursor já preso no futuro (auto-cura), espelhando o clamp do servidor.
-        let nowMs = Date().timeIntervalSince1970 * 1000
-        lastSyncMs = min(max(maxMs, lastSyncMs), nowMs)
+        // Cursor preferencial: X-Sync-Ms = relógio do SERVIDOR no instante da
+        // resposta (autoritativo — é o mesmo relógio que o ?since= compara).
+        if let h = http.value(forHTTPHeaderField: "X-Sync-Ms"), let serverMs = Double(h), serverMs > 0 {
+            lastSyncMs = serverMs
+        } else {
+            // Fallback (bridge antigo): clampa o cursor ao relógio do cliente. O carro
+            // publica timestamp_ms/startMs adiantados; sem clamp o ponteiro pulava pro
+            // futuro e ?since=<futuro> voltava vazio até o relógio alcançar — daí o app
+            // "só atualizava fechando e reabrindo". `min(_, nowMs)` também puxa de
+            // volta um cursor já preso no futuro (auto-cura).
+            let nowMs = Date().timeIntervalSince1970 * 1000
+            lastSyncMs = min(max(maxMs, lastSyncMs), nowMs)
+        }
         saveToDisk()
     }
 
