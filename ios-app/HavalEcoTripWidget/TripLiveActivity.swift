@@ -112,6 +112,10 @@ struct TripLockScreenView: View {
                         Label("\(Int(rng)) km", systemImage: "bolt.car")
                             .font(.caption).foregroundStyle(.secondary)
                     }
+                    if let cost = state.costBrl, cost > 0 {
+                        Label(String(format: "R$ %.2f", cost), systemImage: "brazilianrealsign.circle")
+                            .font(.caption).foregroundStyle(.yellow)
+                    }
                     Spacer()
                     if state.tyreAlert == true {
                         Label(state.tyreMinPsi.map { String(format: "%.0f PSI", $0) } ?? "pneu",

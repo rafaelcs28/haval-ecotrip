@@ -24,6 +24,7 @@ struct TripActivityAttributes: ActivityAttributes {
         var rangeKm:    Double?   // autonomia EV restante (km)
         var tyreMinPsi: Double?   // menor pressão dos 4 pneus (PSI)
         var tyreAlert:  Bool?     // pneu baixo (<30) ou assimétrico (≥5 PSI)
+        var costBrl:    Double?   // custo R$ acumulado (energia + combustível)
 
         var isEV: Bool { fuelL <= 0.05 }
     }

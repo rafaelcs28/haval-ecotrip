@@ -523,6 +523,17 @@ class MqttManager private constructor() {
         // SEMPRE — RPM/SOC/speed continuam sendo capturados independente da UI.
         attachGlobalCarDataListener(context)
         if (enabled && host.isNotEmpty()) connect()
+        // Watchdog: se ficar desconectado SEM reconexão pendente (flag presa,
+        // executor morto, callback de connectionLost que nunca veio), força o ciclo.
+        fastExecutor.scheduleAtFixedRate({
+            try {
+                if (enabled && host.isNotEmpty() && status != Status.CONNECTING &&
+                    client?.isConnected != true && !isReconnecting.get()) {
+                    AppLogger.w(TAG, "Watchdog: desconectado sem reconexão pendente — forçando reconnect")
+                    scheduleReconnect()
+                }
+            } catch (_: Exception) {}
+        }, 30, 30, java.util.concurrent.TimeUnit.SECONDS)
     }
 
     /**
@@ -1385,10 +1396,21 @@ class MqttManager private constructor() {
             val cleanedHost = cleanHost(host)
             val serverUri = if (tls) "ssl://$cleanedHost:$port" else "tcp://$cleanedHost:$port"
             Log.i(TAG, "Connecting to $serverUri")
+            // Fecha o client anterior antes de criar outro: além do leak, o file
+            // persistence segura um lock por (dir, clientId) — sem close, o open
+            // do novo client falharia com "persistence already in use".
+            client?.let { old -> client = null; safeDisconnect(old) }
             // clientId estável (sem sufixo aleatório): com cleanSession=false o broker
             // só retoma a sessão persistente — e re-entrega QoS1 enfileirado — se o
             // mesmo clientId reconectar. Sufixo aleatório criava sessão nova a cada flap.
-            val c = MqttClient(serverUri, CLIENT_ID, MemoryPersistence())
+            // File persistence: QoS1 outbound em voo sobrevive a crash/restart do app.
+            val persistence = appContext?.let { ctx ->
+                try {
+                    val dir = java.io.File(ctx.filesDir, "mqtt-persist").apply { mkdirs() }
+                    org.eclipse.paho.client.mqttv3.persist.MqttDefaultFilePersistence(dir.absolutePath)
+                } catch (_: Exception) { null }
+            } ?: MemoryPersistence()
+            val c = MqttClient(serverUri, CLIENT_ID, persistence)
 
             c.setCallback(object : MqttCallback {
                 override fun connectionLost(cause: Throwable?) {
@@ -1446,8 +1468,14 @@ class MqttManager private constructor() {
             // ativo + a métrica de uptime do bridge enxergar tráfego constante.
             // Se a publish falhar, Paho dispara connectionLost imediatamente.
             heartbeatFuture?.cancel(false)
+            // Adaptativo: 5s dirigindo (detecção rápida de conexão morta), 30s parado
+            // (1 tick a cada 6) — o keepalive de 10s do Paho segura o NAT no intervalo.
+            var hbTick = 0
             heartbeatFuture = fastExecutor.scheduleAtFixedRate({
                 try {
+                    hbTick++
+                    val driving = try { TripManager.getInstance().isDrivingReady() } catch (_: Exception) { true }
+                    if (!driving && hbTick % 6 != 0) return@scheduleAtFixedRate
                     val cur = client
                     if (cur != null && cur.isConnected) {
                         cur.publish("$prefix/heartbeat", System.currentTimeMillis().toString().toByteArray(), 0, false)
@@ -1555,6 +1583,16 @@ class MqttManager private constructor() {
             consecutiveFailures++
             lastErrorMessage = e.message?.take(120) ?: "Erro desconhecido"
             AppLogger.e(TAG, "Falha #$consecutiveFailures: $lastErrorMessage")
+            // Store de persistência corrompido bloqueia TODO connect futuro com a
+            // mesma exceção — limpa o diretório pra próxima tentativa partir limpa.
+            if (e is org.eclipse.paho.client.mqttv3.MqttPersistenceException) {
+                try {
+                    appContext?.let { ctx ->
+                        java.io.File(ctx.filesDir, "mqtt-persist").deleteRecursively()
+                        AppLogger.w(TAG, "Persistência MQTT corrompida — diretório limpo")
+                    }
+                } catch (_: Exception) {}
+            }
             setStatus(Status.ERROR)
             scheduleReconnect()
         }
@@ -1933,10 +1971,18 @@ class MqttManager private constructor() {
     private fun scheduleReconnect() {
         if (!enabled || isReconnecting.getAndSet(true)) return
         executor.submit {
-            reconnectAttempts++
-            Thread.sleep(reconnectDelayMs())
-            isReconnecting.set(false)
-            if (enabled && host.isNotEmpty()) connectInternal()
+            // finally: se o sleep for interrompido, a flag NÃO pode ficar presa em
+            // true — senão a máquina de reconexão trava até reiniciar o app.
+            try {
+                reconnectAttempts++
+                Thread.sleep(reconnectDelayMs())
+            } catch (_: InterruptedException) {
+            } finally {
+                isReconnecting.set(false)
+            }
+            // isConnected: um connect concorrente (watchdog × connectionLost) pode já
+            // ter restabelecido — não derruba o client recém-conectado à toa.
+            if (enabled && host.isNotEmpty() && client?.isConnected != true) connectInternal()
         }
     }
 

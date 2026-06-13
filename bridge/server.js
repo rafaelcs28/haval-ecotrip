@@ -326,6 +326,7 @@ const NOTIF_DEFAULTS = {
   ac_on_parked_min:  10,      // minutos de tolerância antes de alertar (padrão 10)
   batt12_low:        false,   // bateria auxiliar 12V abaixo de 50%
   daily_summary:     false,   // resumo diário às 20h (km, kWh, recargas)
+  weekly_summary:    false,   // resumo semanal aos domingos 20h05 (km, kWh, custo, recargas)
   charge_slow:       false,   // alerta quando potência de recarga cai >30% do pico por 5+ min
   window_forgotten:     false, // vidro aberto X min após motor desligar
   window_forgotten_min: 10,    // minutos antes de alertar (padrão 10)
@@ -549,6 +550,7 @@ function _schedFireMsToday(sched, now) {
 // ── Resumo diário ─────────────────────────────────────────────────────────────
 // Estado operacional — não é preferência, não persiste em notif_prefs.json.
 let daily_summary_last_date = '';
+let weekly_summary_last_date = '';
 
 // ── Alerta carga desacelera ───────────────────────────────────────────────────
 let _chargePeakKw        = 0;
@@ -623,6 +625,40 @@ setInterval(() => {
   if (chargesHoje > 0) parts.push(`${chargesHoje} recarga${chargesHoje > 1 ? 's' : ''}`);
 
   sendPush('📊 Resumo do dia', parts.join(' · '), 'daily_summary', { tag: 'daily_summary' });
+}, 60_000);
+
+// ── Resumo semanal aos domingos 20h05 ────────────────────────────────────────
+setInterval(() => {
+  const now = new Date();
+  if (now.getDay() !== 0) return;   // domingo
+  const hhmm = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
+  if (hhmm !== '20:05') return;
+  const today = now.toISOString().slice(0, 10);
+  if (weekly_summary_last_date === today) return;
+  weekly_summary_last_date = today;
+
+  const weekStart = Date.now() - 7 * 24 * 3600_000;
+  let km = 0, kwh = 0, fuel = 0;
+  for (const t of autoTripsArr) {
+    if ((t.startMs || 0) >= weekStart) {
+      km   += +t.distKm || 0;
+      kwh  += Math.abs(+t.netKwh || 0);
+      fuel += +t.fuelL || 0;
+    }
+  }
+  const charges = eventsLog.filter(e => e.type === 'charge_end' && (e.ts || 0) >= weekStart).length;
+  if (km <= 0 && charges <= 0) return;
+
+  const pKwh = +state.battery_avg_price_per_kwh || +state.price_kwh || 0;
+  const pGas = +state.tank_avg_price_per_l      || +state.price_gas_per_l || 0;
+  const custo = kwh * pKwh + fuel * pGas;
+
+  const parts = [`${km.toFixed(0)} km`, `${kwh.toFixed(1).replace('.', ',')} kWh`];
+  if (fuel > 0.1)  parts.push(`${fuel.toFixed(1).replace('.', ',')} L`);
+  if (custo > 0)   parts.push(`R$ ${custo.toFixed(2).replace('.', ',')}`);
+  if (charges > 0) parts.push(`${charges} recarga${charges > 1 ? 's' : ''}`);
+
+  sendPush('📈 Resumo da semana', parts.join(' · '), 'weekly_summary', { tag: 'weekly_summary' });
 }, 60_000);
 
 async function firePreClimat(sched) {
@@ -7128,12 +7164,17 @@ function _tripContentState(ct, active) {
   // Enriquecimento ao vivo: SOC, autonomia EV e pneus (glance no bloqueio dirigindo).
   const tyres = ['fl', 'fr', 'rl', 'rr'].map(p => +state[`tyre_pressure_${p}`] || 0).filter(v => v > 0);
   const tyreMin = tyres.length ? Math.min(...tyres) : 0;
+  // Custo R$ ao vivo: usa o preço MÉDIO do que está na bateria/tanque (mesma
+  // fonte do /api/cost-summary), com fallback no preço corrente configurado.
+  const pKwh = +state.battery_avg_price_per_kwh || +state.price_kwh || 0;
+  const pGas = +state.tank_avg_price_per_l      || +state.price_gas_per_l || 0;
   return {
     distKm: dist, netKwh: net,
     effKwh100: dist > 0.5 ? net / dist * 100 : 0,
     timeSec: Math.max(0, Math.round(+ct.timeSec || 0)),
     avgSpeedKmh: +ct.avgSpeedKmh || 0,
     fuelL: +ct.fuelL || 0,
+    costBrl: +(net * pKwh + (+ct.fuelL || 0) * pGas).toFixed(2),
     socPct:  Math.round(+state.soc_pct || 0),
     rangeKm: Math.round(+state.range_ev_km || 0),
     tyreMinPsi: tyreMin,
