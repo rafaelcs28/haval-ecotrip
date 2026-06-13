@@ -20,6 +20,7 @@ final class AssistantStore: ObservableObject {
     @Published var messages: [ChatMsg] = []
     @Published var sending = false
     @Published var errorText: String?
+    @AppStorage("ai_prefer_cloud") var preferCloud = false
 
     private var base: String {
         let u = Settings.apiBase.isEmpty ? AuthConfig.bridgeURL : Settings.apiBase
@@ -48,7 +49,10 @@ final class AssistantStore: ObservableObject {
         req.timeoutInterval = 90
         req.addValue("Bearer " + Settings.bridgeToken, forHTTPHeaderField: "Authorization")
         req.addValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.httpBody = try? JSONSerialization.data(withJSONObject: ["messages": thread])
+        req.httpBody = try? JSONSerialization.data(withJSONObject: [
+            "messages": thread,
+            "prefer": preferCloud ? "cloud" : "auto",
+        ])
         do {
             let (data, resp) = try await URLSession.shared.data(for: req)
             let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
@@ -120,6 +124,16 @@ struct AssistantSheet: View {
                     Button { store.reset() } label: { Image(systemName: "square.and.pencil") }
                         .foregroundStyle(DS.text)
                         .disabled(store.messages.isEmpty || store.sending)
+                }
+                ToolbarItem(placement: .principal) {
+                    HStack(spacing: 6) {
+                        Text("Assistente IA").font(.headline).foregroundStyle(DS.text)
+                        Button { store.preferCloud.toggle() } label: {
+                            Image(systemName: store.preferCloud ? "cloud.fill" : "cloud")
+                                .font(.system(size: 13))
+                                .foregroundStyle(store.preferCloud ? DS.teal : DS.muted)
+                        }
+                    }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Fechar") { dismiss() }

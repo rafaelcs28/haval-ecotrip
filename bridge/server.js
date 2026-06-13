@@ -5685,6 +5685,45 @@ app.post('/api/la/relaunch', async (req, res) => {
 const OLLAMA_URL   = process.env.OLLAMA_URL   || 'http://localhost:11434';
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'llama3.1:8b';
 
+// Tier de nuvem (Claude via CLI `claude -p`, mesmo padrão do whats-assistant):
+// usado como fallback quando o Ollama falha e como motor primário pra perguntas
+// analíticas/complexas. Desliga com AI_CLOUD_FALLBACK=0.
+const CLAUDE_BIN        = process.env.CLAUDE_BIN || '/usr/local/bin/claude';
+const CLAUDE_CHAT_MODEL = process.env.CLAUDE_CHAT_MODEL || 'sonnet';
+const AI_CLOUD          = (process.env.AI_CLOUD_FALLBACK ?? '1') !== '0';
+
+// Roda o claude CLI com o prompt no stdin e devolve o texto puro da resposta.
+// USER/LOGNAME explícitos: sob pm2 o lookup da credencial no Keychain quebra sem
+// eles. cwd neutro pra não carregar CLAUDE.md de algum projeto.
+function _askClaude(sys, userMsgs, timeoutMs = 60_000) {
+  const { execFile } = require('child_process');
+  const os = require('os');
+  return new Promise((resolve, reject) => {
+    const u = os.userInfo().username;
+    const env = { ...process.env, USER: process.env.USER || u, LOGNAME: process.env.LOGNAME || u };
+    const thread = userMsgs
+      .map(m => `${m.role === 'user' ? 'Usuário' : 'Assistente'}: ${m.content}`)
+      .join('\n\n');
+    const prompt = `${sys}\n\nHISTÓRICO DA CONVERSA:\n${thread}\n\nResponda à última mensagem do usuário em português, de forma direta e concisa.`;
+    const child = execFile(CLAUDE_BIN, ['-p', '--model', CLAUDE_CHAT_MODEL],
+      { timeout: timeoutMs, maxBuffer: 1024 * 1024, cwd: os.tmpdir(), env },
+      (err, stdout, stderr) => err
+        ? reject(new Error(`${err.message} ${String(stderr).slice(0, 200)}`))
+        : resolve(String(stdout).trim()));
+    child.stdin.on('error', () => {});   // evita EPIPE virar uncaught e derrubar o processo
+    child.stdin.write(prompt);
+    child.stdin.end();
+  });
+}
+
+// Gate de complexidade: perguntas longas ou analíticas/comparativas escalam pro
+// Claude direto; perguntas simples (status/lookup) ficam no Ollama local.
+function _aiIsComplex(userMsgs) {
+  const last = (userMsgs[userMsgs.length - 1]?.content || '');
+  if (last.length > 280) return true;
+  return /\b(compar|por que|porqu[êe]|analis|explic|tend[êe]nc|recomend|sugest|proje[çc]|melhor|pior|vale a pena|deveria|estrat[ée]g|otimiz|m[ée]dia|padr[ãa]o)/i.test(last);
+}
+
 // Resumo compacto de uma viagem — agrega samples por modo (HEV/EV) e calcula
 // km/L só do HEV (assumindo que todo combustível foi queimado em HEV, que é
 // quase sempre verdade num PHEV: motor ICE só liga em HEV).
@@ -5789,7 +5828,15 @@ DICAS:
 - Seja conciso. Tabelas simples ou bullets quando útil.
 - Mantenha continuidade da conversa: se o usuário pergunta "e nessa outra?" assume o contexto da mensagem anterior.`;
 
-  try {
+  // Roteamento entre motor local (Ollama) e nuvem (Claude):
+  //   prefer=local → só Ollama  ·  prefer=cloud → Claude (fallback Ollama)
+  //   prefer=auto (default) → Ollama; escala pro Claude se a pergunta for
+  //   complexa OU se o Ollama falhar.
+  const prefer = (req.body?.prefer || 'auto').toString();
+  const cloudFirst = AI_CLOUD && (prefer === 'cloud' || (prefer === 'auto' && _aiIsComplex(userMsgs)));
+
+  async function viaOllama() {
+    const t0 = Date.now();
     const r = await fetch(`${OLLAMA_URL}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -5800,16 +5847,38 @@ DICAS:
         options: { temperature: 0.2, num_ctx: 8192 },
       }),
     });
-    if (!r.ok) return res.status(502).json({ error: `Ollama ${r.status}` });
+    if (!r.ok) throw new Error(`Ollama ${r.status}`);
     const o = await r.json();
-    res.json({
+    return {
       answer: o.message?.content || '(sem resposta)',
-      duration_sec: o.total_duration ? +(o.total_duration/1e9).toFixed(2) : null,
+      duration_sec: o.total_duration ? +(o.total_duration/1e9).toFixed(2) : +((Date.now()-t0)/1000).toFixed(2),
       tokens: o.eval_count || null,
-    });
-  } catch (e) {
-    console.warn('[ai] erro:', e.message);
-    res.status(500).json({ error: 'falha ao consultar Ollama: ' + e.message });
+      engine: 'ollama',
+    };
+  }
+  async function viaClaude() {
+    const t0 = Date.now();
+    const answer = await _askClaude(sys, userMsgs);
+    return { answer, duration_sec: +((Date.now()-t0)/1000).toFixed(2), tokens: null, engine: 'claude' };
+  }
+
+  // Primário + fallback no outro motor.
+  if (cloudFirst) {
+    try { return res.json(await viaClaude()); }
+    catch (e) { console.warn('[ai] claude falhou, fallback ollama:', e.message); }
+    try { return res.json(await viaOllama()); }
+    catch (e) { console.warn('[ai] ollama falhou:', e.message);
+                return res.status(502).json({ error: 'falha nos dois motores de IA: ' + e.message }); }
+  } else {
+    try { return res.json(await viaOllama()); }
+    catch (e) { console.warn('[ai] ollama falhou:', e.message);
+      if (AI_CLOUD && prefer !== 'local') {
+        try { return res.json(await viaClaude()); }
+        catch (e2) { console.warn('[ai] claude (fallback) falhou:', e2.message);
+                     return res.status(502).json({ error: 'falha nos dois motores de IA: ' + e2.message }); }
+      }
+      return res.status(502).json({ error: 'falha ao consultar Ollama: ' + e.message });
+    }
   }
 });
 
