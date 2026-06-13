@@ -5789,9 +5789,87 @@ function _buildAiContext(N = 10) {
     autonomy_ev_km: state.autonomy_ev_km,
     autonomy_ice_km: state.autonomy_ice_km,
     fuel_l: state.fuel_l,
+    gps: (state.gps_lat && state.gps_lng) ? { lat: state.gps_lat, lng: state.gps_lng } : null,
   };
 
-  return { now_iso: new Date().toISOString(), atual: cur, viagens_recentes: trips, recargas_recentes: charges };
+  // Locais salvos (casa/trabalho/etc) — dão ao modelo as coordenadas pra resolver
+  // perguntas como "chego no trabalho?". Distância real de estrada vem em `rotas`
+  // (preenchido pelo resolver quando a pergunta é de autonomia/trajeto).
+  const locais = knownPlaces
+    .filter(p => Number.isFinite(+p.lat) && Number.isFinite(+p.lng))
+    .map(p => ({ nome: p.name, lat: +p.lat, lng: +p.lng }));
+
+  return {
+    now_iso: new Date().toISOString(),
+    atual: cur,
+    locais_salvos: locais,
+    viagens_recentes: trips,
+    recargas_recentes: charges,
+  };
+}
+
+// Resolve os destinos citados numa pergunta de autonomia/trajeto e calcula a
+// distância real de estrada de cada perna (GPS atual → A → B …). Devolve null
+// quando a pergunta não é sobre trajeto/autonomia ou não há GPS do carro.
+//   1. gate de intenção (regex) pra não geocodar pergunta de status.
+//   2. extrai os destinos em ordem (Claude, JSON) — texto livre tipo "Jardins Lisboa".
+//   3. resolve cada um: match em locais_salvos primeiro, senão _geocode.
+//   4. encadeia as pernas com _routeElevation e acumula km.
+async function _resolveRouteContext(question) {
+  const q = String(question || '');
+  if (!/\b(consigo|chego|chegar|alcan[çc]|autonom|d[áa] pra ir|range|sem chegar|aguenta|quantos? km|dist[âa]ncia|vai dar|volto|ida e volta)\b/i.test(q))
+    return null;
+  const oLat = +state.gps_lat, oLng = +state.gps_lng;
+  if (!oLat || !oLng) return null;
+  if (!AI_CLOUD) return null;   // extração depende do Claude; sem nuvem, pula
+
+  // Extrai os destinos em ordem de visita, mapeando pra um local salvo quando
+  // fizer sentido (ex.: "trabalho" → nome da empresa salva, "casa" → "Casa").
+  const savedNames = knownPlaces.filter(p => p.name && p.lat && p.lng).map(p => p.name);
+  let dests = [];
+  try {
+    const raw = await _askClaude(
+      'Extraia APENAS os destinos/lugares mencionados na pergunta abaixo, na ordem de visita. ' +
+      'LOCAIS SALVOS do usuário: ' + JSON.stringify(savedNames) + '. ' +
+      'Se um destino citado corresponder a um local salvo (inclusive por sinônimo óbvio — ' +
+      '"trabalho"/"serviço" → empresa, "casa"/"em casa" → residência), retorne o NOME SALVO exato. ' +
+      'Senão, retorne o texto do lugar como veio. ' +
+      'Responda SÓ um array JSON de strings, sem texto extra. Se nenhum lugar for citado, responda [].',
+      [{ role: 'user', content: q }], 20_000);
+    const m = raw.match(/\[[\s\S]*\]/);
+    if (m) dests = JSON.parse(m[0]).filter(s => typeof s === 'string' && s.trim()).slice(0, 4);
+  } catch (e) { console.warn('[ai] extração de destinos falhou:', e.message); return null; }
+  if (!dests.length) return null;
+
+  // Resolve coords: locais salvos primeiro (match por nome), senão geocoding.
+  const resolved = [];
+  for (const d of dests) {
+    const dl = d.trim().toLowerCase();
+    const kp = knownPlaces.find(p => p.name && p.lat && p.lng &&
+      (p.name.trim().toLowerCase() === dl || p.name.trim().toLowerCase().includes(dl) || dl.includes(p.name.trim().toLowerCase())));
+    if (kp) { resolved.push({ nome: kp.name, lat: +kp.lat, lng: +kp.lng, fonte: 'salvo' }); continue; }
+    const g = await _geocode(d);
+    if (g) resolved.push({ nome: g.name || d, lat: g.lat, lng: g.lng, fonte: 'geocode' });
+    else   resolved.push({ nome: d, lat: null, lng: null, fonte: 'não encontrado' });
+  }
+
+  // Encadeia as pernas a partir do GPS atual.
+  const pernas = [];
+  let pLat = oLat, pLng = oLng, acc = 0, origem = 'posição atual';
+  for (const r of resolved) {
+    if (r.lat == null) { pernas.push({ de: origem, para: r.nome, status: 'destino não localizado' }); continue; }
+    const leg = await _routeElevation(pLat, pLng, r.lat, r.lng);
+    if (!leg) { pernas.push({ de: origem, para: r.nome, status: 'rota indisponível' }); origem = r.nome; pLat = r.lat; pLng = r.lng; continue; }
+    acc += leg.distanceKm;
+    pernas.push({
+      de: origem, para: r.nome,
+      distancia_km: leg.distanceKm, duracao_min: leg.durationMin,
+      subida_m: leg.climbM, descida_m: leg.descentM,
+      acumulado_km: +acc.toFixed(1),
+    });
+    origem = r.nome; pLat = r.lat; pLng = r.lng;
+  }
+  return { origem: 'posição GPS atual do carro', pernas, distancia_total_km: +acc.toFixed(1) };
 }
 
 app.post('/api/ai/ask', async (req, res) => {
@@ -5816,6 +5894,14 @@ app.post('/api/ai/ask', async (req, res) => {
   if (userMsgs.length > 20) userMsgs = userMsgs.slice(-20);
 
   const ctx = _buildAiContext(req.body?.context_size || 10);
+
+  // Resolve trajeto/distâncias quando a pergunta é de autonomia (camada 2).
+  const lastUser = [...userMsgs].reverse().find(m => m.role === 'user')?.content || '';
+  try {
+    const rotas = await _resolveRouteContext(lastUser);
+    if (rotas) ctx.rotas = rotas;
+  } catch (e) { console.warn('[ai] resolver de rota falhou:', e.message); }
+
   const sys = `Você é um assistente especializado em telemetria de carros híbridos plug-in (PHEV) integrado ao app Haval EcoTrip. Responda em português brasileiro, com clareza e precisão. Use APENAS os dados fornecidos abaixo no JSON de contexto pra responder. Não invente números. Se a pergunta exigir algo fora do contexto, diga.
 
 CONTEXTO (JSON):
@@ -5825,6 +5911,9 @@ DICAS:
 - "Modo HEV" = motor térmico ligado (rpm > 0). "Modo EV" = elétrico puro.
 - "kWh efetivo" da recarga = custo / energia que entrou na bateria.
 - Datas em viagens_recentes.startMs/endMs são milissegundos epoch (use Date(ms).toLocaleString se precisar formatar).
+- "atual.autonomy_ev_km" é a autonomia elétrica estimada AGORA. "atual.soc_pct" é a carga atual.
+- "rotas" (quando presente) traz as distâncias reais de estrada de cada perna a partir do GPS do carro. Pra responder se a bateria chega: compare a distância acumulada com autonomy_ev_km; se o usuário pedir reserva (ex.: "sem ficar abaixo de 20%"), desconte essa fração da autonomia (autonomy_ev_km × (1 − reserva)) antes de comparar. Subida (subida_m) gasta mais; mencione se relevante.
+- "locais_salvos" tem as coordenadas de lugares nomeados (casa/trabalho/etc).
 - Seja conciso. Tabelas simples ou bullets quando útil.
 - Mantenha continuidade da conversa: se o usuário pergunta "e nessa outra?" assume o contexto da mensagem anterior.`;
 
