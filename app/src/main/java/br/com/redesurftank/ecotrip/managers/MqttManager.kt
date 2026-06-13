@@ -1385,7 +1385,10 @@ class MqttManager private constructor() {
             val cleanedHost = cleanHost(host)
             val serverUri = if (tls) "ssl://$cleanedHost:$port" else "tcp://$cleanedHost:$port"
             Log.i(TAG, "Connecting to $serverUri")
-            val c = MqttClient(serverUri, CLIENT_ID + "_${System.currentTimeMillis() % 10000}", MemoryPersistence())
+            // clientId estável (sem sufixo aleatório): com cleanSession=false o broker
+            // só retoma a sessão persistente — e re-entrega QoS1 enfileirado — se o
+            // mesmo clientId reconectar. Sufixo aleatório criava sessão nova a cada flap.
+            val c = MqttClient(serverUri, CLIENT_ID, MemoryPersistence())
 
             c.setCallback(object : MqttCallback {
                 override fun connectionLost(cause: Throwable?) {
@@ -1406,7 +1409,10 @@ class MqttManager private constructor() {
             val opts = MqttConnectOptions().apply {
                 connectionTimeout    = 10   // Starlink: latência baixa; falha logo se cair
                 keepAliveInterval    = 10   // 4G+TLS+cellular pode ter jitter; 1.5×=15s timeout. Heartbeat 5s do app faz a detecção rápida real
-                isCleanSession       = true
+                // false = sessão persistente: o broker enfileira QoS1 (ex. comandos
+                // cmd/#) enquanto o carro pisca de conexão e re-entrega no reconnect,
+                // em vez de dropar. Exige clientId estável (acima).
+                isCleanSession       = false
                 isAutomaticReconnect = false
                 if (username.isNotEmpty()) {
                     userName = username
