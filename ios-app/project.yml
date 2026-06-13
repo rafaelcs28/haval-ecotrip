@@ -71,6 +71,8 @@ targets:
         # WebSocket local (ws://host:8088/ws/state) sem passar pelo Mac mini.
         NSFaceIDUsageDescription: "Use o Face ID para desbloquear o app."
         NSLocalNetworkUsageDescription: "Conecta direto ao carro na mesma rede Wi-Fi para telemetria e comandos com baixa latência."
+        NSCalendarsUsageDescription: "Lê seus próximos compromissos para pré-climatizar o carro antes da hora de sair."
+        NSCalendarsFullAccessUsageDescription: "Lê seus próximos compromissos para pré-climatizar o carro antes da hora de sair."
         NSBonjourServices:
           - _havalobd._tcp
         # canOpenURL p/ abrir a navegação neste iPhone (Waze / Google Maps).

@@ -408,7 +408,7 @@ function checkSpeedFence(cur) {
 //              temp:22.0, fan:3, lastFiredDate:"YYYY-MM-DD" }
 // Lista de agendamentos. Cada um: { id, enabled, time:"HH:MM", recurrence,
 //   temp, fan, duration, leadMin, device_id, lastFiredDate, startedDate }.
-const PRECLIMAT_SCHED_DEFAULTS = { enabled: true, time: '07:30', recurrence: 'daily', temp: 22.0, fan: 3, duration: 20, leadMin: 10, device_id: '', lastFiredDate: '', startedDate: '' };
+const PRECLIMAT_SCHED_DEFAULTS = { enabled: true, time: '07:30', recurrence: 'daily', temp: 22.0, fan: 3, duration: 20, leadMin: 10, device_id: '', onceAtMs: 0, lastFiredDate: '', startedDate: '' };
 function _genSchedId() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
 let preclimat = { schedules: [] };
 try {
@@ -592,8 +592,19 @@ setInterval(() => {
   let dirty = false;
   for (const sched of preclimat.schedules) {
     if (!sched.enabled) continue;
-    if (!_schedEligibleToday(sched, now)) continue;
-    const fireMs = _schedFireMsToday(sched, now);
+    // Agendamento por evento de calendário: timestamp absoluto. Ignora a lógica
+    // HH:MM/recurrence — dispara uma vez no instante exato e se autodesabilita.
+    // Janela de pega de 5min cobre o caso de a bridge ter ficado fora do ar no T.
+    let fireMs, isOnceAt = false;
+    if (Number.isFinite(sched.onceAtMs) && sched.onceAtMs > 0) {
+      fireMs = sched.onceAtMs; isOnceAt = true;
+      if (nowMs >= fireMs + 5 * 60_000) {   // expirou sem disparar — limpa
+        sched.enabled = false; dirty = true; continue;
+      }
+    } else {
+      if (!_schedEligibleToday(sched, now)) continue;
+      fireMs = _schedFireMsToday(sched, now);
+    }
     if (fireMs == null) continue;
     const lead = (sched.leadMin != null ? sched.leadMin : 10) * 60_000;
 
@@ -603,11 +614,13 @@ setInterval(() => {
       _startPreclimatLA(sched, fireMs);
     }
 
-    // Etapa 2 — T (até +90s de folga): dispara motor+AC.
+    // Etapa 2 — T: dispara motor+AC. Janela de 90s no modo HH:MM; 5min no modo
+    // onceAtMs (mais folga p/ não perder o disparo único de um compromisso).
+    const fireWindow = isOnceAt ? 5 * 60_000 : 90_000;
     if (!_preclimatFiring && sched.lastFiredDate !== today
-        && nowMs >= fireMs && nowMs < fireMs + 90_000) {
+        && nowMs >= fireMs && nowMs < fireMs + fireWindow) {
       sched.lastFiredDate = today;
-      if (sched.recurrence === 'once') sched.enabled = false;
+      if (isOnceAt || sched.recurrence === 'once') sched.enabled = false;
       dirty = true;
       _preclimatFiring = true;
       firePreClimat(sched).finally(() => { _preclimatFiring = false; });
@@ -6456,6 +6469,13 @@ app.post('/api/preclimat/schedule', requireAuth, (req, res) => {
   if (dur !== null && (isNaN(dur) || dur < 0 || dur > 180)) return res.status(400).json({ error: 'duration fora de 0-180' });
   const lead = b.leadMin !== undefined ? parseInt(b.leadMin, 10) : null;
   if (lead !== null && (isNaN(lead) || lead < 0 || lead > 60)) return res.status(400).json({ error: 'leadMin fora de 0-60' });
+  // onceAtMs: timestamp absoluto p/ pré-clima por compromisso. 0/null limpa o modo.
+  let onceAt = null;
+  if (b.onceAtMs !== undefined) {
+    onceAt = b.onceAtMs === null ? 0 : parseInt(b.onceAtMs, 10);
+    if (isNaN(onceAt) || onceAt < 0 || onceAt > Date.now() + 30 * 86400_000)
+      return res.status(400).json({ error: 'onceAtMs inválido' });
+  }
 
   let sched = b.id ? preclimat.schedules.find(s => s.id === b.id) : null;
   if (!sched) { sched = { ...PRECLIMAT_SCHED_DEFAULTS, id: _genSchedId() }; preclimat.schedules.push(sched); }
@@ -6471,6 +6491,7 @@ app.post('/api/preclimat/schedule', requireAuth, (req, res) => {
   if (f !== null)         sched.fan = f;
   if (dur !== null)       sched.duration = dur;
   if (lead !== null)      sched.leadMin = lead;
+  if (onceAt !== null) { sched.onceAtMs = onceAt; if (onceAt > 0) { sched.recurrence = 'once'; sched.lastFiredDate = ''; sched.startedDate = ''; } }
   if (b.enabled !== undefined)    sched.enabled = !!b.enabled;
 
   // Efeitos: mudar horário ou desativar encerra a LA ativa deste agendamento;
@@ -7721,7 +7742,16 @@ function _songProEvents(o) {
 // ── LA de deslocamento do BYD (tempo · km · SOC) ──────────────────────────────
 const SONGPRO_TRIP_LA_TYPE = 'SongProTripActivityAttributes';
 let _songProTripActive = !!(state._songpro_trip_la_active);
-let _songProTripLastStartMs = 0;
+// tripStartMs (âncora da sessão de viagem) pra qual já foi feito pushStart desta
+// LA. Persistido em state pra sobreviver a reloads do bridge — sem isso, cada
+// reload mid-viagem refazia pushStart e criava uma LA duplicada na tela.
+// Compat: se restaurei com flag _songpro_trip_la_active=true mas sem chave
+// nova (versão antiga), assume que já foi feito pushStart pra essa viagem.
+let _songProTripStartedFor = +(state._songpro_trip_la_started_for) || 0;
+if (!_songProTripStartedFor && _songProTripActive && _spEv && _spEv.tripStartMs) {
+  _songProTripStartedFor = _spEv.tripStartMs;
+  state._songpro_trip_la_started_for = _spEv.tripStartMs;
+}
 
 function _songProTripEnabled() {
   return Object.values(notifPrefsByDevice).some(p => p && p.la_songpro_trip === true);
@@ -7761,13 +7791,14 @@ function _evalSongProTripLA() {
       _songProTripActive = true;
       state._songpro_trip_la_active = true; scheduleStateSave();
     }
-    // Decide por TOKEN, não pela flag: se não há update token (LA não está viva no
-    // device — flag presa de uma viagem anterior, app reinstalado, LA expirada),
-    // (re)inicia com pushStart. Throttle de 30s evita spam enquanto o token não chega.
+    // pushStart UMA vez por sessão de viagem (ancorada em tripStartMs). Sem isso,
+    // se o app estiver fechado e não conseguir registrar o update token, o bridge
+    // refazia pushStart a cada ciclo e empilhava várias LAs no lockscreen.
     if (apnsLive.hasUpdateToken(SONGPRO_TRIP_LA_TYPE)) {
       apnsLive.pushUpdate(SONGPRO_TRIP_LA_TYPE, {}, cs, {}).catch(() => {});
-    } else if (Date.now() - _songProTripLastStartMs > 30_000) {
-      _songProTripLastStartMs = Date.now();
+    } else if (_songProTripStartedFor !== _spEv.tripStartMs) {
+      _songProTripStartedFor = _spEv.tripStartMs;
+      state._songpro_trip_la_started_for = _spEv.tripStartMs; scheduleStateSave();
       apnsLive.pushStart(SONGPRO_TRIP_LA_TYPE, '', { carName: 'BYD Song Pro' }, cs,
         { staleDate: Date.now() + 6 * 3600_000,
           alert: { title: '🚗 BYD em deslocamento', body: 'Acompanhe o trajeto na tela bloqueada.' },
@@ -7776,7 +7807,10 @@ function _evalSongProTripLA() {
     }
   } else if (_songProTripActive) {
     _songProTripActive = false;
-    state._songpro_trip_la_active = false; scheduleStateSave();
+    _songProTripStartedFor = 0;
+    state._songpro_trip_la_active = false;
+    state._songpro_trip_la_started_for = 0;
+    scheduleStateSave();
     apnsLive.pushUpdate(SONGPRO_TRIP_LA_TYPE, {}, _songProTripContentState(false),
       { isFinal: true, dismissalDate: Date.now() + 5 * 60_000 })
       .catch(e => console.warn('[songpro-trip] end falhou:', e.message));

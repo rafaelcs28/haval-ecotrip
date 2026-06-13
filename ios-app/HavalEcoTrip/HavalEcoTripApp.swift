@@ -12,6 +12,7 @@ import UserNotifications
 struct HavalEcoTripApp: App {
     // AppDelegate adaptor pra capturar Quick Actions (3D/Haptic Touch no ícone).
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    @Environment(\.scenePhase) private var scenePhase
 
     init() {
         // Migra URL/token de versões antigas (UserDefaults.standard) pro
@@ -25,6 +26,9 @@ struct HavalEcoTripApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { Task { await CalendarPreclimatStore.shared.sync() } }
         }
     }
 }

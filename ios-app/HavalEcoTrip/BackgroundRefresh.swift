@@ -48,6 +48,8 @@ enum BackgroundRefresh {
             // histórico aqui — evitaria duplicar com o alerta APNs). Mantemos só
             // a atualização da Live Activity de recarga como fallback.
             await updateActiveLiveActivity()
+            // Mantém o pré-clima por agenda fresco mesmo com o app fechado.
+            await CalendarPreclimatStore.shared.sync()
             task.setTaskCompleted(success: true)
         }
         task.expirationHandler = { work.cancel() }

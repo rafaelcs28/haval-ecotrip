@@ -54,6 +54,10 @@
 	<array>
 		<string>_havalobd._tcp</string>
 	</array>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Lê seus próximos compromissos para pré-climatizar o carro antes da hora de sair.</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>Lê seus próximos compromissos para pré-climatizar o carro antes da hora de sair.</string>
 	<key>NSFaceIDUsageDescription</key>
 	<string>Use o Face ID para desbloquear o app.</string>
 	<key>NSLocalNetworkUsageDescription</key>

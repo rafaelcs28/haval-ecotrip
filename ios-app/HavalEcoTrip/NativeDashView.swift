@@ -27,6 +27,7 @@ struct NativeDashView: View {
     @State private var showRange = false
     @State private var showShare = false
     @State private var showTimeline = false
+    @State private var showAssistant = false
     // Feedback visual da troca de limite de carga (Haptic Touch no card):
     // pendingLimit = valor selecionado aguardando o carro confirmar (amarelo);
     // limitFeedback: 0=nenhum · 1=confirmado (verde) · 2=recusado (vermelho).
@@ -75,6 +76,7 @@ struct NativeDashView: View {
         .sheet(isPresented: $showRange) { RangeSheet() }
         .sheet(isPresented: $showShare) { ShareStatusSheet() }
         .sheet(isPresented: $showTimeline) { EventsTimelineSheet() }
+        .sheet(isPresented: $showAssistant) { AssistantSheet() }
     }
 
     // MARK: localização + central de notificações + versão do carro
@@ -86,6 +88,9 @@ struct NativeDashView: View {
             if store.lanConnected { DSChip(text: "LAN", color: DS.teal, filled: true) }
             if !apkVer.isEmpty {
                 Text("carro v\(apkVer)").font(.system(size: 9)).foregroundStyle(DS.muted).lineLimit(1)
+            }
+            Button { showAssistant = true } label: {
+                Image(systemName: "sparkles").font(.system(size: 15)).foregroundStyle(DS.teal)
             }
             Button { showTimeline = true } label: {
                 Image(systemName: "clock.arrow.circlepath").font(.system(size: 15)).foregroundStyle(DS.text)

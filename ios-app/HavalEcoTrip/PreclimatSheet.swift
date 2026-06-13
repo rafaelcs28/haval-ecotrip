@@ -89,6 +89,7 @@ struct PreclimatSheet: View {
     @StateObject private var store = PreclimatStore()
     @ObservedObject private var trips = TripsLoader.shared
     @ObservedObject private var car = CarStore.shared
+    @ObservedObject private var cal = CalendarPreclimatStore.shared
     @Environment(\.dismiss) private var dismiss
 
     // Horário típico de saída (mediana das viagens de manhã em dias úteis), em minutos.
@@ -122,6 +123,7 @@ struct PreclimatSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 14) {
+                    calendarCard
                     if let sug = suggestion { suggestionCard(sug) }
                     if store.scheds.isEmpty && !store.loading {
                         Text("Nenhum agendamento. Adicione um para o carro pré-climatizar antes de você sair.")
@@ -140,7 +142,76 @@ struct PreclimatSheet: View {
             .navigationTitle("Pré-climatização").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Concluído") { dismiss() } } }
         }
-        .task { await store.load(); await trips.load() }
+        .task { await store.load(); await trips.load(); cal.refreshAuth(); await cal.sync() }
+    }
+
+    // ── Pré-clima por agenda (Calendário) ─────────────────────────────────────
+    @ViewBuilder private var calendarCard: some View {
+        DSCard {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    Image(systemName: "calendar.badge.clock").foregroundStyle(DS.teal)
+                    Text("Pré-clima por agenda").font(.caption.weight(.semibold)).foregroundStyle(DS.teal)
+                    Spacer()
+                    Toggle("", isOn: Binding(get: { cal.enabled }, set: { cal.setEnabled($0) }))
+                        .labelsHidden().tint(DS.green)
+                }
+                if cal.enabled && !cal.authorized {
+                    Button { Task { await cal.requestAccess() } } label: {
+                        Label("Permitir acesso ao Calendário", systemImage: "lock.open.fill")
+                            .font(.system(size: 14, weight: .bold)).frame(maxWidth: .infinity).frame(height: 44)
+                            .foregroundStyle(.black).background(DS.teal).clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    }
+                } else if cal.enabled, let ev = cal.nextEvent {
+                    Text(ev.title).font(.subheadline.weight(.semibold)).foregroundStyle(DS.text)
+                    if let dep = cal.departure {
+                        infoRow("figure.walk", "Sair ~\(hhmm(dep))")
+                    }
+                    if let fire = cal.fireAt {
+                        infoRow("fan.fill", "Pré-clima liga \(hhmm(fire))")
+                    }
+                    rangeBadge
+                } else if cal.enabled {
+                    Text(cal.busy ? "Buscando próximo compromisso…" : "Nenhum compromisso com horário nas próximas 24h.")
+                        .font(.subheadline).foregroundStyle(DS.muted)
+                } else {
+                    Text("Pré-climatize automaticamente antes de cada compromisso da sua agenda.")
+                        .font(.subheadline).foregroundStyle(DS.muted)
+                }
+            }
+        }
+    }
+
+    private func hhmm(_ d: Date) -> String {
+        let f = DateFormatter(); f.dateFormat = "HH:mm"; return f.string(from: d)
+    }
+    private func infoRow(_ icon: String, _ text: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon).font(.system(size: 12)).foregroundStyle(DS.muted).frame(width: 16)
+            Text(text).font(.system(size: 14)).foregroundStyle(DS.text)
+        }
+    }
+    @ViewBuilder private var rangeBadge: some View {
+        let km = cal.distanceKm.map { " (\(Int($0.rounded())) km)" } ?? ""
+        switch cal.verdict {
+        case .ev:
+            badge("Autonomia OK no elétrico\(km)", "bolt.fill", DS.green)
+        case .total:
+            badge("Chega usando gasolina\(km)", "fuelpump.fill", DS.teal)
+        case .insufficient:
+            badge("Autonomia pode não chegar\(km)", "exclamationmark.triangle.fill", DS.red)
+        case .unknown:
+            EmptyView()
+        }
+    }
+    private func badge(_ text: String, _ icon: String, _ color: Color) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon).font(.system(size: 11))
+            Text(text).font(.system(size: 12, weight: .semibold))
+        }
+        .foregroundStyle(color)
+        .padding(.horizontal, 10).padding(.vertical, 6)
+        .background(color.opacity(0.15)).clipShape(Capsule())
     }
 
     @ViewBuilder private func suggestionCard(_ s: (time: String, temp: Double, why: String)) -> some View {
