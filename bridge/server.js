@@ -9423,6 +9423,16 @@ app.get('/api/share/:token/state', (req, res) => {
     distKm: +(a.distKm || 0),
     etaMin: Math.round(a.etaMin || 0),
     etaClock: a.etaClock || '',
+    // Paradas intermediárias (não-final) na ordem do trajeto, c/ km/ETA acumulados.
+    legs: Array.isArray(a.legs) && a.legs.length > 1
+      ? a.legs.map(l => ({
+          name: l.name || 'Parada',
+          distKm: +(l.distKm || 0),
+          etaMin: Math.round(l.etaMin || 0),
+          etaClock: l.etaClock || '',
+          isFinal: !!l.isFinal,
+        }))
+      : null,
   } : null;
   res.json({
     on,

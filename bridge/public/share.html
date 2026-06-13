@@ -26,6 +26,11 @@
   .dest { font-size:15px; font-weight:700; margin-bottom:8px; padding:10px 12px; border-radius:12px;
           background:rgba(34,197,94,.14); border:1px solid rgba(34,197,94,.3); color:var(--text); }
   .dest .name { color:var(--green); } .dest .v { color:var(--green); }
+  .dest .stops { margin-top:8px; padding-top:8px; border-top:1px solid rgba(255,255,255,.1);
+                 display:flex; flex-direction:column; gap:5px; }
+  .dest .stops-h { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); }
+  .dest .stop { font-size:13px; font-weight:600; color:var(--muted); }
+  .dest .stop .sn { color:var(--text); }
   .grid { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; }
   .cell { background:rgba(255,255,255,.05); border-radius:12px; padding:9px 6px; text-align:center; }
   .cell .v { font-size:20px; font-weight:700; font-variant-numeric:tabular-nums; }
@@ -108,9 +113,20 @@ async function poll(){
   // Destino ativo: distância, tempo e hora de chegada.
   const dl = document.getElementById('dest-line');
   if (j.dest && j.dest.distKm != null) {
+    const esc = s => String(s||'').replace(/</g,'&lt;');
     const km = (j.dest.distKm).toFixed(1).replace('.', ',');
     const clock = j.dest.etaClock ? ` · chega ${j.dest.etaClock}` : '';
-    dl.innerHTML = `🏁 Indo pra <span class="name">${(j.dest.name||'destino').replace(/</g,'&lt;')}</span> · <span class="v">${km} km</span> · ${j.dest.etaMin} min${clock}`;
+    let html = `🏁 Indo pra <span class="name">${esc(j.dest.name||'destino')}</span> · <span class="v">${km} km</span> · ${j.dest.etaMin} min${clock}`;
+    // Paradas intermediárias (não-final) na ordem do trajeto.
+    const stops = (j.dest.legs||[]).filter(l => !l.isFinal);
+    if (stops.length) {
+      html += `<div class="stops"><div class="stops-h">Paradas</div>` + stops.map(s => {
+        const sk = (s.distKm||0).toFixed(1).replace('.', ',');
+        const sc = s.etaClock ? ` · ${s.etaClock}` : '';
+        return `<div class="stop">📍 <span class="sn">${esc(s.name)}</span> · ${sk} km${sc}</div>`;
+      }).join('') + `</div>`;
+    }
+    dl.innerHTML = html;
     dl.style.display = '';
   } else { dl.style.display = 'none'; }
   if (j.lat && j.lng){
