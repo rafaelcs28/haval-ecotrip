@@ -47,7 +47,10 @@ struct Trip: Identifiable {
     var endCoord: CLLocationCoordinate2D? { let la = n("endLat"), lo = n("endLng"); return (la != 0 && lo != 0) ? .init(latitude: la, longitude: lo) : nil }
     func cost(_ pKwh: Double, _ pGas: Double) -> Double { netKwh * pKwh + fuelL * pGas }
     var consumo: Double { distKm > 0.5 ? netKwh / distKm * 100 : 0 }
-    var valid: Bool { distKm > 0.1 || timeSec > 60 }
+    // Mostra também o consumo PARADO (0 km / 0 s mas energia gasta — HVAC/pré-clima/
+    // standby). Espelha o que o bridge decide manter (descarta só se dist≈0 E energia
+    // <0.10 E <60s). Importante pra estatística de consumo de energia.
+    var valid: Bool { distKm > 0.1 || timeSec > 60 || netKwh >= 0.10 || fuelL >= 0.05 }
     // Score de condução calculado no bridge (economia + suavidade). nil = viagem antiga.
     var driveScore: Int? { raw["driveScore"] == nil ? nil : Int(n("driveScore")) }
     var harshAcc: Int { Int(n("harshAcc")) }
