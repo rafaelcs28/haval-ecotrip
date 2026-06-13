@@ -2512,7 +2512,7 @@ server.on('upgrade', (req, socket, head) => {
 });
 
 app.use(require('compression')());  // gzip — backup de 11MB cai pra ~1.5MB
-app.use(express.json({ limit: '15mb' }));  // backup gzipado ~1.5MB; 200mb travava o event loop no parse
+app.use(express.json({ limit: '200mb' }));  // /api/restore carrega o backup completo (autotrips+samples) — já ~38MB e cresce até o cap de 2000 trips. Auth-gated; express.json só bufferiza o que chega (não pré-aloca).
 app.use((req, res, next) => {
   // Sem isso, o URLSession (iOS) pode cachear por heurística respostas de sync
   // (sem Cache-Control) e servir corpo antigo. Boa prática pra APIs dinâmicas.
