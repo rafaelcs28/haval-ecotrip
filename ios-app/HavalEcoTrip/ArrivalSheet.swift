@@ -174,7 +174,10 @@ final class ArrivalStore: ObservableObject {
                     cumEnergy += legEnergy(d, dur, cl, ds); cumMin += dur
                     let soc = min(max(curSoc - Int((cumEnergy / cap * 100).rounded()), 0), 100)
                     let isFinal = (k == rawLegs.count - 1)
-                    let pt = isFinal ? (dLat, dLng, name) : (stops[k].lat, stops[k].lng, stops[k].name)
+                    // stops é indexado pelo índice da leg — se o backend mandar mais legs
+                    // que stops, stops[k] crashava (out of bounds). Cai pro destino final.
+                    let pt: (Double, Double, String) = (!isFinal && k < stops.count)
+                        ? (stops[k].lat, stops[k].lng, stops[k].name) : (dLat, dLng, name)
                     legs.append(ArrivalLeg(name: pt.2, lat: pt.0, lng: pt.1, distanceKm: d, durationMin: dur,
                                            etaClock: df.string(from: Date().addingTimeInterval(Double(cumMin) * 60)),
                                            socAtArrival: soc, isFinal: isFinal))

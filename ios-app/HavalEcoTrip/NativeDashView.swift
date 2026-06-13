@@ -289,7 +289,7 @@ struct NativeDashView: View {
             }
         }
         // Carro confirmou: o limite reportado virou o valor pedido.
-        .onChange(of: store.num("charge_limit_pct")) { newVal in
+        .onChange(of: store.num("charge_limit_pct")) { _, newVal in
             if let p = pendingLimit, Int(newVal) == p {
                 limitTimeout?.cancel(); limitTimeout = nil
                 pendingLimit = nil; limitFeedback = 1; clearLimitFeedbackLater()

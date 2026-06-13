@@ -59,20 +59,28 @@ loadRegistry();
 try { fs.watch(REGISTRY_FILE, () => loadRegistry()); } catch (_) {}
 
 const COOKIE = 'etenant';
+const COOKIE_TTL_MS = 30 * 24 * 60 * 60 * 1000;   // 30 dias
 function sign(email) {
-  const mac = crypto.createHmac('sha256', SECRET).update(email).digest('base64url');
-  return email + '.' + mac;
+  // Payload = email|expMs, assinado junto → cookie roubado expira por conta própria
+  // (antes o MAC só cobria o email, então o cookie era válido pra sempre).
+  const payload = email + '|' + (Date.now() + COOKIE_TTL_MS);
+  const mac = crypto.createHmac('sha256', SECRET).update(payload).digest('base64url');
+  return payload + '.' + mac;
 }
 function verify(val) {
   if (!val) return null;
   const i = val.lastIndexOf('.');
   if (i < 0) return null;
-  const email = val.slice(0, i), mac = val.slice(i + 1);
-  const exp = crypto.createHmac('sha256', SECRET).update(email).digest('base64url');
+  const payload = val.slice(0, i), mac = val.slice(i + 1);
+  const exp = crypto.createHmac('sha256', SECRET).update(payload).digest('base64url');
   try {
-    if (mac.length === exp.length && crypto.timingSafeEqual(Buffer.from(mac), Buffer.from(exp))) return email;
-  } catch (_) {}
-  return null;
+    if (mac.length !== exp.length || !crypto.timingSafeEqual(Buffer.from(mac), Buffer.from(exp))) return null;
+  } catch (_) { return null; }
+  const j = payload.lastIndexOf('|');
+  if (j < 0) return null;
+  const email = payload.slice(0, j), expMs = parseInt(payload.slice(j + 1), 10);
+  if (!expMs || expMs < Date.now()) return null;
+  return email;
 }
 function tenantOf(req) {
   const c = cookieLib.parse(req.headers.cookie || '');
@@ -105,7 +113,7 @@ function sendJson(res, code, obj) { res.writeHead(code, { 'content-type': 'appli
 // Lê o email do payload do ID token — SÓ pra rotear. O backend verifica de verdade.
 function emailFromCredential(cred) {
   try {
-    const p = JSON.parse(Buffer.from(String(cred).split('.')[1] || '', 'base64').toString('utf8'));
+    const p = JSON.parse(Buffer.from(String(cred).split('.')[1] || '', 'base64url').toString('utf8'));
     return (p.email || '').toLowerCase().trim();
   } catch { return ''; }
 }

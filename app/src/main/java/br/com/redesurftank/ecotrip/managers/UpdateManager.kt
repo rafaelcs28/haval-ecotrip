@@ -148,7 +148,23 @@ class UpdateManager private constructor() {
 
                 downloadProgress = 100
                 onUpdateStateChanged?.invoke()
-                AppLogger.i(TAG, "APK downloaded: ${apkFile.length()} bytes — trying silent install")
+                AppLogger.i(TAG, "APK downloaded: ${apkFile.length()} bytes")
+
+                // Verifica a versão REAL do APK baixado antes de instalar. A
+                // browser_download_url do GitHub às vezes serve um APK velho em cache
+                // (CDN stale): instalar mesmo assim repete download→install→versão não
+                // muda→killProcess a cada 10min, um loop de reinstalação.
+                val pkgInfo = context.packageManager.getPackageArchiveInfo(apkFile.absolutePath, 0)
+                val apkVersion = pkgInfo?.versionName
+                if (apkVersion == null) {
+                    AppLogger.e(TAG, "APK baixado ilegível (getPackageArchiveInfo null) — abortando install")
+                    return@submit
+                }
+                if (apkVersion != release.version) {
+                    AppLogger.w(TAG, "APK baixado é v$apkVersion mas release esperava v${release.version} (CDN stale?) — abortando install p/ evitar loop")
+                    return@submit
+                }
+                AppLogger.i(TAG, "APK v$apkVersion confere com a release — trying silent install")
 
                 val silentOk = tryShizukuInstall(apkFile.absolutePath)
                 if (silentOk) {

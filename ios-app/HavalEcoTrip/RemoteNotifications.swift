@@ -26,7 +26,7 @@ enum RemoteNotifications {
         let hex = deviceToken.map { String(format: "%02x", $0) }.joined()
         Task {
             guard Settings.isConfigured,
-                  let url = URL(string: Settings.bridgeURL + "/api/apns/register") else { return }
+                  let url = URL(string: Settings.apiBase + "/api/apns/register") else { return }
             var req = URLRequest(url: url, timeoutInterval: 8)
             req.httpMethod = "POST"
             req.addValue("Bearer " + Settings.bridgeToken, forHTTPHeaderField: "Authorization")

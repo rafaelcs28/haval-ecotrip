@@ -96,6 +96,13 @@ function sha256hex(str) {
 const _plainToken   = process.env.BRIDGE_TOKEN      || '';
 let BRIDGE_TOKEN_HASH = process.env.BRIDGE_TOKEN_HASH
   || (_plainToken ? sha256hex(_plainToken) : '');
+// Sem hash configurado a API ficava 100% aberta (fail-open). Agora fail-closed:
+// só libera sem auth se for explicitamente pedido (dev local). Em prod, .env não
+// carregado → API trancada (503) em vez de exposta.
+const ALLOW_NO_AUTH = process.env.ALLOW_NO_AUTH === '1';
+if (!BRIDGE_TOKEN_HASH && !ALLOW_NO_AUTH) {
+  console.warn('[auth] BRIDGE_TOKEN_HASH ausente — API trancada (503). Defina o hash ou ALLOW_NO_AUTH=1 pra dev.');
+}
 
 // ── 2FA (TOTP) ────────────────────────────────────────────────────────────────
 // Estado em arquivo gitignored. Quando ativado: requer código TOTP no login.
@@ -1296,6 +1303,7 @@ const state = {
 
 function deepMergeState(target, source) {
   for (const [k, v] of Object.entries(source)) {
+    if (k === '__proto__' || k === 'constructor' || k === 'prototype') continue;  // anti prototype-pollution
     if (v !== null && v !== undefined) {
       if (typeof v === 'object' && !Array.isArray(v) && target[k] !== null && typeof target[k] === 'object') {
         deepMergeState(target[k], v);
@@ -1461,7 +1469,7 @@ try {
 } catch (e) { console.error('Aviso deleted_ids:', e.message); }
 
 function saveDeletedIds() {
-  try { fs.writeFileSync(DELETED_IDS_FILE, JSON.stringify(deletedIds, null, 2)); } catch (_) {}
+  try { atomicWriteFileSync(DELETED_IDS_FILE, JSON.stringify(deletedIds, null, 2)); } catch (_) {}
 }
 function markDeleted(kind, id) {
   const key = String(id);
@@ -1492,7 +1500,7 @@ try {
 } catch (e) { console.error('Aviso refuels.json:', e.message); }
 
 function saveRefuels() {
-  try { fs.writeFileSync(REFUELS_FILE, JSON.stringify(refuels, null, 2)); } catch (_) {}
+  try { atomicWriteFileSync(REFUELS_FILE, JSON.stringify(refuels, null, 2)); } catch (_) {}
 }
 
 // Preços de referência (seed) usados quando não há histórico próprio.
@@ -2524,12 +2532,22 @@ app.use(express.static(path.join(__dirname, 'public')));
 // ── Autenticação ──────────────────────────────────────────────────────────────
 // O cliente envia SHA-256(senha) no header Authorization: Bearer <hash>
 // O servidor compara com BRIDGE_TOKEN_HASH armazenado no .env
+// Comparação em tempo constante (evita timing oracle no token). Strings de
+// tamanhos diferentes → false sem vazar onde diferiu.
+function safeStrEqual(a, b) {
+  const ba = Buffer.from(String(a)), bb = Buffer.from(String(b));
+  if (ba.length !== bb.length) return false;
+  try { return require('crypto').timingSafeEqual(ba, bb); } catch (_) { return false; }
+}
 function requireAuth(req, res, next) {
-  if (!BRIDGE_TOKEN_HASH) return next();   // sem hash configurado → sem auth (dev local)
+  if (!BRIDGE_TOKEN_HASH) {
+    if (ALLOW_NO_AUTH) return next();      // dev local explícito
+    return res.status(503).json({ error: 'auth_not_configured' });
+  }
   const auth  = req.headers['authorization'] || '';
   const token = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
   // Aceita SHA-256(senha) [HTTPS] ou texto puro [HTTP — fallback quando crypto.subtle indisponível]
-  const valid = token === BRIDGE_TOKEN_HASH || sha256hex(token) === BRIDGE_TOKEN_HASH;
+  const valid = safeStrEqual(token, BRIDGE_TOKEN_HASH) || safeStrEqual(sha256hex(token), BRIDGE_TOKEN_HASH);
   if (!valid) return res.status(401).json({ error: 'unauthorized' });
   next();
 }
@@ -2561,10 +2579,13 @@ app.post('/api/auth/login', (req, res) => {
   if (!rl.ok) return res.status(429).json({ error: 'rate_limited', retry_after_sec: rl.retryAfterSec });
   if (rl.state.count >= 5) return res.status(429).json({ error: 'too_many_attempts' });
   const { password_hash, totp_code } = req.body || {};
-  // Sem hash configurado no servidor (dev mode) → aceita qualquer login
-  if (!BRIDGE_TOKEN_HASH) return res.json({ ok: true, token: '' });
-  const passwordValid = password_hash === BRIDGE_TOKEN_HASH ||
-                        (password_hash && sha256hex(password_hash) === BRIDGE_TOKEN_HASH);
+  // Sem hash configurado: só aceita login em dev explícito; senão trancado.
+  if (!BRIDGE_TOKEN_HASH) {
+    if (ALLOW_NO_AUTH) return res.json({ ok: true, token: '' });
+    return res.status(503).json({ error: 'auth_not_configured' });
+  }
+  const passwordValid = safeStrEqual(password_hash, BRIDGE_TOKEN_HASH) ||
+                        (password_hash && safeStrEqual(sha256hex(password_hash), BRIDGE_TOKEN_HASH));
   if (!passwordValid) {
     _registerFailure(rl.state);
     return res.status(401).json({ error: 'invalid_password' });
@@ -2678,13 +2699,13 @@ async function _verifyAppleIdToken(idToken) {
   const crypto = require('crypto');
   const [h, p, s] = String(idToken).split('.');
   if (!h || !p || !s) throw new Error('token malformado');
-  const header  = JSON.parse(Buffer.from(h, 'base64').toString('utf8'));
+  const header  = JSON.parse(Buffer.from(h, 'base64url').toString('utf8'));
   const jwk = (await _appleJwks()).find(k => k.kid === header.kid);
   if (!jwk) throw new Error('kid desconhecido');
   const pub = crypto.createPublicKey({ key: jwk, format: 'jwk' });
   const ok  = crypto.verify('RSA-SHA256', Buffer.from(`${h}.${p}`), pub, Buffer.from(s, 'base64url'));
   if (!ok) throw new Error('assinatura inválida');
-  const payload = JSON.parse(Buffer.from(p, 'base64').toString('utf8'));
+  const payload = JSON.parse(Buffer.from(p, 'base64url').toString('utf8'));
   if (payload.iss !== 'https://appleid.apple.com') throw new Error('iss inválido');
   if (!APPLE_CLIENT_IDS.includes(payload.aud)) throw new Error('aud inválido (' + payload.aud + ')');
   if ((payload.exp || 0) * 1000 < Date.now()) throw new Error('expirado');
@@ -3310,7 +3331,7 @@ try {
 } catch (_) { automationRules = []; }
 
 function saveRules() {
-  try { fs.writeFileSync(RULES_FILE, JSON.stringify(automationRules, null, 2)); }
+  try { atomicWriteFileSync(RULES_FILE, JSON.stringify(automationRules, null, 2)); }
   catch (e) { console.error('saveRules:', e.message); }
 }
 // Publica a lista completa no carro (RETIDO → chega mesmo se o carro estava off).
@@ -3371,7 +3392,7 @@ try {
   if (!Array.isArray(automationPlaces)) automationPlaces = [];
 } catch (_) { automationPlaces = []; }
 function saveAutoPlaces() {
-  try { fs.writeFileSync(AUTO_PLACES_FILE, JSON.stringify(automationPlaces, null, 2)); }
+  try { atomicWriteFileSync(AUTO_PLACES_FILE, JSON.stringify(automationPlaces, null, 2)); }
   catch (e) { console.error('saveAutoPlaces:', e.message); }
 }
 
@@ -5048,7 +5069,7 @@ function savePendingRenames() {
   // Mantém só últimos 30 dias para não acumular para sempre
   const cutoff = Date.now() - 30 * 86_400_000;
   pendingRenames = pendingRenames.filter(r => r.createdAt > cutoff);
-  fs.writeFileSync(RENAMES_FILE, JSON.stringify(pendingRenames, null, 2));
+  atomicWriteFileSync(RENAMES_FILE, JSON.stringify(pendingRenames, null, 2));
 }
 
 // POST /api/rename  { tripId, type, name, ts? }
@@ -5257,6 +5278,8 @@ app.post('/api/diag/set', (req, res) => {
   if (!adminCheckToken(req, res)) return;
   const { key, value } = req.body || {};
   if (!key || typeof key !== 'string') return res.status(400).json({ error: 'key obrigatório' });
+  // Key vai crua no tópico MQTT — sem isto um '#'/'+'/'/' permitiria injetar tópico.
+  if (!/^[A-Za-z0-9_.]+$/.test(key)) return res.status(400).json({ error: 'key inválida' });
   if (value === undefined) return res.status(400).json({ error: 'value obrigatório' });
   if (!mqttClient?.connected) return res.status(503).json({ error: 'MQTT offline' });
   const payload = typeof value === 'object' ? JSON.stringify(value) : String(value);
@@ -5441,7 +5464,8 @@ app.get('/api/push/prefs', (_req, res) => res.json(notifPrefs));
 // POST /api/push/prefs  { key, value }  — atualiza uma preferência (boolean ou numérica)
 app.post('/api/push/prefs', (req, res) => {
   const { key, value } = req.body || {};
-  if (!key || !(key in NOTIF_DEFAULTS)) return res.status(400).json({ error: 'chave inválida' });
+  // hasOwnProperty (não `in`): senão '__proto__'/'constructor' passam pela herança.
+  if (!key || !Object.prototype.hasOwnProperty.call(NOTIF_DEFAULTS, key)) return res.status(400).json({ error: 'chave inválida' });
   const def = NOTIF_DEFAULTS[key];
   if (Array.isArray(def)) {
     // Lista de IDs (ex: geofence_arrival_places)
@@ -5485,10 +5509,12 @@ app.get('/api/notif/prefs/:device_id', (req, res) => {
 app.post('/api/notif/prefs/:device_id', (req, res) => {
   const id = req.params.device_id;
   const { key, value } = req.body || {};
+  const _danger = k => k === '__proto__' || k === 'constructor' || k === 'prototype';
+  if (_danger(id) || _danger(key)) return res.status(400).json({ error: 'chave inválida' });
   // Aceita chaves do Haval (NOTIF_DEFAULTS) E as do BYD/Grasi (prefixo `byd_`,
   // inclui as sub-chaves de geofence por local byd_geofence_*_<locId>).
   const isByd = typeof key === 'string' && key.startsWith('byd_');
-  if (!key || (!(key in NOTIF_DEFAULTS) && !isByd)) return res.status(400).json({ error: 'chave inválida' });
+  if (!key || (!Object.prototype.hasOwnProperty.call(NOTIF_DEFAULTS, key) && !isByd)) return res.status(400).json({ error: 'chave inválida' });
   if (!notifPrefsByDevice[id]) notifPrefsByDevice[id] = {};
   const def = NOTIF_DEFAULTS[key];
   if (Array.isArray(def)) {

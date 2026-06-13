@@ -59,8 +59,22 @@ final class SyncedList: ObservableObject {
         return dir.appendingPathComponent("sync_\(name).json")
     }
     private func idOf(_ d: [String: Any]) -> String {
-        for k in idKeys { if let v = d[k] { return "\(v)" } }
+        for k in idKeys { if let v = d[k] { return SyncedList.canonId(v) } }
         return UUID().uuidString
+    }
+    // Id canônico: "\(v)" interpolava Int como "123" mas Double como "123.0" — então
+    // um localId derivado de Double nunca casava com o item (edit virava no-op). Normaliza
+    // todo número inteiro pro mesmo string, independente de ser armazenado Int/Double/NSNumber.
+    nonisolated static func canonId(_ v: Any) -> String {
+        if let n = v as? NSNumber {
+            if CFGetTypeID(n) == CFBooleanGetTypeID() { return n.boolValue ? "true" : "false" }
+            let d = n.doubleValue
+            if d.rounded() == d && abs(d) < 9e15 { return String(Int64(d)) }
+            return "\(d)"
+        }
+        if let i = v as? Int { return String(i) }
+        if let d = v as? Double { return (d.rounded() == d && abs(d) < 9e15) ? String(Int64(d)) : "\(d)" }
+        return "\(v)"
     }
 
     // MARK: disco
@@ -68,7 +82,9 @@ final class SyncedList: ObservableObject {
         guard let data = try? Data(contentsOf: fileURL),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
         items = (obj["items"] as? [[String: Any]]) ?? []
-        lastSyncMs = (obj["lastSyncMs"] as? Double) ?? 0
+        // JSONSerialization pode devolver Int — `as? Double` falhava e zerava o cursor,
+        // forçando re-fetch completo a cada cold start.
+        lastSyncMs = (obj["lastSyncMs"] as? NSNumber)?.doubleValue ?? 0
         if let pj = obj["pending"] as? Data { pending = (try? JSONDecoder().decode([PendingOp].self, from: pj)) ?? [] }
         else if let arr = obj["pending"] as? [[String: Any]] {
             pending = arr.compactMap { p in
@@ -132,7 +148,7 @@ final class SyncedList: ObservableObject {
                                          tombstones: String?, syncMsHeader: String?)
     -> (items: [[String: Any]], lastSyncMs: Double) {
         func idOf(_ d: [String: Any]) -> String {
-            for k in idKeys { if let v = d[k] { return "\(v)" } }
+            for k in idKeys { if let v = d[k] { return SyncedList.canonId(v) } }
             return UUID().uuidString
         }
         let any = try? JSONSerialization.jsonObject(with: data)

@@ -74,7 +74,7 @@ final class ChargesLoader: ObservableObject {
 
     /// Edita medidor/custo/local — otimista local + fila offline (reenvia online).
     func edit(_ ts: Double, charger: Double?, total: Double?, location: String?, batteryKwh: Double) async {
-        let id = Int(ts); let lid = "\(Int(ts))"
+        let id = Int(ts); let lid = SyncedList.canonId(ts)
         if let charger, charger >= 0 {
             await sync.mutate(localId: lid, apply: { var d = $0; d["charger_kwh"] = charger; return d },
                               method: "PATCH", opPath: "/api/charges/\(id)/charger_kwh", body: ["charger_kwh": charger])

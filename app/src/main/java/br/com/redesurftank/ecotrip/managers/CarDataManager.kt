@@ -150,9 +150,13 @@ class CarDataManager private constructor() {
                 getSystemService("com.beantechs.intelligentvehiclecontrol")
             )
             if (!binder.isBinderAlive) { Log.e(TAG, "Control service binder not alive"); return }
-            controlService = IIntelligentVehicleControlService.Stub.asInterface(binder)
-            controlService!!.registerDataChangedListener(pkg, remoteListener)
-            controlService!!.addListenerKey(pkg, KEYS)
+            // Registra num val local: se o binder morrer entre a atribuição e as
+            // chamadas, o shizukuDeadListener zera controlService e o `!!` daria NPE.
+            // Só publica em controlService depois de registrar com sucesso.
+            val svc = IIntelligentVehicleControlService.Stub.asInterface(binder)
+            svc.registerDataChangedListener(pkg, remoteListener)
+            svc.addListenerKey(pkg, KEYS)
+            controlService = svc
             Log.i(TAG, "Connected — listening to ${KEYS.size} keys")
             // Notifica listeners de conexão na main thread
             val copy = synchronized(lock) { connectedListeners.toList() }

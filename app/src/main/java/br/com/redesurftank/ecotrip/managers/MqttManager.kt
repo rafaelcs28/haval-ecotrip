@@ -129,6 +129,17 @@ class MqttManager private constructor() {
     val hasRepeatedFailures: Boolean get() = consecutiveFailures >= 3
     private var reconnectAttempts = 0   // p/ backoff escalonado da reconexão
 
+    // Anti-replay: isCleanSession=false faz o broker enfileirar comandos cmd/# (QoS1)
+    // enquanto o carro está offline e re-entregar TODOS num burst no reconnect. Pra
+    // comandos de atuação MOMENTÂNEA (abrir vidro/porta/teto, pisca) isso = ação física
+    // disparando sozinha ao reconectar no posto. Ignoramos esses se chegarem na janela
+    // logo após (re)conectar — comando ao vivo nunca coincide com o burst de fila.
+    @Volatile private var lastConnectMs = 0L
+    private val REPLAY_GUARD_MS = 6_000L
+    private val MOMENTARY_CMDS = setOf(
+        "window", "window_all", "skylight", "shade", "door", "hazard"
+    )
+
     // Config
     var enabled:                    Boolean = false
     var host:                       String  = ""
@@ -1293,7 +1304,7 @@ class MqttManager private constructor() {
         } catch (e: Exception) { Log.w(TAG, "publishRegenLevelState falhou: ${e.message}") }
     }
 
-    // ── One-pedal (car.ev.setting.pedal_control_enable) ───────────────────────
+    // ── One-pedal (car.ev_setting.pedal_control_enable) ───────────────────────
     fun syncOnePedalFromCar(carVal: Int) {
         if (carVal !in setOf(0, 1)) return
         if (carVal == lastPublishedOnePedal) return
@@ -1448,6 +1459,7 @@ class MqttManager private constructor() {
             }
 
             c.connect(opts)
+            lastConnectMs = System.currentTimeMillis()   // inicia a janela anti-replay (burst de fila chega após o subscribe)
             c.publish("$prefix/status", MqttMessage("online".toByteArray()).apply { qos = 1; isRetained = true })
             c.subscribe("$prefix/cmd/#", 1)
             client = c
@@ -1567,7 +1579,7 @@ class MqttManager private constructor() {
                     if (v != null) syncRegenLevelFromCar(v)
                 } catch (e: Exception) { AppLogger.w(TAG, "Leitura inicial regen_level falhou: ${e.message}") }
                 try {
-                    val v = CarDataManager.getInstance().fetchCurrent("car.ev.setting.pedal_control_enable")?.trim()?.toIntOrNull()
+                    val v = CarDataManager.getInstance().fetchCurrent("car.ev_setting.pedal_control_enable")?.trim()?.toIntOrNull()
                     if (v != null) syncOnePedalFromCar(v)
                 } catch (e: Exception) { AppLogger.w(TAG, "Leitura inicial one_pedal falhou: ${e.message}") }
                 try {
@@ -1833,7 +1845,7 @@ class MqttManager private constructor() {
             val cdm = CarDataManager.getInstance()
             try { cdm.fetchCurrent("car.drive_setting.drive_mode")?.trim()?.toIntOrNull()?.let { syncTerrainModeFromCar(it) } } catch (_: Exception) {}
             try { cdm.fetchCurrent("car.ev_setting.energy_recovery_level")?.trim()?.toIntOrNull()?.let { syncRegenLevelFromCar(it) } } catch (_: Exception) {}
-            try { cdm.fetchCurrent("car.ev.setting.pedal_control_enable")?.trim()?.toIntOrNull()?.let { syncOnePedalFromCar(it) } } catch (_: Exception) {}
+            try { cdm.fetchCurrent("car.ev_setting.pedal_control_enable")?.trim()?.toIntOrNull()?.let { syncOnePedalFromCar(it) } } catch (_: Exception) {}
             try { cdm.fetchCurrent("car.drive_setting.esp_enable")?.trim()?.toIntOrNull()?.let { syncEspFromCar(it) } } catch (_: Exception) {}
             try { cdm.fetchCurrent("car.drive_setting.steering_wheel_assist_mode")?.trim()?.toIntOrNull()?.let { syncSteerModeFromCar(it) } } catch (_: Exception) {}
             // car.hvac.power_mode (mestre do AC) não vem por push confiável — poll ativo
@@ -2194,6 +2206,14 @@ class MqttManager private constructor() {
         if (!topic.startsWith(cmdPrefix)) return
         val cmd = topic.removePrefix(cmdPrefix).trimEnd('/')
         AppLogger.i(TAG, "Comando recebido: $cmd = '$payload'")
+
+        // Suprime atuação momentânea re-entregue pelo broker no burst pós-reconnect
+        // (fila QoS1 da sessão persistente). Evita vidro/porta/teto/pisca abrindo sozinho.
+        if (cmd in MOMENTARY_CMDS && System.currentTimeMillis() - lastConnectMs < REPLAY_GUARD_MS) {
+            AppLogger.w(TAG, "Comando '$cmd' ignorado: chegou na janela anti-replay pós-reconnect")
+            publishResult(cmd, "ignored: replay pós-reconnect")
+            return
+        }
 
         // hvac/* serializado (thread única) pra não floodar o barramento; resto no pool.
         val exec = if (cmd.startsWith("hvac/")) hvacExecutor else cmdExecutor
@@ -2579,14 +2599,14 @@ class MqttManager private constructor() {
                     }
                     // OTIMISTA ANTES do requestSetting (que pode bloquear) → confirma já.
                     publishOnePedalState(target)
-                    val ok = car.requestSetting(key = "car.ev.setting.pedal_control_enable", value = target.toString())
+                    val ok = car.requestSetting(key = "car.ev_setting.pedal_control_enable", value = target.toString())
                     if (!ok) {
-                        val actual = try { car.fetchCurrent("car.ev.setting.pedal_control_enable")?.trim()?.toIntOrNull() } catch (_: Exception) { null }
+                        val actual = try { car.fetchCurrent("car.ev_setting.pedal_control_enable")?.trim()?.toIntOrNull() } catch (_: Exception) { null }
                         if (actual != null && actual in setOf(0, 1)) publishOnePedalState(actual)  // reverte
                         publishResult("one_pedal", "error: carro recusou ou está dormindo"); return@submit
                     }
                     Thread.sleep(3_000)
-                    val confirmed = try { car.fetchCurrent("car.ev.setting.pedal_control_enable")?.trim()?.toIntOrNull() } catch (_: Exception) { null }
+                    val confirmed = try { car.fetchCurrent("car.ev_setting.pedal_control_enable")?.trim()?.toIntOrNull() } catch (_: Exception) { null }
                     if (confirmed != null && confirmed in setOf(0, 1)) {
                         publishOnePedalState(confirmed)
                         publishResult("one_pedal", if (confirmed == target) "ok:$confirmed" else "ok:$confirmed (solicitado $target)")
@@ -2601,14 +2621,13 @@ class MqttManager private constructor() {
                         publishResult("esp", "error: valor inválido ('$payload')")
                         return@submit
                     }
-                    // OTIMISTA ANTES do requestSetting: o requestSetting pode bloquear
-                    // segundos; ecoar já faz o cluster confirmar na hora. Se o carro
-                    // recusar, revertemos logo abaixo.
-                    publishEspState(target)
+                    // ESP é controle de estabilidade: NÃO ecoamos estado otimista. O cluster
+                    // só passa a mostrar o novo estado depois do readback confirmar — senão
+                    // mostraria "ESP ON" sem o carro ter aceitado (confirmação falsa perigosa).
                     val ok = car.requestSetting(key = "car.drive_setting.esp_enable", value = target.toString())
                     if (!ok) {
                         val actual = try { car.fetchCurrent("car.drive_setting.esp_enable")?.trim()?.toIntOrNull() } catch (_: Exception) { null }
-                        if (actual != null && actual in setOf(0, 1)) publishEspState(actual)  // reverte o otimista
+                        if (actual != null && actual in setOf(0, 1)) publishEspState(actual)  // reflete o estado REAL
                         publishResult("esp", "error: carro recusou ou está dormindo"); return@submit
                     }
                     Thread.sleep(3_000)
@@ -2617,8 +2636,8 @@ class MqttManager private constructor() {
                         publishEspState(confirmed)
                         publishResult("esp", if (confirmed == target) "ok:$confirmed" else "ok:$confirmed (solicitado $target)")
                     } else {
-                        publishEspState(target)
-                        publishResult("esp", "ok:$target (fallback)")
+                        // Não confirmou: NÃO fabrica estado positivo pra controle de segurança.
+                        publishResult("esp", "error: enviado mas não confirmado")
                     }
                 }
                 "steer_mode" -> {

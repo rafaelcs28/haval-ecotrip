@@ -41,6 +41,13 @@ enum Settings {
         set { defaults.set(newValue, forKey: urlKey) }
     }
 
+    /// bridgeURL sem barra final — concatenar `+ "/api/..."` direto gerava `//api`
+    /// quando o usuário salvava a URL com barra no fim.
+    static var apiBase: String {
+        let u = bridgeURL
+        return u.hasSuffix("/") ? String(u.dropLast()) : u
+    }
+
     static var bridgeToken: String {
         get { defaults.string(forKey: tokenKey) ?? "" }
         set { defaults.set(newValue, forKey: tokenKey) }

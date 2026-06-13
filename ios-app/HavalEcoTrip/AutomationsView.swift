@@ -31,7 +31,7 @@ struct AutoRule: Identifiable {
             let edge = (trigger["edge"] as? String) == "exit" ? "Ao sair" : "Ao chegar"
             t = "\(edge) (\(Int((trigger["radius_m"] as? Double) ?? 50))m)"
         case "time":
-            let m = (trigger["hhmm"] as? Int) ?? 0
+            let m = (trigger["hhmm"] as? NSNumber)?.intValue ?? 0
             t = String(format: "Às %02d:%02d", m / 60, m % 60)
         case "automation": t = "Após outra automação"
         case "state": t = "Quando estado muda"

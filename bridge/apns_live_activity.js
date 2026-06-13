@@ -140,8 +140,11 @@ function clearUpdateTokensByType(type) {
 // Token de notificação de alerta (remote notification "normal").
 function registerAlertToken(deviceId, tokenHex) {
   if (!enabled || !tokenHex) return;
-  alertTokens = alertTokens.filter(t => t.token !== tokenHex && t.deviceId !== (deviceId || ''));
-  alertTokens.push({ deviceId: deviceId || '', token: tokenHex, ts: Date.now() });
+  const dev = deviceId || '';
+  // Dedup por token sempre; por deviceId só quando há um device real — senão um
+  // registro com device vazio apagava TODOS os tokens de device vazio.
+  alertTokens = alertTokens.filter(t => t.token !== tokenHex && !(dev && t.deviceId === dev));
+  alertTokens.push({ deviceId: dev, token: tokenHex, ts: Date.now() });
   _save();
   console.log(`[apns] alert token registrado (device=${(deviceId||'').slice(0,8)}…, total=${alertTokens.length})`);
 }
@@ -154,6 +157,9 @@ async function _send(targets, body, pushType = 'liveactivity') {
   if (!enabled || !targets.length) return { sent: 0, dead: [] };
   const jwt = _getJwt();
   const client = http2.connect(`https://${_apnsHost()}`);
+  // Sem este handler, um erro de socket/TLS na sessão http2 vira 'error' não
+  // tratado e DERRUBA o processo inteiro. Loga e deixa cada req resolver (timeout).
+  client.on('error', err => console.warn('[apns] erro sessão http2:', err.message));
   let sent = 0; const dead = [];
   await Promise.all(targets.map(t => new Promise((resolve) => {
     // Bundle por TOKEN: o app "Grasi Recarga" tem bundle próprio (songpro) e

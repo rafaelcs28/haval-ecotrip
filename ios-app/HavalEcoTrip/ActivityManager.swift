@@ -114,7 +114,7 @@ final class ActivityManager: ObservableObject {
 
     private func pollOnce() async {
         guard let activity = currentActivity else { return }
-        guard let url = URL(string: Settings.bridgeURL + "/api/state") else {
+        guard let url = URL(string: Settings.apiBase + "/api/state") else {
             status = "URL inválida"; return
         }
         var req = URLRequest(url: url)

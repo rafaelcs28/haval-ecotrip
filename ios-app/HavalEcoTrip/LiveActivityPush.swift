@@ -111,7 +111,7 @@ final class LiveActivityPush {
     // Encerra a LA de segurança localmente se o bridge disser que não há mais nada
     // aberto/destrancado (issues vazio). Cobre o caso da LA presa por push-to-start.
     private func endSecurityIfSafe<T: ActivityAttributes>(_ activity: Activity<T>) async {
-        guard Settings.isConfigured, let url = URL(string: Settings.bridgeURL + "/api/security/status") else { return }
+        guard Settings.isConfigured, let url = URL(string: Settings.apiBase + "/api/security/status") else { return }
         var req = URLRequest(url: url, timeoutInterval: 8)
         req.addValue("Bearer " + Settings.bridgeToken, forHTTPHeaderField: "Authorization")
         guard let (data, resp) = try? await URLSession.shared.data(for: req),
@@ -128,7 +128,7 @@ final class LiveActivityPush {
     }
 
     private func register(_ pathSuffix: String, body: [String: Any]) async {
-        guard Settings.isConfigured, let url = URL(string: Settings.bridgeURL + pathSuffix) else { return }
+        guard Settings.isConfigured, let url = URL(string: Settings.apiBase + pathSuffix) else { return }
         var req = URLRequest(url: url, timeoutInterval: 8)
         req.httpMethod = "POST"
         req.addValue("Bearer " + Settings.bridgeToken, forHTTPHeaderField: "Authorization")
