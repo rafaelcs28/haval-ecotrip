@@ -481,8 +481,6 @@ class TripManager private constructor() {
     /** Janela máxima (ms) entre fim de uma viagem e o engate da próxima pra permitir
      *  continuação. 60min cobre almoços e recargas curtas. */
     private val RESUME_WINDOW_MS = 60L * 60_000L
-    /** Gap máximo pra MERGE automático no religar (flap de driving_ready / parada rápida). */
-    private val AUTO_MERGE_GAP_MS = 3L * 60_000L
 
     /**
      * Retorna a última viagem se ela for elegível pra continuação:
@@ -1335,16 +1333,15 @@ class TripManager private constructor() {
             prefs.edit().putInt(SharedPreferencesKeys.LAST_DRIVING_READY_STATE, state).apply()
 
             when {
-                !wasReady && isReady -> {   // 0→1: carro ligado — inicia trip automático
+                !wasReady && isReady -> {   // 0→1: carro ligado — SEMPRE inicia trip nova
+                    // Sem auto-merge silencioso: religar o carro nunca mescla sozinho.
+                    // Se a viagem anterior terminou há <60min, o banner em
+                    // ConsumptionScreen pergunta se o usuário quer continuar
+                    // (getResumableLastTrip/resumeLastTrip). Sem confirmação = viagem
+                    // nova. O merge automático colava o trajeto seguinte e duplicava
+                    // amostras quando o carro era religado após parar num local.
                     saveGearTransitionCheckpoint()
-                    // driving_ready oscila (flap) e religadas rápidas fragmentavam uma
-                    // viagem em dezenas de entradas. Gap curto → continua a anterior
-                    // (mesmo startMs; bridge faz UPSERT) em vez de abrir trip nova.
-                    val lastEnd = autoTripHistory.lastOrNull()?.endMs ?: 0L
-                    val gapMs = System.currentTimeMillis() - lastEnd
-                    val merged = lastEnd > 0L && gapMs in 0..AUTO_MERGE_GAP_MS && resumeLastTrip()
-                    if (merged) AppLogger.i(TAG, "AutoTrip: religada em ${gapMs / 1000}s — merge com a viagem anterior")
-                    else onAutoTripStart()
+                    onAutoTripStart()
                 }
                 wasReady && !isReady -> {   // 1→0: carro desligado — finaliza trip automático
                     onAutoTripEnd()
