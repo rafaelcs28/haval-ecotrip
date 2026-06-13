@@ -13,6 +13,13 @@ import kotlin.math.max
 private const val TAG = "TripManager"
 private const val THREE_HOURS_MS   = 3 * 3600_000L
 private const val PENDING_POLL_MS  = 60_000L        // 1 min — intervalo de verificação de pendências
+// Piso pra descartar "viagem" lixo: motor ligado parado (AC/espera) gera trips
+// >60s mas com distância ~0 e sem combustível — eram salvas e inflavam o histórico
+// (13k+ entradas). Só descarta se NADA aconteceu (dist E combustível abaixo do piso).
+private const val MIN_TRIP_DIST_KM = 0.2f
+private const val MIN_TRIP_FUEL_L  = 0.05f
+// Cap rígido de contagem além da retenção 90d — bound de armazenamento/payload.
+private const val MAX_AUTO_TRIPS   = 2000
 
 data class BlockSample(val kmStart: Float, val netKwhPer100km: Float, val fuelL: Float)
 
@@ -1023,9 +1030,14 @@ class TripManager private constructor() {
         synchronized(lock) {
             val before = autoTripHistory.size
             autoTripHistory.removeAll { it.endMs < cutoff90d }
+            if (autoTripHistory.size > MAX_AUTO_TRIPS) {
+                autoTripHistory.sortBy { it.endMs }
+                val excess = autoTripHistory.size - MAX_AUTO_TRIPS
+                repeat(excess) { autoTripHistory.removeAt(0) }
+            }
             if (autoTripHistory.size < before) {
                 prefs.edit().putString(SharedPreferencesKeys.AUTO_TRIP_HISTORY_JSON, gson.toJson(autoTripHistory)).apply()
-                AppLogger.i(TAG, "Retenção: ${before - autoTripHistory.size} viagem(ns) >90 dias removida(s)")
+                AppLogger.i(TAG, "Retenção: ${before - autoTripHistory.size} viagem(ns) removida(s) (>90d ou >$MAX_AUTO_TRIPS)")
             }
         }
         try {
@@ -1444,12 +1456,36 @@ class TripManager private constructor() {
             elevGainM    = ((telemetryRecorder?.elevGainM ?: 0.0) - autoTripStartElevGain).coerceAtLeast(0.0).toFloat(),
             elevLossM    = ((telemetryRecorder?.elevLossM ?: 0.0) - autoTripStartElevLoss).coerceAtLeast(0.0).toFloat(),
         )
+        // Descarta trip lixo: ≥60s mas sem deslocamento nem combustível (motor ligado
+        // parado). Não persiste no histórico — só limpa a baseline e sai.
+        if (entry.distKm < MIN_TRIP_DIST_KM && entry.fuelL < MIN_TRIP_FUEL_L) {
+            AppLogger.i(TAG, "AutoTrip descartado (dist=${"%.2f".format(entry.distKm)}km fuel=${"%.3f".format(entry.fuelL)}L — sem deslocamento)")
+            autoTripStartMs = 0L
+            autoTripMaxSpeed = 0f
+            autoTripStartPausedMs = 0L
+            autoTripEngineOffMs   = 0L
+            autoTripResumedStartLat = 0.0
+            autoTripResumedStartLng = 0.0
+            prefs.edit()
+                .putLong (SharedPreferencesKeys.AUTO_TRIP_START_MS, 0L)
+                .putFloat(SharedPreferencesKeys.AUTO_TRIP_MAX_SPEED, 0f)
+                .putLong (SharedPreferencesKeys.AUTO_TRIP_START_PAUSED_MS, 0L)
+                .putLong (SharedPreferencesKeys.AUTO_TRIP_ENGINE_OFF_MS, 0L)
+                .apply()
+            return
+        }
         autoTripHistory.add(entry)
         calibrateCapacity(entry.netKwh, entry.startSocPct, entry.endSocPct)   // auto-calibra capacidade EV
         recomputeConsumptionModel()   // reaprende a curva consumo×velocidade
-        // Retenção: descarta viagens com mais de 90 dias
+        // Retenção: descarta viagens com mais de 90 dias + cap rígido de contagem
         val cutoff90d = System.currentTimeMillis() - 90L * 24 * 3_600_000L
         autoTripHistory.removeAll { it.endMs < cutoff90d }
+        if (autoTripHistory.size > MAX_AUTO_TRIPS) {
+            autoTripHistory.sortBy { it.endMs }
+            val excess = autoTripHistory.size - MAX_AUTO_TRIPS
+            repeat(excess) { autoTripHistory.removeAt(0) }
+            AppLogger.i(TAG, "Cap: $excess viagem(ns) antiga(s) removida(s) (>$MAX_AUTO_TRIPS)")
+        }
         autoTripStartMs = 0L
         autoTripMaxSpeed = 0f
         autoTripStartPausedMs = 0L
