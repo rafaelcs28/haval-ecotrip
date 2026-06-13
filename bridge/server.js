@@ -18,6 +18,24 @@ const webpush  = require('web-push');
 const apnsLive = require('./apns_live_activity');
 apnsLive.init();
 
+// Sem isto, uma rejection/exception fora de rota (timer, callback MQTT, fetch em
+// background) derrubava o processo inteiro. Loga e segue — pm2 só reinicia em crash real.
+process.on('unhandledRejection', (reason) => {
+  console.error('[unhandledRejection]', reason && reason.stack || reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[uncaughtException]', err && err.stack || err);
+});
+
+// Write atômico: grava em tmp + rename (rename é atômico no mesmo FS). Sem isto,
+// um writeFileSync interrompido (kill/queda de energia no meio) deixava o arquivo
+// truncado — em .env/state isso = bridge não sobe. rename garante "tudo ou nada".
+function atomicWriteFileSync(file, data, enc) {
+  const tmp = file + '.tmp-' + process.pid;
+  require('fs').writeFileSync(tmp, data, enc);
+  require('fs').renameSync(tmp, file);
+}
+
 // ── Configuração ──────────────────────────────────────────────────────────────
 
 const MQTT_HOST   = process.env.MQTT_HOST   || 'mqtt://localhost';
@@ -1323,7 +1341,7 @@ function scheduleStateSave() {
   const delay = sinceLast > 13000 ? 0 : 2000;
   stateSaveTimer = setTimeout(() => {
     try {
-      fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
+      atomicWriteFileSync(STATE_FILE, JSON.stringify(state, null, 2));
       stateLastSavedAt = Date.now();
     } catch (_) {}
   }, delay);
@@ -1348,7 +1366,7 @@ let chargesSaveTimer = null;
 function scheduleChargesFlush() {
   if (chargesSaveTimer) clearTimeout(chargesSaveTimer);
   chargesSaveTimer = setTimeout(() => {
-    fs.writeFileSync(CHARGES_FILE, JSON.stringify({ charges: chargesArr }, null, 2));
+    atomicWriteFileSync(CHARGES_FILE, JSON.stringify({ charges: chargesArr }, null, 2));
   }, 500);
 }
 
@@ -2494,7 +2512,7 @@ server.on('upgrade', (req, socket, head) => {
 });
 
 app.use(require('compression')());  // gzip — backup de 11MB cai pra ~1.5MB
-app.use(express.json({ limit: '200mb' }));
+app.use(express.json({ limit: '15mb' }));  // backup gzipado ~1.5MB; 200mb travava o event loop no parse
 app.use((req, res, next) => {
   // Sem isso, o URLSession (iOS) pode cachear por heurística respostas de sync
   // (sem Cache-Control) e servir corpo antigo. Boa prática pra APIs dinâmicas.
@@ -4070,7 +4088,7 @@ app.post('/api/vehicle', (req, res) => {
   }
   out.updated_at = Date.now();
   try {
-    fs.writeFileSync(VEHICLE_FILE, JSON.stringify(out, null, 2));
+    atomicWriteFileSync(VEHICLE_FILE, JSON.stringify(out, null, 2));
     res.json({ ok: true, ...out, needs_restart: needsRestart });
   } catch (e) {
     res.status(500).json({ error: 'Falha ao gravar vehicle.json: ' + e.message });
@@ -4087,7 +4105,7 @@ function _updateEnvKeys(updates) {
   const keys = Object.keys(updates);
   const kept = lines.filter(l => !keys.some(k => l.startsWith(k + '=')));
   for (const k of keys) kept.push(`${k}=${updates[k]}`);
-  fs.writeFileSync(envPath, kept.join('\n').replace(/\n+$/, '') + '\n');
+  atomicWriteFileSync(envPath, kept.join('\n').replace(/\n+$/, '') + '\n');
 }
 
 app.get('/api/my-setup', (req, res) => {
@@ -4124,7 +4142,7 @@ app.post('/api/my-setup', (req, res) => {
   if (b.chassi !== undefined) {
     const raw = String(b.chassi).toLowerCase().trim();
     if (raw && !/^lgw[a-z0-9]{14}$/.test(raw)) return res.status(400).json({ error: 'Chassi inválido (esperado: lgw + 14 alfanuméricos)' });
-    try { const cur = _loadVehicleFile(); fs.writeFileSync(VEHICLE_FILE, JSON.stringify({ ...cur, chassi: raw, updated_at: Date.now() }, null, 2)); }
+    try { const cur = _loadVehicleFile(); atomicWriteFileSync(VEHICLE_FILE, JSON.stringify({ ...cur, chassi: raw, updated_at: Date.now() }, null, 2)); }
     catch (e) { return res.status(500).json({ error: 'Falha ao salvar chassi: ' + e.message }); }
   }
   try { if (Object.keys(env).length) _updateEnvKeys(env); }
@@ -4173,7 +4191,7 @@ app.post('/api/admin/change-password', (req, res) => {
     .filter(l => !l.startsWith('BRIDGE_TOKEN=') && !l.startsWith('BRIDGE_TOKEN_HASH='))
     .join('\n').trimEnd();
   envContent += '\nBRIDGE_TOKEN_HASH=' + newHash + '\n';
-  fs.writeFileSync(envPath, envContent, 'utf8');
+  atomicWriteFileSync(envPath, envContent, 'utf8');
   BRIDGE_TOKEN_HASH = newHash;
   console.log('[admin] Senha alterada. Novo BRIDGE_TOKEN_HASH:', newHash.substring(0, 8) + '…');
   res.json({ ok: true, msg: 'Senha alterada com sucesso.' });
@@ -4299,7 +4317,7 @@ app.post('/api/restore', (req, res) => {
     // 3. Recargas
     chargesArr.length = 0;
     chargesArr.push(...bk.charges);
-    fs.writeFileSync(CHARGES_FILE, JSON.stringify({ charges: chargesArr }, null, 2));
+    atomicWriteFileSync(CHARGES_FILE, JSON.stringify({ charges: chargesArr }, null, 2));
 
     // 4. Lifetime snapshots (para Stats da PWA)
     if (Array.isArray(bk.lifeSnapshots)) {
@@ -4451,7 +4469,7 @@ app.post('/api/admin/clear-history', (req, res) => {
   try {
     // 1. Recargas
     chargesArr.length = 0;
-    fs.writeFileSync(CHARGES_FILE, JSON.stringify({ charges: [] }, null, 2));
+    atomicWriteFileSync(CHARGES_FILE, JSON.stringify({ charges: [] }, null, 2));
 
     // 3. Auto-trips — apaga todos os arquivos da pasta
     const files = fs.readdirSync(AUTOTRIPS_DIR).filter(f => f.endsWith('.json'));
@@ -4463,7 +4481,7 @@ app.post('/api/admin/clear-history', (req, res) => {
     const clearedAt = Date.now();
     state.charges_cleared_at = clearedAt;
     state.trips_cleared_at   = clearedAt;
-    fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
+    atomicWriteFileSync(STATE_FILE, JSON.stringify(state, null, 2));
 
     console.log('[admin] Histórico apagado (trips, charges, auto-trips)');
     res.json({ ok: true, msg: 'Histórico apagado com sucesso.' });
@@ -4787,7 +4805,7 @@ function ingestAutoTrip({ tripId, autoTrip, samples }, opts = {}) {
       persisted._estimatedAppliedAt = existingEstimated._estimatedAppliedAt;
       persisted._estimatedValues    = existingEstimated._estimatedValues;
     }
-    fs.writeFileSync(filePath, JSON.stringify(persisted));
+    atomicWriteFileSync(filePath, JSON.stringify(persisted));
 
     const record = { tripId: safeId, ...autoTrip, hybridTimeSec, hybridDistKm };
     if (existingEstimated) {
@@ -6017,7 +6035,11 @@ app.post('/api/admin/recompute-trip-costs', async (req, res) => {
   let updated = 0, skipped = 0, errors = 0;
   try {
     const files = fs.readdirSync(AUTOTRIPS_DIR).filter(f => f.endsWith('.json'));
+    let _i = 0;
     for (const f of files) {
+      // Cede o event loop a cada 10 arquivos — sem isto o loop síncrono congelava
+      // o bridge inteiro (WS/MQTT/requests) por segundos com muitos trips.
+      if (++_i % 10 === 0) await new Promise(r => setImmediate(r));
       try {
         const filePath = path.join(AUTOTRIPS_DIR, f);
         const d = JSON.parse(fs.readFileSync(filePath, 'utf8'));
@@ -6060,7 +6082,10 @@ app.post('/api/admin/recompute-drive-scores', async (req, res) => {
   let updated = 0, skipped = 0, errors = 0;
   try {
     const files = fs.readdirSync(AUTOTRIPS_DIR).filter(f => f.endsWith('.json'));
+    let _i = 0;
     for (const f of files) {
+      // computeDriveScore varre todos os samples — sem ceder, trava o bridge.
+      if (++_i % 10 === 0) await new Promise(r => setImmediate(r));
       try {
         const filePath = path.join(AUTOTRIPS_DIR, f);
         const d = JSON.parse(fs.readFileSync(filePath, 'utf8'));

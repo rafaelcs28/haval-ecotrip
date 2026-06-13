@@ -51,7 +51,7 @@ struct NativeDriveView: View {
                     Spacer()
                 }
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(f0(store.speedKmh)).font(.system(size: 64, weight: .light, design: .rounded))
+                    Text("\(Fmt.adjSpeed(store.speedKmh))").font(.system(size: 64, weight: .light, design: .rounded))
                         .foregroundStyle(DS.text).monospacedDigit()
                     Text("km/h").font(.headline).foregroundStyle(DS.muted)
                 }

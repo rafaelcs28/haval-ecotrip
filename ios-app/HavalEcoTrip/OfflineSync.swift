@@ -110,50 +110,63 @@ final class SyncedList: ObservableObject {
         req.addValue("Bearer " + Settings.bridgeToken, forHTTPHeaderField: "Authorization")
         guard let (data, resp) = try? await URLSession.shared.data(for: req),
               let http = resp as? HTTPURLResponse, http.statusCode == 200 else { return }   // offline → mantém cache
+
+        // Parse + dedup + cursor rodam FORA do main: com autotrips (centenas de itens)
+        // o Dictionary(items.map...) + Array(byId.values) travavam a UI a cada sync.
+        let snapshot = items, prevSync = lastSyncMs, inc = incremental, ak = arrayKey, keys = idKeys
+        let tomb = http.value(forHTTPHeaderField: "X-Tombstones")
+        let syncMs = http.value(forHTTPHeaderField: "X-Sync-Ms")
+        let result = await Task.detached(priority: .userInitiated) {
+            SyncedList.computeMerge(data: data, current: snapshot, prevSync: prevSync,
+                                    incremental: inc, arrayKey: ak, idKeys: keys,
+                                    tombstones: tomb, syncMsHeader: syncMs)
+        }.value
+        items = result.items
+        lastSyncMs = result.lastSyncMs
+        saveToDisk()
+    }
+
+    /// Parse/merge/cursor puro (sem estado de instância) — roda off-main em Task.detached.
+    nonisolated static func computeMerge(data: Data, current: [[String: Any]], prevSync: Double,
+                                         incremental: Bool, arrayKey: String?, idKeys: [String],
+                                         tombstones: String?, syncMsHeader: String?)
+    -> (items: [[String: Any]], lastSyncMs: Double) {
+        func idOf(_ d: [String: Any]) -> String {
+            for k in idKeys { if let v = d[k] { return "\(v)" } }
+            return UUID().uuidString
+        }
         let any = try? JSONSerialization.jsonObject(with: data)
         let arr: [[String: Any]]
         if let k = arrayKey { arr = ((any as? [String: Any])?[k] as? [[String: Any]]) ?? [] }
         else { arr = (any as? [[String: Any]]) ?? ((any as? [String: Any])?["items"] as? [[String: Any]]) ?? [] }
 
+        var outItems: [[String: Any]]
         if incremental {
-            // upsert por id; full quando não-incremental.
-            // `uniquingKeysWith` (não `uniqueKeysWithValues`): se o cache local tiver
-            // dois itens com o mesmo id, `uniqueKeysWithValues` dá CRASH (precondition
-            // failure) e o sync inteiro aborta silenciosamente — dados novos nunca
-            // entram. Tolera a duplicata mantendo a última ocorrência.
-            var byId = Dictionary(items.map { (idOf($0), $0) }, uniquingKeysWith: { _, b in b })
+            // upsert por id; `uniquingKeysWith` tolera duplicata no cache (senão crash).
+            var byId = Dictionary(current.map { (idOf($0), $0) }, uniquingKeysWith: { _, b in b })
             for d in arr { byId[idOf(d)] = d }
-            // tombstones (itens apagados no servidor)
-            if let tk = tombstoneKey, let h = http.value(forHTTPHeaderField: "X-Tombstones"), !h.isEmpty {
-                _ = tk
+            if let h = tombstones, !h.isEmpty {
                 for id in h.split(separator: ",") { byId.removeValue(forKey: String(id)) }
             }
-            items = Array(byId.values)
+            outItems = Array(byId.values)
         } else {
-            items = arr   // full refresh
+            outItems = arr   // full refresh
         }
-        // avança o ponteiro de sync
-        var maxMs = lastSyncMs
+        var maxMs = prevSync
         for d in arr {
             for key in ["_updated_ms", "timestamp_ms", "ts", "startMs", "id", "date_ms"] {
                 if let v = d[key] as? Double { maxMs = max(maxMs, v) }
                 else if let v = d[key] as? Int { maxMs = max(maxMs, Double(v)) }
             }
         }
-        // Cursor preferencial: X-Sync-Ms = relógio do SERVIDOR no instante da
-        // resposta (autoritativo — é o mesmo relógio que o ?since= compara).
-        if let h = http.value(forHTTPHeaderField: "X-Sync-Ms"), let serverMs = Double(h), serverMs > 0 {
-            lastSyncMs = serverMs
+        let cursor: Double
+        if let h = syncMsHeader, let serverMs = Double(h), serverMs > 0 {
+            cursor = serverMs   // X-Sync-Ms: relógio do servidor (autoritativo)
         } else {
-            // Fallback (bridge antigo): clampa o cursor ao relógio do cliente. O carro
-            // publica timestamp_ms/startMs adiantados; sem clamp o ponteiro pulava pro
-            // futuro e ?since=<futuro> voltava vazio até o relógio alcançar — daí o app
-            // "só atualizava fechando e reabrindo". `min(_, nowMs)` também puxa de
-            // volta um cursor já preso no futuro (auto-cura).
-            let nowMs = Date().timeIntervalSince1970 * 1000
-            lastSyncMs = min(max(maxMs, lastSyncMs), nowMs)
+            let nowMs = Date().timeIntervalSince1970 * 1000   // fallback: clampa ao cliente
+            cursor = min(max(maxMs, prevSync), nowMs)
         }
-        saveToDisk()
+        return (outItems, cursor)
     }
 
     // MARK: edições (offline-first)

@@ -232,7 +232,7 @@ struct NativeRecargasView: View {
 
     // MARK: Histórico
     private var historico: some View {
-        VStack(spacing: 14) {
+        LazyVStack(spacing: 14) {
             if filtered.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(loader.failed ? "Não foi possível carregar." : "Nenhuma recarga no período.")
@@ -437,7 +437,7 @@ struct NativeRecargasView: View {
 
     // MARK: Abastecimento
     private var refHistorico: some View {
-        VStack(spacing: 14) {
+        LazyVStack(spacing: 14) {
             if filteredRefuels.isEmpty {
                 Text("Nenhum abastecimento no período.").font(.subheadline).foregroundStyle(DS.muted)
                     .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 20)

@@ -178,6 +178,8 @@ final class ConfigStore: ObservableObject {
     }
 
     func setChargeLimit(_ pct: Int) async { await send("/api/charge-limit", "POST", ["pct": pct]) }
+    // Alvo de corte por software (fora dos presets). pct=0 desliga.
+    func setChargeTarget(_ pct: Int) async { await send("/api/charge-target", "POST", ["pct": pct]) }
 
     /// Reativa as Live Activities em andamento (recria as que travaram, sem reiniciar o bridge).
     func relaunchLA() async {

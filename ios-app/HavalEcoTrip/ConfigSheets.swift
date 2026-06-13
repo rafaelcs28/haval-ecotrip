@@ -61,6 +61,7 @@ struct NotificationsSheet: View {
         Group(title: "Outros", items: [
             Item(key: "refuel_detected", label: "Abastecimento detectado"),
             Item(key: "daily_summary", label: "Resumo diário (20h)"),
+            Item(key: "weekly_summary", label: "Resumo semanal (dom 20h)"),
             Item(key: "app_update", label: "Atualização do app"),
         ]),
     ]
@@ -317,21 +318,40 @@ struct VehicleSheet: View {
     @State private var model = ""
     @State private var chassi = ""
     @State private var loaded = false
+    @State private var showTarget = false
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 14) {
                     DSCard(title: "Limite de carga (SOC)", icon: "bolt.fill") {
+                        let custom = Int(car.num("charge_custom_target"))
                         let limit = Int(car.num("charge_limit_pct"))
-                        HStack(spacing: 6) {
-                            ForEach([50,60,70,80,90,100], id: \.self) { p in
-                                let on = limit == p
-                                Button { Task { await cfg.setChargeLimit(p) } } label: {
-                                    Text("\(p)").font(.system(size: 13, weight: .bold)).frame(maxWidth: .infinity).frame(height: 38)
-                                        .foregroundStyle(on ? .black : DS.text).background(on ? DS.green : DS.panel2).clipShape(RoundedRectangle(cornerRadius: 9))
+                        VStack(spacing: 10) {
+                            HStack(spacing: 6) {
+                                ForEach([50,60,70,80,90,100], id: \.self) { p in
+                                    let on = custom == 0 && limit == p
+                                    Button { Task { await cfg.setChargeLimit(p) } } label: {
+                                        Text("\(p)").font(.system(size: 13, weight: .bold)).frame(maxWidth: .infinity).frame(height: 38)
+                                            .foregroundStyle(on ? .black : DS.text).background(on ? DS.green : DS.panel2).clipShape(RoundedRectangle(cornerRadius: 9))
+                                    }
                                 }
                             }
+                            Button { showTarget = true } label: {
+                                HStack {
+                                    Image(systemName: "slider.horizontal.3")
+                                    Text(custom > 0 ? "Alvo personalizado: \(custom)%" : "Alvo personalizado…")
+                                        .font(.system(size: 14, weight: .semibold))
+                                    Spacer()
+                                    Image(systemName: "chevron.right").font(.caption2)
+                                }
+                                .foregroundStyle(custom > 0 ? DS.green : DS.text)
+                                .padding(.horizontal, 12).frame(height: 40)
+                                .frame(maxWidth: .infinity)
+                                .background(DS.panel2).clipShape(RoundedRectangle(cornerRadius: 9))
+                            }
+                            Text("Para entre/acima dos presets (ex.: 97%). Carrega sem limite e corta no alvo — precisa do servidor online.")
+                                .font(.caption2).foregroundStyle(DS.muted).frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
                     DSCard(title: "Identificação", icon: "car.fill") {
@@ -351,10 +371,74 @@ struct VehicleSheet: View {
             .navigationTitle("Veículo").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Concluído") { dismiss() } } }
         }
+        .sheet(isPresented: $showTarget) { ChargeTargetSheet(cfg: cfg) }
         .task { await cfg.loadVehicle(); if !loaded { model = cfg.modelName; chassi = cfg.chassi; loaded = true } }
     }
     private func field(_ ph: String, text: Binding<String>) -> some View {
         TextField(ph, text: text).foregroundStyle(DS.text).autocorrectionDisabled().textInputAutocapitalization(.never)
             .padding(10).background(DS.panel2).clipShape(RoundedRectangle(cornerRadius: 10)).overlay(RoundedRectangle(cornerRadius: 10).stroke(DS.border, lineWidth: 1))
+    }
+}
+
+// MARK: - Alvo de carga personalizado (corte por software)
+// O carro só tem 6 presets (50/60/70/80/90/100). Este slider escolhe qualquer
+// valor: o servidor carrega sem limite e, ao atingir o alvo, freia setando um
+// preset abaixo do SOC atual (o carro encerra a carga). Útil pra parar logo
+// abaixo de 97% — assim a regeneração volta a funcionar sem perder autonomia.
+struct ChargeTargetSheet: View {
+    @ObservedObject var cfg: ConfigStore
+    @ObservedObject private var car = CarStore.shared
+    @Environment(\.dismiss) private var dismiss
+    @State private var target: Double = 97
+    @State private var loaded = false
+
+    private var active: Int { Int(car.num("charge_custom_target")) }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 14) {
+                    DSCard(title: "Alvo de carga", icon: "bolt.badge.clock") {
+                        VStack(spacing: 14) {
+                            Text("\(Int(target))%")
+                                .font(.system(size: 56, weight: .heavy, design: .rounded))
+                                .foregroundStyle(DS.green)
+                            Slider(value: $target, in: 51...99, step: 1).tint(DS.green)
+                            HStack {
+                                Text("51%").font(.caption2).foregroundStyle(DS.muted)
+                                Spacer()
+                                Text("SOC agora: \(Int(car.socPct))%").font(.caption2).foregroundStyle(DS.muted)
+                                Spacer()
+                                Text("99%").font(.caption2).foregroundStyle(DS.muted)
+                            }
+                            Button {
+                                Task { await cfg.setChargeTarget(Int(target)); dismiss() }
+                            } label: {
+                                Text("Definir alvo \(Int(target))%").font(.system(size: 15, weight: .bold))
+                                    .frame(maxWidth: .infinity).frame(height: 46)
+                                    .foregroundStyle(.black).background(DS.green).clipShape(RoundedRectangle(cornerRadius: 12))
+                            }
+                            if active > 0 {
+                                Button {
+                                    Task { await cfg.setChargeTarget(0); dismiss() }
+                                } label: {
+                                    Text("Desligar (voltar aos presets)").font(.system(size: 14, weight: .semibold))
+                                        .frame(maxWidth: .infinity).frame(height: 42)
+                                        .foregroundStyle(DS.red).background(DS.panel2).clipShape(RoundedRectangle(cornerRadius: 12))
+                                }
+                            }
+                        }
+                    }
+                    DSCard(title: "Como funciona", icon: "info.circle") {
+                        Text("O carro carrega sem limite e o servidor corta a carga no alvo, rebaixando o limite nativo pra um preset abaixo do SOC. Precisa do servidor online durante a recarga. Resolução de ±1%.")
+                            .font(.caption).foregroundStyle(DS.muted).frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }.padding(16)
+            }
+            .background(DS.bg.ignoresSafeArea())
+            .navigationTitle("Alvo personalizado").navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Fechar") { dismiss() } } }
+        }
+        .onAppear { if !loaded { let a = Int(car.num("charge_custom_target")); if a >= 51 && a <= 99 { target = Double(a) }; loaded = true } }
     }
 }

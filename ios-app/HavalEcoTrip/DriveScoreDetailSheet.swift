@@ -152,7 +152,7 @@ struct DriveScoreDetailSheet: View {
                               value: fmtHMS(stopped),
                               label: "Parado (\(stoppedPct)%)")
                     eventCell(icon: "speedometer", color: DS.text,
-                              value: avg > 0 ? "\(Int(avg.rounded()))" : "—",
+                              value: avg > 0 ? "\(Fmt.adjSpeed(avg))" : "—",
                               label: "km/h médios")
                 }
                 Text("Tempo parado não pesa diretamente na nota, mas afeta a economia (ar condicionado em marcha lenta) e indica trânsito/paradas.")

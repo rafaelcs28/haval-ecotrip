@@ -5,7 +5,7 @@
 import SwiftUI
 
 struct ChargeForecastSheet: View {
-    @StateObject private var loader = TripsLoader()
+    @ObservedObject private var loader = TripsLoader.shared
     @ObservedObject private var car = CarStore.shared
     @Environment(\.dismiss) private var dismiss
 

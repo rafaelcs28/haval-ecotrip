@@ -57,6 +57,11 @@ struct Trip: Identifiable {
 
 @MainActor
 final class TripsLoader: ObservableObject {
+    // Singleton: Dash, Viagens, ChargeForecast e Preclimat compartilham UM loader —
+    // antes cada tela criava o seu, sincronizando /api/autotrips em duplicata e
+    // mantendo cópias separadas da mesma coleção em memória.
+    static let shared = TripsLoader()
+
     let sync = SyncedList(name: "autotrips", path: "/api/autotrips", idKeys: ["startMs", "tripId"], incremental: true, tombstoneKey: "autotrips")
     @Published var loading = false
     @Published var diag = ""
@@ -66,9 +71,18 @@ final class TripsLoader: ObservableObject {
     private var bag: AnyCancellable?
     private var prefetching = false
 
-    init() { bag = sync.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() } }
+    // Cacheado: recomputa map/filter/sort SÓ quando sync.items muda. Antes era um
+    // computed var refeito a cada acesso (filtered, estatísticas, cada card, 7 sheets)
+    // → dezenas de map+sort sobre a lista inteira por render.
+    @Published private(set) var trips: [Trip] = []
 
-    var trips: [Trip] { sync.items.map(Trip.init).filter { $0.valid }.sorted { $0.id > $1.id } }
+    init() {
+        // $items emite o valor atual na subscrição + a cada mudança. Setar `trips`
+        // (@Published) já dispara o rebuild da view — não precisa relay manual.
+        bag = sync.$items.sink { [weak self] items in
+            self?.trips = items.map(Trip.init).filter { $0.valid }.sorted { $0.id > $1.id }
+        }
+    }
 
     private var base: String {
         let u = Settings.bridgeURL.isEmpty ? AuthConfig.bridgeURL : Settings.bridgeURL
@@ -77,12 +91,13 @@ final class TripsLoader: ObservableObject {
 
     /// Baixa em background o trajeto (samples) das viagens que ainda não estão em
     /// disco OU cujo cache ficou velho (resume/reprocess bumpou _updated_ms). Roda
-    /// sozinho a cada load() — sem botão. ~23 MB pra coleção inteira; depois cada
-    /// viagem abre offline. Silencioso: falhas (offline) só ficam pra próxima vez.
+    /// sozinho a cada load() — sem botão. Limitado às 30 mais recentes (a coleção
+    /// inteira eram ~23 MB por sessão); viagens antigas baixam ao abrir o detalhe
+    /// (TripDetail.load já cacheia). Silencioso: falhas ficam pra próxima vez.
     func prefetchTrajetos() async {
         guard !prefetching, Settings.isConfigured else { return }
         prefetching = true; defer { prefetching = false }
-        for t in trips {
+        for t in trips.prefix(30) {
             let id = t.tripId
             let cachedMs = OfflineCache.trajMtimeMs(id)
             if cachedMs > 0 && t.updatedMs <= cachedMs { continue }   // já em disco e fresco
@@ -154,7 +169,7 @@ final class TripsLoader: ObservableObject {
 }
 
 struct NativeViagensView: View {
-    @StateObject private var loader = TripsLoader()
+    @ObservedObject private var loader = TripsLoader.shared
     @ObservedObject private var car = CarStore.shared
     @State private var tab = 0
     @AppStorage("via_period") private var period = 0
@@ -323,7 +338,9 @@ struct NativeViagensView: View {
     }
 
     private var historico: some View {
-        VStack(spacing: 14) {
+        // LazyVStack: renderiza só os cards visíveis. Com filtro "Tudo" o histórico
+        // inteiro (centenas) era materializado de uma vez num VStack normal.
+        LazyVStack(spacing: 14) {
             if filtered.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Nenhuma viagem no período.").font(.subheadline).foregroundStyle(DS.muted)
@@ -529,6 +546,9 @@ struct RouteMapSheet: View {
     @State private var idx: Double = 0
     @State private var cam: MapCameraPosition = .automatic
     @State private var follow = true   // mapa segue a posição da linha do tempo
+    // Calculado 1× após load(). Antes era computeDriving() dentro do body → varria
+    // todos os samples a cada frame do slider de timeline.
+    @State private var driving: (avg: Double, max: Double, pwr: Double, regenPct: Double, regenKwh: Double) = (0, 0, 0, 0, 0)
 
     private var base: String {
         let u = Settings.bridgeURL.isEmpty ? AuthConfig.bridgeURL : Settings.bridgeURL
@@ -582,7 +602,7 @@ struct RouteMapSheet: View {
                     if let s = cur {
                         DSCard(glass: true) {
                             HStack {
-                                DSMetric(value: f0(s.spd), unit: "km/h", label: "Velocidade", color: DS.text)
+                                DSMetric(value: "\(Fmt.adjSpeed(s.spd))", unit: "km/h", label: "Velocidade", color: DS.text)
                                 DSMetric(value: f1(s.pwr), unit: "kW", label: "Potência", color: s.pwr < 0 ? DS.green : DS.blue)
                                 DSMetric(value: s.rpm > 0 ? f0(s.rpm) : "—", unit: "rpm", label: "Motor", color: DS.orange)
                             }
@@ -599,7 +619,7 @@ struct RouteMapSheet: View {
                         DSCard(glass: true) {
                             VStack(spacing: 8) {
                                 // Linha do tempo completa de velocidade e potência (picos/vales do trajeto)
-                                TripSparkline(title: "Velocidade", unit: "km/h", values: samples.map { $0.spd },
+                                TripSparkline(title: "Velocidade", unit: "km/h", values: samples.map { Double(Fmt.adjSpeed($0.spd)) },
                                               color: DS.text, progress: prog, signed: false, fmt: f0)
                                 TripSparkline(title: "Potência", unit: "kW", values: samples.map { $0.pwr },
                                               color: DS.blue, progress: prog, signed: true, fmt: f1)
@@ -660,7 +680,7 @@ struct RouteMapSheet: View {
         opts.traitCollection = UITraitCollection(userInterfaceStyle: .dark)
 
         let date = self.trip.date, distKm = self.trip.distKm, netKwh = self.trip.netKwh
-        let score = Eco.score(self.trip), title = cardTitle(), d = computeDriving()
+        let score = Eco.score(self.trip), title = cardTitle(), d = Self.computeDriving(samples)
         MKMapSnapshotter(options: opts).start(with: DispatchQueue.global(qos: .userInitiated)) { snapshot, _ in
             guard let snapshot else { return }
             let img = UIGraphicsImageRenderer(size: size).image { _ in
@@ -718,7 +738,8 @@ struct RouteMapSheet: View {
     }
 
     // Estatísticas de condução a partir dos samples (velocidade/potência/tempo).
-    private func computeDriving() -> (avg: Double, max: Double, pwr: Double, regenPct: Double, regenKwh: Double) {
+    // nonisolated static: roda off-main no parse do trajeto.
+    nonisolated static func computeDriving(_ samples: [TripSample]) -> (avg: Double, max: Double, pwr: Double, regenPct: Double, regenKwh: Double) {
         let spds = samples.map { $0.spd }
         let maxSpd = spds.max() ?? 0
         let moving = spds.filter { $0 > 3 }
@@ -732,11 +753,13 @@ struct RouteMapSheet: View {
                 if dt > 0 && dt < 30 && samples[i].pwr < 0 { regenKwh += -samples[i].pwr * dt / 3600 }
             }
         }
-        return (avgSpd, maxSpd, maxPwr, regenPct, regenKwh)
+        // avg/max só vão pra display (card de stats + cartão compartilhável) → corrige
+        // pro velocímetro. pwr/regen seguem crus (não são velocidade).
+        return (Double(Fmt.adjSpeed(avgSpd)), Double(Fmt.adjSpeed(maxSpd)), maxPwr, regenPct, regenKwh)
     }
 
     @ViewBuilder private var drivingStatsCard: some View {
-        let d = computeDriving()
+        let d = driving
         DSCard(glass: true) {
             VStack(alignment: .leading, spacing: 10) {
                 Text("Condução").font(.caption).foregroundStyle(DS.muted)
@@ -768,31 +791,39 @@ struct RouteMapSheet: View {
         } else {
             data = OfflineCache.loadTraj(trip.tripId)
         }
-        guard let data,
-              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let raw = obj["samples"] as? [[String: Any]] else { return }
-        coords = raw.compactMap { s in
-            let la = anyNum2(s["lat"]), lo = anyNum2(s["lng"])
-            return (la != 0 && lo != 0) ? CLLocationCoordinate2D(latitude: la, longitude: lo) : nil
-        }
-        // kWh acumulado: integra evKw × dt (igual ao PWA — positivo=consumo).
-        // Guard de gap <30s: salto grande = carro desligado entre trechos (resume),
-        // sem energia fluindo no buraco — evita o acumulado "cair e recomeçar".
-        var cum = 0.0; var cumKm = 0.0; var lastT = 0.0; var first = true; var out: [TripSample] = []
-        for s in raw {
-            let t = anyNum2(s["t"])
-            let kw = anyNum2(s["evKw"])
-            let spd = anyNum2(s["spd"])
-            // km acumulado: integra velocidade × dt (mesmo guard de gap do kWh).
-            if !first { let rawDt = t - lastT; let dt = (rawDt > 0 && rawDt < 30) ? rawDt : 0; cum += kw * dt / 3600.0; cumKm += spd * dt / 3600.0 }
-            first = false; lastT = t
-            let la = anyNum2(s["lat"]), lo = anyNum2(s["lng"])
-            out.append(TripSample(t: t, coord: (la != 0 && lo != 0) ? .init(latitude: la, longitude: lo) : nil,
-                                  spd: spd, rpm: anyNum2(s["rpm"]), pwr: kw, soc: anyNum2(s["soc"]),
-                                  alt: anyNum2(s["altM"]), cumKwh: cum, cumKm: cumKm))
-        }
-        if out.count > 600 { let step = out.count / 600 + 1; out = out.enumerated().filter { $0.offset % step == 0 }.map { $0.element } }
-        samples = out
+        guard let data else { return }
+        // Parse + integração (kWh/km acumulado) + decimação rodam OFF-MAIN: o JSON
+        // pode ter milhares de samples (~23MB) e travava a UI ao abrir o trajeto.
+        guard let parsed = await Task.detached(priority: .userInitiated, operation: {
+            () -> (coords: [CLLocationCoordinate2D], samples: [TripSample],
+                   driving: (avg: Double, max: Double, pwr: Double, regenPct: Double, regenKwh: Double))? in
+            guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let raw = obj["samples"] as? [[String: Any]] else { return nil }
+            let coords: [CLLocationCoordinate2D] = raw.compactMap { s in
+                let la = anyNum2(s["lat"]), lo = anyNum2(s["lng"])
+                return (la != 0 && lo != 0) ? CLLocationCoordinate2D(latitude: la, longitude: lo) : nil
+            }
+            // kWh acumulado: integra evKw × dt (igual ao PWA — positivo=consumo).
+            // Guard de gap <30s: salto grande = carro desligado entre trechos (resume),
+            // sem energia fluindo no buraco — evita o acumulado "cair e recomeçar".
+            var cum = 0.0, cumKm = 0.0, lastT = 0.0, first = true
+            var out: [TripSample] = []
+            for s in raw {
+                let t = anyNum2(s["t"]), kw = anyNum2(s["evKw"]), spd = anyNum2(s["spd"])
+                if !first { let rawDt = t - lastT; let dt = (rawDt > 0 && rawDt < 30) ? rawDt : 0; cum += kw * dt / 3600.0; cumKm += spd * dt / 3600.0 }
+                first = false; lastT = t
+                let la = anyNum2(s["lat"]), lo = anyNum2(s["lng"])
+                out.append(TripSample(t: t, coord: (la != 0 && lo != 0) ? .init(latitude: la, longitude: lo) : nil,
+                                      spd: spd, rpm: anyNum2(s["rpm"]), pwr: kw, soc: anyNum2(s["soc"]),
+                                      alt: anyNum2(s["altM"]), cumKwh: cum, cumKm: cumKm))
+            }
+            if out.count > 600 { let step = out.count / 600 + 1; out = out.enumerated().filter { $0.offset % step == 0 }.map { $0.element } }
+            return (coords, out, RouteMapSheet.computeDriving(out))
+        }).value else { return }
+
+        coords = parsed.coords
+        samples = parsed.samples
+        driving = parsed.driving
         buildGPX()
         makeTripCard()
         if let first = coords.first {

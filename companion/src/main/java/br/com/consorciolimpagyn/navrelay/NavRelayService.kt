@@ -170,10 +170,28 @@ class NavRelayService : Service() {
         val ts = j.optLong("ts", 0L)
         val cfg = getSharedPreferences("navrelay", Context.MODE_PRIVATE)
         if (ts > 0L && ts <= cfg.getLong("last_nav_ts", 0L)) return
-        lastNav = "${if (app == "waze") "Waze" else "Maps"} → ${name.take(40)}"
+        // Paradas (só Google Maps usa): [{lat,lng,name}]. Waze/Maps ignoram.
+        val stops = ArrayList<Pair<Double, Double>>()
+        j.optJSONArray("stops")?.let { arr ->
+            for (i in 0 until arr.length()) {
+                val s = arr.optJSONObject(i) ?: continue
+                val sla = s.optDouble("lat", 0.0); val slo = s.optDouble("lng", 0.0)
+                if (sla != 0.0 || slo != 0.0) stops.add(sla to slo)
+            }
+        }
+        val label = if (app == "waze") "Waze" else if (app == "gmaps") "Google Maps" else "Maps"
+        lastNav = "$label → ${name.take(40)}${if (stops.isNotEmpty()) " (+${stops.size})" else ""}"
         updateNotif("Navegando: $lastNav")
-        val uri = if (app == "waze") Uri.parse("waze://?ll=$lat,$lng&navigate=yes")
-                  else               Uri.parse("google.navigation:q=$lat,$lng&mode=d")
+        // gmaps com paradas → URL universal (google.navigation: não tem waypoints).
+        val uri = when {
+            app == "waze" -> Uri.parse("waze://?ll=$lat,$lng&navigate=yes")
+            app == "gmaps" -> {
+                val wp = if (stops.isEmpty()) ""
+                         else "&waypoints=" + stops.joinToString("|") { "${it.first},${it.second}" }
+                Uri.parse("https://www.google.com/maps/dir/?api=1&destination=$lat,$lng$wp&travelmode=driving")
+            }
+            else -> Uri.parse("google.navigation:q=$lat,$lng&mode=d")
+        }
         val pkg = if (app == "waze") "com.waze" else "com.google.android.apps.maps"
         val launched = launchNav(uri, pkg)
         // Fallback: launch bloqueado (background sem overlay). Posta notificação tocável

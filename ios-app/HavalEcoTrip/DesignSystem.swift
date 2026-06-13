@@ -21,6 +21,12 @@ enum Fmt {
     /// km: <100 com 2 casas, >=100 inteiro (com milhares).
     static func km(_ v: Double) -> String { v < 100 ? dec2(v) : int(v) }
     static func brl(_ v: Double) -> String { "R$ " + (f2.string(from: NSNumber(value: v)) ?? String(format: "%.2f", v)) }
+    /// Velocidade corrigida pra bater com o velocímetro do carro (mesma fórmula do
+    /// getAdjustedSpeed do APK). SÓ para DISPLAY — nunca em cálculos físicos (consumo/km).
+    static func adjSpeed(_ raw: Double) -> Int {
+        let s = max(0, raw)
+        return Int((s * 1.07 - s / 180 * 0.02).rounded(.towardZero))
+    }
 }
 
 enum DS {

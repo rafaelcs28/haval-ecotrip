@@ -87,7 +87,7 @@ final class PreclimatStore: ObservableObject {
 
 struct PreclimatSheet: View {
     @StateObject private var store = PreclimatStore()
-    @StateObject private var trips = TripsLoader()
+    @ObservedObject private var trips = TripsLoader.shared
     @ObservedObject private var car = CarStore.shared
     @Environment(\.dismiss) private var dismiss
 

@@ -11,7 +11,7 @@ import MapKit
 struct NativeDashView: View {
     @ObservedObject private var store = CarStore.shared
     @StateObject private var maint = MaintenanceStore()
-    @StateObject private var trips = TripsLoader()
+    @ObservedObject private var trips = TripsLoader.shared
     @StateObject private var cfg = ConfigStore()
     @State private var busy = false
     @State private var showPreclimat = false
@@ -33,6 +33,7 @@ struct NativeDashView: View {
     @State private var pendingLimit: Int? = nil
     @State private var limitFeedback = 0
     @State private var limitTimeout: DispatchWorkItem? = nil
+    @State private var showChargeTarget = false
 
     private let tankL = 55.0   // capacidade aprox. do tanque (H6 PHEV) p/ o medidor
 
@@ -70,6 +71,7 @@ struct NativeDashView: View {
         .sheet(isPresented: $showNotifCenter) { NotificationsCenterSheet() }
         .sheet(isPresented: $showArrival) { ArrivalSheet(trips: trips.trips) }
         .sheet(isPresented: $showParking) { ParkingSheet() }
+        .sheet(isPresented: $showChargeTarget) { ChargeTargetSheet(cfg: cfg) }
         .sheet(isPresented: $showRange) { RangeSheet() }
         .sheet(isPresented: $showShare) { ShareStatusSheet() }
         .sheet(isPresented: $showTimeline) { EventsTimelineSheet() }
@@ -243,14 +245,19 @@ struct NativeDashView: View {
     private var chargingCard: some View {
         let soc = store.socPct
         let limit = store.num("charge_limit_pct")
+        let customTarget = Int(store.num("charge_custom_target"))   // 0 = corte por software desligado
+        // Com alvo custom ativo, o marcador/limite exibido é o ALVO (não o preset
+        // nativo, que fica em 100 enquanto carrega e cai pro freio só no corte).
+        let effLimit: Double = customTarget > 0 ? Double(customTarget) : limit
         // Estado visual do limite: pendente (amarelo) → confirmado (verde) / recusado (vermelho).
-        let markerFrac: Double? = pendingLimit.map { Double($0)/100 } ?? (limit > 0 ? limit/100 : nil)
+        let markerFrac: Double? = pendingLimit.map { Double($0)/100 } ?? (effLimit > 0 ? effLimit/100 : nil)
         let accent: Color = pendingLimit != nil ? DS.yellow
             : (limitFeedback == 1 ? DS.green : (limitFeedback == 2 ? DS.red : DS.muted))
         let markerColor: Color = pendingLimit != nil ? DS.yellow
             : (limitFeedback == 1 ? DS.green : (limitFeedback == 2 ? DS.red : Color.white.opacity(0.85)))
         let badgeLabel: String = {
             if let p = pendingLimit { return "Aplicando limite \(p)%…" }
+            if customTarget > 0 { return "Bateria · alvo \(customTarget)% (corte automático)" }
             if limitFeedback == 1 { return "Limite \(f0(limit))% confirmado" }
             if limitFeedback == 2 { return "Limite não aplicado — tente de novo" }
             return limit > 0 && limit < 100 ? "Bateria · limite \(f0(limit))%" : "Bateria"
@@ -272,8 +279,13 @@ struct NativeDashView: View {
             Text("Limite de carga (SOC)")
             ForEach([50,60,70,80,90,100], id: \.self) { p in
                 Button { selectChargeLimit(p) } label: {
-                    Label("\(p)%", systemImage: (pendingLimit ?? Int(limit)) == p ? "checkmark" : "bolt")
+                    Label("\(p)%", systemImage: customTarget == 0 && (pendingLimit ?? Int(limit)) == p ? "checkmark" : "bolt")
                 }
+            }
+            Divider()
+            Button { showChargeTarget = true } label: {
+                Label(customTarget > 0 ? "Alvo personalizado: \(customTarget)%" : "Alvo personalizado…",
+                      systemImage: customTarget > 0 ? "checkmark" : "slider.horizontal.3")
             }
         }
         // Carro confirmou: o limite reportado virou o valor pedido.
