@@ -59,6 +59,7 @@ struct NativeDashView: View {
                 if store.isCharging { chargingCard } else { HStack(spacing: 14) { batteryCard; fuelCard } }
                 climateCard
                 openingsCard
+                LiveRouteBanner()
                 locationCard
                 revisaoCard
                 tripCard

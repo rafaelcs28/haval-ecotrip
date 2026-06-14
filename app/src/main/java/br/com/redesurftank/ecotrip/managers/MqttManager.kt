@@ -269,8 +269,9 @@ class MqttManager private constructor() {
         val name: String, val lat: Double, val lng: Double, val isFinal: Boolean,
         val distKm: Double, val etaMin: Int, val etaClock: String, val socArrival: Int,
     )
-    // Parada concluída recentemente (avanço por proximidade): fica riscada até untilMs.
-    data class NavUndo(val name: String, val untilMs: Long)
+    // Parada concluída/pulada recentemente: fica riscada até untilMs. skipped=true
+    // distingue "pulei de propósito" de "cheguei e segui" (avanço por proximidade).
+    data class NavUndo(val name: String, val untilMs: Long, val skipped: Boolean = false)
     data class NavDest(
         val lat: Double, val lng: Double, val name: String, val ts: Long, val etaClock: String = "",
         val legs: List<NavLeg> = emptyList(),   // vazio = destino único (sem paradas)
@@ -2246,7 +2247,7 @@ class MqttManager private constructor() {
                                     }
                                 }
                                 val undo = j.optJSONObject("undo")?.let {
-                                    NavUndo(it.optString("name", ""), it.optLong("untilMs", 0L))
+                                    NavUndo(it.optString("name", ""), it.optLong("untilMs", 0L), it.optBoolean("skipped", false))
                                 }
                                 incomingNavDest = NavDest(
                                     lat, lng, j.optString("name", ""), ts, j.optString("etaClock", ""),

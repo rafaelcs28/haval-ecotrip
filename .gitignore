@@ -66,3 +66,7 @@ _analise/
 # Simulador da tela Controles (não vai pro APK)
 app/src/main/assets/controles/_sim.html
 app/src/main/assets/controles/_debug.js
+
+# Atalhos com token do bridge embutido (não vão pro repo público)
+ios-app/AutoShareLocal.shortcut
+ios-app/AutoShareReady.shortcut

@@ -61,6 +61,7 @@
 		8C3FA5DCF7133607EC275A89 /* TripLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B0EC768E77CEDD141861D39 /* TripLiveActivity.swift */; };
 		91E8922CD20B94185D7454A2 /* BydLiveActivityPush.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60050A5D1678A9235BEB0730 /* BydLiveActivityPush.swift */; };
 		920A0533D20932EF36FC4D49 /* ChargeActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = C110A5E3EADD0B1D4DA52BE6 /* ChargeActivityAttributes.swift */; };
+		948F17F08B6F8F6F985727A4 /* LiveRouteBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D8DD420046BFFF1A114B6B5 /* LiveRouteBanner.swift */; };
 		96755F980B03F6B827D28AC0 /* AuthConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = A799F69A43F78E263048C8F4 /* AuthConfig.swift */; };
 		9726912E15C4196ACF166260 /* MaintenanceStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8036EB500E09B8F08A9EA755 /* MaintenanceStore.swift */; };
 		97D85BD3A8D8D549ABD6A944 /* ActivityManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9926C58E001CD8511E829FB /* ActivityManager.swift */; };
@@ -157,6 +158,7 @@
 		192BA3BE182AC3D50F636DA9 /* HavalEcoTripWidget.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = HavalEcoTripWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		19F1EE1E1159233D66EEAFA8 /* LiveActivityPush.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveActivityPush.swift; sourceTree = "<group>"; };
 		1C2F4161732FE79AB2415337 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		1D8DD420046BFFF1A114B6B5 /* LiveRouteBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveRouteBanner.swift; sourceTree = "<group>"; };
 		1E3DCC65EEE32FFFC3727847 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		25AF744D0A813EC24608D127 /* ConfigSheets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigSheets.swift; sourceTree = "<group>"; };
 		26B936D2B31C5DE61815546A /* HavalEcoTrip-dev.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "HavalEcoTrip-dev.entitlements"; sourceTree = "<group>"; };
@@ -285,6 +287,7 @@
 				DA22E658C7AE7CB3679725CF /* LANDiscovery.swift */,
 				19F1EE1E1159233D66EEAFA8 /* LiveActivityPush.swift */,
 				4A804763C29A6FBD8871C5A7 /* LivePreview.swift */,
+				1D8DD420046BFFF1A114B6B5 /* LiveRouteBanner.swift */,
 				C25344C215F40EDE5B072CEF /* LogsSheet.swift */,
 				3D3807C873D02DC8F672F3CD /* MaintenanceSheet.swift */,
 				8036EB500E09B8F08A9EA755 /* MaintenanceStore.swift */,
@@ -643,6 +646,7 @@
 				2BBB45182185499D3B954868 /* LANDiscovery.swift in Sources */,
 				4C94F890D15203640F57B31D /* LiveActivityPush.swift in Sources */,
 				E7A22E919521A94E9004D8F2 /* LivePreview.swift in Sources */,
+				948F17F08B6F8F6F985727A4 /* LiveRouteBanner.swift in Sources */,
 				4EB218A639630413D48F777D /* LogsSheet.swift in Sources */,
 				0CC661D339028F8AD4C5270B /* MaintenanceSheet.swift in Sources */,
 				9726912E15C4196ACF166260 /* MaintenanceStore.swift in Sources */,

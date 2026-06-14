@@ -2,6 +2,7 @@ package br.com.redesurftank.ecotrip.ui.screens
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
@@ -28,6 +29,15 @@ data class RoutePlan(
     val distanceKm: Float, val durationMin: Int, val etaClock: String,
     val climbM: Int, val descentM: Int,
     val curSoc: Int, val predictedSoc: Int, val energyKwh: Float, val capacityKwh: Float,
+    val alts: List<RouteAltCar> = emptyList(),   // rotas alternativas (vazio = só 1)
+)
+
+// Rota alternativa pra comparar/escolher. SOC/energia calculados com o MESMO modelo
+// do cliente (consumo recente + altimetria + clima), igual à rota primária.
+data class RouteAltCar(
+    val idx: Int, val distanceKm: Float, val durationMin: Int,
+    val climbM: Int, val descentM: Int,
+    val predictedSoc: Int, val energyKwh: Float, val etaClock: String,
 )
 
 private fun etaFromNow(durationMin: Int): String {
@@ -63,10 +73,10 @@ suspend fun fetchArrivalPlan(
     if (base.isBlank()) return@withContext null
     val urlStr = if (toLat != null && toLng != null) {
         val nm = URLEncoder.encode(query ?: "", "UTF-8")
-        "$base/api/route-plan?from_lat=$lat&from_lng=$lng&to_lat=$toLat&to_lng=$toLng&q=$nm"
+        "$base/api/route-plan?from_lat=$lat&from_lng=$lng&to_lat=$toLat&to_lng=$toLng&q=$nm&alt=1"
     } else {
         val q = URLEncoder.encode((query ?: "").trim(), "UTF-8")
-        "$base/api/route-plan?from_lat=$lat&from_lng=$lng&q=$q"
+        "$base/api/route-plan?from_lat=$lat&from_lng=$lng&q=$q&alt=1"
     }
     val c = (URL(urlStr).openConnection() as HttpURLConnection).apply {
         requestMethod = "GET"
@@ -87,20 +97,36 @@ suspend fun fetchArrivalPlan(
     val wazeMin = etaClockOverride?.let { minutesUntilClock(it) }
     val durMin  = wazeMin ?: routeMin
     val etaClock = if (!etaClockOverride.isNullOrBlank() && wazeMin != null) etaClockOverride else etaFromNow(durMin)
-    val vMed     = if (durMin > 0) distKm / (durMin / 60f) else 40f
-    val kwhPerKm = tripManager.predictKwhPerKm(vMed)
     val cap      = tripManager.getBatteryCapacityKwh()
     val acOn     = br.com.redesurftank.ecotrip.managers.MqttManager.getInstance().latestHvacAcEnable == 1
     val tempOut  = tripManager.getOutsideTempC()
-    val eClimate = tripManager.acKwhPerHour(tempOut, acOn) * (durMin / 60f)
-    val eDrive   = distKm * kwhPerKm
-    val eElev    = climb * 0.0064f - desc * 0.0035f
-    val energy   = (eDrive + eElev + eClimate).coerceAtLeast(0f)
     val cur      = tripManager.getCurrentSocPct().toInt()
-    val pred     = (cur - (energy / cap * 100f)).toInt().coerceIn(0, 100)
+    // Energia + SOC previsto pra um trecho qualquer (rota primária ou alternativa):
+    // consumo por faixa (velocidade média) + altimetria + carga do clima.
+    fun energyPred(dKm: Float, dMin: Int, cl: Int, de: Int): Pair<Float, Int> {
+        val vm  = if (dMin > 0) dKm / (dMin / 60f) else 40f
+        val kpk = tripManager.predictKwhPerKm(vm)
+        val eC  = tripManager.acKwhPerHour(tempOut, acOn) * (dMin / 60f)
+        val e   = (dKm * kpk + (cl * 0.0064f - de * 0.0035f) + eC).coerceAtLeast(0f)
+        val p   = (cur - (e / cap * 100f)).toInt().coerceIn(0, 100)
+        return e to p
+    }
+    val (energy, pred) = energyPred(distKm, durMin, climb, desc)
+    // Alternativas (só expõe se vier >1): mesmo modelo de energia por rota.
+    val altsArr = json.optJSONArray("routes")
+    val alts = if (altsArr != null && altsArr.length() > 1) {
+        (0 until altsArr.length()).mapNotNull { i ->
+            val o = altsArr.optJSONObject(i) ?: return@mapNotNull null
+            val aD = o.optDouble("distanceKm", 0.0).toFloat()
+            val aMin = o.optInt("durationMin", 0)
+            val aCl = o.optInt("climbM", 0); val aDe = o.optInt("descentM", 0)
+            val (aE, aP) = energyPred(aD, aMin, aCl, aDe)
+            RouteAltCar(o.optInt("idx", i), aD, aMin, aCl, aDe, aP, aE, etaFromNow(aMin))
+        }
+    } else emptyList()
     val dLat = json.optDouble("destLat", 0.0)
     val dLng = json.optDouble("destLng", 0.0)
-    RoutePlan(name, dLat, dLng, distKm, durMin, etaClock, climb, desc, cur, pred, energy, cap)
+    RoutePlan(name, dLat, dLng, distKm, durMin, etaClock, climb, desc, cur, pred, energy, cap, alts)
 }
 
 // Desfaz o avanço automático da última parada (janela de 5 min) → POST /api/route-undo.
@@ -116,6 +142,28 @@ suspend fun postRouteUndo(tripManager: TripManager): Boolean = withContext(Dispa
             connectTimeout = 8000; readTimeout = 8000
         }
         c.outputStream.use { it.write("{}".toByteArray()) }
+        val ok = c.responseCode in 200..299
+        c.disconnect()
+        ok
+    } catch (e: Exception) { false }
+}
+
+// Pula a próxima parada (não-final) da rota ativa → POST /api/route/skip-stop.
+// idx null = a próxima parada (default do bridge). Avança por cima dela e abre a
+// janela de desfazer (5 min, skipped=true).
+suspend fun postRouteSkip(tripManager: TripManager, idx: Int? = null): Boolean = withContext(Dispatchers.IO) {
+    val base = tripManager.bridgeUrlPublic()
+    if (base.isBlank()) return@withContext false
+    try {
+        val c = (URL("$base/api/route/skip-stop").openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            setRequestProperty("Authorization", "Bearer " + tripManager.bridgeTokenPublic())
+            setRequestProperty("Content-Type", "application/json")
+            doOutput = true
+            connectTimeout = 8000; readTimeout = 8000
+        }
+        val body = if (idx != null) "{\"idx\":$idx}" else "{}"
+        c.outputStream.use { it.write(body.toByteArray()) }
         val ok = c.responseCode in 200..299
         c.disconnect()
         ok
@@ -168,7 +216,17 @@ fun SocArrivalScreen(
     var sent    by remember { mutableStateOf<String?>(null) }
     var suggestions by remember { mutableStateOf<List<GeoSuggestion>>(emptyList()) }
     var suppressSuggest by remember { mutableStateOf(false) }
+    var selectedAltIdx by remember { mutableStateOf(0) }   // rota escolhida (0 = recomendada)
     val scope = rememberCoroutineScope()
+
+    // Troca a previsão mostrada pela rota alternativa escolhida (reescreve as métricas
+    // de topo; mantém a lista de alternativas e o destino).
+    fun selectAlt(a: RouteAltCar) {
+        val p = plan ?: return
+        selectedAltIdx = a.idx
+        plan = p.copy(distanceKm = a.distanceKm, durationMin = a.durationMin, etaClock = a.etaClock,
+                      climbM = a.climbM, descentM = a.descentM, predictedSoc = a.predictedSoc, energyKwh = a.energyKwh)
+    }
 
     // coordDest != null → destino veio do celular (lat/lng prontos); senão usa o texto digitado.
     fun calcular(coordDest: br.com.redesurftank.ecotrip.managers.MqttManager.NavDest? = null) {
@@ -184,7 +242,7 @@ fun SocArrivalScreen(
                     fetchArrivalPlan(tripManager, coordDest.lat, coordDest.lng, coordDest.name, coordDest.etaClock)
                 else
                     fetchArrivalPlan(tripManager, null, null, dest.trim(), null)
-                if (p == null) error = "Falha ao calcular a rota." else plan = p
+                if (p == null) error = "Falha ao calcular a rota." else { plan = p; selectedAltIdx = 0 }
             } catch (e: Exception) {
                 error = "Falha ao calcular (${e.message})"
             }
@@ -278,6 +336,38 @@ fun SocArrivalScreen(
                     Spacer(Modifier.weight(1f))
                     Text("agora ${p.curSoc}%", color = TextSecondary, fontSize = 18.sp, modifier = Modifier.padding(bottom = 14.dp))
                 }
+
+                // Escolha de rota: compara alternativas (tempo/dist/SOC) e escolhe — a
+                // previsão acima passa a refletir a rota selecionada.
+                if (p.alts.size > 1) {
+                    HorizontalDivider(color = Separator, thickness = 0.5.dp)
+                    Text("Rotas", color = TextSecondary, fontSize = 14.sp)
+                    p.alts.forEach { a ->
+                        val sel = a.idx == selectedAltIdx
+                        Surface(
+                            onClick = { selectAlt(a) },
+                            color = if (sel) AuroraTeal.copy(alpha = 0.12f) else SurfaceCard,
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Row(
+                                Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            ) {
+                                Text(if (sel) "◉" else "○", color = if (sel) AuroraTeal else TextSecondary, fontSize = 18.sp)
+                                Column(Modifier.weight(1f)) {
+                                    Text(if (a.idx == 0) "Rota recomendada" else "Alternativa ${a.idx}",
+                                        color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                                    Text("${a.durationMin} min · ${f1c(a.distanceKm)} km", color = TextSecondary, fontSize = 12.sp)
+                                }
+                                Text("${a.predictedSoc}%", color = if (a.predictedSoc < 15) MoltenOrange else NeonLime,
+                                    fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     SocStat("Distância", "${f1c(p.distanceKm)} km", AccentBlue)
                     SocStat("Subida", "↑ ${fi(p.climbM)} m", NeonLime)

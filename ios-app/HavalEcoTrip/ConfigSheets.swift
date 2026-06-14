@@ -91,6 +91,7 @@ struct NotificationsSheet: View {
                             }
                         }
                     }
+                    securityCard()
                 }.padding(16)
             }
             .background(DS.bg.ignoresSafeArea())
@@ -117,6 +118,54 @@ struct NotificationsSheet: View {
             if on, let placesKey = item.places { placesPicker(placesKey) }
         }
         .padding(.vertical, 2)
+    }
+
+    private static let dayLabels = ["Dom","Seg","Ter","Qua","Qui","Sex","Sáb"]
+
+    @ViewBuilder private func securityCard() -> some View {
+        let on = cfg.pushPrefs["security_departure"] ?? false
+        DSCard(title: "Segurança", icon: "shield.lefthalf.filled") {
+            VStack(alignment: .leading, spacing: 8) {
+                Toggle("Saída suspeita (janela de horário)", isOn: Binding(get: { on }, set: { v in Task { await cfg.setPush("security_departure", v) } }))
+                    .tint(DS.green).font(.system(size: 14))
+                Text("Alerta se o carro deixar um local monitorado dentro da janela — independe do motor.")
+                    .font(.caption2).foregroundStyle(DS.muted)
+                if on {
+                    placesPicker("security_departure_places")
+                    Text("DIAS").font(.system(size: 9, weight: .semibold)).foregroundStyle(DS.muted)
+                    FlowChipsSelect(options: (0...6).map { ("\($0)", Self.dayLabels[$0]) }, selected: Set(cfg.securityDays.map(String.init))) { id in
+                        guard let d = Int(id) else { return }
+                        var s = Set(cfg.securityDays)
+                        if s.contains(d) { s.remove(d) } else { s.insert(d) }
+                        Task { await cfg.setSecurityDays(Array(s)) }
+                    }
+                    Text("Vazio = todos os dias.").font(.caption2).foregroundStyle(DS.muted)
+                    HStack {
+                        DatePicker("De", selection: timeBinding("security_from", "00:00"), displayedComponents: .hourAndMinute)
+                            .labelsHidden()
+                        Text("até").font(.caption).foregroundStyle(DS.muted)
+                        DatePicker("Até", selection: timeBinding("security_to", "05:00"), displayedComponents: .hourAndMinute)
+                            .labelsHidden()
+                        Spacer()
+                    }
+                }
+            }.padding(.vertical, 2)
+        }
+    }
+
+    private func timeBinding(_ key: String, _ def: String) -> Binding<Date> {
+        Binding(
+            get: { Self.dateFromHHMM(cfg.pushStrs[key] ?? def) },
+            set: { d in Task { await cfg.setPushStr(key, Self.hhmm(d)) } }
+        )
+    }
+    private static func dateFromHHMM(_ s: String) -> Date {
+        let p = s.split(separator: ":").compactMap { Int($0) }
+        return Calendar.current.date(bySettingHour: p.first ?? 0, minute: p.count > 1 ? p[1] : 0, second: 0, of: Date()) ?? Date()
+    }
+    private static func hhmm(_ d: Date) -> String {
+        let c = Calendar.current.dateComponents([.hour, .minute], from: d)
+        return String(format: "%02d:%02d", c.hour ?? 0, c.minute ?? 0)
     }
 
     private func placesPicker(_ key: String) -> some View {

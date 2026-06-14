@@ -341,6 +341,13 @@ const NOTIF_DEFAULTS = {
   geofence_departure:false,
   geofence_arrival_places:   [],
   geofence_departure_places: [],
+  // Segurança por janela: alerta quando o carro SAI de um local monitorado
+  // durante uma janela proibida (dias + faixa de horário). Independe do motor.
+  security_departure:        false,
+  security_departure_places: [],          // IDs dos locais a vigiar (vazio = todos)
+  security_days:             [],          // 0=dom..6=sáb (vazio = todos os dias)
+  security_from:             '00:00',     // início da janela "HH:MM"
+  security_to:               '05:00',     // fim da janela "HH:MM" (suporta virar meia-noite)
   maintenance_soon:  false,
   maintenance_overdue: false,
   anomaly_detected:  false,
@@ -2437,6 +2444,17 @@ function checkTheft() {
   }
 }
 
+// Janela de segurança (dias + faixa "HH:MM"). Vazio/inválido = sempre dentro.
+function _inSecurityWindow(now = new Date()) {
+  const days = Array.isArray(notifPrefs.security_days) ? notifPrefs.security_days.map(Number).filter(Number.isFinite) : [];
+  if (days.length && !days.includes(now.getDay())) return false;
+  const toMin = s => { const m = /^(\d{1,2}):(\d{2})$/.exec(String(s || '')); return m ? (+m[1]) * 60 + (+m[2]) : null; };
+  const f = toMin(notifPrefs.security_from), t = toMin(notifPrefs.security_to);
+  if (f == null || t == null) return true;            // sem faixa válida → só o filtro de dias conta
+  const cur = now.getHours() * 60 + now.getMinutes();
+  return f <= t ? (cur >= f && cur <= t) : (cur >= f || cur <= t);   // suporta virar meia-noite
+}
+
 function checkGeofence() {
   const lat = state.gps_lat, lng = state.gps_lng;
   if (!lat || !lng) return;
@@ -2463,6 +2481,15 @@ function checkGeofence() {
     } else if (isOutside && prev !== 'out') {
       geofenceState[loc.id] = 'out';
       if (_socArrivalTimers[loc.id]) { clearTimeout(_socArrivalTimers[loc.id]); delete _socArrivalTimers[loc.id]; }
+      // Segurança por janela: saída de local monitorado durante janela proibida →
+      // alerta INDEPENDENTE do motor (cobre reboque/empurrão e furto com motor on).
+      if (prev === 'in' && notifPrefs.security_departure && _inSecurityWindow()) {
+        const secPlaces = notifPrefs.security_departure_places || [];
+        if (secPlaces.length === 0 || secPlaces.map(String).includes(String(loc.id))) {
+          addEvent('security_departure', `🚨 Carro saiu de ${loc.name} em horário monitorado`);
+          sendPush('🚨 Saída suspeita', `O Haval deixou ${loc.name} dentro da janela de segurança. Verifique.`, 'security_departure');
+        }
+      }
       if (prev === 'in' && engineOn) {  // saída só com motor ligado
         addEvent('geofence_out', `🚗 Saiu de ${loc.name}`);
         const depPlaces = notifPrefs.geofence_departure_places || [];
@@ -5487,7 +5514,9 @@ app.post('/api/push/prefs', (req, res) => {
   } else if (typeof def === 'number') {
     const n = parseInt(value);
     if (isNaN(n)) return res.status(400).json({ error: 'valor numérico inválido' });
-    notifPrefs[key] = Math.max(1, Math.min(20, n));
+    notifPrefs[key] = Math.max(1, Math.min(100, n));
+  } else if (typeof def === 'string') {
+    notifPrefs[key] = String(value == null ? '' : value);
   } else {
     notifPrefs[key] = !!value;
   }
@@ -7551,6 +7580,113 @@ function _recentKwhPerKm() {
   const k = ev.reduce((s, t) => s + (t.netKwh || 0), 0);
   return (d > 5 && k > 0) ? Math.min(Math.max(k / d, 0.05), 0.5) : 0.16;
 }
+
+// ── Copiloto de energia: modelo preditivo de SOC de chegada (PHEV) ───────────
+// Consumo EV (kWh/km) por FAIXA DE VELOCIDADE das viagens 100% EV. Cidade,
+// estrada e rodovia consomem muito diferente; a média achatada erra demais.
+function _evRatesBySpeed() {
+  const ev = autoTripsArr.filter(t => (t.fuelL || 0) < 0.05 && (t.distKm || 0) >= 2);
+  const bucket = (lo, hi) => {
+    const sel = ev.filter(t => { const s = +t.avgSpeedKmh || 0; return s >= lo && s < hi; });
+    const d = sel.reduce((s, t) => s + (t.distKm || 0), 0);
+    const k = sel.reduce((s, t) => s + (t.netKwh || 0), 0);
+    return (d > 5 && k > 0) ? Math.min(Math.max(k / d, 0.05), 0.5) : null;
+  };
+  return { city: bucket(0, 45), road: bucket(45, 75), hwy: bucket(75, 999), overall: _recentKwhPerKm() };
+}
+function _pickEvRate(rates, speedKmh) {
+  const b = speedKmh < 45 ? rates.city : speedKmh < 75 ? rates.road : rates.hwy;
+  return b || rates.overall;
+}
+// Consumo de gasolina (L/km) das viagens com combustível relevante. Fallback 0,08 (8 L/100km).
+function _recentLPerKm() {
+  const fz = autoTripsArr.filter(t => (t.fuelL || 0) >= 0.3 && (t.distKm || 0) >= 2).slice(0, 40);
+  const d = fz.reduce((s, t) => s + (t.distKm || 0), 0);
+  const l = fz.reduce((s, t) => s + (t.fuelL || 0), 0);
+  return (d > 5 && l > 0) ? Math.min(Math.max(l / d, 0.04), 0.18) : 0.08;
+}
+// Capacidade útil (kWh) estimada das viagens EV: net / (ΔSOC/100). Fallback 34 (fábrica H6 PHEV).
+function _capacityKwh() {
+  const caps = autoTripsArr.map(t => {
+    const drop = (t.startSocPct || 0) - (t.endSocPct || 0);
+    return ((t.fuelL || 0) < 0.05 && drop > 5 && (t.netKwh || 0) > 0.5) ? (t.netKwh / (drop / 100)) : null;
+  }).filter(c => c != null && c > 8 && c < 80);
+  if (!caps.length) return 34;
+  return Math.round(caps.reduce((a, b) => a + b, 0) / caps.length * 10) / 10;
+}
+
+// Calibração: log previsto×real do SOC de chegada (só viagens EV-feasible).
+const SOC_CALIB_FILE = path.join(DATA_DIR, 'soc_calib.json');
+let _socCalib = [];
+try { if (fs.existsSync(SOC_CALIB_FILE)) _socCalib = JSON.parse(fs.readFileSync(SOC_CALIB_FILE, 'utf8')) || []; } catch (_) {}
+function _confidencePct() {
+  if (_socCalib.length < 5) return 8;                       // ainda aprendendo → banda padrão
+  const e = _socCalib.reduce((s, c) => s + Math.abs(c.err || 0), 0) / _socCalib.length;
+  return Math.min(Math.max(Math.round(e), 2), 20);
+}
+function _logSocPrediction(predicted, actual) {
+  if (predicted == null || actual == null) return;
+  _socCalib.push({ predicted, actual, err: actual - predicted, ts: Date.now() });
+  if (_socCalib.length > 50) _socCalib = _socCalib.slice(-50);
+  try { atomicWriteFileSync(SOC_CALIB_FILE, JSON.stringify(_socCalib)); } catch (_) {}
+}
+
+// Núcleo do copiloto: caminha as pernas, modela o handoff EV→combustão (PHEV) e
+// devolve as pernas enriquecidas (socArrival/fuelL/onFuel) + resumo. Ao esgotar
+// o orçamento EV (soc/100*cap kWh), o restante do trajeto roda a gasolina.
+function _energyModelLegs(legsRaw, { soc, cap, acH }) {
+  const rates = _evRatesBySpeed();
+  const lPerKm = _recentLPerKm();
+  const evBudget = Math.max(soc, 0) / 100 * cap;            // kWh disponíveis antes do motor
+  let cumDist = 0, cumEnergy = 0, evDepleteKm = null;
+  const legs = legsRaw.map(l => {
+    const dKm = l.distanceKm || 0, dMin = l.durationMin || 0;
+    const spd = dMin > 0 ? dKm / (dMin / 60) : 0;
+    const rate = _pickEvRate(rates, spd);
+    const legEnergy = Math.max(dKm * rate + (l.climbM || 0) * 0.0064 - (l.descentM || 0) * 0.0035 + acH * (dMin / 60), 0);
+    const energyBefore = cumEnergy;
+    cumDist += dKm; cumEnergy += legEnergy;
+    // Ponto de depleção do EV: interpola dentro da perna que cruza o orçamento.
+    if (evDepleteKm == null && cumEnergy > evBudget && legEnergy > 0) {
+      const frac = Math.min(Math.max((evBudget - energyBefore) / legEnergy, 0), 1);
+      evDepleteKm = Math.round((cumDist - dKm + dKm * frac) * 10) / 10;
+    }
+    const onFuel = cumEnergy > evBudget;
+    const socArrival = onFuel ? 0 : Math.min(Math.max(Math.round(soc - cumEnergy / cap * 100), 0), 100);
+    const fuelKm = evDepleteKm != null ? Math.max(cumDist - evDepleteKm, 0) : 0;
+    return { ...l, socArrival, onFuel, fuelL: Math.round(fuelKm * lPerKm * 10) / 10 };
+  });
+  const fin = legs[legs.length - 1] || { socArrival: Math.round(soc), fuelL: 0, onFuel: false };
+  return {
+    legs,
+    predictedSoc: fin.socArrival,
+    fuelL: fin.fuelL,
+    onFuel: !!fin.onFuel,
+    evDepleteKm,                                            // null = chega inteiro no EV
+    totalKm: Math.round(cumDist * 10) / 10,
+    energyKwh: Math.round(cumEnergy * 10) / 10,
+    energyPct: cap > 0 ? Math.round(cumEnergy / cap * 100) : 0,   // energia como % do pack (pra "carrega até X")
+    confidencePct: _confidencePct(),
+    capacityKwh: cap,
+  };
+}
+// Estações de recarga conhecidas, com potência média REAL do histórico (avg_power_kw
+// das sessões naquele local). Ordena pela mais rápida — melhor candidata a parada.
+function _chargeStations() {
+  const byName = new Map();
+  for (const c of chargesArr) {
+    const nm = (c.location_name || '').trim();
+    if (!nm || !(c.avg_power_kw > 0)) continue;
+    const e = byName.get(nm) || { name: nm, lat: c.location_lat, lng: c.location_lng, pSum: 0, n: 0 };
+    e.pSum += c.avg_power_kw; e.n += 1;
+    if (e.lat == null && c.location_lat != null) { e.lat = c.location_lat; e.lng = c.location_lng; }
+    byName.set(nm, e);
+  }
+  return [...byName.values()]
+    .map(e => ({ name: e.name, lat: e.lat, lng: e.lng, avgPowerKw: Math.round(e.pSum / e.n * 100) / 100, sessions: e.n }))
+    .sort((a, b) => b.avgPowerKw - a.avgPowerKw);
+}
+
 // Limpa toda a rota ativa (chegou ao destino final OU expirou). Apaga o estado,
 // o nav_dest retido e a rota persistida.
 function _clearRoute(consumedWps) {
@@ -7602,7 +7738,12 @@ async function _maybeComputeArrival() {
     // Avanço por proximidade. Parada (não-final) alcançada a ≤300 m → marca concluída
     // e abre janela de desfazer de 5 min (fica riscada). Destino final a ≤500 m → encerra.
     if (next.isFinal) {
-      if (distToNext < 0.5) { _clearRoute(route.wps); return; }
+      if (distToNext < 0.5) {
+        // Calibração: registra previsto×real só pra trajetos que a previsão dizia
+        // chegar no EV (onFuel=false). Trajeto que já ia a gasolina não tem SOC útil.
+        if (route.predSoc != null && route.predOnFuel === false) _logSocPrediction(route.predSoc, Math.round(soc));
+        _clearRoute(route.wps); return;
+      }
     } else if (distToNext < 0.3) {
       route.completedIdx += 1;
       route.undo = { idx: route.completedIdx, name: next.name, lat: next.lat, lng: next.lng, untilMs: now + 5 * 60_000 };
@@ -7610,39 +7751,45 @@ async function _maybeComputeArrival() {
       _arrivalBusy = false;
       return _maybeComputeArrival();   // recomputa já com o próximo trecho
     }
-    const cap = 34;   // capacidade útil de fábrica (H6 PHEV)
+    const cap = _capacityKwh();   // capacidade útil estimada (fallback 34, H6 PHEV)
     const acOn = state.hvac_ac_enable === '1' || state.ac_state === 'on';
     const tempOut = +state.outside_temp || 28;
     const acH = acOn ? Math.min(Math.max(0.5 + 0.07 * Math.abs(tempOut - 22), 0.5), 1.5) : 0.12;
-    const kwhPerKm = _recentKwhPerKm();
-    // ETA + SOC CUMULATIVOS por perna: cada parada e o destino final ganham hora de
-    // chegada e SOC previsto na ordem do trajeto.
-    let cumDur = 0, cumDist = 0, cumEnergy = 0;
+    // Modelo de energia (PHEV): handoff EV→combustão + consumo por faixa de via.
+    const em = _energyModelLegs(legsRaw, { soc, cap, acH });
+    // ETA CUMULATIVO por perna, mesclado com o SOC/handoff do modelo de energia.
+    let cumDur = 0, cumDist = 0;
     const legs = legsRaw.map((l, k) => {
       const dMin = l.durationMin || 0, dKm = l.distanceKm || 0;
       cumDur += dMin; cumDist += dKm;
-      cumEnergy += dKm * kwhPerKm + (l.climbM || 0) * 0.0064 - (l.descentM || 0) * 0.0035 + acH * (dMin / 60);
       const arr = new Date(now + cumDur * 60_000);
       const wp = remaining[k] || next;
+      const me = em.legs[k] || {};
       return {
         name: wp.name, lat: wp.lat, lng: wp.lng, isFinal: !!wp.isFinal,
         distKm: Math.round(cumDist * 10) / 10, etaMin: cumDur,
         etaClock: `${String(arr.getHours()).padStart(2, '0')}:${String(arr.getMinutes()).padStart(2, '0')}`,
-        socArrival: Math.min(Math.max(Math.round(soc - cumEnergy / cap * 100), 0), 100),
+        socArrival: me.socArrival != null ? me.socArrival : Math.round(soc),
+        onFuel: !!me.onFuel, fuelL: me.fuelL || 0,
       };
     });
     const fin = legs[legs.length - 1];
+    // Snapshot da 1ª previsão pra calibração na chegada (previsto×real).
+    if (route.predSoc == null) { route.predSoc = em.predictedSoc; route.predOnFuel = em.onFuel; scheduleStateSave(); }
     state.arrival = {
       name: fin.name, distKm: fin.distKm, etaMin: fin.etaMin, etaClock: fin.etaClock,
       socArrival: fin.socArrival, traffic: plan.traffic, legs, ts: now,
-      undo: route.undo ? { name: route.undo.name, untilMs: route.undo.untilMs } : null,
+      fuelL: em.fuelL, onFuel: em.onFuel, evDepleteKm: em.evDepleteKm,
+      confidencePct: em.confidencePct, capacityKwh: em.capacityKwh,
+      energyKwh: em.energyKwh, energyPct: em.energyPct,
+      undo: route.undo ? { name: route.undo.name, untilMs: route.undo.untilMs, skipped: !!route.undo.skipped } : null,
     };
     scheduleStateBroadcast();
     // Republica o nav_dest retido com as pernas + janela de desfazer pro carro renderizar.
     mqttClient.publish(`${MQTT_PREFIX}/cmd/nav_dest`, JSON.stringify({
       lat: fin.lat, lng: fin.lng, name: fin.name, etaClock: fin.etaClock,
       legs, completedIdx: route.completedIdx,
-      undo: route.undo ? { name: route.undo.name, lat: route.undo.lat, lng: route.undo.lng, untilMs: route.undo.untilMs } : null,
+      undo: route.undo ? { name: route.undo.name, lat: route.undo.lat, lng: route.undo.lng, untilMs: route.undo.untilMs, skipped: !!route.undo.skipped } : null,
       ts: now,
     }), { qos: 1, retain: true });
     _navDestRetained = true;
@@ -9162,6 +9309,26 @@ app.post('/api/route-undo', (req, res) => {
   res.json({ ok: true });
 });
 
+// POST /api/route/skip-stop — pula a PRÓXIMA parada pendente (ou idx específico) sem
+// precisar chegar nela. Avança completedIdx por cima dela, abre a janela de desfazer
+// (skipped:true, ~5 min) e recomputa a chegada. Não pula o destino final.
+app.post('/api/route/skip-stop', (req, res) => {
+  const r = state.route;
+  if (!r || !Array.isArray(r.wps) || !r.wps.length) return res.status(404).json({ ok: false, error: 'sem rota ativa' });
+  const reqIdx = Number.isFinite(+req.body?.idx) ? +req.body.idx : (r.completedIdx + 1);
+  const idx = Math.max(r.completedIdx + 1, reqIdx);   // não dá pra "pular" trás de onde já está
+  const wp = r.wps[idx];
+  if (!wp) return res.status(404).json({ ok: false, error: 'parada inexistente' });
+  if (wp.isFinal) return res.status(400).json({ ok: false, error: 'não dá pra pular o destino final' });
+  r.completedIdx = idx;
+  r.undo = { idx, name: wp.name, lat: wp.lat, lng: wp.lng, untilMs: Date.now() + 5 * 60_000, skipped: true };
+  scheduleStateSave();
+  _arrivalMs = 0;
+  _maybeComputeArrival(true);
+  console.log(`[route] parada pulada: ${wp.name} (idx ${idx})`);
+  res.json({ ok: true, skipped: wp.name });
+});
+
 // GET /api/geocode-suggest?q= — autocomplete de endereço (carro/PWA). Sugestões com
 // viés na posição atual do carro. Mapbox c/ token (autocomplete), senão Nominatim.
 app.get('/api/geocode-suggest', async (req, res) => {
@@ -9290,12 +9457,53 @@ async function _fetchRouteMulti(points) {
   };
 }
 
+// Igual ao _fetchRouteMulti, mas pede ALTERNATIVAS (alternatives=true) e devolve um
+// array de rotas (até 3). Cada item no mesmo formato do _fetchRouteMulti.
+async function _fetchRouteAlts(points) {
+  const coordStr = points.map(p => `${p[0]},${p[1]}`).join(';');
+  const norm = rt => ({
+    distance: rt.distance, duration: rt.duration, coords: rt.geometry.coordinates,
+    legs: (rt.legs || []).map(l => ({ distance: l.distance, duration: l.duration })),
+  });
+  const tok = process.env.MAPBOX_TOKEN;
+  if (tok) {
+    try {
+      const mu = `https://api.mapbox.com/directions/v5/mapbox/driving-traffic/${coordStr}`
+        + `?access_token=${tok}&geometries=geojson&overview=full&alternatives=true`;
+      const mj = await (await fetch(mu, { signal: AbortSignal.timeout(9000) })).json();
+      if (mj && mj.routes && mj.routes.length) return mj.routes.slice(0, 3).map(rt => ({ ...norm(rt), traffic: true }));
+      console.warn('[route] Mapbox alt sem rota:', mj && mj.message);
+    } catch (e) { console.warn('[route] Mapbox alt falhou, OSRM:', e.message); }
+  }
+  const u = `https://router.project-osrm.org/route/v1/driving/${coordStr}`
+    + `?overview=full&geometries=geojson&alternatives=true&steps=false`;
+  const rj = await (await fetch(u, { signal: AbortSignal.timeout(9000) })).json();
+  if (!(rj && rj.routes && rj.routes.length)) return null;
+  return rj.routes.slice(0, 3).map(rt => ({ ...norm(rt), traffic: false }));
+}
+
 // Igual ao _routeElevation, mas com paradas: distância/tempo exatos por perna (Mapbox
 // legs) + subida/descida por perna (Open-Meteo na geometria inteira, fatiada pelos
 // índices mais próximos de cada waypoint). points = [origem, …paradas, destino].
 async function _routeElevationMulti(points) {
   const route = await _fetchRouteMulti(points);
   if (!route) return null;
+  return _enrichRoute(route, points);
+}
+
+// Alternativas com altimetria: busca até 3 rotas e enriquece cada uma (legs + subida/
+// descida). Devolve array (≥1) ou null. A primeira é a recomendada do roteador.
+async function _routeElevationAlts(points) {
+  const routes = await _fetchRouteAlts(points);
+  if (!routes || !routes.length) return null;
+  const out = [];
+  for (const r of routes) { const e = await _enrichRoute(r, points); if (e) out.push(e); }
+  return out.length ? out : null;
+}
+
+// Enriquece UMA rota já buscada (route = {distance,duration,coords,traffic,legs}) com
+// subida/descida (Open-Meteo) por perna e totais. points = [origem, …paradas, destino].
+async function _enrichRoute(route, points) {
   const coords = route.coords;
   const step = Math.max(1, Math.ceil(coords.length / 99));
   const pts = [], idxMap = [];
@@ -9404,7 +9612,7 @@ app.post('/api/share/create', (req, res) => {
 // não faz nada.
 //   body: { place?, days?:[0..6 dom..sáb], from?:"HH:MM", to?:"HH:MM", ttlMin?, message? }
 //   message aceita {link} e {local} como placeholders.
-app.post('/api/auto-share', (req, res) => {
+app.post('/api/auto-share', async (req, res) => {
   const b = req.body || {};
   const now = new Date();
   // Janela de dias (0=domingo..6=sábado). Vazio/ausente = todos os dias.
@@ -9419,7 +9627,14 @@ app.post('/api/auto-share', (req, res) => {
     if (!inWin) return res.json({ ok: true, send: false, reason: 'fora da hora' });
   }
   const link = _createShareToken(b.ttlMin);
-  const place = String(b.place || '').trim();
+  let place = String(b.place || '').trim();
+  // Sem place explícito mas com lat/lng (Atalho manda Localização Atual): reverse-geocode → "Bairro, Cidade".
+  if (!place && Number.isFinite(+b.lat) && Number.isFinite(+b.lng)) {
+    try {
+      const g = await _reverseGeocode(+b.lat, +b.lng);
+      place = [g.suburb, g.city].filter(Boolean).join(', ');
+    } catch (_) {}
+  }
   const tmpl = (typeof b.message === 'string' && b.message.trim())
     ? b.message
     : (place ? 'Saí de {local} — acompanhe ao vivo: {link}' : 'Saí agora — acompanhe ao vivo: {link}');
@@ -9552,9 +9767,14 @@ app.get('/api/route-plan', async (req, res) => {
       const [la, lo] = s.split(',').map(Number);
       return (Number.isFinite(la) && Number.isFinite(lo) && (la !== 0 || lo !== 0)) ? [lo, la] : null;
     }).filter(Boolean);
-    let plan;
-    if (stops.length) {
-      const points = [[fromLng, fromLat], ...stops, [toLng, toLat]];
+    const points = [[fromLng, fromLat], ...stops, [toLng, toLat]];
+    const wantAlts = req.query.alt === '1' || req.query.alt === 'true';
+    let plan, alts = null;
+    if (wantAlts) {
+      // Alternativas: o roteador devolve até 3 rotas. A primeira é a primária.
+      alts = await _routeElevationAlts(points);
+      plan = alts && alts[0];
+    } else if (stops.length) {
       plan = await _routeElevationMulti(points);
     } else {
       plan = await _routeElevation(fromLat, fromLng, toLat, toLng);
@@ -9569,7 +9789,98 @@ app.get('/api/route-plan', async (req, res) => {
         if (recentNavDests.length > 30) recentNavDests.shift();
       }
     }
-    res.json({ ...plan, destLat: toLat, destLng: toLng, destName: toName });
+    // Copiloto de energia: SOC de chegada + handoff PHEV + banda de confiança.
+    // Usa o SOC atual do carro (ou ?soc= pra simular). cap/consumo do histórico.
+    const soc = Number.isFinite(+req.query.soc) ? +req.query.soc : Math.round(+state.soc_pct || 0);
+    const cap = _capacityKwh();
+    const acOn = state.hvac_ac_enable === '1' || state.ac_state === 'on';
+    const tempOut = +state.outside_temp || 28;
+    const acH = acOn ? Math.min(Math.max(0.5 + 0.07 * Math.abs(tempOut - 22), 0.5), 1.5) : 0.12;
+    // Roda o modelo de energia sobre as pernas de uma rota qualquer (primária ou alt).
+    const modelOf = (pl) => {
+      const lr = pl.legs && pl.legs.length ? pl.legs
+        : [{ distanceKm: pl.distanceKm, durationMin: pl.durationMin, climbM: pl.climbM, descentM: pl.descentM }];
+      const m = _energyModelLegs(lr, { soc, cap, acH });
+      return { lr, m };
+    };
+    const { lr: legsRaw, m: em } = modelOf(plan);
+    // Alternativas resumidas pra comparar (tempo/dist/subida/SOC/gasolina) e escolher.
+    const routes = alts ? alts.map((a, i) => {
+      const { m } = modelOf(a);
+      return {
+        idx: i, distanceKm: a.distanceKm, durationMin: a.durationMin,
+        climbM: a.climbM, descentM: a.descentM, traffic: a.traffic,
+        predictedSoc: m.predictedSoc, onFuel: m.onFuel, fuelL: m.fuelL,
+        evDepleteKm: m.evDepleteKm, energyKwh: m.energyKwh,
+      };
+    }) : undefined;
+    res.json({
+      ...plan, destLat: toLat, destLng: toLng, destName: toName,
+      soc, predictedSoc: em.predictedSoc, fuelL: em.fuelL, onFuel: em.onFuel,
+      evDepleteKm: em.evDepleteKm, confidencePct: em.confidencePct,
+      capacityKwh: em.capacityKwh, energyKwh: em.energyKwh, energyPct: em.energyPct,
+      energyLegs: em.legs.map((l, k) => ({
+        distanceKm: legsRaw[k] ? legsRaw[k].distanceKm : null,
+        socArrival: l.socArrival, onFuel: l.onFuel, fuelL: l.fuelL,
+      })),
+      ...(routes ? { routes } : {}),
+    });
+  } catch (e) {
+    res.status(500).json({ error: String(e.message || e) });
+  }
+});
+
+// Copiloto reverso: "carrega até X". Dado um trajeto + SOC de chegada desejado,
+// calcula o SOC de PARTIDA necessário, quanto falta (% e kWh) e quantos minutos
+// na estação mais rápida do histórico. Reaproveita a rota+modelo do /api/route-plan.
+app.get('/api/charge-plan', async (req, res) => {
+  try {
+    const fromLat = +req.query.from_lat, fromLng = +req.query.from_lng;
+    if (!Number.isFinite(fromLat) || !Number.isFinite(fromLng))
+      return res.status(400).json({ error: 'from_lat/from_lng obrigatórios' });
+    let toLat = +req.query.to_lat, toLng = +req.query.to_lng;
+    if (!Number.isFinite(toLat) || !Number.isFinite(toLng)) {
+      if (!req.query.q) return res.status(400).json({ error: 'to_lat/to_lng ou q obrigatórios' });
+      const g = await _geocode(String(req.query.q));
+      if (!g) return res.status(404).json({ error: 'destino não encontrado' });
+      toLat = g.lat; toLng = g.lng;
+    }
+    const stops = String(req.query.stops || '').split(';').map(s => {
+      const [la, lo] = s.split(',').map(Number);
+      return (Number.isFinite(la) && Number.isFinite(lo) && (la !== 0 || lo !== 0)) ? [lo, la] : null;
+    }).filter(Boolean);
+    const plan = stops.length
+      ? await _routeElevationMulti([[fromLng, fromLat], ...stops, [toLng, toLat]])
+      : await _routeElevation(fromLat, fromLng, toLat, toLng);
+    if (!plan) return res.status(502).json({ error: 'rota indisponível' });
+
+    const soc = Number.isFinite(+req.query.soc) ? +req.query.soc : Math.round(+state.soc_pct || 0);
+    const target = Number.isFinite(+req.query.target) ? Math.min(Math.max(+req.query.target, 0), 100) : 20;
+    const cap = _capacityKwh();
+    const acOn = state.hvac_ac_enable === '1' || state.ac_state === 'on';
+    const tempOut = +state.outside_temp || 28;
+    const acH = acOn ? Math.min(Math.max(0.5 + 0.07 * Math.abs(tempOut - 22), 0.5), 1.5) : 0.12;
+    const legsRaw = plan.legs && plan.legs.length ? plan.legs
+      : [{ distanceKm: plan.distanceKm, durationMin: plan.durationMin, climbM: plan.climbM, descentM: plan.descentM }];
+    const em = _energyModelLegs(legsRaw, { soc, cap, acH });
+
+    // SOC de partida pra chegar com `target`: energia do trajeto (%) + margem alvo.
+    const socNeeded = Math.min(Math.round(em.energyPct + target), 100);
+    const addPct = Math.max(socNeeded - soc, 0);
+    const addKwh = Math.round(addPct / 100 * cap * 10) / 10;
+    const stations = _chargeStations();
+    const best = stations[0] || null;
+    const minutes = (best && addKwh > 0) ? Math.ceil(addKwh / best.avgPowerKw * 60) : 0;
+
+    res.json({
+      soc, target, capacityKwh: cap,
+      energyKwh: em.energyKwh, energyPct: em.energyPct,
+      predictedSoc: em.predictedSoc, onFuel: em.onFuel, fuelL: em.fuelL,
+      feasibleNow: addPct === 0,                 // já dá pra chegar com a margem alvo
+      socNeeded, addPct, addKwh,
+      station: best, minutes,                    // estação mais rápida + minutos pra completar
+      stations,
+    });
   } catch (e) {
     res.status(500).json({ error: String(e.message || e) });
   }

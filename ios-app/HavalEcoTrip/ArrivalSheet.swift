@@ -58,6 +58,8 @@ struct ArrivalLeg: Identifiable {
     let lat: Double, lng: Double
     let distanceKm: Double, durationMin: Int, etaClock: String
     let socAtArrival: Int
+    let onFuel: Bool                            // já rodando a gasolina ao chegar nesta perna
+    let fuelL: Double                           // gasolina acumulada até aqui (L)
     let isFinal: Bool
 }
 
@@ -68,8 +70,32 @@ struct ArrivalPlan {
     let climbM: Int, descentM: Int, traffic: Bool
     let curSoc: Int, predictedSoc: Int
     let energyKwh: Double, capacityKwh: Double
+    let fuelL: Double                           // gasolina total prevista (0 = chega no EV)
+    let onFuel: Bool                            // chega rodando a gasolina (EV esgotou)
+    let evDepleteKm: Double?                    // km onde o EV acaba (nil = chega inteiro no EV)
+    let confidencePct: Int                      // banda ± de confiança (erro médio histórico)
     var legs: [ArrivalLeg] = []                 // 1 por perna; última = destino final
     var stops: [(lat: Double, lng: Double, name: String)] = []   // paradas (sem origem/destino)
+}
+
+// Rota alternativa (resumo) pra comparar/escolher. Vem de /api/route-plan?alt=1.
+// idx 0 = rota primária. Escolher uma muda a previsão mostrada.
+struct RouteAlt: Identifiable {
+    let id = UUID()
+    let idx: Int
+    let distanceKm: Double, durationMin: Int
+    let climbM: Int, descentM: Int, traffic: Bool
+    let predictedSoc: Int, onFuel: Bool
+    let fuelL: Double, evDepleteKm: Double?, energyKwh: Double
+}
+
+// Plano de recarga reverso: quanto carregar (e onde/quanto tempo) pra chegar com a
+// margem alvo. Vem do /api/charge-plan.
+struct ChargePlan {
+    let feasibleNow: Bool
+    let target: Int, socNeeded: Int, addPct: Int
+    let addKwh: Double, minutes: Int
+    let stationName: String, stationPowerKw: Double
 }
 
 @MainActor
@@ -77,29 +103,17 @@ final class ArrivalStore: ObservableObject {
     @Published var loading = false
     @Published var error: String?
     @Published var plan: ArrivalPlan?
+    @Published var routeAlts: [RouteAlt] = []       // rotas alternativas (vazio = só 1 rota)
+    @Published var selectedRouteIdx = 0             // rota escolhida (índice em routeAlts)
+    @Published var chargePlan: ChargePlan?
+    @Published var chargeLoading = false
+    // Origem/SOC da última rota calculada — reaproveitados pelo plano de recarga.
+    private var lastFrom: (Double, Double)?
+    private var lastSoc = 0
 
     private var base: String {
         let u = Settings.bridgeURL.isEmpty ? AuthConfig.bridgeURL : Settings.bridgeURL
         return u.hasSuffix("/") ? String(u.dropLast()) : u
-    }
-
-    /// kWh/km recente: net/dist das viagens EV (combustível ~0). Fallback 0,16.
-    private func kwhPerKm(_ trips: [Trip]) -> Double {
-        let ev = trips.filter { $0.fuelL < 0.05 && $0.distKm >= 2 }.prefix(40)
-        let d = ev.reduce(0) { $0 + $1.distKm }, k = ev.reduce(0) { $0 + $1.netKwh }
-        guard d > 5, k > 0 else { return 0.16 }
-        return min(max(k / d, 0.05), 0.5)
-    }
-
-    /// Capacidade útil (kWh) estimada das viagens EV com queda de SOC: net / (ΔSOC/100).
-    private func capacityKwh(_ trips: [Trip]) -> Double {
-        let caps: [Double] = trips.compactMap { t in
-            let drop = t.startSoc - t.endSoc
-            guard t.fuelL < 0.05, drop > 5, t.netKwh > 0.5 else { return nil }
-            return t.netKwh / (drop / 100.0)
-        }.filter { $0 > 8 && $0 < 80 }
-        guard !caps.isEmpty else { return 34.0 }   // fallback: capacidade de fábrica (H6 PHEV)
-        return caps.reduce(0, +) / Double(caps.count)
     }
 
     // toLat/toLng != nil → destino já resolvido. fromLat/fromLng != nil → saída custom
@@ -109,15 +123,15 @@ final class ArrivalStore: ObservableObject {
                  stops: [(lat: Double, lng: Double, name: String)] = []) async {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard (!q.isEmpty || (toLat != nil && toLng != nil)), !loading else { return }
-        loading = true; error = nil; plan = nil
+        loading = true; error = nil; plan = nil; chargePlan = nil
+        routeAlts = []; selectedRouteIdx = 0
         defer { loading = false }
 
         let car = CarStore.shared
         let lat = fromLat ?? car.lat, lng = fromLng ?? car.lng
         if lat == 0 && lng == 0 { error = "Defina a saída ou aguarde o GPS do carro."; return }
         let curSoc = Int(car.socPct.rounded())
-        let acOn = car.acEnable
-        let tempOut = car.outsideTemp != 0 ? car.outsideTemp : 28
+        lastFrom = (lat, lng); lastSoc = curSoc
 
         let nm = q.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
         var urlStr: String
@@ -126,6 +140,7 @@ final class ArrivalStore: ObservableObject {
         } else {
             urlStr = "\(base)/api/route-plan?from_lat=\(lat)&from_lng=\(lng)&q=\(nm)"
         }
+        urlStr += "&soc=\(curSoc)&alt=1"   // SOC da UI + pede rotas alternativas pra comparar
         if !stops.isEmpty {
             urlStr += "&stops=" + stops.map { "\($0.lat),\($0.lng)" }.joined(separator: ";")
         }
@@ -146,33 +161,36 @@ final class ArrivalStore: ObservableObject {
             let name = (j["destName"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? q
             let dLat = num(j["destLat"]), dLng = num(j["destLng"])
 
-            let cap = capacityKwh(trips)
-            let perKm = kwhPerKm(trips)
-            let acH = acOn ? min(max(0.5 + 0.07 * abs(tempOut - 22), 0.5), 1.5) : 0.12
-            // Energia de uma perna a partir da geometria (mesmo modelo, por trecho).
-            func legEnergy(_ d: Double, _ dur: Int, _ cl: Int, _ ds: Int) -> Double {
-                max(d * perKm + Double(cl) * 0.0064 - Double(ds) * 0.0035 + acH * (Double(dur) / 60.0), 0)
-            }
+            // Modelo de energia (PHEV) já vem pronto do bridge: SOC de chegada, handoff
+            // EV→gasolina, banda de confiança e capacidade — sem recálculo no cliente.
+            let cap = num(j["capacityKwh"])
+            let energy = num(j["energyKwh"])
+            let predTop = Int(num(j["predictedSoc"]))
+            let fuelL = num(j["fuelL"])
+            let onFuel = (j["onFuel"] as? Bool) ?? false
+            let evDep = j["evDepleteKm"]
+            let evDepleteKm: Double? = (evDep == nil || evDep is NSNull) ? nil : num(evDep)
+            let conf = Int(num(j["confidencePct"]))
             let df = DateFormatter(); df.locale = Locale(identifier: "pt_BR"); df.dateFormat = "HH:mm"
 
-            // Pernas vindas do bridge (com paradas). Sem paradas → sintetiza 1 perna
-            // com os totais, pra a UI tratar tudo igual.
+            // Pernas: distância/duração/ETA da geometria (j["legs"]); SOC/handoff/gasolina
+            // do modelo de energia (j["energyLegs"], paralelo). Sem paradas → 1 perna.
             let rawLegs = (j["legs"] as? [[String: Any]]) ?? []
+            let energyLegs = (j["energyLegs"] as? [[String: Any]]) ?? []
             var legs: [ArrivalLeg] = []
-            var cumEnergy = 0.0, cumMin = 0
+            var cumMin = 0
             if rawLegs.isEmpty {
-                let e = legEnergy(distKm, durMin, climb, desc)
-                let soc = min(max(curSoc - Int((e / cap * 100).rounded()), 0), 100)
                 legs = [ArrivalLeg(name: name, lat: dLat, lng: dLng, distanceKm: distKm, durationMin: durMin,
                                    etaClock: df.string(from: Date().addingTimeInterval(Double(durMin) * 60)),
-                                   socAtArrival: soc, isFinal: true)]
-                cumEnergy = e
+                                   socAtArrival: predTop, onFuel: onFuel, fuelL: fuelL, isFinal: true)]
             } else {
                 for (k, lg) in rawLegs.enumerated() {
                     let d = num(lg["distanceKm"]), dur = Int(num(lg["durationMin"]))
-                    let cl = Int(num(lg["climbM"])), ds = Int(num(lg["descentM"]))
-                    cumEnergy += legEnergy(d, dur, cl, ds); cumMin += dur
-                    let soc = min(max(curSoc - Int((cumEnergy / cap * 100).rounded()), 0), 100)
+                    cumMin += dur
+                    let el = k < energyLegs.count ? energyLegs[k] : [:]
+                    let soc = Int(num(el["socArrival"]))
+                    let legFuel = num(el["fuelL"])
+                    let legOnFuel = (el["onFuel"] as? Bool) ?? false
                     let isFinal = (k == rawLegs.count - 1)
                     // stops é indexado pelo índice da leg — se o backend mandar mais legs
                     // que stops, stops[k] crashava (out of bounds). Cai pro destino final.
@@ -180,21 +198,80 @@ final class ArrivalStore: ObservableObject {
                         ? (stops[k].lat, stops[k].lng, stops[k].name) : (dLat, dLng, name)
                     legs.append(ArrivalLeg(name: pt.2, lat: pt.0, lng: pt.1, distanceKm: d, durationMin: dur,
                                            etaClock: df.string(from: Date().addingTimeInterval(Double(cumMin) * 60)),
-                                           socAtArrival: soc, isFinal: isFinal))
+                                           socAtArrival: soc, onFuel: legOnFuel, fuelL: legFuel, isFinal: isFinal))
                 }
             }
-            let energy = cumEnergy
-            let pred = legs.last?.socAtArrival ?? min(max(curSoc - Int((energy / cap * 100).rounded()), 0), 100)
+            let pred = legs.last?.socAtArrival ?? predTop
 
             plan = ArrivalPlan(destName: name, destLat: dLat, destLng: dLng,
                                distanceKm: distKm, durationMin: durMin,
                                etaClock: df.string(from: Date().addingTimeInterval(Double(durMin) * 60)),
                                climbM: climb, descentM: desc, traffic: traffic,
                                curSoc: curSoc, predictedSoc: pred, energyKwh: energy, capacityKwh: cap,
+                               fuelL: fuelL, onFuel: onFuel, evDepleteKm: evDepleteKm, confidencePct: conf,
                                legs: legs, stops: stops)
+
+            // Rotas alternativas (idx 0 = a já mostrada). Só expõe o seletor se vier >1.
+            if let arr = j["routes"] as? [[String: Any]], arr.count > 1 {
+                routeAlts = arr.map { a in
+                    let ev = a["evDepleteKm"]
+                    return RouteAlt(idx: Int(num(a["idx"])), distanceKm: num(a["distanceKm"]),
+                                    durationMin: Int(num(a["durationMin"])), climbM: Int(num(a["climbM"])),
+                                    descentM: Int(num(a["descentM"])), traffic: (a["traffic"] as? Bool) ?? false,
+                                    predictedSoc: Int(num(a["predictedSoc"])), onFuel: (a["onFuel"] as? Bool) ?? false,
+                                    fuelL: num(a["fuelL"]),
+                                    evDepleteKm: (ev == nil || ev is NSNull) ? nil : num(ev),
+                                    energyKwh: num(a["energyKwh"]))
+                }
+            }
         } catch {
             self.error = "Falha ao calcular (\(error.localizedDescription))"
         }
+    }
+
+    // Troca a rota mostrada por uma alternativa: reescreve as métricas de topo
+    // (dist/tempo/SOC/gasolina/energia) com o resumo da rota escolhida. Multi-parada
+    // não expõe alternativas (o roteador só dá alternativas em A→B direto), então a
+    // perna única é reconstruída; com paradas, mantém as pernas originais.
+    func selectRoute(_ a: RouteAlt) {
+        guard let p = plan else { return }
+        selectedRouteIdx = a.idx
+        let df = DateFormatter(); df.locale = Locale(identifier: "pt_BR"); df.dateFormat = "HH:mm"
+        let eta = df.string(from: Date().addingTimeInterval(Double(a.durationMin) * 60))
+        var legs = p.legs
+        if legs.count == 1 {
+            legs = [ArrivalLeg(name: p.destName, lat: p.destLat, lng: p.destLng,
+                               distanceKm: a.distanceKm, durationMin: a.durationMin, etaClock: eta,
+                               socAtArrival: a.predictedSoc, onFuel: a.onFuel, fuelL: a.fuelL, isFinal: true)]
+        }
+        plan = ArrivalPlan(destName: p.destName, destLat: p.destLat, destLng: p.destLng,
+                           distanceKm: a.distanceKm, durationMin: a.durationMin, etaClock: eta,
+                           climbM: a.climbM, descentM: a.descentM, traffic: a.traffic,
+                           curSoc: p.curSoc, predictedSoc: a.predictedSoc, energyKwh: a.energyKwh,
+                           capacityKwh: p.capacityKwh, fuelL: a.fuelL, onFuel: a.onFuel,
+                           evDepleteKm: a.evDepleteKm, confidencePct: p.confidencePct, legs: legs, stops: p.stops)
+        chargePlan = nil   // rota mudou → recalcula plano de recarga sob demanda
+    }
+
+    // Plano de recarga reverso pro destino atual: usa a origem/SOC da última rota +
+    // a margem alvo (target). Reaproveita o destino+paradas do plano calculado.
+    func loadChargePlan(target: Int) async {
+        guard let p = plan, let from = lastFrom, !base.isEmpty else { return }
+        chargeLoading = true; defer { chargeLoading = false }
+        var s = "\(base)/api/charge-plan?from_lat=\(from.0)&from_lng=\(from.1)&to_lat=\(p.destLat)&to_lng=\(p.destLng)&soc=\(lastSoc)&target=\(target)"
+        if !p.stops.isEmpty { s += "&stops=" + p.stops.map { "\($0.lat),\($0.lng)" }.joined(separator: ";") }
+        guard let url = URL(string: s) else { return }
+        var r = URLRequest(url: url); r.timeoutInterval = 15
+        r.addValue("Bearer " + Settings.bridgeToken, forHTTPHeaderField: "Authorization")
+        guard let (data, resp) = try? await URLSession.shared.data(for: r),
+              (resp as? HTTPURLResponse)?.statusCode == 200,
+              let j = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+        let st = j["station"] as? [String: Any]
+        chargePlan = ChargePlan(
+            feasibleNow: (j["feasibleNow"] as? Bool) ?? false,
+            target: Int(num(j["target"])), socNeeded: Int(num(j["socNeeded"])),
+            addPct: Int(num(j["addPct"])), addKwh: num(j["addKwh"]), minutes: Int(num(j["minutes"])),
+            stationName: (st?["name"] as? String) ?? "", stationPowerKw: num(st?["avgPowerKw"]))
     }
 
     @Published var sentMsg: String?
@@ -786,6 +863,77 @@ struct ArrivalSheet: View {
         return resp.mapItems.first?.placemark.coordinate
     }
 
+    // Cartão do plano de recarga reverso: quanto carregar (e onde/quanto tempo) pra
+    // chegar com a margem alvo, OU confirmação de que já dá pra ir.
+    @ViewBuilder private func chargePlanCard(_ cp: ChargePlan) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if cp.feasibleNow {
+                HStack(spacing: 8) {
+                    Image(systemName: "checkmark.seal.fill").foregroundStyle(DS.green)
+                    Text("Já dá pra ir — chega com ~\(cp.target)% sem recarregar.")
+                        .font(.subheadline).foregroundStyle(DS.text)
+                }
+            } else {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text("Carregue até").font(.subheadline).foregroundStyle(DS.muted)
+                    Text("\(cp.socNeeded)%").font(.system(size: 24, weight: .bold, design: .rounded)).foregroundStyle(DS.teal)
+                    Text("(+\(cp.addPct)% · \(Fmt.dec1(cp.addKwh)) kWh)").font(.caption).foregroundStyle(DS.muted)
+                }
+                Text("para chegar com ~\(cp.target)% de margem.").font(.caption).foregroundStyle(DS.muted)
+                if !cp.stationName.isEmpty {
+                    HStack(spacing: 6) {
+                        Image(systemName: "bolt.fill").font(.caption).foregroundStyle(DS.orange)
+                        Text("≈\(cp.minutes) min em \(cp.stationName) (\(Fmt.dec1(cp.stationPowerKw)) kW)")
+                            .font(.caption).foregroundStyle(DS.text)
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(DS.teal.opacity(0.10))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    // Seletor de rotas alternativas: uma linha por rota com tempo/dist e o desfecho
+    // de energia (SOC na chegada ou gasolina). A selecionada fica destacada.
+    @ViewBuilder private var routeAltsPicker: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Rotas").font(.caption).foregroundStyle(DS.muted)
+            ForEach(store.routeAlts) { a in
+                let sel = a.idx == store.selectedRouteIdx
+                Button { store.selectRoute(a) } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: sel ? "largecircle.fill.circle" : "circle")
+                            .font(.subheadline).foregroundStyle(sel ? DS.teal : DS.muted)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(a.idx == 0 ? "Rota recomendada" : "Alternativa \(a.idx)")
+                                .font(.subheadline.weight(.semibold)).foregroundStyle(DS.text)
+                            HStack(spacing: 4) {
+                                Text("\(a.durationMin) min · \(Fmt.km(a.distanceKm)) km").font(.caption2).foregroundStyle(DS.muted)
+                                if a.traffic { Image(systemName: "car.2.fill").font(.system(size: 9)).foregroundStyle(DS.muted) }
+                            }
+                        }
+                        Spacer(minLength: 0)
+                        if a.onFuel {
+                            HStack(spacing: 3) {
+                                Image(systemName: "fuelpump.fill").font(.caption2)
+                                Text("\(Fmt.dec1(a.fuelL)) L").font(.system(size: 16, weight: .bold, design: .rounded))
+                            }.foregroundStyle(DS.orange)
+                        } else {
+                            Text("\(a.predictedSoc)%").font(.system(size: 18, weight: .bold, design: .rounded))
+                                .foregroundStyle(arrivalSocColor(a.predictedSoc))
+                        }
+                    }
+                    .padding(10)
+                    .background(sel ? DS.teal.opacity(0.12) : DS.panel2)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
     @ViewBuilder private func resultCard(_ p: ArrivalPlan) -> some View {
         DSCard {
             VStack(alignment: .leading, spacing: 14) {
@@ -802,9 +950,50 @@ struct ArrivalSheet: View {
                     Text("SOC na chegada").font(.subheadline).foregroundStyle(DS.muted).padding(.bottom, 10)
                     Text("\(p.predictedSoc)").font(.system(size: 64, weight: .heavy, design: .rounded))
                         .foregroundStyle(arrivalSocColor(p.predictedSoc))
-                    Text("%").font(.title3).foregroundStyle(DS.muted).padding(.bottom, 8)
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text("%").font(.title3).foregroundStyle(DS.muted)
+                        // Banda de confiança: erro médio histórico (auto-calibração).
+                        Text("± \(p.confidencePct)").font(.caption2).foregroundStyle(DS.muted)
+                    }.padding(.bottom, 8)
                     Spacer()
                     Text("agora \(p.curSoc)%").font(.subheadline).foregroundStyle(DS.muted).padding(.bottom, 10)
+                }
+
+                // Escolha de rota: compara alternativas (tempo/dist/SOC/gasolina) e
+                // escolhe — a previsão mostrada passa a refletir a rota selecionada.
+                if store.routeAlts.count > 1 { routeAltsPicker }
+
+                // Handoff PHEV: o EV não chega — o motor a combustão assume no caminho.
+                if p.onFuel || p.fuelL > 0 || p.evDepleteKm != nil {
+                    HStack(spacing: 10) {
+                        Image(systemName: "fuelpump.fill").font(.title3).foregroundStyle(DS.orange)
+                        VStack(alignment: .leading, spacing: 2) {
+                            if let dep = p.evDepleteKm {
+                                Text("Bateria acaba em ~\(Fmt.km(dep)) km").font(.subheadline.weight(.semibold)).foregroundStyle(DS.text)
+                            } else {
+                                Text("Trecho rodando a gasolina").font(.subheadline.weight(.semibold)).foregroundStyle(DS.text)
+                            }
+                            Text("Motor assume · ~\(Fmt.dec1(p.fuelL)) L de gasolina até o destino")
+                                .font(.caption2).foregroundStyle(DS.muted)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .padding(10)
+                    .background(DS.orange.opacity(0.12))
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+
+                // Plano de recarga reverso: "carrega até X% pra chegar com margem".
+                // Aparece quando o EV não chega (vai usar gasolina). Toca → consulta o bridge.
+                if p.onFuel || p.fuelL > 0 {
+                    if let cp = store.chargePlan {
+                        chargePlanCard(cp)
+                    } else {
+                        DSActionButton(icon: "bolt.fill", title: "Plano de recarga",
+                                       color: DS.teal, busy: store.chargeLoading) {
+                            Task { await store.loadChargePlan(target: 20) }
+                        }
+                    }
                 }
 
                 HStack(spacing: 10) {
@@ -826,8 +1015,15 @@ struct ArrivalSheet: View {
                                     Text(lg.name).font(.subheadline.weight(.semibold)).foregroundStyle(DS.text).lineLimit(1)
                                     Text("\(lg.etaClock) · \(Fmt.km(lg.distanceKm)) km").font(.caption2).foregroundStyle(DS.muted)
                                 }.frame(maxWidth: .infinity, alignment: .leading)
-                                Text("\(lg.socAtArrival)%").font(.system(size: 19, weight: .bold, design: .rounded))
-                                    .foregroundStyle(arrivalSocColor(lg.socAtArrival))
+                                if lg.onFuel {
+                                    HStack(spacing: 3) {
+                                        Image(systemName: "fuelpump.fill").font(.caption)
+                                        Text("\(Fmt.dec1(lg.fuelL)) L").font(.system(size: 16, weight: .bold, design: .rounded))
+                                    }.foregroundStyle(DS.orange)
+                                } else {
+                                    Text("\(lg.socAtArrival)%").font(.system(size: 19, weight: .bold, design: .rounded))
+                                        .foregroundStyle(arrivalSocColor(lg.socAtArrival))
+                                }
                             }
                         }
                     }

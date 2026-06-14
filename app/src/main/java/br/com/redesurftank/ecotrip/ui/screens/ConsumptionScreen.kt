@@ -629,15 +629,62 @@ fun ConsumptionScreen() {
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    Text("✓", fontSize = 18.sp, color = AuroraTeal)
+                    Text(if (u.skipped) "⤼" else "✓", fontSize = 18.sp, color = AuroraTeal)
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("Parada concluída: ${u.name}", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-                        Text("Avançou pra próxima parada", fontSize = 11.sp, color = TextSecondary)
+                        Text(
+                            if (u.skipped) "Parada pulada: ${u.name}" else "Parada concluída: ${u.name}",
+                            fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary,
+                        )
+                        Text(
+                            if (u.skipped) "Indo direto pro destino" else "Avançou pra próxima parada",
+                            fontSize = 11.sp, color = TextSecondary,
+                        )
                     }
                     OutlinedButton(
                         onClick = { undoScope.launch { postRouteUndo(tripManager) } },
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = AuroraTeal),
                     ) { Text("Desfazer", fontSize = 12.sp, fontWeight = FontWeight.Bold) }
+                }
+            }
+        }
+
+        // ── Pular parada: numa rota multi-parada, deixa pular a PRÓXIMA parada e ir
+        // direto pro destino. A ≤2 km vira um aviso destacado (laranja). Sem undo
+        // ativo (evita empilhar com o banner de desfazer).
+        val skipNext = navDest?.legs?.firstOrNull { !it.isFinal }
+        val undoActive = navDest?.undo?.let { it.untilMs > System.currentTimeMillis() } == true
+        if (skipNext != null && !undoActive && resumableTrip == null) {
+            val near = skipNext.distKm <= 2.0
+            val accent = if (near) Color(0xFFFF9F0A) else AccentBlue
+            Surface(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(horizontal = 40.dp, vertical = 16.dp)
+                    .fillMaxWidth(),
+                color = SurfaceCard,
+                shape = RoundedCornerShape(10.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, accent.copy(alpha = 0.4f)),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Text("⤼", fontSize = 18.sp, color = accent)
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            if (near) "A ${"%.1f".format(skipNext.distKm)} km de ${skipNext.name}" else "Próxima parada: ${skipNext.name}",
+                            fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary,
+                        )
+                        Text(
+                            if (near) "Não precisa parar? Pule e vá direto." else "${"%.1f".format(skipNext.distKm)} km",
+                            fontSize = 11.sp, color = TextSecondary,
+                        )
+                    }
+                    Button(
+                        onClick = { undoScope.launch { postRouteSkip(tripManager) } },
+                        colors = ButtonDefaults.buttonColors(containerColor = accent),
+                    ) { Text("Pular parada", fontSize = 12.sp, fontWeight = FontWeight.Bold) }
                 }
             }
         }

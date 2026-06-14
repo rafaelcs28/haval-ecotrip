@@ -32,6 +32,8 @@ final class ConfigStore: ObservableObject {
     @Published var laPrefs: [String: Bool] = [:]
     @Published var pushPrefs: [String: Bool] = [:]
     @Published var pushNums: [String: Int] = [:]
+    @Published var pushStrs: [String: String] = [:]      // prefs string (security_from/to)
+    @Published var securityDays: [Int] = []              // 0=dom..6=sáb (janela de segurança)
     @Published var twofaEnabled = false
     // Sobre
     @Published var pwaVersion = "—"
@@ -86,6 +88,10 @@ final class ConfigStore: ObservableObject {
             pushNums = o.compactMapValues { v -> Int? in
                 if let i = v as? Int { return i }; if let d = v as? Double { return Int(d) }; return nil
             }
+            pushStrs = o.compactMapValues { $0 as? String }
+            if let arr = o["security_days"] as? [Any] {
+                securityDays = arr.compactMap { ($0 as? Int) ?? ($0 as? NSNumber)?.intValue ?? Int("\($0)") }
+            }
         }
         if let (c, d) = await send("/api/auth/2fa/status", "GET"), c == 200 {
             twofaEnabled = (obj(d)["enabled"] as? Bool) ?? false
@@ -109,6 +115,8 @@ final class ConfigStore: ObservableObject {
     func setPush(_ key: String, _ value: Bool) async { await send("/api/push/prefs", "POST", ["key": key, "value": value]); pushPrefs[key] = value }
     func setPushNum(_ key: String, _ value: Int) async { await send("/api/push/prefs", "POST", ["key": key, "value": value]); pushNums[key] = value }
     func setPlaceList(_ key: String, _ ids: [String]) async { await send("/api/push/prefs", "POST", ["key": key, "value": ids]); placeLists[key] = ids }
+    func setPushStr(_ key: String, _ value: String) async { await send("/api/push/prefs", "POST", ["key": key, "value": value]); pushStrs[key] = value }
+    func setSecurityDays(_ days: [Int]) async { let d = days.sorted(); await send("/api/push/prefs", "POST", ["key": "security_days", "value": d]); securityDays = d }
 
     // Locais conhecidos
     func loadPlaces() async {

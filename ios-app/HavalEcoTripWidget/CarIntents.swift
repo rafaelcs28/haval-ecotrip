@@ -6,6 +6,9 @@
 import AppIntents
 import WidgetKit
 import Foundation
+#if canImport(UIKit)
+import UIKit
+#endif
 
 enum CarIntentAPI {
     private static var base: String {
@@ -24,6 +27,24 @@ enum CarIntentAPI {
             return (resp as? HTTPURLResponse)?.statusCode == 200
         }
         return false
+    }
+
+    /// Cria um link de acompanhamento ao vivo (POST /api/auto-share) e devolve a
+    /// mensagem pronta + URL. ttlMin = validade do link em minutos.
+    static func shareLive(ttlMin: Int) async -> (message: String, url: String)? {
+        guard !base.isEmpty, let url = URL(string: "\(base)/api/auto-share") else { return nil }
+        var r = URLRequest(url: url); r.httpMethod = "POST"; r.timeoutInterval = 12
+        r.addValue("Bearer " + Settings.bridgeToken, forHTTPHeaderField: "Authorization")
+        r.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        let body: [String: Any] = ["ttlMin": ttlMin]
+        r.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        guard let (d, resp) = try? await URLSession.shared.data(for: r),
+              (resp as? HTTPURLResponse)?.statusCode == 200,
+              let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+              (j["send"] as? Bool) == true else { return nil }
+        let msg = (j["message"] as? String) ?? ""
+        let link = (j["url"] as? String) ?? ""
+        return (msg, link)
     }
 
     /// Lê o SOC atual (e autonomia EV) do estado do carro.
@@ -106,6 +127,26 @@ struct SocQueryIntent: AppIntent {
 }
 
 @available(iOS 16.0, *)
+struct ShareLiveIntent: AppIntent {
+    static var title: LocalizedStringResource = "Compartilhar ao vivo"
+    static var description = IntentDescription("Cria um link de acompanhamento ao vivo do trajeto e copia a mensagem pronta.")
+
+    @Parameter(title: "Minutos", description: "Por quanto tempo o link fica válido.", default: 120)
+    var minutes: Int
+
+    func perform() async throws -> some IntentResult & ProvidesDialog & ReturnsValue<String> {
+        let ttl = max(5, min(1440, minutes))
+        guard let s = await CarIntentAPI.shareLive(ttlMin: ttl) else {
+            return .result(value: "", dialog: "Não consegui criar o link agora.")
+        }
+        #if canImport(UIKit)
+        await MainActor.run { UIPasteboard.general.string = s.message }
+        #endif
+        return .result(value: s.message, dialog: "Link criado e copiado. \(s.message)")
+    }
+}
+
+@available(iOS 16.0, *)
 struct EcotripShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
         AppShortcut(intent: LockCarIntent(), phrases: [
@@ -124,5 +165,9 @@ struct EcotripShortcuts: AppShortcutsProvider {
             "Quanto de bateria no \(.applicationName)",
             "Bateria do carro no \(.applicationName)",
         ], shortTitle: "Bateria", systemImageName: "bolt.fill")
+        AppShortcut(intent: ShareLiveIntent(), phrases: [
+            "Compartilhar ao vivo no \(.applicationName)",
+            "Compartilhar meu trajeto no \(.applicationName)",
+        ], shortTitle: "Compartilhar ao vivo", systemImageName: "location.fill.viewfinder")
     }
 }

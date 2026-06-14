@@ -406,6 +406,20 @@ final class CarStore: ObservableObject {
     var onePedalOn: Bool { intOrNil("one_pedal") == 1 }
     var espOn: Bool { intOrNil("esp_enable") == 1 }
 
+    // Rota ativa (multi-parada) publicada pelo bridge em state.arrival.
+    var arrivalRaw: [String: Any]? { raw["arrival"] as? [String: Any] }
+
+    /// Pula a próxima parada (não-final) da rota ativa. idx nil = próxima parada.
+    @discardableResult func skipStop(idx: Int? = nil) async -> Bool {
+        var body: [String: Any] = [:]
+        if let i = idx { body["idx"] = i }
+        return await command("/api/route/skip-stop", body: body)
+    }
+    /// Desfaz a última parada pulada/concluída (dentro da janela de 5 min).
+    @discardableResult func routeUndo() async -> Bool {
+        await command("/api/route-undo", body: [:])
+    }
+
     // Viagem em curso (objeto current_trip, publicado pelo carro)
     var trip: [String: Any]? { raw["current_trip"] as? [String: Any] }
     var tripActive: Bool { trip != nil }
