@@ -9461,22 +9461,31 @@ async function _fetchRouteMulti(points) {
 // array de rotas (até 3). Cada item no mesmo formato do _fetchRouteMulti.
 async function _fetchRouteAlts(points) {
   const coordStr = points.map(p => `${p[0]},${p[1]}`).join(';');
+  // Resumo das vias principais (Mapbox/OSRM põem em legs[].summary com steps=true):
+  // junta as vias únicas das pernas e devolve as 2 maiores ("BR-153, Avenida 85").
+  const summarize = rt => {
+    const roads = [];
+    (rt.legs || []).map(l => l.summary).filter(Boolean).join(', ').split(/,\s*/)
+      .forEach(r => { const v = r.trim(); if (v && !roads.includes(v)) roads.push(v); });
+    return roads.slice(0, 2).join(', ');
+  };
   const norm = rt => ({
     distance: rt.distance, duration: rt.duration, coords: rt.geometry.coordinates,
+    summary: summarize(rt),
     legs: (rt.legs || []).map(l => ({ distance: l.distance, duration: l.duration })),
   });
   const tok = process.env.MAPBOX_TOKEN;
   if (tok) {
     try {
       const mu = `https://api.mapbox.com/directions/v5/mapbox/driving-traffic/${coordStr}`
-        + `?access_token=${tok}&geometries=geojson&overview=full&alternatives=true`;
+        + `?access_token=${tok}&geometries=geojson&overview=full&alternatives=true&steps=true`;
       const mj = await (await fetch(mu, { signal: AbortSignal.timeout(9000) })).json();
       if (mj && mj.routes && mj.routes.length) return mj.routes.slice(0, 3).map(rt => ({ ...norm(rt), traffic: true }));
       console.warn('[route] Mapbox alt sem rota:', mj && mj.message);
     } catch (e) { console.warn('[route] Mapbox alt falhou, OSRM:', e.message); }
   }
   const u = `https://router.project-osrm.org/route/v1/driving/${coordStr}`
-    + `?overview=full&geometries=geojson&alternatives=true&steps=false`;
+    + `?overview=full&geometries=geojson&alternatives=true&steps=true`;
   const rj = await (await fetch(u, { signal: AbortSignal.timeout(9000) })).json();
   if (!(rj && rj.routes && rj.routes.length)) return null;
   return rj.routes.slice(0, 3).map(rt => ({ ...norm(rt), traffic: false }));
@@ -9547,11 +9556,20 @@ async function _enrichRoute(route, points) {
     climbM: legElev[k] ? legElev[k].climbM : 0,
     descentM: legElev[k] ? legElev[k].descentM : 0,
   }));
+  // Geometria pro mapa: downsample (cap ~150 pts) em [lng,lat] arredondado (5 casas ≈ 1m).
+  const gstep = Math.max(1, Math.ceil(coords.length / 150));
+  const geometry = [];
+  for (let i = 0; i < coords.length; i += gstep)
+    geometry.push([Math.round(coords[i][0] * 1e5) / 1e5, Math.round(coords[i][1] * 1e5) / 1e5]);
+  const lastc = coords[coords.length - 1];
+  if (lastc && geometry.length && geometry[geometry.length - 1][0] !== Math.round(lastc[0] * 1e5) / 1e5)
+    geometry.push([Math.round(lastc[0] * 1e5) / 1e5, Math.round(lastc[1] * 1e5) / 1e5]);
   return {
     distanceKm: Math.round((route.distance / 1000) * 10) / 10,
     durationMin: Math.round(route.duration / 60),
     climbM: Math.round(totClimb), descentM: Math.round(totDesc),
     traffic: route.traffic, legs,
+    via: route.summary || '', geometry,
   };
 }
 // ── Compartilhar status (link temporário com localização ao vivo) ───────────
@@ -9810,6 +9828,7 @@ app.get('/api/route-plan', async (req, res) => {
       return {
         idx: i, distanceKm: a.distanceKm, durationMin: a.durationMin,
         climbM: a.climbM, descentM: a.descentM, traffic: a.traffic,
+        via: a.via || '', geometry: a.geometry || [],
         predictedSoc: m.predictedSoc, onFuel: m.onFuel, fuelL: m.fuelL,
         evDepleteKm: m.evDepleteKm, energyKwh: m.energyKwh,
       };

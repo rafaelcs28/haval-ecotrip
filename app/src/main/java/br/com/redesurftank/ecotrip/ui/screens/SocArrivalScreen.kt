@@ -38,6 +38,7 @@ data class RouteAltCar(
     val idx: Int, val distanceKm: Float, val durationMin: Int,
     val climbM: Int, val descentM: Int,
     val predictedSoc: Int, val energyKwh: Float, val etaClock: String,
+    val via: String = "",
 )
 
 private fun etaFromNow(durationMin: Int): String {
@@ -121,7 +122,7 @@ suspend fun fetchArrivalPlan(
             val aMin = o.optInt("durationMin", 0)
             val aCl = o.optInt("climbM", 0); val aDe = o.optInt("descentM", 0)
             val (aE, aP) = energyPred(aD, aMin, aCl, aDe)
-            RouteAltCar(o.optInt("idx", i), aD, aMin, aCl, aDe, aP, aE, etaFromNow(aMin))
+            RouteAltCar(o.optInt("idx", i), aD, aMin, aCl, aDe, aP, aE, etaFromNow(aMin), o.optString("via", ""))
         }
     } else emptyList()
     val dLat = json.optDouble("destLat", 0.0)
@@ -357,8 +358,9 @@ fun SocArrivalScreen(
                             ) {
                                 Text(if (sel) "◉" else "○", color = if (sel) AuroraTeal else TextSecondary, fontSize = 18.sp)
                                 Column(Modifier.weight(1f)) {
-                                    Text(if (a.idx == 0) "Rota recomendada" else "Alternativa ${a.idx}",
-                                        color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                                    Text(if (a.via.isNotEmpty()) "via ${a.via}"
+                                         else if (a.idx == 0) "Rota recomendada" else "Alternativa ${a.idx}",
+                                        color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
                                     Text("${a.durationMin} min · ${f1c(a.distanceKm)} km", color = TextSecondary, fontSize = 12.sp)
                                 }
                                 Text("${a.predictedSoc}%", color = if (a.predictedSoc < 15) MoltenOrange else NeonLime,

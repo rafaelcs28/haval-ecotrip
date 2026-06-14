@@ -87,6 +87,8 @@ struct RouteAlt: Identifiable {
     let climbM: Int, descentM: Int, traffic: Bool
     let predictedSoc: Int, onFuel: Bool
     let fuelL: Double, evDepleteKm: Double?, energyKwh: Double
+    let via: String                       // vias principais ("BR-153, Avenida 85")
+    let coords: [CLLocationCoordinate2D]  // geometria pro mapa
 }
 
 // Plano de recarga reverso: quanto carregar (e onde/quanto tempo) pra chegar com a
@@ -215,13 +217,19 @@ final class ArrivalStore: ObservableObject {
             if let arr = j["routes"] as? [[String: Any]], arr.count > 1 {
                 routeAlts = arr.map { a in
                     let ev = a["evDepleteKm"]
+                    let coords = (a["geometry"] as? [[Any]] ?? []).compactMap { c -> CLLocationCoordinate2D? in
+                        guard c.count >= 2 else { return nil }
+                        return CLLocationCoordinate2D(latitude: num(c[1]), longitude: num(c[0]))
+                    }
                     return RouteAlt(idx: Int(num(a["idx"])), distanceKm: num(a["distanceKm"]),
                                     durationMin: Int(num(a["durationMin"])), climbM: Int(num(a["climbM"])),
                                     descentM: Int(num(a["descentM"])), traffic: (a["traffic"] as? Bool) ?? false,
                                     predictedSoc: Int(num(a["predictedSoc"])), onFuel: (a["onFuel"] as? Bool) ?? false,
                                     fuelL: num(a["fuelL"]),
                                     evDepleteKm: (ev == nil || ev is NSNull) ? nil : num(ev),
-                                    energyKwh: num(a["energyKwh"]))
+                                    energyKwh: num(a["energyKwh"]),
+                                    via: (a["via"] as? String) ?? "",
+                                    coords: coords)
                 }
             }
         } catch {
@@ -895,20 +903,57 @@ struct ArrivalSheet: View {
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
-    // Seletor de rotas alternativas: uma linha por rota com tempo/dist e o desfecho
-    // de energia (SOC na chegada ou gasolina). A selecionada fica destacada.
+    // Cor por rota — amarra a linha no mapa à linha do seletor (mesma cor = mesma rota).
+    private func altColor(_ idx: Int) -> Color {
+        switch idx {
+        case 0:  return DS.teal
+        case 1:  return DS.orange
+        default: return Color(red: 0.64, green: 0.45, blue: 0.92)
+        }
+    }
+
+    // Mapa das alternativas: cada rota com sua cor, a selecionada por cima e mais grossa.
+    // .automatic enquadra todas as geometrias. Interativo (pan/zoom) pra inspecionar.
+    @ViewBuilder private var routeAltsMap: some View {
+        let ordered = store.routeAlts.sorted { ($0.idx == store.selectedRouteIdx ? 1 : 0) < ($1.idx == store.selectedRouteIdx ? 1 : 0) }
+        Map(initialPosition: .automatic) {
+            ForEach(ordered) { a in
+                let sel = a.idx == store.selectedRouteIdx
+                MapPolyline(coordinates: a.coords)
+                    .stroke(altColor(a.idx).opacity(sel ? 1 : 0.5),
+                            style: StrokeStyle(lineWidth: sel ? 6 : 3, lineCap: .round, lineJoin: .round))
+            }
+            if let p = store.plan {
+                Marker("Destino", systemImage: "flag.checkered",
+                       coordinate: CLLocationCoordinate2D(latitude: p.destLat, longitude: p.destLng))
+                    .tint(DS.teal)
+                ForEach(Array(p.stops.enumerated()), id: \.offset) { _, s in
+                    Marker(s.name, systemImage: "mappin",
+                           coordinate: CLLocationCoordinate2D(latitude: s.lat, longitude: s.lng))
+                        .tint(DS.orange)
+                }
+            }
+        }
+        .frame(height: 200)
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    // Seletor de rotas alternativas: uma linha por rota com via principal, tempo/dist e
+    // o desfecho de energia (SOC na chegada ou gasolina). A selecionada fica destacada.
     @ViewBuilder private var routeAltsPicker: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Rotas").font(.caption).foregroundStyle(DS.muted)
+            if store.routeAlts.contains(where: { !$0.coords.isEmpty }) { routeAltsMap }
             ForEach(store.routeAlts) { a in
                 let sel = a.idx == store.selectedRouteIdx
                 Button { store.selectRoute(a) } label: {
                     HStack(spacing: 10) {
                         Image(systemName: sel ? "largecircle.fill.circle" : "circle")
-                            .font(.subheadline).foregroundStyle(sel ? DS.teal : DS.muted)
+                            .font(.subheadline).foregroundStyle(altColor(a.idx).opacity(sel ? 1 : 0.6))
                         VStack(alignment: .leading, spacing: 1) {
-                            Text(a.idx == 0 ? "Rota recomendada" : "Alternativa \(a.idx)")
-                                .font(.subheadline.weight(.semibold)).foregroundStyle(DS.text)
+                            Text(a.via.isEmpty ? (a.idx == 0 ? "Rota recomendada" : "Alternativa \(a.idx)")
+                                                : "via \(a.via)")
+                                .font(.subheadline.weight(.semibold)).foregroundStyle(DS.text).lineLimit(1)
                             HStack(spacing: 4) {
                                 Text("\(a.durationMin) min · \(Fmt.km(a.distanceKm)) km").font(.caption2).foregroundStyle(DS.muted)
                                 if a.traffic { Image(systemName: "car.2.fill").font(.system(size: 9)).foregroundStyle(DS.muted) }
@@ -926,7 +971,9 @@ struct ArrivalSheet: View {
                         }
                     }
                     .padding(10)
-                    .background(sel ? DS.teal.opacity(0.12) : DS.panel2)
+                    .background(sel ? altColor(a.idx).opacity(0.12) : DS.panel2)
+                    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(sel ? altColor(a.idx).opacity(0.5) : .clear, lineWidth: 1))
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
                 .buttonStyle(.plain)
