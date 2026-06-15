@@ -359,6 +359,13 @@ class TripManager private constructor() {
     // ── Telemetria em tempo real ──────────────────────────────────────────────
     private var telemetryRecorder: TelemetryRecorder? = null
     private var latestSpeedKmh:     Float  = 0f
+    // Fallback de distância por integração de velocidade (∫v·dt). Usado SÓ quando o
+    // odômetro de jornada do CAN trava na origem mas o carro segue andando (vide
+    // incidente 2026-06-15: odômetro congelou em 16km, viagem real ~36km — velocidade
+    // e GPS continuaram chegando). Acumulador relativo à sessão; baseline avança no checkpoint.
+    private var speedIntegDistKm:    Float = 0f
+    private var lifeSpeedSessStartDist: Float = 0f
+    private var lastSpeedSampleMs:   Long  = 0L
     private var latestEngineRpm:    Int    = 0
     private var latestBattPowerPct: Int    = 0  // % potência bateria (−100=regen, +100=consumo)
     private var latestOutsideTempC:    Float? = null  // null = sem leitura ainda
@@ -742,7 +749,10 @@ class TripManager private constructor() {
 
     /** Para AutoTripsScreen: lista de viagens automáticas (mais recentes primeiro). */
     fun getAutoTripHistory(): List<AutoTripEntry> = synchronized(lock) {
-        autoTripHistory.reversed()
+        // distinctBy é defensivo: se o disco trouxe duplicatas de startMs (ex.: dupla
+        // finalização durante recovery de MQTT), a LazyColumn da tela crasharia com
+        // "Key already used". reversed() primeiro → mantém a entry mais recente (a mais completa).
+        autoTripHistory.reversed().distinctBy { it.startMs }
     }
 
     /**
@@ -1227,6 +1237,10 @@ class TripManager private constructor() {
             lifeSessStartRegen    = curRegen
             lifeHwEnergy          = curEnergy
             lifeHwRegen           = curRegen
+            // Baselines do fallback de velocidade (relativos à sessão).
+            speedIntegDistKm       = 0f
+            lifeSpeedSessStartDist = 0f
+            lastSpeedSampleMs      = 0L
 
             // Mark session as NOT cleanly ended.  If we crash during this session, the next
             // onSessionStart() will read false → crash recovery mode.
@@ -1248,7 +1262,9 @@ class TripManager private constructor() {
             // Flush final de sessão para lifetime
             val dEnergyEnd = max(0f, curEnergy - lifeSessStartEnergy)
             val dRegenEnd  = max(0f, curRegen  - lifeSessStartRegen)
-            val dDistEnd   = if (lifeSessDistReady) max(0f, curDist - lifeSessStartDist) else 0f
+            val dDistOdoEnd   = if (lifeSessDistReady) max(0f, curDist - lifeSessStartDist) else 0f
+            val dDistSpeedEnd = max(0f, speedIntegDistKm - lifeSpeedSessStartDist)
+            val dDistEnd   = if (dDistOdoEnd < 0.005f && dDistSpeedEnd > 0.02f) dDistSpeedEnd else dDistOdoEnd
             val extraPauseMsLife = if (lifeGearPauseStartMs > 0L) (now - lifeGearPauseStartMs) else 0L
             val pausedMsLife     = lifeTotalPausedMs + extraPauseMsLife
             val dTimeEnd   = ((now - lifeSessStartMs - pausedMsLife) / 1000L).coerceAtLeast(0L)
@@ -1482,6 +1498,10 @@ class TripManager private constructor() {
                 .apply()
             return
         }
+        // Upsert por startMs: evita duplicata se onAutoTripEnd disparar 2x para o mesmo
+        // trip (recovery de app/MQTT, power-mode flapping). Duplicata de startMs crashava
+        // a aba de viagens (key repetida na LazyColumn).
+        autoTripHistory.removeAll { it.startMs == entry.startMs }
         autoTripHistory.add(entry)
         calibrateCapacity(entry.netKwh, entry.startSocPct, entry.endSocPct)   // auto-calibra capacidade EV
         recomputeConsumptionModel()   // reaprende a curva consumo×velocidade
@@ -1574,6 +1594,14 @@ class TripManager private constructor() {
 
                 // Telemetria em tempo real — alimenta o TelemetryRecorder
                 CarConstants.CAR_BASIC_VEHICLE_SPEED.value -> {
+                    // Integra a velocidade ANTERIOR sobre o intervalo decorrido → distância.
+                    val nowSpd = System.currentTimeMillis()
+                    if (sessionActive && lastSpeedSampleMs > 0L && latestSpeedKmh > 0f) {
+                        val dtH = (nowSpd - lastSpeedSampleMs) / 3_600_000f
+                        // Descarta gaps anômalos (>30s): app suspenso, MQTT travado etc.
+                        if (dtH > 0f && dtH < 0.0083f) speedIntegDistKm += latestSpeedKmh * dtH
+                    }
+                    lastSpeedSampleMs = nowSpd
                     latestSpeedKmh = value
                     telemetryRecorder?.latestSpeedKmh = value
                     if (autoTripStartMs > 0L && value > autoTripMaxSpeed) {
@@ -1723,7 +1751,15 @@ class TripManager private constructor() {
         // Lifetime checkpoint: commit deltas since last checkpoint
         val dEnergy = max(0f, curEnergy - lifeSessStartEnergy)
         val dRegen  = max(0f, curRegen  - lifeSessStartRegen)
-        val dDist   = if (lifeSessDistReady) max(0f, curDist - lifeSessStartDist) else 0f
+        val dDistOdo   = if (lifeSessDistReady) max(0f, curDist - lifeSessStartDist) else 0f
+        val dDistSpeed = max(0f, speedIntegDistKm - lifeSpeedSessStartDist)
+        // Fallback: odômetro de jornada travou (<5m na janela) mas a integração de
+        // velocidade aponta movimento real (>20m) → usa o estimado pela velocidade.
+        // Limiar duplo evita falso-positivo em trânsito lento (lá os dois ficam ~0).
+        val dDist = if (dDistOdo < 0.005f && dDistSpeed > 0.02f) {
+            AppLogger.w(TAG, "Odômetro travado — fallback velocidade: +${"%.3f".format(dDistSpeed)}km")
+            dDistSpeed
+        } else dDistOdo
         val extraPauseMs = if (lifeGearPauseStartMs > 0L) (now - lifeGearPauseStartMs) else 0L
         val pausedMs     = lifeTotalPausedMs + extraPauseMs
         val deltaSec     = ((now - lifeSessStartMs - pausedMs) / 1000L).coerceAtLeast(0L)
@@ -1735,6 +1771,7 @@ class TripManager private constructor() {
         lifeSessStartEnergy = curEnergy
         lifeSessStartRegen  = curRegen
         if (lifeSessDistReady) lifeSessStartDist = curDist
+        lifeSpeedSessStartDist = speedIntegDistKm
         lifeSessStartMs     = now
         lifeTotalPausedMs   = 0L
         if (lifeGearPauseStartMs > 0L) lifeGearPauseStartMs = now
@@ -2010,7 +2047,15 @@ class TripManager private constructor() {
         if (!atJson.isNullOrEmpty()) {
             try {
                 val type = object : TypeToken<List<AutoTripEntry>>() {}.type
-                autoTripHistory.addAll(gson.fromJson<List<AutoTripEntry>>(atJson, type))
+                val loaded = gson.fromJson<List<AutoTripEntry>>(atJson, type)
+                // Limpa duplicatas de startMs eventualmente persistidas (dupla finalização
+                // em recovery). Mantém a última ocorrência (mais completa).
+                val deduped = loaded.asReversed().distinctBy { it.startMs }.asReversed()
+                autoTripHistory.addAll(deduped)
+                if (deduped.size != loaded.size) {
+                    AppLogger.w(TAG, "loadFromPrefs: removidas ${loaded.size - deduped.size} viagem(ns) duplicada(s)")
+                    prefs.edit().putString(SharedPreferencesKeys.AUTO_TRIP_HISTORY_JSON, gson.toJson(autoTripHistory)).apply()
+                }
                 AppLogger.i(TAG, "loadFromPrefs: ${autoTripHistory.size} auto-trips carregados")
                 recomputeConsumptionModel()   // calibra a curva consumo×velocidade ao iniciar
             } catch (e: Exception) {
