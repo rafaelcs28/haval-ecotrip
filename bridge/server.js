@@ -351,6 +351,7 @@ const NOTIF_DEFAULTS = {
   maintenance_soon:  false,
   maintenance_overdue: false,
   anomaly_detected:  false,
+  conn_flapping:     true,    // conexão MQTT do carro piscando (colisão de client-id / rede) — default ON (falha silenciosa)
   tyre_low:          false,
   tyre_high:         false,
   refuel_detected:   false,
@@ -10118,6 +10119,25 @@ function applyGwmEntity(id, value, isRetained = false) {
 // PWA mostrar ícone 🚗/📡 ao lado de cada métrica.
 const _fieldSource = {};
 
+// Detector de flapping: a conexão saudável do carro publica 'offline' raramente
+// (sleep/desligamento). Colisão de client-id ou rede ruim faz a LWT 'offline'
+// disparar a cada poucos segundos. ≥5 offlines em 3 min = flap → alerta 1x (com
+// debounce de 30 min). Foi exatamente o sintoma da colisão de processo (6.61↔6.66).
+let _flapTs = [];
+let _lastFlapAlertMs = 0;
+function _detectConnFlapping(now) {
+  _flapTs.push(now);
+  _flapTs = _flapTs.filter(t => now - t <= 180_000);
+  if (_flapTs.length >= 5 && now - _lastFlapAlertMs > 30 * 60_000) {
+    _lastFlapAlertMs = now;
+    const ver = state.car_app_version || '?';
+    sendPush('⚠️ Conexão do carro instável',
+      `O app do carro está reconectando em loop (${_flapTs.length}x em 3 min) — possível colisão de client-id MQTT ou rede ruim. Versão ${ver}.`,
+      'conn_flapping');
+    console.log(`[mqtt] flapping detectado: ${_flapTs.length} offline em 3 min`);
+  }
+}
+
 function applyMqttMessage(key, value, isRetained = false) {
   const _now = Date.now();
   state.last_apk_ms = _now;   // qualquer msg em haval/ecotrip/* = APK do carro vivo
@@ -10137,6 +10157,7 @@ function applyMqttMessage(key, value, isRetained = false) {
       } else {
         console.log(`[mqtt] LWT 'offline' stale ignorado (última msg do carro há ${ageSec.toFixed(1)}s)`);
       }
+      _detectConnFlapping(_now);
     }
     state.last_update_ms = _now;
     return;

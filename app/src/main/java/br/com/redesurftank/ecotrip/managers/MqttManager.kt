@@ -115,6 +115,13 @@ class MqttManager private constructor() {
     private val hvacExecutor   = Executors.newSingleThreadExecutor()
     private val isReconnecting = AtomicBoolean(false)
     @Volatile private var clientId: String = CLIENT_ID_BASE
+    // Detecção de colisão no MESMO device: o sufixo ANDROID_ID separa installs em
+    // aparelhos distintos, mas NÃO dois processos no mesmo aparelho (ex.: processo
+    // velho que sobreviveu ao pm install -r). Se a conexão cair <6s repetidas vezes
+    // sem nunca firmar heartbeat, é takeover mútuo — aí anexa o PID ao id pra que os
+    // dois processos parem de se derrubar.
+    @Volatile private var shortLivedConnects = 0
+    @Volatile private var collisionGuardApplied = false
     @Volatile private var client: MqttClient? = null
     private var lastPublishMs  = 0L
     private val gson = Gson()
@@ -1453,6 +1460,19 @@ class MqttManager private constructor() {
             c.setCallback(object : MqttCallback {
                 override fun connectionLost(cause: Throwable?) {
                     Log.w(TAG, "Connection lost: ${cause?.message}")
+                    // Conexão curta seguida (CONNACK ok, mas cai antes de firmar) =
+                    // assinatura de takeover por outro cliente com o mesmo id.
+                    val age = System.currentTimeMillis() - lastConnectMs
+                    if (lastConnectMs > 0 && age in 1..6000) {
+                        shortLivedConnects++
+                        if (shortLivedConnects >= 3 && !collisionGuardApplied) {
+                            collisionGuardApplied = true
+                            clientId = "${clientId}_p${android.os.Process.myPid()}"
+                            AppLogger.w(TAG, "Flap <6s x$shortLivedConnects — provável colisão de id no mesmo device; client-id agora $clientId")
+                        }
+                    } else {
+                        shortLivedConnects = 0
+                    }
                     heartbeatFuture?.cancel(false)
                     heartbeatFuture = null
                     autotripSyncFuture?.cancel(false)
@@ -1513,6 +1533,8 @@ class MqttManager private constructor() {
             heartbeatFuture = fastExecutor.scheduleAtFixedRate({
                 try {
                     hbTick++
+                    // Sobreviveu >6s = conexão firme, sem takeover → zera o contador de flap.
+                    if (System.currentTimeMillis() - lastConnectMs > 6000) shortLivedConnects = 0
                     val driving = try { TripManager.getInstance().isDrivingReady() } catch (_: Exception) { true }
                     if (!driving && hbTick % 6 != 0) return@scheduleAtFixedRate
                     val cur = client
