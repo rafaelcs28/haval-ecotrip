@@ -108,6 +108,40 @@ class UpdateManager private constructor() {
         }
     }
 
+    /**
+     * Força um check síncrono e retorna diagnóstico em texto (pra debug remoto via
+     * cmd/check_update). Roda na thread do chamador — bloqueia até o fetch terminar.
+     * Se houver versão nova, dispara o download/install (assíncrono) antes de retornar.
+     */
+    fun forceCheckDiag(): String {
+        val current = BuildConfig.VERSION_NAME
+        return try {
+            val info = fetchLatestRelease()
+                ?: return "current=$current latest=? — fetchLatestRelease retornou null (GitHub API falhou: rede/rate-limit)"
+            latestRelease = info
+            val newer = isNewer(info.version, current)
+            isUpdateAvailable = newer
+            onUpdateStateChanged?.invoke()
+            if (newer) {
+                val ctx = appContext
+                if (ctx != null) {
+                    if (downloadProgress >= 0) {
+                        "current=$current latest=${info.version} NOVA — download já em andamento (${downloadProgress}%)"
+                    } else {
+                        downloadAndInstall(ctx)
+                        "current=$current latest=${info.version} NOVA — download iniciado (apk=${info.apkUrl})"
+                    }
+                } else {
+                    "current=$current latest=${info.version} NOVA — mas appContext null (init não rodou)"
+                }
+            } else {
+                "current=$current latest=${info.version} — já na mais nova"
+            }
+        } catch (e: Exception) {
+            "current=$current — erro: ${e::class.simpleName}: ${e.message}"
+        }
+    }
+
     /** Downloads the APK and triggers the system installer. */
     fun downloadAndInstall(context: Context) {
         val release = latestRelease ?: return

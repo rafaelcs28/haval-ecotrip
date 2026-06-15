@@ -2707,6 +2707,19 @@ class MqttManager private constructor() {
                         client?.publish("$prefix/cmd/resync_autotrips/result", res.toByteArray(), 1, true)
                     } catch (_: Exception) {}
                 }
+                "check_update" -> {
+                    // Força um check de atualização e devolve diagnóstico (versão atual,
+                    // latest, ação tomada/erro) — pra debug remoto sem ir no carro.
+                    val res = try {
+                        UpdateManager.getInstance().forceCheckDiag()
+                    } catch (e: Exception) {
+                        "erro: ${e::class.simpleName}: ${e.message}"
+                    }
+                    AppLogger.i(TAG, "check_update → $res")
+                    try {
+                        client?.publish("$prefix/cmd/check_update/result", res.toByteArray(), 1, true)
+                    } catch (_: Exception) {}
+                }
                 "dumplog" -> {
                     // Publica o buffer de log do app (retained) pra debug remoto.
                     // Filtro opcional no payload: só linhas contendo essa substring.
