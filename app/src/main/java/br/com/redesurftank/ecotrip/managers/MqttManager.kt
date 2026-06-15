@@ -27,6 +27,9 @@ private const val DEFAULT_PUBLISH_INTERVAL_WIFI_MS      =  5_000
 private const val DEFAULT_PUBLISH_INTERVAL_CELLULAR_MS  = 30_000
 // Backoff de reconexão escalonado: 5×1s → 10×2s → depois 5 em 5s (ver reconnectDelayMs).
 private const val MAX_QUEUED_SNAPSHOTS = 50   // ~17 min at 20s interval
+// Corrente de carga (A) acima da qual consideramos carga ativa quando o enum de estado
+// do CAN não reporta 1 (ex.: carga AC com código diferente). Real ~20A; ruído < 1A.
+private const val CHARGE_CURRENT_MIN_A = 1.0f
 
 // Chaves de telemetria contínua que mudam o tempo todo durante a condução.
 // Vão pra via expressa: publish só desses tópicos a até 20 Hz (debounce 50ms),
@@ -183,6 +186,23 @@ class MqttManager private constructor() {
     var latestBatt12vPct:   Float = 0f     // % — carga da bateria auxiliar 12V
     // 0=Desconectado, 1=Carregando, 2=Programado, 3=Finalizado, 5=Aguardando liberação, -1=desconhecido
     var latestChargingState: Int = -1
+
+    /**
+     * Carga ativa de verdade. O enum de estado do CAN nem sempre reporta 1 (visto em carga
+     * AC: corrente real entrando, mas charging_state != 1). Fallback: corrente de carga
+     * negativa significativa (entrando na bateria) + tensão válida + carro NÃO dirigindo.
+     */
+    fun chargingActiveNow(): Boolean {
+        if (latestChargingState == 1) return true
+        val realChargeCurrent = latestChargeCurrentA < -CHARGE_CURRENT_MIN_A && latestBatteryVoltageV > 0f
+        if (!realChargeCurrent) return false
+        return !(try { TripManager.getInstance().isDrivingReady() } catch (_: Exception) { false })
+    }
+
+    private fun chargePowerKwNow(): Float =
+        if (chargingActiveNow() && latestBatteryVoltageV > 0f)
+            kotlin.math.abs(latestChargeCurrentA) * latestBatteryVoltageV / 1000f
+        else 0f
     private var customCutoffFired = false   // já freou nesta sessão de carga? (corte custom)
     private var prevChargingForCutoff = false // estado anterior pra detectar fim da sessão
     var latestChargeRemainingMin: Int = 0   // minutos restantes de recarga (0 = indisponível)
@@ -479,9 +499,8 @@ class MqttManager private constructor() {
             pub("battery_power_pct", latestBattPowerPct.toString())
             pub("motor_power_kw",    fmt2(latestMotorPowerKw))
             // Carregando? publica a potência de recarga também (mesma fonte)
-            if (latestChargingState == 1 && latestBatteryVoltageV > 0f) {
-                val chargePowerKw = kotlin.math.abs(latestChargeCurrentA) * latestBatteryVoltageV / 1000f
-                pub("charge_power_kw", fmt2(chargePowerKw))
+            if (chargingActiveNow()) {
+                pub("charge_power_kw", fmt2(chargePowerKwNow()))
             }
         } catch (e: Exception) {
             Log.w(TAG, "publishFastTelemetry failed: ${e.message}")
@@ -561,15 +580,12 @@ class MqttManager private constructor() {
         // Recalcula potência de recarga e notifica TripManager quando qualquer
         // dado elétrico relevante muda (estado, corrente ou tensão).
         fun syncCharging() {
-            val state   = latestChargingState
-            val powerKw = if (state == 1 && latestBatteryVoltageV > 0f)
-                kotlin.math.abs(latestChargeCurrentA) * latestBatteryVoltageV / 1000f
-            else 0f
-            tripManager.onChargingUpdate(state == 1, powerKw)
+            val chargingNow = chargingActiveNow()
+            val powerKw = chargePowerKwNow()
+            tripManager.onChargingUpdate(chargingNow, powerKw)
 
             // Corte custom: rearma ao iniciar carga; ao encerrar, se freou, restaura
             // o carro pra "sem limite" (100) pra a próxima sessão carregar descapada.
-            val chargingNow = state == 1
             if (chargingNow && !prevChargingForCutoff) {
                 customCutoffFired = false
             } else if (!chargingNow && prevChargingForCutoff) {
@@ -1792,11 +1808,9 @@ class MqttManager private constructor() {
             pubD("debug/turn_right", "lamp=$latestRightTurnLamp sw=$latestRightSwitch", retained = false)
             pubD("debug/tsr", "limit=$latestSpeedLimit sign=$latestSpeedLimitSign eye=$latestTrafficEyeDist", retained = false)
             // odometer_km e batt_12v_pct movidos pra GWM Brasil (MIGRATED_TO_HA) — bridge ignora.
-            // Potência de recarga: apenas quando charging_state == 1 (Carregando)
-            // Corrente AC (cur_charge_current) × tensão do pack (car.ev_info.power_battery_voltage) / 1000
-            val chargePowerKw = if (latestChargingState == 1 && latestBatteryVoltageV > 0f)
-                kotlin.math.abs(latestChargeCurrentA) * latestBatteryVoltageV / 1000f else 0f
-            pubR("charge_power_kw",   fmt2(chargePowerKw))
+            // Potência de recarga: charging_state==1 OU corrente de carga real (carga AC
+            // às vezes não reporta enum 1). Corrente AC × tensão do pack / 1000.
+            pubR("charge_power_kw",   fmt2(chargePowerKwNow()))
             // charging_state e charge_remaining_min movidos pra GWM Brasil (MIGRATED_TO_HA).
             pubD("charge_session_kwh",   fmt2(TripManager.getInstance().getChargeSessionEnergyKwh()))
             pub("rolling/kwh_per_100km", fmt2(q.rolling.netKwhPer100km))
