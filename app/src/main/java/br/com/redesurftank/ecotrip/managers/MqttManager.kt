@@ -21,7 +21,11 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
 private const val TAG = "MqttManager"
-private const val CLIENT_ID = "haval_ecotrip"
+// Base do client-id MQTT. O id real recebe sufixo do ANDROID_ID (ver initClientId):
+// estável por device → o broker retoma a sessão persistente (cleanSession=false) no
+// reconnect; distinto entre installs → duas instâncias do app NUNCA se derrubam por
+// takeover de id idêntico (causava flap eterno: connect→kick→will offline→repeat).
+private const val CLIENT_ID_BASE = "haval_ecotrip"
 private const val DEFAULT_PUBLISH_INTERVAL_MS           = 20_000
 private const val DEFAULT_PUBLISH_INTERVAL_WIFI_MS      =  5_000
 private const val DEFAULT_PUBLISH_INTERVAL_CELLULAR_MS  = 30_000
@@ -110,6 +114,7 @@ class MqttManager private constructor() {
     // ÚNICA serializa hvac/* — um comando por vez, todos aplicam.
     private val hvacExecutor   = Executors.newSingleThreadExecutor()
     private val isReconnecting = AtomicBoolean(false)
+    @Volatile private var clientId: String = CLIENT_ID_BASE
     @Volatile private var client: MqttClient? = null
     private var lastPublishMs  = 0L
     private val gson = Gson()
@@ -545,6 +550,11 @@ class MqttManager private constructor() {
         } catch (_: Exception) {}
 
         appContext = context.applicationContext
+        clientId = try {
+            val aid = android.provider.Settings.Secure.getString(
+                appContext?.contentResolver, android.provider.Settings.Secure.ANDROID_ID)
+            if (!aid.isNullOrBlank()) "${CLIENT_ID_BASE}_${aid.take(8)}" else CLIENT_ID_BASE
+        } catch (_: Exception) { CLIENT_ID_BASE }
         val ctx = try { context.createDeviceProtectedStorageContext() } catch (_: Exception) { context }
         prefs = ctx.getSharedPreferences(SharedPreferencesKeys.PREFS_NAME, Context.MODE_PRIVATE)
         loadConfig()
@@ -1438,7 +1448,7 @@ class MqttManager private constructor() {
                     org.eclipse.paho.client.mqttv3.persist.MqttDefaultFilePersistence(dir.absolutePath)
                 } catch (_: Exception) { null }
             } ?: MemoryPersistence()
-            val c = MqttClient(serverUri, CLIENT_ID, persistence)
+            val c = MqttClient(serverUri, clientId, persistence)
 
             c.setCallback(object : MqttCallback {
                 override fun connectionLost(cause: Throwable?) {
