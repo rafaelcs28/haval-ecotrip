@@ -18,6 +18,9 @@ private const val PENDING_POLL_MS  = 60_000L        // 1 min — intervalo de ve
 // (13k+ entradas). Só descarta se NADA aconteceu (dist E combustível abaixo do piso).
 private const val MIN_TRIP_DIST_KM = 0.2f
 private const val MIN_TRIP_FUEL_L  = 0.05f
+// Gap de distância (por velocidade) sem nenhum degrau do odômetro a partir do qual
+// consideramos o odômetro travado. 3× a resolução (~100m) — degrau normal nunca atinge.
+private const val ODO_STALL_GAP_KM = 0.3f
 // Cap rígido de contagem além da retenção 90d — bound de armazenamento/payload.
 private const val MAX_AUTO_TRIPS   = 2000
 
@@ -366,6 +369,12 @@ class TripManager private constructor() {
     private var speedIntegDistKm:    Float = 0f
     private var lifeSpeedSessStartDist: Float = 0f
     private var lastSpeedSampleMs:   Long  = 0L
+    // Detecção de travada do odômetro pelo gap acumulado: só cai pro fallback quando a
+    // velocidade já andou >ODO_STALL_GAP_KM sem NENHUM degrau do odômetro (a resolução
+    // é ~100m, então degrau normal nunca chega ao limiar). odoWasStalled lembra o estado
+    // pra rebasear o salto de catch-up quando o odômetro voltar (evita contar 2x).
+    private var speedDistAtLastOdoTick: Float = 0f
+    private var odoWasStalled: Boolean = false
     private var latestEngineRpm:    Int    = 0
     private var latestBattPowerPct: Int    = 0  // % potência bateria (−100=regen, +100=consumo)
     private var latestOutsideTempC:    Float? = null  // null = sem leitura ainda
@@ -1241,6 +1250,8 @@ class TripManager private constructor() {
             speedIntegDistKm       = 0f
             lifeSpeedSessStartDist = 0f
             lastSpeedSampleMs      = 0L
+            speedDistAtLastOdoTick = 0f
+            odoWasStalled          = false
 
             // Mark session as NOT cleanly ended.  If we crash during this session, the next
             // onSessionStart() will read false → crash recovery mode.
@@ -1262,9 +1273,14 @@ class TripManager private constructor() {
             // Flush final de sessão para lifetime
             val dEnergyEnd = max(0f, curEnergy - lifeSessStartEnergy)
             val dRegenEnd  = max(0f, curRegen  - lifeSessStartRegen)
-            val dDistOdoEnd   = if (lifeSessDistReady) max(0f, curDist - lifeSessStartDist) else 0f
-            val dDistSpeedEnd = max(0f, speedIntegDistKm - lifeSpeedSessStartDist)
-            val dDistEnd   = if (dDistOdoEnd < 0.005f && dDistSpeedEnd > 0.02f) dDistSpeedEnd else dDistOdoEnd
+            val dDistOdoEnd = if (lifeSessDistReady) max(0f, curDist - lifeSessStartDist) else 0f
+            val stallGapEnd = speedIntegDistKm - speedDistAtLastOdoTick
+            val dDistEnd = when {
+                dDistOdoEnd > 0.005f -> if (odoWasStalled) 0f else dDistOdoEnd
+                odoWasStalled || stallGapEnd > ODO_STALL_GAP_KM ->
+                    if (!odoWasStalled) stallGapEnd else max(0f, speedIntegDistKm - lifeSpeedSessStartDist)
+                else -> 0f
+            }
             val extraPauseMsLife = if (lifeGearPauseStartMs > 0L) (now - lifeGearPauseStartMs) else 0L
             val pausedMsLife     = lifeTotalPausedMs + extraPauseMsLife
             val dTimeEnd   = ((now - lifeSessStartMs - pausedMsLife) / 1000L).coerceAtLeast(0L)
@@ -1752,14 +1768,30 @@ class TripManager private constructor() {
         val dEnergy = max(0f, curEnergy - lifeSessStartEnergy)
         val dRegen  = max(0f, curRegen  - lifeSessStartRegen)
         val dDistOdo   = if (lifeSessDistReady) max(0f, curDist - lifeSessStartDist) else 0f
-        val dDistSpeed = max(0f, speedIntegDistKm - lifeSpeedSessStartDist)
-        // Fallback: odômetro de jornada travou (<5m na janela) mas a integração de
-        // velocidade aponta movimento real (>20m) → usa o estimado pela velocidade.
-        // Limiar duplo evita falso-positivo em trânsito lento (lá os dois ficam ~0).
-        val dDist = if (dDistOdo < 0.005f && dDistSpeed > 0.02f) {
-            AppLogger.w(TAG, "Odômetro travado — fallback velocidade: +${"%.3f".format(dDistSpeed)}km")
-            dDistSpeed
-        } else dDistOdo
+        val stallGap   = speedIntegDistKm - speedDistAtLastOdoTick
+        val dDist: Float = when {
+            // Odômetro avançou nesta janela.
+            dDistOdo > 0.005f -> {
+                if (odoWasStalled) {
+                    // Voltou após travada: NÃO conta o salto de catch-up (já contamos por
+                    // velocidade durante a travada). Rebase abaixo zera o delta deste tick.
+                    odoWasStalled = false
+                    AppLogger.w(TAG, "Odômetro voltou — rebase do salto (já contado por velocidade)")
+                    0f
+                } else dDistOdo
+            }
+            // Sem degrau do odômetro, mas a velocidade já andou >300m desde o último tick:
+            // travado de verdade → conta por integração de velocidade.
+            stallGap > ODO_STALL_GAP_KM -> {
+                val dSpeed = if (!odoWasStalled) stallGap  // 1ª janela: recupera o gap desde o último tick
+                             else max(0f, speedIntegDistKm - lifeSpeedSessStartDist)
+                odoWasStalled = true
+                AppLogger.w(TAG, "Odômetro travado — fallback velocidade: +${"%.3f".format(dSpeed)}km")
+                dSpeed
+            }
+            // Janela curta sem degrau (resolução grossa, ~100m) — normal, não conta nada.
+            else -> 0f
+        }
         val extraPauseMs = if (lifeGearPauseStartMs > 0L) (now - lifeGearPauseStartMs) else 0L
         val pausedMs     = lifeTotalPausedMs + extraPauseMs
         val deltaSec     = ((now - lifeSessStartMs - pausedMs) / 1000L).coerceAtLeast(0L)
@@ -1889,6 +1921,10 @@ class TripManager private constructor() {
         val prev = curDist
         curDist = value
         if (!sessionActive) return
+
+        // Degrau real do odômetro → marca o ponto da integração de velocidade. O gap
+        // entre marcas é o que distingue "resolução grossa" (~100m) de travada de verdade.
+        if (value > prev) speedDistAtLastOdoTick = speedIntegDistKm
 
         // First reading of session: establish rolling baseline + trip dist baseline.
         // The trip baseline MUST be established here so that onSessionEnd() never
