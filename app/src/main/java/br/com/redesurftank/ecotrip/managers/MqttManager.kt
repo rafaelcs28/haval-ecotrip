@@ -122,6 +122,8 @@ class MqttManager private constructor() {
     // dois processos parem de se derrubar.
     @Volatile private var shortLivedConnects = 0
     @Volatile private var collisionGuardApplied = false
+    // Mata instâncias zumbis do mesmo pacote uma vez por processo, antes do 1º connect.
+    @Volatile private var staleKillDone = false
     @Volatile private var client: MqttClient? = null
     private var lastPublishMs  = 0L
     private val gson = Gson()
@@ -1435,9 +1437,58 @@ class MqttManager private constructor() {
             .removePrefix("https://")
             .trimEnd('/')
 
+    /**
+     * Mata instâncias antigas do MESMO pacote (processos zumbis sobreviventes de OTA
+     * `pm install -r` ou de reboot do head unit) antes de este processo conectar ao
+     * MQTT. Sem isso, dois processos com o mesmo client-id derrubam-se mutuamente no
+     * broker em loop (connect→kick→will 'offline'→repeat); a sessão do carro nunca
+     * firma e a viagem congela nos clientes (iPhone/iPad/PWA). Em vez de detectar a
+     * colisão reativamente (frágil — a janela de age no connectionLost falhava em
+     * takeover rápido), elimina a causa: garante processo único.
+     *
+     * Via Shizuku (uid shell, enxerga todos os PIDs do pacote). No-op silencioso se
+     * Shizuku não está vivo/autorizado — aí o guard reativo (sufixo PID) é o fallback.
+     */
+    private fun killStaleInstances() {
+        try {
+            if (!rikka.shizuku.Shizuku.pingBinder()) return
+            if (rikka.shizuku.Shizuku.checkSelfPermission()
+                != android.content.pm.PackageManager.PERMISSION_GRANTED) return
+            val pkg   = appContext?.packageName ?: "br.com.redesurftank.ecotrip"
+            val myPid = android.os.Process.myPid()
+            val newProcess = rikka.shizuku.Shizuku::class.java.getDeclaredMethod(
+                "newProcess",
+                Array<String>::class.java,
+                Array<String>::class.java,
+                String::class.java,
+            ).also { it.isAccessible = true }
+            val pidofProc = newProcess.invoke(
+                null, arrayOf("pidof", pkg), null as Array<String>?, null as String?,
+            ) as Process
+            val out = pidofProc.inputStream.bufferedReader().readText().trim()
+            pidofProc.waitFor()
+            val others = out.split(Regex("\\s+")).mapNotNull { it.toIntOrNull() }.filter { it != myPid }
+            if (others.isEmpty()) return
+            for (pid in others) {
+                try {
+                    (newProcess.invoke(
+                        null, arrayOf("kill", "-9", pid.toString()), null as Array<String>?, null as String?,
+                    ) as Process).waitFor()
+                } catch (_: Exception) {}
+            }
+            AppLogger.w(TAG, "killStaleInstances: matei processo(s) zumbi do app $others (mantive $myPid) — evita colisão de client-id MQTT")
+        } catch (e: Exception) {
+            Log.w(TAG, "killStaleInstances falhou: ${e.message}")
+        }
+    }
+
     private fun connectInternal() {
         try {
             setStatus(Status.CONNECTING)
+            // Antes de assumir o client-id MQTT, evicta qualquer processo zumbi do mesmo
+            // pacote (sobrevivente de OTA/reboot). Dois processos com o mesmo id se
+            // derrubam no broker em loop e a viagem congela nos clientes. Roda 1×/processo.
+            if (!staleKillDone) { staleKillDone = true; killStaleInstances() }
             val cleanedHost = cleanHost(host)
             val serverUri = if (tls) "ssl://$cleanedHost:$port" else "tcp://$cleanedHost:$port"
             Log.i(TAG, "Connecting to $serverUri")
