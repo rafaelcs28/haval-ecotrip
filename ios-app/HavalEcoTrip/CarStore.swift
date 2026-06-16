@@ -368,7 +368,13 @@ final class CarStore: ObservableObject {
     var gearDisplay: String    { ["P", "R", "N", "D"].contains(gear) ? gear : "" }
     var insideTemp: Double     { num("inside_temp") }
     var outsideTemp: Double    { num("outside_temp") }
-    var rangeEvKm: Double      { num("range_ev_km") }
+    // Autonomia EV: usa o oficial do TCU (autonomy_ev_km = valor do painel),
+    // não o range_ev_km do APK (que leva reserva de 15% e diverge do painel).
+    var rangeEvKm: Double {
+        let official = num("autonomy_ev_km")
+        if official > 0 { return official }
+        return num("range_ev_km")
+    }
     var chargingState: String  { str("charging_state") }
     var carOnline: Bool {
         let age = Date().timeIntervalSince1970 * 1000 - num("last_apk_ms")
@@ -432,8 +438,15 @@ final class CarStore: ObservableObject {
     var tripFuelL: Double   { tnum("fuelL") }
     var tripAvgKmh: Double  { tnum("avgSpeedKmh") }
 
-    // Motor térmico (autonomia + tanque)
-    var rangeIceKm: Double { num("range_ice_km") }
+    // Motor térmico (autonomia + tanque). Usa o oficial do HA (autonomy_ice_km =
+    // painel); range_ice_km é o sensor legado que reportava tanque CHEIO (bogus).
+    // Sem o oficial, estima por litros × km/L (rolling se válido, senão 12).
+    var rangeIceKm: Double {
+        let official = num("autonomy_ice_km")
+        if official > 0 { return official }
+        let kml = roll("km_per_l") > 2 ? roll("km_per_l") : 12.0
+        return fuelL > 0 ? (fuelL * kml).rounded() : 0
+    }
     var fuelL: Double      { num("fuel_l") }
 
     // Preços atuais (p/ estimar custo de viagem — autotrips não guarda custo)
