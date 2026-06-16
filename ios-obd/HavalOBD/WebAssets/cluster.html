@@ -2459,18 +2459,24 @@ function sendCmd(action, value) {
   window.webkit.messageHandlers.obd.postMessage({ action, value: String(value) });
 }
 
-// ── Guard fire-on-tap p/ controles FÍSICOS (teto/cortina/vidros) ─────────────
-// Bug: o teto reabria sozinho — vehicle_skylight=200 era reenviado fora do
-// toque (reassert no ciclo de sync). Estes comandos NÃO devem sair em render/
-// telemetria/timer/reconnect — só por gesto do usuário. Gateamos por um toque
-// recente (<1.5s): sem gesto, o envio é bloqueado. A UI reflete telemetria
-// (skylight_level/shade_level), não dirige.
-let _lastUserGesture = 0;
-['pointerdown', 'pointermove', 'touchstart', 'touchmove', 'mousedown'].forEach(ev =>
-  document.addEventListener(ev, () => { _lastUserGesture = Date.now(); }, true));
+// ── Guard fire-on-tap p/ controles FÍSICOS/momentâneos ──────────────────────
+// Bug: o teto abria em ventilação sozinho a cada partida — o Cockpit reenviava
+// vehicle_skylight=200 ao (re)conectar/sincronizar, sem toque. Regra: comandos
+// físicos só saem DENTRO do disparo SÍNCRONO de um evento CONFIÁVEL (isTrusted)
+// do usuário. Telemetria é display one-way — nunca dispara __cmd.
+//
+// _trustedNow é ligado por um listener em fase de CAPTURA (roda antes do handler
+// inline onchange/onclick) só em evento isTrusted, e desligado no próximo tick.
+// Como o handler do controle envia de forma síncrona, o envio passa; qualquer
+// reassert assíncrono (connect/sync/timer/restore) acha _trustedNow=false → bloqueia.
+let _trustedNow = false;
+['click', 'change', 'input'].forEach(ev =>
+  document.addEventListener(ev, (e) => {
+    if (e && e.isTrusted) { _trustedNow = true; setTimeout(() => { _trustedNow = false; }, 0); }
+  }, true));
 function sendPhysCmd(action, value) {
-  if (Date.now() - _lastUserGesture > 1500) {
-    console.warn('[phys-guard] reassert bloqueado (sem toque): ' + action + '=' + value);
+  if (!_trustedNow) {
+    console.warn('[phys-guard] reassert bloqueado (sem gesto confiável): ' + action + '=' + value);
     return;
   }
   sendCmd(action, value);
