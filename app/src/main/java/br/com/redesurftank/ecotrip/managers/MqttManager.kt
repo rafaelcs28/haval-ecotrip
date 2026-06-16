@@ -129,6 +129,11 @@ class MqttManager private constructor() {
     @Volatile private var collisionGuardApplied = false
     // Mata instâncias zumbis do mesmo pacote uma vez por processo, antes do 1º connect.
     @Volatile private var staleKillDone = false
+    // Instância única do MQTT entre processos: dono escreve pid:ts num arquivo
+    // (refresh a cada heartbeat) e os concorrentes só conectam se o dono morreu/
+    // travou (ts velho > OWNER_TTL_MS). Sem isso dois processos com o mesmo
+    // client-id se derrubam em loop no broker. Independe de Shizuku.
+    private val OWNER_TTL_MS = 20_000L
     @Volatile private var client: MqttClient? = null
     private var lastPublishMs  = 0L
     private val gson = Gson()
@@ -1487,9 +1492,69 @@ class MqttManager private constructor() {
         }
     }
 
+    // Escreve pid:ts no arquivo de posse de forma atômica (tmp + rename), pra um
+    // leitor concorrente nunca ver escrita parcial.
+    private fun writeOwnerAtomic(ctx: Context, pid: Int, ts: Long) {
+        try {
+            val tmp = java.io.File(ctx.filesDir, "mqtt-owner.tmp")
+            tmp.writeText("$pid:$ts")
+            if (!tmp.renameTo(java.io.File(ctx.filesDir, "mqtt-owner"))) {
+                java.io.File(ctx.filesDir, "mqtt-owner").writeText("$pid:$ts")
+            }
+        } catch (_: Exception) {}
+    }
+
+    // Decide se ESTE processo pode ser o dono do MQTT. Seção crítica serializada por
+    // um FileLock curto (o SO solta no fim do processo, sem deadlock permanente).
+    // Retorna true se já era meu, se não havia dono, ou se o dono está velho/travado.
+    private fun tryBecomeMqttOwner(): Boolean {
+        val ctx = appContext ?: return true   // sem contexto: não bloqueia
+        val myPid = android.os.Process.myPid()
+        val now = System.currentTimeMillis()
+        return try {
+            val lockFile = java.io.File(ctx.filesDir, "mqtt-owner.lock")
+            java.io.RandomAccessFile(lockFile, "rw").channel.use { ch ->
+                val fl = ch.lock()
+                try {
+                    val ownerFile = java.io.File(ctx.filesDir, "mqtt-owner")
+                    val txt = try { if (ownerFile.exists()) ownerFile.readText().trim() else "" } catch (_: Exception) { "" }
+                    val parts = txt.split(":")
+                    val ownerPid = parts.getOrNull(0)?.toIntOrNull() ?: -1
+                    val ownerTs  = parts.getOrNull(1)?.toLongOrNull() ?: 0L
+                    val fresh = now - ownerTs < OWNER_TTL_MS
+                    if (ownerPid > 0 && ownerPid != myPid && fresh) {
+                        AppLogger.w(TAG, "MQTT já tem dono (pid=$ownerPid, hb há ${(now - ownerTs) / 1000}s) — pid=$myPid NÃO conecta; re-tenta")
+                        false
+                    } else {
+                        writeOwnerAtomic(ctx, myPid, now)
+                        if (ownerPid != myPid) Log.i(TAG, "MQTT ownership assumido por pid=$myPid (anterior=$ownerPid, ts +${(now - ownerTs) / 1000}s)")
+                        true
+                    }
+                } finally { try { fl.release() } catch (_: Exception) {} }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "tryBecomeMqttOwner: ${e.message}")
+            true   // fail-open: erro de FS não pode impedir o MQTT
+        }
+    }
+
+    private fun refreshMqttOwnership() {
+        val ctx = appContext ?: return
+        writeOwnerAtomic(ctx, android.os.Process.myPid(), System.currentTimeMillis())
+    }
+
     private fun connectInternal() {
         try {
             setStatus(Status.CONNECTING)
+            // Instância única: se outro processo do app já é dono do MQTT (heartbeat
+            // fresco no arquivo), este processo NÃO conecta — evita a colisão de
+            // client-id na raiz, sem depender de Shizuku. Re-tenta no backoff; quando o
+            // dono morre/trava (ts > OWNER_TTL_MS), assume na próxima rodada.
+            if (!tryBecomeMqttOwner()) {
+                setStatus(Status.DISCONNECTED)
+                scheduleReconnect()
+                return
+            }
             // Antes de assumir o client-id MQTT, evicta qualquer processo zumbi do mesmo
             // pacote (sobrevivente de OTA/reboot). Dois processos com o mesmo id se
             // derrubam no broker em loop e a viagem congela nos clientes. Roda 1×/processo.
@@ -1594,6 +1659,9 @@ class MqttManager private constructor() {
             heartbeatFuture = fastExecutor.scheduleAtFixedRate({
                 try {
                     hbTick++
+                    // Renova a posse do MQTT a cada tick (5s) ANTES do skip de parado,
+                    // pra manter o ts fresco e outros processos não tomarem a conexão.
+                    refreshMqttOwnership()
                     // Sobreviveu >6s = conexão firme, sem takeover → zera a janela de flap.
                     if (System.currentTimeMillis() - lastConnectMs > 6000) synchronized(flapLock) { flapTimestamps.clear() }
                     val driving = try { TripManager.getInstance().isDrivingReady() } catch (_: Exception) { true }
