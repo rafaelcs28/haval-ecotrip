@@ -993,6 +993,7 @@ const _hystTimers  = {
 
 let prevChargingState    = null;
 let chargeStartTimer     = null;
+let _chargeStoppedTimer  = null; // debounce 90s do alerta "parou antes do limite" (cancela se religar)
 let chargeSessionStartMs = 0;   // timestamp de início da sessão (para duração e potência média)
 let chargeStartSoc       = 0;   // SOC% no início da sessão (para log de eventos)
 let _chargeTempSamples   = [];  // amostras de temp externa durante a sessão atual
@@ -8678,31 +8679,40 @@ function handleChargingStateTransition(value, isRetained) {
     _chargeTempSamples = [];
 
     // ── Alerta de FALHA de carregamento ────────────────────────────────────
-    // Recarga parou (qualquer motivo) ANTES de atingir o limite, com 1% de
-    // tolerância (limite − 1). Ex.: limite 100 → alerta se parar em ≤98%.
-    // Pega problema no carregamento (cabo soltou, falha do carregador, etc.).
+    // Recarga parou (qualquer motivo) ANTES de atingir o ALVO EFETIVO, com 1%
+    // de tolerância (alvo − 1). Alvo efetivo = alvo custom (ex. 97) se ativo,
+    // senão o limite nativo do carro. Com a feature de corte custom o carro
+    // fica "descapado" em 100, então comparar com charge_limit_pct daria falso
+    // alarme: parar em 96 com alvo 97 NÃO é falha.
     // endSoc > 0 evita falso alarme se o SOC vier zerado/desconhecido.
-    const chargeLimit  = +state.charge_limit_pct || 100;
+    const effTarget    = _effectiveChargeTarget();
     // Se NÓS cortamos (alvo custom), não é falha — suprime o alerta (o readback do
     // preset de freio pode nem ter chegado, então cutByCustom é o sinal confiável).
-    const chargeFailed = !cutByCustom && endSoc > 0 && endSoc < (chargeLimit - 1);
+    const chargeFailed = !cutByCustom && endSoc > 0 && endSoc < (effTarget - 1);
     if (!isRetained && chargeFailed) {
       const aTitle = '⚠️ Carregamento interrompido';
-      const aBody  = `Parou em ${endSoc.toFixed(0)}% (limite ${chargeLimit}%). Verifique o carregamento.`;
-      sendPush(aTitle, aBody, 'charge_stopped', { renotify: true });
-      // Encerra a Live Activity de recarga com o alerta (em vez do "concluída").
-      // Mesmo toggle (charge_stopped, por-device) governa o push E o alerta na LA.
-      const chargeStoppedOn = pushSubs.some(s => getPrefsForDevice(s.device_id).charge_stopped !== false);
-      if (apnsLive.enabled && notifPrefs.la_charge !== false && chargeStoppedOn) {
-        stopChargeLiveTimer();
-        apnsLive.pushUpdate('ChargeActivityAttributes', {}, {
-          soc: endSoc, powerKw: 0,
-          sessionKwh: Math.max(_chargeFinalKwh, +state.charge_session_kwh || 0),
-          remainingMin: 0, charging: false,
-          targetPct: _effectiveChargeTarget(), updatedAtMs: Date.now(),
-        }, { isFinal: true, dismissalDate: Date.now() + 30 * 60_000, alert: { title: aTitle, body: aBody } })
-          .catch(e => console.warn('[apns] charge-stopped end falhou:', e.message));
-      }
+      const aBody  = `Parou em ${endSoc.toFixed(0)}% (alvo ${effTarget}%). Verifique o carregamento.`;
+      const finalKwh = Math.max(_chargeFinalKwh, +state.charge_session_kwh || 0);
+      // Debounce 90s: parada pode ser breve (carro pausa e retoma). Só alerta se
+      // continuar parado após 90s. Religar (value 'Carregando') cancela o timer.
+      if (_chargeStoppedTimer) clearTimeout(_chargeStoppedTimer);
+      _chargeStoppedTimer = setTimeout(() => {
+        _chargeStoppedTimer = null;
+        if (state.charging_state === 'Carregando') return; // religou — falso alarme
+        sendPush(aTitle, aBody, 'charge_stopped', { renotify: true });
+        // Encerra a Live Activity de recarga com o alerta (em vez do "concluída").
+        // Mesmo toggle (charge_stopped, por-device) governa o push E o alerta na LA.
+        const chargeStoppedOn = pushSubs.some(s => getPrefsForDevice(s.device_id).charge_stopped !== false);
+        if (apnsLive.enabled && notifPrefs.la_charge !== false && chargeStoppedOn) {
+          stopChargeLiveTimer();
+          apnsLive.pushUpdate('ChargeActivityAttributes', {}, {
+            soc: endSoc, powerKw: 0, sessionKwh: finalKwh,
+            remainingMin: 0, charging: false,
+            targetPct: effTarget, updatedAtMs: Date.now(),
+          }, { isFinal: true, dismissalDate: Date.now() + 30 * 60_000, alert: { title: aTitle, body: aBody } })
+            .catch(e => console.warn('[apns] charge-stopped end falhou:', e.message));
+        }
+      }, 90_000);
     }
 
     if (!isRetained && value === 'Finalizado' && chargeFailed) {
@@ -8744,7 +8754,11 @@ function handleChargingStateTransition(value, isRetained) {
   // Aceita retained: se o server reinicia com o carro carregando, o broker entrega
   // o estado como retained (packet.retain = true) e sem isso o timer nunca começa.
   // startChargeLiveTimer() já tem guarda interna contra duplo-início.
-  if (value === 'Carregando') startChargeLiveTimer();
+  if (value === 'Carregando') {
+    // Religou dentro da janela de 90s → cancela o alerta de "parou antes".
+    if (_chargeStoppedTimer) { clearTimeout(_chargeStoppedTimer); _chargeStoppedTimer = null; }
+    startChargeLiveTimer();
+  }
 }
 
 // ── Live notification durante recarga ─────────────────────────────────────────
