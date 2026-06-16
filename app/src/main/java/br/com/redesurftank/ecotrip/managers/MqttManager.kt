@@ -117,10 +117,15 @@ class MqttManager private constructor() {
     @Volatile private var clientId: String = CLIENT_ID_BASE
     // Detecção de colisão no MESMO device: o sufixo ANDROID_ID separa installs em
     // aparelhos distintos, mas NÃO dois processos no mesmo aparelho (ex.: processo
-    // velho que sobreviveu ao pm install -r). Se a conexão cair <6s repetidas vezes
-    // sem nunca firmar heartbeat, é takeover mútuo — aí anexa o PID ao id pra que os
-    // dois processos parem de se derrubar.
-    @Volatile private var shortLivedConnects = 0
+    // velho que sobreviveu ao pm install -r). Num loop de takeover, cada instância
+    // pode segurar a conexão por mais de 6s antes de ser chutada, então o antigo
+    // contador de quedas CONSECUTIVAS <6s zerava e nunca disparava. Trocado por uma
+    // janela deslizante: conta quedas pós-connect nos últimos FLAP_WINDOW_MS — se
+    // passar de FLAP_THRESHOLD, anexa o PID ao client-id pra desempatar os processos.
+    private val flapTimestamps = java.util.ArrayDeque<Long>()
+    private val flapLock = Any()
+    private val FLAP_WINDOW_MS = 120_000L
+    private val FLAP_THRESHOLD = 4
     @Volatile private var collisionGuardApplied = false
     // Mata instâncias zumbis do mesmo pacote uma vez por processo, antes do 1º connect.
     @Volatile private var staleKillDone = false
@@ -1515,14 +1520,19 @@ class MqttManager private constructor() {
                     // assinatura de takeover por outro cliente com o mesmo id.
                     val age = System.currentTimeMillis() - lastConnectMs
                     if (lastConnectMs > 0 && age in 1..6000) {
-                        shortLivedConnects++
-                        if (shortLivedConnects >= 3 && !collisionGuardApplied) {
+                        val flaps = synchronized(flapLock) {
+                            val now = System.currentTimeMillis()
+                            flapTimestamps.addLast(now)
+                            while (flapTimestamps.isNotEmpty() && now - flapTimestamps.first() > FLAP_WINDOW_MS) {
+                                flapTimestamps.removeFirst()
+                            }
+                            flapTimestamps.size
+                        }
+                        if (flaps >= FLAP_THRESHOLD && !collisionGuardApplied) {
                             collisionGuardApplied = true
                             clientId = "${clientId}_p${android.os.Process.myPid()}"
-                            AppLogger.w(TAG, "Flap <6s x$shortLivedConnects — provável colisão de id no mesmo device; client-id agora $clientId")
+                            AppLogger.w(TAG, "Flap <6s x$flaps em ${FLAP_WINDOW_MS / 1000}s — provável colisão de id no mesmo device; client-id agora $clientId")
                         }
-                    } else {
-                        shortLivedConnects = 0
                     }
                     heartbeatFuture?.cancel(false)
                     heartbeatFuture = null
@@ -1584,8 +1594,8 @@ class MqttManager private constructor() {
             heartbeatFuture = fastExecutor.scheduleAtFixedRate({
                 try {
                     hbTick++
-                    // Sobreviveu >6s = conexão firme, sem takeover → zera o contador de flap.
-                    if (System.currentTimeMillis() - lastConnectMs > 6000) shortLivedConnects = 0
+                    // Sobreviveu >6s = conexão firme, sem takeover → zera a janela de flap.
+                    if (System.currentTimeMillis() - lastConnectMs > 6000) synchronized(flapLock) { flapTimestamps.clear() }
                     val driving = try { TripManager.getInstance().isDrivingReady() } catch (_: Exception) { true }
                     if (!driving && hbTick % 6 != 0) return@scheduleAtFixedRate
                     val cur = client
