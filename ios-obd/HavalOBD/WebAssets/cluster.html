@@ -2459,6 +2459,23 @@ function sendCmd(action, value) {
   window.webkit.messageHandlers.obd.postMessage({ action, value: String(value) });
 }
 
+// ── Guard fire-on-tap p/ controles FÍSICOS (teto/cortina/vidros) ─────────────
+// Bug: o teto reabria sozinho — vehicle_skylight=200 era reenviado fora do
+// toque (reassert no ciclo de sync). Estes comandos NÃO devem sair em render/
+// telemetria/timer/reconnect — só por gesto do usuário. Gateamos por um toque
+// recente (<1.5s): sem gesto, o envio é bloqueado. A UI reflete telemetria
+// (skylight_level/shade_level), não dirige.
+let _lastUserGesture = 0;
+['pointerdown', 'pointermove', 'touchstart', 'touchmove', 'mousedown'].forEach(ev =>
+  document.addEventListener(ev, () => { _lastUserGesture = Date.now(); }, true));
+function sendPhysCmd(action, value) {
+  if (Date.now() - _lastUserGesture > 1500) {
+    console.warn('[phys-guard] reassert bloqueado (sem toque): ' + action + '=' + value);
+    return;
+  }
+  sendCmd(action, value);
+}
+
 // ── Controles físicos: cortina e teto solar (seletor de valor) ───────────────
 const VEH_PICKERS = {
   windows: {
@@ -2855,22 +2872,22 @@ document.addEventListener('dblclick', e => e.preventDefault());
 
   // ── Aberturas ──
   window.setCurtain = (v) => { const e = _g('ctrl-curtain'); if (e) e.textContent = v + '%'; };
-  window.commitCurtain = (v) => { sendCmd('vehicle_shade', parseInt(v, 10)); toast('⏳ Cortina ' + v + '%…'); };
+  window.commitCurtain = (v) => { sendPhysCmd('vehicle_shade', parseInt(v, 10)); toast('⏳ Cortina ' + v + '%…'); };
   window.previewSunroof = (v) => { const e = _g('ctrl-sunroof'); if (e) e.textContent = (+v <= 10 ? 'Fechado' : v + '%'); };
   window.commitSunroof = (v) => {
     const vent = _g('ctrl-sunroof-vent'); if (vent) vent.classList.remove('on');
-    sendCmd('vehicle_skylight', parseInt(v, 10)); toast('⏳ Teto ' + (+v <= 10 ? 'fechar' : v + '%') + '…');
+    sendPhysCmd('vehicle_skylight', parseInt(v, 10)); toast('⏳ Teto ' + (+v <= 10 ? 'fechar' : v + '%') + '…');
   };
   window.sunroofVent = () => {
     const vent = _g('ctrl-sunroof-vent'); const on = vent && !vent.classList.contains('on');
     if (vent) vent.classList.toggle('on', !!on);
     const lbl = _g('ctrl-sunroof'); if (lbl && on) lbl.textContent = 'Ventilação';
-    sendCmd('vehicle_skylight', on ? 200 : 0); toast('⏳ Teto ' + (on ? 'ventilação' : 'fechar') + '…');
+    sendPhysCmd('vehicle_skylight', on ? 200 : 0); toast('⏳ Teto ' + (on ? 'ventilação' : 'fechar') + '…');
   };
   window.setWindows = (btn, pos) => {
     const map = { fechado: 1, entreaberto: 3, aberto: 0 };
     if (btn && btn.parentElement) [...btn.parentElement.children].forEach(b => b.classList.toggle('on', b === btn));
-    sendCmd('vehicle_windows', map[pos]); toast('⏳ Vidros: ' + pos + '…');
+    sendPhysCmd('vehicle_windows', map[pos]); toast('⏳ Vidros: ' + pos + '…');
   };
 
   // ── Pisca-alerta (4 setas) — override que pinta o tile grande #ctrl-haz.
