@@ -863,7 +863,7 @@ class MqttManager private constructor() {
                 // Não existem branches na CS pra elas; vinham do listener global antigo.
                 CarConstants.CAR_EV_SETTING_POWER_MODEL_CONFIG.value -> {
                     val carVal = value.trim().toIntOrNull()
-                    if (carVal != null) syncDriveModeFromCar(carVal)
+                    if (carVal != null) { syncDriveModeFromCar(carVal); tripManager.onModeChanged(powertrain = carVal) }
                 }
                 CarConstants.CAR_EV_SETTING_POWER_RESERVE_CONFIG.value -> {
                     val carVal = value.trim().toIntOrNull()
@@ -875,15 +875,15 @@ class MqttManager private constructor() {
                 }
                 CarConstants.CAR_DRIVE_SETTING_DRIVE_MODE.value -> {
                     val carVal = value.trim().toIntOrNull()
-                    if (carVal != null) syncTerrainModeFromCar(carVal)
+                    if (carVal != null) { syncTerrainModeFromCar(carVal); tripManager.onModeChanged(drive = carVal) }
                 }
                 CarConstants.CAR_EV_SETTING_ENERGY_RECOVERY_LEVEL.value -> {
                     val carVal = value.trim().toIntOrNull()
-                    if (carVal != null) syncRegenLevelFromCar(carVal)
+                    if (carVal != null) { syncRegenLevelFromCar(carVal); tripManager.onModeChanged(regen = carVal) }
                 }
                 CarConstants.CAR_EV_SETTING_PEDAL_CONTROL_ENABLE.value -> {
                     val carVal = value.trim().toIntOrNull()
-                    if (carVal != null) syncOnePedalFromCar(carVal)
+                    if (carVal != null) { syncOnePedalFromCar(carVal); tripManager.onModeChanged(pedal = carVal) }
                 }
                 CarConstants.CAR_DRIVE_SETTING_ESP_ENABLE.value -> {
                     val carVal = value.trim().toIntOrNull()

@@ -199,6 +199,33 @@ data class AutoTripEntry(
     // v6.08 — altimetria (GPS): ganho (subida) e perda (descida) em metros
     val elevGainM:    Float   = 0f,
     val elevLossM:    Float   = 0f,
+    // v6.69 — segmentos por modo de condução. Cada troca de one-pedal/regen/
+    // estilo/powertrain fecha um segmento; default vazio = retrocompat Gson.
+    val segments:     List<TripSegment> = emptyList(),
+)
+
+/**
+ * Trecho de uma viagem com modo de condução constante. Fechado a cada troca de
+ * one-pedal, nível de regeneração, estilo (drive_mode) ou powertrain. Usado para
+ * comparar a economia de cada combinação de modos (tela de estatísticas).
+ */
+data class TripSegment(
+    val onePedal:   Int,    // 0/1 (-1 = desconhecido)
+    val regenLevel: Int,    // 0=Normal 1=Alto 2=Baixo
+    val driveMode:  Int,    // 0=Normal 1=Sport 2=Eco 3=Neve 4=Areia 5=Lama 11=AWD
+    val powertrain: Int,    // 0=HEV 1=Prior.EV 3=EV puro
+    val distKm:     Float,
+    val timeSec:    Long,
+    val energyKwh:  Float,
+    val regenKwh:   Float,
+    val netKwh:     Float,
+    val fuelL:      Float,
+    val elevGainM:  Float = 0f,
+    val elevLossM:  Float = 0f,
+    // Trecho com motor a combustão ligado (rpm>0). Em HEV a bateria é recarregada
+    // pelo motor, então a economia real do trecho é km/L (combustível), não kWh.
+    val engineDistKm: Float = 0f,
+    val engineSec:    Long  = 0L,
 )
 
 /** Abastecimento auto-detectado pelo APK (pulo no fuel_l com carro parado).
@@ -339,6 +366,30 @@ class TripManager private constructor() {
     private var prevRollingDist   = -1f
     private var prevRollingEnergy = -1f
     private var prevRollingRegen  = -1f
+
+    // ── Segmentos por modo (v6.69) ────────────────────────────────────────────
+    // Modo de condução corrente (último valor reportado pelo carro). -1 = desconhecido.
+    private var curOnePedal   = -1
+    private var curRegenLevel = -1
+    private var curDriveMode  = -1
+    private var curPowertrain = -1
+    // Segmento aberto: acumuladores + snapshot do modo no momento da abertura.
+    private var segOpen        = false
+    private var segOnePedal    = -1
+    private var segRegenLevel  = -1
+    private var segDriveMode   = -1
+    private var segPowertrain  = -1
+    private var segDistKm      = 0f
+    private var segEnergyKwh   = 0f
+    private var segRegenKwh    = 0f
+    private var segFuelL       = 0f
+    private var segTimeSec     = 0L
+    private var segEngineDistKm = 0f
+    private var segEngineSec    = 0L
+    private var segLastTimeMs  = 0L
+    private var segElevGainStart = 0.0
+    private var segElevLossStart = 0.0
+    private val currentTripSegments = mutableListOf<TripSegment>()
 
     // Current session raw values
     private var prevFuelPct  = -1f   // -1 = baseline not yet established
@@ -602,6 +653,11 @@ class TripManager private constructor() {
             // se o arquivo de samples foi deletado pós-sync).
             autoTripResumedStartLat = last.startLat
             autoTripResumedStartLng = last.startLng
+
+            // Segmentos por modo: reidrata os do trecho anterior e abre um novo
+            currentTripSegments.clear()
+            currentTripSegments.addAll(last.segments)
+            openSegment()
 
             // Soma o gap atual (motor off) ao acumulador. Preserva engineOffSec
             // anterior caso esta viagem já tenha sido continuada antes.
@@ -1437,6 +1493,9 @@ class TripManager private constructor() {
             .apply()
         autoTripMaxSpeed    = 0f
         autoTripMaxPowerPct = 0
+        // Segmentos por modo: nova viagem começa com lista limpa e 1 segmento aberto
+        currentTripSegments.clear()
+        openSegment()
         val inProgressFile = java.io.File(samplesDir, "${autoTripStartMs}_inprogress.json")
         telemetryRecorder?.startRecording(autoTripStartMs, flushFile = inProgressFile)
         AppLogger.i(TAG, "AutoTrip iniciado — SOC=${latestSocPct}% fuel=${latestFuelPct}% temp=${latestOutsideTempC}°C")
@@ -1462,6 +1521,11 @@ class TripManager private constructor() {
         try { inProgressFile.delete() } catch (_: Exception) {}
         val startGps   = telSamples.firstOrNull { it.lat != 0.0 || it.lng != 0.0 }
         val endGps     = telSamples.lastOrNull  { it.lat != 0.0 || it.lng != 0.0 }
+
+        // Fecha o segmento de modo ainda aberto e congela a lista da viagem
+        flushSegment()
+        val tripSegments = currentTripSegments.toList()
+        currentTripSegments.clear()
 
         val entry = AutoTripEntry(
             startMs      = autoTripStartMs,
@@ -1495,6 +1559,7 @@ class TripManager private constructor() {
             engineOffSec = autoTripEngineOffMs / 1000L,
             elevGainM    = ((telemetryRecorder?.elevGainM ?: 0.0) - autoTripStartElevGain).coerceAtLeast(0.0).toFloat(),
             elevLossM    = ((telemetryRecorder?.elevLossM ?: 0.0) - autoTripStartElevLoss).coerceAtLeast(0.0).toFloat(),
+            segments     = tripSegments,
         )
         // Descarta trip lixo: ≥60s mas sem deslocamento nem combustível (motor ligado
         // parado). Não persiste no histórico — só limpa a baseline e sai.
@@ -1749,6 +1814,16 @@ class TripManager private constructor() {
                     checkpointSession()
                     checkpointTickCount = 0
                 }
+                // Tempo do segmento: acumula wall-clock exceto em pausa (carro em P).
+                if (segOpen) {
+                    val nowSeg = System.currentTimeMillis()
+                    if (segLastTimeMs > 0L && lifeGearPauseStartMs == 0L) {
+                        val dSec = ((nowSeg - segLastTimeMs) / 1000L).coerceIn(0L, 600L)
+                        segTimeSec += dSec
+                        if (latestEngineRpm > 0) segEngineSec += dSec
+                    }
+                    segLastTimeMs = nowSeg
+                }
                 notifyListeners()
             }
         }
@@ -1830,6 +1905,72 @@ class TripManager private constructor() {
         }
     }
 
+    // ── Segmentos por modo ────────────────────────────────────────────────────
+
+    /** Abre um segmento novo capturando o modo corrente. Caller deve estar em lock. */
+    private fun openSegment() {
+        segOpen        = true
+        segOnePedal    = curOnePedal
+        segRegenLevel  = curRegenLevel
+        segDriveMode   = curDriveMode
+        segPowertrain  = curPowertrain
+        segDistKm      = 0f
+        segEnergyKwh   = 0f
+        segRegenKwh    = 0f
+        segFuelL       = 0f
+        segTimeSec     = 0L
+        segEngineDistKm = 0f
+        segEngineSec    = 0L
+        segLastTimeMs  = System.currentTimeMillis()
+        segElevGainStart = telemetryRecorder?.elevGainM ?: 0.0
+        segElevLossStart = telemetryRecorder?.elevLossM ?: 0.0
+    }
+
+    /** Fecha o segmento aberto e o anexa à lista da viagem corrente. Caller em lock.
+     *  Descarta trechos triviais (<50m e <0,02L e <0,05kWh) — ruído de troca rápida. */
+    private fun flushSegment() {
+        if (!segOpen) return
+        segOpen = false
+        val net = (segEnergyKwh - segRegenKwh).coerceAtLeast(0f)
+        if (segDistKm < 0.05f && segFuelL < 0.02f && segEnergyKwh < 0.05f) return
+        val gain = ((telemetryRecorder?.elevGainM ?: 0.0) - segElevGainStart).coerceAtLeast(0.0).toFloat()
+        val loss = ((telemetryRecorder?.elevLossM ?: 0.0) - segElevLossStart).coerceAtLeast(0.0).toFloat()
+        currentTripSegments.add(TripSegment(
+            onePedal   = segOnePedal,
+            regenLevel = segRegenLevel,
+            driveMode  = segDriveMode,
+            powertrain = segPowertrain,
+            distKm     = segDistKm.coerceAtLeast(0f),
+            timeSec    = segTimeSec.coerceAtLeast(0L),
+            energyKwh  = segEnergyKwh.coerceAtLeast(0f),
+            regenKwh   = segRegenKwh.coerceAtLeast(0f),
+            netKwh     = net,
+            fuelL      = segFuelL.coerceAtLeast(0f),
+            elevGainM  = gain,
+            elevLossM  = loss,
+            engineDistKm = segEngineDistKm.coerceAtLeast(0f),
+            engineSec    = segEngineSec.coerceAtLeast(0L),
+        ))
+    }
+
+    /** Recebe os 4 modos de condução do carro. Não auto-inicia sessão (settings ecoam
+     *  com o carro parado). Numa troca durante viagem ativa, fecha o segmento corrente
+     *  (com o modo antigo) e abre um novo com o modo atualizado. */
+    fun onModeChanged(pedal: Int? = null, regen: Int? = null, drive: Int? = null, powertrain: Int? = null) {
+        synchronized(lock) {
+            var changed = false
+            pedal?.let     { if (it != curOnePedal)   { curOnePedal   = it; changed = true } }
+            regen?.let     { if (it != curRegenLevel) { curRegenLevel = it; changed = true } }
+            drive?.let     { if (it != curDriveMode)  { curDriveMode  = it; changed = true } }
+            powertrain?.let{ if (it != curPowertrain) { curPowertrain = it; changed = true } }
+            if (!changed) return
+            if (sessionActive && autoTripStartMs != 0L) {
+                if (segOpen) { flushSegment(); openSegment() }
+                else openSegment()
+            }
+        }
+    }
+
     // ── Per-channel handlers ──────────────────────────────────────────────────
 
     private fun onFuelPct(value: Float) {
@@ -1846,6 +1987,7 @@ class TripManager private constructor() {
                 pendingFuelL += dFuelL
                 lifeFuelL      += dFuelL   // lifetime: acumula direto (não passa por checkpoint)
                 rollingAccFuel += dFuelL
+                if (segOpen) segFuelL += dFuelL
                 Log.d(TAG, "Fuel drop ${drop}% → ${dFuelL}L (pct=$value)")
             }
             drop < -5f -> {
@@ -1959,6 +2101,13 @@ class TripManager private constructor() {
             rollingDistKm    += kmStep
             rollingAccEnergy += dEnergy
             rollingAccRegen  += dRegen
+
+            if (segOpen) {
+                segDistKm    += kmStep
+                segEnergyKwh += dEnergy
+                segRegenKwh  += dRegen
+                if (latestEngineRpm > 0) segEngineDistKm += kmStep
+            }
 
             AppLogger.d("TripManager",
                 "rolling tick: km+=${String.format("%.3f", kmStep)} " +

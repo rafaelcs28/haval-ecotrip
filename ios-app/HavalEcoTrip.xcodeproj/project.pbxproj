@@ -26,6 +26,7 @@
 		31C4EEF5E7D54B74A2F8DCA1 /* SongProLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8667439515FC27589EEEDBC9 /* SongProLiveActivity.swift */; };
 		396DD83776CC2C2138F1CEAC /* RangeSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = D16EC27D9C377977BF908E1D /* RangeSheet.swift */; };
 		3ED1321FB7B61D7ADDAA032F /* DesignSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7376EEA5C86B0C60FE3CE4E3 /* DesignSystem.swift */; };
+		40FD4BDFC584EDCEDD3A24E6 /* ModeEconomySheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00A892D7A0CA83BABF2920BE /* ModeEconomySheet.swift */; };
 		42169A88F8E36FD03EA47301 /* ConfigStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD7173E45A0E0AAFE9AD301F /* ConfigStore.swift */; };
 		447016E58ECF062223D41618 /* TripActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = E612200FCE6AA9F646191052 /* TripActivityAttributes.swift */; };
 		4C94F890D15203640F57B31D /* LiveActivityPush.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19F1EE1E1159233D66EEAFA8 /* LiveActivityPush.swift */; };
@@ -148,6 +149,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		00A892D7A0CA83BABF2920BE /* ModeEconomySheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModeEconomySheet.swift; sourceTree = "<group>"; };
 		01AC1877140CC251292718C3 /* AutomationsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutomationsView.swift; sourceTree = "<group>"; };
 		0275BC86719533522473C87B /* BydRecargaWidget.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = BydRecargaWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		0412CD48BFB11B79D8D550D4 /* NativeDashView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeDashView.swift; sourceTree = "<group>"; };
@@ -293,6 +295,7 @@
 				8036EB500E09B8F08A9EA755 /* MaintenanceStore.swift */,
 				800D1CEE2F1C2A49E6DF5F72 /* MapPickerSheet.swift */,
 				4FB73D94989A66F5854A3DDE /* MilestonesSheet.swift */,
+				00A892D7A0CA83BABF2920BE /* ModeEconomySheet.swift */,
 				0BBB9A0DE1F041DBBD0BFD00 /* MonthlyReportSheet.swift */,
 				D6CE9B63AE0A75344509696C /* NativeConfigView.swift */,
 				0412CD48BFB11B79D8D550D4 /* NativeDashView.swift */,
@@ -652,6 +655,7 @@
 				9726912E15C4196ACF166260 /* MaintenanceStore.swift in Sources */,
 				F301DF9029E3A438CA7D1C21 /* MapPickerSheet.swift in Sources */,
 				DD310F1F60647C63E517FD7F /* MilestonesSheet.swift in Sources */,
+				40FD4BDFC584EDCEDD3A24E6 /* ModeEconomySheet.swift in Sources */,
 				B96C51890F002FCEC37EB6B2 /* MonthlyReportSheet.swift in Sources */,
 				8B1DEE4FCD8F3304A07A33C9 /* MotorActivityAttributes.swift in Sources */,
 				18E278B160F80938E45E8463 /* NativeConfigView.swift in Sources */,

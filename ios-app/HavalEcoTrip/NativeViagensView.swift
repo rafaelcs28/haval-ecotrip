@@ -188,6 +188,7 @@ struct NativeViagensView: View {
     @State private var showRoutes = false
     @State private var showMilestones = false
     @State private var showTemp = false
+    @State private var showByMode = false
 
     private var fromDate: Binding<Date> { Binding(get: { fromTS > 0 ? Date(timeIntervalSince1970: fromTS) : Date() }, set: { fromTS = $0.timeIntervalSince1970 }) }
     private var toDate: Binding<Date> { Binding(get: { toTS > 0 ? Date(timeIntervalSince1970: toTS) : Date() }, set: { toTS = $0.timeIntervalSince1970 }) }
@@ -252,6 +253,7 @@ struct NativeViagensView: View {
         .sheet(isPresented: $showRoutes) { RouteCompareSheet(trips: loader.trips) }
         .sheet(isPresented: $showMilestones) { MilestonesSheet(odometerKm: car.num("odometer_km"), trips: loader.trips) }
         .sheet(isPresented: $showTemp) { TempConsumptionSheet(trips: loader.trips) }
+        .sheet(isPresented: $showByMode) { ModeEconomySheet() }
     }
 
     private var statsGrid: some View {
@@ -270,6 +272,7 @@ struct NativeViagensView: View {
                 gridTile(icon: "arrow.triangle.swap", title: "Trajetos", color: DS.orange) { showRoutes = true }
                 gridTile(icon: "trophy.fill", title: "Marcos", color: DS.yellow) { showMilestones = true }
                 gridTile(icon: "thermometer.medium", title: "Consumo × temp", color: DS.blue) { showTemp = true }
+                gridTile(icon: "slider.horizontal.3", title: "Por modo", color: DS.green) { showByMode = true }
             }
         }
     }

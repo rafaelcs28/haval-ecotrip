@@ -4981,6 +4981,134 @@ app.get('/api/autotrips', (req, res) => {
   res.json(arr.slice(0, 300));
 });
 
+// ── Estatísticas de economia por modo de condução ───────────────────────────
+// Agrega os `segments[]` de todas as viagens por combinação de modos
+// (one-pedal / regeneração / estilo / powertrain) e ranqueia por economia.
+// Filtro opcional de rota: ?route=<tripId> usa a origem/destino daquela viagem,
+// ou slat/slng/elat/elng explícitos. radius em metros (default 250).
+const _PEDAL_LBL = { '-1': '?', '0': 'Off', '1': 'On' };
+const _REGEN_LBL = { '-1': '?', '0': 'Normal', '1': 'Alto', '2': 'Baixo' };
+const _DRIVE_LBL = { '-1': '?', '0': 'Normal', '1': 'Sport', '2': 'Eco', '3': 'Neve', '4': 'Areia', '5': 'Lama', '11': 'AWD' };
+const _PWRT_LBL  = { '-1': '?', '0': 'HEV', '1': 'Prior.EV', '3': 'EV puro' };
+
+app.get('/api/stats/by-mode', (req, res) => {
+  const pKwh = +state.battery_avg_price_per_kwh || +state.price_kwh || 0;
+  const pGas = +state.tank_avg_price_per_l      || +state.price_gas_per_l || 0;
+  const radius = Math.max(20, +req.query.radius || 250);
+
+  // Referência de rota (opcional)
+  let ref = null;
+  if (req.query.route) {
+    const rid = String(req.query.route).replace(/\D/g, '');
+    const rt = autoTripsArr.find(t => t.tripId === rid || String(t.startMs) === rid);
+    if (rt && rt.startLat) ref = { slat: rt.startLat, slng: rt.startLng, elat: rt.endLat, elng: rt.endLng };
+  } else if (req.query.slat && req.query.slng && req.query.elat && req.query.elng) {
+    ref = { slat: +req.query.slat, slng: +req.query.slng, elat: +req.query.elat, elng: +req.query.elng };
+  }
+  const matchesRoute = (t) => {
+    if (!ref) return true;
+    if (!t.startLat || !t.endLat) return false;
+    return haversineM(t.startLat, t.startLng, ref.slat, ref.slng) <= radius
+        && haversineM(t.endLat,   t.endLng,   ref.elat, ref.elng) <= radius;
+  };
+
+  const combos = new Map();
+  let segTrips = 0;
+  for (const t of autoTripsArr) {
+    const segs = t.segments;
+    if (!Array.isArray(segs) || segs.length === 0) continue;
+    if (!matchesRoute(t)) continue;
+    segTrips++;
+    for (const s of segs) {
+      const key = `${s.onePedal}|${s.regenLevel}|${s.driveMode}|${s.powertrain}`;
+      let c = combos.get(key);
+      if (!c) {
+        c = { onePedal: s.onePedal, regenLevel: s.regenLevel, driveMode: s.driveMode, powertrain: s.powertrain,
+              distKm: 0, netKwh: 0, regenKwh: 0, energyKwh: 0, fuelL: 0, timeSec: 0,
+              engineDistKm: 0, engineSec: 0, segCount: 0, tripIds: new Set() };
+        combos.set(key, c);
+      }
+      c.distKm       += +s.distKm       || 0;
+      c.netKwh       += +s.netKwh       || 0;
+      c.regenKwh     += +s.regenKwh     || 0;
+      c.energyKwh    += +s.energyKwh    || 0;
+      c.fuelL        += +s.fuelL        || 0;
+      c.timeSec      += +s.timeSec      || 0;
+      c.engineDistKm += +s.engineDistKm || 0;
+      c.engineSec    += +s.engineSec    || 0;
+      c.segCount  += 1;
+      c.tripIds.add(t.tripId);
+    }
+  }
+
+  const ranking = [];
+  for (const c of combos.values()) {
+    if (c.distKm < 0.5) continue;   // descarta amostras triviais
+    const isHev  = c.powertrain === 0;   // motor a combustão é a fonte de energia
+    const netPos = Math.max(0, c.netKwh);
+    const kwh100 = c.distKm > 0.1 ? (c.netKwh / c.distKm) * 100 : 0;
+    // km/L: em HEV o motor propulsiona; a economia real é km por litro sobre a
+    // distância com motor ligado (engineDistKm) — não sobre a distância total,
+    // que incluiria trechos EV. Fora de HEV, km/L só faz sentido se houve fuel.
+    const kmL = c.fuelL > 0.01
+      ? (isHev && c.engineDistKm > 0.1 ? c.engineDistKm : c.distKm) / c.fuelL
+      : null;
+    // km/L equivalente e R$/km:
+    //   HEV → a bateria é recarregada pelo MOTOR (custo já está no combustível);
+    //         não credita/penaliza kWh. Economia = km/L (combustível) e R$/km de gás.
+    //   EV/Prior.EV → a bateria vem da tomada; converte kWh→litros equivalentes.
+    let kmLeq, rPerKm;
+    if (isHev) {
+      kmLeq  = (c.fuelL > 0.01) ? c.distKm / c.fuelL : null;
+      rPerKm = (pGas > 0) ? (c.fuelL * pGas) / c.distKm : null;
+    } else {
+      const kwhAsL = (pGas > 0 && pKwh > 0) ? netPos * pKwh / pGas : netPos / 8.9;
+      const totEqL = c.fuelL + kwhAsL;
+      kmLeq  = totEqL > 0.001 ? c.distKm / totEqL : null;
+      rPerKm = (pGas > 0 || pKwh > 0) ? (c.fuelL * pGas + netPos * pKwh) / c.distKm : null;
+    }
+    ranking.push({
+      key: `${c.onePedal}|${c.regenLevel}|${c.driveMode}|${c.powertrain}`,
+      onePedal: c.onePedal, regenLevel: c.regenLevel, driveMode: c.driveMode, powertrain: c.powertrain,
+      isHev,
+      label: {
+        onePedal:   _PEDAL_LBL[String(c.onePedal)]   ?? '?',
+        regenLevel: _REGEN_LBL[String(c.regenLevel)] ?? '?',
+        driveMode:  _DRIVE_LBL[String(c.driveMode)]  ?? '?',
+        powertrain: _PWRT_LBL[String(c.powertrain)]  ?? '?',
+      },
+      distKm:   +c.distKm.toFixed(2),
+      engineDistKm: +c.engineDistKm.toFixed(2),
+      timeMin:  Math.round(c.timeSec / 60),
+      netKwh:   +c.netKwh.toFixed(2),
+      regenKwh: +c.regenKwh.toFixed(2),
+      fuelL:    +c.fuelL.toFixed(2),
+      // kWh/100km só é informativo fora de HEV (em HEV o motor recarrega a bateria)
+      kwh100:   isHev ? null : +kwh100.toFixed(1),
+      kmL:      kmL   != null ? +kmL.toFixed(1)   : null,
+      kmLeq:    kmLeq != null ? +kmLeq.toFixed(1) : null,
+      rPerKm:   rPerKm != null ? +rPerKm.toFixed(3) : null,
+      segCount: c.segCount,
+      tripCount: c.tripIds.size,
+      lowSample: c.distKm < 5,   // <5 km de amostra → ranking pouco confiável
+    });
+  }
+  // Mais econômico primeiro: maior km/L-equivalente. Combos sem métrica (sem
+  // fuel nem kWh) vão pro fim.
+  ranking.sort((a, b) => {
+    const av = a.kmLeq != null ? a.kmLeq : -Infinity;
+    const bv = b.kmLeq != null ? b.kmLeq : -Infinity;
+    return bv - av;
+  });
+
+  res.json({
+    prices: { pKwh, pGas },
+    route: ref ? { ...ref, radius } : null,
+    tripsConsidered: segTrips,
+    ranking,
+  });
+});
+
 app.delete('/api/autotrips/:tripId', (req, res) => {
   const id = String(req.params.tripId).replace(/\D/g, '');
   if (!id) return res.status(400).json({ error: 'invalid tripId' });

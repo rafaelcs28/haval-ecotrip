@@ -5199,6 +5199,9 @@ async function loadStats() {
   // ── 3. Split elétrico / híbrido ──────────────────────────────────────────
   html += _statsElectricHTML(trips);
 
+  // ── 3b. Economia por modo de condução ────────────────────────────────────
+  html += await _statsByModeHTML();
+
   // ── 4. Comparativo EV vs ICE (economia acumulada) ────────────────────────
   html += _statsEvVsIceHTML(trips);
 
@@ -5215,6 +5218,54 @@ async function loadStats() {
   container.innerHTML = html;
   // Inicializa heatmap após o DOM ser pintado
   setTimeout(_initStatsHeatmap, 100);
+}
+
+// Ranking de economia por combinação de modos (one-pedal/regen/estilo/powertrain).
+// Vem do bridge (/api/stats/by-mode), que agrega os segmentos por modo de cada
+// viagem. Em HEV a métrica é km/L (o motor recarrega a bateria); fora de HEV é
+// km/L equivalente (kWh convertido pelo preço). Mais econômico no topo.
+async function _statsByModeHTML() {
+  let data;
+  try {
+    const r = await apiFetch('/api/stats/by-mode');
+    data = await r.json();
+  } catch (_) { return ''; }
+  const rank = (data && data.ranking) || [];
+  if (!rank.length) {
+    return _statsCard('🎛️ Economia por modo', `<div style="font-size:11px;color:#64748b">
+      Sem dados de modo ainda. As viagens passam a registrar one-pedal, regeneração,
+      estilo e powertrain por trecho a partir da v6.69 do carro.</div>`);
+  }
+  const best = rank[0].kmLeq;
+  const rows = rank.map((c, i) => {
+    const top = i === 0;
+    const chip = (txt, on) => `<span style="display:inline-block;font-size:9px;padding:1px 6px;border-radius:6px;margin:1px 3px 1px 0;background:${on?'#16321f':'#141a26'};color:${on?'#5fe3a1':'#94a3b8'}">${txt}</span>`;
+    const chips =
+      chip(`Pedal ${c.label.onePedal}`,   c.onePedal === 1) +
+      chip(`Regen ${c.label.regenLevel}`, c.regenLevel === 1) +
+      chip(c.label.driveMode,             c.driveMode === 2) +
+      chip(c.label.powertrain,            !c.isHev);
+    const main = c.kmLeq != null ? `${c.kmLeq} km/L${c.isHev ? '' : '<sub style="font-size:8px">eq</sub>'}`
+               : (c.kwh100 != null ? `${c.kwh100} kWh/100` : '—');
+    const subParts = [`${c.distKm} km`];
+    if (c.rPerKm != null) subParts.push(`R$ ${c.rPerKm.toFixed(2)}/km`);
+    if (c.isHev && c.kmL != null) subParts.push(`${c.kmL} km/L motor`);
+    else if (!c.isHev && c.kwh100 != null) subParts.push(`${c.kwh100} kWh/100`);
+    if (c.lowSample) subParts.push('⚠ amostra curta');
+    return `<div style="padding:8px 0;border-bottom:1px solid #0F1520;${top?'background:linear-gradient(90deg,#0e2018,transparent);border-radius:8px;padding-left:8px':''}">
+      <div style="display:flex;align-items:flex-start;gap:8px">
+        <div style="flex:1;min-width:0">
+          <div style="margin-bottom:3px">${top?'<span style="font-size:11px">🏆 </span>':''}${chips}</div>
+          <div style="font-size:9px;color:#475569">${subParts.join(' · ')}</div>
+        </div>
+        <div style="font-size:14px;font-weight:700;color:${top?'#5fe3a1':'#f1f5f9'};text-align:right;white-space:nowrap">${main}</div>
+      </div>
+    </div>`;
+  }).join('');
+  const note = `<div style="font-size:9px;color:#475569;margin-top:8px">
+    Comparação por km/L equivalente (kWh convertido pelo preço). HEV usa km/L do
+    motor — em HEV a bateria é recarregada pelo motor, então o kWh não conta.</div>`;
+  return _statsCard(`🎛️ Economia por modo · ${rank.length} combinaç${rank.length!==1?'ões':'ão'}`, rows + note);
 }
 
 function _statsCard(title, body) {
