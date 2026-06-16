@@ -42,6 +42,13 @@ class LocalApiServer(
         private const val TAG = "LocalApiServer"
         private const val MAX_FPS = 10  // throttle WS push
 
+        // Controles físicos de toggle que o iPad (Haval Cockpit) reassenta no
+        // ciclo de sync — edge-trigger por valor pra impedir reabertura sozinha
+        // (teto solar voltando pra ventilação=200 depois que você fecha no botão).
+        // Mesmo valor reenviado dentro da janela = reassert de estado em cache → ignora.
+        private val PHYS_DEDUP_CMDS = setOf("vehicle/skylight", "vehicle/shade", "vehicle/window_all")
+        private const val PHYS_DEDUP_WINDOW_MS = 120_000L
+
         /** Porta que conseguiu bindar — atualizada por startServer(). */
         @Volatile var activePort: Int = -1
             private set
@@ -53,6 +60,9 @@ class LocalApiServer(
 
     private val gson = Gson()
     private val clients = CopyOnWriteArrayList<StateWebSocket>()
+    // Último comando físico aplicado por cmd: valor + timestamp. Usado pelo
+    // guard anti-reassert (ver PHYS_DEDUP_CMDS).
+    private val lastPhysCmd = java.util.concurrent.ConcurrentHashMap<String, Pair<String, Long>>()
     private var lastPushMs = 0L
     // Heartbeat: manda snapshot a cada 1s mesmo sem mudança no CAN. Mantém o
     // stream WS vivo (senão o iOS NWConnection seca a conexão com POSIX 96
@@ -192,13 +202,34 @@ class LocalApiServer(
                 """{"ok":false,"error":"comando desconhecido: $cmd"}""")
         }
 
-        // Delega pro MqttManager — mesmo handler usado pelo MQTT pro Mac mini.
-        // Isso garante que o Mac mini também recebe o resultado via MQTT (dual-publish).
-        Log.i(TAG, "comando local: $cmd = '$payload'")
-        mqttManager.dispatchLocalCommand(cmd, payload)
-
+        val remote = session.remoteIpAddress ?: "?"
+        val applied = relayLocalCommand(cmd, payload, "HTTP $remote")
         return newFixedLengthResponse(Response.Status.ACCEPTED, "application/json",
-            """{"ok":true,"cmd":"$cmd","value":"$payload"}""")
+            """{"ok":true,"cmd":"$cmd","value":"$payload","applied":$applied}""")
+    }
+
+    /**
+     * Aplica um comando vindo da LAN (HTTP ou WS) via MqttManager — mesmo handler
+     * do MQTT, então o Mac mini também recebe o resultado (dual-publish).
+     * Em controles físicos de toggle (PHYS_DEDUP_CMDS) descarta reassert: mesmo
+     * valor reenviado dentro da janela é ignorado, pra não reabrir o teto sozinho
+     * depois que você fechou no botão. `source` = origem (ex.: "WS 192.168.x.y").
+     * Retorna true se aplicou, false se ignorou.
+     */
+    private fun relayLocalCommand(cmd: String, value: String, source: String): Boolean {
+        if (cmd in PHYS_DEDUP_CMDS) {
+            val now = System.currentTimeMillis()
+            val last = lastPhysCmd[cmd]
+            if (last != null && last.first == value && now - last.second < PHYS_DEDUP_WINDOW_MS) {
+                lastPhysCmd[cmd] = value to now   // janela deslizante: zera enquanto o spam continua
+                Log.w(TAG, "comando $source IGNORADO (reassert $cmd='$value' < ${PHYS_DEDUP_WINDOW_MS / 1000}s)")
+                return false
+            }
+            lastPhysCmd[cmd] = value to now
+        }
+        Log.i(TAG, "comando $source: $cmd = '$value'")
+        mqttManager.dispatchLocalCommand(cmd, value)
+        return true
     }
 
     // ── WebSocket ────────────────────────────────────────────────────────────
@@ -214,6 +245,8 @@ class LocalApiServer(
     }
 
     inner class StateWebSocket(handshake: IHTTPSession, val server: LocalApiServer) : WebSocket(handshake) {
+
+        private val remoteIp = handshake.remoteIpAddress ?: "?"
 
         override fun onOpen() {
             clients.add(this)
@@ -241,8 +274,7 @@ class LocalApiServer(
                 val value = (map["value"] ?: map["enable"] ?: map["mode"] ?: map["level"] ?: map["pct"])
                     ?.toString()?.trim()?.removeSuffix(".0") ?: ""
                 if (cmd in ALLOWED_COMMANDS || cmd.startsWith("hvac/")) {
-                    Log.i(TAG, "comando via WS: $cmd = '$value'")
-                    mqttManager.dispatchLocalCommand(cmd, value)
+                    relayLocalCommand(cmd, value, "WS $remoteIp")
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "WS cmd parse falhou: ${e.message}")
