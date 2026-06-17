@@ -1,4 +1,4 @@
-<!-- @dsCard group="Cockpit" viewport="1920x720" name="V4 — Controles · 1920×720" subtitle="A escolhida redimensionada p/ head-unit widescreen · barra status 60 + nav 128 · útil 1792×660" -->
+<!-- @dsCard group="Cockpit" viewport="1792x660" name="Controles · 2 telas (embarcado)" subtitle="Head-unit 1792×660 · T1 Dirigir (Condução+Clima) · T2 Veículo+Energia · troca por deslize de 2 dedos" -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -597,6 +597,198 @@
   /* isola repaints: mexer num card/área não repinta o resto da tela */
   .ctrl-area, .v4 .p-trip, .topbar { contain: layout paint; }
 </style>
+<style id="two-screen-layout">
+/* ════════ Controles em 2 TELAS (deslize de 2 dedos / abas) ════════ */
+.v4 { grid-template-rows: 32px 1fr 92px !important; }
+.v4 .topnav { grid-row: 1; position: relative; display: flex; align-items: center; justify-content: center; }
+.v4 .panes { grid-column: 1; grid-row: 2; overflow: hidden; position: relative; min-height: 0; }
+.v4 .p-trip { grid-row: 3 !important; }
+.pane-track { display: flex; width: 200%; height: 100%; will-change: transform; transition: transform .32s cubic-bezier(.4,0,.2,1) !important; }
+.pane { flex: 0 0 50%; width: 50%; height: 100%; min-height: 0; display: grid; gap: 12px; padding: 1px; box-sizing: border-box; }
+#pane1 { grid-template-columns: 1fr 1fr; }
+#pane2 { grid-template-columns: 1.12fr 1fr; }
+.pane .ctrl-area { min-height: 0; padding: 10px 13px; gap: 6px; }
+.pane .ctrl-area .area-h { display: flex; font-size: 13px; letter-spacing: .12em; margin: 0; }
+
+/* abas / indicador de página */
+.page-tabs { display: flex; gap: 5px; background: rgba(0,0,0,.5); border: 1px solid var(--border-hi); border-radius: 999px; padding: 4px; }
+.page-tab { background: transparent; border: none; color: var(--muted); font-family: inherit; font-size: 13px; font-weight: 700; letter-spacing: .02em; padding: 5px 16px; border-radius: 999px; cursor: pointer; }
+.page-tab.on { background: rgba(34,197,94,.14); color: var(--green); box-shadow: inset 0 0 0 1px rgba(34,197,94,.4); }
+.swipe-hint { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); font-size: 11px; color: var(--dim); font-weight: 600; }
+
+/* botões maiores (mais largura por ter 2 telas) */
+.pane .seg-tile { padding: 9px 13px; gap: 6px; }
+.pane .seg-h { font-size: 12px; }
+.pane .seg button { padding: 13px 6px; font-size: 15px; }
+.pane .seg button small { font-size: 11px; }
+.pane .air-seg .seg button { font-size: 13px; padding: 10px 2px; }
+#pane1 .cond .seg-tile { padding: 8px 14px; gap: 6px; }
+#pane1 .cond .seg button { padding: 12px 6px; font-size: 16px; }
+#pane1 .area-grid.cond { gap: 6px; }
+.pane .clima-toggles { gap: 8px; }
+.pane .clima-toggles .ctrl-tile { padding: 7px 5px; gap: 2px; }
+.pane .clima-toggles .ctrl-tile .ic { font-size: 24px; }
+.pane .clima-toggles .ctrl-tile .lbl { font-size: 12px; }
+.pane .clima-toggles .ctrl-tile .st { font-size: 10px; }
+.pane .slider-tile { padding: 9px 14px; gap: 7px; }
+.pane .slider-h .lbl { font-size: 14px; }
+.pane .slider-h .sv { font-size: 20px; }
+.pane .cv-slider { height: 13px; }
+.pane .cv-slider::-webkit-slider-thumb { width: 32px; height: 32px; }
+.pane .cv-slider::-moz-range-thumb { width: 32px; height: 32px; }
+.pane .cond-actions { gap: 8px; }
+.pane .cond-actions .ctrl-tile, .pane .cond-actions .esp-toggle { min-height: 80px; }
+.pane .cond-actions .ctrl-tile .ic { font-size: 22px; }
+.pane .cond-actions .ctrl-tile .lbl { font-size: 14px; }
+.pane .cond-actions .ctrl-tile.danger .ic svg { width: 30px; height: 30px; }
+.pane .esp-toggle .ic { font-size: 22px; }
+.pane .esp-toggle .lbl { font-size: 13px; }
+
+/* Tela 2 · vidros/bancos um pouco maiores */
+#pane2 .wc-win b { font-size: 16px; }
+#pane2 .wc-win .wc-st { font-size: 11px; }
+#pane2 .win-all button { font-size: 12px; padding: 9px 2px; }
+#pane2 .area-grid.veic .vfader .vf-name { font-size: 12px; }
+#pane2 .area-grid.veic .vfader .vf-val { font-size: 15px; }
+
+/* VITAIS (Tela 2) */
+.vitals { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 10px; min-height: 0; }
+.vitals .panel { display: flex; flex-direction: column; }
+.vitals .p-power { padding: 12px 16px; }
+.vitals .p-speed { padding: 12px 14px; }
+.vitals .p-soc, .vitals .p-fuel { align-items: center; justify-content: center; padding: 8px; }
+.vitals .panel-h { flex: none; }
+.vitals .power-row { flex: 1; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 12px; }
+.vitals .power-num { display: flex; align-items: baseline; }
+.vitals .power-val { font-size: 74px; letter-spacing: -3px; line-height: .9; }
+.vitals .power-unit { font-size: 24px; }
+.vitals .power-meta { width: 100%; display: flex; flex-direction: column; gap: 7px; flex: none; }
+.vitals .power-bar { width: 100%; margin: 0; height: 20px; }
+.vitals .power-scale { width: 100%; margin: 0; font-size: 12px; }
+.vitals .p-speed .mid { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.vitals .speed-val { font-size: 70px; }
+.vitals .speed-unit { font-size: 20px; }
+.vitals .speed-max { font-size: 17px; margin-top: 2px; }
+.vitals .gauge-mini { flex-direction: column; gap: 6px; text-align: center; }
+.vitals .gauge-mini .ring { width: 116px; height: 116px; }
+.vitals .gauge-mini .ring svg { width: 116px; height: 116px; }
+.vitals .gauge-mini .ring .gauge-center .gauge-big { font-size: 33px; letter-spacing: -1px; }
+.vitals .gauge-mini .ring .gauge-center .gauge-big .pct { font-size: 14px; }
+.vitals .gauge-mini .meta { text-align: center; }
+.vitals .gauge-mini .meta .m-lbl { justify-content: center; font-size: 12px; }
+.vitals .gauge-mini .meta .m-main { font-size: 18px; margin-top: 2px; }
+.vitals .gauge-mini .meta .m-sub { font-size: 12px; }
+</style>
+<style id="controls-3panes">
+/* ════ 3 telas no swipe: ① Dirigir (Condução+Clima) · ② Veículo · ③ Viagem ════ */
+.v4 { grid-template-rows: 44px 1fr !important; }
+.pane-track { width: 200% !important; }
+.pane { flex: 0 0 50% !important; width: 50% !important; }
+/* topnav: dica à esquerda, abas centralizadas, barra do app no topo direito */
+.v4 .topnav { padding: 0 12px; }
+.topnav .swipe-hint { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); }
+.topnav .page-tabs { position: absolute; left: 50%; transform: translateX(-50%); }
+.topnav .trip-controls { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); bottom: auto; display: flex; align-items: center; gap: 8px; z-index: 30; }
+.topnav .trip-controls .car-stat { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--muted); }
+.topnav .trip-controls .cfg-btn { margin-left: 0; }
+
+/* —— TELA 1 · botões maiores (ganhou a altura da faixa de viagem) —— */
+#pane1 .ctrl-area { padding: 14px 16px; gap: 9px; }
+#pane1 .cond .seg-tile { padding: 11px 16px; gap: 9px; }
+#pane1 .cond .seg button { padding: 15px 6px; font-size: 18px; }
+#pane1 .cond-actions .ctrl-tile, #pane1 .cond-actions .esp-toggle { min-height: 100px; }
+#pane1 .cond-actions .ctrl-tile .ic { font-size: 30px; }
+#pane1 .cond-actions .ctrl-tile .lbl { font-size: 16px; }
+#pane1 .esp-toggle .ic { font-size: 26px; }
+#pane1 .esp-toggle .lbl { font-size: 15px; }
+#pane1 .clima-toggles .ctrl-tile { padding: 9px 6px; gap: 3px; }
+#pane1 .clima-toggles .ctrl-tile .ic { font-size: 27px; }
+#pane1 .clima-toggles .ctrl-tile .lbl { font-size: 13px; }
+#pane1 .clima-toggles .ctrl-tile .st { font-size: 11px; }
+#pane1 .clima .slider-tile { padding: 9px 15px; gap: 7px; }
+#pane1 .clima .slider-h .lbl { font-size: 14px; }
+#pane1 .clima .slider-h .sv { font-size: 21px; }
+#pane1 .clima .cv-slider { height: 14px; }
+#pane1 .clima .cv-slider::-webkit-slider-thumb { width: 32px; height: 32px; }
+#pane1 .air-seg .seg button { font-size: 13px; padding: 11px 2px; }
+
+/* —— TELA 2 · VEÍCULO em console largo —— */
+#pane2 { display: grid !important; grid-template-columns: 1fr 1fr !important; gap: 12px; }
+#pane2 .ctrl-area { height: 100%; display: flex; flex-direction: column; min-height: 0; }
+#pane2 .veic-controls { padding: 14px 18px; gap: 12px; }
+#pane2 .ctrl-area .area-h { display: flex; font-size: 15px; margin: 0; }
+#pane2 .area-grid.veic.veic-onecol { flex: 1; min-height: 0; display: grid; grid-template-rows: auto 1fr auto auto; gap: 12px; }
+#pane2 .veic-onecol .win-tile { height: auto; padding: 12px 16px; gap: 10px; }
+#pane2 .veic-onecol .win-tile .seg-h { font-size: 14px; }
+#pane2 .veic-onecol .win-all button { font-size: 15px; padding: 14px 4px; }
+#pane2 .veic-onecol .seat-col { min-height: 0; padding: 12px 16px; gap: 8px; display: flex; flex-direction: column; }
+#pane2 .veic-onecol .seat-col .seg-h { font-size: 14px; }
+#pane2 .veic-onecol .seat-col .seat-vfaders { flex: 1; gap: 14px; }
+#pane2 .veic-onecol .seat-col .vfader { padding: 10px 8px; gap: 6px; justify-content: space-between; }
+#pane2 .veic-onecol .seat-col .vfader .vf-name { font-size: 13px; }
+#pane2 .veic-onecol .seat-col .vfader .vf-track { flex: 1; min-height: 64px; width: auto; max-width: none; margin: 4px auto; }
+#pane2 .veic-onecol .seat-col .vfader .vf-val { font-size: 16px; }
+#pane2 .veic-onecol > .slider-tile { padding: 11px 18px; gap: 8px; display: flex; flex-direction: column; justify-content: center; }
+#pane2 .veic-onecol > .slider-tile .slider-h .lbl { font-size: 14px; }
+#pane2 .veic-onecol > .slider-tile .slider-h .sv { font-size: 21px; }
+#pane2 .veic-onecol > .slider-tile .cv-slider { height: 16px; }
+#pane2 .veic-onecol > .slider-tile .cv-slider::-webkit-slider-thumb { width: 36px; height: 36px; }
+#pane2 .veic-onecol .vent-btn { padding: 8px; font-size: 13px; }
+
+/* —— Player de mídia (coluna direita) —— */
+#pane2 .media-area { padding: 16px 20px; gap: 12px; }
+#pane2 .media-area .media-src { margin-left: auto; font-size: 11px; font-weight: 700; color: var(--blue); background: rgba(56,189,248,.12); border: 1px solid rgba(56,189,248,.4); border-radius: 999px; padding: 3px 12px; text-transform: none; letter-spacing: 0; }
+.media-body { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; }
+.media-art { width: 248px; height: 248px; border-radius: 22px; background: linear-gradient(135deg, rgba(34,197,94,.22), rgba(56,189,248,.18)); border: 1px solid var(--border-hi); display: flex; align-items: center; justify-content: center; font-size: 92px; box-shadow: 0 12px 40px rgba(0,0,0,.45); flex-shrink: 0; overflow: hidden; }
+.media-art img { width: 100%; height: 100%; object-fit: cover; }
+.media-meta { text-align: center; max-width: 100%; }
+.media-title { font-size: 21px; font-weight: 700; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 380px; }
+.media-artist { font-size: 14px; color: var(--muted); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 380px; }
+.media-prog { width: 100%; max-width: 440px; display: flex; flex-direction: column; gap: 5px; cursor: pointer; }
+.media-bar { height: 9px; border-radius: 999px; background: var(--border); overflow: hidden; }
+.media-bar-fill { height: 100%; width: 0%; border-radius: 999px; background: var(--green); transition: width .25s linear; }
+.media-time { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.media-ctrls { display: flex; align-items: center; justify-content: center; gap: 18px; }
+.mc-btn { width: 64px; height: 64px; border-radius: 50%; flex-shrink: 0; background: rgba(255,255,255,.06); border: 1px solid var(--border-hi); color: var(--text); font-size: 24px; cursor: pointer; display: flex; align-items: center; justify-content: center; -webkit-tap-highlight-color: transparent; transition: transform .1s, background .15s; }
+.mc-btn:active { transform: scale(.92); }
+.mc-btn.play { width: 80px; height: 80px; font-size: 32px; background: rgba(34,197,94,.16); border-color: rgba(34,197,94,.55); color: var(--green); }
+.media-vol { width: 100%; max-width: 440px; display: flex; align-items: center; gap: 10px; }
+.mv-ic { font-size: 20px; flex-shrink: 0; }
+.mv-val { font-size: 19px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; min-width: 30px; text-align: center; flex-shrink: 0; }
+.mv-btn { width: 54px; height: 48px; border-radius: 12px; flex-shrink: 0; background: rgba(255,255,255,.06); border: 1px solid var(--border-hi); color: var(--text); font-size: 21px; cursor: pointer; display: flex; align-items: center; justify-content: center; -webkit-tap-highlight-color: transparent; }
+.mv-btn:active { transform: scale(.94); }
+.mv-bar { flex: 1; height: 9px; border-radius: 999px; background: var(--border); overflow: hidden; }
+.mv-bar-fill { height: 100%; width: 55%; border-radius: 999px; background: var(--teal); }
+/* steppers −/+ de clima (mais seguros que arrastar em movimento) */
+#pane1 .clima .stepper-tile { gap: 7px; justify-content: center; }
+#pane1 .clima .stepper-tile .slider-h .lbl { font-size: 14px; }
+#pane1 .clima .step-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+#pane1 .clima .step-btn { width: 116px; height: 50px; border-radius: 14px; flex-shrink: 0; background: rgba(255,255,255,.06); border: 1px solid var(--border-hi); color: var(--text); font-size: 32px; fontnt-weight: 400; line-height: 1; font-family: inherit; cursor: pointer; display: flex; align-items: center; justify-content: center; -webkit-tap-highlight-color: transparent; }
+#pane1 .clima .step-btn:active { background: var(--border-hi); }
+#pane1 .clima .step-val { flex: 1; text-align: center; font-size: 30px; font-weight: 600; font-variant-numeric: tabular-nums; }
+#pane1 .clima .step-val small { font-size: 15px; color: var(--muted); font-weight: 500; margin-left: 2px; }
+/* compactar Climatização p/ caber com steppers a 660 */
+#pane1 .clima .step-btn { height: 50px; font-size: 30px; }
+#pane1 .clima .step-val { font-size: 26px; }
+#pane1 .clima .stepper-tile { gap: 2px; }
+#pane1 .clima .sliders { gap: 6px; }
+#pane1 .air-seg .seg button { padding: 9px 2px; }
+#pane1 .clima .stepper-tile .slider-h .lbl { font-size: 13px; }
+/* — steppers seguros em movimento: alvos largos, alto contraste, zona morta central — */
+#pane1 .clima .step-row { gap: 8px; }
+#pane1 .clima .step-btn { width: 122px; height: 45px; font-weight: 600; line-height: 1; }
+#pane1 .clima .stepper-tile .step-btn { background: rgba(34,197,94,.16); border-color: rgba(34,197,94,.55); color: var(--green); }
+#pane1 .clima .stepper-tile:nth-child(3) .step-btn { background: rgba(34,211,238,.16); border-color: rgba(34,211,238,.55); color: var(--teal); }
+#pane1 .clima .step-btn:active { transform: scale(.94); filter: brightness(1.25); }
+#pane1 .clima .step-val { flex: 1; pointer-events: none; }
+#pane1 .clima .step-val.flash { animation: stepflash .35s ease-out; }
+@keyframes stepflash { 0% { color: #fff; text-shadow: 0 0 16px rgba(255,255,255,.7); transform: scale(1.12); } 100% { color: inherit; text-shadow: none; transform: scale(1); } }
+#pane1 .clima-toggles .ctrl-tile { padding: 6px 5px; }
+#pane1 .clima-toggles .ctrl-tile .ic { font-size: 23px; }
+#pane1 .area-grid.clima { gap: 6px; }
+#pane1 .air-seg .seg button { padding: 9px 2px; }
+#pane1 .clima-readout { padding: 5px 12px; }
+</style>
 </head>
 <body>
 <div id="fit">
@@ -613,12 +805,28 @@
 
   <div class="v4">
 
-    <!-- CONTROLES — 3 áreas: Condução · Climatização · Veículo (coluna única, sem vitais) -->
-    <div class="panel p-ctrl">
-      <div class="panel-h"><span class="ico">🎛️</span> Controles rápidos</div>
-      <div class="ctrl-areas">
+    <!-- CONTROLES em 2 TELAS — deslize de 2 dedos / abas no topo. T1 Dirigir · T2 Veículo+Energia -->
+    <div class="topnav">
+      <div class="swipe-hint">✌ deslize com 2 dedos</div>
+      <div class="page-tabs" id="page-tabs">
+        <button class="page-tab on" data-page="0">① Dirigir</button>
+        <button class="page-tab" data-page="1">② Veículo</button>
+      </div>
+      <!-- Barra de controle do app (igual às demais telas) — topo direito -->
+      <div class="trip-controls" id="app-bar">
+        <div class="conn-mode cloud" id="source-badge" onclick="onConnTap()">☁ Nuvem</div>
+        <span class="car-stat"><span class="lbl">Carro</span><span class="dot" id="car-dot"></span><span class="lbl" id="car-lbl">—</span></span>
+        <div class="cfg-btn" id="upd-btn" onclick="checkUpdate()" title="Atualizar">⬇️</div>
+        <div class="cfg-btn" id="rec-btn" onclick="openRecargas()" title="Recargas">🔋</div>
+        <div class="cfg-btn" id="via-btn" onclick="openViagens()" title="Viagens">🚗</div>
+        <div class="cfg-btn" id="cfg-btn" onclick="openConfig()" title="Configurações">⚙️</div>
+      </div>
+    </div>
+    <div class="panes" id="panes">
+      <div class="pane-track" id="pane-track">
+      <div class="pane" id="pane1">
 
-        <!-- ÁREA 1 · Condução (esquerda) -->
+        <!-- ÁREA 1 · Condução -->
         <div class="ctrl-area">
           <div class="area-h"><span class="ico">🚗</span> Condução</div>
           <div class="area-grid cond">
@@ -655,7 +863,6 @@
               </div>
             </div>
             <div class="cond-actions">
-              <div class="ctrl-tile danger" id="ctrl-haz" onclick="toggleHazard()"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><path d="M12 3.5 L21.5 20 L2.5 20 Z"/><line x1="12" y1="10" x2="12" y2="14.5"/><circle cx="12" cy="17.3" r="0.6" fill="currentColor" stroke="none"/></svg></div><div class="lbl">Pisca-alerta</div><div class="st" id="ctrl-haz-st">desligado</div></div>
               <div class="ctrl-tile" id="ctrl-onepedal" onclick="toggleOnePedal()"><div class="ic">🦶</div><div class="lbl">One-pedal</div><div class="st" id="ctrl-onepedal-st">—</div></div>
               <div class="esp-toggle" id="ctrl-esp" onclick="toggleESP()"><span class="ic">🛞</span><span class="lbl">ESP</span><span class="sw"></span><span class="st" id="ctrl-esp-st">—</span></div>
             </div>
@@ -680,17 +887,32 @@
               <div class="ctrl-tile" id="ctrl-acmax" onclick="toggleAcMax()"><div class="ic">❄️</div><div class="lbl">Max A/C</div><div class="st" id="ctrl-acmax-st">—</div></div>
             </div>
             <div class="sliders">
-              <div class="slider-tile">
-                <div class="slider-h"><span class="lbl">🌡️ Motorista</span><span class="sv"><span id="ctrl-temp-d">22,0</span>°C</span></div>
-                <input type="range" class="cv-slider" min="16" max="32" step="0.5" value="22" oninput="setTempSlider('d', this.value)">
+              <div class="slider-tile stepper-tile">
+                <div class="slider-h"><span class="lbl">🌡️ Motorista</span></div>
+                <div class="step-row">
+                  <button class="step-btn" onclick="tempStep('d',-1)" aria-label="Diminuir">−</button>
+                  <div class="step-val"><span id="ctrl-temp-d">22,0</span><small>°C</small></div>
+                  <button class="step-btn" onclick="tempStep('d',1)" aria-label="Aumentar">+</button>
+                </div>
+                <input type="range" class="cv-slider" min="16" max="32" step="0.5" value="22" oninput="setTempSlider('d', this.value)" style="display:none">
               </div>
-              <div class="slider-tile">
-                <div class="slider-h"><span class="lbl">🌡️ Passageiro</span><span class="sv"><span id="ctrl-temp-p">22,0</span>°C</span></div>
-                <input type="range" class="cv-slider" min="16" max="32" step="0.5" value="22" oninput="setTempSlider('p', this.value)">
+              <div class="slider-tile stepper-tile">
+                <div class="slider-h"><span class="lbl">🌡️ Passageiro</span></div>
+                <div class="step-row">
+                  <button class="step-btn" onclick="tempStep('p',-1)" aria-label="Diminuir">−</button>
+                  <div class="step-val"><span id="ctrl-temp-p">22,0</span><small>°C</small></div>
+                  <button class="step-btn" onclick="tempStep('p',1)" aria-label="Aumentar">+</button>
+                </div>
+                <input type="range" class="cv-slider" min="16" max="32" step="0.5" value="22" oninput="setTempSlider('p', this.value)" style="display:none">
               </div>
-              <div class="slider-tile">
-                <div class="slider-h"><span class="lbl">🌀 Ventilação</span><span class="sv"><span id="ctrl-fan">4</span>/7</span></div>
-                <input type="range" class="cv-slider teal" min="0" max="7" step="1" value="4" oninput="setFanSlider(this.value)">
+              <div class="slider-tile stepper-tile">
+                <div class="slider-h"><span class="lbl">🌀 Ventilação</span></div>
+                <div class="step-row">
+                  <button class="step-btn" onclick="fanStep(-1)" aria-label="Diminuir">−</button>
+                  <div class="step-val"><span id="ctrl-fan">4</span><small>/7</small></div>
+                  <button class="step-btn" onclick="fanStep(1)" aria-label="Aumentar">+</button>
+                </div>
+                <input type="range" class="cv-slider teal" min="0" max="7" step="1" value="4" oninput="setFanSlider(this.value)" style="display:none">
               </div>
             </div>
             <div class="seg-tile air-seg">
@@ -712,87 +934,84 @@
           </div>
         </div>
 
-        <!-- ÁREA 3 · Veículo + Aberturas (direita) -->
-        <div class="ctrl-area">
+      </div><!-- /pane1 -->
+
+      <div class="pane" id="pane2">
+        <!-- COLUNA ESQUERDA · Veículo (aberturas numa coluna só) -->
+        <div class="ctrl-area veic-controls">
           <div class="area-h"><span class="ico">🔐</span> Veículo</div>
-          <div class="area-grid veic">
-            <!-- Topo: Vidros (esq) + Ventilação dos bancos (dir), lado a lado -->
-            <div class="veic-row">
-              <!-- Vidros individuais: toque cicla Fechado → Metade → Aberto (vista de cima) -->
-              <div class="win-tile">
-                <div class="seg-h"><span>🪟</span> Vidros <span class="win-hint">toque cicla</span></div>
-                <div class="win-car">
-                  <button class="wc-win" data-win="0" onclick="cycleWin(0)"><b>DE</b><span class="wc-st" id="win-0-st">—</span></button>
-                  <button class="wc-win" data-win="1" onclick="cycleWin(1)"><b>DD</b><span class="wc-st" id="win-1-st">—</span></button>
-                  <button class="wc-win" data-win="2" onclick="cycleWin(2)"><b>TE</b><span class="wc-st" id="win-2-st">—</span></button>
-                  <button class="wc-win" data-win="3" onclick="cycleWin(3)"><b>TD</b><span class="wc-st" id="win-3-st">—</span></button>
-                </div>
-                <div class="seg win-all" id="seg-windows">
-                  <button onclick="setWindows(this,'fechado')">Todos ✕</button>
-                  <button onclick="setWindows(this,'entreaberto')">Metade</button>
-                  <button onclick="setWindows(this,'aberto')">Abrir</button>
-                </div>
+          <div class="area-grid veic veic-onecol">
+            <!-- Vidros: só o controle que muda os 4 de uma vez -->
+            <div class="win-tile">
+              <div class="seg-h"><span>🪟</span> Vidros (todos)</div>
+              <div class="seg win-all" id="seg-windows">
+                <button onclick="setWindows(this,'fechado')">Fechar ✕</button>
+                <button onclick="setWindows(this,'entreaberto')">Metade</button>
+                <button onclick="setWindows(this,'aberto')">Abrir</button>
               </div>
-              <!-- Ventilação dos bancos — faders verticais 0–3 (coluna ao lado dos vidros) -->
-              <div class="seat-col">
-                <div class="seg-h"><span>💺</span> Bancos</div>
-                <div class="seat-vfaders">
-                  <div class="vfader" data-side="d">
-                    <div class="vf-head"><span class="vf-ic">💺</span><span class="vf-name">Mot.</span></div>
-                    <div class="vf-track" title="Arraste para cima para aumentar"><span class="vf-ar">▲</span><div class="vf-segs"><div class="vf-seg"></div><div class="vf-seg"></div><div class="vf-seg"></div></div><span class="vf-ar">▼</span></div>
-                    <div class="vf-val" id="ctrl-seat-d-st">OFF</div>
-                  </div>
-                  <div class="vfader" data-side="p">
-                    <div class="vf-head"><span class="vf-ic">💺</span><span class="vf-name">Pass.</span></div>
-                    <div class="vf-track" title="Arraste para cima para aumentar"><span class="vf-ar">▲</span><div class="vf-segs"><div class="vf-seg"></div><div class="vf-seg"></div><div class="vf-seg"></div></div><span class="vf-ar">▼</span></div>
-                    <div class="vf-val" id="ctrl-seat-p-st">OFF</div>
-                  </div>
+            </div>
+            <!-- Bancos — faders verticais 0–3 -->
+            <div class="seat-col">
+              <div class="seg-h"><span>💺</span> Bancos</div>
+              <div class="seat-vfaders">
+                <div class="vfader" data-side="d">
+                  <div class="vf-head"><span class="vf-ic">💺</span><span class="vf-name">Mot.</span></div>
+                  <div class="vf-track" title="Arraste para cima para aumentar"><span class="vf-ar">▲</span><div class="vf-segs"><div class="vf-seg"></div><div class="vf-seg"></div><div class="vf-seg"></div></div><span class="vf-ar">▼</span></div>
+                  <div class="vf-val" id="ctrl-seat-d-st">OFF</div>
+                </div>
+                <div class="vfader" data-side="p">
+                  <div class="vf-head"><span class="vf-ic">💺</span><span class="vf-name">Pass.</span></div>
+                  <div class="vf-track" title="Arraste para cima para aumentar"><span class="vf-ar">▲</span><div class="vf-segs"><div class="vf-seg"></div><div class="vf-seg"></div><div class="vf-seg"></div></div><span class="vf-ar">▼</span></div>
+                  <div class="vf-val" id="ctrl-seat-p-st">OFF</div>
                 </div>
               </div>
             </div>
-            <!-- Cortina: slider 0–100 (passo 10) -->
-            <div class="slider-tile">
-              <div class="slider-h"><span class="lbl">🌥️ Cortina</span><span class="sv"><span id="ctrl-curtain">0</span>%</span></div>
-              <input type="range" class="cv-slider" id="sld-curtain" min="0" max="100" step="10" value="0" oninput="setCurtain(this.value)">
-            </div>
-            <!-- Teto: slider 10–100 (passo 10) + botão de ventilação (valor 200) -->
+            <!-- Teto solar -->
             <div class="slider-tile">
               <div class="slider-h"><span class="lbl">☀️ Teto solar</span><span class="sv" id="ctrl-sunroof">Fechado</span></div>
               <input type="range" class="cv-slider" id="sld-sunroof" min="10" max="100" step="10" value="10" oninput="setSunroof(this.value)">
               <button class="vent-btn" id="ctrl-sunroof-vent" onclick="sunroofVent()">🌬️ Ventilação</button>
             </div>
+            <!-- Cortina -->
+            <div class="slider-tile">
+              <div class="slider-h"><span class="lbl">🌥️ Cortina</span><span class="sv"><span id="ctrl-curtain">0</span>%</span></div>
+              <input type="range" class="cv-slider" id="sld-curtain" min="0" max="100" step="10" value="0" oninput="setCurtain(this.value)">
+            </div>
           </div>
-        </div>
+        </div><!-- /veic-controls -->
 
-      </div>
-    </div>
+        <!-- COLUNA DIREITA · Mídia (SHELL/mock — trocar pelos ids/handlers do app) -->
+        <div class="ctrl-area media-area">
+          <div class="area-h"><span class="ico">🎵</span> Mídia <span class="media-src" id="media-src">—</span></div>
+          <div class="media-body">
+            <div class="media-art" id="media-art">🎵</div>
+            <div class="media-meta">
+              <div class="media-title" id="media-title">Nada tocando</div>
+              <div class="media-artist" id="media-artist">—</div>
+            </div>
+            <div class="media-prog" id="media-prog" onclick="mediaSeekClick(event)" title="Tocar para buscar">
+              <div class="media-bar"><div class="media-bar-fill" id="media-bar-fill"></div></div>
+              <div class="media-time"><span id="media-cur">0:00</span><span id="media-dur">0:00</span></div>
+            </div>
+            <div class="media-ctrls">
+              <button class="mc-btn" id="media-prev" onclick="mediaPrev()" aria-label="Anterior">⏮</button>
+              <button class="mc-btn play" id="media-play" onclick="mediaToggle()" aria-label="Play/Pause">▶</button>
+              <button class="mc-btn" id="media-next" onclick="mediaNext()" aria-label="Próxima">⏭</button>
+            </div>
+            <div class="media-vol">
+              <span class="mv-ic">🔉</span>
+              <button class="mv-btn" id="media-vol-down" onclick="mediaVol(-1)" aria-label="Menos volume">−</button>
+              <div class="mv-bar"><div class="mv-bar-fill" id="media-vol-fill"></div></div>
+              <span class="mv-val" id="media-vol-val">0</span>
+              <button class="mv-btn" id="media-vol-up" onclick="mediaVol(1)" aria-label="Mais volume">+</button>
+              <span class="mv-ic">🔊</span>
+            </div>
+          </div>
+        </div><!-- /media-area -->
 
-    <!-- TRIP -->
-    <div class="panel p-trip">
-      <div class="panel-h"><span class="ico">🚗</span> Viagem em curso<span class="dest-info" id="trip-dest">→ <b>Casa</b><span class="sep">·</span><b>12,3 km</b><span class="sep">·</span>ETA <b>15:52</b><span class="sep">·</span>chegada <b>61%</b></span></div>
-      <div class="trip-grid">
-        <div class="trip-cell"><div class="trip-val teal"><span id="trip-dist">0,0</span><span class="u">km</span></div><div class="trip-lbl">Distância</div></div>
-        <div class="trip-cell"><div class="trip-val"><span id="trip-time">0:00</span></div><div class="trip-lbl">Tempo</div></div>
-        <div class="trip-cell"><div class="trip-val green"><span id="trip-kwh">0,0</span><span class="u">kWh</span></div><div class="trip-lbl">Energia</div></div>
-        <div class="trip-cell"><div class="trip-val teal"><span id="trip-regen-kwh">0,3</span><span class="u">kWh</span><span class="sub" id="trip-regen-pct">38%</span></div><div class="trip-lbl">Regeneração</div></div>
-        <div class="trip-cell"><div class="trip-val orange"><span id="trip-fuel">0,0</span><span class="u">L</span></div><div class="trip-lbl">Combust.</div></div>
-        <div class="trip-cell"><div class="trip-val green"><span id="trip-ce">13,2</span><span class="u">kWh/100km</span></div><div class="trip-lbl">Consumo EV</div></div>
-        <div class="trip-cell"><div class="trip-val orange"><span id="trip-kml">19,0</span><span class="u">km/L</span></div><div class="trip-lbl">Efetivo</div></div>
-        <div class="trip-cell"><div class="trip-val yellow cost"><span id="trip-cost">R$ 0,00</span></div><div class="trip-lbl">Custo</div></div>
-        <div class="trip-cell"><div class="trip-val yellow cost"><span id="trip-cost-km">R$ 0,00</span><span class="u">/km</span></div><div class="trip-lbl">Por km</div></div>
-        <div class="trip-cell"><div class="trip-val green"><span id="trip-ev-pct">—</span><span class="u">%</span><span class="sub" id="trip-ev-km">— km</span></div><div class="trip-lbl">Elétrico</div></div>
-        <div class="trip-cell"><div class="trip-val orange"><span id="trip-hev-pct">—</span><span class="u">%</span><span class="sub" id="trip-hev-km">— km</span></div><div class="trip-lbl">Híbrido</div></div>
-      </div>
-      <!-- Barra do app (movida da topbar) — canto inferior direito -->
-      <div class="trip-controls">
-        <div class="conn-mode cloud" id="source-badge" onclick="onConnTap()">☁ Nuvem</div>
-        <span class="car-stat"><span class="lbl">Carro</span><span class="dot" id="car-dot"></span><span class="lbl" id="car-lbl">—</span></span>
-        <div class="cfg-btn" id="upd-btn" onclick="checkUpdate()" title="Atualizar">⬇️</div>
-        <div class="cfg-btn" id="rec-btn" onclick="openRecargas()" title="Recargas">🔋</div>
-        <div class="cfg-btn" id="via-btn" onclick="openViagens()" title="Viagens">🚗</div>
-        <div class="cfg-btn" id="cfg-btn" onclick="openConfig()" title="Configurações">⚙️</div>
-      </div>
-    </div>
+      </div><!-- /pane2 -->
+      </div><!-- /pane-track -->
+    </div><!-- /panes -->
 
   </div>
 
@@ -1145,6 +1364,212 @@
       ' bodyBg=' + getComputedStyle(document.body).backgroundColor);
   } catch (e) { console.log('[diag] erro: ' + e.message); }
   console.log('[controles] embarcado pronto · aguardando applyNativeSnapshot');
+})();
+</script>
+<script>
+/* ════ Navegação entre as 2 telas — SOMENTE visual (transform). Não toca em
+   ids/handlers nem no motor acima. Troca: abas no topo OU deslize de 2 dedos. ════ */
+(function(){
+  const track = document.getElementById('pane-track');
+  const panes = document.getElementById('panes');
+  const tabs = [].slice.call(document.querySelectorAll('.page-tab'));
+  if(!track || !panes) return;
+  let page = 0;
+  var N = 2; // 2 telas: Dirigir · Veículo
+  function go(p){
+    page = p < 0 ? 0 : (p > N-1 ? N-1 : p);
+    track.style.transform = 'translateX(' + (-page*(100/N)) + '%)';
+    tabs.forEach(function(t,i){ t.classList.toggle('on', i===page); });
+    try { localStorage.setItem('ctrl.page', String(page)); } catch(_){}   // persiste a página
+  }
+  tabs.forEach(function(t,i){ t.addEventListener('click', function(){ go(i); }); });
+  // hook p/ o app comandar a página interna (carrossel global, Fase 2)
+  window.ControlScreen = { show: function(p){ go(p); }, page: function(){ return page; } };
+
+  /* deslize de 2 dedos na horizontal */
+  var two=false, startX=null, lastX=null;
+  panes.addEventListener('touchstart', function(e){
+    if(e.touches.length===2){ two=true; startX=lastX=(e.touches[0].clientX+e.touches[1].clientX)/2; }
+    else { two=false; }
+  }, {passive:true});
+  panes.addEventListener('touchmove', function(e){
+    if(two && e.touches.length===2){ lastX=(e.touches[0].clientX+e.touches[1].clientX)/2; }
+  }, {passive:true});
+  function endSwipe(){
+    if(!two) return; two=false;
+    if(startX!=null && lastX!=null){ var dx=lastX-startX; if(Math.abs(dx)>50) go(dx<0 ? page+1 : page-1); }
+    startX=lastX=null;
+  }
+  panes.addEventListener('touchend', endSwipe, {passive:true});
+  panes.addEventListener('touchcancel', endSwipe, {passive:true});
+
+  /* setas do teclado — conveniência no preview/desktop */
+  window.addEventListener('keydown', function(e){ if(e.key==='ArrowRight') go(page+1); else if(e.key==='ArrowLeft') go(page-1); });
+
+  // restaura a última página aberta (sobrevive a restart do app / power cycle)
+  var _saved = 0; try { _saved = parseInt(localStorage.getItem('ctrl.page') || '0', 10) || 0; } catch(_){}
+  go(_saved);
+})();
+</script>
+<script>
+/* ════ PREVIEW-ONLY: mostra a tela na PROPORÇÃO REAL da multimídia (1792×660),
+   com letterbox, pra visualizar fiel fora do carro. É NO-OP no head unit:
+   só age quando a proporção da janela difere da do head unit (≈2.715). No
+   carro (WebView 1792×660) a proporção bate → não mexe em nada (preenche 100%).
+   Pode remover este bloco no build de produção sem efeito colateral. ════ */
+(function(){
+  var W=1792, H=660, TARGET=W/H, TOL=0.04;
+  function fit(){
+    var iw=window.innerWidth, ih=window.innerHeight;
+    if(!iw || !ih) return;
+    var cp=document.querySelector('.cockpit'), v4=document.querySelector('.v4'), box=document.getElementById('fit');
+    if(!cp) return;
+    var mismatch = Math.abs((iw/ih) - TARGET) > TOL;
+    if(mismatch){
+      if(box){ box.style.display='flex'; box.style.alignItems='center'; box.style.justifyContent='center'; box.style.background='#000'; }
+      cp.style.flex='none';
+      cp.style.width=W+'px'; cp.style.height=H+'px';
+      if(v4){ v4.style.height='calc(100% - var(--sys-top))'; }
+      var s=Math.min(iw/W, ih/H);
+      cp.style.transformOrigin='center center';
+      cp.style.transform='scale('+s+')';
+    } else {
+      cp.style.flex=''; cp.style.width=''; cp.style.height=''; cp.style.transform='';
+      if(v4){ v4.style.height=''; }
+    }
+  }
+  window.addEventListener('resize', fit);
+  window.addEventListener('load', fit);
+  fit();
+})();
+</script>
+<script>
+/* Steppers de clima (−/+) — mais seguros em movimento. Reusam os handlers do
+   motor (setTempSlider/setFanSlider) + o <input range> oculto (reflexo do carro). */
+(function(){
+  function rangeAt(n){ return document.querySelector('.area-grid.clima .sliders .slider-tile:nth-child('+n+') .cv-slider'); }
+  window.tempStep = function(side, dir){
+    var r = rangeAt(side==='d'?1:2); if(!r) return;
+    var v = (parseFloat(r.value)||22) + dir*0.5;
+    v = Math.min(32, Math.max(16, v));
+    r.value = v;
+    if(window.setTempSlider) window.setTempSlider(side, v);
+  };
+  window.fanStep = function(dir){
+    var r = rangeAt(3); if(!r) return;
+    var v = (parseInt(r.value,10)||0) + dir;
+    v = Math.min(7, Math.max(0, v));
+    r.value = v;
+    if(window.setFanSlider) window.setFanSlider(v);
+  };
+
+  /* ── Toque-e-segure = repete (acelera) + flash de confirmação no valor.
+     Mais seguro em movimento: 1 toque basta; segurar evita vários toques precisos. ── */
+  function flashVal(btn){
+    var tile = btn.closest('.stepper-tile'); if(!tile) return;
+    var val = tile.querySelector('.step-val'); if(!val) return;
+    val.classList.remove('flash'); void val.offsetWidth; val.classList.add('flash');
+  }
+  function bindHold(btn){
+    var t1=null, t2=null;
+    var fire=function(){ btn.click(); flashVal(btn); };
+    var stop=function(){ clearTimeout(t1); clearInterval(t2); t1=t2=null; };
+    btn.addEventListener('pointerdown', function(e){
+      flashVal(btn);                       // feedback imediato (o click já dá 1 passo)
+      try{ btn.setPointerCapture(e.pointerId); }catch(_){}
+      t1=setTimeout(function(){ t2=setInterval(fire, 180); }, 480); // após segurar, repete
+    });
+    ['pointerup','pointercancel','pointerleave'].forEach(function(ev){ btn.addEventListener(ev, stop); });
+  }
+  document.querySelectorAll('#pane1 .clima .step-btn').forEach(bindHold);
+})();
+</script>
+<script>
+/* ════ PLAYER DE MÍDIA — ponte WebView ⇄ app (StandaloneMediaPlayer.kt) ════
+   MODELO (igual ao MediaPlaybackState do Kotlin): title, artist, album, artworkUrl,
+   isPlaying, durationMs, elapsedMs, canSeek, packageName, volume (0..volumeMax, padrão 0..30).
+
+   O app EMPURRA o estado chamando:   window.applyMedia({...})   (uma vez por mudança)
+   Os botões CHAMAM o app via window.MediaBridge (defina no app):
+       MediaBridge.playPause() / next() / previous() / seekTo(ms) / setVolume(v)
+   Mapeamento Kotlin → helper: playPause→helper.playPause(); next→helper.next();
+   previous→helper.previous(); seekTo→helper.seekTo(ms); setVolume→onVolumeChange(v)
+   (no Haval: serviceCarro.updateData("sys.settings.audio.media_volume", v)).
+   Sem MediaBridge (ex.: preview no navegador), cai no MOCK abaixo. ════ */
+(function(){
+  var $=function(id){return document.getElementById(id);};
+  var M = {
+    title:null, artist:null, album:null, artworkUrl:null, isPlaying:false,
+    durationMs:0, elapsedMs:0, canSeek:false, packageName:null, volume:0, volumeMax:30
+  };
+  var liveTimer=null, mock=null;
+  function fmt(ms){ var s=Math.max(0,Math.round(ms/1000)); return Math.floor(s/60)+':'+String(s%60).padStart(2,'0'); }
+  function appName(pkg){ if(!pkg) return '—'; var m={'com.spotify.music':'Spotify','com.google.android.youtube':'YouTube','com.google.android.apps.youtube.music':'YT Music','com.android.bluetooth':'Bluetooth','deezer':'Deezer'}; for(var k in m){ if(pkg.indexOf(k)>=0) return m[k]; } var p=pkg.split('.'); return p[p.length-1].replace(/^\w/,function(c){return c.toUpperCase();}); }
+
+  function render(){
+    var has = !!(M.title || M.artist);
+    if($('media-title')) $('media-title').textContent = M.title || 'Nada tocando';
+    if($('media-artist')){ var sub=[M.artist,M.album].filter(Boolean).join(' • '); $('media-artist').textContent = sub || (has?'':'—'); }
+    if($('media-src')) $('media-src').textContent = appName(M.packageName);
+    // capa
+    var art=$('media-art'); if(art){ if(M.artworkUrl){ art.innerHTML='<img src="'+M.artworkUrl+'" alt="">'; } else { art.textContent='🎵'; } }
+    // progresso
+    var hasDur = M.durationMs>0;
+    if($('media-prog')) $('media-prog').style.visibility = hasDur ? 'visible' : 'hidden';
+    if($('media-bar-fill')) $('media-bar-fill').style.width = hasDur ? (100*Math.min(M.elapsedMs,M.durationMs)/M.durationMs)+'%' : '0%';
+    if($('media-cur')) $('media-cur').textContent = fmt(M.elapsedMs);
+    if($('media-dur')) $('media-dur').textContent = fmt(M.durationMs);
+    if($('media-prog')) $('media-prog').style.cursor = M.canSeek ? 'pointer' : 'default';
+    // play/pause
+    if($('media-play')) $('media-play').textContent = M.isPlaying ? '⏸' : '▶';
+    // volume 0..max
+    if($('media-vol-val')) $('media-vol-val').textContent = M.volume;
+    if($('media-vol-fill')) $('media-vol-fill').style.width = (M.volumeMax? 100*M.volume/M.volumeMax : 0)+'%';
+  }
+
+  // ── Ponto de entrada que o APP chama com o snapshot do MediaPlaybackState ──
+  window.applyMedia = function(state){
+    if(mock){ clearInterval(mock); mock=null; }           // dados reais assumem; encerra o mock
+    if(!state) return;
+    ['title','artist','album','artworkUrl','isPlaying','durationMs','elapsedMs','canSeek','packageName','volume','volumeMax'].forEach(function(k){ if(k in state) M[k]=state[k]; });
+    render(); runLive();
+  };
+  window.getMediaState = function(){ return Object.assign({}, M); };
+
+  // extrapola o tempo decorrido enquanto toca (resincroniza a cada applyMedia)
+  function runLive(){
+    clearInterval(liveTimer);
+    if(M.isPlaying && M.durationMs>0){
+      liveTimer=setInterval(function(){ M.elapsedMs=Math.min(M.elapsedMs+500, M.durationMs); render(); }, 500);
+    }
+  }
+
+  // ── Ações: chamam o app (MediaBridge) e, se ausente, o mock ──
+  function bridge(){ return window.MediaBridge || null; }
+  window.mediaToggle=function(){ var b=bridge(); if(b&&b.playPause) return b.playPause(); mockToggle(); };
+  window.mediaNext  =function(){ var b=bridge(); if(b&&b.next) return b.next(); mockNext(); };
+  window.mediaPrev  =function(){ var b=bridge(); if(b&&b.previous) return b.previous(); mockPrev(); };
+  window.mediaVol   =function(dir){ var v=Math.min(M.volumeMax, Math.max(0, M.volume+dir)); var b=bridge(); if(b&&b.setVolume){ b.setVolume(v); } M.volume=v; render(); };
+  window.mediaSeekClick=function(e){ if(!M.canSeek||!M.durationMs) return; var bar=$('media-prog').querySelector('.media-bar'); var r=bar.getBoundingClientRect(); var frac=Math.min(1,Math.max(0,(e.clientX-r.left)/r.width)); var ms=Math.round(frac*M.durationMs); var b=bridge(); if(b&&b.seekTo){ b.seekTo(ms); } M.elapsedMs=ms; render(); };
+
+  // ── MOCK (somente quando não há MediaBridge — preview/navegador) ──
+  var demo=[
+    {title:'Faixa de demonstração', artist:'Artista', album:'Álbum', durationMs:214000},
+    {title:'Segunda música',        artist:'Outro artista', album:'Álbum 2', durationMs:188000},
+    {title:'Terceira faixa',        artist:'Mais um artista', album:'Álbum 3', durationMs:241000}
+  ];
+  var di=0;
+  function loadDemo(){ var d=demo[di]; M.title=d.title; M.artist=d.artist; M.album=d.album; M.durationMs=d.durationMs; M.elapsedMs=0; M.canSeek=true; M.packageName='com.spotify.music'; }
+  function mockTick(){ M.elapsedMs+=1000; if(M.elapsedMs>=M.durationMs){ mockNext(); return; } render(); }
+  function startMock(){ clearInterval(mock); mock = M.isPlaying ? setInterval(mockTick,1000) : null; }
+  function mockToggle(){ M.isPlaying=!M.isPlaying; startMock(); render(); }
+  function mockNext(){ di=(di+1)%demo.length; loadDemo(); render(); startMock(); }
+  function mockPrev(){ if(M.elapsedMs>3000){ M.elapsedMs=0; } else { di=(di-1+demo.length)%demo.length; loadDemo(); } render(); startMock(); }
+
+  // Inicialização: no carro (EcotripCarBridge presente) NÃO roda mock — espera o
+  // applyMedia real (Fase 3). Mock só no preview/navegador (sem bridge nenhum).
+  if(!window.MediaBridge && !window.EcotripCarBridge){ M.volume=14; M.volumeMax=30; loadDemo(); }
+  render();
 })();
 </script>
 </body>
