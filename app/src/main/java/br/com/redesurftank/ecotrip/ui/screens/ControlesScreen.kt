@@ -173,6 +173,8 @@ fun ControlesLayout(
         while (true) {
             val json = withContext(Dispatchers.Default) { buildControlesSnapshot(hdState.value) }
             ControlesWebHost.feed(json)
+            ControlesWebHost.media?.start()   // re-tenta caso o listener só tenha vinculado depois
+            ControlesWebHost.feedMediaFromHelper()   // reenvia estado de mídia mesmo sem mudança
             delay(800L)
         }
     }
