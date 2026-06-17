@@ -36,6 +36,17 @@
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 
+        <!-- Player de mídia: necessário p/ MediaSessionManager.getActiveSessions.
+             Usuário concede "Acesso a notificações" 1x. -->
+        <service
+            android:name=".managers.MediaNotificationListenerService"
+            android:exported="false"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
         <receiver
             android:name=".receivers.BootReceiver"
             android:directBootAware="true"

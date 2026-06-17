@@ -65,6 +65,7 @@ object SharedPreferencesKeys {
 
     // Layout da tela inicial: 0=Tesla, 1=Europeu, 2=By Claude (default)
     const val HOME_LAYOUT = "home_layout"
+    const val CONTROLES_OPEN = "controles_open"   // carrossel: true = tela Controles em foco
 
     // Capacidade ÚTIL da bateria EV (kWh) — auto-calibrada observando SOC↓ por kWh
     const val BATTERY_CAP_KWH = "battery_cap_kwh"

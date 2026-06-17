@@ -1080,6 +1080,13 @@ class TripManager private constructor() {
             prefs.edit().putInt(SharedPreferencesKeys.HOME_LAYOUT, v.coerceIn(0, 2)).apply()
     }
 
+    /** Carrossel: tela Controles em foco (true) ou a favorita (false). */
+    fun getControlesOpen(): Boolean =
+        if (::prefs.isInitialized) prefs.getBoolean(SharedPreferencesKeys.CONTROLES_OPEN, false) else false
+    fun setControlesOpen(v: Boolean) {
+        if (::prefs.isInitialized) prefs.edit().putBoolean(SharedPreferencesKeys.CONTROLES_OPEN, v).apply()
+    }
+
     /** Para StatsScreen: preços de combustível e energia. */
     fun getPrices(): Pair<Float, Float> = synchronized(lock) {
         Pair(priceGasolinePerL, priceEnergyPerKwh)

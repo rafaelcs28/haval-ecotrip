@@ -169,7 +169,7 @@ fun SettingsScreen(
 
         // ── Tela inicial (layout) ───────────────────────────────────────────────
         SectionCard(title = "Tela inicial") {
-            val opts = listOf("Tesla", "Europeu", "By Claude", "Controles")
+            val opts = listOf("Tesla", "Europeu", "By Claude")
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),

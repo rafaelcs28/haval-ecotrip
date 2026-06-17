@@ -1397,7 +1397,18 @@
   }, {passive:true});
   function endSwipe(){
     if(!two) return; two=false;
-    if(startX!=null && lastX!=null){ var dx=lastX-startX; if(Math.abs(dx)>50) go(dx<0 ? page+1 : page-1); }
+    if(startX!=null && lastX!=null){
+      var dx=lastX-startX;
+      if(Math.abs(dx)>50){
+        var fwd = dx<0;                         // ← = avançar
+        var atEnd=(fwd && page===N-1), atStart=(!fwd && page===0);
+        if((atEnd||atStart) && window.AppNav && window.AppNav.swipe){
+          window.AppNav.swipe(fwd?1:-1);        // no limite → sai da Controles (volta à favorita)
+        } else {
+          go(fwd ? page+1 : page-1);            // navega entre as páginas internas
+        }
+      }
+    }
     startX=lastX=null;
   }
   panes.addEventListener('touchend', endSwipe, {passive:true});

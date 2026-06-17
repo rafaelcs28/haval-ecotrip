@@ -99,6 +99,18 @@ fun ConsumptionScreen() {
 
     // Layout da home + estado do corpo do carro (pro carro interativo)
     var homeLayout by remember { mutableStateOf(tripManager.getHomeLayout()) }
+    // Carrossel: false = tela favorita (homeLayout 0/1/2) · true = Controles (WebView)
+    var controlesOpen by remember { mutableStateOf(tripManager.getControlesOpen()) }
+    // Gesto de 2 dedos na favorita (MainActivity) abre Controles; swipe no limite volta.
+    DisposableEffect(Unit) {
+        br.com.redesurftank.ecotrip.ui.screens.ControlesWebHost.onEnterRequest = {
+            controlesOpen = true; tripManager.setControlesOpen(true)
+        }
+        br.com.redesurftank.ecotrip.ui.screens.ControlesWebHost.onExit = {
+            controlesOpen = false; tripManager.setControlesOpen(false)
+        }
+        onDispose { }
+    }
     var carDoors   by remember { mutableStateOf("") }
     var carWindows by remember { mutableStateOf("") }
     var carSunroof by remember { mutableStateOf(0) }
@@ -555,17 +567,21 @@ fun ConsumptionScreen() {
     // a dock esquerda (128px) e a barra de status (60px) do sistema ficam fora.
     // O layout Controles (WebView) preenche essa área (HTML sem reservar faixas).
     Box(modifier = Modifier.fillMaxSize().systemBarsPadding()) {
+        // Tela favorita (sempre desenhada por trás). A Controles é um overlay
+        // (WebView fora do Compose) mostrado quando controlesOpen=true.
         when (homeLayout) {
             0 -> HomeTeslaLayout(hd, actions = navActions) { m -> InteractiveCar(hd, m) }
             1 -> HomeEuropeanLayout(hd, actions = navActions)
-            3 -> ControlesLayout(
+            else -> HomeClaudeLayout(hd, actions = navActions) { m -> InteractiveCar(hd, m) }
+        }
+        if (controlesOpen) {
+            ControlesLayout(
                 hd,
                 onOpenSettings = { showSettings = true },
                 onOpenRecargas = { showChargeHistory = true },
                 onOpenViagens = { showAutoTrips = true },
                 onCheckUpdate = { if (updateMgr.isUpdateAvailable) updateMgr.downloadAndInstall(context) else updateMgr.checkForUpdate() },
             )
-            else -> HomeClaudeLayout(hd, actions = navActions) { m -> InteractiveCar(hd, m) }
         }
 
         // ── Banner de continuação: aparece quando há viagem retomável ────────

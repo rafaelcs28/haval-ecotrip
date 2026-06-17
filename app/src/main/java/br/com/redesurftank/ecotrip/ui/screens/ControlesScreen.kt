@@ -53,7 +53,28 @@ object ControlesWebHost {
     var onOpenViagens: () -> Unit = {}
     var onCheckUpdate: () -> Unit = {}
 
+    // Carrossel: onEnterRequest(dir) = swipe na favorita pediu pra abrir Controles;
+    // onExit = swipe no limite das páginas internas pediu pra voltar à favorita.
+    var onEnterRequest: (Int) -> Unit = {}
+    var onExit: () -> Unit = {}
+
+    // Player de mídia (Fase 3): MainActivity injeta o helper.
+    var media: br.com.redesurftank.ecotrip.managers.MediaControllerHelper? = null
+
+    private val mainH = Handler(Looper.getMainLooper())
+
     fun attach(r: FrameLayout) { root = r }
+
+    fun isShowing(): Boolean = web != null && web?.visibility == View.VISIBLE
+
+    /** Chamado pela MainActivity (gesto de 2 dedos na favorita). */
+    fun requestEnter(dir: Int) { mainH.post { onEnterRequest(dir) } }
+
+    /** Manda o WebView ir pra página interna (0=Dirigir, 1=Veículo). */
+    fun showPage(p: Int) {
+        val w = web ?: return
+        w.post { w.evaluateJavascript("window.ControlScreen && window.ControlScreen.show($p)", null) }
+    }
 
     @SuppressLint("SetJavaScriptEnabled")
     fun show(ctx: Context) {
@@ -85,6 +106,8 @@ object ControlesWebHost {
                 }
                 WebView.setWebContentsDebuggingEnabled(true)
                 addJavascriptInterface(EcotripCarBridge(), "EcotripCarBridge")
+                addJavascriptInterface(AppNavBridge(), "AppNav")
+                addJavascriptInterface(MediaBridge(), "MediaBridge")
                 loadUrl("file:///android_asset/controles/cockpit.html")
             }
             r.addView(web, FrameLayout.LayoutParams(
@@ -98,6 +121,27 @@ object ControlesWebHost {
     fun feed(json: String) {
         val w = web ?: return
         w.post { w.evaluateJavascript("window._nativeBridge && window._nativeBridge.update($json)", null) }
+    }
+
+    /** Empurra o estado de mídia (window.applyMedia) a partir do helper. */
+    fun feedMediaFromHelper() {
+        val h = media ?: return
+        val w = web ?: return
+        val s = h.state
+        val o = JSONObject()
+        o.put("title", s.title ?: JSONObject.NULL)
+        o.put("artist", s.artist ?: JSONObject.NULL)
+        o.put("album", s.album ?: JSONObject.NULL)
+        o.put("artworkUrl", h.artworkDataUri() ?: JSONObject.NULL)
+        o.put("isPlaying", s.isPlaying)
+        o.put("durationMs", s.durationMs)
+        o.put("elapsedMs", s.elapsedMs)
+        o.put("canSeek", s.canSeek)
+        o.put("packageName", s.packageName ?: JSONObject.NULL)
+        o.put("volume", h.volume())
+        o.put("volumeMax", h.volumeMax())
+        val js = o.toString()
+        w.post { w.evaluateJavascript("window.applyMedia && window.applyMedia($js)", null) }
     }
 }
 
@@ -153,6 +197,25 @@ private class EcotripCarBridge {
     @JavascriptInterface fun openRecargas() = main { ControlesWebHost.onOpenRecargas() }
     @JavascriptInterface fun openViagens() = main { ControlesWebHost.onOpenViagens() }
     @JavascriptInterface fun checkUpdate() = main { ControlesWebHost.onCheckUpdate() }
+}
+
+/** Ponte de navegação: o HTML chama AppNav.swipe(dir) no limite das páginas
+ *  internas pra sair da Controles e voltar pra tela favorita. */
+private class AppNavBridge {
+    @JavascriptInterface
+    fun swipe(dir: Int) {
+        Handler(Looper.getMainLooper()).post { ControlesWebHost.onExit() }
+    }
+}
+
+/** Ponte de mídia: botões do player chamam estes; encaminha pro helper. */
+private class MediaBridge {
+    private fun main(b: () -> Unit) = Handler(Looper.getMainLooper()).post(b)
+    @JavascriptInterface fun playPause() = main { ControlesWebHost.media?.playPause() }
+    @JavascriptInterface fun next() = main { ControlesWebHost.media?.next() }
+    @JavascriptInterface fun previous() = main { ControlesWebHost.media?.previous() }
+    @JavascriptInterface fun seekTo(ms: Int) = main { ControlesWebHost.media?.seekTo(ms.toLong()) }
+    @JavascriptInterface fun setVolume(v: Int) = main { ControlesWebHost.media?.setVolume(v) }
 }
 
 private fun ptBr(v: Float, dec: Int): String =

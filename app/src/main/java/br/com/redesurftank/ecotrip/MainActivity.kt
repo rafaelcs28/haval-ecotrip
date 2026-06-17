@@ -114,10 +114,60 @@ class MainActivity : ComponentActivity() {
         )
         br.com.redesurftank.ecotrip.ui.screens.ControlesWebHost.attach(root)
         setContentView(root)
+
+        // ── Player de mídia (tela Veículo): lê a sessão de mídia ativa e empurra
+        // o estado pro WebView (window.applyMedia). Requer "Acesso a notificações". ──
+        media = br.com.redesurftank.ecotrip.managers.MediaControllerHelper(applicationContext).also { h ->
+            br.com.redesurftank.ecotrip.ui.screens.ControlesWebHost.media = h
+            h.onChanged = { br.com.redesurftank.ecotrip.ui.screens.ControlesWebHost.feedMediaFromHelper() }
+            val comp = br.com.redesurftank.ecotrip.managers.MediaControllerHelper.defaultListenerComponent(this)
+            if (!br.com.redesurftank.ecotrip.managers.MediaControllerHelper.isNotificationAccessGranted(this, comp)) {
+                br.com.redesurftank.ecotrip.managers.MediaControllerHelper.requestNotificationAccess(this)
+            }
+            h.start()
+        }
+    }
+
+    private var media: br.com.redesurftank.ecotrip.managers.MediaControllerHelper? = null
+
+    // ── Gesto de 2 dedos (global, não-consumido): na tela favorita, abre a
+    // Controles. Quando a Controles está em foco, o próprio WebView trata o
+    // swipe (e sai pelos limites via AppNav). ──
+    private var twoActive = false
+    private var twoDownX = 0f
+    private var twoLastX = 0f
+    override fun dispatchTouchEvent(ev: android.view.MotionEvent): Boolean {
+        when (ev.actionMasked) {
+            android.view.MotionEvent.ACTION_POINTER_DOWN -> if (ev.pointerCount == 2) {
+                twoActive = true; twoDownX = (ev.getX(0) + ev.getX(1)) / 2f; twoLastX = twoDownX
+            }
+            android.view.MotionEvent.ACTION_MOVE -> if (twoActive && ev.pointerCount >= 2) {
+                twoLastX = (ev.getX(0) + ev.getX(1)) / 2f
+            }
+            android.view.MotionEvent.ACTION_POINTER_UP,
+            android.view.MotionEvent.ACTION_UP,
+            android.view.MotionEvent.ACTION_CANCEL -> {
+                if (twoActive) {
+                    val dx = twoLastX - twoDownX
+                    if (kotlin.math.abs(dx) > 80 &&
+                        !br.com.redesurftank.ecotrip.ui.screens.ControlesWebHost.isShowing()) {
+                        br.com.redesurftank.ecotrip.ui.screens.ControlesWebHost.requestEnter(if (dx < 0) 1 else -1)
+                    }
+                    twoActive = false
+                }
+            }
+        }
+        return super.dispatchTouchEvent(ev)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        media?.start()   // re-tenta após o usuário conceder "acesso a notificações"
     }
 
     override fun onDestroy() {
         super.onDestroy()
+        media?.stop()
         TripManager.getInstance().onSessionEnd()
         MqttManager.getInstance().destroy()
         CarDataManager.getInstance().destroy()
