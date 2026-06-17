@@ -127,6 +127,20 @@ class MqttManager private constructor() {
     private val FLAP_WINDOW_MS = 120_000L
     private val FLAP_THRESHOLD = 4
     @Volatile private var collisionGuardApplied = false
+    // Liveness ativa do caminho de comando: o Paho pode reportar isConnected=true
+    // (telemetria/heartbeat QoS0 publicam) com o broker tendo dropado a SESSÃO/
+    // SUBSCRIBE (half-open pós-takeover) — aí cmd/# nunca mais é entregue e o app
+    // some pro controle remoto SEM nenhum connectionLost. Testamos o caminho real:
+    // publicamos um nonce em cmd/_live (loopback pela própria subscription cmd/#);
+    // se não voltar em LIVENESS_TIMEOUT_MS por LIVENESS_MAX_MISS ciclos, forçamos
+    // reconnect COMPLETO (close+connect) ignorando o isConnected mentiroso.
+    @Volatile private var pendingPingNonce: String? = null
+    @Volatile private var pendingPingSentMs = 0L
+    private var cmdPathMissCount = 0
+    @Volatile private var selfPingFuture: java.util.concurrent.ScheduledFuture<*>? = null
+    private val LIVENESS_INTERVAL_S = 20L
+    private val LIVENESS_TIMEOUT_MS = 12_000L
+    private val LIVENESS_MAX_MISS = 2
     // Mata instâncias zumbis do mesmo pacote uma vez por processo, antes do 1º connect.
     @Volatile private var staleKillDone = false
     // Instância única do MQTT entre processos: dono escreve pid:ts num arquivo
@@ -569,11 +583,17 @@ class MqttManager private constructor() {
         } catch (_: Exception) {}
 
         appContext = context.applicationContext
+        // clientId único POR PROCESSO: base do ANDROID_ID (legível no broker) + PID.
+        // Estável dentro do processo (reconnects do próprio app retomam liso), mas
+        // diferente a cada restart — um processo zumbi sobrevivente de OTA/reboot tem
+        // outro PID, então NUNCA colide nem entra no loop de takeover mútuo (a sessão
+        // antiga ficava congelada nos clientes). Independe do Shizuku/killStaleInstances.
         clientId = try {
             val aid = android.provider.Settings.Secure.getString(
                 appContext?.contentResolver, android.provider.Settings.Secure.ANDROID_ID)
-            if (!aid.isNullOrBlank()) "${CLIENT_ID_BASE}_${aid.take(8)}" else CLIENT_ID_BASE
-        } catch (_: Exception) { CLIENT_ID_BASE }
+            val base = if (!aid.isNullOrBlank()) "${CLIENT_ID_BASE}_${aid.take(8)}" else CLIENT_ID_BASE
+            "${base}_p${android.os.Process.myPid()}"
+        } catch (_: Exception) { "${CLIENT_ID_BASE}_p${android.os.Process.myPid()}" }
         val ctx = try { context.createDeviceProtectedStorageContext() } catch (_: Exception) { context }
         prefs = ctx.getSharedPreferences(SharedPreferencesKeys.PREFS_NAME, Context.MODE_PRIVATE)
         loadConfig()
@@ -1127,6 +1147,8 @@ class MqttManager private constructor() {
 
     fun destroy() {
         enabled = false
+        selfPingFuture?.cancel(false)
+        selfPingFuture = null
         executor.submit {
             client?.let { safeDisconnect(it) }
             client = null
@@ -1566,10 +1588,9 @@ class MqttManager private constructor() {
             // persistence segura um lock por (dir, clientId) — sem close, o open
             // do novo client falharia com "persistence already in use".
             client?.let { old -> client = null; safeDisconnect(old) }
-            // clientId estável (sem sufixo aleatório): com cleanSession=false o broker
-            // só retoma a sessão persistente — e re-entrega QoS1 enfileirado — se o
-            // mesmo clientId reconectar. Sufixo aleatório criava sessão nova a cada flap.
-            // File persistence: QoS1 outbound em voo sobrevive a crash/restart do app.
+            // clientId único por processo (PID embutido na construção). File persistence
+            // segura QoS1 outbound em voo dentro do processo; entre restarts a sessão é
+            // limpa (cleanSession=true abaixo) — sem sessão órfã acumulando por restart.
             val persistence = appContext?.let { ctx ->
                 try {
                     val dir = java.io.File(ctx.filesDir, "mqtt-persist").apply { mkdirs() }
@@ -1595,14 +1616,18 @@ class MqttManager private constructor() {
                         }
                         if (flaps >= FLAP_THRESHOLD && !collisionGuardApplied) {
                             collisionGuardApplied = true
-                            clientId = "${clientId}_p${android.os.Process.myPid()}"
-                            AppLogger.w(TAG, "Flap <6s x$flaps em ${FLAP_WINDOW_MS / 1000}s — provável colisão de id no mesmo device; client-id agora $clientId")
+                            // clientId já é único por PID na construção — flap rápido aqui
+                            // é jitter de rede real, não colisão. Só registra.
+                            AppLogger.w(TAG, "Flap <6s x$flaps em ${FLAP_WINDOW_MS / 1000}s (client-id $clientId já único por processo)")
                         }
                     }
                     heartbeatFuture?.cancel(false)
                     heartbeatFuture = null
                     autotripSyncFuture?.cancel(false)
                     autotripSyncFuture = null
+                    selfPingFuture?.cancel(false)
+                    selfPingFuture = null
+                    pendingPingNonce = null
                     setStatus(Status.DISCONNECTED)
                     scheduleReconnect()
                 }
@@ -1617,10 +1642,10 @@ class MqttManager private constructor() {
             val opts = MqttConnectOptions().apply {
                 connectionTimeout    = 10   // Starlink: latência baixa; falha logo se cair
                 keepAliveInterval    = 10   // 4G+TLS+cellular pode ter jitter; 1.5×=15s timeout. Heartbeat 5s do app faz a detecção rápida real
-                // false = sessão persistente: o broker enfileira QoS1 (ex. comandos
-                // cmd/#) enquanto o carro pisca de conexão e re-entrega no reconnect,
-                // em vez de dropar. Exige clientId estável (acima).
-                isCleanSession       = false
+                // true = sessão limpa: clientId é único por processo (PID), então uma
+                // sessão persistente por restart vazaria no broker (cmd/# enfileirado pra
+                // sempre num id morto). Comando perdido em blip raro > live congelada.
+                isCleanSession       = true
                 isAutomaticReconnect = false
                 if (username.isNotEmpty()) {
                     userName = username
@@ -1691,6 +1716,34 @@ class MqttManager private constructor() {
                     AppLogger.w(TAG, "autotrip sync periódico falhou: ${e.message}")
                 }
             }, 60, 300, java.util.concurrent.TimeUnit.SECONDS)
+            // Liveness ativa do cmd/#: detecta conexão meio-aberta (isConnected=true
+            // mas broker dropou a sessão/subscribe → RX morto sem connectionLost).
+            pendingPingNonce = null; cmdPathMissCount = 0
+            selfPingFuture?.cancel(false)
+            selfPingFuture = fastExecutor.scheduleAtFixedRate({
+                try {
+                    val cur = client
+                    if (status != Status.CONNECTED || cur == null || !cur.isConnected) return@scheduleAtFixedRate
+                    val pend = pendingPingNonce
+                    if (pend != null) {
+                        if (System.currentTimeMillis() - pendingPingSentMs <= LIVENESS_TIMEOUT_MS) return@scheduleAtFixedRate
+                        pendingPingNonce = null
+                        cmdPathMissCount++
+                        AppLogger.w(TAG, "Liveness: cmd/# sem pong ($cmdPathMissCount/$LIVENESS_MAX_MISS) — possível subscribe meio-aberto")
+                        if (cmdPathMissCount >= LIVENESS_MAX_MISS) {
+                            cmdPathMissCount = 0
+                            AppLogger.w(TAG, "Liveness: RX morto apesar de conectado — forçando reconnect completo")
+                            forceFullReconnect()
+                            return@scheduleAtFixedRate
+                        }
+                    }
+                    val nonce = System.currentTimeMillis().toString()
+                    pendingPingNonce = nonce; pendingPingSentMs = System.currentTimeMillis()
+                    cur.publish("$prefix/cmd/_live", nonce.toByteArray(), 0, false)
+                } catch (e: Exception) {
+                    AppLogger.w(TAG, "self-ping falhou: ${e.message}")
+                }
+            }, LIVENESS_INTERVAL_S, LIVENESS_INTERVAL_S, java.util.concurrent.TimeUnit.SECONDS)
             publishDiscovery(c)
             // Publica disparos do motor de automações pro bridge/app verem (log).
             AutomationManager.onFired = { id, name, ok ->
@@ -2159,6 +2212,27 @@ class MqttManager private constructor() {
         else                    -> 3_000L
     }
 
+    // Reconnect COMPLETO: usado quando o Paho mente isConnected=true mas o caminho
+    // de comando está morto (half-open pós-takeover). scheduleReconnect() não basta
+    // porque ele só age quando client.isConnected != true. Aqui derrubamos o client
+    // de fato (close) e reconectamos do zero — re-publica online + re-subscreve cmd/#.
+    private fun forceFullReconnect() {
+        executor.submit {
+            try {
+                pendingPingNonce = null
+                val old = client
+                client = null
+                if (old != null) safeDisconnect(old)
+            } catch (_: Exception) {}
+            try {
+                if (enabled && host.isNotEmpty()) connectInternal()
+            } catch (e: Exception) {
+                AppLogger.w(TAG, "forceFullReconnect falhou: ${e.message}")
+                scheduleReconnect()
+            }
+        }
+    }
+
     private fun scheduleReconnect() {
         if (!enabled || isReconnecting.getAndSet(true)) return
         executor.submit {
@@ -2384,6 +2458,13 @@ class MqttManager private constructor() {
         val cmdPrefix = "$prefix/cmd/"
         if (!topic.startsWith(cmdPrefix)) return
         val cmd = topic.removePrefix(cmdPrefix).trimEnd('/')
+        // Pong da liveness ativa: o loopback voltou → caminho cmd/# vivo. Não é
+        // comando real, não loga nem processa.
+        if (cmd == "_live") {
+            if (payload == pendingPingNonce) pendingPingNonce = null
+            cmdPathMissCount = 0
+            return
+        }
         AppLogger.i(TAG, "Comando recebido: $cmd = '$payload'")
 
         // Suprime atuação momentânea re-entregue pelo broker no burst pós-reconnect
