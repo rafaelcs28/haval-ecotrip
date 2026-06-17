@@ -1607,6 +1607,8 @@ class MqttManager private constructor() {
                     scheduleReconnect()
                 }
                 override fun messageArrived(topic: String, message: MqttMessage) {
+                    // Áudio (fone→carro) é binário PCM — não passa por toString().
+                    if (topic == "$prefix/audio/p2c") { CarAudioRelay.onIncomingFrame(message.payload); return }
                     handleIncomingCommand(topic, message.toString())
                 }
                 override fun deliveryComplete(token: IMqttDeliveryToken) {}
@@ -1635,6 +1637,7 @@ class MqttManager private constructor() {
             lastConnectMs = System.currentTimeMillis()   // inicia a janela anti-replay (burst de fila chega após o subscribe)
             c.publish("$prefix/status", MqttMessage("online".toByteArray()).apply { qos = 1; isRetained = true })
             c.subscribe("$prefix/cmd/#", 1)
+            c.subscribe("$prefix/audio/p2c", 0)   // áudio do fone (escuta ao vivo) — QoS0, sem fila
             client = c
             consecutiveFailures = 0
             reconnectAttempts = 0   // conectou → zera o backoff de reconexão
@@ -2568,6 +2571,28 @@ class MqttManager private constructor() {
                         }
                     }
                     publishResult("mic_test", "ok: $report")
+                }
+                "audio_listen" -> {
+                    // Escuta ao vivo: start abre o mic (publica audio/c2p) + alto-falante
+                    // (toca audio/p2c); stop encerra. Half-duplex controlado pelo fone.
+                    val action = try { JSONObject(payload).optString("action", "") } catch (_: Exception) { "" }
+                    when (action) {
+                        "start" -> {
+                            val ctx = appContext
+                            if (ctx == null) { publishResult("audio_listen", "error: sem contexto"); return@submit }
+                            val r = CarAudioRelay.start(ctx) { frame ->
+                                try { client?.publish("$prefix/audio/c2p", frame, 0, false) } catch (_: Exception) {}
+                            }
+                            AppLogger.i(TAG, "[audio] start → $r")
+                            publishResult("audio_listen", r)
+                        }
+                        "stop" -> {
+                            CarAudioRelay.stop()
+                            AppLogger.i(TAG, "[audio] stop")
+                            publishResult("audio_listen", "ok: parado")
+                        }
+                        else -> publishResult("audio_listen", "error: action inválida ('$action')")
+                    }
                 }
                 "charge_custom_target" -> {
                     // Alvo de corte por software (fora dos presets). O bridge repassa o
