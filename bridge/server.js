@@ -358,6 +358,7 @@ const NOTIF_DEFAULTS = {
   ac_on_parked:      false,   // AC ligado com velocidade=0 por mais de ac_on_parked_min minutos
   ac_on_parked_min:  10,      // minutos de tolerância antes de alertar (padrão 10)
   batt12_low:        false,   // bateria auxiliar 12V abaixo de 50%
+  batt12_trend:      true,    // 12V em queda sustentada (regressão) — prevê falha antes do limite (default ON: segurança)
   daily_summary:     false,   // resumo diário às 20h (km, kWh, recargas)
   weekly_summary:    false,   // resumo semanal aos domingos 20h05 (km, kWh, custo, recargas)
   charge_slow:       false,   // alerta quando potência de recarga cai >30% do pico por 5+ min
@@ -2232,10 +2233,49 @@ function checkAnomalies() {
   }
 }
 
+// Tendência preditiva do 12V: regressão linear sobre o histórico (até 90d) projeta
+// QUANDO o 12V cruza o limite crítico (50%), alertando ANTES de chegar lá — diferente
+// do batt12_low (threshold) e do checkAnomalies (diff dia-a-dia). Dispara no máx 1×/7d.
+let _batt12TrendSentAt = 0;
+const BATT12_TREND_COOLDOWN = 7 * 24 * 60 * 60 * 1000;
+function checkBatt12Trend() {
+  if (!notifPrefs.batt12_trend) return;
+  if (Date.now() - _batt12TrendSentAt < BATT12_TREND_COOLDOWN) return;
+  // Pontos válidos: 12V em (0,100], ordenados por tempo.
+  const pts = telemetryHistory
+    .filter(s => +s.batt_12v > 0 && +s.batt_12v <= 100 && s.ts)
+    .map(s => ({ t: s.ts, v: +s.batt_12v }))
+    .sort((a, b) => a.t - b.t);
+  if (pts.length < 10) return;                                  // amostra mínima
+  const spanDays = (pts[pts.length - 1].t - pts[0].t) / 86400000;
+  if (spanDays < 14) return;                                    // janela mínima
+  // Regressão linear (x = dias desde o 1º ponto, y = %).
+  const t0 = pts[0].t;
+  const xs = pts.map(p => (p.t - t0) / 86400000), ys = pts.map(p => p.v);
+  const n = pts.length, sx = xs.reduce((a, b) => a + b, 0), sy = ys.reduce((a, b) => a + b, 0);
+  const sxx = xs.reduce((a, x) => a + x * x, 0), sxy = xs.reduce((a, x, i) => a + x * ys[i], 0);
+  const denom = n * sxx - sx * sx;
+  if (Math.abs(denom) < 1e-6) return;
+  const slope = (n * sxy - sx * sy) / denom;                    // %/dia
+  const intercept = (sy - slope * sx) / n;
+  if (slope >= -0.1) return;                                    // estável ou subindo
+  const curProj = intercept + slope * xs[xs.length - 1];        // % projetado hoje
+  if (curProj > 95) return;                                     // ainda cheio → ruído
+  const daysTo50 = (50 - curProj) / slope;                      // slope<0 → positivo se acima de 50
+  if (!(daysTo50 > 0 && daysTo50 <= 30)) return;                // só alerta se cruza 50% em ≤30d
+  _batt12TrendSentAt = Date.now();
+  const perWeek = (-slope * 7).toFixed(1);
+  const title = '🔋 Bateria 12V em queda';
+  const body = `12V caindo ~${perWeek}%/semana (atual ~${curProj.toFixed(0)}%). No ritmo, chega a 50% em ~${Math.round(daysTo50)} dias — verifique dreno/alternador.`;
+  addEvent('anomaly', `${title} — ${body}`);
+  sendPush(title, body, 'batt12_trend');
+}
+
 // Captura snapshot diário + check de anomalia 1×/dia (à meia-noite + boot)
 function _runDailyTelemetry() {
   captureTelemetrySnapshot();
   checkAnomalies();
+  checkBatt12Trend();
 }
 setTimeout(_runDailyTelemetry, 30 * 1000);                       // 30s após boot
 setInterval(_runDailyTelemetry, 24 * 60 * 60 * 1000);            // 24h
@@ -4742,6 +4782,24 @@ function ingestAutoTrip({ tripId, autoTrip, samples }, opts = {}) {
       // Sinal do bug clássico (só infla): média fisicamente impossível, mesmo sem
       // samples confiáveis. Corrige pro piso de samples (não-zero).
       const implausible = (avgKmh > 130) || (avgKmh > 90 && sampleKm > 0.5 && rep > sampleKm * 1.8 + 3);
+      // Carro PARADO ligado: o hodômetro do APK re-baseia e copia o
+      // avg_vehicle_speed_since_startup como se fosse km (bug do trip
+      // "Limpa Gyn→Limpa Gyn 35,90km / 0,13kWh"). Assinatura: dist reportada
+      // mas SEM movimento real (samples ~0) E energia desprezível pro tanto de
+      // km (um EV a 35km gastaria ~6kWh; 0,13kWh => não andou). Fisicamente
+      // impossível → zera pros samples (≈0).
+      const eqKwh = (+autoTrip.netKwh || 0) + (+autoTrip.fuelL || 0) * 8.9;
+      const parkedPhantom = rep > 1 && sampleKm < 0.3 && eqKwh < rep * 0.02;
+      if (parkedPhantom) {
+        // Não é viagem: carro ligado parado. Descarta (tombstone + remove arquivo)
+        // pra não poluir totais nem deixar card residual; reprocess limpa o legado.
+        console.log(`↷ AutoTrip ${safeId} descartado: fantasma de carro parado ${rep.toFixed(1)}km (eq=${eqKwh.toFixed(2)}kWh sampleKm=${sampleKm.toFixed(2)})`);
+        markDeleted('autotrips', safeId);
+        try { fs.unlinkSync(filePath); } catch (_) {}
+        const _i = autoTripsArr.findIndex(t => t.tripId === safeId || String(t.startMs) === safeId);
+        if (_i >= 0) autoTripsArr.splice(_i, 1);
+        return { status: 200, body: { ok: true, skipped: true, reason: 'parked_phantom' } };
+      }
       if (dense && agree && tSec >= 60) {
         // Reconciliação bidirecional: diverge >12% (e >2km) → manda nos samples.
         if (Math.abs(rep - reliableKm) > Math.max(2, reliableKm * 0.12)) {
@@ -5106,6 +5164,84 @@ app.get('/api/stats/by-mode', (req, res) => {
     route: ref ? { ...ref, radius } : null,
     tripsConsidered: segTrips,
     ranking,
+  });
+});
+
+// ── Economia vitalícia vs carro a gasolina ──────────────────────────────────
+// Compara o que um SUV equivalente só-gasolina teria gastado para rodar a mesma
+// distância contra o que o usuário realmente pagou (eletricidade + combustível).
+// Baseline km/L de SUV gasolina classe H6 ~9 km/L (env ICE_BASELINE_KML).
+const ICE_BASELINE_KML = +process.env.ICE_BASELINE_KML || 9.0;
+const KWH_PER_L_EQUIV   = 8.9;   // 1 L gasolina ≈ 8,9 kWh (mesma conversão do by-mode)
+
+app.get('/api/stats/savings', (req, res) => {
+  const distKm = +state.lifetime?.distance_km || 0;
+  const fuelL  = +state.lifetime?.fuel_l      || 0;
+  const netKwh = Math.max(0, +state.lifetime?.net_kwh || 0);
+
+  // Custo real de eletricidade: valora cada sessão pelo override (total/perKwh)
+  // ou cai no SEED — mesma lógica do recomputeBatteryAvgPrice.
+  let elecCost = 0, elecKwh = 0;
+  for (const c of chargesArr) {
+    const energy = +c.energy_kwh || 0;
+    if (energy < 0.05) continue;
+    const ovr = c.cost_override;
+    let pKwh = ovr?.free === true ? 0
+             : ovr && +ovr.total  > 0 ? (+ovr.total / energy)
+             : ovr && +ovr.perKwh > 0 ? +ovr.perKwh
+             : SEED_KWH_PRICE;
+    if (pKwh > 5) pKwh = SEED_KWH_PRICE;   // anti-outlier
+    elecCost += energy * pKwh;
+    elecKwh  += energy;
+  }
+
+  // Custo real de combustível: total_cost quando registrado, senão litros × SEED.
+  let fuelCost = 0, fuelLitersBought = 0;
+  for (const r of refuels) {
+    const liters = +r.liters_added || 0;
+    if (liters <= 0) continue;
+    fuelLitersBought += liters;
+    fuelCost += (+r.total_cost > 0) ? +r.total_cost : liters * SEED_GAS_PRICE_PER_L;
+  }
+
+  const gasPrice = +state.tank_avg_price_per_l || +state.price_gas_per_l || SEED_GAS_PRICE_PER_L;
+
+  // Baseline: SUV gasolina rodando distKm.
+  const baselineLiters = ICE_BASELINE_KML > 0 ? distKm / ICE_BASELINE_KML : 0;
+  const baselineCost   = baselineLiters * gasPrice;
+
+  const actualCost = elecCost + fuelCost;
+  const saved      = baselineCost - actualCost;
+
+  // Litros-equivalentes de energia poupados vs só-gasolina.
+  const kwhAsL       = netKwh / KWH_PER_L_EQUIV;
+  const energyEqL    = fuelL + kwhAsL;
+  const litersSaved  = baselineLiters - energyEqL;
+
+  // Km rodados na eletricidade (share da energia que veio da bateria).
+  const electricShare = energyEqL > 0.001 ? kwhAsL / energyEqL : 0;
+  const electricKm    = distKm * electricShare;
+
+  res.json({
+    distanceKm:     +distKm.toFixed(1),
+    electricKm:     +electricKm.toFixed(1),
+    electricShare:  +(electricShare * 100).toFixed(0),
+    fuelL:          +fuelL.toFixed(1),
+    netKwh:         +netKwh.toFixed(1),
+    cost: {
+      electricity:  +elecCost.toFixed(2),
+      fuel:         +fuelCost.toFixed(2),
+      actual:       +actualCost.toFixed(2),
+      iceBaseline:  +baselineCost.toFixed(2),
+    },
+    savedBrl:       +saved.toFixed(2),
+    litersSaved:    +litersSaved.toFixed(1),
+    baselineLiters: +baselineLiters.toFixed(1),
+    assumptions: {
+      iceBaselineKmL: ICE_BASELINE_KML,
+      gasPricePerL:   +gasPrice.toFixed(2),
+      kwhPerLitre:    KWH_PER_L_EQUIV,
+    },
   });
 });
 
@@ -5880,7 +6016,9 @@ function _askClaude(sys, userMsgs, timeoutMs = 60_000) {
 function _aiIsComplex(userMsgs) {
   const last = (userMsgs[userMsgs.length - 1]?.content || '');
   if (last.length > 280) return true;
-  return /\b(compar|por que|porqu[êe]|analis|explic|tend[êe]nc|recomend|sugest|proje[çc]|melhor|pior|vale a pena|deveria|estrat[ée]g|otimiz|m[ée]dia|padr[ãa]o)/i.test(last);
+  // Analíticas/comparativas OU agregadas/históricas (totais por mês, contagens,
+  // gastos, extremos) — precisam do histórico completo, que só vai pro Claude.
+  return /\b(compar|por que|porqu[êe]|analis|explic|tend[êe]nc|recomend|sugest|proje[çc]|melhor|pior|vale a pena|deveria|estrat[ée]g|otimiz|m[ée]dia|padr[ãa]o|total|totais|quanto|gast|economi|maior|menor|mais long|mais cara?|mais barat|quant[ao]s|no m[êe]s|por m[êe]s|neste m[êe]s|esse m[êe]s|este m[êe]s|jan|fev|mar[çc]o|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro|semana|ano|hist[óo]ric|desde)/i.test(last);
 }
 
 // Resumo compacto de uma viagem — agrega samples por modo (HEV/EV) e calcula
@@ -5965,6 +6103,88 @@ function _buildAiContext(N = 10) {
     viagens_recentes: trips,
     recargas_recentes: charges,
   };
+}
+
+// Preços correntes pra estimar custo de viagem (kWh líquido + combustível).
+function _aiPrices() {
+  return {
+    pKwh: +state.battery_avg_price_per_kwh || +state.price_kwh || 0,
+    pGas: +state.tank_avg_price_per_l      || +state.price_gas_per_l || 0,
+  };
+}
+function _ymSaoPaulo(ms) {
+  if (!ms) return null;
+  try {
+    const p = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit' }).format(new Date(ms));
+    return p.slice(0, 7); // YYYY-MM
+  } catch { return new Date(ms).toISOString().slice(0, 7); }
+}
+
+// Listas COMPACTAS de TODAS as viagens/recargas (sem samples) — pra perguntas
+// históricas/agregadas (totais, comparações, extremos) que a janela de
+// `viagens_recentes` (últimas N) não cobre. Lê os arrays em memória, não disco.
+function _aiFullHistory() {
+  const { pKwh, pGas } = _aiPrices();
+  const r1 = (n) => Math.round((+n || 0) * 10) / 10;
+  const r2 = (n) => Math.round((+n || 0) * 100) / 100;
+  const viagens = [...autoTripsArr]
+    .sort((a, b) => (a.startMs || 0) - (b.startMs || 0))
+    .map(t => {
+      const net = +t.netKwh || 0, fuel = +t.fuelL || 0;
+      return {
+        data: _ymSaoPaulo(t.startMs), ms: t.startMs,
+        rota: t.name || (t.startKp && t.endKp ? `${t.startKp} → ${t.endKp}` : null),
+        km: r1(t.distKm), min: Math.round((+t.timeSec || 0) / 60),
+        netKwh: r2(net), fuelL: r2(fuel), custoBrl: r2(net * pKwh + fuel * pGas),
+        soc: `${t.startSocPct}→${t.endSocPct}%`, vmax: r1(t.maxSpeedKmh), score: t.driveScore,
+      };
+    });
+  let recargas = [];
+  try {
+    recargas = [...chargesArr]
+      .sort((a, b) => (a.timestamp_ms || 0) - (b.timestamp_ms || 0))
+      .map(c => {
+        const kwh = +c.energy_kwh || 0;
+        const custo = (c.cost_override && c.cost_override.total != null) ? +c.cost_override.total : r2(kwh * pKwh);
+        return {
+          data: _ymSaoPaulo(c.timestamp_ms), ms: c.timestamp_ms,
+          local: c.location_name || null, min: Math.round((+c.duration_sec || 0) / 60),
+          kwh: r2(kwh), soc: `${c.soc_start}→${c.soc_end}%`,
+          potKw: r2(c.avg_power_kw), custoBrl: r2(custo),
+        };
+      });
+  } catch (_) {}
+  return { viagens, recargas };
+}
+
+// Rollups por mês (YYYY-MM) sobre TODO o histórico — payload pequeno que resolve
+// "quanto gastei/quantos km/quantas recargas em <mês>" sem depender da lista cheia.
+function _aiMonthlyRollups() {
+  const { pKwh, pGas } = _aiPrices();
+  const r1 = (n) => Math.round((+n || 0) * 10) / 10;
+  const r2 = (n) => Math.round((+n || 0) * 100) / 100;
+  const m = {};
+  const slot = (ym) => (m[ym] = m[ym] || { viagens: 0, km: 0, viagem_custo_brl: 0, net_kwh: 0, fuel_l: 0, recargas: 0, recarga_kwh: 0, recarga_custo_brl: 0 });
+  for (const t of autoTripsArr) {
+    const ym = _ymSaoPaulo(t.startMs); if (!ym) continue;
+    const s = slot(ym); const net = +t.netKwh || 0, fuel = +t.fuelL || 0;
+    s.viagens++; s.km += +t.distKm || 0; s.net_kwh += net; s.fuel_l += fuel;
+    s.viagem_custo_brl += net * pKwh + fuel * pGas;
+  }
+  for (const c of chargesArr) {
+    const ym = _ymSaoPaulo(c.timestamp_ms); if (!ym) continue;
+    const s = slot(ym); const kwh = +c.energy_kwh || 0;
+    s.recargas++; s.recarga_kwh += kwh;
+    s.recarga_custo_brl += (c.cost_override && c.cost_override.total != null) ? +c.cost_override.total : kwh * pKwh;
+  }
+  const out = {};
+  for (const ym of Object.keys(m).sort()) {
+    const s = m[ym];
+    out[ym] = { viagens: s.viagens, km: r1(s.km), viagem_custo_brl: r2(s.viagem_custo_brl),
+      net_kwh: r2(s.net_kwh), fuel_l: r2(s.fuel_l), recargas: s.recargas,
+      recarga_kwh: r2(s.recarga_kwh), recarga_custo_brl: r2(s.recarga_custo_brl) };
+  }
+  return out;
 }
 
 // Resolve os destinos citados numa pergunta de autonomia/trajeto e calcula a
@@ -6053,6 +6273,9 @@ app.post('/api/ai/ask', async (req, res) => {
   if (userMsgs.length > 20) userMsgs = userMsgs.slice(-20);
 
   const ctx = _buildAiContext(req.body?.context_size || 10);
+  // Rollups mensais de TODO o histórico — payload pequeno, fica sempre no
+  // contexto (resolve "quanto gastei/quantos km em <mês>" em qualquer motor).
+  ctx.totais_mensais = _aiMonthlyRollups();
 
   // Resolve trajeto/distâncias quando a pergunta é de autonomia (camada 2).
   const lastUser = [...userMsgs].reverse().find(m => m.role === 'user')?.content || '';
@@ -6060,6 +6283,22 @@ app.post('/api/ai/ask', async (req, res) => {
     const rotas = await _resolveRouteContext(lastUser);
     if (rotas) ctx.rotas = rotas;
   } catch (e) { console.warn('[ai] resolver de rota falhou:', e.message); }
+
+  // Roteamento entre motor local (Ollama) e nuvem (Claude):
+  //   prefer=local → só Ollama  ·  prefer=cloud → Claude (fallback Ollama)
+  //   prefer=auto (default) → Ollama; escala pro Claude se a pergunta for
+  //   complexa OU se o Ollama falhar.
+  const prefer = (req.body?.prefer || 'auto').toString();
+  const cloudFirst = AI_CLOUD && (prefer === 'cloud' || (prefer === 'auto' && _aiIsComplex(userMsgs)));
+
+  // Histórico COMPLETO compacto (todas as viagens/recargas) só quando vai pro
+  // Claude — bloataria a janela curta do Ollama. Atende extremos/comparações
+  // ("viagem mais longa de todas", "recarga mais cara") além dos rollups.
+  if (cloudFirst) {
+    const h = _aiFullHistory();
+    ctx.viagens_todas = h.viagens;
+    ctx.recargas_todas = h.recargas;
+  }
 
   const sys = `Você é um assistente especializado em telemetria de carros híbridos plug-in (PHEV) integrado ao app Haval EcoTrip. Responda em português brasileiro, com clareza e precisão. Use APENAS os dados fornecidos abaixo no JSON de contexto pra responder. Não invente números. Se a pergunta exigir algo fora do contexto, diga.
 
@@ -6071,17 +6310,12 @@ DICAS:
 - "kWh efetivo" da recarga = custo / energia que entrou na bateria.
 - Datas em viagens_recentes.startMs/endMs são milissegundos epoch (use Date(ms).toLocaleString se precisar formatar).
 - "atual.autonomy_ev_km" é a autonomia elétrica estimada AGORA. "atual.soc_pct" é a carga atual.
+- "totais_mensais" agrega TODO o histórico por mês (YYYY-MM, fuso de Brasília): use-o pra totais/médias por mês (custo, km, kWh, nº de viagens/recargas).
+- "viagens_todas"/"recargas_todas" (quando presentes) listam TODAS as viagens/recargas em forma compacta — use pra extremos, comparações e contagens no histórico inteiro. Quando ausentes, baseie-se em "totais_mensais" e nos "recentes".
 - "rotas" (quando presente) traz as distâncias reais de estrada de cada perna a partir do GPS do carro. Pra responder se a bateria chega: compare a distância acumulada com autonomy_ev_km; se o usuário pedir reserva (ex.: "sem ficar abaixo de 20%"), desconte essa fração da autonomia (autonomy_ev_km × (1 − reserva)) antes de comparar. Subida (subida_m) gasta mais; mencione se relevante.
 - "locais_salvos" tem as coordenadas de lugares nomeados (casa/trabalho/etc).
 - Seja conciso. Tabelas simples ou bullets quando útil.
 - Mantenha continuidade da conversa: se o usuário pergunta "e nessa outra?" assume o contexto da mensagem anterior.`;
-
-  // Roteamento entre motor local (Ollama) e nuvem (Claude):
-  //   prefer=local → só Ollama  ·  prefer=cloud → Claude (fallback Ollama)
-  //   prefer=auto (default) → Ollama; escala pro Claude se a pergunta for
-  //   complexa OU se o Ollama falhar.
-  const prefer = (req.body?.prefer || 'auto').toString();
-  const cloudFirst = AI_CLOUD && (prefer === 'cloud' || (prefer === 'auto' && _aiIsComplex(userMsgs)));
 
   async function viaOllama() {
     const t0 = Date.now();
@@ -6548,6 +6782,34 @@ app.post('/api/charge-limit', async (req, res) => {
   }
 });
 
+// POST /api/charge-limit/cycle — avança um preset por tap (botão % da LA).
+// Síncrono ANTES de qualquer await: taps em rajada (3x rápido) serializam no
+// event loop, então 50→60→70→80 e o último vence. Debounce agrupa a rajada num
+// único cmd MQTT pro carro; a LA é empurrada na hora com o alvo pendente.
+let _chargeCycleTimer = null;
+app.post('/api/charge-limit/cycle', (req, res) => {
+  const base = (_pendingChargeTarget && Date.now() - _pendingChargeTargetMs < PENDING_CHARGE_TTL)
+    ? _pendingChargeTarget : _effectiveChargeTarget();
+  const next = CHARGE_PRESETS.find(p => p > base) ?? CHARGE_PRESETS[0];
+  _pendingChargeTarget = next;
+  _pendingChargeTargetMs = Date.now();
+  // Feedback imediato: empurra a LA já com o novo alvo (sem throttle/charging gate).
+  if (apnsLive.enabled) apnsLive.pushUpdate('ChargeActivityAttributes', {}, _chargeContentState(), {}).catch(() => {});
+  // Debounce o envio real pro carro: agrupa a rajada de taps num único cmd.
+  if (_chargeCycleTimer) clearTimeout(_chargeCycleTimer);
+  _chargeCycleTimer = setTimeout(() => {
+    _chargeCycleTimer = null;
+    const pct = _pendingChargeTarget;
+    if (!CHARGE_PRESETS.includes(pct)) return;
+    if (state.charge_custom_target) { state.charge_custom_target = 0; _customCutoffFired = false; scheduleStateSave(); }
+    publishCmdWithRetry(`${MQTT_PREFIX}/cmd/charge_custom_target`, '0', { retain: true, qos: 1 }).catch(() => {});
+    publishCmdWithRetry(`${MQTT_PREFIX}/cmd/charge_limit`, pct.toString(), { retain: true, qos: 1 })
+      .then(() => console.log(`[charge-cycle] alvo enviado ${pct}%`))
+      .catch(e => console.warn('[charge-cycle] falha:', e.message));
+  }, 1200);
+  res.json({ ok: true, target: next });
+});
+
 // POST /api/charge-target  { pct: 97 | 0 }  — alvo de corte por SOFTWARE.
 // O carro só tem 6 presets (50/60/70/80/90/100). Para parar em qualquer outro
 // valor (ex.: 97%, útil pra regen voltar a funcionar logo abaixo de 97%): carrega
@@ -6608,9 +6870,13 @@ app.post('/api/drive-mode', async (req, res) => {
   if (![0, 1, 3].includes(mode))
     return res.status(400).json({ error: 'Valor inválido. Use 0 (HEV), 1 (Prior. EV) ou 3 (EV).' });
   try {
-    await publishCmdWithRetry(`${MQTT_PREFIX}/cmd/drive_mode`, mode.toString(), { retain: true, qos: 1 });
+    // retain:false — comando é evento one-shot, NÃO estado. Retido, o carro
+    // re-aplicava em todo subscribe/reconnect e brigava com a troca feita no
+    // cluster do carro (ex.: usuário põe HEV no carro, retido força EV de volta).
+    // Estado real = ha/drive_mode/state. publishCmdWithRetry cobre gap MQTT curto.
+    await publishCmdWithRetry(`${MQTT_PREFIX}/cmd/drive_mode`, mode.toString(), { retain: false, qos: 1 });
     const carFresh = state.last_apk_ms && (Date.now() - state.last_apk_ms < 30_000);
-    console.log(`[drive-mode] Enviando mode=${mode} (retain) · APK fresh=${carFresh}`);
+    console.log(`[drive-mode] Enviando mode=${mode} · APK fresh=${carFresh}`);
     res.json({ ok: true, carFresh });
   } catch (err) {
     res.status(err.code === 'MQTT_OFFLINE' ? 503 : 500).json({ error: err.message });
@@ -6634,7 +6900,7 @@ app.post('/api/power-reserve', async (req, res) => {
   if (![1, 2].includes(mode))
     return res.status(400).json({ error: 'Valor inválido. Use 1 (Inteligente) ou 2 (Prioritário).' });
   try {
-    await publishCmdWithRetry(`${MQTT_PREFIX}/cmd/power_reserve`, mode.toString(), { retain: true, qos: 1 });
+    await publishCmdWithRetry(`${MQTT_PREFIX}/cmd/power_reserve`, mode.toString(), { retain: false, qos: 1 });
     const carFresh = state.last_apk_ms && (Date.now() - state.last_apk_ms < 30_000);
     res.json({ ok: true, carFresh });
   } catch (err) {
@@ -6655,7 +6921,7 @@ app.post('/api/charge-soc-target', async (req, res) => {
   if (!(pct >= 20 && pct <= 80))
     return res.status(400).json({ error: 'Valor fora da faixa. Use 20..80.' });
   try {
-    await publishCmdWithRetry(`${MQTT_PREFIX}/cmd/charge_soc_target`, pct.toString(), { retain: true, qos: 1 });
+    await publishCmdWithRetry(`${MQTT_PREFIX}/cmd/charge_soc_target`, pct.toString(), { retain: false, qos: 1 });
     const carFresh = state.last_apk_ms && (Date.now() - state.last_apk_ms < 30_000);
     res.json({ ok: true, carFresh });
   } catch (err) {
@@ -6831,6 +7097,73 @@ app.delete('/api/preclimat/schedule/:id', requireAuth, (req, res) => {
   res.json({ ok: true });
 });
 
+// ── Leave-by planner ──────────────────────────────────────────────────────
+// "Saio às 8h" → a bateria chega no alvo a tempo? E quando armar o pré-clima
+// pra cabine ficar pronta na partida? Read-only: combina o ETA de recarga
+// (chargeEtaMin/potência) com uma sugestão de pré-clima. O app arma o pré-clima
+// chamando /api/preclimat/schedule com onceAtMs (já existente).
+app.get('/api/leave-by', requireAuth, (req, res) => {
+  const now = Date.now();
+  // Partida: atMs absoluto, ou HH:MM → próxima ocorrência (hoje se futuro, senão amanhã).
+  let departureMs = 0;
+  if (req.query.atMs) {
+    departureMs = parseInt(req.query.atMs, 10);
+  } else if (/^\d{1,2}:\d{2}$/.test(String(req.query.at || ''))) {
+    const [h, m] = String(req.query.at).split(':').map(Number);
+    const d = new Date(); d.setHours(h, m, 0, 0);
+    if (d.getTime() <= now) d.setDate(d.getDate() + 1);
+    departureMs = d.getTime();
+  }
+  if (!departureMs || isNaN(departureMs) || departureMs <= now)
+    return res.status(400).json({ error: 'horário de partida inválido (use at=HH:MM ou atMs futuro)' });
+
+  const minutesUntil = (departureMs - now) / 60000;
+  const soc    = +state.soc_pct || 0;
+  const target = Math.min(100, Math.max(1, +req.query.target || _effectiveChargeTarget()));
+  const charging = state.charging_state === 'Carregando';
+
+  // Potência: média da janela recente, senão a média da sessão.
+  const win = _chargePwrWin.filter(s => now - s.ts <= CHARGE_ETA_WIN_MS);
+  const powerKw = charging
+    ? (win.length ? win.reduce((a, s) => a + s.kw, 0) / win.length : (+state.charge_avg_power_kw || 0))
+    : 0;
+
+  const needKwh = Math.max(0, (target - soc) / 100 * BATTERY_CAPACITY_KWH);
+  let etaMin = 0, finishAtMs = null, projectedSoc = soc;
+  if (needKwh <= 0.05) {
+    projectedSoc = soc;                        // já no alvo
+  } else if (charging && powerKw > 0.3) {
+    etaMin = needKwh / powerKw * 60;
+    finishAtMs = now + etaMin * 60000;
+    const gainedKwh = powerKw * (minutesUntil / 60);
+    projectedSoc = Math.min(target, soc + gainedKwh / BATTERY_CAPACITY_KWH * 100);
+  }
+  const willReachTarget = needKwh <= 0.05 || (charging && powerKw > 0.3 && etaMin <= minutesUntil + 0.5);
+  const deficitPct = Math.max(0, target - projectedSoc);
+
+  // Pré-clima: arma pra terminar na partida. Temp sugerida pela externa quando o
+  // app não manda uma preferência.
+  const durationMin = Math.min(60, Math.max(5, parseInt(req.query.preclimatMin, 10) || 20));
+  const outside = +state.outside_temp || 0;
+  let temp = parseFloat(req.query.cabin);
+  if (isNaN(temp)) temp = outside >= 26 ? 21 : (outside > 0 && outside < 16 ? 24 : 22);
+  temp = Math.min(32, Math.max(16, temp));
+  const fireAtMs = departureMs - durationMin * 60000;
+
+  res.json({
+    departureMs, minutesUntil: Math.round(minutesUntil),
+    soc, target, charging, powerKw: +powerKw.toFixed(1),
+    etaMin: Math.round(etaMin), finishAtMs,
+    projectedSoc: +projectedSoc.toFixed(0),
+    willReachTarget, deficitPct: +deficitPct.toFixed(0),
+    needKwh: +needKwh.toFixed(1),
+    preclimat: {
+      fireAtMs, durationMin, temp,
+      tooSoon: fireAtMs <= now,           // partida tão próxima que o pré-clima já deveria estar rodando
+    },
+  });
+});
+
 // ── Histórico de modos — GET /api/drive-history ───────────────────────────
 app.get('/api/drive-history', requireAuth, (req, res) => {
   const since = parseInt(req.query.since || '0', 10);
@@ -6959,6 +7292,26 @@ app.post('/api/vehicle/test', async (req, res) => {
   res.json({ ok: true, sub, sent: payload, result: null, note: 'sem resposta em 12s (carro dormindo?)' });
 });
 
+// SPIKE: POST /api/mic-test  { sec?, source? } — dispara cmd/mic_test no carro e
+// aguarda o /result (até 20s, pois grava ~3s por source). Prova se a central
+// deixa um app 3rd-party capturar o mic integrado.
+let _micTestResult = null;
+app.post('/api/mic-test', requireAuth, async (req, res) => {
+  if (!mqttClient?.connected) return res.status(503).json({ error: 'MQTT offline' });
+  const payload = JSON.stringify({
+    sec: parseInt(req.body?.sec) || 3,
+    source: String(req.body?.source || ''),
+  });
+  _micTestResult = null;
+  mqttClient.publish(`${MQTT_PREFIX}/cmd/mic_test`, payload, { qos: 1, retain: false });
+  const start = Date.now();
+  while (Date.now() - start < 20_000) {
+    if (_micTestResult) return res.json({ ok: true, sent: payload, result: _micTestResult.value });
+    await new Promise(r => setTimeout(r, 250));
+  }
+  res.json({ ok: true, sent: payload, result: null, note: 'sem resposta em 20s (carro dormindo?)' });
+});
+
 // POST /api/vehicle/shade  { level: 0..100 } — cortina elétrica (0=fechada, 100=aberta).
 app.post('/api/vehicle/shade', (req, res) => {
   const level = parseInt(req.body?.level);
@@ -7062,14 +7415,74 @@ function _handleWsConnection(ws, req) {
   ws.on('error', () => clients.delete(ws));
 }
 
-const wss = new WebSocketServer({ server, path: '/ws' });
+// noServer + roteamento manual de upgrade: o ws aborta o socket quando o path não
+// bate (websocket-server.js shouldHandle→abortHandshake), então 2 servers com
+// `{server, path}` no MESMO http server brigam — o listener do /ws matava o upgrade
+// do /ws/audio antes dele ser tratado. Com noServer, um único roteador despacha.
+const wss = new WebSocketServer({ noServer: true });
 wss.on('connection', _handleWsConnection);
 
-// WSS no servidor HTTPS (mesmos clientes e handlers)
-if (httpsServer) {
-  const wssHttps = new WebSocketServer({ server: httpsServer, path: '/ws' });
-  wssHttps.on('connection', _handleWsConnection);
+// ── Relay de áudio (escuta ao vivo da central) ──────────────────────────────
+// Half-duplex via MQTT: o carro publica frames PCM em audio/c2p (carro→fone) e
+// assina audio/p2c (fone→carro). Aqui só fazemos a ponte com o WS do iPhone:
+//  - frame binário do fone → publica em audio/p2c (fone fala, sai no carro).
+//  - frame de audio/c2p (MQTT) → reenvia pros clientes WS (fone ouve o carro).
+// Formato fixo v1: PCM16 LE mono 8kHz. Sem retain, QoS0 (latência > confiabilidade).
+const audioClients = new Set();
+function _handleAudioWs(ws, req) {
+  if (BRIDGE_TOKEN_HASH) {
+    const token = new URL(req.url, 'http://localhost').searchParams.get('token') || '';
+    if (token !== BRIDGE_TOKEN_HASH && sha256hex(token) !== BRIDGE_TOKEN_HASH) {
+      ws.close(4001, 'unauthorized'); return;
+    }
+  }
+  audioClients.add(ws);
+  ws.isAlive = true;
+  ws.on('pong', () => { ws.isAlive = true; });
+  ws.on('message', (data, isBinary) => {
+    if (isBinary && mqttClient?.connected) {
+      mqttClient.publish(`${MQTT_PREFIX}/audio/p2c`, data, { qos: 0, retain: false });
+    }
+  });
+  ws.on('close', () => audioClients.delete(ws));
+  ws.on('error', () => audioClients.delete(ws));
 }
+const wssAudio = new WebSocketServer({ noServer: true });
+wssAudio.on('connection', _handleAudioWs);
+
+// Roteador único de upgrade (http + https). Clockin já tem seu próprio listener
+// (proxy) — aqui ignoramos esses paths e deixamos ele tratar.
+function _routeUpgrade(req, socket, head) {
+  if (_isClockinPath(req.url)) return;
+  const pathname = new URL(req.url, 'http://localhost').pathname;
+  if (pathname === '/ws') {
+    wss.handleUpgrade(req, socket, head, ws => wss.emit('connection', ws, req));
+  } else if (pathname === '/ws/audio') {
+    wssAudio.handleUpgrade(req, socket, head, ws => wssAudio.emit('connection', ws, req));
+  } else {
+    socket.destroy();
+  }
+}
+server.on('upgrade', _routeUpgrade);
+if (httpsServer) httpsServer.on('upgrade', _routeUpgrade);
+setInterval(() => {
+  for (const ws of audioClients) {
+    if (ws.isAlive === false) { ws.terminate(); continue; }
+    ws.isAlive = false;
+    try { ws.ping(); } catch (_) {}
+  }
+}, 25000);
+
+// POST /api/audio/listen { action:"start"|"stop", talk?:bool } — controla a captura
+// no carro. Reusa o cmd/audio_listen (o APK abre/fecha AudioRecord/AudioTrack).
+app.post('/api/audio/listen', requireAuth, (req, res) => {
+  if (!mqttClient?.connected) return res.status(503).json({ error: 'MQTT offline' });
+  const action = String(req.body?.action || '').trim();
+  if (action !== 'start' && action !== 'stop') return res.status(400).json({ error: 'action = start|stop' });
+  const payload = JSON.stringify({ action, talk: req.body?.talk === true });
+  mqttClient.publish(`${MQTT_PREFIX}/cmd/audio_listen`, payload, { qos: 1, retain: false });
+  res.json({ ok: true, action });
+});
 
 // ── WebSocket heartbeat (iOS Safari fecha silenciosamente conexões idle) ────────
 setInterval(() => {
@@ -7247,6 +7660,16 @@ function handleDiagMessage(key, raw) {
 }
 
 mqttClient.on('message', (topic, payload, packet) => {
+  // Áudio ao vivo (carro→fone): frame binário PCM. Intercepta ANTES do toString
+  // (é binário, não texto) e reenvia direto pros clientes WS de áudio. Caminho
+  // quente — sem log, sem parse.
+  if (topic === `${MQTT_PREFIX}/audio/c2p`) {
+    for (const ws of audioClients) {
+      if (ws.readyState === WebSocket.OPEN) ws.send(payload, { binary: true });
+    }
+    return;
+  }
+
   const value      = payload.toString().trim();
   const isRetained = !!(packet && packet.retain);
 
@@ -7255,6 +7678,12 @@ mqttClient.on('message', (topic, payload, packet) => {
   if (topic.startsWith(`${MQTT_PREFIX}/cmd/vehicle/`) && topic.endsWith('/result')) {
     const sub = topic.slice(`${MQTT_PREFIX}/cmd/vehicle/`.length, -'/result'.length);
     _vehicleResults[sub] = { value, ts: Date.now() };
+    return;
+  }
+
+  // SPIKE mic_test: resultado da prova de captura do mic da central.
+  if (topic === `${MQTT_PREFIX}/cmd/mic_test/result`) {
+    _micTestResult = { value, ts: Date.now() };
     return;
   }
 
@@ -7543,11 +7972,27 @@ const GWM_BODY_BINARY = new Set([
 // Alvo EFETIVO de carga p/ exibir na LA: o corte custom (se armado) vence o
 // limite nativo — senão a LA mostraria 100% (o carro é descapado pra alcançar
 // o alvo custom) e o tick/meta ficaria errado.
+// Cycle do botão % da LA: cada tap avança um preset. O contador vive AQUI (não
+// no iOS) pra que taps em rajada serializem no event loop do Node — senão cada
+// AppIntent leria o /api/state defasado (charge_limit_pct demora ~10s pro carro
+// confirmar) e 3 taps de 50% cairiam todos em 60. O pending vence o state
+// confirmado por até 30s, então a LA mostra o alvo escolhido na hora.
+const CHARGE_PRESETS = [60, 70, 80, 90, 100];
+const PENDING_CHARGE_TTL = 30_000;
+let _pendingChargeTarget = null;
+let _pendingChargeTargetMs = 0;
+
 function _effectiveChargeTarget() {
+  if (_pendingChargeTarget && Date.now() - _pendingChargeTargetMs < PENDING_CHARGE_TTL)
+    return _pendingChargeTarget;
   const custom = +state.charge_custom_target || 0;
   if (custom >= 50 && custom <= 100) return custom;
   return +state.charge_limit_pct || 100;
 }
+
+// lock_state: 'off'=trancado · 'on'=destrancado · null=desconhecido. A LA usa isso
+// pra alternar o botão Trancar/Destrancar conforme o estado real da trava.
+function _isLocked() { return state.lock_state === 'off'; }
 
 // Content-state da Live Activity de recarga (casa com ChargeActivityAttributes.ContentState).
 function _chargeContentState() {
@@ -7558,6 +8003,7 @@ function _chargeContentState() {
     remainingMin: chargeEtaMin(),   // ETA calculado por nós (o do carro trava em ~5min)
     charging:     state.charging_state === 'Carregando',
     targetPct:    _effectiveChargeTarget(),
+    locked:       _isLocked(),
     updatedAtMs:  Date.now(),
   };
 }
@@ -8836,7 +9282,7 @@ function handleChargingStateTransition(value, isRetained) {
           apnsLive.pushUpdate('ChargeActivityAttributes', {}, {
             soc: endSoc, powerKw: 0, sessionKwh: finalKwh,
             remainingMin: 0, charging: false,
-            targetPct: effTarget, updatedAtMs: Date.now(),
+            targetPct: effTarget, locked: _isLocked(), updatedAtMs: Date.now(),
           }, { isFinal: true, dismissalDate: Date.now() + 30 * 60_000, alert: { title: aTitle, body: aBody } })
             .catch(e => console.warn('[apns] charge-stopped end falhou:', e.message));
         }
@@ -8995,6 +9441,7 @@ function sendChargeLiveUpdate(isFinal = false) {
       remainingMin: Math.max(0, Math.round(rem)),
       charging: !isFinal,
       targetPct: _effectiveChargeTarget(),
+      locked: _isLocked(),
       updatedAtMs: now,
     }, { isFinal, dismissalDate: isFinal ? Date.now() + 30 * 60_000 : undefined, alert: isFinal ? { title, body } : undefined })
       .catch(err => console.warn('[apns] push falhou:', err.message));
@@ -10818,7 +11265,11 @@ function applyMqttMessage(key, value, isRetained = false) {
     }
     case 'ha/charge_limit/state': {
       const pct = parseInt(value);
-      if ([50,60,70,80,90,100].includes(pct)) state.charge_limit_pct = pct;
+      if ([50,60,70,80,90,100].includes(pct)) {
+        state.charge_limit_pct = pct;
+        // Carro confirmou: se bate com o pending, limpa (state confirmado assume).
+        if (_pendingChargeTarget === pct) { _pendingChargeTarget = null; _pendingChargeTargetMs = 0; }
+      }
       break;
     }
     case 'ha/charge_custom_target/state': {
