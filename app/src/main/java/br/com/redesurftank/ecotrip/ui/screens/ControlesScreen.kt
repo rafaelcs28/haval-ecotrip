@@ -114,6 +114,7 @@ object ControlesWebHost {
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
         }
         web?.apply { visibility = View.VISIBLE; bringToFront() }
+        resetDriveSync()   // força leitura imediata das configs de condução ao abrir
     }
 
     fun hide() { web?.visibility = View.GONE }
@@ -229,6 +230,8 @@ private fun ptBr(v: Float, dec: Int): String =
  * Assim a tela reflete mudanças feitas direto no carro. Throttle ~1,5s.
  */
 private var _lastSettingsSync = 0L
+/** Zera o throttle pra próxima leitura ser imediata (ex.: ao abrir a Controles). */
+private fun resetDriveSync() { _lastSettingsSync = 0L }
 private fun syncDriveSettingsFromCar() {
     val now = System.currentTimeMillis()
     if (now - _lastSettingsSync < 1500) return
@@ -237,14 +240,23 @@ private fun syncDriveSettingsFromCar() {
     val car = CarDataManager.getInstance()
     fun rd(k: String): Int? = try { car.fetchCurrent(k)?.trim()?.toFloatOrNull()?.toInt() } catch (_: Exception) { null }
     try {
-        rd(CarConstants.CAR_EV_SETTING_POWER_MODEL_CONFIG.value)?.let { m.syncDriveModeFromCar(it) }
-        rd(CarConstants.CAR_EV_SETTING_POWER_RESERVE_CONFIG.value)?.let { m.syncPowerReserveFromCar(it) }
-        rd(CarConstants.CAR_EV_SETTING_CHARGE_SOC_TARGET_CONFIG.value)?.let { m.syncSocTargetFromCar(it) }
-        rd(CarConstants.CAR_DRIVE_SETTING_DRIVE_MODE.value)?.let { m.syncTerrainModeFromCar(it) }
-        rd(CarConstants.CAR_EV_SETTING_ENERGY_RECOVERY_LEVEL.value)?.let { m.syncRegenLevelFromCar(it) }
-        rd(CarConstants.CAR_EV_SETTING_PEDAL_CONTROL_ENABLE.value)?.let { m.syncOnePedalFromCar(it) }
-        rd(CarConstants.CAR_DRIVE_SETTING_ESP_ENABLE.value)?.let { m.syncEspFromCar(it) }
-        rd(CarConstants.CAR_DRIVE_SETTING_STEER_MODE.value)?.let { m.syncSteerModeFromCar(it) }
+        val dm = rd(CarConstants.CAR_EV_SETTING_POWER_MODEL_CONFIG.value)
+        val pr = rd(CarConstants.CAR_EV_SETTING_POWER_RESERVE_CONFIG.value)
+        val st = rd(CarConstants.CAR_EV_SETTING_CHARGE_SOC_TARGET_CONFIG.value)
+        val tm = rd(CarConstants.CAR_DRIVE_SETTING_DRIVE_MODE.value)
+        val rg = rd(CarConstants.CAR_EV_SETTING_ENERGY_RECOVERY_LEVEL.value)
+        val op = rd(CarConstants.CAR_EV_SETTING_PEDAL_CONTROL_ENABLE.value)
+        val esp = rd(CarConstants.CAR_DRIVE_SETTING_ESP_ENABLE.value)
+        val sm = rd(CarConstants.CAR_DRIVE_SETTING_STEER_MODE.value)
+        Log.w("ControlesSync", "drive=$dm reserve=$pr soc=$st terrain=$tm regen=$rg onepedal=$op esp=$esp steer=$sm")
+        dm?.let { m.syncDriveModeFromCar(it) }
+        pr?.let { m.syncPowerReserveFromCar(it) }
+        st?.let { m.syncSocTargetFromCar(it) }
+        tm?.let { m.syncTerrainModeFromCar(it) }
+        rg?.let { m.syncRegenLevelFromCar(it) }
+        op?.let { m.syncOnePedalFromCar(it) }
+        esp?.let { m.syncEspFromCar(it) }
+        sm?.let { m.syncSteerModeFromCar(it) }
     } catch (_: Exception) {}
 }
 

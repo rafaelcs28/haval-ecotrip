@@ -750,13 +750,13 @@
 .media-time { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .media-ctrls { display: flex; align-items: center; justify-content: center; gap: 18px; }
 .mc-btn { width: 64px; height: 64px; border-radius: 50%; flex-shrink: 0; background: rgba(255,255,255,.06); border: 1px solid var(--border-hi); color: var(--text); font-size: 24px; cursor: pointer; display: flex; align-items: center; justify-content: center; -webkit-tap-highlight-color: transparent; transition: transform .1s, background .15s; }
-.mc-btn:active { transform: scale(.92); }
+.mc-btn.pressed { transform: scale(.92); }
 .mc-btn.play { width: 80px; height: 80px; font-size: 32px; background: rgba(34,197,94,.16); border-color: rgba(34,197,94,.55); color: var(--green); }
 .media-vol { width: 100%; max-width: 440px; display: flex; align-items: center; gap: 10px; }
 .mv-ic { font-size: 20px; flex-shrink: 0; }
 .mv-val { font-size: 19px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; min-width: 30px; text-align: center; flex-shrink: 0; }
 .mv-btn { width: 54px; height: 48px; border-radius: 12px; flex-shrink: 0; background: rgba(255,255,255,.06); border: 1px solid var(--border-hi); color: var(--text); font-size: 21px; cursor: pointer; display: flex; align-items: center; justify-content: center; -webkit-tap-highlight-color: transparent; }
-.mv-btn:active { transform: scale(.94); }
+.mv-btn.pressed { transform: scale(.94); }
 .mv-bar { flex: 1; height: 9px; border-radius: 999px; background: var(--border); overflow: hidden; }
 .mv-bar-fill { height: 100%; width: 55%; border-radius: 999px; background: var(--teal); }
 /* steppers −/+ de clima (mais seguros que arrastar em movimento) */
@@ -1221,6 +1221,11 @@
     track.addEventListener('pointerdown',e=>{ dragging=true; last=-1; try{track.setPointerCapture(e.pointerId);}catch(_){} apply(e.clientY); e.preventDefault(); });
     track.addEventListener('pointermove',e=>{ if(dragging) apply(e.clientY); });
     ['pointerup','pointercancel','pointerleave'].forEach(ev=>track.addEventListener(ev,()=>{ dragging=false; }));
+    // Toque no cabeçalho (ícone/nome/valor) → desliga (nível 0). O fader vertical
+    // é difícil de zerar arrastando; isso garante um "desligar" confiável.
+    const off=()=>{ last=0; window.setSeatSlider(side,0); };
+    f.querySelector('.vf-head')?.addEventListener('click', off);
+    f.querySelector('.vf-val')?.addEventListener('click', off);
   }
   bindVFader('d'); bindVFader('p');
 
@@ -1581,6 +1586,21 @@
   // applyMedia real (Fase 3). Mock só no preview/navegador (sem bridge nenhum).
   if(!window.MediaBridge && !window.EcotripCarBridge){ M.volume=14; M.volumeMax=30; loadDemo(); }
   render();
+
+  // Feedback de toque confiável: o WebView do head unit às vezes não solta o
+  // :active (botão fica "afundado" infinito). Controlamos via classe .pressed
+  // com release garantido (pointerup/cancel/leave + timeout de segurança).
+  (function(){
+    var cur=null, t=null;
+    function rel(){ if(cur){ cur.classList.remove('pressed'); cur=null; } clearTimeout(t); t=null; }
+    document.addEventListener('pointerdown', function(e){
+      var b=e.target.closest && e.target.closest('.mc-btn,.mv-btn'); if(!b) return;
+      rel(); cur=b; b.classList.add('pressed'); t=setTimeout(rel, 600);
+    }, true);
+    ['pointerup','pointercancel','pointerleave','lostpointercapture'].forEach(function(ev){
+      document.addEventListener(ev, rel, true);
+    });
+  })();
 })();
 </script>
 </body>
