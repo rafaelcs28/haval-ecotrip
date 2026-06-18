@@ -414,6 +414,10 @@
   /* Vidros + Bancos lado a lado no topo do card Veículo */
   .veic-row { display: grid; grid-template-columns: 1.05fr 1fr; gap: 8px; flex: 1 1 auto; min-height: 0; }
   .seat-col { display: flex; flex-direction: column; gap: 6px; background: var(--panel-lift); border: 1px solid var(--border-hi); border-radius: 14px; padding: 7px 9px; min-height: 0; }
+  .seat-rows { display: flex; flex-direction: column; gap: 8px; }
+  .seat-row { display: flex; align-items: center; gap: 10px; }
+  .seat-name { width: 46px; flex: none; font-size: 13px; font-weight: 700; color: var(--muted); }
+  .seat-seg { flex: 1; }
   .seat-col .seg-h { flex: none; }
   .seat-col .seat-vfaders { flex: 1 1 auto; }
   .seat-col .vfader .vf-track { width: auto; max-width: none; }
@@ -950,19 +954,27 @@
                 <button onclick="setWindows(this,'aberto')">Abrir</button>
               </div>
             </div>
-            <!-- Bancos — faders verticais 0–3 -->
+            <!-- Bancos — ventilação por botões de toque (Off/1/2/3) -->
             <div class="seat-col">
-              <div class="seg-h"><span>💺</span> Bancos</div>
-              <div class="seat-vfaders">
-                <div class="vfader" data-side="d">
-                  <div class="vf-head"><span class="vf-ic">💺</span><span class="vf-name">Mot.</span></div>
-                  <div class="vf-track" title="Arraste para cima para aumentar"><span class="vf-ar">▲</span><div class="vf-segs"><div class="vf-seg"></div><div class="vf-seg"></div><div class="vf-seg"></div></div><span class="vf-ar">▼</span></div>
-                  <div class="vf-val" id="ctrl-seat-d-st">OFF</div>
+              <div class="seg-h"><span>💺</span> Bancos · ventilação</div>
+              <div class="seat-rows">
+                <div class="seat-row">
+                  <span class="seat-name">Mot.</span>
+                  <div class="seg seat-seg" id="seat-seg-d">
+                    <button class="on" onclick="setSeatSlider('d',0)">Off</button>
+                    <button onclick="setSeatSlider('d',1)">1</button>
+                    <button onclick="setSeatSlider('d',2)">2</button>
+                    <button onclick="setSeatSlider('d',3)">3</button>
+                  </div>
                 </div>
-                <div class="vfader" data-side="p">
-                  <div class="vf-head"><span class="vf-ic">💺</span><span class="vf-name">Pass.</span></div>
-                  <div class="vf-track" title="Arraste para cima para aumentar"><span class="vf-ar">▲</span><div class="vf-segs"><div class="vf-seg"></div><div class="vf-seg"></div><div class="vf-seg"></div></div><span class="vf-ar">▼</span></div>
-                  <div class="vf-val" id="ctrl-seat-p-st">OFF</div>
+                <div class="seat-row">
+                  <span class="seat-name">Pass.</span>
+                  <div class="seg seat-seg" id="seat-seg-p">
+                    <button class="on" onclick="setSeatSlider('p',0)">Off</button>
+                    <button onclick="setSeatSlider('p',1)">1</button>
+                    <button onclick="setSeatSlider('p',2)">2</button>
+                    <button onclick="setSeatSlider('p',3)">3</button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -1116,7 +1128,6 @@
   const _cmdT = {};
   function cmdSoon(key, fn, ms){ if(_cmdT[key]) clearTimeout(_cmdT[key]); _cmdT[key]=setTimeout(()=>{ _cmdT[key]=null; try{ fn(); }catch(_){} }, ms||300); }
 
-  const SEAT = ['OFF','I','II','III'];
   const TANK_L = 55;
   const CIRC = 502.65;
   const fmt0 = (n) => Math.round(n).toLocaleString('pt-BR');
@@ -1213,21 +1224,8 @@
     _hb.addEventListener('contextmenu',e=>{ e.preventDefault(); window.openHevPopup(); });
   }
 
-  /* ── Faders verticais dos bancos ── */
-  function bindVFader(side){
-    const f=document.querySelector('.vfader[data-side="'+side+'"]'); if(!f) return;
-    const track=f.querySelector('.vf-track'); let last=-1, dragging=false;
-    const apply=(y)=>{ const r=track.getBoundingClientRect(); let t=(r.bottom-y)/r.height; t=Math.max(0,Math.min(1,t)); const lvl=Math.round(t*3); if(lvl!==last){ last=lvl; window.setSeatSlider(side,lvl); } };
-    track.addEventListener('pointerdown',e=>{ dragging=true; last=-1; try{track.setPointerCapture(e.pointerId);}catch(_){} apply(e.clientY); e.preventDefault(); });
-    track.addEventListener('pointermove',e=>{ if(dragging) apply(e.clientY); });
-    ['pointerup','pointercancel','pointerleave'].forEach(ev=>track.addEventListener(ev,()=>{ dragging=false; }));
-    // Toque no cabeçalho (ícone/nome/valor) → desliga (nível 0). O fader vertical
-    // é difícil de zerar arrastando; isso garante um "desligar" confiável.
-    const off=()=>{ last=0; window.setSeatSlider(side,0); };
-    f.querySelector('.vf-head')?.addEventListener('click', off);
-    f.querySelector('.vf-val')?.addEventListener('click', off);
-  }
-  bindVFader('d'); bindVFader('p');
+  /* Bancos: ventilação por botões de toque (Off/1/2/3) — os onclick chamam
+     setSeatSlider direto; paintSeat marca o botão ativo. */
 
   /* ── Botões do topo (abrem overlays Compose via bridge) ── */
   const _br=(fn)=>{ try{ if(window.EcotripCarBridge && window.EcotripCarBridge[fn]) window.EcotripCarBridge[fn](); }catch(_){} };
@@ -1342,7 +1340,7 @@
       refl('sunroof', ()=>{ if(state.skylight_level!=null){ const lv=+state.skylight_level; const sb=$('ctrl-sunroof'); const vb=$('ctrl-sunroof-vent'); if(lv===200){ if(sb) sb.textContent='Ventilação'; if(vb) vb.classList.add('on'); } else { if(sb) sb.textContent=(lv<=10?'Fechado':lv+'%'); if(vb) vb.classList.remove('on'); const s=$('sld-sunroof'); if(s && lv>=10) s.value=lv; } } });
     } catch(e) { /* nunca deixa o snapshot derrubar a UI */ }
   };
-  function paintSeat(side, v){ v=Math.max(0,Math.min(3,v)); const el=$('ctrl-seat-'+side+'-st'); if(el) el.textContent=SEAT[v]; const f=document.querySelector('.vfader[data-side="'+side+'"]'); if(f){ f.classList.toggle('on',v>0); f.querySelectorAll('.vf-seg').forEach((s,i)=>s.classList.toggle('on',i<v)); } }
+  function paintSeat(side, v){ v=Math.max(0,Math.min(3,v)); const seg=$('seat-seg-'+side); if(seg){ [...seg.children].forEach((b,i)=>b.classList.toggle('on', i===v)); } }
   window._reflMode=(name)=>{ const btns=[...document.querySelectorAll('#seg-mode button')]; btns.forEach(b=>b.classList.remove('on')); const match=btns.find(b=>b.dataset.mode===name); if(match){ match.classList.add('on'); $('mode-sfx').textContent=''; } else { $('mode-sfx').textContent=' · '+name; } [...document.querySelectorAll('#mode-grid button')].forEach(b=>b.classList.toggle('on',b.dataset.mode===name)); };
 
   // Espelho para o Kotlin (igual ao iPad): _nativeBridge.update(payload)
