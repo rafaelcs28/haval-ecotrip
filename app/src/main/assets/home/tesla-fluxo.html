@@ -1,0 +1,398 @@
+<!-- @dsCard group="Cockpit" viewport="1792x660" name="Tesla · Home + Fluxo de energia" subtitle="Layout Tesla + carro raio-x com eixo dianteiro/traseiro independentes (motor diant., motor tras. AWD, térmico) · data-driven CarConstants" -->
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover">
+<title>Tesla · Home + Fluxo</title>
+<style>
+  :root{
+    --lime:#39FF88; --teal:#00E5CC; --green:#28C98A; --blue:#4DBBFF; --orange:#FF5F1F; --yellow:#FFD60A;
+    --text:#EEF4FF; --muted:#8E8E93; --card:#0C1019; --line:#222226;
+    --font:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text","Segoe UI",Roboto,system-ui,sans-serif;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;height:100%;background:#000;font-family:var(--font);color:var(--text);-webkit-font-smoothing:antialiased;}
+  #fit{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#000;overflow:hidden;}
+  .stage{width:1792px;height:660px;position:relative;flex:none;overflow:hidden;transform-origin:center center;
+    background:linear-gradient(180deg,#101012 0%, #000 100%);}
+
+  /* header */
+  .hdr{position:absolute;left:40px;right:40px;top:10px;height:44px;display:flex;align-items:center;gap:16px;}
+  .hdr .ttl{font-size:22px;font-weight:700;letter-spacing:3px;color:var(--muted);}
+  .hdr .sp{flex:1;}
+  .hdr .temp{font-size:24px;font-weight:600;}
+  .hdr .acts{display:flex;align-items:center;gap:10px;}
+  .hdr .ver{font-size:13px;font-weight:700;color:var(--lime);border:1px solid rgba(57,255,136,.4);background:rgba(57,255,136,.08);border-radius:999px;padding:4px 11px;}
+  .hdr .ic{width:38px;height:38px;border-radius:11px;background:#16161a;border:1px solid var(--line);display:flex;align-items:center;justify-content:center;font-size:18px;}
+  .divider{position:absolute;left:40px;right:40px;top:62px;height:1px;background:var(--line);}
+
+  /* banner de navegação */
+  .nav{position:absolute;left:40px;right:40px;top:74px;height:50px;background:#161618;border:1px solid var(--line);
+    border-radius:14px;display:flex;align-items:center;padding:0 20px;gap:16px;}
+  .nav .dest{font-size:20px;font-weight:700;display:flex;align-items:center;gap:10px;}
+  .nav .dest .ar{color:var(--lime);}
+  .nav .sp{flex:1;}
+  .nav .seg{font-size:16px;color:var(--muted);}
+  .nav .seg b{color:var(--text);font-weight:700;}
+  .nav .seg .soc{color:var(--yellow);}
+
+  /* corpo */
+  .body{position:absolute;left:40px;right:40px;top:140px;bottom:14px;display:grid;grid-template-columns:1fr 1.25fr;gap:36px;}
+
+  /* coluna esquerda: carro raio-x + SOC + barra */
+  .left{position:relative;display:flex;flex-direction:column;min-height:0;}
+  .mode-badge{position:absolute;left:50%;top:-4px;transform:translateX(-50%);z-index:6;}
+  .mode-badge .pill{display:inline-flex;align-items:center;gap:8px;padding:6px 16px;border-radius:999px;background:#16161a;border:1px solid var(--line);}
+  .mode-badge .dot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 10px currentColor;}
+  .mode-badge .nm{font-size:15px;font-weight:700;letter-spacing:.03em;}
+
+  .carwrap{flex:1;position:relative;min-height:0;display:flex;align-items:center;justify-content:center;}
+  .carwrap::before{content:'';position:absolute;left:50%;top:48%;transform:translate(-50%,-50%);width:430px;height:430px;border-radius:50%;background:radial-gradient(circle, rgba(20,40,30,.35), transparent 70%);pointer-events:none;}
+  .car{position:relative;width:794px;height:720px;transform:scale(.66);transform-origin:center center;z-index:1;}
+  .car img{position:absolute;inset:0;width:794px;height:720px;
+    opacity:.5;filter:saturate(.2) brightness(1.05) drop-shadow(0 0 6px rgba(120,190,255,.5));
+    pointer-events:none;}
+  .car .xr,.car .parts{position:absolute;inset:0;width:794px;height:720px;}
+  .car .xr{z-index:2;} .car .parts{z-index:3;pointer-events:none;}
+
+  /* ground glow sob o carro */
+  .glow{position:absolute;left:50%;bottom:92px;transform:translateX(-50%);width:420px;height:84px;z-index:1;
+    background:radial-gradient(ellipse at 50% 80%, rgba(40,201,138,.5), rgba(40,201,138,.12) 45%, transparent 70%);pointer-events:none;}
+
+  /* SOC + autonomia + barra (estilo Tesla) */
+  .socline{display:flex;align-items:baseline;gap:12px;margin-top:-18px;}
+  .socline .pct{font-size:44px;font-weight:600;letter-spacing:-1px;font-variant-numeric:tabular-nums;}
+  .socline .au{font-size:22px;color:var(--muted);}
+  .batt{margin-top:12px;height:22px;border-radius:999px;background:#16161a;border:1px solid var(--line);overflow:hidden;}
+  .batt .fill{height:100%;border-radius:999px;background:linear-gradient(90deg,var(--green),var(--lime));transition:width .5s;}
+
+  /* callouts de potência (upright, colados em cada peça) */
+  .callout{position:absolute;z-index:5;background:rgba(8,10,12,.74);border:1px solid var(--line);
+    border-radius:10px;padding:5px 10px;backdrop-filter:blur(6px);opacity:0;transition:opacity .3s;pointer-events:none;white-space:nowrap;}
+  .callout.show{opacity:1;}
+  .callout .v{font-size:26px;font-weight:600;letter-spacing:-.5px;font-variant-numeric:tabular-nums;line-height:1;}
+  .callout .v .u{font-size:13px;color:var(--muted);margin-left:2px;}
+  .callout .k{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-top:2px;}
+  .callout .v.green{color:var(--green);} .callout .v.orange{color:var(--orange);} .callout .v.teal{color:var(--blue);}
+  /* posições no espaço 794×720 do .car (coladas às peças) */
+  #co-term{left:452px;top:96px;} #co-motf{left:452px;top:218px;} #co-motr{left:452px;top:532px;}
+
+  /* coluna direita: viagem atual */
+  .right{display:flex;flex-direction:column;min-height:0;}
+  .right .lbl{font-size:22px;color:var(--muted);letter-spacing:1px;}
+  .right .big{font-size:82px;font-weight:600;letter-spacing:-3px;line-height:1;margin:6px 0 18px;font-variant-numeric:tabular-nums;}
+  .right .big .u{font-size:34px;color:var(--muted);margin-left:8px;letter-spacing:0;}
+  .grid{flex:1;display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:1fr 1fr;gap:14px;min-height:0;}
+  .cell{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px 18px;display:flex;flex-direction:column;justify-content:center;}
+  .cell .cl{font-size:18px;color:var(--muted);}
+  .cell .cv{font-size:38px;font-weight:600;margin-top:7px;font-variant-numeric:tabular-nums;letter-spacing:-1px;}
+  .cell .cv .u{font-size:17px;color:var(--muted);margin-left:4px;letter-spacing:0;}
+  .cell .cs{font-size:17px;margin-top:5px;color:var(--muted);}
+  .cv.green{color:var(--green);} .cv.orange{color:var(--orange);}
+  .cs.blue{color:var(--blue);} .cs.green{color:var(--green);} .cs.orange{color:var(--orange);}
+
+  /* SVG raio-x */
+  .pack{fill:rgba(40,201,138,.06);stroke:rgba(40,201,138,.45);stroke-width:2;transition:fill .4s;}
+  .pack-fill{fill:var(--green);opacity:0;transition:opacity .4s;}
+  .pack.on{fill:rgba(40,201,138,.07);} .pack-fill.on{opacity:.2;}
+  .comp{fill:rgba(255,255,255,.04);stroke:rgba(255,255,255,.2);stroke-width:2;transition:all .35s;}
+  .comp.green{fill:rgba(40,201,138,.1);stroke:var(--green);filter:drop-shadow(0 0 4px rgba(40,201,138,.4));}
+  .comp.orange{fill:rgba(255,95,31,.1);stroke:var(--orange);filter:drop-shadow(0 0 4px rgba(255,95,31,.4));}
+  .comp.teal{fill:rgba(77,187,255,.1);stroke:var(--blue);filter:drop-shadow(0 0 4px rgba(77,187,255,.4));}
+  .wheel{fill:none;stroke:rgba(255,255,255,.14);stroke-width:4;transition:all .35s;}
+  .wheel.on{stroke:var(--green);filter:drop-shadow(0 0 6px rgba(40,201,138,.55));}
+  .wheel.on.orange{stroke:var(--orange);filter:drop-shadow(0 0 6px rgba(255,95,31,.55));}
+  .wheel.on.teal{stroke:var(--blue);filter:drop-shadow(0 0 6px rgba(77,187,255,.55));}
+  .flowline{fill:none;stroke:rgba(255,255,255,.05);stroke-width:3;stroke-linecap:round;transition:stroke .35s;}
+  .flowline.on{stroke-width:4;filter:drop-shadow(0 0 6px currentColor);}
+  .particle{position:absolute;left:0;top:0;width:10px;height:10px;border-radius:50%;background:#fff;
+    offset-rotate:0deg;will-change:offset-distance;box-shadow:0 0 8px 1px currentColor,0 0 2px #fff inset;animation:flow linear infinite;}
+  @keyframes flow{from{offset-distance:0%}to{offset-distance:100%}}
+
+  /* seletor de revisão (REMOVER no app Compose) */
+  .modes{position:absolute;left:50%;bottom:4px;transform:translateX(-50%);z-index:8;display:flex;gap:6px;flex-wrap:wrap;justify-content:center;max-width:90%;
+    background:rgba(0,0,0,.5);border:1px solid var(--line);border-radius:16px;padding:5px;}
+  .modes button{font-family:inherit;font-size:12px;font-weight:700;color:var(--muted);background:transparent;border:1px solid transparent;border-radius:999px;padding:5px 11px;cursor:pointer;}
+  .modes button.on{background:rgba(40,201,138,.16);color:var(--green);border-color:rgba(40,201,138,.4);}
+
+  @media (prefers-reduced-motion: reduce){ .particle{animation:none;opacity:.9;} }
+</style>
+</head>
+<body>
+<div id="fit">
+  <div class="stage" id="stage">
+
+    <div class="hdr">
+      <span class="ttl">HAVAL H6 PHEV</span><span class="sp"></span>
+      <span class="temp" id="h-temp">—</span>
+      <div class="acts">
+        <span class="ver" id="h-ver" style="display:none"></span>
+        <span class="ic" id="h-recargas">🔋</span><span class="ic" id="h-viagens">🚗</span><span class="ic" id="h-config">⚙️</span>
+      </div>
+    </div>
+    <div class="divider"></div>
+
+    <div class="nav" id="nav" style="visibility:hidden">
+      <div class="dest"><span class="ar">➜</span> <span id="n-dest">—</span></div><div class="sp"></div>
+      <div class="seg">Chegada <b id="n-eta">—</b></div>
+      <div class="seg">Faltam <b id="n-dist">—</b></div>
+      <div class="seg">SOC <b class="soc" id="n-soc">—</b></div>
+    </div>
+
+    <div class="body">
+
+      <!-- ESQUERDA: carro raio-x animado (eixo dianteiro + traseiro) -->
+      <div class="left">
+        <div class="mode-badge"><div class="pill"><span class="dot" id="b-dot"></span><span class="nm" id="b-nm">—</span></div></div>
+        <div class="carwrap">
+          <div class="glow" id="glow"></div>
+          <div class="car" id="car">
+            <img src="assets/haval-h6.png" alt="Haval H6">
+            <svg class="xr" viewBox="0 0 794 720">
+              <!-- pack de bateria (assoalho) -->
+              <rect class="pack" id="pack" x="305" y="312" width="184" height="148" rx="16"/>
+              <clipPath id="packclip"><rect x="305" y="312" width="184" height="148" rx="16"/></clipPath>
+              <rect class="pack-fill" id="pack-fill" x="305" y="312" width="184" height="148" clip-path="url(#packclip)"/>
+              <!-- motor térmico (frente) -->
+              <rect class="comp" id="c-term" x="355" y="108" width="84" height="58" rx="12"/>
+              <!-- motor elétrico dianteiro (eixo diant.) -->
+              <circle class="comp" id="c-motf" cx="397" cy="246" r="32"/>
+              <!-- motor elétrico traseiro (eixo tras. · AWD) -->
+              <circle class="comp" id="c-motr" cx="397" cy="556" r="32"/>
+              <!-- rodas (coladas ao corpo) -->
+              <rect class="wheel" id="w-fl" x="200" y="198" width="40" height="72" rx="13"/>
+              <rect class="wheel" id="w-fr" x="554" y="198" width="40" height="72" rx="13"/>
+              <rect class="wheel" id="w-rl" x="200" y="500" width="40" height="72" rx="13"/>
+              <rect class="wheel" id="w-rr" x="554" y="500" width="40" height="72" rx="13"/>
+              <!-- linhas de fluxo -->
+              <path class="flowline" id="f-termBat" d="M397,166 C 446,210 446,266 397,312"></path>
+              <path class="flowline" id="f-batMotf" d="M397,312 L397,278"></path>
+              <path class="flowline" id="f-motfFL" d="M372,246 C 322,238 252,233 222,232"></path>
+              <path class="flowline" id="f-motfFR" d="M422,246 C 472,238 542,233 572,232"></path>
+              <path class="flowline" id="f-batMotr" d="M397,460 L397,524"></path>
+              <path class="flowline" id="f-motrRL" d="M372,556 C 322,552 252,545 222,538"></path>
+              <path class="flowline" id="f-motrRR" d="M422,556 C 472,552 542,545 572,538"></path>
+            </svg>
+            <div class="parts" id="parts"></div>
+            <div class="callout" id="co-term"><div class="v orange" id="co-term-v">0<span class="u">kW</span></div><div class="k">Térmico</div></div>
+            <div class="callout" id="co-motf"><div class="v green" id="co-motf-v">0<span class="u">kW</span></div><div class="k">Motor diant.</div></div>
+            <div class="callout" id="co-motr"><div class="v green" id="co-motr-v">0<span class="u">kW</span></div><div class="k">Motor tras.</div></div>
+          </div>
+        </div>
+        <div class="socline"><span class="pct" id="soc-pct">62%</span><span class="au">· <b id="au-km">95 km</b> autonomia EV</span></div>
+        <div class="batt"><div class="fill" id="batt-fill" style="width:62%"></div></div>
+      </div>
+
+      <!-- DIREITA: viagem atual -->
+      <div class="right">
+        <div class="lbl">VIAGEM ATUAL</div>
+        <div class="big"><span id="t-dist">—</span><span class="u">km</span></div>
+        <div class="grid">
+          <div class="cell"><div class="cl">Tempo</div><div class="cv" id="t-time">—</div></div>
+          <div class="cell"><div class="cl">Vel. média</div><div class="cv"><span id="t-avg">—</span><span class="u">km/h</span></div></div>
+          <div class="cell"><div class="cl">Consumo</div><div class="cv green"><span id="t-cons">—</span><span class="u">kWh/100</span></div></div>
+          <div class="cell"><div class="cl">Energia usada</div><div class="cv"><span id="t-kwh">—</span><span class="u">kWh</span></div><div class="cs blue" id="t-regen">—</div></div>
+          <div class="cell"><div class="cl">Custo</div><div class="cv" id="t-cost">—</div><div class="cs green" id="t-costkm">—</div></div>
+          <div class="cell"><div class="cl">Combustível</div><div class="cv orange" id="t-fuel">—</div><div class="cs orange" id="t-soc">—</div></div>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="modes" id="modes"></div>
+
+  </div>
+</div>
+
+<script>
+/* ═══════════════════════════════════════════════════════════════════════════
+   CARRO RAIO-X · FLUXO DE ENERGIA (eixo dianteiro + traseiro independentes)
+   ARQUITETURA (Hi4/DHT): o motor TÉRMICO liga-se só ao EIXO DIANTEIRO (via DHT)
+   e/ou carrega a bateria; o EIXO TRASEIRO é um motor elétrico independente (P4),
+   SEM ligação mecânica com o térmico → traseira nunca é "laranja" (térmico),
+   apenas verde (tração elétrica) ou azul (regeneração).
+   Mapeamento p/ as chaves reais (CarConstants.java):
+     SOC ........... car.ev_info.soc_of_battery  (ou cur_battery_power_percentage)
+     autonomia EV .. car.ev_info.electric_mode_remain_odometer
+     térmico ON .... car.basic.engine_state ( + car.basic.engine_speed )
+     térmico kW .... (derivar de instant_fuel_consumption/engine_speed; ou usar
+                      car.ev_info.hcu_power_train_state p/ saber a fonte)
+     motor diant ... car.ev_info.motor_power  ( >0 tração · <0 regen ),
+                     rotação: car.ev_info.motor_speed
+     motor tras .... AWD: car.ev_info.rear_motor_speed ( + potência se exposta )
+     estado fluxo .. car.ev_info.energy_drive_state  (tração) /
+                     car.ev_info.energy_recovery_info (regen) /
+                     car.ev_info.hcu_power_train_state (EV / série / paralelo)
+     saída% ........ car.ev_info.energy_output_percentage
+     recarga ....... car.ev_info.charging_state /
+                     car.ev_info.charging_gun_conn_state / ..._ac_conn_state
+
+   PRODUÇÃO: chame  window.applyFlow(state)  com OBJETO (recomendado):
+     {
+       soc:0..100, socKm:Number,
+       engineKw:Number,            // >0 = térmico ligado
+       frontKw:Number,             // motor diant.: >0 tração · <0 regen · 0 ocioso
+       rearKw:Number,              // motor tras. : idem (0/undefined = sem AWD ativo)
+       seriesMode:Boolean,         // térmico carregando bateria (não tração direta)
+       charging:'none'|'ac'|'dc'   // recarga externa
+     }
+   As cores/sentidos saem dos sinais: regen→azul (volta p/ bateria), tração
+   elétrica→verde, tração com térmico (paralelo)→laranja. O <div class="modes">
+   é só p/ revisão — remover no app. ═══════════════════════════════════════════ */
+(function(){
+  var $=function(id){return document.getElementById(id);};
+  var PATHS={
+    termBat:'M397,166 C 446,210 446,266 397,312',
+    batMotf:'M397,312 L397,278',
+    motfFL:'M372,246 C 322,238 252,233 222,232',
+    motfFR:'M422,246 C 472,238 542,233 572,232',
+    batMotr:'M397,460 L397,524',
+    motrRL:'M372,556 C 322,552 252,545 222,538',
+    motrRR:'M422,556 C 472,552 542,545 572,538'
+  };
+  var C={green:'#28C98A',orange:'#FF5F1F',teal:'#4DBBFF'};
+  var parts=$('parts');
+
+  function fmtKw(v){ return (v>0?'+':'')+Math.round(v); }
+
+  function setLink(key,cfg){
+    var el=$('f-'+key);
+    if(!cfg){ if(el){el.classList.remove('on');el.style.stroke='';} return; }
+    if(el){ el.classList.add('on'); el.style.stroke=cfg.c; el.style.color=cfg.c; }
+    var n=cfg.n||5, dur=cfg.dur||2.2;
+    for(var i=0;i<n;i++){
+      var p=document.createElement('div');p.className='particle';
+      p.style.color=cfg.c;p.style.background=cfg.c;
+      p.style.offsetPath="path('"+PATHS[key]+"')";p.style.webkitOffsetPath="path('"+PATHS[key]+"')";
+      p.style.animationDuration=dur+'s';p.style.animationDelay=(-(dur)*i/n)+'s';
+      p.style.animationDirection=(cfg.d<0)?'reverse':'normal';
+      parts.appendChild(p);
+    }
+  }
+
+  // ── Renderizador genérico orientado a dados ──
+  function render(s){
+    var engineOn = (s.engineKw||0) > 0;
+    var front = s.frontKw||0, rear = s.rearKw||0;
+    var charging = s.charging && s.charging!=='none';
+    var series = !!s.seriesMode;
+
+    // badge
+    var nm = s.name || (charging ? 'Recarga externa'
+      : engineOn ? (series ? 'Série' : 'Paralelo')
+      : (front<0||rear<0) ? 'Regeneração'
+      : (front>0||rear>0) ? 'EV'+((rear>0&&front>0)?' AWD':'') : 'Parado');
+    $('b-nm').textContent = nm;
+    var bd = series||(engineOn&&!series) ? C.orange : ((front<0||rear<0)?C.teal:C.green);
+    if(nm==='Parado') bd='#8E8E93';
+    $('b-dot').style.background=bd; $('b-dot').style.color=bd;
+
+    // SOC / bateria
+    if(typeof s.soc==='number'){ $('soc-pct').textContent=s.soc+'%'; $('batt-fill').style.width=s.soc+'%'; }
+    if(s.socKm!=null) $('au-km').textContent=s.socKm+' km';
+    var packOn = true; $('pack').classList.toggle('on',packOn); $('pack-fill').classList.toggle('on',packOn);
+    if(typeof s.soc==='number'){ var pf=$('pack-fill'), h=148*(s.soc/100); pf.setAttribute('y',312+(148-h)); pf.setAttribute('height',h); }
+
+    // componentes (acendem conforme uso). NOTA: o eixo TRASEIRO é elétrico puro
+    // (motor P4, sem ligação mecânica com o térmico) → nunca laranja.
+    $('c-term').setAttribute('class','comp '+(engineOn?'orange':''));
+    var fCls = front>0 ? (engineOn&&!series?'orange':'green') : (front<0?'teal':'');
+    var rCls = rear>0 ? 'green' : (rear<0?'teal':'');
+    $('c-motf').setAttribute('class','comp '+fCls);
+    $('c-motr').setAttribute('class','comp '+rCls);
+
+    // callouts
+    function callout(id,on,val,cls){ var c=$(id); c.classList.toggle('show',on); var v=$(id+'-v'); v.innerHTML=val+'<span class="u">kW</span>'; v.className='v '+cls; }
+    callout('co-term', engineOn, fmtKw(s.engineKw||0), 'orange');
+    callout('co-motf', front!==0, fmtKw(front), front<0?'teal':(fCls||'green'));
+    callout('co-motr', rear!==0,  fmtKw(rear),  rear<0?'teal':'green');
+
+    // rodas. Dianteiras podem ser laranja (térmico direto); traseiras nunca
+    // (eixo elétrico puro) → só verde (tração) ou azul (regen).
+    function wheel(id,kw,allowOrange){ var cls='wheel'; if(kw>0) cls+=' on'+(allowOrange&&engineOn&&!series?' orange':''); else if(kw<0) cls+=' on teal'; $(id).setAttribute('class',cls); }
+    wheel('w-fl',front,true); wheel('w-fr',front,true); wheel('w-rl',rear,false); wheel('w-rr',rear,false);
+
+    // glow
+    var gC = (front<0||rear<0)?C.teal : (engineOn&&!series?C.orange:C.green);
+    $('glow').style.background='radial-gradient(ellipse at 50% 80%, '+hexA(gC,.5)+', '+hexA(gC,.12)+' 45%, transparent 70%)';
+
+    // fluxos
+    parts.innerHTML='';
+    var L={};
+    // térmico → bateria (série/carga)
+    if(engineOn && (series || (front===0&&rear===0))) L.termBat={c:C.orange,d:1};
+    // dianteiro
+    if(front>0){ var fc=(engineOn&&!series)?C.orange:C.green; L.batMotf={c:fc,d:1}; L.motfFL={c:fc,d:1}; L.motfFR={c:fc,d:1}; }
+    else if(front<0){ L.motfFL={c:C.teal,d:-1}; L.motfFR={c:C.teal,d:-1}; L.batMotf={c:C.teal,d:-1}; }
+    // traseiro — SEMPRE elétrico (verde tração / azul regen), nunca térmico
+    if(rear>0){ L.batMotr={c:C.green,d:1}; L.motrRL={c:C.green,d:1}; L.motrRR={c:C.green,d:1}; }
+    else if(rear<0){ L.motrRL={c:C.teal,d:-1}; L.motrRR={c:C.teal,d:-1}; L.batMotr={c:C.teal,d:-1}; }
+    // recarga externa → entra pela bateria (reusa termBat como “entrada”)
+    if(charging){ L.termBat={c:C.green,d:-1}; }
+    Object.keys(PATHS).forEach(function(k){ setLink(k, L[k]); });
+  }
+  function hexA(hex,a){ var n=parseInt(hex.slice(1),16); return 'rgba('+((n>>16)&255)+','+((n>>8)&255)+','+(n&255)+','+a+')'; }
+
+  // demos (objetos) — cada um exercita um estado dos eixos
+  var DEMO={
+    ev_fwd:   {name:'EV (dianteira)', soc:62, socKm:95, engineKw:0, frontKw:58, rearKw:0},
+    ev_awd:   {name:'EV AWD',         soc:60, socKm:92, engineKw:0, frontKw:42, rearKw:30},
+    serie:    {name:'Série',          soc:48, socKm:70, engineKw:40, frontKw:36, rearKw:0, seriesMode:true},
+    paralelo: {name:'Paralelo',       soc:46, socKm:66, engineKw:55, frontKw:20, rearKw:0},
+    par_awd:  {name:'Paralelo AWD',   soc:44, socKm:62, engineKw:60, frontKw:24, rearKw:22},
+    regen_f:  {name:'Regen dianteira',soc:64, socKm:98, engineKw:0, frontKw:-22, rearKw:0},
+    regen_awd:{name:'Regen AWD',      soc:66, socKm:101,engineKw:0, frontKw:-18, rearKw:-14},
+    carga:    {name:'Carga parada',   soc:40, socKm:58, engineKw:22, frontKw:0, rearKw:0, seriesMode:true},
+    plugin:   {name:'Recarga externa',soc:45, socKm:64, engineKw:0, frontKw:0, rearKw:0, charging:'ac'}
+  };
+
+  window.applyFlow=function(state){
+    if(typeof state==='string') state=DEMO[state]||DEMO.ev_fwd;
+    render(state||DEMO.ev_fwd);
+  };
+
+  // ── Header / navegação / grade de viagem (dados reais, empurrados pelo app) ──
+  function setTxt(id,v){ var e=$(id); if(e && v!=null) e.textContent=v; }
+  window.applyHome=function(d){
+    if(!d) return;
+    if(d.temp!=null) setTxt('h-temp', d.temp+'°');
+    if(d.version){ var ver=$('h-ver'); if(ver){ ver.textContent=d.version; ver.style.display=''; } }
+    // navegação: mostra só com rota ativa
+    var nav=$('nav');
+    if(d.navActive){ if(nav) nav.style.visibility='visible';
+      setTxt('n-dest', d.navName); setTxt('n-eta', d.navEta); setTxt('n-dist', d.navDist); setTxt('n-soc', d.navSoc);
+      var ns=$('n-soc'); if(ns && d.navSocColor) ns.style.color=d.navSocColor;
+    } else if(nav){ nav.style.visibility='hidden'; }
+    // viagem atual
+    setTxt('t-dist', d.dist); setTxt('t-time', d.time); setTxt('t-avg', d.avg); setTxt('t-cons', d.cons);
+    setTxt('t-kwh', d.kwh); setTxt('t-regen', d.regen); setTxt('t-cost', d.cost); setTxt('t-costkm', d.costkm);
+    setTxt('t-fuel', d.fuel); setTxt('t-soc', d.soc);
+  };
+
+  // ── Ícones do header → abrem overlays Compose via bridge ──
+  var _br=function(fn){ try{ if(window.EcotripCarBridge && window.EcotripCarBridge[fn]) window.EcotripCarBridge[fn](); }catch(_){} };
+  var hr=$('h-recargas'); if(hr) hr.onclick=function(){ _br('openRecargas'); };
+  var hv=$('h-viagens');  if(hv) hv.onclick=function(){ _br('openViagens'); };
+  var hc=$('h-config');   if(hc) hc.onclick=function(){ _br('openSettings'); };
+
+  // ── Inicialização ──
+  if(window.EcotripCarBridge){
+    // No carro: estado neutro até o 1º feed; sem seletor de modos.
+    var md=$('modes'); if(md) md.style.display='none';
+    window.applyFlow({soc:0, socKm:0, engineKw:0, frontKw:0, rearKw:0});
+  } else {
+    // Preview no navegador: seletor de modos pra revisão.
+    var order=[['ev_fwd','EV'],['ev_awd','EV AWD'],['serie','Série'],['paralelo','Paralelo'],['par_awd','Par. AWD'],['regen_f','Regen D'],['regen_awd','Regen AWD'],['carga','Carga'],['plugin','Recarga']];
+    var mc=$('modes');
+    order.forEach(function(o){ var b=document.createElement('button');b.textContent=o[1];
+      b.onclick=function(){[].forEach.call(mc.children,function(x){x.classList.remove('on');});b.classList.add('on');window.applyFlow(o[0]);};
+      mc.appendChild(b); });
+    mc.children[1].classList.add('on'); window.applyFlow('ev_awd');
+  }
+
+  (function(){var st=$('stage');function fit(){var s=Math.min(window.innerWidth/1792,window.innerHeight/660);st.style.transform='scale('+s+')';}window.addEventListener('resize',fit);fit();})();
+})();
+</script>
+</body>
+</html>

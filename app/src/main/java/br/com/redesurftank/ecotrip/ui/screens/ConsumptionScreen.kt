@@ -570,9 +570,20 @@ fun ConsumptionScreen() {
         // Tela favorita (sempre desenhada por trás). A Controles é um overlay
         // (WebView fora do Compose) mostrado quando controlesOpen=true.
         when (homeLayout) {
-            0 -> HomeTeslaLayout(hd, actions = navActions) { m -> InteractiveCar(hd, m) }
+            0 -> { /* layout Tesla = Web("home/tesla-fluxo.html") via HomeTeslaWebLayout abaixo */ }
             1 -> HomeEuropeanLayout(hd, actions = navActions)
             else -> HomeClaudeLayout(hd, actions = navActions) { m -> InteractiveCar(hd, m) }
+        }
+        // WebView fica acima do ComposeView → esconde o home Tesla quando há
+        // overlay Compose aberto (Settings/Recargas/Viagens/Log), senão ficaria atrás.
+        val anyOverlay = showSettings || showChargeHistory || showAutoTrips || showLog
+        if (homeLayout == 0 && !controlesOpen && !anyOverlay) {
+            HomeTeslaWebLayout(
+                hd,
+                onOpenSettings = { showSettings = true },
+                onOpenRecargas = { showChargeHistory = true },
+                onOpenViagens = { showAutoTrips = true },
+            )
         }
         if (controlesOpen) {
             ControlesLayout(

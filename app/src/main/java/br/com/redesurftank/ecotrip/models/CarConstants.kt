@@ -41,6 +41,13 @@ enum class CarConstants(val value: String) {
     // Motor elétrico — potência direta do HCU (kW, sinal positivo = consumo, negativo = regen)
     CAR_EV_INFO_MOTOR_POWER("car.ev_info.motor_power"),
 
+    // Powertrain (tela Tesla raio-x). Semântica dos inteiros A CONFIRMAR no veículo.
+    CAR_BASIC_ENGINE_STATE("car.basic.engine_state"),
+    CAR_EV_INFO_MOTOR_SPEED("car.ev_info.motor_speed"),
+    CAR_EV_INFO_REAR_MOTOR_SPEED("car.ev_info.rear_motor_speed"),
+    CAR_EV_INFO_HCU_POWER_TRAIN_STATE("car.ev_info.hcu_power_train_state"),
+    CAR_EV_INFO_ENERGY_DRIVE_STATE("car.ev_info.energy_drive_state"),
+
     // Charging state — 0=Desconectado, 1=Carregando, 2=Programado, 3=Finalizado, 5=Aguardando liberação
     CAR_EV_INFO_CHARGING_STATE("car.ev_info.charging_state"),
 

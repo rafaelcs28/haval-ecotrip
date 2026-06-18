@@ -112,6 +112,7 @@ class MainActivity : ComponentActivity() {
                 android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
             ),
         )
+        br.com.redesurftank.ecotrip.ui.screens.HomeTeslaWebHost.attach(root)
         br.com.redesurftank.ecotrip.ui.screens.ControlesWebHost.attach(root)
         setContentView(root)
 
