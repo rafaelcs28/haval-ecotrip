@@ -150,18 +150,10 @@ private fun buildTeslaHomeJson(hd: HomeData): String {
 // traseira; só rear_motor_speed). Calibrar com o log TeslaFlow. Placeholder.
 private const val REAR_KW_PER_RPM = 0.008
 
-// e_axle: 1 = carro tem eixo traseiro elétrico (AWD). No H6 FWD vem 0 → eixo
-// traseiro nunca acende (e o rear_motor_speed vem fixo/garbage = 799). Lido 1x.
-private var _eAxle: Int? = null
-private fun hasRearAxle(): Boolean {
-    if (_eAxle == null) {
-        _eAxle = try {
-            CarDataManager.getInstance()
-                .fetchCurrent(CarConstants.CAR_CONFIGURE_E_AXLE.value)?.trim()?.toFloatOrNull()?.toInt()
-        } catch (_: Exception) { null }
-    }
-    return _eAxle == 1
-}
+// Carro é AWD com traseiro elétrico (P4), mas e_axle vem 0 (não confiável) e o
+// rear_motor_speed repousa em ~799 quando o eixo está desacoplado. Considera
+// "engatado" só acima desse repouso (REAR_RPM_IDLE) — aí deriva tração/regen.
+private const val REAR_RPM_IDLE = 1200.0
 
 // Lê rear_motor_speed (rotação do eixo traseiro). Cacheia pra não bloquear cada tick.
 private fun readRearMotorSpeed(): Double {
@@ -220,15 +212,13 @@ private fun buildTeslaFlowJson(): String {
     val series = engineOn && kotlin.math.abs(frontKw) < 2.0
     val charging = if (chargingState == 1) "ac" else "none"
 
-    // Eixo traseiro: só em carro AWD (e_axle==1). No H6 FWD não existe → 0 sempre
-    // (o rear_motor_speed vem fixo/garbage). Em AWD: deriva da rotação + sinal do
-    // dianteiro (regen quando frontKw<0); magnitude estimada — calibrar com log.
-    val rearKw = if (!moving || !hasRearAxle()) 0.0 else {
-        val rearSpeed = readRearMotorSpeed()
-        if (kotlin.math.abs(rearSpeed) <= 100.0) 0.0 else {
-            val mag = (kotlin.math.abs(rearSpeed) * REAR_KW_PER_RPM).coerceIn(1.0, 130.0)
-            if (frontKw < -0.5) -mag else mag
-        }
+    // Eixo traseiro elétrico (AWD sob demanda): acende só quando a rotação sobe
+    // acima do repouso (~799). Direção pelo sinal do dianteiro (regen se frontKw<0).
+    // Magnitude estimada por REAR_KW_PER_RPM — calibrar com o log.
+    val rearSpeed = readRearMotorSpeed()
+    val rearKw = if (!moving || rearSpeed <= REAR_RPM_IDLE) 0.0 else {
+        val mag = (rearSpeed * REAR_KW_PER_RPM).coerceIn(1.0, 130.0)
+        if (frontKw < -0.5) -mag else mag
     }
     diagPowertrain(rawFront, speed)
     return JSONObject()
