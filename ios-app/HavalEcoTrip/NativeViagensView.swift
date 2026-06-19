@@ -189,6 +189,7 @@ struct NativeViagensView: View {
     @State private var showMilestones = false
     @State private var showTemp = false
     @State private var showByMode = false
+    @State private var showSavings = false
 
     private var fromDate: Binding<Date> { Binding(get: { fromTS > 0 ? Date(timeIntervalSince1970: fromTS) : Date() }, set: { fromTS = $0.timeIntervalSince1970 }) }
     private var toDate: Binding<Date> { Binding(get: { toTS > 0 ? Date(timeIntervalSince1970: toTS) : Date() }, set: { toTS = $0.timeIntervalSince1970 }) }
@@ -254,6 +255,7 @@ struct NativeViagensView: View {
         .sheet(isPresented: $showMilestones) { MilestonesSheet(odometerKm: car.num("odometer_km"), trips: loader.trips) }
         .sheet(isPresented: $showTemp) { TempConsumptionSheet(trips: loader.trips) }
         .sheet(isPresented: $showByMode) { ModeEconomySheet() }
+        .sheet(isPresented: $showSavings) { SavingsSheet() }
     }
 
     private var statsGrid: some View {
@@ -273,6 +275,7 @@ struct NativeViagensView: View {
                 gridTile(icon: "trophy.fill", title: "Marcos", color: DS.yellow) { showMilestones = true }
                 gridTile(icon: "thermometer.medium", title: "Consumo × temp", color: DS.blue) { showTemp = true }
                 gridTile(icon: "slider.horizontal.3", title: "Por modo", color: DS.green) { showByMode = true }
+                gridTile(icon: "leaf.fill", title: "Economia total", color: DS.green) { showSavings = true }
             }
         }
     }
@@ -372,7 +375,7 @@ struct NativeViagensView: View {
                     Text(Self.df.string(from: t.date)).font(.caption).foregroundStyle(DS.muted).frame(maxWidth: .infinity, alignment: .leading)
                     HStack {
                         DSMetric(value: km(t.distKm), unit: "km", label: "Distância", color: DS.teal)
-                        DSMetric(value: f1(t.netKwh), unit: "kWh", label: "Energia", color: DS.green)
+                        DSMetric(value: f1(abs(t.netKwh)), unit: "kWh", label: t.netKwh < -0.01 ? "Recuperado" : "Energia", color: DS.green)
                         DSMetric(value: cost > 0 ? brl(cost) : "—", label: "Custo")
                     }
                 }
@@ -552,6 +555,10 @@ struct RouteMapSheet: View {
     @State private var idx: Double = 0
     @State private var cam: MapCameraPosition = .automatic
     @State private var follow = true   // mapa segue a posição da linha do tempo
+    @State private var playing = false
+    @State private var speed = 1        // 1×/2×/4× (replay completo em ~20s/velocidade)
+    private let replaySeconds = 20.0
+    private let playTimer = Timer.publish(every: 0.05, on: .main, in: .common).autoconnect()
     // Calculado 1× após load(). Antes era computeDriving() dentro do body → varria
     // todos os samples a cada frame do slider de timeline.
     @State private var driving: (avg: Double, max: Double, pwr: Double, regenPct: Double, regenKwh: Double) = (0, 0, 0, 0, 0)
@@ -633,7 +640,18 @@ struct RouteMapSheet: View {
                                     TripSparkline(title: "Altitude", unit: "m", values: samples.map { $0.alt },
                                                   color: DS.green, progress: prog, signed: false, fmt: f0)
                                 }
-                                Slider(value: $idx, in: 0...Double(samples.count - 1), step: 1).tint(DS.green)
+                                HStack(spacing: 12) {
+                                    Button { togglePlay() } label: {
+                                        Image(systemName: playing ? "pause.fill" : "play.fill")
+                                            .font(.system(size: 15, weight: .bold)).foregroundStyle(.black)
+                                            .frame(width: 38, height: 38).background(DS.green).clipShape(Circle())
+                                    }.buttonStyle(.plain)
+                                    Slider(value: $idx, in: 0...Double(samples.count - 1), step: 1).tint(DS.green)
+                                    Button { speed = speed == 1 ? 2 : (speed == 2 ? 4 : 1) } label: {
+                                        Text("\(speed)×").font(.system(size: 14, weight: .bold)).foregroundStyle(DS.green)
+                                            .frame(width: 40, height: 38).background(DS.panel2).clipShape(RoundedRectangle(cornerRadius: 10))
+                                    }.buttonStyle(.plain)
+                                }
                                 HStack {
                                     Text("Início").font(.caption2).foregroundStyle(DS.muted)
                                     Spacer()
@@ -662,6 +680,19 @@ struct RouteMapSheet: View {
             }
         }
         .task { await load() }
+        .onReceive(playTimer) { _ in
+            guard playing, samples.count > 1 else { return }
+            // Trajeto inteiro reproduz em ~replaySeconds/velocidade; tick de 0.05s.
+            let step = Double(samples.count - 1) / replaySeconds * Double(speed) * 0.05
+            let next = idx + step
+            if next >= Double(samples.count - 1) { idx = Double(samples.count - 1); playing = false }
+            else { idx = next }
+        }
+    }
+
+    private func togglePlay() {
+        if !playing, idx >= Double(samples.count - 1) { idx = 0 }   // reinicia se no fim
+        playing.toggle()
     }
 
     // Cartão compartilhável: mapa do trajeto INTEIRO (mapRect = limites da rota +

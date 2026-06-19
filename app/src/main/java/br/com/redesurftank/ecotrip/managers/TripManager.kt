@@ -44,7 +44,7 @@ data class TripSnapshot(
     val kmPerL: Float get() = if (fuelL > 0.001f) distKm / fuelL else 0f
     val kwhPer100km: Float get() = if (distKm > 0.1f) (netKwh / distKm) * 100f else 0f
     val avgSpeedKmh: Float get() = if (timeSec > 0L) distKm / (timeSec / 3600f) else 0f
-    val costBrl: Float get() = fuelL * priceGasolinePerL + netKwh.coerceAtLeast(0f) * priceEnergyPerKwh
+    val costBrl: Float get() = fuelL * priceGasolinePerL + netKwh * priceEnergyPerKwh
     val costPerKm: Float get() = if (distKm > 0.1f && costBrl > 0f) costBrl / distKm else 0f
     // km/L equivalente ECONÔMICO: converte kWh em "litros de gasolina equivalentes"
     // pela razão de custo (R$/kWh ÷ R$/L). Reflete a economia real do PHEV vs
@@ -100,7 +100,7 @@ data class RollingSnapshot(
     val netKwh: Float get() = energyKwh - regenKwh
     val netKwhPer100km: Float get() = if (windowKm > 0.1f) (netKwh / windowKm) * 100f else 0f
     val kmPerL: Float get() = if (fuelL > 0.001f) windowKm / fuelL else 0f
-    val costBrl: Float get() = fuelL * priceGasolinePerL + netKwh.coerceAtLeast(0f) * priceEnergyPerKwh
+    val costBrl: Float get() = fuelL * priceGasolinePerL + netKwh * priceEnergyPerKwh
     val costPerKm: Float get() = if (windowKm > 0.1f && costBrl > 0f) costBrl / windowKm else 0f
     // km/L equivalente ECONÔMICO: ver TripManager.combinedKmL pro mesmo princípio.
     val combinedKmL: Float get() {
@@ -844,7 +844,7 @@ class TripManager private constructor() {
             timeSec      = (lifeTimeSec - autoTripStartTime  ).coerceAtLeast(0L),
             energyKwh    = energy,
             regenKwh     = regen,
-            netKwh       = (energy - regen).coerceAtLeast(0f),
+            netKwh       = energy - regen,   // negativo = ganho líquido (recarga térmica/regen)
             fuelL        = (lifeFuelL   - autoTripStartFuelL ).coerceAtLeast(0f),
             maxSpeedKmh  = autoTripMaxSpeed,
             maxPowerPct  = autoTripMaxPowerPct,
@@ -1545,7 +1545,9 @@ class TripManager private constructor() {
             timeSec      = (lifeTimeSec   - autoTripStartTime  ).coerceAtLeast(0L),
             energyKwh    = (lifeEnergyKwh - autoTripStartEnergy).coerceAtLeast(0f),
             regenKwh     = (lifeRegenKwh  - autoTripStartRegen ).coerceAtLeast(0f),
-            netKwh       = ((lifeEnergyKwh - autoTripStartEnergy) - (lifeRegenKwh - autoTripStartRegen)).coerceAtLeast(0f),
+            // net NÃO é clampado: negativo = bateria ganhou energia (regen/recarga
+            // pelo motor térmico em HEV). O ganho aparece e credita no custo.
+            netKwh       = (lifeEnergyKwh - autoTripStartEnergy) - (lifeRegenKwh - autoTripStartRegen),
             fuelL        = (lifeFuelL     - autoTripStartFuelL ).coerceAtLeast(0f),
             maxSpeedKmh  = autoTripMaxSpeed,
             maxPowerPct  = autoTripMaxPowerPct,
@@ -1938,7 +1940,7 @@ class TripManager private constructor() {
     private fun flushSegment() {
         if (!segOpen) return
         segOpen = false
-        val net = (segEnergyKwh - segRegenKwh).coerceAtLeast(0f)
+        val net = segEnergyKwh - segRegenKwh   // negativo = ganho líquido no trecho
         if (segDistKm < 0.05f && segFuelL < 0.02f && segEnergyKwh < 0.05f) return
         val gain = ((telemetryRecorder?.elevGainM ?: 0.0) - segElevGainStart).coerceAtLeast(0.0).toFloat()
         val loss = ((telemetryRecorder?.elevLossM ?: 0.0) - segElevLossStart).coerceAtLeast(0.0).toFloat()

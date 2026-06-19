@@ -689,7 +689,7 @@ setInterval(() => {
   for (const t of autoTripsArr) {
     if ((t.startMs || 0) >= weekStart) {
       km   += +t.distKm || 0;
-      kwh  += Math.abs(+t.netKwh || 0);
+      kwh  += +t.netKwh || 0;   // signed: net negativo (ganho térmico/regen) abate o total
       fuel += +t.fuelL || 0;
     }
   }
@@ -4814,6 +4814,21 @@ function ingestAutoTrip({ tripId, autoTrip, samples }, opts = {}) {
       }
     }
 
+    // Invariante: net = energy − regen SEMPRE. O APK antigo clampava net≥0,
+    // escondendo o ganho quando a bateria foi recarregada pelo motor térmico
+    // (HEV) — net negativo = ganho líquido, credita no custo. Recompõe aqui pra
+    // ser imune à versão do APK; o estimated logo abaixo ainda pode sobrescrever.
+    if (autoTrip.energyKwh != null && autoTrip.regenKwh != null) {
+      autoTrip.netKwh = (+autoTrip.energyKwh || 0) - (+autoTrip.regenKwh || 0);
+    }
+    if (Array.isArray(autoTrip.segments)) {
+      for (const s of autoTrip.segments) {
+        if (s.energyKwh != null && s.regenKwh != null) {
+          s.netKwh = (+s.energyKwh || 0) - (+s.regenKwh || 0);
+        }
+      }
+    }
+
     // Calcula tempo e distância em modo híbrido (ICE ligado, rpm > 0).
     // Se o arquivo existente foi marcado como _estimated (telemetria parou no
     // meio da viagem e os hybrid foram inferidos por média histórica), PRESERVA
@@ -4994,7 +5009,8 @@ function ingestAutoTrip({ tripId, autoTrip, samples }, opts = {}) {
 
         const parts = [`${dist} km`, dur];
         if (dropSoc > 0.5)  parts.push(`−${Math.round(dropSoc)}% bateria`);
-        if (netKwh > 0.01) parts.push(`${netKwh.toFixed(2)} kWh`);
+        if (netKwh > 0.01)       parts.push(`${netKwh.toFixed(2)} kWh`);
+        else if (netKwh < -0.01) parts.push(`+${(-netKwh).toFixed(2)} kWh recuperado`);
         if (kwh100)        parts.push(`${kwh100} kWh/100`);
         if (fuelL > 0.01)  parts.push(`${fuelL.toFixed(2)} L`);
         if (kmL)           parts.push(`${kmL} km/L`);
