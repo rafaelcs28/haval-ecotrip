@@ -357,6 +357,8 @@ class LocalApiServer(
             "battery_current_a" to m.latestBatteryCurrentA,
             "pack_voltage_v"    to m.latestBatteryVoltageV,
             "batt_12v_pct"      to m.latestBatt12vPct,
+            // ── Uplink de internet (roteamento do head unit: Starlink vs 4G) ──
+            "uplink"            to UplinkManager.current(),   // WLAN(Starlink)/4G/OFF/?
             // ── Recarga ──
             "charging_state"    to m.latestChargingState,
             "charge_current_a"  to m.latestChargeCurrentA,

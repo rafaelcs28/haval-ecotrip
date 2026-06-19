@@ -127,6 +127,7 @@
       <span class="ttl">HAVAL H6 PHEV</span><span class="sp"></span>
       <span class="temp" id="h-temp">—</span>
       <div class="acts">
+        <span class="ver" id="h-uplink" style="display:none"></span>
         <span class="ver" id="h-ver" style="display:none"></span>
         <span class="ic" id="h-recargas">🔋</span><span class="ic" id="h-viagens">🚗</span><span class="ic" id="h-config">⚙️</span>
       </div>
@@ -358,6 +359,13 @@
     if(!d) return;
     if(d.temp!=null) setTxt('h-temp', d.temp+'°');
     if(d.version){ var ver=$('h-ver'); if(ver){ ver.textContent=d.version; ver.style.display=''; } }
+    // Uplink de internet do head unit (Starlink vs 4G). 4G = laranja (poupar dados).
+    if(d.uplink!=null){ var up=$('h-uplink'); if(up){
+      var map={ WLAN:['📡 Starlink','#39FF88'], '4G':['📶 4G','#FF5F1F'], OFF:['🌐 OEM','#8E8E93'] };
+      var m=map[d.uplink];
+      if(m){ up.textContent=m[0]; up.style.color=m[1]; up.style.borderColor=m[1]; up.style.background='transparent'; up.style.display=''; }
+      else { up.style.display='none'; }   // "?" = sem leitura → esconde
+    }}
     // navegação: mostra só com rota ativa
     var nav=$('nav');
     if(d.navActive){ if(nav) nav.style.visibility='visible';

@@ -22,6 +22,7 @@ import androidx.compose.ui.platform.LocalContext
 import br.com.redesurftank.ecotrip.BuildConfig
 import br.com.redesurftank.ecotrip.managers.CarDataManager
 import br.com.redesurftank.ecotrip.managers.LocalApiServer
+import br.com.redesurftank.ecotrip.managers.UplinkManager
 import br.com.redesurftank.ecotrip.models.CarConstants
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -124,6 +125,7 @@ private fun buildTeslaHomeJson(hd: HomeData): String {
     val o = JSONObject()
     o.put("temp", hd.outsideTempC)
     o.put("version", "v" + BuildConfig.VERSION_NAME)
+    o.put("uplink", UplinkManager.current())   // WLAN(Starlink)/4G/OFF/?
     o.put("dist", htF(hd.distKm, 1))
     o.put("time", hd.timeStr)
     o.put("avg", hd.avgSpeedKmh)
