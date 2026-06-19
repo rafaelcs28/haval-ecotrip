@@ -51,6 +51,20 @@ class TelemetryRecorder(private val context: Context) {
     @Volatile var latestLat: Double = 0.0
     @Volatile var latestLng: Double = 0.0
     @Volatile var gpsActive: Boolean = false
+    /** Timestamp (ms) do último fix GPS aceito — pra detectar localização travada. */
+    @Volatile var latestGpsMs: Long = 0L
+    /** Provider do último fix aceito ("gps"/"network"). */
+    @Volatile var latestGpsProvider: String = ""
+
+    // GPS do head-unit perde lock com frequência; quando isso acontece o NETWORK
+    // (torre de celular, erro ~km) fixava a posição num ponto e a tela mostrava o
+    // carro "andando" (velocidade do CAN) parado num lugar errado, até o GPS
+    // religar e dar um salto. Regras: prefere GPS; só aceita NETWORK como fallback
+    // quando o GPS está mudo há GPS_STALE_MS; rejeita qualquer fix com acurácia pior
+    // que o teto. Reduz o "trava-e-salta".
+    private val GPS_STALE_MS    = 8_000L    // tempo sem GPS pra liberar fallback NETWORK
+    private val NETWORK_MAX_ACC = 150f      // m — acima disso o NETWORK é lixo demais
+    private val HARD_MAX_ACC    = 500f      // m — acima disso rejeita qualquer provider
 
     // Altimetria: ganho/perda acumulados (m) desde o início do recorder. A altitude
     // de GPS é ruidosa → suaviza (EMA) e só conta variação acima do deadband (3 m).
@@ -62,8 +76,25 @@ class TelemetryRecorder(private val context: Context) {
     private val ELEV_DEADBAND_M = 3.0
 
     private val locationListener = LocationListener { loc: Location ->
+        val isGps = loc.provider == LocationManager.GPS_PROVIDER
+        val acc   = if (loc.hasAccuracy()) loc.accuracy else Float.MAX_VALUE
+        val now   = System.currentTimeMillis()
+        val gpsStale = now - latestGpsMs > GPS_STALE_MS
+
+        // Gate de qualidade/provider. GPS sempre vence; NETWORK só entra quando o
+        // GPS está mudo e a acurácia é aceitável.
+        val accept = when {
+            acc > HARD_MAX_ACC                       -> false
+            isGps                                    -> true
+            gpsStale && acc <= NETWORK_MAX_ACC       -> true
+            else                                     -> false
+        }
+        if (!accept) return@LocationListener
+
         latestLat = loc.latitude
         latestLng = loc.longitude
+        latestGpsMs = now
+        latestGpsProvider = if (isGps) "gps" else "network"
         // Só GPS tem altitude útil (NETWORK não). Acumula subida/descida com deadband.
         if (loc.hasAltitude() && loc.provider == LocationManager.GPS_PROVIDER) {
             val a = loc.altitude
@@ -91,14 +122,16 @@ class TelemetryRecorder(private val context: Context) {
             return
         }
         try {
+            // minDistance=0 → entrega um fix por segundo enquanto anda (o filtro de
+            // 1 m suprimia updates e contribuía pro "trava-e-salta").
             if (hasFine && locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
                 locationManager.requestLocationUpdates(
-                    LocationManager.GPS_PROVIDER, 1_000L, 1f, locationListener
+                    LocationManager.GPS_PROVIDER, 1_000L, 0f, locationListener
                 )
             }
             if (locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
                 locationManager.requestLocationUpdates(
-                    LocationManager.NETWORK_PROVIDER, 1_000L, 1f, locationListener
+                    LocationManager.NETWORK_PROVIDER, 1_000L, 0f, locationListener
                 )
             }
             gpsActive = true
