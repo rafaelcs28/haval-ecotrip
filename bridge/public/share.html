@@ -44,6 +44,8 @@
   .chip.ac-on  { background:rgba(56,189,248,.16); border-color:rgba(56,189,248,.35); }
   .chip.ac-off { color:var(--muted); }
   .chip.mode   { background:rgba(34,197,94,.14); border-color:rgba(34,197,94,.3); }
+  .chip.alert  { background:rgba(239,68,68,.18); border-color:rgba(239,68,68,.4); color:#fecaca; }
+  .car-rot { transition:transform .6s ease-out; }
   .badge.stale { background:rgba(251,146,60,.25); color:var(--orange); }
   .ask { color:var(--muted); font-size:13px; }
   .ask a { color:var(--teal); text-decoration:underline; cursor:pointer; }
@@ -65,11 +67,13 @@
     <div class="cell"><div class="v spd" id="v-spd">—</div><div class="l">km/h</div></div>
     <div class="cell"><div class="v soc" id="v-soc">—</div><div class="l">SOC %</div></div>
     <div class="cell"><div class="v" id="v-fuel">—</div><div class="l">tanque L</div></div>
-    <div class="cell"><div class="v" id="v-ev">—</div><div class="l">km EV</div></div>
+    <div class="cell"><div class="v" id="v-ev">—</div><div class="l">aut. EV km</div></div>
+    <div class="cell"><div class="v" id="v-ice">—</div><div class="l">aut. gás km</div></div>
     <div class="cell"><div class="v" id="v-km">—</div><div class="l">km viagem</div></div>
     <div class="cell"><div class="v" id="v-time">—</div><div class="l">tempo</div></div>
     <div class="cell"><div class="v" id="v-tin">—</div><div class="l">interna °C</div></div>
     <div class="cell"><div class="v" id="v-tout">—</div><div class="l">externa °C</div></div>
+    <div class="cell"><div class="v" id="v-odo">—</div><div class="l">odômetro km</div></div>
   </div>
   <div class="chips" id="chips"></div>
 </div>
@@ -83,7 +87,9 @@ const map = L.map('map', { zoomControl:false, attributionControl:false }).setVie
 // as ruas no zoom afastado. Os painéis flutuantes seguem escuros sobre o mapa claro.
 L.tileLayer('https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}@2x.png', { maxZoom:20 }).addTo(map);
 
-const carIcon = L.divIcon({ className:'car-ico', html:'<div style="width:36px;height:36px;border-radius:50%;background:#22d3ee;border:3px solid #fff;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px #000"><svg width="20" height="20" viewBox="0 0 24 24" fill="#0b0d10"><path d="M18.92 6.01C18.72 5.42 18.16 5 17.5 5h-11c-.66 0-1.21.42-1.42 1.01L3 12v8a1 1 0 0 0 1 1h1a1 1 0 0 0 1-1v-1h12v1a1 1 0 0 0 1 1h1a1 1 0 0 0 1-1v-8l-2.08-5.99zM6.5 16a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm11 0a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zM5 11l1.5-4.5h11L19 11H5z"/></svg></div>', iconSize:[36,36], iconAnchor:[18,18] });
+// Seta de navegação que aponta pro rumo (car_heading). A ponta da seta é o "norte"
+// do SVG (0°), então rotate(heading) aponta na direção real do deslocamento.
+const carIcon = L.divIcon({ className:'car-ico', html:'<div id="car-rot" class="car-rot" style="width:36px;height:36px;border-radius:50%;background:#22d3ee;border:3px solid #fff;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px #000"><svg width="20" height="20" viewBox="0 0 24 24" fill="#0b0d10"><path d="M12 2l7 18-7-4-7 4z"/></svg></div>', iconSize:[36,36], iconAnchor:[18,18] });
 const meIcon  = L.divIcon({ className:'car-ico', html:'<div style="width:16px;height:16px;border-radius:50%;background:#38bdf8;border:3px solid #fff;box-shadow:0 0 8px #38bdf8"></div>', iconSize:[16,16], iconAnchor:[8,8] });
 let carMarker=null, meMarker=null, me=null, autoFollow=true;
 map.on('dragstart', () => autoFollow=false);
@@ -116,13 +122,17 @@ async function poll(){
   document.getElementById('v-spd').textContent  = (j.on && !speedStale) ? Math.round(j.speedKmh) : '—';
   document.getElementById('v-fuel').textContent = (j.fuelL != null && j.fuelL > 0) ? j.fuelL.toFixed(1).replace('.', ',') : '—';
   document.getElementById('v-soc').textContent  = j.soc || '—';
-  document.getElementById('v-ev').textContent   = j.rangeEvKm || '—';
+  document.getElementById('v-ev').textContent   = j.evRemainKm  || '—';
+  document.getElementById('v-ice').textContent  = j.iceRemainKm || '—';
   document.getElementById('v-km').textContent   = (j.tripKm||0).toFixed(1).replace('.',',');
   document.getElementById('v-time').textContent = fmtTime(j.tripSec||0);
   document.getElementById('v-tin').textContent  = j.tempIn  ? Math.round(j.tempIn)  : '—';
   document.getElementById('v-tout').textContent = j.tempOut ? Math.round(j.tempOut) : '—';
-  // Chips de status (categóricos): modo de direção, marcha, terreno e AC.
+  document.getElementById('v-odo').textContent  = j.odometer ? j.odometer.toLocaleString('pt-BR') : '—';
+  // Chips de status (categóricos): alertas primeiro, depois modo/marcha/terreno/AC/ar.
+  const esc2 = s => String(s||'').replace(/</g,'&lt;');
   const chips = [];
+  (j.alerts||[]).forEach(t => chips.push(`<span class="chip alert">⚠️ ${esc2(t)}</span>`));
   if (j.on && j.driveMode) chips.push(`<span class="chip mode">🔋 ${j.driveMode}</span>`);
   if (j.on && j.gear && j.gear !== '--') chips.push(`<span class="chip"><span class="ck">marcha</span> ${j.gear}</span>`);
   if (j.on && j.terrain && j.terrain !== 'Normal') chips.push(`<span class="chip">🏔️ ${j.terrain}</span>`);
@@ -130,6 +140,7 @@ async function poll(){
     if (j.ac) chips.push(`<span class="chip ac-on">❄️ AC${j.setTemp ? ' ' + j.setTemp.toFixed(0) + '°' : ''}</span>`);
     else      chips.push(`<span class="chip ac-off">❄️ AC off</span>`);
   }
+  if (j.pm25 != null) chips.push(`<span class="chip">🌫️ PM2.5 ${j.pm25}</span>`);
   document.getElementById('chips').innerHTML = chips.join('');
   // Destino ativo: distância, tempo e hora de chegada.
   const dl = document.getElementById('dest-line');
@@ -154,6 +165,9 @@ async function poll(){
     const ll = [j.lat, j.lng];
     if (!carMarker) carMarker = L.marker(ll, {icon:carIcon}).addTo(map);
     else carMarker.setLatLng(ll);
+    // Aponta a seta pro rumo do carro. Só gira em movimento — parado o heading
+    // antigo não significa nada e ficaria girando à toa.
+    if (j.moving) { const rot = document.getElementById('car-rot'); if (rot) rot.style.transform = `rotate(${j.heading||0}deg)`; }
     if (autoFollow) map.setView(ll, Math.max(map.getZoom(),14), {animate:true});
   }
 }

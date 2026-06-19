@@ -10286,6 +10286,41 @@ app.get('/api/share/list', (_req, res) => {
   res.json({ ok: true, active });
 });
 
+// Traduz status_message (pipe-separado, tokens@args) em frases amigáveis.
+// Espelha ALERT_TEXTS/renderAlerts do app.js — usado no link compartilhado.
+const _SHARE_ALERT_TEXTS = {
+  ERR_FORMATTING_ADDRESS: 'Erro ao formatar endereço.',
+  ERR_GENERATE_RESPONSE: 'Houve um erro ao gerar a resposta.',
+  ALERT_HIGH_VOLTAGE_DISCONNECT: 'Bateria de alta tensão cheia — desconecte o carregador.',
+  SUNROOF_OPEN: 'Teto solar aberto.',
+  UNLOCKED: 'Portas destrancadas.',
+  ENGINE_ON_AND_UNLOCKED: 'Motor ligado e veículo destravado.',
+  FUEL_LOW: 'Combustível abaixo de 15 L.',
+  AC_ON_WITH_ENGINE_OFF: 'AC ligado com motor desligado.',
+  REVIEW_PREFIX: 'Dentro do limite para agendar revisão.',
+};
+function _shareAlerts(raw) {
+  const s = String(raw || '').trim();
+  if (['', 'NO_ALERTS', 'unknown', 'unavailable'].includes(s)) return [];
+  const out = [];
+  s.split('|').forEach(item => {
+    const p = item.split('@');
+    const code = (p[0] || '').trim();
+    if (!code) return;
+    if (code in _SHARE_ALERT_TEXTS) { if (_SHARE_ALERT_TEXTS[code]) out.push(_SHARE_ALERT_TEXTS[code]); }
+    else if (code === 'VEHICLE_CHARGING_TIME' && p.length >= 2) out.push(`Carregando — conclui em ${p[1]}.`);
+    else if (code === 'WINDOW_OPEN' && p.length >= 2) out.push(`${p[1]} aberto.`);
+    else if (code === 'DOOR_OPEN' && p.length >= 2) out.push(`${p[1]} aberta.`);
+    else if (code === 'TRUNK_OPEN' && p.length >= 2) out.push(`${p[1]} aberto.`);
+    else if (code === 'BATTERY_12V_CRITICAL' && p.length >= 2) out.push(`Bateria 12V em ${p[1]}%.`);
+    else if (code === 'BATTERY_12V_ALERT' && p.length >= 2) out.push(`Bateria 12V em ${p[1]}%.`);
+    else if (code === 'TIRE_PRESSURE' && p.length >= 4) out.push(`${p[1]}: ${p[2]} psi.`);
+    else if (code === 'SERVICE_WITH_TOLERANCE' && p.length >= 2) out.push(`Revisão: restam ${p[1]} km.`);
+    else out.push(item.trim());
+  });
+  return out;
+}
+
 // Público (token na URL): estado ao vivo do carro pra página de compartilhamento.
 app.get('/api/share/:token/state', (req, res) => {
   if (!_shareValid(req.params.token)) return res.status(404).json({ error: 'link expirado' });
@@ -10324,6 +10359,12 @@ app.get('/api/share/:token/state', (req, res) => {
     terrain: ({ 0: 'Normal', 1: 'Sport', 2: 'Eco', 3: 'Neve', 4: 'Areia', 5: 'Lama', 11: 'AWD' })[state.terrain_mode] || null,
     ac: (state.hvac_ac_enable === '1' || state.ac_state === 'on'),
     setTemp: (state.hvac_driver_temp != null && +state.hvac_driver_temp > 0) ? +state.hvac_driver_temp : null,
+    evRemainKm: Math.round(+state.ev_remain_km || +state.range_ev_km || 0),
+    iceRemainKm: Math.round(+state.fuel_remain_km || +state.range_ice_km || 0),
+    odometer: Math.round(+state.odometer_km || 0),
+    heading: +state.car_heading || 0,
+    pm25: (state.hvac_pm25 != null && +state.hvac_pm25 > 0) ? Math.round(+state.hvac_pm25) : null,
+    alerts: _shareAlerts(state.status_message),
     moving: (+state.speed_kmh || 0) > 2,
     dest,
     apkAgeMs: state.last_apk_ms ? (Date.now() - state.last_apk_ms) : null,
