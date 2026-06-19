@@ -10,8 +10,8 @@
   :root { --bg:#0b0d10; --card:#16181d; --text:#f5f5f5; --muted:#8b93a1; --green:#22c55e; --blue:#38bdf8; --teal:#22d3ee; --orange:#fb923c; }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body { margin:0; height:100%; background:var(--bg); color:var(--text); font-family:-apple-system,system-ui,Segoe UI,Roboto,sans-serif; }
-  #map { position:absolute; inset:0; background:var(--bg); }
-  .leaflet-container { background:var(--bg); }
+  #map { position:absolute; inset:0; background:#e8eaed; }
+  .leaflet-container { background:#e8eaed; }
   .top { position:absolute; top:0; left:0; right:0; z-index:500; padding:12px 14px;
          background:linear-gradient(180deg, rgba(0,0,0,.8), rgba(0,0,0,0)); pointer-events:none; }
   .title { font-size:15px; font-weight:700; letter-spacing:.02em; }
@@ -70,7 +70,9 @@
 const TOKEN = new URLSearchParams(location.search).get('t') || '';
 const API = (p) => `/api/share/${TOKEN}${p}`;
 const map = L.map('map', { zoomControl:false, attributionControl:false }).setView([-16.6869,-49.2648], 14);
-L.tileLayer('https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png', { maxZoom:20 }).addTo(map);
+// Voyager (claro, ruas legíveis) em vez de dark_all — o destinatário precisa ler
+// as ruas no zoom afastado. Os painéis flutuantes seguem escuros sobre o mapa claro.
+L.tileLayer('https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}@2x.png', { maxZoom:20 }).addTo(map);
 
 const carIcon = L.divIcon({ className:'car-ico', html:'<div style="width:36px;height:36px;border-radius:50%;background:#22d3ee;border:3px solid #fff;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px #000"><svg width="20" height="20" viewBox="0 0 24 24" fill="#0b0d10"><path d="M18.92 6.01C18.72 5.42 18.16 5 17.5 5h-11c-.66 0-1.21.42-1.42 1.01L3 12v8a1 1 0 0 0 1 1h1a1 1 0 0 0 1-1v-1h12v1a1 1 0 0 0 1 1h1a1 1 0 0 0 1-1v-8l-2.08-5.99zM6.5 16a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm11 0a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zM5 11l1.5-4.5h11L19 11H5z"/></svg></div>', iconSize:[36,36], iconAnchor:[18,18] });
 const meIcon  = L.divIcon({ className:'car-ico', html:'<div style="width:16px;height:16px;border-radius:50%;background:#38bdf8;border:3px solid #fff;box-shadow:0 0 8px #38bdf8"></div>', iconSize:[16,16], iconAnchor:[8,8] });
@@ -158,8 +160,28 @@ function askGeo(){
   { enableHighAccuracy:true, maximumAge:10000 });
 }
 
+let _pollTimer=null, _etaTimer=null;
+// Recria os timers do zero. Safari/Chrome no celular SUSPENDEM setInterval em
+// background/tela bloqueada e congelam a página no BFCache — ao voltar pro app o
+// timer antigo não re-dispara e o mapa fica parado até um refresh manual. Em vez
+// de confiar que o interval velho ressuscita, derruba e rearma a cada retorno.
+function rearm(){
+  if (_pollTimer) clearInterval(_pollTimer);
+  if (_etaTimer)  clearInterval(_etaTimer);
+  poll(); updateEta();
+  _pollTimer = setInterval(poll, 1000);
+  _etaTimer  = setInterval(updateEta, 2000);
+}
 if (!TOKEN){ showExpired(); }
-else { poll(); setInterval(poll, 1000); setInterval(updateEta, 2000); }
+else {
+  rearm();
+  // Gatilhos de "a página voltou a ficar viva": foreground, restauração do
+  // BFCache (pageshow), foco da aba e reconexão de rede.
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') rearm(); });
+  window.addEventListener('pageshow', rearm);
+  window.addEventListener('focus',    rearm);
+  window.addEventListener('online',   rearm);
+}
 </script>
 </body>
 </html>
