@@ -47,6 +47,7 @@ enum class CarConstants(val value: String) {
     CAR_EV_INFO_REAR_MOTOR_SPEED("car.ev_info.rear_motor_speed"),
     CAR_EV_INFO_HCU_POWER_TRAIN_STATE("car.ev_info.hcu_power_train_state"),
     CAR_EV_INFO_ENERGY_DRIVE_STATE("car.ev_info.energy_drive_state"),
+    CAR_CONFIGURE_E_AXLE("car.configure.e_axle"),   // 1 = tem eixo traseiro elétrico (AWD)
 
     // Charging state — 0=Desconectado, 1=Carregando, 2=Programado, 3=Finalizado, 5=Aguardando liberação
     CAR_EV_INFO_CHARGING_STATE("car.ev_info.charging_state"),

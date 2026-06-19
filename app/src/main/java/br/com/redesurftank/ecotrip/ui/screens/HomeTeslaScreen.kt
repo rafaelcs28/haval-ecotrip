@@ -146,10 +146,23 @@ private fun buildTeslaHomeJson(hd: HomeData): String {
     return o.toString()
 }
 
+// Escala provisória rotação→kW do motor traseiro (não há chave de potência
+// traseira; só rear_motor_speed). Calibrar com o log TeslaFlow. Placeholder.
+private const val REAR_KW_PER_RPM = 0.008
+
+// Lê rear_motor_speed (rotação do eixo traseiro). Cacheia pra não bloquear cada tick.
+private fun readRearMotorSpeed(): Double {
+    return try {
+        CarDataManager.getInstance()
+            .fetchCurrent(CarConstants.CAR_EV_INFO_REAR_MOTOR_SPEED.value)
+            ?.trim()?.toDoubleOrNull() ?: 0.0
+    } catch (_: Exception) { 0.0 }
+}
+
 // Leitura de diagnóstico das chaves de powertrain ainda não confirmadas — só loga
-// os inteiros crus pra confirmar a semântica no veículo (task do handoff).
+// os valores crus pra confirmar a semântica no veículo (task do handoff).
 private var _lastFlowDiag = 0L
-private fun diagPowertrain() {
+private fun diagPowertrain(frontKw: Double) {
     val now = System.currentTimeMillis()
     if (now - _lastFlowDiag < 3000) return
     _lastFlowDiag = now
@@ -161,7 +174,10 @@ private fun diagPowertrain() {
         val eng = rd(CarConstants.CAR_BASIC_ENGINE_STATE.value)
         val rear = rd(CarConstants.CAR_EV_INFO_REAR_MOTOR_SPEED.value)
         val mspd = rd(CarConstants.CAR_EV_INFO_MOTOR_SPEED.value)
-        Log.w("TeslaFlow", "hcu_power_train_state=$hcu energy_drive_state=$drv engine_state=$eng rear_motor_speed=$rear motor_speed=$mspd")
+        val rec = rd(CarConstants.CAR_EV_INFO_ENERGY_RECOVERY_INFO.value)
+        val eax = rd(CarConstants.CAR_CONFIGURE_E_AXLE.value)
+        Log.w("TeslaFlow", "frontKw=${Math.round(frontKw)} hcu_power_train_state=$hcu energy_drive_state=$drv " +
+            "engine_state=$eng rear_motor_speed=$rear motor_speed=$mspd energy_recovery_info=$rec e_axle=$eax")
     } catch (_: Exception) {}
 }
 
@@ -183,13 +199,23 @@ private fun buildTeslaFlowJson(): String {
     // Heurística de série: térmico ligado sem tração elétrica dianteira — refinar com hcu_power_train_state.
     val series = engineOn && kotlin.math.abs(frontKw) < 2.0
     val charging = if (chargingState == 1) "ac" else "none"
-    diagPowertrain()
+
+    // Eixo traseiro (AWD): sem chave de potência → deriva da rotação (atividade) e
+    // do sinal do motor dianteiro (regen quando frontKw<0). Magnitude estimada por
+    // REAR_KW_PER_RPM — calibrar com o log. Refinar direção com energy_drive_state.
+    val rearSpeed = readRearMotorSpeed()
+    val rearActive = kotlin.math.abs(rearSpeed) > 100.0
+    val rearKw = if (!rearActive) 0.0 else {
+        val mag = (kotlin.math.abs(rearSpeed) * REAR_KW_PER_RPM).coerceIn(1.0, 130.0)
+        if (frontKw < -0.5) -mag else mag   // regen se o conjunto está regenerando
+    }
+    diagPowertrain(frontKw)
     return JSONObject()
         .put("soc", soc)
         .put("socKm", socKm)
         .put("engineKw", Math.round(engineKw))
         .put("frontKw", Math.round(frontKw))
-        .put("rearKw", 0)  // sem telemetria de potência traseira confirmada ainda
+        .put("rearKw", Math.round(rearKw))
         .put("seriesMode", series)
         .put("charging", charging)
         .toString()
