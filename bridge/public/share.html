@@ -31,15 +31,22 @@
   .dest .stops-h { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); }
   .dest .stop { font-size:13px; font-weight:600; color:var(--muted); }
   .dest .stop .sn { color:var(--text); }
-  .grid { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; }
-  .cell { background:rgba(255,255,255,.05); border-radius:12px; padding:9px 6px; text-align:center; }
-  .cell .v { font-size:20px; font-weight:700; font-variant-numeric:tabular-nums; }
-  .cell .l { font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; margin-top:1px; }
+  .grid { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; }
+  .cell { background:rgba(255,255,255,.05); border-radius:11px; padding:7px 5px; text-align:center; }
+  .cell .v { font-size:17px; font-weight:700; font-variant-numeric:tabular-nums; }
+  .cell .l { font-size:9px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; margin-top:1px; }
   .v.soc { color:var(--green); } .v.spd { color:var(--text); }
-  .chips { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
-  .chip { display:inline-flex; align-items:center; gap:5px; font-size:12px; font-weight:600;
-          padding:5px 10px; border-radius:999px; background:rgba(255,255,255,.06);
+  .chips { display:flex; flex-wrap:wrap; gap:5px; margin-top:7px; }
+  .chip { display:inline-flex; align-items:center; gap:4px; font-size:11px; font-weight:600;
+          padding:4px 9px; border-radius:999px; background:rgba(255,255,255,.06);
           border:1px solid rgba(255,255,255,.08); color:var(--text); }
+  /* Placa de velocidade estilo Waze: círculo branco, aro vermelho, número grande. */
+  .speed-sign { position:absolute; top:56px; left:12px; z-index:600; width:66px; height:66px;
+                border-radius:50%; background:#fff; border:5px solid #e11d48;
+                display:none; flex-direction:column; align-items:center; justify-content:center;
+                box-shadow:0 3px 10px rgba(0,0,0,.5); }
+  .speed-sign .num { font-size:26px; font-weight:800; color:#0b0d10; line-height:1; font-variant-numeric:tabular-nums; }
+  .speed-sign .u   { font-size:9px; font-weight:700; color:#64748b; text-transform:uppercase; margin-top:1px; }
   .chip .ck { color:var(--muted); font-weight:600; }
   .chip.ac-on  { background:rgba(56,189,248,.16); border-color:rgba(56,189,248,.35); }
   .chip.ac-off { color:var(--muted); }
@@ -60,11 +67,11 @@
   <span class="title">🚗 Haval ao vivo</span>
   <span id="state-badge" class="badge on">conectando…</span>
 </div>
+<div class="speed-sign" id="speed-sign"><div class="num" id="v-spd">—</div><div class="u">km/h</div></div>
 <div class="panel">
   <div class="dest" id="dest-line" style="display:none"></div>
   <div class="eta" id="eta-line"><span class="ask">Toque em <a onclick="askGeo()">permitir localização</a> para ver a distância até você.</span></div>
   <div class="grid">
-    <div class="cell"><div class="v spd" id="v-spd">—</div><div class="l">km/h</div></div>
     <div class="cell"><div class="v soc" id="v-soc">—</div><div class="l">SOC %</div></div>
     <div class="cell"><div class="v" id="v-fuel">—</div><div class="l">tanque L</div></div>
     <div class="cell"><div class="v" id="v-ev">—</div><div class="l">aut. EV km</div></div>
@@ -119,7 +126,11 @@ async function poll(){
   // Velocidade só vem do APK (não do HA cloud). Se a última msg dela tá velha,
   // o número anterior fica congelado — melhor mostrar "—" do que enganar.
   const speedStale = j.speedAgeMs != null && j.speedAgeMs > 10000;
-  document.getElementById('v-spd').textContent  = (j.on && !speedStale) ? Math.round(j.speedKmh) : '—';
+  const sign = document.getElementById('speed-sign');
+  if (j.on && !speedStale) {
+    document.getElementById('v-spd').textContent = Math.round(j.speedKmh);
+    sign.style.display = 'flex';
+  } else { sign.style.display = 'none'; }
   document.getElementById('v-fuel').textContent = (j.fuelL != null && j.fuelL > 0) ? j.fuelL.toFixed(1).replace('.', ',') : '—';
   document.getElementById('v-soc').textContent  = j.soc || '—';
   document.getElementById('v-ev').textContent   = j.evRemainKm  || '—';
