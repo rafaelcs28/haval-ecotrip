@@ -1098,6 +1098,8 @@
   <div class="right">
     <!-- Fonte de dados: 📡 LAN·WS (verde) · ☁ Nuvem (azul). Toque tenta reconectar LAN. -->
     <div class="conn-mode cloud" id="source-badge" onclick="onConnTap()">☁ Nuvem</div>
+    <!-- Uplink de internet do head unit: 📡 Starlink (verde) · 📶 4G (laranja=poupar dados) · 🌐 OEM -->
+    <div class="conn-mode" id="uplink-badge" style="display:none;margin-left:8px"></div>
     <div class="lbl" style="margin-left:8px">Carro</div>
     <div class="dot" id="car-dot"></div>
     <div class="lbl" id="car-lbl">—</div>
@@ -1528,6 +1530,24 @@ function _updateSourceBadge(source) {
 }
 setInterval(() => _updateSourceBadge(null), 1000);
 
+// Uplink de internet roteado pelo head unit (HotRouter): WLAN=Starlink · 4G · OFF=OEM.
+// 4G fica laranja pra lembrar de poupar dados. "?" / ausente → esconde.
+function _updateUplinkBadge(u) {
+  const el = document.getElementById('uplink-badge');
+  if (!el) return;
+  const map = { WLAN: ['📡 Starlink', '#22c55e'], '4G': ['📶 4G', '#fb923c'], OFF: ['🌐 OEM', '#94a3b8'] };
+  const m = map[u];
+  if (m) {
+    el.textContent = m[0];
+    el.style.color = m[1];
+    el.style.border = '1px solid ' + m[1];
+    el.style.background = 'transparent';
+    el.style.display = 'flex';
+  } else {
+    el.style.display = 'none';
+  }
+}
+
 window.applyNativeSnapshot = function(payload) {
   if (!payload || typeof payload !== 'object') return;
   // Primeira chamada nativa? Fecha o WebSocket se estava conectado (modo browser
@@ -1560,6 +1580,7 @@ window.applyNativeSnapshot = function(payload) {
     state[k] = v;
   }
   lastUpdateMs = Date.now();
+  _updateUplinkBadge(state.uplink);
   try { render(); } catch (e) { console.error('[cluster] render erro:', e); }
 };
 // Chaves de telemetria fast servidas pelo LAN (APK local). Quando LAN ativo,
