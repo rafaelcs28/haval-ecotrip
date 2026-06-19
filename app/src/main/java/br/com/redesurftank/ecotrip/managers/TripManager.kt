@@ -252,6 +252,7 @@ class TripManager private constructor() {
 
         private const val DEFAULT_TANK_L    = 51f
         private const val FUEL_PCT_THRESHOLD = 1f
+        private const val FUEL_SMOOTH_N      = 5   // janela da mediana p/ filtrar ruído do sensor
     }
 
     private lateinit var prefs: SharedPreferences
@@ -393,6 +394,7 @@ class TripManager private constructor() {
 
     // Current session raw values
     private var prevFuelPct  = -1f   // -1 = baseline not yet established
+    private val fuelPctWindow = ArrayDeque<Float>()  // últimas N leituras cruas p/ mediana
     private var pendingFuelL = 0f    // fuel consumed since last odometer tick (for chart)
     private var curEnergy    = 0f
     private var curRegen     = 0f
@@ -1297,6 +1299,7 @@ class TripManager private constructor() {
             }
 
             prevFuelPct         = -1f
+            fuelPctWindow.clear()
             pendingFuelL        = 0f
             checkpointTickCount = 0
 
@@ -1982,7 +1985,18 @@ class TripManager private constructor() {
 
     // ── Per-channel handlers ──────────────────────────────────────────────────
 
-    private fun onFuelPct(value: Float) {
+    private fun onFuelPct(rawValue: Float) {
+        // Mediana das últimas N leituras CRUAS antes de qualquer contabilidade. O
+        // sensor de combustível balança no tanque (curva/freio/subida) e cospe
+        // picos transientes pra baixo que NÃO são consumo. Como a baseline é um
+        // low-watermark (só desce em queda confirmada e ignora a recuperação), um
+        // único pico pra baixo ≥1% virava litro fantasma gravado pra sempre. A
+        // mediana rejeita transientes de 1-2 amostras e ainda acompanha a queda real.
+        fuelPctWindow.addLast(rawValue)
+        while (fuelPctWindow.size > FUEL_SMOOTH_N) fuelPctWindow.removeFirst()
+        val sorted = fuelPctWindow.sorted()
+        val value = sorted[sorted.size / 2]
+
         if (prevFuelPct < 0f) {
             prevFuelPct = value
             return
@@ -2006,6 +2020,9 @@ class TripManager private constructor() {
                 val fuelLAfter  = value / 100f * tankCapacityL
                 val litersAdded = (fuelLAfter - fuelLBefore).coerceAtLeast(0f)
                 prevFuelPct = value
+                // Re-prima a janela com o nível novo — senão a mediana ficaria
+                // presa misturando o nível pré-abastecimento por mais N leituras.
+                fuelPctWindow.clear(); fuelPctWindow.addLast(value)
                 // Registra como abastecimento auto-detectado se ≥5L (filtra ruído).
                 // price_per_liter fica 0 — usuário preenche depois via PWA.
                 if (litersAdded >= 5f) {
