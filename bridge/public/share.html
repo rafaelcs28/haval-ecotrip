@@ -36,6 +36,14 @@
   .cell .v { font-size:20px; font-weight:700; font-variant-numeric:tabular-nums; }
   .cell .l { font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; margin-top:1px; }
   .v.soc { color:var(--green); } .v.spd { color:var(--text); }
+  .chips { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+  .chip { display:inline-flex; align-items:center; gap:5px; font-size:12px; font-weight:600;
+          padding:5px 10px; border-radius:999px; background:rgba(255,255,255,.06);
+          border:1px solid rgba(255,255,255,.08); color:var(--text); }
+  .chip .ck { color:var(--muted); font-weight:600; }
+  .chip.ac-on  { background:rgba(56,189,248,.16); border-color:rgba(56,189,248,.35); }
+  .chip.ac-off { color:var(--muted); }
+  .chip.mode   { background:rgba(34,197,94,.14); border-color:rgba(34,197,94,.3); }
   .badge.stale { background:rgba(251,146,60,.25); color:var(--orange); }
   .ask { color:var(--muted); font-size:13px; }
   .ask a { color:var(--teal); text-decoration:underline; cursor:pointer; }
@@ -63,6 +71,7 @@
     <div class="cell"><div class="v" id="v-tin">—</div><div class="l">interna °C</div></div>
     <div class="cell"><div class="v" id="v-tout">—</div><div class="l">externa °C</div></div>
   </div>
+  <div class="chips" id="chips"></div>
 </div>
 <div class="expired" id="expired"><div><div style="font-size:40px">🔒</div><div style="font-size:18px;font-weight:700;margin-top:8px">Link expirado</div><div style="color:var(--muted);margin-top:6px">Peça um novo link ao dono do carro.</div><div id="exp-tok" style="color:#475569;margin-top:14px;font-size:11px;word-break:break-all"></div></div></div>
 
@@ -112,6 +121,16 @@ async function poll(){
   document.getElementById('v-time').textContent = fmtTime(j.tripSec||0);
   document.getElementById('v-tin').textContent  = j.tempIn  ? Math.round(j.tempIn)  : '—';
   document.getElementById('v-tout').textContent = j.tempOut ? Math.round(j.tempOut) : '—';
+  // Chips de status (categóricos): modo de direção, marcha, terreno e AC.
+  const chips = [];
+  if (j.on && j.driveMode) chips.push(`<span class="chip mode">🔋 ${j.driveMode}</span>`);
+  if (j.on && j.gear && j.gear !== '--') chips.push(`<span class="chip"><span class="ck">marcha</span> ${j.gear}</span>`);
+  if (j.on && j.terrain && j.terrain !== 'Normal') chips.push(`<span class="chip">🏔️ ${j.terrain}</span>`);
+  if (j.on) {
+    if (j.ac) chips.push(`<span class="chip ac-on">❄️ AC${j.setTemp ? ' ' + j.setTemp.toFixed(0) + '°' : ''}</span>`);
+    else      chips.push(`<span class="chip ac-off">❄️ AC off</span>`);
+  }
+  document.getElementById('chips').innerHTML = chips.join('');
   // Destino ativo: distância, tempo e hora de chegada.
   const dl = document.getElementById('dest-line');
   if (j.dest && j.dest.distKm != null) {
