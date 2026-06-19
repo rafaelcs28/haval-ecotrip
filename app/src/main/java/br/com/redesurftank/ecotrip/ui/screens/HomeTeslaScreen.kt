@@ -162,7 +162,7 @@ private fun readRearMotorSpeed(): Double {
 // Leitura de diagnóstico das chaves de powertrain ainda não confirmadas — só loga
 // os valores crus pra confirmar a semântica no veículo (task do handoff).
 private var _lastFlowDiag = 0L
-private fun diagPowertrain(frontKw: Double) {
+private fun diagPowertrain(rawFrontKw: Double, speed: Double) {
     val now = System.currentTimeMillis()
     if (now - _lastFlowDiag < 3000) return
     _lastFlowDiag = now
@@ -176,8 +176,9 @@ private fun diagPowertrain(frontKw: Double) {
         val mspd = rd(CarConstants.CAR_EV_INFO_MOTOR_SPEED.value)
         val rec = rd(CarConstants.CAR_EV_INFO_ENERGY_RECOVERY_INFO.value)
         val eax = rd(CarConstants.CAR_CONFIGURE_E_AXLE.value)
-        Log.w("TeslaFlow", "frontKw=${Math.round(frontKw)} hcu_power_train_state=$hcu energy_drive_state=$drv " +
-            "engine_state=$eng rear_motor_speed=$rear motor_speed=$mspd energy_recovery_info=$rec e_axle=$eax")
+        Log.w("TeslaFlow", "speed=${Math.round(speed)} rawFrontKw=${Math.round(rawFrontKw)} " +
+            "hcu_power_train_state=$hcu energy_drive_state=$drv engine_state=$eng " +
+            "rear_motor_speed=$rear motor_speed=$mspd energy_recovery_info=$rec e_axle=$eax")
     } catch (_: Exception) {}
 }
 
@@ -190,10 +191,16 @@ private fun buildTeslaFlowJson(): String {
     } catch (_: Exception) { JSONObject() }
     val soc = snap.optInt("soc_pct", 0)
     val socKm = snap.optInt("ev_remain_km", 0)
-    val frontKw = snap.optDouble("motor_power_kw", 0.0)
+    val rawFront = snap.optDouble("motor_power_kw", 0.0)
+    val speed = snap.optDouble("speed_kmh", 0.0)
     val rpm = snap.optDouble("engine_rpm", 0.0)
     val chargingState = snap.optInt("charging_state", 0)
     val engineOn = rpm > 0
+    // Potência ÀS RODAS só existe com o carro em movimento — parado, roda não gira,
+    // não há tração/regen (o que o carro consome parado é carga auxiliar, não vai pra
+    // roda). Trava em 0 abaixo de ~1 km/h + zona morta p/ ruído.
+    val moving = speed >= 1.0
+    val frontKw = if (!moving || kotlin.math.abs(rawFront) < 1.0) 0.0 else rawFront
     // ESTIMATIVA de kW do térmico por rpm (sem telemetria de potência térmica) — refinar após confirmar.
     val engineKw = if (engineOn) (rpm / 60.0).coerceIn(5.0, 90.0) else 0.0
     // Heurística de série: térmico ligado sem tração elétrica dianteira — refinar com hcu_power_train_state.
@@ -201,15 +208,15 @@ private fun buildTeslaFlowJson(): String {
     val charging = if (chargingState == 1) "ac" else "none"
 
     // Eixo traseiro (AWD): sem chave de potência → deriva da rotação (atividade) e
-    // do sinal do motor dianteiro (regen quando frontKw<0). Magnitude estimada por
-    // REAR_KW_PER_RPM — calibrar com o log. Refinar direção com energy_drive_state.
+    // do sinal do motor dianteiro (regen quando frontKw<0). Só com o carro andando.
+    // Magnitude estimada por REAR_KW_PER_RPM — calibrar com o log.
     val rearSpeed = readRearMotorSpeed()
-    val rearActive = kotlin.math.abs(rearSpeed) > 100.0
+    val rearActive = moving && kotlin.math.abs(rearSpeed) > 100.0
     val rearKw = if (!rearActive) 0.0 else {
         val mag = (kotlin.math.abs(rearSpeed) * REAR_KW_PER_RPM).coerceIn(1.0, 130.0)
         if (frontKw < -0.5) -mag else mag   // regen se o conjunto está regenerando
     }
-    diagPowertrain(frontKw)
+    diagPowertrain(rawFront, speed)
     return JSONObject()
         .put("soc", soc)
         .put("socKm", socKm)
