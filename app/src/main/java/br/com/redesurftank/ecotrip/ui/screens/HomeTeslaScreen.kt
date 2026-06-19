@@ -150,6 +150,19 @@ private fun buildTeslaHomeJson(hd: HomeData): String {
 // traseira; só rear_motor_speed). Calibrar com o log TeslaFlow. Placeholder.
 private const val REAR_KW_PER_RPM = 0.008
 
+// e_axle: 1 = carro tem eixo traseiro elétrico (AWD). No H6 FWD vem 0 → eixo
+// traseiro nunca acende (e o rear_motor_speed vem fixo/garbage = 799). Lido 1x.
+private var _eAxle: Int? = null
+private fun hasRearAxle(): Boolean {
+    if (_eAxle == null) {
+        _eAxle = try {
+            CarDataManager.getInstance()
+                .fetchCurrent(CarConstants.CAR_CONFIGURE_E_AXLE.value)?.trim()?.toFloatOrNull()?.toInt()
+        } catch (_: Exception) { null }
+    }
+    return _eAxle == 1
+}
+
 // Lê rear_motor_speed (rotação do eixo traseiro). Cacheia pra não bloquear cada tick.
 private fun readRearMotorSpeed(): Double {
     return try {
@@ -200,21 +213,22 @@ private fun buildTeslaFlowJson(): String {
     // não há tração/regen (o que o carro consome parado é carga auxiliar, não vai pra
     // roda). Trava em 0 abaixo de ~1 km/h + zona morta p/ ruído.
     val moving = speed >= 1.0
-    val frontKw = if (!moving || kotlin.math.abs(rawFront) < 1.0) 0.0 else rawFront
+    val frontKw = if (!moving || kotlin.math.abs(rawFront) < 2.0) 0.0 else rawFront
     // ESTIMATIVA de kW do térmico por rpm (sem telemetria de potência térmica) — refinar após confirmar.
     val engineKw = if (engineOn) (rpm / 60.0).coerceIn(5.0, 90.0) else 0.0
     // Heurística de série: térmico ligado sem tração elétrica dianteira — refinar com hcu_power_train_state.
     val series = engineOn && kotlin.math.abs(frontKw) < 2.0
     val charging = if (chargingState == 1) "ac" else "none"
 
-    // Eixo traseiro (AWD): sem chave de potência → deriva da rotação (atividade) e
-    // do sinal do motor dianteiro (regen quando frontKw<0). Só com o carro andando.
-    // Magnitude estimada por REAR_KW_PER_RPM — calibrar com o log.
-    val rearSpeed = readRearMotorSpeed()
-    val rearActive = moving && kotlin.math.abs(rearSpeed) > 100.0
-    val rearKw = if (!rearActive) 0.0 else {
-        val mag = (kotlin.math.abs(rearSpeed) * REAR_KW_PER_RPM).coerceIn(1.0, 130.0)
-        if (frontKw < -0.5) -mag else mag   // regen se o conjunto está regenerando
+    // Eixo traseiro: só em carro AWD (e_axle==1). No H6 FWD não existe → 0 sempre
+    // (o rear_motor_speed vem fixo/garbage). Em AWD: deriva da rotação + sinal do
+    // dianteiro (regen quando frontKw<0); magnitude estimada — calibrar com log.
+    val rearKw = if (!moving || !hasRearAxle()) 0.0 else {
+        val rearSpeed = readRearMotorSpeed()
+        if (kotlin.math.abs(rearSpeed) <= 100.0) 0.0 else {
+            val mag = (kotlin.math.abs(rearSpeed) * REAR_KW_PER_RPM).coerceIn(1.0, 130.0)
+            if (frontKw < -0.5) -mag else mag
+        }
     }
     diagPowertrain(rawFront, speed)
     return JSONObject()
