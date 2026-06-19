@@ -164,6 +164,40 @@ private fun readRearMotorSpeed(): Double {
     } catch (_: Exception) { 0.0 }
 }
 
+// Sonda chaves candidatas de potência/torque/estado traseiro (não estão no enum;
+// fetchCurrent aceita string crua). Loga só as que respondem != null, pra
+// descobrir se existe um sinal traseiro vivo no carro (rear_motor_speed é fixo=799).
+private val REAR_CANDIDATES = listOf(
+    "car.ev_info.rear_motor_power",
+    "car.ev_info.rear_motor_torque",
+    "car.ev_info.rear_motor_current",
+    "car.ev_info.rear_motor_temperature",
+    "car.ev_info.rear_motor_status",
+    "car.ev_info.rear_motor_work_mode",
+    "car.ev_info.rear_motor_enable",
+    "car.ev_info.rear_motor_rotate_speed",
+    "car.ev_info.rear_axle_power",
+    "car.ev_info.rear_drive_motor_power",
+    "car.ev_info.p4_motor_power",
+    "car.ev_info.motor2_power",
+    "car.ev_info.motor2_speed",
+    "car.ev_info.motor_torque",
+    "car.ev_info.front_motor_power",
+    "car.ev_info.dual_motor_state",
+    "car.ev_info.four_wheel_drive_state",
+    "car.ev_info.awd_state",
+    "car.basic.rear_motor_power",
+    "car.basic.rear_motor_torque",
+)
+private fun probeRearKeys() {
+    val car = CarDataManager.getInstance()
+    val alive = REAR_CANDIDATES.mapNotNull { k ->
+        val v = try { car.fetchCurrent(k)?.trim() } catch (_: Exception) { null }
+        if (v != null) "${k.substringAfterLast('.')}=$v" else null
+    }
+    Log.w("TeslaProbe", if (alive.isEmpty()) "nenhuma chave traseira respondeu" else alive.joinToString(" "))
+}
+
 // Leitura de diagnóstico das chaves de powertrain ainda não confirmadas — só loga
 // os valores crus pra confirmar a semântica no veículo (task do handoff).
 private var _lastFlowDiag = 0L
@@ -184,6 +218,7 @@ private fun diagPowertrain(rawFrontKw: Double, speed: Double) {
         Log.w("TeslaFlow", "speed=${Math.round(speed)} rawFrontKw=${Math.round(rawFrontKw)} " +
             "hcu_power_train_state=$hcu energy_drive_state=$drv engine_state=$eng " +
             "rear_motor_speed=$rear motor_speed=$mspd energy_recovery_info=$rec e_axle=$eax")
+        probeRearKeys()
     } catch (_: Exception) {}
 }
 
