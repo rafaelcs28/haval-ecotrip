@@ -249,6 +249,7 @@ class MqttManager private constructor() {
     var latestSocPct:       Float = 0f // % — SOC consolidado (pro LocalApiServer LAN)
     var latestDriverSeatVent:    Int = 0    // 0=off, 1–3 nível de ventilação banco motorista
     var latestPassengerSeatVent: Int = 0    // 0=off, 1–3 nível de ventilação banco passageiro
+    private val fuelDisplayFilter = MedianFilter(7)  // suaviza o ruído do sensor de combustível no display
     var latestHvacDriverTemp:    Float = 0f // °C — temperatura definida do AC (zona motorista)
     var latestHvacPassengerTemp: Float = 0f // °C — temperatura definida do AC (zona passageiro)
     var latestHvacFanSpeed:      Int   = 0  // nível do ventilador do AC (1..7)
@@ -1982,7 +1983,7 @@ class MqttManager private constructor() {
             CarDataManager.getInstance().fetchCurrent("car.ev_info.fuel_mode_remain_odometer")?.trim()?.toFloatOrNull()?.let { pubD("fuel_remain_km", it.toInt().toString()) }
             // Autonomia elétrica real do CAN + % de combustível no tanque (litros calculados no iPad).
             CarDataManager.getInstance().fetchCurrent("car.ev_info.electric_mode_remain_odometer")?.trim()?.toFloatOrNull()?.let { pubD("ev_remain_km", it.toInt().toString()) }
-            CarDataManager.getInstance().fetchCurrent("car.basic.remain_fuel_percentage")?.trim()?.toFloatOrNull()?.let { pubD("fuel_pct_can", it.toInt().toString()) }
+            CarDataManager.getInstance().fetchCurrent("car.basic.remain_fuel_percentage")?.trim()?.toFloatOrNull()?.let { pubD("fuel_pct_can", fuelDisplayFilter.push(it).toInt().toString()) }
             pubD("hvac_driver_temp",     fmt1(latestHvacDriverTemp))
             pubD("hvac_passenger_temp",  fmt1(latestHvacPassengerTemp))
             pubD("hvac_fan_speed",    latestHvacFanSpeed.toString())

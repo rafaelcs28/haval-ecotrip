@@ -324,10 +324,11 @@ class LocalApiServer(
     }
     // % de combustível no tanque — car.basic.remain_fuel_percentage (litros = pct × 55/100 no iPad).
     private var _fuelPctAtMs = 0L; private var _fuelPctVal = -1
+    private val _fuelFilter = MedianFilter(7)   // suaviza o ruído do sensor no display
     private fun cachedFuelPct(): Int? {
         val now = System.currentTimeMillis()
         if (now - _fuelPctAtMs > 1000L) { _fuelPctAtMs = now
-            CarDataManager.getInstance().fetchCurrent("car.basic.remain_fuel_percentage")?.trim()?.toFloatOrNull()?.let { _fuelPctVal = it.toInt() } }
+            CarDataManager.getInstance().fetchCurrent("car.basic.remain_fuel_percentage")?.trim()?.toFloatOrNull()?.let { _fuelPctVal = _fuelFilter.push(it).toInt() } }
         return if (_fuelPctVal >= 0) _fuelPctVal else null
     }
     private fun buildStateJson(): String {
