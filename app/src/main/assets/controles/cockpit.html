@@ -819,6 +819,7 @@
       <!-- Barra de controle do app (igual às demais telas) — topo direito -->
       <div class="trip-controls" id="app-bar">
         <div class="conn-mode cloud" id="source-badge" onclick="onConnTap()">☁ Nuvem</div>
+        <div class="conn-mode" id="uplink-badge" style="display:none"></div>
         <span class="car-stat"><span class="lbl">Carro</span><span class="dot" id="car-dot"></span><span class="lbl" id="car-lbl">—</span></span>
         <div class="cfg-btn" id="upd-btn" onclick="checkUpdate()" title="Atualizar">⬇️</div>
         <div class="cfg-btn" id="rec-btn" onclick="openRecargas()" title="Recargas">🔋</div>
@@ -1260,6 +1261,8 @@
       const fresh = state.ts ? (Date.now()-state.ts < 6000) : true;
       const badge=$('source-badge'); if(badge){ badge.className='conn-mode '+(fresh?'lan':'cloud'); badge.textContent=fresh?'🟢 No carro':'⚪ Offline'; }
       const cd=$('car-dot'), cl=$('car-lbl'); if(cd) cd.classList.toggle('ok',fresh); if(cl) cl.textContent=fresh?'online':'—';
+      // Uplink de internet (Starlink/4G/OEM) — mesma fonte do head unit. 4G = laranja (poupar dados).
+      const upb=$('uplink-badge'); if(upb){ const um={WLAN:['📡 Starlink','#28C98A'],'4G':['📶 4G','#FF5F1F'],OFF:['🌐 OEM','#8E8E93']}[state.uplink]; if(um){ upb.textContent=um[0]; upb.style.color=um[1]; upb.style.border='1px solid '+um[1]; upb.style.background='transparent'; upb.style.display='flex'; } else { upb.style.display='none'; } }
 
       // ── POTÊNCIA ──
       const kw = num(state.motor_power_kw) || 0;

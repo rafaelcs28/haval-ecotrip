@@ -55,6 +55,7 @@ import br.com.redesurftank.ecotrip.managers.RollingSnapshot
 import br.com.redesurftank.ecotrip.managers.TripHistoryEntry
 import br.com.redesurftank.ecotrip.managers.TripManager
 import br.com.redesurftank.ecotrip.managers.UpdateManager
+import br.com.redesurftank.ecotrip.managers.UplinkManager
 import br.com.redesurftank.ecotrip.models.CarConstants
 import br.com.redesurftank.ecotrip.ui.components.BulletBar
 import br.com.redesurftank.ecotrip.ui.components.HeroGauge
@@ -518,8 +519,9 @@ fun ConsumptionScreen() {
         else -> baseHd
     }
 
-    // Ações de navegação no header do layout: chip de update + 4 botões
+    // Ações de navegação no header do layout: uplink + chip de update + botões
     val navActions: @Composable RowScope.() -> Unit = {
+        UplinkChip()
         when {
             downloadProgress in 0..99 -> {
                 Text(
@@ -970,3 +972,24 @@ private fun StripMetric(
     }
 }
 
+
+/** Chip de uplink de internet (Starlink/4G/OEM) no header — em todos os layouts. */
+@Composable
+private fun UplinkChip() {
+    var up by remember { mutableStateOf(UplinkManager.current()) }
+    LaunchedEffect(Unit) { while (true) { up = UplinkManager.current(); delay(5000) } }
+    val pair = when (up) {
+        "WLAN" -> "📡 Starlink" to Color(0xFF39FF88)
+        "4G"   -> "📶 4G" to Color(0xFFFF5F1F)
+        "OFF"  -> "🌐 OEM" to Color(0xFF8E8E93)
+        else   -> null   // "?" → sem leitura → esconde
+    } ?: return
+    val (txt, c) = pair
+    Text(
+        txt, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, color = c,
+        modifier = Modifier
+            .padding(end = 4.dp)
+            .border(1.dp, c.copy(alpha = 0.4f), RoundedCornerShape(8.dp))
+            .padding(horizontal = 10.dp, vertical = 4.dp),
+    )
+}
