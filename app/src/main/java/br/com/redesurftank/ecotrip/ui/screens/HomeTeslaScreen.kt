@@ -126,6 +126,7 @@ private fun buildTeslaHomeJson(hd: HomeData): String {
     o.put("temp", hd.outsideTempC)
     o.put("version", "v" + BuildConfig.VERSION_NAME)
     o.put("uplink", UplinkManager.current())   // WLAN(Starlink)/4G/OFF/?
+    o.put("ac", hd.acOn)                        // ❄️ AC ligado
     o.put("dist", htF(hd.distKm, 1))
     o.put("time", hd.timeStr)
     o.put("avg", hd.avgSpeedKmh)

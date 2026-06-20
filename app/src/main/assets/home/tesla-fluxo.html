@@ -126,6 +126,7 @@
     <div class="hdr">
       <span class="ttl">HAVAL H6 PHEV</span><span class="sp"></span>
       <span class="temp" id="h-temp">—</span>
+      <span id="h-ac" style="display:none;font-size:22px;margin-left:10px" title="Ar-condicionado ligado">❄️</span>
       <div class="acts">
         <span class="ver" id="h-uplink" style="display:none"></span>
         <span class="ver" id="h-ver" style="display:none"></span>
@@ -358,6 +359,7 @@
   window.applyHome=function(d){
     if(!d) return;
     if(d.temp!=null) setTxt('h-temp', d.temp+'°');
+    if(d.ac!=null){ var acel=$('h-ac'); if(acel) acel.style.display = d.ac ? '' : 'none'; }   // ❄️ AC ligado
     if(d.version){ var ver=$('h-ver'); if(ver){ ver.textContent=d.version; ver.style.display=''; } }
     // Uplink de internet do head unit (Starlink vs 4G). 4G = laranja (poupar dados).
     if(d.uplink!=null){ var up=$('h-uplink'); if(up){
