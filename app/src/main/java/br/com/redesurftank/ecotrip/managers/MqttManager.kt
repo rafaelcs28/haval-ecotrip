@@ -2591,12 +2591,10 @@ class MqttManager private constructor() {
                     // Payload opcional: {"sec":3} ou nome de source único {"source":"MIC"}.
                     val ctx = appContext
                     if (ctx == null) { publishResult("mic_test", "error: sem contexto"); return@submit }
-                    val granted = ctx.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) ==
-                        android.content.pm.PackageManager.PERMISSION_GRANTED
+                    val granted = ShizukuPerms.ensureGranted(ctx, android.Manifest.permission.RECORD_AUDIO)
                     AppLogger.i(TAG, "[mic_test] RECORD_AUDIO granted=$granted")
                     if (!granted) {
-                        val msg = "error: RECORD_AUDIO não concedida. Rode via Shizuku/ADB: " +
-                            "pm grant ${ctx.packageName} android.permission.RECORD_AUDIO"
+                        val msg = "error: RECORD_AUDIO não concedida (auto-grant via Shizuku falhou)"
                         AppLogger.w(TAG, "[mic_test] $msg")
                         publishResult("mic_test", msg)
                         return@submit

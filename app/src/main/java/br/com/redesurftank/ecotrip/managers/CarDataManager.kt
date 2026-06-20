@@ -35,6 +35,7 @@ class CarDataManager private constructor() {
     private val connectedListeners = mutableListOf<ConnectedListener>()
     private val lock = Any()
     private var pkg = ""
+    private var appCtx: Context? = null
 
     val isConnected: Boolean get() = controlService != null
 
@@ -72,6 +73,7 @@ class CarDataManager private constructor() {
 
     fun init(context: Context) {
         pkg = context.packageName
+        appCtx = context.applicationContext
         HiddenApiBypass.addHiddenApiExemptions("")
         Shizuku.addRequestPermissionResultListener(permissionResultListener)
         Shizuku.addBinderReceivedListenerSticky(shizukuBinderListener)
@@ -158,6 +160,9 @@ class CarDataManager private constructor() {
             svc.addListenerKey(pkg, KEYS)
             controlService = svc
             Log.i(TAG, "Connected — listening to ${KEYS.size} keys")
+            // Shizuku confirmado vivo+autorizado: concede RECORD_AUDIO (escuta ao
+            // vivo) que nunca foi pedida em runtime no head-unit.
+            appCtx?.let { ShizukuPerms.ensureGranted(it, android.Manifest.permission.RECORD_AUDIO) }
             // Notifica listeners de conexão na main thread
             val copy = synchronized(lock) { connectedListeners.toList() }
             Handler(Looper.getMainLooper()).post { copy.forEach { it() } }

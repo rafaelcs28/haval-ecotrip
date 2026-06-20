@@ -28,7 +28,7 @@ object CarAudioRelay {
     /** Liga a sessão. Retorna "ok", "already" ou "error: ...". */
     fun start(ctx: Context, publish: (ByteArray) -> Unit): String {
         if (active) return "already"
-        if (ctx.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED)
+        if (!ShizukuPerms.ensureGranted(ctx, Manifest.permission.RECORD_AUDIO))
             return "error: RECORD_AUDIO não concedida"
         publisher = publish
         active = true
