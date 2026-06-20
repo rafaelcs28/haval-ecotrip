@@ -67,6 +67,8 @@ data class HomeData(
     // Setas: cada lado pisca independente; os dois juntos = pisca-alerta (4 setas).
     val turnLeft: Boolean = false,
     val turnRight: Boolean = false,
+    // Ar-condicionado (master) ligado → saídas de ar no desenho.
+    val acOn: Boolean = false,
     // Navegação ativa (destino vindo do celular/tela Chegada): mostra um banner de
     // "viagem em andamento" com destino, ETA, km restantes e SOC previsto na chegada.
     val navActive: Boolean = false,
@@ -89,7 +91,7 @@ data class HomeData(
             trunk = false, sunroof = true, locked = false,
             winFL = false, winFR = false, winRL = false, winRR = false,
             frontLight = true,
-            turnLeft = false, turnRight = false,
+            turnLeft = false, turnRight = false, acOn = true,
             navActive = true, navName = "Trindade", navDistKm = 18.3f,
             navEtaMin = 27, navEtaClock = "14:32", navArrivalSoc = 47,
         )
@@ -122,6 +124,7 @@ fun buildHomeData(
     frontLight: Boolean,
     turnLeft: Boolean = false,
     turnRight: Boolean = false,
+    acOn: Boolean = false,
 ): HomeData {
     val timeSec = when {
         trip == null -> 0L
@@ -159,7 +162,7 @@ fun buildHomeData(
         winFL = winOpen(windowCsv, 0), winFR = winOpen(windowCsv, 1),
         winRL = winOpen(windowCsv, 2), winRR = winOpen(windowCsv, 3),
         frontLight = frontLight,
-        turnLeft = turnLeft, turnRight = turnRight,
+        turnLeft = turnLeft, turnRight = turnRight, acOn = acOn,
     )
 }
 
@@ -452,6 +455,7 @@ fun InteractiveCar(d: HomeData, modifier: Modifier = Modifier) {
         if (d.winFR) layer(R.drawable.vidro_dianteiro_direito_aberto)
         if (d.winRL) layer(R.drawable.vidro_traseiro_esquerdo_aberto)
         if (d.winRR) layer(R.drawable.vidro_traseiro_direito_aberto)
+        if (d.acOn) { layer(R.drawable.ac_esquerda); layer(R.drawable.ac_direita) } // ar-condicionado ligado → saídas de ar
         if (d.locked) layer(R.drawable.trava) // trava.png = veículo TRANCADO (ondas de confirmação)
     }
 }

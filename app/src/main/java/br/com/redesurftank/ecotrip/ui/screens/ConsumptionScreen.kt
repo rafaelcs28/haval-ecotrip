@@ -117,6 +117,7 @@ fun ConsumptionScreen() {
     var carSunroof by remember { mutableStateOf(0) }
     var carLocked  by remember { mutableStateOf(true) }
     var carFrontLight by remember { mutableStateOf(false) }
+    var carAcOn      by remember { mutableStateOf(false) }
     var carTurnLeft  by remember { mutableStateOf(false) }
     var carTurnRight by remember { mutableStateOf(false) }
 
@@ -128,12 +129,15 @@ fun ConsumptionScreen() {
             val s = withContext(Dispatchers.IO) { carManager.fetchCurrent(CarConstants.CAR_BASIC_SUNROOF_STATUS.value)?.trim() }
             val l = withContext(Dispatchers.IO) { carManager.fetchCurrent(CarConstants.CAR_BASIC_DOOR_LOCK_STATUS.value)?.trim() }
             val fl = withContext(Dispatchers.IO) { carManager.fetchCurrent(CarConstants.CAR_BASIC_FRONT_LIGHT_STATUS.value)?.trim() }
+            val ac = withContext(Dispatchers.IO) { carManager.fetchCurrent(CarConstants.CAR_HVAC_AC_ENABLE.value)?.trim() }
             if (d != null) carDoors = d
             if (w != null) carWindows = w
             if (s != null) carSunroof = s.toFloatOrNull()?.toInt() ?: 0
             if (l != null) carLocked = (l.toFloatOrNull()?.toInt() == 1) // 1=trancado (confirmado no barramento)
             // Farol: vale o fetchCurrent OU o valor da inscrição (evento) — o que reportar ligado
             carFrontLight = (fl?.toFloatOrNull()?.toInt() == 1) || (mqttManager.latestFrontLight == 1)
+            // AC (master): fetchCurrent OU o último valor do broadcast — o que reportar ligado
+            carAcOn = (ac?.toFloatOrNull()?.toInt() == 1) || (mqttManager.latestHvacAcEnable == 1)
             delay(3_000L)
         }
     }
@@ -488,7 +492,7 @@ fun ConsumptionScreen() {
         socNowPct = rolling.currentSocPct, tempC = displayTrip?.outsideTempC?.toInt() ?: 0,
         rangeEvKm = 0, doorCsv = carDoors, windowCsv = carWindows,
         sunroof = carSunroof, locked = carLocked, frontLight = carFrontLight,
-        turnLeft = carTurnLeft, turnRight = carTurnRight,
+        turnLeft = carTurnLeft, turnRight = carTurnRight, acOn = carAcOn,
     )
     // Banner "viagem em andamento" (destino do celular) sobreposto ao HomeData.
     //   • navDest com legs (rota multi-parada do bridge) → destino final = última perna,
