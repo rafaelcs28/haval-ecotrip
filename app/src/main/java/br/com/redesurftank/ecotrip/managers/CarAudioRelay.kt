@@ -21,11 +21,13 @@ object CarAudioRelay {
     private const val TAG = "CarAudioRelay"
     private const val RATE = 8000
     private const val FRAME = RATE / 50   // 160 samples = 20ms
+    // VOICE_COMMUNICATION fora de propósito: ele coloca o HU em "modo chamada"
+    // e abaixa/pausa a mídia (música) durante a captura. As fontes restantes
+    // capturam o mic sem mexer no audio mode, então gravar não interrompe o som.
     private val CANDIDATE_SOURCES = intArrayOf(
         MediaRecorder.AudioSource.VOICE_RECOGNITION,
         MediaRecorder.AudioSource.MIC,
         MediaRecorder.AudioSource.DEFAULT,
-        MediaRecorder.AudioSource.VOICE_COMMUNICATION,
         MediaRecorder.AudioSource.CAMCORDER)
 
     @Volatile private var liveActive = false
