@@ -2042,6 +2042,7 @@ setInterval(() => {
 // dele é sempre anomalia.
 let _sourceStallNotifiedApk = 0;
 let _sourceStallNotifiedGwm = 0;
+let _apkStallActive = false;   // episódio de silêncio do APK já notificado — só re-notifica após recuperar
 const SOURCE_STALL_MS  = 10 * 60_000;          // 10 min de silêncio = stalled
 const SOURCE_NOTIF_GAP = 60 * 60_000;          // não repete antes de 1h
 
@@ -2061,12 +2062,14 @@ function _carIsAwake() {
   const apkFresh = state.last_apk_ms && apkAge < 90_000;          // APK publica a cada poucos segundos
   const gwmFresh = state.last_gwm_ms && gwmAge < 5 * 60_000;      // GWM é polled a cada 30s-2min
   if (!apkFresh && !gwmFresh) return false;
+  // NB: charging não conta como "acordado" aqui. Carro carregando parado na
+  // garagem com APK zumbi cutucava de hora em hora — e os alertas de recarga
+  // vêm da GWM, não do APK, então o silêncio do app não quebra nada nesse caso.
   const gear   = String(state.gear || 'P').toUpperCase();
   const ready  = state.driving_ready === 1 || state.driving_ready === true;
-  const chrg   = state.charging_state === 1;
   const speed  = +state.speed_kmh || 0;
   const power  = state.power_mode != null && +state.power_mode > 0;
-  return ready || chrg || speed > 1 || power || (gear !== 'P' && gear !== 'N');
+  return ready || speed > 1 || power || (gear !== 'P' && gear !== 'N');
 }
 
 setInterval(() => {
@@ -2077,14 +2080,17 @@ setInterval(() => {
   if (apkMs === 0 || gwmMs === 0) return;
   const apkAge = now - apkMs;
   const gwmAge = now - gwmMs;
+  // APK voltou a publicar → encerra o episódio e rearma o alerta.
+  if (apkAge < SOURCE_STALL_MS) _apkStallActive = false;
   // APK silente mas GWM ativo → só alerta se o carro estiver ACORDADO.
-  // Carro dormindo (gear=P + parado + sem carregar) silencia esse alerta — é o normal.
+  // Carro dormindo (gear=P + parado) silencia esse alerta — é o normal.
+  // Edge-triggered: um aviso por episódio, não de hora em hora.
   if (apkAge > SOURCE_STALL_MS && gwmAge < SOURCE_STALL_MS &&
-      (now - _sourceStallNotifiedApk) > SOURCE_NOTIF_GAP &&
-      _carIsAwake()) {
+      !_apkStallActive && _carIsAwake()) {
+    _apkStallActive = true;
     _sourceStallNotifiedApk = now;
     const min = Math.round(apkAge / 60_000);
-    console.log(`[watchdog] APK silente há ${min}min com CARRO ACORDADO (gear=${state.gear} chrg=${state.charging_state} ready=${state.driving_ready})`);
+    console.log(`[watchdog] APK silente há ${min}min com CARRO ACORDADO (gear=${state.gear} ready=${state.driving_ready} speed=${state.speed_kmh})`);
     sendPush('📡 App do carro silente',
       `Sem dados do app no carro há ${min}min (integração GWM continua ativa).`,
       'anomaly_detected');
