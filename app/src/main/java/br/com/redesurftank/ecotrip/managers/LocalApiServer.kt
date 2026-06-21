@@ -33,6 +33,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 class LocalApiServer(
     private val mqttManager: MqttManager,
     port: Int = LOCAL_API_PORT,
+    private val appCtx: android.content.Context? = null,
 ) : NanoWSD(port) {
 
     companion object {
@@ -160,6 +161,8 @@ class LocalApiServer(
                 uri == "/" && method == Method.GET -> handleRoot()
                 uri == "/api/state" && method == Method.GET -> handleState()
                 uri.startsWith("/api/cmd/") && method == Method.POST -> handleCommand(session, uri.removePrefix("/api/cmd/"))
+                uri == "/api/rec/list" && method == Method.GET -> handleRecList()
+                uri.startsWith("/api/rec/file/") && method == Method.GET -> handleRecFile(uri.removePrefix("/api/rec/file/"))
                 else -> newFixedLengthResponse(Response.Status.NOT_FOUND, "text/plain", "404")
             }
             headers.forEach { (k, v) -> resp.addHeader(k, v) }
@@ -181,6 +184,26 @@ class LocalApiServer(
 
     private fun handleState(): Response =
         newFixedLengthResponse(Response.Status.OK, "application/json", buildStateJson())
+
+    // ── Gravações locais (LAN direto) ─────────────────────────────────────────
+    private fun handleRecList(): Response {
+        val ctx = appCtx ?: return newFixedLengthResponse(
+            Response.Status.INTERNAL_ERROR, "application/json", """{"error":"sem contexto"}""")
+        return newFixedLengthResponse(Response.Status.OK, "application/json", CabinRecorder.listJson(ctx))
+    }
+
+    private fun handleRecFile(id: String): Response {
+        val ctx = appCtx ?: return newFixedLengthResponse(
+            Response.Status.INTERNAL_ERROR, "text/plain", "sem contexto")
+        val safe = id.substringBefore('?').filter { it.isLetterOrDigit() }
+        val f = CabinRecorder.fileFor(ctx, safe)
+            ?: return newFixedLengthResponse(Response.Status.NOT_FOUND, "text/plain", "gravação não encontrada")
+        val resp = newFixedLengthResponse(
+            Response.Status.OK, "audio/wav", f.inputStream(), f.length())
+        resp.addHeader("Content-Disposition", "attachment; filename=\"$safe.wav\"")
+        resp.addHeader("Accept-Ranges", "bytes")
+        return resp
+    }
 
     private fun handleCommand(session: IHTTPSession, cmd: String): Response {
         // Lê body

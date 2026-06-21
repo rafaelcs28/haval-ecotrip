@@ -7328,6 +7328,27 @@ app.post('/api/mic-test', requireAuth, async (req, res) => {
   res.json({ ok: true, sent: payload, result: null, note: 'sem resposta em 20s (carro dormindo?)' });
 });
 
+// ── Gravação de cabine por viagem (controle manual pelo iOS) ───────────────
+// O carro grava localmente (WAV) e só transfere sob demanda. Estes endpoints
+// só disparam start/stop/list via MQTT e devolvem o /result do carro. O
+// download do arquivo é LAN direto (APK /api/rec/file/<id>); o bridge é só
+// fallback de controle/listagem quando fora da LAN.
+const _recResults = {};   // { rec_start|rec_stop|rec_list: { value, ts } }
+async function _recCommand(res, cmd, payload, waitMs) {
+  if (!mqttClient?.connected) return res.status(503).json({ error: 'MQTT offline' });
+  _recResults[cmd] = null;
+  mqttClient.publish(`${MQTT_PREFIX}/cmd/${cmd}`, payload, { qos: 1, retain: false });
+  const start = Date.now();
+  while (Date.now() - start < waitMs) {
+    if (_recResults[cmd]) return res.json({ ok: true, result: _recResults[cmd].value });
+    await new Promise(r => setTimeout(r, 200));
+  }
+  res.json({ ok: true, result: null, note: 'sem resposta (carro offline?)' });
+}
+app.post('/api/rec/start', requireAuth, (req, res) => _recCommand(res, 'rec_start', '{}', 8000));
+app.post('/api/rec/stop',  requireAuth, (req, res) => _recCommand(res, 'rec_stop',  '{}', 8000));
+app.get('/api/rec/list',   requireAuth, (req, res) => _recCommand(res, 'rec_list',  '{}', 6000));
+
 // POST /api/vehicle/shade  { level: 0..100 } — cortina elétrica (0=fechada, 100=aberta).
 app.post('/api/vehicle/shade', (req, res) => {
   const level = parseInt(req.body?.level);
@@ -7599,6 +7620,9 @@ const CLUSTER_EXTRA_FIELDS = [
 const CLUSTER_INDIVIDUAL_FIELDS = [
   'fuel_l',            // litros no tanque (state interno do bridge, não publicado pelo APK)
 ];
+// Tópicos publicados pelo próprio bridge (retain) — ignorados na ingestão pra
+// não renovar last_apk_ms com nosso próprio eco (vide handler de message).
+const BRIDGE_ECHO_KEYS = new Set(CLUSTER_INDIVIDUAL_FIELDS);
 function publishClusterExtra() {
   if (!mqttClient || !mqttClient.connected) return;
   const extra = {};
@@ -7701,6 +7725,12 @@ mqttClient.on('message', (topic, payload, packet) => {
   if (topic === `${MQTT_PREFIX}/cmd/mic_test/result`) {
     _micTestResult = { value, ts: Date.now() };
     return;
+  }
+
+  // Gravação de cabine: resultado dos comandos rec_start/rec_stop/rec_list.
+  {
+    const m = topic.match(new RegExp(`^${MQTT_PREFIX}/cmd/(rec_start|rec_stop|rec_list)/result$`));
+    if (m) { _recResults[m[1]] = { value, ts: Date.now() }; return; }
   }
 
   // Dispatcher: tópicos da integração GWM Brasil vão pro handler dedicado;
@@ -7812,6 +7842,13 @@ mqttClient.on('message', (topic, payload, packet) => {
     const key = topic.startsWith(MQTT_PREFIX + '/')
       ? topic.slice(MQTT_PREFIX.length + 1)
       : topic;
+    // Não ingerir os tópicos que o PRÓPRIO bridge republica (cluster_extra +
+    // campos individuais como fuel_l): a subscription em # recebe de volta o
+    // que publicamos e, sem este guard, last_apk_ms era renovado a cada 3s —
+    // o carro parecia eternamente "online" mesmo com o app offline, mascarando
+    // a causa real da escuta não funcionar (app caído) e furando todo gating
+    // de apkFresh/car_online.
+    if (key === 'cluster_extra' || BRIDGE_ECHO_KEYS.has(key)) return;
     applyMqttMessage(key, value, isRetained);
   }
   scheduleStateBroadcast();

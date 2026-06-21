@@ -137,6 +137,7 @@ class MqttManager private constructor() {
     @Volatile private var pendingPingNonce: String? = null
     @Volatile private var pendingPingSentMs = 0L
     private var cmdPathMissCount = 0
+    @Volatile private var micTestRunning = false
     @Volatile private var selfPingFuture: java.util.concurrent.ScheduledFuture<*>? = null
     private val LIVENESS_INTERVAL_S = 20L
     private val LIVENESS_TIMEOUT_MS = 12_000L
@@ -2591,66 +2592,77 @@ class MqttManager private constructor() {
                     // Payload opcional: {"sec":3} ou nome de source único {"source":"MIC"}.
                     val ctx = appContext
                     if (ctx == null) { publishResult("mic_test", "error: sem contexto"); return@submit }
-                    val granted = ShizukuPerms.ensureGranted(ctx, android.Manifest.permission.RECORD_AUDIO)
-                    AppLogger.i(TAG, "[mic_test] RECORD_AUDIO granted=$granted")
-                    if (!granted) {
-                        val msg = "error: RECORD_AUDIO não concedida (auto-grant via Shizuku falhou)"
-                        AppLogger.w(TAG, "[mic_test] $msg")
-                        publishResult("mic_test", msg)
-                        return@submit
-                    }
-                    val sec = try { JSONObject(payload).optInt("sec", 3) } catch (_: Exception) { 3 }.coerceIn(1, 10)
-                    val onlySource = try { JSONObject(payload).optString("source", "") } catch (_: Exception) { "" }
-                    val sampleRate = 16000
-                    val sources = listOf(
-                        "DEFAULT" to android.media.MediaRecorder.AudioSource.DEFAULT,
-                        "MIC" to android.media.MediaRecorder.AudioSource.MIC,
-                        "VOICE_RECOGNITION" to android.media.MediaRecorder.AudioSource.VOICE_RECOGNITION,
-                        "VOICE_COMMUNICATION" to android.media.MediaRecorder.AudioSource.VOICE_COMMUNICATION,
-                        "CAMCORDER" to android.media.MediaRecorder.AudioSource.CAMCORDER,
-                    ).filter { onlySource.isBlank() || it.first == onlySource }
-                    val minBuf = android.media.AudioRecord.getMinBufferSize(
-                        sampleRate, android.media.AudioFormat.CHANNEL_IN_MONO,
-                        android.media.AudioFormat.ENCODING_PCM_16BIT)
-                    val bufSize = if (minBuf > 0) minBuf * 2 else sampleRate * 2
-                    val report = StringBuilder()
-                    for ((name, src) in sources) {
-                        var rec: android.media.AudioRecord? = null
+                    if (micTestRunning) { publishResult("mic_test", "error: já em execução"); return@submit }
+                    micTestRunning = true
+                    // AudioRecord.read() é BLOQUEANTE: se o mic estiver contendido no
+                    // head-unit, read() pendura e nunca chega no deadline. Em thread
+                    // própria isso vaza só esta thread; no cmdExecutor (pool de 3)
+                    // bastavam 3 sweeps presos pra matar TODO comando seguinte —
+                    // inclusive audio_listen (a escuta ao vivo). Por isso isolado aqui.
+                    Thread {
                         try {
-                            rec = android.media.AudioRecord(src, sampleRate,
-                                android.media.AudioFormat.CHANNEL_IN_MONO,
-                                android.media.AudioFormat.ENCODING_PCM_16BIT, bufSize)
-                            if (rec.state != android.media.AudioRecord.STATE_INITIALIZED) {
-                                AppLogger.w(TAG, "[mic_test] $name: init falhou")
-                                report.append("$name=init_fail; "); continue
+                            val granted = ShizukuPerms.ensureGranted(ctx, android.Manifest.permission.RECORD_AUDIO)
+                            AppLogger.i(TAG, "[mic_test] RECORD_AUDIO granted=$granted")
+                            if (!granted) {
+                                publishResult("mic_test", "error: RECORD_AUDIO não concedida (auto-grant via Shizuku falhou)")
+                                return@Thread
                             }
-                            rec.startRecording()
-                            val buf = ShortArray(bufSize / 2)
-                            var sumSq = 0.0; var peak = 0; var total = 0L
-                            val deadline = System.currentTimeMillis() + sec * 1000L
-                            while (System.currentTimeMillis() < deadline) {
-                                val n = rec.read(buf, 0, buf.size)
-                                if (n <= 0) continue
-                                for (i in 0 until n) {
-                                    val v = buf[i].toInt(); val a = if (v < 0) -v else v
-                                    if (a > peak) peak = a; sumSq += (v.toDouble() * v.toDouble())
+                            val sec = try { JSONObject(payload).optInt("sec", 3) } catch (_: Exception) { 3 }.coerceIn(1, 10)
+                            val onlySource = try { JSONObject(payload).optString("source", "") } catch (_: Exception) { "" }
+                            val sampleRate = 16000
+                            val sources = listOf(
+                                "DEFAULT" to android.media.MediaRecorder.AudioSource.DEFAULT,
+                                "MIC" to android.media.MediaRecorder.AudioSource.MIC,
+                                "VOICE_RECOGNITION" to android.media.MediaRecorder.AudioSource.VOICE_RECOGNITION,
+                                "VOICE_COMMUNICATION" to android.media.MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+                                "CAMCORDER" to android.media.MediaRecorder.AudioSource.CAMCORDER,
+                            ).filter { onlySource.isBlank() || it.first == onlySource }
+                            val minBuf = android.media.AudioRecord.getMinBufferSize(
+                                sampleRate, android.media.AudioFormat.CHANNEL_IN_MONO,
+                                android.media.AudioFormat.ENCODING_PCM_16BIT)
+                            val bufSize = if (minBuf > 0) minBuf * 2 else sampleRate * 2
+                            val report = StringBuilder()
+                            for ((name, src) in sources) {
+                                var rec: android.media.AudioRecord? = null
+                                try {
+                                    rec = android.media.AudioRecord(src, sampleRate,
+                                        android.media.AudioFormat.CHANNEL_IN_MONO,
+                                        android.media.AudioFormat.ENCODING_PCM_16BIT, bufSize)
+                                    if (rec.state != android.media.AudioRecord.STATE_INITIALIZED) {
+                                        AppLogger.w(TAG, "[mic_test] $name: init falhou")
+                                        report.append("$name=init_fail; "); continue
+                                    }
+                                    rec.startRecording()
+                                    val buf = ShortArray(bufSize / 2)
+                                    var sumSq = 0.0; var peak = 0; var total = 0L
+                                    val deadline = System.currentTimeMillis() + sec * 1000L
+                                    while (System.currentTimeMillis() < deadline) {
+                                        val n = rec.read(buf, 0, buf.size)
+                                        if (n <= 0) continue
+                                        for (i in 0 until n) {
+                                            val v = buf[i].toInt(); val a = if (v < 0) -v else v
+                                            if (a > peak) peak = a; sumSq += (v.toDouble() * v.toDouble())
+                                        }
+                                        total += n
+                                    }
+                                    rec.stop()
+                                    val rms = if (total > 0) Math.sqrt(sumSq / total) else 0.0
+                                    val rmsDb = if (rms > 0) 20 * Math.log10(rms / 32768.0) else -120.0
+                                    val line = "$name: rms=${"%.0f".format(rms)} (${"%.1f".format(rmsDb)}dB) peak=$peak samples=$total"
+                                    AppLogger.i(TAG, "[mic_test] $line")
+                                    report.append("$name=rms${"%.0f".format(rms)}/pk$peak; ")
+                                } catch (e: Exception) {
+                                    AppLogger.w(TAG, "[mic_test] $name: erro ${e.message}")
+                                    report.append("$name=err(${e.message}); ")
+                                } finally {
+                                    try { rec?.release() } catch (_: Exception) {}
                                 }
-                                total += n
                             }
-                            rec.stop()
-                            val rms = if (total > 0) Math.sqrt(sumSq / total) else 0.0
-                            val rmsDb = if (rms > 0) 20 * Math.log10(rms / 32768.0) else -120.0
-                            val line = "$name: rms=${"%.0f".format(rms)} (${"%.1f".format(rmsDb)}dB) peak=$peak samples=$total"
-                            AppLogger.i(TAG, "[mic_test] $line")
-                            report.append("$name=rms${"%.0f".format(rms)}/pk$peak; ")
-                        } catch (e: Exception) {
-                            AppLogger.w(TAG, "[mic_test] $name: erro ${e.message}")
-                            report.append("$name=err(${e.message}); ")
+                            publishResult("mic_test", "ok: $report")
                         } finally {
-                            try { rec?.release() } catch (_: Exception) {}
+                            micTestRunning = false
                         }
-                    }
-                    publishResult("mic_test", "ok: $report")
+                    }.apply { isDaemon = true; name = "mic-test" }.start()
                 }
                 "audio_listen" -> {
                     // Escuta ao vivo: start abre o mic (publica audio/c2p) + alto-falante
@@ -2660,19 +2672,36 @@ class MqttManager private constructor() {
                         "start" -> {
                             val ctx = appContext
                             if (ctx == null) { publishResult("audio_listen", "error: sem contexto"); return@submit }
-                            val r = CarAudioRelay.start(ctx) { frame ->
+                            val r = CarAudioRelay.startLive(ctx) { frame ->
                                 try { client?.publish("$prefix/audio/c2p", frame, 0, false) } catch (_: Exception) {}
                             }
                             AppLogger.i(TAG, "[audio] start → $r")
                             publishResult("audio_listen", r)
                         }
                         "stop" -> {
-                            CarAudioRelay.stop()
+                            CarAudioRelay.stopLive()
                             AppLogger.i(TAG, "[audio] stop")
                             publishResult("audio_listen", "ok: parado")
                         }
                         else -> publishResult("audio_listen", "error: action inválida ('$action')")
                     }
+                }
+                "rec_start" -> {
+                    val ctx = appContext
+                    if (ctx == null) { publishResult("rec_start", "error: sem contexto"); return@submit }
+                    val r = CarAudioRelay.startRec(ctx)
+                    AppLogger.i(TAG, "[rec] start → $r")
+                    publishResult("rec_start", r)
+                }
+                "rec_stop" -> {
+                    val r = CarAudioRelay.stopRec()
+                    AppLogger.i(TAG, "[rec] stop → $r")
+                    publishResult("rec_stop", r)
+                }
+                "rec_list" -> {
+                    val ctx = appContext
+                    if (ctx == null) { publishResult("rec_list", "error: sem contexto"); return@submit }
+                    publishResult("rec_list", CabinRecorder.listJson(ctx))
                 }
                 "charge_custom_target" -> {
                     // Alvo de corte por software (fora dos presets). O bridge repassa o

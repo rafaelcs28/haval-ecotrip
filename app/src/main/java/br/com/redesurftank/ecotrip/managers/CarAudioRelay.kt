@@ -2,7 +2,6 @@ package br.com.redesurftank.ecotrip.managers
 
 import android.Manifest
 import android.content.Context
-import android.content.pm.PackageManager
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioManager
@@ -10,48 +9,98 @@ import android.media.AudioRecord
 import android.media.AudioTrack
 import android.media.MediaRecorder
 
-// Escuta ao vivo da cabine: captura o mic da central e publica PCM em audio/c2p
-// (carro→fone); toca em audio/p2c (fone→carro) no alto-falante. Half-duplex
-// controlado pelo fone. Formato fixo: PCM16 LE mono 8kHz, frames de 20ms.
+// Captura ÚNICA do mic da central com dois sinks independentes:
+//   • live  → escuta ao vivo (publica PCM em audio/c2p, carro→fone)
+//   • rec   → gravação local da viagem (CabinRecorder grava WAV)
+// Um único AudioRecord alimenta os dois — não dá pra abrir duas fontes no mesmo
+// mic, e isso evita disputa/wedge. O loop roda enquanto QUALQUER sink ativo.
+// Formato fixo: PCM16 LE mono 8kHz, frames de 20ms. AudioTrack (alto-falante,
+// audio/p2c fone→carro) só existe no modo live (half-duplex).
 object CarAudioRelay {
     private const val TAG = "CarAudioRelay"
     private const val RATE = 8000
     private const val FRAME = RATE / 50   // 160 samples = 20ms
 
-    @Volatile private var active = false
-    private var recThread: Thread? = null
+    @Volatile private var liveActive = false
+    @Volatile private var recActive = false
+    @Volatile private var capturing = false
+    private var capThread: Thread? = null
     private var track: AudioTrack? = null
+    private var appCtx: Context? = null
     @Volatile private var publisher: ((ByteArray) -> Unit)? = null
+    private val lock = Any()
 
-    val isActive: Boolean get() = active
+    val isActive: Boolean get() = liveActive
+    val isRecording: Boolean get() = recActive
 
-    /** Liga a sessão. Retorna "ok", "already" ou "error: ...". */
-    fun start(ctx: Context, publish: (ByteArray) -> Unit): String {
-        if (active) return "already"
+    // ── Escuta ao vivo ─────────────────────────────────────────────────────
+    /** Liga a escuta. Retorna "ok", "already" ou "error: ...". */
+    fun startLive(ctx: Context, publish: (ByteArray) -> Unit): String = synchronized(lock) {
+        if (liveActive) return "already"
         if (!ShizukuPerms.ensureGranted(ctx, Manifest.permission.RECORD_AUDIO))
             return "error: RECORD_AUDIO não concedida"
+        appCtx = ctx.applicationContext
         publisher = publish
-        active = true
+        liveActive = true
         setupTrack()
-        recThread = Thread { captureLoop() }.apply { isDaemon = true; name = "audio-c2p"; start() }
-        AppLogger.i(TAG, "sessão de áudio iniciada (8kHz mono)")
+        ensureCapture()
+        AppLogger.i(TAG, "escuta ao vivo iniciada (8kHz mono)")
         return "ok"
     }
 
-    fun stop() {
-        if (!active) return
-        active = false
-        recThread = null
+    fun stopLive() = synchronized(lock) {
+        if (!liveActive) return
+        liveActive = false
         try { track?.stop(); track?.release() } catch (_: Exception) {}
         track = null
         publisher = null
-        AppLogger.i(TAG, "sessão de áudio encerrada")
+        AppLogger.i(TAG, "escuta ao vivo encerrada")
+        maybeStopCapture()
+    }
+
+    // ── Gravação local ───────────────────────────────────────────────────────
+    /** Inicia a gravação da sessão. Retorna "ok:<id>" ou "error: ...". */
+    fun startRec(ctx: Context): String = synchronized(lock) {
+        if (recActive) return "ok:${CabinRecorder.sessionId}"
+        if (!ShizukuPerms.ensureGranted(ctx, Manifest.permission.RECORD_AUDIO))
+            return "error: RECORD_AUDIO não concedida"
+        appCtx = ctx.applicationContext
+        val r = CabinRecorder.start(ctx)
+        if (r.startsWith("error")) return r
+        recActive = true
+        ensureCapture()
+        AppLogger.i(TAG, "gravação iniciada ($r)")
+        return r
+    }
+
+    fun stopRec(): String = synchronized(lock) {
+        if (!recActive) return "ok: nada gravando"
+        recActive = false
+        val ctx = appCtx
+        val r = if (ctx != null) CabinRecorder.stop(ctx) else "ok: sem contexto"
+        AppLogger.i(TAG, "gravação encerrada ($r)")
+        maybeStopCapture()
+        return r
     }
 
     /** Frame PCM vindo do fone (audio/p2c) → toca no alto-falante do carro. */
     fun onIncomingFrame(pcm: ByteArray) {
-        if (!active) return
+        if (!liveActive) return
         try { track?.write(pcm, 0, pcm.size) } catch (_: Exception) {}
+    }
+
+    // ── Captura (uma fonte, fan-out) ──────────────────────────────────────────
+    private fun ensureCapture() {
+        if (capturing) return
+        capturing = true
+        capThread = Thread { captureLoop() }.apply { isDaemon = true; name = "audio-capture"; start() }
+    }
+
+    private fun maybeStopCapture() {
+        if (!liveActive && !recActive) {
+            capturing = false   // o loop sai sozinho ao checar a flag
+            capThread = null
+        }
     }
 
     private fun setupTrack() {
@@ -82,11 +131,13 @@ object CarAudioRelay {
                 r.release()
             } catch (e: Exception) { AppLogger.w(TAG, "src=$src falhou: ${e.message}") }
         }
-        if (rec == null) { AppLogger.w(TAG, "nenhum AudioSource inicializou"); active = false; return }
+        if (rec == null) { AppLogger.w(TAG, "nenhum AudioSource inicializou"); abortCapture(); return }
         val buf = ShortArray(FRAME)
         val bytes = ByteArray(FRAME * 2)
-        try { rec.startRecording() } catch (e: Exception) { AppLogger.w(TAG, "startRecording falhou: ${e.message}"); active = false; rec.release(); return }
-        while (active) {
+        try { rec.startRecording() } catch (e: Exception) {
+            AppLogger.w(TAG, "startRecording falhou: ${e.message}"); rec.release(); abortCapture(); return
+        }
+        while (capturing) {
             val n = rec.read(buf, 0, buf.size)
             if (n <= 0) continue
             var bi = 0
@@ -95,9 +146,22 @@ object CarAudioRelay {
                 bytes[bi++] = (v and 0xFF).toByte()
                 bytes[bi++] = ((v shr 8) and 0xFF).toByte()
             }
-            val out = if (n == FRAME) bytes else bytes.copyOf(n * 2)
-            try { publisher?.invoke(out) } catch (_: Exception) {}
+            val outLen = n * 2
+            // fan-out: escuta ao vivo + gravação local (cada um independente)
+            if (liveActive) {
+                val frame = if (outLen == bytes.size) bytes else bytes.copyOf(outLen)
+                try { publisher?.invoke(frame) } catch (_: Exception) {}
+            }
+            if (recActive) CabinRecorder.feed(bytes, outLen)
         }
         try { rec.stop(); rec.release() } catch (_: Exception) {}
+    }
+
+    private fun abortCapture() = synchronized(lock) {
+        capturing = false
+        liveActive = false
+        if (recActive) { recActive = false; appCtx?.let { CabinRecorder.stop(it) } }
+        try { track?.stop(); track?.release() } catch (_: Exception) {}
+        track = null; publisher = null; capThread = null
     }
 }

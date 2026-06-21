@@ -112,7 +112,7 @@ class CarTelemetryService : Service() {
             var started: LocalApiServer? = null
             for (port in portsToTry) {
                 try {
-                    val api = LocalApiServer(mqtt, port)
+                    val api = LocalApiServer(mqtt, port, applicationContext)
                     api.startServer()
                     if (LocalApiServer.activePort > 0) {
                         started = api
