@@ -8,6 +8,8 @@ import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.AudioTrack
 import android.media.MediaRecorder
+import android.media.audiofx.AcousticEchoCanceler
+import android.media.audiofx.NoiseSuppressor
 import br.com.redesurftank.ecotrip.models.SharedPreferencesKeys
 
 // Captura ÚNICA do mic da central com dois sinks independentes:
@@ -32,7 +34,10 @@ object CarAudioRelay {
 
     @Volatile private var liveActive = false
     @Volatile private var recActive = false
+    @Volatile private var callActive = false
     @Volatile private var capturing = false
+    private var aec: AcousticEchoCanceler? = null
+    private var ns: NoiseSuppressor? = null
     private var capThread: Thread? = null
     private var track: AudioTrack? = null
     private var appCtx: Context? = null
@@ -58,6 +63,7 @@ object CarAudioRelay {
 
     val isActive: Boolean get() = liveActive
     val isRecording: Boolean get() = recActive
+    val isCallActive: Boolean get() = callActive
 
     fun getAgc(ctx: Context): Boolean =
         ctx.getSharedPreferences(SharedPreferencesKeys.PREFS_NAME, Context.MODE_PRIVATE)
@@ -112,6 +118,37 @@ object CarAudioRelay {
         track = null
         publisher = null
         AppLogger.i(TAG, "escuta ao vivo encerrada")
+        maybeStopCapture()
+    }
+
+    // ── Chamada full-duplex ───────────────────────────────────────────────────
+    // Reusa o caminho do live (captura→c2p + AudioTrack←p2c), mas marca callActive
+    // pra anexar AcousticEchoCanceler+NoiseSuppressor à sessão do mic — reduz o eco
+    // do alto-falante voltando pro mic da cabine. Mantém a fonte de mic que já
+    // funciona (built-in) e NÃO mexe no AudioManager.mode global (rotearia o áudio
+    // errado no HU). A outra ponta (iOS) usa .voiceChat com AEC próprio.
+    fun startCall(ctx: Context, publish: (ByteArray) -> Unit): String = synchronized(lock) {
+        if (callActive) return "already"
+        if (!ShizukuPerms.ensureGranted(ctx, Manifest.permission.RECORD_AUDIO))
+            return "error: RECORD_AUDIO não concedida"
+        appCtx = ctx.applicationContext
+        publisher = publish
+        callActive = true
+        liveActive = true
+        setupTrack()
+        ensureCapture()
+        AppLogger.i(TAG, "chamada iniciada (full-duplex + AEC best-effort)")
+        return "ok"
+    }
+
+    fun stopCall() = synchronized(lock) {
+        if (!callActive) return
+        callActive = false
+        liveActive = false
+        try { track?.stop(); track?.release() } catch (_: Exception) {}
+        track = null
+        publisher = null
+        AppLogger.i(TAG, "chamada encerrada")
         maybeStopCapture()
     }
 
@@ -183,6 +220,7 @@ object CarAudioRelay {
         val bufBytes = maxOf(minBuf, FRAME * 2 * 4)
         val rec = openBestSource(bufBytes)
         if (rec == null) { AppLogger.w(TAG, "nenhuma fonte de áudio utilizável"); abortCapture(); return }
+        if (callActive) attachCallEffects(rec.audioSessionId)
         val buf = ShortArray(FRAME)
         val bytes = ByteArray(FRAME * 2)
         while (capturing) {
@@ -216,7 +254,26 @@ object CarAudioRelay {
             }
             if (recActive) CabinRecorder.feed(bytes, outLen)
         }
+        releaseCallEffects()
         try { rec.stop(); rec.release() } catch (_: Exception) {}
+    }
+
+    // AEC/NS best-effort: alguns HUs reportam enabled mas não cancelam de fato (o
+    // HW AEC normalmente exige o caso de uso VOICE_COMMUNICATION/MODE_IN_COMMUNICATION,
+    // que evitamos aqui por risco de mudo/roteamento). Anexa o que o device oferecer.
+    private fun attachCallEffects(sessionId: Int) {
+        try {
+            if (AcousticEchoCanceler.isAvailable())
+                aec = AcousticEchoCanceler.create(sessionId)?.apply { enabled = true }
+            if (NoiseSuppressor.isAvailable())
+                ns = NoiseSuppressor.create(sessionId)?.apply { enabled = true }
+            AppLogger.i(TAG, "call FX: aec=${aec?.enabled} ns=${ns?.enabled}")
+        } catch (e: Exception) { AppLogger.w(TAG, "attachCallEffects falhou: ${e.message}") }
+    }
+
+    private fun releaseCallEffects() {
+        try { aec?.release() } catch (_: Exception) {}; aec = null
+        try { ns?.release() } catch (_: Exception) {}; ns = null
     }
 
     // Sonda cada AudioSource por ~500ms e escolhe a que entrega sinal REAL.

@@ -600,6 +600,7 @@ class MqttManager private constructor() {
         prefs = ctx.getSharedPreferences(SharedPreferencesKeys.PREFS_NAME, Context.MODE_PRIVATE)
         loadConfig()
         restoreDiagState(prefs)
+        wireCallManager()
         // Listener GLOBAL pro car bus — antes vivia em ConsumptionScreen.kt (dentro
         // de um DisposableEffect que descadastrava ao sair da tela). Agora roda
         // SEMPRE — RPM/SOC/speed continuam sendo capturados independente da UI.
@@ -2740,6 +2741,26 @@ class MqttManager private constructor() {
                         else -> publishResult("audio_listen", "error: action inválida ('$action')")
                     }
                 }
+                "call_start" -> {
+                    // Chamada do iOS: {callId, caller, message}. Toca a tela do HU.
+                    val ctx = appContext
+                    if (ctx == null) { publishResult("call_start", "error: sem contexto"); return@submit }
+                    try {
+                        val o = JSONObject(payload)
+                        val id = o.optString("callId", System.currentTimeMillis().toString())
+                        val who = o.optString("caller", "")
+                        val msg = o.optString("message", "")
+                        CallManager.incoming(ctx, id, who, msg)
+                        publishResult("call_start", "ok:$id")
+                    } catch (e: Exception) { publishResult("call_start", "error: ${e.message}") }
+                }
+                "call_end" -> {
+                    // Hang-up vindo do iOS: encerra sem republicar 'ended' (origem é o fone).
+                    val ctx = appContext
+                    if (ctx == null) { publishResult("call_end", "error: sem contexto"); return@submit }
+                    CallManager.end(ctx, notify = false)
+                    publishResult("call_end", "ok")
+                }
                 "rec_start" -> {
                     val ctx = appContext
                     if (ctx == null) { publishResult("rec_start", "error: sem contexto"); return@submit }
@@ -3366,6 +3387,27 @@ class MqttManager private constructor() {
         } catch (e: Exception) {
             AppLogger.w(TAG, "Falha ao publicar resultado: ${e.message}")
         }
+    }
+
+    // Fia o CallManager: como publicar o ciclo da chamada e como ligar/desligar o
+    // áudio full-duplex (reusa o CarAudioRelay com publish em audio/c2p).
+    private fun wireCallManager() {
+        CallManager.publishEvent = { id, st ->
+            try {
+                val o = JSONObject().put("callId", id).put("state", st)
+                client?.publish("$prefix/call/event", o.toString().toByteArray(), 1, false)
+            } catch (e: Exception) { AppLogger.w(TAG, "call/event falhou: ${e.message}") }
+        }
+        CallManager.startAudio = {
+            val ctx = appContext
+            if (ctx != null) {
+                val r = CarAudioRelay.startCall(ctx) { frame ->
+                    try { client?.publish("$prefix/audio/c2p", frame, 0, false) } catch (_: Exception) {}
+                }
+                AppLogger.i(TAG, "[call] startCall → $r")
+            }
+        }
+        CallManager.stopAudio = { CarAudioRelay.stopCall() }
     }
 
     /**

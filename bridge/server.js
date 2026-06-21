@@ -7618,6 +7618,33 @@ app.post('/api/audio/listen', requireAuth, (req, res) => {
   res.json({ ok: true, action });
 });
 
+// ── Chamada pro carro (full-duplex via relay de áudio) ──────────────────────
+// POST /api/call/start { message?, caller? } → o carro avisa na multimídia e
+// auto-aceita em 10s. Devolve o callId; o iOS abre o /ws/audio e fala/ouve. O
+// ciclo (ringing/accepted/ended) chega de volta pelo WS de áudio (texto call:*).
+let _callState = null;   // { callId, state, ts } do último call/event
+app.post('/api/call/start', requireAuth, (req, res) => {
+  if (!mqttClient?.connected) return res.status(503).json({ error: 'MQTT offline' });
+  const callId  = Date.now().toString();
+  const message = String(req.body?.message || '').slice(0, 200);
+  const caller  = String(req.body?.caller || '').slice(0, 60);
+  mqttClient.publish(`${MQTT_PREFIX}/cmd/call_start`,
+    JSON.stringify({ callId, caller, message }), { qos: 1, retain: false });
+  res.json({ ok: true, callId });
+});
+
+// POST /api/call/end — hang-up do fone. O carro encerra o áudio sem republicar.
+app.post('/api/call/end', requireAuth, (req, res) => {
+  if (!mqttClient?.connected) return res.status(503).json({ error: 'MQTT offline' });
+  mqttClient.publish(`${MQTT_PREFIX}/cmd/call_end`, '1', { qos: 1, retain: false });
+  res.json({ ok: true });
+});
+
+// GET /api/call/state — último estado conhecido (fallback de polling).
+app.get('/api/call/state', requireAuth, (req, res) => {
+  res.json({ ok: true, call: _callState });
+});
+
 // ── WebSocket heartbeat (iOS Safari fecha silenciosamente conexões idle) ────────
 setInterval(() => {
   for (const ws of clients) {
@@ -7804,6 +7831,20 @@ mqttClient.on('message', (topic, payload, packet) => {
     for (const ws of audioClients) {
       if (ws.readyState === WebSocket.OPEN) ws.send(payload, { binary: true });
     }
+    return;
+  }
+
+  // Ciclo da chamada (carro→fone): {callId, state}. Relay como texto pros clientes
+  // WS de áudio (o iOS escuta 'call:<state>') e guarda o último estado.
+  if (topic === `${MQTT_PREFIX}/call/event`) {
+    try {
+      const ev = JSON.parse(payload.toString());
+      _callState = { ...ev, ts: Date.now() };
+      const msg = `call:${ev.state}`;
+      for (const ws of audioClients) {
+        if (ws.readyState === WebSocket.OPEN) ws.send(msg);
+      }
+    } catch (_) {}
     return;
   }
 
