@@ -20,6 +20,12 @@ object CarAudioRelay {
     private const val TAG = "CarAudioRelay"
     private const val RATE = 8000
     private const val FRAME = RATE / 50   // 160 samples = 20ms
+    private val CANDIDATE_SOURCES = intArrayOf(
+        MediaRecorder.AudioSource.VOICE_RECOGNITION,
+        MediaRecorder.AudioSource.MIC,
+        MediaRecorder.AudioSource.DEFAULT,
+        MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+        MediaRecorder.AudioSource.CAMCORDER)
 
     @Volatile private var liveActive = false
     @Volatile private var recActive = false
@@ -120,23 +126,10 @@ object CarAudioRelay {
     private fun captureLoop() {
         val minBuf = AudioRecord.getMinBufferSize(RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
         val bufBytes = maxOf(minBuf, FRAME * 2 * 4)
-        var rec: AudioRecord? = null
-        for (src in intArrayOf(
-            MediaRecorder.AudioSource.VOICE_RECOGNITION,
-            MediaRecorder.AudioSource.MIC,
-            MediaRecorder.AudioSource.DEFAULT)) {
-            try {
-                val r = AudioRecord(src, RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, bufBytes)
-                if (r.state == AudioRecord.STATE_INITIALIZED) { rec = r; AppLogger.i(TAG, "AudioRecord src=$src OK"); break }
-                r.release()
-            } catch (e: Exception) { AppLogger.w(TAG, "src=$src falhou: ${e.message}") }
-        }
-        if (rec == null) { AppLogger.w(TAG, "nenhum AudioSource inicializou"); abortCapture(); return }
+        val rec = openBestSource(bufBytes)
+        if (rec == null) { AppLogger.w(TAG, "nenhuma fonte de áudio utilizável"); abortCapture(); return }
         val buf = ShortArray(FRAME)
         val bytes = ByteArray(FRAME * 2)
-        try { rec.startRecording() } catch (e: Exception) {
-            AppLogger.w(TAG, "startRecording falhou: ${e.message}"); rec.release(); abortCapture(); return
-        }
         while (capturing) {
             val n = rec.read(buf, 0, buf.size)
             if (n <= 0) continue
@@ -155,6 +148,66 @@ object CarAudioRelay {
             if (recActive) CabinRecorder.feed(bytes, outLen)
         }
         try { rec.stop(); rec.release() } catch (_: Exception) {}
+    }
+
+    // Sonda cada AudioSource por ~500ms e escolhe a que entrega sinal REAL.
+    // Num HU automotivo VOICE_RECOGNITION costuma inicializar mas devolver zeros
+    // (escuta/gravação mudas) — pegar a primeira que inicializa não basta. Um ADC
+    // vivo sempre tem ruído de fundo (pico > 0) mesmo no silêncio; fonte zerada dá
+    // pico exatamente 0. Escolhe a primeira com pico > SILENCE_FLOOR; senão, a de
+    // maior pico (último recurso). A fonte retornada já está em startRecording().
+    private fun openBestSource(bufBytes: Int): AudioRecord? {
+        val SILENCE_FLOOR = 8
+        val probe = ShortArray(2048)
+        var bestSrc = -1
+        var bestPeak = -1
+        for (src in CANDIDATE_SOURCES) {
+            val peak = probeSource(src, bufBytes, probe)
+            AppLogger.i(TAG, "probe src=$src peak=$peak")
+            if (peak < 0) continue                       // não inicializou
+            if (peak > SILENCE_FLOOR) {                  // sinal real → usa já
+                AppLogger.i(TAG, "fonte escolhida src=$src (sinal real, peak=$peak)")
+                return openSource(src, bufBytes)
+            }
+            if (peak > bestPeak) { bestPeak = peak; bestSrc = src }
+        }
+        if (bestSrc >= 0) {
+            AppLogger.w(TAG, "nenhuma fonte com sinal nítido; usando melhor src=$bestSrc pico=$bestPeak (provável silêncio do HU)")
+            return openSource(bestSrc, bufBytes)
+        }
+        return null
+    }
+
+    /** Abre+grava a fonte e mede o pico em ~500ms. Retorna pico, ou -1 se não inicializou. */
+    private fun probeSource(src: Int, bufBytes: Int, probe: ShortArray): Int {
+        var r: AudioRecord? = null
+        try {
+            r = AudioRecord(src, RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, bufBytes)
+            if (r.state != AudioRecord.STATE_INITIALIZED) return -1
+            r.startRecording()
+            var peak = 0
+            val deadline = System.currentTimeMillis() + 500
+            while (System.currentTimeMillis() < deadline) {
+                val n = r.read(probe, 0, probe.size, AudioRecord.READ_NON_BLOCKING)
+                if (n > 0) { for (i in 0 until n) { val a = kotlin.math.abs(probe[i].toInt()); if (a > peak) peak = a } }
+                else Thread.sleep(20)
+            }
+            return peak
+        } catch (e: Exception) {
+            AppLogger.w(TAG, "src=$src probe falhou: ${e.message}"); return -1
+        } finally {
+            try { r?.stop() } catch (_: Exception) {}
+            try { r?.release() } catch (_: Exception) {}
+        }
+    }
+
+    /** Abre a fonte e já deixa em startRecording(). null se falhar. */
+    private fun openSource(src: Int, bufBytes: Int): AudioRecord? {
+        return try {
+            val r = AudioRecord(src, RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, bufBytes)
+            if (r.state != AudioRecord.STATE_INITIALIZED) { r.release(); return null }
+            r.startRecording(); r
+        } catch (e: Exception) { AppLogger.w(TAG, "openSource src=$src falhou: ${e.message}"); null }
     }
 
     private fun abortCapture() = synchronized(lock) {

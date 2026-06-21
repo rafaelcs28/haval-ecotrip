@@ -2637,8 +2637,10 @@ class MqttManager private constructor() {
                                     var sumSq = 0.0; var peak = 0; var total = 0L
                                     val deadline = System.currentTimeMillis() + sec * 1000L
                                     while (System.currentTimeMillis() < deadline) {
-                                        val n = rec.read(buf, 0, buf.size)
-                                        if (n <= 0) continue
+                                        // não-bloqueante: fonte sem stream (zeros) bloquearia o read
+                                        // indefinidamente e penduraria o diagnóstico (micTestRunning travado).
+                                        val n = rec.read(buf, 0, buf.size, android.media.AudioRecord.READ_NON_BLOCKING)
+                                        if (n <= 0) { Thread.sleep(20); continue }
                                         for (i in 0 until n) {
                                             val v = buf[i].toInt(); val a = if (v < 0) -v else v
                                             if (a > peak) peak = a; sumSq += (v.toDouble() * v.toDouble())
