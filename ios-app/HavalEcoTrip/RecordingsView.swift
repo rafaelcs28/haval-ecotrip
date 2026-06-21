@@ -25,6 +25,8 @@ final class RecordingsStore: NSObject, ObservableObject {
     @Published var lanReady = false
     @Published var playingId: String?
     @Published var downloadingId: String?
+    @Published var gain: Double = 1.0
+    @Published var gainBusy = false
 
     private let lan = LANDiscovery()
     private var lanHostPort: (String, Int)?
@@ -44,6 +46,41 @@ final class RecordingsStore: NSObject, ObservableObject {
         }
         lan.start()
         Task { await refresh() }
+        Task { await loadGain() }
+    }
+
+    // ── Ganho do mic (via bridge → MQTT). Resultado vem como "ok:<float>". ─────
+    private func parseGain(_ res: String) -> Double? {
+        guard res.hasPrefix("ok:") else { return nil }
+        return Double(res.dropFirst(3).trimmingCharacters(in: .whitespaces))
+    }
+
+    func loadGain() async {
+        guard let u = URL(string: base + "/api/rec/gain") else { return }
+        var r = URLRequest(url: u); r.timeoutInterval = 8
+        r.addValue("Bearer " + Settings.bridgeToken, forHTTPHeaderField: "Authorization")
+        do {
+            let (d, resp) = try await URLSession.shared.data(for: r)
+            guard (resp as? HTTPURLResponse)?.statusCode == 200 else { return }
+            let j = try JSONSerialization.jsonObject(with: d) as? [String: Any]
+            if let g = parseGain((j?["result"] as? String) ?? "") { gain = g }
+        } catch {}
+    }
+
+    func setGain(_ g: Double) async {
+        gainBusy = true; defer { gainBusy = false }
+        gain = g   // otimista
+        guard let u = URL(string: base + "/api/rec/gain") else { return }
+        var r = URLRequest(url: u); r.httpMethod = "POST"; r.timeoutInterval = 10
+        r.addValue("Bearer " + Settings.bridgeToken, forHTTPHeaderField: "Authorization")
+        r.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        r.httpBody = try? JSONSerialization.data(withJSONObject: ["gain": g])
+        do {
+            let (d, resp) = try await URLSession.shared.data(for: r)
+            guard (resp as? HTTPURLResponse)?.statusCode == 200 else { error = "Falha ao ajustar ganho."; return }
+            let j = try JSONSerialization.jsonObject(with: d) as? [String: Any]
+            if let eff = parseGain((j?["result"] as? String) ?? "") { gain = eff }   // valor efetivo (clampado no carro)
+        } catch { error = "Erro de rede: \(error.localizedDescription)" }
     }
 
     func onDisappear() { lan.stop(); player?.stop() }
@@ -174,6 +211,7 @@ struct RecordingsView: View {
         ScrollView {
             VStack(spacing: 14) {
                 recordCard
+                gainCard
                 if let e = store.error {
                     Text(e).font(.caption).foregroundStyle(DS.orange)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -218,6 +256,45 @@ struct RecordingsView: View {
                 Text(store.lanReady
                      ? "Áudio fica no carro. Download rápido na mesma rede (LAN)."
                      : "Áudio fica no carro. Fora da rede, baixa pelo bridge (pode levar ~1 min).")
+                    .font(.caption).foregroundStyle(DS.muted)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+
+    // Passos de ganho (×). Mic da cabine é baixo; ajusta aqui sem ir no carro.
+    private static let gainSteps: [Double] = [0.5, 1, 1.5, 2, 3, 4, 6, 8, 12, 16]
+
+    private func stepGain(_ dir: Int) {
+        let cur = store.gain
+        let idx = Self.gainSteps.firstIndex { $0 >= cur - 0.001 } ?? 1
+        let next = max(0, min(Self.gainSteps.count - 1, idx + dir))
+        Task { await store.setGain(Self.gainSteps[next]) }
+    }
+
+    private var gainCard: some View {
+        DSCard {
+            VStack(spacing: 10) {
+                HStack(spacing: 8) {
+                    Image(systemName: "mic.fill").font(.caption).foregroundStyle(DS.teal)
+                    Text("Ganho do microfone").font(.callout).foregroundStyle(DS.text)
+                    Spacer()
+                    if store.gainBusy { ProgressView() }
+                }
+                HStack(spacing: 16) {
+                    Button { stepGain(-1) } label: {
+                        Image(systemName: "minus.circle.fill").font(.title)
+                            .foregroundStyle(store.gain <= Self.gainSteps.first! ? DS.muted : DS.teal)
+                    }.disabled(store.gainBusy || store.gain <= Self.gainSteps.first!)
+                    Text(String(format: "×%g", store.gain))
+                        .font(.title2.weight(.semibold)).foregroundStyle(DS.text)
+                        .frame(minWidth: 70)
+                    Button { stepGain(1) } label: {
+                        Image(systemName: "plus.circle.fill").font(.title)
+                            .foregroundStyle(store.gain >= Self.gainSteps.last! ? DS.muted : DS.teal)
+                    }.disabled(store.gainBusy || store.gain >= Self.gainSteps.last!)
+                }
+                Text("Multiplica o sinal captado (escuta ao vivo e gravação). ×1 = neutro.")
                     .font(.caption).foregroundStyle(DS.muted)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
