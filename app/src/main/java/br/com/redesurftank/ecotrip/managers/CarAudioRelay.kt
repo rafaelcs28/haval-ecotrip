@@ -181,20 +181,20 @@ object CarAudioRelay {
         return null
     }
 
-    // Num HU automotivo o mic da cabine costuma ser um device TYPE_BUS (barramento
-    // interno), não TYPE_BUILTIN_MIC. Sem setPreferredDevice o AudioRecord pega o
-    // default — que pode ser um device mudo. Prefere BUS, senão BUILTIN_MIC.
+    // Neste HU o mic FÍSICO da cabine é o TYPE_BUILTIN_MIC ("bottom") — é o único
+    // que entrega PCM real. Os TYPE_BUS (bus*_vr_in, etc.) são pipelines de
+    // roteamento interno do barramento, vários mudos (VR/COMM devolvem zeros).
+    // Por isso preferimos BUILTIN_MIC; se não existir, deixa o default (sem forçar
+    // BUS, que rotearia pra um device mudo).
     private fun preferInputDevice(rec: AudioRecord) {
         val ctx = appCtx ?: return
         try {
             val am = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
             val devs = am.getDevices(AudioManager.GET_DEVICES_INPUTS)
-            val bus = devs.firstOrNull { it.type == android.media.AudioDeviceInfo.TYPE_BUS }
             val builtin = devs.firstOrNull { it.type == android.media.AudioDeviceInfo.TYPE_BUILTIN_MIC }
-            val pick = bus ?: builtin
-            if (pick != null) {
-                val ok = rec.setPreferredDevice(pick)
-                AppLogger.i(TAG, "setPreferredDevice type=${pick.type} addr=${pick.address} ok=$ok")
+            if (builtin != null) {
+                val ok = rec.setPreferredDevice(builtin)
+                AppLogger.i(TAG, "setPreferredDevice type=${builtin.type} addr=${builtin.address} ok=$ok")
             }
         } catch (e: Exception) { AppLogger.w(TAG, "preferInputDevice falhou: ${e.message}") }
     }
