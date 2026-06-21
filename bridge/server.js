@@ -7368,6 +7368,28 @@ app.post('/api/rec/gain', requireAuth, (req, res) => {
   _recCommand(res, 'audio_gain', JSON.stringify({ gain: g }), 6000);
 });
 
+// Gravação automática on-boot: liga sozinha quando o carro liga. GET lê; POST {enabled} define.
+app.get('/api/rec/auto',  requireAuth, (req, res) => _recCommand(res, 'auto_record', '{}', 6000));
+app.post('/api/rec/auto', requireAuth, (req, res) => {
+  const enabled = req.body?.enabled === true || req.body?.enabled === 'true';
+  _recCommand(res, 'auto_record', JSON.stringify({ enabled }), 6000);
+});
+
+// AGC (ganho automático) na captura. GET lê; POST {enabled} define.
+app.get('/api/rec/agc',  requireAuth, (req, res) => _recCommand(res, 'audio_agc', '{}', 6000));
+app.post('/api/rec/agc', requireAuth, (req, res) => {
+  const enabled = req.body?.enabled === true || req.body?.enabled === 'true';
+  _recCommand(res, 'audio_agc', JSON.stringify({ enabled }), 6000);
+});
+
+// Minutos por arquivo da gravação segmentada. GET lê; POST {min} define (1..60).
+app.get('/api/rec/segment',  requireAuth, (req, res) => _recCommand(res, 'rec_segment', '{}', 6000));
+app.post('/api/rec/segment', requireAuth, (req, res) => {
+  const min = Number(req.body?.min ?? req.query?.min);
+  if (!Number.isFinite(min)) return res.status(400).json({ error: 'min inválido' });
+  _recCommand(res, 'rec_segment', JSON.stringify({ min: Math.round(min) }), 6000);
+});
+
 // Download remoto (WAN): o arquivo vive no carro. O bridge pede via cmd/rec_fetch
 // com um nonce de uso único; o carro faz upload pra /api/rec/upload; o bridge
 // cacheia e serve. GET faz poll até o upload chegar (carro pode estar em 4G).
@@ -7804,7 +7826,7 @@ mqttClient.on('message', (topic, payload, packet) => {
 
   // Gravação de cabine: resultado dos comandos rec_start/rec_stop/rec_list.
   {
-    const m = topic.match(new RegExp(`^${MQTT_PREFIX}/cmd/(rec_start|rec_stop|rec_list|audio_gain)/result$`));
+    const m = topic.match(new RegExp(`^${MQTT_PREFIX}/cmd/(rec_start|rec_stop|rec_list|audio_gain|auto_record|audio_agc|rec_segment)/result$`));
     if (m) { _recResults[m[1]] = { value, ts: Date.now() }; return; }
   }
 

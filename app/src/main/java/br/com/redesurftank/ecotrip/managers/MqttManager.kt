@@ -1679,6 +1679,17 @@ class MqttManager private constructor() {
             lastPublishedEsp = -1
             lastPublishedSteerMode = -1
             setStatus(Status.CONNECTED)
+            // Gravação automática: se ligada, começa a gravar assim que o carro liga
+            // (este connect). startRec é idempotente — reconexões no meio da viagem
+            // não criam sessão nova, só seguem gravando.
+            if (prefs.getBoolean(SharedPreferencesKeys.AUTO_RECORD, false)) {
+                appContext?.let { ctx ->
+                    cmdExecutor.submit {
+                        val r = try { CarAudioRelay.startRec(ctx) } catch (e: Exception) { "error: ${e.message}" }
+                        AppLogger.i(TAG, "[rec] auto-record on boot → $r")
+                    }
+                }
+            }
             // Heartbeat 5s — pequena publicação fire-and-forget pra manter TCP
             // ativo + a métrica de uptime do bridge enxergar tráfego constante.
             // Se a publish falhar, Paho dispara connectionLost imediatamente.
@@ -2740,6 +2751,42 @@ class MqttManager private constructor() {
                     val r = CarAudioRelay.stopRec()
                     AppLogger.i(TAG, "[rec] stop → $r")
                     publishResult("rec_stop", r)
+                }
+                "auto_record" -> {
+                    // Gravação automática on-boot. {"enabled":bool} define+persiste;
+                    // sem campo só lê. Ao ligar, já começa a gravar agora (carro on).
+                    val ctx = appContext
+                    if (ctx == null) { publishResult("auto_record", "error: sem contexto"); return@submit }
+                    val has = try { JSONObject(payload).has("enabled") } catch (_: Exception) { false }
+                    val on = if (has) {
+                        val v = try { JSONObject(payload).optBoolean("enabled", false) } catch (_: Exception) { false }
+                        prefs.edit().putBoolean(SharedPreferencesKeys.AUTO_RECORD, v).apply()
+                        if (v) { val r = CarAudioRelay.startRec(ctx); AppLogger.i(TAG, "[rec] auto-record ON → grava agora ($r)") }
+                        v
+                    } else prefs.getBoolean(SharedPreferencesKeys.AUTO_RECORD, false)
+                    publishResult("auto_record", "ok:$on")
+                }
+                "audio_agc" -> {
+                    // AGC (ganho automático) na captura. {"enabled":bool} define; sem campo lê.
+                    val ctx = appContext
+                    if (ctx == null) { publishResult("audio_agc", "error: sem contexto"); return@submit }
+                    val has = try { JSONObject(payload).has("enabled") } catch (_: Exception) { false }
+                    val on = if (has) {
+                        val v = try { JSONObject(payload).optBoolean("enabled", false) } catch (_: Exception) { false }
+                        CarAudioRelay.setAgc(ctx, v)
+                    } else CarAudioRelay.getAgc(ctx)
+                    publishResult("audio_agc", "ok:$on")
+                }
+                "rec_segment" -> {
+                    // Minutos por arquivo da gravação. {"min":N} define+persiste; sem campo lê.
+                    val ctx = appContext
+                    if (ctx == null) { publishResult("rec_segment", "error: sem contexto"); return@submit }
+                    val has = try { JSONObject(payload).has("min") } catch (_: Exception) { false }
+                    val m = if (has) {
+                        val v = try { JSONObject(payload).optInt("min", 5) } catch (_: Exception) { 5 }
+                        CabinRecorder.setSegmentMin(ctx, v)
+                    } else CabinRecorder.getSegmentMin(ctx)
+                    publishResult("rec_segment", "ok:$m")
                 }
                 "rec_list" -> {
                     val ctx = appContext

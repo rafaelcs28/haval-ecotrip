@@ -1,6 +1,7 @@
 package br.com.redesurftank.ecotrip.managers
 
 import android.content.Context
+import br.com.redesurftank.ecotrip.models.SharedPreferencesKeys
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -16,6 +17,10 @@ object CabinRecorder {
     private const val CHANNELS = 1
     private const val BITS = 16
     private const val QUOTA_BYTES = 1_500L * 1024 * 1024   // ~1.5GB, rotaciona o mais antigo
+    private const val SEG_MIN_DEFAULT = 5
+    private const val SEG_MIN_LO = 1
+    private const val SEG_MIN_HI = 60
+    @Volatile private var segmentMs = SEG_MIN_DEFAULT * 60_000L   // duração do segmento (configurável)
 
     @Volatile private var active = false
     private var raf: RandomAccessFile? = null
@@ -23,6 +28,7 @@ object CabinRecorder {
     private var startMs = 0L
     private var currentId: String = ""
     private var dir: File? = null
+    private var appCtx: Context? = null
     private val lock = Any()
 
     val isRecording: Boolean get() = active
@@ -31,27 +37,69 @@ object CabinRecorder {
     private fun recDir(ctx: Context): File =
         File(ctx.filesDir, "recordings").apply { mkdirs() }
 
+    /** Minutos por arquivo (persistido). Aplica na próxima rolagem (e nas futuras). */
+    fun getSegmentMin(ctx: Context): Int {
+        val m = ctx.getSharedPreferences(SharedPreferencesKeys.PREFS_NAME, Context.MODE_PRIVATE)
+            .getInt(SharedPreferencesKeys.REC_SEGMENT_MIN, SEG_MIN_DEFAULT)
+            .coerceIn(SEG_MIN_LO, SEG_MIN_HI)
+        segmentMs = m * 60_000L
+        return m
+    }
+
+    fun setSegmentMin(ctx: Context, min: Int): Int {
+        val m = min.coerceIn(SEG_MIN_LO, SEG_MIN_HI)
+        segmentMs = m * 60_000L
+        ctx.getSharedPreferences(SharedPreferencesKeys.PREFS_NAME, Context.MODE_PRIVATE)
+            .edit().putInt(SharedPreferencesKeys.REC_SEGMENT_MIN, m).apply()
+        AppLogger.i(TAG, "segmento = ${m}min")
+        return m
+    }
+
     /** Abre uma nova sessão. Retorna "ok:<id>" ou "error: ...". */
     fun start(ctx: Context): String = synchronized(lock) {
         if (active) return "ok:$currentId"   // já gravando — idempotente
-        try {
-            val d = recDir(ctx); dir = d
-            val id = System.currentTimeMillis().toString()
-            val f = File(d, "$id.wav")
-            val r = RandomAccessFile(f, "rw")
-            r.setLength(0)
-            r.write(ByteArray(44))   // placeholder do header, corrigido no stop()
-            raf = r
-            dataBytes = 0L
-            startMs = System.currentTimeMillis()
-            currentId = id
+        appCtx = ctx.applicationContext
+        getSegmentMin(ctx)   // recarrega a duração persistida
+        return try {
+            openSegmentLocked(ctx)
             active = true
-            AppLogger.i(TAG, "gravação iniciada id=$id")
-            "ok:$id"
+            AppLogger.i(TAG, "gravação iniciada id=$currentId (segmentos de ${segmentMs / 60000}min)")
+            "ok:$currentId"
         } catch (e: Exception) {
             active = false
             "error: ${e.message}"
         }
+    }
+
+    /** Abre um arquivo WAV novo (segmento) e zera os contadores. Exige o lock. */
+    private fun openSegmentLocked(ctx: Context) {
+        val d = recDir(ctx); dir = d
+        val id = System.currentTimeMillis().toString()
+        val f = File(d, "$id.wav")
+        val r = RandomAccessFile(f, "rw")
+        r.setLength(0)
+        r.write(ByteArray(44))   // placeholder do header, corrigido ao fechar
+        raf = r
+        dataBytes = 0L
+        startMs = System.currentTimeMillis()
+        currentId = id
+    }
+
+    /** Fecha o segmento atual (corrige header + indexa) e abre o próximo. Exige o lock. */
+    private fun rollSegmentLocked() {
+        val ctx = appCtx ?: return
+        val r = raf ?: return
+        val id = currentId
+        val durMs = System.currentTimeMillis() - startMs
+        try { writeWavHeader(r, dataBytes); r.close() } catch (e: Exception) {
+            AppLogger.w(TAG, "roll: patch header falhou: ${e.message}")
+        }
+        appendIndex(ctx, id, startMs, durMs, dataBytes + 44)
+        enforceQuota(ctx)
+        try { openSegmentLocked(ctx) } catch (e: Exception) {
+            AppLogger.w(TAG, "roll: abrir próximo segmento falhou: ${e.message}"); active = false; return
+        }
+        AppLogger.i(TAG, "segmento $id fechado (${durMs}ms) → novo $currentId")
     }
 
     /** Frame PCM do loop de captura (no-op se não estiver gravando). */
@@ -60,6 +108,7 @@ object CabinRecorder {
         synchronized(lock) {
             val r = raf ?: return
             try { r.write(pcm, 0, len); dataBytes += len } catch (_: Exception) {}
+            if (System.currentTimeMillis() - startMs >= segmentMs) rollSegmentLocked()
         }
     }
 

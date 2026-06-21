@@ -70,6 +70,7 @@ targets:
         # LAN direta: descobre o APK do carro via Bonjour (_havalobd._tcp) e fala
         # WebSocket local (ws://host:8088/ws/state) sem passar pelo Mac mini.
         NSFaceIDUsageDescription: "Use o Face ID para desbloquear o app."
+        NSMicrophoneUsageDescription: "Usa o microfone para falar na cabine do carro durante a escuta ao vivo."
         NSLocalNetworkUsageDescription: "Conecta direto ao carro na mesma rede Wi-Fi para telemetria e comandos com baixa latência."
         NSCalendarsUsageDescription: "Lê seus próximos compromissos para pré-climatizar o carro antes da hora de sair."
         NSCalendarsFullAccessUsageDescription: "Lê seus próximos compromissos para pré-climatizar o carro antes da hora de sair."
@@ -87,6 +88,7 @@ targets:
           - fetch
           - processing
           - remote-notification
+          - audio   # escuta ao vivo da cabine continua tocando com o app em background
         # Quick Actions (3D/Haptic Touch no ícone do app). 4 atalhos: travar,
         # destravar, ligar motor, desligar motor. AppDelegate captura o
         # shortcut e dispara o action via URL scheme havalecotrip://action/<name>.

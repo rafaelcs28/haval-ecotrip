@@ -12,7 +12,10 @@ final class CarAudioSession: ObservableObject {
     enum State: Equatable { case idle, connecting, listening, error(String) }
     @Published var state: State = .idle
     @Published var talking = false
+    @Published var level: Double = 0        // nível de entrada 0…1 (VU meter)
+    @Published var reconnecting = false
 
+    private var reconnectAttempt = 0
     private let rate = 8000.0
     private let engine = AVAudioEngine()
     private let player = AVAudioPlayerNode()
@@ -53,6 +56,8 @@ final class CarAudioSession: ObservableObject {
     }
 
     func stop() async {
+        state = .idle   // antes do cancel: impede o scheduleReconnect de reabrir
+        reconnecting = false; level = 0
         ws?.cancel(with: .goingAway, reason: nil); ws = nil
         if tapInstalled { engine.inputNode.removeTap(onBus: 0); tapInstalled = false }
         player.stop(); engine.stop()
@@ -85,7 +90,11 @@ final class CarAudioSession: ObservableObject {
     private func configureSession() throws {
         let s = AVAudioSession.sharedInstance()
         if micGranted {
-            try s.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker, .allowBluetooth])
+            // mode .default (NÃO .voiceChat): voiceChat joga a saída no domínio de
+            // chamada (voice-processing I/O), governado pelo volume de ligação — que
+            // fica mudo se não houver chamada ativa. Como é half-duplex (fala OU
+            // escuta), não precisamos de AEC; usamos volume de MÍDIA p/ a escuta sair.
+            try s.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth])
         } else {
             // Sem mic: só toca o áudio do carro (escuta passiva). Evita o erro de
             // ativar playAndRecord sem permissão, que abortava a sessão inteira.
@@ -97,6 +106,7 @@ final class CarAudioSession: ObservableObject {
     private func startEngine() throws {
         engine.attach(player)
         engine.connect(player, to: engine.mainMixerNode, format: pcmFormat)
+        engine.mainMixerNode.outputVolume = 1.0
         // Tap do mic pra push-to-talk (converte hw→8kHz PCM16 só quando talking).
         // Só com permissão — acessar o inputNode sem mic derruba o engine.
         if micGranted {
@@ -151,8 +161,25 @@ final class CarAudioSession: ObservableObject {
                 if case .data(let d) = msg { Task { @MainActor in self.enqueue(d) } }
                 self.receive()
             case .failure:
-                Task { @MainActor in if self.state == .listening { self.state = .error("Conexão de áudio caiu.") } }
+                // Não erra direto: em rede móvel/background o WS cai sozinho. Tenta
+                // reconectar com backoff enquanto a escuta estiver ligada.
+                Task { @MainActor in if self.state == .listening { self.scheduleReconnect() } }
             }
+        }
+    }
+
+    private func scheduleReconnect() {
+        guard state == .listening, !reconnecting else { return }
+        reconnecting = true
+        reconnectAttempt += 1
+        let delay = min(pow(2.0, Double(reconnectAttempt - 1)), 8.0)   // 1,2,4,8s (cap)
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            guard self.state == .listening else { self.reconnecting = false; return }
+            await self.controlCar(action: "start")   // reabre a captura no carro (idempotente)
+            self.ws?.cancel(with: .goingAway, reason: nil)
+            self.connectWS()
+            self.reconnecting = false
         }
     }
 
@@ -160,12 +187,20 @@ final class CarAudioSession: ObservableObject {
         let n = data.count / 2
         guard n > 0, engine.isRunning,
               let buf = AVAudioPCMBuffer(pcmFormat: pcmFormat, frameCapacity: AVAudioFrameCount(n)) else { return }
+        reconnectAttempt = 0   // chegou áudio → conexão saudável, zera o backoff
         buf.frameLength = AVAudioFrameCount(n)
         let out = buf.floatChannelData![0]
+        var peak: Float = 0
         data.withUnsafeBytes { raw in
             let i16 = raw.bindMemory(to: Int16.self)
-            for i in 0..<n { out[i] = Float(Int16(littleEndian: i16[i])) / 32768.0 }
+            for i in 0..<n {
+                let s = Float(Int16(littleEndian: i16[i])) / 32768.0
+                out[i] = s
+                let a = abs(s); if a > peak { peak = a }
+            }
         }
+        // Meter com decaimento (pico sobe na hora, desce suave).
+        level = max(Double(peak), level * 0.82)
         player.scheduleBuffer(buf, completionHandler: nil)
     }
 }

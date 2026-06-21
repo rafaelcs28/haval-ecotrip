@@ -78,7 +78,27 @@ struct MicTestSheet: View {
                     .foregroundStyle(.white).clipShape(RoundedRectangle(cornerRadius: 14))
                 }
                 .disabled(audio.state == .connecting)
+                if listening { levelMeter }
             }
+        }
+    }
+
+    // VU meter ao vivo: distingue "mudo" de "cabine quieta". Verde→laranja→vermelho.
+    private var levelMeter: some View {
+        VStack(spacing: 4) {
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 4).fill(DS.muted.opacity(0.25))
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(audio.level > 0.85 ? DS.red : (audio.level > 0.5 ? DS.orange : DS.green))
+                        .frame(width: max(2, geo.size.width * CGFloat(min(audio.level, 1))))
+                }
+            }
+            .frame(height: 8)
+            .animation(.linear(duration: 0.1), value: audio.level)
+            Text(audio.level < 0.02 ? "Sem som — cabine quieta ou mic mudo (tente aumentar o ganho)" : "Nível do som da cabine")
+                .font(.caption2).foregroundStyle(DS.muted)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
@@ -94,7 +114,9 @@ struct MicTestSheet: View {
         switch audio.state {
         case .idle: return "Parado"
         case .connecting: return "Conectando…"
-        case .listening: return audio.talking ? "Falando…" : "Ouvindo a cabine"
+        case .listening:
+            if audio.reconnecting { return "Reconectando…" }
+            return audio.talking ? "Falando…" : "Ouvindo a cabine"
         case .error(let m): return m
         }
     }

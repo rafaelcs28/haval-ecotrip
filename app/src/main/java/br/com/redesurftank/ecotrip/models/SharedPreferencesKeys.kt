@@ -64,6 +64,13 @@ object SharedPreferencesKeys {
     // escuta ao vivo + gravação). Default 1.0. Persistido pra sobreviver reinício.
     const val MIC_GAIN               = "mic_gain"
 
+    // Gravação automática da cabine: liga sozinha quando o carro liga (MQTT conecta).
+    const val AUTO_RECORD            = "auto_record"
+    // AGC (ganho automático) na captura — nivela o volume. Default off.
+    const val AGC_ENABLED            = "agc_enabled"
+    // Minutos por arquivo da gravação segmentada (configurável pelo iOS). Default 5.
+    const val REC_SEGMENT_MIN        = "rec_segment_min"
+
     // Auto-trip display filter
     const val MIN_AUTO_TRIP_DIST_KM  = "min_auto_trip_dist_km"
 

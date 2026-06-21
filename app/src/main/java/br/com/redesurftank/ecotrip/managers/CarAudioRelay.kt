@@ -44,8 +44,32 @@ object CarAudioRelay {
     private const val GAIN_MIN = 0.5f
     private const val GAIN_MAX = 16.0f
 
+    // AGC (ganho automático): nivela o volume mirando um pico-alvo, com ataque
+    // rápido (reduz) e release lento (sobe). Multiplica DEPOIS do micGain manual.
+    @Volatile private var agcEnabled = false
+    private var agcGain = 1.0f
+    private const val AGC_TARGET = 7000f   // pico-alvo (de 32768)
+    private const val AGC_MIN = 0.5f
+    private const val AGC_MAX = 12.0f
+    private const val AGC_ATTACK = 0.30f   // ao reduzir (sinal alto) — rápido
+    private const val AGC_RELEASE = 0.04f  // ao subir (sinal baixo) — lento, sem bombear
+
     val isActive: Boolean get() = liveActive
     val isRecording: Boolean get() = recActive
+
+    fun getAgc(ctx: Context): Boolean =
+        ctx.getSharedPreferences(SharedPreferencesKeys.PREFS_NAME, Context.MODE_PRIVATE)
+            .getBoolean(SharedPreferencesKeys.AGC_ENABLED, false)
+            .also { agcEnabled = it }
+
+    fun setAgc(ctx: Context, on: Boolean): Boolean {
+        agcEnabled = on
+        if (!on) agcGain = 1.0f
+        ctx.getSharedPreferences(SharedPreferencesKeys.PREFS_NAME, Context.MODE_PRIVATE)
+            .edit().putBoolean(SharedPreferencesKeys.AGC_ENABLED, on).apply()
+        AppLogger.i(TAG, "AGC = $on")
+        return on
+    }
 
     /** Lê o ganho persistido (default 1.0). */
     fun getGain(ctx: Context): Float {
@@ -123,7 +147,7 @@ object CarAudioRelay {
     // ── Captura (uma fonte, fan-out) ──────────────────────────────────────────
     private fun ensureCapture() {
         if (capturing) return
-        appCtx?.let { getGain(it) }   // recarrega ganho persistido
+        appCtx?.let { getGain(it); getAgc(it) }   // recarrega ganho + AGC persistidos
         // FGS-microphone: sem isso o A14+ entrega zeros (mute por policy).
         try { br.com.redesurftank.ecotrip.services.CarTelemetryService.current?.enableMicForeground() } catch (_: Exception) {}
         capturing = true
@@ -163,12 +187,24 @@ object CarAudioRelay {
             val n = rec.read(buf, 0, buf.size)
             if (n <= 0) continue
             val g = micGain
+            val agc = agcEnabled
+            val ag = agcGain
             var bi = 0
+            var framePeak = 0
             for (i in 0 until n) {
                 var v = buf[i].toInt()
                 if (g != 1.0f) v = (v * g).toInt().coerceIn(-32768, 32767)  // saturação, sem wrap
+                if (agc && ag != 1.0f) v = (v * ag).toInt().coerceIn(-32768, 32767)
+                val a = if (v < 0) -v else v
+                if (a > framePeak) framePeak = a
                 bytes[bi++] = (v and 0xFF).toByte()
                 bytes[bi++] = ((v shr 8) and 0xFF).toByte()
+            }
+            // Atualiza o ganho do AGC pro próximo frame (feedback: já inclui ag atual).
+            if (agc && framePeak > 30) {
+                val desired = (ag * AGC_TARGET / framePeak).coerceIn(AGC_MIN, AGC_MAX)
+                val rate = if (desired < ag) AGC_ATTACK else AGC_RELEASE
+                agcGain = ag + (desired - ag) * rate
             }
             val outLen = n * 2
             // fan-out: escuta ao vivo + gravação local (cada um independente)
