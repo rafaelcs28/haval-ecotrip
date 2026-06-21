@@ -2854,6 +2854,10 @@ app.use('/api', (req, res, next) => {
       req.path === '/mapkit/token') return next();   // mapkit/token: JWT só vale pra Apple Maps, não dá acesso a nada do bridge
   // Compartilhamento de status: páginas públicas validadas pelo token na própria URL.
   if (/^\/share\/[^/]+\/(state|eta)$/.test(req.path)) return next();
+  // Upload de gravação: o carro autentica com nonce de uso único (X-Rec-Token),
+  // não com o token do bridge — a própria rota valida. Sem isso o requireAuth
+  // devolvia 401 e o carro quebrava o stream (broken pipe) no meio do POST.
+  if (req.path === '/rec/upload') return next();
   requireAuth(req, res, next);
 });
 
