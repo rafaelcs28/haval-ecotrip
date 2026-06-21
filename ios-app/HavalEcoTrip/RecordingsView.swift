@@ -77,10 +77,10 @@ final class RecordingsStore: NSObject, ObservableObject {
         r.httpBody = try? JSONSerialization.data(withJSONObject: ["gain": g])
         do {
             let (d, resp) = try await URLSession.shared.data(for: r)
-            guard (resp as? HTTPURLResponse)?.statusCode == 200 else { error = "Falha ao ajustar ganho."; return }
+            guard (resp as? HTTPURLResponse)?.statusCode == 200 else { self.error = "Falha ao ajustar ganho."; return }
             let j = try JSONSerialization.jsonObject(with: d) as? [String: Any]
             if let eff = parseGain((j?["result"] as? String) ?? "") { gain = eff }   // valor efetivo (clampado no carro)
-        } catch { error = "Erro de rede: \(error.localizedDescription)" }
+        } catch { self.error = "Erro de rede: \(error.localizedDescription)" }
     }
 
     func onDisappear() { lan.stop(); player?.stop() }
