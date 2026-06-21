@@ -60,6 +60,10 @@ object SharedPreferencesKeys {
     // 0 = desligado. Persistido pra o corte funcionar offline (sem bridge/broker).
     const val CHARGE_CUSTOM_TARGET   = "charge_custom_target"
 
+    // Ganho do mic da cabine (multiplicador linear aplicado na captura, afeta
+    // escuta ao vivo + gravação). Default 1.0. Persistido pra sobreviver reinício.
+    const val MIC_GAIN               = "mic_gain"
+
     // Auto-trip display filter
     const val MIN_AUTO_TRIP_DIST_KM  = "min_auto_trip_dist_km"
 

@@ -2695,6 +2695,18 @@ class MqttManager private constructor() {
                         }
                     }.apply { isDaemon = true; name = "audio-diag" }.start()
                 }
+                "audio_gain" -> {
+                    // Ganho do mic da cabine. Payload {"gain":2.0} define+persiste;
+                    // sem "gain" só lê o atual. Aplica na captura em andamento.
+                    val ctx = appContext
+                    if (ctx == null) { publishResult("audio_gain", "error: sem contexto"); return@submit }
+                    val has = try { JSONObject(payload).has("gain") } catch (_: Exception) { false }
+                    val g = if (has) {
+                        val req = try { JSONObject(payload).optDouble("gain", 1.0).toFloat() } catch (_: Exception) { 1.0f }
+                        CarAudioRelay.setGain(ctx, req)
+                    } else CarAudioRelay.getGain(ctx)
+                    publishResult("audio_gain", "ok:$g")
+                }
                 "audio_listen" -> {
                     // Escuta ao vivo: start abre o mic (publica audio/c2p) + alto-falante
                     // (toca audio/p2c); stop encerra. Half-duplex controlado pelo fone.

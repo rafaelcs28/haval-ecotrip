@@ -8,6 +8,7 @@ import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.AudioTrack
 import android.media.MediaRecorder
+import br.com.redesurftank.ecotrip.models.SharedPreferencesKeys
 
 // Captura ÚNICA do mic da central com dois sinks independentes:
 //   • live  → escuta ao vivo (publica PCM em audio/c2p, carro→fone)
@@ -36,8 +37,32 @@ object CarAudioRelay {
     @Volatile private var publisher: ((ByteArray) -> Unit)? = null
     private val lock = Any()
 
+    // Ganho linear do mic (1.0 = neutro). Mic da cabine costuma ser baixo; o
+    // usuário ajusta pelo app. Clampado em 0.5..16.0 e aplicado por amostra com
+    // saturação (sem wrap) na captura — afeta escuta ao vivo E gravação.
+    @Volatile private var micGain = 1.0f
+    private const val GAIN_MIN = 0.5f
+    private const val GAIN_MAX = 16.0f
+
     val isActive: Boolean get() = liveActive
     val isRecording: Boolean get() = recActive
+
+    /** Lê o ganho persistido (default 1.0). */
+    fun getGain(ctx: Context): Float {
+        return ctx.getSharedPreferences(SharedPreferencesKeys.PREFS_NAME, Context.MODE_PRIVATE)
+            .getFloat(SharedPreferencesKeys.MIC_GAIN, 1.0f)
+            .also { micGain = it.coerceIn(GAIN_MIN, GAIN_MAX) }
+    }
+
+    /** Define+persiste o ganho. Aplica na hora (afeta captura em andamento). Retorna o valor efetivo. */
+    fun setGain(ctx: Context, g: Float): Float {
+        val v = g.coerceIn(GAIN_MIN, GAIN_MAX)
+        micGain = v
+        ctx.getSharedPreferences(SharedPreferencesKeys.PREFS_NAME, Context.MODE_PRIVATE)
+            .edit().putFloat(SharedPreferencesKeys.MIC_GAIN, v).apply()
+        AppLogger.i(TAG, "mic gain = $v")
+        return v
+    }
 
     // ── Escuta ao vivo ─────────────────────────────────────────────────────
     /** Liga a escuta. Retorna "ok", "already" ou "error: ...". */
@@ -98,6 +123,7 @@ object CarAudioRelay {
     // ── Captura (uma fonte, fan-out) ──────────────────────────────────────────
     private fun ensureCapture() {
         if (capturing) return
+        appCtx?.let { getGain(it) }   // recarrega ganho persistido
         // FGS-microphone: sem isso o A14+ entrega zeros (mute por policy).
         try { br.com.redesurftank.ecotrip.services.CarTelemetryService.current?.enableMicForeground() } catch (_: Exception) {}
         capturing = true
@@ -136,9 +162,11 @@ object CarAudioRelay {
         while (capturing) {
             val n = rec.read(buf, 0, buf.size)
             if (n <= 0) continue
+            val g = micGain
             var bi = 0
             for (i in 0 until n) {
-                val v = buf[i].toInt()
+                var v = buf[i].toInt()
+                if (g != 1.0f) v = (v * g).toInt().coerceIn(-32768, 32767)  // saturação, sem wrap
                 bytes[bi++] = (v and 0xFF).toByte()
                 bytes[bi++] = ((v shr 8) and 0xFF).toByte()
             }

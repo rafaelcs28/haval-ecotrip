@@ -7359,6 +7359,15 @@ app.post('/api/rec/start', requireAuth, (req, res) => _recCommand(res, 'rec_star
 app.post('/api/rec/stop',  requireAuth, (req, res) => _recCommand(res, 'rec_stop',  '{}', 8000));
 app.get('/api/rec/list',   requireAuth, (req, res) => _recCommand(res, 'rec_list',  '{}', 6000));
 
+// Ganho do mic da cabine (multiplicador linear, 0.5..16). GET lê o atual;
+// POST {gain} define+persiste no carro. Afeta escuta ao vivo + gravação.
+app.get('/api/rec/gain',  requireAuth, (req, res) => _recCommand(res, 'audio_gain', '{}', 6000));
+app.post('/api/rec/gain', requireAuth, (req, res) => {
+  const g = Number(req.body?.gain ?? req.query?.gain);
+  if (!Number.isFinite(g)) return res.status(400).json({ error: 'gain inválido' });
+  _recCommand(res, 'audio_gain', JSON.stringify({ gain: g }), 6000);
+});
+
 // Download remoto (WAN): o arquivo vive no carro. O bridge pede via cmd/rec_fetch
 // com um nonce de uso único; o carro faz upload pra /api/rec/upload; o bridge
 // cacheia e serve. GET faz poll até o upload chegar (carro pode estar em 4G).
@@ -7795,7 +7804,7 @@ mqttClient.on('message', (topic, payload, packet) => {
 
   // Gravação de cabine: resultado dos comandos rec_start/rec_stop/rec_list.
   {
-    const m = topic.match(new RegExp(`^${MQTT_PREFIX}/cmd/(rec_start|rec_stop|rec_list)/result$`));
+    const m = topic.match(new RegExp(`^${MQTT_PREFIX}/cmd/(rec_start|rec_stop|rec_list|audio_gain)/result$`));
     if (m) { _recResults[m[1]] = { value, ts: Date.now() }; return; }
   }
 
