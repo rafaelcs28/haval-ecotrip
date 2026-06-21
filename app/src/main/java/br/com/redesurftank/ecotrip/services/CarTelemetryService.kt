@@ -159,6 +159,51 @@ class CarTelemetryService : Service() {
         return START_STICKY
     }
 
+    @Volatile private var micForeground = false
+
+    /**
+     * Escala o foreground service pra incluir o tipo `microphone`. No Android 14+
+     * (este HU é A16) um AudioRecord só recebe áudio real se o processo tiver um
+     * FGS com type microphone ativo — senão o framework entrega zeros (mute por
+     * policy). Não dá pra declarar isso no onCreate porque RECORD_AUDIO é
+     * concedida lazy via Shizuku DEPOIS; aqui re-chamamos startForeground já com
+     * a permissão em mãos. Idempotente. Chamado pelo CarAudioRelay ao iniciar
+     * captura. Retorna true se o tipo microphone está ativo após a chamada.
+     */
+    fun enableMicForeground(): Boolean {
+        if (micForeground) return true
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val type = android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC or
+                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                startForeground(NOTIF_ID, buildNotification("Capturando dados do carro"), type)
+            } else {
+                startForeground(NOTIF_ID, buildNotification("Capturando dados do carro"))
+            }
+            micForeground = true
+            android.util.Log.i(TAG, "FGS escalado p/ microphone")
+            true
+        } catch (e: Exception) {
+            android.util.Log.w(TAG, "enableMicForeground falhou: ${e.message}")
+            false
+        }
+    }
+
+    /** Volta o FGS pro tipo dataSync (some o indicador de mic). Idempotente. */
+    fun disableMicForeground() {
+        if (!micForeground) return
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(NOTIF_ID, buildNotification("Capturando dados do carro"),
+                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+            }
+            micForeground = false
+            android.util.Log.i(TAG, "FGS rebaixado p/ dataSync")
+        } catch (e: Exception) {
+            android.util.Log.w(TAG, "disableMicForeground falhou: ${e.message}")
+        }
+    }
+
     override fun onDestroy() {
         android.util.Log.i(TAG, "CarTelemetryService.onDestroy")
         applyLanEnabled(false)

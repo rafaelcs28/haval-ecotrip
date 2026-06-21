@@ -2607,6 +2607,8 @@ class MqttManager private constructor() {
                                 publishResult("mic_test", "error: RECORD_AUDIO não concedida (auto-grant via Shizuku falhou)")
                                 return@Thread
                             }
+                            // A14+: sem FGS-microphone ativo, AudioRecord lê só zeros.
+                            try { br.com.redesurftank.ecotrip.services.CarTelemetryService.current?.enableMicForeground() } catch (_: Exception) {}
                             val sec = try { JSONObject(payload).optInt("sec", 3) } catch (_: Exception) { 3 }.coerceIn(1, 10)
                             val onlySource = try { JSONObject(payload).optString("source", "") } catch (_: Exception) { "" }
                             val sampleRate = 16000
@@ -2665,6 +2667,33 @@ class MqttManager private constructor() {
                             micTestRunning = false
                         }
                     }.apply { isDaemon = true; name = "mic-test" }.start()
+                }
+                "audio_diag" -> {
+                    // Diagnóstico do subsistema de áudio: lista devices de entrada
+                    // (type/addr/id), estado do sensor-privacy (mute global) e o tipo
+                    // atual do FGS. Ajuda a saber por que o mic entrega zeros.
+                    val ctx = appContext
+                    if (ctx == null) { publishResult("audio_diag", "error: sem contexto"); return@submit }
+                    Thread {
+                        try {
+                            val sb = StringBuilder()
+                            try {
+                                val am = ctx.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+                                val devs = am.getDevices(android.media.AudioManager.GET_DEVICES_INPUTS)
+                                sb.append("inputs[${devs.size}]: ")
+                                for (d in devs) sb.append("type${d.type}/id${d.id}/${d.address}; ")
+                                sb.append("mode=${am.mode}; micMute=${am.isMicrophoneMute}; ")
+                            } catch (e: Exception) { sb.append("devices_err=${e.message}; ") }
+                            // sensor-privacy (mute global de mic) via shell adb
+                            val sp = ShizukuPerms.runShell("dumpsys", "sensor_privacy")
+                            val spLine = sp.lineSequence().firstOrNull { it.contains("mic", true) || it.contains("Microphone", true) } ?: "(sem linha mic)"
+                            sb.append("sensor_privacy.mic=$spLine")
+                            publishResult("audio_diag", "ok: $sb")
+                            AppLogger.i(TAG, "[audio_diag] $sb")
+                        } catch (e: Exception) {
+                            publishResult("audio_diag", "error: ${e.message}")
+                        }
+                    }.apply { isDaemon = true; name = "audio-diag" }.start()
                 }
                 "audio_listen" -> {
                     // Escuta ao vivo: start abre o mic (publica audio/c2p) + alto-falante

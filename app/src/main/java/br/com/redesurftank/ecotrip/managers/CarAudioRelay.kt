@@ -98,6 +98,8 @@ object CarAudioRelay {
     // ── Captura (uma fonte, fan-out) ──────────────────────────────────────────
     private fun ensureCapture() {
         if (capturing) return
+        // FGS-microphone: sem isso o A14+ entrega zeros (mute por policy).
+        try { br.com.redesurftank.ecotrip.services.CarTelemetryService.current?.enableMicForeground() } catch (_: Exception) {}
         capturing = true
         capThread = Thread { captureLoop() }.apply { isDaemon = true; name = "audio-capture"; start() }
     }
@@ -106,6 +108,7 @@ object CarAudioRelay {
         if (!liveActive && !recActive) {
             capturing = false   // o loop sai sozinho ao checar a flag
             capThread = null
+            try { br.com.redesurftank.ecotrip.services.CarTelemetryService.current?.disableMicForeground() } catch (_: Exception) {}
         }
     }
 
@@ -178,12 +181,31 @@ object CarAudioRelay {
         return null
     }
 
+    // Num HU automotivo o mic da cabine costuma ser um device TYPE_BUS (barramento
+    // interno), não TYPE_BUILTIN_MIC. Sem setPreferredDevice o AudioRecord pega o
+    // default — que pode ser um device mudo. Prefere BUS, senão BUILTIN_MIC.
+    private fun preferInputDevice(rec: AudioRecord) {
+        val ctx = appCtx ?: return
+        try {
+            val am = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            val devs = am.getDevices(AudioManager.GET_DEVICES_INPUTS)
+            val bus = devs.firstOrNull { it.type == android.media.AudioDeviceInfo.TYPE_BUS }
+            val builtin = devs.firstOrNull { it.type == android.media.AudioDeviceInfo.TYPE_BUILTIN_MIC }
+            val pick = bus ?: builtin
+            if (pick != null) {
+                val ok = rec.setPreferredDevice(pick)
+                AppLogger.i(TAG, "setPreferredDevice type=${pick.type} addr=${pick.address} ok=$ok")
+            }
+        } catch (e: Exception) { AppLogger.w(TAG, "preferInputDevice falhou: ${e.message}") }
+    }
+
     /** Abre+grava a fonte e mede o pico em ~500ms. Retorna pico, ou -1 se não inicializou. */
     private fun probeSource(src: Int, bufBytes: Int, probe: ShortArray): Int {
         var r: AudioRecord? = null
         try {
             r = AudioRecord(src, RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, bufBytes)
             if (r.state != AudioRecord.STATE_INITIALIZED) return -1
+            preferInputDevice(r)
             r.startRecording()
             var peak = 0
             val deadline = System.currentTimeMillis() + 500
@@ -206,6 +228,7 @@ object CarAudioRelay {
         return try {
             val r = AudioRecord(src, RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, bufBytes)
             if (r.state != AudioRecord.STATE_INITIALIZED) { r.release(); return null }
+            preferInputDevice(r)
             r.startRecording(); r
         } catch (e: Exception) { AppLogger.w(TAG, "openSource src=$src falhou: ${e.message}"); null }
     }

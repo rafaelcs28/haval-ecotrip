@@ -49,4 +49,25 @@ object ShizukuPerms {
             false
         }
     }
+
+    /** Roda um comando shell como UID do Shizuku (adb). Retorna stdout+stderr (ou "error: ..."). */
+    fun runShell(vararg cmd: String): String {
+        return try {
+            if (!Shizuku.pingBinder() || Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED)
+                return "error: shizuku indisponível"
+            val newProcess = Shizuku::class.java.getDeclaredMethod(
+                "newProcess",
+                Array<String>::class.java,
+                Array<String>::class.java,
+                String::class.java,
+            ).also { it.isAccessible = true }
+            val proc = newProcess.invoke(null, arrayOf(*cmd), null as Array<String>?, null as String?) as Process
+            val out = proc.inputStream.bufferedReader().readText()
+            val err = proc.errorStream.bufferedReader().readText()
+            proc.waitFor()
+            (out + err).trim()
+        } catch (e: Exception) {
+            "error: ${e.message}"
+        }
+    }
 }
