@@ -7349,6 +7349,62 @@ app.post('/api/rec/start', requireAuth, (req, res) => _recCommand(res, 'rec_star
 app.post('/api/rec/stop',  requireAuth, (req, res) => _recCommand(res, 'rec_stop',  '{}', 8000));
 app.get('/api/rec/list',   requireAuth, (req, res) => _recCommand(res, 'rec_list',  '{}', 6000));
 
+// Download remoto (WAN): o arquivo vive no carro. O bridge pede via cmd/rec_fetch
+// com um nonce de uso único; o carro faz upload pra /api/rec/upload; o bridge
+// cacheia e serve. GET faz poll até o upload chegar (carro pode estar em 4G).
+const REC_CACHE_DIR = path.join(DATA_DIR, 'rec_cache');
+try { fs.mkdirSync(REC_CACHE_DIR, { recursive: true }); } catch (_) {}
+const _recPending = {};   // id -> nonce (autoriza o upload correspondente)
+
+function _pruneRecCache() {
+  try {
+    const now = Date.now();
+    for (const f of fs.readdirSync(REC_CACHE_DIR)) {
+      const p = path.join(REC_CACHE_DIR, f);
+      if (now - fs.statSync(p).mtimeMs > 2 * 60 * 60_000) fs.unlinkSync(p);   // >2h
+    }
+  } catch (_) {}
+}
+
+app.get('/api/rec/file/:id', requireAuth, async (req, res) => {
+  const id = String(req.params.id).replace(/[^0-9]/g, '');
+  if (!id) return res.status(400).json({ error: 'id inválido' });
+  const cached = path.join(REC_CACHE_DIR, `${id}.wav`);
+  if (fs.existsSync(cached)) return res.sendFile(cached);
+  if (!mqttClient?.connected) return res.status(503).json({ error: 'MQTT offline' });
+  _pruneRecCache();
+  const nonce = require('crypto').randomBytes(16).toString('hex');
+  _recPending[id] = nonce;
+  mqttClient.publish(`${MQTT_PREFIX}/cmd/rec_fetch`,
+    JSON.stringify({ id, token: nonce }), { qos: 1, retain: false });
+  const start = Date.now();
+  while (Date.now() - start < 90_000) {   // upload de arquivo grande pode demorar
+    if (fs.existsSync(cached)) return res.sendFile(cached);
+    await new Promise(r => setTimeout(r, 400));
+  }
+  delete _recPending[id];
+  res.status(504).json({ error: 'carro não enviou o arquivo (offline ou timeout)' });
+});
+
+// Upload vindo do carro (autorizado pelo nonce do rec_fetch). Body cru (audio/wav)
+// — middleware raw só nesta rota, não mexe no express.json global.
+app.post('/api/rec/upload', express.raw({ type: '*/*', limit: '600mb' }), (req, res) => {
+  const id = String(req.query.id || '').replace(/[^0-9]/g, '');
+  const tok = req.get('X-Rec-Token') || '';
+  if (!id || !_recPending[id] || _recPending[id] !== tok)
+    return res.status(403).json({ error: 'token inválido' });
+  if (!req.body || !req.body.length) return res.status(400).json({ error: 'body vazio' });
+  try {
+    const tmp = path.join(REC_CACHE_DIR, `${id}.tmp`);
+    fs.writeFileSync(tmp, req.body);
+    fs.renameSync(tmp, path.join(REC_CACHE_DIR, `${id}.wav`));
+    delete _recPending[id];   // consome o nonce
+    res.json({ ok: true, bytes: req.body.length });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // POST /api/vehicle/shade  { level: 0..100 } — cortina elétrica (0=fechada, 100=aberta).
 app.post('/api/vehicle/shade', (req, res) => {
   const level = parseInt(req.body?.level);

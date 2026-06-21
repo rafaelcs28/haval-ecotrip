@@ -2703,6 +2703,22 @@ class MqttManager private constructor() {
                     if (ctx == null) { publishResult("rec_list", "error: sem contexto"); return@submit }
                     publishResult("rec_list", CabinRecorder.listJson(ctx))
                 }
+                "rec_fetch" -> {
+                    // Bridge pediu o arquivo (download remoto/WAN): sobe o WAV pro
+                    // bridge, que cacheia e serve ao fone. Upload pode ser grande →
+                    // thread própria, nunca no cmdExecutor.
+                    val ctx = appContext
+                    if (ctx == null) { publishResult("rec_fetch", "error: sem contexto"); return@submit }
+                    val id = try { JSONObject(payload).optString("id", "") } catch (_: Exception) { "" }
+                    val token = try { JSONObject(payload).optString("token", "") } catch (_: Exception) { "" }
+                    if (id.isBlank()) { publishResult("rec_fetch", "error: id ausente"); return@submit }
+                    Thread {
+                        val base = try { TripManager.getInstance().bridgeUrlPublic() } catch (_: Exception) { "" }
+                        val r = CabinRecorder.uploadToBridge(ctx, id, token, base)
+                        AppLogger.i(TAG, "[rec] fetch $id → $r")
+                        publishResult("rec_fetch", r)
+                    }.apply { isDaemon = true; name = "rec-upload" }.start()
+                }
                 "charge_custom_target" -> {
                     // Alvo de corte por software (fora dos presets). O bridge repassa o
                     // valor; o carro persiste e passa a cortar SOZINHO (offline). 0 = off.

@@ -111,18 +111,33 @@ final class RecordingsStore: NSObject, ObservableObject {
         } catch { return false }
     }
 
-    // ── Download + play (LAN direto) ──────────────────────────────────────────
+    // ── Download + play: LAN direto se disponível, senão bridge (WAN) ─────────
     func play(_ s: RecSession) async {
         error = nil
-        guard let (host, port) = lanHostPort else {
-            error = "Download só na mesma rede do carro (LAN)."; return
-        }
-        guard let u = URL(string: "http://\(host):\(port)/api/rec/file/\(s.id)") else { return }
         downloadingId = s.id; defer { downloadingId = nil }
+        // 1) LAN direto (rápido, sem auth)
+        if let (host, port) = lanHostPort,
+           let u = URL(string: "http://\(host):\(port)/api/rec/file/\(s.id)") {
+            if await download(u, viaBridge: false, id: s.id) { return }
+        }
+        // 2) Fallback bridge — bridge puxa o WAV do carro via MQTT (até 90s)
+        guard let u = URL(string: base + "/api/rec/file/\(s.id)") else {
+            error = "Bridge não configurado."; return
+        }
+        _ = await download(u, viaBridge: true, id: s.id)
+    }
+
+    private func download(_ url: URL, viaBridge: Bool, id: String) async -> Bool {
+        var r = URLRequest(url: url)
+        r.timeoutInterval = viaBridge ? 100 : 20
+        if viaBridge { r.addValue("Bearer " + Settings.bridgeToken, forHTTPHeaderField: "Authorization") }
         do {
-            let (tmp, resp) = try await URLSession.shared.download(from: u)
-            guard (resp as? HTTPURLResponse)?.statusCode == 200 else { error = "Arquivo indisponível."; return }
-            let dest = FileManager.default.temporaryDirectory.appendingPathComponent("\(s.id).wav")
+            let (tmp, resp) = try await URLSession.shared.download(for: r)
+            guard (resp as? HTTPURLResponse)?.statusCode == 200 else {
+                if viaBridge { error = "Carro offline — não enviou o arquivo." }
+                return false
+            }
+            let dest = FileManager.default.temporaryDirectory.appendingPathComponent("\(id).wav")
             try? FileManager.default.removeItem(at: dest)
             try FileManager.default.moveItem(at: tmp, to: dest)
             try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
@@ -130,9 +145,13 @@ final class RecordingsStore: NSObject, ObservableObject {
             let p = try AVAudioPlayer(contentsOf: dest)
             p.delegate = self
             player = p
-            playingId = s.id
+            playingId = id
             p.play()
-        } catch { self.error = "Falha no download: \(error.localizedDescription)" }
+            return true
+        } catch {
+            if viaBridge { self.error = "Falha no download: \(error.localizedDescription)" }
+            return false
+        }
     }
 
     func stopPlayback() { player?.stop(); player = nil; playingId = nil }
@@ -197,8 +216,8 @@ struct RecordingsView: View {
                 }
                 .disabled(store.busy)
                 Text(store.lanReady
-                     ? "Áudio fica no carro. Download e play só na mesma rede (LAN)."
-                     : "Conecte na mesma rede do carro pra baixar e ouvir.")
+                     ? "Áudio fica no carro. Download rápido na mesma rede (LAN)."
+                     : "Áudio fica no carro. Fora da rede, baixa pelo bridge (pode levar ~1 min).")
                     .font(.caption).foregroundStyle(DS.muted)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -239,7 +258,6 @@ struct RecordingsView: View {
                 Button { Task { await store.play(s) } } label: {
                     Image(systemName: "play.circle.fill").font(.title2).foregroundStyle(DS.teal)
                 }
-                .disabled(!store.lanReady)
             }
         }
         .padding(.vertical, 4)

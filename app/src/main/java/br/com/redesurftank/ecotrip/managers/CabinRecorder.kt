@@ -86,6 +86,34 @@ object CabinRecorder {
         return if (f.exists()) f else null
     }
 
+    /**
+     * Sobe o WAV pro bridge sob demanda (fallback WAN quando o fone não está na
+     * LAN). Autoriza via nonce de uso único (X-Rec-Token) que o bridge mandou no
+     * cmd/rec_fetch — sem precisar do token do bridge no carro. Stream sem
+     * carregar o arquivo na memória. Retorna "ok:..." ou "error: ...".
+     */
+    fun uploadToBridge(ctx: Context, id: String, token: String, base: String): String {
+        if (base.isBlank()) return "error: bridge não configurado"
+        val safe = id.filter { it.isDigit() }
+        val f = fileFor(ctx, safe) ?: return "error: gravação $safe não encontrada"
+        return try {
+            val url = java.net.URL("${base.trimEnd('/')}/api/rec/upload?id=$safe")
+            val conn = url.openConnection() as java.net.HttpURLConnection
+            conn.requestMethod = "POST"
+            conn.doOutput = true
+            conn.connectTimeout = 15_000
+            conn.readTimeout = 120_000
+            conn.setRequestProperty("Content-Type", "audio/wav")
+            conn.setRequestProperty("X-Rec-Token", token)
+            conn.setFixedLengthStreamingMode(f.length())
+            f.inputStream().use { input -> conn.outputStream.use { input.copyTo(it, 64 * 1024) } }
+            val code = conn.responseCode
+            if (code in 200..299) "ok:$safe (${f.length()} bytes)" else "error: bridge HTTP $code"
+        } catch (e: Exception) {
+            "error: ${e.message}"
+        }
+    }
+
     /** JSON do index (lista de sessões, mais recente primeiro). */
     fun listJson(ctx: Context): String {
         val arr = readIndex(ctx)

@@ -91,16 +91,11 @@ class UpdateManager private constructor() {
                 latestRelease = info
                 isUpdateAvailable = isNewer(info.version, BuildConfig.VERSION_NAME)
                 if (isUpdateAvailable) {
-                    // Poupar dados: em 4G não baixa sozinho (APK é pesado). Mantém o
-                    // flag (badge "Atualizar" aparece) — usuário baixa manual ou em Starlink.
-                    if (UplinkManager.current() == "4G") {
-                        AppLogger.i(TAG, "Update ${info.version} disponível, mas em 4G — adiando auto-download (poupar dados; baixa manual ou via Starlink)")
-                    } else {
-                        AppLogger.i(TAG, "Update available: ${info.version} (current: ${BuildConfig.VERSION_NAME}}) — iniciando download automático")
-                        val ctx = appContext
-                        if (ctx != null) {
-                            downloadAndInstall(ctx)   // auto-download sem interação do usuário
-                        }
+                    // APK é pequeno — baixa sozinho em qualquer uplink (inclusive 4G).
+                    AppLogger.i(TAG, "Update available: ${info.version} (current: ${BuildConfig.VERSION_NAME}}) — iniciando download automático")
+                    val ctx = appContext
+                    if (ctx != null) {
+                        downloadAndInstall(ctx)   // auto-download sem interação do usuário
                     }
                 } else {
                     Log.d(TAG, "Already on latest version (${BuildConfig.VERSION_NAME})")
