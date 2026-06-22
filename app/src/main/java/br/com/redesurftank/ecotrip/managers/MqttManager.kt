@@ -1998,6 +1998,9 @@ class MqttManager private constructor() {
             // Autonomia elétrica real do CAN + % de combustível no tanque (litros calculados no iPad).
             CarDataManager.getInstance().fetchCurrent("car.ev_info.electric_mode_remain_odometer")?.trim()?.toFloatOrNull()?.let { pubD("ev_remain_km", it.toInt().toString()) }
             CarDataManager.getInstance().fetchCurrent("car.basic.remain_fuel_percentage")?.trim()?.toFloatOrNull()?.let { pubD("fuel_pct_can", fuelDisplayFilter.push(it).toInt().toString()) }
+            // Bateria 12V (car.ev_info.battery_charge_percentage). Migrada pra GWM —
+            // bridge só aceita este publish quando a nuvem GWM está silente (4G out).
+            CarDataManager.getInstance().fetchCurrent("car.ev_info.battery_charge_percentage")?.trim()?.toFloatOrNull()?.let { pubD("batt_12v_pct", it.toInt().toString()) }
             pubD("hvac_driver_temp",     fmt1(latestHvacDriverTemp))
             pubD("hvac_passenger_temp",  fmt1(latestHvacPassengerTemp))
             pubD("hvac_fan_speed",    latestHvacFanSpeed.toString())
