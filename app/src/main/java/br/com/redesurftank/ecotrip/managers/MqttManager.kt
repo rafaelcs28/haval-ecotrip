@@ -1975,9 +1975,9 @@ class MqttManager private constructor() {
             pubR("charge_current_a",  fmt2(latestChargeCurrentA))
             pubR("battery_voltage_v", fmt2(latestBatteryVoltageV))   // car.ev_info.power_battery_voltage (apenas telemetria)
             pubR("battery_current_a", fmt2(latestBatteryCurrentA))
-            // Tensão do pack (namespace basic) — fonte usada no cálculo da potência do motor
+            // Tensão da bateria auxiliar 12V (car.basic.battery_voltage) — NÃO é o pack HV, não entra no cálculo de potência
             if (latestBasicBattVoltageV > 0f) pubR("basic_battery_voltage_v", fmt2(latestBasicBattVoltageV))
-            // Potência do motor elétrico: (car.basic.battery_voltage × car.ev_info.cur_charge_current) / 1000
+            // Potência do motor elétrico: (car.ev_info.power_battery_voltage × car.ev_info.cur_charge_current) / 1000
             // Positivo = consumo; negativo = regeneração
             pubR("motor_power_kw",    fmt2(latestMotorPowerKw))
             // % potência motor elétrico — car.ev_info.cur_battery_power_percentage
@@ -2044,13 +2044,19 @@ class MqttManager private constructor() {
             // engine_state derivado do driving_ready (ignição): o HEV liga/desliga o
             // ICE várias vezes/min, mas driving_ready é estável. 1=carro ligado.
             pubD("engine_state", if (snDrvReady != 0) "1" else "0")
-            // lock_state NÃO entra no fallback: a semântica do car.basic.door_lock_status
-            // cru é AMBÍGUA — observado o carro trancado com GWM lock_state='off' (trancado)
-            // E debug/lock_status_raw='1' ao mesmo tempo, ou seja raw 1 ≠ destrancado como
-            // se supunha. Publicar invertido geraria falso 'destrancado'/'desprotegido'
-            // durante 4G-out. Confirmar a polaridade no device (comparar lock_status_raw
-            // com o GWM em transições trancado↔destrancado) antes de habilitar. Doors/windows
-            // já cobrem o sinal de intrusão.
+            // Odômetro (car.basic.total_odometer) e estado de carga (car.ev_info.charging_state,
+            // numérico 0-5) — migrados pra GWM; o bridge só aceita no 4G-out. charging_state
+            // mantém a Live Activity de recarga viva quando carregando em casa sem 4G.
+            if (latestOdometerKm > 0f) pubD("odometer_km", latestOdometerKm.toInt().toString())
+            if (latestChargingState >= 0) pubD("charging_state", latestChargingState.toString())
+            // lock_state: car.basic.door_lock_status cru = 1 trancado / 0 destrancado
+            // (confirmado no barramento 2026-06-05). O bridge usa 'on'=destrancado /
+            // 'off'=trancado (encoding INVERTIDO vs o raw do CAN), então publicamos
+            // invertido: CAN 1→'0' (trancado), CAN 0→'1' (destrancado). Guarda snLockMs>0
+            // pra não publicar antes do voting filter confirmar. Só aceito no 4G-out.
+            if (snLockMs > 0 && (snLockStat == 0 || snLockStat == 1)) {
+                pubD("lock_state", if (snLockStat == 1) "0" else "1")
+            }
 
             // Debug — valores crus do barramento + resultado do parsing (sem afetar lógica)
             if (snDoorRaw.isNotEmpty()) {
@@ -2067,7 +2073,7 @@ class MqttManager private constructor() {
             pubD("debug/turn_left",  "lamp=$latestLeftTurnLamp sw=$latestLeftSwitch", retained = false)
             pubD("debug/turn_right", "lamp=$latestRightTurnLamp sw=$latestRightSwitch", retained = false)
             pubD("debug/tsr", "limit=$latestSpeedLimit sign=$latestSpeedLimitSign eye=$latestTrafficEyeDist", retained = false)
-            // odometer_km e batt_12v_pct movidos pra GWM Brasil (MIGRATED_TO_HA) — bridge ignora.
+            // batt_12v_pct/odometer_km/charging_state: publicados acima no bloco de fallback.
             // Potência de recarga: charging_state==1 OU corrente de carga real (carga AC
             // às vezes não reporta enum 1). Corrente AC × tensão do pack / 1000.
             pubR("charge_power_kw",   fmt2(chargePowerKwNow()))

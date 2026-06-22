@@ -1221,6 +1221,7 @@ const state = {
   tank_avg_price_per_l: 0,   // R$/L médio ponderado do que está no tanque
   battery_avg_price_per_kwh: 0,  // R$/kWh médio ponderado do que está na bateria
   batt_12v_pct:        0,    // % bateria auxiliar 12V
+  batt_12v_v:          0,    // tensão bateria auxiliar 12V (car.basic.battery_voltage)
   charging_state:      'Desconhecido',
   charge_power_kw:     0,
   charge_max_power_kw: 0,    // pico de potência da sessão atual (reset ao iniciar)
@@ -2065,11 +2066,25 @@ function _carIsAwake() {
   // NB: charging não conta como "acordado" aqui. Carro carregando parado na
   // garagem com APK zumbi cutucava de hora em hora — e os alertas de recarga
   // vêm da GWM, não do APK, então o silêncio do app não quebra nada nesse caso.
-  const gear   = String(state.gear || 'P').toUpperCase();
-  const ready  = state.driving_ready === 1 || state.driving_ready === true;
-  const speed  = +state.speed_kmh || 0;
-  const power  = state.power_mode != null && +state.power_mode > 0;
-  return ready || speed > 1 || power || (gear !== 'P' && gear !== 'N');
+  //
+  // gear/driving_ready/speed/power vêm do APK (CAN via Shizuku). Quando o carro
+  // estaciona e hiberna, ele MATA o app — esses campos ficam CONGELADOS no
+  // último estado (que pode ser "acordado": ready=1, gear=D). Confiar neles com
+  // o APK silente gerava o falso "App do carro silente". Só os considera se o
+  // APK ainda está fresco.
+  if (apkFresh) {
+    const gear   = String(state.gear || 'P').toUpperCase();
+    const ready  = state.driving_ready === 1 || state.driving_ready === true;
+    const speed  = +state.speed_kmh || 0;
+    const power  = state.power_mode != null && +state.power_mode > 0;
+    if (ready || speed > 1 || power || (gear !== 'P' && gear !== 'N')) return true;
+  }
+  // Com o APK silente, o único sinal confiável de "acordado" é o motor ligado
+  // pela GWM (hyengsts), que segue sendo polled mesmo com o app morto. Cobre o
+  // APK zumbi enquanto o carro de fato roda, sem confiar em campo congelado.
+  if (gwmFresh && _fieldSource['engine_state'] === 'gwm' &&
+      (state.engine_state === '1' || state.engine_state === 1)) return true;
+  return false;
 }
 
 setInterval(() => {
@@ -2104,6 +2119,27 @@ setInterval(() => {
       `Sem dados da GWM Brasil/HA há ${min}min (app do carro continua ativo). Verifique a integração.`,
       'anomaly_detected');
   }
+}, 60_000);
+
+// Fallback do endereço: a GWM publica endereco_atual (geocode da nuvem). Sem ela
+// (4G out), o APK ainda manda gps_lat/gps_lng via WiFi — então geocodamos local
+// (Nominatim, mesma fonte do auto-share) pra manter current_address atualizado.
+// Volta pra GWM sozinho quando ela revive. Throttle por coordenada (cache 1000m).
+let _lastAddrGeocodeKey = '';
+setInterval(async () => {
+  const now = Date.now();
+  if (_gwmAlive(now)) return;                                 // GWM viva → ela cuida do endereço
+  if (!state.last_apk_ms || (now - state.last_apk_ms) > 90_000) return; // APK precisa estar vivo
+  const lat = +state.gps_lat, lng = +state.gps_lng;
+  if (!lat || !lng) return;
+  const key = _geocodeMemKey(lat, lng);
+  if (key === _lastAddrGeocodeKey) return;                    // não move → não re-geocoda
+  _lastAddrGeocodeKey = key;
+  try {
+    const g = await _reverseGeocode(lat, lng);
+    const addr = [g.suburb, g.city].filter(Boolean).join(', ');
+    if (addr) { state.current_address = addr; _fieldSource['current_address'] = 'apk'; }
+  } catch (_) {}
 }, 60_000);
 
 // ── Detecção de anomalia preventiva ────────────────────────────────────────
@@ -5065,6 +5101,96 @@ app.get('/api/autotrips', (req, res) => {
   res.json(arr.slice(0, 300));
 });
 
+// ── Logbook: diário de bordo agregado por mês ────────────────────────────────
+// Reusa as autotrips já ingeridas (autoTripsArr) — só agrega por mês, calcula o
+// custo por viagem (mesmos preços ponderados do push) e exporta CSV. Pra IRPF /
+// reembolso de km. Mês no formato YYYY-MM, fuso local do servidor.
+function _tripMonthKey(ms) {
+  const d = new Date(ms || 0);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+function _tripCost(t) {
+  const pKwh = +state.battery_avg_price_per_kwh || +state.price_kwh || 0;
+  const pGas = +state.tank_avg_price_per_l      || +state.price_gas_per_l || 0;
+  const netKwh = +t.netKwh || 0;
+  const fuelL  = +t.fuelL  || 0;
+  return (pGas > 0 || pKwh > 0) ? fuelL * pGas + netKwh * pKwh : 0;
+}
+function _logbookTrips(month) {
+  return autoTripsArr
+    .filter(t => (t.startMs || 0) > 0 && _tripMonthKey(t.startMs) === month)
+    .map(t => {
+      const km = +t.distKm || 0, sec = +t.timeSec || 0;
+      return {
+        tripId:   t.tripId,
+        startMs:  t.startMs || 0,
+        name:     t.name || '',
+        from:     t.knownStart || t.startKp || '',
+        to:       t.knownEnd   || t.endKp   || '',
+        km, kwh: +t.netKwh || 0, fuelL: +t.fuelL || 0,
+        cost:     _tripCost(t),
+        durationSec: sec,
+        avgKmh:   sec >= 60 ? km / (sec / 3600) : 0,
+        driveScore: t.driveScore != null ? t.driveScore : null,
+      };
+    })
+    .sort((a, b) => a.startMs - b.startMs);
+}
+function _logbookTotals(trips) {
+  const sum = (k) => trips.reduce((s, t) => s + (t[k] || 0), 0);
+  const km = sum('km'), cost = sum('cost');
+  return {
+    trips: trips.length,
+    km, kwh: sum('kwh'), fuelL: sum('fuelL'), cost,
+    durationSec: sum('durationSec'),
+    costPerKm: km > 0.5 ? cost / km : 0,
+  };
+}
+
+// GET /api/logbook?month=YYYY-MM — agregado do mês + lista de viagens.
+app.get('/api/logbook', (req, res) => {
+  const month = String(req.query.month || _tripMonthKey(Date.now()));
+  if (!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: 'month inválido (YYYY-MM)' });
+  // Meses que têm pelo menos uma viagem (pro seletor do app).
+  const months = [...new Set(autoTripsArr.filter(t => t.startMs).map(t => _tripMonthKey(t.startMs)))].sort().reverse();
+  const trips = _logbookTrips(month);
+  res.json({ ok: true, month, months, totals: _logbookTotals(trips), trips });
+});
+
+// GET /api/logbook/export?month=YYYY-MM&fmt=csv — CSV anexável (IRPF/reembolso).
+app.get('/api/logbook/export', (req, res) => {
+  const month = String(req.query.month || _tripMonthKey(Date.now()));
+  if (!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: 'month inválido (YYYY-MM)' });
+  const trips = _logbookTrips(month);
+  const fmt = String(req.query.fmt || 'csv');
+  if (fmt !== 'csv') return res.status(400).json({ error: 'fmt suportado: csv' });
+  const esc = (v) => {
+    const s = String(v ?? '');
+    return /[",;\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const fmtDur = (sec) => `${Math.floor(sec / 3600)}h${String(Math.floor((sec % 3600) / 60)).padStart(2, '0')}`;
+  const rows = [['Data', 'Início', 'Origem', 'Destino', 'km', 'kWh', 'Litros', 'Custo R$', 'Duração', 'km/h méd', 'Condução']];
+  for (const t of trips) {
+    const d = new Date(t.startMs);
+    rows.push([
+      d.toLocaleDateString('pt-BR'),
+      d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+      t.from, t.to,
+      t.km.toFixed(1), t.kwh.toFixed(2), t.fuelL.toFixed(2),
+      t.cost.toFixed(2), fmtDur(t.durationSec), t.avgKmh.toFixed(0),
+      t.driveScore != null ? t.driveScore : '',
+    ]);
+  }
+  const tot = _logbookTotals(trips);
+  rows.push([]);
+  rows.push(['TOTAL', '', '', '', tot.km.toFixed(1), tot.kwh.toFixed(2), tot.fuelL.toFixed(2),
+             tot.cost.toFixed(2), fmtDur(tot.durationSec), '', '']);
+  const csv = '﻿' + rows.map(r => r.map(esc).join(';')).join('\r\n');
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="logbook-${month}.csv"`);
+  res.send(csv);
+});
+
 // ── Estatísticas de economia por modo de condução ───────────────────────────
 // Agrega os `segments[]` de todas as viagens por combinação de modos
 // (one-pedal / regeneração / estilo / powertrain) e ranqueia por economia.
@@ -6455,6 +6581,22 @@ const ACTION_TO_HA_BUTTON = {
 };
 const ALLOWED_ACTIONS = new Set(Object.keys(ACTION_TO_HA_BUTTON));
 
+// Caminho LOCAL das ações que têm equivalente no carro (APK atua via Shizuku/
+// IVehicle, sem passar pela nuvem GWM). Quando o APK está vivo (WiFi/Starlink),
+// preferimos isto — a nuvem GWM morre quando o 4G do carro acaba. Cada entrada é
+// uma lista de [tópico_cmd, payload] publicados em sequência.
+// EXCLUÍDOS de propósito: lock_*/engine_* são telematics (carro dormindo = head
+// unit desligado → não há atuador local vivo, e o IVehicle não dá partida
+// remota); trunk_*/charge_* não têm mapeamento local seguro/confirmado. Esses
+// seguem só na nuvem.
+const ACTION_LOCAL = {
+  windows_open:  [['cmd/vehicle/window_all', '0']],    // 0=aberto
+  windows_close: [['cmd/vehicle/window_all', '1']],    // 1=fechado
+  sunroof_open:  [['cmd/vehicle/skylight',   '100']],  // 100=aberto
+  sunroof_close: [['cmd/vehicle/skylight',   '0']],    // 0=fechado
+  ac_on:         [['cmd/hvac/power', '1'], ['cmd/hvac/ac_enable', '1']],
+};
+
 // ── Reverse-geocode via Nominatim (1 req/s, cache em memória) ─────────────
 // Usado pelo reprocessamento de trips/charges. Para o uso runtime do PWA,
 // cada cliente faz o seu (Nominatim aceita); aqui o foco é batch server-side.
@@ -7030,6 +7172,24 @@ app.post('/api/action/:name', async (req, res) => {
     console.warn(`[action] ${name} REJEITADO: ação desconhecida`);
     return res.status(400).json({ error: 'ação desconhecida' });
   }
+  // Caminho LOCAL preferido: se a ação tem equivalente no carro E o APK está vivo
+  // (publicou nos últimos 90s = alcançável via WiFi/Starlink), atua direto pelo
+  // APK e pula a nuvem GWM — que morre quando o 4G do carro acaba. Sem APK fresco
+  // (carro dormindo/longe), cai pro botão da nuvem como antes.
+  const local = ACTION_LOCAL[name];
+  const apkFresh = state.last_apk_ms && (Date.now() - state.last_apk_ms) < 90_000;
+  if (local && apkFresh && mqttClient?.connected) {
+    try {
+      for (const [topic, payload] of local) {
+        mqttClient.publish(`${MQTT_PREFIX}/${topic}`, payload, { qos: 1, retain: false });
+      }
+      if (name === 'engine_on') markRemoteEngineStart();
+      console.log(`[action] ${name} → LOCAL (APK via WiFi, nuvem GWM ignorada)`);
+      return res.json({ ok: true, via: 'local' });
+    } catch (e) {
+      console.warn(`[action] ${name} local falhou (${e.message}) — tentando nuvem GWM`);
+    }
+  }
   if (!HA_URL || !HA_TOKEN) {
     console.warn(`[action] ${name} REJEITADO: HA não configurado`);
     return res.status(503).json({ error: 'HA não configurado' });
@@ -7052,7 +7212,7 @@ app.post('/api/action/:name', async (req, res) => {
     console.log(`[action] ${name} → ${entityId} OK`);
     // Ligar motor pelo app arma a LA de lembrete (confirma no engine_state='1').
     if (name === 'engine_on') markRemoteEngineStart();
-    res.json({ ok: true });
+    res.json({ ok: true, via: 'cloud' });
   } catch (e) {
     console.error(`[action] ${name} erro: ${e.message}`);
     res.status(502).json({ error: 'falha ao chamar HA' });
@@ -7645,6 +7805,31 @@ app.get('/api/call/state', requireAuth, (req, res) => {
   res.json({ ok: true, call: _callState });
 });
 
+// ── Guarda-estacionamento (antifurto) ───────────────────────────────────────
+// O APK arma sozinho quando o carro desliga; estes endpoints só ligam/desligam
+// o recurso e leem o estado. _guardEnabled espelha o que o iOS pediu (o estado
+// real persiste no APK).
+let _guardEnabled = false;
+app.post('/api/guard/arm', requireAuth, (req, res) => {
+  if (!mqttClient?.connected) return res.status(503).json({ error: 'MQTT offline' });
+  const enabled = req.body?.enabled !== false;   // default = ligar
+  _guardEnabled = enabled;
+  mqttClient.publish(`${MQTT_PREFIX}/cmd/guard_arm`,
+    JSON.stringify({ enabled }), { qos: 1, retain: false });
+  res.json({ ok: true, enabled });
+});
+
+app.post('/api/guard/disarm', requireAuth, (req, res) => {
+  if (!mqttClient?.connected) return res.status(503).json({ error: 'MQTT offline' });
+  _guardEnabled = false;
+  mqttClient.publish(`${MQTT_PREFIX}/cmd/guard_disarm`, '1', { qos: 1, retain: false });
+  res.json({ ok: true, enabled: false });
+});
+
+app.get('/api/guard/state', requireAuth, (req, res) => {
+  res.json({ ok: true, enabled: _guardEnabled, lastAlarmMs: _theftAlertedMs || 0 });
+});
+
 // ── WebSocket heartbeat (iOS Safari fecha silenciosamente conexões idle) ────────
 setInterval(() => {
   for (const ws of clients) {
@@ -7844,6 +8029,27 @@ mqttClient.on('message', (topic, payload, packet) => {
       for (const ws of audioClients) {
         if (ws.readyState === WebSocket.OPEN) ws.send(msg);
       }
+    } catch (_) {}
+    return;
+  }
+
+  // Alarme do antifurto no carro (ParkGuard): {lat,lng,reason,ts}. Cai no MESMO
+  // caminho do checkTheft server-side e compartilha _theftAlertedMs, pra APK e
+  // bridge não dispararem dobrado. Cria link de auto-share e manda push crítico.
+  if (topic === `${MQTT_PREFIX}/security/alarm`) {
+    try {
+      const ev = JSON.parse(payload.toString());
+      const now = Date.now();
+      if (now - _theftAlertedMs < 10 * 60_000) return;   // dedup com checkTheft
+      _theftAlertedMs = now;
+      const la = +ev.lat, lng = +ev.lng;
+      if ((la || lng) && Number.isFinite(la) && Number.isFinite(lng)) _theftBase = { lat: la, lng: lng };
+      const via = String(ev.reason || '').startsWith('accel') ? 'sensor de movimento' : 'GPS';
+      const share = _createShareToken(120);
+      addEvent('theft_move', `Antifurto disparou (${ev.reason || '?'})`);
+      sendPush('🚨 Alarme antifurto',
+        `O Haval detectou movimento com o motor desligado (${via}). Acompanhe ao vivo: ${share.url}`,
+        'theft', { tag: 'theft', renotify: true });
     } catch (_) {}
     return;
   }
@@ -8131,9 +8337,20 @@ async function fetchInitialStateFromHA() {
   }
 }
 
+// Janela de "GWM viva" global: a integração faz polling de sensores numéricos
+// (soc/odometer/pneus) a cada ~30s-2min, então last_gwm_ms fresco = nuvem GWM
+// respondendo. Quando o 4G do carro acaba, a nuvem GWM morre e last_gwm_ms fica
+// stale globalmente — é o gatilho pro fallback do APK (que publica via WiFi).
+// Mesmo limiar do gwmFresh do _carIsAwake.
+const GWM_GLOBAL_FRESH_MS = 5 * 60_000;
+function _gwmAlive(now = Date.now()) {
+  return !!state.last_gwm_ms && (now - state.last_gwm_ms) < GWM_GLOBAL_FRESH_MS;
+}
+
 // Chaves que migraram pro HA — handlers do app são ignorados aqui pra evitar
 // que dados ruidosos do app (via Shizuku/CarDataManager) sobrescrevam o estado
-// confiável que vem do HA.
+// confiável que vem do HA. EXCEÇÃO: quando a GWM está silente (4G out), o gate
+// abre e deixa o valor do APK passar — ver applyMqttMessage.
 const MIGRATED_TO_HA = new Set([
   'door_fl', 'door_fr', 'door_rl', 'door_rr', 'door_trunk',
   'lock_state', 'ac_state',
@@ -10966,7 +11183,6 @@ function _detectConnFlapping(now) {
 function applyMqttMessage(key, value, isRetained = false) {
   const _now = Date.now();
   state.last_apk_ms = _now;   // qualquer msg em haval/ecotrip/* = APK do carro vivo
-  _fieldSource[key] = 'apk';  // rastreia origem por chave
   // Status (LWT) é tratado ANTES de atualizar last_update_ms — assim conseguimos
   // detectar LWT 'offline' que chega atrasado da sessão anterior (corrida com
   // o reconnect rápido): se uma mensagem fresca do carro chegou nos últimos
@@ -10992,9 +11208,13 @@ function applyMqttMessage(key, value, isRetained = false) {
   // confiável que a LWT — se o carro publica, está conectado por definição.
   state.car_online = true;
 
-  // Body/lock/etc. migradas pra HA — ignora publishes do app pra essas chaves.
-  // Bridge usa exclusivamente os tópicos da integração GWM Brasil (sem ruído).
-  if (MIGRATED_TO_HA.has(key)) return;
+  // Body/lock/etc. migradas pra HA — normalmente ignora publishes do app pra
+  // essas chaves (integração GWM Brasil é mais limpa, sem ruído de sensor).
+  // EXCEÇÃO: GWM silente (4G do carro acabou → nuvem GWM morre, mas o APK segue
+  // publicando via WiFi/Starlink). Aí deixa o valor do APK passar — melhor dado
+  // ruidoso que dado nenhum. Volta pra GWM sozinho quando ela revive.
+  if (MIGRATED_TO_HA.has(key) && _gwmAlive(_now)) return;
+  _fieldSource[key] = 'apk';  // rastreia origem por chave (só quando aceitamos o valor)
 
   // Resultados de comandos HVAC: cmd/hvac/<control>/result
   if (key.startsWith('cmd/hvac/') && key.endsWith('/result')) {
@@ -11132,9 +11352,18 @@ function applyMqttMessage(key, value, isRetained = false) {
     case 'seat_vent_pass': state.seat_vent_pass = value; break; // '0'..'3'
     case 'shade_level':    state.shade_level    = value; break; // '0'..'100' — cortina do teto (leitura ativa do APK)
     case 'skylight_level': state.skylight_level = value; break; // '0'=fechado·'200'=vent·'1'..'100'=% (teto solar)
-    case 'fuel_remain_km': state.fuel_remain_km = Math.round(num(value)); break; // autonomia ICE real do CAN
-    case 'ev_remain_km':   state.ev_remain_km   = Math.round(num(value)); break; // autonomia EV real do CAN
-    case 'fuel_pct_can':   state.fuel_pct_can   = Math.round(num(value)); break; // % combustível no tanque (CAN)
+    case 'fuel_remain_km': state.fuel_remain_km = Math.round(num(value)); if (!_gwmAlive(_now)) { state.autonomy_ice_km = state.fuel_remain_km; _fieldSource['autonomy_ice_km'] = 'apk'; } break; // autonomia ICE real do CAN; alimenta autonomy_ice_km no 4G-out (GWM-only)
+    case 'ev_remain_km':   state.ev_remain_km   = Math.round(num(value)); if (!_gwmAlive(_now)) { state.autonomy_ev_km  = state.ev_remain_km;  _fieldSource['autonomy_ev_km']  = 'apk'; } break; // autonomia EV real do CAN; idem autonomy_ev_km
+    case 'fuel_pct_can': {
+      state.fuel_pct_can = Math.round(num(value)); // % combustível no tanque (CAN)
+      // Fallback fuel_l: a GWM publica litros direto (id 2017002). Sem ela (4G out),
+      // deriva dos litros a partir do % lido do CAN pelo APK. Quando a GWM revive,
+      // o id 2017002 volta a sobrescrever state.fuel_l com o valor da nuvem.
+      if (!_gwmAlive(_now) && state.fuel_pct_can > 0) {
+        state.fuel_l = +((state.fuel_pct_can / 100) * TANK_CAPACITY_L).toFixed(1);
+      }
+      break;
+    }
     case 'hvac_driver_temp':    state.hvac_driver_temp    = value; break; // float °C
     case 'hvac_passenger_temp': state.hvac_passenger_temp = value; break; // float °C (pendente)
     case 'hvac_fan_speed': {
@@ -11370,9 +11599,11 @@ function applyMqttMessage(key, value, isRetained = false) {
       break;
     }
     case 'charging_state': {
-      // Mantido como fallback pro caso de charging_state sair de MIGRATED_TO_HA;
-      // hoje quem chama handleChargingStateTransition é applyGwmEntity via HA.
-      handleChargingStateTransition(value, isRetained);
+      // Só roda no 4G-out (gate MIGRATED_TO_HA + _gwmAlive já barra quando GWM viva).
+      // O APK publica o código numérico (0-5, mesma convenção da GWM raw); a GWM via
+      // HA já manda texto. Normaliza numérico→texto antes do handler de transição.
+      const v = /^\d+$/.test(String(value).trim()) ? mapChargingStateText(value) : value;
+      handleChargingStateTransition(v, isRetained);
       break;
     }
     case 'charge_power_kw': {
@@ -11595,6 +11826,7 @@ function applyMqttMessage(key, value, isRetained = false) {
     case 'price_kwh':       break;
     case 'charge_current_a':     state.charge_current_a     = num(value); break;
     case 'battery_voltage_v': state.battery_voltage_v  = num(value); break;
+    case 'basic_battery_voltage_v': state.batt_12v_v = num(value); break;
     case 'battery_current_a': state.battery_current_a  = num(value); break;
     case 'motor_power_kw': {
       // Safety: H6 PHEV pico ~173 kW; clamp absurdos (vinham de APK pré-v5.16
