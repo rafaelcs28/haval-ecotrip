@@ -22,6 +22,7 @@ import androidx.compose.ui.platform.LocalContext
 import br.com.redesurftank.ecotrip.BuildConfig
 import br.com.redesurftank.ecotrip.managers.CarDataManager
 import br.com.redesurftank.ecotrip.managers.LocalApiServer
+import br.com.redesurftank.ecotrip.managers.TripManager
 import br.com.redesurftank.ecotrip.managers.UplinkManager
 import br.com.redesurftank.ecotrip.models.CarConstants
 import kotlinx.coroutines.Dispatchers
@@ -127,6 +128,13 @@ private fun buildTeslaHomeJson(hd: HomeData): String {
     o.put("version", "v" + BuildConfig.VERSION_NAME)
     o.put("uplink", UplinkManager.current())   // WLAN(Starlink)/4G/OFF/?
     o.put("ac", hd.acOn)                        // ❄️ AC ligado
+    // Score de condução ao vivo (chip + detalhe ao toque)
+    val sc = TripManager.getInstance().getLiveDriveScore()
+    o.put("scoreValid", sc.valid)
+    if (sc.valid) {
+        o.put("score", sc.score); o.put("econ", sc.econ); o.put("smooth", sc.smooth)
+        o.put("harshAcc", sc.harshAcc); o.put("harshBrake", sc.harshBrake)
+    }
     o.put("dist", htF(hd.distKm, 1))
     o.put("time", hd.timeStr)
     o.put("avg", hd.avgSpeedKmh)

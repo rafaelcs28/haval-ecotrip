@@ -128,6 +128,7 @@
       <span class="temp" id="h-temp">—</span>
       <span id="h-ac" style="display:none;font-size:22px;margin-left:10px" title="Ar-condicionado ligado">❄️</span>
       <div class="acts">
+        <span class="ver" id="h-score" style="display:none;cursor:pointer" onclick="window.toggleScorePanel&&window.toggleScorePanel()"></span>
         <span class="ver" id="h-uplink" style="display:none"></span>
         <span class="ver" id="h-ver" style="display:none"></span>
         <span class="ic" id="h-recargas">🔋</span><span class="ic" id="h-viagens">🚗</span><span class="ic" id="h-config">⚙️</span>
@@ -200,6 +201,24 @@
         </div>
       </div>
 
+    </div>
+
+    <!-- Painel de detalhe do score (abre ao tocar no chip 🎯) -->
+    <div id="score-panel" style="display:none;position:absolute;top:66px;right:40px;width:330px;background:#0C1019;border:1px solid #2A2A2E;border-radius:16px;padding:18px;z-index:60;box-shadow:0 10px 40px rgba(0,0,0,.6)">
+      <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:14px">
+        <span style="font-size:13px;letter-spacing:.1em;color:#8E8E93;font-weight:700">SCORE DA VIAGEM</span>
+        <span style="flex:1"></span>
+        <span id="sp-score" style="font-size:30px;font-weight:800">—</span>
+      </div>
+      <div style="margin-bottom:12px">
+        <div style="display:flex;font-size:14px;margin-bottom:5px;font-weight:600"><span id="sp-econ-l">Economia</span><span style="flex:1"></span><span id="sp-econ-v">—</span></div>
+        <div style="height:8px;background:#23272F;border-radius:4px;overflow:hidden"><div id="sp-econ-bar" style="height:100%;width:0%;border-radius:4px"></div></div>
+      </div>
+      <div style="margin-bottom:12px">
+        <div style="display:flex;font-size:14px;margin-bottom:5px;font-weight:600"><span id="sp-smooth-l">Suavidade</span><span style="flex:1"></span><span id="sp-smooth-v">—</span></div>
+        <div style="height:8px;background:#23272F;border-radius:4px;overflow:hidden"><div id="sp-smooth-bar" style="height:100%;width:0%;border-radius:4px"></div></div>
+      </div>
+      <div id="sp-events" style="font-size:13px;color:#8E8E93"></div>
     </div>
 
     <div class="modes" id="modes"></div>
@@ -360,6 +379,16 @@
     if(!d) return;
     if(d.temp!=null) setTxt('h-temp', d.temp+'°');
     if(d.ac!=null){ var acel=$('h-ac'); if(acel) acel.style.display = d.ac ? '' : 'none'; }   // ❄️ AC ligado
+    // Score de condução ao vivo: chip 🎯 + painel (detalhe ao toque)
+    if(d.scoreValid!=null){
+      var chip=$('h-score');
+      if(!d.scoreValid){ if(chip) chip.style.display='none'; var sp=$('score-panel'); if(sp) sp.style.display='none'; }
+      else {
+        var col=_scol(d.score);
+        if(chip){ chip.textContent='🎯 '+d.score; chip.style.color=col; chip.style.borderColor=col; chip.style.background='transparent'; chip.style.display=''; }
+        fillScorePanel(d);
+      }
+    }
     if(d.version){ var ver=$('h-ver'); if(ver){ ver.textContent=d.version; ver.style.display=''; } }
     // Uplink de internet do head unit (Starlink vs 4G). 4G = laranja (poupar dados).
     if(d.uplink!=null){ var up=$('h-uplink'); if(up){
@@ -379,6 +408,19 @@
     setTxt('t-kwh', d.kwh); setTxt('t-regen', d.regen); setTxt('t-cost', d.cost); setTxt('t-costkm', d.costkm);
     setTxt('t-fuel', d.fuel); setTxt('t-soc', d.soc);
   };
+
+  // ── Score de condução: cor por faixa + preenche o painel de detalhe ──
+  function _scol(v){ return v<50?'#FF5F1F':(v<75?'#FFB648':'#28C98A'); }
+  function fillScorePanel(d){
+    var se=$('sp-score'); if(se){ se.textContent=d.score; se.style.color=_scol(d.score); }
+    var ed = d.econ<=d.smooth;   // o menor está puxando
+    setTxt('sp-econ-v', d.econ); var eb=$('sp-econ-bar'); if(eb){ eb.style.width=d.econ+'%'; eb.style.background=_scol(d.econ); }
+    setTxt('sp-smooth-v', d.smooth); var sb=$('sp-smooth-bar'); if(sb){ sb.style.width=d.smooth+'%'; sb.style.background=_scol(d.smooth); }
+    var el=$('sp-econ-l'); if(el){ el.textContent='Economia'+(ed?' ← puxando':''); el.style.color=ed?_scol(d.econ):'#EEF4FF'; }
+    var sl=$('sp-smooth-l'); if(sl){ sl.textContent='Suavidade'+(!ed?' ← puxando':''); sl.style.color=!ed?_scol(d.smooth):'#EEF4FF'; }
+    setTxt('sp-events', d.harshBrake+' freada(s) brusca(s) · '+d.harshAcc+' aceleração(ões) brusca(s)');
+  }
+  window.toggleScorePanel=function(){ var p=$('score-panel'); if(p) p.style.display = (p.style.display==='none'?'':'none'); };
 
   // ── Ícones do header → abrem overlays Compose via bridge ──
   var _br=function(fn){ try{ if(window.EcotripCarBridge && window.EcotripCarBridge[fn]) window.EcotripCarBridge[fn](); }catch(_){} };

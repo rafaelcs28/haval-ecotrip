@@ -4,6 +4,7 @@ import android.os.Handler
 import android.os.Looper
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -56,6 +57,7 @@ import br.com.redesurftank.ecotrip.managers.TripHistoryEntry
 import br.com.redesurftank.ecotrip.managers.TripManager
 import br.com.redesurftank.ecotrip.managers.UpdateManager
 import br.com.redesurftank.ecotrip.managers.UplinkManager
+import br.com.redesurftank.ecotrip.managers.LiveDriveScore
 import br.com.redesurftank.ecotrip.models.CarConstants
 import br.com.redesurftank.ecotrip.ui.components.BulletBar
 import br.com.redesurftank.ecotrip.ui.components.HeroGauge
@@ -97,6 +99,9 @@ fun ConsumptionScreen() {
     var updateAvailable  by remember { mutableStateOf(updateMgr.isUpdateAvailable) }
     var isCheckingUpdate by remember { mutableStateOf(updateMgr.isChecking) }
     var downloadProgress by remember { mutableStateOf(updateMgr.downloadProgress) }
+    var liveScore       by remember { mutableStateOf(tripManager.getLiveDriveScore()) }
+    var showScoreDetail by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { while (true) { liveScore = tripManager.getLiveDriveScore(); delay(2_000L) } }
 
     // Layout da home + estado do corpo do carro (pro carro interativo)
     var homeLayout by remember { mutableStateOf(tripManager.getHomeLayout()) }
@@ -444,6 +449,10 @@ fun ConsumptionScreen() {
         return
     }
 
+    if (showScoreDetail) {
+        ScoreDetailDialog(liveScore) { showScoreDetail = false }
+    }
+
     if (showLog) {
         LogScreen(onBack = { showLog = false })
         return
@@ -525,6 +534,17 @@ fun ConsumptionScreen() {
 
     // Ações de navegação no header do layout: uplink + chip de update + botões
     val navActions: @Composable RowScope.() -> Unit = {
+        if (liveScore.valid) {
+            val sc = scoreColorOf(liveScore.score)
+            Text(
+                "🎯 ${liveScore.score}", fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, color = sc,
+                modifier = Modifier
+                    .padding(end = 4.dp)
+                    .border(1.dp, sc.copy(alpha = 0.45f), RoundedCornerShape(8.dp))
+                    .clickable { showScoreDetail = true }
+                    .padding(horizontal = 10.dp, vertical = 4.dp),
+            )
+        }
         UplinkChip()
         when {
             downloadProgress in 0..99 -> {
@@ -995,5 +1015,46 @@ private fun UplinkChip() {
             .padding(end = 4.dp)
             .border(1.dp, c.copy(alpha = 0.4f), RoundedCornerShape(8.dp))
             .padding(horizontal = 10.dp, vertical = 4.dp),
+    )
+}
+
+// ── Score de condução ao vivo: cor por faixa + diálogo de detalhe ───────────
+private fun scoreColorOf(s: Int): Color = when {
+    s < 50 -> Color(0xFFFF5F1F)   // baixo
+    s < 75 -> Color(0xFFFFB648)   // médio
+    else   -> Color(0xFF28C98A)   // bom
+}
+
+@Composable
+private fun ScoreBar(label: String, v: Int, dragging: Boolean) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(label + if (dragging) "  ← puxando" else "", color = if (dragging) scoreColorOf(v) else Color(0xFFEEF4FF), fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.weight(1f))
+            Text("$v", color = scoreColorOf(v), fontSize = 15.sp, fontWeight = FontWeight.ExtraBold)
+        }
+        Box(Modifier.fillMaxWidth().height(8.dp).background(Color(0xFF23272F), RoundedCornerShape(4.dp))) {
+            Box(Modifier.fillMaxWidth((v / 100f).coerceIn(0f, 1f)).fillMaxHeight().background(scoreColorOf(v), RoundedCornerShape(4.dp)))
+        }
+    }
+}
+
+@Composable
+private fun ScoreDetailDialog(s: LiveDriveScore, onDismiss: () -> Unit) {
+    val econDrags = s.econ <= s.smooth
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Fechar") } },
+        title = { Text("Score da viagem · ${s.score}", color = scoreColorOf(s.score), fontWeight = FontWeight.ExtraBold, fontSize = 22.sp) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                ScoreBar("Economia", s.econ, econDrags)
+                ScoreBar("Suavidade", s.smooth, !econDrags)
+                val evs = buildString {
+                    append("${s.harshBrake} freada(s) brusca(s) · ${s.harshAcc} aceleração(ões) brusca(s)")
+                }
+                Text(evs, color = Color(0xFF8E8E93), fontSize = 13.sp)
+            }
+        },
     )
 }

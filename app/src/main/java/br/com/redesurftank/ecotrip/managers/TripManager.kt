@@ -242,6 +242,16 @@ data class RefuelEntry(
 
 typealias TripListener = (rolling: RollingSnapshot) -> Unit
 
+/** Score de condução ao vivo (mesma fórmula do bridge: economia 55% + suavidade 45%). */
+data class LiveDriveScore(
+    val valid: Boolean,      // false = viagem muito curta / sem dados → não mostra
+    val score: Int,          // 0-100
+    val econ: Int,           // componente economia 0-100
+    val smooth: Int,         // componente suavidade 0-100
+    val harshAcc: Int,       // acelerações bruscas na viagem
+    val harshBrake: Int,     // frenagens bruscas na viagem
+)
+
 class TripManager private constructor() {
 
     companion object {
@@ -400,6 +410,9 @@ class TripManager private constructor() {
     private var curRegen     = 0f
     private var curDist      = 0f
     private var sessionActive = false
+    // Eventos bruscos da viagem em curso (score ao vivo). Reset em onAutoTripStart.
+    private var liveHarshAcc   = 0
+    private var liveHarshBrake = 0
 
     // Checkpoint counter — checkpointSession() is called every 5 ticks (~5s)
     private var checkpointTickCount = 0
@@ -865,6 +878,26 @@ class TripManager private constructor() {
             elevGainM    = ((telemetryRecorder?.elevGainM ?: 0.0) - autoTripStartElevGain).coerceAtLeast(0.0).toFloat(),
             elevLossM    = ((telemetryRecorder?.elevLossM ?: 0.0) - autoTripStartElevLoss).coerceAtLeast(0.0).toFloat(),
         )
+    }
+
+    /**
+     * Score de condução AO VIVO da viagem em curso — replica computeDriveScore do
+     * bridge (economia 55% + suavidade 45%). valid=false quando não há viagem com
+     * distância mínima pra pontuar.
+     */
+    fun getLiveDriveScore(): LiveDriveScore {
+        val t = getInProgressAutoTrip() ?: return LiveDriveScore(false, 0, 0, 0, 0, 0)
+        val dist = t.distKm
+        if (dist < 0.3f) return LiveDriveScore(false, 0, 0, 0, 0, 0)
+        val ha = liveHarshAcc; val hb = liveHarshBrake
+        // Economia: energia-equiv/100km (kWh + L·8,9). Ótimo em 13; cada kWh acima tira ~5,4 pts.
+        val eq = if (dist >= 1f) (t.netKwh + t.fuelL * 8.9f) / dist * 100f else null
+        val econ = if (eq != null) (100f - (eq - 13f) * (70f / 13f)).coerceIn(0f, 100f) else 70f
+        // Suavidade: penaliza eventos bruscos por km (~18 pts cada).
+        val perKm = if (dist > 0.5f) (ha + hb) / dist else 0f
+        val smooth = (100f - perKm * 18f).coerceIn(0f, 100f)
+        val score = Math.round(0.55f * econ + 0.45f * smooth).coerceIn(0, 100)
+        return LiveDriveScore(true, score, Math.round(econ), Math.round(smooth), ha, hb)
     }
 
     /** Persiste o set de IDs sincronizados nas SharedPreferences (thread-safe). */
@@ -1487,6 +1520,7 @@ class TripManager private constructor() {
     /** Captura baseline do trip automático. Persiste para sobreviver reinício do app. */
     private fun onAutoTripStart() {
         autoTripStartMs     = System.currentTimeMillis()
+        liveHarshAcc = 0; liveHarshBrake = 0   // zera eventos bruscos da nova viagem
         autoTripStartSoc    = latestSocPct
         autoTripStartFuel   = latestFuelPct
         autoTripStartEnergy = lifeEnergyKwh
@@ -1709,6 +1743,14 @@ class TripManager private constructor() {
                         val dtH = (nowSpd - lastSpeedSampleMs) / 3_600_000f
                         // Descarta gaps anômalos (>30s): app suspenso, MQTT travado etc.
                         if (dtH > 0f && dtH < 0.0083f) speedIntegDistKm += latestSpeedKmh * dtH
+                    }
+                    // Eventos bruscos (score ao vivo) — mesma regra do bridge (>9 / <−11 km/h·s).
+                    if (sessionActive && lastSpeedSampleMs > 0L) {
+                        val dtSec = (nowSpd - lastSpeedSampleMs) / 1000f
+                        if (dtSec > 0f && dtSec <= 5f) {
+                            val a = (value - latestSpeedKmh) / dtSec
+                            if (a > 9f) liveHarshAcc++ else if (a < -11f) liveHarshBrake++
+                        }
                     }
                     lastSpeedSampleMs = nowSpd
                     latestSpeedKmh = value
