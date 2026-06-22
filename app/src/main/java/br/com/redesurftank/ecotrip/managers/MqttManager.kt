@@ -601,6 +601,7 @@ class MqttManager private constructor() {
         loadConfig()
         restoreDiagState(prefs)
         wireCallManager()
+        wireParkGuard(context)
         // Listener GLOBAL pro car bus — antes vivia em ConsumptionScreen.kt (dentro
         // de um DisposableEffect que descadastrava ao sair da tela). Agora roda
         // SEMPRE — RPM/SOC/speed continuam sendo capturados independente da UI.
@@ -2761,6 +2762,23 @@ class MqttManager private constructor() {
                     CallManager.end(ctx, notify = false)
                     publishResult("call_end", "ok")
                 }
+                "guard_arm" -> {
+                    // Liga/persiste o guarda-estacionamento. {"enabled":bool}; sem campo só lê.
+                    val ctx = appContext
+                    if (ctx == null) { publishResult("guard_arm", "error: sem contexto"); return@submit }
+                    val has = try { JSONObject(payload).has("enabled") } catch (_: Exception) { false }
+                    val on = if (has) {
+                        val v = try { JSONObject(payload).optBoolean("enabled", false) } catch (_: Exception) { false }
+                        ParkGuard.setEnabled(ctx, v); v
+                    } else ParkGuard.enabled
+                    publishResult("guard_arm", "ok:enabled=$on armed=${ParkGuard.armed}")
+                }
+                "guard_disarm" -> {
+                    val ctx = appContext
+                    if (ctx == null) { publishResult("guard_disarm", "error: sem contexto"); return@submit }
+                    ParkGuard.setEnabled(ctx, false)
+                    publishResult("guard_disarm", "ok")
+                }
                 "rec_start" -> {
                     val ctx = appContext
                     if (ctx == null) { publishResult("rec_start", "error: sem contexto"); return@submit }
@@ -3408,6 +3426,19 @@ class MqttManager private constructor() {
             }
         }
         CallManager.stopAudio = { CarAudioRelay.stopCall() }
+    }
+
+    // Fia o ParkGuard: ao disparar, publica security/alarm {lat,lng,reason,ts}.
+    // O bridge faz push crítico + auto-share (e gravação opcional).
+    private fun wireParkGuard(ctx: Context) {
+        ParkGuard.init(ctx) { lat, lng, reason ->
+            try {
+                val o = JSONObject()
+                    .put("lat", lat).put("lng", lng)
+                    .put("reason", reason).put("ts", System.currentTimeMillis())
+                client?.publish("$prefix/security/alarm", o.toString().toByteArray(), 1, false)
+            } catch (e: Exception) { AppLogger.w(TAG, "security/alarm falhou: ${e.message}") }
+        }
     }
 
     /**

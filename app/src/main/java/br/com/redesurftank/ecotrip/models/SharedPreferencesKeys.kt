@@ -130,4 +130,8 @@ object SharedPreferencesKeys {
     // LAN direta carro↔iPad — servidor HTTP/WS embutido no APK pra iPad
     // descobrir via mDNS e consumir telemetria fast sem passar pelo Mac mini.
     const val LOCAL_LAN_ENABLED = "local_lan_enabled"   // default true
+
+    // Guarda-estacionamento (antifurto): detecta movimento/reboque com o carro
+    // desligado e dispara alarme (push + auto-share).
+    const val PARK_GUARD_ENABLED = "park_guard_enabled"   // default false
 }

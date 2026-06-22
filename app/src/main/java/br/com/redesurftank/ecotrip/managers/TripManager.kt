@@ -719,6 +719,15 @@ class TripManager private constructor() {
     fun getLastGps(): Pair<Double, Double> =
         Pair(telemetryRecorder?.latestLat ?: 0.0, telemetryRecorder?.latestLng ?: 0.0)
 
+    /** Provider do último fix aceito ("gps"/"network"/""). Pro ParkGuard descartar NETWORK. */
+    fun getLastGpsProvider(): String = telemetryRecorder?.latestGpsProvider ?: ""
+
+    /** Idade (ms) do último fix aceito — Long.MAX_VALUE se nunca houve fix. */
+    fun getLastGpsAgeMs(): Long {
+        val ms = telemetryRecorder?.latestGpsMs ?: 0L
+        return if (ms == 0L) Long.MAX_VALUE else System.currentTimeMillis() - ms
+    }
+
     // ── SOC na chegada ──────────────────────────────────────────────────────
     fun getCurrentSocPct(): Float = latestSocPct
     fun getOutsideTempC(): Float = latestOutsideTempC ?: 28f
@@ -1424,11 +1433,15 @@ class TripManager private constructor() {
      * - se state muda 1→0 após reinício, onAutoTripEnd() usa os valores persistidos.
      */
     fun onDrivingReady(state: Int) {
+        var transitioned = false
+        var nowReady = false
         synchronized(lock) {
             val wasReady = lastDrivingReadyState == 1
             val isReady  = state == 1
             lastDrivingReadyState = state
             prefs.edit().putInt(SharedPreferencesKeys.LAST_DRIVING_READY_STATE, state).apply()
+            transitioned = wasReady != isReady
+            nowReady = isReady
 
             when {
                 !wasReady && isReady -> {   // 0→1: carro ligado — SEMPRE inicia trip nova
@@ -1448,6 +1461,9 @@ class TripManager private constructor() {
                 // wasReady==isReady: estado repetido (ex: reconexão/restart) — sem ação
             }
         }
+        // Guarda-estacionamento: arma ao desligar (1→0), desarma ao ligar (0→1).
+        // Fora do lock — arm()/disarm() têm sincronização própria.
+        if (transitioned) ParkGuard.onIgnition(nowReady)
     }
 
     /** Salva checkpoint dos valores lifetime atuais. Chamado de dentro de synchronized(lock). */
