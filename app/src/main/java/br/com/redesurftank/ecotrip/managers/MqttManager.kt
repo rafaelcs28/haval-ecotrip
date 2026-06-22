@@ -2018,12 +2018,37 @@ class MqttManager private constructor() {
             pubD("seat_belt_warning",  latestSeatBeltWarning.toString())
             pubD("seated_state",       latestSeatedState)
 
-            // ── MIGRATED_TO_HA ────────────────────────────────────────────────
-            // O bridge IGNORA publishes do carro para: door_*, window_*, sunroof,
-            // lock_state, ac_state, engine_state (usa integração GWM Brasil em vez).
-            // Stopamos de publicar — economiza banda + simplifica. Os valores
-            // latestDoorFl/etc. continuam rastreados internamente pra UI do carro.
-            // Mantemos os debug/* (diagnóstico — valores CRUS do CAN antes do parse).
+            // ── MIGRATED_TO_HA — fallback de telemetria via WiFi ─────────────
+            // Essas chaves migraram pra integração GWM Brasil: normalmente o bridge
+            // IGNORA o publish do carro em favor da nuvem (sem ruído de sensor). MAS
+            // quando o 4G do carro acaba, a nuvem GWM morre — e o bridge passa a
+            // ACEITAR estes valores, que chegam via WiFi/Starlink (ver _gwmAlive no
+            // server.js). Voltam a ser ignorados sozinhos quando a GWM revive.
+            // pubD = só publica quando o valor muda (dedup) → tráfego mínimo.
+            // Normalizado: "1"=aberto/destrancado/ligado · "0"=fechado/trancado/off.
+            pubD("door_fl",    if (snDoorFl != 0) "1" else "0")
+            pubD("door_fr",    if (snDoorFr != 0) "1" else "0")
+            pubD("door_rl",    if (snDoorRl != 0) "1" else "0")
+            pubD("door_rr",    if (snDoorRr != 0) "1" else "0")
+            pubD("door_trunk", if (snTrunk  != 0) "1" else "0")
+            // Vidros: formato "valor:ms" (bridge usa o ms como hora real da mudança).
+            pubD("window_fl",  "${if (snWinFl != 0) 1 else 0}:$snWinFlMs")
+            pubD("window_fr",  "${if (snWinFr != 0) 1 else 0}:$snWinFrMs")
+            pubD("window_rl",  "${if (snWinRl != 0) 1 else 0}:$snWinRlMs")
+            pubD("window_rr",  "${if (snWinRr != 0) 1 else 0}:$snWinRrMs")
+            pubD("sunroof",    if (snSunroof > 0) "1" else "0")
+            pubD("ac_state",   if (snAcEnable != 0) "1" else "0")
+            // engine_state derivado do driving_ready (ignição): o HEV liga/desliga o
+            // ICE várias vezes/min, mas driving_ready é estável. 1=carro ligado.
+            pubD("engine_state", if (snDrvReady != 0) "1" else "0")
+            // lock_state NÃO entra no fallback: a semântica do car.basic.door_lock_status
+            // cru é AMBÍGUA — observado o carro trancado com GWM lock_state='off' (trancado)
+            // E debug/lock_status_raw='1' ao mesmo tempo, ou seja raw 1 ≠ destrancado como
+            // se supunha. Publicar invertido geraria falso 'destrancado'/'desprotegido'
+            // durante 4G-out. Confirmar a polaridade no device (comparar lock_status_raw
+            // com o GWM em transições trancado↔destrancado) antes de habilitar. Doors/windows
+            // já cobrem o sinal de intrusão.
+
             // Debug — valores crus do barramento + resultado do parsing (sem afetar lógica)
             if (snDoorRaw.isNotEmpty()) {
                 pubD("debug/door_status_raw", snDoorRaw)
