@@ -385,7 +385,7 @@
       if(!d.scoreValid){ if(chip) chip.style.display='none'; var sp=$('score-panel'); if(sp) sp.style.display='none'; }
       else {
         var col=_scol(d.score);
-        if(chip){ chip.textContent='🎯 '+d.score; chip.style.color=col; chip.style.borderColor=col; chip.style.background='transparent'; chip.style.display=''; }
+        if(chip){ chip.textContent='🎯 '+d.score; chip.style.color=col; chip.style.borderColor=col; chip.style.borderWidth='1.5px'; chip.style.background=_rgba(col,0.14); chip.style.fontSize='22px'; chip.style.fontWeight='800'; chip.style.padding='5px 14px'; chip.style.display='flex'; chip.style.alignItems='center'; }
         fillScorePanel(d);
       }
     }
@@ -411,6 +411,7 @@
 
   // ── Score de condução: cor por faixa + preenche o painel de detalhe ──
   function _scol(v){ return v<50?'#FF5F1F':(v<75?'#FFB648':'#28C98A'); }
+  function _rgba(hex,a){ var n=parseInt(hex.slice(1),16); return 'rgba('+((n>>16)&255)+','+((n>>8)&255)+','+(n&255)+','+a+')'; }
   function fillScorePanel(d){
     var se=$('sp-score'); if(se){ se.textContent=d.score; se.style.color=_scol(d.score); }
     var ed = d.econ<=d.smooth;   // o menor está puxando

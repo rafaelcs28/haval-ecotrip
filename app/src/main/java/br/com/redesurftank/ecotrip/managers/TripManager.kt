@@ -413,6 +413,9 @@ class TripManager private constructor() {
     // Eventos bruscos da viagem em curso (score ao vivo). Reset em onAutoTripStart.
     private var liveHarshAcc   = 0
     private var liveHarshBrake = 0
+    // Janela de ~1s pra avaliar aceleração (evita falso-positivo por quantização km/h).
+    private var lastHarshMs    = 0L
+    private var lastHarshSpeed = 0f
 
     // Checkpoint counter — checkpointSession() is called every 5 ticks (~5s)
     private var checkpointTickCount = 0
@@ -1521,6 +1524,7 @@ class TripManager private constructor() {
     private fun onAutoTripStart() {
         autoTripStartMs     = System.currentTimeMillis()
         liveHarshAcc = 0; liveHarshBrake = 0   // zera eventos bruscos da nova viagem
+        lastHarshMs = 0L; lastHarshSpeed = 0f
         autoTripStartSoc    = latestSocPct
         autoTripStartFuel   = latestFuelPct
         autoTripStartEnergy = lifeEnergyKwh
@@ -1744,12 +1748,22 @@ class TripManager private constructor() {
                         // Descarta gaps anômalos (>30s): app suspenso, MQTT travado etc.
                         if (dtH > 0f && dtH < 0.0083f) speedIntegDistKm += latestSpeedKmh * dtH
                     }
-                    // Eventos bruscos (score ao vivo) — mesma regra do bridge (>9 / <−11 km/h·s).
-                    if (sessionActive && lastSpeedSampleMs > 0L) {
-                        val dtSec = (nowSpd - lastSpeedSampleMs) / 1000f
-                        if (dtSec > 0f && dtSec <= 5f) {
-                            val a = (value - latestSpeedKmh) / dtSec
-                            if (a > 9f) liveHarshAcc++ else if (a < -11f) liveHarshBrake++
+                    // Eventos bruscos (score ao vivo) — mesma regra do bridge (>9 / <−11 km/h·s),
+                    // mas avaliado em JANELA de ~1s. Os eventos do CAN chegam rápido demais e a
+                    // velocidade vem em km/h inteiro: medir a cada evento transforma o ruído de
+                    // quantização (±1 km/h em 100ms = 10 km/h·s) em freada/aceleração falsa. A
+                    // janela de 1s reproduz a cadência das amostras que o bridge usa.
+                    if (sessionActive) {
+                        if (lastHarshMs == 0L) { lastHarshMs = nowSpd; lastHarshSpeed = value }
+                        else {
+                            val dtSec = (nowSpd - lastHarshMs) / 1000f
+                            if (dtSec >= 1f) {
+                                if (dtSec <= 5f) {
+                                    val a = (value - lastHarshSpeed) / dtSec
+                                    if (a > 9f) liveHarshAcc++ else if (a < -11f) liveHarshBrake++
+                                }
+                                lastHarshMs = nowSpd; lastHarshSpeed = value
+                            }
                         }
                     }
                     lastSpeedSampleMs = nowSpd

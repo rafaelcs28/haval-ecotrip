@@ -536,14 +536,19 @@ fun ConsumptionScreen() {
     val navActions: @Composable RowScope.() -> Unit = {
         if (liveScore.valid) {
             val sc = scoreColorOf(liveScore.score)
-            Text(
-                "🎯 ${liveScore.score}", fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, color = sc,
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
                 modifier = Modifier
-                    .padding(end = 4.dp)
-                    .border(1.dp, sc.copy(alpha = 0.45f), RoundedCornerShape(8.dp))
+                    .padding(end = 8.dp)
+                    .background(sc.copy(alpha = 0.14f), RoundedCornerShape(12.dp))
+                    .border(1.5.dp, sc.copy(alpha = 0.55f), RoundedCornerShape(12.dp))
                     .clickable { showScoreDetail = true }
-                    .padding(horizontal = 10.dp, vertical = 4.dp),
-            )
+                    .padding(horizontal = 14.dp, vertical = 6.dp),
+            ) {
+                Text("🎯", fontSize = 18.sp)
+                Text("${liveScore.score}", fontSize = 24.sp, fontWeight = FontWeight.ExtraBold, color = sc)
+            }
         }
         UplinkChip()
         when {
