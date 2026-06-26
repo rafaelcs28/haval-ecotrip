@@ -163,6 +163,8 @@ const DRIVE_HISTORY_FILE  = path.join(DATA_DIR, 'drive_history.json');
 // Capacidades do Haval H6 PHEV (uso pra estimar kWh atual a partir do SOC%)
 const BATTERY_CAPACITY_KWH = 34;
 const TANK_CAPACITY_L      = 55;
+// Aplica o offset de calibração manual ao valor bruto do sensor de combustível.
+function _fuelWithCalib(rawL) { return +Math.max(0, rawL + (state.fuel_calib_offset_l || 0)).toFixed(1); }
 const NOTIF_PREFS_FILE    = path.join(DATA_DIR, 'notif_prefs.json');
 const NOTIF_HISTORY_FILE  = path.join(DATA_DIR, 'notif_history.json');
 const EVENTS_FILE         = path.join(DATA_DIR, 'events.json');
@@ -1218,6 +1220,7 @@ const state = {
   outside_temp:     0,
   odometer_km:         0,    // km total do veículo
   fuel_l:              0,    // litros no tanque (direto da GWM Brasil)
+  fuel_calib_offset_l: 0,   // offset de calibração manual (negativo = sensor over-reportou)
   tank_avg_price_per_l: 0,   // R$/L médio ponderado do que está no tanque
   battery_avg_price_per_kwh: 0,  // R$/kWh médio ponderado do que está na bateria
   batt_12v_pct:        0,    // % bateria auxiliar 12V
@@ -2080,10 +2083,17 @@ function _carIsAwake() {
     if (ready || speed > 1 || power || (gear !== 'P' && gear !== 'N')) return true;
   }
   // Com o APK silente, o único sinal confiável de "acordado" é o motor ligado
-  // pela GWM (hyengsts), que segue sendo polled mesmo com o app morto. Cobre o
-  // APK zumbi enquanto o carro de fato roda, sem confiar em campo congelado.
+  // pela GWM (hyengsts), que segue sendo polled mesmo com o app morto. Mas
+  // só conta se o último snapshot do APK NÃO mostrava carro claramente parado
+  // (gear=P + speed~0 + driving_ready falso) — evita falso-positivo quando o
+  // carro estava estacionado quando o APK silenciou.
   if (gwmFresh && _fieldSource['engine_state'] === 'gwm' &&
-      (state.engine_state === '1' || state.engine_state === 1)) return true;
+      (state.engine_state === '1' || state.engine_state === 1)) {
+    const lastGear  = String(state.gear || 'P').toUpperCase();
+    const lastSpeed = +state.speed_kmh || 0;
+    const lastReady = state.driving_ready === 1 || state.driving_ready === true;
+    if (!(lastGear === 'P' && lastSpeed < 1 && !lastReady)) return true;
+  }
   return false;
 }
 
@@ -2099,9 +2109,10 @@ setInterval(() => {
   if (apkAge < SOURCE_STALL_MS) _apkStallActive = false;
   // APK silente mas GWM ativo → só alerta se o carro estiver ACORDADO.
   // Carro dormindo (gear=P + parado) silencia esse alerta — é o normal.
-  // Edge-triggered: um aviso por episódio, não de hora em hora.
+  // Máx 1 aviso/hora — APK pode reconectar/reiniciar várias vezes (OTA, zombie)
+  // gerando múltiplos episódios; sem o gap ficaria spammando.
   if (apkAge > SOURCE_STALL_MS && gwmAge < SOURCE_STALL_MS &&
-      !_apkStallActive && _carIsAwake()) {
+      !_apkStallActive && _carIsAwake() && (now - _sourceStallNotifiedApk) > SOURCE_NOTIF_GAP) {
     _apkStallActive = true;
     _sourceStallNotifiedApk = now;
     const min = Math.round(apkAge / 60_000);
@@ -3897,7 +3908,7 @@ app.post('/api/refuels', (req, res) => {
 
 // PATCH /api/refuels/:id — atualiza campos (preço, posto, notas)
 app.patch('/api/refuels/:id', (req, res) => {
-  const r = refuels.find(x => x.id === req.params.id);
+  const r = refuels.find(x => x.id === req.params.id || String(x.timestamp_ms) === req.params.id);
   if (!r) return res.status(404).json({ error: 'não encontrado' });
   const b = req.body || {};
   if (b.price_per_liter !== undefined) {
@@ -3913,23 +3924,43 @@ app.patch('/api/refuels/:id', (req, res) => {
     r.price_per_liter = (+r.liters_added || 0) > 0 ? t / r.liters_added : 0;
     r.pending = false;
   }
-  if (b.liters_added !== undefined) r.liters_added = parseFloat(b.liters_added) || r.liters_added;
+  if (b.liters_added !== undefined) {
+    const newL = parseFloat(b.liters_added);
+    if (newL > 0) { r.liters_added = newL; r.pending = false; }
+  }
   if (b.location_name !== undefined) r.location_name = String(b.location_name).slice(0, 80);
   if (b.notes !== undefined)         r.notes = String(b.notes).slice(0, 240);
   if (b.timestamp_ms !== undefined)  r.timestamp_ms = parseInt(b.timestamp_ms) || r.timestamp_ms;
   if (b.odometer_km !== undefined)   r.odometer_km = parseFloat(b.odometer_km) || r.odometer_km;
   // Recoeficiente total se price ou liters mudaram
   if (r.price_per_liter > 0 && r.liters_added > 0) r.total_cost = r.price_per_liter * r.liters_added;
+  saveRefuels();
   recomputeTankAvgPrice();
   res.json({ ok: true, refuel: r, tank_avg_price_per_l: state.tank_avg_price_per_l });
 });
 
 app.delete('/api/refuels/:id', (req, res) => {
-  const idx = refuels.findIndex(x => x.id === req.params.id);
+  const idx = refuels.findIndex(x => x.id === req.params.id || String(x.timestamp_ms) === req.params.id);
   if (idx < 0) return res.status(404).json({ error: 'não encontrado' });
   refuels.splice(idx, 1);
   recomputeTankAvgPrice();
   res.json({ ok: true, tank_avg_price_per_l: state.tank_avg_price_per_l });
+});
+
+// POST /api/fuel-calibrate — corrige leitura errada do sensor de combustível.
+// Body: { actual_l: 15 }  → aplica offset = actual - fuel_l_atual, atualiza
+// state.fuel_l imediatamente e persiste o offset no state.json.
+app.post('/api/fuel-calibrate', requireAuth, (req, res) => {
+  const actual = parseFloat(req.body.actual_l);
+  if (!isFinite(actual) || actual < 0 || actual > TANK_CAPACITY_L) {
+    return res.status(400).json({ error: 'actual_l inválido' });
+  }
+  const delta = actual - state.fuel_l;
+  state.fuel_calib_offset_l = +((state.fuel_calib_offset_l || 0) + delta).toFixed(2);
+  state.fuel_l = +actual.toFixed(1);
+  scheduleStateSave();
+  console.log(`[fuel-calib] offset ajustado em ${delta > 0 ? '+' : ''}${delta.toFixed(1)}L → offset total=${state.fuel_calib_offset_l}L fuel_l=${state.fuel_l}L`);
+  res.json({ ok: true, fuel_l: state.fuel_l, fuel_calib_offset_l: state.fuel_calib_offset_l });
 });
 
 // PATCH /api/charges/:ts/location
@@ -5230,10 +5261,12 @@ app.get('/api/stats/by-mode', (req, res) => {
     if (!matchesRoute(t)) continue;
     segTrips++;
     for (const s of segs) {
-      const key = `${s.onePedal}|${s.regenLevel}|${s.driveMode}|${s.powertrain}`;
+      // Com one-pedal ativo o nível de regeneração é irrelevante — agrupa tudo junto.
+      const effRegen = s.onePedal === 1 ? 0 : s.regenLevel;
+      const key = `${s.onePedal}|${effRegen}|${s.driveMode}|${s.powertrain}`;
       let c = combos.get(key);
       if (!c) {
-        c = { onePedal: s.onePedal, regenLevel: s.regenLevel, driveMode: s.driveMode, powertrain: s.powertrain,
+        c = { onePedal: s.onePedal, regenLevel: effRegen, driveMode: s.driveMode, powertrain: s.powertrain,
               distKm: 0, netKwh: 0, regenKwh: 0, energyKwh: 0, fuelL: 0, timeSec: 0,
               engineDistKm: 0, engineSec: 0, segCount: 0, tripIds: new Set() };
         combos.set(key, c);
@@ -5300,7 +5333,7 @@ app.get('/api/stats/by-mode', (req, res) => {
       rPerKm:   rPerKm != null ? +rPerKm.toFixed(3) : null,
       segCount: c.segCount,
       tripCount: c.tripIds.size,
-      lowSample: c.distKm < 5,   // <5 km de amostra → ranking pouco confiável
+      lowSample: c.distKm < 10,  // <10 km de amostra → ranking pouco confiável
     });
   }
   // Mais econômico primeiro: maior km/L-equivalente. Combos sem métrica (sem
@@ -11151,7 +11184,11 @@ function applyGwmEntity(id, value, isRetained = false) {
   }
 
   // ── Sensores numéricos (soc, 12v, odo, pneus, autonomia, remaining_min) ──
-  state[field] = num(value);
+  if (field === 'fuel_l') {
+    state.fuel_l = _fuelWithCalib(num(value));
+  } else {
+    state[field] = num(value);
+  }
   if (field === 'odometer_km') checkMaintenanceAlerts();
   if (field === 'soc_pct') { checkSocLowIdle(); _checkSocFullLong(+state.soc_pct || 0); _checkCustomChargeCutoff(+state.soc_pct || 0); }
 }
@@ -11360,7 +11397,7 @@ function applyMqttMessage(key, value, isRetained = false) {
       // deriva dos litros a partir do % lido do CAN pelo APK. Quando a GWM revive,
       // o id 2017002 volta a sobrescrever state.fuel_l com o valor da nuvem.
       if (!_gwmAlive(_now) && state.fuel_pct_can > 0) {
-        state.fuel_l = +((state.fuel_pct_can / 100) * TANK_CAPACITY_L).toFixed(1);
+        state.fuel_l = _fuelWithCalib((state.fuel_pct_can / 100) * TANK_CAPACITY_L);
       }
       break;
     }
@@ -12059,7 +12096,8 @@ function applyMqttMessage(key, value, isRetained = false) {
             // Preserva preço/cost/notes/location do PWA, atualiza só dados físicos.
             existing.fuel_l_before = r.fuel_l_before || existing.fuel_l_before;
             existing.fuel_l_after  = r.fuel_l_after  || existing.fuel_l_after;
-            existing.liters_added  = r.liters_added  || existing.liters_added;
+            // liters_added: só APK sobrescreve se ainda pendente (usuário não editou)
+            if (existing.pending) existing.liters_added = r.liters_added || existing.liters_added;
             if (r.odometer_km > 0) existing.odometer_km = r.odometer_km;
             merged++;
           } else {
