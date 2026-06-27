@@ -23,10 +23,16 @@ import br.com.redesurftank.ecotrip.managers.CarDataManager
 import br.com.redesurftank.ecotrip.managers.LocalApiServer
 import br.com.redesurftank.ecotrip.managers.MqttManager
 import br.com.redesurftank.ecotrip.models.CarConstants
+import br.com.redesurftank.ecotrip.models.SharedPreferencesKeys
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
+
+/** Retorna true se os overlays WebView (Dirigir + Veículo) estão desabilitados. */
+fun isWebViewsDisabled(ctx: Context): Boolean =
+    ctx.applicationContext.getSharedPreferences(SharedPreferencesKeys.PREFS_NAME, Context.MODE_PRIVATE)
+        .getBoolean(SharedPreferencesKeys.WEBVIEWS_DISABLED, false)
 
 /**
  * Tela "Controles" embarcada no head unit (4º layout da tela inicial).
@@ -79,6 +85,7 @@ object ControlesWebHost {
     @SuppressLint("SetJavaScriptEnabled")
     fun show(ctx: Context) {
         val r = root ?: return
+        if (isWebViewsDisabled(ctx)) return
         if (web == null) {
             web = WebView(ctx.applicationContext).apply {
                 setBackgroundColor(android.graphics.Color.BLACK)

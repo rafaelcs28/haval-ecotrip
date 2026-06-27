@@ -131,6 +131,14 @@ object SharedPreferencesKeys {
     // descobrir via mDNS e consumir telemetria fast sem passar pelo Mac mini.
     const val LOCAL_LAN_ENABLED = "local_lan_enabled"   // default true
 
+    // Inicialização: app inicia no boot sem aparecer na tela (default true).
+    const val BOOT_MINIMIZED = "boot_minimized"          // default true
+
+    // Performance: desabilita os overlays WebView (tela Dirigir + Veículo).
+    // Cada WebView carrega V8+Blink (~50-80 MB); desabilitar libera memória
+    // se essas telas não são usadas. Requer reinício do app para aplicar.
+    const val WEBVIEWS_DISABLED = "webviews_disabled"    // default false
+
     // Guarda-estacionamento (antifurto): detecta movimento/reboque com o carro
     // desligado e dispara alarme (push + auto-share).
     const val PARK_GUARD_ENABLED = "park_guard_enabled"   // default false

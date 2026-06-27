@@ -69,6 +69,16 @@ class CarTelemetryService : Service() {
             val prefs = ctx.getSharedPreferences(SharedPreferencesKeys.PREFS_NAME, Context.MODE_PRIVATE)
             return prefs.getBoolean(SharedPreferencesKeys.LOCAL_LAN_ENABLED, true)
         }
+
+        fun isBootMinimizedPref(ctx: Context): Boolean {
+            val prefs = ctx.getSharedPreferences(SharedPreferencesKeys.PREFS_NAME, Context.MODE_PRIVATE)
+            return prefs.getBoolean(SharedPreferencesKeys.BOOT_MINIMIZED, true)
+        }
+
+        fun setBootMinimized(ctx: Context, on: Boolean) {
+            val prefs = ctx.getSharedPreferences(SharedPreferencesKeys.PREFS_NAME, Context.MODE_PRIVATE)
+            prefs.edit().putBoolean(SharedPreferencesKeys.BOOT_MINIMIZED, on).apply()
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null

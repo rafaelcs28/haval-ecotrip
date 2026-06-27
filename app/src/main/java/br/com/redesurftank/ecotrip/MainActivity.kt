@@ -116,10 +116,16 @@ class MainActivity : ComponentActivity() {
         br.com.redesurftank.ecotrip.ui.screens.ControlesWebHost.attach(root)
         setContentView(root)
 
-        // Iniciado pelo boot: managers já iniciados, UI não precisa aparecer de imediato.
-        // moveTaskToBack envia o app para segundo plano sem destruir a Activity —
-        // serviço foreground continua ativo e o app fica disponível na barra de tarefas.
-        if (intent?.getBooleanExtra("from_boot", false) == true) moveTaskToBack(true)
+        // Iniciado pelo boot: envia o app para segundo plano se a pref BOOT_MINIMIZED
+        // estiver ativa (default true). moveTaskToBack não destrói a Activity —
+        // serviço foreground continua, o app abre ao tocar na barra de tarefas.
+        if (intent?.getBooleanExtra("from_boot", false) == true) {
+            val prefs = try { createDeviceProtectedStorageContext() } catch (_: Exception) { this }
+                .getSharedPreferences(br.com.redesurftank.ecotrip.models.SharedPreferencesKeys.PREFS_NAME, android.content.Context.MODE_PRIVATE)
+            if (prefs.getBoolean(br.com.redesurftank.ecotrip.models.SharedPreferencesKeys.BOOT_MINIMIZED, true)) {
+                moveTaskToBack(true)
+            }
+        }
 
         // ── Player de mídia (tela Veículo): lê a sessão de mídia ativa e empurra
         // o estado pro WebView (window.applyMedia). Requer "Acesso a notificações". ──
