@@ -20,11 +20,29 @@ apnsLive.init();
 
 // Sem isto, uma rejection/exception fora de rota (timer, callback MQTT, fetch em
 // background) derrubava o processo inteiro. Loga e segue — pm2 só reinicia em crash real.
+// Histórico de eventos anômalos (últimas 100 ocorrências) exposto em /api/health.
+const _healthEvents = [];
+function _recordHealthEvent(type, msg) {
+  _healthEvents.push({ ts: Date.now(), type, msg: String(msg).slice(0, 300) });
+  if (_healthEvents.length > 100) _healthEvents.shift();
+}
+// Série temporal de memória (último 1h a cada 30s, ~120 pontos).
+const _memSeries = [];
+setInterval(() => {
+  const m = process.memoryUsage();
+  _memSeries.push({ ts: Date.now(), rss: Math.round(m.rss / 1048576), heap: Math.round(m.heapUsed / 1048576) });
+  if (_memSeries.length > 120) _memSeries.shift();
+}, 30_000);
+
 process.on('unhandledRejection', (reason) => {
-  console.error('[unhandledRejection]', reason && reason.stack || reason);
+  const msg = reason && reason.stack || String(reason);
+  console.error('[unhandledRejection]', msg);
+  _recordHealthEvent('unhandledRejection', msg);
 });
 process.on('uncaughtException', (err) => {
-  console.error('[uncaughtException]', err && err.stack || err);
+  const msg = err && err.stack || String(err);
+  console.error('[uncaughtException]', msg);
+  _recordHealthEvent('uncaughtException', msg);
 });
 
 // Write atômico: grava em tmp + rename (rename é atômico no mesmo FS). Sem isto,
@@ -2693,6 +2711,35 @@ function requireAuth(req, res, next) {
 }
 // Ping público — sem auth, útil para verificar se o servidor está online
 app.get('/ping', (_req, res) => res.json({ ok: true, ts: Date.now() }));
+
+// GET /api/health — status operacional do bridge (auth-gated).
+// Expõe uptime, memória, MQTT, WS clients e histórico de crashes.
+app.get('/api/health', requireAuth, (_req, res) => {
+  const m = process.memoryUsage();
+  res.json({
+    ok:            true,
+    ts:            Date.now(),
+    started_at_ms: SERVER_START_AT,
+    uptime_sec:    Math.floor(process.uptime()),
+    node_version:  process.version,
+    memory: {
+      rss_mb:        Math.round(m.rss        / 1048576),
+      heap_used_mb:  Math.round(m.heapUsed   / 1048576),
+      heap_total_mb: Math.round(m.heapTotal  / 1048576),
+      external_mb:   Math.round(m.external   / 1048576),
+    },
+    mqtt: {
+      connected:      !!(mqttClient && mqttClient.connected),
+      last_apk_ms:    state.last_apk_ms  || 0,
+      last_gwm_ms:    state.last_gwm_ms  || 0,
+    },
+    ws_clients:    clients.size,
+    audio_clients: audioClients.size,
+    hf_clients:    _hfClients.size,
+    events:        _healthEvents.slice().reverse(),   // mais recente primeiro
+    mem_series:    _memSeries,
+  });
+});
 
 // ── /api/auth/* — rotas de autenticação (públicas e privadas) ────────────────
 // Rate limit simples por IP pra /api/auth/login: 5 tentativas/min, 15min de

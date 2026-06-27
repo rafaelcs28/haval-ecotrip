@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Bridge Health</title>
+<style>
+:root {
+  --bg:     #0f0f0f;
+  --panel:  #1a1a1a;
+  --border: rgba(255,255,255,.07);
+  --text:   #e2e8f0;
+  --muted:  #64748b;
+  --green:  #a3e635;
+  --red:    #f87171;
+  --yellow: #fbbf24;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: var(--bg); color: var(--text); font-family: -apple-system,sans-serif;
+       padding: env(safe-area-inset-top,0) 0 env(safe-area-inset-bottom,0); min-height: 100dvh; }
+.page { max-width: 480px; margin: 0 auto; padding: 16px 16px 32px; }
+h1 { font-size: 17px; font-weight: 700; margin-bottom: 4px; }
+.sub { font-size: 11px; color: var(--muted); margin-bottom: 18px; }
+.card { background: var(--panel); border: 1px solid var(--border); border-radius: 14px;
+        padding: 14px 16px; margin-bottom: 12px; }
+.card-title { font-size: 10px; font-weight: 700; color: var(--muted); letter-spacing: 1px;
+              text-transform: uppercase; margin-bottom: 10px; }
+.row { display: flex; justify-content: space-between; align-items: center;
+       padding: 5px 0; border-bottom: 1px solid var(--border); }
+.row:last-child { border-bottom: none; }
+.row .label { font-size: 12px; color: var(--muted); }
+.row .val   { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 5px; flex-shrink: 0; }
+.dot.green  { background: var(--green); box-shadow: 0 0 6px var(--green); }
+.dot.red    { background: var(--red);   box-shadow: 0 0 6px var(--red); }
+.dot.yellow { background: var(--yellow); }
+.status-row { display: flex; align-items: center; gap: 6px; }
+
+/* mini sparkline */
+canvas { display: block; width: 100%; height: 60px; margin-top: 8px; }
+
+/* crash log */
+.event-list { list-style: none; }
+.ev { padding: 8px 0; border-bottom: 1px solid var(--border); }
+.ev:last-child { border-bottom: none; }
+.ev .ev-time { font-size: 10px; color: var(--muted); margin-bottom: 2px; }
+.ev .ev-type { font-size: 11px; font-weight: 700; color: var(--red); }
+.ev .ev-msg  { font-size: 10px; color: #94a3b8; margin-top: 3px;
+               white-space: pre-wrap; word-break: break-word; max-height: 60px;
+               overflow: hidden; }
+.empty { font-size: 12px; color: var(--muted); text-align: center; padding: 16px 0; }
+
+.pill { display: inline-flex; align-items: center; gap: 4px;
+        padding: 3px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+.pill.green { background: rgba(163,230,53,.12); color: var(--green); }
+.pill.red   { background: rgba(248,113,113,.12); color: var(--red); }
+
+#last-update { font-size: 10px; color: var(--muted); text-align: right; margin-bottom: 12px; }
+.refresh-btn { float: right; font-size: 11px; color: var(--green); cursor: pointer;
+               background: none; border: none; padding: 0 0 0 8px; }
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>Bridge Health</h1>
+  <div class="sub" id="last-update">Carregando…</div>
+
+  <!-- Processo -->
+  <div class="card">
+    <div class="card-title">Processo <button class="refresh-btn" onclick="load()">↻ Atualizar</button></div>
+    <div class="row"><span class="label">Status</span><span class="val" id="proc-status">—</span></div>
+    <div class="row"><span class="label">Uptime</span><span class="val" id="proc-uptime">—</span></div>
+    <div class="row"><span class="label">Iniciado em</span><span class="val" id="proc-started">—</span></div>
+    <div class="row"><span class="label">Node</span><span class="val" id="proc-node">—</span></div>
+  </div>
+
+  <!-- Memória -->
+  <div class="card">
+    <div class="card-title">Memória</div>
+    <div class="row"><span class="label">RSS (total)</span><span class="val" id="mem-rss">—</span></div>
+    <div class="row"><span class="label">Heap usado</span><span class="val" id="mem-heap">—</span></div>
+    <div class="row"><span class="label">Heap alocado</span><span class="val" id="mem-htotal">—</span></div>
+    <canvas id="mem-chart"></canvas>
+  </div>
+
+  <!-- MQTT / WS -->
+  <div class="card">
+    <div class="card-title">Conexões</div>
+    <div class="row"><span class="label">MQTT broker</span><span class="val" id="mqtt-status">—</span></div>
+    <div class="row"><span class="label">Último dado APK</span><span class="val" id="mqtt-apk">—</span></div>
+    <div class="row"><span class="label">Último dado GWM</span><span class="val" id="mqtt-gwm">—</span></div>
+    <div class="row"><span class="label">Clientes WS</span><span class="val" id="ws-clients">—</span></div>
+    <div class="row"><span class="label">Clientes áudio</span><span class="val" id="audio-clients">—</span></div>
+  </div>
+
+  <!-- Erros -->
+  <div class="card">
+    <div class="card-title">Erros / crashes <span id="ev-count" style="color:var(--muted);font-weight:400;text-transform:none;font-size:10px"></span></div>
+    <ul class="event-list" id="ev-list">
+      <li class="empty">Nenhum erro registrado nesta sessão.</li>
+    </ul>
+  </div>
+</div>
+
+<script>
+const tk = localStorage.getItem('bridge_token') || prompt('Token do bridge:');
+if (tk) localStorage.setItem('bridge_token', tk);
+
+function fmtUptime(s) {
+  if (s < 60)   return s + 's';
+  if (s < 3600) return Math.floor(s/60) + 'min ' + (s%60) + 's';
+  const h = Math.floor(s/3600), m = Math.floor((s%3600)/60);
+  if (h < 24)   return h + 'h ' + m + 'min';
+  return Math.floor(h/24) + 'd ' + (h%24) + 'h';
+}
+function fmtDate(ms) {
+  if (!ms) return '—';
+  return new Date(ms).toLocaleString('pt-BR', { day:'2-digit', month:'2-digit', year:'2-digit', hour:'2-digit', minute:'2-digit', second:'2-digit' });
+}
+function fmtAgo(ms) {
+  if (!ms) return '—';
+  const s = Math.round((Date.now() - ms) / 1000);
+  if (s < 5)   return 'agora';
+  if (s < 60)  return s + 's atrás';
+  if (s < 3600) return Math.floor(s/60) + 'min atrás';
+  return Math.floor(s/3600) + 'h atrás';
+}
+function set(id, v) { const el = document.getElementById(id); if (el) el.innerHTML = v; }
+
+let memSeries = [];
+function drawChart() {
+  const canvas = document.getElementById('mem-chart');
+  if (!canvas || memSeries.length < 2) return;
+  const dpr = window.devicePixelRatio || 1;
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  canvas.width = w * dpr; canvas.height = h * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, w, h);
+
+  const vals = memSeries.map(p => p.rss);
+  const mn = Math.min(...vals), mx = Math.max(...vals) || 1;
+  const pad = 4;
+  function px(i)  { return pad + (i / (memSeries.length - 1)) * (w - pad * 2); }
+  function py(v)  { return h - pad - ((v - mn) / (mx - mn + 1)) * (h - pad * 2); }
+
+  // fill
+  ctx.beginPath();
+  ctx.moveTo(px(0), py(vals[0]));
+  vals.forEach((v, i) => ctx.lineTo(px(i), py(v)));
+  ctx.lineTo(px(vals.length-1), h); ctx.lineTo(px(0), h); ctx.closePath();
+  ctx.fillStyle = 'rgba(163,230,53,.08)';
+  ctx.fill();
+  // line
+  ctx.beginPath();
+  ctx.moveTo(px(0), py(vals[0]));
+  vals.forEach((v, i) => ctx.lineTo(px(i), py(v)));
+  ctx.strokeStyle = 'rgba(163,230,53,.6)';
+  ctx.lineWidth = 1.5; ctx.stroke();
+  // labels
+  ctx.fillStyle = '#64748b'; ctx.font = `${9 * dpr}px -apple-system,sans-serif`; ctx.scale(1/dpr, 1/dpr);
+  ctx.fillText(mn + ' MB', pad * dpr, (h - pad) * dpr);
+  ctx.fillText(mx + ' MB', pad * dpr, (pad + 10) * dpr);
+}
+
+async function load() {
+  try {
+    const r = await fetch('/api/health', { headers: { Authorization: 'Bearer ' + tk } });
+    if (r.status === 401) { alert('Token inválido'); return; }
+    const d = await r.json();
+
+    set('last-update', 'Atualizado ' + fmtDate(d.ts));
+    set('proc-status', '<span class="pill green"><span class="dot green"></span>Online</span>');
+    set('proc-uptime',  fmtUptime(d.uptime_sec));
+    set('proc-started', fmtDate(d.started_at_ms));
+    set('proc-node',    d.node_version || '—');
+    set('mem-rss',    (d.memory?.rss_mb   || 0) + ' MB');
+    set('mem-heap',   (d.memory?.heap_used_mb  || 0) + ' MB');
+    set('mem-htotal', (d.memory?.heap_total_mb || 0) + ' MB');
+
+    const mqttOk = d.mqtt?.connected;
+    set('mqtt-status', mqttOk
+      ? '<span class="pill green"><span class="dot green"></span>Conectado</span>'
+      : '<span class="pill red"><span class="dot red"></span>Desconectado</span>');
+    set('mqtt-apk',  fmtAgo(d.mqtt?.last_apk_ms));
+    set('mqtt-gwm',  fmtAgo(d.mqtt?.last_gwm_ms));
+    set('ws-clients',    d.ws_clients    ?? '—');
+    set('audio-clients', d.audio_clients ?? '—');
+
+    const evs = d.events || [];
+    set('ev-count', evs.length ? '(' + evs.length + ' total)' : '');
+    const list = document.getElementById('ev-list');
+    if (!evs.length) {
+      list.innerHTML = '<li class="empty">Nenhum erro registrado nesta sessão.</li>';
+    } else {
+      list.innerHTML = evs.map(e => `
+        <li class="ev">
+          <div class="ev-time">${fmtDate(e.ts)}</div>
+          <div class="ev-type">${e.type}</div>
+          <div class="ev-msg">${e.msg.replace(/</g,'&lt;')}</div>
+        </li>`).join('');
+    }
+
+    if (d.mem_series?.length) { memSeries = d.mem_series; drawChart(); }
+  } catch (e) {
+    set('proc-status', '<span class="pill red"><span class="dot red"></span>Sem resposta</span>');
+    set('last-update', 'Falhou em ' + new Date().toLocaleTimeString('pt-BR'));
+  }
+}
+
+load();
+setInterval(load, 15_000);
+window.addEventListener('resize', drawChart);
+</script>
+</body>
+</html>
