@@ -58,7 +58,6 @@ object HomeTeslaWebHost {
     @SuppressLint("SetJavaScriptEnabled")
     fun show(ctx: Context) {
         val r = root ?: return
-        if (isWebViewsDisabled(ctx)) return
         if (web == null) {
             web = WebView(ctx.applicationContext).apply {
                 setBackgroundColor(android.graphics.Color.BLACK)

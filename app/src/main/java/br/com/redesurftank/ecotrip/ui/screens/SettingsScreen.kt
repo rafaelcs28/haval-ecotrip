@@ -404,13 +404,8 @@ fun SettingsScreen(
             }
         }
 
-        // ── Inicialização / Performance ────────────────────────────────────────
+        // ── Inicialização ─────────────────────────────────────────────────────
         var bootMinimized by remember { mutableStateOf(CarTelemetryService.isBootMinimizedPref(ctx)) }
-        var webviewsDisabled by remember {
-            mutableStateOf(ctx.getSharedPreferences(
-                br.com.redesurftank.ecotrip.models.SharedPreferencesKeys.PREFS_NAME, android.content.Context.MODE_PRIVATE
-            ).getBoolean(br.com.redesurftank.ecotrip.models.SharedPreferencesKeys.WEBVIEWS_DISABLED, false))
-        }
         SectionCard("Inicialização") {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -424,8 +419,8 @@ fun SettingsScreen(
                         fontWeight = FontWeight.SemiBold,
                     )
                     Text(
-                        "Com Ligado: ao religar o carro o app sobe no background " +
-                        "(serviço ativo, UI só abre ao tocar). Com Desligado: abre direto na tela.",
+                        "Ligado: ao religar o carro o app sobe no background sem aparecer na tela " +
+                        "(serviço ativo, UI abre ao tocar). Desligado: abre direto na tela.",
                         fontSize = 11.sp, color = TextSecondary,
                     )
                 }
@@ -434,37 +429,6 @@ fun SettingsScreen(
                     onCheckedChange = {
                         bootMinimized = it
                         CarTelemetryService.setBootMinimized(ctx, it)
-                    },
-                )
-            }
-            Spacer(modifier = Modifier.height(8.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        if (webviewsDisabled) "WebViews desabilitadas" else "WebViews habilitadas",
-                        fontSize = 13.sp,
-                        color = if (webviewsDisabled) NeonLime else TextSecondary,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    Text(
-                        "Desabilita as telas Dirigir e Veículo (WebView). Cada uma usa ~50-80 MB " +
-                        "de RAM após aberta pela primeira vez. Requer reiniciar o app para aplicar.",
-                        fontSize = 11.sp, color = TextSecondary,
-                    )
-                }
-                Switch(
-                    checked = webviewsDisabled,
-                    onCheckedChange = {
-                        webviewsDisabled = it
-                        ctx.getSharedPreferences(
-                            br.com.redesurftank.ecotrip.models.SharedPreferencesKeys.PREFS_NAME,
-                            android.content.Context.MODE_PRIVATE
-                        ).edit().putBoolean(
-                            br.com.redesurftank.ecotrip.models.SharedPreferencesKeys.WEBVIEWS_DISABLED, it
-                        ).apply()
                     },
                 )
             }
