@@ -2047,7 +2047,8 @@ setInterval(() => {
 let _sourceStallNotifiedApk = 0;
 let _sourceStallNotifiedGwm = 0;
 let _apkStallActive = false;   // episódio de silêncio do APK já notificado — só re-notifica após recuperar
-const SOURCE_STALL_MS  = 10 * 60_000;          // 10 min de silêncio = stalled
+let _mqttLastConnectedAt = 0;  // timestamp da última conexão MQTT — grace period pós-reconexão
+const SOURCE_STALL_MS  = 20 * 60_000;          // 20 min de silêncio = stalled
 const SOURCE_NOTIF_GAP = 60 * 60_000;          // não repete antes de 1h
 
 /** True quando há sinal de que o carro está "em uso" — em movimento, com
@@ -2103,6 +2104,10 @@ setInterval(() => {
   const gwmMs  = state.last_gwm_ms || 0;
   // Só faz sentido comparar quando AMBAS fontes já produziram algo nesta sessão.
   if (apkMs === 0 || gwmMs === 0) return;
+  // Grace period pós-reconexão MQTT: retained GWM chega imediatamente mas o APK
+  // precisa de tempo para reconectar. Sem isso, qualquer queda de Starlink dispara
+  // falso-positivo de "APK silente" logo que o GWM retorna via retained.
+  if ((now - _mqttLastConnectedAt) < SOURCE_STALL_MS) return;
   const apkAge = now - apkMs;
   const gwmAge = now - gwmMs;
   // APK voltou a publicar → encerra o episódio e rearma o alerta.
@@ -2693,6 +2698,12 @@ app.get('/ping', (_req, res) => res.json({ ok: true, ts: Date.now() }));
 // Rate limit simples por IP pra /api/auth/login: 5 tentativas/min, 15min de
 // bloqueio após 10 falhas consecutivas. Hash da senha NUNCA volta no response.
 const _loginAttempts = new Map();   // ip → { count, firstMs, blockedUntilMs }
+// Purga entradas que já passaram da janela de bloqueio (evita crescimento indefinido).
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, s] of _loginAttempts)
+    if (s.blockedUntilMs < now && now - s.firstMs > 60_000) _loginAttempts.delete(ip);
+}, 10 * 60_000);
 function _checkRateLimit(ip) {
   const now = Date.now();
   let s = _loginAttempts.get(ip);
@@ -7546,7 +7557,8 @@ async function _recCommand(res, cmd, payload, waitMs) {
     if (_recResults[cmd]) return res.json({ ok: true, result: _recResults[cmd].value });
     await new Promise(r => setTimeout(r, 200));
   }
-  res.json({ ok: true, result: null, note: 'sem resposta (carro offline?)' });
+  const carOnline = (Date.now() - (state.last_apk_ms || 0)) < 90_000;
+  res.json({ ok: true, result: null, note: carOnline ? 'sem resposta do app (timeout)' : 'carro offline' });
 }
 app.post('/api/rec/start', requireAuth, (req, res) => _recCommand(res, 'rec_start', '{}', 8000));
 app.post('/api/rec/stop',  requireAuth, (req, res) => _recCommand(res, 'rec_stop',  '{}', 8000));
@@ -7798,7 +7810,7 @@ setInterval(() => {
     ws.isAlive = false;
     try { ws.ping(); } catch (_) {}
   }
-}, 25000);
+}, 15000);
 
 // POST /api/audio/listen { action:"start"|"stop", talk?:bool } — controla a captura
 // no carro. Reusa o cmd/audio_listen (o APK abre/fecha AudioRecord/AudioTrack).
@@ -7863,14 +7875,17 @@ app.get('/api/guard/state', requireAuth, (req, res) => {
   res.json({ ok: true, enabled: _guardEnabled, lastAlarmMs: _theftAlertedMs || 0 });
 });
 
-// ── WebSocket heartbeat (iOS Safari fecha silenciosamente conexões idle) ────────
+// ── WebSocket heartbeat ──────────────────────────────────────────────────────
+// 15s: Tailscale Funnel fecha conexões TCP idle em ~30s. Com 25s de intervalo
+// qualquer delay de rede faz o Funnel cortar antes do ping chegar, causando
+// desconexão fantasma no iOS. 15s dá margem suficiente.
 setInterval(() => {
   for (const ws of clients) {
     if (ws.isAlive === false) { ws.terminate(); continue; }
     ws.isAlive = false;
     ws.ping();
   }
-}, 25000);
+}, 15000);
 
 function broadcast(type, data) {
   const msg = JSON.stringify({ type, data });
@@ -7896,10 +7911,12 @@ function scheduleStateBroadcast() {
 // ── MQTT ──────────────────────────────────────────────────────────────────────
 
 const mqttOptions = {
-  port:           MQTT_PORT,
-  clientId:       `ecotrip-bridge-${Date.now()}`,
-  clean:          true,
-  reconnectPeriod: 5000,
+  port:             MQTT_PORT,
+  clientId:         `ecotrip-bridge-${Date.now()}`,
+  clean:            true,
+  reconnectPeriod:  5000,   // tenta a cada 5s
+  connectTimeout:   10000,  // abandona tentativa pendente após 10s (sem isso pode pendurar indefinidamente)
+  keepalive:        60,     // MQTT keepalive 60s (broker detecta queda mais rápido)
 };
 if (MQTT_USER) { mqttOptions.username = MQTT_USER; mqttOptions.password = MQTT_PASS; }
 
@@ -7913,6 +7930,7 @@ const mqttClient = mqtt.connect(MQTT_HOST, mqttOptions);
 mqttClient.on('connect', () => {
   console.log(`✓ MQTT conectado: ${MQTT_HOST} (prefix: ${MQTT_PREFIX})`);
   mqttClient.subscribe(`${MQTT_PREFIX}/#`, { qos: 1 });
+  _mqttLastConnectedAt = Date.now();
   // Reset cache de publish pra forçar republicação dos preços ao reconectar
   _lastPublishedGas = null; _lastPublishedKwh = null;
   publishPricesToCar();
@@ -11186,6 +11204,10 @@ function applyGwmEntity(id, value, isRetained = false) {
   // ── Sensores numéricos (soc, 12v, odo, pneus, autonomia, remaining_min) ──
   if (field === 'fuel_l') {
     state.fuel_l = _fuelWithCalib(num(value));
+  } else if (field === 'soc_pct') {
+    // GWM às vezes envia 0 quando o carro dorme / GWM indisponível.
+    // Ignora esse zero se haSocActive — o valor real vem da automação HA.
+    if (num(value) > 0 || !haSocActive) state.soc_pct = num(value);
   } else {
     state[field] = num(value);
   }
@@ -11204,9 +11226,15 @@ const _fieldSource = {};
 // debounce de 30 min). Foi exatamente o sintoma da colisão de processo (6.61↔6.66).
 let _flapTs = [];
 let _lastFlapAlertMs = 0;
+let _flapCleanupMs = 0;
 function _detectConnFlapping(now) {
   _flapTs.push(now);
-  _flapTs = _flapTs.filter(t => now - t <= 180_000);
+  // Limpeza lazy a cada 10s em vez de filtrar a cada evento — durante flapping
+  // genuíno (muitos disconnects/s) o filter recriava o array centenas de vezes.
+  if (now - _flapCleanupMs > 10_000) {
+    _flapTs = _flapTs.filter(t => now - t <= 180_000);
+    _flapCleanupMs = now;
+  }
   if (_flapTs.length >= 5 && now - _lastFlapAlertMs > 30 * 60_000) {
     _lastFlapAlertMs = now;
     const ver = state.car_app_version || '?';
