@@ -24,6 +24,7 @@ class BootReceiver : BroadcastReceiver() {
                 }
                 val launch = Intent(context, MainActivity::class.java).apply {
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                    putExtra("from_boot", true)
                 }
                 try { context.startActivity(launch) } catch (e: Exception) {
                     Log.w(TAG, "Falha ao lançar Activity: ${e.message}")

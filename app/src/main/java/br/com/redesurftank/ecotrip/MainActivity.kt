@@ -116,6 +116,11 @@ class MainActivity : ComponentActivity() {
         br.com.redesurftank.ecotrip.ui.screens.ControlesWebHost.attach(root)
         setContentView(root)
 
+        // Iniciado pelo boot: managers já iniciados, UI não precisa aparecer de imediato.
+        // moveTaskToBack envia o app para segundo plano sem destruir a Activity —
+        // serviço foreground continua ativo e o app fica disponível na barra de tarefas.
+        if (intent?.getBooleanExtra("from_boot", false) == true) moveTaskToBack(true)
+
         // ── Player de mídia (tela Veículo): lê a sessão de mídia ativa e empurra
         // o estado pro WebView (window.applyMedia). Requer "Acesso a notificações". ──
         media = br.com.redesurftank.ecotrip.managers.MediaControllerHelper(applicationContext).also { h ->

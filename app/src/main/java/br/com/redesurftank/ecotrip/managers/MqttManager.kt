@@ -100,6 +100,11 @@ class MqttManager private constructor() {
         }
     }
 
+    // Cached formatters — SimpleDateFormat não é thread-safe mas cada executor usa o
+    // seu (executor é single-thread); usar instâncias separadas por site evita locks.
+    private val fmtIsoZ  = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssZ",  Locale.US)
+    private val fmtIso   = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss",   Locale.US)
+
     private lateinit var prefs: SharedPreferences
     private var appContext: Context? = null
     private val executor       = Executors.newSingleThreadExecutor()
@@ -113,6 +118,10 @@ class MqttManager private constructor() {
     // escritas (ex.: ao ligar o pré-clima só o passageiro aplicava). Executor de thread
     // ÚNICA serializa hvac/* — um comando por vez, todos aplicam.
     private val hvacExecutor   = Executors.newSingleThreadExecutor()
+    // Executor dedicado pra comandos pesados (rec_start, call_start, audio_listen).
+    // Esses comandos inicializam áudio/câmera e podem levar segundos — bloqueariam
+    // uma das 3 threads do cmdExecutor e travariam outros comandos na fila.
+    private val heavyExecutor  = Executors.newSingleThreadExecutor()
     private val isReconnecting = AtomicBoolean(false)
     @Volatile private var clientId: String = CLIENT_ID_BASE
     // Detecção de colisão no MESMO device: o sufixo ANDROID_ID separa installs em
@@ -2135,8 +2144,7 @@ class MqttManager private constructor() {
 
             lastSuccessfulPublishMs = System.currentTimeMillis()
             // Publica timestamp ISO para a entidade "Última Atualização" no HA
-            val isoNow = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssZ", Locale.getDefault())
-                .format(Date(lastSuccessfulPublishMs))
+            val isoNow = fmtIsoZ.format(Date(lastSuccessfulPublishMs))
             c.publish("$prefix/last_update", isoNow.toByteArray(), 1, true)
             onStatusChange?.invoke(status) // trigger UI refresh for last-sent time
         } catch (e: Exception) {
@@ -2200,7 +2208,7 @@ class MqttManager private constructor() {
 
     private fun publishChargeHistoryInternal(c: MqttClient, entries: List<ChargeHistoryEntry>) {
         try {
-            val fmt = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.getDefault())
+            val fmt = fmtIso
             fun f1(v: Float) = String.format(java.util.Locale.US, "%.1f", v)
             fun f2(v: Float) = String.format(java.util.Locale.US, "%.2f", v)
             val chargesJson = entries.joinToString(",") { e ->
@@ -2231,7 +2239,7 @@ class MqttManager private constructor() {
 
     private fun publishRefuelHistoryInternal(c: MqttClient, entries: List<RefuelEntry>) {
         try {
-            val fmt = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.getDefault())
+            val fmt = fmtIso
             fun f1(v: Float) = String.format(java.util.Locale.US, "%.1f", v)
             fun f2(v: Float) = String.format(java.util.Locale.US, "%.2f", v)
             val refuelsJson = entries.joinToString(",") { e ->
@@ -2524,8 +2532,13 @@ class MqttManager private constructor() {
             return
         }
 
-        // hvac/* serializado (thread única) pra não floodar o barramento; resto no pool.
-        val exec = if (cmd.startsWith("hvac/")) hvacExecutor else cmdExecutor
+        // hvac/* serializado; rec/call/audio_listen no heavyExecutor (inicialização de áudio pode levar segundos);
+        // resto no pool de 3 threads.
+        val exec = when {
+            cmd.startsWith("hvac/") -> hvacExecutor
+            cmd == "rec_start" || cmd == "call_start" || cmd == "audio_listen" -> heavyExecutor
+            else -> cmdExecutor
+        }
         exec.submit {
             val car = CarDataManager.getInstance()
             when (cmd) {
