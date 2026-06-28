@@ -13,7 +13,7 @@ enum BydSettings {
     private static let shared = UserDefaults(suiteName: appGroup)
 
     static var bridgeURL: String {
-        get { shared?.string(forKey: "byd_bridge_url") ?? d.string(forKey: "byd_bridge_url") ?? "" }
+        get { shared?.string(forKey: "byd_bridge_url") ?? d.string(forKey: "byd_bridge_url") ?? "https://mqttrafael.duckdns.org:3443" }
         set {
             let v = newValue.trimmingCharacters(in: .whitespaces)
             d.set(v, forKey: "byd_bridge_url"); shared?.set(v, forKey: "byd_bridge_url")
@@ -38,6 +38,14 @@ enum BydSettings {
 
     static var isConfigured: Bool {
         !bridgeURL.isEmpty && !bridgeToken.isEmpty
+    }
+
+    static func migrateURLIfNeeded() {
+        let current = d.string(forKey: "byd_bridge_url") ?? shared?.string(forKey: "byd_bridge_url") ?? ""
+        if current.contains("tailacc6e7.ts.net") || current.contains("mac-mini.tail")
+            || current == "http://177.223.45.154:3000" {
+            bridgeURL = "https://mqttrafael.duckdns.org:3443"
+        }
     }
 
     /// Normaliza a base URL (sem barra final).

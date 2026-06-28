@@ -21,6 +21,7 @@ final class BydAppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationC
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         UNUserNotificationCenter.current().delegate = self
+        BydSettings.migrateURLIfNeeded()
         return true
     }
 
