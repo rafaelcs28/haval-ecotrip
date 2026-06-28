@@ -369,6 +369,7 @@ struct ContentView: View {
                         .tabItem { Label("Configuração", systemImage: "gearshape.fill") }
                 }
                 .tint(spAccent)
+                .tabBarMinimizeOnScroll()
             }
         }
         .task {
@@ -742,14 +743,14 @@ struct ClusterView: View {
                         .font(.headline)
                         .foregroundStyle(following ? spAccent : .primary)
                         .padding(11)
-                        .background(.ultraThinMaterial, in: Circle())
+                        .glassControl(in: Circle())
                         .overlay(Circle().strokeBorder(.white.opacity(0.12)))
                 }
                 Button { showTimeline = true } label: {
                     Image(systemName: "chart.xyaxis.line")
                         .font(.headline).foregroundStyle(.primary)
                         .padding(11)
-                        .background(.ultraThinMaterial, in: Circle())
+                        .glassControl(in: Circle())
                         .overlay(Circle().strokeBorder(.white.opacity(0.12)))
                 }
             }
@@ -806,8 +807,7 @@ struct ClusterView: View {
                       fmt: "%.0f", pick: { $0.speed }, zeroMid: false)
         }
         .padding(14)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24))
-        .overlay(RoundedRectangle(cornerRadius: 24).strokeBorder(.white.opacity(0.08)))
+        .glassPanel(in: RoundedRectangle(cornerRadius: 24), stroke: .white.opacity(0.08))
         .padding(.horizontal, 10)
         .padding(.bottom, 4)
     }
@@ -1420,7 +1420,7 @@ struct MapLocationPicker: View {
                         }
                     }
                     .padding(.horizontal, 12).padding(.vertical, 9)
-                    .background(.ultraThinMaterial, in: Capsule())
+                    .glassControl(in: Capsule())
                     .padding(10)
                 }
                 Form {
