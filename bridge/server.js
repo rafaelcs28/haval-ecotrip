@@ -461,13 +461,17 @@ function _checkAlerts() {
       _certBrokerStatus.days_left < 7 ? 'urgent' : 'default', ['lock']);
 
   // 15. PREDITIVO: disco/SSD vai encher em < 10 dias (regressão de tendência)
+  // Gate de piso absoluto: a ETA linear não vale pra consumo purgeable/serrilhado
+  // (snapshots APFS do Time Machine, cache iCloud evictável que o macOS reclama
+  // sob pressão). Com dezenas de GB livres a projeção é ruído — só alerta quando
+  // já está num patamar baixo E ainda caindo, dando lead time sobre o piso duro.
   const tdi = _trend.disk_int, tde = _trend.disk_ext;
   if (tdi?.eta_days != null)
-    _alert('disk_int_eta', tdi.eta_days < 10, 'Disco interno vai encher',
+    _alert('disk_int_eta', tdi.eta_days < 10 && tdi.current < 20, 'Disco interno vai encher',
       `~${tdi.eta_days} dias até <8GB (${tdi.current}GB, ${tdi.slope_per_day}GB/dia)`, 'high', ['chart_with_downwards_trend'],
       { repeatEvery: 24 * 3600_000 });
   if (tde?.eta_days != null)
-    _alert('disk_ext_eta', tde.eta_days < 10, 'SSD externo vai encher',
+    _alert('disk_ext_eta', tde.eta_days < 10 && tde.current < 15, 'SSD externo vai encher',
       `~${tde.eta_days} dias até <5GB (${tde.current}GB, ${tde.slope_per_day}GB/dia)`, 'high', ['chart_with_downwards_trend'],
       { repeatEvery: 24 * 3600_000 });
 
