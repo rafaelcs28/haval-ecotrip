@@ -1957,6 +1957,7 @@ struct IdentityRow: View {
 // expandido depois).
 struct TripsListView: View {
     @ObservedObject var store: SongProStore
+    @State private var selected: SPTrip?
 
     var body: some View {
         List {
@@ -1968,7 +1969,10 @@ struct TripsListView: View {
                 }
             } else {
                 Section("Últimas viagens") {
-                    ForEach(store.trips) { t in tripRow(t) }
+                    ForEach(store.trips) { t in
+                        Button { selected = t } label: { tripRow(t) }
+                            .buttonStyle(.plain)
+                    }
                 }
             }
         }
@@ -1976,6 +1980,7 @@ struct TripsListView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task { await store.fetchTrips() }
         .refreshable { await store.fetchTrips() }
+        .sheet(item: $selected) { t in TripDetailSheet(trip: t) }
     }
 
     private func tripRow(_ t: SPTrip) -> some View {
@@ -2010,16 +2015,253 @@ struct TripsListView: View {
                         Label("\(t.harshAcc + t.harshBrake)", systemImage: "exclamationmark.triangle.fill")
                             .font(.caption2).foregroundStyle(.orange)
                     }
+                    Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
                 }
                 .font(.caption).foregroundStyle(.secondary).monospacedDigit()
             }
         }
         .padding(.vertical, 2)
+        .contentShape(Rectangle())
     }
 
     private func durStr(_ sec: Int) -> String {
         let h = sec / 3600, m = (sec % 3600) / 60
         return h > 0 ? "\(h)h\(String(format: "%02d", m))" : "\(m)min"
+    }
+}
+
+// ── DETALHE DA VIAGEM ────────────────────────────────────────────────────────
+// Sheet expandido com score explicado, métricas detalhadas, alertas (aceleração
+// e frenagem brusca com thresholds reais), energia e mini-mapa início→fim.
+struct TripDetailSheet: View {
+    let trip: SPTrip
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 14) {
+                    headerCard
+                    scoreCard
+                    metricsCard
+                    energyCard
+                    alertsCard
+                    if trip.startLat != 0 || trip.endLat != 0 { mapCard }
+                }
+                .padding(.horizontal, 16).padding(.top, 4)
+            }
+            .background(Color(.systemGroupedBackground))
+            .navigationTitle("Viagem")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Fechar") { dismiss() } } }
+        }
+    }
+
+    // Cabeçalho com data/hora completa + motorista.
+    private var headerCard: some View {
+        let dfd = DateFormatter(); dfd.locale = Locale(identifier: "pt_BR"); dfd.dateFormat = "EEEE, dd 'de' MMMM"
+        let dft = DateFormatter(); dft.locale = Locale(identifier: "pt_BR"); dft.dateFormat = "HH:mm"
+        let endTime = dft.string(from: trip.date)
+        let startTime = dft.string(from: Date(timeIntervalSince1970: trip.startMs / 1000))
+        return HStack(spacing: 13) {
+            ZStack {
+                Circle().fill(LinearGradient(colors: [spAccent, .blue],
+                    startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .frame(width: 50, height: 50)
+                Image(systemName: "car.fill").font(.title3).foregroundStyle(.white)
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                Text(dfd.string(from: trip.date).capitalized)
+                    .font(.headline).lineLimit(1).minimumScaleFactor(0.7)
+                HStack(spacing: 5) {
+                    Image(systemName: "clock").font(.caption2).foregroundStyle(.secondary)
+                    Text("\(startTime) → \(endTime)").font(.caption).foregroundStyle(.secondary)
+                }
+                if !trip.driverName.isEmpty {
+                    HStack(spacing: 5) {
+                        Image(systemName: "steeringwheel").font(.caption2).foregroundStyle(.blue)
+                        Text("Motorista: \(trip.driverName)").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            Spacer()
+        }
+    }
+
+    // Score grande + explicação curta de como é calculado.
+    private var scoreCard: some View {
+        let c = bydScoreColor(trip.driveScore)
+        return Card {
+            CardTitle("Score de condução", icon: "rosette")
+            HStack(spacing: 18) {
+                ZStack {
+                    Circle().stroke(c.opacity(0.18), lineWidth: 8)
+                    Circle().trim(from: 0, to: CGFloat(trip.driveScore) / 100)
+                        .stroke(c, style: StrokeStyle(lineWidth: 8, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                    VStack(spacing: -2) {
+                        Text(bydScoreLetter(trip.driveScore))
+                            .font(.system(size: 28, weight: .heavy, design: .rounded))
+                            .foregroundStyle(c)
+                        Text("\(trip.driveScore)/100").font(.caption2).foregroundStyle(.secondary).monospacedDigit()
+                    }
+                }.frame(width: 88, height: 88)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(scoreVerdict(trip.driveScore)).font(.subheadline.weight(.semibold))
+                        .foregroundStyle(c)
+                    Text("Combina **eficiência** (energia gasta por 100km vs baseline de 17,5 kWh) com **suavidade** (acelerações e frenagens bruscas por km).")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    // Métricas: distância, duração, velocidade média.
+    private var metricsCard: some View {
+        Card {
+            CardTitle("Viagem", icon: "ruler")
+            HStack(spacing: 12) {
+                statTile(String(format: "%.1f", trip.distKm).replacingOccurrences(of: ".", with: ","),
+                         "km percorridos", "ruler.fill", spAccent)
+                statTile(durFull(trip.durationSec), "duração", "clock.fill", .secondary)
+                statTile("\(trip.avgSpeedKmh)", "km/h média", "speedometer", .teal)
+            }
+        }
+    }
+
+    // SOC start→end + energia consumida (kWh).
+    private var energyCard: some View {
+        let consumed = max(0, trip.startSoc - trip.endSoc)
+        return Card {
+            CardTitle("Energia", icon: "minus.plus.batteryblock.fill")
+            HStack(spacing: 12) {
+                statTile("\(trip.startSoc)→\(trip.endSoc)%", "SOC inicial → final",
+                         "battery.75", consumed > 30 ? .orange : .green)
+                statTile(String(format: "%.2f", trip.energyKwh).replacingOccurrences(of: ".", with: ","),
+                         "kWh gastos", "bolt.fill", .yellow)
+                statTile(consumeStr, "kWh/100km", "leaf.fill",
+                         trip.distKm >= 1 && trip.energyKwh / trip.distKm * 100 < 17.5 ? .green : .orange)
+            }
+        }
+    }
+
+    private var consumeStr: String {
+        guard trip.distKm >= 1 else { return "—" }
+        let v = trip.energyKwh / trip.distKm * 100
+        return String(format: "%.1f", v).replacingOccurrences(of: ".", with: ",")
+    }
+
+    // EXPLICAÇÃO dos alertas — o que conta, o threshold, e o impacto.
+    private var alertsCard: some View {
+        let total = trip.harshAcc + trip.harshBrake
+        let perKm = trip.distKm > 0.5 ? Double(total) / trip.distKm : 0
+        return Card {
+            CardTitle("Alertas de direção", icon: "exclamationmark.triangle.fill")
+            HStack(spacing: 12) {
+                alertTile("\(trip.harshAcc)", "acelerações bruscas",
+                         "bolt.car.fill", .orange,
+                         desc: "acima de 9 km/h por segundo (~2,5 m/s²)")
+                alertTile("\(trip.harshBrake)", "frenagens bruscas",
+                         "car.side.front.lock.open", .red,
+                         desc: "menos de −11 km/h por segundo (~3,0 m/s²)")
+            }
+            if total > 0 {
+                Divider().overlay(Color.white.opacity(0.08))
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "info.circle.fill").font(.caption).foregroundStyle(spAccent)
+                        Text("Por que conta?").font(.caption.weight(.semibold))
+                    }
+                    Text("Acelerar ou frear forte gasta mais energia, desgasta pneus/freios e indica direção menos previsível. **O score perde ~18 pontos por evento/km** — esta viagem teve \(String(format: "%.2f", perKm).replacingOccurrences(of: ".", with: ",")) evento/km.")
+                        .font(.caption2).foregroundStyle(.secondary)
+                    Text("Dica: solte o pé do acelerador antes de freadas planejadas — o one-pedal recupera energia em vez de jogar fora.")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+            } else {
+                HStack(spacing: 6) {
+                    Image(systemName: "checkmark.seal.fill").foregroundStyle(.green)
+                    Text("Direção suave — nenhum evento brusco nesta viagem.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    // Mini-mapa com pinos de início e fim. Se for o "ponto e ponto" muito
+    // próximo (viagem curta), zoom mais amplo.
+    @ViewBuilder private var mapCard: some View {
+        let pStart = (trip.startLat != 0 || trip.startLng != 0) ? CLLocationCoordinate2D(latitude: trip.startLat, longitude: trip.startLng) : nil
+        let pEnd   = (trip.endLat != 0 || trip.endLng != 0)     ? CLLocationCoordinate2D(latitude: trip.endLat,   longitude: trip.endLng)   : nil
+        Card {
+            CardTitle("Origem e destino", icon: "map.fill")
+            Map {
+                if let s = pStart {
+                    Annotation("Saída", coordinate: s) {
+                        ZStack {
+                            Circle().fill(.green.opacity(0.3)).frame(width: 28, height: 28)
+                            Image(systemName: "flag.fill").foregroundStyle(.white)
+                                .padding(6).background(.green).clipShape(Circle())
+                        }
+                    }
+                }
+                if let e = pEnd {
+                    Annotation("Chegada", coordinate: e) {
+                        ZStack {
+                            Circle().fill(.red.opacity(0.3)).frame(width: 28, height: 28)
+                            Image(systemName: "flag.checkered").foregroundStyle(.white)
+                                .padding(6).background(.red).clipShape(Circle())
+                        }
+                    }
+                }
+                if let s = pStart, let e = pEnd {
+                    MapPolyline(coordinates: [s, e]).stroke(spAccent, style: StrokeStyle(lineWidth: 3, dash: [6, 4]))
+                }
+            }
+            .mapStyle(.standard(elevation: .flat))
+            .frame(height: 200)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            Text("Linha tracejada é só a referência ponto-a-ponto (não o caminho real).")
+                .font(.caption2).foregroundStyle(.secondary)
+        }
+    }
+
+    private func statTile(_ value: String, _ label: String, _ icon: String, _ color: Color) -> some View {
+        VStack(spacing: 5) {
+            Image(systemName: icon).font(.callout).foregroundStyle(color)
+            Text(value).font(.subheadline.weight(.bold)).monospacedDigit()
+                .lineLimit(1).minimumScaleFactor(0.5)
+            Text(label).font(.caption2).foregroundStyle(.secondary)
+                .lineLimit(2).multilineTextAlignment(.center).minimumScaleFactor(0.7)
+        }
+        .frame(maxWidth: .infinity).padding(.vertical, 10)
+        .background(Color.primary.opacity(0.05))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func alertTile(_ value: String, _ label: String, _ icon: String, _ color: Color, desc: String) -> some View {
+        VStack(spacing: 6) {
+            Image(systemName: icon).font(.title3).foregroundStyle(color)
+            Text(value).font(.title.weight(.heavy)).monospacedDigit().foregroundStyle(color)
+            Text(label).font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+                .multilineTextAlignment(.center).lineLimit(2).minimumScaleFactor(0.7)
+            Text(desc).font(.system(size: 9)).foregroundStyle(.tertiary)
+                .multilineTextAlignment(.center).lineLimit(3).minimumScaleFactor(0.7)
+        }
+        .frame(maxWidth: .infinity).padding(.vertical, 12)
+        .background(color.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func scoreVerdict(_ s: Int) -> String {
+        if s >= 85 { return "Excelente" }; if s >= 70 { return "Muito bom" }
+        if s >= 55 { return "Razoável" };   if s >= 40 { return "Pode melhorar" }
+        return "Direção agressiva"
+    }
+
+    private func durFull(_ sec: Int) -> String {
+        let h = sec / 3600, m = (sec % 3600) / 60
+        if h > 0 { return "\(h)h \(m)min" }
+        return "\(m) min"
     }
 }
 
