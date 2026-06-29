@@ -12,6 +12,9 @@ final class ShareStatusStore: ObservableObject {
     @Published var destName: String?
     @Published var loading = false
     @Published var error: String?
+    @Published var grasiPaired: Bool = false   // se a Grasi já pareou pelo Grasi Recarga
+    @Published var grasiName: String = "Grasi"
+    @Published var deliveredViaLA: Bool = false   // último share caiu direto na LA dela
 
     private var base: String {
         let u = Settings.bridgeURL.isEmpty ? AuthConfig.bridgeURL : Settings.bridgeURL
@@ -37,7 +40,22 @@ final class ShareStatusStore: ObservableObject {
             self.token = j["token"] as? String
             self.expiresMs = (j["expiresMs"] as? Double) ?? 0
             self.destName = (j["destName"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+            self.deliveredViaLA = (j["paired"] as? Bool) ?? false   // share caiu direto na LA dela?
         } catch { self.error = "Erro de rede: \(error.localizedDescription)" }
+    }
+
+    /// Consulta no bridge quem já pareou um device do Grasi Recarga. A UI usa
+    /// isso pra mostrar "Grasi vai receber direto no iPhone (sem precisar de link)".
+    func loadPaired() async {
+        guard !base.isEmpty, let u = URL(string: "\(base)/api/byd/paired-recipients") else { return }
+        var r = URLRequest(url: u); r.timeoutInterval = 8
+        r.addValue("Bearer " + Settings.bridgeToken, forHTTPHeaderField: "Authorization")
+        guard let (data, _) = try? await URLSession.shared.data(for: r),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let arr = obj["recipients"] as? [[String: Any]] else { return }
+        let grasi = arr.first { ($0["role"] as? String) == "grasi" }
+        grasiPaired = (grasi != nil)
+        if let n = grasi?["name"] as? String, !n.isEmpty { grasiName = n }
     }
 
     func revoke() async {
@@ -98,8 +116,15 @@ struct ShareStatusSheet: View {
                                     .padding(10).background(DS.panel2)
                                     .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                                     .foregroundStyle(DS.text).autocorrectionDisabled()
+                            } else if store.grasiPaired {
+                                // Já pareada: share vai direto pra LA dela — sem precisar mandar link.
+                                HStack(spacing: 6) {
+                                    Image(systemName: "checkmark.seal.fill").foregroundStyle(DS.green)
+                                    Text("\(store.grasiName) já está pareada — vai cair direto no iPhone dela como Live Activity. Sem precisar mandar link.")
+                                        .font(.caption).foregroundStyle(DS.green)
+                                }
                             } else {
-                                Text("Quando ela abrir no iPhone, o link pareia o app Grasi Recarga — vira o destino das notificações de chegada.")
+                                Text("Quando ela abrir no iPhone, o link pareia o app Grasi Recarga — vira o destino das notificações de chegada. Da próxima vez não precisa mais mandar link.")
                                     .font(.caption).foregroundStyle(DS.muted)
                             }
                             Text("Duração do link").font(.caption).foregroundStyle(DS.muted)
@@ -120,6 +145,21 @@ struct ShareStatusSheet: View {
                     if let url = store.url, URL(string: url) != nil {
                         DSCard {
                             VStack(alignment: .leading, spacing: 12) {
+                                // Quando o share foi entregue direto na LA da Grasi (paired),
+                                // a UI muda: chama destaque do delivery; link fica como
+                                // fallback opcional ("se ela perder a LA, manda este link").
+                                if store.deliveredViaLA {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: "iphone.gen3.radiowaves.left.and.right")
+                                            .foregroundStyle(DS.green)
+                                        Text("Caiu direto no iPhone da \(store.grasiName) ✓")
+                                            .font(.subheadline.weight(.semibold))
+                                            .foregroundStyle(DS.green)
+                                    }
+                                    Text("A Live Activity já apareceu na tela bloqueada dela. Se ela tocar, abre o trajeto no Grasi Recarga. Você nem precisa mandar nada.")
+                                        .font(.caption).foregroundStyle(DS.muted)
+                                    Text("Se preferir mandar o link mesmo assim:").font(.caption).foregroundStyle(DS.muted)
+                                }
                                 HStack(spacing: 6) {
                                     Image(systemName: "link").foregroundStyle(DS.teal)
                                     Text(url).font(.footnote).foregroundStyle(DS.text).lineLimit(1).truncationMode(.middle)
@@ -130,7 +170,8 @@ struct ShareStatusSheet: View {
                                 // WhatsApp/Messages auto-linkificam a URL no fim da frase.
                                 ShareLink(item: shareText(url: url),
                                           subject: Text("Trajeto Haval")) {
-                                    Label("Compartilhar link", systemImage: "square.and.arrow.up")
+                                    Label(store.deliveredViaLA ? "Mandar link mesmo assim" : "Compartilhar link",
+                                          systemImage: "square.and.arrow.up")
                                         .font(.subheadline.weight(.semibold)).frame(maxWidth: .infinity).padding(.vertical, 12)
                                         .background(DS.teal.opacity(0.22)).foregroundStyle(DS.teal)
                                         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -157,6 +198,7 @@ struct ShareStatusSheet: View {
                 .padding(16)
             }
             .background(DS.bg.ignoresSafeArea())
+            .task { await store.loadPaired() }
             .navigationTitle("Compartilhar status")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Fechar") { dismiss() } } }

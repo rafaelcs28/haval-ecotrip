@@ -10086,6 +10086,69 @@ const phoneLocByDevice = {};                         // { [deviceId]: { lat, lng
 // Estado por companion da feature 1 (LA "chegando até Grasi"): ETA cached + LA ativa.
 const _companionInbound = {};                        // { [deviceId]: { etaMin, distKm, lastEvalMs, laActive } }
 
+const SHARED_TRIP_LA_TYPE = 'SharedTripActivityAttributes';
+// Shares ativos que disparam LA na Grasi pareada. Keyed por token.
+// { token: { token, from, startedMs, lastPushMs, laActive } }
+const _sharedTripLAs = {};
+
+function _sharedTripContentState() {
+  // Lê o estado do carro pra montar o cs da LA.
+  const a = state.arrival || {};
+  const speed = +state.speed_kmh || 0;
+  return {
+    from: '',   // preenchido no caller (pega de attrs)
+    destName: a.name || '',
+    etaToDestMin: Math.round(+a.etaMin || 0),
+    distToDestKm: +(+a.distKm || 0).toFixed(1),
+    socPct: Math.round(+state.soc_pct || 0),
+    moving: speed > 3,
+    active: true,
+    updatedAtMs: Date.now(),
+  };
+}
+
+async function _startSharedTripLA(token, fromName) {
+  if (!apnsLive.enabled) return;
+  const grasiIds = new Set(_grasiDevices());
+  if (grasiIds.size === 0) return;
+  const cs = _sharedTripContentState(); cs.from = fromName || 'Rafael';
+  const now = Date.now();
+  _sharedTripLAs[token] = { token, from: fromName || 'Rafael', startedMs: now, lastPushMs: now, laActive: true };
+  await apnsLive.pushStart(SHARED_TRIP_LA_TYPE, '',
+    { shareToken: token, from: fromName || 'Rafael' }, cs,
+    { staleDate: now + 12 * 3600_000,
+      alert: { title: `🚗 ${fromName || 'Rafael'} compartilhou trajeto`,
+               body: cs.destName ? `Indo pra ${cs.destName}` : 'Toque pra abrir' },
+      allow: (deviceId) => grasiIds.has(deviceId) })
+    .catch(e => { console.warn('[shared-trip] pushStart falhou:', e.message); delete _sharedTripLAs[token]; });
+}
+
+function _evalSharedTripLAs() {
+  // Atualiza todas as LAs ativas com o estado atual do carro. Encerra as cujo
+  // share expirou ou foi revogado.
+  const now = Date.now();
+  for (const [token, st] of Object.entries(_sharedTripLAs)) {
+    const tk = _shareTokens[token];
+    if (!tk || tk.expiresMs <= now) {
+      // Share expirou/revogado — encerra LA.
+      if (st.laActive) {
+        const cs = _sharedTripContentState(); cs.from = st.from; cs.active = false;
+        apnsLive.pushUpdate(SHARED_TRIP_LA_TYPE, {}, cs,
+          { isFinal: true, dismissalDate: now + 60_000 }).catch(() => {});
+      }
+      delete _sharedTripLAs[token];
+      continue;
+    }
+    // Throttle: só atualiza se passou >20s do último push (não inflamar APNs).
+    if (now - st.lastPushMs < 20_000) continue;
+    if (!apnsLive.hasUpdateToken(SHARED_TRIP_LA_TYPE)) continue;
+    const cs = _sharedTripContentState(); cs.from = st.from;
+    apnsLive.pushUpdate(SHARED_TRIP_LA_TYPE, {}, cs, {}).catch(() => {});
+    st.lastPushMs = now;
+  }
+}
+setInterval(_evalSharedTripLAs, 15_000).unref?.();
+
 const COMPANION_LA_TYPE = 'CompanionInboundActivityAttributes';
 const COMPANION_NEAR_M = 50;                         // <50m da Grasi → marca "chegou"
 const COMPANION_MAX_ETA_MIN = 120;                   // só dispara se ETA ≤ 120min (~2h)
@@ -11619,7 +11682,8 @@ function sendChargeLiveUpdate(isFinal = false) {
 const LA_TYPES = ['ChargeActivityAttributes', 'PreClimatActivityAttributes', 'TripActivityAttributes',
                   'MotorActivityAttributes', 'SecurityActivityAttributes', 'SongProActivityAttributes',
                   'SongProTripActivityAttributes',
-                  'CompanionInboundActivityAttributes'];   // feature 1: companion indo até Grasi
+                  'CompanionInboundActivityAttributes',     // feature 1: companion indo até Grasi
+                  'SharedTripActivityAttributes'];          // share do Haval direto na tela dela
 
 // push-to-start token (por tipo de Live Activity)
 // GET /api/songpro/status — % da bateria do BYD Song Pro sempre, + infos da
@@ -12407,9 +12471,32 @@ function _createShareToken(ttlMinRaw, opts) {
            recipientName, recipientRole };
 }
 
+// GET /api/byd/paired-recipients — lista quem está pareado no Grasi Recarga.
+// O app Haval consulta antes de criar share pra mostrar UX adequada (preview
+// "vai cair direto na LA da Grasi" quando role=grasi e ela já pareou).
+app.get('/api/byd/paired-recipients', (_req, res) => {
+  const out = [];
+  for (const [id, p] of Object.entries(notifPrefsByDevice)) {
+    if (!p || !p.byd_paired) continue;
+    out.push({ device_id: id, role: p.byd_role || '', name: p.byd_name || '' });
+  }
+  res.json({ recipients: out });
+});
+
 app.post('/api/share/create', (req, res) => {
   const b = req.body || {};
-  res.json({ ok: true, ..._createShareToken(b.ttlMin, { recipientName: b.recipientName, recipientRole: b.recipientRole }) });
+  const out = _createShareToken(b.ttlMin, { recipientName: b.recipientName, recipientRole: b.recipientRole });
+  // Se o share é pra Grasi E ela já está pareada (tem device com role=grasi
+  // + byd_paired=true), dispara a LA direto no iPhone dela — sem precisar
+  // mandar link. App Haval recebe `paired=true` na resposta pra mostrar UX
+  // diferente ("vai cair direto no iPhone dela").
+  const paired = (out.recipientRole === 'grasi')
+    && Object.values(notifPrefsByDevice).some(p => p && p.byd_role === 'grasi' && p.byd_paired === true);
+  if (paired) {
+    const fromName = String(b.fromName || 'Rafael').slice(0, 40);
+    _startSharedTripLA(out.token, fromName).catch(() => {});
+  }
+  res.json({ ok: true, ...out, paired });
 });
 
 // Pareamento do Grasi Recarga via share token: o app abre o deep link

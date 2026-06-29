@@ -418,6 +418,7 @@ final class SongProStore: ObservableObject {
 struct ContentView: View {
     @State private var configured = BydSettings.isConfigured
     @StateObject private var store = SongProStore()
+    @EnvironmentObject private var deepLink: DeepLinkRouter
 
     var body: some View {
         Group {
@@ -438,6 +439,13 @@ struct ContentView: View {
                 .tabBarMinimizeOnScroll()
             }
         }
+        // Sheet do trajeto compartilhado (toque na LA `SharedTrip` abre aqui).
+        .sheet(item: Binding(
+            get: { deepLink.sharedTripToken.map { SharedTripID(token: $0) } },
+            set: { v in deepLink.sharedTripToken = v?.token }
+        )) { id in
+            SharedTripSheet(token: id.token)
+        }
         .task {
             if configured {
                 BydRemoteNotifications.enable()
@@ -449,6 +457,9 @@ struct ContentView: View {
         }
     }
 }
+
+/// Wrapper Identifiable pra usar token de share como item de sheet.
+private struct SharedTripID: Identifiable { let token: String; var id: String { token } }
 
 // ── DASHBOARD ────────────────────────────────────────────────────────────────
 struct RecargaDashboard: View {
@@ -2009,6 +2020,157 @@ struct TripsListView: View {
     private func durStr(_ sec: Int) -> String {
         let h = sec / 3600, m = (sec % 3600) / 60
         return h > 0 ? "\(h)h\(String(format: "%02d", m))" : "\(m)min"
+    }
+}
+
+// ── TRAJETO COMPARTILHADO (share do Haval) ───────────────────────────────────
+// Sheet aberta pelo deep link grasi-recarga://shared-trip?token=<TOKEN> (toque
+// na LA SharedTrip). Lê /api/share/:token/state (endpoint público, sem auth) e
+// mostra carro ao vivo: destino, ETA, SOC, posição etc.
+struct SharedTripState: Decodable {
+    var on: Bool = false
+    var lat: Double = 0
+    var lng: Double = 0
+    var speedKmh: Double = 0
+    var soc: Int = 0
+    var rangeEvKm: Int = 0
+    var evRemainKm: Int = 0
+    var iceRemainKm: Int = 0
+    var gear: String = "--"
+    var tempIn: Double = 0
+    var tempOut: Double = 0
+    var moving: Bool = false
+    var dest: Dest? = nil
+    var recipient: Recipient? = nil
+
+    struct Dest: Decodable {
+        var name: String = ""; var distKm: Double = 0; var etaMin: Int = 0; var etaClock: String = ""
+    }
+    struct Recipient: Decodable {
+        var name: String = ""; var role: String = ""; var paired: Bool = false
+    }
+}
+
+struct SharedTripSheet: View {
+    let token: String
+    @Environment(\.dismiss) private var dismiss
+    @State private var trip: SharedTripState?
+    @State private var loading = true
+    @State private var expired = false
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                if expired {
+                    ContentUnavailableView("Link expirado",
+                        systemImage: "lock.fill",
+                        description: Text("O Rafael revogou esse compartilhamento ou ele já expirou."))
+                        .padding(.top, 80)
+                } else if let t = trip {
+                    VStack(spacing: 14) {
+                        header(t)
+                        if let d = t.dest, !d.name.isEmpty { destCard(d) }
+                        metricsGrid(t)
+                        if t.lat != 0 || t.lng != 0 {
+                            BydMiniMap(lat: t.lat, lng: t.lng)
+                                .frame(height: 220)
+                                .clipShape(RoundedRectangle(cornerRadius: 16))
+                        }
+                    }
+                    .padding(.horizontal, 16).padding(.top, 6)
+                } else {
+                    ProgressView().padding(.top, 120)
+                }
+            }
+            .background(Color(.systemGroupedBackground))
+            .navigationTitle("Trajeto compartilhado")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Fechar") { dismiss() } } }
+            .task { await poll() }
+            .refreshable { await fetchOnce() }
+        }
+    }
+
+    private func header(_ t: SharedTripState) -> some View {
+        HStack(spacing: 13) {
+            ZStack {
+                Circle().fill(LinearGradient(colors: [.cyan, .blue],
+                    startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .frame(width: 50, height: 50)
+                Image(systemName: "shared.with.you").font(.title3).foregroundStyle(.white)
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Trajeto compartilhado").font(.title2.weight(.bold))
+                Text(t.moving ? "Carro em movimento" : (t.on ? "Carro ligado" : "Em repouso"))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
+    }
+
+    private func destCard(_ d: SharedTripState.Dest) -> some View {
+        Card {
+            CardTitle("Destino", icon: "mappin.and.ellipse")
+            VStack(alignment: .leading, spacing: 4) {
+                Text(d.name).font(.headline)
+                HStack(spacing: 8) {
+                    Label(String(format: "%.1f km", d.distKm).replacingOccurrences(of: ".", with: ","),
+                          systemImage: "ruler")
+                    Text("·")
+                    Label("\(d.etaMin) min", systemImage: "clock")
+                    if !d.etaClock.isEmpty { Text("·"); Text(d.etaClock) }
+                }.font(.subheadline).foregroundStyle(.secondary).monospacedDigit()
+            }
+        }
+    }
+
+    private func metricsGrid(_ t: SharedTripState) -> some View {
+        Card {
+            CardTitle("Estado do carro", icon: "car.fill")
+            HStack(spacing: 12) {
+                tile("\(t.soc)", "% SOC", "minus.plus.batteryblock.fill", .green)
+                tile("\(Int(t.speedKmh.rounded()))", "km/h", "speedometer", .blue)
+                tile(t.gear, "marcha", "gearshift.layout.sixspeed", .secondary)
+            }
+            HStack(spacing: 12) {
+                tile("\(t.evRemainKm)", "km EV", "leaf.fill", .green)
+                tile("\(t.iceRemainKm)", "km gás", "fuelpump.fill", .orange)
+                tile(String(format: "%.0f°", t.tempOut), "externa", "thermometer.medium", .blue)
+            }
+        }
+    }
+
+    private func tile(_ v: String, _ l: String, _ i: String, _ c: Color) -> some View {
+        VStack(spacing: 5) {
+            Image(systemName: i).font(.callout).foregroundStyle(c)
+            Text(v).font(.subheadline.weight(.bold)).monospacedDigit()
+                .lineLimit(1).minimumScaleFactor(0.7)
+            Text(l).font(.caption2).foregroundStyle(.secondary)
+                .lineLimit(1).minimumScaleFactor(0.7)
+        }
+        .frame(maxWidth: .infinity).padding(.vertical, 10)
+        .background(Color.primary.opacity(0.05))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func poll() async {
+        while !Task.isCancelled {
+            await fetchOnce()
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+        }
+    }
+
+    private func fetchOnce() async {
+        guard BydSettings.isConfigured,
+              let url = URL(string: BydSettings.baseURL + "/api/share/" + token + "/state") else { return }
+        var req = URLRequest(url: url, timeoutInterval: 8)
+        // /api/share/:token/state é endpoint público (não exige Bearer) — token
+        // já vale como auth. Mas mandar o Bearer também não atrapalha.
+        req.addValue("Bearer " + BydSettings.bridgeToken, forHTTPHeaderField: "Authorization")
+        guard let (data, resp) = try? await URLSession.shared.data(for: req) else { return }
+        if (resp as? HTTPURLResponse)?.statusCode == 404 { expired = true; loading = false; return }
+        guard let t = try? JSONDecoder().decode(SharedTripState.self, from: data) else { return }
+        trip = t; loading = false
     }
 }
 

@@ -227,6 +227,7 @@ targets:
       - path: HavalEcoTripWidget/SongProActivityAttributes.swift
       - path: HavalEcoTripWidget/SongProTripActivityAttributes.swift
       - path: HavalEcoTripWidget/CompanionInboundActivityAttributes.swift
+      - path: HavalEcoTripWidget/SharedTripActivityAttributes.swift
     info:
       path: BydRecarga/Info.plist
       properties:
@@ -259,7 +260,7 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         # 1.0 já está released na App Store (Unlisted) → bumpa pra 1.0.1 pra
         # aceitar novos builds. Independente do MARKETING_VERSION global do Haval.
-        MARKETING_VERSION: "1.0.1"
+        MARKETING_VERSION: "1.0.2"
       configs:
         Debug:
           CODE_SIGN_ENTITLEMENTS: BydRecarga/BydRecarga-dev.entitlements
@@ -288,6 +289,9 @@ targets:
       # Feature 1: LA "companion indo até a Grasi" (alvo: iPhone da Grasi).
       - path: HavalEcoTripWidget/CompanionInboundActivityAttributes.swift
       - path: HavalEcoTripWidget/CompanionInboundLiveActivity.swift
+      # LA "trajeto compartilhado contigo" (share do Haval pra Grasi pareada).
+      - path: HavalEcoTripWidget/SharedTripActivityAttributes.swift
+      - path: HavalEcoTripWidget/SharedTripLiveActivity.swift
     info:
       path: BydRecargaWidget/Info.plist
       properties:
@@ -302,4 +306,4 @@ targets:
         TARGETED_DEVICE_FAMILY: "1"
         INFOPLIST_KEY_NSHumanReadableCopyright: ""
         # Widget tem que casar a versão do app pai (BydRecarga).
-        MARKETING_VERSION: "1.0.1"
+        MARKETING_VERSION: "1.0.2"

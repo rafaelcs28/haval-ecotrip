@@ -9,22 +9,38 @@ import UserNotifications
 @main
 struct BydRecargaApp: App {
     @UIApplicationDelegateAdaptor(BydAppDelegate.self) var appDelegate
+    @StateObject private var deepLinkRouter = DeepLinkRouter()
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .environmentObject(deepLinkRouter)
                 .preferredColorScheme(.dark)
                 .onOpenURL { url in
-                    // grasi-recarga://pair?token=<TOKEN> — share link do Haval pareia
-                    // este iPhone como o destinatário (Grasi/companion). O token foi
-                    // gerado em /api/share/create com recipientName+recipientRole.
-                    guard url.scheme == "grasi-recarga", url.host == "pair" else { return }
+                    guard url.scheme == "grasi-recarga" else { return }
                     let token = URLComponents(url: url, resolvingAgainstBaseURL: false)?
                         .queryItems?.first { $0.name == "token" }?.value ?? ""
                     guard !token.isEmpty else { return }
-                    Task { await BydPairing.claim(token: token) }
+                    switch url.host {
+                    case "pair":
+                        // grasi-recarga://pair?token=<TOKEN> — pareamento via share do Haval
+                        Task { await BydPairing.claim(token: token) }
+                    case "shared-trip":
+                        // grasi-recarga://shared-trip?token=<TOKEN> — toque na LA "trajeto
+                        // compartilhado" abre o app com a sheet do trajeto.
+                        deepLinkRouter.sharedTripToken = token
+                    default:
+                        break
+                    }
                 }
         }
     }
+}
+
+/// Roteador de deep links pra sheets do app. ContentView observa pra abrir
+/// SharedTripSheet quando um novo token chega via URL.
+@MainActor
+final class DeepLinkRouter: ObservableObject {
+    @Published var sharedTripToken: String?
 }
 
 /// Pareamento via deep link: troca o token do share por uma identidade no bridge.

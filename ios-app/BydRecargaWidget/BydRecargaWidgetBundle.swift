@@ -13,6 +13,7 @@ struct BydRecargaWidgetBundle: WidgetBundle {
         SongProLiveActivity()
         SongProTripLiveActivity()
         CompanionInboundLiveActivity()   // feature 1: companion indo até a Grasi
+        SharedTripLiveActivity()         // share do Haval Hub direto na tela dela
         BydChargeWidget()
     }
 }
