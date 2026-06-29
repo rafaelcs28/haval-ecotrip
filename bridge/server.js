@@ -10114,15 +10114,32 @@ const SHARED_TRIP_LA_TYPE = 'SharedTripActivityAttributes';
 // { token: { token, from, startedMs, lastPushMs, laActive } }
 const _sharedTripLAs = {};
 
-function _sharedTripContentState() {
+function _sharedTripContentState(recipientName) {
   // Lê o estado do carro pra montar o cs da LA.
+  // Prioridade do "destino" mostrado:
+  //   1. Destino real do nav do carro (state.arrival).
+  //   2. Fallback: ETA carro → iPhone do destinatário (Grasi). Usa quando o
+  //      Rafael compartilha SEM destino setado — UX natural ("indo até você").
   const a = state.arrival || {};
   const speed = +state.speed_kmh || 0;
+  const hasNavDest = !!(a.name && (a.distKm != null) && (a.etaMin != null));
+  let destName, etaMin, distKm;
+  if (hasNavDest) {
+    destName = a.name;
+    etaMin = Math.round(+a.etaMin || 0);
+    distKm = +(+a.distKm || 0).toFixed(1);
+  } else if (_routeToPhone.etaMin != null && _routeToPhone.distKm != null) {
+    destName = recipientName || 'você';
+    etaMin = Math.round(_routeToPhone.etaMin);
+    distKm = +_routeToPhone.distKm.toFixed(1);
+  } else {
+    destName = ''; etaMin = 0; distKm = 0;
+  }
   return {
     from: '',   // preenchido no caller (pega de attrs)
-    destName: a.name || '',
-    etaToDestMin: Math.round(+a.etaMin || 0),
-    distToDestKm: +(+a.distKm || 0).toFixed(1),
+    destName,
+    etaToDestMin: etaMin,
+    distToDestKm: distKm,
     socPct: Math.round(+state.soc_pct || 0),
     moving: speed > 3,
     active: true,
@@ -10134,9 +10151,14 @@ async function _startSharedTripLA(token, fromName) {
   if (!apnsLive.enabled) return;
   const grasiIds = new Set(_grasiDevices());
   if (grasiIds.size === 0) return;
-  const cs = _sharedTripContentState(); cs.from = fromName || 'Rafael';
+  // Recipient name vem do token do share (gravado em _createShareToken).
+  const tk = _shareTokens[token] || {};
+  const recipientName = tk.recipientName || 'você';
+  // Força um recálculo do route-to-phone pra ter ETA fresca no fallback.
+  await _maybeRouteToPhone(true).catch(() => {});
+  const cs = _sharedTripContentState(recipientName); cs.from = fromName || 'Rafael';
   const now = Date.now();
-  _sharedTripLAs[token] = { token, from: fromName || 'Rafael', startedMs: now, lastPushMs: now, laActive: true };
+  _sharedTripLAs[token] = { token, from: fromName || 'Rafael', recipientName, startedMs: now, lastPushMs: now, laActive: true };
   await apnsLive.pushStart(SHARED_TRIP_LA_TYPE, '',
     { shareToken: token, from: fromName || 'Rafael' }, cs,
     { staleDate: now + 12 * 3600_000,
@@ -10155,7 +10177,7 @@ function _evalSharedTripLAs() {
     if (!tk || tk.expiresMs <= now) {
       // Share expirou/revogado — encerra LA.
       if (st.laActive) {
-        const cs = _sharedTripContentState(); cs.from = st.from; cs.active = false;
+        const cs = _sharedTripContentState(st.recipientName); cs.from = st.from; cs.active = false;
         apnsLive.pushUpdate(SHARED_TRIP_LA_TYPE, {}, cs,
           { isFinal: true, dismissalDate: now + 60_000 }).catch(() => {});
       }
@@ -10165,7 +10187,9 @@ function _evalSharedTripLAs() {
     // Throttle: só atualiza se passou >20s do último push (não inflamar APNs).
     if (now - st.lastPushMs < 20_000) continue;
     if (!apnsLive.hasUpdateToken(SHARED_TRIP_LA_TYPE)) continue;
-    const cs = _sharedTripContentState(); cs.from = st.from;
+    // Mantém a rota carro→Grasi fresca pra fallback "ETA até você".
+    _maybeRouteToPhone().catch(() => {});
+    const cs = _sharedTripContentState(st.recipientName); cs.from = st.from;
     apnsLive.pushUpdate(SHARED_TRIP_LA_TYPE, {}, cs, {}).catch(() => {});
     st.lastPushMs = now;
   }
