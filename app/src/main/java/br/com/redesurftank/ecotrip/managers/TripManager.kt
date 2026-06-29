@@ -242,12 +242,13 @@ data class RefuelEntry(
 
 typealias TripListener = (rolling: RollingSnapshot) -> Unit
 
-/** Score de condução ao vivo (mesma fórmula do bridge: economia 55% + suavidade 45%). */
+/** Score de condução ao vivo (mesma fórmula do bridge: economia 50% + suavidade 35% + velocidade 15%). */
 data class LiveDriveScore(
     val valid: Boolean,      // false = viagem muito curta / sem dados → não mostra
     val score: Int,          // 0-100
-    val econ: Int,           // componente economia 0-100
+    val econ: Int,           // componente economia 0-100 (corrigida por relevo)
     val smooth: Int,         // componente suavidade 0-100
+    val speed: Int,          // componente disciplina de velocidade 0-100
     val harshAcc: Int,       // acelerações bruscas na viagem
     val harshBrake: Int,     // frenagens bruscas na viagem
 )
@@ -413,6 +414,9 @@ class TripManager private constructor() {
     // Eventos bruscos da viagem em curso (score ao vivo). Reset em onAutoTripStart.
     private var liveHarshAcc   = 0
     private var liveHarshBrake = 0
+    // Disciplina de velocidade ao vivo: janelas (~1s) em movimento vs acima de 115 km/h.
+    private var liveMovingWin  = 0
+    private var liveOverWin     = 0
     // Janela de ~1s pra avaliar aceleração (evita falso-positivo por quantização km/h).
     private var lastHarshMs    = 0L
     private var lastHarshSpeed = 0f
@@ -885,22 +889,37 @@ class TripManager private constructor() {
 
     /**
      * Score de condução AO VIVO da viagem em curso — replica computeDriveScore do
-     * bridge (economia 55% + suavidade 45%). valid=false quando não há viagem com
-     * distância mínima pra pontuar.
+     * bridge (economia 50% + suavidade 35% + disciplina de velocidade 15%).
+     * valid=false quando não há viagem com distância mínima pra pontuar.
+     *
+     * Economia CORRIGIDA por relevo: subtrai a energia atribuível à altitude
+     * (subida custa ~0,0064 kWh/m, descida recupera ~0,0035 kWh/m) antes de
+     * pontuar. Sem isso a mesma condução no mesmo trajeto dava nota alta no
+     * sentido de descida e baixa no de subida — a nota media o relevo, não o
+     * condutor. O baseline auto-relativo por trajeto (B) só existe na nota final
+     * do bridge: aqui o destino ainda é desconhecido.
      */
     fun getLiveDriveScore(): LiveDriveScore {
-        val t = getInProgressAutoTrip() ?: return LiveDriveScore(false, 0, 0, 0, 0, 0)
+        val t = getInProgressAutoTrip() ?: return LiveDriveScore(false, 0, 0, 0, 0, 0, 0)
         val dist = t.distKm
-        if (dist < 0.3f) return LiveDriveScore(false, 0, 0, 0, 0, 0)
+        if (dist < 0.3f) return LiveDriveScore(false, 0, 0, 0, 0, 0, 0)
         val ha = liveHarshAcc; val hb = liveHarshBrake
-        // Economia: energia-equiv/100km (kWh + L·8,9). Ótimo em 13; cada kWh acima tira ~5,4 pts.
-        val eq = if (dist >= 1f) (t.netKwh + t.fuelL * 8.9f) / dist * 100f else null
+        // Economia corrigida por relevo: energia-equiv/100km (kWh + L·8,9) menos a
+        // energia de terreno. Ótimo em 13; cada kWh acima tira ~5,4 pts.
+        val terrainKwh = t.elevGainM * 0.0064f - t.elevLossM * 0.0035f
+        val eq = if (dist >= 1f) (t.netKwh + t.fuelL * 8.9f - terrainKwh) / dist * 100f else null
         val econ = if (eq != null) (100f - (eq - 13f) * (70f / 13f)).coerceIn(0f, 100f) else 70f
         // Suavidade: penaliza eventos bruscos por km (~18 pts cada).
         val perKm = if (dist > 0.5f) (ha + hb) / dist else 0f
         val smooth = (100f - perKm * 18f).coerceIn(0f, 100f)
-        val score = Math.round(0.55f * econ + 0.45f * smooth).coerceIn(0, 100)
-        return LiveDriveScore(true, score, Math.round(econ), Math.round(smooth), ha, hb)
+        // Disciplina de velocidade: penaliza tempo SUSTENTADO acima de ~115 km/h
+        // (escolha do condutor, não relevo). Fração das janelas em movimento acima
+        // do limite; 50% das janelas acima → 0.
+        val speed = if (liveMovingWin >= 10) {
+            (100f - (liveOverWin.toFloat() / liveMovingWin) * 200f).coerceIn(0f, 100f)
+        } else 100f
+        val score = Math.round(0.50f * econ + 0.35f * smooth + 0.15f * speed).coerceIn(0, 100)
+        return LiveDriveScore(true, score, Math.round(econ), Math.round(smooth), Math.round(speed), ha, hb)
     }
 
     /** Persiste o set de IDs sincronizados nas SharedPreferences (thread-safe). */
@@ -1524,6 +1543,7 @@ class TripManager private constructor() {
     private fun onAutoTripStart() {
         autoTripStartMs     = System.currentTimeMillis()
         liveHarshAcc = 0; liveHarshBrake = 0   // zera eventos bruscos da nova viagem
+        liveMovingWin = 0; liveOverWin = 0     // zera disciplina de velocidade
         lastHarshMs = 0L; lastHarshSpeed = 0f
         autoTripStartSoc    = latestSocPct
         autoTripStartFuel   = latestFuelPct
@@ -1761,6 +1781,8 @@ class TripManager private constructor() {
                                 if (dtSec <= 5f) {
                                     val a = (value - lastHarshSpeed) / dtSec
                                     if (a > 9f) liveHarshAcc++ else if (a < -11f) liveHarshBrake++
+                                    // Disciplina de velocidade: conta janelas em movimento e as acima de 115 km/h.
+                                    if (value > 5f) { liveMovingWin++; if (value > 115f) liveOverWin++ }
                                 }
                                 lastHarshMs = nowSpd; lastHarshSpeed = value
                             }

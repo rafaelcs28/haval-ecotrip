@@ -5863,22 +5863,85 @@ function _sampleDistKm(samples) {
 
 // Score de condução (0-100): combina economia (energia-equiv/100km) com suavidade
 // (poucas acelerações/frenagens bruscas, detectadas pela variação de velocidade).
+// Energia atribuível ao RELEVO da viagem (kWh): subir custa, descer recupera.
+// Mesmas constantes do estimador de leg (≈0,0064 kWh/m subindo, recuperação
+// ≈0,0035 kWh/m descendo) — calibradas pro relevo de Goiânia.
+function terrainKwh(t) {
+  return (+t.elevGainM || 0) * 0.0064 - (+t.elevLossM || 0) * 0.0035;
+}
+// (A) energy-eq/100km CORRIGIDO por relevo: tira o custo/ganho de altitude pra
+// nota refletir condução, não se o trajeto é mais de subida ou descida.
+function adjEnergyEq(t) {
+  const distKm = +t.distKm || 0;
+  if (distKm < 1) return null;
+  const eqKwh = (+t.netKwh || 0) + (+t.fuelL || 0) * 8.9 - terrainKwh(t);
+  return eqKwh / distKm * 100;
+}
+// (B) baseline auto-relativo por trajeto+sentido: mediana do energy-eq corrigido
+// (A) das viagens ANTERIORES no mesmo sentido (origem≈ e destino≈ até ~180m).
+// Quando há histórico (≥3), a nota mede "conduziu bem PRA ESTE trajeto" em vez de
+// economia absoluta — subida e descida do mesmo par viram notas próximas.
+function routeEqBaseline(t) {
+  if (t.startLat == null || t.endLat == null) return null;
+  const near = (aLat, aLng, bLat, bLng) => {
+    if (bLat == null || bLng == null) return false;
+    const dLat = (aLat - bLat) * 111320;
+    const dLng = (aLng - bLng) * 111320 * Math.cos(aLat * Math.PI / 180);
+    return Math.hypot(dLat, dLng) <= 180;
+  };
+  const id = String(t.startMs || t.tripId || '').replace(/\D/g, '');
+  const eqs = [];
+  for (const o of autoTripsArr) {
+    const oid = String(o.startMs || o.tripId || '').replace(/\D/g, '');
+    if (oid && oid === id) continue;     // não se compara consigo mesmo
+    if (!near(t.startLat, t.startLng, o.startLat, o.startLng)) continue;
+    if (!near(t.endLat,   t.endLng,   o.endLat,   o.endLng))   continue;
+    const e = adjEnergyEq(o);
+    if (e != null) eqs.push(e);
+  }
+  if (eqs.length < 3) return null;
+  eqs.sort((a, b) => a - b);
+  const m = Math.floor(eqs.length / 2);
+  return eqs.length % 2 ? eqs[m] : (eqs[m - 1] + eqs[m]) / 2;
+}
+
+// Nota de condução: economia 50% + suavidade 35% + disciplina de velocidade 15%.
+// A economia é corrigida por relevo (A) e, quando há histórico do trajeto,
+// misturada com a economia relativa ao usual dele (B). Suavidade e velocidade
+// são neutras a relevo — medem a FORMA de conduzir.
 function computeDriveScore(samples, t) {
-  const distKm = t.distKm || 0;
-  const eq = distKm >= 1 ? ((t.netKwh || 0) + (t.fuelL || 0) * 8.9) / distKm * 100 : null;
-  const econ = eq != null ? Math.max(0, Math.min(100, 100 - (eq - 13) * (70 / 13))) : 70;
-  let ha = 0, hb = 0;
+  const distKm = +t.distKm || 0;
+  // (A) economia corrigida por relevo
+  const eqAdj = adjEnergyEq(t);
+  let econ = eqAdj != null ? Math.max(0, Math.min(100, 100 - (eqAdj - 13) * (70 / 13))) : 70;
+  // (B) com histórico do trajeto, mistura 50/50 a economia relativa (bater o
+  // usual do trajeto ≈ 85). Sem histórico (≥3), fica só o absoluto corrigido.
+  if (eqAdj != null) {
+    const base = routeEqBaseline(t);
+    if (base != null) {
+      const rel = Math.max(0, Math.min(100, 85 - (eqAdj - base) * (70 / 13)));
+      econ = 0.5 * econ + 0.5 * rel;
+    }
+  }
+  // suavidade (eventos bruscos/km) + (C) disciplina de velocidade (fração do
+  // tempo em movimento acima de ~115 km/h — escolha do condutor, não relevo).
+  let ha = 0, hb = 0, moving = 0, over = 0;
   if (Array.isArray(samples)) {
-    for (let i = 1; i < samples.length; i++) {
+    for (let i = 0; i < samples.length; i++) {
+      const spd = samples[i].spd || 0;
+      if (spd > 5) { moving++; if (spd > 115) over++; }
+      if (i === 0) continue;
       const dt = (samples[i].t || 0) - (samples[i - 1].t || 0);
       if (dt <= 0 || dt > 5) continue;
-      const a = ((samples[i].spd || 0) - (samples[i - 1].spd || 0)) / dt;  // km/h por s
+      const a = (spd - (samples[i - 1].spd || 0)) / dt;  // km/h por s
       if (a > 9) ha++; else if (a < -11) hb++;     // ~2,5 / 3,0 m/s²
     }
   }
   const perKm = distKm > 0.5 ? (ha + hb) / distKm : 0;
   const smooth = Math.max(0, 100 - perKm * 18);    // cada evento brusco/km tira ~18 pts
-  return { score: Math.max(0, Math.min(100, Math.round(0.55 * econ + 0.45 * smooth))), harshAcc: ha, harshBrake: hb };
+  const speed = moving >= 10 ? Math.max(0, 100 - (over / moving) * 200) : 100;
+  const score = Math.max(0, Math.min(100, Math.round(0.50 * econ + 0.35 * smooth + 0.15 * speed)));
+  return { score, harshAcc: ha, harshBrake: hb };
 }
 
 // Ingest de um auto-trip. Compartilhado entre o POST HTTP /api/autotrips e o

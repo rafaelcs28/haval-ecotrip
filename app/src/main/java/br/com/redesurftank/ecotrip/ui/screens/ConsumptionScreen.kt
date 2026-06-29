@@ -1046,19 +1046,18 @@ private fun ScoreBar(label: String, v: Int, dragging: Boolean) {
 
 @Composable
 private fun ScoreDetailDialog(s: LiveDriveScore, onDismiss: () -> Unit) {
-    val econDrags = s.econ <= s.smooth
+    val worst = minOf(s.econ, s.smooth, s.speed)   // componente que mais puxa a nota
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = { TextButton(onClick = onDismiss) { Text("Fechar") } },
         title = { Text("Score da viagem · ${s.score}", color = scoreColorOf(s.score), fontWeight = FontWeight.ExtraBold, fontSize = 22.sp) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                ScoreBar("Economia", s.econ, econDrags)
-                ScoreBar("Suavidade", s.smooth, !econDrags)
-                val evs = buildString {
-                    append("${s.harshBrake} freada(s) brusca(s) · ${s.harshAcc} aceleração(ões) brusca(s)")
-                }
-                Text(evs, color = Color(0xFF8E8E93), fontSize = 13.sp)
+                ScoreBar("Economia", s.econ, s.econ == worst)
+                ScoreBar("Suavidade", s.smooth, s.smooth == worst)
+                ScoreBar("Velocidade", s.speed, s.speed == worst)
+                Text("Economia ajustada pelo relevo · ${s.harshBrake} freada(s) · ${s.harshAcc} aceleração(ões) bruscas",
+                     color = Color(0xFF8E8E93), fontSize = 13.sp)
             }
         },
     )
