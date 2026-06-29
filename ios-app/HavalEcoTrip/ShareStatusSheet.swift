@@ -18,13 +18,16 @@ final class ShareStatusStore: ObservableObject {
         return u.hasSuffix("/") ? String(u.dropLast()) : u
     }
 
-    func create(ttlMin: Int) async {
+    func create(ttlMin: Int, recipientName: String?, recipientRole: String?) async {
         guard !base.isEmpty, let u = URL(string: "\(base)/api/share/create") else { error = "Bridge não configurado."; return }
         loading = true; error = nil; defer { loading = false }
         var r = URLRequest(url: u); r.httpMethod = "POST"; r.timeoutInterval = 12
         r.addValue("application/json", forHTTPHeaderField: "Content-Type")
         r.addValue("Bearer " + Settings.bridgeToken, forHTTPHeaderField: "Authorization")
-        r.httpBody = try? JSONSerialization.data(withJSONObject: ["ttlMin": ttlMin])
+        var body: [String: Any] = ["ttlMin": ttlMin]
+        if let n = recipientName, !n.isEmpty { body["recipientName"] = n }
+        if let role = recipientRole, !role.isEmpty { body["recipientRole"] = role }
+        r.httpBody = try? JSONSerialization.data(withJSONObject: body)
         do {
             let (data, resp) = try await URLSession.shared.data(for: r)
             guard (resp as? HTTPURLResponse)?.statusCode == 200,
@@ -52,6 +55,15 @@ struct ShareStatusSheet: View {
     @StateObject private var store = ShareStatusStore()
     @Environment(\.dismiss) private var dismiss
     @State private var ttlMin = 120
+    @State private var recipientKind: RecipientKind = .other
+    @State private var otherName = ""
+
+    enum RecipientKind: String, CaseIterable, Identifiable {
+        case grasi = "Grasi"
+        case other = "Outra pessoa"
+        var id: String { rawValue }
+        var role: String { self == .grasi ? "grasi" : "other" }
+    }
 
     private let options: [(String, Int)] = [
         ("30 min", 30), ("1 h", 60), ("2 h", 120), ("3 h", 180), ("4 h", 240),
@@ -66,6 +78,30 @@ struct ShareStatusSheet: View {
                         VStack(alignment: .leading, spacing: 12) {
                             Text("Quem abrir o link vê o carro ao vivo no mapa (velocidade, marcha, SOC, autonomia, temperaturas) e a distância + tempo de carro até onde a pessoa está.")
                                 .font(.callout).foregroundStyle(DS.muted)
+                            // Destinatário: Grasi → link pareia o iPhone dela com o app Grasi
+                            // Recarga (vira o destino das LAs "indo até você"). Outra pessoa →
+                            // só nome registrado pra auditoria.
+                            Text("Pra quem?").font(.caption).foregroundStyle(DS.muted)
+                            HStack(spacing: 8) {
+                                ForEach(RecipientKind.allCases) { k in
+                                    Button { recipientKind = k } label: {
+                                        Text(k.rawValue).font(.subheadline.weight(.semibold))
+                                            .frame(maxWidth: .infinity).padding(.vertical, 11)
+                                            .background(recipientKind == k ? DS.teal.opacity(0.22) : DS.panel2)
+                                            .foregroundStyle(recipientKind == k ? DS.teal : DS.text)
+                                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                    }.buttonStyle(.plain)
+                                }
+                            }
+                            if recipientKind == .other {
+                                TextField("Nome (ex.: João)", text: $otherName)
+                                    .padding(10).background(DS.panel2)
+                                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                    .foregroundStyle(DS.text).autocorrectionDisabled()
+                            } else {
+                                Text("Quando ela abrir no iPhone, o link pareia o app Grasi Recarga — vira o destino das notificações de chegada.")
+                                    .font(.caption).foregroundStyle(DS.muted)
+                            }
                             Text("Duração do link").font(.caption).foregroundStyle(DS.muted)
                             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3), spacing: 8) {
                                 ForEach(options, id: \.1) { opt in
@@ -108,7 +144,9 @@ struct ShareStatusSheet: View {
                         }
                     } else {
                         DSActionButton(icon: "link.badge.plus", title: "Gerar link", color: DS.green, busy: store.loading) {
-                            Task { await store.create(ttlMin: ttlMin) }
+                            let name: String? = recipientKind == .grasi ? "Grasi" :
+                                otherName.trimmingCharacters(in: .whitespaces).isEmpty ? nil : otherName.trimmingCharacters(in: .whitespaces)
+                            Task { await store.create(ttlMin: ttlMin, recipientName: name, recipientRole: recipientKind.role) }
                         }
                     }
 

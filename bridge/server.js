@@ -10087,10 +10087,11 @@ const phoneLocByDevice = {};                         // { [deviceId]: { lat, lng
 const _companionInbound = {};                        // { [deviceId]: { etaMin, distKm, lastEvalMs, laActive } }
 
 const COMPANION_LA_TYPE = 'CompanionInboundActivityAttributes';
-const COMPANION_NEAR_M = 250;                        // perto da Grasi → encerra LA (chegou)
-const COMPANION_MAX_ETA_MIN = 45;                    // só dispara se ETA ≤ 45min
-const COMPANION_MIN_APPROACH_M = 200;                // aproximação mínima (sample-a-sample) p/ iniciar
+const COMPANION_NEAR_M = 50;                         // <50m da Grasi → marca "chegou"
+const COMPANION_MAX_ETA_MIN = 120;                   // só dispara se ETA ≤ 120min (~2h)
+const COMPANION_MIN_APPROACH_M = 50;                 // aproximação mínima (sample-a-sample) p/ iniciar
 const COMPANION_EVAL_THROTTLE_MS = 30_000;           // throttle de OSRM por companion
+const COMPANION_ARRIVED_LINGER_MS = 10 * 60_000;     // depois de "chegou", LA fica visível por 10min
 
 function _grasiDevices() {
   const out = [];
@@ -10126,12 +10127,13 @@ async function _evalCompanionInbound(companionId) {
   const distPrev = (c.prevLat && c.prevLng)
     ? haversineM(c.prevLat, c.prevLng, grasi.lat, grasi.lng) : Infinity;
   const state0 = _companionInbound[companionId] || { laActive: false, etaMin: null, distKm: null, lastEvalMs: 0 };
-  // Já chegou perto → encerra LA (se ativa).
+  // Chegou (<50m da Grasi): marca a LA como "chegou" (active=false → app renderiza
+  // em cor de chegada) e agenda dismiss em 10min — sem sumir na hora.
   if (distNow < COMPANION_NEAR_M) {
     if (state0.laActive) {
       const finalCs = { name: _deviceName(companionId), etaMin: 0, distKm: 0, active: false, updatedAtMs: Date.now() };
       apnsLive.pushUpdate(COMPANION_LA_TYPE, {}, finalCs,
-        { isFinal: true, dismissalDate: Date.now() + 60_000 })
+        { isFinal: true, dismissalDate: Date.now() + COMPANION_ARRIVED_LINGER_MS })
         .catch(() => {});
       apnsLive.clearUpdateTokensByType(COMPANION_LA_TYPE);
       _companionInbound[companionId] = { laActive: false, etaMin: 0, distKm: 0, lastEvalMs: Date.now() };
@@ -12377,7 +12379,7 @@ app.post('/api/speed-fence', (req, res) => {
 
 // Cria um link de compartilhamento e devolve token/code/url. Reusável internamente
 // (ex.: auto-share disparado por Shortcut na saída de um local).
-function _createShareToken(ttlMinRaw) {
+function _createShareToken(ttlMinRaw, opts) {
   const ttlMin = Math.min(Math.max(parseInt(ttlMinRaw) || 120, 5), 1440);   // 5 min .. 24 h
   const crypto = require('crypto');
   const token = crypto.randomBytes(12).toString('hex');
@@ -12385,7 +12387,13 @@ function _createShareToken(ttlMinRaw) {
   let code; do { code = crypto.randomBytes(4).toString('base64url').slice(0, 6); }
   while (Object.values(_shareTokens).some(v => v.code === code));
   const expiresMs = Date.now() + ttlMin * 60_000;
-  _shareTokens[token] = { createdMs: Date.now(), expiresMs, code };
+  // Identidade do destinatário (opcional). Quando role==='grasi' o link faz o
+  // pareamento do iPhone dela com o app Grasi Recarga (via deep link); quando
+  // 'other', é só um link público read-only com o nome registrado p/ auditoria.
+  const recipientName = String((opts && opts.recipientName) || '').slice(0, 40).trim();
+  const recipientRole = ['grasi', 'companion', 'other'].includes(opts && opts.recipientRole)
+    ? opts.recipientRole : null;
+  _shareTokens[token] = { createdMs: Date.now(), expiresMs, code, recipientName, recipientRole };
   _saveShareTokens();
   // Nome do destino atual (mandado pro carro): permite ao cliente montar
   // "Acompanhe meu trajeto para X". Cai pro último nav_dest recente (≤6h) se
@@ -12395,11 +12403,41 @@ function _createShareToken(ttlMinRaw) {
     const last = recentNavDests[recentNavDests.length - 1];
     if (Date.now() - last.ts < 6 * 3600_000) destName = last.name;
   }
-  return { token, code, url: `${_shareBaseUrl()}/s/${code}`, expiresMs, ttlMin, destName };
+  return { token, code, url: `${_shareBaseUrl()}/s/${code}`, expiresMs, ttlMin, destName,
+           recipientName, recipientRole };
 }
 
 app.post('/api/share/create', (req, res) => {
-  res.json({ ok: true, ..._createShareToken(req.body?.ttlMin) });
+  const b = req.body || {};
+  res.json({ ok: true, ..._createShareToken(b.ttlMin, { recipientName: b.recipientName, recipientRole: b.recipientRole }) });
+});
+
+// Pareamento do Grasi Recarga via share token: o app abre o deep link
+// `grasi-recarga://pair?token=<TOKEN>`, extrai o token e chama este endpoint
+// com o próprio device_id. O bridge lê o recipient.{name,role} do share e
+// grava em notifPrefsByDevice[deviceId] (byd_role, byd_name, byd_paired).
+// Single-use: marca o token como `claimed` pra não permitir múltiplos pareamentos
+// com o mesmo link.
+app.post('/api/byd/claim-share', (req, res) => {
+  const token = String((req.body && req.body.token) || '').trim();
+  const deviceId = String((req.body && req.body.device_id) || '').trim();
+  if (!token || !deviceId) return res.status(400).json({ error: 'token e device_id obrigatórios' });
+  const t = _shareTokens[token];
+  if (!t) return res.status(404).json({ error: 'token inválido ou expirado' });
+  if (Date.now() > t.expiresMs) { delete _shareTokens[token]; _saveShareTokens(); return res.status(410).json({ error: 'token expirado' }); }
+  if (t.claimedByDevice) return res.status(409).json({ error: 'token já usado', byDevice: t.claimedByDevice });
+  if (!t.recipientRole || t.recipientRole === 'other') {
+    return res.status(400).json({ error: 'esse link não é de pareamento (sem recipient)' });
+  }
+  if (!notifPrefsByDevice[deviceId]) notifPrefsByDevice[deviceId] = {};
+  notifPrefsByDevice[deviceId].byd_role = t.recipientRole;
+  notifPrefsByDevice[deviceId].byd_name = t.recipientName || '';
+  notifPrefsByDevice[deviceId].byd_paired = true;
+  saveNotifPrefsByDevice();
+  t.claimedByDevice = deviceId; t.claimedMs = Date.now();
+  _saveShareTokens();
+  console.log(`[pair] device ${deviceId.slice(0,12)}… pareado como ${t.recipientRole}=${t.recipientName}`);
+  res.json({ ok: true, role: t.recipientRole, name: t.recipientName });
 });
 
 // POST /api/auto-share — chamado por um Atalho do iOS (Personal Automation
@@ -12497,6 +12535,7 @@ function _shareAlerts(raw) {
 // Público (token na URL): estado ao vivo do carro pra página de compartilhamento.
 app.get('/api/share/:token/state', (req, res) => {
   if (!_shareValid(req.params.token)) return res.status(404).json({ error: 'link expirado' });
+  const tkObj = _shareTokens[req.params.token] || {};
   const tr = state.current_trip || {};
   const on = state.engine_state === '1' || state.engine_state === 1 || +state.driving_ready === 1;
   // Destino ativo (mandado pro carro): nome, distância, ETA e hora de chegada.
@@ -12542,6 +12581,12 @@ app.get('/api/share/:token/state', (req, res) => {
     dest,
     apkAgeMs: state.last_apk_ms ? (Date.now() - state.last_apk_ms) : null,
     speedAgeMs: state._speed_kmh_ms ? (Date.now() - state._speed_kmh_ms) : null,
+    // Recipient do share (se foi nomeado na criação). A página pública usa pra
+    // mostrar o banner "Para X" + (se role=grasi) um botão de pareamento.
+    recipient: (tkObj.recipientName || tkObj.recipientRole)
+      ? { name: tkObj.recipientName || '', role: tkObj.recipientRole || 'other',
+          paired: !!tkObj.claimedByDevice }
+      : null,
     ts: Date.now(),
   });
 });

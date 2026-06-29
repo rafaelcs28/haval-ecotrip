@@ -244,6 +244,13 @@ targets:
         UIBackgroundModes:
           - remote-notification
           - location   # atualização fina da localização durante a viagem (allowsBackgroundLocationUpdates)
+        # Deep link de pareamento via share link do Haval Hub:
+        #   grasi-recarga://pair?token=<TOKEN>
+        # A página share.html oferece esse link num botão quando role=grasi.
+        CFBundleURLTypes:
+          - CFBundleURLName: br.com.consorciolimpagyn.songpro.pair
+            CFBundleURLSchemes:
+              - grasi-recarga
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: br.com.consorciolimpagyn.songpro

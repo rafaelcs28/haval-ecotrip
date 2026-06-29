@@ -13,7 +13,33 @@ struct BydRecargaApp: App {
         WindowGroup {
             ContentView()
                 .preferredColorScheme(.dark)
+                .onOpenURL { url in
+                    // grasi-recarga://pair?token=<TOKEN> — share link do Haval pareia
+                    // este iPhone como o destinatário (Grasi/companion). O token foi
+                    // gerado em /api/share/create com recipientName+recipientRole.
+                    guard url.scheme == "grasi-recarga", url.host == "pair" else { return }
+                    let token = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                        .queryItems?.first { $0.name == "token" }?.value ?? ""
+                    guard !token.isEmpty else { return }
+                    Task { await BydPairing.claim(token: token) }
+                }
         }
+    }
+}
+
+/// Pareamento via deep link: troca o token do share por uma identidade no bridge.
+enum BydPairing {
+    static func claim(token: String) async {
+        guard BydSettings.isConfigured,
+              let url = URL(string: BydSettings.baseURL + "/api/byd/claim-share") else { return }
+        var req = URLRequest(url: url, timeoutInterval: 10)
+        req.httpMethod = "POST"
+        req.addValue("Bearer " + BydSettings.bridgeToken, forHTTPHeaderField: "Authorization")
+        req.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try? JSONSerialization.data(withJSONObject: [
+            "token": token, "device_id": BydSettings.deviceId,
+        ])
+        _ = try? await URLSession.shared.data(for: req)
     }
 }
 

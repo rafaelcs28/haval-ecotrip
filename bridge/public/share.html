@@ -67,6 +67,18 @@
   <span class="title">🚗 Haval ao vivo</span>
   <span id="state-badge" class="badge on">conectando…</span>
 </div>
+<!-- Banner do destinatário: aparece quando o link foi criado com nome+role.
+     Se role=grasi e ainda não pareado, mostra botão pra abrir Grasi Recarga. -->
+<div id="recipient-banner" style="display:none;position:fixed;top:50px;left:8px;right:8px;
+     background:rgba(244,114,182,.18);border:1px solid rgba(244,114,182,.5);
+     border-radius:12px;padding:10px 14px;color:#fff;font-size:14px;z-index:5;
+     box-shadow:0 4px 16px rgba(0,0,0,.5)">
+  <div id="recipient-text" style="font-weight:600;margin-bottom:2px"></div>
+  <div id="recipient-sub" style="font-size:12px;color:#cbd5e1"></div>
+  <a id="recipient-pair-btn" href="#" style="display:none;margin-top:8px;padding:9px 14px;
+     background:#f472b6;color:#000;border-radius:8px;text-decoration:none;font-weight:700;
+     display:inline-block;font-size:13px">Parear no app Grasi Recarga</a>
+</div>
 <div class="speed-sign" id="speed-sign"><div class="num" id="v-spd">—</div><div class="u">km/h</div></div>
 <div class="panel">
   <div class="dest" id="dest-line" style="display:none"></div>
@@ -115,6 +127,25 @@ async function poll(){
     j = await r.json();
   } catch(_) { return; }
   _fail = 0; _everOK = true; hideExpired();
+  // Banner do destinatário (idempotente — popula uma vez quando vem do estado).
+  const rec = j.recipient;
+  const banner = document.getElementById('recipient-banner');
+  if (rec && rec.name) {
+    banner.style.display = 'block';
+    document.getElementById('recipient-text').textContent =
+      rec.role === 'grasi' ? `📲 Esse link é pra ${rec.name}` : `Link compartilhado com ${rec.name}`;
+    document.getElementById('recipient-sub').textContent =
+      rec.role === 'grasi'
+        ? (rec.paired ? 'Pareado ✓ — seu iPhone já está identificado.' : 'Abra no iPhone da Grasi pra parear o app.')
+        : '';
+    const btn = document.getElementById('recipient-pair-btn');
+    if (rec.role === 'grasi' && !rec.paired) {
+      btn.style.display = 'inline-block';
+      btn.href = `grasi-recarga://pair?token=${TOKEN}`;
+    } else {
+      btn.style.display = 'none';
+    }
+  }
   const badge = document.getElementById('state-badge');
   // apkAgeMs = quanto tempo o BRIDGE está sem mensagem do APK. >15s = MQTT/4G hipiou
   // e os números abaixo podem estar congelados — avisa o destinatário do link.
