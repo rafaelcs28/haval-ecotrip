@@ -46,6 +46,79 @@ enum DS {
     static let red    = Color(red: 0.937, green: 0.267, blue: 0.267)   // #ef4444
 }
 
+// MARK: - Liquid Glass (iOS 26+), com fallback pro material antigo
+
+extension View {
+    /// Superfície de controle flutuante sobre conteúdo (botões sobre o mapa).
+    /// iOS 26+: Liquid Glass real e interativo. Anteriores: ultraThinMaterial escuro.
+    @ViewBuilder
+    func glassControl<S: Shape>(in shape: S) -> some View {
+        if #available(iOS 26, *) {
+            self.glassEffect(.regular.interactive(), in: shape)
+        } else {
+            self.background(.ultraThinMaterial, in: shape)
+                .environment(\.colorScheme, .dark)
+        }
+    }
+
+    /// Nav bar escura opaca (comportamento antigo). No iOS 26+ deixa o glass do
+    /// sistema aparecer (não força fundo), no-op aqui.
+    @ViewBuilder
+    func legacyDarkNavBar() -> some View {
+        if #available(iOS 26, *) {
+            self
+        } else {
+            self.toolbarBackground(.visible, for: .navigationBar)
+                .toolbarBackground(DS.bg, for: .navigationBar)
+        }
+    }
+
+    /// Minimiza a tab bar do sistema ao rolar (iOS 26+). No-op nos anteriores.
+    @ViewBuilder
+    func tabBarMinimizeOnScroll() -> some View {
+        if #available(iOS 26, *) {
+            self.tabBarMinimizeBehavior(.onScrollDown)
+        } else {
+            self
+        }
+    }
+
+    /// Superfície de card translúcido sobre o mapa (overlays do Drive/Viagens).
+    /// iOS 26+: glassEffect com leve tint escuro p/ legibilidade do texto branco.
+    /// Anteriores: ultraThinMaterial + véu preto (comportamento antigo).
+    @ViewBuilder
+    func glassPanel<S: Shape>(in shape: S, stroke: Color) -> some View {
+        if #available(iOS 26, *) {
+            self.glassEffect(.regular.tint(DS.panel2.opacity(0.55)), in: shape)
+                .overlay(shape.stroke(stroke, lineWidth: 1))
+        } else {
+            self.background {
+                ZStack {
+                    Rectangle().fill(.ultraThinMaterial)
+                    Rectangle().fill(Color.black.opacity(0.35))
+                }.environment(\.colorScheme, .dark)
+            }
+            .clipShape(shape)
+            .overlay(shape.stroke(stroke, lineWidth: 1))
+        }
+    }
+}
+
+/// Botão-toggle circular sobre mapa: ATIVO = preenchido na cor; inativo = glass.
+struct FollowButtonSurface: ViewModifier {
+    var active: Bool
+    var tint: Color = DS.green
+    func body(content: Content) -> some View {
+        if active {
+            content.background(tint).clipShape(Circle())
+                .overlay(Circle().stroke(DS.border, lineWidth: 1))
+        } else {
+            content.glassControl(in: Circle())
+                .overlay(Circle().stroke(DS.border, lineWidth: 1))
+        }
+    }
+}
+
 /// Card padrão (painel escuro arredondado com borda sutil).
 struct DSCard<Content: View>: View {
     var title: String? = nil
@@ -70,18 +143,26 @@ struct DSCard<Content: View>: View {
         }
         .padding(.horizontal, 14).padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background {
-            if glass {
-                ZStack {
-                    Rectangle().fill(.ultraThinMaterial)
-                    Rectangle().fill(Color.black.opacity(0.35))
-                }.environment(\.colorScheme, .dark)
-            } else {
-                Rectangle().fill(bg ?? DS.panel)
-            }
+        .modifier(DSCardSurface(glass: glass, bg: bg, border: borderColor ?? DS.border))
+    }
+}
+
+/// Aplica o fundo do card: glass translúcido (sobre mapa) ou painel sólido.
+private struct DSCardSurface: ViewModifier {
+    let glass: Bool
+    let bg: Color?
+    let border: Color
+    private let shape = RoundedRectangle(cornerRadius: 18, style: .continuous)
+
+    func body(content: Content) -> some View {
+        if glass {
+            content.glassPanel(in: shape, stroke: border)
+        } else {
+            content
+                .background(Rectangle().fill(bg ?? DS.panel))
+                .clipShape(shape)
+                .overlay(shape.stroke(border, lineWidth: 1))
         }
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(borderColor ?? DS.border, lineWidth: 1))
     }
 }
 
@@ -117,21 +198,38 @@ struct DSActionButton: View {
     let title: String
     var color: Color = DS.blue
     var busy: Bool = false
+    var compact: Bool = false
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 8) {
-                if busy { ProgressView().tint(.black) }
-                else { Image(systemName: icon).font(.headline) }
-                Text(title).font(.system(size: 16, weight: .bold))
+            HStack(spacing: compact ? 6 : 8) {
+                if busy { ProgressView().tint(color) }
+                else { Image(systemName: icon).font(compact ? .subheadline : .headline) }
+                Text(title).font(.system(size: compact ? 14 : 16, weight: .semibold))
             }
-            .frame(maxWidth: .infinity).frame(height: 52)
-            .foregroundStyle(.black)
-            .background(color)
-            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .frame(maxWidth: .infinity).frame(height: compact ? 40 : 52)
+            .foregroundStyle(color)
+            .modifier(DSActionSurface(color: color))
         }
         .disabled(busy)
+    }
+}
+
+/// Superfície dos botões de ação grandes do Painel: glass translúcido com tint
+/// sutil da cor de acento (iOS 26+) em vez do slab saturado. Ícone/texto ficam
+/// na própria cor. Fallback <26 = fundo leve + borda da cor.
+private struct DSActionSurface: ViewModifier {
+    let color: Color
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
+        if #available(iOS 26, *) {
+            content.glassEffect(.regular.tint(color.opacity(0.10)).interactive(), in: shape)
+                .overlay(shape.stroke(color.opacity(0.28), lineWidth: 1))
+        } else {
+            content.background(color.opacity(0.10), in: shape)
+                .overlay(shape.stroke(color.opacity(0.30), lineWidth: 1))
+        }
     }
 }
 

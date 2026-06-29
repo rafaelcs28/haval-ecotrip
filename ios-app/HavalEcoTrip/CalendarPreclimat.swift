@@ -109,7 +109,7 @@ final class CalendarPreclimatStore: ObservableObject {
 
         // Já passou da hora de ligar → não agenda (tarde demais).
         guard fire > Date() else { await clearSchedule(); return }
-        await pushSchedule(fireAt: fire, temp: suggestedTemp())
+        await pushSchedule(fireAt: fire, departure: dep, ev: ev, temp: suggestedTemp())
     }
 
     private func suggestedTemp() -> Double {
@@ -156,14 +156,20 @@ final class CalendarPreclimatStore: ObservableObject {
         return (km, min)
     }
 
-    private func pushSchedule(fireAt: Date, temp: Double) async {
+    private func pushSchedule(fireAt: Date, departure: Date, ev: UpcomingEvent, temp: Double) async {
         let ms = Int(fireAt.timeIntervalSince1970 * 1000)
         let hhmm = DateFormatter.hhmm.string(from: fireAt)
         var body: [String: Any] = [
             "device_id": "calendar",
-            "onceAtMs": ms, "time": hhmm, "temp": temp,
+            "onceAtMs": ms, "departureMs": Int(departure.timeIntervalSince1970 * 1000),
+            "label": ev.title, "time": hhmm, "temp": temp,
             "duration": climateDurationMin, "enabled": true,
+            // Contexto p/ recompute de trânsito server-side (bridge refaz o ETA ~20 min antes).
+            "eventStartMs": Int(ev.start.timeIntervalSince1970 * 1000),
+            "bufferMin": leaveBufferMin, "climateMin": climateDurationMin,
         ]
+        if let la = ev.lat, let lo = ev.lng { body["destLat"] = la; body["destLng"] = lo }
+        else if let loc = ev.locationText, !loc.isEmpty { body["destName"] = loc }
         if !schedId.isEmpty { body["id"] = schedId }
         guard let r = req("/api/preclimat/schedule", "POST", body),
               let (data, resp) = try? await URLSession.shared.data(for: r),

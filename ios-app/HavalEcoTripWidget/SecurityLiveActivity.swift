@@ -42,8 +42,14 @@ struct SecurityLiveActivity: Widget {
                 }
                 DynamicIslandExpandedRegion(.bottom) {
                     if s.unlocked {
-                        Label("Veículo destrancado", systemImage: "lock.open.fill")
-                            .font(.caption2).foregroundStyle(.red)
+                        HStack {
+                            Label("Veículo destrancado", systemImage: "lock.open.fill")
+                                .font(.caption2).foregroundStyle(.red)
+                            Spacer()
+                            if #available(iOS 17.0, *) {
+                                LAActionButton(title: "Travar", systemImage: "lock.fill", tint: .red, intent: LockCarIntent())
+                            }
+                        }
                     }
                 }
             } compactLeading: {
@@ -86,6 +92,10 @@ struct SecurityLockScreenView: View {
                         .padding(.top, 2)
                 } else {
                     Text("Tudo trancado e fechado").font(.caption).foregroundStyle(.secondary)
+                }
+                if state.unlocked, #available(iOS 17.0, *) {
+                    LAActionButton(title: "Travar", systemImage: "lock.fill", tint: .red, intent: LockCarIntent())
+                        .padding(.top, 2)
                 }
                 Spacer(minLength: 0)
                 CarLegend()

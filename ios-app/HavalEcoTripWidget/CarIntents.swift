@@ -47,6 +47,34 @@ enum CarIntentAPI {
         return (msg, link)
     }
 
+    /// Avança o limite de carga um preset (botão % da LA). O bridge faz o cycle e
+    /// serializa taps em rajada (50→60→70→80), devolvendo o alvo escolhido. Não
+    /// faz read-modify-write no iOS — senão taps rápidos leriam o state defasado.
+    static func cycleChargeLimit() async -> Int? {
+        guard !base.isEmpty, let url = URL(string: "\(base)/api/charge-limit/cycle") else { return nil }
+        var r = URLRequest(url: url); r.httpMethod = "POST"; r.timeoutInterval = 12
+        r.addValue("Bearer " + Settings.bridgeToken, forHTTPHeaderField: "Authorization")
+        r.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        r.httpBody = "{}".data(using: .utf8)
+        guard let (d, resp) = try? await URLSession.shared.data(for: r),
+              (resp as? HTTPURLResponse)?.statusCode == 200,
+              let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any] else { return nil }
+        return Int(((j["target"] as? Double) ?? 0).rounded())
+    }
+
+    /// Cancela a pré-climatização em andamento ou agendada (POST /api/preclimat/cancel).
+    @discardableResult static func cancelPreclimat() async -> Bool {
+        guard !base.isEmpty, let url = URL(string: "\(base)/api/preclimat/cancel") else { return false }
+        var r = URLRequest(url: url); r.httpMethod = "POST"; r.timeoutInterval = 12
+        r.addValue("Bearer " + Settings.bridgeToken, forHTTPHeaderField: "Authorization")
+        r.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        r.httpBody = "{}".data(using: .utf8)
+        guard let (d, resp) = try? await URLSession.shared.data(for: r),
+              (resp as? HTTPURLResponse)?.statusCode == 200,
+              let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any] else { return false }
+        return (j["ok"] as? Bool) == true
+    }
+
     /// Lê o SOC atual (e autonomia EV) do estado do carro.
     static func socNow() async -> (soc: Int, evKm: Int)? {
         guard !base.isEmpty, let url = URL(string: "\(base)/api/state") else { return nil }
@@ -111,6 +139,29 @@ struct PreclimaIntent: AppIntent {
         let ok = await CarIntentAPI.action("ac_on")
         WidgetCenter.shared.reloadAllTimelines()
         return .result(dialog: ok ? "Pré-climatização ligada." : "Não consegui ligar o ar agora.")
+    }
+}
+
+@available(iOS 16.0, *)
+struct CancelPreclimatIntent: AppIntent {
+    static var title: LocalizedStringResource = "Cancelar pré-climatização"
+    static var description = IntentDescription("Cancela a pré-climatização agendada ou em andamento (restaura o AC e desliga o motor).")
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        let ok = await CarIntentAPI.cancelPreclimat()
+        WidgetCenter.shared.reloadAllTimelines()
+        return .result(dialog: ok ? "Pré-climatização cancelada." : "Não consegui cancelar agora.")
+    }
+}
+
+@available(iOS 16.0, *)
+struct CycleChargeLimitIntent: AppIntent {
+    static var title: LocalizedStringResource = "Mudar limite de carga"
+    static var description = IntentDescription("Avança o limite de carga pro próximo preset (…→70→80→90→100→70…).")
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        let next = await CarIntentAPI.cycleChargeLimit()
+        WidgetCenter.shared.reloadAllTimelines()
+        if let n = next { return .result(dialog: "Limite de carga: \(n)%.") }
+        return .result(dialog: "Não consegui mudar o limite agora.")
     }
 }
 

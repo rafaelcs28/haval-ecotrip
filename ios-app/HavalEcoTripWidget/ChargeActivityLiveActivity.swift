@@ -5,6 +5,7 @@
 //   - Dynamic Island compact/expanded/minimal.
 //
 import ActivityKit
+import AppIntents
 import SwiftUI
 import WidgetKit
 
@@ -33,6 +34,22 @@ private struct CarChargeRing: View {
                 .foregroundStyle(accent)
         }
         .frame(width: 22, height: 22)
+    }
+}
+
+// Linha de ações da LA de recarga. Trancar/Destrancar segue o estado real da
+// trava (state.locked); o botão de limite mostra a meta atual e cicla os presets.
+@available(iOS 17.0, *)
+@ViewBuilder
+private func chargeLAButtons(_ s: ChargeActivityAttributes.ContentState) -> some View {
+    HStack(spacing: 6) {
+        LAActionButton(title: "Pré-clima", systemImage: "thermometer.snowflake", intent: PreclimaIntent())
+        if s.locked == true {
+            LAActionButton(title: "Destrancar", systemImage: "lock.open.fill", tint: .orange, intent: UnlockCarIntent())
+        } else {
+            LAActionButton(title: "Trancar", systemImage: "lock.fill", intent: LockCarIntent())
+        }
+        LAActionButton(title: "\(Int(s.targetPct))%", systemImage: "bolt.fill", tint: .green, intent: CycleChargeLimitIntent())
     }
 }
 
@@ -80,6 +97,9 @@ struct ChargeActivityLiveActivity: Widget {
                             Text(String(format: "%.1f kWh", s.sessionKwh))
                                 .font(.caption2).foregroundStyle(.secondary)
                                 .lineLimit(1).minimumScaleFactor(0.5).layoutPriority(1)
+                        }
+                        if #available(iOS 17.0, *) {
+                            chargeLAButtons(s)
                         }
                     }
                 }
@@ -132,6 +152,10 @@ struct ChargeLockScreenView: View {
                 Label(String(format: "%.1f kWh", state.sessionKwh), systemImage: "bolt.batteryblock")
                     .font(.caption).foregroundStyle(.secondary)
                     .lineLimit(1).minimumScaleFactor(0.6).layoutPriority(1)
+            }
+            if #available(iOS 17.0, *) {
+                chargeLAButtons(state)
+                    .padding(.top, 2)
             }
         }
         .padding(14)

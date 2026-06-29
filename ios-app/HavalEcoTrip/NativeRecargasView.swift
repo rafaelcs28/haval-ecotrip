@@ -115,6 +115,27 @@ final class RefuelsLoader: ObservableObject {
     init() { bag = sync.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() } }
     var refuels: [Refuel] { sync.items.map(Refuel.init).filter { $0.valid }.sorted { $0.id > $1.id } }
     func load() async { await sync.sync() }
+    func patch(_ r: Refuel, liters: Double?, pricePerL: Double?, location: String?) async {
+        let lid = SyncedList.canonId(r.id)
+        let idStr = String(format: "%.0f", r.id)
+        var body: [String: Any] = [:]
+        var apply: ([String: Any]) -> [String: Any] = { $0 }
+        if let liters, liters > 0, liters != r.liters {
+            body["liters_added"] = liters
+            let prev = apply; apply = { var d = prev($0); d["liters_added"] = liters; return d }
+        }
+        if let p = pricePerL, p > 0 {
+            body["price_per_liter"] = p
+            let prev = apply; apply = { var d = prev($0); d["price_per_liter"] = p; return d }
+        }
+        if let loc = location, !loc.isEmpty {
+            body["location_name"] = loc
+            let prev = apply; apply = { var d = prev($0); d["location_name"] = loc; return d }
+        }
+        if !body.isEmpty {
+            await sync.mutate(localId: lid, apply: apply, method: "PATCH", opPath: "/api/refuels/\(idStr)", body: body)
+        }
+    }
 }
 
 // MARK: - View
@@ -133,6 +154,7 @@ struct NativeRecargasView: View {
     @State private var showHealth = false
     @State private var showAnalysis = false
     @State private var showForecast = false
+    @State private var editingRefuel: Refuel?
 
     private var fromDate: Binding<Date> {
         Binding(get: { fromTS > 0 ? Date(timeIntervalSince1970: fromTS) : Date() }, set: { fromTS = $0.timeIntervalSince1970 })
@@ -450,6 +472,9 @@ struct NativeRecargasView: View {
                             Text(r.location).font(.system(size: 15, weight: .semibold)).foregroundStyle(DS.text).lineLimit(1)
                             Spacer()
                             Text(Self.df.string(from: r.date)).font(.caption).foregroundStyle(DS.muted)
+                            Button { editingRefuel = r } label: {
+                                Image(systemName: "pencil").font(.caption).foregroundStyle(DS.muted)
+                            }.buttonStyle(.plain)
                         }
                         HStack {
                             DSMetric(value: f1(r.liters), unit: "L", label: "Litros", color: DS.orange)
@@ -460,6 +485,11 @@ struct NativeRecargasView: View {
                             Text("Hodômetro: \(String(format: "%.0f", r.odometer)) km").font(.caption2).foregroundStyle(DS.muted)
                         }
                     }
+                }
+            }
+            .sheet(item: $editingRefuel) { r in
+                RefuelEditSheet(refuel: r) { liters, pricePerL, location in
+                    Task { await refLoader.patch(r, liters: liters, pricePerL: pricePerL, location: location) }
                 }
             }
         }
@@ -529,6 +559,59 @@ private struct ChargeEditFields: View {
             TextField(ph, text: text).keyboardType(kb).foregroundStyle(DS.text)
                 .padding(9).background(DS.panel2).clipShape(RoundedRectangle(cornerRadius: 9))
                 .overlay(RoundedRectangle(cornerRadius: 9).stroke(DS.border, lineWidth: 1))
+        }
+    }
+}
+
+private struct RefuelEditSheet: View {
+    let refuel: Refuel
+    let onSave: (Double?, Double?, String?) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var liters = ""
+    @State private var price = ""
+    @State private var location = ""
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Abastecimento") {
+                    HStack {
+                        Text("LITROS").font(.system(size: 9, weight: .semibold)).foregroundStyle(DS.muted)
+                        Spacer()
+                        TextField("Ex: 10", text: $liters).keyboardType(.decimalPad).multilineTextAlignment(.trailing)
+                    }
+                    HStack {
+                        Text("R$/L").font(.system(size: 9, weight: .semibold)).foregroundStyle(DS.muted)
+                        Spacer()
+                        TextField("Ex: 6.19", text: $price).keyboardType(.decimalPad).multilineTextAlignment(.trailing)
+                    }
+                }
+                Section("Local") {
+                    TextField("Nome do posto", text: $location)
+                }
+                Section {
+                    Text("Editar os litros corrige automaticamente o nível do tanque no app.")
+                        .font(.caption).foregroundStyle(DS.muted)
+                }
+            }
+            .navigationTitle("Editar abastecimento")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancelar") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Salvar") {
+                        let l = Double(liters.replacingOccurrences(of: ",", with: "."))
+                        let p = Double(price.replacingOccurrences(of: ",", with: "."))
+                        onSave(l, p, location.isEmpty ? nil : location)
+                        dismiss()
+                    }
+                }
+            }
+        }
+        .onAppear {
+            liters = refuel.liters > 0 ? String(format: "%.1f", refuel.liters) : ""
+            price  = refuel.pricePerL > 0 ? String(format: "%.2f", refuel.pricePerL) : ""
+            location = refuel.location == "Posto" ? "" : refuel.location
         }
     }
 }

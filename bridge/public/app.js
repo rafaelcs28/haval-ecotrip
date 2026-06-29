@@ -989,6 +989,8 @@ function connect() {
           if (cachedEvents.length > 2000) cachedEvents.pop();
           if (activePanel === 'logs') renderLogs();
         }
+      } else if (msg.type === 'command_progress') {
+        _onCommandProgress(msg.data);
       }
     } catch (e) { console.error('WS parse error', e); }
   };
@@ -6355,6 +6357,51 @@ async function sendRemoteAction(action, successMsg, confirmSpec = null) {
     showToast('✗ ' + msg);
     if (logEl) logEl.innerHTML = `<span style="color:#f87171">✗ ${msg} · ${hhmm()}</span>`;
   }
+}
+
+// Andamento do comando remoto via WS (feed do standalone GWM): sent → running →
+// done/timeout. Fecha o loop em ~15-20s sem esperar o estado físico refletir, e
+// cobre ações sem campo de estado limpo (vidros/teto/porta-malas/ac/recarga).
+let _cmdWatchdogs = {};   // action → timer id do watchdog client-side
+
+function _onCommandProgress(d) {
+  if (!d || !d.action) return;
+  const logEl = document.getElementById(_actionLogMap[d.action] || '');
+  if (!logEl) return;
+  const hhmm = () => new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  // Reseta o watchdog a cada evento; só fases não-terminais voltam a armá-lo.
+  if (_cmdWatchdogs[d.action]) { clearTimeout(_cmdWatchdogs[d.action]); delete _cmdWatchdogs[d.action]; }
+  if (d.phase === 'sent') {
+    logEl.innerHTML = '<span style="color:#94a3b8">Enviando ao carro…</span>';
+    _armCmdWatchdog(d.action);
+  } else if (d.phase === 'running') {
+    logEl.innerHTML = '<span style="color:#fbbf24">⏳ Processando no carro…</span>';
+    _armCmdWatchdog(d.action);
+  } else if (d.phase === 'done') {
+    if (d.ok) {
+      logEl.innerHTML = `<span style="color:#4ade80">✓ Confirmado pelo carro · ${hhmm()}</span>`;
+      showToast('✓ Confirmado pelo carro');
+      if (navigator.vibrate) navigator.vibrate([80, 40, 80]);
+    } else if (d.resultCode != null) {
+      logEl.innerHTML = `<span style="color:#f87171">✗ Recusado pelo carro (cód ${d.resultCode}) · ${hhmm()}</span>`;
+      showToast('✗ Comando recusado pelo carro');
+    } else {
+      logEl.innerHTML = `<span style="color:#f87171">✗ Falha ao enviar — tente de novo · ${hhmm()}</span>`;
+      showToast('✗ Falha ao enviar comando');
+    }
+  } else if (d.phase === 'timeout') {
+    logEl.innerHTML = `<span style="color:#fbbf24">⚠ Sem resposta do carro · ${hhmm()}</span>`;
+    showToast('⚠ Sem resposta do carro');
+  }
+}
+
+// Watchdog: se nenhum evento terminal chegar em 70s (WS caiu, nuvem não
+// respondeu), resolve o log sozinho em timeout — não fica "Processando" eterno.
+function _armCmdWatchdog(action) {
+  _cmdWatchdogs[action] = setTimeout(() => {
+    delete _cmdWatchdogs[action];
+    _onCommandProgress({ action, phase: 'timeout', resultCode: null });
+  }, 70000);
 }
 
 // ── Renomear trip — modal estilo Android ─────────────────────────────────────

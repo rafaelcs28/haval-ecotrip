@@ -42,8 +42,7 @@ struct MapPickerSheet: View {
                     }
                 }
                 .padding(14)
-                .background(.ultraThinMaterial)
-                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .glassPanel(in: RoundedRectangle(cornerRadius: 16, style: .continuous), stroke: DS.border)
                 .padding(12)
             }
             .navigationTitle("Escolher no mapa")

@@ -27,6 +27,19 @@ final class CarStore: ObservableObject {
     /// rápida + comandos sem passar pelo Mac mini.
     @Published private(set) var lanConnected = false
 
+    /// Andamento do último comando remoto (sent → running → done/timeout), vindo
+    /// do feed WS command_progress do bridge. Fecha o loop em ~15-20s sem esperar
+    /// o estado físico refletir. nil = sem comando em voo recente.
+    @Published private(set) var commandProgress: CommandProgress?
+
+    struct CommandProgress: Equatable {
+        var action: String
+        var phase: String        // sent | running | done | timeout
+        var ok: Bool?
+        var resultCode: String?
+        var ts: Date
+    }
+
     private let geocoder = CLGeocoder()
     private var lastGeoCoord: CLLocationCoordinate2D?
     private var lastGeoAt: Date = .distantPast
@@ -36,6 +49,19 @@ final class CarStore: ObservableObject {
     private var pollTask: Task<Void, Never>?
     private var reconnectDelay: TimeInterval = 1
     private var started = false
+
+    // Comandos remotos que têm feed de andamento (sent→running→done/timeout).
+    private static let progressActions: Set<String> = [
+        "lock_open", "lock_close", "engine_on", "engine_off",
+        "windows_open", "windows_close", "trunk_open", "trunk_close"
+    ]
+    // Watchdog client-side: se nenhum evento terminal chegar (WS caiu, nuvem
+    // não respondeu, standalone não pollou), o banner resolve sozinho em timeout.
+    private var cmdWatchdog: Task<Void, Never>?
+
+    private let snapDefaults = UserDefaults(suiteName: "group.br.com.consorciolimpagyn.havalecotrip")
+    private static let snapKey = "carstore.raw.snapshot"
+    private var snapSaveWork: DispatchWorkItem?
 
     // LAN
     private let lan = LANDiscovery()
@@ -49,6 +75,13 @@ final class CarStore: ObservableObject {
     private var token: String { Settings.bridgeToken }
 
     // MARK: - Ciclo de vida
+
+    init() {
+        if let data = snapDefaults?.data(forKey: Self.snapKey),
+           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            raw = obj
+        }
+    }
 
     func start() {
         guard !started, Settings.isConfigured else { return }
@@ -126,8 +159,8 @@ final class CarStore: ObservableObject {
                     self.reconnectDelay = 1
                     self.connected = true
                     switch message {
-                    case .string(let s): self.merge(s)
-                    case .data(let d):   self.merge(String(data: d, encoding: .utf8) ?? "")
+                    case .string(let s): self.handleWSMessage(s)
+                    case .data(let d):   self.handleWSMessage(String(data: d, encoding: .utf8) ?? "")
                     @unknown default: break
                     }
                     // continua escutando
@@ -193,6 +226,74 @@ final class CarStore: ObservableObject {
     // limites…) continua vindo da nuvem — por isso o poll cloud segue rodando.
     private static let lanOwnedKeys: Set<String> = lanPassthrough.union(lanRename.values)
 
+    // Roteia a mensagem do WS: command_progress vai pro feed de andamento; o
+    // resto segue o merge de estado de sempre (update/full_state).
+    private func handleWSMessage(_ s: String) {
+        if let data = s.data(using: .utf8),
+           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           (obj["type"] as? String) == "command_progress",
+           let d = obj["data"] as? [String: Any] {
+            handleCommandProgress(d)
+            return
+        }
+        merge(s)
+    }
+
+    private func handleCommandProgress(_ d: [String: Any]) {
+        let action = d["action"] as? String ?? ""
+        let phase  = d["phase"]  as? String ?? ""
+        guard !action.isEmpty, !phase.isEmpty else { return }
+        let cp = CommandProgress(
+            action: action,
+            phase: phase,
+            ok: d["ok"] as? Bool,
+            resultCode: d["resultCode"] as? String,
+            ts: Date()
+        )
+        setCommandProgress(cp)
+    }
+
+    /// Dispara um comando remoto SEM bloquear a UI: marca 'sent' na hora, arma o
+    /// watchdog e faz o POST em background com timeout próprio. Se o POST falhar
+    /// ou nenhum evento terminal chegar, o banner resolve sozinho (erro/timeout).
+    func fireCommand(_ name: String) {
+        guard Self.progressActions.contains(name) else {
+            Task { _ = await action(name) }   // ação sem feed de andamento
+            return
+        }
+        setCommandProgress(CommandProgress(action: name, phase: "sent", ok: nil, resultCode: nil, ts: Date()))
+        Task { [weak self] in
+            guard let self else { return }
+            let ok = await self.action(name)   // command() já tem timeout de 8s
+            // Falha do POST (rede/HTTP/MQTT offline) → erro já, sem esperar 70s.
+            if !ok, let cp = self.commandProgress, cp.action == name, cp.phase == "sent" {
+                self.setCommandProgress(CommandProgress(action: name, phase: "done", ok: false, resultCode: nil, ts: Date()))
+            }
+        }
+    }
+
+    private func setCommandProgress(_ cp: CommandProgress) {
+        commandProgress = cp
+        cmdWatchdog?.cancel()
+        if cp.phase == "done" || cp.phase == "timeout" {
+            // Terminal → some sozinho em alguns segundos.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
+                if self?.commandProgress?.ts == cp.ts { self?.commandProgress = nil }
+            }
+        } else {
+            // sent/running → arma o watchdog. 70s cobre o timeout do backend (~60s)
+            // com folga; se nem isso chegar, força timeout no cliente.
+            cmdWatchdog = Task { [weak self] in
+                try? await Task.sleep(nanoseconds: 70_000_000_000)
+                guard !Task.isCancelled, let self else { return }
+                if let cur = self.commandProgress, cur.action == cp.action,
+                   cur.phase == "sent" || cur.phase == "running" {
+                    self.setCommandProgress(CommandProgress(action: cp.action, phase: "timeout", ok: false, resultCode: nil, ts: Date()))
+                }
+            }
+        }
+    }
+
     private func merge(_ jsonString: String) {
         guard let data = jsonString.data(using: .utf8),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
@@ -204,6 +305,19 @@ final class CarStore: ObservableObject {
         lastUpdate = Date()
         updateAddressIfNeeded()
         ParkingStore.shared.onCarUpdate(engineOn: engineOn, lat: lat, lng: lng)
+        scheduleSnapSave()
+    }
+
+    private func scheduleSnapSave() {
+        snapSaveWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            if let data = try? JSONSerialization.data(withJSONObject: self.raw) {
+                self.snapDefaults?.set(data, forKey: Self.snapKey)
+            }
+        }
+        snapSaveWork = work
+        DispatchQueue.global(qos: .background).asyncAfter(deadline: .now() + 3, execute: work)
     }
 
     /// Geocodifica o endereço da posição atual — só quando move >60m e no
@@ -295,6 +409,7 @@ final class CarStore: ObservableObject {
         "ac_state": "hvac_ac_enable", "hvac_sync_enable": "hvac_sync",
         "hvac_auto_enable": "hvac_auto", "seat_vent_drv": "hvac_seat_vent_drv",
         "seat_vent_pass": "hvac_seat_vent_pass",
+        "basic_battery_voltage_v": "batt_12v_v",
     ]
 
     private func mergeLAN(_ jsonString: String) {
@@ -381,6 +496,34 @@ final class CarStore: ObservableObject {
         return num("last_apk_ms") > 0 && age < 60_000
     }
 
+    // MARK: - Fallback WiFi (4G/nuvem GWM fora)
+    var lastGwmMs: Double { num("last_gwm_ms") }
+    var lastApkMs: Double { num("last_apk_ms") }
+    /// Nuvem GWM stale: sem dado nos últimos 5 min (mesmo limiar do bridge _gwmAlive).
+    var gwmStale: Bool {
+        let ms = lastGwmMs
+        return ms <= 0 || (Date().timeIntervalSince1970 * 1000 - ms) > 300_000
+    }
+    /// Rodando em fallback: nuvem GWM fora, mas o APK (via WiFi do head unit) fresco.
+    var onWifiFallback: Bool { gwmStale && carOnline }
+    /// Origem do campo no bridge ("apk"|"gwm"|"") — vem de _field_source.
+    func fieldSource(_ key: String) -> String {
+        (raw["_field_source"] as? [String: Any])?[key] as? String ?? ""
+    }
+    /// Campo congelado: o último valor desse campo veio da nuvem GWM e a GWM está
+    /// stale (sem caminho local pelo APK). Desacoplado do carOnline — continua
+    /// marcando velho mesmo depois que o APK também parou (offline total).
+    /// engine_state/door/window viram source 'apk' em fallback → NÃO congelam; lock/pneus sim.
+    func isFrozen(_ key: String) -> Bool { gwmStale && fieldSource(key) == "gwm" }
+    /// Idade do dado mais recente (qualquer fonte), em segundos. -1 se nunca recebeu.
+    var dataAgeSec: Double {
+        let ms = max(lastApkMs, lastGwmMs)
+        guard ms > 0 else { return -1 }
+        return Date().timeIntervalSince1970 - ms / 1000
+    }
+    /// Offline total: já recebeu dados algum dia, mas nada fresco do APK nem da GWM.
+    var isOffline: Bool { !carOnline && gwmStale && dataAgeSec >= 0 }
+
     // GPS (mapa do Painel)
     var lat: Double { num("gps_lat") }
     var lng: Double { num("gps_lng") }
@@ -390,6 +533,7 @@ final class CarStore: ObservableObject {
 
     // Bateria 12V, hodômetro, pneus
     var batt12vPct: Double { num("batt_12v_pct") }
+    var batt12vV: Double { num("batt_12v_v") }
     var odometerKm: Double  { num("odometer_km") }
     var tyreFL: Double { num("tyre_pressure_fl") }
     var tyreFR: Double { num("tyre_pressure_fr") }

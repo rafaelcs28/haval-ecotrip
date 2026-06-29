@@ -5,6 +5,7 @@
 //  temperatura interna; encerra quando o bridge sinaliza motor desligado.
 //
 import ActivityKit
+import AppIntents
 import SwiftUI
 import WidgetKit
 
@@ -40,13 +41,18 @@ struct MotorLiveActivity: Widget {
                     }
                 }
                 DynamicIslandExpandedRegion(.bottom) {
-                    HStack {
-                        if s.acOn {
-                            Label("A/C ligado", systemImage: "fan.fill").font(.caption2).foregroundStyle(.teal)
+                    VStack(spacing: 6) {
+                        HStack {
+                            if s.acOn {
+                                Label("A/C ligado", systemImage: "fan.fill").font(.caption2).foregroundStyle(.teal)
+                            }
+                            Spacer()
+                            Label(String(format: "externa %.0f°", s.outsideTemp), systemImage: "thermometer.medium")
+                                .font(.caption2).foregroundStyle(.secondary)
                         }
-                        Spacer()
-                        Label(String(format: "externa %.0f°", s.outsideTemp), systemImage: "thermometer.medium")
-                            .font(.caption2).foregroundStyle(.secondary)
+                        if s.active, #available(iOS 17.0, *) {
+                            LAActionButton(title: "Desligar motor", systemImage: "power", tint: .orange, intent: EngineOffIntent())
+                        }
                     }
                 }
             } compactLeading: {
@@ -108,6 +114,10 @@ struct MotorLockScreenView: View {
                 Spacer()
                 Label(String(format: "externa %.0f°", state.outsideTemp), systemImage: "thermometer.medium")
                     .font(.caption).foregroundStyle(.secondary)
+            }
+            if state.active, #available(iOS 17.0, *) {
+                LAActionButton(title: "Desligar motor", systemImage: "power", tint: .orange, intent: EngineOffIntent())
+                    .padding(.top, 2)
             }
         }
         .padding(14)

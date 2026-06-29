@@ -37,11 +37,13 @@ struct NotificationsSheet: View {
         ]),
         Group(title: "Viagem e locais", items: [
             Item(key: "trip_end", label: "Fim de viagem"),
+            Item(key: "trip_summary_narrated", label: "Resumo narrado pela Lari", num: "trip_summary_min_km", range: 1...100, unit: "km"),
             Item(key: "geofence_arrival", label: "Chegada a um local", places: "geofence_arrival_places"),
             Item(key: "geofence_departure", label: "Saída de um local", places: "geofence_departure_places"),
         ]),
         Group(title: "Bateria e SOC", items: [
             Item(key: "batt12_low", label: "Bateria 12V baixa"),
+            Item(key: "batt12_trend", label: "Bateria 12V em queda (tendência)"),
             Item(key: "soc_low_idle", label: "SOC baixo parado", num: "soc_low_idle_pct", range: 5...50, unit: "%"),
             Item(key: "soc_arrival", label: "SOC baixo na chegada", num: "soc_arrival_pct", range: 10...60, unit: "%", places: "soc_arrival_places"),
             Item(key: "soc_full_long", label: "SOC cheio por muito tempo"),

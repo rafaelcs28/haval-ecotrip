@@ -23,25 +23,54 @@
 body { background: var(--bg); color: var(--text); font-family: -apple-system,sans-serif;
        padding: env(safe-area-inset-top,0) 0 env(safe-area-inset-bottom,0); min-height: 100dvh; }
 .page { max-width: 480px; margin: 0 auto; padding: 16px 16px 32px; }
-h1 { font-size: 17px; font-weight: 700; margin-bottom: 4px; }
-.sub { font-size: 11px; color: var(--muted); margin-bottom: 18px; }
+.topbar { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+h1 { font-size: 17px; font-weight: 700; }
+.sub { font-size: 11px; color: var(--muted); margin: 2px 0 16px; }
+.btn { font-size: 11px; color: var(--green); cursor: pointer; background: none;
+       border: 1px solid var(--border); border-radius: 8px; padding: 5px 10px; }
+
+/* cards grid */
+.cards { display: grid; grid-template-columns: 1fr; gap: 12px; align-items: start; }
 .card { background: var(--panel); border: 1px solid var(--border); border-radius: 14px;
-        padding: 14px 16px; margin-bottom: 12px; }
-.card-title { font-size: 10px; font-weight: 700; color: var(--muted); letter-spacing: 1px;
-              text-transform: uppercase; margin-bottom: 10px; }
+        overflow: hidden; }
+summary { list-style: none; cursor: pointer; display: flex; align-items: center;
+          justify-content: space-between; gap: 10px; padding: 13px 15px;
+          -webkit-tap-highlight-color: transparent; }
+summary::-webkit-details-marker { display: none; }
+.sum-title { font-size: 11px; font-weight: 700; letter-spacing: .8px;
+             text-transform: uppercase; color: var(--text); white-space: nowrap; }
+.sum-right { display: flex; align-items: center; gap: 8px; font-size: 12px;
+             color: var(--muted); font-variant-numeric: tabular-nums;
+             overflow: hidden; text-overflow: ellipsis; }
+.chev { width: 7px; height: 7px; border-right: 2px solid var(--muted);
+        border-bottom: 2px solid var(--muted); transform: rotate(-45deg);
+        transition: transform .2s; flex-shrink: 0; margin-left: 2px; }
+details[open] .chev { transform: rotate(45deg); }
+.card-body { padding: 2px 15px 13px; }
+
 .row { display: flex; justify-content: space-between; align-items: center;
-       padding: 5px 0; border-bottom: 1px solid var(--border); }
+       padding: 5px 0; border-bottom: 1px solid var(--border); gap: 10px; }
 .row:last-child { border-bottom: none; }
 .row .label { font-size: 12px; color: var(--muted); }
-.row .val   { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
-.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 5px; flex-shrink: 0; }
+.row .val   { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums;
+              text-align: right; }
+.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
 .dot.green  { background: var(--green); box-shadow: 0 0 6px var(--green); }
 .dot.red    { background: var(--red);   box-shadow: 0 0 6px var(--red); }
 .dot.yellow { background: var(--yellow); }
-.status-row { display: flex; align-items: center; gap: 6px; }
 
 /* mini sparkline */
 canvas { display: block; width: 100%; height: 60px; margin-top: 8px; }
+
+/* top mem bars */
+.topbar-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
+.topbar-row .tname { font-size: 12px; color: var(--text); width: 38%;
+                     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.topbar-row .tbar { flex: 1; height: 6px; background: rgba(255,255,255,.06);
+                    border-radius: 3px; overflow: hidden; }
+.topbar-row .tbar > span { display: block; height: 100%; background: var(--green); border-radius: 3px; }
+.topbar-row .tmb { font-size: 11px; color: var(--muted); width: 58px; text-align: right;
+                   font-variant-numeric: tabular-nums; }
 
 /* crash log */
 .event-list { list-style: none; }
@@ -50,65 +79,267 @@ canvas { display: block; width: 100%; height: 60px; margin-top: 8px; }
 .ev .ev-time { font-size: 10px; color: var(--muted); margin-bottom: 2px; }
 .ev .ev-type { font-size: 11px; font-weight: 700; color: var(--red); }
 .ev .ev-msg  { font-size: 10px; color: #94a3b8; margin-top: 3px;
-               white-space: pre-wrap; word-break: break-word; max-height: 60px;
-               overflow: hidden; }
+               white-space: pre-wrap; word-break: break-word; max-height: 60px; overflow: hidden; }
 .empty { font-size: 12px; color: var(--muted); text-align: center; padding: 16px 0; }
 
 .pill { display: inline-flex; align-items: center; gap: 4px;
         padding: 3px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; }
 .pill.green { background: rgba(163,230,53,.12); color: var(--green); }
 .pill.red   { background: rgba(248,113,113,.12); color: var(--red); }
+.pill.yellow{ background: rgba(251,191,36,.12); color: var(--yellow); }
 
-#last-update { font-size: 10px; color: var(--muted); text-align: right; margin-bottom: 12px; }
-.refresh-btn { float: right; font-size: 11px; color: var(--green); cursor: pointer;
-               background: none; border: none; padding: 0 0 0 8px; }
+/* stats grid */
+.stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 12px; }
+.stat-box { background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+            padding: 10px 8px; text-align: center; }
+.stat-box .stat-label { font-size: 9px; color: var(--muted); text-transform: uppercase;
+                        letter-spacing: .8px; margin-bottom: 6px; }
+.stat-box .stat-r { font-size: 18px; font-weight: 700; color: var(--green);
+                    font-variant-numeric: tabular-nums; line-height: 1; }
+.stat-box .stat-r.hot { color: var(--red); }
+.stat-box .stat-e { font-size: 11px; color: var(--yellow); margin-top: 3px;
+                    font-variant-numeric: tabular-nums; }
+
+@media (min-width: 720px) {
+  .page  { max-width: 780px; }
+  .cards { grid-template-columns: 1fr 1fr; }
+}
 </style>
 </head>
 <body>
 <div class="page">
-  <h1>Bridge Health</h1>
+  <div class="topbar">
+    <h1>Bridge Health</h1>
+    <div style="display:flex;gap:6px">
+      <button class="btn" id="toggle-all" onclick="toggleAll()">Expandir tudo</button>
+      <button class="btn" onclick="load()">↻</button>
+    </div>
+  </div>
   <div class="sub" id="last-update">Carregando…</div>
 
-  <!-- Processo -->
-  <div class="card">
-    <div class="card-title">Processo <button class="refresh-btn" onclick="load()">↻ Atualizar</button></div>
-    <div class="row"><span class="label">Status</span><span class="val" id="proc-status">—</span></div>
-    <div class="row"><span class="label">Uptime</span><span class="val" id="proc-uptime">—</span></div>
-    <div class="row"><span class="label">Iniciado em</span><span class="val" id="proc-started">—</span></div>
-    <div class="row"><span class="label">Node</span><span class="val" id="proc-node">—</span></div>
+  <!-- Stats por janela -->
+  <div class="stats-grid" id="stats-grid">
+    <div class="stat-box"><div class="stat-label">1h</div><div class="stat-r" id="s-h1-r">—</div><div class="stat-e" id="s-h1-e"></div></div>
+    <div class="stat-box"><div class="stat-label">24h</div><div class="stat-r" id="s-h24-r">—</div><div class="stat-e" id="s-h24-e"></div></div>
+    <div class="stat-box"><div class="stat-label">7d</div><div class="stat-r" id="s-d7-r">—</div><div class="stat-e" id="s-d7-e"></div></div>
+    <div class="stat-box"><div class="stat-label">30d</div><div class="stat-r" id="s-d30-r">—</div><div class="stat-e" id="s-d30-e"></div></div>
   </div>
 
-  <!-- Memória -->
-  <div class="card">
-    <div class="card-title">Memória</div>
-    <div class="row"><span class="label">RSS (total)</span><span class="val" id="mem-rss">—</span></div>
-    <div class="row"><span class="label">Heap usado</span><span class="val" id="mem-heap">—</span></div>
-    <div class="row"><span class="label">Heap alocado</span><span class="val" id="mem-htotal">—</span></div>
-    <canvas id="mem-chart"></canvas>
-  </div>
+  <div class="cards">
 
-  <!-- MQTT / WS -->
-  <div class="card">
-    <div class="card-title">Conexões</div>
-    <div class="row"><span class="label">MQTT broker</span><span class="val" id="mqtt-status">—</span></div>
-    <div class="row"><span class="label">Último dado APK</span><span class="val" id="mqtt-apk">—</span></div>
-    <div class="row"><span class="label">Último dado GWM</span><span class="val" id="mqtt-gwm">—</span></div>
-    <div class="row"><span class="label">Clientes WS</span><span class="val" id="ws-clients">—</span></div>
-    <div class="row"><span class="label">Clientes áudio</span><span class="val" id="audio-clients">—</span></div>
-  </div>
+    <!-- Processo -->
+    <details class="card" data-k="proc" open>
+      <summary><span class="sum-title">Processo</span>
+        <span class="sum-right"><span id="head-proc">—</span><span class="chev"></span></span></summary>
+      <div class="card-body">
+        <div class="row"><span class="label">Status</span><span class="val" id="proc-status">—</span></div>
+        <div class="row"><span class="label">Uptime bridge</span><span class="val" id="proc-uptime">—</span></div>
+        <div class="row"><span class="label">Iniciado em</span><span class="val" id="proc-started">—</span></div>
+        <div class="row"><span class="label">Node</span><span class="val" id="proc-node">—</span></div>
+        <div class="row"><span class="label">APK version</span><span class="val" id="sys-apkver">—</span></div>
+      </div>
+    </details>
 
-  <!-- Erros -->
-  <div class="card">
-    <div class="card-title">Erros / crashes <span id="ev-count" style="color:var(--muted);font-weight:400;text-transform:none;font-size:10px"></span></div>
-    <ul class="event-list" id="ev-list">
-      <li class="empty">Nenhum erro registrado nesta sessão.</li>
-    </ul>
+    <!-- Mac (host) -->
+    <details class="card" data-k="mac" open>
+      <summary><span class="sum-title">Mac</span>
+        <span class="sum-right"><span id="head-mac">—</span><span class="chev"></span></span></summary>
+      <div class="card-body">
+        <div class="row"><span class="label">Uptime</span><span class="val" id="mac-uptime">—</span></div>
+        <div class="row"><span class="label">Memória em uso</span><span class="val" id="mac-mem-used">—</span></div>
+        <div class="row"><span class="label">Memória disponível</span><span class="val" id="mac-mem-avail">—</span></div>
+        <div class="row"><span class="label">Disco livre</span><span class="val" id="mac-disk">—</span></div>
+        <div class="row"><span class="label">SSD externo</span><span class="val" id="mac-disk-ext">—</span></div>
+        <div class="row"><span class="label">Tendência disco /</span><span class="val" id="trend-di">—</span></div>
+        <div class="row"><span class="label">Tendência SSD</span><span class="val" id="trend-de">—</span></div>
+        <div class="row"><span class="label">Tendência RSS bridge</span><span class="val" id="trend-rss">—</span></div>
+        <div class="row" style="display:block;border-bottom:none">
+          <span class="label">Top memória</span>
+          <div id="mac-top" style="margin-top:6px"></div>
+        </div>
+      </div>
+    </details>
+
+    <!-- Processos pm2 -->
+    <details class="card" data-k="procs" open>
+      <summary><span class="sum-title">Processos</span>
+        <span class="sum-right"><span id="head-procs">—</span><span class="chev"></span></span></summary>
+      <div class="card-body"><div id="proc-list"><div class="empty">—</div></div></div>
+    </details>
+
+    <!-- Conexões -->
+    <details class="card" data-k="conn">
+      <summary><span class="sum-title">Conexões</span>
+        <span class="sum-right"><span id="head-conn">—</span><span class="chev"></span></span></summary>
+      <div class="card-body">
+        <div class="row"><span class="label">MQTT broker</span><span class="val" id="mqtt-status">—</span></div>
+        <div class="row"><span class="label">MQTT latência</span><span class="val" id="mqtt-ping">—</span></div>
+        <div class="row"><span class="label">Último dado APK</span><span class="val" id="mqtt-apk">—</span></div>
+        <div class="row"><span class="label">Chave APK</span><span class="val" id="mqtt-apk-key" style="font-size:11px;word-break:break-all">—</span></div>
+        <div class="row"><span class="label">Carro acordado</span><span class="val" id="mqtt-apk-live">—</span></div>
+        <div class="row"><span class="label">Chave (live)</span><span class="val" id="mqtt-apk-live-key" style="font-size:11px;word-break:break-all">—</span></div>
+        <div class="row"><span class="label">Último dado GWM</span><span class="val" id="mqtt-gwm">—</span></div>
+        <div class="row"><span class="label">Clientes WS</span><span class="val" id="ws-clients">—</span></div>
+        <div class="row"><span class="label">Clientes áudio</span><span class="val" id="audio-clients">—</span></div>
+      </div>
+    </details>
+
+    <!-- Clockin -->
+    <details class="card" data-k="clockin">
+      <summary><span class="sum-title">Clockin</span>
+        <span class="sum-right"><span id="head-clockin">—</span><span class="chev"></span></span></summary>
+      <div class="card-body">
+        <div class="row"><span class="label">HTTP</span><span class="val" id="clockin-http">—</span></div>
+        <div class="row"><span class="label">Saúde</span><span class="val" id="clockin-healthy">—</span></div>
+        <div class="row"><span class="label">Versão</span><span class="val" id="clockin-ver">—</span></div>
+        <div class="row"><span class="label">Latência</span><span class="val" id="clockin-lat">—</span></div>
+        <div class="row"><span class="label">Último backup</span><span class="val" id="clockin-backup">—</span></div>
+        <div class="row"><span class="label">Funcionários</span><span class="val" id="clockin-emp">—</span></div>
+        <div class="row"><span class="label">Push (admin/disp.)</span><span class="val" id="clockin-push">—</span></div>
+        <div class="row" id="clockin-issues-row" style="display:none;border-bottom:none">
+          <div style="width:100%"><span class="label">Problemas</span><div id="clockin-issues" style="margin-top:6px"></div></div>
+        </div>
+      </div>
+    </details>
+
+    <!-- Haval -->
+    <details class="card" data-k="car">
+      <summary><span class="sum-title">Haval</span>
+        <span class="sum-right"><span id="head-car">—</span><span class="chev"></span></span></summary>
+      <div class="card-body">
+        <div class="row"><span class="label">Status</span><span class="val" id="car-online">—</span></div>
+        <div class="row"><span class="label">APK (últ. dado)</span><span class="val" id="car-apk-age">—</span></div>
+        <div class="row"><span class="label">GWM (últ. dado)</span><span class="val" id="car-gwm-age">—</span></div>
+        <div class="row"><span class="label">Ativo há</span><span class="val" id="car-awake-age">—</span></div>
+        <div class="row"><span class="label">Alertas ativos</span><span class="val" id="car-alerts">—</span></div>
+        <div class="row"><span class="label">Última telemetria</span><span class="val" id="car-last">—</span></div>
+        <div class="row"><span class="label">SOC</span><span class="val" id="car-soc">—</span></div>
+        <div class="row"><span class="label">Potência</span><span class="val" id="car-power">—</span></div>
+        <div class="row"><span class="label">Carregando</span><span class="val" id="car-charging">—</span></div>
+      </div>
+    </details>
+
+    <!-- Grasi (BYD) -->
+    <details class="card" data-k="grasi">
+      <summary><span class="sum-title">Grasi (BYD)</span>
+        <span class="sum-right"><span id="head-grasi">—</span><span class="chev"></span></span></summary>
+      <div class="card-body">
+        <div class="row"><span class="label">Última telemetria</span><span class="val" id="grasi-last">—</span></div>
+        <div class="row"><span class="label">SOC</span><span class="val" id="grasi-soc">—</span></div>
+        <div class="row"><span class="label">Potência</span><span class="val" id="grasi-power">—</span></div>
+        <div class="row"><span class="label">Carregando</span><span class="val" id="grasi-charging">—</span></div>
+      </div>
+    </details>
+
+    <details class="card" data-k="lari">
+      <summary><span class="sum-title">Lari (WhatsApp)</span>
+        <span class="sum-right"><span id="head-lari">—</span><span class="chev"></span></span></summary>
+      <div class="card-body" id="lari-body">
+        <div class="row"><span class="label">—</span><span class="val">—</span></div>
+      </div>
+    </details>
+
+    <!-- Backups -->
+    <details class="card" data-k="bkp">
+      <summary><span class="sum-title">Backups</span>
+        <span class="sum-right"><span id="head-bkp">—</span><span class="chev"></span></span></summary>
+      <div class="card-body">
+        <div class="row"><span class="label">iCloud sincronizado</span><span class="val" id="icloud-sync">—</span></div>
+        <div id="bkp-body">
+          <div class="row"><span class="label">—</span><span class="val">—</span></div>
+        </div>
+      </div>
+    </details>
+
+    <!-- APNs / Live Activities -->
+    <details class="card" data-k="apns">
+      <summary><span class="sum-title">APNs / Live Activities</span>
+        <span class="sum-right"><span id="head-apns">—</span><span class="chev"></span></span></summary>
+      <div class="card-body">
+        <div class="row"><span class="label">Estado</span><span class="val" id="apns-state">—</span></div>
+        <div class="row"><span class="label">Ambiente</span><span class="val" id="apns-env">—</span></div>
+        <div class="row"><span class="label">Tokens (start/upd/alert)</span><span class="val" id="apns-tokens">—</span></div>
+        <div class="row"><span class="label">Atrito (mortos 24h/total)</span><span class="val" id="apns-attrition">—</span></div>
+        <div class="row"><span class="label">Último envio</span><span class="val" id="apns-last">—</span></div>
+        <div class="row"><span class="label">Último erro</span><span class="val" id="apns-err" style="font-size:11px;word-break:break-all">—</span></div>
+      </div>
+    </details>
+
+    <!-- Rede -->
+    <details class="card" data-k="net">
+      <summary><span class="sum-title">Rede</span>
+        <span class="sum-right"><span id="head-net">—</span><span class="chev"></span></span></summary>
+      <div class="card-body">
+        <div class="row"><span class="label">Tailscale</span><span class="val" id="ts-backend">—</span></div>
+        <div class="row"><span class="label">Funnel ingress</span><span class="val" id="funnel-status">—</span></div>
+        <div class="row"><span class="label">Gateway LAN</span><span class="val" id="gw-status">—</span></div>
+        <div class="row"><span class="label">Mosquitto 1883</span><span class="val" id="broker-1883">—</span></div>
+        <div class="row"><span class="label">Mosquitto 1884</span><span class="val" id="broker-1884">—</span></div>
+        <div class="row"><span class="label">Mosquitto 8883</span><span class="val" id="broker-8883">—</span></div>
+        <div class="row"><span class="label">Home Assistant</span><span class="val" id="ha-status">—</span></div>
+        <div class="row"><span class="label">IP público</span><span class="val" id="net-pubip" style="font-size:12px">—</span></div>
+        <div class="row"><span class="label">DuckDNS resolve</span><span class="val" id="net-duck">—</span></div>
+        <div class="row"><span class="label">DNS correto</span><span class="val" id="net-match">—</span></div>
+        <div class="row"><span class="label">Cert TLS</span><span class="val" id="cert-status">—</span></div>
+        <div class="row"><span class="label">Cert broker MQTT</span><span class="val" id="cert-broker-status">—</span></div>
+        <div class="row"><span class="label">Banda (↓/↑)</span><span class="val" id="net-bw">—</span></div>
+        <div class="row"><span class="label">Link local</span><span class="val" id="net-link">—</span></div>
+        <div class="row"><span class="label">Verificado</span><span class="val" id="net-checked">—</span></div>
+      </div>
+    </details>
+
+
+    <!-- Erros -->
+    <details class="card" data-k="err">
+      <summary><span class="sum-title">Erros / crashes</span>
+        <span class="sum-right"><span id="head-err">—</span><span class="chev"></span></span></summary>
+      <div class="card-body">
+        <div class="row" style="border-bottom:none;justify-content:flex-end">
+          <button class="btn" onclick="clearEvents()">✕ Limpar</button>
+        </div>
+        <ul class="event-list" id="ev-list">
+          <li class="empty">Nenhum erro registrado nesta sessão.</li>
+        </ul>
+      </div>
+    </details>
+
   </div>
 </div>
 
 <script>
 const tk = localStorage.getItem('bridge_token') || prompt('Token do bridge:');
 if (tk) localStorage.setItem('bridge_token', tk);
+
+// ── Estado expandido/colapsado persistente ──────────────────────────────────
+const OPEN_KEY = 'health_open_v1';
+function loadOpenState() {
+  let st;
+  try { st = JSON.parse(localStorage.getItem(OPEN_KEY) || 'null'); } catch (_) {}
+  document.querySelectorAll('details[data-k]').forEach(d => {
+    if (st && d.dataset.k in st) d.open = !!st[d.dataset.k];
+    d.addEventListener('toggle', () => { saveOpenState(); if (d.dataset.k === 'mem' && d.open) drawChart(); });
+  });
+  refreshToggleAllLabel();
+}
+function saveOpenState() {
+  const st = {};
+  document.querySelectorAll('details[data-k]').forEach(d => st[d.dataset.k] = d.open);
+  localStorage.setItem(OPEN_KEY, JSON.stringify(st));
+  refreshToggleAllLabel();
+}
+function toggleAll() {
+  const all = [...document.querySelectorAll('details[data-k]')];
+  const anyClosed = all.some(d => !d.open);
+  all.forEach(d => d.open = anyClosed);
+  saveOpenState();
+  if (anyClosed) drawChart();
+}
+function refreshToggleAllLabel() {
+  const all = [...document.querySelectorAll('details[data-k]')];
+  const anyClosed = all.some(d => !d.open);
+  const btn = document.getElementById('toggle-all');
+  if (btn) btn.textContent = anyClosed ? 'Expandir tudo' : 'Recolher tudo';
+}
 
 function fmtUptime(s) {
   if (s < 60)   return s + 's';
@@ -130,11 +361,12 @@ function fmtAgo(ms) {
   return Math.floor(s/3600) + 'h atrás';
 }
 function set(id, v) { const el = document.getElementById(id); if (el) el.innerHTML = v; }
+function dot(c) { return `<span class="dot ${c}"></span>`; }
 
 let memSeries = [];
 function drawChart() {
   const canvas = document.getElementById('mem-chart');
-  if (!canvas || memSeries.length < 2) return;
+  if (!canvas || !canvas.clientWidth || memSeries.length < 2) return;
   const dpr = window.devicePixelRatio || 1;
   const w = canvas.clientWidth, h = canvas.clientHeight;
   canvas.width = w * dpr; canvas.height = h * dpr;
@@ -148,20 +380,17 @@ function drawChart() {
   function px(i)  { return pad + (i / (memSeries.length - 1)) * (w - pad * 2); }
   function py(v)  { return h - pad - ((v - mn) / (mx - mn + 1)) * (h - pad * 2); }
 
-  // fill
   ctx.beginPath();
   ctx.moveTo(px(0), py(vals[0]));
   vals.forEach((v, i) => ctx.lineTo(px(i), py(v)));
   ctx.lineTo(px(vals.length-1), h); ctx.lineTo(px(0), h); ctx.closePath();
   ctx.fillStyle = 'rgba(163,230,53,.08)';
   ctx.fill();
-  // line
   ctx.beginPath();
   ctx.moveTo(px(0), py(vals[0]));
   vals.forEach((v, i) => ctx.lineTo(px(i), py(v)));
   ctx.strokeStyle = 'rgba(163,230,53,.6)';
   ctx.lineWidth = 1.5; ctx.stroke();
-  // labels
   ctx.fillStyle = '#64748b'; ctx.font = `${9 * dpr}px -apple-system,sans-serif`; ctx.scale(1/dpr, 1/dpr);
   ctx.fillText(mn + ' MB', pad * dpr, (h - pad) * dpr);
   ctx.fillText(mx + ' MB', pad * dpr, (pad + 10) * dpr);
@@ -178,40 +407,367 @@ async function load() {
     set('proc-uptime',  fmtUptime(d.uptime_sec));
     set('proc-started', fmtDate(d.started_at_ms));
     set('proc-node',    d.node_version || '—');
+    set('sys-apkver',   d.system?.car_app_version || '—');
+    set('head-proc', dot('green') + ' ' + fmtUptime(d.uptime_sec));
+
     set('mem-rss',    (d.memory?.rss_mb   || 0) + ' MB');
     set('mem-heap',   (d.memory?.heap_used_mb  || 0) + ' MB');
     set('mem-htotal', (d.memory?.heap_total_mb || 0) + ' MB');
+    set('head-mem', (d.memory?.rss_mb || 0) + ' MB');
 
+    // ── Mac ──────────────────────────────────────────────────────────────────
+    const mac = d.mac || {};
+    set('mac-uptime',   fmtUptime(mac.uptime_sec || 0));
+    set('mac-mem-used',  mac.mem?.used_gb  != null ? `${mac.mem.used_gb} / ${mac.mem.total_gb} GB` : '—');
+    set('mac-mem-avail', mac.mem?.avail_gb != null ? `${mac.mem.avail_gb} GB` : '—');
+    set('mac-disk',      mac.disk ? `${mac.disk.avail_gb} / ${mac.disk.total_gb} GB livre` : '—');
+    const ext = mac.disk_ext;
+    set('mac-disk-ext', !ext ? '—'
+      : ext.mounted === false ? `${dot('red')} desmontado`
+      : `${dot(ext.avail_gb < 5 ? 'yellow' : 'green')} ${ext.avail_gb} / ${ext.total_gb} GB livre`);
+    const memTight  = mac.mem?.avail_gb  != null && mac.mem.avail_gb  < 1.5;
+    const diskTight = mac.disk?.avail_gb != null && mac.disk.avail_gb < 15;
+    const extBad    = ext && (ext.mounted === false || (ext.avail_gb != null && ext.avail_gb < 5));
+    set('head-mac', dot(memTight || diskTight || extBad ? 'red' : 'green') + ' '
+      + (mac.mem?.used_gb != null ? `${mac.mem.used_gb}/${mac.mem.total_gb} GB` : '—'));
+    if (mac.top_mem?.length) {
+      const maxMb = Math.max(...mac.top_mem.map(p => p.mb), 1);
+      set('mac-top', mac.top_mem.map(p => `
+        <div class="topbar-row">
+          <span class="tname">${p.name.replace(/</g,'&lt;')}</span>
+          <span class="tbar"><span style="width:${Math.max(4, Math.round(p.mb/maxMb*100))}%"></span></span>
+          <span class="tmb">${p.mb} MB</span>
+        </div>`).join(''));
+    } else { set('mac-top', '<span class="val">—</span>'); }
+
+    // ── Tendência preditiva (slope/ETA) ──────────────────────────────────────
+    const tr = d.trend || {};
+    const etaTxt = (f, floor) => {
+      if (!f) return `${dot('yellow')} coletando…`;
+      if (f.eta_days == null) return `${dot('green')} estável (${f.slope_per_day >= 0 ? '+' : ''}${f.slope_per_day} GB/dia)`;
+      const c = f.eta_days < 10 ? 'red' : f.eta_days < 30 ? 'yellow' : 'green';
+      return `${dot(c)} ~${f.eta_days}d até <${floor}GB (${f.slope_per_day} GB/dia)`;
+    };
+    set('trend-di', tr.disk_int !== undefined ? etaTxt(tr.disk_int, 8) : '—');
+    set('trend-de', tr.disk_ext !== undefined ? (tr.disk_ext ? etaTxt(tr.disk_ext, 5) : `${dot('yellow')} SSD não montado`) : '—');
+    if (!tr.rss) set('trend-rss', `${dot('yellow')} coletando…`);
+    else {
+      const leak = tr.rss.span_h >= 6 && tr.rss.slope_per_day > 60;
+      set('trend-rss', `${dot(leak ? 'red' : 'green')} ${tr.rss.slope_per_day >= 0 ? '+' : ''}${tr.rss.slope_per_day} MB/dia (${tr.rss.span_h}h, atual ${tr.rss.current}MB)`);
+    }
+
+    // ── Processos pm2 (+ Lari, fora do pm2) ──────────────────────────────────
+    const procs = d.processes || [];
+    const lariProcs = (d.lari || []).filter(l => l.up && l.pid);
+    const onlineN = procs.filter(p => p.status === 'online').length + lariProcs.length;
+    const totalN = procs.length + lariProcs.length;
+    const anyDown = procs.some(p => p.status !== 'online');
+    set('head-procs', dot(anyDown ? 'red' : 'green') + ` ${onlineN}/${totalN} online`);
+    const procRows = procs.map(p => {
+      const ok  = p.status === 'online';
+      const hot = p.restarts > 50 ? ' style="color:var(--yellow)"' : '';
+      return `<div class="row">
+        <span class="label">${dot(ok ? 'green' : 'red')} ${p.name}</span>
+        <span class="val" style="font-size:12px;font-weight:500">${p.mem_mb} MB · ${p.cpu ?? 0}% · <span${hot}>${p.restarts}↻</span> · ${fmtUptime(p.uptime_sec || 0)}</span>
+      </div>`;
+    });
+    const lariRows = lariProcs.map(l => `<div class="row">
+        <span class="label">${dot(l.connected ? 'green' : 'yellow')} lari-${(l.user || '?').replace(/</g,'&lt;')}</span>
+        <span class="val" style="font-size:12px;font-weight:500">${l.mem_mb != null ? l.mem_mb + ' MB' : '?'} · ${l.cpu ?? 0}% · ${fmtUptime(l.uptime_sec || 0)}</span>
+      </div>`);
+    const allRows = procRows.concat(lariRows);
+    set('proc-list', allRows.length ? allRows.join('') : '<div class="empty">—</div>');
+
+    // ── Clockin ────────────────────────────────────────────────────────────────
+    const ck = d.clockin || {};
+    const ckm = ck.metrics || {};
+    set('clockin-http', ck.up === true
+      ? '<span class="pill green"><span class="dot green"></span>OK</span>'
+      : ck.up === false ? `<span class="pill red"><span class="dot red"></span>${ck.error || 'down'}</span>` : '—');
+    set('clockin-healthy', ck.healthy === true
+      ? '<span class="pill green"><span class="dot green"></span>OK</span>'
+      : ck.healthy === false ? '<span class="pill red"><span class="dot red"></span>Degradado</span>' : '—');
+    set('clockin-ver', ck.version ? 'v' + ck.version : '—');
+    set('clockin-lat', ck.latency_ms != null ? ck.latency_ms + ' ms' : '—');
+    if (ckm.backup_age_hours != null) {
+      const old = ckm.backup_age_hours > 25;
+      set('clockin-backup', `<span style="color:${old ? 'var(--red)' : 'var(--green)'}">${ckm.backup_age_hours}h</span>`);
+    } else { set('clockin-backup', '—'); }
+    set('clockin-emp', ckm.employees_total != null ? ckm.employees_total : '—');
+    set('clockin-push', (ckm.admin_push_subscriptions != null || ckm.device_push_subscriptions != null)
+      ? `${ckm.admin_push_subscriptions ?? '?'} / ${ckm.device_push_subscriptions ?? '?'}` : '—');
+    const ckIssues = ck.issues || [];
+    const issRow = document.getElementById('clockin-issues-row');
+    if (ckIssues.length) {
+      if (issRow) issRow.style.display = 'flex';
+      const sevColor = { critical: 'var(--red)', high: 'var(--red)', medium: 'var(--yellow)', low: 'var(--muted)' };
+      set('clockin-issues', ckIssues.map(i =>
+        `<div style="font-size:11px;color:${sevColor[i.severity] || 'var(--muted)'};padding:2px 0">[${i.severity}] ${(i.message||'').replace(/</g,'&lt;')}</div>`).join(''));
+    } else if (issRow) { issRow.style.display = 'none'; }
+    const ckColor = ck.up === false ? 'red' : ck.healthy === false ? 'yellow' : ck.healthy === true ? 'green' : 'yellow';
+    set('head-clockin', dot(ckColor) + ' '
+      + (ck.up === false ? 'down' : ck.healthy === false ? `${ckIssues.length} probl.` : ck.version ? 'v' + ck.version : '—'));
+
+    // ── Grasi (BYD Song Pro) ─────────────────────────────────────────────────────
+    const gr = d.grasi || {};
+    const grStale = !gr.last_ms || (Date.now() - gr.last_ms) > 30 * 60 * 1000;
+    set('grasi-last', gr.last_ms ? fmtAgo(gr.last_ms) : '<span style="color:var(--muted)">nunca</span>');
+    set('grasi-soc', gr.soc ? gr.soc.toFixed(1) + '%' : '—');
+    set('grasi-power', (gr.power_kw || 0).toFixed(1) + ' kW');
+    set('grasi-charging', gr.charging ? '<span style="color:var(--green)">Sim</span>' : '<span style="color:var(--muted)">Não</span>');
+    set('head-grasi', dot(gr.charging ? 'green' : grStale ? 'yellow' : 'green') + ' '
+      + (gr.soc ? gr.soc.toFixed(0) + '%' : '—'));
+
+    // ── Lari (whats-assistant): 1 bloco por tenant ───────────────────────────────
+    const lari = d.lari || [];
+    if (lari.length) {
+      const rows = lari.map(l => {
+        const name = (l.user || l.url || '?').replace(/</g, '&lt;');
+        const c = !l.up ? 'red' : l.connected ? 'green' : 'yellow';
+        const st = !l.up ? (l.error || 'down') : l.connected ? `conectado${l.me ? ' · ' + l.me : ''}` : (l.qr_pending ? 'aguardando QR' : 'desconectado');
+        const up = l.up && l.uptime_sec != null ? ` · ${fmtUptime(l.uptime_sec)}` : '';
+        return `<div class="row"><span class="label" style="text-transform:capitalize">${name}</span>`
+          + `<span class="val" style="font-size:12px">${dot(c)} ${st}${up}</span></div>`;
+      }).join('');
+      document.getElementById('lari-body').innerHTML = rows;
+      const anyDown = lari.some(l => !l.up || !l.connected);
+      const allConn = lari.every(l => l.up && l.connected);
+      const onCount = lari.filter(l => l.up && l.connected).length;
+      set('head-lari', dot(allConn ? 'green' : anyDown ? 'yellow' : 'green') + ` ${onCount}/${lari.length}`);
+    } else {
+      set('head-lari', '—');
+    }
+
+    // ── iCloud realmente subiu (offsite) ──────────────────────────────────────
+    const ic = d.icloud_sync || {};
+    if (ic.error) set('icloud-sync', `${dot('yellow')} ${ic.error}`);
+    else if (ic.checked_at > 0) {
+      const c = ic.pending > 0 ? 'red' : ic.errors > 0 ? 'yellow' : 'green';
+      set('icloud-sync', `${dot(c)} ${ic.uploaded}/${ic.total} subiram${ic.pending ? ` · ${ic.pending} pendente` : ''}${ic.errors ? ` · ${ic.errors} erro` : ''}`);
+    } else set('icloud-sync', '—');
+
+    // ── Backups ──────────────────────────────────────────────────────────────
+    const bkp = d.backups || [];
+    if (bkp.length) {
+      const rows = bkp.map(b => {
+        const c = b.ok ? 'green' : 'red';
+        const detail = b.error ? b.error
+          : b.age_hours != null ? `${fmtAgo(Date.now() - b.age_hours * 3600000)}` : '—';
+        return `<div class="row"><span class="label">${dot(c)} ${b.name.replace(/</g,'&lt;')}</span>`
+          + `<span class="val" style="font-size:12px">${detail}</span></div>`;
+      }).join('');
+      document.getElementById('bkp-body').innerHTML = rows;
+      const okN = bkp.filter(b => b.ok).length;
+      set('head-bkp', dot(okN === bkp.length ? 'green' : 'red') + ` ${okN}/${bkp.length}`);
+    } else { set('head-bkp', '—'); }
+
+    // ── APNs / Live Activities ─────────────────────────────────────────────────
+    const ap = d.apns || {};
+    set('apns-state', !ap.enabled ? `${dot('yellow')} desativado`
+      : `${dot('green')} ativo`);
+    set('apns-env', ap.env || '—');
+    set('apns-tokens', ap.enabled ? `${ap.start_tokens ?? 0} / ${ap.update_tokens ?? 0} / ${ap.alert_tokens ?? 0}` : '—');
+    set('apns-attrition', ap.enabled
+      ? `${dot((ap.dead_24h || 0) >= 3 ? 'red' : 'green')} ${ap.dead_24h || 0} / ${ap.dead_total || 0}${ap.last_dead_ms ? ' · ' + fmtAgo(ap.last_dead_ms) : ''}`
+      : '—');
+    set('apns-last', ap.last_push_ms ? `${fmtAgo(ap.last_push_ms)} · ${ap.last_sent ?? 0} ok${ap.last_status ? ' · HTTP ' + ap.last_status : ''}` : '—');
+    set('apns-err', ap.last_err ? `${fmtAgo(ap.last_err_ms)}: ${String(ap.last_err).replace(/</g,'&lt;')}` : '—');
+    const apnsBad = ap.enabled && ap.last_err_ms > 0 && ap.last_err_ms > (ap.last_ok_ms || 0);
+    set('head-apns', !ap.enabled ? dot('yellow') + ' off'
+      : dot(apnsBad ? 'yellow' : 'green') + ` ${(ap.start_tokens ?? 0) + (ap.update_tokens ?? 0) + (ap.alert_tokens ?? 0)} tok`);
+
+    // ── Conexões ───────────────────────────────────────────────────────────────
     const mqttOk = d.mqtt?.connected;
     set('mqtt-status', mqttOk
       ? '<span class="pill green"><span class="dot green"></span>Conectado</span>'
       : '<span class="pill red"><span class="dot red"></span>Desconectado</span>');
+    const mp = d.mqtt_ping || {};
+    set('mqtt-ping', mp.latency_ms != null ? mp.latency_ms + ' ms' : '—');
     set('mqtt-apk',  fmtAgo(d.mqtt?.last_apk_ms));
+    set('mqtt-apk-key',      d.mqtt?.last_apk_key      || '—');
+    set('mqtt-apk-live',     fmtAgo(d.mqtt?.last_apk_live_ms));
+    set('mqtt-apk-live-key', d.mqtt?.last_apk_live_key || '—');
     set('mqtt-gwm',  fmtAgo(d.mqtt?.last_gwm_ms));
     set('ws-clients',    d.ws_clients    ?? '—');
     set('audio-clients', d.audio_clients ?? '—');
+    set('head-conn', dot(mqttOk ? 'green' : 'red') + ' '
+      + (mqttOk ? (mp.latency_ms != null ? mp.latency_ms + ' ms' : 'OK') : 'offline'));
 
+    // ── Rede ───────────────────────────────────────────────────────────────────
+    const ts = d.tailscale || {};
+    const tsOk = ts.backend === 'Running';
+    set('ts-backend', tsOk
+      ? '<span class="pill green"><span class="dot green"></span>Running</span>'
+      : `<span class="pill red"><span class="dot red"></span>${ts.error || ts.backend || 'Desconhecido'}</span>`);
+
+    const fn = d.funnel || {};
+    set('funnel-status', fn.up === true
+      ? '<span class="pill green"><span class="dot green"></span>OK</span>'
+      : fn.up === false
+        ? `<span class="pill red"><span class="dot red"></span>${fn.error || 'Portas ' + (fn.failed||[]).join(',')}</span>`
+        : '—');
+
+    const mb = d.mqtt_broker || {};
+    const portPill = (ok) => ok === true
+      ? '<span class="pill green"><span class="dot green"></span>OK</span>'
+      : ok === false ? '<span class="pill red"><span class="dot red"></span>Down</span>' : '—';
+    set('broker-1883', portPill(mb.port1883));
+    set('broker-1884', portPill(mb.port1884));
+    set('broker-8883', portPill(mb.port8883));
+
+    const gw = d.gateway || {};
+    set('gw-status', gw.up === true
+      ? `<span class="pill green"><span class="dot green"></span>${gw.latency_ms ?? '?'} ms</span>`
+      : gw.up === false ? '<span class="pill red"><span class="dot red"></span>Offline</span>' : '—');
+
+    const ha = d.ha || {};
+    set('ha-status', ha.up === true
+      ? `<span class="pill green"><span class="dot green"></span>${ha.latency_ms ?? '?'} ms</span>`
+      : ha.up === false ? `<span class="pill red"><span class="dot red"></span>${ha.error || 'Offline'}</span>` : '—');
+
+    const net = d.network || {};
+    set('net-pubip',   net.public_ip || '—');
+    set('net-duck',    net.duckdns_ip
+      ? net.duckdns_ip
+      : net.duckdns_ip_cached
+        ? `<span style="color:var(--muted)">${net.duckdns_ip_cached} (cache)</span>`
+        : net.error ? `<span style="color:var(--muted)">${net.error}</span>` : '—');
+    set('net-match',   net.match === true
+      ? '<span class="pill green"><span class="dot green"></span>OK</span>'
+      : net.match === false
+        ? '<span class="pill red"><span class="dot red"></span>Divergente</span>'
+        : net.error
+          ? '<span class="pill yellow"><span class="dot yellow"></span>DuckDNS instável</span>'
+          : '—');
+
+    const cert = d.cert || {};
+    let certOk = null;
+    if (cert.days_left != null) {
+      certOk = cert.days_left > 14;
+      set('cert-status', certOk
+        ? `<span class="pill green"><span class="dot green"></span>${cert.days_left}d</span>`
+        : `<span class="pill red"><span class="dot red"></span>${cert.days_left}d restantes</span>`);
+    } else { set('cert-status', cert.error ? `<span style="color:var(--muted)">${cert.error}</span>` : '—'); }
+    const certB = d.cert_broker || {};
+    let certBOk = null;
+    if (certB.days_left != null) {
+      certBOk = certB.days_left > 14;
+      set('cert-broker-status', certBOk
+        ? `<span class="pill green"><span class="dot green"></span>${certB.days_left}d</span>`
+        : `<span class="pill red"><span class="dot red"></span>${certB.days_left}d restantes</span>`);
+    } else { set('cert-broker-status', certB.error ? `<span style="color:var(--muted)">${certB.error}</span>` : '—'); }
+    const bw = net.bandwidth || {};
+    const fmtBw = k => k == null ? '?' : k >= 1000 ? (k / 1000).toFixed(1) + ' Mbps' : k + ' kbps';
+    set('net-bw', bw.rx_kbps != null
+      ? `<span style="font-size:12px">${fmtBw(bw.rx_kbps)} / ${fmtBw(bw.tx_kbps)}<span style="color:var(--muted)"> · ${bw.iface || ''}</span></span>`
+      : '—');
+    set('net-link', bw.link_mbps != null
+      ? `<span style="font-size:12px">${bw.link_mbps >= 1000 ? (bw.link_mbps / 1000).toFixed(1) + ' Gbps' : bw.link_mbps + ' Mbps'}<span style="color:var(--muted)"> · ${bw.link_type || ''}</span></span>`
+      : '—');
+    set('net-checked', fmtAgo(net.checked_at));
+
+    // headline da rede: pior estado entre os checks principais
+    const netChecks = [tsOk, fn.up, mb.port8883, gw.up, net.match, certOk, certBOk];
+    const anyBad  = netChecks.some(v => v === false);
+    const allGood = netChecks.every(v => v === true || v == null) && netChecks.some(v => v === true);
+    set('head-net', dot(anyBad ? 'red' : allGood ? 'green' : 'yellow') + ' '
+      + (anyBad ? 'atenção' : 'OK'));
+
+    // ── Carro ──────────────────────────────────────────────────────────────────
+    const car = d.car || {};
+    const als = d.alerts || {};
+    set('car-online', car.online
+      ? '<span class="pill green"><span class="dot green"></span>Online</span>'
+      : '<span class="pill red"><span class="dot red"></span>Offline</span>');
+
+    function fmtCarAge(ms) {
+      if (!ms) return '<span style="color:var(--muted)">nunca</span>';
+      const s = Math.round((Date.now() - ms) / 1000);
+      const ago = s < 5 ? 'agora' : s < 60 ? s + 's' : s < 3600 ? Math.floor(s/60) + 'min' : Math.floor(s/3600) + 'h';
+      const color = s < 120 ? 'var(--green)' : s < 1200 ? 'var(--yellow)' : 'var(--red)';
+      return `<span style="color:${color}">${ago}</span>`;
+    }
+    set('car-apk-age',  fmtCarAge(car.last_apk_ms));
+    set('car-gwm-age',  fmtCarAge(car.last_gwm_ms));
+    set('car-awake-age', car.last_awake_ms ? fmtCarAge(car.last_awake_ms) : '<span style="color:var(--muted)">nunca</span>');
+
+    const CAR_ALERT_LABELS = {
+      car_apk_stall:     'APK silente',
+      car_gwm_stall:     'GWM silente',
+      car_total_silence: 'Sem comunicação',
+    };
+    const firingCar = Object.entries(CAR_ALERT_LABELS)
+      .filter(([k]) => als[k]?.firing)
+      .map(([k, label]) => {
+        const notified = als[k]?.notified;
+        const color    = notified ? 'var(--red)' : 'var(--yellow)';
+        return `<span style="color:${color}">${label}${notified ? '' : ' (aguardando)'}</span>`;
+      });
+    set('car-alerts', firingCar.length ? firingCar.join(' · ') : '<span style="color:var(--green)">Nenhum</span>');
+    set('car-last',     car.last_ms ? fmtAgo(car.last_ms) : '<span style="color:var(--muted)">nunca</span>');
+    set('car-soc',      car.soc ? car.soc.toFixed(1) + '%' : '—');
+    set('car-power',    (car.power_kw || 0).toFixed(1) + ' kW');
+    set('car-charging', car.charging ? '<span style="color:var(--green)">Sim</span>' : '<span style="color:var(--muted)">Não</span>');
+    set('head-car', dot(car.online ? (firingCar.length ? 'yellow' : 'green') : 'red') + ' '
+      + (car.online ? 'online' : 'offline'));
+
+    // ── Erros ──────────────────────────────────────────────────────────────────
     const evs = d.events || [];
-    set('ev-count', evs.length ? '(' + evs.length + ' total)' : '');
+    // "Sério" = qualquer evento que NÃO seja restart planejado (ajuste/deploy).
+    const serious = evs.filter(e => !(e.type === 'restart' && e.planned)).length;
+    set('head-err', dot(serious ? 'red' : 'green') + ' ' + (evs.length ? `${serious}/${evs.length} eventos` : 'limpo'));
     const list = document.getElementById('ev-list');
     if (!evs.length) {
       list.innerHTML = '<li class="empty">Nenhum erro registrado nesta sessão.</li>';
     } else {
-      list.innerHTML = evs.map(e => `
+      list.innerHTML = evs.map(e => {
+        const tag = e.type === 'restart'
+          ? (e.planned ? '<span style="color:var(--muted)">restart · ajuste</span>'
+                       : '<span style="color:var(--red)">restart · queda</span>')
+          : e.type.replace(/</g,'&lt;');
+        return `
         <li class="ev">
           <div class="ev-time">${fmtDate(e.ts)}</div>
-          <div class="ev-type">${e.type}</div>
+          <div class="ev-type">${tag}</div>
           <div class="ev-msg">${e.msg.replace(/</g,'&lt;')}</div>
-        </li>`).join('');
+        </li>`;
+      }).join('');
     }
 
     if (d.mem_series?.length) { memSeries = d.mem_series; drawChart(); }
+
+    // Número grande = QUEDAS (crashes). Linha menor = ajustes/deploys + erros.
+    const s = d.stats || {};
+    for (const [k, id] of [['h1','s-h1'], ['h24','s-h24'], ['d7','s-d7'], ['d30','s-d30']]) {
+      const w = s[k] || {};
+      const rEl = document.getElementById(id + '-r');
+      const eEl = document.getElementById(id + '-e');
+      const crash = w.restarts_crash ?? w.restarts ?? 0;
+      if (rEl) {
+        rEl.textContent = crash;
+        rEl.className = 'stat-r' + (crash > 0 ? ' hot' : '');
+      }
+      if (eEl) {
+        const parts = [];
+        if (w.restarts_planned) parts.push(w.restarts_planned + ' aj');
+        if (w.errors)           parts.push(w.errors + ' err');
+        eEl.textContent = parts.join(' · ');
+      }
+    }
   } catch (e) {
     set('proc-status', '<span class="pill red"><span class="dot red"></span>Sem resposta</span>');
+    set('head-proc', dot('red') + ' sem resposta');
     set('last-update', 'Falhou em ' + new Date().toLocaleTimeString('pt-BR'));
   }
 }
 
+async function clearEvents() {
+  if (!confirm('Limpar todos os erros registrados?')) return;
+  await fetch('/api/health/events/clear', { method: 'POST', headers: { Authorization: 'Bearer ' + tk } });
+  load();
+}
+
+loadOpenState();
 load();
 setInterval(load, 15_000);
 window.addEventListener('resize', drawChart);

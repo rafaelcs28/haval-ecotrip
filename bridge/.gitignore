@@ -32,3 +32,9 @@ vehicle.json
 passkeys.json
 activity_tokens.json
 *.p8
+.trend_samples.json
+.clean_shutdown
+health_events.json
+soc_calib.json
+rec_cache/
+pm2-logs/

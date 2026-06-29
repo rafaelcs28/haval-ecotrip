@@ -110,6 +110,14 @@ struct PreClimatLiveActivity: Widget {
                                 Text(String(format: "AC %.0f° · %d/7", s.temp, s.fan))
                                     .font(.caption2).foregroundStyle(.secondary)
                             }
+                            if s.isCancellable, let cancelURL = URL(string: "havalecotrip://preclimat-cancel") {
+                                Link(destination: cancelURL) {
+                                    Label("Cancelar", systemImage: "xmark.circle.fill")
+                                        .font(.caption2.weight(.semibold)).foregroundStyle(.red)
+                                        .padding(.horizontal, 10).padding(.vertical, 5)
+                                        .background(Color.red.opacity(0.15), in: Capsule())
+                                }
+                            }
                         }
                     }
                 }
@@ -183,6 +191,17 @@ struct PreClimatLockScreenView: View {
                           systemImage: "fan.fill")
                         .font(.caption2).foregroundStyle(.secondary)
                         .labelStyle(.titleAndIcon)
+                }
+            }
+
+            // Botão Cancelar: abre o app (havalecotrip://preclimat-cancel), que pede
+            // confirmação antes de restaurar o AC e desligar o motor.
+            if state.isCancellable, let cancelURL = URL(string: "havalecotrip://preclimat-cancel") {
+                Link(destination: cancelURL) {
+                    Label("Cancelar", systemImage: "xmark.circle.fill")
+                        .font(.caption.weight(.semibold)).foregroundStyle(.red)
+                        .frame(maxWidth: .infinity).padding(.vertical, 7)
+                        .background(Color.red.opacity(0.15), in: Capsule())
                 }
             }
         }

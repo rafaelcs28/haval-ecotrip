@@ -14,6 +14,10 @@ final class CarAudioSession: ObservableObject {
     @Published var talking = false
     @Published var level: Double = 0        // nível de entrada 0…1 (VU meter)
     @Published var reconnecting = false
+    @Published var inCall = false           // chamada full-duplex ativa
+    @Published var callStatus = ""          // "Chamando…", "Em chamada", "Encerrada"
+
+    @Published private(set) var callMode = false
 
     private var reconnectAttempt = 0
     private let rate = 8000.0
@@ -56,13 +60,20 @@ final class CarAudioSession: ObservableObject {
     }
 
     func stop() async {
+        teardownAudio()
+        await controlCar(action: "stop")
+    }
+
+    // Desmonta WS + engine + sessão SEM avisar o carro (controlCar). A chamada
+    // reusa a escuta (liveActive=true no carro); se o endCall mandasse stop no
+    // /api/audio/listen, o carro pararia a captura e derrubaria a chamada.
+    private func teardownAudio() {
         state = .idle   // antes do cancel: impede o scheduleReconnect de reabrir
-        reconnecting = false; level = 0
+        reconnecting = false; level = 0; callMode = false
         ws?.cancel(with: .goingAway, reason: nil); ws = nil
         if tapInstalled { engine.inputNode.removeTap(onBus: 0); tapInstalled = false }
         player.stop(); engine.stop()
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
-        await controlCar(action: "stop")
         talking = false
         state = .idle
     }
@@ -90,10 +101,11 @@ final class CarAudioSession: ObservableObject {
     private func configureSession() throws {
         let s = AVAudioSession.sharedInstance()
         if micGranted {
-            // mode .default (NÃO .voiceChat): voiceChat joga a saída no domínio de
-            // chamada (voice-processing I/O), governado pelo volume de ligação — que
-            // fica mudo se não houver chamada ativa. Como é half-duplex (fala OU
-            // escuta), não precisamos de AEC; usamos volume de MÍDIA p/ a escuta sair.
+            // .default (NÃO .voiceChat): voiceChat roteia o áudio pelo volume de
+            // ligação do iOS, que fica mudo sem chamada telefônica ativa do sistema —
+            // causando silêncio total na escuta e na chamada. .default usa o volume
+            // de mídia que sempre funciona. AEC full-duplex não é necessário aqui
+            // porque o mic do carro fica longe das caixas.
             try s.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth])
         } else {
             // Sem mic: só toca o áudio do carro (escuta passiva). Evita o erro de
@@ -158,7 +170,11 @@ final class CarAudioSession: ObservableObject {
             guard let self else { return }
             switch result {
             case .success(let msg):
-                if case .data(let d) = msg { Task { @MainActor in self.enqueue(d) } }
+                switch msg {
+                case .data(let d): Task { @MainActor in self.enqueue(d) }
+                case .string(let s): Task { @MainActor in self.onSignal(s) }
+                @unknown default: break
+                }
                 self.receive()
             case .failure:
                 // Não erra direto: em rede móvel/background o WS cai sozinho. Tenta
@@ -202,5 +218,81 @@ final class CarAudioSession: ObservableObject {
         // Meter com decaimento (pico sobe na hora, desce suave).
         level = max(Double(peak), level * 0.82)
         player.scheduleBuffer(buf, completionHandler: nil)
+    }
+
+    // ── Chamada full-duplex (iOS → carro) ────────────────────────────────────
+    // Eventos do ciclo de vida chegam como texto pelo mesmo WS: o carro publica
+    // em call/event → bridge → "call:<state>" pra todos os audioClients.
+    private func onSignal(_ s: String) {
+        guard s.hasPrefix("call:") else { return }
+        switch String(s.dropFirst(5)) {
+        case "ringing":  callStatus = "Tocando no carro…"
+        case "accepted": callStatus = "Em chamada"; inCall = true
+        case "busy":     callStatus = "Carro ocupado"; finishCall()
+        case "ended":    callStatus = "Encerrada"; finishCall()
+        default: break
+        }
+    }
+
+    // Liga pro carro: abre a sessão de escuta (carro→fone) e, ao mesmo tempo,
+    // mantém o mic do iPhone aberto contínuo (fone→carro) = full-duplex.
+    func startCall(message: String) async {
+        guard state == .idle, !inCall else { return }
+        callMode = true
+        callStatus = "Chamando…"
+        state = .connecting
+        micGranted = await askMicPermission()
+        guard micGranted else { state = .idle; callMode = false; callStatus = "Sem permissão de microfone"; return }
+        // Só dispara o ring; a captura do carro abre no accept (CallManager →
+        // CarAudioRelay.startCall). Não chamamos controlCar aqui pra não vazar a
+        // cabine antes do motorista aceitar.
+        guard await requestCall(message: message) else {
+            state = .idle; callMode = false; callStatus = "Carro não respondeu."
+            return
+        }
+        do {
+            try configureSession()
+            try startEngine()
+            connectWS()
+            state = .listening
+            talking = true   // mic contínuo: full-duplex (sem push-to-talk)
+        } catch {
+            await controlCar(action: "stop")
+            state = .idle; callMode = false; callStatus = "Áudio: \(error.localizedDescription)"
+        }
+    }
+
+    func endCall() async {
+        guard callMode else { return }
+        await requestCallEnd()
+        finishCall()
+    }
+
+    private func finishCall() {
+        inCall = false
+        teardownAudio()
+    }
+
+    // POST /api/call/start {message} → carro toca a tela e auto-aceita em 10s.
+    private func requestCall(message: String) async -> Bool {
+        guard !base.isEmpty, let u = URL(string: "\(base)/api/call/start") else { return false }
+        var r = URLRequest(url: u); r.httpMethod = "POST"; r.timeoutInterval = 12
+        r.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        r.addValue("Bearer " + Settings.bridgeToken, forHTTPHeaderField: "Authorization")
+        r.httpBody = try? JSONSerialization.data(withJSONObject: ["caller": "iPhone", "message": message])
+        if let (_, resp) = try? await URLSession.shared.data(for: r) {
+            return (resp as? HTTPURLResponse)?.statusCode == 200
+        }
+        return false
+    }
+
+    @discardableResult private func requestCallEnd() async -> Bool {
+        guard !base.isEmpty, let u = URL(string: "\(base)/api/call/end") else { return false }
+        var r = URLRequest(url: u); r.httpMethod = "POST"; r.timeoutInterval = 12
+        r.addValue("Bearer " + Settings.bridgeToken, forHTTPHeaderField: "Authorization")
+        if let (_, resp) = try? await URLSession.shared.data(for: r) {
+            return (resp as? HTTPURLResponse)?.statusCode == 200
+        }
+        return false
     }
 }

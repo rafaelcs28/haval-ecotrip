@@ -194,8 +194,12 @@ final class RecordingsStore: NSObject, ObservableObject {
             guard (resp as? HTTPURLResponse)?.statusCode == 200 else { error = "Falha (HTTP)."; return }
             let j = try JSONSerialization.jsonObject(with: d) as? [String: Any]
             let res = (j?["result"] as? String) ?? ""
+            let note = (j?["note"] as? String) ?? ""
             if res.hasPrefix("error") { error = res; return }
-            if res == "" { error = "Sem resposta do carro (offline?)."; return }
+            if res == "" {
+                error = note.contains("offline") ? "Carro offline — app do carro sem conexão MQTT." : "Sem resposta do carro (timeout)."
+                return
+            }
             recording.toggle()
             try? await Task.sleep(nanoseconds: 400_000_000)
             await refresh()

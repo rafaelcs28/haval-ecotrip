@@ -34,6 +34,12 @@ enum Settings {
            (group.string(forKey: tokenKey) ?? "").isEmpty {
             group.set(oldTok, forKey: tokenKey)
         }
+        // Migra URLs antigas (Tailscale ou IP direto HTTP) para HTTPS DuckDNS.
+        let current = group.string(forKey: urlKey) ?? ""
+        if current.contains("tailacc6e7.ts.net") || current.contains("mac-mini.tail")
+            || current == "http://177.223.45.154:3000" {
+            group.set("https://mqttrafael.duckdns.org:3443", forKey: urlKey)
+        }
     }
 
     static var bridgeURL: String {

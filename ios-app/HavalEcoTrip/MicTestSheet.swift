@@ -39,6 +39,7 @@ struct MicTestSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var sec = 3
     @State private var showDiag = false
+    @State private var callMessage = "Preciso falar com você."
 
     private var listening: Bool { audio.state == .listening }
 
@@ -46,8 +47,13 @@ struct MicTestSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 14) {
-                    liveCard
-                    if listening { talkButton }
+                    if audio.callMode {
+                        callCard
+                    } else {
+                        liveCard
+                        if listening { talkButton }
+                        callLaunchCard
+                    }
                     recordingsLink
                     diagSection
                 }
@@ -57,7 +63,7 @@ struct MicTestSheet: View {
             .navigationTitle("Escuta do carro")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Fechar") { dismiss() } } }
-            .onDisappear { Task { await audio.stop() } }
+            .onDisappear { Task { audio.callMode ? await audio.endCall() : await audio.stop() } }
         }
     }
 
@@ -133,6 +139,69 @@ struct MicTestSheet: View {
             .gesture(DragGesture(minimumDistance: 0)
                 .onChanged { _ in if !audio.talking { audio.setTalking(true) } }
                 .onEnded { _ in audio.setTalking(false) })
+        }
+    }
+
+    // Disparar a chamada: mensagem que aparece na tela do carro + botão. O carro
+    // toca a tela e auto-aceita em 10s; daí vira full-duplex.
+    private var callLaunchCard: some View {
+        DSCard {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 12) {
+                    Image(systemName: "phone.arrow.up.right.fill")
+                        .font(.title2).foregroundStyle(DS.teal)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Ligar pro carro").font(.callout.weight(.semibold)).foregroundStyle(DS.text)
+                        Text("Mostra a mensagem na tela e atende sozinho em 10s").font(.caption).foregroundStyle(DS.muted)
+                    }
+                    Spacer()
+                }
+                TextField("Mensagem na tela", text: $callMessage, axis: .vertical)
+                    .lineLimit(1...3)
+                    .padding(10)
+                    .background(DS.muted.opacity(0.12))
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .foregroundStyle(DS.text)
+                Button {
+                    Task { await audio.startCall(message: callMessage.trimmingCharacters(in: .whitespacesAndNewlines)) }
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "phone.fill")
+                        Text("Chamar").font(.headline)
+                    }
+                    .frame(maxWidth: .infinity).padding(.vertical, 14)
+                    .background(DS.green).foregroundStyle(.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                }
+                .disabled(callMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+    }
+
+    // Chamada em curso: status (Chamando…/Em chamada) + VU meter + encerrar.
+    private var callCard: some View {
+        DSCard {
+            VStack(spacing: 12) {
+                HStack(spacing: 8) {
+                    Image(systemName: audio.inCall ? "phone.fill" : "phone.arrow.up.right.fill")
+                        .font(.title2).foregroundStyle(audio.inCall ? DS.green : DS.orange)
+                    Text(audio.callStatus.isEmpty ? "Chamando…" : audio.callStatus)
+                        .font(.callout.weight(.semibold)).foregroundStyle(DS.text)
+                    Spacer()
+                }
+                if audio.inCall { levelMeter }
+                Button {
+                    Task { await audio.endCall() }
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "phone.down.fill")
+                        Text("Encerrar").font(.headline)
+                    }
+                    .frame(maxWidth: .infinity).padding(.vertical, 14)
+                    .background(DS.red).foregroundStyle(.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                }
+            }
         }
     }
 

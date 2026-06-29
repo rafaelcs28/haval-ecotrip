@@ -20,6 +20,8 @@ struct ContentView: View {
     @StateObject private var shortcuts = ShortcutManager.shared
     @Environment(\.scenePhase) private var scenePhase
     @State private var showSetup = false   // sheet por cima da WebView
+    @State private var showCancelPreclima = false   // confirmação do botão da LA
+    @State private var cancellingPreclima = false
     // Observa o token no App Group: ao logar (nativo ou manual), SwiftUI
     // re-renderiza e troca da tela de login pra WebView automaticamente.
     @AppStorage("bridge_token", store: UserDefaults(suiteName: Settings.appGroupId))
@@ -55,14 +57,19 @@ struct ContentView: View {
                     .tabItem { Label("Config", systemImage: "gearshape.fill") }
                 }
                 .tint(DS.green)
+                .tabBarMinimizeOnScroll()
                 // Cobre a área da status bar com o fundo do app: o conteúdo rolável
                 // some atrás dela em vez de colidir com o relógio/ícones do iPhone.
+                // No iOS 26+ o scroll-edge effect + toolbar glass cuidam disso — a
+                // laje opaca mataria o efeito, então só aplica nos anteriores.
                 .overlay(alignment: .top) {
-                    DS.bg
-                        .frame(maxWidth: .infinity)
-                        .frame(height: topSafeInset)
-                        .ignoresSafeArea(edges: .top)
-                        .allowsHitTesting(false)
+                    if #unavailable(iOS 26) {
+                        DS.bg
+                            .frame(maxWidth: .infinity)
+                            .frame(height: topSafeInset)
+                            .ignoresSafeArea(edges: .top)
+                            .allowsHitTesting(false)
+                    }
                 }
                 .overlay { BiometricGate() }
                 .onReceive(NotificationCenter.default.publisher(for: .openHavalSettings)) { _ in
@@ -93,7 +100,23 @@ struct ContentView: View {
         // quando user toca em notif Web Push.
         .onOpenURL { url in
             print("[app] aberto via URL:", url.absoluteString)
+            // Botão "Cancelar" da Live Activity de pré-clima → confirma antes de agir.
+            if url.host == "preclimat-cancel" || url.path == "/preclimat-cancel" {
+                showCancelPreclima = true
+            }
             Task { await manager.autoStartIfCharging() }
+        }
+        .alert("Cancelar pré-climatização?", isPresented: $showCancelPreclima) {
+            Button("Não", role: .cancel) {}
+            Button("Cancelar pré-clima", role: .destructive) {
+                cancellingPreclima = true
+                Task {
+                    await CarIntentAPI.cancelPreclimat()
+                    cancellingPreclima = false
+                }
+            }
+        } message: {
+            Text("Restaura o ar-condicionado ao ajuste anterior e desliga o motor (se o carro estiver parado).")
         }
         // Quick Actions (3D Touch no ícone) — postam em ShortcutManager.shared
         // via SceneDelegate. Aqui observamos e despachamos pra CarActions.

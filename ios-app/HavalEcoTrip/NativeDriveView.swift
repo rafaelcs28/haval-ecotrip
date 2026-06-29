@@ -13,6 +13,7 @@ struct NativeDriveView: View {
     @ObservedObject private var store = CarStore.shared
     @State private var showControls = false
     @State private var showAC = false
+    @State private var showMic = false
 
     private var powerColor: Color {
         let p = store.motorPowerKw
@@ -40,6 +41,7 @@ struct NativeDriveView: View {
         .onDisappear { store.stopHF() }
         .sheet(isPresented: $showControls) { DriveControlsSheet() }
         .sheet(isPresented: $showAC) { ACSheet() }
+        .sheet(isPresented: $showMic) { MicTestSheet() }
     }
 
     private var speedCard: some View {
@@ -92,12 +94,13 @@ struct NativeDriveView: View {
                 HStack(spacing: 10) {
                     chip("Modo", store.driveModeLabel)
                     chip("Regen", store.regenLabel)
-                    chip("1-Pedal", store.onePedalOn ? "On" : "Off")
+                    chip("One Pedal", store.onePedalOn ? "On" : "Off")
                     chip("ESP", store.espOn ? "On" : "Off")
                 }
                 HStack(spacing: 10) {
                     DSActionButton(icon: "slider.horizontal.3", title: "Controles", color: DS.green) { showControls = true }
                     DSActionButton(icon: store.acOn ? "snowflake" : "fan", title: "AC", color: DS.blue) { showAC = true }
+                    DSActionButton(icon: "mic.fill", title: "Escuta", color: DS.teal) { showMic = true }
                 }
             }
         }
@@ -200,23 +203,31 @@ struct FollowMap: View {
         .onReceive(tick) { _ in
             if !autoFollow && Date().timeIntervalSince(lastTouch) > 10 { autoFollow = true; followCenter() }
         }
-        .overlay(alignment: .trailing) {
-            VStack(spacing: 10) {
-                mapButton("plus") { zoom(0.6) }
-                mapButton("minus") { zoom(1.6) }
-                mapButton("location.fill", tint: autoFollow ? DS.green : DS.text) {
-                    autoFollow = true; center()
-                }
+        .overlay(alignment: .trailing) { mapControls.padding(.trailing, 12) }
+    }
+
+    @ViewBuilder
+    private var mapControls: some View {
+        let stack = VStack(spacing: 10) {
+            mapButton("plus") { zoom(0.6) }
+            mapButton("minus") { zoom(1.6) }
+            mapButton("location.fill", tint: autoFollow ? DS.green : DS.text) {
+                autoFollow = true; center()
             }
-            .padding(.trailing, 12)
+        }
+        if #available(iOS 26, *) {
+            GlassEffectContainer(spacing: 10) { stack }
+        } else {
+            stack
         }
     }
 
     private func mapButton(_ icon: String, tint: Color = DS.text, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: icon).font(.system(size: 15, weight: .semibold)).foregroundStyle(tint)
-                .frame(width: 38, height: 38).background(.ultraThinMaterial).environment(\.colorScheme, .dark)
-                .clipShape(Circle()).overlay(Circle().stroke(DS.border, lineWidth: 1))
+                .frame(width: 38, height: 38)
+                .glassControl(in: Circle())
+                .overlay(Circle().stroke(DS.border, lineWidth: 1))
         }
     }
 }

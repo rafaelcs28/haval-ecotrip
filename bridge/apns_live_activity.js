@@ -44,6 +44,11 @@ let startTokens = [];
 let updateTokens = [];
 let alertTokens = [];
 let _jwt = '', _jwtIat = 0;
+// Estatísticas pro monitor de saúde: último envio bem/mal-sucedido.
+let _stats = { last_push_ms: 0, last_sent: 0, last_dead: 0, last_status: null,
+               last_ok_ms: 0, last_err_ms: 0, last_err: null, total_sent: 0,
+               dead_total: 0, dead_24h: 0, last_dead_ms: 0, rejected_total: 0 };
+let _deadTs = [];   // timestamps de tokens invalidados (janela 24h p/ atrito)
 
 function _save() {
   try {
@@ -181,8 +186,12 @@ async function _send(targets, body, pushType = 'liveactivity') {
     req.on('data', c => { respBody += c; });
     req.on('end', () => {
       console.log(`[apns] resp ${status} (${pushType}) token=${t.token.slice(0,8)}…${respBody ? ' body=' + respBody.slice(0,160) : ''}`);
-      if (status === 200) { sent++; }
+      _stats.last_status = status;
+      if (status === 200) { sent++; _stats.total_sent++; _stats.last_ok_ms = Date.now(); }
       else {
+        _stats.last_err_ms = Date.now();
+        _stats.last_err = `${status} ${respBody.slice(0,120)}`;
+        _stats.rejected_total++;
         console.warn(`[apns] HTTP ${status} token ${t.token.slice(0,8)}…: ${respBody.slice(0,140)}`);
         // Prune só 410 ExpiredToken e 400 BadDeviceToken. NÃO prunar 403
         // BadEnvironmentKeyInToken: enquanto a Apple não ativa o APNs de produção
@@ -196,7 +205,35 @@ async function _send(targets, body, pushType = 'liveactivity') {
     req.end(body);
   })));
   client.close();
+  _stats.last_push_ms = Date.now();
+  _stats.last_sent = sent;
+  _stats.last_dead = dead.length;
+  if (dead.length) {
+    const now = Date.now();
+    _stats.dead_total += dead.length;
+    _stats.last_dead_ms = now;
+    for (let i = 0; i < dead.length; i++) _deadTs.push(now);
+    const cutoff = now - 24 * 3600_000;
+    while (_deadTs.length && _deadTs[0] < cutoff) _deadTs.shift();
+    _stats.dead_24h = _deadTs.length;
+  } else {
+    const cutoff = Date.now() - 24 * 3600_000;
+    while (_deadTs.length && _deadTs[0] < cutoff) _deadTs.shift();
+    _stats.dead_24h = _deadTs.length;
+  }
   return { sent, dead };
+}
+
+// Status pro monitor de saúde (não expõe tokens).
+function getStatus() {
+  return {
+    enabled, env, bundle_id: bundleId,
+    songpro_bundle_id: songProBundleId || null,
+    start_tokens: startTokens.length,
+    update_tokens: updateTokens.length,
+    alert_tokens: alertTokens.length,
+    ...(_stats),
+  };
 }
 
 // ── push-to-start: cria a Live Activity (app fechado/bloqueado) ───────────────
@@ -255,6 +292,6 @@ async function pushAlert(title, body, opts = {}) {
 module.exports = {
   init, registerStartToken, registerUpdateToken, unregisterActivity, registerAlertToken,
   hasUpdateToken, clearUpdateTokensByType,
-  pushStart, pushUpdate, pushAlert, tokenCount,
+  pushStart, pushUpdate, pushAlert, tokenCount, getStatus,
   get enabled() { return enabled; },
 };

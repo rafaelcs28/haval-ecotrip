@@ -15,7 +15,7 @@ import Foundation
 enum AuthConfig {
     /// URL do porteiro (gateway) — a MESMA pra todo mundo. O login por email é que
     /// roteia cada pessoa pros dados dela. Ninguém precisa digitar URL/token.
-    static let bridgeURL = "https://mac-mini.tailacc6e7.ts.net"
+    static let bridgeURL = "https://mqttrafael.duckdns.org:3443"
 
     /// Client ID do OAuth iOS do Google. Ex: "757576...-abc123.apps.googleusercontent.com".
     /// Vazio = login Google escondido no app.

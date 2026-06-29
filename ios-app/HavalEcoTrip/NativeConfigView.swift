@@ -21,6 +21,7 @@ struct NativeConfigView: View {
     @State private var showAutomations = false
     @State private var showNotifCenter = false
     @State private var showSpeedFence = false
+    @State private var showParkGuard = false
     @State private var shareURL: URL?
     @State private var importing = false
     @AppStorage("faceid_lock") private var faceIDLock = false
@@ -41,7 +42,7 @@ struct NativeConfigView: View {
             }
             .background(DS.bg.ignoresSafeArea())
             .navigationTitle("Configurações").navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(.visible, for: .navigationBar).toolbarBackground(DS.bg, for: .navigationBar)
+            .legacyDarkNavBar()
         }
         .task { await cfg.loadAll() }
         .sheet(isPresented: $showLogs) { LogsSheet() }
@@ -120,11 +121,14 @@ struct NativeConfigView: View {
                 rowButton(icon: "bell.fill", title: "Notificações", subtitle: "Live Activities + alertas push") { showNotif = true }
                 Divider().overlay(DS.border)
                 rowButton(icon: "gauge.open.with.lines.needle.33percent", title: "Cerca de velocidade", subtitle: "Alerta se passar do limite (outro motorista)") { showSpeedFence = true }
+                Divider().overlay(DS.border)
+                rowButton(icon: "shield.lefthalf.filled", title: "Guarda-estacionamento", subtitle: "Alarme se o carro for movido/rebocado desligado") { showParkGuard = true }
             }
         }
         .sheet(isPresented: $showNotif) { NotificationsSheet(cfg: cfg) }
         .sheet(isPresented: $showNotifCenter) { NotificationsCenterSheet() }
         .sheet(isPresented: $showSpeedFence) { SpeedFenceSheet() }
+        .sheet(isPresented: $showParkGuard) { ParkGuardSheet() }
     }
     // MARK: Conta e segurança
     private var contaCard: some View {

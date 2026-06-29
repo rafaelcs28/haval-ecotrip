@@ -601,8 +601,7 @@ struct RouteMapSheet: View {
                             Image(systemName: follow ? "location.fill" : "location")
                                 .font(.system(size: 16, weight: .bold)).foregroundStyle(follow ? .black : DS.text)
                                 .frame(width: 40, height: 40)
-                                .background(follow ? DS.green : DS.panel2).clipShape(Circle())
-                                .overlay(Circle().stroke(DS.border, lineWidth: 1))
+                                .modifier(FollowButtonSurface(active: follow))
                         }.padding(.top, 60).padding(.trailing, 14)
                     }
                 } else {

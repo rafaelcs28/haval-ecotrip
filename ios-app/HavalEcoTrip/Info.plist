@@ -62,6 +62,8 @@
 	<string>Use o Face ID para desbloquear o app.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Conecta direto ao carro na mesma rede Wi-Fi para telemetria e comandos com baixa latência.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Usa o microfone para falar na cabine do carro durante a escuta ao vivo.</string>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
 	<key>NSSupportsLiveActivitiesFrequentUpdates</key>
@@ -131,6 +133,7 @@
 		<string>fetch</string>
 		<string>processing</string>
 		<string>remote-notification</string>
+		<string>audio</string>
 	</array>
 	<key>UILaunchScreen</key>
 	<dict/>

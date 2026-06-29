@@ -84,15 +84,19 @@ struct ModeEconomySheet: View {
             HStack(alignment: .top) {
                 FlowChips(chips: [
                     ("Pedal \(c.label.onePedal)", c.onePedal == 1),
-                    ("Regen \(c.label.regenLevel)", c.regenLevel == 1),
+                    c.onePedal == 1 ? nil : ("Regen \(c.label.regenLevel)", c.regenLevel == 1),
                     (c.label.driveMode, c.driveMode == 2),
                     (c.label.powertrain, !c.isHev),
-                ])
+                ].compactMap { $0 })
                 Spacer(minLength: 8)
-                VStack(alignment: .trailing, spacing: 0) {
+                VStack(alignment: .trailing, spacing: 2) {
                     if top { Text("🏆").font(.system(size: 12)) }
                     Text(mainMetric(c)).font(.system(size: 16, weight: .bold))
                         .foregroundStyle(top ? DS.green : DS.text)
+                    if !c.isHev, let k = c.kwh100 {
+                        Text(String(format: "%.1f kWh/100", k))
+                            .font(.system(size: 11)).foregroundStyle(DS.muted)
+                    }
                 }
             }
             Text(subline(c)).font(.system(size: 10)).foregroundStyle(DS.muted)
@@ -114,8 +118,6 @@ struct ModeEconomySheet: View {
         var parts = [String(format: "%.0f km", c.distKm)]
         if let r = c.rPerKm { parts.append(String(format: "R$ %.2f/km", r)) }
         if c.isHev, let k = c.kmL { parts.append(String(format: "%.1f km/L motor", k)) }
-        else if !c.isHev, let k = c.kwh100 { parts.append(String(format: "%.1f kWh/100", k)) }
-        if c.lowSample { parts.append("⚠ amostra curta") }
         return parts.joined(separator: " · ")
     }
 
@@ -134,7 +136,7 @@ struct ModeEconomySheet: View {
             let (data, resp) = try await URLSession.shared.data(for: req)
             guard let http = resp as? HTTPURLResponse, http.statusCode == 200 else { throw URLError(.badServerResponse) }
             let decoded = try JSONDecoder().decode(ModeStatsResponse.self, from: data)
-            ranking = decoded.ranking
+            ranking = decoded.ranking.filter { !$0.lowSample }
             tripsConsidered = decoded.tripsConsidered
         } catch {
             failed = true
@@ -162,5 +164,9 @@ private struct FlowChips: View {
             .foregroundStyle(c.1 ? DS.green : DS.muted)
             .clipShape(Capsule())
     }
-    private func rows() -> [[Int]] { [[0, 1], [2, 3]] }
+    private func rows() -> [[Int]] {
+        stride(from: 0, to: chips.count, by: 2).map { i in
+            i + 1 < chips.count ? [i, i + 1] : [i]
+        }
+    }
 }

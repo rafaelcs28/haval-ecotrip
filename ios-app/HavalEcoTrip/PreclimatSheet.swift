@@ -34,6 +34,11 @@ private func anyD(_ v: Any?) -> Double {
 final class PreclimatStore: ObservableObject {
     @Published var scheds: [PreclimatSched] = []
     @Published var loading = false
+    @Published var statusPhase: String = "idle"
+    @Published var statusDetail: String = ""
+    @Published var cancelling = false
+
+    var isActive: Bool { ["scheduled", "starting", "engine_on", "cooling"].contains(statusPhase) }
 
     private var base: String {
         let u = Settings.bridgeURL.isEmpty ? AuthConfig.bridgeURL : Settings.bridgeURL
@@ -56,6 +61,19 @@ final class PreclimatStore: ObservableObject {
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let arr = obj["schedules"] as? [[String: Any]] else { return }
         scheds = arr.map(PreclimatSched.init)
+        if let st = obj["status"] as? [String: Any] {
+            statusPhase  = (st["phase"] as? String) ?? "idle"
+            statusDetail = (st["detail"] as? String) ?? ""
+        }
+    }
+
+    // Cancela a pré-climatização ativa (antes ou durante). Recarrega o status depois.
+    func cancel() async {
+        guard let r = req("/api/preclimat/cancel", "POST", [:]) else { return }
+        cancelling = true
+        defer { cancelling = false }
+        _ = try? await URLSession.shared.data(for: r)
+        await load()
     }
 
     func add() async {
@@ -65,10 +83,10 @@ final class PreclimatStore: ObservableObject {
         scheds.append(PreclimatSched(obj))
     }
 
-    // Cria um agendamento já com horário e temperatura (sugestão inteligente).
-    func addAt(time: String, temp: Double) async {
+    // Cria um agendamento já com horário, temperatura e recorrência (sugestão inteligente).
+    func addAt(time: String, temp: Double, recurrence: String) async {
         guard let r = req("/api/preclimat/schedule", "POST",
-                          ["device_id": "", "time": time, "temp": temp, "enabled": true]) else { return }
+                          ["device_id": "", "time": time, "temp": temp, "recurrence": recurrence, "enabled": true]) else { return }
         _ = try? await URLSession.shared.data(for: r)
         await load()
     }
@@ -91,38 +109,55 @@ struct PreclimatSheet: View {
     @ObservedObject private var car = CarStore.shared
     @ObservedObject private var cal = CalendarPreclimatStore.shared
     @Environment(\.dismiss) private var dismiss
+    @State private var showCancelConfirm = false
 
-    // Horário típico de saída (mediana das viagens de manhã em dias úteis), em minutos.
-    private var typicalDeparture: Int? {
+    // Aprendizado de rotina: além do horário típico de saída, detecta o PADRÃO de
+    // recorrência (dias úteis × fim de semana × todo dia) pra propor o agendamento certo.
+    private struct Routine { let dep: Int; let recurrence: String; let label: String }
+    private func medianDeparture(_ weekdays: Set<Int>) -> (mins: Int, count: Int)? {
         let cal = Calendar.current
         let mins = trips.trips.compactMap { t -> Int? in
             let wd = cal.component(.weekday, from: t.date)
-            guard (2...6).contains(wd) else { return nil }   // seg–sex
+            guard weekdays.contains(wd) else { return nil }
             let h = cal.component(.hour, from: t.date), m = cal.component(.minute, from: t.date)
-            guard h >= 4 && h <= 12 else { return nil }       // manhã
+            guard h >= 4 && h <= 12 else { return nil }       // só saídas de manhã
             return h * 60 + m
         }
         guard mins.count >= 4 else { return nil }
-        let s = mins.sorted(); return s[s.count / 2]
+        let s = mins.sorted(); return (s[s.count / 2], s.count)
+    }
+    private var routine: Routine? {
+        let weekday = medianDeparture([2, 3, 4, 5, 6])   // seg–sex
+        let weekend = medianDeparture([1, 7])            // sáb–dom
+        if let wd = weekday {
+            // Rotina nos dois grupos com horários próximos (≤45 min) → diário.
+            if let we = weekend, abs(wd.mins - we.mins) <= 45 {
+                return Routine(dep: (wd.mins + we.mins) / 2, recurrence: "daily", label: "todo dia")
+            }
+            return Routine(dep: wd.mins, recurrence: "weekdays", label: "nos dias úteis")
+        }
+        if let we = weekend { return Routine(dep: we.mins, recurrence: "weekends", label: "no fim de semana") }
+        return nil
     }
 
     // Sugestão: só quando não há agendamento, há rotina e a temperatura justifica.
-    private var suggestion: (time: String, temp: Double, why: String)? {
-        guard store.scheds.isEmpty, let dep = typicalDeparture else { return nil }
+    private var suggestion: (time: String, temp: Double, recurrence: String, why: String)? {
+        guard store.scheds.isEmpty, let r = routine else { return nil }
         let t = car.outsideTemp
         let pick: (Double, String)?
         if t >= 27        { pick = (22, "Faz \(Int(t))°C lá fora — pré-climatizar pra esfriar a cabine") }
         else if t > 0 && t <= 15 { pick = (23, "Faz \(Int(t))°C lá fora — pré-climatizar pra aquecer a cabine") }
         else { pick = nil }
         guard let (target, why) = pick else { return nil }
-        let pre = max(0, dep - 12)
-        return (String(format: "%02d:%02d", pre / 60, pre % 60), target, why)
+        let pre = max(0, r.dep - 12)
+        return (String(format: "%02d:%02d", pre / 60, pre % 60), target, r.recurrence, why)
     }
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 14) {
+                    if store.isActive { activeCard }
                     calendarCard
                     if let sug = suggestion { suggestionCard(sug) }
                     if store.scheds.isEmpty && !store.loading {
@@ -143,6 +178,45 @@ struct PreclimatSheet: View {
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Concluído") { dismiss() } } }
         }
         .task { await store.load(); await trips.load(); cal.refreshAuth(); await cal.sync() }
+        .confirmationDialog("Cancelar pré-climatização?", isPresented: $showCancelConfirm, titleVisibility: .visible) {
+            Button("Cancelar pré-clima", role: .destructive) { Task { await store.cancel() } }
+            Button("Voltar", role: .cancel) {}
+        } message: {
+            Text("Restaura o ar-condicionado ao ajuste anterior e desliga o motor (se o carro estiver parado).")
+        }
+    }
+
+    // ── Pré-clima em andamento: cancelar antes/durante ────────────────────────
+    private func phaseLabel(_ p: String) -> String {
+        switch p {
+        case "scheduled": return "Agendada — começa em breve"
+        case "starting":  return "Ligando o motor…"
+        case "engine_on": return "Motor ligado"
+        case "cooling":   return "Climatizando"
+        default:          return "Em andamento"
+        }
+    }
+    @ViewBuilder private var activeCard: some View {
+        DSCard {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    Image(systemName: "thermometer.snowflake").foregroundStyle(DS.teal)
+                    Text("Pré-climatização ativa").font(.caption.weight(.semibold)).foregroundStyle(DS.teal)
+                }
+                Text(store.statusDetail.isEmpty ? phaseLabel(store.statusPhase) : store.statusDetail)
+                    .font(.subheadline.weight(.semibold)).foregroundStyle(DS.text)
+                Button { showCancelConfirm = true } label: {
+                    HStack {
+                        if store.cancelling { ProgressView().tint(.white) }
+                        else { Image(systemName: "xmark.circle.fill") }
+                        Text(store.cancelling ? "Cancelando…" : "Cancelar agora")
+                    }
+                    .font(.system(size: 15, weight: .bold)).frame(maxWidth: .infinity).frame(height: 48)
+                    .foregroundStyle(.white).background(DS.red).clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+                .disabled(store.cancelling)
+            }
+        }
     }
 
     // ── Pré-clima por agenda (Calendário) ─────────────────────────────────────
@@ -214,17 +288,24 @@ struct PreclimatSheet: View {
         .background(color.opacity(0.15)).clipShape(Capsule())
     }
 
-    @ViewBuilder private func suggestionCard(_ s: (time: String, temp: Double, why: String)) -> some View {
+    private func recLabel(_ r: String) -> String {
+        switch r {
+        case "daily": return "todo dia"
+        case "weekends": return "no fim de semana"
+        default: return "nos dias úteis"
+        }
+    }
+    @ViewBuilder private func suggestionCard(_ s: (time: String, temp: Double, recurrence: String, why: String)) -> some View {
         DSCard {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 8) {
                     Image(systemName: "sparkles").foregroundStyle(DS.teal)
                     Text("Sugestão inteligente").font(.caption.weight(.semibold)).foregroundStyle(DS.teal)
                 }
-                Text("\(s.why). Você costuma sair de manhã nos dias úteis — deixar pronto às \(s.time), a \(Int(s.temp))°.")
+                Text("\(s.why). Você costuma sair de manhã \(recLabel(s.recurrence)) — deixar pronto às \(s.time), a \(Int(s.temp))°.")
                     .font(.subheadline).foregroundStyle(DS.text)
-                Button { Task { await store.addAt(time: s.time, temp: s.temp) } } label: {
-                    Label("Agendar \(s.time) · \(Int(s.temp))°", systemImage: "plus.circle.fill")
+                Button { Task { await store.addAt(time: s.time, temp: s.temp, recurrence: s.recurrence) } } label: {
+                    Label("Agendar \(s.time) · \(Int(s.temp))° · \(recLabel(s.recurrence))", systemImage: "plus.circle.fill")
                         .font(.system(size: 14, weight: .bold)).frame(maxWidth: .infinity).frame(height: 44)
                         .foregroundStyle(.black).background(DS.teal).clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }

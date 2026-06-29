@@ -26,6 +26,8 @@ struct PreClimatActivityAttributes: ActivityAttributes {
         var endsAt: Date? { endsAtMs > 0 ? Date(timeIntervalSince1970: endsAtMs / 1000.0) : nil }
         var updatedAt: Date { Date(timeIntervalSince1970: updatedAtMs / 1000.0) }
         var isFinal: Bool { phase == "ended" || phase == "failed" }
+        // Fases em que faz sentido oferecer o botão de cancelar (antes ou durante).
+        var isCancellable: Bool { ["scheduled", "starting", "engine_on", "cooling"].contains(phase) }
     }
 
     var scheduledTime: String   // "HH:MM" — imutável durante a sessão

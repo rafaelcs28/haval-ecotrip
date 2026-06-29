@@ -985,8 +985,8 @@ struct PlaceMapPicker: View {
                             .onSubmit { Task { await search() } }
                         Button { centerOnCar() } label: { Image(systemName: "car.fill") }
                     }
-                    .padding(10).background(.regularMaterial)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .padding(10)
+                    .glassControl(in: RoundedRectangle(cornerRadius: 12))
                     Picker("Estilo do mapa", selection: $mapMode) {
                         ForEach(MapMode.allCases) { Text($0.rawValue).tag($0) }
                     }
@@ -1011,7 +1011,7 @@ struct PlaceMapPicker: View {
                     .buttonStyle(.borderedProminent)
                     .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || saving)
                 }
-                .padding().background(.regularMaterial)
+                .padding().glassPanel(in: Rectangle(), stroke: .clear)
             }
             .navigationTitle("Novo local").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancelar") { dismiss() } } }
@@ -1137,7 +1137,7 @@ struct AutomationPlaceEditor: View {
                     .buttonStyle(.borderedProminent)
                     .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || saving)
                 }
-                .padding().background(.regularMaterial)
+                .padding().glassPanel(in: Rectangle(), stroke: .clear)
             }
             .navigationTitle("Editar local").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancelar") { dismiss() } } }
@@ -1191,7 +1191,7 @@ struct CarKeysReference: View {
                 if copied != nil {
                     Text("Chave copiada").font(.caption.weight(.semibold))
                         .padding(.horizontal, 14).padding(.vertical, 8)
-                        .background(.regularMaterial).clipShape(Capsule()).padding(.bottom, 12)
+                        .glassPanel(in: Capsule(), stroke: .clear).padding(.bottom, 12)
                         .task { try? await Task.sleep(nanoseconds: 1_500_000_000); copied = nil }
                 }
             }

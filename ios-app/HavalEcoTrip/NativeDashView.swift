@@ -35,6 +35,10 @@ struct NativeDashView: View {
     @State private var limitFeedback = 0
     @State private var limitTimeout: DispatchWorkItem? = nil
     @State private var showChargeTarget = false
+    @State private var showLeaveBy = false
+    @State private var showFuelCalib = false
+    @State private var showHealth = false
+    @State private var showDestCost = false
 
     private let tankL = 55.0   // capacidade aprox. do tanque (H6 PHEV) p/ o medidor
 
@@ -55,6 +59,9 @@ struct NativeDashView: View {
         ScrollView {
             VStack(spacing: 11) {
                 header
+                if store.onWifiFallback { fallbackBanner }
+                else if store.isOffline { offlineBanner }
+                if let cp = store.commandProgress { commandBanner(cp) }
                 statusCard
                 if store.isCharging { chargingCard } else { HStack(spacing: 14) { batteryCard; fuelCard } }
                 climateCard
@@ -62,6 +69,7 @@ struct NativeDashView: View {
                 LiveRouteBanner()
                 locationCard
                 revisaoCard
+                healthCard
                 tripCard
             }
             .padding(16)
@@ -75,9 +83,103 @@ struct NativeDashView: View {
         .sheet(isPresented: $showParking) { ParkingSheet() }
         .sheet(isPresented: $showChargeTarget) { ChargeTargetSheet(cfg: cfg) }
         .sheet(isPresented: $showRange) { RangeSheet() }
+        .sheet(isPresented: $showLeaveBy) { LeaveBySheet() }
         .sheet(isPresented: $showShare) { ShareStatusSheet() }
         .sheet(isPresented: $showTimeline) { EventsTimelineSheet() }
         .sheet(isPresented: $showAssistant) { AssistantSheet() }
+        .sheet(isPresented: $showFuelCalib) { FuelCalibSheet(currentL: store.fuelL, store: store) }
+        .sheet(isPresented: $showHealth) { HealthScoreSheet() }
+        .sheet(isPresented: $showDestCost) { DestinationsCostSheet() }
+    }
+
+    // MARK: banner de fallback — nuvem GWM/4G fora, telemetria viva pelo WiFi do carro
+    private var fallbackBanner: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "wifi").font(.system(size: 13, weight: .semibold)).foregroundStyle(DS.teal)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Ao vivo via WiFi").font(.caption.weight(.semibold)).foregroundStyle(DS.text)
+                Text("Nuvem 4G fora — trava/motor/pneus podem estar congelados").font(.system(size: 10)).foregroundStyle(DS.muted)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 12).padding(.vertical, 9)
+        .frame(maxWidth: .infinity)
+        .background(RoundedRectangle(cornerRadius: 12).fill(DS.teal.opacity(0.14)))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(DS.teal.opacity(0.45), lineWidth: 1))
+    }
+
+    // MARK: banner offline — nada fresco do APK nem da GWM; valores são os últimos vistos
+    private var offlineBanner: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "wifi.slash").font(.system(size: 13, weight: .semibold)).foregroundStyle(DS.muted)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Offline").font(.caption.weight(.semibold)).foregroundStyle(DS.text)
+                Text("Sem conexão com o carro — dados \(ageText(store.dataAgeSec))").font(.system(size: 10)).foregroundStyle(DS.muted)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 12).padding(.vertical, 9)
+        .frame(maxWidth: .infinity)
+        .background(RoundedRectangle(cornerRadius: 12).fill(DS.panel2))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(DS.border, lineWidth: 1))
+    }
+
+    // MARK: andamento de comando — confirmação ao vivo via resultCode da GWM
+    private func cmdLabel(_ action: String) -> String {
+        switch action {
+        case "lock_open":     return "Destravar"
+        case "lock_close":    return "Travar"
+        case "engine_on":     return "Ligar motor"
+        case "engine_off":    return "Desligar motor"
+        case "windows_open":  return "Abrir vidros"
+        case "windows_close": return "Fechar vidros"
+        case "trunk_open":    return "Porta-malas"
+        default:              return "Comando"
+        }
+    }
+
+    @ViewBuilder
+    private func commandBanner(_ cp: CarStore.CommandProgress) -> some View {
+        let label = cmdLabel(cp.action)
+        let (icon, tint, text): (String, Color, String) = {
+            switch cp.phase {
+            case "sent":    return ("paperplane.fill", DS.muted, "\(label) · enviando ao carro…")
+            case "running": return ("hourglass",       DS.yellow, "\(label) · processando no carro…")
+            case "done":
+                if cp.ok == true {
+                    return ("checkmark.circle.fill", DS.green, "\(label) · confirmado pelo carro")
+                } else if let rc = cp.resultCode {
+                    return ("xmark.circle.fill", DS.red, "\(label) · recusado pelo carro (cód \(rc))")
+                } else {
+                    return ("wifi.exclamationmark", DS.red, "\(label) · falha ao enviar — tente de novo")
+                }
+            case "timeout": return ("exclamationmark.triangle.fill", DS.yellow, "\(label) · sem resposta do carro")
+            default:        return ("circle", DS.muted, label)
+            }
+        }()
+        HStack(spacing: 8) {
+            if cp.phase == "running" || cp.phase == "sent" {
+                ProgressView().scaleEffect(0.7).frame(width: 16, height: 16)
+            } else {
+                Image(systemName: icon).font(.system(size: 14, weight: .semibold)).foregroundStyle(tint)
+            }
+            Text(text).font(.caption.weight(.semibold)).foregroundStyle(DS.text).lineLimit(1).minimumScaleFactor(0.7)
+            Spacer()
+        }
+        .padding(.horizontal, 12).padding(.vertical, 9)
+        .frame(maxWidth: .infinity)
+        .background(RoundedRectangle(cornerRadius: 12).fill(tint.opacity(0.14)))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(tint.opacity(0.45), lineWidth: 1))
+        .transition(.move(edge: .top).combined(with: .opacity))
+        .animation(.easeInOut(duration: 0.2), value: cp)
+    }
+
+    private func ageText(_ sec: Double) -> String {
+        guard sec >= 0 else { return "indisponíveis" }
+        if sec < 60   { return "de há \(Int(sec))s" }
+        if sec < 3600 { return "de há \(Int(sec/60))min" }
+        if sec < 86400 { return "de há \(Int(sec/3600))h" }
+        return "de há \(Int(sec/86400))d"
     }
 
     // MARK: localização + central de notificações + versão do carro
@@ -104,16 +206,6 @@ struct NativeDashView: View {
         .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 4)
     }
 
-    private var lastUpdateText: String {
-        let ms = store.num("last_apk_ms")
-        guard ms > 0 else { return "" }
-        let age = Date().timeIntervalSince1970 - ms / 1000
-        if age < 60 { return "há \(Int(max(0, age)))s" }
-        if age < 3600 { return "há \(Int(age/60))min" }
-        if age < 86400 { return "há \(Int(age/3600))h" }
-        return "há \(Int(age/86400))d"
-    }
-
     // MARK: trava + motor (ícones com confirmação ancorada) + hodômetro/12V ao lado
     private var statusCard: some View {
         let winOpen = ["window_fl","window_fr","window_rl","window_rr"].contains { store.str($0) == "on" }
@@ -122,7 +214,8 @@ struct NativeDashView: View {
             HStack {
                 iconButton(icon: store.isLocked ? "lock.fill" : "lock.open.fill",
                            tint: store.isLocked ? DS.green : DS.orange,
-                           caption: !store.lockKnown ? "—" : (store.isLocked ? "Trancado" : "Destranc.")) {
+                           caption: !store.lockKnown ? "—" : (store.isLocked ? "Trancado" : "Destranc."),
+                           frozen: store.isFrozen("lock_state")) {
                     showLock = true
                 }
                 .popover(isPresented: $showLock) {
@@ -132,7 +225,8 @@ struct NativeDashView: View {
                 }
                 Spacer()
                 iconButton(icon: "power", tint: store.engineOn ? DS.green : DS.muted,
-                           caption: store.engineOn ? "Ligado" : "Desligado") {
+                           caption: store.engineOn ? "Ligado" : "Desligado",
+                           frozen: store.isFrozen("engine_state")) {
                     showEngine = true
                 }
                 .popover(isPresented: $showEngine) {
@@ -188,7 +282,7 @@ struct NativeDashView: View {
             HStack(spacing: 10) {
                 Button("Cancelar") { binding.wrappedValue = false }
                     .frame(maxWidth: .infinity).frame(height: 44).foregroundStyle(DS.text).background(DS.panel2).clipShape(RoundedRectangle(cornerRadius: 11))
-                Button(confirm) { binding.wrappedValue = false; busy = true; Task { _ = await store.action(name); busy = false } }
+                Button(confirm) { binding.wrappedValue = false; store.fireCommand(name) }
                     .frame(maxWidth: .infinity).frame(height: 44).foregroundStyle(.black).background(danger ? DS.red : DS.green).clipShape(RoundedRectangle(cornerRadius: 11)).font(.system(size: 15, weight: .bold))
             }
         }
@@ -212,17 +306,23 @@ struct NativeDashView: View {
         .presentationCompactAdaptation(.popover)
     }
 
-    private func iconButton(icon: String, tint: Color, caption: String, action: @escaping () -> Void) -> some View {
+    private func iconButton(icon: String, tint: Color, caption: String, frozen: Bool = false, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             VStack(spacing: 3) {
-                Image(systemName: icon).font(.system(size: 15, weight: .medium)).foregroundStyle(tint)
-                    .frame(width: 38, height: 38).background(DS.panel2).clipShape(Circle())
-                    .overlay(Circle().stroke(DS.border, lineWidth: 1))
+                ZStack(alignment: .topTrailing) {
+                    Image(systemName: icon).font(.system(size: 15, weight: .medium)).foregroundStyle(frozen ? DS.muted : tint)
+                        .frame(width: 38, height: 38).background(DS.panel2).clipShape(Circle())
+                        .overlay(Circle().stroke(DS.border, lineWidth: 1))
+                    if frozen {
+                        Image(systemName: "snowflake").font(.system(size: 9, weight: .bold)).foregroundStyle(DS.blue)
+                            .padding(2).background(DS.panel2).clipShape(Circle()).offset(x: 4, y: -2)
+                    }
+                }
                 Text(caption).font(.system(size: 9.5, weight: .medium)).foregroundStyle(DS.muted)
                     .lineLimit(1).minimumScaleFactor(0.7)
             }
         }
-        .buttonStyle(.plain).disabled(busy)
+        .buttonStyle(.plain).disabled(busy).opacity(frozen ? 0.7 : 1)
     }
 
     // MARK: energia
@@ -334,6 +434,7 @@ struct NativeDashView: View {
                 }
             }
         }
+        .onLongPressGesture { showFuelCalib = true }
     }
 
     // MARK: clima (compacto)
@@ -351,7 +452,10 @@ struct NativeDashView: View {
                 if acActive { DSChip(text: "AC", color: DS.blue, filled: true) }
                 Spacer()
                 rightMetric("Hodômetro", store.odometerKm > 0 ? "\(miles(store.odometerKm)) km" : "—")
-                if store.batt12vPct > 0 { rightMetric("12V", "\(f0(store.batt12vPct))%") }
+                if store.batt12vPct > 0 {
+                    let v12 = store.batt12vV
+                    rightMetric("12V", v12 > 0 ? "\(f0(store.batt12vPct))% · \(f1(v12))V" : "\(f0(store.batt12vPct))%")
+                }
             }
         }
     }
@@ -360,20 +464,24 @@ struct NativeDashView: View {
     // autonomia e compartilhar status em botões grandes.
     private var locationCard: some View {
         DSCard {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 6) {
                 if !store.address.isEmpty {
                     HStack(spacing: 6) {
                         Image(systemName: "location.fill").font(.caption2).foregroundStyle(DS.green)
-                        Text(store.address).font(.caption).foregroundStyle(DS.muted).lineLimit(2)
+                        Text(store.address).font(.caption).foregroundStyle(DS.muted).lineLimit(1)
                     }
                 }
-                HStack(spacing: 10) {
-                    DSActionButton(icon: "location.north.fill", title: "Destino", color: DS.teal) { showArrival = true }
-                    DSActionButton(icon: "parkingsign", title: "Estacionei", color: DS.green) { showParking = true }
+                HStack(spacing: 8) {
+                    DSActionButton(icon: "location.north.fill", title: "Destino", color: DS.teal, compact: true) { showArrival = true }
+                    DSActionButton(icon: "parkingsign", title: "Estacionei", color: DS.green, compact: true) { showParking = true }
                 }
-                HStack(spacing: 10) {
-                    DSActionButton(icon: "map.fill", title: "Até onde chego", color: DS.orange) { showRange = true }
-                    DSActionButton(icon: "square.and.arrow.up", title: "Compartilhar", color: DS.blue) { showShare = true }
+                HStack(spacing: 8) {
+                    DSActionButton(icon: "map.fill", title: "Até onde chego", color: DS.orange, compact: true) { showRange = true }
+                    DSActionButton(icon: "square.and.arrow.up", title: "Compartilhar", color: DS.blue, compact: true) { showShare = true }
+                }
+                HStack(spacing: 8) {
+                    DSActionButton(icon: "clock.arrow.circlepath", title: "Planejar saída", color: DS.teal, compact: true) { showLeaveBy = true }
+                    DSActionButton(icon: "dollarsign.arrow.circlepath", title: "Custo p/ destino", color: DS.green, compact: true) { showDestCost = true }
                 }
             }
         }
@@ -381,15 +489,17 @@ struct NativeDashView: View {
 
     private func tyreCell(_ pk: String, _ tk: String, _ label: String) -> some View {
         let p = store.num(pk), t = store.num(tk)
+        let frozen = store.isFrozen(pk)
         return VStack(alignment: .leading, spacing: 2) {
             HStack(alignment: .firstTextBaseline, spacing: 3) {
                 Text(p <= 0 ? "—" : f0(p)).font(.system(size: 22, weight: .semibold, design: .rounded))
                     .foregroundStyle(p > 0 && p < 28 ? DS.red : DS.text).monospacedDigit()
                 Text("psi").font(.system(size: 11)).foregroundStyle(DS.muted)
                 if t > 0 { Text("· \(f0(t))°").font(.system(size: 11)).foregroundStyle(DS.muted) }
+                if frozen { Image(systemName: "snowflake").font(.system(size: 10, weight: .bold)).foregroundStyle(DS.blue) }
             }
             Text(label.uppercased()).font(.system(size: 9, weight: .semibold)).foregroundStyle(DS.muted)
-        }.frame(maxWidth: .infinity, alignment: .leading)
+        }.frame(maxWidth: .infinity, alignment: .leading).opacity(frozen ? 0.6 : 1)
     }
 
     // MARK: Pneus + Portas + Vidros/Teto num card só — fechado mostra só o resumo;
@@ -450,6 +560,23 @@ struct NativeDashView: View {
                     }
                     Spacer()
                     if let n = next { Circle().fill(n.statusColor).frame(width: 9, height: 9) }
+                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(DS.muted)
+                }
+            }.buttonStyle(.plain)
+        }
+    }
+
+    // MARK: saúde consolidada do carro (botão → sheet com breakdown)
+    private var healthCard: some View {
+        DSCard {
+            Button { showHealth = true } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "heart.text.square.fill").font(.subheadline).foregroundStyle(DS.green)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Saúde do carro").font(.system(size: 15, weight: .semibold)).foregroundStyle(DS.text)
+                        Text("Bateria 12V, pneus, consumo e manutenção").font(.caption).foregroundStyle(DS.muted)
+                    }
+                    Spacer()
                     Image(systemName: "chevron.right").font(.caption).foregroundStyle(DS.muted)
                 }
             }.buttonStyle(.plain)
@@ -529,5 +656,70 @@ struct CarWindowGlyph: View {
             ctx.stroke(p, with: .color(color), lineWidth: 1.4)
         }
         .frame(width: 15, height: 15)
+    }
+}
+
+struct FuelCalibSheet: View {
+    let currentL: Double
+    let store: CarStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var inputText = ""
+    @State private var saving = false
+    @State private var error: String? = nil
+
+    private var addedL: Double? {
+        let t = inputText.replacingOccurrences(of: ",", with: ".")
+        guard let v = Double(t), v > 0, v <= 55 else { return nil }
+        return v
+    }
+    private var resultL: Double { currentL + (addedL ?? 0) }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    HStack {
+                        Text("Sensor antes do abastecimento").foregroundStyle(.secondary)
+                        Spacer()
+                        Text(String(format: "%.1f L", currentL)).bold()
+                    }
+                }
+                Section("Litros abastecidos (bomba)") {
+                    TextField("Ex: 10", text: $inputText)
+                        .keyboardType(.decimalPad)
+                }
+                if addedL != nil {
+                    Section {
+                        HStack {
+                            Text("Total corrigido").foregroundStyle(.secondary)
+                            Spacer()
+                            Text(String(format: "%.1f L", resultL)).bold().foregroundStyle(.orange)
+                        }
+                    }
+                }
+                if let e = error {
+                    Section { Text(e).foregroundStyle(.red).font(.caption) }
+                }
+            }
+            .navigationTitle("Corrigir abastecimento")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancelar") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(saving ? "Salvando…" : "Salvar") { Task { await save() } }
+                        .disabled(saving || addedL == nil)
+                }
+            }
+        }
+    }
+
+    private func save() async {
+        guard let added = addedL else { return }
+        let actual = currentL + added
+        guard actual <= 55 else { error = "Total excede capacidade do tanque (55 L)"; return }
+        saving = true
+        let ok = await store.command("/api/fuel-calibrate", body: ["actual_l": actual])
+        saving = false
+        if ok { dismiss() } else { error = "Falha ao comunicar com o bridge" }
     }
 }
