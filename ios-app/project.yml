@@ -226,6 +226,7 @@ targets:
       # Tipos das LAs compartilhados (app referencia, widget renderiza)
       - path: HavalEcoTripWidget/SongProActivityAttributes.swift
       - path: HavalEcoTripWidget/SongProTripActivityAttributes.swift
+      - path: HavalEcoTripWidget/CompanionInboundActivityAttributes.swift
     info:
       path: BydRecarga/Info.plist
       properties:
@@ -277,6 +278,9 @@ targets:
       - path: HavalEcoTripWidget/SongProLiveActivity.swift
       - path: HavalEcoTripWidget/SongProTripActivityAttributes.swift
       - path: HavalEcoTripWidget/SongProTripLiveActivity.swift
+      # Feature 1: LA "companion indo até a Grasi" (alvo: iPhone da Grasi).
+      - path: HavalEcoTripWidget/CompanionInboundActivityAttributes.swift
+      - path: HavalEcoTripWidget/CompanionInboundLiveActivity.swift
     info:
       path: BydRecargaWidget/Info.plist
       properties:

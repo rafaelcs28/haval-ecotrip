@@ -71,6 +71,7 @@ final class BydPhoneLocation: NSObject, CLLocationManagerDelegate {
         req.httpBody = try? JSONSerialization.data(withJSONObject: [
             "lat": loc.coordinate.latitude,
             "lng": loc.coordinate.longitude,
+            "device_id": BydSettings.deviceId,   // bridge guarda location por-device
         ])
         Task { _ = try? await URLSession.shared.data(for: req) }
     }

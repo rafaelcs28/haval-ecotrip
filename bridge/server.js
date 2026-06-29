@@ -14,19 +14,502 @@ const fs       = require('fs');
 const path     = require('path');
 const http     = require('http');
 const https    = require('https');
+const { exec } = require('child_process');
 const webpush  = require('web-push');
 const apnsLive = require('./apns_live_activity');
 apnsLive.init();
 
 // Sem isto, uma rejection/exception fora de rota (timer, callback MQTT, fetch em
 // background) derrubava o processo inteiro. Loga e segue — pm2 só reinicia em crash real.
-// Histórico de eventos anômalos (últimas 100 ocorrências) exposto em /api/health.
-const _healthEvents = [];
-function _recordHealthEvent(type, msg) {
-  _healthEvents.push({ ts: Date.now(), type, msg: String(msg).slice(0, 300) });
-  if (_healthEvents.length > 100) _healthEvents.shift();
+
+// ── Health events: crashes + restarts persistidos em disco ───────────────────
+// Guarda os últimos 30 dias (máx 5000 entradas). Cada restart do bridge é
+// registrado como tipo 'restart' — assim dá pra ver quantas quedas houve em
+// 1h/24h/7d/30d mesmo depois de o processo ter reiniciado.
+const HEALTH_EVENTS_FILE = path.join(__dirname, 'health_events.json');
+const HEALTH_EVENTS_MAX  = 5000;
+const HEALTH_EVENTS_TTL  = 30 * 24 * 3600_000;  // 30 dias
+
+function _loadHealthEvents() {
+  try {
+    const raw = JSON.parse(require('fs').readFileSync(HEALTH_EVENTS_FILE, 'utf8'));
+    const cutoff = Date.now() - HEALTH_EVENTS_TTL;
+    return Array.isArray(raw) ? raw.filter(e => e.ts > cutoff) : [];
+  } catch (_) { return []; }
 }
-// Série temporal de memória (último 1h a cada 30s, ~120 pontos).
+let _healthEvents = _loadHealthEvents();
+
+let _healthSaveTimer = null;
+function _saveHealthEvents() {
+  if (_healthSaveTimer) return;
+  _healthSaveTimer = setTimeout(() => {
+    _healthSaveTimer = null;
+    try { atomicWriteFileSync(HEALTH_EVENTS_FILE, JSON.stringify(_healthEvents)); } catch (_) {}
+  }, 2000);
+}
+
+function _recordHealthEvent(type, msg, extra) {
+  _healthEvents.push({ ts: Date.now(), type, msg: String(msg).slice(0, 400), ...(extra || {}) });
+  // Mantém dentro do limite e remove entradas antigas
+  const cutoff = Date.now() - HEALTH_EVENTS_TTL;
+  if (_healthEvents.length > HEALTH_EVENTS_MAX)
+    _healthEvents = _healthEvents.slice(-HEALTH_EVENTS_MAX);
+  _healthEvents = _healthEvents.filter(e => e.ts > cutoff);
+  _saveHealthEvents();
+}
+function _healthStats() {
+  const now = Date.now();
+  const windows = { h1: 3_600_000, h24: 86_400_000, d7: 604_800_000, d30: 2_592_000_000 };
+  const r = {};
+  for (const [k, ms] of Object.entries(windows)) {
+    const cutoff = now - ms;
+    const slice  = _healthEvents.filter(e => e.ts > cutoff);
+    const restarts = slice.filter(e => e.type === 'restart');
+    r[k] = {
+      restarts:        restarts.length,
+      restarts_planned: restarts.filter(e => e.planned).length,  // ajustes/deploys
+      restarts_crash:   restarts.filter(e => !e.planned).length, // quedas
+      errors:   slice.filter(e => e.type !== 'restart').length,
+      total:    slice.length,
+    };
+  }
+  return r;
+}
+
+// ── Marker de shutdown limpo: distingue restart de ajuste/deploy (SIGINT/SIGTERM
+// recebido → escrevemos o marker antes de sair) de queda (crash sem marker). ──
+const SHUTDOWN_MARKER = path.join(__dirname, '.clean_shutdown');
+function _markCleanShutdown(reason) {
+  try { require('fs').writeFileSync(SHUTDOWN_MARKER, JSON.stringify({ ts: Date.now(), reason })); } catch (_) {}
+}
+// Lido no boot: true se o processo anterior saiu por sinal há < 90s. Consome o marker.
+function _wasPlannedRestart() {
+  try {
+    const fs2 = require('fs');
+    if (!fs2.existsSync(SHUTDOWN_MARKER)) return false;
+    const m = JSON.parse(fs2.readFileSync(SHUTDOWN_MARKER, 'utf8'));
+    fs2.unlinkSync(SHUTDOWN_MARKER);
+    return m && (Date.now() - m.ts) < 90_000;
+  } catch (_) { return false; }
+}
+
+// ── Tailscale status (polled a cada 30s) ─────────────────────────────────────
+const TS_BIN = '/Applications/Tailscale.app/Contents/MacOS/Tailscale';
+let _tsStatus = { checked_at: 0, backend: null, ips: [], error: null };
+function _pollTailscale() {
+  exec(`"${TS_BIN}" status --json`, { timeout: 8000 }, (err, stdout) => {
+    const now = Date.now();
+    if (err) { _tsStatus = { checked_at: now, backend: null, ips: [], error: err.message }; return; }
+    try {
+      const j = JSON.parse(stdout);
+      _tsStatus = { checked_at: now, backend: j.BackendState || null, ips: j.TailscaleIPs || [], error: null };
+    } catch (e) { _tsStatus = { checked_at: now, backend: null, ips: [], error: 'parse error' }; }
+  });
+}
+_pollTailscale();
+setInterval(_pollTailscale, 30_000);
+
+// ── DuckDNS + IP público (polled a cada 2min) ────────────────────────────────
+const dns = require('dns');
+const DUCKDNS_HOST = 'mqttrafael.duckdns.org';
+// Resolve via DNS-over-HTTPS público (por HOSTNAME) — NÃO pelo resolver do
+// sistema. O Mac usa MagicDNS do Tailscale (100.100.100.100) como primário, que
+// dá SERVFAIL pro duckdns.org; e 1.1.1.1 literal é inalcançável daqui (UDP 53 e
+// :443 atravancados). DoH por hostname é HTTPS puro (egress funciona) e reflete o
+// DNS público que clientes externos (carro/OBD) enxergam.
+// IMPORTANTE: falha de resolução (SERVFAIL/timeout — o DuckDNS surta de vez em
+// quando) NÃO é "Divergente". match=null+error = estado transitório (amarelo);
+// só vira match=false quando resolvemos um IP que REALMENTE difere do público.
+const DOH_URLS = ['https://cloudflare-dns.com/dns-query', 'https://dns.google/resolve'];
+let _netStatus = { checked_at: 0, public_ip: null, duckdns_ip: null, duckdns_ip_cached: null, match: null, error: null };
+// Tenta cada provedor DoH em ordem até um responder com um registro A (Status 0).
+function _resolveViaPublic(host, urls, cb) {
+  if (!urls.length) return cb(new Error('DuckDNS não resolveu (SERVFAIL/timeout nos DNS públicos)'));
+  const url = `${urls[0]}?name=${encodeURIComponent(host)}&type=A`;
+  const req = https.get(url, { headers: { accept: 'application/dns-json' }, timeout: 5000 }, res => {
+    let b = '';
+    res.on('data', d => b += d);
+    res.on('end', () => {
+      try {
+        const j = JSON.parse(b);
+        const a = (j.Answer || []).filter(x => x.type === 1).map(x => x.data);
+        if (j.Status === 0 && a.length) return cb(null, a[0]);
+      } catch (_) {}
+      _resolveViaPublic(host, urls.slice(1), cb);   // SERVFAIL/parse → próximo provedor
+    });
+  });
+  req.on('timeout', () => { req.destroy(); _resolveViaPublic(host, urls.slice(1), cb); });
+  req.on('error', () => _resolveViaPublic(host, urls.slice(1), cb));
+}
+function _fetchPublicIp(cb) {
+  const req = https.get('https://api.ipify.org?format=text', { timeout: 5000 }, res => {
+    let raw = ''; res.on('data', d => raw += d); res.on('end', () => cb(null, raw.trim()));
+  });
+  req.on('timeout', () => { req.destroy(); cb(new Error('ipify timeout')); });
+  req.on('error', e => cb(e));
+}
+function _pollNet() {
+  // IP público e resolução DuckDNS em paralelo — independentes.
+  _fetchPublicIp((ipErr, pubIp) => {
+    // DuckDNS NS é flaky (~60% por query); 2 passadas por provedor ⇒ ~97% de acerto.
+    _resolveViaPublic(DUCKDNS_HOST, [...DOH_URLS, ...DOH_URLS], (dnsErr, duckIp) => {
+      const haveBoth = !!pubIp && !!duckIp;
+      const cached   = duckIp || _netStatus.duckdns_ip_cached;   // mantém último IP bom
+      _netStatus = {
+        checked_at: Date.now(),
+        public_ip:  pubIp || null,
+        duckdns_ip: duckIp || null,
+        duckdns_ip_cached: cached || null,
+        match:      haveBoth ? (pubIp === duckIp) : null,   // null = não dá pra comparar
+        error:      dnsErr ? dnsErr.message : (ipErr ? ipErr.message : null),
+      };
+    });
+  });
+}
+_pollNet();
+setInterval(_pollNet, 2 * 60_000);
+
+// ── Tailscale Funnel HTTP probe (a cada 60s) ─────────────────────────────────
+// Resolve via DNS público (1.1.1.1) pra evitar MagicDNS local mascarar falha.
+const FUNNEL_HOST  = 'mac-mini.tailacc6e7.ts.net';
+const FUNNEL_PORTS = [443, 8443, 10000];
+let _funnelStatus     = { checked_at: 0, up: null, failed: [], error: null };
+let _funnelFailCount  = 0;
+function _pollFunnel() {
+  dns.resolve4(FUNNEL_HOST, (err, addrs) => {
+    const now = Date.now();
+    if (err || !addrs?.length) {
+      _funnelFailCount++;
+      _funnelStatus = { checked_at: now, up: _funnelFailCount < 2 ? null : false, failed: [], fail_count: _funnelFailCount, error: 'DNS falhou: ' + (err?.message || 'sem resultado') };
+      return;
+    }
+    const ip = addrs[0];
+    const checks = FUNNEL_PORTS.map(port => new Promise(resolve => {
+      const opts = { hostname: ip, port, path: '/', method: 'HEAD', timeout: 7000,
+                     headers: { Host: FUNNEL_HOST }, rejectUnauthorized: false };
+      const req = https.request(opts, res => { res.resume(); resolve({ port, ok: true }); });
+      req.on('error', () => resolve({ port, ok: false }));
+      req.on('timeout', () => { req.destroy(); resolve({ port, ok: false }); });
+      req.end();
+    }));
+    Promise.all(checks).then(results => {
+      const failed = results.filter(r => !r.ok).map(r => r.port);
+      if (failed.length > 0) {
+        _funnelFailCount++;
+      } else {
+        _funnelFailCount = 0;
+      }
+      // up=false só após 2 falhas consecutivas (evita falso positivo de 1 ciclo)
+      _funnelStatus = { checked_at: Date.now(), up: failed.length === 0 ? true : (_funnelFailCount >= 2 ? false : null), failed, fail_count: _funnelFailCount, ip, error: null };
+    });
+  });
+}
+_pollFunnel();
+setInterval(_pollFunnel, 60_000);
+
+// ── MQTT latency ping (dispara após connect, a cada 30s) ─────────────────────
+let _mqttPing = { checked_at: 0, latency_ms: null, error: null };
+let _mqttPingTs = 0;
+function _pingMqtt() {
+  if (!mqttClient?.connected) return;
+  _mqttPingTs = Date.now();
+  mqttClient.publish(`${MQTT_PREFIX}/_ping`, String(_mqttPingTs), { qos: 0, retain: false });
+}
+
+// ── Home Assistant health (polled a cada 30s) ────────────────────────────────
+const HA_HEALTH_URL = 'http://192.168.1.30:8123/api/';
+let _haStatus    = { checked_at: 0, up: null, latency_ms: null, error: null };
+let _haFailCount = 0;
+function _pollHA() {
+  const t0 = Date.now();
+  // /api/ exige auth — sem o Bearer, HA loga "invalid authentication" (ban.py)
+  // a cada poll e pode banir o IP do bridge. Token lido de process.env porque
+  // a const HA_TOKEN só é declarada depois deste ponto (TDZ no _pollHA inicial).
+  const tok = process.env.HA_TOKEN || '';
+  const opts = { timeout: 5000, headers: tok ? { Authorization: `Bearer ${tok}` } : {} };
+  const req = http.get(HA_HEALTH_URL, opts, res => {
+    res.resume();
+    _haFailCount = 0;
+    _haStatus = { checked_at: Date.now(), up: true, latency_ms: Date.now() - t0, error: null };
+  });
+  const onFail = (msg) => {
+    _haFailCount++;
+    _haStatus = { checked_at: Date.now(), up: _haFailCount >= 2 ? false : null, latency_ms: null, error: msg };
+  };
+  req.on('error', e => onFail(e.message));
+  req.on('timeout', () => { req.destroy(); onFail('timeout'); });
+}
+_pollHA();
+setInterval(_pollHA, 30_000);
+
+// ── Mosquitto ports probe (1883 plain + 8883 TLS, a cada 30s) ───────────────
+const net = require('net');
+let _mqttBrokerStatus = { checked_at: 0, port1883: null, port8883: null, fail_count: 0 };
+let _mqttBrokerFailCount = 0;
+function _probeTcpPort(host, port) {
+  return new Promise(resolve => {
+    const sock = new net.Socket();
+    const timer = setTimeout(() => { sock.destroy(); resolve(false); }, 3000);
+    sock.connect(port, host, () => { clearTimeout(timer); sock.destroy(); resolve(true); });
+    sock.on('error', () => { clearTimeout(timer); resolve(false); });
+  });
+}
+async function _pollMqttBroker() {
+  const [p1883, p1884, p8883] = await Promise.all([
+    _probeTcpPort('127.0.0.1', 1883),
+    _probeTcpPort('127.0.0.1', 1884),
+    _probeTcpPort('127.0.0.1', 8883),
+  ]);
+  const allOk = p1883 && p1884 && p8883;
+  if (!allOk) _mqttBrokerFailCount++; else _mqttBrokerFailCount = 0;
+  _mqttBrokerStatus = { checked_at: Date.now(), port1883: p1883, port1884: p1884, port8883: p8883, fail_count: _mqttBrokerFailCount };
+}
+_pollMqttBroker();
+setInterval(_pollMqttBroker, 30_000);
+
+// ── Gateway LAN ping (polled a cada 30s) ─────────────────────────────────────
+let _gwStatus    = { checked_at: 0, up: null, latency_ms: null };
+let _gwFailCount = 0;
+function _pollGateway() {
+  const t0 = Date.now();
+  exec('ping -c 1 -W 2 192.168.1.1', { timeout: 4000 }, (err) => {
+    if (!err) { _gwFailCount = 0; _gwStatus = { checked_at: Date.now(), up: true, latency_ms: Date.now() - t0 }; }
+    else { _gwFailCount++; _gwStatus = { checked_at: Date.now(), up: _gwFailCount >= 2 ? false : null, latency_ms: null }; }
+  });
+}
+_pollGateway();
+setInterval(_pollGateway, 30_000);
+
+// ── TLS cert expiry ───────────────────────────────────────────────────────────
+const { X509Certificate } = require('crypto');
+let _certStatus = { checked_at: 0, expires_at: null, days_left: null, error: null };
+function _checkCert() {
+  try {
+    const pem = fs.readFileSync(path.join(__dirname, 'cert.pem'), 'utf8');
+    const cert = new X509Certificate(pem);
+    const expiresAt = new Date(cert.validTo).getTime();
+    const daysLeft  = Math.floor((expiresAt - Date.now()) / 86_400_000);
+    _certStatus = { checked_at: Date.now(), expires_at: expiresAt, days_left: daysLeft, error: null };
+  } catch (e) { _certStatus = { checked_at: Date.now(), expires_at: null, days_left: null, error: e.message }; }
+}
+_checkCert();
+setInterval(_checkCert, 6 * 3600_000);   // a cada 6h
+
+// Cert TLS do broker MQTT (listener 8883). Renovado pelo acme.sh; se vencer, o
+// carro/NavRelay/OBD param de conectar. Path != cert.pem do bridge.
+const BROKER_CERT_PATH = process.env.MQTT_BROKER_CERT ||
+  '/Users/consorciolimpagyn/.acme.sh/mqttrafael.duckdns.org_ecc/fullchain.cer';
+let _certBrokerStatus = { checked_at: 0, expires_at: null, days_left: null, error: null };
+function _checkBrokerCert() {
+  try {
+    const cert = new X509Certificate(fs.readFileSync(BROKER_CERT_PATH, 'utf8'));
+    const expiresAt = new Date(cert.validTo).getTime();
+    _certBrokerStatus = { checked_at: Date.now(), expires_at: expiresAt,
+      days_left: Math.floor((expiresAt - Date.now()) / 86_400_000), error: null };
+  } catch (e) { _certBrokerStatus = { checked_at: Date.now(), expires_at: null, days_left: null, error: e.message }; }
+}
+_checkBrokerCert();
+setInterval(_checkBrokerCert, 6 * 3600_000);
+
+// ── Central de monitoramento inteligente → ntfy ───────────────────────────────
+const NTFY_URL   = 'https://ntfy.sh/tailscale-watchdog-73418c8d76d0f61c94f621a0';
+const NTFY_COOLDOWN    = 10 * 60_000;   // mínimo 10min entre notifs do mesmo alerta
+const ALERT_FIRE_DELAY = 2.5 * 60_000; // só notifica se falha persistir 2.5min
+
+// alertId → { firing, firedAt, lastNotifiedAt }
+const _alertState = new Map();
+
+function _ntfy(title, body, priority = 'default', tags = []) {
+  const bodyBuf = Buffer.from(body, 'utf8');
+  const headers = {
+    'Title':          title,
+    'Priority':       priority,
+    'Content-Type':   'text/plain; charset=utf-8',
+    'Content-Length': bodyBuf.length,
+  };
+  if (tags.length) headers['Tags'] = tags.join(',');
+  const req = https.request(NTFY_URL, { method: 'POST', headers }, res => res.resume());
+  req.on('error', () => {});
+  req.write(bodyBuf);
+  req.end();
+}
+
+function _alert(id, firing, title, body, priority = 'default', tags = [], opts = {}) {
+  const prev = _alertState.get(id) || { firing: false, firedAt: 0, lastNotifiedAt: 0, notified: false };
+  const now  = Date.now();
+  const repeatEvery = opts.repeatEvery ?? NTFY_COOLDOWN;  // intervalo entre repetições "(ainda)"
+
+  if (firing && !prev.firing) {
+    // nova queda — apenas registra; aguarda ALERT_FIRE_DELAY antes de notificar
+    _alertState.set(id, { firing: true, firedAt: now, lastNotifiedAt: 0, notified: false });
+  } else if (firing && prev.firing && !prev.notified && (now - prev.firedAt) >= ALERT_FIRE_DELAY) {
+    // falha persistiu o tempo mínimo → primeira notificação
+    _alertState.set(id, { ...prev, lastNotifiedAt: now, notified: true });
+    _ntfy(title, body, priority, tags);
+    _recordHealthEvent(id, title + ': ' + body);
+  } else if (firing && prev.firing && prev.notified && (now - prev.lastNotifiedAt) > repeatEvery) {
+    // repetição (ainda caído, cooldown passou)
+    _alertState.set(id, { ...prev, lastNotifiedAt: now });
+    _ntfy(title + ' (ainda)', body, 'low', tags);
+    _recordHealthEvent(id, title + ' (ainda): ' + body);
+  } else if (!firing && prev.firing) {
+    // recuperado — só notifica se tinha enviado alerta
+    if (prev.notified) {
+      _ntfy('Recuperado: ' + title, 'Voltou ao normal.', 'low', ['white_check_mark']);
+      _recordHealthEvent(id + '_recovery', 'Recuperado: ' + title);
+    }
+    _alertState.set(id, { firing: false, firedAt: 0, lastNotifiedAt: 0, notified: false });
+  } else if (!firing) {
+    _alertState.set(id, { firing: false, firedAt: 0, lastNotifiedAt: 0, notified: false });
+  }
+}
+
+let _lastRestartCount = 0;
+let _mqttDownCount    = 0;
+function _checkAlerts() {
+  const now = Date.now();
+
+  // 1. Bridge caindo em rajada (3+ QUEDAS em 1h). Restarts planejados (ajustes/
+  // deploys, com marker de shutdown limpo) não contam — só quedas reais.
+  const recentRestarts = _healthEvents.filter(e => e.type === 'restart' && !e.planned && e.ts > now - 3600_000).length;
+  if (_lastRestartCount === 0) _lastRestartCount = recentRestarts;   // inicializa sem alertar no boot
+  const newRestarts = recentRestarts > _lastRestartCount;
+  _lastRestartCount = recentRestarts;
+  if (newRestarts && recentRestarts >= 3)
+    _alert('restarts', true, 'Bridge caindo muito', `${recentRestarts} quedas na última hora`, 'urgent', ['rotating_light']);
+  else if (recentRestarts < 3)
+    _alert('restarts', false, 'Bridge reiniciando muito', '');
+
+  // 2. MQTT desconectado (2 ciclos consecutivos para evitar falso positivo no restart)
+  const mqttOk = !!(mqttClient?.connected);
+  if (mqttOk) _mqttDownCount = 0; else _mqttDownCount = (_mqttDownCount || 0) + 1;
+  _alert('mqtt_down', _mqttDownCount >= 2, 'MQTT desconectado', 'Bridge perdeu conexao com o broker MQTT.', 'high', ['electric_plug']);
+
+  // 3. MQTT latência alta (> 800ms)
+  const mqttLat = _mqttPing.latency_ms;
+  const mqttSlow = mqttLat != null && mqttLat > 800;
+  _alert('mqtt_slow', mqttSlow, 'MQTT lento', `Latência ${mqttLat}ms (limite 800ms)`, 'default', ['snail']);
+
+  // 4. Mosquitto broker ports
+  const brokerPortDown = _mqttBrokerStatus.checked_at > 0 &&
+    (!_mqttBrokerStatus.port1883 || !_mqttBrokerStatus.port1884 || !_mqttBrokerStatus.port8883) &&
+    _mqttBrokerFailCount >= 2;
+  const brokerMsg = [
+    !_mqttBrokerStatus.port1883 ? '1883 down' : '',
+    !_mqttBrokerStatus.port1884 ? '1884 down' : '',
+    !_mqttBrokerStatus.port8883 ? '8883 down' : '',
+  ].filter(Boolean).join(', ');
+  _alert('broker_ports', brokerPortDown, 'Mosquitto porta inacessivel', brokerMsg, 'high', ['electric_plug']);
+
+  // 5. Home Assistant down
+  _alert('ha_down', _haStatus.up === false, 'Home Assistant offline', _haStatus.error || 'Sem resposta em 192.168.1.30:8123', 'high', ['house']);
+
+  // 5. Tailscale não Running
+  const tsDown = _tsStatus.backend !== null && _tsStatus.backend !== 'Running';
+  _alert('ts_down', tsDown, 'Tailscale fora', `Backend: ${_tsStatus.backend || _tsStatus.error}`, 'high', ['satellite']);
+
+  // 6. DuckDNS divergente
+  _alert('dns_mismatch', _netStatus.match === false, 'DuckDNS desatualizado',
+    `DNS resolve ${_netStatus.duckdns_ip}, IP público é ${_netStatus.public_ip}`, 'default', ['globe_with_meridians']);
+
+  // 7. Memória alta (RSS > 450MB)
+  const rss = Math.round(process.memoryUsage().rss / 1048576);
+  _alert('mem_high', rss > 450, 'Memória alta no bridge', `RSS ${rss}MB (limite 450MB)`, 'high', ['warning']);
+
+  // 8. Gateway LAN down
+  _alert('gw_down', _gwStatus.up === false, 'Gateway LAN offline', 'Ping para 192.168.1.1 falhou.', 'urgent', ['sos']);
+
+  // 9. Funnel ingress down
+  _alert('funnel_down', _funnelStatus.up === false && _funnelStatus.checked_at > 0,
+    'Funnel ingress down',
+    _funnelStatus.error || `Portas falhas: ${_funnelStatus.failed?.join(', ') || '?'} (${_funnelStatus.ip || FUNNEL_HOST})`,
+    'high', ['satellite']);
+
+  // 10. Certificado TLS expirando (< 21 dias)
+  if (_certStatus.days_left != null)
+    _alert('cert_expiry', _certStatus.days_left < 21, 'Certificado TLS expirando',
+      `Expira em ${_certStatus.days_left} dias`, _certStatus.days_left < 7 ? 'urgent' : 'default', ['lock']);
+
+  // 11. SSD externo desmontado (segura o bundle HAOS — HA morre sem ele)
+  const ext = _macStats.disk_ext;
+  if (ext) {
+    _alert('ssd_unmounted', ext.mounted === false, 'SSD externo desmontado',
+      `${ext.path} não está montado — Home Assistant pode cair.`, 'urgent', ['floppy_disk']);
+    if (ext.mounted && ext.avail_gb != null)
+      _alert('ssd_full', ext.avail_gb < 5, 'SSD externo quase cheio',
+        `${ext.avail_gb}GB livres em ${ext.path} (limite 5GB)`, 'high', ['floppy_disk']);
+  }
+
+  // 12. Disco interno quase cheio (< 8GB)
+  if (_macStats.disk?.avail_gb != null)
+    _alert('disk_full', _macStats.disk.avail_gb < 8, 'Disco interno quase cheio',
+      `${_macStats.disk.avail_gb}GB livres em / (limite 8GB)`, 'high', ['floppy_disk']);
+
+  // 13. Backup velho (passou do max_age_h da fonte). Repete no máx 1x/dia — não
+  // adianta spammar push de algo que muda devagar.
+  for (const b of _backups) {
+    const stale = b.ok === false;
+    _alert(`backup_${b.name.split(' ')[0].toLowerCase()}`, stale, `Backup atrasado: ${b.name}`,
+      b.error ? b.error : `${b.age_hours}h desde o último (limite ${b.max_age_h}h)`, 'high', ['package'],
+      { repeatEvery: 24 * 3600_000 });
+  }
+
+  // 14. Cert TLS do broker MQTT expirando (< 21 dias)
+  if (_certBrokerStatus.days_left != null)
+    _alert('cert_broker_expiry', _certBrokerStatus.days_left < 21, 'Cert do broker MQTT expirando',
+      `Expira em ${_certBrokerStatus.days_left} dias (carro/OBD param de conectar)`,
+      _certBrokerStatus.days_left < 7 ? 'urgent' : 'default', ['lock']);
+
+  // 15. PREDITIVO: disco/SSD vai encher em < 10 dias (regressão de tendência)
+  const tdi = _trend.disk_int, tde = _trend.disk_ext;
+  if (tdi?.eta_days != null)
+    _alert('disk_int_eta', tdi.eta_days < 10, 'Disco interno vai encher',
+      `~${tdi.eta_days} dias até <8GB (${tdi.current}GB, ${tdi.slope_per_day}GB/dia)`, 'high', ['chart_with_downwards_trend'],
+      { repeatEvery: 24 * 3600_000 });
+  if (tde?.eta_days != null)
+    _alert('disk_ext_eta', tde.eta_days < 10, 'SSD externo vai encher',
+      `~${tde.eta_days} dias até <5GB (${tde.current}GB, ${tde.slope_per_day}GB/dia)`, 'high', ['chart_with_downwards_trend'],
+      { repeatEvery: 24 * 3600_000 });
+
+  // 16. PREDITIVO: memory leak no bridge (RSS subindo de forma sustentada)
+  const trss = _trend.rss;
+  const leaking = trss != null && trss.span_h >= 6 && trss.slope_per_day > 60;
+  if (trss != null)
+    _alert('rss_leak', leaking, 'Possível memory leak no bridge',
+      `RSS +${trss.slope_per_day}MB/dia sob ${trss.span_h}h (atual ${trss.current}MB)`, 'default', ['chart_with_upwards_trend'],
+      { repeatEvery: 12 * 3600_000 });
+
+  // 17. iCloud: backup local não subiu (offsite em risco)
+  if (_icloudSync.checked_at > 0 && !_icloudSync.error) {
+    const pend = _icloudSync.pending > 0;
+    _alert('icloud_pending', pend, 'Backup iCloud não sincronizou',
+      `${_icloudSync.pending}/${_icloudSync.total} arquivos recentes ainda não subiram`, 'high', ['cloud'],
+      { repeatEvery: 6 * 3600_000 });
+  }
+
+  // 18. APNs: tokens de Live Activity morrendo (atrito → LA para de entregar)
+  const apns = apnsLive.getStatus();
+  if (apns.enabled)
+    _alert('apns_attrition', (apns.dead_24h || 0) >= 3, 'Tokens APNs morrendo',
+      `${apns.dead_24h} tokens invalidados em 24h (start=${apns.start_tokens} update=${apns.update_tokens})`,
+      'default', ['iphone'], { repeatEvery: 12 * 3600_000 });
+}
+
+// Aguarda 60s no boot antes de começar a checar (deixa os pollers inicializarem)
+setTimeout(() => {
+  _lastRestartCount = _healthEvents.filter(e => e.type === 'restart' && !e.planned && e.ts > Date.now() - 3600_000).length;
+  _checkAlerts();
+  setInterval(_checkAlerts, 60_000);
+}, 60_000);
+
+// Registra o boot desta instância. `planned` = o processo anterior saiu por sinal
+// (pm2 restart/stop = ajuste/deploy) e deixou o marker; senão foi queda (crash).
+const _planned = _wasPlannedRestart();
+_recordHealthEvent('restart',
+  `Bridge iniciado (PID ${process.pid}, Node ${process.version}) — ${_planned ? 'ajuste/deploy' : 'queda'}`,
+  { planned: _planned });
+
+// Série temporal de memória (último 1h a cada 30s, ~120 pontos — só em memória).
 const _memSeries = [];
 setInterval(() => {
   const m = process.memoryUsage();
@@ -95,6 +578,11 @@ if (!GWM_CHASSI) {
   console.log(`✓ Chassi do veículo: ${GWM_CHASSI} (fonte: ${GWM_CHASSI_SOURCE === 'file' ? 'vehicle.json' : '.env'})`);
 }
 const GWM_TOPIC_PREFIX = `gwmbrasil_${GWM_CHASSI}`;
+
+// Comando GWM em voo, pra correlacionar o feed de andamento (gwmbrasil_<vin>/
+// command_progress/state) com a ação que o disparou. Comandos GWM são seriais
+// (a nuvem bloqueia concorrência), então casar por tempo é seguro.
+let _pendingCommand = null;
 
 // Versão do bridge — usada no endpoint /api/bridge-version e no full_state WS
 const BRIDGE_VERSION = '5.11';
@@ -338,6 +826,24 @@ async function sendPush(title, body, type, opts = {}) {
   }
 }
 
+// Empurra os dados de uma viagem pra Lari narrar no WhatsApp do dono. Best-effort:
+// só a instância dela com HAVAL_ENABLED responde; falha de rede é silenciosa.
+const LARI_TRIP_URL = process.env.LARI_TRIP_URL || 'http://127.0.0.1:3738/haval/trip-summary';
+async function notifyLariTripSummary(trip) {
+  if (!LARI_HEALTH_TOKEN) return;
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 4000);
+    await fetch(LARI_TRIP_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Health-Token': LARI_HEALTH_TOKEN },
+      body: JSON.stringify(trip),
+      signal: ctrl.signal,
+    }).finally(() => clearTimeout(t));
+    console.log(`[lari] resumo de viagem enviado (${(trip.distKm||0).toFixed(1)} km)`);
+  } catch (e) { console.warn('[lari] resumo de viagem falhou:', e.message); }
+}
+
 // ── Preferências de notificações push ────────────────────────────────────────
 const NOTIF_DEFAULTS = {
   // Tudo desativado por padrão. Cada device escolhe o que ativar — sem
@@ -379,7 +885,9 @@ const NOTIF_DEFAULTS = {
   ac_on_parked_min:  10,      // minutos de tolerância antes de alertar (padrão 10)
   batt12_low:        false,   // bateria auxiliar 12V abaixo de 50%
   batt12_trend:      true,    // 12V em queda sustentada (regressão) — prevê falha antes do limite (default ON: segurança)
-  daily_summary:     false,   // resumo diário às 20h (km, kWh, recargas)
+  daily_summary:     false,   // resumo diário às 20h (km, kWh gastos, combustível, kWh recarregados)
+  trip_summary_narrated: false, // resumo de viagem narrado pela Lari no WhatsApp (fim de viagem)
+  trip_summary_min_km:   10,    // só narra viagens com pelo menos X km
   weekly_summary:    false,   // resumo semanal aos domingos 20h05 (km, kWh, custo, recargas)
   charge_slow:       false,   // alerta quando potência de recarga cai >30% do pico por 5+ min
   window_forgotten:     false, // vidro aberto X min após motor desligar
@@ -437,7 +945,9 @@ function checkSpeedFence(cur) {
 //              temp:22.0, fan:3, lastFiredDate:"YYYY-MM-DD" }
 // Lista de agendamentos. Cada um: { id, enabled, time:"HH:MM", recurrence,
 //   temp, fan, duration, leadMin, device_id, lastFiredDate, startedDate }.
-const PRECLIMAT_SCHED_DEFAULTS = { enabled: true, time: '07:30', recurrence: 'daily', temp: 22.0, fan: 3, duration: 20, leadMin: 10, device_id: '', onceAtMs: 0, lastFiredDate: '', startedDate: '' };
+const PRECLIMAT_SCHED_DEFAULTS = { enabled: true, time: '07:30', recurrence: 'daily', temp: 22.0, fan: 3, duration: 20, leadMin: 10, device_id: '', onceAtMs: 0, departureMs: 0, label: '', lastFiredDate: '', startedDate: '',
+  // Contexto de viagem (só nos planos onceAtMs com destino) p/ recompute de trânsito server-side.
+  eventStartMs: 0, destLat: 0, destLng: 0, destName: '', bufferMin: 0, climateMin: 0, trafficAdjAt: 0 };
 function _genSchedId() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
 let preclimat = { schedules: [] };
 try {
@@ -466,6 +976,31 @@ let _activeSched = null;
 let _preclimatRestoreTimer   = null;
 let _preclimatAutoOffCancelled = false;
 let _preclimatPrevHvac       = null;   // { fan, drvTemp, passTemp, acEnable } salvo antes da pré-clima
+
+// ── Inteligência da pré-climatização (configurável por env) ───────────────────
+// SOC mínimo p/ deixar o motor ligar FORA da tomada; consumo estimado parado;
+// delta que considera a cabine "pronta" (closed-loop) e tempo mínimo de marcha.
+const PRECLIMAT_MIN_SOC_UNPLUGGED = +(process.env.PRECLIMAT_MIN_SOC || 25);
+const PRECLIMAT_DRAIN_PCT_PER_MIN = +(process.env.PRECLIMAT_DRAIN_PCT_PER_MIN || 0.25);
+const PRECLIMAT_CABIN_OK_DELTA    = +(process.env.PRECLIMAT_CABIN_OK_DELTA || 1.5);
+const PRECLIMAT_MIN_RUN_MS        = 4 * 60_000;
+
+// Cabo conectado? Qualquer estado != Desconectado/Desconhecido = plugado.
+function _preclimatPluggedIn() {
+  const s = state.charging_state;
+  return s != null && s !== 'Desconectado' && s !== 'Desconhecido';
+}
+
+// Duração dinâmica: parte do |interna − alvo| (~1.2 min/°C + 2 de folga). Nunca
+// passa do pedido (cap do usuário); piso de 6 min (ou o pedido, se menor).
+function _dynamicDurationMin(target, requested) {
+  if (!(requested > 0)) return requested;
+  const inside = +state.inside_temp;
+  if (!Number.isFinite(inside) || inside === 0 || !Number.isFinite(target)) return requested;
+  const est   = Math.ceil(Math.abs(inside - target) * 1.2) + 2;
+  const floor = Math.min(6, requested);
+  return Math.max(floor, Math.min(requested, est));
+}
 
 // Fases em que o motor foi ligado pela pré-clima e o desligamento automático
 // ainda está pendente — só aí faz sentido a trava da porta agir.
@@ -506,6 +1041,64 @@ function _abortPreclimatAutoOff(reason) {
   // Entrou no carro → encerra a LA logo (1 min, tempo de ver a confirmação),
   // sobrepondo os 5 min do encerramento normal.
   _schedulePreclimatLAEnd(_activeSched && _activeSched.device_id, 60_000);
+}
+
+// Cancelamento EXPLÍCITO (botão da LA / app), diferente do _abortPreclimatAutoOff
+// (porta = usuário vai dirigir, motor segue ligado). Aqui o usuário DESISTIU:
+//  • fase scheduled (antes do disparo): só descarta a LA e impede o disparo de hoje.
+//  • fases starting/engine_on/cooling (em andamento): restaura o AC e DESLIGA o motor
+//    (a menos que o carro esteja em movimento — nunca desligar dirigindo).
+async function cancelPreClimat(reason = 'cancelado pelo usuário') {
+  const phase = preclimatStatus.phase;
+  if (!_activeSched || ['idle', 'ended', 'failed'].includes(phase)) {
+    return { ok: false, phase, error: 'nenhuma pré-climatização ativa' };
+  }
+  const dev   = _activeSched.device_id;
+  const sched = _activeSched;
+  const beforeFire = phase === 'scheduled';
+  console.log(`[preclimat] CANCELAMENTO explícito (${reason}) na fase ${phase}`);
+
+  // Sinaliza pro firePreClimat em andamento parar de aplicar/agendar + mata o timer.
+  _preclimatAutoOffCancelled = true;
+  if (_preclimatRestoreTimer) { clearTimeout(_preclimatRestoreTimer); _preclimatRestoreTimer = null; }
+
+  // Impede o checker de recriar a LA ou re-disparar hoje; once/onceAt → desabilita.
+  const today = new Date().toISOString().slice(0, 10);
+  sched.lastFiredDate = today; sched.startedDate = today;
+  if (sched.recurrence === 'once' || (Number.isFinite(sched.onceAtMs) && sched.onceAtMs > 0)) sched.enabled = false;
+  savePreclimat();
+
+  let engineOff = false;
+  if (beforeFire) {
+    _setPreclimatStatus('ended', 'Pré-climatização cancelada antes de iniciar',
+      { endsAtMs: Date.now() + 60_000,
+        alert: { title: '🚫 Pré-climatização cancelada', body: 'Cancelada antes de ligar o motor.' } });
+  } else {
+    _setPreclimatStatus('restoring', 'Cancelando — restaurando AC e desligando motor…', { endsAtMs: 0 });
+    await _restorePreclimatHvac();   // no-op se nada foi aplicado ainda
+    await new Promise(r => setTimeout(r, 2_000));
+    if ((+state.speed_kmh || 0) > 3) {
+      console.log('[preclimat] cancelamento com carro em movimento — motor NÃO desligado');
+    } else if (mqttClient?.connected) {
+      const pressTopic = `homeassistant/button/${GWM_TOPIC_PREFIX}_${ACTION_TO_GWM_BUTTON_CODE.engine_off}/press`;
+      try {
+        await new Promise((resolve, reject) => {
+          mqttClient.publish(pressTopic, 'PRESS', { qos: 1, retain: false }, err => err ? reject(err) : resolve());
+        });
+        engineOff = true;
+        console.log('[preclimat] engine_off enviado via MQTT (cancelamento)');
+      } catch (e) { console.error(`[preclimat] cancel engine_off falhou: ${e.message}`); }
+    }
+    _setPreclimatStatus('ended',
+      engineOff ? 'Cancelada · AC restaurado, motor desligado' : 'Cancelada · AC restaurado',
+      { endsAtMs: Date.now() + 60_000,
+        alert: { title: '🚫 Pré-climatização cancelada',
+                 body: engineOff ? 'AC restaurado e motor desligado.'
+                                 : 'AC restaurado. Motor seguia ligado (carro em movimento).' } });
+  }
+  _schedulePreclimatLAEnd(dev, 30_000);   // encerra a LA logo (30s p/ ver a confirmação)
+  _activeSched = null;
+  return { ok: true, phase, before_fire: beforeFire, engine_off: engineOff };
 }
 
 const PRECLIMAT_LA_TYPE = 'PreClimatActivityAttributes';
@@ -658,6 +1251,58 @@ setInterval(() => {
   if (dirty) savePreclimat();
 }, 60_000);
 
+// ── Recompute de trânsito (autônomo, server-side) ─────────────────────────────
+// Pra planos onceAtMs COM destino + eventStartMs: ~20→3 min antes do disparo,
+// refaz a rota (carro→destino) com o ETA AO VIVO do Mapbox e reposiciona o
+// onceAtMs/departureMs. Roda só uma vez por plano (trafficAdjAt) e nunca depois
+// da LA ter sido criada (startedDate). App fechado — o ajuste é todo no bridge.
+setInterval(async () => {
+  const now = Date.now();
+  let dirty = false;
+  for (const sched of preclimat.schedules) {
+    if (!sched.enabled || !(sched.onceAtMs > 0) || !(sched.eventStartMs > 0)) continue;
+    const hasDest = (sched.destLat || sched.destLng) || (sched.destName && sched.destName.length);
+    if (!hasDest) continue;
+    const fireMs = sched.onceAtMs;
+    if (now < fireMs - 20 * 60_000 || now > fireMs - 3 * 60_000) continue;  // fora da janela
+    if (sched.startedDate || sched.lastFiredDate) continue;                  // LA criada/disparado
+    if (sched.trafficAdjAt && now - sched.trafficAdjAt < 18 * 60_000) continue;
+    sched.trafficAdjAt = now; dirty = true;
+    try {
+      const lat = +state.gps_lat, lng = +state.gps_lng;
+      if (!lat || !lng) { console.warn('[preclimat] recompute trânsito: sem GPS do carro'); continue; }
+      let route;
+      if (sched.destLat || sched.destLng) {
+        route = await _fetchRoute(lat, lng, sched.destLat, sched.destLng);
+      } else {
+        const g = await _geocode(sched.destName);
+        if (g) { route = await _fetchRoute(lat, lng, g.lat, g.lng); sched.destLat = g.lat; sched.destLng = g.lng; }
+      }
+      if (!route) { console.warn('[preclimat] recompute trânsito: rota indisponível'); continue; }
+      const travelMin = Math.round(route.duration / 60);
+      const dep     = sched.eventStartMs - (travelMin + (sched.bufferMin || 0)) * 60_000;
+      const newFire = dep - (sched.climateMin || 0) * 60_000;
+      if (newFire <= now) {                       // trânsito piorou → já passou da hora de ligar
+        console.log('[preclimat] recompute trânsito: novo horário no passado — não reposiciona');
+        continue;
+      }
+      const shiftMin = Math.round((newFire - fireMs) / 60_000);
+      if (Math.abs(shiftMin) >= 3) {
+        sched.onceAtMs = newFire; sched.departureMs = dep;
+        sched.lastFiredDate = ''; sched.startedDate = '';
+        const dir = shiftMin > 0 ? 'adiado' : 'antecipado';
+        console.log(`[preclimat] recompute trânsito: ${sched.label || 'viagem'} ${dir} ${Math.abs(shiftMin)} min (ETA ${travelMin} min${route.traffic ? ', c/ trânsito' : ''})`);
+        sendPush('🚦 Pré-clima ajustado ao trânsito',
+          `${sched.label || 'Viagem'}: pré-clima ${dir} ${Math.abs(shiftMin)} min · ${travelMin} min até o destino${route.traffic ? ' (trânsito ao vivo)' : ''}.`,
+          'preclimat_traffic', { tag: 'preclimat_traffic' });
+      }
+    } catch (e) {
+      console.warn('[preclimat] recompute trânsito falhou:', e.message);
+    }
+  }
+  if (dirty) savePreclimat();
+}, 60_000);
+
 // ── Resumo diário às 20h ──────────────────────────────────────────────────────
 // Roda a cada 60s, dispara exatamente uma vez por dia às 20:00 local.
 setInterval(() => {
@@ -670,26 +1315,30 @@ setInterval(() => {
 
   const todayMidnight = new Date(today + 'T00:00:00').getTime();
 
-  // km e kWh rodados hoje (das auto-trips)
-  let kmHoje  = 0;
-  let kwhHoje = 0;
+  // km, kWh e combustível gastos hoje (das auto-trips)
+  let kmHoje   = 0;
+  let kwhHoje  = 0;
+  let fuelHoje = 0;
   for (const t of autoTripsArr) {
     if ((t.startMs || 0) >= todayMidnight) {
-      kmHoje  += +t.distKm || 0;
-      kwhHoje += +t.netKwh || 0;
+      kmHoje   += +t.distKm || 0;
+      kwhHoje  += +t.netKwh || 0;
+      fuelHoje += +t.fuelL  || 0;
     }
   }
 
-  // Recargas finalizadas hoje (eventos charge_end)
-  const chargesHoje = eventsLog.filter(e => e.type === 'charge_end' && (e.ts || 0) >= todayMidnight).length;
+  // Energia recarregada hoje (kWh somados das sessões de recarga)
+  let chargedHoje = 0;
+  for (const c of chargesArr) {
+    if ((c.timestamp_ms || 0) >= todayMidnight) chargedHoje += +c.energy_kwh || 0;
+  }
 
-  if (kmHoje <= 0 && chargesHoje <= 0) return; // nada a reportar
+  if (kmHoje <= 0 && chargedHoje <= 0) return; // nada a reportar
 
-  const kmStr  = kmHoje.toFixed(0);
   // netKwh é negativo quando energia é consumida; exibe o valor absoluto
-  const kwhStr = Math.abs(kwhHoje).toFixed(1).replace('.', ',');
-  const parts  = [`${kmStr} km rodados`, `${kwhStr} kWh`];
-  if (chargesHoje > 0) parts.push(`${chargesHoje} recarga${chargesHoje > 1 ? 's' : ''}`);
+  const parts = [`${kmHoje.toFixed(0)} km`, `${Math.abs(kwhHoje).toFixed(1).replace('.', ',')} kWh gastos`];
+  if (fuelHoje > 0.1)   parts.push(`${fuelHoje.toFixed(1).replace('.', ',')} L`);
+  if (chargedHoje > 0)  parts.push(`${chargedHoje.toFixed(1).replace('.', ',')} kWh recarregados`);
 
   sendPush('📊 Resumo do dia', parts.join(' · '), 'daily_summary', { tag: 'daily_summary' });
 }, 60_000);
@@ -735,22 +1384,33 @@ async function firePreClimat(sched) {
   _preclimatPrevHvac = null;   // descarta estado anterior não-restaurado de uma sessão antiga
   if (_preclimatRestoreTimer) { clearTimeout(_preclimatRestoreTimer); _preclimatRestoreTimer = null; }
   const { temp, fan, duration } = sched;
-  console.log(`[preclimat] disparando — temp=${temp}°C fan=${fan} (${sched.time})`);
+
+  // Guarda bateria/tomada: na tomada climatiza livre; fora dela exige SOC mínimo —
+  // abaixo do piso não liga o motor (evita descarregar a bateria com o carro parado).
+  const plugged = _preclimatPluggedIn();
+  const soc = +state.soc_pct || 0;
+  if (!plugged && soc > 0 && soc < PRECLIMAT_MIN_SOC_UNPLUGGED) {
+    console.warn(`[preclimat] abortado — SOC ${soc}% < ${PRECLIMAT_MIN_SOC_UNPLUGGED}% e fora da tomada`);
+    _setPreclimatStatus('failed', `Bateria baixa (${soc}%) e fora da tomada`,
+      { temp, fan, endsAtMs: Date.now() + 5 * 60_000,
+        alert: { title: '🔋 Pré-climatização cancelada',
+                 body: `Bateria em ${soc}% e o carro não está na tomada — não liguei o motor pra não descarregar demais.` } });
+    return;
+  }
+
+  console.log(`[preclimat] disparando — temp=${temp}°C fan=${fan} (${sched.time}) plugged=${plugged} soc=${soc}%`);
   _setPreclimatStatus('starting', 'Ligando o motor…',
     { temp, fan, endsAtMs: 0, alert: { title: '⏰ Pré-climatização', body: 'Ligando o motor…' } });
 
-  // Passo 1: ligar motor via HA (mesmo mecanismo do botão do dashboard)
-  if (HA_URL && HA_TOKEN) {
-    const entityId = `button.${GWM_TOPIC_PREFIX}_ligar_o_motor`;
+  // Passo 1: ligar motor via MQTT → standalone GWM (mesmo caminho do botão do dashboard)
+  if (mqttClient?.connected) {
+    const pressTopic = `homeassistant/button/${GWM_TOPIC_PREFIX}_${ACTION_TO_GWM_BUTTON_CODE.engine_on}/press`;
     try {
-      const r = await fetch(`${HA_URL}/api/services/button/press`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${HA_TOKEN}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ entity_id: entityId }),
+      await new Promise((resolve, reject) => {
+        mqttClient.publish(pressTopic, 'PRESS', { qos: 1, retain: false }, err => err ? reject(err) : resolve());
       });
-      if (!r.ok) throw new Error(`HA HTTP ${r.status}`);
       _lastEngineOnCmdMs = Date.now();   // marca: foi comando NOSSO (pré-clima)
-      console.log('[preclimat] comando engine_on enviado via HA');
+      console.log('[preclimat] comando engine_on enviado via MQTT (GWM standalone)');
     } catch (e) {
       console.error(`[preclimat] falha ao ligar motor: ${e.message}`);
       _setPreclimatStatus('failed', 'Não foi possível ligar o motor',
@@ -759,7 +1419,7 @@ async function firePreClimat(sched) {
       return;
     }
   } else {
-    console.warn('[preclimat] HA não configurado — pulando engine_on');
+    console.warn('[preclimat] MQTT offline — pulando engine_on');
   }
 
   // Passo 2: aguardar confirmação de motor ligado por até 5 min (poll 5s).
@@ -846,37 +1506,60 @@ async function firePreClimat(sched) {
   // Sempre puxa ar de FORA no pré-clima (cycle_mode=1 = ar externo, não recircula).
   mqttClient.publish(`${MQTT_PREFIX}/cmd/hvac/cycle_mode`,     '1',     { qos: 1, retain: false });
 
-  const durStr = duration > 0 ? ` · desliga em ${duration} min` : '';
-  const acEndsAtMs = duration > 0 ? Date.now() + duration * 60_000 : 0;
+  // Teto de tempo: duração dinâmica (|interna − alvo|), nunca acima do pedido.
+  // Fora da tomada, limita ainda mais ao orçamento de bateria (não cai do piso SOC).
+  let capMin = _dynamicDurationMin(temp, duration);
+  if (!plugged && capMin > 0 && soc > 0) {
+    const budgetMin = Math.floor((soc - PRECLIMAT_MIN_SOC_UNPLUGGED) / PRECLIMAT_DRAIN_PCT_PER_MIN);
+    if (budgetMin > 0 && budgetMin < capMin) {
+      console.log(`[preclimat] fora da tomada: limitando ${capMin}→${budgetMin} min p/ poupar bateria (SOC ${soc}%)`);
+      capMin = budgetMin;
+    }
+  }
+  if (capMin !== duration && duration > 0) console.log(`[preclimat] duração dinâmica: pedido=${duration} → cap=${capMin} min (interna=${state.inside_temp} alvo=${temp})`);
+
+  const durStr = capMin > 0 ? ` · até ${capMin} min` : '';
+  const acEndsAtMs = capMin > 0 ? Date.now() + capMin * 60_000 : 0;
   _setPreclimatStatus('cooling', `Climatizando · ${temp.toFixed(0)}° · fan ${fan}/7`,
     { temp, fan, endsAtMs: acEndsAtMs,
       alert: { title: '⏰ Pré-climatização ativada',
                body: `Motor ligado · AC ${temp.toFixed(0)}° · ventilação ${fan}/7${durStr}` } });
-  console.log(`[preclimat] AC ativado — temp=${temp} fan=${fan} duration=${duration}min (prev: fan=${prevFan} temp=${prevDrvTemp})`);
+  console.log(`[preclimat] AC ativado — temp=${temp} fan=${fan} cap=${capMin}min (prev: fan=${prevFan} temp=${prevDrvTemp})`);
 
-  // Passo 4: restaurar AC ao estado anterior + desligar motor após X minutos
-  if (duration > 0) {
+  // Passo 4: closed-loop — desliga quando a cabine chega no alvo OU no teto de tempo.
+  // Poll a cada 30s (timer auto-reagendado, guardado em _preclimatRestoreTimer p/ o
+  // cancelamento/abort conseguir matá-lo). Restaura o AC e desliga o motor no fim.
+  if (capMin > 0) {
     // Se o motorista já entrou (porta aberta) enquanto subíamos o AC, nem agenda.
     if (_preclimatAutoOffCancelled) {
-      console.log('[preclimat] entrada detectada antes do timer — não agenda desligamento');
+      console.log('[preclimat] entrada detectada antes do loop — não agenda desligamento');
       return;
     }
-    _preclimatRestoreTimer = setTimeout(async () => {
+    const loopStart = Date.now();
+    const tick = async () => {
       _preclimatRestoreTimer = null;
-      // Trava de segurança: aborta o desligamento se o motorista entrou (porta)
-      // ou se o carro já está em movimento — nunca desligar o motor dirigindo.
       if (_preclimatAutoOffCancelled) {
-        console.log('[preclimat] timer expirou mas desligamento já foi cancelado — ignorando');
+        console.log('[preclimat] loop: desligamento já cancelado — ignorando');
         return;
       }
       if ((+state.speed_kmh || 0) > 3) {
-        console.log('[preclimat] carro em movimento no fim do timer — desligamento abortado');
+        console.log('[preclimat] carro em movimento — desligamento abortado');
         _abortPreclimatAutoOff('em movimento');
         return;
       }
-      console.log('[preclimat] timer expirado — restaurando AC e desligando motor');
+      const elapsed = Date.now() - loopStart;
+      const inside  = +state.inside_temp;
+      const cabinReady = Number.isFinite(inside) && inside !== 0 && Math.abs(inside - temp) <= PRECLIMAT_CABIN_OK_DELTA;
+      const hitCap = elapsed >= capMin * 60_000;
+      if (!hitCap && !(cabinReady && elapsed >= PRECLIMAT_MIN_RUN_MS)) {
+        const next = Math.min(30_000, capMin * 60_000 - elapsed);
+        _preclimatRestoreTimer = setTimeout(tick, Math.max(1_000, next));   // segue climatizando
+        return;
+      }
+      const why = hitCap ? `tempo encerrado (${capMin} min)` : `cabine no alvo (${inside.toFixed(0)}°)`;
+      console.log(`[preclimat] encerrando — ${why} — restaurando AC e desligando motor`);
       _setPreclimatStatus('restoring', 'Restaurando AC e desligando motor…',
-        { endsAtMs: 0, alert: { title: '⏰ Pré-climatização', body: 'Tempo encerrado — restaurando AC e desligando o motor…' } });
+        { endsAtMs: 0, alert: { title: '⏰ Pré-climatização', body: `${hitCap ? 'Tempo encerrado' : 'Cabine pronta'} — restaurando AC e desligando o motor…` } });
 
       // Restaura o AC ao estado anterior (temp/fan/master) antes de desligar o motor.
       await _restorePreclimatHvac();
@@ -887,24 +1570,24 @@ async function firePreClimat(sched) {
         console.log('[preclimat] entrada/movimento durante a restauração — NÃO desliga o motor');
         return;
       }
-      if (HA_URL && HA_TOKEN) {
-        const entityId = `button.${GWM_TOPIC_PREFIX}_desligar_o_motor`;
+      if (mqttClient?.connected) {
+        const pressTopic = `homeassistant/button/${GWM_TOPIC_PREFIX}_${ACTION_TO_GWM_BUTTON_CODE.engine_off}/press`;
         try {
-          await fetch(`${HA_URL}/api/services/button/press`, {
-            method: 'POST',
-            headers: { Authorization: `Bearer ${HA_TOKEN}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ entity_id: entityId }),
+          await new Promise((resolve, reject) => {
+            mqttClient.publish(pressTopic, 'PRESS', { qos: 1, retain: false }, err => err ? reject(err) : resolve());
           });
-          console.log('[preclimat] engine_off enviado via HA');
+          console.log('[preclimat] engine_off enviado via MQTT (GWM standalone)');
         } catch (e) {
           console.error(`[preclimat] falha ao desligar motor: ${e.message}`);
         }
       }
-      _setPreclimatStatus('ended', `Encerrada · motor desligado após ${duration} min`,
+      _setPreclimatStatus('ended', `Encerrada · ${why}`,
         { endsAtMs: Date.now() + 5 * 60_000,
           alert: { title: '⏰ Pré-climatização encerrada',
-                   body: `AC restaurado · motor desligado após ${duration} min.` } });
-    }, duration * 60_000);
+                   body: hitCap ? `AC restaurado · motor desligado após ${capMin} min.`
+                                : `Cabine atingiu ${temp.toFixed(0)}° · AC restaurado e motor desligado.` } });
+    };
+    _preclimatRestoreTimer = setTimeout(tick, Math.min(30_000, capMin * 60_000));
   } else {
     // Sem duração definida: marca como encerrada na hora (LA some em 5 min).
     _setPreclimatStatus('ended', 'Pré-climatização ativada (sem desligamento automático)',
@@ -1218,6 +1901,9 @@ const state = {
   bridge_online:     true,
   last_update_ms:    null,    // última msg de QUALQUER fonte (carro APK ou GWM)
   last_apk_ms:       null,    // última msg do APK (haval/ecotrip/*)
+  last_apk_key:      null,    // tópico da última msg do APK
+  last_apk_live_ms:  null,    // última msg NÃO-retida do APK (carro acordado de fato)
+  last_apk_live_key: null,
   last_gwm_ms:       null,    // última msg da integração GWM Brasil (gwmbrasil_*)
   last_obd_ms:       null,    // última msg do OBD Companion (haval/ecotrip/obd/snapshot)
   car_last_update:   null,
@@ -2062,12 +2748,10 @@ setInterval(() => {
 // é NORMAL o APK ficar silencioso — não dispara alerta. Já o GWM (HA Brasil) é
 // polled pelo HA e DEVE continuar respondendo mesmo com carro dormindo — silêncio
 // dele é sempre anomalia.
-let _sourceStallNotifiedApk = 0;
-let _sourceStallNotifiedGwm = 0;
-let _apkStallActive = false;   // episódio de silêncio do APK já notificado — só re-notifica após recuperar
 let _mqttLastConnectedAt = 0;  // timestamp da última conexão MQTT — grace period pós-reconexão
-const SOURCE_STALL_MS  = 20 * 60_000;          // 20 min de silêncio = stalled
-const SOURCE_NOTIF_GAP = 60 * 60_000;          // não repete antes de 1h
+let _lastCarAwakeMs = 0;       // última vez que _carIsAwake() retornou true
+const SOURCE_STALL_MS = 20 * 60_000;           // 20 min de silêncio = stalled
+const CAR_AWAKE_WINDOW = 30 * 60_000;          // "foi visto ativo" nos últimos 30min
 
 /** True quando há sinal de que o carro está "em uso" — em movimento, com
  *  motor pronto, ou carregando. Nesses casos o APK DEVE estar publicando.
@@ -2120,39 +2804,45 @@ setInterval(() => {
   const now    = Date.now();
   const apkMs  = state.last_apk_ms || 0;
   const gwmMs  = state.last_gwm_ms || 0;
+
+  // Atualiza janela "carro foi visto ativo" antes de qualquer early-return.
+  if (_carIsAwake()) _lastCarAwakeMs = now;
+
   // Só faz sentido comparar quando AMBAS fontes já produziram algo nesta sessão.
   if (apkMs === 0 || gwmMs === 0) return;
   // Grace period pós-reconexão MQTT: retained GWM chega imediatamente mas o APK
   // precisa de tempo para reconectar. Sem isso, qualquer queda de Starlink dispara
   // falso-positivo de "APK silente" logo que o GWM retorna via retained.
   if ((now - _mqttLastConnectedAt) < SOURCE_STALL_MS) return;
+
   const apkAge = now - apkMs;
   const gwmAge = now - gwmMs;
-  // APK voltou a publicar → encerra o episódio e rearma o alerta.
-  if (apkAge < SOURCE_STALL_MS) _apkStallActive = false;
-  // APK silente mas GWM ativo → só alerta se o carro estiver ACORDADO.
-  // Carro dormindo (gear=P + parado) silencia esse alerta — é o normal.
-  // Máx 1 aviso/hora — APK pode reconectar/reiniciar várias vezes (OTA, zombie)
-  // gerando múltiplos episódios; sem o gap ficaria spammando.
-  if (apkAge > SOURCE_STALL_MS && gwmAge < SOURCE_STALL_MS &&
-      !_apkStallActive && _carIsAwake() && (now - _sourceStallNotifiedApk) > SOURCE_NOTIF_GAP) {
-    _apkStallActive = true;
-    _sourceStallNotifiedApk = now;
-    const min = Math.round(apkAge / 60_000);
-    console.log(`[watchdog] APK silente há ${min}min com CARRO ACORDADO (gear=${state.gear} ready=${state.driving_ready} speed=${state.speed_kmh})`);
-    sendPush('📡 App do carro silente',
-      `Sem dados do app no carro há ${min}min (integração GWM continua ativa).`,
-      'anomaly_detected');
-  }
-  // GWM silente mas APK ativo → SEMPRE notifica (HA é polled, deveria sempre responder).
-  if (gwmAge > SOURCE_STALL_MS && apkAge < SOURCE_STALL_MS && (now - _sourceStallNotifiedGwm) > SOURCE_NOTIF_GAP) {
-    _sourceStallNotifiedGwm = now;
-    const min = Math.round(gwmAge / 60_000);
-    console.log(`[watchdog] GWM silente há ${min}min (APK ativo)`);
-    sendPush('🛰️ Integração GWM silente',
-      `Sem dados da GWM Brasil/HA há ${min}min (app do carro continua ativo). Verifique a integração.`,
-      'anomaly_detected');
-  }
+
+  // 1. APK silente mas GWM ativa — só alerta com carro acordado (dormir = normal).
+  _alert('car_apk_stall',
+    apkAge > SOURCE_STALL_MS && gwmAge < SOURCE_STALL_MS && _carIsAwake(),
+    'App do carro silente',
+    `Sem dados do APK há ${Math.round(apkAge / 60_000)}min (GWM continua ativa).`,
+    'high', ['car']);
+
+  // 2. GWM silente mas APK ativo — HA é polled, silêncio é sempre anomalia.
+  _alert('car_gwm_stall',
+    gwmAge > SOURCE_STALL_MS && apkAge < SOURCE_STALL_MS,
+    'Integração GWM silente',
+    `Sem dados da GWM há ${Math.round(gwmAge / 60_000)}min (APK ativo).`,
+    'high', ['satellite']);
+
+  // 3. Silêncio total: ambas fontes sumidas + carro foi visto ativo recentemente.
+  // Cobre quedas de infra que silenciam tudo ao mesmo tempo (Starlink, HA + MQTT).
+  // NB: ha_down / mqtt_down já cobrem a causa raiz; este alerta foca na perspectiva
+  // do carro — "não tenho dados do veículo há Xmin".
+  const bothSilent    = apkAge > SOURCE_STALL_MS && gwmAge > SOURCE_STALL_MS;
+  const recentlyAwake = _lastCarAwakeMs > 0 && (now - _lastCarAwakeMs) < CAR_AWAKE_WINDOW;
+  _alert('car_total_silence',
+    bothSilent && recentlyAwake,
+    'Carro sem comunicação',
+    `APK ${Math.round(apkAge / 60_000)}min + GWM ${Math.round(gwmAge / 60_000)}min sem dados. Ativo há ${Math.round((now - _lastCarAwakeMs) / 60_000)}min.`,
+    'high', ['sos']);
 }, 60_000);
 
 // Fallback do endereço: a GWM publica endereco_atual (geocode da nuvem). Sem ela
@@ -2685,6 +3375,10 @@ app.use((req, res, next) => {
   if (req.path.startsWith('/api')) res.setHeader('Cache-Control', 'no-store, must-revalidate');
   next();
 });
+app.get('/health.html', (_req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.sendFile(path.join(__dirname, 'public', 'health.html'));
+});
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ── Autenticação ──────────────────────────────────────────────────────────────
@@ -2712,6 +3406,349 @@ function requireAuth(req, res, next) {
 // Ping público — sem auth, útil para verificar se o servidor está online
 app.get('/ping', (_req, res) => res.json({ ok: true, ts: Date.now() }));
 
+// ── Stats do Mac (host) — memória/disco/uptime, cacheado (vm_stat é subprocess) ──
+// os.freemem() no macOS conta só páginas livres (~0) e engana; usamos vm_stat
+// pra "em uso" (active+wired+compressor) estilo Activity Monitor.
+const SSD_EXT_PATH = process.env.SSD_EXT_PATH || '/Volumes/SSD1TB';
+let _macStats = { uptime_sec: 0, mem: null, disk: null, disk_ext: null, checked_at: 0 };
+function _pollMacStats() {
+  const os = require('os');
+  const total = os.totalmem();
+  let disk = null, disk_ext = null;
+  try {
+    const s = require('fs').statfsSync('/');
+    disk = { total_gb: +(s.blocks * s.bsize / 1e9).toFixed(1),
+             avail_gb: +(s.bavail * s.bsize / 1e9).toFixed(1) };
+  } catch (_) {}
+  // SSD externo: segura o bundle HAOS (~60GB). Se desmontar ou encher, HA morre.
+  try {
+    const fsx = require('fs');
+    if (fsx.existsSync(SSD_EXT_PATH)) {
+      const s2 = fsx.statfsSync(SSD_EXT_PATH);
+      disk_ext = { path: SSD_EXT_PATH, mounted: true,
+                   total_gb: +(s2.blocks * s2.bsize / 1e9).toFixed(1),
+                   avail_gb: +(s2.bavail * s2.bsize / 1e9).toFixed(1) };
+    } else {
+      disk_ext = { path: SSD_EXT_PATH, mounted: false };
+    }
+  } catch (_) { disk_ext = { path: SSD_EXT_PATH, mounted: false }; }
+  exec('vm_stat', { timeout: 4000 }, (err, stdout) => {
+    let mem = { total_gb: +(total / 1e9).toFixed(1), used_gb: null, avail_gb: null };
+    if (!err && stdout) {
+      const pg = +(/page size of (\d+) bytes/.exec(stdout)?.[1] || 4096);
+      const pages = k => +(new RegExp(k + ':\\s+(\\d+)').exec(stdout)?.[1] || 0);
+      const used = (pages('Pages active') + pages('Pages wired down')
+                    + pages('Pages occupied by compressor')) * pg;
+      mem.used_gb  = +(used / 1e9).toFixed(1);
+      mem.avail_gb = +((total - used) / 1e9).toFixed(1);
+    }
+    // Top 5 processos por RSS (rss em KB). Agrupa por nome de comando.
+    exec('ps -Axo rss=,comm= -r', { timeout: 4000, maxBuffer: 4 * 1024 * 1024 }, (e2, s2) => {
+      let top = [];
+      if (!e2 && s2) {
+        const agg = {};
+        for (const line of s2.split('\n')) {
+          const mm = /^\s*(\d+)\s+(.+)$/.exec(line);
+          if (!mm) continue;
+          const name = mm[2].split('/').pop().trim();
+          agg[name] = (agg[name] || 0) + (+mm[1]) * 1024;
+        }
+        top = Object.entries(agg)
+          .sort((a, b) => b[1] - a[1]).slice(0, 5)
+          .map(([name, bytes]) => ({ name, mb: Math.round(bytes / 1048576) }));
+      }
+      _macStats = { uptime_sec: Math.floor(os.uptime()), mem, disk, disk_ext, top_mem: top, checked_at: Date.now() };
+    });
+  });
+}
+_pollMacStats();
+setInterval(_pollMacStats, 20_000);
+
+// Banda de rede: delta de bytes do netstat -ib na interface default, dividido
+// pelo intervalo. rx/tx em kbps. Detecta a interface a cada tick (WiFi/Ethernet).
+let _netBw = { rx_kbps: null, tx_kbps: null, iface: null, link_mbps: null, link_type: null, checked_at: 0 };
+let _netPrev = null; // { rx, tx, ts }
+let _netLink = { mbps: null, type: null }; // velocidade negociada do link local (WiFi/Ethernet)
+function _pollLinkSpeed() {
+  // WiFi: Transmit Rate (Mbps) via system_profiler. Ethernet: media baseT do ifconfig.
+  // system_profiler do WiFi faz scan de rádio e leva ~15s — timeout largo, poll lento (60s).
+  exec('system_profiler SPAirPortDataType 2>/dev/null', { timeout: 20000, maxBuffer: 1 << 20 }, (e, out) => {
+    const tx = /Transmit Rate:\s*(\d+)/.exec(out || '');
+    if (tx) { _netLink = { mbps: +tx[1], type: 'WiFi' }; return; }
+    const iface = _netBw.iface || 'en0';
+    exec(`ifconfig ${iface} 2>/dev/null`, { timeout: 3000 }, (e2, out2) => {
+      const m = /media:.*?(\d+)base/i.exec(out2 || '');
+      _netLink = m ? { mbps: +m[1], type: 'Ethernet' } : { mbps: null, type: null };
+    });
+  });
+}
+_pollLinkSpeed();
+setInterval(_pollLinkSpeed, 60_000);
+function _pollNetBw() {
+  exec("route -n get default 2>/dev/null | awk '/interface:/{print $2}'", { timeout: 3000 }, (e0, ifaceOut) => {
+    const iface = (ifaceOut || '').trim() || 'en0';
+    exec(`netstat -ib -I ${iface}`, { timeout: 3000 }, (err, stdout) => {
+      if (err || !stdout) return;
+      const line = stdout.split('\n').find(l => new RegExp('^' + iface + '\\s').test(l));
+      if (!line) return;
+      const c = line.trim().split(/\s+/);
+      const rx = +c[6], tx = +c[9]; // Ibytes, Obytes (col Link#)
+      const now = Date.now();
+      if (_netPrev && _netPrev.iface === iface && now > _netPrev.ts) {
+        const dt = (now - _netPrev.ts) / 1000;
+        _netBw = {
+          rx_kbps: Math.max(0, Math.round((rx - _netPrev.rx) * 8 / 1000 / dt)),
+          tx_kbps: Math.max(0, Math.round((tx - _netPrev.tx) * 8 / 1000 / dt)),
+          iface, link_mbps: _netLink.mbps, link_type: _netLink.type, checked_at: now,
+        };
+      }
+      _netPrev = { rx, tx, ts: now, iface };
+    });
+  });
+}
+_pollNetBw();
+setInterval(_pollNetBw, 5_000);
+
+// ── Processos pm2 (todos os apps do Mac Mini) ────────────────────────────────
+const PM2_BIN = process.env.PM2_BIN || '/usr/local/bin/pm2';
+let _processes = [];
+function _pollProcesses() {
+  exec(`${PM2_BIN} jlist`, { timeout: 6000, maxBuffer: 8 * 1024 * 1024 }, (err, stdout) => {
+    if (err || !stdout) return;
+    try {
+      _processes = JSON.parse(stdout).map(p => ({
+        name:        p.name,
+        status:      p.pm2_env?.status || 'unknown',
+        cpu:         p.monit?.cpu ?? null,
+        mem_mb:      Math.round((p.monit?.memory || 0) / 1048576),
+        restarts:    p.pm2_env?.restart_time ?? 0,
+        uptime_sec:  p.pm2_env?.pm_uptime ? Math.floor((Date.now() - p.pm2_env.pm_uptime) / 1000) : null,
+      })).sort((a, b) => a.name.localeCompare(b.name));
+    } catch (_) {}
+  });
+}
+_pollProcesses();
+setInterval(_pollProcesses, 15_000);
+
+// ── Recência de backups (Lari/Radicale, Haval tarball) ───────────────────────
+// Cada fonte aponta pra um diretório; pega a entrada mais nova (file ou dir) por
+// mtime e reporta a idade. Alerta se passar de max_age_h.
+const _home = require('os').homedir();
+const BACKUP_SOURCES = [
+  { name: 'Lari (SQLite+Radicale)', dir: path.join(_home, 'whats-assistant', 'backups'), max_age_h: 30 },
+  { name: 'Haval (tarball)', dir: path.join(_home, 'Library', 'Mobile Documents', 'com~apple~CloudDocs', '02. RAFAEL PESSOAL', 'Backup Haval EcoTrip', 'daily'), max_age_h: 30 },
+  { name: 'SSD físico (2x/dia)', dir: '/Volumes/SSD1TB/Backups/haval-ecotrip/daily', max_age_h: 16 },
+  { name: 'MQTT (broker)', dir: '/Volumes/SSD1TB/Backups/mosquitto/daily', max_age_h: 16 },
+  { name: 'Clockin bkp-of-bkp', dir: '/Volumes/SSD1TB/Backups/ellevar-clockin/backups-mirror', max_age_h: 30 },
+];
+let _backups = [];
+function _pollBackups() {
+  const fsx = require('fs');
+  _backups = BACKUP_SOURCES.map((src) => {
+    try {
+      const entries = fsx.readdirSync(src.dir);
+      if (!entries.length) return { name: src.name, ok: false, error: 'vazio', max_age_h: src.max_age_h };
+      let newestMs = 0, newestName = null;
+      for (const e of entries) {
+        if (e.startsWith('.')) continue;
+        const st = fsx.statSync(path.join(src.dir, e));
+        if (st.mtimeMs > newestMs) { newestMs = st.mtimeMs; newestName = e; }
+      }
+      if (!newestName) return { name: src.name, ok: false, error: 'vazio', max_age_h: src.max_age_h };
+      const ageH = (Date.now() - newestMs) / 3600000;
+      return { name: src.name, ok: ageH <= src.max_age_h, newest: newestName,
+               age_hours: Math.round(ageH * 10) / 10, max_age_h: src.max_age_h, checked_at: Date.now() };
+    } catch (e) {
+      return { name: src.name, ok: false, error: e.code === 'ENOENT' ? 'dir ausente' : e.message, max_age_h: src.max_age_h };
+    }
+  });
+}
+_pollBackups();
+setInterval(_pollBackups, 10 * 60_000);
+
+// ── Tendência preditiva: disco/SSD/RSS via regressão linear ──────────────────
+// Guarda amostras (persistidas) e projeta: quantos dias até encher / detecta
+// memory leak. Mais útil que o snapshot — avisa ANTES de bater no limite.
+const TREND_FILE   = path.join(__dirname, '.trend_samples.json');
+const TREND_MAX    = 1100;            // ~7,6 dias a 10min/amostra
+const TREND_MIN_N  = 6;               // mínimo p/ projetar (≈1h de dados)
+let _trendSamples = [];               // [{ ts, di, de, rss }]  (gb, gb, mb)
+try { _trendSamples = JSON.parse(fs.readFileSync(TREND_FILE, 'utf8')) || []; } catch (_) {}
+let _trend = { disk_int: null, disk_ext: null, rss: null, samples: 0 };
+
+// Regressão linear y=a+bx sobre (horas, valor). Retorna slope/dia + ETA até `target`.
+function _linfit(pts, perDayUnit) {
+  const n = pts.length;
+  if (n < TREND_MIN_N) return null;
+  const x0 = pts[0].x;
+  let sx = 0, sy = 0, sxx = 0, sxy = 0;
+  for (const p of pts) { const x = p.x - x0; sx += x; sy += p.y; sxx += x * x; sxy += x * p.y; }
+  const d = n * sxx - sx * sx;
+  if (d === 0) return null;
+  const b = (n * sxy - sx * sy) / d;   // unidade por hora
+  const spanH = pts[n - 1].x - pts[0].x;
+  return { slope_per_day: +(b * 24).toFixed(2), current: +pts[n - 1].y.toFixed(2),
+           span_h: +spanH.toFixed(1), unit: perDayUnit };
+}
+// ETA em dias até `current` cair a `floor` (recurso esgotando). null se subindo/estável.
+function _etaToFloor(fit, floor) {
+  if (!fit || fit.slope_per_day >= -0.001) return null;
+  const days = (fit.current - floor) / (-fit.slope_per_day);
+  return days > 0 ? +days.toFixed(1) : 0;
+}
+function _pollTrend() {
+  const m  = _macStats;
+  const di = m.disk?.avail_gb ?? null;
+  const de = (m.disk_ext && m.disk_ext.mounted) ? (m.disk_ext.avail_gb ?? null) : null;
+  const rss = Math.round(process.memoryUsage().rss / 1048576);
+  _trendSamples.push({ ts: Date.now(), di, de, rss });
+  if (_trendSamples.length > TREND_MAX) _trendSamples = _trendSamples.slice(-TREND_MAX);
+  try { fs.writeFileSync(TREND_FILE, JSON.stringify(_trendSamples)); } catch (_) {}
+
+  const toPts = (key) => _trendSamples
+    .filter(s => s[key] != null)
+    .map(s => ({ x: s.ts / 3600_000, y: s[key] }));
+  const diFit  = _linfit(toPts('di'),  'gb');
+  const deFit  = _linfit(toPts('de'),  'gb');
+  const rssFit = _linfit(toPts('rss'), 'mb');
+  _trend = {
+    disk_int: diFit  ? { ...diFit,  eta_days: _etaToFloor(diFit, 8) } : null,
+    disk_ext: deFit  ? { ...deFit,  eta_days: _etaToFloor(deFit, 5) } : null,
+    rss:      rssFit ? { ...rssFit } : null,   // slope_per_day em MB/dia; >0 = subindo (leak)
+    samples:  _trendSamples.length,
+    checked_at: Date.now(),
+  };
+}
+setTimeout(_pollTrend, 25_000);     // espera o 1º _pollMacStats popular
+setInterval(_pollTrend, 10 * 60_000);
+
+// ── iCloud: backup local ≠ offsite. Confere upload REAL via JXA ───────────────
+// Lista o arquivo mais novo de cada produto no backup iCloud e pergunta ao
+// NSURLUbiquitousItemIsUploadedKey se já subiu. Detecta backup "preso" local.
+const ICLOUD_BACKUP_DIR = process.env.ICLOUD_BACKUP_DIR ||
+  path.join(_home, 'Library', 'Mobile Documents', 'com~apple~CloudDocs', '02. RAFAEL PESSOAL', 'Backup Haval EcoTrip');
+const ICLOUD_PROBE = path.join(__dirname, '..', 'scripts', 'icloud-upload-status.js');
+let _icloudSync = { checked_at: 0, total: 0, uploaded: 0, pending: 0, errors: 0, files: [], error: null };
+function _newestFileIn(dir) {
+  try {
+    const fsx = require('fs');
+    let best = null, bestMs = 0;
+    const walk = (d, depth) => {
+      if (depth > 2) return;
+      for (const e of fsx.readdirSync(d)) {
+        if (e.startsWith('.')) continue;
+        const fp = path.join(d, e);
+        const st = fsx.statSync(fp);
+        if (st.isDirectory()) walk(fp, depth + 1);
+        else if (st.mtimeMs > bestMs) { bestMs = st.mtimeMs; best = fp; }
+      }
+    };
+    walk(dir, 0);
+    return best;
+  } catch (_) { return null; }
+}
+function _pollIcloudSync() {
+  const fsx = require('fs');
+  const { execFile } = require('child_process');
+  let roots;
+  try { roots = fsx.readdirSync(ICLOUD_BACKUP_DIR).filter(e => !e.startsWith('.')); }
+  catch (e) { _icloudSync = { checked_at: Date.now(), total: 0, uploaded: 0, pending: 0, errors: 0, files: [], error: e.code === 'ENOENT' ? 'dir ausente' : e.message }; return; }
+  // 1 arquivo mais novo por produto (raiz ou subdir) — amostra representativa.
+  const targets = [];
+  for (const r of roots) {
+    const rp = path.join(ICLOUD_BACKUP_DIR, r);
+    let st; try { st = fsx.statSync(rp); } catch (_) { continue; }
+    const f = st.isDirectory() ? _newestFileIn(rp) : rp;
+    if (f) targets.push({ product: r, file: f });
+  }
+  if (!targets.length) { _icloudSync = { checked_at: Date.now(), total: 0, uploaded: 0, pending: 0, errors: 0, files: [], error: 'sem arquivos' }; return; }
+  const args = ['-l', 'JavaScript', ICLOUD_PROBE, ...targets.map(t => t.file)];
+  execFile('osascript', args, { timeout: 15000 }, (err, stdout) => {
+    if (err) { _icloudSync = { ..._icloudSync, checked_at: Date.now(), error: 'osascript: ' + err.message }; return; }
+    let arr; try { arr = JSON.parse(stdout); } catch (_) { _icloudSync = { ..._icloudSync, checked_at: Date.now(), error: 'parse' }; return; }
+    let uploaded = 0, pending = 0, errors = 0;
+    const files = targets.map((t, i) => {
+      const s = arr[i] || {};
+      if (s.uploaded) uploaded++; else pending++;
+      if (s.error) errors++;
+      return { product: t.product, name: path.basename(t.file), uploaded: !!s.uploaded, uploading: !!s.uploading, error: !!s.error };
+    });
+    _icloudSync = { checked_at: Date.now(), total: targets.length, uploaded, pending, errors, files, error: null };
+  });
+}
+setTimeout(_pollIcloudSync, 30_000);
+setInterval(_pollIcloudSync, 15 * 60_000);
+
+// ── Health específico de apps vizinhos (Clockin etc.) ────────────────────────
+const CLOCKIN_HEALTH_URL   = process.env.CLOCKIN_HEALTH_URL   || 'http://127.0.0.1:3010/clockin/api/health/full';
+const CLOCKIN_HEALTH_TOKEN = process.env.CLOCKIN_HEALTH_TOKEN || '';
+let _appHealth = { clockin: { up: null } };
+async function _pollAppHealth() {
+  const t0 = Date.now();
+  try {
+    const ctrl = new AbortController();
+    const tm = setTimeout(() => ctrl.abort(), 3000);
+    const r = await fetch(CLOCKIN_HEALTH_URL, { signal: ctrl.signal, headers: { 'x-health-token': CLOCKIN_HEALTH_TOKEN } });
+    clearTimeout(tm);
+    const j = await r.json().catch(() => ({}));
+    _appHealth.clockin = {
+      up:         r.ok,                       // HTTP respondeu
+      healthy:    j.ok ?? null,               // health profundo (DB/backup/VAPID)
+      version:    j.version || null,
+      latency_ms: Date.now() - t0,
+      issues:     j.issues  || [],
+      metrics:    j.metrics || {},
+    };
+  } catch (e) {
+    _appHealth.clockin = { up: false, error: e.name === 'AbortError' ? 'timeout' : e.message };
+  }
+}
+_pollAppHealth();
+setInterval(_pollAppHealth, 20_000);
+
+// ── Lari (whats-assistant): 2 tenants (deivid/rafael), web server próprio ────
+const LARI_HEALTH_TOKEN = process.env.LARI_HEALTH_TOKEN || '';
+const LARI_HEALTH_URLS  = (process.env.LARI_HEALTH_URLS || '').split(',').map(s => s.trim()).filter(Boolean);
+let _lari = []; // [{ url, up, user, connected, me, qr_pending, uptime_sec, latency_ms, pid, mem_mb, cpu, error }]
+async function _pollLari() {
+  if (!LARI_HEALTH_URLS.length) return;
+  const arr = await Promise.all(LARI_HEALTH_URLS.map(async url => {
+    const t0 = Date.now();
+    try {
+      const ctrl = new AbortController();
+      const tm = setTimeout(() => ctrl.abort(), 3000);
+      const r = await fetch(url, { signal: ctrl.signal, headers: { 'x-health-token': LARI_HEALTH_TOKEN } });
+      clearTimeout(tm);
+      const j = await r.json().catch(() => ({}));
+      return { url, up: r.ok, user: j.user || null, connected: !!j.connected, me: j.me || null,
+               qr_pending: !!j.qr_pending, uptime_sec: j.uptime_sec ?? null, latency_ms: Date.now() - t0,
+               pid: j.pid || null, mem_mb: null, cpu: null };
+    } catch (e) {
+      return { url, up: false, error: e.name === 'AbortError' ? 'timeout' : e.message };
+    }
+  }));
+  // mem/cpu via ps (mesma metrica do card Processos): RSS em KB, %cpu.
+  const pids = arr.filter(l => l.pid).map(l => l.pid);
+  if (pids.length) {
+    await new Promise(resolve => {
+      exec(`ps -o pid=,rss=,%cpu= -p ${pids.join(',')}`, { timeout: 3000 }, (err, stdout) => {
+        if (!err && stdout) {
+          for (const line of stdout.trim().split('\n')) {
+            const m = /^\s*(\d+)\s+(\d+)\s+([\d.]+)/.exec(line);
+            if (!m) continue;
+            const ent = arr.find(l => l.pid === +m[1]);
+            if (ent) { ent.mem_mb = Math.round(+m[2] / 1024); ent.cpu = +m[3]; }
+          }
+        }
+        resolve();
+      });
+    });
+  }
+  _lari = arr;
+}
+_pollLari();
+setInterval(_pollLari, 20_000);
+
 // GET /api/health — status operacional do bridge (auth-gated).
 // Expõe uptime, memória, MQTT, WS clients e histórico de crashes.
 app.get('/api/health', requireAuth, (_req, res) => {
@@ -2730,15 +3767,60 @@ app.get('/api/health', requireAuth, (_req, res) => {
     },
     mqtt: {
       connected:      !!(mqttClient && mqttClient.connected),
-      last_apk_ms:    state.last_apk_ms  || 0,
+      last_apk_ms:       state.last_apk_ms       || 0,
+      last_apk_key:      state.last_apk_key      || null,
+      last_apk_live_ms:  state.last_apk_live_ms  || 0,
+      last_apk_live_key: state.last_apk_live_key || null,
       last_gwm_ms:    state.last_gwm_ms  || 0,
     },
     ws_clients:    clients.size,
     audio_clients: audioClients.size,
     hf_clients:    _hfClients.size,
+    tailscale:     _tsStatus,
+    funnel:        _funnelStatus,
+    network:       { ..._netStatus, bandwidth: _netBw },
+    ha:            _haStatus,
+    mqtt_broker:   _mqttBrokerStatus,
+    gateway:       _gwStatus,
+    cert:          _certStatus,
+    cert_broker:   _certBrokerStatus,
+    mqtt_ping:     _mqttPing,
+    system:        { car_app_version: state.car_app_version || null },
+    mac:           _macStats,
+    processes:     _processes,
+    clockin:       _appHealth.clockin,
+    lari:          _lari,
+    backups:       _backups,
+    trend:         _trend,
+    icloud_sync:   _icloudSync,
+    apns:          apnsLive.getStatus(),
+    grasi: {
+      last_ms:   _songProLatest?.ts || 0,
+      soc:       _songProLatest?.soc || 0,
+      power_kw:  _songProLatest?.powerKw || 0,
+      charging:  !!(_songProSession && _songProSession.active),
+    },
     events:        _healthEvents.slice().reverse(),   // mais recente primeiro
     mem_series:    _memSeries,
+    stats:         _healthStats(),
+    car: {
+      online:        state.car_online || _gwmAlive(),
+      last_apk_ms:   state.last_apk_ms  || 0,
+      last_gwm_ms:   state.last_gwm_ms  || 0,
+      last_awake_ms: _lastCarAwakeMs    || 0,
+      last_ms:       Math.max(state.last_apk_ms || 0, state.last_gwm_ms || 0),
+      soc:           +state.soc_pct || 0,
+      power_kw:      +state.charge_power_kw || 0,
+      charging:      state.charging_state === 'Carregando',
+    },
+    alerts: Object.fromEntries(_alertState),
   });
+});
+
+app.post('/api/health/events/clear', requireAuth, (_req, res) => {
+  _healthEvents = [];
+  _saveHealthEvents();
+  res.json({ ok: true });
 });
 
 // ── /api/auth/* — rotas de autenticação (públicas e privadas) ────────────────
@@ -4001,6 +5083,7 @@ app.delete('/api/refuels/:id', (req, res) => {
   const idx = refuels.findIndex(x => x.id === req.params.id || String(x.timestamp_ms) === req.params.id);
   if (idx < 0) return res.status(404).json({ error: 'não encontrado' });
   refuels.splice(idx, 1);
+  saveRefuels();
   recomputeTankAvgPrice();
   res.json({ ok: true, tank_avg_price_per_l: state.tank_avg_price_per_l });
 });
@@ -5153,6 +6236,20 @@ function ingestAutoTrip({ tripId, autoTrip, samples }, opts = {}) {
         if (drive != null) parts.push(`condução ${drive}`);
 
         sendPush('🏁 Viagem concluída', parts.join(' · '), 'trip_end');
+
+        // #9: resumo narrado pela Lari (opt-in + km mínimo configuráveis no app).
+        if (notifPrefs.trip_summary_narrated && distKm >= (notifPrefs.trip_summary_min_km || 0)) {
+          notifyLariTripSummary({
+            distKm, timeSec: sec, netKwh, fuelL, cost,
+            kwh100: kwh100 ? +kwh100 : null,
+            kmL: kmL ? +kmL : null,
+            dropSocPct: dropSoc > 0.5 ? Math.round(dropSoc) : 0,
+            driveScore: drive ?? null,
+            destination: record.knownEnd || record.endKp || record.name || null,
+            startMs: autoTrip.startMs || 0,
+            endMs: autoTrip.endMs || Date.now(),
+          });
+        }
       }
     }
     return { status: 200, body: { ok: true } };
@@ -5188,6 +6285,184 @@ app.get('/api/autotrips', (req, res) => {
     res.setHeader('Access-Control-Expose-Headers', 'X-Tombstones');
   }
   res.json(arr.slice(0, 300));
+});
+
+// ── Rotina: horário típico da 1ª saída do dia, por dia da semana ──────────────
+// Determinístico (sem LLM): agrupa as auto-trips por dia local, pega a 1ª viagem
+// de cada dia e tira a MEDIANA do horário por dia da semana. A Lari usa pra
+// antecipar pré-clima quando não há compromisso na agenda. Janela default 56d.
+const _DOW_LABEL = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'];
+function _median(nums) {
+  if (!nums.length) return null;
+  const a = [...nums].sort((x, y) => x - y);
+  const m = a.length >> 1;
+  return a.length % 2 ? a[m] : Math.round((a[m - 1] + a[m]) / 2);
+}
+function _minToHHMM(min) {
+  if (min == null) return null;
+  const h = Math.floor(min / 60) % 24, m = min % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+app.get('/api/routine/departure', (req, res) => {
+  const lookbackDays = Math.min(180, Math.max(7, parseInt(req.query.days, 10) || 56));
+  const minSamples = Math.max(2, parseInt(req.query.min, 10) || 3);
+  const since = Date.now() - lookbackDays * 86400_000;
+
+  // 1ª viagem de cada dia local → { dayKey: {dow, minuteOfDay} }
+  const firstOfDay = new Map();
+  for (const t of autoTripsArr) {
+    const ms = t.startMs || 0;
+    if (ms < since) continue;
+    if (!((t.distKm || 0) > 0.3 || (t.timeSec || 0) >= 120)) continue; // ignora micro-movimento
+    const d = new Date(ms);
+    const dayKey = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+    const minuteOfDay = d.getHours() * 60 + d.getMinutes();
+    const cur = firstOfDay.get(dayKey);
+    if (!cur || minuteOfDay < cur.minuteOfDay) firstOfDay.set(dayKey, { dow: d.getDay(), minuteOfDay });
+  }
+
+  const byDow = Array.from({ length: 7 }, () => []);
+  const weekdayPool = [], weekendPool = [];
+  for (const { dow, minuteOfDay } of firstOfDay.values()) {
+    byDow[dow].push(minuteOfDay);
+    (dow === 0 || dow === 6 ? weekendPool : weekdayPool).push(minuteOfDay);
+  }
+
+  const perDow = {};
+  for (let d = 0; d < 7; d++) {
+    const med = byDow[d].length >= minSamples ? _median(byDow[d]) : null;
+    perDow[d] = { label: _DOW_LABEL[d], hhmm: _minToHHMM(med), samples: byDow[d].length };
+  }
+  const dow = /^[0-6]$/.test(String(req.query.dow)) ? +req.query.dow : new Date().getDay();
+  const isWeekend = dow === 0 || dow === 6;
+  const pool = isWeekend ? weekendPool : weekdayPool;
+  const poolMed = pool.length >= minSamples ? _median(pool) : null;
+  // hoje: usa a mediana do próprio dia da semana; cai pro pool (úteis/fim) se faltar amostra
+  const todayMed = byDow[dow].length >= minSamples ? _median(byDow[dow]) : poolMed;
+
+  res.json({
+    ok: true,
+    lookbackDays, daysObserved: firstOfDay.size,
+    today: { dow, label: _DOW_LABEL[dow], hhmm: _minToHHMM(todayMed), samples: byDow[dow].length },
+    weekdayMedian: { hhmm: _minToHHMM(weekdayPool.length >= minSamples ? _median(weekdayPool) : null), samples: weekdayPool.length },
+    weekendMedian: { hhmm: _minToHHMM(weekendPool.length >= minSamples ? _median(weekendPool) : null), samples: weekendPool.length },
+    perDow,
+  });
+});
+
+// ── Rotina por LOCAL: destinos recorrentes + dwell (quanto tempo fica) ────────
+// Agrupa os destinos das viagens (grade ~110m) e, pareando cada chegada com a
+// saída seguinte do mesmo lugar, aprende: nº de visitas, hora típica de chegada,
+// duração típica da parada (dwell) e dias da semana. A Lari usa pra antecipar
+// climatização da volta (ex: almoço diário de ~40 min com calor lá fora).
+function _placeKey(lat, lng) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  return `${lat.toFixed(3)},${lng.toFixed(3)}`; // ~110m
+}
+function _computeRoutinePlaces(lookbackDays, minVisits) {
+  const since = Date.now() - lookbackDays * 86400_000;
+  // ascendente p/ parear chegada→próxima saída do mesmo lugar
+  const trips = autoTripsArr.filter(t => (t.startMs || 0) >= since).sort((a, b) => (a.startMs || 0) - (b.startMs || 0));
+  const places = new Map(); // key → {name, lat, lng, arrivals[], dwells[], dows[]}
+  for (let i = 0; i < trips.length; i++) {
+    const t = trips[i];
+    const key = _placeKey(+t.endLat, +t.endLng);
+    if (!key || !(t.endMs > 0)) continue;
+    let p = places.get(key);
+    if (!p) { p = { key, names: {}, lat: +t.endLat, lng: +t.endLng, arrivals: [], dwells: [], dows: Array(7).fill(0) }; places.set(key, p); }
+    if (t.endKp) p.names[t.endKp] = (p.names[t.endKp] || 0) + 1;
+    const d = new Date(t.endMs);
+    p.arrivals.push(d.getHours() * 60 + d.getMinutes());
+    p.dows[d.getDay()]++;
+    // dwell = início da PRÓXIMA viagem que sai daqui − chegada (mesma grade)
+    const nxt = trips[i + 1];
+    if (nxt && _placeKey(+nxt.startLat, +nxt.startLng) === key && nxt.startMs > t.endMs) {
+      const min = Math.round((nxt.startMs - t.endMs) / 60000);
+      if (min >= 10 && min <= 360) p.dwells.push(min);
+    }
+  }
+  const out = [];
+  for (const p of places.values()) {
+    if (p.arrivals.length < minVisits) continue;
+    const name = Object.entries(p.names).sort((a, b) => b[1] - a[1])[0]?.[0] || null;
+    const topDow = p.dows.map((n, d) => ({ d, n })).sort((a, b) => b.n - a.n)[0];
+    out.push({
+      key: p.key, name, lat: +p.lat.toFixed(5), lng: +p.lng.toFixed(5),
+      visits: p.arrivals.length,
+      arrivalHHMM: _minToHHMM(_median(p.arrivals)),
+      dwellMin: p.dwells.length ? _median(p.dwells) : null,
+      dwellSamples: p.dwells.length,
+      topDow: topDow ? { dow: topDow.d, label: _DOW_LABEL[topDow.d], count: topDow.n } : null,
+      // "quase todo dia" = visto em >=60% dos dias observados da janela
+      frequent: p.arrivals.length >= Math.max(minVisits, Math.round(lookbackDays * 0.6 / 7)),
+    });
+  }
+  out.sort((a, b) => b.visits - a.visits);
+  return out;
+}
+app.get('/api/routine/places', (req, res) => {
+  const lookbackDays = Math.min(365, Math.max(7, parseInt(req.query.days, 10) || 60));
+  const minVisits = Math.max(2, parseInt(req.query.min, 10) || 4);
+  const out = _computeRoutinePlaces(lookbackDays, minVisits).map(({ key, ...p }) => p);
+  res.json({ ok: true, lookbackDays, places: out.slice(0, 30) });
+});
+
+// temp atual REAL no ponto (open-meteo) — NÃO usar ambient_c do carro: congela
+// quando o carro dorme. null se indisponível.
+async function _liveTempC(lat, lng) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  try {
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}`
+      + `&current=temperature_2m&timezone=auto`;
+    const r = await fetch(url, { signal: AbortSignal.timeout(9000) });
+    if (!r.ok) return null;
+    const j = await r.json();
+    const t = j?.current?.temperature_2m;
+    return Number.isFinite(+t) ? +t : null;
+  } catch { return null; }
+}
+
+// GET /api/routine/return-suggestion — "o carro está num lugar recorrente,
+// perto da hora típica de sair, e tá quente lá fora? sugerir ligar o AC antes".
+// Estado puro: decide com base no estado VIVO (gps, motor) + dwell decorrido
+// (desde a última chegada) + temp REAL via open-meteo. A cadência/janela/dedup
+// é responsabilidade de quem chama (poller da Lari).
+app.get('/api/routine/return-suggestion', async (req, res) => {
+  const tempThresh = Number.isFinite(+req.query.temp) ? +req.query.temp : 30;
+  const dwellPct   = Number.isFinite(+req.query.dwellpct) ? +req.query.dwellpct : 0.7;
+  const graceMin   = Number.isFinite(+req.query.grace) ? +req.query.grace : 30;
+  const lookbackDays = Math.min(365, Math.max(7, parseInt(req.query.days, 10) || 60));
+  const minVisits = Math.max(2, parseInt(req.query.min, 10) || 4);
+
+  const engineOff = String(state.engine_state) === '0';
+  const last = autoTripsArr[0]; // mais recente (ordenado desc por startMs)
+  const parkedKey = last ? _placeKey(+last.endLat, +last.endLng) : null;
+  const parkedSinceMs = last?.endMs || 0;
+
+  const base = { ok: true, suggest: false };
+  if (!engineOff) return res.json({ ...base, reason: 'motor ligado / em movimento' });
+  if (!parkedKey || !(parkedSinceMs > 0)) return res.json({ ...base, reason: 'sem viagem recente p/ ancorar' });
+
+  const place = _computeRoutinePlaces(lookbackDays, minVisits).find(p => p.key === parkedKey && p.frequent);
+  if (!place) return res.json({ ...base, reason: 'não é um local recorrente' });
+  if (!(place.dwellMin > 0)) return res.json({ ...base, reason: 'sem tempo de permanência típico p/ esse local' });
+
+  const dwellElapsedMin = Math.round((Date.now() - parkedSinceMs) / 60000);
+  const windowFrom = Math.round(place.dwellMin * dwellPct);
+  const windowTo   = place.dwellMin + graceMin; // janela de saída: não nagueia eternamente
+  const place4 = { name: place.name, lat: place.lat, lng: place.lng, dwellMin: place.dwellMin, dwellElapsedMin };
+  if (dwellElapsedMin < windowFrom) return res.json({ ...base, reason: 'ainda longe da hora típica de sair', place: place4 });
+  if (dwellElapsedMin > windowTo)   return res.json({ ...base, reason: 'já passou da janela típica de saída (fora de rotina)', place: place4 });
+
+  const tempC = await _liveTempC(place.lat, place.lng);
+  if (tempC == null) return res.json({ ...base, reason: 'temp local indisponível', place: place4 });
+  if (tempC < tempThresh) return res.json({ ...base, reason: `tá ${Math.round(tempC)}° lá (abaixo de ${tempThresh}°)`, place: place4, tempC });
+
+  res.json({
+    ok: true, suggest: true, place: place4, tempC,
+    reason: `parado em ${place.name || 'local recorrente'} há ${dwellElapsedMin}min (típico ~${place.dwellMin}min) e tá ${Math.round(tempC)}° lá fora`,
+    action: { type: 'car_command', name: 'ac_on' },
+  });
 });
 
 // ── Logbook: diário de bordo agregado por mês ────────────────────────────────
@@ -5486,6 +6761,112 @@ app.get('/api/stats/savings', (req, res) => {
       kwhPerLitre:    KWH_PER_L_EQUIV,
     },
   });
+});
+
+// GET /api/health-score — índice consolidado de saúde do carro (0-100).
+// Junta 4 subscores: bateria 12V, pneus, autonomia ICE (tendência) e manutenção.
+app.get('/api/health-score', (_req, res) => {
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+  const subs = [];
+  const issues = [];
+
+  // ── Bateria 12V: 90%→100, 50%→0 ──
+  const v12 = +state.batt_12v_pct || 0;
+  if (v12 > 0) {
+    const s = Math.round(clamp((v12 - 50) / 40 * 100, 0, 100));
+    subs.push({ key: 'batt12', label: 'Bateria 12V', score: s, detail: `${v12}%` });
+    if (s < 60) issues.push('Bateria 12V baixa');
+  }
+
+  // ── Pneus: pior pneu. 32 psi→100, 26 psi→0 ──
+  const tyres = ['tyre_fl', 'tyre_fr', 'tyre_rl', 'tyre_rr'].map(k => +state[k] || 0).filter(v => v > 0);
+  if (tyres.length) {
+    const worst = Math.min(...tyres);
+    const s = Math.round(clamp((worst - 26) / 6 * 100, 0, 100));
+    subs.push({ key: 'tyres', label: 'Pneus', score: s, detail: `mín ${worst.toFixed(0)} psi` });
+    if (s < 60) issues.push('Pressão de pneu baixa');
+  }
+
+  // ── Autonomia ICE (tendência): queda >10% com tanque similar penaliza ──
+  const last = telemetryHistory[telemetryHistory.length - 1];
+  if (last && last.fuel_l > 5) {
+    const recent = telemetryHistory.filter(s => Math.abs((s.fuel_l || 0) - last.fuel_l) < 3 && (s.autonomy_ice || 0) > 0).sort((a, b) => a.ts - b.ts);
+    if (recent.length >= 5) {
+      const f3 = recent.slice(0, 3).map(s => s.autonomy_ice);
+      const l3 = recent.slice(-3).map(s => s.autonomy_ice);
+      const avgF = f3.reduce((a, b) => a + b, 0) / f3.length;
+      const avgL = l3.reduce((a, b) => a + b, 0) / l3.length;
+      const dropPct = avgF > 0 ? (avgF - avgL) / avgF * 100 : 0;
+      const s = Math.round(clamp(100 - Math.max(0, dropPct) * 3, 0, 100));
+      subs.push({ key: 'ice', label: 'Consumo combustão', score: s, detail: dropPct > 1 ? `−${dropPct.toFixed(0)}% autonomia` : 'estável' });
+      if (s < 60) issues.push('Autonomia de combustão caindo');
+    }
+  }
+
+  // ── Manutenção: cada vencida −25, cada próxima −8 ──
+  const maint = computeMaintenance();
+  const overdue = maint.filter(m => m.status === 'overdue').length;
+  const soon    = maint.filter(m => m.status === 'soon').length;
+  if (maint.length) {
+    const s = clamp(100 - overdue * 25 - soon * 8, 0, 100);
+    subs.push({ key: 'maint', label: 'Manutenção', score: s, detail: overdue ? `${overdue} vencida${overdue > 1 ? 's' : ''}` : soon ? `${soon} próxima${soon > 1 ? 's' : ''}` : 'em dia' });
+    if (overdue) issues.push(`${overdue} manutenção${overdue > 1 ? 'ões' : ''} vencida${overdue > 1 ? 's' : ''}`);
+  }
+
+  const weights = { batt12: 0.25, tyres: 0.25, ice: 0.20, maint: 0.30 };
+  let wsum = 0, acc = 0;
+  for (const s of subs) { const w = weights[s.key] || 0; acc += s.score * w; wsum += w; }
+  const total = wsum > 0 ? Math.round(acc / wsum) : null;
+  const label = total == null ? '—' : total >= 85 ? 'Ótimo' : total >= 70 ? 'Bom' : total >= 50 ? 'Atenção' : 'Crítico';
+
+  res.json({ ok: true, total, label, subs, issues });
+});
+
+// GET /api/routine/destinations-cost — custo médio por destino recorrente.
+// Agrupa viagens por grade de destino, soma energia/combustível, valora pelos
+// preços ponderados do tanque/bateria e compara com baseline 100% gasolina.
+app.get('/api/routine/destinations-cost', (req, res) => {
+  const lookbackDays = Math.min(365, Math.max(7, parseInt(req.query.days, 10) || 90));
+  const minVisits = Math.max(2, parseInt(req.query.min, 10) || 3);
+  const since = Date.now() - lookbackDays * 86400_000;
+
+  const pKwh = +state.battery_avg_price_per_kwh || +state.price_kwh || SEED_KWH_PRICE;
+  const pGas = +state.tank_avg_price_per_l      || +state.price_gas_per_l || SEED_GAS_PRICE_PER_L;
+
+  const places = new Map(); // key → agregado
+  for (const t of autoTripsArr) {
+    if ((t.startMs || 0) < since) continue;
+    const key = _placeKey(+t.endLat, +t.endLng);
+    const dist = +t.distKm || 0;
+    if (!key || dist < 0.5) continue;
+    let p = places.get(key);
+    if (!p) { p = { key, names: {}, lat: +t.endLat, lng: +t.endLng, trips: 0, km: 0, kwh: 0, fuel: 0 }; places.set(key, p); }
+    const nm = t.knownEnd || t.endKp || null;
+    if (nm) p.names[nm] = (p.names[nm] || 0) + 1;
+    p.trips += 1;
+    p.km   += dist;
+    p.kwh  += Math.max(0, +t.netKwh || 0);
+    p.fuel += +t.fuelL || 0;
+  }
+
+  const out = [];
+  for (const p of places.values()) {
+    if (p.trips < minVisits) continue;
+    const actual   = p.kwh * pKwh + p.fuel * pGas;
+    const baseline = ICE_BASELINE_KML > 0 ? (p.km / ICE_BASELINE_KML) * pGas : 0;
+    const savedPct = baseline > 0.01 ? Math.round((baseline - actual) / baseline * 100) : 0;
+    out.push({
+      name: Object.entries(p.names).sort((a, b) => b[1] - a[1])[0]?.[0] || 'Local sem nome',
+      lat: +p.lat.toFixed(5), lng: +p.lng.toFixed(5),
+      trips: p.trips,
+      avgKm:   +(p.km / p.trips).toFixed(1),
+      avgCost: +(actual / p.trips).toFixed(2),
+      avgGasCost: +(baseline / p.trips).toFixed(2),
+      savedPct,
+    });
+  }
+  out.sort((a, b) => b.trips - a.trips);
+  res.json({ ok: true, lookbackDays, gasPricePerL: +pGas.toFixed(2), kwhPrice: +pKwh.toFixed(2), destinations: out.slice(0, 20) });
 });
 
 app.delete('/api/autotrips/:tripId', (req, res) => {
@@ -6078,6 +7459,13 @@ app.post('/api/notif/prefs/:device_id', (req, res) => {
   } else if (isByd && typeof value === 'number') {
     // Prefs numéricas do BYD (ex.: byd_unlocked_min) — minutos/limiares.
     notifPrefsByDevice[id][key] = Math.max(0, Math.min(240, value));
+  } else if (isByd && (key === 'byd_role' || key === 'byd_name') && typeof value === 'string') {
+    // Identidade do device (string): role={grasi|companion|other}, nome de exibição.
+    // Usado pra feature 1 (LA "companion indo até Grasi") e 2 (quem está dirigindo).
+    if (key === 'byd_role' && !['grasi', 'companion', 'other'].includes(value)) {
+      return res.status(400).json({ error: 'role inválido' });
+    }
+    notifPrefsByDevice[id][key] = String(value).slice(0, 40);
   } else {
     notifPrefsByDevice[id][key] = !!value;
   }
@@ -6653,24 +8041,27 @@ app.post('/api/push/history/clear', (_req, res) => {
 });
 
 // ── Remote Actions ────────────────────────────────────────────────────────────
-// Cada ação do PWA mapeia 1:1 num button.* da integração GWM Brasil no HA.
-// O bridge dispara via REST: POST $HA_URL/api/services/button/press { entity_id }.
-const ACTION_TO_HA_BUTTON = {
-  engine_on:      'ligar_o_motor',
-  engine_off:     'desligar_o_motor',
-  lock_open:      'abrir_as_portas',
-  lock_close:     'fechar_as_portas',
-  windows_open:   'abrir_os_vidros',
-  windows_close:  'fechar_os_vidros',
-  trunk_open:     'abrir_porta_malas',
-  trunk_close:    'fechar_porta_malas',
-  sunroof_open:   'abrir_teto_solar',
-  sunroof_close:  'fechar_teto_solar',
-  ac_on:          'ativacao_do_ar_condicionado',
-  charge_stop:    'interromper_carregamento',
-  charge_history: 'historico_de_carregamento',
+// Cada ação do PWA mapeia 1:1 num button.* da integração GWM Brasil.
+// O bridge dispara publicando PRESS direto no tópico de comando MQTT do bridge
+// GWM standalone (gwm-bridge no pm2, mqtt://localhost:1883) — SEM passar pelo HA.
+// Assim os comandos sobrevivem ao HA estar fora do ar.
+//   homeassistant/button/gwmbrasil_<chassi>_<code>/press  payload 'PRESS'
+const ACTION_TO_GWM_BUTTON_CODE = {
+  engine_on:      'hyengsts_engineon',
+  engine_off:     'hyengsts_engineoff',
+  lock_open:      '2208001_doorsopen',
+  lock_close:     '2208001_doorsclose',
+  windows_open:   '2210001_windowsopen',
+  windows_close:  '2210001_windowsclose',
+  trunk_open:     '2206001_trunkopen',
+  trunk_close:    '2206001_trunkclose',
+  sunroof_open:   '2210005_skywindowopen',
+  sunroof_close:  '2210005_skywindowclose',
+  ac_on:          '2202001_airconditioner',
+  charge_stop:    '2041142_stopcharging',
+  charge_history: '2013021_charginglogs',
 };
-const ALLOWED_ACTIONS = new Set(Object.keys(ACTION_TO_HA_BUTTON));
+const ALLOWED_ACTIONS = new Set(Object.keys(ACTION_TO_GWM_BUTTON_CODE));
 
 // Caminho LOCAL das ações que têm equivalente no carro (APK atua via Shizuku/
 // IVehicle, sem passar pela nuvem GWM). Quando o APK está vivo (WiFi/Starlink),
@@ -7258,8 +8649,8 @@ app.post('/api/steer-mode', (req, res) => {
 app.post('/api/action/:name', async (req, res) => {
   const { name } = req.params;
   console.log(`[action] recebido name='${name}'`);
-  const suffix = ACTION_TO_HA_BUTTON[name];
-  if (!suffix) {
+  const code = ACTION_TO_GWM_BUTTON_CODE[name];
+  if (!code) {
     console.warn(`[action] ${name} REJEITADO: ação desconhecida`);
     return res.status(400).json({ error: 'ação desconhecida' });
   }
@@ -7281,33 +8672,25 @@ app.post('/api/action/:name', async (req, res) => {
       console.warn(`[action] ${name} local falhou (${e.message}) — tentando nuvem GWM`);
     }
   }
-  if (!HA_URL || !HA_TOKEN) {
-    console.warn(`[action] ${name} REJEITADO: HA não configurado`);
-    return res.status(503).json({ error: 'HA não configurado' });
+  if (!mqttClient?.connected) {
+    console.warn(`[action] ${name} REJEITADO: MQTT offline`);
+    return res.status(503).json({ error: 'MQTT offline' });
   }
-  const entityId = `button.${GWM_TOPIC_PREFIX}_${suffix}`;
-  try {
-    const r = await fetch(`${HA_URL}/api/services/button/press`, {
-      method:  'POST',
-      headers: {
-        Authorization: `Bearer ${HA_TOKEN}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ entity_id: entityId }),
-    });
-    if (!r.ok) {
-      const txt = await r.text().catch(() => '');
-      console.error(`[action] ${name} → ${entityId} HTTP ${r.status} ${txt.slice(0, 200)}`);
-      return res.status(502).json({ error: `HA HTTP ${r.status}` });
+  const pressTopic = `homeassistant/button/${GWM_TOPIC_PREFIX}_${code}/press`;
+  mqttClient.publish(pressTopic, 'PRESS', { qos: 1, retain: false }, err => {
+    if (err) {
+      console.error(`[action] ${name} → ${pressTopic} erro: ${err.message}`);
+      return res.status(502).json({ error: 'falha ao publicar no MQTT' });
     }
-    console.log(`[action] ${name} → ${entityId} OK`);
+    console.log(`[action] ${name} → ${pressTopic} OK (GWM via MQTT)`);
+    // Arma o feed de andamento: o standalone vai publicar sent→done/timeout em
+    // gwmbrasil_<vin>/command_progress/state, que casamos com esta ação por tempo.
+    _pendingCommand = { action: name, code, ts: Date.now() };
+    broadcast('command_progress', { action: name, phase: 'sent', resultCode: null, ts: Date.now() });
     // Ligar motor pelo app arma a LA de lembrete (confirma no engine_state='1').
     if (name === 'engine_on') markRemoteEngineStart();
-    res.json({ ok: true, via: 'cloud' });
-  } catch (e) {
-    console.error(`[action] ${name} erro: ${e.message}`);
-    res.status(502).json({ error: 'falha ao chamar HA' });
-  }
+    res.json({ ok: true, via: 'gwm' });
+  });
 });
 
 // ── Pré-climatização — lista de agendamentos ──────────────────────────────
@@ -7336,6 +8719,30 @@ app.post('/api/preclimat/schedule', requireAuth, (req, res) => {
     if (isNaN(onceAt) || onceAt < 0 || onceAt > Date.now() + 30 * 86400_000)
       return res.status(400).json({ error: 'onceAtMs inválido' });
   }
+  // departureMs/label: metadados da "viagem planejada" (só p/ exibir na lista).
+  let departureMs = null;
+  if (b.departureMs !== undefined) {
+    departureMs = b.departureMs === null ? 0 : parseInt(b.departureMs, 10);
+    if (isNaN(departureMs) || departureMs < 0 || departureMs > Date.now() + 30 * 86400_000)
+      return res.status(400).json({ error: 'departureMs inválido' });
+  }
+  const label = b.label !== undefined ? String(b.label).slice(0, 80) : null;
+
+  // Contexto de viagem (opcional) p/ recompute de trânsito server-side. Aceita
+  // destino por coordenadas OU nome (geocodado no recompute). eventStartMs = hora
+  // do compromisso (chegada); bufferMin = folga antes da viagem; climateMin = tempo
+  // de climatização. O bridge recalcula onceAtMs ~20 min antes com o ETA ao vivo.
+  let eventStartMs = null;
+  if (b.eventStartMs !== undefined) {
+    eventStartMs = b.eventStartMs === null ? 0 : parseInt(b.eventStartMs, 10);
+    if (isNaN(eventStartMs) || eventStartMs < 0 || eventStartMs > Date.now() + 30 * 86400_000)
+      return res.status(400).json({ error: 'eventStartMs inválido' });
+  }
+  const destLat   = b.destLat   !== undefined ? (+b.destLat   || 0) : null;
+  const destLng   = b.destLng   !== undefined ? (+b.destLng   || 0) : null;
+  const destName  = b.destName  !== undefined ? String(b.destName).slice(0, 120) : null;
+  const bufferMin = b.bufferMin !== undefined ? Math.max(0, Math.min(60,  parseInt(b.bufferMin, 10) || 0)) : null;
+  const climateMin= b.climateMin!== undefined ? Math.max(0, Math.min(180, parseInt(b.climateMin,10) || 0)) : null;
 
   let sched = b.id ? preclimat.schedules.find(s => s.id === b.id) : null;
   if (!sched) { sched = { ...PRECLIMAT_SCHED_DEFAULTS, id: _genSchedId() }; preclimat.schedules.push(sched); }
@@ -7352,6 +8759,15 @@ app.post('/api/preclimat/schedule', requireAuth, (req, res) => {
   if (dur !== null)       sched.duration = dur;
   if (lead !== null)      sched.leadMin = lead;
   if (onceAt !== null) { sched.onceAtMs = onceAt; if (onceAt > 0) { sched.recurrence = 'once'; sched.lastFiredDate = ''; sched.startedDate = ''; } }
+  if (departureMs !== null) sched.departureMs = departureMs;
+  if (label !== null)       sched.label = label;
+  if (eventStartMs !== null) sched.eventStartMs = eventStartMs;
+  if (destLat !== null)     sched.destLat = destLat;
+  if (destLng !== null)     sched.destLng = destLng;
+  if (destName !== null)    sched.destName = destName;
+  if (bufferMin !== null)   sched.bufferMin = bufferMin;
+  if (climateMin !== null)  sched.climateMin = climateMin;
+  if (eventStartMs !== null || destLat !== null || destLng !== null || destName !== null) sched.trafficAdjAt = 0;
   if (b.enabled !== undefined)    sched.enabled = !!b.enabled;
 
   // Efeitos: mudar horário ou desativar encerra a LA ativa deste agendamento;
@@ -7372,6 +8788,18 @@ app.delete('/api/preclimat/schedule/:id', requireAuth, (req, res) => {
     savePreclimat();
   }
   res.json({ ok: true });
+});
+
+// Cancela a pré-climatização em andamento (ou agendada e ainda não disparada).
+// Antes do disparo: descarta a LA. Em andamento: restaura AC + desliga motor.
+app.post('/api/preclimat/cancel', requireAuth, async (_req, res) => {
+  try {
+    const r = await cancelPreClimat('cancelado pelo app');
+    res.status(r.ok ? 200 : 409).json(r);
+  } catch (e) {
+    console.error('[preclimat] cancel erro:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
 });
 
 // ── Leave-by planner ──────────────────────────────────────────────────────
@@ -8002,6 +9430,9 @@ mqttClient.on('connect', () => {
   // A integração não publica esses tópicos com retain — broker fica sem o
   // estado atual ao subscribe. Puxamos via REST do HA no boot pra popular.
   fetchInitialStateFromHA();
+  // Subscribe no tópico de ping interno pra medir latência do broker.
+  mqttClient.subscribe(`${MQTT_PREFIX}/_ping`, { qos: 0 });
+  setInterval(_pingMqtt, 30_000);
 });
 
 mqttClient.on('error',      (err) => console.error('MQTT erro:', err.message));
@@ -8192,6 +9623,21 @@ mqttClient.on('message', (topic, payload, packet) => {
     catch (_) { /* payload inválido — ignora */ }
     return;
   }
+  if (topic === `${GWM_TOPIC_PREFIX}/command_progress/state`) {
+    // Andamento de comando remoto vindo do standalone GWM. Correlaciona com a
+    // ação em voo por tempo e empurra pro app via WS pra fechar o loop sem
+    // esperar o estado completo refletir (que leva ~20-30s na nuvem GWM).
+    try {
+      const p = JSON.parse(value);
+      const pend = _pendingCommand && (Date.now() - _pendingCommand.ts) < 90_000 ? _pendingCommand : null;
+      const out = { action: pend ? pend.action : null, phase: p.phase, resultCode: p.resultCode ?? null, ts: Date.now() };
+      if (p.phase === 'done')         { out.ok = p.ok != null ? p.ok : (p.resultCode === '0'); _pendingCommand = null; }
+      else if (p.phase === 'timeout') { out.ok = false; _pendingCommand = null; }
+      broadcast('command_progress', out);
+      console.log(`[cmd-progress] action=${out.action} phase=${p.phase} resultCode=${p.resultCode}`);
+    } catch (e) { console.warn('[cmd-progress] payload inválido:', e.message); }
+    return;
+  }
   if (topic.startsWith(GWM_TOPIC_PREFIX + '/') && topic.endsWith('/state')) {
     const id = topic.slice(GWM_TOPIC_PREFIX.length + 1, topic.length - '/state'.length);
     applyGwmEntity(id, value, isRetained);
@@ -8290,6 +9736,11 @@ mqttClient.on('message', (topic, payload, packet) => {
     // o carro parecia eternamente "online" mesmo com o app offline, mascarando
     // a causa real da escuta não funcionar (app caído) e furando todo gating
     // de apkFresh/car_online.
+    if (key === '_ping') {
+      if (_mqttPingTs > 0) _mqttPing = { checked_at: Date.now(), latency_ms: Date.now() - _mqttPingTs, error: null };
+      _mqttPingTs = 0;
+      return;
+    }
     if (key === 'cluster_extra' || BRIDGE_ECHO_KEYS.has(key)) return;
     applyMqttMessage(key, value, isRetained);
   }
@@ -8629,6 +10080,108 @@ let _songProLatest  = { soc: 0, powerKw: 0, ts: 0 };
 let _spCarLoc   = { lat: 0, lng: 0, ts: 0 };
 let _phoneLoc   = { lat: 0, lng: 0, ts: 0 };
 let _routeToPhone = { distKm: null, etaMin: null, ms: 0, busy: false, atLat: 0, atLng: 0 };
+// Localização por iPhone (cada device do app Grasi reporta a sua). Keyed por
+// device_id. Persiste o sample atual + o anterior pra calcular velocidade/rumo.
+const phoneLocByDevice = {};                         // { [deviceId]: { lat, lng, ts, prevLat, prevLng, prevTs } }
+// Estado por companion da feature 1 (LA "chegando até Grasi"): ETA cached + LA ativa.
+const _companionInbound = {};                        // { [deviceId]: { etaMin, distKm, lastEvalMs, laActive } }
+
+const COMPANION_LA_TYPE = 'CompanionInboundActivityAttributes';
+const COMPANION_NEAR_M = 250;                        // perto da Grasi → encerra LA (chegou)
+const COMPANION_MAX_ETA_MIN = 45;                    // só dispara se ETA ≤ 45min
+const COMPANION_MIN_APPROACH_M = 200;                // aproximação mínima (sample-a-sample) p/ iniciar
+const COMPANION_EVAL_THROTTLE_MS = 30_000;           // throttle de OSRM por companion
+
+function _grasiDevices() {
+  const out = [];
+  for (const [id, p] of Object.entries(notifPrefsByDevice)) {
+    if (p && p.byd_role === 'grasi') out.push(id);
+  }
+  return out;
+}
+function _grasiLoc() {
+  // Localização da Grasi: lookup pela tabela por-device; fallback no _phoneLoc legado.
+  for (const id of _grasiDevices()) {
+    const l = phoneLocByDevice[id];
+    if (l && l.lat && l.lng && (Date.now() - l.ts) < 15 * 60_000) return { ...l, deviceId: id };
+  }
+  if (_phoneLoc && _phoneLoc.lat && _phoneLoc.lng && (Date.now() - _phoneLoc.ts) < 15 * 60_000) {
+    return { lat: _phoneLoc.lat, lng: _phoneLoc.lng, ts: _phoneLoc.ts, deviceId: null };
+  }
+  return null;
+}
+function _deviceName(id) {
+  const n = (notifPrefsByDevice[id] && notifPrefsByDevice[id].byd_name) || '';
+  return n || 'alguém';
+}
+
+// Feature 1: detecta companion se aproximando da Grasi e mantém uma LA na tela
+// bloqueada DELA enquanto a aproximação for real. Encerra ao chegar perto.
+async function _evalCompanionInbound(companionId) {
+  if (!apnsLive.enabled) return;
+  const c = phoneLocByDevice[companionId];
+  const grasi = _grasiLoc();
+  if (!c || !grasi || grasi.deviceId === companionId) return;
+  const distNow = haversineM(c.lat, c.lng, grasi.lat, grasi.lng);
+  const distPrev = (c.prevLat && c.prevLng)
+    ? haversineM(c.prevLat, c.prevLng, grasi.lat, grasi.lng) : Infinity;
+  const state0 = _companionInbound[companionId] || { laActive: false, etaMin: null, distKm: null, lastEvalMs: 0 };
+  // Já chegou perto → encerra LA (se ativa).
+  if (distNow < COMPANION_NEAR_M) {
+    if (state0.laActive) {
+      const finalCs = { name: _deviceName(companionId), etaMin: 0, distKm: 0, active: false, updatedAtMs: Date.now() };
+      apnsLive.pushUpdate(COMPANION_LA_TYPE, {}, finalCs,
+        { isFinal: true, dismissalDate: Date.now() + 60_000 })
+        .catch(() => {});
+      apnsLive.clearUpdateTokensByType(COMPANION_LA_TYPE);
+      _companionInbound[companionId] = { laActive: false, etaMin: 0, distKm: 0, lastEvalMs: Date.now() };
+    }
+    return;
+  }
+  // Sem LA ativa: só dispara se está mesmo se aproximando da Grasi (não passando
+  // perto por coincidência). Exige redução >200m vs sample anterior.
+  if (!state0.laActive && (distPrev - distNow) < COMPANION_MIN_APPROACH_M) return;
+  // Throttle do OSRM (cálculo caro): 30s entre fetches por companion.
+  const now = Date.now();
+  if (now - state0.lastEvalMs < COMPANION_EVAL_THROTTLE_MS && state0.etaMin != null) {
+    // Atualiza só distância (em km, derivada local) com a ETA do último fetch.
+    const newCs = {
+      name: _deviceName(companionId),
+      etaMin: state0.etaMin, distKm: Math.round((distNow / 1000) * 10) / 10,
+      active: true, updatedAtMs: now,
+    };
+    if (state0.laActive) apnsLive.pushUpdate(COMPANION_LA_TYPE, {}, newCs, {}).catch(() => {});
+    return;
+  }
+  const route = await _fetchRoute(c.lat, c.lng, grasi.lat, grasi.lng).catch(() => null);
+  if (!route) return;
+  const etaMin = Math.round(route.duration / 60);
+  const distKm = Math.round((route.distance / 1000) * 10) / 10;
+  if (etaMin > COMPANION_MAX_ETA_MIN) {
+    // Longe demais — não dispara. Se LA estava ativa (estava perto, agora afastou-se),
+    // encerra: provavelmente o companion virou e foi pra outro lugar.
+    if (state0.laActive) {
+      apnsLive.pushUpdate(COMPANION_LA_TYPE, {}, { name: _deviceName(companionId), etaMin, distKm, active: false, updatedAtMs: now },
+        { isFinal: true, dismissalDate: now + 60_000 }).catch(() => {});
+      apnsLive.clearUpdateTokensByType(COMPANION_LA_TYPE);
+      _companionInbound[companionId] = { laActive: false, etaMin, distKm, lastEvalMs: now };
+    }
+    return;
+  }
+  const cs = { name: _deviceName(companionId), etaMin, distKm, active: true, updatedAtMs: now };
+  const grasiIds = new Set(_grasiDevices());
+  if (state0.laActive && apnsLive.hasUpdateToken(COMPANION_LA_TYPE)) {
+    apnsLive.pushUpdate(COMPANION_LA_TYPE, {}, cs, {}).catch(() => {});
+  } else {
+    apnsLive.pushStart(COMPANION_LA_TYPE, '',
+      { name: _deviceName(companionId) }, cs,
+      { staleDate: now + 90 * 60_000,
+        alert: { title: `🚗 ${_deviceName(companionId)} a caminho`, body: `Chega em ~${etaMin} min · ${distKm} km` },
+        allow: (deviceId) => grasiIds.has(deviceId) })
+      .catch(e => console.warn('[companion-inbound] pushStart falhou:', e.message));
+  }
+  _companionInbound[companionId] = { laActive: true, etaMin, distKm, lastEvalMs: now };
+}
 
 // Calcula (throttle 30s) a rota de CARRO do carro até o celular. Usa _fetchRoute:
 // Mapbox driving-traffic (ETA com TRÂNSITO ao vivo) se houver token, OSRM de fallback.
@@ -8972,6 +10525,27 @@ function _songProEvents(o) {
     _spEv.movingNotified = false;   // rearma o aviso "começou a andar"
     // Obs: o início/fim da viagem é por MOVIMENTO (abaixo), não pela ignição —
     // assim "carro ligado parado" não infla o tempo nem mantém viagem fantasma.
+    // Feature 2: identifica o motorista pelo iPhone mais próximo do carro (≤200m)
+    // no momento da ignição. Persiste em _spEv pra carimbar a viagem.
+    {
+      const plat = +o.location_latitude || 0, plng = +o.location_longitude || 0;
+      _spEv.driverDeviceId = null; _spEv.driverName = '';
+      if (plat && plng) {
+        let best = null, bestD = 200;        // só conta se < 200m do carro
+        const fresh = nowMs - 10 * 60_000;   // localização do device fresca (<10min)
+        for (const [id, l] of Object.entries(phoneLocByDevice)) {
+          if (!l || l.ts < fresh || !l.lat || !l.lng) continue;
+          const d = haversineM(l.lat, l.lng, plat, plng);
+          if (d < bestD) { best = id; bestD = d; }
+        }
+        if (best) {
+          _spEv.driverDeviceId = best;
+          _spEv.driverName = _deviceName(best);
+          console.log(`[songpro] motorista identificado: ${_spEv.driverName} (${bestD.toFixed(0)}m do carro)`);
+        }
+      }
+      scheduleStateSave();
+    }
   }
   // Estacionou (desligou): carro ON→OFF. Inclui o nome do local se conhecido.
   if (_spEv.carOn === true && !carOn) {
@@ -9008,12 +10582,18 @@ function _songProEvents(o) {
     if (idleMin >= 60 || !_spEv.tripStartMs) {
       if (_songProTrail.length > 1) {
         _songProLastTrail = { trail: _songProTrail, startMs: _spEv.tripStartMs || 0, endMs: _spEv.tripLastMs || 0 };
+        // Feature 10: registra a viagem encerrada com score de condução.
+        _recordSongProTrip(_songProTrail, _spEv.tripStartMs || 0, _spEv.tripLastMs || 0,
+          _spEv.tripStartSoc || 0, _spEv.tripDistM || 0,
+          _spEv.driverDeviceId || null, _spEv.driverName || '');
       }
       _songProTrail = [];
       _spEv.tripStartMs = nowMs;
       _spEv.tripDistM = 0;                 // zera odômetro da viagem nova
       _spEv.tripStartSoc = soc;            // SOC no início (p/ consumo da LA)
       _spEv.movingNotified = false;
+      _spEv.driverDeviceId = null;         // motorista da próxima viagem será detectado na ignição
+      _spEv.driverName = '';
     }
     _spEv.tripLastMs = nowMs;
     if (!_spEv.movingNotified) {
@@ -9202,6 +10782,14 @@ function _evalSongProTripLA() {
       { isFinal: true, dismissalDate: Date.now() + 5 * 60_000 })
       .catch(e => console.warn('[songpro-trip] end falhou:', e.message));
     apnsLive.clearUpdateTokensByType(SONGPRO_TRIP_LA_TYPE);
+    // Feature 10: registra a viagem com score já que sabemos que encerrou
+    // (carro desligou ou >60min de idle). Idempotente — não duplica se já
+    // registrada pelo bloco de início-de-nova-viagem em _songProEvents.
+    if (_songProTrail.length > 1 && _spEv.tripStartMs && _spEv.tripLastMs) {
+      _recordSongProTrip(_songProTrail, _spEv.tripStartMs, _spEv.tripLastMs,
+        _spEv.tripStartSoc || 0, _spEv.tripDistM || 0,
+        _spEv.driverDeviceId || null, _spEv.driverName || '');
+    }
   }
 }
 
@@ -9283,6 +10871,9 @@ function songProStatus() {
     // Distância/ETA de carro do veículo até o celular do monitor (null se indisponível).
     distToPhoneKm: _routeToPhone.distKm,
     etaToPhoneMin: _routeToPhone.etaMin,
+    // Feature 2: motorista identificado no momento da ignição (string vazia = não detectado).
+    driverName:     _spEv.driverName     || '',
+    driverDeviceId: _spEv.driverDeviceId || '',
     // Telemetria completa do veículo (bateria, pneus, autonomia, localização…)
     tele,
   };
@@ -9313,12 +10904,77 @@ function _songProContentState(active) {
 // ── Histórico de recargas do BYD Song Pro (por local, com custo estimado) ────
 const SONGPRO_CHARGES_FILE = path.join(DATA_DIR, 'songpro_charges.json');
 const SONGPRO_LOCS_FILE    = path.join(DATA_DIR, 'songpro_locations.json');
+const SONGPRO_TRIPS_FILE   = path.join(DATA_DIR, 'songpro_trips.json');
 let songProCharges = [];
 let songProLocs    = [];
+let songProTrips   = [];
 try { songProCharges = JSON.parse(fs.readFileSync(SONGPRO_CHARGES_FILE, 'utf8')) || []; } catch (_) {}
 try { songProLocs    = JSON.parse(fs.readFileSync(SONGPRO_LOCS_FILE, 'utf8'))    || []; } catch (_) {}
+try { songProTrips   = JSON.parse(fs.readFileSync(SONGPRO_TRIPS_FILE, 'utf8'))   || []; } catch (_) {}
 function _saveSongProCharges() { try { fs.writeFileSync(SONGPRO_CHARGES_FILE, JSON.stringify(songProCharges, null, 2)); } catch (_) {} }
 function _saveSongProLocs()    { try { fs.writeFileSync(SONGPRO_LOCS_FILE, JSON.stringify(songProLocs, null, 2)); } catch (_) {} }
+function _saveSongProTrips()   { try { fs.writeFileSync(SONGPRO_TRIPS_FILE, JSON.stringify(songProTrips, null, 2)); } catch (_) {} }
+
+// Feature 10: score de condução por viagem (0-100) — economia + suavidade
+// (acelerações/frenagens bruscas detectadas pela variação de velocidade).
+// Sample shape: { t (s desde início), spd (km/h), kw (potência tração), soc }.
+function _songProDriveScore(trail, distKm, startSoc, endSoc) {
+  // Economia: energia consumida por 100km, comparada com baseline (kWh ~17.5/100km).
+  // BYD Song Pro PHEV: usa kw da tração integrado — modo aproximado.
+  let kwhInt = 0;
+  for (let i = 1; i < trail.length; i++) {
+    const dt = (trail[i].t - trail[i - 1].t) / 3600;
+    if (dt > 0 && dt < 0.01) kwhInt += ((trail[i].kw || 0) + (trail[i - 1].kw || 0)) / 2 * dt;
+  }
+  const dropSoc = Math.max(0, startSoc - endSoc);
+  // Energia: prioriza ΔSOC (mais confiável) com bateria de 18kWh; fallback no integral.
+  const energyKwh = dropSoc > 0 ? (dropSoc / 100) * SONGPRO_BATTERY_KWH : Math.max(0, kwhInt);
+  const eq = distKm >= 1 ? (energyKwh / distKm) * 100 : null;
+  const econ = eq != null ? Math.max(0, Math.min(100, 100 - (eq - 17.5) * (60 / 17.5))) : 70;
+  // Suavidade: conta acelerações >9 km/h/s (~2.5 m/s²) e frenagens <-11 km/h/s.
+  let ha = 0, hb = 0;
+  for (let i = 1; i < trail.length; i++) {
+    const dt = trail[i].t - trail[i - 1].t;
+    if (dt <= 0 || dt > 5) continue;
+    const a = (trail[i].spd - trail[i - 1].spd) / dt;
+    if (a > 9) ha++; else if (a < -11) hb++;
+  }
+  const perKm = distKm > 0.5 ? (ha + hb) / distKm : 0;
+  const smooth = Math.max(0, 100 - perKm * 18);
+  const score = Math.max(0, Math.min(100, Math.round(0.55 * econ + 0.45 * smooth)));
+  return { score, harshAcc: ha, harshBrake: hb, energyKwh: +energyKwh.toFixed(2) };
+}
+
+const SONGPRO_TRIPS_MAX = 300;     // teto de viagens guardadas (≈1 ano com 1 viagem/dia)
+function _recordSongProTrip(trail, startMs, endMs, startSoc, distM, driverId, driverName) {
+  if (!Array.isArray(trail) || trail.length < 2 || !startMs || !endMs) return;
+  // Idempotente: chave do trip = endMs; se já registrado, não duplica.
+  const tripId = 'sp-trip-' + endMs.toString(36);
+  if (songProTrips.some(t => t.id === tripId)) return;
+  const distKm = Math.max(0.05, distM / 1000);
+  const endSoc = trail[trail.length - 1].soc || 0;
+  const startLat = trail[0].lat, startLng = trail[0].lng;
+  const endLat = trail[trail.length - 1].lat, endLng = trail[trail.length - 1].lng;
+  const avgSpeedKmh = endMs > startMs ? Math.round(distKm / ((endMs - startMs) / 3600_000)) : 0;
+  const { score, harshAcc, harshBrake, energyKwh } = _songProDriveScore(trail, distKm, startSoc, endSoc);
+  const trip = {
+    id: tripId,
+    startMs, endMs,
+    durationSec: Math.round((endMs - startMs) / 1000),
+    distKm: +distKm.toFixed(2),
+    avgSpeedKmh,
+    startSoc: Math.round(startSoc), endSoc: Math.round(endSoc),
+    energyKwh,
+    startLat, startLng, endLat, endLng,
+    driverDeviceId: driverId || null,
+    driverName:     driverName || '',
+    driveScore: score, harshAcc, harshBrake,
+  };
+  songProTrips.unshift(trip);
+  if (songProTrips.length > SONGPRO_TRIPS_MAX) songProTrips.length = SONGPRO_TRIPS_MAX;
+  _saveSongProTrips();
+  console.log(`[songpro] viagem registrada · ${distKm.toFixed(1)}km · score=${score} · motorista=${driverName || '?'}`);
+}
 
 // Acha o local existente a ≤200m, ou cria um novo (preço 0 — usuário edita depois).
 function _songProLocFor(lat, lng) {
@@ -9960,7 +11616,8 @@ function sendChargeLiveUpdate(isFinal = false) {
 //  - update token (por atividade): permite atualizar/encerrar uma LA específica.
 const LA_TYPES = ['ChargeActivityAttributes', 'PreClimatActivityAttributes', 'TripActivityAttributes',
                   'MotorActivityAttributes', 'SecurityActivityAttributes', 'SongProActivityAttributes',
-                  'SongProTripActivityAttributes'];
+                  'SongProTripActivityAttributes',
+                  'CompanionInboundActivityAttributes'];   // feature 1: companion indo até Grasi
 
 // push-to-start token (por tipo de Live Activity)
 // GET /api/songpro/status — % da bateria do BYD Song Pro sempre, + infos da
@@ -10001,6 +11658,14 @@ app.get('/api/songpro/last-trip', (req, res) => {
 // local e mês e soma energia/custo. Protegido pelo requireAuth global.
 app.get('/api/songpro/charges', (req, res) => {
   res.json({ charges: songProCharges, locations: songProLocs });
+});
+
+// Feature 10: histórico de viagens com score de condução + motorista.
+// Resposta: { trips: [{ id, startMs, endMs, durationSec, distKm, avgSpeedKmh,
+//   startSoc, endSoc, energyKwh, driverName, driveScore, harshAcc, harshBrake, ... }] }
+app.get('/api/songpro/trips', (req, res) => {
+  const lim = Math.min(200, Math.max(1, parseInt(req.query.limit) || 60));
+  res.json({ trips: songProTrips.slice(0, lim), total: songProTrips.length });
 });
 
 // Lançamento MANUAL de recarga (ex.: recargas antigas). Body:
@@ -10101,20 +11766,38 @@ app.patch('/api/songpro/locations/:id', (req, res) => {
   res.json(loc);
 });
 
-// Localização do celular do monitor — usada pra calcular distância/ETA (carro→celular)
-// na LA de viagem do BYD. O app reporta periodicamente enquanto a LA está ativa.
+// Localização do celular dos monitores — armazenada por device_id (cada iPhone
+// reporta a sua própria). Usada pra:
+//  (a) distância/ETA carro→Grasi na LA de viagem (escolhe o device com role=grasi);
+//  (b) feature 1: detectar quando um companion está se aproximando de Grasi;
+//  (c) feature 2: identificar o motorista na ignição (device mais próximo do carro).
+// Fallback: pra retro-compatibilidade, ainda atualiza o `_phoneLoc` legado quando
+// não houver device_id (clientes antigos) ou quando o device for o primary.
 app.post('/api/phone-location', (req, res) => {
   const lat = +(req.body && req.body.lat), lng = +(req.body && req.body.lng);
+  const deviceId = String((req.body && req.body.device_id) || '').slice(0, 80);
   if (!Number.isFinite(lat) || !Number.isFinite(lng) || (lat === 0 && lng === 0))
     return res.status(400).json({ error: 'lat/lng válidos obrigatórios' });
-  _phoneLoc = { lat, lng, ts: Date.now() };
+  const now = Date.now();
+  if (deviceId) {
+    const prev = phoneLocByDevice[deviceId];
+    phoneLocByDevice[deviceId] = { lat, lng, ts: now, prevLat: prev?.lat, prevLng: prev?.lng, prevTs: prev?.ts };
+  }
+  // Mantém _phoneLoc apontando pro device com role=grasi (alvo das LAs do carro).
+  const role = getPrefsForDevice(deviceId).byd_role;
+  if (!deviceId || role === 'grasi') {
+    _phoneLoc = { lat, lng, ts: now };
+  }
   res.json({ ok: true });
-  // Recalcula a rota carro→celular quando VOCÊ se move (não só quando o carro manda
-  // telemetria). Se andou >150m desde o último cálculo, recalcula na hora (ignora o
-  // throttle de 30s); senão, respeita o throttle. Cobre o caso "carro parado, eu indo até ele".
-  const moved = (_routeToPhone.atLat && _routeToPhone.atLng)
-    ? haversineM(lat, lng, _routeToPhone.atLat, _routeToPhone.atLng) : Infinity;
-  _maybeRouteToPhone(moved > 150);
+  // Recalcula a rota carro→Grasi quando o iPhone da Grasi se move (não só na
+  // telemetria do carro). Throttle interno do _maybeRouteToPhone respeitado.
+  if (!deviceId || role === 'grasi') {
+    const moved = (_routeToPhone.atLat && _routeToPhone.atLng)
+      ? haversineM(lat, lng, _routeToPhone.atLat, _routeToPhone.atLng) : Infinity;
+    _maybeRouteToPhone(moved > 150);
+  }
+  // Feature 1: companion se aproximando da Grasi → LA na tela bloqueada da Grasi.
+  if (deviceId && role === 'companion') _evalCompanionInbound(deviceId).catch(() => {});
 });
 
 // ── Planejamento de rota p/ previsão de SOC na chegada ──────────────────────
@@ -11294,7 +12977,14 @@ function _detectConnFlapping(now) {
 
 function applyMqttMessage(key, value, isRetained = false) {
   const _now = Date.now();
-  state.last_apk_ms = _now;   // qualquer msg em haval/ecotrip/* = APK do carro vivo
+  if (!key.startsWith('cmd/')) {
+    state.last_apk_ms  = _now;
+    state.last_apk_key = key;
+    if (!isRetained) {
+      state.last_apk_live_ms  = _now;
+      state.last_apk_live_key = key;
+    }
+  }
   // Status (LWT) é tratado ANTES de atualizar last_update_ms — assim conseguimos
   // detectar LWT 'offline' que chega atrasado da sessão anterior (corrida com
   // o reconnect rápido): se uma mensagem fresca do carro chegou nos últimos
@@ -12255,5 +13945,7 @@ if (httpsServer) {
   httpsServer.listen(HTTPS_PORT);
 }
 
-process.on('SIGINT',  () => { mqttClient.end(); process.exit(0); });
-process.on('SIGTERM', () => { mqttClient.end(); process.exit(0); });
+// Sinal = shutdown intencional (pm2 restart/stop). Marca pra o próximo boot saber
+// que foi ajuste/deploy, não queda.
+process.on('SIGINT',  () => { _markCleanShutdown('SIGINT');  mqttClient.end(); process.exit(0); });
+process.on('SIGTERM', () => { _markCleanShutdown('SIGTERM'); mqttClient.end(); process.exit(0); });

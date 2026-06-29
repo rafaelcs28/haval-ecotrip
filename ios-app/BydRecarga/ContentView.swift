@@ -27,6 +27,8 @@ struct SongProStatus: Decodable {
     var hasData: Bool = false
     var distToPhoneKm: Double? = nil   // distância de carro até o celular do monitor
     var etaToPhoneMin: Int? = nil
+    var driverName: String = ""        // feature 2: motorista identificado na ignição
+    var driverDeviceId: String = ""
     var tele: Tele = Tele()
 
     struct Tele: Decodable {
@@ -86,6 +88,46 @@ struct ChargesResponse: Decodable {
     var locations: [SPLocation] = []
 }
 
+// Feature 10: viagem encerrada com score de condução + motorista.
+struct SPTrip: Decodable, Identifiable {
+    var id: String
+    var startMs: Double = 0
+    var endMs: Double = 0
+    var durationSec: Int = 0
+    var distKm: Double = 0
+    var avgSpeedKmh: Int = 0
+    var startSoc: Int = 0
+    var endSoc: Int = 0
+    var energyKwh: Double = 0
+    var startLat: Double = 0
+    var startLng: Double = 0
+    var endLat: Double = 0
+    var endLng: Double = 0
+    var driverDeviceId: String? = nil
+    var driverName: String = ""
+    var driveScore: Int = 0
+    var harshAcc: Int = 0
+    var harshBrake: Int = 0
+    var date: Date { Date(timeIntervalSince1970: endMs / 1000) }
+}
+
+struct TripsResponse: Decodable {
+    var trips: [SPTrip] = []
+    var total: Int = 0
+}
+
+// Letra do score (igual ao Haval): A 85+, B 70+, C 55+, D 40+, E abaixo.
+func bydScoreLetter(_ s: Int) -> String {
+    if s >= 85 { return "A" }; if s >= 70 { return "B" }
+    if s >= 55 { return "C" }; if s >= 40 { return "D" }
+    return "E"
+}
+func bydScoreColor(_ s: Int) -> Color {
+    if s >= 85 { return .green }; if s >= 70 { return .mint }
+    if s >= 55 { return .yellow }; if s >= 40 { return .orange }
+    return .red
+}
+
 struct ClusterSample: Identifiable {
     let id = UUID()
     let t: Date
@@ -111,6 +153,7 @@ final class SongProStore: ObservableObject {
     @Published var status: SongProStatus?
     @Published var prefs: [String: Bool] = [:]
     @Published var prefsNum: [String: Int] = [:]
+    @Published var prefsStr: [String: String] = [:]   // byd_role, byd_name
     @Published var busy = false
     @Published var message = ""
     @Published var history: [ClusterSample] = []   // janela de 60s pro cluster
@@ -230,21 +273,27 @@ final class SongProStore: ObservableObject {
            let p = obj["prefs"] as? [String: Any] {
             var dict: [String: Bool] = [:]
             var nums: [String: Int] = [:]
+            var strs: [String: String] = [:]
             for (k, v) in p {
-                // Chaves numéricas (minutos/limiares) por sufixo; resto é boolean.
+                // Chaves numéricas (minutos/limiares) por sufixo; identidade (role/name)
+                // é string; o resto é boolean.
                 if k.hasSuffix("_min") || k.hasSuffix("_pct") {
                     if let n = (v as? NSNumber)?.intValue { nums[k] = n }
+                } else if k == "byd_role" || k == "byd_name" {
+                    if let s = v as? String { strs[k] = s }
                 } else if let b = v as? Bool {
                     dict[k] = b
                 }
             }
             prefs = dict
             prefsNum = nums
+            prefsStr = strs
         }
     }
 
     func isOn(_ key: String) -> Bool { prefs[key] ?? false }
     func numValue(_ key: String, _ def: Int) -> Int { prefsNum[key] ?? def }
+    func strValue(_ key: String, _ def: String = "") -> String { prefsStr[key] ?? def }
 
     func setPref(_ key: String, _ value: Bool) async {
         prefs[key] = value   // atualização otimista
@@ -255,6 +304,13 @@ final class SongProStore: ObservableObject {
 
     func setPrefNum(_ key: String, _ value: Int) async {
         prefsNum[key] = value
+        guard var req = authedRequest("/api/notif/prefs/" + BydSettings.deviceId, method: "POST") else { return }
+        req.httpBody = try? JSONSerialization.data(withJSONObject: ["key": key, "value": value])
+        _ = try? await URLSession.shared.data(for: req)
+    }
+
+    func setPrefStr(_ key: String, _ value: String) async {
+        prefsStr[key] = value
         guard var req = authedRequest("/api/notif/prefs/" + BydSettings.deviceId, method: "POST") else { return }
         req.httpBody = try? JSONSerialization.data(withJSONObject: ["key": key, "value": value])
         _ = try? await URLSession.shared.data(for: req)
@@ -277,6 +333,16 @@ final class SongProStore: ObservableObject {
     // ── Histórico de recargas ───────────────────────────────────────────────
     @Published var charges: [SPCharge] = []
     @Published var locations: [SPLocation] = []
+    // Feature 10: histórico de viagens com score (cresce a cada viagem encerrada).
+    @Published var trips: [SPTrip] = []
+
+    func fetchTrips() async {
+        guard let req = authedRequest("/api/songpro/trips?limit=60") else { return }
+        guard let (data, resp) = try? await URLSession.shared.data(for: req),
+              (resp as? HTTPURLResponse)?.statusCode == 200,
+              let r = try? JSONDecoder().decode(TripsResponse.self, from: data) else { return }
+        trips = r.trips
+    }
 
     func locName(_ id: String?) -> String {
         guard let id else { return "Sem local" }
@@ -435,6 +501,13 @@ struct RecargaDashboard: View {
                     Circle().fill(last.fresh ? Color.green : Color.orange).frame(width: 7, height: 7)
                     Text("Último envio do carro \(last.text)")
                         .font(.caption).foregroundStyle(.secondary)
+                }
+                // Feature 2: motorista identificado (iPhone mais próximo na ignição).
+                if s.tele.carOn && !s.driverName.isEmpty {
+                    HStack(spacing: 5) {
+                        Image(systemName: "steeringwheel").font(.caption2).foregroundStyle(.blue)
+                        Text("Dirigindo: \(s.driverName)").font(.caption).foregroundStyle(.secondary)
+                    }
                 }
             }
             Spacer()
@@ -1142,6 +1215,13 @@ struct HistoryView: View {
     var body: some View {
         NavigationStack {
             List {
+                Section {
+                    NavigationLink {
+                        TripsListView(store: store)
+                    } label: {
+                        Label("Viagens (com score)", systemImage: "car.fill")
+                    }
+                }
                 filterSection
                 summarySection
                 chargesSection
@@ -1163,9 +1243,10 @@ struct HistoryView: View {
             }
             .task {
                 await store.fetchCharges()
+                await store.fetchTrips()
                 configLoc = store.locations.first { $0.needsConfig }
             }
-            .refreshable { await store.fetchCharges() }
+            .refreshable { await store.fetchCharges(); await store.fetchTrips() }
         }
     }
 
@@ -1752,6 +1833,14 @@ struct ConfigTab: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section {
+                    IdentityRow(store: store)
+                } header: {
+                    Text("Identidade")
+                } footer: {
+                    Text("Quem é este iPhone? A Grasi recebe alertas quando outros aparelhos (companions) estão se aproximando dela. O nome também identifica quem está dirigindo (o iPhone mais perto do carro no momento da ignição).")
+                }
+
                 Section("Live Activity") {
                     Toggle("Mostrar recarga do BYD", isOn: Binding(
                         get: { store.isOn("la_songpro") },
@@ -1811,6 +1900,115 @@ struct ConfigTab: View {
             .navigationTitle("Configuração")
             .task { await store.fetchPrefs(); await store.fetchCharges() }
         }
+    }
+}
+
+// ── IDENTIDADE DO DEVICE ─────────────────────────────────────────────────────
+// Picker "Sou Grasi / Companion / Outro" + nome livre. O role da Grasi
+// determina quem recebe a LA "companion a caminho"; o nome dela é usado pra
+// identificar o motorista (iPhone mais próximo do carro na ignição).
+struct IdentityRow: View {
+    @ObservedObject var store: SongProStore
+    @State private var nameDraft = ""
+
+    var body: some View {
+        let role = store.strValue("byd_role", "other")
+        let saved = store.strValue("byd_name", "")
+        return VStack(alignment: .leading, spacing: 10) {
+            Picker("Sou", selection: Binding(
+                get: { role },
+                set: { v in Task { await store.setPrefStr("byd_role", v) } }
+            )) {
+                Text("Grasi (recebe alertas)").tag("grasi")
+                Text("Companion (Rafael, etc)").tag("companion")
+                Text("Outro").tag("other")
+            }
+            HStack {
+                Text("Nome").foregroundStyle(.secondary)
+                Spacer()
+                TextField("Como me chamar (ex.: Grasi, Rafael)", text: $nameDraft, onCommit: {
+                    Task { await store.setPrefStr("byd_name", nameDraft) }
+                })
+                .multilineTextAlignment(.trailing)
+                .autocorrectionDisabled()
+            }
+        }
+        .onAppear { nameDraft = saved }
+        .onChange(of: saved) { _, new in
+            if nameDraft != new { nameDraft = new }
+        }
+    }
+}
+
+// ── HISTÓRICO DE VIAGENS (Feature 10) ────────────────────────────────────────
+// Lista de viagens encerradas com score de condução, motorista identificado e
+// métricas básicas. Toque na linha pra detalhe (placeholder por ora — pode ser
+// expandido depois).
+struct TripsListView: View {
+    @ObservedObject var store: SongProStore
+
+    var body: some View {
+        List {
+            if store.trips.isEmpty {
+                Section {
+                    ContentUnavailableView("Sem viagens registradas",
+                        systemImage: "car.fill",
+                        description: Text("Cada viagem encerrada (>60min sem mover) vira uma linha aqui com score de condução."))
+                }
+            } else {
+                Section("Últimas viagens") {
+                    ForEach(store.trips) { t in tripRow(t) }
+                }
+            }
+        }
+        .navigationTitle("Viagens")
+        .navigationBarTitleDisplayMode(.inline)
+        .task { await store.fetchTrips() }
+        .refreshable { await store.fetchTrips() }
+    }
+
+    private func tripRow(_ t: SPTrip) -> some View {
+        let df = DateFormatter(); df.locale = Locale(identifier: "pt_BR"); df.dateFormat = "dd/MM HH:mm"
+        return HStack(spacing: 12) {
+            ZStack {
+                Circle().fill(bydScoreColor(t.driveScore).opacity(0.18))
+                Text(bydScoreLetter(t.driveScore))
+                    .font(.title3.weight(.heavy)).monospacedDigit()
+                    .foregroundStyle(bydScoreColor(t.driveScore))
+            }
+            .frame(width: 46, height: 46)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack {
+                    Text(df.string(from: t.date)).font(.subheadline.weight(.semibold))
+                    if !t.driverName.isEmpty {
+                        Text("· \(t.driverName)").font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Text("\(t.driveScore)").font(.subheadline.weight(.bold))
+                        .foregroundStyle(bydScoreColor(t.driveScore)).monospacedDigit()
+                }
+                HStack(spacing: 8) {
+                    Text(String(format: "%.1f km", t.distKm)
+                        .replacingOccurrences(of: ".", with: ","))
+                    Text("·")
+                    Text(durStr(t.durationSec))
+                    Text("·")
+                    Text("\(t.startSoc)→\(t.endSoc)%")
+                    Spacer()
+                    if t.harshAcc + t.harshBrake > 0 {
+                        Label("\(t.harshAcc + t.harshBrake)", systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption2).foregroundStyle(.orange)
+                    }
+                }
+                .font(.caption).foregroundStyle(.secondary).monospacedDigit()
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    private func durStr(_ sec: Int) -> String {
+        let h = sec / 3600, m = (sec % 3600) / 60
+        return h > 0 ? "\(h)h\(String(format: "%02d", m))" : "\(m)min"
     }
 }
 

@@ -12,6 +12,7 @@ struct BydRecargaWidgetBundle: WidgetBundle {
     var body: some Widget {
         SongProLiveActivity()
         SongProTripLiveActivity()
+        CompanionInboundLiveActivity()   // feature 1: companion indo até a Grasi
         BydChargeWidget()
     }
 }

@@ -18,6 +18,7 @@ final class BydLiveActivityPush {
         started = true
         observe(SongProActivityAttributes.self, type: "SongProActivityAttributes")
         observe(SongProTripActivityAttributes.self, type: "SongProTripActivityAttributes")
+        observe(CompanionInboundActivityAttributes.self, type: "CompanionInboundActivityAttributes")
     }
 
     private func observe<T: ActivityAttributes>(_ attr: T.Type, type: String) {
