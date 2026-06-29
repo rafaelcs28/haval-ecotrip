@@ -251,7 +251,7 @@ struct NativeViagensView: View {
         .sheet(isPresented: $showReport) {
             MonthlyReportSheet(trips: loader.trips, priceKwh: car.priceKwh, priceGas: car.priceGas, kmPerLGas: car.kmPerL)
         }
-        .sheet(isPresented: $showRoutes) { RouteCompareSheet(trips: loader.trips) }
+        .sheet(isPresented: $showRoutes) { RouteCompareSheet(trips: loader.trips, priceKwh: car.priceKwh, priceGas: car.priceGas, kmPerLGas: car.kmPerL) }
         .sheet(isPresented: $showMilestones) { MilestonesSheet(odometerKm: car.num("odometer_km"), trips: loader.trips) }
         .sheet(isPresented: $showTemp) { TempConsumptionSheet(trips: loader.trips) }
         .sheet(isPresented: $showByMode) { ModeEconomySheet() }

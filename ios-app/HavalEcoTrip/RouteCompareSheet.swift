@@ -7,7 +7,15 @@ import CoreLocation
 
 struct RouteCompareSheet: View {
     let trips: [Trip]
+    var priceKwh: Double = 0
+    var priceGas: Double = 0
+    var kmPerLGas: Double = 0
     @Environment(\.dismiss) private var dismiss
+
+    // Mesmas premissas do resto do app (economiaValue, InsightsSheet): SUV
+    // gasolina a kmPerL real (fallback 11 km/L) e gasolina a R$/L real (fallback 6).
+    private var gasL: Double { priceGas > 0 ? priceGas : 6.0 }
+    private var baselineKmL: Double { kmPerLGas > 1 ? kmPerLGas : 11 }
 
     private struct RouteGroup: Identifiable {
         let id = UUID()
@@ -89,6 +97,28 @@ struct RouteCompareSheet: View {
                         }.foregroundStyle(better ? DS.green : DS.orange)
                     }
                 }
+                costRow(g)
+            }
+        }
+    }
+
+    // Custo médio real (kWh + combustível) vs se o mesmo trajeto rodasse 100%
+    // gasolina (km / baseline km·L × R$/L). savedPct = quanto o híbrido economiza.
+    @ViewBuilder private func costRow(_ g: RouteGroup) -> some View {
+        let real = g.trips.reduce(0.0) { $0 + $1.netKwh * priceKwh + $1.fuelL * gasL } / Double(g.n)
+        let gas  = g.trips.reduce(0.0) { $0 + ($1.distKm / baselineKmL) * gasL } / Double(g.n)
+        let savedPct = gas > 0.01 ? Int(((gas - real) / gas * 100).rounded()) : 0
+        Divider().overlay(DS.muted.opacity(0.25))
+        HStack(spacing: 14) {
+            miniMetric(Fmt.brl(real), "custo méd.", DS.text)
+            miniMetric(Fmt.brl(gas), "se gasolina", DS.orange)
+            Spacer()
+            if savedPct != 0 {
+                let saving = savedPct > 0
+                HStack(spacing: 3) {
+                    Image(systemName: saving ? "leaf.fill" : "exclamationmark.triangle.fill").font(.caption2)
+                    Text("\(saving ? "−" : "+")\(abs(savedPct))%").font(.caption.weight(.bold))
+                }.foregroundStyle(saving ? DS.green : DS.orange)
             }
         }
     }
