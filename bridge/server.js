@@ -11963,8 +11963,12 @@ app.post('/api/phone-location', (req, res) => {
       ? haversineM(lat, lng, _routeToPhone.atLat, _routeToPhone.atLng) : Infinity;
     _maybeRouteToPhone(moved > 150);
   }
-  // Feature 1: companion se aproximando da Grasi → LA na tela bloqueada da Grasi.
-  if (deviceId && role === 'companion') _evalCompanionInbound(deviceId).catch(() => {});
+  // Feature 1 (CompanionInbound) desabilitada por design: a Grasi prefere
+  // receber LA SÓ quando o Rafael compartilha explicitamente do Haval Hub
+  // (SharedTrip), sem "vigilância" automática toda vez que alguém anda na
+  // direção dela. Código de detecção fica preservado em _evalCompanionInbound
+  // pra ser reabilitado no futuro via toggle se ela quiser.
+  // if (deviceId && role === 'companion') _evalCompanionInbound(deviceId).catch(() => {});
 });
 
 // ── Planejamento de rota p/ previsão de SOC na chegada ──────────────────────
