@@ -2999,6 +2999,30 @@ function checkAnomalies() {
   }
 }
 
+// Regressão linear do 12V sobre o histórico diário (até 90d). Base compartilhada
+// pelo alerta preditivo (checkBatt12Trend) e pelo subscore de saúde. Retorna
+// null sem amostra/janela mínima; senão { slope %/dia, curProj %, daysTo50, perWeek, spanDays, n }.
+function batt12Regression() {
+  const pts = telemetryHistory
+    .filter(s => +s.batt_12v > 0 && +s.batt_12v <= 100 && s.ts)
+    .map(s => ({ t: s.ts, v: +s.batt_12v }))
+    .sort((a, b) => a.t - b.t);
+  if (pts.length < 10) return null;                             // amostra mínima
+  const spanDays = (pts[pts.length - 1].t - pts[0].t) / 86400000;
+  if (spanDays < 14) return null;                               // janela mínima
+  const t0 = pts[0].t;
+  const xs = pts.map(p => (p.t - t0) / 86400000), ys = pts.map(p => p.v);
+  const n = pts.length, sx = xs.reduce((a, b) => a + b, 0), sy = ys.reduce((a, b) => a + b, 0);
+  const sxx = xs.reduce((a, x) => a + x * x, 0), sxy = xs.reduce((a, x, i) => a + x * ys[i], 0);
+  const denom = n * sxx - sx * sx;
+  if (Math.abs(denom) < 1e-6) return null;
+  const slope = (n * sxy - sx * sy) / denom;                    // %/dia (negativo = caindo)
+  const intercept = (sy - slope * sx) / n;
+  const curProj = intercept + slope * xs[xs.length - 1];        // % projetado hoje
+  const daysTo50 = slope < 0 ? (50 - curProj) / slope : null;   // dias até cruzar 50% (só se caindo)
+  return { slope, curProj, daysTo50, perWeek: +(-slope * 7).toFixed(1), spanDays, n };
+}
+
 // Tendência preditiva do 12V: regressão linear sobre o histórico (até 90d) projeta
 // QUANDO o 12V cruza o limite crítico (50%), alertando ANTES de chegar lá — diferente
 // do batt12_low (threshold) e do checkAnomalies (diff dia-a-dia). Dispara no máx 1×/7d.
@@ -3007,30 +3031,14 @@ const BATT12_TREND_COOLDOWN = 7 * 24 * 60 * 60 * 1000;
 function checkBatt12Trend() {
   if (!notifPrefs.batt12_trend) return;
   if (Date.now() - _batt12TrendSentAt < BATT12_TREND_COOLDOWN) return;
-  // Pontos válidos: 12V em (0,100], ordenados por tempo.
-  const pts = telemetryHistory
-    .filter(s => +s.batt_12v > 0 && +s.batt_12v <= 100 && s.ts)
-    .map(s => ({ t: s.ts, v: +s.batt_12v }))
-    .sort((a, b) => a.t - b.t);
-  if (pts.length < 10) return;                                  // amostra mínima
-  const spanDays = (pts[pts.length - 1].t - pts[0].t) / 86400000;
-  if (spanDays < 14) return;                                    // janela mínima
-  // Regressão linear (x = dias desde o 1º ponto, y = %).
-  const t0 = pts[0].t;
-  const xs = pts.map(p => (p.t - t0) / 86400000), ys = pts.map(p => p.v);
-  const n = pts.length, sx = xs.reduce((a, b) => a + b, 0), sy = ys.reduce((a, b) => a + b, 0);
-  const sxx = xs.reduce((a, x) => a + x * x, 0), sxy = xs.reduce((a, x, i) => a + x * ys[i], 0);
-  const denom = n * sxx - sx * sx;
-  if (Math.abs(denom) < 1e-6) return;
-  const slope = (n * sxy - sx * sy) / denom;                    // %/dia
-  const intercept = (sy - slope * sx) / n;
+  const reg = batt12Regression();
+  if (!reg) return;
+  const { slope, curProj, daysTo50 } = reg;
   if (slope >= -0.1) return;                                    // estável ou subindo
-  const curProj = intercept + slope * xs[xs.length - 1];        // % projetado hoje
   if (curProj > 95) return;                                     // ainda cheio → ruído
-  const daysTo50 = (50 - curProj) / slope;                      // slope<0 → positivo se acima de 50
   if (!(daysTo50 > 0 && daysTo50 <= 30)) return;                // só alerta se cruza 50% em ≤30d
   _batt12TrendSentAt = Date.now();
-  const perWeek = (-slope * 7).toFixed(1);
+  const perWeek = reg.perWeek.toFixed(1);
   const title = '🔋 Bateria 12V em queda';
   const body = `12V caindo ~${perWeek}%/semana (atual ~${curProj.toFixed(0)}%). No ritmo, chega a 50% em ~${Math.round(daysTo50)} dias — verifique dreno/alternador.`;
   addEvent('anomaly', `${title} — ${body}`);
@@ -6770,12 +6778,27 @@ app.get('/api/health-score', (_req, res) => {
   const subs = [];
   const issues = [];
 
-  // ── Bateria 12V: 90%→100, 50%→0 ──
+  // ── Bateria 12V: nível atual (90%→100, 50%→0) + penalidade de tendência ──
+  // Não basta o % instantâneo: uma 12V que perde carga rápido falha mesmo
+  // estando "ok" hoje. A regressão sobre o histórico projeta quando cruza 50%
+  // e desconta proporcionalmente — quanto mais perto da troca, menor o score.
   const v12 = +state.batt_12v_pct || 0;
   if (v12 > 0) {
-    const s = Math.round(clamp((v12 - 50) / 40 * 100, 0, 100));
-    subs.push({ key: 'batt12', label: 'Bateria 12V', score: s, detail: `${v12}%` });
-    if (s < 60) issues.push('Bateria 12V baixa');
+    let s = Math.round(clamp((v12 - 50) / 40 * 100, 0, 100));
+    let detail = `${v12}%`;
+    const reg = batt12Regression();
+    if (reg && reg.slope < -0.05 && reg.daysTo50 != null && reg.daysTo50 > 0) {
+      // ≤30d p/ troca → −60; ≥365d → ~0. Penaliza a queda projetada.
+      const trendPenalty = clamp((365 - reg.daysTo50) / 335 * 60, 0, 60);
+      s = Math.round(clamp(s - trendPenalty, 0, 100));
+      const d = Math.round(reg.daysTo50);
+      detail = `${v12}% · −${reg.perWeek}%/sem · troca em ~${d > 365 ? '365+' : d}d`;
+      if (reg.daysTo50 <= 60) issues.push(`Bateria 12V: troca prevista em ~${d}d`);
+    } else if (reg && reg.slope >= -0.05) {
+      detail = `${v12}% · estável`;
+    }
+    subs.push({ key: 'batt12', label: 'Bateria 12V', score: s, detail });
+    if (s < 60 && !issues.some(i => i.startsWith('Bateria 12V'))) issues.push('Bateria 12V baixa');
   }
 
   // ── Pneus: pior pneu. 32 psi→100, 26 psi→0 ──
@@ -10592,21 +10615,31 @@ function _songProEvents(o) {
     // assim "carro ligado parado" não infla o tempo nem mantém viagem fantasma.
     // Feature 2: identifica o motorista pelo iPhone mais próximo do carro (≤200m)
     // no momento da ignição. Persiste em _spEv pra carimbar a viagem.
+    // Caso ambíguo (ambos em casa): marca como TENTATIVO — re-avalia conforme o
+    // carro se afasta da garagem (ver bloco "driver re-eval" abaixo).
     {
       const plat = +o.location_latitude || 0, plng = +o.location_longitude || 0;
       _spEv.driverDeviceId = null; _spEv.driverName = '';
+      _spEv.driverIgnitionLat = plat; _spEv.driverIgnitionLng = plng;
+      _spEv.driverPending = true;
+      _spEv.driverIgnitionMs = nowMs;
       if (plat && plng) {
         let best = null, bestD = 200;        // só conta se < 200m do carro
         const fresh = nowMs - 10 * 60_000;   // localização do device fresca (<10min)
+        let candidatesNearby = 0;
         for (const [id, l] of Object.entries(phoneLocByDevice)) {
           if (!l || l.ts < fresh || !l.lat || !l.lng) continue;
           const d = haversineM(l.lat, l.lng, plat, plng);
+          if (d < 200) candidatesNearby++;
           if (d < bestD) { best = id; bestD = d; }
         }
         if (best) {
           _spEv.driverDeviceId = best;
           _spEv.driverName = _deviceName(best);
-          console.log(`[songpro] motorista identificado: ${_spEv.driverName} (${bestD.toFixed(0)}m do carro)`);
+          // Se só 1 device está perto do carro, locka direto. Múltiplos → mantém
+          // pending pra reavaliação quando o carro sair.
+          if (candidatesNearby <= 1) _spEv.driverPending = false;
+          console.log(`[songpro] motorista identificado: ${_spEv.driverName} (${bestD.toFixed(0)}m, candidatos perto=${candidatesNearby}, pending=${_spEv.driverPending})`);
         }
       }
       scheduleStateSave();
@@ -10635,6 +10668,50 @@ function _songProEvents(o) {
   // Localização atual do carro (pra distância/ETA até o celular na LA de viagem).
   const _clat = +o.location_latitude || 0, _clng = +o.location_longitude || 0;
   if (_clat && _clng) _spCarLoc = { lat: _clat, lng: _clng, ts: nowMs };
+
+  // Re-avaliação do motorista enquanto o carro se afasta da garagem.
+  // Caso: ambos os iPhones estavam em casa na ignição → quem REALMENTE está no
+  // carro é o que continua perto enquanto o carro anda. O outro fica pra trás.
+  // Roda só se driverPending=true (ainda não locked) e o carro já saiu >300m da
+  // posição da ignição. Janela máx 10min — depois disso mantém o palpite inicial.
+  if (carOn && _spEv.driverPending && _clat && _clng
+      && _spEv.driverIgnitionLat && _spEv.driverIgnitionLng) {
+    const movedFromIgnition = haversineM(_clat, _clng,
+      _spEv.driverIgnitionLat, _spEv.driverIgnitionLng);
+    const sinceIgnitionMin = (nowMs - (_spEv.driverIgnitionMs || nowMs)) / 60_000;
+    if (movedFromIgnition > 300 && sinceIgnitionMin < 10) {
+      const fresh = nowMs - 2 * 60_000;   // só conta como "seguindo" se reportou agora
+      const stale = nowMs - 60 * 60_000;  // ignora devices completamente velhos (>1h)
+      let following = null, followingD = 150;   // <150m do carro = no carro
+      let leftBehind = 0;                       // n. de devices longe (>500m do carro)
+      for (const [id, l] of Object.entries(phoneLocByDevice)) {
+        if (!l || l.ts < stale || !l.lat || !l.lng) continue;
+        const d = haversineM(l.lat, l.lng, _clat, _clng);
+        // "Seguindo" exige update RECENTE: phone se moveu junto, gerou samples.
+        if (l.ts >= fresh && d < followingD) { following = id; followingD = d; }
+        // "Left behind" aceita até stale: device parado em casa não reporta — o
+        // último sample dele continua sendo a melhor estimativa de onde ele está.
+        if (d > 500) leftBehind++;
+      }
+      // Trava o motorista se UM device segue o carro E pelo menos outro ficou pra trás.
+      if (following && leftBehind > 0) {
+        const prevName = _spEv.driverName;
+        _spEv.driverDeviceId = following;
+        _spEv.driverName = _deviceName(following);
+        _spEv.driverPending = false;
+        if (prevName !== _spEv.driverName) {
+          console.log(`[songpro] motorista CORRIGIDO em movimento: ${prevName || '?'} → ${_spEv.driverName} (segue o carro a ${followingD.toFixed(0)}m, ${leftBehind} device(s) ficou pra trás)`);
+        } else {
+          console.log(`[songpro] motorista CONFIRMADO: ${_spEv.driverName}`);
+        }
+        scheduleStateSave();
+      }
+    } else if (sinceIgnitionMin >= 10) {
+      // Janela esgotou — desiste de reavaliar, mantém o palpite inicial.
+      _spEv.driverPending = false;
+      scheduleStateSave();
+    }
+  }
 
   // ── Viagem por MOVIMENTO ──────────────────────────────────────────────────
   // tripStartMs = início do deslocamento; tripLastMs = último movimento. Volta a
