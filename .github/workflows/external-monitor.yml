@@ -1,0 +1,27 @@
+name: External Monitor
+
+# Roda no GitHub, fora do Mac Mini de propósito: cobre o caso em que o bridge
+# E o HA da empresa caem juntos (aí nenhum dos dois consegue se auto-alertar).
+# Ver memória macmini-external-monitoring — este é o terceiro observador.
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping health.html via Funnel
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: |
+          code=$(curl -sk -o /dev/null --max-time 15 -w "%{http_code}" https://mac-mini.tailacc6e7.ts.net/health.html || echo "000")
+          echo "http_code=$code"
+          if [ "$code" != "200" ]; then
+            curl -sk -X POST "https://ntfy.sh/${NTFY_TOPIC}" \
+              -H "Title: Mac Mini totalmente inacessível" \
+              -H "Priority: 5" \
+              -H "Tags: rotating_light" \
+              -d "health.html não respondeu (http=$code). Bridge e/ou HA da empresa podem estar caídos juntos — checagem via GitHub Actions, fora da rede do Mac."
+          fi
