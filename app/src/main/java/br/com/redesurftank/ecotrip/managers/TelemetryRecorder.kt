@@ -214,7 +214,7 @@ class TelemetryRecorder(private val context: Context) {
      * @param startMs          Timestamp de início do auto-trip (original, não do reinício).
      * @param preloadedSamples Amostras já salvas em disco antes do reinício do app; serão
      *                         pré-populadas na lista antes de continuar a gravar.
-     * @param flushFile        Arquivo onde as amostras serão gravadas a cada 60 s para
+     * @param flushFile        Arquivo onde as amostras serão gravadas a cada 20 s para
      *                         sobreviver a reinícios do app. Null = sem persistência.
      */
     fun startRecording(
@@ -247,7 +247,7 @@ class TelemetryRecorder(private val context: Context) {
             // Tick de 500 ms — permite capturar variações sem esperar 1 s inteiro.
             // Amostra é gravada quando velocidade varia ≥ 1 km/h, potência ≥ 0,2 kW,
             // ou passaram ≥ 5 s sem nenhuma amostra (garante continuidade do GPS).
-            var ticksSinceFlush  = 0  // flush a cada 60 ticks × 500 ms = 30 s
+            var ticksSinceFlush  = 0  // flush a cada 40 ticks × 500 ms = 20 s
             var ticksSinceRecord = 0  // força registro a cada 10 ticks × 500 ms = 5 s
             var lastSpd  = Float.NaN
             var lastEvKw = Float.NaN
@@ -288,8 +288,8 @@ class TelemetryRecorder(private val context: Context) {
                     ticksSinceRecord = 0
                 }
 
-                // Flush para disco a cada 30 s — garante recuperação após reinício do app
-                if (++ticksSinceFlush >= 60) {
+                // Flush para disco a cada 20 s — garante recuperação após reinício do app
+                if (++ticksSinceFlush >= 40) {
                     ticksSinceFlush = 0
                     flushFile?.let { f ->
                         val snapshot = synchronized(samples) { samples.toList() }
