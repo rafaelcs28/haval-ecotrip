@@ -16,12 +16,19 @@ jobs:
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
         run: |
-          code=$(curl -sk -o /dev/null --max-time 15 -w "%{http_code}" https://mac-mini.tailacc6e7.ts.net/health.html || echo "000")
-          echo "http_code=$code"
+          # Funnel/Tailscale degrada em blips transitórios; confirma 3x (20s) antes
+          # de gritar, senão vira alarme falso de "totalmente inacessível".
+          code=000
+          for attempt in 1 2 3; do
+            code=$(curl -sk -o /dev/null --max-time 15 -w "%{http_code}" https://mac-mini.tailacc6e7.ts.net/health.html || echo "000")
+            echo "attempt $attempt: http_code=$code"
+            [ "$code" = "200" ] && break
+            [ "$attempt" -lt 3 ] && sleep 20
+          done
           if [ "$code" != "200" ]; then
             curl -sk -X POST "https://ntfy.sh/${NTFY_TOPIC}" \
               -H "Title: Mac Mini totalmente inacessível" \
               -H "Priority: 5" \
               -H "Tags: rotating_light" \
-              -d "health.html não respondeu (http=$code). Bridge e/ou HA da empresa podem estar caídos juntos — checagem via GitHub Actions, fora da rede do Mac."
+              -d "health.html não respondeu em 3 tentativas (http=$code). Bridge e/ou HA da empresa podem estar caídos juntos — checagem via GitHub Actions, fora da rede do Mac."
           fi
