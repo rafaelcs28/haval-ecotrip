@@ -53,7 +53,8 @@ final class CarStore: ObservableObject {
     // Comandos remotos que têm feed de andamento (sent→running→done/timeout).
     private static let progressActions: Set<String> = [
         "lock_open", "lock_close", "engine_on", "engine_off",
-        "windows_open", "windows_close", "trunk_open", "trunk_close"
+        "windows_open", "windows_close", "trunk_open", "trunk_close",
+        "sunroof_open", "sunroof_close", "find_car", "find_car_honk"
     ]
     // Watchdog client-side: se nenhum evento terminal chegar (WS caiu, nuvem
     // não respondeu, standalone não pollou), o banner resolve sozinho em timeout.
@@ -68,10 +69,7 @@ final class CarStore: ObservableObject {
     private var lanWS: URLSessionWebSocketTask?
     private var lanHostPort: (String, Int)?
 
-    private var base: String {
-        let u = Settings.bridgeURL.isEmpty ? AuthConfig.bridgeURL : Settings.bridgeURL
-        return u.hasSuffix("/") ? String(u.dropLast()) : u
-    }
+    private var base: String { BridgeRouter.shared.currentURL }
     private var token: String { Settings.bridgeToken }
 
     // MARK: - Ciclo de vida
@@ -88,6 +86,15 @@ final class CarStore: ObservableObject {
         started = true
         connectWS()
         startPolling()
+        // Reconecta o WS quando o BridgeRouter trocar pra um caminho mais rápido
+        // (ex: Tailscale liga/desliga, mudou WiFi/celular).
+        NotificationCenter.default.addObserver(forName: .bridgeURLChanged, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, self.started else { return }
+                self.ws?.cancel(with: .goingAway, reason: nil); self.ws = nil
+                self.connectWS()
+            }
+        }
         // LAN direta é OPCIONAL (default off). Ligar Bonjour dispara o prompt de
         // "Rede Local" do iOS; se negado, pode bloquear a rota até o carro/bridge
         // na Wi-Fi de casa. Só liga quando o usuário ativa em Configurações.
@@ -404,11 +411,11 @@ final class CarStore: ObservableObject {
         "hvac_rear_defrost", "hvac_auto_defrost", "hvac_blower_mode", "hvac_power_mode",
         "drive_mode", "power_reserve", "charge_soc_target", "terrain_mode",
         "regen_level", "steer_mode", "one_pedal", "esp_enable",
+        "seat_vent_drv", "seat_vent_pass",
     ]
     private static let lanRename: [String: String] = [
         "ac_state": "hvac_ac_enable", "hvac_sync_enable": "hvac_sync",
-        "hvac_auto_enable": "hvac_auto", "seat_vent_drv": "hvac_seat_vent_drv",
-        "seat_vent_pass": "hvac_seat_vent_pass",
+        "hvac_auto_enable": "hvac_auto",
         "basic_battery_voltage_v": "batt_12v_v",
     ]
 
@@ -476,6 +483,8 @@ final class CarStore: ObservableObject {
     // Atalhos usados nas telas (expandir por bloco)
     var speedKmh: Double      { max(0, num("speed_kmh")) }   // -1 = desconhecido → 0
     var motorPowerKw: Double   { num("motor_power_kw") }
+    // Ângulo do volante (graus). Carro envia direita=NEGATIVO, esq=POSITIVO (calib. PWA 2026-05-27).
+    var steeringAngle: Double  { num("steering_angle") }
     var engineRpm: Int         { max(0, Int(num("engine_rpm"))) }
     var socPct: Double         { num("soc_pct") }
     var gear: String           { str("gear") }
@@ -571,6 +580,14 @@ final class CarStore: ObservableObject {
     }
 
     // Viagem em curso (objeto current_trip, publicado pelo carro)
+    /// Rede do carro (APK publica em network/info): IP local + tipo + velocidade.
+    private var carNetwork: [String: Any]? { raw["car_network"] as? [String: Any] }
+    var carIP: String { carNetwork?["ip"] as? String ?? "" }
+    var carNetType: String { carNetwork?["type"] as? String ?? "" }
+    var carDownlinkMbps: Double? {
+        switch carNetwork?["downlink_kbps"] { case let d as Double: return d/1000; case let i as Int: return Double(i)/1000; default: return nil }
+    }
+
     var trip: [String: Any]? { raw["current_trip"] as? [String: Any] }
     var tripActive: Bool { trip != nil }
     private func tnum(_ k: String) -> Double {
@@ -634,8 +651,8 @@ final class CarStore: ObservableObject {
     var frontDefrost: Bool { bool("hvac_front_defrost") }
     var rearDefrost: Bool  { bool("hvac_rear_defrost") }
     var autoDefrost: Bool  { bool("hvac_auto_defrost") }
-    var seatVentDrv: Int  { Int(num("hvac_seat_vent_drv")) }   // 0–3
-    var seatVentPass: Int { Int(num("hvac_seat_vent_pass")) }
+    var seatVentDrv: Int  { Int(num("seat_vent_drv")) }   // 0–3
+    var seatVentPass: Int { Int(num("seat_vent_pass")) }
 
     // Sub-modos de condução / terreno / direção
     var powerReserve: Int?    { intOrNil("power_reserve") }    // 1=Inteligente, 2=Prioritário
@@ -728,5 +745,11 @@ final class CarStore: ObservableObject {
     @discardableResult func setHvac(_ control: String, on: Bool) async -> Bool {
         if sendLAN("hvac/\(control)", on ? 1 : 0) { return true }
         return await command("/api/hvac/\(control)", body: ["value": on ? 1 : 0])
+    }
+
+    // update otimista: reflete o valor na UI já, antes do carro ecoar (~2,5s).
+    // O echo real (seat_vent_drv/pass) sobrescreve depois e reconcilia.
+    func optimisticRaw(_ key: String, _ value: Int) {
+        DispatchQueue.main.async { self.raw[key] = value }
     }
 }

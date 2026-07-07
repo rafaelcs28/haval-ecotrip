@@ -14,6 +14,7 @@ struct PreclimatSched: Identifiable {
     var temp: Double        // 16–32
     var fan: Int            // 1–7
     var duration: Int       // 0–180 min
+    var leadMin: Int        // minutos antes da saída em que o clima liga
 
     init(_ r: [String: Any]) {
         id = (r["id"] as? String) ?? UUID().uuidString
@@ -23,6 +24,7 @@ struct PreclimatSched: Identifiable {
         temp = anyD(r["temp"]) == 0 ? 22 : anyD(r["temp"])
         fan = Int(anyD(r["fan"])); if fan < 1 { fan = 3 }
         duration = Int(anyD(r["duration"])); if duration == 0 { duration = 20 }
+        leadMin = Int(anyD(r["leadMin"])); if leadMin == 0 { leadMin = 10 }
     }
 }
 private func anyD(_ v: Any?) -> Double {
@@ -41,7 +43,7 @@ final class PreclimatStore: ObservableObject {
     var isActive: Bool { ["scheduled", "starting", "engine_on", "cooling"].contains(statusPhase) }
 
     private var base: String {
-        let u = Settings.bridgeURL.isEmpty ? AuthConfig.bridgeURL : Settings.bridgeURL
+        let u = BridgeRouter.shared.currentURL
         return u.hasSuffix("/") ? String(u.dropLast()) : u
     }
     private func req(_ path: String, _ method: String, _ body: [String: Any]? = nil) -> URLRequest? {

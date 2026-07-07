@@ -113,16 +113,14 @@ final class ArrivalStore: ObservableObject {
     private var lastFrom: (Double, Double)?
     private var lastSoc = 0
 
-    private var base: String {
-        let u = Settings.bridgeURL.isEmpty ? AuthConfig.bridgeURL : Settings.bridgeURL
-        return u.hasSuffix("/") ? String(u.dropLast()) : u
-    }
+    private var base: String { BridgeRouter.shared.currentURL }
 
     // toLat/toLng != nil → destino já resolvido. fromLat/fromLng != nil → saída custom
     // (simular outro ponto de partida); senão usa o local atual do carro.
     func compute(query: String, trips: [Trip], toLat: Double? = nil, toLng: Double? = nil,
                  fromLat: Double? = nil, fromLng: Double? = nil,
-                 stops: [(lat: Double, lng: Double, name: String)] = []) async {
+                 stops: [(lat: Double, lng: Double, name: String)] = [],
+                 targetSoc: Int = 12) async {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard (!q.isEmpty || (toLat != nil && toLng != nil)), !loading else { return }
         loading = true; error = nil; plan = nil; chargePlan = nil
@@ -143,6 +141,7 @@ final class ArrivalStore: ObservableObject {
             urlStr = "\(base)/api/route-plan?from_lat=\(lat)&from_lng=\(lng)&q=\(nm)"
         }
         urlStr += "&soc=\(curSoc)&alt=1"   // SOC da UI + pede rotas alternativas pra comparar
+        if targetSoc > 12 { urlStr += "&target_soc=\(targetSoc)" }   // preservar bateria: chegar com X%
         if !stops.isEmpty {
             urlStr += "&stops=" + stops.map { "\($0.lat),\($0.lng)" }.joined(separator: ";")
         }
@@ -432,6 +431,7 @@ struct ArrivalSheet: View {
     @State private var showMapPicker = false
     @State private var mapInitial: CLLocationCoordinate2D? = nil   // ponto inicial do mapa (vindo da busca)
     @State private var destWaypointId = UUID()                     // identidade estável do destino na lista reordenável
+    @State private var targetSoc = 12                              // SOC de chegada desejado (12 = auto/só reserva PHEV)
     @Environment(\.dismiss) private var dismiss
     @FocusState private var focusedField: Field?
 
@@ -508,7 +508,13 @@ struct ArrivalSheet: View {
             .background(DS.bg.ignoresSafeArea())
             .navigationTitle("SOC na chegada")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Fechar") { dismiss() } } }
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark").font(.system(size: 13, weight: .bold)).foregroundStyle(DS.muted)
+                    }
+                }
+            }
             .onAppear { focusedField = .dest }
             .sheet(isPresented: $showMapPicker) {
                 MapPickerSheet(start: mapInitial ?? destCoord.map { .init(latitude: $0.0, longitude: $0.1) } ?? CarStore.shared.coordinate,
@@ -527,6 +533,8 @@ struct ArrivalSheet: View {
                 Button("Cancelar", role: .cancel) { favTarget = nil; favName = "" }
             } message: { place in Text(place.name) }
         }
+        .presentationDetents([.large])
+        .presentationDragIndicator(.visible)
     }
 
     // Paradas (waypoints): lista reordenável (paradas + destino) + um campo de busca
@@ -753,7 +761,7 @@ struct ArrivalSheet: View {
         dest = name
         destCoord = (c.latitude, c.longitude)
         completer.clear(); focusedField = nil
-        Task { await store.compute(query: name, trips: trips, toLat: c.latitude, toLng: c.longitude, stops: stopsCoords) }
+        Task { await store.compute(query: name, trips: trips, toLat: c.latitude, toLng: c.longitude, stops: stopsCoords, targetSoc: targetSoc) }
     }
 
     private func use(_ p: SavedPlace) {
@@ -764,7 +772,7 @@ struct ArrivalSheet: View {
         dest = p.display
         destCoord = (p.lat, p.lng)
         completer.clear(); focusedField = nil
-        Task { await store.compute(query: p.name, trips: trips, toLat: p.lat, toLng: p.lng, stops: stopsCoords) }
+        Task { await store.compute(query: p.name, trips: trips, toLat: p.lat, toLng: p.lng, stops: stopsCoords, targetSoc: targetSoc) }
     }
 
     // Adiciona um favorito/recente como PARADA (não destino) e recalcula se já há destino.
@@ -821,7 +829,8 @@ struct ArrivalSheet: View {
             }
             await store.compute(query: dest, trips: trips,
                                 toLat: destCoord?.0, toLng: destCoord?.1,
-                                fromLat: fromC?.0, fromLng: fromC?.1, stops: stopsCoords)
+                                fromLat: fromC?.0, fromLng: fromC?.1, stops: stopsCoords,
+                                targetSoc: targetSoc)
             if let p = store.plan, p.destLat != 0 || p.destLng != 0 {
                 places.addRecent(name: p.destName, lat: p.destLat, lng: p.destLng)
             }
@@ -879,28 +888,28 @@ struct ArrivalSheet: View {
                 HStack(spacing: 8) {
                     Image(systemName: "checkmark.seal.fill").foregroundStyle(DS.green)
                     Text("Já dá pra ir — chega com ~\(cp.target)% sem recarregar.")
-                        .font(.subheadline).foregroundStyle(DS.text)
+                        .font(.system(size: 13)).foregroundStyle(DS.text)
                 }
             } else {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text("Carregue até").font(.subheadline).foregroundStyle(DS.muted)
-                    Text("\(cp.socNeeded)%").font(.system(size: 24, weight: .bold, design: .rounded)).foregroundStyle(DS.teal)
-                    Text("(+\(cp.addPct)% · \(Fmt.dec1(cp.addKwh)) kWh)").font(.caption).foregroundStyle(DS.muted)
+                    Text("Carregue até").font(.system(size: 13)).foregroundStyle(DS.muted)
+                    Text("\(cp.socNeeded)%").font(.system(size: 24, weight: .semibold, design: .rounded)).foregroundStyle(DS.teal).monospacedDigit()
+                    Text("(+\(cp.addPct)% · \(Fmt.dec1(cp.addKwh)) kWh)").font(.system(size: 11)).foregroundStyle(DS.muted)
                 }
-                Text("para chegar com ~\(cp.target)% de margem.").font(.caption).foregroundStyle(DS.muted)
+                Text("para chegar com ~\(cp.target)% de margem.").font(.system(size: 9.5)).foregroundStyle(DS.muted)
                 if !cp.stationName.isEmpty {
                     HStack(spacing: 6) {
-                        Image(systemName: "bolt.fill").font(.caption).foregroundStyle(DS.orange)
+                        Image(systemName: "bolt.fill").font(.system(size: 11)).foregroundStyle(DS.orange)
                         Text("≈\(cp.minutes) min em \(cp.stationName) (\(Fmt.dec1(cp.stationPowerKw)) kW)")
-                            .font(.caption).foregroundStyle(DS.text)
+                            .font(.system(size: 11)).foregroundStyle(DS.text)
                     }
                 }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(10)
-        .background(DS.teal.opacity(0.10))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .padding(.horizontal, 12).padding(.vertical, 11)
+        .background(DS.panel2)
+        .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
     }
 
     // Cor por rota — amarra a linha no mapa à linha do seletor (mesma cor = mesma rota).
@@ -940,6 +949,30 @@ struct ArrivalSheet: View {
 
     // Seletor de rotas alternativas: uma linha por rota com via principal, tempo/dist e
     // o desfecho de energia (SOC na chegada ou gasolina). A selecionada fica destacada.
+    // Seletor de SOC de chegada desejado. Auto (12) = usa a bateria até a reserva PHEV.
+    // 20/30/40/50 = preserva bateria; o bridge recalcula quanto de gasolina isso custa.
+    @ViewBuilder private var targetSocPicker: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Chegar com").font(.caption).foregroundStyle(DS.muted)
+            HStack(spacing: 6) {
+                ForEach([12, 20, 30, 40, 50], id: \.self) { v in
+                    let sel = targetSoc == v
+                    Button {
+                        guard targetSoc != v else { return }
+                        targetSoc = v; calc()
+                    } label: {
+                        Text(v == 12 ? "Auto" : "\(v)%")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(sel ? DS.bg : DS.text)
+                            .frame(maxWidth: .infinity).padding(.vertical, 8)
+                            .background(sel ? DS.teal : DS.panel2)
+                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    }.buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
     @ViewBuilder private var routeAltsPicker: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Rotas").font(.caption).foregroundStyle(DS.muted)
@@ -982,122 +1015,148 @@ struct ArrivalSheet: View {
     }
 
     @ViewBuilder private func resultCard(_ p: ArrivalPlan) -> some View {
-        DSCard {
-            VStack(alignment: .leading, spacing: 14) {
-                Text(p.destName).font(.headline).foregroundStyle(DS.text).lineLimit(2)
+        VStack(alignment: .leading, spacing: 16) {
+            // Header: destino + chip de ETA à direita.
+            HStack(alignment: .top) {
+                Text(p.destName).font(.system(size: 15, weight: .bold)).foregroundStyle(DS.text).lineLimit(2)
+                Spacer(minLength: 8)
+                DSChip(text: "\(p.etaClock) · \(p.durationMin) min", color: p.traffic ? DS.orange : DS.teal)
+            }
 
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text("Chegada").font(.subheadline).foregroundStyle(DS.muted)
-                    Text(p.etaClock).font(.system(size: 26, weight: .bold, design: .rounded)).foregroundStyle(DS.teal)
-                    Text("· \(p.durationMin) min").font(.subheadline).foregroundStyle(DS.muted)
-                    if p.traffic { Image(systemName: "car.2.fill").font(.caption).foregroundStyle(DS.muted) }
-                }
-
-                HStack(alignment: .bottom, spacing: 10) {
-                    Text("SOC na chegada").font(.subheadline).foregroundStyle(DS.muted).padding(.bottom, 10)
-                    Text("\(p.predictedSoc)").font(.system(size: 64, weight: .heavy, design: .rounded))
-                        .foregroundStyle(arrivalSocColor(p.predictedSoc))
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text("%").font(.title3).foregroundStyle(DS.muted)
-                        // Banda de confiança: erro médio histórico (auto-calibração).
-                        Text("± \(p.confidencePct)").font(.caption2).foregroundStyle(DS.muted)
-                    }.padding(.bottom, 8)
-                    Spacer()
-                    Text("agora \(p.curSoc)%").font(.subheadline).foregroundStyle(DS.muted).padding(.bottom, 10)
-                }
-
-                // Escolha de rota: compara alternativas (tempo/dist/SOC/gasolina) e
-                // escolhe — a previsão mostrada passa a refletir a rota selecionada.
-                if store.routeAlts.count > 1 { routeAltsPicker }
-
-                // Handoff PHEV: o EV não chega — o motor a combustão assume no caminho.
-                if p.onFuel || p.fuelL > 0 || p.evDepleteKm != nil {
-                    HStack(spacing: 10) {
-                        Image(systemName: "fuelpump.fill").font(.title3).foregroundStyle(DS.orange)
-                        VStack(alignment: .leading, spacing: 2) {
-                            if let dep = p.evDepleteKm {
-                                Text("Bateria acaba em ~\(Fmt.km(dep)) km").font(.subheadline.weight(.semibold)).foregroundStyle(DS.text)
-                            } else {
-                                Text("Trecho rodando a gasolina").font(.subheadline.weight(.semibold)).foregroundStyle(DS.text)
-                            }
-                            Text("Motor assume · ~\(Fmt.dec1(p.fuelL)) L de gasolina até o destino")
-                                .font(.caption2).foregroundStyle(DS.muted)
-                        }
-                        Spacer(minLength: 0)
+            // Hero: SOC previsto na chegada (numeral ultraLight monospaced).
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                        Text("\(p.predictedSoc)")
+                            .font(.system(size: 72, weight: .ultraLight, design: .rounded))
+                            .foregroundStyle(arrivalSocColor(p.predictedSoc)).monospacedDigit()
+                        Text("%").font(.system(size: 18)).foregroundStyle(DS.muted)
                     }
-                    .padding(10)
-                    .background(DS.orange.opacity(0.12))
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    Text("SOC NA CHEGADA · ± \(p.confidencePct)").font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(DS.muted).tracking(0.5)
                 }
-
-                // Plano de recarga reverso: "carrega até X% pra chegar com margem".
-                // Aparece quando o EV não chega (vai usar gasolina). Toca → consulta o bridge.
-                if p.onFuel || p.fuelL > 0 {
-                    if let cp = store.chargePlan {
-                        chargePlanCard(cp)
-                    } else {
-                        DSActionButton(icon: "bolt.fill", title: "Plano de recarga",
-                                       color: DS.teal, busy: store.chargeLoading) {
-                            Task { await store.loadChargePlan(target: 20) }
-                        }
-                    }
-                }
-
-                HStack(spacing: 10) {
-                    DSMetric(value: Fmt.km(p.distanceKm), unit: "km", label: "Distância", color: DS.blue, compact: true)
-                    DSMetric(value: "↑ \(Fmt.int(Double(p.climbM)))", unit: "m", label: "Subida", color: DS.green, compact: true)
-                    DSMetric(value: "↓ \(Fmt.int(Double(p.descentM)))", unit: "m", label: "Descida", color: DS.blue, compact: true)
-                    DSMetric(value: Fmt.dec1(p.energyKwh), unit: "kWh", label: "Energia", color: DS.orange, compact: true)
-                }
-
-                // SOC em cada parada (cumulativo) quando há paradas.
-                if p.legs.count > 1 {
-                    Divider().background(DS.border)
-                    VStack(spacing: 8) {
-                        ForEach(Array(p.legs.enumerated()), id: \.element.id) { i, lg in
-                            HStack(spacing: 8) {
-                                Image(systemName: lg.isFinal ? "flag.checkered.circle.fill" : "\(min(i + 1, 50)).circle.fill")
-                                    .font(.title3).foregroundStyle(lg.isFinal ? DS.teal : DS.orange)
-                                VStack(alignment: .leading, spacing: 1) {
-                                    Text(lg.name).font(.subheadline.weight(.semibold)).foregroundStyle(DS.text).lineLimit(1)
-                                    Text("\(lg.etaClock) · \(Fmt.km(lg.distanceKm)) km").font(.caption2).foregroundStyle(DS.muted)
-                                }.frame(maxWidth: .infinity, alignment: .leading)
-                                if lg.onFuel {
-                                    HStack(spacing: 3) {
-                                        Image(systemName: "fuelpump.fill").font(.caption)
-                                        Text("\(Fmt.dec1(lg.fuelL)) L").font(.system(size: 16, weight: .bold, design: .rounded))
-                                    }.foregroundStyle(DS.orange)
-                                } else {
-                                    Text("\(lg.socAtArrival)%").font(.system(size: 19, weight: .bold, design: .rounded))
-                                        .foregroundStyle(arrivalSocColor(lg.socAtArrival))
-                                }
-                            }
-                        }
-                    }
-                }
-
-                Text("Estimativa a partir das suas viagens EV: ~\(Fmt.dec1(p.capacityKwh)) kWh úteis · altimetria por mapa · trânsito ao vivo.")
-                    .font(.caption2).foregroundStyle(DS.muted)
-
-                // Só pro painel do carro (mesmo desligado — ele puxa ao ligar).
-                DSActionButton(icon: "car.fill", title: "Enviar pro carro", color: DS.green) {
-                    Task { await store.sendToCar(p) }
-                }
-                // Um botão por app: ao tocar, pergunta onde abrir (iPhone, Android ou carro).
-                HStack(spacing: 8) {
-                    DSActionButton(icon: "location.north.fill", title: "Waze", color: DS.teal) { navApp = "waze" }
-                    DSActionButton(icon: "map.fill", title: "Maps", color: DS.blue) { navApp = "maps" }
-                    DSActionButton(icon: "mappin.and.ellipse", title: "Google", color: DS.orange) { navApp = "gmaps" }
-                }
-                if !p.stops.isEmpty {
-                    Text("Paradas só no Google Maps. Waze e Maps abrem direto no destino final.")
-                        .font(.caption2).foregroundStyle(DS.muted)
-                }
-                if let m = store.sentMsg {
-                    Text(m).font(.caption).foregroundStyle(m.contains("✓") ? DS.green : DS.orange)
-                        .frame(maxWidth: .infinity, alignment: .center)
+                Spacer()
+                VStack(alignment: .trailing, spacing: 0) {
+                    Text("\(p.curSoc)%").font(.system(size: 17, weight: .semibold, design: .rounded))
+                        .foregroundStyle(DS.text).monospacedDigit()
+                    Text("agora").font(.system(size: 9.5)).foregroundStyle(DS.muted)
                 }
             }
+
+            // Alvo de chegada: preservar bateria (chegar com X%). Auto = só a reserva
+            // PHEV de 12%. Trocar recalcula a rota (mais bateria guardada = mais gasolina).
+            targetSocPicker
+
+            // Escolha de rota: compara alternativas (tempo/dist/SOC/gasolina) e
+            // escolhe — a previsão mostrada passa a refletir a rota selecionada.
+            if store.routeAlts.count > 1 { routeAltsPicker }
+
+            // Handoff PHEV: o EV não chega — o motor a combustão assume no caminho.
+            if p.onFuel || p.fuelL > 0 || p.evDepleteKm != nil {
+                HStack(spacing: 10) {
+                    Image(systemName: "fuelpump.fill").font(.system(size: 20)).foregroundStyle(DS.orange)
+                    VStack(alignment: .leading, spacing: 2) {
+                        if let dep = p.evDepleteKm {
+                            Text(targetSoc > 12 ? "Elétrico até ~\(Fmt.km(dep)) km" : "Bateria acaba em ~\(Fmt.km(dep)) km")
+                                .font(.system(size: 13, weight: .semibold)).foregroundStyle(DS.text)
+                        } else {
+                            Text("Trecho rodando a gasolina").font(.system(size: 13, weight: .semibold)).foregroundStyle(DS.text)
+                        }
+                        Text(targetSoc > 12
+                             ? "Motor assume · ~\(Fmt.dec1(p.fuelL)) L p/ chegar com \(targetSoc)%"
+                             : "Motor assume · ~\(Fmt.dec1(p.fuelL)) L de gasolina até o destino")
+                            .font(.system(size: 9.5)).foregroundStyle(DS.muted)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 12).padding(.vertical, 11)
+                .background(DS.panel2).clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
+            }
+
+            // Plano de recarga reverso: "carrega até X% pra chegar com margem".
+            // Aparece quando o EV não chega (vai usar gasolina). Toca → consulta o bridge.
+            if p.onFuel || p.fuelL > 0 {
+                if let cp = store.chargePlan {
+                    chargePlanCard(cp)
+                } else {
+                    DSActionButton(icon: "bolt.fill", title: "Plano de recarga",
+                                   color: DS.teal, busy: store.chargeLoading) {
+                        Task { await store.loadChargePlan(target: 20) }
+                    }
+                }
+            }
+
+            // Métricas do trajeto.
+            HStack(spacing: 10) {
+                DSMetric(value: Fmt.km(p.distanceKm), unit: "km", label: "Distância", color: DS.blue, compact: true)
+                DSMetric(value: "↑ \(Fmt.int(Double(p.climbM)))", unit: "m", label: "Subida", color: DS.green, compact: true)
+                DSMetric(value: "↓ \(Fmt.int(Double(p.descentM)))", unit: "m", label: "Descida", color: DS.blue, compact: true)
+                DSMetric(value: Fmt.dec1(p.energyKwh), unit: "kWh", label: "Energia", color: DS.orange, compact: true)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 12)
+            .background(DS.panel2).clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
+
+            // SOC em cada parada (cumulativo) quando há paradas.
+            if p.legs.count > 1 {
+                VStack(spacing: 0) {
+                    ForEach(Array(p.legs.enumerated()), id: \.element.id) { i, lg in
+                        HStack(spacing: 10) {
+                            Image(systemName: lg.isFinal ? "flag.checkered.circle.fill" : "\(min(i + 1, 50)).circle.fill")
+                                .font(.system(size: 18)).foregroundStyle(lg.isFinal ? DS.teal : DS.orange).frame(width: 22)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(lg.name).font(.system(size: 13, weight: .semibold)).foregroundStyle(DS.text).lineLimit(1)
+                                Text("\(lg.etaClock) · \(Fmt.km(lg.distanceKm)) km").font(.system(size: 9.5)).foregroundStyle(DS.muted)
+                            }.frame(maxWidth: .infinity, alignment: .leading)
+                            if lg.onFuel {
+                                HStack(spacing: 3) {
+                                    Image(systemName: "fuelpump.fill").font(.system(size: 12))
+                                    Text("\(Fmt.dec1(lg.fuelL)) L").font(.system(size: 15, weight: .semibold, design: .rounded)).monospacedDigit()
+                                }.foregroundStyle(DS.orange)
+                            } else {
+                                Text("\(lg.socAtArrival)%").font(.system(size: 17, weight: .semibold, design: .rounded))
+                                    .foregroundStyle(arrivalSocColor(lg.socAtArrival)).monospacedDigit()
+                            }
+                        }
+                        .padding(.vertical, 11)
+                        if lg.id != p.legs.last?.id { Rectangle().fill(DS.divider).frame(height: 1) }
+                    }
+                }
+                .padding(.horizontal, 12)
+                .background(DS.panel2).clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
+            }
+
+            // CTA primária: enviar pro painel do carro (pílula verde, texto preto).
+            Button { Task { await store.sendToCar(p) } } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "car.fill").font(.system(size: 15, weight: .bold))
+                    Text("Enviar pro carro").font(.system(size: 15, weight: .bold))
+                }
+                .frame(maxWidth: .infinity).frame(height: 42)
+                .foregroundStyle(.black).background(DS.green)
+                .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+            }
+            .buttonStyle(.plain)
+
+            // Um botão por app: ao tocar, pergunta onde abrir (iPhone, Android ou carro).
+            HStack(spacing: 8) {
+                DSActionButton(icon: "location.north.fill", title: "Waze", color: DS.teal, compact: true) { navApp = "waze" }
+                DSActionButton(icon: "map.fill", title: "Maps", color: DS.blue, compact: true) { navApp = "maps" }
+                DSActionButton(icon: "mappin.and.ellipse", title: "Google", color: DS.orange, compact: true) { navApp = "gmaps" }
+            }
+
+            if !p.stops.isEmpty {
+                Text("Paradas só no Google Maps. Waze e Maps abrem direto no destino final.")
+                    .font(.system(size: 10.5)).foregroundStyle(DS.muted)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            if let m = store.sentMsg {
+                Text(m).font(.system(size: 12)).foregroundStyle(m.contains("✓") ? DS.green : DS.orange)
+                    .frame(maxWidth: .infinity, alignment: .center)
+            }
+
+            Text("Estimativa pelas suas viagens EV: ~\(Fmt.dec1(p.capacityKwh)) kWh úteis · altimetria por mapa · trânsito ao vivo.")
+                .font(.system(size: 10.5)).foregroundStyle(DS.muted)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
         .confirmationDialog(
             navApp == "waze" ? "Abrir Waze em…" : navApp == "gmaps" ? "Abrir Google Maps em…" : "Abrir Maps em…",

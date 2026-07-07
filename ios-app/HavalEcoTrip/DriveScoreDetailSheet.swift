@@ -2,6 +2,7 @@
 //  Composição da nota de condução de uma viagem: mostra como economia (55%) e
 //  suavidade (45%) somam pra nota final, conta acelerações/frenagens bruscas e
 //  — se a telemetria estiver em cache — também tempo parado vs movimento.
+//  Estilo v2 (hero + panels DS).
 
 import SwiftUI
 
@@ -18,7 +19,7 @@ struct DriveScoreDetailSheet: View {
         return (trip.netKwh + trip.fuelL * 8.9) / trip.distKm * 100
     }
     private var econ: Double {
-        guard let eq else { return 70 }   // sem economia computável → bridge usa 70
+        guard let eq else { return 70 }
         return max(0, min(100, 100 - (eq - 13) * (70.0 / 13.0)))
     }
     private var eventsPerKm: Double {
@@ -32,14 +33,14 @@ struct DriveScoreDetailSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 14) {
-                    headerCard
+                VStack(alignment: .leading, spacing: 14) {
+                    hero
                     breakdownCard
                     eventsCard
                     if loadedTraj { motionCard }
                     formulaCard
                 }
-                .padding(16)
+                .padding(.horizontal, 18).padding(.top, 8).padding(.bottom, 16)
             }
             .background(DS.bg.ignoresSafeArea())
             .navigationTitle("Composição da nota")
@@ -47,93 +48,85 @@ struct DriveScoreDetailSheet: View {
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Fechar") { dismiss() } } }
             .task { await loadSamples() }
         }
+        .presentationDetents([.large])
     }
 
-    private var headerCard: some View {
-        DSCard {
-            VStack(spacing: 6) {
-                Text(tripName).font(.subheadline).foregroundStyle(DS.muted).lineLimit(2)
+    private var hero: some View {
+        HStack(alignment: .firstTextBaseline) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text("\(displayed)")
-                    .font(.system(size: 66, weight: .heavy, design: .rounded))
-                    .foregroundStyle(Eco.color(displayed))
-                Text("\(Fmt.km(trip.distKm)) km · \(Fmt.dec1(trip.netKwh)) kWh")
-                    .font(.caption).foregroundStyle(DS.muted)
+                    .font(.system(size: 62, weight: .ultraLight)).tracking(-2)
+                    .monospacedDigit().foregroundStyle(Eco.color(displayed))
+                    .lineLimit(1).minimumScaleFactor(0.6)
+                Text(tripName).font(.system(size: 11.5)).foregroundStyle(DS.text2).lineLimit(1)
+            }
+            Spacer(minLength: 10)
+            VStack(alignment: .trailing, spacing: 3) {
+                Text("\(Fmt.km(trip.distKm)) km").font(.system(size: 12, weight: .bold)).monospacedDigit().foregroundStyle(DS.text)
+                Text("\(Fmt.dec1(trip.netKwh)) kWh").font(.system(size: 11.5)).foregroundStyle(DS.text2)
                 if isEstimated {
-                    Text("Estimada — viagem sem telemetria de eventos bruscos.")
-                        .font(.caption2).foregroundStyle(DS.orange)
+                    Text("estimada").font(.system(size: 11, weight: .semibold)).foregroundStyle(DS.orange)
                 }
-            }.frame(maxWidth: .infinity).padding(.vertical, 4)
+            }
         }
     }
 
     private var breakdownCard: some View {
-        DSCard {
-            VStack(alignment: .leading, spacing: 14) {
-                Text("Composição").font(.caption).foregroundStyle(DS.muted)
-                componentRow(label: "Economia",
-                             weight: "55%",
-                             value: Int(econ.rounded()),
-                             detail: eq.map { "\(Fmt.dec1($0)) kWh-eq/100km" } ?? "sem economia (viagem curta)")
-                componentRow(label: "Suavidade",
-                             weight: "45%",
-                             value: Int(smooth.rounded()),
-                             detail: trip.distKm > 0.5
-                                ? "\(Fmt.dec1(eventsPerKm)) eventos/km · \(trip.harshAcc + trip.harshBrake) ao todo"
-                                : "sem dados (viagem curta)")
-                if !isEstimated && computed != displayed {
-                    Text("Bridge gravou \(displayed); recomputada localmente daria \(computed). Pequenas diferenças podem ocorrer quando os samples enviados diferem dos persistidos.")
-                        .font(.caption2).foregroundStyle(DS.muted)
-                }
+        VStack(alignment: .leading, spacing: 14) {
+            sectionLabel("COMPOSIÇÃO")
+            componentRow(label: "Economia", weight: "55%", value: Int(econ.rounded()),
+                         detail: eq.map { "\(Fmt.dec1($0)) kWh-eq/100km" } ?? "sem economia (viagem curta)")
+            componentRow(label: "Suavidade", weight: "45%", value: Int(smooth.rounded()),
+                         detail: trip.distKm > 0.5
+                            ? "\(Fmt.dec1(eventsPerKm)) eventos/km · \(trip.harshAcc + trip.harshBrake) ao todo"
+                            : "sem dados (viagem curta)")
+            if !isEstimated && computed != displayed {
+                Text("Bridge gravou \(displayed); recomputada localmente daria \(computed).")
+                    .font(.system(size: 10.5)).foregroundStyle(DS.muted)
             }
         }
+        .modifier(V2Panel())
     }
 
     private func componentRow(label: String, weight: String, value: Int, detail: String) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text(label).font(.subheadline.weight(.semibold)).foregroundStyle(DS.text)
-                Text(weight).font(.caption2).foregroundStyle(DS.muted)
+                Text(label).font(.system(size: 13.5, weight: .semibold)).foregroundStyle(DS.text)
+                Text(weight).font(.system(size: 10)).foregroundStyle(DS.muted)
                 Spacer()
-                Text("\(value)").font(.subheadline.weight(.bold)).foregroundStyle(Eco.color(value))
-                Text("/100").font(.caption2).foregroundStyle(DS.muted)
+                Text("\(value)").font(.system(size: 14, weight: .bold)).monospacedDigit().foregroundStyle(Eco.color(value))
+                Text("/100").font(.system(size: 10)).foregroundStyle(DS.muted)
             }
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 4).fill(DS.panel2).frame(height: 6)
-                    RoundedRectangle(cornerRadius: 4).fill(Eco.color(value))
+                    Capsule().fill(DS.panel2).frame(height: 6)
+                    Capsule().fill(Eco.color(value))
                         .frame(width: max(4, geo.size.width * CGFloat(value) / 100), height: 6)
                 }
             }.frame(height: 6)
-            Text(detail).font(.caption2).foregroundStyle(DS.muted)
+            Text(detail).font(.system(size: 10.5)).foregroundStyle(DS.muted)
         }
     }
 
     private var eventsCard: some View {
-        DSCard {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Eventos bruscos").font(.caption).foregroundStyle(DS.muted)
-                HStack(spacing: 12) {
-                    eventCell(icon: "bolt.fill", color: DS.orange,
-                              value: "\(trip.harshAcc)",
-                              label: "Acelerações")
-                    eventCell(icon: "octagon.fill", color: DS.red,
-                              value: "\(trip.harshBrake)",
-                              label: "Frenagens")
-                    eventCell(icon: "ruler", color: DS.muted,
-                              value: trip.distKm > 0.5 ? Fmt.dec1(eventsPerKm) : "—",
-                              label: "Por km")
-                }
-                Text("Acelerações > ~2,5 m/s² (≈ 9 km/h por segundo) e frenagens < ~−3,0 m/s² (≈ 11 km/h por segundo).")
-                    .font(.caption2).foregroundStyle(DS.muted)
+        VStack(alignment: .leading, spacing: 10) {
+            sectionLabel("EVENTOS BRUSCOS")
+            HStack(spacing: 12) {
+                eventCell(icon: "bolt.fill", color: DS.orange, value: "\(trip.harshAcc)", label: "Acelerações")
+                eventCell(icon: "octagon.fill", color: DS.red, value: "\(trip.harshBrake)", label: "Frenagens")
+                eventCell(icon: "ruler", color: DS.muted, value: trip.distKm > 0.5 ? Fmt.dec1(eventsPerKm) : "—", label: "Por km")
             }
+            Text("Acelerações > ~2,5 m/s² e frenagens < ~−3,0 m/s².")
+                .font(.system(size: 10.5)).foregroundStyle(DS.muted)
         }
+        .modifier(V2Panel())
     }
 
     private func eventCell(icon: String, color: Color, value: String, label: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Label("", systemImage: icon).foregroundStyle(color).labelStyle(.iconOnly).font(.subheadline)
-            Text(value).font(.title3.weight(.bold)).foregroundStyle(DS.text)
-            Text(label).font(.caption2).foregroundStyle(DS.muted)
+        VStack(alignment: .leading, spacing: 3) {
+            Image(systemName: icon).foregroundStyle(color).font(.system(size: 13))
+            Text(value).font(.system(size: 18, weight: .bold)).monospacedDigit().foregroundStyle(DS.text)
+            Text(label).font(.system(size: 10)).foregroundStyle(DS.muted)
         }.frame(maxWidth: .infinity, alignment: .leading)
     }
 
@@ -141,36 +134,28 @@ struct DriveScoreDetailSheet: View {
         let (moving, stopped, avg) = motionStats()
         let total = max(1, moving + stopped)
         let stoppedPct = Int((stopped / total * 100).rounded())
-        return DSCard {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Movimento").font(.caption).foregroundStyle(DS.muted)
-                HStack(spacing: 12) {
-                    eventCell(icon: "play.fill", color: DS.green,
-                              value: fmtHMS(moving),
-                              label: "Em movimento")
-                    eventCell(icon: "pause.fill", color: DS.orange,
-                              value: fmtHMS(stopped),
-                              label: "Parado (\(stoppedPct)%)")
-                    eventCell(icon: "speedometer", color: DS.text,
-                              value: avg > 0 ? "\(Fmt.adjSpeed(avg))" : "—",
-                              label: "km/h médios")
-                }
-                Text("Tempo parado não pesa diretamente na nota, mas afeta a economia (ar condicionado em marcha lenta) e indica trânsito/paradas.")
-                    .font(.caption2).foregroundStyle(DS.muted)
+        return VStack(alignment: .leading, spacing: 10) {
+            sectionLabel("MOVIMENTO")
+            HStack(spacing: 12) {
+                eventCell(icon: "play.fill", color: DS.green, value: fmtHMS(moving), label: "Em movimento")
+                eventCell(icon: "pause.fill", color: DS.orange, value: fmtHMS(stopped), label: "Parado (\(stoppedPct)%)")
+                eventCell(icon: "speedometer", color: DS.text, value: avg > 0 ? "\(Fmt.adjSpeed(avg))" : "—", label: "km/h médios")
             }
+            Text("Tempo parado não pesa direto na nota, mas afeta a economia (AC em marcha lenta).")
+                .font(.system(size: 10.5)).foregroundStyle(DS.muted)
         }
+        .modifier(V2Panel())
     }
 
     private var formulaCard: some View {
-        DSCard {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Como a nota é calculada").font(.caption).foregroundStyle(DS.muted)
-                Text("nota = 0,55 · economia + 0,45 · suavidade")
-                    .font(.footnote.monospaced()).foregroundStyle(DS.text)
-                Text("Economia parte de 100 e cai conforme o consumo (kWh-eq/100km) afasta de 13. Suavidade parte de 100 e perde ~18 pontos a cada evento brusco por km.")
-                    .font(.caption2).foregroundStyle(DS.muted)
-            }
+        VStack(alignment: .leading, spacing: 6) {
+            sectionLabel("COMO A NOTA É CALCULADA")
+            Text("nota = 0,55 · economia + 0,45 · suavidade")
+                .font(.system(size: 12).monospaced()).foregroundStyle(DS.text)
+            Text("Economia parte de 100 e cai conforme o consumo (kWh-eq/100km) afasta de 13. Suavidade parte de 100 e perde ~18 pontos a cada evento brusco por km.")
+                .font(.system(size: 10.5)).foregroundStyle(DS.muted)
         }
+        .modifier(V2Panel())
     }
 
     private var tripName: String {
@@ -184,7 +169,7 @@ struct DriveScoreDetailSheet: View {
         var mv = 0.0, st = 0.0, sumSpd = 0.0, nMv = 0
         for i in 1..<samples.count {
             let dt = samples[i].t - samples[i - 1].t
-            guard dt > 0 && dt < 30 else { continue }   // ignora gap (carro desligado)
+            guard dt > 0 && dt < 30 else { continue }
             let s = samples[i].spd
             if s > 3 { mv += dt; sumSpd += s; nMv += 1 } else { st += dt }
         }
@@ -199,8 +184,6 @@ struct DriveScoreDetailSheet: View {
     }
 
     private func loadSamples() async {
-        // Usa só o cache local (não baixa) — a aba Viagens prefetch'a as recentes.
-        // Sem cache = motionCard fica escondido (loadedTraj = false).
         guard let data = OfflineCache.loadTraj(trip.tripId),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let raw = obj["samples"] as? [[String: Any]] else { return }

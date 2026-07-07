@@ -11,6 +11,7 @@ import MapKit
 struct NativeDashView: View {
     @ObservedObject private var store = CarStore.shared
     @StateObject private var maint = MaintenanceStore()
+    @StateObject private var health = HealthScoreStore()
     @ObservedObject private var trips = TripsLoader.shared
     @StateObject private var cfg = ConfigStore()
     @State private var busy = false
@@ -39,6 +40,7 @@ struct NativeDashView: View {
     @State private var showFuelCalib = false
     @State private var showHealth = false
     @State private var showDestCost = false
+    @AppStorage("dash_hero_style") private var heroStyle = "padrao"
 
     private let tankL = 55.0   // capacidade aprox. do tanque (H6 PHEV) p/ o medidor
 
@@ -50,11 +52,6 @@ struct NativeDashView: View {
     }()
     private func miles(_ v: Double) -> String { Self.grp.string(from: NSNumber(value: v)) ?? f0(v) }
 
-    // Aberturas separadas (chave 'on' = aberto)
-    private func openList(_ map: [(String, String)]) -> [String] { map.filter { store.str($0.0) == "on" }.map { $0.1 } }
-    private var doorsMap: [(String, String)] { [("door_fl","Porta diant. esq."),("door_fr","Porta diant. dir."),("door_rl","Porta tras. esq."),("door_rr","Porta tras. dir."),("door_trunk","Porta-malas")] }
-    private var windowsMap: [(String, String)] { [("window_fl","Vidro diant. esq."),("window_fr","Vidro diant. dir."),("window_rl","Vidro tras. esq."),("window_rr","Vidro tras. dir."),("sunroof","Teto solar")] }
-
     var body: some View {
         ScrollView {
             VStack(spacing: 11) {
@@ -62,20 +59,21 @@ struct NativeDashView: View {
                 if store.onWifiFallback { fallbackBanner }
                 else if store.isOffline { offlineBanner }
                 if let cp = store.commandProgress { commandBanner(cp) }
-                statusCard
-                if store.isCharging { chargingCard } else { HStack(spacing: 14) { batteryCard; fuelCard } }
-                climateCard
-                openingsCard
+                carHero
+                if heroStyle != "padrao" {
+                    if store.isCharging { chargingCard }
+                    else { HStack(spacing: 14) { batteryCard; fuelCard } }
+                }   // no padrão, bateria/tanque/carga vivem todos dentro do herói
+                if heroStyle == "padrao" { climateCard }   // no desenho, temp/odômetro/12V vivem dentro do herói + card de bateria
                 LiveRouteBanner()
                 locationCard
-                revisaoCard
-                healthCard
+                HStack(spacing: 11) { revisaoCard; healthCard }
                 tripCard
             }
             .padding(16)
         }
         .background(DS.bg.ignoresSafeArea())
-        .onAppear { store.start(); Task { await maint.load() }; Task { await trips.load() } }
+        .onAppear { store.start(); Task { await maint.load() }; Task { await trips.load() }; Task { await health.load() } }
         .sheet(isPresented: $showPreclimat) { PreclimatSheet() }
         .sheet(isPresented: $showMaint) { MaintenanceSheet(store: maint) }
         .sheet(isPresented: $showNotifCenter) { NotificationsCenterSheet() }
@@ -206,12 +204,170 @@ struct NativeDashView: View {
         .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 4)
     }
 
-    // MARK: trava + motor (ícones com confirmação ancorada) + hodômetro/12V ao lado
-    private var statusCard: some View {
-        let winOpen = ["window_fl","window_fr","window_rl","window_rr"].contains { store.str($0) == "on" }
+    // MARK: herói do carro — render real do H6 com estado ao vivo + fileira de comandos
+    private var heroState: CarHeroState {
+        CarHeroState(
+            locked: store.lockKnown ? store.isLocked : nil,
+            charging: store.isCharging,
+            acOn: store.acOn,
+            doors: ["door_fl","door_fr","door_rl","door_rr"].map { store.str($0) == "on" },
+            windows: ["window_fl","window_fr","window_rl","window_rr"].map { store.str($0) == "on" },
+            sunroof: store.str("sunroof") == "on",
+            trunk: store.str("door_trunk") == "on",
+            tyres: ["tyre_pressure_fl","tyre_pressure_fr","tyre_pressure_rl","tyre_pressure_rr"].map { store.num($0) }
+        )
+    }
+    private var statusData: CarStatusData {
+        let doorNames: [(String, String)] = [
+            ("door_fl", "DE"), ("door_fr", "DD"),
+            ("door_rl", "TE"), ("door_rr", "TD"),
+            ("door_trunk", "Mala")
+        ]
+        let winNames: [(String, String)] = [
+            ("window_fl", "DE"), ("window_fr", "DD"),
+            ("window_rl", "TE"), ("window_rr", "TD"),
+            ("sunroof", "Teto")
+        ]
+        let openDoors = doorNames.filter { store.str($0.0) == "on" }.map { $0.1 }
+        let openWindows = winNames.filter { store.str($0.0) == "on" }.map { $0.1 }
+        return CarStatusData(
+            locked: store.lockKnown ? store.isLocked : nil,
+            charging: store.isCharging,
+            engineOn: store.engineOn,
+            socPct: store.socPct,
+            rangeEvKm: store.rangeEvKm,
+            chargePowerKw: store.chargePowerKw,
+            openDoors: openDoors,
+            openWindows: openWindows,
+            tyres: ["tyre_pressure_fl","tyre_pressure_fr","tyre_pressure_rl","tyre_pressure_rr"].map { store.num($0) },
+            tyreTemps: ["tyre_temp_fl","tyre_temp_fr","tyre_temp_rl","tyre_temp_rr"].map { store.num($0) },
+            chargeSessionKwh: store.chargeSessionKwh,
+            chargeRemainingMin: store.chargeRemainingMin,
+            chargeLimitPct: store.num("charge_limit_pct"),
+            chargeTargetPct: Int(store.num("charge_custom_target")),
+            fuelL: store.fuelL,
+            rangeIceKm: store.rangeIceKm,
+            priceKwh: store.priceKwh,
+            priceGas: store.priceGas,
+            tankL: tankL
+        )
+    }
+    private var carHero: some View {
         let on = store.engineOn
-        return DSCard(bg: on ? DS.green.opacity(0.14) : nil, borderColor: on ? DS.green.opacity(0.55) : nil) {
-            HStack {
+        // no estilo "padrão" toda a energia (bateria/tanque/carga) vive dentro do herói;
+        // aí o card ganha o Haptic Touch pra trocar limite/alvo de carga a qualquer hora.
+        let merged = heroStyle == "padrao"
+        return DSCard(bg: on ? DS.green.opacity(0.14) : nil, borderColor: on ? DS.green.opacity(0.55) : nil, compact: true) {
+            VStack(alignment: .leading, spacing: 4) {
+                if heroStyle == "padrao" {
+                    CarStatusInfoView(data: statusData)
+                } else {
+                    if !store.address.isEmpty {
+                        HStack(spacing: 4) {
+                            Image(systemName: "location.fill").font(.system(size: 10)).foregroundStyle(DS.green)
+                            Text(store.address).font(.system(size: 11)).foregroundStyle(DS.muted).lineLimit(1)
+                        }
+                    }
+                    HStack(alignment: .center, spacing: 10) {
+                        CarHeroView(state: heroState,
+                                    onLock: { showLock = true },
+                                    onTrunk: { showTrunk = true })
+                            .frame(width: 140, height: 170)
+                        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                            heroMiniCard("Interna", "\(f0(store.insideTemp))°",
+                                         "thermometer.medium", DS.text)
+                            heroMiniCard("Externa", "\(f0(store.outsideTemp))°",
+                                         "thermometer.sun.fill", DS.orange)
+                            heroMiniCard("Km", store.odometerKm > 0 ? "\(miles(store.odometerKm))" : "—",
+                                         "gauge.with.dots.needle.bottom.50percent", DS.text)
+                            heroMiniCard(store.batt12vV > 0 ? "\(f1(store.batt12vV))V" : "12V",
+                                         store.batt12vPct > 0 ? "\(f0(store.batt12vPct))%" : "—",
+                                         "minus.plus.batteryblock.fill",
+                                         store.batt12vPct > 0 ? volt12Color(store.batt12vPct) : DS.muted)
+                        }
+                    }
+                }
+                carControls
+            }
+        }
+        .if(merged) { v in
+            v.contextMenu { chargeLimitMenu }
+                .onChange(of: store.num("charge_limit_pct")) { _, newVal in
+                    if let p = pendingLimit, Int(newVal) == p {
+                        limitTimeout?.cancel(); limitTimeout = nil
+                        pendingLimit = nil; limitFeedback = 1; clearLimitFeedbackLater()
+                    }
+                }
+        }
+    }
+
+    // Temp interna/externa acima do desenho do carro (AC saiu daqui).
+    private var heroTempStrip: some View {
+        HStack(spacing: 8) {
+            heroTempPill(icon: "thermometer.medium", value: f0(store.insideTemp), label: "int")
+            heroTempPill(icon: "thermometer.sun", value: f0(store.outsideTemp), label: "ext")
+        }
+    }
+
+    // Mini-card pro grid 2x2 ao lado do PNG (Interna/Externa/Km/12V).
+    private func heroMiniCard(_ label: String, _ value: String, _ icon: String, _ color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 4) {
+                Image(systemName: icon).font(.system(size: 10)).foregroundStyle(DS.muted)
+                Text(label).font(.system(size: 10)).foregroundStyle(DS.muted)
+            }
+            Text(value)
+                .font(.system(size: 16, weight: .bold, design: .rounded))
+                .monospacedDigit().foregroundStyle(color)
+                .lineLimit(1).minimumScaleFactor(0.65)
+        }
+        .padding(8).frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 8).fill(DS.panel2.opacity(0.6)))
+    }
+    private func heroTempPill(icon: String, value: String, label: String) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: icon).font(.system(size: 11)).foregroundStyle(DS.muted)
+            Text("\(value)°").font(.system(size: 15, weight: .semibold, design: .rounded)).foregroundStyle(DS.text)
+            Text(label).font(.system(size: 9)).foregroundStyle(DS.muted)
+        }
+        .padding(.horizontal, 9).padding(.vertical, 5)
+        .background(Capsule().fill(DS.panel2.opacity(0.85)))
+        .overlay(Capsule().stroke(DS.border, lineWidth: 1))
+    }
+
+    // Hodômetro logo abaixo do porta-malas (centro inferior do desenho).
+    private var heroOdometer: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "gauge.with.dots.needle.bottom.50percent").font(.system(size: 11)).foregroundStyle(DS.muted)
+            Text(store.odometerKm > 0 ? "\(miles(store.odometerKm)) km" : "—")
+                .font(.system(size: 13, weight: .semibold, design: .rounded)).monospacedDigit().foregroundStyle(DS.text)
+        }
+        .padding(.horizontal, 10).padding(.vertical, 5)
+        .background(Capsule().fill(DS.panel2.opacity(0.85)))
+        .overlay(Capsule().stroke(DS.border, lineWidth: 1))
+        .padding(.bottom, 2)
+    }
+
+    @ViewBuilder private var chargeLimitMenu: some View {
+        let limit = store.num("charge_limit_pct")
+        let customTarget = Int(store.num("charge_custom_target"))
+        Text("Limite de carga (SOC)")
+        ForEach([50,60,70,80,90,100], id: \.self) { p in
+            Button { selectChargeLimit(p) } label: {
+                Label("\(p)%", systemImage: customTarget == 0 && (pendingLimit ?? Int(limit)) == p ? "checkmark" : "bolt")
+            }
+        }
+        Divider()
+        Button { showChargeTarget = true } label: {
+            Label(customTarget > 0 ? "Alvo personalizado: \(customTarget)%" : "Alvo personalizado…",
+                  systemImage: customTarget > 0 ? "checkmark" : "slider.horizontal.3")
+        }
+    }
+
+    // MARK: fileira de comandos (trava/motor/clima/vidros/malas/pisca) com confirmação ancorada
+    private var carControls: some View {
+        let winOpen = ["window_fl","window_fr","window_rl","window_rr"].contains { store.str($0) == "on" }
+        return HStack {
                 iconButton(icon: store.isLocked ? "lock.fill" : "lock.open.fill",
                            tint: store.isLocked ? DS.green : DS.orange,
                            caption: !store.lockKnown ? "—" : (store.isLocked ? "Trancado" : "Destranc."),
@@ -254,19 +410,16 @@ struct NativeDashView: View {
                                    name: "trunk_open", binding: $showTrunk)
                 }
                 Spacer()
-                iconButton(icon: "exclamationmark.triangle.fill", tint: DS.yellow, caption: "Pisca") {
+                iconButton(icon: "light.beacon.max.fill", tint: DS.yellow, caption: "Achar") {
                     showHazard = true
                 }
                 .popover(isPresented: $showHazard) {
-                    confirmPopoverAction(title: "Piscar o pisca-alerta para localizar o carro?",
-                                         confirm: "Piscar", danger: false, binding: $showHazard) {
-                        _ = await store.setHazard(true)
-                        try? await Task.sleep(nanoseconds: 6_000_000_000)   // pisca ~6s e apaga
-                        _ = await store.setHazard(false)
+                    confirmPopoverAction(title: "Piscar os faróis e buzinar para localizar o carro?",
+                                         confirm: "Piscar e buzinar", danger: false, binding: $showHazard) {
+                        _ = await store.action("find_car_honk")
                     }
                 }
             }
-        }
     }
 
     private func rightMetric(_ label: String, _ value: String) -> some View {
@@ -329,6 +482,12 @@ struct NativeDashView: View {
     private func batteryIcon(_ soc: Double) -> String {
         switch soc { case ..<13: return "battery.0percent"; case ..<38: return "battery.25percent"
         case ..<63: return "battery.50percent"; case ..<88: return "battery.75percent"; default: return "battery.100percent" }
+    }
+    private func volt12Color(_ p: Double) -> Color {
+        if p >= 90 { return DS.green }
+        if p >= 80 { return DS.orange }
+        if p >= 70 { return DS.yellow }
+        return DS.red
     }
     private var batteryCard: some View {
         let soc = store.socPct
@@ -463,86 +622,20 @@ struct NativeDashView: View {
     // MARK: localização + ações (mapa agora vive só na aba Drive). Destino, estacionamento,
     // autonomia e compartilhar status em botões grandes.
     private var locationCard: some View {
-        DSCard {
-            VStack(alignment: .leading, spacing: 6) {
-                if !store.address.isEmpty {
-                    HStack(spacing: 6) {
-                        Image(systemName: "location.fill").font(.caption2).foregroundStyle(DS.green)
-                        Text(store.address).font(.caption).foregroundStyle(DS.muted).lineLimit(1)
-                    }
-                }
-                HStack(spacing: 8) {
-                    DSActionButton(icon: "location.north.fill", title: "Destino", color: DS.teal, compact: true) { showArrival = true }
-                    DSActionButton(icon: "parkingsign", title: "Estacionei", color: DS.green, compact: true) { showParking = true }
-                }
-                HStack(spacing: 8) {
-                    DSActionButton(icon: "map.fill", title: "Até onde chego", color: DS.orange, compact: true) { showRange = true }
-                    DSActionButton(icon: "square.and.arrow.up", title: "Compartilhar", color: DS.blue, compact: true) { showShare = true }
-                }
-                HStack(spacing: 8) {
-                    DSActionButton(icon: "clock.arrow.circlepath", title: "Planejar saída", color: DS.teal, compact: true) { showLeaveBy = true }
-                    DSActionButton(icon: "dollarsign.arrow.circlepath", title: "Custo p/ destino", color: DS.green, compact: true) { showDestCost = true }
-                }
+        DSCard(compact: true) {
+            HStack {
+                    iconButton(icon: "location.north.fill", tint: DS.teal, caption: "Destino") { showArrival = true }
+                    Spacer()
+                    iconButton(icon: "parkingsign", tint: DS.green, caption: "Estacionei") { showParking = true }
+                    Spacer()
+                    iconButton(icon: "map.fill", tint: DS.orange, caption: "Alcance") { showRange = true }
+                    Spacer()
+                    iconButton(icon: "square.and.arrow.up", tint: DS.blue, caption: "Compartilhar") { showShare = true }
+                    Spacer()
+                    iconButton(icon: "clock.arrow.circlepath", tint: DS.teal, caption: "Saída") { showLeaveBy = true }
+                    Spacer()
+                    iconButton(icon: "dollarsign.arrow.circlepath", tint: DS.green, caption: "Custo") { showDestCost = true }
             }
-        }
-    }
-
-    private func tyreCell(_ pk: String, _ tk: String, _ label: String) -> some View {
-        let p = store.num(pk), t = store.num(tk)
-        let frozen = store.isFrozen(pk)
-        return VStack(alignment: .leading, spacing: 2) {
-            HStack(alignment: .firstTextBaseline, spacing: 3) {
-                Text(p <= 0 ? "—" : f0(p)).font(.system(size: 22, weight: .semibold, design: .rounded))
-                    .foregroundStyle(p > 0 && p < 28 ? DS.red : DS.text).monospacedDigit()
-                Text("psi").font(.system(size: 11)).foregroundStyle(DS.muted)
-                if t > 0 { Text("· \(f0(t))°").font(.system(size: 11)).foregroundStyle(DS.muted) }
-                if frozen { Image(systemName: "snowflake").font(.system(size: 10, weight: .bold)).foregroundStyle(DS.blue) }
-            }
-            Text(label.uppercased()).font(.system(size: 9, weight: .semibold)).foregroundStyle(DS.muted)
-        }.frame(maxWidth: .infinity, alignment: .leading).opacity(frozen ? 0.6 : 1)
-    }
-
-    // MARK: Pneus + Portas + Vidros/Teto num card só — fechado mostra só o resumo;
-    // abre sozinho se houver anomalia (pneu <28 psi ou porta/vidro/teto aberto).
-    private var openingsCard: some View {
-        let ps = ["tyre_pressure_fl","tyre_pressure_fr","tyre_pressure_rl","tyre_pressure_rr"].map { store.num($0) }
-        let tyreLow = ps.contains { $0 > 0 && $0 < 28 }
-        let tyreTxt = ps.allSatisfy { $0 <= 0 } ? "s/ dados" : ps.map { $0 <= 0 ? "—" : f0($0) }.joined(separator: "/")
-        let openDoors = openList(doorsMap)
-        let openWins  = openList(windowsMap)
-        let anomaly = tyreLow || !openDoors.isEmpty || !openWins.isEmpty
-        let tint = anomaly ? DS.yellow : DS.muted
-        // Resumo com glifos de carro (porta/vidro), não emoji de casa.
-        let summaryView = AnyView(
-            HStack(spacing: 4) {
-                Text("🛞").font(.system(size: 11))
-                Text(tyreTxt).font(.system(size: 11, weight: .medium)).foregroundStyle(tint)
-                    .lineLimit(1).minimumScaleFactor(0.5).layoutPriority(1)
-                Text("·").font(.caption2).foregroundStyle(tint)
-                CarDoorGlyph(color: openDoors.isEmpty ? tint : DS.orange)
-                Text(openDoors.isEmpty ? "ok" : "\(openDoors.count)").font(.caption2).foregroundStyle(openDoors.isEmpty ? tint : DS.orange)
-                Text("·").font(.caption2).foregroundStyle(tint)
-                CarWindowGlyph(color: openWins.isEmpty ? tint : DS.orange)
-                Text(openWins.isEmpty ? "ok" : "\(openWins.count)").font(.caption2).foregroundStyle(openWins.isEmpty ? tint : DS.orange)
-            }.layoutPriority(1)
-        )
-        return CollapsibleCard(icon: "car.side.fill", title: "Pneus & Abert.", summary: "", alert: anomaly, summaryView: summaryView) {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack { tyreCell("tyre_pressure_fl","tyre_temp_fl","Diant. Esq."); tyreCell("tyre_pressure_fr","tyre_temp_fr","Diant. Dir.") }
-                HStack { tyreCell("tyre_pressure_rl","tyre_temp_rl","Tras. Esq.");  tyreCell("tyre_pressure_rr","tyre_temp_rr","Tras. Dir.") }
-                Divider().background(DS.border)
-                ForEach(doorsMap, id: \.0) { k, label in stateRow(label, store.str(k) == "on") }
-                ForEach(windowsMap, id: \.0) { k, label in stateRow(label, store.str(k) == "on") }
-            }
-        }
-    }
-
-    private func stateRow(_ label: String, _ open: Bool) -> some View {
-        HStack {
-            Text(label).font(.system(size: 14)).foregroundStyle(DS.text)
-            Spacer()
-            Text(open ? "Aberto" : "Fechado").font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(open ? DS.yellow : DS.muted)
         }
     }
 
@@ -551,16 +644,18 @@ struct NativeDashView: View {
         let next = maint.items.first
         return DSCard {
             Button { showMaint = true } label: {
-                HStack(spacing: 10) {
-                    Image(systemName: "wrench.and.screwdriver.fill").font(.subheadline).foregroundStyle(DS.muted)
-                    VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "wrench.and.screwdriver.fill").font(.subheadline).foregroundStyle(DS.muted)
                         Text("Revisão").font(.system(size: 15, weight: .semibold)).foregroundStyle(DS.text)
-                        Text(next.map { "\($0.label ?? "Próxima") · \(maintWhen($0))" } ?? "Ver histórico e custos")
-                            .font(.caption).foregroundStyle(DS.muted)
+                            .lineLimit(1).minimumScaleFactor(0.8)
+                        Spacer(minLength: 4)
+                        if let n = next { Circle().fill(n.statusColor).frame(width: 9, height: 9) }
                     }
-                    Spacer()
-                    if let n = next { Circle().fill(n.statusColor).frame(width: 9, height: 9) }
-                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(DS.muted)
+                    Text(next.map { "\($0.label ?? "Próxima") · \(maintWhen($0))" } ?? "Ver histórico e custos")
+                        .font(.caption).foregroundStyle(DS.muted)
+                        .lineLimit(2).minimumScaleFactor(0.85).fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, minHeight: 30, alignment: .topLeading)
                 }
             }.buttonStyle(.plain)
         }
@@ -570,17 +665,28 @@ struct NativeDashView: View {
     private var healthCard: some View {
         DSCard {
             Button { showHealth = true } label: {
-                HStack(spacing: 10) {
-                    Image(systemName: "heart.text.square.fill").font(.subheadline).foregroundStyle(DS.green)
-                    VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "heart.text.square.fill").font(.subheadline).foregroundStyle(DS.green)
                         Text("Saúde do carro").font(.system(size: 15, weight: .semibold)).foregroundStyle(DS.text)
-                        Text("Bateria 12V, pneus, consumo e manutenção").font(.caption).foregroundStyle(DS.muted)
+                            .lineLimit(1).minimumScaleFactor(0.8)
+                        Spacer(minLength: 4)
+                        if let s = health.data?.total {
+                            Text("\(s)").font(.system(size: 14, weight: .bold, design: .rounded)).monospacedDigit()
+                                .foregroundStyle(healthTint(s))
+                        }
                     }
-                    Spacer()
-                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(DS.muted)
+                    Text("Bateria 12V, pneus, consumo e manutenção")
+                        .font(.caption).foregroundStyle(DS.muted)
+                        .lineLimit(2).minimumScaleFactor(0.85).fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, minHeight: 30, alignment: .topLeading)
                 }
             }.buttonStyle(.plain)
         }
+    }
+
+    private func healthTint(_ s: Int) -> Color {
+        s >= 85 ? DS.green : s >= 70 ? DS.teal : s >= 50 ? DS.yellow : DS.red
     }
 
     private func maintWhen(_ m: MaintItem) -> String {
@@ -592,17 +698,33 @@ struct NativeDashView: View {
     // MARK: viagem em andamento (ou última)
     @ViewBuilder private var tripCard: some View {
         if store.tripActive {
-            DSCard(title: "Viagem em andamento", icon: "car.fill") {
-                tripMetrics(distKm: store.tripDistKm, timeSec: Double(store.tripTimeSec),
-                            netKwh: store.tripNetKwh, fuelL: store.tripFuelL)
-            }
-        } else if let t = trips.trips.first {
-            DSCard(title: "Última viagem", icon: "car.fill") {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text(lastTripDate(t)).font(.caption).foregroundStyle(DS.muted).frame(maxWidth: .infinity, alignment: .leading)
-                    tripMetrics(distKm: t.distKm, timeSec: t.timeSec, netKwh: t.netKwh, fuelL: t.fuelL)
+            Button { TabRouter.shared.go(.drive) } label: {
+                DSCard(title: "Viagem em andamento", icon: "car.fill") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        tripMetrics(distKm: store.tripDistKm, timeSec: Double(store.tripTimeSec),
+                                    netKwh: store.tripNetKwh, fuelL: store.tripFuelL)
+                        tripCardHint("Ver ao vivo no Drive")
+                    }
                 }
-            }
+            }.buttonStyle(.plain)
+        } else if let t = trips.trips.first {
+            Button { trips.focusTripId = t.id; TabRouter.shared.go(.viagens) } label: {
+                DSCard(title: "Última viagem", icon: "car.fill") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text(lastTripDate(t)).font(.caption).foregroundStyle(DS.muted).frame(maxWidth: .infinity, alignment: .leading)
+                        tripMetrics(distKm: t.distKm, timeSec: t.timeSec, netKwh: t.netKwh, fuelL: t.fuelL)
+                        tripCardHint("Ver detalhes em Viagens")
+                    }
+                }
+            }.buttonStyle(.plain)
+        }
+    }
+
+    private func tripCardHint(_ s: String) -> some View {
+        HStack(spacing: 4) {
+            Spacer()
+            Text(s).font(.caption2).foregroundStyle(DS.muted)
+            Image(systemName: "chevron.right").font(.caption2).foregroundStyle(DS.muted)
         }
     }
 
@@ -621,44 +743,6 @@ struct NativeDashView: View {
     private func lastTripDate(_ t: Trip) -> String { Self.tripDF.string(from: t.date) }
 }
 
-// Glifos vetoriais de carro pro resumo de aberturas (não há emoji de porta/vidro de carro).
-struct CarDoorGlyph: View {
-    var color: Color
-    var body: some View {
-        Canvas { ctx, size in
-            let w = size.width, h = size.height
-            let body = Path(roundedRect: CGRect(x: w*0.14, y: h*0.16, width: w*0.72, height: h*0.7), cornerRadius: w*0.14)
-            ctx.stroke(body, with: .color(color), lineWidth: 1.4)
-            // janela da porta (parte de cima)
-            let win = Path(roundedRect: CGRect(x: w*0.26, y: h*0.26, width: w*0.48, height: h*0.2), cornerRadius: w*0.05)
-            ctx.fill(win, with: .color(color.opacity(0.45)))
-            // maçaneta
-            var handle = Path(); handle.move(to: CGPoint(x: w*0.56, y: h*0.6)); handle.addLine(to: CGPoint(x: w*0.72, y: h*0.6))
-            ctx.stroke(handle, with: .color(color), lineWidth: 1.4)
-        }
-        .frame(width: 15, height: 15)
-    }
-}
-
-struct CarWindowGlyph: View {
-    var color: Color
-    var body: some View {
-        Canvas { ctx, size in
-            let w = size.width, h = size.height
-            // vidro lateral (trapézio arredondado)
-            var p = Path()
-            p.move(to: CGPoint(x: w*0.18, y: h*0.34))
-            p.addLine(to: CGPoint(x: w*0.80, y: h*0.26))
-            p.addLine(to: CGPoint(x: w*0.86, y: h*0.70))
-            p.addLine(to: CGPoint(x: w*0.14, y: h*0.74))
-            p.closeSubpath()
-            ctx.fill(p, with: .color(color.opacity(0.35)))
-            ctx.stroke(p, with: .color(color), lineWidth: 1.4)
-        }
-        .frame(width: 15, height: 15)
-    }
-}
-
 struct FuelCalibSheet: View {
     let currentL: Double
     let store: CarStore
@@ -667,50 +751,100 @@ struct FuelCalibSheet: View {
     @State private var saving = false
     @State private var error: String? = nil
 
-    private var addedL: Double? {
-        let t = inputText.replacingOccurrences(of: ",", with: ".")
-        guard let v = Double(t), v > 0, v <= 55 else { return nil }
-        return v
-    }
-    private var resultL: Double { currentL + (addedL ?? 0) }
+    @State private var added: Double = 20
+    @State private var price: Double = 6.29
+
+    private var addedL: Double? { added > 0 && added <= 55 ? added : nil }
+    private var resultL: Double { min(55, currentL + added) }
+    private let tankCap: Double = 55
+    private var curPct: Int { Int((currentL / tankCap * 100).rounded()) }
+    private var resultPct: Int { Int((resultL / tankCap * 100).rounded()) }
+    private var totalCost: Double { added * price }
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section {
-                    HStack {
-                        Text("Sensor antes do abastecimento").foregroundStyle(.secondary)
-                        Spacer()
-                        Text(String(format: "%.1f L", currentL)).bold()
+            ScrollView {
+                VStack(spacing: 16) {
+                    // Hero
+                    VStack(spacing: 4) {
+                        Text("\(curPct)%")
+                            .font(.system(size: 92, weight: .ultraLight, design: .rounded))
+                            .foregroundStyle(DS.orange).monospacedDigit()
+                        Text("~\(Fmt.dec1(currentL)) L no tanque")
+                            .font(.system(size: 13)).foregroundStyle(DS.text2)
                     }
-                }
-                Section("Litros abastecidos (bomba)") {
-                    TextField("Ex: 10", text: $inputText)
-                        .keyboardType(.decimalPad)
-                }
-                if addedL != nil {
-                    Section {
-                        HStack {
-                            Text("Total corrigido").foregroundStyle(.secondary)
-                            Spacer()
-                            Text(String(format: "%.1f L", resultL)).bold().foregroundStyle(.orange)
+                    .padding(.top, 8)
+
+                    // Steppers
+                    VStack(spacing: 0) {
+                        stepperRow("Abasteci agora", "\(Fmt.dec1(added)) L", down: { added = max(1, (added - 1).rounded()) }, up: { added = min(55, (added + 1).rounded()) })
+                        Divider().overlay(DS.divider)
+                        stepperRow("Preço", Fmt.brl(price), down: { price = max(0.5, ((price - 0.10) * 100).rounded() / 100) }, up: { price = min(15, ((price + 0.10) * 100).rounded() / 100) })
+                    }
+                    .background(DS.panel2).clipShape(RoundedRectangle(cornerRadius: 15))
+
+                    // Preview
+                    HStack(spacing: 6) {
+                        Text("\(curPct)%").foregroundStyle(DS.text2)
+                        Image(systemName: "arrow.right").font(.system(size: 11)).foregroundStyle(DS.muted)
+                        Text("~\(resultPct)%").foregroundStyle(DS.orange)
+                        Text("·").foregroundStyle(DS.muted)
+                        Text(Fmt.brl(totalCost)).foregroundStyle(DS.text)
+                    }
+                    .font(.system(size: 15, weight: .semibold)).monospacedDigit()
+                    .padding(.vertical, 12).frame(maxWidth: .infinity)
+                    .background(DS.panel).clipShape(RoundedRectangle(cornerRadius: 15))
+
+                    if let e = error {
+                        Text(e).font(.system(size: 12)).foregroundStyle(DS.red)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+
+                    // CTA
+                    Button { Task { await save() } } label: {
+                        HStack(spacing: 8) {
+                            if saving { ProgressView().tint(.black) }
+                            Text(saving ? "Registrando…" : "Registrar abastecimento")
+                                .font(.system(size: 15, weight: .bold))
                         }
+                        .frame(maxWidth: .infinity).frame(height: 42)
+                        .foregroundStyle(.black).background(DS.green).clipShape(Capsule())
                     }
-                }
-                if let e = error {
-                    Section { Text(e).foregroundStyle(.red).font(.caption) }
-                }
+                    .disabled(saving || addedL == nil)
+
+                    Text("Sensor antes do abastecimento: \(Fmt.dec1(currentL)) L. Corrige o nível do tanque no bridge.")
+                        .font(.system(size: 10.5)).foregroundStyle(DS.muted)
+                        .multilineTextAlignment(.center).padding(.top, 2)
+                }.padding(16)
             }
+            .background(DS.bg.ignoresSafeArea())
             .navigationTitle("Corrigir abastecimento")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancelar") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button(saving ? "Salvando…" : "Salvar") { Task { await save() } }
-                        .disabled(saving || addedL == nil)
+            }
+            .onAppear { if store.priceGas > 0 { price = store.priceGas } }
+        }
+    }
+
+    private func stepperRow(_ label: String, _ value: String, down: @escaping () -> Void, up: @escaping () -> Void) -> some View {
+        HStack {
+            Text(label).font(.system(size: 13)).foregroundStyle(DS.text2)
+            Spacer()
+            Text(value).font(.system(size: 15, weight: .semibold)).foregroundStyle(DS.text).monospacedDigit()
+            HStack(spacing: 8) {
+                Button(action: down) {
+                    Image(systemName: "minus").font(.system(size: 14, weight: .bold)).foregroundStyle(DS.blue)
+                        .frame(width: 34, height: 30).background(DS.panel).clipShape(RoundedRectangle(cornerRadius: 9))
+                }
+                Button(action: up) {
+                    Image(systemName: "plus").font(.system(size: 14, weight: .bold)).foregroundStyle(DS.orange)
+                        .frame(width: 34, height: 30).background(DS.panel).clipShape(RoundedRectangle(cornerRadius: 9))
                 }
             }
+            .padding(.leading, 8)
         }
+        .padding(.horizontal, 14).padding(.vertical, 10)
     }
 
     private func save() async {

@@ -67,7 +67,7 @@ struct NotificationsSheet: View {
             Item(key: "app_update", label: "Atualização do app"),
         ]),
     ]
-    private let laItems: [(String, String)] = [("la_charge","Recarga"),("la_preclimat","Pré-climatização"),("la_trip","Viagem"),("la_motor","Motor ligado"),("la_security","Segurança"),("preclimat_steps","Passos da pré-climatização")]
+    private let laItems: [(String, String)] = [("la_charge","Recarga"),("la_preclimat","Pré-climatização"),("la_trip","Viagem"),("la_motor","Motor ligado"),("la_security","Segurança"),("la_infra","Monitoramento (infra)"),("la_parking","Voltar ao carro"),("preclimat_steps","Passos da pré-climatização")]
 
     var body: some View {
         NavigationStack {
@@ -94,6 +94,7 @@ struct NotificationsSheet: View {
                         }
                     }
                     securityCard()
+                    if cfg.laPrefs["la_parking"] ?? true { parkingCard() }
                 }.padding(16)
             }
             .background(DS.bg.ignoresSafeArea())
@@ -151,6 +152,18 @@ struct NotificationsSheet: View {
                         Spacer()
                     }
                 }
+            }.padding(.vertical, 2)
+        }
+    }
+
+    @ViewBuilder private func parkingCard() -> some View {
+        DSCard(title: "Voltar ao carro", icon: "parkingsign") {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Mostra distância e rumo até o carro estacionado quando você se afasta mais de 100 m dele.")
+                    .font(.caption2).foregroundStyle(DS.muted)
+                placesPicker("la_parking_suppress_places")
+                Text("Locais marcados NÃO abrem o card (ex.: casa, trabalho). Deixe vazio pra sempre abrir.")
+                    .font(.caption2).foregroundStyle(DS.muted)
             }.padding(.vertical, 2)
         }
     }
@@ -445,45 +458,99 @@ struct ChargeTargetSheet: View {
 
     private var active: Int { Int(car.num("charge_custom_target")) }
 
+    private var subtitle: String {
+        switch Int(target) {
+        case ...74:  return "preserva mais a bateria"
+        case 75...84: return "recomendado pro dia a dia"
+        case 85...94: return "carga alta"
+        default:      return "só antes de viagem longa"
+        }
+    }
+    private let presets: [Int] = [70, 80, 90, 97, 99]
+    private func presetLabel(_ p: Int) -> String { p >= 99 ? "viagem" : "\(p)" }
+
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 14) {
-                    DSCard(title: "Alvo de carga", icon: "bolt.badge.clock") {
-                        VStack(spacing: 14) {
-                            Text("\(Int(target))%")
-                                .font(.system(size: 56, weight: .heavy, design: .rounded))
-                                .foregroundStyle(DS.green)
-                            Slider(value: $target, in: 51...99, step: 1).tint(DS.green)
-                            HStack {
-                                Text("51%").font(.caption2).foregroundStyle(DS.muted)
-                                Spacer()
-                                Text("SOC agora: \(Int(car.socPct))%").font(.caption2).foregroundStyle(DS.muted)
-                                Spacer()
-                                Text("99%").font(.caption2).foregroundStyle(DS.muted)
+                VStack(spacing: 16) {
+                    // Hero
+                    VStack(spacing: 4) {
+                        Text("\(Int(target))%")
+                            .font(.system(size: 92, weight: .ultraLight, design: .rounded))
+                            .foregroundStyle(DS.green).monospacedDigit()
+                        Text(subtitle).font(.system(size: 13)).foregroundStyle(DS.text2)
+                    }
+                    .padding(.top, 8)
+
+                    // Slider grande com tick neutro (track custom + Slider real invisível por cima)
+                    ZStack {
+                        GeometryReader { g in
+                            ZStack(alignment: .leading) {
+                                Capsule().fill(DS.panel3).frame(height: 10)
+                                Capsule().fill(DS.greenGrad)
+                                    .frame(width: max(10, g.size.width * CGFloat((target - 51) / 48)), height: 10)
+                                // tick neutro no ponto médio (75%)
+                                RoundedRectangle(cornerRadius: 1).fill(DS.text2.opacity(0.6))
+                                    .frame(width: 2, height: 14)
+                                    .offset(x: g.size.width * CGFloat((75.0 - 51) / 48) - 1)
+                                Circle().fill(.white)
+                                    .frame(width: 22, height: 22)
+                                    .overlay(Circle().stroke(DS.green, lineWidth: 3))
+                                    .offset(x: max(0, min(g.size.width - 22, g.size.width * CGFloat((target - 51) / 48) - 11)))
                             }
-                            Button {
-                                Task { await cfg.setChargeTarget(Int(target)); dismiss() }
-                            } label: {
-                                Text("Definir alvo \(Int(target))%").font(.system(size: 15, weight: .bold))
-                                    .frame(maxWidth: .infinity).frame(height: 46)
-                                    .foregroundStyle(.black).background(DS.green).clipShape(RoundedRectangle(cornerRadius: 12))
-                            }
-                            if active > 0 {
-                                Button {
-                                    Task { await cfg.setChargeTarget(0); dismiss() }
-                                } label: {
-                                    Text("Desligar (voltar aos presets)").font(.system(size: 14, weight: .semibold))
-                                        .frame(maxWidth: .infinity).frame(height: 42)
-                                        .foregroundStyle(DS.red).background(DS.panel2).clipShape(RoundedRectangle(cornerRadius: 12))
-                                }
+                            .frame(height: 22)
+                            .frame(maxHeight: .infinity)
+                        }
+                        // Controle real invisível captura o gesto
+                        Slider(value: $target, in: 51...99, step: 1).tint(.clear).opacity(0.02)
+                    }
+                    .frame(height: 30)
+
+                    // Presets
+                    HStack(spacing: 8) {
+                        ForEach(presets, id: \.self) { p in
+                            let on = Int(target) == p
+                            Button { target = Double(p) } label: {
+                                Text(presetLabel(p))
+                                    .font(.system(size: 13, weight: .bold))
+                                    .frame(maxWidth: .infinity).frame(height: 36)
+                                    .foregroundStyle(on ? .black : DS.text)
+                                    .background(on ? DS.green : DS.panel)
+                                    .clipShape(Capsule())
+                                    .overlay(Capsule().stroke(on ? .clear : DS.border, lineWidth: 1))
                             }
                         }
                     }
-                    DSCard(title: "Como funciona", icon: "info.circle") {
-                        Text("O carro carrega sem limite e o servidor corta a carga no alvo, rebaixando o limite nativo pra um preset abaixo do SOC. Precisa do servidor online durante a recarga. Resolução de ±1%.")
-                            .font(.caption).foregroundStyle(DS.muted).frame(maxWidth: .infinity, alignment: .leading)
+
+                    // Impacto na carga atual
+                    VStack(spacing: 0) {
+                        impactRow("SOC agora", "\(Int(car.socPct))%", DS.text)
+                        Divider().overlay(DS.divider)
+                        impactRow("Alvo", "\(Int(target))%", DS.green)
                     }
+                    .background(DS.panel2).clipShape(RoundedRectangle(cornerRadius: 15))
+
+                    // CTA
+                    Button {
+                        Task { await cfg.setChargeTarget(Int(target)); dismiss() }
+                    } label: {
+                        Text("Aplicar \(Int(target))%").font(.system(size: 15, weight: .bold))
+                            .frame(maxWidth: .infinity).frame(height: 42)
+                            .foregroundStyle(.black).background(DS.green).clipShape(Capsule())
+                    }
+                    if active > 0 {
+                        Button {
+                            Task { await cfg.setChargeTarget(0); dismiss() }
+                        } label: {
+                            Text("Desligar (voltar aos presets)").font(.system(size: 14, weight: .semibold))
+                                .frame(maxWidth: .infinity).frame(height: 40)
+                                .foregroundStyle(DS.red).background(DS.panel2).clipShape(Capsule())
+                        }
+                    }
+
+                    Text("Este alvo alimenta o marcador amarelo em todas as barras de SOC. Precisa do servidor online durante a recarga.")
+                        .font(.system(size: 10.5)).foregroundStyle(DS.muted)
+                        .multilineTextAlignment(.center).padding(.top, 2)
                 }.padding(16)
             }
             .background(DS.bg.ignoresSafeArea())
@@ -491,5 +558,14 @@ struct ChargeTargetSheet: View {
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Fechar") { dismiss() } } }
         }
         .onAppear { if !loaded { let a = Int(car.num("charge_custom_target")); if a >= 51 && a <= 99 { target = Double(a) }; loaded = true } }
+    }
+
+    private func impactRow(_ label: String, _ value: String, _ color: Color) -> some View {
+        HStack {
+            Text(label).font(.system(size: 13)).foregroundStyle(DS.text2)
+            Spacer()
+            Text(value).font(.system(size: 15, weight: .semibold)).foregroundStyle(color).monospacedDigit()
+        }
+        .padding(.horizontal, 14).padding(.vertical, 12)
     }
 }

@@ -5,6 +5,7 @@
 //
 
 import SwiftUI
+import UserNotifications
 
 struct MaintenanceSheet: View {
     @ObservedObject var store: MaintenanceStore
@@ -16,6 +17,17 @@ struct MaintenanceSheet: View {
     @State private var newDate = Date()
     @State private var newCost = ""
     @State private var newNotes = ""
+    @State private var reminderSet = false
+
+    // Menor distância restante entre as próximas manutenções (hero "até a revisão").
+    private var kmUntilService: Double? {
+        store.items.compactMap { $0.remaining_km }.filter { $0 > 0 }.min()
+    }
+    // Estimativa de semanas com base na média diária de km.
+    private var weeksUntilService: Int? {
+        guard let km = kmUntilService, store.dailyKmAvg > 0 else { return nil }
+        return max(1, Int((km / store.dailyKmAvg / 7).rounded()))
+    }
 
     private static let grp: NumberFormatter = { let f = NumberFormatter(); f.numberStyle = .decimal; f.groupingSeparator = "."; f.maximumFractionDigits = 0; return f }()
     private func miles(_ v: Double) -> String { Self.grp.string(from: NSNumber(value: v)) ?? String(format: "%.0f", v) }
@@ -25,33 +37,38 @@ struct MaintenanceSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 14) {
-                    // Resumo
-                    DSCard {
-                        HStack {
-                            DSMetric(value: store.currentOdometer > 0 ? miles(store.currentOdometer) : "—", unit: "km", label: "Hodômetro")
-                            DSMetric(value: store.dailyKmAvg > 0 ? String(format: "%.0f", store.dailyKmAvg) : "—", unit: "km/dia", label: "Média diária")
-                            DSMetric(value: brl(store.totalCost), label: "Custo total", color: DS.orange)
-                        }
-                    }
-
+                VStack(spacing: 16) {
+                    header
+                    heroCard
                     // Próximas
                     if !store.items.isEmpty {
-                        DSCard(title: "Próximas", icon: "calendar.badge.clock") {
-                            VStack(spacing: 12) {
-                                ForEach(store.items) { m in
-                                    HStack(spacing: 8) {
-                                        Circle().fill(m.statusColor).frame(width: 9, height: 9)
-                                        VStack(alignment: .leading, spacing: 2) {
-                                            Text(m.label ?? "Manutenção").font(.system(size: 14, weight: .semibold)).foregroundStyle(DS.text)
-                                            Text(whenText(m)).font(.caption).foregroundStyle(DS.muted)
-                                        }
-                                        Spacer()
-                                        if let nk = m.next_km, nk > 0 { Text("aos \(miles(nk)) km").font(.caption).foregroundStyle(DS.muted) }
+                        VStack(spacing: 0) {
+                            ForEach(Array(store.items.enumerated()), id: \.element.id) { i, m in
+                                HStack(spacing: 10) {
+                                    Circle().fill(m.statusColor).frame(width: 8, height: 8)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(m.label ?? "Manutenção").font(.system(size: 13, weight: .semibold)).foregroundStyle(DS.text)
+                                        Text(whenText(m)).font(.system(size: 9.5)).foregroundStyle(DS.muted)
                                     }
+                                    Spacer()
+                                    if let nk = m.next_km, nk > 0 { Text("aos \(miles(nk)) km").font(.system(size: 9.5)).foregroundStyle(DS.muted) }
                                 }
+                                .padding(.vertical, 11)
+                                if i != store.items.count - 1 { Rectangle().fill(DS.divider).frame(height: 1) }
                             }
                         }
+                        .padding(.horizontal, 12)
+                        .background(DS.panel2).clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
+                    }
+
+                    // Lembrete local (agendar revisão) — não integra concessionária.
+                    DSActionButton(icon: "bell.badge", title: "Lembrar de agendar revisão", color: DS.green) {
+                        scheduleReminder()
+                    }
+                    if reminderSet {
+                        Label("Lembrete salvo no Calendário", systemImage: "checkmark.circle.fill")
+                            .font(.system(size: 11)).foregroundStyle(DS.green)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
 
                     // Registrar
@@ -115,13 +132,73 @@ struct MaintenanceSheet: View {
             }
             .background(DS.bg.ignoresSafeArea())
             .navigationTitle("Revisão").navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Concluído") { dismiss() } } }
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { dismiss() } label: { Image(systemName: "xmark").font(.system(size: 13, weight: .bold)).foregroundStyle(DS.muted) }
+                }
+            }
         }
+        .presentationDetents([.large])
+        .presentationDragIndicator(.visible)
         .task {
             await store.load()
             if newType.isEmpty { newType = store.intervals.first?.id ?? "" }
             if newOdo.isEmpty, store.currentOdometer > 0 { newOdo = String(Int(store.currentOdometer)) }
         }
+    }
+
+    private var header: some View {
+        HStack {
+            Text("Revisão").font(.system(size: 15, weight: .bold)).foregroundStyle(DS.text)
+            Spacer()
+            if store.currentOdometer > 0 {
+                DSChip(text: "\(miles(store.currentOdometer)) km", color: DS.blue)
+            }
+        }
+    }
+
+    // Hero: km até a revisão + ~semanas + barra de progresso; fallback pro custo.
+    private var heroCard: some View {
+        let km = kmUntilService
+        return VStack(spacing: 12) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(km.map { miles($0) } ?? "—")
+                    .font(.system(size: 56, weight: .ultraLight, design: .rounded)).monospacedDigit().foregroundStyle(DS.text)
+                Text("km").font(.system(size: 16)).foregroundStyle(DS.muted)
+            }
+            Text(weeksUntilService.map { "até a revisão · ~\($0) semanas" } ?? "até a próxima revisão")
+                .font(.system(size: 11, weight: .semibold)).foregroundStyle(DS.muted).tracking(0.4)
+            if let km, km > 0 {
+                let frac = CGFloat(max(0.02, min(1, 1 - km / 10_000)))   // 10k km = ciclo típico
+                GeometryReader { g in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(DS.panel3).frame(height: 6)
+                        Capsule().fill(DS.greenGrad).frame(width: g.size.width * frac, height: 6)
+                    }
+                }.frame(height: 6)
+            }
+        }
+        .frame(maxWidth: .infinity).padding(.vertical, 8)
+    }
+
+    // Lembrete local (UserNotifications) — não integra a concessionária.
+    private func scheduleReminder() {
+        let c = UNMutableNotificationContent()
+        c.title = "Revisão do carro"
+        c.body = kmUntilService.map { "Faltam \(miles($0)) km para a próxima revisão. Agende com folga." }
+            ?? "Hora de agendar a próxima revisão."
+        c.sound = .default
+        // Dispara em ~metade das semanas estimadas (mín. 7 dias), pra lembrar com folga.
+        let days = Double(weeksUntilService ?? 4) * 7 / 2
+        let secs = max(7 * 86_400, days * 86_400)
+        let trig = UNTimeIntervalNotificationTrigger(timeInterval: secs, repeats: false)
+        let req = UNNotificationRequest(identifier: "maint-reminder", content: c, trigger: trig)
+        let center = UNUserNotificationCenter.current()
+        center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
+            guard granted else { return }
+            center.add(req)
+        }
+        reminderSet = true
     }
 
     private func whenText(_ m: MaintItem) -> String {

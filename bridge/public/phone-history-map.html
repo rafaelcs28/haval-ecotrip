@@ -1,0 +1,745 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Histórico de localização</title>
+<!-- PWA / add-to-home -->
+<link rel="manifest" href="/phone-history-manifest.json">
+<meta name="theme-color" content="#0d1117">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Localização">
+<link rel="apple-touch-icon" sizes="180x180" href="/images/phone-history-icon-180.png">
+<link rel="icon" type="image/png" sizes="192x192" href="/images/phone-history-icon-192.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/images/phone-history-favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/images/phone-history-favicon-16.png">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+<style>
+  :root {
+    --bg: #0d1117;
+    --panel: #161b22;
+    --panel-elev: #1f2937;
+    --border: #30363d;
+    --fg: #e6edf3;
+    --muted: #8b949e;
+    --muted-2: #6e7681;
+    --accent: #58a6ff;
+    --accent-strong: #1f6feb;
+    --green: #3fb950;
+    --red: #f85149;
+    --amber: #d29922;
+    --radius: 10px;
+    --radius-sm: 6px;
+    --shadow: 0 4px 16px rgba(0,0,0,.4);
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    height: 100%; margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg); color: var(--fg);
+    -webkit-tap-highlight-color: transparent;
+    -webkit-font-smoothing: antialiased;
+  }
+  #app { display: grid; grid-template-rows: auto auto 1fr; height: 100%; min-height: 0; }
+
+  /* ── Header ─────────────────────────────────────────────────────────────── */
+  header {
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    padding: max(12px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) 12px max(16px, env(safe-area-inset-left));
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 12px;
+    align-items: center;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .brand-icon {
+    width: 36px; height: 36px; border-radius: 9px;
+    background: linear-gradient(135deg, var(--accent-strong), #0969da);
+    display: grid; place-items: center; font-size: 18px;
+    box-shadow: 0 2px 8px rgba(31, 111, 235, 0.4);
+    flex-shrink: 0;
+  }
+  .brand-text { min-width: 0; }
+  .brand-text h1 { font-size: 1em; font-weight: 600; margin: 0; line-height: 1.2; }
+  .brand-text p { font-size: .75em; color: var(--muted); margin: 2px 0 0; line-height: 1.2; }
+  .header-actions { display: flex; gap: 6px; }
+  .icon-btn {
+    width: 36px; height: 36px; border-radius: 8px;
+    background: transparent; border: 1px solid var(--border);
+    color: var(--muted); font-size: 16px; cursor: pointer;
+    display: grid; place-items: center;
+    transition: all .15s;
+  }
+  .icon-btn:hover { background: var(--panel-elev); color: var(--fg); }
+
+  /* ── Filtros ────────────────────────────────────────────────────────────── */
+  .filters {
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    padding: 10px max(16px, env(safe-area-inset-right)) 12px max(16px, env(safe-area-inset-left));
+    display: grid;
+    grid-template-columns: minmax(140px, 1.2fr) 1fr 1fr auto;
+    gap: 8px;
+    align-items: end;
+  }
+  .field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+  .field label {
+    font-size: .7em;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    font-weight: 500;
+  }
+  .field select, .field input {
+    width: 100%;
+    background: var(--bg);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 9px 10px;
+    font-size: .9em;
+    font-family: inherit;
+    -webkit-appearance: none;
+    appearance: none;
+    transition: border-color .15s;
+  }
+  .field select:focus, .field input:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+  .field select {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2 4l4 4 4-4' stroke='%238b949e' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    padding-right: 28px;
+  }
+  .btn-primary {
+    background: var(--accent-strong);
+    color: #fff;
+    border: 0;
+    border-radius: var(--radius-sm);
+    padding: 10px 18px;
+    font-weight: 600;
+    font-size: .9em;
+    font-family: inherit;
+    cursor: pointer;
+    transition: filter .15s;
+    white-space: nowrap;
+  }
+  .btn-primary:hover { filter: brightness(1.15); }
+  .btn-primary:disabled { opacity: .5; cursor: not-allowed; }
+
+  /* Quick chips (botões rápidos de janela temporal) */
+  .quick-chips {
+    grid-column: 1 / -1;
+    display: flex;
+    gap: 6px;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    margin-top: 4px;
+  }
+  .quick-chips::-webkit-scrollbar { display: none; }
+  .chip {
+    background: var(--panel-elev);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    padding: 5px 12px;
+    border-radius: 999px;
+    font-size: .8em;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all .12s;
+    flex-shrink: 0;
+  }
+  .chip:hover { color: var(--fg); border-color: var(--accent); }
+  .chip.active { background: var(--accent-strong); color: #fff; border-color: var(--accent-strong); }
+
+  /* ── Mapa + Stats ───────────────────────────────────────────────────────── */
+  .map-wrap { position: relative; min-height: 0; }
+  #map { width: 100%; height: 100%; background: #0a0e13; }
+
+  .stats {
+    position: absolute;
+    top: 12px; left: 12px;
+    background: rgba(22, 27, 34, 0.92);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 10px 14px;
+    z-index: 1000;
+    font-size: .82em;
+    box-shadow: var(--shadow);
+    display: flex;
+    gap: 16px;
+    align-items: center;
+    max-width: calc(100% - 24px);
+  }
+  .stats-item { display: flex; flex-direction: column; gap: 1px; }
+  .stats-label { color: var(--muted); font-size: .85em; text-transform: uppercase; letter-spacing: .04em; }
+  .stats-value { color: var(--fg); font-weight: 600; font-size: 1.05em; }
+  .stats.warn .stats-value { color: var(--amber); }
+  .stats.hidden { display: none; }
+  .empty.hidden { display: none; }
+
+  /* Loading overlay */
+  .overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(13, 17, 23, 0.85);
+    backdrop-filter: blur(4px);
+    z-index: 999;
+    display: grid;
+    place-items: center;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity .2s;
+  }
+  .overlay.active { opacity: 1; pointer-events: auto; }
+  .spinner {
+    width: 32px; height: 32px;
+    border: 3px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin .8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .empty {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    z-index: 998;
+    pointer-events: none;
+  }
+  .empty-inner {
+    text-align: center;
+    color: var(--muted);
+    background: rgba(22, 27, 34, 0.9);
+    padding: 24px 32px;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    max-width: 280px;
+  }
+  .empty-icon { font-size: 36px; margin-bottom: 6px; opacity: .5; }
+  .empty p { margin: 0; line-height: 1.5; font-size: .9em; }
+
+  /* ── Markers / Popup ────────────────────────────────────────────────────── */
+  .marker-pt {
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    border: 2px solid #fff;
+    background: var(--accent);
+    box-shadow: 0 2px 6px rgba(0,0,0,.5);
+  }
+  .marker-pt.start { background: var(--green); width: 18px; height: 18px; }
+  .marker-pt.end { background: var(--red); width: 18px; height: 18px; }
+  .marker-stop {
+    width: 16px; height: 16px;
+    border-radius: 50%;
+    border: 2px solid #fff;
+    background: var(--amber);
+    box-shadow: 0 2px 6px rgba(0,0,0,.5);
+  }
+
+  /* Leaflet popup theming (dark) */
+  .leaflet-popup-content-wrapper {
+    background: var(--panel);
+    color: var(--fg);
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow);
+  }
+  .leaflet-popup-tip { background: var(--panel); border: 1px solid var(--border); }
+  .leaflet-popup-close-button { color: var(--muted) !important; }
+  .leaflet-popup-content { margin: 12px 14px; font-size: .9em; line-height: 1.5; min-width: 200px; }
+  .pop-time { font-weight: 600; color: var(--fg); font-size: 1em; margin-bottom: 4px; }
+  .pop-tag {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 1px 8px;
+    border-radius: 999px;
+    font-size: .75em;
+    font-weight: 600;
+    vertical-align: middle;
+  }
+  .pop-tag.start { background: rgba(63, 185, 80, 0.18); color: var(--green); }
+  .pop-tag.end   { background: rgba(248, 81, 73, 0.18); color: var(--red); }
+  .pop-tag.stop  { background: rgba(210, 153, 34, 0.18); color: var(--amber); }
+  .pop-addr { color: var(--muted); margin: 4px 0; }
+  .pop-coord { color: var(--muted-2); font-size: .82em; font-family: 'SF Mono', Menlo, monospace; }
+  .pop-link {
+    display: inline-block;
+    margin-top: 8px;
+    color: var(--accent);
+    text-decoration: none;
+    font-weight: 500;
+    font-size: .9em;
+  }
+  .pop-link:hover { text-decoration: underline; }
+
+  /* Leaflet controls */
+  .leaflet-bar {
+    border: 1px solid var(--border) !important;
+    box-shadow: var(--shadow) !important;
+  }
+  .leaflet-bar a {
+    background: var(--panel) !important;
+    color: var(--fg) !important;
+    border-color: var(--border) !important;
+  }
+  .leaflet-bar a:hover { background: var(--panel-elev) !important; }
+  .leaflet-control-attribution {
+    background: rgba(22, 27, 34, 0.85) !important;
+    color: var(--muted) !important;
+    backdrop-filter: blur(8px);
+    border-radius: 4px;
+    padding: 2px 6px !important;
+    font-size: .68em !important;
+  }
+  .leaflet-control-attribution a { color: var(--accent) !important; }
+
+  /* ── Mobile ─────────────────────────────────────────────────────────────── */
+  @media (max-width: 720px) {
+    .filters {
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    .filters .field:first-child { grid-column: 1 / -1; }
+    .btn-primary { grid-column: 1 / -1; padding: 12px; }
+    .brand-text p { display: none; }
+    .stats {
+      top: auto; bottom: 12px; left: 12px; right: 12px;
+      max-width: calc(100% - 24px);
+      justify-content: space-around;
+      gap: 8px;
+    }
+    .stats-item { min-width: 0; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="brand">
+      <div class="brand-icon">📍</div>
+      <div class="brand-text">
+        <h1>Histórico de localização</h1>
+        <p id="brand-sub">trajeto de pessoas por janela de tempo</p>
+      </div>
+    </div>
+    <div class="header-actions">
+      <button id="recenter" class="icon-btn" title="Centralizar nos pontos">⊕</button>
+      <button id="logout" class="icon-btn" title="Esquecer token">🔑</button>
+    </div>
+  </header>
+
+  <div class="filters">
+    <div class="field">
+      <label for="who">Pessoa</label>
+      <select id="who"></select>
+    </div>
+    <div class="field">
+      <label for="from">De</label>
+      <input type="datetime-local" id="from">
+    </div>
+    <div class="field">
+      <label for="to">Até</label>
+      <input type="datetime-local" id="to">
+    </div>
+    <button id="reload" class="btn-primary">Carregar</button>
+    <div class="quick-chips" id="chips">
+      <button class="chip" data-h="1">1h</button>
+      <button class="chip" data-h="6">6h</button>
+      <button class="chip active" data-h="24">24h</button>
+      <button class="chip" data-h="48">48h</button>
+      <button class="chip" data-h="168">7d</button>
+      <button class="chip" data-h="720">30d</button>
+      <button class="chip" data-h="2160">90d</button>
+    </div>
+    <div style="margin-top:8px;display:flex;align-items:center;gap:8px">
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;color:var(--muted)">
+        <input type="checkbox" id="only-stops"> Só paradas
+      </label>
+    </div>
+  </div>
+
+  <div class="map-wrap">
+    <div id="map"></div>
+    <div class="stats hidden" id="stats">
+      <div class="stats-item">
+        <div class="stats-label">Pontos</div>
+        <div class="stats-value" id="s-count">—</div>
+      </div>
+      <div class="stats-item">
+        <div class="stats-label">Distância</div>
+        <div class="stats-value" id="s-dist">—</div>
+      </div>
+      <div class="stats-item">
+        <div class="stats-label">Período</div>
+        <div class="stats-value" id="s-span">—</div>
+      </div>
+      <div class="stats-item">
+        <div class="stats-label">Paradas</div>
+        <div class="stats-value" id="s-stops">—</div>
+      </div>
+    </div>
+    <div class="overlay" id="overlay"><div class="spinner"></div></div>
+    <div class="empty hidden" id="empty">
+      <div class="empty-inner">
+        <div class="empty-icon">🗺</div>
+        <p id="empty-msg">Selecione uma pessoa e o intervalo e clique <b>Carregar</b>.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script>
+const TOKEN_KEY = 'phm.token';
+const STATE_KEY = 'phm.state';
+
+function getToken() {
+  let t = localStorage.getItem(TOKEN_KEY);
+  if (!t) {
+    t = prompt('Bearer token do bridge:') || '';
+    if (t) localStorage.setItem(TOKEN_KEY, t);
+  }
+  return t;
+}
+async function api(path) {
+  const r = await fetch(path, { headers: { Authorization: 'Bearer ' + getToken() } });
+  if (r.status === 401) {
+    localStorage.removeItem(TOKEN_KEY);
+    throw new Error('Token inválido — recarregue a página');
+  }
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  return r.json();
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────
+const pad = n => String(n).padStart(2, '0');
+function toLocalInput(ms) {
+  const d = new Date(ms);
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+function fromLocalInput(s) { const d = new Date(s); return isNaN(d) ? null : d.getTime(); }
+function fmtDate(ms) {
+  const d = new Date(ms), now = new Date();
+  const sameDay = d.toDateString() === now.toDateString();
+  const opts = sameDay
+    ? { hour: '2-digit', minute: '2-digit', second: '2-digit' }
+    : { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' };
+  return d.toLocaleString('pt-BR', opts);
+}
+function fmtFull(ms) {
+  return new Date(ms).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'medium' });
+}
+function fmtSpan(ms) {
+  if (ms < 60_000) return Math.round(ms / 1000) + 's';
+  if (ms < 3600_000) return Math.round(ms / 60_000) + ' min';
+  if (ms < 86400_000) {
+    const h = Math.floor(ms / 3600_000);
+    const m = Math.round((ms % 3600_000) / 60_000);
+    return m ? `${h}h ${m}min` : `${h}h`;
+  }
+  return Math.round(ms / 86400_000) + ' dias';
+}
+function fmtDist(m) {
+  if (m < 1000) return Math.round(m) + ' m';
+  return (m / 1000).toFixed(m < 10_000 ? 2 : 1) + ' km';
+}
+function haversine(lat1, lon1, lat2, lon2) {
+  const R = 6371000, rad = x => x * Math.PI / 180;
+  const dLat = rad(lat2 - lat1), dLon = rad(lon2 - lon1);
+  const a = Math.sin(dLat/2)**2 + Math.cos(rad(lat1)) * Math.cos(rad(lat2)) * Math.sin(dLon/2)**2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+// ── Stops detection (clustering de samples próximos em sequência) ─────────
+function detectStops(pts, radiusM = 80, minDurMs = 10 * 60_000) {
+  const stops = [];
+  let i = 0;
+  while (i < pts.length) {
+    const anchor = pts[i];
+    let j = i;
+    while (j + 1 < pts.length && haversine(anchor.lat, anchor.lng, pts[j + 1].lat, pts[j + 1].lng) <= radiusM) j++;
+    const dur = pts[j].ts - pts[i].ts;
+    if (j > i && dur >= minDurMs) {
+      // centroid
+      let sLat = 0, sLng = 0;
+      for (let k = i; k <= j; k++) { sLat += pts[k].lat; sLng += pts[k].lng; }
+      const n = j - i + 1;
+      stops.push({ lat: sLat / n, lng: sLng / n, from: pts[i].ts, to: pts[j].ts, samples: n, durMs: dur });
+      i = j + 1;
+    } else { i++; }
+  }
+  return stops;
+}
+
+// ── Map setup ─────────────────────────────────────────────────────────────
+const map = L.map('map', { zoomControl: true, attributionControl: true })
+  .setView([-16.6869, -49.2648], 12);
+
+// CartoDB Dark Matter — combina com o tema escuro do app
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
+  subdomains: 'abcd',
+  maxZoom: 19,
+}).addTo(map);
+
+let layer = L.layerGroup().addTo(map);
+let lastBounds = null;
+const addrCache = new Map();
+
+async function reverseGeocode(lat, lng) {
+  const k = lat.toFixed(4) + ',' + lng.toFixed(4);
+  if (addrCache.has(k)) return addrCache.get(k);
+  try {
+    const r = await api(`/api/reverse-geocode?lat=${lat}&lng=${lng}`);
+    const v = r.place || '';
+    addrCache.set(k, v);
+    return v;
+  } catch (_) { return ''; }
+}
+
+function markerDot(kind) {
+  return L.divIcon({
+    className: 'leaflet-marker-custom',
+    html: `<div class="marker-pt${kind ? ' ' + kind : ''}"></div>`,
+    iconSize: kind ? [22, 22] : [18, 18],
+    iconAnchor: kind ? [11, 11] : [9, 9],
+  });
+}
+function markerStop() {
+  return L.divIcon({
+    className: 'leaflet-marker-custom',
+    html: `<div class="marker-stop"></div>`,
+    iconSize: [20, 20],
+    iconAnchor: [10, 10],
+  });
+}
+
+function popupHtml(p, tag) {
+  const tagHtml = tag ? `<span class="pop-tag ${tag}">${
+    tag === 'start' ? '🟢 início' : tag === 'end' ? '🔴 fim' : '🟡 parada'
+  }</span>` : '';
+  const time = `<div class="pop-time">${fmtFull(p.ts)}${tagHtml}</div>`;
+  const extra = p.durMs ? `<div class="pop-addr">⏱ Ficou ${fmtSpan(p.durMs)} (${p.samples} pontos)</div>` : '';
+  const addr = `<div class="pop-addr addr">carregando endereço…</div>`;
+  const coord = `<div class="pop-coord">${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}</div>`;
+  const link = `<a class="pop-link" href="https://maps.google.com/?q=${p.lat},${p.lng}" target="_blank">🗺 Abrir no Google Maps →</a>`;
+  return time + extra + addr + coord + link;
+}
+
+// ── UI state ──────────────────────────────────────────────────────────────
+const $ = id => document.getElementById(id);
+function setLoading(on) { $('overlay').classList.toggle('active', on); }
+function setEmpty(msg) {
+  $('empty-msg').innerHTML = msg || 'Sem dados pra mostrar.';
+  $('empty').classList.remove('hidden');
+}
+function hideEmpty() { $('empty').classList.add('hidden'); }
+function setStats({ count, distM, fromMs, toMs, stops, warn }) {
+  const el = $('stats');
+  if (count == null) { el.classList.add('hidden'); return; }
+  el.classList.remove('hidden');
+  el.classList.toggle('warn', !!warn);
+  $('s-count').textContent = count;
+  $('s-dist').textContent = fmtDist(distM);
+  $('s-span').textContent = fmtSpan(toMs - fromMs);
+  $('s-stops').textContent = stops;
+}
+
+async function loadDevices() {
+  try {
+    const r = await api('/api/phones-known');
+    const sel = $('who');
+    sel.innerHTML = '';
+    if (!r.devices.length) {
+      sel.innerHTML = '<option value="">(nenhum device)</option>';
+      $('reload').disabled = true;
+      setEmpty('Nenhum device tagueado encontrado no bridge.');
+      return;
+    }
+    for (const d of r.devices) {
+      const label = (d.name || '(sem nome)') + (d.role ? ' · ' + d.role : '');
+      const o = document.createElement('option');
+      o.value = d.name || d.device_id;
+      o.dataset.deviceId = d.device_id;
+      o.textContent = label;
+      sel.appendChild(o);
+    }
+    // restaura último selecionado
+    const state = JSON.parse(localStorage.getItem(STATE_KEY) || '{}');
+    if (state.who) sel.value = state.who;
+  } catch (err) {
+    setEmpty(`<b style="color:var(--red)">Erro:</b> ${err.message}`);
+  }
+}
+
+async function reload() {
+  const sel = $('who');
+  const opt = sel.selectedOptions[0];
+  if (!opt) { setEmpty('Selecione uma pessoa.'); return; }
+  const name = opt.value;
+  const deviceId = opt.dataset.deviceId;
+  const fromMs = fromLocalInput($('from').value);
+  const toMs = fromLocalInput($('to').value);
+  if (!fromMs || !toMs) { setEmpty('Datas inválidas.'); return; }
+  if (toMs <= fromMs) { setEmpty('A data <b>Até</b> precisa ser posterior à <b>De</b>.'); return; }
+
+  // salva estado
+  localStorage.setItem(STATE_KEY, JSON.stringify({ who: name }));
+
+  setLoading(true);
+  hideEmpty();
+  layer.clearLayers();
+  setStats({ count: null });
+
+  try {
+    const params = new URLSearchParams({ from: String(fromMs), to: String(toMs) });
+    if (deviceId) params.set('device_id', deviceId); else params.set('name', name);
+    const r = await api('/api/phone-location/history?' + params.toString());
+
+    if (!r.samples || !r.samples.length) {
+      // Fallback: se o histórico do intervalo está vazio, tenta a última posição
+      // conhecida do device (iPhone parado não dispara updates de localização).
+      const lastParams = new URLSearchParams();
+      if (deviceId) lastParams.set('device_id', deviceId); else lastParams.set('name', name);
+      let last = null;
+      try { last = await api('/api/phone-location?' + lastParams.toString()); } catch (_) {}
+      if (last && Number.isFinite(last.lat) && Number.isFinite(last.lng)) {
+        const ageMin = Math.round((Date.now() - (+last.ts || 0)) / 60000);
+        const ageTxt = !last.ts ? '' : ageMin < 60 ? `há ${ageMin} min`
+                       : ageMin < 60 * 24 ? `há ${Math.round(ageMin/60)} h`
+                       : `há ${Math.round(ageMin/(60*24))} dias`;
+        const m = L.marker([last.lat, last.lng], { icon: markerStop(), zIndexOffset: 500 }).addTo(layer);
+        m.bindPopup(`<b>Última posição conhecida</b><br>${ageTxt || '—'}<br><span class="addr">…</span>`);
+        m.on('popupopen', async (e) => {
+          const el = e.popup.getElement().querySelector('.addr');
+          if (!el) return;
+          const addr = await reverseGeocode(last.lat, last.lng);
+          el.textContent = addr ? '📍 ' + addr : '(endereço indisponível)';
+        });
+        m.openPopup();
+        map.setView([last.lat, last.lng], 15);
+        setStats({ count: 1, distM: 0, fromMs, toMs, stops: 0 });
+        return;
+      }
+      setEmpty(`Sem registros de <b>${name}</b> nesse intervalo.<br><span style="font-size:.85em">iPhone parado não publica atualizações — só significa que não se mexeu. Se nunca aparecer, verifique se o app está enviando localização.</span>`);
+      return;
+    }
+
+    const pts = r.samples.slice().sort((a, b) => a.ts - b.ts);
+    const latlngs = pts.map(p => [p.lat, p.lng]);
+    // Só pontos no mapa — sem linhas conectando (rota de iPhone não é rota real
+    // de deslocamento, os saltos entre significant-changes distorcem o traço).
+
+    // Distância total
+    let distM = 0;
+    for (let i = 1; i < pts.length; i++) {
+      distM += haversine(pts[i-1].lat, pts[i-1].lng, pts[i].lat, pts[i].lng);
+    }
+
+    // Detecta paradas (>10min num raio de 80m)
+    const stops = detectStops(pts);
+    const stopTsSet = new Set();
+    for (const s of stops) {
+      // todos os ts de samples que caíram dentro da parada
+      for (const p of pts) {
+        if (p.ts >= s.from && p.ts <= s.to) stopTsSet.add(p.ts);
+      }
+      const m = L.marker([s.lat, s.lng], { icon: markerStop(), zIndexOffset: 500 }).addTo(layer);
+      m.bindPopup(popupHtml({ lat: s.lat, lng: s.lng, ts: s.from, durMs: s.durMs, samples: s.samples }, 'stop'));
+      m.on('popupopen', async (e) => {
+        const el = e.popup.getElement().querySelector('.addr');
+        if (!el || !el.classList.contains('addr')) return;
+        const addr = await reverseGeocode(s.lat, s.lng);
+        el.textContent = addr ? '📍 ' + addr : '(endereço indisponível)';
+      });
+    }
+
+    // Filtro "só paradas": pula os markers de pontos intermediários; só os
+    // markers de parada já foram adicionados acima.
+    const onlyStops = document.getElementById('only-stops')?.checked;
+    const startEndIdx = new Set([0, pts.length - 1]);
+    // amostra intermediária a cada N pra não lotar — máx 50 markers visíveis
+    const cap = Math.max(1, Math.floor((pts.length - 2) / 48));
+    const showSet = new Set(onlyStops ? [] : [0, pts.length - 1]);
+    if (!onlyStops) {
+      for (let i = 1; i < pts.length - 1; i += cap) if (!stopTsSet.has(pts[i].ts)) showSet.add(i);
+    }
+
+    for (const i of [...showSet].sort((a, b) => a - b)) {
+      const p = pts[i];
+      const tag = i === 0 ? 'start' : i === pts.length - 1 ? 'end' : null;
+      const marker = L.marker([p.lat, p.lng], { icon: markerDot(tag), zIndexOffset: tag ? 1000 : 0 }).addTo(layer);
+      marker.bindPopup(popupHtml(p, tag));
+      marker.on('popupopen', async (e) => {
+        const el = e.popup.getElement().querySelector('.addr');
+        if (!el || !el.classList.contains('addr')) return;
+        const addr = await reverseGeocode(p.lat, p.lng);
+        el.textContent = addr ? '📍 ' + addr : '(endereço indisponível)';
+      });
+    }
+
+    lastBounds = L.latLngBounds(latlngs);
+    map.fitBounds(lastBounds, { padding: [50, 50], maxZoom: 16 });
+
+    setStats({
+      count: pts.length,
+      distM,
+      fromMs: pts[0].ts,
+      toMs: pts[pts.length - 1].ts,
+      stops: stops.length,
+    });
+  } catch (err) {
+    setEmpty(`<b style="color:var(--red)">Erro:</b> ${err.message}`);
+  } finally {
+    setLoading(false);
+  }
+}
+
+// ── Wiring ────────────────────────────────────────────────────────────────
+$('reload').addEventListener('click', reload);
+$('only-stops').addEventListener('change', reload);
+$('recenter').addEventListener('click', () => {
+  if (lastBounds) map.fitBounds(lastBounds, { padding: [50, 50], maxZoom: 16 });
+});
+$('logout').addEventListener('click', () => {
+  if (confirm('Esquecer token salvo?')) {
+    localStorage.removeItem(TOKEN_KEY);
+    location.reload();
+  }
+});
+
+// Chips de janela rápida
+document.querySelectorAll('#chips .chip').forEach(c => {
+  c.addEventListener('click', () => {
+    const h = Number(c.dataset.h);
+    const now = Date.now();
+    $('from').value = toLocalInput(now - h * 3600_000);
+    $('to').value = toLocalInput(now);
+    document.querySelectorAll('#chips .chip').forEach(x => x.classList.toggle('active', x === c));
+    reload();
+  });
+});
+
+// init
+(async () => {
+  const now = Date.now();
+  $('from').value = toLocalInput(now - 24 * 3600_000);
+  $('to').value = toLocalInput(now);
+  await loadDevices();
+})();
+</script>
+</body>
+</html>

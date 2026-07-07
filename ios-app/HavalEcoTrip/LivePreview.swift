@@ -16,7 +16,8 @@ enum LivePreview {
         endActive(Activity<ChargeActivityAttributes>.activities)
         let state = ChargeActivityAttributes.ContentState(
             soc: 78, powerKw: 12.4, sessionKwh: 8.2, remainingMin: 65,
-            charging: true, targetPct: 80, updatedAtMs: Date().timeIntervalSince1970 * 1000)
+            charging: true, targetPct: 80, costBrl: 9.84,
+            updatedAtMs: Date().timeIntervalSince1970 * 1000)
         _ = try? Activity.request(
             attributes: ChargeActivityAttributes(carName: carName),
             content: ActivityContent(state: state, staleDate: Date().addingTimeInterval(3600)))
@@ -42,7 +43,9 @@ enum LivePreview {
         let state = TripActivityAttributes.ContentState(
             distKm: 23.7, netKwh: 4.1, effKwh100: 17.3, timeSec: 1860,
             avgSpeedKmh: 46, fuelL: 0, active: true,
-            updatedAtMs: Date().timeIntervalSince1970 * 1000)
+            updatedAtMs: Date().timeIntervalSince1970 * 1000,
+            socPct: 71, rangeKm: 48,
+            speedKmh: 72, destName: "Escritório", destEtaMin: 8, destKm: 8.2)
         _ = try? Activity.request(
             attributes: TripActivityAttributes(carName: carName),
             content: ActivityContent(state: state, staleDate: Date().addingTimeInterval(3600)))
@@ -71,10 +74,27 @@ enum LivePreview {
             trunk: false, sunroof: true,
             summary: "Destrancado · Porta diant. esq. · Vidro tras. dir. · Teto solar",
             active: true,
-            updatedAtMs: Date().timeIntervalSince1970 * 1000)
+            updatedAtMs: Date().timeIntervalSince1970 * 1000,
+            sinceMs: Date().addingTimeInterval(-720).timeIntervalSince1970 * 1000,  // há 12 min
+            userDistKm: 1.2,
+            locationShort: "Estac. Flamboyant G2")
         _ = try? Activity.request(
             attributes: SecurityActivityAttributes(carName: carName),
             content: ActivityContent(state: state, staleDate: Date().addingTimeInterval(3600)))
+    }
+
+    static func parking() {
+        guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
+        endActive(Activity<ParkingActivityAttributes>.activities)
+        let now = Date()
+        let state = ParkingActivityAttributes.ContentState(
+            distM: 340, bearingDeg: 45,
+            carLat: -16.6725, carLng: -49.2554,
+            parkedAtMs: now.addingTimeInterval(-1500).timeIntervalSince1970 * 1000,  // estac. há 25 min
+            updatedAtMs: now.timeIntervalSince1970 * 1000)
+        _ = try? Activity.request(
+            attributes: ParkingActivityAttributes(carName: carName),
+            content: ActivityContent(state: state, staleDate: now.addingTimeInterval(3600)))
     }
 
     // Encerra todas as Live Activities ativas.
@@ -84,6 +104,7 @@ enum LivePreview {
         endActive(Activity<TripActivityAttributes>.activities)
         endActive(Activity<MotorActivityAttributes>.activities)
         endActive(Activity<SecurityActivityAttributes>.activities)
+        endActive(Activity<ParkingActivityAttributes>.activities)
     }
 
     // Encerra atividades ativas do tipo antes de criar a de preview (evita duplicar).

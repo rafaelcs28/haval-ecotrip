@@ -15,8 +15,26 @@
 import SwiftUI
 import AuthenticationServices
 
+// Navegação programática entre tabs (ex: card "Última viagem" no Painel → Viagens;
+// "Viagem em andamento" → Drive). Índices batem com a ordem da TabView abaixo.
+final class TabRouter: ObservableObject {
+    static let shared = TabRouter()
+    enum Tab: Int { case painel = 0, drive = 1, recargas = 2, viagens = 3, config = 4 }
+    @Published var selected = 0
+    func go(_ t: Tab) { selected = t.rawValue }
+
+    private init() {
+        #if DEBUG
+        // Tab inicial pra screenshots no sim: defaults write ... v2_tab -int N
+        let t = UserDefaults.standard.integer(forKey: "v2_tab")
+        if t > 0 { selected = t }
+        #endif
+    }
+}
+
 struct ContentView: View {
     @StateObject private var manager = ActivityManager()
+    @ObservedObject private var router = TabRouter.shared
     @StateObject private var shortcuts = ShortcutManager.shared
     @Environment(\.scenePhase) private var scenePhase
     @State private var showSetup = false   // sheet por cima da WebView
@@ -26,6 +44,7 @@ struct ContentView: View {
     // re-renderiza e troca da tela de login pra WebView automaticamente.
     @AppStorage("bridge_token", store: UserDefaults(suiteName: Settings.appGroupId))
     private var storedToken: String = ""
+    @AppStorage("ui_v2") private var uiV2: Bool = UIv2.defaultOn
 
     private var bridgeURL: URL? {
         URL(string: Settings.bridgeURL.isEmpty ? AuthConfig.bridgeURL : Settings.bridgeURL)
@@ -44,17 +63,27 @@ struct ContentView: View {
     var body: some View {
         Group {
             if bridgeURL != nil, !storedToken.isEmpty, !Settings.bridgeURL.isEmpty {
-                TabView {
-                  NativeDashView()
-                    .tabItem { Label("Painel", systemImage: "gauge.with.dots.needle.bottom.50percent") }
-                  NativeDriveView()
-                    .tabItem { Label("Drive", systemImage: "steeringwheel") }
-                  NativeRecargasView()
-                    .tabItem { Label("Recargas", systemImage: "bolt.fill") }
-                  NativeViagensView()
-                    .tabItem { Label("Viagens", systemImage: "map.fill") }
-                  NativeConfigView()
-                    .tabItem { Label("Config", systemImage: "gearshape.fill") }
+                TabView(selection: $router.selected) {
+                  Group {
+                      if uiV2 { DashV2View() } else { NativeDashView() }
+                  }
+                    .tabItem { Label("Painel", systemImage: "gauge.with.dots.needle.bottom.50percent") }.tag(0)
+                  Group {
+                      if uiV2 { DriveV2View() } else { NativeDriveView() }
+                  }
+                    .tabItem { Label("Drive", systemImage: "steeringwheel") }.tag(1)
+                  Group {
+                      if uiV2 { RecargasV2View() } else { NativeRecargasView() }
+                  }
+                    .tabItem { Label("Recargas", systemImage: "bolt.fill") }.tag(2)
+                  Group {
+                      if uiV2 { ViagensV2View() } else { NativeViagensView() }
+                  }
+                    .tabItem { Label("Viagens", systemImage: "map.fill") }.tag(3)
+                  Group {
+                      if uiV2 { ConfigV2View() } else { NativeConfigView() }
+                  }
+                    .tabItem { Label("Config", systemImage: "gearshape.fill") }.tag(4)
                 }
                 .tint(DS.green)
                 .tabBarMinimizeOnScroll()
@@ -83,6 +112,21 @@ struct ContentView: View {
             }
         }
         .task {
+            #if DEBUG
+            // Preview de LA pra screenshots no sim:
+            //   defaults write <bundle> la_preview -string charge|preclimat|trip|motor|security|stop
+            switch UserDefaults.standard.string(forKey: "la_preview") {
+            case "charge":    LivePreview.charge()
+            case "preclimat": LivePreview.preclimat()
+            case "trip":      LivePreview.trip()
+            case "motor":     LivePreview.motor()
+            case "security":  LivePreview.security()
+            case "parking":   LivePreview.parking()
+            case "stop":      LivePreview.stopAll()
+            default: break
+            }
+            UserDefaults.standard.removeObject(forKey: "la_preview")
+            #endif
             await manager.autoStartIfCharging()
             // Registra os tokens APNs das Live Activities no bridge (push-to-start
             // + update). É o que permite o servidor criar/atualizar a LA com o app
@@ -95,6 +139,9 @@ struct ContentView: View {
             // que pode estar dessincronizada com a pref do PWA/bridge (device novo
             // restaurado de backup mostrava o toggle ON mas nunca pedia a permissão).
             RemoteNotifications.enable()
+            // Reporta posição do celular em background (significant-change + geofence
+            // no carro estacionado) pra LA "voltar ao carro" ter distância/rumo frescos.
+            PhoneLocationReporter.shared.start()
         }
         // URL scheme havalecotrip://open — disparado pelo SW do PWA standalone
         // quando user toca em notif Web Push.
@@ -259,6 +306,12 @@ struct SetupView: View {
                         isPresented = false
                     } label: {
                         Label("Pré-visualizar · Veículo desprotegido", systemImage: "lock.open.trianglebadge.exclamationmark.fill")
+                    }
+                    Button {
+                        LivePreview.parking()
+                        isPresented = false
+                    } label: {
+                        Label("Pré-visualizar · Voltar ao carro", systemImage: "parkingsign")
                     }
                     Button(role: .destructive) {
                         LivePreview.stopAll()

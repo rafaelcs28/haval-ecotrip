@@ -1,0 +1,72 @@
+<!doctype html><html><head><meta charset='utf-8'><style>
+    body { background: #0a0a0a; margin: 0; }
+    @keyframes ecoBreathe { 0%,100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.35); opacity: .55; } }
+    @keyframes ecoPulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+    @keyframes ecoSpin { to { transform: rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
+  </style></head><body style='margin:0;background:#050505;padding:20px;display:flex;justify-content:center'><div id="2c" style="display: flex; flex-direction: column; gap: 14px; width: 360px;">
+      <div style="display: flex; align-items: baseline; gap: 10px;">
+        <span style="background: #22c55e; color: #000; font-size: 11px; font-weight: 700; letter-spacing: .06em; padding: 3px 8px; border-radius: 6px;">2c</span>
+        <span style="font-size: 15px; font-weight: 650;">Conexão e frescor do dado</span>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 10px;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <div style="display: flex; align-items: center; gap: 5px; background: rgba(34,197,94,.12); border: 1px solid rgba(34,197,94,.3); border-radius: 999px; padding: 4px 10px;">
+            <span style="width: 6px; height: 6px; border-radius: 999px; background: #22c55e; animation: ecoBreathe 2.2s ease-in-out infinite;"></span>
+            <span style="font-size: 10px; font-weight: 700; letter-spacing: .1em; color: #22c55e;">AO VIVO</span>
+          </div>
+          <span style="font-size: 11px; color: #6b7280;">WebSocket ok, dado &lt; 30 s</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <div style="display: flex; align-items: center; gap: 5px; background: #16161a; border: 1px solid rgba(255,255,255,.08); border-radius: 999px; padding: 4px 10px;">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13.5A8 8 0 1 1 10.5 4a6.5 6.5 0 0 0 9.5 9.5z"></path></svg>
+            <span style="font-size: 10px; font-weight: 700; letter-spacing: .1em; color: #94a3b8;">DORMINDO · HÁ 42 MIN</span>
+          </div>
+          <span style="font-size: 11px; color: #6b7280;">carro desligado, snapshot</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <div style="display: flex; align-items: center; gap: 5px; background: rgba(239,68,68,.1); border: 1px solid rgba(239,68,68,.4); border-radius: 999px; padding: 4px 10px; animation: ecoPulse 1.6s ease-in-out infinite;">
+            <span style="width: 6px; height: 6px; border-radius: 999px; background: #ef4444;"></span>
+            <span style="font-size: 10px; font-weight: 700; letter-spacing: .1em; color: #ef4444;">BRIDGE FORA</span>
+          </div>
+          <span style="font-size: 11px; color: #6b7280;">reconectando a cada 5 s</span>
+        </div>
+      </div>
+
+      <span style="font-size: 10.5px; font-weight: 700; letter-spacing: .1em; color: #6b7280; margin-top: 6px;">PAINEL DORMINDO — TUDO ESMAECE, TIMESTAMP SOBE</span>
+      <div style="display: flex; flex-direction: column; gap: 8px;">
+        <div style="filter: brightness(.6) saturate(.7); display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px;">
+          <div style="background: #0d0d0f; border: 1px solid rgba(255,255,255,.08); border-radius: 13px; padding: 8px 4px 7px; display: flex; flex-direction: column; align-items: center; gap: 2px;">
+            <span style="font-size: 9px; font-weight: 600; letter-spacing: .08em; color: #6b7280;">CABINE</span>
+            <span style="font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; color: #f5f5f5;">27,5°</span>
+            <span style="font-size: 8.5px; color: #6b7280;">há 42 min</span>
+          </div>
+          <div style="background: #0d0d0f; border: 1px solid rgba(255,255,255,.08); border-radius: 13px; padding: 8px 4px 7px; display: flex; flex-direction: column; align-items: center; gap: 2px;">
+            <span style="font-size: 9px; font-weight: 600; letter-spacing: .08em; color: #6b7280;">SOC</span>
+            <span style="font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; color: #f5f5f5;">74%</span>
+            <span style="font-size: 8.5px; color: #6b7280;">há 42 min</span>
+          </div>
+          <div style="background: #0d0d0f; border: 1px solid rgba(255,255,255,.08); border-radius: 13px; padding: 8px 4px 7px; display: flex; flex-direction: column; align-items: center; gap: 2px;">
+            <span style="font-size: 9px; font-weight: 600; letter-spacing: .08em; color: #6b7280;">12V</span>
+            <span style="font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; color: #f5f5f5;">12,4</span>
+            <span style="font-size: 8.5px; color: #6b7280;">há 42 min</span>
+          </div>
+        </div>
+        <div style="display: flex; align-items: center; justify-content: space-between; background: #16161a; border: 1px solid rgba(255,255,255,.06); border-radius: 12px; padding: 8px 13px;">
+          <span style="font-size: 11px; color: #94a3b8;">Última leitura 17:58 · o carro acorda ao abrir a porta</span>
+          <span style="font-size: 11px; font-weight: 600; color: #38bdf8;">Acordar</span>
+        </div>
+      </div>
+
+      <span style="font-size: 10.5px; font-weight: 700; letter-spacing: .1em; color: #6b7280; margin-top: 6px;">BRIDGE FORA — BANNER, DADOS CONGELADOS</span>
+      <div style="display: flex; align-items: center; gap: 10px; background: rgba(239,68,68,.08); border: 1px solid rgba(239,68,68,.35); border-radius: 13px; padding: 10px 13px;">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v9"></path><circle cx="12" cy="17.5" r="1.3" fill="#ef4444" stroke="none"></circle></svg>
+        <div style="display: flex; flex-direction: column; gap: 1px; flex: 1;">
+          <span style="font-size: 12px; font-weight: 600; color: #f5f5f5;">Sem conexão com o bridge</span>
+          <span style="font-size: 10.5px; color: #94a3b8;">mostrando snapshot de 18:02 · reconectando…</span>
+        </div>
+      </div>
+
+      <div style="font-size: 12px; line-height: 1.5; color: #94a3b8;">Frescor é um cidadão de primeira classe: todo valor carrega seu "há X min" quando não é ao vivo. Dormindo esmaece (brightness .6); bridge fora congela e avisa — nunca esconde o último dado.</div>
+    </div></body></html>

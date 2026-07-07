@@ -1,0 +1,16 @@
+{
+  "name": "Histórico de localização",
+  "short_name": "Localização",
+  "description": "Trajeto e pontos onde cada device esteve",
+  "start_url": "/phone-history-map.html",
+  "scope": "/phone-history-map.html",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0d1117",
+  "theme_color": "#1f6feb",
+  "icons": [
+    { "src": "/images/phone-history-icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/images/phone-history-icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/images/phone-history-icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

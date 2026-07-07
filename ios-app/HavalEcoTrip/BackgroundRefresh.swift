@@ -63,7 +63,7 @@ enum BackgroundRefresh {
             Activity<ChargeActivityAttributes>.activities.filter { $0.activityState == .active }
         }
         guard let activity = activities.first else { return }
-        guard let url = URL(string: Settings.bridgeURL + "/api/state") else { return }
+        guard let url = URL(string: BridgeRouter.shared.currentURL + "/api/state") else { return }
         var req = URLRequest(url: url)
         req.timeoutInterval = 8
         req.addValue("Bearer " + Settings.bridgeToken, forHTTPHeaderField: "Authorization")
@@ -80,7 +80,7 @@ enum BackgroundRefresh {
                 soc: soc, powerKw: pwr, sessionKwh: kwh,
                 remainingMin: Int(rem.rounded()),
                 charging: charging,
-                targetPct: (json["charge_limit_pct"] as? Double) ?? 100,
+                targetPct: ActivityManager.effectiveLimit(json),
                 updatedAtMs: Date().timeIntervalSince1970 * 1000
             )
             let content = ActivityContent(state: state, staleDate: Date().addingTimeInterval(60 * 60))

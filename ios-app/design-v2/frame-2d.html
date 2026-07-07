@@ -1,0 +1,59 @@
+<!doctype html><html><head><meta charset='utf-8'><style>
+    body { background: #0a0a0a; margin: 0; }
+    @keyframes ecoBreathe { 0%,100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.35); opacity: .55; } }
+    @keyframes ecoPulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+    @keyframes ecoSpin { to { transform: rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
+  </style></head><body style='margin:0;background:#050505;padding:20px;display:flex;justify-content:center'><div id="2d" style="display: flex; flex-direction: column; gap: 14px; width: 360px;">
+      <div style="display: flex; align-items: baseline; gap: 10px;">
+        <span style="background: #22c55e; color: #000; font-size: 11px; font-weight: 700; letter-spacing: .06em; padding: 3px 8px; border-radius: 6px;">2d</span>
+        <span style="font-size: 15px; font-weight: 650;">Estados do carro no Painel</span>
+      </div>
+
+      <span style="font-size: 10.5px; font-weight: 700; letter-spacing: .1em; color: #6b7280;">CHIPS DE ESTADO — VOCABULÁRIO COMPLETO</span>
+      <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+        <span style="display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; color: #22c55e; background: rgba(34,197,94,.12); border: 1px solid rgba(34,197,94,.3); border-radius: 999px; padding: 4px 11px;"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="10" width="14" height="10" rx="3"></rect><path d="M8 10V7a4 4 0 0 1 8 0v3"></path></svg>Travado</span>
+        <span style="display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; color: #ef4444; background: rgba(239,68,68,.1); border: 1px solid rgba(239,68,68,.4); border-radius: 999px; padding: 4px 11px;"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="10" width="14" height="10" rx="3"></rect><path d="M8 10V7a4 4 0 0 1 7.7-1.4"></path></svg>Destravado</span>
+        <span style="font-size: 11px; font-weight: 600; color: #ef4444; background: rgba(239,68,68,.1); border: 1px solid rgba(239,68,68,.4); border-radius: 999px; padding: 4px 11px;">2 portas abertas</span>
+        <span style="font-size: 11px; font-weight: 600; color: #facc15; background: rgba(251,191,36,.12); border: 1px solid rgba(251,191,36,.4); border-radius: 999px; padding: 4px 11px;">Teto aberto</span>
+        <span style="display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; color: #fb923c; background: rgba(251,146,60,.15); border: 1px solid rgba(251,146,60,.4); border-radius: 999px; padding: 4px 11px;"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#fb923c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 9V6h5v3"></path><rect x="3" y="9" width="14" height="8" rx="2"></rect><path d="M17 11h2.5l1.5 2v4h-4"></path></svg>Motor ligado</span>
+        <span style="font-size: 11px; font-weight: 600; color: #94a3b8; background: #16161a; border: 1px solid rgba(255,255,255,.08); border-radius: 999px; padding: 4px 11px;">D · 3ª</span>
+        <span style="font-size: 11px; font-weight: 600; color: #22d3ee; background: rgba(34,211,238,.15); border: 1px solid rgba(34,211,238,.4); border-radius: 999px; padding: 4px 11px;">AC ligado · 22,0°</span>
+      </div>
+
+      <span style="font-size: 10.5px; font-weight: 700; letter-spacing: .1em; color: #6b7280; margin-top: 6px;">DESTRAVADO + PORTA ABERTA — CARD SOBE PRO TOPO</span>
+      <div style="border-radius: 16px; border: 1px solid rgba(239,68,68,.4); background: linear-gradient(135deg, rgba(239,68,68,.12), #0d0d0f 62%); padding: 12px 14px; display: flex; align-items: center; gap: 12px;">
+        <img src="assets/haval-h6.png" alt="" style="width: 54px; filter: drop-shadow(0 4px 8px rgba(0,0,0,.5));">
+        <div style="display: flex; flex-direction: column; gap: 2px; flex: 1;">
+          <span style="font-size: 9.5px; font-weight: 700; letter-spacing: .12em; color: #ef4444;">DESTRAVADO · HÁ 12 MIN</span>
+          <span style="font-size: 12.5px; font-weight: 600;">Porta traseira esq. e porta-malas abertos</span>
+          <span style="font-size: 10.5px; color: #94a3b8;">você está a 1,2 km do carro</span>
+        </div>
+        <span style="font-size: 12px; font-weight: 700; color: #000; background: #ef4444; border-radius: 999px; padding: 7px 13px;">Travar</span>
+      </div>
+
+      <span style="font-size: 10.5px; font-weight: 700; letter-spacing: .1em; color: #6b7280; margin-top: 6px;">VIAGEM EM ANDAMENTO — RESUMO AO VIVO NO PAINEL</span>
+      <div style="border-radius: 16px; border: 1px solid rgba(34,197,94,.3); background: linear-gradient(135deg, rgba(34,197,94,.12), #0d0d0f 62%); padding: 12px 14px; display: flex; flex-direction: column; gap: 9px;">
+        <div style="display: flex; align-items: center; justify-content: space-between;">
+          <div style="display: flex; align-items: center; gap: 6px;">
+            <span style="width: 6px; height: 6px; border-radius: 999px; background: #22c55e; animation: ecoBreathe 2.2s ease-in-out infinite;"></span>
+            <span style="font-size: 9.5px; font-weight: 700; letter-spacing: .12em; color: #22c55e;">VIAGEM EM CURSO · 18 MIN</span>
+          </div>
+          <span style="font-size: 10.5px; color: #94a3b8;">Grasi dirigindo · → Escritório</span>
+        </div>
+        <div style="display: flex; align-items: center; justify-content: space-between;">
+          <div style="display: flex; flex-direction: column; gap: 1px;">
+            <span style="font-size: 22px; font-weight: 500; letter-spacing: -.5px; font-variant-numeric: tabular-nums; line-height: 1;">72<span style="font-size: 11px; color: #6b7280; font-weight: 400;"> km/h</span></span>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 1px; align-items: center;">
+            <span style="font-size: 22px; font-weight: 500; letter-spacing: -.5px; font-variant-numeric: tabular-nums; line-height: 1;">8,2<span style="font-size: 11px; color: #6b7280; font-weight: 400;"> km</span></span>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 1px; align-items: flex-end;">
+            <span style="font-size: 22px; font-weight: 500; letter-spacing: -.5px; font-variant-numeric: tabular-nums; line-height: 1;">13,9<span style="font-size: 11px; color: #6b7280; font-weight: 400;"> kWh/100</span></span>
+          </div>
+        </div>
+        <span style="font-size: 11px; font-weight: 600; color: #22c55e;">Acompanhar no Drive →</span>
+      </div>
+
+      <div style="font-size: 12px; line-height: 1.5; color: #94a3b8;">Anomalia promove o card: destravado/aberto vira o primeiro item do Painel com ação inline; viagem em curso substitui "última viagem" e leva pro Drive num toque.</div>
+    </div></body></html>

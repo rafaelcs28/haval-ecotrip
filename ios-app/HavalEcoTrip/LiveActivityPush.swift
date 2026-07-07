@@ -41,6 +41,8 @@ final class LiveActivityPush {
         observe(TripActivityAttributes.self,      type: "TripActivityAttributes")
         observe(MotorActivityAttributes.self,     type: "MotorActivityAttributes")
         observe(SecurityActivityAttributes.self,  type: "SecurityActivityAttributes")
+        observe(InfraActivityAttributes.self,     type: "InfraActivityAttributes")
+        observe(ParkingActivityAttributes.self,   type: "ParkingActivityAttributes")
         // A LA de recarga do BYD (SongPro) vive no app dedicado "Grasi Recarga"
         // (target BydRecarga), não mais aqui — fica separado do app do Haval.
     }
@@ -90,6 +92,13 @@ final class LiveActivityPush {
         if type == "SecurityActivityAttributes" {
             Task { await endSecurityIfSafe(activity) }
         }
+        // LA de viagem: quando criada/mantida por push-to-start com o app morto, o
+        // bridge nunca recebe o update token (pushTokenUpdates só emite com o app
+        // vivo) → não consegue empurrar o fim, e a LA fica presa "em curso". Ao
+        // detectá-la, consulta o bridge e encerra LOCALMENTE se não há viagem ativa.
+        if type == "TripActivityAttributes" {
+            Task { await endTripIfInactive(activity) }
+        }
         Task {
             for await tokenData in activity.pushTokenUpdates {
                 await register("/api/activity/start", body: [
@@ -119,6 +128,22 @@ final class LiveActivityPush {
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let issues = obj["issues"] as? [Any] else { return }
         if issues.isEmpty {
+            await activity.end(nil, dismissalPolicy: .immediate)
+        }
+    }
+
+    // Encerra a LA de viagem localmente se o bridge disser que não há viagem em
+    // curso (current_trip null). Cobre a LA presa por push-to-start sem update token.
+    private func endTripIfInactive<T: ActivityAttributes>(_ activity: Activity<T>) async {
+        guard Settings.isConfigured, let url = URL(string: Settings.apiBase + "/api/state") else { return }
+        var req = URLRequest(url: url, timeoutInterval: 8)
+        req.addValue("Bearer " + Settings.bridgeToken, forHTTPHeaderField: "Authorization")
+        guard let (data, resp) = try? await URLSession.shared.data(for: req),
+              (resp as? HTTPURLResponse)?.statusCode == 200,
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+        let st = (obj["state"] as? [String: Any]) ?? obj
+        let hasTrip = st["current_trip"] != nil && !(st["current_trip"] is NSNull)
+        if !hasTrip {
             await activity.end(nil, dismissalPolicy: .immediate)
         }
     }

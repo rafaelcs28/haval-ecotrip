@@ -38,6 +38,12 @@ struct BatteryHealthSheet: View {
     private var soh: Double { current > 0 ? min(current / factoryKwh * 100, 100) : 0 }
     private var sohColor: Color { soh >= 90 ? DS.green : (soh >= 80 ? DS.yellow : DS.orange) }
 
+    // Ciclos equivalentes: soma dos ganhos de SOC ÷ 100 (carga completa equivalente).
+    private var cycles: Int {
+        let sum = charges.reduce(0.0) { $0 + max(0, $1.socEnd - $1.socStart) }
+        return Int((sum / 100).rounded())
+    }
+
     // Regressão linear (mínimos quadrados) sobre os pontos: kWh por ano + predição.
     private var trend: (perYear: Double, predict: (Date) -> Double)? {
         let pts = points
@@ -53,9 +59,47 @@ struct BatteryHealthSheet: View {
         let intercept = (sy - slope * sx) / n
         return (slope * 365 * 86400, { d in intercept + slope * d.timeIntervalSince(t0) })
     }
-    private var trendPoints: [Point] {
-        guard let tr = trend, let f = points.first?.date, let l = points.last?.date, f != l else { return [] }
-        return [Point(date: f, cap: tr.predict(f)), Point(date: l, cap: tr.predict(l))]
+
+    // Variação de SOH no período coberto pelos pontos (início → agora).
+    private var sohDeltaText: String? {
+        let pts = points
+        guard pts.count >= 3, let first = pts.first?.cap, first > 0 else { return nil }
+        let startSoh = min(first / factoryKwh * 100, 100)
+        let d = soh - startSoh
+        return "\(d < 0 ? "" : "+")\(Fmt.dec1(d))% no período"
+    }
+
+    // --- Hábitos de recarga derivados das sessões (sem sensor de temperatura). ---
+    private struct Habit: Identifiable { let id = UUID(); let icon: String; let label: String; let value: String; let verdict: String; let color: Color }
+
+    private var habits: [Habit] {
+        var out: [Habit] = []
+        let valid = charges.filter { $0.kwh > 1 }
+        // % de sessões que passaram de 90% de SOC (estresse do topo da bateria).
+        if !valid.isEmpty {
+            let over90 = valid.filter { $0.socEnd > 90 }.count
+            let pct = Double(over90) / Double(valid.count) * 100
+            let v = pct <= 10 ? "ótimo" : (pct <= 25 ? "saudável" : "atenção")
+            out.append(Habit(icon: "battery.100", label: "Acima de 90%", value: "\(Fmt.int(pct))%",
+                             verdict: v, color: pct <= 25 ? DS.green : DS.orange))
+        }
+        // % de sessões em potência alta (proxy de DC rápida — desgasta mais).
+        let powered = valid.filter { $0.avgPowerKw > 0 }
+        if !powered.isEmpty {
+            let fast = powered.filter { $0.avgPowerKw >= 20 }.count
+            let pct = Double(fast) / Double(powered.count) * 100
+            let v = pct <= 20 ? "saudável" : (pct <= 40 ? "moderado" : "atenção")
+            out.append(Habit(icon: "bolt.fill", label: "Carga rápida", value: "\(Fmt.int(pct))%",
+                             verdict: v, color: pct <= 40 ? DS.green : DS.orange))
+        }
+        // SOC médio de fim de recarga.
+        if !valid.isEmpty {
+            let avgEnd = valid.reduce(0.0) { $0 + $1.socEnd } / Double(valid.count)
+            let v = avgEnd <= 82 ? "ideal" : "acima do ideal"
+            out.append(Habit(icon: "gauge.with.dots.needle.50percent", label: "SOC final médio", value: "\(Fmt.int(avgEnd))%",
+                             verdict: v, color: avgEnd <= 82 ? DS.green : DS.yellow))
+        }
+        return out
     }
 
     var body: some View {
@@ -63,56 +107,15 @@ struct BatteryHealthSheet: View {
             ScrollView {
                 VStack(spacing: 14) {
                     if points.count < 3 {
-                        DSCard {
-                            Text("Ainda sem recargas suficientes pra estimar (precisa de algumas recargas com ganho de SOC ≥ 15%).")
-                                .font(.callout).foregroundStyle(DS.muted)
-                        }
+                        emptyState
                     } else {
-                        DSCard {
-                            VStack(spacing: 6) {
-                                Text("Saúde da bateria (SOH)").font(.caption).foregroundStyle(DS.muted)
-                                Text("\(Int(soh.rounded()))%").font(.system(size: 56, weight: .heavy, design: .rounded)).foregroundStyle(sohColor)
-                                if let tr = trend {
-                                    Text(abs(tr.perYear) < 0.3 ? "tendência estável"
-                                         : "\(tr.perYear < 0 ? "" : "+")\(Fmt.dec1(tr.perYear)) kWh/ano")
-                                        .font(.subheadline).foregroundStyle(tr.perYear < -0.3 ? DS.orange : DS.muted)
-                                }
-                            }.frame(maxWidth: .infinity).padding(.vertical, 4)
-                        }
-                        HStack(spacing: 12) {
-                            DSCard { metric("Capacidade atual", "\(Fmt.dec1(current)) kWh", DS.green) }
-                            DSCard { metric("Degradação", "\(Fmt.dec1(degradationPct))%",
-                                            degradationPct > 10 ? DS.orange : DS.muted) }
-                        }
-                        DSCard(title: "Capacidade útil por recarga", icon: "chart.xyaxis.line") {
-                            Chart {
-                                ForEach(points) { p in
-                                    LineMark(x: .value("Data", p.date), y: .value("kWh", p.cap), series: .value("s", "cap"))
-                                        .foregroundStyle(DS.green)
-                                    PointMark(x: .value("Data", p.date), y: .value("kWh", p.cap))
-                                        .foregroundStyle(DS.green.opacity(0.5))
-                                }
-                                ForEach(trendPoints) { tp in
-                                    LineMark(x: .value("Data", tp.date), y: .value("kWh", tp.cap), series: .value("s", "trend"))
-                                        .foregroundStyle(DS.teal)
-                                        .lineStyle(StrokeStyle(lineWidth: 2, dash: [5, 3]))
-                                }
-                                RuleMark(y: .value("Fábrica", factoryKwh))
-                                    .foregroundStyle(DS.muted.opacity(0.6))
-                                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
-                                    .annotation(position: .top, alignment: .leading) {
-                                        Text("fábrica \(Fmt.int(factoryKwh)) kWh").font(.system(size: 9)).foregroundStyle(DS.muted)
-                                    }
-                            }
-                            .frame(height: 180)
-                            .chartYScale(domain: .automatic(includesZero: false))
-                        }
-                        DSCard {
-                            metric("Capacidade de fábrica", "\(Fmt.int(factoryKwh)) kWh", DS.muted)
-                        }
+                        hero
+                        if let spark = sohDeltaText { sparkCard(delta: spark) }
+                        if !habits.isEmpty { habitsCard }
                     }
-                    Text("Estimativa: capacidade = energia da recarga ÷ ganho de SOC. Valores variam com temperatura e taxa de carga — leia a TENDÊNCIA, não um ponto isolado.")
-                        .font(.caption2).foregroundStyle(DS.muted).frame(maxWidth: .infinity, alignment: .leading)
+                    Text("estimativa: capacidade = energia da recarga ÷ ganho de SOC · leia a tendência, não um ponto isolado · seu limite de 80% está ajudando a preservar a bateria")
+                        .font(.system(size: 10.5)).foregroundStyle(DS.muted)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .padding(16)
             }
@@ -123,11 +126,93 @@ struct BatteryHealthSheet: View {
         }
     }
 
-    @ViewBuilder private func metric(_ label: String, _ value: String, _ color: Color) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(label).font(.caption2).foregroundStyle(DS.muted)
-            Text(value).font(.system(size: 22, weight: .bold, design: .rounded)).foregroundStyle(color)
-                .lineLimit(1).minimumScaleFactor(0.6)
-        }.frame(maxWidth: .infinity, alignment: .leading)
+    private var emptyState: some View {
+        DSCard {
+            VStack(spacing: 10) {
+                Image(systemName: "battery.75").font(.system(size: 40)).foregroundStyle(DS.muted)
+                Text("Ainda sem recargas suficientes pra estimar (precisa de algumas recargas com ganho de SOC ≥ 15%).")
+                    .font(.callout).foregroundStyle(DS.muted).multilineTextAlignment(.center)
+            }.frame(maxWidth: .infinity).padding(.vertical, 10)
+        }
+    }
+
+    // Hero: SOH grande (ultraLight) + capacidade útil / fábrica + ciclos.
+    private var hero: some View {
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    Text("\(Fmt.dec1(soh))%")
+                        .font(.system(size: 60, weight: .ultraLight, design: .rounded))
+                        .foregroundStyle(sohColor).monospacedDigit()
+                }
+                Text("SAÚDE DA BATERIA").font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(DS.muted).tracking(0.5)
+                Text("\(Fmt.dec1(current)) de \(Fmt.dec1(factoryKwh)) kWh · ~\(cycles) ciclos")
+                    .font(.system(size: 12)).foregroundStyle(DS.text2).padding(.top, 4)
+            }
+            Spacer()
+            VStack(alignment: .trailing, spacing: 8) {
+                splitValue("\(Fmt.dec1(current)) kWh", "capacidade atual", DS.green)
+                splitValue("\(Fmt.dec1(degradationPct))%", "degradação", degradationPct > 10 ? DS.orange : DS.muted)
+            }
+        }
+    }
+
+    // Sparkline da SOH nos meses cobertos + variação no período.
+    private func sparkCard(delta: String) -> some View {
+        DSCard {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("SOH NO PERÍODO").font(.system(size: 10, weight: .semibold)).foregroundStyle(DS.muted).tracking(0.5)
+                    Spacer()
+                    Text(delta).font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(delta.hasPrefix("+") ? DS.green : DS.orange)
+                }
+                Chart {
+                    ForEach(points) { p in
+                        let s = min(p.cap / factoryKwh * 100, 100)
+                        LineMark(x: .value("Data", p.date), y: .value("SOH", s))
+                            .foregroundStyle(DS.green).interpolationMethod(.catmullRom)
+                        AreaMark(x: .value("Data", p.date), y: .value("SOH", s))
+                            .foregroundStyle(LinearGradient(colors: [DS.green.opacity(0.22), .clear], startPoint: .top, endPoint: .bottom))
+                            .interpolationMethod(.catmullRom)
+                    }
+                }
+                .frame(height: 90)
+                .chartYScale(domain: .automatic(includesZero: false))
+                .chartXAxis(.hidden)
+                .chartYAxis { AxisMarks(position: .trailing) { v in
+                    AxisValueLabel { if let d = v.as(Double.self) { Text("\(Fmt.int(d))%").font(.system(size: 9)).foregroundStyle(DS.muted) } }
+                } }
+            }
+        }
+    }
+
+    // Lista de hábitos com veredito (fundo painel2, hairlines).
+    private var habitsCard: some View {
+        VStack(spacing: 0) {
+            ForEach(Array(habits.enumerated()), id: \.element.id) { i, h in
+                HStack(spacing: 10) {
+                    Image(systemName: h.icon).font(.system(size: 14)).foregroundStyle(DS.text2).frame(width: 20)
+                    Text(h.label).font(.system(size: 13)).foregroundStyle(DS.text)
+                    Spacer()
+                    Text(h.value).font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .foregroundStyle(DS.text).monospacedDigit()
+                    Text(h.verdict).font(.system(size: 11, weight: .semibold)).foregroundStyle(h.color)
+                }
+                .padding(.horizontal, 12).padding(.vertical, 11)
+                if i < habits.count - 1 { Divider().background(DS.divider) }
+            }
+        }
+        .background(DS.panel2)
+        .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
+    }
+
+    private func splitValue(_ value: String, _ label: String, _ color: Color) -> some View {
+        VStack(alignment: .trailing, spacing: 0) {
+            Text(value).font(.system(size: 17, weight: .semibold, design: .rounded))
+                .foregroundStyle(color).monospacedDigit()
+            Text(label).font(.system(size: 9.5)).foregroundStyle(DS.muted)
+        }
     }
 }

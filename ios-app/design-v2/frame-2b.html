@@ -1,0 +1,59 @@
+<!doctype html><html><head><meta charset='utf-8'><style>
+    body { background: #0a0a0a; margin: 0; }
+    @keyframes ecoBreathe { 0%,100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.35); opacity: .55; } }
+    @keyframes ecoPulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+    @keyframes ecoSpin { to { transform: rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
+  </style></head><body style='margin:0;background:#050505;padding:20px;display:flex;justify-content:center'><div id="2b" style="display: flex; flex-direction: column; gap: 14px; width: 360px;">
+      <div style="display: flex; align-items: baseline; gap: 10px;">
+        <span style="background: #22c55e; color: #000; font-size: 11px; font-weight: 700; letter-spacing: .06em; padding: 3px 8px; border-radius: 6px;">2b</span>
+        <span style="font-size: 15px; font-weight: 650;">Comando remoto — 4 estados</span>
+      </div>
+
+      <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;">
+        <div style="display: flex; flex-direction: column; gap: 6px; align-items: center;">
+          <div style="width: 100%; height: 62px; background: #0d0d0f; border: 1px solid rgba(255,255,255,.08); border-radius: 13px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;">
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="10" width="14" height="10" rx="3"></rect><path d="M8 10V7a4 4 0 0 1 8 0v3"></path></svg>
+            <span style="font-size: 10px; font-weight: 600; color: #94a3b8;">Travar</span>
+          </div>
+          <span style="font-size: 9.5px; letter-spacing: .08em; color: #6b7280;">PADRÃO</span>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 6px; align-items: center;">
+          <div style="width: 100%; height: 62px; background: rgba(251,191,36,.12); border: 1px solid rgba(251,191,36,.4); border-radius: 13px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; animation: ecoPulse 1.4s ease-in-out infinite;">
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#facc15" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"></circle><path d="M12 7.5v4.5l3 2"></path></svg>
+            <span style="font-size: 10px; font-weight: 600; color: #facc15;">Enviando…</span>
+          </div>
+          <span style="font-size: 9.5px; letter-spacing: .08em; color: #6b7280;">1–3 S</span>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 6px; align-items: center;">
+          <div style="width: 100%; height: 62px; background: rgba(34,197,94,.12); border: 1px solid rgba(34,197,94,.4); border-radius: 13px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;">
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg>
+            <span style="font-size: 10px; font-weight: 600; color: #22c55e;">Travado</span>
+          </div>
+          <span style="font-size: 9.5px; letter-spacing: .08em; color: #6b7280;">CONFIRMADO</span>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 6px; align-items: center;">
+          <div style="width: 100%; height: 62px; background: rgba(239,68,68,.1); border: 1px solid rgba(239,68,68,.4); border-radius: 13px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;">
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2" stroke-linecap="round"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"></path></svg>
+            <span style="font-size: 10px; font-weight: 600; color: #ef4444;">Falhou</span>
+          </div>
+          <span style="font-size: 9.5px; letter-spacing: .08em; color: #6b7280;">TOCAR = RETRY</span>
+        </div>
+      </div>
+
+      <span style="font-size: 10.5px; font-weight: 700; letter-spacing: .1em; color: #6b7280; margin-top: 6px;">TOAST DE FALHA</span>
+      <div style="border-radius: 999px; background: rgba(31,31,31,.92); backdrop-filter: blur(12px); border: 1px solid rgba(239,68,68,.35); box-shadow: 0 14px 32px rgba(0,0,0,.5); padding: 10px 16px; display: flex; align-items: center; gap: 10px;">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2.2" stroke-linecap="round"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"></path></svg>
+        <span style="font-size: 12.5px; color: #f5f5f5; flex: 1;">Carro não respondeu · Travar</span>
+        <span style="font-size: 12.5px; font-weight: 700; color: #22c55e;">Tentar</span>
+      </div>
+
+      <span style="font-size: 10.5px; font-weight: 700; letter-spacing: .1em; color: #6b7280; margin-top: 6px;">CONFIRMAÇÃO SILENCIOSA</span>
+      <div style="border-radius: 999px; background: rgba(31,31,31,.92); backdrop-filter: blur(12px); border: 1px solid rgba(34,197,94,.3); box-shadow: 0 14px 32px rgba(0,0,0,.5); padding: 10px 16px; display: flex; align-items: center; gap: 10px;">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg>
+        <span style="font-size: 12.5px; color: #f5f5f5; flex: 1;">Travado · o carro confirmou</span>
+        <span style="font-size: 11px; color: #6b7280; font-variant-numeric: tabular-nums;">2,1 s</span>
+      </div>
+
+      <div style="font-size: 12px; line-height: 1.5; color: #94a3b8;">O botão é a própria máquina de estados — nunca um spinner genérico. Amarelo pulsa enquanto o MQTT aguarda verify; falha vira retry de um toque; sucesso confirma e some.</div>
+    </div></body></html>

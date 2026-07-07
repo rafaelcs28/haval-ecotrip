@@ -20,6 +20,14 @@ struct SecurityActivityAttributes: ActivityAttributes {
         var summary:  String                        // resumo textual (fallback)
         var active:   Bool                          // false quando tudo for resolvido
         var updatedAtMs: Double
+        // Rodada 9b (opcionais p/ compat com payloads antigos):
+        var sinceMs:       Double?   // quando o problema começou (timestamp ms)
+        var userDistKm:    Double?   // distância do usuário até o carro (km)
+        var locationShort: String?   // "Estac. Flamboyant G2" (onde o carro está)
+        var confirmSec:    Double?   // latência da confirmação do travar (s)
+
+        var updatedAt: Date { Date(timeIntervalSince1970: updatedAtMs / 1000.0) }
+        var since: Date? { sinceMs.map { Date(timeIntervalSince1970: $0 / 1000.0) } }
 
         // Derivados de conveniência pro layout.
         var anyDoor:   Bool { doorFL || doorFR || doorRL || doorRR || trunk }

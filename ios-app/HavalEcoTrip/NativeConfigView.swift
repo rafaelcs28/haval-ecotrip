@@ -26,15 +26,17 @@ struct NativeConfigView: View {
     @State private var importing = false
     @AppStorage("faceid_lock") private var faceIDLock = false
     @AppStorage("lan_enabled") private var lanEnabled = false
+    @AppStorage("dash_hero_style") private var heroStyle = "padrao"
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 18) {
+                    aparenciaCard
                     veiculoCard
                     notificacoesCard
-                    dadosCard
                     contaCard
+                    dadosCard
                     avancadoCard
                     sobreCard
                 }
@@ -86,22 +88,33 @@ struct NativeConfigView: View {
         }
     }
 
+    // MARK: Aparência — estilo do card principal do Painel
+    private var aparenciaCard: some View {
+        DSCard(title: "Aparência", icon: "paintbrush.fill") {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Card principal do Painel").font(.system(size: 14)).foregroundStyle(DS.text)
+                Picker("", selection: $heroStyle) {
+                    Text("Desenho do carro").tag("carro")
+                    Text("Informações").tag("padrao")
+                }
+                .pickerStyle(.segmented)
+                Text(heroStyle == "carro"
+                     ? "Render do H6 com estado pintado por cima (portas, vidros, teto, mala, pneus)."
+                     : "Anel de bateria + tiles de status e pneus, estilo Grasi Recarga.")
+                    .font(.caption2).foregroundStyle(DS.muted)
+            }
+        }
+    }
+
     // MARK: Veículo (submenu) + Locais + LAN + pareamento
     private var veiculoCard: some View {
         DSCard(title: "Veículo", icon: "car.fill") {
             VStack(spacing: 4) {
-                rowButton(icon: "slider.horizontal.3", title: "Veículo", subtitle: "Limite de carga, modelo e chassi") { showVehicle = true }
+                rowButton(icon: "slider.horizontal.3", title: "Carga, modelo e chassi", subtitle: "Limite de carga e dados do veículo") { showVehicle = true }
                 Divider().overlay(DS.border)
                 rowButton(icon: "mappin.and.ellipse", title: "Locais conhecidos", subtitle: "Casa, trabalho, postos…") { showPlaces = true }
                 Divider().overlay(DS.border)
                 rowButton(icon: "wand.and.stars", title: "Automações", subtitle: "Ações no carro por local ou horário") { showAutomations = true }
-                Divider().overlay(DS.border)
-                Toggle(isOn: $lanEnabled) {
-                    VStack(alignment: .leading, spacing: 1) {
-                        Label("LAN direta", systemImage: "wifi").font(.system(size: 14)).foregroundStyle(DS.text)
-                        Text("Conecta direto ao carro na mesma Wi-Fi. Reabra o app ao alterar.").font(.caption2).foregroundStyle(DS.muted)
-                    }
-                }.tint(DS.green)
                 Divider().overlay(DS.border)
                 rowButton(icon: "qrcode", title: "Parear carro", subtitle: "Gera um código pro app do carro") { showPair = true }
             }
@@ -114,7 +127,7 @@ struct NativeConfigView: View {
 
     // MARK: Notificações (catálogo completo em sheet)
     private var notificacoesCard: some View {
-        DSCard {
+        DSCard(title: "Alertas e notificações", icon: "bell.fill") {
             VStack(spacing: 4) {
                 rowButton(icon: "bell.badge.fill", title: "Central de notificações", subtitle: "Histórico de alertas recebidos") { showNotifCenter = true }
                 Divider().overlay(DS.border)
@@ -148,6 +161,13 @@ struct NativeConfigView: View {
         DSCard {
             DisclosureGroup {
                 VStack(spacing: 4) {
+                    Toggle(isOn: $lanEnabled) {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Label("LAN direta", systemImage: "wifi").font(.system(size: 14)).foregroundStyle(DS.text)
+                            Text("Conecta direto ao carro na mesma Wi-Fi. Reabra o app ao alterar.").font(.caption2).foregroundStyle(DS.muted)
+                        }
+                    }.tint(DS.green)
+                    Divider().overlay(DS.border)
                     // Reabre a tela de Setup (URL + token do bridge). Antes só dava
                     // pra acessar via 3-finger long press na WebView do PWA.
                     rowButton(icon: "server.rack", title: "Bridge (URL e token)",
@@ -186,15 +206,18 @@ struct NativeConfigView: View {
 
     // MARK: Sobre
     private var sobreCard: some View {
-        DSCard(title: "Sobre", icon: "info.circle.fill") {
-            VStack(spacing: 8) {
-                aboutRow("App", appVersion)
-                aboutRow("Carro", cfg.carVersion)
-                aboutRow("Bridge", cfg.gitCommit)
-                aboutRow("Node", cfg.nodeVersion)
-                aboutRow("Uptime", cfg.bridgeUptime)
-                aboutRow("Broker", cfg.mqttHost)
-            }
+        DSCard {
+            DisclosureGroup {
+                VStack(spacing: 8) {
+                    aboutRow("App", appVersion)
+                    aboutRow("Carro", cfg.carVersion)
+                    aboutRow("Bridge", cfg.gitCommit)
+                    aboutRow("Node", cfg.nodeVersion)
+                    aboutRow("Uptime", cfg.bridgeUptime)
+                    aboutRow("Broker", cfg.mqttHost)
+                    aboutRow("IP do carro", car.carIP.isEmpty ? "—" : car.carIP)
+                }.padding(.top, 8)
+            } label: { Label("Sobre", systemImage: "info.circle.fill").font(.system(size: 15, weight: .semibold)).foregroundStyle(DS.text) }.tint(DS.muted)
         }
     }
     private var appVersion: String {

@@ -57,7 +57,22 @@ final class ParkingStore: ObservableObject {
     func setNote(_ n: String) {
         guard var s = spot else { return }
         s.note = String(n.prefix(80)); spot = s; persist()
+        syncNote(s.note)
     }
 
-    func clear() { spot = nil; def.removeObject(forKey: key) }
+    func clear() { spot = nil; def.removeObject(forKey: key); syncNote("") }
+
+    /// Re-envia a nota atual pro bridge (self-heal: bridge perde a nota se reiniciar).
+    func resyncNote() { if let s = spot, !s.note.isEmpty { syncNote(s.note) } }
+
+    // Empurra a nota pro bridge (debounce), que a inclui na LA "voltar ao carro".
+    private var noteTask: Task<Void, Never>?
+    private func syncNote(_ n: String) {
+        noteTask?.cancel()
+        noteTask = Task { [n] in
+            try? await Task.sleep(nanoseconds: 600_000_000)
+            if Task.isCancelled { return }
+            await CarStore.shared.command("/api/parking-note", body: ["note": n])
+        }
+    }
 }

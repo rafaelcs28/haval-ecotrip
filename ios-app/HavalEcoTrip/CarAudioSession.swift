@@ -16,6 +16,7 @@ final class CarAudioSession: ObservableObject {
     @Published var reconnecting = false
     @Published var inCall = false           // chamada full-duplex ativa
     @Published var callStatus = ""          // "Chamando…", "Em chamada", "Encerrada"
+    @Published var muted = false            // silencia só o playback local
 
     @Published private(set) var callMode = false
 
@@ -29,10 +30,7 @@ final class CarAudioSession: ObservableObject {
     private var tapInstalled = false
     private var micGranted = false
 
-    private var base: String {
-        let u = Settings.bridgeURL.isEmpty ? AuthConfig.bridgeURL : Settings.bridgeURL
-        return u.hasSuffix("/") ? String(u.dropLast()) : u
-    }
+    private var base: String { BridgeRouter.shared.currentURL }
 
     func start() async {
         guard state == .idle else { return }
@@ -70,12 +68,18 @@ final class CarAudioSession: ObservableObject {
     private func teardownAudio() {
         state = .idle   // antes do cancel: impede o scheduleReconnect de reabrir
         reconnecting = false; level = 0; callMode = false
+        muted = false; engine.mainMixerNode.outputVolume = 1
         ws?.cancel(with: .goingAway, reason: nil); ws = nil
         if tapInstalled { engine.inputNode.removeTap(onBus: 0); tapInstalled = false }
         player.stop(); engine.stop()
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         talking = false
         state = .idle
+    }
+
+    func setMuted(_ on: Bool) {
+        muted = on
+        engine.mainMixerNode.outputVolume = on ? 0 : 1
     }
 
     func setTalking(_ on: Bool) {

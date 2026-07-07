@@ -1,0 +1,149 @@
+<html><head><meta charset="utf8"><style>
+@keyframes ecoBreathe{0%,100%{opacity:1}50%{opacity:.35}}
+@keyframes ecoPulse{0%,100%{opacity:1}50%{opacity:.45}}
+@keyframes ecoSpin{to{transform:rotate(360deg)}}
+body{margin:0;background:#000;display:flex;justify-content:center;padding:16px}
+</style><style>
+    body { background: #0a0a0a; margin: 0; }
+    @keyframes ecoBreathe { 0%,100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.35); opacity: .55; } }
+    @keyframes ecoPulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+    @keyframes ecoSpin { to { transform: rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
+  </style></head><body><div id="7b" style="display: flex; flex-direction: column; gap: 14px;">
+      <div style="display: flex; align-items: baseline; gap: 10px;">
+        <span style="background: #22c55e; color: #000; font-size: 11px; font-weight: 700; letter-spacing: .06em; padding: 3px 8px; border-radius: 6px;">7b</span>
+        <span style="font-size: 15px; font-weight: 650;">Aparência</span>
+        <span style="font-size: 12px; color: #6b7280;">estilo do hero com prévia ao vivo</span>
+      </div>
+      <x-import component-from-global-scope="IOSDevice" from="./ios-frame.jsx" dark="{{ true }}" hint-size="402px,874px">
+        <div style="height: 100%; display: flex; flex-direction: column; background: #000; position: relative; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', system-ui, sans-serif; color: #f5f5f5; box-sizing: border-box; padding-top: 62px;">
+
+          <div style="display: flex; align-items: center; justify-content: space-between; padding: 0 18px;">
+            <div style="display: flex; align-items: center; gap: 4px; width: 90px;">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"></path></svg>
+              <span style="font-size: 13px; font-weight: 500; color: #22c55e;">Config</span>
+            </div>
+            <span style="font-size: 16px; font-weight: 700; letter-spacing: -.02em;">Aparência</span>
+            <span style="width: 90px;"></span>
+          </div>
+
+          <span style="font-size: 9.5px; font-weight: 700; letter-spacing: .12em; color: #6b7280; padding: 14px 22px 7px;">ESTILO DO HERO DO PAINEL</span>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 0 18px;">
+            <div style="border-radius: 16px; border: 1.5px solid rgba(34,197,94,.55); background: #0d0d0f; padding: 10px; display: flex; flex-direction: column; gap: 8px;">
+              <div style="border-radius: 10px; background: #000; border: 1px solid rgba(255,255,255,.06); padding: 10px 10px 8px; display: flex; flex-direction: column; gap: 6px;">
+                <div style="display: flex; align-items: flex-end; justify-content: space-between;">
+                  <span style="font-size: 30px; font-weight: 200; letter-spacing: -1.5px; line-height: .9; font-variant-numeric: tabular-nums;">74<span style="font-size: 11px; color: #6b7280; font-weight: 400;">%</span></span>
+                  <span style="font-size: 8px; color: #22c55e; font-variant-numeric: tabular-nums;">122 km</span>
+                </div>
+                <div style="position: relative; height: 5px; border-radius: 999px; background: #16161a;">
+                  <div style="position: absolute; inset: 0 auto 0 0; width: 74%; border-radius: 999px; background: linear-gradient(90deg, #16a34a, #22c55e);"></div>
+                  <div style="position: absolute; top: -1.5px; bottom: -1.5px; left: 80%; width: 1.5px; background: #facc15;"></div>
+                </div>
+                <div style="display: flex; gap: 3px;">
+                  <span style="width: 22px; height: 8px; border-radius: 999px; background: #16161a;"></span>
+                  <span style="width: 22px; height: 8px; border-radius: 999px; background: #16161a;"></span>
+                  <span style="width: 22px; height: 8px; border-radius: 999px; background: rgba(34,197,94,.25);"></span>
+                </div>
+              </div>
+              <div style="display: flex; align-items: center; justify-content: space-between;">
+                <span style="font-size: 11.5px; font-weight: 600;">Energia</span>
+                <span style="width: 16px; height: 16px; border-radius: 999px; background: #22c55e; display: inline-flex; align-items: center; justify-content: center;"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg></span>
+              </div>
+            </div>
+            <div style="border-radius: 16px; border: 1px solid rgba(255,255,255,.1); background: #0d0d0f; padding: 10px; display: flex; flex-direction: column; gap: 8px;">
+              <div style="border-radius: 10px; background: #000; border: 1px solid rgba(255,255,255,.06); padding: 10px; display: flex; align-items: center; gap: 8px;">
+                <img src="assets/haval-h6.png" alt="" style="width: 34px;">
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 3px; flex: 1;">
+                  <span style="height: 13px; border-radius: 4px; background: #16161a;"></span>
+                  <span style="height: 13px; border-radius: 4px; background: #16161a;"></span>
+                  <span style="height: 13px; border-radius: 4px; background: #16161a;"></span>
+                  <span style="height: 13px; border-radius: 4px; background: #16161a;"></span>
+                </div>
+              </div>
+              <div style="display: flex; align-items: center; justify-content: space-between;">
+                <span style="font-size: 11.5px; font-weight: 500; color: #94a3b8;">Carro + status</span>
+                <span style="width: 16px; height: 16px; border-radius: 999px; border: 1.5px solid rgba(255,255,255,.2);"></span>
+              </div>
+            </div>
+          </div>
+
+          <span style="font-size: 9.5px; font-weight: 700; letter-spacing: .12em; color: #6b7280; padding: 14px 22px 7px;">PRÉVIA</span>
+          <div style="margin: 0 18px; border-radius: 16px; background: #0d0d0f; border: 1px solid rgba(255,255,255,.08); padding: 14px 16px; display: flex; flex-direction: column; gap: 9px;">
+            <div style="display: flex; align-items: center; justify-content: space-between;">
+              <span style="font-size: 11px; color: #94a3b8;">R. T-63 · Setor Bueno</span>
+              <div style="display: flex; align-items: center; gap: 4px;">
+                <span style="width: 5px; height: 5px; border-radius: 999px; background: #22c55e; animation: ecoBreathe 2.2s ease-in-out infinite;"></span>
+                <span style="font-size: 8.5px; font-weight: 700; letter-spacing: .1em; color: #22c55e;">AO VIVO</span>
+              </div>
+            </div>
+            <div style="display: flex; align-items: flex-end; justify-content: space-between;">
+              <span style="font-size: 56px; font-weight: 200; line-height: .9; letter-spacing: -2.5px; font-variant-numeric: tabular-nums;">74<span style="font-size: 16px; color: #6b7280; font-weight: 400;">%</span></span>
+              <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 2px; padding-bottom: 4px;">
+                <span style="font-size: 11.5px; font-weight: 600; color: #22c55e; font-variant-numeric: tabular-nums;">122 km elétricos</span>
+                <span style="font-size: 10px; color: #6b7280; font-variant-numeric: tabular-nums;">486 km total</span>
+              </div>
+            </div>
+            <div style="position: relative; height: 8px; border-radius: 999px; background: #16161a;">
+              <div style="position: absolute; inset: 0 auto 0 0; width: 74%; border-radius: 999px; background: linear-gradient(90deg, #16a34a, #22c55e);"></div>
+              <div style="position: absolute; top: -2.5px; bottom: -2.5px; left: 80%; width: 2px; border-radius: 2px; background: #facc15;"></div>
+            </div>
+            <div style="display: flex; gap: 5px;">
+              <span style="font-size: 10px; font-weight: 600; color: #94a3b8; background: #16161a; border: 1px solid rgba(255,255,255,.08); border-radius: 999px; padding: 3px 9px;">P</span>
+              <span style="font-size: 10px; font-weight: 600; color: #94a3b8; background: #16161a; border: 1px solid rgba(255,255,255,.08); border-radius: 999px; padding: 3px 9px;">Desligado</span>
+              <span style="font-size: 10px; font-weight: 600; color: #22c55e; background: rgba(34,197,94,.12); border: 1px solid rgba(34,197,94,.3); border-radius: 999px; padding: 3px 9px;">Travado</span>
+            </div>
+          </div>
+
+          <span style="font-size: 9.5px; font-weight: 700; letter-spacing: .12em; color: #6b7280; padding: 14px 22px 7px;">EFEITOS</span>
+          <div style="margin: 0 18px; background: #0d0d0f; border: 1px solid rgba(255,255,255,.08); border-radius: 15px; display: flex; flex-direction: column;">
+            <div style="display: flex; align-items: center; gap: 11px; padding: 9px 14px;">
+              <div style="width: 26px; height: 26px; border-radius: 7px; background: rgba(148,163,184,.15); display: flex; align-items: center; justify-content: center;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2" stroke-linejoin="round"><rect x="4" y="4" width="12" height="12" rx="3"></rect><rect x="8" y="8" width="12" height="12" rx="3"></rect></svg></div>
+              <div style="display: flex; flex-direction: column; gap: 1px; flex: 1;">
+                <span style="font-size: 12.5px; font-weight: 500;">Liquid Glass</span>
+                <span style="font-size: 10px; color: #6b7280;">iOS 26+ · fallback ultraThinMaterial</span>
+              </div>
+              <div style="width: 34px; height: 20px; border-radius: 999px; background: #22c55e; position: relative;"><div style="position: absolute; top: 2px; right: 2px; width: 16px; height: 16px; border-radius: 999px; background: #000;"></div></div>
+            </div>
+            <div style="height: 1px; background: rgba(255,255,255,.05); margin: 0 14px;"></div>
+            <div style="display: flex; align-items: center; gap: 11px; padding: 9px 14px;">
+              <div style="width: 26px; height: 26px; border-radius: 7px; background: rgba(34,211,238,.15); display: flex; align-items: center; justify-content: center;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#22d3ee" stroke-width="2" stroke-linecap="round"><path d="M5 12a7 7 0 0 1 14 0M12 12v7"></path></svg></div>
+              <div style="display: flex; flex-direction: column; gap: 1px; flex: 1;">
+                <span style="font-size: 12.5px; font-weight: 500;">Reduzir animações</span>
+                <span style="font-size: 10px; color: #6b7280;">desliga pulsos e loops</span>
+              </div>
+              <div style="width: 34px; height: 20px; border-radius: 999px; background: #2a2a2a; position: relative;"><div style="position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 999px; background: #6b7280;"></div></div>
+            </div>
+            <div style="height: 1px; background: rgba(255,255,255,.05); margin: 0 14px;"></div>
+            <div style="display: flex; align-items: center; gap: 11px; padding: 9px 14px;">
+              <div style="width: 26px; height: 26px; border-radius: 7px; background: rgba(148,163,184,.15); display: flex; align-items: center; justify-content: center;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13.5A8 8 0 1 1 10.5 4a6.5 6.5 0 0 0 9.5 9.5z"></path></svg></div>
+              <span style="font-size: 12.5px; font-weight: 500; flex: 1;">Tema</span>
+              <span style="font-size: 11.5px; color: #94a3b8;">Escuro · fixo</span>
+            </div>
+          </div>
+
+          <div style="margin-top: auto; position: relative; z-index: 15; background: rgba(10,10,10,.92); backdrop-filter: blur(16px); border-top: 1px solid rgba(255,255,255,.06); display: flex; padding: 8px 10px 26px;">
+            <div style="flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px;">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 17a8 8 0 1 1 15 0"></path><path d="M12 17l3.5-6"></path><circle cx="12" cy="17" r="1.4" fill="#6b7280" stroke="none"></circle></svg>
+              <span style="font-size: 9.5px; font-weight: 500; color: #6b7280;">Painel</span>
+            </div>
+            <div style="flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px;">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"></circle><circle cx="12" cy="12" r="2.6"></circle><path d="M3.5 12h6M14.5 12h6M12 14.6v5.9"></path></svg>
+              <span style="font-size: 9.5px; font-weight: 500; color: #6b7280;">Drive</span>
+            </div>
+            <div style="flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px;">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="#6b7280"><path d="M13 2L5 13.5h5.5L9.5 22l8-11.5H12L13 2z"></path></svg>
+              <span style="font-size: 9.5px; font-weight: 500; color: #6b7280;">Recargas</span>
+            </div>
+            <div style="flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px;">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4L4 6v14l5-2 6 2 5-2V4l-5 2-6-2z"></path><path d="M9 4v14M15 6v14"></path></svg>
+              <span style="font-size: 9.5px; font-weight: 500; color: #6b7280;">Viagens</span>
+            </div>
+            <div style="flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px;">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"></circle><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.2 5.2l2.1 2.1M16.7 16.7l2.1 2.1M18.8 5.2l-2.1 2.1M7.3 16.7l-2.1 2.1"></path></svg>
+              <span style="font-size: 9.5px; font-weight: 600; color: #22c55e;">Config</span>
+            </div>
+          </div>
+        </div>
+      </x-import>
+      <div style="font-size: 12px; line-height: 1.5; color: #94a3b8; max-width: 380px;">O drill-down de Aparência: seletor do estilo do hero como dois cartões-miniatura (Energia selecionado) com prévia ao vivo logo abaixo — muda na hora; Liquid Glass e Reduzir animações como toggles; tema escuro é fixo, declarado.</div>
+    </div></body></html>

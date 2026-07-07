@@ -49,7 +49,7 @@ enum CarActions {
         await fireNotif(title: lbl.sending, body: "Aguardando resposta do carro (até 50s)…", tag: "action-\(action)", silent: true)
 
         // 3. Dispara o comando no bridge
-        guard let url = URL(string: Settings.bridgeURL + "/api/action/" + action) else {
+        guard let url = URL(string: BridgeRouter.shared.currentURL + "/api/action/" + action) else {
             await fireNotif(title: lbl.fail, body: "URL inválida", tag: "action-\(action)", silent: false)
             return
         }
@@ -91,7 +91,7 @@ enum CarActions {
     // ── State fetch + change detection ───────────────────────────────────────
 
     private static func fetchState() async -> [String: Any]? {
-        guard let url = URL(string: Settings.bridgeURL + "/api/state") else { return nil }
+        guard let url = URL(string: BridgeRouter.shared.currentURL + "/api/state") else { return nil }
         var req = URLRequest(url: url)
         req.timeoutInterval = 6
         req.addValue("Bearer " + Settings.bridgeToken, forHTTPHeaderField: "Authorization")

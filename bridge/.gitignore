@@ -38,3 +38,17 @@ health_events.json
 soc_calib.json
 rec_cache/
 pm2-logs/
+
+# Dados pessoais / de runtime — NUNCA commitar (repo é PÚBLICO)
+phone_loc.json
+phone-history/
+haval_owner_device.json
+automation_state.json
+automation_events.json
+shared-trips.json
+songpro_trips.json
+ha-work-events.json
+ha-work-status.json
+ext-monitor-beat.json
+alert_diag.log
+autotrips_backup_dupfix/

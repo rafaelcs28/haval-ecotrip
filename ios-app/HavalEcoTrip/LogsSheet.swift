@@ -58,6 +58,30 @@ struct LogsSheet: View {
     private var all: [LogEvent] { events.items.map(LogEvent.init).sorted { $0.id > $1.id } }
     private let cats = ["Tudo", "Motor", "Viagens", "Recarga", "Trava", "Portas", "Vidros", "AC", "Manut."]
     private static let df: DateFormatter = { let f = DateFormatter(); f.locale = Locale(identifier: "pt_BR"); f.dateFormat = "d MMM HH:mm"; return f }()
+    // Terminal: só HH:mm:ss no começo de cada linha.
+    private static let tf: DateFormatter = { let f = DateFormatter(); f.locale = Locale(identifier: "pt_BR"); f.dateFormat = "HH:mm:ss"; return f }()
+    // Fundo mais escuro que DS.bg pro visual de terminal (#060607).
+    private static let terminalBg = Color(red: 0.024, green: 0.024, blue: 0.027)
+
+    // Estimativa de retenção: janela dos eventos carregados + tamanho bruto.
+    private var retentionLine: String {
+        guard let oldest = all.last?.ts, let newest = all.first?.ts else { return "sem eventos" }
+        let days = max(1, Int(newest.timeIntervalSince(oldest) / 86400) + 1)
+        let bytes = all.reduce(0) { $0 + $1.label.utf8.count + $1.type.utf8.count + 40 }
+        let mb = Double(bytes) / 1_048_576
+        let size = mb >= 0.1 ? "\(Fmt.dec1(mb)) MB" : "\(bytes / 1024) KB"
+        return "\(days) \(days == 1 ? "dia" : "dias") · \(all.count) eventos · \(size)"
+    }
+
+    // Texto exportável (timestamp topic payload por linha).
+    private func exportText() -> URL? {
+        let body = filtered.reversed().map { e in
+            "\(Self.tf.string(from: e.ts)) \(e.type) \(e.label)"
+        }.joined(separator: "\n")
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("haval-logs.txt")
+        try? body.data(using: .utf8)?.write(to: url)
+        return url
+    }
 
     private var filtered: [LogEvent] {
         let now = Date(); let cal = Calendar.current
@@ -91,24 +115,17 @@ struct LogsSheet: View {
                 Picker("", selection: $period) { Text("Tudo").tag(0); Text("Hoje").tag(1); Text("7d").tag(2); Text("30d").tag(3) }
                     .pickerStyle(.segmented).padding(.horizontal, 16)
 
-                ScrollView {
-                    LazyVStack(spacing: 8) {
-                        if filtered.isEmpty && !loading {
-                            Text("Nenhum evento.").font(.subheadline).foregroundStyle(DS.muted).padding(.top, 30)
-                        }
-                        ForEach(filtered) { e in
-                            HStack(spacing: 10) {
-                                Image(systemName: e.icon).font(.caption).foregroundStyle(e.color).frame(width: 20)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(e.label.isEmpty ? e.type : e.label).font(.system(size: 14)).foregroundStyle(DS.text)
-                                    Text(Self.df.string(from: e.ts)).font(.caption2).foregroundStyle(DS.muted)
-                                }
-                                Spacer()
-                            }
-                            .padding(10).background(DS.panel).clipShape(RoundedRectangle(cornerRadius: 10))
-                        }
-                    }.padding(.horizontal, 16)
+                terminal
+
+                HStack(spacing: 8) {
+                    Text(retentionLine).font(.system(size: 10.5)).foregroundStyle(DS.muted)
+                    Spacer()
+                    ShareLink(item: exportText() ?? FileManager.default.temporaryDirectory) {
+                        Label("Exportar .txt", systemImage: "square.and.arrow.up")
+                            .font(.system(size: 12, weight: .semibold)).foregroundStyle(DS.teal)
+                    }
                 }
+                .padding(.horizontal, 16).padding(.bottom, 4)
             }
             .searchable(text: $search, prompt: "Buscar")
             .background(DS.bg.ignoresSafeArea())
@@ -116,6 +133,38 @@ struct LogsSheet: View {
             .navigationTitle("Logs de eventos").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Concluído") { dismiss() } } }
         }
+        .presentationDetents([.large])
         .task { loading = events.items.isEmpty; await events.sync(); loading = false }
+    }
+
+    // Console mono: "timestamp topic payload", topic tingido por semântica.
+    private var terminal: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 3) {
+                if filtered.isEmpty && !loading {
+                    Text("nenhum evento").font(.system(size: 13, design: .monospaced))
+                        .foregroundStyle(DS.muted).padding(.top, 30)
+                }
+                ForEach(filtered) { e in
+                    HStack(alignment: .top, spacing: 8) {
+                        Text(Self.tf.string(from: e.ts))
+                            .font(.system(size: 11.5, design: .monospaced)).foregroundStyle(DS.muted)
+                        Text(e.type.isEmpty ? e.category.lowercased() : e.type)
+                            .font(.system(size: 11.5, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(e.color).lineLimit(1)
+                        Text(e.label).font(.system(size: 11.5, design: .monospaced))
+                            .foregroundStyle(DS.text2)
+                        Spacer(minLength: 0)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .background(Self.terminalBg)
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(DS.border, lineWidth: 1))
+        .padding(.horizontal, 16)
     }
 }

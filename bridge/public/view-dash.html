@@ -637,8 +637,8 @@
         <div class="target" id="hc-soc-bar-target"></div>
       </div>
     </div>
-    <div class="hero-card orange">
-      <div class="lbl">Combustível</div>
+    <div class="hero-card orange" id="hc-fuel-card" onclick="openFuelCalibModal()" style="cursor:pointer">
+      <div class="lbl">Combustível<span style="margin-left:auto;font-size:9px;color:#f97316;font-weight:700">⛽ corrigir ›</span></div>
       <div class="val-row" style="gap:10px">
         <div class="lvl-fuel">
           <div class="lvl-fuel-fill" id="hc-fuel-icon-fill"></div>
@@ -661,6 +661,24 @@
       <div class="sub" id="hc-other-prices" style="font-size:10px;margin-top:1px;font-variant-numeric:tabular-nums;color:#94a3b8">--</div>
     </div>
     <!-- Card "Condução" removido do Dash (a pedido). Detalhes de condução ficam na aba Drive. -->
+  </div>
+
+  <!-- Saúde do carro + Planejar saída — lado a lado, metade cada -->
+  <div class="hero-grid">
+    <div class="hero-card" id="hc-health-card" onclick="openHealthModal()" style="cursor:pointer;display:none">
+      <div class="lbl">❤️ Saúde</div>
+      <div class="val-row" style="gap:6px;align-items:baseline">
+        <span class="v" id="hc-health-v">--</span><span class="u">/100</span>
+      </div>
+      <div class="maint-bar" style="margin:6px 0 4px"><div class="maint-bar-fill" id="hc-health-bar"></div></div>
+      <div class="sub" id="hc-health-sub" style="display:flex;align-items:center;gap:6px">
+        <span id="hc-health-label" style="font-size:10px;font-weight:800;padding:2px 8px;border-radius:6px">--</span>
+      </div>
+    </div>
+    <div class="hero-card teal" id="hc-leaveby-card" onclick="openLeaveByModal()" style="cursor:pointer">
+      <div class="lbl">🕐 Planejar saída</div>
+      <div class="sub" style="margin-top:6px">Saio às X — chega no alvo?</div>
+    </div>
   </div>
 
   <!-- Status do veículo: 4 chips compactos.
@@ -1129,6 +1147,248 @@ async function _loadMaintData() {
     if (window.state) renderMaintCard(window.state);
   } catch (_) {}
 }
+// ── Saúde do carro (mirror HealthScoreSheet) ────────────────────────────────
+let _healthData = null;
+function _healthTint(score) {
+  return score >= 85 ? '#22c55e' : score >= 70 ? '#5eead4' : score >= 50 ? '#fbbf24' : '#f87171';
+}
+function _healthBg(score) {
+  return score >= 85 ? 'rgba(34,197,94,.15)' : score >= 70 ? 'rgba(94,234,212,.15)' : score >= 50 ? 'rgba(251,191,36,.15)' : 'rgba(248,113,113,.15)';
+}
+async function _loadHealthData() {
+  const tk = localStorage.getItem('bridge_token');
+  if (!tk) return;
+  try {
+    const r = await fetch('/api/health-score', { headers: { 'Authorization': 'Bearer ' + tk } });
+    if (!r.ok) return;
+    _healthData = await r.json();
+    renderHealthCard();
+  } catch (_) {}
+}
+function renderHealthCard() {
+  const card = document.getElementById('hc-health-card');
+  if (!card || !_healthData || !_healthData.ok || _healthData.total == null) return;
+  const total = _healthData.total;
+  const color = _healthTint(total);
+  card.style.display = '';
+  const v = document.getElementById('hc-health-v');
+  v.textContent = total; v.style.color = color;
+  const lbl = document.getElementById('hc-health-label');
+  lbl.textContent = _healthData.label || '';
+  lbl.style.color = color; lbl.style.background = _healthBg(total);
+  const bar = document.getElementById('hc-health-bar');
+  bar.style.width = total + '%'; bar.style.background = color;
+  const sub = document.getElementById('hc-health-sub');
+  const nIssues = (_healthData.issues || []).length;
+  sub.textContent = nIssues ? `${nIssues} ponto${nIssues > 1 ? 's' : ''} de atenção · toque pra ver` : 'Toque pra detalhes';
+}
+window.openHealthModal = function() {
+  const d = _healthData;
+  let modal = document.getElementById('health-dash-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'health-dash-modal';
+    modal.style.cssText = 'position:fixed;inset:0;z-index:90;background:rgba(0,0,0,.7);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);display:flex;align-items:flex-end;justify-content:center';
+    modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+    document.body.appendChild(modal);
+  }
+  if (!d || !d.ok) {
+    modal.innerHTML = `<div style="width:100%;max-width:480px;background:#1f1f1f;border-top-left-radius:18px;border-top-right-radius:18px;padding:28px 18px calc(env(safe-area-inset-bottom) + 18px);text-align:center;color:var(--muted)">Sem dados de saúde.<br><button onclick="document.getElementById('health-dash-modal').remove()" style="margin-top:16px;padding:10px 24px;background:var(--green);color:#000;border:none;border-radius:10px;font-weight:700;font-family:inherit">Fechar</button></div>`;
+    return;
+  }
+  const color = _healthTint(d.total);
+  const subsHtml = (d.subs || []).map(s => `
+    <div style="margin-bottom:12px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:5px">
+        <span style="font-size:14px;font-weight:600;color:var(--text)">${s.label}</span>
+        <span style="font-size:11px;color:var(--muted);margin-left:auto">${s.detail || ''}</span>
+        <span style="font-size:15px;font-weight:800;color:${_healthTint(s.score)};font-variant-numeric:tabular-nums">${s.score}</span>
+      </div>
+      <div style="height:6px;background:rgba(255,255,255,.08);border-radius:3px;overflow:hidden">
+        <div style="height:100%;width:${s.score}%;background:${_healthTint(s.score)};border-radius:3px"></div>
+      </div>
+    </div>`).join('');
+  const issuesHtml = (d.issues || []).length ? `
+    <div style="background:rgba(249,115,22,.08);border:1px solid rgba(249,115,22,.2);border-radius:10px;padding:12px 14px;margin-top:14px">
+      <div style="font-size:11px;font-weight:700;color:#f97316;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">⚠ Pontos de atenção</div>
+      ${d.issues.map(i => `<div style="display:flex;gap:8px;align-items:center;font-size:13px;color:var(--text);margin-bottom:4px"><span style="width:6px;height:6px;border-radius:50%;background:#f97316;flex-shrink:0"></span>${i}</div>`).join('')}
+    </div>` : '';
+  modal.innerHTML = `<div style="width:100%;max-width:480px;background:#1f1f1f;border-top-left-radius:18px;border-top-right-radius:18px;padding:18px 18px calc(env(safe-area-inset-bottom) + 18px);border-top:1px solid rgba(255,255,255,.08);max-height:82vh;overflow-y:auto">
+    <div style="width:42px;height:5px;background:rgba(255,255,255,.18);border-radius:3px;margin:-8px auto 14px"></div>
+    <div style="font-size:18px;font-weight:700;margin-bottom:14px">❤️ Saúde do carro</div>
+    <div style="text-align:center;margin-bottom:18px">
+      <div style="font-size:54px;font-weight:800;color:${color};line-height:1">${d.total}<span style="font-size:20px;color:var(--muted);font-weight:600">/100</span></div>
+      <span style="display:inline-block;margin-top:8px;font-size:13px;font-weight:800;padding:5px 16px;border-radius:10px;color:${color};background:${_healthBg(d.total)}">${d.label || ''}</span>
+    </div>
+    ${subsHtml}
+    ${issuesHtml}
+    <div style="font-size:10px;color:var(--muted);margin-top:14px;line-height:1.5">Pesos: manutenção 30% · bateria 12V 25% · pneus 25% · consumo de combustão 20%. Subscores sem dados ficam de fora do total.</div>
+    <button onclick="document.getElementById('health-dash-modal').remove()" style="width:100%;margin-top:16px;padding:12px;background:var(--green);color:#000;border:none;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit">Fechar</button>
+  </div>`;
+};
+
+// ── Planejar saída (mirror LeaveBySheet) ────────────────────────────────────
+window.openLeaveByModal = function() {
+  let modal = document.getElementById('leaveby-dash-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'leaveby-dash-modal';
+    modal.style.cssText = 'position:fixed;inset:0;z-index:90;background:rgba(0,0,0,.7);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);display:flex;align-items:flex-end;justify-content:center';
+    modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+    document.body.appendChild(modal);
+  }
+  modal.innerHTML = `<div style="width:100%;max-width:480px;background:#1f1f1f;border-top-left-radius:18px;border-top-right-radius:18px;padding:18px 18px calc(env(safe-area-inset-bottom) + 18px);border-top:1px solid rgba(255,255,255,.08);max-height:85vh;overflow-y:auto">
+    <div style="width:42px;height:5px;background:rgba(255,255,255,.18);border-radius:3px;margin:-8px auto 14px"></div>
+    <div style="font-size:18px;font-weight:700;margin-bottom:2px">🕐 Planejar saída</div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:12px">Saio às X — a bateria chega no alvo a tempo?</div>
+    <div id="lb-ctx" style="display:none;background:rgba(94,234,212,.06);border:1px solid rgba(94,234,212,.18);border-radius:12px;padding:10px 12px;margin-bottom:12px;font-size:12px;color:#cbd5e1;display:flex;gap:14px;flex-wrap:wrap"></div>
+    <div style="background:rgba(255,255,255,.04);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+        <span style="font-size:14px;color:var(--text)">Horário de saída</span>
+        <input type="time" id="lb-time" value="08:00" style="background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);color:#5eead4;font-size:18px;font-weight:700;padding:8px 12px;border-radius:8px;font-family:inherit">
+      </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+        <span style="font-size:14px;color:var(--text)">Cabine alvo</span>
+        <input type="number" id="lb-cabin" value="24" min="16" max="32" step="1" style="background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);color:#5eead4;font-size:18px;font-weight:700;padding:8px 12px;border-radius:8px;width:90px;font-family:inherit;text-align:right">
+      </div>
+    </div>
+    <button id="lb-go" onclick="runLeaveBy()" style="width:100%;margin-top:14px;padding:13px;background:#5eead4;color:#06302a;border:none;border-radius:10px;font-size:15px;font-weight:800;cursor:pointer;font-family:inherit">✨ Planejar</button>
+    <div id="lb-result"></div>
+    <button onclick="document.getElementById('leaveby-dash-modal').remove()" style="width:100%;margin-top:10px;padding:12px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.08);color:#cbd5e1;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit">Fechar</button>
+  </div>`;
+  // Busca contexto (temp cabine + clima local) e renderiza o chip do topo
+  (async () => {
+    try {
+      const tk = localStorage.getItem('bridge_token');
+      const r = await fetch('/api/preclimat/context', { headers: { 'Authorization': 'Bearer ' + tk } });
+      const j = await r.json();
+      const el = document.getElementById('lb-ctx');
+      if (!el || !j.ok) return;
+      const parts = [];
+      if (j.cabin && j.cabin.tempC != null) {
+        const age = j.cabin.ageMs != null ? Math.round(j.cabin.ageMs / 60000) : null;
+        const ageTxt = age != null ? (age < 1 ? 'agora' : `há ${age}min`) : 'sem ts';
+        const color = j.cabin.fresh ? '#5eead4' : '#f97316';
+        parts.push(`<span>🚗 Cabine <b style="color:${color}">${j.cabin.tempC}°C</b> <span style="color:var(--muted)">· ${ageTxt}</span></span>`);
+      }
+      if (j.weather && j.weather.tempC != null) {
+        parts.push(`<span>🌤️ Local <b style="color:#5eead4">${j.weather.tempC}°C</b> <span style="color:var(--muted)">· ${j.weather.condition}</span></span>`);
+      } else if (j.carSensor && j.carSensor.tempC != null) {
+        parts.push(`<span>🌡️ Externa <b style="color:#5eead4">${j.carSensor.tempC}°C</b> <span style="color:var(--muted)">· sensor</span></span>`);
+      }
+      if (parts.length) { el.innerHTML = parts.join(''); el.style.display = 'flex'; }
+    } catch (_) {}
+  })();
+};
+window.runLeaveBy = async function() {
+  const tk = localStorage.getItem('bridge_token');
+  const at = (document.getElementById('lb-time') || {}).value || '08:00';
+  const cabin = parseInt((document.getElementById('lb-cabin') || {}).value) || 24;
+  const out = document.getElementById('lb-result');
+  const btn = document.getElementById('lb-go');
+  if (btn) { btn.textContent = 'Planejando…'; btn.disabled = true; }
+  try {
+    const r = await fetch(`/api/leave-by?at=${encodeURIComponent(at)}&cabin=${cabin}`, { headers: { 'Authorization': 'Bearer ' + tk } });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Falha ao planejar');
+    const ok = d.willReachTarget;
+    const fmtH = (ms) => ms ? new Date(ms).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '--';
+    const accent = ok ? '#22c55e' : '#f97316';
+    let detail = '';
+    if (!ok && d.deficitPct > 0) {
+      detail = d.charging
+        ? `Faltam ${Math.round(d.deficitPct)}% (${(+d.needKwh).toFixed(1)} kWh). No ritmo atual (${(+d.powerKw).toFixed(1)} kW) não dá.`
+        : `Ligue a recarga: faltam ${Math.round(d.deficitPct)}% (${(+d.needKwh).toFixed(1)} kWh) até o alvo.`;
+    } else if (d.charging && d.etaMin > 0 && d.finishAtMs) {
+      detail = `Recarga completa ~${fmtH(d.finishAtMs)} (em ${Math.round(d.etaMin)} min).`;
+    }
+    const pc = d.preclimat || {};
+    let pcHtml = '';
+    if (pc.tooSoon) {
+      pcHtml = `<div style="font-size:12px;color:#f97316">A saída está perto demais — ligue o clima agora.</div>`;
+    } else if (pc.fireAtMs) {
+      pcHtml = `<div style="font-size:12px;color:var(--text)">❄️ Pré-clima liga às <b>${fmtH(pc.fireAtMs)}</b> (${pc.durationMin} min antes), ${Math.round(pc.temp)}°C — cabine pronta na saída.</div>`;
+    }
+    out.innerHTML = `<div style="margin-top:14px;background:rgba(255,255,255,.04);border:1px solid ${accent}55;border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:10px">
+      <div style="display:flex;align-items:center;gap:8px;font-size:15px;font-weight:700;color:${accent}">
+        <span>${ok ? '✓' : '⚠'}</span>${ok ? 'Chega no alvo a tempo' : (d.charging ? 'Não chega no alvo a tempo' : 'Não está carregando')}
+      </div>
+      <div style="display:flex;gap:10px;text-align:center">
+        <div style="flex:1"><div style="font-size:20px;font-weight:800;color:#60a5fa">${Math.round(d.soc)}%</div><div style="font-size:10px;color:var(--muted)">SOC agora</div></div>
+        <div style="flex:1"><div style="font-size:20px;font-weight:800;color:${accent}">${Math.round(d.projectedSoc)}%</div><div style="font-size:10px;color:var(--muted)">Na saída</div></div>
+        <div style="flex:1"><div style="font-size:20px;font-weight:800;color:var(--muted)">${Math.round(d.target)}%</div><div style="font-size:10px;color:var(--muted)">Alvo</div></div>
+      </div>
+      ${detail ? `<div style="font-size:12px;color:${accent}">${detail}</div>` : ''}
+      ${pcHtml}
+    </div>`;
+  } catch (e) {
+    out.innerHTML = `<div style="margin-top:14px;font-size:13px;color:#f97316">✗ ${e.message}</div>`;
+  } finally {
+    if (btn) { btn.textContent = '✨ Planejar'; btn.disabled = false; }
+  }
+};
+
+// ── Corrigir abastecimento (mirror FuelCalibSheet) ──────────────────────────
+window.openFuelCalibModal = function() {
+  let modal = document.getElementById('fuelcalib-dash-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'fuelcalib-dash-modal';
+    modal.style.cssText = 'position:fixed;inset:0;z-index:90;background:rgba(0,0,0,.7);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);display:flex;align-items:flex-end;justify-content:center';
+    modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+    document.body.appendChild(modal);
+  }
+  const curL = +(window.state?.fuel_l) || 0;
+  modal.innerHTML = `<div style="width:100%;max-width:480px;background:#1f1f1f;border-top-left-radius:18px;border-top-right-radius:18px;padding:18px 18px calc(env(safe-area-inset-bottom) + 18px);border-top:1px solid rgba(255,255,255,.08)">
+    <div style="width:42px;height:5px;background:rgba(255,255,255,.18);border-radius:3px;margin:-8px auto 14px"></div>
+    <div style="font-size:18px;font-weight:700;margin-bottom:2px">⛽ Corrigir abastecimento</div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:16px">Após abastecer, informe os litros da bomba pra calibrar o sensor.</div>
+    <div style="background:rgba(255,255,255,.04);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:12px">
+      <div style="display:flex;justify-content:space-between;font-size:13px"><span style="color:var(--muted)">Sensor antes do abastecimento</span><b id="fc-cur">${curL.toFixed(1)} L</b></div>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+        <span style="font-size:14px;color:var(--text)">Litros abastecidos (bomba)</span>
+        <input type="number" id="fc-added" inputmode="decimal" placeholder="Ex: 10" min="0" max="55" step="0.1" oninput="updateFuelCalibTotal()" style="background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);color:#f97316;font-size:18px;font-weight:700;padding:8px 12px;border-radius:8px;width:110px;font-family:inherit;text-align:right">
+      </div>
+      <div id="fc-total-row" style="display:none;justify-content:space-between;font-size:13px;border-top:1px solid rgba(255,255,255,.06);padding-top:12px"><span style="color:var(--muted)">Total corrigido</span><b id="fc-total" style="color:#f97316">--</b></div>
+    </div>
+    <div id="fc-err" style="font-size:12px;color:#f87171;margin-top:10px;display:none"></div>
+    <button id="fc-save" onclick="saveFuelCalib()" style="width:100%;margin-top:14px;padding:13px;background:#f97316;color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:800;cursor:pointer;font-family:inherit">Salvar</button>
+    <button onclick="document.getElementById('fuelcalib-dash-modal').remove()" style="width:100%;margin-top:10px;padding:12px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.08);color:#cbd5e1;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit">Cancelar</button>
+  </div>`;
+};
+window.updateFuelCalibTotal = function() {
+  const curL = +(window.state?.fuel_l) || 0;
+  const added = parseFloat((document.getElementById('fc-added') || {}).value);
+  const row = document.getElementById('fc-total-row');
+  if (added > 0) {
+    document.getElementById('fc-total').textContent = (curL + added).toFixed(1) + ' L';
+    row.style.display = 'flex';
+  } else { row.style.display = 'none'; }
+};
+window.saveFuelCalib = async function() {
+  const curL = +(window.state?.fuel_l) || 0;
+  const added = parseFloat((document.getElementById('fc-added') || {}).value);
+  const err = document.getElementById('fc-err');
+  const btn = document.getElementById('fc-save');
+  const show = (m) => { err.textContent = m; err.style.display = 'block'; };
+  err.style.display = 'none';
+  if (!(added > 0)) { show('Informe os litros abastecidos.'); return; }
+  const actual = curL + added;
+  if (actual > 55) { show('Total excede a capacidade do tanque (55 L).'); return; }
+  btn.textContent = 'Salvando…'; btn.disabled = true;
+  try {
+    const tk = localStorage.getItem('bridge_token');
+    const r = await fetch('/api/fuel-calibrate', { method: 'POST', headers: { 'Authorization': 'Bearer ' + tk, 'Content-Type': 'application/json' }, body: JSON.stringify({ actual_l: actual }) });
+    const d = await r.json();
+    if (!r.ok || d.error) throw new Error(d.error || 'Falha ao comunicar com o bridge');
+    window.showToast && window.showToast('✓ Sensor calibrado: ' + actual.toFixed(1) + ' L', 'ok');
+    document.getElementById('fuelcalib-dash-modal').remove();
+  } catch (e) {
+    show('✗ ' + e.message);
+    btn.textContent = 'Salvar'; btn.disabled = false;
+  }
+};
+
 function renderMaintCard(s) {
   const fill = document.getElementById('hc-maint-bar-fill');
   const sub = document.getElementById('hc-maint-sub');
@@ -1510,6 +1770,28 @@ function render(s, kpData) {
       // race quando map é criado num container ainda sem layout estável)
       setTimeout(() => { try { map.invalidateSize(); } catch (_) {} }, 100);
       setTimeout(() => { try { map.invalidateSize(); } catch (_) {} }, 500);
+      // Sheet pode mudar de altura quando cards aparecem/somem (saúde, leave-by,
+      // etc): observa e força recentro pra manter o pin no meio da área visível.
+      // Lê GPS do marker (state `s` da função externa fica stale no closure).
+      const _sheet = document.querySelector('.bottom-sheet');
+      window._recenterMap = () => {
+        if (!map || !marker) return;
+        try { map.invalidateSize({ animate: false, pan: false }); } catch (_) {}
+        const ll = marker.getLatLng();
+        const sheetH = (_sheet && !_sheet.classList.contains('collapsed')) ? _sheet.offsetHeight : 0;
+        map.setView(ll, map.getZoom() || 16, { animate: false });
+        if (sheetH > 0) map.panBy([0, sheetH / 2], { animate: false });
+        _lastCenteredPos = [ll.lat, ll.lng];
+      };
+      if (_sheet && window.ResizeObserver) {
+        let _ro_t = null;
+        const _ro = new ResizeObserver(() => {
+          if (_ro_t) clearTimeout(_ro_t);
+          _ro_t = setTimeout(() => window._recenterMap(), 150);
+        });
+        _ro.observe(_sheet);
+      }
+      window.addEventListener('resize', () => { setTimeout(() => window._recenterMap && window._recenterMap(), 100); });
     }
     const _heading = _updateCarHeading(s.car_heading);   // rumo calculado/persistido no servidor
     if (marker) marker.setLatLng(pos);
@@ -1524,9 +1806,9 @@ function render(s, kpData) {
       const sheet = document.querySelector('.bottom-sheet');
       const sheetH = sheet && !sheet.classList.contains('collapsed') ? sheet.offsetHeight : 0;
       map.setView(pos, map.getZoom() || 16, { animate: false });
-      // Carro ligado: sobe o pin pra centralizar na área visível acima do sheet.
-      // Carro desligado: centraliza no mapa de verdade — pin fica mais embaixo.
-      if (sheetH > 0 && engOn) map.panBy([0, sheetH / 2], { animate: false });
+      // Sempre centraliza o pin na área visível acima do sheet (independente de
+      // ligado/desligado).
+      if (sheetH > 0) map.panBy([0, sheetH / 2], { animate: false });
       _lastCenteredPos = pos;
       _lastCenteredEngOn = engOn;
     }
@@ -2041,6 +2323,8 @@ updateTabbarHeight();
 window.addEventListener('resize', updateTabbarHeight);
 // Carrega dados de manutenção em background (popula _maintData)
 if (typeof _loadMaintData === 'function') _loadMaintData();
+// Carrega índice de saúde em background (popula _healthData)
+if (typeof _loadHealthData === 'function') _loadHealthData();
 
 // Live se houver token; senão snapshot fake
 if (localStorage.getItem('bridge_token')) {

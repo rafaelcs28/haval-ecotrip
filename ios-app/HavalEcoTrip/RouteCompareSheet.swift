@@ -1,6 +1,7 @@
 //  RouteCompareSheet.swift
 //  Trajetos recorrentes: agrupa viagens pelo par origem→destino e mostra
 //  frequência, médias (km, tempo, consumo) e tendência (recente vs antigo).
+//  Estilo v2 (hero + panels DS).
 
 import SwiftUI
 import CoreLocation
@@ -57,49 +58,74 @@ struct RouteCompareSheet: View {
             .sorted { $0.n > $1.n }
     }
 
+    private var totalRepeats: Int { groups.reduce(0) { $0 + $1.n } }
+
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 14) {
                     if groups.isEmpty {
-                        DSCard { Text("Ainda não há trajetos repetidos suficientes (precisa de 2+ viagens no mesmo origem→destino).").font(.callout).foregroundStyle(DS.muted).frame(maxWidth: .infinity).padding(.vertical, 10) }
+                        emptyCard
                     } else {
+                        hero
                         ForEach(groups) { g in groupCard(g) }
                     }
                 }
-                .padding(16)
+                .padding(.horizontal, 18).padding(.top, 8).padding(.bottom, 16)
             }
             .background(DS.bg.ignoresSafeArea())
             .navigationTitle("Trajetos recorrentes")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Fechar") { dismiss() } } }
         }
+        .presentationDetents([.large])
+    }
+
+    private var hero: some View {
+        HStack(alignment: .firstTextBaseline) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(groups.count)")
+                    .font(.system(size: 62, weight: .ultraLight)).tracking(-2)
+                    .monospacedDigit().foregroundStyle(DS.teal)
+                    .lineLimit(1).minimumScaleFactor(0.6)
+                Text("trajetos repetidos").font(.system(size: 11.5)).foregroundStyle(DS.text2)
+            }
+            Spacer(minLength: 10)
+            VStack(alignment: .trailing, spacing: 3) {
+                Text("\(totalRepeats) viagens").font(.system(size: 12, weight: .bold)).monospacedDigit().foregroundStyle(DS.text)
+                Text("no total").font(.system(size: 11.5)).foregroundStyle(DS.text2)
+            }
+        }
+    }
+
+    private var emptyCard: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            sectionLabel("TRAJETOS RECORRENTES")
+            Text("Ainda não há trajetos repetidos suficientes (precisa de 2+ viagens no mesmo origem→destino).")
+                .font(.system(size: 12)).foregroundStyle(DS.muted)
+        }
+        .modifier(V2Panel())
     }
 
     @ViewBuilder private func groupCard(_ g: RouteGroup) -> some View {
-        DSCard {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Text(g.name).font(.subheadline.weight(.semibold)).foregroundStyle(DS.text).lineLimit(2)
-                    Spacer()
-                    Text("\(g.n)×").font(.subheadline.weight(.bold)).foregroundStyle(DS.teal)
-                }
-                HStack(spacing: 14) {
-                    miniMetric(Fmt.km(g.avgKm), "km méd.", DS.blue)
-                    miniMetric("\(Int(g.avgMin.rounded())) min", "tempo méd.", DS.text)
-                    miniMetric("\(Fmt.dec1(g.avgCons))", "kWh/100", DS.green)
-                    Spacer()
-                    if abs(g.trend) >= 0.5 {
-                        let better = g.trend < 0
-                        HStack(spacing: 3) {
-                            Image(systemName: better ? "arrow.down.right" : "arrow.up.right").font(.caption2)
-                            Text("\(Fmt.dec1(abs(g.trend)))").font(.caption.weight(.semibold))
-                        }.foregroundStyle(better ? DS.green : DS.orange)
-                    }
-                }
-                costRow(g)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(g.name).font(.system(size: 13.5, weight: .semibold)).foregroundStyle(DS.text).lineLimit(2)
+                Spacer(minLength: 8)
+                Text("\(g.n)×").font(.system(size: 15, weight: .bold)).monospacedDigit().foregroundStyle(DS.teal)
             }
+            HStack(spacing: 12) {
+                metric(Fmt.km(g.avgKm), "km méd.", DS.blue)
+                metric("\(Int(g.avgMin.rounded())) min", "tempo méd.", DS.text)
+                metric(Fmt.dec1(g.avgCons), "kWh/100", DS.green)
+                if abs(g.trend) >= 0.5 {
+                    let better = g.trend < 0
+                    trendCell(better: better, value: Fmt.dec1(abs(g.trend)))
+                }
+            }
+            costRow(g)
         }
+        .modifier(V2Panel())
     }
 
     // Custo médio real (kWh + combustível) vs se o mesmo trajeto rodasse 100%
@@ -108,25 +134,36 @@ struct RouteCompareSheet: View {
         let real = g.trips.reduce(0.0) { $0 + $1.netKwh * priceKwh + $1.fuelL * gasL } / Double(g.n)
         let gas  = g.trips.reduce(0.0) { $0 + ($1.distKm / baselineKmL) * gasL } / Double(g.n)
         let savedPct = gas > 0.01 ? Int(((gas - real) / gas * 100).rounded()) : 0
-        Divider().overlay(DS.muted.opacity(0.25))
-        HStack(spacing: 14) {
-            miniMetric(Fmt.brl(real), "custo méd.", DS.text)
-            miniMetric(Fmt.brl(gas), "se gasolina", DS.orange)
-            Spacer()
+        Rectangle().fill(DS.divider).frame(height: 1)
+        HStack(spacing: 12) {
+            metric(Fmt.brl(real), "custo méd.", DS.text)
+            metric(Fmt.brl(gas), "se gasolina", DS.orange)
             if savedPct != 0 {
                 let saving = savedPct > 0
-                HStack(spacing: 3) {
-                    Image(systemName: saving ? "leaf.fill" : "exclamationmark.triangle.fill").font(.caption2)
-                    Text("\(saving ? "−" : "+")\(abs(savedPct))%").font(.caption.weight(.bold))
-                }.foregroundStyle(saving ? DS.green : DS.orange)
+                VStack(alignment: .leading, spacing: 3) {
+                    Image(systemName: saving ? "leaf.fill" : "exclamationmark.triangle.fill")
+                        .foregroundStyle(saving ? DS.green : DS.orange).font(.system(size: 13))
+                    Text("\(saving ? "−" : "+")\(abs(savedPct))%")
+                        .font(.system(size: 18, weight: .bold)).monospacedDigit()
+                        .foregroundStyle(saving ? DS.green : DS.orange)
+                }.frame(maxWidth: .infinity, alignment: .leading)
             }
         }
     }
 
-    private func miniMetric(_ v: String, _ label: String, _ color: Color) -> some View {
-        VStack(alignment: .leading, spacing: 1) {
-            Text(v).font(.system(size: 16, weight: .bold, design: .rounded)).foregroundStyle(color)
-            Text(label).font(.system(size: 9)).foregroundStyle(DS.muted)
-        }
+    private func metric(_ v: String, _ label: String, _ color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(v).font(.system(size: 18, weight: .bold)).monospacedDigit().foregroundStyle(color)
+            Text(label).font(.system(size: 10)).foregroundStyle(DS.muted)
+        }.frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func trendCell(better: Bool, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Image(systemName: better ? "arrow.down.right" : "arrow.up.right")
+                .foregroundStyle(better ? DS.green : DS.orange).font(.system(size: 13))
+            Text(value).font(.system(size: 18, weight: .bold)).monospacedDigit()
+                .foregroundStyle(better ? DS.green : DS.orange)
+        }.frame(maxWidth: .infinity, alignment: .leading)
     }
 }

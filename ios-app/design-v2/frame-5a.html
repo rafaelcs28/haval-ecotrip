@@ -1,0 +1,177 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+@keyframes ecoBreathe{0%,100%{opacity:1}50%{opacity:.45}}
+@keyframes ecoPulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.5;transform:scale(.85)}}
+@keyframes ecoSpin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion: reduce){*{animation:none!important}}
+</style></head><body style='margin:0;background:#050505;padding:20px;display:flex;justify-content:center'><div id="5a" style="display: flex; flex-direction: column; gap: 14px;">
+      <div style="display: flex; align-items: baseline; gap: 10px;">
+        <span style="background: #22c55e; color: #000; font-size: 11px; font-weight: 700; letter-spacing: .06em; padding: 3px 8px; border-radius: 6px;">5a</span>
+        <span style="font-size: 15px; font-weight: 650;">Tab Viagens</span>
+        <span style="font-size: 12px; color: #6b7280;">resumo hero · card expandido</span>
+      </div>
+      <x-import component-from-global-scope="IOSDevice" from="./ios-frame.jsx" dark="{{ true }}" hint-size="402px,874px">
+        <div style="height: 100%; display: flex; flex-direction: column; background: #000; position: relative; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', system-ui, sans-serif; color: #f5f5f5; box-sizing: border-box; padding-top: 62px;">
+
+          <div style="display: flex; align-items: center; justify-content: space-between; padding: 0 18px;">
+            <span style="font-size: 21px; font-weight: 700; letter-spacing: -.02em;">Viagens</span>
+            <div style="display: flex; gap: 8px;">
+              <div style="width: 32px; height: 32px; border-radius: 999px; background: #16161a; border: 1px solid rgba(255,255,255,.08); display: flex; align-items: center; justify-content: center;">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"></circle><path d="M16 16l4.5 4.5"></path></svg>
+              </div>
+              <div style="width: 32px; height: 32px; border-radius: 999px; background: #16161a; border: 1px solid rgba(255,255,255,.08); display: flex; align-items: center; justify-content: center;">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2" stroke-linecap="round"><path d="M4 19V11M10 19V5M16 19v-6M21 19H3"></path></svg>
+              </div>
+            </div>
+          </div>
+
+          <div style="padding: 8px 18px 0; display: flex; align-items: flex-end; justify-content: space-between;">
+            <div style="display: flex; align-items: flex-start; gap: 3px;">
+              <span style="font-size: 62px; font-weight: 200; line-height: .9; letter-spacing: -3px; font-variant-numeric: tabular-nums;">412</span>
+              <span style="font-size: 15px; color: #6b7280; margin-top: 8px;">km</span>
+            </div>
+            <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 3px; padding-bottom: 5px;">
+              <span style="font-size: 13px; font-weight: 600; color: #22c55e; font-variant-numeric: tabular-nums;">28 viagens · 82% em EV</span>
+              <span style="font-size: 11.5px; color: #6b7280; font-variant-numeric: tabular-nums;">61,3 kWh · R$ 74,20</span>
+            </div>
+          </div>
+
+          <div style="display: flex; gap: 6px; padding: 12px 18px 0;">
+            <span style="font-size: 11px; font-weight: 600; color: #94a3b8; background: #16161a; border: 1px solid rgba(255,255,255,.08); border-radius: 999px; padding: 4px 12px;">Semana</span>
+            <span style="font-size: 11px; font-weight: 600; color: #22c55e; background: rgba(34,197,94,.12); border: 1px solid rgba(34,197,94,.3); border-radius: 999px; padding: 4px 12px;">Junho</span>
+            <span style="font-size: 11px; font-weight: 600; color: #94a3b8; background: #16161a; border: 1px solid rgba(255,255,255,.08); border-radius: 999px; padding: 4px 12px;">Personalizado</span>
+          </div>
+
+          <div style="margin: 12px 18px 0; background: #0d0d0f; border: 1px solid rgba(34,197,94,.28); border-radius: 16px; padding: 12px 14px; display: flex; flex-direction: column; gap: 10px;">
+            <div style="display: flex; align-items: center; justify-content: space-between;">
+              <div style="display: flex; flex-direction: column; gap: 2px;">
+                <span style="font-size: 13.5px; font-weight: 600;">Casa → Escritório</span>
+                <span style="font-size: 10.5px; color: #6b7280;">hoje · 17:42 – 18:00 · 31° externa</span>
+              </div>
+              <span style="font-size: 11px; font-weight: 700; color: #22c55e; background: rgba(34,197,94,.12); border: 1px solid rgba(34,197,94,.3); border-radius: 999px; padding: 4px 10px; font-variant-numeric: tabular-nums;">92</span>
+            </div>
+            <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px;">
+              <div style="background: #16161a; border-radius: 11px; padding: 7px 4px 6px; display: flex; flex-direction: column; align-items: center; gap: 1px;">
+                <span style="font-size: 8.5px; letter-spacing: .08em; color: #6b7280;">DISTÂNCIA</span>
+                <span style="font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums;">12,4 <span style="font-size: 9px; color: #6b7280; font-weight: 400;">km</span></span>
+              </div>
+              <div style="background: #16161a; border-radius: 11px; padding: 7px 4px 6px; display: flex; flex-direction: column; align-items: center; gap: 1px;">
+                <span style="font-size: 8.5px; letter-spacing: .08em; color: #6b7280;">CONSUMO</span>
+                <span style="font-size: 14px; font-weight: 600; color: #22d3ee; font-variant-numeric: tabular-nums;">13,9</span>
+              </div>
+              <div style="background: #16161a; border-radius: 11px; padding: 7px 4px 6px; display: flex; flex-direction: column; align-items: center; gap: 1px;">
+                <span style="font-size: 8.5px; letter-spacing: .08em; color: #6b7280;">VEL. MÁX</span>
+                <span style="font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums;">84</span>
+              </div>
+              <div style="background: #16161a; border-radius: 11px; padding: 7px 4px 6px; display: flex; flex-direction: column; align-items: center; gap: 1px;">
+                <span style="font-size: 8.5px; letter-spacing: .08em; color: #6b7280;">CUSTO</span>
+                <span style="font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums;">R$ 1,58</span>
+              </div>
+            </div>
+            <div style="border-radius: 12px; overflow: hidden; position: relative; height: 76px; border: 1px solid rgba(255,255,255,.06);">
+              <svg viewBox="0 0 340 76" preserveAspectRatio="xMidYMid slice" style="position: absolute; inset: 0; width: 100%; height: 100%;">
+                <rect width="340" height="76" fill="#0e0f12"></rect>
+                <path d="M-10 40 H350" stroke="#1c1e23" stroke-width="6"></path>
+                <path d="M120 -10 V86" stroke="#16181c" stroke-width="4"></path>
+                <path d="M230 -10 V86" stroke="#1c1e23" stroke-width="5"></path>
+                <path d="M20 62 L120 62 L120 40 L230 40 L230 18 L320 18" stroke="#22c55e" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" opacity=".18" fill="none"></path>
+                <path d="M20 62 L120 62 L120 40 L230 40" stroke="#22c55e" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" fill="none"></path>
+                <path d="M230 40 L230 18 L320 18" stroke="#fb923c" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" fill="none"></path>
+                <circle cx="20" cy="62" r="4" fill="#f5f5f5"></circle>
+                <circle cx="320" cy="18" r="4" fill="#22c55e"></circle>
+              </svg>
+            </div>
+            <div style="display: flex; align-items: center; justify-content: space-between;">
+              <span style="font-size: 12px; font-weight: 700; color: #22c55e;">Ver trajeto →</span>
+              <div style="display: flex; gap: 12px;">
+                <span style="font-size: 11px; font-weight: 600; color: #94a3b8;">Compartilhar</span>
+                <span style="font-size: 11px; font-weight: 600; color: #94a3b8;">GPX</span>
+              </div>
+            </div>
+          </div>
+
+          <div style="margin: 8px 18px 0; background: #0d0d0f; border: 1px solid rgba(255,255,255,.08); border-radius: 15px; padding: 10px 14px; display: flex; align-items: center; justify-content: space-between;">
+            <div style="display: flex; flex-direction: column; gap: 2px;">
+              <span style="font-size: 12.5px; font-weight: 600;">Escritório → Casa</span>
+              <span style="font-size: 10.5px; color: #6b7280; font-variant-numeric: tabular-nums;">ontem 18:31 · 12,6 km · 19 min · 14,4 kWh/100</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="font-size: 10.5px; font-weight: 700; color: #22c55e; font-variant-numeric: tabular-nums;">90</span>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"></path></svg>
+            </div>
+          </div>
+
+          <div style="margin: 7px 18px 0; background: #0d0d0f; border: 1px solid rgba(255,255,255,.08); border-radius: 15px; padding: 10px 14px; display: flex; align-items: center; justify-content: space-between;">
+            <div style="display: flex; flex-direction: column; gap: 2px;">
+              <span style="font-size: 12.5px; font-weight: 600;">Casa → Flamboyant</span>
+              <span style="font-size: 10.5px; color: #6b7280; font-variant-numeric: tabular-nums;">ontem 12:04 · 6,1 km · 11 min · 12,1 kWh/100</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="font-size: 10.5px; font-weight: 700; color: #22c55e; font-variant-numeric: tabular-nums;">95</span>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"></path></svg>
+            </div>
+          </div>
+
+          <div style="margin: 7px 18px 0; background: #0d0d0f; border: 1px solid rgba(255,255,255,.08); border-radius: 15px; padding: 10px 14px; display: flex; align-items: center; justify-content: space-between;">
+            <div style="display: flex; flex-direction: column; gap: 2px;">
+              <span style="font-size: 12.5px; font-weight: 600;">Aeroporto → Casa</span>
+              <span style="font-size: 10.5px; color: #6b7280; font-variant-numeric: tabular-nums;">seg 22:47 · 14,8 km · 24 min · 15,0 kWh/100</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="font-size: 10.5px; font-weight: 700; color: #fbbf24; font-variant-numeric: tabular-nums;">78</span>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"></path></svg>
+            </div>
+          </div>
+
+          <div style="margin: 7px 18px 0; background: #0d0d0f; border: 1px solid rgba(255,255,255,.08); border-radius: 15px; padding: 10px 14px; display: flex; align-items: center; justify-content: space-between;">
+            <div style="display: flex; flex-direction: column; gap: 2px;">
+              <span style="font-size: 12.5px; font-weight: 600;">Casa → Aeroporto</span>
+              <span style="font-size: 10.5px; color: #6b7280; font-variant-numeric: tabular-nums;">seg 20:15 · 14,2 km · 21 min · 14,8 kWh/100</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="font-size: 10.5px; font-weight: 700; color: #22c55e; font-variant-numeric: tabular-nums;">85</span>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"></path></svg>
+            </div>
+          </div>
+
+          <div style="margin: 7px 18px 0; background: #0d0d0f; border: 1px solid rgba(255,255,255,.08); border-radius: 15px; padding: 10px 14px; display: flex; align-items: center; justify-content: space-between;">
+            <div style="display: flex; flex-direction: column; gap: 2px;">
+              <span style="font-size: 12.5px; font-weight: 600;">Escritório → Casa</span>
+              <span style="font-size: 10.5px; color: #6b7280; font-variant-numeric: tabular-nums;">sex 18:22 · 12,9 km · 22 min · 14,1 kWh/100</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="font-size: 10.5px; font-weight: 700; color: #22c55e; font-variant-numeric: tabular-nums;">96</span>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"></path></svg>
+            </div>
+          </div>
+
+          <div style="margin: 9px 18px 0; display: flex; align-items: center; justify-content: center; gap: 6px;">
+            <span style="font-size: 11.5px; font-weight: 600; color: #94a3b8;">Ver todas as 28 viagens</span>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"></path></svg>
+          </div>
+
+          <div style="margin-top: auto; position: relative; z-index: 15; background: rgba(10,10,10,.92); backdrop-filter: blur(16px); border-top: 1px solid rgba(255,255,255,.06); display: flex; padding: 8px 10px 26px;">
+            <div style="flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px;">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 17a8 8 0 1 1 15 0"></path><path d="M12 17l3.5-6"></path><circle cx="12" cy="17" r="1.4" fill="#6b7280" stroke="none"></circle></svg>
+              <span style="font-size: 9.5px; font-weight: 500; color: #6b7280;">Painel</span>
+            </div>
+            <div style="flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px;">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"></circle><circle cx="12" cy="12" r="2.6"></circle><path d="M3.5 12h6M14.5 12h6M12 14.6v5.9"></path></svg>
+              <span style="font-size: 9.5px; font-weight: 500; color: #6b7280;">Drive</span>
+            </div>
+            <div style="flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px;">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="#6b7280"><path d="M13 2L5 13.5h5.5L9.5 22l8-11.5H12L13 2z"></path></svg>
+              <span style="font-size: 9.5px; font-weight: 500; color: #6b7280;">Recargas</span>
+            </div>
+            <div style="flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px;">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4L4 6v14l5-2 6 2 5-2V4l-5 2-6-2z"></path><path d="M9 4v14M15 6v14"></path></svg>
+              <span style="font-size: 9.5px; font-weight: 600; color: #22c55e;">Viagens</span>
+            </div>
+            <div style="flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px;">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"></circle><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.2 5.2l2.1 2.1M16.7 16.7l2.1 2.1M18.8 5.2l-2.1 2.1M7.3 16.7l-2.1 2.1"></path></svg>
+              <span style="font-size: 9.5px; font-weight: 500; color: #6b7280;">Config</span>
+            </div>
+          </div>
+        </div>
+      </x-import>
+      <div style="font-size: 12px; line-height: 1.5; color: #94a3b8; max-width: 380px;">Resumo do período no padrão hero do 1a (412 km peso 200); o card de hoje expandido com métricas, prévia do trajeto (colorida por velocidade) e ações; os demais colapsam em 2 linhas com score. Busca e Insights na toolbar.</div>
+    </div></body></html>

@@ -77,7 +77,7 @@ final class RecordingsStore: NSObject, ObservableObject {
     private var ticker: Task<Void, Never>?
 
     private var base: String {
-        let u = Settings.bridgeURL.isEmpty ? AuthConfig.bridgeURL : Settings.bridgeURL
+        let u = BridgeRouter.shared.currentURL
         return u.hasSuffix("/") ? String(u.dropLast()) : u
     }
 

@@ -243,6 +243,16 @@
       <div class="info"><div class="label">Conta & Segurança</div><div class="sub">Senha · 2FA</div></div>
       <span class="chevron">›</span>
     </div>
+    <div class="settings-item teal" onclick="openSub('speedfence')">
+      <div class="icon-box">🚦</div>
+      <div class="info"><div class="label">Cerca de velocidade</div><div class="sub">Alerta acima do limite</div></div>
+      <span class="chevron">›</span>
+    </div>
+    <div class="settings-item red" onclick="openSub('parkguard')">
+      <div class="icon-box">🛡️</div>
+      <div class="info"><div class="label">Guarda-estacionamento</div><div class="sub" id="parkguard-sub">Antifurto: vigia quando o carro desliga</div></div>
+      <span class="chevron">›</span>
+    </div>
     <div class="settings-item muted" onclick="openSub('backup')">
       <div class="icon-box">💾</div>
       <div class="info"><div class="label">Backup & Dados</div><div class="sub">Exportar · restaurar · limpar cache e histórico</div></div>
@@ -333,6 +343,48 @@
         <div class="soc-chip" data-pct="100" onclick="setChargeLimit(100)">100%</div>
       </div>
       <div class="hint">Envia comando ao carro pra parar de carregar nesse nível · atual: <strong id="soc-cur">--</strong></div>
+    </div>
+  </div>
+</div>
+
+<div class="subview" id="sv-speedfence">
+  <div class="sub-head">
+    <button class="sub-back" onclick="closeSub()">←</button>
+    <div class="sub-title">🚦 Cerca de velocidade</div>
+  </div>
+  <div class="sub-body">
+    <div class="field">
+      <div class="toggle-row" onclick="onSpeedFenceToggle()" style="padding:0 0 4px">
+        <div class="label">Alertar acima do limite</div>
+        <div class="toggle" id="sf-toggle"></div>
+      </div>
+      <div id="sf-slider-wrap" style="display:none;margin-top:12px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+          <span style="font-size:13px;color:var(--muted)">Limite</span>
+          <span style="font-size:18px;font-weight:800;color:var(--teal)"><span id="sf-val">120</span> km/h</span>
+        </div>
+        <input type="range" id="sf-range" min="60" max="160" step="5" value="120" oninput="document.getElementById('sf-val').textContent=this.value" style="width:100%;accent-color:var(--teal)">
+      </div>
+      <div class="hint">Quando o carro passar do limite, você recebe um push. Bom pra acompanhar quando outra pessoa dirige.</div>
+      <button id="sf-save" onclick="saveSpeedFence()" style="width:100%;margin-top:14px;padding:13px;background:var(--green);color:#000;border:none;border-radius:10px;font-size:15px;font-weight:800;cursor:pointer;font-family:inherit">✓ Salvar</button>
+    </div>
+  </div>
+</div>
+
+<div class="subview" id="sv-parkguard">
+  <div class="sub-head">
+    <button class="sub-back" onclick="closeSub()">←</button>
+    <div class="sub-title">🛡️ Guarda-estacionamento</div>
+  </div>
+  <div class="sub-body">
+    <div class="field">
+      <div class="toggle-row" onclick="onParkGuardToggle()" style="padding:0 0 4px">
+        <div class="label">Vigiar quando desligado</div>
+        <div class="toggle" id="pg-toggle"></div>
+      </div>
+      <div class="hint">Ao desligar o carro, o app dele passa a vigiar. Se o veículo for movido ou rebocado, você recebe um push com link ao vivo da localização.</div>
+      <div id="pg-last" style="display:none;margin-top:12px;padding-top:12px;border-top:1px solid rgba(255,255,255,.06);font-size:13px"><span style="color:var(--muted)">Último alarme</span> <b style="color:#5eead4;margin-left:6px" id="pg-last-when"></b></div>
+      <button id="pg-save" onclick="saveParkGuard()" style="width:100%;margin-top:14px;padding:13px;background:var(--green);color:#000;border:none;border-radius:10px;font-size:15px;font-weight:800;cursor:pointer;font-family:inherit">✓ Salvar</button>
     </div>
   </div>
 </div>
@@ -996,6 +1048,106 @@
   if (name === 'security' && typeof _loadSecurity === 'function') _loadSecurity();
   if (name === 'about' && typeof _loadAbout === 'function') _loadAbout();
   if (name === 'diag' && typeof _loadDiag === 'function') _loadDiag();
+  if (name === 'speedfence' && typeof _loadSpeedFence === 'function') _loadSpeedFence();
+  if (name === 'parkguard' && typeof _loadParkGuard === 'function') _loadParkGuard();
+}
+
+// ─── Cerca de velocidade (mirror SpeedFenceSheet) ──────────────────────────
+let _sfKmh = 0;
+async function _loadSpeedFence() {
+  const tk = localStorage.getItem('bridge_token');
+  try {
+    const r = await fetch('/api/speed-fence', { headers: { 'Authorization': 'Bearer ' + tk } });
+    if (r.ok) { const j = await r.json(); _sfKmh = +j.kmh || 0; }
+  } catch (_) {}
+  _renderSpeedFence();
+}
+function _renderSpeedFence() {
+  const tog = document.getElementById('sf-toggle');
+  const wrap = document.getElementById('sf-slider-wrap');
+  const range = document.getElementById('sf-range');
+  const val = document.getElementById('sf-val');
+  if (!tog) return;
+  const on = _sfKmh > 0;
+  tog.classList.toggle('on', on);
+  wrap.style.display = on ? 'block' : 'none';
+  if (on) {
+    const clamped = Math.min(160, Math.max(60, _sfKmh));
+    range.value = clamped; val.textContent = clamped;
+  }
+}
+function onSpeedFenceToggle() {
+  const tog = document.getElementById('sf-toggle');
+  const turningOn = !tog.classList.contains('on');
+  _sfKmh = turningOn ? Math.max(_sfKmh, 100) : 0;
+  _renderSpeedFence();
+}
+async function saveSpeedFence() {
+  const tog = document.getElementById('sf-toggle');
+  const on = tog.classList.contains('on');
+  const kmh = on ? (parseInt(document.getElementById('sf-range').value) || 0) : 0;
+  const btn = document.getElementById('sf-save');
+  btn.textContent = 'Salvando…'; btn.disabled = true;
+  try {
+    const tk = localStorage.getItem('bridge_token');
+    const r = await fetch('/api/speed-fence', { method: 'POST', headers: { 'Authorization': 'Bearer ' + tk, 'Content-Type': 'application/json' }, body: JSON.stringify({ kmh }) });
+    const j = await r.json();
+    if (!r.ok || !j.ok) throw new Error(j.error || 'Falha ao salvar');
+    _sfKmh = +j.kmh || 0;
+    window.showToast && window.showToast(_sfKmh > 0 ? '✓ Cerca: ' + _sfKmh + ' km/h' : '✓ Cerca desligada', 'ok');
+  } catch (e) {
+    window.showToast && window.showToast('✗ ' + e.message, 'err');
+  } finally {
+    btn.textContent = '✓ Salvar'; btn.disabled = false;
+  }
+}
+
+// ─── Guarda-estacionamento (mirror ParkGuardSheet) ─────────────────────────
+let _pgState = { enabled: false, lastAlarmMs: 0 };
+async function _loadParkGuard() {
+  const tk = localStorage.getItem('bridge_token');
+  try {
+    const r = await fetch('/api/guard/state', { headers: { 'Authorization': 'Bearer ' + tk } });
+    if (r.ok) { const j = await r.json(); _pgState = { enabled: !!j.enabled, lastAlarmMs: +j.lastAlarmMs || 0 }; }
+  } catch (_) {}
+  _renderParkGuard();
+}
+function _renderParkGuard() {
+  const tog = document.getElementById('pg-toggle');
+  if (!tog) return;
+  tog.classList.toggle('on', _pgState.enabled);
+  const sub = document.getElementById('parkguard-sub');
+  if (sub) sub.textContent = _pgState.enabled ? 'Armado · vigia quando desliga' : 'Antifurto: vigia quando o carro desliga';
+  const last = document.getElementById('pg-last');
+  if (last && _pgState.lastAlarmMs > 0) {
+    last.style.display = 'block';
+    const w = document.getElementById('pg-last-when');
+    if (w) w.textContent = new Date(_pgState.lastAlarmMs).toLocaleString('pt-BR');
+  } else if (last) last.style.display = 'none';
+}
+function onParkGuardToggle() {
+  const tog = document.getElementById('pg-toggle');
+  _pgState.enabled = !tog.classList.contains('on');
+  _renderParkGuard();
+}
+async function saveParkGuard() {
+  const on = document.getElementById('pg-toggle').classList.contains('on');
+  const btn = document.getElementById('pg-save');
+  btn.textContent = 'Salvando…'; btn.disabled = true;
+  try {
+    const tk = localStorage.getItem('bridge_token');
+    const path = on ? '/api/guard/arm' : '/api/guard/disarm';
+    const r = await fetch(path, { method: 'POST', headers: { 'Authorization': 'Bearer ' + tk, 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: on }) });
+    const j = await r.json();
+    if (!r.ok || !j.ok) throw new Error(j.error || 'Falha ao salvar');
+    _pgState.enabled = !!j.enabled;
+    _renderParkGuard();
+    window.showToast && window.showToast(j.enabled ? '🛡️ Guarda armado' : '🛡️ Guarda desarmado', 'ok');
+  } catch (e) {
+    window.showToast && window.showToast('✗ ' + e.message, 'err');
+  } finally {
+    btn.textContent = '✓ Salvar'; btn.disabled = false;
+  }
 }
 
 // ─── Diagnóstico (debug): captura tempo real via WS ────────────────────
@@ -3612,7 +3764,7 @@ window.adminRemove = async function(email) {
 window.adminInit();
 
   // Expõe handlers de onclick no window
-  Object.assign(window, { openSub: typeof openSub !== 'undefined' ? openSub : undefined, closeSub: typeof closeSub !== 'undefined' ? closeSub : undefined, saveSection: typeof saveSection !== 'undefined' ? saveSection : undefined, toggle2fa: typeof toggle2fa !== 'undefined' ? toggle2fa : undefined, confirmClearHistory: typeof confirmClearHistory !== 'undefined' ? confirmClearHistory : undefined, confirmClearPwaCache: typeof confirmClearPwaCache !== 'undefined' ? confirmClearPwaCache : undefined, clearDriveHistory: typeof clearDriveHistory !== 'undefined' ? clearDriveHistory : undefined, confirmClearEventLogs: typeof confirmClearEventLogs !== 'undefined' ? confirmClearEventLogs : undefined, openMaintAdd: openMaintAdd, openMaintEdit: openMaintEdit, closeMaintModal: closeMaintModal, saveMaintItem: saveMaintItem, deleteMaintItem: deleteMaintItem, markMaintDone: markMaintDone, openMaintRecord: openMaintRecord, closeMaintRecord: closeMaintRecord, saveMaintRecord: saveMaintRecord, deleteMaintHistory: deleteMaintHistory, _onMaintRecTypeChange: window._onMaintRecTypeChange, saveVehicle: saveVehicle, saveMySetup: saveMySetup, genPairCode: genPairCode, setChargeLimit: setChargeLimit, actionReprocessPlaces: actionReprocessPlaces, actionRecomputeTripCosts: actionRecomputeTripCosts, actionRestartBridge: actionRestartBridge, actionUpdateBridge: actionUpdateBridge, openPlaceAdd: openPlaceAdd, openPlaceEdit: openPlaceEdit, closePlaceModal: closePlaceModal, usePlaceGps: usePlaceGps, savePlace: savePlace, deletePlace: deletePlace, toggleNotif: toggleNotif, toggleLa: toggleLa, relaunchLa: relaunchLa, _onNotifDeviceChange: _onNotifDeviceChange, renameNotifDevice: renameNotifDevice, removeNotifDevice: removeNotifDevice, renameMyDevice: renameMyDevice, forceSubscribePush: forceSubscribePush, reRegisterPush: reRegisterPush, openNotifDevicePicker: openNotifDevicePicker, closeNotifDevicePicker: closeNotifDevicePicker, _pickNotifDevice: _pickNotifDevice, renameNotifDeviceById: renameNotifDeviceById, removeNotifDeviceById: removeNotifDeviceById, changePassword: changePassword, toggle2faNew: toggle2faNew, closeTotpModal: closeTotpModal, activate2fa: activate2fa, show2faBackup: show2faBackup, regenBackupCodes: regenBackupCodes, openGeofencePlaces: openGeofencePlaces, _toggleGeofencePick: _toggleGeofencePick, saveGeofencePlaces: saveGeofencePlaces, toggleNg: toggleNg, saveWindowForgottenMin: saveWindowForgottenMin, saveLockForgottenMin: saveLockForgottenMin, saveTrunkForgottenMin: saveTrunkForgottenMin, saveSocLowIdlePct: saveSocLowIdlePct, saveSocArrivalPct: saveSocArrivalPct, saveSocArrivalMin: saveSocArrivalMin, saveTyreDropPsi: saveTyreDropPsi, openSocArrivalPlaces: openSocArrivalPlaces, toggleChargeEnding: toggleChargeEnding, editChargeEndingMin: editChargeEndingMin, downloadBackup: downloadBackup, uploadBackup: uploadBackup, copyBackupToClipboard: copyBackupToClipboard, shareBackup: shareBackup, clearLocalCache: clearLocalCache, toggleDiag: toggleDiag, saveDiagInterval: saveDiagInterval, exportDiag: exportDiag, clearDiag: clearDiag, openDiagSet: openDiagSet, confirmDiagSet: confirmDiagSet, _scheduleDiagRender: _scheduleDiagRender });
+  Object.assign(window, { openSub: typeof openSub !== 'undefined' ? openSub : undefined, closeSub: typeof closeSub !== 'undefined' ? closeSub : undefined, saveSection: typeof saveSection !== 'undefined' ? saveSection : undefined, toggle2fa: typeof toggle2fa !== 'undefined' ? toggle2fa : undefined, confirmClearHistory: typeof confirmClearHistory !== 'undefined' ? confirmClearHistory : undefined, confirmClearPwaCache: typeof confirmClearPwaCache !== 'undefined' ? confirmClearPwaCache : undefined, clearDriveHistory: typeof clearDriveHistory !== 'undefined' ? clearDriveHistory : undefined, confirmClearEventLogs: typeof confirmClearEventLogs !== 'undefined' ? confirmClearEventLogs : undefined, openMaintAdd: openMaintAdd, openMaintEdit: openMaintEdit, closeMaintModal: closeMaintModal, saveMaintItem: saveMaintItem, deleteMaintItem: deleteMaintItem, markMaintDone: markMaintDone, openMaintRecord: openMaintRecord, closeMaintRecord: closeMaintRecord, saveMaintRecord: saveMaintRecord, deleteMaintHistory: deleteMaintHistory, _onMaintRecTypeChange: window._onMaintRecTypeChange, saveVehicle: saveVehicle, saveMySetup: saveMySetup, genPairCode: genPairCode, setChargeLimit: setChargeLimit, actionReprocessPlaces: actionReprocessPlaces, actionRecomputeTripCosts: actionRecomputeTripCosts, actionRestartBridge: actionRestartBridge, actionUpdateBridge: actionUpdateBridge, openPlaceAdd: openPlaceAdd, openPlaceEdit: openPlaceEdit, closePlaceModal: closePlaceModal, usePlaceGps: usePlaceGps, savePlace: savePlace, deletePlace: deletePlace, toggleNotif: toggleNotif, toggleLa: toggleLa, relaunchLa: relaunchLa, _onNotifDeviceChange: _onNotifDeviceChange, renameNotifDevice: renameNotifDevice, removeNotifDevice: removeNotifDevice, renameMyDevice: renameMyDevice, forceSubscribePush: forceSubscribePush, reRegisterPush: reRegisterPush, openNotifDevicePicker: openNotifDevicePicker, closeNotifDevicePicker: closeNotifDevicePicker, _pickNotifDevice: _pickNotifDevice, renameNotifDeviceById: renameNotifDeviceById, removeNotifDeviceById: removeNotifDeviceById, changePassword: changePassword, toggle2faNew: toggle2faNew, closeTotpModal: closeTotpModal, activate2fa: activate2fa, show2faBackup: show2faBackup, regenBackupCodes: regenBackupCodes, openGeofencePlaces: openGeofencePlaces, _toggleGeofencePick: _toggleGeofencePick, saveGeofencePlaces: saveGeofencePlaces, toggleNg: toggleNg, saveWindowForgottenMin: saveWindowForgottenMin, saveLockForgottenMin: saveLockForgottenMin, saveTrunkForgottenMin: saveTrunkForgottenMin, saveSocLowIdlePct: saveSocLowIdlePct, saveSocArrivalPct: saveSocArrivalPct, saveSocArrivalMin: saveSocArrivalMin, saveTyreDropPsi: saveTyreDropPsi, openSocArrivalPlaces: openSocArrivalPlaces, toggleChargeEnding: toggleChargeEnding, editChargeEndingMin: editChargeEndingMin, downloadBackup: downloadBackup, uploadBackup: uploadBackup, copyBackupToClipboard: copyBackupToClipboard, shareBackup: shareBackup, clearLocalCache: clearLocalCache, toggleDiag: toggleDiag, saveDiagInterval: saveDiagInterval, exportDiag: exportDiag, clearDiag: clearDiag, openDiagSet: openDiagSet, confirmDiagSet: confirmDiagSet, _scheduleDiagRender: _scheduleDiagRender, onSpeedFenceToggle: typeof onSpeedFenceToggle !== 'undefined' ? onSpeedFenceToggle : undefined, saveSpeedFence: typeof saveSpeedFence !== 'undefined' ? saveSpeedFence : undefined, onParkGuardToggle: typeof onParkGuardToggle !== 'undefined' ? onParkGuardToggle : undefined, saveParkGuard: typeof saveParkGuard !== 'undefined' ? saveParkGuard : undefined });
   if (!window['initView_config']) window['initView_config'] = function() {};
 })();
 </script>

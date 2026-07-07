@@ -49,6 +49,11 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
                 ShortcutManager.shared.receive(shortcut)
             }
         }
+        // Relançamento em background por evento de localização (region/significant):
+        // o manager precisa subir já no launch pra receber o evento, não só na UI.
+        if launchOptions?[.location] != nil {
+            Task { @MainActor in PhoneLocationReporter.shared.start() }
+        }
         return true
     }
 

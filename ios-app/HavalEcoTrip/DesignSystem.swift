@@ -38,6 +38,15 @@ enum DS {
     static let muted  = Color(red: 0.42, green: 0.45, blue: 0.50)      // #6b7280
     static let border = Color.white.opacity(0.08)
 
+    // Tokens v2 (redesign "Energia como hero")
+    static let panel3  = Color(red: 0.165, green: 0.165, blue: 0.165)  // #2a2a2a
+    static let text2   = Color(red: 0.580, green: 0.639, blue: 0.722)  // #94a3b8
+    static let divider = Color.white.opacity(0.05)
+    static let greenDim = Color(red: 0.086, green: 0.639, blue: 0.290) // #16a34a
+    static var greenGrad: LinearGradient {
+        LinearGradient(colors: [greenDim, green], startPoint: .leading, endPoint: .trailing)
+    }
+
     static let green  = Color(red: 0.133, green: 0.773, blue: 0.369)   // #22c55e
     static let blue   = Color(red: 0.220, green: 0.741, blue: 0.973)   // #38bdf8
     static let orange = Color(red: 0.984, green: 0.573, blue: 0.235)   // #fb923c
@@ -49,16 +58,17 @@ enum DS {
 // MARK: - Liquid Glass (iOS 26+), com fallback pro material antigo
 
 extension View {
-    /// Superfície de controle flutuante sobre conteúdo (botões sobre o mapa).
-    /// iOS 26+: Liquid Glass real e interativo. Anteriores: ultraThinMaterial escuro.
+    /// Aplica um transform condicionalmente, mantendo a árvore estável.
     @ViewBuilder
+    func `if`<V: View>(_ condition: Bool, transform: (Self) -> V) -> some View {
+        if condition { transform(self) } else { self }
+    }
+
+    /// Superfície de controle flutuante sobre conteúdo (botões sobre o mapa).
+    /// iOS 26+: Liquid Glass real e interativo (respeita o toggle glass_enabled).
+    /// Anteriores/desligado: ultraThinMaterial escuro.
     func glassControl<S: Shape>(in shape: S) -> some View {
-        if #available(iOS 26, *) {
-            self.glassEffect(.regular.interactive(), in: shape)
-        } else {
-            self.background(.ultraThinMaterial, in: shape)
-                .environment(\.colorScheme, .dark)
-        }
+        modifier(GlassControlSurface(shape: shape))
     }
 
     /// Nav bar escura opaca (comportamento antigo). No iOS 26+ deixa o glass do
@@ -84,15 +94,37 @@ extension View {
     }
 
     /// Superfície de card translúcido sobre o mapa (overlays do Drive/Viagens).
-    /// iOS 26+: glassEffect com leve tint escuro p/ legibilidade do texto branco.
-    /// Anteriores: ultraThinMaterial + véu preto (comportamento antigo).
-    @ViewBuilder
+    /// iOS 26+: glassEffect com leve tint escuro (respeita o toggle glass_enabled).
+    /// Anteriores/desligado: ultraThinMaterial + véu preto (comportamento antigo).
     func glassPanel<S: Shape>(in shape: S, stroke: Color) -> some View {
-        if #available(iOS 26, *) {
-            self.glassEffect(.regular.tint(DS.panel2.opacity(0.55)), in: shape)
+        modifier(GlassPanelSurface(shape: shape, stroke: stroke))
+    }
+}
+
+/// Toggle do usuário (Config → Aparência): desliga o Liquid Glass mesmo no iOS 26+.
+private struct GlassControlSurface<S: Shape>: ViewModifier {
+    let shape: S
+    @AppStorage("glass_enabled") private var glassEnabled = true
+    func body(content: Content) -> some View {
+        if #available(iOS 26, *), glassEnabled {
+            content.glassEffect(.regular.interactive(), in: shape)
+        } else {
+            content.background(.ultraThinMaterial, in: shape)
+                .environment(\.colorScheme, .dark)
+        }
+    }
+}
+
+private struct GlassPanelSurface<S: Shape>: ViewModifier {
+    let shape: S
+    let stroke: Color
+    @AppStorage("glass_enabled") private var glassEnabled = true
+    func body(content: Content) -> some View {
+        if #available(iOS 26, *), glassEnabled {
+            content.glassEffect(.regular.tint(DS.panel2.opacity(0.55)), in: shape)
                 .overlay(shape.stroke(stroke, lineWidth: 1))
         } else {
-            self.background {
+            content.background {
                 ZStack {
                     Rectangle().fill(.ultraThinMaterial)
                     Rectangle().fill(Color.black.opacity(0.35))
@@ -126,10 +158,11 @@ struct DSCard<Content: View>: View {
     var glass: Bool = false   // true = fundo translúcido (legível sobre o mapa)
     var bg: Color? = nil          // sobrescreve o fundo (ex.: destaque quando ligado)
     var borderColor: Color? = nil // sobrescreve a borda
+    var compact: Bool = false     // padding reduzido pra cards de linha única (ex: actions row)
     @ViewBuilder var content: Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: compact ? 4 : 12) {
             if let title {
                 HStack(spacing: 6) {
                     if let icon { Image(systemName: icon).font(.caption).foregroundStyle(DS.muted) }
@@ -141,7 +174,7 @@ struct DSCard<Content: View>: View {
             }
             content
         }
-        .padding(.horizontal, 14).padding(.vertical, 12)
+        .padding(.horizontal, compact ? 10 : 14).padding(.vertical, compact ? 6 : 12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .modifier(DSCardSurface(glass: glass, bg: bg, border: borderColor ?? DS.border))
     }

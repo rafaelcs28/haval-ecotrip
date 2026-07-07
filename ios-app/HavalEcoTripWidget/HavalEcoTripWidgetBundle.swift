@@ -14,6 +14,8 @@ struct HavalEcoTripWidgetBundle: WidgetBundle {
         TripLiveActivity()
         MotorLiveActivity()
         SecurityLiveActivity()
+        InfraLiveActivity()
+        ParkingLiveActivity()
         BatteryWidget()
         LockBatteryWidget()
         if #available(iOS 17.0, *) { ControlsWidget() }

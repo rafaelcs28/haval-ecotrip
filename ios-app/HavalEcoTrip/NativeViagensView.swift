@@ -47,6 +47,11 @@ struct Trip: Identifiable {
     var endCoord: CLLocationCoordinate2D? { let la = n("endLat"), lo = n("endLng"); return (la != 0 && lo != 0) ? .init(latitude: la, longitude: lo) : nil }
     func cost(_ pKwh: Double, _ pGas: Double) -> Double { netKwh * pKwh + fuelL * pGas }
     var consumo: Double { distKm > 0.5 ? netKwh / distKm * 100 : 0 }
+    // Híbrida = usou gasolina E bateria no mesmo trecho.
+    var isHybrid: Bool { fuelL >= 0.05 && netKwh > 0.1 }
+    // km/L equivalente: energia elétrica convertida em gasolina (8,9 kWh/L, mesma
+    // constante do eco-score). Combina os dois consumos num único número de eficiência.
+    var kmPerLEq: Double { let eqL = fuelL + netKwh / 8.9; return (eqL > 0.01 && distKm > 0.5) ? distKm / eqL : 0 }
     // Mostra também o consumo PARADO (0 km / 0 s mas energia gasta — HVAC/pré-clima/
     // standby). Espelha o que o bridge decide manter (descarta só se dist≈0 E energia
     // <0.10 E <60s). Importante pra estatística de consumo de energia.
@@ -70,6 +75,9 @@ final class TripsLoader: ObservableObject {
     @Published var diag = ""
     @Published var geoStart: [Double: String] = [:]   // tripId(startMs) → "Bairro, Cidade" (origem)
     @Published var geoEnd:   [Double: String] = [:]   // tripId(startMs) → "Bairro, Cidade" (destino)
+    // Trip que outra tela (ex: EcoScoreSheet "Melhor consumo") pede pra abrir no
+    // histórico: Insights faz pop, Viagens muda pra "Tudo" + expande + rola até ela.
+    @Published var focusTripId: Double?
     private let geocoder = CLGeocoder()
     private var bag: AnyCancellable?
     private var prefetching = false
@@ -88,7 +96,7 @@ final class TripsLoader: ObservableObject {
     }
 
     private var base: String {
-        let u = Settings.bridgeURL.isEmpty ? AuthConfig.bridgeURL : Settings.bridgeURL
+        let u = BridgeRouter.shared.currentURL
         return u.hasSuffix("/") ? String(u.dropLast()) : u
     }
 
@@ -174,7 +182,6 @@ final class TripsLoader: ObservableObject {
 struct NativeViagensView: View {
     @ObservedObject private var loader = TripsLoader.shared
     @ObservedObject private var car = CarStore.shared
-    @State private var tab = 0
     @AppStorage("via_period") private var period = 0
     @AppStorage("via_from") private var fromTS: Double = 0
     @AppStorage("via_to") private var toTS: Double = 0
@@ -182,14 +189,6 @@ struct NativeViagensView: View {
     @State private var expandedId: Double?
     @State private var routeTrip: Trip?
     @State private var search = ""
-    @State private var showInsights = false
-    @State private var showEco = false
-    @State private var showReport = false
-    @State private var showRoutes = false
-    @State private var showMilestones = false
-    @State private var showTemp = false
-    @State private var showByMode = false
-    @State private var showSavings = false
 
     private var fromDate: Binding<Date> { Binding(get: { fromTS > 0 ? Date(timeIntervalSince1970: fromTS) : Date() }, set: { fromTS = $0.timeIntervalSince1970 }) }
     private var toDate: Binding<Date> { Binding(get: { toTS > 0 ? Date(timeIntervalSince1970: toTS) : Date() }, set: { toTS = $0.timeIntervalSince1970 }) }
@@ -221,98 +220,66 @@ struct NativeViagensView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 14) {
-                Picker("", selection: $tab) { Text("Histórico").tag(0); Text("Estatísticas").tag(1) }.pickerStyle(.segmented)
-                periodChips
-                if period == 4 && showCal {
-                    DSCard {
-                        VStack(spacing: 10) {
-                            DatePicker("De", selection: fromDate, displayedComponents: .date)
-                            DatePicker("Até", selection: toDate, in: fromDate.wrappedValue..., displayedComponents: .date)
-                        }.font(.system(size: 14)).foregroundStyle(DS.text).tint(DS.green).environment(\.locale, Locale(identifier: "pt_BR"))
+        NavigationStack {
+            ScrollViewReader { proxy in
+            ScrollView {
+                VStack(spacing: 14) {
+                    periodChips
+                    if period == 4 && showCal {
+                        DSCard {
+                            VStack(spacing: 10) {
+                                DatePicker("De", selection: fromDate, displayedComponents: .date)
+                                DatePicker("Até", selection: toDate, in: fromDate.wrappedValue..., displayedComponents: .date)
+                            }.font(.system(size: 14)).foregroundStyle(DS.text).tint(DS.green).environment(\.locale, Locale(identifier: "pt_BR"))
+                        }
+                    }
+                    searchBar
+                    if !filtered.isEmpty && search.isEmpty { resumoCard }
+                    historico
+                }
+                .padding(16)
+            }
+            .onChange(of: loader.focusTripId) { focusTrip(loader.focusTripId, proxy) }
+            .onAppear { focusTrip(loader.focusTripId, proxy) }
+            }
+            .background(DS.bg.ignoresSafeArea())
+            .navigationTitle("Viagens")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    NavigationLink { NativeInsightsView().navigationTitle("Insights").navigationBarTitleDisplayMode(.inline) } label: {
+                        Image(systemName: "chart.bar.xaxis")
                     }
                 }
-                if tab == 0 { searchBar; historico } else { estatisticas; statsGrid }
             }
-            .padding(16)
-        }
-        .background(DS.bg.ignoresSafeArea())
-        .overlay { if loader.loading && loader.trips.isEmpty { ProgressView().tint(DS.green) } }
-        .refreshable { await loader.load() }
-        // Sincroniza SEMPRE ao abrir (não só com cache vazio): senão viagens novas
-        // só entravam via pull-to-refresh manual. Mesmo ajuste feito em Recargas.
-        .task { await loader.load() }
-        .sheet(item: $routeTrip) { t in RouteMapSheet(trip: t) }
-        .sheet(isPresented: $showInsights) {
-            InsightsSheet(trips: loader.trips, priceKwh: car.priceKwh, priceGas: car.priceGas, kmPerLGas: car.kmPerL)
-        }
-        .sheet(isPresented: $showEco) { EcoScoreSheet(trips: loader.trips) }
-        .sheet(isPresented: $showReport) {
-            MonthlyReportSheet(trips: loader.trips, priceKwh: car.priceKwh, priceGas: car.priceGas, kmPerLGas: car.kmPerL)
-        }
-        .sheet(isPresented: $showRoutes) { RouteCompareSheet(trips: loader.trips, priceKwh: car.priceKwh, priceGas: car.priceGas, kmPerLGas: car.kmPerL) }
-        .sheet(isPresented: $showMilestones) { MilestonesSheet(odometerKm: car.num("odometer_km"), trips: loader.trips) }
-        .sheet(isPresented: $showTemp) { TempConsumptionSheet(trips: loader.trips) }
-        .sheet(isPresented: $showByMode) { ModeEconomySheet() }
-        .sheet(isPresented: $showSavings) { SavingsSheet() }
-    }
-
-    private var statsGrid: some View {
-        let cols = [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)]
-        let ecoVal: Int? = Eco.avg(loader.trips.filter { $0.date > Date().addingTimeInterval(-7*86400) }) ?? Eco.avg(loader.trips)
-        return VStack(alignment: .leading, spacing: 10) {
-            sectionHeader("DESTE PERÍODO")
-            LazyVGrid(columns: cols, spacing: 10) {
-                gridTile(icon: "leaf.fill", title: "Economia", color: DS.green, value: economiaValue) { showInsights = true }
-                gridTile(icon: "gauge.with.dots.needle.67percent", title: "Score", color: DS.teal,
-                         value: ecoVal.map { "\($0)" }, valueColor: ecoVal.map { Eco.color($0) }) { showEco = true }
-            }
-            sectionHeader("EXPLORAR").padding(.top, 4)
-            LazyVGrid(columns: cols, spacing: 10) {
-                gridTile(icon: "doc.text.fill", title: "Relatório", color: DS.blue) { showReport = true }
-                gridTile(icon: "arrow.triangle.swap", title: "Trajetos", color: DS.orange) { showRoutes = true }
-                gridTile(icon: "trophy.fill", title: "Marcos", color: DS.yellow) { showMilestones = true }
-                gridTile(icon: "thermometer.medium", title: "Consumo × temp", color: DS.blue) { showTemp = true }
-                gridTile(icon: "slider.horizontal.3", title: "Por modo", color: DS.green) { showByMode = true }
-                gridTile(icon: "leaf.fill", title: "Economia total", color: DS.green) { showSavings = true }
-            }
+            .overlay { if loader.loading && loader.trips.isEmpty { ProgressView().tint(DS.green) } }
+            .refreshable { await loader.load() }
+            // Sincroniza SEMPRE ao abrir (não só com cache vazio): senão viagens novas
+            // só entravam via pull-to-refresh manual. Mesmo ajuste feito em Recargas.
+            .task { await loader.load() }
+            .sheet(item: $routeTrip) { t in RouteMapSheet(trip: t) }
         }
     }
 
-    private var economiaValue: String? {
+    // Resumo do período: 4 números glanceable. Análises detalhadas migraram pra
+    // aba Insights (NativeInsightsView).
+    private var resumoCard: some View {
         let f = filtered
-        guard !f.isEmpty else { return nil }
+        let totalKm = f.reduce(0) { $0 + $1.distKm }
+        let cost = f.reduce(0) { $0 + $1.cost(car.priceKwh, car.priceGas) }
         let baselineKmL = car.kmPerL > 1 ? car.kmPerL : 11
         let gasL = car.priceGas > 0 ? car.priceGas : 6.0
-        let saved = f.reduce(0.0) { acc, t in
-            acc + max((t.distKm / baselineKmL) * gasL - (t.netKwh * car.priceKwh + t.fuelL * gasL), 0)
-        }
-        return saved > 0 ? brl(saved) : nil
-    }
-
-    private func sectionHeader(_ s: String) -> some View {
-        Text(s).font(.system(size: 11, weight: .bold)).foregroundStyle(DS.muted).kerning(0.5)
-            .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private func gridTile(icon: String, title: String, color: Color, value: String? = nil,
-                          valueColor: Color? = nil, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Image(systemName: icon).font(.title3).foregroundStyle(color)
-                    Spacer()
-                    if let v = value { Text(v).font(.headline).foregroundStyle(valueColor ?? DS.text) }
-                }
-                Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(DS.text)
-                    .frame(maxWidth: .infinity, alignment: .leading).lineLimit(1).minimumScaleFactor(0.8)
+        let saved = f.reduce(0.0) { $0 + max(($1.distKm / baselineKmL) * gasL - ($1.netKwh * car.priceKwh + $1.fuelL * gasL), 0) }
+        let costIfGas = totalKm / baselineKmL * gasL
+        let savedPct = costIfGas > 0.01 ? Int((saved / costIfGas * 100).rounded()) : 0
+        return DSCard {
+            HStack(spacing: 6) {
+                DSMetric(value: "\(f.count)", label: "Viagens", color: DS.teal, compact: true)
+                DSMetric(value: km(totalKm), unit: "km", label: "Distância", color: DS.green, compact: true)
+                DSMetric(value: brl(cost), label: "Custo est.", compact: true)
+                DSMetric(value: savedPct > 0 ? "−\(savedPct)%" : "—", label: "vs gasolina", color: DS.green, compact: true)
             }
-            .padding(14).frame(maxWidth: .infinity, minHeight: 86, alignment: .topLeading)
-            .background(DS.panel).clipShape(RoundedRectangle(cornerRadius: 16))
-            .overlay(RoundedRectangle(cornerRadius: 16).stroke(DS.border, lineWidth: 1))
         }
-        .buttonStyle(.plain)
     }
 
     private var periodChips: some View {
@@ -356,7 +323,7 @@ struct NativeViagensView: View {
                     if !loader.diag.isEmpty { Text(loader.diag).font(.caption2).foregroundStyle(DS.muted.opacity(0.7)) }
                 }.frame(maxWidth: .infinity, alignment: .leading).padding(.top, 20)
             }
-            ForEach(filtered) { t in tripCard(t) }
+            ForEach(filtered) { t in tripCard(t).id(t.id) }
         }
     }
 
@@ -410,49 +377,16 @@ struct NativeViagensView: View {
         .onAppear { loader.geocodeIfNeeded(t) }
     }
 
-    private var estatisticas: some View {
-        let f = filtered
-        let totalKm = f.reduce(0) { $0 + $1.distKm }
-        let kwh = f.reduce(0) { $0 + $1.netKwh }
-        let fuel = f.reduce(0) { $0 + $1.fuelL }
-        let cost = f.reduce(0) { $0 + $1.cost(car.priceKwh, car.priceGas) }
-        return VStack(spacing: 14) {
-            if f.isEmpty {
-                Text("Sem dados no período.").font(.subheadline).foregroundStyle(DS.muted).frame(maxWidth: .infinity, alignment: .leading).padding(.top, 20)
-            } else {
-                DSCard {
-                    HStack {
-                        DSMetric(value: "\(f.count)", label: "Viagens", color: DS.teal)
-                        DSMetric(value: km(totalKm), unit: "km", label: "Distância", color: DS.green)
-                        DSMetric(value: brl(cost), label: "Custo est.")
-                    }
-                }
-                DSCard {
-                    HStack(spacing: 6) {
-                        DSMetric(value: totalKm > 1 ? f1(kwh/totalKm*100) : "—", unit: "kWh/100", label: "Consumo médio", compact: true)
-                        DSMetric(value: totalKm > 1 ? brl(cost/totalKm) : "—", label: "R$/km", color: DS.green, compact: true)
-                        DSMetric(value: f1(kwh), unit: "kWh", label: "Energia", color: DS.teal, compact: true)
-                        DSMetric(value: f1(fuel), unit: "L", label: "Gasolina", color: DS.orange, compact: true)
-                    }
-                }
-                monthlyChart(f)
-            }
-        }
-    }
-
-    private func monthlyChart(_ f: [Trip]) -> some View {
-        struct Bucket: Identifiable { let id: String; let label: String; let km: Double }
-        let fmt = DateFormatter(); fmt.locale = Locale(identifier: "pt_BR"); fmt.dateFormat = "MMM/yy"
-        let keyFmt = DateFormatter(); keyFmt.dateFormat = "yyyy-MM"
-        var map: [String: (String, Double)] = [:]
-        for t in f { let k = keyFmt.string(from: t.date); map[k] = (fmt.string(from: t.date), (map[k]?.1 ?? 0) + t.distKm) }
-        let buckets = map.sorted { $0.key < $1.key }.map { Bucket(id: $0.key, label: $0.value.0, km: $0.value.1) }
-        return DSCard(title: "km por mês", icon: "chart.bar.fill") {
-            if buckets.count < 2 { Text("Precisa de mais de um mês de dados.").font(.caption).foregroundStyle(DS.muted) }
-            else {
-                Chart(buckets) { b in BarMark(x: .value("Mês", b.label), y: .value("km", b.km)).foregroundStyle(DS.teal) }
-                    .frame(height: 160).chartYAxis { AxisMarks { _ in AxisGridLine().foregroundStyle(DS.border); AxisValueLabel() } }
-            }
+    // Pedido vindo de outra tela (focusTripId): garante a viagem visível ("Tudo",
+    // sem busca), expande o card e rola até ele. Limpa o flag pra não reagir de novo.
+    private func focusTrip(_ id: Double?, _ proxy: ScrollViewProxy) {
+        guard let id else { return }
+        search = ""
+        if !loader.trips.contains(where: { $0.id == id && filtered.contains(where: { $0.id == id }) }) { period = 3 }
+        expandedId = id
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            withAnimation(.easeInOut(duration: 0.3)) { proxy.scrollTo(id, anchor: .top) }
+            loader.focusTripId = nil
         }
     }
 
@@ -551,6 +485,8 @@ struct RouteMapSheet: View {
     @State private var samples: [TripSample] = []
     @State private var gpxURL: URL?
     @State private var cardURL: URL?
+    @State private var shareURL: URL?
+    @State private var creatingShareURL = false
     @State private var loading = true
     @State private var idx: Double = 0
     @State private var cam: MapCameraPosition = .automatic
@@ -564,7 +500,7 @@ struct RouteMapSheet: View {
     @State private var driving: (avg: Double, max: Double, pwr: Double, regenPct: Double, regenKwh: Double) = (0, 0, 0, 0, 0)
 
     private var base: String {
-        let u = Settings.bridgeURL.isEmpty ? AuthConfig.bridgeURL : Settings.bridgeURL
+        let u = BridgeRouter.shared.currentURL
         return u.hasSuffix("/") ? String(u.dropLast()) : u
     }
     private var cur: TripSample? { samples.isEmpty ? nil : samples[min(samples.count - 1, max(0, Int(idx)))] }
@@ -668,11 +604,21 @@ struct RouteMapSheet: View {
             .toolbarBackground(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) { Button("Concluído") { dismiss() } }
-                if gpxURL != nil || cardURL != nil {
+                if gpxURL != nil || cardURL != nil || shareURL != nil {
                     ToolbarItem(placement: .topBarLeading) {
                         Menu {
                             if let c = cardURL { ShareLink(item: c, preview: SharePreview("Viagem", image: Image(systemName: "map"))) { Label("Cartão (imagem)", systemImage: "photo") } }
                             if let g = gpxURL { ShareLink(item: g) { Label("Trajeto (GPX)", systemImage: "point.topleft.down.curvedto.point.bottomright.up") } }
+                            if let s = shareURL {
+                                ShareLink(item: s) { Label("Link do trajeto", systemImage: "link") }
+                            } else {
+                                Button {
+                                    Task { await createShareURL() }
+                                } label: {
+                                    Label(creatingShareURL ? "Gerando link…" : "Gerar link do trajeto", systemImage: "link.badge.plus")
+                                }
+                                .disabled(creatingShareURL)
+                            }
                         } label: { Image(systemName: "square.and.arrow.up") }
                     }
                 }
@@ -773,6 +719,27 @@ struct RouteMapSheet: View {
         gpxURL = url
     }
 
+    // Pede ao bridge um token de compartilhamento e monta o link público.
+    // Reutiliza o token existente se ainda válido (bridge decide).
+    private func createShareURL() async {
+        creatingShareURL = true
+        defer { creatingShareURL = false }
+        let base = BridgeRouter.shared.currentURL
+        guard let url = URL(string: "\(base)/api/autotrips/\(trip.tripId)/share") else { return }
+        var req = URLRequest(url: url); req.httpMethod = "POST"; req.timeoutInterval = 8
+        req.addValue("Bearer " + Settings.bridgeToken, forHTTPHeaderField: "Authorization")
+        req.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        do {
+            let (data, resp) = try await URLSession.shared.data(for: req)
+            guard (resp as? HTTPURLResponse)?.statusCode == 200,
+                  let j = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let token = j["token"] as? String else { return }
+            // Link público sempre pelo hostname Tailscale Funnel (o `base` pode ser
+            // 100.x quando estamos no Tailnet — não abre pra quem recebe).
+            shareURL = URL(string: "https://mac-mini.tailacc6e7.ts.net/t/\(token)")
+        } catch { /* ignora */ }
+    }
+
     // Estatísticas de condução a partir dos samples (velocidade/potência/tempo).
     // nonisolated static: roda off-main no parse do trajeto.
     nonisolated static func computeDriving(_ samples: [TripSample]) -> (avg: Double, max: Double, pwr: Double, regenPct: Double, regenKwh: Double) {
@@ -845,7 +812,14 @@ struct RouteMapSheet: View {
             var cum = 0.0, cumKm = 0.0, lastT = 0.0, first = true
             var out: [TripSample] = []
             for s in raw {
-                let t = anyNum2(s["t"]), kw = anyNum2(s["evKw"]), spd = anyNum2(s["spd"])
+                let t = anyNum2(s["t"])
+                // APK antigo publica `evKw`, novo publica `pwr` (mesma coisa, kW positivo=consumo).
+                let kw: Double = {
+                    if let n = s["evKw"] as? NSNumber { return n.doubleValue }
+                    if let n = s["pwr"]  as? NSNumber { return n.doubleValue }
+                    return anyNum2(s["evKw"])
+                }()
+                let spd = anyNum2(s["spd"])
                 if !first { let rawDt = t - lastT; let dt = (rawDt > 0 && rawDt < 30) ? rawDt : 0; cum += kw * dt / 3600.0; cumKm += spd * dt / 3600.0 }
                 first = false; lastT = t
                 let la = anyNum2(s["lat"]), lo = anyNum2(s["lng"])

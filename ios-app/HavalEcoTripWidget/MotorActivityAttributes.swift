@@ -19,6 +19,7 @@ struct MotorActivityAttributes: ActivityAttributes {
         var updatedAtMs: Double
 
         var startedAt: Date { Date(timeIntervalSince1970: startedAtMs / 1000) }
+        var updatedAt: Date { Date(timeIntervalSince1970: updatedAtMs / 1000) }
     }
 
     var carName: String

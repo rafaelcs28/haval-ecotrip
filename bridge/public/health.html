@@ -82,6 +82,21 @@ canvas { display: block; width: 100%; height: 60px; margin-top: 8px; }
                white-space: pre-wrap; word-break: break-word; max-height: 60px; overflow: hidden; }
 .empty { font-size: 12px; color: var(--muted); text-align: center; padding: 16px 0; }
 
+/* Activity Monitor table */
+.proc-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.proc-table th, .proc-table td { padding: 4px 6px; text-align: left;
+                                  border-bottom: 1px solid var(--border); }
+.proc-table th { color: var(--muted); font-weight: 600; user-select: none;
+                 cursor: pointer; white-space: nowrap; }
+.proc-table th:hover { color: var(--text); }
+.proc-table th.active { color: var(--green); }
+.proc-table th.active.desc::after { content: ' ▼'; font-size: 9px; }
+.proc-table th.active.asc::after  { content: ' ▲'; font-size: 9px; }
+.proc-table td { color: var(--text); font-variant-numeric: tabular-nums; }
+.proc-table td.num { text-align: right; }
+.proc-table td.name { white-space: nowrap; overflow: hidden;
+                       text-overflow: ellipsis; max-width: 160px; }
+
 .pill { display: inline-flex; align-items: center; gap: 4px;
         padding: 3px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; }
 .pill.green { background: rgba(163,230,53,.12); color: var(--green); }
@@ -154,8 +169,15 @@ canvas { display: block; width: 100%; height: 60px; margin-top: 8px; }
         <div class="row"><span class="label">Tendência SSD</span><span class="val" id="trend-de">—</span></div>
         <div class="row"><span class="label">Tendência RSS bridge</span><span class="val" id="trend-rss">—</span></div>
         <div class="row" style="display:block;border-bottom:none">
-          <span class="label">Top memória</span>
-          <div id="mac-top" style="margin-top:6px"></div>
+          <span class="label">Activity Monitor (sistema)</span>
+          <table id="sysproc-table" class="proc-table" style="margin-top:6px">
+            <thead><tr>
+              <th data-sort="name">Processo</th>
+              <th data-sort="cpu" class="active desc">CPU%</th>
+              <th data-sort="rssMb">Mem</th>
+            </tr></thead>
+            <tbody><tr><td colspan="3" class="empty">—</td></tr></tbody>
+          </table>
         </div>
       </div>
     </details>
@@ -166,6 +188,7 @@ canvas { display: block; width: 100%; height: 60px; margin-top: 8px; }
         <span class="sum-right"><span id="head-procs">—</span><span class="chev"></span></span></summary>
       <div class="card-body"><div id="proc-list"><div class="empty">—</div></div></div>
     </details>
+
 
     <!-- Conexões -->
     <details class="card" data-k="conn">
@@ -216,6 +239,8 @@ canvas { display: block; width: 100%; height: 60px; margin-top: 8px; }
         <div class="row"><span class="label">SOC</span><span class="val" id="car-soc">—</span></div>
         <div class="row"><span class="label">Potência</span><span class="val" id="car-power">—</span></div>
         <div class="row"><span class="label">Carregando</span><span class="val" id="car-charging">—</span></div>
+        <div class="row"><span class="label">Executor APK/Shizuku</span><span class="val" id="car-apk-exec">—</span></div>
+        <div class="row"><span class="label">Automações (24h)</span><span class="val" id="car-apk-stats">—</span></div>
       </div>
     </details>
 
@@ -232,7 +257,7 @@ canvas { display: block; width: 100%; height: 60px; margin-top: 8px; }
     </details>
 
     <details class="card" data-k="lari">
-      <summary><span class="sum-title">Lari (WhatsApp)</span>
+      <summary><span class="sum-title">Assistentes (WhatsApp)</span>
         <span class="sum-right"><span id="head-lari">—</span><span class="chev"></span></span></summary>
       <div class="card-body" id="lari-body">
         <div class="row"><span class="label">—</span><span class="val">—</span></div>
@@ -277,6 +302,8 @@ canvas { display: block; width: 100%; height: 60px; margin-top: 8px; }
         <div class="row"><span class="label">Mosquitto 1884</span><span class="val" id="broker-1884">—</span></div>
         <div class="row"><span class="label">Mosquitto 8883</span><span class="val" id="broker-8883">—</span></div>
         <div class="row"><span class="label">Home Assistant</span><span class="val" id="ha-status">—</span></div>
+        <div class="row"><span class="label">Monitor externo</span><span class="val" id="ext-mon-status">—</span></div>
+        <div class="row"><span class="label">Monitor externo · último ping</span><span class="val" id="ext-mon-last">—</span></div>
         <div class="row"><span class="label">IP público</span><span class="val" id="net-pubip" style="font-size:12px">—</span></div>
         <div class="row"><span class="label">DuckDNS resolve</span><span class="val" id="net-duck">—</span></div>
         <div class="row"><span class="label">DNS correto</span><span class="val" id="net-match">—</span></div>
@@ -288,6 +315,26 @@ canvas { display: block; width: 100%; height: 60px; margin-top: 8px; }
       </div>
     </details>
 
+    <!-- HA da empresa (push) -->
+    <details class="card" data-k="hawork">
+      <summary><span class="sum-title">HA da empresa</span>
+        <span class="sum-right"><span id="head-hawork">—</span><span class="chev"></span></span></summary>
+      <div class="card-body">
+        <div class="row"><span class="label">Último push</span><span class="val" id="hawork-last">—</span></div>
+        <div class="row"><span class="label">Guards</span><span class="val" id="hawork-guards">—</span></div>
+        <div class="row" style="display:block">
+          <div class="label" style="margin-bottom:6px">Serviços</div>
+          <div id="hawork-services" style="display:flex;flex-wrap:wrap;gap:6px">—</div>
+        </div>
+        <div class="row" style="display:block">
+          <div class="label" style="margin-bottom:6px">Uptime 7d</div>
+          <div id="hawork-uptime" style="display:flex;flex-wrap:wrap;gap:6px">—</div>
+        </div>
+        <ul class="event-list" id="hawork-ev-list">
+          <li class="empty">Sem transições registradas ainda.</li>
+        </ul>
+      </div>
+    </details>
 
     <!-- Erros -->
     <details class="card" data-k="err">
@@ -430,15 +477,6 @@ async function load() {
     const extBad    = ext && (ext.mounted === false || (ext.avail_gb != null && ext.avail_gb < 5));
     set('head-mac', dot(memTight || diskTight || extBad ? 'red' : 'green') + ' '
       + (mac.mem?.used_gb != null ? `${mac.mem.used_gb}/${mac.mem.total_gb} GB` : '—'));
-    if (mac.top_mem?.length) {
-      const maxMb = Math.max(...mac.top_mem.map(p => p.mb), 1);
-      set('mac-top', mac.top_mem.map(p => `
-        <div class="topbar-row">
-          <span class="tname">${p.name.replace(/</g,'&lt;')}</span>
-          <span class="tbar"><span style="width:${Math.max(4, Math.round(p.mb/maxMb*100))}%"></span></span>
-          <span class="tmb">${p.mb} MB</span>
-        </div>`).join(''));
-    } else { set('mac-top', '<span class="val">—</span>'); }
 
     // ── Tendência preditiva (slope/ETA) ──────────────────────────────────────
     const tr = d.trend || {};
@@ -471,10 +509,16 @@ async function load() {
         <span class="val" style="font-size:12px;font-weight:500">${p.mem_mb} MB · ${p.cpu ?? 0}% · <span${hot}>${p.restarts}↻</span> · ${fmtUptime(p.uptime_sec || 0)}</span>
       </div>`;
     });
-    const lariRows = lariProcs.map(l => `<div class="row">
-        <span class="label">${dot(l.connected ? 'green' : 'yellow')} lari-${(l.user || '?').replace(/</g,'&lt;')}</span>
+    // Nome do assistente por usuário: Rafael → Mari, Deivid → Lari.
+    const _assistantName = { rafael: 'mari', deivid: 'lari' };
+    const lariRows = lariProcs.map(l => {
+      const u = (l.user || '?').toLowerCase();
+      const name = (_assistantName[u] || 'lari') + '-' + u.replace(/</g,'&lt;');
+      return `<div class="row">
+        <span class="label">${dot(l.connected ? 'green' : 'yellow')} ${name}</span>
         <span class="val" style="font-size:12px;font-weight:500">${l.mem_mb != null ? l.mem_mb + ' MB' : '?'} · ${l.cpu ?? 0}% · ${fmtUptime(l.uptime_sec || 0)}</span>
-      </div>`);
+      </div>`;
+    });
     const allRows = procRows.concat(lariRows);
     set('proc-list', allRows.length ? allRows.join('') : '<div class="empty">—</div>');
 
@@ -625,6 +669,61 @@ async function load() {
       ? `<span class="pill green"><span class="dot green"></span>${ha.latency_ms ?? '?'} ms</span>`
       : ha.up === false ? `<span class="pill red"><span class="dot red"></span>${ha.error || 'Offline'}</span>` : '—');
 
+    // Monitor externo (HA da empresa) — dead-man's-switch: mostra estado + último ping.
+    const em = d.ext_monitor || {};
+    set('ext-mon-status', em.ok === true
+      ? `<span class="pill green"><span class="dot green"></span>Ativo (${em.age_sec}s)</span>`
+      : em.ok === false
+        ? `<span class="pill red"><span class="dot red"></span>Parado há ${Math.round((em.age_sec || 0) / 60)}min</span>`
+        : `<span class="pill yellow"><span class="dot yellow"></span>Aguardando 1º ping</span>`);
+    set('ext-mon-last', em.last_beat_ms ? fmtAgo(em.last_beat_ms) : '—');
+
+    // ── HA da empresa (push, IP dinâmico — só dá pra ver por aqui) ──────────────
+    const SERVICE_LABELS = {
+      tailnet: 'Tailnet', ellevar: 'Ellevar', haval: 'Haval', whats: 'Whats', mqtt: 'MQTT',
+      mosquitto: 'Mosquitto', ha_local: 'HA local', gateway: 'Gateway', ssd: 'SSD', duckdns: 'DuckDNS',
+    };
+    const GUARD_LABELS = {
+      mac_inalcancavel: 'Mac inalcançável', bridge_cego: 'Bridge cego (LAN)',
+    };
+    const hw = d.ha_work;
+    if (!hw) {
+      set('head-hawork', dot('yellow') + ' aguardando 1º push');
+      set('hawork-last', '—');
+      set('hawork-guards', '—');
+      set('hawork-services', '—');
+      set('hawork-uptime', '—');
+    } else {
+      const svcEntries = Object.entries(hw.services || {});
+      const anyDown = svcEntries.some(([, v]) => v === false);
+      const anyGuard = Object.values(hw.guards || {}).some(v => v === true);
+      set('head-hawork', dot(hw.stale ? 'yellow' : (anyDown || anyGuard) ? 'red' : 'green') + ' '
+        + (hw.stale ? `sem push há ${Math.round(hw.age_sec / 60)}min` : (anyDown || anyGuard) ? 'atenção' : 'OK'));
+      set('hawork-last', (hw.stale ? '<span class="pill yellow">' : '<span class="pill green">')
+        + fmtAgo(hw.ts) + '</span>');
+      const guardEntries = Object.entries(hw.guards || {});
+      set('hawork-guards', guardEntries.length
+        ? guardEntries.map(([k, v]) => `<span class="pill ${v ? 'red' : 'green'}">${dot(v ? 'red' : 'green')}${GUARD_LABELS[k] || k}</span>`).join(' ')
+        : '—');
+      set('hawork-services', svcEntries.length
+        ? svcEntries.map(([k, v]) => `<span class="pill ${v ? 'green' : 'red'}">${dot(v ? 'green' : 'red')}${SERVICE_LABELS[k] || k}</span>`).join('')
+        : '—');
+      const upEntries = Object.entries(hw.uptime7d || {});
+      set('hawork-uptime', upEntries.length
+        ? upEntries.map(([k, v]) => `<span class="pill" style="color:var(--muted)">${SERVICE_LABELS[k] || k} ${Number(v).toFixed(1)}%</span>`).join('')
+        : '—');
+      const hwEvs = hw.events || [];
+      const hwList = document.getElementById('hawork-ev-list');
+      hwList.innerHTML = hwEvs.length
+        ? hwEvs.map(e => `
+        <li class="ev">
+          <div class="ev-time">${fmtDate(e.ts)}</div>
+          <div class="ev-type">${e.up ? '<span style="color:var(--green)">voltou</span>' : '<span style="color:var(--red)">caiu</span>'}</div>
+          <div class="ev-msg">${SERVICE_LABELS[e.service] || e.service}</div>
+        </li>`).join('')
+        : '<li class="empty">Sem transições registradas ainda.</li>';
+    }
+
     const net = d.network || {};
     set('net-pubip',   net.public_ip || '—');
     set('net-duck',    net.duckdns_ip
@@ -708,6 +807,19 @@ async function load() {
     set('car-soc',      car.soc ? car.soc.toFixed(1) + '%' : '—');
     set('car-power',    (car.power_kw || 0).toFixed(1) + ' kW');
     set('car-charging', car.charging ? '<span style="color:var(--green)">Sim</span>' : '<span style="color:var(--muted)">Não</span>');
+    // Executor APK/Shizuku (inferido pelo verify das automações)
+    const ax = d.apk_executor || {};
+    if (ax.last_ok_ms || ax.last_fail_ms) {
+      const okAgo   = ax.last_ok_ms   ? fmtAgo(ax.last_ok_ms)   : 'nunca';
+      const failAgo = ax.last_fail_ms ? fmtAgo(ax.last_fail_ms) : 'nunca';
+      const statusColor = ax.healthy ? 'var(--green)' : 'var(--red)';
+      const statusText  = ax.healthy ? 'ok' : `⚠ ${ax.fail_streak} falhas seguidas`;
+      set('car-apk-exec',  `<span style="color:${statusColor}">${statusText}</span> · últ. ok ${okAgo}`);
+      set('car-apk-stats', `${ax.ok_24h || 0} ok / ${ax.fail_24h || 0} fail · últ. fail ${failAgo}`);
+    } else {
+      set('car-apk-exec', '<span style="color:var(--muted)">sem dados</span>');
+      set('car-apk-stats', '—');
+    }
     set('head-car', dot(car.online ? (firingCar.length ? 'yellow' : 'green') : 'red') + ' '
       + (car.online ? 'online' : 'offline'));
 
@@ -767,9 +879,54 @@ async function clearEvents() {
   load();
 }
 
+// ── Activity Monitor (top processos do sistema) ──────────────────────────────
+let _sysProcSort = { col: 'cpu', dir: 'desc' };
+let _sysProcLast = [];
+function _renderSysProc() {
+  const tb = document.querySelector('#sysproc-table tbody');
+  if (!tb) return;
+  const { col, dir } = _sysProcSort;
+  const sign = dir === 'asc' ? 1 : -1;
+  const sorted = [..._sysProcLast].sort((a, b) => {
+    const va = a[col], vb = b[col];
+    if (typeof va === 'number' && typeof vb === 'number') return (va - vb) * sign;
+    return String(va).localeCompare(String(vb)) * sign;
+  });
+  tb.innerHTML = sorted.map(p => `
+    <tr>
+      <td class="name" title="pid ${p.pid} · ${p.user} · ${p.name.replace(/"/g,'&quot;')}">${p.name.replace(/</g,'&lt;')}</td>
+      <td class="num">${p.cpu.toFixed(1)}</td>
+      <td class="num">${p.rssMb} MB</td>
+    </tr>`).join('') || '<tr><td colspan="3" class="empty">—</td></tr>';
+  document.querySelectorAll('#sysproc-table th').forEach(th => {
+    th.classList.remove('active', 'asc', 'desc');
+    if (th.dataset.sort === col) th.classList.add('active', dir);
+  });
+}
+document.querySelectorAll('#sysproc-table th').forEach(th => {
+  th.addEventListener('click', () => {
+    const c = th.dataset.sort;
+    if (_sysProcSort.col === c) _sysProcSort.dir = _sysProcSort.dir === 'asc' ? 'desc' : 'asc';
+    else _sysProcSort = { col: c, dir: c === 'name' || c === 'user' ? 'asc' : 'desc' };
+    _renderSysProc();
+  });
+});
+async function loadSysProc() {
+  try {
+    const r = await fetch('/api/proc-list', { headers: { Authorization: 'Bearer ' + tk } });
+    const d = await r.json();
+    if (d.ok) {
+      _sysProcLast = d.list || [];
+      _renderSysProc();
+    }
+  } catch (_) {}
+}
+
 loadOpenState();
 load();
-setInterval(load, 15_000);
+loadSysProc();
+setInterval(load, 5_000);
+setInterval(loadSysProc, 5_000);
 window.addEventListener('resize', drawChart);
 </script>
 </body>

@@ -112,6 +112,16 @@ struct UnlockCarIntent: AppIntent {
 }
 
 @available(iOS 16.0, *)
+struct FindCarIntent: AppIntent {
+    static var title: LocalizedStringResource = "Encontrar o carro"
+    static var description = IntentDescription("Pisca os faróis e buzina o Haval pela nuvem (funciona com o carro dormindo).")
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        let ok = await CarIntentAPI.action("find_car")
+        return .result(dialog: ok ? "Piscando os faróis do carro." : "Não consegui acionar agora.")
+    }
+}
+
+@available(iOS 16.0, *)
 struct EngineOnIntent: AppIntent {
     static var title: LocalizedStringResource = "Ligar o motor"
     static var description = IntentDescription("Liga o motor do Haval remotamente (climatiza a cabine).")
@@ -212,6 +222,10 @@ struct EcotripShortcuts: AppShortcutsProvider {
             "Ligar o motor no \(.applicationName)",
             "Ligar o carro no \(.applicationName)",
         ], shortTitle: "Ligar motor", systemImageName: "power")
+        AppShortcut(intent: FindCarIntent(), phrases: [
+            "Encontrar o carro no \(.applicationName)",
+            "Piscar os faróis no \(.applicationName)",
+        ], shortTitle: "Encontrar carro", systemImageName: "car.top.radiowaves.rear.right")
         AppShortcut(intent: SocQueryIntent(), phrases: [
             "Quanto de bateria no \(.applicationName)",
             "Bateria do carro no \(.applicationName)",

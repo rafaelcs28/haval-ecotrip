@@ -1,8 +1,8 @@
 //
 //  MotorLiveActivity.swift
 //  Live Activity de motor ligado remotamente (lock screen + Dynamic Island).
-//  Lembrete de segurança: conta "há X min" ao vivo no device e mostra a
-//  temperatura interna; encerra quando o bridge sinaliza motor desligado.
+//  Estilo v2 (gramática da Rodada 9): timer como hero, contexto de cabine e
+//  ação Desligar inline (App Intent). Encerra em variante de confirmação.
 //
 import ActivityKit
 import AppIntents
@@ -13,113 +13,173 @@ struct MotorLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: MotorActivityAttributes.self) { context in
             MotorLockScreenView(state: context.state, carName: context.attributes.carName)
-                .activityBackgroundTint(Color.orange.opacity(0.18))
-                .activitySystemActionForegroundColor(.orange)
+                .activityBackgroundTint(LAv2.bg)
+                .activitySystemActionForegroundColor(context.state.active ? LAv2.orange : LAv2.text2)
 
         } dynamicIsland: { context in
             let s = context.state
             return DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
+                    Image(systemName: s.active ? "key.fill" : "key.slash")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(s.active ? LAv2.orange : LAv2.text2)
+                        .frame(width: 40, height: 40)
+                        .background((s.active ? LAv2.orange : LAv2.text2).opacity(0.15), in: Circle())
+                }
+                DynamicIslandExpandedRegion(.center) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Label("Motor ligado", systemImage: "key.fill")
-                            .font(.caption).foregroundStyle(.orange)
                         if s.active {
-                            Text(s.startedAt, style: .timer)
-                                .font(.system(size: 22, weight: .bold, design: .rounded))
-                                .foregroundStyle(.orange)
-                                .frame(maxWidth: 90)
+                            (Text("Motor ligado há ") + Text(s.startedAt, style: .relative))
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(LAv2.orange)
+                                .lineLimit(1).minimumScaleFactor(0.7)
+                            Text(motorContextLine(s))
+                                .font(.system(size: 11.5)).foregroundStyle(LAv2.text2)
+                                .lineLimit(1).minimumScaleFactor(0.6)
                         } else {
-                            Text("desligado").font(.title3).bold().foregroundStyle(.secondary)
+                            Text("Motor desligado")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(LAv2.text2)
                         }
                     }
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    VStack(alignment: .trailing, spacing: 2) {
-                        Text(String(format: "%.0f°", s.cabinTemp))
-                            .font(.title2).bold().foregroundStyle(.teal)
-                        Text("interna").font(.caption2).foregroundStyle(.secondary)
-                    }
-                }
-                DynamicIslandExpandedRegion(.bottom) {
-                    VStack(spacing: 6) {
-                        HStack {
-                            if s.acOn {
-                                Label("A/C ligado", systemImage: "fan.fill").font(.caption2).foregroundStyle(.teal)
-                            }
-                            Spacer()
-                            Label(String(format: "externa %.0f°", s.outsideTemp), systemImage: "thermometer.medium")
-                                .font(.caption2).foregroundStyle(.secondary)
-                        }
-                        if s.active, #available(iOS 17.0, *) {
-                            LAActionButton(title: "Desligar motor", systemImage: "power", tint: .orange, intent: EngineOffIntent())
-                        }
+                    if s.active {
+                        if #available(iOS 17.0, *) { EngineOffPillButton() }
                     }
                 }
             } compactLeading: {
-                Image(systemName: "key.fill").foregroundStyle(.orange)
+                Image(systemName: s.active ? "key.fill" : "key.slash")
+                    .foregroundStyle(s.active ? LAv2.orange : LAv2.text2)
             } compactTrailing: {
-                if context.state.active {
-                    Text(context.state.startedAt, style: .timer)
-                        .frame(maxWidth: 44).foregroundStyle(.orange).bold()
-                } else {
-                    Image(systemName: "key.slash").foregroundStyle(.secondary)
+                if s.active {
+                    Text(s.startedAt, style: .timer)
+                        .font(.system(size: 12, weight: .bold)).monospacedDigit()
+                        .foregroundStyle(LAv2.orange)
+                        .frame(maxWidth: 46)
+                        .lineLimit(1).minimumScaleFactor(0.5)
                 }
             } minimal: {
-                Image(systemName: "key.fill").foregroundStyle(.orange)
+                Image(systemName: s.active ? "key.fill" : "key.slash")
+                    .foregroundStyle(s.active ? LAv2.orange : LAv2.text2)
             }
-            .keylineTint(.orange)
+            .keylineTint(s.active ? LAv2.orange : LAv2.text2)
         }
     }
 }
+
+// MARK: - Lock screen
 
 struct MotorLockScreenView: View {
     let state: MotorActivityAttributes.ContentState
     let carName: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Image(systemName: state.active ? "key.fill" : "key.slash")
-                    .foregroundStyle(state.active ? .orange : .secondary)
-                Text(state.active ? "Motor ligado" : "Motor desligado").font(.headline)
-                Spacer()
-                Text(carName).font(.caption2).foregroundStyle(.secondary)
-            }
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                if state.active {
-                    Text("há").font(.title3).foregroundStyle(.secondary)
-                    Text(state.startedAt, style: .timer)
-                        .font(.system(size: 34, weight: .bold, design: .rounded))
-                        .foregroundStyle(.orange)
-                        .frame(maxWidth: 140, alignment: .leading)
-                } else {
-                    Text("Veículo desligado").font(.title3).foregroundStyle(.secondary)
-                }
-                Spacer()
-                VStack(alignment: .trailing, spacing: 0) {
-                    Text(String(format: "%.0f°", state.cabinTemp))
-                        .font(.title2).bold().foregroundStyle(.teal)
-                    Text("interna").font(.caption2).foregroundStyle(.secondary)
-                }
-            }
-            HStack {
-                if state.acOn {
-                    Label("A/C ligado", systemImage: "fan.fill").font(.caption).foregroundStyle(.teal)
-                }
-                if state.active {
-                    Spacer()
-                    Label("Não esqueça ligado", systemImage: "exclamationmark.triangle.fill")
-                        .font(.caption2).foregroundStyle(.orange)
-                }
-                Spacer()
-                Label(String(format: "externa %.0f°", state.outsideTemp), systemImage: "thermometer.medium")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            if state.active, #available(iOS 17.0, *) {
-                LAActionButton(title: "Desligar motor", systemImage: "power", tint: .orange, intent: EngineOffIntent())
-                    .padding(.top, 2)
-            }
+        Group {
+            if state.active { runningBody } else { endedBody }
         }
         .padding(14)
+        .background(alignment: .topLeading) {
+            RadialGradient(colors: [(state.active ? LAv2.orange : LAv2.green).opacity(0.14), .clear],
+                           center: .topLeading, startRadius: 0, endRadius: 220)
+        }
     }
+
+    private var runningBody: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            // Header: tile + carro | tag LIGADO
+            HStack(spacing: 8) {
+                Image(systemName: "key.fill")
+                    .font(.system(size: 11, weight: .bold)).foregroundStyle(.black)
+                    .frame(width: 22, height: 22)
+                    .background(LAv2.orange, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                Text(carName)
+                    .font(.system(size: 12, weight: .semibold)).foregroundStyle(LAv2.text)
+                    .lineLimit(1).minimumScaleFactor(0.7)
+                Spacer(minLength: 6)
+                Text("MOTOR LIGADO")
+                    .font(.system(size: 10, weight: .bold)).tracking(1)
+                    .foregroundStyle(LAv2.orange)
+            }
+            // Corpo: PNG do carro | timer hero + contexto | Desligar
+            HStack(alignment: .center, spacing: 13) {
+                Image("haval_h6_top")
+                    .resizable().scaledToFit()
+                    .frame(width: 56, height: 56)
+                    .shadow(color: .black.opacity(0.5), radius: 6, y: 3)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(state.startedAt, style: .timer)
+                        .font(.system(size: 26, weight: .light)).tracking(-0.5)
+                        .monospacedDigit()
+                        .foregroundStyle(LAv2.orange)
+                        .lineLimit(1).minimumScaleFactor(0.7)
+                    Text(motorContextLine(state))
+                        .font(.system(size: 11.5)).foregroundStyle(LAv2.text)
+                        .lineLimit(1).minimumScaleFactor(0.7)
+                    Text(state.acOn ? "A/C ligado · climatizando" : "A/C desligado")
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(state.acOn ? LAv2.teal : LAv2.text2)
+                        .lineLimit(1).minimumScaleFactor(0.7)
+                }
+                Spacer(minLength: 8)
+                VStack(spacing: 4) {
+                    if #available(iOS 17.0, *) { EngineOffPillButton() }
+                    Text("desliga na hora")
+                        .font(.system(size: 8.5)).foregroundStyle(LAv2.muted)
+                }
+            }
+            // Rodapé: lembrete | hora
+            VStack(spacing: 8) {
+                Rectangle().fill(Color.white.opacity(0.06)).frame(height: 1)
+                HStack {
+                    Text("Não esqueça o motor ligado")
+                        .font(.system(size: 10.5)).foregroundStyle(LAv2.text2)
+                    Spacer(minLength: 6)
+                    Text(state.updatedAt, format: .dateTime.hour().minute())
+                        .font(.system(size: 10.5)).monospacedDigit().foregroundStyle(LAv2.muted)
+                }
+            }
+        }
+    }
+
+    // Variante de confirmação (motor desligou) — bridge encerra com dismissal.
+    private var endedBody: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 34)).foregroundStyle(LAv2.green)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Motor desligado")
+                    .font(.system(size: 13, weight: .semibold)).foregroundStyle(LAv2.text)
+                Text("ficou ligado por \(runMinutes) min")
+                    .font(.system(size: 10.5)).monospacedDigit().foregroundStyle(LAv2.text2)
+            }
+            Spacer(minLength: 6)
+            Text(state.updatedAt, format: .dateTime.hour().minute())
+                .font(.system(size: 11)).monospacedDigit().foregroundStyle(LAv2.muted)
+        }
+    }
+
+    private var runMinutes: Int {
+        max(0, Int((state.updatedAtMs - state.startedAtMs) / 60_000))
+    }
+}
+
+// Botão Desligar (pill orange, texto preto) — App Intent, sem abrir o app.
+@available(iOS 17.0, *)
+private struct EngineOffPillButton: View {
+    var body: some View {
+        Button(intent: EngineOffIntent()) {
+            Text("Desligar")
+                .font(.system(size: 13, weight: .bold)).foregroundStyle(.black)
+                .lineLimit(1).fixedSize()
+                .padding(.horizontal, 18).padding(.vertical, 9)
+                .background(LAv2.orange, in: Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// Linha de contexto: cabine · externa.
+private func motorContextLine(_ s: MotorActivityAttributes.ContentState) -> String {
+    "cabine \(Int(s.cabinTemp.rounded()))° · externa \(Int(s.outsideTemp.rounded()))°"
 }

@@ -1,69 +1,71 @@
 //
 //  SecurityLiveActivity.swift
-//  Live Activity persistente de veículo desprotegido (lock screen + Dynamic
-//  Island). Desenha o carro em VISTA DE CIMA e destaca qual porta / vidro /
-//  teto / porta-malas está aberto. Some sozinha quando tudo é resolvido.
+//  Live Activity de carro destravado/desprotegido (lock screen + Dynamic Island).
+//  Estilo v2 Rodada 9 (frame 9b): gramática de anomalia — o que está aberto,
+//  há quanto tempo, distância do usuário e ação Travar inline (App Intent).
+//  Resolvido → variante verde de confirmação que se dispensa sozinha.
 //
 import ActivityKit
 import SwiftUI
 import WidgetKit
 
-// Paleta dos estados desenhados no carro.
-private enum CarTint {
-    static let secure  = Color.secondary.opacity(0.22)   // fechado/seguro
-    static let door    = Color.red                       // porta/porta-malas aberto
-    static let window  = Color.blue                      // vidro aberto
-    static let sunroof = Color.orange                    // teto solar aberto
-    static let body    = Color.gray.opacity(0.14)
-    static let stroke  = Color.secondary.opacity(0.45)
-}
-
 struct SecurityLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: SecurityActivityAttributes.self) { context in
             SecurityLockScreenView(state: context.state, carName: context.attributes.carName)
-                .activityBackgroundTint(securityTint(context.state))
-                .activitySystemActionForegroundColor(.red)
+                .activityBackgroundTint(LAv2.bg)
+                .activitySystemActionForegroundColor(context.state.active ? LAv2.red : LAv2.green)
 
         } dynamicIsland: { context in
             let s = context.state
             return DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
-                    CarTopView(state: s).frame(width: 62, height: 96)
+                    Image(systemName: s.active ? "lock.open.fill" : "checkmark")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(s.active ? LAv2.red : LAv2.green)
+                        .frame(width: 40, height: 40)
+                        .background((s.active ? LAv2.red : LAv2.green).opacity(0.15), in: Circle())
                 }
-                DynamicIslandExpandedRegion(.trailing) {
-                    VStack(alignment: .leading, spacing: 5) {
-                        Label(s.active ? "Desprotegido" : "Seguro",
-                              systemImage: s.active ? "exclamationmark.triangle.fill" : "checkmark.seal.fill")
-                            .font(.subheadline).bold()
-                            .foregroundStyle(s.active ? .red : .green)
-                        SecurityIssueList(state: s, limit: 3, dense: true)
+                DynamicIslandExpandedRegion(.center) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        if s.active {
+                            (Text(securityHeadline(s)) + sinceText(s))
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(LAv2.red)
+                                .lineLimit(1).minimumScaleFactor(0.7)
+                            Text(securityIssueLine(s))
+                                .font(.system(size: 11.5)).foregroundStyle(LAv2.text2)
+                                .lineLimit(1).minimumScaleFactor(0.6)
+                        } else {
+                            Text("Travado · o carro confirmou")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(LAv2.green)
+                        }
                     }
                 }
-                DynamicIslandExpandedRegion(.bottom) {
-                    if s.unlocked {
-                        HStack {
-                            Label("Veículo destrancado", systemImage: "lock.open.fill")
-                                .font(.caption2).foregroundStyle(.red)
-                            Spacer()
-                            if #available(iOS 17.0, *) {
-                                LAActionButton(title: "Travar", systemImage: "lock.fill", tint: .red, intent: LockCarIntent())
-                            }
-                        }
+                DynamicIslandExpandedRegion(.trailing) {
+                    if s.active, s.unlocked {
+                        if #available(iOS 17.0, *) { LockPillButton() }
                     }
                 }
             } compactLeading: {
                 Image(systemName: s.active ? "lock.open.fill" : "lock.fill")
-                    .foregroundStyle(s.active ? .red : .green)
+                    .foregroundStyle(s.active ? LAv2.red : LAv2.green)
             } compactTrailing: {
-                if s.active {
-                    Text("\(s.openCount)").bold().foregroundStyle(.red)
+                if s.active, let since = s.since {
+                    Text(since, style: .relative)
+                        .font(.system(size: 12, weight: .bold)).monospacedDigit()
+                        .foregroundStyle(LAv2.red)
+                        .frame(maxWidth: 46)
+                        .lineLimit(1).minimumScaleFactor(0.5)
+                } else if s.active {
+                    Text("\(s.openCount)").bold().foregroundStyle(LAv2.red)
                 }
             } minimal: {
-                Image(systemName: s.active ? "exclamationmark.triangle.fill" : "lock.fill")
-                    .foregroundStyle(s.active ? .red : .green)
+                Image(systemName: s.active ? "lock.open.fill" : "lock.fill")
+                    .foregroundStyle(s.active ? LAv2.red : LAv2.green)
             }
-            .keylineTint(s.unlocked ? .red : (s.active ? .orange : .green))
+            .keylineTint(s.active ? LAv2.red : LAv2.green)
         }
     }
 }
@@ -75,219 +77,167 @@ struct SecurityLockScreenView: View {
     let carName: String
 
     var body: some View {
-        HStack(alignment: .top, spacing: 14) {
-            CarTopView(state: state).frame(width: 84, height: 130)
-
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 6) {
-                    Image(systemName: state.active ? "exclamationmark.triangle.fill" : "checkmark.seal.fill")
-                        .foregroundStyle(state.active ? .red : .green)
-                    Text(state.active ? "Veículo desprotegido" : "Veículo seguro")
-                        .font(.headline).foregroundStyle(state.active ? .red : .primary)
-                }
-                Text(carName).font(.caption2).foregroundStyle(.secondary)
-
-                if state.active {
-                    SecurityIssueList(state: state, limit: 5, dense: false)
-                        .padding(.top, 2)
-                } else {
-                    Text("Tudo trancado e fechado").font(.caption).foregroundStyle(.secondary)
-                }
-                if state.unlocked, #available(iOS 17.0, *) {
-                    LAActionButton(title: "Travar", systemImage: "lock.fill", tint: .red, intent: LockCarIntent())
-                        .padding(.top, 2)
-                }
-                Spacer(minLength: 0)
-                CarLegend()
-            }
-            Spacer(minLength: 0)
+        Group {
+            if state.active { alertBody } else { confirmBody }
         }
         .padding(14)
+        .background(alignment: .topLeading) {
+            RadialGradient(colors: [(state.active ? LAv2.red : LAv2.green).opacity(0.14), .clear],
+                           center: .topLeading, startRadius: 0, endRadius: 220)
+        }
     }
-}
 
-// Lista textual dos itens abertos, com bolinha colorida por categoria.
-private struct SecurityIssueList: View {
-    let state: SecurityActivityAttributes.ContentState
-    let limit: Int
-    let dense: Bool
-
-    var body: some View {
-        let items = securityIssues(state)
-        VStack(alignment: .leading, spacing: dense ? 1 : 3) {
-            ForEach(items.prefix(limit), id: \.label) { item in
-                HStack(spacing: 5) {
-                    Circle().fill(item.color).frame(width: 6, height: 6)
-                    Text(item.label)
-                        .font(dense ? .caption2 : .caption)
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
+    // Variante de anomalia (destravado / algo aberto).
+    private var alertBody: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            // Header: tile + local | tag ATENÇÃO
+            HStack(spacing: 8) {
+                Image(systemName: "lock.open.fill")
+                    .font(.system(size: 11, weight: .bold)).foregroundStyle(.black)
+                    .frame(width: 22, height: 22)
+                    .background(LAv2.red, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                Text(state.locationShort.map { "Haval · \($0)" } ?? carName)
+                    .font(.system(size: 12, weight: .semibold)).foregroundStyle(LAv2.text)
+                    .lineLimit(1).minimumScaleFactor(0.7)
+                Spacer(minLength: 6)
+                Text("ATENÇÃO")
+                    .font(.system(size: 10, weight: .bold)).tracking(1)
+                    .foregroundStyle(LAv2.red)
+            }
+            // Corpo: PNG do carro | estado + contexto | Travar
+            HStack(alignment: .center, spacing: 13) {
+                Image("haval_h6_top")
+                    .resizable().scaledToFit()
+                    .frame(width: 56, height: 56)
+                    .shadow(color: .black.opacity(0.5), radius: 6, y: 3)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(securityHeadline(state))
+                        .font(.system(size: 26, weight: .light)).tracking(-0.5)
+                        .foregroundStyle(LAv2.red)
+                        .lineLimit(1).minimumScaleFactor(0.7)
+                    Text(securityIssueLine(state))
+                        .font(.system(size: 11.5)).foregroundStyle(LAv2.text)
+                        .lineLimit(1).minimumScaleFactor(0.7)
+                    contextLine
+                        .font(.system(size: 10.5)).monospacedDigit()
+                        .foregroundStyle(LAv2.text2)
+                        .lineLimit(1).minimumScaleFactor(0.7)
+                }
+                Spacer(minLength: 8)
+                if state.unlocked {
+                    VStack(spacing: 4) {
+                        if #available(iOS 17.0, *) { LockPillButton() }
+                        Text("fecha vidros junto")
+                            .font(.system(size: 8.5)).foregroundStyle(LAv2.muted)
+                    }
                 }
             }
-            if items.count > limit {
-                Text("+\(items.count - limit) mais")
-                    .font(.caption2).foregroundStyle(.secondary)
-            }
-        }
-    }
-}
-
-private struct CarLegend: View {
-    var body: some View {
-        HStack(spacing: 10) {
-            legendDot(CarTint.door, "porta")
-            legendDot(CarTint.window, "vidro")
-            legendDot(CarTint.sunroof, "teto")
-        }
-    }
-    private func legendDot(_ c: Color, _ t: String) -> some View {
-        HStack(spacing: 3) {
-            Circle().fill(c).frame(width: 6, height: 6)
-            Text(t).font(.system(size: 9)).foregroundStyle(.secondary)
-        }
-    }
-}
-
-// MARK: - Desenho do carro (vista de cima, frente no topo)
-
-struct CarTopView: View {
-    let state: SecurityActivityAttributes.ContentState
-
-    var body: some View {
-        GeometryReader { geo in
-            let w = geo.size.width, h = geo.size.height
-            let cx = w / 2
-            ZStack {
-                // Carroceria (silhueta — frente afunilada no topo)
-                CarBodyShape()
-                    .fill(CarTint.body)
-                    .overlay(CarBodyShape().stroke(CarTint.stroke, lineWidth: 1.4))
-                // Para-brisa (trapézio logo abaixo do capô) — reforça o "frente"
-                WindshieldShape()
-                    .fill(CarTint.stroke.opacity(0.35))
-                    .frame(width: w * 0.5, height: h * 0.1)
-                    .position(x: cx, y: h * 0.2)
-
-                // Teto solar (centro-frente)
-                roofElement(width: w * 0.40, height: h * 0.14, open: state.sunroof, tint: CarTint.sunroof)
-                    .position(x: cx, y: h * 0.30)
-
-                // Portas (barras nas laterais) — frente e traseira
-                doorBar(open: state.doorFL, h: h).position(x: w * 0.085, y: h * 0.36)
-                doorBar(open: state.doorFR, h: h).position(x: w * 0.915, y: h * 0.36)
-                doorBar(open: state.doorRL, h: h).position(x: w * 0.085, y: h * 0.60)
-                doorBar(open: state.doorRR, h: h).position(x: w * 0.915, y: h * 0.60)
-
-                // Vidros (quadradinhos logo para dentro de cada porta)
-                winDot(open: state.winFL).position(x: w * 0.24, y: h * 0.36)
-                winDot(open: state.winFR).position(x: w * 0.76, y: h * 0.36)
-                winDot(open: state.winRL).position(x: w * 0.24, y: h * 0.60)
-                winDot(open: state.winRR).position(x: w * 0.76, y: h * 0.60)
-
-                // Porta-malas (traseira, embaixo)
-                roofElement(width: w * 0.46, height: h * 0.075, open: state.trunk, tint: CarTint.door)
-                    .position(x: cx, y: h * 0.85)
-
-                // Cadeado central (estado de trava)
-                Image(systemName: state.unlocked ? "lock.open.fill" : "lock.fill")
-                    .font(.system(size: w * 0.2, weight: .bold))
-                    .foregroundStyle(state.unlocked ? CarTint.door : .green)
-                    .position(x: cx, y: h * 0.485)
+            // Rodapé: o que está OK | ver no mapa
+            VStack(spacing: 8) {
+                Rectangle().fill(Color.white.opacity(0.06)).frame(height: 1)
+                HStack {
+                    Text(securityOkLine(state))
+                        .font(.system(size: 10.5)).foregroundStyle(LAv2.text2)
+                        .lineLimit(1).minimumScaleFactor(0.7)
+                    Spacer(minLength: 6)
+                    Link(destination: URL(string: "havalecotrip://")!) {
+                        Text("Ver no mapa →")
+                            .font(.system(size: 10.5, weight: .semibold))
+                            .foregroundStyle(LAv2.text2)
+                    }
+                }
             }
         }
     }
 
-    private func doorBar(open: Bool, h: CGFloat) -> some View {
-        RoundedRectangle(cornerRadius: 2.5)
-            .fill(open ? CarTint.door : CarTint.secure)
-            .frame(width: 8, height: h * 0.20)
-            .shadow(color: open ? CarTint.door.opacity(0.6) : .clear, radius: 3)
+    // Variante verde de confirmação (após travar) — bridge encerra com dismissal.
+    private var confirmBody: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 34)).foregroundStyle(LAv2.green)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Travado · o carro confirmou")
+                    .font(.system(size: 13, weight: .semibold)).foregroundStyle(LAv2.text)
+                Text(confirmSub)
+                    .font(.system(size: 10.5)).monospacedDigit().foregroundStyle(LAv2.text2)
+            }
+            Spacer(minLength: 6)
+            Text(state.updatedAt, format: .dateTime.hour().minute())
+                .font(.system(size: 11)).monospacedDigit().foregroundStyle(LAv2.muted)
+        }
     }
 
-    private func winDot(open: Bool) -> some View {
-        RoundedRectangle(cornerRadius: 2)
-            .fill(open ? CarTint.window : CarTint.secure)
-            .frame(width: 9, height: 9)
-            .shadow(color: open ? CarTint.window.opacity(0.6) : .clear, radius: 3)
+    private var contextLine: Text {
+        var t = Text("")
+        if let since = state.since {
+            t = Text("há ") + Text(since, style: .relative)
+        }
+        if let d = state.userDistKm {
+            let sep = state.since != nil ? " · " : ""
+            t = t + Text("\(sep)você a \(d < 1 ? "\(Int(d * 1000)) m" : "\(laDec1(d)) km")")
+        }
+        return t
     }
 
-    private func roofElement(width: CGFloat, height: CGFloat, open: Bool, tint: Color) -> some View {
-        RoundedRectangle(cornerRadius: 3)
-            .fill(open ? tint : CarTint.secure)
-            .frame(width: width, height: height)
-            .shadow(color: open ? tint.opacity(0.6) : .clear, radius: 3)
-    }
-}
-
-// MARK: - Shapes do carro
-
-// Silhueta vista de cima: frente (topo) mais estreita, abre nas portas, afunila
-// de leve na traseira. Curvas suaves nos para-choques.
-struct CarBodyShape: Shape {
-    func path(in r: CGRect) -> Path {
-        let w = r.width, h = r.height, cx = r.midX
-        let frontHalf = w * 0.30, midHalf = w * 0.47, rearHalf = w * 0.41
-        let yFront = r.minY + h * 0.05, yMid = r.minY + h * 0.34, yRear = r.maxY - h * 0.05
-        var p = Path()
-        p.move(to: CGPoint(x: cx - frontHalf, y: yFront))
-        // Para-choque dianteiro
-        p.addQuadCurve(to: CGPoint(x: cx + frontHalf, y: yFront),
-                       control: CGPoint(x: cx, y: r.minY - h * 0.03))
-        // Lateral direita: frente → meio (alarga)
-        p.addQuadCurve(to: CGPoint(x: cx + midHalf, y: yMid),
-                       control: CGPoint(x: cx + midHalf, y: r.minY + h * 0.14))
-        // Meio → traseira (afunila um pouco)
-        p.addLine(to: CGPoint(x: cx + rearHalf, y: yRear))
-        // Para-choque traseiro
-        p.addQuadCurve(to: CGPoint(x: cx - rearHalf, y: yRear),
-                       control: CGPoint(x: cx, y: r.maxY + h * 0.03))
-        // Lateral esquerda: traseira → meio → frente
-        p.addLine(to: CGPoint(x: cx - midHalf, y: yMid))
-        p.addQuadCurve(to: CGPoint(x: cx - frontHalf, y: yFront),
-                       control: CGPoint(x: cx - midHalf, y: r.minY + h * 0.14))
-        p.closeSubpath()
-        return p
+    private var confirmSub: String {
+        if let s = state.confirmSec, s > 0 { return "tudo fechado · respondeu em \(laDec1(s)) s" }
+        return "tudo fechado e trancado"
     }
 }
 
-// Para-brisa: trapézio com a base maior embaixo (em direção à cabine).
-struct WindshieldShape: Shape {
-    func path(in r: CGRect) -> Path {
-        var p = Path()
-        p.move(to: CGPoint(x: r.minX + r.width * 0.18, y: r.minY))
-        p.addLine(to: CGPoint(x: r.maxX - r.width * 0.18, y: r.minY))
-        p.addLine(to: CGPoint(x: r.maxX, y: r.maxY))
-        p.addLine(to: CGPoint(x: r.minX, y: r.maxY))
-        p.closeSubpath()
-        return p
+// Botão Travar (pill red, texto preto) — App Intent, trava sem abrir o app.
+@available(iOS 17.0, *)
+private struct LockPillButton: View {
+    var body: some View {
+        Button(intent: LockCarIntent()) {
+            Text("Travar")
+                .font(.system(size: 13, weight: .bold)).foregroundStyle(.black)
+                .lineLimit(1).fixedSize()
+                .padding(.horizontal, 18).padding(.vertical, 9)
+                .background(LAv2.red, in: Capsule())
+        }
+        .buttonStyle(.plain)
     }
 }
 
-// MARK: - Helpers
+// MARK: - Texto
 
-// Fundo da LA conforme a gravidade: destrancado é o mais crítico (vermelho
-// forte); só vidro/teto aberto é alerta leve (laranja); seguro fica neutro.
-func securityTint(_ s: SecurityActivityAttributes.ContentState) -> Color {
-    if !s.active { return Color.green.opacity(0.12) }
-    if s.unlocked { return Color.red.opacity(0.30) }
-    if s.anyDoor { return Color.red.opacity(0.20) }
-    return Color.orange.opacity(0.16)   // só vidro/teto
+// Palavra-estado grande: destravado domina; senão o que estiver aberto.
+func securityHeadline(_ s: SecurityActivityAttributes.ContentState) -> String {
+    if s.unlocked { return "Destravado" }
+    if s.anyDoor { return "Aberto" }
+    if s.anyWindow || s.sunroof { return "Vidro aberto" }
+    return "Atenção"
 }
 
-private struct SecurityIssueItem { let label: String; let color: Color }
+private func sinceText(_ s: SecurityActivityAttributes.ContentState) -> Text {
+    guard let since = s.since else { return Text("") }
+    return Text(" há ") + Text(since, style: .relative)
+}
 
-private func securityIssues(_ s: SecurityActivityAttributes.ContentState) -> [SecurityIssueItem] {
-    var out: [SecurityIssueItem] = []
-    if s.unlocked { out.append(.init(label: "Destrancado", color: CarTint.door)) }
-    if s.doorFL   { out.append(.init(label: "Porta diant. esq.", color: CarTint.door)) }
-    if s.doorFR   { out.append(.init(label: "Porta diant. dir.", color: CarTint.door)) }
-    if s.doorRL   { out.append(.init(label: "Porta tras. esq.", color: CarTint.door)) }
-    if s.doorRR   { out.append(.init(label: "Porta tras. dir.", color: CarTint.door)) }
-    if s.trunk    { out.append(.init(label: "Porta-malas", color: CarTint.door)) }
-    if s.winFL    { out.append(.init(label: "Vidro diant. esq.", color: CarTint.window)) }
-    if s.winFR    { out.append(.init(label: "Vidro diant. dir.", color: CarTint.window)) }
-    if s.winRL    { out.append(.init(label: "Vidro tras. esq.", color: CarTint.window)) }
-    if s.winRR    { out.append(.init(label: "Vidro tras. dir.", color: CarTint.window)) }
-    if s.sunroof  { out.append(.init(label: "Teto solar", color: CarTint.sunroof)) }
-    return out
+// Linha do que está aberto (sem repetir "Destrancado", que já é o headline).
+func securityIssueLine(_ s: SecurityActivityAttributes.ContentState) -> String {
+    var items: [String] = []
+    if s.doorFL { items.append("Porta diant. esq.") }
+    if s.doorFR { items.append("Porta diant. dir.") }
+    if s.doorRL { items.append("Porta tras. esq.") }
+    if s.doorRR { items.append("Porta tras. dir.") }
+    if s.trunk  { items.append("Porta-malas") }
+    if s.winFL  { items.append("Vidro diant. esq.") }
+    if s.winFR  { items.append("Vidro diant. dir.") }
+    if s.winRL  { items.append("Vidro tras. esq.") }
+    if s.winRR  { items.append("Vidro tras. dir.") }
+    if s.sunroof { items.append("Teto solar") }
+    if items.isEmpty { return "portas e vidros fechados" }
+    let line = items.prefix(2).joined(separator: " · ")
+    return items.count > 2 ? "\(line) +\(items.count - 2)" : "\(line) aberto"
+}
+
+// Rodapé: o que está OK (inverso dos issues).
+func securityOkLine(_ s: SecurityActivityAttributes.ContentState) -> String {
+    var ok: [String] = []
+    if !s.anyDoor { ok.append("Portas fechadas") }
+    if !s.anyWindow { ok.append("vidros fechados") }
+    if !s.sunroof { ok.append("teto fechado") }
+    return ok.isEmpty ? "Verifique o carro" : ok.joined(separator: " · ")
 }

@@ -19,6 +19,7 @@ struct ChargeActivityAttributes: ActivityAttributes {
         var charging:     Bool     // false quando termina (estado final)
         var targetPct:    Double   // meta de SOC (limite de carga) — 100 se desconhecido
         var locked:       Bool?    // estado real da trava: true=trancado · nil/false=destrancado
+        var costBrl:      Double?  // custo R$ da sessão (kWh × preço corrente)
         var updatedAtMs:  Double   // ms epoch — bridge envia como número
         var updatedAt: Date {       // computed pra usar nas views
             Date(timeIntervalSince1970: updatedAtMs / 1000.0)

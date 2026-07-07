@@ -171,19 +171,42 @@ struct FollowMap: View {
     var speedKmh: Double = 0          // zoom adaptativo: mais rápido = mais afastado
     @State private var cam: MapCameraPosition = .automatic
     @State private var span = 0.004
+    @State private var spanSpeed = -100.0     // velocidade usada no span atual (força 1º cálculo)
+    /// v2 (Drive 4a): substitui os controles nativos pela coluna flutuante —
+    /// follow (green ativo) + botões extras injetados pela view dona.
+    var v2Accessory: (() -> AnyView)? = nil
     @State private var autoFollow = true
     @State private var lastTouch = Date.distantPast
+    @State private var lastMoveAt = Date.distantPast
     private let tick = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     private var coord: CLLocationCoordinate2D { .init(latitude: lat, longitude: lng) }
     // Span por velocidade: parado ~0,004; ~0,004 + v/120·0,02 (teto 0,03 ≈ ~3 km de visão).
     private func spanForSpeed() -> Double { min(0.03, max(0.0035, 0.004 + speedKmh / 120 * 0.02)) }
-    private func center() { cam = .region(MKCoordinateRegion(center: coord,
-        span: MKCoordinateSpan(latitudeDelta: span, longitudeDelta: span))) }
-    private func followCenter() { span = spanForSpeed(); center() }   // auto: zoom pela velocidade
+
+    private func setCamera(animated: Bool, duration: Double = 0) {
+        let region = MKCoordinateRegion(center: coord,
+            span: MKCoordinateSpan(latitudeDelta: span, longitudeDelta: span))
+        if animated { withAnimation(.linear(duration: duration)) { cam = .region(region) } }
+        else { cam = .region(region) }
+    }
+    // Pan suave seguindo o carro: anima na cadência real do GPS (em vez de cortar
+    // seco a cada update) e só re-zooma quando a velocidade muda o bastante — assim
+    // o mapa não "respira" com a flutuação do velocímetro.
+    private func follow() {
+        let now = Date()
+        let dt = min(3, max(0.6, now.timeIntervalSince(lastMoveAt)))
+        lastMoveAt = now
+        if abs(speedKmh - spanSpeed) > 8 { span = spanForSpeed(); spanSpeed = speedKmh }
+        setCamera(animated: true, duration: dt)
+    }
+    private func recenter() {                 // botão / auto-resume: reenquadra no zoom da velocidade
+        span = spanForSpeed(); spanSpeed = speedKmh
+        setCamera(animated: true, duration: 0.4)
+    }
     private func zoom(_ factor: Double) {
         autoFollow = false; lastTouch = Date()
-        span = min(0.08, max(0.0015, span * factor)); center()
+        span = min(0.08, max(0.0015, span * factor)); setCamera(animated: true, duration: 0.25)
     }
 
     var body: some View {
@@ -196,29 +219,45 @@ struct FollowMap: View {
         .environment(\.colorScheme, .dark)   // mapa escuro (ruas claras)
         .simultaneousGesture(DragGesture().onChanged { _ in autoFollow = false; lastTouch = Date() }
                                           .onEnded { _ in lastTouch = Date() })
-        .onAppear { followCenter() }
-        .onChange(of: lat) { _, _ in if autoFollow { followCenter() } }
-        .onChange(of: lng) { _, _ in if autoFollow { followCenter() } }
-        .onChange(of: speedKmh) { _, _ in if autoFollow { followCenter() } }
+        .onAppear { span = spanForSpeed(); spanSpeed = speedKmh; lastMoveAt = Date(); setCamera(animated: false) }
+        .onChange(of: "\(lat)|\(lng)") { _, _ in if autoFollow { follow() } }
         .onReceive(tick) { _ in
-            if !autoFollow && Date().timeIntervalSince(lastTouch) > 10 { autoFollow = true; followCenter() }
+            if !autoFollow && Date().timeIntervalSince(lastTouch) > 10 { autoFollow = true; recenter() }
         }
         .overlay(alignment: .trailing) { mapControls.padding(.trailing, 12) }
     }
 
     @ViewBuilder
     private var mapControls: some View {
-        let stack = VStack(spacing: 10) {
-            mapButton("plus") { zoom(0.6) }
-            mapButton("minus") { zoom(1.6) }
-            mapButton("location.fill", tint: autoFollow ? DS.green : DS.text) {
-                autoFollow = true; center()
+        if let acc = v2Accessory {
+            VStack(spacing: 10) {
+                Button {
+                    autoFollow = true; recenter()
+                } label: {
+                    Image(systemName: "location.north.fill")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(autoFollow ? .black : DS.text)
+                        .frame(width: 44, height: 44)
+                        .background(autoFollow ? AnyShapeStyle(DS.green) : AnyShapeStyle(.ultraThinMaterial))
+                        .clipShape(Circle())
+                        .overlay(Circle().stroke(autoFollow ? .clear : DS.border, lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+                acc()
             }
-        }
-        if #available(iOS 26, *) {
-            GlassEffectContainer(spacing: 10) { stack }
         } else {
-            stack
+            let stack = VStack(spacing: 10) {
+                mapButton("plus") { zoom(0.6) }
+                mapButton("minus") { zoom(1.6) }
+                mapButton("location.fill", tint: autoFollow ? DS.green : DS.text) {
+                    autoFollow = true; recenter()
+                }
+            }
+            if #available(iOS 26, *) {
+                GlassEffectContainer(spacing: 10) { stack }
+            } else {
+                stack
+            }
         }
     }
 

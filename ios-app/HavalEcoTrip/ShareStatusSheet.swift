@@ -17,7 +17,7 @@ final class ShareStatusStore: ObservableObject {
     @Published var deliveredViaLA: Bool = false   // último share caiu direto na LA dela
 
     private var base: String {
-        let u = Settings.bridgeURL.isEmpty ? AuthConfig.bridgeURL : Settings.bridgeURL
+        let u = BridgeRouter.shared.currentURL
         return u.hasSuffix("/") ? String(u.dropLast()) : u
     }
 
@@ -75,6 +75,8 @@ struct ShareStatusSheet: View {
     @State private var ttlMin = 120
     @State private var recipientKind: RecipientKind = .other
     @State private var otherName = ""
+    @State private var includeSoc = true
+    @State private var pulse = false
 
     enum RecipientKind: String, CaseIterable, Identifiable {
         case grasi = "Grasi"
@@ -92,6 +94,23 @@ struct ShareStatusSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 14) {
+                    // Preview: o que a pessoa vê ao abrir o link.
+                    DSCard(title: "O que a pessoa vê") {
+                        HStack(spacing: 12) {
+                            Image(systemName: "car.fill").font(.system(size: 22)).foregroundStyle(DS.teal)
+                                .frame(width: 34)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("Carro ao vivo no mapa").font(.system(size: 13, weight: .semibold)).foregroundStyle(DS.text)
+                                Text("distância + tempo de carro até você")
+                                    .font(.system(size: 10)).foregroundStyle(DS.muted)
+                                if includeSoc {
+                                    Text("SOC e autonomia").font(.system(size: 10)).foregroundStyle(DS.green)
+                                }
+                            }
+                            Spacer()
+                        }
+                    }
+
                     DSCard {
                         VStack(alignment: .leading, spacing: 12) {
                             Text("Quem abrir o link vê o carro ao vivo no mapa (velocidade, marcha, SOC, autonomia, temperaturas) e a distância + tempo de carro até onde a pessoa está.")
@@ -130,21 +149,39 @@ struct ShareStatusSheet: View {
                             Text("Duração do link").font(.caption).foregroundStyle(DS.muted)
                             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3), spacing: 8) {
                                 ForEach(options, id: \.1) { opt in
+                                    let on = ttlMin == opt.1
                                     Button { ttlMin = opt.1 } label: {
-                                        Text(opt.0).font(.subheadline.weight(.semibold))
-                                            .frame(maxWidth: .infinity).padding(.vertical, 12)
-                                            .background(ttlMin == opt.1 ? DS.teal.opacity(0.22) : DS.panel2)
-                                            .foregroundStyle(ttlMin == opt.1 ? DS.teal : DS.text)
-                                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                        Text(opt.0).font(.system(size: 13, weight: .semibold))
+                                            .frame(maxWidth: .infinity).padding(.vertical, 10)
+                                            .foregroundStyle(on ? Color.black : DS.text2)
+                                            .background(on ? DS.teal : DS.panel2)
+                                            .clipShape(Capsule())
                                     }.buttonStyle(.plain)
                                 }
                             }
+
+                            // Toggle: incluir SOC e autonomia na tela da pessoa.
+                            Toggle(isOn: $includeSoc) {
+                                Text("Incluir SOC e autonomia").font(.system(size: 13)).foregroundStyle(DS.text)
+                            }
+                            .tint(DS.green)
+                            .padding(.top, 2)
                         }
                     }
 
                     if let url = store.url, URL(string: url) != nil {
                         DSCard {
                             VStack(alignment: .leading, spacing: 12) {
+                                // Chip "ativo · <nome>" com respiração.
+                                HStack(spacing: 6) {
+                                    Circle().fill(DS.green).frame(width: 8, height: 8)
+                                        .opacity(pulse ? 0.35 : 1)
+                                        .animation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true), value: pulse)
+                                    Text("ativo\(activeName.isEmpty ? "" : " · \(activeName)")")
+                                        .font(.system(size: 12, weight: .bold)).foregroundStyle(DS.green)
+                                    Spacer()
+                                }
+                                .onAppear { pulse = true }
                                 // Quando o share foi entregue direto na LA da Grasi (paired),
                                 // a UI muda: chama destaque do delivery; link fica como
                                 // fallback opcional ("se ela perder a LA, manda este link").
@@ -168,19 +205,33 @@ struct ShareStatusSheet: View {
                                 // Compartilha como TEXTO (não só URL): o destinatário recebe
                                 // "Acompanhe meu trajeto[ para <destino>]. <link>" — apps tipo
                                 // WhatsApp/Messages auto-linkificam a URL no fim da frase.
+                                // Copiar link (pill verde) — primária.
+                                Button {
+                                    UIPasteboard.general.string = shareText(url: url)
+                                } label: {
+                                    Label("Copiar link", systemImage: "doc.on.doc")
+                                        .font(.system(size: 15, weight: .bold)).frame(maxWidth: .infinity).frame(height: 42)
+                                        .foregroundStyle(Color.black)
+                                        .background(DS.green)
+                                        .clipShape(Capsule())
+                                }.buttonStyle(.plain)
+                                // Compartilhar via share sheet (secundária).
                                 ShareLink(item: shareText(url: url),
                                           subject: Text("Trajeto Haval")) {
-                                    Label(store.deliveredViaLA ? "Mandar link mesmo assim" : "Compartilhar link",
+                                    Label(store.deliveredViaLA ? "Mandar link mesmo assim" : "Compartilhar",
                                           systemImage: "square.and.arrow.up")
-                                        .font(.subheadline.weight(.semibold)).frame(maxWidth: .infinity).padding(.vertical, 12)
+                                        .font(.subheadline.weight(.semibold)).frame(maxWidth: .infinity).padding(.vertical, 11)
                                         .background(DS.teal.opacity(0.22)).foregroundStyle(DS.teal)
-                                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                        .clipShape(Capsule())
                                 }
+                                // Parar (destrutiva).
                                 Button(role: .destructive) { Task { await store.revoke() } } label: {
-                                    Label("Revogar link", systemImage: "xmark.circle")
-                                        .font(.subheadline).frame(maxWidth: .infinity).padding(.vertical, 10)
+                                    Label("Parar", systemImage: "stop.circle")
+                                        .font(.system(size: 15, weight: .bold)).frame(maxWidth: .infinity).frame(height: 42)
                                         .foregroundStyle(DS.red)
-                                }
+                                        .background(DS.red.opacity(0.12))
+                                        .clipShape(Capsule())
+                                }.buttonStyle(.plain)
                             }
                         }
                     } else {
@@ -203,6 +254,13 @@ struct ShareStatusSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Fechar") { dismiss() } } }
         }
+    }
+
+    /// Nome pra chip "ativo · <nome>": destino resolvido, senão o destinatário escolhido.
+    private var activeName: String {
+        if let n = store.destName?.trimmingCharacters(in: .whitespacesAndNewlines), !n.isEmpty { return n }
+        if recipientKind == .grasi { return store.grasiName }
+        return otherName.trimmingCharacters(in: .whitespaces)
     }
 
     private var expiryText: String {

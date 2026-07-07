@@ -31,6 +31,10 @@ struct ChargeForecastSheet: View {
     private var usableKwh: Double { Double(max(0, soc - 15)) / 100 * capacity }
     private var currentKwh: Double { usableKwh }
     private var daysLeft: Double? { dailyKwh > 0.05 ? currentKwh / dailyKwh : nil }
+    private var daysColor: Color {
+        guard let d = daysLeft else { return DS.muted }
+        return d < 1 ? DS.orange : (d < 2 ? DS.yellow : DS.green)
+    }
 
     // Vampire drain: % de SOC perdido parado por dia. Olha o intervalo entre o fim
     // de uma viagem e o início da próxima; só conta quando o SOC caiu (sem recarga).
@@ -55,44 +59,20 @@ struct ChargeForecastSheet: View {
             ScrollView {
                 VStack(spacing: 14) {
                     if loader.trips.isEmpty {
-                        DSCard { Text(loader.loading ? "Carregando…" : "Sem viagens pra estimar.").font(.callout).foregroundStyle(DS.muted).frame(maxWidth: .infinity).padding(.vertical, 10) }
+                        DSCard {
+                            VStack(spacing: 10) {
+                                if loader.loading { ProgressView().tint(DS.muted) }
+                                else { Image(systemName: "calendar.badge.clock").font(.system(size: 40)).foregroundStyle(DS.muted) }
+                                Text(loader.loading ? "Carregando…" : "Sem viagens pra estimar.").font(.callout).foregroundStyle(DS.muted)
+                            }.frame(maxWidth: .infinity).padding(.vertical, 10)
+                        }
                     } else {
-                        DSCard {
-                            VStack(spacing: 8) {
-                                Text("A carga atual dura").font(.caption).foregroundStyle(DS.muted)
-                                if let d = daysLeft {
-                                    Text(d >= 1 ? "~\(Fmt.dec1(d)) dias" : "menos de 1 dia")
-                                        .font(.system(size: 46, weight: .heavy, design: .rounded))
-                                        .foregroundStyle(d < 1 ? DS.orange : (d < 2 ? DS.yellow : DS.green))
-                                    Text("Carregue \(whenText(d))").font(.subheadline).foregroundStyle(DS.muted)
-                                } else {
-                                    Text("—").font(.system(size: 46, weight: .heavy, design: .rounded)).foregroundStyle(DS.muted)
-                                    Text("Sem consumo recente pra estimar").font(.subheadline).foregroundStyle(DS.muted)
-                                }
-                            }.frame(maxWidth: .infinity).padding(.vertical, 4)
-                        }
-                        DSCard {
-                            HStack(spacing: 14) {
-                                cell("\(soc)", "%", "SOC agora", arrivalSocColor(soc))
-                                cell(Fmt.dec1(currentKwh), "kWh", "Útil (até 15%)", DS.green)
-                                cell(Fmt.dec1(dailyKwh), "kWh/dia", "Uso médio", DS.teal)
-                            }
-                        }
-                        if let vd = vampireDrain {
-                            DSCard {
-                                HStack(spacing: 10) {
-                                    Image(systemName: "moon.zzz.fill").foregroundStyle(vd > 2 ? DS.orange : DS.muted)
-                                    VStack(alignment: .leading, spacing: 1) {
-                                        Text("Perda parado").font(.caption2).foregroundStyle(DS.muted)
-                                        Text("~\(Fmt.dec1(vd))%/dia").font(.headline).foregroundStyle(vd > 2 ? DS.orange : DS.text)
-                                    }
-                                    Spacer()
-                                    Text(vd > 2 ? "acima do normal (~1%/dia)" : "normal").font(.caption2).foregroundStyle(DS.muted)
-                                }
-                            }
-                        }
-                        Text("Estimativa pelo consumo de bateria dos últimos 14 dias e capacidade útil de ~\(Fmt.dec1(capacity)) kWh. Perda parado vem da queda de SOC entre viagens. Varia com uso e clima.")
-                            .font(.caption2).foregroundStyle(DS.muted).frame(maxWidth: .infinity, alignment: .leading)
+                        hero
+                        cellsCard
+                        if let vd = vampireDrain { vampireRow(vd) }
+                        Text("estimativa pelo consumo de bateria dos últimos 14 dias e capacidade útil de ~\(Fmt.dec1(capacity)) kWh · perda parado vem da queda de SOC entre viagens · varia com uso e clima")
+                            .font(.system(size: 10.5)).foregroundStyle(DS.muted)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
                 .padding(16)
@@ -105,12 +85,77 @@ struct ChargeForecastSheet: View {
         }
     }
 
+    // Hero: quantos dias a carga atual dura (numeral ultraLight) + quando carregar.
+    private var hero: some View {
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 0) {
+                if let d = daysLeft {
+                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                        Text(d >= 1 ? Fmt.dec1(d) : "< 1")
+                            .font(.system(size: 60, weight: .ultraLight, design: .rounded))
+                            .foregroundStyle(daysColor).monospacedDigit()
+                        Text("dias").font(.system(size: 16)).foregroundStyle(DS.muted)
+                    }
+                    Text("A CARGA ATUAL DURA").font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(DS.muted).tracking(0.5)
+                    Text("carregue \(whenText(d))").font(.system(size: 12)).foregroundStyle(DS.text2).padding(.top, 4)
+                } else {
+                    Text("—").font(.system(size: 60, weight: .ultraLight, design: .rounded)).foregroundStyle(DS.muted)
+                    Text("A CARGA ATUAL DURA").font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(DS.muted).tracking(0.5)
+                    Text("sem consumo recente pra estimar").font(.system(size: 12)).foregroundStyle(DS.text2).padding(.top, 4)
+                }
+            }
+            Spacer()
+            VStack(alignment: .trailing, spacing: 8) {
+                splitValue("\(soc)%", "SOC agora", arrivalSocColor(soc))
+                splitValue("\(Fmt.dec1(currentKwh)) kWh", "útil até 15%", DS.green)
+            }
+        }
+    }
+
+    private var cellsCard: some View {
+        DSCard {
+            HStack(spacing: 14) {
+                cell("\(soc)", "%", "SOC agora", arrivalSocColor(soc))
+                cell(Fmt.dec1(currentKwh), "kWh", "Útil (até 15%)", DS.green)
+                cell(Fmt.dec1(dailyKwh), "kWh/dia", "Uso médio", DS.teal)
+            }
+        }
+    }
+
+    private func vampireRow(_ vd: Double) -> some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                Image(systemName: "moon.zzz.fill").font(.system(size: 14)).foregroundStyle(vd > 2 ? DS.orange : DS.text2).frame(width: 20)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Perda parado").font(.system(size: 13)).foregroundStyle(DS.text)
+                    Text(vd > 2 ? "acima do normal (~1%/dia)" : "dentro do normal").font(.system(size: 9.5)).foregroundStyle(DS.muted)
+                }
+                Spacer()
+                Text("~\(Fmt.dec1(vd))%/dia").font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundStyle(vd > 2 ? DS.orange : DS.text).monospacedDigit()
+            }
+            .padding(.horizontal, 12).padding(.vertical, 11)
+        }
+        .background(DS.panel2)
+        .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
+    }
+
     private func whenText(_ days: Double) -> String {
         if days < 1 { return "hoje" }
         let target = Date().addingTimeInterval(days * 86400)
         if days < 2 { return "amanhã" }
         let f = DateFormatter(); f.locale = Locale(identifier: "pt_BR"); f.dateFormat = "EEEE"
         return "até " + f.string(from: target)
+    }
+
+    private func splitValue(_ value: String, _ label: String, _ color: Color) -> some View {
+        VStack(alignment: .trailing, spacing: 0) {
+            Text(value).font(.system(size: 17, weight: .semibold, design: .rounded))
+                .foregroundStyle(color).monospacedDigit()
+            Text(label).font(.system(size: 9.5)).foregroundStyle(DS.muted)
+        }
     }
 
     private func cell(_ v: String, _ unit: String, _ label: String, _ color: Color) -> some View {

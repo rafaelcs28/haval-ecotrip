@@ -2678,6 +2678,10 @@ function setLogsDateFilter(filter) {
 
 // ── Auto-Trips ────────────────────────────────────────────────────────────────
 let cachedAutoTrips = null;
+// Exposto pro script inline da view-desloc (análises client-side) acessarem as
+// viagens carregadas. `let` no topo não vira propriedade de window; o getter
+// fecha sobre o escopo do módulo e devolve o valor atual.
+try { Object.defineProperty(window, 'getCachedAutoTrips', { value: () => cachedAutoTrips, configurable: true }); } catch (_) {}
 
 function loadAutoTrips() {
   document.querySelector('[data-panel="auto"] .tab-notif')?.remove();

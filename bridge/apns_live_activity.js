@@ -158,7 +158,7 @@ function tokenCount() { return startTokens.length + updateTokens.length + alertT
 
 // ── Envio HTTP/2 pra uma lista de tokens ──────────────────────────────────────
 // pushType: 'liveactivity' (topic .push-type.liveactivity) ou 'alert' (topic = bundle).
-async function _send(targets, body, pushType = 'liveactivity') {
+async function _send(targets, body, pushType = 'liveactivity', attrition = false) {
   if (!enabled || !targets.length) return { sent: 0, dead: [] };
   const jwt = _getJwt();
   const client = http2.connect(`https://${_apnsHost()}`);
@@ -208,19 +208,18 @@ async function _send(targets, body, pushType = 'liveactivity') {
   _stats.last_push_ms = Date.now();
   _stats.last_sent = sent;
   _stats.last_dead = dead.length;
+  const now = Date.now();
   if (dead.length) {
-    const now = Date.now();
     _stats.dead_total += dead.length;
     _stats.last_dead_ms = now;
-    for (let i = 0; i < dead.length; i++) _deadTs.push(now);
-    const cutoff = now - 24 * 3600_000;
-    while (_deadTs.length && _deadTs[0] < cutoff) _deadTs.shift();
-    _stats.dead_24h = _deadTs.length;
-  } else {
-    const cutoff = Date.now() - 24 * 3600_000;
-    while (_deadTs.length && _deadTs[0] < cutoff) _deadTs.shift();
-    _stats.dead_24h = _deadTs.length;
+    // Só conta attrition (janela 24h que dispara o alerta) de tokens que NÃO
+    // deviam morrer: push-to-start. 410 em token de update é fim de Live
+    // Activity — expiração esperada, churn normal, não sintoma de problema.
+    if (attrition) for (let i = 0; i < dead.length; i++) _deadTs.push(now);
   }
+  const cutoff = now - 24 * 3600_000;
+  while (_deadTs.length && _deadTs[0] < cutoff) _deadTs.shift();
+  _stats.dead_24h = _deadTs.length;
   return { sent, dead };
 }
 
@@ -252,7 +251,7 @@ async function pushStart(type, deviceId, attributes, contentState, opts = {}) {
   };
   if (opts.staleDate) aps['stale-date'] = Math.floor(opts.staleDate / 1000);
   if (opts.alert) { aps.alert = opts.alert; aps.sound = 'default'; }
-  const { sent, dead } = await _send(targets, JSON.stringify({ aps }));
+  const { sent, dead } = await _send(targets, JSON.stringify({ aps }), 'liveactivity', true);
   if (dead.length) { startTokens = startTokens.filter(t => !dead.includes(t.token)); _save(); }
   return { sent };
 }

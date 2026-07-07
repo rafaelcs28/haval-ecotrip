@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Trajeto compartilhado — Haval Hub</title>
+<meta name="theme-color" content="#0f0f0f">
+<link rel="stylesheet" href="/leaflet.css">
+<script src="/leaflet.js"></script>
+<script src="/chart.min.js"></script>
+<style>
+  :root { --bg:#0f0f0f; --panel:#1a1a1a; --border:rgba(255,255,255,.08); --text:#e2e8f0;
+          --muted:#94a3b8; --green:#a3e635; --teal:#5eead4; --blue:#60a5fa; --orange:#f97316; --red:#f87171; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: var(--bg); color: var(--text); font-family: -apple-system, sans-serif; height: 100%; }
+  body { display: flex; flex-direction: column; padding: env(safe-area-inset-top,0) 0 env(safe-area-inset-bottom,0); }
+  header { padding: 14px 16px 8px; }
+  h1 { font-size: 15px; font-weight: 700; }
+  .sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; padding: 0 16px 8px; }
+  .stat { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 8px; text-align: center; }
+  .stat-label { font-size: 9px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 3px; }
+  .stat-val { font-size: 15px; font-weight: 700; color: var(--teal); font-variant-numeric: tabular-nums; }
+  #map { flex: 1; min-height: 260px; }
+
+  /* Timeline scrubber */
+  .timeline { background: var(--panel); border-top: 1px solid var(--border); padding: 10px 12px 6px; }
+  .tl-row { display: flex; align-items: center; gap: 10px; }
+  .tl-btn { width: 36px; height: 36px; border-radius: 50%; background: var(--teal); color: #06302a;
+            border: none; font-size: 15px; font-weight: 800; cursor: pointer; display: flex;
+            align-items: center; justify-content: center; flex-shrink: 0; }
+  .tl-btn:disabled { opacity: .4; }
+  .tl-slider { flex: 1; -webkit-appearance: none; height: 4px; border-radius: 2px;
+               background: rgba(255,255,255,.12); outline: none; }
+  .tl-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px;
+               border-radius: 50%; background: var(--teal); cursor: pointer; }
+  .tl-slider::-moz-range-thumb { width: 16px; height: 16px; border-radius: 50%; background: var(--teal); border: none; }
+  .tl-time { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; min-width: 44px; text-align: right; }
+  .tl-live { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 8px; }
+  .tl-metric { background: rgba(255,255,255,.03); border-radius: 8px; padding: 5px 6px; text-align: center; }
+  .tl-metric-label { font-size: 9px; color: var(--muted); }
+  .tl-metric-val { font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .tl-speed-toggle { display: flex; gap: 4px; margin-left: auto; }
+  .tl-speed-toggle button { background: rgba(255,255,255,.06); border: 1px solid var(--border);
+              color: var(--muted); font-size: 10px; padding: 3px 7px; border-radius: 6px; cursor: pointer; }
+  .tl-speed-toggle button.active { background: var(--teal); color: #06302a; border-color: var(--teal); font-weight: 700; }
+
+  .chart-wrap { background: var(--panel); border-top: 1px solid var(--border); padding: 8px 12px; position: relative; }
+  .chart-title { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .8px; margin-bottom: 4px; }
+  canvas { display: block; width: 100% !important; height: 70px !important; }
+  .err { padding: 40px 20px; text-align: center; color: var(--red); font-size: 14px; }
+  .foot { padding: 8px 16px; font-size: 10px; color: var(--muted); text-align: center; }
+</style>
+</head>
+<body>
+<div id="root" style="flex:1;display:flex;flex-direction:column;min-height:0">
+  <header>
+    <h1 id="title">Carregando…</h1>
+    <div class="sub" id="subtitle"></div>
+  </header>
+  <div class="stats" id="stats" hidden></div>
+  <div id="map" hidden></div>
+
+  <div class="timeline" id="timeline" hidden>
+    <div class="tl-row">
+      <button class="tl-btn" id="tl-play">▶</button>
+      <input type="range" class="tl-slider" id="tl-slider" min="0" max="100" value="0" step="1">
+      <span class="tl-time" id="tl-time">0m</span>
+      <div class="tl-speed-toggle">
+        <button data-x="1">1×</button>
+        <button data-x="4" class="active">4×</button>
+        <button data-x="16">16×</button>
+      </div>
+    </div>
+    <div class="tl-live" id="tl-live"></div>
+  </div>
+
+  <div class="chart-wrap" id="chart-speed-wrap" hidden>
+    <div class="chart-title">Velocidade (km/h)</div>
+    <canvas id="chart-speed"></canvas>
+  </div>
+  <div class="chart-wrap" id="chart-pwr-wrap" hidden>
+    <div class="chart-title">Potência (kW) · negativo = regen</div>
+    <canvas id="chart-pwr"></canvas>
+  </div>
+  <div class="chart-wrap" id="chart-soc-wrap" hidden>
+    <div class="chart-title">Bateria (%)</div>
+    <canvas id="chart-soc"></canvas>
+  </div>
+  <div class="chart-wrap" id="chart-rpm-wrap" hidden>
+    <div class="chart-title">Motor à combustão (RPM)</div>
+    <canvas id="chart-rpm"></canvas>
+  </div>
+  <div class="foot">Haval Hub · trajeto compartilhado</div>
+</div>
+
+<script>
+const token = location.pathname.split('/').pop();
+const $ = id => document.getElementById(id);
+const fmt = { dist: k => (k >= 10 ? Math.round(k) : k.toFixed(1)) + ' km',
+              dur: s => { const h = Math.floor(s/3600), m = Math.round((s%3600)/60); return h ? `${h}h ${m}min` : `${m}min`; },
+              kwh: k => k.toFixed(1) + ' kWh',
+              hhmm: ms => new Date(ms).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+              date: ms => new Date(ms).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' }),
+              minSec: sec => { const m = Math.floor(sec/60), s = Math.round(sec%60); return `${m}m ${String(s).padStart(2,'0')}s`; } };
+
+// Estado global
+let samples = [], startMs = 0, charts = [], carMarker = null, mapRef = null;
+let playing = false, speedX = 4, rafId = null, lastFrameMs = 0;
+let userPanning = false, userPanTimer = null;
+
+async function load() {
+  try {
+    const r = await fetch('/api/shared-trip/' + encodeURIComponent(token));
+    if (!r.ok) {
+      const j = await r.json().catch(() => ({}));
+      $('root').innerHTML = `<div class="err">✗ ${j.error || 'Falha ao carregar'}</div>`;
+      return;
+    }
+    const { autoTrip: at, samples: raw } = await r.json();
+    if (!at) return;
+    samples = (raw || []).filter(s => s && s.t != null);
+    startMs = +at.startMs || 0;
+
+    $('title').textContent = at.name || `${at.knownStart || '?'} → ${at.knownEnd || '?'}`;
+    $('subtitle').textContent = `${fmt.date(at.startMs)} · ${fmt.hhmm(at.startMs)} → ${fmt.hhmm(at.endMs)}`;
+
+    // Stats
+    $('stats').hidden = false;
+    // Se rodou motor à combustão, mostra fuelL no lugar do score. Score fica na live.
+    const fuelL = +at.fuelL || 0;
+    const hybridKm = +at.hybridDistKm || 0;
+    const statsRow4 = fuelL > 0
+      ? `<div class="stat"><div class="stat-label">Gasolina</div><div class="stat-val" style="color:#f97316">${fuelL.toFixed(2)} L</div></div>`
+      : `<div class="stat"><div class="stat-label">Score</div><div class="stat-val">${Math.round(+at.driveScore||0)}</div></div>`;
+    $('stats').innerHTML = `
+      <div class="stat"><div class="stat-label">Distância</div><div class="stat-val">${fmt.dist(+at.distKm||0)}</div></div>
+      <div class="stat"><div class="stat-label">Tempo</div><div class="stat-val">${fmt.dur(+at.timeSec||0)}</div></div>
+      <div class="stat"><div class="stat-label">Energia</div><div class="stat-val">${fmt.kwh(+at.netKwh||0)}</div></div>
+      ${statsRow4}`;
+
+    // Map
+    $('map').hidden = false;
+    const map = L.map('map', { zoomControl: true, attributionControl: false });
+    mapRef = map;
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom: 19 }).addTo(map);
+    const pts = samples.filter(s => s.lat && s.lng).map(s => [s.lat, s.lng]);
+    if (pts.length) {
+      L.polyline(pts, { color: '#5eead4', weight: 4, opacity: .85 }).addTo(map);
+      L.marker(pts[0], { icon: dot('#a3e635') }).addTo(map);
+      L.marker(pts[pts.length-1], { icon: dot('#f87171') }).addTo(map);
+      // Marcador móvel da posição atual
+      carMarker = L.marker(pts[0], { icon: L.divIcon({ className: '', html: '<div style="width:18px;height:18px;border-radius:50%;background:#5eead4;border:3px solid #06302a;box-shadow:0 0 0 2px #5eead4,0 4px 12px rgba(0,0,0,.6)"></div>', iconSize:[18,18], iconAnchor:[9,9] }), zIndexOffset: 1000 }).addTo(map);
+      map.fitBounds(L.latLngBounds(pts), { padding: [30, 30] });
+      // iOS Safari às vezes calcula o size do map div errado no 1º layout —
+      // força recálculo depois pra o pan pousar no lugar certo.
+      setTimeout(() => map.invalidateSize(), 200);
+      setTimeout(() => map.invalidateSize(), 800);
+      window.addEventListener('resize', () => map.invalidateSize());
+    }
+    // Só detecta INTERAÇÃO real (pointerdown/touchstart no container) — o
+    // fitBounds/panTo internos disparam dragstart/zoomstart programáticos que
+    // travavam o auto-follow.
+    const mapEl = $('map');
+    const markUser = () => {
+      userPanning = true;
+      if (userPanTimer) clearTimeout(userPanTimer);
+      userPanTimer = setTimeout(() => { userPanning = false; }, 4000);
+    };
+    mapEl.addEventListener('pointerdown', markUser, { passive: true });
+    mapEl.addEventListener('wheel',       markUser, { passive: true });
+
+    // Timeline + charts
+    if (samples.length > 1) {
+      $('timeline').hidden = false;
+      $('tl-slider').max = samples.length - 1;
+      buildCharts();
+      wireTimeline();
+      updateFrame(0);
+    }
+  } catch (e) {
+    $('root').innerHTML = `<div class="err">✗ ${e.message}</div>`;
+  }
+}
+function dot(color) {
+  return L.divIcon({ className: '', html: `<div style="width:14px;height:14px;border-radius:50%;background:${color};border:2px solid #fff;box-shadow:0 2px 6px #000"></div>`, iconSize:[14,14], iconAnchor:[7,7] });
+}
+
+// Plugin simples pra desenhar linha vertical no ponto atual
+const VLine = {
+  id: 'vLine',
+  afterDatasetsDraw(chart) {
+    const idx = chart.$vLineIdx;
+    if (idx == null) return;
+    const x = chart.scales.x.getPixelForValue(chart.data.labels[idx]);
+    const { top, bottom } = chart.chartArea;
+    const ctx = chart.ctx;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(94,234,212,.9)';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath();
+    ctx.moveTo(x, top); ctx.lineTo(x, bottom); ctx.stroke();
+    ctx.restore();
+  },
+};
+Chart.register(VLine);
+
+function buildCharts() {
+  const t = samples.map(s => (s.t || 0) / 60);
+  const spd = samples.map(s => +s.spd || 0);
+  const pwr = samples.map(s => (s.pwr != null ? +s.pwr : (+s.evKw || 0)));
+  const soc = samples.map(s => +s.soc || 0);
+  const commonOpts = {
+    responsive: true, maintainAspectRatio: false, animation: false,
+    plugins: { legend: { display: false }, tooltip: { enabled: false } },
+    scales: {
+      x: { type: 'linear', ticks: { color: 'rgba(148,163,184,.7)', font: { size: 9 }, maxTicksLimit: 6, callback: v => Math.round(v) + 'm' }, grid: { color: 'rgba(255,255,255,.04)' } },
+      y: { ticks: { color: 'rgba(148,163,184,.7)', font: { size: 9 }, maxTicksLimit: 4 }, grid: { color: 'rgba(255,255,255,.04)' } },
+    },
+    elements: { point: { radius: 0 }, line: { tension: .3, borderWidth: 1.5 } },
+  };
+  const mk = (id, color, values) => {
+    const c = new Chart($(id).getContext('2d'), {
+      type: 'line',
+      data: { labels: t, datasets: [{ data: values.map((v, i) => ({ x: t[i], y: v })), borderColor: color, backgroundColor: color + '22', fill: 'origin' }] },
+      options: commonOpts,
+    });
+    return c;
+  };
+  const rpm = samples.map(s => +s.rpm || 0);
+  if (spd.some(v => v > 0)) { $('chart-speed-wrap').hidden = false; charts.push({ chart: mk('chart-speed', '#5eead4', spd), id: 'speed' }); }
+  if (pwr.some(v => v !== 0)) { $('chart-pwr-wrap').hidden = false; charts.push({ chart: mk('chart-pwr', '#60a5fa', pwr), id: 'pwr' }); }
+  if (soc.some(v => v > 0)) { $('chart-soc-wrap').hidden = false; charts.push({ chart: mk('chart-soc', '#a3e635', soc), id: 'soc' }); }
+  // Só mostra o gráfico de RPM se o motor à combustão realmente rodou
+  if (rpm.some(v => v > 0)) { $('chart-rpm-wrap').hidden = false; charts.push({ chart: mk('chart-rpm', '#f97316', rpm), id: 'rpm' }); }
+}
+
+function wireTimeline() {
+  $('tl-slider').addEventListener('input', e => {
+    pausePlay(); updateFrame(+e.target.value);
+  });
+  $('tl-play').addEventListener('click', togglePlay);
+  document.querySelectorAll('.tl-speed-toggle button').forEach(b => {
+    b.addEventListener('click', () => {
+      document.querySelectorAll('.tl-speed-toggle button').forEach(x => x.classList.remove('active'));
+      b.classList.add('active');
+      speedX = +b.dataset.x;
+    });
+  });
+}
+function togglePlay() {
+  if (playing) return pausePlay();
+  const cur = +$('tl-slider').value;
+  if (cur >= samples.length - 1) updateFrame(0);
+  playing = true;
+  $('tl-play').textContent = '⏸';
+  lastFrameMs = performance.now();
+  step();
+}
+function pausePlay() {
+  playing = false;
+  $('tl-play').textContent = '▶';
+  if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+}
+function step() {
+  if (!playing) return;
+  const now = performance.now();
+  const dt = (now - lastFrameMs) / 1000;   // segundos reais
+  lastFrameMs = now;
+  const cur = +$('tl-slider').value;
+  // avança em "segundos simulados"
+  const s = samples[cur], sNext = samples[Math.min(cur + 1, samples.length - 1)];
+  const sampleGap = sNext.t - s.t || 1;
+  const advanceSampleGaps = dt * speedX / sampleGap;
+  const next = Math.min(samples.length - 1, cur + Math.max(1, Math.round(advanceSampleGaps)));
+  updateFrame(next);
+  if (next >= samples.length - 1) return pausePlay();
+  rafId = requestAnimationFrame(step);
+}
+
+function updateFrame(i) {
+  i = Math.max(0, Math.min(samples.length - 1, i));
+  $('tl-slider').value = i;
+  const s = samples[i];
+  $('tl-time').textContent = fmt.minSec(s.t || 0);
+  // Move marcador + centraliza mapa na posição atual (respeitando pan do usuário).
+  // setView com zoom atual em vez de panTo — no iOS Safari o panTo pode não
+  // atualizar se o size do container tá desatualizado.
+  if (carMarker && s.lat && s.lng) {
+    carMarker.setLatLng([s.lat, s.lng]);
+    if (mapRef && !userPanning) {
+      mapRef.setView([s.lat, s.lng], mapRef.getZoom(), { animate: true, duration: 0.3, noMoveStart: true });
+    }
+  }
+  // VLine nos charts
+  for (const { chart } of charts) { chart.$vLineIdx = i; chart.draw(); }
+  // Métricas ao vivo
+  const pwr = (s.pwr != null ? +s.pwr : (+s.evKw || 0));
+  const rpm = +s.rpm || 0;
+  // Se o motor a combustão está girando agora, mostra RPM no lugar da hora.
+  const lastCard = rpm > 0
+    ? `<div class="tl-metric"><div class="tl-metric-label">RPM</div><div class="tl-metric-val" style="color:#f97316">${Math.round(rpm)}</div></div>`
+    : `<div class="tl-metric"><div class="tl-metric-label">Hora</div><div class="tl-metric-val">${fmt.hhmm(startMs + (s.t||0)*1000)}</div></div>`;
+  $('tl-live').innerHTML = `
+    <div class="tl-metric"><div class="tl-metric-label">Velocidade</div><div class="tl-metric-val" style="color:#5eead4">${Math.round(+s.spd||0)} km/h</div></div>
+    <div class="tl-metric"><div class="tl-metric-label">Potência</div><div class="tl-metric-val" style="color:${pwr < 0 ? '#a3e635' : '#60a5fa'}">${pwr.toFixed(1)} kW</div></div>
+    <div class="tl-metric"><div class="tl-metric-label">SOC</div><div class="tl-metric-val" style="color:#a3e635">${Math.round(+s.soc||0)}%</div></div>
+    ${lastCard}`;
+}
+
+load();
+</script>
+</body>
+</html>

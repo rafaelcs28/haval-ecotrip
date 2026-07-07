@@ -76,41 +76,6 @@ function _healthStats() {
   return r;
 }
 
-// ── Diagnóstico temporário (24h) pra achar a causa da "cegueira local" ────────
-// Loop-lag: mede se o event loop trava (GC, exec síncrono, I/O pesado) — se os
-// probes TCP/HTTP falharem exatamente quando o lag pica, é boot-race/blocking,
-// não outage real. `alert_diag.log` guarda cada falha de sonda E cada notify
-// disparado, com o lag/uptime/mem daquele instante. Remover após validar.
-const ALERT_DIAG_FILE = path.join(__dirname, 'alert_diag.log');
-const ALERT_DIAG_MAX_BYTES = 5 * 1024 * 1024;
-let _loopLagMs = 0;
-let _loopLagMax60s = 0;
-{
-  const TICK_MS = 200;
-  let last = Date.now();
-  setInterval(() => {
-    const now = Date.now();
-    _loopLagMs = Math.max(0, now - last - TICK_MS);
-    last = now;
-    if (_loopLagMs > _loopLagMax60s) _loopLagMax60s = _loopLagMs;
-  }, TICK_MS);
-  setInterval(() => { _loopLagMax60s = _loopLagMs; }, 60_000); // reseta o pico por janela
-}
-function _diagLog(event, extra) {
-  try {
-    if (fs.existsSync(ALERT_DIAG_FILE) && fs.statSync(ALERT_DIAG_FILE).size > ALERT_DIAG_MAX_BYTES) {
-      fs.truncateSync(ALERT_DIAG_FILE, 0);
-    }
-    fs.appendFileSync(ALERT_DIAG_FILE, JSON.stringify({
-      ts: Date.now(), event,
-      loopLagMs: _loopLagMs, loopLagMax60s: _loopLagMax60s,
-      uptime_s: Math.round(process.uptime()),
-      rss_mb: Math.round(process.memoryUsage().rss / 1048576),
-      ...extra,
-    }) + '\n');
-  } catch (_) {}
-}
-
 // ── Marker de shutdown limpo: distingue restart de ajuste/deploy (SIGINT/SIGTERM
 // recebido → escrevemos o marker antes de sair) de queda (crash sem marker). ──
 const SHUTDOWN_MARKER = path.join(__dirname, '.clean_shutdown');
@@ -270,7 +235,6 @@ function _pollHA() {
   const onFail = (msg) => {
     _haFailCount++;
     _haStatus = { checked_at: Date.now(), up: _haFailCount >= 2 ? false : null, latency_ms: null, error: msg };
-    _diagLog('ha_probe_fail', { failCount: _haFailCount, error: msg, elapsed_ms: Date.now() - t0 });
   };
   req.on('error', e => onFail(e.message));
   req.on('timeout', () => { req.destroy(); onFail('timeout'); });
@@ -304,10 +268,6 @@ async function _pollMqttBroker() {
     errors: [r1883.error && `1883:${r1883.error}`, r1884.error && `1884:${r1884.error}`, r8883.error && `8883:${r8883.error}`]
       .filter(Boolean).join(', ') || null,
   };
-  if (!allOk) {
-    _diagLog('mqtt_probe_fail', { failCount: _mqttBrokerFailCount,
-      p1883: r1883, p1884: r1884, p8883: r8883 });
-  }
 }
 _pollMqttBroker();
 setInterval(_pollMqttBroker, 5_000);
@@ -324,7 +284,6 @@ function _pollGateway() {
       const errMsg = (stderr || err.message || '').trim().slice(0, 200);
       _gwStatus = { checked_at: Date.now(), up: _gwFailCount >= 2 ? false : null, latency_ms: null,
         error: errMsg };
-      _diagLog('gateway_probe_fail', { failCount: _gwFailCount, error: errMsg, elapsed_ms: Date.now() - t0 });
     }
   });
 }
@@ -332,7 +291,8 @@ _pollGateway();
 setInterval(_pollGateway, 5_000);
 
 // ── TLS cert expiry ───────────────────────────────────────────────────────────
-const { X509Certificate } = require('crypto');
+const crypto = require('crypto');
+const { X509Certificate } = crypto;
 let _certStatus = { checked_at: 0, expires_at: null, days_left: null, error: null };
 function _checkCert() {
   try {
@@ -397,7 +357,23 @@ function _ntfy(title, body, priority = 'default', tags = []) {
   req.end();
 }
 
+// Alertas cuja NOTIFICAÇÃO é delegada ao it-agent: ele tenta corrigir (ts/mqtt/pm2)
+// ou verifica ao vivo + sugere (claude) ANTES de te incomodar, e só notifica em
+// "corrigindo/persiste/resolvido". O bridge segue registrando o evento e expondo
+// em /api/health (o app enxerga), mas NÃO manda push próprio — evita o ping
+// prematuro "antes do agente nem tentar" + a notificação duplicada.
+// Fora daqui de propósito (push DIRETO, fail-open — o agente não pode ser porteiro
+// de coisa que, se ele cair, você precisa saber assim mesmo): perda-de-dado/
+// expiração (disk/ssd/icloud/backup/cert/apns) e failsafe/ignorados pelo agente
+// (ext_monitor_down, restarts, dns_mismatch, mqtt_slow, local_blind).
+const AGENT_OWNED = new Set([
+  'ts_down', 'mqtt_down', 'broker_ports',                 // it-agent auto-corrige
+  'ha_down', 'gw_down', 'funnel_down', 'mem_high', 'rss_leak',
+  'apk_executor_dead', 'car_apk_stall', 'car_gwm_stall', 'car_total_silence', // claude verifica ao vivo antes
+]);
+
 function _alert(id, firing, title, body, priority = 'default', tags = [], opts = {}) {
+  if (AGENT_OWNED.has(id)) opts = { ...opts, silent: true };
   const prev = _alertState.get(id) || { firing: false, firedAt: 0, lastNotifiedAt: 0, notified: false };
   const now  = Date.now();
   const repeatEvery = opts.repeatEvery ?? NTFY_COOLDOWN;  // intervalo entre repetições "(ainda)"
@@ -410,7 +386,6 @@ function _alert(id, firing, title, body, priority = 'default', tags = [], opts =
       _alertState.set(id, { firing: true, firedAt: now, lastNotifiedAt: now, notified: true });
       if (!opts.silent) _ntfy(title, body, priority, tags);
       _recordHealthEvent(id, title + ': ' + body);
-      _diagLog('alert_notify', { id, kind: 'immediate', title, body });
     } else {
       _alertState.set(id, { firing: true, firedAt: now, lastNotifiedAt: 0, notified: false });
     }
@@ -419,25 +394,21 @@ function _alert(id, firing, title, body, priority = 'default', tags = [], opts =
     _alertState.set(id, { ...prev, lastNotifiedAt: now, notified: true });
     if (!opts.silent) _ntfy(title, body, priority, tags);
     _recordHealthEvent(id, title + ': ' + body);
-    _diagLog('alert_notify', { id, kind: 'first', title, body, firingSince_ms: now - prev.firedAt });
   } else if (firing && prev.firing && prev.notified && (now - prev.lastNotifiedAt) > repeatEvery) {
     // repetição (ainda caído, cooldown passou). No silêncio noturno só marca o
     // tempo (pra reset do backoff) mas NÃO manda push — evita spammar de noite.
     _alertState.set(id, { ...prev, lastNotifiedAt: now });
     if (_inQuietHours()) {
       _recordHealthEvent(id, title + ' (ainda, silenciado noturno): ' + body);
-      _diagLog('alert_notify', { id, kind: 'repeat_quiet', title, body, firingSince_ms: now - prev.firedAt });
     } else {
       if (!opts.silent) _ntfy(title + ' (ainda)', body, 'low', tags);
       _recordHealthEvent(id, title + ' (ainda): ' + body);
-      _diagLog('alert_notify', { id, kind: 'repeat', title, body, firingSince_ms: now - prev.firedAt });
     }
   } else if (!firing && prev.firing) {
     // recuperado — só notifica se tinha enviado alerta
     if (prev.notified) {
       if (!opts.silent) _ntfy('Recuperado: ' + title, 'Voltou ao normal.', 'low', ['white_check_mark']);
       _recordHealthEvent(id + '_recovery', 'Recuperado: ' + title);
-      _diagLog('alert_recovery', { id, title, wasFiringFor_ms: now - prev.firedAt });
     }
     _alertState.set(id, { firing: false, firedAt: 0, lastNotifiedAt: 0, notified: false });
   } else if (!firing) {
@@ -684,6 +655,17 @@ function _checkAlerts() {
     _alert('apns_attrition', (apns.dead_24h || 0) >= 3, 'Tokens APNs morrendo',
       `${apns.dead_24h} tokens invalidados em 24h (start=${apns.start_tokens} update=${apns.update_tokens})`,
       'default', ['iphone'], { repeatEvery: 12 * 3600_000 });
+
+  // APK executor (Shizuku) morto/mudo: comandos publicados mas o carro não muda
+  // estado. Sinal indireto — automações repetidas sem efeito. Se ≥2 seguidas
+  // falharem no verify2, provavelmente Shizuku travou / permissão caiu.
+  // Só alerta se a última falha foi RECENTE (1h) — com o carro desligado a
+  // streak fica pendurada sem comando novo e não deve re-notificar.
+  const apkX = _apkExecutorHealth();
+  const apkFailFresh = apkX.fail_streak >= 2 && (Date.now() - (apkX.last_fail_ms || 0)) < 3600_000;
+  _alert('apk_executor_dead', apkFailFresh, 'APK/Shizuku sem executar',
+    `${apkX.fail_streak} comandos seguidos sem confirmação (24h: ${apkX.ok_24h} ok / ${apkX.fail_24h} fail). Cheque Shizuku no head-unit.`,
+    'high', ['warning'], { repeatEvery: 4 * 3600_000 });
 
   // 19. Monitor externo (HA da empresa) parado — dead-man's-switch. HA bate a cada
   // 60s; 5min de silêncio = parado. Só avalia após já ter recebido ≥1 heartbeat
@@ -1118,6 +1100,8 @@ const NOTIF_DEFAULTS = {
   la_infra:             true,   // LA de infra/monitoramento (guard ou serviço caído)
   la_songpro:           false,  // LA paralela da BYD Song Pro (Grasi) — opt-in, só admin
   la_songpro_trip:      false,  // LA de deslocamento do BYD (Grasi) — opt-in, default OFF
+  la_parking:           true,   // LA "voltar ao carro" (só dispara >100m do carro estacionado)
+  la_parking_suppress_places: [],  // IDs de locais conhecidos onde NÃO abrir a LA (casa, trabalho…)
   preclimat_steps:      true,   // alerta (som) a cada passo da pré-climatização
 };
 let notifPrefs = { ...NOTIF_DEFAULTS };
@@ -2199,15 +2183,25 @@ function _liveTripStart(tripId) {
   const id = String(tripId).replace(/\D/g, '');
   if (!id) return;
   if (_liveTrip && _liveTrip.tripId === id) return;
-  let existing = [];
+  let existing = [], existingStart = null;
   try {
     const fp = path.join(AUTOTRIPS_DIR, `${id}.json`);
     if (fs.existsSync(fp)) {
       const d = JSON.parse(fs.readFileSync(fp, 'utf8'));
       if (Array.isArray(d.samples)) existing = d.samples;
+      if (d.actualStart) existingStart = d.actualStart;
     }
   } catch (_) {}
-  _liveTrip = { tripId: id, startMs: +id, samples: existing, lastFlushMs: 0, lastGpsMs: 0 };
+  // Snapshot do GPS no INSTANTE que a viagem começa (via current_trip MQTT).
+  // Se o APK perder samples no início, ainda temos aqui o ponto de origem real.
+  // Só grava se o GPS estiver fresco (< 2min).
+  let actualStart = existingStart;
+  const gpsAgeMs = state.gps_ts ? (Date.now() - state.gps_ts) : Infinity;
+  const lat = +state.gps_lat || 0, lng = +state.gps_lng || 0;
+  if (!actualStart && lat && lng && gpsAgeMs < 120_000) {
+    actualStart = { lat, lng, ts: Date.now() };
+  }
+  _liveTrip = { tripId: id, startMs: +id, samples: existing, lastFlushMs: 0, lastGpsMs: 0, actualStart };
 }
 
 function _liveTripAppend() {
@@ -2233,12 +2227,15 @@ function _liveTripFlush() {
   const fp = path.join(AUTOTRIPS_DIR, `${_liveTrip.tripId}.json`);
   let existing = {};
   try { if (fs.existsSync(fp)) existing = JSON.parse(fs.readFileSync(fp, 'utf8')); } catch (_) {}
+  // APK já postou os samples definitivos (arquivo sem _liveSamples): não sobrescreve.
+  if (Array.isArray(existing.samples) && existing.samples.length && !existing._liveSamples) return;
   const merged = {
     tripId: _liveTrip.tripId,
     autoTrip: existing.autoTrip || { startMs: _liveTrip.startMs },
     samples: _liveTrip.samples,
     hybridTimeSec: existing.hybridTimeSec,
     hybridDistKm: existing.hybridDistKm,
+    actualStart: _liveTrip.actualStart || existing.actualStart || null,
     _liveSamples: true,
     _liveUpdatedMs: Date.now(),
     ...(existing._estimated ? {
@@ -3175,6 +3172,9 @@ setInterval(() => {
   if (ageSec > 30) {
     state.car_online = false;
     console.log(`[mqtt] watchdog: marcando carro offline (sem msg há ${Math.round(ageSec)}s)`);
+    // Carro caiu silencioso no meio da viagem (APK morre ao desligar sem publicar
+    // engine_state='0'). Sem isso a LA de viagem ficava presa indefinidamente.
+    if (_tripActive) _scheduleTripLAEnd();
   }
 }, 10_000);
 
@@ -3754,6 +3754,9 @@ function checkGeofence() {
       }
     }
   }
+  // Monitor server-side das regras geofence-vidro: o APK executa; o bridge só observa
+  // se o vidro atingiu o estado esperado e alerta se não (usa o mesmo GPS do carro).
+  _evalGeofenceRules(lat, lng);
 }
 
 // Retorna o local conhecido mais próximo dentro de radiusM metros, ou null
@@ -3863,8 +3866,19 @@ app.get('/api/mqtt-status', (_req, res) =>
 // HA da empresa consome isso pra decidir os pushes (guard 3+ juntos = 1 alerta),
 // substituindo os alertas que o bridge disparava sozinho pra essas mesmas checagens.
 app.get('/api/infra-status', (_req, res) => res.json({
+  // Precisa do mesmo debounce (fail_count >= 2) que local_ha_ok/gateway_ok já tinham —
+  // sem isso, 1 timeout isolado de probe (broker ocupado por 1 ciclo) já reportava
+  // down pro HA da empresa. Causa raiz real (achada via alert_diag.log pós-fix,
+  // 2026-07-01): não é lag/boot-race do bridge — é um cliente MQTT.js em
+  // 192.168.1.30 (user rafael_haval, provável Node-RED com reconnect quebrado)
+  // fazendo connect/disconnect em rajada só na porta 1884, a cada ~3min, por
+  // 5-65s cada vez. O debounce filtra essas rajadas (nunca passam de ~65s =
+  // 13 ciclos de 5s); só alertaria de verdade se a porta ficasse presa >150s
+  // contínuos, que é o threshold real do guard "Mosquitto Local" no HA (2min30).
+  // Corrigir na raiz = achar e consertar o reconnect loop no lado do HA VM.
   mosquitto_ok: !(_mqttBrokerStatus.checked_at > 0 &&
-    (!_mqttBrokerStatus.port1883 || !_mqttBrokerStatus.port1884 || !_mqttBrokerStatus.port8883)),
+    (!_mqttBrokerStatus.port1883 || !_mqttBrokerStatus.port1884 || !_mqttBrokerStatus.port8883) &&
+    _mqttBrokerStatus.fail_count >= 2),
   local_ha_ok: _haStatus.up !== false,
   gateway_ok: _gwStatus.up !== false,
   ssd_ok: !_macStats.disk_ext || _macStats.disk_ext.mounted !== false,
@@ -3926,11 +3940,9 @@ function _pollMacStats() {
                    avail_gb: +(s2.bavail * s2.bsize / 1e9).toFixed(1) };
     } else {
       disk_ext = { path: SSD_EXT_PATH, mounted: false, error: 'existsSync=false' };
-      _diagLog('ssd_probe_fail', { error: 'existsSync=false' });
     }
   } catch (e) {
     disk_ext = { path: SSD_EXT_PATH, mounted: false, error: e.message };
-    _diagLog('ssd_probe_fail', { error: e.message });
   }
   exec('vm_stat', { timeout: 4000 }, (err, stdout) => {
     let mem = { total_gb: +(total / 1e9).toFixed(1), used_gb: null, avail_gb: null };
@@ -4302,6 +4314,7 @@ app.get('/api/health', requireAuth, (_req, res) => {
     cert_broker:   _certBrokerStatus,
     mqtt_ping:     _mqttPing,
     system:        { car_app_version: state.car_app_version || null },
+    apk_executor:  _apkExecutorHealth(),
     mac:           _macStats,
     processes:     _processes,
     clockin:       _appHealth.clockin,
@@ -4574,6 +4587,8 @@ app.use('/api', (req, res, next) => {
       req.path === '/mapkit/token') return next();   // mapkit/token: JWT só vale pra Apple Maps, não dá acesso a nada do bridge
   // Compartilhamento de status: páginas públicas validadas pelo token na própria URL.
   if (/^\/share\/[^/]+\/(state|eta)$/.test(req.path)) return next();
+  // Trajeto compartilhado: /api/shared-trip/:token — token da URL faz o gate.
+  if (/^\/shared-trip\/[^/]+$/.test(req.path)) return next();
   // Upload de gravação: o carro autentica com nonce de uso único (X-Rec-Token),
   // não com o token do bridge — a própria rota valida. Sem isso o requireAuth
   // devolvia 401 e o carro quebrava o stream (broken pipe) no meio do POST.
@@ -5141,6 +5156,229 @@ try {
   if (!Array.isArray(automationRules)) automationRules = [];
   if (automationRules.length) console.log(`✓ Automações carregadas: ${automationRules.length}`);
 } catch (_) { automationRules = []; }
+
+// ── Executor server-side de regras (fallback do APK) ─────────────────────────
+// Motivação: o APK adormece / Shizuku cai / GPS treme — regras de geofence
+// que dependem do APK falham calado. O bridge executa em paralelo (idempotente),
+// verifica o estado 3s depois e retenta 1× em caso de falha. Cada execução vai
+// pro automation_events.json pra auditoria.
+const AUTOMATION_EVENTS_FILE = path.join(DATA_DIR, 'automation_events.json');
+const AUTOMATION_STATE_FILE  = path.join(DATA_DIR, 'automation_state.json');
+const RULE_STABLE_MS      = 30_000;      // fallback quando carro parado
+const RULE_STABLE_MOVING_MS = 1_500;    // se speed > 3, quase imediato (portaria dura ~3s)
+const RULE_MOTION_MIN_KMH = 3;           // mínimo pra considerar "passando" (evita jitter estático)
+const RULE_HYST_MULT      = 1.5;         // outside = d > radius * 1.5 (só zera enteredFired longe da zona)
+const RULE_VERIFY_MS      = 3_000;       // intervalo entre verificar o estado do carro e re-publicar
+const RULE_WATCHDOG_MS    = 120_000;     // bridge insiste (verify+re-publish) até confirmar ou estourar 2min — cobre o limbo WiFi-fraco/4G-ainda-não na chegada
+
+let _autoEvents = [];
+try { if (fs.existsSync(AUTOMATION_EVENTS_FILE)) _autoEvents = JSON.parse(fs.readFileSync(AUTOMATION_EVENTS_FILE, 'utf8')); } catch (_) {}
+function _logAutoEvent(entry) {
+  _autoEvents.push({ ts: Date.now(), ...entry });
+  if (_autoEvents.length > 500) _autoEvents = _autoEvents.slice(-500);
+  try { atomicWriteFileSync(AUTOMATION_EVENTS_FILE, JSON.stringify(_autoEvents)); } catch (_) {}
+}
+
+// Estado por regra: { entryTs, lastFireTs } — persistido pra sobreviver a restart.
+let _ruleState = {};
+try { if (fs.existsSync(AUTOMATION_STATE_FILE)) _ruleState = JSON.parse(fs.readFileSync(AUTOMATION_STATE_FILE, 'utf8')) || {}; } catch (_) {}
+function _saveRuleState() {
+  try { atomicWriteFileSync(AUTOMATION_STATE_FILE, JSON.stringify(_ruleState)); } catch (_) {}
+}
+
+// Mapa expected-state por action.status pra verificação pós-comando (windows).
+// status 1=fechado, 2=aberto (APK). state.window_* : 1=fechado, 2=aberto.
+function _expectedWindowState(status) { return status === 2 ? 'aberto' : 'fechado'; }
+function _windowStateAt() {
+  // state.window_* guarda 'on' (aberto) / 'off' (fechado). Null/undefined = desconhecido.
+  const vals = [state.window_fl, state.window_fr, state.window_rl, state.window_rr];
+  if (vals.every(v => v == null)) return 'desconhecido';
+  if (vals.some(v => v === 'on')) return 'aberto';
+  if (vals.every(v => v === 'off')) return 'fechado';
+  return 'desconhecido';
+}
+
+// Verifica se o estado do carro reflete a ação executada.
+function _verifyRuleAction(rule) {
+  const a = rule.action || {};
+  if (a.type === 'window') {
+    const expected = _expectedWindowState(a.status);
+    const actual = _windowStateAt();
+    return { verified: actual === expected, actual, expected };
+  }
+  return { verified: true, actual: '?', expected: '?' };
+}
+
+// O APK executa a regra de geofence-vidro localmente (imune ao limbo WiFi/4G da
+// chegada). O bridge NÃO comanda — só MONITORA: observa se o vidro atinge o estado
+// esperado e alerta se não atingir. Read-first: só confia com carro online E estado
+// legível; offline/desconhecido não vira falso alarme, só espera. Alerta no fim da
+// janela se leu e o vidro não mudou (APK não atuou), ou se o carro ficou ilegível.
+function _monitorRuleAction(rule, reason) {
+  const a = rule.action || {};
+  if (a.type !== 'window') return;   // só vidro é verificável server-side; resto é 100% APK
+  if (!_evalConditions(rule.conditions)) {
+    _logAutoEvent({ rule_id: rule.id, name: rule.name, phase: 'monitor-skip', reason: 'conditions falharam' });
+    return;
+  }
+  _logAutoEvent({ rule_id: rule.id, name: rule.name, phase: 'monitor', trigger: reason, action: `esperando APK → ${_expectedWindowState(a.status)}` });
+  const deadline = Date.now() + RULE_WATCHDOG_MS;
+  let attempt = 0;
+  const tick = () => {
+    const v = _verifyRuleAction(rule);
+    attempt++;
+    const readable = state.car_online === true && v.actual !== 'desconhecido' && v.actual !== '?';
+    if (v.verified) { _logAutoEvent({ rule_id: rule.id, name: rule.name, phase: 'monitor-ok', ...v }); return; }
+    if (Date.now() >= deadline) {
+      const msg = readable
+        ? `${rule.name || 'Regra'}: o carro não abriu/fechou o vidro — esperava ${v.expected}, reporta ${v.actual} após ${Math.round(RULE_WATCHDOG_MS/1000)}s.`
+        : `${rule.name || 'Regra'}: carro ficou offline/ilegível, não deu pra confirmar em ${Math.round(RULE_WATCHDOG_MS/1000)}s.`;
+      _logAutoEvent({ rule_id: rule.id, name: rule.name, phase: 'monitor-fail', ...v, readable });
+      sendPush('⚠️ Automação não confirmou', msg, 'automation_fail');
+      return;
+    }
+    setTimeout(tick, RULE_VERIFY_MS);   // ainda não atingiu → só observa, nunca comanda
+  };
+  setTimeout(tick, RULE_VERIFY_MS);
+}
+
+// Chamado no loop de GPS (junto de checkGeofence). Avalia regras com
+// trigger.type='geofence' e edge='enter'/'exit'. Estabilidade 30s antes de fire.
+function _evalGeofenceRules(lat, lng) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+  const now = Date.now();
+  for (const rule of automationRules) {
+    if (!rule.enabled) continue;
+    const t = rule.trigger || {};
+    if (t.type !== 'geofence') continue;
+    if (!t.lat || !t.lng || !t.radius_m) continue;
+    if (!['enter', 'exit'].includes(t.edge)) continue;
+    // Execução é 100% do APK (autônoma, imune ao limbo WiFi/4G). O bridge só MONITORA
+    // o vidro (único action verificável server-side); outros actions ficam sem monitor.
+    if ((rule.action || {}).type !== 'window') continue;
+
+    const d = haversineM(lat, lng, t.lat, t.lng);
+    const inside = d <= t.radius_m;
+    // Histerese: só considera "fora" quando >= 1.5× o raio (jitter pequeno não zera enteredFired).
+    const clearlyOutside = d >= t.radius_m * RULE_HYST_MULT;
+    const speed = +state.speed_kmh || 0;
+    const moving = speed >= RULE_MOTION_MIN_KMH;
+    // Estabilidade curta se está passando (portaria dura poucos segundos); longa se parado.
+    const stableMs = moving ? RULE_STABLE_MOVING_MS : RULE_STABLE_MS;
+    const st = _ruleState[rule.id] || {};
+    const wantEnter = t.edge === 'enter';
+    const wantExit  = t.edge === 'exit';
+
+    if (wantEnter && inside) {
+      if (!st.entryTs) { _ruleState[rule.id] = { ...st, entryTs: now }; _saveRuleState(); continue; }
+      if (now - st.entryTs >= stableMs && !st.enteredFired) {
+        _ruleState[rule.id] = { ...st, enteredFired: true };
+        _saveRuleState();
+        _monitorRuleAction(rule, `geofence enter (${Math.round(d)}m/${t.radius_m}m, speed=${speed.toFixed(1)}km/h, estável ${Math.round((now - st.entryTs)/1000)}s)`);
+      }
+    } else if (wantExit && !inside) {
+      if (!st.exitTs) { _ruleState[rule.id] = { ...st, exitTs: now }; _saveRuleState(); continue; }
+      if (now - st.exitTs >= stableMs && !st.exitedFired) {
+        _ruleState[rule.id] = { ...st, exitedFired: true };
+        _saveRuleState();
+        _monitorRuleAction(rule, `geofence exit (${Math.round(d)}m/${t.radius_m}m, speed=${speed.toFixed(1)}km/h, estável ${Math.round((now - st.exitTs)/1000)}s)`);
+      }
+    } else if (clearlyOutside) {
+      // Saiu claramente da zona (>1.5× raio): rearma as flags de borda pra a próxima
+      // entrada real re-armar o monitor. Jitter pequeno perto da zona não rearma
+      // (histerese). Re-entrada ainda exige estabilidade (stableMs) antes de monitorar.
+      const st2 = { ...st, entryTs: 0, enteredFired: false, exitTs: 0, exitedFired: false, lastFireTs: 0 };
+      if (st.entryTs || st.enteredFired || st.exitTs || st.exitedFired || st.lastFireTs) {
+        _ruleState[rule.id] = st2; _saveRuleState();
+      }
+    }
+  }
+}
+
+// Endpoint pra o app auditar as execuções (mostra na aba Automações).
+app.get('/api/automation-events', requireAuth, (req, res) => {
+  const limit = Math.min(500, parseInt(req.query.limit) || 100);
+  res.json({ ok: true, events: _autoEvents.slice(-limit).reverse() });
+});
+
+// Health do executor APK/Shizuku: infere pelo verify das automações.
+// - success: phase termina com verify (v1 ok) OU verify2 ok.
+// - fail: verify2 com verified=false (comando não teve efeito).
+function _apkExecutorHealth() {
+  const now = Date.now();
+  const cut24 = now - 24 * 3600_000;
+  let lastOk = 0, lastFail = 0, ok24 = 0, fail24 = 0, failStreak = 0;
+  // Percorre em ordem cronológica pra contar streak recente de falhas.
+  for (const e of _autoEvents) {
+    if (!/verify$|verify2$/.test(e.phase || '')) continue;
+    const ok = e.verified === true;
+    if (e.ts >= cut24) { if (ok) ok24++; else fail24++; }
+    if (ok) { lastOk = Math.max(lastOk, e.ts); failStreak = 0; }
+    else    { lastFail = Math.max(lastFail, e.ts); failStreak++; }
+  }
+  return {
+    last_ok_ms:   lastOk || null,
+    last_fail_ms: lastFail || null,
+    ok_24h:       ok24,
+    fail_24h:     fail24,
+    fail_streak:  failStreak,
+    healthy:      failStreak < 2,   // ≥2 falhas seguidas = suspeito (Shizuku off?)
+  };
+}
+
+// ── Resolver de campos de condição das regras ────────────────────────────────
+// Regras usam `car.basic.vehicle_speed`, etc. Mapa mínimo pros campos comuns.
+const _RULE_FIELD_MAP = {
+  'car.basic.vehicle_speed':      () => +state.speed_kmh || 0,
+  'car.basic.outside_temp':       () => +state.outside_temp || 0,
+  'car.basic.inside_temp':        () => +state.inside_temp || 0,
+  'car.basic.driving_ready_state':() => state.driving_ready,
+  'car.basic.engine_state':       () => state.engine_state,
+  'car.basic.lock_state':         () => state.lock_state,
+  'car.basic.sunroof_status':     () => +state.skylight_level || 0,
+  'car.basic.remain_fuel_percentage': () => +state.fuel_pct || 0,
+  'car.hvac.pm2.5_value':         () => +state.hvac_pm25 || 0,
+  'car.hvac.cycle_mode':          () => state.hvac_cycle_mode,
+  'car.ev_info.charging_state':   () => state.charging_state,
+  'car.basic.soc_pct':            () => +state.soc_pct || 0,
+};
+function _resolveRuleField(field) {
+  const fn = _RULE_FIELD_MAP[field];
+  return fn ? fn() : undefined;
+}
+function _cmpValues(a, op, b) {
+  const na = Number(a), nb = Number(b);
+  const num = Number.isFinite(na) && Number.isFinite(nb);
+  if (op === '==') return num ? na === nb : String(a) === String(b);
+  if (op === '!=') return num ? na !== nb : String(a) !== String(b);
+  if (!num) return false;
+  if (op === '>')  return na > nb;
+  if (op === '<')  return na < nb;
+  if (op === '>=') return na >= nb;
+  if (op === '<=') return na <= nb;
+  return false;
+}
+// Avalia items AND/OR. `time` items: dias da semana + janela HH:MM.
+function _evalConditions(conds) {
+  if (!conds || !Array.isArray(conds.items) || !conds.items.length) return true;
+  const op = (conds.op || 'AND').toUpperCase();
+  const results = conds.items.map(it => {
+    if (it.type === 'time') {
+      const now = new Date();
+      const dow = now.getDay();
+      const hm = now.getHours() * 60 + now.getMinutes();
+      if (Array.isArray(it.days) && !it.days.includes(dow)) return false;
+      const from = +it.from_hhmm || 0, to = +it.to_hhmm || 1439;
+      return from <= to ? (hm >= from && hm <= to) : (hm >= from || hm <= to);
+    }
+    if (it.type === 'visited') return true;   // não avaliamos server-side
+    // default: state field comparison
+    const val = _resolveRuleField(it.field);
+    if (val === undefined) return false;   // campo não mapeado → não bloqueia? melhor conservador: FALSE.
+    return _cmpValues(val, it.cmp || '==', it.value);
+  });
+  return op === 'OR' ? results.some(Boolean) : results.every(Boolean);
+}
 
 function saveRules() {
   try { atomicWriteFileSync(RULES_FILE, JSON.stringify(automationRules, null, 2)); }
@@ -6587,11 +6825,12 @@ function ingestAutoTrip({ tripId, autoTrip, samples }, opts = {}) {
     // Estratégia: deduplica por `t` arredondado (offset em segundos relativo
     // a startMs). Em conflito, prefere o sample NOVO (mais fresco). Os samples
     // antigos sobrevivem nos `t` que o novo POST não cobre.
-    let existingSamples = [];
+    let existingSamples = [], existingWasLive = false;
     if (fs.existsSync(filePath)) {
       try {
         const existing = JSON.parse(fs.readFileSync(filePath, 'utf8'));
         existingSamples = existing.samples || [];
+        existingWasLive = !!existing._liveSamples;
       } catch (_) {}
     }
 
@@ -6612,7 +6851,15 @@ function ingestAutoTrip({ tripId, autoTrip, samples }, opts = {}) {
         //     novos a mais recente; corta no maxExistingT
         const maxExistingT = existingSamples.reduce((m, s) => Math.max(m, s.t || 0), 0);
         const minNewT      = newSamples.reduce((m, s) => Math.min(m, s.t || 0), Infinity);
-        if (minNewT > maxExistingT) {
+        if (existingWasLive) {
+          // Existentes vieram do buffer LIVE do bridge (mesma viagem, mesma janela
+          // de tempo) — os samples do APK são a versão autoritativa. Re-basear e
+          // concatenar aqui era o bug que dobrava/triplicava o trajeto no app.
+          // Mantém só a cabeça live anterior ao 1º sample do APK (origem real).
+          const liveHead = existingSamples.filter(s => (s.t || 0) < minNewT);
+          finalSamples = [...liveHead, ...newSamples];
+          console.log(`↻ AutoTrip ${safeId}: samples live (${existingSamples.length}) substituídos pelos do APK (${newSamples.length}, head=${liveHead.length})`);
+        } else if (minNewT > maxExistingT) {
           // Ranges disjuntos — apenas concatena
           finalSamples = [...existingSamples, ...newSamples];
         } else if (_isDuplicateTail(existingSamples, newSamples)) {
@@ -6628,8 +6875,19 @@ function ingestAutoTrip({ tripId, autoTrip, samples }, opts = {}) {
           // existente, preservando o espaçamento interno, e concatena.
           const offset = maxExistingT + 1 - minNewT;
           const rebased = newSamples.map(s => ({ ...s, t: (s.t || 0) + offset }));
-          finalSamples = [...existingSamples, ...rebased];
-          console.log(`↻ AutoTrip ${safeId}: resume detectado (t re-baseado +${offset}s) — 2º trecho preservado`);
+          const candidate = [...existingSamples, ...rebased];
+          // Sanidade: resume legítimo cobre geografia NOVA e a distância integrada
+          // do merge ≈ distKm da viagem. Se estourar (>1.4× + 2km), é re-POST do
+          // mesmo trecho (retry/sync) — concatenar duplicaria a rota.
+          const repKm = +autoTrip.distKm || 0;
+          const { spdKm: candKm } = _sampleDistKm(candidate);
+          if (repKm > 1 && candKm > repKm * 1.4 + 2) {
+            finalSamples = newSamples;
+            console.log(`↻ AutoTrip ${safeId}: merge rejeitado (integraria ${candKm.toFixed(1)}km vs ${repKm.toFixed(1)}km reais) — mantém samples do POST`);
+          } else {
+            finalSamples = candidate;
+            console.log(`↻ AutoTrip ${safeId}: resume detectado (t re-baseado +${offset}s) — 2º trecho preservado`);
+          }
         }
         if (finalSamples.length > newSamples.length) {
           didMerge = true;
@@ -6655,6 +6913,28 @@ function ingestAutoTrip({ tripId, autoTrip, samples }, opts = {}) {
         autoTrip.endLng = lastGps.lng;
       }
     }
+
+    // Âncora: se temos snapshot do GPS no INSTANTE da ignição (via current_trip),
+    // e ele diverge >200m do que ficou em startLat/Lng, usa o snapshot — cobre o
+    // caso em que o APK perdeu GPS nos primeiros minutos e o "primeiro sample"
+    // ficou no meio da rota.
+    try {
+      const existingFile = fs.existsSync(filePath) ? JSON.parse(fs.readFileSync(filePath, 'utf8')) : null;
+      const anchor = existingFile && existingFile.actualStart;
+      if (anchor && anchor.lat && anchor.lng) {
+        const distM = haversineM(anchor.lat, anchor.lng,
+                                 +autoTrip.startLat || 0, +autoTrip.startLng || 0);
+        if (distM > 200) {
+          console.log(`↻ AutoTrip ${safeId}: âncora do start ${anchor.lat.toFixed(5)},${anchor.lng.toFixed(5)} substitui ${(+autoTrip.startLat||0).toFixed(5)},${(+autoTrip.startLng||0).toFixed(5)} (Δ${Math.round(distM)}m)`);
+          autoTrip.startLat = anchor.lat;
+          autoTrip.startLng = anchor.lng;
+          // Prepende um sample sintético em t=0 pra fechar o polyline.
+          if (finalSamples.length && finalSamples[0].t > 0) {
+            finalSamples.unshift({ t: 0, lat: anchor.lat, lng: anchor.lng, spd: 0, rpm: 0, pwr: 0, soc: finalSamples[0].soc || 0 });
+          }
+        }
+      }
+    } catch (e) { console.warn('[ingest] anchor check falhou:', e.message); }
 
     // Blindagem do distKm: o hodômetro do APK re-baseia no meio da viagem e
     // ora INFLA (soma o acumulado do dia: 5km vira 38km) ora SUBCONTA (perde um
@@ -6948,6 +7228,88 @@ app.post('/api/autotrips', (req, res) => {
     console.error('Erro ao salvar auto-trip:', e.message);
     res.status(500).json({ error: e.message });
   }
+});
+
+// ── Compartilhamento de trajeto por link (sem auth) ────────────────────────
+// Token curto e imprevisível ↔ tripId. Expira em 30 dias (limpa periodicamente).
+const SHARED_TRIPS_FILE = path.join(DATA_DIR, 'shared-trips.json');
+const SHARED_TRIP_TTL_MS = 30 * 24 * 3600_000;
+let _sharedTrips = {};
+try { if (fs.existsSync(SHARED_TRIPS_FILE)) _sharedTrips = JSON.parse(fs.readFileSync(SHARED_TRIPS_FILE, 'utf8')) || {}; } catch (_) {}
+function _saveSharedTrips() {
+  try { atomicWriteFileSync(SHARED_TRIPS_FILE, JSON.stringify(_sharedTrips)); } catch (_) {}
+}
+function _cleanupSharedTrips() {
+  const now = Date.now();
+  let dirty = false;
+  for (const [tok, e] of Object.entries(_sharedTrips)) {
+    if (!e || !e.expiresAt || e.expiresAt < now) { delete _sharedTrips[tok]; dirty = true; }
+  }
+  if (dirty) _saveSharedTrips();
+}
+setInterval(_cleanupSharedTrips, 6 * 3600_000);
+_cleanupSharedTrips();
+
+// Cria (ou retorna existente ainda válido) o token de compartilhamento.
+app.post('/api/autotrips/:tripId/share', requireAuth, (req, res) => {
+  const tripId = String(req.params.tripId).replace(/\D/g, '');
+  if (!tripId) return res.status(400).json({ error: 'tripId inválido' });
+  const fp = path.join(AUTOTRIPS_DIR, `${tripId}.json`);
+  if (!fs.existsSync(fp)) return res.status(404).json({ error: 'viagem não encontrada' });
+  const now = Date.now();
+  // Reutiliza token existente se ainda válido pra próximos 7 dias.
+  for (const [tok, e] of Object.entries(_sharedTrips)) {
+    if (e.tripId === tripId && e.expiresAt > now + 7 * 24 * 3600_000) {
+      return res.json({ ok: true, token: tok, expiresAt: e.expiresAt });
+    }
+  }
+  // Token curto (8 chars base62 = 48 bits). Retenta se colisão (raríssimo).
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  let token = '';
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const buf = crypto.randomBytes(8);
+    token = Array.from(buf).map(b => alphabet[b % alphabet.length]).join('');
+    if (!_sharedTrips[token]) break;
+    token = '';
+  }
+  if (!token) return res.status(500).json({ error: 'falha ao gerar token' });
+  _sharedTrips[token] = { tripId, createdAt: now, expiresAt: now + SHARED_TRIP_TTL_MS };
+  _saveSharedTrips();
+  res.json({ ok: true, token, expiresAt: _sharedTrips[token].expiresAt });
+});
+
+// Revoga um token de compartilhamento.
+app.delete('/api/autotrips/:tripId/share/:token', requireAuth, (req, res) => {
+  const tok = String(req.params.token);
+  const e = _sharedTrips[tok];
+  if (!e || e.tripId !== String(req.params.tripId).replace(/\D/g, '')) return res.status(404).json({ error: 'token não encontrado' });
+  delete _sharedTrips[tok];
+  _saveSharedTrips();
+  res.json({ ok: true });
+});
+
+// Endpoint público (sem auth) — retorna metadata + samples da viagem por token.
+app.get('/api/shared-trip/:token', (req, res) => {
+  const tok = String(req.params.token);
+  const e = _sharedTrips[tok];
+  if (!e || e.expiresAt < Date.now()) return res.status(404).json({ error: 'link expirado ou inválido' });
+  const fp = path.join(AUTOTRIPS_DIR, `${e.tripId}.json`);
+  if (!fs.existsSync(fp)) return res.status(404).json({ error: 'viagem removida' });
+  try {
+    const d = JSON.parse(fs.readFileSync(fp, 'utf8'));
+    res.json({ ok: true, autoTrip: d.autoTrip || null, samples: d.samples || [] });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Página compartilhada — serve o mesmo HTML pra qualquer token (a página lê da URL).
+app.get('/shared-trip/:token', (_req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'shared-trip.html'));
+});
+// Alias curto: /t/TOKEN → mesmo HTML (redirect pra manter a URL bonita).
+app.get('/t/:token', (req, res) => {
+  res.redirect(302, `/shared-trip/${encodeURIComponent(req.params.token)}`);
 });
 
 app.get('/api/autotrips', (req, res) => {
@@ -8285,6 +8647,26 @@ app.post('/api/la/relaunch', async (req, res) => {
       _securityActive = false; _evalSecurityAlert();   // re-cria se ainda há problema
       done.push('seguranca');
     }
+    // "Voltar ao carro": se o card estava vivo (talvez dispensado por swipe),
+    // recria com os números reais já conhecidos. Se NÃO estava vivo, deixa o
+    // eval decidir — só abre com fix fresco do dono e >100m. Nunca fabrica 0m.
+    if (_parkedLoc && notifPrefs.la_parking !== false) {
+      if (_parkingActive && _parkingLast.dist >= 0) {
+        try {
+          await apnsLive.pushUpdate(PARKING_LA_TYPE, {}, _parkingContentState(_parkingLast.dist, _parkingLast.brg),
+            { isFinal: true, dismissalDate: Date.now() });
+        } catch (_) {}
+        await new Promise(r => setTimeout(r, 250));
+        await apnsLive.pushStart(PARKING_LA_TYPE, '', { carName: 'Haval H6 PHEV' },
+          _parkingContentState(_parkingLast.dist, _parkingLast.brg),
+          { staleDate: Date.now() + 12 * 3600_000, alert: { title: '🅿️ Voltar ao carro', body: 'Card reativado — acompanhe na tela bloqueada.' } });
+        done.push('estacionamento');
+      } else {
+        const was = _parkingActive;
+        _evalParkingLA();
+        if (_parkingActive && !was) done.push('estacionamento');
+      }
+    }
     // BYD Song Pro (Grasi) — só relança se sessão ativa e algum device opt-in.
     if (_songProSession && _songProSession.active && _songProEnabled()) {
       const cs = _songProContentState(true);
@@ -8754,6 +9136,8 @@ const ACTION_TO_GWM_BUTTON_CODE = {
   ac_on:          '2202001_airconditioner',
   charge_stop:    '2041142_stopcharging',
   charge_history: '2013021_charginglogs',
+  find_car:       '2103010_findcar',
+  find_car_honk:  '2103010_findcarhonk',
 };
 const ALLOWED_ACTIONS = new Set(Object.keys(ACTION_TO_GWM_BUTTON_CODE));
 
@@ -10356,6 +10740,19 @@ mqttClient.on('message', (topic, payload, packet) => {
     if (m) { _recResults[m[1]] = { value, ts: Date.now() }; return; }
   }
 
+  // Execução autônoma de regra no APK (carro). O APK publica {id,name,ok,ts} ao
+  // disparar uma automação local. O bridge não comanda — só registra pra auditoria
+  // (aba Automações) e observabilidade de que o motor do APK está atuando.
+  if (topic === `${MQTT_PREFIX}/rules/fired`) {
+    if (!isRetained) {
+      try {
+        const ev = JSON.parse(value);
+        _logAutoEvent({ rule_id: ev.id, name: ev.name, phase: 'apk-fired', ok: ev.ok !== false, source: 'apk' });
+      } catch (_) {}
+    }
+    return;
+  }
+
   // Dispatcher: tópicos da integração GWM Brasil vão pro handler dedicado;
   // outros caem no handler legado do app.
   if (topic === MQTT_PREFIX + '/car_dest_raw') {
@@ -10711,6 +11108,7 @@ function _chargeContentState() {
     charging:     state.charging_state === 'Carregando',
     targetPct:    _effectiveChargeTarget(),
     locked:       _isLocked(),
+    costBrl:      +(((+state.charge_session_kwh || 0) * (+state.price_kwh || 0)).toFixed(2)),
     updatedAtMs:  Date.now(),
   };
 }
@@ -10742,6 +11140,13 @@ function _tripContentState(ct, active) {
     // alerta = perda de pressão DETECTADA na viagem (checkTyreDrop) → pneu em
     // destaque na LA + notificação. Sem isso, fica só o PSI normal.
     tyreAlert: Object.values(_tyreDropAlertSent).some(Boolean),
+    // Navegação (frame 2a): velocidade atual + destino/ETA quando o nav tem rota.
+    speedKmh: active ? Math.max(0, +state.speed_kmh || 0) : undefined,
+    ...(active && state.arrival && state.arrival.name ? {
+      destName:   String(state.arrival.name),
+      destEtaMin: Math.round(+state.arrival.etaMin || 0),
+      destKm:     +(+state.arrival.distKm || 0).toFixed(1),
+    } : {}),
     active: !!active,
     updatedAtMs: Date.now(),
   };
@@ -10772,8 +11177,10 @@ function handleTripUpdate(ct, isRetained) {
     } else {
       apnsLive.pushUpdate(TRIP_LA_TYPE, {}, cs, {}).catch(() => {});
     }
-  } else if (_tripActive) {
+  } else if (_tripActive || apnsLive.hasUpdateToken(TRIP_LA_TYPE)) {
     // Viagem encerrada (current_trip foi a null). Mostra o resumo por 5 min e some.
+    // Considera também token vivo sem _tripActive: restart do bridge zera a flag em
+    // memória, mas a LA no telefone segue viva (token persistido) → ainda encerra.
     _endTripLA(5 * 60_000);
   }
 }
@@ -10787,7 +11194,10 @@ function _cancelTripEndTimer() { if (_tripEndTimer) { clearTimeout(_tripEndTimer
 // dismissMs = quanto tempo o iOS mantém o card no estado final antes de removê-lo.
 function _endTripLA(dismissMs = 5 * 60_000) {
   _cancelTripEndTimer();
-  if (!_tripActive) return;
+  // Encerra se achamos que há viagem ativa OU se há token vivo de LA de viagem
+  // (restart zerou _tripActive mas a LA no telefone continua). Sem nenhum dos dois,
+  // não há o que encerrar.
+  if (!_tripActive && !apnsLive.hasUpdateToken(TRIP_LA_TYPE)) return;
   _tripActive = false;
   if (!apnsLive.enabled || notifPrefs.la_trip === false) return;
   const last = _tripContentState(_lastTripSnapshot || {}, false);
@@ -10806,7 +11216,10 @@ function _scheduleTripLAEnd() {
   _cancelTripEndTimer();
   _tripEndTimer = setTimeout(() => {
     _tripEndTimer = null;
-    if (state.engine_state === '1') return;   // religou no intervalo → viagem continua
+    // Só mantém a LA se o carro está VIVO e com motor ligado. Se ficou offline
+    // (APK morreu ao desligar) o engine_state fica congelado em '1' — não dá pra
+    // confiar nele; a ausência de sinal já é o "desligou". Não religou = encerra.
+    if (state.car_online && state.engine_state === '1') return;
     _endTripLA(0);                            // os 5 min já passaram → remove agora
   }, 5 * 60_000);
 }
@@ -10840,6 +11253,13 @@ const PHONE_LOC_FILE = path.join(DATA_DIR, 'phone_loc.json');
 let phoneLocByDevice = {};
 try { if (fs.existsSync(PHONE_LOC_FILE)) phoneLocByDevice = JSON.parse(fs.readFileSync(PHONE_LOC_FILE, 'utf8')) || {}; }
 catch (_) { phoneLocByDevice = {}; }
+// device_id que se declarou dono do Haval (app HavalEcoTrip via haval_owner:true).
+// É a fonte preferida de posição do dono pra LA "voltar ao carro" (mais fresca que
+// a presença esporádica). Persiste pra sobreviver a restart.
+const HAVAL_OWNER_FILE = path.join(DATA_DIR, 'haval_owner_device.json');
+let _havalOwnerDeviceId = '';
+try { if (fs.existsSync(HAVAL_OWNER_FILE)) _havalOwnerDeviceId = String(JSON.parse(fs.readFileSync(HAVAL_OWNER_FILE, 'utf8')).device_id || ''); } catch (_) {}
+
 let _phoneLocSaveAt = 0;
 function _savePhoneLoc() {
   const now = Date.now();
@@ -11137,16 +11557,29 @@ function _evRatesBySpeed() {
   };
   return { city: bucket(0, 45), road: bucket(45, 75), hwy: bucket(75, 999), overall: _recentKwhPerKm() };
 }
+// Escolhe a taxa da faixa. Sem dado da faixa (comum: só rodei EV na cidade), NÃO
+// cai na taxa de cidade crua — aplica penalidade por velocidade (arrasto aerodinâmico
+// cresce com v²): estrada ~+25%, rodovia ~+55% sobre a média. Senão o modelo acha
+// que dá pra rodar na estrada gastando como na cidade e superestima a autonomia EV.
 function _pickEvRate(rates, speedKmh) {
-  const b = speedKmh < 45 ? rates.city : speedKmh < 75 ? rates.road : rates.hwy;
-  return b || rates.overall;
+  if (speedKmh < 45) return rates.city || rates.overall;
+  if (speedKmh < 75) return rates.road || Math.min(rates.overall * 1.25, 0.5);
+  return rates.hwy || Math.min(rates.overall * 1.55, 0.5);
 }
-// Consumo de gasolina (L/km) das viagens com combustível relevante. Fallback 0,08 (8 L/100km).
+// Consumo de gasolina PURA (L/km) do motor a combustão. NÃO pode diluir com os km
+// rodados em EV: uma viagem híbrida gasta X litros ao longo de toda a distância, mas
+// parte dela foi elétrica — dividir litros/distância_total subestima o motor puro.
+// Então só conta viagens rodadas MAJORITARIAMENTE a gasolina (netKwh/km baixo, i.e.
+// bateria quase não ajudou) e divide litros pela distância dessas. Piso 0,075 e teto
+// 0,14 (7,5–14 L/100km — faixa real do H6 PHEV com bateria vazia). Fallback 0,09.
 function _recentLPerKm() {
-  const fz = autoTripsArr.filter(t => (t.fuelL || 0) >= 0.3 && (t.distKm || 0) >= 2).slice(0, 40);
+  const fz = autoTripsArr.filter(t =>
+    (t.fuelL || 0) >= 0.5 && (t.distKm || 0) >= 3 &&
+    ((t.netKwh || 0) / (t.distKm || 1)) < 0.04            // <4 kWh/100km ⇒ quase só gasolina
+  ).slice(0, 40);
   const d = fz.reduce((s, t) => s + (t.distKm || 0), 0);
   const l = fz.reduce((s, t) => s + (t.fuelL || 0), 0);
-  return (d > 5 && l > 0) ? Math.min(Math.max(l / d, 0.04), 0.18) : 0.08;
+  return (d > 10 && l > 0) ? Math.min(Math.max(l / d, 0.075), 0.14) : 0.09;
 }
 // Capacidade útil (kWh) estimada das viagens EV: net / (ΔSOC/100). Fallback 34 (fábrica H6 PHEV).
 function _capacityKwh() {
@@ -11174,13 +11607,21 @@ function _logSocPrediction(predicted, actual) {
   try { atomicWriteFileSync(SOC_CALIB_FILE, JSON.stringify(_socCalib)); } catch (_) {}
 }
 
+// Reserva PHEV: o Haval H6 não usa a bateria abaixo de 12% de SOC — ao chegar nesse
+// piso o motor a combustão assume OBRIGATORIAMENTE. Então essa fatia é inutilizável
+// em EV: o orçamento elétrico é só (soc − 12)% e a chegada nunca cai abaixo de 12%.
+const PHEV_EV_FLOOR_PCT = 12;
+
 // Núcleo do copiloto: caminha as pernas, modela o handoff EV→combustão (PHEV) e
 // devolve as pernas enriquecidas (socArrival/fuelL/onFuel) + resumo. Ao esgotar
-// o orçamento EV (soc/100*cap kWh), o restante do trajeto roda a gasolina.
-function _energyModelLegs(legsRaw, { soc, cap, acH }) {
+// o orçamento EV ((soc−12)/100*cap kWh), o restante do trajeto roda a gasolina.
+function _energyModelLegs(legsRaw, { soc, cap, acH, targetSoc }) {
   const rates = _evRatesBySpeed();
   const lPerKm = _recentLPerKm();
-  const evBudget = Math.max(soc, 0) / 100 * cap;            // kWh disponíveis antes do motor
+  // SOC-alvo de chegada: o usuário pode querer chegar com X% (ex.: 30/40%) preservando
+  // bateria; abaixo do alvo roda a gasolina. O alvo nunca fica abaixo do piso PHEV de 12%.
+  const floor = Math.max(Number.isFinite(targetSoc) ? targetSoc : PHEV_EV_FLOOR_PCT, PHEV_EV_FLOOR_PCT);
+  const evBudget = Math.max(soc - floor, 0) / 100 * cap;    // kWh usáveis (acima do alvo/piso)
   let cumDist = 0, cumEnergy = 0, evDepleteKm = null;
   const legs = legsRaw.map(l => {
     const dKm = l.distanceKm || 0, dMin = l.durationMin || 0;
@@ -11195,7 +11636,8 @@ function _energyModelLegs(legsRaw, { soc, cap, acH }) {
       evDepleteKm = Math.round((cumDist - dKm + dKm * frac) * 10) / 10;
     }
     const onFuel = cumEnergy > evBudget;
-    const socArrival = onFuel ? 0 : Math.min(Math.max(Math.round(soc - cumEnergy / cap * 100), 0), 100);
+    // Chegada: piso em 12% (a reserva não é gasta em EV). onFuel → parou exatamente no piso.
+    const socArrival = onFuel ? floor : Math.min(Math.max(Math.round(soc - cumEnergy / cap * 100), floor), 100);
     const fuelKm = evDepleteKm != null ? Math.max(cumDist - evDepleteKm, 0) : 0;
     return { ...l, socArrival, onFuel, fuelL: Math.round(fuelKm * lPerKm * 10) / 10 };
   });
@@ -11211,6 +11653,7 @@ function _energyModelLegs(legsRaw, { soc, cap, acH }) {
     energyPct: cap > 0 ? Math.round(cumEnergy / cap * 100) : 0,   // energia como % do pack (pra "carrega até X")
     confidencePct: _confidencePct(),
     capacityKwh: cap,
+    targetSoc: floor,                                       // piso de chegada efetivo (alvo do usuário ou 12%)
   };
 }
 // Estações de recarga conhecidas, com potência média REAL do histórico (avg_power_kw
@@ -12147,6 +12590,132 @@ function _endMotorLA() {
     .catch(e => console.warn('[apns] motor end falhou:', e.message));
 }
 
+// ── Live Activity: "voltar ao carro" (parking finder) ─────────────────────
+// Dispara quando o carro está estacionado (motor desligado) e o dono se afasta
+// >100m dele. Mostra distância + direção (rumo do celular → carro) atualizando
+// enquanto ele anda. Some quando ele volta pra perto (<40m, histerese) ou o
+// carro liga. Suprimida em locais escolhidos (casa/trabalho…): se o celular está
+// dentro do raio de um local em `la_parking_suppress_places`, não abre.
+const PARKING_LA_TYPE = 'ParkingActivityAttributes';
+let _parkingActive   = false;
+let _parkedLoc       = null;   // { lat, lng, ts } — snapshot do carro ao estacionar
+const PARKING_NOTE_FILE = path.join(DATA_DIR, 'parking_note.json');
+let _parkingNote     = '';     // nota do local salva pelo dono no app ("vaga 214")
+try { if (fs.existsSync(PARKING_NOTE_FILE)) _parkingNote = String(JSON.parse(fs.readFileSync(PARKING_NOTE_FILE, 'utf8')).note || ''); } catch (_) {}
+function _saveParkingNote() { try { atomicWriteFileSync(PARKING_NOTE_FILE, JSON.stringify({ note: _parkingNote })); } catch (_) {} }
+let _parkingLast     = { dist: -1, brg: -1, ts: 0 };
+const PARK_TRIGGER_M = 100;    // abre a LA só além disso
+const PARK_CLEAR_M   = 40;     // fecha quando volta pra dentro disso (histerese)
+const _fmtParkDist   = m => m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m)} m`;
+
+// Posição do celular do DONO do Haval (device Grasi tagueado byd_name='rafael').
+function _ownerPhoneLoc() {
+  // Fonte preferida: o próprio app HavalEcoTrip (haval_owner) — posição fresca.
+  const own = _havalOwnerDeviceId && phoneLocByDevice[_havalOwnerDeviceId];
+  if (own && own.lat) return own;
+  // Fallback: device da presença tagueado com o nome do dono.
+  const target = (process.env.PARKING_OWNER_NAME || 'rafael').toLowerCase();
+  let best = null;
+  for (const [id, loc] of Object.entries(phoneLocByDevice)) {
+    if (!loc || !loc.lat) continue;
+    if ((getPrefsForDevice(id).byd_name || '').toLowerCase() !== target) continue;
+    if (!best || loc.ts > best.ts) best = loc;
+  }
+  return best;
+}
+
+// Rumo (bearing) A→B em graus (0=Norte, 90=Leste) — gira a seta da LA pro carro.
+function _bearingDeg(lat1, lng1, lat2, lng2) {
+  const toRad = d => d * Math.PI / 180, toDeg = r => r * 180 / Math.PI;
+  const dLng = toRad(lng2 - lng1);
+  const y = Math.sin(dLng) * Math.cos(toRad(lat2));
+  const x = Math.cos(toRad(lat1)) * Math.sin(toRad(lat2))
+          - Math.sin(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.cos(dLng);
+  return (toDeg(Math.atan2(y, x)) + 360) % 360;
+}
+
+// Celular dentro do raio de algum local marcado como "não notificar"?
+function _phoneInSuppressedPlace(lat, lng) {
+  const ids = Array.isArray(notifPrefs.la_parking_suppress_places)
+    ? notifPrefs.la_parking_suppress_places.map(String) : [];
+  if (!ids.length) return false;
+  for (const p of knownPlaces) {
+    if (!ids.includes(String(p.id)) || !p.lat || !p.lng) continue;
+    if (haversineM(lat, lng, p.lat, p.lng) <= (p.radius_m || 200)) return true;
+  }
+  return false;
+}
+
+function _parkingContentState(distM, bearing) {
+  return {
+    distM:      Math.round(distM),
+    bearingDeg: Math.round(bearing),
+    carLat:     _parkedLoc ? _parkedLoc.lat : 0,
+    carLng:     _parkedLoc ? _parkedLoc.lng : 0,
+    parkedAtMs: _parkedLoc ? _parkedLoc.ts : Date.now(),
+    updatedAtMs: Date.now(),
+    note: String(_parkingNote || '').slice(0, 60),
+  };
+}
+
+// App envia/limpa a nota do local ("vaga 214"). Se a LA já está ativa, empurra
+// um update na hora pra nota aparecer sem esperar o dono se mover.
+app.post('/api/parking-note', requireAuth, (req, res) => {
+  _parkingNote = String((req.body && req.body.note) || '').slice(0, 60);
+  _saveParkingNote();
+  if (_parkingActive && apnsLive.enabled) {
+    apnsLive.pushUpdate(PARKING_LA_TYPE, {},
+      _parkingContentState(_parkingLast.dist, _parkingLast.brg), {}).catch(() => {});
+  }
+  res.json({ ok: true, note: _parkingNote });
+});
+
+function _endParkingLA() {
+  if (!_parkingActive) return;
+  _parkingActive = false;
+  if (!apnsLive.enabled) return;
+  apnsLive.pushUpdate(PARKING_LA_TYPE, {}, _parkingContentState(0, 0),
+    { isFinal: true, dismissalDate: Date.now() + 8_000 })
+    .catch(e => console.warn('[apns] parking end falhou:', e.message));
+}
+
+function _evalParkingLA() {
+  if (!apnsLive.enabled || notifPrefs.la_parking === false) { _endParkingLA(); return; }
+  // Carro ligado / dirigindo → sem LA de estacionamento; re-arma o snapshot.
+  const carOn = state.engine_state === '1' || state.engine_state === 1
+    || +state.driving_ready === 1 || (+state.speed_kmh || 0) > 3;
+  if (carOn) { _parkedLoc = null; if (_parkingNote) { _parkingNote = ''; _saveParkingNote(); } _endParkingLA(); return; }
+  // Estacionado: snapshot da posição do carro (último GPS válido antes de desligar).
+  const clat = +state.gps_lat, clng = +state.gps_lng;
+  if (!_parkedLoc && clat && clng) _parkedLoc = { lat: clat, lng: clng, ts: Date.now() };
+  if (!_parkedLoc) return;   // sem posição do carro → nada a fazer
+  // Posição do dono. Sem fix fresco (>15min) → mantém o estado atual (não fecha à toa).
+  const ph = _ownerPhoneLoc();
+  if (!ph || (Date.now() - ph.ts > 15 * 60_000)) return;
+  // Local marcado como "não notificar" → não abre (e fecha se já estava aberta).
+  if (_phoneInSuppressedPlace(ph.lat, ph.lng)) { _endParkingLA(); return; }
+  const dist = haversineM(ph.lat, ph.lng, _parkedLoc.lat, _parkedLoc.lng);
+  const brg  = _bearingDeg(ph.lat, ph.lng, _parkedLoc.lat, _parkedLoc.lng);
+  const now  = Date.now();
+  if (!_parkingActive) {
+    if (dist < PARK_TRIGGER_M) return;   // ainda perto do carro
+    _parkingActive = true;
+    _parkingLast = { dist, brg, ts: now };
+    apnsLive.pushStart(PARKING_LA_TYPE, '', { carName: 'Haval H6 PHEV' }, _parkingContentState(dist, brg),
+      { staleDate: now + 12 * 3600_000,
+        alert: { title: '🅿️ Voltar ao carro', body: `Seu Haval está a ${_fmtParkDist(dist)}. Toque pra abrir a direção.` } })
+      .catch(e => console.warn('[apns] parking pushStart falhou:', e.message));
+    return;
+  }
+  if (dist < PARK_CLEAR_M) { _endParkingLA(); return; }   // voltou pro carro
+  // Throttle: só atualiza se mudou o bastante (≥15m ou ≥15° de rumo) ou passou 5min.
+  const dBrg = Math.abs(((brg - _parkingLast.brg + 540) % 360) - 180);
+  if (Math.abs(dist - _parkingLast.dist) < 15 && dBrg < 15 && (now - _parkingLast.ts) < 300_000) return;
+  _parkingLast = { dist, brg, ts: now };
+  apnsLive.pushUpdate(PARKING_LA_TYPE, {}, _parkingContentState(dist, brg), {}).catch(() => {});
+}
+setInterval(_evalParkingLA, 60_000);
+
 // ── Live Activity persistente: veículo desprotegido ───────────────────────
 // Fica visível na tela bloqueada enquanto o carro estacionado estiver
 // destrancado e/ou com porta/vidro/teto/porta-malas aberto. Some sozinha
@@ -12194,7 +12763,21 @@ function _securitySnapshot() {
   if (sunroofOpen) issues.push('Teto solar');
   return { issues, unlocked, door, win, trunkOpen, sunroofOpen };
 }
+// Posição fresca do celular do dono (não-grasi) pra "você a X km" — null se stale.
+function _ownerPhoneDistKm() {
+  const carLat = +state.gps_lat, carLng = +state.gps_lng;
+  if (!carLat || !carLng) return null;
+  let best = null;
+  for (const [id, loc] of Object.entries(phoneLocByDevice)) {
+    if (getPrefsForDevice(id).byd_role === 'grasi') continue;
+    if (!best || loc.ts > best.ts) best = loc;
+  }
+  if (!best || Date.now() - best.ts > 15 * 60_000 || !best.lat || !best.lng) return null;
+  return +(haversineM(carLat, carLng, best.lat, best.lng) / 1000).toFixed(1);
+}
 function _securityContentState(snap, active) {
+  const place = matchKnownPlace(+state.gps_lat, +state.gps_lng, 100);
+  const dist  = _ownerPhoneDistKm();
   return {
     unlocked:    snap.unlocked,
     doorFL: snap.door.fl, doorFR: snap.door.fr, doorRL: snap.door.rl, doorRR: snap.door.rr,
@@ -12204,6 +12787,10 @@ function _securityContentState(snap, active) {
     summary:     snap.issues.join(' · ') || 'Tudo seguro',
     active:      !!active,
     updatedAtMs: Date.now(),
+    // Rodada 9b (opcionais):
+    sinceMs:       state._security_la_since || undefined,
+    userDistKm:    dist == null ? undefined : dist,
+    locationShort: place ? String(place.name) : undefined,
   };
 }
 // Reavalia e cria/atualiza/encerra a LA. Chamado após cada transição de
@@ -12235,7 +12822,9 @@ function _evalSecurityAlert() {
     if (!_securityActive) {
       _securityActive = true;
       _securitySig    = sig;
-      state._security_la_active = true; state._security_la_sig = sig; scheduleStateSave();
+      state._security_la_active = true; state._security_la_sig = sig;
+      state._security_la_since = Date.now(); scheduleStateSave();
+      cs.sinceMs = state._security_la_since;
       apnsLive.pushStart(SECURITY_LA_TYPE, '', { carName: 'Haval H6 PHEV' }, cs,
         { staleDate: Date.now() + 12 * 3600_000,
           alert: { title: '🔓 Veículo desprotegido', body: snap.issues.join(' · ') } })
@@ -12249,9 +12838,10 @@ function _evalSecurityAlert() {
   } else if (_securityActive) {
     _securityActive = false;
     _securitySig    = '';
-    state._security_la_active = false; state._security_la_sig = ''; scheduleStateSave();
+    state._security_la_active = false; state._security_la_sig = '';
+    state._security_la_since = 0; scheduleStateSave();
     apnsLive.pushUpdate(SECURITY_LA_TYPE, {}, _securityContentState(snap, false),
-      { isFinal: true, dismissalDate: Date.now() + 60_000 })   // tudo seguro → mostra 60s e encerra
+      { isFinal: true, dismissalDate: Date.now() + 8_000 })   // confirmação verde → ~8s e encerra
       .catch(e => console.warn('[apns] security end falhou:', e.message));
   }
 }
@@ -12264,11 +12854,13 @@ app.post('/api/security/refresh', requireAuth, async (req, res) => {
   try {
     const snap = _securitySnapshot();
     if (snap.issues.length === 0) {
+      state._security_la_since = 0;
       await apnsLive.pushUpdate(SECURITY_LA_TYPE, {}, _securityContentState(snap, false),
-        { isFinal: true, dismissalDate: Date.now() + 60_000 });   // tudo seguro → 60s e encerra
+        { isFinal: true, dismissalDate: Date.now() + 8_000 });   // confirmação verde → ~8s e encerra
       _securityActive = false; _securitySig = '';
     } else {
       const sig = snap.issues.join('|');
+      if (!state._security_la_since) state._security_la_since = Date.now();
       await apnsLive.pushUpdate(SECURITY_LA_TYPE, {}, _securityContentState(snap, true), {});
       _securityActive = true; _securitySig = sig;
     }
@@ -12635,6 +13227,15 @@ function sendChargeLiveUpdate(isFinal = false) {
   }
 }
 
+// Refresh imediato da LA de recarga quando a trava muda — os pushes normais são
+// gated em telemetria de carga, então trancar/destrancar não atualizava o botão
+// Trancar/Destrancar sozinho (ficava stale até o próximo tick de carga/heartbeat).
+function _pushChargeLockUpdate() {
+  if (!apnsLive.enabled || !apnsLive.hasUpdateToken('ChargeActivityAttributes')) return;
+  apnsLive.pushUpdate('ChargeActivityAttributes', {}, _chargeContentState())
+    .catch(err => console.warn('[apns] push lock falhou:', err.message));
+}
+
 // ── Endpoints da Live Activity (iOS companion) ────────────────────────────────
 // O app registra:
 //  - push-to-start token (por TIPO de LA): permite o servidor CRIAR a LA.
@@ -12644,7 +13245,8 @@ const LA_TYPES = ['ChargeActivityAttributes', 'PreClimatActivityAttributes', 'Tr
                   'SongProTripActivityAttributes',
                   'CompanionInboundActivityAttributes',     // feature 1: companion indo até Grasi
                   'SharedTripActivityAttributes',           // share do Haval direto na tela dela
-                  'InfraActivityAttributes'];               // monitoramento do Mac Mini (push do HA da empresa)
+                  'InfraActivityAttributes',                // monitoramento do Mac Mini (push do HA da empresa)
+                  'ParkingActivityAttributes'];             // "voltar ao carro" (distância+direção do carro estacionado)
 
 // push-to-start token (por tipo de Live Activity)
 // GET /api/songpro/status — % da bateria do BYD Song Pro sempre, + infos da
@@ -12811,6 +13413,12 @@ app.post('/api/phone-location', (req, res) => {
     phoneLocByDevice[deviceId] = { lat, lng, ts: now, prevLat: prev?.lat, prevLng: prev?.lng, prevTs: prev?.ts };
     _savePhoneLoc();
     _phoneHistAppend(deviceId, lat, lng, now);
+    // O app HavalEcoTrip marca seu device como dono → vira a fonte preferida da
+    // posição do dono na LA "voltar ao carro" (mais fresca que a presença).
+    if (req.body.haval_owner && _havalOwnerDeviceId !== deviceId) {
+      _havalOwnerDeviceId = deviceId;
+      try { atomicWriteFileSync(HAVAL_OWNER_FILE, JSON.stringify({ device_id: deviceId })); } catch (_) {}
+    }
   }
   // Mantém _phoneLoc apontando pro device com role=grasi (alvo das LAs do carro).
   const role = getPrefsForDevice(deviceId).byd_role;
@@ -13718,15 +14326,17 @@ app.get('/api/share/:token/state', (req, res) => {
     fuelL: +state.fuel_l || 0,
     tripKm: +(tr.distKm || 0), tripSec: +(tr.timeSec || 0),
     rangeEvKm: Math.round(+state.range_ev_km || 0),
-    gear: String(state.gear || '--').toUpperCase(),
+    gear: (['P', 'R', 'N', 'D'].includes(String(state.gear || '').toUpperCase()) ? String(state.gear).toUpperCase() : '--'),
     tempIn: +state.inside_temp || 0,
     tempOut: +state.outside_temp || 0,
-    driveMode: ({ 0: 'HEV', 1: 'Prior. EV', 3: 'EV' })[state.drive_mode] || null,
+    driveMode: ({ 0: 'HEV', 1: 'Prior. EV', 3: 'EV Puro' })[state.drive_mode] || null,
     terrain: ({ 0: 'Normal', 1: 'Sport', 2: 'Eco', 3: 'Neve', 4: 'Areia', 5: 'Lama', 11: 'AWD' })[state.terrain_mode] || null,
     ac: (state.hvac_ac_enable === '1' || state.ac_state === 'on'),
     setTemp: (state.hvac_driver_temp != null && +state.hvac_driver_temp > 0) ? +state.hvac_driver_temp : null,
-    evRemainKm: Math.round(+state.ev_remain_km || +state.range_ev_km || 0),
-    iceRemainKm: Math.round(+state.fuel_remain_km || +state.range_ice_km || 0),
+    // Mesma fonte do app (autonomy_*_km = valor do painel/HA). fuel_remain_km/range_ice_km
+    // são sensores CAN legados que divergem do painel — só fallback se não houver oficial.
+    evRemainKm: Math.max(0, Math.round(+state.autonomy_ev_km || +state.ev_remain_km || +state.range_ev_km || 0)),
+    iceRemainKm: Math.max(0, Math.round(+state.autonomy_ice_km || +state.fuel_remain_km || 0)),
     odometer: Math.round(+state.odometer_km || 0),
     heading: +state.car_heading || 0,
     pm25: (state.hvac_pm25 != null && +state.hvac_pm25 > 0) ? Math.round(+state.hvac_pm25) : null,
@@ -13837,11 +14447,13 @@ app.get('/api/route-plan', async (req, res) => {
     const acOn = state.hvac_ac_enable === '1' || state.ac_state === 'on';
     const tempOut = +state.outside_temp || 28;
     const acH = acOn ? Math.min(Math.max(0.5 + 0.07 * Math.abs(tempOut - 22), 0.5), 1.5) : 0.12;
+    // SOC-alvo de chegada opcional (?target_soc=). Preserva bateria: abaixo do alvo roda gasolina.
+    const targetSoc = Number.isFinite(+req.query.target_soc) ? +req.query.target_soc : undefined;
     // Roda o modelo de energia sobre as pernas de uma rota qualquer (primária ou alt).
     const modelOf = (pl) => {
       const lr = pl.legs && pl.legs.length ? pl.legs
         : [{ distanceKm: pl.distanceKm, durationMin: pl.durationMin, climbM: pl.climbM, descentM: pl.descentM }];
-      const m = _energyModelLegs(lr, { soc, cap, acH });
+      const m = _energyModelLegs(lr, { soc, cap, acH, targetSoc });
       return { lr, m };
     };
     const { lr: legsRaw, m: em } = modelOf(plan);
@@ -13859,7 +14471,7 @@ app.get('/api/route-plan', async (req, res) => {
     res.json({
       ...plan, destLat: toLat, destLng: toLng, destName: toName,
       soc, predictedSoc: em.predictedSoc, fuelL: em.fuelL, onFuel: em.onFuel,
-      evDepleteKm: em.evDepleteKm, confidencePct: em.confidencePct,
+      evDepleteKm: em.evDepleteKm, confidencePct: em.confidencePct, targetSoc: em.targetSoc,
       capacityKwh: em.capacityKwh, energyKwh: em.energyKwh, energyPct: em.energyPct,
       energyLegs: em.legs.map((l, k) => ({
         distanceKm: legsRaw[k] ? legsRaw[k].distanceKm : null,
@@ -14006,6 +14618,7 @@ function applyGwmEntity(id, value, isRetained = false) {
           if (state.engine_state === '0') { _unlockedWhileOff = true; _persistSecurityGate(); }   // destrancou parado
           addEvent('lock_open',  'Carro destrancado');
         } else             addEvent('lock_close', 'Carro trancado');
+        _pushChargeLockUpdate();   // botão Trancar/Destrancar da LA de recarga
       } else if (field === 'ac_state') {
         if (norm === 'on') addEvent('ac_on',  'Ar condicionado ligado');
         else               addEvent('ac_off', 'Ar condicionado desligado');
@@ -14318,6 +14931,7 @@ function applyMqttMessage(key, value, isRetained = false) {
             addEvent('lock_close', 'Carro trancado', realTs);
             _cancelLockForgottenTimer();   // carro foi trancado — cancela alerta
           }
+          _pushChargeLockUpdate();   // botão Trancar/Destrancar da LA de recarga
         }
         _evalSecurityAlert();
       }, HYSTERESIS_MS);
@@ -14353,8 +14967,10 @@ function applyMqttMessage(key, value, isRetained = false) {
     case 'seat_vent_pass': state.seat_vent_pass = value; break; // '0'..'3'
     case 'shade_level':    state.shade_level    = value; break; // '0'..'100' — cortina do teto (leitura ativa do APK)
     case 'skylight_level': state.skylight_level = value; break; // '0'=fechado·'200'=vent·'1'..'100'=% (teto solar)
-    case 'fuel_remain_km': state.fuel_remain_km = Math.round(num(value)); if (!_gwmAlive(_now)) { state.autonomy_ice_km = state.fuel_remain_km; _fieldSource['autonomy_ice_km'] = 'apk'; } break; // autonomia ICE real do CAN; alimenta autonomy_ice_km no 4G-out (GWM-only)
-    case 'ev_remain_km':   state.ev_remain_km   = Math.round(num(value)); if (!_gwmAlive(_now)) { state.autonomy_ev_km  = state.ev_remain_km;  _fieldSource['autonomy_ev_km']  = 'apk'; } break; // autonomia EV real do CAN; idem autonomy_ev_km
+    // Carro desligado publica -1 (sentinela "sem leitura"). Ignora negativos e
+    // mantém o último valor válido — igual a EV faz naturalmente.
+    case 'fuel_remain_km': { const v = Math.round(num(value)); if (v >= 0) { state.fuel_remain_km = v; if (!_gwmAlive(_now)) { state.autonomy_ice_km = v; _fieldSource['autonomy_ice_km'] = 'apk'; } } break; } // autonomia ICE real do CAN; alimenta autonomy_ice_km no 4G-out (GWM-only)
+    case 'ev_remain_km':   { const v = Math.round(num(value)); if (v >= 0) { state.ev_remain_km   = v; if (!_gwmAlive(_now)) { state.autonomy_ev_km  = v; _fieldSource['autonomy_ev_km']  = 'apk'; } } break; } // autonomia EV real do CAN; idem autonomy_ev_km
     case 'fuel_pct_can': {
       state.fuel_pct_can = Math.round(num(value)); // % combustível no tanque (CAN)
       // Fallback fuel_l: a GWM publica litros direto (id 2017002). Sem ela (4G out),
@@ -15141,6 +15757,16 @@ server.listen(PORT, () => {
     console.log(`    HTTPS:     inativo (sem cert.pem / key.pem)`);
   }
   console.log(`    MQTT:      ${MQTT_HOST} (prefix: ${MQTT_PREFIX})\n`);
+  // Reconciliação de LA de viagem órfã: se sobrou token vivo de uma LA de viagem
+  // mas não há viagem em curso (current_trip retido teria chegado em ~30s), a LA
+  // ficou presa "em curso" (ex.: restart do bridge no fim da viagem). Encerra.
+  setTimeout(() => {
+    if (!apnsLive.enabled) return;
+    if (!state.current_trip && !_tripActive && apnsLive.hasUpdateToken(TRIP_LA_TYPE)) {
+      console.log('[apns] reconcile: LA de viagem órfã (sem current_trip) → encerrando');
+      _endTripLA(0);
+    }
+  }, 30_000);
 });
 
 if (httpsServer) {

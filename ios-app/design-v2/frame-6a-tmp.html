@@ -1,0 +1,156 @@
+<html><head><meta charset="utf8"><style>
+@keyframes ecoBreathe{0%,100%{opacity:1}50%{opacity:.35}}
+@keyframes ecoPulse{0%,100%{opacity:1}50%{opacity:.45}}
+@keyframes ecoSpin{to{transform:rotate(360deg)}}
+body{margin:0;background:#000;display:flex;justify-content:center;padding:16px}
+</style><style>
+    body { background: #0a0a0a; margin: 0; }
+    @keyframes ecoBreathe { 0%,100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.35); opacity: .55; } }
+    @keyframes ecoPulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+    @keyframes ecoSpin { to { transform: rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
+  </style></head><body><div id="6a" style="display: flex; flex-direction: column; gap: 14px;">
+      <div style="display: flex; align-items: baseline; gap: 10px;">
+        <span style="background: #22c55e; color: #000; font-size: 11px; font-weight: 700; letter-spacing: .06em; padding: 3px 8px; border-radius: 6px;">6a</span>
+        <span style="font-size: 15px; font-weight: 650;">Histórico</span>
+        <span style="font-size: 12px; color: #6b7280;">sessão de hoje expandida</span>
+      </div>
+      <x-import component-from-global-scope="IOSDevice" from="./ios-frame.jsx" dark="{{ true }}" hint-size="402px,874px">
+        <div style="height: 100%; display: flex; flex-direction: column; background: #000; position: relative; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', system-ui, sans-serif; color: #f5f5f5; box-sizing: border-box; padding-top: 62px;">
+
+          <div style="display: flex; align-items: center; justify-content: space-between; padding: 0 18px;">
+            <span style="font-size: 21px; font-weight: 700; letter-spacing: -.02em;">Recargas</span>
+            <div style="width: 32px; height: 32px; border-radius: 999px; background: #16161a; border: 1px solid rgba(255,255,255,.08); display: flex; align-items: center; justify-content: center;">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l2-5 4 10 2-5h6"></path></svg>
+            </div>
+          </div>
+
+          <div style="margin: 10px 18px 0; display: flex; background: #16161a; border: 1px solid rgba(255,255,255,.06); border-radius: 11px; padding: 2px;">
+            <span style="flex: 1; text-align: center; font-size: 12px; font-weight: 600; color: #f5f5f5; background: #2a2a2a; border-radius: 9px; padding: 6px 0;">Recargas</span>
+            <span style="flex: 1; text-align: center; font-size: 12px; font-weight: 500; color: #6b7280; padding: 6px 0;">Abastecimento</span>
+          </div>
+
+          <div style="padding: 10px 18px 0; display: flex; align-items: flex-end; justify-content: space-between;">
+            <div style="display: flex; align-items: flex-start; gap: 3px;">
+              <span style="font-size: 56px; font-weight: 200; line-height: .9; letter-spacing: -2.5px; font-variant-numeric: tabular-nums;">84,6</span>
+              <span style="font-size: 14px; color: #6b7280; margin-top: 7px;">kWh</span>
+            </div>
+            <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 3px; padding-bottom: 4px;">
+              <span style="font-size: 13px; font-weight: 600; color: #22c55e; font-variant-numeric: tabular-nums;">9 recargas em junho</span>
+              <span style="font-size: 11.5px; color: #6b7280; font-variant-numeric: tabular-nums;">R$ 98,10 · média R$ 1,16/kWh</span>
+            </div>
+          </div>
+
+          <div style="display: flex; gap: 6px; padding: 11px 18px 0;">
+            <span style="font-size: 11px; font-weight: 600; color: #94a3b8; background: #16161a; border: 1px solid rgba(255,255,255,.08); border-radius: 999px; padding: 4px 12px;">Histórico</span>
+            <span style="font-size: 11px; font-weight: 600; color: #94a3b8; background: #16161a; border: 1px solid rgba(255,255,255,.08); border-radius: 999px; padding: 4px 12px;">Estatísticas</span>
+            <span style="margin-left: auto; font-size: 11px; font-weight: 600; color: #22c55e; background: rgba(34,197,94,.12); border: 1px solid rgba(34,197,94,.3); border-radius: 999px; padding: 4px 12px;">Junho</span>
+          </div>
+
+          <div style="margin: 11px 18px 0; background: #0d0d0f; border: 1px solid rgba(34,197,94,.28); border-radius: 16px; padding: 12px 14px; display: flex; flex-direction: column; gap: 10px;">
+            <div style="display: flex; align-items: center; justify-content: space-between;">
+              <div style="display: flex; flex-direction: column; gap: 2px;">
+                <span style="font-size: 13.5px; font-weight: 600;">Wallbox casa</span>
+                <span style="font-size: 10.5px; color: #6b7280;">hoje · 19:12 – 21:36 · AC 6,6 kW</span>
+              </div>
+              <span style="font-size: 11px; font-weight: 700; color: #22c55e; background: rgba(34,197,94,.12); border: 1px solid rgba(34,197,94,.3); border-radius: 999px; padding: 4px 10px; font-variant-numeric: tabular-nums;">+18,4 kWh</span>
+            </div>
+
+            <div style="display: flex; flex-direction: column; gap: 5px;">
+              <div style="display: flex; align-items: center; justify-content: space-between;">
+                <span style="font-size: 9px; font-weight: 700; letter-spacing: .1em; color: #6b7280;">SOC</span>
+                <span style="font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums;">46% <span style="color: #6b7280; font-weight: 400;">→</span> 80%</span>
+              </div>
+              <div style="position: relative; height: 8px; border-radius: 999px; background: #16161a;">
+                <div style="position: absolute; top: 0; bottom: 0; left: 0; width: 46%; border-radius: 999px 0 0 999px; background: rgba(34,197,94,.25);"></div>
+                <div style="position: absolute; top: 0; bottom: 0; left: 46%; width: 34%; background: linear-gradient(90deg, #16a34a, #22c55e);"></div>
+                <div style="position: absolute; top: -2.5px; bottom: -2.5px; left: 80%; width: 2px; border-radius: 2px; background: #facc15;"></div>
+              </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px;">
+              <div style="background: #16161a; border-radius: 11px; padding: 7px 4px 6px; display: flex; flex-direction: column; align-items: center; gap: 1px;">
+                <span style="font-size: 8.5px; letter-spacing: .08em; color: #6b7280;">CUSTO</span>
+                <span style="font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums;">R$ 21,30</span>
+              </div>
+              <div style="background: #16161a; border-radius: 11px; padding: 7px 4px 6px; display: flex; flex-direction: column; align-items: center; gap: 1px;">
+                <span style="font-size: 8.5px; letter-spacing: .08em; color: #6b7280;">DURAÇÃO</span>
+                <span style="font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums;">2h24</span>
+              </div>
+              <div style="background: #16161a; border-radius: 11px; padding: 7px 4px 6px; display: flex; flex-direction: column; align-items: center; gap: 1px;">
+                <span style="font-size: 8.5px; letter-spacing: .08em; color: #6b7280;">MÉDIA</span>
+                <span style="font-size: 14px; font-weight: 600; color: #22d3ee; font-variant-numeric: tabular-nums;">6,4 <span style="font-size: 9px; color: #6b7280; font-weight: 400;">kW</span></span>
+              </div>
+              <div style="background: #16161a; border-radius: 11px; padding: 7px 4px 6px; display: flex; flex-direction: column; align-items: center; gap: 1px;">
+                <span style="font-size: 8.5px; letter-spacing: .08em; color: #6b7280;">R$/KWH</span>
+                <span style="font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums;">1,16</span>
+              </div>
+            </div>
+
+            <div style="position: relative; height: 86px;">
+              <svg viewBox="0 0 340 86" preserveAspectRatio="none" style="position: absolute; inset: 0; width: 100%; height: 100%;">
+                <line x1="0" y1="22" x2="340" y2="22" stroke="rgba(255,255,255,.05)" stroke-width="1"></line>
+                <line x1="0" y1="50" x2="340" y2="50" stroke="rgba(255,255,255,.05)" stroke-width="1"></line>
+                <path d="M0 78 L6 26 L200 24 L225 30 L250 40 L275 52 L300 62 L322 70 L340 74 L340 86 L0 86 Z" fill="rgba(34,211,238,.13)"></path>
+                <path d="M0 78 L6 26 L200 24 L225 30 L250 40 L275 52 L300 62 L322 70 L340 74" stroke="#22d3ee" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"></path>
+              </svg>
+              <span style="position: absolute; left: 0; top: 0; font-size: 8.5px; letter-spacing: .08em; color: #6b7280;">CURVA DE POTÊNCIA · KW</span>
+              <span style="position: absolute; right: 0; top: 0; font-size: 8.5px; color: #6b7280;">6,6 máx</span>
+              <span style="position: absolute; left: 0; bottom: -3px; font-size: 8.5px; color: #6b7280;">19:12</span>
+              <span style="position: absolute; right: 0; bottom: -3px; font-size: 8.5px; color: #6b7280;">21:36</span>
+            </div>
+          </div>
+
+          <div style="margin: 8px 18px 0; background: #0d0d0f; border: 1px solid rgba(255,255,255,.08); border-radius: 15px; padding: 10px 14px; display: flex; align-items: center; justify-content: space-between;">
+            <div style="display: flex; flex-direction: column; gap: 2px;">
+              <span style="font-size: 12.5px; font-weight: 600;">Shell Recharge · T-63</span>
+              <span style="font-size: 10.5px; color: #6b7280; font-variant-numeric: tabular-nums;">seg 13:20 · DC 40 kW · 31% → 74% · 34 min</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="font-size: 10.5px; color: #94a3b8; font-variant-numeric: tabular-nums;">22,1 kWh · R$ 35,80</span>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"></path></svg>
+            </div>
+          </div>
+
+          <div style="margin: 7px 18px 0; background: #0d0d0f; border: 1px solid rgba(255,255,255,.08); border-radius: 15px; padding: 10px 14px; display: flex; align-items: center; justify-content: space-between;">
+            <div style="display: flex; flex-direction: column; gap: 2px;">
+              <span style="font-size: 12.5px; font-weight: 600;">Wallbox casa</span>
+              <span style="font-size: 10.5px; color: #6b7280; font-variant-numeric: tabular-nums;">sex 22:05 · AC 6,6 kW · 58% → 80% · 1h49</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="font-size: 10.5px; color: #94a3b8; font-variant-numeric: tabular-nums;">12,2 kWh · R$ 14,10</span>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"></path></svg>
+            </div>
+          </div>
+
+          <div style="margin: 9px 18px 0; display: flex; align-items: center; justify-content: center; gap: 6px;">
+            <span style="font-size: 11.5px; font-weight: 600; color: #94a3b8;">Ver todas as 9 recargas</span>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"></path></svg>
+          </div>
+
+          <div style="margin-top: auto; position: relative; z-index: 15; background: rgba(10,10,10,.92); backdrop-filter: blur(16px); border-top: 1px solid rgba(255,255,255,.06); display: flex; padding: 8px 10px 26px;">
+            <div style="flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px;">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 17a8 8 0 1 1 15 0"></path><path d="M12 17l3.5-6"></path><circle cx="12" cy="17" r="1.4" fill="#6b7280" stroke="none"></circle></svg>
+              <span style="font-size: 9.5px; font-weight: 500; color: #6b7280;">Painel</span>
+            </div>
+            <div style="flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px;">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"></circle><circle cx="12" cy="12" r="2.6"></circle><path d="M3.5 12h6M14.5 12h6M12 14.6v5.9"></path></svg>
+              <span style="font-size: 9.5px; font-weight: 500; color: #6b7280;">Drive</span>
+            </div>
+            <div style="flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px;">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="#22c55e"><path d="M13 2L5 13.5h5.5L9.5 22l8-11.5H12L13 2z"></path></svg>
+              <span style="font-size: 9.5px; font-weight: 600; color: #22c55e;">Recargas</span>
+            </div>
+            <div style="flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px;">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4L4 6v14l5-2 6 2 5-2V4l-5 2-6-2z"></path><path d="M9 4v14M15 6v14"></path></svg>
+              <span style="font-size: 9.5px; font-weight: 500; color: #6b7280;">Viagens</span>
+            </div>
+            <div style="flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px;">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"></circle><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.2 5.2l2.1 2.1M16.7 16.7l2.1 2.1M18.8 5.2l-2.1 2.1M7.3 16.7l-2.1 2.1"></path></svg>
+              <span style="font-size: 9.5px; font-weight: 500; color: #6b7280;">Config</span>
+            </div>
+          </div>
+        </div>
+      </x-import>
+      <div style="font-size: 12px; line-height: 1.5; color: #94a3b8; max-width: 380px;">Segmented Recargas | Abastecimento no topo; kWh do mês como hero. A sessão de hoje expande com SOC de→até na barra (marcador de limite), grid de custo/duração e a curva CC/CV em teal. DC rápida mostra potência e tempo curto na linha colapsada.</div>
+    </div></body></html>

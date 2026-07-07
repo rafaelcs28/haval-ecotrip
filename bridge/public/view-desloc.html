@@ -539,6 +539,24 @@
       </div>
     </div>
 
+    <!-- Análises (client-side, computam das viagens) -->
+    <div class="stat-card teal" onclick="openEcoScoreModal()" style="cursor:pointer">
+      <div class="icon-box">🏆</div>
+      <div class="meta"><div class="lbl">Condução</div><div class="v" style="font-size:15px">Eco-score & recordes ›</div></div>
+    </div>
+    <div class="stat-card blue" onclick="openMonthlyReportModal()" style="cursor:pointer">
+      <div class="icon-box">📅</div>
+      <div class="meta"><div class="lbl">Relatório mensal</div><div class="v" style="font-size:15px">km · kWh · R$ · CO₂ ›</div></div>
+    </div>
+    <div class="stat-card green" onclick="openRouteCompareModal()" style="cursor:pointer">
+      <div class="icon-box">🔁</div>
+      <div class="meta"><div class="lbl">Trajetos recorrentes</div><div class="v" style="font-size:15px">Médias & tendência ›</div></div>
+    </div>
+    <div class="stat-card orange" onclick="openMilestonesModal()" style="cursor:pointer">
+      <div class="icon-box">🎯</div>
+      <div class="meta"><div class="lbl">Marcos do carro</div><div class="v" style="font-size:15px">Conquistas ›</div></div>
+    </div>
+
     <div class="stat-card green">
       <div class="icon-box">📍</div>
       <div class="meta">
@@ -33752,6 +33770,240 @@ function _tripPriceGas() {
   const s = window.state || {};
   return +s.tank_avg_price_per_l || +s.price_gas_per_l || +SNAPSHOT.price_gas_per_l || 0;
 }
+
+// ════════════════════════════════════════════════════════════════════════════
+// ANÁLISES client-side (mirror EcoScoreSheet / MonthlyReportSheet /
+// RouteCompareSheet / MilestonesSheet) — computam de cachedAutoTrips.
+// ════════════════════════════════════════════════════════════════════════════
+const _ANALYTICS_KM_PER_L = () => { const s = window.state || {}; const v = +s.km_per_l || +SNAPSHOT.km_per_l || 0; return v > 1 ? v : 11; };
+let _analyticsCache = null;
+function _analyticsTrips() {
+  // app.js expõe window.getCachedAutoTrips() (getter sobre o `let` do módulo).
+  try { const a = window.getCachedAutoTrips && window.getCachedAutoTrips(); if (Array.isArray(a) && a.length) return a.slice(); } catch (_) {}
+  try { if (typeof cachedAutoTrips !== 'undefined' && Array.isArray(cachedAutoTrips) && cachedAutoTrips.length) return cachedAutoTrips.slice(); } catch (_) {}
+  if (Array.isArray(_analyticsCache)) return _analyticsCache.slice();
+  return [];
+}
+// Garante que há viagens carregadas antes de abrir um modal de analytics.
+// As viagens só populam cachedAutoTrips quando o painel Auto carrega; aqui
+// puxamos direto do IndexedDB (compartilha escopo com app.js) ou da API.
+async function _ensureAnalyticsTrips() {
+  try { const a = window.getCachedAutoTrips && window.getCachedAutoTrips(); if (Array.isArray(a) && a.length) return; } catch (_) {}
+  try { if (typeof cachedAutoTrips !== 'undefined' && Array.isArray(cachedAutoTrips) && cachedAutoTrips.length) return; } catch (_) {}
+  if (Array.isArray(_analyticsCache) && _analyticsCache.length) return;
+  // 1) IndexedDB local (mesmo store que o app usa)
+  try {
+    if (typeof _idbGetAll === 'function') {
+      const a = await _idbGetAll('autotrips');
+      if (Array.isArray(a) && a.length) { _analyticsCache = a.sort((x, y) => (+y.startMs || 0) - (+x.startMs || 0)); return; }
+    }
+  } catch (_) {}
+  // 2) Fallback: API
+  try {
+    const r = await (typeof apiFetch === 'function' ? apiFetch('/api/autotrips') : fetch('/api/autotrips'));
+    const j = await r.json();
+    const a = Array.isArray(j) ? j : (j.trips || j.items || []);
+    if (Array.isArray(a)) _analyticsCache = a.sort((x, y) => (+y.startMs || 0) - (+x.startMs || 0));
+  } catch (_) {}
+}
+function _tripDate(t) { return new Date(+t.startMs || 0); }
+function _tripName(t) {
+  if (t.name) return t.name;
+  if (t.startKp && t.endKp) return t.startKp + ' → ' + t.endKp;
+  return t.endKp || t.startKp || 'Viagem';
+}
+// ── Eco-score (nota de condução) ────────────────────────────────────────────
+const ECO_GOAL = 70;
+function _ecoScore(t) {
+  if (t.driveScore != null) return Math.round(+t.driveScore);
+  if (!(+t.distKm >= 1)) return null;
+  const eq = ((+t.netKwh || 0) + (+t.fuelL || 0) * 8.9) / t.distKm * 100;
+  const econ = Math.max(0, Math.min(100, 100 - (eq - 13.0) * (70.0 / 13.0)));
+  const events = (+t.harshAcc || 0) + (+t.harshBrake || 0);
+  const perKm = t.distKm > 0.5 ? events / t.distKm : 0;
+  const smooth = Math.max(0, Math.min(100, 100 - perKm * 18));
+  return Math.round(0.55 * econ + 0.45 * smooth);
+}
+function _ecoAvg(arr) { const s = arr.map(_ecoScore).filter(v => v != null); return s.length ? Math.round(s.reduce((a, b) => a + b, 0) / s.length) : null; }
+function _ecoColor(s) { return s >= 80 ? '#22c55e' : s >= 60 ? '#fbbf24' : '#f97316'; }
+function _ecoModalShell(id, title, inner) {
+  return `<div style="width:100%;max-width:480px;background:#1f1f1f;border-top-left-radius:18px;border-top-right-radius:18px;padding:18px 18px calc(env(safe-area-inset-bottom) + 18px);border-top:1px solid rgba(255,255,255,.08);max-height:86vh;overflow-y:auto">
+    <div style="width:42px;height:5px;background:rgba(255,255,255,.18);border-radius:3px;margin:-8px auto 14px"></div>
+    <div style="font-size:18px;font-weight:700;margin-bottom:14px">${title}</div>
+    ${inner}
+    <button onclick="document.getElementById('${id}').remove()" style="width:100%;margin-top:14px;padding:12px;background:var(--green);color:#000;border:none;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit">Fechar</button>
+  </div>`;
+}
+function _ensureAnalyticsModal(id) {
+  let m = document.getElementById(id);
+  if (!m) {
+    m = document.createElement('div'); m.id = id;
+    m.style.cssText = 'position:fixed;inset:0;z-index:90;background:rgba(0,0,0,.7);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);display:flex;align-items:flex-end;justify-content:center';
+    m.onclick = (e) => { if (e.target === m) m.remove(); };
+    document.body.appendChild(m);
+  }
+  return m;
+}
+const _brl = (n) => 'R$ ' + (+n).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const _d1 = (n) => (+n).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+
+window.openEcoScoreModal = async function() {
+  const m = _ensureAnalyticsModal('ecoscore-modal');
+  m.innerHTML = _ecoModalShell('ecoscore-modal', '🏆 Condução', `<div style="text-align:center;padding:24px;color:var(--muted);font-size:13px">Carregando…</div>`);
+  await _ensureAnalyticsTrips();
+  const trips = _analyticsTrips();
+  const now = Date.now();
+  const thisWeek = trips.filter(t => +t.startMs > now - 7 * 86400000);
+  const lastWeek = trips.filter(t => +t.startMs <= now - 7 * 86400000 && +t.startMs > now - 14 * 86400000);
+  const rated = trips.filter(t => _ecoScore(t) != null).sort((a, b) => +b.startMs - +a.startMs);
+  const avg = _ecoAvg(thisWeek) ?? _ecoAvg(trips);
+  // streak: dias-com-viagem consecutivos com média >= meta
+  const byDay = {};
+  for (const t of trips) { const s = _ecoScore(t); if (s == null) continue; const d = new Date(+t.startMs); const k = d.getFullYear() + '-' + d.getMonth() + '-' + d.getDate(); (byDay[k] = byDay[k] || []).push({ s, ms: +t.startMs }); }
+  const days = Object.keys(byDay).sort((a, b) => byDay[b][0].ms - byDay[a][0].ms);
+  let streak = 0;
+  for (const k of days) { const a = byDay[k].map(x => x.s); if (a.reduce((x, y) => x + y, 0) / a.length >= ECO_GOAL) streak++; else break; }
+  const tw = _ecoAvg(thisWeek), lw = _ecoAvg(lastWeek);
+  const best = rated.length ? Math.max(...rated.map(_ecoScore)) : null;
+  const bestEq = rated.filter(t => (+t.fuelL || 0) < 0.05 && +t.distKm >= 5 && +t.netKwh > 0)
+    .sort((a, b) => (a.netKwh / a.distKm) - (b.netKwh / b.distKm))[0];
+  const header = `<div style="text-align:center;background:rgba(255,255,255,.04);border-radius:12px;padding:16px;margin-bottom:12px">
+    <div style="font-size:12px;color:var(--muted)">Nota de condução (7 dias)</div>
+    <div style="font-size:60px;font-weight:900;line-height:1;color:${avg != null ? _ecoColor(avg) : '#94a3b8'}">${avg != null ? avg : '—'}</div>
+    <div style="font-size:13px;color:${avg != null && avg >= ECO_GOAL ? '#22c55e' : '#94a3b8'};margin-top:4px">${avg != null ? ('meta ' + ECO_GOAL + ' · ' + (avg >= ECO_GOAL ? 'na meta ✓' : 'abaixo da meta')) : 'sem viagens suficientes ainda'}</div>
+    ${streak > 0 ? `<div style="font-size:13px;color:#f97316;margin-top:6px;font-weight:700">🔥 ${streak} ${streak === 1 ? 'dia' : 'dias'} seguidos na meta</div>` : ''}
+  </div>`;
+  const weekDelta = (tw != null && lw != null) ? tw - lw : null;
+  const week = `<div style="background:rgba(255,255,255,.04);border-radius:12px;padding:14px;margin-bottom:12px;display:flex;gap:16px;align-items:center">
+    <div><div style="font-size:22px;font-weight:800;color:${tw != null ? _ecoColor(tw) : '#94a3b8'}">${tw ?? '—'}</div><div style="font-size:10px;color:var(--muted)">Esta semana</div></div>
+    <div><div style="font-size:22px;font-weight:800;color:${lw != null ? _ecoColor(lw) : '#94a3b8'}">${lw ?? '—'}</div><div style="font-size:10px;color:var(--muted)">Anterior</div></div>
+    ${weekDelta != null ? `<div style="margin-left:auto;text-align:right"><div style="font-size:18px;font-weight:800;color:${weekDelta >= 0 ? '#22c55e' : '#f97316'}">${weekDelta >= 0 ? '+' : ''}${weekDelta}</div><div style="font-size:10px;color:var(--muted)">${weekDelta >= 0 ? 'melhor' : 'pior'}</div></div>` : ''}
+  </div>`;
+  const records = `<div style="background:rgba(255,255,255,.04);border-radius:12px;padding:14px;margin-bottom:12px;display:flex;gap:14px">
+    <div style="flex:1"><div style="font-size:16px;font-weight:800;color:${best != null ? _ecoColor(best) : '#94a3b8'}">${best ?? '—'}</div><div style="font-size:10px;color:var(--muted)">Melhor nota</div></div>
+    <div style="flex:1"><div style="font-size:16px;font-weight:800;color:#5eead4">${bestEq ? _d1(bestEq.netKwh / bestEq.distKm * 100) + ' kWh/100' : '—'}</div><div style="font-size:10px;color:var(--muted)">Melhor consumo</div></div>
+  </div>`;
+  const list = rated.slice(0, 20).map(t => {
+    const s = _ecoScore(t) || 0;
+    return `<div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-top:1px solid rgba(255,255,255,.06)">
+      <span style="font-size:17px;font-weight:800;color:${_ecoColor(s)};width:34px">${s}</span>
+      <div style="flex:1;min-width:0"><div style="font-size:13px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_tripName(t)}</div>
+      <div style="font-size:10px;color:var(--muted)">${_d1(t.distKm)} km · ${_d1(t.netKwh)} kWh${(t.driveScore != null && ((+t.harshAcc || 0) + (+t.harshBrake || 0)) > 0) ? ` · ⚡${t.harshAcc} 🛑${t.harshBrake}` : ''}</div></div>
+    </div>`;
+  }).join('');
+  const listCard = rated.length ? `<div style="background:rgba(255,255,255,.04);border-radius:12px;padding:4px 14px 12px;margin-bottom:12px">${list}</div>` : '';
+  const note = `<div style="font-size:10px;color:var(--muted);line-height:1.5">Nota de condução combina economia (consumo) com suavidade — penaliza acelerações e frenagens bruscas. Viagens antigas usam só a economia.</div>`;
+  m.innerHTML = _ecoModalShell('ecoscore-modal', '🏆 Condução', header + week + records + listCard + note);
+};
+
+// ── Relatório mensal ────────────────────────────────────────────────────────
+let _monthlyState = { months: [], idx: 0 };
+window.openMonthlyReportModal = async function() {
+  const m = _ensureAnalyticsModal('monthly-modal');
+  m.innerHTML = _ecoModalShell('monthly-modal', '📅 Relatório mensal', `<div style="text-align:center;padding:24px;color:var(--muted);font-size:13px">Carregando…</div>`);
+  await _ensureAnalyticsTrips();
+  const trips = _analyticsTrips().filter(t => +t.distKm > 0.1);
+  const set = {};
+  for (const t of trips) { const d = new Date(+t.startMs); set[d.getFullYear() + '-' + d.getMonth()] = { y: d.getFullYear(), mo: d.getMonth() }; }
+  const months = Object.values(set).sort((a, b) => (b.y - a.y) || (b.mo - a.mo));
+  _monthlyState = { months, idx: 0 };
+  _renderMonthly(m);
+};
+function _renderMonthly(m) {
+  const { months, idx } = _monthlyState;
+  if (!months.length) { m.innerHTML = _ecoModalShell('monthly-modal', '📅 Relatório mensal', `<div style="text-align:center;padding:24px;color:var(--muted);font-size:13px">Sem viagens pra relatar ainda.</div>`); return; }
+  const sel = months[idx];
+  const priceKwh = _tripPriceKwh(), gasL = _tripPriceGas() > 0 ? _tripPriceGas() : 6.0, kmL = _ANALYTICS_KM_PER_L();
+  const CO2_PER_L = 2.31, CO2_PER_KWH = 0.0817;
+  const trips = _analyticsTrips().filter(t => { const d = new Date(+t.startMs); return d.getFullYear() === sel.y && d.getMonth() === sel.mo && +t.distKm > 0.1; });
+  let km = 0, kwh = 0, fuelL = 0, cost = 0, evKm = 0, dur = 0, n = 0;
+  for (const t of trips) { km += +t.distKm || 0; kwh += +t.netKwh || 0; fuelL += +t.fuelL || 0; cost += (+t.netKwh || 0) * priceKwh + (+t.fuelL || 0) * gasL; dur += +t.timeSec || 0; if ((+t.fuelL || 0) < 0.05) evKm += +t.distKm || 0; n++; }
+  const savings = Math.max(km / kmL * gasL - cost, 0);
+  const co2 = Math.max((km / kmL - fuelL) * CO2_PER_L - kwh * CO2_PER_KWH, 0);
+  const evShare = km > 0 ? evKm / km * 100 : 0;
+  const monthLbl = (mm) => new Date(mm.y, mm.mo, 1).toLocaleDateString('pt-BR', { month: 'short', year: 'numeric' }).replace('.', '');
+  const durStr = (s) => Math.floor(s / 3600) + 'h' + String(Math.floor((s % 3600) / 60)).padStart(2, '0');
+  const chips = months.map((mm, i) => `<div onclick="_monthlyState.idx=${i};_renderMonthly(document.getElementById('monthly-modal'))" style="flex-shrink:0;padding:8px 14px;border-radius:18px;font-size:13px;font-weight:700;cursor:pointer;background:${i === idx ? 'rgba(94,234,212,.22)' : 'rgba(255,255,255,.06)'};color:${i === idx ? '#5eead4' : 'var(--text)'}">${monthLbl(mm)}</div>`).join('');
+  const cell = (v, u, l, c) => `<div style="flex:1"><div style="font-size:18px;font-weight:800;color:${c}">${v}<span style="font-size:11px;color:var(--muted)">${u ? ' ' + u : ''}</span></div><div style="font-size:10px;color:var(--muted)">${l}</div></div>`;
+  const grid = `<div style="background:rgba(255,255,255,.04);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:14px">
+    <div style="display:flex;gap:10px">${cell(_d1(km), 'km', 'Distância', '#60a5fa')}${cell(_d1(kwh), 'kWh', 'Energia', '#22c55e')}${cell(_d1(fuelL), 'L', 'Gasolina', '#f97316')}</div>
+    <div style="display:flex;gap:10px">${cell(_brl(cost), '', 'Custo', 'var(--text)')}${cell(Math.round(evShare), '%', 'Elétrico', '#22c55e')}${cell(n, '', 'Viagens', '#94a3b8')}</div>
+    <div style="border-top:1px solid rgba(255,255,255,.06);padding-top:12px;display:flex;gap:10px">${cell(_brl(savings), '', 'Economia vs gasolina', '#22c55e')}${cell(Math.round(co2), 'kg', 'CO₂ evitado', '#5eead4')}</div>
+  </div>`;
+  const note = `<div style="font-size:10px;color:var(--muted);margin-top:10px;line-height:1.5">Economia e CO₂ estimados vs baseline de ${_d1(kmL)} km/L (gasolina ${_brl(gasL)}/L).</div>`;
+  m.innerHTML = _ecoModalShell('monthly-modal', '📅 Relatório mensal', `<div style="display:flex;gap:8px;overflow-x:auto;margin-bottom:12px;padding-bottom:4px">${chips}</div>` + grid + note);
+}
+
+// ── Trajetos recorrentes ────────────────────────────────────────────────────
+window.openRouteCompareModal = async function() {
+  const m = _ensureAnalyticsModal('routecmp-modal');
+  m.innerHTML = _ecoModalShell('routecmp-modal', '🔁 Trajetos recorrentes', `<div style="text-align:center;padding:24px;color:var(--muted);font-size:13px">Carregando…</div>`);
+  await _ensureAnalyticsTrips();
+  const priceKwh = _tripPriceKwh(), gasL = _tripPriceGas() > 0 ? _tripPriceGas() : 6.0, kmL = _ANALYTICS_KM_PER_L();
+  const key = (t) => {
+    const p = (kp, lat, lng) => (kp && kp.length) ? kp : (lat != null && lng != null ? (+lat).toFixed(3) + ',' + (+lng).toFixed(3) : '?');
+    return p(t.startKp, t.startLat, t.startLng) + ' → ' + p(t.endKp, t.endLat, t.endLng);
+  };
+  const map = {};
+  for (const t of _analyticsTrips()) { if (+t.distKm > 0.3) (map[key(t)] = map[key(t)] || []).push(t); }
+  const groups = Object.keys(map).filter(k => map[k].length >= 2).map(k => ({ name: k, trips: map[k] })).sort((a, b) => b.trips.length - a.trips.length);
+  if (!groups.length) { m.innerHTML = _ecoModalShell('routecmp-modal', '🔁 Trajetos recorrentes', `<div style="text-align:center;padding:24px;color:var(--muted);font-size:13px">Ainda não há trajetos repetidos suficientes (precisa de 2+ viagens no mesmo origem→destino).</div>`); return; }
+  const rows = groups.map(g => {
+    const n = g.trips.length;
+    const avgKm = g.trips.reduce((a, t) => a + (+t.distKm || 0), 0) / n;
+    const avgMin = g.trips.reduce((a, t) => a + (+t.timeSec || 0), 0) / n / 60;
+    const consArr = g.trips.filter(t => +t.distKm > 0.5).map(t => t.netKwh / t.distKm * 100);
+    const avgCons = consArr.length ? consArr.reduce((a, b) => a + b, 0) / consArr.length : 0;
+    // tendência
+    let trend = 0;
+    const sorted = g.trips.filter(t => +t.distKm > 0.5).sort((a, b) => +a.startMs - +b.startMs);
+    if (sorted.length >= 4) { const h = Math.floor(sorted.length / 2); const old = sorted.slice(0, h), nw = sorted.slice(-h); const co = old.reduce((a, t) => a + t.netKwh / t.distKm * 100, 0) / old.length; const cn = nw.reduce((a, t) => a + t.netKwh / t.distKm * 100, 0) / nw.length; trend = cn - co; }
+    const real = g.trips.reduce((a, t) => a + (+t.netKwh || 0) * priceKwh + (+t.fuelL || 0) * gasL, 0) / n;
+    const gas = g.trips.reduce((a, t) => a + ((+t.distKm || 0) / kmL) * gasL, 0) / n;
+    const savedPct = gas > 0.01 ? Math.round((gas - real) / gas * 100) : 0;
+    const trendHtml = Math.abs(trend) >= 0.5 ? `<span style="margin-left:auto;font-size:12px;font-weight:700;color:${trend < 0 ? '#22c55e' : '#f97316'}">${trend < 0 ? '↘' : '↗'} ${_d1(Math.abs(trend))}</span>` : '';
+    const saveHtml = savedPct !== 0 ? `<span style="margin-left:auto;font-size:12px;font-weight:800;color:${savedPct > 0 ? '#22c55e' : '#f97316'}">${savedPct > 0 ? '🌿 −' : '⚠ +'}${Math.abs(savedPct)}%</span>` : '';
+    const mini = (v, l, c) => `<div><div style="font-size:15px;font-weight:800;color:${c}">${v}</div><div style="font-size:9px;color:var(--muted)">${l}</div></div>`;
+    return `<div style="background:rgba(255,255,255,.04);border-radius:12px;padding:14px;margin-bottom:10px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px"><span style="font-size:14px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis">${g.name}</span><span style="margin-left:auto;font-size:14px;font-weight:800;color:#5eead4">${n}×</span></div>
+      <div style="display:flex;gap:14px;align-items:center">${mini(_d1(avgKm), 'km méd.', '#60a5fa')}${mini(Math.round(avgMin) + ' min', 'tempo', 'var(--text)')}${mini(_d1(avgCons), 'kWh/100', '#22c55e')}${trendHtml}</div>
+      <div style="border-top:1px solid rgba(255,255,255,.06);margin-top:10px;padding-top:10px;display:flex;gap:14px;align-items:center">${mini(_brl(real), 'custo méd.', 'var(--text)')}${mini(_brl(gas), 'se gasolina', '#f97316')}${saveHtml}</div>
+    </div>`;
+  }).join('');
+  m.innerHTML = _ecoModalShell('routecmp-modal', '🔁 Trajetos recorrentes', rows);
+};
+
+// ── Marcos do carro ─────────────────────────────────────────────────────────
+window.openMilestonesModal = async function() {
+  const m = _ensureAnalyticsModal('milestones-modal');
+  m.innerHTML = _ecoModalShell('milestones-modal', '🎯 Marcos do carro', `<div style="text-align:center;padding:24px;color:var(--muted);font-size:13px">Carregando…</div>`);
+  await _ensureAnalyticsTrips();
+  const trips = _analyticsTrips();
+  const odo = +(window.state?.odometer_km) || +SNAPSHOT.odometer_km || 0;
+  const evKm = trips.filter(t => (+t.fuelL || 0) < 0.05).reduce((a, t) => a + (+t.distKm || 0), 0);
+  const tripCount = trips.filter(t => +t.distKm > 0.3).length;
+  const items = [
+    { icon: '🛣️', title: 'Quilometragem', value: odo, tiers: [1000, 5000, 10000, 25000, 50000, 100000], unit: 'km', color: '#60a5fa' },
+    { icon: '⚡', title: 'Km no elétrico', value: evKm, tiers: [500, 1000, 5000, 10000, 25000], unit: 'km', color: '#22c55e' },
+    { icon: '🚗', title: 'Viagens', value: tripCount, tiers: [10, 50, 100, 250, 500, 1000], unit: '', color: '#5eead4' },
+  ];
+  const fmtI = (n) => Math.round(n).toLocaleString('pt-BR');
+  const cards = items.map(a => {
+    const achieved = a.tiers.filter(t => a.value >= t);
+    const next = a.tiers.find(t => a.value < t);
+    const prev = achieved.length ? achieved[achieved.length - 1] : 0;
+    const prog = next ? Math.max(0, Math.min(1, (a.value - prev) / (next - prev))) : 1;
+    const chips = achieved.map(t => `<span style="font-size:10px;font-weight:700;color:${a.color};background:${a.color}26;padding:3px 8px;border-radius:10px;white-space:nowrap">✓ ${fmtI(t)}${a.unit ? ' ' + a.unit : ''}</span>`).join('');
+    return `<div style="background:rgba(255,255,255,.04);border-radius:12px;padding:14px;margin-bottom:10px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><span>${a.icon}</span><span style="font-size:14px;font-weight:600;color:var(--text)">${a.title}</span><span style="margin-left:auto;font-size:16px;font-weight:800;color:${a.color}">${a.unit === 'km' ? fmtI(a.value) + ' km' : fmtI(a.value)}</span></div>
+      <div style="height:8px;background:rgba(255,255,255,.08);border-radius:4px;overflow:hidden"><div style="height:100%;width:${(prog * 100).toFixed(0)}%;background:${a.color}"></div></div>
+      <div style="font-size:10px;color:var(--muted);margin-top:6px">${next ? `faltam ${fmtI(next - a.value)}${a.unit ? ' ' + a.unit : ''} pro próximo: ${fmtI(next)}${a.unit ? ' ' + a.unit : ''}` : 'todos os marcos atingidos 🎉'}</div>
+      ${chips ? `<div style="display:flex;gap:6px;overflow-x:auto;margin-top:8px;padding-bottom:2px">${chips}</div>` : ''}
+    </div>`;
+  }).join('');
+  const note = `<div style="font-size:10px;color:var(--muted);line-height:1.5">Quilometragem vem do odômetro do carro; km elétrico e viagens das suas viagens sincronizadas.</div>`;
+  m.innerHTML = _ecoModalShell('milestones-modal', '🎯 Marcos do carro', cards + note);
+};
 
 function renderTripCard(t) {
   const socDelta = (t.startSocPct || 0) - (t.endSocPct || 0);

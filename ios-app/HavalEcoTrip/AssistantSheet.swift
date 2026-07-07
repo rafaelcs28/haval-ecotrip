@@ -115,6 +115,7 @@ struct AssistantSheet: View {
                     }
                 }
                 inputBar
+                footer
             }
             .background(DS.bg.ignoresSafeArea())
             .navigationTitle("Assistente IA")
@@ -144,27 +145,20 @@ struct AssistantSheet: View {
 
     // MARK: subviews
     private var emptyState: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
-                Image(systemName: "sparkles").foregroundStyle(DS.teal)
-                Text("Pergunte sobre a telemetria do carro")
-                    .font(.system(size: 15, weight: .semibold)).foregroundStyle(DS.text)
-            }
-            Text("O assistente vê o estado atual do carro, viagens e recargas.")
-                .font(.system(size: 13)).foregroundStyle(DS.muted)
-            ForEach(suggestions, id: \.self) { s in
-                Button { store.send(s) } label: {
-                    HStack {
-                        Text(s).font(.system(size: 14)).foregroundStyle(DS.text)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        Image(systemName: "arrow.up.right").font(.system(size: 11)).foregroundStyle(DS.muted)
-                    }
-                    .padding(.horizontal, 12).padding(.vertical, 11)
-                    .background(DS.panel).clipShape(RoundedRectangle(cornerRadius: 12))
-                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(DS.border, lineWidth: 1))
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    Image(systemName: "sparkles").foregroundStyle(DS.teal)
+                    Text("Pergunte sobre a telemetria do carro")
+                        .font(.system(size: 16, weight: .bold)).foregroundStyle(DS.text)
                 }
+                Text("O assistente vê o estado atual do carro, viagens e recargas.")
+                    .font(.system(size: 13)).foregroundStyle(DS.text2)
             }
+            // Chips de sugestão (pílulas tint teal)
+            FlowChips(items: suggestions) { s in store.send(s) }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.top, 30)
     }
 
@@ -187,8 +181,11 @@ struct AssistantSheet: View {
                 }
             }
             .padding(.horizontal, 13).padding(.vertical, 9)
-            .background(isUser ? DS.green : DS.panel)
-            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .background(isUser ? DS.green : DS.panel2)
+            .clipShape(UnevenRoundedRectangle(
+                topLeadingRadius: 15, bottomLeadingRadius: isUser ? 15 : 4,
+                bottomTrailingRadius: isUser ? 4 : 15, topTrailingRadius: 15,
+                style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .stroke(isUser ? Color.clear : DS.border, lineWidth: 1))
             if !isUser { Spacer(minLength: 40) }
@@ -220,8 +217,15 @@ struct AssistantSheet: View {
             }
             .disabled(!canSend)
         }
-        .padding(.horizontal, 14).padding(.vertical, 10)
+        .padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 4)
         .background(DS.bg)
+    }
+
+    private var footer: some View {
+        Text("responde com seus dados reais")
+            .font(.system(size: 10.5)).foregroundStyle(DS.muted)
+            .frame(maxWidth: .infinity)
+            .padding(.bottom, 8).background(DS.bg)
     }
 
     private var canSend: Bool {
@@ -232,5 +236,28 @@ struct AssistantSheet: View {
         guard canSend else { return }
         store.send(input)
         input = ""
+    }
+}
+
+/// Chips de sugestão em fluxo (wrap), pílulas tint teal.
+private struct FlowChips: View {
+    let items: [String]
+    let onTap: (String) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(items, id: \.self) { s in
+                Button { onTap(s) } label: {
+                    HStack(spacing: 6) {
+                        Text(s).font(.system(size: 13, weight: .medium)).foregroundStyle(DS.text)
+                        Image(systemName: "arrow.up.right").font(.system(size: 10)).foregroundStyle(DS.teal)
+                    }
+                    .padding(.horizontal, 13).padding(.vertical, 9)
+                    .background(DS.teal.opacity(0.10)).clipShape(Capsule())
+                    .overlay(Capsule().stroke(DS.teal.opacity(0.30), lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+            }
+        }
     }
 }

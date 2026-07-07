@@ -65,9 +65,17 @@ enum Settings {
 
     private static let deviceIdKey  = "notif_device_id"
 
-    /// device_id do PWA — usado para filtrar /api/push/history por prefs do device.
+    /// device_id do device — usado pra filtrar /api/push/history por prefs, pra
+    /// registrar push/pts token e pra reportar phone-location. O PWA escreve o seu
+    /// id (setter). Em install nativo (sem PWA) o getter gera e persiste um UUID
+    /// estável na 1ª leitura — sem isso o id fica vazio e vários POSTs são bloqueados.
     static var notifDeviceId: String {
-        get { defaults.string(forKey: deviceIdKey) ?? "" }
+        get {
+            if let id = defaults.string(forKey: deviceIdKey), !id.isEmpty { return id }
+            let id = "hav-" + UUID().uuidString.prefix(12).lowercased()
+            defaults.set(id, forKey: deviceIdKey)
+            return id
+        }
         set { defaults.set(newValue, forKey: deviceIdKey) }
     }
 

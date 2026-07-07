@@ -62,6 +62,10 @@
 	<string>Use o Face ID para desbloquear o app.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Conecta direto ao carro na mesma rede Wi-Fi para telemetria e comandos com baixa latência.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Atualiza em segundo plano a distância até o carro estacionado, para o card 'Voltar ao carro' funcionar mesmo com o app fechado.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Mostra a distância e a direção até o carro estacionado.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Usa o microfone para falar na cabine do carro durante a escuta ao vivo.</string>
 	<key>NSSupportsLiveActivities</key>
@@ -134,6 +138,7 @@
 		<string>processing</string>
 		<string>remote-notification</string>
 		<string>audio</string>
+		<string>location</string>
 	</array>
 	<key>UILaunchScreen</key>
 	<dict/>

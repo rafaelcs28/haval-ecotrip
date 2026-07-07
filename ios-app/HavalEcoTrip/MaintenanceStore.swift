@@ -62,7 +62,7 @@ final class MaintenanceStore: ObservableObject {
     }
 
     private var base: String {
-        let u = Settings.bridgeURL.isEmpty ? AuthConfig.bridgeURL : Settings.bridgeURL
+        let u = BridgeRouter.shared.currentURL
         return u.hasSuffix("/") ? String(u.dropLast()) : u
     }
     private func authReq(_ path: String, _ method: String, _ body: [String: Any]? = nil) -> URLRequest? {

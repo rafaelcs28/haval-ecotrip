@@ -15,7 +15,7 @@ final class RangeStore: ObservableObject {
     @Published var failed = false
 
     private var base: String {
-        let u = Settings.bridgeURL.isEmpty ? AuthConfig.bridgeURL : Settings.bridgeURL
+        let u = BridgeRouter.shared.currentURL
         return u.hasSuffix("/") ? String(u.dropLast()) : u
     }
 
@@ -76,31 +76,74 @@ struct RangeSheet: View {
                             }.frame(maxWidth: .infinity).padding(.vertical, 10)
                         }
                     } else {
-                        DSCard {
-                            VStack(alignment: .leading, spacing: 12) {
-                                RangeMap(center: car.coordinate, contours: store.contours,
-                                         evKm: evKm, totalKm: totalKm, useCircles: useCircles)
-                                    .frame(height: 300)
-                                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                                    .overlay(alignment: .topTrailing) {
-                                        if store.loading { ProgressView().padding(8) }
-                                    }
-                                HStack(spacing: 16) {
-                                    legend(color: DS.green, label: "Elétrico", value: "\(Int(evKm)) km")
-                                    if iceKm > 0 { legend(color: DS.blue, label: "+ Gasolina", value: "\(Int(totalKm)) km") }
-                                    Spacer()
-                                    VStack(alignment: .trailing, spacing: 1) {
-                                        Text("\(soc)%").font(.system(size: 22, weight: .bold, design: .rounded))
-                                            .foregroundStyle(arrivalSocColor(soc))
-                                        Text("SOC").font(.caption2).foregroundStyle(DS.muted)
-                                    }
+                        // Hero: total no mapa + split elétrico/combustão à direita.
+                        HStack(alignment: .top) {
+                            VStack(alignment: .leading, spacing: 0) {
+                                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                                    Text(Fmt.int(totalKm))
+                                        .font(.system(size: 60, weight: .ultraLight, design: .rounded))
+                                        .foregroundStyle(DS.text).monospacedDigit()
+                                    Text("km").font(.system(size: 16)).foregroundStyle(DS.muted)
                                 }
-                                Text(useCircles
-                                     ? "Raio em linha reta a partir do SOC — por estrada o alcance é menor."
-                                     : "Alcance por estrada (Mapbox). Trânsito, relevo e clima alteram o real.")
-                                    .font(.caption2).foregroundStyle(DS.muted)
+                                Text("ATÉ ONDE CHEGO").font(.system(size: 10, weight: .semibold))
+                                    .foregroundStyle(DS.muted).tracking(0.5)
+                            }
+                            Spacer()
+                            VStack(alignment: .trailing, spacing: 8) {
+                                splitValue("\(Int(evKm)) km", "elétricos", DS.green)
+                                if iceKm > 0 { splitValue("\(Int(iceKm)) km", "a combustão", DS.orange) }
                             }
                         }
+
+                        // Barra empilhada verde (EV) + laranja (combustão).
+                        VStack(spacing: 6) {
+                            GeometryReader { g in
+                                let evFrac = totalKm > 0 ? evKm / totalKm : 0
+                                HStack(spacing: 0) {
+                                    Rectangle().fill(DS.green)
+                                        .frame(width: max(0, g.size.width * CGFloat(evFrac)))
+                                    Rectangle().fill(DS.orange)
+                                }
+                                .clipShape(Capsule())
+                            }.frame(height: 10)
+                            HStack {
+                                Text("EV · SOC \(soc)%").font(.system(size: 10, weight: .semibold)).foregroundStyle(DS.green)
+                                Spacer()
+                                if iceKm > 0 {
+                                    Text("GASOLINA").font(.system(size: 10, weight: .semibold)).foregroundStyle(DS.orange)
+                                }
+                            }
+                        }
+
+                        DSCard {
+                            RangeMap(center: car.coordinate, contours: store.contours,
+                                     evKm: evKm, totalKm: totalKm, useCircles: useCircles)
+                                .frame(height: 280)
+                                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                .overlay(alignment: .topTrailing) {
+                                    if store.loading { ProgressView().padding(8) }
+                                }
+                        }
+
+                        // Lista de fatores (fundo painel2, hairlines).
+                        VStack(spacing: 0) {
+                            infoRow(icon: "map",
+                                    title: useCircles ? "Raio em linha reta" : "Alcance por estrada",
+                                    sub: useCircles ? "por estrada o alcance é menor"
+                                                    : "trânsito, relevo e clima alteram o real",
+                                    value: nil, valueColor: DS.text)
+                            Divider().background(DS.divider)
+                            infoRow(icon: "gauge.with.dots.needle.bottom.50percent",
+                                    title: "Alcance total estimado",
+                                    sub: "EV + combustão com o SOC atual",
+                                    value: "\(Int(totalKm)) km", valueColor: DS.text)
+                        }
+                        .background(DS.panel2)
+                        .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
+
+                        Text("Pelo seu uso real, não o padrão de fábrica.")
+                            .font(.system(size: 10.5)).foregroundStyle(DS.muted)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
                 .padding(16)
@@ -119,14 +162,28 @@ struct RangeSheet: View {
         }
     }
 
-    private func legend(color: Color, label: String, value: String) -> some View {
-        HStack(spacing: 6) {
-            Circle().fill(color).frame(width: 12, height: 12)
-            VStack(alignment: .leading, spacing: 0) {
-                Text(value).font(.subheadline.weight(.semibold)).foregroundStyle(DS.text)
-                Text(label).font(.caption2).foregroundStyle(DS.muted)
+    private func splitValue(_ value: String, _ label: String, _ color: Color) -> some View {
+        VStack(alignment: .trailing, spacing: 0) {
+            Text(value).font(.system(size: 17, weight: .semibold, design: .rounded))
+                .foregroundStyle(color).monospacedDigit()
+            Text(label).font(.system(size: 9.5)).foregroundStyle(DS.muted)
+        }
+    }
+
+    private func infoRow(icon: String, title: String, sub: String, value: String?, valueColor: Color) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon).font(.system(size: 14)).foregroundStyle(DS.text2).frame(width: 20)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title).font(.system(size: 13)).foregroundStyle(DS.text)
+                Text(sub).font(.system(size: 9.5)).foregroundStyle(DS.muted)
+            }
+            Spacer()
+            if let value {
+                Text(value).font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundStyle(valueColor).monospacedDigit()
             }
         }
+        .padding(.horizontal, 12).padding(.vertical, 11)
     }
 }
 

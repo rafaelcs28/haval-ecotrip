@@ -25,8 +25,14 @@ struct TripActivityAttributes: ActivityAttributes {
         var tyreMinPsi: Double?   // menor pressão dos 4 pneus (PSI)
         var tyreAlert:  Bool?     // pneu baixo (<30) ou assimétrico (≥5 PSI)
         var costBrl:    Double?   // custo R$ acumulado (energia + combustível)
+        // Navegação (frame 2a — opcionais, bridge envia quando há destino):
+        var speedKmh:   Double?   // velocidade atual
+        var destName:   String?   // destino do nav do carro
+        var destEtaMin: Double?   // minutos até chegar
+        var destKm:     Double?   // km restantes até o destino
 
         var isEV: Bool { fuelL <= 0.05 }
+        var updatedAt: Date { Date(timeIntervalSince1970: updatedAtMs / 1000.0) }
     }
 
     var carName: String

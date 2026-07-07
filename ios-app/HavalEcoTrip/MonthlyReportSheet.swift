@@ -28,11 +28,17 @@ struct MonthlyReportSheet: View {
     private var monthTrips: [Trip] {
         trips.filter { cal.isDate($0.date, equalTo: month, toGranularity: .month) && $0.distKm > 0.1 }
     }
+    // Mês anterior ao selecionado (pra deltas comparativos).
+    private var prevMonth: Date? { cal.date(byAdding: .month, value: -1, to: month) }
+    private var prevMonthTrips: [Trip] {
+        guard let p = prevMonth else { return [] }
+        return trips.filter { cal.isDate($0.date, equalTo: p, toGranularity: .month) && $0.distKm > 0.1 }
+    }
 
     private struct Tot { var km = 0.0, kwh = 0.0, fuelL = 0.0, cost = 0.0, evKm = 0.0, duration = 0.0; var n = 0 }
-    private var tot: Tot {
+    private func totals(_ list: [Trip]) -> Tot {
         var t = Tot()
-        for v in monthTrips {
+        for v in list {
             t.km += v.distKm; t.kwh += v.netKwh; t.fuelL += v.fuelL
             t.cost += v.netKwh * priceKwh + v.fuelL * gasL
             t.duration += v.timeSec
@@ -41,9 +47,52 @@ struct MonthlyReportSheet: View {
         }
         return t
     }
-    private var savings: Double { max(tot.km / baselineKmL * gasL - tot.cost, 0) }
+    private var tot: Tot { totals(monthTrips) }
+    private var prevTot: Tot { totals(prevMonthTrips) }
+    private func savingsOf(_ t: Tot) -> Double { max(t.km / baselineKmL * gasL - t.cost, 0) }
+    private var savings: Double { savingsOf(tot) }
     private var co2: Double { max((tot.km / baselineKmL - tot.fuelL) * CO2_PER_L - tot.kwh * CO2_PER_KWH, 0) }
-    private var evShare: Double { tot.km > 0 ? tot.evKm / tot.km * 100 : 0 }
+    private func evShareOf(_ t: Tot) -> Double { t.km > 0 ? t.evKm / t.km * 100 : 0 }
+    private var evShare: Double { evShareOf(tot) }
+
+    // Score médio do mês (viagens com driveScore).
+    private func avgScore(_ list: [Trip]) -> Double? {
+        let s = list.compactMap { $0.driveScore }
+        return s.isEmpty ? nil : Double(s.reduce(0, +)) / Double(s.count)
+    }
+    // Delta percentual formatado (nil se base 0). Ex.: "-8%", "+4%".
+    private func deltaPct(_ cur: Double, _ prev: Double) -> String? {
+        guard prev > 0 else { return nil }
+        let d = (cur - prev) / prev * 100
+        if abs(d) < 0.5 { return "0%" }
+        return (d > 0 ? "+" : "") + "\(Int(d.rounded()))%"
+    }
+    // Delta em pontos absolutos (pra % EV e score). Ex.: "+4", "-3".
+    private func deltaPts(_ cur: Double, _ prev: Double) -> String {
+        let d = cur - prev
+        if abs(d) < 0.5 { return "0" }
+        return (d > 0 ? "+" : "") + "\(Int(d.rounded()))"
+    }
+
+    // ── Destaques ────────────────────────────────────────────────────────────
+    private func routeLabel(_ t: Trip) -> String {
+        if let r = t.rawName { return r }
+        let s = [t.knownStart ?? "", t.knownEnd ?? ""].filter { !$0.isEmpty }
+        return s.isEmpty ? "" : s.joined(separator: " → ")
+    }
+    // Trajeto mais frequente do mês (por nome de rota).
+    private var topRoute: (label: String, count: Int)? {
+        var freq: [String: Int] = [:]
+        for t in monthTrips { let l = routeLabel(t); if !l.isEmpty { freq[l, default: 0] += 1 } }
+        guard let best = freq.max(by: { $0.value < $1.value }), best.value > 1 else { return nil }
+        return (best.key, best.value)
+    }
+    // Melhor viagem do mês (maior driveScore).
+    private var bestTrip: Trip? { monthTrips.filter { $0.driveScore != nil }.max { ($0.driveScore ?? 0) < ($1.driveScore ?? 0) } }
+    // Custo por km rodado no mês.
+    private var costPerKm: Double { tot.km > 0 ? tot.cost / tot.km : 0 }
+    // Custo/km equivalente só a gasolina (baseline), pra comparar.
+    private var gasCostPerKm: Double { baselineKmL > 0 ? gasL / baselineKmL : 0 }
 
     var body: some View {
         NavigationStack {
@@ -52,14 +101,19 @@ struct MonthlyReportSheet: View {
                     if months.isEmpty {
                         DSCard { Text("Sem viagens pra relatar ainda.").font(.callout).foregroundStyle(DS.muted).frame(maxWidth: .infinity).padding(.vertical, 10) }
                     } else {
-                        monthPicker
+                        monthNav
+                        heroSavings
                         gridCard
-                        DSActionButton(icon: "tablecells", title: "Exportar CSV do mês", color: DS.teal) { exportCSV() }
-                        if let u = csvURL { ShareLink(item: u) { Label("Compartilhar CSV", systemImage: "doc") .font(.subheadline.weight(.semibold)).frame(maxWidth: .infinity).padding(.vertical, 10).background(DS.panel2).clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous)).foregroundStyle(DS.text) } }
-                        DSActionButton(icon: "doc.richtext", title: "Exportar PDF do mês", color: DS.blue) { exportPDF() }
-                        if let u = pdfURL { ShareLink(item: u) { Label("Compartilhar PDF", systemImage: "doc.fill") .font(.subheadline.weight(.semibold)).frame(maxWidth: .infinity).padding(.vertical, 10).background(DS.panel2).clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous)).foregroundStyle(DS.text) } }
+                        highlightsCard
+                        HStack(spacing: 10) {
+                            DSActionButton(icon: "doc.richtext", title: "Exportar PDF", color: DS.blue, compact: true) { exportPDF() }
+                            DSActionButton(icon: "tablecells", title: "Exportar CSV", color: DS.teal, compact: true) { exportCSV() }
+                        }
+                        if let u = pdfURL { shareRow(u, "Compartilhar PDF", "doc.fill") }
+                        if let u = csvURL { shareRow(u, "Compartilhar CSV", "doc") }
                         Text("Economia e CO₂ estimados vs. baseline de \(Fmt.dec1(baselineKmL)) km/L (gasolina \(Fmt.brl(gasL))/L).")
-                            .font(.caption2).foregroundStyle(DS.muted)
+                            .font(.system(size: 10.5)).foregroundStyle(DS.muted)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
                 .padding(16)
@@ -70,58 +124,140 @@ struct MonthlyReportSheet: View {
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Fechar") { dismiss() } } }
             .onAppear { if let m = months.first { month = m } }
         }
+        .presentationDetents([.large])
     }
 
-    private var monthPicker: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(months, id: \.self) { m in
-                    Button { month = m; csvURL = nil; pdfURL = nil } label: {
-                        Text(monthLabel(m)).font(.subheadline.weight(.semibold))
-                            .padding(.horizontal, 14).padding(.vertical, 8)
-                            .background(cal.isDate(m, equalTo: month, toGranularity: .month) ? DS.teal.opacity(0.22) : DS.panel2)
-                            .foregroundStyle(cal.isDate(m, equalTo: month, toGranularity: .month) ? DS.teal : DS.text)
-                            .clipShape(Capsule())
-                    }.buttonStyle(.plain)
-                }
+    // Índice do mês atual dentro de `months` (ordem: recente → antigo).
+    private var monthIdx: Int { months.firstIndex { cal.isDate($0, equalTo: month, toGranularity: .month) } ?? 0 }
+    private func goto(_ i: Int) {
+        guard months.indices.contains(i) else { return }
+        month = months[i]; csvURL = nil; pdfURL = nil
+    }
+
+    // Cabeçalho "Junho · fechado" com navegação ‹ ›.
+    private var monthNav: some View {
+        HStack(spacing: 12) {
+            Button { goto(monthIdx + 1) } label: {   // mais antigo
+                Image(systemName: "chevron.left").font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(monthIdx + 1 < months.count ? DS.text : DS.muted)
+                    .frame(width: 34, height: 34).background(DS.panel2).clipShape(Circle())
+            }.buttonStyle(.plain).disabled(monthIdx + 1 >= months.count)
+            VStack(spacing: 1) {
+                Text(monthLongLabel(month)).font(.system(size: 16, weight: .bold)).foregroundStyle(DS.text)
+                Text(cal.isDate(month, equalTo: Date(), toGranularity: .month) ? "em curso" : "fechado")
+                    .font(.system(size: 11, weight: .semibold)).foregroundStyle(DS.muted)
+            }.frame(maxWidth: .infinity)
+            Button { goto(monthIdx - 1) } label: {   // mais recente
+                Image(systemName: "chevron.right").font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(monthIdx - 1 >= 0 ? DS.text : DS.muted)
+                    .frame(width: 34, height: 34).background(DS.panel2).clipShape(Circle())
+            }.buttonStyle(.plain).disabled(monthIdx - 1 < 0)
+        }
+    }
+
+    // Hero: economia do mês em numeral fino.
+    private var heroSavings: some View {
+        VStack(spacing: 4) {
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text("R$").font(.system(size: 22, weight: .light)).foregroundStyle(DS.green.opacity(0.8))
+                Text(Fmt.int(savings)).font(.system(size: 56, weight: .ultraLight, design: .rounded))
+                    .monospacedDigit().foregroundStyle(DS.green)
+            }
+            Text("ECONOMIZADOS VS GASOLINA").font(.system(size: 10, weight: .semibold))
+                .tracking(0.6).foregroundStyle(DS.muted)
+            if let d = deltaPct(savings, savingsOf(prevTot)) {
+                Text("\(d) vs mês anterior").font(.system(size: 11, weight: .semibold)).foregroundStyle(DS.text2)
             }
         }
+        .frame(maxWidth: .infinity).padding(.vertical, 8)
     }
 
     private var gridCard: some View {
         DSCard {
-            VStack(spacing: 12) {
+            VStack(spacing: 14) {
                 HStack(spacing: 10) {
-                    cell(Fmt.km(tot.km), "km", "Distância", DS.blue)
-                    cell(Fmt.dec1(tot.kwh), "kWh", "Energia", DS.green)
-                    cell(Fmt.dec1(tot.fuelL), "L", "Gasolina", DS.orange)
+                    cell(Fmt.km(tot.km), "km", "Distância", DS.blue, deltaPct(tot.km, prevTot.km))
+                    cell("\(Int(evShare.rounded()))", "%", "Em EV", DS.green, deltaPts(evShare, evShareOf(prevTot)))
+                    cell(Fmt.dec1(tot.kwh), "kWh", "Energia", DS.teal, nil)
+                    cell(scoreStr(avgScore(monthTrips)), "", "Score", DS.orange,
+                         (avgScore(monthTrips) != nil && avgScore(prevMonthTrips) != nil) ? deltaPts(avgScore(monthTrips)!, avgScore(prevMonthTrips)!) : nil)
                 }
+                Divider().overlay(DS.divider)
                 HStack(spacing: 10) {
-                    cell(Fmt.brl(tot.cost), "", "Custo", DS.text)
-                    cell("\(Int(evShare.rounded()))", "%", "Elétrico", DS.green)
-                    cell("\(tot.n)", "", "Viagens", DS.muted)
-                }
-                Divider().overlay(DS.border)
-                HStack(spacing: 10) {
-                    cell(Fmt.brl(savings), "", "Economia vs gasolina", DS.green)
-                    cell(Fmt.int(co2), "kg", "CO₂ evitado", DS.teal)
+                    cell(Fmt.dec1(tot.fuelL), "L", "Gasolina", DS.orange, nil)
+                    cell(Fmt.brl(tot.cost), "", "Custo", DS.text, nil)
+                    cell("\(tot.n)", "", "Viagens", DS.muted, nil)
+                    cell(Fmt.int(co2), "kg", "CO₂ evit.", DS.teal, nil)
                 }
             }
         }
     }
 
-    private func cell(_ v: String, _ unit: String, _ label: String, _ color: Color) -> some View {
-        VStack(alignment: .leading, spacing: 1) {
+    private func scoreStr(_ s: Double?) -> String { s.map { "\(Int($0.rounded()))" } ?? "—" }
+
+    private func cell(_ v: String, _ unit: String, _ label: String, _ color: Color, _ delta: String?) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
             HStack(alignment: .firstTextBaseline, spacing: 2) {
-                Text(v).font(.system(size: 19, weight: .bold, design: .rounded)).foregroundStyle(color)
-                if !unit.isEmpty { Text(unit).font(.caption2).foregroundStyle(DS.muted) }
+                Text(v).font(.system(size: 17, weight: .bold, design: .rounded)).foregroundStyle(color)
+                    .monospacedDigit().lineLimit(1).minimumScaleFactor(0.5)
+                if !unit.isEmpty { Text(unit).font(.system(size: 9)).foregroundStyle(DS.muted) }
             }
-            Text(label).font(.system(size: 10)).foregroundStyle(DS.muted)
+            Text(label.uppercased()).font(.system(size: 9, weight: .semibold)).tracking(0.3)
+                .foregroundStyle(DS.muted).lineLimit(1).minimumScaleFactor(0.6)
+            if let d = delta {
+                Text(d).font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(d.hasPrefix("-") ? DS.red : (d == "0" || d == "0%" ? DS.muted : DS.green))
+            }
         }.frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func monthLabel(_ d: Date) -> String {
-        let f = DateFormatter(); f.locale = Locale(identifier: "pt_BR"); f.dateFormat = "MMM/yyyy"
+    // Destaques: trajeto top, melhor viagem, custo/km vs gasolina.
+    private var highlightsCard: some View {
+        DSCard(title: "Destaques", icon: "star.fill") {
+            VStack(spacing: 0) {
+                if let r = topRoute { hlRow("map", "Trajeto mais frequente", r.label, "\(r.count)x", DS.blue) }
+                if let b = bestTrip, let sc = b.driveScore {
+                    if topRoute != nil { divRow }
+                    let name = routeLabel(b)
+                    hlRow("hand.thumbsup.fill", "Melhor viagem", name.isEmpty ? "Score do mês" : name, "\(sc)", DS.green)
+                }
+                if costPerKm > 0 {
+                    if topRoute != nil || bestTrip != nil { divRow }
+                    hlRow("dollarsign.circle", "Custo por km", "vs gasolina \(Fmt.brl(gasCostPerKm))", Fmt.brl(costPerKm), DS.teal)
+                }
+                if topRoute == nil && bestTrip == nil && costPerKm <= 0 {
+                    Text("Sem destaques neste mês.").font(.system(size: 12)).foregroundStyle(DS.muted)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+        }
+    }
+
+    private var divRow: some View { Divider().overlay(DS.divider).padding(.vertical, 8) }
+
+    private func hlRow(_ icon: String, _ label: String, _ sub: String, _ value: String, _ color: Color) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon).font(.system(size: 13)).foregroundStyle(color).frame(width: 20)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(label).font(.system(size: 13, weight: .semibold)).foregroundStyle(DS.text)
+                Text(sub).font(.system(size: 11)).foregroundStyle(DS.muted).lineLimit(1)
+            }
+            Spacer()
+            Text(value).font(.system(size: 15, weight: .bold, design: .rounded)).foregroundStyle(color).monospacedDigit()
+        }
+    }
+
+    private func shareRow(_ u: URL, _ title: String, _ icon: String) -> some View {
+        ShareLink(item: u) {
+            Label(title, systemImage: icon).font(.subheadline.weight(.semibold))
+                .frame(maxWidth: .infinity).padding(.vertical, 11)
+                .background(DS.panel2).clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .foregroundStyle(DS.text)
+        }
+    }
+
+    private func monthLongLabel(_ d: Date) -> String {
+        let f = DateFormatter(); f.locale = Locale(identifier: "pt_BR"); f.dateFormat = "MMMM"
         return f.string(from: d).capitalized
     }
 

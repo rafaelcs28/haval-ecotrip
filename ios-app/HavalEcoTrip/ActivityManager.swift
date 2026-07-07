@@ -73,10 +73,12 @@ final class ActivityManager: ObservableObject {
             Activity<ChargeActivityAttributes>.activities.filter { $0.activityState == .active }
         }
         guard let activity = activities.first else { return }
+        // Push charge_live não traz o alvo — preserva o que a LA já mostra (pode ser alvo custom 97%).
+        let prevTarget = activity.content.state.targetPct
         let state = ChargeActivityAttributes.ContentState(
             soc: soc, powerKw: pwr, sessionKwh: kwh,
             remainingMin: Int(rem.rounded()), charging: true,
-            targetPct: 100,
+            targetPct: prevTarget,
             updatedAtMs: Date().timeIntervalSince1970 * 1000
         )
         await activity.update(ActivityContent(state: state, staleDate: Date().addingTimeInterval(60 * 60)))
@@ -112,6 +114,13 @@ final class ActivityManager: ObservableObject {
         pollingTask = nil
     }
 
+    // Alvo por software (ex.: 97%) tem prioridade — o carro fica em 100 e o bridge corta.
+    nonisolated static func effectiveLimit(_ json: [String: Any]) -> Double {
+        let custom = (json["charge_custom_target"] as? Double)
+            ?? (json["charge_custom_target"] as? Int).map(Double.init) ?? 0
+        return custom > 0 ? custom : (json["charge_limit_pct"] as? Double) ?? 100
+    }
+
     private func pollOnce() async {
         guard let activity = currentActivity else { return }
         guard let url = URL(string: Settings.apiBase + "/api/state") else {
@@ -140,7 +149,7 @@ final class ActivityManager: ObservableObject {
                 sessionKwh: kwh,
                 remainingMin: Int(rem.rounded()),
                 charging: charging,
-                targetPct: (json["charge_limit_pct"] as? Double) ?? 100,
+                targetPct: Self.effectiveLimit(json),
                 updatedAtMs: Date().timeIntervalSince1970 * 1000
             )
             let content = ActivityContent(state: state, staleDate: Date().addingTimeInterval(60 * 60))

@@ -53,10 +53,7 @@ final class ConfigStore: ObservableObject {
     // Listas de locais por notificação (geofence_*_places, soc_arrival_places)
     @Published var placeLists: [String: [String]] = [:]
 
-    private var base: String {
-        let u = Settings.bridgeURL.isEmpty ? AuthConfig.bridgeURL : Settings.bridgeURL
-        return u.hasSuffix("/") ? String(u.dropLast()) : u
-    }
+    private var base: String { BridgeRouter.shared.currentURL }
     private func req(_ path: String, _ method: String = "GET", _ body: [String: Any]? = nil) -> URLRequest? {
         guard let url = URL(string: "\(base)\(path)") else { return nil }
         var r = URLRequest(url: url); r.httpMethod = method; r.timeoutInterval = 15

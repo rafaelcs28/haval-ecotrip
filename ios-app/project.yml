@@ -43,6 +43,10 @@ targets:
       - path: HavalEcoTripWidget/MotorActivityAttributes.swift
       # Veículo desprotegido (alerta persistente): idem.
       - path: HavalEcoTripWidget/SecurityActivityAttributes.swift
+      # Infra/monitoramento (guard ou serviço caído): idem — LiveActivityPush (app) registra os tokens.
+      - path: HavalEcoTripWidget/InfraActivityAttributes.swift
+      # "Voltar ao carro" (parking finder): LiveActivityPush (app) registra os tokens + LivePreview.
+      - path: HavalEcoTripWidget/ParkingActivityAttributes.swift
       # App Intents (Siri/Atalhos) — compartilhados com o widget (botões interativos).
       - path: HavalEcoTripWidget/CarIntents.swift
       # SongPro (recarga BYD) saiu daqui — agora só no app "Grasi Recarga".
@@ -74,6 +78,8 @@ targets:
         NSLocalNetworkUsageDescription: "Conecta direto ao carro na mesma rede Wi-Fi para telemetria e comandos com baixa latência."
         NSCalendarsUsageDescription: "Lê seus próximos compromissos para pré-climatizar o carro antes da hora de sair."
         NSCalendarsFullAccessUsageDescription: "Lê seus próximos compromissos para pré-climatizar o carro antes da hora de sair."
+        NSLocationWhenInUseUsageDescription: "Mostra a distância e a direção até o carro estacionado."
+        NSLocationAlwaysAndWhenInUseUsageDescription: "Atualiza em segundo plano a distância até o carro estacionado, para o card 'Voltar ao carro' funcionar mesmo com o app fechado."
         NSBonjourServices:
           - _havalobd._tcp
         # canOpenURL p/ abrir a navegação neste iPhone (Waze / Google Maps).
@@ -89,6 +95,7 @@ targets:
           - processing
           - remote-notification
           - audio   # escuta ao vivo da cabine continua tocando com o app em background
+          - location   # reporta posição do celular p/ o card "voltar ao carro" (dist/rumo)
         # Quick Actions (3D/Haptic Touch no ícone do app). 4 atalhos: travar,
         # destravar, ligar motor, desligar motor. AppDelegate captura o
         # shortcut e dispara o action via URL scheme havalecotrip://action/<name>.

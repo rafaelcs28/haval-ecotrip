@@ -21,6 +21,13 @@ private func phaseMeta(_ phase: String) -> (icon: String, color: Color, status: 
     }
 }
 
+private func footerRight(_ s: PreClimatActivityAttributes.ContentState) -> String {
+    var parts: [String] = []
+    if s.tempOut != 0 { parts.append("ext \(Int(s.tempOut))°") }
+    if s.temp > 0 { parts.append("\(s.fan)/7") }
+    return parts.joined(separator: " · ")
+}
+
 private func countdownCaption(_ phase: String) -> String {
     switch phase {
     case "scheduled": return "começa em"
@@ -63,19 +70,25 @@ struct PreClimatLiveActivity: Widget {
             PreClimatLockScreenView(state: context.state,
                                     scheduledTime: context.attributes.scheduledTime,
                                     carName: context.attributes.carName)
-                .activityBackgroundTint(Color.black.opacity(0.55))
-                .activitySystemActionForegroundColor(.cyan)
+                .activityBackgroundTint(LAv2.bg)
+                .activitySystemActionForegroundColor(LAv2.teal)
 
         } dynamicIsland: { context in
             let s = context.state
             let meta = phaseMeta(s.phase)
             return DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Label("Pré-clima", systemImage: meta.icon)
-                            .font(.caption).bold().foregroundStyle(meta.color)
-                            .labelStyle(.titleAndIcon)
-                        StatusPill(text: meta.status, color: meta.color)
+                    HStack(spacing: 8) {
+                        Image(systemName: "fan.fill")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(meta.color)
+                            .frame(width: 32, height: 32)
+                            .background(meta.color.opacity(0.15), in: Circle())
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Pré-clima")
+                                .font(.system(size: 12, weight: .bold)).foregroundStyle(LAv2.text)
+                            StatusPill(text: meta.status, color: meta.color)
+                        }
                     }
                 }
                 DynamicIslandExpandedRegion(.trailing) {
@@ -103,13 +116,20 @@ struct PreClimatLiveActivity: Widget {
                                 .tint(meta.color).labelsHidden()
                         }
                         HStack(spacing: 14) {
-                            if s.tempIn  != 0 { TempChip(label: "Int", value: s.tempIn,  color: .cyan) }
-                            if s.tempOut != 0 { TempChip(label: "Ext", value: s.tempOut, color: .orange) }
-                            Spacer()
-                            if s.temp > 0 {
-                                Text(String(format: "AC %.0f° · %d/7", s.temp, s.fan))
-                                    .font(.caption2).foregroundStyle(.secondary)
+                            if s.tempIn != 0, s.temp > 0 {
+                                (Text("Cabine \(Int(s.tempIn))° → \(Int(s.temp))°")
+                                    + (s.endsAt != nil && !s.isFinal
+                                        ? Text(" · pronta às ") + Text(s.endsAt!, format: .dateTime.hour().minute())
+                                        : Text("")))
+                                    .font(.system(size: 11)).monospacedDigit()
+                                    .foregroundStyle(LAv2.text2)
+                                    .lineLimit(1).minimumScaleFactor(0.7)
+                            } else {
+                                if s.tempIn  != 0 { TempChip(label: "Int", value: s.tempIn,  color: .cyan) }
+                                if s.tempOut != 0 { TempChip(label: "Ext", value: s.tempOut, color: .orange) }
                             }
+                            Spacer()
+                            if !s.isFinal { LACaps(text: "live", color: LAv2.green) }
                             if s.isCancellable, let cancelURL = URL(string: "havalecotrip://preclimat-cancel") {
                                 Link(destination: cancelURL) {
                                     Label("Cancelar", systemImage: "xmark.circle.fill")
@@ -150,15 +170,20 @@ struct PreClimatLockScreenView: View {
     var body: some View {
         let meta = phaseMeta(state.phase)
         VStack(alignment: .leading, spacing: 10) {
-            // Cabeçalho: ícone + título fixo + pílula de status + horário
+            // Cabeçalho: tile + título fixo + pílula de status + horário
             HStack(spacing: 8) {
-                Image(systemName: meta.icon).foregroundStyle(meta.color)
-                Text("Pré-climatização").font(.headline)
+                Image(systemName: meta.icon)
+                    .font(.system(size: 11, weight: .bold)).foregroundStyle(.black)
+                    .frame(width: 22, height: 22)
+                    .background(meta.color, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                Text("Pré-climatização")
+                    .font(.system(size: 12, weight: .semibold)).foregroundStyle(LAv2.text)
+                    .lineLimit(1).minimumScaleFactor(0.7)
                 StatusPill(text: meta.status, color: meta.color)
-                Spacer()
+                Spacer(minLength: 6)
                 if !scheduledTime.isEmpty {
                     Label(scheduledTime, systemImage: "alarm")
-                        .font(.caption2).foregroundStyle(.secondary)
+                        .font(.system(size: 10.5)).foregroundStyle(LAv2.text2)
                         .labelStyle(.titleAndIcon)
                 }
             }
@@ -167,11 +192,10 @@ struct PreClimatLockScreenView: View {
             if let endsAt = state.endsAt, hasCountdown {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(endsAt, style: .timer)
-                        .font(.system(size: 34, weight: .bold, design: .rounded))
-                        .monospacedDigit().foregroundStyle(meta.color)
+                        .font(.system(size: 34, weight: .light)).tracking(-1)
+                        .monospacedDigit().foregroundStyle(LAv2.text)
                         .frame(maxWidth: 150, alignment: .leading)
-                    Text(countdownCaption(state.phase))
-                        .font(.subheadline).foregroundStyle(.secondary)
+                    LACaps(text: countdownCaption(state.phase))
                     Spacer()
                 }
                 ProgressView(timerInterval: state.updatedAt...endsAt, countsDown: false)
@@ -181,16 +205,26 @@ struct PreClimatLockScreenView: View {
                     .font(.title3).bold().foregroundStyle(meta.color)
             }
 
-            // Rodapé: chips de temperatura + AC/ventilação
+            // Rodapé: cabine atual → alvo (+ pronta às) | externa · fan
             HStack(spacing: 14) {
-                if state.tempIn  != 0 { TempChip(label: "Interna", value: state.tempIn,  color: .cyan) }
-                if state.tempOut != 0 { TempChip(label: "Externa", value: state.tempOut, color: .orange) }
-                Spacer()
-                if state.temp > 0 {
-                    Label(String(format: "%.0f° · fan %d/7", state.temp, state.fan),
-                          systemImage: "fan.fill")
-                        .font(.caption2).foregroundStyle(.secondary)
+                if state.tempIn != 0, state.temp > 0 {
+                    (Text("Cabine \(Int(state.tempIn))° → \(Int(state.temp))°")
+                        + (state.endsAt != nil && !state.isFinal
+                            ? Text(" · pronta às ") + Text(state.endsAt!, format: .dateTime.hour().minute())
+                            : Text("")))
+                        .font(.system(size: 11)).monospacedDigit()
+                        .foregroundStyle(LAv2.text2)
+                        .lineLimit(1).minimumScaleFactor(0.7)
+                } else {
+                    if state.tempIn  != 0 { TempChip(label: "Interna", value: state.tempIn,  color: .cyan) }
+                    if state.tempOut != 0 { TempChip(label: "Externa", value: state.tempOut, color: .orange) }
+                }
+                Spacer(minLength: 6)
+                if state.tempOut != 0 || state.temp > 0 {
+                    Label(footerRight(state), systemImage: "fan.fill")
+                        .font(.system(size: 10.5)).foregroundStyle(LAv2.muted)
                         .labelStyle(.titleAndIcon)
+                        .lineLimit(1).minimumScaleFactor(0.7)
                 }
             }
 

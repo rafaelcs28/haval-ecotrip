@@ -207,7 +207,7 @@ struct NativeRecargasView: View {
                     }
                 }
 
-                if source == 0 { if tab == 0 { historico } else { healthButton; analysisButton; forecastButton; estatisticas } }
+                if source == 0 { if tab == 0 { historico } else { estatisticas } }
                 else { if tab == 0 { refHistorico } else { refEstatisticas } }
             }
             .padding(16)
@@ -312,54 +312,6 @@ struct NativeRecargasView: View {
         }
     }
 
-    private var forecastButton: some View {
-        DSCard {
-            Button { showForecast = true } label: {
-                HStack(spacing: 12) {
-                    Image(systemName: "calendar.badge.clock").font(.title3).foregroundStyle(DS.green)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Previsão de recarga").font(.subheadline.weight(.semibold)).foregroundStyle(DS.text)
-                        Text("Quanto a carga atual ainda dura").font(.caption).foregroundStyle(DS.muted)
-                    }
-                    Spacer()
-                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(DS.muted)
-                }
-            }
-        }
-    }
-
-    private var analysisButton: some View {
-        DSCard {
-            Button { showAnalysis = true } label: {
-                HStack(spacing: 12) {
-                    Image(systemName: "chart.bar.xaxis").font(.title3).foregroundStyle(DS.yellow)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Análise de recarga").font(.subheadline.weight(.semibold)).foregroundStyle(DS.text)
-                        Text("Perda AC, R$/kWh e melhor carregador").font(.caption).foregroundStyle(DS.muted)
-                    }
-                    Spacer()
-                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(DS.muted)
-                }
-            }
-        }
-    }
-
-    private var healthButton: some View {
-        DSCard {
-            Button { showHealth = true } label: {
-                HStack(spacing: 12) {
-                    Image(systemName: "heart.text.square.fill").font(.title3).foregroundStyle(DS.teal)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Saúde da bateria").font(.subheadline.weight(.semibold)).foregroundStyle(DS.text)
-                        Text("Capacidade útil e degradação ao longo do tempo").font(.caption).foregroundStyle(DS.muted)
-                    }
-                    Spacer()
-                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(DS.muted)
-                }
-            }
-        }
-    }
-
     // MARK: Estatísticas
     private var estatisticas: some View {
         let f = filtered
@@ -373,6 +325,7 @@ struct NativeRecargasView: View {
                 Text("Sem dados no período.").font(.subheadline).foregroundStyle(DS.muted)
                     .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 20)
             } else {
+                section("RESUMO")
                 DSCard {
                     HStack {
                         DSMetric(value: "\(f.count)", label: "Recargas", color: DS.green)
@@ -394,10 +347,36 @@ struct NativeRecargasView: View {
                         DSMetric(value: f0(chg), unit: "kWh", label: "No carregador", color: DS.muted)
                     }
                 }
+
+                section("ANÁLISE")
+                navRow(icon: "heart.text.square.fill", title: "Saúde da bateria", color: DS.teal) { showHealth = true }
+                navRow(icon: "chart.bar.xaxis", title: "Análise de recarga", color: DS.yellow) { showAnalysis = true }
+                navRow(icon: "calendar.badge.clock", title: "Previsão de recarga", color: DS.green) { showForecast = true }
+
+                section("ATIVIDADE")
                 monthlyChart(f)
                 locationsCard(f)
             }
         }
+    }
+
+    private func section(_ s: String) -> some View {
+        Text(s).font(.system(size: 11, weight: .bold)).foregroundStyle(DS.muted).kerning(0.5)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func navRow(icon: String, title: String, color: Color, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: icon).font(.subheadline).foregroundStyle(color).frame(width: 22)
+                Text(title).font(.subheadline.weight(.medium)).foregroundStyle(DS.text)
+                Spacer()
+                Image(systemName: "chevron.right").font(.caption2).foregroundStyle(DS.muted)
+            }
+            .padding(.horizontal, 14).frame(height: 48)
+            .background(DS.panel).clipShape(RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).stroke(DS.border, lineWidth: 1))
+        }.buttonStyle(.plain)
     }
 
     private func monthlyChart(_ f: [Charge]) -> some View {

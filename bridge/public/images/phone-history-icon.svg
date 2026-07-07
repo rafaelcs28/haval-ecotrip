@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1f6feb"/>
+      <stop offset="100%" stop-color="#0969da"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="6"/>
+      <feOffset dx="0" dy="4" result="off"/>
+      <feComponentTransfer><feFuncA type="linear" slope="0.35"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <!-- iOS faz mask circular automaticamente, mas Android usa adaptive icons.
+       Fundo arredondado pra rodar bem em ambos. -->
+  <rect width="512" height="512" rx="115" ry="115" fill="url(#bg)"/>
+
+  <!-- Trajeto (polyline curva pra dar ideia de histórico) -->
+  <path d="M 95 360 Q 160 280 220 295 Q 290 312 320 240 Q 355 160 420 165"
+        stroke="#ffffff" stroke-opacity="0.45" stroke-width="14"
+        stroke-linecap="round" stroke-linejoin="round" fill="none"
+        stroke-dasharray="3 22"/>
+
+  <!-- Pontos do trajeto (verde início, azul intermediários, vermelho fim — eco do mapa) -->
+  <circle cx="95" cy="360" r="16" fill="#3fb950" stroke="#ffffff" stroke-width="4"/>
+  <circle cx="220" cy="295" r="11" fill="#ffffff" opacity="0.9"/>
+  <circle cx="320" cy="240" r="11" fill="#ffffff" opacity="0.9"/>
+
+  <!-- Pin de localização principal (destino atual) -->
+  <g transform="translate(256 200)" filter="url(#shadow)">
+    <path d="M 0 -90
+             C -52 -90 -90 -52 -90 0
+             C -90 50 -45 110 0 170
+             C 45 110 90 50 90 0
+             C 90 -52 52 -90 0 -90 Z"
+          fill="#ffffff"/>
+    <circle cx="0" cy="-5" r="32" fill="#1f6feb"/>
+  </g>
+</svg>

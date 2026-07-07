@@ -1,0 +1,10 @@
+{
+  "name": "@haval-hub/design-system",
+  "version": "1.0.0",
+  "description": "Haval Hub design system — dark automotive companion UI. React mirror of the SwiftUI DesignSystem (ios-app/HavalEcoTrip/DesignSystem.swift); same tokens as the PWA/cluster theme.",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "peerDependencies": {
+    "react": ">=18"
+  }
+}
