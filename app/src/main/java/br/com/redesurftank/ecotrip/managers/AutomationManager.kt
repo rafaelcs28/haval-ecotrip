@@ -29,6 +29,13 @@ object AutomationManager {
     private const val TAG = "AutomationManager"
     private const val FILE = "automations.json"
     private const val FILE_TRIG = "automation_trig_state.json"   // estado das bordas (gatilho "state") entre sessões
+    private const val FILE_GEO  = "automation_geo_state.json"    // estado dentro/fora do geofence entre sessões
+
+    // Geofence só confia em fix GPS recente. Fix NETWORK (até 150m de erro) ou stale
+    // alimentando um raio pequeno dava "dentro" aleatório → às vezes abria, às vezes não.
+    private const val GEO_MAX_AGE_MS = 15_000L
+    // Piso do raio efetivo: GPS bom ainda oscila ~5-20m; 15m era apertado demais.
+    private const val GEO_MIN_RADIUS_M = 40.0
 
     private lateinit var appContext: Context
     private val tick = Executors.newSingleThreadScheduledExecutor()
@@ -56,6 +63,7 @@ object AutomationManager {
         appContext = context.applicationContext
         loadFromDisk()
         loadTrigState()
+        loadGeoState()
         // Estado do carro: reavalia regras a cada mudança (event-driven, custo ~0).
         CarDataManager.getInstance().addListener { key, value ->
             synchronized(lock) { state[key] = value }
@@ -116,6 +124,12 @@ object AutomationManager {
         processArmedWatch(now)                                  // encadeadas observando a janela
         val (lat, lng) = TripManager.getInstance().getLastGps()
         val hasGps = !(lat == 0.0 && lng == 0.0)
+        // Geofence exige fix GPS (não NETWORK) e recente. Se o fix não presta, NÃO
+        // chamamos checkGeofence — assim o mapa `inside` preserva o estado anterior
+        // em vez de ser corrompido por uma posição ruidosa.
+        val geoGps = hasGps &&
+            TripManager.getInstance().getLastGpsProvider() == "gps" &&
+            TripManager.getInstance().getLastGpsAgeMs() < GEO_MAX_AGE_MS
         if (hasGps) updateVisits(snapshot, lat, lng, now)      // rastreia passagem por pontos (p/ condição "visited")
         refreshDynamicFields(snapshot)                          // popula chaves "sob demanda" (ex: rain_intensity)
         trackRecent(snapshot, now)                              // rastreia "última vez que o predicado foi verdade" (p/ "recent")
@@ -131,7 +145,7 @@ object AutomationManager {
                 val condNow = conditionsPass(r.conditions, now)
                 if (hasConds && !condNow) firedThisWindow[r.id] = false   // re-arma
                 val fire = when (r.trigger.type) {
-                    "geofence" -> if (hasGps) checkGeofence(r, lat, lng) else false
+                    "geofence" -> if (geoGps) checkGeofence(r, lat, lng) else false
                     "time"     -> if (stateKey == null) checkTime(r, now) else false
                     "state"    -> {
                         if (stateKey == null) {
@@ -357,9 +371,10 @@ object AutomationManager {
 
     private fun checkGeofence(r: Rule, lat: Double, lng: Double): Boolean {
         val d = haversine(lat, lng, r.trigger.lat, r.trigger.lng)
-        val nowInside = d <= r.trigger.radiusM
+        val radius = maxOf(r.trigger.radiusM, GEO_MIN_RADIUS_M)   // piso: raio pequeno oscilava
+        val nowInside = d <= radius
         val prev = inside[r.id]
-        inside[r.id] = nowInside
+        if (prev != nowInside) { inside[r.id] = nowInside; saveGeoState() }
         if (prev == null) return false                        // primeira leitura: sem borda
         return when (r.trigger.edge) {
             "enter" -> !prev && nowInside
@@ -419,6 +434,24 @@ object AutomationManager {
             synchronized(lock) { stateTrigSatisfied.forEach { (k, v) -> o.put(k, v) } }
             File(appContext.filesDir, FILE_TRIG).writeText(o.toString())
         } catch (e: Exception) { AppLogger.w(TAG, "saveTrigState: ${e.message}") }
+    }
+
+    // Persiste dentro/fora do geofence entre sessões. Sem isso, reinício do app perto
+    // ou dentro da zona zerava a borda (prev=null) e a regra de vidro nunca disparava.
+    private fun loadGeoState() {
+        try {
+            val f = File(appContext.filesDir, FILE_GEO)
+            if (!f.exists()) return
+            val o = JSONObject(f.readText())
+            o.keys().forEach { k -> inside[k] = o.getBoolean(k) }
+        } catch (e: Exception) { AppLogger.w(TAG, "loadGeoState: ${e.message}") }
+    }
+    private fun saveGeoState() {
+        try {
+            val o = JSONObject()
+            synchronized(lock) { inside.forEach { (k, v) -> o.put(k, v) } }
+            File(appContext.filesDir, FILE_GEO).writeText(o.toString())
+        } catch (e: Exception) { AppLogger.w(TAG, "saveGeoState: ${e.message}") }
     }
 
     private fun conditionsPass(group: ConditionGroup?, now: Long): Boolean {
