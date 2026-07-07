@@ -36,6 +36,9 @@ object AutomationManager {
     private const val GEO_MAX_AGE_MS = 15_000L
     // Piso do raio efetivo: GPS bom ainda oscila ~5-20m; 15m era apertado demais.
     private const val GEO_MIN_RADIUS_M = 40.0
+    // Histerese de re-arme: só considera "saiu" ao passar do raio + esta margem.
+    // Evita flicker perto da borda e só rearma numa saída de verdade.
+    private const val GEO_EXIT_MARGIN_M = 30.0
 
     private lateinit var appContext: Context
     private val tick = Executors.newSingleThreadScheduledExecutor()
@@ -45,6 +48,7 @@ object AutomationManager {
     private var rules: List<Rule> = emptyList()
     private val state = HashMap<String, String>()          // chave do bus → último valor
     private val inside = HashMap<String, Boolean>()         // ruleId → dentro do geofence?
+    private val firedVisit = HashMap<String, Boolean>()     // ruleId → já disparou nesta visita (nível, persistido)
     private val lastFiredMs = HashMap<String, Long>()       // ruleId → último disparo
     private val lastFiredMinute = HashMap<String, Int>()    // ruleId → minuto do dia já disparado (time)
     private val geofenceLastInside = HashMap<String, Long>() // coordKey → última vez dentro (ms) — p/ condição "visited"
@@ -88,6 +92,7 @@ object AutomationManager {
                 // Reseta estado transiente das regras que sumiram; mantém o resto.
                 val ids = parsed.map { it.id }.toSet()
                 inside.keys.retainAll(ids)
+                firedVisit.keys.retainAll(ids)
                 lastFiredMs.keys.retainAll(ids)
                 lastFiredMinute.keys.retainAll(ids)
                 condPrevPass.keys.retainAll(ids)
@@ -168,6 +173,7 @@ object AutomationManager {
                 if (r.debounceS > 0 && now - last < r.debounceS * 1000L) continue
                 lastFiredMs[r.id] = now
                 if (hasConds) firedThisWindow[r.id] = true
+                markGeofenceFired(r)   // nível: uma vez por visita, só após o disparo real
                 fireRule(r)
             } catch (e: Exception) {
                 AppLogger.w(TAG, "avaliar '${r.name}': ${e.message}")
@@ -369,18 +375,35 @@ object AutomationManager {
         }
     }
 
+    // Level-trigger com re-arme (não borda): dispara enquanto ESTÁ na condição-alvo
+    // (dentro p/ "enter", fora p/ "exit") e ainda não disparou nesta visita; re-arma
+    // só ao cruzar claramente pro lado oposto (raio + margem). Robusto a reinício do
+    // app perto/dentro da zona — a borda antiga exigia prev==false e perdia o disparo.
     private fun checkGeofence(r: Rule, lat: Double, lng: Double): Boolean {
         val d = haversine(lat, lng, r.trigger.lat, r.trigger.lng)
         val radius = maxOf(r.trigger.radiusM, GEO_MIN_RADIUS_M)   // piso: raio pequeno oscilava
         val nowInside = d <= radius
-        val prev = inside[r.id]
-        if (prev != nowInside) { inside[r.id] = nowInside; saveGeoState() }
-        if (prev == null) return false                        // primeira leitura: sem borda
-        return when (r.trigger.edge) {
-            "enter" -> !prev && nowInside
-            "exit"  -> prev && !nowInside
-            else    -> false
+        val clearlyOutside = d > radius + GEO_EXIT_MARGIN_M
+        if (inside[r.id] != nowInside) { inside[r.id] = nowInside }
+
+        // "alvo" = estado que deve disparar; "rearm" = estado oposto claro que re-arma.
+        val (target, rearm) = when (r.trigger.edge) {
+            "exit" -> Pair(clearlyOutside, nowInside)
+            else   -> Pair(nowInside, clearlyOutside)   // "enter" (default)
         }
+        if (rearm) {
+            if (firedVisit[r.id] == true) { firedVisit[r.id] = false; saveGeoState() }
+            return false
+        }
+        // NÃO marca firedVisit aqui: quem marca é o evaluate, DEPOIS do fireRule real
+        // (senão condições/debounce bloqueiam o disparo mas a visita já ficava "usada").
+        return target && firedVisit[r.id] != true
+    }
+
+    // Marca a visita como disparada após o fireRule de uma regra de geofence executar.
+    private fun markGeofenceFired(r: Rule) {
+        if (r.trigger.type != "geofence") return
+        firedVisit[r.id] = true; saveGeoState()
     }
 
     private fun checkTime(r: Rule, now: Long): Boolean {
@@ -443,13 +466,24 @@ object AutomationManager {
             val f = File(appContext.filesDir, FILE_GEO)
             if (!f.exists()) return
             val o = JSONObject(f.readText())
-            o.keys().forEach { k -> inside[k] = o.getBoolean(k) }
+            val ins = o.optJSONObject("inside")
+            if (ins != null) {
+                ins.keys().forEach { inside[it] = ins.getBoolean(it) }
+                o.optJSONObject("fired")?.let { fv -> fv.keys().forEach { firedVisit[it] = fv.getBoolean(it) } }
+            } else {
+                // Legado (v6.117): JSON flat era só o mapa `inside`.
+                o.keys().forEach { inside[it] = o.getBoolean(it) }
+            }
         } catch (e: Exception) { AppLogger.w(TAG, "loadGeoState: ${e.message}") }
     }
     private fun saveGeoState() {
         try {
-            val o = JSONObject()
-            synchronized(lock) { inside.forEach { (k, v) -> o.put(k, v) } }
+            val ins = JSONObject(); val fv = JSONObject()
+            synchronized(lock) {
+                inside.forEach { (k, v) -> ins.put(k, v) }
+                firedVisit.forEach { (k, v) -> fv.put(k, v) }
+            }
+            val o = JSONObject().put("inside", ins).put("fired", fv)
             File(appContext.filesDir, FILE_GEO).writeText(o.toString())
         } catch (e: Exception) { AppLogger.w(TAG, "saveGeoState: ${e.message}") }
     }
