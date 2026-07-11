@@ -49,7 +49,7 @@ object V8SoundEngine {
     // ── Entrada ao vivo (alimentada pelo hook de telemetria) ──
     @Volatile private var carOn = false
     @Volatile private var inThrottle = 0f     // -1..1 (potência normalizada)
-    @Volatile private var inTargetRpm = 0f
+    @Volatile private var inTargetRpm = 650f  // semente = marcha lenta (soa idle até chegar telemetria)
 
     @Volatile private var running = false
     private var thread: Thread? = null
@@ -139,6 +139,8 @@ object V8SoundEngine {
         if (running) return
         running = true
         rpm = idleRpm
+        inTargetRpm = idleRpm
+        inThrottle = 0f
         thread = Thread { audioLoop() }.apply { isDaemon = true; name = "v8-engine"; start() }
         AppLogger.i(TAG, "V8 engine iniciado (sr=$SR)")
     }
@@ -178,8 +180,11 @@ object V8SoundEngine {
         var carGain = 0f   // fade in/out quando o carro liga/desliga (evita clique)
 
         while (running) {
-            val on = carOn
-            val target = if (on) inTargetRpm else idleRpm
+            // Ligou o efeito = intenção de ouvir. NÃO gateia por carOn/driving_ready
+            // (que pode nunca chegar ou estar 0 parado) — senão fica mudo. A telemetria
+            // só MODULA (rpm/carga) via feed(); a marcha lenta soa mesmo sem dado.
+            val on = enabled
+            val target = if (on) inTargetRpm.coerceAtLeast(idleRpm) else idleRpm
             val thr = inThrottle
             val vol = masterVol
             // coef do low-pass final a partir do corte configurado
