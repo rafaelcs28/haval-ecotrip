@@ -60,6 +60,7 @@ object V8SoundEngine {
     private var rpm = 0f
     private var crankPhase = 0.0
     private var lpState = 0f
+    private var lpPost = 0f            // low-pass PÓS-distorção (mata o fizz/xiado do soft-clip)
     private var popEnv = 0f
     private var popCoef = 0f
     private var popPhase = 0.0        // thump grave do estalo
@@ -227,10 +228,11 @@ object V8SoundEngine {
                 s += (bright * 0.34 * sin((fire + 2) * ph)).toFloat()
                 s += (bright * 0.26 * sin((fire * 2) * ph)).toFloat()
 
-                // Ruído de escape proporcional à rotação e à carga
+                // Ruído de escape SÓ sob carga/rotação — sem piso constante (o piso
+                // é justo o "xiado" que vaza parado). Bem mais sutil que antes.
                 val rpmN = (rpm / redlineRpm).coerceIn(0f, 1f)
                 val noise = (rng.nextFloat() - 0.5f) * 2f
-                s += noise * (0.08f + 0.22f * load) * (0.3f + 0.7f * rpmN)
+                s += noise * (0.10f * load) * rpmN
 
                 // ── Estalos ("pops"/cuspidas) ──────────────────────────────────
                 // Dispara no OVERRUN (soltou/regen) e no acelerador FUNDO (WOT).
@@ -250,11 +252,13 @@ object V8SoundEngine {
                     popEnv -= popEnv * popCoef
                 }
 
-                // Low-pass (timbre) + rasp/drive + volume + soft-clip.
+                // Low-pass (timbre) → drive/rasp mais suave → 2º low-pass PÓS-clip
+                // pra remover o fizz/aliasing que a distorção gera (o "xiado").
                 lpState += (s - lpState) * lpA
-                var o = lpState * 0.26f * vol * carGain
-                o = tanh(o * (1.4f + rasp * 3.0f))   // rasp = grit do escapamento mexido
-                buf[i] = (o.coerceIn(-1f, 1f) * 32767f).toInt().toShort()
+                var o = lpState * 0.24f * vol * carGain
+                o = tanh(o * (1.15f + rasp * 1.6f))
+                lpPost += (o - lpPost) * lpA
+                buf[i] = (lpPost.coerceIn(-1f, 1f) * 32767f).toInt().toShort()
             }
             liveRpm = rpm
             liveThrottle = thr
