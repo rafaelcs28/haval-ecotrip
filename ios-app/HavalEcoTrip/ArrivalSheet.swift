@@ -332,6 +332,19 @@ final class ArrivalStore: ObservableObject {
             sentMsg = "Falha ao enviar"
         }
     }
+
+    // Retira o destino ativo do carro (limpa rota/chegada no bridge).
+    func clearFromCar() async {
+        guard !base.isEmpty, let url = URL(string: "\(base)/api/nav-clear") else { return }
+        var r = URLRequest(url: url); r.httpMethod = "POST"; r.timeoutInterval = 10
+        r.addValue("Bearer " + Settings.bridgeToken, forHTTPHeaderField: "Authorization")
+        if let (_, resp) = try? await URLSession.shared.data(for: r),
+           (resp as? HTTPURLResponse)?.statusCode == 200 {
+            sentMsg = "Destino retirado do carro ✓"
+        } else {
+            sentMsg = "Falha ao retirar"
+        }
+    }
 }
 
 // Parada resolvida (nome + coordenada) na tela de SOC na chegada.
@@ -427,6 +440,7 @@ struct ArrivalSheet: View {
     @State private var favTarget: SavedPlace?             // alvo do alerta "salvar favorito"
     @State private var favName = ""
     @State private var navApp: String?                    // "waze"/"maps" → abre o diálogo "abrir em…"
+    @State private var sharingDest: String?               // destino a compartilhar → abre QuickShareSheet
     @State private var pickingSaved = false               // texto setado por favorito/recente (não zerar coord)
     @State private var showMapPicker = false
     @State private var mapInitial: CLLocationCoordinate2D? = nil   // ponto inicial do mapa (vindo da busca)
@@ -532,6 +546,9 @@ struct ArrivalSheet: View {
                 }
                 Button("Cancelar", role: .cancel) { favTarget = nil; favName = "" }
             } message: { place in Text(place.name) }
+            .sheet(isPresented: Binding(get: { sharingDest != nil }, set: { if !$0 { sharingDest = nil } })) {
+                QuickShareSheet(destName: sharingDest ?? "")
+            }
         }
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
@@ -1125,17 +1142,30 @@ struct ArrivalSheet: View {
                 .background(DS.panel2).clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
             }
 
-            // CTA primária: enviar pro painel do carro (pílula verde, texto preto).
-            Button { Task { await store.sendToCar(p) } } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: "car.fill").font(.system(size: 15, weight: .bold))
-                    Text("Enviar pro carro").font(.system(size: 15, weight: .bold))
+            // CTA primária dividida: esquerda envia pro carro, direita compartilha.
+            HStack(spacing: 8) {
+                Button { Task { await store.sendToCar(p) } } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "car.fill").font(.system(size: 14, weight: .bold))
+                        Text("Enviar pro carro").font(.system(size: 14, weight: .bold)).lineLimit(1).minimumScaleFactor(0.8)
+                    }
+                    .frame(maxWidth: .infinity).frame(height: 42)
+                    .foregroundStyle(.black).background(DS.green)
+                    .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
                 }
-                .frame(maxWidth: .infinity).frame(height: 42)
-                .foregroundStyle(.black).background(DS.green)
-                .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+                .buttonStyle(.plain)
+
+                Button { sharingDest = p.destName } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "square.and.arrow.up").font(.system(size: 14, weight: .bold))
+                        Text("Compartilhar").font(.system(size: 14, weight: .bold)).lineLimit(1).minimumScaleFactor(0.8)
+                    }
+                    .frame(maxWidth: .infinity).frame(height: 42)
+                    .foregroundStyle(DS.teal).background(DS.teal.opacity(0.15))
+                    .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
 
             // Um botão por app: ao tocar, pergunta onde abrir (iPhone, Android ou carro).
             HStack(spacing: 8) {
@@ -1143,6 +1173,18 @@ struct ArrivalSheet: View {
                 DSActionButton(icon: "map.fill", title: "Maps", color: DS.blue, compact: true) { navApp = "maps" }
                 DSActionButton(icon: "mappin.and.ellipse", title: "Google", color: DS.orange, compact: true) { navApp = "gmaps" }
             }
+
+            // Retira o destino que foi mandado pro painel do carro.
+            Button { Task { await store.clearFromCar() } } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "xmark.circle").font(.system(size: 13, weight: .semibold))
+                    Text("Retirar destino do carro").font(.system(size: 13, weight: .semibold))
+                }
+                .frame(maxWidth: .infinity).frame(height: 38)
+                .foregroundStyle(DS.red).background(DS.red.opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+            }
+            .buttonStyle(.plain)
 
             if !p.stops.isEmpty {
                 Text("Paradas só no Google Maps. Waze e Maps abrem direto no destino final.")

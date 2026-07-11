@@ -86,9 +86,9 @@ final class PreclimatStore: ObservableObject {
     }
 
     // Cria um agendamento já com horário, temperatura e recorrência (sugestão inteligente).
-    func addAt(time: String, temp: Double, recurrence: String) async {
+    func addAt(time: String, temp: Double, recurrence: String, duration: Int = 20) async {
         guard let r = req("/api/preclimat/schedule", "POST",
-                          ["device_id": "", "time": time, "temp": temp, "recurrence": recurrence, "enabled": true]) else { return }
+                          ["device_id": "", "time": time, "temp": temp, "recurrence": recurrence, "duration": duration, "enabled": true]) else { return }
         _ = try? await URLSession.shared.data(for: r)
         await load()
     }

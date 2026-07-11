@@ -9,10 +9,14 @@ import MapKit
 
 struct DriveV2View: View {
     @ObservedObject private var store = CarStore.shared
+    @StateObject private var route = CockpitRouteStore()
     @AppStorage("v2_preview") private var previewRaw: String = ""
+    @AppStorage("cockpit_voice") private var voiceOn = false
     @State private var showAC = false
     @State private var showMic = false
     @State private var showControles = false
+
+    private var navMode: Bool { route.coords.count > 1 }
 
     private var pv: String {
         #if DEBUG
@@ -39,19 +43,20 @@ struct DriveV2View: View {
 
     var body: some View {
         ZStack {
-            if store.hasGps {
-                FollowMap(lat: store.lat, lng: store.lng, heading: store.heading,
-                          speedKmh: store.speedKmh,
+            if store.hasGps || mock {
+                FollowMap(lat: displayCoord.latitude, lng: displayCoord.longitude, heading: displayHeading,
+                          speedKmh: store.speedKmh, routeCoords: route.coords,
                           v2Accessory: { AnyView(accessoryColumn) })
-                    .ignoresSafeArea()
+                    .ignoresSafeArea(edges: .top)   // não cobre a atribuição Maps (legal) na base
             } else {
                 DS.bg.ignoresSafeArea()
                 Text("Sem GPS do carro")
                     .font(.system(size: 13)).foregroundStyle(DS.muted)
             }
 
-            VStack(spacing: 0) {
+            VStack(spacing: 8) {
                 topRow
+                if let m = route.maneuver { maneuverBanner(m) }
                 Spacer(minLength: 0)
                 overlayCard
             }
@@ -59,8 +64,10 @@ struct DriveV2View: View {
             .padding(.bottom, 8)
         }
         .background(alignment: .top) { topProtection }
-        .onAppear { store.start(); store.startHF() }
+        .onAppear { store.start(); store.startHF(); refreshRoute() }
         .onDisappear { store.stopHF() }
+        .onChange(of: "\(store.lat)|\(store.lng)") { _, _ in refreshRoute() }
+        .onChange(of: destKey) { _, _ in refreshRoute() }
         .sheet(isPresented: $showAC) { ClimaSheetV2() }
         .sheet(isPresented: $showControles) { ControlesSheetV2() }
         .sheet(isPresented: $showMic) { EscutaSheetV2() }
@@ -92,8 +99,28 @@ struct DriveV2View: View {
             LiveChipV2(preview: pv)
             Spacer(minLength: 8)
             destinationPill
+            if destination != nil {
+                Button { Task { await clearDest() } } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 12, weight: .bold)).foregroundStyle(DS.text)
+                        .frame(width: 30, height: 30)
+                        .background(.ultraThinMaterial, in: Circle())
+                        .overlay(Circle().stroke(DS.border, lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+            }
         }
         .padding(.top, 4)
+    }
+
+    private func clearDest() async {
+        route.clear()
+        let base = BridgeRouter.shared.currentURL
+        let b = base.hasSuffix("/") ? String(base.dropLast()) : base
+        guard let u = URL(string: "\(b)/api/nav-clear") else { return }
+        var r = URLRequest(url: u); r.httpMethod = "POST"; r.timeoutInterval = 10
+        r.addValue("Bearer " + Settings.bridgeToken, forHTTPHeaderField: "Authorization")
+        _ = try? await URLSession.shared.data(for: r)
     }
 
     private var destination: (name: String, eta: Int, dist: Double)? {
@@ -106,19 +133,129 @@ struct DriveV2View: View {
         return nil
     }
 
+    // Coordenada do destino final: última perna de state.arrival.legs (server.js:11912).
+    private var destCoord: CLLocationCoordinate2D? {
+        guard let legs = store.arrivalRaw?["legs"] as? [[String: Any]], let last = legs.last,
+              let la = (last["lat"] as? NSNumber)?.doubleValue, let lo = (last["lng"] as? NSNumber)?.doubleValue,
+              la != 0 || lo != 0 else { return nil }
+        return .init(latitude: la, longitude: lo)
+    }
+    private var destKey: String {
+        guard let c = destCoord else { return "" }
+        return "\(c.latitude),\(c.longitude)"
+    }
+    // Mock DEBUG (v2_preview=dirigindo): carro em Goiânia + destino ~4km pra demoar a rota sem dirigir.
+    private var mockCar: CLLocationCoordinate2D { .init(latitude: -16.6869, longitude: -49.2648) }
+    private var mockDest: CLLocationCoordinate2D { .init(latitude: -16.7050, longitude: -49.2400) }
+    private var carCoord: CLLocationCoordinate2D {
+        mock ? mockCar : .init(latitude: store.lat, longitude: store.lng)
+    }
+    // Posição/rumo exibidos: carro snapado na rota (map-matching) quando há rota; senão cru.
+    private var displayCoord: CLLocationCoordinate2D { route.matchedCar ?? carCoord }
+    private var displayHeading: Double { route.courseHeading ?? store.heading }
+
+    // Geometria da rota do bridge (Mapbox driving-traffic): [[lng,lat], …].
+    private var bridgeGeometry: [CLLocationCoordinate2D] {
+        guard let g = store.arrivalRaw?["geometry"] as? [[Any]] else { return [] }
+        return g.compactMap { p in
+            guard p.count >= 2,
+                  let lng = (p[0] as? NSNumber)?.doubleValue,
+                  let lat = (p[1] as? NSNumber)?.doubleValue else { return nil }
+            return CLLocationCoordinate2D(latitude: lat, longitude: lng)
+        }
+    }
+    // Manobras (turn-by-turn com nome de via) do bridge.
+    private var bridgeManeuvers: [BridgeManeuver] {
+        guard let ms = store.arrivalRaw?["maneuvers"] as? [[String: Any]] else { return [] }
+        return ms.compactMap { m in
+            guard let lat = (m["lat"] as? NSNumber)?.doubleValue,
+                  let lng = (m["lng"] as? NSNumber)?.doubleValue else { return nil }
+            return BridgeManeuver(coord: .init(latitude: lat, longitude: lng),
+                                  text: (m["text"] as? String) ?? "",
+                                  type: (m["type"] as? String) ?? "",
+                                  modifier: (m["modifier"] as? String) ?? "")
+        }
+    }
+    private var bridgeSpeedLimit: Int? { (store.arrivalRaw?["speedLimit"] as? NSNumber)?.intValue }
+
+    private func refreshRoute() {
+        route.voiceEnabled = voiceOn
+        if mock { route.updateApple(car: mockCar, dest: mockDest); return }
+        guard store.hasGps else { route.clear(); return }
+        let car = carCoord
+        let geo = bridgeGeometry
+        if geo.count > 1 {                                              // rota com trânsito ao vivo
+            route.setBridgeRoute(geo, maneuvers: bridgeManeuvers, speedLimit: bridgeSpeedLimit, car: car)
+        } else if destCoord != nil {
+            route.updateApple(car: car, dest: destCoord)                // fallback sem bridge
+        } else { route.clear() }
+    }
+
+    private func clockString(_ d: Date) -> String {
+        let f = DateFormatter(); f.dateFormat = "HH:mm"; return f.string(from: d)
+    }
+    // ETA: hora de chegada (última perna) + min/km restantes.
+    private var etaInfo: (clock: String, min: Int, km: Double)? {
+        if mock { return (clockString(Date().addingTimeInterval(8 * 60)), 8, 3.9) }
+        guard let d = destination else { return nil }
+        let clock = (store.arrivalRaw?["legs"] as? [[String: Any]])?.last?["etaClock"] as? String
+            ?? clockString(Date().addingTimeInterval(Double(d.eta) * 60))
+        return (clock, d.eta, d.dist)
+    }
+
+    private func maneuverBanner(_ m: Maneuver) -> some View {
+        let near = m.distanceM < 100
+        let accent = near ? DS.green : DS.blue
+        return VStack(spacing: 8) {
+            HStack(spacing: 12) {
+                Image(systemName: m.icon)
+                    .font(.system(size: 24, weight: .bold)).foregroundStyle(accent)
+                    .frame(width: 34)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(m.distanceM >= 1000 ? "\(Fmt.dec1(m.distanceM / 1000)) km" : "\(Int(m.distanceM.rounded())) m")
+                        .font(.system(size: 20, weight: .bold, design: .rounded)).monospacedDigit()
+                        .foregroundStyle(near ? DS.green : DS.text)
+                    Text(m.instruction)
+                        .font(.system(size: 12.5)).foregroundStyle(DS.text2)
+                        .lineLimit(2).minimumScaleFactor(0.85)
+                }
+                Spacer(minLength: 6)
+                if let e = etaInfo {
+                    VStack(alignment: .trailing, spacing: 1) {
+                        Text(e.clock)
+                            .font(.system(size: 19, weight: .bold, design: .rounded)).monospacedDigit().foregroundStyle(DS.green)
+                        Text("\(e.min) min · \(Fmt.dec1(e.km)) km")
+                            .font(.system(size: 10.5)).monospacedDigit().foregroundStyle(DS.muted)
+                            .lineLimit(1)
+                    }
+                }
+            }
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color.white.opacity(0.12))
+                    Capsule().fill(accent)
+                        .frame(width: max(6, geo.size.width * (1 - m.progress)))
+                }
+            }
+            .frame(height: 4)
+        }
+        .padding(.horizontal, 14).padding(.vertical, 10)
+        .background(Color(red: 0.071, green: 0.071, blue: 0.078).opacity(0.82))
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(near ? DS.green.opacity(0.5) : DS.border, lineWidth: 1))
+        .animation(.easeOut(duration: 0.3), value: m.progress)
+    }
+
     @ViewBuilder
     private var destinationPill: some View {
         if let d = destination {
-            HStack(spacing: 5) {
-                Text("→ \(d.name)")
-                    .font(.system(size: 12, weight: .bold)).foregroundStyle(DS.text)
-                Text("\(d.eta) min · \(Fmt.dec1(d.dist)) km")
-                    .font(.system(size: 11.5)).foregroundStyle(DS.text2)
-            }
-            .lineLimit(1).minimumScaleFactor(0.8)
-            .padding(.horizontal, 12).padding(.vertical, 7)
-            .background(.ultraThinMaterial, in: Capsule())
-            .overlay(Capsule().stroke(DS.border, lineWidth: 1))
+            Text("→ \(d.name)")
+                .font(.system(size: 12, weight: .bold)).foregroundStyle(DS.text)
+                .lineLimit(1).minimumScaleFactor(0.8)
+                .padding(.horizontal, 12).padding(.vertical, 7)
+                .background(.ultraThinMaterial, in: Capsule())
+                .overlay(Capsule().stroke(DS.border, lineWidth: 1))
         }
     }
 
@@ -126,10 +263,25 @@ struct DriveV2View: View {
 
     private var accessoryColumn: some View {
         VStack(spacing: 10) {
+            if navMode {
+                floatButton(voiceOn ? "speaker.wave.2.fill" : "speaker.slash.fill",
+                            tint: voiceOn ? DS.green : DS.text) { voiceOn.toggle(); route.voiceEnabled = voiceOn }
+            }
             floatButton("snowflake", tint: store.acOn ? DS.teal : DS.text) { showAC = true }
             floatButton("car.fill", tint: store.lockKnown && !store.isLocked ? DS.red : DS.text) { showControles = true }
             floatButton("mic.fill", tint: DS.text) { showMic = true }
         }
+    }
+
+    // Placa de limite de velocidade (padrão BR/EU: aro vermelho, número preto).
+    private func speedLimitBadge(_ v: Int) -> some View {
+        Text("\(v)")
+            .font(.system(size: 17, weight: .heavy, design: .rounded)).monospacedDigit()
+            .foregroundStyle(.black)
+            .frame(width: 42, height: 42)
+            .background(Circle().fill(.white))
+            .overlay(Circle().stroke(.red, lineWidth: 4))
+            .overlay(Circle().stroke(.white, lineWidth: 1.5).padding(2))
     }
 
     // Volante ao vivo (espelha o widget do PWA). Calibração: carro envia
@@ -179,7 +331,8 @@ struct DriveV2View: View {
                     Text("km/h").font(.system(size: 14)).foregroundStyle(DS.muted)
                 }
                 Spacer(minLength: 8)
-                if store.carOnline || mock { steeringIndicator }
+                if navMode, let sl = route.speedLimit { speedLimitBadge(sl) }
+                else if !navMode, store.carOnline || mock { steeringIndicator }
                 Spacer(minLength: 8)
                 VStack(alignment: .trailing, spacing: 5) {
                     HStack(alignment: .firstTextBaseline, spacing: 3) {
@@ -200,16 +353,19 @@ struct DriveV2View: View {
                 pillMini(gearLabel, .neutral)
                 if !modeLabel.isEmpty { pillMini(modeLabel, .outline) }
                 Spacer(minLength: 6)
-                Text(consumo > 0 ? "\(Fmt.dec1(consumo)) kWh/100 · viagem" : "— kWh/100")
-                    .font(.system(size: 11)).foregroundStyle(DS.text2)
-                    .lineLimit(1).minimumScaleFactor(0.8)
-                if let s = liveScore {
-                    Spacer(minLength: 6)
-                    HStack(spacing: 5) {
-                        ScoreRing(score: s)
-                        Text("SCORE")
-                            .font(.system(size: 8, weight: .bold))
-                            .foregroundStyle(DS.muted).tracking(1)
+                // Em nav-mode a atenção é rota+velocidade; esconde consumo/score.
+                if !navMode {
+                    Text(consumo > 0 ? "\(Fmt.dec1(consumo)) kWh/100 · viagem" : "— kWh/100")
+                        .font(.system(size: 11)).foregroundStyle(DS.text2)
+                        .lineLimit(1).minimumScaleFactor(0.8)
+                    if let s = liveScore {
+                        Spacer(minLength: 6)
+                        HStack(spacing: 5) {
+                            ScoreRing(score: s)
+                            Text("SCORE")
+                                .font(.system(size: 8, weight: .bold))
+                                .foregroundStyle(DS.muted).tracking(1)
+                        }
                     }
                 }
             }

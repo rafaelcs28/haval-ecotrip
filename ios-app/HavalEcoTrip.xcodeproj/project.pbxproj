@@ -29,7 +29,7 @@
 		30E7EF6F07C0F5426CFC7E3D /* ChargeAnalysisSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = FFF70A4F7CBB079E318E2289 /* ChargeAnalysisSheet.swift */; };
 		31C4EEF5E7D54B74A2F8DCA1 /* SongProLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8667439515FC27589EEEDBC9 /* SongProLiveActivity.swift */; };
 		326CAF9CD3D64AD79469D6C5 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 0C916CB148E5590BB5EF8513 /* Assets.xcassets */; };
-		396DD83776CC2C2138F1CEAC /* RangeSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = D16EC27D9C377977BF908E1D /* RangeSheet.swift */; };
+		358FAD5EC35FFE7883AA5F9F /* CockpitRoute.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25A17F71A438747B21DAF8B6 /* CockpitRoute.swift */; };
 		3980C2076408E94B4B512D5B /* PeriodFilter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A74BCCDF1A1B7A5A4D1A2F /* PeriodFilter.swift */; };
 		3B1E127339910428D3BC6CB3 /* InfraActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72A96429D1C213B7BC4490B3 /* InfraActivityAttributes.swift */; };
 		3ED1321FB7B61D7ADDAA032F /* DesignSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7376EEA5C86B0C60FE3CE4E3 /* DesignSystem.swift */; };
@@ -215,6 +215,7 @@
 		1E3DCC65EEE32FFFC3727847 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		232F301A30B4B1A8B1CBC296 /* HealthScoreSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthScoreSheet.swift; sourceTree = "<group>"; };
 		233A69DF139C48429A427377 /* ParkingActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParkingActivityAttributes.swift; sourceTree = "<group>"; };
+		25A17F71A438747B21DAF8B6 /* CockpitRoute.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CockpitRoute.swift; sourceTree = "<group>"; };
 		25AF744D0A813EC24608D127 /* ConfigSheets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigSheets.swift; sourceTree = "<group>"; };
 		26B936D2B31C5DE61815546A /* HavalEcoTrip-dev.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "HavalEcoTrip-dev.entitlements"; sourceTree = "<group>"; };
 		290EB87DC1EC5670D4F65A0E /* PreclimatContextStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreclimatContextStore.swift; sourceTree = "<group>"; };
@@ -301,7 +302,6 @@
 		C88C20EF0FDB1AB8EB036191 /* CarActions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarActions.swift; sourceTree = "<group>"; };
 		CD754B29F48E190AD2D8648F /* CarIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarIntents.swift; sourceTree = "<group>"; };
 		D15756C1CEF1EFDD6804C05D /* SecurityActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecurityActivityAttributes.swift; sourceTree = "<group>"; };
-		D16EC27D9C377977BF908E1D /* RangeSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RangeSheet.swift; sourceTree = "<group>"; };
 		D2C8DF4BFA59CDFFCB7CAABF /* ChargeForecastSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChargeForecastSheet.swift; sourceTree = "<group>"; };
 		D2E5847D4B630A807A07557A /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
 		D6CE9B63AE0A75344509696C /* NativeConfigView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeConfigView.swift; sourceTree = "<group>"; };
@@ -356,6 +356,7 @@
 				C68353FA3433CBE88BFA4347 /* CarStore.swift */,
 				FFF70A4F7CBB079E318E2289 /* ChargeAnalysisSheet.swift */,
 				D2C8DF4BFA59CDFFCB7CAABF /* ChargeForecastSheet.swift */,
+				25A17F71A438747B21DAF8B6 /* CockpitRoute.swift */,
 				25AF744D0A813EC24608D127 /* ConfigSheets.swift */,
 				AD7173E45A0E0AAFE9AD301F /* ConfigStore.swift */,
 				E25E4CB35E07E12C3CBD67E4 /* ConfigV2View.swift */,
@@ -408,7 +409,6 @@
 				6215EB2F3EA8C80FA49D1477 /* PreclimatSheet.swift */,
 				11400D718E9CC0F694031328 /* PreclimaV2View.swift */,
 				B41BC4A6A889A1B5BBFCF7C6 /* PwaWebView.swift */,
-				D16EC27D9C377977BF908E1D /* RangeSheet.swift */,
 				E98E48557C0D1C195F52D06D /* RecargasV2View.swift */,
 				44155F27E876BF6FC49BEC89 /* RecordingsView.swift */,
 				0AFED4CCA277E184649006B9 /* RemoteNotifications.swift */,
@@ -778,6 +778,7 @@
 				920A0533D20932EF36FC4D49 /* ChargeActivityAttributes.swift in Sources */,
 				30E7EF6F07C0F5426CFC7E3D /* ChargeAnalysisSheet.swift in Sources */,
 				BBDA07ABAFDD14A11CEAC022 /* ChargeForecastSheet.swift in Sources */,
+				358FAD5EC35FFE7883AA5F9F /* CockpitRoute.swift in Sources */,
 				0BB7525EC9FA3BFAAE77FCB0 /* ConfigSheets.swift in Sources */,
 				42169A88F8E36FD03EA47301 /* ConfigStore.swift in Sources */,
 				9D8A593457802718AE4EA0C2 /* ConfigV2View.swift in Sources */,
@@ -830,7 +831,6 @@
 				D2B7262D32955CCCE4EE48F7 /* PreclimatContextStore.swift in Sources */,
 				A01430293347A18D099263AF /* PreclimatSheet.swift in Sources */,
 				5E3E822BD69F7F11ED12B2D6 /* PwaWebView.swift in Sources */,
-				396DD83776CC2C2138F1CEAC /* RangeSheet.swift in Sources */,
 				CF45F1EDFEE591233BE1F24E /* RecargasV2View.swift in Sources */,
 				B25D2B9EB0665CADC0BFB9E8 /* RecordingsView.swift in Sources */,
 				51B5F9B9255D183BDCDE0CC7 /* RemoteNotifications.swift in Sources */,

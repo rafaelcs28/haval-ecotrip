@@ -28,7 +28,6 @@ struct DashV2View: View {
     @State private var showMaint = false
     @State private var showArrival = false
     @State private var showParking = false
-    @State private var showRange = false
     @State private var showShare = false
     @State private var showDestCost = false
     @State private var showTimeline = false
@@ -150,7 +149,6 @@ struct DashV2View: View {
                     case "maint": showMaint = true
                     case "arrival": showArrival = true
                     case "parking": showParking = true
-                    case "range": showRange = true
                     case "share": showShare = true
                     case "destcost": showDestCost = true
                     case "timeline": showTimeline = true
@@ -173,7 +171,6 @@ struct DashV2View: View {
         .sheet(isPresented: $showMaint) { MaintenanceSheet(store: maint) }
         .sheet(isPresented: $showArrival) { ArrivalSheet(trips: trips.trips) }
         .sheet(isPresented: $showParking) { ParkingSheet() }
-        .sheet(isPresented: $showRange) { RangeSheet() }
         .sheet(isPresented: $showShare) { ShareStatusSheet() }
         .sheet(isPresented: $showDestCost) { DestinationsCostSheet() }
         .sheet(isPresented: $showTimeline) { EventsTimelineSheet() }
@@ -903,7 +900,6 @@ struct DashV2View: View {
         HStack(spacing: 8) {
             quickTile("location.north.fill", "Destino", DS.teal) { showArrival = true }
             quickTile("parkingsign", "Estacionei", DS.green) { showParking = true }
-            quickTile("map.fill", "Alcance", DS.orange) { showRange = true }
             quickTile("square.and.arrow.up", "Compartilhar", DS.blue) { showShare = true }
             quickTile("dollarsign.arrow.circlepath", "Custo", DS.green) { showDestCost = true }
         }

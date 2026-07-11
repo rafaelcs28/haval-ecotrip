@@ -47,6 +47,16 @@ automation_state.json
 automation_events.json
 shared-trips.json
 songpro_trips.json
+songpro_charges.json
+songpro_locations.json
+songpro_records_trips.json
+songpro_records_charges.json
+songpro_trip_samples/
+apk_deaths.ndjson
+# backups timestamp de import/dedupe/rebuild (dados pessoais)
+songpro_*.pre-*.json
+songpro_*.json.pre-*
+songpro_*.json.pre-*.[0-9]*
 ha-work-events.json
 ha-work-status.json
 ext-monitor-beat.json

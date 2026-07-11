@@ -438,11 +438,21 @@ struct ViagensV2View: View {
                     featTile("VEL. MÁX", maxSpd.map { "\($0)" } ?? "—", "", DS.text)
                     featTile("CUSTO", cost > 0 ? Fmt.brl(cost) : "—", "", DS.text)
                 }
+                let custoKm = (cost > 0 && t.distKm > 0.5) ? cost / t.distKm : 0
+                HStack(spacing: 8) {
+                    featTile("CUSTO/KM", custoKm > 0 ? Fmt.brl(custoKm) : "—", "", DS.text)
+                    // EV puro: km/L equivalente não é intuitivo (e kWh/100km já está em
+                    // CONSUMO) → mostra energia gasta. Híbrida/gasolina: km/L equivalente.
+                    if t.fuelL < 0.05 {
+                        featTile("ENERGIA", Fmt.dec1(t.netKwh), "kWh", DS.teal)
+                    } else {
+                        featTile("KM/L EQUIV.", t.kmPerLEq > 0 ? Fmt.dec1(t.kmPerLEq) : "—", "km/L", DS.green)
+                    }
+                }
                 if t.fuelL >= 0.05 {
                     HStack(spacing: 8) {
                         featTile("ENERGIA", Fmt.dec1(t.netKwh), "kWh", DS.teal)
                         featTile("GASOLINA", Fmt.dec1(t.fuelL), "L", DS.orange)
-                        featTile("EQUIV.", t.kmPerLEq > 0 ? Fmt.dec1(t.kmPerLEq) : "—", "km/L", DS.green)
                     }
                 }
                 if let img = d?.preview {
@@ -563,6 +573,8 @@ struct TrajetoV2Sheet: View {
                 metricsGrid
                 player
                 speedGraph
+                powerGraph
+                if hasIce { rpmGraph }
                 shareRow
             } else if loading {
                 ProgressView().tint(DS.green).frame(maxWidth: .infinity).padding(.vertical, 40)
@@ -741,6 +753,66 @@ struct TrajetoV2Sheet: View {
                 var line = Path(); line.move(to: pt(0))
                 for i in 1..<spds.count { line.addLine(to: pt(i)) }
                 ctx.stroke(line, with: .color(DS.green), lineWidth: 2)
+                let mx = w * prog
+                var m = Path(); m.move(to: CGPoint(x: mx, y: 0)); m.addLine(to: CGPoint(x: mx, y: h))
+                ctx.stroke(m, with: .color(.white.opacity(0.85)), lineWidth: 1.5)
+            }
+            .frame(height: 64)
+        }
+    }
+
+    // Potência do motor elétrico (evKw, com sinal): + = tração, − = regeneração.
+    private var powerGraph: some View {
+        let pw = samples.map { $0.pwr }
+        return VStack(alignment: .leading, spacing: 5) {
+            Text("POTÊNCIA DO MOTOR ELÉTRICO")
+                .font(.system(size: 8.5, weight: .bold)).foregroundStyle(DS.muted).tracking(1)
+            Canvas { ctx, size in
+                guard pw.count > 1 else { return }
+                let w = size.width, h = size.height
+                let hi = max(pw.max() ?? 0, 0), lo = min(pw.min() ?? 0, 0)
+                let span = max(hi - lo, 1)
+                let n = Double(pw.count - 1)
+                func y(_ v: Double) -> CGFloat { h - CGFloat((v - lo) / span) * (h - 4) - 2 }
+                func pt(_ i: Int) -> CGPoint { CGPoint(x: w * Double(i) / n, y: y(pw[i])) }
+                let zeroY = y(0)
+                var zero = Path(); zero.move(to: CGPoint(x: 0, y: zeroY)); zero.addLine(to: CGPoint(x: w, y: zeroY))
+                ctx.stroke(zero, with: .color(.white.opacity(0.18)), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+                var area = Path(); area.move(to: CGPoint(x: 0, y: zeroY))
+                for i in 0..<pw.count { area.addLine(to: pt(i)) }
+                area.addLine(to: CGPoint(x: w, y: zeroY)); area.closeSubpath()
+                ctx.fill(area, with: .color(DS.orange.opacity(0.12)))
+                var line = Path(); line.move(to: pt(0))
+                for i in 1..<pw.count { line.addLine(to: pt(i)) }
+                ctx.stroke(line, with: .color(DS.orange), lineWidth: 2)
+                let mx = w * prog
+                var m = Path(); m.move(to: CGPoint(x: mx, y: 0)); m.addLine(to: CGPoint(x: mx, y: h))
+                ctx.stroke(m, with: .color(.white.opacity(0.85)), lineWidth: 1.5)
+            }
+            .frame(height: 64)
+        }
+    }
+
+    // Rotação do motor térmico (ICE). RPM=0 = motor desligado (modo EV).
+    private var hasIce: Bool { samples.contains { $0.rpm > 0 } }
+    private var rpmGraph: some View {
+        let rpm = samples.map { $0.rpm }
+        return VStack(alignment: .leading, spacing: 5) {
+            Text("ROTAÇÃO DO MOTOR TÉRMICO")
+                .font(.system(size: 8.5, weight: .bold)).foregroundStyle(DS.muted).tracking(1)
+            Canvas { ctx, size in
+                guard rpm.count > 1 else { return }
+                let w = size.width, h = size.height
+                let hi = max(rpm.max() ?? 1, 1)
+                let n = Double(rpm.count - 1)
+                func pt(_ i: Int) -> CGPoint { CGPoint(x: w * Double(i) / n, y: h - CGFloat(rpm[i] / hi) * (h - 4) - 2) }
+                var area = Path(); area.move(to: CGPoint(x: 0, y: h))
+                for i in 0..<rpm.count { area.addLine(to: pt(i)) }
+                area.addLine(to: CGPoint(x: w, y: h)); area.closeSubpath()
+                ctx.fill(area, with: .color(DS.teal.opacity(0.14)))
+                var line = Path(); line.move(to: pt(0))
+                for i in 1..<rpm.count { line.addLine(to: pt(i)) }
+                ctx.stroke(line, with: .color(DS.teal), lineWidth: 2)
                 let mx = w * prog
                 var m = Path(); m.move(to: CGPoint(x: mx, y: 0)); m.addLine(to: CGPoint(x: mx, y: h))
                 ctx.stroke(m, with: .color(.white.opacity(0.85)), lineWidth: 1.5)

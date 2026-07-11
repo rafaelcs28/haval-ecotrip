@@ -120,6 +120,7 @@ final class ConfigStore: ObservableObject {
         if let (c, d) = await send("/api/known-places", "GET"), c == 200,
            let arr = (try? JSONSerialization.jsonObject(with: d)) as? [[String: Any]] {
             places = arr.map(KnownPlace.init)
+                .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
         }
     }
     // Locais de AUTOMAÇÃO (lista separada dos conhecidos de recarga/trajeto).
@@ -127,6 +128,7 @@ final class ConfigStore: ObservableObject {
         if let (c, d) = await send("/api/automation-places", "GET"), c == 200,
            let arr = (try? JSONSerialization.jsonObject(with: d)) as? [[String: Any]] {
             automationPlaces = arr.map(KnownPlace.init)
+                .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
         }
     }
     /// Cria um local de automação e recarrega. Retorna o id novo (pra já selecionar).

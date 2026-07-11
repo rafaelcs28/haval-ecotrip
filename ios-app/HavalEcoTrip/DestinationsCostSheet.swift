@@ -1,25 +1,25 @@
 //  DestinationsCostSheet.swift
-//  Custo médio por destino recorrente: agrupa viagens por local de chegada,
-//  mostra custo real (energia+combustível) por ida e quanto economiza vs gasolina.
+//  Custo por TRAJETO recorrente (origem→destino): custo total no período +
+//  custo total/médio dos trajetos mais recorrentes, com comparação vs gasolina.
 
 import SwiftUI
 
-struct DestinationsCostData: Decodable {
-    struct Dest: Decodable {
+struct TripsCostData: Decodable {
+    struct Route: Decodable {
         let name: String
-        let lat, lng: Double
         let trips: Int
-        let avgKm, avgCost, avgGasCost: Double
+        let avgKm, totalCost, avgCost, avgGasCost: Double
         let savedPct: Int
     }
     let lookbackDays: Int
-    let gasPricePerL, kwhPrice: Double
-    let destinations: [Dest]
+    let gasPricePerL, kwhPrice, totalCost, totalGasCost: Double
+    let totalTrips: Int
+    let trips: [Route]
 }
 
 @MainActor
-final class DestinationsCostStore: ObservableObject {
-    @Published var data: DestinationsCostData?
+final class TripsCostStore: ObservableObject {
+    @Published var data: TripsCostData?
     @Published var loading = false
     @Published var error: String?
 
@@ -29,20 +29,20 @@ final class DestinationsCostStore: ObservableObject {
     }
 
     func load() async {
-        guard !base.isEmpty, let u = URL(string: "\(base)/api/routine/destinations-cost") else { error = "Bridge não configurado."; return }
+        guard !base.isEmpty, let u = URL(string: "\(base)/api/routine/trips-cost") else { error = "Bridge não configurado."; return }
         loading = true; error = nil; defer { loading = false }
         var r = URLRequest(url: u); r.timeoutInterval = 12
         r.addValue("Bearer " + Settings.bridgeToken, forHTTPHeaderField: "Authorization")
         do {
             let (d, resp) = try await URLSession.shared.data(for: r)
             guard (resp as? HTTPURLResponse)?.statusCode == 200 else { error = "Falha ao carregar."; return }
-            data = try JSONDecoder().decode(DestinationsCostData.self, from: d)
+            data = try JSONDecoder().decode(TripsCostData.self, from: d)
         } catch { self.error = "Erro de rede: \(error.localizedDescription)" }
     }
 }
 
 struct DestinationsCostSheet: View {
-    @StateObject private var store = DestinationsCostStore()
+    @StateObject private var store = TripsCostStore()
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -50,44 +50,42 @@ struct DestinationsCostSheet: View {
             ScrollView {
                 VStack(spacing: 12) {
                     if let d = store.data {
-                        if d.destinations.isEmpty {
-                            DSCard { Text("Ainda sem destinos recorrentes suficientes (mínimo 3 idas no período).").font(.callout).foregroundStyle(DS.muted).frame(maxWidth: .infinity, alignment: .leading) }
+                        // Hero: gasto real total no período (todas as viagens).
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text(Fmt.brl(d.totalCost))
+                                .font(.system(size: 52, weight: .ultraLight, design: .rounded))
+                                .foregroundStyle(DS.text).monospacedDigit()
+                                .lineLimit(1).minimumScaleFactor(0.6)
+                            Text("\(d.totalTrips) VIAGENS · ÚLTIMOS \(d.lookbackDays) DIAS")
+                                .font(.system(size: 10, weight: .semibold)).foregroundStyle(DS.muted).tracking(0.5)
+                        }.frame(maxWidth: .infinity, alignment: .leading)
+
+                        let saved = max(0, d.totalGasCost - d.totalCost)
+                        Text("Se fosse gasolina \(Fmt.brl(d.totalGasCost)) · economizou \(Fmt.brl(saved))")
+                            .font(.system(size: 13, weight: .semibold)).foregroundStyle(DS.green)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                        if d.trips.isEmpty {
+                            DSCard { Text("Ainda sem trajetos recorrentes suficientes (mínimo 2 idas no período).").font(.callout).foregroundStyle(DS.muted).frame(maxWidth: .infinity, alignment: .leading) }
                         } else {
-                            let totalReal = d.destinations.reduce(0.0) { $0 + $1.avgCost * Double($1.trips) }
-                            let totalGas = d.destinations.reduce(0.0) { $0 + $1.avgGasCost * Double($1.trips) }
-                            let maxSpend = d.destinations.map { $0.avgCost * Double($0.trips) }.max() ?? 1
+                            Text("TRAJETOS MAIS RECORRENTES")
+                                .font(.system(size: 10, weight: .semibold)).foregroundStyle(DS.muted).tracking(0.5)
+                                .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 4)
 
-                            // Hero: gasto real total no período.
-                            VStack(alignment: .leading, spacing: 0) {
-                                HStack(alignment: .firstTextBaseline, spacing: 4) {
-                                    Text(Fmt.brl(totalReal))
-                                        .font(.system(size: 52, weight: .ultraLight, design: .rounded))
-                                        .foregroundStyle(DS.text).monospacedDigit()
-                                        .lineLimit(1).minimumScaleFactor(0.6)
-                                }
-                                Text("NOS ÚLTIMOS \(d.lookbackDays) DIAS")
-                                    .font(.system(size: 10, weight: .semibold)).foregroundStyle(DS.muted).tracking(0.5)
-                            }.frame(maxWidth: .infinity, alignment: .leading)
-
+                            let maxSpend = d.trips.map { $0.totalCost }.max() ?? 1
                             VStack(spacing: 0) {
-                                let ordered = d.destinations.sorted { $0.avgCost * Double($0.trips) > $1.avgCost * Double($1.trips) }
-                                ForEach(Array(ordered.enumerated()), id: \.element.name) { idx, dst in
-                                    row(dst, color: barColor(idx), maxSpend: maxSpend)
-                                    if dst.name != ordered.last?.name { Divider().background(DS.divider) }
+                                ForEach(Array(d.trips.enumerated()), id: \.element.name) { idx, rt in
+                                    row(rt, color: barColor(idx), maxSpend: maxSpend)
+                                    if rt.name != d.trips.last?.name { Divider().background(DS.divider) }
                                 }
                             }
                             .background(DS.panel2)
                             .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
-
-                            let saved = max(0, totalGas - totalReal)
-                            Text("Se fosse gasolina \(Fmt.brl(totalGas)) · economizou \(Fmt.brl(saved))")
-                                .font(.system(size: 13, weight: .semibold)).foregroundStyle(DS.green)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-
-                            Text("Comparação vs SUV gasolina. Eletricidade \(Fmt.brl(d.kwhPrice))/kWh · gasolina \(Fmt.brl(d.gasPricePerL))/L.")
-                                .font(.caption2).foregroundStyle(DS.muted)
-                                .frame(maxWidth: .infinity, alignment: .leading)
                         }
+
+                        Text("Comparação vs SUV gasolina. Eletricidade \(Fmt.brl(d.kwhPrice))/kWh · gasolina \(Fmt.brl(d.gasPricePerL))/L.")
+                            .font(.caption2).foregroundStyle(DS.muted)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     } else if store.loading {
                         ProgressView().tint(DS.green).frame(maxWidth: .infinity).padding(.vertical, 40)
                     } else if let e = store.error {
@@ -97,14 +95,14 @@ struct DestinationsCostSheet: View {
                 .padding(16)
             }
             .background(DS.bg.ignoresSafeArea())
-            .navigationTitle("Custo por destino")
+            .navigationTitle("Custo por trajeto")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Fechar") { dismiss() } } }
             .task { await store.load() }
         }
     }
 
-    // Verde → teal → laranja → cinza, por ranking de gasto.
+    // Verde → teal → laranja → cinza, por recorrência.
     private func barColor(_ idx: Int) -> Color {
         switch idx {
         case 0: return DS.green
@@ -114,22 +112,21 @@ struct DestinationsCostSheet: View {
         }
     }
 
-    private func row(_ d: DestinationsCostData.Dest, color: Color, maxSpend: Double) -> some View {
-        let spend = d.avgCost * Double(d.trips)
-        return VStack(alignment: .leading, spacing: 7) {
+    private func row(_ r: TripsCostData.Route, color: Color, maxSpend: Double) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
             HStack {
-                Text(d.name).font(.system(size: 13, weight: .semibold)).foregroundStyle(DS.text).lineLimit(1)
+                Text(r.name).font(.system(size: 13, weight: .semibold)).foregroundStyle(DS.text).lineLimit(1)
                 Spacer()
-                Text(Fmt.brl(spend)).font(.system(size: 13, weight: .semibold, design: .rounded))
+                Text(Fmt.brl(r.totalCost)).font(.system(size: 13, weight: .semibold, design: .rounded))
                     .foregroundStyle(color).monospacedDigit()
             }
             GeometryReader { g in
-                let frac = maxSpend > 0 ? spend / maxSpend : 0
+                let frac = maxSpend > 0 ? r.totalCost / maxSpend : 0
                 Capsule().fill(color)
                     .frame(width: max(4, g.size.width * CGFloat(frac)))
                     .frame(maxWidth: .infinity, alignment: .leading)
             }.frame(height: 5)
-            Text("\(d.trips)× · \(Fmt.brl(spend)) · méd \(Fmt.brl(d.avgCost))")
+            Text("\(r.trips)× · méd \(Fmt.brl(r.avgCost))/ida · \(Fmt.dec1(r.avgKm)) km")
                 .font(.system(size: 9.5)).foregroundStyle(DS.muted)
         }
         .padding(.horizontal, 12).padding(.vertical, 11)

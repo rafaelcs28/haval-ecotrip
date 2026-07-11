@@ -337,7 +337,7 @@ final class SongProStore: ObservableObject {
     @Published var trips: [SPTrip] = []
 
     func fetchTrips() async {
-        guard let req = authedRequest("/api/songpro/trips?limit=60") else { return }
+        guard let req = authedRequest("/api/songpro/trips?limit=5000") else { return }
         guard let (data, resp) = try? await URLSession.shared.data(for: req),
               (resp as? HTTPURLResponse)?.statusCode == 200,
               let r = try? JSONDecoder().decode(TripsResponse.self, from: data) else { return }

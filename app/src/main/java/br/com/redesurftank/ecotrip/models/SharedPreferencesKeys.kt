@@ -95,6 +95,11 @@ object SharedPreferencesKeys {
     // false = app fechou/travou no meio → na próxima sessão manter baselines de energia.
     const val SESSION_ENDED_CLEANLY = "session_ended_cleanly"
 
+    // Breadcrumb: por que o processo morreu (ex: "ota_install v5.93", "crash: NPE: ...").
+    // Escrito com commit() logo antes de encerrar/no uncaught handler; lido no boot pra
+    // reportar ao bridge quando a morte pegou uma viagem no meio. Limpo após reportar.
+    const val LAST_DEATH_REASON = "last_death_reason"
+
     // Último valor recebido do carro — persistido para não zerar após reinício do app
     const val LATEST_FUEL_PCT     = "latest_fuel_pct"
     const val LATEST_SOC_PCT      = "latest_soc_pct"
@@ -137,4 +142,23 @@ object SharedPreferencesKeys {
     // Guarda-estacionamento (antifurto): detecta movimento/reboque com o carro
     // desligado e dispara alarme (push + auto-share).
     const val PARK_GUARD_ENABLED = "park_guard_enabled"   // default false
+
+    // Som V8 simulado — sintetiza ronco de V8 pela potência do motor elétrico e
+    // toca nas caixas do carro. Todos os parâmetros ajustáveis ao vivo na tela.
+    const val V8_ENABLED       = "v8_enabled"          // default false
+    const val V8_MASTER_VOL    = "v8_master_vol"       // 0..1
+    const val V8_IDLE_RPM      = "v8_idle_rpm"         // rpm de marcha lenta
+    const val V8_REDLINE_RPM   = "v8_redline_rpm"      // rpm máximo
+    const val V8_POWER_FULL_KW = "v8_power_full_kw"    // kW = acelerador no fundo
+    const val V8_SPEED_TO_RPM  = "v8_speed_to_rpm"     // rpm de cruzeiro por km/h
+    const val V8_REV_BOOST     = "v8_rev_boost"        // empurrão de rotação no acelerador
+    const val V8_RUMBLE        = "v8_rumble"           // ronco/lope (meia-ordem)
+    const val V8_LOAD_BRIGHT   = "v8_load_bright"      // brilho/agressividade sob carga
+    const val V8_REGEN_VOL     = "v8_regen_vol"        // volume no regen (freio-motor)
+    const val V8_CRACKLE       = "v8_crackle"          // estalos de overrun (soltar/regen)
+    const val V8_POP_ACCEL     = "v8_pop_accel"        // estalos ao acelerar forte (WOT)
+    const val V8_RASP          = "v8_rasp"             // rasp/grit do escapamento mexido
+    const val V8_TONE_HZ       = "v8_tone_hz"          // corte do timbre (grave↔brilhante)
+    const val V8_FIRING_ORDER  = "v8_firing_order"     // ordem de disparo (V8=4, V10=5, V12=6, I6=3, I4=2)
+    const val V8_PRESET        = "v8_preset"           // nome do preset selecionado
 }

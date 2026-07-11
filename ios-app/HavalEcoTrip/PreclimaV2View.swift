@@ -478,6 +478,7 @@ private struct AddSchedV2: View {
     @State private var time = "07:30"
     @State private var recurrence = "weekdays"
     @State private var temp: Double = 22
+    @State private var duration: Int = 20
     @State private var saving = false
 
     var body: some View {
@@ -503,10 +504,16 @@ private struct AddSchedV2: View {
                 StepperPillV2(value: String(format: "%.1f°", temp).replacingOccurrences(of: ".", with: ","),
                               dec: { temp = max(16, temp - 0.5) }, inc: { temp = min(32, temp + 0.5) })
             }
+            HStack {
+                Text("Duração").font(.system(size: 13, weight: .semibold)).foregroundStyle(DS.text)
+                Spacer()
+                StepperPillV2(value: "\(duration) min",
+                              dec: { duration = max(5, duration - 5) }, inc: { duration = min(60, duration + 5) })
+            }
             Button {
                 guard !saving else { return }
                 saving = true
-                Task { await store.addAt(time: time, temp: temp, recurrence: recurrence); dismiss() }
+                Task { await store.addAt(time: time, temp: temp, recurrence: recurrence, duration: duration); dismiss() }
             } label: {
                 HStack(spacing: 6) {
                     if saving { ProgressView().tint(.black) }
@@ -521,7 +528,7 @@ private struct AddSchedV2: View {
         }
         .padding(16)
         .background(DS.panel.ignoresSafeArea())
-        .presentationDetents([.fraction(0.45)])
+        .presentationDetents([.fraction(0.52)])
         .presentationDragIndicator(.visible)
     }
 }

@@ -326,6 +326,8 @@ class TripManager private constructor() {
     private var lastDrivingReadyState: Int = 0   // persiste para detectar reinício mid-trip
     /** Para MqttManager (heartbeat adaptativo): carro pronto pra dirigir agora? */
     fun isDrivingReady(): Boolean = lastDrivingReadyState == 1
+    /** Viagem automática em andamento? Usado pelo OTA pra não matar o processo no meio. */
+    fun isAutoTripActive(): Boolean = autoTripStartMs > 0L
     private var minAutoTripDistKm:   Float = 0f  // filtro de distância mínima (display + save)
     /** Chamado na UI thread após cada trip automático salvo com sucesso. */
     var onAutoTripCompleted: ((AutoTripEntry) -> Unit)? = null
@@ -1210,17 +1212,37 @@ class TripManager private constructor() {
         // Carrega as amostras já gravadas em disco (flush a cada 60 s) para preservar a rota.
         // Arquivos _inprogress de outras sessões (orphans) são apagados.
         if (autoTripStartMs > 0L) {
-            // Sempre passa flushFile válido — mesmo se o arquivo _inprogress sumiu,
-            // o recorder começa a persistir do zero pra não perder os próximos samples.
-            val inProgressFile = java.io.File(samplesDir, "${autoTripStartMs}_inprogress.json")
-            val preloaded: List<TelemetrySample> = if (inProgressFile.exists()) {
-                try {
-                    val type = object : TypeToken<List<TelemetrySample>>() {}.type
-                    gson.fromJson<List<TelemetrySample>>(inProgressFile.readText(), type) ?: emptyList()
-                } catch (_: Exception) { emptyList() }
-            } else emptyList()
-            telemetryRecorder?.startRecording(autoTripStartMs, preloaded, inProgressFile)
-            AppLogger.i(TAG, "AutoTrip retomado após reinício: ${preloaded.size} amostras carregadas do disco (inProgressExistia=${inProgressFile.exists()})")
+            // Havia uma viagem aberta quando o processo morreu. Reporta a causa ao bridge
+            // (breadcrumb) antes de decidir retomar ou finalizar — assim mapeamos a
+            // frequência e o motivo das mortes mid-trip (OTA, crash, force-stop, OOM).
+            val deathTripId          = autoTripStartMs
+            val deathReason          = prefs.getString(SharedPreferencesKeys.LAST_DEATH_REASON, null)
+            val deathEndedCleanly     = prefs.getBoolean(SharedPreferencesKeys.SESSION_ENDED_CLEANLY, false)
+            prefs.edit().remove(SharedPreferencesKeys.LAST_DEATH_REASON).apply()
+            reportApkDeath(deathTripId, deathReason, deathEndedCleanly)
+
+            if (lastDrivingReadyState == 1) {
+                // Carro ainda ligado (state persistido=1) → o app só reiniciou no meio.
+                // Retoma a gravação. Sempre passa flushFile válido — mesmo se o arquivo
+                // _inprogress sumiu, o recorder persiste do zero pra não perder samples.
+                val inProgressFile = java.io.File(samplesDir, "${autoTripStartMs}_inprogress.json")
+                val preloaded: List<TelemetrySample> = if (inProgressFile.exists()) {
+                    try {
+                        val type = object : TypeToken<List<TelemetrySample>>() {}.type
+                        gson.fromJson<List<TelemetrySample>>(inProgressFile.readText(), type) ?: emptyList()
+                    } catch (_: Exception) { emptyList() }
+                } else emptyList()
+                telemetryRecorder?.startRecording(autoTripStartMs, preloaded, inProgressFile)
+                AppLogger.i(TAG, "AutoTrip retomado após reinício: ${preloaded.size} amostras carregadas do disco (inProgressExistia=${inProgressFile.exists()})")
+            } else {
+                // Viagem órfã: o carro já desligou (state≠1) enquanto o app estava morto,
+                // então a transição 1→0 que finalizaria a viagem nunca chegou. Finaliza
+                // agora com os baselines persistidos (delta lifetime, não wall-clock).
+                // Idempotente: onAutoTripEnd zera autoTripStartMs, então um eventual
+                // onDrivingReady(0) via MQTT retido depois vira no-op.
+                AppLogger.w(TAG, "AutoTrip órfão detectado no boot (startMs=$autoTripStartMs, drivingReady=$lastDrivingReadyState) — finalizando")
+                synchronized(lock) { onAutoTripEnd() }
+            }
         }
         // Limpa arquivos _inprogress órfãos (sessões anteriores abandonadas)
         try {
@@ -2313,6 +2335,41 @@ class TripManager private constructor() {
             .removePrefix("mqtts://").removePrefix("mqtt://").removePrefix("tcp://")
             .substringBefore(":").trim()
         return if (host.isNotBlank()) "http://$host:3000" else ""
+    }
+
+    /**
+     * Reporta ao bridge que o APK morreu com uma viagem aberta (breadcrumb).
+     * Fire-and-forget — não bloqueia o boot nem falha se o bridge estiver offline.
+     */
+    private fun reportApkDeath(tripId: Long, reason: String?, sessionEndedCleanly: Boolean) {
+        val url = getBridgeHttpUrl()
+        if (url.isBlank()) return
+        Thread {
+            try {
+                val body = org.json.JSONObject()
+                    .put("tripId", tripId.toString())
+                    .put("reason", reason ?: "unknown")
+                    .put("sessionEndedCleanly", sessionEndedCleanly)
+                    .put("version", br.com.redesurftank.ecotrip.BuildConfig.VERSION_NAME)
+                    .put("ts", System.currentTimeMillis())
+                    .toString()
+                val conn = (java.net.URL("$url/api/apk-death").openConnection() as java.net.HttpURLConnection).apply {
+                    requestMethod = "POST"
+                    connectTimeout = 8000
+                    readTimeout = 8000
+                    doOutput = true
+                    setRequestProperty("Content-Type", "application/json")
+                    val token = getBridgeToken()
+                    if (token.isNotBlank()) setRequestProperty("Authorization", "Bearer $token")
+                }
+                conn.outputStream.use { it.write(body.toByteArray()) }
+                val code = conn.responseCode
+                conn.disconnect()
+                AppLogger.i(TAG, "apk-death reportado ao bridge (trip=$tripId reason=$reason clean=$sessionEndedCleanly) → HTTP $code")
+            } catch (e: Exception) {
+                AppLogger.w(TAG, "Falha ao reportar apk-death: ${e.message}")
+            }
+        }.start()
     }
 
     // ── Persistence ───────────────────────────────────────────────────────────

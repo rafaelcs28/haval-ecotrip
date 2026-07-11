@@ -101,6 +101,9 @@ class CarTelemetryService : Service() {
         // Motor de automações local (geofence/horário/estado → vidro/teto/cortina…).
         try { br.com.redesurftank.ecotrip.managers.AutomationManager.init(this) } catch (_: Exception) {}
 
+        // Som V8 simulado: alimenta o sintetizador com potência/velocidade do carro.
+        try { setupV8Engine() } catch (_: Exception) {}
+
         // ── Servidor LAN local: respeita pref (default ON)
         if (isLanEnabledPref(this)) applyLanEnabled(true)
 
@@ -214,9 +217,44 @@ class CarTelemetryService : Service() {
         }
     }
 
+    // ── Som V8 simulado ────────────────────────────────────────────────────────
+    private var v8Listener: ((String, String) -> Unit)? = null
+    @Volatile private var v8Power = 0f
+    @Volatile private var v8Speed = 0f
+    @Volatile private var v8Ready = false
+    @Volatile private var v8Gear = 3
+
+    private fun setupV8Engine() {
+        val engine = br.com.redesurftank.ecotrip.managers.V8SoundEngine
+        engine.loadConfig(this)
+        val carData = try { CarDataManager.getInstance() } catch (_: Exception) { null } ?: return
+        val listener: (String, String) -> Unit = lbl@{ key, value ->
+            val f = value.trim().toFloatOrNull()
+            when (key) {
+                br.com.redesurftank.ecotrip.models.CarConstants.CAR_EV_INFO_MOTOR_POWER.value ->
+                    if (f != null) v8Power = f
+                br.com.redesurftank.ecotrip.models.CarConstants.CAR_BASIC_VEHICLE_SPEED.value ->
+                    if (f != null) v8Speed = f
+                br.com.redesurftank.ecotrip.models.CarConstants.CAR_BASIC_DRIVING_READY_STATE.value ->
+                    v8Ready = (f == 1f)
+                br.com.redesurftank.ecotrip.models.CarConstants.CAR_BASIC_GEAR_STATUS.value ->
+                    if (f != null) v8Gear = f.toInt()
+                else -> return@lbl
+            }
+            if (engine.isRunning) engine.feed(v8Power, v8Speed, v8Ready, v8Gear)
+        }
+        carData.addListener(listener)
+        v8Listener = listener
+        if (engine.enabled) engine.start(this)
+    }
+
     override fun onDestroy() {
         android.util.Log.i(TAG, "CarTelemetryService.onDestroy")
         applyLanEnabled(false)
+        try {
+            v8Listener?.let { CarDataManager.getInstance().removeListener(it) }
+            br.com.redesurftank.ecotrip.managers.V8SoundEngine.stop()
+        } catch (_: Exception) {}
         if (current === this) current = null
         super.onDestroy()
     }

@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.util.Log
 import androidx.core.content.FileProvider
 import br.com.redesurftank.ecotrip.BuildConfig
+import br.com.redesurftank.ecotrip.models.SharedPreferencesKeys
 import org.json.JSONObject
 import rikka.shizuku.Shizuku
 import java.io.File
@@ -147,6 +148,16 @@ class UpdateManager private constructor() {
     fun downloadAndInstall(context: Context) {
         val release = latestRelease ?: return
         if (downloadProgress >= 0) return   // already downloading
+        // Guarda-viagem: nunca instalar/matar o processo com uma viagem automática em
+        // andamento (ou carro pronto pra dirigir). O install silencioso via Shizuku
+        // encerra o processo (killProcess) — se isso rodar mid-trip, o APK morre no
+        // meio e a viagem fica órfã (finalizada por estimativa pelo bridge, sem rota).
+        // Adia: o check periódico (10min) tenta de novo quando o carro desligar.
+        val tm = TripManager.getInstance()
+        if (tm.isAutoTripActive() || tm.isDrivingReady()) {
+            AppLogger.i(TAG, "OTA adiado: viagem ativa (autoTrip=${tm.isAutoTripActive()} drivingReady=${tm.isDrivingReady()}) — não instalar mid-trip")
+            return
+        }
         executor.submit {
             try {
                 downloadProgress = 0
@@ -204,6 +215,15 @@ class UpdateManager private constructor() {
                 val silentOk = tryShizukuInstall(apkFile.absolutePath)
                 if (silentOk) {
                     AppLogger.i(TAG, "Instalação silenciosa concluída — encerrando processo para iniciar nova versão")
+                    // Breadcrumb: registra que a morte foi um OTA planejado (não crash/OOM).
+                    // commit() síncrono — o killProcess logo abaixo não espera flush assíncrono.
+                    try {
+                        val dpCtx = context.createDeviceProtectedStorageContext()
+                        dpCtx.getSharedPreferences(SharedPreferencesKeys.PREFS_NAME, Context.MODE_PRIVATE)
+                            .edit()
+                            .putString(SharedPreferencesKeys.LAST_DEATH_REASON, "ota_install v${release.version}")
+                            .commit()
+                    } catch (_: Exception) {}
                     Thread.sleep(300)
                     android.os.Process.killProcess(android.os.Process.myPid())
                     return@submit

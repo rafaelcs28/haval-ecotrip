@@ -986,6 +986,92 @@ class MqttManager private constructor() {
         return caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
     }
 
+    // ── Failover Wi-Fi → 4G ────────────────────────────────────────────────────
+    // Starlink (e Wi-Fi em geral) pode "travar": interface associada mas sem pacote
+    // passando. O OS segue reportando Wi-Fi conectada, então o failover natural pro
+    // 4G NUNCA dispara — o MQTT reconecta em loop na mesma rede morta até alguém
+    // desligar o Wi-Fi na mão. Detecção: N reconnects seguidos falhando com o
+    // transporte ativo = Wi-Fi. Ação: pede uma rede celular VALIDADA e amarra o
+    // processo inteiro nela (bindProcessToNetwork) até a Wi-Fi voltar a passar.
+    @Volatile private var forcedCellular: android.net.Network? = null
+    private var cellularCallback: ConnectivityManager.NetworkCallback? = null
+    private var wifiHealthCallback: ConnectivityManager.NetworkCallback? = null
+    private val cellFailoverArmed = AtomicBoolean(false)
+    private val CELL_FAILOVER_AFTER = 5   // reconnects seguidos falhando na Wi-Fi
+
+    private fun maybeStartCellularFailover() {
+        if (cellFailoverArmed.get()) return
+        if (reconnectAttempts < CELL_FAILOVER_AFTER) return
+        if (!isWifiConnected()) return   // já está no 4G/ethernet — failover não ajudaria
+        val ctx = appContext ?: return
+        val cm = ctx.getSystemService(ConnectivityManager::class.java) ?: return
+        if (!cellFailoverArmed.compareAndSet(false, true)) return
+        AppLogger.w(TAG, "Wi-Fi travada ($reconnectAttempts reconnects falharam) — pedindo failover pro 4G")
+        val req = android.net.NetworkRequest.Builder()
+            .addTransportType(NetworkCapabilities.TRANSPORT_CELLULAR)
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+            .build()
+        val cb = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: android.net.Network) {
+                forcedCellular = network
+                try { cm.bindProcessToNetwork(network) } catch (_: Exception) {}
+                AppLogger.i(TAG, "Failover 4G ativo — processo amarrado à rede celular; reconectando MQTT")
+                watchWifiRecovery()
+                forceFullReconnect()
+            }
+            override fun onUnavailable() {
+                AppLogger.w(TAG, "Sem 4G validado pro failover (timeout) — seguindo na Wi-Fi")
+                cellFailoverArmed.set(false)
+                cellularCallback = null
+            }
+            override fun onLost(network: android.net.Network) {
+                if (forcedCellular == network) { forcedCellular = null; AppLogger.w(TAG, "Rede celular do failover caiu") }
+            }
+        }
+        cellularCallback = cb
+        try {
+            cm.requestNetwork(req, cb, 15_000)   // sem 4G validado em 15s → onUnavailable
+        } catch (e: Exception) {
+            AppLogger.w(TAG, "requestNetwork(cellular) falhou: ${e.message}")
+            cellFailoverArmed.set(false); cellularCallback = null
+        }
+    }
+
+    // Enquanto no 4G forçado, observa a Wi-Fi: quando VALIDAR de novo (voltou a passar
+    // pacote), solta o bind e reconecta preferindo Wi-Fi. Wi-Fi morta nunca valida,
+    // então isto só dispara na recuperação real — sem risco de voltar cedo demais.
+    private fun watchWifiRecovery() {
+        val ctx = appContext ?: return
+        val cm = ctx.getSystemService(ConnectivityManager::class.java) ?: return
+        if (wifiHealthCallback != null) return
+        val req = android.net.NetworkRequest.Builder()
+            .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+            .build()
+        val cb = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: android.net.Network) {
+                AppLogger.i(TAG, "Wi-Fi validada de novo — desfazendo failover 4G")
+                stopCellularFailover()
+                forceFullReconnect()
+            }
+        }
+        wifiHealthCallback = cb
+        try { cm.registerNetworkCallback(req, cb) } catch (e: Exception) {
+            AppLogger.w(TAG, "registerNetworkCallback(wifi) falhou: ${e.message}"); wifiHealthCallback = null
+        }
+    }
+
+    private fun stopCellularFailover() {
+        val cm = appContext?.getSystemService(ConnectivityManager::class.java)
+        try { cm?.bindProcessToNetwork(null) } catch (_: Exception) {}
+        cellularCallback?.let { try { cm?.unregisterNetworkCallback(it) } catch (_: Exception) {} }
+        wifiHealthCallback?.let { try { cm?.unregisterNetworkCallback(it) } catch (_: Exception) {} }
+        cellularCallback = null; wifiHealthCallback = null; forcedCellular = null
+        cellFailoverArmed.set(false)
+    }
+
     /** Coleta IP local v4 do head unit + tipo de conexão pra publicar no bridge. */
     private fun collectNetworkInfo(): JSONObject {
         val info = JSONObject()
@@ -2297,6 +2383,7 @@ class MqttManager private constructor() {
             // true — senão a máquina de reconexão trava até reiniciar o app.
             try {
                 reconnectAttempts++
+                maybeStartCellularFailover()
                 Thread.sleep(reconnectDelayMs())
             } catch (_: InterruptedException) {
             } finally {
@@ -3417,6 +3504,18 @@ class MqttManager private constructor() {
                         if (busKey == null) {
                             publishResult("hvac/$control", "error: chave desconhecida")
                             return@submit
+                        }
+                        // Intervenção manual no ventilador cancela o modo AUTO. Sem isso, a
+                        // ECU de clima recalcula o fan e o religa sozinho em ~2s quando o
+                        // usuário desliga a ventilação (fan_speed=0) com o AUTO ligado.
+                        // Mesmo comportamento do painel físico: mexeu no fan → sai do AUTO.
+                        if (control == "fan_speed" && latestHvacAutoEnable == 1) {
+                            try {
+                                if (car.requestSetting(key = "car.hvac.auto_enable", value = "0")) {
+                                    latestHvacAutoEnable = 0
+                                    AppLogger.i(TAG, "HVAC: AUTO desligado antes de aplicar fan manual (evita override da ECU)")
+                                }
+                            } catch (e: Exception) { AppLogger.w(TAG, "HVAC: desligar AUTO falhou: ${e.message}") }
                         }
                         AppLogger.i(TAG, "HVAC set: $busKey = $payload")
                         val ok = try {

@@ -650,10 +650,15 @@ function _checkAlerts() {
   }
 
   // 18. APNs: tokens de Live Activity morrendo (atrito → LA para de entregar)
+  // Morte de push-to-start token é ESPERADA em cada update do app (TestFlight):
+  // o iOS rotaciona o token e o antigo vira BadDeviceToken/410 até o re-registro.
+  // Com deploys frequentes isso dava alerta diário falso. Só é problema de verdade
+  // se, ALÉM das mortes, a entrega parou — ou seja, nenhum push 200 nas últimas 6h.
   const apns = apnsLive.getStatus();
+  const apnsDeliveryStalled = (apns.last_ok_ms || 0) < (Date.now() - 6 * 3600_000);
   if (apns.enabled)
-    _alert('apns_attrition', (apns.dead_24h || 0) >= 3, 'Tokens APNs morrendo',
-      `${apns.dead_24h} tokens invalidados em 24h (start=${apns.start_tokens} update=${apns.update_tokens})`,
+    _alert('apns_attrition', (apns.dead_24h || 0) >= 3 && apnsDeliveryStalled, 'Tokens APNs morrendo',
+      `${apns.dead_24h} tokens invalidados em 24h sem entrega OK há 6h+ (start=${apns.start_tokens} update=${apns.update_tokens})`,
       'default', ['iphone'], { repeatEvery: 12 * 3600_000 });
 
   // APK executor (Shizuku) morto/mudo: comandos publicados mas o carro não muda
@@ -2047,6 +2052,13 @@ const _hystTimers  = {
 };
 
 let prevChargingState    = null;
+let _lastChargeEndMs     = 0;    // quando a última recarga finalizou (anti-flap de fim de sessão)
+const CHARGE_BOUNCE_MS   = 60_000; // Carregando↔fim dentro dessa janela = oscilação de fim de recarga, não sessão nova
+// Após finalizar, a LA NÃO encerra: vira card-resumo fixo (doneBody verde) e fica
+// pinada. A próxima recarga dentro dessa janela reaproveita a MESMA LA (volta a
+// live); depois disso o ActivityKit já a removeu (~12h é o teto de vida da LA),
+// então o token guardado está morto → recria via pushStart.
+const CHARGE_SUMMARY_MAX_MS = 12 * 3600_000;
 let chargeStartTimer     = null;
 let _chargeStoppedTimer  = null; // debounce 90s do alerta "parou antes do limite" (cancela se religar)
 let chargeSessionStartMs = 0;   // timestamp de início da sessão (para duração e potência média)
@@ -2401,8 +2413,9 @@ const state = {
   range_ev_km:      0,      // autonomia elétrica real (sensor HA)
   range_ice_km:     0,      // autonomia térmica real  (sensor HA)
   current_trip:     null,   // snapshot da viagem em andamento (publicado retained pelo APK)
+  last_trip_snapshot: null, // último snapshot NÃO-VAZIO da viagem (p/ LA final não zerar após restart)
   status_message:   '',     // string pipe-separada de alertas do carro
-  engine_state:     null,   // null=desconhecido | '0'=desligado | '1'=ligado
+  engine_state:     null,   // null=desconhecido | '0'=desligado | '1'=ligado (motor elétrico+ICE, GWM hyengsts)
   lock_state:       null,   // null=desconhecido | 'off'=trancado | 'on'=destrancado
   high_beam:        null,   // null | 'on' | 'off'
   light_state:      null,   // null | 'on' | 'off' — farol (sem sensor por ora)
@@ -4051,7 +4064,11 @@ const BACKUP_SOURCES = [
   { name: 'Haval (tarball)', dir: path.join(_home, 'Library', 'Mobile Documents', 'com~apple~CloudDocs', '02. RAFAEL PESSOAL', 'Backup Haval EcoTrip', 'daily'), max_age_h: 30 },
   { name: 'SSD físico (2x/dia)', dir: '/Volumes/SSD1TB/Backups/haval-ecotrip/daily', max_age_h: 16 },
   { name: 'MQTT (broker)', dir: '/Volumes/SSD1TB/Backups/mosquitto/daily', max_age_h: 16 },
-  { name: 'Clockin bkp-of-bkp', dir: '/Volumes/SSD1TB/Backups/ellevar-clockin/backups-mirror', max_age_h: 30 },
+  // bkp-OF-bkp: roda tarde (~17:39), a mais tardia do dia. Com cadência 24h e o
+  // Mac podendo dormir/mirror atrasar, 30h dava alerta diário falso (só 6h de
+  // folga). É cópia secundária — o primário + SSD físico + iCloud estão sempre
+  // mais frescos —, então 48h só dispara se estiver 2 dias atrás de verdade.
+  { name: 'Clockin bkp-of-bkp', dir: '/Volumes/SSD1TB/Backups/ellevar-clockin/backups-mirror', max_age_h: 48 },
 ];
 let _backups = [];
 function _pollBackups() {
@@ -6792,6 +6809,11 @@ function computeDriveScore(samples, t) {
 // (usado no backlog republicado por MQTT pra não spammar).
 function ingestAutoTrip({ tripId, autoTrip, samples }, opts = {}) {
   const suppressPush = !!opts.suppressPush;
+  // Motivo de estimativa quando a viagem é FINALIZADA pelo bridge (APK morreu no
+  // meio e nunca postou o autotrip final). Marca _estimated pra UI, SEM gravar
+  // _estimatedValues (sticky) — se o APK ressuscitar e re-postar o dado real, ele
+  // vence normalmente em vez de ficar preso na estimativa do bridge.
+  const estimatedReason = opts.estimatedReason || null;
   {
     if (!tripId || !autoTrip) return { status: 400, body: { error: 'missing fields' } };
 
@@ -7117,6 +7139,11 @@ function ingestAutoTrip({ tripId, autoTrip, samples }, opts = {}) {
       persisted._estimatedReason    = existingEstimated._estimatedReason;
       persisted._estimatedAppliedAt = existingEstimated._estimatedAppliedAt;
       persisted._estimatedValues    = existingEstimated._estimatedValues;
+    } else if (estimatedReason) {
+      persisted._estimated          = true;
+      persisted._estimatedFields    = [];
+      persisted._estimatedReason    = estimatedReason;
+      persisted._estimatedAppliedAt = new Date().toISOString();
     }
     atomicWriteFileSync(filePath, JSON.stringify(persisted));
 
@@ -7125,6 +7152,10 @@ function ingestAutoTrip({ tripId, autoTrip, samples }, opts = {}) {
       record._estimated       = true;
       record._estimatedFields = existingEstimated._estimatedFields;
       record._estimatedReason = existingEstimated._estimatedReason;
+    } else if (estimatedReason) {
+      record._estimated       = true;
+      record._estimatedFields = [];
+      record._estimatedReason = estimatedReason;
     }
 
     // Auto-naming por Locais Conhecidos
@@ -7226,6 +7257,31 @@ app.post('/api/autotrips', (req, res) => {
     res.status(r.status).json(r.body);
   } catch (e) {
     console.error('Erro ao salvar auto-trip:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── Breadcrumb: APK morreu com viagem aberta ───────────────────────────────
+// O APK reporta no boot seguinte que havia uma viagem aberta quando o processo
+// morreu (OTA planejado, crash, force-stop, OOM). Guarda um NDJSON pra medir a
+// frequência e o motivo dominante das mortes mid-trip. Fire-and-forget do APK.
+const APK_DEATHS_FILE = path.join(DATA_DIR, 'apk_deaths.ndjson');
+app.post('/api/apk-death', (req, res) => {
+  try {
+    const b = req.body || {};
+    const rec = {
+      at: new Date().toISOString(),
+      tripId: String(b.tripId || ''),
+      reason: String(b.reason || 'unknown').slice(0, 300),
+      sessionEndedCleanly: !!b.sessionEndedCleanly,
+      version: String(b.version || '?'),
+      deviceTs: Number(b.ts) || null,
+    };
+    fs.appendFileSync(APK_DEATHS_FILE, JSON.stringify(rec) + '\n');
+    console.log(`[apk-death] trip=${rec.tripId} reason="${rec.reason}" clean=${rec.sessionEndedCleanly} v${rec.version}`);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('Erro ao registrar apk-death:', e.message);
     res.status(500).json({ error: e.message });
   }
 });
@@ -7878,51 +7934,60 @@ app.get('/api/health-score', (_req, res) => {
   res.json({ ok: true, total, label, subs, issues });
 });
 
-// GET /api/routine/destinations-cost — custo médio por destino recorrente.
-// Agrupa viagens por grade de destino, soma energia/combustível, valora pelos
-// preços ponderados do tanque/bateria e compara com baseline 100% gasolina.
-app.get('/api/routine/destinations-cost', (req, res) => {
+// GET /api/routine/trips-cost — custo por TRAJETO recorrente (origem→destino).
+// Agrupa viagens pelo par (grade de origem, grade de destino), soma
+// energia/combustível, valora pelos preços ponderados do tanque/bateria e
+// compara com baseline 100% gasolina. Devolve custo total do período (todas as
+// viagens) + custo total/médio dos trajetos mais recorrentes.
+app.get('/api/routine/trips-cost', (req, res) => {
   const lookbackDays = Math.min(365, Math.max(7, parseInt(req.query.days, 10) || 90));
-  const minVisits = Math.max(2, parseInt(req.query.min, 10) || 3);
+  const minTrips = Math.max(2, parseInt(req.query.min, 10) || 2);
   const since = Date.now() - lookbackDays * 86400_000;
 
   const pKwh = +state.battery_avg_price_per_kwh || +state.price_kwh || SEED_KWH_PRICE;
   const pGas = +state.tank_avg_price_per_l      || +state.price_gas_per_l || SEED_GAS_PRICE_PER_L;
 
-  const places = new Map(); // key → agregado
+  const routes = new Map(); // key origem→destino → agregado
+  let totalCost = 0, totalGas = 0, totalTrips = 0;
   for (const t of autoTripsArr) {
     if ((t.startMs || 0) < since) continue;
-    const key = _placeKey(+t.endLat, +t.endLng);
     const dist = +t.distKm || 0;
-    if (!key || dist < 0.5) continue;
-    let p = places.get(key);
-    if (!p) { p = { key, names: {}, lat: +t.endLat, lng: +t.endLng, trips: 0, km: 0, kwh: 0, fuel: 0 }; places.set(key, p); }
-    const nm = t.knownEnd || t.endKp || null;
-    if (nm) p.names[nm] = (p.names[nm] || 0) + 1;
-    p.trips += 1;
-    p.km   += dist;
-    p.kwh  += Math.max(0, +t.netKwh || 0);
-    p.fuel += +t.fuelL || 0;
+    if (dist < 0.5) continue;
+    const cost = Math.max(0, +t.netKwh || 0) * pKwh + (+t.fuelL || 0) * pGas;
+    const gas  = ICE_BASELINE_KML > 0 ? (dist / ICE_BASELINE_KML) * pGas : 0;
+    totalCost += cost; totalGas += gas; totalTrips += 1;
+
+    const sk = _placeKey(+t.startLat, +t.startLng);
+    const ek = _placeKey(+t.endLat, +t.endLng);
+    if (!sk || !ek) continue;
+    const key = `${sk}>${ek}`;
+    let r = routes.get(key);
+    if (!r) { r = { key, name: null, names: {}, trips: 0, km: 0, cost: 0, gas: 0 }; routes.set(key, r); }
+    const nm = t.name || ((t.startKp || t.endKp) ? `${t.startKp || '?'} → ${t.endKp || '?'}` : null);
+    if (nm) r.names[nm] = (r.names[nm] || 0) + 1;
+    r.trips += 1; r.km += dist; r.cost += cost; r.gas += gas;
   }
 
   const out = [];
-  for (const p of places.values()) {
-    if (p.trips < minVisits) continue;
-    const actual   = p.kwh * pKwh + p.fuel * pGas;
-    const baseline = ICE_BASELINE_KML > 0 ? (p.km / ICE_BASELINE_KML) * pGas : 0;
-    const savedPct = baseline > 0.01 ? Math.round((baseline - actual) / baseline * 100) : 0;
+  for (const r of routes.values()) {
+    if (r.trips < minTrips) continue;
+    const savedPct = r.gas > 0.01 ? Math.round((r.gas - r.cost) / r.gas * 100) : 0;
     out.push({
-      name: Object.entries(p.names).sort((a, b) => b[1] - a[1])[0]?.[0] || 'Local sem nome',
-      lat: +p.lat.toFixed(5), lng: +p.lng.toFixed(5),
-      trips: p.trips,
-      avgKm:   +(p.km / p.trips).toFixed(1),
-      avgCost: +(actual / p.trips).toFixed(2),
-      avgGasCost: +(baseline / p.trips).toFixed(2),
+      name: Object.entries(r.names).sort((a, b) => b[1] - a[1])[0]?.[0] || 'Trajeto sem nome',
+      trips: r.trips,
+      avgKm:   +(r.km / r.trips).toFixed(1),
+      totalCost: +r.cost.toFixed(2),
+      avgCost: +(r.cost / r.trips).toFixed(2),
+      avgGasCost: +(r.gas / r.trips).toFixed(2),
       savedPct,
     });
   }
-  out.sort((a, b) => b.trips - a.trips);
-  res.json({ ok: true, lookbackDays, gasPricePerL: +pGas.toFixed(2), kwhPrice: +pKwh.toFixed(2), destinations: out.slice(0, 20) });
+  out.sort((a, b) => b.trips - a.trips || b.totalCost - a.totalCost);
+  res.json({
+    ok: true, lookbackDays, gasPricePerL: +pGas.toFixed(2), kwhPrice: +pKwh.toFixed(2),
+    totalCost: +totalCost.toFixed(2), totalGasCost: +totalGas.toFixed(2), totalTrips,
+    trips: out.slice(0, 20),
+  });
 });
 
 app.delete('/api/autotrips/:tripId', (req, res) => {
@@ -10555,6 +10620,13 @@ mqttClient.on('connect', () => {
   // via toggle la_songpro (default OFF). NÃO persiste dado.
   mqttClient.subscribe('electro/telemetry/song-pro/data', { qos: 0 });
   console.log('✓ Subscribed em electro/telemetry/song-pro/data (LA Grasi)');
+  // Recurso novo do APK Song Pro: registros por ID via request/response.
+  // APK publica no sensor `id_da_ultima_recarga`/`id_da_ultima_viagem` (retained);
+  // bridge pede o registro completo por ID em .../request e recebe em .../response.
+  // Resiliente offline: o APK bufferiza e reenvia ao reconectar. Wildcard
+  // amplo (song-pro/#) pra pegar o sensor sem depender do path exato.
+  mqttClient.subscribe('electro/telemetry/song-pro/#', { qos: 1 });
+  console.log('✓ Subscribed em electro/telemetry/song-pro/# (registros oficiais + sensor)');
   // OBD Companion (iPad com ELM327 BLE) — fonte alternativa de telemetria
   // direto do CAN. Payload é JSON consolidado a 1Hz em haval/ecotrip/obd/snapshot
   // com campos planos: { ts, source, rpm, speed_kmh, ect_c, ... }. Atualiza
@@ -10785,6 +10857,48 @@ mqttClient.on('message', (topic, payload, packet) => {
     } catch (e) { console.warn('[cmd-progress] payload inválido:', e.message); }
     return;
   }
+  // Registros oficiais do APK Song Pro (charging_sessions, trips).
+  // Fluxo: APK publica sensor id_da_ultima_recarga/_viagem (retained) sob
+  // song-pro/. Bridge dispara records/{type}/request e recebe .../response.
+  // Ignora echo do próprio .../request.
+  if (topic.startsWith(SONGPRO_RECORDS_PREFIX + '/')) {
+    const rest = topic.slice(SONGPRO_RECORDS_PREFIX.length + 1);
+    const parts = rest.split('/');
+    const type = parts[0];
+    const action = parts[1];
+    if (type === 'charging_sessions' || type === 'trips') {
+      if (action === 'response') {
+        // response pode chegar retained (broker guarda último); persist é idempotente por id.
+        _handleSongProRecordResponse(type, value);
+      } else if (action === 'created') {
+        // safety net: se APK publicar evento explícito no futuro, também pega.
+        if (!isRetained) _handleSongProRecordCreated(type, value);
+      } else if (action && action !== 'request') {
+        console.log(`[songpro-records] topic desconhecido rest=${rest} retained=${isRetained} value=${value.slice(0, 200)}`);
+      }
+    }
+    return;
+  }
+  // Sensor "ID da última recarga/viagem" — no padrão do BYD (song-pro/command/
+  // <sensor_name>/state) o leaf é sempre 'state', então casamos pelo path inteiro.
+  // Retained → backfill do último registro após restart do bridge.
+  if (topic.startsWith('electro/telemetry/song-pro/') && topic !== 'electro/telemetry/song-pro/data') {
+    const path = topic.toLowerCase();
+    if (/id_da_ultima_recarga|last_charge_id|last_charging_session_id/.test(path)) {
+      _handleSongProLastIdSensor('charging_sessions', value, isRetained);
+      return;
+    }
+    if (/id_da_ultima_viagem|last_trip_id/.test(path)) {
+      _handleSongProLastIdSensor('trips', value, isRetained);
+      return;
+    }
+    if (!_songProUnknownTopicsSeen.has(topic)) {
+      _songProUnknownTopicsSeen.add(topic);
+      console.log(`[songpro-records] topic novo descoberto: ${topic} retained=${isRetained} value=${value.slice(0, 200)}`);
+    }
+    return;
+  }
+
   if (topic.startsWith(GWM_TOPIC_PREFIX + '/') && topic.endsWith('/state')) {
     const id = topic.slice(GWM_TOPIC_PREFIX.length + 1, topic.length - '/state'.length);
     applyGwmEntity(id, value, isRetained);
@@ -11116,7 +11230,10 @@ function _chargeContentState() {
 // ── Live Activity de viagem ao vivo ───────────────────────────────────────
 const TRIP_LA_TYPE = 'TripActivityAttributes';
 let _tripActive = false;
-let _lastTripSnapshot = null;   // último snapshot não-vazio (p/ estado final correto)
+// Sobrevive a restart: se o bridge reinicia no fim da viagem (ou o _endTripLA
+// dispara duas vezes), o snapshot in-memory sumia → LA final zerava. Persistido
+// em state.last_trip_snapshot e reidratado no boot.
+let _lastTripSnapshot = state.last_trip_snapshot || null;
 function _tripContentState(ct, active) {
   const dist = +ct.distKm || 0;
   const net  = Math.abs(+ct.netKwh || 0);
@@ -11156,7 +11273,7 @@ function _tripContentState(ct, active) {
 // viagem). Nesse caso a LA JÁ existe no telefone → só atualiza, nunca cria outra
 // (era a causa de aparecerem 2 LAs idênticas).
 function handleTripUpdate(ct, isRetained) {
-  if (ct) _lastTripSnapshot = ct;   // guarda o último snapshot não-vazio
+  if (ct) { _lastTripSnapshot = ct; state.last_trip_snapshot = ct; }   // guarda + persiste o último snapshot não-vazio
   if (!apnsLive.enabled || notifPrefs.la_trip === false) { _tripActive = !!ct; return; }
   if (ct) {
     _cancelTripEndTimer();   // chegou snapshot → viagem em curso, cancela encerramento agendado
@@ -11200,8 +11317,17 @@ function _endTripLA(dismissMs = 5 * 60_000) {
   if (!_tripActive && !apnsLive.hasUpdateToken(TRIP_LA_TYPE)) return;
   _tripActive = false;
   if (!apnsLive.enabled || notifPrefs.la_trip === false) return;
-  const last = _tripContentState(_lastTripSnapshot || {}, false);
-  _lastTripSnapshot = null;
+  // Fonte do resumo final: o último snapshot não-vazio. Se ele sumiu ou veio sem
+  // distância (restart no boot antes do 1º snapshot, ou viagem salva só via
+  // reaper), usa a viagem mais recente já persistida em disco — nunca zeros.
+  let src = _lastTripSnapshot || {};
+  if (!(+src.distKm > 0)) {
+    const saved = autoTripsArr[0];   // ordenado por startMs desc
+    if (saved && +saved.distKm > 0) src = saved;
+  }
+  const last = _tripContentState(src, false);
+  // NÃO limpa _lastTripSnapshot aqui: um 2º _endTripLA (reaper/eco do retido vazio)
+  // ainda precisa do dado. É sobrescrito quando a próxima viagem publica snapshot.
   apnsLive.pushUpdate(TRIP_LA_TYPE, {}, last, { isFinal: true, dismissalDate: Date.now() + dismissMs })
     .catch(e => console.warn('[apns] trip end falhou:', e.message));
   // Próxima viagem recria a LA do zero (não fica presa num token de LA morta).
@@ -11223,6 +11349,99 @@ function _scheduleTripLAEnd() {
     _endTripLA(0);                            // os 5 min já passaram → remove agora
   }, 5 * 60_000);
 }
+
+// Reaper de LA de viagem PRESA. O APK publica current_trip RETIDO e o limpa
+// (payload vazio) ao fim da viagem — mas quando ele morre no meio (Shizuku cai,
+// OTA, força-parada) o retido fica preso e "revive" a LA como "em curso" a cada
+// restart do bridge (a msg retida re-chega e re-arma _tripActive). O watchdog de
+// online→offline não pega esse caso pós-restart, e no boot a ordem de chegada das
+// retidas (engine_state=0 antes de _tripActive virar true) fura o _scheduleTripLAEnd.
+// Aqui: quando o GWM (fonte que segue viva com o carro dormindo) confirma motor
+// DESLIGADO e o APK está mudo há >90s, a viagem acabou → limpa o current_trip
+// retido na ORIGEM (o eco do broker cai no handler como vazio e encerra a LA +
+// a live-trip pela via normal), pra não ressuscitar. Sem current_trip preso, só
+// encerra o token órfão local.
+// RAIZ do bug "viagem não salvou": quando o APK morre no meio, ele nunca faz o
+// POST final /api/autotrips. O único registro em disco é o arquivo de live-samples
+// com `autoTrip:{startMs}` (stub, sem distKm/netKwh/timeSec) — que o purge da carga
+// (dist=0 & energia=0 & <60s) APAGA no próximo boot → a viagem some. Mas o bridge
+// TEM as métricas no snapshot retido current_trip (distKm/netKwh/timeSec/etc.).
+// Aqui, ao detectar viagem abandonada, dobra esse snapshot num autoTrip completo e
+// chama ingestAutoTrip (que casa Locais Conhecidos, refaz autoTripsArr e dispara o
+// push "Viagem concluída") ANTES de limpar o retido — assim a viagem é finalizada
+// pelo bridge em vez de perdida. Retorna true se finalizou.
+function _finalizeAbandonedTrip(snapshot) {
+  const snap = snapshot || _lastTripSnapshot;
+  if (!snap) return false;
+  const tripId = String(snap.startMs || snap.tripId || (_liveTrip && _liveTrip.tripId) || '').replace(/\D/g, '');
+  if (!tripId) return false;
+
+  // Métricas do snapshot são a fonte; start/end GPS vêm do arquivo live (actualStart
+  // = ignição; último sample = fim) com fallback no GPS corrente do carro.
+  let liveSamples = [], actualStart = null;
+  try {
+    const fp = path.join(AUTOTRIPS_DIR, `${tripId}.json`);
+    if (fs.existsSync(fp)) {
+      const d = JSON.parse(fs.readFileSync(fp, 'utf8'));
+      liveSamples = Array.isArray(d.samples) ? d.samples : [];
+      actualStart = d.actualStart || null;
+      // Já foi salvo de verdade (APK postou): não mexe.
+      if (d.autoTrip && d.autoTrip.distKm != null && !d._liveSamples) return false;
+    }
+  } catch (_) {}
+
+  const distKm  = +snap.distKm  || 0;
+  const netKwh  = +snap.netKwh  || 0;
+  const timeSec = +snap.timeSec || 0;
+  // Trivial (parado ligado / manobra): deixa o purge levar, não polui o histórico.
+  if (distKm <= 0.3 && Math.abs(netKwh) < 0.10 && timeSec < 120) return false;
+
+  const lastGps = [...liveSamples].reverse().find(s => s.lat && s.lat !== 0);
+  const autoTrip = {
+    ...snap,
+    startMs: +tripId,
+    endMs:   snap.endMs || Date.now(),
+    startLat: snap.startLat != null ? snap.startLat : (actualStart ? actualStart.lat : undefined),
+    startLng: snap.startLng != null ? snap.startLng : (actualStart ? actualStart.lng : undefined),
+    endLat:  snap.endLat != null ? snap.endLat : (lastGps ? lastGps.lat : (+state.gps_lat || undefined)),
+    endLng:  snap.endLng != null ? snap.endLng : (lastGps ? lastGps.lng : (+state.gps_lng || undefined)),
+  };
+  delete autoTrip.tripId;
+
+  try {
+    const r = ingestAutoTrip({ tripId, autoTrip, samples: liveSamples },
+      { estimatedReason: 'APK morreu no meio da viagem; finalizado pelo bridge via snapshot current_trip' });
+    // Impede o _liveTripEnd (disparado pelo eco do retido vazio logo abaixo) de
+    // re-escrever o stub live por cima do arquivo já finalizado.
+    _liveTrip = null;
+    console.log(`[trip] reaper: viagem ${tripId} finalizada pelo bridge (${distKm.toFixed(1)}km, ${netKwh.toFixed(2)}kWh, ${timeSec}s) status=${r.status}`);
+    return r.status === 200 && !r.body.skipped;
+  } catch (e) {
+    console.warn('[trip] reaper: finalize falhou:', e.message);
+    return false;
+  }
+}
+
+function _reapStuckTripLA() {
+  if (!apnsLive.enabled) return;
+  if (!(_tripActive || apnsLive.hasUpdateToken(TRIP_LA_TYPE))) return;
+  const now       = Date.now();
+  const apkStale  = now - (state.last_apk_ms || 0) > 90_000;
+  const gwmFresh  = state.last_gwm_ms && (now - state.last_gwm_ms) < 5 * 60_000;
+  const engineOff = state.engine_state === '0' || state.engine_state === 0;
+  if (!(apkStale && gwmFresh && _fieldSource['engine_state'] === 'gwm' && engineOff)) return;
+  if (state.current_trip && mqttClient && mqttClient.connected) {
+    // Salva a viagem a partir do snapshot ANTES de limpar o retido (senão o dado
+    // se perde e o stub live é purgado no próximo boot).
+    _finalizeAbandonedTrip(state.current_trip);
+    console.log('[trip] reaper: motor off (gwm) + APK morto → limpando current_trip retido preso');
+    mqttClient.publish(`${MQTT_PREFIX}/current_trip`, '', { qos: 1, retain: true });
+  } else {
+    console.log('[trip] reaper: motor off (gwm) + APK morto → encerrando LA órfã');
+    _endTripLA(0);
+  }
+}
+setInterval(_reapStuckTripLA, 30_000);
 
 // ── BYD Song Pro (Grasi) — LA paralela de recarga ───────────────────────────
 // Tópico único `electro/telemetry/song-pro/data` traz JSON completo (charging_power,
@@ -11765,6 +11984,8 @@ async function _maybeComputeArrival() {
     state.arrival = {
       name: fin.name, distKm: fin.distKm, etaMin: fin.etaMin, etaClock: fin.etaClock,
       socArrival: fin.socArrival, traffic: plan.traffic, legs, ts: now,
+      geometry: plan.geometry || null,
+      maneuvers: plan.maneuvers || [], speedLimit: plan.speedLimit != null ? plan.speedLimit : null,
       fuelL: em.fuelL, onFuel: em.onFuel, evDepleteKm: em.evDepleteKm,
       confidencePct: em.confidencePct, capacityKwh: em.capacityKwh,
       energyKwh: em.energyKwh, energyPct: em.energyPct,
@@ -12316,9 +12537,308 @@ let songProTrips   = [];
 try { songProCharges = JSON.parse(fs.readFileSync(SONGPRO_CHARGES_FILE, 'utf8')) || []; } catch (_) {}
 try { songProLocs    = JSON.parse(fs.readFileSync(SONGPRO_LOCS_FILE, 'utf8'))    || []; } catch (_) {}
 try { songProTrips   = JSON.parse(fs.readFileSync(SONGPRO_TRIPS_FILE, 'utf8'))   || []; } catch (_) {}
-function _saveSongProCharges() { try { fs.writeFileSync(SONGPRO_CHARGES_FILE, JSON.stringify(songProCharges, null, 2)); } catch (_) {} }
+function _saveSongProCharges() {
+  try {
+    songProCharges.sort((a, b) => (b && b.endMs || 0) - (a && a.endMs || 0));
+    fs.writeFileSync(SONGPRO_CHARGES_FILE, JSON.stringify(songProCharges, null, 2));
+  } catch (_) {}
+}
 function _saveSongProLocs()    { try { fs.writeFileSync(SONGPRO_LOCS_FILE, JSON.stringify(songProLocs, null, 2)); } catch (_) {} }
-function _saveSongProTrips()   { try { fs.writeFileSync(SONGPRO_TRIPS_FILE, JSON.stringify(songProTrips, null, 2)); } catch (_) {} }
+function _saveSongProTrips()   {
+  try {
+    songProTrips.sort((a, b) => (b && b.endMs || 0) - (a && a.endMs || 0));
+    fs.writeFileSync(SONGPRO_TRIPS_FILE, JSON.stringify(songProTrips, null, 2));
+  } catch (_) {}
+}
+
+// ── Registros oficiais por ID do APK Song Pro ────────────────────────────────
+// APK publica em records/{charging_sessions|trips}/created quando fecha uma
+// sessão/viagem, com o ID numérico dele. Bridge pede o registro completo em
+// records/{type}/request e recebe em .../response. Resiliente offline: o APK
+// bufferiza e reenvia quando reconecta. V1 só captura o payload cru pra
+// entendermos o schema antes de reconciliar com songpro_charges/trips.json.
+const SONGPRO_RECORDS_PREFIX = 'electro/telemetry/song-pro/records';
+const SONGPRO_RECORD_CHARGES_FILE = path.join(DATA_DIR, 'songpro_records_charges.json');
+const SONGPRO_RECORD_TRIPS_FILE   = path.join(DATA_DIR, 'songpro_records_trips.json');
+let songProRecordCharges = [];
+let songProRecordTrips   = [];
+try { songProRecordCharges = JSON.parse(fs.readFileSync(SONGPRO_RECORD_CHARGES_FILE, 'utf8')) || []; } catch (_) {}
+try { songProRecordTrips   = JSON.parse(fs.readFileSync(SONGPRO_RECORD_TRIPS_FILE, 'utf8'))   || []; } catch (_) {}
+function _saveSongProRecordCharges() { try { fs.writeFileSync(SONGPRO_RECORD_CHARGES_FILE, JSON.stringify(songProRecordCharges, null, 2)); } catch (_) {} }
+function _saveSongProRecordTrips()   { try { fs.writeFileSync(SONGPRO_RECORD_TRIPS_FILE, JSON.stringify(songProRecordTrips, null, 2)); } catch (_) {} }
+const _songProRecordPending = new Map();
+// Última ID vista por tipo (via sensor id_da_ultima_recarga / _viagem). Só
+// dispara request quando muda. Retained na primeira msg = backfill do último
+// registro após restart do bridge. Persiste em memória (nova conexão re-lê retained).
+const _songProLastRecordId = { charging_sessions: null, trips: null };
+// Descoberta: loga uma vez por topic desconhecido sob song-pro/ pra evoluir schema.
+const _songProUnknownTopicsSeen = new Set();
+const SONGPRO_RECORD_REQUEST_TIMEOUT_MS = 30_000;
+function _handleSongProLastIdSensor(type, raw, isRetained) {
+  const id = parseInt(String(raw).trim(), 10);
+  if (!Number.isFinite(id) || id <= 0) return;
+  if (_songProLastRecordId[type] === id) return;
+  const prev = _songProLastRecordId[type];
+  _songProLastRecordId[type] = id;
+  const kind = type === 'charging_sessions' ? 'recarga' : 'viagem';
+  console.log(`[songpro-records] id_da_ultima_${kind}: ${prev} → ${id}${isRetained ? ' (retained/backfill)' : ''}`);
+  _requestSongProRecord(type, id);
+  if (prev === null) {
+    // Startup — dispara backfill decremental. Known IDs são skipados no loop.
+    _startSongProBackfill(type, id - 1);
+  } else if (id > prev + 1) {
+    // Gap no meio — request cada faltante direto (raro; cadence do stream é ~30s).
+    for (let m = prev + 1; m < id; m++) _requestSongProRecord(type, m);
+  }
+}
+
+// Backfill decremental por tipo. Cadence 2s pra não sobrecarregar APK. Para
+// quando bater N misses consecutivos (histórico esgotado) ou cursor≤0.
+const SONGPRO_BACKFILL_CADENCE_MS = 2000;
+const SONGPRO_BACKFILL_MAX_MISS = 5;
+const _songProBackfillState = {
+  charging_sessions: { active: false, cursor: 0, misses: 0, timer: null, knownIds: null },
+  trips:             { active: false, cursor: 0, misses: 0, timer: null, knownIds: null },
+};
+function _startSongProBackfill(type, fromId) {
+  const s = _songProBackfillState[type];
+  if (s.active) return;
+  const list = type === 'charging_sessions' ? songProRecordCharges : songProRecordTrips;
+  s.knownIds = new Set(list.map(r => r && r.id).filter(x => x != null));
+  s.active = true;
+  s.misses = 0;
+  s.cursor = fromId;
+  console.log(`[songpro-records] backfill ${type} iniciando de id=${fromId} · já conhecidos=${s.knownIds.size}`);
+  _songProBackfillStep(type);
+}
+function _songProBackfillStep(type) {
+  const s = _songProBackfillState[type];
+  if (!s.active) return;
+  while (s.cursor > 0 && s.knownIds.has(s.cursor)) s.cursor--;
+  if (s.cursor <= 0 || s.misses >= SONGPRO_BACKFILL_MAX_MISS) {
+    console.log(`[songpro-records] backfill ${type} concluído · cursor=${s.cursor} · misses=${s.misses}`);
+    s.active = false;
+    s.timer = null;
+    return;
+  }
+  _requestSongProRecord(type, s.cursor);
+  s.cursor--;
+  s.timer = setTimeout(() => _songProBackfillStep(type), SONGPRO_BACKFILL_CADENCE_MS);
+}
+function _onSongProBackfillNotFound(type, id) {
+  const s = _songProBackfillState[type];
+  if (s && s.active) s.misses++;
+}
+function _onSongProBackfillFound(type, id) {
+  const s = _songProBackfillState[type];
+  if (s && s.active) {
+    s.misses = 0;
+    if (id != null) s.knownIds.add(id);
+  }
+}
+function _requestSongProRecord(type, id) {
+  if (!mqttClient || !mqttClient.connected) return;
+  if (type !== 'charging_sessions' && type !== 'trips') return;
+  const requestId = crypto.randomUUID();
+  const requestTopic = `${SONGPRO_RECORDS_PREFIX}/${type}/request`;
+  const payload = JSON.stringify({ id, request_id: requestId });
+  mqttClient.publish(requestTopic, payload, { qos: 1 }, (err) => {
+    if (err) console.warn(`[songpro-records] publish request falhou: ${err.message}`);
+  });
+  const timeout = setTimeout(() => {
+    if (_songProRecordPending.delete(requestId)) {
+      console.warn(`[songpro-records] timeout id=${id} type=${type} rid=${requestId}`);
+    }
+  }, SONGPRO_RECORD_REQUEST_TIMEOUT_MS);
+  _songProRecordPending.set(requestId, { type, id, ts: Date.now(), timeout });
+  console.log(`[songpro-records] request enviado id=${id} type=${type} rid=${requestId}`);
+}
+function _handleSongProRecordCreated(type, raw) {
+  let payload;
+  try { payload = JSON.parse(raw); } catch (e) {
+    console.warn(`[songpro-records] created inválido (${type}): ${e.message} raw=${raw.slice(0, 200)}`);
+    return;
+  }
+  const id = payload && payload.id;
+  if (id == null) {
+    console.warn(`[songpro-records] created sem id (${type}): ${raw.slice(0, 200)}`);
+    return;
+  }
+  console.log(`[songpro-records] created id=${id} type=${type} · pedindo registro completo`);
+  _requestSongProRecord(type, id);
+}
+function _handleSongProRecordResponse(type, raw) {
+  let payload;
+  try { payload = JSON.parse(raw); } catch (e) {
+    console.warn(`[songpro-records] response inválido (${type}): ${e.message} raw=${raw.slice(0, 200)}`);
+    return;
+  }
+  const requestId = payload && payload.request_id;
+  if (requestId && _songProRecordPending.has(requestId)) {
+    const p = _songProRecordPending.get(requestId);
+    clearTimeout(p.timeout);
+    _songProRecordPending.delete(requestId);
+  }
+  // Backfill pode pedir ID que não existe no APK (found: false) — sinaliza limite.
+  if (payload && payload.found === false) {
+    console.log(`[songpro-records] not found id=${payload.requested_id} type=${type}`);
+    _onSongProBackfillNotFound(type, payload.requested_id);
+    return;
+  }
+  const record = { ...payload, _recv_ms: Date.now() };
+  const list = type === 'charging_sessions' ? songProRecordCharges : songProRecordTrips;
+  const id = payload && payload.id;
+  if (id != null) {
+    const idx = list.findIndex(r => r && r.id === id);
+    if (idx >= 0) list[idx] = record;
+    else list.unshift(record);
+  } else {
+    list.unshift(record);
+  }
+  // Trim mantendo os N mais recentes por id desc (backfill insere antigos via
+  // unshift; unshift+length= evictaria os RECENTES, contrário do desejado).
+  if (list.length > 20000) {
+    list.sort((a, b) => (b && b.id || 0) - (a && a.id || 0));
+    list.length = 20000;
+  }
+  if (type === 'charging_sessions') _saveSongProRecordCharges();
+  else                              _saveSongProRecordTrips();
+  broadcast('songpro_record', { type, record });
+  console.log(`[songpro-records] response ok id=${id} type=${type} keys=${Object.keys(payload || {}).join(',')}`);
+  _reconcileSongProOfficial(type, payload);
+  _onSongProBackfillFound(type, id);
+}
+
+// Reconcilia registro oficial do APK com o computed do bridge por proximidade
+// de ended_at (±60s). Se achou match: enriquece com campos que só o APK tem
+// (soh_delta, mileage_ev/hev, fuel_delta, energy_kwh preciso) e marca source.
+// Se não achou: cria registro novo (bridge perdeu offline — via backfill ou
+// stream perdido). Custo é recomputado com energia oficial se tinha local.
+// Janela de match ±300s: bridge computa endMs quando charging_power fica em 0
+// por N segundos (delay de detecção), enquanto APK marca ended_at no instante
+// exato. Delta típico observado: 60-140s. 300s cobre com folga.
+const SONGPRO_RECONCILE_WINDOW_MS = 300_000;
+function _reconcileSongProOfficial(type, p) {
+  if (!p || p.found === false) return;
+  const endedS = +p.ended_at;
+  if (!Number.isFinite(endedS) || endedS <= 0) return;
+  const endedMs = endedS * 1000;
+  if (type === 'charging_sessions') _reconcileSongProCharge(p, endedMs);
+  else if (type === 'trips')        _reconcileSongProTrip(p, endedMs);
+}
+function _reconcileSongProCharge(p, endedMs) {
+  const startedMs = +p.started_at_ms || ((+p.started_at || 0) * 1000) || (endedMs - (+p.duration_s || 0) * 1000);
+  const energyKwh = +(+p.energy_kwh || 0).toFixed(2);
+  const enrich = {
+    officialId: p.id,
+    source: 'apk-official',
+    energyKwh,
+    avgPowerKw:  +(+p.avg_power_kw || 0).toFixed(2),
+    socStart:    Math.round(+p.soc_start || 0),
+    socEnd:      Math.round(+p.soc_end   || 0),
+    sohInitial:  p.soh_initial != null ? +p.soh_initial : null,
+    sohFinal:    p.soh_final   != null ? +p.soh_final   : null,
+    sohDelta:    p.soh_delta   != null ? +p.soh_delta   : null,
+    odometerKm:  p.odometer_km != null ? +p.odometer_km : null,
+    pointsCount: p.points_count != null ? +p.points_count : null,
+  };
+  const idx = songProCharges.findIndex(r => r && Math.abs((r.endMs || 0) - endedMs) < SONGPRO_RECONCILE_WINDOW_MS);
+  if (idx >= 0) {
+    const prev = songProCharges[idx];
+    const cost = prev.locationId ? +((energyKwh) * (+prev.pricePerKwh || 0)).toFixed(2) : prev.costEstimate;
+    songProCharges[idx] = { ...prev, ...enrich, costEstimate: cost };
+    console.log(`[songpro-records] reconcile charge bridge=${prev.id} ↔ official=${p.id} · ${energyKwh}kWh`);
+  } else {
+    const loc = _songProLocFor(0, 0);
+    songProCharges.unshift({
+      id: 'sp-official-' + p.id,
+      startMs: startedMs, endMs: endedMs,
+      durationSec: +p.duration_s || Math.round((endedMs - startedMs) / 1000),
+      lat: 0, lng: 0,
+      locationId: loc ? loc.id : null,
+      pricePerKwh: loc ? (+loc.pricePerKwh || 0) : 0,
+      free: loc ? !!loc.free : false,
+      costEstimate: _songProCost(energyKwh, loc),
+      ...enrich,
+    });
+    if (songProCharges.length > 20000) {
+      songProCharges.sort((a, b) => (b && b.endMs || 0) - (a && a.endMs || 0));
+      songProCharges.length = 20000;
+    }
+    console.log(`[songpro-records] recarga NOVA via oficial id=${p.id} · ${energyKwh}kWh (bridge não capturou)`);
+  }
+  _saveSongProCharges();
+  broadcast('songpro_charge_reconciled', { officialId: p.id });
+  // Se essa recarga acabou nos últimos 10min, atualiza a LA (que fechou com
+  // valor integrado do bridge) com o kWh oficial antes do dismissalDate.
+  const nowMs = Date.now();
+  if (nowMs - endedMs < 10 * 60_000 && apnsLive && apnsLive.enabled && _songProEnabled()) {
+    const cs = {
+      soc: enrich.socEnd || 0,
+      powerKw: 0,
+      sessionKwh: energyKwh,
+      remainingMin: 0,
+      charging: false,
+      updatedAtMs: nowMs,
+    };
+    apnsLive.pushUpdate(SONGPRO_LA_TYPE, {}, cs, { isFinal: true, dismissalDate: nowMs + 5 * 60_000 })
+      .catch(e => console.warn('[songpro-records] LA oficial pushUpdate falhou:', e.message));
+    console.log(`[songpro-records] LA atualizada com oficial · ${energyKwh}kWh · SOC ${enrich.socEnd}%`);
+  }
+}
+function _reconcileSongProTrip(p, endedMs) {
+  const startedMs = ((+p.created_at || 0) * 1000) || (endedMs - (+p.duration_s || 0) * 1000);
+  const distKm = +(+p.distance_km || 0).toFixed(2);
+  const energyKwh = +(+p.electric_energy_kwh || 0).toFixed(2);
+  const enrich = {
+    officialId: p.id,
+    source: 'apk-official',
+    distKm,
+    energyKwh,
+    econKwh100km: p.electric_consumption_kwh_100km != null ? +(+p.electric_consumption_kwh_100km).toFixed(2) : null,
+    startSoc: Math.round(+p.soc_start || 0),
+    endSoc:   Math.round(+p.soc_end   || 0),
+    sohFinal: p.soh != null ? +p.soh : null,
+    odometerStartKm:   p.odometer_start_km   != null ? +p.odometer_start_km   : null,
+    odometerEndKm:     p.odometer_end_km     != null ? +p.odometer_end_km     : null,
+    mileageEvStartKm:  p.mileage_ev_start_km  != null ? +p.mileage_ev_start_km  : null,
+    mileageEvEndKm:    p.mileage_ev_end_km    != null ? +p.mileage_ev_end_km    : null,
+    mileageHevStartKm: p.mileage_hev_start_km != null ? +p.mileage_hev_start_km : null,
+    mileageHevEndKm:   p.mileage_hev_end_km   != null ? +p.mileage_hev_end_km   : null,
+    fuelConsumedL:       p.fuel_consumed_l,
+    fuelConsumptionKmL:  p.fuel_consumption_km_l,
+    fuelStartPercent:    p.fuel_start_percent,
+    fuelEndPercent:      p.fuel_end_percent,
+    fuelDeltaPercent:    p.fuel_delta_percent,
+    pointsCount:         p.points_count != null ? +p.points_count : null,
+  };
+  const idx = songProTrips.findIndex(r => r && Math.abs((r.endMs || 0) - endedMs) < SONGPRO_RECONCILE_WINDOW_MS);
+  if (idx >= 0) {
+    const prev = songProTrips[idx];
+    // Preserva driver/score do bridge (não vem no oficial).
+    songProTrips[idx] = { ...prev, ...enrich };
+    console.log(`[songpro-records] reconcile trip bridge=${prev.id} ↔ official=${p.id} · ${distKm}km ${energyKwh}kWh`);
+  } else {
+    const durationSec = +p.duration_s || Math.round((endedMs - startedMs) / 1000);
+    const avgSpeedKmh = durationSec > 0 ? Math.round(distKm / (durationSec / 3600)) : 0;
+    songProTrips.unshift({
+      id: 'sp-trip-official-' + p.id,
+      startMs: startedMs, endMs: endedMs,
+      durationSec, avgSpeedKmh,
+      startLat: 0, startLng: 0, endLat: 0, endLng: 0,
+      driverDeviceId: null, driverName: '',
+      driveScore: 0, harshAcc: 0, harshBrake: 0,
+      ...enrich,
+    });
+    if (songProTrips.length > 20000) {
+      songProTrips.sort((a, b) => (b && b.endMs || 0) - (a && a.endMs || 0));
+      songProTrips.length = 20000;
+    }
+    console.log(`[songpro-records] viagem NOVA via oficial id=${p.id} · ${distKm}km ${energyKwh}kWh (bridge não capturou)`);
+  }
+  _saveSongProTrips();
+  broadcast('songpro_trip_reconciled', { officialId: p.id });
+}
 
 // Feature 10: score de condução por viagem (0-100) — economia + suavidade
 // (acelerações/frenagens bruscas detectadas pela variação de velocidade).
@@ -12350,7 +12870,7 @@ function _songProDriveScore(trail, distKm, startSoc, endSoc) {
   return { score, harshAcc: ha, harshBrake: hb, energyKwh: +energyKwh.toFixed(2) };
 }
 
-const SONGPRO_TRIPS_MAX = 300;     // teto de viagens guardadas (≈1 ano com 1 viagem/dia)
+const SONGPRO_TRIPS_MAX = 20000;   // teto de viagens guardadas (histórico completo do APK)
 function _recordSongProTrip(trail, startMs, endMs, startSoc, distM, driverId, driverName) {
   if (!Array.isArray(trail) || trail.length < 2 || !startMs || !endMs) return;
   // Idempotente: chave do trip = endMs; se já registrado, não duplica.
@@ -12427,7 +12947,7 @@ function _recordSongProCharge(s, finalSoc, endMs) {
     free: loc ? !!loc.free : false,
     costEstimate: cost,
   });
-  if (songProCharges.length > 1000) songProCharges.length = 1000;
+  if (songProCharges.length > 20000) songProCharges.length = 20000;
   _saveSongProCharges();
   console.log(`[songpro] recarga salva · ${energy.toFixed(2)}kWh · ${loc ? loc.name : 'sem local'}${loc && !loc.configured ? ' (novo)' : ''} · R$ ${cost.toFixed(2)}`);
 }
@@ -12443,6 +12963,11 @@ function _songProEnabled() {
 function handleSongProMessage(jsonStr) {
   let o;
   try { o = JSON.parse(jsonStr); } catch (_) { return; }
+  // IDs da última recarga/viagem vêm inline no JSON (APK 1.11+). Dispara
+  // request pelo registro oficial quando o valor muda. Idempotente via
+  // _songProLastRecordId — mensagens repetidas com mesmo id são no-op.
+  if (o.last_charging_session_id != null) _handleSongProLastIdSensor('charging_sessions', o.last_charging_session_id, false);
+  if (o.last_trip_id != null)             _handleSongProLastIdSensor('trips',             o.last_trip_id,             false);
   const power = +o.charging_power || 0;
   const soc   = +o.soc || +o.soc_panel || 0;
   if (soc <= 0 && power <= 0) return;   // amostra ruim — ignora
@@ -12634,8 +13159,8 @@ function _bearingDeg(lat1, lng1, lat2, lng2) {
   return (toDeg(Math.atan2(y, x)) + 360) % 360;
 }
 
-// Celular dentro do raio de algum local marcado como "não notificar"?
-function _phoneInSuppressedPlace(lat, lng) {
+// Ponto (celular OU carro) dentro do raio de algum local marcado como "não notificar"?
+function _pointInSuppressedPlace(lat, lng) {
   const ids = Array.isArray(notifPrefs.la_parking_suppress_places)
     ? notifPrefs.la_parking_suppress_places.map(String) : [];
   if (!ids.length) return false;
@@ -12689,11 +13214,14 @@ function _evalParkingLA() {
   const clat = +state.gps_lat, clng = +state.gps_lng;
   if (!_parkedLoc && clat && clng) _parkedLoc = { lat: clat, lng: clng, ts: Date.now() };
   if (!_parkedLoc) return;   // sem posição do carro → nada a fazer
+  // Carro parado num local suprimido (casa/trabalho): você já sabe onde ele está,
+  // finder é pra estacionamento desconhecido. Não abre — mesmo com o dono longe.
+  if (_pointInSuppressedPlace(_parkedLoc.lat, _parkedLoc.lng)) { _endParkingLA(); return; }
   // Posição do dono. Sem fix fresco (>15min) → mantém o estado atual (não fecha à toa).
   const ph = _ownerPhoneLoc();
   if (!ph || (Date.now() - ph.ts > 15 * 60_000)) return;
-  // Local marcado como "não notificar" → não abre (e fecha se já estava aberta).
-  if (_phoneInSuppressedPlace(ph.lat, ph.lng)) { _endParkingLA(); return; }
+  // Celular dentro de um local suprimido → não abre (e fecha se já estava aberta).
+  if (_pointInSuppressedPlace(ph.lat, ph.lng)) { _endParkingLA(); return; }
   const dist = haversineM(ph.lat, ph.lng, _parkedLoc.lat, _parkedLoc.lng);
   const brg  = _bearingDeg(ph.lat, ph.lng, _parkedLoc.lat, _parkedLoc.lng);
   const now  = Date.now();
@@ -12806,6 +13334,9 @@ function _anyoneSeated() {
 }
 function _evalSecurityAlert() {
   if (!apnsLive.enabled) return;
+  // "Ligado/parado" vem do estado do motor da GWM (hyengsts) — awake-independent,
+  // chega pela telemetria própria do carro mesmo com o APK dormindo/offline.
+  const carOn  = state.engine_state === '1';
   const parked = state.engine_state === '0';   // só estacionado (evita falso alarme dirigindo)
   const snap = _securitySnapshot();
   // "Exposto" = motorista fora do carro. Sinal preferido: ocupação dos bancos
@@ -12840,7 +13371,10 @@ function _evalSecurityAlert() {
     _securitySig    = '';
     state._security_la_active = false; state._security_la_sig = '';
     state._security_la_since = 0; scheduleStateSave();
-    apnsLive.pushUpdate(SECURITY_LA_TYPE, {}, _securityContentState(snap, false),
+    const endCs = _securityContentState(snap, false);
+    // Encerrou porque o carro ligou → marca explicitamente "carro ligado".
+    if (carOn) endCs.summary = 'Concluído · carro ligado';
+    apnsLive.pushUpdate(SECURITY_LA_TYPE, {}, endCs,
       { isFinal: true, dismissalDate: Date.now() + 8_000 })   // confirmação verde → ~8s e encerra
       .catch(e => console.warn('[apns] security end falhou:', e.message));
   }
@@ -12956,6 +13490,18 @@ function handleChargingStateTransition(value, isRetained) {
   const realTransition = prev && prev !== value;
   if (!realTransition) return;
 
+  // Anti-flap de fim de recarga: ao bater o alvo, o carro oscila
+  // Carregando↔Finalizado/Aguardando por alguns segundos. Sem isto, cada volta
+  // pra 'Carregando' recriava uma Live Activity nova (push-to-start) e cada saída
+  // refiring "Recarga concluída" — resultado eram várias LAs duplicadas com
+  // "+0,0 kWh" (a sessão fantasma reiniciada zera o contador). Uma transição
+  // dentro de CHARGE_BOUNCE_MS do fim é oscilação, não sessão nova: absorve.
+  const sinceEnd = Date.now() - _lastChargeEndMs;
+  if (_lastChargeEndMs > 0 && sinceEnd < CHARGE_BOUNCE_MS) {
+    console.log(`[charge] flap ${prev}→${value} ${sinceEnd}ms após fim — absorvido (evita LA duplicada / concluída repetida)`);
+    return;
+  }
+
   if (value === 'Carregando') {
     _customCutoffFired = false;   // nova sessão → rearma o corte custom
     _chargeTempSamples = [];   // inicia nova coleta de temperatura
@@ -12977,11 +13523,15 @@ function handleChargingStateTransition(value, isRetained) {
     // O alert é necessário pra apresentar a LA; o timer de live update mantém ela
     // atualizada e o fim encerra com sendChargeLiveUpdate(true).
     if (apnsLive.enabled && notifPrefs.la_charge !== false) {
-      // Cria a LA só se não houver uma viva (robusto a restart/redelivery — antes
-      // o !isRetained impedia a criação após restart no meio da recarga).
-      if (apnsLive.hasUpdateToken('ChargeActivityAttributes')) {
+      // Reaproveita a LA viva se houver (robusto a restart/redelivery no meio da
+      // recarga E ao card-resumo fixo da sessão anterior: aqui ele "volta a live").
+      // Só recria via pushStart se o token guardado é de um resumo já expirado
+      // (> teto de vida da LA → ActivityKit removeu; token morto): limpa e recria.
+      const summaryStale = _lastChargeEndMs > 0 && (Date.now() - _lastChargeEndMs) >= CHARGE_SUMMARY_MAX_MS;
+      if (apnsLive.hasUpdateToken('ChargeActivityAttributes') && !summaryStale) {
         apnsLive.pushUpdate('ChargeActivityAttributes', {}, _chargeContentState(), {}).catch(() => {});
       } else {
+        if (summaryStale) apnsLive.clearUpdateTokensByType('ChargeActivityAttributes');
         apnsLive.pushStart('ChargeActivityAttributes', '', { carName: 'Haval H6 PHEV' }, _chargeContentState(),
           { staleDate: Date.now() + 3600_000, alert: { title: '⚡ Recarga iniciada', body: 'Acompanhe o progresso na tela bloqueada.' } })
           .catch(e => console.warn('[apns] charge pushStart falhou:', e.message));
@@ -13006,11 +13556,12 @@ function handleChargingStateTransition(value, isRetained) {
       }, 30000);
     }
   } else if (prev === 'Carregando') {
+    _lastChargeEndMs = Date.now();       // arma janela anti-flap (ver guard no topo)
     if (chargeStartTimer) { clearTimeout(chargeStartTimer); chargeStartTimer = null; }
     chargeEndingNotifSent = false;       // reset para próxima sessão
-    // Recarga encerrou: limpa o token de update da LA com folga (deixa o update
-    // final ser entregue) pra que a PRÓXIMA recarga recrie a LA do zero.
-    setTimeout(() => apnsLive.clearUpdateTokensByType('ChargeActivityAttributes'), 60_000);
+    // Recarga encerrou: NÃO limpa o token — a LA final não é encerrada, vira card-
+    // resumo fixo (ver sendChargeLiveUpdate). Manter o token deixa a próxima
+    // recarga reaproveitar a MESMA LA (transforma o resumo de volta em live).
     const endSoc = state.soc_pct || 0;
     // Corte custom ativo e já freou: restaura o carro pra "sem limite" (100) — assim
     // a próxima sessão volta a carregar descapada e o corte rearma no alvo. Mantém
@@ -13222,7 +13773,16 @@ function sendChargeLiveUpdate(isFinal = false) {
       targetPct: _effectiveChargeTarget(),
       locked: _isLocked(),
       updatedAtMs: now,
-    }, { isFinal, dismissalDate: isFinal ? Date.now() + 30 * 60_000 : undefined, alert: isFinal ? { title, body } : undefined })
+      // charging:false no final → o widget renderiza o doneBody (card-resumo verde).
+    }, {
+      // Fim da recarga NÃO encerra a LA (event:'update', não 'end'): ela vira um
+      // card-resumo compacto fixo com os dados da sessão e fica pinada até a
+      // próxima recarga (que a transforma de volta em live) ou o teto de vida da
+      // LA. O alert toca o "ding" do fim uma vez; staleDate longo evita dimming.
+      isFinal: false,
+      staleDate: isFinal ? Date.now() + CHARGE_SUMMARY_MAX_MS : undefined,
+      alert:     isFinal ? { title, body } : undefined,
+    })
       .catch(err => console.warn('[apns] push falhou:', err.message));
   }
 }
@@ -13293,8 +13853,43 @@ app.get('/api/songpro/charges', (req, res) => {
 // Resposta: { trips: [{ id, startMs, endMs, durationSec, distKm, avgSpeedKmh,
 //   startSoc, endSoc, energyKwh, driverName, driveScore, harshAcc, harshBrake, ... }] }
 app.get('/api/songpro/trips', (req, res) => {
-  const lim = Math.min(200, Math.max(1, parseInt(req.query.limit) || 60));
+  const lim = Math.min(5000, Math.max(1, parseInt(req.query.limit) || 60));
   res.json({ trips: songProTrips.slice(0, lim), total: songProTrips.length });
+});
+
+// Registros oficiais do APK Song Pro por ID (payload cru retornado pelo APK
+// em .../response). V1 só captura — sem reconciliar com songProCharges/Trips.
+app.get('/api/songpro/records/charges', (req, res) => {
+  const lim = Math.min(500, Math.max(1, parseInt(req.query.limit) || 100));
+  res.json({
+    records: songProRecordCharges.slice(0, lim),
+    total: songProRecordCharges.length,
+    pending: _songProRecordPending.size,
+  });
+});
+app.get('/api/songpro/records/trips', (req, res) => {
+  const lim = Math.min(500, Math.max(1, parseInt(req.query.limit) || 100));
+  res.json({
+    records: songProRecordTrips.slice(0, lim),
+    total: songProRecordTrips.length,
+    pending: _songProRecordPending.size,
+  });
+});
+
+// Samples ponto-a-ponto de uma viagem específica (importados via CSV detalhado).
+// Retorna 404 se não temos samples pra esse ID. Arquivo lido do disco a cada
+// request — trip samples podem ser grandes (centenas/milhares de pontos).
+app.get('/api/songpro/trips/:id/samples', (req, res) => {
+  const tripId = parseInt(req.params.id, 10);
+  if (!Number.isFinite(tripId)) return res.status(400).json({ error: 'id inválido' });
+  const file = path.join(DATA_DIR, 'songpro_trip_samples', `${tripId}.json`);
+  if (!fs.existsSync(file)) return res.status(404).json({ error: 'samples não encontradas' });
+  try {
+    const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+    res.json(data);
+  } catch (e) {
+    res.status(500).json({ error: 'read failed', detail: e.message });
+  }
 });
 
 // Lançamento MANUAL de recarga (ex.: recargas antigas). Body:
@@ -13816,6 +14411,12 @@ app.post('/api/nav-to', (req, res) => {
   res.json({ ok: true, name });
 });
 
+// POST /api/nav-clear — retira o destino ativo (limpa rota + chegada + nav_dest retido).
+app.post('/api/nav-clear', (_req, res) => {
+  _clearRoute(state.route && state.route.wps);
+  res.json({ ok: true });
+});
+
 // POST /api/route-undo — desfaz o avanço automático da última parada concluída
 // (dentro da janela de 5 min). Volta completedIdx pra antes daquela parada.
 app.post('/api/route-undo', (req, res) => {
@@ -13895,27 +14496,61 @@ app.get('/api/geocode-suggest', async (req, res) => {
 });
 // Busca a rota: Mapbox driving-traffic (ETA COM trânsito ao vivo) se houver MAPBOX_TOKEN;
 // senão OSRM (sem trânsito). Retorna distância(m), duração(s), geometria e flag de trânsito.
+// Extrai manobras (turn-by-turn com nome de via) dos steps de uma perna.
+function _stepsToManeuvers(legs) {
+  const out = [];
+  for (const l of (legs || [])) for (const s of (l.steps || [])) {
+    const m = s.maneuver || {};
+    const loc = m.location || [];
+    if (loc.length < 2) continue;
+    out.push({
+      lat: loc[1], lng: loc[0],
+      text: String(m.instruction || s.name || '').slice(0, 90),
+      type: m.type || '', modifier: m.modifier || '',
+    });
+  }
+  return out.slice(0, 60);
+}
+// Limite de velocidade no início da rota (posição atual do carro): 1ª entrada
+// numérica do annotation.maxspeed. mph→km/h se preciso. null se indisponível.
+function _speedLimitAtStart(legs) {
+  const ms = legs && legs[0] && legs[0].annotation && legs[0].annotation.maxspeed;
+  if (!Array.isArray(ms)) return null;
+  for (const e of ms) {
+    if (e && typeof e.speed === 'number') {
+      return e.unit === 'mph' ? Math.round(e.speed * 1.60934) : Math.round(e.speed);
+    }
+  }
+  return null;
+}
 async function _fetchRoute(fromLat, fromLng, toLat, toLng) {
   const tok = process.env.MAPBOX_TOKEN;
   if (tok) {
     try {
       const mu = `https://api.mapbox.com/directions/v5/mapbox/driving-traffic/`
         + `${fromLng},${fromLat};${toLng},${toLat}`
-        + `?access_token=${tok}&geometries=geojson&overview=full&alternatives=false`;
+        + `?access_token=${tok}&geometries=geojson&overview=full&alternatives=false`
+        + `&steps=true&language=pt&annotations=maxspeed`;
       const mr = await fetch(mu, { signal: AbortSignal.timeout(9000) });
       const mj = await mr.json();
       const rt = mj && mj.routes && mj.routes[0];
-      if (rt) return { distance: rt.distance, duration: rt.duration, coords: rt.geometry.coordinates, traffic: true };
+      if (rt) return {
+        distance: rt.distance, duration: rt.duration, coords: rt.geometry.coordinates, traffic: true,
+        maneuvers: _stepsToManeuvers(rt.legs), speedLimit: _speedLimitAtStart(rt.legs),
+      };
       console.warn('[route] Mapbox sem rota:', mj && mj.message);
     } catch (e) { console.warn('[route] Mapbox falhou, caindo p/ OSRM:', e.message); }
   }
   const u = `https://router.project-osrm.org/route/v1/driving/${fromLng},${fromLat};${toLng},${toLat}`
-    + `?overview=full&geometries=geojson&alternatives=false&steps=false`;
+    + `?overview=full&geometries=geojson&alternatives=false&steps=true`;
   const rr = await fetch(u, { signal: AbortSignal.timeout(9000) });
   const rj = await rr.json();
   const route = rj && rj.routes && rj.routes[0];
   if (!route) return null;
-  return { distance: route.distance, duration: route.duration, coords: route.geometry.coordinates, traffic: false };
+  return {
+    distance: route.distance, duration: route.duration, coords: route.geometry.coordinates, traffic: false,
+    maneuvers: _stepsToManeuvers(route.legs), speedLimit: null,
+  };
 }
 async function _routeElevation(fromLat, fromLng, toLat, toLng) {
   const route = await _fetchRoute(fromLat, fromLng, toLat, toLng);
@@ -13938,11 +14573,20 @@ async function _routeElevation(fromLat, fromLng, toLat, toLng) {
       }
     }
   } catch (_) { /* elevação indisponível → climb/descent ficam 0 */ }
+  // Geometria pro mapa: downsample (cap ~150 pts) em [lng,lat] arredondado (5 casas ≈ 1m).
+  const gstep = Math.max(1, Math.ceil(coords.length / 150));
+  const geometry = [];
+  for (let i = 0; i < coords.length; i += gstep)
+    geometry.push([Math.round(coords[i][0] * 1e5) / 1e5, Math.round(coords[i][1] * 1e5) / 1e5]);
+  const lastc = coords[coords.length - 1];
+  if (lastc && geometry.length && geometry[geometry.length - 1][0] !== Math.round(lastc[0] * 1e5) / 1e5)
+    geometry.push([Math.round(lastc[0] * 1e5) / 1e5, Math.round(lastc[1] * 1e5) / 1e5]);
   return {
     distanceKm: Math.round((route.distance / 1000) * 10) / 10,
     durationMin: Math.round(route.duration / 60),
     climbM: Math.round(climbM), descentM: Math.round(descentM),
-    traffic: route.traffic,
+    traffic: route.traffic, geometry,
+    maneuvers: route.maneuvers || [], speedLimit: route.speedLimit != null ? route.speedLimit : null,
   };
 }
 
@@ -14132,12 +14776,15 @@ function _createShareToken(ttlMinRaw, opts) {
   const recipientName = String((opts && opts.recipientName) || '').slice(0, 40).trim();
   const recipientRole = ['grasi', 'companion', 'other'].includes(opts && opts.recipientRole)
     ? opts.recipientRole : null;
-  _shareTokens[token] = { createdMs: Date.now(), expiresMs, code, recipientName, recipientRole };
+  // includeSoc: quando false, a página pública esconde SOC/autonomia. Default true.
+  const includeSoc = (opts && opts.includeSoc === false) ? false : true;
+  _shareTokens[token] = { createdMs: Date.now(), expiresMs, code, recipientName, recipientRole, includeSoc };
   _saveShareTokens();
-  // Nome do destino atual (mandado pro carro): permite ao cliente montar
-  // "Acompanhe meu trajeto para X". Cai pro último nav_dest recente (≤6h) se
-  // state.arrival ainda não foi populado.
-  let destName = (state.arrival && state.arrival.name) || null;
+  // Nome do destino atual: override explícito do cliente (ex.: destino planejado
+  // na aba Destino) tem prioridade; senão cai pro state.arrival, senão pro último
+  // nav_dest recente (≤6h). Permite montar "Acompanhe meu trajeto para X".
+  let destName = (opts && opts.destName ? String(opts.destName).slice(0, 120).trim() : '') || null;
+  if (!destName) destName = (state.arrival && state.arrival.name) || null;
   if (!destName && recentNavDests.length) {
     const last = recentNavDests[recentNavDests.length - 1];
     if (Date.now() - last.ts < 6 * 3600_000) destName = last.name;
@@ -14160,7 +14807,10 @@ app.get('/api/byd/paired-recipients', (_req, res) => {
 
 app.post('/api/share/create', (req, res) => {
   const b = req.body || {};
-  const out = _createShareToken(b.ttlMin, { recipientName: b.recipientName, recipientRole: b.recipientRole });
+  const out = _createShareToken(b.ttlMin, {
+    recipientName: b.recipientName, recipientRole: b.recipientRole,
+    destName: b.destName, includeSoc: b.includeSoc,
+  });
   // Se o share é pra Grasi E ela já está pareada (tem device com role=grasi
   // + byd_paired=true), dispara a LA direto no iPhone dela — sem precisar
   // mandar link. App Haval recebe `paired=true` na resposta pra mostrar UX

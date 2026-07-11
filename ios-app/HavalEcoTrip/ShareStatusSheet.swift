@@ -21,15 +21,17 @@ final class ShareStatusStore: ObservableObject {
         return u.hasSuffix("/") ? String(u.dropLast()) : u
     }
 
-    func create(ttlMin: Int, recipientName: String?, recipientRole: String?) async {
+    func create(ttlMin: Int, recipientName: String?, recipientRole: String?,
+                destName: String? = nil, includeSoc: Bool = true) async {
         guard !base.isEmpty, let u = URL(string: "\(base)/api/share/create") else { error = "Bridge não configurado."; return }
         loading = true; error = nil; defer { loading = false }
         var r = URLRequest(url: u); r.httpMethod = "POST"; r.timeoutInterval = 12
         r.addValue("application/json", forHTTPHeaderField: "Content-Type")
         r.addValue("Bearer " + Settings.bridgeToken, forHTTPHeaderField: "Authorization")
-        var body: [String: Any] = ["ttlMin": ttlMin]
+        var body: [String: Any] = ["ttlMin": ttlMin, "includeSoc": includeSoc]
         if let n = recipientName, !n.isEmpty { body["recipientName"] = n }
         if let role = recipientRole, !role.isEmpty { body["recipientRole"] = role }
+        if let dn = destName?.trimmingCharacters(in: .whitespacesAndNewlines), !dn.isEmpty { body["destName"] = dn }
         r.httpBody = try? JSONSerialization.data(withJSONObject: body)
         do {
             let (data, resp) = try await URLSession.shared.data(for: r)
@@ -274,5 +276,149 @@ struct ShareStatusSheet: View {
             return "Acompanhe meu trajeto para \(n). \(url)"
         }
         return "Acompanhe meu trajeto. \(url)"
+    }
+}
+
+/// Compartilhamento rápido a partir da aba Destino, com o destino já planejado.
+/// Padrão: 5 h de link, SOC+autonomia on. Grasi → cai direto na LA dela (sem
+/// link). Outra pessoa → gera link, copia mensagem pronta e oferece WhatsApp.
+struct QuickShareSheet: View {
+    let destName: String
+    @StateObject private var store = ShareStatusStore()
+    @Environment(\.dismiss) private var dismiss
+    @State private var kind: ShareStatusSheet.RecipientKind = .grasi
+    @State private var otherName = ""
+    @State private var includeSoc = true
+    @State private var copied = false
+    private let ttlMin = 300   // 5 h padrão
+
+    private func shareText(url: String) -> String {
+        let n = (store.destName?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 }
+            ?? (destName.isEmpty ? nil : destName)
+        if let n { return "Acompanhe meu trajeto para \(n). \(url)" }
+        return "Acompanhe meu trajeto. \(url)"
+    }
+
+    private func openWhatsApp(_ url: String) {
+        let txt = shareText(url: url)
+        guard let enc = txt.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+              let wa = URL(string: "https://wa.me/?text=\(enc)") else { return }
+        UIApplication.shared.open(wa)
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 14) {
+                    if !destName.isEmpty {
+                        HStack(spacing: 8) {
+                            Image(systemName: "mappin.circle.fill").foregroundStyle(DS.teal)
+                            Text("Trajeto para \(destName)").font(.system(size: 13, weight: .semibold)).foregroundStyle(DS.text).lineLimit(1)
+                            Spacer()
+                        }
+                        .padding(12).background(DS.panel2).clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    }
+
+                    // Pra quem?
+                    HStack(spacing: 8) {
+                        ForEach(ShareStatusSheet.RecipientKind.allCases) { k in
+                            Button { kind = k } label: {
+                                Text(k.rawValue).font(.subheadline.weight(.semibold))
+                                    .frame(maxWidth: .infinity).padding(.vertical, 11)
+                                    .background(kind == k ? DS.teal.opacity(0.22) : DS.panel2)
+                                    .foregroundStyle(kind == k ? DS.teal : DS.text)
+                                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            }.buttonStyle(.plain)
+                        }
+                    }
+
+                    if kind == .other {
+                        TextField("Nome (ex.: João)", text: $otherName)
+                            .padding(10).background(DS.panel2)
+                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            .foregroundStyle(DS.text).autocorrectionDisabled()
+                    } else if store.grasiPaired {
+                        HStack(spacing: 6) {
+                            Image(systemName: "checkmark.seal.fill").foregroundStyle(DS.green)
+                            Text("\(store.grasiName) já está pareada — cai direto no iPhone dela como Live Activity, sem precisar de link.")
+                                .font(.caption).foregroundStyle(DS.green)
+                        }.frame(maxWidth: .infinity, alignment: .leading)
+                    }
+
+                    Toggle(isOn: $includeSoc) {
+                        Text("Incluir SOC e autonomia").font(.system(size: 13)).foregroundStyle(DS.text)
+                    }.tint(DS.green)
+
+                    Text("Link válido por 5 h.").font(.caption2).foregroundStyle(DS.muted)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                    // Resultado
+                    if kind == .grasi, store.deliveredViaLA {
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "iphone.gen3.radiowaves.left.and.right").foregroundStyle(DS.green)
+                                Text("Caiu direto no iPhone da \(store.grasiName) ✓").font(.subheadline.weight(.semibold)).foregroundStyle(DS.green)
+                            }
+                            Text("A Live Activity já apareceu na tela bloqueada dela. Você nem precisa mandar nada.")
+                                .font(.caption).foregroundStyle(DS.muted)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(12).background(DS.panel2).clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    } else if let url = store.url, URL(string: url) != nil {
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack(spacing: 6) {
+                                Image(systemName: copied ? "checkmark.circle.fill" : "link").foregroundStyle(copied ? DS.green : DS.teal)
+                                Text(copied ? "Link copiado com a mensagem" : url)
+                                    .font(.footnote).foregroundStyle(DS.text).lineLimit(1).truncationMode(.middle)
+                            }
+                            Button { openWhatsApp(url) } label: {
+                                Label("Enviar no WhatsApp", systemImage: "paperplane.fill")
+                                    .font(.system(size: 15, weight: .bold)).frame(maxWidth: .infinity).frame(height: 42)
+                                    .foregroundStyle(.black).background(DS.green).clipShape(Capsule())
+                            }.buttonStyle(.plain)
+                            HStack(spacing: 8) {
+                                Button {
+                                    UIPasteboard.general.string = shareText(url: url); copied = true
+                                } label: {
+                                    Label("Copiar", systemImage: "doc.on.doc")
+                                        .font(.subheadline.weight(.semibold)).frame(maxWidth: .infinity).padding(.vertical, 11)
+                                        .background(DS.teal.opacity(0.22)).foregroundStyle(DS.teal).clipShape(Capsule())
+                                }.buttonStyle(.plain)
+                                ShareLink(item: shareText(url: url), subject: Text("Trajeto Haval")) {
+                                    Label("Mais", systemImage: "square.and.arrow.up")
+                                        .font(.subheadline.weight(.semibold)).frame(maxWidth: .infinity).padding(.vertical, 11)
+                                        .background(DS.teal.opacity(0.22)).foregroundStyle(DS.teal).clipShape(Capsule())
+                                }
+                            }
+                        }
+                    } else {
+                        DSActionButton(icon: kind == .grasi ? "paperplane.fill" : "link.badge.plus",
+                                       title: kind == .grasi ? "Enviar pra \(store.grasiName)" : "Gerar link e copiar",
+                                       color: DS.green, busy: store.loading) {
+                            let name: String? = kind == .grasi ? "Grasi" :
+                                otherName.trimmingCharacters(in: .whitespaces).isEmpty ? nil : otherName.trimmingCharacters(in: .whitespaces)
+                            Task {
+                                await store.create(ttlMin: ttlMin, recipientName: name, recipientRole: kind.role,
+                                                   destName: destName, includeSoc: includeSoc)
+                                // Outra pessoa: copia a mensagem pronta assim que o link nasce.
+                                if kind == .other, let u = store.url { UIPasteboard.general.string = shareText(url: u); copied = true }
+                            }
+                        }
+                    }
+
+                    if let e = store.error {
+                        Text(e).font(.callout).foregroundStyle(DS.orange).frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(16)
+            }
+            .background(DS.bg.ignoresSafeArea())
+            .task { await store.loadPaired() }
+            .navigationTitle("Compartilhar trajeto")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Fechar") { dismiss() } } }
+        }
+        .presentationDetents([.medium, .large])
     }
 }

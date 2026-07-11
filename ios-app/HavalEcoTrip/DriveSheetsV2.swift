@@ -196,27 +196,39 @@ struct ClimaSheetV2: View {
                 Text(fan > 0 ? "nível \(fan) de 7" : "desligada")
                     .font(.system(size: 10.5)).monospacedDigit().foregroundStyle(DS.text2)
             }
-            GeometryReader { geo in
-                let w = geo.size.width
-                HStack(spacing: 5) {
-                    ForEach(1...7, id: \.self) { i in
-                        RoundedRectangle(cornerRadius: 7)
-                            .fill(i <= fan ? DS.teal : DS.panel2)
-                            .overlay(RoundedRectangle(cornerRadius: 7)
-                                .stroke(Color.white.opacity(i <= fan ? 0 : 0.07), lineWidth: 1))
-                    }
+            HStack(spacing: 6) {
+                Button { setFan(fan == 0 ? 1 : 0) } label: {
+                    Image(systemName: "power")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(fan == 0 ? .black : DS.text2)
+                        .frame(width: 36, height: 26)
+                        .background(RoundedRectangle(cornerRadius: 7).fill(fan == 0 ? DS.teal : DS.panel2))
+                        .overlay(RoundedRectangle(cornerRadius: 7)
+                            .stroke(Color.white.opacity(fan == 0 ? 0 : 0.07), lineWidth: 1))
                 }
-                .contentShape(Rectangle())
-                .gesture(DragGesture(minimumDistance: 0).onChanged { g in
-                    let seg = Int((g.location.x / w * 7).rounded(.down)) + 1
-                    let lvl = Swift.min(7, Swift.max(0, seg))
-                    if lvl != fan { setFan(lvl == fan ? 0 : lvl) }
-                }.onEnded { g in
-                    let seg = Int((g.location.x / w * 7).rounded(.down)) + 1
-                    setFan(Swift.min(7, Swift.max(1, seg)))
-                })
+                .buttonStyle(.plain)
+                GeometryReader { geo in
+                    let w = geo.size.width
+                    HStack(spacing: 5) {
+                        ForEach(1...7, id: \.self) { i in
+                            RoundedRectangle(cornerRadius: 7)
+                                .fill(i <= fan ? DS.teal : DS.panel2)
+                                .overlay(RoundedRectangle(cornerRadius: 7)
+                                    .stroke(Color.white.opacity(i <= fan ? 0 : 0.07), lineWidth: 1))
+                        }
+                    }
+                    .contentShape(Rectangle())
+                    .gesture(DragGesture(minimumDistance: 0).onChanged { g in
+                        let seg = Int((g.location.x / w * 7).rounded(.down)) + 1
+                        let lvl = Swift.min(7, Swift.max(1, seg))
+                        if lvl != fan { setFan(lvl) }
+                    }.onEnded { g in
+                        let seg = Int((g.location.x / w * 7).rounded(.down)) + 1
+                        setFan(Swift.min(7, Swift.max(1, seg)))
+                    })
+                }
+                .frame(height: 26)
             }
-            .frame(height: 26)
         }
     }
 

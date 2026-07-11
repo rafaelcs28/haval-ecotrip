@@ -169,8 +169,10 @@ struct FollowMap: View {
     let lng: Double
     var heading: Double = 0
     var speedKmh: Double = 0          // zoom adaptativo: mais rápido = mais afastado
+    var routeCoords: [CLLocationCoordinate2D] = []   // rota ativa traçada (cockpit); vazio = sem rota
     @State private var cam: MapCameraPosition = .automatic
     @State private var span = 0.004
+    @State private var camDist = 700.0        // distância da câmera (m) no modo heading-up
     @State private var spanSpeed = -100.0     // velocidade usada no span atual (força 1º cálculo)
     /// v2 (Drive 4a): substitui os controles nativos pela coluna flutuante —
     /// follow (green ativo) + botões extras injetados pela view dona.
@@ -181,14 +183,23 @@ struct FollowMap: View {
     private let tick = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     private var coord: CLLocationCoordinate2D { .init(latitude: lat, longitude: lng) }
+    // Com rota ativa: câmera heading-up (marcha pra cima) + pitch = cara de cockpit.
+    private var routeActive: Bool { routeCoords.count > 1 }
     // Span por velocidade: parado ~0,004; ~0,004 + v/120·0,02 (teto 0,03 ≈ ~3 km de visão).
     private func spanForSpeed() -> Double { min(0.03, max(0.0035, 0.004 + speedKmh / 120 * 0.02)) }
+    // Distância heading-up: parado ~550m; sobe com a velocidade (teto ~1,6km).
+    private func distForSpeed() -> Double { min(1600, max(520, 560 + speedKmh / 120 * 900)) }
 
     private func setCamera(animated: Bool, duration: Double = 0) {
-        let region = MKCoordinateRegion(center: coord,
-            span: MKCoordinateSpan(latitudeDelta: span, longitudeDelta: span))
-        if animated { withAnimation(.linear(duration: duration)) { cam = .region(region) } }
-        else { cam = .region(region) }
+        let pos: MapCameraPosition
+        if routeActive {
+            pos = .camera(MapCamera(centerCoordinate: coord, distance: camDist, heading: heading, pitch: 58))
+        } else {
+            pos = .region(MKCoordinateRegion(center: coord,
+                span: MKCoordinateSpan(latitudeDelta: span, longitudeDelta: span)))
+        }
+        if animated { withAnimation(.linear(duration: duration)) { cam = pos } }
+        else { cam = pos }
     }
     // Pan suave seguindo o carro: anima na cadência real do GPS (em vez de cortar
     // seco a cada update) e só re-zooma quando a velocidade muda o bastante — assim
@@ -197,11 +208,11 @@ struct FollowMap: View {
         let now = Date()
         let dt = min(3, max(0.6, now.timeIntervalSince(lastMoveAt)))
         lastMoveAt = now
-        if abs(speedKmh - spanSpeed) > 8 { span = spanForSpeed(); spanSpeed = speedKmh }
+        if abs(speedKmh - spanSpeed) > 8 { span = spanForSpeed(); camDist = distForSpeed(); spanSpeed = speedKmh }
         setCamera(animated: true, duration: dt)
     }
     private func recenter() {                 // botão / auto-resume: reenquadra no zoom da velocidade
-        span = spanForSpeed(); spanSpeed = speedKmh
+        span = spanForSpeed(); camDist = distForSpeed(); spanSpeed = speedKmh
         setCamera(animated: true, duration: 0.4)
     }
     private func zoom(_ factor: Double) {
@@ -211,16 +222,22 @@ struct FollowMap: View {
 
     var body: some View {
         Map(position: $cam, interactionModes: .all) {
+            if routeCoords.count > 1 {
+                MapPolyline(coordinates: routeCoords)
+                    .stroke(.white.opacity(0.85), style: StrokeStyle(lineWidth: 9, lineCap: .round, lineJoin: .round))
+                MapPolyline(coordinates: routeCoords)
+                    .stroke(DS.blue, style: StrokeStyle(lineWidth: 5.5, lineCap: .round, lineJoin: .round))
+            }
             Annotation("", coordinate: coord) {
-                CarMarker(size: 42, heading: heading)
+                CarMarker(size: 63, heading: routeActive ? 0 : heading)
             }
         }
         .mapStyle(.standard(pointsOfInterest: .excludingAll))
         .environment(\.colorScheme, .dark)   // mapa escuro (ruas claras)
         .simultaneousGesture(DragGesture().onChanged { _ in autoFollow = false; lastTouch = Date() }
                                           .onEnded { _ in lastTouch = Date() })
-        .onAppear { span = spanForSpeed(); spanSpeed = speedKmh; lastMoveAt = Date(); setCamera(animated: false) }
-        .onChange(of: "\(lat)|\(lng)") { _, _ in if autoFollow { follow() } }
+        .onAppear { span = spanForSpeed(); camDist = distForSpeed(); spanSpeed = speedKmh; lastMoveAt = Date(); setCamera(animated: false) }
+        .onChange(of: "\(lat)|\(lng)|\(Int(heading))|\(routeActive)") { _, _ in if autoFollow { follow() } }
         .onReceive(tick) { _ in
             if !autoFollow && Date().timeIntervalSince(lastTouch) > 10 { autoFollow = true; recenter() }
         }

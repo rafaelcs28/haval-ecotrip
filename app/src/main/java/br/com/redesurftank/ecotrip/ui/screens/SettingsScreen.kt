@@ -78,6 +78,7 @@ fun SettingsScreen(
 ) {
     var showClearConfirm  by remember { mutableStateOf(false) }
     var clearDoneMsg      by remember { mutableStateOf("") }
+    var showV8            by remember { mutableStateOf(false) }
     var mqttEnabled      by remember { mutableStateOf(mqttManager.enabled) }
     var host             by remember { mutableStateOf(mqttManager.host) }
     var port             by remember { mutableStateOf(mqttManager.port.toString()) }
@@ -159,6 +160,11 @@ fun SettingsScreen(
         onDispose { mqttManager.onStatusChange = null }
     }
 
+    if (showV8) {
+        V8SoundScreen(onBack = { showV8 = false })
+        return
+    }
+
     ClaudeScreen(title = "Configurações", onBack = onBack, accent = NeonLime, spacing = 16.dp) {
         Column(
             modifier = Modifier
@@ -166,6 +172,22 @@ fun SettingsScreen(
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
+
+        // ── Som V8 (tela dedicada) ──────────────────────────────────────────────
+        SectionCard(title = "Som V8") {
+            Text(
+                "Transforma a potência do motor elétrico em ronco de V8 pelas caixas do carro. Ative e ajuste na tela dedicada.",
+                fontSize = 12.sp, color = TextSecondary,
+            )
+            OutlinedButton(
+                onClick = { showV8 = true },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(8.dp),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = AccentOrange),
+            ) {
+                Text("Abrir Som V8", fontWeight = FontWeight.Bold)
+            }
+        }
 
         // ── Tela inicial (layout) ───────────────────────────────────────────────
         SectionCard(title = "Tela inicial") {

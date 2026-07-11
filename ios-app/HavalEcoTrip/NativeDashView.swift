@@ -25,7 +25,6 @@ struct NativeDashView: View {
     @State private var showTrunk = false
     @State private var showHazard = false
     @State private var showParking = false
-    @State private var showRange = false
     @State private var showShare = false
     @State private var showTimeline = false
     @State private var showAssistant = false
@@ -80,7 +79,6 @@ struct NativeDashView: View {
         .sheet(isPresented: $showArrival) { ArrivalSheet(trips: trips.trips) }
         .sheet(isPresented: $showParking) { ParkingSheet() }
         .sheet(isPresented: $showChargeTarget) { ChargeTargetSheet(cfg: cfg) }
-        .sheet(isPresented: $showRange) { RangeSheet() }
         .sheet(isPresented: $showLeaveBy) { LeaveBySheet() }
         .sheet(isPresented: $showShare) { ShareStatusSheet() }
         .sheet(isPresented: $showTimeline) { EventsTimelineSheet() }
@@ -627,8 +625,6 @@ struct NativeDashView: View {
                     iconButton(icon: "location.north.fill", tint: DS.teal, caption: "Destino") { showArrival = true }
                     Spacer()
                     iconButton(icon: "parkingsign", tint: DS.green, caption: "Estacionei") { showParking = true }
-                    Spacer()
-                    iconButton(icon: "map.fill", tint: DS.orange, caption: "Alcance") { showRange = true }
                     Spacer()
                     iconButton(icon: "square.and.arrow.up", tint: DS.blue, caption: "Compartilhar") { showShare = true }
                     Spacer()
