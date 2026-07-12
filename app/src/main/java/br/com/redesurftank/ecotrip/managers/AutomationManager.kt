@@ -34,8 +34,10 @@ object AutomationManager {
     // Geofence só confia em fix GPS recente. Fix NETWORK (até 150m de erro) ou stale
     // alimentando um raio pequeno dava "dentro" aleatório → às vezes abria, às vezes não.
     private const val GEO_MAX_AGE_MS = 15_000L
-    // Piso do raio efetivo: GPS bom ainda oscila ~5-20m; 15m era apertado demais.
-    private const val GEO_MIN_RADIUS_M = 40.0
+    // Piso do raio efetivo: GPS bom ainda oscila ~5-20m. A trava de qualidade acima
+    // (só fix não-NETWORK e ≤15s) já cobre o grosso da oscilação; 40m disparava cedo
+    // demais e ignorava raios reduzidos, então segura só um piso mínimo.
+    private const val GEO_MIN_RADIUS_M = 15.0
     // Histerese de re-arme: só considera "saiu" ao passar do raio + esta margem.
     // Evita flicker perto da borda e só rearma numa saída de verdade.
     private const val GEO_EXIT_MARGIN_M = 30.0
