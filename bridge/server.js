@@ -1172,6 +1172,13 @@ let _activeSched = null;
 let _preclimatRestoreTimer   = null;
 let _preclimatAutoOffCancelled = false;
 let _preclimatPrevHvac       = null;   // { fan, drvTemp, passTemp, acEnable } salvo antes da pré-clima
+// Último setpoint REAL do motorista/passageiro reportado pelo carro fora da pré-clima.
+// Congela enquanto a pré-clima está ativa (_preclimatPrevHvac != null) pra não capturar
+// os valores do ramp. É o "estado anterior" a restaurar quando o carro não re-reporta
+// o setpoint após acordar (state.hvac_driver_temp pode vir null).
+let _lastGoodDrvTemp  = null;
+let _lastGoodPassTemp = null;
+const PRECLIMAT_RESTORE_FALLBACK_TEMP = +(process.env.PRECLIMAT_RESTORE_FALLBACK_TEMP || 22.0);
 
 // ── Inteligência da pré-climatização (configurável por env) ───────────────────
 // SOC mínimo p/ deixar o motor ligar FORA da tomada; consumo estimado parado;
@@ -1235,8 +1242,12 @@ async function _restorePreclimatHvac() {
   const prev = _preclimatPrevHvac;
   if (!prev) return;
   _preclimatPrevHvac = null;   // evita restaurar duas vezes
-  if (prev.drvTemp  !== null) mqttClient.publish(`${MQTT_PREFIX}/cmd/hvac/driver_temp`,    prev.drvTemp.toFixed(1),  { qos: 1, retain: false });
-  if (prev.passTemp !== null) mqttClient.publish(`${MQTT_PREFIX}/cmd/hvac/passenger_temp`, prev.passTemp.toFixed(1), { qos: 1, retain: false });
+  // Sempre republica a temperatura pra tirar o setpoint da pré-clima do display.
+  // Sem valor anterior conhecido, usa o último bom global e, por fim, o fallback.
+  const drvTemp  = (prev.drvTemp  != null ? prev.drvTemp  : (_lastGoodDrvTemp  ?? PRECLIMAT_RESTORE_FALLBACK_TEMP));
+  const passTemp = (prev.passTemp != null ? prev.passTemp : (_lastGoodPassTemp ?? drvTemp));
+  mqttClient.publish(`${MQTT_PREFIX}/cmd/hvac/driver_temp`,    drvTemp.toFixed(1),  { qos: 1, retain: false });
+  mqttClient.publish(`${MQTT_PREFIX}/cmd/hvac/passenger_temp`, passTemp.toFixed(1), { qos: 1, retain: false });
   await new Promise(r => setTimeout(r, 1_000));
   mqttClient.publish(`${MQTT_PREFIX}/cmd/hvac/fan_speed`, prev.fan.toString(), { qos: 1, retain: false });
   // Restaura a recirculação (ar interno/externo) ao que estava antes do pré-clima.
@@ -1244,7 +1255,7 @@ async function _restorePreclimatHvac() {
     mqttClient.publish(`${MQTT_PREFIX}/cmd/hvac/cycle_mode`, prev.cycle.toString(), { qos: 1, retain: false });
   // Restaura o master do A/C ao estado anterior (desliga se estava desligado/desconhecido).
   mqttClient.publish(`${MQTT_PREFIX}/cmd/hvac/ac_enable`, prev.acEnable === '1' ? '1' : '0', { qos: 1, retain: false });
-  console.log(`[preclimat] AC restaurado ao estado anterior (fan=${prev.fan} acEnable=${prev.acEnable} cycle=${prev.cycle})`);
+  console.log(`[preclimat] AC restaurado ao estado anterior (temp=${drvTemp.toFixed(1)} fan=${prev.fan} acEnable=${prev.acEnable} cycle=${prev.cycle})`);
 }
 
 // Cancela o desligamento remoto agendado (motor segue ligado) e restaura o AC.
@@ -1803,7 +1814,11 @@ async function firePreClimat(sched) {
   await new Promise(resolve => {
     const ready = () => {
       const f = parseInt(state.hvac_fan_speed, 10);
-      return Number.isFinite(f) && f >= 0 && state.hvac_ac_enable != null;
+      const t = parseFloat(state.hvac_driver_temp);
+      // espera também o setpoint REAL do motorista chegar — senão capturaríamos null
+      // e o restore não teria pra onde voltar (temp da pré-clima ficaria grudada).
+      return Number.isFinite(f) && f >= 0 && state.hvac_ac_enable != null
+        && Number.isFinite(t) && t > 0;
     };
     if (ready()) return resolve();
     let n = 0;
@@ -1820,8 +1835,12 @@ async function firePreClimat(sched) {
 
   // Captura estado anterior do AC antes de sobrescrever
   const prevFan      = Math.max(0, parseInt(state.hvac_fan_speed, 10) || 0);  // -1/off → 0
-  const prevDrvTemp  = parseFloat(state.hvac_driver_temp)    || null;
-  const prevPassTemp = parseFloat(state.hvac_passenger_temp) || null;
+  // Prefere o valor recém-reportado; se vier null, cai no último setpoint real
+  // conhecido (fora da pré-clima). Só fica null se o carro nunca reportou.
+  const _dRaw = parseFloat(state.hvac_driver_temp);
+  const _pRaw = parseFloat(state.hvac_passenger_temp);
+  const prevDrvTemp  = (Number.isFinite(_dRaw) && _dRaw > 0) ? _dRaw : (_lastGoodDrvTemp  ?? null);
+  const prevPassTemp = (Number.isFinite(_pRaw) && _pRaw > 0) ? _pRaw : (_lastGoodPassTemp ?? null);
   const prevAcEnable = state.hvac_ac_enable;   // '0'|'1'|null — pra restaurar no fim
   const _pc = parseInt(state.hvac_cycle_mode, 10);
   const prevCycle    = Number.isFinite(_pc) ? _pc : null;   // recirculação anterior (0/1) — restaura no fim
@@ -15631,8 +15650,18 @@ function applyMqttMessage(key, value, isRetained = false) {
       }
       break;
     }
-    case 'hvac_driver_temp':    state.hvac_driver_temp    = value; break; // float °C
-    case 'hvac_passenger_temp': state.hvac_passenger_temp = value; break; // float °C (pendente)
+    case 'hvac_driver_temp': {
+      state.hvac_driver_temp = value; // float °C
+      const t = parseFloat(value);
+      if (Number.isFinite(t) && t > 0 && !_preclimatPrevHvac) _lastGoodDrvTemp = t; // congela durante a pré-clima
+      break;
+    }
+    case 'hvac_passenger_temp': {
+      state.hvac_passenger_temp = value; // float °C (pendente)
+      const t = parseFloat(value);
+      if (Number.isFinite(t) && t > 0 && !_preclimatPrevHvac) _lastGoodPassTemp = t;
+      break;
+    }
     case 'hvac_fan_speed': {
       state.hvac_fan_speed = value;
       const fan = parseInt(value, 10) || 0;
