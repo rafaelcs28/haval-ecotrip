@@ -39,8 +39,8 @@ object V8SoundEngine {
     @Volatile var rumble = 0.85f          // amplitude da meia-ordem (ronco/lope do V8)
     @Volatile var loadBright = 1.0f       // quanta harmônica alta a carga adiciona (agressividade)
     @Volatile var regenVol = 0.5f         // volume relativo quando regenerando (freio-motor)
-    @Volatile var crackle = 0.75f         // intensidade dos estalos de overrun (soltar/regen)
-    @Volatile var popAccel = 0.55f        // estalos/cuspidas ao acelerar forte (WOT)
+    @Volatile var crackle = 0.9f          // intensidade dos estalos de overrun (soltar/regen)
+    @Volatile var popAccel = 0.8f         // estalos/cuspidas ao acelerar forte (WOT)
     @Volatile var rasp = 0.55f            // rasp/grit do escapamento mexido (drive/distorção)
     @Volatile var toneHz = 5200f          // corte do low-pass final (timbre: grave↔brilhante)
     @Volatile var firingOrder = 4f        // ordem de disparo dominante (V8=4, V10=5, V12=6, I6=3, I4=2)
@@ -63,7 +63,9 @@ object V8SoundEngine {
     private var lpPost = 0f            // low-pass PÓS-distorção (mata o fizz/xiado do soft-clip)
     private var popEnv = 0f
     private var popCoef = 0f
-    private var popPhase = 0.0        // thump grave do estalo
+    private var popPhase = 0.0        // fase do tom grave do estalo ("bap")
+    private var popFreq = 90.0        // "nota" do estalo (Hz), randomizada por evento
+    private var popClick = 0f         // envelope rápido (~2ms) do clique de ataque
     private var prevThr = 0f          // detecção de "soltar" (lift) entre blocos
     private var overrunSamples = 0    // janela de estalos após soltar
     private val rng = java.util.Random()
@@ -95,7 +97,7 @@ object V8SoundEngine {
     )
 
     val PRESETS = listOf(
-        EnginePreset("V8 Mexido",   4f, 650f, 6200f, 0.85f, 1.0f,  0.75f, 0.55f, 0.55f, 5200f, 2600f, 0.5f),
+        EnginePreset("V8 Mexido",   4f, 650f, 6200f, 0.85f, 1.0f,  0.9f,  0.8f,  0.55f, 5200f, 2600f, 0.5f),
         EnginePreset("V8 Muscle",   4f, 600f, 5800f, 1.10f, 0.8f,  0.55f, 0.40f, 0.45f, 3800f, 2400f, 0.5f),
         EnginePreset("V10 Super",   5f, 950f, 8500f, 0.30f, 1.0f,  0.45f, 0.50f, 0.45f, 6000f, 3200f, 0.45f),
         EnginePreset("V12",         6f, 700f, 7800f, 0.25f, 0.9f,  0.30f, 0.35f, 0.35f, 5600f, 3000f, 0.4f),
@@ -198,7 +200,7 @@ object V8SoundEngine {
             // "Soltou" o acelerador entre este bloco e o anterior → abre janela de
             // estalos de overrun (escapamento mexido cuspindo na desaceleração).
             val lift = prevThr - thr
-            if (on && lift > 0.10f && prevThr > 0.22f) overrunSamples = (SR * 0.6f).toInt()
+            if (on && lift > 0.06f && prevThr > 0.15f) overrunSamples = (SR * 1.1f).toInt()
             prevThr = thr
             // Overrun ativo: soltou há pouco OU está regenerando (freio-motor).
             val overrun = on && (overrunSamples > 0 || regen)
@@ -237,19 +239,26 @@ object V8SoundEngine {
                 // ── Estalos ("pops"/cuspidas) ──────────────────────────────────
                 // Dispara no OVERRUN (soltou/regen) e no acelerador FUNDO (WOT).
                 // Cada pop = burst de ruído + thump grave (~110 Hz), decaindo rápido.
-                val overrunFire = overrun && crackle > 0f && rng.nextFloat() < crackle * 0.0042f
-                val accelFire = !regen && load > 0.6f && popAccel > 0f && rng.nextFloat() < popAccel * 0.0026f
+                // Cada estalo = 1 evento discreto: tom grave decaindo ("bap") + clique
+                // curtíssimo de ataque. NÃO é ruído contínuo (isso virava xiado).
+                val overrunFire = overrun && crackle > 0f && rng.nextFloat() < crackle * 0.0013f
+                val accelFire = !regen && load > 0.45f && popAccel > 0f && rng.nextFloat() < popAccel * 0.0006f
                 if (overrunFire || accelFire) {
-                    popEnv = if (accelFire) 1.0f else 0.85f
-                    popCoef = 1f - exp(-1f / (SR * 0.018f))
+                    popEnv = if (accelFire) 1.0f else 0.9f
+                    popCoef = 1f - exp(-1f / (SR * 0.016f))   // corpo curto/seco ~16ms ("tá")
+                    popClick = 1f                             // clique de ataque (só no onset)
+                    popFreq = 90.0 + rng.nextFloat() * 90.0   // "nota" 90..180 Hz por evento
                     popPhase = 0.0
                 }
+                var popMix = 0f
                 if (popEnv > 0.0001f) {
-                    popPhase += 110.0 / SR
+                    popPhase += popFreq / SR
+                    val body = sin(2.0 * PI * popPhase).toFloat()          // tom grave = "tá"
+                    val click = (rng.nextFloat() - 0.5f) * 2f * popClick   // ruído SÓ no ataque
                     val amp = if (regen || overrunSamples > 0) crackle else popAccel
-                    val pop = ((rng.nextFloat() - 0.5f) * 2f) * 0.75f + sin(2.0 * PI * popPhase).toFloat() * 0.5f
-                    s += pop * popEnv * amp * 1.4f
+                    popMix = (body * 0.6f + click * 0.95f) * popEnv * amp  // mais ataque, menos ring = seco
                     popEnv -= popEnv * popCoef
+                    popClick -= popClick * 0.045f                          // clique some em ~1ms
                 }
 
                 // Low-pass (timbre) → drive/rasp mais suave → 2º low-pass PÓS-clip
@@ -258,7 +267,10 @@ object V8SoundEngine {
                 var o = lpState * 0.24f * vol * carGain
                 o = tanh(o * (1.15f + rasp * 1.6f))
                 lpPost += (o - lpPost) * lpA
-                buf[i] = (lpPost.coerceIn(-1f, 1f) * 32767f).toInt().toShort()
+                // O estalo entra PÓS-clip: senão a tanh esmagava e os low-pass borravam
+                // o transiente. Não escala por carGain/regenVol — mantém força no lift/regen.
+                val out = lpPost + popMix * 1.8f * vol * (if (on) 1f else 0f)
+                buf[i] = (out.coerceIn(-1f, 1f) * 32767f).toInt().toShort()
             }
             liveRpm = rpm
             liveThrottle = thr
