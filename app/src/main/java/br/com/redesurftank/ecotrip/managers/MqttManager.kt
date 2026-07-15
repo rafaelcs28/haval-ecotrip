@@ -3509,11 +3509,16 @@ class MqttManager private constructor() {
                         // ECU de clima recalcula o fan e o religa sozinho em ~2s quando o
                         // usuário desliga a ventilação (fan_speed=0) com o AUTO ligado.
                         // Mesmo comportamento do painel físico: mexeu no fan → sai do AUTO.
-                        if (control == "fan_speed" && latestHvacAutoEnable == 1) {
+                        // Não guarda mais por `latestHvacAutoEnable == 1`: esse cache pode
+                        // estar stale (a ECU já tá AUTO mas o APK ainda não recebeu o push
+                        // do estado novo). auto=0 idempotente + delay pra ECU aceitar antes
+                        // do fan é mais barato que perder o comando.
+                        if (control == "fan_speed") {
                             try {
                                 if (car.requestSetting(key = "car.hvac.auto_enable", value = "0")) {
                                     latestHvacAutoEnable = 0
                                     AppLogger.i(TAG, "HVAC: AUTO desligado antes de aplicar fan manual (evita override da ECU)")
+                                    Thread.sleep(300)   // deixa a ECU processar o auto=0 antes de receber o fan
                                 }
                             } catch (e: Exception) { AppLogger.w(TAG, "HVAC: desligar AUTO falhou: ${e.message}") }
                         }
