@@ -512,15 +512,25 @@ async function _handleNotifyAction(rule) {
     await send(a.title || `Trânsito ruim, ${who} vai atrasar`,
                `Saindo agora. ETA ${hhmm} · trânsito +${delta} min acima do normal (baseline ${baseline}min).`,
                ['car', 'hourglass']);
-    // Canal LA: reaproveita o Shared Trip LA que hoje é disparado manual pelo Rafael.
-    // Cria share token programático (role='grasi', dest="Casa") e inicia a LA — a
-    // Grasi vê o card no Grasi Recarga com ETA/destino atualizando sozinho durante
-    // toda a viagem. Ao chegar (rule arrived_home), a LA é encerrada.
+    // Canal LA: usa APENAS Shared Trip LA que Rafael JÁ tinha criado manualmente
+    // pra Grasi (role='grasi'). NÃO cria share automaticamente — se ele não
+    // compartilhou, silêncio (assume que não quer avisar essa viagem).
     if (wantLa && apnsLive.enabled) {
-      try {
-        const share = _createShareToken(180, { recipientName: 'Grasi', recipientRole: 'grasi', destName: 'Casa' });
-        await _startSharedTripLA(share.token, who);
-      } catch (e) { console.warn('[notify] LA start falhou:', e.message); }
+      const active = Object.entries(_sharedTripLAs).filter(([tok, st]) => {
+        const tk = _shareTokens[tok];
+        return st.laActive && tk && tk.recipientRole === 'grasi' && tk.expiresMs > Date.now();
+      });
+      if (active.length === 0) {
+        console.log('[notify] traffic_delay: sem share ativa pra Grasi — pula LA');
+      } else for (const [, st] of active) {
+        try {
+          const cs = _sharedTripContentState(st.recipientName); cs.from = st.from;
+          await apnsLive.pushUpdate(SHARED_TRIP_LA_TYPE, {}, cs, {
+            alert: { title: `⚠️ Trânsito ruim, ${who} vai atrasar`,
+                     body: `ETA ${hhmm} · +${delta} min acima do normal.` },
+          });
+        } catch (e) { console.warn('[notify] LA delay update falhou:', e.message); }
+      }
     }
     return;
   }
@@ -529,11 +539,17 @@ async function _handleNotifyAction(rule) {
     await send(a.title || `${who} chegou em casa`,
                a.body || `${who} chegou em casa às ${hhmm}.`,
                ['house']);
-    // Canal LA: encerra qualquer Shared Trip LA ativa com estado final + alerta
-    // "chegou em casa". Grasi vê o card virar "concluído" e recebe o banner.
+    // Canal LA: só encerra se existir Shared Trip LA ativa pra Grasi (Rafael
+    // compartilhou antes de sair). Sem share, silêncio.
     if (wantLa && apnsLive.enabled) {
       const finalAlert = { title: a.title || `${who} chegou em casa`, body: a.body || `Chegada às ${hhmm}.` };
-      for (const [tok, st] of Object.entries(_sharedTripLAs)) {
+      const active = Object.entries(_sharedTripLAs).filter(([tok, st]) => {
+        const tk = _shareTokens[tok];
+        return st.laActive && tk && tk.recipientRole === 'grasi' && tk.expiresMs > Date.now();
+      });
+      if (active.length === 0) {
+        console.log('[notify] arrived_home: sem share ativa pra Grasi — pula LA');
+      } else for (const [tok, st] of active) {
         try {
           const cs = _sharedTripContentState(st.recipientName);
           cs.from = st.from; cs.destName = 'Casa'; cs.active = false;
