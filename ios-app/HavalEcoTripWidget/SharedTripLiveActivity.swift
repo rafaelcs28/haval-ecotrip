@@ -9,6 +9,22 @@ import SwiftUI
 import WidgetKit
 
 private let stripAccent = Color(red: 0.30, green: 0.80, blue: 0.95)   // ciano
+private let delayAccent = Color(red: 0.98, green: 0.72, blue: 0.20)   // âmbar (trânsito ruim)
+
+/// Pill "Atraso de X min hoje" — só quando o bridge devolve delayMin > threshold
+/// (5min). Escondida em delay ≤ 5min (dentro do normal) ou nil (sem cálculo).
+@ViewBuilder
+private func delayPill(_ delayMin: Int?) -> some View {
+    if let d = delayMin, d > 5 {
+        HStack(spacing: 4) {
+            Image(systemName: "exclamationmark.triangle.fill").font(.caption2)
+            Text("Atraso de \(d) min hoje").font(.caption2).bold()
+        }
+        .padding(.horizontal, 8).padding(.vertical, 4)
+        .background(delayAccent.opacity(0.22), in: Capsule())
+        .foregroundStyle(delayAccent)
+    }
+}
 
 private func stripEta(_ min: Int) -> String {
     guard min > 0 else { return "—" }
@@ -59,7 +75,7 @@ struct SharedTripLiveActivity: Widget {
                             .font(.caption2).foregroundStyle(stripAccent)
                             .lineLimit(1).minimumScaleFactor(0.6)
                         Spacer(minLength: 4)
-                        Text("Toque pra abrir").font(.caption2).foregroundStyle(.secondary)
+                        delayPill(s.delayMin)
                     }
                 }
             } compactLeading: {
@@ -94,6 +110,8 @@ struct SharedTripLockScreenView: View {
                     Image(systemName: "mappin.and.ellipse").font(.caption).foregroundStyle(.secondary)
                     Text("Indo pra \(state.destName)").font(.subheadline)
                         .foregroundStyle(.primary).lineLimit(1).minimumScaleFactor(0.7)
+                    Spacer(minLength: 4)
+                    delayPill(state.delayMin)
                 }
             }
             HStack(alignment: .firstTextBaseline, spacing: 12) {

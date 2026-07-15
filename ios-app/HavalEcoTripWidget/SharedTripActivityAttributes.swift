@@ -25,6 +25,11 @@ struct SharedTripActivityAttributes: ActivityAttributes {
         var socPct:       Int        // SOC % do carro
         var moving:       Bool       // carro andando agora
         var active:       Bool       // false quando share expira/revoga
+        // Delay em min vs baseline histórico do mesmo dia da semana. Positivo =
+        // trânsito acima do normal; ≤0 = normal ou melhor. nil = sem cálculo
+        // disponível (rota desconhecida ou fora de horário) → LA esconde a pill.
+        // Optional em Codable = apps velhos ignoram o campo, sem regressão.
+        var delayMin:     Int?
         var updatedAtMs:  Double
         var updatedAt: Date { Date(timeIntervalSince1970: updatedAtMs / 1000.0) }
     }

@@ -399,6 +399,17 @@ function _ntfy(title, body, priority = 'default', tags = [], urlOverride = null)
   req.end();
 }
 
+// Snapshot de trânsito: cada vez que a rule traffic_delay dispara (Rafael saiu
+// do trabalho), grava um registro pra auditoria. Rolling 200 entradas.
+const TRAFFIC_SNAPSHOTS_FILE = path.join(DATA_DIR, 'traffic_snapshots.json');
+let _trafficSnapshots = [];
+try { _trafficSnapshots = JSON.parse(fs.readFileSync(TRAFFIC_SNAPSHOTS_FILE, 'utf8')) || []; } catch (_) {}
+function _appendTrafficSnapshot(snap) {
+  _trafficSnapshots.push(snap);
+  if (_trafficSnapshots.length > 200) _trafficSnapshots.splice(0, _trafficSnapshots.length - 200);
+  try { atomicWriteFileSync(TRAFFIC_SNAPSHOTS_FILE, JSON.stringify(_trafficSnapshots)); } catch (_) {}
+}
+
 // Baseline dinâmico: mediana de timeSec das últimas viagens que começaram próximo
 // de `from` E terminaram próximo de `to`, no MESMO dia da semana. Serve pro
 // traffic_delay comparar "está atrasado?" com o normal DAQUELE dia. Null se
@@ -512,26 +523,17 @@ async function _handleNotifyAction(rule) {
     await send(a.title || `Trânsito ruim, ${who} vai atrasar`,
                `Saindo agora. ETA ${hhmm} · trânsito +${delta} min acima do normal (baseline ${baseline}min).`,
                ['car', 'hourglass']);
-    // Canal LA: usa APENAS Shared Trip LA que Rafael JÁ tinha criado manualmente
-    // pra Grasi (role='grasi'). NÃO cria share automaticamente — se ele não
-    // compartilhou, silêncio (assume que não quer avisar essa viagem).
-    if (wantLa && apnsLive.enabled) {
-      const active = Object.entries(_sharedTripLAs).filter(([tok, st]) => {
-        const tk = _shareTokens[tok];
-        return st.laActive && tk && tk.recipientRole === 'grasi' && tk.expiresMs > Date.now();
-      });
-      if (active.length === 0) {
-        console.log('[notify] traffic_delay: sem share ativa pra Grasi — pula LA');
-      } else for (const [, st] of active) {
-        try {
-          const cs = _sharedTripContentState(st.recipientName); cs.from = st.from;
-          await apnsLive.pushUpdate(SHARED_TRIP_LA_TYPE, {}, cs, {
-            alert: { title: `⚠️ Trânsito ruim, ${who} vai atrasar`,
-                     body: `ETA ${hhmm} · +${delta} min acima do normal.` },
-          });
-        } catch (e) { console.warn('[notify] LA delay update falhou:', e.message); }
-      }
-    }
+    // Snapshot pra auditoria: fica salvo aqui mesmo se não houver share ativa.
+    // A LA (quando Rafael compartilhar) puxa delayMin do cs — não precisamos
+    // pushar alert-banner separado. Silêncio > ruído.
+    _appendTrafficSnapshot({
+      ts: Date.now(), from, to, etaMin, baseline, source, threshold, delta,
+      shared: wantLa && Object.values(_sharedTripLAs).some(st => {
+        const tk = _shareTokens[st.token]; return st.laActive && tk && tk.recipientRole === 'grasi';
+      }),
+    });
+    // Nada mais a fazer no LA aqui — o _evalSharedTripLAs vai pegar o delayMin
+    // no próximo ciclo (≤20s) e atualizar a LA da Grasi se ela estiver ativa.
     return;
   }
   if (tpl === 'arrived_home') {
@@ -11791,6 +11793,20 @@ const SHARED_TRIP_LA_TYPE = 'SharedTripActivityAttributes';
 // { token: { token, from, startedMs, lastPushMs, laActive } }
 const _sharedTripLAs = {};
 
+// Cache do baseline pra não escanear autotrips/ a cada eval (20s). Chave =
+// "startRounded→endRounded_dow"; TTL 30min. Sobrevive à vida útil de um share.
+const _baselineCache = new Map();   // key → { minMedian, samples, until }
+function _baselineFor(from, to) {
+  if (!from || !to || from.lat == null || to.lat == null) return null;
+  const round = (v) => (Math.round(v * 200) / 200).toFixed(3);   // grade ~500m
+  const k = `${round(from.lat)},${round(from.lng)}→${round(to.lat)},${round(to.lng)}_${new Date().getDay()}`;
+  const c = _baselineCache.get(k);
+  if (c && c.until > Date.now()) return c;
+  const b = _dynamicTrafficBaseline(from, to);
+  if (b) { const rec = { ...b, until: Date.now() + 30 * 60_000 }; _baselineCache.set(k, rec); return rec; }
+  return null;
+}
+
 function _sharedTripContentState(recipientName) {
   // Lê o estado do carro pra montar o cs da LA.
   // Prioridade do "destino" mostrado:
@@ -11800,17 +11816,28 @@ function _sharedTripContentState(recipientName) {
   const a = state.arrival || {};
   const speed = +state.speed_kmh || 0;
   const hasNavDest = !!(a.name && (a.distKm != null) && (a.etaMin != null));
-  let destName, etaMin, distKm;
+  let destName, etaMin, distKm, destLat, destLng;
   if (hasNavDest) {
     destName = a.name;
     etaMin = Math.round(+a.etaMin || 0);
     distKm = +(+a.distKm || 0).toFixed(1);
+    destLat = +a.lat; destLng = +a.lng;
   } else if (_routeToPhone.etaMin != null && _routeToPhone.distKm != null) {
     destName = recipientName || 'você';
     etaMin = Math.round(_routeToPhone.etaMin);
     distKm = +_routeToPhone.distKm.toFixed(1);
+    destLat = _routeToPhone.lat; destLng = _routeToPhone.lng;
   } else {
     destName = ''; etaMin = 0; distKm = 0;
+  }
+  // delayMin: diferença entre ETA agora e mediana histórica do MESMO dow p/ o
+  // par (posição-atual → destino). Só faz sentido se temos ETA e coords válidas.
+  // null quando não há amostras suficientes → LA não mostra a pill.
+  let delayMin = null;
+  const carLat = +state.gps_lat, carLng = +state.gps_lng;
+  if (etaMin > 0 && Number.isFinite(carLat) && Number.isFinite(destLat)) {
+    const base = _baselineFor({ lat: carLat, lng: carLng }, { lat: destLat, lng: destLng });
+    if (base) delayMin = etaMin - base.minMedian;
   }
   return {
     from: '',   // preenchido no caller (pega de attrs)
@@ -11820,6 +11847,7 @@ function _sharedTripContentState(recipientName) {
     socPct: Math.round(+state.soc_pct || 0),
     moving: speed > 3,
     active: true,
+    delayMin,
     updatedAtMs: Date.now(),
   };
 }
