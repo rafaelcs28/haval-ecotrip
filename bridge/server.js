@@ -15975,9 +15975,38 @@ function _detectConnFlapping(now) {
   }
 }
 
+// Detector de crash-loop do APK do carro. Cada reconnect (LWT dropped +
+// resurrect) empilha um timestamp. Se atingir ≥4 em 15min, dispara alerta
+// pedindo pra o dono fazer força-parada no carro. Sai do alerta sozinho
+// quando reconecta calmo (≤1 evento na janela).
+const _apkRestartTs = [];
+let _apkCrashLoopFiring = false;
+function _recordApkReconnect(now) {
+  _apkRestartTs.push(now);
+  while (_apkRestartTs.length && (now - _apkRestartTs[0]) > 15 * 60_000) _apkRestartTs.shift();
+  if (_apkRestartTs.length >= 4 && !_apkCrashLoopFiring) {
+    _apkCrashLoopFiring = true;
+    _alert('apk_crash_loop', true, 'APK Haval em crash loop',
+      `${_apkRestartTs.length} reconexões do APK em 15min — provável zumbi pós-OTA. Força-parada e reabra o EcoTrip no carro.`,
+      'high', ['warning', 'car']);
+  }
+}
+setInterval(() => {
+  const now = Date.now();
+  while (_apkRestartTs.length && (now - _apkRestartTs[0]) > 15 * 60_000) _apkRestartTs.shift();
+  if (_apkCrashLoopFiring && _apkRestartTs.length <= 1) {
+    _apkCrashLoopFiring = false;
+    _alert('apk_crash_loop', false, 'APK Haval em crash loop', '', 'default', []);
+  }
+}, 60_000);
+
 function applyMqttMessage(key, value, isRetained = false) {
   const _now = Date.now();
   if (!key.startsWith('cmd/')) {
+    // Crash-loop detector: se o APK estava mudo há >60s e volta agora, é um
+    // reconnect (LWT dropped + reconnect). ≥4 reconnects em 15min = zombie.
+    const wasStale = state.last_apk_ms && (_now - state.last_apk_ms > 60_000);
+    if (wasStale) _recordApkReconnect(_now);
     state.last_apk_ms  = _now;
     state.last_apk_key = key;
     if (!isRetained) {
