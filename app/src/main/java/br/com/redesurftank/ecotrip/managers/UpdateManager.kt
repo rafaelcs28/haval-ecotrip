@@ -212,6 +212,19 @@ class UpdateManager private constructor() {
                 }
                 AppLogger.i(TAG, "APK v$apkVersion confere com a release — trying silent install")
 
+                // Re-guarda-viagem: o download demora 10-30s. Se o motorista ligou
+                // o carro NESSA janela, `isDrivingReady/isAutoTripActive` no início
+                // eram false — mas agora podem ser true. Silent install mata o
+                // processo (killProcess) → APK morre no meio da viagem → LA
+                // congela + bridge marca offline. Verifica de novo AQUI, ANTES do
+                // Shizuku. Se em uso, aborta preservando o APK baixado; próximo
+                // tick de checkForUpdate (~10min) re-instala quando desligar.
+                val tm2 = TripManager.getInstance()
+                if (tm2.isAutoTripActive() || tm2.isDrivingReady()) {
+                    AppLogger.w(TAG, "OTA adiado no PRÉ-INSTALL: carro entrou em uso durante o download (autoTrip=${tm2.isAutoTripActive()} drivingReady=${tm2.isDrivingReady()}). APK fica em cache pro próximo tick.")
+                    return@submit
+                }
+
                 val silentOk = tryShizukuInstall(apkFile.absolutePath)
                 if (silentOk) {
                     AppLogger.i(TAG, "Instalação silenciosa concluída — encerrando processo para iniciar nova versão")
