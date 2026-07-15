@@ -59,6 +59,7 @@ object AutomationManager {
     private val lastFiredMs = HashMap<String, Long>()       // ruleId → último disparo
     private val lastFiredMinute = HashMap<String, Int>()    // ruleId → minuto do dia já disparado (time)
     private val lastFiredDay = HashMap<String, String>()    // ruleId → "yyyy-MM-dd" já disparado (time, persistido)
+    private val intervalLastMs = HashMap<String, Long>()    // ruleId → último check do "interval" (não persiste; sobrevive ao tick)
     private val geofenceLastInside = HashMap<String, Long>() // coordKey → última vez dentro (ms) — p/ condição "visited"
     private val lastSatisfiedMs = HashMap<String, Long>()    // "field|cmp|value" → última vez que o predicado foi verdadeiro (p/ condição "recent")
     private val condPrevPass = HashMap<String, Boolean>()    // ruleId → conditionsPass no tick anterior (detecta re-arme)
@@ -104,6 +105,7 @@ object AutomationManager {
                 lastFiredMs.keys.retainAll(ids)
                 lastFiredMinute.keys.retainAll(ids)
                 lastFiredDay.keys.retainAll(ids)
+                intervalLastMs.keys.retainAll(ids)
                 condPrevPass.keys.retainAll(ids)
                 firedThisWindow.keys.retainAll(ids)
                 stateTrigSatisfied.keys.retainAll(ids)
@@ -161,6 +163,7 @@ object AutomationManager {
                 val fire = when (r.trigger.type) {
                     "geofence" -> if (geoGps) checkGeofence(r, lat, lng) else false
                     "time"     -> if (stateKey == null) checkTime(r, now) else false
+                    "interval" -> if (stateKey == null) checkInterval(r, now) else false
                     "state"    -> {
                         if (stateKey == null) {
                             // Tick: lê o valor fresco do barramento e checa a borda — assim o
@@ -437,6 +440,37 @@ object AutomationManager {
         return true
     }
 
+    // Gatilho "interval": dispara a cada N min dentro da janela [hhmm..until_hhmm]
+    // em todos os dias listados (ou todos se days vazio). Diferente do "time", NÃO
+    // guarda 1x/dia — reavalia condições em cada janelinha. Ideal p/ "manter
+    // cortina fechada enquanto sol/temp alta durante a direção": se você reabriu
+    // manual, na próxima batida ele fecha de novo se ainda estiver quente.
+    // Se a regra usa `shade`, faz leitura ATIVA do nível atual da cortina via
+    // VehicleControlManager (a chave não vem pelo CAN listener) e injeta em `state`
+    // como `shade_level` pra o conditionsPass ter dado fresco.
+    private fun checkInterval(r: Rule, now: Long): Boolean {
+        val cal = java.util.Calendar.getInstance()
+        val minuteOfDay = cal.get(java.util.Calendar.HOUR_OF_DAY) * 60 + cal.get(java.util.Calendar.MINUTE)
+        val dow = cal.get(java.util.Calendar.DAY_OF_WEEK) - 1
+        if (r.trigger.days.isNotEmpty() && !r.trigger.days.contains(dow)) return false
+        val start = if (r.trigger.hhmm >= 0) r.trigger.hhmm else 0
+        val end = if (r.trigger.untilHhmm > start) r.trigger.untilHhmm else 1439
+        if (minuteOfDay < start || minuteOfDay > end) return false
+        val everyMs = maxOf(1, r.trigger.everyMin) * 60_000L
+        val lastMs = intervalLastMs[r.id] ?: 0L
+        if (now - lastMs < everyMs) return false
+        // Leitura ativa do shade se a regra depende dele (só chave que não chega no CAN).
+        try {
+            val usesShade = r.conditions?.items?.any { it.type == "compare" && it.field == "shade_level" } == true
+            if (usesShade) {
+                val lvl = VehicleControlManager.getShadeScreensLevel()
+                if (lvl != null) synchronized(lock) { state["shade_level"] = lvl.toString() }
+            }
+        } catch (e: Exception) { AppLogger.w(TAG, "interval: leitura shade falhou: ${e.message}") }
+        intervalLastMs[r.id] = now
+        return true
+    }
+
     // Gatilho "state": dispara quando o valor da chave passa a satisfazer cmp/value
     // (borda de subida — não estava satisfazendo antes desta mudança).
     private val stateTrigSatisfied = HashMap<String, Boolean>()
@@ -594,6 +628,7 @@ object AutomationManager {
         "shade"    -> VehicleControlManager.setShadeScreensLevel(a.level)
         "door"     -> VehicleControlManager.setDoorOpen(a.p1, a.p2)
         "request"  -> CarDataManager.getInstance().requestSetting(a.key, a.value)
+        "notify"   -> true    // execução real fica no bridge (recebe rules/fired e roteia ntfy/WhatsApp)
         else       -> false
     }
 
@@ -623,6 +658,7 @@ object AutomationManager {
                 afterRuleId = t.optString("after_rule_id", ""),
                 onlyIfSuccess = t.optBoolean("only_if_success", true),
                 untilHhmm = t.optInt("until_hhmm", -1),
+                everyMin = t.optInt("every_min", 0),
             )
             // Passos extras (sequência numa regra só): cada passo = atraso + condição
             // (observada por watch_s) + ação. Executados em ordem após a ação principal.
@@ -696,6 +732,7 @@ object AutomationManager {
         val afterRuleId: String = "",          // type "automation": dispara após esta regra executar
         val onlyIfSuccess: Boolean = true,      // só encadeia se a regra-origem executou com sucesso
         val untilHhmm: Int = -1,                // "time": limite superior da janela de disparo (minuto do dia); -1 = default 90min
+        val everyMin: Int = 0,                  // "interval": intervalo entre disparos (min) dentro da janela [hhmm..untilHhmm]
     )
     data class ConditionGroup(val op: String, val items: List<Condition>)
     data class VPoint(val lat: Double, val lng: Double, val radiusM: Double)

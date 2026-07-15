@@ -18,6 +18,8 @@ const { exec } = require('child_process');
 const webpush  = require('web-push');
 const apnsLive = require('./apns_live_activity');
 apnsLive.init();
+const impulseHelp = require('./impulse-help');
+const carHelp     = require('./car-help');
 
 // Sem isto, uma rejection/exception fora de rota (timer, callback MQTT, fetch em
 // background) derrubava o processo inteiro. Loga e segue — pm2 só reinicia em crash real.
@@ -217,7 +219,10 @@ function _pingMqtt() {
 }
 
 // ── Home Assistant health (polled a cada 30s) ────────────────────────────────
-const HA_HEALTH_URL = 'http://192.168.1.30:8123/api/';
+// URL vem do env pra usar a MESMA rota que o resto do bridge (evita split-brain
+// onde o probe cai mas o bridge segue acessando HA). Fallback só se env vazio.
+// process.env é lido a cada poll pelo mesmo motivo do token: TDZ (HA_URL como
+// const só é declarada bem depois no arquivo).
 let _haStatus    = { checked_at: 0, up: null, latency_ms: null, error: null };
 let _haFailCount = 0;
 function _pollHA() {
@@ -226,18 +231,35 @@ function _pollHA() {
   // a cada poll e pode banir o IP do bridge. Token lido de process.env porque
   // a const HA_TOKEN só é declarada depois deste ponto (TDZ no _pollHA inicial).
   const tok = process.env.HA_TOKEN || '';
+  const primary = (process.env.HA_URL || 'http://192.168.1.30:8123').replace(/\/$/, '');
+  // Fallback é a outra rota pra mesma VM: se HA_URL é a UTM shared (.64.3),
+  // tenta a LAN (.1.30) — e vice-versa. As duas rotas oscilam de forma
+  // independente (rota UTM stale via bridge sem IP; LAN flapa em WiFi/idle),
+  // então só reporta down se AMBAS falharem. Elimina falso positivo do monitor.
+  const fallback = /192\.168\.64\.3/.test(primary)
+    ? 'http://192.168.1.30:8123'
+    : 'http://192.168.64.3:8123';
   const opts = { timeout: 5000, headers: tok ? { Authorization: `Bearer ${tok}` } : {} };
-  const req = http.get(HA_HEALTH_URL, opts, res => {
-    res.resume();
+  const onSuccess = () => {
     _haFailCount = 0;
     _haStatus = { checked_at: Date.now(), up: true, latency_ms: Date.now() - t0, error: null };
-  });
+  };
   const onFail = (msg) => {
     _haFailCount++;
     _haStatus = { checked_at: Date.now(), up: _haFailCount >= 2 ? false : null, latency_ms: null, error: msg };
   };
-  req.on('error', e => onFail(e.message));
-  req.on('timeout', () => { req.destroy(); onFail('timeout'); });
+  const probe = (url, onDone) => {
+    const req = http.get(url + '/api/', opts, res => { res.resume(); onDone(null); });
+    req.on('error', e => onDone(e.message));
+    req.on('timeout', () => { req.destroy(); onDone('timeout'); });
+  };
+  probe(primary, (err1) => {
+    if (!err1) return onSuccess();
+    if (primary === fallback) return onFail(`${primary}: ${err1}`);
+    probe(fallback, (err2) => err2
+      ? onFail(`primary(${primary}): ${err1} · fallback(${fallback}): ${err2}`)
+      : onSuccess());
+  });
 }
 _pollHA();
 setInterval(_pollHA, 5_000);
@@ -339,10 +361,30 @@ function _inQuietHours() {
 // trata como wake: reseta o debounce e pula 1 ciclo pros pollers reamostrarem.
 const WAKE_GAP_MS      = 3 * 60_000;
 
-// alertId → { firing, firedAt, lastNotifiedAt }
+// alertId → { firing, firedAt, lastNotifiedAt, notified }
+// Persistido em disco pra sobreviver a restarts do bridge — senão a transição
+// firing→!firing (recovery) some quando o restart acontece entre a queda e a
+// recuperação, e o "Recuperado" nunca sai pro ntfy → empresa HA fica com badge
+// preso em "atenção".
+const ALERT_STATE_FILE = path.join(DATA_DIR, 'alert_state.json');
 const _alertState = new Map();
+try {
+  const raw = fs.readFileSync(ALERT_STATE_FILE, 'utf8');
+  for (const [k, v] of Object.entries(JSON.parse(raw))) _alertState.set(k, v);
+} catch (_) { /* primeira execução ou arquivo corrompido: começa vazio */ }
+let _alertStateSaveTimer = null;
+function _saveAlertState() {
+  if (_alertStateSaveTimer) return;               // debounce 500ms — muitas escritas por ciclo
+  _alertStateSaveTimer = setTimeout(() => {
+    _alertStateSaveTimer = null;
+    try {
+      const obj = Object.fromEntries(_alertState);
+      atomicWriteFileSync(ALERT_STATE_FILE, JSON.stringify(obj));
+    } catch (e) { /* não paralisa o bridge por falha de disco */ }
+  }, 500);
+}
 
-function _ntfy(title, body, priority = 'default', tags = []) {
+function _ntfy(title, body, priority = 'default', tags = [], urlOverride = null) {
   const bodyBuf = Buffer.from(body, 'utf8');
   const headers = {
     'Title':          title,
@@ -351,10 +393,58 @@ function _ntfy(title, body, priority = 'default', tags = []) {
     'Content-Length': bodyBuf.length,
   };
   if (tags.length) headers['Tags'] = tags.join(',');
-  const req = https.request(NTFY_URL, { method: 'POST', headers }, res => res.resume());
+  const req = https.request(urlOverride || NTFY_URL, { method: 'POST', headers }, res => res.resume());
   req.on('error', () => {});
   req.write(bodyBuf);
   req.end();
+}
+
+// Executa `action.type = "notify"` disparada por regra do APK. Templates conhecidos:
+//   • traffic_delay — mede ETA now vs baseline (Google Directions); só notifica se
+//     atrasado ≥ threshold. Evita ruído de "trânsito normal, saí do trabalho".
+//   • arrived_home — mensagem simples de chegada, formatada com hora local.
+//   • (fallback) usa title/body direto da regra sem processar.
+// Canal padrão = NTFY_URL do bridge. Regra pode sobrescrever com `action.ntfy_url`
+// pra roteamento por destinatário (ex.: canal separado da Grasi). WhatsApp via
+// whats-assistant fica em próxima iteração — hoje só ntfy.
+async function _handleNotifyAction(rule) {
+  const a = rule.action || {};
+  const tpl = a.template || '';
+  const url = a.ntfy_url || null;
+  const who = a.subject || 'Rafael';
+  if (tpl === 'traffic_delay') {
+    const from = a.from, to = a.to;
+    if (!from || !to || from.lat == null || to.lat == null) {
+      console.warn('[notify] traffic_delay sem from/to na regra', rule.id); return;
+    }
+    const route = await _fetchRoute(from.lat, from.lng, to.lat, to.lng);
+    if (!route) { console.warn('[notify] traffic_delay: rota indisponível'); return; }
+    const etaMin = Math.round(route.duration / 60);
+    const baseline = +a.baseline_min || 27;
+    const threshold = +a.threshold_min || 10;
+    const delta = etaMin - baseline;
+    if (delta < threshold) {
+      console.log(`[notify] traffic_delay skip: eta=${etaMin} baseline=${baseline} delta=${delta} < ${threshold}`);
+      return;
+    }
+    const arrive = new Date(Date.now() + route.duration * 1000);
+    const hhmm = arrive.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    _ntfy(a.title || `Trânsito ruim, ${who} vai atrasar`,
+          `Saindo agora. ETA ${hhmm} · trânsito +${delta} min acima do normal.`,
+          'default', ['car', 'hourglass'], url);
+    return;
+  }
+  if (tpl === 'arrived_home') {
+    const hhmm = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    _ntfy(a.title || `${who} chegou em casa`,
+          a.body || `${who} chegou em casa às ${hhmm}.`,
+          'default', ['house'], url);
+    return;
+  }
+  // Custom (title + body direto da regra).
+  if (a.title || a.body) {
+    _ntfy(a.title || rule.name || 'Automação', a.body || '', 'default', ['bell'], url);
+  }
 }
 
 // Alertas cuja NOTIFICAÇÃO é delegada ao it-agent: ele tenta corrigir (ts/mqtt/pm2)
@@ -414,6 +504,7 @@ function _alert(id, firing, title, body, priority = 'default', tags = [], opts =
   } else if (!firing) {
     _alertState.set(id, { firing: false, firedAt: 0, lastNotifiedAt: 0, notified: false });
   }
+  _saveAlertState();   // persiste após qualquer transição pra sobreviver a restart
 }
 
 let _lastRestartCount = 0;
@@ -559,7 +650,7 @@ function _checkAlerts() {
   _alert('broker_ports', brokerPortDown && !localBlind, 'Mosquitto porta inacessivel', brokerMsg, 'high', ['electric_plug'], { silent: true });
 
   // 5. Home Assistant down
-  _alert('ha_down', _haStatus.up === false && !localBlind, 'Home Assistant offline', _haStatus.error || 'Sem resposta em 192.168.1.30:8123', 'high', ['house'], { silent: true });
+  _alert('ha_down', _haStatus.up === false && !localBlind, 'Home Assistant offline', _haStatus.error || `Sem resposta em ${process.env.HA_URL || '192.168.1.30:8123'}`, 'high', ['house'], { silent: true });
 
   // 5. Tailscale não Running
   const tsDown = _tsStatus.backend !== null && _tsStatus.backend !== 'Running';
@@ -4607,6 +4698,12 @@ app.post('/api/auth/apple/login', async (req, res) => {
   console.log(`[auth] login Apple OK · ${email}`);
   res.json({ ok: true, token: BRIDGE_TOKEN_HASH, email });
 });
+
+// impulse-help: registrado ANTES do middleware blanket abaixo — rotas públicas
+// (/status, /oauth/callback, /ask) ficam acessíveis; /oauth/start e /refresh já
+// pegam requireAuth inline dentro do módulo.
+impulseHelp.install(app, { requireAuth });
+carHelp.install(app);
 
 // requireAuth: aplica a toda a API exceto /api/push/* (SW não consegue enviar headers)
 // e rotas de auth públicas (login, google, status).
@@ -10839,6 +10936,12 @@ mqttClient.on('message', (topic, payload, packet) => {
       try {
         const ev = JSON.parse(value);
         _logAutoEvent({ rule_id: ev.id, name: ev.name, phase: 'apk-fired', ok: ev.ok !== false, source: 'apk' });
+        // Ação "notify" é rodada aqui: APK não tem ntfy/WhatsApp, só publica o
+        // rules/fired. Bridge acha a regra pelo id e executa o template.
+        const rule = (automationRules || []).find(r => r.id === ev.id);
+        if (rule && rule.action && rule.action.type === 'notify' && ev.ok !== false) {
+          _handleNotifyAction(rule).catch(e => console.warn('[notify]', e.message));
+        }
       } catch (_) {}
     }
     return;
@@ -14542,7 +14645,87 @@ function _speedLimitAtStart(legs) {
   }
   return null;
 }
+// ── Google Directions (primária quando GOOGLE_DIRECTIONS_KEY existe) ────────
+// Google usa Encoded Polyline (base ASCII) ao invés de GeoJSON — precisamos
+// decodificar. Formato normalizado devolvido bate com o do Mapbox pra os 3
+// fetchers abaixo consumirem sem branch. Speed limit fica null (Google Directions
+// não devolve maxspeed; isso só sai da Roads API paga à parte).
+function _decodePolyline(str) {
+  const out = [];
+  let i = 0, lat = 0, lng = 0;
+  const s = String(str || '');
+  while (i < s.length) {
+    let b, shift = 0, result = 0;
+    do { b = s.charCodeAt(i++) - 63; result |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
+    lat += (result & 1) ? ~(result >> 1) : (result >> 1);
+    shift = 0; result = 0;
+    do { b = s.charCodeAt(i++) - 63; result |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
+    lng += (result & 1) ? ~(result >> 1) : (result >> 1);
+    out.push([lng / 1e5, lat / 1e5]);
+  }
+  return out;
+}
+function _stripHtml(x) { return String(x || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim(); }
+function _googleManeuverToMbx(m) {
+  const parts = String(m || '').split('-');
+  return { type: parts[0] || '', modifier: parts.slice(1).join('-') || '' };
+}
+// points = [[lng,lat], …] ≥2. Devolve array de rotas normalizadas OU null.
+async function _googleDirections(points, opts = {}) {
+  const key = process.env.GOOGLE_DIRECTIONS_KEY;
+  if (!key || !Array.isArray(points) || points.length < 2) return null;
+  const p = new URLSearchParams();
+  p.set('origin', `${points[0][1]},${points[0][0]}`);
+  p.set('destination', `${points[points.length - 1][1]},${points[points.length - 1][0]}`);
+  const wps = points.slice(1, -1);
+  if (wps.length) p.set('waypoints', wps.map(w => `${w[1]},${w[0]}`).join('|'));
+  if (opts.alternatives) p.set('alternatives', 'true');
+  p.set('language', 'pt-BR');
+  p.set('departure_time', 'now');   // libera duration_in_traffic
+  p.set('key', key);
+  try {
+    const r = await fetch(`https://maps.googleapis.com/maps/api/directions/json?${p}`, { signal: AbortSignal.timeout(9000) });
+    const j = await r.json();
+    if (j.status !== 'OK' || !j.routes || !j.routes.length) {
+      console.warn('[route] Google sem rota:', j.status, j.error_message || '');
+      return null;
+    }
+    return j.routes.map(rt => {
+      const legs = rt.legs || [];
+      const distance = legs.reduce((s, l) => s + ((l.distance && l.distance.value) || 0), 0);
+      const duration = legs.reduce((s, l) => s + (((l.duration_in_traffic || l.duration) || {}).value || 0), 0);
+      const mbxLegs = legs.map(l => ({
+        distance: (l.distance && l.distance.value) || 0,
+        duration: ((l.duration_in_traffic || l.duration) || {}).value || 0,
+        summary: l.summary || '',
+        steps: (l.steps || []).map(s => ({
+          name: _stripHtml(s.html_instructions).slice(0, 60),
+          maneuver: {
+            ..._googleManeuverToMbx(s.maneuver),
+            instruction: _stripHtml(s.html_instructions),
+            location: [(s.start_location && s.start_location.lng), (s.start_location && s.start_location.lat)],
+          },
+        })),
+      }));
+      return {
+        distance, duration,
+        coords: _decodePolyline(rt.overview_polyline && rt.overview_polyline.points),
+        traffic: true,
+        legs: mbxLegs,
+        maneuvers: _stepsToManeuvers(mbxLegs),
+        speedLimit: null,
+        summary: mbxLegs.map(l => l.summary).filter(Boolean).slice(0, 2).join(', '),
+      };
+    });
+  } catch (e) {
+    console.warn('[route] Google falhou:', e.message);
+    return null;
+  }
+}
+
 async function _fetchRoute(fromLat, fromLng, toLat, toLng) {
+  const g = await _googleDirections([[fromLng, fromLat], [toLng, toLat]]);
+  if (g && g[0]) return g[0];
   const tok = process.env.MAPBOX_TOKEN;
   if (tok) {
     try {
@@ -14612,6 +14795,8 @@ async function _routeElevation(fromLat, fromLng, toLat, toLng) {
 // Rota com paradas (waypoints). points = [[lng,lat], …] (≥2). Mapbox/OSRM aceitam
 // coordenadas `;`-separadas e devolvem `legs[]` (uma por trecho origem→parada→…→destino).
 async function _fetchRouteMulti(points) {
+  const g = await _googleDirections(points);
+  if (g && g[0]) return g[0];
   const coordStr = points.map(p => `${p[0]},${p[1]}`).join(';');
   const tok = process.env.MAPBOX_TOKEN;
   if (tok) {
@@ -14643,6 +14828,8 @@ async function _fetchRouteMulti(points) {
 // Igual ao _fetchRouteMulti, mas pede ALTERNATIVAS (alternatives=true) e devolve um
 // array de rotas (até 3). Cada item no mesmo formato do _fetchRouteMulti.
 async function _fetchRouteAlts(points) {
+  const g = await _googleDirections(points, { alternatives: true });
+  if (g && g.length) return g;
   const coordStr = points.map(p => `${p[0]},${p[1]}`).join(';');
   // Resumo das vias principais (Mapbox/OSRM põem em legs[].summary com steps=true):
   // junta as vias únicas das pernas e devolve as 2 maiores ("BR-153, Avenida 85").
