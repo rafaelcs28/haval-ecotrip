@@ -399,19 +399,89 @@ function _ntfy(title, body, priority = 'default', tags = [], urlOverride = null)
   req.end();
 }
 
+// Baseline dinâmico: mediana de timeSec das últimas viagens que começaram próximo
+// de `from` E terminaram próximo de `to`, no MESMO dia da semana. Serve pro
+// traffic_delay comparar "está atrasado?" com o normal DAQUELE dia. Null se
+// não há amostras suficientes — caller cai no baseline_min fixo da regra.
+function _dynamicTrafficBaseline(from, to, opts = {}) {
+  const matchM = opts.matchM || 500;              // raio de pareamento (m)
+  const days = opts.days || 60;                   // janela histórica
+  const minSamples = opts.minSamples || 3;        // mínimo pra confiar na mediana
+  const dow = new Date().getDay();                // 0=Dom..6=Sáb (JS)
+  const cutoffMs = Date.now() - days * 24 * 3600 * 1000;
+  const dir = path.join(DATA_DIR, 'autotrips');
+  let files = [];
+  try { files = fs.readdirSync(dir).filter(f => f.endsWith('.json')); } catch { return null; }
+  const secs = [];
+  const hav = (a, b, c, d) => {
+    const R = 6_371_000, r = x => x * Math.PI / 180;
+    const dLat = r(c - a), dLon = r(d - b);
+    const h = Math.sin(dLat / 2) ** 2 + Math.cos(r(a)) * Math.cos(r(c)) * Math.sin(dLon / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(h));
+  };
+  for (const f of files) {
+    try {
+      const t = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')).autoTrip;
+      if (!t || !t.timeSec || !t.startLat || !t.endLat || !t.endMs) continue;
+      if (t.endMs < cutoffMs) continue;
+      if (new Date(t.endMs).getDay() !== dow) continue;
+      if (hav(t.startLat, t.startLng, from.lat, from.lng) > matchM) continue;
+      if (hav(t.endLat, t.endLng, to.lat, to.lng) > matchM) continue;
+      secs.push(t.timeSec);
+    } catch (_) {}
+  }
+  if (secs.length < minSamples) return null;
+  secs.sort((a, b) => a - b);
+  const median = secs[Math.floor(secs.length / 2)];
+  return { minMedian: Math.round(median / 60), samples: secs.length };
+}
+
+// Envia mensagem WhatsApp via whats-assistant Mari (POST /api/say com basic auth).
+// Env do bridge: WA_ASSIST_URL, WA_ASSIST_USER, WA_ASSIST_PASS. jid vem por rule
+// (action.jid) ou fallback env WA_FAMILY_JID.
+async function _waSend(jid, text) {
+  const base = process.env.WA_ASSIST_URL;
+  const user = process.env.WA_ASSIST_USER, pass = process.env.WA_ASSIST_PASS;
+  if (!base || !jid) { console.warn('[notify] whatsapp: WA_ASSIST_URL ou jid ausente'); return false; }
+  const auth = user && pass ? 'Basic ' + Buffer.from(`${user}:${pass}`).toString('base64') : null;
+  try {
+    const r = await fetch(base.replace(/\/$/, '') + '/api/say', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(auth ? { Authorization: auth } : {}) },
+      body: JSON.stringify({ jid, text }),
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!r.ok) { console.warn('[notify] whatsapp HTTP', r.status); return false; }
+    return true;
+  } catch (e) { console.warn('[notify] whatsapp erro:', e.message); return false; }
+}
+
 // Executa `action.type = "notify"` disparada por regra do APK. Templates conhecidos:
-//   • traffic_delay — mede ETA now vs baseline (Google Directions); só notifica se
-//     atrasado ≥ threshold. Evita ruído de "trânsito normal, saí do trabalho".
+//   • traffic_delay — mede ETA now vs baseline (Google Directions). Baseline vem
+//     do drive_history via _dynamicTrafficBaseline se houver ≥3 viagens no mesmo
+//     dow, senão cai no `baseline_min` fixo da regra. Só notifica se atrasado
+//     ≥ threshold. Evita ruído de "trânsito normal, saí do trabalho".
 //   • arrived_home — mensagem simples de chegada, formatada com hora local.
 //   • (fallback) usa title/body direto da regra sem processar.
-// Canal padrão = NTFY_URL do bridge. Regra pode sobrescrever com `action.ntfy_url`
-// pra roteamento por destinatário (ex.: canal separado da Grasi). WhatsApp via
-// whats-assistant fica em próxima iteração — hoje só ntfy.
+// Canal: `action.channel` = "ntfy" (default) | "whatsapp" | "both".
+//   ntfy topic: `action.ntfy_url` OU env NTFY_FAMILY_URL OU NTFY_URL.
+//   whatsapp: usa Mari (whats-assistant) via WA_ASSIST_URL; JID de `action.jid`
+//   ou env WA_FAMILY_JID.
 async function _handleNotifyAction(rule) {
   const a = rule.action || {};
   const tpl = a.template || '';
-  const url = a.ntfy_url || null;
+  const channel = a.channel || 'ntfy';                                       // "ntfy" | "whatsapp" | "both"
+  const ntfyUrl = a.ntfy_url || process.env.NTFY_FAMILY_URL || NTFY_URL;
+  const jid = a.jid || process.env.WA_FAMILY_JID;
   const who = a.subject || 'Rafael';
+  // Helper que respeita o canal escolhido.
+  const send = async (title, body, tags = ['bell']) => {
+    if (channel === 'ntfy' || channel === 'both') _ntfy(title, body, 'default', tags, ntfyUrl);
+    if (channel === 'whatsapp' || channel === 'both') {
+      const text = title ? `*${title}*\n${body}` : body;
+      await _waSend(jid, text);
+    }
+  };
   if (tpl === 'traffic_delay') {
     const from = a.from, to = a.to;
     if (!from || !to || from.lat == null || to.lat == null) {
@@ -420,30 +490,32 @@ async function _handleNotifyAction(rule) {
     const route = await _fetchRoute(from.lat, from.lng, to.lat, to.lng);
     if (!route) { console.warn('[notify] traffic_delay: rota indisponível'); return; }
     const etaMin = Math.round(route.duration / 60);
-    const baseline = +a.baseline_min || 27;
+    const dyn = _dynamicTrafficBaseline(from, to);
+    const baseline = (dyn && dyn.minMedian) || +a.baseline_min || 27;
+    const source = dyn ? `histórico dow (${dyn.samples})` : `fixo ${baseline}min`;
     const threshold = +a.threshold_min || 10;
     const delta = etaMin - baseline;
     if (delta < threshold) {
-      console.log(`[notify] traffic_delay skip: eta=${etaMin} baseline=${baseline} delta=${delta} < ${threshold}`);
+      console.log(`[notify] traffic_delay skip: eta=${etaMin} baseline=${baseline} (${source}) delta=${delta} < ${threshold}`);
       return;
     }
     const arrive = new Date(Date.now() + route.duration * 1000);
     const hhmm = arrive.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-    _ntfy(a.title || `Trânsito ruim, ${who} vai atrasar`,
-          `Saindo agora. ETA ${hhmm} · trânsito +${delta} min acima do normal.`,
-          'default', ['car', 'hourglass'], url);
+    await send(a.title || `Trânsito ruim, ${who} vai atrasar`,
+               `Saindo agora. ETA ${hhmm} · trânsito +${delta} min acima do normal (baseline ${baseline}min).`,
+               ['car', 'hourglass']);
     return;
   }
   if (tpl === 'arrived_home') {
     const hhmm = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-    _ntfy(a.title || `${who} chegou em casa`,
-          a.body || `${who} chegou em casa às ${hhmm}.`,
-          'default', ['house'], url);
+    await send(a.title || `${who} chegou em casa`,
+               a.body || `${who} chegou em casa às ${hhmm}.`,
+               ['house']);
     return;
   }
   // Custom (title + body direto da regra).
   if (a.title || a.body) {
-    _ntfy(a.title || rule.name || 'Automação', a.body || '', 'default', ['bell'], url);
+    await send(a.title || rule.name || 'Automação', a.body || '', ['bell']);
   }
 }
 
