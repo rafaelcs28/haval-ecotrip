@@ -425,10 +425,13 @@ object AutomationManager {
             cal.get(java.util.Calendar.YEAR),
             cal.get(java.util.Calendar.MONTH) + 1,
             cal.get(java.util.Calendar.DAY_OF_MONTH))
-        if (lastFiredDay[r.id] == today) return false            // já disparou hoje (dispensa refire minuto-a-minuto)
+        if (lastFiredDay[r.id] == today) return false            // já disparou hoje (respeita override manual: se fechou às 10h e o dono abriu, não fecha de novo)
         val delta = minuteOfDay - r.trigger.hhmm
         if (delta < 0) return false                              // ainda não chegou a hora hoje
-        if (delta > CATCHUP_WINDOW_MIN) return false             // atrasou demais (ex.: ligou o carro 3h depois) — cancela pra evitar disparo tarde da noite
+        // Janela: se `until_hhmm` vier na regra, usa essa faixa (ex.: 10:00-16:00 = 360min).
+        // Senão cai no default 90min (compat com regras antigas sem até).
+        val window = if (r.trigger.untilHhmm > r.trigger.hhmm) (r.trigger.untilHhmm - r.trigger.hhmm) else CATCHUP_WINDOW_MIN
+        if (delta > window) return false                         // fora da janela — não fira mais hoje
         lastFiredDay[r.id] = today; saveTrigState()
         lastFiredMinute[r.id] = minuteOfDay
         return true
@@ -619,6 +622,7 @@ object AutomationManager {
                 field = t.optString("field", ""), cmp = t.optString("cmp", "=="), value = t.optString("value", ""),
                 afterRuleId = t.optString("after_rule_id", ""),
                 onlyIfSuccess = t.optBoolean("only_if_success", true),
+                untilHhmm = t.optInt("until_hhmm", -1),
             )
             // Passos extras (sequência numa regra só): cada passo = atraso + condição
             // (observada por watch_s) + ação. Executados em ordem após a ação principal.
@@ -691,6 +695,7 @@ object AutomationManager {
         val hhmm: Int, val days: List<Int>, val field: String, val cmp: String, val value: String,
         val afterRuleId: String = "",          // type "automation": dispara após esta regra executar
         val onlyIfSuccess: Boolean = true,      // só encadeia se a regra-origem executou com sucesso
+        val untilHhmm: Int = -1,                // "time": limite superior da janela de disparo (minuto do dia); -1 = default 90min
     )
     data class ConditionGroup(val op: String, val items: List<Condition>)
     data class VPoint(val lat: Double, val lng: Double, val radiusM: Double)

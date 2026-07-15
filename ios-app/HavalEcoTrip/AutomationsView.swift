@@ -181,6 +181,7 @@ struct RuleEditorSheet: View {
     @State private var placeId = ""
     @State private var radius = 50.0
     @State private var time = Date()
+    @State private var untilTime: Date? = nil   // opcional: janela até. nil = só o minuto exato (com catch-up default de 90min)
     @State private var days = Set<Int>()     // 0=Dom..6=Sáb (vazio = todo dia)
     @State private var actKind = 0           // 0=vidro,1=teto,2=cortina,3=avançado
     @State private var winTarget = 0         // 0..3 ou 4=todas
@@ -509,6 +510,16 @@ struct RuleEditorSheet: View {
                             .font(.caption).foregroundStyle(DS.muted)
                     } else {
                         DatePicker("Horário", selection: $time, displayedComponents: .hourAndMinute)
+                        Toggle("Janela até…", isOn: Binding(
+                            get: { untilTime != nil },
+                            set: { on in untilTime = on ? (untilTime ?? Calendar.current.date(byAdding: .hour, value: 6, to: time)) : nil }
+                        ))
+                        if untilTime != nil {
+                            DatePicker("Até", selection: Binding(get: { untilTime ?? time }, set: { untilTime = $0 }), displayedComponents: .hourAndMinute)
+                            Text("Dispara UMA vez no dia entre início e fim (na hora exata OU ao ligar o carro dentro da janela). Se abrir/fechar manual depois, respeita.").font(.caption).foregroundStyle(DS.muted)
+                        } else {
+                            Text("Dispara no minuto exato ou até 90 min depois, se você tiver ligado o carro atrasado.").font(.caption).foregroundStyle(DS.muted)
+                        }
                         HStack(spacing: 6) {
                             ForEach(0..<7, id: \.self) { d in
                                 let on = days.contains(d)
@@ -770,7 +781,13 @@ struct RuleEditorSheet: View {
         default:
             let cal = Calendar.current
             let h = cal.component(.hour, from: time), m = cal.component(.minute, from: time)
-            rule["trigger"] = ["type": "time", "hhmm": h * 60 + m, "days": Array(days).sorted()]
+            var trg: [String: Any] = ["type": "time", "hhmm": h * 60 + m, "days": Array(days).sorted()]
+            if let u = untilTime {
+                let uh = cal.component(.hour, from: u), um = cal.component(.minute, from: u)
+                let umin = uh * 60 + um
+                if umin > h * 60 + m { trg["until_hhmm"] = umin }
+            }
+            rule["trigger"] = trg
         }
 
         // Action
@@ -849,6 +866,9 @@ struct RuleEditorSheet: View {
                 let m = (t["hhmm"] as? Int) ?? 0
                 time = Calendar.current.date(bySettingHour: m / 60, minute: m % 60, second: 0, of: Date()) ?? Date()
                 days = Set((t["days"] as? [Int]) ?? [])
+                if let u = t["until_hhmm"] as? Int, u > m {
+                    untilTime = Calendar.current.date(bySettingHour: u / 60, minute: u % 60, second: 0, of: Date())
+                } else { untilTime = nil }
             case "state":
                 trigKind = 3
                 let key = (t["field"] as? String) ?? "car.basic.vehicle_speed"
