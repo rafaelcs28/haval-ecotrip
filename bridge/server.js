@@ -470,14 +470,22 @@ async function _waSend(jid, text) {
 async function _handleNotifyAction(rule) {
   const a = rule.action || {};
   const tpl = a.template || '';
-  const channel = a.channel || 'ntfy';                                       // "ntfy" | "whatsapp" | "both"
+  // channel aceita string ("ntfy"|"whatsapp"|"la"|"both"|"all") OU array (["ntfy","la"]).
+  //   "la" = usa a LA SharedTripActivityAttributes no app Grasi Recarga (reaproveita
+  //   o compartilhamento de trajeto que hoje é manual). "all" = ntfy+whatsapp+la.
+  //   "both" mantém compat = ntfy+whatsapp.
+  const raw = a.channel || 'ntfy';
+  const ch = Array.isArray(raw) ? raw : (raw === 'all' ? ['ntfy','whatsapp','la'] : raw === 'both' ? ['ntfy','whatsapp'] : [raw]);
+  const wantNtfy = ch.includes('ntfy');
+  const wantWa   = ch.includes('whatsapp');
+  const wantLa   = ch.includes('la');
   const ntfyUrl = a.ntfy_url || process.env.NTFY_FAMILY_URL || NTFY_URL;
   const jid = a.jid || process.env.WA_FAMILY_JID;
   const who = a.subject || 'Rafael';
-  // Helper que respeita o canal escolhido.
+  // Helper pra canais "texto" (ntfy/whatsapp). LA é tratada nos templates específicos.
   const send = async (title, body, tags = ['bell']) => {
-    if (channel === 'ntfy' || channel === 'both') _ntfy(title, body, 'default', tags, ntfyUrl);
-    if (channel === 'whatsapp' || channel === 'both') {
+    if (wantNtfy) _ntfy(title, body, 'default', tags, ntfyUrl);
+    if (wantWa) {
       const text = title ? `*${title}*\n${body}` : body;
       await _waSend(jid, text);
     }
@@ -504,6 +512,16 @@ async function _handleNotifyAction(rule) {
     await send(a.title || `Trânsito ruim, ${who} vai atrasar`,
                `Saindo agora. ETA ${hhmm} · trânsito +${delta} min acima do normal (baseline ${baseline}min).`,
                ['car', 'hourglass']);
+    // Canal LA: reaproveita o Shared Trip LA que hoje é disparado manual pelo Rafael.
+    // Cria share token programático (role='grasi', dest="Casa") e inicia a LA — a
+    // Grasi vê o card no Grasi Recarga com ETA/destino atualizando sozinho durante
+    // toda a viagem. Ao chegar (rule arrived_home), a LA é encerrada.
+    if (wantLa && apnsLive.enabled) {
+      try {
+        const share = _createShareToken(180, { recipientName: 'Grasi', recipientRole: 'grasi', destName: 'Casa' });
+        await _startSharedTripLA(share.token, who);
+      } catch (e) { console.warn('[notify] LA start falhou:', e.message); }
+    }
     return;
   }
   if (tpl === 'arrived_home') {
@@ -511,6 +529,20 @@ async function _handleNotifyAction(rule) {
     await send(a.title || `${who} chegou em casa`,
                a.body || `${who} chegou em casa às ${hhmm}.`,
                ['house']);
+    // Canal LA: encerra qualquer Shared Trip LA ativa com estado final + alerta
+    // "chegou em casa". Grasi vê o card virar "concluído" e recebe o banner.
+    if (wantLa && apnsLive.enabled) {
+      const finalAlert = { title: a.title || `${who} chegou em casa`, body: a.body || `Chegada às ${hhmm}.` };
+      for (const [tok, st] of Object.entries(_sharedTripLAs)) {
+        try {
+          const cs = _sharedTripContentState(st.recipientName);
+          cs.from = st.from; cs.destName = 'Casa'; cs.active = false;
+          await apnsLive.pushUpdate(SHARED_TRIP_LA_TYPE, {}, cs,
+            { isFinal: true, dismissalDate: Date.now() + 60_000, alert: finalAlert });
+        } catch (e) { console.warn('[notify] LA end falhou:', e.message); }
+        delete _sharedTripLAs[tok];
+      }
+    }
     return;
   }
   // Custom (title + body direto da regra).
