@@ -42,6 +42,11 @@ object AutomationManager {
     // Evita flicker perto da borda e só rearma numa saída de verdade.
     private const val GEO_EXIT_MARGIN_M = 30.0
 
+    // Trigger "time": se o carro estava desligado no minuto exato, ao ligar dentro
+    // dessa janela pra trás dispara ainda hoje (catch-up). ex.: rule às 10:00,
+    // carro liga 10:45 → fira; 12:30 → passa (fora da janela). Uma vez por dia.
+    private const val CATCHUP_WINDOW_MIN = 90
+
     private lateinit var appContext: Context
     private val tick = Executors.newSingleThreadScheduledExecutor()
     private val lock = Any()
@@ -53,6 +58,7 @@ object AutomationManager {
     private val firedVisit = HashMap<String, Boolean>()     // ruleId → já disparou nesta visita (nível, persistido)
     private val lastFiredMs = HashMap<String, Long>()       // ruleId → último disparo
     private val lastFiredMinute = HashMap<String, Int>()    // ruleId → minuto do dia já disparado (time)
+    private val lastFiredDay = HashMap<String, String>()    // ruleId → "yyyy-MM-dd" já disparado (time, persistido)
     private val geofenceLastInside = HashMap<String, Long>() // coordKey → última vez dentro (ms) — p/ condição "visited"
     private val lastSatisfiedMs = HashMap<String, Long>()    // "field|cmp|value" → última vez que o predicado foi verdadeiro (p/ condição "recent")
     private val condPrevPass = HashMap<String, Boolean>()    // ruleId → conditionsPass no tick anterior (detecta re-arme)
@@ -97,6 +103,7 @@ object AutomationManager {
                 firedVisit.keys.retainAll(ids)
                 lastFiredMs.keys.retainAll(ids)
                 lastFiredMinute.keys.retainAll(ids)
+                lastFiredDay.keys.retainAll(ids)
                 condPrevPass.keys.retainAll(ids)
                 firedThisWindow.keys.retainAll(ids)
                 stateTrigSatisfied.keys.retainAll(ids)
@@ -411,11 +418,18 @@ object AutomationManager {
     private fun checkTime(r: Rule, now: Long): Boolean {
         val cal = java.util.Calendar.getInstance()
         val minuteOfDay = cal.get(java.util.Calendar.HOUR_OF_DAY) * 60 + cal.get(java.util.Calendar.MINUTE)
-        if (minuteOfDay != r.trigger.hhmm) return false
         // Dia da semana: Calendar DOM 1=Dom..7=Sáb → 0..6
         val dow = cal.get(java.util.Calendar.DAY_OF_WEEK) - 1
         if (r.trigger.days.isNotEmpty() && !r.trigger.days.contains(dow)) return false
-        if (lastFiredMinute[r.id] == minuteOfDay) return false   // já disparou neste minuto
+        val today = String.format("%04d-%02d-%02d",
+            cal.get(java.util.Calendar.YEAR),
+            cal.get(java.util.Calendar.MONTH) + 1,
+            cal.get(java.util.Calendar.DAY_OF_MONTH))
+        if (lastFiredDay[r.id] == today) return false            // já disparou hoje (dispensa refire minuto-a-minuto)
+        val delta = minuteOfDay - r.trigger.hhmm
+        if (delta < 0) return false                              // ainda não chegou a hora hoje
+        if (delta > CATCHUP_WINDOW_MIN) return false             // atrasou demais (ex.: ligou o carro 3h depois) — cancela pra evitar disparo tarde da noite
+        lastFiredDay[r.id] = today; saveTrigState()
         lastFiredMinute[r.id] = minuteOfDay
         return true
     }
@@ -450,14 +464,25 @@ object AutomationManager {
             val f = File(appContext.filesDir, FILE_TRIG)
             if (!f.exists()) return
             val o = JSONObject(f.readText())
-            o.keys().forEach { k -> stateTrigSatisfied[k] = o.getBoolean(k) }
+            val st = o.optJSONObject("state")
+            if (st != null) {
+                st.keys().forEach { k -> stateTrigSatisfied[k] = st.getBoolean(k) }
+                o.optJSONObject("day")?.let { dy -> dy.keys().forEach { k -> lastFiredDay[k] = dy.getString(k) } }
+            } else {
+                // Legado (pré-catchup): arquivo flat só com booleanos = stateTrigSatisfied.
+                o.keys().forEach { k -> stateTrigSatisfied[k] = o.getBoolean(k) }
+            }
         } catch (e: Exception) { AppLogger.w(TAG, "loadTrigState: ${e.message}") }
     }
     private fun saveTrigState() {
         try {
-            val o = JSONObject()
-            synchronized(lock) { stateTrigSatisfied.forEach { (k, v) -> o.put(k, v) } }
-            File(appContext.filesDir, FILE_TRIG).writeText(o.toString())
+            val st = JSONObject(); val dy = JSONObject()
+            synchronized(lock) {
+                stateTrigSatisfied.forEach { (k, v) -> st.put(k, v) }
+                lastFiredDay.forEach { (k, v) -> dy.put(k, v) }
+            }
+            val out = JSONObject().put("state", st).put("day", dy)
+            File(appContext.filesDir, FILE_TRIG).writeText(out.toString())
         } catch (e: Exception) { AppLogger.w(TAG, "saveTrigState: ${e.message}") }
     }
 
