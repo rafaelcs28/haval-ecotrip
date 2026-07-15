@@ -399,6 +399,97 @@ function _ntfy(title, body, priority = 'default', tags = [], urlOverride = null)
   req.end();
 }
 
+// ── Baseline matrix (preditivo) ────────────────────────────────────────────
+// Grava a mediana rolante de ETAs Google observados por (par-de-locais, dow, hora).
+// Roda a cada 15 min entre 6-20h; refresca cada par se cache > 60 min (rush) OU
+// > 180 min (fora do rush). Pares "úteis" = os que apareceram em autotrips últimos
+// 30d + os das Saídas monitoradas (_group departure_share). Cap de 15 pares por
+// tick pra segurar custo (~$40/mês).
+const BASELINE_MATRIX_FILE = path.join(DATA_DIR, 'baseline_matrix.json');
+const BASELINE_COST_FILE   = path.join(DATA_DIR, 'baseline_cost.json');
+let _baselineMatrix = {};    // { "roundLat,roundLng→roundLat,roundLng_dow_hour": { samples:[{ts,etaMin}], median, updated_ms } }
+let _baselineCostToday = { date: '', calls: 0, cost_usd: 0 };
+try { _baselineMatrix = JSON.parse(fs.readFileSync(BASELINE_MATRIX_FILE, 'utf8')) || {}; } catch (_) {}
+try { _baselineCostToday = JSON.parse(fs.readFileSync(BASELINE_COST_FILE, 'utf8')) || _baselineCostToday; } catch (_) {}
+function _bmKey(from, to, dow, hour) {
+  const r = (v) => (Math.round(v * 200) / 200).toFixed(3);   // grade ~500m
+  return `${r(from.lat)},${r(from.lng)}→${r(to.lat)},${r(to.lng)}_${dow}_${hour}`;
+}
+function _bmSave() {
+  try { atomicWriteFileSync(BASELINE_MATRIX_FILE, JSON.stringify(_baselineMatrix)); } catch (_) {}
+  try { atomicWriteFileSync(BASELINE_COST_FILE, JSON.stringify(_baselineCostToday)); } catch (_) {}
+}
+function _bmMedian(samples) { const a = samples.map(s => s.etaMin).sort((x,y) => x-y); return a[Math.floor(a.length/2)]; }
+function _bmIsRushHour(h) { return (h >= 6 && h < 9) || (h >= 16 && h < 20); }
+
+// Pares úteis: SOMENTE Saídas monitoradas (_group: departure_share). O usuário
+// escolhe explicitamente o que quer monitorar (origem, destino, dias, janela).
+// Retorna com dias/janela pra o scanner respeitar o horário de cada config.
+function _bmUsefulPairs() {
+  const out = [];
+  for (const r of (automationRules || [])) {
+    if (!((r._group || '').startsWith('departure_share:'))) continue;
+    if ((r.action || {}).type !== 'notify' || r.action.template !== 'traffic_delay') continue;
+    if (r.enabled === false) continue;
+    const from = r.action.from, to = r.action.to;
+    if (!from || !to || from.lat == null || to.lat == null) continue;
+    const cond = ((r.conditions || {}).items || []).find(i => i.type === 'time') || {};
+    out.push({
+      from: { lat: from.lat, lng: from.lng },
+      to:   { lat: to.lat,   lng: to.lng   },
+      days: cond.days || [],
+      fromHhmm:  cond.from_hhmm ?? 0,
+      untilHhmm: cond.to_hhmm ?? 1439,
+      group: r._group,
+    });
+  }
+  return out.slice(0, 15);   // cap 15 pares (custo)
+}
+
+async function _bmTick() {
+  if (notifPrefs.baseline_predictive === false) return;
+  const now = new Date();
+  const hour = now.getHours(), min = now.getMinutes(), dow = now.getDay();
+  const minuteOfDay = hour * 60 + min;
+  const nowMs = Date.now();
+  const todayStr = `${now.getFullYear()}-${now.getMonth()+1}-${now.getDate()}`;
+  if (_baselineCostToday.date !== todayStr) _baselineCostToday = { date: todayStr, calls: 0, cost_usd: 0 };
+  // Só pares cuja janela cobre AGORA (com folga de ±60min pra ter dados quando
+  // a rule dispara na borda) E cujo dia da semana bate.
+  const pairs = _bmUsefulPairs().filter(p => {
+    if (p.days.length && !p.days.includes(dow)) return false;
+    const from = Math.max(0, p.fromHhmm - 60);
+    const until = Math.min(1439, p.untilHhmm + 60);
+    return minuteOfDay >= from && minuteOfDay <= until;
+  });
+  const maxAgeMs = _bmIsRushHour(hour) ? 60 * 60_000 : 180 * 60_000;
+  for (const p of pairs) {
+    const key = _bmKey(p.from, p.to, dow, hour);
+    const cur = _baselineMatrix[key];
+    if (cur && (nowMs - (cur.updated_ms || 0)) < maxAgeMs) continue;
+    // Refresca via Google Directions (departure_time=now)
+    try {
+      const route = await _fetchRoute(p.from.lat, p.from.lng, p.to.lat, p.to.lng);
+      if (!route) continue;
+      const etaMin = Math.round(route.duration / 60);
+      const rec = cur || { samples: [], median: etaMin, updated_ms: 0 };
+      rec.samples.push({ ts: nowMs, etaMin });
+      if (rec.samples.length > 30) rec.samples.splice(0, rec.samples.length - 30);
+      rec.median = _bmMedian(rec.samples);
+      rec.updated_ms = nowMs;
+      _baselineMatrix[key] = rec;
+      _baselineCostToday.calls += 1;
+      _baselineCostToday.cost_usd = +(_baselineCostToday.calls * 0.01).toFixed(4);
+    } catch (e) { console.warn('[baseline] falhou:', e.message); }
+  }
+  _bmSave();
+}
+setInterval(() => { _bmTick().catch(() => {}); }, 15 * 60_000);
+setTimeout(() => { _bmTick().catch(() => {}); }, 60_000);   // primeiro tick 1min após boot
+
+// GET /api/baseline-status registrado depois do `const app = express()` (linha ~4137);
+// aqui só define matrix + scanner. Se registrar `app.get` neste ponto, TDZ mata o boot.
+
 // Snapshot de trânsito: cada vez que a rule traffic_delay dispara (Rafael saiu
 // do trabalho), grava um registro pra auditoria. Rolling 200 entradas.
 const TRAFFIC_SNAPSHOTS_FILE = path.join(DATA_DIR, 'traffic_snapshots.json');
@@ -410,15 +501,29 @@ function _appendTrafficSnapshot(snap) {
   try { atomicWriteFileSync(TRAFFIC_SNAPSHOTS_FILE, JSON.stringify(_trafficSnapshots)); } catch (_) {}
 }
 
-// Baseline dinâmico: mediana de timeSec das últimas viagens que começaram próximo
-// de `from` E terminaram próximo de `to`, no MESMO dia da semana. Serve pro
-// traffic_delay comparar "está atrasado?" com o normal DAQUELE dia. Null se
-// não há amostras suficientes — caller cai no baseline_min fixo da regra.
+// Baseline dinâmico: PRIMEIRO tenta a matrix preditiva (Google ETAs observados
+// no mesmo dow+hour, mediana rolante) — se tiver ≥3 samples, usa. SENÃO cai em
+// autotrips (viagens reais últimos 30d, same-dow). Retorna {minMedian, samples,
+// source}. Null se nenhum dos dois tiver dado.
 function _dynamicTrafficBaseline(from, to, opts = {}) {
+  // (1) Matrix — mesmo dow, hour ± 1h (mais tolerante que exato pra ter samples)
+  const now = new Date();
+  const dow = now.getDay(), hour = now.getHours();
+  const collected = [];
+  for (const dh of [0, -1, 1]) {
+    const h = hour + dh; if (h < 0 || h > 23) continue;
+    const key = _bmKey(from, to, dow, h);
+    const rec = _baselineMatrix[key];
+    if (rec && Array.isArray(rec.samples)) collected.push(...rec.samples);
+  }
+  if (collected.length >= 3) {
+    const arr = collected.map(s => s.etaMin).sort((x, y) => x - y);
+    return { minMedian: arr[Math.floor(arr.length / 2)], samples: arr.length, source: 'matrix' };
+  }
+  // (2) autotrips fallback (comportamento original)
   const matchM = opts.matchM || 500;              // raio de pareamento (m)
   const days = opts.days || 60;                   // janela histórica
   const minSamples = opts.minSamples || 3;        // mínimo pra confiar na mediana
-  const dow = new Date().getDay();                // 0=Dom..6=Sáb (JS)
   const cutoffMs = Date.now() - days * 24 * 3600 * 1000;
   const dir = path.join(DATA_DIR, 'autotrips');
   let files = [];
@@ -1321,6 +1426,7 @@ const NOTIF_DEFAULTS = {
   la_parking:           true,   // LA "voltar ao carro" (só dispara >100m do carro estacionado)
   la_parking_suppress_places: [],  // IDs de locais conhecidos onde NÃO abrir a LA (casa, trabalho…)
   preclimat_steps:      true,   // alerta (som) a cada passo da pré-climatização
+  baseline_predictive:  true,   // scanner que pré-calcula ETA das rotas úteis por hora (Google Directions)
 };
 let notifPrefs = { ...NOTIF_DEFAULTS };
 try {
@@ -4130,6 +4236,84 @@ app.get('/api/infra-status', (_req, res) => res.json({
   dns_ok: _netStatus.match !== false,
   ts: Date.now(),
 }));
+
+// GET /api/departure-configs — retorna as configs de Saídas monitoradas
+// parseadas dos _group das automation_rules. Consumido pelo iOS pra saber quando
+// mostrar a LA "Indo pra <dest>?" ao ligar o carro em uma origem monitorada.
+app.get('/api/departure-configs', (_req, res) => {
+  const byGroup = {};
+  for (const r of (automationRules || [])) {
+    const g = r._group || '';
+    if (!g.startsWith('departure_share:')) continue;
+    (byGroup[g] = byGroup[g] || []).push(r);
+  }
+  const out = Object.entries(byGroup).map(([g, rules]) => {
+    const exit = rules.find(r => (r.trigger || {}).edge === 'exit');
+    const enter = rules.find(r => (r.trigger || {}).edge === 'enter');
+    if (!exit) return null;
+    const cond = (((exit.conditions || {}).items) || []).find(i => i.type === 'time') || {};
+    const a = exit.action || {};
+    return {
+      config_id: g.replace('departure_share:', ''),
+      enabled: exit.enabled !== false,
+      subject: a.subject || 'Rafael',
+      source: { lat: exit.trigger.lat, lng: exit.trigger.lng, radius_m: exit.trigger.radius_m, name: (a.from || {}).name || 'Origem' },
+      dest:   { lat: (a.to || {}).lat, lng: (a.to || {}).lng, radius_m: (enter && enter.trigger && enter.trigger.radius_m) || 50, name: (a.to || {}).name || 'Destino' },
+      days: cond.days || [],
+      from_hhmm: cond.from_hhmm ?? 0,
+      until_hhmm: cond.to_hhmm ?? 1439,
+    };
+  }).filter(Boolean);
+  res.json(out);
+});
+
+// POST /api/departure/accept  { config_id }
+// O usuário tocou "Sim" na LA "Indo pra <dest>?" — orquestra: seta nav_dest no
+// carro (MQTT retido) + cria share role=grasi + inicia SharedTripLA no iPhone
+// da Grasi. iOS termina a LA de decisão localmente.
+app.post('/api/departure/accept', async (req, res) => {
+  const cfgId = (req.body || {}).config_id;
+  if (!cfgId) return res.status(400).json({ error: 'config_id obrigatório' });
+  const rule = (automationRules || []).find(r => (r._group || '') === `departure_share:${cfgId}` && (r.trigger || {}).edge === 'exit');
+  if (!rule) return res.status(404).json({ error: 'config não encontrada' });
+  const a = rule.action || {};
+  const to = a.to || {};
+  const destName = to.name || 'Casa';
+  // 1. nav_dest pro carro (retido — se estiver acordado, painel abre a Chegada)
+  try {
+    const payload = JSON.stringify({ lat: to.lat, lng: to.lng, name: destName });
+    mqttClient.publish(`${MQTT_PREFIX}/cmd/nav_dest`, payload, { qos: 1, retain: true });
+    recentNavDests.push({ name: destName, lat: to.lat, lng: to.lng, ts: Date.now() });
+    if (recentNavDests.length > 30) recentNavDests.shift();
+  } catch (e) { console.warn('[departure/accept] nav_dest falhou:', e.message); }
+  // 2. share pra Grasi
+  let share = null;
+  try {
+    share = _createShareToken(180, { recipientName: 'Grasi', recipientRole: 'grasi', destName });
+  } catch (e) { console.warn('[departure/accept] share falhou:', e.message); }
+  // 3. LA na Grasi
+  if (share && apnsLive.enabled) {
+    _startSharedTripLA(share.token, a.subject || 'Rafael').catch(() => {});
+  }
+  res.json({ ok: true, share_token: share ? share.token : null, dest: destName });
+});
+
+// POST /api/departure/dismiss  { config_id }   — só audit; iOS gerencia estado local
+app.post('/api/departure/dismiss', (req, res) => {
+  console.log(`[departure] dismiss config=${(req.body || {}).config_id}`);
+  res.json({ ok: true });
+});
+
+// GET /api/baseline-status — status do scanner preditivo (habilitado?, entries,
+// pares monitorados, custo do dia em USD).
+app.get('/api/baseline-status', (_req, res) => {
+  res.json({
+    enabled: notifPrefs.baseline_predictive !== false,
+    entries: Object.keys(_baselineMatrix).length,
+    pairs: _bmUsefulPairs().length,
+    cost_today: _baselineCostToday,
+  });
+});
 
 // Heartbeat do monitor externo — o HA da empresa faz POST periódico aqui. Se
 // parar de chegar, /api/monitor-heartbeat detecta no _checkAlerts e alerta que o

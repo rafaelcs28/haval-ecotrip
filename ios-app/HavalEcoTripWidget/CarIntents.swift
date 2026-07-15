@@ -75,6 +75,40 @@ enum CarIntentAPI {
         return (j["ok"] as? Bool) == true
     }
 
+    /// Aceita a saída monitorada — bridge orquestra nav_dest + share pra Grasi + LA.
+    @discardableResult static func departureAccept(configId: String) async -> Bool {
+        guard !base.isEmpty, let url = URL(string: "\(base)/api/departure/accept") else { return false }
+        var r = URLRequest(url: url); r.httpMethod = "POST"; r.timeoutInterval = 12
+        r.addValue("Bearer " + Settings.bridgeToken, forHTTPHeaderField: "Authorization")
+        r.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        r.httpBody = try? JSONSerialization.data(withJSONObject: ["config_id": configId])
+        guard let (d, resp) = try? await URLSession.shared.data(for: r),
+              (resp as? HTTPURLResponse)?.statusCode == 200,
+              let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any] else { return false }
+        return (j["ok"] as? Bool) == true
+    }
+
+    /// Descarta a LA de saída monitorada — só audit; iOS encerra a Activity local.
+    static func departureDismiss(configId: String) async {
+        guard !base.isEmpty, let url = URL(string: "\(base)/api/departure/dismiss") else { return }
+        var r = URLRequest(url: url); r.httpMethod = "POST"; r.timeoutInterval = 6
+        r.addValue("Bearer " + Settings.bridgeToken, forHTTPHeaderField: "Authorization")
+        r.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        r.httpBody = try? JSONSerialization.data(withJSONObject: ["config_id": configId])
+        _ = try? await URLSession.shared.data(for: r)
+    }
+
+    /// Lista as Saídas monitoradas configuradas (bridge parseia rules com _group).
+    static func departureConfigs() async -> [[String: Any]] {
+        guard !base.isEmpty, let url = URL(string: "\(base)/api/departure-configs") else { return [] }
+        var r = URLRequest(url: url); r.timeoutInterval = 8
+        r.addValue("Bearer " + Settings.bridgeToken, forHTTPHeaderField: "Authorization")
+        guard let (d, resp) = try? await URLSession.shared.data(for: r),
+              (resp as? HTTPURLResponse)?.statusCode == 200,
+              let arr = try? JSONSerialization.jsonObject(with: d) as? [[String: Any]] else { return [] }
+        return arr
+    }
+
     /// Lê o SOC atual (e autonomia EV) do estado do carro.
     static func socNow() async -> (soc: Int, evKm: Int)? {
         guard !base.isEmpty, let url = URL(string: "\(base)/api/state") else { return nil }

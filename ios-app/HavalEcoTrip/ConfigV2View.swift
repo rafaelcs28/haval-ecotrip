@@ -27,6 +27,7 @@ struct ConfigV2View: View {
     @State private var showNotifCenter = false
     @State private var showSpeedFence = false
     @State private var showParkGuard = false
+    @State private var showDeparture = false
     @State private var shareURL: URL?
     @State private var importing = false
     @State private var latencyMs: Int?
@@ -57,6 +58,9 @@ struct ConfigV2View: View {
                         div
                         row(icon: "exclamationmark.triangle.fill", tint: DS.yellow, title: "Central de alertas",
                             sub: "Histórico de alertas recebidos") { showNotifCenter = true }
+                        div
+                        row(icon: "car.side.and.exclamationmark", tint: DS.blue, title: "Saídas monitoradas",
+                            sub: "Avisar/compartilhar ao sair de um local") { showDeparture = true }
                         div
                         row(icon: "gauge.open.with.lines.needle.33percent", tint: DS.orange, title: "Cerca de velocidade",
                             sub: "alerta se passar do limite (outro motorista)") { showSpeedFence = true }
@@ -164,6 +168,7 @@ struct ConfigV2View: View {
         .sheet(isPresented: $showAutomations) { AutomationsSheet(cfg: cfg) }
         .sheet(isPresented: $showNotif) { NotificationsSheet(cfg: cfg) }
         .sheet(isPresented: $showNotifCenter) { NotificationsCenterSheet() }
+        .sheet(isPresented: $showDeparture) { DepartureSharesSheet(cfg: cfg) }
         .sheet(isPresented: $showSpeedFence) { SpeedFenceSheet() }
         .sheet(isPresented: $showParkGuard) { ParkGuardSheet() }
         .sheet(item: $shareURL) { url in ShareSheet(items: [url]) }

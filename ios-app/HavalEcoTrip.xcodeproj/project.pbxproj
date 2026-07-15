@@ -49,6 +49,7 @@
 		54C6AF9B49E5FD2C86044A58 /* ControlsWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 547E045E2B2DA8F7E8B45F40 /* ControlsWidget.swift */; };
 		56DB4B366860CA6AC5500786 /* NativeInsightsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07A4D05D4468B1E0F2E83B3A /* NativeInsightsView.swift */; };
 		5CF964F8F567C8A30A20996D /* SecurityActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = D15756C1CEF1EFDD6804C05D /* SecurityActivityAttributes.swift */; };
+		5DCAF03A5D2567FC5D991C52 /* DepartureAskLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = F791B2902D7276CAFD8668F6 /* DepartureAskLiveActivity.swift */; };
 		5E3E822BD69F7F11ED12B2D6 /* PwaWebView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B41BC4A6A889A1B5BBFCF7C6 /* PwaWebView.swift */; };
 		605ED8EEC91528FFBC054A48 /* CarActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = C88C20EF0FDB1AB8EB036191 /* CarActions.swift */; };
 		6223380A259556C149F9E067 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = EEEFCC8135B0627DFDB60013 /* Assets.xcassets */; };
@@ -65,6 +66,7 @@
 		6B3EDE545B2502D265805216 /* OfflineSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2EBD85F9B7D028E3D520ED77 /* OfflineSync.swift */; };
 		6C1FE4315EFC5408CBF98788 /* NotificationsCenterSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7817E2396F9C3176DF2954E /* NotificationsCenterSheet.swift */; };
 		6D2D2B81A43BB7E8D26EE81F /* SongProActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF8BF0D6E8837DEC20056AB8 /* SongProActivityAttributes.swift */; };
+		7115EB26C2B97145BFBF7471 /* DepartureAskActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2FF82EC94D39D72882566F0F /* DepartureAskActivityAttributes.swift */; };
 		73D67C49913D49F094F16FCA /* SharedTripActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEFBCE42F4C0655FC9E8CAFE /* SharedTripActivityAttributes.swift */; };
 		75C8BDB4E564295F9914305A /* EscutaSheetV2.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE979130639CFA45EF877A5B /* EscutaSheetV2.swift */; };
 		77472ED6F598E53605506B96 /* ChargeActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = C110A5E3EADD0B1D4DA52BE6 /* ChargeActivityAttributes.swift */; };
@@ -85,6 +87,7 @@
 		8B73DFD0957C51F2398BED33 /* NativeDriveView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0D6E362CB348E539FA519CC /* NativeDriveView.swift */; };
 		8C38A751217FF17B7A5F5691 /* BydChargeWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84E0CFB1FD73D4EBEF6720A1 /* BydChargeWidget.swift */; };
 		8C3FA5DCF7133607EC275A89 /* TripLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B0EC768E77CEDD141861D39 /* TripLiveActivity.swift */; };
+		8E243C437C40D71C7010FE21 /* DepartureAskManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C084EFC344E5832B39E32B4E /* DepartureAskManager.swift */; };
 		907217011438996B6B234CBE /* DriveSheetsV2.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76A9EF7A30ED513EAB44FB7C /* DriveSheetsV2.swift */; };
 		918327725401C391E14F531E /* BydDesignSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93B4FFFA330691BE792A6CD2 /* BydDesignSystem.swift */; };
 		91E8922CD20B94185D7454A2 /* BydLiveActivityPush.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60050A5D1678A9235BEB0730 /* BydLiveActivityPush.swift */; };
@@ -96,6 +99,7 @@
 		97D85BD3A8D8D549ABD6A944 /* ActivityManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9926C58E001CD8511E829FB /* ActivityManager.swift */; };
 		985C98EC482371EDBE14B4E2 /* SecurityActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = D15756C1CEF1EFDD6804C05D /* SecurityActivityAttributes.swift */; };
 		98A61174D1B1F41AC4E60640 /* LAActionButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30F76E0D9822CBB897499A4D /* LAActionButton.swift */; };
+		9A12629CFC77A2124BB641C1 /* DepartureAskLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = F791B2902D7276CAFD8668F6 /* DepartureAskLiveActivity.swift */; };
 		9CC60221177D73FA6ED4E7F8 /* SecurityLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFE9C8DD63C6163B5AF174C8 /* SecurityLiveActivity.swift */; };
 		9D8A593457802718AE4EA0C2 /* ConfigV2View.swift in Sources */ = {isa = PBXBuildFile; fileRef = E25E4CB35E07E12C3CBD67E4 /* ConfigV2View.swift */; };
 		9E9A8069F0811E01F0967B3B /* MicTestSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80A945217321F91BDD85E6F3 /* MicTestSheet.swift */; };
@@ -143,6 +147,7 @@
 		E7A22E919521A94E9004D8F2 /* LivePreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A804763C29A6FBD8871C5A7 /* LivePreview.swift */; };
 		EA761C0E941E7F8949B72336 /* CompanionInboundActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6454F8C53F20E0ADD009D5D1 /* CompanionInboundActivityAttributes.swift */; };
 		EB170A75BD1ABB3462C6AF9E /* BiometricGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5C3783F4045873A9A1C2F85 /* BiometricGate.swift */; };
+		F1CAC211DED32950338B974E /* DepartureAskActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2FF82EC94D39D72882566F0F /* DepartureAskActivityAttributes.swift */; };
 		F301DF9029E3A438CA7D1C21 /* MapPickerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 800D1CEE2F1C2A49E6DF5F72 /* MapPickerSheet.swift */; };
 		F379D806BE7FED032C296716 /* LeaveBySheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B6819E27B57380D580AC0FF /* LeaveBySheet.swift */; };
 		F84F3B84B0CC0D78ACA5E89B /* TempConsumptionSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 099944E7CC1BCBFE6E3A0B09 /* TempConsumptionSheet.swift */; };
@@ -223,6 +228,7 @@
 		2A0F1250A4346D17F0539FE8 /* MotorLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MotorLiveActivity.swift; sourceTree = "<group>"; };
 		2EBD85F9B7D028E3D520ED77 /* OfflineSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OfflineSync.swift; sourceTree = "<group>"; };
 		2F97B54C85FEC5A112CB0C9E /* BackgroundRefresh.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundRefresh.swift; sourceTree = "<group>"; };
+		2FF82EC94D39D72882566F0F /* DepartureAskActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DepartureAskActivityAttributes.swift; sourceTree = "<group>"; };
 		30F76E0D9822CBB897499A4D /* LAActionButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LAActionButton.swift; sourceTree = "<group>"; };
 		31A72286F2044C2FB45A957A /* ParkingStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParkingStore.swift; sourceTree = "<group>"; };
 		33D5F8203565F8E20D91E100 /* ShortcutManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutManager.swift; sourceTree = "<group>"; };
@@ -293,6 +299,7 @@
 		BA1A634027D62C075536F879 /* CarHeroView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarHeroView.swift; sourceTree = "<group>"; };
 		BE979130639CFA45EF877A5B /* EscutaSheetV2.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EscutaSheetV2.swift; sourceTree = "<group>"; };
 		BF4805E2E098ECAD51E0A441 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		C084EFC344E5832B39E32B4E /* DepartureAskManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DepartureAskManager.swift; sourceTree = "<group>"; };
 		C0D6E362CB348E539FA519CC /* NativeDriveView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeDriveView.swift; sourceTree = "<group>"; };
 		C110A5E3EADD0B1D4DA52BE6 /* ChargeActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChargeActivityAttributes.swift; sourceTree = "<group>"; };
 		C25344C215F40EDE5B072CEF /* LogsSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogsSheet.swift; sourceTree = "<group>"; };
@@ -328,6 +335,7 @@
 		EEEFCC8135B0627DFDB60013 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		F5B823C235ED2AB25740FEEA /* EcoScoreSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EcoScoreSheet.swift; sourceTree = "<group>"; };
 		F6B65FA59825E09151BBC7C3 /* BatteryWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BatteryWidget.swift; sourceTree = "<group>"; };
+		F791B2902D7276CAFD8668F6 /* DepartureAskLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DepartureAskLiveActivity.swift; sourceTree = "<group>"; };
 		FA80C20DB354205B277ADC19 /* ParkGuardSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParkGuardSheet.swift; sourceTree = "<group>"; };
 		FB5145A32C36D0D8E2E36E83 /* NativeRecargasView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeRecargasView.swift; sourceTree = "<group>"; };
 		FBB9FEC86DC9FAEDAE722250 /* GravacoesV2View.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GravacoesV2View.swift; sourceTree = "<group>"; };
@@ -365,6 +373,7 @@
 				36AA01E4F54D0727EF341F49 /* ContentView.swift */,
 				D7A442E88C358C98CE318DF9 /* ControlSheets.swift */,
 				40F897CF12D9D798464B3337 /* DashV2View.swift */,
+				C084EFC344E5832B39E32B4E /* DepartureAskManager.swift */,
 				A5CB27509C982C7C90F5D774 /* DepartureSharesSheet.swift */,
 				7376EEA5C86B0C60FE3CE4E3 /* DesignSystem.swift */,
 				1BC76CD875BA1A36A4E1E089 /* DestinationsCostSheet.swift */,
@@ -456,6 +465,8 @@
 				6454F8C53F20E0ADD009D5D1 /* CompanionInboundActivityAttributes.swift */,
 				95282CA58B3AEAAE8DFF2DA9 /* CompanionInboundLiveActivity.swift */,
 				547E045E2B2DA8F7E8B45F40 /* ControlsWidget.swift */,
+				2FF82EC94D39D72882566F0F /* DepartureAskActivityAttributes.swift */,
+				F791B2902D7276CAFD8668F6 /* DepartureAskLiveActivity.swift */,
 				C4C25F23B2E85136F2735757 /* HavalEcoTripWidget.entitlements */,
 				6F5328FAA367AE3DF93613BE /* HavalEcoTripWidgetBundle.swift */,
 				1C2F4161732FE79AB2415337 /* Info.plist */,
@@ -717,6 +728,8 @@
 				A247949E84D69629C62E27D7 /* CompanionInboundActivityAttributes.swift in Sources */,
 				690E367FBE312093F345FB81 /* CompanionInboundLiveActivity.swift in Sources */,
 				54C6AF9B49E5FD2C86044A58 /* ControlsWidget.swift in Sources */,
+				F1CAC211DED32950338B974E /* DepartureAskActivityAttributes.swift in Sources */,
+				5DCAF03A5D2567FC5D991C52 /* DepartureAskLiveActivity.swift in Sources */,
 				253A6649A6A5B25C6DEBB140 /* HavalEcoTripWidgetBundle.swift in Sources */,
 				3B1E127339910428D3BC6CB3 /* InfraActivityAttributes.swift in Sources */,
 				ABF9F470EA6B41F8BC23D16E /* InfraLiveActivity.swift in Sources */,
@@ -788,6 +801,9 @@
 				87640D1FE3604A94892D6723 /* ContentView.swift in Sources */,
 				07FC719000D999AB80CF8C4C /* ControlSheets.swift in Sources */,
 				A31C821E6C6C0ECBC212E1B0 /* DashV2View.swift in Sources */,
+				7115EB26C2B97145BFBF7471 /* DepartureAskActivityAttributes.swift in Sources */,
+				9A12629CFC77A2124BB641C1 /* DepartureAskLiveActivity.swift in Sources */,
+				8E243C437C40D71C7010FE21 /* DepartureAskManager.swift in Sources */,
 				3035A56BC80FCFEAD48831DB /* DepartureSharesSheet.swift in Sources */,
 				3ED1321FB7B61D7ADDAA032F /* DesignSystem.swift in Sources */,
 				A7702B4C541BF386DC61A751 /* DestinationsCostSheet.swift in Sources */,

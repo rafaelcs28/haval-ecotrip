@@ -37,6 +37,10 @@ struct DepartureSharesSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var editing: DepartureConfig? = nil
+    @State private var baselineEnabled = true
+    @State private var baselineEntries = 0
+    @State private var baselinePairs = 0
+    @State private var baselineCostUsd = 0.0
 
     // Merge automation_places + known_places pra o dropdown (Casa mora em
     // known_places; Limpa Gyn em automation_places). Dedup por lat/lng arredondado.
@@ -115,6 +119,7 @@ struct DepartureSharesSheet: View {
                         }.padding(.top, 30)
                     }
                     ForEach(configs) { c in card(c) }
+                    baselineFooter
                 }.padding(16)
             }
             .background(DS.bg.ignoresSafeArea())
@@ -126,8 +131,57 @@ struct DepartureSharesSheet: View {
                     Task { await save(saved) }
                 }
             }
-            .task { await cfg.loadPlaces(); await cfg.loadAutomationPlaces(); await loader.load() }
+            .task { await cfg.loadPlaces(); await cfg.loadAutomationPlaces(); await loader.load(); await refreshBaselineStatus() }
         }
+    }
+
+    // Footer: status do scanner preditivo (baseline pré-calculado por hora) +
+    // toggle pra ligar/desligar. Sem custo extra se você desliga.
+    private var baselineFooter: some View {
+        DSCard {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Baseline pré-calculado").font(.system(size: 14, weight: .semibold))
+                        Text("Consulta Google Directions periódico p/ cada saída acima. Custo ~$0.01/chamada.").font(.caption).foregroundStyle(DS.muted)
+                    }
+                    Spacer()
+                    Toggle("", isOn: Binding(get: { baselineEnabled }, set: { on in Task { await setBaseline(on) } })).labelsHidden().tint(DS.green)
+                }
+                if baselineEnabled {
+                    HStack(spacing: 8) {
+                        Label("\(baselineEntries) amostras", systemImage: "chart.bar.doc.horizontal").font(.caption)
+                        Label("\(baselinePairs) pares", systemImage: "arrow.left.and.right").font(.caption)
+                        Label(String(format: "$%.2f hoje", baselineCostUsd), systemImage: "dollarsign.circle").font(.caption)
+                    }.foregroundStyle(DS.muted)
+                }
+            }
+        }
+    }
+
+    private func refreshBaselineStatus() async {
+        let base = BridgeRouter.shared.currentURL
+        guard let u = URL(string: "\(base)/api/baseline-status") else { return }
+        var r = URLRequest(url: u); r.addValue("Bearer " + Settings.bridgeToken, forHTTPHeaderField: "Authorization"); r.timeoutInterval = 6
+        guard let (d, _) = try? await URLSession.shared.data(for: r) else { return }
+        guard let j = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any] else { return }
+        baselineEnabled = (j["enabled"] as? Bool) ?? true
+        baselineEntries = (j["entries"] as? Int) ?? 0
+        baselinePairs = (j["pairs"] as? Int) ?? 0
+        let cost = (j["cost_today"] as? [String: Any])?["cost_usd"] as? Double ?? 0
+        baselineCostUsd = cost
+    }
+
+    private func setBaseline(_ on: Bool) async {
+        baselineEnabled = on  // otimista
+        let base = BridgeRouter.shared.currentURL
+        guard let u = URL(string: "\(base)/api/push/prefs") else { return }
+        var r = URLRequest(url: u); r.httpMethod = "POST"
+        r.addValue("Bearer " + Settings.bridgeToken, forHTTPHeaderField: "Authorization")
+        r.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        r.httpBody = try? JSONSerialization.data(withJSONObject: ["key": "baseline_predictive", "value": on])
+        _ = try? await URLSession.shared.data(for: r)
+        await refreshBaselineStatus()
     }
 
     private func card(_ c: DepartureConfig) -> some View {
@@ -185,8 +239,8 @@ struct DepartureSharesSheet: View {
             ]],
             "action": ["type": "notify", "template": "traffic_delay", "channel": "la",
                        "subject": "Rafael",
-                       "from": ["lat": c.sourceLat, "lng": c.sourceLng],
-                       "to": ["lat": c.destLat, "lng": c.destLng],
+                       "from": ["lat": c.sourceLat, "lng": c.sourceLng, "name": c.sourceName],
+                       "to": ["lat": c.destLat, "lng": c.destLng, "name": c.destName],
                        "baseline_min": 27, "threshold_min": 10],
             "debounce_s": 1800
         ]

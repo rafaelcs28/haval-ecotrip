@@ -49,6 +49,10 @@ targets:
       - path: HavalEcoTripWidget/ParkingActivityAttributes.swift
       # App Intents (Siri/Atalhos) — compartilhados com o widget (botões interativos).
       - path: HavalEcoTripWidget/CarIntents.swift
+      # LA "Indo pra <dest>?" — DepartureAskManager (app) usa o tipo pra requestar Activity.
+      - path: HavalEcoTripWidget/DepartureAskActivityAttributes.swift
+      # DepartureAskLifecycle helper (usado pelos intents no widget e pelo manager no app).
+      - path: HavalEcoTripWidget/DepartureAskLiveActivity.swift
       # SongPro (recarga BYD) saiu daqui — agora só no app "Grasi Recarga".
     info:
       path: HavalEcoTrip/Info.plist
