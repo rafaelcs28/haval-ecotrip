@@ -26,6 +26,7 @@
 		253A6649A6A5B25C6DEBB140 /* HavalEcoTripWidgetBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F5328FAA367AE3DF93613BE /* HavalEcoTripWidgetBundle.swift */; };
 		2BBB45182185499D3B954868 /* LANDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA22E658C7AE7CB3679725CF /* LANDiscovery.swift */; };
 		2E5167D0ADF77FFAC397D835 /* ParkingActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 233A69DF139C48429A427377 /* ParkingActivityAttributes.swift */; };
+		3035A56BC80FCFEAD48831DB /* DepartureSharesSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5CB27509C982C7C90F5D774 /* DepartureSharesSheet.swift */; };
 		30E7EF6F07C0F5426CFC7E3D /* ChargeAnalysisSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = FFF70A4F7CBB079E318E2289 /* ChargeAnalysisSheet.swift */; };
 		31C4EEF5E7D54B74A2F8DCA1 /* SongProLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8667439515FC27589EEEDBC9 /* SongProLiveActivity.swift */; };
 		326CAF9CD3D64AD79469D6C5 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 0C916CB148E5590BB5EF8513 /* Assets.xcassets */; };
@@ -275,6 +276,7 @@
 		A08F555DFDD330D4992422B5 /* DriveScoreDetailSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DriveScoreDetailSheet.swift; sourceTree = "<group>"; };
 		A1A74BCCDF1A1B7A5A4D1A2F /* PeriodFilter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeriodFilter.swift; sourceTree = "<group>"; };
 		A53601AA6DAB2F8858F60A3D /* BydRecarga-prod.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "BydRecarga-prod.entitlements"; sourceTree = "<group>"; };
+		A5CB27509C982C7C90F5D774 /* DepartureSharesSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DepartureSharesSheet.swift; sourceTree = "<group>"; };
 		A799F69A43F78E263048C8F4 /* AuthConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthConfig.swift; sourceTree = "<group>"; };
 		AD7173E45A0E0AAFE9AD301F /* ConfigStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigStore.swift; sourceTree = "<group>"; };
 		AF8BF0D6E8837DEC20056AB8 /* SongProActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SongProActivityAttributes.swift; sourceTree = "<group>"; };
@@ -363,6 +365,7 @@
 				36AA01E4F54D0727EF341F49 /* ContentView.swift */,
 				D7A442E88C358C98CE318DF9 /* ControlSheets.swift */,
 				40F897CF12D9D798464B3337 /* DashV2View.swift */,
+				A5CB27509C982C7C90F5D774 /* DepartureSharesSheet.swift */,
 				7376EEA5C86B0C60FE3CE4E3 /* DesignSystem.swift */,
 				1BC76CD875BA1A36A4E1E089 /* DestinationsCostSheet.swift */,
 				A08F555DFDD330D4992422B5 /* DriveScoreDetailSheet.swift */,
@@ -785,6 +788,7 @@
 				87640D1FE3604A94892D6723 /* ContentView.swift in Sources */,
 				07FC719000D999AB80CF8C4C /* ControlSheets.swift in Sources */,
 				A31C821E6C6C0ECBC212E1B0 /* DashV2View.swift in Sources */,
+				3035A56BC80FCFEAD48831DB /* DepartureSharesSheet.swift in Sources */,
 				3ED1321FB7B61D7ADDAA032F /* DesignSystem.swift in Sources */,
 				A7702B4C541BF386DC61A751 /* DestinationsCostSheet.swift in Sources */,
 				C41F6D9BF236FAA2E0C9F8FE /* DriveScoreDetailSheet.swift in Sources */,
