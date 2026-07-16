@@ -84,7 +84,11 @@ enum DepartureAskLifecycle {
 
 // MARK: - View
 
-@available(iOS 17.0, *)
+// IMPORTANTE: Widget struct NÃO pode ter @available(iOS 17.0, *) — isso deixa
+// o tipo de Activity "conditional" e o iOS não emite pushToStartTokenUpdates
+// pra ele. Os botões (Button(intent:)) são iOS 17+ e vão wrappados
+// individualmente dentro da view. Isso permite o widget registrar em iOS 16.1+
+// e ter botões só no 17+.
 struct DepartureAskLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: DepartureAskActivityAttributes.self) { context in
@@ -102,16 +106,20 @@ struct DepartureAskLiveActivity: Widget {
                 }
                 DynamicIslandExpandedRegion(.bottom) {
                     if context.state.status == "asking" {
-                        HStack(spacing: 8) {
-                            Button(intent: DepartureAcceptIntent(configId: a.configId)) {
-                                Label("Sim", systemImage: "checkmark.circle.fill")
-                            }.buttonStyle(.borderedProminent).tint(.green)
-                            Button(intent: DepartureSnoozeIntent(configId: a.configId)) {
-                                Label("5 min", systemImage: "clock")
-                            }.buttonStyle(.bordered).tint(.orange)
-                            Button(intent: DepartureDismissIntent(configId: a.configId)) {
-                                Label("Não", systemImage: "xmark.circle")
-                            }.buttonStyle(.bordered).tint(.gray)
+                        if #available(iOS 17.0, *) {
+                            HStack(spacing: 8) {
+                                Button(intent: DepartureAcceptIntent(configId: a.configId)) {
+                                    Label("Sim", systemImage: "checkmark.circle.fill")
+                                }.buttonStyle(.borderedProminent).tint(.green)
+                                Button(intent: DepartureSnoozeIntent(configId: a.configId)) {
+                                    Label("5 min", systemImage: "clock")
+                                }.buttonStyle(.bordered).tint(.orange)
+                                Button(intent: DepartureDismissIntent(configId: a.configId)) {
+                                    Label("Não", systemImage: "xmark.circle")
+                                }.buttonStyle(.bordered).tint(.gray)
+                            }
+                        } else {
+                            Text("Toque na LA pra decidir").font(.caption).foregroundStyle(.secondary)
                         }
                     } else {
                         Text(context.state.resultText ?? "OK").font(.subheadline).foregroundStyle(.secondary)
@@ -128,7 +136,6 @@ struct DepartureAskLiveActivity: Widget {
     }
 }
 
-@available(iOS 17.0, *)
 struct DepartureAskLockScreenView: View {
     let state: DepartureAskActivityAttributes.ContentState
     let attrs: DepartureAskActivityAttributes
@@ -147,16 +154,20 @@ struct DepartureAskLockScreenView: View {
                 .font(.footnote).foregroundStyle(.secondary)
                 .lineLimit(2)
             if state.status == "asking" {
-                HStack(spacing: 8) {
-                    Button(intent: DepartureAcceptIntent(configId: attrs.configId)) {
-                        Label("Sim", systemImage: "checkmark").frame(maxWidth: .infinity)
-                    }.buttonStyle(.borderedProminent).tint(.green)
-                    Button(intent: DepartureSnoozeIntent(configId: attrs.configId)) {
-                        Label("5 min", systemImage: "clock").frame(maxWidth: .infinity)
-                    }.buttonStyle(.bordered).tint(.orange)
-                    Button(intent: DepartureDismissIntent(configId: attrs.configId)) {
-                        Label("Não", systemImage: "xmark").frame(maxWidth: .infinity)
-                    }.buttonStyle(.bordered).tint(.gray)
+                if #available(iOS 17.0, *) {
+                    HStack(spacing: 8) {
+                        Button(intent: DepartureAcceptIntent(configId: attrs.configId)) {
+                            Label("Sim", systemImage: "checkmark").frame(maxWidth: .infinity)
+                        }.buttonStyle(.borderedProminent).tint(.green)
+                        Button(intent: DepartureSnoozeIntent(configId: attrs.configId)) {
+                            Label("5 min", systemImage: "clock").frame(maxWidth: .infinity)
+                        }.buttonStyle(.bordered).tint(.orange)
+                        Button(intent: DepartureDismissIntent(configId: attrs.configId)) {
+                            Label("Não", systemImage: "xmark").frame(maxWidth: .infinity)
+                        }.buttonStyle(.bordered).tint(.gray)
+                    }
+                } else {
+                    Text("Abre o app pra decidir").font(.caption).foregroundStyle(.secondary)
                 }
             } else {
                 Text(state.resultText ?? "OK").font(.subheadline).foregroundStyle(.secondary).padding(.top, 4)

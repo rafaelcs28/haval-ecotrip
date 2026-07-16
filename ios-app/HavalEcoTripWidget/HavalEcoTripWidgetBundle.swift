@@ -19,6 +19,6 @@ struct HavalEcoTripWidgetBundle: WidgetBundle {
         BatteryWidget()
         LockBatteryWidget()
         if #available(iOS 17.0, *) { ControlsWidget() }
-        if #available(iOS 17.0, *) { DepartureAskLiveActivity() }
+        DepartureAskLiveActivity()
     }
 }

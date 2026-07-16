@@ -43,30 +43,7 @@ final class LiveActivityPush {
         observe(SecurityActivityAttributes.self,  type: "SecurityActivityAttributes")
         observe(InfraActivityAttributes.self,     type: "InfraActivityAttributes")
         observe(ParkingActivityAttributes.self,   type: "ParkingActivityAttributes")
-        if #available(iOS 17.0, *) {
-            observe(DepartureAskActivityAttributes.self, type: "DepartureAskActivityAttributes")
-            // "Prime" o tipo novo pra iOS emitir pushToStartTokenUpdates. Sem
-            // uma Activity criada UMA VEZ, iOS pode não inicializar a plumbing
-            // do push-to-start pro tipo (padrão observado com tipos adicionados
-            // depois da 1a instalação). Criamos uma efêmera e encerramos em 2s
-            // — usuário não vê nada, mas o token nasce.
-            Task { @MainActor in
-                let existing = Activity<DepartureAskActivityAttributes>.activities
-                let hasCached = ptsCache["DepartureAskActivityAttributes"] != nil
-                if existing.isEmpty && !hasCached {
-                    do {
-                        let attrs = DepartureAskActivityAttributes(configId: "_prime", sourceName: "", destName: "", subject: "")
-                        let cs = DepartureAskActivityAttributes.ContentState(startedMs: Date().timeIntervalSince1970 * 1000, status: "asking", resultText: nil)
-                        let a = try Activity.request(
-                            attributes: attrs,
-                            content: ActivityContent(state: cs, staleDate: Date().addingTimeInterval(30)),
-                            pushType: .token)
-                        try? await Task.sleep(nanoseconds: 2_000_000_000)
-                        await a.end(nil, dismissalPolicy: .immediate)
-                    } catch { /* silencioso — iOS emite token nas subs seguintes */ }
-                }
-            }
-        }
+        observe(DepartureAskActivityAttributes.self, type: "DepartureAskActivityAttributes")
         // A LA de recarga do BYD (SongPro) vive no app dedicado "Grasi Recarga"
         // (target BydRecarga), não mais aqui — fica separado do app do Haval.
     }
