@@ -14347,7 +14347,8 @@ const LA_TYPES = ['ChargeActivityAttributes', 'PreClimatActivityAttributes', 'Tr
                   'CompanionInboundActivityAttributes',     // feature 1: companion indo até Grasi
                   'SharedTripActivityAttributes',           // share do Haval direto na tela dela
                   'InfraActivityAttributes',                // monitoramento do Mac Mini (push do HA da empresa)
-                  'ParkingActivityAttributes'];             // "voltar ao carro" (distância+direção do carro estacionado)
+                  'ParkingActivityAttributes',              // "voltar ao carro" (distância+direção do carro estacionado)
+                  'DepartureAskActivityAttributes'];         // "Indo pra <dest>? Compartilhar com <subject>?" ao ligar em origem monitorada
 
 // push-to-start token (por tipo de Live Activity)
 // GET /api/songpro/status — % da bateria do BYD Song Pro sempre, + infos da
