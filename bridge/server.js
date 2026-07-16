@@ -500,15 +500,27 @@ setTimeout(() => { _bmTick().catch(() => {}); }, 60_000);   // primeiro tick 1mi
 const DEPARTURE_ASKED_FILE = path.join(DATA_DIR, 'departure_asked.json');
 let _departureAsked = {};
 try { _departureAsked = JSON.parse(fs.readFileSync(DEPARTURE_ASKED_FILE, 'utf8')) || {}; } catch (_) {}
+// Última coord com motor DESLIGADO — usada em _evalDepartureAsk pra compensar
+// o gap entre engine 0→1 e a chegada da 1a msg MQTT (que pode ser 30s+ depois).
+let _lastParkedLoc = null;   // { lat, lng, ts }
 function _saveDepartureAsked() {
   try { atomicWriteFileSync(DEPARTURE_ASKED_FILE, JSON.stringify(_departureAsked)); } catch (_) {}
 }
 function _evalDepartureAsk() {
   if (!apnsLive.enabled) return;
-  const lat = +state.gps_lat, lng = +state.gps_lng;
+  // GPS de referência: prioriza a última coord com motor DESLIGADO (onde o carro
+  // ESTACIONOU) — o APK pode demorar segundos/minutos pra reconectar MQTT
+  // depois de ligar, e nesse gap o carro já pode ter saído do raio da origem.
+  // Se a última parking coord tem <10min, usa ela. Senão fallback pra GPS atual.
+  let lat = +state.gps_lat, lng = +state.gps_lng;
+  const parked = _lastParkedLoc;
+  if (parked && parked.lat && (Date.now() - parked.ts) < 10 * 60_000) {
+    lat = parked.lat; lng = parked.lng;
+  }
   if (!Number.isFinite(lat) || !Number.isFinite(lng) || (lat === 0 && lng === 0)) {
     console.log('[departure-ask] pulou: sem GPS ainda'); return;
   }
+  console.log(`[departure-ask] avaliando de lat=${lat.toFixed(5)} lng=${lng.toFixed(5)}`);
   const now = new Date();
   const dow = now.getDay();                             // 0=Dom..6=Sáb
   const minuteOfDay = now.getHours() * 60 + now.getMinutes();
@@ -536,8 +548,11 @@ function _evalDepartureAsk() {
     const from = cond.from_hhmm ?? 0, until = cond.to_hhmm ?? 1439;
     if (minuteOfDay < from || minuteOfDay > until) continue;
     const d = hav(lat, lng, src.lat, src.lng);
-    const radius = Math.max(+src.radius_m || 50, 30);
-    if (d > radius) continue;
+    // Raio efetivo maior: geofence do editor pode ser 15m (bom pra rules do
+    // AutomationManager no carro), mas o bridge só recebe engine_on segundos
+    // depois — nesse ponto GPS já se moveu. 500m cobre o gap sem falso match.
+    const radius = Math.max(+src.radius_m || 50, 500);
+    if (d > radius) { console.log(`[departure-ask] cid=${cid} fora do raio (${Math.round(d)}m > ${radius}m)`); continue; }
     // Já perguntou hoje?
     const askedKey = `${cid}_${today}`;
     if (_departureAsked[askedKey]) { console.log(`[departure-ask] cid=${cid} já perguntado hoje, pula`); continue; }
@@ -16182,6 +16197,12 @@ function applyMqttMessage(key, value, isRetained = false) {
         } else if (value === '0') {
           addEvent('engine_off', 'Motor desligado');
           sendPush('🔑 Motor desligado', 'O veículo foi desligado.', 'engine_off');
+          // Guarda a coord de estacionamento pra usar como referência no próximo
+          // engine_on (compensar gap MQTT — carro pode publicar engine=1 já longe).
+          const _pLat = +state.gps_lat, _pLng = +state.gps_lng;
+          if (Number.isFinite(_pLat) && Number.isFinite(_pLng) && (_pLat || _pLng)) {
+            _lastParkedLoc = { lat: _pLat, lng: _pLng, ts: Date.now() };
+          }
           _scheduleWindowForgottenAlert();
           _scheduleLockForgottenAlert();
           _scheduleTrunkForgottenAlert();
