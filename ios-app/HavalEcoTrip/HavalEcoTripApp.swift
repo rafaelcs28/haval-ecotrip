@@ -22,8 +22,10 @@ struct HavalEcoTripApp: App {
         // Registra handler de BG refresh ANTES de qualquer view aparecer.
         // Sem isso, iOS não acorda o app em background pra polling de notifs.
         BackgroundRefresh.register()
-        // LA "Indo pra <dest>?" ao ligar o carro em origem monitorada (iOS 17+).
-        if #available(iOS 17.0, *) { DepartureAskManager.shared.start() }
+        // LA "Indo pra <dest>?" agora é disparada pelo BRIDGE via APNs push-to-start
+        // (funciona com app fechado). O manager local ainda registra o token via
+        // LiveActivityPush.observe() adicionado logo abaixo. Não roda mais o
+        // observer engine-on local pra evitar dupla LA quando app estiver aberto.
     }
     var body: some Scene {
         WindowGroup {

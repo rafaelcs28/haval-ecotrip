@@ -43,6 +43,9 @@ final class LiveActivityPush {
         observe(SecurityActivityAttributes.self,  type: "SecurityActivityAttributes")
         observe(InfraActivityAttributes.self,     type: "InfraActivityAttributes")
         observe(ParkingActivityAttributes.self,   type: "ParkingActivityAttributes")
+        if #available(iOS 17.0, *) {
+            observe(DepartureAskActivityAttributes.self, type: "DepartureAskActivityAttributes")
+        }
         // A LA de recarga do BYD (SongPro) vive no app dedicado "Grasi Recarga"
         // (target BydRecarga), não mais aqui — fica separado do app do Haval.
     }

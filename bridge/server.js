@@ -490,6 +490,78 @@ setTimeout(() => { _bmTick().catch(() => {}); }, 60_000);   // primeiro tick 1mi
 // GET /api/baseline-status registrado depois do `const app = express()` (linha ~4137);
 // aqui só define matrix + scanner. Se registrar `app.get` neste ponto, TDZ mata o boot.
 
+// ── Saídas monitoradas: LA "Indo pra <dest>?" via APNs push-to-start ────────
+// Quando o motor liga (engine_state 0→1), o bridge verifica todas as configs
+// de Saídas monitoradas (rules com _group=departure_share:*): se a posição do
+// carro cai dentro do raio da origem + o horário está na janela + dia da
+// semana bate + a config não foi acionada hoje ainda, dispara push-to-start
+// da DepartureAskActivityAttributes no iPhone do dono. A LA nasce mesmo com
+// o app fechado (iOS 17.2+).
+const DEPARTURE_ASKED_FILE = path.join(DATA_DIR, 'departure_asked.json');
+let _departureAsked = {};
+try { _departureAsked = JSON.parse(fs.readFileSync(DEPARTURE_ASKED_FILE, 'utf8')) || {}; } catch (_) {}
+function _saveDepartureAsked() {
+  try { atomicWriteFileSync(DEPARTURE_ASKED_FILE, JSON.stringify(_departureAsked)); } catch (_) {}
+}
+function _evalDepartureAsk() {
+  if (!apnsLive.enabled) return;
+  const lat = +state.gps_lat, lng = +state.gps_lng;
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || (lat === 0 && lng === 0)) {
+    console.log('[departure-ask] pulou: sem GPS ainda'); return;
+  }
+  const now = new Date();
+  const dow = now.getDay();                             // 0=Dom..6=Sáb
+  const minuteOfDay = now.getHours() * 60 + now.getMinutes();
+  const today = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+  const hav = (a, b, c, d) => {
+    const R = 6_371_000, r = x => x * Math.PI / 180;
+    const dLat = r(c - a), dLon = r(d - b);
+    const h = Math.sin(dLat/2)**2 + Math.cos(r(a)) * Math.cos(r(c)) * Math.sin(dLon/2)**2;
+    return 2 * R * Math.asin(Math.sqrt(h));
+  };
+  // Configs = rules com _group departure_share, action.type=notify, template=traffic_delay
+  for (const r of (automationRules || [])) {
+    const g = r._group || '';
+    if (!g.startsWith('departure_share:')) continue;
+    if (r.enabled === false) continue;
+    if ((r.action || {}).type !== 'notify' || r.action.template !== 'traffic_delay') continue;
+    if ((r.trigger || {}).edge !== 'exit') continue;    // pega só o "sair"
+    const cid = g.replace('departure_share:', '');
+    const src = r.trigger || {}; const a = r.action || {};
+    const to = a.to || {};
+    if (src.lat == null || to.lat == null) continue;
+    const cond = ((r.conditions || {}).items || []).find(x => x.type === 'time') || {};
+    const days = cond.days || [];
+    if (days.length && !days.includes(dow)) continue;
+    const from = cond.from_hhmm ?? 0, until = cond.to_hhmm ?? 1439;
+    if (minuteOfDay < from || minuteOfDay > until) continue;
+    const d = hav(lat, lng, src.lat, src.lng);
+    const radius = Math.max(+src.radius_m || 50, 30);
+    if (d > radius) continue;
+    // Já perguntou hoje?
+    const askedKey = `${cid}_${today}`;
+    if (_departureAsked[askedKey]) { console.log(`[departure-ask] cid=${cid} já perguntado hoje, pula`); continue; }
+    // Passou tudo — marca ANTES do push pra evitar duplicidade em race
+    _departureAsked[askedKey] = Date.now(); _saveDepartureAsked();
+    const sourceName = (a.from || {}).name || r.name || 'Origem';
+    const destName   = to.name || 'Destino';
+    const subject    = a.subject || 'Grasi';
+    console.log(`[departure-ask] cid=${cid} disparando LA (${sourceName} → ${destName})`);
+    apnsLive.pushStart('DepartureAskActivityAttributes', '',
+      { configId: cid, sourceName, destName, subject },
+      { startedMs: Date.now(), status: 'asking', resultText: null },
+      { staleDate: Date.now() + 15 * 60_000,
+        alert: { title: `Indo pra ${destName}?`, body: `Toque nos botões pra decidir.` } })
+      .catch(e => { console.warn('[departure-ask] pushStart falhou:', e.message);
+                    delete _departureAsked[askedKey]; _saveDepartureAsked(); });
+  }
+  // Limpa entries antigas (>7 dias) da tabela asked pra não crescer sem limite
+  const cutoff = Date.now() - 7 * 24 * 3600_000;
+  for (const k of Object.keys(_departureAsked)) {
+    if (_departureAsked[k] < cutoff) delete _departureAsked[k];
+  }
+}
+
 // Snapshot de trânsito: cada vez que a rule traffic_delay dispara (Rafael saiu
 // do trabalho), grava um registro pra auditoria. Rolling 200 entradas.
 const TRAFFIC_SNAPSHOTS_FILE = path.join(DATA_DIR, 'traffic_snapshots.json');
@@ -16103,6 +16175,10 @@ function applyMqttMessage(key, value, isRetained = false) {
             _remoteEnginePending = false;
             _startMotorLA();
           }
+          // Saídas monitoradas: avalia se o carro ligou dentro de uma origem
+          // configurada (janela + dia da semana). Push-to-start APNs cria a LA
+          // "Indo pra <dest>?" no iPhone do dono mesmo com app fechado.
+          try { _evalDepartureAsk(); } catch (e) { console.warn('[departure-ask]', e.message); }
         } else if (value === '0') {
           addEvent('engine_off', 'Motor desligado');
           sendPush('🔑 Motor desligado', 'O veículo foi desligado.', 'engine_off');
