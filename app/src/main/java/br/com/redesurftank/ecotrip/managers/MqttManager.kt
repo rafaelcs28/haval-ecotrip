@@ -2601,6 +2601,11 @@ class MqttManager private constructor() {
     private fun handleIncomingCommand(topic: String, payload: String) {
         val cmdPrefix = "$prefix/cmd/"
         if (!topic.startsWith(cmdPrefix)) return
+        // Filtro anti-eco: cmd/#  também captura os `cmd/*/result` que o próprio
+        // APK publica (subscrição wildcard). Sem esse guard, cada resultado
+        // volta como novo comando → processa → publica novo /result → loop
+        // exponencial (`cmd/hvac/fan_speed/result/result/result/…` na prática).
+        if (topic.endsWith("/result")) return
         val cmd = topic.removePrefix(cmdPrefix).trimEnd('/')
         // Pong da liveness ativa: o loopback voltou → caminho cmd/# vivo. Não é
         // comando real, não loga nem processa.
@@ -3520,7 +3525,18 @@ class MqttManager private constructor() {
                                     AppLogger.i(TAG, "HVAC: AUTO desligado antes de aplicar fan manual (evita override da ECU)")
                                     Thread.sleep(300)   // deixa a ECU processar o auto=0 antes de receber o fan
                                 }
-                            } catch (e: Exception) { AppLogger.w(TAG, "HVAC: desligar AUTO falhou: ${e.message}") }
+                                // fan_speed=0 → também desliga AC. A ECU se recusa a segurar
+                                // fan=0 com AC=on por design (precisa circular ar refrigerado).
+                                // O v6.129 só cortava AUTO, ECU religava fan em ~2s mesmo assim.
+                                // Sem AC, fan=0 fica estável. Se quiser AC de volta, liga pelo
+                                // botão do AC direto.
+                                if (payload.trim() == "0") {
+                                    if (car.requestSetting(key = "car.hvac.ac_enable", value = "0")) {
+                                        AppLogger.i(TAG, "HVAC: AC desligado junto com fan=0 (ECU não segura fan=0 com AC=on)")
+                                        Thread.sleep(300)
+                                    }
+                                }
+                            } catch (e: Exception) { AppLogger.w(TAG, "HVAC: preparação pré-fan falhou: ${e.message}") }
                         }
                         AppLogger.i(TAG, "HVAC set: $busKey = $payload")
                         val ok = try {
