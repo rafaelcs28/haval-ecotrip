@@ -4646,10 +4646,10 @@ async function _fetchSolarStatus() {
 async function _solarTick() {
   const d = await _fetchSolarStatus();
   if (d) {
-    // Anexa sunrise/sunset pra o cliente também usar (evita hardcoded 7-18)
     const sun = await _fetchCatalaoSun();
     d.sunrise_ms = sun.sunrise_ms || null;
     d.sunset_ms  = sun.sunset_ms  || null;
+    d.expected   = _expectedNow('catalao');   // mediana da hora atual (histórico)
     _solarState = d; _solarCache = { data: d, ts: Date.now() };
   }
   _evalSolarAlerts().catch(() => {});
@@ -4797,25 +4797,66 @@ try { _solarHistory = { ...{ catalao: [], ivonei: [], palmeiras: [] }, ...(JSON.
 function _saveSolarHistory() {
   try { atomicWriteFileSync(SOLAR_HISTORY_FILE, JSON.stringify(_solarHistory)); } catch (_) {}
 }
+function _todayDateStr() {
+  const n = new Date();
+  return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}-${String(n.getDate()).padStart(2,'0')}`;
+}
 function _recordSolarDay(key, kwh) {
   if (kwh == null || kwh <= 0) return;
-  const now = new Date();
-  const date = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+  const date = _todayDateStr();
   const arr = _solarHistory[key] || (_solarHistory[key] = []);
   const idx = arr.findIndex(x => x.date === date);
-  if (idx >= 0) { if (arr[idx].kwh < kwh) arr[idx].kwh = kwh; }  // sempre o maior (fim de dia)
-  else arr.push({ date, kwh });
+  if (idx >= 0) { if ((arr[idx].kwh || 0) < kwh) arr[idx].kwh = kwh; }
+  else arr.push({ date, kwh, snaps: {} });
   if (arr.length > 30) arr.splice(0, arr.length - 30);
   _saveSolarHistory();
 }
-// Grava snapshot 3x entre 17h-19h — idempotente, substitui pelo maior valor
+// Grava snapshot HORÁRIO por sistema (potência atual + energia acumulada) na
+// primeira vez que passa aquela hora. Serve pra colorir "gerando agora" e
+// "hoje" no card comparando com mediana histórica da MESMA hora.
+function _recordSolarSnap(key, powerW, genKwh) {
+  const now = new Date(), h = now.getHours();
+  if (h < 7 || h >= 19) return;               // só janela solar
+  if (powerW == null || genKwh == null) return;
+  const date = _todayDateStr();
+  const arr = _solarHistory[key] || (_solarHistory[key] = []);
+  let day = arr.find(x => x.date === date);
+  if (!day) { day = { date, kwh: genKwh, snaps: {} }; arr.push(day); if (arr.length > 30) arr.shift(); }
+  if (!day.snaps) day.snaps = {};
+  // Guarda 1 snap por hora — 1a leitura, resto ignora
+  if (day.snaps[h] == null) day.snaps[h] = { p: Math.round(powerW), kwh: +genKwh.toFixed(2) };
+  if ((day.kwh || 0) < genKwh) day.kwh = genKwh;
+  _saveSolarHistory();
+}
 setInterval(() => {
+  if (_solarState?.plant)     _recordSolarSnap('catalao',   _solarState.plant.pv_power,       _solarState.plant.energy_today);
+  if (_solisState?.ivonei)    _recordSolarSnap('ivonei',    _solisState.ivonei.ac_power_w,    _solisState.ivonei.gen_today_kwh);
+  if (_solisState?.palmeiras) _recordSolarSnap('palmeiras', _solisState.palmeiras.ac_power_w, _solisState.palmeiras.gen_today_kwh);
+  // E o final do dia (17-19h)
   const h = new Date().getHours();
-  if (h < 17 || h > 19) return;
-  if (_solarState?.plant)     _recordSolarDay('catalao',   _solarState.plant.energy_today);
-  if (_solisState?.ivonei)    _recordSolarDay('ivonei',    _solisState.ivonei.gen_today_kwh);
-  if (_solisState?.palmeiras) _recordSolarDay('palmeiras', _solisState.palmeiras.gen_today_kwh);
-}, 20 * 60_000);
+  if (h >= 17 && h <= 19) {
+    if (_solarState?.plant)     _recordSolarDay('catalao',   _solarState.plant.energy_today);
+    if (_solisState?.ivonei)    _recordSolarDay('ivonei',    _solisState.ivonei.gen_today_kwh);
+    if (_solisState?.palmeiras) _recordSolarDay('palmeiras', _solisState.palmeiras.gen_today_kwh);
+  }
+}, 5 * 60_000);
+
+// Mediana histórica de {potência, energia acumulada} pra hora ATUAL,
+// baseada nos últimos 14 dias (excluindo hoje). Usado pela UI pra colorir.
+function _expectedNow(key) {
+  const h = new Date().getHours();
+  const today = _todayDateStr();
+  const arr = (_solarHistory[key] || []).filter(x => x.date !== today).slice(-14);
+  const powers = [], gens = [];
+  for (const day of arr) {
+    const sn = day.snaps && day.snaps[h];
+    if (sn && sn.p > 0) powers.push(sn.p);
+    if (sn && sn.kwh > 0) gens.push(sn.kwh);
+  }
+  if (powers.length < 3) return null;
+  const med = (a) => { const s = [...a].sort((x,y)=>x-y); return s[Math.floor(s.length/2)]; };
+  return { median_power: med(powers), median_gen: med(gens), samples: powers.length, hour: h };
+}
 
 // Histórico curto de potência por sistema (últimos 6 ticks = ~6min) — precisa
 // de queda SUSTENTADA pra alertar, evitando falso positivo de nuvem passageira.
@@ -4964,8 +5005,8 @@ async function _solisTick() {
     // usa Palmeiras de Goiás. ~30min de diferença no oeste (Palmeiras).
     const sunGYN = await _fetchSunTimes('goiania');
     const sunPGO = await _fetchSunTimes('palmeiras');
-    if (d.ivonei)    { d.ivonei.sunrise_ms    = sunGYN.sunrise_ms || null; d.ivonei.sunset_ms    = sunGYN.sunset_ms || null; }
-    if (d.palmeiras) { d.palmeiras.sunrise_ms = sunPGO.sunrise_ms || null; d.palmeiras.sunset_ms = sunPGO.sunset_ms || null; }
+    if (d.ivonei)    { d.ivonei.sunrise_ms    = sunGYN.sunrise_ms || null; d.ivonei.sunset_ms    = sunGYN.sunset_ms || null; d.ivonei.expected    = _expectedNow('ivonei'); }
+    if (d.palmeiras) { d.palmeiras.sunrise_ms = sunPGO.sunrise_ms || null; d.palmeiras.sunset_ms = sunPGO.sunset_ms || null; d.palmeiras.expected = _expectedNow('palmeiras'); }
     _solisState = d; _solisCache = { data: d, ts: Date.now() };
   }
   _evalSolisAlerts().catch(() => {});
@@ -5052,7 +5093,7 @@ app.get('/api/ivonei-status', async (_req, res) => {
   const d = _solisCache.data;
   if (!d || !d.ivonei) return res.status(502).json({ error: 'ivonei indisponível' });
   const sun = await _fetchSunTimes('goiania');
-  res.json({ ...d.ivonei, sunrise_ms: sun.sunrise_ms || null, sunset_ms: sun.sunset_ms || null, ts: d.ts });
+  res.json({ ...d.ivonei, sunrise_ms: sun.sunrise_ms || null, sunset_ms: sun.sunset_ms || null, expected: _expectedNow('ivonei'), ts: d.ts });
 });
 app.get('/api/palmeiras-status', async (_req, res) => {
   const now = Date.now();
@@ -5063,7 +5104,7 @@ app.get('/api/palmeiras-status', async (_req, res) => {
   const d = _solisCache.data;
   if (!d || !d.palmeiras) return res.status(502).json({ error: 'palmeiras indisponível' });
   const sun = await _fetchSunTimes('palmeiras');
-  res.json({ ...d.palmeiras, sunrise_ms: sun.sunrise_ms || null, sunset_ms: sun.sunset_ms || null, ts: d.ts });
+  res.json({ ...d.palmeiras, sunrise_ms: sun.sunrise_ms || null, sunset_ms: sun.sunset_ms || null, expected: _expectedNow('palmeiras'), ts: d.ts });
 });
 
 // GET /api/baseline-status — status do scanner preditivo (habilitado?, entries,

@@ -1045,10 +1045,14 @@ async function _paintSolisSystem(sys, prefix, headId) {
   else                   status = '<span style="color:#888">sem geração</span>';
   set(prefix+'-status', status);
   const kw = (sys.ac_power_w||0) / 1000;
+  const exp = sys.expected;
+  const kwTxt = `${kw.toFixed(2)} kW · ${sys.ac_power_w||0} W`;
   set(prefix+'-power', kw > 0
-    ? `<span style="color:#f6c343">${kw.toFixed(2)} kW</span> · ${sys.ac_power_w||0} W`
+    ? wrapColor(kwTxt, sys.ac_power_w, exp?.median_power) + expectedTip(sys.ac_power_w, exp?.median_power, 'W')
     : '<span style="color:#888">0 W</span>');
-  set(prefix+'-today', sys.gen_today_kwh != null ? `${sys.gen_today_kwh.toFixed(2)} kWh` : '—');
+  set(prefix+'-today', sys.gen_today_kwh != null
+    ? wrapColor(`${sys.gen_today_kwh.toFixed(2)} kWh`, sys.gen_today_kwh, exp?.median_gen) + expectedTip(sys.gen_today_kwh, exp?.median_gen, 'kWh')
+    : '—');
   set(prefix+'-month', sys.gen_month_kwh != null ? `${sys.gen_month_kwh.toFixed(1)} kWh` : '—');
   set(prefix+'-total', sys.gen_total_kwh != null ? `${(sys.gen_total_kwh/1000).toFixed(2)} MWh` : '—');
   set(prefix+'-sun', (sys.sunrise_ms && sys.sunset_ms)
@@ -1084,12 +1088,32 @@ async function updatePalmeiras() {
   } catch (e) { set('head-pm', 'erro'); }
 }
 
+// Cor por razão atual/esperado (verde ≥85% · amarelo 60-85% · vermelho <60%).
+// null se sem histórico suficiente — devolve cinza neutro pra não colorir errado.
+function ratioColor(cur, expected) {
+  if (expected == null || expected <= 0 || cur == null) return null;
+  const r = cur / expected;
+  if (r >= 0.85) return '#7bc47f';
+  if (r >= 0.60) return '#e6b800';
+  return '#e74c3c';
+}
+function wrapColor(txt, cur, expected) {
+  const c = ratioColor(cur, expected);
+  return c ? `<span style="color:${c}">${txt}</span>` : txt;
+}
+function expectedTip(cur, expected, unit) {
+  if (expected == null || expected <= 0) return '';
+  const pct = Math.round((cur / expected) * 100);
+  return ` <span style="color:#888;font-size:10px">(${pct}% da mediana ${expected.toFixed(unit==='kWh'?1:0)} ${unit})</span>`;
+}
+
 async function updateSolar() {
   try {
     const r = await fetch('/api/solar-status', { headers: { Authorization: 'Bearer ' + tk } });
     if (!r.ok) { set('head-solar', 'indisponível'); return; }
     const d = await r.json();
     const p = d.plant;
+    const exp = d.expected;   // { median_power, median_gen, samples, hour }
     const online = p.online !== false;
     // Alarme só é REAL se algum inversor reporta alarm_count > 0. O campo
     // status da planta SAJ vive cravado em "alarm" mesmo sem problema real.
@@ -1115,14 +1139,17 @@ async function updateSolar() {
     else if ((p.pv_power||0) > 100) statusStr = '<span style="color:#7bc47f">gerando</span>';
     else                 statusStr = '<span style="color:#888">sem geração</span>';
     set('sol-status', statusStr);
-    // Números planta
+    // Números planta — colore potência atual e kWh hoje por comparação com mediana histórica
     const kw = (p.pv_power||0) / 1000;
-    set('sol-pv-now', `<span style="color:#f6c343">${kw.toFixed(2)} kW</span> · ${p.pv_power||0} W`);
+    const kwTxt = `${kw.toFixed(2)} kW · ${p.pv_power||0} W`;
+    set('sol-pv-now', wrapColor(kwTxt, p.pv_power, exp?.median_power) + expectedTip(p.pv_power, exp?.median_power, 'W'));
     const dir = p.pv_direction === 'exporting' ? '<span style="color:#7bc47f">exportando</span>'
               : p.pv_direction === 'importing' ? '<span style="color:#e6b800">importando</span>'
               : `<span style="color:#888">${p.pv_direction||'—'}</span>`;
     set('sol-direction', dir);
-    set('sol-today',  p.energy_today != null ? `${p.energy_today.toFixed(2)} kWh` : '—');
+    set('sol-today',  p.energy_today != null
+      ? wrapColor(`${p.energy_today.toFixed(2)} kWh`, p.energy_today, exp?.median_gen) + expectedTip(p.energy_today, exp?.median_gen, 'kWh')
+      : '—');
     set('sol-peak',   p.peak_power_today != null ? `${(p.peak_power_today/1000).toFixed(2)} kW` : '—');
     set('sol-hours',  p.hours_equivalent != null ? `${p.hours_equivalent.toFixed(1)} h` : '—');
     set('sol-month',  p.energy_month != null ? `${p.energy_month.toFixed(1)} kWh` : '—');
