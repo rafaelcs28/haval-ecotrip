@@ -4473,10 +4473,32 @@ setTimeout(() => { _bluettiTick().catch(() => {}); }, 5_000);
 // offgrid (rodando bateria — pré-alarme), battery_low (≤30% sem grid), battery_critical
 // (≤10% sem grid). unreachable = HA/Bluetti offline. Histerese via debounce/recovery
 // do próprio _alert(). Rotula "🏠 Casa" e "🌱 Sítio" pra ntfy ficar autoexplicativo.
+// Histórico curto de battery_pct por estação pra confirmar offgrid real (evita
+// falso positivo se grid_in_w oscilar em 0 momentaneamente sem ser queda de rede).
+// Só considero "offgrid confirmado" se grid=0 E (bateria caiu ≥1% em ≥3 leituras
+// OU bateria ≤ 99% mesmo — a passthrough real em UPS+bateria cheia mantém 100%).
+const _bluettiHist = { casa: [], sitio: [] };   // últimos N battery_pct
+function _pushBluettiHist(key, pct) {
+  if (pct == null) return;
+  const arr = _bluettiHist[key]; arr.push(pct);
+  if (arr.length > 6) arr.shift();
+}
+function _bluettiOffgridConfirmed(key, gridW, batt) {
+  if (gridW !== 0) return false;
+  const arr = _bluettiHist[key];
+  if (arr.length < 3) return false;                   // insuficiente pra decidir
+  // Caiu ≥1% nas últimas 3 leituras?
+  const dropping = arr[arr.length - 1] < arr[arr.length - 3];
+  // Ou está abaixo de 100 E mantém grid=0 há ≥3 ticks (não está passthrough)
+  const belowFull = batt != null && batt < 100;
+  return dropping || belowFull;
+}
+
 function _evalBluettiAlerts() {
   if (!_bluettiState) return;
   for (const key of ['casa', 'sitio']) {
     const s = _bluettiState[key]; if (!s) continue;
+    _pushBluettiHist(key, s.battery_pct);
     const emoji = key === 'casa' ? '🏠 Casa' : '🌱 Sítio';
     const feeds = s.feeds || (key === 'casa' ? 'Mac Mini + Roteador' : 'Starlink');
     const unreachable = !s.reachable;
@@ -4496,23 +4518,27 @@ function _evalBluettiAlerts() {
     const grid = s.grid_in_w ?? 0;
     const batt = s.battery_pct ?? 100;
     const acOff = s.ac_on === false;
+    // "Offgrid CONFIRMADO" = grid=0 E (bateria caindo em histórico ≥3 leituras
+    // OU battery<100). Isso elimina falso positivo de flap momentâneo de grid=0
+    // com bateria cheia em passthrough perfeito.
+    const offgrid = _bluettiOffgridConfirmed(key, grid, batt);
     // 2. AC desligado — dispositivos ligados apagaram agora. Urgentíssimo.
     _alert(`bluetti_${key}_ac_off`, acOff,
       `${emoji} — AC DESLIGADO`,
       `Saída AC off. ${feeds} sem energia AGORA. Religa a saída AC na estação.`,
       'urgent', ['warning', 'electric_plug']);
-    // 3. Bateria crítica (grid caiu + ≤10%): apagão iminente
-    _alert(`bluetti_${key}_battery_critical`, grid === 0 && batt <= 10 && !acOff,
+    // 3. Bateria crítica (offgrid confirmado + ≤10%): apagão iminente
+    _alert(`bluetti_${key}_battery_critical`, offgrid && batt <= 10 && !acOff,
       `${emoji} — bateria CRÍTICA ${batt}%`,
-      `Grid caiu e bateria ≤10%. ${feeds} vão apagar em minutos. Autonomia: ${_fmtMin(s.battery_time_min)}.`,
+      `Sem rede e bateria ≤10%. ${feeds} vão apagar em minutos. Autonomia: ${_fmtMin(s.battery_time_min)}.`,
       'urgent', ['warning', 'battery.0']);
-    // 4. Bateria baixa (grid caiu + ≤30%): pré-alarme
-    _alert(`bluetti_${key}_battery_low`, grid === 0 && batt > 10 && batt <= 30 && !acOff,
+    // 4. Bateria baixa (offgrid confirmado + ≤30%): pré-alarme
+    _alert(`bluetti_${key}_battery_low`, offgrid && batt > 10 && batt <= 30 && !acOff,
       `${emoji} — bateria baixa ${batt}%`,
-      `Grid caiu e bateria ≤30%. Autonomia estimada: ${_fmtMin(s.battery_time_min)}.`,
+      `Sem rede e bateria ≤30%. Autonomia estimada: ${_fmtMin(s.battery_time_min)}.`,
       'high', ['battery.25']);
-    // 5. Offgrid (rodando na bateria, ainda tem folga): observação
-    _alert(`bluetti_${key}_offgrid`, grid === 0 && batt > 30 && !acOff,
+    // 5. Offgrid confirmado (rodando na bateria, ainda tem folga): observação
+    _alert(`bluetti_${key}_offgrid`, offgrid && batt > 30 && !acOff,
       `${emoji} — sem energia da rede`,
       `Rodando na bateria (${batt}%, autonomia ${_fmtMin(s.battery_time_min)}). ${feeds}.`,
       'default', ['battery.75', 'electric_plug']);
