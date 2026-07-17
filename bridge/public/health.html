@@ -207,6 +207,44 @@ canvas { display: block; width: 100%; height: 60px; margin-top: 8px; }
       </div>
     </details>
 
+    <!-- Solar (SAJ Clean Master Ambiental — Catalão) -->
+    <details class="card" data-k="solar">
+      <summary><span class="sum-title">Solar Catalão</span>
+        <span class="sum-right"><span id="head-solar">—</span><span class="chev"></span></span></summary>
+      <div class="card-body">
+        <div class="row"><span class="label">Status</span><span class="val" id="sol-status">—</span></div>
+        <div class="row"><span class="label">Gerando agora</span><span class="val" id="sol-pv-now">—</span></div>
+        <div class="row"><span class="label">Direção</span><span class="val" id="sol-direction">—</span></div>
+        <div class="row"><span class="label">Hoje</span><span class="val" id="sol-today">—</span></div>
+        <div class="row"><span class="label">Pico hoje</span><span class="val" id="sol-peak">—</span></div>
+        <div class="row"><span class="label">Horas sol pleno</span><span class="val" id="sol-hours">—</span></div>
+        <div class="row"><span class="label">Mês</span><span class="val" id="sol-month">—</span></div>
+        <div class="row"><span class="label">Total (vida)</span><span class="val" id="sol-total">—</span></div>
+        <div class="row"><span class="label">CO₂ evitado hoje</span><span class="val" id="sol-co2">—</span></div>
+        <div class="row"><span class="label">Última sync SAJ</span><span class="val" id="sol-stale">—</span></div>
+        <div class="row" style="border-bottom:1px solid #333;padding-bottom:6px;margin-top:12px;margin-bottom:8px;font-weight:600">
+          <span style="width:100%">🔌 Inv A <span style="font-weight:400;color:#888;font-size:11px">— 30214</span></span>
+        </div>
+        <div class="row"><span class="label">Potência</span><span class="val" id="sol-a-power">—</span></div>
+        <div class="row"><span class="label">Energia hoje</span><span class="val" id="sol-a-today">—</span></div>
+        <div class="row"><span class="label">Temperatura</span><span class="val" id="sol-a-temp">—</span></div>
+        <div class="row"><span class="label">Rede</span><span class="val" id="sol-a-grid">—</span></div>
+        <div class="row"><span class="label">String 1</span><span class="val" id="sol-a-s1">—</span></div>
+        <div class="row"><span class="label">String 2</span><span class="val" id="sol-a-s2">—</span></div>
+        <div class="row"><span class="label">Alarmes hoje</span><span class="val" id="sol-a-alarms">—</span></div>
+        <div class="row" style="border-bottom:1px solid #333;padding-bottom:6px;margin-top:12px;margin-bottom:8px;font-weight:600">
+          <span style="width:100%">🔌 Inv B <span style="font-weight:400;color:#888;font-size:11px">— 37763</span></span>
+        </div>
+        <div class="row"><span class="label">Potência</span><span class="val" id="sol-b-power">—</span></div>
+        <div class="row"><span class="label">Energia hoje</span><span class="val" id="sol-b-today">—</span></div>
+        <div class="row"><span class="label">Temperatura</span><span class="val" id="sol-b-temp">—</span></div>
+        <div class="row"><span class="label">Rede</span><span class="val" id="sol-b-grid">—</span></div>
+        <div class="row"><span class="label">String 1</span><span class="val" id="sol-b-s1">—</span></div>
+        <div class="row"><span class="label">String 2</span><span class="val" id="sol-b-s2">—</span></div>
+        <div class="row"><span class="label">Alarmes hoje</span><span class="val" id="sol-b-alarms">—</span></div>
+      </div>
+    </details>
+
     <!-- Estações portáteis (Bluetti EL100V2) -->
     <details class="card" data-k="bluetti">
       <summary><span class="sum-title">Estações portáteis</span>
@@ -952,6 +990,69 @@ async function loadSysProc() {
   } catch (_) {}
 }
 
+async function updateSolar() {
+  try {
+    const r = await fetch('/api/solar-status', { headers: { Authorization: 'Bearer ' + tk } });
+    if (!r.ok) { set('head-solar', 'indisponível'); return; }
+    const d = await r.json();
+    const p = d.plant;
+    const online = p.online !== false;
+    const alarm  = String(p.status||'').toLowerCase() === 'alarm';
+    const stale  = (d.stale_min ?? 0) > 20;
+    // Status semântico
+    let statusStr;
+    if (!online)      statusStr = '<span style="color:#e74c3c">offline (sem cloud SAJ)</span>';
+    else if (alarm)   statusStr = '<span style="color:#e74c3c">ALARME no inversor</span>';
+    else if (stale)   statusStr = '<span style="color:#e6b800">dados atrasados</span>';
+    else if ((p.pv_power||0) > 100) statusStr = '<span style="color:#7bc47f">gerando</span>';
+    else              statusStr = '<span style="color:#888">sem geração</span>';
+    set('sol-status', statusStr);
+    // Números planta
+    const kw = (p.pv_power||0) / 1000;
+    set('sol-pv-now', `<span style="color:#f6c343">${kw.toFixed(2)} kW</span> · ${p.pv_power||0} W`);
+    const dir = p.pv_direction === 'exporting' ? '<span style="color:#7bc47f">exportando</span>'
+              : p.pv_direction === 'importing' ? '<span style="color:#e6b800">importando</span>'
+              : `<span style="color:#888">${p.pv_direction||'—'}</span>`;
+    set('sol-direction', dir);
+    set('sol-today',  p.energy_today != null ? `${p.energy_today.toFixed(2)} kWh` : '—');
+    set('sol-peak',   p.peak_power_today != null ? `${(p.peak_power_today/1000).toFixed(2)} kW` : '—');
+    set('sol-hours',  p.hours_equivalent != null ? `${p.hours_equivalent.toFixed(1)} h` : '—');
+    set('sol-month',  p.energy_month != null ? `${p.energy_month.toFixed(1)} kWh` : '—');
+    set('sol-total',  p.energy_total != null ? `${(p.energy_total/1000).toFixed(2)} MWh` : '—');
+    set('sol-co2',    p.co2_kg_today != null ? `${p.co2_kg_today.toFixed(1)} kg (${(p.trees_today||0).toFixed(2)} árv.)` : '—');
+    set('sol-stale',  d.stale_min != null ? (d.stale_min > 20
+      ? `<span style="color:#e6b800">há ${d.stale_min} min</span>`
+      : `há ${d.stale_min} min`) : '—');
+    // Inversores
+    const paintInv = (prefix, i) => {
+      if (!i) return;
+      const w = i.power||0;
+      set(prefix+'-power', w > 100
+        ? `<span style="color:#f6c343">${w} W</span>`
+        : (w > 0 ? `${w} W` : '<span style="color:#888">0 W</span>'));
+      set(prefix+'-today', i.energy_today != null ? `${i.energy_today.toFixed(2)} kWh` : '—');
+      const t = i.temperature||0;
+      const tColor = t > 65 ? '#e74c3c' : (t > 55 ? '#e6b800' : '#7bc47f');
+      set(prefix+'-temp',  `<span style="color:${tColor}">${t.toFixed(1)}°C</span>`);
+      set(prefix+'-grid',  `${i.grid_v!=null?i.grid_v.toFixed(0):'—'} V · ${i.grid_power||0} W`);
+      const s1 = i.strings?.[0], s2 = i.strings?.[1];
+      set(prefix+'-s1', s1 ? `${s1.watts||0} W @ ${s1.pv_v!=null?s1.pv_v.toFixed(0):'—'} V` : '—');
+      set(prefix+'-s2', s2 ? `${s2.watts||0} W @ ${s2.pv_v!=null?s2.pv_v.toFixed(0):'—'} V` : '—');
+      const alarms = i.alarm_count||0;
+      set(prefix+'-alarms', alarms > 0
+        ? `<span style="color:#e74c3c">${alarms}</span>`
+        : `<span style="color:#7bc47f">0</span>`);
+    };
+    paintInv('sol-a', d.invs?.[0]); paintInv('sol-b', d.invs?.[1]);
+    // Header do card resume: alarme > offline > gerando kW > sem geração
+    if (alarm)                     set('head-solar', '<span style="color:#e74c3c">⚠️ ALARME</span>');
+    else if (!online)              set('head-solar', '<span style="color:#e74c3c">offline</span>');
+    else if (stale)                set('head-solar', '<span style="color:#e6b800">dados atrasados</span>');
+    else if ((p.pv_power||0) > 100)set('head-solar', `<span style="color:#f6c343">${(p.pv_power/1000).toFixed(2)} kW · ${(p.energy_today||0).toFixed(1)} kWh hoje</span>`);
+    else                           set('head-solar', `<span style="color:#888">${(p.energy_today||0).toFixed(1)} kWh hoje</span>`);
+  } catch (e) { set('head-solar', 'erro'); }
+}
+
 async function updateBluetti() {
   try {
     const r = await fetch('/api/bluetti-status', { headers: { Authorization: 'Bearer ' + tk } });
@@ -1025,9 +1126,11 @@ loadOpenState();
 load();
 loadSysProc();
 updateBluetti();
+updateSolar();
 setInterval(load, 5_000);
 setInterval(loadSysProc, 5_000);
 setInterval(updateBluetti, 30_000);
+setInterval(updateSolar, 60_000);
 window.addEventListener('resize', drawChart);
 </script>
 </body>

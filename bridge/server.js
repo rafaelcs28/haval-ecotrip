@@ -4559,6 +4559,176 @@ app.get('/api/bluetti-status', async (_req, res) => {
   res.json(_bluettiCache.data);
 });
 
+// ── Solar (SAJ Clean Master Ambiental — Catalão) ─────────────────────────────
+// Planta com 2 inversores R6-10K-S3-18 (3 strings cada). Fetch via HA REST +
+// cache 60s. Watchdog dispara alertas: plant_offline (sem comm com cloud SAJ),
+// inverter_alarm, temperature_high, generation_lost_daytime, stale_upload.
+const _SAJ = {
+  plant_slug: 'clean_master_ambiental',
+  invs: [
+    { label: 'Inv A', slug: 'inverter_r6l3103j2422e30214', short: '30214' },
+    { label: 'Inv B', slug: 'inverter_r6l3103j2425e37763', short: '37763' },
+  ],
+};
+let _solarState = null;
+let _solarCache = { data: null, ts: 0 };
+async function _fetchSolarStatus() {
+  const tok = process.env.HA_TOKEN;
+  const url = (process.env.HA_URL || '').replace(/\/$/, '');
+  if (!tok || !url) return null;
+  try {
+    const r = await fetch(`${url}/api/states`, {
+      headers: { Authorization: `Bearer ${tok}` },
+      signal: AbortSignal.timeout(6000),
+    });
+    if (!r.ok) return null;
+    const arr = await r.json();
+    const num = (id) => {
+      const s = arr.find(x => x.entity_id === id);
+      if (!s || s.state === 'unknown' || s.state === 'unavailable') return null;
+      const n = +s.state; return Number.isFinite(n) ? n : null;
+    };
+    const str = (id) => {
+      const s = arr.find(x => x.entity_id === id);
+      return s && s.state !== 'unknown' && s.state !== 'unavailable' ? s.state : null;
+    };
+    // Planta
+    const p = _SAJ.plant_slug;
+    const plantP = `sensor.plant_${p}`;
+    const plant = {
+      online:            str(`sensor.${p}_device_online`) === 'online',
+      status:            str(`sensor.${p}_inverter_status`),      // "normal" | "alarm"
+      pv_power:          num(`sensor.${p}_pv_power`),              // W (geração agora)
+      pv_direction:      str(`sensor.${p}_pv_direction`),          // exporting/importing/standby
+      grid_power:        num(`sensor.${p}_grid_power`),            // W (sinal indica direção)
+      load_power:        num(`sensor.${p}_load_power`),
+      self_use_rate:     num(`sensor.${p}_self_use_rate`),         // % (auto-consumo)
+      co2_kg_today:      (num(`sensor.${p}_co2_reduction_today`) ?? 0) * 1000,
+      trees_today:       num(`sensor.${p}_trees_planted_today`),
+      energy_today:      num(`${plantP}_energy_today`),            // kWh
+      energy_month:      num(`${plantP}_energy_month`),
+      energy_year:       num(`${plantP}_energy_year`),
+      energy_total:      num(`${plantP}_energy_total`),
+      peak_power_today:  num(`${plantP}_peak_power`),
+      hours_equivalent:  num(`${plantP}_today_equivalent_hours`),
+      last_upload_iso:   str(`${plantP}_last_upload_time`),
+    };
+    // Inversores
+    const invs = _SAJ.invs.map(inv => {
+      const s = `sensor.${inv.slug}`;
+      const strings = [1, 2, 3].map(i => ({
+        pv_v:  num(`${s}_pv${i}`),
+        watts: num(`${s}_string_${i}_power`),
+      }));
+      return {
+        label: inv.label, short: inv.short,
+        power:         num(`${s}_power`),
+        peak_today:    num(`${s}_peak_power`),
+        energy_today:  num(`${s}_energy_today`),
+        energy_month:  num(`${s}_energy_month`),
+        energy_total:  num(`${s}_energy_total`),
+        temperature:   num(`${s}_temperature`),
+        grid_power:    num(`${s}_grid_power`),
+        grid_v:        num(`${s}_gv1r`),
+        alarm_count:   num(`${s}_today_alarm_num`),
+        strings,
+      };
+    });
+    // Freshness da última comunicação com o cloud SAJ
+    let stale_min = null;
+    if (plant.last_upload_iso) {
+      const t = Date.parse(plant.last_upload_iso);
+      if (!isNaN(t)) stale_min = Math.round((Date.now() - t) / 60_000);
+    }
+    return { plant, invs, stale_min, ts: Date.now() };
+  } catch (e) { return null; }
+}
+async function _solarTick() {
+  const d = await _fetchSolarStatus();
+  if (d) { _solarState = d; _solarCache = { data: d, ts: Date.now() }; }
+  _evalSolarAlerts();
+}
+setInterval(() => { _solarTick().catch(() => {}); }, 60_000);
+setTimeout(() => { _solarTick().catch(() => {}); }, 7_000);
+
+// Alertas do solar. Prioriza clareza: planta offline > inversor alarm >
+// geração perdida em pleno dia > temperatura alta > dados velhos.
+function _evalSolarAlerts() {
+  if (!_solarState) return;
+  const p = _solarState.plant;
+  // 1) Planta offline (sem comm com cloud SAJ)
+  _alert('solar_plant_offline', p.online === false,
+    '☀️ Solar Catalão — sem comunicação',
+    `SAJ Elekeeper cloud sem dados. Inversores podem estar operando OK, mas monitoramento cego.`,
+    'high', ['warning', 'sun.max']);
+  // 2) Inverter status = alarm (nível planta — condensa alarme de qualquer inversor)
+  const alarmActive = String(p.status || '').toLowerCase() === 'alarm';
+  _alert('solar_inverter_alarm', alarmActive && p.online !== false,
+    '☀️ Solar Catalão — inversor em ALARME',
+    `Estado da planta = "${p.status}". Ver app SAJ Elekeeper pra detalhes.`,
+    'urgent', ['warning', 'exclamationmark.circle.fill']);
+  // 3) Dados velhos (last_upload > 20min)
+  _alert('solar_stale_upload', (_solarState.stale_min ?? 0) > 20 && p.online !== false,
+    '☀️ Solar Catalão — dados atrasados',
+    `Última atualização há ${_solarState.stale_min} min. Cloud SAJ ou inversor com atraso.`,
+    'default', ['clock', 'sun.max']);
+  // 4) Temperatura alta em algum inversor (>65°C limite operacional típico)
+  for (const inv of _solarState.invs) {
+    _alert(`solar_${inv.short}_temp_high`, (inv.temperature ?? 0) > 65 && p.online !== false,
+      `☀️ ${inv.label} — temperatura alta ${inv.temperature}°C`,
+      `Inversor ${inv.short} acima de 65°C. Pode entrar em derating. Ver ventilação/insolação direta.`,
+      'high', ['thermometer.sun', 'flame']);
+  }
+  // 5) Geração perdida em PLENO DIA (10h-14h local, sol alto): planta online mas
+  //    pv_power = 0. Guarda contra manhã cedo / fim de tarde / céu nublado longo.
+  const now = new Date();
+  const hour = now.getHours();
+  const middayNow = hour >= 10 && hour <= 14;
+  const genLost = middayNow && p.online !== false && (p.pv_power ?? 0) < 200;
+  _alert('solar_generation_lost', genLost,
+    '☀️ Solar Catalão — sem geração ao meio-dia',
+    `PV power = ${p.pv_power ?? 0}W entre 10-14h. Pode ser nublado extremo, disjuntor abriu ou string caída.`,
+    'high', ['sun.max.trianglebadge.exclamationmark']);
+  // 6) Inversor específico parou (0W) enquanto o outro gera (>500W) — string ou
+  //    inversor individual com problema.
+  if (_solarState.invs.length === 2 && p.online !== false && middayNow) {
+    const [a, b] = _solarState.invs;
+    const aDown = (a.power ?? 0) < 100, bDown = (b.power ?? 0) < 100;
+    const aUp = (a.power ?? 0) > 500,   bUp   = (b.power ?? 0) > 500;
+    _alert(`solar_${a.short}_solo_down`, aDown && bUp,
+      `☀️ ${a.label} parou (o outro segue)`,
+      `${a.label} em 0W enquanto ${b.label} gera ${b.power}W. Problema local (fusível, string, disjuntor CC).`,
+      'high', ['bolt.slash']);
+    _alert(`solar_${b.short}_solo_down`, bDown && aUp,
+      `☀️ ${b.label} parou (o outro segue)`,
+      `${b.label} em 0W enquanto ${a.label} gera ${a.power}W. Problema local (fusível, string, disjuntor CC).`,
+      'high', ['bolt.slash']);
+  }
+  // 7) String desbalanceada dentro do mesmo inversor (>40% diferença + ambas em geração)
+  for (const inv of _solarState.invs) {
+    if (!middayNow || p.online === false) continue;
+    const s1 = inv.strings[0]?.watts ?? 0, s2 = inv.strings[1]?.watts ?? 0;
+    if (s1 > 800 && s2 > 800) {
+      const diff = Math.abs(s1 - s2) / Math.max(s1, s2);
+      _alert(`solar_${inv.short}_string_imbalance`, diff > 0.4,
+        `☀️ ${inv.label} — strings desbalanceadas`,
+        `String 1 ${s1}W vs String 2 ${s2}W (${Math.round(diff*100)}% dif). Sombreamento, painel sujo/quebrado.`,
+        'default', ['square.split.2x1']);
+    } else {
+      _alert(`solar_${inv.short}_string_imbalance`, false, '', '', 'default', []);
+    }
+  }
+}
+app.get('/api/solar-status', async (_req, res) => {
+  const now = Date.now();
+  if (!_solarCache.data || (now - _solarCache.ts) > 60_000) {
+    const d = await _fetchSolarStatus();
+    if (d) _solarCache = { data: d, ts: now };
+  }
+  if (!_solarCache.data) return res.status(502).json({ error: 'solar indisponível' });
+  res.json(_solarCache.data);
+});
+
 // GET /api/baseline-status — status do scanner preditivo (habilitado?, entries,
 // pares monitorados, custo do dia em USD).
 app.get('/api/baseline-status', (_req, res) => {
