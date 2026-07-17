@@ -998,7 +998,10 @@ async function updateSolar() {
     const d = await r.json();
     const p = d.plant;
     const online = p.online !== false;
-    const alarm  = String(p.status||'').toLowerCase() === 'alarm';
+    // Alarme só é REAL se algum inversor reporta alarm_count > 0. O campo
+    // status da planta SAJ vive cravado em "alarm" mesmo sem problema real.
+    const invAlarms = (d.invs||[]).reduce((a,i)=>a+(i.alarm_count||0), 0);
+    const alarm  = String(p.status||'').toLowerCase() === 'alarm' && invAlarms > 0;
     const stale  = (d.stale_min ?? 0) > 20;
     // Preferência: sunrise/sunset real vindo da API. Fallback fixo 7-18h se null.
     const nowMs = Date.now();
@@ -1014,7 +1017,7 @@ async function updateSolar() {
     let statusStr;
     if (!daytime)        statusStr = '<span style="color:#888">🌙 noite (dormindo)</span>';
     else if (!online)    statusStr = '<span style="color:#e74c3c">offline (sem cloud SAJ)</span>';
-    else if (alarm)      statusStr = '<span style="color:#e74c3c">ALARME no inversor</span>';
+    else if (alarm)      statusStr = `<span style="color:#e74c3c">ALARME no inversor (${invAlarms})</span>`;
     else if (stale)      statusStr = '<span style="color:#e6b800">dados atrasados</span>';
     else if ((p.pv_power||0) > 100) statusStr = '<span style="color:#7bc47f">gerando</span>';
     else                 statusStr = '<span style="color:#888">sem geração</span>';

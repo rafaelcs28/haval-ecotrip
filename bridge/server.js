@@ -4700,11 +4700,15 @@ async function _evalSolarAlerts() {
     `SAJ Elekeeper cloud sem dados em horário diurno. Inversores podem estar operando OK, mas monitoramento cego.`,
     'high', ['warning', 'sun.max']);
   // 2) Inverter status = alarm — só de dia. À noite o estado retido pode
-  // refletir cache antigo do cloud.
-  const alarmActive = String(p.status || '').toLowerCase() === 'alarm';
-  _alert('solar_inverter_alarm', alarmActive && p.online !== false && daytime,
+  // refletir cache antigo do cloud. E o campo plant.status vive cravado em
+  // "alarm" no SAJ mesmo depois do evento passar (bug/design deles), então
+  // só grito de verdade se algum inversor reporta alarm_count > 0 HOJE —
+  // esse contador é per-dispositivo e ao vivo, fonte confiável.
+  const plantAlarm  = String(p.status || '').toLowerCase() === 'alarm';
+  const anyInvAlarm = _solarState.invs.some(i => (i.alarm_count ?? 0) > 0);
+  _alert('solar_inverter_alarm', plantAlarm && anyInvAlarm && p.online !== false && daytime,
     '☀️ Solar Catalão — inversor em ALARME',
-    `Estado da planta = "${p.status}". Ver app SAJ Elekeeper pra detalhes.`,
+    `Estado da planta = "${p.status}" com ${_solarState.invs.reduce((a,i)=>a+(i.alarm_count||0),0)} alarme(s) ativo(s) hoje. Ver app SAJ Elekeeper.`,
     'urgent', ['warning', 'exclamationmark.circle.fill']);
   // 3) Dados velhos — só de dia. Após pôr-do-sol o cloud SAJ para de receber
   // porque os inversores desligam (sem sol = sem geração = dormem).
