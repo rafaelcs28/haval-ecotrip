@@ -4659,37 +4659,46 @@ setTimeout(() => { _solarTick().catch(() => {}); }, 7_000);
 
 // Alertas do solar. Prioriza clareza: planta offline > inversor alarm >
 // geração perdida em pleno dia > temperatura alta > dados velhos.
-// Sunrise/sunset de Catalão via OpenWeather. Cache 12h — sunrise/sunset
-// varia menos de 2min/dia. Fallback pra janela fixa 7-18h se API indisponível.
-// Margem de 15min antes/depois pra cobrir a franja de geração fraca no alvorecer/
-// entardecer (evita alerta "gerando pouco" na fronteira).
-const CATALAO_LATLNG = { lat: -18.189331, lng: -47.937741 };
-let _sunCache = { sunrise_ms: 0, sunset_ms: 0, cachedAt: 0 };
-async function _fetchCatalaoSun() {
+// Sunrise/sunset por localização via OpenWeather. Cache 12h por lat/lng —
+// sunrise/sunset varia <2min/dia. Fallback pra janela fixa 7-18h se API off.
+// Margem de 15min antes/depois pra cobrir a franja de geração fraca no
+// alvorecer/entardecer (evita alerta na fronteira).
+const SUN_COORDS = {
+  catalao:   { lat: -18.189331, lng: -47.937741 },   // SAJ Clean Master
+  goiania:   { lat: -16.686900, lng: -49.264800 },   // Ivonei
+  palmeiras: { lat: -16.800300, lng: -49.925600 },   // Palmeiras de Goiás
+};
+const _sunCache = {};   // { locKey: { sunrise_ms, sunset_ms, cachedAt } }
+async function _fetchSunTimes(locKey) {
+  const c = SUN_COORDS[locKey];
+  if (!c) return { sunrise_ms: 0, sunset_ms: 0 };
+  const cur = _sunCache[locKey];
   const now = Date.now();
-  if (_sunCache.cachedAt && (now - _sunCache.cachedAt) < 12 * 3600_000) return _sunCache;
+  if (cur && cur.cachedAt && (now - cur.cachedAt) < 12 * 3600_000) return cur;
   const key = process.env.OPENWEATHER_API_KEY;
-  if (!key) return _sunCache;
+  if (!key) return cur || { sunrise_ms: 0, sunset_ms: 0 };
   try {
-    const u = `https://api.openweathermap.org/data/2.5/weather?lat=${CATALAO_LATLNG.lat}&lon=${CATALAO_LATLNG.lng}&appid=${key}`;
+    const u = `https://api.openweathermap.org/data/2.5/weather?lat=${c.lat}&lon=${c.lng}&appid=${key}`;
     const j = await (await fetch(u, { signal: AbortSignal.timeout(5000) })).json();
     if (j.sys && j.sys.sunrise && j.sys.sunset) {
-      _sunCache = { sunrise_ms: j.sys.sunrise * 1000, sunset_ms: j.sys.sunset * 1000, cachedAt: now };
+      _sunCache[locKey] = { sunrise_ms: j.sys.sunrise * 1000, sunset_ms: j.sys.sunset * 1000, cachedAt: now };
     }
   } catch (_) {}
-  return _sunCache;
+  return _sunCache[locKey] || { sunrise_ms: 0, sunset_ms: 0 };
 }
-async function _isSolarDaytime() {
-  const s = await _fetchCatalaoSun();
+// Compat: _fetchCatalaoSun continua funcionando (SAJ Catalão).
+async function _fetchCatalaoSun() { return _fetchSunTimes('catalao'); }
+async function _isDaytimeAt(locKey) {
+  const s = await _fetchSunTimes(locKey);
   if (!s.sunrise_ms || !s.sunset_ms) {
-    // Fallback fixo se OpenWeather falhar
     const h = new Date().getHours();
     return h >= 7 && h < 18;
   }
-  const marginMs = 15 * 60_000;   // ±15min ao redor do nascer/pôr
+  const marginMs = 15 * 60_000;
   const now = Date.now();
   return now >= (s.sunrise_ms - marginMs) && now <= (s.sunset_ms + marginMs);
 }
+async function _isSolarDaytime() { return _isDaytimeAt('catalao'); }
 async function _evalSolarAlerts() {
   if (!_solarState) return;
   const p = _solarState.plant;
@@ -4863,11 +4872,12 @@ async function _fetchSolisStatus() {
 async function _solisTick() {
   const d = await _fetchSolisStatus();
   if (d) {
-    // Anexa sunrise/sunset de Catalão (as diferenças entre GYN, Palmeiras e
-    // Catalão são <5min — mesmo pôr-do-sol funcional pro gate).
-    const sun = await _fetchCatalaoSun();
-    d.sunrise_ms = sun.sunrise_ms || null;
-    d.sunset_ms  = sun.sunset_ms  || null;
+    // Sunrise/sunset ESPECÍFICO por sistema: Ivonei usa Goiânia, Palmeiras
+    // usa Palmeiras de Goiás. ~30min de diferença no oeste (Palmeiras).
+    const sunGYN = await _fetchSunTimes('goiania');
+    const sunPGO = await _fetchSunTimes('palmeiras');
+    if (d.ivonei)    { d.ivonei.sunrise_ms    = sunGYN.sunrise_ms || null; d.ivonei.sunset_ms    = sunGYN.sunset_ms || null; }
+    if (d.palmeiras) { d.palmeiras.sunrise_ms = sunPGO.sunrise_ms || null; d.palmeiras.sunset_ms = sunPGO.sunset_ms || null; }
     _solisState = d; _solisCache = { data: d, ts: Date.now() };
   }
   _evalSolisAlerts().catch(() => {});
@@ -4877,8 +4887,12 @@ setTimeout(() => { _solisTick().catch(() => {}); }, 9_000);
 
 async function _evalSolisAlerts() {
   if (!_solisState) return;
-  const daytime = await _isSolarDaytime();
-  for (const [key, sys] of [['ivonei', _solisState.ivonei], ['palmeiras', _solisState.palmeiras]]) {
+  const daytimeGYN = await _isDaytimeAt('goiania');
+  const daytimePGO = await _isDaytimeAt('palmeiras');
+  for (const [key, sys, daytime] of [
+    ['ivonei',    _solisState.ivonei,    daytimeGYN],
+    ['palmeiras', _solisState.palmeiras, daytimePGO],
+  ]) {
     if (!sys) continue;
     // Collector offline em qualquer inv = cloud Solis não recebe (only daytime)
     const collOff = sys.invs.some(i => i.collector && i.collector !== 'online');
@@ -4935,6 +4949,30 @@ app.get('/api/solis-status', async (_req, res) => {
   }
   if (!_solisCache.data) return res.status(502).json({ error: 'solis indisponível' });
   res.json(_solisCache.data);
+});
+// Endpoints separados por sistema — matching o padrão do /api/solar-status
+// (Catalão). Cada um retorna 1 sistema + sunrise/sunset local.
+app.get('/api/ivonei-status', async (_req, res) => {
+  const now = Date.now();
+  if (!_solisCache.data || (now - _solisCache.ts) > 60_000) {
+    const d = await _fetchSolisStatus();
+    if (d) _solisCache = { data: d, ts: now };
+  }
+  const d = _solisCache.data;
+  if (!d || !d.ivonei) return res.status(502).json({ error: 'ivonei indisponível' });
+  const sun = await _fetchSunTimes('goiania');
+  res.json({ ...d.ivonei, sunrise_ms: sun.sunrise_ms || null, sunset_ms: sun.sunset_ms || null, ts: d.ts });
+});
+app.get('/api/palmeiras-status', async (_req, res) => {
+  const now = Date.now();
+  if (!_solisCache.data || (now - _solisCache.ts) > 60_000) {
+    const d = await _fetchSolisStatus();
+    if (d) _solisCache = { data: d, ts: now };
+  }
+  const d = _solisCache.data;
+  if (!d || !d.palmeiras) return res.status(502).json({ error: 'palmeiras indisponível' });
+  const sun = await _fetchSunTimes('palmeiras');
+  res.json({ ...d.palmeiras, sunrise_ms: sun.sunrise_ms || null, sunset_ms: sun.sunset_ms || null, ts: d.ts });
 });
 
 // GET /api/baseline-status — status do scanner preditivo (habilitado?, entries,

@@ -246,29 +246,39 @@ canvas { display: block; width: 100%; height: 60px; margin-top: 8px; }
       </div>
     </details>
 
-    <!-- Solar Solis (Ivonei + Palmeiras) -->
-    <details class="card" data-k="solis">
-      <summary><span class="sum-title">Solar Solis</span>
-        <span class="sum-right"><span id="head-solis">—</span><span class="chev"></span></span></summary>
+    <!-- Solar Ivonei (Goiânia — 2 inversores S6-GR1P6K) -->
+    <details class="card" data-k="solis-ivonei">
+      <summary><span class="sum-title">Solar Ivonei</span>
+        <span class="sum-right"><span id="head-iv">—</span><span class="chev"></span></span></summary>
       <div class="card-body">
-        <div class="row" style="border-bottom:1px solid #333;padding-bottom:6px;margin-bottom:8px;font-weight:600">
-          <span style="width:100%">⚡ Ivonei <span style="font-weight:400;color:#888;font-size:11px">— Goiânia · 2 inv S6-GR1P6K</span></span>
+        <div class="row" style="border-bottom:1px solid #333;padding-bottom:6px;margin-bottom:8px;color:#888;font-size:11px">
+          <span style="width:100%">Goiânia · 2 × S6-GR1P6K</span>
         </div>
         <div class="row"><span class="label">Status</span><span class="val" id="iv-status">—</span></div>
         <div class="row"><span class="label">Gerando</span><span class="val" id="iv-power">—</span></div>
         <div class="row"><span class="label">Hoje</span><span class="val" id="iv-today">—</span></div>
         <div class="row"><span class="label">Mês</span><span class="val" id="iv-month">—</span></div>
         <div class="row"><span class="label">Total (vida)</span><span class="val" id="iv-total">—</span></div>
+        <div class="row"><span class="label">Nascer / pôr</span><span class="val" id="iv-sun">—</span></div>
         <div class="row"><span class="label">Inv 1</span><span class="val" id="iv-inv1">—</span></div>
         <div class="row"><span class="label">Inv 2</span><span class="val" id="iv-inv2">—</span></div>
-        <div class="row" style="border-bottom:1px solid #333;padding-bottom:6px;margin-top:12px;margin-bottom:8px;font-weight:600">
-          <span style="width:100%">⚡ Palmeiras <span style="font-weight:400;color:#888;font-size:11px">— Palmeiras de Goiás · 1 inv S5-GR1P10K</span></span>
+      </div>
+    </details>
+
+    <!-- Solar Palmeiras (Palmeiras de Goiás — 1 inversor S5-GR1P10K) -->
+    <details class="card" data-k="solis-palmeiras">
+      <summary><span class="sum-title">Solar Palmeiras</span>
+        <span class="sum-right"><span id="head-pm">—</span><span class="chev"></span></span></summary>
+      <div class="card-body">
+        <div class="row" style="border-bottom:1px solid #333;padding-bottom:6px;margin-bottom:8px;color:#888;font-size:11px">
+          <span style="width:100%">Palmeiras de Goiás · 1 × S5-GR1P10K</span>
         </div>
         <div class="row"><span class="label">Status</span><span class="val" id="pm-status">—</span></div>
         <div class="row"><span class="label">Gerando</span><span class="val" id="pm-power">—</span></div>
         <div class="row"><span class="label">Hoje</span><span class="val" id="pm-today">—</span></div>
         <div class="row"><span class="label">Mês</span><span class="val" id="pm-month">—</span></div>
         <div class="row"><span class="label">Total (vida)</span><span class="val" id="pm-total">—</span></div>
+        <div class="row"><span class="label">Nascer / pôr</span><span class="val" id="pm-sun">—</span></div>
         <div class="row"><span class="label">Inv</span><span class="val" id="pm-inv1">—</span></div>
       </div>
     </details>
@@ -1018,61 +1028,60 @@ async function loadSysProc() {
   } catch (_) {}
 }
 
-async function updateSolis() {
+async function _paintSolisSystem(sys, prefix, headId) {
+  if (!sys) { set(headId, 'indisponível'); return; }
+  const nowMs = Date.now(), marginMs = 15*60_000;
+  const daytime = (sys.sunrise_ms && sys.sunset_ms)
+    ? nowMs >= sys.sunrise_ms-marginMs && nowMs <= sys.sunset_ms+marginMs
+    : (new Date().getHours() >= 7 && new Date().getHours() < 18);
+  const fmtClock = (ms) => ms ? new Date(ms).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}) : '—';
+  const collOff  = sys.invs.some(i=>i.collector && i.collector !== 'online');
+  const badStatus = sys.invs.find(i=>i.status && !['generating','online'].includes(String(i.status).toLowerCase()));
+  let status;
+  if (!daytime)          status = '<span style="color:#888">🌙 noite (dormindo)</span>';
+  else if (collOff)      status = '<span style="color:#e74c3c">coletor offline</span>';
+  else if (badStatus)    status = `<span style="color:#e74c3c">ALARME (${badStatus.status})</span>`;
+  else if ((sys.ac_power_w||0) > 500) status = '<span style="color:#7bc47f">gerando</span>';
+  else                   status = '<span style="color:#888">sem geração</span>';
+  set(prefix+'-status', status);
+  const kw = (sys.ac_power_w||0) / 1000;
+  set(prefix+'-power', kw > 0
+    ? `<span style="color:#f6c343">${kw.toFixed(2)} kW</span> · ${sys.ac_power_w||0} W`
+    : '<span style="color:#888">0 W</span>');
+  set(prefix+'-today', sys.gen_today_kwh != null ? `${sys.gen_today_kwh.toFixed(2)} kWh` : '—');
+  set(prefix+'-month', sys.gen_month_kwh != null ? `${sys.gen_month_kwh.toFixed(1)} kWh` : '—');
+  set(prefix+'-total', sys.gen_total_kwh != null ? `${(sys.gen_total_kwh/1000).toFixed(2)} MWh` : '—');
+  set(prefix+'-sun', (sys.sunrise_ms && sys.sunset_ms)
+    ? `🌅 ${fmtClock(sys.sunrise_ms)} · 🌇 ${fmtClock(sys.sunset_ms)}`
+    : '<span style="color:#888">janela fixa 7-18h</span>');
+  sys.invs.forEach((inv, idx) => {
+    const tC = inv.temperature_c ?? 0;
+    const tCol = tC > 80 ? '#e74c3c' : (tC > 70 ? '#e6b800' : '#7bc47f');
+    const collCol = inv.collector === 'online' ? '#7bc47f' : '#e74c3c';
+    const strP = inv.strings.map(s=>`S${s.n}:${s.w||0}W`).join(' · ');
+    const val = `${(inv.ac_power_w/1000).toFixed(2)}kW · ${inv.gen_today_kwh?.toFixed(1)||'?'}kWh · <span style="color:${tCol}">${tC.toFixed(1)}°C</span> · ${inv.grid_v?.toFixed(0)||'?'}V · <span style="color:${collCol};font-size:10px">${inv.collector||'?'}</span><br><span style="color:#888;font-size:10px">${strP}</span>`;
+    set(prefix+'-inv'+(idx+1), val);
+  });
+  // Header do card
+  if (!daytime)        set(headId, `<span style="color:#888">🌙 ${(sys.gen_today_kwh||0).toFixed(1)} kWh hoje</span>`);
+  else if (badStatus)  set(headId, '<span style="color:#e74c3c">⚠️ ALARME</span>');
+  else if (collOff)    set(headId, '<span style="color:#e74c3c">coletor offline</span>');
+  else if (kw > 0.5)   set(headId, `<span style="color:#f6c343">${kw.toFixed(2)} kW · ${(sys.gen_today_kwh||0).toFixed(1)} kWh hoje</span>`);
+  else                 set(headId, `<span style="color:#888">${(sys.gen_today_kwh||0).toFixed(1)} kWh hoje</span>`);
+}
+async function updateIvonei() {
   try {
-    const r = await fetch('/api/solis-status', { headers: { Authorization: 'Bearer ' + tk } });
-    if (!r.ok) { set('head-solis', 'indisponível'); return; }
-    const d = await r.json();
-    const nowMs = Date.now(), marginMs = 15*60_000;
-    let daytime;
-    if (d.sunrise_ms && d.sunset_ms) daytime = nowMs >= d.sunrise_ms-marginMs && nowMs <= d.sunset_ms+marginMs;
-    else { const h = new Date().getHours(); daytime = h >= 7 && h < 18; }
-
-    const paintSystem = (prefix, sys) => {
-      if (!sys) return;
-      const collOff = sys.invs.some(i=>i.collector && i.collector !== 'online');
-      const badStatus = sys.invs.find(i=>i.status && !['generating','online'].includes(String(i.status).toLowerCase()));
-      let status;
-      if (!daytime)     status = '<span style="color:#888">🌙 noite (dormindo)</span>';
-      else if (collOff) status = '<span style="color:#e74c3c">coletor offline</span>';
-      else if (badStatus) status = `<span style="color:#e74c3c">ALARME (${badStatus.status})</span>`;
-      else if ((sys.ac_power_w||0) > 500) status = '<span style="color:#7bc47f">gerando</span>';
-      else              status = '<span style="color:#888">sem geração</span>';
-      set(prefix+'-status', status);
-      const kw = (sys.ac_power_w||0) / 1000;
-      set(prefix+'-power', kw > 0
-        ? `<span style="color:#f6c343">${kw.toFixed(2)} kW</span> · ${sys.ac_power_w||0} W`
-        : '<span style="color:#888">0 W</span>');
-      set(prefix+'-today', sys.gen_today_kwh != null ? `${sys.gen_today_kwh.toFixed(2)} kWh` : '—');
-      set(prefix+'-month', sys.gen_month_kwh != null ? `${sys.gen_month_kwh.toFixed(1)} kWh` : '—');
-      set(prefix+'-total', sys.gen_total_kwh != null ? `${(sys.gen_total_kwh/1000).toFixed(2)} MWh` : '—');
-      // Inversores em 1 linha compacta
-      sys.invs.forEach((inv, idx) => {
-        const tC = inv.temperature_c ?? 0;
-        const tCol = tC > 80 ? '#e74c3c' : (tC > 70 ? '#e6b800' : '#7bc47f');
-        const collCol = inv.collector === 'online' ? '#7bc47f' : '#e74c3c';
-        const strP = inv.strings.map(s=>`S${s.n}:${s.w||0}W`).join(' · ');
-        const val = `${(inv.ac_power_w/1000).toFixed(2)}kW · ${inv.gen_today_kwh?.toFixed(1)||'?'}kWh · <span style="color:${tCol}">${tC.toFixed(1)}°C</span> · ${inv.grid_v?.toFixed(0)||'?'}V · <span style="color:${collCol};font-size:10px">${inv.collector||'?'}</span><br><span style="color:#888;font-size:10px">${strP}</span>`;
-        set(prefix+'-inv'+(idx+1), val);
-      });
-    };
-    paintSystem('iv', d.ivonei);
-    paintSystem('pm', d.palmeiras);
-    // Header resumo
-    const anyDown = ['ivonei','palmeiras'].some(k => {
-      const s = d[k]; return s && s.invs.some(i=>i.collector && i.collector !== 'online');
-    });
-    const anyAlarm = ['ivonei','palmeiras'].some(k => {
-      const s = d[k]; return s && s.invs.some(i=>i.status && !['generating','online'].includes(String(i.status).toLowerCase()));
-    });
-    const totalKw = ((d.ivonei?.ac_power_w||0) + (d.palmeiras?.ac_power_w||0)) / 1000;
-    const totalToday = (d.ivonei?.gen_today_kwh||0) + (d.palmeiras?.gen_today_kwh||0);
-    if (!daytime)         set('head-solis', `<span style="color:#888">🌙 ${totalToday.toFixed(1)} kWh hoje</span>`);
-    else if (anyAlarm)    set('head-solis', '<span style="color:#e74c3c">⚠️ ALARME</span>');
-    else if (anyDown)     set('head-solis', '<span style="color:#e74c3c">coletor offline</span>');
-    else if (totalKw > 0.5) set('head-solis', `<span style="color:#f6c343">${totalKw.toFixed(2)} kW · ${totalToday.toFixed(1)} kWh hoje</span>`);
-    else                  set('head-solis', `<span style="color:#888">${totalToday.toFixed(1)} kWh hoje</span>`);
-  } catch (e) { set('head-solis', 'erro'); }
+    const r = await fetch('/api/ivonei-status', { headers: { Authorization: 'Bearer ' + tk } });
+    if (!r.ok) { set('head-iv', 'indisponível'); return; }
+    _paintSolisSystem(await r.json(), 'iv', 'head-iv');
+  } catch (e) { set('head-iv', 'erro'); }
+}
+async function updatePalmeiras() {
+  try {
+    const r = await fetch('/api/palmeiras-status', { headers: { Authorization: 'Bearer ' + tk } });
+    if (!r.ok) { set('head-pm', 'indisponível'); return; }
+    _paintSolisSystem(await r.json(), 'pm', 'head-pm');
+  } catch (e) { set('head-pm', 'erro'); }
 }
 
 async function updateSolar() {
@@ -1230,12 +1239,14 @@ load();
 loadSysProc();
 updateBluetti();
 updateSolar();
-updateSolis();
+updateIvonei();
+updatePalmeiras();
 setInterval(load, 5_000);
 setInterval(loadSysProc, 5_000);
 setInterval(updateBluetti, 30_000);
 setInterval(updateSolar, 60_000);
-setInterval(updateSolis, 60_000);
+setInterval(updateIvonei, 60_000);
+setInterval(updatePalmeiras, 60_000);
 window.addEventListener('resize', drawChart);
 </script>
 </body>
