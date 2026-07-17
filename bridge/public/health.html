@@ -222,6 +222,7 @@ canvas { display: block; width: 100%; height: 60px; margin-top: 8px; }
         <div class="row"><span class="label">Total (vida)</span><span class="val" id="sol-total">—</span></div>
         <div class="row"><span class="label">CO₂ evitado hoje</span><span class="val" id="sol-co2">—</span></div>
         <div class="row"><span class="label">Última sync SAJ</span><span class="val" id="sol-stale">—</span></div>
+        <div class="row"><span class="label">Nascer / pôr do sol</span><span class="val" id="sol-sun">—</span></div>
         <div class="row" style="border-bottom:1px solid #333;padding-bottom:6px;margin-top:12px;margin-bottom:8px;font-weight:600">
           <span style="width:100%">🔌 Inv A <span style="font-weight:400;color:#888;font-size:11px">— 30214</span></span>
         </div>
@@ -999,8 +1000,16 @@ async function updateSolar() {
     const online = p.online !== false;
     const alarm  = String(p.status||'').toLowerCase() === 'alarm';
     const stale  = (d.stale_min ?? 0) > 20;
-    const h = new Date().getHours();
-    const daytime = h >= 7 && h < 18;   // fora disso, inversor dorme (esperado)
+    // Preferência: sunrise/sunset real vindo da API. Fallback fixo 7-18h se null.
+    const nowMs = Date.now();
+    const marginMs = 15 * 60_000;
+    let daytime;
+    if (d.sunrise_ms && d.sunset_ms) {
+      daytime = nowMs >= (d.sunrise_ms - marginMs) && nowMs <= (d.sunset_ms + marginMs);
+    } else {
+      const h = new Date().getHours(); daytime = h >= 7 && h < 18;
+    }
+    const fmtClock = (ms) => ms ? new Date(ms).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '—';
     // Status semântico
     let statusStr;
     if (!daytime)        statusStr = '<span style="color:#888">🌙 noite (dormindo)</span>';
@@ -1023,9 +1032,12 @@ async function updateSolar() {
     set('sol-month',  p.energy_month != null ? `${p.energy_month.toFixed(1)} kWh` : '—');
     set('sol-total',  p.energy_total != null ? `${(p.energy_total/1000).toFixed(2)} MWh` : '—');
     set('sol-co2',    p.co2_kg_today != null ? `${p.co2_kg_today.toFixed(1)} kg (${(p.trees_today||0).toFixed(2)} árv.)` : '—');
-    set('sol-stale',  d.stale_min != null ? (d.stale_min > 20
+    set('sol-stale',  d.stale_min != null ? (d.stale_min > 20 && daytime
       ? `<span style="color:#e6b800">há ${d.stale_min} min</span>`
       : `há ${d.stale_min} min`) : '—');
+    set('sol-sun', (d.sunrise_ms && d.sunset_ms)
+      ? `🌅 ${fmtClock(d.sunrise_ms)} · 🌇 ${fmtClock(d.sunset_ms)}`
+      : '<span style="color:#888">janela fixa 7-18h</span>');
     // Inversores
     const paintInv = (prefix, i) => {
       if (!i) return;

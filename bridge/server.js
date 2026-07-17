@@ -4645,24 +4645,55 @@ async function _fetchSolarStatus() {
 }
 async function _solarTick() {
   const d = await _fetchSolarStatus();
-  if (d) { _solarState = d; _solarCache = { data: d, ts: Date.now() }; }
-  _evalSolarAlerts();
+  if (d) {
+    // Anexa sunrise/sunset pra o cliente também usar (evita hardcoded 7-18)
+    const sun = await _fetchCatalaoSun();
+    d.sunrise_ms = sun.sunrise_ms || null;
+    d.sunset_ms  = sun.sunset_ms  || null;
+    _solarState = d; _solarCache = { data: d, ts: Date.now() };
+  }
+  _evalSolarAlerts().catch(() => {});
 }
 setInterval(() => { _solarTick().catch(() => {}); }, 60_000);
 setTimeout(() => { _solarTick().catch(() => {}); }, 7_000);
 
 // Alertas do solar. Prioriza clareza: planta offline > inversor alarm >
 // geração perdida em pleno dia > temperatura alta > dados velhos.
-function _isSolarDaytime() {
-  // Janela diurna conservadora Goiânia (sem DST). Fora dela, inversor dorme e
-  // o cloud SAJ para de receber — silencia offline/stale/alarm nesse período.
-  const h = new Date().getHours();
-  return h >= 7 && h < 18;
+// Sunrise/sunset de Catalão via OpenWeather. Cache 12h — sunrise/sunset
+// varia menos de 2min/dia. Fallback pra janela fixa 7-18h se API indisponível.
+// Margem de 15min antes/depois pra cobrir a franja de geração fraca no alvorecer/
+// entardecer (evita alerta "gerando pouco" na fronteira).
+const CATALAO_LATLNG = { lat: -18.189331, lng: -47.937741 };
+let _sunCache = { sunrise_ms: 0, sunset_ms: 0, cachedAt: 0 };
+async function _fetchCatalaoSun() {
+  const now = Date.now();
+  if (_sunCache.cachedAt && (now - _sunCache.cachedAt) < 12 * 3600_000) return _sunCache;
+  const key = process.env.OPENWEATHER_API_KEY;
+  if (!key) return _sunCache;
+  try {
+    const u = `https://api.openweathermap.org/data/2.5/weather?lat=${CATALAO_LATLNG.lat}&lon=${CATALAO_LATLNG.lng}&appid=${key}`;
+    const j = await (await fetch(u, { signal: AbortSignal.timeout(5000) })).json();
+    if (j.sys && j.sys.sunrise && j.sys.sunset) {
+      _sunCache = { sunrise_ms: j.sys.sunrise * 1000, sunset_ms: j.sys.sunset * 1000, cachedAt: now };
+    }
+  } catch (_) {}
+  return _sunCache;
 }
-function _evalSolarAlerts() {
+async function _isSolarDaytime() {
+  const s = await _fetchCatalaoSun();
+  if (!s.sunrise_ms || !s.sunset_ms) {
+    // Fallback fixo se OpenWeather falhar
+    const h = new Date().getHours();
+    return h >= 7 && h < 18;
+  }
+  const marginMs = 15 * 60_000;   // ±15min ao redor do nascer/pôr
+  const now = Date.now();
+  return now >= (s.sunrise_ms - marginMs) && now <= (s.sunset_ms + marginMs);
+}
+async function _evalSolarAlerts() {
   if (!_solarState) return;
   const p = _solarState.plant;
-  const daytime = _isSolarDaytime();
+  const daytime = await _isSolarDaytime();
   // 1) Planta offline (sem comm com cloud SAJ) — só de dia (noite é esperado)
   _alert('solar_plant_offline', p.online === false && daytime,
     '☀️ Solar Catalão — sem comunicação',
