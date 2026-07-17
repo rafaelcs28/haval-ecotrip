@@ -4418,18 +4418,36 @@ async function _fetchBluettiStatus() {
       };
       const bool = (suffix) => {
         const s = arr.find(x => x.entity_id === `switch.${id}_${suffix}`);
-        return s ? s.state === 'on' : null;
+        if (!s) return null;
+        if (s.state === 'unknown' || s.state === 'unavailable') return null;
+        return s.state === 'on';
       };
+      const str = (domain, suffix) => {
+        const s = arr.find(x => x.entity_id === `${domain}.${id}_${suffix}`);
+        return s && s.state !== 'unknown' && s.state !== 'unavailable' ? s.state : null;
+      };
+      const batt   = num('battery_level');
+      const gridIn = num('grid_input_power');
+      const acOn   = bool('ac');
+      const acOut  = num('alternating_current_out_power');
+      const dcOut  = num('direct_current_out_power');
+      const pv     = num('photovoltaics_input_power');
+      // Reachable = pelo menos um campo veio; se todos null, HA/dispositivo offline
+      const reachable = [batt, gridIn, acOut, dcOut, pv].some(v => v != null);
       return {
-        battery_pct:      num('battery_level'),
-        ac_out_w:         num('alternating_current_out_power'),
-        dc_out_w:         num('direct_current_out_power'),
-        grid_in_w:        num('grid_input_power'),
-        pv_in_w:          num('photovoltaics_input_power'),
+        battery_pct:      batt,
+        ac_out_w:         acOut,
+        dc_out_w:         dcOut,
+        grid_in_w:        gridIn,
+        pv_in_w:          pv,
         battery_time_min: num('battery_time_in_minutes'),
         full_charge_min:  num('full_charge_time_in_minutes'),
-        ac_on:            bool('ac'),
+        ac_on:            acOn,
+        ac_eco_on:        bool('ac_eco'),
         dc_on:            bool('dc'),
+        dc_eco_on:        bool('dc_eco'),
+        working_mode:     str('select', 'working_mode'),
+        reachable,
       };
     };
     return {
@@ -4438,6 +4456,72 @@ async function _fetchBluettiStatus() {
       ts: Date.now(),
     };
   } catch (e) { return null; }
+}
+// Poll servidor-side a cada 30s: 1 fetch pra alimentar UI + watchdog. Endpoint
+// e alertas ambos leem `_bluettiState` mais recente sem hammer no HA.
+let _bluettiState = null;
+async function _bluettiTick() {
+  const d = await _fetchBluettiStatus();
+  if (d) { _bluettiState = d; _bluettiCache = { data: d, ts: Date.now() }; }
+  _evalBluettiAlerts();
+}
+setInterval(() => { _bluettiTick().catch(() => {}); }, 30_000);
+setTimeout(() => { _bluettiTick().catch(() => {}); }, 5_000);
+
+// ── Watchdog: interpreta o estado das estações e dispara alertas via _alert() ─
+// Cada estação tem 4 alertas escopados: ac_off (dispositivos apagados agora),
+// offgrid (rodando bateria — pré-alarme), battery_low (≤30% sem grid), battery_critical
+// (≤10% sem grid). unreachable = HA/Bluetti offline. Histerese via debounce/recovery
+// do próprio _alert(). Rotula "🏠 Casa" e "🌱 Sítio" pra ntfy ficar autoexplicativo.
+function _evalBluettiAlerts() {
+  if (!_bluettiState) return;
+  for (const key of ['casa', 'sitio']) {
+    const s = _bluettiState[key]; if (!s) continue;
+    const emoji = key === 'casa' ? '🏠 Casa' : '🌱 Sítio';
+    const feeds = s.feeds || (key === 'casa' ? 'Mac Mini + Roteador' : 'Starlink');
+    const unreachable = !s.reachable;
+    // 1. Unreachable — Bluetti/HA sem comunicação. Silencia demais alertas.
+    _alert(`bluetti_${key}_unreachable`, unreachable,
+      `Bluetti ${emoji} sem comunicação`,
+      `Sem dados do EL100V2 (HA/BLE offline). Ver conexão da estação.`,
+      'high', ['battery.0', 'signal_strength']);
+    if (unreachable) {
+      // Suprime os outros pra não gritar múltiplas vezes por causa da mesma causa
+      _alert(`bluetti_${key}_ac_off`, false, '', '', 'default', []);
+      _alert(`bluetti_${key}_offgrid`, false, '', '', 'default', []);
+      _alert(`bluetti_${key}_battery_low`, false, '', '', 'default', []);
+      _alert(`bluetti_${key}_battery_critical`, false, '', '', 'default', []);
+      continue;
+    }
+    const grid = s.grid_in_w ?? 0;
+    const batt = s.battery_pct ?? 100;
+    const acOff = s.ac_on === false;
+    // 2. AC desligado — dispositivos ligados apagaram agora. Urgentíssimo.
+    _alert(`bluetti_${key}_ac_off`, acOff,
+      `${emoji} — AC DESLIGADO`,
+      `Saída AC off. ${feeds} sem energia AGORA. Religa a saída AC na estação.`,
+      'urgent', ['warning', 'electric_plug']);
+    // 3. Bateria crítica (grid caiu + ≤10%): apagão iminente
+    _alert(`bluetti_${key}_battery_critical`, grid === 0 && batt <= 10 && !acOff,
+      `${emoji} — bateria CRÍTICA ${batt}%`,
+      `Grid caiu e bateria ≤10%. ${feeds} vão apagar em minutos. Autonomia: ${_fmtMin(s.battery_time_min)}.`,
+      'urgent', ['warning', 'battery.0']);
+    // 4. Bateria baixa (grid caiu + ≤30%): pré-alarme
+    _alert(`bluetti_${key}_battery_low`, grid === 0 && batt > 10 && batt <= 30 && !acOff,
+      `${emoji} — bateria baixa ${batt}%`,
+      `Grid caiu e bateria ≤30%. Autonomia estimada: ${_fmtMin(s.battery_time_min)}.`,
+      'high', ['battery.25']);
+    // 5. Offgrid (rodando na bateria, ainda tem folga): observação
+    _alert(`bluetti_${key}_offgrid`, grid === 0 && batt > 30 && !acOff,
+      `${emoji} — sem energia da rede`,
+      `Rodando na bateria (${batt}%, autonomia ${_fmtMin(s.battery_time_min)}). ${feeds}.`,
+      'default', ['battery.75', 'electric_plug']);
+  }
+}
+function _fmtMin(m) {
+  if (m == null) return 'desconhecida';
+  const h = Math.floor(m / 60), r = m % 60;
+  return h > 0 ? `${h}h${String(r).padStart(2, '0')}min` : `${m}min`;
 }
 app.get('/api/bluetti-status', async (_req, res) => {
   const now = Date.now();

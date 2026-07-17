@@ -215,17 +215,25 @@ canvas { display: block; width: 100%; height: 60px; margin-top: 8px; }
         <div class="row" style="border-bottom:1px solid #333;padding-bottom:6px;margin-bottom:8px;font-weight:600">
           <span style="width:100%">🏠 Casa <span style="font-weight:400;color:#888;font-size:11px">— Mac Mini + Roteador</span></span>
         </div>
+        <div class="row"><span class="label">Status</span><span class="val" id="bl-casa-status">—</span></div>
         <div class="row"><span class="label">Bateria</span><span class="val" id="bl-casa-battery">—</span></div>
-        <div class="row"><span class="label">Grid IN</span><span class="val" id="bl-casa-grid">—</span></div>
-        <div class="row"><span class="label">Saída AC</span><span class="val" id="bl-casa-ac">—</span></div>
         <div class="row"><span class="label">Autonomia</span><span class="val" id="bl-casa-eta">—</span></div>
+        <div class="row"><span class="label">Modo</span><span class="val" id="bl-casa-mode">—</span></div>
+        <div class="row"><span class="label">Entrada rede</span><span class="val" id="bl-casa-grid">—</span></div>
+        <div class="row"><span class="label">Entrada solar</span><span class="val" id="bl-casa-pv">—</span></div>
+        <div class="row"><span class="label">Saída AC</span><span class="val" id="bl-casa-ac">—</span></div>
+        <div class="row"><span class="label">Saída DC</span><span class="val" id="bl-casa-dc">—</span></div>
         <div class="row" style="border-bottom:1px solid #333;padding-bottom:6px;margin-top:12px;margin-bottom:8px;font-weight:600">
           <span style="width:100%">🌱 Sítio <span style="font-weight:400;color:#888;font-size:11px">— Starlink</span></span>
         </div>
+        <div class="row"><span class="label">Status</span><span class="val" id="bl-sitio-status">—</span></div>
         <div class="row"><span class="label">Bateria</span><span class="val" id="bl-sitio-battery">—</span></div>
-        <div class="row"><span class="label">Grid IN</span><span class="val" id="bl-sitio-grid">—</span></div>
-        <div class="row"><span class="label">Saída AC</span><span class="val" id="bl-sitio-ac">—</span></div>
         <div class="row"><span class="label">Autonomia</span><span class="val" id="bl-sitio-eta">—</span></div>
+        <div class="row"><span class="label">Modo</span><span class="val" id="bl-sitio-mode">—</span></div>
+        <div class="row"><span class="label">Entrada rede</span><span class="val" id="bl-sitio-grid">—</span></div>
+        <div class="row"><span class="label">Entrada solar</span><span class="val" id="bl-sitio-pv">—</span></div>
+        <div class="row"><span class="label">Saída AC</span><span class="val" id="bl-sitio-ac">—</span></div>
+        <div class="row"><span class="label">Saída DC</span><span class="val" id="bl-sitio-dc">—</span></div>
       </div>
     </details>
 
@@ -949,31 +957,67 @@ async function updateBluetti() {
     const r = await fetch('/api/bluetti-status', { headers: { Authorization: 'Bearer ' + tk } });
     if (!r.ok) { set('head-bluetti', 'indisponível'); return; }
     const d = await r.json();
+    const fmtMin = (m) => {
+      if (m == null) return '—';
+      const h = Math.floor(m/60), r = m % 60;
+      return h > 0 ? `${h}h${String(r).padStart(2,'0')}min` : `${m}min`;
+    };
     const paint = (prefix, s) => {
-      if (!s || s.battery_pct == null) { set(prefix+'-battery', '—'); return; }
-      const battColor = s.battery_pct <= 20 ? '#e74c3c' : (s.battery_pct <= 40 ? '#e6b800' : '#7bc47f');
-      set(prefix+'-battery', `<span style="color:${battColor}">${s.battery_pct}%</span>`);
-      set(prefix+'-grid', s.grid_in_w > 0
-        ? `<span style="color:#7bc47f">${s.grid_in_w} W recebendo</span>`
-        : `<span style="color:#e6b800">0 W (na bateria)</span>`);
-      set(prefix+'-ac', s.ac_on
-        ? `${s.ac_out_w||0} W`
-        : `<span style="color:#e74c3c">desligado</span>`);
-      if (s.grid_in_w > 0) {
-        if (s.battery_pct >= 100) set(prefix+'-eta', '<span style="color:#7bc47f">cheia</span>');
-        else set(prefix+'-eta', s.full_charge_min ? `${s.full_charge_min} min p/ cheia` : 'carregando…');
-      } else {
-        const m = s.battery_time_min || 0;
-        const h = Math.floor(m/60), rest = m % 60;
-        set(prefix+'-eta', h > 0 ? `${h}h${String(rest).padStart(2,'0')}min` : `${m} min`);
+      if (!s || !s.reachable) {
+        set(prefix+'-status', '<span style="color:#e74c3c">sem comunicação</span>');
+        ['battery','eta','mode','grid','pv','ac','dc'].forEach(k => set(prefix+'-'+k, '—'));
+        return;
       }
+      // Status resumo (semântico)
+      const grid = s.grid_in_w ?? 0;
+      const batt = s.battery_pct ?? 0;
+      let status;
+      if (s.ac_on === false && s.dc_on === false) status = '<span style="color:#e74c3c">saídas desligadas</span>';
+      else if (grid > 0)                          status = '<span style="color:#7bc47f">recebendo rede</span>';
+      else if (batt <= 10)                        status = '<span style="color:#e74c3c">bateria CRÍTICA</span>';
+      else if (batt <= 30)                        status = '<span style="color:#e6b800">na bateria (baixa)</span>';
+      else                                        status = '<span style="color:#e6b800">na bateria</span>';
+      set(prefix+'-status', status);
+      // Bateria colorida
+      const battColor = batt <= 20 ? '#e74c3c' : (batt <= 40 ? '#e6b800' : '#7bc47f');
+      set(prefix+'-battery', `<span style="color:${battColor}">${batt}%</span>`);
+      // Autonomia / tempo pra cheia
+      if (grid > 0) {
+        if (batt >= 100) set(prefix+'-eta', '<span style="color:#7bc47f">cheia</span>');
+        else set(prefix+'-eta', s.full_charge_min > 0 ? `${fmtMin(s.full_charge_min)} p/ cheia` : 'carregando…');
+      } else {
+        set(prefix+'-eta', fmtMin(s.battery_time_min));
+      }
+      // Modo (Standard UPS / PV Priority / Custom UPS…)
+      set(prefix+'-mode', s.working_mode || '—');
+      // Entrada rede (grid input)
+      set(prefix+'-grid', grid > 0
+        ? `<span style="color:#7bc47f">${grid} W</span>`
+        : `<span style="color:#e6b800">0 W</span>`);
+      // Entrada solar
+      set(prefix+'-pv', (s.pv_in_w||0) > 0 ? `<span style="color:#f6c343">${s.pv_in_w} W</span>` : '0 W');
+      // Saída AC (com ECO)
+      const acOn  = s.ac_on === true;
+      const acEco = s.ac_eco_on === true;
+      set(prefix+'-ac', acOn
+        ? `${s.ac_out_w||0} W${acEco?' <span style="color:#7bc47f;font-size:10px">ECO</span>':''}`
+        : `<span style="color:#e74c3c">desligada</span>`);
+      // Saída DC
+      const dcOn  = s.dc_on === true;
+      const dcEco = s.dc_eco_on === true;
+      set(prefix+'-dc', dcOn
+        ? `${s.dc_out_w||0} W${dcEco?' <span style="color:#7bc47f;font-size:10px">ECO</span>':''}`
+        : `<span style="color:#666">desligada</span>`);
     };
     paint('bl-casa', d.casa); paint('bl-sitio', d.sitio);
-    const critical  = (s) => s && (s.ac_on === false || (s.grid_in_w === 0 && (s.battery_pct||0) < 20));
-    const attention = (s) => s && s.grid_in_w === 0;
-    if (critical(d.casa) || critical(d.sitio))    set('head-bluetti', '<span style="color:#e74c3c">⚠️ CRÍTICO</span>');
-    else if (attention(d.casa) || attention(d.sitio)) set('head-bluetti', '<span style="color:#e6b800">na bateria</span>');
-    else set('head-bluetti', `Casa ${d.casa.battery_pct||'?'}% · Sítio ${d.sitio.battery_pct||'?'}%`);
+    // Header resumo
+    const critical  = (s) => s && s.reachable && (s.ac_on === false || (s.grid_in_w === 0 && (s.battery_pct||0) <= 10));
+    const attention = (s) => s && s.reachable && s.grid_in_w === 0;
+    const gone      = (s) => s && !s.reachable;
+    if (gone(d.casa) || gone(d.sitio))                set('head-bluetti', '<span style="color:#e74c3c">sem comunicação</span>');
+    else if (critical(d.casa) || critical(d.sitio))    set('head-bluetti', '<span style="color:#e74c3c">⚠️ CRÍTICO</span>');
+    else if (attention(d.casa) || attention(d.sitio))  set('head-bluetti', '<span style="color:#e6b800">na bateria</span>');
+    else set('head-bluetti', `<span style="color:#7bc47f">Casa ${d.casa.battery_pct||'?'}% · Sítio ${d.sitio.battery_pct||'?'}%</span>`);
   } catch (e) { set('head-bluetti', 'erro'); }
 }
 
