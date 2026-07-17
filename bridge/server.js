@@ -15976,6 +15976,9 @@ function applyGwmEntity(id, value, isRetained = false) {
         checkRefuelOnEngineOn();
         _cancelTrunkForgottenTimer();
         _resetTyreTrip();
+        // Saídas monitoradas: bridge path GWM (o path 'case engine_state' do APK
+        // também chama isso — o carro atualmente publica engine pelo GWM).
+        try { _evalDepartureAsk(); } catch (e) { console.warn('[departure-ask]', e.message); }
       } else if (value === '0') {
         addEvent('engine_off', 'Motor desligado');
         sendPush('🔑 Motor desligado', 'O veículo foi desligado.', 'engine_off');
@@ -15985,6 +15988,11 @@ function applyGwmEntity(id, value, isRetained = false) {
         _scheduleLockForgottenAlert();
         _scheduleTrunkForgottenAlert();
         _resetTyreTrip();
+        // Guarda coord onde estacionou pra referência no próximo engine_on.
+        const _pLatG = +state.gps_lat, _pLngG = +state.gps_lng;
+        if (Number.isFinite(_pLatG) && Number.isFinite(_pLngG) && (_pLatG || _pLngG)) {
+          _lastParkedLoc = { lat: _pLatG, lng: _pLngG, ts: Date.now() };
+        }
       } else {
         _cancelWindowForgottenTimer();
         _cancelLockForgottenTimer();
