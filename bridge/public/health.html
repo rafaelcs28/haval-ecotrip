@@ -1070,7 +1070,7 @@ async function _paintSolisSystem(sys, prefix, headId) {
   if (!daytime)        set(headId, `<span style="color:#888">🌙 ${(sys.gen_today_kwh||0).toFixed(1)} kWh hoje</span>`);
   else if (badStatus)  set(headId, '<span style="color:#e74c3c">⚠️ ALARME</span>');
   else if (collOff)    set(headId, '<span style="color:#e74c3c">coletor offline</span>');
-  else if (kw > 0.5)   set(headId, `<span style="color:#f6c343">${kw.toFixed(2)} kW · ${(sys.gen_today_kwh||0).toFixed(1)} kWh hoje</span>`);
+  else if (kw > 0.5)   set(headId, wrapColor(`${kw.toFixed(2)} kW · ${(sys.gen_today_kwh||0).toFixed(1)} kWh hoje`, sys.ac_power_w, exp?.median_power));
   else                 set(headId, `<span style="color:#888">${(sys.gen_today_kwh||0).toFixed(1)} kWh hoje</span>`);
 }
 async function updateIvonei() {
@@ -1182,12 +1182,12 @@ async function updateSolar() {
         : `<span style="color:#7bc47f">0</span>`);
     };
     paintInv('sol-a', d.invs?.[0]); paintInv('sol-b', d.invs?.[1]);
-    // Header do card resume: noite silenciosa; senão alarme > offline > gerando
+    // Header: cor por ratio quando há histórico; padrão (sem span) quando não.
     if (!daytime)                  set('head-solar', `<span style="color:#888">🌙 ${(p.energy_today||0).toFixed(1)} kWh hoje</span>`);
     else if (alarm)                set('head-solar', '<span style="color:#e74c3c">⚠️ ALARME</span>');
     else if (!online)              set('head-solar', '<span style="color:#e74c3c">offline</span>');
     else if (stale)                set('head-solar', '<span style="color:#e6b800">dados atrasados</span>');
-    else if ((p.pv_power||0) > 100)set('head-solar', `<span style="color:#f6c343">${(p.pv_power/1000).toFixed(2)} kW · ${(p.energy_today||0).toFixed(1)} kWh hoje</span>`);
+    else if ((p.pv_power||0) > 100) set('head-solar', wrapColor(`${(p.pv_power/1000).toFixed(2)} kW · ${(p.energy_today||0).toFixed(1)} kWh hoje`, p.pv_power, exp?.median_power));
     else                           set('head-solar', `<span style="color:#888">${(p.energy_today||0).toFixed(1)} kWh hoje</span>`);
   } catch (e) { set('head-solar', 'erro'); }
 }
