@@ -4773,6 +4773,170 @@ app.get('/api/solar-status', async (_req, res) => {
   res.json(_solarCache.data);
 });
 
+// ── Solis Cloud (Ivonei + Palmeiras) ────────────────────────────────────────
+// Sistema Ivonei tem 2 inversores S6-GR1P6K (Goiânia); Palmeiras tem 1
+// S5-GR1P10K (Palmeiras de Goiás). Integração Solis Cloud publica 123 entities
+// por device — a maioria é lixo (bateria zerada, pv_string 4-24, l2/l3 zerados,
+// campos agregados unavailable). Filtrei só o que é útil.
+const _SOLIS = {
+  ivonei: {
+    label: 'Ivonei (Goiânia)',
+    invs: [
+      { label: 'Inv 1', slug: 'energia_solar_ivonei',   strings: [1, 2] },
+      { label: 'Inv 2', slug: 'energia_solar_ivonei_2', strings: [1, 2] },
+    ],
+  },
+  palmeiras: {
+    label: 'Palmeiras (Palmeiras de Goiás)',
+    invs: [
+      { label: 'Inv',   slug: 'energia_solar_palmeiras', strings: [1, 2, 3] },
+    ],
+  },
+};
+let _solisState = null;
+let _solisCache = { data: null, ts: 0 };
+async function _fetchSolisStatus() {
+  const tok = process.env.HA_TOKEN;
+  const url = (process.env.HA_URL || '').replace(/\/$/, '');
+  if (!tok || !url) return null;
+  try {
+    const r = await fetch(`${url}/api/states`, {
+      headers: { Authorization: `Bearer ${tok}` },
+      signal: AbortSignal.timeout(6000),
+    });
+    if (!r.ok) return null;
+    const arr = await r.json();
+    const num = (id) => {
+      const s = arr.find(x => x.entity_id === id);
+      if (!s || s.state === 'unknown' || s.state === 'unavailable') return null;
+      const n = +s.state; return Number.isFinite(n) ? n : null;
+    };
+    const str = (id) => {
+      const s = arr.find(x => x.entity_id === id);
+      return s && s.state !== 'unknown' && s.state !== 'unavailable' ? s.state : null;
+    };
+    const readInv = (inv) => {
+      const p = `sensor.${inv.slug}`;
+      return {
+        label: inv.label,
+        ac_power_w:        num(`${p}_inverter_ac_power`),
+        dc_power_w:        num(`${p}_inverter_dc_power`),
+        gen_today_kwh:     num(`${p}_inverter_generation_today`),
+        gen_month_kwh:     num(`${p}_inverter_generation_this_month`),
+        gen_total_kwh:     num(`${p}_inverter_generation_total`),
+        temperature_c:     num(`${p}_inverter_temperature`),
+        grid_v:            num(`${p}_grid_l1_voltage`),
+        grid_a:            num(`${p}_grid_l1_current`),
+        grid_freq_hz:      num(`${p}_grid_frequency`),
+        grid_export_today: num(`${p}_grid_export_today`),
+        runtime_today_h:   num(`${p}_inverter_runtime_today`),
+        collector:         str(`${p}_collector_state`),   // online/offline
+        status:            str(`${p}_inverter_status`),   // generating/alarm/offline
+        strings: inv.strings.map(n => ({
+          n,
+          v: num(`${p}_pv_string_${n}_voltage`),
+          a: num(`${p}_pv_string_${n}_current`),
+          w: num(`${p}_pv_string_${n}_power`),
+        })),
+      };
+    };
+    // Agrega por sistema (soma potência/energia hoje)
+    const buildSystem = (cfg) => {
+      const invs = cfg.invs.map(readInv);
+      const sum = (k) => invs.reduce((a, i) => a + (i[k] ?? 0), 0);
+      return {
+        label: cfg.label,
+        ac_power_w:    sum('ac_power_w'),
+        gen_today_kwh: sum('gen_today_kwh'),
+        gen_month_kwh: sum('gen_month_kwh'),
+        gen_total_kwh: sum('gen_total_kwh'),
+        invs,
+      };
+    };
+    return {
+      ivonei:    buildSystem(_SOLIS.ivonei),
+      palmeiras: buildSystem(_SOLIS.palmeiras),
+      ts: Date.now(),
+    };
+  } catch (e) { return null; }
+}
+async function _solisTick() {
+  const d = await _fetchSolisStatus();
+  if (d) {
+    // Anexa sunrise/sunset de Catalão (as diferenças entre GYN, Palmeiras e
+    // Catalão são <5min — mesmo pôr-do-sol funcional pro gate).
+    const sun = await _fetchCatalaoSun();
+    d.sunrise_ms = sun.sunrise_ms || null;
+    d.sunset_ms  = sun.sunset_ms  || null;
+    _solisState = d; _solisCache = { data: d, ts: Date.now() };
+  }
+  _evalSolisAlerts().catch(() => {});
+}
+setInterval(() => { _solisTick().catch(() => {}); }, 60_000);
+setTimeout(() => { _solisTick().catch(() => {}); }, 9_000);
+
+async function _evalSolisAlerts() {
+  if (!_solisState) return;
+  const daytime = await _isSolarDaytime();
+  for (const [key, sys] of [['ivonei', _solisState.ivonei], ['palmeiras', _solisState.palmeiras]]) {
+    if (!sys) continue;
+    // Collector offline em qualquer inv = cloud Solis não recebe (only daytime)
+    const collOff = sys.invs.some(i => i.collector && i.collector !== 'online');
+    _alert(`solis_${key}_collector_offline`, collOff && daytime,
+      `☀️ ${sys.label} — coletor offline`,
+      `Datalogger Solis sem comunicação com cloud. Inversores podem estar operando OK mas monitoramento cego.`,
+      'high', ['warning', 'sun.max']);
+    // Inverter status != generating (durante o dia)
+    const badStatus = sys.invs.find(i => i.status && !['generating','正常'].includes(String(i.status).toLowerCase()) && i.status !== 'online');
+    _alert(`solis_${key}_alarm`, !!badStatus && daytime && !collOff,
+      `☀️ ${sys.label} — inversor em ALARME`,
+      `Status: "${badStatus?.status}". Ver app Solis Cloud pra detalhes.`,
+      'urgent', ['warning', 'exclamationmark.circle.fill']);
+    // Temperatura alta (>80°C — S6-GR1P6K tem limite 85°C)
+    for (const inv of sys.invs) {
+      const _tId = key + '_' + inv.label.toLowerCase().replace(/[^a-z0-9]/g,'');
+      _alert(`solis_${_tId}_temp_high`, (inv.temperature_c ?? 0) > 80 && daytime,
+        `☀️ ${sys.label} · ${inv.label} — temperatura alta ${inv.temperature_c}°C`,
+        `Acima de 80°C. Pode entrar em derating. Ver ventilação/insolação direta.`,
+        'high', ['thermometer.sun', 'flame']);
+    }
+    // Ivonei tem 2 inversores — se 1 estiver em 0W enquanto o outro gera >500W
+    // (10h-14h), problema local
+    if (sys.invs.length === 2) {
+      const now = new Date(), h = now.getHours();
+      const midday = h >= 10 && h <= 14;
+      const [a, b] = sys.invs;
+      const aDown = (a.ac_power_w ?? 0) < 100, bDown = (b.ac_power_w ?? 0) < 100;
+      const aUp   = (a.ac_power_w ?? 0) > 500, bUp   = (b.ac_power_w ?? 0) > 500;
+      _alert(`solis_${key}_inv1_solo_down`, aDown && bUp && midday,
+        `☀️ ${sys.label} — ${a.label} parou`,
+        `${a.label} em 0W enquanto ${b.label} gera ${b.ac_power_w}W. Problema local (string/disjuntor/CC).`,
+        'high', ['bolt.slash']);
+      _alert(`solis_${key}_inv2_solo_down`, bDown && aUp && midday,
+        `☀️ ${sys.label} — ${b.label} parou`,
+        `${b.label} em 0W enquanto ${a.label} gera ${a.ac_power_w}W. Problema local (string/disjuntor/CC).`,
+        'high', ['bolt.slash']);
+    }
+    // Geração perdida ao meio-dia (10-14h) — sistema inteiro em <10% do esperado
+    const now = new Date();
+    const midday = now.getHours() >= 10 && now.getHours() <= 14;
+    _alert(`solis_${key}_generation_lost`, midday && (sys.ac_power_w ?? 0) < 500,
+      `☀️ ${sys.label} — sem geração ao meio-dia`,
+      `Potência ${sys.ac_power_w}W entre 10-14h. Nublado extremo, disjuntor ou coletor caído.`,
+      'high', ['sun.max.trianglebadge.exclamationmark']);
+  }
+}
+
+app.get('/api/solis-status', async (_req, res) => {
+  const now = Date.now();
+  if (!_solisCache.data || (now - _solisCache.ts) > 60_000) {
+    const d = await _fetchSolisStatus();
+    if (d) _solisCache = { data: d, ts: now };
+  }
+  if (!_solisCache.data) return res.status(502).json({ error: 'solis indisponível' });
+  res.json(_solisCache.data);
+});
+
 // GET /api/baseline-status — status do scanner preditivo (habilitado?, entries,
 // pares monitorados, custo do dia em USD).
 app.get('/api/baseline-status', (_req, res) => {
