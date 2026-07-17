@@ -207,6 +207,28 @@ canvas { display: block; width: 100%; height: 60px; margin-top: 8px; }
       </div>
     </details>
 
+    <!-- Estações portáteis (Bluetti EL100V2) -->
+    <details class="card" data-k="bluetti">
+      <summary><span class="sum-title">Estações portáteis</span>
+        <span class="sum-right"><span id="head-bluetti">—</span><span class="chev"></span></span></summary>
+      <div class="card-body">
+        <div class="row" style="border-bottom:1px solid #333;padding-bottom:6px;margin-bottom:8px;font-weight:600">
+          <span style="width:100%">🏠 Casa <span style="font-weight:400;color:#888;font-size:11px">— Mac Mini + Roteador</span></span>
+        </div>
+        <div class="row"><span class="label">Bateria</span><span class="val" id="bl-casa-battery">—</span></div>
+        <div class="row"><span class="label">Grid IN</span><span class="val" id="bl-casa-grid">—</span></div>
+        <div class="row"><span class="label">Saída AC</span><span class="val" id="bl-casa-ac">—</span></div>
+        <div class="row"><span class="label">Autonomia</span><span class="val" id="bl-casa-eta">—</span></div>
+        <div class="row" style="border-bottom:1px solid #333;padding-bottom:6px;margin-top:12px;margin-bottom:8px;font-weight:600">
+          <span style="width:100%">🌱 Sítio <span style="font-weight:400;color:#888;font-size:11px">— Starlink</span></span>
+        </div>
+        <div class="row"><span class="label">Bateria</span><span class="val" id="bl-sitio-battery">—</span></div>
+        <div class="row"><span class="label">Grid IN</span><span class="val" id="bl-sitio-grid">—</span></div>
+        <div class="row"><span class="label">Saída AC</span><span class="val" id="bl-sitio-ac">—</span></div>
+        <div class="row"><span class="label">Autonomia</span><span class="val" id="bl-sitio-eta">—</span></div>
+      </div>
+    </details>
+
     <!-- Clockin -->
     <details class="card" data-k="clockin">
       <summary><span class="sum-title">Clockin</span>
@@ -922,11 +944,46 @@ async function loadSysProc() {
   } catch (_) {}
 }
 
+async function updateBluetti() {
+  try {
+    const r = await fetch('/api/bluetti-status', { headers: { Authorization: 'Bearer ' + tk } });
+    if (!r.ok) { set('head-bluetti', 'indisponível'); return; }
+    const d = await r.json();
+    const paint = (prefix, s) => {
+      if (!s || s.battery_pct == null) { set(prefix+'-battery', '—'); return; }
+      const battColor = s.battery_pct <= 20 ? '#e74c3c' : (s.battery_pct <= 40 ? '#e6b800' : '#7bc47f');
+      set(prefix+'-battery', `<span style="color:${battColor}">${s.battery_pct}%</span>`);
+      set(prefix+'-grid', s.grid_in_w > 0
+        ? `<span style="color:#7bc47f">${s.grid_in_w} W recebendo</span>`
+        : `<span style="color:#e6b800">0 W (na bateria)</span>`);
+      set(prefix+'-ac', s.ac_on
+        ? `${s.ac_out_w||0} W`
+        : `<span style="color:#e74c3c">desligado</span>`);
+      if (s.grid_in_w > 0) {
+        if (s.battery_pct >= 100) set(prefix+'-eta', '<span style="color:#7bc47f">cheia</span>');
+        else set(prefix+'-eta', s.full_charge_min ? `${s.full_charge_min} min p/ cheia` : 'carregando…');
+      } else {
+        const m = s.battery_time_min || 0;
+        const h = Math.floor(m/60), rest = m % 60;
+        set(prefix+'-eta', h > 0 ? `${h}h${String(rest).padStart(2,'0')}min` : `${m} min`);
+      }
+    };
+    paint('bl-casa', d.casa); paint('bl-sitio', d.sitio);
+    const critical  = (s) => s && (s.ac_on === false || (s.grid_in_w === 0 && (s.battery_pct||0) < 20));
+    const attention = (s) => s && s.grid_in_w === 0;
+    if (critical(d.casa) || critical(d.sitio))    set('head-bluetti', '<span style="color:#e74c3c">⚠️ CRÍTICO</span>');
+    else if (attention(d.casa) || attention(d.sitio)) set('head-bluetti', '<span style="color:#e6b800">na bateria</span>');
+    else set('head-bluetti', `Casa ${d.casa.battery_pct||'?'}% · Sítio ${d.sitio.battery_pct||'?'}%`);
+  } catch (e) { set('head-bluetti', 'erro'); }
+}
+
 loadOpenState();
 load();
 loadSysProc();
+updateBluetti();
 setInterval(load, 5_000);
 setInterval(loadSysProc, 5_000);
+setInterval(updateBluetti, 30_000);
 window.addEventListener('resize', drawChart);
 </script>
 </body>

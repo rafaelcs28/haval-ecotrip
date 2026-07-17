@@ -4391,6 +4391,64 @@ app.post('/api/departure/dismiss', (req, res) => {
   res.json({ ok: true });
 });
 
+// GET /api/bluetti-status — estado das duas EL100V2 (Casa + Sítio). Fetch dos
+// sensores no HA local (bridge já tem HA_TOKEN) e devolve JSON normalizado.
+// Cache 30s. Consumido pelo health.html do monitor externo.
+const _BLUETTI = {
+  casa:  { id: 'el100v22541111662131', label: 'Casa',  feeds: 'Mac Mini + Roteador' },
+  sitio: { id: 'el100v22541111602913', label: 'Sítio', feeds: 'Starlink' },
+};
+let _bluettiCache = { data: null, ts: 0 };
+async function _fetchBluettiStatus() {
+  const tok = process.env.HA_TOKEN;
+  const url = (process.env.HA_URL || '').replace(/\/$/, '');
+  if (!tok || !url) return null;
+  try {
+    const r = await fetch(`${url}/api/states`, {
+      headers: { Authorization: `Bearer ${tok}` },
+      signal: AbortSignal.timeout(6000),
+    });
+    if (!r.ok) return null;
+    const arr = await r.json();
+    const parse = (id) => {
+      const num = (suffix) => {
+        const s = arr.find(x => x.entity_id === `sensor.${id}_${suffix}`);
+        if (!s || s.state === 'unknown' || s.state === 'unavailable') return null;
+        const n = +s.state; return Number.isFinite(n) ? n : null;
+      };
+      const bool = (suffix) => {
+        const s = arr.find(x => x.entity_id === `switch.${id}_${suffix}`);
+        return s ? s.state === 'on' : null;
+      };
+      return {
+        battery_pct:      num('battery_level'),
+        ac_out_w:         num('alternating_current_out_power'),
+        dc_out_w:         num('direct_current_out_power'),
+        grid_in_w:        num('grid_input_power'),
+        pv_in_w:          num('photovoltaics_input_power'),
+        battery_time_min: num('battery_time_in_minutes'),
+        full_charge_min:  num('full_charge_time_in_minutes'),
+        ac_on:            bool('ac'),
+        dc_on:            bool('dc'),
+      };
+    };
+    return {
+      casa:  { ..._BLUETTI.casa,  ...parse(_BLUETTI.casa.id) },
+      sitio: { ..._BLUETTI.sitio, ...parse(_BLUETTI.sitio.id) },
+      ts: Date.now(),
+    };
+  } catch (e) { return null; }
+}
+app.get('/api/bluetti-status', async (_req, res) => {
+  const now = Date.now();
+  if (!_bluettiCache.data || (now - _bluettiCache.ts) > 30_000) {
+    const d = await _fetchBluettiStatus();
+    if (d) _bluettiCache = { data: d, ts: now };
+  }
+  if (!_bluettiCache.data) return res.status(502).json({ error: 'bluetti indisponível' });
+  res.json(_bluettiCache.data);
+});
+
 // GET /api/baseline-status — status do scanner preditivo (habilitado?, entries,
 // pares monitorados, custo do dia em USD).
 app.get('/api/baseline-status', (_req, res) => {
