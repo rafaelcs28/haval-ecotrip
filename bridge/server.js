@@ -4653,24 +4653,33 @@ setTimeout(() => { _solarTick().catch(() => {}); }, 7_000);
 
 // Alertas do solar. Prioriza clareza: planta offline > inversor alarm >
 // geração perdida em pleno dia > temperatura alta > dados velhos.
+function _isSolarDaytime() {
+  // Janela diurna conservadora Goiânia (sem DST). Fora dela, inversor dorme e
+  // o cloud SAJ para de receber — silencia offline/stale/alarm nesse período.
+  const h = new Date().getHours();
+  return h >= 7 && h < 18;
+}
 function _evalSolarAlerts() {
   if (!_solarState) return;
   const p = _solarState.plant;
-  // 1) Planta offline (sem comm com cloud SAJ)
-  _alert('solar_plant_offline', p.online === false,
+  const daytime = _isSolarDaytime();
+  // 1) Planta offline (sem comm com cloud SAJ) — só de dia (noite é esperado)
+  _alert('solar_plant_offline', p.online === false && daytime,
     '☀️ Solar Catalão — sem comunicação',
-    `SAJ Elekeeper cloud sem dados. Inversores podem estar operando OK, mas monitoramento cego.`,
+    `SAJ Elekeeper cloud sem dados em horário diurno. Inversores podem estar operando OK, mas monitoramento cego.`,
     'high', ['warning', 'sun.max']);
-  // 2) Inverter status = alarm (nível planta — condensa alarme de qualquer inversor)
+  // 2) Inverter status = alarm — só de dia. À noite o estado retido pode
+  // refletir cache antigo do cloud.
   const alarmActive = String(p.status || '').toLowerCase() === 'alarm';
-  _alert('solar_inverter_alarm', alarmActive && p.online !== false,
+  _alert('solar_inverter_alarm', alarmActive && p.online !== false && daytime,
     '☀️ Solar Catalão — inversor em ALARME',
     `Estado da planta = "${p.status}". Ver app SAJ Elekeeper pra detalhes.`,
     'urgent', ['warning', 'exclamationmark.circle.fill']);
-  // 3) Dados velhos (last_upload > 20min)
-  _alert('solar_stale_upload', (_solarState.stale_min ?? 0) > 20 && p.online !== false,
+  // 3) Dados velhos — só de dia. Após pôr-do-sol o cloud SAJ para de receber
+  // porque os inversores desligam (sem sol = sem geração = dormem).
+  _alert('solar_stale_upload', (_solarState.stale_min ?? 0) > 20 && p.online !== false && daytime,
     '☀️ Solar Catalão — dados atrasados',
-    `Última atualização há ${_solarState.stale_min} min. Cloud SAJ ou inversor com atraso.`,
+    `Última atualização há ${_solarState.stale_min} min em horário diurno. Cloud SAJ ou inversor com atraso.`,
     'default', ['clock', 'sun.max']);
   // 4) Temperatura alta em algum inversor (>65°C limite operacional típico)
   for (const inv of _solarState.invs) {

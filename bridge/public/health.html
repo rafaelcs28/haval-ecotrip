@@ -999,13 +999,16 @@ async function updateSolar() {
     const online = p.online !== false;
     const alarm  = String(p.status||'').toLowerCase() === 'alarm';
     const stale  = (d.stale_min ?? 0) > 20;
+    const h = new Date().getHours();
+    const daytime = h >= 7 && h < 18;   // fora disso, inversor dorme (esperado)
     // Status semântico
     let statusStr;
-    if (!online)      statusStr = '<span style="color:#e74c3c">offline (sem cloud SAJ)</span>';
-    else if (alarm)   statusStr = '<span style="color:#e74c3c">ALARME no inversor</span>';
-    else if (stale)   statusStr = '<span style="color:#e6b800">dados atrasados</span>';
+    if (!daytime)        statusStr = '<span style="color:#888">🌙 noite (dormindo)</span>';
+    else if (!online)    statusStr = '<span style="color:#e74c3c">offline (sem cloud SAJ)</span>';
+    else if (alarm)      statusStr = '<span style="color:#e74c3c">ALARME no inversor</span>';
+    else if (stale)      statusStr = '<span style="color:#e6b800">dados atrasados</span>';
     else if ((p.pv_power||0) > 100) statusStr = '<span style="color:#7bc47f">gerando</span>';
-    else              statusStr = '<span style="color:#888">sem geração</span>';
+    else                 statusStr = '<span style="color:#888">sem geração</span>';
     set('sol-status', statusStr);
     // Números planta
     const kw = (p.pv_power||0) / 1000;
@@ -1044,8 +1047,9 @@ async function updateSolar() {
         : `<span style="color:#7bc47f">0</span>`);
     };
     paintInv('sol-a', d.invs?.[0]); paintInv('sol-b', d.invs?.[1]);
-    // Header do card resume: alarme > offline > gerando kW > sem geração
-    if (alarm)                     set('head-solar', '<span style="color:#e74c3c">⚠️ ALARME</span>');
+    // Header do card resume: noite silenciosa; senão alarme > offline > gerando
+    if (!daytime)                  set('head-solar', `<span style="color:#888">🌙 ${(p.energy_today||0).toFixed(1)} kWh hoje</span>`);
+    else if (alarm)                set('head-solar', '<span style="color:#e74c3c">⚠️ ALARME</span>');
     else if (!online)              set('head-solar', '<span style="color:#e74c3c">offline</span>');
     else if (stale)                set('head-solar', '<span style="color:#e6b800">dados atrasados</span>');
     else if ((p.pv_power||0) > 100)set('head-solar', `<span style="color:#f6c343">${(p.pv_power/1000).toFixed(2)} kW · ${(p.energy_today||0).toFixed(1)} kWh hoje</span>`);
