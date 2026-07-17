@@ -4757,7 +4757,9 @@ async function _evalSolarAlerts() {
       `${b.label} em 0W enquanto ${a.label} gera ${a.power}W. Problema local (fusível, string, disjuntor CC).`,
       'high', ['bolt.slash']);
   }
-  // 7) String desbalanceada dentro do mesmo inversor (>40% diferença + ambas em geração)
+  // 7) Anomalias comuns: queda súbita + dia com geração baixa vs histórico
+  await _evalSolarAnomalies('catalao', 'catalao', p.pv_power, p.energy_today, daytime);
+  // 8) String desbalanceada dentro do mesmo inversor (>40% diferença + ambas em geração)
   for (const inv of _solarState.invs) {
     if (!middayNow || p.online === false) continue;
     const s1 = inv.strings[0]?.watts ?? 0, s2 = inv.strings[1]?.watts ?? 0;
@@ -4781,6 +4783,85 @@ app.get('/api/solar-status', async (_req, res) => {
   if (!_solarCache.data) return res.status(502).json({ error: 'solar indisponível' });
   res.json(_solarCache.data);
 });
+
+// ── Detecção de anomalias solar (comum aos 3 sistemas) ──────────────────────
+// A) Queda súbita — compara potência atual vs último tick; se cai ≥70% de vez
+//    em pleno dia (vinha gerando >2kW), dispara imediato. Debounce natural
+//    pelo estado — só re-dispara quando volta acima do limite e cai de novo.
+// B) Dia ruim — grava gen_today diário em solar_history.json (últimos 30 dias)
+//    e ao passar de 15h compara com mediana dos últimos 14 dias. Se hoje
+//    <40% da mediana, alerta uma vez (via _alert() com auto-recovery).
+const SOLAR_HISTORY_FILE = path.join(DATA_DIR, 'solar_history.json');
+let _solarHistory = { catalao: [], ivonei: [], palmeiras: [] };
+try { _solarHistory = { ...{ catalao: [], ivonei: [], palmeiras: [] }, ...(JSON.parse(fs.readFileSync(SOLAR_HISTORY_FILE, 'utf8')) || {}) }; } catch (_) {}
+function _saveSolarHistory() {
+  try { atomicWriteFileSync(SOLAR_HISTORY_FILE, JSON.stringify(_solarHistory)); } catch (_) {}
+}
+function _recordSolarDay(key, kwh) {
+  if (kwh == null || kwh <= 0) return;
+  const now = new Date();
+  const date = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+  const arr = _solarHistory[key] || (_solarHistory[key] = []);
+  const idx = arr.findIndex(x => x.date === date);
+  if (idx >= 0) { if (arr[idx].kwh < kwh) arr[idx].kwh = kwh; }  // sempre o maior (fim de dia)
+  else arr.push({ date, kwh });
+  if (arr.length > 30) arr.splice(0, arr.length - 30);
+  _saveSolarHistory();
+}
+// Grava snapshot 3x entre 17h-19h — idempotente, substitui pelo maior valor
+setInterval(() => {
+  const h = new Date().getHours();
+  if (h < 17 || h > 19) return;
+  if (_solarState?.plant)     _recordSolarDay('catalao',   _solarState.plant.energy_today);
+  if (_solisState?.ivonei)    _recordSolarDay('ivonei',    _solisState.ivonei.gen_today_kwh);
+  if (_solisState?.palmeiras) _recordSolarDay('palmeiras', _solisState.palmeiras.gen_today_kwh);
+}, 20 * 60_000);
+
+// Última potência instantânea por sistema (memória) pra detectar queda súbita
+const _solarLastPower = {};
+function _detectPowerDrop(key, currentW, daytime) {
+  const last = _solarLastPower[key];
+  _solarLastPower[key] = currentW;
+  if (!daytime || last == null) return false;
+  if (last < 2000) return false;                    // vinha gerando pouco — não conta como queda
+  return currentW < last * 0.3;                     // ≥70% de queda em 1 tick (60s)
+}
+function _isLowGenDay(key, todayKwh) {
+  if (todayKwh == null || todayKwh < 0) return false;
+  const arr = (_solarHistory[key] || []).slice(-14);
+  if (arr.length < 5) return false;                 // histórico insuficiente
+  const past = arr.map(x => x.kwh).sort((a, b) => a - b);
+  const median = past[Math.floor(past.length / 2)];
+  if (median <= 0) return false;
+  return todayKwh < median * 0.4;                   // <40% da mediana = dia problema
+}
+// Depois das 15h da tarde já dá pra saber se o dia foi ruim (curva típica
+// gera >70% do total até essa hora).
+function _lateAfternoonAt(locKey) {
+  const s = _sunCache[locKey];
+  if (!s || !s.sunset_ms) return new Date().getHours() >= 15;
+  return Date.now() >= (s.sunset_ms - 2.5 * 3600_000);   // últimas 2.5h antes do pôr
+}
+// Wrapper que os 3 watchdogs chamam
+async function _evalSolarAnomalies(key, sunLocKey, currentW, todayKwh, daytime) {
+  const label = { catalao: '☀️ SAJ Catalão', ivonei: '☀️ Ivonei (Goiânia)', palmeiras: '☀️ Palmeiras' }[key] || key;
+  // A) Queda súbita
+  const drop = _detectPowerDrop(key, currentW || 0, daytime);
+  _alert(`solar_${key}_power_drop`, drop,
+    `${label} — queda súbita de geração`,
+    `Potência caiu abruptamente (>70% em 1 min) em pleno dia. Disjuntor CC, string desligou, cloud perdeu inversor.`,
+    'urgent', ['bolt.slash', 'exclamationmark.triangle.fill']);
+  // B) Dia ruim (só depois de 15h — dá pra saber se salvou o dia)
+  const afternoon = _lateAfternoonAt(sunLocKey);
+  const lowDay = daytime && afternoon && _isLowGenDay(key, todayKwh);
+  const arr = _solarHistory[key] || [];
+  const past = arr.slice(-14).map(x => x.kwh).sort((a,b)=>a-b);
+  const median = past.length ? past[Math.floor(past.length/2)] : 0;
+  _alert(`solar_${key}_low_gen_day`, lowDay,
+    `${label} — geração baixa hoje`,
+    `${(todayKwh||0).toFixed(1)} kWh até agora vs mediana ${median.toFixed(1)} kWh dos últimos ${past.length} dias. Nublado extremo, sombreamento novo ou problema pontual.`,
+    'high', ['cloud.sun', 'chart.line.downtrend.xyaxis']);
+}
 
 // ── Solis Cloud (Ivonei + Palmeiras) ────────────────────────────────────────
 // Sistema Ivonei tem 2 inversores S6-GR1P6K (Goiânia); Palmeiras tem 1
@@ -4932,12 +5013,15 @@ async function _evalSolisAlerts() {
         'high', ['bolt.slash']);
     }
     // Geração perdida ao meio-dia (10-14h) — sistema inteiro em <10% do esperado
-    const now = new Date();
-    const midday = now.getHours() >= 10 && now.getHours() <= 14;
-    _alert(`solis_${key}_generation_lost`, midday && (sys.ac_power_w ?? 0) < 500,
+    const now2 = new Date();
+    const midday2 = now2.getHours() >= 10 && now2.getHours() <= 14;
+    _alert(`solis_${key}_generation_lost`, midday2 && (sys.ac_power_w ?? 0) < 500,
       `☀️ ${sys.label} — sem geração ao meio-dia`,
       `Potência ${sys.ac_power_w}W entre 10-14h. Nublado extremo, disjuntor ou coletor caído.`,
       'high', ['sun.max.trianglebadge.exclamationmark']);
+    // Anomalias comuns: queda súbita + dia baixo vs histórico
+    const sunLoc = key === 'ivonei' ? 'goiania' : 'palmeiras';
+    await _evalSolarAnomalies(key, sunLoc, sys.ac_power_w, sys.gen_today_kwh, daytime);
   }
 }
 
