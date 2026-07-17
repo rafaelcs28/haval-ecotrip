@@ -4817,14 +4817,19 @@ setInterval(() => {
   if (_solisState?.palmeiras) _recordSolarDay('palmeiras', _solisState.palmeiras.gen_today_kwh);
 }, 20 * 60_000);
 
-// Última potência instantânea por sistema (memória) pra detectar queda súbita
-const _solarLastPower = {};
+// Histórico curto de potência por sistema (últimos 6 ticks = ~6min) — precisa
+// de queda SUSTENTADA pra alertar, evitando falso positivo de nuvem passageira.
+const _solarPowerHist = {};
 function _detectPowerDrop(key, currentW, daytime) {
-  const last = _solarLastPower[key];
-  _solarLastPower[key] = currentW;
-  if (!daytime || last == null) return false;
-  if (last < 2000) return false;                    // vinha gerando pouco — não conta como queda
-  return currentW < last * 0.3;                     // ≥70% de queda em 1 tick (60s)
+  const arr = _solarPowerHist[key] || (_solarPowerHist[key] = []);
+  arr.push({ w: currentW || 0, ts: Date.now() });
+  if (arr.length > 6) arr.shift();
+  if (!daytime || arr.length < 4) return false;
+  // Referência: leitura mais antiga da janela (4 ticks atrás, ~4min)
+  const older = arr[arr.length - 4].w;
+  if (older < 2000) return false;                   // vinha gerando pouco — nuvem inicial, não é "queda"
+  // Últimas 3 leituras TODAS abaixo de 30% do valor de referência = sustentado
+  return arr.slice(-3).every(x => x.w < older * 0.3);
 }
 function _isLowGenDay(key, todayKwh) {
   if (todayKwh == null || todayKwh < 0) return false;
@@ -4845,12 +4850,13 @@ function _lateAfternoonAt(locKey) {
 // Wrapper que os 3 watchdogs chamam
 async function _evalSolarAnomalies(key, sunLocKey, currentW, todayKwh, daytime) {
   const label = { catalao: '☀️ SAJ Catalão', ivonei: '☀️ Ivonei (Goiânia)', palmeiras: '☀️ Palmeiras' }[key] || key;
-  // A) Queda súbita
+  // A) Queda súbita sustentada por 3+ ticks (~3min) — filtra nuvem passageira
   const drop = _detectPowerDrop(key, currentW || 0, daytime);
   _alert(`solar_${key}_power_drop`, drop,
-    `${label} — queda súbita de geração`,
-    `Potência caiu abruptamente (>70% em 1 min) em pleno dia. Disjuntor CC, string desligou, cloud perdeu inversor.`,
-    'urgent', ['bolt.slash', 'exclamationmark.triangle.fill']);
+    `${label} — queda de geração persistente`,
+    `Potência caiu >70% e MANTEVE assim por 3+ min. Disjuntor CC, string desligou ou cloud perdeu inversor.`,
+    'urgent', ['bolt.slash', 'exclamationmark.triangle.fill'],
+    { repeatEvery: 4 * 3600_000 });   // no máximo 1x/4h se persistir (evita spam)
   // B) Dia ruim (só depois de 15h — dá pra saber se salvou o dia)
   const afternoon = _lateAfternoonAt(sunLocKey);
   const lowDay = daytime && afternoon && _isLowGenDay(key, todayKwh);
@@ -4860,7 +4866,8 @@ async function _evalSolarAnomalies(key, sunLocKey, currentW, todayKwh, daytime) 
   _alert(`solar_${key}_low_gen_day`, lowDay,
     `${label} — geração baixa hoje`,
     `${(todayKwh||0).toFixed(1)} kWh até agora vs mediana ${median.toFixed(1)} kWh dos últimos ${past.length} dias. Nublado extremo, sombreamento novo ou problema pontual.`,
-    'high', ['cloud.sun', 'chart.line.downtrend.xyaxis']);
+    'high', ['cloud.sun', 'chart.line.downtrend.xyaxis'],
+    { repeatEvery: 6 * 3600_000 });   // 1x pela tarde só; recovery no fim do dia
 }
 
 // ── Solis Cloud (Ivonei + Palmeiras) ────────────────────────────────────────
