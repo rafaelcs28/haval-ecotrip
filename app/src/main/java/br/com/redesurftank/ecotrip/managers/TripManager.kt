@@ -526,16 +526,14 @@ class TripManager private constructor() {
                         avgTempC    = avgTempC,
                     )
                     chargeHistory.add(0, entry)
-                    // Usa a configuração MAX_HISTORY_ENTRIES (default 200, range 10-500)
-                    // em vez de 50 hardcoded — o valor antigo apagava recargas antigas
-                    // do storage local do APK a cada nova sessão. Como o retained MQTT
-                    // republica esse histórico e o bridge (pré-fix) sobrescrevia com o
-                    // que veio do APK, as recargas de maio sumiram gradualmente ao
-                    // longo de junho/julho no bridge. Bridge agora preserva entries
-                    // antigas ausentes do retained, mas o APK também aumenta o buffer
-                    // pra minimizar a chance de perda + evitar tela local do carro
-                    // ficar com histórico curtíssimo.
-                    while (chargeHistory.size > maxHistoryEntries) chargeHistory.removeAt(chargeHistory.lastIndex)
+                    // NÃO trima. Histórico completo é dado do usuário — nunca
+                    // deve ser descartado. Cada entry ~150 bytes, 5000 entries
+                    // = 750KB de storage, zero impacto. O antigo `while (size > N)`
+                    // (com N=50 depois 200) apagava entries antigas silenciosamente
+                    // e o retained MQTT propagava a truncagem pro bridge, causando
+                    // a perda de recargas de maio ao longo de junho/julho.
+                    // `maxHistoryEntries` fica só como preferência de display no UI
+                    // (quantas mostrar na tela do carro), sem afetar o storage.
                     saveChargeHistory()
                     AppLogger.i(TAG, "Recarga concluída — ${chargeSessionEnergyKwh}kWh em ${chargeSessionSec}s SOC ${chargeSessionStartSoc}→${latestSocPct}% avgTemp=${avgTempC}°C samples=${chargeSessionSamples.size}")
                     onChargeSessionCompleted?.invoke(entry)
@@ -1365,11 +1363,11 @@ class TripManager private constructor() {
 
     fun setMaxHistoryEntries(count: Int) {
         synchronized(lock) {
-            maxHistoryEntries = count.coerceIn(10, 500)
+            // Mantém a preferência (UI usa pra decidir quantas linhas mostrar
+            // na tela do carro), mas NÃO trima o storage — histórico é dado
+            // permanente do usuário. Aqui só persiste o novo valor.
+            maxHistoryEntries = count.coerceIn(10, 5000)
             prefs.edit().putInt(SharedPreferencesKeys.MAX_HISTORY_ENTRIES, maxHistoryEntries).apply()
-            val trimmed = tripHistory.size > maxHistoryEntries
-            while (tripHistory.size > maxHistoryEntries) tripHistory.removeAt(tripHistory.lastIndex)
-            if (trimmed) saveHistory()
         }
     }
 
