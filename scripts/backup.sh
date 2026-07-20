@@ -16,7 +16,14 @@ RETENTION_MONTHLY=12
 BRIDGE_API="http://localhost:3000"
 # ──────────────────────────────────────────────────
 
-LOG="$ICLOUD/backup.log"
+# LOG local — escrever direto no iCloud dispara `Resource deadlock avoided` do
+# file provider (async materialize vs sync append) e ainda deixa o arquivo em
+# estado ghost (conteúdo trava, timestamp muda, sync fica pendente pra sempre).
+# Escreve local; se quiser cópia no iCloud, o file provider replica sozinho
+# quando o arquivo estabiliza (mv atômico do MANIFEST no fim já resolve isso).
+LOG_DIR="/Users/consorciolimpagyn/haval-ecotrip/logs"
+LOG="$LOG_DIR/backup.log"
+mkdir -p "$LOG_DIR" || { echo "❌ não consigo criar $LOG_DIR"; exit 1; }
 mkdir -p "$ICLOUD"/{daily,weekly,monthly,yearly} || { echo "❌ não consigo criar $ICLOUD"; exit 1; }
 touch "$LOG"
 
@@ -68,13 +75,16 @@ if [ "$DAY_OF_MONTH" = "01" ] && [ "$MONTH" = "01" ]; then
 fi
 
 # 4) Prune (mantém só os N mais recentes em cada categoria; yearly = ilimitado)
+# BSD head (macOS) NÃO suporta `head -n -N` (só GNU) — retorna "illegal line
+# count" e o prune falha calado. Calcula explicit e usa `head -n K`.
 prune_dir() {
   local dir="$1" keep="$2"
-  local total
+  local total drop
   total=$(find "$dir" -maxdepth 1 -name "haval-ecotrip_*.tar.gz" -type f 2>/dev/null | wc -l | tr -d ' ')
   [ "$total" -le "$keep" ] && return
+  drop=$((total - keep))
   find "$dir" -maxdepth 1 -name "haval-ecotrip_*.tar.gz" -type f 2>/dev/null \
-    | sort | head -n "-$keep" \
+    | sort | head -n "$drop" \
     | while read -r f; do
         rm -f "$f" && log "  rm $(basename "$f")"
       done
@@ -112,18 +122,29 @@ else
   log "ℹ GitHub mirror não configurado em $GITHUB_MIRROR (skip)"
 fi
 
-# 6) Manifest legível
+# 6) Manifest legível — atomic write: escreve num arquivo temp e mv pro iCloud.
+# `> $ICLOUD/MANIFEST.txt` direto abre file handle no path do file provider e
+# dá EDEADLK se o arquivo estiver evicted. mv (rename atômico) troca o inode
+# sem abrir handle — file provider aceita e sincroniza depois.
+MANIFEST_TMP="$(mktemp -t haval-manifest)"
 {
   echo "# Manifest de Backups — Haval EcoTrip"
   echo "# Última atualização: $(date '+%Y-%m-%d %H:%M:%S')"
   echo
   for d in daily weekly monthly yearly; do
     echo "## $d/ ($(find "$ICLOUD/$d" -name 'haval-ecotrip_*.tar.gz' 2>/dev/null | wc -l | tr -d ' ') arquivos)"
-    if ls -lh "$ICLOUD/$d"/*.tar.gz >/dev/null 2>&1; then
-      ls -lh "$ICLOUD/$d"/*.tar.gz | awk '{print "  ",$9,"·",$5}' | sed "s|$ICLOUD/$d/||"
-    fi
+    # awk '{print $9}' quebra em paths com espaço ($ICLOUD tem "com~apple~CloudDocs/…"),
+    # cortando na 1ª quebra e imprimindo "/path/with · Xk". Usa find+stat direto.
+    find "$ICLOUD/$d" -maxdepth 1 -name 'haval-ecotrip_*.tar.gz' -type f 2>/dev/null \
+      | sort \
+      | while read -r f; do
+          sz=$(du -h "$f" 2>/dev/null | cut -f1)
+          echo "   $(basename "$f") · $sz"
+        done
     echo
   done
-} > "$ICLOUD/MANIFEST.txt"
+} > "$MANIFEST_TMP"
+mv -f "$MANIFEST_TMP" "$ICLOUD/MANIFEST.txt" 2>>"$LOG" \
+  || log "⚠ MANIFEST mv falhou (iCloud file provider) — segue"
 
 log "═══ Backup OK ═══"

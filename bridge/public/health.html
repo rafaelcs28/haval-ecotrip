@@ -313,6 +313,15 @@ canvas { display: block; width: 100%; height: 60px; margin-top: 8px; }
       </div>
     </details>
 
+    <!-- Família (localização iCloud) -->
+    <details class="card" data-k="family">
+      <summary><span class="sum-title">Família</span>
+        <span class="sum-right"><span id="head-family">—</span><span class="chev"></span></span></summary>
+      <div class="card-body">
+        <div id="family-list"><div class="empty">—</div></div>
+      </div>
+    </details>
+
     <!-- Clockin -->
     <details class="card" data-k="clockin">
       <summary><span class="sum-title">Clockin</span>
@@ -1261,6 +1270,65 @@ async function updateBluetti() {
   } catch (e) { set('head-bluetti', 'erro'); }
 }
 
+async function updateFamily() {
+  try {
+    const r = await fetch('/api/family-locations', { headers: { Authorization: 'Bearer ' + tk } });
+    if (!r.ok) { set('head-family', 'indisponível'); return; }
+    const d = await r.json();
+    const el = document.getElementById('family-list');
+    if (!d.members || !d.members.length) { el.innerHTML = '<div class="empty">—</div>'; set('head-family','—'); return; }
+    const fmtAge = (ms) => {
+      if (ms == null) return '—';
+      const s = Math.max(0, ms/1000);
+      if (s < 90) return 'agora';
+      const m = Math.round(s/60);
+      if (m < 60) return `há ${m}min`;
+      const h = Math.floor(m/60); const rm = m % 60;
+      if (h < 24) return rm ? `há ${h}h${rm}min` : `há ${h}h`;
+      return `há ${Math.floor(h/24)}d`;
+    };
+    const accColor = (acc) => acc == null ? '#888' : (acc <= 50 ? '#7bc47f' : (acc <= 200 ? '#e6b800' : '#e74c3c'));
+    const battColor = (b) => b == null ? '#888' : (b <= 20 ? '#e74c3c' : (b <= 40 ? '#e6b800' : '#7bc47f'));
+    // Lag do HA (icloud3 rate-limita quando iPhone em low-power). Escala 3 níveis:
+    //  <=10min = fresh (cinza padrão)
+    //  10-30min = lag suave (amarelo)
+    //  >30min = HA travado (vermelho + aviso explícito)
+    const ageInfo = (ms) => {
+      if (ms == null) return { color: '#888', warn: '' };
+      const min = ms / 60000;
+      if (min <= 10) return { color: '#888', warn: '' };
+      if (min <= 30) return { color: '#e6b800', warn: '' };
+      return { color: '#e74c3c', warn: ' <span title="icloud3 do HA não atualizou. iPhone em low-power e/ou HA VM lag.">⚠ HA lag</span>' };
+    };
+    let stale = 0;
+    const rows = d.members.map(m => {
+      const ai = ageInfo(m.age_ms);
+      const isStale = m.age_ms == null || m.age_ms > 30*60*1000;
+      if (isStale) stale++;
+      const age = fmtAge(m.age_ms);
+      const zonePart = m.zone ? `<span style="color:#888"> · ${m.zone}</span>` : '';
+      const addr = m.address
+        ? `${m.address}${zonePart}`
+        : (m.zone || '<span style="color:#888">sem localização</span>');
+      const batt = m.battery_pct != null
+        ? `<span style="color:${battColor(m.battery_pct)}">${m.battery_pct}%</span>` : '—';
+      const accTxt = m.accuracy_m != null
+        ? `<span style="color:${accColor(m.accuracy_m)}">±${Math.round(m.accuracy_m)}m</span>` : '';
+      return `
+        <div class="row" style="border-bottom:1px solid #333;padding:6px 0;flex-wrap:wrap">
+          <span style="width:100%;font-weight:600">${m.name} <span style="font-weight:400;color:#888;font-size:11px">· ${m.device}</span></span>
+          <span style="width:100%;color:#ddd;font-size:13px;padding-top:2px">${addr} ${accTxt}</span>
+          <span style="width:100%;color:${ai.color};font-size:11px;padding-top:2px">${age}${ai.warn} · bateria ${batt}</span>
+        </div>`;
+    });
+    el.innerHTML = rows.join('');
+    const total = d.members.length;
+    if (stale === total) set('head-family', '<span style="color:#e6b800">sem dados recentes</span>');
+    else if (stale)      set('head-family', `<span style="color:#7bc47f">${total} pessoas</span> <span style="color:#e6b800">· ${stale} stale</span>`);
+    else                 set('head-family', `<span style="color:#7bc47f">${total} pessoas</span>`);
+  } catch (e) { set('head-family', 'erro'); }
+}
+
 loadOpenState();
 load();
 loadSysProc();
@@ -1268,12 +1336,14 @@ updateBluetti();
 updateSolar();
 updateIvonei();
 updatePalmeiras();
+updateFamily();
 setInterval(load, 5_000);
 setInterval(loadSysProc, 5_000);
 setInterval(updateBluetti, 30_000);
 setInterval(updateSolar, 60_000);
 setInterval(updateIvonei, 60_000);
 setInterval(updatePalmeiras, 60_000);
+setInterval(updateFamily, 60_000);
 window.addEventListener('resize', drawChart);
 </script>
 </body>

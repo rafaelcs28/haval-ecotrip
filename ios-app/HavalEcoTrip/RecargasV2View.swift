@@ -59,6 +59,7 @@ struct RecargasV2View: View {
     @State private var showAnalysis = false
     @State private var showForecast = false
     @State private var editingId: Double?
+    @State private var editingRefuel: Refuel?
     @State private var toast: String?
 
     private var fromDate: Binding<Date> { Binding(get: { fromTS > 0 ? Date(timeIntervalSince1970: fromTS) : Date() }, set: { fromTS = $0.timeIntervalSince1970 }) }
@@ -100,6 +101,11 @@ struct RecargasV2View: View {
         .sheet(isPresented: $showHealth) { BatteryHealthSheet(charges: loader.charges) }
         .sheet(isPresented: $showAnalysis) { ChargeAnalysisSheet(charges: loader.charges) }
         .sheet(isPresented: $showForecast) { ChargeForecastSheet() }
+        .sheet(item: $editingRefuel) { r in
+            RefuelEditSheet(refuel: r) { liters, pricePerL, location in
+                Task { await refLoader.patch(r, liters: liters, pricePerL: pricePerL, location: location) }
+            }
+        }
         .overlay(alignment: .bottom) {
             if let t = toast {
                 Text(t).font(.system(size: 13, weight: .semibold)).foregroundStyle(DS.text)
@@ -636,22 +642,28 @@ struct RecargasV2View: View {
     }
 
     private func refuelRow(_ r: Refuel) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: "fuelpump.fill").font(.system(size: 13)).foregroundStyle(DS.orange)
-                .frame(width: 30, height: 30)
-                .background(DS.orange.opacity(0.10), in: RoundedRectangle(cornerRadius: 8))
-            VStack(alignment: .leading, spacing: 3) {
-                Text(r.location).font(.system(size: 14, weight: .bold)).foregroundStyle(DS.text).lineLimit(1)
-                Text("\(dayLabel(r.date)) \(hhmm(r.date)) · \(Fmt.dec1(r.liters)) L · R$ \(Fmt.dec2(r.pricePerL))/L")
-                    .font(.system(size: 11)).foregroundStyle(DS.text2)
-                    .lineLimit(1).minimumScaleFactor(0.8)
+        Button {
+            editingRefuel = r
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "fuelpump.fill").font(.system(size: 13)).foregroundStyle(DS.orange)
+                    .frame(width: 30, height: 30)
+                    .background(DS.orange.opacity(0.10), in: RoundedRectangle(cornerRadius: 8))
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(r.location).font(.system(size: 14, weight: .bold)).foregroundStyle(DS.text).lineLimit(1)
+                    Text("\(dayLabel(r.date)) \(hhmm(r.date)) · \(Fmt.dec1(r.liters)) L · R$ \(Fmt.dec2(r.pricePerL))/L")
+                        .font(.system(size: 11)).foregroundStyle(DS.text2)
+                        .lineLimit(1).minimumScaleFactor(0.8)
+                }
+                Spacer(minLength: 8)
+                Text(Fmt.brl(r.total)).font(.system(size: 13, weight: .bold)).foregroundStyle(DS.text)
+                Image(systemName: "chevron.right").font(.system(size: 10)).foregroundStyle(DS.muted)
             }
-            Spacer(minLength: 8)
-            Text(Fmt.brl(r.total)).font(.system(size: 13, weight: .bold)).foregroundStyle(DS.text)
+            .padding(.horizontal, 14).padding(.vertical, 12)
+            .background(DS.panel, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(DS.border, lineWidth: 1))
         }
-        .padding(.horizontal, 14).padding(.vertical, 12)
-        .background(DS.panel, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(DS.border, lineWidth: 1))
+        .buttonStyle(.plain)
     }
 
     private var refEstatisticas: some View {

@@ -203,35 +203,76 @@ function resetFix(key) {
   fixState.delete(key);
 }
 
-// claude -p: SUGERE, não executa. Fail-OPEN: se o agente não der diagnóstico
-// (timeout/erro/vazio), manda um aviso simples mesmo assim — o bridge silencia
-// os alertas AGENT_OWNED contando com este caminho, então ficar mudo aqui te
-// deixaria cego. Melhor um ping cru sem sugestão do que nenhum.
+// Coleta dados frescos do bridge relevantes ao alerta ANTES de chamar Claude.
+// Assim o veredicto vem baseado no estado REAL (SoC, W, temp, etc), não em
+// palpite. Fail-open: se não achar endpoint, retorna null e o Claude cai no
+// modo genérico com contexto mínimo.
+async function collectContext(id) {
+  const base = (process.env.IT_AGENT_HEALTH_URL || 'http://127.0.0.1:3000/api/health').replace('/api/health', '');
+  const auth = 'Bearer ' + ADMIN_TOKEN;
+  const get = (path) => new Promise((res) => {
+    const u = new URL(base + path);
+    const mod = u.protocol === 'https:' ? https : http;
+    const req = mod.get(u, { headers: { Authorization: auth }, timeout: 6000 }, (r) => {
+      let d = ''; r.on('data', c => d += c);
+      r.on('end', () => { try { res(JSON.parse(d)); } catch (_) { res(null); } });
+    });
+    req.on('timeout', () => { req.destroy(); res(null); });
+    req.on('error', () => res(null));
+  });
+  const out = {};
+  if (/^bluetti_/.test(id)) {
+    const d = await get('/api/bluetti-status');
+    if (d) {
+      // qual das duas estações o alerta é sobre? bluetti_casa_* ou bluetti_sitio_*
+      const which = /casa/.test(id) ? 'casa' : /sitio/.test(id) ? 'sitio' : null;
+      out.bluetti = which ? d[which] : d;
+    }
+  } else if (/^solar_/.test(id)) {
+    const d = await get('/api/solar-status');
+    if (d) out.solar = { plant: d.plant, invs: d.invs?.map(i => ({ label: i.label, power: i.power, temperature: i.temperature, alarm_count: i.alarm_count, energy_today: i.energy_today })), stale_min: d.stale_min, sunset_ms: d.sunset_ms };
+  } else if (/^solis_ivonei_/.test(id)) {
+    const d = await get('/api/ivonei-status');
+    if (d) out.ivonei = { ac_power_w: d.ac_power_w, gen_today_kwh: d.gen_today_kwh, invs: d.invs?.map(i => ({ label: i.label, ac_power_w: i.ac_power_w, temperature_c: i.temperature_c, status: i.status, collector: i.collector })), sunset_ms: d.sunset_ms };
+  } else if (/^solis_palmeiras_/.test(id)) {
+    const d = await get('/api/palmeiras-status');
+    if (d) out.palmeiras = { ac_power_w: d.ac_power_w, gen_today_kwh: d.gen_today_kwh, invs: d.invs?.map(i => ({ label: i.label, ac_power_w: i.ac_power_w, temperature_c: i.temperature_c, status: i.status, collector: i.collector })), sunset_ms: d.sunset_ms };
+  }
+  return Object.keys(out).length ? out : null;
+}
+
+// claude -p: dá VEREDICTO, não instrução. Coleta dados frescos primeiro
+// (SoC/W/temp/etc), passa pro Claude e ele responde 1-2 frases com o que
+// está acontecendo AGORA + ação SE for acionável remotamente. Sem despejar
+// comando mosquitto_sub pro dono rodar. Fail-OPEN mantido.
 function claudeSuggest(id, ctx) {
   const s = claudeState.get(id) || 0;
   if (Date.now() - s < CLAUDE_COOLDOWN) return;
   claudeState.set(id, Date.now());
   const label = alertLabel(id);
-  const prompt = `Você é o SRE de plantão de uma infra caseira. Um monitor disparou um alerta SEM correção automática mapeada. Dê UMA recomendação curta e ACIONÁVEL (máx 2 frases, PT-BR técnico) com o(s) comando(s) exato(s) a rodar NESTA infra. Não invente comandos que não se aplicam. Nada destrutivo.
+  collectContext(id).then((liveData) => {
+    const prompt = `Você é o SRE de plantão de uma infra caseira. Um monitor disparou um alerta e você JÁ TEM os dados ao vivo (abaixo). Escreva 1-2 frases em PT-BR técnico terse com o VEREDICTO (o que está acontecendo AGORA, baseado nos números reais). Se houver ação acionável remotamente daqui, mencione em 1 frase adicional. Se a ação for física (verificar tomada, disjuntor, ventilação), diga isso claramente sem sugerir comando de terminal. NUNCA despeje comando pro dono rodar (nada de \`mosquitto_sub\`, \`pm2 logs\`, etc). Você já sabe o estado — reporte, não instrua. Nada destrutivo sem confirmação.
 
 ${INFRA_CONTEXT}
 
 Alerta: ${id} (${label})
-Detalhe: ${JSON.stringify(ctx)}`;
-  const child = execFile(CLAUDE_BIN, ['-p', '--model', CLAUDE_MODEL, '--effort', 'medium'],
-    { timeout: 90000, maxBuffer: 1024 * 1024, cwd: tmpdir(), env: { ...process.env, USER: process.env.USER || 'node', LOGNAME: process.env.LOGNAME || 'node' } },
-    (err, out) => {
-      const txt = (out || '').trim();
-      if (err) log('claude err', id, err.message);
-      if (!err && txt) {
-        ntfy(`Diagnostico: ${label}`, `${txt.slice(0, 480)}\n\n(sugestao do agente, nao executada)`, 'high', ['mag', 'robot']);
-      } else {
-        // fail-open: agente não respondeu — avisa cru pra você não ficar cego.
-        ntfy(`Alerta: ${label}`, `Persistiu por ${CONFIRM_TICKS} ciclos e o agente não conseguiu diagnosticar. Detalhe: ${JSON.stringify(ctx).slice(0, 300)}`, 'high', ['warning']);
-      }
-    });
-  child.stdin.on('error', () => {});
-  child.stdin.write(prompt); child.stdin.end();
+Contexto do alerta: ${JSON.stringify(ctx).slice(0, 300)}
+DADOS AO VIVO agora: ${liveData ? JSON.stringify(liveData) : '(coleta falhou — use só o contexto acima)'}`;
+    const child = execFile(CLAUDE_BIN, ['-p', '--model', CLAUDE_MODEL, '--effort', 'medium'],
+      { timeout: 90000, maxBuffer: 1024 * 1024, cwd: tmpdir(), env: { ...process.env, USER: process.env.USER || 'node', LOGNAME: process.env.LOGNAME || 'node' } },
+      (err, out) => {
+        const txt = (out || '').trim();
+        if (err) log('claude err', id, err.message);
+        if (!err && txt) {
+          ntfy(`Diagnostico: ${label}`, txt.slice(0, 480), 'high', ['mag', 'robot']);
+        } else {
+          // fail-open: agente não respondeu — avisa cru pra você não ficar cego.
+          ntfy(`Alerta: ${label}`, `Persistiu por ${CONFIRM_TICKS} ciclos e o diagnóstico automático falhou. Contexto: ${JSON.stringify(ctx).slice(0, 250)}`, 'high', ['warning']);
+        }
+      });
+    child.stdin.on('error', () => {});
+    child.stdin.write(prompt); child.stdin.end();
+  }).catch(e => log('collectContext err', id, e.message));
 }
 
 // ---- loop ------------------------------------------------------------------

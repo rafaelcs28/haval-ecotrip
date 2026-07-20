@@ -290,7 +290,7 @@ class TripManager private constructor() {
     }
 
     private var tankCapacityL     = DEFAULT_TANK_L
-    private var maxHistoryEntries = 50
+    private var maxHistoryEntries = 200
     private var priceGasolinePerL = 6.0f   // R$/L — default para gasolina no Brasil
     private var priceEnergyPerKwh = 0.9f   // R$/kWh — default tarifário residencial
     private val tripHistory       = mutableListOf<TripHistoryEntry>()
@@ -526,7 +526,16 @@ class TripManager private constructor() {
                         avgTempC    = avgTempC,
                     )
                     chargeHistory.add(0, entry)
-                    while (chargeHistory.size > 50) chargeHistory.removeAt(chargeHistory.lastIndex)
+                    // Usa a configuração MAX_HISTORY_ENTRIES (default 200, range 10-500)
+                    // em vez de 50 hardcoded — o valor antigo apagava recargas antigas
+                    // do storage local do APK a cada nova sessão. Como o retained MQTT
+                    // republica esse histórico e o bridge (pré-fix) sobrescrevia com o
+                    // que veio do APK, as recargas de maio sumiram gradualmente ao
+                    // longo de junho/julho no bridge. Bridge agora preserva entries
+                    // antigas ausentes do retained, mas o APK também aumenta o buffer
+                    // pra minimizar a chance de perda + evitar tela local do carro
+                    // ficar com histórico curtíssimo.
+                    while (chargeHistory.size > maxHistoryEntries) chargeHistory.removeAt(chargeHistory.lastIndex)
                     saveChargeHistory()
                     AppLogger.i(TAG, "Recarga concluída — ${chargeSessionEnergyKwh}kWh em ${chargeSessionSec}s SOC ${chargeSessionStartSoc}→${latestSocPct}% avgTemp=${avgTempC}°C samples=${chargeSessionSamples.size}")
                     onChargeSessionCompleted?.invoke(entry)
@@ -2484,7 +2493,7 @@ class TripManager private constructor() {
         rollingStartTankL   = prefs.getFloat(SharedPreferencesKeys.ROLLING_START_TANK_L,  0f)
         rollingStartCaptured = rollingStartSocPct > 0f || rollingStartTankL > 0f
         tankCapacityL     = prefs.getFloat(SharedPreferencesKeys.TANK_CAPACITY_L,       DEFAULT_TANK_L)
-        maxHistoryEntries = prefs.getInt  (SharedPreferencesKeys.MAX_HISTORY_ENTRIES,   50)
+        maxHistoryEntries = prefs.getInt  (SharedPreferencesKeys.MAX_HISTORY_ENTRIES,   200)
         priceGasolinePerL = prefs.getFloat(SharedPreferencesKeys.PRICE_GASOLINE_PER_L,  6.0f)
         priceEnergyPerKwh = prefs.getFloat(SharedPreferencesKeys.PRICE_ENERGY_PER_KWH,  0.9f)
         minAutoTripDistKm = prefs.getFloat(SharedPreferencesKeys.MIN_AUTO_TRIP_DIST_KM,  0f)

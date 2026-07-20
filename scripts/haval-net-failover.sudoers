@@ -1,0 +1,5 @@
+# /etc/sudoers.d/haval-net-failover
+# Permite ao watchdog reativar/desativar o serviço Ethernet do macOS sem senha.
+# Escopo mínimo: 1 comando, 1 flag, 1 serviço.
+consorciolimpagyn ALL=(root) NOPASSWD: /usr/sbin/networksetup -setnetworkserviceenabled Ethernet on
+consorciolimpagyn ALL=(root) NOPASSWD: /usr/sbin/networksetup -setnetworkserviceenabled Ethernet off

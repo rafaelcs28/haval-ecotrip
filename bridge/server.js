@@ -207,7 +207,45 @@ function _pollFunnel() {
   });
 }
 _pollFunnel();
-setInterval(_pollFunnel, 60_000);
+setInterval(_pollFunnel, 15_000);   // 15s (era 60s) — precisa capturar rajadas curtas de ISP/Tailscale
+
+// Registra transições UP↔DOWN do Funnel em _healthEvents pra correlacionar
+// com alertas externos ("Mac Mini inalcançável" do HA da empresa). Antes
+// dependia só do state do alert; agora deixa rastro forense com timestamp.
+let _lastFunnelUp = null;
+setInterval(() => {
+  const up = _funnelStatus.up;
+  if (up === null) return;
+  if (_lastFunnelUp === null) { _lastFunnelUp = up; return; }
+  if (up !== _lastFunnelUp) {
+    _recordHealthEvent('funnel_' + (up ? 'up' : 'down'),
+      `Funnel ${up ? 'voltou' : 'caiu'} · failed=${(_funnelStatus.failed||[]).join(',')} · fail_count=${_funnelStatus.fail_count}`);
+    _lastFunnelUp = up;
+  }
+}, 15_000);
+
+// Ping externo (8.8.8.8) contínuo pra distinguir "Funnel/Tailscale caiu" vs
+// "toda a internet caiu". Assim, quando bater rajada, dá pra ver no log se
+// foi ISP flap (external_gap dispara) ou só Tailscale (só funnel_down).
+let _externalReachable = null;
+function _pollExternal() {
+  const { spawn } = require('child_process');
+  const p = spawn('ping', ['-c', '1', '-W', '1500', '8.8.8.8']);
+  let done = false;
+  const timer = setTimeout(() => { if (!done) { done = true; p.kill(); react(false); } }, 3000);
+  const react = (ok) => {
+    if (done) return; done = true; clearTimeout(timer);
+    if (_externalReachable !== null && _externalReachable !== ok) {
+      _recordHealthEvent('external_' + (ok ? 'up' : 'down'),
+        `Ping externo ${ok ? 'voltou' : 'perdeu'} (8.8.8.8)`);
+    }
+    _externalReachable = ok;
+  };
+  p.on('exit', code => react(code === 0));
+  p.on('error', () => react(false));
+}
+_pollExternal();
+setInterval(_pollExternal, 15_000);
 
 // ── MQTT latency ping (dispara após connect, a cada 30s) ─────────────────────
 let _mqttPing = { checked_at: 0, latency_ms: null, error: null };
@@ -900,6 +938,11 @@ function _checkAlerts() {
   // debounce dos alertas em curso e pula este ciclo pros pollers (SSD, gateway,
   // HA, DNS) reamostrarem o estado real antes de qualquer julgamento.
   if (_lastAlertTick > 0 && (now - _lastAlertTick) > WAKE_GAP_MS) {
+    // Logar o gap em health_events pra permitir correlacionar com alertas
+    // externos "Mac inalcançável" (HA da empresa). Gap grande = Mac dormiu,
+    // suspend/DarkWake ou processo bloqueado — bridge acorda sem contexto.
+    const gapSec = Math.round((now - _lastAlertTick) / 1000);
+    _recordHealthEvent('tick_gap', `Gap de ${gapSec}s no _checkAlerts (sleep/DarkWake?) — reset debounce`);
     for (const [id, st] of _alertState) if (st.firing) _alertState.set(id, { ...st, firedAt: now });
     _lastAlertTick = now;
     return;
@@ -2617,7 +2660,7 @@ const LIVE_TRIP_FLUSH_MS = 0;        // flush a cada amostra (tempo real)
 const LIVE_TRIP_MIN_GAP_MS = 1_000;   // máx 1 amostra/seg
 
 function _liveTripStart(tripId) {
-  const id = String(tripId).replace(/\D/g, '');
+  let id = String(tripId).replace(/\D/g, '');
   if (!id) return;
   if (_liveTrip && _liveTrip.tripId === id) return;
   let existing = [], existingStart = null;
@@ -2625,8 +2668,22 @@ function _liveTripStart(tripId) {
     const fp = path.join(AUTOTRIPS_DIR, `${id}.json`);
     if (fs.existsSync(fp)) {
       const d = JSON.parse(fs.readFileSync(fp, 'utf8'));
-      if (Array.isArray(d.samples)) existing = d.samples;
-      if (d.actualStart) existingStart = d.actualStart;
+      // TripId REUSADO por bug do APK: arquivo já foi persistido de forma
+      // autoritativa (sem flag _liveSamples) — se voltarmos a acumular sob
+      // esse id, o flush será silenciosamente ignorado (line 2711) e os
+      // samples do novo ciclo somem. Reencaminha pra um NOVO id derivado
+      // do agora, evitando colisão com o histórico e permitindo persistir
+      // + reaper (`_finalizeAbandonedTrip`) rodar em cima do novo arquivo.
+      if (Array.isArray(d.samples) && d.samples.length && !d._liveSamples) {
+        const newId = String(Date.now());
+        console.log(`[liveTrip] tripId ${id} já é autoritativo — reencaminhando ciclo pra novo tripId=${newId}`);
+        id = newId;
+        existing = [];
+        existingStart = null;
+      } else {
+        if (Array.isArray(d.samples)) existing = d.samples;
+        if (d.actualStart) existingStart = d.actualStart;
+      }
     }
   } catch (_) {}
   // Snapshot do GPS no INSTANTE que a viagem começa (via current_trip MQTT).
@@ -4321,6 +4378,10 @@ app.get('/api/infra-status', (_req, res) => res.json({
   gateway_ok: _gwStatus.up !== false,
   ssd_ok: !_macStats.disk_ext || _macStats.disk_ext.mounted !== false,
   dns_ok: _netStatus.match !== false,
+  // backup_ok: TODOS os 5 backups (Lari, Haval, SSD, MQTT, Clockin) dentro da
+  // idade máxima esperada. Automação do HA da empresa pode usar ISSO em vez de
+  // heurística temporal ("se hora=04 e não vi backup") que dá falso positivo.
+  backup_ok: !_backups.length || _backups.every(b => b.ok !== false),
   ts: Date.now(),
 }));
 
@@ -4597,7 +4658,11 @@ async function _fetchSolarStatus() {
     const plantP = `sensor.plant_${p}`;
     const plant = {
       online:            str(`sensor.${p}_device_online`) === 'online',
-      status:            str(`sensor.${p}_inverter_status`),      // "normal" | "alarm"
+      // status da PLANTA (Normal/Offline/Alarm). O sensor `${p}_inverter_status`
+      // é do inversor e vive cravado em "alarm" no cloud SAJ mesmo após evento
+      // passar — não serve pra decidir alerta.
+      status:            str(`${plantP}_status`),
+      inverter_status:   str(`sensor.${p}_inverter_status`),      // legado — sticky
       pv_power:          num(`sensor.${p}_pv_power`),              // W (geração agora)
       pv_direction:      str(`sensor.${p}_pv_direction`),          // exporting/importing/standby
       grid_power:        num(`sensor.${p}_grid_power`),            // W (sinal indica direção)
@@ -4698,21 +4763,38 @@ async function _isDaytimeAt(locKey) {
   const now = Date.now();
   return now >= (s.sunrise_ms - marginMs) && now <= (s.sunset_ms + marginMs);
 }
+// Janela em que inversor DEVE estar reportando ao coletor. Sunrise "oficial"
+// = sol no horizonte astronômico; inversor solar só liga quando irradiância
+// cruza ~50-100 W/m² (~45min após sunrise) e desliga ~30min antes do sunset.
+// Alertas de offline/collector_offline devem usar esta janela, não o daytime
+// permissivo, senão dispara todo dia às 06:30 antes do inversor acordar.
+async function _isInverterActiveHours(locKey) {
+  const s = await _fetchSunTimes(locKey);
+  if (!s.sunrise_ms || !s.sunset_ms) {
+    const h = new Date().getHours();
+    return h >= 8 && h < 17;
+  }
+  const now = Date.now();
+  return now >= (s.sunrise_ms + 45 * 60_000) && now <= (s.sunset_ms - 30 * 60_000);
+}
 async function _isSolarDaytime() { return _isDaytimeAt('catalao'); }
+async function _isSolarInverterHours() { return _isInverterActiveHours('catalao'); }
 async function _evalSolarAlerts() {
   if (!_solarState) return;
   const p = _solarState.plant;
   const daytime = await _isSolarDaytime();
-  // 1) Planta offline (sem comm com cloud SAJ) — só de dia (noite é esperado)
-  _alert('solar_plant_offline', p.online === false && daytime,
+  const invHours = await _isSolarInverterHours();
+  // 1) Planta offline (sem comm com cloud SAJ) — só na janela em que o
+  // inversor DEVERIA estar reportando (sunrise+45min → sunset-30min). O
+  // gate "daytime" simples dispara às 06:29 antes do inversor acordar.
+  _alert('solar_plant_offline', p.online === false && invHours,
     '☀️ Solar Catalão — sem comunicação',
-    `SAJ Elekeeper cloud sem dados em horário diurno. Inversores podem estar operando OK, mas monitoramento cego.`,
+    `SAJ Elekeeper cloud sem dados em janela ativa do inversor. Inversores podem estar operando OK, mas monitoramento cego.`,
     'high', ['warning', 'sun.max']);
-  // 2) Inverter status = alarm — só de dia. À noite o estado retido pode
-  // refletir cache antigo do cloud. E o campo plant.status vive cravado em
-  // "alarm" no SAJ mesmo depois do evento passar (bug/design deles), então
-  // só grito de verdade se algum inversor reporta alarm_count > 0 HOJE —
-  // esse contador é per-dispositivo e ao vivo, fonte confiável.
+  // 2) Inverter status = alarm — só de dia. plant.status agora vem do sensor
+  // da PLANTA (Normal/Offline/Alarm); o campo antigo do inversor (agora em
+  // p.inverter_status) vive sticky no cloud SAJ. Sanity check final:
+  // alarm_count > 0 HOJE (contador per-device ao vivo, fonte confiável).
   const plantAlarm  = String(p.status || '').toLowerCase() === 'alarm';
   const anyInvAlarm = _solarState.invs.some(i => (i.alarm_count ?? 0) > 0);
   _alert('solar_inverter_alarm', plantAlarm && anyInvAlarm && p.online !== false && daytime,
@@ -4721,7 +4803,7 @@ async function _evalSolarAlerts() {
     'urgent', ['warning', 'exclamationmark.circle.fill']);
   // 3) Dados velhos — só de dia. Após pôr-do-sol o cloud SAJ para de receber
   // porque os inversores desligam (sem sol = sem geração = dormem).
-  _alert('solar_stale_upload', (_solarState.stale_min ?? 0) > 20 && p.online !== false && daytime,
+  _alert('solar_stale_upload', (_solarState.stale_min ?? 0) > 20 && p.online !== false && invHours,
     '☀️ Solar Catalão — dados atrasados',
     `Última atualização há ${_solarState.stale_min} min em horário diurno. Cloud SAJ ou inversor com atraso.`,
     'default', ['clock', 'sun.max']);
@@ -4810,6 +4892,26 @@ function _recordSolarDay(key, kwh) {
   else arr.push({ date, kwh, snaps: {} });
   if (arr.length > 30) arr.splice(0, arr.length - 30);
   _saveSolarHistory();
+}
+// Grava gen_month_kwh do PRIMEIRO tick do dia (baseline pra derivar
+// gen_today_kwh quando o Solis manda o campo `_inverter_generation_today`
+// como `unavailable` — bug intermitente do coletor).
+function _ensureDayStart(key, genMonthKwh) {
+  if (genMonthKwh == null || !Number.isFinite(genMonthKwh)) return;
+  const date = _todayDateStr();
+  const arr = _solarHistory[key] || (_solarHistory[key] = []);
+  let day = arr.find(x => x.date === date);
+  if (!day) { day = { date, kwh: 0, snaps: {} }; arr.push(day); if (arr.length > 30) arr.shift(); }
+  if (day.gen_month_at_start == null) {
+    day.gen_month_at_start = genMonthKwh;
+    _saveSolarHistory();
+  }
+}
+function _dayStartMonthKwh(key) {
+  const date = _todayDateStr();
+  const arr = _solarHistory[key] || [];
+  const day = arr.find(x => x.date === date);
+  return day && day.gen_month_at_start != null ? day.gen_month_at_start : null;
 }
 // Grava snapshot HORÁRIO por sistema (potência atual + energia acumulada) na
 // primeira vez que passa aquela hora. Serve pra colorir "gerando agora" e
@@ -4979,21 +5081,49 @@ async function _fetchSolisStatus() {
       };
     };
     // Agrega por sistema (soma potência/energia hoje)
-    const buildSystem = (cfg) => {
+    const buildSystem = (cfg, key) => {
       const invs = cfg.invs.map(readInv);
       const sum = (k) => invs.reduce((a, i) => a + (i[k] ?? 0), 0);
+      // Se algum inversor não trouxe gen_today (Solis manda `unavailable`
+      // esporadicamente), soma vai vir subestimada. Deriva a partir de
+      // gen_month_kwh - snapshot_do_inicio_do_dia (monotônico até virar mês).
+      const someMissing = invs.some(i => i.gen_today_kwh == null);
+      const genMonth = sum('gen_month_kwh');
+      _ensureDayStart(key, genMonth);
+      let genToday = sum('gen_today_kwh');
+      let genTodaySource = 'inverter_field';
+      // Fallback A: deriva de gen_month_kwh - snapshot_do_inicio_do_dia
+      if (someMissing || genToday === 0) {
+        const start = _dayStartMonthKwh(key);
+        if (start != null && genMonth >= start) {
+          const derived = +(genMonth - start).toFixed(2);
+          if (derived > genToday) { genToday = derived; genTodaySource = 'derived_month_delta'; }
+        }
+      }
+      // Fallback B: monotonic clamp — última leitura BOA persistida hoje
+      // sempre vence uma leitura pior (Solis manda unavailable → 0 e depois
+      // volta). Usa `_solarHistory[key]` que já é atualizado pelo _recordSolarSnap.
+      if (someMissing || genToday === 0) {
+        const today = _todayDateStr();
+        const persisted = (_solarHistory[key] || []).find(d => d.date === today);
+        if (persisted && (persisted.kwh || 0) > genToday) {
+          genToday = +persisted.kwh.toFixed(2);
+          genTodaySource = 'persisted_max';
+        }
+      }
       return {
         label: cfg.label,
-        ac_power_w:    sum('ac_power_w'),
-        gen_today_kwh: sum('gen_today_kwh'),
-        gen_month_kwh: sum('gen_month_kwh'),
-        gen_total_kwh: sum('gen_total_kwh'),
+        ac_power_w:      sum('ac_power_w'),
+        gen_today_kwh:   genToday,
+        gen_today_src:   genTodaySource,
+        gen_month_kwh:   genMonth,
+        gen_total_kwh:   sum('gen_total_kwh'),
         invs,
       };
     };
     return {
-      ivonei:    buildSystem(_SOLIS.ivonei),
-      palmeiras: buildSystem(_SOLIS.palmeiras),
+      ivonei:    buildSystem(_SOLIS.ivonei,    'ivonei'),
+      palmeiras: buildSystem(_SOLIS.palmeiras, 'palmeiras'),
       ts: Date.now(),
     };
   } catch (e) { return null; }
@@ -5018,14 +5148,18 @@ async function _evalSolisAlerts() {
   if (!_solisState) return;
   const daytimeGYN = await _isDaytimeAt('goiania');
   const daytimePGO = await _isDaytimeAt('palmeiras');
-  for (const [key, sys, daytime] of [
-    ['ivonei',    _solisState.ivonei,    daytimeGYN],
-    ['palmeiras', _solisState.palmeiras, daytimePGO],
+  const invHoursGYN = await _isInverterActiveHours('goiania');
+  const invHoursPGO = await _isInverterActiveHours('palmeiras');
+  for (const [key, sys, daytime, invHours] of [
+    ['ivonei',    _solisState.ivonei,    daytimeGYN, invHoursGYN],
+    ['palmeiras', _solisState.palmeiras, daytimePGO, invHoursPGO],
   ]) {
     if (!sys) continue;
-    // Collector offline em qualquer inv = cloud Solis não recebe (only daytime)
+    // Collector offline em qualquer inv = cloud Solis não recebe. Só alerta na
+    // janela ATIVA do inversor (sunrise+45min → sunset-30min); daytime é
+    // permissivo demais (dispara 06:29 antes do inversor acordar).
     const collOff = sys.invs.some(i => i.collector && i.collector !== 'online');
-    _alert(`solis_${key}_collector_offline`, collOff && daytime,
+    _alert(`solis_${key}_collector_offline`, collOff && invHours,
       `☀️ ${sys.label} — coletor offline`,
       `Datalogger Solis sem comunicação com cloud. Inversores podem estar operando OK mas monitoramento cego.`,
       'high', ['warning', 'sun.max']);
@@ -5148,6 +5282,229 @@ app.post('/api/ha-status', (req, res) => {
   res.json({ ok: true, ts });
 });
 
+// ── iCloud family locations ─────────────────────────────────────────────────
+// Puxa localização dos iPhones da família a cada 10min via device_tracker do HA
+// (integração iCloud), reverse-geocoda endereço e persiste. gps_accuracy do HA
+// vira "raio de confiança": <50m alta, 50-200m média, >200m baixa (potencial
+// falso positivo). Só iPhones — iPad/MacBook fora. Endpoint auth-gated.
+const _FAMILY_MEMBERS = [
+  { key: 'grasielle', name: 'Grasielle',       device: 'iPhone 16 Pro Max',
+    tracker: 'device_tracker.iphone_de_grasielle', battery: 'sensor.iphone_de_grasielle_bateria' },
+  { key: 'vitoria',   name: 'Vitória',         device: 'iPhone 14 Pro Max',
+    tracker: 'device_tracker.vitoria',             battery: 'sensor.vitoria_bateria' },
+  { key: 'rodrigo',   name: 'Rodrigo Machado', device: 'iPhone 13 Pro',
+    tracker: 'device_tracker.rodrigo_machado_2',   battery: 'sensor.rodrigo_machado_2_bateria' },
+  { key: 'ivone',     name: 'Ivone',           device: 'iPhone 14 Pro Max',
+    tracker: 'device_tracker.iphone_de_ivone_2',   battery: 'sensor.iphone_de_ivone_2_bateria' },
+  { key: 'eduardo',   name: 'Eduardo',         device: 'iPhone 17e',
+    tracker: 'device_tracker.eduardo_2',           battery: 'sensor.eduardo_2_bateria' },
+];
+const FAMILY_FILE = path.join(DATA_DIR, 'icloud_family.json');
+let _familyLocations = {};
+try { _familyLocations = JSON.parse(fs.readFileSync(FAMILY_FILE, 'utf8')) || {}; } catch (_) {}
+function _saveFamilyLocations() {
+  try { atomicWriteFileSync(FAMILY_FILE, JSON.stringify(_familyLocations)); } catch (_) {}
+}
+// Reverse geocode rico (rua + número + bairro + POI) só pra família. Cache
+// próprio arredondado a ~11m (4 casas decimais). Zoom 18 pra buscar POI.
+// namedetails=1 traz nome de estabelecimento quando lat/lng cai num prédio
+// cadastrado no OSM. Se Nominatim não trouxe POI, faz fallback Overpass num
+// raio ao redor pra pegar shopping/restaurante/mercado/hospital/etc próximo.
+const _familyGeoMem = new Map();
+// Overpass: busca POI (shop, amenity, tourism, leisure, office, healthcare)
+// mais próximo com nome. Radius = accuracy do GPS ou 60m (o que for maior).
+// Só chama quando Nominatim não trouxe POI. Timeout curto, fail-open.
+const _OVERPASS_HOSTS = [
+  'https://overpass-api.de/api/interpreter',
+  'https://overpass.osm.ch/api/interpreter',
+];
+async function _nearbyPOI(lat, lng, radius) {
+  const r = Math.max(30, Math.min(200, Math.round(radius || 60)));
+  const q = `[out:json][timeout:4];(` +
+    `nwr(around:${r},${lat},${lng})["name"]["shop"];` +
+    `nwr(around:${r},${lat},${lng})["name"]["amenity"];` +
+    `nwr(around:${r},${lat},${lng})["name"]["tourism"];` +
+    `nwr(around:${r},${lat},${lng})["name"]["leisure"];` +
+    `nwr(around:${r},${lat},${lng})["name"]["office"];` +
+    `nwr(around:${r},${lat},${lng})["name"]["healthcare"];` +
+    `);out center tags 8;`;
+  let j = null;
+  for (const host of _OVERPASS_HOSTS) {
+    try {
+      const resp = await fetch(host, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'User-Agent': 'ecotrip-bridge/1.0 (https://github.com/rafaelcs28/haval-ecotrip)',
+        },
+        body: 'data=' + encodeURIComponent(q),
+        signal: AbortSignal.timeout(5000),
+      });
+      if (!resp.ok) continue;   // 429/500 → tenta próximo host
+      j = await resp.json();
+      break;
+    } catch (_) { /* tenta próximo host */ }
+  }
+  if (!j) return '';
+  try {
+    const els = j.elements || [];
+    if (!els.length) return '';
+    // Score: preferir shop/amenity food-adjacent, e o mais próximo.
+    const scored = els.map(e => {
+      const c = e.center || e;
+      const d = (c.lat && c.lon) ? haversineM(lat, lng, c.lat, c.lon) : 9999;
+      const t = e.tags || {};
+      let bonus = 0;
+      if (t.shop === 'mall' || t.amenity === 'marketplace') bonus += 40;
+      if (t.shop || t.amenity === 'restaurant' || t.amenity === 'cafe' || t.amenity === 'fast_food' || t.amenity === 'bar') bonus += 20;
+      if (t.tourism || t.leisure) bonus += 10;
+      if (t.healthcare || t.amenity === 'hospital' || t.amenity === 'clinic') bonus += 25;
+      return { name: t.name, tags: t, dist: d, score: bonus - d };
+    }).filter(x => x.name).sort((a,b) => b.score - a.score);
+    return scored.length ? scored[0].name : '';
+  } catch (_) { return ''; }
+}
+async function _reverseGeocodeFamily(lat, lng, accuracy) {
+  const k = (Math.round(lat * 10000) / 10000) + ',' + (Math.round(lng * 10000) / 10000);
+  if (_familyGeoMem.has(k)) return _familyGeoMem.get(k);
+  try {
+    const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&namedetails=1&addressdetails=1&accept-language=pt-BR`, {
+      headers: {
+        'Accept': 'application/json',
+        'Accept-Language': 'pt-BR,pt;q=0.9',
+        'User-Agent': 'ecotrip-bridge/1.0 (https://github.com/rafaelcs28/haval-ecotrip)',
+      },
+    });
+    const j = await r.json();
+    const a = j.address || {};
+    let poi = j.name || (j.namedetails && j.namedetails.name) || '';
+    const road   = a.road || a.pedestrian || a.footway || '';
+    const num    = a.house_number || '';
+    const bairro = a.suburb || a.neighbourhood || a.quarter || a.city_district || '';
+    const city   = a.city || a.town || a.village || a.municipality || a.county || '';
+    if (poi && (poi === road || poi === city)) poi = '';
+    // Fallback Overpass: se Nominatim não achou POI nomeado, procura
+    // estabelecimento próximo. Serve quando lat/lng cai na rua ao lado do
+    // shopping/restaurante em vez de cair exato no polígono.
+    if (!poi) {
+      poi = await _nearbyPOI(lat, lng, accuracy);
+    }
+    const parts = [];
+    if (poi)                        parts.push(poi);
+    if (road)                       parts.push(num ? `${road}, ${num}` : road);
+    if (bairro && bairro !== road)  parts.push(bairro);
+    if (city && city !== bairro)    parts.push(city);
+    const label = parts.length ? parts.join(' · ') : (j.display_name || '');
+    const result = { label, city, bairro, road, num, poi };
+    _familyGeoMem.set(k, result);
+    return result;
+  } catch (_) {
+    const empty = { label: '', city: '', bairro: '', road: '', num: '', poi: '' };
+    _familyGeoMem.set(k, empty);
+    return empty;
+  }
+}
+async function _fetchFamilyLocations() {
+  const tok = process.env.HA_TOKEN;
+  const url = (process.env.HA_URL || '').replace(/\/$/, '');
+  if (!tok || !url) return;
+  let arr;
+  try {
+    const r = await fetch(`${url}/api/states`, {
+      headers: { Authorization: `Bearer ${tok}` },
+      signal: AbortSignal.timeout(6000),
+    });
+    if (!r.ok) return;
+    arr = await r.json();
+  } catch (_) { return; }
+  const now = Date.now();
+  for (const m of _FAMILY_MEMBERS) {
+    const t = arr.find(x => x.entity_id === m.tracker);
+    if (!t) continue;
+    const attr = t.attributes || {};
+    const lat = Number.isFinite(+attr.latitude) ? +attr.latitude : null;
+    const lng = Number.isFinite(+attr.longitude) ? +attr.longitude : null;
+    const acc = Number.isFinite(+attr.gps_accuracy) ? +attr.gps_accuracy : null;
+    const haReportedMs = Date.parse(t.last_updated || t.last_changed || '') || now;
+    const zone = (t.state && t.state !== 'not_home' && t.state !== 'unknown' && t.state !== 'unavailable') ? t.state : null;
+    let battery_pct = null;
+    if (m.battery) {
+      const b = arr.find(x => x.entity_id === m.battery);
+      if (b && b.state !== 'unknown' && b.state !== 'unavailable') {
+        const n = +b.state; if (Number.isFinite(n)) battery_pct = Math.round(n);
+      }
+    }
+    const prev = _familyLocations[m.key] || {};
+    let address = prev.address || null;
+    if (lat != null && lng != null) {
+      const moved = (prev.lat == null || prev.lng == null) ||
+                    haversineM(prev.lat, prev.lng, lat, lng) > 50;
+      if (moved || !prev.address) {
+        try {
+          const g = await _reverseGeocodeFamily(lat, lng, acc);
+          if (g.label) address = g.label;
+        } catch (_) {}
+      }
+    }
+    const next = {
+      name: m.name,
+      device: m.device,
+      lat: lat != null ? lat : (prev.lat ?? null),
+      lng: lng != null ? lng : (prev.lng ?? null),
+      accuracy_m: acc,
+      battery_pct,
+      address,
+      zone,
+      ha_reported_ms: haReportedMs,
+      updated_ms: now,
+    };
+    // Detecta mudanca significativa (>=50m) pra fazer PUSH ao whats-assistant
+    // (Marileuza). Bridge pushou = Mari pode reagir NA HORA sem esperar poll.
+    if (prev.lat != null && next.lat != null
+        && haversineM(prev.lat, prev.lng, next.lat, next.lng) >= 50) {
+      _pushFamilyChange(m.key, next).catch(() => {});
+    }
+    _familyLocations[m.key] = next;
+  }
+  _saveFamilyLocations();
+}
+async function _pushFamilyChange(key, loc) {
+  const url = process.env.MARI_PUSH_URL || 'http://127.0.0.1:3738/api/family-changed';
+  const token = process.env.MARI_PUSH_TOKEN || process.env.HEALTH_TOKEN;
+  if (!url || !token) return;
+  try {
+    await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Push-Token': token },
+      body: JSON.stringify({ key, lat: loc.lat, lng: loc.lng, address: loc.address, ts: Date.now() }),
+      signal: AbortSignal.timeout(4000),
+    });
+  } catch (_) { /* fail-open */ }
+}
+setTimeout(() => { _fetchFamilyLocations().catch(() => {}); }, 5_000);
+setInterval(() => { _fetchFamilyLocations().catch(() => {}); }, 3 * 60_000);
+
+app.get('/api/family-locations', requireAuth, (_req, res) => {
+  const now = Date.now();
+  const list = _FAMILY_MEMBERS.map(m => {
+    const s = _familyLocations[m.key] || {};
+    return {
+      key: m.key,
+      name: s.name || m.name,
+      device: s.device || m.device,
+      lat: s.lat ?? null,
+      lng: s.lng ?? null,
+      accuracy_m: s.accuracy_m ?? null,
+      battery_pct: s.battery_pct ?? null,
+      address: s.address || null,
+      zone: s.zone || null,
+      updated_ms: s.ha_reported_ms || null,
+      age_ms: s.ha_reported_ms ? (now - s.ha_reported_ms) : null,
+    };
+  });
+  res.json({ ts: now, members: list });
+});
+
 // ── Stats do Mac (host) — memória/disco/uptime, cacheado (vm_stat é subprocess) ──
 // os.freemem() no macOS conta só páginas livres (~0) e engana; usamos vm_stat
 // pra "em uso" (active+wired+compressor) estilo Activity Monitor.
@@ -5214,16 +5571,25 @@ let _netBw = { rx_kbps: null, tx_kbps: null, iface: null, link_mbps: null, link_
 let _netPrev = null; // { rx, tx, ts }
 let _netLink = { mbps: null, type: null }; // velocidade negociada do link local (WiFi/Ethernet)
 function _pollLinkSpeed() {
-  // WiFi: Transmit Rate (Mbps) via system_profiler. Ethernet: media baseT do ifconfig.
-  // system_profiler do WiFi faz scan de rádio e leva ~15s — timeout largo, poll lento (60s).
-  exec('system_profiler SPAirPortDataType 2>/dev/null', { timeout: 20000, maxBuffer: 1 << 20 }, (e, out) => {
-    const tx = /Transmit Rate:\s*(\d+)/.exec(out || '');
-    if (tx) { _netLink = { mbps: +tx[1], type: 'WiFi' }; return; }
-    const iface = _netBw.iface || 'en0';
-    exec(`ifconfig ${iface} 2>/dev/null`, { timeout: 3000 }, (e2, out2) => {
-      const m = /media:.*?(\d+)base/i.exec(out2 || '');
-      _netLink = m ? { mbps: +m[1], type: 'Ethernet' } : { mbps: null, type: null };
-    });
+  // Descobre a interface ATIVA da rota default antes de escolher o método:
+  // Ethernet (en0/USB) → ifconfig media baseT. WiFi (en1) → Transmit Rate do
+  // system_profiler. Antes assumia WiFi só porque o rádio estava associado
+  // mesmo com Ethernet como default — reportava "WiFi" errado no card.
+  exec("route -n get default 2>/dev/null | awk '/interface:/{print $2}'", { timeout: 3000 }, (e0, ifaceOut) => {
+    const iface = (ifaceOut || '').trim() || 'en0';
+    // en1 é WiFi no Mac Mini; qualquer outro (en0 built-in, en5-9 USB) é Ethernet
+    const isWifi = iface === 'en1';
+    if (isWifi) {
+      exec('system_profiler SPAirPortDataType 2>/dev/null', { timeout: 20000, maxBuffer: 1 << 20 }, (e, out) => {
+        const tx = /Transmit Rate:\s*(\d+)/.exec(out || '');
+        _netLink = tx ? { mbps: +tx[1], type: 'WiFi' } : { mbps: null, type: 'WiFi' };
+      });
+    } else {
+      exec(`ifconfig ${iface} 2>/dev/null`, { timeout: 3000 }, (e2, out2) => {
+        const m = /media:.*?(\d+)base/i.exec(out2 || '');
+        _netLink = m ? { mbps: +m[1], type: 'Ethernet' } : { mbps: null, type: 'Ethernet' };
+      });
+    }
   });
 }
 _pollLinkSpeed();
@@ -7658,11 +8024,39 @@ app.get('/api/system-backup', (req, res) => {
 
     // Monta um diretório staging pra poder dar um `tar -czf` só, com paths
     // relativos simples (evita -C repetido / paths absolutos vazando no tar).
+    // `cp -R` aborta ao 1º arquivo transiente que some entre readdir/open —
+    // acontece em auth-state-rafael (Baileys grava/apaga session keys em
+    // rajada de milhares por hora) e derrubava o backup TODO com "Command
+    // failed: cp -R". Solução: tar-streaming (tar -cf - src | tar -xf - dest);
+    // stderr do -cf pode ter warnings de arquivos sumidos, mas o pipe segue
+    // e o exit do `sh -c` reflete o -xf (que sempre sucede se stream chega).
+    // rsync do macOS é BSD 2.6.9 sem --ignore-missing-args, então tar é o fix.
+    const failed = [];
     for (const [src, arcName] of items) {
-      const dest = path.join(tmpDir, arcName);
-      fs.mkdirSync(path.dirname(dest), { recursive: true });
-      execFileSync('cp', ['-R', src, dest]);
+      const destParent = path.join(tmpDir, path.dirname(arcName));
+      fs.mkdirSync(destParent, { recursive: true });
+      try {
+        if (fs.statSync(src).isDirectory()) {
+          const srcParent = path.dirname(src);
+          const srcBase   = path.basename(src);
+          execFileSync('sh', ['-c',
+            `tar -cf - -C "${srcParent}" "${srcBase}" 2>/dev/null | tar -xf - -C "${destParent}"`,
+          ]);
+          // Renomeia se arcName final difere do basename original
+          const created = path.join(destParent, srcBase);
+          const dest = path.join(tmpDir, arcName);
+          if (created !== dest && fs.existsSync(created)) {
+            fs.renameSync(created, dest);
+          }
+        } else {
+          execFileSync('cp', ['-p', src, path.join(tmpDir, arcName)]);
+        }
+      } catch (e) {
+        failed.push(arcName);
+        console.warn(`[system-backup] item falhou (segue): ${arcName} — ${e.message.slice(0, 120)}`);
+      }
     }
+    if (failed.length) console.warn(`[system-backup] itens com falha parcial: ${failed.join(', ')}`);
 
     const tarPath = path.join(tmpDir, 'out.tar.gz');
     const entries = ['ecotrip-backup.json', ...items.map(([, arcName]) => arcName.split('/')[0])];
@@ -8504,6 +8898,16 @@ app.post('/api/apk-death', (req, res) => {
     };
     fs.appendFileSync(APK_DEATHS_FILE, JSON.stringify(rec) + '\n');
     console.log(`[apk-death] trip=${rec.tripId} reason="${rec.reason}" clean=${rec.sessionEndedCleanly} v${rec.version}`);
+    // Fallback ATIVO: se APK morreu com viagem NÃO finalizada limpa, tenta
+    // criar autotrip a partir do snapshot em memória ANTES de perder dados.
+    // Antes o handler só logava, e a trip só existia em memória (_liveTrip) —
+    // se motor desligasse depois sem POST autoritativo, os dados sumiam.
+    if (!rec.sessionEndedCleanly) {
+      try {
+        const created = _finalizeAbandonedTrip(_lastTripSnapshot);
+        if (created) console.log(`[apk-death] fallback finalizou trip a partir do snapshot`);
+      } catch (e) { console.warn('[apk-death] fallback falhou:', e.message); }
+    }
     res.json({ ok: true });
   } catch (e) {
     console.error('Erro ao registrar apk-death:', e.message);
@@ -12602,9 +13006,9 @@ function _scheduleTripLAEnd() {
 // push "Viagem concluída") ANTES de limpar o retido — assim a viagem é finalizada
 // pelo bridge em vez de perdida. Retorna true se finalizou.
 function _finalizeAbandonedTrip(snapshot) {
-  const snap = snapshot || _lastTripSnapshot;
+  let snap = snapshot || _lastTripSnapshot;
   if (!snap) return false;
-  const tripId = String(snap.startMs || snap.tripId || (_liveTrip && _liveTrip.tripId) || '').replace(/\D/g, '');
+  let tripId = String(snap.startMs || snap.tripId || (_liveTrip && _liveTrip.tripId) || '').replace(/\D/g, '');
   if (!tripId) return false;
 
   // Métricas do snapshot são a fonte; start/end GPS vêm do arquivo live (actualStart
@@ -12616,8 +13020,36 @@ function _finalizeAbandonedTrip(snapshot) {
       const d = JSON.parse(fs.readFileSync(fp, 'utf8'));
       liveSamples = Array.isArray(d.samples) ? d.samples : [];
       actualStart = d.actualStart || null;
-      // Já foi salvo de verdade (APK postou): não mexe.
-      if (d.autoTrip && d.autoTrip.distKm != null && !d._liveSamples) return false;
+      // Arquivo já autoritativo (APK postou). Se o snapshot ATUAL vem com
+      // distKm/timeSec claramente maiores que o autoritativo, o APK reutilizou
+      // tripId num novo ciclo (viagem 2 usando id da viagem 1). Aí redireciona
+      // pra novo tripId derivado do relógio — assim finaliza o ciclo perdido
+      // sem sobrescrever a trip original. Caso contrário, respeita o autoritativo.
+      if (d.autoTrip && d.autoTrip.distKm != null && !d._liveSamples) {
+        const snapDist = +snap.distKm || 0;
+        const fileDist = +d.autoTrip.distKm || 0;
+        if (snapDist > fileDist + 1) {   // >1km a mais = ciclo NOVO acumulado
+          const newId = String(Date.now());
+          console.log(`[reaper] snapshot excede autoritativa (${snapDist}km vs ${fileDist}km) — redireciona pra tripId=${newId}`);
+          tripId = newId;
+          liveSamples = (_liveTrip && Array.isArray(_liveTrip.samples)) ? _liveTrip.samples : [];
+          actualStart = _liveTrip ? _liveTrip.actualStart : null;
+          // Métricas viram DELTA (snap acumulado − autoritativa)
+          snap = {
+            ...snap,
+            startMs: (d.autoTrip.endMs || snap.startMs) + 1000,
+            distKm:  +(snapDist - fileDist).toFixed(3),
+            timeSec: Math.max(0, (+snap.timeSec || 0) - (+d.autoTrip.timeSec || 0)),
+            netKwh:  +((+snap.netKwh || 0) - (+d.autoTrip.netKwh || 0)).toFixed(4),
+            fuelL:   +((+snap.fuelL  || 0) - (+d.autoTrip.fuelL  || 0)).toFixed(4),
+            startLat: d.autoTrip.endLat, startLng: d.autoTrip.endLng,
+            startSocPct: d.autoTrip.endSocPct,
+            startFuelPct: d.autoTrip.endFuelPct,
+          };
+        } else {
+          return false;
+        }
+      }
     }
   } catch (_) {}
 
@@ -17560,9 +17992,18 @@ function applyMqttMessage(key, value, isRetained = false) {
           // Snapshot dos timestamps que JÁ tínhamos — pra detectar novas depois do merge.
           // Em mensagens retained (chegam no boot do bridge), não dispara broadcast/push.
           const prevTsSet = new Set(chargesArr.map(c => c.timestamp_ms));
+          // Preserva entries antigas que o APK truncou do próprio histórico local
+          // (retention interna do Android — só manda últimas N). Sem isso, cada
+          // retained/reconexão APAGAVA sessões antigas do bridge silenciosamente
+          // — foi a causa da perda das 17 recargas de maio ao longo de junho/julho.
+          const newTsSet = new Set(charges.map(c => c.timestamp_ms));
+          const preservedOldEntries = chargesArr.filter(c => c.timestamp_ms && !newTsSet.has(c.timestamp_ms));
+          if (preservedOldEntries.length) {
+            console.log(`⤴ Preservadas ${preservedOldEntries.length} recargas antigas ausentes do retained (APK truncou histórico local)`);
+          }
           // Merge: preserva campos server-side (location, charger_kwh, cost_override)
           // que o Android não conhece — sem isso o MQTT retained apaga tudo
-          chargesArr = charges.map(newCharge => {
+          const mergedEntries = charges.map(newCharge => {
             const existing = chargesArr.find(c => c.timestamp_ms === newCharge.timestamp_ms);
             // Validação de energy_kwh: o APK às vezes envia valor parcial
             // (perdeu samples no meio da sessão). Se SOC delta × capacidade
@@ -17628,6 +18069,7 @@ function applyMqttMessage(key, value, isRetained = false) {
             }
             return { ...newCharge, ...keep };
           });
+          chargesArr = [...preservedOldEntries, ...mergedEntries];
           scheduleChargesFlush();
           // Mix ponderado da bateria precisa ser recalculado a cada recarga
           // nova/atualizada — sem isso, o custo das viagens segue usando o

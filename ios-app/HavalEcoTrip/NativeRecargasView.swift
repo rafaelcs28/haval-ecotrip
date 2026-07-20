@@ -120,6 +120,8 @@ final class RefuelsLoader: ObservableObject {
         let idStr = String(format: "%.0f", r.id)
         var body: [String: Any] = [:]
         var apply: ([String: Any]) -> [String: Any] = { $0 }
+        let effLiters = (liters ?? 0) > 0 ? liters! : r.liters
+        let effPrice  = (pricePerL ?? 0) > 0 ? pricePerL! : r.pricePerL
         if let liters, liters > 0, liters != r.liters {
             body["liters_added"] = liters
             let prev = apply; apply = { var d = prev($0); d["liters_added"] = liters; return d }
@@ -132,8 +134,18 @@ final class RefuelsLoader: ObservableObject {
             body["location_name"] = loc
             let prev = apply; apply = { var d = prev($0); d["location_name"] = loc; return d }
         }
+        // Recalcula total_cost no optimistic update — o server já faz isso ao
+        // receber o PATCH, mas até o próximo refresh o item local mostrava R$ 0
+        // porque o body não tem `total_cost` e a lista não é substituída pela
+        // resposta HTTP (só pela sync.sync() completa).
+        if !body.isEmpty && effLiters > 0 && effPrice > 0 {
+            let newTotal = effLiters * effPrice
+            let prev = apply; apply = { var d = prev($0); d["total_cost"] = newTotal; d["pending"] = false; return d }
+        }
         if !body.isEmpty {
             await sync.mutate(localId: lid, apply: apply, method: "PATCH", opPath: "/api/refuels/\(idStr)", body: body)
+            // Full refresh pra pegar tank_avg_price recalculado e state global.
+            await sync.sync()
         }
     }
 }
@@ -215,6 +227,11 @@ struct NativeRecargasView: View {
         .sheet(isPresented: $showHealth) { BatteryHealthSheet(charges: loader.charges) }
         .sheet(isPresented: $showAnalysis) { ChargeAnalysisSheet(charges: loader.charges) }
         .sheet(isPresented: $showForecast) { ChargeForecastSheet() }
+        .sheet(item: $editingRefuel) { r in
+            RefuelEditSheet(refuel: r) { liters, pricePerL, location in
+                Task { await refLoader.patch(r, liters: liters, pricePerL: pricePerL, location: location) }
+            }
+        }
         .background(DS.bg.ignoresSafeArea())
         .overlay { if loader.loading && loader.charges.isEmpty { ProgressView().tint(DS.green) } }
         .overlay(alignment: .bottom) {
@@ -444,32 +461,30 @@ struct NativeRecargasView: View {
                     .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 20)
             }
             ForEach(filteredRefuels) { r in
-                DSCard {
-                    VStack(alignment: .leading, spacing: 12) {
-                        HStack {
-                            Image(systemName: "fuelpump.fill").font(.caption).foregroundStyle(DS.orange)
-                            Text(r.location).font(.system(size: 15, weight: .semibold)).foregroundStyle(DS.text).lineLimit(1)
-                            Spacer()
-                            Text(Self.df.string(from: r.date)).font(.caption).foregroundStyle(DS.muted)
-                            Button { editingRefuel = r } label: {
-                                Image(systemName: "pencil").font(.caption).foregroundStyle(DS.muted)
-                            }.buttonStyle(.plain)
-                        }
-                        HStack {
-                            DSMetric(value: f1(r.liters), unit: "L", label: "Litros", color: DS.orange)
-                            DSMetric(value: brl(r.total), label: "Total")
-                            DSMetric(value: perKwh(r.pricePerL), unit: "R$/L", label: "Preço")
-                        }
-                        if r.odometer > 0 {
-                            Text("Hodômetro: \(String(format: "%.0f", r.odometer)) km").font(.caption2).foregroundStyle(DS.muted)
+                Button {
+                    editingRefuel = r
+                } label: {
+                    DSCard {
+                        VStack(alignment: .leading, spacing: 12) {
+                            HStack {
+                                Image(systemName: "fuelpump.fill").font(.caption).foregroundStyle(DS.orange)
+                                Text(r.location).font(.system(size: 15, weight: .semibold)).foregroundStyle(DS.text).lineLimit(1)
+                                Spacer()
+                                Text(Self.df.string(from: r.date)).font(.caption).foregroundStyle(DS.muted)
+                                Image(systemName: "chevron.right").font(.caption2).foregroundStyle(DS.muted)
+                            }
+                            HStack {
+                                DSMetric(value: f1(r.liters), unit: "L", label: "Litros", color: DS.orange)
+                                DSMetric(value: brl(r.total), label: "Total")
+                                DSMetric(value: perKwh(r.pricePerL), unit: "R$/L", label: "Preço")
+                            }
+                            if r.odometer > 0 {
+                                Text("Hodômetro: \(String(format: "%.0f", r.odometer)) km").font(.caption2).foregroundStyle(DS.muted)
+                            }
                         }
                     }
                 }
-            }
-            .sheet(item: $editingRefuel) { r in
-                RefuelEditSheet(refuel: r) { liters, pricePerL, location in
-                    Task { await refLoader.patch(r, liters: liters, pricePerL: pricePerL, location: location) }
-                }
+                .buttonStyle(.plain)
             }
         }
     }
@@ -542,7 +557,7 @@ private struct ChargeEditFields: View {
     }
 }
 
-private struct RefuelEditSheet: View {
+struct RefuelEditSheet: View {
     let refuel: Refuel
     let onSave: (Double?, Double?, String?) -> Void
     @Environment(\.dismiss) private var dismiss
