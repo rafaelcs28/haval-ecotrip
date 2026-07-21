@@ -783,7 +783,7 @@ async function _handleNotifyAction(rule) {
         console.log('[notify] arrived_home: sem share ativa pra Grasi — pula LA');
       } else for (const [tok, st] of active) {
         try {
-          const cs = _sharedTripContentState(st.recipientName);
+          const cs = _sharedTripContentState(st.recipientName, st.tokenDestName);
           cs.from = st.from; cs.destName = 'Casa'; cs.active = false;
           await apnsLive.pushUpdate(SHARED_TRIP_LA_TYPE, {}, cs,
             { isFinal: true, dismissalDate: Date.now() + 60_000, alert: finalAlert });
@@ -13226,12 +13226,15 @@ function _baselineFor(from, to) {
   return null;
 }
 
-function _sharedTripContentState(recipientName) {
+function _sharedTripContentState(recipientName, tokenDestName) {
   // Lê o estado do carro pra montar o cs da LA.
   // Prioridade do "destino" mostrado:
-  //   1. Destino real do nav do carro (state.arrival).
-  //   2. Fallback: ETA carro → iPhone do destinatário (Grasi). Usa quando o
-  //      Rafael compartilha SEM destino setado — UX natural ("indo até você").
+  //   1. Destino real do nav do carro (state.arrival) — se o dono redirecionar
+  //      no meio do caminho, atualiza automático aqui.
+  //   2. destName guardado no token (nome que o dono queria mostrar quando
+  //      aceitou compartilhar — ex.: "Casa"). Persiste mesmo sem nav ativo.
+  //   3. Fallback: ETA carro → iPhone do destinatário. Aparece só quando o
+  //      Rafael compartilha sem nenhum destino ("indo até você").
   const a = state.arrival || {};
   const speed = +state.speed_kmh || 0;
   const hasNavDest = !!(a.name && (a.distKm != null) && (a.etaMin != null));
@@ -13242,12 +13245,14 @@ function _sharedTripContentState(recipientName) {
     distKm = +(+a.distKm || 0).toFixed(1);
     destLat = +a.lat; destLng = +a.lng;
   } else if (_routeToPhone.etaMin != null && _routeToPhone.distKm != null) {
-    destName = recipientName || 'você';
+    // Nome preferido: o do token (ex.: "Casa"); só cai em "você/Grasi" se não
+    // houver nome persistido.
+    destName = tokenDestName || recipientName || 'você';
     etaMin = Math.round(_routeToPhone.etaMin);
     distKm = +_routeToPhone.distKm.toFixed(1);
     destLat = _routeToPhone.lat; destLng = _routeToPhone.lng;
   } else {
-    destName = ''; etaMin = 0; distKm = 0;
+    destName = tokenDestName || ''; etaMin = 0; distKm = 0;
   }
   // delayMin: diferença entre ETA agora e mediana histórica do MESMO dow p/ o
   // par (posição-atual → destino). Só faz sentido se temos ETA e coords válidas.
@@ -13275,14 +13280,17 @@ async function _startSharedTripLA(token, fromName) {
   if (!apnsLive.enabled) return;
   const grasiIds = new Set(_grasiDevices());
   if (grasiIds.size === 0) return;
-  // Recipient name vem do token do share (gravado em _createShareToken).
+  // Recipient name + destName vêm do token (gravados em _createShareToken).
   const tk = _shareTokens[token] || {};
   const recipientName = tk.recipientName || 'você';
+  const tokenDestName = tk.destName || null;
   // Força um recálculo do route-to-phone pra ter ETA fresca no fallback.
   await _maybeRouteToPhone(true).catch(() => {});
-  const cs = _sharedTripContentState(recipientName); cs.from = fromName || 'Rafael';
+  const cs = _sharedTripContentState(recipientName, tokenDestName); cs.from = fromName || 'Rafael';
   const now = Date.now();
-  _sharedTripLAs[token] = { token, from: fromName || 'Rafael', recipientName, startedMs: now, lastPushMs: now, laActive: true };
+  _sharedTripLAs[token] = { token, from: fromName || 'Rafael', recipientName, tokenDestName,
+                            lastDestName: cs.destName || null,
+                            startedMs: now, lastPushMs: now, laActive: true };
   await apnsLive.pushStart(SHARED_TRIP_LA_TYPE, '',
     { shareToken: token, from: fromName || 'Rafael' }, cs,
     { staleDate: now + 12 * 3600_000,
@@ -13301,7 +13309,8 @@ function _evalSharedTripLAs() {
     if (!tk || tk.expiresMs <= now) {
       // Share expirou/revogado — encerra LA.
       if (st.laActive) {
-        const cs = _sharedTripContentState(st.recipientName); cs.from = st.from; cs.active = false;
+        const cs = _sharedTripContentState(st.recipientName, st.tokenDestName);
+        cs.from = st.from; cs.active = false;
         apnsLive.pushUpdate(SHARED_TRIP_LA_TYPE, {}, cs,
           { isFinal: true, dismissalDate: now + 60_000 }).catch(() => {});
       }
@@ -13313,7 +13322,19 @@ function _evalSharedTripLAs() {
     if (!apnsLive.hasUpdateToken(SHARED_TRIP_LA_TYPE)) continue;
     // Mantém a rota carro→Grasi fresca pra fallback "ETA até você".
     _maybeRouteToPhone().catch(() => {});
-    const cs = _sharedTripContentState(st.recipientName); cs.from = st.from;
+    const cs = _sharedTripContentState(st.recipientName, st.tokenDestName); cs.from = st.from;
+    // Detecta mudança de destino no meio do trajeto: se o nome mudou desde o
+    // último push (Rafael redirecionou o nav), dispara alert push pra Grasi
+    // ("Rafael agora vai pra Shopping X"). Não repete no próximo tick.
+    if (cs.destName && st.lastDestName && cs.destName !== st.lastDestName) {
+      const grasiIds = new Set(_grasiDevices());
+      apnsLive.pushAlert(`🔀 Destino mudou`,
+        `${st.from} agora vai pra ${cs.destName} (antes: ${st.lastDestName})`,
+        { allow: (deviceId) => grasiIds.has(deviceId), threadId: 'shared-trip' }
+      ).catch(() => {});
+      console.log(`[shared-trip] dest mudou: "${st.lastDestName}" → "${cs.destName}" (token ${token.slice(0,8)}…)`);
+    }
+    st.lastDestName = cs.destName || st.lastDestName;
     apnsLive.pushUpdate(SHARED_TRIP_LA_TYPE, {}, cs, {}).catch(() => {});
     st.lastPushMs = now;
   }
@@ -13426,11 +13447,21 @@ async function _maybeRouteToPhone(force = false) {
   const now = Date.now();
   // force ignora só o throttle de tempo (não o lock concorrente).
   if (_routeToPhone.busy || (!force && now - _routeToPhone.ms < 30_000)) return;
-  if (!(_spCarLoc.lat && _spCarLoc.lng) || !(_phoneLoc.lat && _phoneLoc.lng)) return;
+  if (!(_phoneLoc.lat && _phoneLoc.lng)) return;
   if (now - _phoneLoc.ts > 15 * 60_000) return;   // celular sem reportar há 15min → não calcula
+  // Origem: prioriza o HAVAL (state.gps_*) se fresh. `_spCarLoc` é do BYD e só
+  // vale como fallback — quando o Rafael compartilha trajeto do Haval a origem
+  // TEM que ser o Haval, senão a LA da Grasi mostra distância do BYD parado
+  // (que fica junto do iPhone dela = ~100m travado).
+  const havalFresh = state.gps_ts && (now - state.gps_ts) < 5 * 60_000
+                     && Number.isFinite(+state.gps_lat) && Number.isFinite(+state.gps_lng)
+                     && (+state.gps_lat) !== 0 && (+state.gps_lng) !== 0;
+  const originLat = havalFresh ? +state.gps_lat : _spCarLoc.lat;
+  const originLng = havalFresh ? +state.gps_lng : _spCarLoc.lng;
+  if (!(originLat && originLng)) return;
   _routeToPhone.busy = true;
   try {
-    const route = await _fetchRoute(_spCarLoc.lat, _spCarLoc.lng, _phoneLoc.lat, _phoneLoc.lng);
+    const route = await _fetchRoute(originLat, originLng, _phoneLoc.lat, _phoneLoc.lng);
     if (route) {
       _routeToPhone.distKm = Math.round((route.distance / 1000) * 10) / 10;
       _routeToPhone.etaMin = Math.round(route.duration / 60);   // com trânsito (Mapbox)
@@ -16552,17 +16583,16 @@ function _createShareToken(ttlMinRaw, opts) {
     ? opts.recipientRole : null;
   // includeSoc: quando false, a página pública esconde SOC/autonomia. Default true.
   const includeSoc = (opts && opts.includeSoc === false) ? false : true;
-  _shareTokens[token] = { createdMs: Date.now(), expiresMs, code, recipientName, recipientRole, includeSoc };
-  _saveShareTokens();
-  // Nome do destino atual: override explícito do cliente (ex.: destino planejado
-  // na aba Destino) tem prioridade; senão cai pro state.arrival, senão pro último
-  // nav_dest recente (≤6h). Permite montar "Acompanhe meu trajeto para X".
+  // Nome do destino atual — resolvido antes de persistir pra ficar no token.
   let destName = (opts && opts.destName ? String(opts.destName).slice(0, 120).trim() : '') || null;
   if (!destName) destName = (state.arrival && state.arrival.name) || null;
   if (!destName && recentNavDests.length) {
     const last = recentNavDests[recentNavDests.length - 1];
     if (Date.now() - last.ts < 6 * 3600_000) destName = last.name;
   }
+  _shareTokens[token] = { createdMs: Date.now(), expiresMs, code, recipientName, recipientRole,
+                           includeSoc, destName: destName || null };
+  _saveShareTokens();
   return { token, code, url: `${_shareBaseUrl()}/s/${code}`, expiresMs, ttlMin, destName,
            recipientName, recipientRole };
 }

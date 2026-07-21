@@ -44,6 +44,14 @@ object V8SoundEngine {
     @Volatile var rasp = 0.55f            // rasp/grit do escapamento mexido (drive/distorção)
     @Volatile var toneHz = 5200f          // corte do low-pass final (timbre: grave↔brilhante)
     @Volatile var firingOrder = 4f        // ordem de disparo dominante (V8=4, V10=5, V12=6, I6=3, I4=2)
+    // ── Câmbio virtual ────────────────────────────────────────────────────────
+    // gearCount=1 → comportamento legado (câmbio único, usa speedToRpm direto).
+    // gearCount>=2 → cada marcha tem sua razão rpm/kmh (marcha 1 alta rotação,
+    // última "baixa" pra cruzeiro). Upshift automático quando cruza shiftUpPct
+    // do redline. Downshift por kickdown (load alta + rpm baixo).
+    @Volatile var gearCount = 6           // 1..8 (1 = legado)
+    @Volatile var shiftUpPct = 0.85f      // 0.70..0.95
+    @Volatile var kickdown = true
     @Volatile var currentPreset = "V8 Mexido"
 
     // ── Entrada ao vivo (alimentada pelo hook de telemetria) ──
@@ -68,6 +76,11 @@ object V8SoundEngine {
     private var popClick = 0f         // envelope rápido (~2ms) do clique de ataque
     private var prevThr = 0f          // detecção de "soltar" (lift) entre blocos
     private var overrunSamples = 0    // janela de estalos após soltar
+    // Estado do câmbio virtual (só a thread de áudio/feed mexe).
+    @Volatile private var currentGear = 1   // 1..gearCount
+    private var shiftCutSamples = 0         // "throttle cut" durante upshift (som drop)
+    private var shiftBoostSamples = 0       // "rev blip" durante downshift kickdown
+    private var lastShiftMs = 0L            // debounce entre trocas
     private val rng = java.util.Random()
 
     // ── Leituras ao vivo pra UI (tacômetro) ──
@@ -76,6 +89,19 @@ object V8SoundEngine {
     val displayRpm: Int get() = liveRpm.toInt()
     val displayThrottle: Float get() = liveThrottle
     val displayRegen: Boolean get() = liveThrottle < -0.02f
+    val displayGear: Int get() = currentGear
+
+    // Razão rpm/kmh da marcha `g` (1..N). Cai geometricamente: 1ª é ~2.5×
+    // speedToRpm, última fica ~0.6× (cruise). Speed-to-rpm da UI vira o "meio
+    // da faixa" — mantém retrocompat quando gearCount=1.
+    private fun gearRatio(g: Int, gc: Int): Float {
+        if (gc <= 1) return speedToRpm
+        // Curva decrescente: exp entre 2.5× (1ª) e 0.6× (última).
+        val t = (g - 1).toFloat() / (gc - 1).toFloat()   // 0..1
+        val hi = 2.5f; val lo = 0.6f
+        val mul = hi * Math.pow((lo / hi).toDouble(), t.toDouble()).toFloat()
+        return speedToRpm * mul
+    }
 
     val isRunning: Boolean get() = running
 
@@ -97,7 +123,7 @@ object V8SoundEngine {
     )
 
     val PRESETS = listOf(
-        EnginePreset("V8 Mexido",   4f, 650f, 6200f, 0.85f, 1.0f,  0.9f,  0.8f,  0.55f, 5200f, 2600f, 0.5f),
+        EnginePreset("V8 Mexido",   4f, 650f, 6200f, 0.85f, 1.0f,  1.1f,  0.8f,  0.55f, 5200f, 2600f, 0.5f),
         EnginePreset("V8 Muscle",   4f, 600f, 5800f, 1.10f, 0.8f,  0.55f, 0.40f, 0.45f, 3800f, 2400f, 0.5f),
         EnginePreset("V10 Super",   5f, 950f, 8500f, 0.30f, 1.0f,  0.45f, 0.50f, 0.45f, 6000f, 3200f, 0.45f),
         EnginePreset("V12",         6f, 700f, 7800f, 0.25f, 0.9f,  0.30f, 0.35f, 0.35f, 5600f, 3000f, 0.4f),
@@ -129,8 +155,51 @@ object V8SoundEngine {
         carOn = drivingReady
         val full = if (powerFullKw > 1f) powerFullKw else 90f
         inThrottle = (motorPowerKw / full).coerceIn(-1f, 1f)
-        // Rotação-alvo: cruzeiro (velocidade × câmbio) + empurrão do acelerador.
-        val cruise = idleRpm + speedKmh.coerceAtLeast(0f) * speedToRpm
+        val spd = speedKmh.coerceAtLeast(0f)
+        val gc = gearCount.coerceIn(1, 8)
+        // Debounce entre shifts (evita flutter em torno do threshold).
+        val now = System.currentTimeMillis()
+        val canShift = (now - lastShiftMs) > 400
+        // Seleção de marcha (só se gearCount > 1).
+        if (gc >= 2) {
+            if (currentGear < 1 || currentGear > gc) currentGear = 1
+            // rpm que a marcha ATUAL geraria pra essa velocidade
+            val ratioCur = gearRatio(currentGear, gc)
+            val cruiseRpmCur = idleRpm + spd * ratioCur
+            val load = inThrottle.coerceIn(0f, 1f)
+            val redUp = redlineRpm * shiftUpPct.coerceIn(0.6f, 0.98f)
+            // UPSHIFT: rpm de cruzeiro (sem revBoost momentâneo) cruzou o teto.
+            //  usa cruise puro pra não subir marcha só porque pisou fundo — só
+            //  quando a velocidade justifica.
+            if (canShift && currentGear < gc && cruiseRpmCur > redUp && spd > 5f) {
+                currentGear++
+                lastShiftMs = now
+                shiftCutSamples = (SR * 0.14f).toInt()   // ~140ms de "throttle cut"
+            }
+            // DOWNSHIFT — kickdown (aceleração forte + rpm baixo pra pegar torque)
+            else if (canShift && kickdown && currentGear > 1 && load > 0.7f) {
+                val ratioLower = gearRatio(currentGear - 1, gc)
+                val cruiseRpmLower = idleRpm + spd * ratioLower
+                if (cruiseRpmLower < redlineRpm * 0.85f && cruiseRpmCur < redlineRpm * 0.45f) {
+                    currentGear--
+                    lastShiftMs = now
+                    shiftBoostSamples = (SR * 0.12f).toInt()   // ~120ms de rev blip
+                }
+            }
+            // DOWNSHIFT — normal (perdeu velocidade, rpm caiu abaixo do idle da marcha)
+            else if (canShift && currentGear > 1) {
+                val cruiseRpmLower = idleRpm + spd * gearRatio(currentGear - 1, gc)
+                if (cruiseRpmCur < idleRpm + 200f && cruiseRpmLower < redlineRpm * 0.70f) {
+                    currentGear--
+                    lastShiftMs = now
+                }
+            }
+        } else {
+            currentGear = 1
+        }
+        // Ratio efetivo da marcha atual.
+        val effRatio = if (gc >= 2) gearRatio(currentGear, gc) else speedToRpm
+        val cruise = idleRpm + spd * effRatio
         val boost = if (inThrottle > 0f) inThrottle * revBoost else 0f
         // No regen tira um pouco da rotação (desacelerando) pra dar o freio-motor.
         val drag = if (inThrottle < 0f) inThrottle * 400f else 0f
@@ -199,16 +268,36 @@ object V8SoundEngine {
 
             // "Soltou" o acelerador entre este bloco e o anterior → abre janela de
             // estalos de overrun (escapamento mexido cuspindo na desaceleração).
+            // 2.0s de janela (era 1.1s) — pipoco mais duradouro após soltar.
             val lift = prevThr - thr
-            if (on && lift > 0.06f && prevThr > 0.15f) overrunSamples = (SR * 1.1f).toInt()
+            if (on && lift > 0.06f && prevThr > 0.15f) overrunSamples = (SR * 2.0f).toInt()
             prevThr = thr
             // Overrun ativo: soltou há pouco OU está regenerando (freio-motor).
             val overrun = on && (overrunSamples > 0 || regen)
+            // Multiplica intensidade de pop no overrun (lift ou regen) — mais
+            // "pipoco" na saída do acelerador e freio-motor. 2.2× no lift fresco
+            // (primeiros 500ms), 1.6× depois; regen fica em 1.6× constante.
+            val liftFresh = overrunSamples > (SR * 1.5f).toInt()
+            val overrunGain = if (regen) 1.6f else if (liftFresh) 2.2f else 1.6f
 
             for (i in 0 until BLOCK) {
                 if (overrunSamples > 0) overrunSamples--
+                // Efeito de shift: durante shiftCutSamples, força a rotação a cair
+                // rápido (upshift) — dá o "brrrr" da troca. shiftBoostSamples faz
+                // o rev blip do kickdown (subida rápida).
+                var effectiveTarget = target
+                var effectiveAUp = aUp; var effectiveADn = aDn
+                if (shiftCutSamples > 0) {
+                    effectiveTarget = target * 0.6f + idleRpm * 0.4f   // puxa pro idle
+                    effectiveADn = aDn * 3.5f                          // queda RÁPIDA
+                    shiftCutSamples--
+                } else if (shiftBoostSamples > 0) {
+                    effectiveTarget = (target + redlineRpm * 0.15f).coerceAtMost(redlineRpm)
+                    effectiveAUp = aUp * 3f                            // subida rápida (blip)
+                    shiftBoostSamples--
+                }
                 // rotação → alvo
-                rpm += (target - rpm) * (if (target > rpm) aUp else aDn)
+                rpm += (effectiveTarget - rpm) * (if (effectiveTarget > rpm) effectiveAUp else effectiveADn)
                 carGain += (targetCarGain - carGain) * 0.0008f
 
                 val f0 = rpm / 60.0            // Hz do virabrequim (fundamental)
@@ -241,7 +330,11 @@ object V8SoundEngine {
                 // Cada pop = burst de ruído + thump grave (~110 Hz), decaindo rápido.
                 // Cada estalo = 1 evento discreto: tom grave decaindo ("bap") + clique
                 // curtíssimo de ataque. NÃO é ruído contínuo (isso virava xiado).
-                val overrunFire = overrun && crackle > 0f && rng.nextFloat() < crackle * 0.0013f
+                // Taxa de disparo do pop no overrun subiu 2.3× (0.0013 → 0.0030),
+                // e no regen tem uma taxa própria mais alta (freio-motor dá mais
+                // "pipoco" contínuo que o simples lift do acelerador).
+                val overrunRate = if (regen) 0.0028f else 0.0030f
+                val overrunFire = overrun && crackle > 0f && rng.nextFloat() < crackle * overrunRate
                 val accelFire = !regen && load > 0.45f && popAccel > 0f && rng.nextFloat() < popAccel * 0.0006f
                 if (overrunFire || accelFire) {
                     popEnv = if (accelFire) 1.0f else 0.9f
@@ -255,7 +348,8 @@ object V8SoundEngine {
                     popPhase += popFreq / SR
                     val body = sin(2.0 * PI * popPhase).toFloat()          // tom grave = "tá"
                     val click = (rng.nextFloat() - 0.5f) * 2f * popClick   // ruído SÓ no ataque
-                    val amp = if (regen || overrunSamples > 0) crackle else popAccel
+                    val baseAmp = if (regen || overrunSamples > 0) crackle else popAccel
+                    val amp = baseAmp * (if (regen || overrunSamples > 0) overrunGain else 1f)
                     popMix = (body * 0.6f + click * 0.95f) * popEnv * amp  // mais ataque, menos ring = seco
                     popEnv -= popEnv * popCoef
                     popClick -= popClick * 0.045f                          // clique some em ~1ms
@@ -302,6 +396,9 @@ object V8SoundEngine {
         rasp       = p.getFloat(SharedPreferencesKeys.V8_RASP, rasp)
         toneHz     = p.getFloat(SharedPreferencesKeys.V8_TONE_HZ, toneHz)
         firingOrder= p.getFloat(SharedPreferencesKeys.V8_FIRING_ORDER, firingOrder)
+        gearCount  = p.getInt  (SharedPreferencesKeys.V8_GEAR_COUNT, gearCount).coerceIn(1, 8)
+        shiftUpPct = p.getFloat(SharedPreferencesKeys.V8_SHIFT_UP_PCT, shiftUpPct).coerceIn(0.60f, 0.98f)
+        kickdown   = p.getBoolean(SharedPreferencesKeys.V8_KICKDOWN, kickdown)
         currentPreset = p.getString(SharedPreferencesKeys.V8_PRESET, currentPreset) ?: currentPreset
     }
 
@@ -328,7 +425,19 @@ object V8SoundEngine {
             SharedPreferencesKeys.V8_RASP        -> rasp = value
             SharedPreferencesKeys.V8_TONE_HZ     -> toneHz = value
             SharedPreferencesKeys.V8_FIRING_ORDER -> firingOrder = value
+            SharedPreferencesKeys.V8_SHIFT_UP_PCT  -> shiftUpPct = value.coerceIn(0.60f, 0.98f)
         }
         prefs(ctx).edit().putFloat(key, value).apply()
+    }
+
+    /** Grava/aplica gearCount (Int) e kickdown (Bool) — não são Float. */
+    fun setGearCount(ctx: Context, value: Int) {
+        gearCount = value.coerceIn(1, 8)
+        if (currentGear > gearCount) currentGear = 1
+        prefs(ctx).edit().putInt(SharedPreferencesKeys.V8_GEAR_COUNT, gearCount).apply()
+    }
+    fun setKickdown(ctx: Context, value: Boolean) {
+        kickdown = value
+        prefs(ctx).edit().putBoolean(SharedPreferencesKeys.V8_KICKDOWN, value).apply()
     }
 }

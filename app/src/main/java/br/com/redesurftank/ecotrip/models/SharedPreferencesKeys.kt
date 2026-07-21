@@ -160,5 +160,8 @@ object SharedPreferencesKeys {
     const val V8_RASP          = "v8_rasp"             // rasp/grit do escapamento mexido
     const val V8_TONE_HZ       = "v8_tone_hz"          // corte do timbre (grave↔brilhante)
     const val V8_FIRING_ORDER  = "v8_firing_order"     // ordem de disparo (V8=4, V10=5, V12=6, I6=3, I4=2)
+    const val V8_GEAR_COUNT    = "v8_gear_count"       // marchas do câmbio virtual (1=linear legado, 2..8)
+    const val V8_SHIFT_UP_PCT  = "v8_shift_up_pct"     // fração do redline p/ upshift (0.70..0.95)
+    const val V8_KICKDOWN      = "v8_kickdown"         // habilita downshift agressivo em WOT (1/0)
     const val V8_PRESET        = "v8_preset"           // nome do preset selecionado
 }
