@@ -45,11 +45,13 @@ fun V8SoundScreen(onBack: () -> Unit) {
     var rpm by remember { mutableStateOf(0) }
     var regen by remember { mutableStateOf(false) }
     var throttle by remember { mutableStateOf(0f) }
+    var gearNow by remember { mutableStateOf(1) }
     LaunchedEffect(enabled) {
         while (true) {
             rpm = V8SoundEngine.displayRpm
             regen = V8SoundEngine.displayRegen
             throttle = V8SoundEngine.displayThrottle
+            gearNow = V8SoundEngine.displayGear
             delay(70)
         }
     }
@@ -68,6 +70,9 @@ fun V8SoundScreen(onBack: () -> Unit) {
     var popAccel   by remember { mutableStateOf(V8SoundEngine.popAccel) }
     var rasp       by remember { mutableStateOf(V8SoundEngine.rasp) }
     var toneHz     by remember { mutableStateOf(V8SoundEngine.toneHz) }
+    var gearCount  by remember { mutableStateOf(V8SoundEngine.gearCount) }
+    var shiftUpPct by remember { mutableStateOf(V8SoundEngine.shiftUpPct) }
+    var kickdown   by remember { mutableStateOf(V8SoundEngine.kickdown) }
     var preset     by remember { mutableStateOf(V8SoundEngine.currentPreset) }
 
     ClaudeScreen(title = "Som V8", onBack = onBack, accent = accent, spacing = 16.dp) {
@@ -109,6 +114,14 @@ fun V8SoundScreen(onBack: () -> Unit) {
 
                 // Tacômetro
                 Tachometer(rpm = rpm, redline = redlineRpm.toInt(), regen = regen, throttle = throttle, accent = accent)
+                // Marcha atual (só mostra se câmbio virtual habilitado)
+                if (gearCount > 1) {
+                    Text(
+                        "Marcha: ${gearNow}ª / $gearCount",
+                        color = accent, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+                }
             }
 
             // ── Presets de motor ────────────────────────────────────────────────
@@ -209,6 +222,33 @@ fun V8SoundScreen(onBack: () -> Unit) {
                 }
                 ParamSlider("Potência p/ acelerador no fundo", powerFull, 30f, 200f, accent, { "${it.roundToInt()} kW" }) {
                     powerFull = it; V8SoundEngine.setParam(ctx, K.V8_POWER_FULL_KW, it)
+                }
+            }
+
+            ParamCard(title = "CÂMBIO VIRTUAL") {
+                // Marchas do câmbio automático simulado. 1 = câmbio único linear
+                // (comportamento antigo — usa só "Rotação por km/h"). 2..8 =
+                // marchas com ratios decrescentes; upshift automático quando
+                // rpm cruza o "Ponto de upshift" do redline.
+                ParamSlider("Marchas", gearCount.toFloat(), 1f, 8f, accent,
+                    { "${it.roundToInt()}" + if (it.roundToInt() == 1) " (linear)" else "" }) {
+                    val n = it.roundToInt().coerceIn(1, 8)
+                    if (n != gearCount) { gearCount = n; V8SoundEngine.setGearCount(ctx, n) }
+                }
+                ParamSlider("Ponto de upshift", shiftUpPct, 0.60f, 0.98f, accent, { pct(it) }) {
+                    shiftUpPct = it; V8SoundEngine.setParam(ctx, K.V8_SHIFT_UP_PCT, it)
+                }
+                // Kickdown: switch on/off.
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("Kickdown (desce marcha ao pisar fundo)",
+                        color = TextPrimary, fontSize = 13.sp,
+                        modifier = Modifier.weight(1f))
+                    Switch(checked = kickdown, onCheckedChange = {
+                        kickdown = it; V8SoundEngine.setKickdown(ctx, it)
+                    })
                 }
             }
 
