@@ -151,7 +151,48 @@ object V8SoundEngine {
     // ── API pública ────────────────────────────────────────────────────────────
 
     /** Alimenta o motor com a telemetria crua do carro. Barato; chame à vontade. */
+    // "Simulação WOT" pro botão TESTAR — 3s de rampa sintética. Durante testMs>0,
+    // feed() ignora telemetria e usa curva forjada. Auto-clear ao terminar.
+    @Volatile private var testStartMs = 0L
+    @Volatile private var testDurationMs = 0L
+
+    fun startWotTest(durationMs: Long = 3000L) {
+        testStartMs = System.currentTimeMillis()
+        testDurationMs = durationMs
+    }
+
+    /** true enquanto a simulação de WOT está rodando. UI usa pra animar botão. */
+    fun isWotTesting(): Boolean = testStartMs > 0L &&
+        System.currentTimeMillis() - testStartMs < testDurationMs
+
+    /** Progresso 0..1 do teste WOT (0 quando não tá testando). */
+    fun wotTestProgress(): Float {
+        if (testStartMs == 0L) return 0f
+        val el = System.currentTimeMillis() - testStartMs
+        if (el >= testDurationMs) { testStartMs = 0L; return 0f }
+        return (el.toFloat() / testDurationMs).coerceIn(0f, 1f)
+    }
+
     fun feed(motorPowerKw: Float, speedKmh: Float, drivingReady: Boolean, gear: Int) {
+        // Override do teste: gera curva de aceleração forte (throttle 0→1 em 300ms,
+        // segura em 1, cai pra 0 nos últimos 400ms simulando lift → dá pipoco).
+        val testP = wotTestProgress()
+        val useTest = testP > 0f
+        if (useTest) {
+            val fakeThrottle = when {
+                testP < 0.10f -> testP / 0.10f * 0.9f + 0.1f    // 0.1 → 1.0
+                testP > 0.87f -> (1f - (testP - 0.87f) / 0.13f).coerceIn(0f, 1f)  // 1.0 → 0 (lift)
+                else -> 1.0f
+            }
+            // Velocidade fake sobe de 0 a ~80 durante o teste
+            val fakeSpeed = testP * 80f
+            return feedInternal(fakeThrottle * (powerFullKw.takeIf { it > 1f } ?: 90f),
+                                fakeSpeed, true, 0)
+        }
+        feedInternal(motorPowerKw, speedKmh, drivingReady, gear)
+    }
+
+    private fun feedInternal(motorPowerKw: Float, speedKmh: Float, drivingReady: Boolean, gear: Int) {
         carOn = drivingReady
         val full = if (powerFullKw > 1f) powerFullKw else 90f
         inThrottle = (motorPowerKw / full).coerceIn(-1f, 1f)
