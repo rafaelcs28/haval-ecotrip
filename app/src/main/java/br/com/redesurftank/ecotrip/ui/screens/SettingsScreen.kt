@@ -79,6 +79,7 @@ fun SettingsScreen(
     var showClearConfirm  by remember { mutableStateOf(false) }
     var clearDoneMsg      by remember { mutableStateOf("") }
     var showV8            by remember { mutableStateOf(false) }
+    var showV8Cluster     by remember { mutableStateOf(false) }
     var mqttEnabled      by remember { mutableStateOf(mqttManager.enabled) }
     var host             by remember { mutableStateOf(mqttManager.host) }
     var port             by remember { mutableStateOf(mqttManager.port.toString()) }
@@ -164,6 +165,10 @@ fun SettingsScreen(
         V8SoundScreen(onBack = { showV8 = false })
         return
     }
+    if (showV8Cluster) {
+        V8ClusterScreen(onBack = { showV8Cluster = false })
+        return
+    }
 
     ClaudeScreen(title = "Configurações", onBack = onBack, accent = NeonLime, spacing = 16.dp) {
         Column(
@@ -186,6 +191,14 @@ fun SettingsScreen(
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = AccentOrange),
             ) {
                 Text("Abrir Som V8", fontWeight = FontWeight.Bold)
+            }
+            OutlinedButton(
+                onClick = { showV8Cluster = true },
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                shape = RoundedCornerShape(8.dp),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFFF1E1E)),
+            ) {
+                Text("V8 CLUSTER (tacô + velocímetro)", fontWeight = FontWeight.Bold)
             }
         }
 
