@@ -148,14 +148,23 @@ class UpdateManager private constructor() {
     fun downloadAndInstall(context: Context) {
         val release = latestRelease ?: return
         if (downloadProgress >= 0) return   // already downloading
-        // Guarda-viagem: nunca instalar/matar o processo com uma viagem automática em
-        // andamento (ou carro pronto pra dirigir). O install silencioso via Shizuku
-        // encerra o processo (killProcess) — se isso rodar mid-trip, o APK morre no
-        // meio e a viagem fica órfã (finalizada por estimativa pelo bridge, sem rota).
-        // Adia: o check periódico (10min) tenta de novo quando o carro desligar.
+        // Guarda-marcha: só instala com gear=P (ou carro desligado). D/R/N adia,
+        // mesmo com carro parado no semáforo. Shizuku mata o processo — se rodar
+        // com marcha engatada a LA/telemetria congela por alguns segundos. Espera
+        // o motorista mandar pra P (fim de trajeto, ou estacionar de propósito).
         val tm = TripManager.getInstance()
-        if (tm.isAutoTripActive() || tm.isDrivingReady()) {
-            AppLogger.i(TAG, "OTA adiado: viagem ativa (autoTrip=${tm.isAutoTripActive()} drivingReady=${tm.isDrivingReady()}) — não instalar mid-trip")
+        val gear  = MqttManager.getInstance().latestGear
+        val ready = MqttManager.getInstance().latestDrivingReadyState
+        // ready==1 e gear != "P" → carro pronto pra andar (D/R/N). Adia.
+        // ready==0 → carro apagado (pode instalar mesmo sem gear conhecido).
+        // gear vazio (nunca populou) + ready==1 → adia por segurança.
+        val gearBlocks = ready == 1 && gear != "P"
+        if (gearBlocks) {
+            AppLogger.i(TAG, "OTA adiado: gear=$gear ready=$ready — só instala em P (ou carro apagado)")
+            return
+        }
+        if (tm.isAutoTripActive()) {
+            AppLogger.i(TAG, "OTA adiado: viagem automática ativa — não instalar mid-trip")
             return
         }
         executor.submit {
@@ -212,16 +221,17 @@ class UpdateManager private constructor() {
                 }
                 AppLogger.i(TAG, "APK v$apkVersion confere com a release — trying silent install")
 
-                // Re-guarda-viagem: o download demora 10-30s. Se o motorista ligou
-                // o carro NESSA janela, `isDrivingReady/isAutoTripActive` no início
-                // eram false — mas agora podem ser true. Silent install mata o
-                // processo (killProcess) → APK morre no meio da viagem → LA
-                // congela + bridge marca offline. Verifica de novo AQUI, ANTES do
-                // Shizuku. Se em uso, aborta preservando o APK baixado; próximo
-                // tick de checkForUpdate (~10min) re-instala quando desligar.
+                // Re-guarda-marcha: o download demora 10-30s. Se o motorista
+                // engatou D/R/N NESSA janela, o gear no início era P — mas agora
+                // pode ser outro. Silent install mata o processo (killProcess) →
+                // APK morre → LA congela + bridge marca offline. Verifica de novo
+                // AQUI, ANTES do Shizuku. Se saiu de P, aborta preservando o APK
+                // baixado; próximo tick re-instala quando voltar pra P.
                 val tm2 = TripManager.getInstance()
-                if (tm2.isAutoTripActive() || tm2.isDrivingReady()) {
-                    AppLogger.w(TAG, "OTA adiado no PRÉ-INSTALL: carro entrou em uso durante o download (autoTrip=${tm2.isAutoTripActive()} drivingReady=${tm2.isDrivingReady()}). APK fica em cache pro próximo tick.")
+                val gear2  = MqttManager.getInstance().latestGear
+                val ready2 = MqttManager.getInstance().latestDrivingReadyState
+                if (tm2.isAutoTripActive() || (ready2 == 1 && gear2 != "P")) {
+                    AppLogger.w(TAG, "OTA adiado no PRÉ-INSTALL: gear=$gear2 ready=$ready2 autoTrip=${tm2.isAutoTripActive()} — APK fica em cache pro próximo tick.")
                     return@submit
                 }
 

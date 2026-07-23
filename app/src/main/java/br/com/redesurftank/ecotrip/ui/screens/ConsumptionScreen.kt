@@ -147,10 +147,12 @@ fun ConsumptionScreen() {
         }
     }
 
-    // Check on startup + repeat every 3 min while app is running
+    // Check on startup + repeat every 2 min while app is running.
+    // Install fica bloqueado até gear=P (ver UpdateManager.downloadAndInstall) —
+    // então baixa o metadata na frequência agressiva, mas só reinstala em Park.
     LaunchedEffect(Unit) {
         updateMgr.checkForUpdate()
-        updateMgr.startPeriodicCheck(3)
+        updateMgr.startPeriodicCheck(2)
     }
 
     DisposableEffect(updateMgr) {
