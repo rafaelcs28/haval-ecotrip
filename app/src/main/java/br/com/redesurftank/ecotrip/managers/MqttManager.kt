@@ -3510,29 +3510,51 @@ class MqttManager private constructor() {
                             publishResult("hvac/$control", "error: chave desconhecida")
                             return@submit
                         }
-                        // Intervenção manual no ventilador cancela o modo AUTO. Sem isso, a
-                        // ECU de clima recalcula o fan e o religa sozinho em ~2s quando o
-                        // usuário desliga a ventilação (fan_speed=0) com o AUTO ligado.
-                        // Mesmo comportamento do painel físico: mexeu no fan → sai do AUTO.
-                        // Não guarda mais por `latestHvacAutoEnable == 1`: esse cache pode
-                        // estar stale (a ECU já tá AUTO mas o APK ainda não recebeu o push
-                        // do estado novo). auto=0 idempotente + delay pra ECU aceitar antes
-                        // do fan é mais barato que perder o comando.
+                        // fan_speed=0 exige desligar o MESTRE (car.hvac.power_mode=0).
+                        // Histórico de tentativas que NÃO funcionaram:
+                        //   v6.129: só cortava AUTO — ECU religava fan em ~2s.
+                        //   v6.13x: cortava AUTO + ac_enable=0 — ECU AINDA religava (segurança
+                        //          de "safe cabin" enquanto power_mode=1).
+                        // Único jeito da ventilação ficar em 0 estável é desligar o power_mode
+                        // (mesmo botão físico "off" do painel do AC). Depois disso, a ECU não
+                        // toca no fan.
+                        // Pra fan >= 1 mantém a lógica antiga (cortar AUTO antes) e RELIGA o
+                        // power_mode se estiver off — sem isso, requestSetting no fan não teria
+                        // efeito com sistema desligado.
                         if (control == "fan_speed") {
+                            val payloadInt = payload.trim().toIntOrNull() ?: -1
                             try {
-                                if (car.requestSetting(key = "car.hvac.auto_enable", value = "0")) {
-                                    latestHvacAutoEnable = 0
-                                    AppLogger.i(TAG, "HVAC: AUTO desligado antes de aplicar fan manual (evita override da ECU)")
-                                    Thread.sleep(300)   // deixa a ECU processar o auto=0 antes de receber o fan
-                                }
-                                // fan_speed=0 → também desliga AC. A ECU se recusa a segurar
-                                // fan=0 com AC=on por design (precisa circular ar refrigerado).
-                                // O v6.129 só cortava AUTO, ECU religava fan em ~2s mesmo assim.
-                                // Sem AC, fan=0 fica estável. Se quiser AC de volta, liga pelo
-                                // botão do AC direto.
-                                if (payload.trim() == "0") {
-                                    if (car.requestSetting(key = "car.hvac.ac_enable", value = "0")) {
-                                        AppLogger.i(TAG, "HVAC: AC desligado junto com fan=0 (ECU não segura fan=0 com AC=on)")
+                                if (payloadInt == 0) {
+                                    // Rota direta: desliga o mestre. Publica ok e sai — o
+                                    // requestSetting em car.hvac.fan_speed depois disso é
+                                    // redundante (mestre off zera o fan naturalmente).
+                                    val ok = car.requestSetting(key = "car.hvac.power_mode", value = "0")
+                                    if (ok) {
+                                        latestHvacPowerMode = 0
+                                        AppLogger.i(TAG, "HVAC: fan_speed=0 → power_mode=0 (mestre off, única forma de manter fan zerado)")
+                                        publishResult("hvac/fan_speed", "ok:0 (via power_mode)")
+                                        return@submit
+                                    } else {
+                                        AppLogger.w(TAG, "HVAC: power_mode=0 recusado; tentando via ac_enable=0 + fan=0 (fallback)")
+                                        // Fallback antigo — se o carro rejeitou o power_mode
+                                        // (dormindo?), tenta a rota AC+fan mesmo sabendo que
+                                        // pode voltar. Melhor tentar que falhar calado.
+                                        car.requestSetting(key = "car.hvac.ac_enable", value = "0")
+                                        Thread.sleep(300)
+                                    }
+                                } else if (payloadInt >= 1) {
+                                    // Se o mestre está off, precisa religar antes; senão o
+                                    // requestSetting no fan_speed não tem efeito.
+                                    if (latestHvacPowerMode == 0) {
+                                        if (car.requestSetting(key = "car.hvac.power_mode", value = "1")) {
+                                            latestHvacPowerMode = 1
+                                            AppLogger.i(TAG, "HVAC: power_mode=1 (religando mestre pra aplicar fan=$payloadInt)")
+                                            Thread.sleep(400)
+                                        }
+                                    }
+                                    if (car.requestSetting(key = "car.hvac.auto_enable", value = "0")) {
+                                        latestHvacAutoEnable = 0
+                                        AppLogger.i(TAG, "HVAC: AUTO desligado antes de aplicar fan manual (evita override da ECU)")
                                         Thread.sleep(300)
                                     }
                                 }
