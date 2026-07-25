@@ -1304,8 +1304,16 @@ const DELETED_IDS_FILE    = path.join(DATA_DIR, 'deleted_ids.json');
 const PRECLIMAT_FILE      = path.join(DATA_DIR, 'preclimat.json');
 const DRIVE_HISTORY_FILE  = path.join(DATA_DIR, 'drive_history.json');
 
-// Capacidades do Haval H6 PHEV (uso pra estimar kWh atual a partir do SOC%)
+// Capacidades do Haval H6 PHEV.
+//   BATTERY_CAPACITY_KWH — nominal do pack (34 kWh). Uso: cálculo econômico de
+//     R$/kWh médio na bateria (preço da energia FÍSICA que entrou).
+//   BATTERY_USEFUL_KWH — capacidade ÚTIL para o motorista. O PHEV reserva 12%
+//     do pack pro ICE assumir abaixo do "SOC 0%" do display; portanto o SOC
+//     display 0-100 mapeia 12-100% real do pack. Isso equivale a 88% × 34 =
+//     29.92 kWh disponíveis pro deslocamento elétrico. Uso: ETA de recarga e
+//     estimativa de energia por SOC-delta (o que o usuário vê).
 const BATTERY_CAPACITY_KWH = 34;
+const BATTERY_USEFUL_KWH   = +(BATTERY_CAPACITY_KWH * 0.88).toFixed(2);
 const TANK_CAPACITY_L      = 55;
 // Aplica o offset de calibração manual ao valor bruto do sensor de combustível.
 function _fuelWithCalib(rawL) { return +Math.max(0, rawL + (state.fuel_calib_offset_l || 0)).toFixed(1); }
@@ -3090,7 +3098,7 @@ try {
       const socDelta = (snap.socNow - snap.socStart);
       // Estima energia: usa kwhNow do APK se >0 (mais confiável); senão SOC delta
       // × capacidade nominal do H6 PHEV.
-      const energyKwh = snap.kwhNow > 0.1 ? snap.kwhNow : +(socDelta / 100 * BATTERY_CAPACITY_KWH).toFixed(2);
+      const energyKwh = snap.kwhNow > 0.1 ? snap.kwhNow : +(socDelta / 100 * BATTERY_USEFUL_KWH).toFixed(2);
       const durSec = Math.round(((snap.lastUpdateMs || Date.now()) - snap.startMs) / 1000);
       const avgKw = snap.powerAvgKw > 0.1 ? snap.powerAvgKw : (durSec > 0 ? +(energyKwh / (durSec/3600)).toFixed(2) : 0);
       const rec = {
@@ -6725,7 +6733,7 @@ app.post('/api/charge-reconstruct', requireAuth, (req, res) => {
     if (isNaN(socStart) || isNaN(socEnd) || socEnd <= socStart) return res.status(400).json({ error: 'socStart/socEnd inválidos (socEnd deve ser > socStart)' });
     const socDelta = socEnd - socStart;
     let energyKwh = parseFloat(b.energyKwh);
-    if (!(energyKwh > 0)) energyKwh = +(socDelta / 100 * BATTERY_CAPACITY_KWH).toFixed(2);
+    if (!(energyKwh > 0)) energyKwh = +(socDelta / 100 * BATTERY_USEFUL_KWH).toFixed(2);
     let avgPowerKw = parseFloat(b.avgPowerKw);
     // Duração efetiva DE CARGA (não tempo entre startMs/endMs — pode ter pausa).
     // Se veio avgPowerKw, calcula duration_sec = energy / power. Senão usa endMs-startMs.
@@ -15644,7 +15652,7 @@ const CHARGE_ETA_WIN_MS = 60_000;
 function _recalcChargeEta() {
   const soc  = +state.soc_pct || 0;
   const lim  = _effectiveChargeTarget();   // alvo custom vence o limite nativo (100 descapado)
-  const need = Math.max(0, (lim - soc) / 100 * BATTERY_CAPACITY_KWH);   // kWh até o alvo
+  const need = Math.max(0, (lim - soc) / 100 * BATTERY_USEFUL_KWH);   // kWh até o alvo (capacidade útil — SOC display já mapeia 12-100% real)
   if (need <= 0.05) { _chargeEtaMin = 0; return; }
   const now = Date.now();
   _chargePwrWin = _chargePwrWin.filter(s => now - s.ts <= CHARGE_ETA_WIN_MS);
