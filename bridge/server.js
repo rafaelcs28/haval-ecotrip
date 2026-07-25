@@ -3090,8 +3090,7 @@ try {
       const socDelta = (snap.socNow - snap.socStart);
       // Estima energia: usa kwhNow do APK se >0 (mais confiável); senão SOC delta
       // × capacidade nominal do H6 PHEV.
-      const BATT_H6 = 24.6;
-      const energyKwh = snap.kwhNow > 0.1 ? snap.kwhNow : +(socDelta / 100 * BATT_H6).toFixed(2);
+      const energyKwh = snap.kwhNow > 0.1 ? snap.kwhNow : +(socDelta / 100 * BATTERY_CAPACITY_KWH).toFixed(2);
       const durSec = Math.round(((snap.lastUpdateMs || Date.now()) - snap.startMs) / 1000);
       const avgKw = snap.powerAvgKw > 0.1 ? snap.powerAvgKw : (durSec > 0 ? +(energyKwh / (durSec/3600)).toFixed(2) : 0);
       const rec = {
@@ -6724,10 +6723,9 @@ app.post('/api/charge-reconstruct', requireAuth, (req, res) => {
     const socEnd   = parseFloat(b.socEnd);
     if (!startMs || !endMs || endMs <= startMs) return res.status(400).json({ error: 'startMs/endMs inválidos' });
     if (isNaN(socStart) || isNaN(socEnd) || socEnd <= socStart) return res.status(400).json({ error: 'socStart/socEnd inválidos (socEnd deve ser > socStart)' });
-    const BATT_H6 = 24.6;   // bateria nominal do H6 PHEV
     const socDelta = socEnd - socStart;
     let energyKwh = parseFloat(b.energyKwh);
-    if (!(energyKwh > 0)) energyKwh = +(socDelta / 100 * BATT_H6).toFixed(2);
+    if (!(energyKwh > 0)) energyKwh = +(socDelta / 100 * BATTERY_CAPACITY_KWH).toFixed(2);
     let avgPowerKw = parseFloat(b.avgPowerKw);
     // Duração efetiva DE CARGA (não tempo entre startMs/endMs — pode ter pausa).
     // Se veio avgPowerKw, calcula duration_sec = energy / power. Senão usa endMs-startMs.
