@@ -632,6 +632,14 @@ class MqttManager private constructor() {
                 }
             } catch (_: Exception) {}
         }, 30, 30, java.util.concurrent.TimeUnit.SECONDS)
+        // Tick contínuo do TripManager (P×Δt e watchdog de sessão órfã) —
+        // não pode depender da UI (ConsumptionScreen). Se o dono nunca abre
+        // a tela durante recarga overnight, o `chargeSessionSec` fica 0 e
+        // no fim o entry local não é criado (guard >=60s). Rodar aqui garante
+        // que o acumulador anda enquanto o processo vive.
+        fastExecutor.scheduleAtFixedRate({
+            try { TripManager.getInstance().tickTime() } catch (_: Exception) {}
+        }, 5, 5, java.util.concurrent.TimeUnit.SECONDS)
     }
 
     /**

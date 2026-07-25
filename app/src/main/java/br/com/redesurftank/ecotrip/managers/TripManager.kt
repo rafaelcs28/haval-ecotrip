@@ -576,6 +576,80 @@ class TripManager private constructor() {
     fun getChargeHistory(): List<ChargeHistoryEntry> = synchronized(lock) { chargeHistory.toList() }
     fun getRefuelHistory(): List<RefuelEntry>        = synchronized(lock) { refuelHistory.toList() }
 
+    /**
+     * No boot, se prefs tem uma sessão de recarga não fechada limpamente
+     * (chargeSessionStartMs>0), promove pra `chargeHistory` local. Usa o
+     * SOC delta atual como fallback confiável — o P×t pode estar zerado se
+     * o `tickTime()` não rodou (bug UI-bound corrigido em v6.144+).
+     *
+     * Só finaliza se a sessão for razoável: SOC delta ≥ 1% E ainda válida
+     * (não mais de 24h atrás). Sessões triviais/velhas são descartadas
+     * silenciosamente com reset dos prefs.
+     */
+    private fun finalizeOrphanChargeSession() {
+        synchronized(lock) {
+            val startMs = chargeSessionStartMs
+            if (startMs <= 0L) return
+            val ageMs = System.currentTimeMillis() - startMs
+            val socDelta = (latestSocPct - chargeSessionStartSoc).coerceAtLeast(0f)
+            // Descarta se muito velha (>24h) ou sem SOC delta significativo
+            if (ageMs > 24L * 3600_000L || socDelta < 1f) {
+                AppLogger.i(TAG, "Sessão órfã descartada (ageH=${ageMs/3600_000L} socDelta=$socDelta) — reset")
+                chargeSessionEnergyKwh = 0f
+                chargeSessionSec       = 0L
+                chargeSessionStartSoc  = 0f
+                chargeSessionStartMs   = 0L
+                if (::prefs.isInitialized) prefs.edit()
+                    .putFloat(SharedPreferencesKeys.CHARGE_SESSION_ENERGY_KWH, 0f)
+                    .putLong (SharedPreferencesKeys.CHARGE_SESSION_SEC,        0L)
+                    .putFloat(SharedPreferencesKeys.CHARGE_SESSION_START_SOC,  0f)
+                    .putLong (SharedPreferencesKeys.CHARGE_SESSION_START_MS,   0L)
+                    .apply()
+                return
+            }
+            // Energia: max(P×t acumulado, SOC delta × 34 × 0.92). O bridge tem
+            // logic mais precisa (BATTERY_USEFUL_KWH=29.92); aqui priorizamos
+            // não perder dados — energia via SOC-delta cobre o caso do tickTime
+            // não ter rodado.
+            val energyFromSoc = (socDelta / 100f) * 34f * 0.92f
+            val finalEnergyKwh = maxOf(chargeSessionEnergyKwh, energyFromSoc)
+            val avgTempC = if (chargeSessionTempCount > 0)
+                (chargeSessionTempSum / chargeSessionTempCount).toFloat() else null
+            val entry = ChargeHistoryEntry(
+                timestampMs = startMs,
+                durationSec = if (chargeSessionSec > 0) chargeSessionSec else ageMs / 1000L,
+                energyKwh   = finalEnergyKwh,
+                startSocPct = chargeSessionStartSoc,
+                endSocPct   = latestSocPct,
+                avgTempC    = avgTempC,
+            )
+            // Dedupe: se já existe entry com timestampMs próximo (±60s), pula
+            val exists = chargeHistory.any { kotlin.math.abs(it.timestampMs - startMs) < 60_000L }
+            if (!exists) {
+                chargeHistory.add(0, entry)
+                saveChargeHistory()
+                AppLogger.i(TAG, "⤴ Sessão órfã finalizada: ${finalEnergyKwh}kWh SOC ${chargeSessionStartSoc}→${latestSocPct} (age=${ageMs/60_000L}min)")
+                // Não republica MQTT aqui — o MqttManager.drainQueues cuida disso ao conectar
+            } else {
+                AppLogger.i(TAG, "Sessão órfã já persistida — pulando (dedupe por timestampMs)")
+            }
+            // Reset prefs pra próxima sessão começar limpa
+            chargeSessionEnergyKwh = 0f
+            chargeSessionSec       = 0L
+            chargeSessionStartSoc  = 0f
+            chargeSessionStartMs   = 0L
+            chargeSessionTempSum   = 0.0
+            chargeSessionTempCount = 0
+            chargeSessionSamples.clear()
+            if (::prefs.isInitialized) prefs.edit()
+                .putFloat(SharedPreferencesKeys.CHARGE_SESSION_ENERGY_KWH, 0f)
+                .putLong (SharedPreferencesKeys.CHARGE_SESSION_SEC,        0L)
+                .putFloat(SharedPreferencesKeys.CHARGE_SESSION_START_SOC,  0f)
+                .putLong (SharedPreferencesKeys.CHARGE_SESSION_START_MS,   0L)
+                .apply()
+        }
+    }
+
     /** Janela máxima (ms) entre fim de uma viagem e o engate da próxima pra permitir
      *  continuação. 60min cobre almoços e recargas curtas. */
     private val RESUME_WINDOW_MS = 60L * 60_000L
@@ -1176,6 +1250,20 @@ class TripManager private constructor() {
         appContext = ctx
         prefs = ctx.getSharedPreferences(SharedPreferencesKeys.PREFS_NAME, Context.MODE_PRIVATE)
         loadFromPrefs()
+        // Sessão de recarga órfã: se prefs contém chargeSessionStartMs>0 (sessão
+        // NÃO fechada limpamente antes), promove pra entry local via SOC delta.
+        // Postergado 30s pra garantir que latestSocPct atualizou via car bus
+        // (loadFromPrefs restaura o último persistido, mas o SOC real pode ter
+        // avançado bastante durante o downtime; usamos o mais fresh).
+        // Case do dia 24-25/07 Recanto da Paz: APK morreu, ao voltar não tinha
+        // essa recovery → recarga sumiu.
+        if (chargeSessionStartMs > 0L) {
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                try { finalizeOrphanChargeSession() } catch (e: Exception) {
+                    AppLogger.w(TAG, "finalizeOrphanChargeSession falhou: ${e.message}")
+                }
+            }, 30_000L)
+        }
         // Carrega as viagens recusadas (persistidas).
         synchronized(lock) {
             dismissedResumeIds.clear()
