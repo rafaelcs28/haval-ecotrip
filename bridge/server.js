@@ -2542,6 +2542,40 @@ let chargeStartTimer     = null;
 let _chargeStoppedTimer  = null; // debounce 90s do alerta "parou antes do limite" (cancela se religar)
 let chargeSessionStartMs = 0;   // timestamp de início da sessão (para duração e potência média)
 let chargeStartSoc       = 0;   // SOC% no início da sessão (para log de eventos)
+
+// ── Blindagem: snapshot live-charge periódico em disco ────────────────────────
+// Se o bridge morrer/restar no meio de uma carga, precisamos poder RECUPERAR
+// a sessão em vez de perdê-la. A cada 30s durante 'Carregando', grava um
+// snapshot em state.charge_session_snapshot. No boot, se snapshot existe E
+// o carro NÃO está mais 'Carregando', promove pra chargesArr como registro
+// recuperado (marcado _recovered) — assim a sessão sobrevive ao restart.
+let _liveChargeSnapshotTimer = null;
+function _persistLiveChargeSnapshot() {
+  if (state.charging_state !== 'Carregando') return;
+  const sm = chargeSessionStartMs || state.charge_session_start_ms || 0;
+  if (sm <= 0) return;
+  state.charge_session_snapshot = {
+    startMs: sm,
+    socStart: chargeStartSoc || state.charge_start_soc_pct || 0,
+    socNow: +state.soc_pct || 0,
+    kwhNow: +state.charge_session_kwh || 0,
+    powerAvgKw: +state.charge_avg_power_kw || 0,
+    powerMaxKw: +state.charge_max_power_kw || 0,
+    // Local: guarda coords do último parked location — reverse-geocode fica no /api
+    lat: +state.gps_lat || 0, lng: +state.gps_lng || 0,
+    lastUpdateMs: Date.now(),
+  };
+  scheduleStateSave();
+}
+function _startLiveChargeSnapshot() {
+  if (_liveChargeSnapshotTimer) return;
+  _liveChargeSnapshotTimer = setInterval(_persistLiveChargeSnapshot, 30_000);
+  _persistLiveChargeSnapshot();   // primeira gravação imediata
+}
+function _stopLiveChargeSnapshot() {
+  if (_liveChargeSnapshotTimer) { clearInterval(_liveChargeSnapshotTimer); _liveChargeSnapshotTimer = null; }
+  if (state.charge_session_snapshot) { delete state.charge_session_snapshot; scheduleStateSave(); }
+}
 let _chargeTempSamples   = [];  // amostras de temp externa durante a sessão atual
 let _lastChargeAvgTemp   = null;// média calculada ao fim da sessão, anexada ao próximo charging/history
 let _customCutoffFired   = false;// já freou nesta sessão? (evita re-enviar o preset)
@@ -3043,6 +3077,44 @@ if (fs.existsSync(CHARGES_FILE)) {
     console.error('Aviso: não foi possível ler charges.json:', e.message);
   }
 }
+
+// Recovery: se restartamos com um snapshot live-charge órfão (bridge morreu no
+// meio da carga ou logo depois, sem 'Finalizado' que zera o snapshot), promove
+// pra chargesArr como registro _recovered antes de arrancar. Idempotente:
+// dedupe por startMs contra os já existentes.
+try {
+  const snap = state.charge_session_snapshot;
+  if (snap && snap.startMs > 0 && state.charging_state !== 'Carregando') {
+    const already = chargesArr.some(c => Math.abs((c.timestamp_ms || 0) - snap.startMs) < 60_000);
+    if (!already && (snap.socNow || 0) > (snap.socStart || 0)) {
+      const socDelta = (snap.socNow - snap.socStart);
+      // Estima energia: usa kwhNow do APK se >0 (mais confiável); senão SOC delta
+      // × capacidade nominal do H6 PHEV.
+      const BATT_H6 = 24.6;
+      const energyKwh = snap.kwhNow > 0.1 ? snap.kwhNow : +(socDelta / 100 * BATT_H6).toFixed(2);
+      const durSec = Math.round(((snap.lastUpdateMs || Date.now()) - snap.startMs) / 1000);
+      const avgKw = snap.powerAvgKw > 0.1 ? snap.powerAvgKw : (durSec > 0 ? +(energyKwh / (durSec/3600)).toFixed(2) : 0);
+      const rec = {
+        timestamp: new Date(snap.startMs - 3*3600_000).toISOString().slice(0,19),
+        timestamp_ms: snap.startMs,
+        duration_sec: durSec,
+        energy_kwh: +energyKwh.toFixed(2),
+        soc_start: Math.round(snap.socStart),
+        soc_end:   Math.round(snap.socNow),
+        avg_power_kw: avgKw,
+        location_lat: snap.lat || 0,
+        location_lng: snap.lng || 0,
+        _updated_ms: Date.now(),
+        _recovered: true,
+        _recovered_note: 'promoted from charge_session_snapshot on boot (bridge restart mid-charge)',
+      };
+      chargesArr.push(rec);
+      chargesArr.sort((a,b) => (b.timestamp_ms||0) - (a.timestamp_ms||0));
+      console.log(`⤴ Sessão órfã recuperada do snapshot: ${rec.energy_kwh}kWh SOC ${rec.soc_start}→${rec.soc_end} (${new Date(rec.timestamp_ms).toISOString()})`);
+    }
+    delete state.charge_session_snapshot;   // limpa pra próxima sessão
+  }
+} catch (e) { console.warn('[charge-recovery] falhou:', e.message); }
 
 let chargesSaveTimer = null;
 function scheduleChargesFlush() {
@@ -6639,6 +6711,74 @@ app.get('/api/charges/:ts/samples', (req, res) => {
 // - soc_start = sessão mais antiga; soc_end = sessão mais nova
 // - location, charger_kwh, cost_override, avg_temp_c: preservados do que existir
 // - amostras de linha do tempo: concatenadas (late offset por duration da early)
+// Reconstrói uma recarga que o bridge/APK perdeu (bridge morreu, APK offline,
+// 4G caiu, força-parada no meio…). Body: { startMs, endMs, socStart, socEnd,
+// avgPowerKw?, energyKwh?, location? }. Se energyKwh não vier, estima por
+// SOC delta × capacidade nominal H6. Publish MQTT retained inclusive.
+app.post('/api/charge-reconstruct', requireAuth, (req, res) => {
+  try {
+    const b = req.body || {};
+    const startMs = parseInt(b.startMs, 10);
+    const endMs   = parseInt(b.endMs, 10);
+    const socStart = parseFloat(b.socStart);
+    const socEnd   = parseFloat(b.socEnd);
+    if (!startMs || !endMs || endMs <= startMs) return res.status(400).json({ error: 'startMs/endMs inválidos' });
+    if (isNaN(socStart) || isNaN(socEnd) || socEnd <= socStart) return res.status(400).json({ error: 'socStart/socEnd inválidos (socEnd deve ser > socStart)' });
+    const BATT_H6 = 24.6;   // bateria nominal do H6 PHEV
+    const socDelta = socEnd - socStart;
+    let energyKwh = parseFloat(b.energyKwh);
+    if (!(energyKwh > 0)) energyKwh = +(socDelta / 100 * BATT_H6).toFixed(2);
+    let avgPowerKw = parseFloat(b.avgPowerKw);
+    // Duração efetiva DE CARGA (não tempo entre startMs/endMs — pode ter pausa).
+    // Se veio avgPowerKw, calcula duration_sec = energy / power. Senão usa endMs-startMs.
+    let durationSec;
+    if (avgPowerKw > 0) {
+      durationSec = Math.round(energyKwh / avgPowerKw * 3600);
+    } else {
+      durationSec = Math.round((endMs - startMs) / 1000);
+      avgPowerKw  = durationSec > 0 ? +(energyKwh / (durationSec / 3600)).toFixed(2) : 0;
+    }
+    const rec = {
+      timestamp: new Date(startMs - 3*3600_000).toISOString().slice(0,19),
+      timestamp_ms: startMs,
+      duration_sec: durationSec,
+      energy_kwh: +energyKwh.toFixed(2),
+      soc_start: Math.round(socStart),
+      soc_end:   Math.round(socEnd),
+      avg_power_kw: +avgPowerKw.toFixed(2),
+      _updated_ms: Date.now(),
+      _recovered: true,
+    };
+    if (b.location) {
+      if (typeof b.location === 'string') rec.location_name = b.location;
+      else { rec.location_name = b.location.name || ''; rec.location_lat = +b.location.lat || 0; rec.location_lng = +b.location.lng || 0; }
+    }
+    // Dedupe por startMs (5min de tolerância)
+    const existingIdx = chargesArr.findIndex(c => Math.abs((c.timestamp_ms||0) - startMs) < 5*60_000);
+    if (existingIdx >= 0) chargesArr[existingIdx] = { ...chargesArr[existingIdx], ...rec };
+    else chargesArr.push(rec);
+    chargesArr.sort((a,b) => (b.timestamp_ms||0) - (a.timestamp_ms||0));
+    scheduleChargesFlush();
+    // Republish MQTT retained pra iOS/PWA verem imediato.
+    try {
+      const publicArr = chargesArr.slice(0, 60).map(c => {
+        const { _recovered, _recovered_note, _updated_ms, ...rest } = c;
+        return rest;
+      });
+      if (mqttClient?.connected) {
+        mqttClient.publish(`${MQTT_PREFIX}/charging/history`,
+          JSON.stringify({ count: publicArr.length, charges: publicArr }),
+          { qos: 1, retain: true });
+      }
+    } catch (e) { console.warn('[charge-reconstruct] republish MQTT falhou:', e.message); }
+    console.log(`✓ [charge-reconstruct] ${existingIdx >= 0 ? 'atualizada' : 'inserida'}: ${rec.energy_kwh}kWh SOC ${rec.soc_start}→${rec.soc_end} @ ${rec.timestamp}`);
+    res.json({ ok: true, charge: rec, updated: existingIdx >= 0 });
+  } catch (e) {
+    console.error('[charge-reconstruct] erro:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.post('/api/charges/merge', (req, res) => {
   try {
     const { tsA, tsB } = req.body;
@@ -15323,6 +15463,7 @@ function handleChargingStateTransition(value, isRetained) {
     chargeStartSoc = state.soc_pct || 0;
     state.charge_start_soc_pct       = chargeStartSoc;
     state.charge_session_start_ms    = chargeSessionStartMs;
+    _startLiveChargeSnapshot();     // grava snapshot em disco a cada 30s (blindagem restart)
     state.charge_max_power_kw        = 0;
     state.charge_avg_power_kw        = 0;
     state.charge_session_kwh_at_init = 0;
@@ -15439,6 +15580,7 @@ function handleChargingStateTransition(value, isRetained) {
       chargeSessionStartMs = 0;
       state.charge_session_start_ms    = 0;
       state.charge_session_kwh_at_init = 0;
+      _stopLiveChargeSnapshot();
     } else if (!isRetained && value === 'Finalizado') {
       const kwh = state.charge_session_kwh || 0;
       const durSec = chargeSessionStartMs > 0
@@ -15466,6 +15608,7 @@ function handleChargingStateTransition(value, isRetained) {
       chargeSessionStartMs = 0;
       state.charge_session_start_ms    = 0;
       state.charge_session_kwh_at_init = 0;
+      _stopLiveChargeSnapshot();
     }
   }
   // Inicia o ciclo de "live notification" quando começa a carregar.
