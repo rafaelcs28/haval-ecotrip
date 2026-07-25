@@ -783,7 +783,7 @@ async function _handleNotifyAction(rule) {
         console.log('[notify] arrived_home: sem share ativa pra Grasi — pula LA');
       } else for (const [tok, st] of active) {
         try {
-          const cs = _sharedTripContentState(st.recipientName, st.tokenDestName);
+          const cs = _sharedTripContentState(st.recipientName, st.tokenDestName, tk);
           cs.from = st.from; cs.destName = 'Casa'; cs.active = false;
           await apnsLive.pushUpdate(SHARED_TRIP_LA_TYPE, {}, cs,
             { isFinal: true, dismissalDate: Date.now() + 60_000, alert: finalAlert });
@@ -2017,27 +2017,38 @@ setInterval(() => {
     }
     if (fireMs == null) continue;
     const lead = (sched.leadMin != null ? sched.leadMin : 10) * 60_000;
+    // Instante em que o AC EFETIVAMENTE liga.
+    //  - Modo HH:MM (recorrente): sched.time = horário de SAÍDA. O AC precisa
+    //    ligar `lead` minutos antes p/ o carro estar climatizado quando o dono
+    //    sair. A UI iOS (PreclimaV2View "COMEÇA A RESFRIAR HH:MM") mostra isso
+    //    como time-lead — antes desta correção o AC só ligava no time exato,
+    //    divergindo da UI.
+    //  - Modo onceAtMs (viagem planejada): sched.onceAtMs já É o horário-início
+    //    (o recompute de trânsito calcula dep − climateMin). Não subtrai lead
+    //    de novo.
+    const startMs = isOnceAt ? fireMs : (fireMs - lead);
 
-    // Etapa 1 — T-leadMin: cria a LA via push-to-start (uma vez por dia).
-    if (lead > 0 && nowMs >= fireMs - lead && nowMs < fireMs && sched.startedDate !== today) {
+    // Etapa 1 — T-leadMin (i.e., ~lead min antes do AC ligar): cria a LA via
+    // push-to-start (uma vez por dia).
+    if (lead > 0 && nowMs >= startMs - lead && nowMs < startMs && sched.startedDate !== today) {
       sched.startedDate = today; dirty = true;
-      _startPreclimatLA(sched, fireMs);
+      _startPreclimatLA(sched, startMs);
     }
 
     // Etapa 1.5 — T-3min: pré-check inteligente. Lê temp_cabine, e se já tiver
     // abaixo do alvo (estrito), pula o acionamento avisando o usuário por push.
     // Marca lastFiredDate=today pra Etapa 2 não rodar depois.
     if (sched.smartCheck !== false && sched.precheckDate !== today
-        && nowMs >= fireMs - PRECLIMAT_PRECHECK_LEAD_MS && nowMs < fireMs) {
+        && nowMs >= startMs - PRECLIMAT_PRECHECK_LEAD_MS && nowMs < startMs) {
       sched.precheckDate = today; dirty = true;
       precheckPreClimat(sched).catch(e => console.warn('[preclimat] precheck err:', e.message));
     }
 
-    // Etapa 2 — T: dispara motor+AC. Janela de 90s no modo HH:MM; 5min no modo
+    // Etapa 2 — dispara motor+AC. Janela de 90s no modo HH:MM; 5min no modo
     // onceAtMs (mais folga p/ não perder o disparo único de um compromisso).
     const fireWindow = isOnceAt ? 5 * 60_000 : 90_000;
     if (!_preclimatFiring && sched.lastFiredDate !== today
-        && nowMs >= fireMs && nowMs < fireMs + fireWindow) {
+        && nowMs >= startMs && nowMs < startMs + fireWindow) {
       sched.lastFiredDate = today;
       if (isOnceAt || sched.recurrence === 'once') sched.enabled = false;
       dirty = true;
@@ -3463,12 +3474,24 @@ function checkBatt12Low() {
 }
 
 const REFUEL_MIN_LITERS = 5;          // threshold mínimo pra detectar abastecimento
+const REFUEL_MIN_OFF_MS = 3 * 60_000; // motor precisa ter ficado desligado ≥3min
+                                      // (abastecer leva no mínimo isso; on/off
+                                      // rápido do APK bug não conta como parada)
 
 function checkRefuelOnEngineOn() {
   const fuelNow = +state.fuel_l || 0;
   if (_fuelLAtPark <= 0 || fuelNow <= 0) return;
   const added = fuelNow - _fuelLAtPark;
   if (added < REFUEL_MIN_LITERS) return;
+  // Guarda contra rajada de motor on/off (APK travado, ANR, etc): se ficou
+  // desligado menos de 3min, não pode ter abastecido — a leitura do sensor
+  // fuel_l só variou por ruído/reset ao religar. Sem isso, 20/07 gerou 93
+  // refuels fantasmas em 40min de ciclos de ignição.
+  const offMs = Date.now() - (_fuelParkTs || 0);
+  if (_fuelParkTs && offMs < REFUEL_MIN_OFF_MS) {
+    console.log(`[refuel] ignorado — motor ficou off só ${Math.round(offMs/1000)}s (mín=${REFUEL_MIN_OFF_MS/1000}s). added=${added.toFixed(1)}L`);
+    return;
+  }
 
   // Criar registro PENDENTE (sem preço — usuário preenche depois)
   const rec = {
@@ -3661,12 +3684,30 @@ setInterval(_checkCertExpiry, 24 * 60 * 60_000); // depois diário
 
 // Watchdog do car_online: se não chega mensagem do carro há >30s, marca offline.
 // Cobre o caso raro de queda silenciosa em que nem a LWT chegou.
+// Também: detecta ping-pong online↔offline (padrão zumbi/collision) e alerta.
+const _offlineTransitions = [];   // ms de cada transição online→offline (janela 5min)
+let _lastZumbiAlertMs = 0;        // cooldown 30min entre alertas de zumbi
 setInterval(() => {
   if (!state.car_online) return;
   const ageSec = (Date.now() - (state.last_update_ms || 0)) / 1000;
   if (ageSec > 30) {
     state.car_online = false;
     console.log(`[mqtt] watchdog: marcando carro offline (sem msg há ${Math.round(ageSec)}s)`);
+    // Registra a transição. Se acumular ≥5 em 5min = APK em ping-pong (zumbi
+    // pós-OTA ou client-id collision). Dispara push pro dono pra ele saber
+    // que precisa força-parar o app — não deixa a viagem inteira sem saber.
+    const now = Date.now();
+    _offlineTransitions.push(now);
+    while (_offlineTransitions.length && now - _offlineTransitions[0] > 5 * 60_000) {
+      _offlineTransitions.shift();
+    }
+    if (_offlineTransitions.length >= 5 && now - _lastZumbiAlertMs > 30 * 60_000) {
+      _lastZumbiAlertMs = now;
+      sendPush('⚠️ APK do carro em loop',
+        `Ecotrip Impulse caiu ${_offlineTransitions.length}× em 5min (padrão zumbi). Force-parada no carro pra restaurar.`,
+        'apk_zumbi_loop', { tag: 'apk_zumbi_loop' });
+      console.warn(`[mqtt] ping-pong detectado: ${_offlineTransitions.length} offline/5min — alerta disparado`);
+    }
     // Carro caiu silencioso no meio da viagem (APK morre ao desligar sem publicar
     // engine_state='0'). Sem isso a LA de viagem ficava presa indefinidamente.
     if (_tripActive) _scheduleTripLAEnd();
@@ -13125,6 +13166,29 @@ let _songProLatest  = { soc: 0, powerKw: 0, ts: 0 };
 let _spCarLoc   = { lat: 0, lng: 0, ts: 0 };
 let _phoneLoc   = { lat: 0, lng: 0, ts: 0 };
 let _routeToPhone = { distKm: null, etaMin: null, ms: 0, busy: false, atLat: 0, atLng: 0 };
+
+// Endereço reverso do carro cacheado. Refreshed 1x/60s pelo eval das LAs
+// compartilhadas — só quando há share ativo (senão não gasta Nominatim).
+// label = "R. das Palmeiras, 245 · Setor Bueno" (curto pra caber na LA).
+let _lastCarAddress = { lat: 0, lng: 0, label: '', ts: 0 };
+async function _refreshCarAddressForLA() {
+  const lat = +state.gps_lat, lng = +state.gps_lng;
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || (!lat && !lng)) return;
+  // Se moveu <60m E label ainda fresco (< 90s), reusa (evita spam de Nominatim
+  // com carro parado). ~60m = 4 casas decimais.
+  const moved = Math.abs(lat - _lastCarAddress.lat) + Math.abs(lng - _lastCarAddress.lng);
+  if (moved < 0.0006 && Date.now() - _lastCarAddress.ts < 90_000 && _lastCarAddress.label) return;
+  try {
+    const g = await _reverseGeocodeFamily(lat, lng, 20);
+    // Formata curto: prioriza road+num, depois bairro. Corta cidade — o
+    // destino já implica cidade e a LA tem pouca linha.
+    const parts = [];
+    if (g.road) parts.push(g.num ? `${g.road}, ${g.num}` : g.road);
+    if (g.bairro && g.bairro !== g.road) parts.push(g.bairro);
+    if (!parts.length && g.poi) parts.push(g.poi);
+    _lastCarAddress = { lat, lng, label: parts.join(' · ') || (g.label || ''), ts: Date.now() };
+  } catch (e) { /* mantém último label */ }
+}
 // Localização por iPhone (cada device do app Grasi reporta a sua). Keyed por
 // device_id. Persiste o sample atual + o anterior pra calcular velocidade/rumo.
 // { [deviceId]: { lat, lng, ts, prevLat, prevLng, prevTs } }
@@ -13226,7 +13290,7 @@ function _baselineFor(from, to) {
   return null;
 }
 
-function _sharedTripContentState(recipientName, tokenDestName) {
+function _sharedTripContentState(recipientName, tokenDestName, tk) {
   // Lê o estado do carro pra montar o cs da LA.
   // Prioridade do "destino" mostrado:
   //   1. Destino real do nav do carro (state.arrival) — se o dono redirecionar
@@ -13263,15 +13327,27 @@ function _sharedTripContentState(recipientName, tokenDestName) {
     const base = _baselineFor({ lat: carLat, lng: carLng }, { lat: destLat, lng: destLng });
     if (base) delayMin = etaMin - base.minMedian;
   }
+  // Progresso 0..1: 1 − distToDest/startDist. startDistKm é gravado na 1a
+  // amostra válida (>0) do share pelo _evalSharedTripLAs. Antes disso, mostra
+  // 0 (barra vazia). Clampa em [0..1] — pode ir negativo se o motorista se
+  // afastar (redirecionou) ou passar de 1 (chegou perto do destino).
+  let progress = 0;
+  if (tk && tk.startDistKm > 0 && distKm >= 0) {
+    progress = 1 - (distKm / tk.startDistKm);
+    if (progress < 0) progress = 0;
+    if (progress > 1) progress = 1;
+  }
   return {
-    from: '',   // preenchido no caller (pega de attrs)
+    from: '',   // preenchido no caller (pega de attrs); mantido pra compat
     destName,
     etaToDestMin: etaMin,
     distToDestKm: distKm,
-    socPct: Math.round(+state.soc_pct || 0),
+    socPct: Math.round(+state.soc_pct || 0),   // mantido no schema; LA não mostra mais
     moving: speed > 3,
     active: true,
     delayMin,
+    currentAddress: _lastCarAddress.label || '',
+    progress: +progress.toFixed(3),
     updatedAtMs: Date.now(),
   };
 }
@@ -13286,13 +13362,24 @@ async function _startSharedTripLA(token, fromName) {
   const tokenDestName = tk.destName || null;
   // Força um recálculo do route-to-phone pra ter ETA fresca no fallback.
   await _maybeRouteToPhone(true).catch(() => {});
-  const cs = _sharedTripContentState(recipientName, tokenDestName); cs.from = fromName || 'Rafael';
+  // Refresca endereço reverso do carro pra 1a tick (senão sai vazio até o
+  // eval seguinte ~15s depois).
+  await _refreshCarAddressForLA().catch(() => {});
+  const cs = _sharedTripContentState(recipientName, tokenDestName, tk); cs.from = fromName || 'Rafael';
+  // Grava startDistKm no token pra base do progress. Só grava se >0 —
+  // shares sem destino conhecido ficam com startDistKm=null → progress=0.
+  if (cs.distToDestKm > 0 && !tk.startDistKm) {
+    tk.startDistKm = cs.distToDestKm; _saveShareTokens();
+    // Recalcula com startDistKm já persistido pra progress ir >0 na 1a tick.
+    cs.progress = 0;   // 1a tick sempre em 0 (você acabou de sair)
+  }
   const now = Date.now();
+  const shareURL = `${_shareBaseUrl()}/shared-trip/${token}`;
   _sharedTripLAs[token] = { token, from: fromName || 'Rafael', recipientName, tokenDestName,
                             lastDestName: cs.destName || null,
                             startedMs: now, lastPushMs: now, laActive: true };
   await apnsLive.pushStart(SHARED_TRIP_LA_TYPE, '',
-    { shareToken: token, from: fromName || 'Rafael' }, cs,
+    { shareToken: token, from: fromName || 'Rafael', shareURL }, cs,
     { staleDate: now + 12 * 3600_000,
       alert: { title: `🚗 ${fromName || 'Rafael'} compartilhou trajeto`,
                body: cs.destName ? `Indo pra ${cs.destName}` : 'Toque pra abrir' },
@@ -13309,7 +13396,7 @@ function _evalSharedTripLAs() {
     if (!tk || tk.expiresMs <= now) {
       // Share expirou/revogado — encerra LA.
       if (st.laActive) {
-        const cs = _sharedTripContentState(st.recipientName, st.tokenDestName);
+        const cs = _sharedTripContentState(st.recipientName, st.tokenDestName, tk);
         cs.from = st.from; cs.active = false;
         apnsLive.pushUpdate(SHARED_TRIP_LA_TYPE, {}, cs,
           { isFinal: true, dismissalDate: now + 60_000 }).catch(() => {});
@@ -13322,7 +13409,14 @@ function _evalSharedTripLAs() {
     if (!apnsLive.hasUpdateToken(SHARED_TRIP_LA_TYPE)) continue;
     // Mantém a rota carro→Grasi fresca pra fallback "ETA até você".
     _maybeRouteToPhone().catch(() => {});
-    const cs = _sharedTripContentState(st.recipientName, st.tokenDestName); cs.from = st.from;
+    // Refresca endereço do carro (interno tem debounce por movimento+ttl).
+    _refreshCarAddressForLA().catch(() => {});
+    const cs = _sharedTripContentState(st.recipientName, st.tokenDestName, tk); cs.from = st.from;
+    // Se ainda não gravamos startDistKm (share criado sem destino, e destino
+    // apareceu depois), grava agora — trava a base do progress.
+    if (cs.distToDestKm > 0 && !tk.startDistKm) {
+      tk.startDistKm = cs.distToDestKm; _saveShareTokens(); cs.progress = 0;
+    }
     // Detecta mudança de destino no meio do trajeto: se o nome mudou desde o
     // último push (Rafael redirecionou o nav), dispara alert push pra Grasi
     // ("Rafael agora vai pra Shopping X"). Não repete no próximo tick.
@@ -16591,7 +16685,12 @@ function _createShareToken(ttlMinRaw, opts) {
     if (Date.now() - last.ts < 6 * 3600_000) destName = last.name;
   }
   _shareTokens[token] = { createdMs: Date.now(), expiresMs, code, recipientName, recipientRole,
-                           includeSoc, destName: destName || null };
+                           includeSoc, destName: destName || null,
+                           // startDistKm é a distância medida na 1a tick do share.
+                           // Preenchida em _evalSharedTripLAs (não aqui) porque na
+                           // criação o route-to-phone/nav pode não estar disponível
+                           // ainda. Base pro cálculo de progress na LA.
+                           startDistKm: null };
   _saveShareTokens();
   return { token, code, url: `${_shareBaseUrl()}/s/${code}`, expiresMs, ttlMin, destName,
            recipientName, recipientRole };

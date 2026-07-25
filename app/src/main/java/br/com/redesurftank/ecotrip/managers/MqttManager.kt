@@ -603,8 +603,13 @@ class MqttManager private constructor() {
             val aid = android.provider.Settings.Secure.getString(
                 appContext?.contentResolver, android.provider.Settings.Secure.ANDROID_ID)
             val base = if (!aid.isNullOrBlank()) "${CLIENT_ID_BASE}_${aid.take(8)}" else CLIENT_ID_BASE
-            "${base}_p${android.os.Process.myPid()}"
-        } catch (_: Exception) { "${CLIENT_ID_BASE}_p${android.os.Process.myPid()}" }
+            // pid + boot-time-seconds pra garantir unicidade absoluta MESMO com
+            // dois processos concorrentes (o PID pode reciclar; o boot ts do processo,
+            // não). Sem isso, dois processos "gêmeos" pós-OTA acabam colidindo
+            // e entram em session-takeover loop (viagem inteira sem MQTT).
+            val bootSec = android.os.Process.getElapsedCpuTime() / 1000L
+            "${base}_p${android.os.Process.myPid()}_b${bootSec}"
+        } catch (_: Exception) { "${CLIENT_ID_BASE}_p${android.os.Process.myPid()}_${System.currentTimeMillis() % 100000}" }
         val ctx = try { context.createDeviceProtectedStorageContext() } catch (_: Exception) { context }
         prefs = ctx.getSharedPreferences(SharedPreferencesKeys.PREFS_NAME, Context.MODE_PRIVATE)
         loadConfig()
@@ -2376,6 +2381,15 @@ class MqttManager private constructor() {
         }
     }
 
+    // Timestamps das últimas reconexões pra detectar loop/ping-pong. Janela
+    // de 5min — se acumular ≥8, o processo está preso em collision/zumbi e
+    // não recupera sozinho. Recovery = suicídio (System.exit) + Android
+    // reinicia via service; equivale ao "força-parada" manual.
+    private val reconnectTimestamps = java.util.concurrent.ConcurrentLinkedDeque<Long>()
+    private val RECONNECT_LOOP_THRESHOLD = 8         // 8 tentativas em 5min = loop
+    private val RECONNECT_LOOP_WINDOW_MS = 5 * 60_000L
+    private var lastSelfKillMs = 0L
+
     private fun scheduleReconnect() {
         if (!enabled || isReconnecting.getAndSet(true)) return
         executor.submit {
@@ -2388,6 +2402,30 @@ class MqttManager private constructor() {
             } catch (_: InterruptedException) {
             } finally {
                 isReconnecting.set(false)
+            }
+            // Registra tentativa e checa loop. Cooldown 15min entre suicídios
+            // pra Android relaunch ter tempo de estabilizar antes de re-diagnosticar.
+            val now = System.currentTimeMillis()
+            reconnectTimestamps.addLast(now)
+            while (reconnectTimestamps.peekFirst()?.let { now - it > RECONNECT_LOOP_WINDOW_MS } == true) {
+                reconnectTimestamps.pollFirst()
+            }
+            if (reconnectTimestamps.size >= RECONNECT_LOOP_THRESHOLD && now - lastSelfKillMs > 15 * 60_000L) {
+                lastSelfKillMs = now
+                AppLogger.w(TAG, "⚠ MQTT loop detectado (${reconnectTimestamps.size} reconnects/5min) — suicidando processo pra Android relaunch")
+                try {
+                    val ctx = appContext
+                    if (ctx != null) {
+                        val dpCtx = ctx.createDeviceProtectedStorageContext()
+                        dpCtx.getSharedPreferences(SharedPreferencesKeys.PREFS_NAME, Context.MODE_PRIVATE)
+                            .edit()
+                            .putString(SharedPreferencesKeys.LAST_DEATH_REASON, "self-kill mqtt-loop (${reconnectTimestamps.size} reconn/5min)")
+                            .commit()
+                    }
+                } catch (_: Exception) {}
+                Thread.sleep(200)
+                android.os.Process.killProcess(android.os.Process.myPid())
+                return@submit
             }
             // isConnected: um connect concorrente (watchdog × connectionLost) pode já
             // ter restabelecido — não derruba o client recém-conectado à toa.
