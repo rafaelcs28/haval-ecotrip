@@ -264,7 +264,16 @@ DADOS AO VIVO agora: ${liveData ? JSON.stringify(liveData) : '(coleta falhou —
         const txt = (out || '').trim();
         if (err) log('claude err', id, err.message);
         if (!err && txt) {
-          ntfy(`Diagnostico: ${label}`, txt.slice(0, 480), 'high', ['mag', 'robot']);
+          // Suprime notif se o veredicto do Claude já classifica como falso
+          // positivo — não quer receber ping às 4h da manhã pra "planta parou
+          // porque é noite" ou "sensor stale mas ambiente OK". Se ele julgou
+          // que não há nada real, respeita e só loga.
+          const falseHits = /\b(falso[\s\-\/]positiv|falso[\s\/]stale|sem falha real|nada (a fazer|de|anormal)|dia inteiro ok|planta parou.*porque[^.]*noit|noturno|não[\s-]?acionável)/i;
+          if (falseHits.test(txt)) {
+            log('agent-suppress', id, 'veredicto=falso-positivo — não notificando:', txt.slice(0, 120));
+          } else {
+            ntfy(`Diagnostico: ${label}`, txt.slice(0, 480), 'high', ['mag', 'robot']);
+          }
         } else {
           // fail-open: agente não respondeu — avisa cru pra você não ficar cego.
           ntfy(`Alerta: ${label}`, `Persistiu por ${CONFIRM_TICKS} ciclos e o diagnóstico automático falhou. Contexto: ${JSON.stringify(ctx).slice(0, 250)}`, 'high', ['warning']);
