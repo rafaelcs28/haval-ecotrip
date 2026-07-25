@@ -2580,6 +2580,80 @@ function _startLiveChargeSnapshot() {
   _liveChargeSnapshotTimer = setInterval(_persistLiveChargeSnapshot, 30_000);
   _persistLiveChargeSnapshot();   // primeira gravação imediata
 }
+
+// Blindagem: após fim de carga (charging_state Carregando→outro), agenda
+// verificação em 5min. Se o APK NÃO publicou o retained `charging/history`
+// com a nova entry (offline/self-killed), o bridge sintetiza direto do
+// state e MQTT retained pra propagar pro iOS/PWA. Sem isso, a única rota
+// era via APK — se ele não voltar, a carga fica invisível.
+function _scheduleChargeSelfSynthesis(sessionStartMs, socStart, socEnd) {
+  const startMs = sessionStartMs > 0 ? sessionStartMs : (Date.now() - 60*60_000);   // fallback: 1h atrás
+  const socStartCapt = socStart, socEndCapt = socEnd;   // capture snapshot
+  // Amostra: kWh acumulado no state agora + potência média + temp média já calculada.
+  const kwhCapt      = +state.charge_session_kwh || 0;
+  const avgPwrCapt   = +state.charge_avg_power_kw || 0;
+  const tempCapt     = _lastChargeAvgTemp;
+  setTimeout(() => {
+    try {
+      // O APK publicou? Se sim, chargesArr tem entry com timestamp_ms próximo do startMs.
+      const already = chargesArr.some(c => Math.abs((c.timestamp_ms||0) - startMs) < 5*60_000);
+      if (already) return;   // APK cumpriu, nada a fazer
+      if (!(socEndCapt > socStartCapt)) {
+        console.log(`[charge-synth] pulando: SOC delta inválido (${socStartCapt}→${socEndCapt})`);
+        return;
+      }
+      const socDelta = socEndCapt - socStartCapt;
+      // Prioridade: kWh acumulado real; fallback: SOC delta × capacidade útil.
+      const energyKwh = kwhCapt > 0.1 ? +kwhCapt.toFixed(2)
+                                     : +(socDelta / 100 * BATTERY_USEFUL_KWH).toFixed(2);
+      // Duração: se avg_power_kw > 0, calcula por energia/potência (bate com o padrão
+      // dos registros do APK). Senão usa (agora - startMs).
+      const durSec = avgPwrCapt > 0.1
+        ? Math.round(energyKwh / avgPwrCapt * 3600)
+        : Math.round((Date.now() - startMs) / 1000);
+      const avgPwr = avgPwrCapt > 0.1 ? +avgPwrCapt.toFixed(2)
+                                      : (durSec > 0 ? +(energyKwh / (durSec/3600)).toFixed(2) : 0);
+      const rec = {
+        timestamp: new Date(startMs - 3*3600_000).toISOString().slice(0,19),
+        timestamp_ms: startMs,
+        duration_sec: durSec,
+        energy_kwh: energyKwh,
+        soc_start: Math.round(socStartCapt),
+        soc_end:   Math.round(socEndCapt),
+        avg_power_kw: avgPwr,
+        location_lat: +state.gps_lat || 0,
+        location_lng: +state.gps_lng || 0,
+        _updated_ms: Date.now(),
+        _synthesized: true,
+        _synthesized_note: 'bridge-side synthesis (APK não publicou retained em 5min)',
+      };
+      if (tempCapt != null) rec.avg_temp_c = tempCapt;
+      chargesArr.push(rec);
+      chargesArr.sort((a,b) => (b.timestamp_ms||0) - (a.timestamp_ms||0));
+      scheduleChargesFlush();
+      recomputeBatteryAvgPrice();
+      console.log(`⚠ [charge-synth] sintetizou registro: ${rec.energy_kwh}kWh SOC ${rec.soc_start}→${rec.soc_end} (${new Date(rec.timestamp_ms).toISOString()}) — APK não publicou`);
+      // Publish retained pra iOS/PWA verem imediato
+      try {
+        const publicArr = chargesArr.slice(0, 60).map(c => {
+          const { _synthesized, _synthesized_note, _recovered, _recovered_note, _updated_ms, ...rest } = c;
+          return rest;
+        });
+        if (mqttClient?.connected) {
+          mqttClient.publish(`${MQTT_PREFIX}/charging/history`,
+            JSON.stringify({ count: publicArr.length, charges: publicArr }),
+            { qos: 1, retain: true });
+        }
+      } catch (_) {}
+      // Alerta o dono — pra ele saber que o APK estava fora e o bridge cobriu
+      sendPush('⚡ Recarga sintetizada',
+        `APK offline durante a carga — bridge estimou ${energyKwh.toFixed(2)} kWh (SOC ${Math.round(socStartCapt)}→${Math.round(socEndCapt)}%). Ajuste manualmente se necessário.`,
+        'charge_synthesized', { tag: 'charge_synth_' + startMs });
+    } catch (e) {
+      console.warn('[charge-synth] falhou:', e.message);
+    }
+  }, 5 * 60_000).unref?.();
+}
 function _stopLiveChargeSnapshot() {
   if (_liveChargeSnapshotTimer) { clearInterval(_liveChargeSnapshotTimer); _liveChargeSnapshotTimer = null; }
   if (state.charge_session_snapshot) { delete state.charge_session_snapshot; scheduleStateSave(); }
@@ -15520,6 +15594,11 @@ function handleChargingStateTransition(value, isRetained) {
     _lastChargeEndMs = Date.now();       // arma janela anti-flap (ver guard no topo)
     if (chargeStartTimer) { clearTimeout(chargeStartTimer); chargeStartTimer = null; }
     chargeEndingNotifSent = false;       // reset para próxima sessão
+    // Blindagem: se o APK não publicar o `charging/history` retained em 5min
+    // (offline/travado/self-killed), o bridge sintetiza o registro sozinho
+    // usando SOC/potência/duração que tem no state. Sem isso, cargas com o
+    // APK fora ficavam invisíveis (caso 24-25/07 Recanto da Paz).
+    _scheduleChargeSelfSynthesis(chargeSessionStartMs, chargeStartSoc, endSoc);
     // Recarga encerrou: NÃO limpa o token — a LA final não é encerrada, vira card-
     // resumo fixo (ver sendChargeLiveUpdate). Manter o token deixa a próxima
     // recarga reaproveitar a MESMA LA (transforma o resumo de volta em live).
