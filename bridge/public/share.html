@@ -320,24 +320,82 @@ async function poll(){
   } else { dl.style.display = 'none'; }
   if (j.lat && j.lng){
     const ll = [j.lat, j.lng];
+    window.carPos = ll;   // usado pela projeção local do ETA (ver projectEta)
     if (!carMarker) carMarker = L.marker(ll, {icon:carIcon}).addTo(map);
     else carMarker.setLatLng(ll);
     // Aponta a seta pro rumo do carro. Só gira em movimento — parado o heading
     // antigo não significa nada e ficaria girando à toa.
     if (j.moving) { const rot = document.getElementById('car-rot'); if (rot) rot.style.transform = `rotate(${j.heading||0}deg)`; }
     if (autoFollow) map.setView(ll, Math.max(map.getZoom(),14), {animate:true});
+    // Reprojeta a distância/ETA com a posição nova — sem rede, a cada poll.
+    projectEta();
   }
 }
 
-let etaLast=0;
+// ── Distância/ETA até quem está vendo ──────────────────────────────────────
+// Cada /eta é uma chamada paga de Directions, então buscar a 1s (a taxa em que
+// o GPS do carro chega) sairia caro: ~720 requests numa viagem de 1h.
+//
+// Em vez disso: busca a rota real a cada ETA_FETCH_MS e, entre as buscas,
+// projeta o valor com a linha reta carro→viewer, que dá pra recalcular de
+// graça a cada poll. `factor` = quanto a rota é mais longa que a reta no
+// momento da última busca; enquanto o carro segue a mesma rota o fator quase
+// não muda, e a busca periódica corrige qualquer desvio.
+//
+// Antes: throttle fixo de 15s (≈310m a 75 km/h — e 1km+ se o Safari suspendia
+// os timers em background), que era o motivo do número "travar".
+const ETA_FETCH_MS   = 20000;   // rota real (rede)
+const ETA_REFETCH_KM = 1.5;     // ou quando o carro já andou isto desde a busca
+let etaLast = 0;
+let etaRef = null;   // { carLat, carLng, distKm, etaMin, straightKm }
+
+function haversineKm(aLat, aLng, bLat, bLng) {
+  const R = 6371, rad = Math.PI / 180;
+  const dLat = (bLat - aLat) * rad, dLng = (bLng - aLng) * rad;
+  const s = Math.sin(dLat / 2) ** 2
+          + Math.cos(aLat * rad) * Math.cos(bLat * rad) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(s));
+}
+
+function renderEtaLine(distKm, etaMin) {
+  document.getElementById('eta-line').innerHTML =
+    `<span>🧭 <span class="km">${distKm.toFixed(1).replace('.', ',')} km</span> · ${etaMin} min de carro até você</span>`;
+}
+
+// Projeção local, roda a cada poll (1s) sem tocar na rede.
+function projectEta() {
+  if (!me || !etaRef || !window.carPos) return;
+  const straightNow = haversineKm(window.carPos[0], window.carPos[1], me[0], me[1]);
+  if (!(etaRef.straightKm > 0.01) || !(straightNow > 0)) return;
+  const factor = etaRef.distKm / etaRef.straightKm;         // rota ÷ reta
+  const distNow = straightNow * factor;
+  // Velocidade média implícita da rota buscada — mais estável que a velocidade
+  // instantânea do carro (que zera em semáforo e explode o ETA).
+  const kmPerMin = etaRef.etaMin > 0 ? etaRef.distKm / etaRef.etaMin : 0;
+  const etaNow = kmPerMin > 0 ? Math.max(0, Math.round(distNow / kmPerMin)) : etaRef.etaMin;
+  renderEtaLine(distNow, etaNow);
+}
+
 async function updateEta(){
-  if (!me || Date.now()-etaLast < 15000) return;
+  if (!me) return;
+  // Rebusca por tempo OU quando o carro já se deslocou o bastante pra o fator
+  // da última rota não valer mais.
+  const movedFar = etaRef && window.carPos
+    && haversineKm(etaRef.carLat, etaRef.carLng, window.carPos[0], window.carPos[1]) > ETA_REFETCH_KM;
+  if (Date.now() - etaLast < ETA_FETCH_MS && !movedFar) return;
   etaLast = Date.now();
   try {
     const r = await fetch(API(`/eta?to_lat=${me[0]}&to_lng=${me[1]}`), {cache:'no-store'});
     const j = await r.json();
-    if (j.ok) document.getElementById('eta-line').innerHTML =
-      `<span>🧭 <span class="km">${j.distKm.toFixed(1).replace('.',',')} km</span> · ${j.etaMin} min de carro até você</span>`;
+    if (j.ok) {
+      const car = window.carPos;
+      etaRef = {
+        carLat: car ? car[0] : 0, carLng: car ? car[1] : 0,
+        distKm: j.distKm, etaMin: j.etaMin,
+        straightKm: car ? haversineKm(car[0], car[1], me[0], me[1]) : 0,
+      };
+      renderEtaLine(j.distKm, j.etaMin);
+    }
   } catch(_){}
 }
 function askGeo(){
