@@ -13581,6 +13581,10 @@ setInterval(_phoneHistCleanup, 24 * 3600_000).unref?.();
 const _companionInbound = {};                        // { [deviceId]: { etaMin, distKm, lastEvalMs, laActive } }
 
 const SHARED_TRIP_LA_TYPE = 'SharedTripActivityAttributes';
+// Renovação do token enquanto a LA de trajeto está viva (ver _evalSharedTripLAs).
+const SHARE_RENEW_WHEN_LEFT_MS = 30 * 60_000;      // renova faltando <30min
+const SHARE_RENEW_ADD_MS       = 2 * 3600_000;     // estica pra +2h
+const SHARE_LA_RENEW_MAX_MS    = 12 * 3600_000;    // teto: idade máx. da LA
 // Shares ativos que disparam LA na Grasi pareada. Keyed por token.
 // { token: { token, from, startedMs, lastPushMs, laActive } }
 const _sharedTripLAs = {};
@@ -13705,6 +13709,18 @@ function _evalSharedTripLAs() {
   const now = Date.now();
   for (const [token, st] of Object.entries(_sharedTripLAs)) {
     const tk = _shareTokens[token];
+    // Renovação automática: enquanto a LA está viva no aparelho dela, estica o
+    // token pra que o link nunca vire "Link expirado" no meio do trajeto. Para
+    // no dismiss (laActive=false, via /api/activity/stop) e no teto de 12h — o
+    // mesmo horizonte do staleDate da LA, ponto em que o iOS já a encerrou de
+    // qualquer forma. Sem esse teto, uma LA cuja morte nunca foi reportada
+    // (app dela nunca aberto) manteria o link válido pra sempre.
+    if (tk && st.laActive && (now - st.startedMs) < SHARE_LA_RENEW_MAX_MS
+        && (tk.expiresMs - now) < SHARE_RENEW_WHEN_LEFT_MS) {
+      tk.expiresMs = now + SHARE_RENEW_ADD_MS;
+      _saveShareTokens();
+      console.log(`[shared-trip] token ${token.slice(0, 8)}… renovado +${SHARE_RENEW_ADD_MS / 60_000}min (LA viva)`);
+    }
     if (!tk || tk.expiresMs <= now) {
       // Share expirou/revogado — encerra LA.
       if (st.laActive) {
@@ -17432,6 +17448,14 @@ app.post('/api/activity/start', (req, res) => {
   if (!push_token || !activity_id) return res.status(400).json({ error: 'push_token e activity_id obrigatórios' });
   const t = LA_TYPES.includes(String(type)) ? String(type) : 'ChargeActivityAttributes';
   apnsLive.registerUpdateToken(t, String(activity_id), device_id ? String(device_id) : '', String(push_token));
+  // Amarra o activityId da LA de trajeto ao share que a criou. É esse vínculo
+  // que permite parar de renovar o token quando a destinatária dispensa a LA
+  // (ela reporta /api/activity/stop com o mesmo activity_id).
+  if (t === SHARED_TRIP_LA_TYPE) {
+    for (const st of Object.values(_sharedTripLAs)) {
+      if (st.laActive && !st.activityId) { st.activityId = String(activity_id); break; }
+    }
+  }
   // Reconcilia a LA de segurança ao registrar o token: se ela iniciou mas o carro
   // já está seguro, encerra agora. Cobre o race em que o "end" foi enviado ANTES do
   // app reportar o update token (a LA ficava presa em "Veículo desprotegido").
@@ -17449,6 +17473,16 @@ app.post('/api/activity/start', (req, res) => {
 app.post('/api/activity/stop', (req, res) => {
   const { activity_id } = req.body || {};
   if (activity_id) apnsLive.unregisterActivity(String(activity_id));
+  // LA de trajeto dispensada pela destinatária → para de renovar o token do
+  // share. O link então expira sozinho no prazo que ainda resta.
+  if (activity_id) {
+    for (const [tok, st] of Object.entries(_sharedTripLAs)) {
+      if (st.activityId === String(activity_id)) {
+        st.laActive = false;
+        console.log(`[shared-trip] LA dispensada — renovação do token ${tok.slice(0, 8)}… encerrada`);
+      }
+    }
+  }
   res.json({ ok: true, registered: apnsLive.tokenCount() });
 });
 
