@@ -29,27 +29,41 @@ object MessageManager {
     private const val CHAN = "recados"
     private const val NOTIF_ID = 4711
 
-    /** Exibe o recado. [from] quem escreveu, [text] a mensagem (limitada no servidor). */
-    fun show(ctx: Context, from: String, text: String) {
+    /**
+     * Exibe o recado. [from] quem escreveu, [text] a mensagem (limitada no
+     * servidor). [audioUrl] não-nulo = recado de VOZ: a tela mostra "mensagem
+     * de áudio" com botão de ouvir em vez do texto.
+     */
+    fun show(ctx: Context, from: String, text: String, audioUrl: String? = null,
+             durSec: Int = 0, msgId: String = "") {
         val who = from.ifBlank { "Recado" }
         try {
             ensureChannel(ctx)
+            // Toca um tom de notificação: sem isso o recado só aparece, e quem
+            // está de olho na estrada não percebe. Mesmo caminho do alerta de
+            // chamada (Ringtone), one-shot, respeitando o volume do sistema.
+            playChime(ctx)
             val full = Intent(ctx, MessageActivity::class.java).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
                 putExtra("from", who); putExtra("text", text)
+                putExtra("audioUrl", audioUrl); putExtra("durSec", durSec)
+                putExtra("msgId", msgId)
             }
             val pi = PendingIntent.getActivity(
                 ctx, NOTIF_ID, full,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
+            val preview = if (audioUrl != null)
+                (if (durSec > 0) "Mensagem de áudio · ${durSec}s" else "Mensagem de áudio")
+                else text
             val sender = Person.Builder().setName(who).build()
             val style = NotificationCompat.MessagingStyle(sender).addMessage(
-                text, System.currentTimeMillis(), sender,
+                preview, System.currentTimeMillis(), sender,
             )
             val n = NotificationCompat.Builder(ctx, CHAN)
                 .setSmallIcon(android.R.drawable.ic_dialog_email)
                 .setContentTitle(who)
-                .setContentText(text)
+                .setContentText(preview)
                 .setStyle(style)
                 .setPriority(NotificationCompat.PRIORITY_MAX)
                 .setCategory(NotificationCompat.CATEGORY_MESSAGE)
@@ -72,6 +86,15 @@ object MessageManager {
     /** Remove a notificação (chamado quando a activity fecha). */
     fun clear(ctx: Context) {
         try { nm(ctx).cancel(NOTIF_ID) } catch (_: Exception) {}
+    }
+
+    /** Tom curto de aviso. Falha em silêncio — o recado importa mais que o som. */
+    private fun playChime(ctx: Context) {
+        try {
+            val uri = android.media.RingtoneManager
+                .getDefaultUri(android.media.RingtoneManager.TYPE_NOTIFICATION)
+            android.media.RingtoneManager.getRingtone(ctx, uri)?.play()
+        } catch (e: Exception) { AppLogger.w(TAG, "chime falhou: ${e.message}") }
     }
 
     private fun nm(ctx: Context) =

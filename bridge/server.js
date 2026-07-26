@@ -12430,10 +12430,131 @@ app.post('/api/call/end', requireAuth, (req, res) => {
 const MESSAGE_MAX_CHARS = 100;
 const SHARE_MSG_COOLDOWN_MS = 20_000;    // anti-flood por share
 const _shareMsgLast = new Map();         // token → ms do último envio
+const _shareLastMsg  = new Map();        // token → msgId do último recado (status na página)
 
-function _publishCarMessage(from, text) {
+// Recados enviados, por id, pra saber a quem devolver a confirmação de leitura.
+// origin: 'owner' (app iOS) ou o token do share. Janela curta — depois de lido
+// ou expirado não precisa mais guardar.
+const _carMessages = new Map();   // msgId → { origin, from, kind, state, ts }
+const CAR_MSG_KEEP_MS = 6 * 3600_000;
+setInterval(() => {
+  const cut = Date.now() - CAR_MSG_KEEP_MS;
+  for (const [id, m] of _carMessages) if (m.ts < cut) _carMessages.delete(id);
+}, 3600_000).unref?.();
+
+function _publishCarMessage(from, text, extra = {}, origin = 'owner') {
+  const msgId = require('crypto').randomBytes(8).toString('hex');
+  _carMessages.set(msgId, {
+    origin, from, kind: extra.audioUrl ? 'audio' : 'text',
+    state: 'sent', ts: Date.now(),
+  });
   mqttClient.publish(`${MQTT_PREFIX}/cmd/message`,
-    JSON.stringify({ from, text }), { qos: 1, retain: false });
+    JSON.stringify({ msgId, from, text, ...extra }), { qos: 1, retain: false });
+  return msgId;
+}
+
+// Confirmação vinda do carro: {msgId, state}. 'read' = motorista fechou o popup,
+// 'played' = tocou o áudio, 'expired' = sumiu sozinho sem interação.
+function _handleCarMessageEvent(payload) {
+  let ev; try { ev = JSON.parse(payload.toString()); } catch (_) { return; }
+  const id = String(ev.msgId || ''), st = String(ev.state || '');
+  const m = _carMessages.get(id);
+  if (!m || !st) return;
+  // Não regride: uma vez 'played', um 'read' posterior (fechar depois de ouvir)
+  // não deve rebaixar o status.
+  if (m.state === 'played' && st === 'read') { m.readTs = Date.now(); return; }
+  m.state = st; m.stateTs = Date.now();
+  console.log(`[message] ${id} → ${st} (de ${m.from}, origem ${m.origin === 'owner' ? 'app' : 'link'})`);
+  // Quem mandou pelo app recebe push; quem mandou pelo link vê na própria
+  // página (o /state do share devolve o status — ver lastMsg).
+  if (m.origin === 'owner' && st !== 'expired') {
+    const what = m.kind === 'audio' ? 'Áudio' : 'Recado';
+    const verb = st === 'played' ? 'ouvido' : 'lido';
+    sendPush(`✓ ${what} ${verb}`, `Confirmado na tela do carro.`, 'message_read',
+      { tag: 'message_read_' + id });
+  }
+}
+
+// ── Recado de VOZ ───────────────────────────────────────────────────────────
+// O remetente grava no navegador (MediaRecorder) e manda o blob; guardamos em
+// disco e mandamos só a URL pro carro, que toca com MediaPlayer. Áudio não
+// passa por MQTT: seriam centenas de KB num canal feito pra telemetria.
+const VOICE_DIR = path.join(DATA_DIR, 'voice_messages');
+try { fs.mkdirSync(VOICE_DIR, { recursive: true }); } catch (_) {}
+const VOICE_MAX_BYTES = 2 * 1024 * 1024;   // ~2MB cobre bem mais que 30s de voz
+const VOICE_TTL_MS    = 24 * 3600_000;     // recado ouvido não precisa persistir
+
+// Limpa gravações velhas de hora em hora.
+setInterval(() => {
+  try {
+    const now = Date.now();
+    for (const f of fs.readdirSync(VOICE_DIR)) {
+      const fp = path.join(VOICE_DIR, f);
+      try { if (now - fs.statSync(fp).mtimeMs > VOICE_TTL_MS) fs.unlinkSync(fp); } catch (_) {}
+    }
+  } catch (_) {}
+}, 3600_000).unref?.();
+
+// Extensão a partir do mime — MediaPlayer usa a extensão/conteúdo pra escolher
+// o decoder. Safari grava mp4/aac; Chrome, webm/opus. Android toca os dois.
+function _voiceExt(mime) {
+  const m = String(mime || '').toLowerCase();
+  if (m.includes('mp4') || m.includes('aac') || m.includes('m4a')) return 'm4a';
+  if (m.includes('ogg'))  return 'ogg';
+  if (m.includes('mpeg') || m.includes('mp3')) return 'mp3';
+  return 'webm';
+}
+
+// Serve a gravação. Sem auth de propósito: a URL contém um id aleatório de 24
+// hex e é o carro (não um browser logado) que precisa baixar; o requireAuth
+// global tem esta rota na whitelist.
+app.get('/api/voice/:id', (req, res) => {
+  const id = String(req.params.id).replace(/[^a-f0-9.]/gi, '');
+  const fp = path.join(VOICE_DIR, id);
+  if (!id || !fp.startsWith(VOICE_DIR) || !fs.existsSync(fp)) {
+    return res.status(404).json({ error: 'áudio não encontrado' });
+  }
+  const ext = path.extname(fp).slice(1);
+  res.type(ext === 'm4a' ? 'audio/mp4' : ext === 'ogg' ? 'audio/ogg'
+         : ext === 'mp3' ? 'audio/mpeg' : 'audio/webm');
+  fs.createReadStream(fp).pipe(res);
+});
+
+// Recebe a gravação e dispara o recado. Body = áudio cru (application/octet-stream
+// ou audio/*), com duração em ?dur=. Multipart seria peso extra pra um blob só.
+function _handleVoiceUpload(req, res, from, onOk, origin = 'owner') {
+  const chunks = [];
+  let size = 0, aborted = false;
+  req.on('data', (c) => {
+    if (aborted) return;
+    size += c.length;
+    if (size > VOICE_MAX_BYTES) {
+      aborted = true;
+      res.status(413).json({ error: 'áudio muito longo' });
+      req.destroy();
+      return;
+    }
+    chunks.push(c);
+  });
+  req.on('end', () => {
+    if (aborted) return;
+    if (!chunks.length) return res.status(400).json({ error: 'áudio vazio' });
+    const ext = _voiceExt(req.headers['content-type']);
+    const id  = require('crypto').randomBytes(12).toString('hex') + '.' + ext;
+    try {
+      fs.writeFileSync(path.join(VOICE_DIR, id), Buffer.concat(chunks));
+    } catch (e) {
+      return res.status(500).json({ error: 'falha ao salvar áudio' });
+    }
+    const durSec = Math.max(0, Math.min(300, parseInt(req.query.dur, 10) || 0));
+    const url = `${_shareBaseUrl()}/api/voice/${id}`;
+    const msgId = _publishCarMessage(from, '', { audioUrl: url, durSec }, origin);
+    if (origin !== 'owner') _shareLastMsg.set(origin, msgId);
+    console.log(`[voice] ${from}: ${id} (${Math.round(size / 1024)}KB, ${durSec}s)`);
+    onOk(durSec);
+    res.json({ ok: true, durSec });
+  });
+  req.on('error', () => { if (!aborted) res.status(400).json({ error: 'upload interrompido' }); });
 }
 
 // Dono, pelo app iOS.
@@ -12472,12 +12593,50 @@ app.post('/api/share/:token/message', (req, res) => {
   _shareMsgLast.set(token, now);
   const tk = _shareTokens[token] || {};
   const from = tk.recipientName || 'Contato do link';
-  _publishCarMessage(from, text);
+  const msgId = _publishCarMessage(from, text, {}, token);
+  _shareLastMsg.set(token, msgId);
   console.log(`[share-message] ${from}: ${text}`);
   // O dono precisa saber o que foi exibido na tela do carro dele.
   sendPush('💬 Recado no carro', `${from}: ${text}`, 'share_message', { tag: 'share_message' });
   addEvent('car_message', `Recado pelo link (${from}): ${text.slice(0, 60)}`);
   res.json({ ok: true });
+});
+
+// Recado de voz — dono (app iOS).
+app.post('/api/message-audio', requireAuth, (req, res) => {
+  if (!mqttClient?.connected) return res.status(503).json({ error: 'MQTT offline' });
+  const apkAge = Date.now() - (state.last_apk_ms || 0);
+  if (!(state.last_apk_ms > 0) || apkAge > 90_000) {
+    return res.status(409).json({ error: 'o carro está dormindo' });
+  }
+  const from = String(req.query.from || 'Você').slice(0, 40);
+  _handleVoiceUpload(req, res, from, (dur) => {
+    addEvent('car_message', `Áudio enviado (${dur}s)`);
+  });
+});
+
+// Recado de voz — quem recebeu o link do trajeto.
+app.post('/api/share/:token/message-audio', (req, res) => {
+  const token = String(req.params.token);
+  if (!_shareValid(token)) return res.status(404).json({ error: 'link expirado' });
+  if (!mqttClient?.connected) return res.status(503).json({ error: 'carro indisponível agora' });
+  const apkAge = Date.now() - (state.last_apk_ms || 0);
+  if (!(state.last_apk_ms > 0) || apkAge > 90_000) {
+    return res.status(409).json({ error: 'o carro está dormindo — tente quando estiver em uso' });
+  }
+  const now = Date.now(), last = _shareMsgLast.get(token) || 0;
+  if (now - last < SHARE_MSG_COOLDOWN_MS) {
+    const wait = Math.ceil((SHARE_MSG_COOLDOWN_MS - (now - last)) / 1000);
+    return res.status(429).json({ error: `aguarde ${wait}s pra mandar outro`, retryAfterSec: wait });
+  }
+  _shareMsgLast.set(token, now);
+  const tk = _shareTokens[token] || {};
+  const from = tk.recipientName || 'Contato do link';
+  _handleVoiceUpload(req, res, from, (dur) => {
+    sendPush('🎙 Áudio no carro', `${from} mandou um áudio de ${dur}s.`,
+      'share_message', { tag: 'share_message' });
+    addEvent('car_message', `Áudio pelo link (${from}, ${dur}s)`);
+  }, token);
 });
 
 // ── Chamada iniciada por quem recebeu o link do trajeto ────────────────────
@@ -12788,6 +12947,12 @@ mqttClient.on('message', (topic, payload, packet) => {
 
   // Ciclo da chamada (carro→fone): {callId, state}. Relay como texto pros clientes
   // WS de áudio (o iOS escuta 'call:<state>') e guarda o último estado.
+  // Confirmação de leitura/escuta do recado (carro→bridge).
+  if (topic === `${MQTT_PREFIX}/message/event`) {
+    _handleCarMessageEvent(payload);
+    return;
+  }
+
   if (topic === `${MQTT_PREFIX}/call/event`) {
     try {
       const ev = JSON.parse(payload.toString());
@@ -17271,10 +17436,17 @@ app.get('/api/share/:token/state', (req, res) => {
         }))
       : null,
   } : null;
+  // Status do último recado que ESTE link mandou, pra página mostrar
+  // "enviado → lido/ouvido" sem endpoint extra (o poll de 1s já roda).
+  const lastMsgId = _shareLastMsg.get(req.params.token);
+  const lastMsgRec = lastMsgId ? _carMessages.get(lastMsgId) : null;
   res.json({
     on,
     lat: +state.gps_lat || 0, lng: +state.gps_lng || 0,
     address: _lastCarAddress.label || '',
+    lastMsg: lastMsgRec
+      ? { state: lastMsgRec.state, kind: lastMsgRec.kind, ts: lastMsgRec.stateTs || lastMsgRec.ts }
+      : null,
     speedKmh: Math.max(0, +state.speed_kmh || 0),
     soc: Math.round(+state.soc_pct || 0),
     fuelL: +state.fuel_l || 0,

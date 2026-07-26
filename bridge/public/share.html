@@ -92,6 +92,21 @@
                padding:12px; font-size:15px; font-family:inherit; line-height:1.4; }
   .msg-input:focus { outline:none; border-color:rgba(34,211,238,.55); }
   .msg-count { text-align:right; font-size:11px; color:var(--muted); margin-top:6px; }
+  .rec-row { display:flex; align-items:center; gap:10px; margin-top:12px; }
+  .btn-rec { flex:1; display:flex; align-items:center; justify-content:center; gap:8px;
+             background:rgba(255,255,255,.07); color:#e2e8f0; cursor:pointer;
+             border:1px solid rgba(255,255,255,.12); border-radius:12px;
+             padding:12px 10px; font-size:14px; font-weight:700; font-family:inherit; }
+  .btn-rec.rec { background:rgba(239,68,68,.18); border-color:rgba(239,68,68,.5); color:#fecaca; }
+  .btn-rec.has { background:rgba(34,211,238,.14); border-color:rgba(34,211,238,.45); color:#a5f3fc; }
+  .rec-dot { width:10px; height:10px; border-radius:50%; background:#ef4444; flex:none; display:none; }
+  .btn-rec.rec .rec-dot { display:block; animation:cpulse 1s infinite; }
+  .rec-time { font-size:12px; color:var(--muted); font-variant-numeric:tabular-nums; min-width:34px; }
+  /* Confirmação de leitura vinda do carro */
+  .msg-status { margin-top:12px; font-size:12.5px; font-weight:600; color:var(--muted);
+                display:none; align-items:center; gap:6px; }
+  .msg-status.on { display:flex; }
+  .msg-status.ok { color:var(--green); }
 
   .modal { position:absolute; inset:0; z-index:900; display:none;
            align-items:center; justify-content:center; padding:22px;
@@ -187,10 +202,18 @@
     <textarea id="msg-text" class="msg-input" maxlength="100" rows="3"
               placeholder="Ex.: passa no mercado na volta"></textarea>
     <div class="msg-count"><span id="msg-left">100</span> restantes</div>
+    <!-- Recado de voz: mais rápido que digitar e o motorista só aperta OUVIR -->
+    <div class="rec-row">
+      <button class="btn-rec" id="rec-btn">
+        <span class="rec-dot"></span><span id="rec-label">Gravar áudio</span>
+      </button>
+      <span class="rec-time" id="rec-time"></span>
+    </div>
     <div class="modal-actions">
       <button class="btn-ghost" id="msg-cancel">Cancelar</button>
       <button class="btn-call" id="msg-send">Enviar</button>
     </div>
+    <div class="msg-status" id="msg-status"></div>
   </div>
 </div>
 
@@ -300,6 +323,8 @@ async function poll(){
     document.getElementById('v-spd').textContent = Math.trunc(s * 1.07 - s / 180 * 0.02);
     sign.style.display = 'flex';
   } else { sign.style.display = 'none'; }
+  // Confirmação de leitura do último recado deste link (ver onLastMsg).
+  if (window.onLastMsg) window.onLastMsg(j.lastMsg);
   // Chamada exige a multimídia ACORDADA (cmd/call_start só chega se o APK está
   // no MQTT). Motor ligado NÃO é o critério — o carro pode estar parado com a
   // central acesa. Carro dormindo → botão nem aparece.
@@ -645,28 +670,114 @@ else {
   mNo.addEventListener('click', closeMsg);
   mModal.addEventListener('click', (e) => { if (e.target === mModal) closeMsg(); });
 
+  // ── Gravação de voz ──────────────────────────────────────────────────────
+  // MediaRecorder grava no formato nativo do browser (Safari: mp4/aac, Chrome:
+  // webm/opus) — o Android toca os dois, então não convertemos nada. O blob vai
+  // cru no corpo do POST; o bridge decide a extensão pelo Content-Type.
+  const recBtn = document.getElementById('rec-btn');
+  const recLbl = document.getElementById('rec-label');
+  const recTime= document.getElementById('rec-time');
+  const REC_MAX_SEC = 30;
+  let mediaRec = null, recChunks = [], recBlob = null, recSec = 0, recTimer = null, recStream = null;
+
+  function recReset() {
+    recBlob = null; recSec = 0; recTime.textContent = '';
+    recBtn.classList.remove('rec', 'has'); recLbl.textContent = 'Gravar áudio';
+  }
+  function recStopTracks() {
+    try { recStream && recStream.getTracks().forEach(t => t.stop()); } catch (_) {}
+    recStream = null;
+  }
+  async function recStart() {
+    try {
+      recStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (_) { alert('Precisa liberar o microfone pra gravar.'); return; }
+    recChunks = []; recBlob = null; recSec = 0;
+    mediaRec = new MediaRecorder(recStream);
+    mediaRec.ondataavailable = e => { if (e.data && e.data.size) recChunks.push(e.data); };
+    mediaRec.onstop = () => {
+      recBlob = new Blob(recChunks, { type: mediaRec.mimeType || 'audio/webm' });
+      recStopTracks();
+      recBtn.classList.remove('rec'); recBtn.classList.add('has');
+      recLbl.textContent = 'Regravar';
+      recTime.textContent = recSec + 's';
+      clearInterval(recTimer); recTimer = null;
+    };
+    mediaRec.start();
+    recBtn.classList.remove('has'); recBtn.classList.add('rec');
+    recLbl.textContent = 'Parar';
+    recTime.textContent = '0s';
+    recTimer = setInterval(() => {
+      recSec++; recTime.textContent = recSec + 's';
+      if (recSec >= REC_MAX_SEC) recStop();   // teto: recado é curto
+    }, 1000);
+  }
+  function recStop() { try { mediaRec && mediaRec.state !== 'inactive' && mediaRec.stop(); } catch (_) {} }
+
+  recBtn.addEventListener('click', () => {
+    if (mediaRec && mediaRec.state === 'recording') recStop();
+    else recStart();
+  });
+
+  // ── Envio (texto OU áudio) ───────────────────────────────────────────────
   mSend.addEventListener('click', async () => {
     const text = mText.value.trim();
-    if (!text) { mText.focus(); return; }
+    if (!text && !recBlob) { mText.focus(); return; }
     mSend.disabled = true; mSend.textContent = 'Enviando…';
     try {
-      const r = await fetch(API('/message'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text }),
-      });
+      let r;
+      if (recBlob) {
+        // Áudio tem prioridade: se gravou, é isso que vai.
+        r = await fetch(API(`/message-audio?dur=${recSec}`), {
+          method: 'POST',
+          headers: { 'Content-Type': recBlob.type || 'audio/webm' },
+          body: recBlob,
+        });
+      } else {
+        r = await fetch(API('/message'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text }),
+        });
+      }
       const j = await r.json().catch(() => ({}));
       if (!r.ok) { alert(j.error || 'não foi possível enviar'); return; }
-      mText.value = ''; upLeft(); closeMsg();
-      mSend.textContent = 'Enviado ✓';
-      setTimeout(() => { mSend.textContent = 'Enviar'; }, 1500);
+      mText.value = ''; upLeft(); recReset(); closeMsg();
+      showMsgStatus('sent');
     } catch (_) {
       alert('falha de rede ao enviar');
     } finally {
-      mSend.disabled = false;
-      if (mSend.textContent === 'Enviando…') mSend.textContent = 'Enviar';
+      mSend.disabled = false; mSend.textContent = 'Enviar';
     }
   });
+
+  // ── Confirmação de leitura ───────────────────────────────────────────────
+  // O carro publica read/played/expired; o bridge devolve em /state.lastMsg e o
+  // poll de 1s traz pra cá. Fica visível sobre o mapa por alguns segundos.
+  const stEl = document.getElementById('msg-status');
+  let stShown = '';
+  function showMsgStatus(state, kind) {
+    const map = {
+      sent:    ['✓ Enviado pro painel', false],
+      read:    ['✓✓ Lido no carro', true],
+      played:  ['✓✓ Áudio ouvido no carro', true],
+      expired: ['⚠ Fechou sozinho — pode não ter sido visto', false],
+    };
+    const m = map[state]; if (!m) return;
+    stEl.textContent = m[0];
+    stEl.classList.toggle('ok', m[1]);
+    stEl.classList.add('on');
+    clearTimeout(showMsgStatus._t);
+    showMsgStatus._t = setTimeout(() => stEl.classList.remove('on'), 8000);
+  }
+  // Chamado pelo render() a cada poll.
+  window.onLastMsg = (lm) => {
+    if (!lm || !lm.state) return;
+    const key = lm.state + ':' + (lm.ts || 0);
+    if (key === stShown) return;      // já mostrado
+    stShown = key;
+    if (lm.state !== 'sent') showMsgStatus(lm.state, lm.kind);
+  };
 
   // Hooks de teste/screenshot: ?preview=call|msg abre o popup no load.
   // Inofensivo — o envio/chamada continua passando por todos os gates.

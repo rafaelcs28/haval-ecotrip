@@ -2950,8 +2950,14 @@ class MqttManager private constructor() {
                         val o = JSONObject(payload)
                         val from = o.optString("from", "")
                         val text = o.optString("text", "")
-                        if (text.isBlank()) { publishResult("message", "error: texto vazio"); return@submit }
-                        MessageManager.show(ctx, from, text)
+                        // Recado de voz: o bridge manda a URL do arquivo em vez do texto.
+                        val audio = o.optString("audioUrl", "").ifBlank { null }
+                        val dur   = o.optInt("durSec", 0)
+                        val msgId = o.optString("msgId", "")
+                        if (text.isBlank() && audio == null) {
+                            publishResult("message", "error: sem texto nem áudio"); return@submit
+                        }
+                        MessageManager.show(ctx, from, text, audio, dur, msgId)
                         publishResult("message", "ok")
                     } catch (e: Exception) { publishResult("message", "error: ${e.message}") }
                 }
@@ -3646,6 +3652,25 @@ class MqttManager private constructor() {
                     }
                 }
             }
+        }
+    }
+
+    /**
+     * Confirma leitura/escuta de um recado. [state]: "read" (motorista fechou),
+     * "played" (tocou o áudio) ou "expired" (fechou sozinho sem interação).
+     * Fire-and-forget: se o MQTT estiver fora a confirmação é perdida, e isso é
+     * aceitável — o recado já foi entregue.
+     */
+    fun publishMessageEvent(msgId: String, state: String) {
+        if (msgId.isBlank()) return
+        try {
+            val c = client ?: return
+            if (!c.isConnected) return
+            val json = """{"msgId":"$msgId","state":"$state"}"""
+            c.publish("$prefix/message/event", json.toByteArray(), 1, false)
+            AppLogger.i(TAG, "message/event $msgId → $state")
+        } catch (e: Exception) {
+            AppLogger.w(TAG, "publishMessageEvent falhou: ${e.message}")
         }
     }
 
