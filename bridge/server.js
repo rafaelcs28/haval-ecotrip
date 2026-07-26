@@ -6394,7 +6394,7 @@ app.use('/api', (req, res, next) => {
   // Compartilhamento de status: páginas públicas validadas pelo token na própria URL.
   // `call` e `call/end`: a página share.html liga pro carro; o gate é o token do
   // share (+ cooldown/TTL/owner na própria rota), não o token do bridge.
-  if (/^\/share\/[^/]+\/(state|eta|call|call\/end)$/.test(req.path)) return next();
+  if (/^\/share\/[^/]+\/(state|eta|call|call\/end|message)$/.test(req.path)) return next();
   // Trajeto compartilhado: /api/shared-trip/:token — token da URL faz o gate.
   if (/^\/shared-trip\/[^/]+$/.test(req.path)) return next();
   // Upload de gravação: o carro autentica com nonce de uso único (X-Rec-Token),
@@ -12421,6 +12421,62 @@ app.post('/api/call/end', requireAuth, (req, res) => {
   if (!mqttClient?.connected) return res.status(503).json({ error: 'MQTT offline' });
   mqttClient.publish(`${MQTT_PREFIX}/cmd/call_end`, '1', { qos: 1, retain: false });
   _shareCallOwner = null; _shareCallStartedMs = 0;
+  res.json({ ok: true });
+});
+
+// ── Recado curto exibido em tela cheia no HU ────────────────────────────────
+// O APK mostra via full-screen-intent (mesmo caminho da chamada), então aparece
+// por cima do app em uso. Texto limitado a MESSAGE_MAX_CHARS.
+const MESSAGE_MAX_CHARS = 100;
+const SHARE_MSG_COOLDOWN_MS = 20_000;    // anti-flood por share
+const _shareMsgLast = new Map();         // token → ms do último envio
+
+function _publishCarMessage(from, text) {
+  mqttClient.publish(`${MQTT_PREFIX}/cmd/message`,
+    JSON.stringify({ from, text }), { qos: 1, retain: false });
+}
+
+// Dono, pelo app iOS.
+app.post('/api/message', requireAuth, (req, res) => {
+  if (!mqttClient?.connected) return res.status(503).json({ error: 'MQTT offline' });
+  const text = String(req.body?.text || '').trim().slice(0, MESSAGE_MAX_CHARS);
+  const from = String(req.body?.from || 'Você').trim().slice(0, 40);
+  if (!text) return res.status(400).json({ error: 'texto obrigatório' });
+  const apkAge = Date.now() - (state.last_apk_ms || 0);
+  if (!(state.last_apk_ms > 0) || apkAge > 90_000) {
+    return res.status(409).json({ error: 'o carro está dormindo — o recado não apareceria' });
+  }
+  _publishCarMessage(from, text);
+  addEvent('car_message', `Recado enviado: ${text.slice(0, 60)}`);
+  console.log(`[message] "${from}": ${text}`);
+  res.json({ ok: true });
+});
+
+// Quem recebeu o link do trajeto. Gate = token do share (whitelist do
+// requireAuth), com cooldown próprio e aviso pro dono — mesma lógica da chamada.
+app.post('/api/share/:token/message', (req, res) => {
+  const token = String(req.params.token);
+  if (!_shareValid(token)) return res.status(404).json({ error: 'link expirado' });
+  if (!mqttClient?.connected) return res.status(503).json({ error: 'carro indisponível agora' });
+  const text = String(req.body?.text || '').trim().slice(0, MESSAGE_MAX_CHARS);
+  if (!text) return res.status(400).json({ error: 'escreva a mensagem' });
+  const apkAge = Date.now() - (state.last_apk_ms || 0);
+  if (!(state.last_apk_ms > 0) || apkAge > 90_000) {
+    return res.status(409).json({ error: 'o carro está dormindo — tente quando estiver em uso' });
+  }
+  const now = Date.now(), last = _shareMsgLast.get(token) || 0;
+  if (now - last < SHARE_MSG_COOLDOWN_MS) {
+    const wait = Math.ceil((SHARE_MSG_COOLDOWN_MS - (now - last)) / 1000);
+    return res.status(429).json({ error: `aguarde ${wait}s pra mandar outro`, retryAfterSec: wait });
+  }
+  _shareMsgLast.set(token, now);
+  const tk = _shareTokens[token] || {};
+  const from = tk.recipientName || 'Contato do link';
+  _publishCarMessage(from, text);
+  console.log(`[share-message] ${from}: ${text}`);
+  // O dono precisa saber o que foi exibido na tela do carro dele.
+  sendPush('💬 Recado no carro', `${from}: ${text}`, 'share_message', { tag: 'share_message' });
+  addEvent('car_message', `Recado pelo link (${from}): ${text.slice(0, 60)}`);
   res.json({ ok: true });
 });
 

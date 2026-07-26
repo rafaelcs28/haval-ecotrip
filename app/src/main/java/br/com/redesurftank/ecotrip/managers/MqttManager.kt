@@ -2940,6 +2940,21 @@ class MqttManager private constructor() {
                         publishResult("call_start", "ok:$id")
                     } catch (e: Exception) { publishResult("call_start", "error: ${e.message}") }
                 }
+                "message" -> {
+                    // Recado curto: {from, text}. Sobe em tela cheia pelo mesmo
+                    // caminho da chamada (full-screen-intent), então aparece por
+                    // cima do app em uso.
+                    val ctx = appContext
+                    if (ctx == null) { publishResult("message", "error: sem contexto"); return@submit }
+                    try {
+                        val o = JSONObject(payload)
+                        val from = o.optString("from", "")
+                        val text = o.optString("text", "")
+                        if (text.isBlank()) { publishResult("message", "error: texto vazio"); return@submit }
+                        MessageManager.show(ctx, from, text)
+                        publishResult("message", "ok")
+                    } catch (e: Exception) { publishResult("message", "error: ${e.message}") }
+                }
                 "call_end" -> {
                     // Hang-up vindo do iOS: encerra sem republicar 'ended' (origem é o fone).
                     val ctx = appContext

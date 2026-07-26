@@ -76,6 +76,23 @@
   .call-fab:active { transform:scale(.94); }
   .call-fab.on { display:flex; }
 
+  /* Recado: mesmo eixo do botão de ligar, um acima. O `bottom` dos dois é
+     calculado no JS a partir da altura do painel. */
+  .msg-fab { position:absolute; right:14px; bottom:308px; z-index:650;
+             width:54px; height:54px; border-radius:50%; border:none; cursor:pointer;
+             background:#22d3ee; color:#04252b; display:none;
+             align-items:center; justify-content:center;
+             box-shadow:0 4px 14px rgba(0,0,0,.55), 0 0 0 4px rgba(34,211,238,.18); }
+  .msg-fab:active { transform:scale(.94); }
+  .msg-fab.on { display:flex; }
+
+  .msg-input { width:100%; margin-top:14px; box-sizing:border-box; resize:none;
+               background:rgba(255,255,255,.06); color:#f1f5f9;
+               border:1px solid rgba(255,255,255,.14); border-radius:12px;
+               padding:12px; font-size:15px; font-family:inherit; line-height:1.4; }
+  .msg-input:focus { outline:none; border-color:rgba(34,211,238,.55); }
+  .msg-count { text-align:right; font-size:11px; color:var(--muted); margin-top:6px; }
+
   .modal { position:absolute; inset:0; z-index:900; display:none;
            align-items:center; justify-content:center; padding:22px;
            background:rgba(0,0,0,.78); backdrop-filter:blur(3px); }
@@ -154,6 +171,29 @@
   </div>
   <div class="chips" id="chips"></div>
 </div>
+<!-- Mandar recado: fica logo acima do botão de ligar -->
+<button class="msg-fab" id="msg-fab" title="Mandar recado pro carro">
+  <svg viewBox="0 0 24 24" fill="currentColor" width="22" height="22"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>
+</button>
+
+<!-- Popup de escrever o recado -->
+<div class="modal" id="msg-modal">
+  <div class="modal-box">
+    <div class="modal-title">Mandar recado</div>
+    <div class="modal-text" style="margin-top:8px">
+      Aparece <b>em tela cheia no painel do carro</b>, com seu nome e a mensagem.
+      Ele fecha quando quiser.
+    </div>
+    <textarea id="msg-text" class="msg-input" maxlength="100" rows="3"
+              placeholder="Ex.: passa no mercado na volta"></textarea>
+    <div class="msg-count"><span id="msg-left">100</span> restantes</div>
+    <div class="modal-actions">
+      <button class="btn-ghost" id="msg-cancel">Cancelar</button>
+      <button class="btn-call" id="msg-send">Enviar</button>
+    </div>
+  </div>
+</div>
+
 <!-- Ligar pro carro: botão flutuante sobre o mapa -->
 <button class="call-fab" id="call-fab" title="Ligar pro carro">
   <svg viewBox="0 0 24 24" fill="currentColor" width="22" height="22"><path d="M6.6 10.8c1.4 2.8 3.8 5.1 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1-9.4 0-17-7.6-17-17 0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.2.2 2.4.6 3.6.1.4 0 .7-.2 1l-2.3 2.2z"/></svg>
@@ -265,11 +305,17 @@ async function poll(){
   // central acesa. Carro dormindo → botão nem aparece.
   window.carReachable = j.apkAgeMs != null && j.apkAgeMs < 90000;
   const fabEl = document.getElementById('call-fab');
+  const msgEl = document.getElementById('msg-fab');
   fabEl.classList.toggle('on', window.carReachable && !callActive);
+  msgEl.classList.toggle('on', window.carReachable);
   // Reposiciona acima do painel: ele cresce/encolhe com destino, paradas e
-  // chips, e com `bottom` fixo o FAB acabava sobre as métricas.
+  // chips, e com `bottom` fixo os FABs acabavam sobre as métricas.
   const panelEl = document.querySelector('.panel');
-  if (panelEl) fabEl.style.bottom = (panelEl.offsetHeight + 22) + 'px';
+  if (panelEl) {
+    const base = panelEl.offsetHeight + 22;
+    fabEl.style.bottom = base + 'px';
+    msgEl.style.bottom = (base + 66) + 'px';   // 54 do botão + 12 de respiro
+  }
   // Endereço atual do carro. Some se o bridge ainda não geocodou (ou falhou) —
   // linha vazia com o pin ficaria pior que não mostrar nada.
   const addrEl = document.getElementById('addr-line');
@@ -577,11 +623,56 @@ else {
     btnMute.textContent = muted ? 'Mudo ✓' : 'Mudo';
   });
   btnHang.addEventListener('click', () => stop(''));
-  // Hook de teste/screenshot: ?preview=call abre o popup no load. Inofensivo —
-  // "Ligar agora" continua passando por todos os gates do servidor.
-  if (new URLSearchParams(location.search).get('preview') === 'call') {
-    modal.classList.add('on');
-  }
+
+  // ── Recado ────────────────────────────────────────────────────────────────
+  const mFab  = document.getElementById('msg-fab');
+  const mModal= document.getElementById('msg-modal');
+  const mText = document.getElementById('msg-text');
+  const mLeft = document.getElementById('msg-left');
+  const mSend = document.getElementById('msg-send');
+  const mNo   = document.getElementById('msg-cancel');
+  const MAX   = 100;
+
+  const upLeft = () => { mLeft.textContent = String(MAX - mText.value.length); };
+  mText.addEventListener('input', upLeft);
+  mFab.addEventListener('click', () => {
+    mModal.classList.add('on');
+    upLeft();
+    // Foco só depois do paint, senão o teclado do iOS não sobe.
+    setTimeout(() => mText.focus(), 120);
+  });
+  const closeMsg = () => { mModal.classList.remove('on'); mText.blur(); };
+  mNo.addEventListener('click', closeMsg);
+  mModal.addEventListener('click', (e) => { if (e.target === mModal) closeMsg(); });
+
+  mSend.addEventListener('click', async () => {
+    const text = mText.value.trim();
+    if (!text) { mText.focus(); return; }
+    mSend.disabled = true; mSend.textContent = 'Enviando…';
+    try {
+      const r = await fetch(API('/message'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) { alert(j.error || 'não foi possível enviar'); return; }
+      mText.value = ''; upLeft(); closeMsg();
+      mSend.textContent = 'Enviado ✓';
+      setTimeout(() => { mSend.textContent = 'Enviar'; }, 1500);
+    } catch (_) {
+      alert('falha de rede ao enviar');
+    } finally {
+      mSend.disabled = false;
+      if (mSend.textContent === 'Enviando…') mSend.textContent = 'Enviar';
+    }
+  });
+
+  // Hooks de teste/screenshot: ?preview=call|msg abre o popup no load.
+  // Inofensivo — o envio/chamada continua passando por todos os gates.
+  const pv = new URLSearchParams(location.search).get('preview');
+  if (pv === 'call') modal.classList.add('on');
+  if (pv === 'msg')  { mModal.classList.add('on'); upLeft(); }
   // Fechar/atualizar a aba não pode deixar a chamada aberta no carro.
   window.addEventListener('pagehide', () => { if (callActive) stop(''); });
 })();

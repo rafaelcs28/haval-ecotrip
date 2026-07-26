@@ -45,6 +45,17 @@
             android:showWhenLocked="true"
             android:turnScreenOn="true" />
 
+        <!-- Recado em tela cheia. Mesmas flags da chamada: é o full-screen-intent
+             que faz o sistema colocar isto por cima do app em uso. -->
+        <activity
+            android:name=".MessageActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:launchMode="singleInstance"
+            android:screenOrientation="landscape"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true" />
+
         <service
             android:name=".services.CarTelemetryService"
             android:exported="false"

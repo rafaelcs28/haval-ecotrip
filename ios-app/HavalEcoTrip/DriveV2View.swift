@@ -14,6 +14,7 @@ struct DriveV2View: View {
     @AppStorage("cockpit_voice") private var voiceOn = false
     @State private var showAC = false
     @State private var showMic = false
+    @State private var showMsg = false
     @State private var showControles = false
 
     private var navMode: Bool { route.coords.count > 1 }
@@ -71,6 +72,7 @@ struct DriveV2View: View {
         .sheet(isPresented: $showAC) { ClimaSheetV2() }
         .sheet(isPresented: $showControles) { ControlesSheetV2() }
         .sheet(isPresented: $showMic) { EscutaSheetV2() }
+        .sheet(isPresented: $showMsg) { CarMessageSheet() }
         #if DEBUG
         .task {
             // Auto-abre sheet via `defaults write ... drive_sheet -string clima|controles`
@@ -78,7 +80,8 @@ struct DriveV2View: View {
             if let k = d.string(forKey: "drive_sheet") {
                 d.removeObject(forKey: "drive_sheet")
                 try? await Task.sleep(nanoseconds: 400_000_000)
-                if k == "clima" { showAC = true } else if k == "controles" { showControles = true } else if k == "escuta" { showMic = true }
+                if k == "clima" { showAC = true } else if k == "controles" { showControles = true }
+                else if k == "escuta" { showMic = true } else if k == "recado" { showMsg = true }
             }
         }
         #endif
@@ -270,6 +273,9 @@ struct DriveV2View: View {
             floatButton("snowflake", tint: store.acOn ? DS.teal : DS.text) { showAC = true }
             floatButton("car.fill", tint: store.lockKnown && !store.isLocked ? DS.red : DS.text) { showControles = true }
             floatButton("mic.fill", tint: DS.text) { showMic = true }
+            // Recado: aparece em tela cheia no painel do carro. Fica logo abaixo
+            // da escuta — mesma família de "falar com o carro".
+            floatButton("bubble.left.fill", tint: DS.teal) { showMsg = true }
         }
     }
 
