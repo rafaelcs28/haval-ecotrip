@@ -13474,11 +13474,13 @@ let _spCarLoc   = { lat: 0, lng: 0, ts: 0 };
 let _phoneLoc   = { lat: 0, lng: 0, ts: 0 };
 let _routeToPhone = { distKm: null, etaMin: null, ms: 0, busy: false, atLat: 0, atLng: 0 };
 
-// Endereço reverso do carro cacheado. Refreshed 1x/60s pelo eval das LAs
-// compartilhadas — só quando há share ativo (senão não gasta Nominatim).
+// Endereço reverso do carro cacheado. O refresh é disparado sob demanda — pelo
+// eval das LAs de trajeto compartilhado e pelo /api/share/:token/state (página
+// share.html) — ou seja, só enquanto alguém está de fato acompanhando; sem isso
+// gastaríamos Nominatim de graça. Debounce interno: 60m de deslocamento ou 90s.
 // label = "R. das Palmeiras, 245 · Setor Bueno" (curto pra caber na LA).
 let _lastCarAddress = { lat: 0, lng: 0, label: '', ts: 0 };
-async function _refreshCarAddressForLA() {
+async function _refreshCarAddress() {
   const lat = +state.gps_lat, lng = +state.gps_lng;
   if (!Number.isFinite(lat) || !Number.isFinite(lng) || (!lat && !lng)) return;
   // Se moveu <60m E label ainda fresco (< 90s), reusa (evita spam de Nominatim
@@ -13671,7 +13673,7 @@ async function _startSharedTripLA(token, fromName) {
   await _maybeRouteToPhone(true).catch(() => {});
   // Refresca endereço reverso do carro pra 1a tick (senão sai vazio até o
   // eval seguinte ~15s depois).
-  await _refreshCarAddressForLA().catch(() => {});
+  await _refreshCarAddress().catch(() => {});
   const cs = _sharedTripContentState(recipientName, tokenDestName, tk); cs.from = fromName || 'Rafael';
   // Grava startDistKm no token pra base do progress. Só grava se >0 —
   // shares sem destino conhecido ficam com startDistKm=null → progress=0.
@@ -13720,7 +13722,7 @@ function _evalSharedTripLAs() {
     // Mantém a rota carro→Grasi fresca pra fallback "ETA até você".
     _maybeRouteToPhone().catch(() => {});
     // Refresca endereço do carro (interno tem debounce por movimento+ttl).
-    _refreshCarAddressForLA().catch(() => {});
+    _refreshCarAddress().catch(() => {});
     const cs = _sharedTripContentState(st.recipientName, st.tokenDestName, tk); cs.from = st.from;
     // Se ainda não gravamos startDistKm (share criado sem destino, e destino
     // apareceu depois), grava agora — trava a base do progress.
@@ -17168,6 +17170,10 @@ function _shareAlerts(raw) {
 // Público (token na URL): estado ao vivo do carro pra página de compartilhamento.
 app.get('/api/share/:token/state', (req, res) => {
   if (!_shareValid(req.params.token)) return res.status(404).json({ error: 'link expirado' });
+  // Endereço do carro pra página compartilhada. Fire-and-forget: a resposta
+  // desta chamada usa o cache atual e o refresh alimenta a PRÓXIMA (a página
+  // faz polling), pra não pendurar o /state no Nominatim.
+  _refreshCarAddress().catch(() => {});
   const tkObj = _shareTokens[req.params.token] || {};
   const tr = state.current_trip || {};
   const on = state.engine_state === '1' || state.engine_state === 1 || +state.driving_ready === 1;
@@ -17192,6 +17198,7 @@ app.get('/api/share/:token/state', (req, res) => {
   res.json({
     on,
     lat: +state.gps_lat || 0, lng: +state.gps_lng || 0,
+    address: _lastCarAddress.label || '',
     speedKmh: Math.max(0, +state.speed_kmh || 0),
     soc: Math.round(+state.soc_pct || 0),
     fuelL: +state.fuel_l || 0,

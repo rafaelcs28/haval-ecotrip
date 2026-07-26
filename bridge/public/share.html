@@ -21,6 +21,10 @@
   .panel { position:absolute; left:10px; right:10px; bottom:10px; z-index:500;
            background:rgba(22,24,29,.92); border:1px solid rgba(255,255,255,.08); border-radius:16px;
            padding:14px; backdrop-filter:blur(8px); }
+  /* Endereço atual do carro — linha discreta no topo do painel. */
+  .addr { display:flex; align-items:center; gap:6px; margin-bottom:9px;
+          font-size:12.5px; font-weight:600; color:var(--muted); line-height:1.3; }
+  .addr svg { flex:none; color:var(--teal); }
   .eta { font-size:15px; font-weight:700; margin-bottom:10px; display:flex; align-items:center; gap:8px; }
   .eta .km { color:var(--teal); }
   .dest { font-size:15px; font-weight:700; margin-bottom:8px; padding:10px 12px; border-radius:12px;
@@ -130,6 +134,11 @@
 </div>
 <div class="speed-sign" id="speed-sign"><div class="num" id="v-spd">—</div><div class="u">km/h</div></div>
 <div class="panel">
+  <!-- Onde o carro está agora (reverse-geocode do bridge) -->
+  <div class="addr" id="addr-line" style="display:none">
+    <svg viewBox="0 0 24 24" fill="currentColor" width="13" height="13"><path d="M12 2a7 7 0 0 0-7 7c0 5.2 7 13 7 13s7-7.8 7-13a7 7 0 0 0-7-7zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5z"/></svg>
+    <span id="addr-text"></span>
+  </div>
   <div class="dest" id="dest-line" style="display:none"></div>
   <div class="eta" id="eta-line"><span class="ask">Toque em <a onclick="askGeo()">permitir localização</a> para ver a distância até você.</span></div>
   <div class="grid">
@@ -261,6 +270,13 @@ async function poll(){
   // chips, e com `bottom` fixo o FAB acabava sobre as métricas.
   const panelEl = document.querySelector('.panel');
   if (panelEl) fabEl.style.bottom = (panelEl.offsetHeight + 22) + 'px';
+  // Endereço atual do carro. Some se o bridge ainda não geocodou (ou falhou) —
+  // linha vazia com o pin ficaria pior que não mostrar nada.
+  const addrEl = document.getElementById('addr-line');
+  if (j.address) {
+    document.getElementById('addr-text').textContent = j.address;
+    addrEl.style.display = 'flex';
+  } else { addrEl.style.display = 'none'; }
   document.getElementById('v-fuel').textContent = (j.fuelL != null && j.fuelL > 0) ? j.fuelL.toFixed(1).replace('.', ',') : '—';
   document.getElementById('v-soc').textContent  = j.soc || '—';
   document.getElementById('v-ev').textContent   = j.evRemainKm  || '—';
