@@ -6388,7 +6388,9 @@ app.use('/api', (req, res, next) => {
       req.path === '/pair/redeem' ||
       req.path === '/mapkit/token') return next();   // mapkit/token: JWT só vale pra Apple Maps, não dá acesso a nada do bridge
   // Compartilhamento de status: páginas públicas validadas pelo token na própria URL.
-  if (/^\/share\/[^/]+\/(state|eta)$/.test(req.path)) return next();
+  // `call` e `call/end`: a página share.html liga pro carro; o gate é o token do
+  // share (+ cooldown/TTL/owner na própria rota), não o token do bridge.
+  if (/^\/share\/[^/]+\/(state|eta|call|call\/end)$/.test(req.path)) return next();
   // Trajeto compartilhado: /api/shared-trip/:token — token da URL faz o gate.
   if (/^\/shared-trip\/[^/]+$/.test(req.path)) return next();
   // Upload de gravação: o carro autentica com nonce de uso único (X-Rec-Token),
@@ -12334,8 +12336,16 @@ wss.on('connection', _handleWsConnection);
 const audioClients = new Set();
 function _handleAudioWs(ws, req) {
   if (BRIDGE_TOKEN_HASH) {
-    const token = new URL(req.url, 'http://localhost').searchParams.get('token') || '';
-    if (token !== BRIDGE_TOKEN_HASH && sha256hex(token) !== BRIDGE_TOKEN_HASH) {
+    const q = new URL(req.url, 'http://localhost').searchParams;
+    const token = q.get('token') || '';
+    // Credencial alternativa: token de share ativo (?share=…). Permite que a
+    // página do trajeto compartilhado (share.html) participe do áudio da
+    // chamada sem receber o token do bridge. Só vale enquanto o share existe
+    // E há uma chamada aberta por ESSE share (ver _shareCallOwner) — sem isso
+    // o link viraria escuta permanente da cabine.
+    const share = q.get('share') || '';
+    const shareOk = share && _shareValid(share) && _shareCallOwner === share;
+    if (!shareOk && token !== BRIDGE_TOKEN_HASH && sha256hex(token) !== BRIDGE_TOKEN_HASH) {
       ws.close(4001, 'unauthorized'); return;
     }
   }
@@ -12406,6 +12416,78 @@ app.post('/api/call/start', requireAuth, (req, res) => {
 app.post('/api/call/end', requireAuth, (req, res) => {
   if (!mqttClient?.connected) return res.status(503).json({ error: 'MQTT offline' });
   mqttClient.publish(`${MQTT_PREFIX}/cmd/call_end`, '1', { qos: 1, retain: false });
+  _shareCallOwner = null; _shareCallStartedMs = 0;
+  res.json({ ok: true });
+});
+
+// ── Chamada iniciada por quem recebeu o link do trajeto ────────────────────
+// A página share.html tem um botão "Ligar pro carro". Gate = token do share na
+// URL (mesmo do /api/share/:token/state), NÃO o token do bridge.
+//
+// Guardas, porque isto abre áudio ao vivo na cabine:
+//  · share tem que estar válido (não expirado/revogado);
+//  · cooldown de 2 min por share — impede insistência/abuso;
+//  · uma chamada por vez no bridge (_shareCallOwner) e o /ws/audio só aceita
+//    ?share=<token> enquanto ESSE share é o dono da chamada corrente;
+//  · o dono recebe push com o nome de quem ligou (auditoria).
+// TTL da chamada: 10 min. Depois disso o owner cai e o WS perde credencial.
+let _shareCallOwner = null;      // token do share que abriu a chamada corrente
+let _shareCallStartedMs = 0;
+const SHARE_CALL_TTL_MS      = 10 * 60_000;
+const SHARE_CALL_COOLDOWN_MS = 2 * 60_000;
+const _shareCallLast = new Map();   // token → ms da última tentativa
+
+function _shareCallExpire() {
+  if (_shareCallOwner && Date.now() - _shareCallStartedMs > SHARE_CALL_TTL_MS) {
+    _shareCallOwner = null; _shareCallStartedMs = 0;
+  }
+}
+setInterval(_shareCallExpire, 30_000).unref?.();
+
+app.post('/api/share/:token/call', (req, res) => {
+  const token = String(req.params.token);
+  if (!_shareValid(token)) return res.status(404).json({ error: 'link expirado' });
+  if (!mqttClient?.connected) return res.status(503).json({ error: 'carro indisponível agora' });
+  _shareCallExpire();
+  const now = Date.now();
+  const last = _shareCallLast.get(token) || 0;
+  if (now - last < SHARE_CALL_COOLDOWN_MS) {
+    const wait = Math.ceil((SHARE_CALL_COOLDOWN_MS - (now - last)) / 1000);
+    return res.status(429).json({ error: `aguarde ${wait}s pra ligar de novo`, retryAfterSec: wait });
+  }
+  if (_shareCallOwner && _shareCallOwner !== token) {
+    return res.status(409).json({ error: 'já existe uma chamada em andamento' });
+  }
+  // Multimídia dormindo: cmd/call_start não chega no APK (fora do MQTT). Recusa
+  // aqui também — a UI já esconde o botão, mas o gate real é server-side (e
+  // sem isto o cooldown seria queimado numa chamada que nunca aconteceu).
+  const apkAge = Date.now() - (state.last_apk_ms || 0);
+  if (!(state.last_apk_ms > 0) || apkAge > 90_000) {
+    return res.status(409).json({ error: 'o carro está dormindo — tente quando estiver em uso' });
+  }
+  const tk = _shareTokens[token] || {};
+  const caller = tk.recipientName || 'Contato do link';
+  const callId = String(now);
+  _shareCallLast.set(token, now);
+  _shareCallOwner = token; _shareCallStartedMs = now;
+  mqttClient.publish(`${MQTT_PREFIX}/cmd/call_start`,
+    JSON.stringify({ callId, caller, message: `${caller} está ligando` }),
+    { qos: 1, retain: false });
+  console.log(`[share-call] ${caller} iniciou chamada (token ${token.slice(0, 8)}…)`);
+  // Auditoria pro dono — ele precisa saber que alguém do link abriu áudio.
+  sendPush('📞 Chamada pelo link do trajeto',
+    `${caller} está ligando pro carro.`, 'share_call', { tag: 'share_call' });
+  addEvent('share_call', `Chamada pelo link: ${caller}`);
+  res.json({ ok: true, callId });
+});
+
+app.post('/api/share/:token/call/end', (req, res) => {
+  const token = String(req.params.token);
+  if (!_shareValid(token)) return res.status(404).json({ error: 'link expirado' });
+  if (_shareCallOwner === token) { _shareCallOwner = null; _shareCallStartedMs = 0; }
+  if (mqttClient?.connected) {
+    mqttClient.publish(`${MQTT_PREFIX}/cmd/call_end`, '1', { qos: 1, retain: false });
+  }
   res.json({ ok: true });
 });
 
@@ -12650,6 +12732,11 @@ mqttClient.on('message', (topic, payload, packet) => {
     try {
       const ev = JSON.parse(payload.toString());
       _callState = { ...ev, ts: Date.now() };
+      // Carro encerrou (ou recusou): solta o share dono da chamada, senão o
+      // ?share=<token> seguiria valendo como credencial do /ws/audio até o TTL.
+      if (/end|reject|fail/i.test(String(ev.state || ''))) {
+        _shareCallOwner = null; _shareCallStartedMs = 0;
+      }
       const msg = `call:${ev.state}`;
       for (const ws of audioClients) {
         if (ws.readyState === WebSocket.OPEN) ws.send(msg);
@@ -13594,7 +13681,10 @@ async function _startSharedTripLA(token, fromName) {
     cs.progress = 0;   // 1a tick sempre em 0 (você acabou de sair)
   }
   const now = Date.now();
-  const shareURL = `${_shareBaseUrl()}/shared-trip/${token}`;
+  // share.html (trajeto AO VIVO, lê /api/share/:token/state) — NÃO /shared-trip/,
+  // que serve a página de uma viagem CONCLUÍDA e consulta o store _sharedTrips.
+  // Com /shared-trip/<token> o link da LA caía em "link expirado ou inválido".
+  const shareURL = `${_shareBaseUrl()}/share.html?t=${token}`;
   _sharedTripLAs[token] = { token, from: fromName || 'Rafael', recipientName, tokenDestName,
                             lastDestName: cs.destName || null,
                             startedMs: now, lastPushMs: now, laActive: true };

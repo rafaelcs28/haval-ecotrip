@@ -59,6 +59,55 @@
   .expired { position:absolute; inset:0; z-index:900; display:none; align-items:center; justify-content:center;
              background:rgba(0,0,0,.85); text-align:center; padding:30px; }
   .car-ico { background:none; border:none; }
+
+  /* ── Ligar pro carro ─────────────────────────────────────────────────── */
+  /* FAB no canto direito, ACIMA do painel de métricas. O painel tem altura
+     variável (destino, paradas, chips), então o `bottom` real é calculado no
+     JS a cada render — este valor é só o fallback do 1º paint. */
+  .call-fab { position:absolute; right:14px; bottom:240px; z-index:650;
+              width:54px; height:54px; border-radius:50%; border:none; cursor:pointer;
+              background:#22c55e; color:#04220f; display:none;
+              align-items:center; justify-content:center;
+              box-shadow:0 4px 14px rgba(0,0,0,.55), 0 0 0 4px rgba(34,197,94,.18); }
+  .call-fab:active { transform:scale(.94); }
+  .call-fab.on { display:flex; }
+
+  .modal { position:absolute; inset:0; z-index:900; display:none;
+           align-items:center; justify-content:center; padding:22px;
+           background:rgba(0,0,0,.78); backdrop-filter:blur(3px); }
+  .modal.on { display:flex; }
+  .modal-box { background:#12141a; border:1px solid rgba(255,255,255,.10);
+               border-radius:18px; padding:22px 20px; max-width:360px; width:100%;
+               box-shadow:0 18px 50px rgba(0,0,0,.7); }
+  .modal-ico { font-size:34px; text-align:center; }
+  .modal-title { font-size:19px; font-weight:800; text-align:center; margin-top:8px; }
+  .modal-text { font-size:13.5px; line-height:1.5; color:#cbd5e1; margin-top:12px; }
+  .modal-text b { color:#f1f5f9; }
+  .modal-actions { display:flex; gap:10px; margin-top:20px; }
+  .btn-ghost, .btn-call, .btn-mute, .btn-hang {
+              flex:1; border-radius:12px; padding:13px 10px; font-size:14px;
+              font-weight:700; cursor:pointer; border:1px solid transparent; }
+  .btn-ghost { background:rgba(255,255,255,.07); color:#e2e8f0;
+               border-color:rgba(255,255,255,.10); }
+  .btn-call  { background:#22c55e; color:#04220f; }
+  .btn-call:disabled { opacity:.55; cursor:default; }
+
+  .callbar { position:absolute; left:10px; right:10px; top:52px; z-index:700;
+             display:none; align-items:center; gap:8px;
+             background:#12141a; border:1px solid rgba(34,197,94,.35);
+             border-radius:14px; padding:9px 11px; font-size:13px; font-weight:600;
+             box-shadow:0 6px 20px rgba(0,0,0,.6); }
+  .callbar.on { display:flex; }
+  .callbar .dot { width:9px; height:9px; border-radius:50%; background:#22c55e;
+                  flex:none; animation:cpulse 1.3s infinite; }
+  @keyframes cpulse { 0%,100%{opacity:1} 50%{opacity:.25} }
+  .callbar-time { color:var(--muted); font-variant-numeric:tabular-nums; margin-left:auto; }
+  .callbar .btn-mute, .callbar .btn-hang { flex:none; padding:7px 11px; font-size:12px; }
+  .btn-mute { background:rgba(255,255,255,.08); color:#e2e8f0;
+              border-color:rgba(255,255,255,.12); }
+  .btn-mute.muted { background:rgba(251,146,60,.20); color:var(--orange);
+                    border-color:rgba(251,146,60,.45); }
+  .btn-hang { background:#ef4444; color:#fff; }
 </style>
 </head>
 <body>
@@ -96,11 +145,48 @@
   </div>
   <div class="chips" id="chips"></div>
 </div>
+<!-- Ligar pro carro: botão flutuante sobre o mapa -->
+<button class="call-fab" id="call-fab" title="Ligar pro carro">
+  <svg viewBox="0 0 24 24" fill="currentColor" width="22" height="22"><path d="M6.6 10.8c1.4 2.8 3.8 5.1 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1-9.4 0-17-7.6-17-17 0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.2.2 2.4.6 3.6.1.4 0 .7-.2 1l-2.3 2.2z"/></svg>
+</button>
+
+<!-- Popup explicativo (confirmação antes de abrir áudio na cabine) -->
+<div class="modal" id="call-modal">
+  <div class="modal-box">
+    <!-- SVG em vez de emoji: independe da fonte de emoji do device. -->
+    <div class="modal-ico">
+      <svg viewBox="0 0 24 24" fill="#22c55e" width="40" height="40"><path d="M6.6 10.8c1.4 2.8 3.8 5.1 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1-9.4 0-17-7.6-17-17 0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.2.2 2.4.6 3.6.1.4 0 .7-.2 1l-2.3 2.2z"/></svg>
+    </div>
+    <div class="modal-title">Ligar pro carro?</div>
+    <div class="modal-text">
+      A multimídia do carro vai <b>tocar um aviso</b> e a chamada é atendida
+      automaticamente em <b>10 segundos</b>, em viva-voz.
+      <br><br>
+      Você vai <b>falar e ouvir pelo seu celular</b> — o navegador vai pedir
+      permissão do microfone. O dono do carro é avisado de que você ligou.
+    </div>
+    <div class="modal-actions">
+      <button class="btn-ghost" id="call-cancel">Cancelar</button>
+      <button class="btn-call" id="call-confirm">Ligar agora</button>
+    </div>
+  </div>
+</div>
+
+<!-- Barra de chamada em andamento -->
+<div class="callbar" id="callbar">
+  <span class="dot"></span>
+  <span id="call-status">chamando…</span>
+  <span class="callbar-time" id="call-time"></span>
+  <button class="btn-mute" id="call-mute">Mudo</button>
+  <button class="btn-hang" id="call-hang">Desligar</button>
+</div>
+
 <div class="expired" id="expired"><div><div style="font-size:40px">🔒</div><div style="font-size:18px;font-weight:700;margin-top:8px">Link expirado</div><div style="color:var(--muted);margin-top:6px">Peça um novo link ao dono do carro.</div><div id="exp-tok" style="color:#475569;margin-top:14px;font-size:11px;word-break:break-all"></div></div></div>
 
 <script>
 const TOKEN = new URLSearchParams(location.search).get('t') || '';
 const API = (p) => `/api/share/${TOKEN}${p}`;
+let callActive = false;   // usado pelo render() pra esconder o FAB durante a chamada
 const map = L.map('map', { zoomControl:false, attributionControl:false }).setView([-16.6869,-49.2648], 14);
 // Voyager (claro, ruas legíveis) em vez de dark_all — o destinatário precisa ler
 // as ruas no zoom afastado. Os painéis flutuantes seguem escuros sobre o mapa claro.
@@ -159,9 +245,22 @@ async function poll(){
   const speedStale = j.speedAgeMs != null && j.speedAgeMs > 10000;
   const sign = document.getElementById('speed-sign');
   if (j.on && !speedStale) {
-    document.getElementById('v-spd').textContent = Math.round(j.speedKmh);
+    // adjSpeed: mesma correção do velocímetro do carro usada no app (Fmt.adjSpeed)
+    // e na LA. O bridge manda speedKmh cru — sem isso a página mostrava ~7% menos.
+    const s = Math.max(0, j.speedKmh || 0);
+    document.getElementById('v-spd').textContent = Math.trunc(s * 1.07 - s / 180 * 0.02);
     sign.style.display = 'flex';
   } else { sign.style.display = 'none'; }
+  // Chamada exige a multimídia ACORDADA (cmd/call_start só chega se o APK está
+  // no MQTT). Motor ligado NÃO é o critério — o carro pode estar parado com a
+  // central acesa. Carro dormindo → botão nem aparece.
+  window.carReachable = j.apkAgeMs != null && j.apkAgeMs < 90000;
+  const fabEl = document.getElementById('call-fab');
+  fabEl.classList.toggle('on', window.carReachable && !callActive);
+  // Reposiciona acima do painel: ele cresce/encolhe com destino, paradas e
+  // chips, e com `bottom` fixo o FAB acabava sobre as métricas.
+  const panelEl = document.querySelector('.panel');
+  if (panelEl) fabEl.style.bottom = (panelEl.offsetHeight + 22) + 'px';
   document.getElementById('v-fuel').textContent = (j.fuelL != null && j.fuelL > 0) ? j.fuelL.toFixed(1).replace('.', ',') : '—';
   document.getElementById('v-soc').textContent  = j.soc || '—';
   document.getElementById('v-ev').textContent   = j.evRemainKm  || '—';
@@ -257,6 +356,161 @@ else {
   window.addEventListener('focus',    rearm);
   window.addEventListener('online',   rearm);
 }
+
+// ── Ligar pro carro ─────────────────────────────────────────────────────────
+// Áudio full-duplex com a cabine pelo mesmo relay do app iOS: WebSocket
+// /ws/audio trocando PCM16 LE mono 8 kHz. Credencial = ?share=<token> (o
+// bridge só aceita enquanto ESSE share é o dono da chamada corrente).
+//
+// Captura: getUserMedia → AudioContext → ScriptProcessor → decima pra 8k →
+//          Int16 → ws.send(binário).
+// Playback: ws.onmessage (ArrayBuffer) → Int16 → Float32 → fila de AudioBuffer,
+//          agendada em sequência pra não picotar.
+(() => {
+  const RATE = 8000;
+  const fab     = document.getElementById('call-fab');
+  const modal   = document.getElementById('call-modal');
+  const btnOk   = document.getElementById('call-confirm');
+  const btnNo   = document.getElementById('call-cancel');
+  const bar     = document.getElementById('callbar');
+  const elStat  = document.getElementById('call-status');
+  const elTime  = document.getElementById('call-time');
+  const btnMute = document.getElementById('call-mute');
+  const btnHang = document.getElementById('call-hang');
+
+  let ws = null, ac = null, micStream = null, node = null, srcNode = null;
+  let muted = false, playAt = 0, startedMs = 0, timer = null;
+
+  const setStatus = (t) => { elStat.textContent = t; };
+
+  function tick() {
+    if (!startedMs) { elTime.textContent = ''; return; }
+    const s = Math.floor((Date.now() - startedMs) / 1000);
+    elTime.textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  }
+
+  async function startAudio() {
+    micStream = await navigator.mediaDevices.getUserMedia({
+      audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+    });
+    ac = new (window.AudioContext || window.webkitAudioContext)();
+    await ac.resume();
+    playAt = ac.currentTime;
+
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    ws = new WebSocket(`${proto}//${location.host}/ws/audio?share=${encodeURIComponent(TOKEN)}`);
+    ws.binaryType = 'arraybuffer';
+
+    ws.onopen = () => setStatus('conectado · atende em ~10 s');
+    ws.onclose = () => { if (callActive) stop('chamada encerrada'); };
+    ws.onerror = () => { if (callActive) stop('falha no áudio'); };
+    ws.onmessage = (ev) => {
+      // Texto = ciclo da chamada (call:ringing / call:accepted / call:ended).
+      if (typeof ev.data === 'string') {
+        if (ev.data.includes('accepted')) { setStatus('em chamada'); if (!startedMs) startedMs = Date.now(); }
+        else if (ev.data.includes('ringing')) setStatus('tocando no carro…');
+        else if (ev.data.includes('ended')) stop('chamada encerrada');
+        return;
+      }
+      if (!ac) return;
+      const i16 = new Int16Array(ev.data);
+      if (!i16.length) return;
+      const buf = ac.createBuffer(1, i16.length, RATE);
+      const ch = buf.getChannelData(0);
+      for (let i = 0; i < i16.length; i++) ch[i] = i16[i] / 32768;
+      const src = ac.createBufferSource();
+      src.buffer = buf; src.connect(ac.destination);
+      // Se a fila atrasou (aba em background), realinha pra não acumular delay.
+      if (playAt < ac.currentTime) playAt = ac.currentTime + 0.04;
+      src.start(playAt);
+      playAt += buf.duration;
+    };
+
+    // Captura do mic. ScriptProcessor é deprecado mas é o caminho com melhor
+    // compatibilidade em Safari iOS sem servir um arquivo de AudioWorklet.
+    srcNode = ac.createMediaStreamSource(micStream);
+    node = ac.createScriptProcessor(2048, 1, 1);
+    const ratio = ac.sampleRate / RATE;
+    node.onaudioprocess = (e) => {
+      if (!ws || ws.readyState !== 1 || muted) return;
+      const inp = e.inputBuffer.getChannelData(0);
+      const outLen = Math.floor(inp.length / ratio);
+      const out = new Int16Array(outLen);
+      for (let i = 0; i < outLen; i++) {
+        const v = inp[Math.floor(i * ratio)];
+        out[i] = Math.max(-32768, Math.min(32767, Math.round(v * 32767)));
+      }
+      ws.send(out.buffer);
+    };
+    srcNode.connect(node);
+    // ScriptProcessor só roda se estiver conectado ao destino; ganho 0 evita
+    // que o próprio microfone volte pelo alto-falante do celular.
+    const sink = ac.createGain(); sink.gain.value = 0;
+    node.connect(sink); sink.connect(ac.destination);
+  }
+
+  function teardown() {
+    try { node && (node.onaudioprocess = null, node.disconnect()); } catch (_) {}
+    try { srcNode && srcNode.disconnect(); } catch (_) {}
+    try { micStream && micStream.getTracks().forEach(t => t.stop()); } catch (_) {}
+    try { ac && ac.close(); } catch (_) {}
+    try { ws && ws.close(); } catch (_) {}
+    node = srcNode = micStream = ac = ws = null;
+  }
+
+  function stop(msg) {
+    if (!callActive) return;
+    callActive = false;
+    if (timer) { clearInterval(timer); timer = null; }
+    startedMs = 0; muted = false;
+    btnMute.classList.remove('muted'); btnMute.textContent = 'Mudo';
+    teardown();
+    fetch(API('/call/end'), { method: 'POST' }).catch(() => {});
+    bar.classList.remove('on');
+    if (msg) { setStatus(msg); }
+  }
+
+  fab.addEventListener('click', () => modal.classList.add('on'));
+  btnNo.addEventListener('click', () => modal.classList.remove('on'));
+  modal.addEventListener('click', (e) => { if (e.target === modal) modal.classList.remove('on'); });
+
+  btnOk.addEventListener('click', async () => {
+    btnOk.disabled = true; btnOk.textContent = 'Ligando…';
+    try {
+      const r = await fetch(API('/call'), { method: 'POST' });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) { alert(j.error || 'não foi possível ligar agora'); return; }
+      callActive = true;
+      modal.classList.remove('on');
+      fab.classList.remove('on');
+      bar.classList.add('on');
+      setStatus('tocando no carro…');
+      timer = setInterval(tick, 1000);
+      await startAudio();
+    } catch (e) {
+      // Negar o microfone cai aqui — encerra a chamada no carro pra não deixar
+      // a multimídia tocando sem ninguém do outro lado.
+      stop('');
+      alert('Precisa liberar o microfone pra falar com o carro.');
+    } finally {
+      btnOk.disabled = false; btnOk.textContent = 'Ligar agora';
+    }
+  });
+
+  btnMute.addEventListener('click', () => {
+    muted = !muted;
+    btnMute.classList.toggle('muted', muted);
+    btnMute.textContent = muted ? 'Mudo ✓' : 'Mudo';
+  });
+  btnHang.addEventListener('click', () => stop(''));
+  // Hook de teste/screenshot: ?preview=call abre o popup no load. Inofensivo —
+  // "Ligar agora" continua passando por todos os gates do servidor.
+  if (new URLSearchParams(location.search).get('preview') === 'call') {
+    modal.classList.add('on');
+  }
+  // Fechar/atualizar a aba não pode deixar a chamada aberta no carro.
+  window.addEventListener('pagehide', () => { if (callActive) stop(''); });
+})();
 </script>
 </body>
 </html>
