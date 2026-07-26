@@ -6394,7 +6394,10 @@ app.use('/api', (req, res, next) => {
   // Compartilhamento de status: páginas públicas validadas pelo token na própria URL.
   // `call` e `call/end`: a página share.html liga pro carro; o gate é o token do
   // share (+ cooldown/TTL/owner na própria rota), não o token do bridge.
-  if (/^\/share\/[^/]+\/(state|eta|call|call\/end|message)$/.test(req.path)) return next();
+  if (/^\/share\/[^/]+\/(state|eta|call|call\/end|message|message-audio)$/.test(req.path)) return next();
+  // Áudio do recado: quem baixa é o MediaPlayer do carro, que não manda header
+  // de Authorization. O gate é o id aleatório de 24 hex no path (+ TTL de 24h).
+  if (/^\/voice\/[a-f0-9]{24}\.[a-z0-9]{2,4}$/.test(req.path)) return next();
   // Trajeto compartilhado: /api/shared-trip/:token — token da URL faz o gate.
   if (/^\/shared-trip\/[^/]+$/.test(req.path)) return next();
   // Upload de gravação: o carro autentica com nonce de uso único (X-Rec-Token),
@@ -12509,9 +12512,15 @@ function _voiceExt(mime) {
 // hex e é o carro (não um browser logado) que precisa baixar; o requireAuth
 // global tem esta rota na whitelist.
 app.get('/api/voice/:id', (req, res) => {
-  const id = String(req.params.id).replace(/[^a-f0-9.]/gi, '');
+  // Valida o formato inteiro em vez de "limpar" caracteres: o replace anterior
+  // comia letras da extensão fora de a-f (o 'm' de .m4a, o 'w' de .webm) e
+  // sempre dava 404. Só id hex + extensão conhecida passam.
+  const id = String(req.params.id);
+  if (!/^[a-f0-9]{24}\.(m4a|webm|ogg|mp3)$/.test(id)) {
+    return res.status(404).json({ error: 'áudio não encontrado' });
+  }
   const fp = path.join(VOICE_DIR, id);
-  if (!id || !fp.startsWith(VOICE_DIR) || !fs.existsSync(fp)) {
+  if (!fp.startsWith(VOICE_DIR) || !fs.existsSync(fp)) {
     return res.status(404).json({ error: 'áudio não encontrado' });
   }
   const ext = path.extname(fp).slice(1);
