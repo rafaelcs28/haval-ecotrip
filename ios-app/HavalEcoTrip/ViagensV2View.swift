@@ -219,6 +219,8 @@ struct ViagensV2View: View {
     @State private var search = ""
     @State private var showAll = false
     @State private var routeTrip: Trip?
+    // Viagem cujo TRECHO (origem→destino) está sendo comparado com o histórico.
+    @State private var compareTrip: Trip?
     // Trajeto por viagem (vel. máx + mini-mapa + share/GPX) — carrega async ao expandir.
     @State private var featCache: [String: FeatData] = [:]
     @State private var loadingIds: Set<String> = []
@@ -313,10 +315,21 @@ struct ViagensV2View: View {
                     try? await Task.sleep(for: .seconds(0.6)); routeTrip = t
                 } else if d.integer(forKey: "v2_insights") == 1 {
                     try? await Task.sleep(for: .seconds(0.6)); showInsights = true
+                } else if d.integer(forKey: "v2_compare") > 0 {
+                    // Abre o comparativo de trecho da N-ésima viagem filtrada
+                    // (1 = a mais recente). Atalho de teste sem depender de toque.
+                    let idx = d.integer(forKey: "v2_compare") - 1
+                    if filtered.indices.contains(idx) {
+                        try? await Task.sleep(for: .seconds(0.8)); compareTrip = filtered[idx]
+                    }
                 }
                 #endif
             }
             .sheet(item: $routeTrip) { t in TrajetoV2Sheet(trip: t) }
+            .sheet(item: $compareTrip) { t in
+                RouteCompareSheet(trips: filtered, priceKwh: car.priceKwh, priceGas: car.priceGas,
+                                  kmPerLGas: car.kmPerL, focusTrip: t)
+            }
             .alert("Renomear viagem", isPresented: Binding(get: { renamingTrip != nil }, set: { if !$0 { renamingTrip = nil } })) {
                 TextField("Nome", text: $renameText)
                 Button("Salvar") {
@@ -461,20 +474,29 @@ struct ViagensV2View: View {
                         .frame(height: 76)
                         .clipShape(RoundedRectangle(cornerRadius: 10))
                 }
-                HStack(spacing: 18) {
+                // 4 ações não cabem em texto na largura do iPhone (quebrava
+                // "Comparar" em duas linhas) → compartilhar vira ícone.
+                HStack(spacing: 14) {
                     Button { routeTrip = t } label: {
-                        Text("Ver trajeto →").font(.system(size: 13, weight: .bold)).foregroundStyle(DS.green)
-                    }.buttonStyle(.plain)
-                    Spacer()
+                        Text("Trajeto →").font(.system(size: 13, weight: .bold)).foregroundStyle(DS.green)
+                    }.buttonStyle(.plain).fixedSize()
+                    Button { compareTrip = t } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "chart.bar.xaxis").font(.system(size: 11, weight: .bold))
+                            Text("Comparar").font(.system(size: 13, weight: .bold))
+                        }.foregroundStyle(DS.teal)
+                    }.buttonStyle(.plain).fixedSize()
+                    Spacer(minLength: 4)
                     if let c = d?.card {
                         ShareLink(item: c, preview: SharePreview("Viagem", image: Image(systemName: "map"))) {
-                            Text("Compartilhar").font(.system(size: 13, weight: .semibold)).foregroundStyle(DS.text2)
-                        }
+                            Image(systemName: "square.and.arrow.up")
+                                .font(.system(size: 14, weight: .semibold)).foregroundStyle(DS.text2)
+                        }.fixedSize()
                     }
                     if let g = d?.gpx {
                         ShareLink(item: g) {
                             Text("GPX").font(.system(size: 13, weight: .semibold)).foregroundStyle(DS.text2)
-                        }
+                        }.fixedSize()
                     }
                 }
             }
@@ -941,7 +963,7 @@ struct InsightsV2View: View {
         .sheet(isPresented: $showByMode) { ModeEconomySheet() }
         .sheet(isPresented: $showEcoScore) { EcoScoreSheet(trips: loader.trips) }
         .sheet(isPresented: $showTemp) { TempConsumptionSheet(trips: loader.trips) }
-        .sheet(isPresented: $showRoutes) { RouteCompareSheet(trips: loader.trips, priceKwh: car.priceKwh, priceGas: car.priceGas, kmPerLGas: car.kmPerL) }
+        .sheet(isPresented: $showRoutes) { RouteCompareSheet(trips: periodTrips, priceKwh: car.priceKwh, priceGas: car.priceGas, kmPerLGas: car.kmPerL) }
     }
 
     // MARK: hero — economia vs gasolina
@@ -1127,43 +1149,55 @@ struct InsightsV2View: View {
 
     // MARK: rotas comparadas — melhor viagem vs média do trajeto mais recorrente
 
-    private var topRoute: (name: String, trips: [Trip])? {
-        func place(_ known: String?, _ c: CLLocationCoordinate2D?) -> String {
-            if let k = known, !k.isEmpty { return k }
-            if let c { return String(format: "%.3f,%.3f", c.latitude, c.longitude) }
-            return "?"
-        }
-        var map: [String: [Trip]] = [:]
-        for t in loader.trips where t.distKm > 0.3 {
-            map[place(t.knownStart, t.startCoord) + " → " + place(t.knownEnd, t.endCoord), default: []].append(t)
-        }
-        guard let best = map.filter({ $0.value.count >= 3 && !$0.key.contains(",") })
-            .max(by: { $0.value.count < $1.value.count }) else { return nil }
-        return (best.key, best.value)
+    /// Trechos mais repetidos do HISTÓRICO (não do período) — o card é uma porta
+    /// de entrada pro comparativo; recorte curto esconderia rotas conhecidas.
+    /// Chave canônica geográfica em RouteKey (ver RouteCompareSheet).
+    private var topRoutes: [RouteGroup] {
+        Array(RouteGroup.build(from: loader.trips).prefix(3))
     }
 
     @ViewBuilder private var routesCard: some View {
-        if let r = topRoute {
-            let valid = r.trips.filter { $0.consumo > 0 }
-            if valid.count >= 3, let melhor = valid.min(by: { $0.consumo < $1.consumo }) {
-                let avgKm = valid.reduce(0.0) { $0 + $1.distKm } / Double(valid.count)
-                let avgMin = valid.reduce(0.0) { $0 + $1.timeSec } / Double(valid.count) / 60
-                let avgCons = valid.reduce(0.0) { $0 + $1.consumo } / Double(valid.count)
-                let pct = Int(((melhor.consumo - avgCons) / avgCons * 100).rounded())
-                let df = DateFormatter()
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("ROTAS COMPARADAS · \(r.name.uppercased())")
+        let rs = topRoutes
+        if !rs.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text("TRECHOS MAIS FREQUENTES")
                         .font(.system(size: 8.5, weight: .bold)).foregroundStyle(DS.muted).tracking(1)
-                        .lineLimit(1).minimumScaleFactor(0.8)
-                    routeLine("média \(valid.count)×", "\(Fmt.km(avgKm)) km · \(Fmt.int(avgMin)) min · \(Fmt.dec1(avgCons)) kWh/100", nil, DS.text)
-                    routeLine("melhor · \({ df.locale = Locale(identifier: "pt_BR"); df.dateFormat = "d MMM"; return df.string(from: melhor.date) }())",
-                              "\(Fmt.km(melhor.distKm)) km · \(Fmt.int(melhor.timeSec / 60)) min · \(Fmt.dec1(melhor.consumo)) kWh/100",
-                              pct < 0 ? "\(pct)%" : nil, DS.green)
+                    Spacer()
+                    Text("comparar →").font(.system(size: 10.5, weight: .bold)).foregroundStyle(DS.teal)
                 }
-                .padding(14)
-                .background(DS.panel, in: RoundedRectangle(cornerRadius: 16))
-                .overlay(RoundedRectangle(cornerRadius: 16).stroke(DS.border, lineWidth: 1))
+                ForEach(rs) { g in
+                    HStack(spacing: 8) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(g.name).font(.system(size: 12.5, weight: .semibold))
+                                .foregroundStyle(DS.text).lineLimit(1).minimumScaleFactor(0.8)
+                            Text("\(g.n)× · \(Fmt.km(g.avgKm)) km · \(Fmt.int(g.avgMin)) min méd.")
+                                .font(.system(size: 10.5)).monospacedDigit().foregroundStyle(DS.muted)
+                                .lineLimit(1).minimumScaleFactor(0.8)
+                        }
+                        Spacer(minLength: 6)
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text(Fmt.dec1(g.avgCons)).font(.system(size: 13, weight: .bold))
+                                .monospacedDigit().foregroundStyle(DS.green)
+                            // Tendência: metade recente vs antiga. ↓ = consumindo menos.
+                            if abs(g.trend) >= 0.5 {
+                                HStack(spacing: 2) {
+                                    Image(systemName: g.trend < 0 ? "arrow.down" : "arrow.up")
+                                        .font(.system(size: 7.5, weight: .bold))
+                                    Text(Fmt.dec1(abs(g.trend))).font(.system(size: 9.5, weight: .semibold)).monospacedDigit()
+                                }
+                                .foregroundStyle(g.trend < 0 ? DS.green : DS.orange)
+                            } else {
+                                Text("kWh/100").font(.system(size: 8.5)).foregroundStyle(DS.muted)
+                            }
+                        }
+                    }
+                    if g.id != rs.last?.id { Rectangle().fill(DS.divider).frame(height: 1) }
+                }
             }
+            .padding(14)
+            .background(DS.panel, in: RoundedRectangle(cornerRadius: 16))
+            .overlay(RoundedRectangle(cornerRadius: 16).stroke(DS.border, lineWidth: 1))
         }
     }
 
