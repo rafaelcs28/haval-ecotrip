@@ -100,6 +100,11 @@ object SharedPreferencesKeys {
     // reportar ao bridge quando a morte pegou uma viagem no meio. Limpo após reportar.
     const val LAST_DEATH_REASON = "last_death_reason"
 
+    // Instante do último install OTA. Serve pro intervalo mínimo entre updates:
+    // duas versões publicadas em sequência causavam dois killProcess seguidos e
+    // o app travava. Sobrevive ao restart porque o install mata o processo.
+    const val LAST_OTA_INSTALL_MS = "last_ota_install_ms"
+
     // Último valor recebido do carro — persistido para não zerar após reinício do app
     const val LATEST_FUEL_PCT     = "latest_fuel_pct"
     const val LATEST_SOC_PCT      = "latest_soc_pct"

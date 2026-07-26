@@ -130,7 +130,9 @@ class UpdateManager private constructor() {
                     if (downloadProgress >= 0) {
                         "current=$current latest=${info.version} NOVA — download já em andamento (${downloadProgress}%)"
                     } else {
-                        downloadAndInstall(ctx)
+                        // force=true: check manual (cmd/check_update) é escape do
+                        // intervalo mínimo, pra fix urgente entrar na hora.
+                        downloadAndInstall(ctx, force = true)
                         "current=$current latest=${info.version} NOVA — download iniciado (apk=${info.apkUrl})"
                     }
                 } else {
@@ -144,10 +146,48 @@ class UpdateManager private constructor() {
         }
     }
 
-    /** Downloads the APK and triggers the system installer. */
-    fun downloadAndInstall(context: Context) {
+    /**
+     * Intervalo mínimo entre dois installs OTA. Cada install chama killProcess;
+     * duas versões publicadas em sequência (v6.145 e v6.146 em ~10min, 26/07)
+     * causavam duas mortes seguidas e o app travava, perdendo uma viagem.
+     * Não se perde versão nenhuma: o check sempre busca a ÚLTIMA release, então
+     * esperar só significa pular direto pra ela. [forceCheckDiag] ignora este
+     * intervalo, pra um fix urgente entrar na hora.
+     */
+    private val MIN_OTA_GAP_MS = 30 * 60_000L
+
+    /** Instantes do último install (persistido — o install mata o processo). */
+    private fun lastOtaMs(ctx: Context): Long = try {
+        ctx.createDeviceProtectedStorageContext()
+            .getSharedPreferences(SharedPreferencesKeys.PREFS_NAME, Context.MODE_PRIVATE)
+            .getLong(SharedPreferencesKeys.LAST_OTA_INSTALL_MS, 0L)
+    } catch (_: Exception) { 0L }
+
+    private fun markOtaNow(ctx: Context) {
+        try {
+            ctx.createDeviceProtectedStorageContext()
+                .getSharedPreferences(SharedPreferencesKeys.PREFS_NAME, Context.MODE_PRIVATE)
+                .edit()
+                .putLong(SharedPreferencesKeys.LAST_OTA_INSTALL_MS, System.currentTimeMillis())
+                .commit()   // commit(): o killProcess logo depois não espera flush async
+        } catch (_: Exception) {}
+    }
+
+    /**
+     * Downloads the APK and triggers the system installer.
+     * [force] pula o intervalo mínimo entre installs (usado pelo check manual).
+     */
+    fun downloadAndInstall(context: Context, force: Boolean = false) {
         val release = latestRelease ?: return
         if (downloadProgress >= 0) return   // already downloading
+        if (!force) {
+            val since = System.currentTimeMillis() - lastOtaMs(context)
+            if (lastOtaMs(context) > 0 && since < MIN_OTA_GAP_MS) {
+                AppLogger.i(TAG, "OTA adiado: último install há ${since / 60_000}min "
+                    + "(mín ${MIN_OTA_GAP_MS / 60_000}min). Instala a mais recente no próximo tick após a janela.")
+                return
+            }
+        }
         // Guarda-marcha: só instala com gear=P (ou carro desligado). D/R/N adia,
         // mesmo com carro parado no semáforo. Shizuku mata o processo — se rodar
         // com marcha engatada a LA/telemetria congela por alguns segundos. Espera
@@ -247,6 +287,9 @@ class UpdateManager private constructor() {
                             .putString(SharedPreferencesKeys.LAST_DEATH_REASON, "ota_install v${release.version}")
                             .commit()
                     } catch (_: Exception) {}
+                    // Abre a janela do intervalo mínimo — sem isto, a próxima
+                    // versão publicada instalaria no tick seguinte.
+                    markOtaNow(context)
                     Thread.sleep(300)
                     android.os.Process.killProcess(android.os.Process.myPid())
                     return@submit
