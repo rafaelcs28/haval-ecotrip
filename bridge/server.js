@@ -2836,7 +2836,11 @@ function _liveTripAppend() {
     t: Math.round((now - _liveTrip.startMs) / 1000),
     lat, lng,
     spd: Math.max(0, +state.speed_kmh || 0),
-    rpm: +state.rpm || 0,
+    // O campo do state é `engine_rpm` — `state.rpm` NUNCA existiu, então todo
+    // live sample ia com rpm=0. Efeito: _calcHybrid não achava trecho com ICE e
+    // qualquer viagem finalizada a partir destes samples (APK morto no meio)
+    // virava "100% EV". Sentinela -1 (carro dormindo) também vira 0.
+    rpm: Math.max(0, +state.engine_rpm || 0),
     pwr: +state.motor_power_kw || 0,
     soc: +state.soc_pct || 0,
   });
@@ -18702,6 +18706,18 @@ function applyMqttMessage(key, value, isRetained = false) {
           state.current_trip = JSON.parse(value);
           const sid = state.current_trip?.startMs || state.current_trip?.tripId;
           if (sid) _liveTripStart(sid);
+          // Split EV/HEV AO VIVO. O APK não publica hybrid* no current_trip —
+          // o campo só existia nas viagens já finalizadas (calculado no ingest).
+          // Sem isso o cluster do iPad lia hybridDistKm=undefined e mostrava
+          // 100% EV em qualquer modo. Calcula dos live samples, que o bridge já
+          // acumula 1x/s com rpm do ICE.
+          if (_liveTrip?.samples?.length > 1) {
+            const h = _calcHybrid(_liveTrip.samples);
+            if (h.hybridDistKm != null) {
+              state.current_trip.hybridDistKm  = h.hybridDistKm;
+              state.current_trip.hybridTimeSec = h.hybridTimeSec;
+            }
+          }
         } catch (e) {
           console.error('current_trip JSON inválido:', e.message);
         }
