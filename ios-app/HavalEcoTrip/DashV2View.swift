@@ -438,7 +438,10 @@ struct DashV2View: View {
                     }
                 }
                 HStack(alignment: .firstTextBaseline) {
-                    tripBig(Fmt.int(speed), "km/h")
+                    // adjSpeed: mesma correção do velocímetro do carro que o
+                    // Drive e o cluster aplicam. Com Fmt.int(speed) cru o card
+                    // mostrava ~7% menos que o painel do veículo.
+                    tripBig("\(Fmt.adjSpeed(speed))", "km/h")
                     Spacer()
                     tripBig(Fmt.dec1(dist), "km")
                     Spacer()

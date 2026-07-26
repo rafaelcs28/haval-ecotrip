@@ -185,7 +185,7 @@ struct TripLockScreenView: View {
     // (texto, cor opcional) — nil = text2.
     private var microMetrics: [(String, Color?)] {
         var out: [(String, Color?)] = []
-        if state.active, let v = state.speedKmh { out.append(("\(Int(v.rounded())) km/h", nil)) }
+        if state.active, let v = state.speedKmh { out.append(("\(laAdjSpeed(v)) km/h", nil)) }
         out.append((tripDuration(state.timeSec), nil))
         if state.effKwh100 > 0 { out.append(("\(laDec1(state.effKwh100)) kWh/100", nil)) }
         if state.fuelL > 0.05 { out.append(("\(laDec1(state.fuelL)) L", nil)) }

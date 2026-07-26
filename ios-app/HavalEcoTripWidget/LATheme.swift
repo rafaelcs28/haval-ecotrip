@@ -25,6 +25,16 @@ func laDec2(_ v: Double) -> String {
     String(format: "%.2f", v).replacingOccurrences(of: ".", with: ",")
 }
 
+/// Velocidade corrigida pra bater com o velocímetro do carro. Espelha
+/// `Fmt.adjSpeed` do app e o `getAdjustedSpeed` do APK — o widget não compila
+/// DesignSystem.swift, então a fórmula é replicada aqui.
+/// SÓ para DISPLAY; nunca em cálculo físico (consumo/km).
+/// ⚠ Se mudar aqui, mudar em DesignSystem.swift (Fmt.adjSpeed) e no APK.
+func laAdjSpeed(_ raw: Double) -> Int {
+    let s = max(0, raw)
+    return Int((s * 1.07 - s / 180 * 0.02).rounded(.towardZero))
+}
+
 // Micro-rótulo CAPS (8.5pt bold tracking) da gramática v2.
 struct LACaps: View {
     let text: String
