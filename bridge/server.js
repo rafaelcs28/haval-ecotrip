@@ -18902,7 +18902,13 @@ function applyMqttMessage(key, value, isRetained = false) {
             // for muito maior que o reportado, recalcula via SOC.
             const PACK_KWH = 34;
             const socDelta = (newCharge.soc_end || 0) - (newCharge.soc_start || 0);
-            if (socDelta > 0) {
+            // soc_start <= 0 não é "bateria vazia", é leitura que o APK não tinha
+            // ainda quando a carga começou. Usar esse delta faria a correção
+            // calcular a carga desde 0% e inflar a energia (25,02 kWh numa recarga
+            // de 34→80% em 27/07). Sem soc_start confiável, respeita o reportado.
+            if ((+newCharge.soc_start || 0) <= 0 && (+newCharge.soc_end || 0) > 0) {
+              console.warn(`⚠ [charge] ts=${newCharge.timestamp_ms} soc_start=0 com soc_end=${newCharge.soc_end} — correção por SOC delta ignorada (energia mantida em ${newCharge.energy_kwh})`);
+            } else if (socDelta > 0) {
               const expected = (socDelta / 100) * PACK_KWH;
               const reported = +newCharge.energy_kwh || 0;
               // Tolerância: se expected > 2× reported, o APK perdeu telemetria
@@ -18958,6 +18964,17 @@ function applyMqttMessage(key, value, isRetained = false) {
               keep.energy_kwh   = existing.energy_kwh;
               keep.avg_power_kw = existing.avg_power_kw;
               keep.soc_end      = existing.soc_end;
+            }
+            // Registro corrigido à mão (_fixed) tem prioridade sobre o retained.
+            // O APK republica o histórico dele a cada reconexão, e sem isto a
+            // correção era desfeita no próximo restart do bridge.
+            if (existing._fixed) {
+              keep._fixed       = true;
+              keep._fixed_note  = existing._fixed_note;
+              keep.energy_kwh   = existing.energy_kwh;
+              keep.soc_start    = existing.soc_start;
+              keep.soc_end      = existing.soc_end;
+              keep.avg_power_kw = existing.avg_power_kw;
             }
             return { ...newCharge, ...keep };
           });

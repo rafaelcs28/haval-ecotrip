@@ -493,7 +493,14 @@ class TripManager private constructor() {
                 } else {
                     // Sessão genuinamente nova
                     chargeSessionStartMs   = System.currentTimeMillis()
+                    // latestSocPct pode ainda ser 0 se a carga começou antes do
+                    // primeiro tick do car bus (app recém-subido). Fica 0 e é
+                    // adotado no primeiro SOC válido que chegar (ver onDataChanged),
+                    // pra não congelar um startSoc falso na sessão inteira.
                     chargeSessionStartSoc  = latestSocPct
+                    if (latestSocPct <= 0f) {
+                        AppLogger.w(TAG, "Recarga iniciou sem SOC válido — startSoc será adotado no 1º valor real")
+                    }
                     chargeSessionEnergyKwh = 0f
                     chargeSessionSec       = 0L
                     chargeSessionTempSum   = 0.0
@@ -511,10 +518,22 @@ class TripManager private constructor() {
                     // muito atrás do que o SOC indica (ex app suspenso por
                     // horas), usa o cálculo via SOC. PACK_KWH ≈ 34, eficiência
                     // ~90% (perda interna pack DC). Pega o MAIOR dos dois.
-                    val socDelta = (latestSocPct - chargeSessionStartSoc).coerceAtLeast(0f)
+                    //
+                    // ⚠ Só vale com startSoc VÁLIDO. Se a sessão começou logo
+                    // após o app subir, latestSocPct ainda era 0 e virou
+                    // chargeSessionStartSoc — aí socDelta = endSoc inteiro e o
+                    // fallback inventa uma carga do zero. Foi o que gravou
+                    // 25,02 kWh numa recarga de 34→80% em 27/07:
+                    //   (80-0)/100 × 34 × 0,92 = 25,02
+                    // Sem startSoc confiável, fica só o P×t medido.
+                    val startSocOk = chargeSessionStartSoc > 0f
+                    val socDelta = if (startSocOk)
+                        (latestSocPct - chargeSessionStartSoc).coerceAtLeast(0f) else 0f
                     val energyFromSoc = (socDelta / 100f) * 34f * 0.92f
                     val finalEnergyKwh = maxOf(chargeSessionEnergyKwh, energyFromSoc)
-                    if (energyFromSoc > chargeSessionEnergyKwh * 1.5f) {
+                    if (!startSocOk) {
+                        AppLogger.w(TAG, "startSoc inválido (0) — fallback por SOC delta DESLIGADO nesta sessão; energia = P×t (${chargeSessionEnergyKwh}kWh)")
+                    } else if (energyFromSoc > chargeSessionEnergyKwh * 1.5f) {
                         AppLogger.w(TAG, "Energy via P×t (${chargeSessionEnergyKwh}kWh) muito menor que SOC delta (${energyFromSoc}kWh) — usando o maior (provável sleep do app)")
                     }
                     val entry = ChargeHistoryEntry(
@@ -1869,6 +1888,15 @@ class TripManager private constructor() {
                     latestSocPct = value
                     telemetryRecorder?.latestSocPct = value.toInt()
                     prefs.edit().putFloat(SharedPreferencesKeys.LATEST_SOC_PCT, value).apply()
+                    // Sessão de carga que começou antes do 1º SOC válido ficou com
+                    // startSoc=0; adota este valor agora. Sem isso o fallback por
+                    // SOC delta calcula a carga desde 0% (gravou 25,02 kWh numa
+                    // recarga de 34→80% em 27/07).
+                    if (isChargingNow && chargeSessionStartSoc <= 0f && chargeSessionStartMs > 0L) {
+                        chargeSessionStartSoc = value
+                        prefs.edit().putFloat(SharedPreferencesKeys.CHARGE_SESSION_START_SOC, value).apply()
+                        AppLogger.i(TAG, "startSoc da recarga adotado no 1º SOC válido: ${value}%")
+                    }
                     captureStartIfNeeded()
                     MqttManager.getInstance().evaluateChargeCutoff(value)
                 }
