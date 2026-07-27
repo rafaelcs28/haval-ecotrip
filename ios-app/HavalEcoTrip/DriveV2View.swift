@@ -253,12 +253,36 @@ struct DriveV2View: View {
     @ViewBuilder
     private var destinationPill: some View {
         if let d = destination {
-            Text("→ \(d.name)")
-                .font(.system(size: 12, weight: .bold)).foregroundStyle(DS.text)
-                .lineLimit(1).minimumScaleFactor(0.8)
-                .padding(.horizontal, 12).padding(.vertical, 7)
-                .background(.ultraThinMaterial, in: Capsule())
-                .overlay(Capsule().stroke(DS.border, lineWidth: 1))
+            // Toque na pill oferece navegação guiada de verdade: o Hub calcula e
+            // exibe (Google Directions), mas quem guia é o app do celular.
+            // Só vira menu quando temos a coordenada do destino.
+            if let c = destCoord {
+                Menu {
+                    ForEach(NavApp.available) { app in
+                        Button {
+                            NavLauncher.open(app, lat: c.latitude, lng: c.longitude, name: d.name)
+                        } label: { Label("Abrir no \(app.label)", systemImage: app.icon) }
+                    }
+                } label: {
+                    HStack(spacing: 5) {
+                        Text("→ \(d.name)")
+                            .font(.system(size: 12, weight: .bold)).foregroundStyle(DS.text)
+                            .lineLimit(1).minimumScaleFactor(0.8)
+                        Image(systemName: "arrow.up.forward.app")
+                            .font(.system(size: 10, weight: .bold)).foregroundStyle(DS.teal)
+                    }
+                    .padding(.horizontal, 12).padding(.vertical, 7)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .overlay(Capsule().stroke(DS.teal.opacity(0.35), lineWidth: 1))
+                }
+            } else {
+                Text("→ \(d.name)")
+                    .font(.system(size: 12, weight: .bold)).foregroundStyle(DS.text)
+                    .lineLimit(1).minimumScaleFactor(0.8)
+                    .padding(.horizontal, 12).padding(.vertical, 7)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .overlay(Capsule().stroke(DS.border, lineWidth: 1))
+            }
         }
     }
 

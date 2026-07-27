@@ -25,6 +25,24 @@
   .addr { display:flex; align-items:center; gap:6px; margin-bottom:9px;
           font-size:12.5px; font-weight:600; color:var(--muted); line-height:1.3; }
   .addr svg { flex:none; color:var(--teal); }
+  .go-btn { flex:none; margin-left:auto; background:rgba(34,211,238,.14); color:var(--teal);
+            border:1px solid rgba(34,211,238,.4); border-radius:999px; cursor:pointer;
+            padding:4px 10px; font-size:11px; font-weight:700; font-family:inherit; }
+  .go-btn:active { transform:scale(.95); }
+  /* Folha de escolha do app de navegação */
+  .navsheet { position:absolute; inset:0; z-index:900; display:none;
+              align-items:flex-end; justify-content:center; padding:16px;
+              background:rgba(0,0,0,.7); }
+  .navsheet.on { display:flex; }
+  .navsheet-box { background:#12141a; border:1px solid rgba(255,255,255,.10);
+                  border-radius:18px; padding:14px; width:100%; max-width:400px; }
+  .navsheet h4 { margin:2px 0 12px; font-size:14px; font-weight:800; text-align:center; }
+  .navsheet a, .navsheet button { display:block; width:100%; box-sizing:border-box;
+              text-align:center; text-decoration:none; border-radius:12px;
+              padding:14px; font-size:15px; font-weight:700; margin-bottom:8px;
+              background:rgba(255,255,255,.07); color:#e2e8f0;
+              border:1px solid rgba(255,255,255,.10); cursor:pointer; font-family:inherit; }
+  .navsheet a.primary { background:#22d3ee; color:#04252b; border-color:transparent; }
   .eta { font-size:15px; font-weight:700; margin-bottom:10px; display:flex; align-items:center; gap:8px; }
   .eta .km { color:var(--teal); }
   .dest { font-size:15px; font-weight:700; margin-bottom:8px; padding:10px 12px; border-radius:12px;
@@ -170,6 +188,8 @@
   <div class="addr" id="addr-line" style="display:none">
     <svg viewBox="0 0 24 24" fill="currentColor" width="13" height="13"><path d="M12 2a7 7 0 0 0-7 7c0 5.2 7 13 7 13s7-7.8 7-13a7 7 0 0 0-7-7zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5z"/></svg>
     <span id="addr-text"></span>
+    <!-- Traçar rota ATÉ O CARRO no app de navegação do próprio celular -->
+    <button class="go-btn" id="go-car" title="Traçar rota até o carro">ir até ↗</button>
   </div>
   <div class="dest" id="dest-line" style="display:none"></div>
   <div class="eta" id="eta-line"><span class="ask">Toque em <a onclick="askGeo()">permitir localização</a> para ver a distância até você.</span></div>
@@ -186,6 +206,17 @@
   </div>
   <div class="chips" id="chips"></div>
 </div>
+<!-- Escolha do app de navegação (o "ir até" abre isto) -->
+<div class="navsheet" id="navsheet">
+  <div class="navsheet-box">
+    <h4 id="navsheet-title">Traçar rota até o carro</h4>
+    <a id="nav-gmaps" class="primary" target="_blank" rel="noopener">Google Maps</a>
+    <a id="nav-waze" target="_blank" rel="noopener">Waze</a>
+    <a id="nav-apple" target="_blank" rel="noopener">Mapas (Apple)</a>
+    <button id="nav-cancel">Cancelar</button>
+  </div>
+</div>
+
 <!-- Mandar recado: fica logo acima do botão de ligar -->
 <button class="msg-fab" id="msg-fab" title="Mandar recado pro carro">
   <svg viewBox="0 0 24 24" fill="currentColor" width="22" height="22"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>
@@ -260,9 +291,32 @@ const TOKEN = new URLSearchParams(location.search).get('t') || '';
 const API = (p) => `/api/share/${TOKEN}${p}`;
 let callActive = false;   // usado pelo render() pra esconder o FAB durante a chamada
 const map = L.map('map', { zoomControl:false, attributionControl:false }).setView([-16.6869,-49.2648], 14);
-// Voyager (claro, ruas legíveis) em vez de dark_all — o destinatário precisa ler
-// as ruas no zoom afastado. Os painéis flutuantes seguem escuros sobre o mapa claro.
-L.tileLayer('https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}@2x.png', { maxZoom:20 }).addTo(map);
+// Tiles: Google Maps quando o bridge expõe uma chave habilitada pro Map Tiles
+// API (GET /api/maps-tiles-key), senão CartoDB Voyager — claro e com ruas
+// legíveis no zoom afastado, que é o que o destinatário precisa.
+// A troca é gated porque tile do Google é PAGO por carregamento e exige chave
+// própria (a de Directions é restrita e devolve 403 em tiles).
+(async () => {
+  let key = null;
+  try {
+    const r = await fetch('/api/maps-tiles-key', { cache: 'no-store' });
+    if (r.ok) key = (await r.json()).key || null;
+  } catch (_) {}
+  if (key) {
+    // Map Tiles API (2D raster, roadmap). Session token é obtido pelo bridge.
+    try {
+      const s = await fetch('/api/maps-tiles-session', { cache: 'no-store' }).then(x => x.json());
+      if (s && s.session) {
+        L.tileLayer(
+          `https://tile.googleapis.com/v1/2dtiles/{z}/{x}/{y}?session=${s.session}&key=${key}`,
+          { maxZoom: 20, attribution: 'Google' },
+        ).addTo(map);
+        return;
+      }
+    } catch (_) {}
+  }
+  L.tileLayer('https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}@2x.png', { maxZoom:20 }).addTo(map);
+})();
 
 // Seta de navegação que aponta pro rumo (car_heading). A ponta da seta é o "norte"
 // do SVG (0°), então rotate(heading) aponta na direção real do deslocamento.
@@ -501,6 +555,39 @@ else {
   window.addEventListener('focus',    rearm);
   window.addEventListener('online',   rearm);
 }
+
+// ── Abrir no app de navegação ───────────────────────────────────────────────
+// A página mostra distância/ETA (Google Directions no bridge) mas não guia.
+// Aqui a pessoa manda o ponto pro app dela. Links universais em vez de schemes:
+// no navegador, `waze://` numa aba morre em silêncio se o app não existir,
+// enquanto o https faz o iOS/Android abrirem o app instalado ou a web.
+(() => {
+  const sheet = document.getElementById('navsheet');
+  const title = document.getElementById('navsheet-title');
+  const gm = document.getElementById('nav-gmaps');
+  const wz = document.getElementById('nav-waze');
+  const ap = document.getElementById('nav-apple');
+
+  function openNavSheet(lat, lng, label) {
+    if (!lat || !lng) return;
+    title.textContent = 'Traçar rota até ' + (label || 'o carro');
+    gm.href = `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=driving`;
+    wz.href = `https://waze.com/ul?ll=${lat},${lng}&navigate=yes`;
+    ap.href = `https://maps.apple.com/?daddr=${lat},${lng}&dirflg=d`;
+    sheet.classList.add('on');
+  }
+  const close = () => sheet.classList.remove('on');
+  document.getElementById('nav-cancel').addEventListener('click', close);
+  sheet.addEventListener('click', e => { if (e.target === sheet) close(); });
+  [gm, wz, ap].forEach(a => a.addEventListener('click', () => setTimeout(close, 300)));
+
+  document.getElementById('go-car').addEventListener('click', () => {
+    const c = window.carPos;
+    if (c) openNavSheet(c[0], c[1], 'o carro');
+  });
+  // Exposto pro render(): o destino do carro também ganha atalho (ver dest-line).
+  window.openNavSheet = openNavSheet;
+})();
 
 // ── Ligar pro carro ─────────────────────────────────────────────────────────
 // Áudio full-duplex com a cabine pelo mesmo relay do app iOS: WebSocket
@@ -784,6 +871,7 @@ else {
   const pv = new URLSearchParams(location.search).get('preview');
   if (pv === 'call') modal.classList.add('on');
   if (pv === 'msg')  { mModal.classList.add('on'); upLeft(); }
+  if (pv === 'nav')  setTimeout(() => window.openNavSheet && window.openNavSheet(-16.7325, -49.2743, 'o carro'), 400);
   // Fechar/atualizar a aba não pode deixar a chamada aberta no carro.
   window.addEventListener('pagehide', () => { if (callActive) stop(''); });
 })();

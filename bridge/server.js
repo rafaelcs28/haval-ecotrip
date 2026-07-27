@@ -6398,6 +6398,9 @@ app.use('/api', (req, res, next) => {
   // Áudio do recado: quem baixa é o MediaPlayer do carro, que não manda header
   // de Authorization. O gate é o id aleatório de 24 hex no path (+ TTL de 24h).
   if (/^\/voice\/[a-f0-9]{24}\.[a-z0-9]{2,4}$/.test(req.path)) return next();
+  // Config de tiles: a página compartilhada é pública e precisa ler antes de
+  // montar o mapa. Só expõe a chave de TILES (não a de Directions).
+  if (req.path === '/maps-tiles-key' || req.path === '/maps-tiles-session') return next();
   // Trajeto compartilhado: /api/shared-trip/:token — token da URL faz o gate.
   if (/^\/shared-trip\/[^/]+$/.test(req.path)) return next();
   // Upload de gravação: o carro autentica com nonce de uso único (X-Rec-Token),
@@ -7477,6 +7480,51 @@ function _mapkitToken() {
   _mapkitJwtExp = now + ttl;
   return _mapkitJwt;
 }
+// ── Tiles do Google Maps (opcional, pago) ───────────────────────────────────
+// As páginas web (share.html, cluster.html) usam CartoDB por padrão — grátis e
+// sem chave. Se GOOGLE_MAPS_TILES_KEY estiver definida, passam a usar o Map
+// Tiles API do Google. Fica atrás de chave própria de propósito:
+//  · a GOOGLE_DIRECTIONS_KEY é restrita a Directions (tile devolve 403);
+//  · tile do Google é cobrado por carregamento, então virar o default sem o
+//    dono pedir seria gerar custo silencioso.
+// Sem a env, os endpoints devolvem 404 e a página cai no fallback sozinha.
+app.get('/api/maps-tiles-key', (_req, res) => {
+  const key = process.env.GOOGLE_MAPS_TILES_KEY;
+  if (!key) return res.status(404).json({ error: 'tiles do Google não configurados' });
+  res.json({ key });
+});
+
+// Session token do Map Tiles API (exigência da API; vale ~2 semanas).
+// Cacheado em memória pra não pedir um por carregamento de página.
+let _gTileSession = { token: null, exp: 0 };
+app.get('/api/maps-tiles-session', async (_req, res) => {
+  const key = process.env.GOOGLE_MAPS_TILES_KEY;
+  if (!key) return res.status(404).json({ error: 'tiles do Google não configurados' });
+  if (_gTileSession.token && Date.now() < _gTileSession.exp) {
+    return res.json({ session: _gTileSession.token });
+  }
+  try {
+    const r = await fetch(`https://tile.googleapis.com/v1/createSession?key=${key}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mapType: 'roadmap', language: 'pt-BR', region: 'BR' }),
+      signal: AbortSignal.timeout(9000),
+    });
+    const j = await r.json();
+    if (!j.session) {
+      console.warn('[gtiles] createSession sem token:', JSON.stringify(j).slice(0, 200));
+      return res.status(502).json({ error: 'createSession falhou' });
+    }
+    // expiry vem em epoch segundos (string); renova 1h antes por segurança.
+    const expMs = (parseInt(j.expiry, 10) || (Date.now() / 1000 + 86400)) * 1000;
+    _gTileSession = { token: j.session, exp: expMs - 3600_000 };
+    res.json({ session: j.session });
+  } catch (e) {
+    console.warn('[gtiles] createSession erro:', e.message);
+    res.status(502).json({ error: e.message });
+  }
+});
+
 app.get('/api/mapkit/token', (req, res) => {
   const token = _mapkitToken();
   if (!token) return res.status(503).json({ error: 'MapKit não configurado (faltam MAPKIT_TEAM_ID/KEY_ID/KEY_P8_PATH)' });
