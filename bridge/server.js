@@ -2609,9 +2609,13 @@ function _scheduleChargeSelfSynthesis(sessionStartMs, socStart, socEnd) {
         return;
       }
       const socDelta = socEndCapt - socStartCapt;
-      // Prioridade: kWh acumulado real; fallback: SOC delta × capacidade útil.
+      // Prioridade: kWh acumulado real (P×t medido pelo APK, energia DC no pack).
+      // Fallback: SOC delta × capacidade NOMINAL. Não usar BATTERY_USEFUL_KWH aqui:
+      // a reserva de 12% é pra ETA/autonomia, não fator de eficiência de carga —
+      // usá-la descontava 12% de um número que já era DC (medido em 43 sessões com
+      // P×t confiável, a capacidade implícita é ~35,5 kWh, perto da nominal).
       const energyKwh = kwhCapt > 0.1 ? +kwhCapt.toFixed(2)
-                                     : +(socDelta / 100 * BATTERY_USEFUL_KWH).toFixed(2);
+                                     : +(socDelta / 100 * BATTERY_CAPACITY_KWH).toFixed(2);
       // Duração: se avg_power_kw > 0, calcula por energia/potência (bate com o padrão
       // dos registros do APK). Senão usa (agora - startMs).
       const durSec = avgPwrCapt > 0.1
@@ -3182,7 +3186,7 @@ try {
       const socDelta = (snap.socNow - snap.socStart);
       // Estima energia: usa kwhNow do APK se >0 (mais confiável); senão SOC delta
       // × capacidade nominal do H6 PHEV.
-      const energyKwh = snap.kwhNow > 0.1 ? snap.kwhNow : +(socDelta / 100 * BATTERY_USEFUL_KWH).toFixed(2);
+      const energyKwh = snap.kwhNow > 0.1 ? snap.kwhNow : +(socDelta / 100 * BATTERY_CAPACITY_KWH).toFixed(2);
       const durSec = Math.round(((snap.lastUpdateMs || Date.now()) - snap.startMs) / 1000);
       const avgKw = snap.powerAvgKw > 0.1 ? snap.powerAvgKw : (durSec > 0 ? +(energyKwh / (durSec/3600)).toFixed(2) : 0);
       const rec = {
@@ -6825,7 +6829,7 @@ app.post('/api/charge-reconstruct', requireAuth, (req, res) => {
     if (isNaN(socStart) || isNaN(socEnd) || socEnd <= socStart) return res.status(400).json({ error: 'socStart/socEnd inválidos (socEnd deve ser > socStart)' });
     const socDelta = socEnd - socStart;
     let energyKwh = parseFloat(b.energyKwh);
-    if (!(energyKwh > 0)) energyKwh = +(socDelta / 100 * BATTERY_USEFUL_KWH).toFixed(2);
+    if (!(energyKwh > 0)) energyKwh = +(socDelta / 100 * BATTERY_CAPACITY_KWH).toFixed(2);
     let avgPowerKw = parseFloat(b.avgPowerKw);
     // Duração efetiva DE CARGA (não tempo entre startMs/endMs — pode ter pausa).
     // Se veio avgPowerKw, calcula duration_sec = energy / power. Senão usa endMs-startMs.

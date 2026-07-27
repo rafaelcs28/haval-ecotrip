@@ -529,7 +529,13 @@ class TripManager private constructor() {
                     val startSocOk = chargeSessionStartSoc > 0f
                     val socDelta = if (startSocOk)
                         (latestSocPct - chargeSessionStartSoc).coerceAtLeast(0f) else 0f
-                    val energyFromSoc = (socDelta / 100f) * 34f * 0.92f
+                    // Sem fator de eficiência: energyKwh é energia DC no pack (é isso
+                    // que o P×t mede via V×I do pack), e o SOC do display mapeia a
+                    // capacidade nominal. Medido em 43 sessões com P×t confiável, a
+                    // capacidade implícita (energia ÷ SOC delta) dá ~35,5 kWh — perto
+                    // dos 34 nominais, não dos 29,92 úteis. Multiplicar por 0,92 aqui
+                    // descontava uma perda que já está fora deste número.
+                    val energyFromSoc = (socDelta / 100f) * 34f
                     val finalEnergyKwh = maxOf(chargeSessionEnergyKwh, energyFromSoc)
                     if (!startSocOk) {
                         AppLogger.w(TAG, "startSoc inválido (0) — fallback por SOC delta DESLIGADO nesta sessão; energia = P×t (${chargeSessionEnergyKwh}kWh)")
