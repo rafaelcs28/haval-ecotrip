@@ -1778,6 +1778,7 @@ class MqttManager private constructor() {
             client = c
             consecutiveFailures = 0
             reconnectAttempts = 0   // conectou → zera o backoff de reconexão
+            reconnectBurstStartMs = 0L   // conectou → encerra a rajada (ver scheduleReconnect)
             lastPubSnapshot.clear()           // dedupe do snapshot: força re-publish completo na primeira rodada
             lastPublishedChargeLimitPct = -1  // força re-sync com o carro após reconexão
             lastPublishedDriveMode = -1       // idem pro modo de condução
@@ -2389,14 +2390,25 @@ class MqttManager private constructor() {
         }
     }
 
-    // Timestamps das últimas reconexões pra detectar loop/ping-pong. Janela
-    // de 5min — se acumular ≥8, o processo está preso em collision/zumbi e
-    // não recupera sozinho. Recovery = suicídio (System.exit) + Android
-    // reinicia via service; equivale ao "força-parada" manual.
-    private val reconnectTimestamps = java.util.concurrent.ConcurrentLinkedDeque<Long>()
-    private val RECONNECT_LOOP_THRESHOLD = 8         // 8 tentativas em 5min = loop
-    private val RECONNECT_LOOP_WINDOW_MS = 5 * 60_000L
-    private var lastSelfKillMs = 0L
+    // Quando a PRIMEIRA tentativa desta rajada de reconexão começou. Se ficarmos
+    // muito tempo sem conseguir conectar, o client Paho pode estar travado
+    // (socket meio-aberto que nunca falha nem completa) — a resposta é recriar o
+    // client do zero, NÃO matar o processo.
+    //
+    // Histórico: aqui havia um self-kill por "≥8 reconnects em 5min". Ele media a
+    // coisa errada — contava TENTATIVAS falhas (rede fora) e não takeover — e com
+    // o backoff de 250/500ms as 8 tentativas cabiam em 3,2s. Resultado: ao ligar o
+    // carro, antes de a rede subir, o app se matava, o Android relançava e repetia:
+    // bootloop. Foi a causa das mortes unclean em cascata de 26-27/07 (que de
+    // quebra travaram as bordas das automações — ver AutomationManager).
+    // O cooldown de 15min também não protegia: era campo de instância, perdido
+    // junto com o processo.
+    // A detecção de takeover que presta já existe no connectionLost (queda 1-6s
+    // após CONNACK) e o client-id virou único por processo na v6.143, que era a
+    // raiz do caso original.
+    @Volatile private var reconnectBurstStartMs = 0L
+    private val STUCK_CLIENT_AFTER_MS = 3 * 60_000L   // 3min sem conectar = client suspeito
+    @Volatile private var lastForcedRebuildMs = 0L
 
     private fun scheduleReconnect() {
         if (!enabled || isReconnecting.getAndSet(true)) return
@@ -2411,28 +2423,17 @@ class MqttManager private constructor() {
             } finally {
                 isReconnecting.set(false)
             }
-            // Registra tentativa e checa loop. Cooldown 15min entre suicídios
-            // pra Android relaunch ter tempo de estabilizar antes de re-diagnosticar.
+            // Rajada longa sem conectar = client possivelmente travado. Recria do
+            // zero (close + new MqttClient), que é o que resolve socket meio-aberto.
+            // Nada de matar o processo: tentativa falha normalmente significa rede
+            // indisponível (carro acabou de ligar), e aí morrer só gera bootloop.
             val now = System.currentTimeMillis()
-            reconnectTimestamps.addLast(now)
-            while (reconnectTimestamps.peekFirst()?.let { now - it > RECONNECT_LOOP_WINDOW_MS } == true) {
-                reconnectTimestamps.pollFirst()
-            }
-            if (reconnectTimestamps.size >= RECONNECT_LOOP_THRESHOLD && now - lastSelfKillMs > 15 * 60_000L) {
-                lastSelfKillMs = now
-                AppLogger.w(TAG, "⚠ MQTT loop detectado (${reconnectTimestamps.size} reconnects/5min) — suicidando processo pra Android relaunch")
-                try {
-                    val ctx = appContext
-                    if (ctx != null) {
-                        val dpCtx = ctx.createDeviceProtectedStorageContext()
-                        dpCtx.getSharedPreferences(SharedPreferencesKeys.PREFS_NAME, Context.MODE_PRIVATE)
-                            .edit()
-                            .putString(SharedPreferencesKeys.LAST_DEATH_REASON, "self-kill mqtt-loop (${reconnectTimestamps.size} reconn/5min)")
-                            .commit()
-                    }
-                } catch (_: Exception) {}
-                Thread.sleep(200)
-                android.os.Process.killProcess(android.os.Process.myPid())
+            if (reconnectBurstStartMs == 0L) reconnectBurstStartMs = now
+            val burst = now - reconnectBurstStartMs
+            if (burst > STUCK_CLIENT_AFTER_MS && now - lastForcedRebuildMs > STUCK_CLIENT_AFTER_MS) {
+                lastForcedRebuildMs = now
+                AppLogger.w(TAG, "MQTT sem conectar há ${burst / 1000}s — recriando o client do zero")
+                forceFullReconnect()
                 return@submit
             }
             // isConnected: um connect concorrente (watchdog × connectionLost) pode já
