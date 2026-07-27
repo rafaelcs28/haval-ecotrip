@@ -8646,18 +8646,86 @@ function _isDuplicateTail(existing, incoming) {
 // score) com fallback/sanidade por GPS (haversine). Usada pra blindar o distKm
 // vindo do APK quando o hodômetro re-baseia no meio da viagem e injeta um pulo
 // (ex.: viagem de 5km vira o acumulado do dia). Retorna {spdKm, gpsKm}.
+// ── Sanidade física dos samples ─────────────────────────────────────────────
+// Teto de velocidade implícita entre dois samples. O carro não passa de ~200
+// km/h; acima de MAX_IMPLIED_KMH o par não é deslocamento, é salto de
+// coordenada (GPS resetando, sample de outro trecho, merge desalinhado).
+// Sem esse corte, 278 samples com saltos somaram 5.703 km na viagem de 27/07 e
+// inflaram o distKm reconciliado de 16,9 pra 19,8 km.
+const MAX_IMPLIED_KMH = 250;
+// Samples no MESMO instante (dt<=0) não podem estar a mais que isto de distância.
+const MAX_SAME_INSTANT_KM = 0.2;
+
+function _kmBetween(a, b) {
+  const R = 6371, rad = d => d * Math.PI / 180;
+  const dLa = rad(b.lat - a.lat), dLo = rad(b.lng - a.lng);
+  const h = Math.sin(dLa / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLo / 2) ** 2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+/** Par consecutivo representa um salto fisicamente impossível? */
+function _isTeleport(a, b) {
+  if (!(a && b && a.lat && a.lng && b.lat && b.lng)) return false;
+  const km = _kmBetween(a, b);
+  const dt = (b.t || 0) - (a.t || 0);
+  if (dt <= 0) return km > MAX_SAME_INSTANT_KM;
+  return (km / (dt / 3600)) > MAX_IMPLIED_KMH;
+}
+
+/**
+ * Descarta samples cuja posição é impossível vindo do último ponto bom. Mantém
+ * a âncora anterior ao comparar, pra que um único ponto ruim no meio não derrube
+ * todo o resto da série.
+ */
+function _dropTeleports(samples) {
+  if (!Array.isArray(samples) || samples.length < 2) return { clean: samples || [], dropped: 0 };
+  const clean = [samples[0]];
+  let dropped = 0;
+  for (let i = 1; i < samples.length; i++) {
+    if (_isTeleport(clean[clean.length - 1], samples[i])) { dropped++; continue; }
+    clean.push(samples[i]);
+  }
+  return { clean, dropped };
+}
+
+/**
+ * O trecho `inner` já está coberto pela rota `outer`? Amostra pontos de inner e
+ * checa se cada um tem algum ponto de outer por perto.
+ *
+ * Serve pra decidir merge: quando o APK posta a viagem COMPLETA e o bridge já
+ * tem live samples de um pedaço dela, concatenar duplica a rota. Em 27/07 os 278
+ * live cobriam 2,9km do FIM do trajeto e foram concatenados ANTES dos 2544 do
+ * APK — a rota ia ao fim, voltava ao começo e refazia tudo (20,0km em vez de
+ * 16,9km). Comparar só primeiro/último ponto não pegaria: nem coincidem com as
+ * pontas do outro trecho.
+ */
+function _isContainedIn(inner, outer, tolKm = 0.15) {
+  const pi = (inner || []).filter(s => s.lat && s.lng);
+  const po = (outer || []).filter(s => s.lat && s.lng);
+  if (pi.length < 2 || po.length < 2) return false;
+  const STEPS = 12;                                   // amostra barata da série
+  const step = Math.max(1, Math.floor(pi.length / STEPS));
+  let checked = 0, near = 0;
+  for (let i = 0; i < pi.length; i += step) {
+    checked++;
+    for (const o of po) {
+      if (_kmBetween(pi[i], o) <= tolKm) { near++; break; }
+    }
+  }
+  return checked > 0 && near / checked >= 0.8;
+}
+
 function _sampleDistKm(samples) {
   let spdKm = 0, gpsKm = 0, coveredSec = 0;
   if (!Array.isArray(samples)) return { spdKm, gpsKm, coveredSec };
-  const R = 6371, rad = d => d * Math.PI / 180;
   for (let i = 1; i < samples.length; i++) {
     const a = samples[i - 1], b = samples[i];
     const dt = (b.t || 0) - (a.t || 0);
     if (dt > 0 && dt <= 5) { spdKm += ((a.spd || 0) + (b.spd || 0)) / 2 / 3600 * dt; coveredSec += dt; }
     if (a.lat && a.lng && b.lat && b.lng) {
-      const dLa = rad(b.lat - a.lat), dLo = rad(b.lng - a.lng);
-      const h = Math.sin(dLa / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLo / 2) ** 2;
-      gpsKm += 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+      // Salto impossível não é distância percorrida — ignora no total.
+      if (_isTeleport(a, b)) continue;
+      gpsKm += _kmBetween(a, b);
     }
   }
   return { spdKm, gpsKm, coveredSec };
@@ -8799,6 +8867,23 @@ function ingestAutoTrip({ tripId, autoTrip, samples }, opts = {}) {
       } catch (_) {}
     }
 
+    // Limpa saltos impossíveis ANTES de qualquer decisão de merge. Um trecho
+    // podre inflava a distância integrada, e era justamente essa distância que a
+    // heurística de merge usava pra escolher entre concatenar e substituir —
+    // decidia com o número errado (27/07: 278 samples somando 5.703 km).
+    {
+      const a = _dropTeleports(existingSamples);
+      if (a.dropped) {
+        console.warn(`⚠ AutoTrip ${safeId}: ${a.dropped} sample(s) existentes descartados por salto impossível (>${MAX_IMPLIED_KMH} km/h implícitos)`);
+        existingSamples = a.clean;
+      }
+      const b = _dropTeleports(samples || []);
+      if (b.dropped) {
+        console.warn(`⚠ AutoTrip ${safeId}: ${b.dropped} sample(s) do POST descartados por salto impossível`);
+        samples = b.clean;
+      }
+    }
+
     const newSamples = samples || [];
     let finalSamples = newSamples;
     let didMerge = false;
@@ -8807,6 +8892,13 @@ function ingestAutoTrip({ tripId, autoTrip, samples }, opts = {}) {
       if (newSamples.length === 0) {
         // POST sem samples (sync metadata-only) — preserva existentes
         finalSamples = existingSamples;
+      } else if (newSamples.length > existingSamples.length
+                 && _isContainedIn(existingSamples, newSamples)) {
+        // O POST traz a viagem inteira e os existentes são um pedaço dela
+        // (típico: bridge só gravou live nos minutos em que teve GPS). Concatenar
+        // duplicaria esse pedaço e inflaria distKm — substitui.
+        finalSamples = newSamples;
+        console.log(`↻ AutoTrip ${safeId}: ${existingSamples.length} live samples já contidos na rota do POST (${newSamples.length}) — substituídos`);
       } else {
         // Atenção: `t` é em segundos (offset de startMs) e múltiplos samples no
         // mesmo segundo são comuns (tick de 500ms). Dedupe por t inteiro colapsa
