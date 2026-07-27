@@ -11,6 +11,15 @@ class App : Application() {
 
         fun getDeviceProtectedContext(): Context =
             instance.createDeviceProtectedStorageContext()
+
+        /**
+         * A sessão ANTERIOR terminou limpa? Capturado em reportDeathIfAny() antes
+         * de o flag ser sobrescrito. Quem consome: AutomationManager — bordas de
+         * trigger "state" salvas por uma sessão que morreu mal não são confiáveis
+         * (ver loadTrigState).
+         */
+        @Volatile var lastSessionEndedCleanly: Boolean = true
+            private set
     }
 
     override fun onCreate() {
@@ -38,6 +47,8 @@ class App : Application() {
         val prefs = dpCtx.getSharedPreferences(SharedPreferencesKeys.PREFS_NAME, Context.MODE_PRIVATE)
         val cleanly = prefs.getBoolean(SharedPreferencesKeys.SESSION_ENDED_CLEANLY, true)
         val reason  = prefs.getString(SharedPreferencesKeys.LAST_DEATH_REASON, null)
+        // Guarda antes do overwrite abaixo — o AutomationManager precisa saber.
+        lastSessionEndedCleanly = cleanly
         // Marca "unclean" pra próxima — só vira "clean" no shutdown intencional.
         prefs.edit().putBoolean(SharedPreferencesKeys.SESSION_ENDED_CLEANLY, false).apply()
         if (cleanly && reason == null) return  // primeira vez OU boot limpo — nada a reportar

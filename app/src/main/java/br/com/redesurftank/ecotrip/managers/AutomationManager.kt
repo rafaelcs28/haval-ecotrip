@@ -1,6 +1,7 @@
 package br.com.redesurftank.ecotrip.managers
 
 import android.content.Context
+import br.com.redesurftank.ecotrip.App
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -508,6 +509,28 @@ object AutomationManager {
             } else {
                 // Legado (pré-catchup): arquivo flat só com booleanos = stateTrigSatisfied.
                 o.keys().forEach { k -> stateTrigSatisfied[k] = o.getBoolean(k) }
+            }
+            // Sessão anterior morreu mal (force-stop/ANR/OOM/self-kill)? As bordas
+            // `true` salvas por ela NÃO são confiáveis: o app morreu com o predicado
+            // satisfeito e nunca gravou a descida. Ao subir de novo com a condição
+            // ainda verdadeira, cur==prev==true, não há borda e a regra fica MUDA
+            // até um desligamento limpo.
+            //
+            // Foi o que aconteceu em 27/07: o app morreu unclean em 26/07 com o
+            // carro ligado, então "Cortina abre 1a ignição" não disparou na
+            // ignição das 05:59 — nem dispararia nas seguintes.
+            //
+            // Zerar só as `true` (as `false` já rearmam sozinhas) faz a próxima
+            // avaliação contar como borda de subida. O disparo indevido é contido
+            // pelas conditions da regra (janela de horário, shade<100) e pelo
+            // debounce, que continuam valendo.
+            if (!App.lastSessionEndedCleanly) {
+                val armed = stateTrigSatisfied.filterValues { it }.keys.toList()
+                if (armed.isNotEmpty()) {
+                    armed.forEach { stateTrigSatisfied[it] = false }
+                    saveTrigState()
+                    AppLogger.w(TAG, "sessão anterior morreu unclean — bordas de state rearmadas: $armed")
+                }
             }
         } catch (e: Exception) { AppLogger.w(TAG, "loadTrigState: ${e.message}") }
     }
