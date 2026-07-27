@@ -6881,18 +6881,15 @@ app.post('/api/charge-reconstruct', requireAuth, (req, res) => {
   }
 });
 
-app.post('/api/charges/merge', (req, res) => {
-  try {
-    const { tsA, tsB } = req.body;
-    const numA = parseInt(tsA, 10), numB = parseInt(tsB, 10);
-    if (!numA || !numB || numA === numB) return res.status(400).json({ error: 'tsA e tsB devem ser diferentes e válidos' });
-
-    const idxA = chargesArr.findIndex(c => (c.timestamp_ms || 0) === numA);
-    const idxB = chargesArr.findIndex(c => (c.timestamp_ms || 0) === numB);
-    if (idxA < 0) return res.status(404).json({ error: `recarga não encontrada: ${numA}` });
-    if (idxB < 0) return res.status(404).json({ error: `recarga não encontrada: ${numB}` });
-
-    const cA = chargesArr[idxA], cB = chargesArr[idxB];
+// Funde duas recargas numa só. `cA`/`cB` em qualquer ordem — a cronológica é
+// resolvida aqui. Faz os side effects (chargesArr, telemetria, tombstone da late,
+// preço médio) e devolve o registro consolidado.
+//
+// Usada pelo merge manual (POST /api/charges/merge) e pelo automático
+// (_autoMergeContiguousCharges), pra que os dois tratem cost_override, charger_kwh
+// e amostras exatamente igual.
+function _mergeChargePair(cA, cB) {
+  {
     // Ordem cronológica
     const [early, late] = cA.timestamp_ms <= cB.timestamp_ms ? [cA, cB] : [cB, cA];
 
@@ -7003,6 +7000,126 @@ app.post('/api/charges/merge', (req, res) => {
     recomputeBatteryAvgPrice();
     scheduleChargesFlush();
     console.log(`[merge-charges] ${early.timestamp_ms} + ${late.timestamp_ms} → ${early.timestamp_ms} (${mergedEnergyKwh} kWh, ${mergedDurationSec}s)`);
+    return merged;
+  }
+}
+
+// ── Consolidação automática de recargas fragmentadas ─────────────────────────
+// O APK fecha a sessão e abre outra quando perde o fio no meio de uma carga
+// (dorme, morre, MQTT cai). O carregador conta a carga INTEIRA, então cada
+// fragmento comparado com o display do carregador parece ter perda absurda:
+// em 27/07 um fragmento deu 21% contra 15,8% da carga somada.
+//
+// Assinatura de fragmentação: SOC contínuo (a nova começa onde a anterior
+// parou), gap curto e mesmo local. Se o SOC caiu no meio, o carro rodou —
+// são cargas distintas e não se unem.
+const AUTO_MERGE_MAX_GAP_MS = 30 * 60_000;  // pausa maior que isso já é outra carga
+const AUTO_MERGE_SOC_TOL    = 2;            // pontos de folga no encaixe do SOC
+const AUTO_MERGE_MAX_DIST_M = 200;          // mesmo carregador
+
+// `timestamp_ms` é o FIM da sessão (o APK usa System.currentTimeMillis() ao
+// fechar), então o início é ts - duration.
+function _chargeStartMs(c) {
+  return (c.timestamp_ms || 0) - (c.duration_sec || 0) * 1000;
+}
+
+function _chargesAreContiguous(early, late) {
+  const gapMs = _chargeStartMs(late) - (early.timestamp_ms || 0);
+  if (!(gapMs >= 0 && gapMs <= AUTO_MERGE_MAX_GAP_MS)) return false;
+
+  // SOC tem que existir nos dois lados; 0 aqui é leitura ausente, não bateria
+  // vazia — unir com base nele inventaria continuidade.
+  const eEnd = +early.soc_end, lStart = +late.soc_start;
+  if (!(eEnd > 0) || !(lStart > 0)) return false;
+  if (Math.abs(lStart - eEnd) > AUTO_MERGE_SOC_TOL) return false;
+
+  // Progressão monotônica: a carga unida tem que subir.
+  if (!(+late.soc_end > +early.soc_start)) return false;
+
+  // Mesmo local. Se falta GPS em algum lado, o SOC contínuo + gap curto já
+  // bastam (é o caso comum: o APK não anexa GPS em toda sessão).
+  const hasBoth = early.location_lat != null && early.location_lng != null
+               && late.location_lat  != null && late.location_lng  != null;
+  if (hasBoth) {
+    const d = haversineM(early.location_lat, early.location_lng, late.location_lat, late.location_lng);
+    if (d > AUTO_MERGE_MAX_DIST_M) return false;
+  }
+  return true;
+}
+
+// Varre o histórico e une o que estiver fragmentado. Idempotente: a `late` de
+// cada merge ganha tombstone, então o retained do APK não a traz de volta e uma
+// segunda passada não encontra nada. Devolve os pares unidos.
+function _autoMergeContiguousCharges() {
+  const unidos = [];
+  // Enquanto houver o que unir: cada merge muda os vizinhos, então reavalia.
+  for (let volta = 0; volta < 20; volta++) {
+    const ord = [...chargesArr]
+      .filter(c => c.timestamp_ms)
+      .sort((a, b) => a.timestamp_ms - b.timestamp_ms);
+    let achou = false;
+    for (let i = 0; i + 1 < ord.length; i++) {
+      const early = ord[i], late = ord[i + 1];
+      if (!_chargesAreContiguous(early, late)) continue;
+      const antes = { e: early.energy_kwh, l: late.energy_kwh };
+      const merged = _mergeChargePair(early, late);
+      unidos.push({
+        ts: merged.timestamp_ms,
+        de: [early.timestamp_ms, late.timestamp_ms],
+        energia: `${antes.e} + ${antes.l} → ${merged.energy_kwh} kWh`,
+        soc: `${merged.soc_start}→${merged.soc_end}`,
+      });
+      achou = true;
+      break;   // chargesArr mudou — reordena
+    }
+    if (!achou) break;
+  }
+  if (unidos.length) {
+    console.log(`🔗 [auto-merge] ${unidos.length} recarga(s) fragmentada(s) consolidada(s)`);
+    for (const u of unidos) console.log(`   ${u.de.join(' + ')} → ${u.ts}  ${u.energia}  SOC ${u.soc}`);
+  }
+  return unidos;
+}
+
+// Consolidação sob demanda — útil pra rodar no histórico já gravado.
+// `?dry=1` só lista os pares que seriam unidos, sem tocar em nada.
+app.post('/api/charges/auto-merge', (req, res) => {
+  try {
+    if (req.query.dry === '1' || req.body?.dry === true) {
+      const ord = [...chargesArr].filter(c => c.timestamp_ms).sort((a, b) => a.timestamp_ms - b.timestamp_ms);
+      const pares = [];
+      for (let i = 0; i + 1 < ord.length; i++) {
+        const e = ord[i], l = ord[i + 1];
+        if (!_chargesAreContiguous(e, l)) continue;
+        pares.push({
+          early: { ts: e.timestamp_ms, quando: e.timestamp, kwh: e.energy_kwh, soc: `${e.soc_start}→${e.soc_end}`, local: e.location_name || null },
+          late:  { ts: l.timestamp_ms, quando: l.timestamp, kwh: l.energy_kwh, soc: `${l.soc_start}→${l.soc_end}`, local: l.location_name || null },
+          gap_min: +(((_chargeStartMs(l) - e.timestamp_ms) / 60000).toFixed(1)),
+          resultado: { kwh: +(((+e.energy_kwh || 0) + (+l.energy_kwh || 0)).toFixed(2)), soc: `${e.soc_start}→${l.soc_end}` },
+        });
+      }
+      return res.json({ ok: true, dry: true, would_merge: pares.length, pares });
+    }
+    const unidos = _autoMergeContiguousCharges();
+    res.json({ ok: true, merged_count: unidos.length, merged: unidos });
+  } catch (e) {
+    console.error('[auto-merge]', e);
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
+app.post('/api/charges/merge', (req, res) => {
+  try {
+    const { tsA, tsB } = req.body;
+    const numA = parseInt(tsA, 10), numB = parseInt(tsB, 10);
+    if (!numA || !numB || numA === numB) return res.status(400).json({ error: 'tsA e tsB devem ser diferentes e válidos' });
+
+    const idxA = chargesArr.findIndex(c => (c.timestamp_ms || 0) === numA);
+    const idxB = chargesArr.findIndex(c => (c.timestamp_ms || 0) === numB);
+    if (idxA < 0) return res.status(404).json({ error: `recarga não encontrada: ${numA}` });
+    if (idxB < 0) return res.status(404).json({ error: `recarga não encontrada: ${numB}` });
+
+    const merged = _mergeChargePair(chargesArr[idxA], chargesArr[idxB]);
     res.json({ ok: true, merged });
   } catch (e) {
     console.error('[merge-charges]', e);
@@ -18983,6 +19100,10 @@ function applyMqttMessage(key, value, isRetained = false) {
             return { ...newCharge, ...keep };
           });
           chargesArr = [...preservedOldEntries, ...mergedEntries];
+          // Fragmento novo pode fechar contiguidade com o anterior (APK perdeu o
+          // fio no meio da carga). Roda antes do broadcast pra que a PWA já receba
+          // o registro consolidado, não os dois pedaços.
+          _autoMergeContiguousCharges();
           scheduleChargesFlush();
           // Mix ponderado da bateria precisa ser recalculado a cada recarga
           // nova/atualizada — sem isso, o custo das viagens segue usando o
@@ -18998,6 +19119,13 @@ function applyMqttMessage(key, value, isRetained = false) {
             // Antes só faltava ser chamado — o autoMatchLocation já existia.
             for (const nova of novas) {
               const stored = chargesArr.find(c => c.timestamp_ms === nova.timestamp_ms);
+              // Absorvida pelo auto-merge (era o fragmento `late`) — quem vale é o
+              // registro consolidado, não este ts. Sem isso a PWA receberia um
+              // new_charge de recarga que já não existe.
+              if (!stored) {
+                console.log(`↩ new_charge ts=${nova.timestamp_ms} suprimido — consolidado pelo auto-merge`);
+                continue;
+              }
               if (stored && !stored.location_name && state.gps_lat && state.gps_lng) {
                 stored.location_lat = state.gps_lat;
                 stored.location_lng = state.gps_lng;
