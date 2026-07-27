@@ -14557,8 +14557,12 @@ function _chargeStations() {
 function _clearRoute(consumedWps) {
   if (state.arrival) { state.arrival = null; scheduleStateBroadcast(); }
   if (state.route)   { state.route   = null; scheduleStateSave(); }
-  if (_navDestRetained) {
+  // Publica a limpeza sem depender da flag: publicar '' retido num tópico já
+  // vazio é idempotente e barato, e um `false` indevido aqui deixava destino
+  // órfão no carro por horas. A flag segue só pra log/telemetria.
+  if (mqttClient?.connected) {
     mqttClient.publish(`${MQTT_PREFIX}/cmd/nav_dest`, '', { qos: 1, retain: true });
+    if (_navDestRetained) console.log('[nav_dest] limpo (chegou ao destino ou rota expirou)');
     _navDestRetained = false;
   }
   // Zera ts dos pontos consumidos no histórico pra não "ressuscitarem" no próximo tick.
@@ -18863,6 +18867,22 @@ function applyMqttMessage(key, value, isRetained = false) {
     case 'cmd/charge_limit/result':
       broadcast('charge_limit_result', { result: value });
       break;
+    // O próprio bridge publica este tópico (retido) pro carro. Assinar de volta é
+    // o que faz `_navDestRetained` sobreviver a restart: o broker entrega o
+    // retained no connect e a flag se reconstrói da fonte da verdade.
+    //
+    // Sem isso a flag voltava `false` a cada restart e `_clearRoute()` pulava a
+    // publicação de limpeza — o destino ficava órfão no broker e o carro seguia
+    // exibindo o endereço de horas antes (chegou no trabalho, saiu pra almoçar e
+    // o destino da manhã ainda estava lá).
+    case 'cmd/nav_dest': {
+      const temDest = !!(value && value.trim());
+      if (temDest !== _navDestRetained) {
+        _navDestRetained = temDest;
+        console.log(`[nav_dest] retained ${temDest ? 'presente' : 'vazio'} no broker — _navDestRetained=${temDest}`);
+      }
+      break;
+    }
     case 'ha/drive_mode/state': {
       const m = parseInt(value);
       if ([0, 1, 3].includes(m)) { state.drive_mode = m; _onDriveModeChange(); }
