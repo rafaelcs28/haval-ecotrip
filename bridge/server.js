@@ -1289,6 +1289,12 @@ function genBackupCodes(n = 10) {
 
 // TRIPS_FILE removido — Trip A/B descontinuados.
 const CHARGES_FILE    = path.join(DATA_DIR, 'charges.json');
+// Teto pra "correção" automática do início da viagem. As heurísticas de âncora e
+// de 1º sample servem pra REFINAR o startLat quando o APK começou sem GPS —
+// centenas de metros. Um salto maior que isto significa que a fonte derivada é de
+// outro trecho (típico em merge de resume), e aí o valor do APK vale mais.
+const START_FIX_MAX_M = 2000;
+
 const STATE_FILE      = path.join(DATA_DIR, 'state.json');
 const AUTOTRIPS_DIR   = path.join(DATA_DIR, 'autotrips');
 const SNAPSHOTS_FILE  = path.join(DATA_DIR, 'lifetime_snapshots.json');
@@ -8863,9 +8869,18 @@ function ingestAutoTrip({ tripId, autoTrip, samples }, opts = {}) {
       const firstGps = finalSamples.find(s => s.lat && s.lat !== 0);
       const lastGps  = [...finalSamples].reverse().find(s => s.lat && s.lat !== 0);
       if (firstGps && (firstGps.lat !== autoTrip.startLat || firstGps.lng !== autoTrip.startLng)) {
-        console.log(`↻ AutoTrip ${safeId}: startLat ${(+autoTrip.startLat||0).toFixed(5)},${(+autoTrip.startLng||0).toFixed(5)} → ${firstGps.lat.toFixed(5)},${firstGps.lng.toFixed(5)}`);
-        autoTrip.startLat = firstGps.lat;
-        autoTrip.startLng = firstGps.lng;
+        // Mesmo teto da âncora: num merge de resume o primeiro sample da lista
+        // pode ser de outro trecho. Refinar sim, teletransportar não.
+        const jumpM = (+autoTrip.startLat && +autoTrip.startLng)
+          ? haversineM(firstGps.lat, firstGps.lng, +autoTrip.startLat, +autoTrip.startLng)
+          : 0;
+        if (jumpM > START_FIX_MAX_M) {
+          console.warn(`⚠ AutoTrip ${safeId}: 1º sample ${firstGps.lat.toFixed(5)},${firstGps.lng.toFixed(5)} ignorado como start — Δ${Math.round(jumpM)}m (>${START_FIX_MAX_M}m)`);
+        } else {
+          console.log(`↻ AutoTrip ${safeId}: startLat ${(+autoTrip.startLat||0).toFixed(5)},${(+autoTrip.startLng||0).toFixed(5)} → ${firstGps.lat.toFixed(5)},${firstGps.lng.toFixed(5)}`);
+          autoTrip.startLat = firstGps.lat;
+          autoTrip.startLng = firstGps.lng;
+        }
       }
       if (lastGps && (lastGps.lat !== autoTrip.endLat || lastGps.lng !== autoTrip.endLng)) {
         autoTrip.endLat = lastGps.lat;
@@ -8877,13 +8892,21 @@ function ingestAutoTrip({ tripId, autoTrip, samples }, opts = {}) {
     // e ele diverge >200m do que ficou em startLat/Lng, usa o snapshot — cobre o
     // caso em que o APK perdeu GPS nos primeiros minutos e o "primeiro sample"
     // ficou no meio da rota.
+    //
+    // Teto de plausibilidade: a âncora vem de arquivo já existente da trip e num
+    // resume pode ser de OUTRO trecho. Em 27/07 isso jogou a origem de Casa pra
+    // Santa Genoveva (Δ10.589m) por cima de um startLat que o APK mandou certo.
+    // Acima de START_FIX_MAX_M a "correção" não é refino, é troca de viagem.
     try {
       const existingFile = fs.existsSync(filePath) ? JSON.parse(fs.readFileSync(filePath, 'utf8')) : null;
       const anchor = existingFile && existingFile.actualStart;
+      const apkHasStart = !!(+autoTrip.startLat && +autoTrip.startLng);
       if (anchor && anchor.lat && anchor.lng) {
         const distM = haversineM(anchor.lat, anchor.lng,
                                  +autoTrip.startLat || 0, +autoTrip.startLng || 0);
-        if (distM > 200) {
+        if (apkHasStart && distM > START_FIX_MAX_M) {
+          console.warn(`⚠ AutoTrip ${safeId}: âncora ${anchor.lat.toFixed(5)},${anchor.lng.toFixed(5)} ignorada — Δ${Math.round(distM)}m do start do APK (>${START_FIX_MAX_M}m, provável trecho de outra viagem)`);
+        } else if (distM > 200) {
           console.log(`↻ AutoTrip ${safeId}: âncora do start ${anchor.lat.toFixed(5)},${anchor.lng.toFixed(5)} substitui ${(+autoTrip.startLat||0).toFixed(5)},${(+autoTrip.startLng||0).toFixed(5)} (Δ${Math.round(distM)}m)`);
           autoTrip.startLat = anchor.lat;
           autoTrip.startLng = anchor.lng;
