@@ -4625,6 +4625,21 @@ app.use((req, _res, next) => {
   } catch (_) { /* contador não pode derrubar request */ }
   next();
 });
+// IPs "de casa": o público da residência e as faixas privadas. Serve pra separar
+// cliente conhecido de scanner — o Funnel é público e bots varrem a internet
+// (28/07: 172.184.247.1, Azure/Microsoft, pedindo /health.html). Sem separar, o
+// ruído de scanner mascara a pergunta "ainda tem cliente MEU no host antigo?".
+function _ipConhecido(ip) {
+  const s = String(ip || '');
+  if (!s || s === '?') return true;                       // sem dado: não acusa
+  if (/^(127\.|::1|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.)/.test(s)) return true;
+  return s === (_ddnsLastIp() || '');                     // IP público atual da casa
+}
+function _ddnsLastIp() {
+  try { return fs.readFileSync(path.join(require('os').homedir(), '.cloudflared/ddns-last-ip'), 'utf8').trim(); }
+  catch (_) { return ''; }
+}
+
 app.get('/api/host-hits', (_req, res) => {
   const out = [...
     _hostHits.entries()].map(([host, e]) => ({
@@ -4635,9 +4650,17 @@ app.get('/api/host-hits', (_req, res) => {
                                         .map(([p, n]) => ({ path: p, n })),
       legacy: _isFunnelHost(host),
       fallback: /duckdns/.test(host),   // acesso direto, não bloqueia o desligamento
+      // Todo IP visto é de fora? Então é scanner, não cliente seu.
+      externo: [...(e.ips || new Set())].length > 0
+            && [...(e.ips || new Set())].every(ip => !_ipConhecido(ip)),
     })).sort((a, b) => b.hits - a.hits);
+  const legacy = out.filter(h => h.legacy);
   res.json({ hosts: out, window_h: HOST_WINDOW_MS / 3600_000,
-             legacy_hits: out.filter(h => h.legacy).reduce((s, h) => s + h.hits, 0),
+             // legacy_hits conta só o que é SEU: é esse número que decide se o
+             // Funnel pode cair. Scanner externo vai continuar batendo pra
+             // sempre e não deve travar a decisão.
+             legacy_hits:         legacy.filter(h => !h.externo).reduce((s, h) => s + h.hits, 0),
+             legacy_hits_externo: legacy.filter(h =>  h.externo).reduce((s, h) => s + h.hits, 0),
              reset_ms: _hostHitsResetMs });
 });
 
@@ -4662,7 +4685,33 @@ app.use((req, res, next) => {
   if (req.path.startsWith('/api')) res.setHeader('Cache-Control', 'no-store, must-revalidate');
   next();
 });
-app.get('/health.html', (_req, res) => {
+// Basic auth no HTML do monitor. Navegação de browser NÃO manda header
+// Authorization: Bearer, então não dá pra reusar o token do jeito que as /api/*
+// fazem — o Basic é o único esquema que o browser negocia sozinho (pede uma vez
+// e guarda na sessão).
+//
+// Por que fechar: o HTML aberto entregava a estrutura do monitor (nomes de
+// endpoint, ids dos cards) a qualquer scanner. Não era vazamento de dado — o
+// conteúdo vem das /api/*, que exigem token — mas era reconhecimento de graça.
+// Um bot da Azure pediu /health.html em 28/07.
+//
+// Senha = o token do bridge (usuário: qualquer coisa). HEALTH_HTML_OPEN=1 no .env
+// volta ao comportamento aberto.
+function requireHealthHtmlAuth(req, res, next) {
+  if (process.env.HEALTH_HTML_OPEN === '1' || !BRIDGE_TOKEN_HASH) return next();
+  const h = req.headers.authorization || '';
+  if (h.startsWith('Basic ')) {
+    const pw = Buffer.from(h.slice(6), 'base64').toString('utf8').split(':').slice(1).join(':');
+    if (safeStrEqual(pw, BRIDGE_TOKEN_HASH) || safeStrEqual(sha256hex(pw), BRIDGE_TOKEN_HASH)) return next();
+  }
+  // Sessão admin também abre (senha + 2FA já provaram identidade).
+  const sid = (req.headers['x-admin-session'] || '').toString().trim();
+  if (sid && adminAuth.validSession(sid)) return next();
+  res.set('WWW-Authenticate', 'Basic realm="Bridge Health", charset="UTF-8"');
+  return res.status(401).send('auth necessária');
+}
+
+app.get('/health.html', requireHealthHtmlAuth, (_req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   res.sendFile(path.join(__dirname, 'public', 'health.html'));
 });
