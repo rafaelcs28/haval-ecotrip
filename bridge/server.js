@@ -20,6 +20,7 @@ const apnsLive = require('./apns_live_activity');
 apnsLive.init();
 const impulseHelp = require('./impulse-help');
 const carHelp     = require('./car-help');
+const bluettiCloud = require('./bluetti-cloud');
 
 // Sem isto, uma rejection/exception fora de rota (timer, callback MQTT, fetch em
 // background) derrubava o processo inteiro. Loga e segue — pm2 só reinicia em crash real.
@@ -4798,15 +4799,71 @@ app.post('/api/departure/dismiss', (req, res) => {
   res.json({ ok: true });
 });
 
-// GET /api/bluetti-status — estado das duas EL100V2 (Casa + Sítio). Fetch dos
-// sensores no HA local (bridge já tem HA_TOKEN) e devolve JSON normalizado.
-// Cache 30s. Consumido pelo health.html do monitor externo.
+// GET /api/bluetti-status — estado das duas EL100V2 (Casa + Sítio). Fonte
+// PRIMÁRIA: integração própria com a nuvem Bluetti (bluetti-cloud.js, sem HA no
+// caminho). O HA fica como fallback automático enquanto a nuvem não tem token/
+// bootstrap — assim a troca não abre janela cega. `source` no payload diz de onde
+// o dado veio. Consumido pelo health.html do monitor externo.
+// BLUETTI_SOURCE=cloud|ha|auto (default auto = cloud com fallback pro HA).
 const _BLUETTI = {
-  casa:  { id: 'el100v22541111662131', label: 'Casa',  feeds: 'Mac Mini + Roteador' },
-  sitio: { id: 'el100v22541111602913', label: 'Sítio', feeds: 'Starlink' },
+  casa:  { id: 'el100v22541111662131', sn: 'EL100V22541111662131', label: 'Casa',  feeds: 'Mac Mini + Roteador' },
+  sitio: { id: 'el100v22541111602913', sn: 'EL100V22541111602913', label: 'Sítio', feeds: 'Starlink' },
 };
+const _BLUETTI_SOURCE = (process.env.BLUETTI_SOURCE || 'auto').toLowerCase();
 let _bluettiCache = { data: null, ts: 0 };
-async function _fetchBluettiStatus() {
+
+// SN por estação: .env manda (BLUETTI_SN_CASA/BLUETTI_SN_SITIO), senão o default
+// derivado das entity ids que o HA já usava (model+SN).
+function _bluettiSn(key) {
+  return (process.env[`BLUETTI_SN_${key.toUpperCase()}`] || _BLUETTI[key].sn).toUpperCase();
+}
+
+// Monta o payload normalizado a partir do snapshot da nuvem. Mesmo shape do HA
+// (battery_pct/ac_out_w/.../reachable) — o watchdog e o health.html não mudam.
+const BLUETTI_STALE_MS = 5 * 60_000;   // sem poll bem-sucedido há 5min = dado velho
+function _bluettiFromCloud() {
+  const snap = bluettiCloud.snapshot();
+  if (!snap.ready) return null;
+  // Dado velho não vale como verdade: em `auto` cai pro HA, em `cloud` o alerta
+  // bluetti_cloud_stale acende. Sem isso o watchdog julgaria estado congelado.
+  if (!snap.ts || Date.now() - snap.ts > BLUETTI_STALE_MS) return null;
+  const out = { ts: Date.now(), source: 'cloud', ws: snap.ws, needs_reauth: snap.needs_reauth };
+  let hit = 0;
+  for (const key of ['casa', 'sitio']) {
+    const d = snap.devices[_bluettiSn(key)];
+    if (d) hit++;
+    out[key] = {
+      ..._BLUETTI[key],
+      battery_pct:      d?.battery_pct ?? null,
+      ac_out_w:         d?.ac_out_w ?? null,
+      dc_out_w:         d?.dc_out_w ?? null,
+      grid_in_w:        d?.grid_in_w ?? null,
+      pv_in_w:          d?.pv_in_w ?? null,
+      battery_time_min: d?.battery_time_min ?? null,
+      full_charge_min:  d?.full_charge_min ?? null,
+      ac_on:            d?.ac_on ?? null,
+      ac_eco_on:        d?.ac_eco_on ?? null,
+      dc_on:            d?.dc_on ?? null,
+      dc_eco_on:        d?.dc_eco_on ?? null,
+      working_mode:     d?.working_mode ?? null,
+      inv_state:        d?.inv_state ?? null,
+      reachable:        !!d?.reachable,
+      // stale_zeros: nuvem diz online mas mandou tudo zerado = estação sem
+      // comunicação de verdade (vira unreachable, não apagão).
+      stale_zeros:      !!d?.stale_zeros,
+      cloud_name:       d?.name ?? null,
+    };
+  }
+  // Nenhum dos 2 SNs bateu → SN errado no .env. Não devolve "tudo offline" (isso
+  // dispararia unreachable falso); deixa o HA responder e loga o que a nuvem viu.
+  if (!hit) {
+    console.warn('[bluetti] SNs não bateram com a nuvem. Cloud tem:', Object.keys(snap.devices).join(', '));
+    return null;
+  }
+  return out;
+}
+
+async function _fetchBluettiStatusHA() {
   const tok = process.env.HA_TOKEN;
   const url = (process.env.HA_URL || '').replace(/\/$/, '');
   if (!tok || !url) return null;
@@ -4861,8 +4918,21 @@ async function _fetchBluettiStatus() {
       casa:  { ..._BLUETTI.casa,  ...parse(_BLUETTI.casa.id) },
       sitio: { ..._BLUETTI.sitio, ...parse(_BLUETTI.sitio.id) },
       ts: Date.now(),
+      source: 'ha',
     };
   } catch (e) { return null; }
+}
+
+// Fonte efetiva: cloud primeiro (é o dado sem intermediário), HA como rede de
+// segurança. Com BLUETTI_SOURCE=cloud não cai pro HA nunca (útil pra validar que
+// a integração própria está de pé sozinha); com =ha volta ao comportamento antigo.
+async function _fetchBluettiStatus() {
+  if (_BLUETTI_SOURCE !== 'ha') {
+    const c = _bluettiFromCloud();
+    if (c) return c;
+    if (_BLUETTI_SOURCE === 'cloud') return null;
+  }
+  return _fetchBluettiStatusHA();
 }
 // Poll servidor-side a cada 30s: 1 fetch pra alimentar UI + watchdog. Endpoint
 // e alertas ambos leem `_bluettiState` mais recente sem hammer no HA.
@@ -4874,6 +4944,22 @@ async function _bluettiTick() {
 }
 setInterval(() => { _bluettiTick().catch(() => {}); }, 30_000);
 setTimeout(() => { _bluettiTick().catch(() => {}); }, 5_000);
+
+// ── Integração própria com a nuvem Bluetti (substitui o caminho via HA) ───────
+// start() cuida sozinho de: bootstrap (devices + bind), poll de fundo, WS STOMP
+// de push e refresh do OAuth. onUpdate = push chegou → reavalia alerta na hora,
+// sem esperar o tick de 30s. Throttle de 3s pra rajada de push não virar loop.
+let _bluettiPushAt = 0;
+bluettiCloud.start({
+  dataDir: DATA_DIR,
+  log: (...a) => console.log('[bluetti-cloud]', ...a),
+  onUpdate: () => {
+    const now = Date.now();
+    if (now - _bluettiPushAt < 3000) return;
+    _bluettiPushAt = now;
+    _bluettiTick().catch(() => {});
+  },
+});
 
 // ── Watchdog: interpreta o estado das estações e dispara alertas via _alert() ─
 // Cada estação tem 4 alertas escopados: ac_off (dispositivos apagados agora),
@@ -4902,6 +4988,31 @@ function _bluettiOffgridConfirmed(key, gridW, batt) {
 }
 
 function _evalBluettiAlerts() {
+  // OAuth da nuvem morreu (refresh_token recusado) → só login manual religa. Fora
+  // do guard abaixo de propósito: precisa gritar mesmo sem nenhum estado ainda.
+  // O grant da Bluetti morre 31 dias depois do login manual: o refresh renova o
+  // access_token DENTRO da janela mas não move o vencimento (o servidor devolve o
+  // tempo restante, não 31 dias novos). Então o login mensal é inevitável — o que
+  // dá pra fazer é avisar com folga e num toque. Um alerta só, com dois gatilhos:
+  // refresh quebrado OU janela acabando; repete 1x/dia até religar.
+  const _bDays = bluettiCloud.status().token_expires_in_days;
+  _alert('bluetti_cloud_reauth',
+    bluettiCloud.hasToken() && ((bluettiCloud.needsReauth() && _bDays != null && _bDays < 7) || (_bDays != null && _bDays < 7)),
+    'Bluetti: refazer login',
+    `O acesso à nuvem Bluetti vence em ${_bDays} dia(s)` +
+    `${bluettiCloud.needsReauth() ? ' e o refresh automático está falhando' : ''}. ` +
+    `Toque pra religar: ${_bluettiReauthLink()}`,
+    'high', ['key', 'warning'], { repeatEvery: 86400_000 });
+  // Integração própria parada (token ok, mas sem poll há >5min: internet, nuvem
+  // Bluetti fora ou WS/poll travado). Em modo `ha` não interessa.
+  const cs = bluettiCloud.status();
+  _alert('bluetti_cloud_stale',
+    _BLUETTI_SOURCE !== 'ha' && cs.has_token && !cs.needs_reauth &&
+      cs.last_poll_age_s != null && cs.last_poll_age_s > 300,
+    'Bluetti: integração sem dados',
+    `A nuvem Bluetti não responde há ${cs.last_poll_age_s}s (ws=${cs.ws_connected ? 'on' : 'off'}). ` +
+    `Último erro: ${cs.last_error || '—'}.`,
+    'high', ['warning', 'cloud']);
   if (!_bluettiState) return;
   for (const key of ['casa', 'sitio']) {
     const s = _bluettiState[key]; if (!s) continue;
@@ -4964,6 +5075,100 @@ app.get('/api/bluetti-status', async (_req, res) => {
   }
   if (!_bluettiCache.data) return res.status(502).json({ error: 'bluetti indisponível' });
   res.json(_bluettiCache.data);
+});
+
+// ── OAuth da nuvem Bluetti ───────────────────────────────────────────────────
+// Fluxo authorization_code padrão. /start só é alcançável com ADMIN_TOKEN na
+// query (é navegação de browser, não dá pra usar o header x-admin-session), e o
+// callback é protegido pelo `state` de uso único com validade de 10min.
+const _bluettiStates = new Map();   // state → expiresMs
+// Link de reautorização: o alerta vai pro ntfy/celular, então NÃO pode carregar o
+// ADMIN_TOKEN (o tópico ntfy vale como segredo fraco). Em vez disso um token
+// dedicado, com validade e escopo de uma coisa só: iniciar o OAuth da Bluetti.
+// Sobrevive a restart (em disco) e é rotacionado a cada login bem-sucedido.
+const BLUETTI_REAUTH_FILE = path.join(DATA_DIR, 'bluetti_reauth.json');
+let _bluettiReauth = null;
+try { _bluettiReauth = JSON.parse(fs.readFileSync(BLUETTI_REAUTH_FILE, 'utf8')); } catch (_) {}
+function _bluettiReauthToken() {
+  const now = Date.now();
+  if (!_bluettiReauth || !_bluettiReauth.token || (_bluettiReauth.expires || 0) < now) {
+    _bluettiReauth = { token: require('crypto').randomBytes(24).toString('base64url'), created: now, expires: now + 45 * 86400_000 };
+    try { atomicWriteFileSync(BLUETTI_REAUTH_FILE, JSON.stringify(_bluettiReauth)); } catch (_) {}
+  }
+  return _bluettiReauth.token;
+}
+function _bluettiReauthLink() {
+  const base = (process.env.BRIDGE_PUBLIC_URL || '').replace(/\/$/, '');
+  return `${base}/api/bluetti/oauth/start?rt=${_bluettiReauthToken()}`;
+}
+function _bluettiAdminOk(req) {
+  const t = (req.query.token || req.headers['x-admin-token'] || '').toString();
+  if (process.env.ADMIN_TOKEN && t === process.env.ADMIN_TOKEN) return true;
+  const rt = (req.query.rt || '').toString();
+  return !!(rt && _bluettiReauth && rt === _bluettiReauth.token && (_bluettiReauth.expires || 0) > Date.now());
+}
+app.get('/api/bluetti/oauth/start', (req, res) => {
+  if (!_bluettiAdminOk(req)) return res.status(401).send('token inválido');
+  const state = require('crypto').randomBytes(16).toString('hex');
+  for (const [k, exp] of _bluettiStates) if (exp < Date.now()) _bluettiStates.delete(k);
+  _bluettiStates.set(state, Date.now() + 600_000);
+  const url = bluettiCloud.authUrl(state);
+  console.log(`[bluetti] oauth start → redirect_uri=${bluettiCloud.redirectUri()}`);
+  res.redirect(url);
+});
+// Atende os dois paths: o nosso e o do HA (/auth/external/callback), caso o SSO
+// da Bluetti valide redirect_uri por whitelist. Trocar via BLUETTI_REDIRECT_PATH.
+app.get(['/api/bluetti/oauth/callback', '/auth/external/callback'], async (req, res) => {
+  const { code, state, error, error_description: desc } = req.query;
+  if (error) return res.status(400).send(`<h2>Bluetti recusou</h2><pre>${error}: ${desc || ''}</pre>`);
+  const exp = _bluettiStates.get(String(state));
+  if (!exp || exp < Date.now()) return res.status(400).send('<h2>state inválido/expirado</h2>Refaça em /api/bluetti/oauth/start');
+  _bluettiStates.delete(String(state));
+  if (!code) return res.status(400).send('<h2>sem code</h2>');
+  try {
+    await bluettiCloud.exchangeCode(String(code));
+    _bluettiReauth = null; _bluettiReauthToken();      // queima o link usado
+    const st = bluettiCloud.status();
+    _bluettiTick().catch(() => {});
+    res.send(`<h2>Bluetti autorizada ✅</h2><p>Devices: ${st.devices.join(', ') || '—'}</p>` +
+             `<p>Token expira em ${st.token_expires_in_days} dias (refresh automático).</p>` +
+             `<pre>${JSON.stringify(bluettiCloud.snapshot().devices, null, 2)}</pre>`);
+  } catch (e) {
+    console.warn('[bluetti] callback falhou:', e.message);
+    res.status(502).send(`<h2>Falhou</h2><pre>${e.message}</pre>`);
+  }
+});
+// Diagnóstico da integração (token, ws, poll, SNs vistos na nuvem).
+app.get('/api/bluetti/cloud-status', (req, res) => {
+  const admin = _bluettiAdminOk(req) || !!adminAuth.validSession((req.headers['x-admin-session'] || '').toString().trim());
+  if (!admin) return res.status(401).json({ error: 'unauthorized' });
+  res.json({ source_mode: _BLUETTI_SOURCE, expected_sns: { casa: _bluettiSn('casa'), sitio: _bluettiSn('sitio') },
+             ...bluettiCloud.status(), snapshot: bluettiCloud.snapshot() });
+});
+// Força um refresh do OAuth agora (o automático roda com 7 dias de folga). Serve
+// pra testar o caminho de renovação sem esperar o mês passar.
+app.post('/api/bluetti/refresh', async (req, res) => {
+  const admin = _bluettiAdminOk(req) || !!adminAuth.validSession((req.headers['x-admin-session'] || '').toString().trim());
+  if (!admin) return res.status(401).json({ error: 'unauthorized' });
+  const before = bluettiCloud.status();
+  const ok = await bluettiCloud.refreshNow();
+  const after = bluettiCloud.status();
+  res.json({ ok, before: { expires_at: before.token_expires_at, days: before.token_expires_in_days },
+             after:  { expires_at: after.token_expires_at,  days: after.token_expires_in_days },
+             needs_reauth: after.needs_reauth, last_error: after.last_error });
+});
+// Controle direto (AC/DC/ECO/working mode) sem passar pelo HA.
+// body: { key: 'casa'|'sitio' } ou { sn }, + { fnCode, value }
+app.post('/api/bluetti/control', requireAdmin, async (req, res) => {
+  const { key, sn, fnCode, value } = req.body || {};
+  const target = sn || (key ? _bluettiSn(key) : null);
+  if (!target || !fnCode) return res.status(400).json({ error: 'sn/key e fnCode obrigatórios' });
+  try {
+    await bluettiCloud.controlDevice(target, fnCode, value);
+    await bluettiCloud.poll([target]);
+    await _bluettiTick();
+    res.json({ ok: true, state: bluettiCloud.snapshot().devices[String(target).toUpperCase()] || null });
+  } catch (e) { res.status(502).json({ error: e.message }); }
 });
 
 // ── Solar (SAJ Clean Master Ambiental — Catalão) ─────────────────────────────
@@ -5640,7 +5845,10 @@ app.get('/api/cloudflare-status', async (_req, res) => {
     process: proc,
     api,
     hostnames: _cfHostnames(),
-    public_url: _shareBaseUrl(),
+    // Aqui é o card do SERVIDOR no monitor, então mostra o nome do servidor —
+    // _shareBaseUrl() devolveria carro.malha.dev, que é o dos links de trajeto.
+    public_url: (process.env.BRIDGE_PUBLIC_URL || 'https://bridge.malha.dev').replace(/\/+$/, ''),
+    car_url: _shareBaseUrl(),
     ts: now,
   };
   _cfCache = { ts: now, data };
@@ -17813,8 +18021,17 @@ function _shareValid(token) {
   if (Date.now() > t.expiresMs) { delete _shareTokens[token]; _saveShareTokens(); return false; }
   return true;
 }
+// Base dos links que saem PRO CARRO e pra terceiros: trajeto compartilhado
+// (/s/, share.html) e áudio de recado que o MediaPlayer do carro baixa. Tudo
+// isso é contexto Haval/Grasi, então mora em carro.malha.dev — bridge.malha.dev
+// é o nome do servidor (health, API, admin) e não deve aparecer num link que a
+// Grasi recebe.
+//
+// CAR_PUBLIC_URL tem precedência; BRIDGE_PUBLIC_URL fica como fallback pra não
+// quebrar instalação que só tenha a variável antiga.
 function _shareBaseUrl() {
-  return (process.env.BRIDGE_PUBLIC_URL || 'https://carro.malha.dev').replace(/\/+$/, '');
+  return (process.env.CAR_PUBLIC_URL || process.env.BRIDGE_PUBLIC_URL || 'https://carro.malha.dev')
+    .replace(/\/+$/, '');
 }
 
 // Cerca de velocidade: GET lê, POST { kmh } define (0 = desliga).

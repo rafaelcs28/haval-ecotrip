@@ -482,7 +482,8 @@ canvas { display: block; width: 100%; height: 60px; margin-top: 8px; }
         <div class="row"><span class="label">Conexões de edge</span><span class="val" id="cf-conns">—</span></div>
         <div class="row"><span class="label">cloudflared local</span><span class="val" id="cf-proc">—</span></div>
         <div class="row"><span class="label">Hostnames</span><span class="val" id="cf-hosts" style="font-size:11px">—</span></div>
-        <div class="row"><span class="label">URL pública</span><span class="val" id="cf-url" style="font-size:12px">—</span></div>
+        <div class="row"><span class="label">URL do servidor</span><span class="val" id="cf-url" style="font-size:12px">—</span></div>
+        <div class="row"><span class="label">URL dos links do carro</span><span class="val" id="cf-carurl" style="font-size:12px">—</span></div>
       </div>
     </details>
 
@@ -1580,6 +1581,7 @@ async function updateCloudflare() {
       ? `<span style="color:#888">${d.hostnames.join('<br>')}</span>`
       : '—');
     set('cf-url', d.public_url ? `<span style="color:#888">${d.public_url}</span>` : '—');
+    set('cf-carurl', d.car_url ? `<span style="color:#888">${d.car_url}</span>` : '—');
   } catch (e) { set('head-cf', 'erro'); }
 }
 
