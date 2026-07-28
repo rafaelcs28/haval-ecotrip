@@ -4657,6 +4657,24 @@ app.get('/health.html', (_req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   res.sendFile(path.join(__dirname, 'public', 'health.html'));
 });
+
+// Raiz por hostname: bridge.* é o nome do SERVIDOR, então abre o monitor; a PWA
+// do carro fica no carro.*, que é o nome do Haval/Grasi. Mesmo processo, mesma
+// porta — só a porta de entrada muda de significado.
+//
+// Redirect (302) em vez de servir o health direto, pra URL na barra refletir
+// onde a pessoa está. HEAD passa igual, então o probe do Funnel e a corrida do
+// BridgeRouter (que fazem HEAD em '/') continuam validando: 302 < 500.
+const _monitorHosts = new Set(
+  [process.env.BRIDGE_PUBLIC_URL || 'https://bridge.malha.dev']
+    .map(u => { try { return new URL(u).hostname.toLowerCase(); } catch (_) { return ''; } })
+    .filter(Boolean));
+app.get('/', (req, res, next) => {
+  const h = String(req.headers.host || '').toLowerCase().split(':')[0];
+  if (_monitorHosts.has(h)) return res.redirect(302, '/health.html');
+  next();
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ── Autenticação ──────────────────────────────────────────────────────────────
