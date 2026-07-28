@@ -33,7 +33,7 @@ const { exec } = require('child_process');
 // Admins (podem adicionar/remover pessoas pelo painel). Default: o dono.
 const ADMIN_EMAILS = (process.env.GATEWAY_ADMIN_EMAILS || 'rafaelcs28@gmail.com')
   .split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
-const APP_URL = process.env.GATEWAY_PUBLIC_URL || 'https://mac-mini.tailacc6e7.ts.net';
+const APP_URL = process.env.GATEWAY_PUBLIC_URL || 'https://bridge.malha.dev';
 
 // segredo p/ assinar o cookie de roteamento
 let SECRET = '';

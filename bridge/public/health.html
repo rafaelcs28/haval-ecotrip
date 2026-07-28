@@ -510,9 +510,9 @@ canvas { display: block; width: 100%; height: 60px; margin-top: 8px; }
       </div>
     </details>
 
-    <!-- HA da empresa (push) -->
+    <!-- HA do Sítio (push) -->
     <details class="card" data-k="hawork">
-      <summary><span class="sum-title">HA da empresa</span>
+      <summary><span class="sum-title">HA do Sítio</span>
         <span class="sum-right"><span id="head-hawork">—</span><span class="chev"></span></span></summary>
       <div class="card-body">
         <div class="row"><span class="label">Último push</span><span class="val" id="hawork-last">—</span></div>
@@ -864,7 +864,7 @@ async function load() {
       ? `<span class="pill green"><span class="dot green"></span>${ha.latency_ms ?? '?'} ms</span>`
       : ha.up === false ? `<span class="pill red"><span class="dot red"></span>${ha.error || 'Offline'}</span>` : '—');
 
-    // Monitor externo (HA da empresa) — dead-man's-switch: mostra estado + último ping.
+    // Monitor externo (HA do Sítio) — dead-man's-switch: mostra estado + último ping.
     const em = d.ext_monitor || {};
     set('ext-mon-status', em.ok === true
       ? `<span class="pill green"><span class="dot green"></span>Ativo (${em.age_sec}s)</span>`
@@ -873,7 +873,7 @@ async function load() {
         : `<span class="pill yellow"><span class="dot yellow"></span>Aguardando 1º ping</span>`);
     set('ext-mon-last', em.last_beat_ms ? fmtAgo(em.last_beat_ms) : '—');
 
-    // ── HA da empresa (push, IP dinâmico — só dá pra ver por aqui) ──────────────
+    // ── HA do Sítio (push, IP dinâmico — só dá pra ver por aqui) ──────────────
     const SERVICE_LABELS = {
       tailnet: 'Tailnet', ellevar: 'Ellevar', haval: 'Haval', whats: 'Whats', mqtt: 'MQTT',
       mosquitto: 'Mosquitto', ha_local: 'HA local', gateway: 'Gateway', ssd: 'SSD', duckdns: 'DuckDNS',

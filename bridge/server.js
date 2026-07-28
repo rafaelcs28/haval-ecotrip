@@ -210,7 +210,7 @@ _pollFunnel();
 setInterval(_pollFunnel, 15_000);   // 15s (era 60s) — precisa capturar rajadas curtas de ISP/Tailscale
 
 // Registra transições UP↔DOWN do Funnel em _healthEvents pra correlacionar
-// com alertas externos ("Mac Mini inalcançável" do HA da empresa). Antes
+// com alertas externos ("Mac Mini inalcançável" do HA do Sítio). Antes
 // dependia só do state do alert; agora deixa rastro forense com timestamp.
 let _lastFunnelUp = null;
 setInterval(() => {
@@ -402,7 +402,7 @@ const WAKE_GAP_MS      = 3 * 60_000;
 // alertId → { firing, firedAt, lastNotifiedAt, notified }
 // Persistido em disco pra sobreviver a restarts do bridge — senão a transição
 // firing→!firing (recovery) some quando o restart acontece entre a queda e a
-// recuperação, e o "Recuperado" nunca sai pro ntfy → empresa HA fica com badge
+// recuperação, e o "Recuperado" nunca sai pro ntfy → HA do Sítio fica com badge
 // preso em "atenção".
 const ALERT_STATE_FILE = path.join(DATA_DIR, 'alert_state.json');
 const _alertState = new Map();
@@ -863,7 +863,7 @@ let _lastRestartCount = 0;
 let _mqttDownCount    = 0;
 let _lastAlertTick    = 0;
 
-// Dead-man's-switch do monitor externo: o HA da empresa (que vigia o Mac de fora)
+// Dead-man's-switch do monitor externo: o HA do Sítio (que vigia o Mac de fora)
 // faz POST periódico em /api/monitor-heartbeat. Se parar de chegar, o Mac está
 // sendo monitorado às cegas → alerta. Persiste em disco pra sobreviver a restart
 // do bridge (senão restart com HA já caído = silêncio eterno).
@@ -872,8 +872,8 @@ const EXT_MONITOR_TIMEOUT   = 5 * 60_000;    // 5min sem beat = monitor externo 
 let _extMonitorLastBeat = null;
 try { _extMonitorLastBeat = JSON.parse(fs.readFileSync(EXT_MONITOR_BEAT_FILE, 'utf8')).ts || null; } catch (_) {}
 
-// ── Status do HA da empresa (push) ────────────────────────────────────────
-// O HA da empresa tem IP dinâmico — não dá pra puxar dele de fora. Solução:
+// ── Status do HA do Sítio (push) ────────────────────────────────────────
+// O HA do Sítio tem IP dinâmico — não dá pra puxar dele de fora. Solução:
 // ele empurra o próprio status pra cá via POST periódico, e o /health.html
 // mostra isso pra dar visão externa igual à do dashboard local (uptime 7d,
 // serviços up/down, guards). Puramente informativo: o bridge NÃO alerta em
@@ -939,7 +939,7 @@ function _checkAlerts() {
   // HA, DNS) reamostrarem o estado real antes de qualquer julgamento.
   if (_lastAlertTick > 0 && (now - _lastAlertTick) > WAKE_GAP_MS) {
     // Logar o gap em health_events pra permitir correlacionar com alertas
-    // externos "Mac inalcançável" (HA da empresa). Gap grande = Mac dormiu,
+    // externos "Mac inalcançável" (HA do Sítio). Gap grande = Mac dormiu,
     // suspend/DarkWake ou processo bloqueado — bridge acorda sem contexto.
     const gapSec = Math.round((now - _lastAlertTick) / 1000);
     _recordHealthEvent('tick_gap', `Gap de ${gapSec}s no _checkAlerts (sleep/DarkWake?) — reset debounce`);
@@ -1120,7 +1120,7 @@ function _checkAlerts() {
     `${apkX.fail_streak} comandos seguidos sem confirmação (24h: ${apkX.ok_24h} ok / ${apkX.fail_24h} fail). Cheque Shizuku no head-unit.`,
     'high', ['warning'], { repeatEvery: 4 * 3600_000 });
 
-  // 19. Monitor externo (HA da empresa) parado — dead-man's-switch. HA bate a cada
+  // 19. Monitor externo (HA do Sítio) parado — dead-man's-switch. HA bate a cada
   // 60s; 5min de silêncio = parado. Só avalia após já ter recebido ≥1 heartbeat
   // (deploy novo sem beat ainda não alerta). O beat persiste em disco, então
   // restart do bridge com HA já caído ainda dispara.
@@ -1128,7 +1128,7 @@ function _checkAlerts() {
     const silentMin = Math.round((now - _extMonitorLastBeat) / 60_000);
     _alert('ext_monitor_down', (now - _extMonitorLastBeat) > EXT_MONITOR_TIMEOUT,
       'Monitor externo parado',
-      `HA da empresa sem heartbeat há ${silentMin}min — o Mac está sendo monitorado às cegas.`,
+      `HA do Sítio sem heartbeat há ${silentMin}min — o Mac está sendo monitorado às cegas.`,
       'high', ['satellite', 'warning'], { repeatEvery: 6 * 3600_000, fireDelay: 0 });
   }
 }
@@ -4699,17 +4699,17 @@ app.delete('/api/admin/tokens/:id', requireAdmin, (req, res) => {
 app.get('/ping', (_req, res) => res.json({ ok: true, ts: Date.now() }));
 
 // Status do broker MQTT — público (só booleano, sem segredos). Monitor externo
-// (HA da empresa) checa via 443/Funnel; a 8883 não é funnelada e exige peering.
+// (HA do Sítio) checa via 443/Funnel; a 8883 não é funnelada e exige peering.
 app.get('/api/mqtt-status', (_req, res) =>
   res.json({ ok: !!(mqttClient && mqttClient.connected), ts: Date.now() }));
 
 // Status agregado da infra local — público (só booleanos, sem IP/path/erro).
-// HA da empresa consome isso pra decidir os pushes (guard 3+ juntos = 1 alerta),
+// HA do Sítio consome isso pra decidir os pushes (guard 3+ juntos = 1 alerta),
 // substituindo os alertas que o bridge disparava sozinho pra essas mesmas checagens.
 app.get('/api/infra-status', (_req, res) => res.json({
   // Precisa do mesmo debounce (fail_count >= 2) que local_ha_ok/gateway_ok já tinham —
   // sem isso, 1 timeout isolado de probe (broker ocupado por 1 ciclo) já reportava
-  // down pro HA da empresa. Causa raiz real (achada via alert_diag.log pós-fix,
+  // down pro HA do Sítio. Causa raiz real (achada via alert_diag.log pós-fix,
   // 2026-07-01): não é lag/boot-race do bridge — é um cliente MQTT.js em
   // 192.168.1.30 (user rafael_haval, provável Node-RED com reconnect quebrado)
   // fazendo connect/disconnect em rajada só na porta 1884, a cada ~3min, por
@@ -4725,7 +4725,7 @@ app.get('/api/infra-status', (_req, res) => res.json({
   ssd_ok: !_macStats.disk_ext || _macStats.disk_ext.mounted !== false,
   dns_ok: _netStatus.match !== false,
   // backup_ok: TODOS os 5 backups (Lari, Haval, SSD, MQTT, Clockin) dentro da
-  // idade máxima esperada. Automação do HA da empresa pode usar ISSO em vez de
+  // idade máxima esperada. Automação do HA do Sítio pode usar ISSO em vez de
   // heurística temporal ("se hora=04 e não vi backup") que dá falso positivo.
   backup_ok: !_backups.length || _backups.every(b => b.ok !== false),
   ts: Date.now(),
@@ -5681,7 +5681,7 @@ app.get('/api/baseline-status', (_req, res) => {
   });
 });
 
-// Heartbeat do monitor externo — o HA da empresa faz POST periódico aqui. Se
+// Heartbeat do monitor externo — o HA do Sítio faz POST periódico aqui. Se
 // parar de chegar, /api/monitor-heartbeat detecta no _checkAlerts e alerta que o
 // monitoramento externo do Mac está cego. GET também aceito (rest_command simples).
 function _recordExtBeat(_req, res) {
@@ -5692,7 +5692,7 @@ function _recordExtBeat(_req, res) {
 app.post('/api/monitor-heartbeat', _recordExtBeat);
 app.get('/api/monitor-heartbeat', _recordExtBeat);
 
-// Status do HA da empresa — push periódico de services/guards/uptime7d, pra
+// Status do HA do Sítio — push periódico de services/guards/uptime7d, pra
 // mostrar no /health.html (única forma de ver de fora, já que o HA tem IP
 // dinâmico). Sem auth por padrão, mesmo modelo do /api/monitor-heartbeat
 // (dado não sensível); HA_STATUS_TOKEN opcional se quiser exigir header.
@@ -8645,7 +8645,7 @@ app.get('/api/backup', (req, res) => {
 
 // GET /api/system-backup — backup noturno consolidado dos 6 processos do Mac
 // (bridge ecotrip, gateway multi-tenant, ellevar-clockin, gwm-bridge,
-// whats-assistant, radicale). Puxado pela HA da empresa (única forma de tirar
+// whats-assistant, radicale). Puxado pela HA do Sítio (única forma de tirar
 // os dados do Mac pra fora, já que ele não tem IP fixo pra receber push).
 // Lê tudo via filesystem local (mesmo usuário Unix, sem precisar de auth
 // cruzada entre processos) e empacota num .tar.gz único.
@@ -11044,7 +11044,7 @@ app.post('/api/pair/generate', (_req, res) => {   // autenticado (passa pelo gua
   // Detecta a URL externa: prioridade BRIDGE_PUBLIC_URL → Tailscale funnel → vazio.
   const bridgeUrl = (process.env.BRIDGE_PUBLIC_URL ||
                      process.env.TAILSCALE_FUNNEL_URL ||
-                     'https://mac-mini.tailacc6e7.ts.net').replace(/\/+$/, '');
+                     'https://bridge.malha.dev').replace(/\/+$/, '');
   // Token: o hash do .env (o bridge aceita tanto plain quanto hash como Bearer).
   const bridgeToken = BRIDGE_TOKEN_HASH || '';
   _pairCodes.set(code, {
@@ -16387,7 +16387,7 @@ app.get('/api/security/status', requireAuth, (_req, res) => {
 });
 
 // ── Live Activity de infra/monitoramento ──────────────────────────────────
-// Persistente na tela bloqueada enquanto o HA da empresa reportar algo fora
+// Persistente na tela bloqueada enquanto o HA do Sítio reportar algo fora
 // (serviço caído ou guard disparado) via /api/ha-status; encerra quando volta
 // tudo OK. Mesmo padrão da LA de segurança (sig-based dedup + persistência em
 // state.json pra sobreviver a restart do bridge).
@@ -16785,7 +16785,7 @@ const LA_TYPES = ['ChargeActivityAttributes', 'PreClimatActivityAttributes', 'Tr
                   'SongProTripActivityAttributes',
                   'CompanionInboundActivityAttributes',     // feature 1: companion indo até Grasi
                   'SharedTripActivityAttributes',           // share do Haval direto na tela dela
-                  'InfraActivityAttributes',                // monitoramento do Mac Mini (push do HA da empresa)
+                  'InfraActivityAttributes',                // monitoramento do Mac Mini (push do HA do Sítio)
                   'ParkingActivityAttributes',              // "voltar ao carro" (distância+direção do carro estacionado)
                   'DepartureAskActivityAttributes'];         // "Indo pra <dest>? Compartilhar com <subject>?" ao ligar em origem monitorada
 
@@ -17814,7 +17814,7 @@ function _shareValid(token) {
   return true;
 }
 function _shareBaseUrl() {
-  return (process.env.BRIDGE_PUBLIC_URL || 'https://mac-mini.tailacc6e7.ts.net').replace(/\/+$/, '');
+  return (process.env.BRIDGE_PUBLIC_URL || 'https://carro.malha.dev').replace(/\/+$/, '');
 }
 
 // Cerca de velocidade: GET lê, POST { kmh } define (0 = desliga).

@@ -111,7 +111,7 @@ const IGNORE_ALERTS = new Set([
   'restarts',         // só alerta
   'mqtt_slow',        // transiente
   'dns_mismatch',     // DuckDNS auto-atualiza
-  'ext_monitor_down', // outage do HA da EMPRESA (máquina remota) — não-acionável daqui,
+  'ext_monitor_down', // outage do HA do SÍTIO (máquina remota) — não-acionável daqui,
                       // e o bridge já manda "Monitor externo parado". Claude não ajuda.
 ]);
 
@@ -144,7 +144,7 @@ const INFRA_CONTEXT = `Infra (Mac Mini Apple Silicon, macOS):
 - Broker MQTT = Mosquitto NATIVO via Homebrew (brew services restart mosquitto). NAO é pm2/docker. Listeners 1883/1884/8883.
 - EXISTEM DOIS Home Assistant DISTINTOS, não confunda:
   (1) HA do CARRO = HAOS numa VM UTM neste Mac (bundle no SSD externo /Volumes/SSD1TB), UI em 192.168.1.30:8123. É o que o alerta 'ha_down' checa. NAO é pm2/systemctl/serviço macOS — reinicia na VM UTM ou na UI do HA. NUNCA sugira 'pm2 home-assistant' nem 'systemctl'.
-  (2) HA da EMPRESA = máquina REMOTA (fora deste Mac) que vigia o Mac de fora via heartbeat POST. É o que o alerta 'ext_monitor_down' representa. NÃO é acionável a partir deste Mac — se ele emudeceu, o problema é na rede/energia do lado da empresa. NÃO sugira mexer na VM UTM nem no SSD por causa de ext_monitor_down.
+  (2) HA do SÍTIO = máquina REMOTA (fora deste Mac) que vigia o Mac de fora via heartbeat POST. É o que o alerta 'ext_monitor_down' representa. NÃO é acionável a partir deste Mac — se ele emudeceu, o problema é na rede/energia do lado da empresa. NÃO sugira mexer na VM UTM nem no SSD por causa de ext_monitor_down.
 - Tailscale = app GUI do macOS (Tailscale.app), não daemon CLI. Restart = relançar o app.
 - Backups/SSD externo montado em /Volumes/SSD1TB. iCloud sync via launchd.
 O agente JÁ auto-corrige: mosquitto (se processo morto), Tailscale (relança app), pm2 <proc> caído. Então NÃO sugira essas — só o que sobra.`;
