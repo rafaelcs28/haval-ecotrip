@@ -4635,7 +4635,7 @@ app.get('/api/host-hits', (_req, res) => {
 // Zera a contagem. Serve pra marcar "corrigi um retardatário" e ver do zero se
 // alguém volta a bater no host antigo — sem isso os hits de antes da correção
 // mascaram os novos e não dá pra saber se resolveu.
-app.post('/api/host-hits/reset', requireWriteOrAdmin, (_req, res) => {
+app.post('/api/host-hits/reset', (_req, res) => {
   const antes = [...
     _hostHits.entries()].filter(([h]) => _isFunnelHost(h))
                         .reduce((s, [, e]) => s + e.n, 0);
@@ -6761,7 +6761,7 @@ function requireWriteOrAdmin(req, res, next) {
   return requireAuth(req, res, next);
 }
 
-app.post('/api/health/events/clear', requireWriteOrAdmin, (_req, res) => {
+app.post('/api/health/events/clear', (_req, res) => {
   _healthEvents = [];
   _saveHealthEvents();
   res.json({ ok: true });
@@ -7022,6 +7022,13 @@ app.use('/api', (req, res, next) => {
   // não com o token do bridge — a própria rota valida. Sem isso o requireAuth
   // devolvia 401 e o carro quebrava o stream (broken pipe) no meio do POST.
   if (req.path === '/rec/upload') return next();
+  // Dois botões do monitor sem auth, por decisão explícita do dono: o monitor roda
+  // com token `read` (privilégio mínimo) e esses POSTs tomavam 403 calado. São
+  // ações de baixo impacto — zerar um contador de observação e limpar o log de
+  // erros do próprio monitor. Não tocam em dado de negócio nem comandam o carro.
+  // Ficam abertos em bridge.malha.dev, que é público: quem descobrir a URL pode
+  // zerar essas duas coisas.
+  if (req.path === '/host-hits/reset' || req.path === '/health/events/clear') return next();
   // Painel admin: tem autenticação PRÓPRIA (senha + TOTP, header
   // X-Admin-Session) e não pode exigir o token do bridge — é justamente de onde
   // se emite token novo quando não se tem nenhum. Cada rota /admin/* aplica
