@@ -406,6 +406,21 @@ canvas { display: block; width: 100%; height: 60px; margin-top: 8px; }
     </details>
 
     <!-- Rede -->
+    <!-- Cloudflare Tunnel — porta de entrada de tudo que é HTTP desde que
+         substituiu o Funnel. Cai ele, caem os links compartilhados, o app e o
+         HA remoto de uma vez. -->
+    <details class="card" data-k="cf">
+      <summary><span class="sum-title">Cloudflare</span>
+        <span class="sum-right"><span id="head-cf">—</span><span class="chev"></span></span></summary>
+      <div class="card-body">
+        <div class="row"><span class="label">Túnel</span><span class="val" id="cf-status">—</span></div>
+        <div class="row"><span class="label">Conexões de edge</span><span class="val" id="cf-conns">—</span></div>
+        <div class="row"><span class="label">cloudflared local</span><span class="val" id="cf-proc">—</span></div>
+        <div class="row"><span class="label">Hostnames</span><span class="val" id="cf-hosts" style="font-size:11px">—</span></div>
+        <div class="row"><span class="label">URL pública</span><span class="val" id="cf-url" style="font-size:12px">—</span></div>
+      </div>
+    </details>
+
     <details class="card" data-k="net">
       <summary><span class="sum-title">Rede</span>
         <span class="sum-right"><span id="head-net">—</span><span class="chev"></span></span></summary>
@@ -1079,7 +1094,9 @@ async function _paintSolisSystem(sys, prefix, headId) {
   if (!daytime)        set(headId, `<span style="color:#888">🌙 ${(sys.gen_today_kwh||0).toFixed(1)} kWh hoje</span>`);
   else if (badStatus)  set(headId, '<span style="color:#e74c3c">⚠️ ALARME</span>');
   else if (collOff)    set(headId, '<span style="color:#e74c3c">coletor offline</span>');
-  else if (kw > 0.5)   set(headId, wrapColor(`${kw.toFixed(2)} kW · ${(sys.gen_today_kwh||0).toFixed(1)} kWh hoje`, sys.ac_power_w, exp?.median_power));
+  else if (kw > 0.5)   set(headId, headPowerAndGen(kw, sys.gen_today_kwh||0,
+                                                   sys.ac_power_w, exp?.median_power,
+                                                   sys.gen_today_kwh, exp?.median_gen));
   else                 set(headId, `<span style="color:#888">${(sys.gen_today_kwh||0).toFixed(1)} kWh hoje</span>`);
 }
 async function updateIvonei() {
@@ -1109,6 +1126,17 @@ function ratioColor(cur, expected) {
 function wrapColor(txt, cur, expected) {
   const c = ratioColor(cur, expected);
   return c ? `<span style="color:${c}">${txt}</span>` : txt;
+}
+// Header "X kW · Y kWh hoje" com cada métrica na cor do PRÓPRIO ratio: a
+// potência contra a mediana de potência, o kWh contra a mediana de geração.
+// Antes um único wrapColor envolvia a linha toda usando só o ratio de potência,
+// então uma nuvem passando na frente pintava de vermelho também o kWh do dia,
+// que podia estar perfeitamente em linha com o histórico. O separador fica
+// neutro pra não sugerir que os dois estão no mesmo estado.
+function headPowerAndGen(kw, kwhToday, curPower, expPower, curGen, expGen) {
+  const pot = wrapColor(`${kw.toFixed(2)} kW`, curPower, expPower);
+  const gen = wrapColor(`${kwhToday.toFixed(1)} kWh hoje`, curGen, expGen);
+  return `${pot} <span style="color:#888">·</span> ${gen}`;
 }
 function expectedTip(cur, expected, unit) {
   if (expected == null || expected <= 0) return '';
@@ -1196,7 +1224,9 @@ async function updateSolar() {
     else if (alarm)                set('head-solar', '<span style="color:#e74c3c">⚠️ ALARME</span>');
     else if (!online)              set('head-solar', '<span style="color:#e74c3c">offline</span>');
     else if (stale)                set('head-solar', '<span style="color:#e6b800">dados atrasados</span>');
-    else if ((p.pv_power||0) > 100) set('head-solar', wrapColor(`${(p.pv_power/1000).toFixed(2)} kW · ${(p.energy_today||0).toFixed(1)} kWh hoje`, p.pv_power, exp?.median_power));
+    else if ((p.pv_power||0) > 100) set('head-solar', headPowerAndGen((p.pv_power||0)/1000, p.energy_today||0,
+                                                                     p.pv_power, exp?.median_power,
+                                                                     p.energy_today, exp?.median_gen));
     else                           set('head-solar', `<span style="color:#888">${(p.energy_today||0).toFixed(1)} kWh hoje</span>`);
   } catch (e) { set('head-solar', 'erro'); }
 }
@@ -1329,9 +1359,52 @@ async function updateFamily() {
   } catch (e) { set('head-family', 'erro'); }
 }
 
+// Cloudflare: processo local + status oficial da API. As duas fontes porque o
+// cloudflared pode estar vivo e desconectado — aí o processo diz "ok" e só a
+// API revela que não há conexão de edge nenhuma.
+async function updateCloudflare() {
+  try {
+    const r = await fetch('/api/cloudflare-status', { headers: { Authorization: 'Bearer ' + tk } });
+    if (!r.ok) { set('head-cf', 'indisponível'); return; }
+    const d = await r.json();
+    const api = d.api || {};
+    const proc = d.process || {};
+    const conns = api.connections || 0;
+
+    // Verde exige as duas pontas de acordo: túnel healthy E processo vivo.
+    const okApi  = api.status === 'healthy' && conns > 0;
+    const degrad = api.status === 'degraded' || (conns > 0 && conns < 4);
+    let head;
+    if (api.error)        head = `<span style="color:#e6b800">API: ${api.error}</span>`;
+    else if (!proc.running) head = '<span style="color:#e74c3c">cloudflared parado</span>';
+    else if (okApi && !degrad) head = `<span style="color:#7bc47f">healthy · ${conns} conn</span>`;
+    else if (degrad)      head = `<span style="color:#e6b800">${api.status||'degradado'} · ${conns} conn</span>`;
+    else                  head = `<span style="color:#e74c3c">${api.status || 'sem conexão'}</span>`;
+    set('head-cf', head);
+
+    const stCol = api.status === 'healthy' ? '#7bc47f'
+                : api.status === 'degraded' ? '#e6b800' : '#e74c3c';
+    set('cf-status', api.status
+      ? `<span style="color:${stCol}">${api.status}</span>${api.name ? ` <span style="color:#888">(${api.name})</span>` : ''}`
+      : (api.error ? `<span style="color:#e6b800">${api.error}</span>` : '—'));
+    set('cf-conns', conns
+      ? `<span style="color:${conns >= 4 ? '#7bc47f' : '#e6b800'}">${conns}</span>` +
+        (api.colos?.length ? ` <span style="color:#888">${api.colos.join(' · ')}</span>` : '')
+      : '<span style="color:#e74c3c">0</span>');
+    set('cf-proc', proc.running
+      ? `<span style="color:#7bc47f">pid ${proc.pid}</span>${proc.uptime ? ` <span style="color:#888">· ${proc.uptime}</span>` : ''}`
+      : '<span style="color:#e74c3c">parado</span>');
+    set('cf-hosts', (d.hostnames||[]).length
+      ? `<span style="color:#888">${d.hostnames.join('<br>')}</span>`
+      : '—');
+    set('cf-url', d.public_url ? `<span style="color:#888">${d.public_url}</span>` : '—');
+  } catch (e) { set('head-cf', 'erro'); }
+}
+
 loadOpenState();
 load();
 loadSysProc();
+updateCloudflare();
 updateBluetti();
 updateSolar();
 updateIvonei();
@@ -1339,6 +1412,7 @@ updatePalmeiras();
 updateFamily();
 setInterval(load, 5_000);
 setInterval(loadSysProc, 5_000);
+setInterval(updateCloudflare, 45_000);   // casa com o cache do endpoint
 setInterval(updateBluetti, 30_000);
 setInterval(updateSolar, 60_000);
 setInterval(updateIvonei, 60_000);

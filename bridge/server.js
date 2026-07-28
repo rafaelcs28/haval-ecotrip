@@ -5426,6 +5426,89 @@ app.get('/api/solis-status', async (_req, res) => {
 });
 // Endpoints separados por sistema — matching o padrão do /api/solar-status
 // (Catalão). Cada um retorna 1 sistema + sunrise/sunset local.
+// ── Cloudflare Tunnel ────────────────────────────────────────────────────────
+// Substituiu o Funnel do Tailscale como porta de entrada de tudo que é HTTP.
+// Se ele cai, os links compartilhados, o app e o HA remoto caem juntos — então
+// vale a mesma vigilância que as usinas têm.
+//
+// Duas fontes independentes, porque cada uma mente de um jeito diferente:
+//  • processo local vivo (launchd) — mas pode estar vivo e desconectado
+//  • a API da Cloudflare, que devolve o status oficial e as conexões de edge
+// homedir() inline: HOME_DIR só é declarado bem mais abaixo no arquivo e um
+// const em TDZ aqui derrubaria o boot.
+const CF_DIR         = path.join(require('os').homedir(), '.cloudflared');
+const CF_CONFIG      = path.join(CF_DIR, 'malha.yml');
+const CF_TOKEN_FILE  = path.join(CF_DIR, 'cf-api-token');
+const CF_ACCOUNT_ID  = process.env.CF_ACCOUNT_ID || '2aff246feca922d7d668f8c9ef9e6f8c';
+const CF_CACHE_MS    = 45_000;
+let _cfCache = { ts: 0, data: null };
+
+function _cfTunnelIdFromConfig() {
+  try {
+    const m = fs.readFileSync(CF_CONFIG, 'utf8').match(/^tunnel:\s*([0-9a-f-]{36})/m);
+    return m ? m[1] : null;
+  } catch (_) { return null; }
+}
+
+// Hostnames que o túnel serve, lidos da própria config — sem lista duplicada
+// aqui que sairia de sincronia quando o ingress mudar.
+function _cfHostnames() {
+  try {
+    return [...fs.readFileSync(CF_CONFIG, 'utf8').matchAll(/^\s*-\s*hostname:\s*(\S+)/gm)].map(m => m[1]);
+  } catch (_) { return []; }
+}
+
+function _cfProcess() {
+  try {
+    const { execFileSync } = require('child_process');
+    const out = execFileSync('pgrep', ['-f', 'cloudflared.*malha.yml'], { encoding: 'utf8', timeout: 3000 }).trim();
+    const pid = parseInt(out.split('\n')[0], 10);
+    if (!pid) return { running: false };
+    let etime = null;
+    try {
+      etime = execFileSync('ps', ['-o', 'etime=', '-p', String(pid)], { encoding: 'utf8', timeout: 3000 }).trim();
+    } catch (_) {}
+    return { running: true, pid, uptime: etime };
+  } catch (_) { return { running: false }; }
+}
+
+async function _cfApiTunnel(tunnelId) {
+  let token = '';
+  try { token = fs.readFileSync(CF_TOKEN_FILE, 'utf8').trim(); } catch (_) {}
+  if (!token || !tunnelId) return null;
+  try {
+    const r = await fetch(`https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/cfd_tunnel/${tunnelId}`,
+                          { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(8000) });
+    const j = await r.json();
+    if (!j.success) return { error: (j.errors || []).map(e => e.code).join(',') || 'api falhou' };
+    const t = j.result || {};
+    return {
+      name: t.name || null,
+      status: t.status || null,              // healthy | degraded | down | inactive
+      connections: (t.connections || []).length,
+      // Onde os túneis estão ancorados: útil pra ver rota ruim (ex. saiu de gru).
+      colos: [...new Set((t.connections || []).map(c => c.colo_name).filter(Boolean))],
+    };
+  } catch (e) { return { error: String(e.message || e).slice(0, 80) }; }
+}
+
+app.get('/api/cloudflare-status', async (_req, res) => {
+  const now = Date.now();
+  if (_cfCache.data && (now - _cfCache.ts) < CF_CACHE_MS) return res.json(_cfCache.data);
+  const tunnelId = _cfTunnelIdFromConfig();
+  const [proc, api] = [_cfProcess(), await _cfApiTunnel(tunnelId)];
+  const data = {
+    tunnel_id: tunnelId,
+    process: proc,
+    api,
+    hostnames: _cfHostnames(),
+    public_url: _shareBaseUrl(),
+    ts: now,
+  };
+  _cfCache = { ts: now, data };
+  res.json(data);
+});
+
 app.get('/api/ivonei-status', async (_req, res) => {
   const now = Date.now();
   if (!_solisCache.data || (now - _solisCache.ts) > 60_000) {
