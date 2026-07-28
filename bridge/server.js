@@ -14537,20 +14537,24 @@ function _endTripLA(dismissMs = 5 * 60_000) {
 // Fallback: o APK nem sempre limpa o current_trip retido ao fim da viagem, então a
 // LA podia ficar presa indefinidamente. Ao desligar o motor, agenda o encerramento
 // da LA em 5 min (cancelado se o motor religar ou chegar novo snapshot antes).
-// Quanto esperar antes de encerrar a LA por conta própria. Num PHEV o
-// engine_state vai a 0 em modo EV sem o carro estar desligado, e o APK só fecha a
-// viagem quando car.basic.power_mode = 0 — então entre "estacionou" e "a LA marca
-// encerrada" havia até 5 min de espera.
+// Quanto esperar antes de encerrar a LA por conta própria.
 //
-// Com os três sinais juntos (P + parado + motor off) o carro está estacionado, não
-// num semáforo: em semáforo o gear é D. Aí 90s bastam.
-const TRIP_END_FAST_MS = 90_000;
+// `engine_state` NÃO é o estado do motor a combustão: o APK o publica derivado de
+// `driving_ready` (`pubD("engine_state", if (snDrvReady != 0) "1" else "0")`), que
+// é a ignição. Num HEV o ICE liga/desliga várias vezes por minuto, mas o
+// driving_ready é estável — então engine_state=0 significa carro DESLIGADO, e em
+// semáforo ele vale 1.
+//
+// Por isso gear e velocidade não entram na decisão: driving_ready=0 já basta. Os
+// 5 min só valem quando o carro segue ligado (ex.: APK morreu e o estado
+// congelou) — aí não há sinal confiável e a espera longa é a rede de segurança.
+//
+// A demora real vinha do APK, que só fecha a viagem em car.basic.power_mode=0
+// (inclui acessório/ACC, cai depois da ignição). O bridge pode agir antes disso.
+const TRIP_END_FAST_MS = 30_000;   // margem pra ignição oscilando / APK reiniciando
 const TRIP_END_SLOW_MS = 5 * 60_000;
 function _tripEndDelayMs() {
-  const paradoEmP = String(state.gear) === 'P'
-                 && (+state.speed_kmh || 0) === 0
-                 && String(state.engine_state) === '0';
-  return paradoEmP ? TRIP_END_FAST_MS : TRIP_END_SLOW_MS;
+  return String(state.engine_state) === '0' ? TRIP_END_FAST_MS : TRIP_END_SLOW_MS;
 }
 
 function _scheduleTripLAEnd() {
