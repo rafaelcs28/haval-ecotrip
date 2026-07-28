@@ -37,11 +37,15 @@ enum Settings {
         // Migra URLs antigas (Tailscale, IP direto HTTP, ou DuckDNS) pro domínio
         // próprio via Cloudflare Tunnel. Sem isto, quem já tem o app instalado
         // continuaria batendo no ts.net até editar à mão — e o Funnel vai sair do ar.
+        // `carro.malha.dev` entra na lista porque foi o primeiro nome usado na
+        // migração: o servidor é bridge.malha.dev, e carro.* ficou só pros links
+        // públicos de trajeto (Haval/Grasi).
         let current = group.string(forKey: urlKey) ?? ""
         if current.contains("tailacc6e7.ts.net") || current.contains("mac-mini.tail")
             || current == "http://177.223.45.154:3000"
-            || current.contains("mqttrafael.duckdns.org") {
-            group.set("https://carro.malha.dev", forKey: urlKey)
+            || current.contains("mqttrafael.duckdns.org")
+            || current == "https://carro.malha.dev" {
+            group.set("https://bridge.malha.dev", forKey: urlKey)
         }
     }
 

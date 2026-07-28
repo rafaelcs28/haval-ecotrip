@@ -44,8 +44,9 @@ enum BydSettings {
         let current = d.string(forKey: "byd_bridge_url") ?? shared?.string(forKey: "byd_bridge_url") ?? ""
         if current.contains("tailacc6e7.ts.net") || current.contains("mac-mini.tail")
             || current == "http://177.223.45.154:3000"
-            || current.contains("mqttrafael.duckdns.org") {
-            bridgeURL = "https://carro.malha.dev"
+            || current.contains("mqttrafael.duckdns.org")
+            || current == "https://carro.malha.dev" {
+            bridgeURL = "https://bridge.malha.dev"
         }
     }
 

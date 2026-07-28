@@ -17,7 +17,7 @@ enum AuthConfig {
     /// roteia cada pessoa pros dados dela. Ninguém precisa digitar URL/token.
     /// Via Cloudflare Tunnel: sem porta aberta no roteador e sem depender do
     /// Tailscale. O BridgeRouter ainda corre contra o DuckDNS direto como fallback.
-    static let bridgeURL = "https://carro.malha.dev"
+    static let bridgeURL = "https://bridge.malha.dev"
 
     /// Client ID do OAuth iOS do Google. Ex: "757576...-abc123.apps.googleusercontent.com".
     /// Vazio = login Google escondido no app.
