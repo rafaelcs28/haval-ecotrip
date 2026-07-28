@@ -154,7 +154,7 @@ enum TrajV2 {
               (resp as? HTTPURLResponse)?.statusCode == 200,
               let j = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let token = j["token"] as? String else { return nil }
-        return URL(string: "https://mac-mini.tailacc6e7.ts.net/t/\(token)")
+        return URL(string: "https://carro.malha.dev/t/\(token)")
     }
 
     /// Cartão compartilhável (mesmo layout do v1, polyline colorida por velocidade).

@@ -566,11 +566,17 @@ struct RouteMapSheet: View {
                         let prog = Double(min(samples.count - 1, max(0, Int(idx)))) / Double(samples.count - 1)
                         DSCard(glass: true) {
                             VStack(spacing: 8) {
-                                // Linha do tempo completa de velocidade e potência (picos/vales do trajeto)
+                                // Linha do tempo completa de velocidade, potência e RPM (picos/vales do trajeto)
                                 TripSparkline(title: "Velocidade", unit: "km/h", values: samples.map { Double(Fmt.adjSpeed($0.spd)) },
                                               color: DS.text, progress: prog, signed: false, fmt: f0)
-                                TripSparkline(title: "Potência", unit: "kW", values: samples.map { $0.pwr },
+                                TripSparkline(title: "Potência (motor elétrico)", unit: "kW", values: samples.map { $0.pwr },
                                               color: DS.blue, progress: prog, signed: true, fmt: f1)
+                                // RPM do motor térmico: só quando houve uso em algum ponto (>0). Viagens
+                                // 100% EV omitem esta linha pra não empilhar sparkline vazia.
+                                if samples.contains(where: { $0.rpm > 0 }) {
+                                    TripSparkline(title: "Rotação (motor térmico)", unit: "rpm", values: samples.map { $0.rpm },
+                                                  color: DS.orange, progress: prog, signed: false, fmt: f0)
+                                }
                                 if samples.contains(where: { $0.alt != 0 }) {
                                     TripSparkline(title: "Altitude", unit: "m", values: samples.map { $0.alt },
                                                   color: DS.green, progress: prog, signed: false, fmt: f0)
@@ -736,7 +742,7 @@ struct RouteMapSheet: View {
                   let token = j["token"] as? String else { return }
             // Link público sempre pelo hostname Tailscale Funnel (o `base` pode ser
             // 100.x quando estamos no Tailnet — não abre pra quem recebe).
-            shareURL = URL(string: "https://mac-mini.tailacc6e7.ts.net/t/\(token)")
+            shareURL = URL(string: "https://carro.malha.dev/t/\(token)")
         } catch { /* ignora */ }
     }
 

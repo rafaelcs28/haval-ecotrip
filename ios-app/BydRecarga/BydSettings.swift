@@ -43,8 +43,9 @@ enum BydSettings {
     static func migrateURLIfNeeded() {
         let current = d.string(forKey: "byd_bridge_url") ?? shared?.string(forKey: "byd_bridge_url") ?? ""
         if current.contains("tailacc6e7.ts.net") || current.contains("mac-mini.tail")
-            || current == "http://177.223.45.154:3000" {
-            bridgeURL = "https://mqttrafael.duckdns.org:3443"
+            || current == "http://177.223.45.154:3000"
+            || current.contains("mqttrafael.duckdns.org") {
+            bridgeURL = "https://carro.malha.dev"
         }
     }
 

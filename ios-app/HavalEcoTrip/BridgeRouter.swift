@@ -1,9 +1,12 @@
 //  BridgeRouter.swift
-//  Escolhe o caminho mais rápido pro bridge entre o URL configurado (DuckDNS
-//  público) e o hostname Tailscale (mac-mini.tailacc6e7.ts.net). Quando o
-//  Tailscale está ativo no iPhone, o MagicDNS resolve pra 100.x e o WireGuard
-//  faz P2P (~5-15ms). Sem Tailscale, o mesmo hostname cai no Funnel CDN (lento,
-//  ~1.8s) — aí o duckdns vence a corrida. Acontece transparente.
+//  Escolhe o caminho mais rápido pro bridge entre o URL configurado
+//  (carro.malha.dev, via Cloudflare Tunnel) e o acesso direto por DuckDNS.
+//  A corrida decide sozinha: o Cloudflare tem edge em São Paulo e costuma
+//  ganhar, mas se o túnel estiver fora o DuckDNS assume sem o app perceber.
+//
+//  Antes o segundo candidato era o hostname Tailscale
+//  (mac-mini.tailacc6e7.ts.net), que dava P2P rápido com o app ativo mas
+//  degradava em silêncio depois de reboot do Mac — foi o motivo de sair dele.
 
 import Foundation
 import Network
@@ -15,8 +18,10 @@ extension Notification.Name {
 final class BridgeRouter {
     static let shared = BridgeRouter()
 
-    /// Hostname Tailscale (Funnel + MagicDNS). Mesmo cert, mesma rota TLS.
-    private let tsURL = "https://mac-mini.tailacc6e7.ts.net"
+    /// Rota alternativa: acesso direto ao bridge, sem passar pelo Cloudflare.
+    /// Serve de rede de segurança se o túnel cair — não compartilha nenhuma
+    /// dependência com ele.
+    private let fallbackURL = "https://mqttrafael.duckdns.org:3443"
     /// Timeout do probe — generoso o bastante pra DERP/hairpin mas curto pra
     /// não dar UX ruim na primeira request quando o vencedor demora.
     private let probeTimeout: TimeInterval = 1.5
@@ -50,7 +55,7 @@ final class BridgeRouter {
 
         let cfg = Self.configured()
         var candidates = [cfg]
-        if !candidates.contains(tsURL) { candidates.append(tsURL) }
+        if !candidates.contains(fallbackURL) { candidates.append(fallbackURL) }
 
         guard let winner = await Self.race(candidates: candidates, timeout: probeTimeout) else {
             return

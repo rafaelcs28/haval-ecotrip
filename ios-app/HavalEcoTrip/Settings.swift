@@ -34,11 +34,14 @@ enum Settings {
            (group.string(forKey: tokenKey) ?? "").isEmpty {
             group.set(oldTok, forKey: tokenKey)
         }
-        // Migra URLs antigas (Tailscale ou IP direto HTTP) para HTTPS DuckDNS.
+        // Migra URLs antigas (Tailscale, IP direto HTTP, ou DuckDNS) pro domínio
+        // próprio via Cloudflare Tunnel. Sem isto, quem já tem o app instalado
+        // continuaria batendo no ts.net até editar à mão — e o Funnel vai sair do ar.
         let current = group.string(forKey: urlKey) ?? ""
         if current.contains("tailacc6e7.ts.net") || current.contains("mac-mini.tail")
-            || current == "http://177.223.45.154:3000" {
-            group.set("https://mqttrafael.duckdns.org:3443", forKey: urlKey)
+            || current == "http://177.223.45.154:3000"
+            || current.contains("mqttrafael.duckdns.org") {
+            group.set("https://carro.malha.dev", forKey: urlKey)
         }
     }
 

@@ -15,7 +15,9 @@ import Foundation
 enum AuthConfig {
     /// URL do porteiro (gateway) — a MESMA pra todo mundo. O login por email é que
     /// roteia cada pessoa pros dados dela. Ninguém precisa digitar URL/token.
-    static let bridgeURL = "https://mqttrafael.duckdns.org:3443"
+    /// Via Cloudflare Tunnel: sem porta aberta no roteador e sem depender do
+    /// Tailscale. O BridgeRouter ainda corre contra o DuckDNS direto como fallback.
+    static let bridgeURL = "https://carro.malha.dev"
 
     /// Client ID do OAuth iOS do Google. Ex: "757576...-abc123.apps.googleusercontent.com".
     /// Vazio = login Google escondido no app.

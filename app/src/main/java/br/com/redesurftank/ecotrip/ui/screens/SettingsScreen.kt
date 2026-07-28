@@ -349,7 +349,7 @@ fun SettingsScreen(
                 Button(
                     onClick = {
                         pairing = true; pairMsg = ""
-                        mqttManager.pairWithCode("https://mac-mini.tailacc6e7.ts.net", pairCode) { ok, msg ->
+                        mqttManager.pairWithCode("https://carro.malha.dev", pairCode) { ok, msg ->
                             pairing = false; pairMsg = msg
                             if (ok) { pairedState = true; pairCode = "" }
                         }
