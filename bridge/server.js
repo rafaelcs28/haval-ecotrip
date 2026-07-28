@@ -11402,8 +11402,12 @@ const ACTION_STATE_CHECK = {
   engine_on:  () => String(state.engine_state) === '1',
   engine_off: () => String(state.engine_state) === '0',
 };
-const CMD_VERIFY_WINDOW_MS = 75_000;   // nuvem GWM leva 20-30s; folga pra 4G ruim
+// 60s < watchdog de 70s do app (CarStore.setCommandProgress): o bridge tem que
+// dar o veredito ANTES do cliente desistir, senão o falso "não respondeu" aparece
+// de qualquer forma. Cobre com folga os 20-30s típicos da nuvem GWM.
+const CMD_VERIFY_WINDOW_MS = 60_000;
 const CMD_VERIFY_POLL_MS   = 3_000;
+let _pendingCommandSeq = 0;
 
 // Observa o estado até a ação se confirmar ou a janela fechar. O critério é o
 // estado DESEJADO estar satisfeito, não a transição: se o carro já está ligado e
@@ -12048,8 +12052,26 @@ app.post('/api/action/:name', async (req, res) => {
     console.log(`[action] ${name} → ${pressTopic} OK (GWM via MQTT)`);
     // Arma o feed de andamento: o standalone vai publicar sent→done/timeout em
     // gwmbrasil_<vin>/command_progress/state, que casamos com esta ação por tempo.
-    _pendingCommand = { action: name, code, ts: Date.now() };
+    const cmdId = ++_pendingCommandSeq;
+    _pendingCommand = { action: name, code, ts: Date.now(), id: cmdId };
     broadcast('command_progress', { action: name, phase: 'sent', resultCode: null, ts: Date.now() });
+    // A nuvem GWM às vezes não publica NADA em command_progress/state — nem done,
+    // nem timeout. Aí o bridge ficava calado e o watchdog de 70s do app declarava
+    // "Carro não respondeu" com o comando já executado (engine_off de 28/07:
+    // desligou o carro e mostrou timeout). Então a verificação por estado corre em
+    // paralelo ao envio, sem depender da nuvem responder.
+    if (ACTION_STATE_CHECK[name]) {
+      _verifyCommandByState(name, Date.now()).then(confirmado => {
+        // Só fala se a nuvem não resolveu antes (pending ainda é este comando).
+        if (!confirmado || _pendingCommand?.id !== cmdId) return;
+        _pendingCommand = null;
+        broadcast('command_progress', {
+          action: name, phase: 'done', resultCode: null,
+          ok: true, verifiedByState: true, ts: Date.now(),
+        });
+        console.log(`[cmd-progress] action=${name} confirmado pelo estado (nuvem não respondeu)`);
+      });
+    }
     // Ligar motor pelo app arma a LA de lembrete (confirma no engine_state='1').
     if (name === 'engine_on') markRemoteEngineStart();
     res.json({ ok: true, via: 'gwm' });
