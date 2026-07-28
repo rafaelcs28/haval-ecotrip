@@ -14537,17 +14537,36 @@ function _endTripLA(dismissMs = 5 * 60_000) {
 // Fallback: o APK nem sempre limpa o current_trip retido ao fim da viagem, então a
 // LA podia ficar presa indefinidamente. Ao desligar o motor, agenda o encerramento
 // da LA em 5 min (cancelado se o motor religar ou chegar novo snapshot antes).
+// Quanto esperar antes de encerrar a LA por conta própria. Num PHEV o
+// engine_state vai a 0 em modo EV sem o carro estar desligado, e o APK só fecha a
+// viagem quando car.basic.power_mode = 0 — então entre "estacionou" e "a LA marca
+// encerrada" havia até 5 min de espera.
+//
+// Com os três sinais juntos (P + parado + motor off) o carro está estacionado, não
+// num semáforo: em semáforo o gear é D. Aí 90s bastam.
+const TRIP_END_FAST_MS = 90_000;
+const TRIP_END_SLOW_MS = 5 * 60_000;
+function _tripEndDelayMs() {
+  const paradoEmP = String(state.gear) === 'P'
+                 && (+state.speed_kmh || 0) === 0
+                 && String(state.engine_state) === '0';
+  return paradoEmP ? TRIP_END_FAST_MS : TRIP_END_SLOW_MS;
+}
+
 function _scheduleTripLAEnd() {
   if (!_tripActive) return;
   _cancelTripEndTimer();
+  const delay = _tripEndDelayMs();
   _tripEndTimer = setTimeout(() => {
     _tripEndTimer = null;
     // Só mantém a LA se o carro está VIVO e com motor ligado. Se ficou offline
     // (APK morreu ao desligar) o engine_state fica congelado em '1' — não dá pra
     // confiar nele; a ausência de sinal já é o "desligou". Não religou = encerra.
     if (state.car_online && state.engine_state === '1') return;
-    _endTripLA(0);                            // os 5 min já passaram → remove agora
-  }, 5 * 60_000);
+    _endTripLA(0);                            // a espera já passou → remove agora
+  }, delay);
+  console.log(`[trip-la] encerramento agendado em ${Math.round(delay / 1000)}s`
+            + ` (gear=${state.gear} speed=${state.speed_kmh} engine=${state.engine_state})`);
 }
 
 // Reaper de LA de viagem PRESA. O APK publica current_trip RETIDO e o limpa
