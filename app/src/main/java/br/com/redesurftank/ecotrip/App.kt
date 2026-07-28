@@ -2,6 +2,7 @@ package br.com.redesurftank.ecotrip
 
 import android.app.Application
 import android.content.Context
+import br.com.redesurftank.ecotrip.managers.AppLogger
 import br.com.redesurftank.ecotrip.models.SharedPreferencesKeys
 import br.com.redesurftank.ecotrip.services.CarTelemetryService
 
@@ -103,13 +104,33 @@ class App : Application() {
      * Grava de volta pra não repetir a substituição em cada leitura.
      */
     private fun migrarBridgeUrl(prefs: android.content.SharedPreferences, raw: String): String {
-        if (raw.isEmpty()) return raw
-        val antigo = raw.contains("tailacc6e7") || raw.contains(".ts.net")
-        if (!antigo) return raw
         val novo = "https://bridge.malha.dev"
-        prefs.edit().putString(SharedPreferencesKeys.BRIDGE_URL, novo).apply()
-        android.util.Log.i("App", "bridge_url migrado: $raw -> $novo")
-        return novo
+        fun ehAntigo(s: String) = s.contains("tailacc6e7") || s.contains(".ts.net")
+
+        // Caso 1: BRIDGE_URL preenchida com o host antigo.
+        if (raw.isNotEmpty() && ehAntigo(raw)) {
+            prefs.edit().putString(SharedPreferencesKeys.BRIDGE_URL, novo).apply()
+            AppLogger.i("App", "bridge_url migrado: $raw -> $novo")
+            return novo
+        }
+        if (raw.isNotEmpty()) return raw
+
+        // Caso 2: BRIDGE_URL VAZIA. Aí TripManager.getBridgeHttpUrl() deriva do
+        // HA_EXPORT_URL (nível 2) ou do MQTT_HOST (nível 3) — e se qualquer um
+        // deles for o Funnel, o carro continua batendo lá. Foi o que aconteceu:
+        // a v6.152 migrou "nada" porque a pref estava vazia, e o app seguiu
+        // derivando o ts.net do HA_EXPORT_URL.
+        //
+        // Grava BRIDGE_URL explícita pra ganhar do nível 2/3, sem tocar no
+        // HA_EXPORT_URL (que é a URL do Home Assistant e serve pra outra coisa).
+        val ha   = prefs.getString(SharedPreferencesKeys.HA_EXPORT_URL, "") ?: ""
+        val mqtt = prefs.getString(SharedPreferencesKeys.MQTT_HOST, "") ?: ""
+        if (ehAntigo(ha) || ehAntigo(mqtt)) {
+            prefs.edit().putString(SharedPreferencesKeys.BRIDGE_URL, novo).apply()
+            AppLogger.i("App", "bridge_url vazio e derivava do Funnel (ha='$ha' mqtt='$mqtt') -> fixado em $novo")
+            return novo
+        }
+        return raw
     }
 
     /**
