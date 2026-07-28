@@ -11389,6 +11389,43 @@ const ACTION_TO_GWM_BUTTON_CODE = {
 };
 const ALLOWED_ACTIONS = new Set(Object.keys(ACTION_TO_GWM_BUTTON_CODE));
 
+// ── Confirmação de comando pelo estado do carro ──────────────────────────────
+// A nuvem GWM responde 'timeout' com frequência mesmo com o comando executado
+// (ela leva 20-30s pra fechar o loop e desiste antes). Nessas ações o estado do
+// carro é evidência melhor que o veredito dela.
+//
+// Só entram ações cujo sinal é inequívoco. `engine_state` (hyengsts) vale porque
+// reflete o carro ligado independente do head unit estar acordado. lock_* está
+// de fora de propósito: a polaridade de `lock_state` é ambígua e um falso
+// "confirmado" em tranca é pior que um falso "não respondeu".
+const ACTION_STATE_CHECK = {
+  engine_on:  () => String(state.engine_state) === '1',
+  engine_off: () => String(state.engine_state) === '0',
+};
+const CMD_VERIFY_WINDOW_MS = 75_000;   // nuvem GWM leva 20-30s; folga pra 4G ruim
+const CMD_VERIFY_POLL_MS   = 3_000;
+
+// Observa o estado até a ação se confirmar ou a janela fechar. O critério é o
+// estado DESEJADO estar satisfeito, não a transição: se o carro já está ligado e
+// veio um engine_on, "Motor ligado" é o que o usuário quer ver — é também o que o
+// resto do app mostra. Já um engine_off que não desligou continua reprovando,
+// porque aí o estado desejado não se realiza.
+function _verifyCommandByState(action, sentMs) {
+  const check = ACTION_STATE_CHECK[action];
+  if (!check) return Promise.resolve(false);
+  return new Promise(resolve => {
+    const deadline = sentMs + CMD_VERIFY_WINDOW_MS;
+    const tick = () => {
+      let ok = false;
+      try { ok = !!check(); } catch (_) { ok = false; }
+      if (ok)                  return resolve(true);
+      if (Date.now() >= deadline) return resolve(false);
+      setTimeout(tick, CMD_VERIFY_POLL_MS);
+    };
+    tick();
+  });
+}
+
 // Caminho LOCAL das ações que têm equivalente no carro (APK atua via Shizuku/
 // IVehicle, sem passar pela nuvem GWM). Quando o APK está vivo (WiFi/Starlink),
 // preferimos isto — a nuvem GWM morre quando o 4G do carro acaba. Cada entrada é
@@ -13351,6 +13388,28 @@ mqttClient.on('message', (topic, payload, packet) => {
       const p = JSON.parse(value);
       const pend = _pendingCommand && (Date.now() - _pendingCommand.ts) < 90_000 ? _pendingCommand : null;
       const out = { action: pend ? pend.action : null, phase: p.phase, resultCode: p.resultCode ?? null, ts: Date.now() };
+      const falhouNaNuvem = p.phase === 'timeout'
+                         || (p.phase === 'done' && !(p.ok != null ? p.ok : (p.resultCode === '0')));
+      // A nuvem GWM diz 'timeout' com frequência mesmo quando o comando FOI
+      // executado — ela só não confirmou em tempo. Antes de acusar falha, olha o
+      // estado real do carro: mandou ligar, o carro ligou e o app mostrou "Carro
+      // não respondeu · Ligar motor" (27/07). Só as ações com sinal de estado
+      // confiável entram aqui; o resto segue o veredito da nuvem.
+      if (falhouNaNuvem && pend && ACTION_STATE_CHECK[pend.action]) {
+        _pendingCommand = null;
+        // 'verifying' não é tratado pelo app (cai no default), então o toast de
+        // falha não pisca antes da confirmação real.
+        broadcast('command_progress', { ...out, phase: 'verifying', ok: null });
+        console.log(`[cmd-progress] action=${pend.action} nuvem=${p.phase} — verificando pelo estado do carro`);
+        _verifyCommandByState(pend.action, pend.ts).then(confirmado => {
+          broadcast('command_progress', {
+            action: pend.action, phase: 'done', resultCode: p.resultCode ?? null,
+            ok: confirmado, verifiedByState: true, ts: Date.now(),
+          });
+          console.log(`[cmd-progress] action=${pend.action} veredito pelo estado: ${confirmado ? 'EXECUTOU (nuvem errou)' : 'não executou'}`);
+        });
+        return;
+      }
       if (p.phase === 'done')         { out.ok = p.ok != null ? p.ok : (p.resultCode === '0'); _pendingCommand = null; }
       else if (p.phase === 'timeout') { out.ok = false; _pendingCommand = null; }
       broadcast('command_progress', out);
