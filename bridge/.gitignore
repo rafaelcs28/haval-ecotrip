@@ -62,3 +62,8 @@ ha-work-status.json
 ext-monitor-beat.json
 alert_diag.log
 autotrips_backup_dupfix/
+uploads/
+
+# Credenciais do painel admin (senha scrypt, segredo TOTP, hashes de token)
+admin_auth.json
+bridge_tokens.json

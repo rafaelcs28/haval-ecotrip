@@ -4545,6 +4545,12 @@ function safeStrEqual(a, b) {
   if (ba.length !== bb.length) return false;
   try { return require('crypto').timingSafeEqual(ba, bb); } catch (_) { return false; }
 }
+// Tokens emitidos pelo painel admin (nome + escopo + revogação individual). O
+// token legado do .env continua valendo e equivale a escopo admin — trocar tudo
+// de uma vez arriscaria derrubar app, cluster, OBD e atalhos juntos.
+const { AdminAuth } = require('./admin-auth');
+const adminAuth = new AdminAuth(DATA_DIR);
+
 function requireAuth(req, res, next) {
   if (!BRIDGE_TOKEN_HASH) {
     if (ALLOW_NO_AUTH) return next();      // dev local explícito
@@ -4554,9 +4560,141 @@ function requireAuth(req, res, next) {
   const token = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
   // Aceita SHA-256(senha) [HTTPS] ou texto puro [HTTP — fallback quando crypto.subtle indisponível]
   const valid = safeStrEqual(token, BRIDGE_TOKEN_HASH) || safeStrEqual(sha256hex(token), BRIDGE_TOKEN_HASH);
-  if (!valid) return res.status(401).json({ error: 'unauthorized' });
+  if (valid) { req.authScope = 'admin'; req.authSource = 'legacy'; return next(); }
+  // Token emitido no painel: além de existir, o escopo tem que permitir o método.
+  const issued = adminAuth.match(token);
+  if (issued) {
+    if (!AdminAuth.scopeAllows(issued.scope, req.method)) {
+      return res.status(403).json({ error: 'forbidden_scope', scope: issued.scope, need: req.method });
+    }
+    req.authScope  = issued.scope;
+    req.authSource = 'issued';
+    req.authToken  = { id: issued.id, name: issued.name };
+    return next();
+  }
+  return res.status(401).json({ error: 'unauthorized' });
+}
+
+// ── Painel admin: senha + TOTP, e emissão de tokens ──────────────────────────
+// A área não herda a sessão do monitor: exige senha + código na hora, porque o
+// health.html está público em bridge.malha.dev e emitir credencial a partir dele
+// concentra risco.
+function _adminIp(req) {
+  return (req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for'] || req.ip || '')
+    .toString().split(',')[0].trim();
+}
+function requireAdmin(req, res, next) {
+  const sid = (req.headers['x-admin-session'] || '').toString().trim();
+  const s = adminAuth.validSession(sid);
+  if (!s) return res.status(401).json({ error: 'admin_session_invalida' });
+  req.adminSession = s;
   next();
 }
+
+app.get('/api/admin/state', (req, res) => {
+  const sid = (req.headers['x-admin-session'] || '').toString().trim();
+  res.json({
+    configured: adminAuth.configured,
+    totpPending: !!adminAuth.state.totpPending,
+    session: !!adminAuth.validSession(sid),
+    scopes: AdminAuth.SCOPES,
+  });
+});
+
+// Primeiro acesso: define a senha. Só permitido enquanto NÃO há senha — depois
+// disso a troca exige sessão válida (rota abaixo), senão qualquer um na
+// internet redefiniria o admin.
+app.post('/api/admin/setup-password', (req, res) => {
+  if (adminAuth.state.password) return res.status(409).json({ error: 'ja_configurada' });
+  const r = adminAuth.setPassword(req.body?.password);
+  res.status(r.ok ? 200 : 400).json(r);
+});
+
+app.post('/api/admin/change-password', requireAdmin, (req, res) => {
+  if (!adminAuth.verifyPassword(req.body?.current)) return res.status(401).json({ error: 'senha_atual_invalida' });
+  const r = adminAuth.setPassword(req.body?.password);
+  res.status(r.ok ? 200 : 400).json(r);
+});
+
+// TOTP: begin devolve o segredo/QR; confirm só liga o 2FA depois de um código
+// bater. Enquanto não há senha, nem começa.
+app.post('/api/admin/totp/begin', (req, res) => {
+  if (!adminAuth.state.password) return res.status(409).json({ error: 'defina_a_senha_primeiro' });
+  // Se já existe TOTP ativo, exigir sessão pra regerar (evita reset remoto).
+  if (adminAuth.state.totp) {
+    const s = adminAuth.validSession((req.headers['x-admin-session'] || '').toString().trim());
+    if (!s) return res.status(401).json({ error: 'admin_session_invalida' });
+  } else if (!adminAuth.verifyPassword(req.body?.password)) {
+    return res.status(401).json({ error: 'senha_invalida' });
+  }
+  res.json(adminAuth.beginTotpSetup('malha.dev'));
+});
+
+// QR do setup em andamento. Monta do segredo PENDENTE guardado no servidor —
+// receber o URI por query o colocaria em log de acesso e no histórico do proxy,
+// e o URI carrega o segredo inteiro. Só serve enquanto há setup em curso.
+app.get('/api/admin/totp/qr', async (_req, res) => {
+  const p = adminAuth.state.totpPending;
+  if (!p) return res.status(404).json({ error: 'sem_setup_pendente' });
+  try {
+    const { authenticator } = require('otplib');
+    const uri = authenticator.keyuri('admin', 'Bridge malha.dev', p.secret);
+    const png = await require('qrcode').toBuffer(uri, { width: 360, margin: 1 });
+    res.set('Cache-Control', 'no-store').type('png').send(png);
+  } catch (e) {
+    res.status(500).json({ error: 'qr_falhou', detail: String(e.message).slice(0, 80) });
+  }
+});
+
+app.post('/api/admin/totp/confirm', (req, res) => {
+  const r = adminAuth.confirmTotpSetup(req.body?.code);
+  res.status(r.ok ? 200 : 400).json(r);
+});
+
+app.post('/api/admin/login', (req, res) => {
+  const ip = _adminIp(req);
+  if (adminAuth.blocked(ip)) return res.status(429).json({ error: 'muitas_tentativas' });
+  if (!adminAuth.configured) return res.status(409).json({ error: 'admin_nao_configurado' });
+  const okPw = adminAuth.verifyPassword(req.body?.password);
+  const okTt = adminAuth.verifyTotp(req.body?.code);
+  if (!okPw || !okTt) {
+    adminAuth.noteFail(ip);
+    // Resposta única pra não revelar qual dos dois falhou.
+    return res.status(401).json({ error: 'credenciais_invalidas' });
+  }
+  // Só agora o código é gasto: consumir antes faria uma senha errada queimar o
+  // TOTP do dono e viraria vetor de negação de acesso.
+  adminAuth.consumeTotp(req.body?.code);
+  adminAuth.clearFails(ip);
+  const s = adminAuth.createSession(ip);
+  console.log(`[admin] login OK ip=${ip || '?'} — sessão até ${new Date(s.expiresMs).toLocaleTimeString('pt-BR')}`);
+  res.json({ ok: true, session: s.sid, expiresMs: s.expiresMs });
+});
+
+app.post('/api/admin/logout', requireAdmin, (req, res) => {
+  adminAuth.dropSession((req.headers['x-admin-session'] || '').toString().trim());
+  res.json({ ok: true });
+});
+
+app.get('/api/admin/tokens', requireAdmin, (_req, res) => res.json({ tokens: adminAuth.list() }));
+
+app.post('/api/admin/tokens', requireAdmin, (req, res) => {
+  const r = adminAuth.issueToken({ name: req.body?.name, scope: req.body?.scope });
+  if (!r.ok) return res.status(400).json(r);
+  console.log(`[admin] token emitido "${r.record.name}" escopo=${r.record.scope} id=${r.record.id}`);
+  res.json(r);   // `token` em claro só nesta resposta
+});
+
+app.post('/api/admin/tokens/:id/revoke', requireAdmin, (req, res) => {
+  const r = adminAuth.revokeToken(req.params.id);
+  if (r.ok) console.log(`[admin] token revogado id=${req.params.id}`);
+  res.status(r.ok ? 200 : 404).json(r);
+});
+
+app.delete('/api/admin/tokens/:id', requireAdmin, (req, res) => {
+  const r = adminAuth.deleteToken(req.params.id);
+  res.status(r.ok ? 200 : 404).json(r);
+});
 // Ping público — sem auth, útil para verificar se o servidor está online
 app.get('/ping', (_req, res) => res.json({ ok: true, ts: Date.now() }));
 
@@ -6500,6 +6638,12 @@ app.use('/api', (req, res, next) => {
   // não com o token do bridge — a própria rota valida. Sem isso o requireAuth
   // devolvia 401 e o carro quebrava o stream (broken pipe) no meio do POST.
   if (req.path === '/rec/upload') return next();
+  // Painel admin: tem autenticação PRÓPRIA (senha + TOTP, header
+  // X-Admin-Session) e não pode exigir o token do bridge — é justamente de onde
+  // se emite token novo quando não se tem nenhum. Cada rota /admin/* aplica
+  // requireAdmin por conta, exceto as de bootstrap (state / setup-password /
+  // totp / login), que são gateadas por senha e rate limit.
+  if (req.path === '/admin/state' || req.path.startsWith('/admin/')) return next();
   requireAuth(req, res, next);
 });
 

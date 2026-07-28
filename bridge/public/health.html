@@ -406,6 +406,71 @@ canvas { display: block; width: 100%; height: 60px; margin-top: 8px; }
     </details>
 
     <!-- Rede -->
+    <!-- Tokens do bridge. Auth PRÓPRIA (senha + TOTP): esta página é pública em
+         bridge.malha.dev, e emitir credencial a partir dela não pode depender só
+         do token do monitor. A sessão é curta e não sobrevive a restart. -->
+    <details class="card" data-k="tokens">
+      <summary><span class="sum-title">Tokens</span>
+        <span class="sum-right"><span id="head-tok">—</span><span class="chev"></span></span></summary>
+      <div class="card-body">
+        <!-- primeiro acesso -->
+        <div id="tok-setup" style="display:none">
+          <div class="row"><span class="label" style="color:#e6b800">Primeiro acesso — defina a senha do painel</span></div>
+          <div class="row"><input id="tok-newpw" type="password" placeholder="senha (mín. 10 caracteres)"
+               style="flex:1;background:#111;border:1px solid #333;color:#eee;padding:6px;border-radius:6px"></div>
+          <div class="row"><button id="tok-setpw" class="btn">Definir senha</button></div>
+        </div>
+        <!-- ativar 2FA -->
+        <div id="tok-totp" style="display:none">
+          <div class="row"><span class="label" style="color:#e6b800">Ative o 2FA para concluir</span></div>
+          <div class="row"><input id="tok-totppw" type="password" placeholder="sua senha"
+               style="flex:1;background:#111;border:1px solid #333;color:#eee;padding:6px;border-radius:6px">
+               <button id="tok-totpbegin" class="btn">Gerar QR</button></div>
+          <div class="row" id="tok-qrbox" style="display:none;flex-direction:column;gap:6px">
+            <img id="tok-qr" alt="QR do TOTP" style="width:180px;height:180px;background:#fff;border-radius:8px;padding:6px">
+            <span class="label" id="tok-secret" style="font-size:10px;color:#888;word-break:break-all"></span>
+            <div style="display:flex;gap:6px">
+              <input id="tok-totpcode" inputmode="numeric" maxlength="6" placeholder="código de 6 dígitos"
+                style="flex:1;background:#111;border:1px solid #333;color:#eee;padding:6px;border-radius:6px">
+              <button id="tok-totpconfirm" class="btn">Confirmar</button>
+            </div>
+          </div>
+        </div>
+        <!-- login -->
+        <div id="tok-login" style="display:none">
+          <div class="row"><input id="tok-pw" type="password" placeholder="senha"
+               style="flex:1;background:#111;border:1px solid #333;color:#eee;padding:6px;border-radius:6px"></div>
+          <div class="row"><input id="tok-code" inputmode="numeric" maxlength="6" placeholder="código 2FA"
+               style="flex:1;background:#111;border:1px solid #333;color:#eee;padding:6px;border-radius:6px">
+               <button id="tok-dologin" class="btn">Entrar</button></div>
+          <div class="row"><span class="label" id="tok-loginmsg" style="color:#e74c3c"></span></div>
+        </div>
+        <!-- área autenticada -->
+        <div id="tok-area" style="display:none">
+          <div class="row"><span class="label">Sessão</span><span class="val" id="tok-sess">—</span></div>
+          <div class="row" style="flex-direction:column;gap:6px;align-items:stretch">
+            <div style="display:flex;gap:6px">
+              <input id="tok-name" placeholder="nome (ex: cluster-ipad)" maxlength="60"
+                style="flex:1;background:#111;border:1px solid #333;color:#eee;padding:6px;border-radius:6px">
+              <select id="tok-scope" style="background:#111;border:1px solid #333;color:#eee;padding:6px;border-radius:6px">
+                <option value="read">read (só GET)</option>
+                <option value="write">write (GET+POST)</option>
+                <option value="admin">admin (tudo)</option>
+              </select>
+              <button id="tok-gen" class="btn">Gerar</button>
+            </div>
+            <div id="tok-new" style="display:none;background:#0c2b22;border:1px solid #1c6b52;border-radius:8px;padding:8px">
+              <div style="font-size:11px;color:#7bc47f;margin-bottom:4px">Copie agora — não aparece de novo</div>
+              <code id="tok-newval" style="font-size:11px;word-break:break-all;color:#eee"></code>
+              <div style="margin-top:6px"><button id="tok-copy" class="btn">Copiar</button></div>
+            </div>
+          </div>
+          <div id="tok-list" style="margin-top:8px"></div>
+          <div class="row"><button id="tok-logout" class="btn">Sair</button></div>
+        </div>
+      </div>
+    </details>
+
     <!-- Cloudflare Tunnel — porta de entrada de tudo que é HTTP desde que
          substituiu o Funnel. Cai ele, caem os links compartilhados, o app e o
          HA remoto de uma vez. -->
@@ -1359,6 +1424,123 @@ async function updateFamily() {
   } catch (e) { set('head-family', 'erro'); }
 }
 
+// ── Tokens do bridge ────────────────────────────────────────────────────────
+// Sessão admin fica em sessionStorage (não localStorage): morre ao fechar a aba,
+// e é curta no servidor. É a porta de emissão de credencial — não deve persistir
+// como o token do monitor persiste.
+const AKEY = 'admin_session';
+const aSid = () => sessionStorage.getItem(AKEY) || '';
+const aHdr = (extra = {}) => ({ 'Content-Type': 'application/json', 'X-Admin-Session': aSid(), ...extra });
+const aPost = (p, body) => fetch('/api/admin' + p, { method: 'POST', headers: aHdr(), body: JSON.stringify(body || {}) })
+  .then(async r => ({ status: r.status, body: await r.json().catch(() => ({})) }));
+
+function tokShow(which) {
+  for (const id of ['tok-setup', 'tok-totp', 'tok-login', 'tok-area']) {
+    const el = document.getElementById(id);
+    if (el) el.style.display = (id === which) ? 'block' : 'none';
+  }
+}
+
+async function updateTokens() {
+  try {
+    const r = await fetch('/api/admin/state', { headers: { 'X-Admin-Session': aSid() } });
+    if (!r.ok) { set('head-tok', 'indisponível'); return; }
+    const d = await r.json();
+    if (d.session)          { set('head-tok', '<span style="color:#7bc47f">autenticado</span>'); tokShow('tok-area'); await tokList(); }
+    else if (!d.configured) {
+      // Sem senha ainda → setup. Com senha mas sem 2FA → só falta o TOTP.
+      const semSenha = !d.totpPending && !d.configured;
+      set('head-tok', '<span style="color:#e6b800">configurar</span>');
+      tokShow(semSenha ? 'tok-setup' : 'tok-totp');
+    }
+    else                    { set('head-tok', '<span style="color:#888">bloqueado</span>'); tokShow('tok-login'); }
+  } catch (e) { set('head-tok', 'erro'); }
+}
+
+async function tokList() {
+  const box = document.getElementById('tok-list');
+  if (!box) return;
+  const r = await fetch('/api/admin/tokens', { headers: { 'X-Admin-Session': aSid() } });
+  if (!r.ok) { box.innerHTML = ''; return; }
+  const { tokens } = await r.json();
+  if (!tokens.length) { box.innerHTML = '<div class="row"><span class="label">nenhum token emitido</span></div>'; return; }
+  const fmt = ms => ms ? new Date(ms).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : 'nunca';
+  const cor = { read: '#7bc47f', write: '#e6b800', admin: '#e74c3c' };
+  box.innerHTML = tokens.map(t => `
+    <div class="row" style="align-items:flex-start">
+      <span class="label" style="flex:1">
+        ${t.revokedMs ? '<s style="color:#666">' : ''}${t.name}${t.revokedMs ? '</s>' : ''}
+        <span style="color:${cor[t.scope]||'#888'};font-size:10px"> ${t.scope}</span><br>
+        <span style="color:#888;font-size:10px">criado ${fmt(t.createdMs)} · usado ${fmt(t.lastUsedMs)}</span>
+      </span>
+      <span class="val">${t.revokedMs
+        ? `<button class="btn" data-del="${t.id}" style="color:#666">apagar</button>`
+        : `<button class="btn" data-rev="${t.id}" style="color:#e74c3c">revogar</button>`}</span>
+    </div>`).join('');
+  box.querySelectorAll('[data-rev]').forEach(b => b.onclick = async () => {
+    if (!confirm('Revogar este token? Quem usa ele perde acesso na hora.')) return;
+    await aPost(`/tokens/${b.dataset.rev}/revoke`); tokList();
+  });
+  box.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => {
+    await fetch(`/api/admin/tokens/${b.dataset.del}`, { method: 'DELETE', headers: aHdr() }); tokList();
+  });
+}
+
+function wireTokens() {
+  const $ = id => document.getElementById(id);
+  $('tok-setpw').onclick = async () => {
+    const r = await aPost('/setup-password', { password: $('tok-newpw').value });
+    if (r.status !== 200) return alert(r.body.error === 'senha_curta' ? 'Senha muito curta (mín. 10)' : ('Erro: ' + r.body.error));
+    $('tok-newpw').value = ''; tokShow('tok-totp');
+  };
+  $('tok-totpbegin').onclick = async () => {
+    const r = await aPost('/totp/begin', { password: $('tok-totppw').value });
+    if (r.status !== 200) return alert('Erro: ' + (r.body.error || r.status));
+    $('tok-qrbox').style.display = 'flex';
+    $('tok-secret').textContent = 'segredo: ' + r.body.secret;
+    // O QR vem do bridge, que monta a partir do segredo pendente guardado no
+    // servidor. Não mando o URI na query de propósito: ele contém o segredo e
+    // acabaria em log de acesso/proxy.
+    $('tok-qr').src = '/api/admin/totp/qr?t=' + Date.now();
+  };
+  $('tok-totpconfirm').onclick = async () => {
+    const r = await aPost('/totp/confirm', { code: $('tok-totpcode').value });
+    if (r.status !== 200) return alert('Código inválido');
+    alert('2FA ativado. Agora entre com senha + código.');
+    tokShow('tok-login'); updateTokens();
+  };
+  $('tok-dologin').onclick = async () => {
+    $('tok-loginmsg').textContent = '';
+    const r = await aPost('/login', { password: $('tok-pw').value, code: $('tok-code').value });
+    if (r.status !== 200) {
+      $('tok-loginmsg').textContent = r.body.error === 'muitas_tentativas'
+        ? 'Muitas tentativas — espere alguns minutos.' : 'Senha ou código inválido.';
+      return;
+    }
+    sessionStorage.setItem(AKEY, r.body.session);
+    $('tok-pw').value = ''; $('tok-code').value = '';
+    set('tok-sess', 'expira ' + new Date(r.body.expiresMs).toLocaleTimeString('pt-BR'));
+    tokShow('tok-area'); updateTokens();
+  };
+  $('tok-gen').onclick = async () => {
+    const name = $('tok-name').value.trim();
+    if (!name) return alert('Dê um nome ao token (pra saber o que revogar depois).');
+    const r = await aPost('/tokens', { name, scope: $('tok-scope').value });
+    if (r.status !== 200) return alert('Erro: ' + (r.body.error || r.status));
+    $('tok-new').style.display = 'block';
+    $('tok-newval').textContent = r.body.token;
+    $('tok-name').value = '';
+    tokList();
+  };
+  $('tok-copy').onclick = () => {
+    navigator.clipboard?.writeText($('tok-newval').textContent)
+      .then(() => { $('tok-copy').textContent = 'copiado'; setTimeout(() => $('tok-copy').textContent = 'Copiar', 1500); });
+  };
+  $('tok-logout').onclick = async () => {
+    await aPost('/logout'); sessionStorage.removeItem(AKEY); updateTokens();
+  };
+}
+
 // Cloudflare: processo local + status oficial da API. As duas fontes porque o
 // cloudflared pode estar vivo e desconectado — aí o processo diz "ok" e só a
 // API revela que não há conexão de edge nenhuma.
@@ -1404,6 +1586,8 @@ async function updateCloudflare() {
 loadOpenState();
 load();
 loadSysProc();
+wireTokens();
+updateTokens();
 updateCloudflare();
 updateBluetti();
 updateSolar();
