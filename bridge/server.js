@@ -4592,9 +4592,12 @@ _loadHostHits();
 function _isFunnelHost(h) { return /tailacc6e7|\.ts\.net$/.test(String(h || '')); }
 app.use((req, _res, next) => {
   try {
-    // O probe interno do Funnel não conta: ele sonda o hostname antigo de 15 em
-    // 15s por design, e inflava o número que decide se ainda tem cliente real lá.
-    if ((req.headers['user-agent'] || '').startsWith('ecotrip-funnel-probe')) return next();
+    // Monitores do próprio Mac não contam: eles sondam o hostname antigo por
+    // design (probe do bridge a cada 15s, watchdog do launchd a cada 120s) e
+    // inflavam o número que decide se ainda tem CLIENTE real lá — chegaram a ser
+    // ~59 acessos/h de puro auto-monitoramento.
+    const _ua = req.headers['user-agent'] || '';
+    if (_ua.startsWith('ecotrip-funnel-probe') || _ua.startsWith('funnel-watchdog')) return next();
     const h = String(req.headers.host || '?').toLowerCase().split(':')[0];
     const now = Date.now();
     let e = _hostHits.get(h);
