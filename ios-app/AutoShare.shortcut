@@ -45,7 +45,7 @@
 				<key>UUID</key>
 				<string>A91EB0CF-F061-4160-99CE-AAF2A48D6034</string>
 				<key>WFURL</key>
-				<string>https://mac-mini.tailacc6e7.ts.net/api/auto-share</string>
+				<string>https://bridge.malha.dev/api/auto-share</string>
 				<key>WFHTTPMethod</key>
 				<string>POST</string>
 				<key>WFHTTPHeaders</key>
