@@ -494,7 +494,9 @@ canvas { display: block; width: 100%; height: 60px; margin-top: 8px; }
         <div class="row"><span class="label">URL do servidor</span><span class="val" id="cf-url" style="font-size:12px">—</span></div>
         <div class="row"><span class="label">URL dos links do carro</span><span class="val" id="cf-carurl" style="font-size:12px">—</span></div>
         <!-- Enquanto isto não zerar, desligar o Funnel quebra alguém. -->
-        <div class="row"><span class="label">Host antigo (24h)</span><span class="val" id="cf-legacy">—</span></div>
+        <div class="row"><span class="label">Funnel (ts.net)</span>
+          <span class="val"><span id="cf-legacy">—</span>
+          <button class="btn" id="cf-reset" style="margin-left:8px">zerar</button></span></div>
         <div class="row" style="flex-direction:column;align-items:stretch">
           <span class="label">Acessos por host</span>
           <div id="cf-hosts-list" style="font-size:11px;color:#888;margin-top:4px">—</div>
@@ -1086,7 +1088,16 @@ async function load() {
 
 async function clearEvents() {
   if (!confirm('Limpar todos os erros registrados?')) return;
-  await fetch('/api/health/events/clear', { method: 'POST', headers: { Authorization: 'Bearer ' + tk } });
+  // Manda os dois: o token do monitor (que é `read` e sozinho toma 403) e a
+  // sessão admin, se houver. O servidor aceita qualquer um dos dois.
+  const r = await fetch('/api/health/events/clear', {
+    method: 'POST',
+    headers: { Authorization: 'Bearer ' + tk, 'X-Admin-Session': sessionStorage.getItem('admin_session') || '' },
+  });
+  if (r.status === 403 || r.status === 401) {
+    alert('Sem permissão pra limpar: o token do monitor é só-leitura.\n\nEntre no card "Tokens" com senha + 2FA e tente de novo.');
+    return;
+  }
   load();
 }
 
@@ -1515,6 +1526,27 @@ async function tokList() {
   });
 }
 
+// Zerar a contagem depois de corrigir um retardatário: sem isso os acessos de
+// antes da correção mascaram os novos e não dá pra saber se resolveu.
+function wireHostReset() {
+  const b = document.getElementById('cf-reset');
+  if (!b) return;
+  b.onclick = async () => {
+    const r = await fetch('/api/host-hits/reset', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + tk, 'X-Admin-Session': sessionStorage.getItem('admin_session') || '' },
+    });
+    if (r.status === 403 || r.status === 401) {
+      alert('Sem permissão: o token do monitor é só-leitura.\n\nEntre no card "Tokens" com senha + 2FA.');
+      return;
+    }
+    const j = await r.json().catch(() => ({}));
+    b.textContent = 'zerado'; setTimeout(() => b.textContent = 'zerar', 1500);
+    console.log('[host-hits] zerado, havia', j.cleared_legacy, 'acessos no Funnel');
+    updateCloudflare();
+  };
+}
+
 function wireTokens() {
   const $ = id => document.getElementById(id);
   $('tok-setpw').onclick = async () => {
@@ -1618,13 +1650,25 @@ async function updateCloudflare() {
       if (hr.ok) {
         const hj = await hr.json();
         const leg = hj.legacy_hits || 0;
+        const desde = hj.reset_ms
+          ? ' <span style="color:#666;font-size:10px">(desde ' + new Date(hj.reset_ms).toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'}) + ')</span>'
+          : '';
         set('cf-legacy', leg === 0
-          ? '<span style="color:#7bc47f">0 — seguro desligar o Funnel</span>'
-          : `<span style="color:#e6b800">${leg} acessos</span>`);
+          ? '<span style="color:#7bc47f">0 — pode desligar</span>' + desde
+          : `<span style="color:#e6b800">${leg} acessos</span>` + desde);
         const fmtH = ms => new Date(ms).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+        // Mostra os endpoints só do host do Funnel: é o que diz ONDE reconfigurar
+        // quem ainda bate lá. duckdns aparece como fallback esperado, sem alarme.
         document.getElementById('cf-hosts-list').innerHTML = (hj.hosts || [])
-          .map(h => `${h.legacy ? '<span style="color:#e6b800">⚠ </span>' : ''}${h.host} — ${h.hits} (últ. ${fmtH(h.lastMs)})`
-                    + (h.legacy && h.agents.length ? `<br><span style="color:#666;padding-left:12px">${h.agents.join(' · ')}</span>` : ''))
+          .map(h => {
+            const tag = h.legacy ? '<span style="color:#e6b800">⚠ </span>'
+                      : h.fallback ? '<span style="color:#888">↩ </span>' : '';
+            let l = `${tag}${h.host} — ${h.hits} (últ. ${fmtH(h.lastMs)})`;
+            if (h.agents.length) l += `<br><span style="color:#666;padding-left:12px">${h.agents.join(' · ')}</span>`;
+            if (h.legacy && h.paths?.length)
+              l += `<br><span style="color:#666;padding-left:12px">${h.paths.map(p => p.n + 'x ' + p.path).join('<br>' + ' '.repeat(0) + '<span style="padding-left:12px"></span>')}</span>`;
+            return l;
+          })
           .join('<br>') || '—';
       }
     } catch (_) { /* contador é acessório: não derruba o card */ }
@@ -1635,6 +1679,7 @@ loadOpenState();
 load();
 loadSysProc();
 wireTokens();
+wireHostReset();
 updateTokens();
 updateCloudflare();
 updateBluetti();

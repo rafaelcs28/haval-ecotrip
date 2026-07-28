@@ -176,6 +176,8 @@ setInterval(_pollNet, 2 * 60_000);
 // Resolve via DNS público (1.1.1.1) pra evitar MagicDNS local mascarar falha.
 const FUNNEL_HOST  = 'mac-mini.tailacc6e7.ts.net';
 const FUNNEL_PORTS = [443, 8443, 10000];
+// Identifica o probe interno: usado pra excluí-lo do contador de host-hits.
+const FUNNEL_PROBE_UA = 'ecotrip-funnel-probe/1';
 let _funnelStatus     = { checked_at: 0, up: null, failed: [], error: null };
 let _funnelFailCount  = 0;
 function _pollFunnel() {
@@ -188,8 +190,12 @@ function _pollFunnel() {
     }
     const ip = addrs[0];
     const checks = FUNNEL_PORTS.map(port => new Promise(resolve => {
+      // UA próprio pra este probe sair da contagem de host-hits: ele bate no
+      // Funnel a cada 15s em 3 portas (~48 requests/4min) e inflava o número que
+      // usamos pra decidir se ainda tem cliente de verdade no hostname antigo.
       const opts = { hostname: ip, port, path: '/', method: 'HEAD', timeout: 7000,
-                     headers: { Host: FUNNEL_HOST }, rejectUnauthorized: false };
+                     headers: { Host: FUNNEL_HOST, 'User-Agent': FUNNEL_PROBE_UA },
+                     rejectUnauthorized: false };
       const req = https.request(opts, res => { res.resume(); resolve({ port, ok: true }); });
       req.on('error', () => resolve({ port, ok: false }));
       req.on('timeout', () => { req.destroy(); resolve({ port, ok: false }); });
@@ -4530,17 +4536,37 @@ server.on('upgrade', (req, socket, head) => {
 //
 // Só memória: reiniciar o bridge zera, e é aceitável porque a pergunta é "alguém
 // usou nas últimas horas", não histórico de longo prazo.
-const _hostHits = new Map();   // host → { n, lastMs, agents:Set }
+const _hostHits = new Map();   // host → { n, lastMs, agents:Set, paths:Map }
 const HOST_WINDOW_MS = 24 * 3600_000;
+let _hostHitsResetMs = 0;      // declarado aqui: o GET abaixo lê antes do POST definir
+
+// Só o Funnel do Tailscale bloqueia o desligamento. O DuckDNS NÃO entra: ele é
+// acesso direto por porta aberta, não depende do Tailscale, e é justamente o
+// fallback que o BridgeRouter do app usa quando o Cloudflare está mais lento.
+// Contar o duckdns como "legado" dava falso alarme — o app iOS aparece lá por
+// design, não por estar desatualizado.
+function _isFunnelHost(h) { return /tailacc6e7|\.ts\.net$/.test(String(h || '')); }
 app.use((req, _res, next) => {
   try {
+    // O probe interno do Funnel não conta: ele sonda o hostname antigo de 15 em
+    // 15s por design, e inflava o número que decide se ainda tem cliente real lá.
+    if ((req.headers['user-agent'] || '').startsWith('ecotrip-funnel-probe')) return next();
     const h = String(req.headers.host || '?').toLowerCase().split(':')[0];
     const now = Date.now();
     let e = _hostHits.get(h);
-    if (!e || now - e.firstMs > HOST_WINDOW_MS) e = { n: 0, firstMs: now, lastMs: now, agents: new Set() };
+    if (!e || now - e.firstMs > HOST_WINDOW_MS) {
+      e = { n: 0, firstMs: now, lastMs: now, agents: new Set(), paths: new Map() };
+    }
     e.n += 1; e.lastMs = now;
     const ua = (req.headers['user-agent'] || '').slice(0, 40);
     if (ua && e.agents.size < 6) e.agents.add(ua);
+    // Path também: saber QUE endpoint o retardatário chama é o que diz onde
+    // reconfigurar. Só nos hosts legados, pra não gastar memória com o normal.
+    if (_isFunnelHost(h)) {
+      const p = String(req.path || req.url || '').split('?')[0].slice(0, 60);
+      if (e.paths.size < 40) e.paths.set(p, (e.paths.get(p) || 0) + 1);
+      else if (e.paths.has(p)) e.paths.set(p, e.paths.get(p) + 1);
+    }
     _hostHits.set(h, e);
   } catch (_) { /* contador não pode derrubar request */ }
   next();
@@ -4550,10 +4576,27 @@ app.get('/api/host-hits', (_req, res) => {
     _hostHits.entries()].map(([host, e]) => ({
       host, hits: e.n, lastMs: e.lastMs, sinceMs: e.firstMs,
       agents: [...e.agents],
-      legacy: /tailacc6e7|ts\.net|duckdns/.test(host),
+      paths: [...(e.paths || new Map())].sort((a, b) => b[1] - a[1]).slice(0, 8)
+                                        .map(([p, n]) => ({ path: p, n })),
+      legacy: _isFunnelHost(host),
+      fallback: /duckdns/.test(host),   // acesso direto, não bloqueia o desligamento
     })).sort((a, b) => b.hits - a.hits);
   res.json({ hosts: out, window_h: HOST_WINDOW_MS / 3600_000,
-             legacy_hits: out.filter(h => h.legacy).reduce((s, h) => s + h.hits, 0) });
+             legacy_hits: out.filter(h => h.legacy).reduce((s, h) => s + h.hits, 0),
+             reset_ms: _hostHitsResetMs });
+});
+
+// Zera a contagem. Serve pra marcar "corrigi um retardatário" e ver do zero se
+// alguém volta a bater no host antigo — sem isso os hits de antes da correção
+// mascaram os novos e não dá pra saber se resolveu.
+app.post('/api/host-hits/reset', requireWriteOrAdmin, (_req, res) => {
+  const antes = [...
+    _hostHits.entries()].filter(([h]) => _isFunnelHost(h))
+                        .reduce((s, [, e]) => s + e.n, 0);
+  _hostHits.clear();
+  _hostHitsResetMs = Date.now();
+  console.log(`[host-hits] zerado (havia ${antes} acessos em host legado)`);
+  res.json({ ok: true, cleared_legacy: antes, reset_ms: _hostHitsResetMs });
 });
 
 app.use(require('compression')());  // gzip — backup de 11MB cai pra ~1.5MB
@@ -5122,7 +5165,7 @@ app.get('/api/bluetti-status', async (req, res) => {
     // 7 dias é onde o alerta acende: o refresh renova o access_token mas NÃO move
     // o vencimento do grant (a nuvem devolve o tempo restante), então o login
     // manual mensal é obrigatório.
-    needs_login: !cs.has_token || (days != null && days < 40),  // TESTE
+    needs_login: !cs.has_token || (days != null && days < 7),
   };
   if (_bridgeTokenOk(req)) auth.reauth_url = _bluettiReauthLink();
   res.json({ ..._bluettiCache.data, auth });
@@ -6643,7 +6686,18 @@ app.get('/api/health', requireAuth, (_req, res) => {
   });
 });
 
-app.post('/api/health/events/clear', requireAuth, (_req, res) => {
+// Aceita token de escrita OU sessão admin. Motivo: o monitor roda com token de
+// escopo `read` (privilégio mínimo — se o localStorage do browser vazar, ninguém
+// comanda o carro), e aí o POST tomava 403 e o botão "limpar eventos" não fazia
+// nada. Ação de escrita na página de leitura tem que se autenticar por outro
+// caminho, e a sessão admin do card Tokens é exatamente isso.
+function requireWriteOrAdmin(req, res, next) {
+  const sid = (req.headers['x-admin-session'] || '').toString().trim();
+  if (sid && adminAuth.validSession(sid)) { req.authScope = 'admin'; req.authSource = 'admin-session'; return next(); }
+  return requireAuth(req, res, next);
+}
+
+app.post('/api/health/events/clear', requireWriteOrAdmin, (_req, res) => {
   _healthEvents = [];
   _saveHealthEvents();
   res.json({ ok: true });
