@@ -175,12 +175,20 @@ struct LeaveBySheet: View {
         }
     }
 
-    // Hero: horário grande com stepper ±5 min de 44px.
+    // Hero: DatePicker wheel (hora + minuto individuais) + botões ±5 min pra
+    // ajuste fino. O wheel dá scroll natural nos dois campos; os botões viram
+    // atalho pra pequenos deltas sem ter que rolar (ex: "10min antes").
     private var heroStepper: some View {
         VStack(spacing: 10) {
-            Text(hhmmDate(departure))
-                .font(.system(size: 72, weight: .ultraLight, design: .rounded))
-                .monospacedDigit().foregroundStyle(DS.text)
+            DatePicker("", selection: $departure, displayedComponents: .hourAndMinute)
+                .datePickerStyle(.wheel)
+                .labelsHidden()
+                .environment(\.locale, Locale(identifier: "pt_BR"))
+                .frame(maxWidth: .infinity)
+                .frame(height: 130)
+                .onChange(of: departure) { _, _ in
+                    if store.data != nil { store.armed = false }
+                }
             HStack(spacing: 14) {
                 stepBtn("minus", DS.blue) { bump(-5) }
                 Text("saída").font(.system(size: 11, weight: .semibold)).foregroundStyle(DS.muted).tracking(0.5)

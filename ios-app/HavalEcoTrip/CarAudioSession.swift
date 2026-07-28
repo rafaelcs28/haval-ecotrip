@@ -6,9 +6,16 @@
 
 import AVFoundation
 import Foundation
+import MediaPlayer
 
 @MainActor
 final class CarAudioSession: ObservableObject {
+    // Singleton p/ escuta ao vivo: sobrevive ao ciclo de vida da sheet — fechar
+    // sheet, trocar de tela ou minimizar (background audio via UIBackgroundModes:
+    // audio no project.yml) NÃO para o playback. Só para com ação explícita.
+    // MicTestSheet segue criando instância própria (diag isolado por sessão).
+    static let shared = CarAudioSession()
+
     enum State: Equatable { case idle, connecting, listening, error(String) }
     @Published var state: State = .idle
     @Published var talking = false
@@ -21,6 +28,7 @@ final class CarAudioSession: ObservableObject {
     @Published private(set) var callMode = false
 
     private var reconnectAttempt = 0
+    private var interruptionObserver: NSObjectProtocol?
     private let rate = 8000.0
     private let engine = AVAudioEngine()
     private let player = AVAudioPlayerNode()
@@ -44,6 +52,9 @@ final class CarAudioSession: ObservableObject {
             try startEngine()
             connectWS()
             state = .listening
+            configureNowPlaying(title: "Escuta da cabine")
+            configureRemoteCommands()
+            observeInterruptions()
         } catch {
             await controlCar(action: "stop")
             state = .error("Áudio: \(error.localizedDescription)")
@@ -75,6 +86,98 @@ final class CarAudioSession: ObservableObject {
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         talking = false
         state = .idle
+        clearNowPlaying()
+    }
+
+    // ── Now Playing / Lock-screen ────────────────────────────────────────────
+    // Sem isso, iOS não mostra nada no Control Center/tela bloqueada durante o
+    // playback em background e o usuário não consegue encerrar dali.
+    private func configureNowPlaying(title: String) {
+        var info: [String: Any] = [:]
+        info[MPMediaItemPropertyTitle] = title
+        info[MPMediaItemPropertyArtist] = "Haval EcoTrip"
+        info[MPNowPlayingInfoPropertyIsLiveStream] = true
+        info[MPNowPlayingInfoPropertyPlaybackRate] = 1.0
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+    }
+
+    private func clearNowPlaying() {
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+        let c = MPRemoteCommandCenter.shared()
+        c.stopCommand.removeTarget(self)
+        c.pauseCommand.removeTarget(self)
+        c.playCommand.removeTarget(self)
+        c.togglePlayPauseCommand.removeTarget(self)
+    }
+
+    private func configureRemoteCommands() {
+        let c = MPRemoteCommandCenter.shared()
+        // Encerra escuta / chamada pela tela bloqueada. pauseCommand duplica o
+        // stop porque muitos widgets mostram Pause em vez de Stop.
+        let end: (MPRemoteCommandEvent) -> MPRemoteCommandHandlerStatus = { [weak self] _ in
+            guard let self else { return .commandFailed }
+            Task { @MainActor in
+                if self.callMode { await self.endCall() } else { await self.stop() }
+            }
+            return .success
+        }
+        c.stopCommand.isEnabled = true
+        c.stopCommand.addTarget(handler: end)
+        c.pauseCommand.isEnabled = true
+        c.pauseCommand.addTarget(handler: end)
+        c.togglePlayPauseCommand.isEnabled = true
+        c.togglePlayPauseCommand.addTarget(handler: end)
+        // Live stream não retoma — desabilita play pra não confundir.
+        c.playCommand.isEnabled = false
+    }
+
+    // ── Interrupções (ligação, Siri, alarme) ─────────────────────────────────
+    // iOS pausa o AVAudioEngine sozinho no .began; no .ended, se `shouldResume`
+    // vier ligado, reativa a sessão e o engine pra escuta longa sobreviver.
+    // Registro idempotente por instância; observer é solto no deinit por segurança.
+    private func observeInterruptions() {
+        guard interruptionObserver == nil else { return }
+        interruptionObserver = NotificationCenter.default.addObserver(
+            forName: AVAudioSession.interruptionNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            Task { @MainActor in self?.handleInterruption(note) }
+        }
+    }
+
+    private func handleInterruption(_ note: Notification) {
+        guard let info = note.userInfo,
+              let raw = info[AVAudioSessionInterruptionTypeKey] as? UInt,
+              let type = AVAudioSession.InterruptionType(rawValue: raw) else { return }
+        switch type {
+        case .began:
+            // Nada a fazer — iOS já pausou o engine. Resume depende do .shouldResume no .ended.
+            break
+        case .ended:
+            guard state == .listening else { return }
+            let opts = AVAudioSession.InterruptionOptions(
+                rawValue: info[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
+            )
+            guard opts.contains(.shouldResume) else { return }
+            do {
+                try AVAudioSession.sharedInstance().setActive(true)
+                if !engine.isRunning { try engine.start() }
+                player.play()
+                configureNowPlaying(title: callMode ? "Chamada com o carro" : "Escuta da cabine")
+            } catch {
+                // Se o restart local falhar, força reconexão do WS (o carro segue capturando).
+                scheduleReconnect()
+            }
+        @unknown default:
+            break
+        }
+    }
+
+    deinit {
+        if let obs = interruptionObserver {
+            NotificationCenter.default.removeObserver(obs)
+        }
     }
 
     func setMuted(_ on: Bool) {
@@ -260,6 +363,9 @@ final class CarAudioSession: ObservableObject {
             connectWS()
             state = .listening
             talking = true   // mic contínuo: full-duplex (sem push-to-talk)
+            configureNowPlaying(title: "Chamada com o carro")
+            configureRemoteCommands()
+            observeInterruptions()
         } catch {
             await controlCar(action: "stop")
             state = .idle; callMode = false; callStatus = "Áudio: \(error.localizedDescription)"

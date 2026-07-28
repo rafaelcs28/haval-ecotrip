@@ -8,7 +8,9 @@
 import SwiftUI
 
 struct EscutaSheetV2: View {
-    @StateObject private var audio = CarAudioSession()
+    // Singleton: escuta segue tocando quando fechar a sheet, trocar de tela ou
+    // minimizar o app. Só para com ação explícita ("Encerrar" nesta sheet).
+    @ObservedObject private var audio = CarAudioSession.shared
     @StateObject private var diag = MicTestStore()
     @ObservedObject private var store = CarStore.shared
     @Environment(\.dismiss) private var dismiss
@@ -71,7 +73,8 @@ struct EscutaSheetV2: View {
             #endif
         }
         .onChange(of: listening) { if listening { sessionStart = Date() } }
-        .onDisappear { Task { audio.callMode ? await audio.endCall() : await audio.stop() } }
+        // Fechar a sheet NÃO para a escuta — user precisa tocar "Encerrar" pra
+        // parar. Chamada em curso segue a mesma regra (fecha com "Desligar").
     }
 
     @ViewBuilder private var headerChip: some View {

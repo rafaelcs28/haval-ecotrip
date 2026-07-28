@@ -19,19 +19,24 @@ final class ActivityManager: ObservableObject {
     private let pollInterval: TimeInterval = 5    // 5s entre polls
 
     // Auto-start: chamado no .onAppear / scenePhase=active.
-    // 2 caminhos:
-    //   (a) Já tem Activity → garante polling ativo e força update imediato
-    //       (cobre o caso "iPhone bloqueado por horas, Activity congelada").
-    //   (b) Sem Activity → se carro está carregando, inicia.
-    // A LA de recarga agora é CRIADA pelo bridge via push-to-start (mesmo com o
-    // app fechado). O app não cria mais localmente — apenas adota a que existir
-    // (indicador na UI + refresh imediato em foreground). Isso evita LA duplicada.
+    // Preferência é a LA criada pelo bridge via push-to-start APNs (app pode
+    // estar fechado). MAS: nem sempre o push abre a LA (rate limit do iOS,
+    // bug 26.x, user desativou LA nas settings do app). Como fallback, se o
+    // carro está carregando e não existe LA local nem via APNs, o app CRIA
+    // localmente. Não duplica: só cria se `Activity.activities.first == nil`.
     func autoStartIfCharging() async {
         guard Settings.isConfigured else { return }
         if let existing = Activity<ChargeActivityAttributes>.activities.first(where: { $0.activityState == .active }) {
             if currentActivity == nil { currentActivity = existing }
             if pollingTask == nil { startPolling() }
             await pollOnce()   // refresh imediato
+            return
+        }
+        // Sem LA ativa. Cria local se o carro está carregando (fallback pro
+        // push-to-start APNs que às vezes falha em abrir a LA).
+        if await CarStore.shared.chargingState == "Carregando" {
+            await start()
+            await pollOnce()   // popula o ContentState com os valores reais imediato
         }
     }
 
