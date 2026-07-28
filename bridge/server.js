@@ -14553,6 +14553,36 @@ function _endTripLA(dismissMs = 5 * 60_000) {
 // (inclui acessório/ACC, cai depois da ignição). O bridge pode agir antes disso.
 const TRIP_END_FAST_MS = 30_000;   // margem pra ignição oscilando / APK reiniciando
 const TRIP_END_SLOW_MS = 5 * 60_000;
+// Quanto o card fica na tela DEPOIS de marcar concluída. São coisas separadas:
+// marcar o fim é urgente (senão a LA mente dizendo "em curso"), sumir não é —
+// esse tempo é justamente pra dar pra ler o resumo da viagem.
+const TRIP_SUMMARY_KEEP_MS = 15 * 60_000;
+// ...MAS se houver alerta mais importante na tela, o resumo da viagem tem que
+// sair da frente rápido. Foi o caso do "Veículo desprotegido" ficando ATRÁS da
+// viagem concluída ao destravar e sair do carro.
+const TRIP_SUMMARY_YIELD_MS = 20_000;
+
+// Prioridade entre Live Activities, do mais importante pro menos.
+//
+// O iOS não expõe ordenação de LAs — a pilha é decidida pelo sistema. O que dá
+// pra controlar é o tempo de vida: a de menor prioridade sai de cena mais rápido
+// quando há uma mais importante ativa. Não é "trazer pra frente", é "tirar da
+// frente", que é o efeito que se consegue de forma confiável.
+// Literais e não as consts SECURITY_LA_TYPE/etc: aquelas são declaradas mais
+// abaixo no arquivo e referenciá-las aqui cairia em TDZ no boot.
+const LA_PRIORITY = [
+  'SecurityActivityAttributes',   // 🔓 veículo desprotegido — ação pendente do dono
+  'ChargeActivityAttributes',     // ⚡ recarga em andamento — informação com prazo
+  TRIP_LA_TYPE,                   // 🏁 viagem — histórico, o menos urgente dos três
+];
+/// Existe LA ativa MAIS prioritária que `tipo`?
+function _laMaisPrioritariaAtiva(tipo) {
+  const i = LA_PRIORITY.indexOf(tipo);
+  if (i <= 0) return false;   // não listado, ou já é o mais prioritário
+  return LA_PRIORITY.slice(0, i).some(t => {
+    try { return apnsLive.hasUpdateToken(t); } catch (_) { return false; }
+  });
+}
 function _tripEndDelayMs() {
   return String(state.engine_state) === '0' ? TRIP_END_FAST_MS : TRIP_END_SLOW_MS;
 }
@@ -14567,7 +14597,13 @@ function _scheduleTripLAEnd() {
     // (APK morreu ao desligar) o engine_state fica congelado em '1' — não dá pra
     // confiar nele; a ausência de sinal já é o "desligou". Não religou = encerra.
     if (state.car_online && state.engine_state === '1') return;
-    _endTripLA(0);                            // a espera já passou → remove agora
+    // dismissMs alto de propósito: o que importa é marcar CONCLUÍDA cedo, não
+    // fazer o card desaparecer. Com 0 aqui a LA saía da tela junto com a
+    // mudança de estado e você nunca via o resumo (km, tempo, consumo).
+    // Exceção: se há alerta mais prioritário na tela (destravado, recarga), o
+    // resumo cede o lugar rápido.
+    _endTripLA(_laMaisPrioritariaAtiva(TRIP_LA_TYPE) ? TRIP_SUMMARY_YIELD_MS
+                                                     : TRIP_SUMMARY_KEEP_MS);
   }, delay);
   console.log(`[trip-la] encerramento agendado em ${Math.round(delay / 1000)}s`
             + ` (gear=${state.gear} speed=${state.speed_kmh} engine=${state.engine_state})`);
