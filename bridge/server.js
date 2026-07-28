@@ -4534,11 +4534,49 @@ server.on('upgrade', (req, socket, head) => {
 // apareceria quando quebrasse. Conta por Host numa janela de 24h, com o último
 // acesso e o user-agent — o suficiente pra identificar o retardatário.
 //
-// Só memória: reiniciar o bridge zera, e é aceitável porque a pergunta é "alguém
-// usou nas últimas horas", não histórico de longo prazo.
-const _hostHits = new Map();   // host → { n, lastMs, agents:Set, paths:Map }
-const HOST_WINDOW_MS = 24 * 3600_000;
+// Persistido em disco: a janela de observação é de 48h e um restart do bridge
+// (deploy, crash) zerava tudo — o contador mostraria 0 por ter perdido a memória,
+// não por ninguém ter usado, e é justamente essa leitura que faria desligar o
+// Funnel cedo demais.
+const HOST_HITS_FILE = path.join(DATA_DIR, 'host-hits.json');
+const _hostHits = new Map();   // host → { n, firstMs, lastMs, agents:Set, ips:Set, paths:Map }
+const HOST_WINDOW_MS = 48 * 3600_000;
 let _hostHitsResetMs = 0;      // declarado aqui: o GET abaixo lê antes do POST definir
+
+function _loadHostHits() {
+  try {
+    const j = JSON.parse(fs.readFileSync(HOST_HITS_FILE, 'utf8'));
+    _hostHitsResetMs = j.resetMs || 0;
+    const now = Date.now();
+    for (const [host, e] of Object.entries(j.hosts || {})) {
+      if (now - (e.firstMs || 0) > HOST_WINDOW_MS) continue;   // fora da janela
+      _hostHits.set(host, {
+        n: e.n || 0, firstMs: e.firstMs || now, lastMs: e.lastMs || now,
+        agents: new Set(e.agents || []), ips: new Set(e.ips || []),
+        paths: new Map(Object.entries(e.paths || {})),
+      });
+    }
+    if (_hostHits.size) console.log(`[host-hits] restaurados ${_hostHits.size} hosts do disco`);
+  } catch (_) { /* primeira execução */ }
+}
+
+let _hostHitsSaveTimer = null;
+function _saveHostHitsSoon() {
+  if (_hostHitsSaveTimer) return;   // debounce: o middleware roda em TODA request
+  _hostHitsSaveTimer = setTimeout(() => {
+    _hostHitsSaveTimer = null;
+    try {
+      const hosts = {};
+      for (const [host, e] of _hostHits) {
+        hosts[host] = { n: e.n, firstMs: e.firstMs, lastMs: e.lastMs,
+                        agents: [...e.agents], ips: [...(e.ips || [])],
+                        paths: Object.fromEntries(e.paths || []) };
+      }
+      fs.writeFileSync(HOST_HITS_FILE, JSON.stringify({ resetMs: _hostHitsResetMs, hosts }));
+    } catch (e) { console.warn('[host-hits] falha ao salvar:', e.message); }
+  }, 20_000);
+}
+_loadHostHits();
 
 // Só o Funnel do Tailscale bloqueia o desligamento. O DuckDNS NÃO entra: ele é
 // acesso direto por porta aberta, não depende do Tailscale, e é justamente o
@@ -4566,8 +4604,15 @@ app.use((req, _res, next) => {
       const p = String(req.path || req.url || '').split('?')[0].slice(0, 60);
       if (e.paths.size < 40) e.paths.set(p, (e.paths.get(p) || 0) + 1);
       else if (e.paths.has(p)) e.paths.set(p, e.paths.get(p) + 1);
+      // IP de origem: UA genérico ("curl/8.5.0") não diz de qual máquina veio, e
+      // sem isso sobra adivinhar de qual dispositivo da tailnet é.
+      e.ips = e.ips || new Set();
+      const ip = (req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '?')
+        .toString().split(',')[0].trim();
+      if (e.ips.size < 8) e.ips.add(ip);
     }
     _hostHits.set(h, e);
+    _saveHostHitsSoon();
   } catch (_) { /* contador não pode derrubar request */ }
   next();
 });
@@ -4576,6 +4621,7 @@ app.get('/api/host-hits', (_req, res) => {
     _hostHits.entries()].map(([host, e]) => ({
       host, hits: e.n, lastMs: e.lastMs, sinceMs: e.firstMs,
       agents: [...e.agents],
+      ips: [...(e.ips || new Set())],
       paths: [...(e.paths || new Map())].sort((a, b) => b[1] - a[1]).slice(0, 8)
                                         .map(([p, n]) => ({ path: p, n })),
       legacy: _isFunnelHost(host),

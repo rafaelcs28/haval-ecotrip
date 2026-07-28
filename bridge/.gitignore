@@ -67,3 +67,4 @@ uploads/
 # Credenciais do painel admin (senha scrypt, segredo TOTP, hashes de token)
 admin_auth.json
 bridge_tokens.json
+host-hits.json
