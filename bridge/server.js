@@ -4522,6 +4522,40 @@ server.on('upgrade', (req, socket, head) => {
   if (_isClockinPath(req.url)) _clockinProxy.ws(req, socket, head, { target: 'http://127.0.0.1:3010' });
 });
 
+// ── Contador de Host ─────────────────────────────────────────────────────────
+// Quem ainda bate no hostname antigo? Sem isso, desligar o Funnel do Tailscale é
+// adivinhação: um cliente esquecido (atalho, script, app não atualizado) só
+// apareceria quando quebrasse. Conta por Host numa janela de 24h, com o último
+// acesso e o user-agent — o suficiente pra identificar o retardatário.
+//
+// Só memória: reiniciar o bridge zera, e é aceitável porque a pergunta é "alguém
+// usou nas últimas horas", não histórico de longo prazo.
+const _hostHits = new Map();   // host → { n, lastMs, agents:Set }
+const HOST_WINDOW_MS = 24 * 3600_000;
+app.use((req, _res, next) => {
+  try {
+    const h = String(req.headers.host || '?').toLowerCase().split(':')[0];
+    const now = Date.now();
+    let e = _hostHits.get(h);
+    if (!e || now - e.firstMs > HOST_WINDOW_MS) e = { n: 0, firstMs: now, lastMs: now, agents: new Set() };
+    e.n += 1; e.lastMs = now;
+    const ua = (req.headers['user-agent'] || '').slice(0, 40);
+    if (ua && e.agents.size < 6) e.agents.add(ua);
+    _hostHits.set(h, e);
+  } catch (_) { /* contador não pode derrubar request */ }
+  next();
+});
+app.get('/api/host-hits', (_req, res) => {
+  const out = [...
+    _hostHits.entries()].map(([host, e]) => ({
+      host, hits: e.n, lastMs: e.lastMs, sinceMs: e.firstMs,
+      agents: [...e.agents],
+      legacy: /tailacc6e7|ts\.net|duckdns/.test(host),
+    })).sort((a, b) => b.hits - a.hits);
+  res.json({ hosts: out, window_h: HOST_WINDOW_MS / 3600_000,
+             legacy_hits: out.filter(h => h.legacy).reduce((s, h) => s + h.hits, 0) });
+});
+
 app.use(require('compression')());  // gzip — backup de 11MB cai pra ~1.5MB
 app.use(express.json({ limit: '200mb' }));  // /api/restore carrega o backup completo (autotrips+samples) — já ~38MB e cresce até o cap de 2000 trips. Auth-gated; express.json só bufferiza o que chega (não pré-aloca).
 app.use((req, res, next) => {
@@ -5067,14 +5101,31 @@ function _fmtMin(m) {
   const h = Math.floor(m / 60), r = m % 60;
   return h > 0 ? `${h}h${String(r).padStart(2, '0')}min` : `${m}min`;
 }
-app.get('/api/bluetti-status', async (_req, res) => {
+app.get('/api/bluetti-status', async (req, res) => {
   const now = Date.now();
   if (!_bluettiCache.data || (now - _bluettiCache.ts) > 30_000) {
     const d = await _fetchBluettiStatus();
     if (d) _bluettiCache = { data: d, ts: now };
   }
   if (!_bluettiCache.data) return res.status(502).json({ error: 'bluetti indisponível' });
-  res.json(_bluettiCache.data);
+  // Bloco de auth pro banner do health: dias restantes e se precisa religar. O LINK
+  // só vai pra quem apresenta o token do bridge — esta rota é registrada antes do
+  // gate global de /api, então responde sem auth, e link de login vazando daria
+  // pra um estranho plugar a NOSSA instância na conta Bluetti dele.
+  const cs = bluettiCloud.status();
+  const days = cs.token_expires_in_days;
+  const auth = {
+    has_token: cs.has_token,
+    expires_at: cs.token_expires_at,
+    expires_in_days: days,
+    needs_reauth: cs.needs_reauth,
+    // 7 dias é onde o alerta acende: o refresh renova o access_token mas NÃO move
+    // o vencimento do grant (a nuvem devolve o tempo restante), então o login
+    // manual mensal é obrigatório.
+    needs_login: !cs.has_token || (days != null && days < 40),  // TESTE
+  };
+  if (_bridgeTokenOk(req)) auth.reauth_url = _bluettiReauthLink();
+  res.json({ ..._bluettiCache.data, auth });
 });
 
 // ── OAuth da nuvem Bluetti ───────────────────────────────────────────────────
@@ -5100,6 +5151,13 @@ function _bluettiReauthToken() {
 function _bluettiReauthLink() {
   const base = (process.env.BRIDGE_PUBLIC_URL || '').replace(/\/$/, '');
   return `${base}/api/bluetti/oauth/start?rt=${_bluettiReauthToken()}`;
+}
+// Mesmo esquema do requireAuth: aceita o token cru ou o sha256 dele.
+function _bridgeTokenOk(req) {
+  const raw = (req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim() ||
+              (req.query.token || '').toString();
+  if (!raw || !BRIDGE_TOKEN_HASH) return false;
+  return safeStrEqual(raw, BRIDGE_TOKEN_HASH) || safeStrEqual(sha256hex(raw), BRIDGE_TOKEN_HASH);
 }
 function _bluettiAdminOk(req) {
   const t = (req.query.token || req.headers['x-admin-token'] || '').toString();

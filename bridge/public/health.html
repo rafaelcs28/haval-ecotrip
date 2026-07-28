@@ -288,6 +288,15 @@ canvas { display: block; width: 100%; height: 60px; margin-top: 8px; }
       <summary><span class="sum-title">Estações portáteis</span>
         <span class="sum-right"><span id="head-bluetti">—</span><span class="chev"></span></span></summary>
       <div class="card-body">
+        <!-- Login da nuvem Bluetti: o grant morre 31 dias depois do login manual (o
+             refresh renova o token mas não move o vencimento). Aparece só quando
+             falta <7 dias ou o refresh quebrou. -->
+        <a id="bl-reauth" href="#" target="_blank" rel="noopener" style="display:none;text-decoration:none">
+          <div style="background:#3a2a00;border:1px solid #e6b800;border-radius:6px;padding:8px 10px;margin-bottom:10px;font-size:12px;color:#ffd966">
+            <span id="bl-reauth-txt">login da Bluetti expirando</span>
+            <span style="color:#e6b800;font-weight:600"> → clique pra religar</span>
+          </div>
+        </a>
         <div class="row" style="border-bottom:1px solid #333;padding-bottom:6px;margin-bottom:8px;font-weight:600">
           <span style="width:100%">🏠 Casa <span style="font-weight:400;color:#888;font-size:11px">— Mac Mini + Roteador</span></span>
         </div>
@@ -484,6 +493,12 @@ canvas { display: block; width: 100%; height: 60px; margin-top: 8px; }
         <div class="row"><span class="label">Hostnames</span><span class="val" id="cf-hosts" style="font-size:11px">—</span></div>
         <div class="row"><span class="label">URL do servidor</span><span class="val" id="cf-url" style="font-size:12px">—</span></div>
         <div class="row"><span class="label">URL dos links do carro</span><span class="val" id="cf-carurl" style="font-size:12px">—</span></div>
+        <!-- Enquanto isto não zerar, desligar o Funnel quebra alguém. -->
+        <div class="row"><span class="label">Host antigo (24h)</span><span class="val" id="cf-legacy">—</span></div>
+        <div class="row" style="flex-direction:column;align-items:stretch">
+          <span class="label">Acessos por host</span>
+          <div id="cf-hosts-list" style="font-size:11px;color:#888;margin-top:4px">—</div>
+        </div>
       </div>
     </details>
 
@@ -1355,11 +1370,24 @@ async function updateBluetti() {
         : `<span style="color:#666">desligada</span>`);
     };
     paint('bl-casa', d.casa); paint('bl-sitio', d.sitio);
+    // Faixa de reauth: o link vem no payload só pra quem manda o token do bridge.
+    const a = d.auth || {};
+    const band = document.getElementById('bl-reauth');
+    if (band) {
+      if (a.needs_login && a.reauth_url) {
+        band.href = a.reauth_url;
+        set('bl-reauth-txt', !a.has_token ? 'Bluetti sem login'
+          : a.needs_reauth ? `login vence em ${a.expires_in_days} dia(s) e o refresh está falhando`
+          : `login da Bluetti vence em ${a.expires_in_days} dia(s)`);
+        band.style.display = 'block';
+      } else band.style.display = 'none';
+    }
     // Header resumo
     const critical  = (s) => s && s.reachable && (s.ac_on === false || (s.grid_in_w === 0 && (s.battery_pct||0) <= 10));
     const attention = (s) => s && s.reachable && s.grid_in_w === 0;
     const gone      = (s) => s && !s.reachable;
-    if (gone(d.casa) || gone(d.sitio))                set('head-bluetti', '<span style="color:#e74c3c">sem comunicação</span>');
+    if (d.auth && d.auth.needs_login)                 set('head-bluetti', '<span style="color:#e6b800">🔑 refazer login</span>');
+    else if (gone(d.casa) || gone(d.sitio))           set('head-bluetti', '<span style="color:#e74c3c">sem comunicação</span>');
     else if (critical(d.casa) || critical(d.sitio))    set('head-bluetti', '<span style="color:#e74c3c">⚠️ CRÍTICO</span>');
     else if (attention(d.casa) || attention(d.sitio))  set('head-bluetti', '<span style="color:#e6b800">na bateria</span>');
     else set('head-bluetti', `<span style="color:#7bc47f">Casa ${d.casa.battery_pct||'?'}% · Sítio ${d.sitio.battery_pct||'?'}%</span>`);
@@ -1582,6 +1610,24 @@ async function updateCloudflare() {
       : '—');
     set('cf-url', d.public_url ? `<span style="color:#888">${d.public_url}</span>` : '—');
     set('cf-carurl', d.car_url ? `<span style="color:#888">${d.car_url}</span>` : '—');
+
+    // Retardatários no hostname antigo. Verde = ninguém mais usa, pode desligar
+    // o Funnel; amarelo = ainda tem cliente batendo lá.
+    try {
+      const hr = await fetch('/api/host-hits', { headers: { Authorization: 'Bearer ' + tk } });
+      if (hr.ok) {
+        const hj = await hr.json();
+        const leg = hj.legacy_hits || 0;
+        set('cf-legacy', leg === 0
+          ? '<span style="color:#7bc47f">0 — seguro desligar o Funnel</span>'
+          : `<span style="color:#e6b800">${leg} acessos</span>`);
+        const fmtH = ms => new Date(ms).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+        document.getElementById('cf-hosts-list').innerHTML = (hj.hosts || [])
+          .map(h => `${h.legacy ? '<span style="color:#e6b800">⚠ </span>' : ''}${h.host} — ${h.hits} (últ. ${fmtH(h.lastMs)})`
+                    + (h.legacy && h.agents.length ? `<br><span style="color:#666;padding-left:12px">${h.agents.join(' · ')}</span>` : ''))
+          .join('<br>') || '—';
+      }
+    } catch (_) { /* contador é acessório: não derruba o card */ }
   } catch (e) { set('head-cf', 'erro'); }
 }
 
