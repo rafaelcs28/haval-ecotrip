@@ -34,10 +34,29 @@ class MainActivity : AppCompatActivity() {
     private lateinit var web: WebView
     private val prefs by lazy { getSharedPreferences("cluster", Context.MODE_PRIVATE) }
 
+    companion object {
+        /// Bridge via Cloudflare Tunnel. Era o DuckDNS, e muitos aparelhos têm o
+        /// Funnel do Tailscale (mac-mini.*.ts.net) gravado nas prefs — o Funnel vai
+        /// sair do ar, então `migrarUrlSeNecessario` converte no primeiro boot.
+        const val BRIDGE_PADRAO = "https://bridge.malha.dev"
+    }
+
+    /// Troca URLs antigas gravadas nas prefs pelo host atual. Sem isso o aparelho
+    /// continuaria batendo no Funnel até alguém abrir a tela de config e editar à
+    /// mão — foi o cluster que apareceu como último cliente do ts.net.
+    private fun migrarUrlSeNecessario() {
+        val atual = prefs.getString("bridgeUrl", "") ?: ""
+        val antigo = atual.contains("tailacc6e7") || atual.contains(".ts.net") ||
+                     atual.contains("mqttrafael.duckdns.org")
+        if (atual.isEmpty() || antigo) {
+            prefs.edit().putString("bridgeUrl", BRIDGE_PADRAO).apply()
+        }
+    }
+
     // Exposto ao JS como window.AndroidCfg — o android-shim.js lê URL + senha daqui.
     inner class Cfg {
         @JavascriptInterface fun getBridgeUrl(): String =
-            prefs.getString("bridgeUrl", "https://mqttrafael.duckdns.org") ?: ""
+            prefs.getString("bridgeUrl", BRIDGE_PADRAO) ?: BRIDGE_PADRAO
         @JavascriptInterface fun getPassword(): String =
             prefs.getString("password", "") ?: ""
         // Tema do cluster: "light" | "dark" (padrão dark)
@@ -109,6 +128,8 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        // Antes de carregar o cluster: converte URL antiga gravada nas prefs.
+        migrarUrlSeNecessario()
 
         web = WebView(this).apply {
             settings.javaScriptEnabled = true
@@ -167,7 +188,7 @@ class MainActivity : AppCompatActivity() {
         }
         val urlIn = EditText(ctx).apply {
             hint = "URL do bridge (https://...)"
-            setText(prefs.getString("bridgeUrl", "https://mqttrafael.duckdns.org"))
+            setText(prefs.getString("bridgeUrl", BRIDGE_PADRAO))
             inputType = InputType.TYPE_TEXT_VARIATION_URI
         }
         val pwIn = EditText(ctx).apply {
