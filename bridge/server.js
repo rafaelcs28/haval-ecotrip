@@ -176,6 +176,12 @@ setInterval(_pollNet, 2 * 60_000);
 // Resolve via DNS público (1.1.1.1) pra evitar MagicDNS local mascarar falha.
 const FUNNEL_HOST  = 'mac-mini.tailacc6e7.ts.net';
 const FUNNEL_PORTS = [443, 8443, 10000];
+// Funnel desligado em 28/07/2026 (migração pro malha.dev via Cloudflare Tunnel).
+// Com ele fora do ar o probe alertaria "Funnel caiu" pra sempre — alerta falso no
+// canal que serve pra confiar que está tudo de pé. Flag em vez de arrancar o
+// código: se algum dia o Funnel voltar como rota de emergência, é só inverter.
+// FUNNEL_WATCH=1 no .env reativa.
+const FUNNEL_WATCH = process.env.FUNNEL_WATCH === '1';
 // Identifica o probe interno: usado pra excluí-lo do contador de host-hits.
 const FUNNEL_PROBE_UA = 'ecotrip-funnel-probe/1';
 let _funnelStatus     = { checked_at: 0, up: null, failed: [], error: null };
@@ -214,7 +220,7 @@ function _pollFunnel() {
   });
 }
 _pollFunnel();
-setInterval(_pollFunnel, 15_000);   // 15s (era 60s) — precisa capturar rajadas curtas de ISP/Tailscale
+if (FUNNEL_WATCH) setInterval(_pollFunnel, 15_000);   // 15s — só quando o Funnel está em uso (ver FUNNEL_WATCH)
 
 // Registra transições UP↔DOWN do Funnel em _healthEvents pra correlacionar
 // com alertas externos ("Mac Mini inalcançável" do HA do Sítio). Antes
