@@ -25,6 +25,17 @@ class App : Application() {
     override fun onCreate() {
         super.onCreate()
         instance = this
+        // ANTES de qualquer coisa que leia a URL do bridge: o MqttManager lê
+        // BRIDGE_URL direto das prefs, então a migração tem que já ter gravado o
+        // valor novo quando ele carregar.
+        try {
+            // Device-protected storage: é onde MqttManager e reportDeathIfAny leem
+            // as prefs. Usar o contexto normal aqui abriria OUTRO arquivo e a
+            // migração não teria efeito nenhum.
+            val ctx = try { createDeviceProtectedStorageContext() } catch (_: Exception) { this }
+            val p = ctx.getSharedPreferences(SharedPreferencesKeys.PREFS_NAME, Context.MODE_PRIVATE)
+            migrarBridgeUrl(p, (p.getString(SharedPreferencesKeys.BRIDGE_URL, "") ?: "").trim().trimEnd('/'))
+        } catch (_: Exception) {}
         installDeathBreadcrumb()
         // Se a sessão anterior morreu (crash Java OU force-stop/ANR/OOM), reporta
         // ao bridge no boot atual — antes só reportava se havia trip aberta.
@@ -78,7 +89,27 @@ class App : Application() {
 
     private fun getBridgeUrlFromPrefs(prefs: android.content.SharedPreferences): String {
         val raw = (prefs.getString(SharedPreferencesKeys.BRIDGE_URL, "") ?: "").trim().trimEnd('/')
-        return raw
+        return migrarBridgeUrl(prefs, raw)
+    }
+
+    /**
+     * Converte URL antiga do bridge gravada nas prefs pro host atual.
+     *
+     * O Funnel do Tailscale (mac-mini.*.ts.net) vai sair do ar, e a URL do bridge
+     * fica em SharedPreferences desde o pareamento — sem isto o carro continuaria
+     * batendo lá até alguém re-parear na tela de config. Foi o APK o último cliente
+     * do Funnel: apareceu como Dalvik/Android 9 chamando /api/pending-renames.
+     *
+     * Grava de volta pra não repetir a substituição em cada leitura.
+     */
+    private fun migrarBridgeUrl(prefs: android.content.SharedPreferences, raw: String): String {
+        if (raw.isEmpty()) return raw
+        val antigo = raw.contains("tailacc6e7") || raw.contains(".ts.net")
+        if (!antigo) return raw
+        val novo = "https://bridge.malha.dev"
+        prefs.edit().putString(SharedPreferencesKeys.BRIDGE_URL, novo).apply()
+        android.util.Log.i("App", "bridge_url migrado: $raw -> $novo")
+        return novo
     }
 
     /**
