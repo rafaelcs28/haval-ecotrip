@@ -42,15 +42,32 @@ struct DepartureDismissIntent: LiveActivityIntent {
 }
 
 @available(iOS 17.0, *)
+/// "Na próxima partida" — não é adiamento por tempo, é por EVENTO.
+///
+/// Caso real: ligar o carro só pra manobrar no pátio da empresa. Não é a saída,
+/// mas a pergunta já apareceu. Adiar 5 min não servia: se a manobra durasse mais
+/// que isso a pergunta voltava no meio dela, e se a saída real fosse duas horas
+/// depois já tinha passado.
+///
+/// O bridge apaga a marca do dia, e como `_evalDepartureAsk` roda a cada engine
+/// on, a pergunta volta exatamente quando o carro for ligado de novo.
 struct DepartureSnoozeIntent: LiveActivityIntent {
-    static var title: LocalizedStringResource = "Adiar 5 min"
+    static var title: LocalizedStringResource = "Perguntar na próxima partida"
     @Parameter(title: "configId") var configId: String
     init() {}
     init(configId: String) { self.configId = configId }
     func perform() async throws -> some IntentResult {
-        // Snooze é state local no app; endpoint no bridge só p/ audit.
-        await CarIntentAPI.departureDismiss(configId: configId)   // reusa endpoint
-        await DepartureAskLifecycle.snooze(configId: configId, minutes: 5)
+        // 1. Bridge: apaga a marca do dia (libera o push-to-start).
+        await CarIntentAPI.departureSnooze(configId: configId)
+        // 2. App: a LA também pode nascer pelo DepartureAskManager local, que tem
+        //    marca própria no App Group. Sem limpar as duas, o caminho local
+        //    continuaria bloqueado hoje e o "próxima partida" só valeria pra metade
+        //    dos casos. E NÃO gravamos departure_snooze_: aquela chave é o
+        //    adiamento por tempo, que suprimiria a pergunta que queremos de volta.
+        DepartureAskLifecycle.limparMarcaLocalDeHoje(configId: configId)
+        // 3. Encerra a LA atual: quem recria é o próximo engine on.
+        await DepartureAskLifecycle.end(configId: configId, status: "acted_snooze",
+                                        message: "Pergunto na próxima partida")
         return .result()
     }
 }
@@ -72,13 +89,31 @@ enum DepartureAskLifecycle {
                                dismissalPolicy: .after(Date().addingTimeInterval(6)))
         }
     }
+    /// Apaga a marca "já perguntei hoje" que o DepartureAskManager grava no App
+    /// Group, pra a pergunta poder voltar no próximo engine on. Espelha a mesma
+    /// limpeza que o bridge faz em /api/departure/snooze — as duas camadas criam
+    /// LA, então as duas precisam liberar.
+    static func limparMarcaLocalDeHoje(configId: String) {
+        guard let d = UserDefaults(suiteName: "group.br.com.consorciolimpagyn.havalecotrip") else { return }
+        let now = Date()
+        let cal = Calendar.current
+        let y = cal.component(.year, from: now), m = cal.component(.month, from: now), dd = cal.component(.day, from: now)
+        let today = String(format: "%04d-%02d-%02d", y, m, dd)
+        d.removeObject(forKey: "departure_asked_\(configId)_\(today)")
+        // Limpa também um adiamento por tempo pendente: ele suprimiria a pergunta
+        // que acabamos de pedir de volta.
+        d.removeObject(forKey: "departure_snooze_\(configId)")
+    }
+
+    /// Adiamento por TEMPO. Mantido porque a chave é lida pelo manager, mas hoje
+    /// nenhum botão o usa — "Depois" virou por evento (próxima partida), que é o
+    /// que resolve o caso de manobrar o carro sem sair.
     static func snooze(configId: String, minutes: Int) async {
         let until = Date().addingTimeInterval(TimeInterval(minutes * 60))
-        // Persiste em App Group (ambos targets veem) pra o manager pular re-disparar.
         if let d = UserDefaults(suiteName: "group.br.com.consorciolimpagyn.havalecotrip") {
             d.set(until.timeIntervalSince1970, forKey: "departure_snooze_\(configId)")
         }
-        await end(configId: configId, status: "acted_snooze", message: "Adiado 5 min")
+        await end(configId: configId, status: "acted_snooze", message: "Adiado \(minutes) min")
     }
 }
 
@@ -112,7 +147,7 @@ struct DepartureAskLiveActivity: Widget {
                                     Label("Sim", systemImage: "checkmark.circle.fill")
                                 }.buttonStyle(.borderedProminent).tint(.green)
                                 Button(intent: DepartureSnoozeIntent(configId: a.configId)) {
-                                    Label("5 min", systemImage: "clock")
+                                    Label("Depois", systemImage: "arrow.clockwise")
                                 }.buttonStyle(.bordered).tint(.orange)
                                 Button(intent: DepartureDismissIntent(configId: a.configId)) {
                                     Label("Não", systemImage: "xmark.circle")
@@ -160,7 +195,7 @@ struct DepartureAskLockScreenView: View {
                             Label("Sim", systemImage: "checkmark").frame(maxWidth: .infinity)
                         }.buttonStyle(.borderedProminent).tint(.green)
                         Button(intent: DepartureSnoozeIntent(configId: attrs.configId)) {
-                            Label("5 min", systemImage: "clock").frame(maxWidth: .infinity)
+                            Label("Depois", systemImage: "arrow.clockwise").frame(maxWidth: .infinity)
                         }.buttonStyle(.bordered).tint(.orange)
                         Button(intent: DepartureDismissIntent(configId: attrs.configId)) {
                             Label("Não", systemImage: "xmark").frame(maxWidth: .infinity)

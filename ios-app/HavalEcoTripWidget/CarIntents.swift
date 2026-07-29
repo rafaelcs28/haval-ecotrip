@@ -88,9 +88,19 @@ enum CarIntentAPI {
         return (j["ok"] as? Bool) == true
     }
 
-    /// Descarta a LA de saída monitorada — só audit; iOS encerra a Activity local.
+    /// "Não hoje" — a marca do dia já está gravada no bridge, então só registra.
     static func departureDismiss(configId: String) async {
-        guard !base.isEmpty, let url = URL(string: "\(base)/api/departure/dismiss") else { return }
+        await departurePost(path: "dismiss", configId: configId)
+    }
+
+    /// "Perguntar na próxima partida" — apaga a marca do dia no bridge, pra a
+    /// pergunta voltar no próximo engine on (ex.: só manobrou no pátio).
+    static func departureSnooze(configId: String) async {
+        await departurePost(path: "snooze", configId: configId)
+    }
+
+    private static func departurePost(path: String, configId: String) async {
+        guard !base.isEmpty, let url = URL(string: "\(base)/api/departure/\(path)") else { return }
         var r = URLRequest(url: url); r.httpMethod = "POST"; r.timeoutInterval = 6
         r.addValue("Bearer " + Settings.bridgeToken, forHTTPHeaderField: "Authorization")
         r.addValue("application/json", forHTTPHeaderField: "Content-Type")

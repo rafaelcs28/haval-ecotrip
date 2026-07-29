@@ -5012,10 +5012,37 @@ app.post('/api/departure/accept', async (req, res) => {
   res.json({ ok: true, share_token: share ? share.token : null, dest: destName });
 });
 
-// POST /api/departure/dismiss  { config_id }   — só audit; iOS gerencia estado local
+// POST /api/departure/dismiss  { config_id }   — "não hoje".
+//
+// A marca do dia já foi gravada em _evalDepartureAsk ANTES do push, então não
+// perguntar mais hoje é o padrão e aqui só registramos. Fica explícito no log
+// pra diferenciar de "ignorou a LA", que tem o mesmo efeito prático.
 app.post('/api/departure/dismiss', (req, res) => {
-  console.log(`[departure] dismiss config=${(req.body || {}).config_id}`);
-  res.json({ ok: true });
+  console.log(`[departure] dismiss (não hoje) config=${(req.body || {}).config_id}`);
+  res.json({ ok: true, until: 'proxima_janela' });
+});
+
+// POST /api/departure/snooze  { config_id }  — "me lembra na próxima partida".
+//
+// Caso de uso: ligar o carro só pra manobrar no pátio da empresa. Não é uma
+// saída, mas a pergunta já apareceu — e como a marca do dia foi gravada antes do
+// push, sem isto a pergunta não voltaria hoje e a saída de verdade passaria
+// batida.
+//
+// Apagar a marca faz _evalDepartureAsk perguntar de novo no PRÓXIMO engine on
+// (é ele o gatilho, nos dois caminhos: GWM e APK), desde que ainda esteja na
+// janela de horário e no raio da origem.
+app.post('/api/departure/snooze', (req, res) => {
+  const cfgId = (req.body || {}).config_id;
+  if (!cfgId) return res.status(400).json({ error: 'config_id obrigatório' });
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+  const key = `${cfgId}_${today}`;
+  const havia = !!_departureAsked[key];
+  delete _departureAsked[key];
+  _saveDepartureAsked();
+  console.log(`[departure] snooze config=${cfgId} — pergunta de novo na próxima partida (marca ${havia ? 'removida' : 'não existia'})`);
+  res.json({ ok: true, until: 'proxima_partida' });
 });
 
 // GET /api/bluetti-status — estado das duas EL100V2 (Casa + Sítio). Fonte
