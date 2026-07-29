@@ -1,7 +1,7 @@
 name: External Monitor
 
 # Roda no GitHub, fora do Mac Mini de propósito: cobre o caso em que o bridge
-# E o HA da empresa caem juntos (aí nenhum dos dois consegue se auto-alertar).
+# E o HA do sítio caem juntos (aí nenhum dos dois consegue se auto-alertar).
 # Ver memória macmini-external-monitoring — este é o terceiro observador.
 on:
   schedule:
@@ -12,23 +12,53 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - name: Ping health.html via Funnel
+      - name: Ping o bridge por Cloudflare e pelo acesso direto
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
         run: |
-          # Funnel/Tailscale degrada em blips transitórios; confirma 3x (20s) antes
-          # de gritar, senão vira alarme falso de "totalmente inacessível".
-          code=000
+          # Duas rotas independentes: o túnel Cloudflare (principal) e o DuckDNS
+          # direto (porta aberta, sem CDN no caminho). Só grita "inacessível"
+          # quando as DUAS falham — se uma responde, o Mac está de pé e o
+          # problema é da rota, que é informação diferente.
+          #
+          # Antes checava só o Funnel do Tailscale (mac-mini.tailacc6e7.ts.net),
+          # aposentado na migração pro malha.dev.
+          PRIMARY="https://bridge.malha.dev/health.html"
+          FALLBACK="https://mqttrafael.duckdns.org:3443/health.html"
+
+          probe() {
+            curl -sk -o /dev/null --max-time 15 -w "%{http_code}" "$1" 2>/dev/null || echo "000"
+          }
+
+          # Confirma 3x com 20s: blip de CDN/ISP não deve virar alarme.
+          cf=000; dd=000
           for attempt in 1 2 3; do
-            code=$(curl -sk -o /dev/null --max-time 15 -w "%{http_code}" https://mac-mini.tailacc6e7.ts.net/health.html || echo "000")
-            echo "attempt $attempt: http_code=$code"
-            [ "$code" = "200" ] && break
+            cf=$(probe "$PRIMARY")
+            dd=$(probe "$FALLBACK")
+            echo "attempt $attempt: cloudflare=$cf duckdns=$dd"
+            { [ "$cf" = "200" ] || [ "$dd" = "200" ]; } && break
             [ "$attempt" -lt 3 ] && sleep 20
           done
-          if [ "$code" != "200" ]; then
-            curl -sk -X POST "https://ntfy.sh/${NTFY_TOPIC}" \
-              -H "Title: Mac Mini totalmente inacessível" \
-              -H "Priority: 5" \
-              -H "Tags: rotating_light" \
-              -d "health.html não respondeu em 3 tentativas (http=$code). Bridge e/ou HA da empresa podem estar caídos juntos — checagem via GitHub Actions, fora da rede do Mac."
+
+          if [ "$cf" = "200" ] || [ "$dd" = "200" ]; then
+            # Uma rota caiu e a outra respondeu: degradação, não indisponibilidade.
+            if [ "$cf" != "200" ]; then
+              curl -sk -X POST "https://ntfy.sh/${NTFY_TOPIC}" \
+                -H "Title: Cloudflare Tunnel fora (Mac de pe)" \
+                -H "Priority: 3" -H "Tags: warning" \
+                -d "bridge.malha.dev nao respondeu (http=$cf), mas o acesso direto respondeu 200. Provavel cloudflared parado ou tunel degradado — os apps caem no fallback sozinhos."
+            elif [ "$dd" != "200" ]; then
+              curl -sk -X POST "https://ntfy.sh/${NTFY_TOPIC}" \
+                -H "Title: Acesso direto fora (Mac de pe)" \
+                -H "Priority: 2" -H "Tags: warning" \
+                -d "mqttrafael.duckdns.org:3443 nao respondeu (http=$dd), mas o Cloudflare respondeu 200. Checar port-forward/DuckDNS — sem isso o app perde a rota de emergencia."
+            fi
+            exit 0
           fi
+
+          curl -sk -X POST "https://ntfy.sh/${NTFY_TOPIC}" \
+            -H "Title: Mac Mini totalmente inacessivel" \
+            -H "Priority: 5" \
+            -H "Tags: rotating_light" \
+            -d "health.html nao respondeu por NENHUMA rota em 3 tentativas (cloudflare=$cf, direto=$dd). Bridge e/ou HA do sitio podem estar caidos juntos — checagem via GitHub Actions, fora da rede do Mac."
+          exit 1
