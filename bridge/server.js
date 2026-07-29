@@ -4666,21 +4666,28 @@ app.get('/api/host-hits', (_req, res) => {
       fallback: /duckdns/.test(host),   // acesso direto, não bloqueia o desligamento
       // "Externo" = scanner/bot, que não deve travar o desligamento do Funnel.
       //
-      // Classifica primeiro por USER-AGENT e só depois por IP: o app da Grasi
-      // (BydRecarga) roda no 4G dela, com IP que não é o da casa, e o filtro
-      // só-por-IP o marcava como scanner — escondendo um cliente real com
-      // versão de junho ainda no ts.net. Cliente conhecido é SEU em qualquer IP.
+      // Classifica por USER-AGENT e não por IP: o app do sogro (BydRecarga) roda
+      // no 4G dele, com IP que não é o da casa, e o filtro só-por-IP o marcava
+      // como scanner — escondendo um cliente real ainda no ts.net.
       externo: !(e.agents && [...e.agents].some(a => _uaClienteConhecido(a)))
             && [...(e.ips || new Set())].length > 0
             && [...(e.ips || new Set())].every(ip => !_ipConhecido(ip)),
+      // Quais UAs conhecidos ainda batem aqui. É ISTO que diz se o Funnel pode
+      // cair — a contagem de hits do host mistura cliente e bot no mesmo número,
+      // porque agents/paths são conjuntos por host e não dá pra atribuir cada hit.
+      clientes: [...(e.agents || new Set())].filter(a => _uaClienteConhecido(a)),
     })).sort((a, b) => b.hits - a.hits);
   const legacy = out.filter(h => h.legacy);
+  // O que DECIDE o desligamento é a lista de clientes conhecidos ainda batendo no
+  // Funnel, não a contagem de hits: agents e paths são conjuntos por host, então
+  // um único cliente conhecido fazia o host inteiro (bots incluídos) contar como
+  // "seu" e inflava o número — 38 hits quando só o app do sogro importava.
+  const clientesNoFunnel = [...new Set(legacy.flatMap(h => h.clientes || []))];
   res.json({ hosts: out, window_h: HOST_WINDOW_MS / 3600_000,
-             // legacy_hits conta só o que é SEU: é esse número que decide se o
-             // Funnel pode cair. Scanner externo vai continuar batendo pra
-             // sempre e não deve travar a decisão.
              legacy_hits:         legacy.filter(h => !h.externo).reduce((s, h) => s + h.hits, 0),
              legacy_hits_externo: legacy.filter(h =>  h.externo).reduce((s, h) => s + h.hits, 0),
+             // Vazio = seguro desligar o Funnel.
+             clientes_no_funnel:  clientesNoFunnel,
              reset_ms: _hostHitsResetMs });
 });
 

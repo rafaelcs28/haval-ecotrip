@@ -1650,12 +1650,18 @@ async function updateCloudflare() {
       if (hr.ok) {
         const hj = await hr.json();
         const leg = hj.legacy_hits || 0;
+        const cli = hj.clientes_no_funnel || [];
         const desde = hj.reset_ms
           ? ' <span style="color:#666;font-size:10px">(desde ' + new Date(hj.reset_ms).toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'}) + ')</span>'
           : '';
-        set('cf-legacy', leg === 0
-          ? '<span style="color:#7bc47f">0 — pode desligar</span>' + desde
-          : `<span style="color:#e6b800">${leg} acessos</span>` + desde);
+        // Quem decide o desligamento é a LISTA de clientes conhecidos, não a
+        // contagem: agents/paths são conjuntos por host, então um cliente real
+        // fazia o host inteiro (bots incluídos) contar como "seu" — 38 hits
+        // quando só o app do sogro importava.
+        set('cf-legacy', cli.length === 0
+          ? '<span style="color:#7bc47f">nenhum cliente</span>' + desde
+          : `<span style="color:#e6b800">${cli.length} cliente(s)</span><br>`
+            + `<span style="color:#888;font-size:10px">${cli.join('<br>')}</span>`);
         const fmtH = ms => new Date(ms).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
         // Mostra os endpoints só do host do Funnel: é o que diz ONDE reconfigurar
         // quem ainda bate lá. duckdns aparece como fallback esperado, sem alarme.
