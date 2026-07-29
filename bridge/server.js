@@ -4640,6 +4640,20 @@ function _ddnsLastIp() {
   catch (_) { return ''; }
 }
 
+// User-agents dos NOSSOS clientes. Vale mais que o IP: eles rodam em 4G (carro,
+// iPhone da Grasi) e o IP muda, então filtrar só por IP mascarava cliente real
+// como se fosse scanner.
+const UA_CLIENTES = [
+  'HavalEcoTrip', 'BydRecarga', 'EllevarClockin',   // apps iOS
+  'Dalvik',                                         // APK do carro / cluster
+  'HomeAssistant', 'aiohttp',                       // HA de casa e do sítio
+  'okhttp',                                         // libs Android
+];
+function _uaClienteConhecido(ua) {
+  const s = String(ua || '');
+  return UA_CLIENTES.some(m => s.includes(m));
+}
+
 app.get('/api/host-hits', (_req, res) => {
   const out = [...
     _hostHits.entries()].map(([host, e]) => ({
@@ -4650,8 +4664,14 @@ app.get('/api/host-hits', (_req, res) => {
                                         .map(([p, n]) => ({ path: p, n })),
       legacy: _isFunnelHost(host),
       fallback: /duckdns/.test(host),   // acesso direto, não bloqueia o desligamento
-      // Todo IP visto é de fora? Então é scanner, não cliente seu.
-      externo: [...(e.ips || new Set())].length > 0
+      // "Externo" = scanner/bot, que não deve travar o desligamento do Funnel.
+      //
+      // Classifica primeiro por USER-AGENT e só depois por IP: o app da Grasi
+      // (BydRecarga) roda no 4G dela, com IP que não é o da casa, e o filtro
+      // só-por-IP o marcava como scanner — escondendo um cliente real com
+      // versão de junho ainda no ts.net. Cliente conhecido é SEU em qualquer IP.
+      externo: !(e.agents && [...e.agents].some(a => _uaClienteConhecido(a)))
+            && [...(e.ips || new Set())].length > 0
             && [...(e.ips || new Set())].every(ip => !_ipConhecido(ip)),
     })).sort((a, b) => b.hits - a.hits);
   const legacy = out.filter(h => h.legacy);
