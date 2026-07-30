@@ -402,6 +402,33 @@ class MqttManager private constructor() {
         } else {
             pendingLock = raw; pendingLockCount = 1; pendingLockSinceMs = now
         }
+        lockRawUltima = raw
+        lockRawLeiturasTotal++
+    }
+
+    /** Última leitura CRUA e quantas chegaram — sem isso o debug só mostrava o
+     *  valor pós-filtro, e não dava pra saber se o barramento tinha emitido a
+     *  mudança ou se o filtro a tinha engolido. */
+    @Volatile var lockRawUltima: Int = -1
+    @Volatile var lockRawLeiturasTotal: Long = 0
+
+    /** Confirma por TEMPO o valor pendente. O K=8 era a única via de confirmação,
+     *  e travar/destravar com o carro parado emite poucas mensagens no barramento:
+     *  se chegam 3 e param, pendingLockCount fica em 3 pra sempre e o estado nunca
+     *  muda — foi o que deixou lock_state congelado em 30/07 mesmo depois de
+     *  aceitar o raw=3. A proteção contra burst ruidoso continua: um transiente
+     *  não se sustenta por LOCK_SETTLE_MS. Chamado no ciclo de publicação porque
+     *  applyLockStatus só roda quando o carro emite — sem novas emissões, nada
+     *  reavaliaria o pendente. */
+    private val LOCK_SETTLE_MS = 5_000L
+    fun confirmaLockPorTempo() {
+        if (!lockVoteInitialized) return
+        val now = System.currentTimeMillis()
+        if (latestLockStatus != pendingLock && pendingLockCount in 1 until LOCK_VOTE_REQUIRED
+            && now - pendingLockSinceMs >= LOCK_SETTLE_MS) {
+            latestLockStatus = pendingLock
+            latestLockConfirmedMs = pendingLockSinceMs
+        }
     }
 
     /** Aplica voting filter em uma nova leitura de car.basic.window_status. */
@@ -2051,6 +2078,7 @@ class MqttManager private constructor() {
             val snWinFlMs = latestWindowFlConfirmedMs;   val snWinFrMs = latestWindowFrConfirmedMs
             val snWinRlMs = latestWindowRlConfirmedMs;   val snWinRrMs = latestWindowRrConfirmedMs
             val snSunroof   = latestSunroof
+            confirmaLockPorTempo()   // resolve pendente por tempo antes do snapshot
             val snLockStat  = latestLockStatus
             val snLockMs    = latestLockConfirmedMs
             val snAcEnable  = latestHvacAcEnable
@@ -2215,6 +2243,9 @@ class MqttManager private constructor() {
             }
             pubD("debug/sunroof_raw",      snSunroof.toString())
             pubD("debug/lock_status_raw",  snLockStat.toString())
+            // Cru + total de leituras: distingue "o barramento não emitiu" de
+            // "emitiu e o filtro engoliu". Sem dedupe, senão some justo quando repete.
+            pub("debug/lock_vote", "cru=$lockRawUltima confirmado=$snLockStat leituras=$lockRawLeiturasTotal")
             pubD("debug/front_light_raw",  latestFrontLight.toString())
             pubD("debug/turn_left",  "lamp=$latestLeftTurnLamp sw=$latestLeftSwitch", retained = false)
             pubD("debug/turn_right", "lamp=$latestRightTurnLamp sw=$latestRightSwitch", retained = false)
