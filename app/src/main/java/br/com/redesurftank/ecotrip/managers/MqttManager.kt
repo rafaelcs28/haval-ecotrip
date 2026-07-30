@@ -2077,7 +2077,19 @@ class MqttManager private constructor() {
             // o valor MAIS FRESCO sempre vence. Quando carro está parado, HA atualiza
             // (5s) e cobre o gap. Guard >0 evita publicar 0 antes do CAN inicializar.
             val socNow = q.rolling.currentSocPct
-            if (socNow > 0f) { pubD("soc_pct", socNow.toInt().toString()); latestSocPct = socNow }
+            if (socNow > 0f) {
+                // Tópico PRÓPRIO (soc_pct_can) além do legado. O `soc_pct` é
+                // compartilhado com a automação do HA, que republica o SOC da
+                // nuvem GWM — as duas fontes ficavam indistinguíveis ali e o
+                // bridge não conseguia aplicar failover: em 30/07 o SOC ficou em
+                // 88% (GWM congelada) com o carro em 74% (CAN).
+                //
+                // Aqui o valor vem do barramento, então é o mais confiável.
+                // Mantemos o `soc_pct` publicado pra não quebrar bridge antigo.
+                pubD("soc_pct_can", socNow.toInt().toString())
+                pubD("soc_pct",     socNow.toInt().toString())
+                latestSocPct = socNow
+            }
 
             // Electrical: corrente de carga, tensão e corrente do pack + potência derivada
             // retain=true — persiste no broker; HA não fica em branco se a conexão cair brevemente

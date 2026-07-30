@@ -20006,17 +20006,53 @@ function applyMqttMessage(key, value, isRetained = false) {
     case 'battery_power_pct': state.battery_power_pct = Math.round(num(value)); break;
     case 'engine_rpm':        state.engine_rpm        = Math.round(num(value)); break;
 
+    // SOC do CAN (tópico próprio do APK, v6.154+). Separado do `soc_pct` porque
+    // aquele é compartilhado com a automação do HA, que republica o SOC da nuvem
+    // GWM — indistinguíveis, então o failover não tinha como agir: em 30/07 o SOC
+    // ficou em 88% (GWM congelada) com o carro em 74% (CAN).
+    //
+    // Aqui a fonte é inequívoca, então entra na disputa como 'apk' e o
+    // _apkAssumeChave decide. Enquanto a GWM estiver produzindo valor novo, ela
+    // ganha; quando congelar, este assume.
+    case 'soc_pct_can': {
+      const v = num(value);
+      if (!(v > 0)) break;                       // 0 = CAN não inicializado
+      _notaValorFonte('soc_pct', 'apk', String(v));
+      if (_gwmAlive(_now) && !_apkAssumeChave('soc_pct', String(v), _now)) break;
+      if (state.soc_pct !== v) {
+        console.log(`[failover] soc_pct: CAN assume ${v}% (GWM em ${_srcChange['soc_pct']?.gwm?.v}%)`);
+      }
+      state.soc_pct = v;
+      _fieldSource['soc_pct'] = 'apk';
+      _applyEvReserve();
+      if (state.charging_state === 'Carregando') sendChargeLiveUpdate(false);
+      break;
+    }
+
     // SOC — fonte primária: HA publica via automação em haval/ecotrip/soc_pct (retain)
     // Uma vez recebido, marca haSocActive = true e ignora trip_a/b soc_current para soc_pct
-    case 'soc_pct':
-      haSocActive   = true;
-      state.soc_pct = num(value);
+    case 'soc_pct': {
+      haSocActive = true;
+      // Este tópico é COMPARTILHADO: publica nele a automação do HA (que espelha
+      // a nuvem GWM) e também o APK, por compatibilidade. Então não dá pra saber
+      // a origem aqui — e se o CAN já assumiu via soc_pct_can, deixar este
+      // escrever desfaria o failover a cada mensagem do HA.
+      const vSoc = num(value);
+      if (_fieldSource['soc_pct'] === 'apk') {
+        const canV = _srcChange['soc_pct']?.apk?.v;
+        if (canV !== undefined && String(canV) !== String(vSoc)
+            && _apkAssumeChave('soc_pct', canV, _now)) {
+          break;   // CAN no comando: ignora o valor do tópico compartilhado
+        }
+      }
+      state.soc_pct = vSoc;
       _applyEvReserve();   // reaplica reserva de 15% na autonomia EV
       // Event-driven: SOC mudou → tenta atualizar a Live Activity de recarga
       // na hora (em vez de esperar o timer de 60s). O throttle interno
       // (dSoc≥1 / dPwr≥0.5 / 60s) garante que não vira spam.
       if (state.charging_state === 'Carregando') sendChargeLiveUpdate(false);
       break;
+    }
 
     // Trip A/B foram descontinuados — bridge ignora os tópicos legados.
     // SOC vem agora exclusivamente do HA (gwmbrasil_.../soc_pct) ou do
