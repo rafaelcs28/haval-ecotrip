@@ -19613,7 +19613,14 @@ function applyMqttMessage(key, value, isRetained = false) {
     // Gate normal: GWM publicando → ela manda. MAS se o valor dela está
     // congelado e o APK discorda de forma consistente, o APK assume — senão o
     // dado cacheado da nuvem trava o estado (engine_state preso em '1' em 30/07).
-    if (_gwmAlive(_now) && !_apkAssumeChave(key, value, _now)) return;
+    // Se o APK CONCORDA com a GWM, deixa escrever: não há disputa nenhuma, e
+    // bloquear deixava o state preso no valor do takeover anterior quando o carro
+    // voltava a coincidir com a nuvem — porta ficou 'aberta' depois de fechar,
+    // porque o publish de '0' foi barrado por "concordam" e a GWM congelada não
+    // republica pra corrigir.
+    const _gwmV = _srcChange[key]?.gwm?.v;
+    const _concordaComGwm = _gwmV !== undefined && _normCmp(key, _gwmV) === _normCmp(key, value);
+    if (_gwmAlive(_now) && !_concordaComGwm && !_apkAssumeChave(key, value, _now)) return;
     if (_gwmAlive(_now)) {
       console.log(`[failover] ${key}: APK assume ('${value}') — GWM parada em `
                 + `'${_srcChange[key]?.gwm?.v}' há ${Math.round((_now - (_srcChange[key]?.gwm?.ms || _now)) / 60_000)}min`);
