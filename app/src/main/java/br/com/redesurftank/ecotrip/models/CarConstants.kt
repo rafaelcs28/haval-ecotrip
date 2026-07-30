@@ -43,7 +43,12 @@ enum class CarConstants(val value: String) {
     CAR_EV_INFO_CUR_CHARGE_CURRENT("car.ev_info.cur_charge_current"),
     CAR_EV_INFO_POWER_BATTERY_VOLTAGE("car.ev_info.power_battery_voltage"),
     CAR_EV_INFO_POWER_BATTERY_CURRENT("car.ev_info.power_battery_current"),
-    CAR_BASIC_BATTERY_VOLTAGE("car.basic.battery_voltage"),   // tensão do pack (namespace basic)
+    // 12V AUXILIAR, não o pack: medido 14,38V com o carro ligado (DCDC carregando).
+    // O pack de tração é car.ev_info.power_battery_voltage, que dá ~332V.
+    CAR_BASIC_BATTERY_VOLTAGE("car.basic.battery_voltage"),
+    // Candidata ao PERCENTUAL da 12V. car.ev_info.battery_charge_percentage, que o
+    // APK usava pra isso, retorna 0 neste carro — ev_info é o sistema de tração.
+    CAR_BASIC_BATTERY_POWER_LEVEL("car.basic.battery_power_level"),
 
     // Motor elétrico — potência direta do HCU (kW, sinal positivo = consumo, negativo = regen)
     CAR_EV_INFO_MOTOR_POWER("car.ev_info.motor_power"),

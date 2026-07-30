@@ -2164,7 +2164,19 @@ class MqttManager private constructor() {
             CarDataManager.getInstance().fetchCurrent("car.basic.remain_fuel_percentage")?.trim()?.toFloatOrNull()?.let { pubD("fuel_pct_can", fuelDisplayFilter.push(it).toInt().toString()) }
             // Bateria 12V (car.ev_info.battery_charge_percentage). Migrada pra GWM —
             // bridge só aceita este publish quando a nuvem GWM está silente (4G out).
-            CarDataManager.getInstance().fetchCurrent("car.ev_info.battery_charge_percentage")?.trim()?.toFloatOrNull()?.let { pubD("batt_12v_pct", it.toInt().toString()) }
+            // batt_12v_pct: car.ev_info.battery_charge_percentage retorna 0 neste carro
+            // (ev_info é o sistema de TRAÇÃO — o pack dá 332V em power_battery_voltage,
+            // e a 12V real está em car.basic.battery_voltage, medida 14,38V). Publicar 0
+            // só funcionava porque o guard NAO_ZERO do bridge barra, então só publica
+            // valor > 0. car.basic.battery_power_level vai pro debug pra medir antes de
+            // virar fonte — se trouxer algo próximo dos 87% que a GWM reporta, é a chave.
+            CarDataManager.getInstance().fetchCurrent("car.ev_info.battery_charge_percentage")
+                ?.trim()?.toFloatOrNull()?.takeIf { it > 0f }
+                ?.let { pubD("batt_12v_pct", it.toInt().toString()) }
+            pub("debug/batt12v", "ev_charge_pct=" +
+                "${CarDataManager.getInstance().fetchCurrent("car.ev_info.battery_charge_percentage")?.trim()}" +
+                " basic_power_level=${CarDataManager.getInstance().fetchCurrent("car.basic.battery_power_level")?.trim()}" +
+                " basic_volt=${CarDataManager.getInstance().fetchCurrent("car.basic.battery_voltage")?.trim()}")
             pubD("hvac_driver_temp",     fmt1(latestHvacDriverTemp))
             pubD("hvac_passenger_temp",  fmt1(latestHvacPassengerTemp))
             pubD("hvac_fan_speed",    latestHvacFanSpeed.toString())
