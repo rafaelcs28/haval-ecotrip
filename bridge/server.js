@@ -4678,7 +4678,10 @@ function _uaClienteConhecido(ua) {
 app.get('/api/source-state', (_req, res) => {
   const now = Date.now();
   const out = {};
-  for (const key of MIGRATED_TO_HA) {
+  // Itera os campos DISPUTADOS, não só MIGRATED_TO_HA: soc_pct, autonomy_* e
+  // fuel_l são escritos pelas duas fontes sem estar no gate, e ficavam invisíveis
+  // aqui — justamente os que apareceram velhos no app (SOC 88% vs 74% do CAN).
+  for (const key of [..._camposDisputados].sort()) {
     const e = _srcChange[key] || {};
     out[key] = {
       valor_atual: state[key],
@@ -14627,6 +14630,16 @@ function _apkAssumeChave(key, apkValue, now = Date.now()) {
   const gwmParado = now - e.gwm.ms > GWM_VALUE_STALE_MS;
   if (!gwmParado && !apkNoComando) return false;
   if (_normCmp(key, e.gwm.v) === _normCmp(key, apkValue)) return false;   // concordam (após normalizar formato)
+  // MANTER o takeover não exige o APK ativo — só ENTRAR. O carro estacionado
+  // encerra o app e o APK para de publicar; se isso devolvesse o comando, a GWM
+  // congelada repintava o dado velho (88% de SOC, "motor ligado" e odômetro de
+  // 82min atrás com o carro dormindo no estacionamento — print de 30/07 13:06).
+  // O último valor do APK saiu do CAN, o da GWM é cache: enquanto ela não
+  // convergir (checado acima) nem produzir valor novo (gwmParado), o do APK vale
+  // mais. Se alguém ligar o carro, ou o APK acorda junto e republica, ou a GWM
+  // enxerga e vira gwmParado=false — os dois caminhos devolvem o comando.
+  if (apkNoComando) return gwmParado;
+
   const apk = e.apk;
   const discordaHa = apk && _normCmp(key, apk.v) === _normCmp(key, apkValue) ? now - apk.ms : 0;
   if (discordaHa < APK_TAKEOVER_MIN_MS) return false;
