@@ -4666,6 +4666,10 @@ app.get('/api/source-state', (_req, res) => {
       fonte: _fieldSource[key] || null,
       gwm: e.gwm ? { valor: e.gwm.v, mudou_ha_s: Math.round((now - e.gwm.ms) / 1000) } : null,
       apk: e.apk ? { valor: e.apk.v, mudou_ha_s: Math.round((now - e.apk.ms) / 1000) } : null,
+      // Os valores CRUS têm formatos diferentes por fonte (vidro do APK vem
+      // '1:<ts>', sunroof da GWM é posição 0-3). Sem expor o normalizado, o
+      // monitor mostra "discordam" justamente onde a decisão vê concordância.
+      concordam: !!(e.gwm && e.apk) && _normCmp(key, e.gwm.v) === _normCmp(key, e.apk.v),
       gwm_congelada: !!(e.gwm && now - e.gwm.ms > GWM_VALUE_STALE_MS),
     };
   }
@@ -14541,6 +14545,35 @@ function _notaValorFonte(key, src, value) {
 ///   3. o APK está VIVO agora (publicou há pouco)
 /// Uma vez assumido, só devolve quando a GWM produzir um valor NOVO — o que
 /// acontece naturalmente no _notaValorFonte quando o pacote de dados volta.
+/// Campo espelhado (o APK tem a medida do CAN, a GWM a da nuvem): o APK escreve
+/// quando a GWM está FORA ou quando congelou e ele discorda. Antes o critério era
+/// só `!_gwmAlive`, que não cobria o caso real — nuvem publicando valor velho.
+function _apkPodeEspelhar(key, v, now = Date.now()) {
+  if (!_valorAproveitavel(key, v)) return false;
+  _notaValorFonte(key, 'apk', String(v));
+  return !_gwmAlive(now) || _apkAssumeChave(key, String(v), now);
+}
+
+/// Normaliza pra COMPARAR fontes. As duas publicam o mesmo estado em formatos
+/// diferentes, e comparar string crua fazia o failover ver discordância onde havia
+/// acordo — os vidros vêm como '1:1785418952797' do APK (estado + timestamp da
+/// última mudança) e '1' da GWM, então batiam takeover a cada mensagem.
+///
+/// Só é usada na DECISÃO. O valor gravado no state segue o caminho normal de cada
+/// handler, que já faz a conversão própria.
+function _normCmp(key, v) {
+  let s = String(v ?? '').trim();
+  if (s === '') return '';
+  // window_*: "estado:timestampMs" → só o estado importa pra comparar
+  if (/^window_/.test(key) && s.includes(':')) s = s.split(':')[0];
+  // binários: GWM manda 0/1, o state guarda off/on, o APK manda 0/1
+  if (s === 'off') return '0';
+  if (s === 'on')  return '1';
+  // sunroof: GWM usa 0-3 (posição), APK 0/1 — qualquer coisa > 0 é "aberto"
+  if (key === 'sunroof') return (+s > 0 ? '1' : '0');
+  return s;
+}
+
 /// Campos numéricos onde 0/vazio significa "o APK não conseguiu ler", não uma
 /// medida real. Sem esta guarda o takeover troca dado velho por dado ausente —
 /// aconteceu com batt_12v_pct, que assumiu '0' por cima dos 87% corretos.
@@ -14566,9 +14599,9 @@ function _apkAssumeChave(key, apkValue, now = Date.now()) {
   if (!e || !e.gwm) return true;                       // GWM nunca falou: APK manda
   const gwmParado = now - e.gwm.ms > GWM_VALUE_STALE_MS;
   if (!gwmParado) return false;
-  if (String(e.gwm.v) === String(apkValue)) return false;   // concordam: nada a decidir
+  if (_normCmp(key, e.gwm.v) === _normCmp(key, apkValue)) return false;   // concordam (após normalizar formato)
   const apk = e.apk;
-  const discordaHa = apk && String(apk.v) === String(apkValue) ? now - apk.ms : 0;
+  const discordaHa = apk && _normCmp(key, apk.v) === _normCmp(key, apkValue) ? now - apk.ms : 0;
   if (discordaHa < APK_TAKEOVER_MIN_MS) return false;
   // "APK mais fresco" se mede pela ATIVIDADE dele, não comparando os timestamps
   // de mudança: com as duas fontes paradas, esses ms refletem só a ordem de
@@ -19490,14 +19523,14 @@ function applyMqttMessage(key, value, isRetained = false) {
     case 'skylight_level': state.skylight_level = value; break; // '0'=fechado·'200'=vent·'1'..'100'=% (teto solar)
     // Carro desligado publica -1 (sentinela "sem leitura"). Ignora negativos e
     // mantém o último valor válido — igual a EV faz naturalmente.
-    case 'fuel_remain_km': { const v = Math.round(num(value)); if (v >= 0) { state.fuel_remain_km = v; if (!_gwmAlive(_now)) { state.autonomy_ice_km = v; _fieldSource['autonomy_ice_km'] = 'apk'; } } break; } // autonomia ICE real do CAN; alimenta autonomy_ice_km no 4G-out (GWM-only)
-    case 'ev_remain_km':   { const v = Math.round(num(value)); if (v >= 0) { state.ev_remain_km   = v; if (!_gwmAlive(_now)) { state.autonomy_ev_km  = v; _fieldSource['autonomy_ev_km']  = 'apk'; } } break; } // autonomia EV real do CAN; idem autonomy_ev_km
+    case 'fuel_remain_km': { const v = Math.round(num(value)); if (v >= 0) { state.fuel_remain_km = v; if (_apkPodeEspelhar('autonomy_ice_km', v, _now)) { state.autonomy_ice_km = v; _fieldSource['autonomy_ice_km'] = 'apk'; } } break; } // autonomia ICE real do CAN; alimenta autonomy_ice_km no 4G-out (GWM-only)
+    case 'ev_remain_km':   { const v = Math.round(num(value)); if (v >= 0) { state.ev_remain_km   = v; if (_apkPodeEspelhar('autonomy_ev_km', v, _now)) { state.autonomy_ev_km  = v; _fieldSource['autonomy_ev_km']  = 'apk'; } } break; } // autonomia EV real do CAN; idem autonomy_ev_km
     case 'fuel_pct_can': {
       state.fuel_pct_can = Math.round(num(value)); // % combustível no tanque (CAN)
       // Fallback fuel_l: a GWM publica litros direto (id 2017002). Sem ela (4G out),
       // deriva dos litros a partir do % lido do CAN pelo APK. Quando a GWM revive,
       // o id 2017002 volta a sobrescrever state.fuel_l com o valor da nuvem.
-      if (!_gwmAlive(_now) && state.fuel_pct_can > 0) {
+      if (state.fuel_pct_can > 0 && _apkPodeEspelhar('fuel_l', state.fuel_pct_can, _now)) {
         state.fuel_l = _fuelWithCalib((state.fuel_pct_can / 100) * TANK_CAPACITY_L);
       }
       break;
