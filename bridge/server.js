@@ -5616,6 +5616,22 @@ app.get('/api/starlink-history', (req, res) => {
   res.json({ hours, every, count: rows.length, rows });
 });
 
+// POST /api/starlink/reset-counters — marco de corte dos agregados 7d/30d.
+// Não purga o recorder do HA (o histórico do trabalho fica lá pra comparação):
+// só passa a contar daqui pra frente e arquiva a nossa série temporal.
+// Exige token do bridge ou sessão admin — é ação que muda número na cara do dono.
+app.post('/api/starlink/reset-counters', async (req, res) => {
+  const admin = _bridgeTokenOk(req) || !!adminAuth.validSession((req.headers['x-admin-session'] || '').toString().trim());
+  if (!admin) return res.status(403).json({ error: 'somente com token do bridge ou sessão admin' });
+  try {
+    const r = await starlink.resetCounters();
+    _slHist.ping.length = 0; _slHist.drop.length = 0;   // histerese recomeça também
+    _recordHealthEvent('starlink_counters_reset',
+      `Contadores da Starlink zerados${r.archived ? ' · histórico arquivado em ' + r.archived : ''}`);
+    res.json({ ok: true, ...r });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // GET /api/starlink-status — consumido pelo card do health.
 app.get('/api/starlink-status', (req, res) => {
   const snap = starlink.snapshot();
@@ -14753,6 +14769,38 @@ function _recalcCamposDisputados() {
   _camposDisputados = new Set([...Object.values(GWM_TOPIC_MAP || {}), ...MIGRATED_TO_HA]);
 }
 
+/// A nuvem está CEGA? Não é sobre um campo: se NENHUM dos ~31 campos que ela
+/// publica mudou em GWM_CEGA_MS enquanto o APK publica ao vivo, ela está
+/// devolvendo cache — o carro perdeu o pacote de dados. Medido em 30/07 com o
+/// 4G fora: 0 de 31 campos mudaram em 8min, o mais recente era de 218min.
+///
+/// Serve pro caso da viagem com a multimídia em satélite/WiFi e sem 4G: nesse
+/// estado o takeover é IMEDIATO pra todo campo, não só evento discreto, senão
+/// cada métrica numérica levaria 8min+3min pra migrar e a primeira meia hora
+/// fora de cobertura mostraria dado velho.
+const GWM_CEGA_MS = 5 * 60_000;
+let _gwmCegaCache = { ms: 0, v: false };
+function _gwmCega(now = Date.now()) {
+  if (now - _gwmCegaCache.ms < 15_000) return _gwmCegaCache.v;   // 31 campos por mensagem: cacheia
+  let algumFresco = false;
+  for (const e of Object.values(_srcChange)) {
+    if (e && e.gwm && now - e.gwm.ms < GWM_CEGA_MS) { algumFresco = true; break; }
+  }
+  const apkVivo = !!state.last_apk_live_ms && (now - state.last_apk_live_ms) < APK_ALIVE_MS;
+  const v = !algumFresco && apkVivo;
+  if (v !== _gwmCegaCache.v) console.log(`[failover] GWM ${v ? 'CEGA' : 'voltou a ler o carro'}`);
+  _gwmCegaCache = { ms: now, v };
+  return v;
+}
+
+/// Quando o APK assumiu cada chave. Devolver pra GWM tem carência; assumir não.
+/// Assimétrico de propósito: o dado do APK vem do CAN, então antecipar o takeover
+/// nunca piora. Devolver rápido é que causa o vai-e-vem visível — a nuvem
+/// intermitente (publica, congela, publica) alternaria a cada poucos minutos e o
+/// app pularia entre dois valores.
+const HANDOFF_COOLDOWN_MS = 2 * 60_000;
+const _apkAssumiuMs = {};
+
 /// Campos de EVENTO discreto: trava, portas, vidros, teto, AC, ignição. Mudam de
 /// uma vez e a mudança é a informação — não têm ruído numérico pra filtrar (o
 /// APK já aplica voting filter na trava e nos vidros). Exigir os 3 min de
@@ -14786,9 +14834,15 @@ function _apkAssumeChave(key, apkValue, now = Date.now()) {
   // está lendo o carro de verdade, converge; se é cache reciclado, não. O APK é
   // o árbitro porque lê o CAN direto, e a saída por APK morto continua no fim.
   const apkNoComando = _fieldSource[key] === 'apk';
-  const gwmParado = now - e.gwm.ms > GWM_VALUE_STALE_MS;
+  const cega = _gwmCega(now);
+  const gwmParado = cega || now - e.gwm.ms > GWM_VALUE_STALE_MS;
   if (!gwmParado && !apkNoComando) return false;
-  if (_normCmp(key, e.gwm.v) === _normCmp(key, apkValue)) return false;   // concordam (após normalizar formato)
+  // Devolver pra GWM respeita a carência — evita o vai-e-vem quando ela volta
+  // intermitente. Só vale se o APK está de fato no comando; a carência nunca
+  // atrasa um takeover, só a devolução.
+  const emCarencia = apkNoComando && _apkAssumiuMs[key]
+                     && (now - _apkAssumiuMs[key]) < HANDOFF_COOLDOWN_MS;
+  if (_normCmp(key, e.gwm.v) === _normCmp(key, apkValue)) return emCarencia;   // concordam (após normalizar formato)
   // MANTER o takeover não exige o APK ativo — só ENTRAR. O carro estacionado
   // encerra o app e o APK para de publicar; se isso devolvesse o comando, a GWM
   // congelada repintava o dado velho (88% de SOC, "motor ligado" e odômetro de
@@ -14797,11 +14851,11 @@ function _apkAssumeChave(key, apkValue, now = Date.now()) {
   // convergir (checado acima) nem produzir valor novo (gwmParado), o do APK vale
   // mais. Se alguém ligar o carro, ou o APK acorda junto e republica, ou a GWM
   // enxerga e vira gwmParado=false — os dois caminhos devolvem o comando.
-  if (apkNoComando) return gwmParado;
+  if (apkNoComando) return gwmParado || emCarencia;
 
   const apk = e.apk;
   const discordaHa = apk && _normCmp(key, apk.v) === _normCmp(key, apkValue) ? now - apk.ms : 0;
-  if (discordaHa < (CAMPOS_EVENTO.has(key) ? 0 : APK_TAKEOVER_MIN_MS)) return false;
+  if (discordaHa < ((CAMPOS_EVENTO.has(key) || cega) ? 0 : APK_TAKEOVER_MIN_MS)) return false;
   // "APK mais fresco" se mede pela ATIVIDADE dele, não comparando os timestamps
   // de mudança: com as duas fontes paradas, esses ms refletem só a ordem de
   // registro no boot — arbitrária. Foi o que travou o takeover no primeiro teste,
@@ -19308,6 +19362,7 @@ function applyGwmEntity(id, value, isRetained = false) {
       // Re-injeta: só dar `return` deixaria o state com o valor velho da GWM até
       // o APK republicar, que o dedupe impede. isRetained=true atualiza o state
       // sem re-disparar push/evento — o alerta já saiu quando o APK mandou.
+      if (_fieldSource[field] !== 'apk') _apkAssumiuMs[field] = Date.now();
       applyMqttMessage(field, apkV, true);
     }
     return;
@@ -19626,6 +19681,7 @@ function applyMqttMessage(key, value, isRetained = false) {
                 + `'${_srcChange[key]?.gwm?.v}' há ${Math.round((_now - (_srcChange[key]?.gwm?.ms || _now)) / 60_000)}min`);
     }
   }
+  if (_fieldSource[key] !== 'apk') _apkAssumiuMs[key] = _now;   // marca o handoff (alimenta a carência)
   _fieldSource[key] = 'apk';  // rastreia origem por chave (só quando aceitamos o valor)
 
   // Resultados de comandos HVAC: cmd/hvac/<control>/result
