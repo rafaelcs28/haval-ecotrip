@@ -747,12 +747,12 @@ struct DashV2View: View {
                 if let score = liveScore {
                     miniCell("SCORE", "\(score)", "ao vivo", tint: DS.green)
                 } else {
-                    miniCell("BATERIA 12V", store.batt12vV > 0 ? Fmt.dec1(store.batt12vV) : "—", "V")
+                    miniCell("BATERIA 12V", store.batt12vV > 0 ? Fmt.dec1(store.batt12vV) : "—", batt12vSub("V"))
                 }
             } else {
                 miniCell("ODÔMETRO", Fmt.int(store.odometerKm), "km")
                 miniCell("BATERIA 12V", store.batt12vV > 0 ? Fmt.dec1(store.batt12vV) : "—",
-                         isSleeping ? freshness : "V")
+                         isSleeping ? freshness : batt12vSub("V"))
             }
         }
     }
@@ -776,6 +776,15 @@ struct DashV2View: View {
         let min = Int(age / 60)
         if min < 60 { return "há \(min) min" }
         return "há \(min / 60) h"
+    }
+
+    /// Sub-rótulo da 12V: "V · 88%" quando o percentual chega. Fica no sub porque a
+    /// tensão é o número que diagnostica (12,3V em repouso é normal, <12,0V é bateria
+    /// fraca; 14,4V é o DCDC carregando com o carro ligado) e o layout do mini-card
+    /// só tem uma linha de destaque.
+    private func batt12vSub(_ base: String) -> String {
+        let pct = store.batt12vPct
+        return pct > 0 ? "\(base) · \(Int(pct))%" : base
     }
 
     private func miniCell(_ label: String, _ value: String, _ sub: String, tint: Color = DS.text) -> some View {
