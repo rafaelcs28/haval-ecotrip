@@ -14504,25 +14504,64 @@ function _gwmAlive(now = Date.now()) {
 //
 // Aqui rastreamos, por chave e por fonte, quando o VALOR mudou pela última vez.
 // A GWM só mantém a preferência enquanto está de fato mudando de valor.
-const _srcChange = {};                       // key → { gwm:{v,ms}, apk:{v,ms} }
+// Persistido: sem isso, cada restart do bridge zera o histórico e a GWM ganha 8min
+// de carência — exatamente quando ela está congelada há horas e o APK deveria já
+// estar no comando. Foi o que fez o primeiro teste do failover não atuar.
+const SRC_CHANGE_FILE = path.join(DATA_DIR, 'src_change.json');
+let _srcChange = {};                         // key → { gwm:{v,ms}, apk:{v,ms} }
+try { _srcChange = JSON.parse(fs.readFileSync(SRC_CHANGE_FILE, 'utf8')) || {}; } catch (_) {}
 const GWM_VALUE_STALE_MS  = 8 * 60_000;      // valor parado > isso = suspeito
 const APK_TAKEOVER_MIN_MS = 3 * 60_000;      // e o APK precisa estar discordando há isso
+const APK_ALIVE_MS        = 15 * 60_000;     // janela de 'APK vivo': com o carro dormindo ele publica a cada ~4min
+
+let _srcChangeSaveTimer = null;
+function _saveSrcChangeSoon() {
+  if (_srcChangeSaveTimer) return;           // debounce: roda a cada mensagem MQTT
+  _srcChangeSaveTimer = setTimeout(() => {
+    _srcChangeSaveTimer = null;
+    try { fs.writeFileSync(SRC_CHANGE_FILE, JSON.stringify(_srcChange)); }
+    catch (e) { console.warn('[failover] falha ao salvar src_change:', e.message); }
+  }, 15_000);
+}
 
 /// Registra que `src` observou `value` para `key`. Só move o timestamp quando o
 /// valor MUDA — é o que distingue "dado novo" de "mesma resposta repetida".
 function _notaValorFonte(key, src, value) {
   const e = _srcChange[key] || (_srcChange[key] = {});
   const cur = e[src];
-  if (!cur || cur.v !== value) e[src] = { v: value, ms: Date.now() };
+  if (!cur || String(cur.v) !== String(value)) {
+    e[src] = { v: value, ms: Date.now() };
+    _saveSrcChangeSoon();
+  }
 }
 
 /// O APK deve assumir esta chave? Exige TRÊS condições, pra não ficar oscilando:
 ///   1. a GWM não muda o valor há GWM_VALUE_STALE_MS
 ///   2. o APK está discordando dela há pelo menos APK_TAKEOVER_MIN_MS
-///   3. o valor do APK é mais recente que o da GWM
+///   3. o APK está VIVO agora (publicou há pouco)
 /// Uma vez assumido, só devolve quando a GWM produzir um valor NOVO — o que
 /// acontece naturalmente no _notaValorFonte quando o pacote de dados volta.
+/// Campos numéricos onde 0/vazio significa "o APK não conseguiu ler", não uma
+/// medida real. Sem esta guarda o takeover troca dado velho por dado ausente —
+/// aconteceu com batt_12v_pct, que assumiu '0' por cima dos 87% corretos.
+/// Chaves que AS DUAS fontes escrevem — as únicas onde faz sentido decidir quem
+/// manda. Deriva do GWM_TOPIC_MAP (o que a nuvem publica) mais MIGRATED_TO_HA,
+/// em vez de manter lista à mão que sairia de sincronia.
+let _camposDisputados = new Set();
+function _recalcCamposDisputados() {
+  _camposDisputados = new Set([...Object.values(GWM_TOPIC_MAP || {}), ...MIGRATED_TO_HA]);
+}
+
+const NAO_ZERO = new Set(['batt_12v_pct', 'soc_pct', 'odometer_km', 'charge_remaining_min',
+                          'fuel_pct', 'autonomy_ev_km', 'autonomy_ice_km']);
+function _valorAproveitavel(key, v) {
+  if (v === undefined || v === null || v === '') return false;
+  if (NAO_ZERO.has(key) && (+v === 0 || Number.isNaN(+v))) return false;
+  return true;
+}
+
 function _apkAssumeChave(key, apkValue, now = Date.now()) {
+  if (!_valorAproveitavel(key, apkValue)) return false;   // dado ausente não substitui dado velho
   const e = _srcChange[key];
   if (!e || !e.gwm) return true;                       // GWM nunca falou: APK manda
   const gwmParado = now - e.gwm.ms > GWM_VALUE_STALE_MS;
@@ -14530,7 +14569,17 @@ function _apkAssumeChave(key, apkValue, now = Date.now()) {
   if (String(e.gwm.v) === String(apkValue)) return false;   // concordam: nada a decidir
   const apk = e.apk;
   const discordaHa = apk && String(apk.v) === String(apkValue) ? now - apk.ms : 0;
-  return discordaHa >= APK_TAKEOVER_MIN_MS && (!apk || apk.ms > e.gwm.ms);
+  if (discordaHa < APK_TAKEOVER_MIN_MS) return false;
+  // "APK mais fresco" se mede pela ATIVIDADE dele, não comparando os timestamps
+  // de mudança: com as duas fontes paradas, esses ms refletem só a ordem de
+  // registro no boot — arbitrária. Foi o que travou o takeover no primeiro teste,
+  // com a GWM congelada há 10min e o APK discordando, e nada acontecia.
+  //
+  // A janela é de 15min e não os 3min do takeover: com o carro DORMINDO o APK
+  // publica a cada ~4min, então um limite curto o considerava morto justamente
+  // no cenário que mais importa — carro desligado e a nuvem insistindo que está
+  // ligado. Só descarta o APK quando ele está de fato fora (offline há 15min+).
+  return !!state.last_apk_ms && (now - state.last_apk_ms) < APK_ALIVE_MS;
 }
 
 // Chaves que migraram pro HA — handlers do app são ignorados aqui pra evitar
@@ -14547,6 +14596,8 @@ const MIGRATED_TO_HA = new Set([
   // Charging state agora vem do HA com mapeamento texto
   'charging_state', 'charge_remaining_min',
 ]);
+
+_recalcCamposDisputados();   // GWM_TOPIC_MAP e MIGRATED_TO_HA já definidos aqui
 
 const GWM_BODY_BINARY = new Set([
   'door_trunk', 'door_fl', 'door_fr', 'door_rl', 'door_rr', 'lock_state', 'ac_state',
@@ -18993,6 +19044,26 @@ function applyGwmEntity(id, value, isRetained = false) {
   // é isso que permite detectar "a nuvem está repetindo dado cacheado" e liberar
   // o APK. Retained não conta: é eco do broker, não observação nova.
   if (!isRetained) _notaValorFonte(field, 'gwm', value);
+
+  // Campos SEM gate (soc_pct e afins, fora de MIGRATED_TO_HA) eram "último a
+  // escrever ganha" — e como a nuvem GWM publica com mais frequência que o APK,
+  // ela sobrescrevia o valor real do CAN a cada poucos segundos. Foi o que
+  // manteve o SOC em 88% com o carro em outro valor: não era falta de dado do
+  // APK, era a GWM apagando por cima.
+  //
+  // Se o APK já assumiu esta chave (GWM congelada + APK discordando de forma
+  // consistente), a GWM para de escrever até produzir valor NOVO — o
+  // _notaValorFonte acima é quem detecta isso e devolve o comando pra ela.
+  // Sem o filtro de isRetained: as mensagens da GWM chegam RETIDAS (o publisher
+  // usa retain), então gatear por !isRetained fazia o bloqueio nunca rodar — o
+  // takeover aparecia no log e o valor continuava sendo sobrescrito.
+  if (_fieldSource[field] === 'apk') {
+    const apkV = _srcChange[field]?.apk?.v;
+    if (apkV !== undefined && _apkAssumeChave(field, apkV)) {
+      console.log(`[failover] ${field}: GWM ignorada ('${value}') — APK no comando com '${apkV}'`);
+      return;
+    }
+  }
   _fieldSource[field] = 'gwm';   // rastreia origem por campo
 
   // ── Binary body (doors, lock, AC) ─────────────────────────────────────────
@@ -19252,8 +19323,13 @@ function applyMqttMessage(key, value, isRetained = false) {
   // EXCEÇÃO: GWM silente (4G do carro acabou → nuvem GWM morre, mas o APK segue
   // publicando via WiFi/Starlink). Aí deixa o valor do APK passar — melhor dado
   // ruidoso que dado nenhum. Volta pra GWM sozinho quando ela revive.
+  // Registra o valor do APK pra toda chave DISPUTADA — não só as de
+  // MIGRATED_TO_HA. Campos sem gate (soc_pct à frente) também são escritos pelas
+  // duas fontes, e sem este histórico o bloqueio da GWM não tinha como saber que
+  // o APK discordava: o SOC seguia em 88% com o carro em 74%.
+  if (_camposDisputados.has(key)) _notaValorFonte(key, 'apk', value);
+
   if (MIGRATED_TO_HA.has(key)) {
-    _notaValorFonte(key, 'apk', value);   // registra ANTES do gate: é o histórico que autoriza o takeover
     // Gate normal: GWM publicando → ela manda. MAS se o valor dela está
     // congelado e o APK discorda de forma consistente, o APK assume — senão o
     // dado cacheado da nuvem trava o estado (engine_state preso em '1' em 30/07).
