@@ -14616,8 +14616,16 @@ function _apkAssumeChave(key, apkValue, now = Date.now()) {
   if (!_valorAproveitavel(key, apkValue)) return false;   // dado ausente não substitui dado velho
   const e = _srcChange[key];
   if (!e || !e.gwm) return true;                       // GWM nunca falou: APK manda
+  // Entrada e saída do takeover têm critérios DIFERENTES (histerese), senão fica
+  // oscilando. Entrar exige a GWM parada. Sair NÃO pode depender só de "mudou de
+  // valor": a nuvem republica a cada ~5s e mexe no próprio cache sem falar com o
+  // carro, então uma troca qualquer devolveria o comando a dado que continua
+  // velho. Com o APK no comando, a GWM só volta quando CONVERGIR com ele — se
+  // está lendo o carro de verdade, converge; se é cache reciclado, não. O APK é
+  // o árbitro porque lê o CAN direto, e a saída por APK morto continua no fim.
+  const apkNoComando = _fieldSource[key] === 'apk';
   const gwmParado = now - e.gwm.ms > GWM_VALUE_STALE_MS;
-  if (!gwmParado) return false;
+  if (!gwmParado && !apkNoComando) return false;
   if (_normCmp(key, e.gwm.v) === _normCmp(key, apkValue)) return false;   // concordam (após normalizar formato)
   const apk = e.apk;
   const discordaHa = apk && _normCmp(key, apk.v) === _normCmp(key, apkValue) ? now - apk.ms : 0;
@@ -19109,12 +19117,24 @@ function applyGwmEntity(id, value, isRetained = false) {
   // Sem o filtro de isRetained: as mensagens da GWM chegam RETIDAS (o publisher
   // usa retain), então gatear por !isRetained fazia o bloqueio nunca rodar — o
   // takeover aparecia no log e o valor continuava sendo sobrescrito.
-  if (_fieldSource[field] === 'apk') {
-    const apkV = _srcChange[field]?.apk?.v;
-    if (apkV !== undefined && _apkAssumeChave(field, apkV)) {
-      console.log(`[failover] ${field}: GWM ignorada ('${value}') — APK no comando com '${apkV}'`);
-      return;
+  // NÃO gatear por `_fieldSource === 'apk'`: era circular. A GWM só era barrada
+  // se o APK já fosse a fonte, mas basta ela ganhar UMA vez — a janela de
+  // APK_TAKEOVER_MIN_MS logo depois do replay dos retained, quando `apk.ms`
+  // acabou de ser reescrito — pra `_fieldSource` virar 'gwm' e o bloco nunca
+  // mais rodar. E o APK não republica pra corrigir, porque o pubD dele deduplica
+  // por valor: mandou '0' uma vez, não manda de novo. Resultado observado em
+  // 30/07: engine_state preso em '1' por 74 min com a GWM congelada e o APK
+  // dizendo '0'. Avaliar sempre, independente de quem é a fonte agora.
+  const apkV = _srcChange[field]?.apk?.v;
+  if (apkV !== undefined && _apkAssumeChave(field, apkV)) {
+    if (_fieldSource[field] !== 'apk') {
+      console.log(`[failover] ${field}: APK retoma ('${apkV}') — GWM congelada em '${value}'`);
+      // Re-injeta: só dar `return` deixaria o state com o valor velho da GWM até
+      // o APK republicar, que o dedupe impede. isRetained=true atualiza o state
+      // sem re-disparar push/evento — o alerta já saiu quando o APK mandou.
+      applyMqttMessage(field, apkV, true);
     }
+    return;
   }
   _fieldSource[field] = 'gwm';   // rastreia origem por campo
 
@@ -19549,8 +19569,13 @@ function applyMqttMessage(key, value, isRetained = false) {
       // Fallback fuel_l: a GWM publica litros direto (id 2017002). Sem ela (4G out),
       // deriva dos litros a partir do % lido do CAN pelo APK. Quando a GWM revive,
       // o id 2017002 volta a sobrescrever state.fuel_l com o valor da nuvem.
-      if (state.fuel_pct_can > 0 && _apkPodeEspelhar('fuel_l', state.fuel_pct_can, _now)) {
-        state.fuel_l = _fuelWithCalib((state.fuel_pct_can / 100) * TANK_CAPACITY_L);
+      if (state.fuel_pct_can > 0) {
+        const litros = _fuelWithCalib((state.fuel_pct_can / 100) * TANK_CAPACITY_L);
+        // Compara em LITROS, não no % do CAN: a GWM publica litros, então passar
+        // o percentual fazia '50' contra '27' e a discordância era sempre falsa —
+        // o mesmo erro de unidade que os vidros tinham. Arredonda porque a nuvem
+        // manda inteiro; o state fica com o valor preciso.
+        if (_apkPodeEspelhar('fuel_l', Math.round(litros), _now)) state.fuel_l = litros;
       }
       break;
     }
