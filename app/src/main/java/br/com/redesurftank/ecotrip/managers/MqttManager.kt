@@ -2170,9 +2170,17 @@ class MqttManager private constructor() {
             // só funcionava porque o guard NAO_ZERO do bridge barra, então só publica
             // valor > 0. car.basic.battery_power_level vai pro debug pra medir antes de
             // virar fonte — se trouxer algo próximo dos 87% que a GWM reporta, é a chave.
-            CarDataManager.getInstance().fetchCurrent("car.ev_info.battery_charge_percentage")
-                ?.trim()?.toFloatOrNull()?.takeIf { it > 0f }
-                ?.let { pubD("batt_12v_pct", it.toInt().toString()) }
+            // Fonte do percentual da 12V: car.basic.battery_power_level. O namespace
+            // basic é o certo — a 12V real está em car.basic.battery_voltage (14,38V
+            // medidos), enquanto ev_info é o sistema de tração (pack em 332V).
+            // car.ev_info.battery_charge_percentage fica só como fallback: ela retorna
+            // 0 neste carro, e o takeIf > 0 impede publicar o zero como se fosse
+            // leitura — era ele que derrubava os 87% da GWM antes do guard do bridge.
+            val batt12 = CarDataManager.getInstance().fetchCurrent("car.basic.battery_power_level")
+                             ?.trim()?.toFloatOrNull()?.takeIf { it > 0f }
+                         ?: CarDataManager.getInstance().fetchCurrent("car.ev_info.battery_charge_percentage")
+                             ?.trim()?.toFloatOrNull()?.takeIf { it > 0f }
+            batt12?.let { pubD("batt_12v_pct", it.toInt().toString()) }
             pub("debug/batt12v", "ev_charge_pct=" +
                 "${CarDataManager.getInstance().fetchCurrent("car.ev_info.battery_charge_percentage")?.trim()}" +
                 " basic_power_level=${CarDataManager.getInstance().fetchCurrent("car.basic.battery_power_level")?.trim()}" +
